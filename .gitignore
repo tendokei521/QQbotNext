@@ -1,6 +1,7 @@
 # Created by pytest automatically.
 linux_main.py
 test.py
+.env
 __pycache__/
 *.pyc
 *.pyo
