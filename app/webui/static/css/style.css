@@ -242,9 +242,9 @@ body { font-family: "Microsoft YaHei", Arial, sans-serif; background: var(--bg);
     padding: 12px 16px;
 }
 
-.module-item { background: var(--border); border-radius: 8px; padding: 15px; margin-bottom: 10px; cursor: pointer; transition: all 0.2s; }
-.module-item:hover { background: var(--border-strong); }
-.module-item.active { border-left: 4px solid var(--blue); background: var(--blue-light); }
+.module-item { background: var(--bg-deep); border-radius: 8px; padding: 15px; margin-bottom: 10px; cursor: pointer; transition: all 0.2s; }
+.module-item:hover { background: var(--border); }
+.module-item.active { border-left: 4px solid var(--blue); background: var(--border-strong); }
 
 .module-name { font-size: 16px; font-weight: bold; margin-bottom: 5px; display: flex; align-items: center; }
 .module-name i { margin-right: 8px; width: 20px; text-align: center; }
