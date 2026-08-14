@@ -359,7 +359,7 @@ class OneBotGateway:
             text = _message_log_text(event).strip()
             if text:
                 name = event.user.card or event.user.nickname or ""
-                prefix = f"Recv][#{conn.index}"
+                prefix = f"Recv] [#{conn.index}"
                 if event.event_type == "message_group":
                     group_name = self._lookup_group_name(conn, event.group.group_id)
                     prefix += f"] [{group_name}({event.group.group_id})" if group_name else f"[{event.group.group_id}]"
@@ -370,7 +370,7 @@ class OneBotGateway:
                 text = _event_text(event)
                 if text:
                     # 与消息一致：群事件前缀拼 [群id]（notice 无群名，仅 id）
-                    prefix = f"Recv][#{conn.index}"
+                    prefix = f"Recv] [#{conn.index}"
                     group_id = getattr(event, "group_id", 0) or 0
                     if group_id:
                         prefix += f"] [{group_id}"

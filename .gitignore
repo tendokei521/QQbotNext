@@ -6,8 +6,10 @@ __pycache__/
 *.pyo
 *.pyd
 
-# 运行时数据（SQLite WAL 临时文件 / LLM 会话历史与状态）
+# 运行时数据（SQLite / WAL 临时文件 / LLM 会话历史与状态 / 模块持久化数据）
+data/app.db
 data/app.db-wal
 data/app.db-shm
 data/app.db-journal
 data/llm/
+module/data/
