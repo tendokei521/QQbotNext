@@ -50,8 +50,8 @@ class RecallDB:
 
     # ── CRUD ──────────────────────────────────────────────────
 
-    async def store(self, message_id: str, data: dict) -> bool:
-        """存入一条消息快照。已存在则跳过。"""
+    async def store(self, message_id: str, data: dict, max_per_group: int = 0) -> bool:
+        """存入一条消息快照。已存在则跳过；超过每群上限时淘汰该群最旧消息。"""
         self._ensure()
         async with self._lock:
             if message_id in self._db:
@@ -59,6 +59,18 @@ class RecallDB:
             data["time"] = time.time()
             self._db[message_id] = data
             self._db["data"]["total"] += 1
+            # 每群上限（旧版 max_messages_per_group 语义）：淘汰该群最旧消息
+            if max_per_group > 0:
+                group_id = str(data.get("group_id", "") or "")
+                group_ids = [
+                    k for k, v in self._db.items()
+                    if k != "data" and str(v.get("group_id", "") or "") == group_id
+                ]
+                while len(group_ids) > max_per_group:
+                    oldest = min(group_ids, key=lambda k: self._db[k].get("time", 0))
+                    del self._db[oldest]
+                    group_ids.remove(oldest)
+                    self._db["data"]["total"] = max(0, self._db["data"]["total"] - 1)
             self._write()
         return True
 

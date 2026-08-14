@@ -8,17 +8,29 @@ SCHEMA = {
         "default": 600,
         "placeholder": "输入缓存时间，单位秒",
     },
-    "target": {
-        "type": "select",
-        "label": "转发范围",
-        "description": "选择模块的转发范围",
-        "default": "auto",
-        "options": {
-            "default": "仅保存在本地",
-            "group": "发送到群聊",
-            "private": "发送到私信",
-            "all": "发送到所有范围",
-        },
+    "enable_group_listen": {
+        "type": "boolean",
+        "label": "监听群撤回",
+        "description": "处理群聊撤回事件",
+        "default": True,
+    },
+    "enable_private_listen": {
+        "type": "boolean",
+        "label": "监听私聊撤回",
+        "description": "处理私聊撤回事件",
+        "default": True,
+    },
+    "enable_forward_to_group": {
+        "type": "boolean",
+        "label": "转发到群聊",
+        "description": "把撤回消息转发到目标群",
+        "default": True,
+    },
+    "enable_forward_to_private": {
+        "type": "boolean",
+        "label": "转发到私聊",
+        "description": "把撤回消息转发到目标好友",
+        "default": True,
     },
     "target_groups": {
         "type": "list",
@@ -51,10 +63,17 @@ SCHEMA = {
     },
     "db_max_messages": {
         "type": "integer",
-        "label": "缓存上限（条）",
+        "label": "缓存总量上限（条）",
         "description": "超过上限后自动淘汰最旧的消息",
         "default": 5000,
         "min": 100,
+    },
+    "db_max_per_group": {
+        "type": "integer",
+        "label": "单群缓存上限（条）",
+        "description": "每个群最多缓存的撤回消息数，超出淘汰该群最旧",
+        "default": 200,
+        "min": 10,
     },
     "db_retention_minutes": {
         "type": "integer",
@@ -62,5 +81,12 @@ SCHEMA = {
         "description": "超过保留时长的消息自动清理",
         "default": 60,
         "min": 1,
+    },
+    "db_clean_interval_minutes": {
+        "type": "integer",
+        "label": "自动清理间隔（分钟）",
+        "description": "运行中周期清理过期/超量缓存的间隔",
+        "default": 60,
+        "min": 5,
     },
 }
