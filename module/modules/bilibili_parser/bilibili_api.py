@@ -40,15 +40,18 @@ _ALLOWED_DOMAINS = (
     "bili23.cn", "bili33.cn",
 )
 
-# BV 去重缓存：{bv: 最近解析时间戳}
-_bv_cache: dict[str, float] = {}
-
 
 # ==================== API 封装类（网络请求） ====================
 
 
 class BilibiliAPI(CurlCffiClient):
-    """B站 API 封装：短链解析 + 视频信息获取（curl_cffi 浏览器指纹模拟）。"""
+    """B站 API 封装：短链解析 + 视频信息获取（curl_cffi 浏览器指纹模拟）。
+
+    BV 去重缓存为类级状态（跨实例共享，API 层行为）。
+    """
+
+    # BV 去重缓存：{bv: 最近解析时间戳}
+    _bv_cache: dict[str, float] = {}
 
     def __init__(self, impersonate="chrome", proxy: str = "") -> None:
         super().__init__(impersonate=impersonate, proxy=proxy)
@@ -100,6 +103,24 @@ class BilibiliAPI(CurlCffiClient):
         except Exception as e:
             module_logger.error(f"[BilibiliAPI] 获取视频信息失败: {e}")
             return None
+
+    @classmethod
+    def filter_bv_dedup(cls, video_ids: list, timeout: int) -> list:
+        """过滤掉在超时时间内已解析过的 BV 号，并清理过期缓存（类级状态）。"""
+        now = time.time()
+        fresh_ids = []
+        for vid in video_ids:
+            last = cls._bv_cache.get(vid)
+            if last is not None and (now - last) < timeout:
+                module_logger.info(f"[BilibiliAPI] BV {vid} 在 {timeout}s 内已解析，跳过")
+                continue
+            cls._bv_cache[vid] = now
+            fresh_ids.append(vid)
+
+        stale = [k for k, v in cls._bv_cache.items() if (now - v) >= timeout]
+        for k in stale:
+            del cls._bv_cache[k]
+        return fresh_ids
 
 
 # ==================== 纯逻辑（链接提取 / 去重 / 格式化） ====================
@@ -180,21 +201,8 @@ def extract_from_direct_link(raw: str) -> str:
 
 
 def filter_bv_dedup(video_ids: list, timeout: int) -> list:
-    """过滤掉在超时时间内已解析过的 BV 号，并清理过期缓存。"""
-    now = time.time()
-    fresh_ids = []
-    for vid in video_ids:
-        last = _bv_cache.get(vid)
-        if last is not None and (now - last) < timeout:
-            module_logger.info(f"[BilibiliAPI] BV {vid} 在 {timeout}s 内已解析，跳过")
-            continue
-        _bv_cache[vid] = now
-        fresh_ids.append(vid)
-
-    stale = [k for k, v in _bv_cache.items() if (now - v) >= timeout]
-    for k in stale:
-        del _bv_cache[k]
-    return fresh_ids
+    """过滤掉在超时时间内已解析过的 BV 号，并清理过期缓存（委托 BilibiliAPI 类级缓存）。"""
+    return BilibiliAPI.filter_bv_dedup(video_ids, timeout)
 
 
 def build_video_message(info: dict, show_cover: bool = True) -> list:

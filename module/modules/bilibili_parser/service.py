@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from app.core.logger import module_logger
+from app.modules.groups import check_group_enabled
 from . import bilibili_api as bapi
 
 
@@ -19,7 +20,7 @@ async def handle(module, event):
 
     # 群范围检查
     group_id = event.group.group_id
-    if group_id and not _check_group(config, str(group_id)):
+    if group_id and not check_group_enabled(config, str(group_id)):
         return
 
     segments = [seg.to_dict() for seg in event.message]
@@ -92,14 +93,3 @@ async def handle(module, event):
     # 说明期望 LLM 参与对话，不跳过。
     if not event.is_at_me():
         event.llm.stop()
-
-
-def _check_group(config, group_id: str) -> bool:
-    """检查群组是否允许使用。"""
-    mode = config.get("group_mode", "all")
-    group_configs = config.get("group_configs", {}) or {}
-    if mode == "all":
-        return group_configs.get(group_id, {}).get("enabled", True)
-    if mode == "none":
-        return False
-    return group_configs.get(group_id, {}).get("enabled", False)
