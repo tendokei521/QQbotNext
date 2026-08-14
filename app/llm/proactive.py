@@ -51,6 +51,7 @@ class ProactiveManager:
         self._data: Dict[str, dict] = {}
         self._file = os.path.join(llm_data_dir(), "proactive_data.json")
         self._load()
+        self._restore()
 
     # ── 配置读取 ─────────────────────────────────────────
     def _cfg(self, key: str, default: Any = None) -> Any:
@@ -110,7 +111,7 @@ class ProactiveManager:
             owner=self._owner(),
         )
         self._timers[session_id] = task
-        logger.add_info(f"#{self.module.bot_id}").debug(f"[主动] {session_id} 安排 {delay}s 后主动发言")
+        logger.add_info(f"#{self.module.bot_id}").debug(f"[主动消息] {session_id} 安排 {delay}s 后主动发言")
 
     def _reset_group_silence(self, session_id: str) -> None:
         self._cancel(self._group_timers, session_id)
@@ -142,7 +143,7 @@ class ProactiveManager:
         if not self._session_enabled(session_id, is_group):
             return
         if self._is_quiet_time():
-            logger.add_info(f"#{self.module.bot_id}").debug(f"[主动] {session_id} 处于免打扰时段，跳过")
+            logger.add_info(f"#{self.module.bot_id}").debug(f"[主动消息] {session_id} 处于免打扰时段，跳过")
             if not is_group:
                 self._schedule_next_private(session_id)
             return
@@ -176,7 +177,7 @@ class ProactiveManager:
             max_tokens=self.module.config.get("max_tokens", 150),
         )
         if self._data.get(session_id, {}).get("last_user_time", 0) != start_last:
-            logger.add_info(f"#{self.module.bot_id}").info(f"[主动] {session_id} 生成期间用户来消息，丢弃本次")
+            logger.add_info(f"#{self.module.bot_id}").info(f"[主动消息] {session_id} 生成期间用户来消息，丢弃本次")
             return
         if not resp.ok:
             if not is_group:
@@ -191,7 +192,7 @@ class ProactiveManager:
             else:
                 await self.bot.send_private_msg(user_id=int(target), message=clean)
         except Exception as e:
-            logger.add_info(f"#{self.module.bot_id}").error(f"[主动] 发送失败: {e}")
+            logger.add_info(f"#{self.module.bot_id}").error(f"[主动消息] 发送失败: {e}")
             return
 
         if session:
@@ -199,7 +200,7 @@ class ProactiveManager:
             await asyncio.to_thread(self.session_mgr.history.save_session, session)
         self._data.setdefault(session_id, {})["unanswered_count"] = unanswered + 1
         self._save()
-        logger.add_info(f"#{self.module.bot_id}").info(f"[主动] {session_id} 主动发言完成（未回复 {unanswered + 1} 次）")
+        logger.add_info(f"#{self.module.bot_id}").info(f"[主动消息] {session_id} 主动发言完成（未回复 {unanswered + 1} 次）")
         if not is_group:
             self._schedule_next_private(session_id)
 
@@ -212,14 +213,49 @@ class ProactiveManager:
                 if isinstance(data, dict):
                     self._data = data
         except Exception as e:
-            logger.add_info(f"#{self.module.bot_id}").warning(f"[主动] 加载状态失败: {e}")
+            logger.add_info(f"#{self.module.bot_id}").warning(f"[主动消息] 加载状态失败: {e}")
+
+    def _restore(self) -> None:
+        """启动恢复：重排主动消息计时器。
+
+        私聊：未过期的按原触发时间武装；已过期的重新随机间隔。
+        群聊：重新武装沉默计时器。
+        """
+        restored = 0
+        for session_id in list(self._data.keys()):
+            is_group, _ = _session_parts(session_id)
+            if not self._session_enabled(session_id, is_group):
+                continue
+            if is_group:
+                self._reset_group_silence(session_id)
+                restored += 1
+                continue
+            next_ts = self._data.get(session_id, {}).get("next_trigger_time")
+            if next_ts and next_ts > time.time():
+                # 未过期 → 按原触发时间重新武装
+                delay = next_ts - time.time()
+                task = self.task_manager.create_task(
+                    self._delayed_check(session_id, delay),
+                    name=f"proactive:{session_id}",
+                    owner=self._owner(),
+                )
+                self._timers[session_id] = task
+                restored += 1
+            else:
+                # 已过期 / 缺失 → 重新随机间隔
+                self._schedule_next_private(session_id)
+                restored += 1
+        if restored:
+            logger.add_info(f"#{self.module.bot_id}").info(
+                f"[主动消息] 启动恢复 {restored} 个会话计时器"
+            )
 
     def _save(self) -> None:
         try:
             with open(self._file, "w", encoding="utf-8") as f:
                 json.dump(self._data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            logger.add_info(f"#{self.module.bot_id}").warning(f"[主动] 保存状态失败: {e}")
+            logger.add_info(f"#{self.module.bot_id}").warning(f"[主动消息] 保存状态失败: {e}")
 
     def stop(self) -> None:
         for session_id in list(self._timers.keys()):

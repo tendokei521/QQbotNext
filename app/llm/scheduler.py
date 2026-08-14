@@ -151,11 +151,11 @@ class TaskScheduler:
         trigger_expr = (spec.get("trigger") or "").strip()
         content = (spec.get("content") or "").strip()
         if not trigger_expr or not content:
-            logger.add_info(f"#{self.bot_id}").warning(f"[定时] 任务信息不完整: {spec}")
+            logger.add_info(f"#{self.bot_id}").warning(f"[定时任务] 任务信息不完整: {spec}")
             return None
         parsed = parse_schedule(trigger_expr)
         if parsed is None:
-            logger.add_info(f"#{self.bot_id}").warning(f"[定时] 无法解析时间表达式: {trigger_expr}")
+            logger.add_info(f"#{self.bot_id}").warning(f"[定时任务] 无法解析时间表达式: {trigger_expr}")
             return None
 
         repeat = parsed["repeat"]
@@ -190,7 +190,7 @@ class TaskScheduler:
             self._tasks.pop(entry.id, None)
             raise
         logger.add_info(f"#{self.bot_id}").info(
-            f"[定时] 已创建 {entry.id} | {session_id} | {trigger_expr} -> "
+            f"[定时任务] 已创建 {entry.id} | {session_id} | {trigger_expr} -> "
             f"{entry.next_at:%Y-%m-%d %H:%M:%S} ({repeat}) | {content[:40]}"
         )
         return entry
@@ -221,7 +221,7 @@ class TaskScheduler:
         entry.active = False
         self._cancel_timer(task_id)
         self._save()
-        logger.add_info(f"#{self.bot_id}").info(f"[定时] 已取消 {task_id} | {entry.session_id}")
+        logger.add_info(f"#{self.bot_id}").info(f"[定时任务] 已取消 {task_id} | {entry.session_id}")
         return True
 
     # ── 定时循环 ─────────────────────────────────────────
@@ -261,7 +261,7 @@ class TaskScheduler:
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.add_info(f"#{self.bot_id}").error(f"[定时] 任务 {entry.id} 循环异常: {e}")
+            logger.add_info(f"#{self.bot_id}").error(f"[定时任务] 任务 {entry.id} 循环异常: {e}")
 
     async def _fire(self, entry: TaskEntry) -> None:
         """定时触发：像主动消息一样做一次带系统提示词的 LLM 请求后自然发言。
@@ -270,18 +270,18 @@ class TaskScheduler:
         """
         entry.fired_count += 1
         if self.bot is None:
-            logger.add_info(f"#{self.bot_id}").warning(f"[定时] 无可用 Bot，跳过发送 {entry.id}")
+            logger.add_info(f"#{self.bot_id}").warning(f"[定时任务] 无可用 Bot，跳过发送 {entry.id}")
             return
         try:
             resp = await self._generate_reply(entry)
         except Exception as e:
-            logger.add_info(f"#{self.bot_id}").error(f"[定时] LLM 生成异常，改用固定内容: {e}")
+            logger.add_info(f"#{self.bot_id}").error(f"[定时任务] LLM 生成异常，改用固定内容: {e}")
             resp = None
 
         if resp is not None and resp.ok:
             text = resp.text
         else:
-            logger.add_info(f"#{self.bot_id}").warning(f"[定时] LLM 生成失败，发送固定内容: {entry.content}")
+            logger.add_info(f"#{self.bot_id}").warning(f"[定时任务] LLM 生成失败，发送固定内容: {entry.content}")
             text = entry.content
 
         # 防御：剥离角色提示词可能输出的 <type=...> 标签
@@ -297,13 +297,13 @@ class TaskScheduler:
             else:
                 await self.bot.send_private_msg(user_id=int(entry.target), message=clean)
             logger.add_info(f"#{self.bot_id}").info(
-                f"[定时] 触发 {entry.id} -> {entry.session_id}: {clean[:50]}"
+                f"[定时任务] 触发 {entry.id} -> {entry.session_id}: {clean[:50]}"
             )
             if session:
                 self.session_mgr.add_message(entry.session_id, "assistant", clean)
                 await asyncio.to_thread(self.session_mgr.history.save_session, session)
         except Exception as e:
-            logger.add_info(f"#{self.bot_id}").error(f"[定时] 发送失败 {entry.id} -> {entry.session_id}: {e}")
+            logger.add_info(f"#{self.bot_id}").error(f"[定时任务] 发送失败 {entry.id} -> {entry.session_id}: {e}")
         self._save()
 
     async def _generate_reply(self, entry: TaskEntry):
@@ -404,7 +404,7 @@ class TaskScheduler:
                 except Exception:
                     continue
         except Exception as e:
-            logger.add_info(f"#{self.bot_id}").warning(f"[定时] 加载状态失败: {e}")
+            logger.add_info(f"#{self.bot_id}").warning(f"[定时任务] 加载状态失败: {e}")
 
     def _save(self) -> None:
         try:
@@ -414,25 +414,37 @@ class TaskScheduler:
                     f, ensure_ascii=False, indent=2,
                 )
         except Exception as e:
-            logger.add_info(f"#{self.bot_id}").warning(f"[定时] 保存状态失败: {e}")
+            logger.add_info(f"#{self.bot_id}").warning(f"[定时任务] 保存状态失败: {e}")
 
     def _restore(self) -> None:
-        """恢复未到期任务；过期的一次性任务丢弃，周期任务推进到未来。"""
+        """启动恢复：移除过期的一次性任务，周期任务推进到未来，重新武装计时器。"""
         now_ts = time.time()
+        removed = 0
+        advanced = 0
+        armed = 0
         for entry in list(self._tasks.values()):
             if not entry.active:
                 continue
             if entry.next_at.timestamp() <= now_ts:
                 if entry.repeat == "once":
+                    # 一次性任务已过期 → 移除
                     self._tasks.pop(entry.id, None)
+                    removed += 1
                     continue
+                # 周期任务 → 推进到未来
+                advanced += 1
                 while entry.next_at.timestamp() <= now_ts:
                     entry.next_at = advance_repeat(
                         entry.next_at, repeat=entry.repeat,
                         weekday=entry.weekday, dom=entry.dom, interval_seconds=entry.interval_seconds,
                     )
             self._start(entry)
+            armed += 1
         self._save()
+        if removed or advanced:
+            logger.add_info(f"#{self.bot_id}").info(
+                f"[定时任务] 启动恢复: 移除过期 {removed} 个，周期任务推进 {advanced} 个，武装 {armed} 个"
+            )
 
 
 # ==================== schedule_task 工具（原生 function calling） ====================
@@ -477,14 +489,14 @@ async def handle_schedule_tool(module, session_id: str, is_private: bool, args: 
             return "error: create 需要同时提供 trigger 与 note"
         entry = await scheduler.schedule(session_id, {"trigger": trigger, "content": note})
         if entry is None:
-            logger.add_info(f"#{bot_id}").warning(f"[定时] 工具 create 失败: trigger={trigger}")
+            logger.add_info(f"#{bot_id}").warning(f"[定时任务] 工具 create 失败: trigger={trigger}")
             return (
                 f"error: 无法解析时间表达式 {trigger!r}。支持格式：明天早上8点 / 今晚10点 / "
                 "每天早上8点 / 每周五下午6点 / 每月1号上午9点 / 5分钟后 / 半小时后 / 每30分钟 / 08:30。"
                 "请用这些格式重新尝试。"
             )
         logger.add_info(f"#{bot_id}").info(
-            f"[定时] 工具 create -> {session_id}: {trigger} @ {entry.next_at:%Y-%m-%d %H:%M} ({entry.repeat})"
+            f"[定时任务] 工具 create -> {session_id}: {trigger} @ {entry.next_at:%Y-%m-%d %H:%M} ({entry.repeat})"
         )
         return (
             f"success: 已创建定时任务，id={entry.id[:8]}，重复方式={entry.repeat}，"

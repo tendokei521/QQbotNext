@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import os
 import re
@@ -113,6 +114,57 @@ class SixHourRotatingHandler(BaseRotatingHandler):
             print(f"清理归档时出错: {e}")
 
 
+# 调用者模块缓存：{ (filename, lineno): (module, lineno) }，同一条日志行多次调用只回溯一次
+_caller_cache: dict = {}
+
+
+def _find_caller_module() -> Optional[tuple]:
+    """栈回溯找第一个业务调用者 → (模块名, 行号)。
+
+    跳过 logging 内部与本文件（format 等）帧；找不到返回 None。
+    """
+    f = inspect.currentframe()
+    try:
+        # f → _find_caller_module；f.f_back → CallerModuleFormatter.format
+        frame = f.f_back.f_back if f.f_back else None  # logging 内部帧开始
+        while frame is not None:
+            mod = frame.f_globals.get("__name__", "")
+            if mod and not mod.startswith("logging") and mod != __name__:
+                key = (frame.f_code.co_filename, frame.f_lineno)
+                cached = _caller_cache.get(key)
+                if cached:
+                    return cached
+                caller = (mod, frame.f_lineno)
+                _caller_cache[key] = caller
+                return caller
+            frame = frame.f_back
+        return None
+    finally:
+        del f
+
+
+def _truncate_module(module: str) -> str:
+    """截断模块路径各部分：长度 ≤8 取前 6 字符，≥9 取前 7 字符。"""
+    return ".".join(
+        (part[:6] if len(part) <= 8 else part[:7])
+        for part in module.split(".")
+    )
+
+
+class CallerModuleFormatter(logging.Formatter):
+    """把记录名动态改为「调用者模块路径:行号」（替代固定的 [Service]），带方括号输出。"""
+
+    def format(self, record: logging.LogRecord) -> str:
+        caller = _find_caller_module()
+        if caller:
+            mod, lineno = caller
+            record.name = f"{_truncate_module(mod)}:{lineno}"
+        else:
+            # 边缘情况：找不到调用者 → 去掉原名的方括号，避免 [[Service]]
+            record.name = record.name.strip("[]") or "?"
+        return super().format(record)
+
+
 def _build_logger(log_dir: str | Path) -> logging.Logger:
     logs_dir = str(log_dir)
     setup_dir(logs_dir)
@@ -121,8 +173,8 @@ def _build_logger(log_dir: str | Path) -> logging.Logger:
     logger_.handlers.clear()
     logger_.propagate = False
 
-    lf = logging.Formatter(
-        fmt="%(name)s %(asctime)s.%(msecs)03d - %(levelname)s - %(message)s",
+    lf = CallerModuleFormatter(
+        fmt="[%(name)s] %(asctime)s.%(msecs)03d - %(levelname)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 

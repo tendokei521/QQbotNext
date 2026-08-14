@@ -54,7 +54,7 @@ class BotConnection(IBot):
             try:
                 return await self.outbound_hook(action, params or {})
             except Exception as e:
-                api_logger.error(f"[API] 出站链异常 {action}: {e}")
+                api_logger.error(f"[#{self.index}] 出站链异常 {action}: {e}")
                 return None
         return await self._direct_send(action, params, timeout_sec)
 
@@ -71,18 +71,18 @@ class BotConnection(IBot):
         try:
             async with self._lock:
                 await self.websocket.send(json.dumps(payload))
-            api_logger.debug(f"[#{self.index} API->] {action} | echo:{echo_id[:8]}")
+            api_logger.debug(f"[#{self.index}] API(->) {action} | echo:{echo_id[:8]}")
             response = await asyncio.wait_for(future, timeout=timeout_sec)
             if response.get("status") != "ok":
                 api_logger.warning(f"[API] {action} 失败: {response.get('retcode')} {response.get('message')}")
             else:
-                api_logger.debug(f"[#{self.index} API<-] {action}")
+                api_logger.debug(f"[#{self.index}] API(<-) {action} | echo:{echo_id[:8]}")
             return response
         except asyncio.TimeoutError:
-            api_logger.error(f"[API超时] {action} ({timeout_sec}s)")
+            api_logger.error(f"[#{self.index}] API 超时 {action} ({timeout_sec}s)")
             return None
         except Exception as e:
-            api_logger.error(f"[API异常] {action}: {e}")
+            api_logger.error(f"[#{self.index}] API 异常 {action}: {e}")
             return None
         finally:
             self._pending.pop(echo_id, None)
@@ -94,7 +94,7 @@ class BotConnection(IBot):
             return False
         future = self._pending.get(echo_id)
         if not future:
-            api_logger.warning(f"[API] 未找到对应请求 echo={echo_id[:8]}")
+            api_logger.warning(f"[#{self.index}] 未找到对应请求 echo={echo_id[:8]}")
             return False
         if not future.done():
             future.set_result(message)

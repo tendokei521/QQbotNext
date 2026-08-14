@@ -54,7 +54,8 @@ def migrate_legacy_data() -> None:
         moved.append("proactive_data.json")
 
     if moved:
-        logger.info(f"[Agent] 已迁移数据文件到 data/llm: {', '.join(moved)}")
+        logger.info(f"[#{self.index}] 已迁移数据文件到 data/llm: {', '.join(moved)}")
+
 
 
 from .chat import handle  # noqa: E402

@@ -71,7 +71,7 @@ class Database:
         await self._conn.execute("PRAGMA foreign_keys=ON;")
         await self._conn.executescript(SCHEMA)
         await self._conn.commit()
-        logger.debug(f"[DB] SQLite 已初始化: {self.path}")
+        logger.debug(f"[DB] SQLite 已初始化") #: "){self.path}")
 
     async def close(self) -> None:
         if self._conn:
