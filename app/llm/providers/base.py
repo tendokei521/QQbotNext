@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -31,9 +31,9 @@ class BaseProvider:
 
     async def chat(
         self,
-        messages: List[dict],
+        messages: list[dict],
         *,
-        model: Optional[str] = None,
+        model: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 150,
         timeout: int = 30,

@@ -1,6 +1,12 @@
 """模块配置 Schema。"""
 
 SCHEMA = {
+    "enable_auto_parse": {
+        "type": "boolean",
+        "label": "启用自动解析",
+        "description": "总开关：关闭后不解析任何 B 站链接",
+        "default": True,
+    },
     "enable_json_video": {
         "type": "boolean",
         "label": "解析小程序卡片",
@@ -34,5 +40,53 @@ SCHEMA = {
         "default": 10,
         "min": 5,
         "max": 30,
+    },
+    "cookie": {
+        "type": "password",
+        "label": "B站 Cookie（可选）",
+        "description": "部分受限视频需要登录 Cookie 才能获取信息",
+        "default": "",
+    },
+    "group_mode": {
+        "type": "select",
+        "label": "生效群范围",
+        "description": "在哪些群中解析链接",
+        "default": "all",
+        "options": {
+            "all": "全部群",
+            "partial": "仅勾选的群",
+            "none": "不解析",
+        },
+    },
+    "group_configs": {
+        "type": "list",
+        "label": "生效群列表",
+        "description": "勾选启用解析的群",
+        "endpoint": "groups",
+        "id_field": "group_id",
+        "name_field": "group_name",
+        "meta_fields": ["member_count"],
+        "checkboxes": True,
+        "default": {},
+    },
+    "is_reply": {
+        "type": "boolean",
+        "label": "引用原消息回复",
+        "description": "回复时引用触发的原消息",
+        "default": True,
+    },
+    "enable_bv_dedup": {
+        "type": "boolean",
+        "label": "BV 去重",
+        "description": "同一视频在超时时间内只解析一次，避免刷屏",
+        "default": True,
+    },
+    "bv_dedup_timeout": {
+        "type": "integer",
+        "label": "去重时间（秒）",
+        "description": "BV 去重缓存的有效时长",
+        "default": 60,
+        "min": 10,
+        "max": 3600,
     },
 }

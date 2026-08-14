@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Callable, Dict, List, Optional
+from typing import Callable
 
 import aiohttp
 
@@ -25,7 +25,7 @@ class _FatalError(Exception):
     """不可恢复错误（认证/参数）：不重试。"""
 
 
-def _split_keys(api_key: str) -> List[str]:
+def _split_keys(api_key: str) -> list[str]:
     if not api_key:
         return []
     if isinstance(api_key, str):
@@ -66,7 +66,7 @@ class OpenAICompatProvider(BaseProvider):
                     raise _FatalError(f"HTTP {resp.status}: {body[:200]}")
                 return await resp.json()
 
-    async def _request(self, payload: dict, timeout: int) -> Optional[dict]:
+    async def _request(self, payload: dict, timeout: int) -> dict | None:
         """带重试的请求。最终失败返回 None。"""
         last_error = ""
         for attempt in range(self.max_retries):
@@ -88,7 +88,7 @@ class OpenAICompatProvider(BaseProvider):
         return None
 
     # ---------- 响应解析 ----------
-    def _to_response(self, result: dict, tool_results: Optional[List[dict]] = None) -> LLMResponse:
+    def _to_response(self, result: dict, tool_results: list[dict] | None = None) -> LLMResponse:
         usage = result.get("usage", {}) or {}
         choices = result.get("choices", []) or []
         content = ""
@@ -115,14 +115,14 @@ class OpenAICompatProvider(BaseProvider):
     # ---------- 对话 + 工具循环 ----------
     async def chat(
         self,
-        messages: List[dict],
+        messages: list[dict],
         *,
-        model: Optional[str] = None,
+        model: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 150,
         timeout: int = 30,
-        tools: Optional[List[dict]] = None,
-        tool_executor: Optional[Callable] = None,
+        tools: list[dict] | None = None,
+        tool_executor: Callable | None = None,
         max_tool_rounds: int = 5,
     ) -> LLMResponse:
         """对话请求。若提供 tools 且模型返回 tool_calls，则循环执行工具并回传结果。
@@ -140,7 +140,7 @@ class OpenAICompatProvider(BaseProvider):
         if tools:
             payload["tools"] = tools
 
-        tool_results: List[dict] = []
+        tool_results: list[dict] = []
         for _round in range(max_tool_rounds):
             result = await self._request(payload, timeout)
             if result is None:

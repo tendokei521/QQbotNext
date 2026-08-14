@@ -11,11 +11,18 @@ class Module(BaseModule):
     authority_type = "normal"
     subscribe = ("message_group", "message_private")
     default_config = {
+        "enable_auto_parse": True,
         "enable_json_video": True,
         "enable_link_video": True,
         "show_cover": True,
         "max_parse_count": 3,
         "timeout": 10,
+        "cookie": "",
+        "group_mode": "all",
+        "group_configs": {},
+        "is_reply": True,
+        "enable_bv_dedup": True,
+        "bv_dedup_timeout": 60,
     }
     config_schema = SCHEMA
 

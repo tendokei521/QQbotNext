@@ -8,7 +8,6 @@ tag 状态系统已废弃（废案），仅保留「剥离任意 <type=xxx> 标�
 from __future__ import annotations
 
 import re
-from typing import Optional
 
 # 通用标签清洗：剥掉任意 <type=xxx>...</type> 块 / 孤立开标签（含中文类型名）
 _TAG_BLOCK_RE = re.compile(r"<type\s*=\s*[\w一-鿿]+>.*?</type>", re.DOTALL)

@@ -14,7 +14,7 @@ import os
 import random
 import time
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any
 
 from app.llm import logger, llm_data_dir
 from app.llm.prompt import build_messages
@@ -46,9 +46,9 @@ class ProactiveManager:
         self.bot = module.ctx.bot
         self.task_manager = module.ctx.services.task_manager
         self.session_mgr = SessionManager(str(module.bot_id))
-        self._timers: Dict[str, asyncio.Task] = {}       # 私聊下次主动任务
-        self._group_timers: Dict[str, asyncio.Task] = {}  # 群聊沉默计时器
-        self._data: Dict[str, dict] = {}
+        self._timers: dict[str, asyncio.Task] = {}       # 私聊下次主动任务
+        self._group_timers: dict[str, asyncio.Task] = {}  # 群聊沉默计时器
+        self._data: dict[str, dict] = {}
         self._file = os.path.join(llm_data_dir(), "proactive_data.json")
         self._load()
         self._restore()

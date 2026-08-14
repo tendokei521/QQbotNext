@@ -9,7 +9,6 @@ import json
 import os
 import re
 import time
-from typing import Dict, List, Optional
 
 from app.llm import logger, llm_data_dir
 
@@ -63,7 +62,7 @@ class HistoryManager:
             )
 
     # ── 读取 ──────────────────────────────────────────────
-    def load_history(self, task_id: str) -> Optional[dict]:
+    def load_history(self, task_id: str) -> dict | None:
         try:
             file_path = self._file_path(task_id)
         except ValueError:
@@ -78,7 +77,7 @@ class HistoryManager:
             logger.add_info(f"#{self.bot_id}").error(f"读取历史失败 (task: {task_id}): {e}")
             return None
 
-    def find_all_by_session(self, session_id: str) -> List[dict]:
+    def find_all_by_session(self, session_id: str) -> list[dict]:
         """按会话 id 读取其全部对话归档（按 saved_at 升序）。"""
         result = []
         if not os.path.exists(self.history_dir):
@@ -97,7 +96,7 @@ class HistoryManager:
         return result
 
     # ── 列表 / 导出 / 删除 ────────────────────────────────
-    def list_tasks(self, session_id: Optional[str] = None) -> List[dict]:
+    def list_tasks(self, session_id: str | None = None) -> list[dict]:
         tasks = []
         if not os.path.exists(self.history_dir):
             return tasks
@@ -123,7 +122,7 @@ class HistoryManager:
         tasks.sort(key=lambda t: t.get("saved_at", 0), reverse=True)
         return tasks
 
-    def export_text(self, task_id: str) -> Optional[str]:
+    def export_text(self, task_id: str) -> str | None:
         data = self.load_history(task_id)
         if not data:
             return None

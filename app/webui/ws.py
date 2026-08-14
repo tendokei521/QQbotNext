@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import List
 
 from fastapi import WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketDisconnect as _WSDisconnect
@@ -16,7 +15,7 @@ class ConnectionManager:
     """管理 WebUI 的 WebSocket 连接，支持广播。"""
 
     def __init__(self) -> None:
-        self.active_connections: List[WebSocket] = []
+        self.active_connections: list[WebSocket] = []
 
     async def connect(self, websocket: WebSocket) -> None:
         await websocket.accept()

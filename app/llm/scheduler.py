@@ -18,7 +18,6 @@ import os
 import re
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
 
 from app.llm import logger, llm_data_dir
 from app.llm.prompt import build_messages
@@ -54,10 +53,10 @@ class TaskEntry:
         content: str,
         repeat: str = "once",
         next_at: datetime,
-        weekday: Optional[int] = None,
-        dom: Optional[int] = None,
-        interval_seconds: Optional[int] = None,
-        created_at: Optional[int] = None,
+        weekday: int | None = None,
+        dom: int | None = None,
+        interval_seconds: int | None = None,
+        created_at: int | None = None,
         fired_count: int = 0,
         active: bool = True,
     ) -> None:
@@ -117,14 +116,14 @@ class TaskEntry:
 class TaskScheduler:
     """定时任务管理器（每 Bot 实例一个）。"""
 
-    def __init__(self, module, data_dir: Optional[str] = None) -> None:
+    def __init__(self, module, data_dir: str | None = None) -> None:
         self.module = module
         self.bot = module.ctx.bot
         self.bot_id = module.bot_id
         self.task_manager = module.ctx.services.task_manager
         self.session_mgr = SessionManager(str(module.bot_id))
-        self._tasks: Dict[str, TaskEntry] = {}
-        self._timers: Dict[str, asyncio.Task] = {}
+        self._tasks: dict[str, TaskEntry] = {}
+        self._timers: dict[str, asyncio.Task] = {}
 
         if data_dir is None:
             data_dir = llm_data_dir()
@@ -140,7 +139,7 @@ class TaskScheduler:
         return f"agent:{self.module.bot_id}"
 
     # ── 调度入口 ─────────────────────────────────────────
-    async def schedule(self, session_id: str, spec: dict) -> Optional[TaskEntry]:
+    async def schedule(self, session_id: str, spec: dict) -> TaskEntry | None:
         """根据 LLM 提取的任务 spec（trigger/content/repeat）创建定时任务。
 
         session_id 形如 group_123 / private_456，据此推导私聊/群聊，
@@ -357,7 +356,7 @@ class TaskScheduler:
         self._save()
 
     # ── 管理接口 ─────────────────────────────────────────
-    def status(self) -> List[dict]:
+    def status(self) -> list[dict]:
         rows = []
         for e in self._tasks.values():
             rows.append({

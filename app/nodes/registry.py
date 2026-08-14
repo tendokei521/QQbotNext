@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
 
 from app.core.logger import logger
 from app.nodes.base import MessageNode
@@ -15,8 +14,8 @@ from app.nodes.base import MessageNode
 
 class NodeRegistry:
     def __init__(self, log=None) -> None:
-        self._inbound: Dict[str, MessageNode] = {}
-        self._outbound: Dict[str, MessageNode] = {}
+        self._inbound: dict[str, MessageNode] = {}
+        self._outbound: dict[str, MessageNode] = {}
         self.log = log or logger
 
     # ── 注册 ──────────────────────────────────────────────
@@ -47,12 +46,12 @@ class NodeRegistry:
         return target.pop(name, None) is not None
 
     # ── 查询 ──────────────────────────────────────────────
-    def get(self, name: str, direction: str = "inbound") -> Optional[MessageNode]:
+    def get(self, name: str, direction: str = "inbound") -> MessageNode | None:
         target = self._inbound if direction == "inbound" else self._outbound
         return target.get(name)
 
-    def inbound_nodes(self) -> List[MessageNode]:
+    def inbound_nodes(self) -> list[MessageNode]:
         return sorted(self._inbound.values(), key=lambda n: n.order)
 
-    def outbound_nodes(self) -> List[MessageNode]:
+    def outbound_nodes(self) -> list[MessageNode]:
         return sorted(self._outbound.values(), key=lambda n: n.order)

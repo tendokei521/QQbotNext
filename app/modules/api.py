@@ -7,10 +7,10 @@
 
 from __future__ import annotations
 
-from typing import Any, List
+from typing import Any
 
 
-def get_modules() -> List[Any]:
+def get_modules() -> list[Any]:
     """获取已加载的模块对象列表（扁平，含全局与各 Bot 实例，排除子模块）。"""
     from app.bootstrap import get_container
     from app.modules.registry import ModuleRegistry

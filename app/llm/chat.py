@@ -4,7 +4,6 @@
   #chat task / export / list / load / new / exit / stop / proactive / schedule
 """
 
-from typing import Optional
 
 import asyncio
 import time

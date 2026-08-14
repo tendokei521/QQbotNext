@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from typing import Optional
 
 from app.core.container import Container
 from app.core.logger import logger, setup_logging
@@ -27,7 +26,7 @@ from app.services.log_service import LogService
 from app.services.provider_service import ProviderRegistry
 from app.services.scheduler import SchedulerService
 
-_container: Optional[Container] = None
+_container: Container | None = None
 
 
 def build_container(settings: Settings | None = None) -> Container:
@@ -72,7 +71,7 @@ def build_container(settings: Settings | None = None) -> Container:
     gateway = OneBotGateway(settings=settings, cache=cache, logger_=logger)
     container.register_factory(OneBotGateway, lambda: gateway)
 
-    # 节点注册表：内置入站链（Agent → 路由 → 权限 → 派发），框架/模块可插入/替换
+    # 节点注册表：内置入站链（路由 → 权限 → 派发 → Agent 兜底），框架/模块可插入/替换
     from app.modules.nodes import AgentNode, ModuleInvokeNode, ModulePermissionNode, ModuleRouterNode
     from app.nodes import NodeRegistry
     from app.nodes.outbound import OutboundPipeline, SendNode

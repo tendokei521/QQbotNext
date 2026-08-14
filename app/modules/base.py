@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.domain.bot import IBot
 from app.domain.events import BaseEvent
@@ -129,9 +129,9 @@ class ModulePermission:
     """权限配置数据类。默认黑名单+空列表 = 放行所有群/用户。"""
 
     group_mode: str = "blacklist"
-    group_list: List[str] = field(default_factory=list)
+    group_list: list[str] = field(default_factory=list)
     user_mode: str = "blacklist"
-    user_list: List[str] = field(default_factory=list)
+    user_list: list[str] = field(default_factory=list)
 
 
 class ModuleAuthority:
@@ -216,7 +216,7 @@ class ServiceAccess:
     providers: Any = None
     scheduler: Any = None
     agent_manager: Any = None  # 框架级 LLM Agent 运行时管理
-    extra: Dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
     def __getitem__(self, key: str) -> Any:
         return self.extra[key]
@@ -227,11 +227,11 @@ class ModuleContext:
     """模块实例的构造上下文。"""
 
     module_name: str
-    bot_id: Optional[int]
+    bot_id: int | None
     config: ModuleConfig
     authority: ModuleAuthority
     services: ServiceAccess
-    bot: Optional[IBot] = None
+    bot: IBot | None = None
 
 
 def resolve_enabled_ids(config_value, mode: str = "all"):
@@ -275,7 +275,7 @@ class BaseModule(ABC):
         # 事件运行期属性（dispatcher 每事件更新）
         self.authority_check = False
         self.authority_enabled = False
-        self.authority_level: Optional[int] = None
+        self.authority_level: int | None = None
 
     # ---------- 生命周期 ----------
     async def on_load(self) -> None: ...

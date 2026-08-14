@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -103,7 +102,7 @@ def _resolve_module(container, module_name, bot_id):
 
 
 @router.get("/modules")
-async def api_modules(request: Request, bot_id: Optional[int] = Depends(parse_bot_id)):
+async def api_modules(request: Request, bot_id: int | None = Depends(parse_bot_id)):
     from app.services.bot_service import BotService
 
     container = get_container(request)
@@ -111,7 +110,7 @@ async def api_modules(request: Request, bot_id: Optional[int] = Depends(parse_bo
 
 
 @router.get("/modules/{module_name}")
-async def api_module(module_name: str, request: Request, bot_id: Optional[int] = Depends(parse_bot_id)):
+async def api_module(module_name: str, request: Request, bot_id: int | None = Depends(parse_bot_id)):
     from app.services.bot_service import BotService
 
     container = get_container(request)
@@ -123,7 +122,7 @@ async def api_module(module_name: str, request: Request, bot_id: Optional[int] =
 
 @router.post("/module/{module_name}/toggle")
 async def toggle_module(module_name: str, request: Request,
-                        bot_id: Optional[int] = Depends(parse_bot_id), enabled: bool = Form(...)):
+                        bot_id: int | None = Depends(parse_bot_id), enabled: bool = Form(...)):
     container = get_container(request)
     module = _resolve_module(container, module_name, bot_id)
     if not module:
@@ -135,7 +134,7 @@ async def toggle_module(module_name: str, request: Request,
 
 @router.post("/module/{module_name}/permission")
 async def update_permission(
-    module_name: str, request: Request, bot_id: Optional[int] = Depends(parse_bot_id),
+    module_name: str, request: Request, bot_id: int | None = Depends(parse_bot_id),
     group_mode: str = Form(...), group_list: str = Form(""),
     user_mode: str = Form(...), user_list: str = Form(""),
 ):
@@ -156,7 +155,7 @@ async def update_permission(
 
 @router.get("/module/{module_name}/config")
 async def get_module_config(module_name: str, request: Request,
-                            bot_id: Optional[int] = Depends(parse_bot_id)):
+                            bot_id: int | None = Depends(parse_bot_id)):
     """读取模块配置（自定义配置页用）。返回已脱敏（password 打码）的配置。"""
     from app.services.bot_service import BotService
 
@@ -168,7 +167,7 @@ async def get_module_config(module_name: str, request: Request,
 
 
 @router.post("/module/{module_name}/config")
-async def update_config(module_name: str, request: Request, bot_id: Optional[int] = Depends(parse_bot_id)):
+async def update_config(module_name: str, request: Request, bot_id: int | None = Depends(parse_bot_id)):
     container = get_container(request)
     if not bot_id:
         return _err(404, f"模块 {module_name} 无 Bot ID 实例")
@@ -195,7 +194,7 @@ async def update_config(module_name: str, request: Request, bot_id: Optional[int
 
 
 @router.post("/modules/reload")
-async def reload_modules(request: Request, bot_id: Optional[int] = Depends(parse_bot_id)):
+async def reload_modules(request: Request, bot_id: int | None = Depends(parse_bot_id)):
     from app.services.bot_service import BotService
 
     container = get_container(request)
@@ -210,7 +209,7 @@ async def reload_modules(request: Request, bot_id: Optional[int] = Depends(parse
 
 @router.get("/module/{module_name}/page", response_class=HTMLResponse)
 async def module_page(module_name: str, request: Request,
-                      bot_id: Optional[int] = Depends(parse_bot_id)):
+                      bot_id: int | None = Depends(parse_bot_id)):
     container = get_container(request)
 
     if module_name == VIRTUAL_AGENT_MODULE:
@@ -246,7 +245,7 @@ async def module_page(module_name: str, request: Request,
 
 # ==================== list / dynamic 数据源 ====================
 
-def _find_schema_field(module, field_type: str, endpoint: str) -> Optional[dict]:
+def _find_schema_field(module, field_type: str, endpoint: str) -> dict | None:
     """在模块 config_schema 中查找 type 与 endpoint 匹配的字段定义（返回副本，不污染类级 schema）。"""
     schema = getattr(module, "config_schema", None) or {}
     for key, field in schema.items():
@@ -259,7 +258,7 @@ def _find_schema_field(module, field_type: str, endpoint: str) -> Optional[dict]
     return None
 
 
-def _resolve_bot(container, bot_id: Optional[int]):
+def _resolve_bot(container, bot_id: int | None):
     if not bot_id:
         return None
     from app.infrastructure.onebot.gateway import OneBotGateway
@@ -269,7 +268,7 @@ def _resolve_bot(container, bot_id: Optional[int]):
 
 @router.get("/module/{module_name}/list/{endpoint}")
 async def module_list_data(module_name: str, endpoint: str, request: Request,
-                           bot_id: Optional[int] = Depends(parse_bot_id)):
+                           bot_id: int | None = Depends(parse_bot_id)):
     from app.modules.registry import ModuleRegistry
     from app.services.provider_service import ProviderRegistry
 
@@ -310,7 +309,7 @@ async def module_list_data(module_name: str, endpoint: str, request: Request,
 
 @router.get("/module/{module_name}/dynamic/{endpoint}")
 async def module_dynamic_options(module_name: str, endpoint: str, request: Request,
-                                 bot_id: Optional[int] = Depends(parse_bot_id)):
+                                 bot_id: int | None = Depends(parse_bot_id)):
     from app.modules.registry import ModuleRegistry
     from app.services.provider_service import ProviderRegistry
 
@@ -331,7 +330,7 @@ async def module_dynamic_options(module_name: str, endpoint: str, request: Reque
 
 @router.get("/module/{module_name}/dynamic/{endpoint}/{value}")
 async def module_dynamic_fields(module_name: str, endpoint: str, value: str, request: Request,
-                                bot_id: Optional[int] = Depends(parse_bot_id)):
+                                bot_id: int | None = Depends(parse_bot_id)):
     from app.modules.registry import ModuleRegistry
     from app.services.provider_service import ProviderRegistry
 

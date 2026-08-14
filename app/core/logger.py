@@ -118,7 +118,7 @@ class SixHourRotatingHandler(BaseRotatingHandler):
 _caller_cache: dict = {}
 
 
-def _find_caller_module() -> Optional[tuple]:
+def _find_caller_module() -> tuple | None:
     """栈回溯找第一个业务调用者 → (模块名, 行号)。
 
     跳过 logging 内部与本文件（format 等）帧；找不到返回 None。

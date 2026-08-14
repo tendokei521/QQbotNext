@@ -5,7 +5,7 @@
   "task_id": "f6afac4c8f4a",
   "title": "对话 b3e202",
   "bot_id": "99",
-  "saved_at": 1786685925,
+  "saved_at": 1786690972,
   "messages": [
     {
       "role": "assistant",
@@ -196,6 +196,46 @@
       "role": "assistant",
       "content": "群聊提醒",
       "time": 1786685925
+    },
+    {
+      "role": "assistant",
+      "content": "打卡",
+      "time": 1786689449
+    },
+    {
+      "role": "assistant",
+      "content": "群聊提醒",
+      "time": 1786689449
+    },
+    {
+      "role": "assistant",
+      "content": "打卡",
+      "time": 1786689904
+    },
+    {
+      "role": "assistant",
+      "content": "群聊提醒",
+      "time": 1786689904
+    },
+    {
+      "role": "assistant",
+      "content": "打卡",
+      "time": 1786690924
+    },
+    {
+      "role": "assistant",
+      "content": "群聊提醒",
+      "time": 1786690924
+    },
+    {
+      "role": "assistant",
+      "content": "打卡",
+      "time": 1786690972
+    },
+    {
+      "role": "assistant",
+      "content": "群聊提醒",
+      "time": 1786690972
     }
   ]
 }

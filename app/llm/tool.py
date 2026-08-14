@@ -6,7 +6,7 @@ to_openai() 输出 OpenAI 原生 function 定义，交给 Provider 的工具循�
 
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable, List
+from typing import Awaitable, Callable
 
 ToolHandler = Callable[[dict], Awaitable[str]]
 
@@ -35,12 +35,12 @@ class ToolSpec:
         }
 
 
-def build_tools(specs: List[ToolSpec]) -> List[dict]:
+def build_tools(specs: list[ToolSpec]) -> list[dict]:
     """ToolSpec 列表 → OpenAI tools 参数。"""
     return [s.to_openai() for s in specs]
 
 
-def make_executor(specs: List[ToolSpec]) -> ToolHandler:
+def make_executor(specs: list[ToolSpec]) -> ToolHandler:
     """按工具名分发到对应处理器；未知工具返回错误文本（回传给 LLM 自纠错）。"""
 
     async def _executor(name: str, args: dict) -> str:

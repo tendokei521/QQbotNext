@@ -1,6 +1,6 @@
 """触发器模块（框架级）：判断消息是否触发 LLM 响应（@ 或关键词）。"""
 
-from typing import Dict, List
+from typing import Dict
 
 
 def _seg_type(seg) -> str:

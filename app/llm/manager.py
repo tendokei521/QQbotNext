@@ -10,7 +10,7 @@ AgentRuntime 暴露与旧模块一致的接口（.config / .ctx / .bot_id / .sch
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from app.llm import logger
 from app.llm.config import AgentConfig
@@ -75,9 +75,9 @@ class AgentManager:
     def __init__(self, config_service, task_manager) -> None:
         self.config_service = config_service
         self.task_manager = task_manager
-        self._runtimes: Dict[Any, AgentRuntime] = {}
+        self._runtimes: dict[Any, AgentRuntime] = {}
 
-    def ensure_runtime(self, bot_id: Any, bot=None) -> Optional[AgentRuntime]:
+    def ensure_runtime(self, bot_id: Any, bot=None) -> AgentRuntime | None:
         """获取或创建该 Bot 的运行时。bot_id 为空（全局实例）不创建。"""
         if bot_id is None:
             return None
@@ -90,10 +90,10 @@ class AgentManager:
             runtime.set_bot(bot)
         return runtime
 
-    def get_runtime(self, bot_id: Any) -> Optional[AgentRuntime]:
+    def get_runtime(self, bot_id: Any) -> AgentRuntime | None:
         return self._runtimes.get(bot_id)
 
-    def runtimes(self) -> Dict[Any, AgentRuntime]:
+    def runtimes(self) -> dict[Any, AgentRuntime]:
         return dict(self._runtimes)
 
     def shutdown(self) -> None:

@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
 
 from app.core.logger import logger
 from app.domain.bot import IBot
@@ -45,7 +44,7 @@ class BotService:
     async def reconnect(self, index: int) -> bool:
         return await self.gateway.reconnect_bot(index)
 
-    async def add_bot(self, ws_url: str, owner_id: Optional[int], auto_connect: bool = False) -> int:
+    async def add_bot(self, ws_url: str, owner_id: int | None, auto_connect: bool = False) -> int:
         index = await self.config_service.add_bot(
             {"ws_url": ws_url, "owner_id": owner_id, "auto_connect": auto_connect}
         )
@@ -56,14 +55,14 @@ class BotService:
         await self.gateway.del_bot(index)
         return await self.config_service.delete_bot(index)
 
-    async def save_bots_config(self, bots: List[dict]) -> None:
+    async def save_bots_config(self, bots: list[dict]) -> None:
         await self.config_service.save_bots(bots)
 
     # ==================== 查询（WebUI 渲染） ====================
-    def get_bots_data(self) -> List[dict]:
+    def get_bots_data(self) -> list[dict]:
         return self.gateway.get_bots_info()
 
-    def get_bots_groups(self) -> Dict[str, dict]:
+    def get_bots_groups(self) -> dict[str, dict]:
         result: dict = {}
         for index, conn in self.gateway.connections.items():
             if conn.all_group_list:
@@ -75,7 +74,7 @@ class BotService:
                 }
         return result
 
-    def get_modules_data(self, bot_id: Optional[int] = None) -> Dict[str, dict]:
+    def get_modules_data(self, bot_id: int | None = None) -> dict[str, dict]:
         """模块数据（WebUI 渲染所需），返回格式与原实现一致。
 
         bot_id 有指定时优先取该 bot 的实例；未加载则回退全局(None)实例，
@@ -116,7 +115,7 @@ class BotService:
         data["agent"] = self._agent_module_data(bot_id)
         return data
 
-    def _agent_module_data(self, bot_id: Optional[int]) -> dict:
+    def _agent_module_data(self, bot_id: int | None) -> dict:
         """框架级 LLM 模块条目：读 AgentRuntime（无运行时则用默认值）。"""
         from app.llm.config import DEFAULT_LLM_CONFIG
         from app.llm.config_schema import SCHEMA
@@ -151,14 +150,14 @@ class BotService:
             "has_page": True,
         }
 
-    def get_module_data(self, module_name: str, bot_id: Optional[int] = None) -> Optional[dict]:
+    def get_module_data(self, module_name: str, bot_id: int | None = None) -> dict | None:
         return self.get_modules_data(bot_id).get(module_name)
 
-    async def get_bot_id(self, index: int) -> Optional[int]:
+    async def get_bot_id(self, index: int) -> int | None:
         return await self.gateway.get_bot_id(index)
 
     # ==================== 模块重载 ====================
-    async def reload_modules(self, bot_id: Optional[int] = None) -> int:
+    async def reload_modules(self, bot_id: int | None = None) -> int:
         await self.registry.reload_all(bot_id)
         return len(self.registry.module_names())
 

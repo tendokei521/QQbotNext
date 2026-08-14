@@ -12,7 +12,7 @@ import importlib
 import sys
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.core.logger import logger
 from app.domain.bot import IBot
@@ -32,10 +32,10 @@ class ModuleRegistry:
         self.config_service = config_service
         self.services = services
         self.log = log or logger
-        self._modules: Dict[str, Dict[Any, BaseModule]] = {}
+        self._modules: dict[str, dict[Any, BaseModule]] = {}
 
     # ---------- 查询 ----------
-    def loaded(self) -> List[BaseModule]:
+    def loaded(self) -> list[BaseModule]:
         """全局分发用的模块实例（扁平）。排除子模块——子模块由父模块调度，不参与全局分发。"""
         result = []
         for bot_modules in self._modules.values():
@@ -44,10 +44,10 @@ class ModuleRegistry:
                     result.append(module)
         return result
 
-    def loaded_map(self) -> Dict[str, Dict[Any, BaseModule]]:
+    def loaded_map(self) -> dict[str, dict[Any, BaseModule]]:
         return {name: dict(bots) for name, bots in self._modules.items()}
 
-    def get(self, module_name: str, bot_id: Any = None) -> Optional[BaseModule]:
+    def get(self, module_name: str, bot_id: Any = None) -> BaseModule | None:
         """取指定 bot 的模块实例；无 bot 专属实例时回退到全局(None)实例。"""
         if module_name not in self._modules:
             return None
@@ -62,10 +62,10 @@ class ModuleRegistry:
             instance = bot_modules.get(None)
         return instance
 
-    def module_names(self) -> List[str]:
+    def module_names(self) -> list[str]:
         return sorted(self._modules.keys())
 
-    def module_page_path(self, module_name: str) -> Optional[Path]:
+    def module_page_path(self, module_name: str) -> Path | None:
         """自定义配置页：module/modules/<name>/pages/index.html。无则返回 None。"""
         page = self._resolve_module_path(module_name) / "pages" / "index.html"
         return page if page.is_file() else None
@@ -86,8 +86,8 @@ class ModuleRegistry:
         self,
         module_name: str,
         bot_id: Any = None,
-        bot: Optional[IBot] = None,
-        parent: Optional[BaseModule] = None,
+        bot: IBot | None = None,
+        parent: BaseModule | None = None,
     ) -> bool:
         module_path = self._resolve_module_path(module_name)
         if not module_path.is_dir() or module_name.startswith(("_", ".")):
@@ -154,13 +154,10 @@ class ModuleRegistry:
             #self.log.debug(f"[Module] 加载: {module_name} (bot {bot_id})")
             return True
         except Exception as e:
-            self.log.error(f"[Module] {module_name} (bot {bot_id}) 加载失败: {e}")
-            import traceback
-
-            traceback.print_exc()
+            self.log.exception(f"[Module] {module_name} (bot {bot_id}) 加载失败: {e}")
             return False
 
-    async def load_all(self, bot_id: Any = None, bot: Optional[IBot] = None) -> int:
+    async def load_all(self, bot_id: Any = None, bot: IBot | None = None) -> int:
         """加载模块目录下所有模块到指定 bot_id。"""
         count = 0
         if not self.modules_dir.exists():
@@ -197,11 +194,11 @@ class ModuleRegistry:
             if not bot_modules:
                 del self._modules[module_name]
 
-    async def reload_all(self, bot_id: Any = None, bot: Optional[IBot] = None) -> int:
+    async def reload_all(self, bot_id: Any = None, bot: IBot | None = None) -> int:
         await self.unload(bot_id)
         return await self.load_all(bot_id, bot)
 
-    async def reload_single(self, module_name: str, bot_id: Any = None, bot: Optional[IBot] = None) -> bool:
+    async def reload_single(self, module_name: str, bot_id: Any = None, bot: IBot | None = None) -> bool:
         await self.unload_single(module_name, bot_id)
         return await self.load_single(module_name, bot_id, bot)
 

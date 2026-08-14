@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
 
 from app.core.logger import logger
 from app.domain.events import BaseEvent

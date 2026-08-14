@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable
 
 from app.domain.bot import IBot
 from app.domain.events import BaseEvent
@@ -25,13 +25,13 @@ Next = Callable[[], Awaitable[None]]
 class MessageContext:
     """节点链的共享上下文。入站与出站复用同一结构。"""
 
-    event: Optional[BaseEvent] = None
-    bot: Optional[IBot] = None
-    state: Dict[str, Any] = field(default_factory=dict)
+    event: BaseEvent | None = None
+    bot: IBot | None = None
+    state: dict[str, Any] = field(default_factory=dict)
     cancelled: bool = False
     # 出站用：要执行的动作与参数
     action: str = ""
-    params: Dict[str, Any] = field(default_factory=dict)
+    params: dict[str, Any] = field(default_factory=dict)
 
 
 class MessageNode(ABC):
@@ -49,11 +49,11 @@ class MessageNode(ABC):
 class NodeRunner:
     """按 order 升序执行一条节点链。"""
 
-    def __init__(self, nodes: List[MessageNode]) -> None:
+    def __init__(self, nodes: list[MessageNode]) -> None:
         self._nodes = sorted(nodes, key=lambda n: n.order)
 
     @property
-    def nodes(self) -> List[MessageNode]:
+    def nodes(self) -> list[MessageNode]:
         return list(self._nodes)
 
     async def run(self, ctx: MessageContext) -> None:

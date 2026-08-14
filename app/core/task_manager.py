@@ -12,11 +12,11 @@ import asyncio
 import contextlib
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Coroutine, Dict, List, Optional
+from typing import Any, Awaitable, Coroutine
 
 from app.core.logger import task_logger
 
-TASKS = Dict[str, List[asyncio.Task]]
+TASKS = dict[str, list[asyncio.Task]]
 
 
 @dataclass
@@ -26,7 +26,7 @@ class TaskRecord:
     name: str
     owner: str = "system"  # 模块名 / service 名
     created_order: int = 0
-    task: Optional["asyncio.Task"] = field(default=None, repr=False)
+    task: "asyncio.Task" | None = field(default=None, repr=False)
 
 
 class TaskManager:

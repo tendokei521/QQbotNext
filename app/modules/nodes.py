@@ -4,13 +4,14 @@
 - ModuleRouterNode     订阅匹配 + bot 归属 → ctx.state.candidates
 - ModulePermissionNode 启停 + 单一服务 + 权限等级 → ctx.state.allowed
 - ModuleInvokeNode     逐个调用业务模块 handle（1 级叶子）
+- AgentNode            模块链之后的 LLM 兜底（模块可 event.llm.stop() 跳过）
 
 这些节点依赖模块框架（app.modules），故放在此而非 app/nodes。
 """
 
 from __future__ import annotations
 
-from typing import Any, List
+from typing import Any
 
 from app.core.logger import logger
 from app.domain.events import BaseEvent
@@ -42,15 +43,16 @@ class _AgentGate:
 
 
 class AgentNode(MessageNode):
-    """框架级 LLM Agent 默认响应：聊天消息由 Agent 处理。
+    """框架级 LLM Agent 兜底响应：模块链之后执行。
 
-    门控：Agent 启停/黑白名单/单一服务（框架级配置）；
-    Agent 内部再按触发规则（私聊全触发 / 群聊 @或关键词）决定是否回复。
-    运行 app.llm.handle(runtime, event)，随后继续走模块链（其它事件模块照常）。
+    顺序：模块先处理（Router → Permission → Invoke），LLM 最后兜底。
+    模块可在 handle 中调用 event.llm.stop() 声明「我已处理，跳过 LLM 回复」；
+    未声明时 LLM 按触发规则（私聊全触发 / 群聊 @或关键词）决定是否回复。
+    主动消息观察独立于回复，即使模块 stop 了 LLM 也照常维护。
     """
 
     name = "agent"
-    order = 90
+    order = 130  # 模块链（Router 100 / Permission 110 / Invoke 120）之后
 
     def __init__(self, agent_manager: Any, config_service: Any, gateway: Any, log=None) -> None:
         self.agent_manager = agent_manager
@@ -79,10 +81,25 @@ class AgentNode(MessageNode):
         if not check_event_permission(event, gate):
             await next_()
             return
+        # 模块已声明跳过 LLM 回复（event.llm.stop()）→ 仅维护主动消息观察
+        if getattr(event, "_llm_stop", False):
+            await self._observe_proactive(runtime, event)
+            await next_()
+            return
         from app.llm import handle as agent_handle
 
         await agent_handle(runtime, event)
         await next_()
+
+    @staticmethod
+    async def _observe_proactive(runtime, event) -> None:
+        """主动消息观察：模块跳过 LLM 回复时也维护 Agent 的活跃状态。"""
+        pm = getattr(runtime, "proactive", None)
+        if pm is None:
+            return
+        is_group = event.event_type == "message_group"
+        sid = f"group_{event.group.group_id}" if is_group else f"private_{event.user_id}"
+        await pm.on_message(sid, is_group, is_self=(event.user_id == event.self_id))
 
 
 class ModuleRouterNode(MessageNode):
@@ -97,7 +114,7 @@ class ModuleRouterNode(MessageNode):
 
     async def process(self, ctx: MessageContext, next_: Next) -> None:
         event = ctx.event
-        candidates: List[BaseModule] = []
+        candidates: list[BaseModule] = []
         for module in self.registry.loaded():
             if event.event_type not in module.subscribe:
                 continue
@@ -126,7 +143,7 @@ class ModulePermissionNode(MessageNode):
 
     async def process(self, ctx: MessageContext, next_: Next) -> None:
         event = ctx.event
-        allowed: List[BaseModule] = []
+        allowed: list[BaseModule] = []
         for module in ctx.state.get("candidates", []) or []:
             if not check_module_enabled(module):
                 continue
@@ -162,10 +179,7 @@ class ModuleInvokeNode(MessageNode):
             try:
                 await module.handle(event)
             except Exception as e:
-                self.log.error(
+                self.log.exception(
                     f"[Dispatch] {module.module_name}(bot {module.bot_id}) 处理 {event.event_type} 异常: {e}"
                 )
-                import traceback
-
-                traceback.print_exc()
         await next_()

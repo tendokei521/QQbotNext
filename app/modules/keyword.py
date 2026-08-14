@@ -10,17 +10,17 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Iterable
 
 
 def match_keywords(
-    keywords_data: Dict[str, Any],
+    keywords_data: dict[str, Any],
     msgtext: Iterable[str],
     *,
-    atlist: Optional[Iterable] = None,
+    atlist: Iterable | None = None,
     self_id: Any = "",
     user_id: Any = "",
-) -> List[str]:
+) -> list[str]:
     """匹配关键词配置，返回命中的关键词列表（空 = 未命中）。
 
     Args:
@@ -34,8 +34,8 @@ def match_keywords(
     if not msgtext and not atlist:
         return []
 
-    def _get_keyword(keyword: Dict[str, Any], texts: List[str]) -> List[str]:
-        got: List[str] = []
+    def _get_keyword(keyword: dict[str, Any], texts: list[str]) -> list[str]:
+        got: list[str] = []
         textkeywords = keyword.get("text")
         if textkeywords == "selfid":
             textkeywords = str(self_id)

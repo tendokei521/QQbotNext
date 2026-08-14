@@ -8,7 +8,6 @@ OneBot 适配器（infrastructure/onebot/client.BotConnection）实现本接口�
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Union
 
 from app.domain.message import SegmentLike
 
@@ -17,9 +16,9 @@ class IBot(ABC):
     """一个已连接的机器人账号。"""
 
     # ---------- 运行时状态 ----------
-    bot_id: Optional[int] = None
-    index: Optional[int] = None
-    owner_id: Optional[int] = None
+    bot_id: int | None = None
+    index: int | None = None
+    owner_id: int | None = None
     ws_url: str = ""
     status: str = "disconnected"
     auto_connect: bool = False
@@ -43,14 +42,14 @@ class IBot(ABC):
         self,
         message_type: str,
         message: SegmentLike,
-        user_id: Optional[int] = None,
-        group_id: Optional[int] = None,
+        user_id: int | None = None,
+        group_id: int | None = None,
         auto_escape: bool = False,
     ) -> dict: ...
 
     @abstractmethod
     async def send_poke(
-        self, user_id: int, group_id: Optional[int] = None, target_id: Optional[int] = None
+        self, user_id: int, group_id: int | None = None, target_id: int | None = None
     ) -> dict: ...
 
     @abstractmethod

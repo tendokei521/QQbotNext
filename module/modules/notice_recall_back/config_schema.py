@@ -3,8 +3,8 @@
 SCHEMA = {
     "cache_time": {
         "type": "number",
-        "label": "缓存时间",
-        "description": "缓存时间，单位秒",
+        "label": "内存缓存时间",
+        "description": "撤回消息在内存中的缓存时间，单位秒（重启后由磁盘缓存兜底）",
         "default": 600,
         "placeholder": "输入缓存时间，单位秒",
     },
@@ -42,5 +42,25 @@ SCHEMA = {
         "checkboxes": True,
         "mode_select": True,
         "default": {},
+    },
+    "db_enable": {
+        "type": "boolean",
+        "label": "启用持久化缓存",
+        "description": "撤回消息落盘保存（module/data/notice_recall_back/），重启后仍可恢复",
+        "default": True,
+    },
+    "db_max_messages": {
+        "type": "integer",
+        "label": "缓存上限（条）",
+        "description": "超过上限后自动淘汰最旧的消息",
+        "default": 5000,
+        "min": 100,
+    },
+    "db_retention_minutes": {
+        "type": "integer",
+        "label": "缓存保留时长（分钟）",
+        "description": "超过保留时长的消息自动清理",
+        "default": 60,
+        "min": 1,
     },
 }

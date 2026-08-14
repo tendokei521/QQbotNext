@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 
 class BotConfigItem(BaseModel):
     ws_url: str = ""
-    owner_id: Optional[int] = None
+    owner_id: int | None = None
     auto_connect: bool = False
 
 
 class BotsConfigUpdate(BaseModel):
-    bots: List[BotConfigItem] = Field(default_factory=list)
+    bots: list[BotConfigItem] = Field(default_factory=list)
 
 
 class ModuleConfigUpdate(BaseModel):
@@ -31,18 +31,18 @@ class ModuleConfigUpdate(BaseModel):
 
 
 class WebuiConfigUpdate(BaseModel):
-    logs: Optional[dict] = None
+    logs: dict | None = None
 
 
 class LogsConfigUpdate(BaseModel):
-    visible_levels: Optional[List[str]] = None
-    max_lines: Optional[int] = None
-    console_height: Optional[int] = None
+    visible_levels: list[str] | None = None
+    max_lines: int | None = None
+    console_height: int | None = None
 
 
 class SingleServiceUpdate(BaseModel):
-    single_service: Dict[str, bool] = Field(default_factory=dict)
+    single_service: dict[str, bool] = Field(default_factory=dict)
 
 
 class MultiGroupUpdate(BaseModel):
-    multi_group: Dict[str, Any] = Field(default_factory=dict)
+    multi_group: dict[str, Any] = Field(default_factory=dict)

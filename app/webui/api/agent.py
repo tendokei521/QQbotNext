@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import json
-from typing import Optional
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -59,7 +58,7 @@ def _mask_password_config(config: dict, schema: dict) -> dict:
 # ==================== 配置 / 权限 ====================
 
 @router.get("/config")
-async def agent_config(request: Request, bot_id: Optional[int] = None):
+async def agent_config(request: Request, bot_id: int | None = None):
     from app.llm.config_schema import SCHEMA
 
     container = get_container(request)
@@ -83,7 +82,7 @@ async def agent_config(request: Request, bot_id: Optional[int] = None):
 
 
 @router.post("/config")
-async def agent_config_update(request: Request, bot_id: Optional[int] = None):
+async def agent_config_update(request: Request, bot_id: int | None = None):
     from app.llm.config_schema import SCHEMA
 
     container = get_container(request)
@@ -116,7 +115,7 @@ async def agent_config_update(request: Request, bot_id: Optional[int] = None):
 # ==================== 定时任务 ====================
 
 @router.get("/tasks")
-async def agent_tasks(request: Request, bot_id: Optional[int] = None):
+async def agent_tasks(request: Request, bot_id: int | None = None):
     container = get_container(request)
     runtime, _ = _runtime(container, bot_id)
     if runtime is None:
@@ -125,7 +124,7 @@ async def agent_tasks(request: Request, bot_id: Optional[int] = None):
 
 
 @router.post("/tasks")
-async def agent_task_add(request: Request, bot_id: Optional[int] = None):
+async def agent_task_add(request: Request, bot_id: int | None = None):
     container = get_container(request)
     runtime, _ = _runtime(container, bot_id)
     if runtime is None:
@@ -158,7 +157,7 @@ async def agent_task_add(request: Request, bot_id: Optional[int] = None):
 
 
 @router.post("/tasks/{task_id}/trigger")
-async def agent_task_trigger(task_id: str, request: Request, bot_id: Optional[int] = None):
+async def agent_task_trigger(task_id: str, request: Request, bot_id: int | None = None):
     container = get_container(request)
     runtime, _ = _runtime(container, bot_id)
     if runtime is None:
@@ -170,7 +169,7 @@ async def agent_task_trigger(task_id: str, request: Request, bot_id: Optional[in
 
 
 @router.post("/tasks/{task_id}/cancel")
-async def agent_task_cancel(task_id: str, request: Request, bot_id: Optional[int] = None):
+async def agent_task_cancel(task_id: str, request: Request, bot_id: int | None = None):
     container = get_container(request)
     runtime, _ = _runtime(container, bot_id)
     if runtime is None:
@@ -184,7 +183,7 @@ async def agent_task_cancel(task_id: str, request: Request, bot_id: Optional[int
 # ==================== 主动消息 ====================
 
 @router.get("/proactive/status")
-async def agent_proactive_status(request: Request, bot_id: Optional[int] = None):
+async def agent_proactive_status(request: Request, bot_id: int | None = None):
     container = get_container(request)
     runtime, _ = _runtime(container, bot_id)
     if runtime is None:
@@ -193,7 +192,7 @@ async def agent_proactive_status(request: Request, bot_id: Optional[int] = None)
 
 
 @router.post("/proactive/trigger")
-async def agent_proactive_trigger(request: Request, bot_id: Optional[int] = None):
+async def agent_proactive_trigger(request: Request, bot_id: int | None = None):
     container = get_container(request)
     runtime, _ = _runtime(container, bot_id)
     if runtime is None:

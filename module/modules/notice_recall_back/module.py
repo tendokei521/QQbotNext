@@ -17,6 +17,9 @@ class Module(BaseModule):
         "target_groups_mode": "all",
         "target_users": {},
         "target_users_mode": "all",
+        "db_enable": True,
+        "db_max_messages": 5000,
+        "db_retention_minutes": 60,
     }
     config_schema = SCHEMA
 
@@ -24,3 +27,9 @@ class Module(BaseModule):
         from .service import handle
 
         await handle(self, event)
+
+    async def on_load(self):
+        """启动时清理过期/超量的持久化消息缓存。"""
+        from .service import on_load
+
+        await on_load(self)

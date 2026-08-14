@@ -7,7 +7,7 @@ OneBot 适配器负责与 payload 相互转换。
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Iterable, List, Union
+from typing import Any, Iterable
 
 
 @dataclass
@@ -26,11 +26,11 @@ class MessageSegment:
         return cls("text", {"text": text})
 
     @classmethod
-    def at(cls, qq: Union[str, int]) -> "MessageSegment":
+    def at(cls, qq: str | int) -> "MessageSegment":
         return cls("at", {"qq": str(qq)})
 
     @classmethod
-    def reply(cls, message_id: Union[str, int]) -> "MessageSegment":
+    def reply(cls, message_id: str | int) -> "MessageSegment":
         return cls("reply", {"id": str(message_id)})
 
     @classmethod
@@ -38,19 +38,19 @@ class MessageSegment:
         return cls("image", {"file": file})
 
     @classmethod
-    def node(cls, name: str, uin: Union[str, int], content: Any) -> "MessageSegment":
+    def node(cls, name: str, uin: str | int, content: Any) -> "MessageSegment":
         return cls("node", {"name": name, "uin": uin, "content": content})
 
 
 class Message:
     """消息链：有序消息段集合，可直接作为 send_xxx 的 message 参数。"""
 
-    def __init__(self, segments: Iterable[Union[MessageSegment, dict]] = None) -> None:
+    def __init__(self, segments: Iterable[MessageSegment | dict] = None) -> None:
         self.segments: list[MessageSegment] = []
         for seg in segments or []:
             self.append(seg)
 
-    def append(self, seg: Union[MessageSegment, dict, str]) -> None:
+    def append(self, seg: MessageSegment | dict | str) -> None:
         if isinstance(seg, MessageSegment):
             self.segments.append(seg)
         elif isinstance(seg, dict):
@@ -58,7 +58,7 @@ class Message:
         elif isinstance(seg, str):
             self.segments.append(MessageSegment.text(seg))
 
-    def extend(self, segments: Iterable[Union[MessageSegment, dict, str]]) -> None:
+    def extend(self, segments: Iterable[MessageSegment | dict | str]) -> None:
         for seg in segments:
             self.append(seg)
 
@@ -88,4 +88,4 @@ class Message:
         return cls()
 
 
-SegmentLike = Union[str, MessageSegment, dict, Message, List[dict], List[MessageSegment]]
+SegmentLike = str | MessageSegment | dict | Message | list[dict] | list[MessageSegment]

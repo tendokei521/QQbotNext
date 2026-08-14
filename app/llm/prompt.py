@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
 
 SCHEDULE_INSTRUCTION = """### 定时任务
 当用户请求在特定时间做某事 / 提醒 / 定时回复时（例如"明天早上8点提醒我吃药"、"每周五下午6点发我周报"、"5分钟后叫我"、"每天中午提醒我喝水"），调用 schedule_task 工具来安排，不要用文字描述安排过程，也不要询问用户。
@@ -26,11 +25,11 @@ def build_messages(
     *,
     system_prompt: str,
     pre_history_text: str = "",
-    history: Optional[List[dict]] = None,
+    history: list[dict] | None = None,
     user_text: str,
     with_schedule_instruction: bool = True,
     schedule_nudge: bool = False,
-) -> List[dict]:
+) -> list[dict]:
     """组装 LLM 消息列表。
 
     Args:
@@ -41,7 +40,7 @@ def build_messages(
         with_schedule_instruction: 是否追加「定时任务协议」指令
         schedule_nudge: 是否在用户消息前插入「必须调用 schedule_task 工具」的紧贴提醒
     """
-    messages: List[dict] = [{"role": "system", "content": system_prompt}]
+    messages: list[dict] = [{"role": "system", "content": system_prompt}]
 
     if with_schedule_instruction:
         messages.append({"role": "system", "content": SCHEDULE_INSTRUCTION})

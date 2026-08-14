@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
 
 from app.nodes.base import MessageContext, MessageNode, Next, NodeRunner
 
@@ -35,10 +34,10 @@ class SendNode(MessageNode):
 class OutboundPipeline:
     """出站拦截链。run(bot, action, params) → 返回发送结果（被拦截则为 None）。"""
 
-    def __init__(self, nodes: List[MessageNode]) -> None:
+    def __init__(self, nodes: list[MessageNode]) -> None:
         self._runner = NodeRunner(nodes)
 
-    async def run(self, bot, action: str, params: dict) -> Optional[dict]:
+    async def run(self, bot, action: str, params: dict) -> dict | None:
         ctx = MessageContext(bot=bot, action=action, params=dict(params or {}), state={})
         await self._runner.run(ctx)
         return ctx.state.get("response")

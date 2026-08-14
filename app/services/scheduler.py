@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import time as _time
 from datetime import datetime, timedelta
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable
 
 from app.core.logger import logger
 
@@ -26,7 +26,7 @@ class ScheduledTask:
         self.time_str = time_str
         self.handler = handler
         self.log = log or logger
-        self._task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
         self.running = False
 
     async def start(self) -> None:
@@ -160,7 +160,7 @@ class SchedulerService:
     """定时任务管理器（进程内单例）。"""
 
     def __init__(self, log=None) -> None:
-        self._tasks: Dict[str, ScheduledTask] = {}
+        self._tasks: dict[str, ScheduledTask] = {}
         self.log = log or logger
 
     async def register_module(self, module) -> int:
@@ -188,7 +188,17 @@ class SchedulerService:
             #self.log.info(f"[Scheduler] {module.module_name}(bot {module.bot_id}) 注册 {count} 个定时任务")
         return count
 
-    async def unload(self, module_name: str, bot_id: Any, time_str: Optional[str] = None) -> None:
+    async def register(self, key: str, time_str: str, handler: Handler) -> Optional[ScheduledTask]:
+        """注册任意定时任务（供模块动态时间注册；key 建议含 `<module>:<bot_id>:` 前缀以便 unload 统一清理）。"""
+        old = self._tasks.pop(key, None)
+        if old:
+            await old.stop()
+        task = ScheduledTask(key, time_str, handler, self.log)
+        self._tasks[key] = task
+        await task.start()
+        return task
+
+    async def unload(self, module_name: str, bot_id: Any, time_str: str | None = None) -> None:
         """注销某模块某 bot 的定时任务（可指定时间）。"""
         prefix = f"{module_name}:{bot_id}"
         if time_str:

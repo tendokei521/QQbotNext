@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, Sequence
 
 import aiosqlite
 
@@ -60,7 +60,7 @@ class Database:
 
     def __init__(self, path: Path | str) -> None:
         self.path = str(path)
-        self._conn: Optional[aiosqlite.Connection] = None
+        self._conn: aiosqlite.Connection | None = None
         self._lock = asyncio.Lock()
 
     async def connect(self) -> None:
@@ -84,7 +84,7 @@ class Database:
             await self._conn.commit()
             return cur.rowcount
 
-    async def fetchone(self, sql: str, params: Sequence[Any] = ()) -> Optional[dict]:
+    async def fetchone(self, sql: str, params: Sequence[Any] = ()) -> dict | None:
         async with self._lock:
             cur = await self._conn.execute(sql, params)
             row = await cur.fetchone()

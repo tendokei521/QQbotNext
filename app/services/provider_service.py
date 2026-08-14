@@ -23,7 +23,7 @@
 from __future__ import annotations
 
 import inspect
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable
 
 from app.core.logger import logger
 
@@ -62,7 +62,7 @@ async def _builtin_friends(module, field, bot) -> dict:
 
 
 # 框架内置数据源（任何模块无需声明即可用）
-_BUILTIN_LIST: Dict[str, ListHandler] = {
+_BUILTIN_LIST: dict[str, ListHandler] = {
     "groups": _builtin_groups,
     "friends": _builtin_friends,
 }
@@ -72,8 +72,8 @@ class ProviderRegistry:
     """数据源注册表（进程内单例，由容器注入）。"""
 
     def __init__(self, log=None) -> None:
-        self._list: Dict[tuple, ListHandler] = {}
-        self._dynamic: Dict[tuple, DynamicHandler] = {}
+        self._list: dict[tuple, ListHandler] = {}
+        self._dynamic: dict[tuple, DynamicHandler] = {}
         self.log = log or logger
 
     # ── 注册 ──────────────────────────────────────────────
@@ -101,7 +101,7 @@ class ProviderRegistry:
 
     # ── 查询 / 调用 ───────────────────────────────────────
 
-    def get(self, module_name: str, endpoint: str, kind: str = "list") -> Optional[Callable]:
+    def get(self, module_name: str, endpoint: str, kind: str = "list") -> Callable | None:
         if kind == "dynamic":
             return self._dynamic.get((module_name, endpoint))
         return self._list.get((module_name, endpoint)) or _BUILTIN_LIST.get(endpoint)

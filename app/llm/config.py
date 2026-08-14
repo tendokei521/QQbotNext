@@ -7,7 +7,7 @@ Agent 的开关不再依赖模块。
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from app.modules.base import ModulePermission
 

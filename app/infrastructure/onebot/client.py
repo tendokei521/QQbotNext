@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.core.logger import api_logger
 from app.domain.bot import IBot
@@ -24,8 +24,8 @@ class BotConnection(IBot):
     def __init__(
         self,
         websocket=None,
-        bot_id: Optional[int] = None,
-        owner_id: Optional[int] = None,
+        bot_id: int | None = None,
+        owner_id: int | None = None,
         ws_url: str = "",
         auto_connect: bool = False,
     ) -> None:
@@ -37,11 +37,11 @@ class BotConnection(IBot):
         self.status = "disconnected"
         self.login_info: dict = {}
         self.reconnect_attempts = 0
-        self.last_error: Optional[str] = None
+        self.last_error: str | None = None
         self.all_group_list: list = []
         self.all_group_list_info: list = []
-        self.index: Optional[int] = None
-        self._pending: Dict[str, asyncio.Future] = {}
+        self.index: int | None = None
+        self._pending: dict[str, asyncio.Future] = {}
         self._lock = asyncio.Lock()
         self._last_connect_attempt: float = 0.0
         # 出站拦截钩子（bootstrap 装配）：若设置，_send 先经出站节点链
@@ -117,7 +117,7 @@ class BotConnection(IBot):
 
     async def send_msg(
         self, message_type: str, message: SegmentLike,
-        user_id: Optional[int] = None, group_id: Optional[int] = None,
+        user_id: int | None = None, group_id: int | None = None,
         auto_escape: bool = False,
     ) -> dict:
         params: dict = {"message_type": message_type, "message": _to_payload(message), "auto_escape": auto_escape}
@@ -127,7 +127,7 @@ class BotConnection(IBot):
             params["group_id"] = group_id
         return await self._send("send_msg", params)
 
-    async def send_poke(self, user_id: int, group_id: Optional[int] = None, target_id: Optional[int] = None) -> dict:
+    async def send_poke(self, user_id: int, group_id: int | None = None, target_id: int | None = None) -> dict:
         params: dict = {"user_id": user_id}
         if group_id:
             params["group_id"] = group_id

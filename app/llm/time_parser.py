@@ -16,7 +16,6 @@ from __future__ import annotations
 import calendar
 import re
 from datetime import datetime, timedelta
-from typing import Dict, Optional
 
 # 时段 → 未跟数字时的默认小时
 _PERIOD_DEFAULT_HOUR = {
@@ -33,7 +32,7 @@ _CN_NUM = {"一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6,
            "七": 7, "八": 8, "九": 9, "十": 10, "半": 0.5}
 
 
-def _cn_to_int(s: str) -> Optional[float]:
+def _cn_to_int(s: str) -> float | None:
     """简单中文数字 → 数值（十 及 十N 组合、单个数字、半）。"""
     if not s:
         return None
@@ -47,7 +46,7 @@ def _cn_to_int(s: str) -> Optional[float]:
     return None
 
 
-def _find_period(text: str) -> Optional[str]:
+def _find_period(text: str) -> str | None:
     if "今晚" in text:
         return "晚上"
     for p in _PERIODS:
@@ -56,7 +55,7 @@ def _find_period(text: str) -> Optional[str]:
     return None
 
 
-def _adjust_12h(h: int, period: Optional[str]) -> int:
+def _adjust_12h(h: int, period: str | None) -> int:
     """把 12 小时制数字按时段换算为 24 小时制。"""
     if period in ("凌晨", "半夜"):
         return 0 if h == 12 else h % 12
@@ -71,7 +70,7 @@ def _adjust_12h(h: int, period: Optional[str]) -> int:
     return h
 
 
-def _parse_clock(text: str) -> Optional[tuple]:
+def _parse_clock(text: str) -> tuple | None:
     """解析时刻 → (hour, minute, second)；无法解析返回 None。"""
     period = _find_period(text)
 
@@ -102,7 +101,7 @@ def _parse_clock(text: str) -> Optional[tuple]:
     return None
 
 
-def _resolve_weekday(w: str) -> Optional[int]:
+def _resolve_weekday(w: str) -> int | None:
     if w in _CN_WEEKDAY:
         return _CN_WEEKDAY[w]
     if w.isdigit():
@@ -211,7 +210,7 @@ def _compute_first(day: dict, h: int, mi: int, s: int, now: datetime) -> tuple:
     return (base + timedelta(days=1)) if base <= now else base, "once"
 
 
-def _unit_seconds(n: float, unit: str) -> Optional[int]:
+def _unit_seconds(n: float, unit: str) -> int | None:
     if unit == "秒":
         return int(n)
     if unit in ("分钟", "分"):
@@ -223,7 +222,7 @@ def _unit_seconds(n: float, unit: str) -> Optional[int]:
     return None
 
 
-def parse_schedule(text: str, now: Optional[datetime] = None) -> Optional[dict]:
+def parse_schedule(text: str, now: datetime | None = None) -> dict | None:
     """解析定时任务时间表达式。
 
     Returns:
@@ -294,9 +293,9 @@ def advance_repeat(
     current: datetime,
     *,
     repeat: str,
-    weekday: Optional[int] = None,
-    dom: Optional[int] = None,
-    interval_seconds: Optional[int] = None,
+    weekday: int | None = None,
+    dom: int | None = None,
+    interval_seconds: int | None = None,
 ) -> datetime:
     """周期性任务的下一触发时间。"""
     if repeat == "daily":

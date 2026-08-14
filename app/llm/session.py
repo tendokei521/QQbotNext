@@ -9,7 +9,6 @@
 import time
 import threading
 import uuid
-from typing import Dict, List, Optional, Set
 
 from app.llm import logger
 from app.llm.history import HistoryManager
@@ -23,7 +22,7 @@ class ConversationData:
 class Conversation:
     """一个对话线程：独立历史、标签、task_id。"""
 
-    def __init__(self, title: str = "", conv_id: Optional[str] = None):
+    def __init__(self, title: str = "", conv_id: str | None = None):
         self.id = conv_id or uuid.uuid4().hex[:12]
         self.title = title or f"对话 {self.id[:6]}"
         self.task_id = uuid.uuid4().hex[:12]
@@ -56,12 +55,12 @@ class Session:
         self.config.create_time = int(time.time())
         self.config.last_time = self.config.create_time
 
-        self.participants: Set[str] = set()
+        self.participants: set[str] = set()
         self.last_reply_time: float = 0
         self.reply_cooldown: int = 5
 
-        self.conversations: Dict[str, Conversation] = {}
-        self.active_id: Optional[str] = None
+        self.conversations: dict[str, Conversation] = {}
+        self.active_id: str | None = None
         self._new_conversation()
 
     # ── 对话操作 ──────────────────────────────────────────
@@ -91,7 +90,7 @@ class Session:
             self.active_id = next(iter(self.conversations), None)
         return True
 
-    def list_conversations(self) -> List[dict]:
+    def list_conversations(self) -> list[dict]:
         return [
             {
                 "id": c.id,
@@ -104,11 +103,11 @@ class Session:
 
     # ── 活跃对话代理（兼容旧调用） ─────────────────────────
     @property
-    def active(self) -> Optional[Conversation]:
+    def active(self) -> Conversation | None:
         return self.conversations.get(self.active_id)
 
     @property
-    def data(self) -> Optional[ConversationData]:
+    def data(self) -> ConversationData | None:
         conv = self.active
         return conv.data if conv else None
 
@@ -167,11 +166,11 @@ class SessionManager:
 
     def _init(self, bot_id: str):
         self.bot_id = bot_id
-        self.sessions: Dict[str, Session] = {}
+        self.sessions: dict[str, Session] = {}
         self.lock = threading.RLock()
         self.history = HistoryManager(bot_id)
         self._stop_event = threading.Event()
-        self._cleanup_thread: Optional[threading.Thread] = None
+        self._cleanup_thread: threading.Thread | None = None
         self._start_auto_cleanup()
 
     def stop_cleanup(self):
@@ -212,7 +211,7 @@ class SessionManager:
         logger.add_info(f"#{self.bot_id}").info(f"创建会话: {session_id}")
         return session
 
-    def get_session(self, session_id: str) -> Optional[Session]:
+    def get_session(self, session_id: str) -> Session | None:
         with self.lock:
             session = self.sessions.get(session_id)
             if session and session.is_alive():
@@ -239,7 +238,7 @@ class SessionManager:
             session.data.history.append(msg)
             session.touch()
 
-    def get_history(self, session_id: str, limit: int = 10) -> List[dict]:
+    def get_history(self, session_id: str, limit: int = 10) -> list[dict]:
         session = self.get_session(session_id)
         if not session or session.data is None:
             return []
@@ -249,7 +248,7 @@ class SessionManager:
         ]
 
     # ── 多对话操作 ────────────────────────────────────────
-    def new_conversation(self, session_id: str, title: str = "") -> Optional[dict]:
+    def new_conversation(self, session_id: str, title: str = "") -> dict | None:
         session = self.get_session(session_id)
         if not session:
             return None
@@ -263,7 +262,7 @@ class SessionManager:
             return False
         return session.switch_conversation(conv_id)
 
-    def list_conversations(self, session_id: str) -> List[dict]:
+    def list_conversations(self, session_id: str) -> list[dict]:
         session = self.get_session(session_id)
         if not session:
             return []

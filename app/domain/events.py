@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
 
 from app.domain.bot import IBot
 from app.domain.message import Message, MessageSegment, SegmentLike
@@ -31,6 +30,25 @@ class GroupInfo:
     user_role: str = ""
 
 
+class LlmGate:
+    """模块内控制 LLM 是否参与本次事件的开关（通过 event.llm 访问）。
+
+    框架的 LLM Agent 节点在模块链之后兜底执行；模块在 handle 中调用
+    event.llm.stop() 声明「我已处理，跳过 LLM 回复」。
+    """
+
+    def __init__(self, event: "BaseEvent") -> None:
+        self._event = event
+
+    def stop(self) -> None:
+        """标记：模块已处理本次事件，跳过 LLM 的回复部分。"""
+        self._event._llm_stop = True
+
+    @property
+    def stopped(self) -> bool:
+        return self._event._llm_stop
+
+
 @dataclass
 class BaseEvent:
     """所有事件基类。event_type 为模块订阅依据。"""
@@ -41,13 +59,20 @@ class BaseEvent:
     user_id: int = 0
     self_id: int = 0
     bot: IBot = None
-    bot_id: Optional[int] = None
-    bot_index: Optional[int] = None
-    owner_id: Optional[int] = None
+    bot_id: int | None = None
+    bot_index: int | None = None
+    owner_id: int | None = None
     # 权限（由 dispatcher 计算后写入）
-    authority_level: Optional[int] = None
+    authority_level: int | None = None
     authority_check: bool = False
     raw: dict = field(default_factory=dict)
+    # 模块可调用 event.llm.stop() 跳过 LLM 处理（LLM 节点在模块链之后执行）
+    _llm_stop: bool = False
+
+    @property
+    def llm(self) -> LlmGate:
+        """LLM 门控：event.llm.stop() 跳过本次事件的 LLM 回复。"""
+        return LlmGate(self)
 
     async def reply(self, message: SegmentLike, **kwargs) -> dict:
         """向本事件的目标发送消息（群/私聊自动判断）。"""

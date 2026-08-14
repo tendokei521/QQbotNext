@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable
 
 from app.core.logger import logger
 from app.infrastructure.persistence.database import Database
@@ -53,13 +53,13 @@ class ConfigService:
         self.db = db
         self.root = project_root
         self.log = log or logger
-        self._listeners: List[Listener] = []
+        self._listeners: list[Listener] = []
 
         # 内存缓存（source of truth for 读取）
         self._bots: list[dict] = []
         self._webui: dict = dict(DEFAULT_WEBUI_CONFIG)
-        self._module_config: Dict[str, Dict[str, dict]] = {}      # module -> {bot_id: config}
-        self._module_authority: Dict[str, Dict[str, dict]] = {}   # module -> {bot_id: authority}
+        self._module_config: dict[str, dict[str, dict]] = {}      # module -> {bot_id: config}
+        self._module_authority: dict[str, dict[str, dict]] = {}   # module -> {bot_id: authority}
 
     # ==================== 生命周期 ====================
     async def init(self) -> None:
@@ -215,7 +215,7 @@ class ConfigService:
         """对外使用（WebUI/页面）：ws_url 中的 access_token 打码。"""
         return [{**dict(b), "ws_url": mask_ws_url(b.get("ws_url", ""))} for b in self._bots]
 
-    async def save_bots(self, bots: List[dict]) -> None:
+    async def save_bots(self, bots: list[dict]) -> None:
         """保存账号配置。若提交的 ws_url 是打码值，用当前存储的真实 access_token 回填。"""
         old = self._bots
         normalized = []
@@ -268,7 +268,7 @@ class ConfigService:
         data = self._module_config.get(module, {})
         return dict(data.get(str(bot_id)) or data.get(bot_id) or {})
 
-    def get_all_module_configs(self, module: str) -> Dict[str, dict]:
+    def get_all_module_configs(self, module: str) -> dict[str, dict]:
         return dict(self._module_config.get(module, {}))
 
     def set_module_config(self, module: str, bot_id: Any, config: dict, persist: bool = True) -> None:

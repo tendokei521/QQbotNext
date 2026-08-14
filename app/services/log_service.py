@@ -7,14 +7,13 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import List, Optional
 
 
 class LogService:
     def __init__(self, log_dir: Path) -> None:
         self.log_dir = Path(log_dir)
 
-    def _read_last_n_lines(self, file_path: str, n: int) -> List[str]:
+    def _read_last_n_lines(self, file_path: str, n: int) -> list[str]:
         try:
             with open(file_path, "rb") as f:
                 f.seek(0, 2)
@@ -37,7 +36,7 @@ class LogService:
         except OSError:
             return []
 
-    def get_recent_logs(self, max_lines: int = 50, levels: Optional[List[str]] = None) -> List[dict]:
+    def get_recent_logs(self, max_lines: int = 50, levels: list[str] | None = None) -> list[dict]:
         from app.infrastructure.config.config_service import mask_ws_url
 
         log_file = self.log_dir / "debug.log"
@@ -47,7 +46,7 @@ class LogService:
             levels = ["info", "warning", "error"]
         levels = [l.lower() for l in levels]
 
-        logs: List[dict] = []
+        logs: list[dict] = []
         lines = self._read_last_n_lines(str(log_file), max_lines)
         for line in reversed(lines):
             line = line.strip()

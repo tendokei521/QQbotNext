@@ -14,7 +14,7 @@ import asyncio
 import contextlib
 import json
 import time
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable
 
 import websockets
 
@@ -35,23 +35,23 @@ class OneBotGateway:
         settings,
         cache: Cache,
         logger_: Any = None,
-        login_handler: Optional[LoginHandler] = None,
+        login_handler: LoginHandler | None = None,
     ) -> None:
         self.settings = settings
         self.cache = cache
         self.log = logger_ or logger
         self.login_handler = login_handler
 
-        self.connections: Dict[int, BotConnection] = {}
-        self.bot_server_tasks: Dict[int, asyncio.Task] = {}
+        self.connections: dict[int, BotConnection] = {}
+        self.bot_server_tasks: dict[int, asyncio.Task] = {}
         self.connect_type = False
-        self._supervise_task: Optional[asyncio.Task] = None
-        self._connect_locks: Dict[int, asyncio.Lock] = {}  # 防止监督循环与 WebUI 并发双开
+        self._supervise_task: asyncio.Task | None = None
+        self._connect_locks: dict[int, asyncio.Lock] = {}  # 防止监督循环与 WebUI 并发双开
         # 出站拦截钩子工厂（bootstrap 注入）：传入连接 → 返回 (action, params) 钩子
         self.outbound_hook_factory = None
 
     # ==================== 对外查询 ====================
-    def get_bots_info(self) -> List[dict]:
+    def get_bots_info(self) -> list[dict]:
         result: list[dict] = []
         for index, conn in sorted(self.connections.items()):
             result.append({
@@ -67,7 +67,7 @@ class OneBotGateway:
             })
         return result
 
-    def get_bot_info_by_index(self, index: int) -> Optional[dict]:
+    def get_bot_info_by_index(self, index: int) -> dict | None:
         conn = self.connections.get(index)
         if not conn:
             return None
@@ -79,7 +79,7 @@ class OneBotGateway:
             "ws_url": mask_ws_url(conn.ws_url),
         }
 
-    async def get_bot_id(self, index: int) -> Optional[int]:
+    async def get_bot_id(self, index: int) -> int | None:
         conn = self.connections.get(index)
         if not conn:
             return None
@@ -89,10 +89,10 @@ class OneBotGateway:
             await asyncio.sleep(0.1)
         return None
 
-    def get_bot(self, index: int) -> Optional[BotConnection]:
+    def get_bot(self, index: int) -> BotConnection | None:
         return self.connections.get(index)
 
-    def find_conn_by_bot_id(self, bot_id: int) -> Optional[BotConnection]:
+    def find_conn_by_bot_id(self, bot_id: int) -> BotConnection | None:
         for conn in self.connections.values():
             if conn.bot_id == bot_id:
                 return conn
@@ -100,7 +100,7 @@ class OneBotGateway:
 
     # ==================== 连接管理 ====================
     async def add_bot(
-        self, ws_url: str, owner_id: Optional[int], auto_connect: bool = False, index: Optional[int] = None
+        self, ws_url: str, owner_id: int | None, auto_connect: bool = False, index: int | None = None
     ) -> int:
         """新增（或按显式 index 更新）一个 Bot 连接。index 缺省取当前连接数。"""
         if index is None:
@@ -119,7 +119,7 @@ class OneBotGateway:
         self.connections[index] = conn
         return index
 
-    async def readd_bot(self, ws_url: str, owner_id: Optional[int], index: int) -> int:
+    async def readd_bot(self, ws_url: str, owner_id: int | None, index: int) -> int:
         conn = self.connections.get(index)
         if conn:
             conn.ws_url = ws_url
@@ -346,10 +346,7 @@ class OneBotGateway:
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                bot_logger.error(f"事件处理异常: {e}")
-                import traceback
-
-                traceback.print_exc()
+                bot_logger.exception(f"事件处理异常: {e}")
 
     async def _process_event(
         self, event: BaseEvent, conn: BotConnection, bot_logger, recv_logger
@@ -493,7 +490,7 @@ class OneBotGateway:
         return None
 
     # ==================== 生命周期 ====================
-    async def start_all(self, bots_config: List[dict]) -> None:
+    async def start_all(self, bots_config: list[dict]) -> None:
         """按配置收敛连接列表，并行连接 auto_connect 账号，启动监督循环。"""
         await self._reconcile(bots_config)
         auto_indices = [
@@ -505,7 +502,7 @@ class OneBotGateway:
         if self._supervise_task is None or self._supervise_task.done():
             self._supervise_task = asyncio.create_task(self._supervise(), name="gateway_supervise")
 
-    async def _reconcile(self, bots_config: List[dict]) -> None:
+    async def _reconcile(self, bots_config: list[dict]) -> None:
         """按 config 序号收敛 gateway 连接映射，消除删除中间账号导致的索引漂移。
 
         - config 之外的连接 → 断开并移除；

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any, Dict, Tuple
+from typing import Any
 
 from app.core.logger import logger
 
@@ -17,7 +17,7 @@ class Cache:
     """线程安全的 TTL 内存缓存。"""
 
     def __init__(self) -> None:
-        self._store: Dict[str, Tuple[Any, float]] = {}
+        self._store: dict[str, tuple[Any, float]] = {}
         self._lock = threading.RLock()
 
     def set(self, key: str, value: Any = True, ttl: int = 300) -> None:
