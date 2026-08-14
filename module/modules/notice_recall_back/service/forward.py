@@ -50,7 +50,16 @@ def get_msg_text(recalled: dict):
                 "content": recalled.get("message", []),
             },
         }]
-    return get_forward_nodes(recalled["forward_msg"])
+    # 合并转发消息：外层包「转发者」node，内层递归展开（保持「A 转发了聊天记录」的层级）
+    user_name = recalled.get("user_card") or recalled.get("user_nickname") or str(recalled.get("user_id", ""))
+    return [{
+        "type": "node",
+        "data": {
+            "name": user_name,
+            "uin": recalled.get("user_id", ""),
+            "content": get_forward_nodes(recalled["forward_msg"]),
+        },
+    }]
 
 
 def build_forward_msg_data(recalled: dict, recall_event):
