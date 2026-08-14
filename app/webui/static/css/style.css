@@ -790,6 +790,23 @@ textarea.config-updated {
     margin-bottom: 4px;
 }
 
+.bot-token-input-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.bot-token-input-row .form-control {
+    flex: 1;
+    min-width: 0;
+}
+
+.bot-card-hint {
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--text-muted, #888);
+}
+
 .bot-card-field-inline label {
     display: flex;
     align-items: center;

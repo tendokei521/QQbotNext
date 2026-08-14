@@ -21,7 +21,7 @@ import websockets
 from app.core.logger import logger, websocket_logger
 from app.domain.events import BaseEvent, MessageEvent, NoticeEvent, RequestEvent
 from app.infrastructure.cache import Cache
-from app.infrastructure.config.config_service import mask_ws_url
+from app.infrastructure.config.config_service import mask_ws_url, split_ws_url
 from app.infrastructure.onebot.client import BotConnection
 from app.infrastructure.onebot.codec import decode, event_name
 
@@ -54,12 +54,13 @@ class OneBotGateway:
     def get_bots_info(self) -> list[dict]:
         result: list[dict] = []
         for index, conn in sorted(self.connections.items()):
+            base, _ = split_ws_url(conn.ws_url)
             result.append({
                 "index": conn.index,
                 "bot_id": conn.bot_id,
                 "owner_id": conn.owner_id,
                 "status": conn.status,
-                "ws_url": mask_ws_url(conn.ws_url),  # 对外打码 access_token
+                "ws_url": base,  # 对外只暴露基础地址（access_token 独立字段，不回显）
                 "login_info": conn.login_info,
                 "reconnect_attempts": conn.reconnect_attempts,
                 "last_error": conn.last_error,
@@ -71,12 +72,13 @@ class OneBotGateway:
         conn = self.connections.get(index)
         if not conn:
             return None
+        base, _ = split_ws_url(conn.ws_url)
         return {
             "bot_id": conn.bot_id,
             "owner_id": conn.owner_id,
             "status": conn.status,
             "login_info": conn.login_info,
-            "ws_url": mask_ws_url(conn.ws_url),
+            "ws_url": base,
         }
 
     async def get_bot_id(self, index: int) -> int | None:

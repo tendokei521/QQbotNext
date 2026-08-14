@@ -36,6 +36,35 @@ def mask_ws_url(url: str) -> str:
     return re.sub(r"(access_token=)[^&]*", r"\g<1>" + ACCESS_TOKEN_MASK, url)
 
 
+def split_ws_url(url: str) -> tuple[str, str]:
+    """把完整 ws_url 拆成 (基础地址, access_token)。
+
+    仅拆出 access_token 参数，query 中其余参数保留在基础地址里。
+    """
+    if not url or "?" not in url:
+        return (url or ""), ""
+    base, query = url.split("?", 1)
+    token = ""
+    kept = []
+    for param in query.split("&"):
+        if param.startswith("access_token="):
+            token = param[len("access_token="):]
+        elif param:
+            kept.append(param)
+    if kept:
+        return f"{base}?{'&'.join(kept)}", token
+    return base, token
+
+
+def join_ws_url(base: str, token: str) -> str:
+    """把基础地址与 access_token 拼回完整 ws_url（无 token 时原样返回）。"""
+    base = (base or "").strip()
+    if not token:
+        return base
+    sep = "&" if "?" in base else "?"
+    return f"{base}{sep}access_token={token}"
+
+
 def restore_ws_url(masked: str, original: str) -> str:
     """保存时：提交的是打码 URL → 用原 URL 的真实 access_token 回填。"""
     if not masked or ACCESS_TOKEN_MASK not in masked or not original:
@@ -212,25 +241,37 @@ class ConfigService:
         return [dict(b) for b in self._bots]
 
     def get_bots_public(self) -> list[dict]:
-        """对外使用（WebUI/页面）：ws_url 中的 access_token 打码。"""
-        return [{**dict(b), "ws_url": mask_ws_url(b.get("ws_url", ""))} for b in self._bots]
+        """对外使用（WebUI/页面）：ws_url 拆出基础地址，access_token 独立字段打码。"""
+        result = []
+        for b in self._bots:
+            base, token = split_ws_url(b.get("ws_url", ""))
+            result.append({
+                **{k: v for k, v in dict(b).items() if k != "access_token"},
+                "ws_url": base,
+                "access_token": ACCESS_TOKEN_MASK if token else "",
+            })
+        return result
 
     async def save_bots(self, bots: list[dict]) -> None:
-        """保存账号配置。若提交的 ws_url 是打码值，用当前存储的真实 access_token 回填。
+        """保存账号配置。支持独立 access_token 字段（WebUI 独立输入框）：
 
-        回填顺序：先按位置（顺序未变的常见场景），位置不匹配时再按
-        去掉 access_token 后的 URL 特征关联回填（顺序变化/增删导致的错位）。
+        - access_token 字段缺失 或 值为打码哨兵 → 保留旧 token（位置优先、基础地址匹配兜底）；
+        - access_token 为显式值（含空串）→ 直接采用（空串 = 清除 token）；
+        - 兼容旧前端：ws_url 本身携带打码 access_token 时同样回填。
         """
         old = self._bots
         normalized = []
         for i, cfg in enumerate(bots):
-            ws = cfg.get("ws_url", "")
-            if ACCESS_TOKEN_MASK in ws:
-                if i < len(old) and old[i].get("ws_url"):
-                    ws = restore_ws_url(ws, old[i]["ws_url"])
-                if ACCESS_TOKEN_MASK in ws:  # 位置回填未命中（无旧值或仍为打码）→ 关联回填
-                    ws = restore_ws_url(ws, self._find_matching_old(old, ws))
-            normalized.append({**cfg, "ws_url": ws})
+            base, inline_token = split_ws_url(cfg.get("ws_url", ""))
+            token = cfg.get("access_token")
+            if token is None or token == ACCESS_TOKEN_MASK or ACCESS_TOKEN_MASK in str(token):
+                # 未提交 / 打码哨兵 → 保留旧值
+                token = self._find_old_token(old, i, base) or inline_token
+            else:
+                token = str(token).strip()
+            clean = {**cfg, "ws_url": join_ws_url(base, token)}
+            clean.pop("access_token", None)  # 独立字段不落库（存储仍为单字段 ws_url）
+            normalized.append(clean)
         sqls = [("DELETE FROM bots", ())]
         for i, cfg in enumerate(normalized):
             sqls.append((
@@ -242,18 +283,16 @@ class ConfigService:
         await self._notify("bots", self._bots)
 
     @staticmethod
-    def _find_matching_old(old: list[dict], masked_ws: str) -> str:
-        """在旧配置中找与提交 ws_url（除 token 外）匹配的条目，返回其真实 ws_url。"""
-        import re
-
-        def stripped(url: str) -> str:
-            return re.sub(r"access_token=[^&]*", "access_token=", url)
-
-        target = stripped(masked_ws)
+    def _find_old_token(old: list[dict], index: int, base: str) -> str:
+        """在旧配置中找应保留的 access_token：位置优先，其次按基础地址特征匹配。"""
+        if index < len(old):
+            _, token = split_ws_url(old[index].get("ws_url", ""))
+            if token:
+                return token
         for item in old:
-            old_url = item.get("ws_url", "")
-            if old_url and stripped(old_url) == target:
-                return old_url
+            old_base, token = split_ws_url(item.get("ws_url", ""))
+            if old_base == base and token:
+                return token
         return ""
 
     async def add_bot(self, cfg: dict) -> int:
