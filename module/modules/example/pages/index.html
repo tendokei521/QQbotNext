@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>示例模块 · 自定义配置页</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", sans-serif; padding: 20px; color: #2d3748; background: #f7fafc; margin: 0; }
+  h2 { margin-top: 0; }
+  .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; max-width: 480px; }
+  label { display: block; margin: 10px 0 4px; font-size: 13px; font-weight: 600; }
+  input, textarea { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #cbd5e0; border-radius: 4px; font-size: 14px; }
+  textarea { height: 80px; resize: vertical; }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .row input[type=number] { width: 80px; }
+  button { margin-top: 16px; padding: 8px 20px; background: #3182ce; color: #fff; border: 0; border-radius: 4px; cursor: pointer; font-size: 14px; }
+  #status { margin-top: 10px; font-size: 13px; color: #2f855a; }
+  p.tip { font-size: 12px; color: #718096; }
+</style>
+</head>
+<body>
+  <h2>示例模块自定义页</h2>
+  <p class="tip">演示：插件可自带 <code>pages/index.html</code> 作为完整配置页，通过
+  <code>fetch('/api/module/&lt;name&gt;/config')</code> 读写配置。</p>
+  <div class="card">
+    <label>API 密钥（留空或保持打码=不变）</label>
+    <input type="password" name="api_key">
+    <label>自定义提示词</label>
+    <textarea name="custom_prompt"></textarea>
+    <label>最大重试次数</label>
+    <input type="number" name="max_retry" min="0">
+    <div class="row" style="margin-top: 12px;">
+      <input type="checkbox" name="enable_feature" style="width:auto;">
+      <label style="margin:0;">启用功能</label>
+    </div>
+    <button onclick="save()">保存配置</button>
+    <div id="status"></div>
+  </div>
+
+<script>
+  const MOD = window.PLUGIN_MODULE || 'example';
+  const BOT = window.PLUGIN_BOT_ID || '';
+  const BQ = BOT ? '?bot_id=' + BOT : '';
+  const BASE = '/api/module/' + MOD;
+
+  async function load() {
+    try {
+      const r = await fetch(BASE + '/config' + BQ);
+      const data = await r.json();
+      const cfg = (data && data.config) || {};
+      document.querySelector('[name=api_key]').value = cfg.api_key || '';
+      document.querySelector('[name=custom_prompt]').value = cfg.custom_prompt || '';
+      document.querySelector('[name=max_retry]').value = cfg.max_retry != null ? cfg.max_retry : 3;
+      document.querySelector('[name=enable_feature]').checked = !!cfg.enable_feature;
+    } catch (e) {
+      document.getElementById('status').textContent = '加载失败: ' + e.message;
+    }
+  }
+
+  async function save() {
+    const body = {
+      api_key: document.querySelector('[name=api_key]').value,
+      custom_prompt: document.querySelector('[name=custom_prompt]').value,
+      max_retry: parseInt(document.querySelector('[name=max_retry]').value, 10) || 0,
+      enable_feature: document.querySelector('[name=enable_feature]').checked,
+    };
+    try {
+      const r = await fetch(BASE + '/config' + BQ, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const res = await r.json();
+      const st = document.getElementById('status');
+      st.textContent = (res && res.message) || '已保存';
+      st.style.color = (r.ok && res.status === 'success') ? '#2f855a' : '#c53030';
+    } catch (e) {
+      document.getElementById('status').textContent = '保存失败: ' + e.message;
+    }
+  }
+
+  load();
+</script>
+</body>
+</html>

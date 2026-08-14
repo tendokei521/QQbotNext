@@ -1,0 +1,169 @@
+"""领域事件模型。
+
+替代原 ws_msgprocess.MsgData + event_bus.Event：
+- 事件对象直接携带解析后的字段（不再有 msg_object.User / .Group / .Msg 三级嵌套）；
+- 每个事件持有其所属的 IBot，模块通过 event.bot / event.reply() 收发消息；
+- event_type 沿用原事件字符串（message_group / notice_poke / request_group / time_core …），
+  保证模块订阅语义不变。
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, List, Optional
+
+from app.domain.bot import IBot
+from app.domain.message import Message, MessageSegment, SegmentLike
+
+
+@dataclass
+class UserInfo:
+    user_id: int = 0
+    nickname: str = ""
+    card: str = ""
+    role: str = ""
+
+
+@dataclass
+class GroupInfo:
+    group_id: int = 0
+    group_name: str = ""
+    user_role: str = ""
+
+
+@dataclass
+class BaseEvent:
+    """所有事件基类。event_type 为模块订阅依据。"""
+
+    event_type: str
+    post_type: str = ""
+    time: int = 0
+    user_id: int = 0
+    self_id: int = 0
+    bot: IBot = None
+    bot_id: Optional[int] = None
+    bot_index: Optional[int] = None
+    owner_id: Optional[int] = None
+    # 权限（由 dispatcher 计算后写入）
+    authority_level: Optional[int] = None
+    authority_check: bool = False
+    raw: dict = field(default_factory=dict)
+
+    async def reply(self, message: SegmentLike, **kwargs) -> dict:
+        """向本事件的目标发送消息（群/私聊自动判断）。"""
+        raise NotImplementedError
+
+
+@dataclass
+class MessageEvent(BaseEvent):
+    """消息类事件（群消息 / 私聊消息）。"""
+
+    message_type: str = ""
+    sub_type: str = ""
+    message_id: int = 0
+    raw_message: str = ""
+    message: list = field(default_factory=list)  # list[MessageSegment]
+    forward_msg: list = field(default_factory=list)
+    user: UserInfo = field(default_factory=UserInfo)
+    group: GroupInfo = field(default_factory=GroupInfo)
+
+    @property
+    def text(self) -> str:
+        """提取全部文本段拼接。"""
+        return "".join(s.data.get("text", "") for s in self.message if s.type == "text")
+
+    def is_at_me(self) -> bool:
+        """是否 @ 了本 bot。"""
+        for seg in self.message:
+            if seg.type == "at" and str(seg.data.get("qq", "")) == str(self.self_id):
+                return True
+        return False
+
+    async def reply(self, message: SegmentLike, **kwargs) -> dict:
+        m = _to_message(message)
+        if self.message_type == "private":
+            return await self.bot.send_private_msg(self.user_id, m, **kwargs)
+        return await self.bot.send_group_msg(self.group.group_id, m, **kwargs)
+
+
+@dataclass
+class GroupMessageEvent(MessageEvent):
+    event_type: str = "message_group"
+    message_type: str = "group"
+
+
+@dataclass
+class PrivateMessageEvent(MessageEvent):
+    event_type: str = "message_private"
+    message_type: str = "private"
+
+
+@dataclass
+class NoticeEvent(BaseEvent):
+    """通知类事件（戳一戳 / 表情回应 / 撤回等）。"""
+
+    notice_type: str = ""
+    sub_type: str = ""
+    group_id: int = 0
+    target_id: int = 0
+    # 表情回应
+    emoji_likes: list = field(default_factory=list)
+    emoji_is_add: bool = False
+    # 撤回
+    operator_id: int = 0
+    message_id: int = 0
+
+    async def reply(self, message: SegmentLike, **kwargs) -> dict:
+        m = _to_message(message)
+        if self.group_id:
+            return await self.bot.send_group_msg(self.group_id, m, **kwargs)
+        return await self.bot.send_private_msg(self.user_id, m, **kwargs)
+
+
+@dataclass
+class RequestEvent(BaseEvent):
+    """申请类事件（加群 / 加好友）。"""
+
+    request_type: str = ""
+    sub_type: str = ""
+    group_id: int = 0
+    comment: str = ""
+    flag: str = ""
+    operator_id: int = 0
+
+    async def approve(self, approve: bool = True, reason: str = "") -> dict:
+        """处理申请。"""
+        if self.request_type == "group":
+            return await self.bot.set_group_add_request(self.flag, approve=approve, reason=reason)
+        return await self.bot.set_friend_add_request(self.flag, approve=approve)
+
+
+@dataclass
+class MetaEvent(BaseEvent):
+    """生命周期类事件（心跳等）。"""
+
+    meta_event_type: str = ""
+
+
+@dataclass
+class TimeCoreEvent(BaseEvent):
+    """调度器发出的时间核心事件（替代旧 time_core）。"""
+
+    event_type: str = "time_core"
+    hour: int = 0
+    minute: int = 0
+
+    async def reply(self, message: SegmentLike, **kwargs) -> dict:  # pragma: no cover
+        raise RuntimeError("time_core 事件无回复目标")
+
+
+def _to_message(message: SegmentLike) -> Message:
+    if isinstance(message, Message):
+        return message
+    if isinstance(message, str):
+        return Message.from_text(message)
+    if isinstance(message, MessageSegment):
+        return Message([message])
+    if isinstance(message, list):
+        return Message(message)
+    return Message([MessageSegment.text(str(message))])

@@ -1,0 +1,30 @@
+{
+  "3569937952": {
+    "enabled": false,
+    "group_mode": "blacklist",
+    "group_list": [],
+    "user_mode": "blacklist",
+    "user_list": []
+  },
+  "3841308038": {
+    "enabled": false,
+    "group_mode": "whitelist",
+    "group_list": [],
+    "user_mode": "blacklist",
+    "user_list": []
+  },
+  "3437542570": {
+    "enabled": false,
+    "group_mode": "whitelist",
+    "group_list": [],
+    "user_mode": "blacklist",
+    "user_list": []
+  },
+  "1000000": {
+    "enabled": true,
+    "group_mode": "blacklist",
+    "group_list": [],
+    "user_mode": "blacklist",
+    "user_list": []
+  }
+}

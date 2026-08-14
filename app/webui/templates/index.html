@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>QQBot 管理后台</title>
+    <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script>
+        window.WEBUI_CONFIG = {{ webui_config | tojson }};
+        window.BOTS_DATA = {{ bots | tojson }};
+    </script>
+</head>
+<body>
+{% macro render_config_input(mod_name, key, schema, current_value, mod_config=None) %}
+    {% if schema.type in ['boolean', 'bool'] %}
+        <label class="switch" style="margin-top: 5px;">
+            <input type="checkbox" id="config-{{ mod_name }}-{{ key }}" {% if current_value %}checked{% endif %}>
+            <span class="slider"></span>
+        </label>
+    {% elif schema.type == 'integer' %}
+        <input type="number" id="config-{{ mod_name }}-{{ key }}" class="form-control"
+               value="{{ current_value }}"
+               {% if schema.min is not none %}min="{{ schema.min }}"{% endif %}
+               {% if schema.max is not none %}max="{{ schema.max }}"{% endif %}>
+    {% elif schema.type in ['float', 'number'] %}
+        <input type="number" id="config-{{ mod_name }}-{{ key }}" class="form-control" step="0.01"
+               value="{{ current_value }}"
+               {% if schema.min is not none %}min="{{ schema.min }}"{% endif %}
+               {% if schema.max is not none %}max="{{ schema.max }}"{% endif %}>
+    {% elif schema.type == 'password' %}
+        <input type="password" id="config-{{ mod_name }}-{{ key }}" class="form-control"
+               value="{{ current_value }}"
+               placeholder="{{ schema.placeholder or '' }}">
+    {% elif schema.type == 'select' %}
+        <select id="config-{{ mod_name }}-{{ key }}" class="form-control mode-select">
+            {% for opt_key, opt_label in schema.options.items() %}
+            <option value="{{ opt_key }}" {% if current_value == opt_key %}selected{% endif %}>{{ opt_label }}</option>
+            {% endfor %}
+        </select>
+    {% elif schema.type == 'textarea' %}
+        <textarea id="config-{{ mod_name }}-{{ key }}" class="form-control auto-resize"
+                  placeholder="{{ schema.placeholder or '' }}"
+                  {% if schema.rows %}rows="{{ schema.rows }}"{% endif %}>{{ current_value }}</textarea>
+    {% elif schema.type == 'time' %}
+        <input type="time" id="config-{{ mod_name }}-{{ key }}" class="form-control"
+               style="max-width: 160px;" value="{{ current_value or '00:00' }}">
+    {% elif schema.type == 'string_list' %}
+        <div class="widget" id="widget-{{ mod_name }}-{{ key }}"
+             data-widget-type="string_list"
+             data-widget-key="{{ mod_name }}.{{ key }}"
+             data-value='{{ current_value | tojson }}'></div>
+    {% elif schema.type == 'list' %}
+        <div class="widget" id="widget-{{ mod_name }}-{{ key }}"
+             data-widget-type="list"
+             data-widget-key="{{ mod_name }}.{{ key }}"
+             data-endpoint="{{ schema.endpoint or '' }}"
+             data-id-field="{{ schema.id_field or 'id' }}"
+             data-name-field="{{ schema.name_field or 'name' }}"
+             data-meta-fields='{{ (schema.meta_fields or []) | tojson }}'
+             data-sortable="{{ '1' if schema.sortable else '0' }}"
+             data-checkboxes="{{ '1' if schema.checkboxes else '0' }}"
+             data-mode-select="{{ '1' if schema.mode_select else '0' }}"
+             data-value='{{ current_value | tojson }}'
+             data-mode='{{ (mod_config.get(key + "_mode", "all") if mod_config else "all") | tojson }}'></div>
+    {% elif schema.type == 'dynamic' %}
+        <div class="widget" id="widget-{{ mod_name }}-{{ key }}"
+             data-widget-type="dynamic"
+             data-widget-key="{{ mod_name }}.{{ key }}"
+             data-endpoint="{{ schema.endpoint or '' }}"
+             data-value='{{ current_value | tojson }}'
+             data-selected='{{ (mod_config.get(key + "_selected", "") if mod_config else "") | tojson }}'></div>
+    {% elif schema.type == 'repeater' %}
+        <div class="widget" id="widget-{{ mod_name }}-{{ key }}"
+             data-widget-type="repeater"
+             data-widget-key="{{ mod_name }}.{{ key }}"
+             data-template='{{ (schema.template or {}) | tojson }}'
+             data-value='{{ current_value | tojson }}'></div>
+    {% else %}
+        <input type="text" id="config-{{ mod_name }}-{{ key }}" class="form-control"
+               value="{{ current_value }}"
+               placeholder="{{ schema.placeholder or '' }}">
+    {% endif %}
+{% endmacro %}
+
+{% macro render_config_item(mod_name, key, schema, current_value, mod_config=None) %}
+    <div class="form-group config-item" data-config-key="{{ key }}" data-config-type="{{ schema.type }}"
+         {% if schema.showIf %}data-showif-key="{{ schema.showIf.key }}" data-showif-value='{{ schema.showIf.value | tojson }}'{% endif %}>
+        <label>{{ schema.label or key }}</label>
+        {% if schema.description %}
+        <div style="font-size: 12px; color: #718096; margin-bottom: 8px;">{{ schema.description | replace('\n', '<br>') | safe }}</div>
+        {% endif %}
+        {{ render_config_input(mod_name, key, schema, current_value, mod_config) }}
+    </div>
+{% endmacro %}
+
+{% macro render_permission(mod_name, mod) %}
+    <div class="form-group">
+        <label><i class="fas fa-shield-alt"></i> 响应范围控制</label>
+        <div class="permission-row">
+            <div class="permission-col">
+                <label style="font-size: 12px; font-weight: normal; color: #718096;">群组模式</label>
+                <select id="group-mode-{{ mod_name }}" class="mode-select">
+                    <option value="whitelist" {% if mod.permission.group_mode == 'whitelist' %}selected{% endif %}>白名单 (仅响应以下)</option>
+                    <option value="blacklist" {% if mod.permission.group_mode == 'blacklist' %}selected{% endif %}>黑名单 (不响应以下)</option>
+                </select>
+                <textarea id="group-list-{{ mod_name }}" class="form-control auto-resize mt-2" placeholder="群号，每行一个">{{ mod.permission.group_list | join('\n') }}</textarea>
+            </div>
+            <div class="permission-col">
+                <label style="font-size: 12px; font-weight: normal; color: #718096;">用户模式</label>
+                <select id="user-mode-{{ mod_name }}" class="mode-select">
+                    <option value="whitelist" {% if mod.permission.user_mode == 'whitelist' %}selected{% endif %}>白名单 (仅响应以下)</option>
+                    <option value="blacklist" {% if mod.permission.user_mode == 'blacklist' %}selected{% endif %}>黑名单 (不响应以下)</option>
+                </select>
+                <textarea id="user-list-{{ mod_name }}" class="form-control auto-resize mt-2" placeholder="QQ号，每行一个">{{ mod.permission.user_list | join('\n') }}</textarea>
+            </div>
+        </div>
+        <button type="button" class="btn-save" onclick="savePermission('{{ mod_name }}')">
+            <i class="fas fa-save"></i> 保存权限
+        </button>
+    </div>
+{% endmacro %}
+    <div id="toast-container"></div>
+
+    <!-- 账号管理弹窗 (多卡片式 WS 配置) -->
+    <div class="modal-overlay" id="ws-config-modal">
+        <div class="modal modal-wide">
+            <div class="modal-header">
+                <div class="modal-title"><i class="fas fa-plug"></i> 账号连接管理</div>
+                <button class="modal-close" onclick="closeModal('ws-config-modal')"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="bot-cards-toolbar">
+                    <button class="btn btn-primary" onclick="addBotConfig()">
+                        <i class="fas fa-plus"></i> 新增账号
+                    </button>
+                    <button class="btn btn-secondary" onclick="loadBotCards()">
+                        <i class="fas fa-sync-alt"></i> 刷新
+                    </button>
+                </div>
+                <div class="bot-cards-container" id="bot-cards-container">
+                    {% for bot in bots %}
+                    <div class="bot-config-card" data-index="{{ bot.index }}">
+                        <div class="bot-card-header">
+                            <div class="bot-card-title">
+                                <i class="fas fa-robot"></i>
+                                <span>账号 #{{ bot.index }}</span>
+                            </div>
+                            <div class="bot-card-actions">
+                                <span class="bot-card-status {{ bot.status }}">
+                                    <i class="fas fa-circle"></i> {{ bot.status }}
+                                </span>
+                                <button class="btn-icon-small btn-danger" onclick="deleteBotConfig({{ bot.index }})" title="删除此账号配置">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="bot-card-body">
+                            <div class="bot-card-field">
+                                <label>WebSocket 地址</label>
+                                <input type="text" class="form-control bot-ws-url" value="{{ bot.ws_url or '' }}" placeholder="ws://...">
+                            </div>
+                            <div class="bot-card-field">
+                                <label>Owner ID</label>
+                                <input type="text" class="form-control bot-owner-id" value="{{ bot.owner_id or '' }}" placeholder="管理员QQ号">
+                            </div>
+                            <div class="bot-card-field bot-card-field-switch">
+                                <div class="bot-switch-row">
+                                    <span>启动时自动连接</span>
+                                    <label class="switch switch-auto-connect">
+                                        <input type="checkbox" class="bot-auto-connect" {% if bot.auto_connect %}checked{% endif %}>
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="bot-card-info">
+                                <div class="bot-card-info-item">
+                                    <span class="info-label">Bot ID</span>
+                                    <span class="info-value">{{ bot.bot_id or '未连接' }}</span>
+                                </div>
+                                <div class="bot-card-info-item">
+                                    <span class="info-label">索引</span>
+                                    <span class="info-value">#{{ bot.index }}</span>
+                                </div>
+                            </div>
+                            {% if bot.login_info and bot.login_info.get('user_id') %}
+                            <div class="bot-card-login-info">
+                                <div class="bot-card-info-item">
+                                    <span class="info-label">登录账号</span>
+                                    <span class="info-value">{{ bot.login_info.get('nickname','') }} ({{ bot.login_info.get('user_id','') }})</span>
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+                        <div class="bot-card-footer">
+                            <button class="btn btn-sm btn-success" onclick="connectBotByIndex({{ bot.index }})">
+                                <i class="fas fa-plug"></i> 连接
+                            </button>
+                            <button class="btn btn-sm btn-danger" onclick="disconnectBotByIndex({{ bot.index }})">
+                                <i class="fas fa-unlink"></i> 断开
+                            </button>
+                            <button class="btn btn-sm btn-warning" onclick="reconnectBotByIndex({{ bot.index }})">
+                                <i class="fas fa-redo"></i> 重连
+                            </button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="saveBotConfigs()">
+                    <i class="fas fa-save"></i> 保存所有配置
+                </button>
+                <button class="btn btn-secondary" onclick="closeModal('ws-config-modal')">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 日志级别配置弹窗 -->
+    <div class="modal-overlay" id="logs-config-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title"><i class="fas fa-filter"></i> 日志显示设置</div>
+                <button class="modal-close" onclick="closeModal('logs-config-modal')"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="checkbox-group">
+                    <label class="checkbox-item">
+                        <input type="checkbox" id="log-level-debug" value="debug">
+                        <span class="checkbox-label">Debug 调试</span>
+                    </label>
+                    <div class="checkbox-desc">详细的调试信息，用于排查问题</div>
+
+                    <label class="checkbox-item">
+                        <input type="checkbox" id="log-level-info" value="info" checked>
+                        <span class="checkbox-label">Info 信息</span>
+                    </label>
+                    <div class="checkbox-desc">一般性信息提示</div>
+
+                    <label class="checkbox-item">
+                        <input type="checkbox" id="log-level-warning" value="warning" checked>
+                        <span class="checkbox-label">Warning 警告</span>
+                    </label>
+                    <div class="checkbox-desc">需要注意的非错误情况</div>
+
+                    <label class="checkbox-item">
+                        <input type="checkbox" id="log-level-error" value="error" checked>
+                        <span class="checkbox-label">Error 错误</span>
+                    </label>
+                    <div class="checkbox-desc">错误信息，需要处理</div>
+                </div>
+                <div class="form-group" style="margin-top: 20px;">
+                    <label>显示行数</label>
+                    <input type="number" id="log-max-lines" class="form-control" min="10" max="200" value="50">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('logs-config-modal')">取消</button>
+                <button class="btn btn-primary" onclick="saveLogsConfig()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 多群管理弹窗 -->
+    <div class="modal-overlay" id="multi-group-modal">
+        <div class="modal modal-wide">
+            <div class="modal-header">
+                <div class="modal-title"><i class="fas fa-layer-group"></i> 多群管理</div>
+                <button class="modal-close" onclick="closeMultiGroupModal()"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="multi-group-toolbar">
+                    <label class="checkbox-item" style="padding: 0;">
+                        <input type="checkbox" id="multi-group-show-all" onchange="toggleMultiGroupShowAll()">
+                        <span class="checkbox-label">展示全部</span>
+                    </label>
+                    <div class="checkbox-desc" style="margin-left: 30px; margin-bottom: 10px;">勾选时展示所有获取到的群（包括仅单个账号在的群）</div>
+                </div>
+                <div class="multi-group-container" id="multi-group-container">
+                    <div class="multi-group-loading"><i class="fas fa-spinner fa-spin"></i> 加载中...</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeMultiGroupModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 顶栏 -->
+    <div class="topbar">
+        <div class="topbar-left">
+            <div class="topbar-brand">
+                <i class="fab fa-qq"></i> QQBot
+            </div>
+            <div class="topbar-divider"></div>
+            <div class="topbar-account">
+                <span class="topbar-label"><i class="fas fa-user-robot"></i> 当前账号</span>
+                <select id="current-bot-select" class="topbar-bot-select" onchange="switchBot()">
+                    {% for bot in bots %}
+                    <option value="{{ bot.index }}" data-status="{{ bot.status }}" data-bot-id="{{ bot.bot_id }}">
+                        {% if bot.bot_id %}Bot {{ bot.bot_id }}{% else %}Bot #{{ bot.index }} (未连接){% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+                <div class="topbar-status" id="bot-status-bar">
+                    <span class="bot-status-indicator" id="bot-status-indicator">
+                        <i class="fas fa-circle"></i>
+                    </span>
+                    <span class="topbar-status-text" id="bot-status-text">离线</span>
+                </div>
+            </div>
+            <div class="topbar-divider"></div>
+            <div class="topbar-controls" id="bot-control-panel">
+                <button class="topbar-btn topbar-btn-connect" id="btn-connect" onclick="connectBot()" title="连接">
+                    <i class="fas fa-plug"></i> 连接
+                </button>
+                <button class="topbar-btn topbar-btn-disconnect" id="btn-disconnect" onclick="disconnectBot()" title="断开" style="display: none;">
+                    <i class="fas fa-unlink"></i> 断开
+                </button>
+                <button class="topbar-btn topbar-btn-reconnect" id="btn-reconnect" onclick="reconnectBot()" title="重连">
+                    <i class="fas fa-redo"></i> 重连
+                </button>
+                <button class="topbar-btn topbar-btn-refresh" onclick="refreshBotsStatus()" title="刷新状态">
+                    <i class="fas fa-sync-alt"></i>
+                </button>
+            </div>
+        </div>
+        <div class="topbar-right">
+            <button class="topbar-btn topbar-btn-multi-group" onclick="openMultiGroupModal()" title="多群管理">
+                <i class="fas fa-layer-group"></i> 多群管理
+            </button>
+            <button class="topbar-icon-btn" onclick="openWsConfigModal()" title="账号连接配置">
+                <i class="fas fa-cog"></i>
+            </button>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- 左侧侧边栏（仅模块列表） -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <i class="fas fa-cubes"></i> 功能模块
+            </div>
+
+            <!-- 模块列表 -->
+            <div id="module-list" style="flex: 1; overflow-y: auto;">
+                {% for mod_name, mod in modules.items() %}
+                <div class="module-item module-card-btn {% if loop.first %}active{% endif %}" data-module="{{ mod_name }}">
+                    <div class="module-name">
+                        <i class="fas fa-cube"></i>
+                        {{ mod.name }}
+                        <span class="authority-badge authority-{{ mod.authority_type|lower }}">{{ mod.authority_type }}</span>
+                    </div>
+                    <div class="module-desc">{{ mod.description }}</div>
+                    <div class="module-switch">
+                        <span style="font-size: 12px; color: #cbd5e0;">{{ mod_name }}</span>
+                        <label class="switch">
+                            <input type="checkbox" id="switch-{{ mod_name }}" {% if mod.enabled %}checked{% endif %} onchange="toggleModule('{{ mod_name }}')">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- 主内容区 -->
+        <div class="main-wrapper">
+            <div class="main-content">
+                <div class="header">
+                    <h2>配置管理</h2>
+                    <div class="header-actions">
+                        <button class="btn-refresh" onclick="reloadModules()">
+                            <i class="fas fa-sync-alt"></i> 刷新模块
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 模块配置卡片循环 -->
+                {% for mod_name, mod in modules.items() %}
+                <div class="config-card module-config-card" id="config-{{ mod_name }}" {% if not loop.first %}style="display: none;"{% endif %}>
+                    <!-- 单一服务开关（在所有配置之上，所有账号共有） -->
+                    <div class="single-service-bar" id="single-service-bar-{{ mod_name }}" data-module="{{ mod_name }}">
+                        <div class="single-service-bar-left">
+                            <i class="fas fa-server"></i>
+                            <span>单一服务模式</span>
+                            <span class="single-service-desc">启用后仅由指定账号处理本模块的群消息</span>
+                        </div>
+                        <label class="switch switch-single-service">
+                            <input type="checkbox" id="single-service-switch-{{ mod_name }}" onchange="toggleSingleService('{{ mod_name }}')">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+
+                    <!-- 黄色提示条：单一服务模式下非指定账号 -->
+                    <div class="single-service-warning" id="single-service-warning-{{ mod_name }}" style="display: none;">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <span>当前账号非本模块的指定服务账号，该模块在群消息场景下将不会触发</span>
+                    </div>
+
+                    <h3>
+                        <i class="fas fa-cube"></i> {{ mod.name }} 配置
+                        <span class="authority-badge authority-{{ mod.authority_type|lower }}">{{ mod.authority_type }}</span>
+                        <span class="bot-id-badge">Bot {{ mod.bot_id }}</span>
+                    </h3>
+
+                    <!-- 权限配置（黑白名单；自定义 page 模块同样保留） -->
+                    {{ render_permission(mod_name, mod) }}
+
+                    <!-- 业务配置：有自定义 page 则 iframe 渲染插件页面，否则 schema 表单 -->
+                    {% if mod.has_page %}
+                    <iframe id="plugin-page-{{ mod_name }}" data-page="/api/module/{{ mod_name }}/page"
+                            class="plugin-page-frame" title="{{ mod.name }} 配置页"></iframe>
+                    {% elif mod.config %}
+                    <div class="form-group">
+                        <label><i class="fas fa-cogs"></i> 业务配置</label>
+                        <div id="config-container-{{ mod_name }}">
+                            {% if mod.config_schema and mod.config_schema.get('items') %}
+                                {% set groups = mod.config_schema.get('groups', {}) %}
+                                {% set items = mod.config_schema.get('items', {}) %}
+                                {% set group_order = groups.keys() | list %}
+                                {% set has_ungrouped = namespace(value=false) %}
+                                {% for key, schema in items.items() %}
+                                    {% if not schema.get('group') %}
+                                        {% set has_ungrouped.value = true %}
+                                    {% endif %}
+                                {% endfor %}
+                                {% for gid in group_order %}
+                                    {% set group_schema = groups[gid] %}
+                                    {% set has_items = namespace(value=false) %}
+                                    {% for key, schema in items.items() %}
+                                        {% if schema.get('group') == gid %}
+                                            {% set has_items.value = true %}
+                                        {% endif %}
+                                    {% endfor %}
+                                    {% if has_items.value %}
+                                    <div class="config-group" data-group-id="{{ gid }}">
+                                        <div class="config-group-header {% if group_schema.get('collapsible', true) %}collapsible{% endif %}" onclick="toggleConfigGroup(this)">
+                                            <span class="config-group-title">{{ group_schema.get('label', gid) }}</span>
+                                            {% if group_schema.get('collapsible', true) %}
+                                            <i class="fas fa-chevron-down config-group-toggle"></i>
+                                            {% endif %}
+                                        </div>
+                                        <div class="config-group-body">
+                                        {% for key, schema in items.items() if schema.get('group') == gid %}
+                                            {{ render_config_item(mod_name, key, schema, mod.config.get(key, schema.default), mod.config) }}
+                                        {% endfor %}
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                {% endfor %}
+                                {% if has_ungrouped.value %}
+                                <div class="config-group" data-group-id="default">
+                                    <div class="config-group-header collapsible" onclick="toggleConfigGroup(this)">
+                                        <span class="config-group-title">默认配置</span>
+                                        <i class="fas fa-chevron-down config-group-toggle"></i>
+                                    </div>
+                                    <div class="config-group-body">
+                                    {% for key, schema in items.items() if not schema.get('group') %}
+                                        {{ render_config_item(mod_name, key, schema, mod.config.get(key, schema.default), mod.config) }}
+                                    {% endfor %}
+                                    </div>
+                                </div>
+                                {% endif %}
+                            {% elif mod.config_schema and not mod.config_schema.get('items') %}
+                                <!-- 兼容旧版扁平 schema -->
+                                {% set raw_items = mod.config_schema %}
+                                {% if raw_items is mapping and raw_items.values() | first is mapping %}
+                                    {% set has_groups = namespace(value=false) %}
+                                    {% for key, schema in raw_items.items() %}
+                                        {% if schema.get('type') == 'group' %}
+                                            {% set has_groups.value = true %}
+                                        {% endif %}
+                                    {% endfor %}
+                                    {% if has_groups.value %}
+                                        {% set groups = {} %}
+                                        {% set items = {} %}
+                                        {% for key, schema in raw_items.items() %}
+                                            {% if schema.get('type') == 'group' %}
+                                                {% set _ = groups.update({key: schema}) %}
+                                            {% else %}
+                                                {% set _ = items.update({key: schema}) %}
+                                            {% endif %}
+                                        {% endfor %}
+                                        {% for gid, group_schema in groups.items() %}
+                                        <div class="config-group" data-group-id="{{ gid }}">
+                                            <div class="config-group-header {% if group_schema.get('collapsible', true) %}collapsible{% endif %}" onclick="toggleConfigGroup(this)">
+                                                <span class="config-group-title">{{ group_schema.get('label', gid) }}</span>
+                                                {% if group_schema.get('collapsible', true) %}
+                                                <i class="fas fa-chevron-down config-group-toggle"></i>
+                                                {% endif %}
+                                            </div>
+                                            <div class="config-group-body">
+                                            {% for key, schema in items.items() if schema.get('group') == gid %}
+                                                {{ render_config_item(mod_name, key, schema, mod.config.get(key, schema.default), mod.config) }}
+                                            {% endfor %}
+                                            </div>
+                                        </div>
+                                        {% endfor %}
+                                        {% set ungrouped_items = {} %}
+                                        {% for key, schema in items.items() if not schema.get('group') %}
+                                            {% set _ = ungrouped_items.update({key: schema}) %}
+                                        {% endfor %}
+                                        {% if ungrouped_items %}
+                                        <div class="config-group" data-group-id="default">
+                                            <div class="config-group-header collapsible" onclick="toggleConfigGroup(this)">
+                                                <span class="config-group-title">默认配置</span>
+                                                <i class="fas fa-chevron-down config-group-toggle"></i>
+                                            </div>
+                                            <div class="config-group-body">
+                                            {% for key, schema in ungrouped_items.items() %}
+                                                {{ render_config_item(mod_name, key, schema, mod.config.get(key, schema.default), mod.config) }}
+                                            {% endfor %}
+                                            </div>
+                                        </div>
+                                        {% endif %}
+                                    {% else %}
+                                        {% for key, schema in raw_items.items() %}
+                                        <div class="form-group config-item" class="config-item-flat" data-config-key="{{ key }}" data-config-type="{{ schema.type }}">
+                                            <label>{{ schema.label or key }}</label>
+                                            {% if schema.description %}
+                                            <div style="font-size: 12px; color: #718096; margin-bottom: 8px;">{{ schema.description | replace('\n', '<br>') | safe }}</div>
+                                            {% endif %}
+                                            {% set current_value = mod.config.get(key, schema.default) %}
+                                            {{ render_config_input(mod_name, key, schema, current_value, mod.config) }}
+                                        </div>
+                                        {% endfor %}
+                                    {% endif %}
+                                {% else %}
+                                    {% for key, value in mod.config.items() %}
+                                    <div class="form-group config-item" class="config-item-flat" data-config-key="{{ key }}">
+                                        <label>{{ key }}</label>
+                                        {% if value is boolean %}
+                                            <label class="switch" style="margin-top: 5px;">
+                                                <input type="checkbox" id="config-{{ mod_name }}-{{ key }}" {% if value %}checked{% endif %}>
+                                                <span class="slider"></span>
+                                            </label>
+                                        {% elif value is number %}
+                                            <input type="number" id="config-{{ mod_name }}-{{ key }}" class="form-control" value="{{ value }}">
+                                        {% else %}
+                                            <input type="text" id="config-{{ mod_name }}-{{ key }}" class="form-control" value="{{ value }}">
+                                        {% endif %}
+                                    </div>
+                                    {% endfor %}
+                                {% endif %}
+                            {% else %}
+                                <!-- 使用简单模式（自动根据值类型） -->
+                                <div class="config-group" data-group-id="default">
+                                    <div class="config-group-header collapsible" onclick="toggleConfigGroup(this)">
+                                        <span class="config-group-title">默认配置</span>
+                                        <i class="fas fa-chevron-down config-group-toggle"></i>
+                                    </div>
+                                    <div class="config-group-body">
+                                    {% for key, value in mod.config.items() %}
+                                    <div class="form-group config-item" class="config-item-flat" data-config-key="{{ key }}">
+                                        <label>{{ key }}</label>
+                                        {% if value is boolean %}
+                                            <label class="switch" style="margin-top: 5px;">
+                                                <input type="checkbox" id="config-{{ mod_name }}-{{ key }}" {% if value %}checked{% endif %}>
+                                                <span class="slider"></span>
+                                            </label>
+                                        {% elif value is number %}
+                                            <input type="number" id="config-{{ mod_name }}-{{ key }}" class="form-control" value="{{ value }}">
+                                        {% else %}
+                                            <input type="text" id="config-{{ mod_name }}-{{ key }}" class="form-control" value="{{ value }}">
+                                        {% endif %}
+                                    </div>
+                                    {% endfor %}
+                                    </div>
+                                </div>
+                            {% endif %}
+                        </div>
+                        <button type="button" class="btn-save" onclick="saveConfig('{{ mod_name }}')">
+                            <i class="fas fa-save"></i> 保存配置
+                        </button>
+                    </div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+
+            <!-- 底部控制台 -->
+            <div class="console-wrapper" id="console-wrapper">
+                <div class="console-resize-handle" id="console-resize-handle" title="拖动调整大小"></div>
+                <div class="console-header">
+                    <div class="console-title">
+                        <i class="fas fa-terminal"></i> 控制台日志
+                    </div>
+                    <div class="console-actions">
+                        <button class="console-btn" onclick="openLogsConfigModal()" title="日志显示设置">
+                            <i class="fas fa-filter"></i> 设置
+                        </button>
+                        <button class="console-btn" onclick="clearLogs()" title="清空日志">
+                            <i class="fas fa-trash-alt"></i> 清空
+                        </button>
+                        <button class="console-toggle" onclick="toggleConsole()" title="折叠/展开">
+                            <i class="fas fa-chevron-down"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="console-body">
+                    <div class="logs-container" id="logs-container">
+                        {% for log in logs %}
+                        <div class="log-item">
+                            <span class="log-time">{{ log.timestamp }}</span>
+                            <span class="log-level {{ log.level }}">{{ log.level.upper() }}</span>
+                            <span class="log-message">{{ log.message }}</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/widgets.js"></script>
+    <script src="/static/js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,461 @@
+"""核心聊天逻辑（框架级 MainAgent 流程）。
+
+指令系统（#chat 开头）：
+  #chat task / export / list / load / new / exit / stop / proactive / schedule
+"""
+
+from typing import Optional
+
+import asyncio
+import time
+
+from app.llm import logger
+from app.llm.session import SessionManager
+from app.llm.prompt import build_messages
+from app.llm.providers import get_provider
+from app.llm.tags import strip_all_tags
+from app.llm.scheduler import extract_reminder_note, has_schedule_intent
+from app.llm.trigger import check_trigger, extract_text
+from app.llm.tool import build_tools, make_executor
+
+import re
+
+
+async def handle(module, event):
+    """唯一入口：主动消息观察 + api_key 校验 + 消息类型开关过滤后分发。"""
+    # 主动消息观察（先于 api_key/开关检查，独立于被动回复）
+    pm = getattr(module, "proactive", None)
+    if pm is not None and event.event_type in ("message_group", "message_private"):
+        is_group = event.event_type == "message_group"
+        sid = f"group_{event.group.group_id}" if is_group else f"private_{event.user_id}"
+        await pm.on_message(sid, is_group, is_self=(event.user_id == event.self_id))
+
+    config = module.config
+    api_key = config.get("api_key", "")
+    if not api_key:
+        logger.add_info(f"#{module.bot_id}").error(f"[{module.name}] API 密钥未配置，跳过处理")
+        return
+
+    message_type = event.message_type
+    if message_type not in ("group", "private"):
+        return
+    if message_type == "private":
+        if not config.get("private_enable", True):
+            return
+        await handle_private(module, event, config)
+    else:
+        if not config.get("group_enable", False):
+            return
+        await handle_group(module, event, config)
+
+
+async def handle_group(module, event, config):
+    session_mgr = SessionManager(str(module.bot_id))
+    group_id = str(event.group.group_id)
+    user_id = str(event.user_id)
+    self_id = str(event.self_id)
+    message_data = event.message
+    session_id = f"group_{group_id}"
+    raw_text = extract_text(message_data).strip()
+    is_admin = event.authority_check
+
+    if raw_text.startswith("#chat "):
+        await handle_commands(
+            module, session_mgr, session_id, group_id, user_id,
+            raw_text, is_admin, is_private=False, event=event,
+        )
+        return
+
+    trigger_at = config.get("trigger_at", True)
+    trigger_keyword = config.get("trigger_keyword", [])
+    triggered, is_at, user_text = check_trigger(message_data, self_id, trigger_at, trigger_keyword)
+    if not triggered:
+        return
+
+    if is_at:
+        user_text = re.sub(r"\[CQ:at,qq=\d+\]", "", user_text).strip()
+        user_text = re.sub(r"@\S+\s*", "", user_text).strip()
+
+    max_msg_len = config.get("max_message_length", 50)
+    if not user_text:
+        return
+    if len(user_text) > max_msg_len:
+        user_text = user_text[:max_msg_len]
+
+    session = session_mgr.get_session(session_id)
+    if not session:
+        session = session_mgr.create_session(session_id, "group", config.get("session_timeout", 60))
+        session.reply_cooldown = config.get("reply_cooldown", 5)
+        await asyncio.to_thread(session_mgr.restore_session_from_archive, session, session_id)
+    else:
+        if not session.can_reply():
+            return
+        session.add_participant(user_id)
+
+    session_mgr.add_message(session_id, "user", user_text, user_id)
+    await call_llm_and_reply(
+        module, event, session_mgr, config,
+        session_id, user_id, group_id, is_private=False,
+        include_pre_history=config.get("include_pre_history", False),
+    )
+
+
+async def handle_private(module, event, config):
+    session_mgr = SessionManager(str(module.bot_id))
+    user_id = str(event.user_id)
+    message_data = event.message
+    session_id = f"private_{user_id}"
+    raw_text = extract_text(message_data).strip()
+    is_admin = event.authority_check
+
+    if raw_text.startswith("#chat "):
+        await handle_commands(
+            module, session_mgr, session_id, None, user_id,
+            raw_text, is_admin, is_private=True, event=event,
+        )
+        return
+
+    if not raw_text:
+        return
+    max_msg_len = config.get("max_message_length", 50)
+    user_text = raw_text[:max_msg_len]
+
+    session = session_mgr.get_session(session_id)
+    if not session:
+        session = session_mgr.create_session(session_id, "private", config.get("session_timeout", 60))
+        await asyncio.to_thread(session_mgr.restore_session_from_archive, session, session_id)
+
+    session_mgr.add_message(session_id, "user", user_text, user_id)
+    await call_llm_and_reply(
+        module, event, session_mgr, config,
+        session_id, user_id, None, is_private=True,
+        include_pre_history=config.get("include_private_pre_history", "default"),
+    )
+
+
+async def call_llm_and_reply(module, event, session_mgr, config,
+                             session_id, user_id, group_id, is_private, include_pre_history):
+    model = config.get("model", "deepseek-chat")
+    system_prompt = config.get("system_prompt", "你是一个友好的助手。")
+    max_tokens = config.get("max_tokens", 150)
+    temperature = config.get("temperature", 0.7)
+    history_rounds = config.get("history_rounds", 10)
+
+    session = session_mgr.get_session(session_id)
+    if not session:
+        return
+
+    # 前置历史（群聊近期 / 私信近期）
+    pre_history_text = ""
+    if group_id:
+        pre_history_text = await fetch_online_history(event, group_id, count=history_rounds)
+        if pre_history_text:
+            pre_history_text = f"群聊近期记录:\n{pre_history_text}"
+    elif is_private and include_pre_history in ("history", "load"):
+        pre_history_text = await fetch_private_online_history(event, user_id, count=history_rounds)
+        if pre_history_text and include_pre_history == "history":
+            pre_history_text = f"近期聊天记录:\n{pre_history_text}"
+
+    session_history = session_mgr.get_history(session_id, limit=history_rounds)
+    user_text = session.data.history[-1]["content"] if session.data.history else ""
+
+    schedule_enable = config.get("schedule_enable", True)
+    # 定时意图检测：用于「紧贴提醒」+「模型未调工具时的确定性兜底」
+    intent = has_schedule_intent(user_text) if schedule_enable else False
+
+    messages = build_messages(
+        system_prompt=system_prompt,
+        pre_history_text=pre_history_text,
+        history=session_history,
+        user_text=user_text,
+        with_schedule_instruction=schedule_enable,
+        schedule_nudge=intent,
+    )
+
+    logger.add_info(f"#{module.bot_id}").info(
+        f"API 请求 -> {session_id} (task: {session.task_id}), 消息数: {len(messages)}"
+    )
+
+    # 原生 function calling：装配 schedule_task 工具，由 provider 工具循环处理
+    schedule_tools = []
+    if schedule_enable:
+        from app.llm.scheduler import build_schedule_tool
+
+        schedule_tools = [build_schedule_tool(module, session_id, is_private)]
+
+    provider = get_provider(config)
+    response = await provider.chat(
+        messages,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        tools=build_tools(schedule_tools) if schedule_tools else None,
+        tool_executor=make_executor(schedule_tools) if schedule_tools else None,
+    )
+
+    if not response.ok:
+        clean_response = "抱歉，我暂时无法回答，请稍后再试。"
+    else:
+        # 工具结果（定时任务已在工具循环中执行，最终回复是 LLM 基于结果的确认）
+        if response.tool_results:
+            for tr in response.tool_results:
+                logger.add_info(f"#{module.bot_id}").info(
+                    f"[Tool] {tr['name']} 执行 -> {str(tr['result'])[:80]}"
+                )
+        # 防御：剥离角色提示词可能输出的 <type=...> 标签，避免漏到客户端
+        clean_response = strip_all_tags(response.text)
+
+    # 兜底：用户明确提了定时请求但模型未调用工具 → 模块确定性排程（保证任务一定创建）
+    if intent and not response.tool_results:
+        scheduler = getattr(module, "scheduler", None)
+        if scheduler:
+            note = extract_reminder_note(user_text)
+            entry = await scheduler.schedule(session_id, {"trigger": user_text[:60], "content": note})
+            if entry:
+                logger.add_info(f"#{module.bot_id}").info(
+                    f"[定时] 模型未调工具，兜底创建 {session_id}: {user_text[:30]} -> "
+                    f"{entry.next_at:%Y-%m-%d %H:%M} ({entry.repeat})"
+                )
+            else:
+                logger.add_info(f"#{module.bot_id}").warning(
+                    f"[定时] 兜底排程失败（时间无法解析）: {user_text}"
+                )
+
+    session_mgr.add_message(session_id, "assistant", clean_response)
+    if not is_private:
+        session.mark_replied()
+    await asyncio.to_thread(session_mgr.history.save_session, session)
+
+    try:
+        if is_private:
+            await event.bot.send_private_msg(user_id=int(user_id), message=clean_response)
+        else:
+            await event.bot.send_group_msg(group_id=int(group_id), message=clean_response)
+        logger.add_info(f"#{module.bot_id}").info(f"回复完成 -> {session_id} (task: {session.task_id})")
+    except Exception as e:
+        logger.add_info(f"#{module.bot_id}").error(f"消息发送失败: {e}")
+
+
+async def handle_commands(module, session_mgr, session_id, group_id, user_id,
+                          raw_text, is_admin, is_private, event=None) -> bool:
+    cmd = raw_text.strip()
+    if not cmd.startswith("#chat "):
+        return False
+    parts = cmd.split(maxsplit=1)
+    if len(parts) < 2:
+        return False
+
+    action = parts[1].strip()
+    history_mgr = session_mgr.history
+    bot = event.bot
+
+    async def send(msg):
+        text = f"# {msg}"
+        if is_private:
+            await bot.send_private_msg(user_id=int(user_id), message=text)
+        else:
+            await bot.send_group_msg(group_id=int(group_id), message=text)
+
+    session = session_mgr.get_session(session_id)
+
+    if action == "task":
+        if session:
+            await send(f"当前任务ID: {session.task_id}（对话: {session.active.title if session.active else '?'}）")
+        else:
+            await send("当前没有活跃会话")
+        return True
+
+    elif action == "list":
+        if not session:
+            await send("当前没有活跃会话")
+            return True
+        convs = session.list_conversations()
+        if not convs:
+            await send("当前会话暂无对话记录")
+            return True
+        lines = [f"当前会话 {len(convs)} 个对话（#chat switch <id> 切换）:"]
+        for c in convs[:10]:
+            mark = " *" if c["id"] == session.active_id else ""
+            lines.append(f"  {c['id'][:8]} | {c['title']} | {c['count']}条{mark}")
+        await send("\n".join(lines))
+        return True
+
+    elif action.startswith("switch "):
+        target = action[7:].strip()
+        if not session:
+            await send("当前没有活跃会话")
+            return True
+        # 支持按 conv_id 或 task_id 切换
+        hit = None
+        for c in session.conversations.values():
+            if c.id == target or c.task_id == target:
+                hit = c
+                break
+        if hit and session.switch_conversation(hit.id):
+            session_mgr.history.save_session(session)
+            await send(f"已切换到对话「{hit.title}」({len(hit.data.history)} 条)")
+        else:
+            await send(f"未找到对话: {target}")
+        return True
+
+    elif action == "new" or action.startswith("new "):
+        title = action[4:].strip()
+        if session:
+            session_mgr.history.save_session(session)
+        created = session_mgr.new_conversation(session_id, title)
+        if created:
+            await send(f"已开启新对话「{created['title']}」(task: {created['task_id']})")
+        else:
+            await send("创建失败")
+        return True
+
+    elif action.startswith("load "):
+        load_task_id = action[5:].strip()
+        data = history_mgr.load_history(load_task_id)
+        if not data:
+            await send(f"未找到任务: {load_task_id}")
+            return True
+        session = session or session_mgr.create_session(session_id, "private" if is_private else "group", 60)
+        conv = session.new_conversation(title=data.get("title", "导入"))
+        conv.task_id = data.get("task_id", conv.task_id)
+        conv.data.history = data.get("messages", []) or []
+        history_mgr.save_session(session)
+        await send(f"已加载历史: {load_task_id} -> 新对话「{conv.title}」({len(conv.data.history)} 条)")
+        return True
+
+    elif action == "export" or action.startswith("export "):
+        sub = raw_text[len("#chat export "):].strip()
+        export_task_id = sub if sub and " " not in sub else (session.task_id if session else "")
+        if not export_task_id:
+            await send("当前没有活跃会话可导出，请指定任务ID: #chat export <task_id>")
+            return True
+        text = history_mgr.export_text(export_task_id)
+        if text:
+            lines = text.split("\n")
+            for i in range(0, len(lines), 10):
+                await send(f"导出 ({export_task_id}):\n{chr(10).join(lines[i:i+10])}")
+        else:
+            await send(f"未找到任务: {export_task_id}")
+        return True
+
+    elif action == "proactive" or action.startswith("proactive "):
+        pm = getattr(module, "proactive", None)
+        if pm is None:
+            await send("本模块未启用主动消息")
+            return True
+        target = action[len("proactive "):].strip() if action.startswith("proactive ") else ""
+        if target:
+            ok = await pm.manual_trigger(target)
+            await send(f"已触发 {target} 主动发言" if ok else f"会话 {target} 未启用或不在主动列表")
+        else:
+            rows = pm.status()
+            if not rows:
+                await send("暂无已配置的主动会话")
+                return True
+            lines = ["主动消息状态:"]
+            for s in rows:
+                mark = "🟢" if s["enabled"] else "⚪"
+                next_s = f"，下次 {time.strftime('%m-%d %H:%M', time.localtime(s['next_trigger_time']))}" if s["next_trigger_time"] else ""
+                lines.append(f"  {mark} {s['session_id']} | 未回复{s['unanswered']} | {s['timer'] or '未计时'}{next_s}")
+            await send("\n".join(lines))
+        return True
+
+    elif action == "schedule" or action.startswith("schedule "):
+        scheduler = getattr(module, "scheduler", None)
+        if scheduler is None:
+            await send("本模块未启用定时任务")
+            return True
+        sub = action[len("schedule "):].strip() if action.startswith("schedule ") else ""
+        if sub.startswith("cancel "):
+            tid = sub[len("cancel "):].strip()
+            ok = scheduler.cancel(tid)
+            await send(f"已取消定时任务 {tid}" if ok else f"未找到定时任务 {tid}")
+            return True
+        rows = scheduler.status()
+        if not rows:
+            await send("暂无定时任务（对话中提出定时请求，或用 #chat schedule add 手动添加）")
+            return True
+        lines = ["定时任务:"]
+        for r in rows:
+            next_s = time.strftime("%m-%d %H:%M", time.localtime(r["next_trigger_time"]))
+            lines.append(
+                f"  {r['task_id'][:8]} | {r['session_id']} | {r['repeat']} | "
+                f"下次 {next_s} | {r['content'][:20]}"
+            )
+        lines.append("#chat schedule cancel <id> 取消；页面也可管理")
+        await send("\n".join(lines))
+        return True
+
+    elif action == "exit":
+        if session:
+            session_mgr.add_message(session_id, "assistant", "#chat exit")
+            history_mgr.save_session(session)
+        session_mgr.destroy_session(session_id)
+        await send("已退出会话")
+        return True
+
+    elif action == "stop":
+        if not is_admin:
+            await send("权限不足，无法执行此命令")
+            return True
+        if session:
+            session_mgr.add_message(session_id, "assistant", "#chat stop")
+            history_mgr.save_session(session)
+        session_mgr.destroy_session(session_id)
+        await send("会话已强制结束")
+        return True
+
+    return False
+
+
+async def fetch_online_history(event, group_id: str, count: int = 10) -> str:
+    try:
+        result = await event.bot.get_msg_history(group_id=int(group_id), user_id=0, count=count, reverse_order=False)
+        if not result or not isinstance(result, dict):
+            return ""
+        messages = result.get("messages", [])
+        return _format_history(messages, count)
+    except Exception as e:
+        logger.add_info("Src").warning(f"获取群聊历史失败: {e}")
+        return ""
+
+
+async def fetch_private_online_history(event, user_id: str, count: int = 10) -> str:
+    try:
+        result = await event.bot.get_msg_history(group_id=0, user_id=int(user_id), count=count, reverse_order=False)
+        if not result or not isinstance(result, dict):
+            return ""
+        messages = result.get("messages", [])
+        return _format_history(messages, count)
+    except Exception as e:
+        logger.add_info("Src").warning(f"获取私聊历史失败: {e}")
+        return ""
+
+
+def _format_history(messages, count: int) -> str:
+    if not messages:
+        return ""
+    lines = []
+    for msg in messages[-count:]:
+        if isinstance(msg, dict):
+            sender = msg.get("sender", {})
+            nickname = sender.get("nickname", "未知")
+            content = _extract_msg_text(msg)
+            if content:
+                if len(content) > 50:
+                    content = content[:50] + "..."
+                lines.append(f"{nickname}: {content}")
+    return "\n".join(lines)
+
+
+def _extract_msg_text(msg: dict) -> str:
+    message = msg.get("message", [])
+    if isinstance(message, list):
+        texts = []
+        for item in message:
+            if isinstance(item, dict) and item.get("type") == "text":
+                texts.append(item.get("data", {}).get("text", ""))
+        return "".join(texts)
+    if isinstance(message, str):
+        return message
+    return ""
