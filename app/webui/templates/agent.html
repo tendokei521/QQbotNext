@@ -132,6 +132,14 @@
 
   function q(id) { return document.getElementById(id); }
 
+  // 统一请求封装：自动携带 WEBUI_TOKEN（iframe 模式下取父页面注入的 token）
+  function agentFetch(url, opts) {
+    const token = window.WEBUI_TOKEN || (window.parent && window.parent.WEBUI_TOKEN) || '';
+    const headers = Object.assign({}, opts && opts.headers);
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    return window.fetch(url, Object.assign({}, opts, { headers: headers }));
+  }
+
   function esc(s) {
     return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
@@ -234,7 +242,7 @@
   // ---- 加载 ----
   async function loadBots() {
     try {
-      const r = await fetch('/api/bots');
+      const r = await agentFetch('/api/bots');
       const d = await r.json();
       const sel = q('bot-select');
       const bots = Array.isArray(d) ? d : (d.bots || []);
@@ -255,7 +263,7 @@
   async function loadConfig() {
     if (!BOT) return;
     try {
-      const r = await fetch('/api/agent/config?bot_id=' + BOT);
+      const r = await agentFetch('/api/agent/config?bot_id=' + BOT);
       const d = await r.json();
       if (!d.ok) { status(d.message || '加载失败', true); return; }
       SCHEMA = d.schema || { groups: {}, items: {} };
@@ -287,7 +295,7 @@
       user_list: q('user_list').value.split('\n').map(x => x.trim()).filter(Boolean),
     };
     try {
-      const r = await fetch('/api/agent/config?bot_id=' + BOT, {
+      const r = await agentFetch('/api/agent/config?bot_id=' + BOT, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       const res = await r.json();
@@ -302,7 +310,7 @@
     const body = q('tk-body'), st = q('tk-status');
     st.textContent = '加载中…';
     try {
-      const r = await fetch('/api/agent/tasks?bot_id=' + BOT);
+      const r = await agentFetch('/api/agent/tasks?bot_id=' + BOT);
       const d = await r.json();
       const tasks = (d && d.tasks) || [];
       if (!tasks.length) { body.innerHTML = '<tr><td colspan="7" style="color:var(--muted)">暂无定时任务</td></tr>'; st.textContent=''; return; }
@@ -326,7 +334,7 @@
     };
     if (!body.target || !body.trigger || !body.content) { status('请填写 目标 / 时间 / 内容', true); return; }
     try {
-      const r = await fetch('/api/agent/tasks?bot_id=' + BOT, {
+      const r = await agentFetch('/api/agent/tasks?bot_id=' + BOT, {
         method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body),
       });
       const res = await r.json();
@@ -337,7 +345,7 @@
 
   async function triggerTask(id) {
     try {
-      const r = await fetch(`/api/agent/tasks/${id}/trigger?bot_id=${BOT}`, { method:'POST' });
+      const r = await agentFetch(`/api/agent/tasks/${id}/trigger?bot_id=${BOT}`, { method:'POST' });
       const res = await r.json();
       status((res && res.message) || '已触发', !(r.ok && res.status === 'success'));
       setTimeout(loadTasks, 1000);
@@ -347,7 +355,7 @@
   async function cancelTask(id) {
     if (!confirm('确定取消定时任务 ' + id.slice(0,8) + ' ？')) return;
     try {
-      const r = await fetch(`/api/agent/tasks/${id}/cancel?bot_id=${BOT}`, { method:'POST' });
+      const r = await agentFetch(`/api/agent/tasks/${id}/cancel?bot_id=${BOT}`, { method:'POST' });
       const res = await r.json();
       status((res && res.message) || '已取消', !(r.ok && res.status === 'success'));
       loadTasks();
@@ -360,7 +368,7 @@
     const body = q('pr-body'), st = q('pr-status');
     st.textContent = '加载中…';
     try {
-      const r = await fetch('/api/agent/proactive/status?bot_id=' + BOT);
+      const r = await agentFetch('/api/agent/proactive/status?bot_id=' + BOT);
       const d = await r.json();
       const sessions = (d && d.sessions) || [];
       if (!sessions.length) { body.innerHTML = '<tr><td colspan="7" style="color:var(--muted)">无已配置的主动会话</td></tr>'; st.textContent=''; return; }
@@ -377,7 +385,7 @@
 
   async function triggerProactive(sessionId) {
     try {
-      const r = await fetch('/api/agent/proactive/trigger?bot_id=' + BOT, {
+      const r = await agentFetch('/api/agent/proactive/trigger?bot_id=' + BOT, {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ session_id: sessionId }),
       });
@@ -397,10 +405,10 @@
 
   async function init() {
     if (window.PLUGIN_BOT_ID) {
-      // iframe（模块卡片）模式：用父页面选中的账号，隐藏账号选择器
+      // iframe（模块卡片）模式：账号由父页面选中，仅隐藏账号选择器，保留保存按钮
       BOT = window.PLUGIN_BOT_ID;
-      const tb = q('bot-select').closest('.toolbar');
-      if (tb) tb.style.display = 'none';
+      const sel = q('bot-select');
+      if (sel) sel.style.display = 'none';
       await loadAll();
     } else {
       await loadBots();

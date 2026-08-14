@@ -234,10 +234,14 @@ async def module_page(module_name: str, request: Request,
             return _err(404, f"模块 {module_name} 无自定义页面")
         content = page_path.read_text(encoding="utf-8")
 
-    # 注入模块名与当前选中账号，方便页面 JS 拼接配置 API
+    # 注入模块名 / 当前选中账号 / WebUI 访问令牌，方便页面 JS 拼接配置 API 并携带鉴权
+    from app.core.settings import Settings
+
+    webui_token = container.get(Settings).webui_token or ""
     module_var = (
         f'<script>window.PLUGIN_MODULE = {json.dumps(module_name)};'
-        f'window.PLUGIN_BOT_ID = {json.dumps(bot_id) if bot_id is not None else "null"};</script>'
+        f'window.PLUGIN_BOT_ID = {json.dumps(bot_id) if bot_id is not None else "null"};'
+        f'window.WEBUI_TOKEN = {json.dumps(webui_token)};</script>'
     )
     if "<head>" in content:
         content = content.replace("<head>", f"<head>{module_var}", 1)
