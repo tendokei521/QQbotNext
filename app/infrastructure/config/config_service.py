@@ -241,14 +241,19 @@ class ConfigService:
         return [dict(b) for b in self._bots]
 
     def get_bots_public(self) -> list[dict]:
-        """对外使用（WebUI/页面）：ws_url 拆出基础地址，access_token 独立字段打码。"""
+        """对外使用（WebUI 配置接口）：ws_url 拆出基础地址，access_token 独立字段回显真实值。
+
+        配置页需要直观查看/编辑 token，因此不在这里打码——安全由接口鉴权
+        （WEBUI_TOKEN）与传输层（HTTPS 反代）保证；页面 HTML 渲染走
+        gateway.get_bots_info()（纯地址，不含 token）。
+        """
         result = []
         for b in self._bots:
             base, token = split_ws_url(b.get("ws_url", ""))
             result.append({
                 **{k: v for k, v in dict(b).items() if k != "access_token"},
                 "ws_url": base,
-                "access_token": ACCESS_TOKEN_MASK if token else "",
+                "access_token": token,
             })
         return result
 

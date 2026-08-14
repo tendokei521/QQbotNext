@@ -287,13 +287,8 @@ async function loadBotCards() {
                     </div>
                     <div class="bot-card-field">
                         <label>Access Token</label>
-                        <div class="bot-token-input-row">
-                            <input type="password" class="form-control bot-access-token" value="${cfg.access_token || ''}" placeholder="留空则不修改" autocomplete="off">
-                            <button type="button" class="btn-icon-small" onclick="clearBotToken(this)" title="清除此账号的 Token">
-                                <i class="fas fa-times"></i>
-                            </button>
-                        </div>
-                        <div class="bot-card-hint">Token 单独保存，留空 = 保持原值；点 ✕ 并保存 = 清除 Token</div>
+                        <input type="text" class="form-control bot-access-token" value="${cfg.access_token || ''}" placeholder="无 Token" autocomplete="off">
+                        <div class="bot-card-hint">保存后立即生效；留空并保存 = 清除 Token</div>
                     </div>
                     <div class="bot-card-field">
                         <label>Owner ID</label>
@@ -343,16 +338,6 @@ async function loadBotCards() {
     }
 }
 
-// 与后端 ACCESS_TOKEN_MASK 一致：输入框中的打码占位值
-const WS_TOKEN_MASK = '****';
-
-function clearBotToken(button) {
-    const input = button.closest('.bot-card-field').querySelector('.bot-access-token');
-    input.value = '';
-    input.dataset.cleared = '1';
-    input.placeholder = '保存后将清除 Token';
-}
-
 async function saveBotConfigs() {
     const cards = document.querySelectorAll('#bot-cards-container .bot-config-card');
     const bots = [];
@@ -361,22 +346,13 @@ async function saveBotConfigs() {
         const tokenInput = card.querySelector('.bot-access-token');
         const ownerId = card.querySelector('.bot-owner-id').value.trim();
         const autoConnect = card.querySelector('.bot-auto-connect').checked;
-        const bot = {
+        bots.push({
             ws_url: wsUrl,
+            // 配置接口回显真实 token：输入框当前值即最终值（空串 = 清除）
+            access_token: tokenInput ? tokenInput.value.trim() : '',
             owner_id: ownerId ? parseInt(ownerId) || ownerId : null,
             auto_connect: autoConnect
-        };
-        if (tokenInput.dataset.cleared) {
-            // 显式清除 → 提交空串（后端据此删除 token）
-            bot.access_token = '';
-        } else {
-            const token = tokenInput.value.trim();
-            if (token && token !== WS_TOKEN_MASK) {
-                bot.access_token = token;   // 新值 / 修改 → 提交
-            }
-            // 空值或打码占位 → 不提交 → 后端保留旧 token
-        }
-        bots.push(bot);
+        });
     });
 
     try {

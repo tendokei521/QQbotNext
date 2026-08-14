@@ -162,13 +162,8 @@
                             </div>
                             <div class="bot-card-field">
                                 <label>Access Token</label>
-                                <div class="bot-token-input-row">
-                                    <input type="password" class="form-control bot-access-token" value="{{ bot.access_token or '' }}" placeholder="留空则不修改" autocomplete="off">
-                                    <button type="button" class="btn-icon-small" onclick="clearBotToken(this)" title="清除此账号的 Token">
-                                        <i class="fas fa-times"></i>
-                                    </button>
-                                </div>
-                                <div class="bot-card-hint">Token 单独保存，留空 = 保持原值；点 ✕ 并保存 = 清除 Token</div>
+                                <input type="text" class="form-control bot-access-token" value="{{ bot.access_token or '' }}" placeholder="无 Token" autocomplete="off">
+                                <div class="bot-card-hint">保存后立即生效；留空并保存 = 清除 Token</div>
                             </div>
                             <div class="bot-card-field">
                                 <label>Owner ID</label>
