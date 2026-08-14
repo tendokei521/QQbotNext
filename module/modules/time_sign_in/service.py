@@ -31,7 +31,7 @@ def migrate_legacy_config(module) -> None:
 
 
 async def handle(module, event):
-    """指令入口：匹配 #打卡 / #全群打卡 / 自定义触发词。"""
+    """指令入口：匹配 #打卡 / #全群打卡 / 自定义触发词；命中即接管，跳过 LLM。"""
     if event.event_type != "message_group":
         return
     logger = module_logger.add_info(f"#{module.bot_id}").add_info(module.name)
@@ -44,11 +44,13 @@ async def handle(module, event):
     if text == "#打卡":
         if config.get("enable_signin_command", True):
             await _signin_current(module, event, logger)
+            event.llm.stop()  # 打卡已执行（含静默模式）
         return
 
     if text == "#全群打卡":
         if config.get("enable_all_signin_command", True):
             await _signin_all(module, event, logger)
+            event.llm.stop()
         return
 
     if config.get("enable_custom_commands", False):
@@ -56,6 +58,7 @@ async def handle(module, event):
             cmd = str(cmd).strip()
             if cmd and (text == f"#{cmd}" or text == f"/{cmd}"):
                 await _signin_current(module, event, logger)
+                event.llm.stop()
                 return
 
 

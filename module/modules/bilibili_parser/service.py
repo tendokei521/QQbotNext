@@ -86,6 +86,12 @@ async def handle(module, event):
         message=chain,
     )
 
+    # LLM 接管规则：解析回复已接管「链接」话题，默认跳过 LLM；
+    # 唯一例外——群聊中用户 @ 了 bot（如「@bot 这视频讲了啥」），
+    # 说明期望 LLM 参与对话，不跳过。
+    if not event.is_at_me():
+        event.llm.stop()
+
 
 def _check_group(config, group_id: str) -> bool:
     """检查群组是否允许使用。"""

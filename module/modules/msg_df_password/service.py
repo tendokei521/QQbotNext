@@ -41,7 +41,7 @@ def migrate_legacy_config(module) -> None:
 
 
 async def handle(module, event):
-    """#今日密码 指令 → 获取密码并回复。"""
+    """#今日密码 指令 → 获取密码并回复；命中即接管，跳过 LLM。"""
     if event.event_type != "message_group":
         return
     logger = module_logger.add_info(f"#{module.bot_id}").add_info(module.name)
@@ -65,6 +65,8 @@ async def handle(module, event):
 
     result_text = await _fetch_and_format(module)
     await event.reply(result_text if result_text else "三角洲行动今日密码获取失败，请稍后再试")
+    # 模块已接管「今日密码」话题 → 跳过 LLM 兜底
+    event.llm.stop()
 
 
 # ==================== 定时推送 ====================
