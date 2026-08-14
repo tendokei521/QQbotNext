@@ -121,6 +121,16 @@ except Exception as e:
   - [ ] 中文注释解释了"为什么"
   - [ ] `pytest -q` 全绿
 
+## 11. 提交规范（Commit）
+
+- **提交信息格式**：`YYYY.M.D HH:MM`（本地时间，如 `2026.8.14 16:10`）。
+  每次 commit / push 的信息就是当时的日期时间，不写功能描述。
+- **生成方式**：`git commit -m "$(Get-Date -Format 'yyyy.M.d HH:mm')"`（Windows PowerShell）。
+- **模板文件**：仓库根目录 `.gitmessage` 已提供模板；执行
+  `git config commit.template .gitmessage` 后，`git commit`（不带 -m）会预填该格式。
+- **一次性提交**：工作区的所有改动一次性 commit + push，不拆碎提交。
+- **提交前自查**：`pytest -q` 全绿；不提交 `data/` 运行时数据之外的临时文件。
+
 ---
 
 *本规范依据代码库实际风格整理，2025 年定稿。新增约定请先与本文件核对，必要时经讨论后更新。*
