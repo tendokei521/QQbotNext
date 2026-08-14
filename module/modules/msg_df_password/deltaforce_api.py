@@ -66,34 +66,46 @@ class DeltaForceKkrbFetcher(CurlCffiClient):
             module_logger.error(f"[DeltaForce:kkrb] Cookie 获取失败: {e}")
             return False
 
-    async def get_menu_data(self) -> dict | None:
-        """步骤2: 获取 built_ver 版本号。"""
+    async def get_menu_data(self) -> bool:
+        """步骤2: 获取菜单并提取 built_ver（仅作记录；getOVData 不依赖它）。
+
+        调试确认（1/2/deltaforce_kkrb_api.py）：getMenu 为 POST 请求，参数 globalData=false。
+        """
         try:
-            response = await self.GET(f"{self.base_url}/getMenu", headers=KKRB_API_HEADERS, timeout=30)
-            if response.status_code == 200:
-                data = response.json()
-                self.version = data.get("built_ver")
-                if self.version:
-                    module_logger.info(f"[DeltaForce:kkrb] built_ver={self.version}")
-                    return data
-            return None
+            response = await self.POST(
+                f"{self.base_url}/getMenu",
+                data={"globalData": "false"},
+                headers=KKRB_API_HEADERS,
+                timeout=30,
+            )
+            if response.status_code != 200:
+                module_logger.warning(f"[DeltaForce:kkrb] getMenu 状态码异常: {response.status_code}")
+                return False
+            data = response.json()
+            # 兼容两种结构：{"built_ver": ...} 或 {"data": {"built_ver": ...}}
+            self.version = data.get("built_ver") or (data.get("data") or {}).get("built_ver")
+            if self.version:
+                module_logger.info(f"[DeltaForce:kkrb] built_ver={self.version}")
+            return True
         except Exception as e:
             module_logger.error(f"[DeltaForce:kkrb] getMenu 异常: {e}")
-            return None
+            return False
 
     async def fetch_passwords(self) -> dict | None:
-        """步骤3: 用版本号获取密码 JSON。"""
-        if not self.version and not await self.get_menu_data():
-            return None
+        """步骤3: 获取密码 JSON。
+
+        调试确认：getOVData 仅需 globalData=false，无需 version 参数。
+        """
         try:
             response = await self.POST(
                 f"{self.base_url}/getOVData",
-                data={"version": self.version, "globalData": "false"},
+                data={"globalData": "false"},
                 headers=KKRB_API_HEADERS,
                 timeout=30,
             )
             if response.status_code == 200:
                 return response.json()
+            module_logger.warning(f"[DeltaForce:kkrb] getOVData 状态码异常: {response.status_code}")
             return None
         except Exception as e:
             module_logger.error(f"[DeltaForce:kkrb] getOVData 异常: {e}")
@@ -124,11 +136,13 @@ class DeltaForceKkrbFetcher(CurlCffiClient):
         return passwords
 
     async def get_today_passwords(self) -> dict | None:
-        """执行完整三步流程，获取今日密码。"""
+        """执行完整三步流程，获取今日密码。
+
+        getMenu 失败不阻断（getOVData 不依赖 built_ver），仅记录日志。
+        """
         if not await self.get_initial_cookie():
             return None
-        if not await self.get_menu_data():
-            return None
+        await self.get_menu_data()
         data = await self.fetch_passwords()
         if not data:
             return None
