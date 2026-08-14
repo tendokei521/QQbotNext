@@ -19,7 +19,13 @@ _LEGACY_DATA_DIR = os.path.join(_PROJECT_ROOT, "module", "modules", "llm_chat_v2
 
 
 def llm_data_dir() -> str:
-    """LLM 数据目录（data/llm）：历史 / 定时任务 / 主动消息状态。"""
+    """LLM 数据目录（历史 / 定时任务 / 主动消息状态）。
+
+    默认 data/llm；可用环境变量 QQBOT_LLM_DATA_DIR 覆盖（测试隔离 / 自定义部署）。
+    """
+    override = os.environ.get("QQBOT_LLM_DATA_DIR", "").strip()
+    if override:
+        return override
     return os.path.join(_PROJECT_ROOT, "data", "llm")
 
 
