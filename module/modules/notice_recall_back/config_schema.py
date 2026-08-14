@@ -24,13 +24,13 @@ SCHEMA = {
         "type": "boolean",
         "label": "转发到群聊",
         "description": "把撤回消息转发到目标群",
-        "default": True,
+        "default": False,
     },
     "enable_forward_to_private": {
         "type": "boolean",
         "label": "转发到私聊",
         "description": "把撤回消息转发到目标好友",
-        "default": True,
+        "default": False,
     },
     "target_groups": {
         "type": "list",

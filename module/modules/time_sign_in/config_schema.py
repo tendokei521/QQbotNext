@@ -15,7 +15,7 @@ SCHEMA = {
     },
     "permission_scope": {
         "type": "select",
-        "label": "指令权限范围",
+        "label": "指令权限范围(可能未实现)",
         "description": "谁可以使用打卡指令",
         "default": "bot_owner_only",
         "options": {
