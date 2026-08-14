@@ -119,6 +119,7 @@ except Exception as e:
   - [ ] 注解用 `X | None` / 内置泛型
   - [ ] 异常用 `logger.exception` 记录
   - [ ] 中文注释解释了"为什么"
+  - [ ] 新增依赖须**同步两处**：`pyproject.toml` 与根目录 `requirements.txt`
   - [ ] `pytest -q` 全绿
 
 ## 11. 提交规范（Commit）

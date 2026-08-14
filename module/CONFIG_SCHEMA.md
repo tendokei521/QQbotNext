@@ -12,19 +12,40 @@ module/modules/<name>/
 ├── __init__.py        # 一句话说明
 ├── module.py          # Module(BaseModule)：声明元数据 + handle 薄入口（只路由，不写业务）
 ├── config_schema.py   # SCHEMA 字典
-└── service.py         # async handle(module, event)（唯一业务入口，顶部做启用检查）
+├── service.py         # async handle(module, event)（唯一业务入口，顶部做启用检查）
+├── xxx_api.py         # 可选：模块专属 API 封装类（网络请求，见下）
+└── xxx_db.py          # 可选：模块私有持久化库（如 notice_recall_back/recall_db.py）
 ```
 
 - **入口链统一**：`module.py → service.handle(module, event)`，禁止更深子包层（如 `src/`、`intro`）；
   业务较复杂时可拆 `service/` 目录，但入口仍须是 `service/__init__.py` 导出的 `handle`。
+- **平级辅助文件**：除 `service/` 目录外，可用**平级模块级文件**承载独立职责，只被 `service.py` import、不直接暴露入口：
+  - `xxx_api.py`：模块专属 API 封装类（网络请求，继承共享客户端，见下）；
+  - `xxx_db.py`：模块私有持久化（JSON/SQLite）。
+- **网络请求统一走共享客户端**：`app/infrastructure/curl_cffi.py::CurlCffiClient`
+  （curl_cffi 浏览器指纹模拟 + Cookie 自动管理）。模式：API 封装类继承共享客户端，业务用 `async with` 调用：
+
+  ```python
+  # xxx_api.py —— API 封装类
+  from app.infrastructure.curl_cffi import CurlCffiClient
+
+  class BilibiliAPI(CurlCffiClient):
+      async def get_video_info(self, vid, timeout=10, cookie=""): ...
+
+  # service.py —— 调用
+  async with BilibiliAPI() as api:
+      info = await api.get_video_info(vid)
+  ```
+
+  禁止在模块里散落 `aiohttp` / `requests` 直连；纯逻辑（正则、格式化、去重）保留为模块级函数。
 - **启用开关检查只一处**：在 `service.handle` 顶部，不要与 `module.py` 重复。
 - **日志统一**：`logger = module_logger.add_info(f"#{module.bot_id}").add_info(module.name)`
   （用 `module.bot_id`，定时任务无 event 也能用）。
 - **定时任务**：`SCHEDULES = {"HH:MM[:SS]": "方法名"}`，方法在 Module 类上，内部调
-  `service.xxx(module, self.ctx.bot)`。
+  `service.xxx(module, self.ctx.bot)`；时间需可配置时改用动态注册（见 §六）。
 - **数据源**：`LIST_PROVIDERS` / `DYNAMIC_PROVIDERS`（见 §三）。
-- **共享逻辑**：跨模块通用处理（如关键词匹配 `app/modules/keyword.py::match_keywords`）
-  提取为共享库，模块各自调用，不复制。
+- **共享逻辑**：跨模块通用处理（如关键词匹配 `app/modules/keyword.py::match_keywords`、
+  群模式判断）提取为共享库，模块各自调用，不复制。
 
 ### 子模块（父模块可拥有子模块）
 
@@ -66,9 +87,9 @@ module/modules/<name>/
 框架的消息处理基于 `MessageNode`（`app/nodes/base.py`），入站与出站都由同一种节点构成：
 
 ```
-入站链（0级基础设施 → 1级业务）：
-  [ModuleRouterNode] → [ModulePermissionNode] → [ModuleInvokeNode]
-     (订阅/bot归属)      (启停/单一服务/权限)     (调用业务模块 handle)
+入站链（0级基础设施 → 1级业务 → LLM 兜底）：
+  [ModuleRouterNode] → [ModulePermissionNode] → [ModuleInvokeNode] → [AgentNode]
+     (订阅/bot归属)      (启停/单一服务/权限)     (调用业务模块 handle)   (LLM 兜底 order=130)
 
 出站链（Bot 发送前）：
   [任意拦截节点…] → [SendNode]   ← 不调用 next_ 即吞掉发送；可改写 params
@@ -77,6 +98,20 @@ module/modules/<name>/
 - **插入**：`NodeRegistry`（容器中）注册新节点到任意 order，无需改 dispatcher；
 - **替换**：`node_registry.replace("permission", 自定义权限节点)`；
 - 业务模块仍是 `handle(module, event)`（InvokeNode 的叶子），现有模块零改动。
+
+### LLM 兜底与模块接管（模块 ↔ Agent 协作规则）
+
+框架级 LLM Agent（`AgentNode`，order=130）在**模块链之后**兜底响应——模块有最终决定权：
+
+| 方法 | 作用 | 适用场景 |
+|---|---|---|
+| `event.llm.stop()` | 仅跳过 LLM 兜底，模块链照常 | 模块已回复（如指令命中），但后续模块仍可处理 |
+| `event.stop()` | 终止整条链：后续模块 + LLM 全部不执行（对齐 astrbot stop_event） | 模块声明「这个话题我全权处理」 |
+
+- **默认不调用**：模块未接管 → LLM 按自身触发规则（私聊全触发 / 群聊 @或关键词）决定是否回复；
+- **接管判定建议**：指令/关键词类模块（`#今日密码`、`#打卡`）命中即 `event.llm.stop()`；
+  解析类模块（B站链接）解析回复后默认 stop，但**群聊中用户 @bot 时留给 LLM 对话**（`if not event.is_at_me(): event.llm.stop()`）；
+- 模块可查询 `event.stopped` 判断事件是否已被前面模块终止。
 
 ---
 
@@ -337,7 +372,37 @@ class Module(BaseModule):
 
 - 支持 5 字段 cron（`分 时 日 月 周`，`*` / `*/n` / `a-b` / `a,b,c`）与每日 `HH:MM[:SS]` 简写；
 - 仅对**真实 Bot 实例**注册；模块加载自动注册、卸载/重载自动注销；
-- 参考实现：`module/modules/msg_df_password`（05:00 推密码）、`module/modules/time_sign_in`（00:00 打卡）。
+- 参考实现：`module/modules/msg_df_password`（定时推密码）、`module/modules/time_sign_in`（每日打卡）。
+
+### 定时任务动态注册（时间可配置时）
+
+`SCHEDULES` 是编译期声明，时间固定。**定时时间需要由配置决定**（如 WebUI 的 `cron_time` 字段）时，
+在模块 `on_load` 中经 `SchedulerService.register` 动态注册（key 含 `<module>:<bot_id>:` 前缀，卸载自动清理）：
+
+```python
+# module.py
+class Module(BaseModule):
+    async def on_load(self):
+        from .service import register_schedule
+        await register_schedule(self)
+
+# service.py
+async def register_schedule(module):
+    """按配置的 cron_time 动态注册每日任务（on_load 调用）。"""
+    scheduler = module.ctx.services.scheduler
+    if scheduler is None or module.bot_id is None:
+        return
+    if not module.config.get("enable_cron", False):
+        await scheduler.unload_module(module.module_name, module.bot_id)
+        return
+    time_str = module.config.get("cron_time", "08:00")
+    key = f"{module.module_name}:{module.bot_id}:cron"
+    await scheduler.register(key, time_str, lambda: daily_push(module, module.ctx.bot))
+```
+
+- 与 `SCHEDULES` 声明**二选一**：动态注册的模块不要同时声明 SCHEDULES（避免双注册）；
+- 配置变更（WebUI 修改时间）后需「刷新模块」重新 on_load 生效；
+- 参考实现：`msg_df_password`（cron_time）、`time_sign_in`（daily_signin_time）。
 
 ### LLM Provider 抽象（框架级 app/llm）
 
