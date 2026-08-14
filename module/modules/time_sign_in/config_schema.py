@@ -57,6 +57,7 @@ SCHEMA = {
         "meta_fields": ["member_count"],
         "sortable": True,
         "checkboxes": True,
+        "mode_select": True,
         "default": {},
     },
     "enable_daily_auto_signin": {
@@ -99,6 +100,7 @@ SCHEMA = {
         "name_field": "group_name",
         "meta_fields": ["member_count"],
         "checkboxes": True,
+        "mode_select": True,
         "default": {},
     },
     "notify_friends": {
@@ -109,6 +111,7 @@ SCHEMA = {
         "id_field": "user_id",
         "name_field": "nickname",
         "checkboxes": True,
+        "mode_select": True,
         "default": {},
     },
 }

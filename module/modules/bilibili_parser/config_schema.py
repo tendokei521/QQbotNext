@@ -67,6 +67,7 @@ SCHEMA = {
         "name_field": "group_name",
         "meta_fields": ["member_count"],
         "checkboxes": True,
+        "mode_select": True,
         "default": {},
     },
     "is_reply": {

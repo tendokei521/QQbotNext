@@ -33,6 +33,7 @@ SCHEMA = {
         "name_field": "group_name",
         "meta_fields": ["member_count"],
         "checkboxes": True,
+        "mode_select": True,
         "default": {},
     },
     "enable_cron": {
@@ -67,6 +68,7 @@ SCHEMA = {
         "name_field": "group_name",
         "meta_fields": ["member_count"],
         "checkboxes": True,
+        "mode_select": True,
         "default": {},
     },
     "push_enable": {

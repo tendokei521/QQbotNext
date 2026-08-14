@@ -41,7 +41,6 @@ SCHEMA = {
         "name_field": "group_name",
         "meta_fields": ["member_count"],
         "checkboxes": True,
-        "mode_select": True,
         "default": {},
     },
     "target_users": {
@@ -52,7 +51,6 @@ SCHEMA = {
         "id_field": "user_id",
         "name_field": "nickname",
         "checkboxes": True,
-        "mode_select": True,
         "default": {},
     },
     "db_enable": {
