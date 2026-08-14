@@ -65,8 +65,14 @@ class SixHourRotatingHandler(BaseRotatingHandler):
         try:
             with open(archive_file, "r", encoding="utf-8") as f:
                 archived_content = f.read()
-            with open(self.base_filename, "a", encoding="utf-8") as f:
+            # 归档在前、当前文件在后拼接，保证时间顺序（上次运行滚动归档的日志更早）
+            current_content = ""
+            if os.path.exists(self.base_filename):
+                with open(self.base_filename, "r", encoding="utf-8") as f:
+                    current_content = f.read()
+            with open(self.base_filename, "w", encoding="utf-8") as f:
                 f.write(archived_content)
+                f.write(current_content)
             os.remove(archive_file)
             if not os.listdir(archive_folder):
                 os.rmdir(archive_folder)

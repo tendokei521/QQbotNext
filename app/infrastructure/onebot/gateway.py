@@ -102,9 +102,9 @@ class OneBotGateway:
     async def add_bot(
         self, ws_url: str, owner_id: int | None, auto_connect: bool = False, index: int | None = None
     ) -> int:
-        """新增（或按显式 index 更新）一个 Bot 连接。index 缺省取当前连接数。"""
+        """新增（或按显式 index 更新）一个 Bot 连接。index 缺省取最大索引 + 1（避免删除中间账号后撞已有连接）。"""
         if index is None:
-            index = len(self.connections)
+            index = max(self.connections, default=-1) + 1
         conn = self.connections.get(index)
         if conn is not None:  # 已存在 → 仅更新配置字段，不重建连接
             conn.ws_url = ws_url
@@ -128,6 +128,7 @@ class OneBotGateway:
     async def del_bot(self, index: int) -> None:
         await self.disconnect_bot(index)
         self.connections.pop(index, None)
+        self._connect_locks.pop(index, None)  # 清理连接锁，防增删账号后泄漏
 
     async def connect_bot(self, index: int) -> bool:
         conn = self.connections.get(index)
@@ -155,6 +156,7 @@ class OneBotGateway:
             conn.reconnect_attempts += 1
             conn.status = "error"
             conn.last_error = f"连接失败: {mask_ws_url(conn.ws_url)}"
+            conn._last_connect_attempt = time.time()  # 失败也记账，保证监督循环退避生效
             self.log.error(f"机器人索引: {index} 连接失败: {mask_ws_url(conn.ws_url)}")
             return False
 
@@ -168,15 +170,27 @@ class OneBotGateway:
                 await task
             except asyncio.CancelledError:
                 pass
-        if conn and conn.websocket:
-            try:
-                await conn.websocket.close()
-            except Exception as e:
-                self.log.warning(f"关闭 WebSocket 异常: {e}")
-            conn.websocket = None
+        if conn:
+            if conn.websocket:
+                try:
+                    await conn.websocket.close()
+                except Exception as e:
+                    self.log.warning(f"关闭 WebSocket 异常: {e}")
+                conn.websocket = None
+            self._reset_conn_state(conn)
             conn.status = "disconnected"
-            conn.all_group_list = []
             self.log.info(f"机器人索引: {index} 断开连接")
+
+    @staticmethod
+    def _reset_conn_state(conn) -> None:
+        """断开后清空登录态，并让在途 API 请求立即失败（避免调用方阻塞至超时）。"""
+        conn.bot_id = 0
+        conn.login_info = {}
+        conn.all_group_list = []
+        conn.all_group_list_info = []
+        fail_pending = getattr(conn, "fail_pending", None)
+        if fail_pending:
+            fail_pending()
 
     async def reconnect_bot(self, index: int) -> bool:
         await self.disconnect_bot(index)
@@ -259,7 +273,7 @@ class OneBotGateway:
         # 耗时处理（模块调用 / 转发拉取 / 多 Bot 去重）在 worker 串行执行。
         # 若不这样拆分，模块内 await API 响应（如 send_private_msg 等 echo）时，
         # 接收循环被阻塞、无法消费该响应 → 请求/响应自锁 → 10s 超时。
-        queue: asyncio.Queue = asyncio.Queue()
+        queue: asyncio.Queue = asyncio.Queue(maxsize=1024)  # 有界背压，防异常洪峰撑爆内存
         worker = asyncio.create_task(
             self._dispatch_worker(index, queue), name=f"dispatch_worker:{index}"
         )
@@ -319,6 +333,8 @@ class OneBotGateway:
                 except Exception:
                     pass
                 conn.websocket = None
+            # 清空登录态 + 让在途 API 请求立即失败（与 disconnect_bot 一致）
+            self._reset_conn_state(conn)
         finally:
             worker.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -431,47 +447,40 @@ class OneBotGateway:
         - 单 bot → 立即放行；
         - 多 bot → 等待同群其它 bot（最多 wait_timeout 秒），
           由最先完成的 bot 通过 _done 标记抢到处理权，其余跳过。
+
+        key 设计：base_key 含 message_id（一条消息唯一，同群同秒多条不混淆），
+        slot 用固定键存储各 bot 到达标记，所有 bot 读写同一个 slot/done_key，
+        避免各 bot 独立计数导致 slot 分裂、双双超时成为处理者。
         """
         msgtime = event.time
         group_id = event.group.group_id
+        message_id = event.message_id
         bot_index = conn.index
         indexes = await self._message_indexes(event)
         if not indexes:
             return [bot_index]  # 无跟踪 → 放行（不丢弃）
 
-        base_key = f"{msgtime}_{group_id}"
-        count_key = f"{base_key}_{bot_index}_count"
+        base_key = f"{msgtime}_{group_id}_{message_id}"
+        done_key = f"{base_key}_done"
         cache = self.cache
         wait_timeout = 1.5
 
-        def create_slot(data: dict) -> dict:
-            index_data = {f"{i}": False for i in indexes}
-            data[f"{len(data)}"] = index_data
-            cache.set(base_key, data, 3)
-            return cache.get(base_key)
-
+        # 创建到达标记 slot（同步段无 await，并发安全）
         if not cache.has(base_key):
-            data = create_slot({})
-        if not cache.has(count_key):
-            cache.set(count_key, 0, 3)
+            index_data = {f"{i}": False for i in indexes}
+            cache.set(base_key, index_data, 3)
 
         data = cache.get(base_key)
-        count = cache.get(count_key)
-
-        if f"{count}" not in data:
-            data = create_slot(data)
-        if data[f"{count}"][f"{bot_index}"] is False:
-            data[f"{count}"][f"{bot_index}"] = True
+        if isinstance(data, dict) and data.get(f"{bot_index}") is False:
+            data[f"{bot_index}"] = True
             cache.set(base_key, data, 3)
-        cache.set(count_key, int(count) + 1, 3)
 
-        done_key = f"{base_key}_{count}_done"
         deadline = time.monotonic() + wait_timeout
         while time.monotonic() < deadline:
             if cache.has(done_key):
                 return None  # 已有 bot 处理 → 跳过
             data = cache.get(base_key)
-            if all(data[f"{count}"].values()):
+            if isinstance(data, dict) and all(data.values()):
                 # 全到齐：抢 _done（单事件循环内 check+set 原子，恰好一个成功）
                 if not cache.has(done_key):
                     cache.set(done_key, True, 3)
@@ -483,9 +492,10 @@ class OneBotGateway:
         if not cache.has(done_key):
             cache.set(done_key, True, 3)
             data = cache.get(base_key)
-            for i in data[f"{count}"].keys():
-                data[f"{count}"][i] = True
-            cache.set(base_key, data, 3)
+            if isinstance(data, dict):
+                for i in list(data.keys()):
+                    data[i] = True
+                cache.set(base_key, data, 3)
             return indexes
         return None
 

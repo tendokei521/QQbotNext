@@ -31,7 +31,10 @@ async def save_webui_config(request: Request):
 
     container = get_container(request)
     cfg_service = container.get(ConfigService)
-    data = await request.json()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
     current = cfg_service.get_webui_config()
     if "logs" in data:
         current["logs"].update(data["logs"] or {})
@@ -45,7 +48,10 @@ async def save_logs_config(request: Request):
 
     container = get_container(request)
     cfg_service = container.get(ConfigService)
-    data = await request.json()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
     config = cfg_service.get_webui_config()
     logs_cfg = config.setdefault("logs", {})
     for key in ("visible_levels", "max_lines", "console_height"):
@@ -69,7 +75,10 @@ async def save_single_service(request: Request):
 
     container = get_container(request)
     cfg_service = container.get(ConfigService)
-    data = await request.json()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
     config = cfg_service.get_webui_config()
     config["single_service"] = data.get("single_service", {})
     await cfg_service.save_webui_config(config)
@@ -90,7 +99,10 @@ async def save_multi_group(request: Request):
 
     container = get_container(request)
     cfg_service = container.get(ConfigService)
-    data = await request.json()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
     config = cfg_service.get_webui_config()
     config["multi_group"] = data.get("multi_group", {"show_all": False, "groups": {}})
     await cfg_service.save_webui_config(config)

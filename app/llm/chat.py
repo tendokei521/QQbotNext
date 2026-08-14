@@ -157,6 +157,10 @@ async def call_llm_and_reply(module, event, session_mgr, config,
 
     session_history = session_mgr.get_history(session_id, limit=history_rounds)
     user_text = session.data.history[-1]["content"] if session.data.history else ""
+    # 防重复：history 尾部就是刚追加的当前用户消息，去掉避免同一消息出现两次
+    if (session_history and session_history[-1].get("role") == "user"
+            and session_history[-1].get("content") == user_text):
+        session_history = session_history[:-1]
 
     schedule_enable = config.get("schedule_enable", True)
     # 定时意图检测：用于「紧贴提醒」+「模型未调工具时的确定性兜底」
@@ -230,6 +234,10 @@ async def call_llm_and_reply(module, event, session_mgr, config,
             await event.bot.send_private_msg(user_id=int(user_id), message=clean_response)
         else:
             await event.bot.send_group_msg(group_id=int(group_id), message=clean_response)
+        # 主动消息观察：Bot 发言后重置群聊沉默计时器（on_bot_sent 入口）
+        pm = getattr(module, "proactive", None)
+        if pm is not None:
+            await pm.on_bot_sent(session_id, not is_private)
         logger.add_info(f"#{module.bot_id}").info(f"回复完成 -> {session_id} (task: {session.task_id})")
     except Exception as e:
         logger.add_info(f"#{module.bot_id}").error(f"消息发送失败: {e}")
@@ -315,9 +323,17 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
             await send(f"未找到任务: {load_task_id}")
             return True
         session = session or session_mgr.create_session(session_id, "private" if is_private else "group", 60)
-        conv = session.new_conversation(title=data.get("title", "导入"))
+        # 新建会话自带 1 个空对话 → 复用而非再建，避免残留空对话
+        fresh = len(session.conversations) == 1 and not any(c.data.history for c in session.conversations.values())
+        if fresh:
+            conv = next(iter(session.conversations.values()))
+            session.active_id = conv.id
+        else:
+            conv = session.new_conversation(title=data.get("title", "导入"))
+        conv.title = data.get("title", "导入")
         conv.task_id = data.get("task_id", conv.task_id)
         conv.data.history = data.get("messages", []) or []
+        session.touch()
         history_mgr.save_session(session)
         await send(f"已加载历史: {load_task_id} -> 新对话「{conv.title}」({len(conv.data.history)} 条)")
         return True

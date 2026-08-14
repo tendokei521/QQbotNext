@@ -28,6 +28,7 @@ class ScheduledTask:
         self.log = log or logger
         self._task: asyncio.Task | None = None
         self.running = False
+        self._cron_target: datetime | None = None  # 最近一次 cron 计算出的目标时刻（命中后复用）
 
     async def start(self) -> None:
         if self.running:
@@ -96,9 +97,15 @@ class ScheduledTask:
         return False
 
     def _next_cron(self) -> float:
-        """计算 5 字段 cron 距下次触发的秒数。"""
-        minute, hour, dom, month, dow = self.time_str.split()[:5]
+        """计算 5 字段 cron 距下次触发的秒数（缓存目标时刻，避免每次触发后全量重扫）。"""
         now = datetime.now()
+        if self._cron_target is not None:
+            delta = (self._cron_target - now).total_seconds()
+            if delta >= 1.0:
+                return delta
+            self._cron_target = None  # 已过 → 重新计算
+
+        minute, hour, dom, month, dow = self.time_str.split()[:5]
         for day_offset in range(0, 366):
             d = now + timedelta(days=day_offset)
             if not self._match_cron_field(month, d.month):
@@ -115,6 +122,7 @@ class ScheduledTask:
                     target = d.replace(hour=hh, minute=mm, second=0, microsecond=0)
                     delta = (target - now).total_seconds()
                     if delta >= 1.0:
+                        self._cron_target = target
                         return delta
         return 365 * 86400
 

@@ -82,7 +82,7 @@ class Message:
     def from_onebot(cls, segments: Any) -> "Message":
         """从 OneBot 消息段（dict 数组或字符串）构造。"""
         if isinstance(segments, str):
-            return cls.text(segments)
+            return cls.from_text(segments)
         if isinstance(segments, list):
             return cls(segments)
         return cls()

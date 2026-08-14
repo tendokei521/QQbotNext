@@ -16,8 +16,8 @@ async def handle(module, event):
     cache = module.ctx.services.cache
 
     config = module.config
-    cache_time = config.get("cache_time", 600)
-    if not isinstance(cache_time, int):
+    cache_time = int(config.get("cache_time", 600) or 600)
+    if cache_time <= 0:
         return
 
     if event.event_type in ("message_group", "message_private"):

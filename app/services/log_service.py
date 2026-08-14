@@ -32,7 +32,7 @@ class LogService:
                     if start_pos == 0 or len(lines) > n:
                         break
                     window *= 2
-                return lines[-n * 3:]
+                return lines[-n:]
         except OSError:
             return []
 
@@ -47,7 +47,8 @@ class LogService:
         levels = [l.lower() for l in levels]
 
         logs: list[dict] = []
-        lines = self._read_last_n_lines(str(log_file), max_lines)
+        # 按级别过滤需要余量：读取 max_lines 的 5 倍行（至少 50 行），过滤后仍够 N 条
+        lines = self._read_last_n_lines(str(log_file), max(50, max_lines * 5))
         for line in reversed(lines):
             line = line.strip()
             if not line:

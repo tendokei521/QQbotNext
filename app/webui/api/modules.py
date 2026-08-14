@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.services.bot_service import PASSWORD_MASK as _PASSWORD_MASK
+from app.services.bot_service import _mask_password_config
 from app.webui.api.deps import get_container, parse_bot_id
 from app.webui.ws import manager
 
@@ -175,7 +176,10 @@ async def update_config(module_name: str, request: Request, bot_id: int | None =
     if not module:
         return _err(404, f"模块 {module_name} (Bot {bot_id}) 不存在")
 
-    data = await request.json()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
     for key, value in (data or {}).items():
         # password 字段值为脱敏哨兵时保留旧值（用户未修改密码）
         field = module.config_schema.get(key)
@@ -188,7 +192,8 @@ async def update_config(module_name: str, request: Request, bot_id: int | None =
         "type": "module_config_updated",
         "module": module_name,
         "bot_id": bot_id,
-        "config": module.config.raw_config,
+        # 广播前脱敏：password 字段打码，避免明文密码经 WS 泄露（与读取接口一致）
+        "config": _mask_password_config(module.config.raw_config, module.config_schema),
     }))
     return _ok(f"模块 {module.name} (Bot {bot_id}) 配置已更新")
 
@@ -281,9 +286,12 @@ async def module_list_data(module_name: str, endpoint: str, request: Request,
         return _err(404, f"模块 {module_name} 无 list 字段 endpoint={endpoint}")
 
     bot = _resolve_bot(container, bot_id)
-    data = await container.get(ProviderRegistry).call(
-        module.module_name, endpoint, "list", module, bot, field
-    )
+    try:
+        data = await container.get(ProviderRegistry).call(
+            module.module_name, endpoint, "list", module, bot, field
+        )
+    except Exception as e:
+        return _err(502, f"数据源请求失败: {e}")
     items = data.get("items") or data.get("groups") or data.get("friends") or []
 
     # 合并已存配置：{<id>: {enabled, index}} → 每项回填 enabled/index，并排序
@@ -322,9 +330,12 @@ async def module_dynamic_options(module_name: str, endpoint: str, request: Reque
         return _err(404, f"模块 {module_name} 无 dynamic 字段 endpoint={endpoint}")
 
     bot = _resolve_bot(container, bot_id)
-    data = await container.get(ProviderRegistry).call(
-        module.module_name, endpoint, "dynamic", module, bot, field, value=None
-    )
+    try:
+        data = await container.get(ProviderRegistry).call(
+            module.module_name, endpoint, "dynamic", module, bot, field, value=None
+        )
+    except Exception as e:
+        return _err(502, f"数据源请求失败: {e}")
     return JSONResponse(content={"ok": True, "options": data.get("options", [])})
 
 
@@ -343,7 +354,10 @@ async def module_dynamic_fields(module_name: str, endpoint: str, value: str, req
         return _err(404, f"模块 {module_name} 无 dynamic 字段 endpoint={endpoint}")
 
     bot = _resolve_bot(container, bot_id)
-    data = await container.get(ProviderRegistry).call(
-        module.module_name, endpoint, "dynamic", module, bot, field, value=value
-    )
+    try:
+        data = await container.get(ProviderRegistry).call(
+            module.module_name, endpoint, "dynamic", module, bot, field, value=value
+        )
+    except Exception as e:
+        return _err(502, f"数据源请求失败: {e}")
     return JSONResponse(content={"ok": True, "fields": data.get("fields", [])})

@@ -48,9 +48,11 @@ async def handle(module, event):
         if not bv_ids:
             return
 
-        # 4. BV 去重保序
+        # 4. BV 去重保序（按 bot_id 独立去重，空串一并过滤）
         if config.get("enable_bv_dedup", True):
-            video_ids = bapi.filter_bv_dedup(bv_ids, int(config.get("bv_dedup_timeout", 60) or 60))
+            video_ids = bapi.filter_bv_dedup(
+                bv_ids, int(config.get("bv_dedup_timeout", 60) or 60), bot_id=module.bot_id
+            )
         else:
             video_ids = list(dict.fromkeys(bv_ids))
         if not video_ids:

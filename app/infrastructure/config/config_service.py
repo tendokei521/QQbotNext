@@ -216,23 +216,45 @@ class ConfigService:
         return [{**dict(b), "ws_url": mask_ws_url(b.get("ws_url", ""))} for b in self._bots]
 
     async def save_bots(self, bots: list[dict]) -> None:
-        """保存账号配置。若提交的 ws_url 是打码值，用当前存储的真实 access_token 回填。"""
+        """保存账号配置。若提交的 ws_url 是打码值，用当前存储的真实 access_token 回填。
+
+        回填顺序：先按位置（顺序未变的常见场景），位置不匹配时再按
+        去掉 access_token 后的 URL 特征关联回填（顺序变化/增删导致的错位）。
+        """
         old = self._bots
         normalized = []
         for i, cfg in enumerate(bots):
             ws = cfg.get("ws_url", "")
-            if i < len(old) and old[i].get("ws_url"):
-                ws = restore_ws_url(ws, old[i]["ws_url"])
+            if ACCESS_TOKEN_MASK in ws:
+                if i < len(old) and old[i].get("ws_url"):
+                    ws = restore_ws_url(ws, old[i]["ws_url"])
+                if ACCESS_TOKEN_MASK in ws:  # 位置回填未命中（无旧值或仍为打码）→ 关联回填
+                    ws = restore_ws_url(ws, self._find_matching_old(old, ws))
             normalized.append({**cfg, "ws_url": ws})
-        self._bots = normalized
         sqls = [("DELETE FROM bots", ())]
         for i, cfg in enumerate(normalized):
             sqls.append((
                 "INSERT OR REPLACE INTO bots (bot_index, ws_url, owner_id, auto_connect) VALUES (?,?,?,?)",
                 (i, cfg.get("ws_url", ""), cfg.get("owner_id"), 1 if cfg.get("auto_connect") else 0),
             ))
-        await self.db.run_in_transaction(sqls)
+        await self.db.run_in_transaction(sqls)   # 先落库，成功后再更新内存缓存
+        self._bots = normalized
         await self._notify("bots", self._bots)
+
+    @staticmethod
+    def _find_matching_old(old: list[dict], masked_ws: str) -> str:
+        """在旧配置中找与提交 ws_url（除 token 外）匹配的条目，返回其真实 ws_url。"""
+        import re
+
+        def stripped(url: str) -> str:
+            return re.sub(r"access_token=[^&]*", "access_token=", url)
+
+        target = stripped(masked_ws)
+        for item in old:
+            old_url = item.get("ws_url", "")
+            if old_url and stripped(old_url) == target:
+                return old_url
+        return ""
 
     async def add_bot(self, cfg: dict) -> int:
         self._bots.append(dict(cfg))
@@ -255,12 +277,12 @@ class ConfigService:
 
     async def save_webui_config(self, config: dict) -> None:
         merged = {**DEFAULT_WEBUI_CONFIG, **config}
-        self._webui = merged
         sqls = [("DELETE FROM webui_config", ())]
         for key, value in merged.items():
             sqls.append(("INSERT OR REPLACE INTO webui_config (key, value_json) VALUES (?,?)",
                          (key, self.db.dumps(value))))
-        await self.db.run_in_transaction(sqls)
+        await self.db.run_in_transaction(sqls)   # 先落库，成功后再更新内存缓存
+        self._webui = merged
         await self._notify("webui", merged)
 
     # ==================== 模块配置（同步读取，异步持久化） ====================

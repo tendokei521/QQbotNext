@@ -37,12 +37,13 @@ async def connect_bot(index: int, request: Request):
     config_service = container.get(ConfigService)
 
     bots_config = config_service.get_bots()
-    if index >= len(bots_config):
+    if index < 0 or index >= len(bots_config):
         return _err(404, f"Bot at index {index} not in config")
     bot_cfg = bots_config[index]
     if index not in bot_service.gateway.connections:
+        # 显式传 index，避免 add_bot 缺省索引（max+1）与配置索引脱节
         await bot_service.gateway.add_bot(bot_cfg.get("ws_url", ""), bot_cfg.get("owner_id"),
-                                          bot_cfg.get("auto_connect", False))
+                                          bot_cfg.get("auto_connect", False), index=index)
     else:
         await bot_service.gateway.readd_bot(bot_cfg.get("ws_url", ""), bot_cfg.get("owner_id"), index)
 
@@ -89,7 +90,10 @@ async def api_bots_config_save(request: Request):
     from app.infrastructure.config.config_service import ConfigService
 
     container = get_container(request)
-    data = await request.json()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
     await container.get(ConfigService).save_bots(data.get("bots", []))
     return _ok("配置已保存")
 

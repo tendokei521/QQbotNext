@@ -60,6 +60,10 @@ def create_app(container) -> FastAPI:
             webui_cfg.get("logs", {}).get("max_lines", 50),
             webui_cfg.get("logs", {}).get("visible_levels", ["info", "warning", "error"]),
         )
+        # 注入访问令牌：GET / 本身不鉴权，前端凭此 token 调用受保护的 /api 与 /ws/logs
+        from app.core.settings import Settings
+
+        webui_token = container.get(Settings).webui_token or ""
         return templates.TemplateResponse(
             request, "index.html", {
                 "request": request,
@@ -67,6 +71,7 @@ def create_app(container) -> FastAPI:
                 "modules": bot_service.get_modules_data(),
                 "logs": logs,
                 "webui_config": webui_cfg,
+                "webui_token": webui_token,
             }
         )
 

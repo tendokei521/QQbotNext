@@ -16,15 +16,16 @@ class IBot(ABC):
     """一个已连接的机器人账号。"""
 
     # ---------- 运行时状态 ----------
+    # 仅作类型声明（mutable 默认值会跨实例共享，实例属性一律在 __init__ 初始化）
     bot_id: int | None = None
     index: int | None = None
     owner_id: int | None = None
     ws_url: str = ""
     status: str = "disconnected"
     auto_connect: bool = False
-    login_info: dict = {}
-    all_group_list: list = []
-    all_group_list_info: list = []
+    login_info: dict | None = None
+    all_group_list: list | None = None
+    all_group_list_info: list | None = None
 
     # ---------- 消息发送 ----------
     @abstractmethod

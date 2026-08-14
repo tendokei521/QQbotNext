@@ -47,11 +47,11 @@ _ALLOWED_DOMAINS = (
 class BilibiliAPI(CurlCffiClient):
     """B站 API 封装：短链解析 + 视频信息获取（curl_cffi 浏览器指纹模拟）。
 
-    BV 去重缓存为类级状态（跨实例共享，API 层行为）。
+    BV 去重缓存键含 bot_id（各账号独立去重，互不干扰）。
     """
 
-    # BV 去重缓存：{bv: 最近解析时间戳}
-    _bv_cache: dict[str, float] = {}
+    # BV 去重缓存：{(bot_id, bv): 最近解析时间戳}
+    _bv_cache: dict[tuple, float] = {}
 
     def __init__(self, impersonate="chrome", proxy: str = "") -> None:
         super().__init__(impersonate=impersonate, proxy=proxy)
@@ -105,16 +105,17 @@ class BilibiliAPI(CurlCffiClient):
             return None
 
     @classmethod
-    def filter_bv_dedup(cls, video_ids: list, timeout: int) -> list:
-        """过滤掉在超时时间内已解析过的 BV 号，并清理过期缓存（类级状态）。"""
+    def filter_bv_dedup(cls, video_ids: list, timeout: int, bot_id=None) -> list:
+        """过滤掉在超时时间内已解析过的 BV 号，并清理过期缓存（键含 bot_id 区分账号）。"""
         now = time.time()
         fresh_ids = []
         for vid in video_ids:
-            last = cls._bv_cache.get(vid)
+            key = (bot_id, vid)
+            last = cls._bv_cache.get(key)
             if last is not None and (now - last) < timeout:
                 module_logger.info(f"[BilibiliAPI] BV {vid} 在 {timeout}s 内已解析，跳过")
                 continue
-            cls._bv_cache[vid] = now
+            cls._bv_cache[key] = now
             fresh_ids.append(vid)
 
         stale = [k for k, v in cls._bv_cache.items() if (now - v) >= timeout]
@@ -200,9 +201,10 @@ def extract_from_direct_link(raw: str) -> str:
     return ""
 
 
-def filter_bv_dedup(video_ids: list, timeout: int) -> list:
-    """过滤掉在超时时间内已解析过的 BV 号，并清理过期缓存（委托 BilibiliAPI 类级缓存）。"""
-    return BilibiliAPI.filter_bv_dedup(video_ids, timeout)
+def filter_bv_dedup(video_ids: list, timeout: int, bot_id=None) -> list:
+    """过滤空串 + 过滤超时时间内已解析过的 BV 号（委托 BilibiliAPI，按 bot_id 独立去重）。"""
+    video_ids = [v for v in video_ids if v and v.strip()]
+    return BilibiliAPI.filter_bv_dedup(video_ids, timeout, bot_id=bot_id)
 
 
 def build_video_message(info: dict, show_cover: bool = True) -> list:

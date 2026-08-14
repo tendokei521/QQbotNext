@@ -121,7 +121,7 @@ class DeltaForceKkrbFetcher(CurlCffiClient):
     def parse_passwords(self, data: dict) -> dict:
         """解析密码 JSON 数据。"""
         passwords: dict = {}
-        bd_data = data.get("data", {}).get("bdData", {})
+        bd_data = (data.get("data") or {}).get("bdData", {}) or {}
         date_str = ""
         for key, value in bd_data.items():
             if key in MAP_MAPPING:

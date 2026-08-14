@@ -8,6 +8,25 @@ let maxLogLines = webuiConfig.logs?.max_lines || 50;
 let currentBotId = null;
 
 // ==================== 工具函数 ====================
+// ==================== 访问令牌（WEBUI_TOKEN） ====================
+// GET / 不鉴权，页面渲染时注入 token；所有 API 请求与 WS 连接统一携带
+const WEBUI_TOKEN = window.WEBUI_TOKEN || '';
+
+function apiFetch(url, options = {}) {
+    options = options || {};
+    if (WEBUI_TOKEN) {
+        options.headers = Object.assign({}, options.headers || {}, {
+            'Authorization': 'Bearer ' + WEBUI_TOKEN
+        });
+    }
+    return window.fetch(url, options);
+}
+
+function apiWsUrl(path) {
+    if (!WEBUI_TOKEN) return path;
+    return path + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(WEBUI_TOKEN);
+}
+
 function autoResize(el) {
     el.style.height = 'auto';
     el.style.height = (el.scrollHeight + 2) + 'px';
@@ -129,7 +148,7 @@ function getStatusText(status) {
 
 async function refreshBotsStatus() {
     try {
-        const response = await fetch('/api/bots');
+        const response = await apiFetch('/api/bots');
         if (response.ok) {
             const data = await response.json();
             botsData = data.bots || [];
@@ -149,7 +168,7 @@ async function connectBot() {
     }
 
     try {
-        const response = await fetch(`/api/bots/${botIndex}/connect`, { method: 'POST' });
+        const response = await apiFetch(`/api/bots/${botIndex}/connect`, { method: 'POST' });
         const result = await response.json();
 
         if (response.ok && result.status === 'success') {
@@ -172,7 +191,7 @@ async function disconnectBot() {
     }
 
     try {
-        const response = await fetch(`/api/bots/${botIndex}/disconnect`, { method: 'POST' });
+        const response = await apiFetch(`/api/bots/${botIndex}/disconnect`, { method: 'POST' });
         const result = await response.json();
 
         if (response.ok && result.status === 'success') {
@@ -197,7 +216,7 @@ async function reconnectBot() {
     }
 
     try {
-        const response = await fetch(`/api/bots/${botIndex}/reconnect`, { method: 'POST' });
+        const response = await apiFetch(`/api/bots/${botIndex}/reconnect`, { method: 'POST' });
         const result = await response.json();
 
         if (response.ok && result.status === 'success') {
@@ -221,8 +240,8 @@ function openWsConfigModal() {
 async function loadBotCards() {
     try {
         const [configResp, statusResp] = await Promise.all([
-            fetch('/api/bots/config'),
-            fetch('/api/bots')
+            apiFetch('/api/bots/config'),
+            apiFetch('/api/bots')
         ]);
         const configData = await configResp.json();
         const statusData = await statusResp.json();
@@ -329,7 +348,7 @@ async function saveBotConfigs() {
     });
 
     try {
-        const response = await fetch('/api/bots/config/save', {
+        const response = await apiFetch('/api/bots/config/save', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ bots })
@@ -347,7 +366,7 @@ async function saveBotConfigs() {
 
 async function addBotConfig() {
     try {
-        const response = await fetch('/api/bots/config/add', { method: 'POST' });
+        const response = await apiFetch('/api/bots/config/add', { method: 'POST' });
         const result = await response.json();
         if (response.ok && result.status === 'success') {
             showToast(result.message, 'success');
@@ -363,7 +382,7 @@ async function addBotConfig() {
 async function deleteBotConfig(index) {
     if (!confirm(`确定删除账号 #${index} 的配置？`)) return;
     try {
-        const response = await fetch(`/api/bots/config/delete/${index}`, { method: 'POST' });
+        const response = await apiFetch(`/api/bots/config/delete/${index}`, { method: 'POST' });
         const result = await response.json();
         if (response.ok && result.status === 'success') {
             showToast(result.message, 'success');
@@ -378,7 +397,7 @@ async function deleteBotConfig(index) {
 
 async function connectBotByIndex(index) {
     try {
-        const response = await fetch(`/api/bots/${index}/connect`, { method: 'POST' });
+        const response = await apiFetch(`/api/bots/${index}/connect`, { method: 'POST' });
         const result = await response.json();
         if (response.ok && result.status === 'success') {
             showToast(result.message, 'success');
@@ -395,7 +414,7 @@ async function connectBotByIndex(index) {
 
 async function disconnectBotByIndex(index) {
     try {
-        const response = await fetch(`/api/bots/${index}/disconnect`, { method: 'POST' });
+        const response = await apiFetch(`/api/bots/${index}/disconnect`, { method: 'POST' });
         const result = await response.json();
         if (response.ok && result.status === 'success') {
             showToast(result.message, 'success');
@@ -412,7 +431,7 @@ async function disconnectBotByIndex(index) {
 
 async function reconnectBotByIndex(index) {
     try {
-        const response = await fetch(`/api/bots/${index}/reconnect`, { method: 'POST' });
+        const response = await apiFetch(`/api/bots/${index}/reconnect`, { method: 'POST' });
         const result = await response.json();
         if (response.ok && result.status === 'success') {
             showToast(result.message, 'info');
@@ -453,7 +472,7 @@ async function saveLogsConfig() {
     }
 
     try {
-        const response = await fetch('/api/webui/config/logs', {
+        const response = await apiFetch('/api/webui/config/logs', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -521,7 +540,7 @@ async function refreshAllModulesData(silent = false) {
         return;
     }
     try {
-        const response = await fetch(`/api/modules?bot_id=${botId}`);
+        const response = await apiFetch(`/api/modules?bot_id=${botId}`);
         if (response.ok) {
             const modules = await response.json();
             for (const [moduleName, moduleData] of Object.entries(modules)) {
@@ -567,7 +586,7 @@ async function refreshAllModulesData(silent = false) {
 async function loadModulesForBot(botId) {
     if (!botId) return; // 无连接 Bot 时静默返回
     try {
-        const response = await fetch(`/api/modules?bot_id=${botId}`);
+        const response = await apiFetch(`/api/modules?bot_id=${botId}`);
         if (response.ok) {
             const modules = await response.json();
             console.log('Loaded modules for bot', botId, modules);
@@ -587,7 +606,7 @@ async function toggleModule(moduleName) {
         formData.append('enabled', enabled);
         if (botId) formData.append('bot_id', botId);
 
-        const response = await fetch(`/api/module/${moduleName}/toggle?bot_id=${botId}`, {
+        const response = await apiFetch(`/api/module/${moduleName}/toggle?bot_id=${botId}`, {
             method: 'POST',
             body: formData
         });
@@ -622,7 +641,7 @@ async function savePermission(moduleName) {
         formData.append('user_list', userList);
         if (botId) formData.append('bot_id', botId);
 
-        const response = await fetch(`/api/module/${moduleName}/permission?bot_id=${botId}`, {
+        const response = await apiFetch(`/api/module/${moduleName}/permission?bot_id=${botId}`, {
             method: 'POST',
             body: formData
         });
@@ -680,7 +699,7 @@ async function saveConfig(moduleName) {
     });
 
     try {
-        const response = await fetch(`/api/module/${moduleName}/config?bot_id=${botId}`, {
+        const response = await apiFetch(`/api/module/${moduleName}/config?bot_id=${botId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config)
@@ -702,7 +721,7 @@ async function reloadModules() {
     }
     showToast('正在重新加载模块...', 'info');
     try {
-        const response = await fetch(`/api/modules/reload?bot_id=${botId}`, { method: 'POST' });
+        const response = await apiFetch(`/api/modules/reload?bot_id=${botId}`, { method: 'POST' });
         const result = await response.json();
 
         if (response.ok && result.status === 'success') {
@@ -720,7 +739,7 @@ let ws = null;
 
 function connectLogsWebSocket() {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws/logs`);
+    ws = new WebSocket(apiWsUrl(`${wsProtocol}//${window.location.host}/ws/logs`));
 
     ws.onmessage = function(event) {
         try {
@@ -909,7 +928,7 @@ async function refreshModulePermission(moduleName) {
     const botId = getCurrentBotId();
     try {
         const url = botId ? `/api/modules/${moduleName}?bot_id=${botId}` : `/api/modules/${moduleName}`;
-        const response = await fetch(url);
+        const response = await apiFetch(url);
         if (response.ok) {
             const modules = await response.json();
             if (modules[moduleName]) {
@@ -956,7 +975,7 @@ function updateLogsDisplay(logs) {
 
 async function refreshLogs() {
     try {
-        const response = await fetch('/api/logs');
+        const response = await apiFetch('/api/logs');
         if (response.ok) {
             const logs = await response.json();
             updateLogsDisplay(logs);
@@ -966,7 +985,7 @@ async function refreshLogs() {
 
 async function loadWebuiConfig() {
     try {
-        const response = await fetch('/api/webui/config');
+        const response = await apiFetch('/api/webui/config');
         if (response.ok) {
             webuiConfig = await response.json();
             visibleLevels = webuiConfig.logs?.visible_levels || ['info', 'warning', 'error'];
@@ -1039,7 +1058,7 @@ let singleServiceConfig = {};
 
 async function loadSingleServiceConfig() {
     try {
-        const response = await fetch('/api/webui/single-service');
+        const response = await apiFetch('/api/webui/single-service');
         if (response.ok) {
             const data = await response.json();
             singleServiceConfig = data.single_service || {};
@@ -1063,7 +1082,7 @@ async function toggleSingleService(moduleName) {
     singleServiceConfig[moduleName] = enabled;
 
     try {
-        const response = await fetch('/api/webui/single-service', {
+        const response = await apiFetch('/api/webui/single-service', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ single_service: singleServiceConfig })
@@ -1107,8 +1126,8 @@ function updateSingleServiceWarning(moduleName) {
 
     // 对齐后端 is_single_service_skipped：仅同群 ≥2 个在线 Bot 且该群指定了服务账号时生效
     Promise.all([
-        fetch('/api/webui/multi-group').then(r => r.json()),
-        fetch('/api/bots/groups').then(r => r.json()),
+        apiFetch('/api/webui/multi-group').then(r => r.json()),
+        apiFetch('/api/bots/groups').then(r => r.json()),
     ]).then(([configData, groupsData]) => {
         const groupsConfig = (configData.multi_group || { groups: {} }).groups || {};
         const botsGroups = groupsData.bots_groups || {};
@@ -1119,7 +1138,7 @@ function updateSingleServiceWarning(moduleName) {
         for (const [gid, gConfig] of Object.entries(groupsConfig)) {
             const serviceBotIndex = gConfig.service_bot_index;
             if (serviceBotIndex === undefined || serviceBotIndex === null) continue;
-            if (Number(serviceBotIndex) === currentIndex) continue;  // 当前账号是指定服务账号 → 不提示
+            if (Number(serviceBotIndex) === Number(currentIndex)) continue;  // 当前账号是指定服务账号 → 不提示
 
             let onlineInGroup = 0;
             for (const [idx, bg] of Object.entries(botsGroups)) {
@@ -1172,8 +1191,8 @@ async function loadMultiGroupData() {
 
     try {
         const [configResp, groupsResp] = await Promise.all([
-            fetch('/api/webui/multi-group'),
-            fetch('/api/bots/groups')
+            apiFetch('/api/webui/multi-group'),
+            apiFetch('/api/bots/groups')
         ]);
 
         const configData = await configResp.json();
@@ -1325,7 +1344,7 @@ async function saveMultiGroupRow(groupId, serviceBotIndex) {
 
 async function saveMultiGroupConfig(quiet) {
     try {
-        const response = await fetch('/api/webui/multi-group', {
+        const response = await apiFetch('/api/webui/multi-group', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ multi_group: multiGroupData })

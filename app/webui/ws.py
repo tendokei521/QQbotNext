@@ -16,20 +16,28 @@ class ConnectionManager:
 
     def __init__(self) -> None:
         self.active_connections: list[WebSocket] = []
+        self._send_locks: dict[int, asyncio.Lock] = {}
 
     async def connect(self, websocket: WebSocket) -> None:
         await websocket.accept()
+        self._send_locks[id(websocket)] = asyncio.Lock()
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket) -> None:
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
+        self._send_locks.pop(id(websocket), None)
 
     async def broadcast(self, message: str) -> None:
         disconnected = []
         for connection in list(self.active_connections):
+            lock = self._send_locks.get(id(connection))
             try:
-                await connection.send_text(message)
+                if lock is not None:
+                    async with lock:  # 同一连接串行发送，避免并发 send_text 竞态
+                        await connection.send_text(message)
+                else:
+                    await connection.send_text(message)
             except Exception:
                 disconnected.append(connection)
         for conn in disconnected:

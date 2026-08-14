@@ -25,6 +25,10 @@ class _FatalError(Exception):
     """不可恢复错误（认证/参数）：不重试。"""
 
 
+class _AuthError(Exception):
+    """认证失败（401/403）：当前 key 无效，轮换到下一个 key。"""
+
+
 def _split_keys(api_key: str) -> list[str]:
     if not api_key:
         return []
@@ -61,18 +65,30 @@ class OpenAICompatProvider(BaseProvider):
             ) as resp:
                 if resp.status != 200:
                     body = await resp.text()
+                    if resp.status in (401, 403):
+                        raise _AuthError(f"HTTP {resp.status}: {body[:200]}")
                     if resp.status in RETRYABLE_STATUS:
                         raise ConnectionError(f"HTTP {resp.status}: {body[:200]}")
                     raise _FatalError(f"HTTP {resp.status}: {body[:200]}")
                 return await resp.json()
 
     async def _request(self, payload: dict, timeout: int) -> dict | None:
-        """带重试的请求。最终失败返回 None。"""
+        """带重试的请求。认证失败自动轮换 key；最终失败返回 None。"""
         last_error = ""
         for attempt in range(self.max_retries):
             key = self.api_keys[attempt % len(self.api_keys)]
             try:
                 return await self._post(key, payload, timeout)
+            except _AuthError as e:
+                last_error = str(e)
+                if attempt < self.max_retries - 1:
+                    logger.add_info("Api").warning(
+                        f"API key {attempt % len(self.api_keys) + 1} 认证失败，轮换下一个: {e}"
+                    )
+                    await asyncio.sleep(0.5)
+                else:
+                    logger.add_info("Api").error(f"所有 API key 认证均失败: {last_error}")
+                    return None
             except _FatalError as e:
                 logger.add_info("Api").error(f"API 不可恢复错误: {e}")
                 return None
@@ -180,4 +196,5 @@ class OpenAICompatProvider(BaseProvider):
                 })
 
         logger.add_info("Api").warning(f"工具循环超过 {max_tool_rounds} 轮，强制结束")
-        return LLMResponse(text="", raw=None)
+        # 保留已执行工具结果与最后一次响应，避免已完成的工具调用静默丢失
+        return self._to_response(result, tool_results)

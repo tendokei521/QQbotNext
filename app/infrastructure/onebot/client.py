@@ -100,6 +100,22 @@ class BotConnection(IBot):
             future.set_result(message)
         return True
 
+    def fail_pending(self, exc: Exception | None = None) -> int:
+        """连接断开时让所有在途请求立即失败，避免调用方阻塞至超时。
+
+        由 gateway 断线路径调用；_direct_send 的 except Exception 会捕获并返回 None。
+        """
+        exc = exc or ConnectionError("连接已断开")
+        count = 0
+        for echo_id, future in list(self._pending.items()):
+            if not future.done():
+                future.set_exception(exc)
+                count += 1
+        self._pending.clear()
+        if count:
+            api_logger.warning(f"[#{self.index}] 连接断开，{count} 个在途请求已失败")
+        return count
+
     # ---------- 消息发送 ----------
     async def send_group_msg(self, group_id: int, message: SegmentLike, auto_escape: bool = False) -> dict:
         return await self._send("send_group_msg", {

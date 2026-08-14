@@ -72,13 +72,16 @@ def match_keywords(
 
         ordata = keyword.get("or") or []
         if ordata:
+            # or 分支独立计数：value 只约束 or 子命中的数量，
+            # 不把 text/at/and 的命中算进去（原实现用整个 got 统计会互相污染）
+            or_hits: list[str] = []
             for orkeyword in ordata:
                 sub = _get_keyword(orkeyword, texts)
                 if sub:
-                    got.extend(sub)
+                    or_hits.extend(sub)
             min_text = keyword.get("value", 0)
-            if min_text and min_text > len(got):
-                got.clear()
+            if not (min_text and min_text > len(or_hits)):
+                got.extend(or_hits)
         return got
 
     return _get_keyword(keywords_data, msgtext)

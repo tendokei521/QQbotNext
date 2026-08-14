@@ -10,6 +10,10 @@ async def _set_essence(bot, group_id: int, text: str, message_id, logger) -> Non
     """把推送消息设为精华：清理同模块旧精华，避免堆积。"""
     date_match = PASSWORD_ESSENCE_RE.search(text)
     today_date = date_match.group(1) if date_match else ""
+    if not today_date:
+        # 无法识别日期 → 不做去重/清理（避免误删旧精华），直接设置
+        await bot.set_essence_msg(message_id)
+        return
 
     essence_resp = await bot.get_essence_msg_list(group_id)
     if not essence_resp or essence_resp.get("status") != "ok":

@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from app.services.bot_service import PASSWORD_MASK as _PASSWORD_MASK
-from app.webui.api.deps import get_container
+from app.webui.api.deps import get_container, parse_bot_id
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -58,7 +58,7 @@ def _mask_password_config(config: dict, schema: dict) -> dict:
 # ==================== 配置 / 权限 ====================
 
 @router.get("/config")
-async def agent_config(request: Request, bot_id: int | None = None):
+async def agent_config(request: Request, bot_id: int | None = Depends(parse_bot_id)):
     from app.llm.config_schema import SCHEMA
 
     container = get_container(request)
@@ -82,14 +82,17 @@ async def agent_config(request: Request, bot_id: int | None = None):
 
 
 @router.post("/config")
-async def agent_config_update(request: Request, bot_id: int | None = None):
+async def agent_config_update(request: Request, bot_id: int | None = Depends(parse_bot_id)):
     from app.llm.config_schema import SCHEMA
 
     container = get_container(request)
     runtime, _ = _runtime(container, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
-    data = await request.json()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
     data = data or {}
     # 配置字段（password 为脱敏哨兵时保留旧值）
     for key, value in data.get("config", {}).items():
@@ -115,7 +118,7 @@ async def agent_config_update(request: Request, bot_id: int | None = None):
 # ==================== 定时任务 ====================
 
 @router.get("/tasks")
-async def agent_tasks(request: Request, bot_id: int | None = None):
+async def agent_tasks(request: Request, bot_id: int | None = Depends(parse_bot_id)):
     container = get_container(request)
     runtime, _ = _runtime(container, bot_id)
     if runtime is None:
@@ -124,14 +127,17 @@ async def agent_tasks(request: Request, bot_id: int | None = None):
 
 
 @router.post("/tasks")
-async def agent_task_add(request: Request, bot_id: int | None = None):
+async def agent_task_add(request: Request, bot_id: int | None = Depends(parse_bot_id)):
     container = get_container(request)
     runtime, _ = _runtime(container, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
     if not runtime.config.get("schedule_enable", True):
         return _err(400, "定时任务未启用，请在配置中开启")
-    data = await request.json()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
     trigger = (data or {}).get("trigger", "").strip()
     content = (data or {}).get("content", "").strip()
     if not trigger or not content:
@@ -157,7 +163,7 @@ async def agent_task_add(request: Request, bot_id: int | None = None):
 
 
 @router.post("/tasks/{task_id}/trigger")
-async def agent_task_trigger(task_id: str, request: Request, bot_id: int | None = None):
+async def agent_task_trigger(task_id: str, request: Request, bot_id: int | None = Depends(parse_bot_id)):
     container = get_container(request)
     runtime, _ = _runtime(container, bot_id)
     if runtime is None:
@@ -169,7 +175,7 @@ async def agent_task_trigger(task_id: str, request: Request, bot_id: int | None 
 
 
 @router.post("/tasks/{task_id}/cancel")
-async def agent_task_cancel(task_id: str, request: Request, bot_id: int | None = None):
+async def agent_task_cancel(task_id: str, request: Request, bot_id: int | None = Depends(parse_bot_id)):
     container = get_container(request)
     runtime, _ = _runtime(container, bot_id)
     if runtime is None:
@@ -183,7 +189,7 @@ async def agent_task_cancel(task_id: str, request: Request, bot_id: int | None =
 # ==================== 主动消息 ====================
 
 @router.get("/proactive/status")
-async def agent_proactive_status(request: Request, bot_id: int | None = None):
+async def agent_proactive_status(request: Request, bot_id: int | None = Depends(parse_bot_id)):
     container = get_container(request)
     runtime, _ = _runtime(container, bot_id)
     if runtime is None:
@@ -192,12 +198,15 @@ async def agent_proactive_status(request: Request, bot_id: int | None = None):
 
 
 @router.post("/proactive/trigger")
-async def agent_proactive_trigger(request: Request, bot_id: int | None = None):
+async def agent_proactive_trigger(request: Request, bot_id: int | None = Depends(parse_bot_id)):
     container = get_container(request)
     runtime, _ = _runtime(container, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
-    data = await request.json()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
     session_id = (data or {}).get("session_id", "")
     if not session_id:
         return _err(400, "缺少 session_id")

@@ -179,6 +179,12 @@ class SessionManager:
             self._cleanup_thread.join(timeout=3)
         self._cleanup_thread = None
 
+    def restart_cleanup(self):
+        """恢复清理线程（stop 后 / 线程意外退出时调用，幂等）。"""
+        self._stop_event.clear()
+        if not self._cleanup_thread or not self._cleanup_thread.is_alive():
+            self._start_auto_cleanup()
+
     def _start_auto_cleanup(self):
         def cleanup_task():
             while not self._stop_event.is_set():
@@ -205,6 +211,7 @@ class SessionManager:
 
     # ── 会话 CRUD ─────────────────────────────────────────
     def create_session(self, session_id: str, session_type: str, timeout: int = 60) -> Session:
+        self.restart_cleanup()  # 懒恢复清理线程（bot 重连/框架重启后）
         session = Session(session_id, session_type, timeout)
         with self.lock:
             self.sessions[session_id] = session
@@ -229,13 +236,22 @@ class SessionManager:
                 logger.add_info(f"#{self.bot_id}").info(f"会话已结束: {session_id}")
 
     # ── 消息 ──────────────────────────────────────────────
+    MAX_HISTORY_MESSAGES = 200  # 单对话内存/归档有界：超过后裁剪最旧消息
+
     def add_message(self, session_id: str, role: str, content: str, user_id: str = ""):
         session = self.get_session(session_id)
         if session and session.data is not None:
             msg = {"role": role, "content": content, "time": int(time.time())}
             if user_id:
                 msg["user_id"] = user_id
-            session.data.history.append(msg)
+            history = session.data.history
+            history.append(msg)
+            if len(history) > self.MAX_HISTORY_MESSAGES:
+                dropped = len(history) - self.MAX_HISTORY_MESSAGES
+                del history[:dropped]
+                logger.add_info(f"#{self.bot_id}").debug(
+                    f"历史裁剪: {session_id} 丢弃最旧 {dropped} 条 (上限 {self.MAX_HISTORY_MESSAGES})"
+                )
             session.touch()
 
     def get_history(self, session_id: str, limit: int = 10) -> list[dict]:
