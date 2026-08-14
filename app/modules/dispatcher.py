@@ -41,4 +41,6 @@ class ModuleDispatcher:
 
     async def dispatch(self, event: BaseEvent) -> None:
         ctx = MessageContext(event=event, bot=getattr(event, "bot", None), state={})
+        # 挂载节点链上下文，供模块 event.stop() 短路整条链路
+        event._ctx = ctx
         await NodeRunner(self.node_registry.inbound_nodes()).run(ctx)

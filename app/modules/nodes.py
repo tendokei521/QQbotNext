@@ -81,6 +81,10 @@ class AgentNode(MessageNode):
         if not check_event_permission(event, gate):
             await next_()
             return
+        # 前面的模块已调用 event.stop() 强制终止 → 链已短路（含 LLM 兜底）
+        if getattr(event, "_stopped", False):
+            await next_()
+            return
         # 模块已声明跳过 LLM 回复（event.llm.stop()）→ 仅维护主动消息观察
         if getattr(event, "_llm_stop", False):
             await self._observe_proactive(runtime, event)
@@ -176,6 +180,9 @@ class ModuleInvokeNode(MessageNode):
     async def process(self, ctx: MessageContext, next_: Next) -> None:
         event = ctx.event
         for module in ctx.state.get("allowed", []) or []:
+            # 某模块已调用 event.stop() 强制终止 → 跳出，不再调用后续模块
+            if ctx.cancelled or getattr(event, "_stopped", False):
+                break
             try:
                 await module.handle(event)
             except Exception as e:

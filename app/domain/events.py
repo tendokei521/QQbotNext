@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from app.domain.bot import IBot
 from app.domain.message import Message, MessageSegment, SegmentLike
@@ -68,11 +69,31 @@ class BaseEvent:
     raw: dict = field(default_factory=dict)
     # 模块可调用 event.llm.stop() 跳过 LLM 处理（LLM 节点在模块链之后执行）
     _llm_stop: bool = False
+    # 模块可调用 event.stop() 强制终止整条节点链（对齐 astrbot stop_event）
+    _stopped: bool = False
+    # 事件所属节点链上下文（dispatcher 注入，供 event.stop() 短路链路；不参与 repr/eq）
+    _ctx: Any = field(default=None, repr=False, compare=False)
 
     @property
     def llm(self) -> LlmGate:
         """LLM 门控：event.llm.stop() 跳过本次事件的 LLM 回复。"""
         return LlmGate(self)
+
+    def stop(self) -> None:
+        """强制终止本事件在节点链中的继续传播（对齐 astrbot stop_event）。
+
+        调用后：后续模块、LLM 兜底均不再执行；链在下一个节点边界立即短路。
+        与 event.llm.stop() 的区别：后者仅跳过 LLM，模块链照常。
+        """
+        self._stopped = True
+        ctx = getattr(self, "_ctx", None)
+        if ctx is not None:
+            ctx.cancelled = True
+
+    @property
+    def stopped(self) -> bool:
+        """事件是否已被某模块调用 event.stop() 终止。"""
+        return self._stopped
 
     async def reply(self, message: SegmentLike, **kwargs) -> dict:
         """向本事件的目标发送消息（群/私聊自动判断）。"""
