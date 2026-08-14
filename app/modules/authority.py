@@ -33,7 +33,16 @@ def check_module_enabled(module: BaseModule) -> bool:
 
 
 def is_single_service_skipped(module: BaseModule, event: BaseEvent, config_service, gateway) -> bool:
-    """单一服务模式：该群指定了服务账号，且当前 bot 不是 → 跳过。"""
+    """单一服务模式：仅当同群有 ≥2 个在线 Bot 时，把响应权交给多群管理中指定的服务账号。
+
+    设计初衷：多账号在同一群聊时只有一个账号响应，服务账号由多群管理按群配置；
+    单账号群 / 未指定服务账号的群不触发本规则，各账号照常响应。
+
+    - 模块未启用单一服务 / 非群事件 → 不跳过；
+    - 群内在线 Bot 数 < 2 → 不触发规则（单账号群照常响应）；
+    - 群内 ≥2 个 Bot 且未配置服务账号 → 不限制（所有账号均可响应）；
+    - 群内 ≥2 个 Bot 且配置了服务账号 → 仅服务账号响应，其余跳过。
+    """
     try:
         webui = config_service.get_webui_config()
         single_service = webui.get("single_service", {}) or {}
@@ -42,17 +51,22 @@ def is_single_service_skipped(module: BaseModule, event: BaseEvent, config_servi
         group_id = getattr(getattr(event, "group", None), "group_id", None)
         if not group_id:
             return False
+
+        # 核心触发条件：仅当 ≥2 个在线 Bot 当前在该群时才应用规则
+        online_in_group = 0
+        for conn in gateway.connections.values():
+            if conn.status == "connected" and group_id in (conn.all_group_list or []):
+                online_in_group += 1
+        if online_in_group < 2:
+            return False
+
+        # 多账号群：按多群管理中该群配置的服务账号决定响应权
         multi_group = webui.get("multi_group", {}) or {}
-        group_config = (multi_group.get("groups", {}) or {}).get(str(group_id))
-        if group_config is None:
-            return True
+        group_config = (multi_group.get("groups", {}) or {}).get(str(group_id)) or {}
         service_bot_index = group_config.get("service_bot_index")
         if service_bot_index is None:
-            return True
-        for conn in gateway.connections.values():
-            if conn.index == service_bot_index:
-                return conn.bot_id != event.bot_id
-        return True
+            return False  # 未指定服务账号 → 不限制
+        return event.bot_index != service_bot_index
     except Exception as e:
         logger.warning(f"[Auth] 单一服务判断异常: {e}")
         return False
