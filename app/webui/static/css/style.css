@@ -242,8 +242,8 @@ body { font-family: "Microsoft YaHei", Arial, sans-serif; background: var(--bg);
     padding: 12px 16px;
 }
 
-.module-item { background: var(--bg-deep); border-radius: 8px; padding: 15px; margin-bottom: 10px; cursor: pointer; transition: all 0.2s; }
-.module-item:hover { background: var(--border); }
+.module-item { background: var(--border); border-radius: 8px; padding: 15px; margin-bottom: 10px; cursor: pointer; transition: all 0.2s; }
+.module-item:hover { background: var(--border-strong); }
 .module-item.active { border-left: 4px solid var(--blue); background: var(--blue-light); }
 
 .module-name { font-size: 16px; font-weight: bold; margin-bottom: 5px; display: flex; align-items: center; }
@@ -257,7 +257,7 @@ body { font-family: "Microsoft YaHei", Arial, sans-serif; background: var(--bg);
 /* 开关样式 */
 .switch { position: relative; display: inline-block; width: 40px; height: 20px; }
 .switch input { opacity: 0; width: 0; height: 0; }
-.slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--border-strong); border: 1px solid var(--faint); transition: .4s; border-radius: 20px; }
+.slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--faint); border: 1px solid var(--faint); transition: .4s; border-radius: 20px; }
 .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 2px; bottom: 2px; background-color: white; transition: .4s; border-radius: 50%; }
 input:checked + .slider { background-color: var(--blue); border-color: var(--blue); }
 input:checked + .slider:before { transform: translateX(20px); }
@@ -841,7 +841,7 @@ textarea.config-updated {
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: var(--border-strong);
+    background-color: var(--faint);
     border: 1px solid var(--faint);
     transition: .4s;
     border-radius: 20px;
@@ -1009,7 +1009,7 @@ textarea.config-updated {
 
 /* 单一服务开关：紫色主题以与普通bool区分 */
 .switch-single-service .slider {
-    background-color: var(--border-strong);
+    background-color: var(--faint);
     border-color: var(--faint);
 }
 
