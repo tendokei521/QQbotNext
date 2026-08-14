@@ -1,23 +1,29 @@
-"""打卡执行：批量打卡 + 每日定时任务 + 动态定时注册。"""
+"""打卡执行：批量打卡 + 每日定时任务。"""
+
+import asyncio
+from functools import partial
 
 from app.core.logger import module_logger
+from app.modules import register_daily_schedule
 from app.modules.groups import resolve_group_ids
 
 
-async def _execute_signin_for_groups(module, group_ids: list) -> tuple:
-    """按顺序为每个群签到，返回 (成功数, 失败数)。"""
+async def _execute_signin_for_groups(module, group_ids: list, batch: int = 4) -> tuple:
+    """为每个群签到（分批并发，防串行拖慢 + 防限流），返回 (成功数, 失败数)。"""
     bot = module.ctx.bot
-    success = fail = 0
-    for gid in group_ids:
+
+    async def _one(gid: str) -> bool:
         try:
             result = await bot.send_group_sign(group_id=int(gid))
-            if result and result.get("status") == "ok":
-                success += 1
-            else:
-                fail += 1
+            return bool(result and result.get("status") == "ok")
         except Exception:
-            fail += 1
-    return success, fail
+            return False
+
+    success = 0
+    for i in range(0, len(group_ids), batch):
+        results = await asyncio.gather(*(_one(g) for g in group_ids[i:i + batch]))
+        success += sum(1 for ok in results if ok)
+    return success, len(group_ids) - success
 
 
 async def daily_sign_in(module, bot):
@@ -40,12 +46,10 @@ async def daily_sign_in(module, bot):
 
 async def register_schedule(module):
     """按配置的 daily_signin_time 动态注册每日定时任务（on_load 调用）。"""
-    scheduler = module.ctx.services.scheduler
-    if scheduler is None or module.bot_id is None:
-        return
-    if not module.config.get("enable_daily_auto_signin", True):
-        await scheduler.unload_module(module.module_name, module.bot_id)
-        return
-    time_str = module.config.get("daily_signin_time", "00:00")
-    key = f"{module.module_name}:{module.bot_id}:daily"
-    await scheduler.register(key, time_str, lambda: daily_sign_in(module, module.ctx.bot))
+    await register_daily_schedule(
+        module,
+        key_suffix="daily",
+        enable_key="enable_daily_auto_signin",
+        time_key="daily_signin_time",
+        handler_factory=lambda: partial(daily_sign_in, module, module.ctx.bot),
+    )

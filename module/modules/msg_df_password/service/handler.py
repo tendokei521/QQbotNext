@@ -1,6 +1,9 @@
 """指令与定时推送处理：#今日密码 查询 + 每日定时推送（含精华设置）。"""
 
+from functools import partial
+
 from app.core.logger import module_logger
+from app.modules import register_daily_schedule
 from app.modules.groups import check_group_enabled
 
 from .essence import _set_essence
@@ -53,22 +56,27 @@ async def daily_push(module, bot):
     for gid, cfg in cron_send_groups.items():
         if not check_group_enabled(config, gid, key="cron_send_groups", mode_key="cron_group_mode"):
             continue
-        result = await bot.send_group_msg(int(gid), text)
+        try:
+            result = await bot.send_group_msg(int(gid), text)
+        except Exception as e:
+            logger.error(f"定时密码发送到群 {gid} 失败: {e}")
+            continue
         logger.info(f"定时密码已发送到群 {gid}")
         if config.get("push_enable", False) and result and result.get("status") == "ok":
             message_id = result.get("data", {}).get("message_id")
             if message_id:
-                await _set_essence(bot, int(gid), text, message_id, logger)
+                try:
+                    await _set_essence(bot, int(gid), text, message_id, logger)
+                except Exception as e:
+                    logger.error(f"群 {gid} 设置精华失败: {e}")
 
 
 async def register_schedule(module):
     """按配置的 cron_time 动态注册每日推送任务（on_load 调用）。"""
-    scheduler = module.ctx.services.scheduler
-    if scheduler is None or module.bot_id is None:
-        return
-    if not module.config.get("enable_cron", False):
-        await scheduler.unload_module(module.module_name, module.bot_id)
-        return
-    time_str = module.config.get("cron_time", "08:00")
-    key = f"{module.module_name}:{module.bot_id}:cron"
-    await scheduler.register(key, time_str, lambda: daily_push(module, module.ctx.bot))
+    await register_daily_schedule(
+        module,
+        key_suffix="cron",
+        enable_key="enable_cron",
+        time_key="cron_time",
+        handler_factory=lambda: partial(daily_push, module, module.ctx.bot),
+    )

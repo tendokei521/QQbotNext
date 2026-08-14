@@ -23,6 +23,7 @@ class RecallDB:
         self._lock = asyncio.Lock()
         self._db: dict = {}
         self._loaded = False
+        self._group_index: dict[str, list[str]] | None = None  # {group_id: [message_id]} 懒加载
 
     # ── 内部 ──────────────────────────────────────────────────
 
@@ -38,6 +39,21 @@ class RecallDB:
         if "data" not in self._db:
             self._db["data"] = {"total": 0, "updated": time.time()}
         self._loaded = True
+
+    def _ensure_group_index(self) -> None:
+        """懒构建 {group_id: [message_id]} 索引；库变更（删除/清理）后由调用方失效重建。"""
+        if self._group_index is not None:
+            return
+        index: dict[str, list[str]] = {}
+        for key, value in self._db.items():
+            if key == "data":
+                continue
+            gid = str(value.get("group_id", "") or "")
+            index.setdefault(gid, []).append(key)
+        self._group_index = index
+
+    def _invalidate_group_index(self) -> None:
+        self._group_index = None
 
     def _write(self) -> None:
         self._db["data"]["updated"] = time.time()
@@ -59,17 +75,16 @@ class RecallDB:
             data["time"] = time.time()
             self._db[message_id] = data
             self._db["data"]["total"] += 1
-            # 每群上限（旧版 max_messages_per_group 语义）：淘汰该群最旧消息
+            # 每群上限（旧版 max_messages_per_group 语义）：经群索引只淘汰该群最旧消息
             if max_per_group > 0:
                 group_id = str(data.get("group_id", "") or "")
-                group_ids = [
-                    k for k, v in self._db.items()
-                    if k != "data" and str(v.get("group_id", "") or "") == group_id
-                ]
-                while len(group_ids) > max_per_group:
-                    oldest = min(group_ids, key=lambda k: self._db[k].get("time", 0))
+                self._ensure_group_index()
+                gids = self._group_index.setdefault(group_id, [])
+                gids.append(message_id)
+                while len(gids) > max_per_group:
+                    oldest = min(gids, key=lambda k: self._db[k].get("time", 0))
                     del self._db[oldest]
-                    group_ids.remove(oldest)
+                    gids.remove(oldest)
                     self._db["data"]["total"] = max(0, self._db["data"]["total"] - 1)
             self._write()
         return True
@@ -95,6 +110,7 @@ class RecallDB:
                 return False
             del self._db[mid]
             self._db["data"]["total"] = max(0, self._db["data"]["total"] - 1)
+            self._invalidate_group_index()
             self._write()
         return True
 
@@ -131,6 +147,7 @@ class RecallDB:
 
             if removed:
                 self._db["data"]["total"] = len(self._db) - 1
+                self._invalidate_group_index()
                 self._write()
                 module_logger.info(f"[RecallDB] 清理了 {removed} 条消息")
 

@@ -21,11 +21,13 @@ MAP_MAPPING = {
 
 TINI_API_URL = "https://www.tmini.net/api/sjzmm?ckey=&type="
 
+_KRRB_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0"
+)
+
 KKRB_BASE_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0"
-    ),
+    "User-Agent": _KRRB_UA,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     "Connection": "keep-alive",
@@ -38,10 +40,7 @@ KKRB_API_HEADERS = {
     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
     "Origin": "https://www.kkrb.net",
     "Referer": "https://www.kkrb.net/?viewpage=view%2Foverview",
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0"
-    ),
+    "User-Agent": _KRRB_UA,
     "X-Requested-With": "XMLHttpRequest",
 }
 

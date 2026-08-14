@@ -1,11 +1,14 @@
 """群组配置通用处理（跨模块共享）。
 
-统一三处重复的群模式判断与启用群解析：
+统一重复的群模式判断与启用群解析：
 - check_group_enabled：单个群是否启用（all 默认启用 / partial 仅勾选 / none 禁用）；
-- resolve_group_ids：获取排序后的启用群列表，新群自动注册进配置（写回）。
+- resolve_group_ids：获取排序后的启用群列表，新群自动注册进配置（写回）；
+- migrate_group_list_config：旧版 list 群配置 → 新版 {gid: {enabled, index}} 一次性迁移。
 """
 
 from __future__ import annotations
+
+from app.modules.base import resolve_enabled_ids
 
 
 def check_group_enabled(
@@ -45,20 +48,23 @@ async def resolve_group_ids(
     bot = module.ctx.bot
     if bot is None:
         return []
-    resp = await bot.get_group_list()
-    if not resp or resp.get("status") != "ok":
-        return []
-    data = resp.get("data", []) or []
+    # 优先用登录缓存（gateway 登录时已拉取群列表），避免每次指令都实时拉取；
+    # 缓存为空（未登录/测试 mock）时回退实时请求。
+    cached = getattr(bot, "all_group_list", None) or []
+    if cached:
+        group_ids = [str(g) for g in cached]
+    else:
+        resp = await bot.get_group_list()
+        if not resp or resp.get("status") != "ok":
+            return []
+        group_ids = [str(g.get("group_id", "")) for g in resp.get("data", []) or [] if g.get("group_id")]
 
     config = module.config
     group_configs = dict(config.get(key, {}) or {})
 
     # 自动注册新群
     dirty = False
-    for g in data:
-        gid = str(g.get("group_id", ""))
-        if not gid:
-            continue
+    for gid in group_ids:
         if gid not in group_configs:
             group_configs[gid] = {"enabled": True, "index": len(group_configs)}
             dirty = True
@@ -75,3 +81,30 @@ async def resolve_group_ids(
 
     enabled.sort(key=lambda gid: group_configs.get(gid, {}).get("index", 9999))
     return enabled
+
+
+def migrate_group_list_config(
+    module,
+    legacy_key: str,
+    legacy_mode_key: str,
+    new_key: str,
+    new_mode_key: str,
+) -> bool:
+    """旧版 list 群配置 → 新版 {gid: {enabled, index}} 一次性迁移（保留拖拽顺序）。
+
+    幂等：新字段已有值或旧字段不存在时直接返回 False。
+    """
+    config = module.config
+    if config.get(new_key):
+        return False
+    legacy = config.get(legacy_key, None)
+    if not legacy:
+        return False
+    mode = config.get(legacy_mode_key, "all")
+    groups = {}
+    for i, gid in enumerate(resolve_enabled_ids(legacy, mode)):
+        groups[gid] = {"enabled": True, "index": i}
+    config.set(new_key, groups)
+    if mode in ("partial", "none"):
+        config.set(new_mode_key, mode)
+    return True

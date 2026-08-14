@@ -2,7 +2,7 @@
 
 
 def get_forward_nodes(forward_msg):
-    """递归构建 node 格式消息节点，支持多层嵌套合并转发。"""
+    """递归构建 node 格式消息节点，支持多层嵌套合并转发（多个 forward 段全部展开）。"""
     msg_nodes = []
     for msg in forward_msg:
         sender = msg.get("sender", {})
@@ -11,15 +11,12 @@ def get_forward_nodes(forward_msg):
         user_id = sender.get("user_id", "")
         msg_array = msg.get("message", [])
 
-        has_forward = False
         nested_nodes = []
         for msg_json in msg_array:
             if msg_json.get("type") == "forward":
-                has_forward = True
-                forward_data = msg_json.get("data", {}).get("content", [])
-                nested_nodes = get_forward_nodes(forward_data)
+                nested_nodes.extend(get_forward_nodes(msg_json.get("data", {}).get("content", [])))
 
-        if not has_forward:
+        if not nested_nodes:
             msg_nodes.append({
                 "type": "node",
                 "data": {"name": user_name, "uin": user_id, "content": msg_array},

@@ -41,3 +41,32 @@ def get_data_path(module_name: str, create: bool = True) -> str:
     if create:
         path.mkdir(parents=True, exist_ok=True)
     return str(path)
+
+
+async def register_daily_schedule(
+    module,
+    *,
+    key_suffix: str,
+    enable_key: str,
+    time_key: str,
+    handler_factory,
+) -> bool:
+    """按配置的每日时间动态注册定时任务；未启用则注销（模块 on_load 调用）。
+
+    Args:
+        module: 模块实例（须有 ctx.services.scheduler）
+        key_suffix: 任务 key 后缀（如 "daily" / "cron"），同模块同后缀互斥
+        enable_key: 启用开关配置键
+        time_key: 每日触发时间配置键（HH:MM[:SS] 或 5 字段 cron）
+        handler_factory: () -> 无参异步处理器（如 lambda: functools.partial(daily_push, module, bot)）
+    """
+    scheduler = module.ctx.services.scheduler
+    if scheduler is None or module.bot_id is None:
+        return False
+    if not module.config.get(enable_key, False):
+        await scheduler.unload_module(module.module_name, module.bot_id)
+        return False
+    time_str = module.config.get(time_key, "00:00")
+    key = f"{module.module_name}:{module.bot_id}:{key_suffix}"
+    await scheduler.register(key, time_str, handler_factory())
+    return True

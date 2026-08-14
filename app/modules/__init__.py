@@ -1,6 +1,6 @@
 """插件系统：BaseModule / 注册表 / 权限 / 事件分发 / 插件 API。"""
 
-from app.modules.api import get_config_path, get_data_path, get_modules
+from app.modules.api import get_config_path, get_data_path, get_modules, register_daily_schedule
 from app.modules.authority import (
     AUTHORITY_TYPES,
     check_event_permission,
@@ -41,4 +41,5 @@ __all__ = [
     "get_modules",
     "get_config_path",
     "get_data_path",
+    "register_daily_schedule",
 ]
