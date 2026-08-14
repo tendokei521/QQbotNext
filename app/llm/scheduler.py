@@ -318,7 +318,7 @@ class TaskScheduler:
 
         config = self.module.config
         history = self.session_mgr.get_history(
-            entry.session_id, limit=int(config.get("history_rounds", 10))
+            entry.session_id, limit=int(config.get("history_rounds", 50))
         )
         system_prompt = config.get("system_prompt", "你是一个友好的助手。")
         now_str = datetime.now().strftime("%Y年%m月%d日 %H:%M")
@@ -346,7 +346,7 @@ class TaskScheduler:
             messages,
             model=config.get("model", "deepseek-chat"),
             temperature=config.get("temperature", 0.7),
-            max_tokens=config.get("max_tokens", 150),
+            max_tokens=config.get("max_tokens", 1024),
         )
 
     def _complete(self, entry: TaskEntry) -> None:

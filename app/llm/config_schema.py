@@ -34,8 +34,8 @@ SCHEMA = {
         "default": "deepseek-chat", "placeholder": "deepseek-chat", "group": "group_model",
     },
     "max_tokens": {
-        "type": "number", "label": "最大输出Token", "description": "模型回复的最大token数（建议150以内）",
-        "default": 200, "min": 50, "max": 500, "group": "group_model",
+        "type": "number", "label": "最大输出Token", "description": "模型回复的最大token数",
+        "default": 1024, "min": 50, "max": 4096, "group": "group_model",
     },
     "temperature": {
         "type": "number", "label": "温度", "description": "回复的随机性，0-1之间",
@@ -65,7 +65,7 @@ SCHEMA = {
     },
     "history_rounds": {
         "type": "number", "label": "历史对话轮数", "description": "保留多少轮对话历史",
-        "default": 10, "min": 5, "max": 20, "group": "group_session",
+        "default": 50, "min": 5, "max": 100, "group": "group_session",
     },
     "max_message_length": {
         "type": "number", "label": "消息最大长度", "description": "单条消息的最大字符数",

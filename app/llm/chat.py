@@ -136,9 +136,9 @@ async def call_llm_and_reply(module, event, session_mgr, config,
                              session_id, user_id, group_id, is_private, include_pre_history):
     model = config.get("model", "deepseek-chat")
     system_prompt = config.get("system_prompt", "你是一个友好的助手。")
-    max_tokens = config.get("max_tokens", 150)
+    max_tokens = config.get("max_tokens", 1024)
     temperature = config.get("temperature", 0.7)
-    history_rounds = config.get("history_rounds", 10)
+    history_rounds = config.get("history_rounds", 50)
 
     session = session_mgr.get_session(session_id)
     if not session:

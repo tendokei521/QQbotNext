@@ -35,7 +35,7 @@ class BaseProvider:
         *,
         model: str | None = None,
         temperature: float = 0.7,
-        max_tokens: int = 150,
+        max_tokens: int = 1024,
         timeout: int = 30,
     ) -> LLMResponse:
         raise NotImplementedError

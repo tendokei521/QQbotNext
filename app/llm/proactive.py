@@ -154,7 +154,7 @@ class ProactiveManager:
 
         # 上下文
         session = self.session_mgr.get_session(session_id)
-        history = self.session_mgr.get_history(session_id, limit=int(self.module.config.get("history_rounds", 10))) if session else []
+        history = self.session_mgr.get_history(session_id, limit=int(self.module.config.get("history_rounds", 50))) if session else []
         system_prompt = self.module.config.get("system_prompt", "你是一个友好的助手。")
         now_str = datetime.now().strftime("%Y年%m月%d日 %H:%M")
         prompt_tpl = self._cfg("proactive_prompt", DEFAULT_PROACTIVE_PROMPT)
@@ -174,7 +174,7 @@ class ProactiveManager:
             messages,
             model=self.module.config.get("model", "deepseek-chat"),
             temperature=self.module.config.get("temperature", 0.7),
-            max_tokens=self.module.config.get("max_tokens", 150),
+            max_tokens=self.module.config.get("max_tokens", 1024),
         )
         if self._data.get(session_id, {}).get("last_user_time", 0) != start_last:
             logger.add_info(f"#{self.module.bot_id}").info(f"[主动消息] {session_id} 生成期间用户来消息，丢弃本次")
