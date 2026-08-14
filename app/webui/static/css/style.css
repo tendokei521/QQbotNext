@@ -981,7 +981,7 @@ textarea.config-updated {
     justify-content: space-between;
     padding: 12px 16px;
     margin-bottom: 16px;
-    background: linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%);
+    background: var(--card);
     border: 1px solid #d6bcfa;
     border-radius: 8px;
     border-left: 4px solid var(--purple);
@@ -1007,10 +1007,10 @@ textarea.config-updated {
     color: var(--muted);
 }
 
-/* 单一服务开关：紫色主题以与普通bool区分；关闭态紫框白底，开启态紫底 */
+/* 单一服务开关：紫色主题以与普通bool区分；开启态紫底 */
 .switch-single-service .slider {
-    background-color: var(--card);
-    border: 1px solid var(--purple);
+    background-color: var(--faint);
+    border-color: var(--faint);
 }
 
 .switch-single-service input:checked + .slider {
