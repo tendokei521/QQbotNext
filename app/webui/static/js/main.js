@@ -1098,28 +1098,47 @@ function updateSingleServiceWarning(moduleName) {
         warningEl.style.display = 'none';
         return;
     }
+    const currentBot = botsData.find(b => b.bot_id == currentBotId);
+    if (!currentBot) {
+        warningEl.style.display = 'none';
+        return;
+    }
+    const currentIndex = currentBot.index;
 
-    fetch('/api/webui/multi-group').then(r => r.json()).then(data => {
-        const multiGroup = data.multi_group || { groups: {} };
-        const groupsConfig = multiGroup.groups || {};
-        let isServiceAccount = false;
+    // 对齐后端 is_single_service_skipped：仅同群 ≥2 个在线 Bot 且该群指定了服务账号时生效
+    Promise.all([
+        fetch('/api/webui/multi-group').then(r => r.json()),
+        fetch('/api/bots/groups').then(r => r.json()),
+    ]).then(([configData, groupsData]) => {
+        const groupsConfig = (configData.multi_group || { groups: {} }).groups || {};
+        const botsGroups = groupsData.bots_groups || {};
 
-        for (const [groupId, gConfig] of Object.entries(groupsConfig)) {
+        // 找出「当前账号不会触发」的群：
+        //   1. 群配置了 service_bot_index；2. 服务账号不是当前账号；3. 群内在线 Bot ≥ 2
+        const affectedGroups = [];
+        for (const [gid, gConfig] of Object.entries(groupsConfig)) {
             const serviceBotIndex = gConfig.service_bot_index;
-            if (serviceBotIndex !== undefined && serviceBotIndex !== null) {
-                const bot = botsData.find(b => b.index === serviceBotIndex);
-                if (bot && bot.bot_id == currentBotId) {
-                    isServiceAccount = true;
-                    break;
-                }
+            if (serviceBotIndex === undefined || serviceBotIndex === null) continue;
+            if (Number(serviceBotIndex) === currentIndex) continue;  // 当前账号是指定服务账号 → 不提示
+
+            let onlineInGroup = 0;
+            for (const [idx, bg] of Object.entries(botsGroups)) {
+                const bot = botsData.find(b => b.index == idx);
+                if (!bot || bot.status !== 'connected') continue;
+                if ((bg.groups || []).includes(Number(gid))) onlineInGroup++;
             }
+            if (onlineInGroup >= 2) affectedGroups.push(gid);
         }
 
-        if (!isServiceAccount) {
-            warningEl.style.display = 'flex';
-        } else {
+        if (affectedGroups.length === 0) {
             warningEl.style.display = 'none';
+            return;
         }
+        const span = warningEl.querySelector('span');
+        if (span) {
+            span.textContent = `当前账号非本模块指定服务账号，该模块在群${affectedGroups.join('、')}下不会触发`;
+        }
+        warningEl.style.display = 'flex';
     }).catch(() => {
         warningEl.style.display = 'none';
     });
