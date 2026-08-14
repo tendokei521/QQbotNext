@@ -5,3 +5,9 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# 运行时数据（SQLite WAL 临时文件 / LLM 会话历史与状态）
+data/app.db-wal
+data/app.db-shm
+data/app.db-journal
+data/llm/
