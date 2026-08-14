@@ -1,7 +1,7 @@
 """B 站 API 操作：链接检测、短链解析、视频信息获取、消息格式化、BV 去重。
 
-从 astrbot napcat_bilibili_parser 移植，logger 换为框架 module_logger；
-新增域名白名单校验与 BV 去重缓存。
+- 网络请求走 CurlCffiClient（浏览器指纹模拟，自 fabric_api Bilibili_API 移植）；
+- 纯逻辑（正则提取 / 去重 / 格式化）保留为模块级函数。
 """
 
 from __future__ import annotations
@@ -11,11 +11,10 @@ import re
 import time
 import urllib.parse
 
-import aiohttp
-
 from app.core.logger import module_logger
+from app.infrastructure.curl_cffi import CurlCffiClient
 
-HEADERS = {
+BILI_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -23,6 +22,8 @@ HEADERS = {
     ),
     "Referer": "https://www.bilibili.com/",
 }
+
+BILIBILI_API_URL = "https://api.bilibili.com/x/web-interface/view"
 
 # 正则
 REGEX_SHORT = re.compile(r"(?:https?://)?b23\.tv/[a-zA-Z0-9]+", re.IGNORECASE)
@@ -41,6 +42,67 @@ _ALLOWED_DOMAINS = (
 
 # BV 去重缓存：{bv: 最近解析时间戳}
 _bv_cache: dict[str, float] = {}
+
+
+# ==================== API 封装类（网络请求） ====================
+
+
+class BilibiliAPI(CurlCffiClient):
+    """B站 API 封装：短链解析 + 视频信息获取（curl_cffi 浏览器指纹模拟）。"""
+
+    def __init__(self, impersonate="chrome", proxy: str = "") -> None:
+        super().__init__(impersonate=impersonate, proxy=proxy)
+        self.headers = dict(BILI_HEADERS)  # 覆盖默认请求头
+
+    async def resolve_short_link(self, url: str, timeout: int = 10) -> str:
+        """解析 b23.tv 短链接，返回真实 URL。"""
+        if not url.startswith("http"):
+            url = "https://" + url
+        try:
+            resp = await self.GET(url, timeout=timeout)
+            return str(resp.url)
+        except Exception as e:
+            module_logger.debug(f"[BilibiliAPI] 短链解析失败: {e}")
+            return url
+
+    async def extract_b23(self, bv_list: list) -> list:
+        """把 b23.tv 短链统一解析为 BV 号（其余原样保留）。"""
+        b23_list = []
+        bili_list = []
+        for item in bv_list:
+            for match in REGEX_SHORT.finditer(item):
+                b23_list.append(match.group().strip())
+            if not REGEX_SHORT.match(item):
+                bili_list.append(item)
+        for b23_url in b23_list:
+            bili_list.append(extract_from_direct_link(await self.resolve_short_link(b23_url)))
+        return bili_list
+
+    async def get_video_info(self, vid: str, timeout: int = 10, cookie: str = "") -> dict | None:
+        """通过 B站 API 获取视频信息。"""
+        vid = vid.strip()
+        params = {}
+        if vid.lower().startswith("bv"):
+            params["bvid"] = vid
+        elif vid.lower().startswith("av"):
+            params["aid"] = vid[2:]
+        else:
+            return None
+
+        headers = dict(self.headers)
+        if cookie:
+            headers["Cookie"] = cookie
+
+        try:
+            resp = await self.GET(BILIBILI_API_URL, params=params, headers=headers, timeout=timeout)
+            data = resp.json()
+            return data["data"] if data.get("code") == 0 else None
+        except Exception as e:
+            module_logger.error(f"[BilibiliAPI] 获取视频信息失败: {e}")
+            return None
+
+
+# ==================== 纯逻辑（链接提取 / 去重 / 格式化） ====================
 
 
 def format_number(num: int) -> str:
@@ -84,9 +146,6 @@ def _find_qqdocurl(data) -> str:
     return ""
 
 
-# ==================== 链接提取 ====================
-
-
 def extract_from_text(raw: list) -> list:
     """从文本片段中提取 B站 URL（直链 / BV号 / b23 短链）。"""
     if raw is None:
@@ -120,66 +179,6 @@ def extract_from_direct_link(raw: str) -> str:
     return ""
 
 
-async def extract_b23(bv_list: list) -> list:
-    """把 b23.tv 短链统一解析为 BV 号（其余原样保留）。"""
-    b23_list = []
-    bili_list = []
-    for item in bv_list:
-        for match in REGEX_SHORT.finditer(item):
-            b23_list.append(match.group().strip())
-        if not REGEX_SHORT.match(item):
-            bili_list.append(item)
-    for b23_url in b23_list:
-        bili_list.append(extract_from_direct_link(await resolve_short_link(b23_url)))
-    return bili_list
-
-
-async def resolve_short_link(url: str, timeout: int = 10) -> str:
-    """解析 b23.tv 短链接，返回真实 URL。"""
-    if not url.startswith("http"):
-        url = "https://" + url
-    try:
-        async with aiohttp.ClientSession(headers=HEADERS) as session:
-            async with session.head(
-                url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=timeout)
-            ) as resp:
-                return str(resp.url)
-    except Exception as e:
-        module_logger.debug(f"[BilibiliAPI] 短链解析失败: {e}")
-        return url
-
-
-async def get_video_info(vid: str, timeout: int = 10, cookie: str = "") -> dict | None:
-    """通过 B站 API 获取视频信息。"""
-    vid = vid.strip()
-    params = {}
-    if vid.lower().startswith("bv"):
-        params["bvid"] = vid
-    elif vid.lower().startswith("av"):
-        params["aid"] = vid[2:]
-    else:
-        return None
-
-    headers = dict(HEADERS)
-    if cookie:
-        headers["Cookie"] = cookie
-
-    url = "https://api.bilibili.com/x/web-interface/view"
-    try:
-        async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(
-                url, params=params, timeout=aiohttp.ClientTimeout(total=timeout)
-            ) as resp:
-                data = await resp.json()
-                return data["data"] if data.get("code") == 0 else None
-    except Exception as e:
-        module_logger.error(f"[BilibiliAPI] 获取视频信息失败: {e}")
-        return None
-
-
-# ==================== BV 去重 ====================
-
-
 def filter_bv_dedup(video_ids: list, timeout: int) -> list:
     """过滤掉在超时时间内已解析过的 BV 号，并清理过期缓存。"""
     now = time.time()
@@ -196,9 +195,6 @@ def filter_bv_dedup(video_ids: list, timeout: int) -> list:
     for k in stale:
         del _bv_cache[k]
     return fresh_ids
-
-
-# ==================== 消息格式化 ====================
 
 
 def build_video_message(info: dict, show_cover: bool = True) -> list:

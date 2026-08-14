@@ -10,6 +10,7 @@ dependencies = [
     "websockets>=12",
     "aiohttp>=3.8",
     "brotlicffi>=1.1",  # aiohttp 3.13 + 官方 brotli 包解 br 编码不兼容（process 无 max_length），需 brotlicffi
+    "curl_cffi>=0.15",  # 浏览器指纹模拟 HTTP 客户端（模块网络请求统一走 CurlCffiClient）
     "aiosqlite>=0.19",
     "pydantic>=2.4",
     "pydantic-settings>=2.0",

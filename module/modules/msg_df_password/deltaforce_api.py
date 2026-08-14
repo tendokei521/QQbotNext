@@ -1,4 +1,4 @@
-"""三角洲行动密码获取器：双站点实现（从 astrbot napcat_deltaforce_password 移植）。
+"""三角洲行动密码获取器：双站点实现（curl_cffi 浏览器指纹模拟，自 fabric_api 移植）。
 
 - kkrb:  POST 三步流程（Cookie → built_ver → 密码 JSON）
 - tmini: GET 单步流程（直接请求纯文本，正则解析）
@@ -7,12 +7,9 @@
 from __future__ import annotations
 
 import re
-import ssl
-
-import aiohttp
 
 from app.core.logger import module_logger
-from yarl import URL
+from app.infrastructure.curl_cffi import CurlCffiClient
 
 MAP_MAPPING = {
     "db": "零号大坝",
@@ -24,99 +21,80 @@ MAP_MAPPING = {
 
 TINI_API_URL = "https://www.tmini.net/api/sjzmm?ckey=&type="
 
+KKRB_BASE_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Connection": "keep-alive",
+    "Cache-Control": "max-age=0",
+}
+
+KKRB_API_HEADERS = {
+    "Accept": "*/*",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "Origin": "https://www.kkrb.net",
+    "Referer": "https://www.kkrb.net/?viewpage=view%2Foverview",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0"
+    ),
+    "X-Requested-With": "XMLHttpRequest",
+}
+
 
 # ==================== 站点: kkrb ====================
 
 
-class DeltaForceKkrbFetcher:
-    """kkrb.net — POST 三步流程获取密码。"""
+class DeltaForceKkrbFetcher(CurlCffiClient):
+    """kkrb.net — curl_cffi POST 三步流程获取密码（Cookie 自动管理）。"""
 
-    def __init__(self):
+    def __init__(self, impersonate="chrome", proxy: str = "") -> None:
+        super().__init__(impersonate=impersonate, proxy=proxy)
         self.base_url = "https://www.kkrb.net"
-        self.session: aiohttp.ClientSession | None = None
         self.version: str | None = None
 
-        # 站点证书校验异常（历史遗留），关闭校验以保证可用
-        self.ssl_context = ssl.create_default_context()
-        self.ssl_context.check_hostname = False
-        self.ssl_context.verify_mode = ssl.CERT_NONE
-
-        self.base_headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-            "Connection": "keep-alive",
-            "Cache-Control": "max-age=0",
-        }
-        self.api_headers = {
-            "Accept": "*/*",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "Origin": self.base_url,
-            "Referer": f"{self.base_url}/?viewpage=view%2Foverview",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0",
-            "X-Requested-With": "XMLHttpRequest",
-        }
-
-    async def __aenter__(self):
-        self.session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=self.ssl_context))
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.close()
-
-    async def close(self):
-        if self.session:
-            await self.session.close()
-            self.session = None
-
-    async def _ensure_session(self):
-        if not self.session:
-            self.session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=self.ssl_context))
-
     async def get_initial_cookie(self) -> bool:
-        await self._ensure_session()
+        """步骤1: 获取 Cookie（curl_cffi 自动管理）。"""
         try:
-            async with self.session.get(  # type: ignore[union-attr]
-                self.base_url, headers=self.base_headers,
-                timeout=aiohttp.ClientTimeout(total=30),
-            ) as _:
-                cookies = self.session.cookie_jar.filter_cookies(URL(self.base_url))  # type: ignore[union-attr]
-                return bool(cookies)
+            await self.GET(self.base_url, headers=KKRB_BASE_HEADERS, timeout=30)
+            return bool(self.session is not None and self.session.cookies)
         except Exception as e:
             module_logger.error(f"[DeltaForce:kkrb] Cookie 获取失败: {e}")
             return False
 
     async def get_menu_data(self) -> dict | None:
-        await self._ensure_session()
+        """步骤2: 获取 built_ver 版本号。"""
         try:
-            async with self.session.post(  # type: ignore[union-attr]
-                f"{self.base_url}/getMenu", headers=self.api_headers, data={},
-                timeout=aiohttp.ClientTimeout(total=30),
-            ) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    self.version = data.get("built_ver")
-                    if self.version:
-                        module_logger.info(f"[DeltaForce:kkrb] built_ver={self.version}")
-                        return data
-                return None
+            response = await self.GET(f"{self.base_url}/getMenu", headers=KKRB_API_HEADERS, timeout=30)
+            if response.status_code == 200:
+                data = response.json()
+                self.version = data.get("built_ver")
+                if self.version:
+                    module_logger.info(f"[DeltaForce:kkrb] built_ver={self.version}")
+                    return data
+            return None
         except Exception as e:
             module_logger.error(f"[DeltaForce:kkrb] getMenu 异常: {e}")
             return None
 
     async def fetch_passwords(self) -> dict | None:
+        """步骤3: 用版本号获取密码 JSON。"""
         if not self.version and not await self.get_menu_data():
             return None
         try:
-            async with self.session.post(  # type: ignore[union-attr]
-                f"{self.base_url}/getOVData", headers=self.api_headers,
+            response = await self.POST(
+                f"{self.base_url}/getOVData",
                 data={"version": self.version, "globalData": "false"},
-                timeout=aiohttp.ClientTimeout(total=30),
-            ) as response:
-                if response.status == 200:
-                    return await response.json()
-                return None
+                headers=KKRB_API_HEADERS,
+                timeout=30,
+            )
+            if response.status_code == 200:
+                return response.json()
+            return None
         except Exception as e:
             module_logger.error(f"[DeltaForce:kkrb] getOVData 异常: {e}")
             return None
@@ -128,8 +106,8 @@ class DeltaForceKkrbFetcher:
             return f"{int(updated_str[4:6])}月{int(updated_str[6:8])}日"
         return updated_str
 
-    @staticmethod
-    def parse_passwords(data: dict) -> dict:
+    def parse_passwords(self, data: dict) -> dict:
+        """解析密码 JSON 数据。"""
         passwords: dict = {}
         bd_data = data.get("data", {}).get("bdData", {})
         date_str = ""
@@ -138,15 +116,15 @@ class DeltaForceKkrbFetcher:
                 pwd = value.get("password")
                 if pwd:
                     passwords[MAP_MAPPING[key]] = pwd
-                # 从第一个有效条目提取日期
                 if not date_str:
                     updated = value.get("updated", "")
-                    date_str = DeltaForceKkrbFetcher._parse_kkrb_date(updated)
+                    date_str = self._parse_kkrb_date(updated)
         if date_str:
             passwords["_date"] = date_str
         return passwords
 
     async def get_today_passwords(self) -> dict | None:
+        """执行完整三步流程，获取今日密码。"""
         if not await self.get_initial_cookie():
             return None
         if not await self.get_menu_data():
@@ -160,32 +138,16 @@ class DeltaForceKkrbFetcher:
 # ==================== 站点: tmini ====================
 
 
-class DeltaForceTminiFetcher:
+class DeltaForceTminiFetcher(CurlCffiClient):
     """tmini.net — GET 单步请求，正则解析明文密码。"""
 
-    def __init__(self):
-        self._session: aiohttp.ClientSession | None = None
-
-    async def _ensure_session(self):
-        if not self._session:
-            self._session = aiohttp.ClientSession()
-
-    async def close(self):
-        if self._session:
-            await self._session.close()
-            self._session = None
-
     async def get_today_passwords(self) -> dict | None:
-        await self._ensure_session()
         try:
-            async with self._session.get(  # type: ignore[union-attr]
-                TINI_API_URL,
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as resp:
-                if resp.status != 200:
-                    module_logger.error(f"[DeltaForce:tmini] HTTP {resp.status}")
-                    return None
-                text = await resp.text()
+            resp = await self.GET(TINI_API_URL, timeout=10)
+            if resp.status_code != 200:
+                module_logger.error(f"[DeltaForce:tmini] HTTP {resp.status_code}")
+                return None
+            text = resp.text
         except Exception as e:
             module_logger.error(f"[DeltaForce:tmini] 请求异常: {e}")
             return None
@@ -236,9 +198,5 @@ async def fetch_passwords_from_site(site: str) -> dict | None:
         module_logger.error(f"[DeltaForce] 未知站点: {site}")
         return None
 
-    fetcher = fetcher_cls()
-    try:
-        result = await fetcher.get_today_passwords()
-    finally:
-        await fetcher.close()
-    return result
+    async with fetcher_cls() as fetcher:
+        return await fetcher.get_today_passwords()

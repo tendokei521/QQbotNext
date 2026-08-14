@@ -40,41 +40,42 @@ async def handle(module, event):
     if not bv_list:
         return
 
-    # 3. 解析 b23.tv 短链，统一为 BV 号
-    bv_ids = await bapi.extract_b23(bv_list)
-    if not bv_ids:
-        return
-
-    # 4. BV 去重保序
-    if config.get("enable_bv_dedup", True):
-        video_ids = bapi.filter_bv_dedup(bv_ids, int(config.get("bv_dedup_timeout", 60) or 60))
-    else:
-        video_ids = list(dict.fromkeys(bv_ids))
-    if not video_ids:
-        return
-
-    # 5. 限制数量
-    video_ids = video_ids[: int(config.get("max_parse_count", 3) or 3)]
-    source = f"群{group_id}" if group_id else "私聊"
-    logger.info(f"{source} 识别到 {len(video_ids)} 个视频: {video_ids}")
-
-    # 6. 逐个查询视频信息并构建消息链
+    # 3-6. 网络请求（短链归一 + 视频信息）走 BilibiliAPI 封装（curl_cffi 指纹模拟）
     chain: list = []
-    if config.get("is_reply", True) and event.message_id:
-        chain.append({"type": "reply", "data": {"id": event.message_id}})
-    for i, vid in enumerate(video_ids):
-        try:
-            info = await bapi.get_video_info(
-                vid,
-                timeout=int(config.get("timeout", 10) or 10),
-                cookie=config.get("cookie", "") or "",
-            )
-            if info:
-                if i > 0:
-                    chain.append({"type": "text", "data": {"text": "\n──────────────\n"}})
-                chain.extend(bapi.build_video_message(info, config.get("show_cover", True)))
-        except Exception as e:
-            logger.error(f"解析 {vid} 失败: {e}")
+    async with bapi.BilibiliAPI() as api:
+        bv_ids = await api.extract_b23(bv_list)
+        if not bv_ids:
+            return
+
+        # 4. BV 去重保序
+        if config.get("enable_bv_dedup", True):
+            video_ids = bapi.filter_bv_dedup(bv_ids, int(config.get("bv_dedup_timeout", 60) or 60))
+        else:
+            video_ids = list(dict.fromkeys(bv_ids))
+        if not video_ids:
+            return
+
+        # 5. 限制数量
+        video_ids = video_ids[: int(config.get("max_parse_count", 3) or 3)]
+        source = f"群{group_id}" if group_id else "私聊"
+        logger.info(f"{source} 识别到 {len(video_ids)} 个视频: {video_ids}")
+
+        # 6. 逐个查询视频信息并构建消息链
+        if config.get("is_reply", True) and event.message_id:
+            chain.append({"type": "reply", "data": {"id": event.message_id}})
+        for i, vid in enumerate(video_ids):
+            try:
+                info = await api.get_video_info(
+                    vid,
+                    timeout=int(config.get("timeout", 10) or 10),
+                    cookie=config.get("cookie", "") or "",
+                )
+                if info:
+                    if i > 0:
+                        chain.append({"type": "text", "data": {"text": "\n──────────────\n"}})
+                    chain.extend(bapi.build_video_message(info, config.get("show_cover", True)))
+            except Exception as e:
+                logger.error(f"解析 {vid} 失败: {e}")
 
     if len(chain) <= 1:  # 仅 reply 段 → 无解析结果
         return

@@ -5,7 +5,7 @@
   "task_id": "86716ef4b211",
   "title": "对话 3cee06",
   "bot_id": "99",
-  "saved_at": 1786695781,
+  "saved_at": 1786698786,
   "messages": [
     {
       "role": "assistant",
@@ -411,6 +411,21 @@
       "role": "assistant",
       "content": "私聊提醒",
       "time": 1786695781
+    },
+    {
+      "role": "assistant",
+      "content": "该起床啦",
+      "time": 1786698786
+    },
+    {
+      "role": "assistant",
+      "content": "明天早上记得带伞哦~",
+      "time": 1786698786
+    },
+    {
+      "role": "assistant",
+      "content": "私聊提醒",
+      "time": 1786698786
     }
   ]
 }

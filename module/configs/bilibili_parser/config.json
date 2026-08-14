@@ -1,9 +1,0 @@
-{
-  "3569937952": {
-    "enable_json_video": true,
-    "enable_link_video": true,
-    "show_cover": true,
-    "max_parse_count": 3,
-    "timeout": 10
-  }
-}
