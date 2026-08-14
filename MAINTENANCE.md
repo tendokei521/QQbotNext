@@ -57,17 +57,17 @@ python main.py
 
 ## 4. 配置管理
 
-### 4.1 环境变量（.env，前缀 `QQBOT_`）
+### 4.1 环境变量（.env，变量名 = 字段名大写，无前缀）
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `QQBOT_WEBUI_HOST` | `127.0.0.1` | WebUI 监听地址（外网访问请配反向代理，勿直接 0.0.0.0 裸奔） |
-| `QQBOT_WEBUI_PORT` | `9200` | WebUI 端口 |
-| `QQBOT_WEBUI_TOKEN` | 空 | 非空则 API 需 `Authorization: Bearer <token>` |
-| `QQBOT_DB_PATH` | `data/app.db` | SQLite 路径 |
-| `QQBOT_LOG_DIR` | `logs` | 日志目录 |
-| `QQBOT_WS_CONNECT_TIMEOUT` | `30` | 连接超时（秒） |
-| `QQBOT_WS_PING_INTERVAL` / `_TIMEOUT` | `30`/`10` | WebSocket 心跳 |
+| `WEBUI_HOST` | `127.0.0.1` | WebUI 监听地址（外网访问请配反向代理，勿直接 0.0.0.0 裸奔） |
+| `WEBUI_PORT` | `9200` | WebUI 端口 |
+| `WEBUI_TOKEN` | 空 | 非空则 API 需 `Authorization: Bearer <token>` |
+| `DB_PATH` | `data/app.db` | SQLite 路径 |
+| `LOG_DIR` | `logs` | 日志目录 |
+| `WS_CONNECT_TIMEOUT` | `30` | 连接超时（秒） |
+| `WS_PING_INTERVAL` / `WS_PING_TIMEOUT` | `30`/`10` | WebSocket 心跳 |
 
 参考 `pyproject.toml` 与 `app/core/settings.py`。改完 `.env` 需重启生效。
 
@@ -199,7 +199,7 @@ venv\Scripts\python.exe -c "import sqlite3; c=sqlite3.connect('data/app.db'); pr
 
 ## 11. WebUI 维护
 
-- **打不开**：确认进程在跑；确认 `QQBOT_WEBUI_HOST/PORT`；外网访问需放行端口或反代。
+- **打不开**：确认进程在跑；确认 `WEBUI_HOST/PORT`；外网访问需放行端口或反代。
 - **模块列表为空**：首次打开时模块列表来自「全局实例」，若为空说明模块未加载成功 → 查 `logs/errors.log` 的 `[Module]` 加载失败记录。
 - **实时日志不显示**：控制台走 `/ws/logs` WebSocket，若浏览器控制台报错刷新即可；后端日志仍会写入 `logs/`。
 - **改了模块配置不生效**：点「保存配置」后模块运行逻辑读 `module.config`；个别模块需「刷新模块」重载。
@@ -211,7 +211,7 @@ venv\Scripts\python.exe -c "import sqlite3; c=sqlite3.connect('data/app.db'); pr
 | 现象 | 原因与处理 |
 |---|---|
 | 启动报 fastapi/starlette 相关错误 | 用了**基础 Python**。必须用 `venv\Scripts\python.exe`（venv 内 fastapi 0.138 + starlette 1.2 配套；基础 Python310 的 fastapi 0.104 与其 starlette 1.3 不兼容） |
-| 端口被占用 | `netstat -ano | grep 9200` 找到 PID 后结束，或改 `QQBOT_WEBUI_PORT` |
+| 端口被占用 | `netstat -ano | grep 9200` 找到 PID 后结束，或改 `WEBUI_PORT` |
 | 首次启动很慢 | 正在从旧 JSON 迁移 + 加载 14 个模块，正常 |
 
 ### 12.2 连接类
@@ -243,8 +243,8 @@ venv\Scripts\python.exe -c "import sqlite3; c=sqlite3.connect('data/app.db'); pr
 
 ## 13. 安全建议
 
-- **默认只绑 `127.0.0.1`**；需要远程管理时，用反向代理（Nginx/Caddy）+ HTTPS，并设置 `QQBOT_WEBUI_TOKEN`。
-- **token 鉴权**：设置 `QQBOT_WEBUI_TOKEN` 后，所有 `/api/*` 与 `/ws/logs` 需携带 `Authorization: Bearer <token>`（前端页面本身无需 token）。
+- **默认只绑 `127.0.0.1`**；需要远程管理时，用反向代理（Nginx/Caddy）+ HTTPS，并设置 `WEBUI_TOKEN`。
+- **token 鉴权**：设置 `WEBUI_TOKEN` 后，所有 `/api/*` 与 `/ws/logs` 需携带 `Authorization: Bearer <token>`（前端页面本身无需 token）。
 - 不要在群里转发 `.env` / `data/app.db`；`data/`、`logs/` 已在 `.gitignore`。
 
 ## 14. 测试

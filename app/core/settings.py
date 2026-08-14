@@ -12,10 +12,9 @@ ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 
 
 class Settings(BaseSettings):
-    """应用全局配置。所有环境变量以 `QQBOT_` 为前缀（见 .env.example）。"""
+    """应用全局配置。从 .env / 环境变量读取（变量名 = 字段名大写，如 WEBUI_HOST，见 .env.example）。"""
 
     model_config = SettingsConfigDict(
-        env_prefix="QQBOT_",
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",

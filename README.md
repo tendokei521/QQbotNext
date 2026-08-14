@@ -8,7 +8,7 @@
 main.py / app/bootstrap.py      装配与生命周期入口
 app/
 ├── core/                       核心内核（无业务依赖）
-│   ├── settings.py             pydantic-settings 配置（.env 前缀 QQBOT_）
+│   ├── settings.py             pydantic-settings 配置（.env，变量名=字段名大写）
 │   ├── container.py            轻量 DI 容器
 │   ├── logger.py               日志（6h 轮转 / 分级别文件 / 前缀 Logger）
 │   ├── task_manager.py         统一后台任务管理（可追踪、级联取消）
@@ -64,11 +64,11 @@ python main.py
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
-| `QQBOT_WEBUI_HOST` | `127.0.0.1` | WebUI 监听地址（外网访问请配合反向代理） |
-| `QQBOT_WEBUI_PORT` | `9200` | WebUI 端口 |
-| `QQBOT_WEBUI_TOKEN` | 空 | 非空则 API 需 `Authorization: Bearer <token>` |
-| `QQBOT_DB_PATH` | `data/app.db` | SQLite 路径 |
-| `QQBOT_WS_CONNECT_TIMEOUT` | `30` | WebSocket 连接超时 |
+| `WEBUI_HOST` | `127.0.0.1` | WebUI 监听地址（外网访问请配合反向代理） |
+| `WEBUI_PORT` | `9200` | WebUI 端口 |
+| `WEBUI_TOKEN` | 空 | 非空则 API 需 `Authorization: Bearer <token>` |
+| `DB_PATH` | `data/app.db` | SQLite 路径 |
+| `WS_CONNECT_TIMEOUT` | `30` | WebSocket 连接超时 |
 
 ## 开发一个插件
 
