@@ -36,7 +36,7 @@ DEFAULT_TEMPLATES = [
     "我推荐{food}！",
 ]
 
-TRIGGER_WORDS = ("吃什么", "是啊，吃什么")
+TRIGGER_WORDS = ("吃什么", "是啊，吃什么", "今天吃什么")
 ECHO_REPLY = "是啊，吃什么"
 
 

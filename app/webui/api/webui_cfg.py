@@ -38,6 +38,8 @@ async def save_webui_config(request: Request):
     current = cfg_service.get_webui_config()
     if "logs" in data:
         current["logs"].update(data["logs"] or {})
+    if "module_preferences" in data:
+        current["module_preferences"] = data["module_preferences"] or {}
     await cfg_service.save_webui_config(current)
     return _ok("配置已保存")
 
@@ -59,6 +61,30 @@ async def save_logs_config(request: Request):
             logs_cfg[key] = data[key]
     await cfg_service.save_webui_config(config)
     return _ok("日志配置已保存")
+
+
+@router.get("/webui/module-preferences")
+async def get_module_preferences(request: Request):
+    from app.infrastructure.config.config_service import ConfigService
+
+    cfg = get_container(request).get(ConfigService).get_webui_config()
+    return JSONResponse(content=cfg.get("module_preferences", {}))
+
+
+@router.post("/webui/module-preferences")
+async def save_module_preferences(request: Request):
+    from app.infrastructure.config.config_service import ConfigService
+
+    container = get_container(request)
+    cfg_service = container.get(ConfigService)
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    config = cfg_service.get_webui_config()
+    config["module_preferences"] = data.get("module_preferences", {}) or {}
+    await cfg_service.save_webui_config(config)
+    return _ok("模块偏好已保存")
 
 
 @router.get("/webui/single-service")

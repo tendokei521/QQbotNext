@@ -540,8 +540,160 @@ document.querySelectorAll('.module-card-btn').forEach(item => {
                 if (pluginFrame && typeof resizePluginPage === 'function') resizePluginPage(pluginFrame);
             }, 100);
         }
+        recordRecentModule(modName);
     });
 });
+
+// ==================== 模块侧边栏增强 ====================
+let modulePrefs = { pinned: [], hidden: [], recent: [], collapsed: {} };
+let moduleGridView = false;
+let allModuleItems = [];
+
+async function loadModulePrefs() {
+    try {
+        const res = await apiFetch('/api/webui/module-preferences');
+        if (res.ok) modulePrefs = await res.json();
+    } catch (e) {}
+    if (!modulePrefs.pinned) modulePrefs.pinned = [];
+    if (!modulePrefs.hidden) modulePrefs.hidden = [];
+    if (!modulePrefs.recent) modulePrefs.recent = [];
+    if (!modulePrefs.collapsed) modulePrefs.collapsed = {};
+}
+
+async function saveModulePrefs() {
+    try {
+        await apiFetch('/api/webui/module-preferences', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ module_preferences: modulePrefs })
+        });
+    } catch (e) {}
+}
+
+function renderModuleList() {
+    const container = document.getElementById('module-list');
+    if (!container) return;
+    const query = (document.getElementById('module-search')?.value || '').trim().toLowerCase();
+    const items = allModuleItems;
+    const hiddenSet = new Set(modulePrefs.hidden || []);
+    const pinnedSet = new Set(modulePrefs.pinned || []);
+    const recentSet = new Set(modulePrefs.recent || []);
+
+    const visibleItems = items.filter(item => {
+        const name = (item.getAttribute('data-name') || '').toLowerCase();
+        const sign = (item.getAttribute('data-sign') || '').toLowerCase();
+        const tags = (item.getAttribute('data-tags') || '').toLowerCase();
+        const mod = item.getAttribute('data-module');
+        if (hiddenSet.has(mod)) return false;
+        // 默认隐藏的模块只有被置顶后才显示
+        if (item.getAttribute('data-hidden') === '1' && !pinnedSet.has(mod)) return false;
+        if (query && !name.includes(query) && !sign.includes(query) && !tags.includes(query)) return false;
+        return true;
+    });
+
+    const fragment = document.createDocumentFragment();
+
+    if (!query) {
+        const pinnedItems = visibleItems.filter(item =>
+            pinnedSet.has(item.getAttribute('data-module')) || item.getAttribute('data-pinned') === '1'
+        );
+        const recentItems = visibleItems.filter(item =>
+            recentSet.has(item.getAttribute('data-module')) && !pinnedItems.includes(item)
+        );
+        const others = visibleItems.filter(item => !pinnedItems.includes(item) && !recentItems.includes(item));
+
+        const groups = [];
+        if (pinnedItems.length) groups.push(['📌 置顶', pinnedItems]);
+        if (recentItems.length) groups.push(['🕒 最近使用', recentItems]);
+
+        const byCat = {};
+        others.forEach(item => {
+            const cat = item.getAttribute('data-category') || '未分类';
+            if (!byCat[cat]) byCat[cat] = [];
+            byCat[cat].push(item);
+        });
+        Object.keys(byCat).sort().forEach(cat => groups.push([cat, byCat[cat]]));
+
+        groups.forEach(([title, list]) => {
+            const group = document.createElement('div');
+            group.className = 'module-group' + ((modulePrefs.collapsed || {})[title] ? ' collapsed' : '');
+            const header = document.createElement('div');
+            header.className = 'module-group-header';
+            header.onclick = function() { toggleModuleGroup(this); };
+            header.innerHTML = `<span>${title}</span><span class="module-group-count">${list.length}</span>`;
+            const body = document.createElement('div');
+            body.className = 'module-group-body';
+            list.forEach(item => body.appendChild(item));
+            group.appendChild(header);
+            group.appendChild(body);
+            fragment.appendChild(group);
+        });
+
+        if (!groups.length) {
+            const empty = document.createElement('div');
+            empty.className = 'module-empty';
+            empty.textContent = '没有可用模块';
+            fragment.appendChild(empty);
+        }
+    } else {
+        visibleItems.forEach(item => fragment.appendChild(item));
+        if (!visibleItems.length) {
+            const empty = document.createElement('div');
+            empty.className = 'module-empty';
+            empty.textContent = '没有匹配的模块';
+            fragment.appendChild(empty);
+        }
+    }
+
+    container.replaceChildren(fragment);
+}
+
+function toggleModuleGroup(header) {
+    const group = header.parentElement;
+    const title = header.querySelector('span')?.textContent || '';
+    group.classList.toggle('collapsed');
+    if (modulePrefs.collapsed) {
+        if (group.classList.contains('collapsed')) modulePrefs.collapsed[title] = true;
+        else delete modulePrefs.collapsed[title];
+        saveModulePrefs();
+    }
+}
+
+function filterModules() {
+    renderModuleList();
+}
+
+function toggleModuleView() {
+    const list = document.getElementById('module-list');
+    if (!list) return;
+    moduleGridView = !moduleGridView;
+    list.classList.toggle('module-grid', moduleGridView);
+}
+
+function recordRecentModule(modName) {
+    if (!modName) return;
+    modulePrefs.recent = [modName, ...(modulePrefs.recent || []).filter(x => x !== modName)].slice(0, 8);
+    saveModulePrefs();
+    renderModuleList();
+}
+
+function togglePinModule(modName, event) {
+    if (event) event.stopPropagation();
+    const arr = modulePrefs.pinned || [];
+    if (arr.includes(modName)) modulePrefs.pinned = arr.filter(x => x !== modName);
+    else modulePrefs.pinned = [modName, ...arr];
+    saveModulePrefs();
+    renderModuleList();
+}
+
+function toggleHideModule(modName, event) {
+    if (event) event.stopPropagation();
+    const arr = modulePrefs.hidden || [];
+    if (arr.includes(modName)) modulePrefs.hidden = arr.filter(x => x !== modName);
+    else modulePrefs.hidden = [modName, ...arr];
+    saveModulePrefs();
+    renderModuleList();
+}
 
 /**
  * 刷新当前账号的所有模块数据（开关、权限、配置）
@@ -1789,6 +1941,22 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     connectLogsWebSocket();
+
+    // 捕获初始模块节点，供侧边栏分组/搜索使用
+    allModuleItems = Array.from(document.querySelectorAll('#module-list .module-item'));
+
+    // 模块侧边栏：加载用户偏好并分组渲染
+    loadModulePrefs().then(() => renderModuleList());
+
+    // 快捷键：/ 聚焦模块搜索框
+    document.addEventListener('keydown', function(e) {
+        const tag = document.activeElement && document.activeElement.tagName;
+        if (e.key === '/' && tag !== 'INPUT' && tag !== 'TEXTAREA') {
+            e.preventDefault();
+            const search = document.getElementById('module-search');
+            if (search) search.focus();
+        }
+    });
 
     const firstMod = document.querySelector('.module-card-btn.active');
     if (!firstMod) {

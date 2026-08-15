@@ -345,16 +345,31 @@
         <div class="sidebar">
             <div class="sidebar-header">
                 <i class="fas fa-cubes"></i> 功能模块
+                <button class="module-view-toggle" onclick="toggleModuleView()" title="切换视图">▦</button>
+            </div>
+            <div class="module-search-wrap">
+                <input type="text" id="module-search" class="module-search-input" placeholder="搜索模块…" oninput="filterModules(this.value)">
             </div>
 
             <!-- 模块列表 -->
             <div id="module-list" style="flex: 1; overflow-y: auto;">
                 {% for mod_name, mod in modules.items() %}
-                <div class="module-item module-card-btn {% if loop.first %}active{% endif %}" data-module="{{ mod_name }}">
+                <div class="module-item module-card-btn {% if loop.first %}active{% endif %}"
+                     data-module="{{ mod_name }}"
+                     data-category="{{ mod.category }}"
+                     data-tags="{{ mod.tags|join(',') }}"
+                     data-pinned="{{ '1' if mod.pinned else '0' }}"
+                     data-hidden="{{ '1' if mod.hidden else '0' }}"
+                     data-name="{{ mod.name }}"
+                     data-sign="{{ mod.name_sign }}">
                     <div class="module-name">
                         <i class="fas fa-cube"></i>
-                        {{ mod.name }}
+                        <span class="module-name-text">{{ mod.name }}</span>
                         <span class="authority-badge authority-{{ mod.permission|lower }}">{{ 'admin' if mod.permission == 'group_admin' else mod.permission }}</span>
+                        <span class="module-actions">
+                            <button class="module-action-btn" onclick="togglePinModule('{{ mod_name }}', event)" title="置顶/取消置顶">📌</button>
+                            <button class="module-action-btn" onclick="toggleHideModule('{{ mod_name }}', event)" title="隐藏/取消隐藏">🙈</button>
+                        </span>
                     </div>
                     <div class="module-desc">{{ mod.description }}</div>
                     <div class="module-switch">

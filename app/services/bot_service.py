@@ -101,6 +101,11 @@ class BotService:
                 "enabled": mod.authority.enabled,
                 "permission": mod.permission,
                 "bot_id": mod.bot_id,
+                "category": getattr(mod, "category", "未分类"),
+                "tags": list(getattr(mod, "tags", []) or []),
+                "order": int(getattr(mod, "order", 100) or 100),
+                "hidden": bool(getattr(mod, "hidden", False)),
+                "pinned": bool(getattr(mod, "pinned", False)),
                 "permission_config": {
                     "group_mode": mod.authority.permission.group_mode,
                     "group_list": mod.authority.permission.group_list,
@@ -139,6 +144,11 @@ class BotService:
             "enabled": enabled,
             "permission": permission,
             "bot_id": bot_id,
+            "category": "框架",
+            "tags": ["LLM", "Agent"],
+            "order": 0,
+            "hidden": False,
+            "pinned": True,
             "permission_config": {
                 "group_mode": perm.group_mode,
                 "group_list": perm.group_list,

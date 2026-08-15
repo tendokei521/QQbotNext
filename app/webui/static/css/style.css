@@ -252,6 +252,31 @@ body { font-family: "Microsoft YaHei", Arial, sans-serif; background: var(--bg);
 
 .module-switch { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
 
+.module-view-toggle { background: none; border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; cursor: pointer; color: var(--text); font-size: 14px; margin-left: auto; }
+.module-search-wrap { padding: 10px 16px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--card); z-index: 5; }
+.module-search-input { width: 100%; padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; background: var(--bg); color: var(--text); outline: none; }
+.module-search-input:focus { border-color: var(--blue); }
+
+.module-name-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.module-actions { display: flex; gap: 4px; margin-left: 6px; }
+.module-action-btn { background: none; border: 0; cursor: pointer; font-size: 13px; opacity: 0.5; padding: 2px; }
+.module-action-btn:hover { opacity: 1; }
+
+.module-group { margin-bottom: 12px; }
+.module-group-header { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: bold; color: var(--muted); padding: 6px 4px; cursor: pointer; user-select: none; }
+.module-group-header .module-group-count { margin-left: auto; font-weight: normal; }
+.module-group-body { padding-left: 4px; }
+.module-group.collapsed .module-group-body { display: none; }
+
+#module-list.module-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+#module-list.module-grid .module-group { grid-column: 1 / -1; }
+#module-list.module-grid .module-item { margin-bottom: 0; padding: 10px; }
+#module-list.module-grid .module-desc { display: none; }
+#module-list.module-grid .module-switch span:first-child { display: none; }
+
+.module-empty { color: var(--muted); text-align: center; padding: 20px; font-size: 13px; }
+.module-item.hidden-module { display: none !important; }
+
 .sidebar-divider { border: 0; border-top: 1px solid var(--border); margin: 10px 0 20px 0; }
 
 /* 开关样式 */

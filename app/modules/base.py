@@ -265,6 +265,11 @@ class BaseModule(ABC):
     subscribe: tuple = ()           # 订阅的事件类型，如 ("message_group", "notice_poke")
     default_config: dict = {}
     config_schema: dict = {}        # 可选，供 WebUI 渲染表单
+    category: str = "未分类"        # WebUI 分类
+    tags: list = []                 # WebUI 标签
+    order: int = 100                # 分类内排序
+    hidden: bool = False            # 是否默认隐藏
+    pinned: bool = False            # 是否默认置顶
 
     def __init__(self, ctx: ModuleContext) -> None:
         self.ctx = ctx
