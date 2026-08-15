@@ -4,6 +4,7 @@ SCHEMA = {
     # ==================== 分组 ====================
     "group_debounce": {"type": "group", "label": "防抖", "collapsible": True},
     "group_context": {"type": "group", "label": "用户信息感知", "collapsible": True},
+    "group_interrupt": {"type": "group", "label": "回复打断", "collapsible": True},
     "group_debug": {"type": "group", "label": "调试", "collapsible": True},
 
     # ==================== 防抖 ====================
@@ -92,6 +93,29 @@ SCHEMA = {
         "description": "关闭时不请求原始消息内容",
         "default": True,
         "group": "group_context",
+    },
+
+    # ==================== 回复打断 ====================
+    "interrupt_enable": {
+        "type": "boolean",
+        "label": "启用回复打断",
+        "description": "LLM 输出过程中收到新消息时取消剩余发送并开始新一轮请求",
+        "default": False,
+        "group": "group_interrupt",
+    },
+    "interrupt_save_sent": {
+        "type": "boolean",
+        "label": "保存已发送内容",
+        "description": "中断时把实际已发送的句子写入历史",
+        "default": True,
+        "group": "group_interrupt",
+    },
+    "interrupt_debug": {
+        "type": "boolean",
+        "label": "调试回复打断",
+        "description": "开启后打印回复被打断的日志",
+        "default": False,
+        "group": "group_interrupt",
     },
 
     # ==================== 调试 ====================

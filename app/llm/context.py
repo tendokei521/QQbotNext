@@ -44,4 +44,5 @@ class LlmJob:
     go: asyncio.Event = field(default_factory=asyncio.Event)
     skip: bool = False
     superseded: bool = False
+    generation: int = 0
     module: Any = None

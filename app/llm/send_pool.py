@@ -25,17 +25,20 @@ class StreamSendPool:
         send_message: Callable[[Message], Awaitable[None]],
         pre_send: Callable[[Message], Awaitable[bool]] | None = None,
         post_send: Callable[[Message], Awaitable[None]] | None = None,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> None:
         self.config = config or {}
         self._send_message = send_message
         self._pre_send = pre_send
         self._post_send = post_send
+        self._should_cancel = should_cancel
         self._policy = SendPolicy(self.config)
 
         maxsize = int(self.config.get("stream_send_max_queue", 20) or 20)
         self._queue: asyncio.Queue[Message] = asyncio.Queue(maxsize=maxsize)
         self._finished = False
         self._flush = False
+        self._cancelled = False
         self._drained = asyncio.Event()
         self._paused = asyncio.Event()
         self._paused.set()
@@ -79,6 +82,7 @@ class StreamSendPool:
         self._paused.set()
 
     async def shutdown(self) -> None:
+        self.clear_pending()
         task = self._sender_task
         if task and not task.done():
             task.cancel()
@@ -86,6 +90,15 @@ class StreamSendPool:
                 await task
             except asyncio.CancelledError:
                 pass
+
+    def clear_pending(self) -> None:
+        """丢弃队列中尚未发送的消息。"""
+        while True:
+            try:
+                self._queue.get_nowait()
+                self._queue.task_done()
+            except asyncio.QueueEmpty:
+                break
 
     def _apply_affix(self, msg: Message) -> Message:
         prefix = self.config.get("stream_send_prefix", "") or ""
@@ -100,6 +113,13 @@ class StreamSendPool:
         try:
             while True:
                 msg = await self._queue.get()
+
+                # 回复打断：任务已过期则不再发送剩余消息
+                if self._should_cancel and self._should_cancel():
+                    self._cancelled = True
+                    self._queue.task_done()
+                    break
+
                 try:
                     await self._paused.wait()
 

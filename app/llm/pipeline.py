@@ -24,6 +24,7 @@ class LlmPipeline:
         self.task_manager = task_manager
         self.pool = LlmPool()
         self._tasks: set[asyncio.Task] = set()
+        self._session_generation: dict[str, int] = {}
 
     def submit(self, event) -> asyncio.Task | None:
         """提交一个 LLM 处理任务（非阻塞）。"""
@@ -34,6 +35,12 @@ class LlmPipeline:
         session_id = f"group_{event.group.group_id}" if is_group else f"private_{event.user_id}"
         user_text = event.text.strip()
 
+        # 回复打断：新消息到达时，使同一会话旧任务过期
+        interrupt_enabled = getattr(self.runtime, "interrupt_enabled", False)
+        if interrupt_enabled:
+            self._session_generation[session_id] = self._session_generation.get(session_id, 0) + 1
+        generation = self._session_generation.get(session_id, 0)
+
         ctx = LlmContext(
             event=event,
             runtime=self.runtime,
@@ -41,7 +48,7 @@ class LlmPipeline:
             session_id=session_id,
             user_text=user_text,
         )
-        job = LlmJob(id=uuid.uuid4().hex, group_key=session_id, ctx=ctx)
+        job = LlmJob(id=uuid.uuid4().hex, group_key=session_id, ctx=ctx, generation=generation)
         ctx.job = job
         event._llm_job = job
 
@@ -49,6 +56,14 @@ class LlmPipeline:
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return task
+
+    def interrupt_session(self, session_id: str) -> None:
+        """手动使某会话的旧任务过期。"""
+        self._session_generation[session_id] = self._session_generation.get(session_id, 0) + 1
+
+    def is_stale(self, job: LlmJob) -> bool:
+        """判断任务是否已被同一会话的新消息打断。"""
+        return self._session_generation.get(job.group_key, 0) != job.generation
 
     async def _run(self, job: LlmJob) -> None:
         ctx = job.ctx
@@ -169,7 +184,14 @@ class LlmPipeline:
         pool_enabled = config.get("stream_send_pool_enabled", False)
 
         if not pool_enabled:
+            sent_parts: list[str] = []
+            interrupted = False
+
             async for sentence in stream_response(self.runtime, ctx.event, ctx):
+                if self.is_stale(job):
+                    interrupted = True
+                    break
+
                 msg = Message.from_text(sentence)
 
                 if not await self._run_stage("pre_send", ctx, msg):
@@ -178,16 +200,25 @@ class LlmPipeline:
                     continue
 
                 await self._send(ctx, msg)
+                sent_parts.append(msg.text)
 
                 await self._run_stage("post_send", ctx, msg)
+
+            if interrupted:
+                await self._save_sent_history(ctx, sent_parts)
+                ctx.state["interrupted"] = True
 
             await self._run_stage("post_stream", ctx)
             return
 
         from app.llm.send_pool import StreamSendPool
 
+        sent_parts = []
+        interrupted = False
+
         async def send_message(msg: Message) -> None:
             await self._send(ctx, msg)
+            sent_parts.append(msg.text)
 
         async def pre_send_hook(msg: Message) -> bool:
             if not await self._run_stage("pre_send", ctx, msg):
@@ -202,16 +233,42 @@ class LlmPipeline:
             send_message=send_message,
             pre_send=pre_send_hook,
             post_send=post_send_hook,
+            should_cancel=lambda: self.is_stale(job),
         )
         try:
             async for sentence in stream_response(self.runtime, ctx.event, ctx):
+                if self.is_stale(job):
+                    interrupted = True
+                    break
                 await pool.put(Message.from_text(sentence))
-            await pool.finish()
-            await pool.wait_drained()
+
+            if not interrupted:
+                await pool.finish()
+                await pool.wait_drained()
         finally:
             await pool.shutdown()
 
+        if interrupted:
+            await self._save_sent_history(ctx, sent_parts)
+            ctx.state["interrupted"] = True
+
         await self._run_stage("post_stream", ctx)
+
+    async def _save_sent_history(self, ctx: LlmContext, sent_parts: list[str]) -> None:
+        """回复被打断时，把实际已发送的内容写入历史。"""
+        if not getattr(self.runtime, "interrupt_save_sent", True):
+            return
+        text = "\n".join(sent_parts).strip()
+        if not text:
+            return
+        session_mgr = getattr(self.runtime, "session_mgr", None)
+        if session_mgr is None:
+            return
+        session = session_mgr.get_session(ctx.session_id)
+        if session is None:
+            return
+        session_mgr.add_message(ctx.session_id, "assistant", text)
+        await asyncio.to_thread(session_mgr.history.save_session, session)
 
     async def _run_stage(self, stage: str, ctx: LlmContext, msg: Any = None) -> bool:
         """执行某个 LLM 阶段的所有钩子。返回 False 表示应中止。"""

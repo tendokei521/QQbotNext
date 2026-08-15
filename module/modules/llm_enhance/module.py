@@ -34,6 +34,10 @@ class Module(BaseModule):
         "include_sent": True,
         "fetch_at_nickname": True,
         "fetch_quote_content": True,
+        # 回复打断
+        "interrupt_enable": False,
+        "interrupt_save_sent": True,
+        "interrupt_debug": False,
         # 调试
         "debug_prompt": False,
     }
@@ -119,6 +123,18 @@ class Module(BaseModule):
 
         if parts:
             ctx.user_text = "\n".join(parts)
+
+    @llm_hook("pre_request", event_type="*", order=25)
+    async def interrupt_config_hook(self, ctx: LlmContext):
+        """把回复打断开关同步到运行时，供 LlmPipeline 判断是否打断旧任务。"""
+        ctx.runtime.interrupt_enabled = bool(self.config.get("interrupt_enable", False))
+        ctx.runtime.interrupt_save_sent = bool(self.config.get("interrupt_save_sent", True))
+        if self.config.get("interrupt_debug", False):
+            from app.llm import logger
+
+            logger.add_info(f"#{self.bot_id}").info(
+                f"[打断] {ctx.session_id} interrupt_enabled={ctx.runtime.interrupt_enabled}"
+            )
 
     async def _collect_at_info(self, ctx: LlmContext) -> list[str]:
         event = ctx.event
