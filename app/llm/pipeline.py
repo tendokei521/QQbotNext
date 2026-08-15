@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 import uuid
 from typing import Any
 
@@ -55,10 +54,21 @@ class LlmPipeline:
     # ==================== 框架级用户感知 ====================
 
     def _raw_user_text(self, event) -> str:
-        raw = getattr(event, "raw_message", "") or ""
-        if raw:
-            return re.sub(r"\[CQ:[^\]]*\]", "", raw).strip()
-        return (getattr(event, "text", "") or "").strip()
+        """从 OneBot message 字段（结构化段 JSON）中提取纯文本。
+
+        不使用 raw_message / CQ 码，只读取 text 段的 data.text。
+        """
+        parts: list[str] = []
+        for seg in getattr(event, "message", []) or []:
+            if isinstance(seg, dict):
+                if seg.get("type") == "text":
+                    data = seg.get("data", {}) or {}
+                    parts.append(data.get("text", ""))
+            else:
+                if getattr(seg, "type", "") == "text":
+                    data = getattr(seg, "data", {}) or {}
+                    parts.append(data.get("text", ""))
+        return "".join(parts).strip()
 
     async def _collect_user_context(self, ctx: LlmContext) -> None:
         config = self.runtime.config
