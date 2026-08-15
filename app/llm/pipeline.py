@@ -268,6 +268,10 @@ class LlmPipeline:
                 if not ctx.user_text.strip():
                     return
 
+            # 先截断原始用户消息，避免上下文包装后被 max_message_length 截掉“发送了”
+            max_msg_len = int(config.get("max_message_length", 50) or 50)
+            ctx.user_text = ctx.user_text[:max_msg_len]
+
             # 框架级用户感知：先收集上下文，等防抖/合并后再格式化
             await self._collect_user_context(ctx)
 
