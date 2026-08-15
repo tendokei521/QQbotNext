@@ -188,7 +188,7 @@ SCHEMA = {
     # ==================== 权限 ====================
     "permission": {
         "type": "select", "label": "权限角色", "description": "Agent 可响应的事件权限角色",
-        "default": "group_admin", "group": "group_permission",
+        "default": "member", "group": "group_permission",
         "options": {
             "everyone": "所有人",
             "member": "普通成员及以上",

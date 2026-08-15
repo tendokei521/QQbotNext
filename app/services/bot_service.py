@@ -126,12 +126,12 @@ class BotService:
             config = dict(runtime.config.raw_config)
             enabled = runtime.config.enabled
             perm = runtime.config.permission
-            permission = runtime.config.get("permission", "group_admin")
+            permission = runtime.config.get("permission", "member")
         else:
             config = dict(DEFAULT_LLM_CONFIG)
             enabled = True
             perm = ModulePermission()
-            permission = config.get("permission", "group_admin")
+            permission = config.get("permission", "member")
         return {
             "name": "LLM服务",
             "name_sign": "Agent",

@@ -34,7 +34,7 @@ class _AgentGate:
     """
 
     def __init__(self, runtime) -> None:
-        self.permission = runtime.config.get("permission", "group_admin")
+        self.permission = runtime.config.get("permission", "member")
         self.sign = "LLM Agent"
         self.module_name = "llm_chat_v2"
         self.authority = type("_A", (), {

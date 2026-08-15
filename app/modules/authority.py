@@ -132,6 +132,13 @@ def check_module_permission(module: BaseModule, event: BaseEvent) -> bool:
             return False
 
     policy = getattr(module, "permission", "member") or "member"
+
+    # 私聊场景没有群角色概念：群管理/群主策略自动降级为 member，
+    # 避免私聊被“仅群管理”错误拦截；owner 仍表示仅 Bot 拥有者。
+    if getattr(event, "event_type", "") == "message_private":
+        if policy in ("group_admin", "group_owner"):
+            policy = "member"
+
     if policy == "everyone":
         return True
 

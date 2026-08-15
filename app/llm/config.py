@@ -52,7 +52,7 @@ DEFAULT_LLM_CONFIG: dict = {
     "include_private_pre_history": "default",
     "reply_cooldown": 5,
     # 权限：Agent 可响应的事件权限角色
-    "permission": "group_admin",
+    "permission": "member",
     # 主动消息
     "proactive_friend_enable": False,
     "proactive_group_enable": False,
