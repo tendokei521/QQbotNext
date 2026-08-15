@@ -45,6 +45,22 @@ logs/                           日志目录
 
 ## 快速开始
 
+### 简单开始（推荐）
+
+```bash
+# 1. 自动创建虚拟环境并安装依赖
+scripts\requirements.bat
+
+# 2. 启动
+start.bat
+```
+
+之后每次启动只需要运行 `start.bat`。
+
+> Linux/macOS 可运行 `scripts/requirements.sh` 后执行 `start.sh`。
+
+### 手动启动
+
 ```bash
 # 首次启动
 venv\Scripts\activate.bat          # 激活虚拟环境
