@@ -7,9 +7,9 @@ SCHEMA = {
     "group_switch": {"type": "group", "label": "功能开关", "collapsible": True},
     "group_session": {"type": "group", "label": "会话管理", "collapsible": True},
     "group_trigger": {"type": "group", "label": "触发设置", "collapsible": True},
+    "group_stream": {"type": "group", "label": "流式回复", "collapsible": True},
     "group_proactive": {"type": "group", "label": "主动消息", "collapsible": True},
     "group_schedule": {"type": "group", "label": "定时任务", "collapsible": True},
-    "group_stream": {"type": "group", "label": "流式回复", "collapsible": True},
     "group_permission": {"type": "group", "label": "权限", "collapsible": True},
 
     # ==================== 配置项 ====================
@@ -148,10 +148,6 @@ SCHEMA = {
         "type": "boolean", "label": "严格按顺序发送", "description": "保持生成顺序逐条发送（建议开启）",
         "default": True, "group": "group_stream",
     },
-    "stream_proactive_scheduled_enabled": {
-        "type": "boolean", "label": "主动/定时也使用流式", "description": "开启后主动消息和定时任务使用与普通消息相同的流式发送配置",
-        "default": False, "group": "group_stream",
-    },
 
     "system_prompt": {
         "type": "textarea", "label": "系统提示词", "description": "设定AI角色的系统提示词",
@@ -211,6 +207,10 @@ SCHEMA = {
         "type": "boolean", "label": "群聊主动发言", "description": "对下方群聊会话在沉默后主动开口",
         "default": False, "group": "group_proactive",
     },
+    "stream_proactive_enabled": {
+        "type": "boolean", "label": "主动消息使用流式", "description": "开启后主动消息使用与普通消息相同的流式发送配置",
+        "default": False, "group": "group_proactive",
+    },
     "proactive_friend_sessions": {
         "type": "string_list", "label": "主动私聊会话（QQ号）", "description": "每行一个 QQ 号",
         "default": [], "group": "group_proactive",
@@ -253,6 +253,10 @@ SCHEMA = {
     "schedule_enable": {
         "type": "boolean", "label": "定时任务启用", "description": "识别对话中的定时请求（如\"明天早上8点提醒我\"）并按点回复；关闭后不再创建新任务",
         "default": True, "group": "group_schedule",
+    },
+    "stream_scheduled_enabled": {
+        "type": "boolean", "label": "定时任务使用流式", "description": "开启后定时任务使用与普通消息相同的流式发送配置",
+        "default": False, "group": "group_schedule",
     },
     "schedule_prompt": {
         "type": "textarea", "label": "定时触发提示词", "description": "定时任务触发时给 LLM 的指令，可用 {{content}} / {{current_time}} / {{job_json}} 占位",

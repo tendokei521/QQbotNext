@@ -172,7 +172,7 @@ class ProactiveManager:
         config = self.module.config
 
         # 主动消息也支持流式：与普通消息使用同一套流式发送配置
-        if config.get("stream_output", False) and config.get("stream_proactive_scheduled_enabled", False):
+        if config.get("stream_output", False) and config.get("stream_proactive_enabled", False):
             from app.llm.initiative_stream import stream_send_initiative
 
             full_text = await stream_send_initiative(

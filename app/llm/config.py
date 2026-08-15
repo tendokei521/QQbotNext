@@ -47,7 +47,8 @@ DEFAULT_LLM_CONFIG: dict = {
     "stream_flush_on_finish": True,
     "stream_keep_order": True,
     # 主动消息 / 定时任务也使用流式发送（与普通消息同一套流式配置）
-    "stream_proactive_scheduled_enabled": False,
+    "stream_proactive_enabled": False,
+    "stream_scheduled_enabled": False,
     "trigger_at": False,
     "trigger_keyword": [],
     "include_pre_history": False,

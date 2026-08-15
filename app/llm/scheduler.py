@@ -274,7 +274,7 @@ class TaskScheduler:
 
         config = self.module.config
         # 定时任务也支持流式：与普通消息使用同一套流式发送配置
-        if config.get("stream_output", False) and config.get("stream_proactive_scheduled_enabled", False):
+        if config.get("stream_output", False) and config.get("stream_scheduled_enabled", False):
             session = self.session_mgr.get_session(entry.session_id)
             if session is None:
                 session = self.session_mgr.create_session(

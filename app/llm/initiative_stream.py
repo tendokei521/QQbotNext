@@ -1,6 +1,6 @@
 """主动消息 / 定时任务流式发送助手。
 
-当开启 ``stream_proactive_scheduled_enabled`` 时，
+当开启 ``stream_proactive_enabled`` / ``stream_scheduled_enabled`` 时，
 主动消息和定时任务使用与普通消息相同的流式发送配置：
 - 流式生成；
 - 按句子切分；
