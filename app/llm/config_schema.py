@@ -7,6 +7,7 @@ SCHEMA = {
     "group_switch": {"type": "group", "label": "功能开关", "collapsible": True},
     "group_session": {"type": "group", "label": "会话管理", "collapsible": True},
     "group_trigger": {"type": "group", "label": "触发设置", "collapsible": True},
+    "group_context": {"type": "group", "label": "用户感知", "collapsible": True},
     "group_stream": {"type": "group", "label": "流式回复", "collapsible": True},
     "group_proactive": {"type": "group", "label": "主动消息", "collapsible": True},
     "group_schedule": {"type": "group", "label": "定时任务", "collapsible": True},
@@ -183,6 +184,40 @@ SCHEMA = {
     "trigger_keyword": {
         "type": "string_list", "label": "触发关键词", "description": "包含此关键词时触发（可选）",
         "default": [], "placeholder": "例如：AI、助手", "group": "group_trigger",
+    },
+
+    # ==================== 用户感知 ====================
+    "context_enable": {
+        "type": "boolean", "label": "启用用户感知", "description": "在 LLM 请求前附加发送者/提到了/引用/发送内容上下文",
+        "default": True, "group": "group_context",
+    },
+    "include_sender": {
+        "type": "boolean", "label": "包含发送者信息", "description": "群聊中附加发送者昵称和 QQ",
+        "default": True, "group": "group_context",
+    },
+    "include_mentioned": {
+        "type": "boolean", "label": "包含提到了信息", "description": "群聊中附加被 @ 的人（自动过滤机器人自身）",
+        "default": True, "group": "group_context",
+    },
+    "include_quote": {
+        "type": "boolean", "label": "包含引用消息", "description": "附加引用消息内容",
+        "default": True, "group": "group_context",
+    },
+    "include_quote_sender": {
+        "type": "boolean", "label": "引用消息包含发送者", "description": "群聊中引用消息附带发送者昵称和 QQ",
+        "default": True, "group": "group_context",
+    },
+    "include_sent": {
+        "type": "boolean", "label": "包含发送内容", "description": "附加当前消息文本为“发送了：xxx”",
+        "default": True, "group": "group_context",
+    },
+    "fetch_at_nickname": {
+        "type": "boolean", "label": "拉取 @ 对象昵称", "description": "关闭时只附加 QQ，不额外请求群成员信息",
+        "default": True, "group": "group_context",
+    },
+    "fetch_quote_content": {
+        "type": "boolean", "label": "拉取引用消息内容", "description": "关闭时不请求原始消息内容",
+        "default": True, "group": "group_context",
     },
 
     # ==================== 权限 ====================

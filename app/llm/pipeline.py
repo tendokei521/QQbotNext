@@ -10,10 +10,12 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid
 from typing import Any
 
 from app.domain.message import Message
+from app.infrastructure.cache import get_cache
 from app.llm.context import LlmContext, LlmJob
 from app.llm.pool import LlmPool
 
@@ -49,6 +51,166 @@ class LlmPipeline:
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return task
+
+    # ==================== 框架级用户感知 ====================
+
+    def _raw_user_text(self, event) -> str:
+        raw = getattr(event, "raw_message", "") or ""
+        if raw:
+            return re.sub(r"\[CQ:[^\]]*\]", "", raw).strip()
+        return (getattr(event, "text", "") or "").strip()
+
+    async def _collect_user_context(self, ctx: LlmContext) -> None:
+        config = self.runtime.config
+        if not config.get("context_enable", True):
+            return
+
+        event = ctx.event
+        info = {
+            "sender": None,
+            "mentioned": [],
+            "quote": None,
+            "quote_sender": None,
+            "sent_text": self._raw_user_text(event),
+        }
+
+        if event.event_type == "message_group":
+            if config.get("include_sender", True):
+                user = getattr(event, "user", None)
+                nickname = (getattr(user, "card", "") or getattr(user, "nickname", "") or "")
+                info["sender"] = f"{nickname}({event.user_id})" if nickname else str(event.user_id)
+            if config.get("include_mentioned", True):
+                info["mentioned"] = await self._collect_at_info(ctx)
+
+        if config.get("include_quote", True):
+            quote = await self._collect_quote_info(ctx)
+            if quote:
+                info["quote"] = quote["text"]
+                info["quote_sender"] = f"{quote['sender_nickname']}({quote['sender_id']})"
+
+        ctx.state["user_context"] = info
+
+    async def _format_user_context(self, ctx: LlmContext) -> None:
+        info = ctx.state.get("user_context")
+        if not info:
+            return
+
+        config = self.runtime.config
+        event = ctx.event
+        is_group = event.event_type == "message_group"
+        parts: list[str] = []
+
+        if is_group:
+            if config.get("include_sender", True) and info.get("sender"):
+                parts.append(f"发送者：{info['sender']}")
+            if config.get("include_mentioned", True) and info.get("mentioned"):
+                parts.append("提到了(用户名)：" + "、".join(info["mentioned"]))
+
+        if config.get("include_quote", True) and info.get("quote"):
+            if is_group and config.get("include_quote_sender", True) and info.get("quote_sender"):
+                parts.append(f"引用了：{info['quote_sender']}发送的引用消息：“{info['quote']}”")
+            else:
+                parts.append(f"引用了：{info['quote']}")
+
+        sent_text = ctx.user_text.strip() or (info.get("sent_text") or "").strip()
+        if config.get("include_sent", True) and sent_text:
+            parts.append(f"发送了：{sent_text}")
+
+        if parts:
+            ctx.user_text = "\n".join(parts)
+
+    async def _collect_at_info(self, ctx: LlmContext) -> list[str]:
+        event = ctx.event
+        if not event.message:
+            return []
+
+        result: list[str] = []
+        config = self.runtime.config
+        for seg in event.message:
+            if seg.type != "at":
+                continue
+            qq = str(seg.data.get("qq", "") or "")
+            if not qq:
+                continue
+            if qq in (str(event.self_id), str(getattr(event, "bot_id", "") or "")):
+                continue
+            if qq in ("all", "0"):
+                result.append("全体成员")
+                continue
+
+            nickname = qq
+            if config.get("fetch_at_nickname", True):
+                fetched = await self._fetch_group_member_nickname(ctx, qq)
+                if fetched:
+                    nickname = fetched
+            result.append(f"{nickname}({qq})")
+        return result
+
+    async def _fetch_group_member_nickname(self, ctx: LlmContext, qq: str) -> str:
+        event = ctx.event
+        group_id = getattr(getattr(event, "group", None), "group_id", None)
+        if not group_id or not event.bot:
+            return ""
+
+        cache = get_cache()
+        cache_key = f"llm_enhance:nick:{event.bot_id}:{group_id}:{qq}"
+        cached = cache.get(cache_key)
+        if cached:
+            return cached
+
+        try:
+            resp = await event.bot.get_group_member_info(group_id=group_id, user_id=int(qq))
+            data = (resp or {}).get("data", {}) or {}
+            nickname = data.get("card") or data.get("nickname") or ""
+            if nickname:
+                cache.set(cache_key, nickname, 600)
+                return nickname
+        except Exception:
+            pass
+        return ""
+
+    async def _collect_quote_info(self, ctx: LlmContext) -> dict | None:
+        event = ctx.event
+        config = self.runtime.config
+        if not event.bot or not config.get("fetch_quote_content", True):
+            return None
+
+        reply_id = None
+        for seg in event.message:
+            if seg.type == "reply":
+                reply_id = str(seg.data.get("id", "") or "")
+                break
+        if not reply_id:
+            return None
+
+        try:
+            resp = await event.bot.get_msg(reply_id)
+            data = (resp or {}).get("data", {}) or {}
+            sender = data.get("sender", {}) or {}
+            sender_nickname = sender.get("card") or sender.get("nickname") or ""
+            sender_id = sender.get("user_id", "")
+            text = self._segments_to_text(data.get("message"))
+            if not text:
+                return None
+            return {
+                "text": text,
+                "sender_nickname": sender_nickname or str(sender_id),
+                "sender_id": sender_id,
+            }
+        except Exception:
+            return None
+
+    @staticmethod
+    def _segments_to_text(message) -> str:
+        if isinstance(message, str):
+            return message
+        msg = Message.from_onebot(message)
+        text = msg.text
+        if text:
+            return text
+        if msg.segments:
+            return "[" + ",".join(s.type for s in msg.segments) + "]"
+        return ""
 
     async def _run(self, job: LlmJob) -> None:
         ctx = job.ctx
@@ -96,11 +258,17 @@ class LlmPipeline:
                 if not ctx.user_text.strip():
                     return
 
+            # 框架级用户感知：先收集上下文，等防抖/合并后再格式化
+            await self._collect_user_context(ctx)
+
             # 1. 请求前钩子（可暂停/防抖/合并/跳过）
             if not await self._run_stage("pre_request", ctx):
                 return
             if job.skip or job.superseded:
                 return
+
+            # 防抖/合并等钩子执行完后，再统一格式化用户上下文
+            await self._format_user_context(ctx)
 
             # 只有真正进入 LLM 请求前才更新主动消息状态（群聊普通消息不重置沉默计时器）
             await self._observe(ctx)

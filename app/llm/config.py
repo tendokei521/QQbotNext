@@ -56,6 +56,15 @@ DEFAULT_LLM_CONFIG: dict = {
     "reply_cooldown": 5,
     # 权限：Agent 可响应的事件权限角色
     "permission": "member",
+    # 用户信息感知（框架级）
+    "context_enable": True,
+    "include_sender": True,
+    "include_mentioned": True,
+    "include_quote": True,
+    "include_quote_sender": True,
+    "include_sent": True,
+    "fetch_at_nickname": True,
+    "fetch_quote_content": True,
     # 主动消息
     "proactive_friend_enable": False,
     "proactive_group_enable": False,
