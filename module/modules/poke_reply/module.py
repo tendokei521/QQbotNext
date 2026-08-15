@@ -41,6 +41,10 @@ class Module(BaseModule):
         if not operator_id or not target_id:
             return
 
+        # 忽略 Bot 自己发出的戳一戳
+        if operator_id in (event.self_id, getattr(event, "bot_id", None)):
+            return
+
         if not self._check_interval(event):
             return
 
