@@ -8,6 +8,7 @@ SCHEMA = {
     "group_session": {"type": "group", "label": "会话管理", "collapsible": True},
     "group_trigger": {"type": "group", "label": "触发设置", "collapsible": True},
     "group_stream": {"type": "group", "label": "流式回复", "collapsible": True},
+    "group_debug": {"type": "group", "label": "调试", "collapsible": True},
     "group_proactive": {"type": "group", "label": "主动消息", "collapsible": True},
     "group_schedule": {"type": "group", "label": "定时任务", "collapsible": True},
     "group_permission": {"type": "group", "label": "权限", "collapsible": True},
@@ -196,6 +197,11 @@ SCHEMA = {
             "group_owner": "仅群主",
             "owner": "仅 Bot 拥有者",
         },
+    },
+
+    "debug_prompt": {
+        "type": "boolean", "label": "调试本轮 Prompt", "description": "开启后在本轮 LLM 请求前打印完整 prompt 到日志",
+        "default": False, "group": "group_debug",
     },
 
     # ==================== 主动消息 ====================

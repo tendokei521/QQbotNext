@@ -22,6 +22,17 @@ from app.llm.tool import build_tools, make_executor
 import re
 
 
+def _log_debug_prompt(runtime, config, session_id: str, messages: list[dict]) -> None:
+    """调试配置开启时，打印本轮完整 prompt。"""
+    if not config.get("debug_prompt", False):
+        return
+    try:
+        text = json.dumps(messages, ensure_ascii=False, indent=2)
+    except Exception:
+        text = str(messages)
+    logger.add_info(f"#{runtime.bot_id}").info(f"[Prompt] {session_id}\n{text}")
+
+
 async def handle(module, event):
     """唯一入口：api_key 校验 + 消息类型开关过滤后分发。"""
     config = module.config
@@ -345,6 +356,8 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
         schedule_nudge=intent,
     )
 
+    _log_debug_prompt(runtime, config, session_id, messages)
+
     logger.add_info(f"#{runtime.bot_id}").info(
         f"API 请求 -> {session_id} (task: {session.task_id}), 消息数: {len(messages)}"
     )
@@ -499,6 +512,8 @@ async def stream_response(runtime, event, ctx=None):
         with_schedule_instruction=schedule_enable,
         schedule_nudge=intent,
     )
+
+    _log_debug_prompt(runtime, config, session_id, messages)
 
     logger.add_info(f"#{runtime.bot_id}").info(
         f"流式 API 请求 -> {session_id} (task: {session.task_id}), 消息数: {len(messages)}"
