@@ -35,10 +35,7 @@ class LlmPipeline:
         session_id = f"group_{event.group.group_id}" if is_group else f"private_{event.user_id}"
         user_text = event.text.strip()
 
-        # 回复打断：新消息到达时，使同一会话旧任务过期
-        interrupt_enabled = getattr(self.runtime, "interrupt_enabled", False)
-        if interrupt_enabled:
-            self._session_generation[session_id] = self._session_generation.get(session_id, 0) + 1
+        # 回复打断：代际在 _run 中确认真正触发 LLM 后再递增，避免普通消息误打断
         generation = self._session_generation.get(session_id, 0)
 
         ctx = LlmContext(
@@ -120,6 +117,11 @@ class LlmPipeline:
                 return
             if job.skip or job.superseded:
                 return
+
+            # 确认本轮真正会触发 LLM 后，再使同一会话旧任务过期（回复打断）
+            if getattr(self.runtime, "interrupt_enabled", False):
+                self.interrupt_session(ctx.session_id)
+                ctx.job.generation = self._session_generation.get(ctx.session_id, 0)
 
             # 只有真正进入 LLM 请求前才更新主动消息状态（群聊普通消息不重置沉默计时器）
             await self._observe(ctx)
