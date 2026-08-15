@@ -26,7 +26,7 @@ class Module(BaseModule):
     name = "示例模块"
     sign = "Example"
     description = "示例"
-    authority_type = "all"
+    permission = "member"
 ```
 
 ---
@@ -44,6 +44,38 @@ LLM 流水线（后）
   @llm_hook 注册的处理函数
   → pre_request / post_response / pre_send / post_send / post_stream
 ```
+
+---
+
+## 2.5 模块权限
+
+模块通过 `permission` 声明允许谁触发：
+
+```python
+class Module(BaseModule):
+    permission = "group_admin"
+```
+
+| 取值 | 含义 |
+|---|---|
+| `everyone` | 所有人 |
+| `member` | 普通群成员及以上 |
+| `group_admin` | 群管理/群主 |
+| `group_owner` | 仅群主 |
+| `owner` | 仅 Bot 拥有者 |
+
+事件上会写入语义化字段：
+
+```python
+event.role              # member / group_admin / group_owner
+event.permission_role   # member / group_admin / group_owner / owner
+event.is_bot_owner
+event.is_group_owner
+event.is_admin
+event.is_member
+```
+
+权限过滤由框架在 `ModulePermissionNode` 统一完成，**不要在业务代码里再判断 owner/admin**。
 
 ---
 
@@ -269,6 +301,8 @@ async def after_stream(self, ctx: LlmContext):
 from app.modules import BaseModule, module_hook, llm_hook
 
 class Module(BaseModule):
+    permission = "member"
+
     @module_hook("message_group", order=10)
     async def on_group(self, event):
         if event.text == "ping":

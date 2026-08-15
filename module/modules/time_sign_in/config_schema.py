@@ -13,17 +13,6 @@ SCHEMA = {
         "description": "允许通过 #全群打卡 指令为所有已启用群打卡",
         "default": True,
     },
-    "permission_scope": {
-        "type": "select",
-        "label": "指令权限范围(可能未实现)",
-        "description": "谁可以使用打卡指令",
-        "default": "bot_owner_only",
-        "options": {
-            "everyone": "所有人",
-            "bot_owner_and_group_admin": "群主/管理员及以上",
-            "bot_owner_only": "仅 Bot 拥有者",
-        },
-    },
     "enable_silence_signin": {
         "type": "boolean",
         "label": "静默模式",

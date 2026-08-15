@@ -8,7 +8,7 @@ class Module(BaseModule):
     name = "示例模块"
     sign = "Example"
     description = "这是一个标准演示模块"
-    authority_type = "all"
+    permission = "everyone"
     default_config = {
         "api_key": "",
         "max_retry": 3,

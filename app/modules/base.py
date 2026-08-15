@@ -261,7 +261,7 @@ class BaseModule(ABC):
     name: str = "未知模块"
     sign: str = "Module"
     description: str = ""
-    authority_type: str = "normal"  # all / normal / strict / admin / refuse
+    permission: str = "member"  # everyone / member / group_admin / group_owner / owner
     subscribe: tuple = ()           # 订阅的事件类型，如 ("message_group", "notice_poke")
     default_config: dict = {}
     config_schema: dict = {}        # 可选，供 WebUI 渲染表单
@@ -275,9 +275,7 @@ class BaseModule(ABC):
         # 装饰器收集到的模块流水线钩子（由 ModuleRegistry 填充）
         self._module_hooks: list[dict] = []
         # 事件运行期属性（dispatcher 每事件更新）
-        self.authority_check = False
-        self.authority_enabled = False
-        self.authority_level: int | None = None
+        self.permission_granted = False
 
     # ---------- 钩子收集 ----------
     @classmethod

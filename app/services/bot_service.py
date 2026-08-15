@@ -99,7 +99,7 @@ class BotService:
                 "name_sign": mod.sign,
                 "description": mod.description,
                 "enabled": mod.authority.enabled,
-                "authority_type": mod.authority_type,
+                "permission": mod.permission,
                 "bot_id": mod.bot_id,
                 "permission": {
                     "group_mode": mod.authority.permission.group_mode,
@@ -126,18 +126,18 @@ class BotService:
             config = dict(runtime.config.raw_config)
             enabled = runtime.config.enabled
             perm = runtime.config.permission
-            authority_type = runtime.config.get("authority_type", "strict")
+            permission = runtime.config.get("permission", "group_admin")
         else:
             config = dict(DEFAULT_LLM_CONFIG)
             enabled = True
             perm = ModulePermission()
-            authority_type = config.get("authority_type", "strict")
+            permission = config.get("permission", "group_admin")
         return {
             "name": "LLM服务",
             "name_sign": "Agent",
             "description": "框架级 LLM 角色扮演对话",
             "enabled": enabled,
-            "authority_type": authority_type,
+            "permission": permission,
             "bot_id": bot_id,
             "permission": {
                 "group_mode": perm.group_mode,

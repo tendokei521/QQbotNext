@@ -8,7 +8,7 @@ class Module(BaseModule):
     name = "防撤回模块"
     sign = "RecallBack"
     description = "防撤回模块，监听消息并转发被撤回的消息"
-    authority_type = "all"
+    permission = "everyone"
     default_config = {
         "cache_time": 600,
         "enable_group_listen": True,

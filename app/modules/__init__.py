@@ -2,11 +2,10 @@
 
 from app.modules.api import get_config_path, get_data_path, get_modules, register_daily_schedule
 from app.modules.authority import (
-    AUTHORITY_TYPES,
-    check_event_permission,
+    PERMISSIONS,
     check_module_enabled,
-    check_permission,
-    set_system_authority,
+    check_module_permission,
+    compute_event_permission,
 )
 from app.modules.base import (
     BaseModule,
@@ -31,11 +30,10 @@ __all__ = [
     "ServiceAccess",
     "ModuleRegistry",
     "ModuleDispatcher",
-    "AUTHORITY_TYPES",
+    "PERMISSIONS",
     "check_module_enabled",
-    "check_event_permission",
-    "check_permission",
-    "set_system_authority",
+    "check_module_permission",
+    "compute_event_permission",
     "resolve_enabled_ids",
     "match_keywords",
     "module_hook",

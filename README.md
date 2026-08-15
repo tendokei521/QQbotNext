@@ -85,7 +85,7 @@ class Module(BaseModule):
     name = "插件名"
     sign = "Sign"
     description = "功能描述"
-    authority_type = "normal"        # all/normal/strict/admin/refuse
+    permission = "member"            # everyone/member/group_admin/group_owner/owner
     subscribe = ("message_group", "message_private")   # 订阅的事件类型
     default_config = {"greeting": "你好"}
     config_schema = SCHEMA

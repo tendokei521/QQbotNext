@@ -58,7 +58,7 @@ async def handle_group(module, event, config):
     message_data = event.message
     session_id = f"group_{group_id}"
     raw_text = extract_text(message_data).strip()
-    is_admin = event.authority_check
+    is_admin = event.is_admin
 
     if raw_text.startswith("#chat "):
         await handle_commands(
@@ -107,7 +107,7 @@ async def handle_private(module, event, config):
     message_data = event.message
     session_id = f"private_{user_id}"
     raw_text = extract_text(message_data).strip()
-    is_admin = event.authority_check
+    is_admin = event.is_admin
 
     if raw_text.startswith("#chat "):
         await handle_commands(

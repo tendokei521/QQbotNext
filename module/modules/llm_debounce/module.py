@@ -14,7 +14,7 @@ class Module(BaseModule):
     name = "LLM防抖"
     sign = "LlmDebounce"
     description = "同一会话短时间内多条消息合并为一次 LLM 请求"
-    authority_type = "all"
+    permission = "everyone"
     subscribe = ()
     default_config = {
         "enable": True,

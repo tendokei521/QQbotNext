@@ -100,14 +100,15 @@ SCHEMA = {
     },
 
     # ==================== 权限 ====================
-    "authority_type": {
-        "type": "select", "label": "权限等级", "description": "可响应的事件权限（strict=仅管理员及以上）",
-        "default": "strict", "group": "group_permission",
+    "permission": {
+        "type": "select", "label": "权限角色", "description": "Agent 可响应的事件权限角色",
+        "default": "group_admin", "group": "group_permission",
         "options": {
-            "all": "所有人",
-            "normal": "普通用户及以上",
-            "strict": "仅管理员及以上",
-            "admin": "仅 Bot 拥有者",
+            "everyone": "所有人",
+            "member": "普通成员及以上",
+            "group_admin": "群管理/群主",
+            "group_owner": "仅群主",
+            "owner": "仅 Bot 拥有者",
         },
     },
 

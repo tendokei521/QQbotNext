@@ -3,7 +3,6 @@
 from app.core.logger import module_logger
 from app.modules.groups import check_group_enabled, resolve_group_ids
 
-from .permission import _check_permission
 from .signin import _execute_signin_for_groups
 
 
@@ -14,9 +13,6 @@ async def handle(module, event):
     logger = module_logger.add_info(f"#{module.bot_id}").add_info(module.name)
     config = module.config
     text = event.text.strip()
-
-    if not _check_permission(module, event):
-        return
 
     if text == "#打卡":
         if config.get("enable_signin_command", True):

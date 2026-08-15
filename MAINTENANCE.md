@@ -121,7 +121,7 @@ module/data/<name>/      可选持久化数据（get_data_path 自动创建）
 from .config_schema import SCHEMA
 class Module(BaseModule):
     name = "插件名"; sign = "Sign"
-    authority_type = "normal"        # all/normal/strict/admin/refuse
+    permission = "member"            # everyone/member/group_admin/group_owner/owner
     subscribe = ("message_group",)   # 订阅事件类型
     SCHEDULES = {"05:00:00": "daily_push"}   # 可选：定时任务
     LIST_PROVIDERS = {"groups": "list_groups"}   # 可选：list 数据源
@@ -141,7 +141,7 @@ class Module(BaseModule):
 
 ### 7.3 注意
 
-- **`refuse` 类型的模块不会响应任何消息**（仅用于声明不响应）。
+- **模块权限由框架统一过滤**：`permission` 声明 everyone/member/group_admin/group_owner/owner，黑白名单仍作为前置过滤。
 - **LLM 是框架级能力**：WebUI 侧栏的「LLM服务」为虚拟模块卡（`app/llm/`），不依赖任何插件目录，
   删除全部插件后仍保留；其配置/定时/主动走框架运行时（`module_config("agent")`、`data/llm`）。
 - 模块卸载时框架会自动取消其后台任务（`TaskManager`）与定时任务（`SchedulerService`）。
@@ -226,7 +226,7 @@ venv\Scripts\python.exe -c "import sqlite3; c=sqlite3.connect('data/app.db'); pr
 
 | 现象 | 原因与处理 |
 |---|---|
-| 模块不响应 | ①模块开关没开 ②权限黑白名单拦了 ③`authority_type` 为 `refuse`（永不响应）④`subscribe` 不含该事件 |
+| 模块不响应 | ①模块开关没开 ②权限黑白名单拦了 ③`permission` 角色不满足 ④`subscribe` 不含该事件 |
 | 单一服务模式下群消息不触发 | 该群未在「多群管理」指定服务账号，或当前账号非服务账号 |
 | 消息处理慢（曾出现每条约 1.7s） | 已知旧 bug（`_eventable_sync` off-by-one）已修复；若仍慢查模块内是否调用网络 API |
 | 群消息被静默丢弃 | 旧 bug（多 Bot 去重 `_message_indexes` 为空时丢弃、等待超时无兜底）已修复：无跟踪直接放行、有界等待超时由等待方处理 |

@@ -33,8 +33,8 @@ DEFAULT_LLM_CONFIG: dict = {
     "include_pre_history": False,
     "include_private_pre_history": "default",
     "reply_cooldown": 5,
-    # 权限：Agent 可响应的事件权限等级（对齐模块 authority_type 语义）
-    "authority_type": "strict",
+    # 权限：Agent 可响应的事件权限角色
+    "permission": "group_admin",
     # 主动消息
     "proactive_friend_enable": False,
     "proactive_group_enable": False,

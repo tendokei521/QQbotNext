@@ -87,8 +87,12 @@ class BaseEvent:
     bot_index: int | None = None
     owner_id: int | None = None
     # 权限（由 dispatcher 计算后写入）
-    authority_level: int | None = None
-    authority_check: bool = False
+    role: str = "member"               # member / group_admin / group_owner
+    is_bot_owner: bool = False
+    is_group_owner: bool = False
+    is_admin: bool = False
+    is_member: bool = True
+    permission_role: str = "member"    # 最终生效角色：member / group_admin / group_owner / owner
     raw: dict = field(default_factory=dict)
     # 模块可调用 event.llm.stop() 跳过 LLM 处理（LLM 节点在模块链之后执行）
     _llm_stop: bool = False

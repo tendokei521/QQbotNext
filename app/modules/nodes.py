@@ -2,7 +2,7 @@
 
 从原 dispatcher 的硬编码过滤抽取，行为保持一致：
 - ModuleRouterNode     订阅匹配 + bot 归属 → ctx.state.candidates
-- ModulePermissionNode 启停 + 单一服务 + 权限等级 → ctx.state.allowed
+- ModulePermissionNode 启停 + 单一服务 + 权限角色 → ctx.state.allowed
 - ModuleInvokeNode     逐个调用业务模块 handle（1 级叶子）
 - AgentNode            模块链之后的 LLM 兜底（模块可 event.llm.stop() 跳过）
 
@@ -16,8 +16,9 @@ from typing import Any
 from app.core.logger import logger
 from app.domain.events import BaseEvent
 from app.modules.authority import (
-    check_event_permission,
     check_module_enabled,
+    check_module_permission,
+    compute_event_permission,
     is_single_service_skipped,
 )
 from app.modules.base import BaseModule
@@ -28,12 +29,12 @@ from app.nodes.base import MessageContext, MessageNode, Next
 class _AgentGate:
     """Agent 权限门控对象（对齐模块 authority 接口，供 check_* 复用）。
 
-    数据来自框架级 AgentRuntime 配置（enabled / permission / authority_type），
+    数据来自框架级 AgentRuntime 配置（enabled / permission / permission），
     Agent 开关不依赖 llm_chat_v2 模块。
     """
 
     def __init__(self, runtime) -> None:
-        self.authority_type = runtime.config.get("authority_type", "strict")
+        self.permission = runtime.config.get("permission", "group_admin")
         self.sign = "LLM Agent"
         self.module_name = "llm_chat_v2"
         self.authority = type("_A", (), {
@@ -77,8 +78,8 @@ class AgentNode(MessageNode):
         if is_single_service_skipped(gate, event, self.config_service, self.gateway):
             await next_()
             return
-        event.authority_level = None
-        if not check_event_permission(event, gate):
+        compute_event_permission(event)
+        if not check_module_permission(gate, event):
             await next_()
             return
         # 前面的模块已调用 event.stop() 强制终止 → 链已短路（含 LLM 兜底）
@@ -152,19 +153,19 @@ class ModulePermissionNode(MessageNode):
 
     async def process(self, ctx: MessageContext, next_: Next) -> None:
         event = ctx.event
+        # 先一次性计算事件角色，所有模块共用，避免重复计算
+        compute_event_permission(event)
+
         allowed: list[BaseModule] = []
         for module in ctx.state.get("candidates", []) or []:
             if not check_module_enabled(module):
                 continue
             if self._is_single_service_skipped(module, event):
                 continue
-            # 权限：每模块独立计算，避免上一个模块的等级/黑名单污染后续模块
-            event.authority_level = None
-            if not check_event_permission(event, module):
+            # 模块级权限过滤：黑白名单 + permission 角色
+            if not check_module_permission(module, event):
                 continue
-            module.authority_check = event.authority_check
-            module.authority_level = event.authority_level
-            module.authority_enabled = getattr(event, "authority_enabled", False)
+            module.permission_granted = True
             allowed.append(module)
         ctx.state["allowed"] = allowed
         await next_()

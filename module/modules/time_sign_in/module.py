@@ -8,12 +8,11 @@ class Module(BaseModule):
     name = "群打卡"
     sign = "TimeSignInModule"
     description = "每日自动群打卡 + #打卡/#全群打卡 指令"
-    # normal：框架放行群成员，模块内按 permission_scope 配置再校验
-    authority_type = "normal"
+    # 框架级权限过滤：仅 Bot 拥有者可执行
+    permission = "owner"
     default_config = {
         "enable_signin_command": True,
         "enable_all_signin_command": True,
-        "permission_scope": "bot_owner_only",
         "enable_silence_signin": True,
         "enable_ignore_group_check": False,
         "enable_daily_auto_signin": True,
