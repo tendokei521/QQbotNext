@@ -1,4 +1,4 @@
-/* QQBot 配置小组件：string_list / list / dynamic / repeater / showIf。
+﻿/* QQBot 配置小组件：string_list / list / dynamic / repeater / showIf。
    由 main.js 在 DOMContentLoaded 时调用 initAllConfigWidgets() 初始化。 */
 
 // ==================== 配置小组件（string_list / list / dynamic / repeater / showIf） ====================
@@ -10,6 +10,11 @@ function getWidget(mod, key) { return window.__configWidgets[widgetKey(mod, key)
 function escHtml(s) {
     return String(s == null ? '' : s)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/** HTML 属性内转义（额外转义单引号，用于内联事件参数）。 */
+function escAttr(s) {
+    return escHtml(s).replace(/'/g, '&#39;');
 }
 
 function parseJsonAttr(raw, fallback) {
@@ -498,11 +503,15 @@ function initConfigWidgets(moduleName) {
             console.error('[Widget] 初始化失败 ' + moduleName + ':', e);
         }
     });
-    // showIf 响应式监听（只绑定一次）
+    // showIf 响应式监听（只绑定一次）；顺带标记「未保存」触发自动保存
     if (!container.dataset.showifBound) {
         container.dataset.showifBound = '1';
-        container.addEventListener('change', function () { applyShowIf(moduleName); });
-        container.addEventListener('input', function () { applyShowIf(moduleName); });
+        const onFormChange = function () {
+            applyShowIf(moduleName);
+            if (typeof markModuleDirty === 'function') markModuleDirty(moduleName);
+        };
+        container.addEventListener('change', onFormChange);
+        container.addEventListener('input', onFormChange);
     }
     applyShowIf(moduleName);
 }

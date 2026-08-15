@@ -18,6 +18,7 @@ from typing import Any, Awaitable, Callable
 
 import websockets
 
+from app.core.event_bus import BotLifecycleEvent, event_bus
 from app.core.logger import logger, websocket_logger
 from app.domain.events import BaseEvent, MessageEvent, NoticeEvent, RequestEvent
 from app.infrastructure.cache import Cache
@@ -100,6 +101,26 @@ class OneBotGateway:
                 return conn
         return None
 
+    # ==================== 状态广播 ====================
+    async def _notify_status(self, conn, state: str, detail: str = "") -> None:
+        """广播 Bot 连接状态变化（WebUI 实时刷新；同一状态不重复广播）。
+
+        走框架 EventBus（app/core/event_bus.py），由 WebUI 订阅后经 WS 推送前端；
+        无订阅者时零开销（测试环境安全）。
+        """
+        if getattr(conn, "_last_notified_status", None) == state:
+            return
+        conn._last_notified_status = state
+        try:
+            await event_bus.publish(BotLifecycleEvent(
+                bot_id=conn.bot_id or None,
+                bot_index=conn.index,
+                state=state,
+                detail=detail,
+            ))
+        except Exception as e:
+            self.log.warning(f"[Gateway] 状态广播失败: {e}")
+
     # ==================== 连接管理 ====================
     async def add_bot(
         self, ws_url: str, owner_id: int | None, auto_connect: bool = False, index: int | None = None
@@ -154,12 +175,14 @@ class OneBotGateway:
                 self.bot_server_tasks[f"{index}"] = asyncio.create_task(
                     self._bot_server(index), name=f"bot_server:{index}"
                 )
+                await self._notify_status(conn, "connected")
                 return True
             conn.reconnect_attempts += 1
             conn.status = "error"
             conn.last_error = f"连接失败: {mask_ws_url(conn.ws_url)}"
             conn._last_connect_attempt = time.time()  # 失败也记账，保证监督循环退避生效
             self.log.error(f"机器人索引: {index} 连接失败: {mask_ws_url(conn.ws_url)}")
+            await self._notify_status(conn, "error", conn.last_error)
             return False
 
     async def disconnect_bot(self, index: int) -> None:
@@ -179,6 +202,7 @@ class OneBotGateway:
                 except Exception as e:
                     self.log.warning(f"关闭 WebSocket 异常: {e}")
                 conn.websocket = None
+            await self._notify_status(conn, "disconnected")  # 先广播（保留 bot_id）
             self._reset_conn_state(conn)
             conn.status = "disconnected"
             self.log.info(f"机器人索引: {index} 断开连接")
@@ -231,6 +255,9 @@ class OneBotGateway:
                 self.log.info(f"登录成功 | #{conn.index} | {conn.bot_id} | {data.get('nickname', '')}")
                 if self.login_handler:
                     await self.login_handler(conn)
+                # 强制重新广播（此时才有真实 bot_id，前端据此刷新模块数据）
+                conn._last_notified_status = None
+                await self._notify_status(conn, "connected", "已登录")
                 self.connect_type = False
                 return True
             self.log.info(f"获取账号信息失败，将尝试从消息流中自动获取 self_id")
@@ -329,6 +356,7 @@ class OneBotGateway:
             bot_logger.error(f"WebSocket 连接结束: {e}")
             conn.status = "error"
             conn.last_error = str(e)
+            await self._notify_status(conn, "error", str(e))
             if conn.websocket:
                 try:
                     await conn.websocket.close()

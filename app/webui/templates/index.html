@@ -99,7 +99,7 @@
         <label><i class="fas fa-shield-alt"></i> 响应范围控制</label>
         <div class="permission-row">
             <div class="permission-col">
-                <label style="font-size: 12px; font-weight: normal; color: #718096;">群组模式</label>
+                <label style="font-size: 13px; font-weight: 600; color: #718096;">群组模式</label>
                 <select id="group-mode-{{ mod_name }}" class="mode-select">
                     <option value="whitelist" {% if mod.permission.group_mode == 'whitelist' %}selected{% endif %}>白名单 (仅响应以下)</option>
                     <option value="blacklist" {% if mod.permission.group_mode == 'blacklist' %}selected{% endif %}>黑名单 (不响应以下)</option>
@@ -107,7 +107,7 @@
                 <textarea id="group-list-{{ mod_name }}" class="form-control auto-resize mt-2" placeholder="群号，每行一个">{{ mod.permission.group_list | join('\n') }}</textarea>
             </div>
             <div class="permission-col">
-                <label style="font-size: 12px; font-weight: normal; color: #718096;">用户模式</label>
+                <label style="font-size: 13px; font-weight: 600; color: #718096;">用户模式</label>
                 <select id="user-mode-{{ mod_name }}" class="mode-select">
                     <option value="whitelist" {% if mod.permission.user_mode == 'whitelist' %}selected{% endif %}>白名单 (仅响应以下)</option>
                     <option value="blacklist" {% if mod.permission.user_mode == 'blacklist' %}selected{% endif %}>黑名单 (不响应以下)</option>
@@ -407,6 +407,7 @@
                         <i class="fas fa-cube"></i> {{ mod.name }} 配置
                         <span class="authority-badge authority-{{ mod.authority_type|lower }}">{{ mod.authority_type }}</span>
                         <span class="bot-id-badge">Bot {{ mod.bot_id }}</span>
+                        <span class="save-status" id="save-status-{{ mod_name }}"></span>
                     </h3>
 
                     <!-- 权限配置（黑白名单；自定义 page 模块同样保留） -->
@@ -575,7 +576,7 @@
                                 </div>
                             {% endif %}
                         </div>
-                        <button type="button" class="btn-save" onclick="saveConfig('{{ mod_name }}')">
+                        <button type="button" class="btn-save" onclick="forceSave('{{ mod_name }}')">
                             <i class="fas fa-save"></i> 保存配置
                         </button>
                     </div>
@@ -592,6 +593,12 @@
                         <i class="fas fa-terminal"></i> 控制台日志
                     </div>
                     <div class="console-actions">
+                        <input type="text" class="console-filter" id="log-filter"
+                               placeholder="过滤日志…（如 #0 / 关键字）" oninput="onLogFilterInput(this.value)">
+                        <span class="console-filter-count" id="log-filter-count" style="display:none;"></span>
+                        <button class="console-btn" id="log-pause-btn" onclick="toggleLogPause()" title="暂停/继续自动滚动">
+                            <i class="fas fa-pause"></i> 暂停
+                        </button>
                         <button class="console-btn" onclick="openLogsConfigModal()" title="日志显示设置">
                             <i class="fas fa-filter"></i> 设置
                         </button>

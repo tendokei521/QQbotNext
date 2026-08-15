@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.core.logger import webui_logger
-from app.core.event_bus import ConfigChangedEvent, event_bus
+from app.core.event_bus import BotLifecycleEvent, ConfigChangedEvent, event_bus
 from app.webui.api import agent as agent_router
 from app.webui.api import bots as bots_router
 from app.webui.api import logs as logs_router
@@ -77,8 +77,48 @@ def create_app(container) -> FastAPI:
 
     # 配置变更 → WS 广播（单点广播源，前端按 type 处理）
     _install_config_listener(container)
+    # Bot 连接状态变化 → WS 广播（前端实时刷新顶栏/弹窗状态）
+    _install_bot_lifecycle_listener(container)
 
     return app
+
+
+_bot_lifecycle_subscribed = False
+
+
+def _install_bot_lifecycle_listener(container) -> None:
+    """订阅 BotLifecycleEvent：连接状态变化实时推送给前端。
+
+    - state=connected（登录成功，带真实 bot_id）→ 顺带广播 modules_reloaded，
+      前端收到后刷新模块数据（登录时模块刚装配完）；
+    - 同一状态经 gateway._notify_status 去重，不会刷屏。
+    """
+    global _bot_lifecycle_subscribed
+    if _bot_lifecycle_subscribed:
+        return
+    _bot_lifecycle_subscribed = True
+
+    from app.infrastructure.onebot.gateway import OneBotGateway
+
+    gateway = container.get(OneBotGateway)
+
+    async def on_bot_lifecycle(event: BotLifecycleEvent) -> None:
+        info = gateway.get_bot_info_by_index(event.bot_index) or {}
+        await manager.broadcast(json.dumps({
+            "type": "bot_status_updated",
+            "bot": {
+                "index": event.bot_index,
+                "bot_id": event.bot_id,
+                "status": event.state,
+                "last_error": event.detail or None,
+                "login_info": info.get("login_info"),
+            },
+        }))
+        if event.state == "connected" and event.bot_id:
+            await manager.broadcast(json.dumps({"type": "modules_reloaded", "bot_id": event.bot_id}))
+
+    event_bus.subscribe(BotLifecycleEvent, on_bot_lifecycle)
+    webui_logger.debug("[WebUI] Bot 生命周期监听已注册")
 
 
 def _install_config_listener(container) -> None:

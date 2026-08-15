@@ -512,7 +512,11 @@ function toggleConsole() {
 }
 
 function clearLogs() {
+    logCache = [];
+    pendingLogCount = 0;
     document.getElementById('logs-container').innerHTML = '';
+    updatePauseBtn();
+    updateLogFilterCount(0);
     showToast('日志已清空', 'info');
 }
 
@@ -581,6 +585,8 @@ async function refreshAllModulesData(silent = false) {
                     applyShowIf(moduleName);
                 }
             }
+            // 回填完成 = 与服务器一致，清除未保存标记
+            markAllModulesClean();
             if (!silent) showToast('模块数据已同步', 'success');
         } else {
             console.warn('获取模块数据失败:', response.status);
@@ -634,7 +640,8 @@ async function toggleModule(moduleName) {
     }
 }
 
-async function savePermission(moduleName) {
+async function savePermission(moduleName, opts) {
+    const silent = !!(opts && opts.silent);
     const groupMode = document.getElementById(`group-mode-${moduleName}`).value;
     const groupList = document.getElementById(`group-list-${moduleName}`).value;
     const userMode = document.getElementById(`user-mode-${moduleName}`).value;
@@ -654,16 +661,22 @@ async function savePermission(moduleName) {
             body: formData
         });
         const result = await response.json();
-
-        showToast(result.message, response.ok && result.status === 'success' ? 'success' : 'error');
+        if (response.ok && result.status === 'success') {
+            if (!silent) showToast(result.message, 'success');
+            return true;
+        }
+        if (!silent) showToast(result.message || '保存失败', 'error');
+        return false;
     } catch (error) {
-        showToast('保存失败', 'error');
+        if (!silent) showToast('保存失败', 'error');
+        return false;
     }
 }
 
-async function saveConfig(moduleName) {
+async function saveConfig(moduleName, opts) {
+    const silent = !!(opts && opts.silent);
     const configContainer = document.getElementById(`config-container-${moduleName}`);
-    if (!configContainer) return;
+    if (!configContainer) return true;
 
     const config = {};
     const botId = getCurrentBotId();
@@ -715,9 +728,15 @@ async function saveConfig(moduleName) {
         const result = await response.json();
 
         isRecentOperation(`config-${moduleName}`);
-        showToast(result.message, response.ok && result.status === 'success' ? 'success' : 'error');
+        if (response.ok && result.status === 'success') {
+            if (!silent) showToast(result.message, 'success');
+            return true;
+        }
+        if (!silent) showToast(result.message || '保存失败', 'error');
+        return false;
     } catch (error) {
-        showToast('保存失败', 'error');
+        if (!silent) showToast('保存失败', 'error');
+        return false;
     }
 }
 
@@ -740,6 +759,77 @@ async function reloadModules() {
     } catch (error) {
         showToast('请求失败', 'error');
     }
+}
+
+// ==================== 自动保存（统一保存心智） ====================
+// 配置/权限修改后 2s 防抖自动保存；卡片标题与权限区显示保存状态徽标。
+// 手动「保存配置」按钮保留为立即保存兜底（点击即保存）。
+
+const _autoSave = {};
+const AUTOSAVE_DELAY = 2000;
+
+function _saveState(mod) {
+    if (!_autoSave[mod]) _autoSave[mod] = { timer: null, dirty: false };
+    return _autoSave[mod];
+}
+
+function updateSaveStatus(mod, state) {
+    const el = document.getElementById(`save-status-${mod}`);
+    const textMap = {
+        dirty: '● 未保存更改',
+        saving: '⏳ 保存中…',
+        saved: '✓ 已保存 ' + new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+        error: '✗ 保存失败，请重试',
+    };
+    const clsMap = { dirty: 'save-status-dirty', saving: 'save-status-saving', saved: 'save-status-saved', error: 'save-status-error' };
+    const text = textMap[state] || '';
+    if (el) { el.textContent = text; el.className = 'save-status ' + (clsMap[state] || ''); }
+}
+
+/** 模块配置/权限被修改：标记未保存并调度自动保存（输入事件 / 权限编辑器调用）。 */
+function markModuleDirty(mod) {
+    const st = _saveState(mod);
+    st.dirty = true;
+    updateSaveStatus(mod, 'dirty');
+    clearTimeout(st.timer);
+    st.timer = setTimeout(() => { doAutoSave(mod); }, AUTOSAVE_DELAY);
+}
+
+/** 立即保存某模块的配置（自动保存与手动按钮共用）。 */
+async function doAutoSave(mod) {
+    const st = _saveState(mod);
+    clearTimeout(st.timer);
+    st.timer = null;
+    if (!st.dirty) return true;
+    updateSaveStatus(mod, 'saving');
+    const okConfig = await saveConfig(mod, { silent: true });
+    if (okConfig) {
+        st.dirty = false;
+        updateSaveStatus(mod, 'saved');
+        return true;
+    }
+    updateSaveStatus(mod, 'error');
+    return false;
+}
+
+/** 清除某模块的未保存标记（数据回填同步后调用）。 */
+function markModuleClean(mod) {
+    const st = _saveState(mod);
+    st.dirty = false;
+    clearTimeout(st.timer);
+    st.timer = null;
+    updateSaveStatus(mod, '');
+}
+
+/** 手动「保存配置」按钮：强制立即保存（无论是否有未保存更改）。 */
+function forceSave(mod) {
+    const st = _saveState(mod);
+    st.dirty = true;
+    doAutoSave(mod);
+}
+
+function markAllModulesClean() {
+    Object.keys(_autoSave).forEach(mod => markModuleClean(mod));
 }
 
 // ==================== 日志 WebSocket ====================
@@ -792,8 +882,8 @@ function handleConfigUpdate(data) {
             }
             break;
         case 'modules_reloaded':
-            showToast('模块已重新加载', 'info');
-            refreshAllModulesData();
+            // 模块重载/登录装配完成 → 静默同步模块数据（手动刷新已有「正在重新加载」提示）
+            refreshAllModulesData(true);
             break;
         case 'single_service_updated':
             if (data.single_service) {
@@ -816,6 +906,9 @@ function handleConfigUpdate(data) {
                 updateAllSingleServiceWarnings();
             }
             break;
+        case 'bot_status_updated':
+            handleBotStatusUpdate(data.bot || {});
+            break;
     }
 }
 
@@ -825,6 +918,37 @@ function handleWebuiConfigUpdate(config) {
     maxLogLines = config.logs?.max_lines || 50;
     updateLogLevelCheckboxes();
     showToast('WebUI 配置已更新', 'info');
+}
+
+/** Bot 连接状态实时更新（WS 推送，无需手动刷新）。 */
+function handleBotStatusUpdate(bot) {
+    if (!bot || bot.index === undefined) return;
+    const idx = botsData.findIndex(b => b.index === bot.index);
+    const oldStatus = idx >= 0 ? botsData[idx].status : null;
+    const merged = Object.assign({}, idx >= 0 ? botsData[idx] : {}, bot);
+    if (idx >= 0) botsData[idx] = merged; else botsData.push(merged);
+
+    // 当前选中账号 → 刷新顶栏状态显示
+    if (bot.index === getCurrentBotIndex()) updateBotStatusDisplay();
+    // 账号管理弹窗内卡片 → 轻量更新状态徽标
+    updateBotCardStatus(merged);
+    // 状态真实变化 → 提示（error 带原因）
+    if (oldStatus && oldStatus !== bot.status) {
+        const detail = bot.last_error ? `: ${bot.last_error}` : '';
+        const type = bot.status === 'error' ? 'error' : (bot.status === 'connected' ? 'success' : 'info');
+        showToast(`Bot #${bot.index} ${getStatusText(bot.status)}${detail}`, type);
+    }
+}
+
+/** 账号管理弹窗内的状态徽标轻量更新（不重建整个卡片）。 */
+function updateBotCardStatus(bot) {
+    const card = document.querySelector(`#bot-cards-container .bot-config-card[data-index="${bot.index}"]`);
+    if (!card) return;
+    const statusEl = card.querySelector('.bot-card-status');
+    if (statusEl) {
+        statusEl.className = 'bot-card-status ' + (bot.status || '');
+        statusEl.innerHTML = `<i class="fas fa-circle"></i> ${bot.status || ''}`;
+    }
 }
 
 const _recentManualOperations = {};
@@ -896,39 +1020,24 @@ function updateInputValue(input, value) {
 }
 
 function updatePermissionDisplay(moduleName, permission) {
-    console.log(`更新权限显示: ${moduleName}`, permission);
-    
-    // 使用 ID 选择器（推荐）
     const groupModeSelect = document.getElementById(`group-mode-${moduleName}`);
     if (groupModeSelect) {
         groupModeSelect.value = permission.group_mode;
-        console.log(`已更新群组模式: ${permission.group_mode}`);
-    } else {
-        console.warn(`找不到群组模式元素: group-mode-${moduleName}`);
     }
-    
+
     const groupListInput = document.getElementById(`group-list-${moduleName}`);
     if (groupListInput) {
         groupListInput.value = permission.group_list.join('\n');
-        console.log(`已更新群组列表: ${permission.group_list.length} 个群`);
-    } else {
-        console.warn(`找不到群组列表元素: group-list-${moduleName}`);
     }
-    
+
     const userModeSelect = document.getElementById(`user-mode-${moduleName}`);
     if (userModeSelect) {
         userModeSelect.value = permission.user_mode;
-        console.log(`已更新用户模式: ${permission.user_mode}`);
-    } else {
-        console.warn(`找不到用户模式元素: user-mode-${moduleName}`);
     }
-    
+
     const userListInput = document.getElementById(`user-list-${moduleName}`);
     if (userListInput) {
         userListInput.value = permission.user_list.join('\n');
-        console.log(`已更新用户列表: ${permission.user_list.length} 个用户`);
-    } else {
-        console.warn(`找不到用户列表元素: user-list-${moduleName}`);
     }
 }
 
@@ -949,36 +1058,128 @@ async function refreshModulePermission(moduleName) {
 }
 
 function updateLogLevelCheckboxes() {
-    const checkboxes = document.querySelectorAll('#logs-config-form input[type="checkbox"]');
-    checkboxes.forEach(cb => {
-        cb.checked = visibleLevels.includes(cb.value);
+    // 日志设置弹窗的级别复选框按 id 同步（原 #logs-config-form 选择器不存在，永不生效）
+    ['debug', 'info', 'warning', 'error'].forEach(level => {
+        const cb = document.getElementById(`log-level-${level}`);
+        if (cb) cb.checked = visibleLevels.includes(level);
     });
 }
 
-function updateLogsDisplay(logs) {
+// ==================== 控制台日志（增量渲染 + 关键字过滤 + 暂停） ====================
+let logCache = [];        // 服务端推送的原始日志（含被过滤掉的）
+let logFilterText = '';   // 关键字过滤（匹配消息/级别/时间戳）
+let logPaused = false;    // 暂停自动滚动与增量渲染
+let pendingLogCount = 0;  // 暂停期间新到的条数
+
+function _logKey(log) {
+    return (log.timestamp || '') + '|' + (log.level || '') + '|' + (log.message || '');
+}
+
+function _logMatches(log) {
+    if (!logFilterText) return true;
+    const kw = logFilterText.toLowerCase();
+    return String(log.message || '').toLowerCase().includes(kw)
+        || String(log.level || '').toLowerCase().includes(kw)
+        || String(log.timestamp || '').toLowerCase().includes(kw);
+}
+
+/** 创建单条日志 DOM（textContent 防 XSS：用户消息原文会进日志）。 */
+function _buildLogItem(log) {
+    const div = document.createElement('div');
+    div.className = 'log-item';
+    const time = document.createElement('span');
+    time.className = 'log-time';
+    time.textContent = log.timestamp;
+    const level = document.createElement('span');
+    level.className = 'log-level ' + (log.level || '');
+    level.textContent = String(log.level || '').toUpperCase();
+    const msg = document.createElement('span');
+    msg.className = 'log-message';
+    msg.textContent = log.message;
+    div.appendChild(time);
+    div.appendChild(level);
+    div.appendChild(msg);
+    return div;
+}
+
+/** 全量重渲染（过滤激活 / 暂停恢复 / 服务器窗口重置时）。 */
+function renderLogsAll() {
+    const logsContainer = document.getElementById('logs-container');
+    const isBottom = !logPaused && (logsContainer.scrollHeight - logsContainer.scrollTop - logsContainer.clientHeight < 50);
+    logsContainer.innerHTML = '';
+    let shown = 0;
+    for (const log of logCache) {
+        if (_logMatches(log)) { logsContainer.appendChild(_buildLogItem(log)); shown++; }
+    }
+    updateLogFilterCount(shown);
+    if (isBottom) logsContainer.scrollTop = logsContainer.scrollHeight;
+}
+
+/** 增量渲染：新数组与缓存尾部对齐求差，只追加新增行（不再全量重绘）。 */
+function updateLogsDisplay(newArr) {
+    const arr = Array.isArray(newArr) ? newArr : [];
+    const firstBatch = logCache.length === 0;  // 首次推送：清掉服务端渲染的初始日志，避免重复
+
+    // diff：从尾部对齐新旧数组（服务端窗口 = 最近 N 条，旧行仍在窗口内时尾部必然相同）
+    let i = arr.length - 1, j = logCache.length - 1;
+    while (i >= 0 && j >= 0 && _logKey(arr[i]) === _logKey(logCache[j])) { i--; j--; }
+    const added = arr.slice(0, i + 1);
+    const noCommonTail = logCache.length > 0 && i >= arr.length - 1;  // 无公共尾部（文件轮转/窗口跳变）→ 全量
+    logCache = arr.slice();
+
+    if (logPaused) {
+        pendingLogCount += added.length;
+        updatePauseBtn();
+        return;
+    }
+    if (noCommonTail || logFilterText || firstBatch) {
+        renderLogsAll();
+        return;
+    }
+
+    // 常规增量：仅追加新增行，保持滚动跟随
     const logsContainer = document.getElementById('logs-container');
     const isBottom = logsContainer.scrollHeight - logsContainer.scrollTop - logsContainer.clientHeight < 50;
-
-    logsContainer.innerHTML = '';
-    logs.forEach(log => {
-        const div = document.createElement('div');
-        div.className = 'log-item';
-        const time = document.createElement('span');
-        time.className = 'log-time';
-        time.textContent = log.timestamp;          // textContent 防 XSS
-        const level = document.createElement('span');
-        level.className = 'log-level ' + (log.level || '');
-        level.textContent = String(log.level || '').toUpperCase();
-        const msg = document.createElement('span');
-        msg.className = 'log-message';
-        msg.textContent = log.message;             // 用户消息原文经日志进入前端，必须 textContent
-        div.appendChild(time);
-        div.appendChild(level);
-        div.appendChild(msg);
-        logsContainer.appendChild(div);
-    });
-
+    for (const log of added) logsContainer.appendChild(_buildLogItem(log));
     if (isBottom) logsContainer.scrollTop = logsContainer.scrollHeight;
+    updateLogFilterCount(logCache.length);
+}
+
+/** 过滤输入（HTML oninput 触发）。 */
+function onLogFilterInput(value) {
+    logFilterText = String(value || '').trim();
+    renderLogsAll();
+}
+
+/** 暂停/继续（HTML onclick 触发）。 */
+function toggleLogPause() {
+    logPaused = !logPaused;
+    if (!logPaused) {
+        pendingLogCount = 0;
+        renderLogsAll();
+    }
+    updatePauseBtn();
+}
+
+function updatePauseBtn() {
+    const btn = document.getElementById('log-pause-btn');
+    if (!btn) return;
+    if (logPaused) {
+        btn.innerHTML = `<i class="fas fa-play"></i> 继续${pendingLogCount ? ` (${pendingLogCount})` : ''}`;
+    } else {
+        btn.innerHTML = '<i class="fas fa-pause"></i> 暂停';
+    }
+}
+
+function updateLogFilterCount(shown) {
+    const el = document.getElementById('log-filter-count');
+    if (!el) return;
+    if (logFilterText) {
+        el.textContent = `${shown}/${logCache.length} 条匹配`;
+        el.style.display = '';
+    } else {
+        el.style.display = 'none';
+    }
 }
 
 async function refreshLogs() {

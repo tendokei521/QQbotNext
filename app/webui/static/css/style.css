@@ -5,10 +5,10 @@
 :root {
     /* 基础 */
     --bg:             #f7fafc;   /* 页面背景：浅灰白 */
-    --bg-deep:        var(--bg-deep);   /* 次级背景 / 悬停：浅灰蓝 */
+    --bg-deep:        #edf2f7;   /* 次级背景 / 悬停：浅灰蓝（修复：原为自引用，循环无效） */
     --card:           #ffffff;   /* 卡片 / 顶栏 / 侧边栏：白 */
     --border:         #e2e8f0;   /* 边框：浅灰 */
-    --border-strong:  var(--border-strong);   /* 边框（强调）：灰 */
+    --border-strong:  #cbd5e0;   /* 边框（强调）：灰（修复：原为自引用，循环无效） */
     /* 文字（三级灰阶） */
     --text:           #2d3748;   /* 主文字：深灰蓝 */
     --muted:          #718096;   /* 次要文字：灰蓝 */
@@ -16,7 +16,7 @@
     /* 主色（浅蓝系） */
     --blue:           #3182ce;
     --blue-hover:     #2b6cb0;
-    --blue-light:     var(--blue-light);   /* 选中 / 高亮底 */
+    --blue-light:     #ebf4ff;   /* 选中 / 高亮底（修复：原为自引用，循环无效） */
     --blue-faint:     #ebf4ff;   /* 极浅蓝底 */
     /* 状态色（实色用于按钮 / 标签 / toast；浅底深字用于状态胶囊） */
     --green:          #48bb78;   --green-hover:  #38a169;
@@ -242,9 +242,9 @@ body { font-family: "Microsoft YaHei", Arial, sans-serif; background: var(--bg);
     padding: 12px 16px;
 }
 
-.module-item { background: var(--bg-deep); border-radius: 8px; padding: 15px; margin-bottom: 10px; cursor: pointer; transition: all 0.2s; }
-.module-item:hover { background: var(--border); }
-.module-item.active { border-left: 4px solid var(--blue); background: var(--border-strong); }
+.module-item { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 15px; margin-bottom: 10px; cursor: pointer; transition: all 0.2s; }
+.module-item:hover { background: var(--bg-deep); }
+.module-item.active { border-left: 4px solid var(--blue); background: var(--blue-faint); }
 
 .module-name { font-size: 16px; font-weight: bold; margin-bottom: 5px; display: flex; align-items: center; }
 .module-name i { margin-right: 8px; width: 20px; text-align: center; }
@@ -1261,4 +1261,37 @@ textarea.config-updated {
     background: var(--card);
     margin-top: 12px;
     /* 实际高度由 widgets.js 的 resizePluginPage() 按页面内容自动设置 */
+}
+
+/* ==================== 保存状态徽标（自动保存） ==================== */
+.save-status {
+    font-size: 13px;
+    font-weight: normal;
+    margin-left: 10px;
+}
+
+.save-status-dirty { color: var(--orange); }
+.save-status-saving { color: var(--blue); }
+.save-status-saved { color: var(--green); }
+.save-status-error { color: var(--red); }
+
+/* ==================== 控制台过滤 / 暂停 ==================== */
+.console-filter {
+    width: 220px;
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 13px;
+    background: var(--card);
+    color: var(--text);
+    outline: none;
+}
+
+.console-filter:focus {
+    border-color: var(--blue);
+}
+
+.console-filter-count {
+    font-size: 13px;
+    color: var(--muted);
 }
