@@ -78,9 +78,14 @@ class StreamSendPool:
     def resume(self) -> None:
         self._paused.set()
 
-    def shutdown(self) -> None:
-        if self._sender_task and not self._sender_task.done():
-            self._sender_task.cancel()
+    async def shutdown(self) -> None:
+        task = self._sender_task
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
     def _apply_affix(self, msg: Message) -> Message:
         prefix = self.config.get("stream_send_prefix", "") or ""

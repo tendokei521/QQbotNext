@@ -53,25 +53,28 @@ async def stream_send_initiative(
     full_text = ""
     buffer = ""
 
-    async for ev in provider.chat_stream(
-        messages,
-        model=model or config.get("model", "deepseek-chat"),
-        temperature=temperature,
-        max_tokens=max_tokens,
-    ):
-        if ev.type == "text":
-            full_text += ev.text
-            buffer += ev.text
-            sentences, buffer = split_sentences(buffer, max_length=max_len)
-            for sentence in sentences:
-                await pool.put(Message.from_text(sentence))
-        elif ev.type == "error":
-            break
+    try:
+        async for ev in provider.chat_stream(
+            messages,
+            model=model or config.get("model", "deepseek-chat"),
+            temperature=temperature,
+            max_tokens=max_tokens,
+        ):
+            if ev.type == "text":
+                full_text += ev.text
+                buffer += ev.text
+                sentences, buffer = split_sentences(buffer, max_length=max_len)
+                for sentence in sentences:
+                    await pool.put(Message.from_text(sentence))
+            elif ev.type == "error":
+                break
 
-    if buffer.strip():
-        await pool.put(Message.from_text(buffer.strip()))
+        if buffer.strip():
+            await pool.put(Message.from_text(buffer.strip()))
 
-    await pool.finish()
-    await pool.wait_drained()
+        await pool.finish()
+        await pool.wait_drained()
+    finally:
+        await pool.shutdown()
 
     return full_text

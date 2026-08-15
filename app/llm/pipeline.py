@@ -192,7 +192,7 @@ class LlmPipeline:
             await pool.finish()
             await pool.wait_drained()
         finally:
-            pool.shutdown()
+            await pool.shutdown()
 
         await self._run_stage("post_stream", ctx)
 
