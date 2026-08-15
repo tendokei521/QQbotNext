@@ -166,7 +166,7 @@ class Module(BaseModule):
 - 模块流水线在前，LLM 流水线在后；
 - `event.llm.stop()` 跳过 LLM 回复；
 - `continue` 是 Python 关键字，手动放行请用 `event.llm.resume()`；
-- 内置 `llm_debounce` 模块演示了“多条消息防抖合并为一次 LLM 请求”。
+- 内置 `llm_enhance` 模块演示了“防抖合并 + 群聊用户信息感知”。
 
 ### 流式输出（带 tools）
 

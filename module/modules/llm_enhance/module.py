@@ -1,11 +1,8 @@
-"""模块声明：LLM 用户信息感知。
+"""模块声明：LLM 增强。
 
-在群聊 LLM 请求前自动附加：
-- 发送者昵称 / QQ；
-- 被 @ 的人昵称 / QQ；
-- 引用消息的内容、发送者昵称 / QQ。
-
-从而让 LLM 在群聊中获得更完整的上下文。
+合并原 llm_debounce（请求防抖）和 llm_user_context（群聊用户信息感知）：
+- 防抖：同一会话短时间内连续消息只触发一次 LLM 请求；
+- 用户信息感知：群聊请求前附加发送者 / @ / 引用消息上下文。
 """
 
 from app.llm import LlmContext
@@ -14,13 +11,19 @@ from .config_schema import SCHEMA
 
 
 class Module(BaseModule):
-    name = "LLM用户信息感知"
-    sign = "LlmUserContext"
-    description = "在群聊 LLM 请求前附加发送者/@/引用消息上下文"
+    name = "LLM增强"
+    sign = "LlmEnhance"
+    description = "LLM 请求防抖 + 群聊用户信息感知"
     permission = "everyone"
     subscribe = ()
     default_config = {
-        "enable": True,
+        # 防抖
+        "debounce_enable": True,
+        "debounce_seconds": 1.5,
+        "merge_messages": False,
+        "merge_separator": "\n",
+        # 用户信息感知
+        "context_enable": True,
         "include_sender": True,
         "include_at": True,
         "include_quote": True,
@@ -29,10 +32,12 @@ class Module(BaseModule):
     }
     config_schema = SCHEMA
 
+    # ==================== 用户信息感知 ====================
+
     @llm_hook("pre_request", event_type="message_group", order=-100)
     async def attach_user_context(self, ctx: LlmContext):
         """在 LLM 请求前把群聊上下文附加到 user_text。"""
-        if not self.config.get("enable", True):
+        if not self.config.get("context_enable", True):
             return
 
         event = ctx.event
@@ -94,7 +99,7 @@ class Module(BaseModule):
         if not group_id or not event.bot:
             return ""
 
-        cache_key = f"llm_user_context:nick:{event.bot_id}:{group_id}:{qq}"
+        cache_key = f"llm_enhance:nick:{event.bot_id}:{group_id}:{qq}"
         cached = self.ctx.services.cache.get(cache_key)
         if cached:
             return cached
@@ -150,7 +155,28 @@ class Module(BaseModule):
         text = msg.text
         if text:
             return text
-        # 无文本时简单标记类型，避免完全空上下文
         if msg.segments:
             return "[" + ",".join(s.type for s in msg.segments) + "]"
         return ""
+
+    # ==================== 防抖 ====================
+
+    @llm_hook("pre_request", event_type="*", order=0)
+    async def debounce_pre_request(self, ctx: LlmContext):
+        """LLM 请求前进入请求池：只放行防抖窗口内的最后一条消息。"""
+        if not self.config.get("debounce_enable", True):
+            return
+
+        pool = ctx.runtime.llm_pipeline.pool
+        raw_debounce = self.config.get("debounce_seconds", 1.5)
+        debounce = float(raw_debounce) if raw_debounce is not None else 1.5
+        ok = await pool.wait_for_continue(ctx.job, debounce=debounce)
+        if not ok:
+            ctx.job.skip = True
+            return
+
+        if self.config.get("merge_messages", False):
+            texts = pool.take_pending_texts(ctx.job.group_key)
+            if texts:
+                separator = str(self.config.get("merge_separator", "\n") or "\n")
+                ctx.user_text = separator.join(texts)
