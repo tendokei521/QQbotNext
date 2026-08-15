@@ -50,6 +50,7 @@ class Module(BaseModule):
             "mentioned": [],
             "quote": None,
             "quote_sender": None,
+            "sent_text": ctx.user_text.strip(),
         }
 
         if event.event_type == "message_group":
@@ -86,7 +87,7 @@ class Module(BaseModule):
             if self.config.get("include_sender", True) and info.get("sender"):
                 parts.append(f"发送者：{info['sender']}")
             if self.config.get("include_mentioned", True) and info.get("mentioned"):
-                parts.append("提到了：" + "、".join(info["mentioned"]))
+                parts.append("提到了(用户名)：" + "、".join(info["mentioned"]))
 
         if self.config.get("include_quote", True) and info.get("quote"):
             if is_group and self.config.get("include_quote_sender", True) and info.get("quote_sender"):
@@ -94,8 +95,9 @@ class Module(BaseModule):
             else:
                 parts.append(f"引用了：{info['quote']}")
 
-        if self.config.get("include_sent", True) and ctx.user_text.strip():
-            parts.append(f"发送了：{ctx.user_text.strip()}")
+        sent_text = ctx.user_text.strip() or (info.get("sent_text") or "").strip()
+        if self.config.get("include_sent", True) and sent_text:
+            parts.append(f"发送了：{sent_text}")
 
         if parts:
             ctx.user_text = "\n".join(parts)
