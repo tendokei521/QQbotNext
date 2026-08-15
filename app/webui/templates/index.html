@@ -354,7 +354,7 @@
                     <div class="module-name">
                         <i class="fas fa-cube"></i>
                         {{ mod.name }}
-                        <span class="authority-badge authority-{{ mod.permission|lower }}">{{ mod.permission }}</span>
+                        <span class="authority-badge authority-{{ mod.permission|lower }}">{{ 'admin' if mod.permission == 'group_admin' else mod.permission }}</span>
                     </div>
                     <div class="module-desc">{{ mod.description }}</div>
                     <div class="module-switch">
@@ -405,7 +405,7 @@
 
                     <h3>
                         <i class="fas fa-cube"></i> {{ mod.name }} 配置
-                        <span class="authority-badge authority-{{ mod.permission|lower }}">{{ mod.permission }}</span>
+                        <span class="authority-badge authority-{{ mod.permission|lower }}">{{ 'admin' if mod.permission == 'group_admin' else mod.permission }}</span>
                         <span class="bot-id-badge">Bot {{ mod.bot_id }}</span>
                         <span class="save-status" id="save-status-{{ mod_name }}"></span>
                     </h3>

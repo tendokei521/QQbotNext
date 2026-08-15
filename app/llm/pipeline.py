@@ -62,6 +62,30 @@ class LlmPipeline:
 
             await self._observe(ctx)
 
+            # 群聊必须满足触发条件（@ 或关键词），否则不进入 LLM 流水线
+            if ctx.event.event_type == "message_group":
+                config = self.runtime.config
+                from app.llm.trigger import check_trigger
+
+                triggered, is_at, user_text = check_trigger(
+                    ctx.event.message,
+                    ctx.event.self_id,
+                    config.get("trigger_at", False),
+                    config.get("trigger_keyword", []),
+                )
+                if not triggered:
+                    return
+
+                if is_at:
+                    import re
+
+                    user_text = re.sub(r"\[CQ:at,qq=\d+\]", "", user_text).strip()
+                    user_text = re.sub(r"@\S+\s*", "", user_text).strip()
+
+                ctx.user_text = user_text.strip()
+                if not ctx.user_text:
+                    return
+
             # 1. 请求前钩子（可暂停/防抖/合并/跳过）
             if not await self._run_stage("pre_request", ctx):
                 return

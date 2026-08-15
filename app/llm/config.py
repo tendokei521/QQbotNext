@@ -28,7 +28,7 @@ DEFAULT_LLM_CONFIG: dict = {
     # 流式输出
     "stream_output": False,
     "stream_sentence_max_length": 50,
-    "trigger_at": True,
+    "trigger_at": False,
     "trigger_keyword": [],
     "include_pre_history": False,
     "include_private_pre_history": "default",

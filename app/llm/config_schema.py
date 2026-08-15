@@ -91,8 +91,8 @@ SCHEMA = {
     },
 
     "trigger_at": {
-        "type": "boolean", "label": "@触发", "description": "被@时启动对话",
-        "default": True, "group": "group_trigger",
+        "type": "boolean", "label": "@触发", "description": "被@时启动对话（默认关闭，群聊默认不响应普通消息）",
+        "default": False, "group": "group_trigger",
     },
     "trigger_keyword": {
         "type": "string_list", "label": "触发关键词", "description": "包含此关键词时触发（可选）",
