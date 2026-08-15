@@ -87,6 +87,7 @@ class LlmPipeline:
                     return
 
                 if is_at:
+                    ctx.state["is_at"] = True
                     import re
 
                     user_text = re.sub(r"\[CQ:at,qq=\d+\]", "", user_text).strip()

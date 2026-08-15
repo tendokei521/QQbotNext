@@ -98,7 +98,7 @@ async def handle_group(module, event, config):
         session.reply_cooldown = config.get("reply_cooldown", 5)
         await asyncio.to_thread(session_mgr.restore_session_from_archive, session, session_id)
     else:
-        if not session.can_reply():
+        if not session.can_reply() and not is_at:
             return
         session.add_participant(user_id)
 
@@ -316,7 +316,7 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
             session.reply_cooldown = config.get("reply_cooldown", 5)
         await asyncio.to_thread(session_mgr.restore_session_from_archive, session, session_id)
     else:
-        if not is_private and not session.can_reply():
+        if not is_private and not session.can_reply() and not (ctx is not None and ctx.state.get("is_at")):
             return None
         session.add_participant(user_id)
 
@@ -477,7 +477,7 @@ async def stream_response(runtime, event, ctx=None):
             session.reply_cooldown = config.get("reply_cooldown", 5)
         await asyncio.to_thread(session_mgr.restore_session_from_archive, session, session_id)
     else:
-        if not is_private and not session.can_reply():
+        if not is_private and not session.can_reply() and not (ctx is not None and ctx.state.get("is_at")):
             return
         session.add_participant(user_id)
 
