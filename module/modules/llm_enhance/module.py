@@ -25,8 +25,10 @@ class Module(BaseModule):
         # 用户信息感知
         "context_enable": True,
         "include_sender": True,
-        "include_at": True,
+        "include_mentioned": True,
         "include_quote": True,
+        "include_quote_sender": True,
+        "include_sent": True,
         "fetch_at_nickname": True,
         "fetch_quote_content": True,
         # 调试
@@ -36,40 +38,67 @@ class Module(BaseModule):
 
     # ==================== 用户信息感知 ====================
 
-    @llm_hook("pre_request", event_type="message_group", order=-100)
-    async def attach_user_context(self, ctx: LlmContext):
-        """在 LLM 请求前把群聊上下文附加到 user_text。"""
+    @llm_hook("pre_request", event_type="*", order=-100)
+    async def collect_user_context(self, ctx: LlmContext):
+        """收集上下文信息，暂存到 ctx.state，不直接修改 user_text。"""
         if not self.config.get("context_enable", True):
             return
 
         event = ctx.event
-        config = self.config
-        parts: list[str] = []
+        info = {
+            "sender": None,
+            "mentioned": [],
+            "quote": None,
+            "quote_sender": None,
+        }
 
-        # 1. 发送者信息
-        if config.get("include_sender", True):
-            nickname = event.user.card or event.user.nickname or ""
-            if nickname:
-                parts.append(f"发送者：{nickname}({event.user_id})")
-            else:
-                parts.append(f"发送者：{event.user_id}")
+        if event.event_type == "message_group":
+            # 发送者
+            if self.config.get("include_sender", True):
+                nickname = event.user.card or event.user.nickname or ""
+                info["sender"] = f"{nickname}({event.user_id})" if nickname else str(event.user_id)
 
-        # 2. @ 信息
-        if config.get("include_at", True):
-            at_list = await self._collect_at_info(ctx)
-            if at_list:
-                parts.append("@了：" + "、".join(at_list))
+            # 提到了（自动过滤机器人自身）
+            if self.config.get("include_mentioned", True):
+                info["mentioned"] = await self._collect_at_info(ctx)
 
-        # 3. 引用消息信息
-        if config.get("include_quote", True):
+        # 引用消息
+        if self.config.get("include_quote", True):
             quote = await self._collect_quote_info(ctx)
             if quote:
-                parts.append(
-                    f"引用消息：{quote['text']}（发送者：{quote['sender_nickname']}({quote['sender_id']})）"
-                )
+                info["quote"] = quote["text"]
+                info["quote_sender"] = f"{quote['sender_nickname']}({quote['sender_id']})"
+
+        ctx.state["user_context"] = info
+
+    @llm_hook("pre_request", event_type="*", order=20)
+    async def format_user_context(self, ctx: LlmContext):
+        """在防抖/合并后，把上下文格式化为最终 user_text。"""
+        info = ctx.state.get("user_context")
+        if not info:
+            return
+
+        event = ctx.event
+        is_group = event.event_type == "message_group"
+        parts: list[str] = []
+
+        if is_group:
+            if self.config.get("include_sender", True) and info.get("sender"):
+                parts.append(f"发送者：{info['sender']}")
+            if self.config.get("include_mentioned", True) and info.get("mentioned"):
+                parts.append("提到了：" + "、".join(info["mentioned"]))
+
+        if self.config.get("include_quote", True) and info.get("quote"):
+            if is_group and self.config.get("include_quote_sender", True) and info.get("quote_sender"):
+                parts.append(f"引用了：{info['quote_sender']}发送的引用消息：“{info['quote']}”")
+            else:
+                parts.append(f"引用了：{info['quote']}")
+
+        if self.config.get("include_sent", True) and ctx.user_text.strip():
+            parts.append(f"发送了：{ctx.user_text.strip()}")
 
         if parts:
-            ctx.user_text = "\n".join(parts) + "\n" + ctx.user_text
+            ctx.user_text = "\n".join(parts)
 
     async def _collect_at_info(self, ctx: LlmContext) -> list[str]:
         event = ctx.event
@@ -83,8 +112,14 @@ class Module(BaseModule):
             qq = str(seg.data.get("qq", "") or "")
             if not qq:
                 continue
-            if qq == str(event.self_id):
-                result.append("我")
+
+            # 过滤机器人自身（self_id / bot_id 都过滤）
+            if qq in (str(event.self_id), str(getattr(event, "bot_id", "") or "")):
+                continue
+
+            # 全体成员
+            if qq in ("all", "0"):
+                result.append("全体成员")
                 continue
 
             nickname = qq
@@ -185,7 +220,7 @@ class Module(BaseModule):
 
     # ==================== 调试 ====================
 
-    @llm_hook("pre_request", event_type="*", order=10)
+    @llm_hook("pre_request", event_type="*", order=30)
     async def debug_prompt_hook(self, ctx: LlmContext):
         """开启调试时，标记本轮需要打印完整 prompt。"""
         enabled = bool(self.config.get("debug_prompt", False))
