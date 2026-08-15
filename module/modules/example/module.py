@@ -9,6 +9,7 @@ class Module(BaseModule):
     sign = "Example"
     description = "这是一个标准演示模块"
     permission = "everyone"
+    category = "消息"
     default_config = {
         "api_key": "",
         "max_retry": 3,

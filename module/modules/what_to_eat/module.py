@@ -45,6 +45,7 @@ class Module(BaseModule):
     sign = "WhatToEat"
     description = "遇到“吃什么”时随机推荐食物"
     permission = "everyone"
+    category = "消息"
     subscribe = ("message_group", "message_private")
     default_config = {
         "enable": True,

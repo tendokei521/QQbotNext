@@ -9,6 +9,7 @@ class Module(BaseModule):
     sign = "BilibiliParser"
     description = "自动解析B站视频链接，支持小程序卡片、短链和直链"
     permission = "member"
+    category = "消息"
     default_config = {
         "enable_auto_parse": True,
         "enable_json_video": True,

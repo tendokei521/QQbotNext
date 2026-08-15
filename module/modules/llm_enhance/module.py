@@ -17,6 +17,8 @@ class Module(BaseModule):
     description = "LLM 请求防抖 + 用户信息感知 + 调试"
     permission = "everyone"
     subscribe = ()
+    category = "LLM"
+    pinned = True
     default_config = {
         # 防抖
         "debounce_enable": True,

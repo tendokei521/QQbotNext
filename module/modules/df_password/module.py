@@ -9,6 +9,7 @@ class Module(BaseModule):
     sign = "Delta_Password"
     description = "三角洲行动今日密码"
     permission = "member"
+    category = "消息"
     default_config = {
         "strict_text": True,
         "enable_command": True,

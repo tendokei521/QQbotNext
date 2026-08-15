@@ -144,7 +144,7 @@ class BotService:
             "enabled": enabled,
             "permission": permission,
             "bot_id": bot_id,
-            "category": "框架",
+            "category": "LLM",
             "tags": ["LLM", "Agent"],
             "order": 0,
             "hidden": False,
