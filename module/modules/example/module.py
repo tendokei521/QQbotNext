@@ -1,6 +1,6 @@
 """模块声明：标准演示模块。"""
 
-from app.modules import BaseModule
+from app.modules import BaseModule, module_hook
 from .config_schema import SCHEMA
 
 
@@ -9,7 +9,6 @@ class Module(BaseModule):
     sign = "Example"
     description = "这是一个标准演示模块"
     authority_type = "all"
-    subscribe = ("message_group", "message_private")
     default_config = {
         "api_key": "",
         "max_retry": 3,
@@ -22,6 +21,8 @@ class Module(BaseModule):
     }
     config_schema = SCHEMA
 
+    @module_hook("message_group", order=10)
+    @module_hook("message_private", order=10)
     async def handle(self, event):
         from .service import handle
 

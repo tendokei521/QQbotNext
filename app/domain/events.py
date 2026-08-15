@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -36,6 +37,9 @@ class LlmGate:
 
     框架的 LLM Agent 节点在模块链之后兜底执行；模块在 handle 中调用
     event.llm.stop() 声明「我已处理，跳过 LLM 回复」。
+
+    在 LLM 流水线中，钩子可通过 event.llm.wait_continue() / resume()
+    实现暂停与继续（如请求池防抖）。
     """
 
     def __init__(self, event: "BaseEvent") -> None:
@@ -44,10 +48,29 @@ class LlmGate:
     def stop(self) -> None:
         """标记：模块已处理本次事件，跳过 LLM 的回复部分。"""
         self._event._llm_stop = True
+        job = getattr(self._event, "_llm_job", None)
+        if job is not None:
+            job.skip = True
 
     @property
     def stopped(self) -> bool:
         return self._event._llm_stop
+
+    def resume(self) -> None:
+        """放行当前 LLM Job（用于 LLM 流水线中的手动继续）。
+
+        注：``continue`` 是 Python 关键字，因此命名为 ``resume``。
+        """
+        job = getattr(self._event, "_llm_job", None)
+        if job is not None:
+            job.go.set()
+
+    async def wait_continue(self, timeout: float | None = None) -> None:
+        """暂停当前 LLM 流水线，直到 continue() 被调用或超时。"""
+        job = getattr(self._event, "_llm_job", None)
+        if job is None:
+            return
+        await asyncio.wait_for(job.go.wait(), timeout)
 
 
 @dataclass
@@ -69,6 +92,8 @@ class BaseEvent:
     raw: dict = field(default_factory=dict)
     # 模块可调用 event.llm.stop() 跳过 LLM 处理（LLM 节点在模块链之后执行）
     _llm_stop: bool = False
+    # LLM 流水线提交后挂载的 LlmJob（供 event.llm.resume/wait_continue 使用）
+    _llm_job: Any = field(default=None, repr=False, compare=False)
     # 模块可调用 event.stop() 强制终止整条节点链（对齐 astrbot stop_event）
     _stopped: bool = False
     # 事件所属节点链上下文（dispatcher 注入，供 event.stop() 短路链路；不参与 repr/eq）

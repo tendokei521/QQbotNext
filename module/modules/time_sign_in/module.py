@@ -1,6 +1,6 @@
 """模块声明：群打卡。"""
 
-from app.modules import BaseModule
+from app.modules import BaseModule, module_hook
 from .config_schema import SCHEMA
 
 
@@ -10,7 +10,6 @@ class Module(BaseModule):
     description = "每日自动群打卡 + #打卡/#全群打卡 指令"
     # normal：框架放行群成员，模块内按 permission_scope 配置再校验
     authority_type = "normal"
-    subscribe = ("message_group",)
     default_config = {
         "enable_signin_command": True,
         "enable_all_signin_command": True,
@@ -29,6 +28,7 @@ class Module(BaseModule):
     }
     config_schema = SCHEMA
 
+    @module_hook("message_group", order=10)
     async def handle(self, event):
         from .service import handle
 

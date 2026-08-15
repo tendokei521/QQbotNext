@@ -25,6 +25,9 @@ DEFAULT_LLM_CONFIG: dict = {
     "session_timeout": 60,
     "history_rounds": 50,
     "max_message_length": 50,
+    # 流式输出
+    "stream_output": False,
+    "stream_sentence_max_length": 50,
     "trigger_at": True,
     "trigger_keyword": [],
     "include_pre_history": False,

@@ -21,6 +21,23 @@ class LLMResponse:
         return bool(self.text.strip())
 
 
+@dataclass
+class StreamEvent:
+    """流式输出事件。
+
+    type:
+        - text: 文本增量
+        - tool_call: 工具调用碎片（需要按 index 累积）
+        - done: 本轮流结束
+        - error: 流式请求失败
+    """
+
+    type: str = "text"
+    text: str = ""
+    tool_call: dict | None = None
+    finish_reason: str = ""
+
+
 class BaseProvider:
     """对话 Provider 基类。子类实现 chat()，处理「调哪个 LLM、如何容错」。"""
 
@@ -39,3 +56,18 @@ class BaseProvider:
         timeout: int = 30,
     ) -> LLMResponse:
         raise NotImplementedError
+
+    async def chat_stream(
+        self,
+        messages: list[dict],
+        *,
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 1024,
+        timeout: int = 30,
+        tools: list[dict] | None = None,
+        tool_executor=None,
+    ):
+        """流式对话请求：逐块产出 StreamEvent，支持 tools 的碎片解析。"""
+        raise NotImplementedError
+        yield StreamEvent(type="error", text="not implemented")  # pragma: no cover

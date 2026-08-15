@@ -120,7 +120,47 @@ class ModuleRegistry:
             instance.parent = parent          # 父模块引用（None = 顶层模块）
             instance.children: dict = {}       # 子模块：{短名: 实例}
 
+            # 收集装饰器钩子并绑定到实例
+            module_hooks, llm_hooks = cls.collect_hooks()
+            instance._module_hooks = []
+            for hook in module_hooks:
+                handler = getattr(instance, hook["method"], None)
+                if handler is None:
+                    continue
+                instance._module_hooks.append({
+                    "event_type": hook.get("event_type", "*"),
+                    "order": hook.get("order", 100),
+                    "handler": handler,
+                })
+
+            # 未显式声明 subscribe 时，从 @module_hook 自动推导（"*" 表示全部）
+            if not getattr(cls, "subscribe", ()):
+                instance.subscribe = tuple({
+                    h["event_type"] for h in module_hooks
+                })
+
             self._modules.setdefault(module_name, {})[bot_id] = instance
+
+            # 注册 LLM 流水线钩子到该 Bot 的 AgentRuntime
+            if llm_hooks and self.services and self.services.agent_manager:
+                runtime = self.services.agent_manager.get_runtime(bot_id)
+                if runtime is not None and hasattr(runtime, "llm_hooks"):
+                    for hook in llm_hooks:
+                        method = hook.get("method")
+                        handler = hook.get("handler")
+                        if method:
+                            handler = getattr(instance, method, None)
+                        elif isinstance(handler, str):
+                            handler = getattr(instance, handler, None)
+                        if handler is None or not callable(handler):
+                            continue
+                        runtime.llm_hooks.register(
+                            stage=hook.get("stage", ""),
+                            event_type=hook.get("event_type", "*"),
+                            order=hook.get("order", 100),
+                            handler=handler,
+                            module=instance,
+                        )
             # 自动注册模块声明的 list/dynamic 数据源
             providers = self.services.providers if self.services else None
             if providers is not None:
@@ -180,6 +220,7 @@ class ModuleRegistry:
             instance = bot_modules.pop(bot_id, None)
             if instance is None:
                 continue
+            self._unregister_llm_hooks(instance, bot_id)
             try:
                 await instance.on_unload()
             except Exception as e:
@@ -208,6 +249,7 @@ class ModuleRegistry:
             return
         instance = bot_modules.pop(bot_id, None)
         if instance:
+            self._unregister_llm_hooks(instance, bot_id)
             try:
                 await instance.on_unload()
             except Exception as e:
@@ -221,6 +263,16 @@ class ModuleRegistry:
                     self.log.warning(f"[Module] {module_name} 定时任务注销异常: {e}")
         if not bot_modules:
             del self._modules[module_name]
+
+    def _unregister_llm_hooks(self, instance, bot_id) -> None:
+        """卸载模块实例时注销其注册的 LLM 钩子。"""
+        if not (self.services and self.services.agent_manager):
+            return
+        runtime = self.services.agent_manager.get_runtime(bot_id)
+        if runtime is not None and hasattr(runtime, "llm_hooks"):
+            runtime.llm_hooks.unregister_module(instance)
+        if runtime is not None and hasattr(runtime, "llm_pipeline"):
+            runtime.llm_pipeline.cancel_for_module(instance)
 
     @staticmethod
     def _purge_module_cache(module_name: str) -> None:

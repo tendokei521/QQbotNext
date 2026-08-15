@@ -25,10 +25,10 @@ class BotService:
 
     # ==================== 登录装配 ====================
     async def on_bot_login(self, conn: IBot) -> None:
-        await self.registry.load_all(conn.bot_id, bot=conn)
-        # 框架级 Agent 运行时装配（与模块加载解耦，定时/主动随 Bot 登录即生效）
+        # 先装配 Agent 运行时，再加载模块；这样模块的 @llm_hook 才能注册到 runtime.llm_hooks
         if self.agent_manager is not None:
             self.agent_manager.ensure_runtime(conn.bot_id, bot=conn)
+        await self.registry.load_all(conn.bot_id, bot=conn)
         logger.info(f"[BotService] Bot {conn.bot_id} 模块装配完成")
 
     # ==================== 连接操作（WebUI 调用） ====================
@@ -147,7 +147,9 @@ class BotService:
             },
             "config": _mask_password_config(config, SCHEMA),
             "config_schema": _split_schema(SCHEMA),
-            "has_page": True,
+            # 不设独立 page：Agent 配置走框架自身的 schema 表单（与普通模块统一排版），
+            # 读写由 app/webui/api/modules.py 的 _AgentProxy 桥接到 AgentRuntime。
+            "has_page": False,
         }
 
     def get_module_data(self, module_name: str, bot_id: int | None = None) -> dict | None:

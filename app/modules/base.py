@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+from abc import ABC
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -272,10 +272,56 @@ class BaseModule(ABC):
         self.authority = ctx.authority
         self.module_name = ctx.module_name
         self.bot_id = ctx.bot_id
+        # 装饰器收集到的模块流水线钩子（由 ModuleRegistry 填充）
+        self._module_hooks: list[dict] = []
         # 事件运行期属性（dispatcher 每事件更新）
         self.authority_check = False
         self.authority_enabled = False
         self.authority_level: int | None = None
+
+    # ---------- 钩子收集 ----------
+    @classmethod
+    def collect_hooks(cls) -> tuple[list[dict], list[dict]]:
+        """收集类中所有 @module_hook / @llm_hook 装饰的钩子。"""
+        module_hooks: list[dict] = []
+        llm_hooks: list[dict] = []
+
+        for klass in reversed(cls.__mro__):
+            for name, attr in vars(klass).items():
+                for meta in getattr(attr, "__module_hook_meta__", []):
+                    module_hooks.append({"method": name, **meta})
+                for meta in getattr(attr, "__llm_hook_meta__", []):
+                    llm_hooks.append({"method": name, **meta})
+
+        # 兼容旧的 LLM_HOOKS 类属性声明方式
+        for item in getattr(cls, "LLM_HOOKS", []) or []:
+            if isinstance(item, dict):
+                llm_hooks.append(dict(item))
+
+        return module_hooks, llm_hooks
+
+    # ---------- 事件入口 ----------
+    async def process_event(self, event: BaseEvent) -> None:
+        """模块流水线统一入口。
+
+        优先执行装饰器注册的 @module_hook；
+        没有装饰器钩子时回退到旧版 handle()。
+        """
+        hooks = [
+            h
+            for h in self._module_hooks
+            if h["event_type"] in ("*", event.event_type)
+        ]
+        hooks.sort(key=lambda h: h["order"])
+
+        if not hooks:
+            await self.handle(event)
+            return
+
+        for hook in hooks:
+            await hook["handler"](event)
+            if getattr(event, "_stopped", False):
+                break
 
     # ---------- 生命周期 ----------
     async def on_load(self) -> None: ...
@@ -283,5 +329,6 @@ class BaseModule(ABC):
     async def on_unload(self) -> None: ...
 
     # ---------- 业务入口 ----------
-    @abstractmethod
-    async def handle(self, event: BaseEvent) -> None: ...
+    async def handle(self, event: BaseEvent) -> None:
+        """旧版单入口；使用 @module_hook 的模块可以忽略。"""
+        return

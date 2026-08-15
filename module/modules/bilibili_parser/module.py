@@ -1,6 +1,6 @@
 """模块声明：B 站视频解析。"""
 
-from app.modules import BaseModule
+from app.modules import BaseModule, module_hook
 from .config_schema import SCHEMA
 
 
@@ -9,7 +9,6 @@ class Module(BaseModule):
     sign = "BilibiliParser"
     description = "自动解析B站视频链接，支持小程序卡片、短链和直链"
     authority_type = "normal"
-    subscribe = ("message_group", "message_private")
     default_config = {
         "enable_auto_parse": True,
         "enable_json_video": True,
@@ -26,6 +25,8 @@ class Module(BaseModule):
     }
     config_schema = SCHEMA
 
+    @module_hook("message_group", order=10)
+    @module_hook("message_private", order=10)
     async def handle(self, event):
         from .service import handle
 

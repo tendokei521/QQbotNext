@@ -265,3 +265,6 @@ venv\Scripts\python.exe -m pytest -q
 - **消息分发「一切皆节点」**：dispatcher 硬编码过滤 → `app/nodes` 入站节点链
   （Router → Permission → Invoke），出站发送可拦截；`app/modules/nodes.py` 为内置节点，
   `app/modules/keyword.py` 为共享关键词库；支持父模块递归子模块（`parent.child` 配置命名空间）。
+- **模块流水线 + LLM 流水线**：模块流水线在前（`@module_hook`），LLM 流水线在后
+  （`@llm_hook`：pre_request / post_response / pre_send / post_send）；LLM 请求池
+  `app/llm/pool.py` 支持同会话防抖合并；`event.llm.resume()` 手动放行。

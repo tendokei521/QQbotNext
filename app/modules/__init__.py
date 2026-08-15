@@ -17,6 +17,7 @@ from app.modules.base import (
     ServiceAccess,
     resolve_enabled_ids,
 )
+from app.modules.hooks import llm_hook, module_hook
 from app.modules.dispatcher import ModuleDispatcher
 from app.modules.keyword import match_keywords
 from app.modules.registry import ModuleRegistry
@@ -37,6 +38,8 @@ __all__ = [
     "set_system_authority",
     "resolve_enabled_ids",
     "match_keywords",
+    "module_hook",
+    "llm_hook",
     # 插件 API
     "get_modules",
     "get_config_path",

@@ -215,24 +215,15 @@ async def reload_modules(request: Request, bot_id: int | None = Depends(parse_bo
 @router.get("/module/{module_name}/page", response_class=HTMLResponse)
 async def module_page(module_name: str, request: Request,
                       bot_id: int | None = Depends(parse_bot_id)):
+    """自定义配置页（仅模块目录 pages/index.html；框架级 Agent 已并入 schema 表单，无独立页）。"""
     container = get_container(request)
+    from app.modules.registry import ModuleRegistry
 
-    if module_name == VIRTUAL_AGENT_MODULE:
-        # 框架级 Agent 页（虚拟模块）：读框架模板
-        from pathlib import Path
-
-        page_path = Path(__file__).resolve().parent.parent / "templates" / "agent.html"
-        if not page_path.exists():
-            return _err(404, f"模块 {module_name} 无自定义页面")
-        content = page_path.read_text(encoding="utf-8")
-    else:
-        from app.modules.registry import ModuleRegistry
-
-        reg = container.get(ModuleRegistry)
-        page_path = reg.module_page_path(module_name)
-        if page_path is None:
-            return _err(404, f"模块 {module_name} 无自定义页面")
-        content = page_path.read_text(encoding="utf-8")
+    reg = container.get(ModuleRegistry)
+    page_path = reg.module_page_path(module_name)
+    if page_path is None:
+        return _err(404, f"模块 {module_name} 无自定义页面")
+    content = page_path.read_text(encoding="utf-8")
 
     # 注入模块名 / 当前选中账号 / WebUI 访问令牌，方便页面 JS 拼接配置 API 并携带鉴权
     from app.core.settings import Settings

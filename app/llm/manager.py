@@ -14,6 +14,8 @@ from typing import Any
 
 from app.llm import logger
 from app.llm.config import AgentConfig
+from app.llm.hooks import LlmHookRegistry
+from app.llm.pipeline import LlmPipeline
 from app.llm.proactive import ProactiveManager
 from app.llm.scheduler import TaskScheduler
 from app.llm.session import SessionManager
@@ -48,6 +50,10 @@ class AgentRuntime:
         self.scheduler = TaskScheduler(self)
         self.proactive = ProactiveManager(self)
 
+        # LLM 流水线：模块可在任意阶段注册钩子
+        self.llm_hooks = LlmHookRegistry()
+        self.llm_pipeline = LlmPipeline(self, task_manager=task_manager)
+
     def set_bot(self, bot) -> None:
         self._bot = bot
         self.ctx.bot = bot
@@ -64,6 +70,10 @@ class AgentRuntime:
             pass
         try:
             self.session_mgr.stop_cleanup()
+        except Exception:
+            pass
+        try:
+            self.llm_pipeline.shutdown()
         except Exception:
             pass
         logger.add_info(f"#{self.bot_id}").info("[Agent] 运行时已停止")

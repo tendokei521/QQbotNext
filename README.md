@@ -72,6 +72,8 @@ python main.py
 
 ## 开发一个插件
 
+> 完整模块开发文档见 [`docs/MODULE_DEV.md`](docs/MODULE_DEV.md)，包含每个钩子的参数与用法。
+
 在 `module/modules/<name>/` 下新建文件（模块内部一律用**相对导入**，与目录位置解耦）：
 
 ```python
@@ -112,6 +114,52 @@ SCHEMA = {"greeting": {"type": "text", "label": "问候语", "default": "你好"
 
 插件可通过 `module.config.get(key)` / `module.authority.enabled` / `module.ctx.services.cache`
 访问配置、启停状态与缓存；通过 `event.bot` 调用全部 OneBot API。
+
+### 装饰器风格（推荐）
+
+新架构支持用装饰器直观注册“模块流水线钩子”和“LLM 流水线钩子”：
+
+```python
+# module.py
+from app.modules import BaseModule, module_hook, llm_hook
+
+class Module(BaseModule):
+    # 模块流水线：按事件类型注册处理函数（subscribe 可自动推导）
+    @module_hook("message_group", order=10)
+    @module_hook("message_private", order=10)
+    async def on_message(self, event):
+        if event.text == "ping":
+            await event.reply("pong")
+            event.llm.stop()          # 已处理，跳过 LLM
+
+    # LLM 流水线：请求前钩子（可暂停/防抖）
+    @llm_hook("pre_request", event_type="*", order=10)
+    async def before_llm(self, ctx):
+        await ctx.event.llm.wait_continue()   # 等待 event.llm.resume()
+
+    # LLM 流水线：请求后拆分多条消息
+    @llm_hook("post_response", order=20)
+    async def after_llm(self, ctx):
+        from app.domain.message import Message
+        parts = [ctx.response_text[i:i+50] for i in range(0, len(ctx.response_text), 50)]
+        ctx.response_messages = [Message.from_text(p) for p in parts]
+```
+
+要点：
+
+- 模块流水线在前，LLM 流水线在后；
+- `event.llm.stop()` 跳过 LLM 回复；
+- `continue` 是 Python 关键字，手动放行请用 `event.llm.resume()`；
+- 内置 `llm_debounce` 模块演示了“多条消息防抖合并为一次 LLM 请求”。
+
+### 流式输出（带 tools）
+
+在 LLM 配置开启 `stream_output` 后，LLM 回复会按句子流式发送，并且仍然支持定时任务等工具调用。
+
+- 每个完整句子都会触发 `pre_send` / `post_send` 钩子；
+- 整个流结束后触发 `post_stream` 钩子；
+- 工具调用通过流式 `tool_calls` 碎片累积解析，支持多轮工具循环；
+- 单句最大长度由 `stream_sentence_max_length` 控制。
 
 ### 插件 API（`from app.modules import ...`）
 

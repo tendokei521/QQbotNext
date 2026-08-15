@@ -65,5 +65,13 @@ def migrate_legacy_data() -> None:
 
 
 from .chat import handle  # noqa: E402
+from .context import LlmContext, LlmJob  # noqa: E402
 
-__all__ = ["handle", "logger", "llm_data_dir", "migrate_legacy_data"]
+__all__ = [
+    "handle",
+    "LlmContext",
+    "LlmJob",
+    "logger",
+    "llm_data_dir",
+    "migrate_legacy_data",
+]

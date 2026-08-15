@@ -1,6 +1,6 @@
 """模块声明：三角洲行动今日密码。"""
 
-from app.modules import BaseModule
+from app.modules import BaseModule, module_hook
 from .config_schema import SCHEMA
 
 
@@ -9,7 +9,6 @@ class Module(BaseModule):
     sign = "Delta_Password"
     description = "三角洲行动今日密码"
     authority_type = "normal"
-    subscribe = ("message_group",)
     default_config = {
         "strict_text": True,
         "enable_command": True,
@@ -26,6 +25,7 @@ class Module(BaseModule):
     }
     config_schema = SCHEMA
 
+    @module_hook("message_group", order=10)
     async def handle(self, event):
         from .service import handle
 

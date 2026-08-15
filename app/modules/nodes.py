@@ -90,9 +90,14 @@ class AgentNode(MessageNode):
             await self._observe_proactive(runtime, event)
             await next_()
             return
-        from app.llm import handle as agent_handle
+        # 非阻塞提交到 LLM 流水线（由 LlmPipeline 后台执行，避免卡住模块 Worker）
+        pipeline = getattr(runtime, "llm_pipeline", None)
+        if pipeline is not None:
+            pipeline.submit(event)
+        else:
+            from app.llm import handle as agent_handle
 
-        await agent_handle(runtime, event)
+            await agent_handle(runtime, event)
         await next_()
 
     @staticmethod
@@ -120,7 +125,7 @@ class ModuleRouterNode(MessageNode):
         event = ctx.event
         candidates: list[BaseModule] = []
         for module in self.registry.loaded():
-            if event.event_type not in module.subscribe:
+            if "*" not in module.subscribe and event.event_type not in module.subscribe:
                 continue
             # bot 归属：有明确 bot 只派发给该 bot 的实例；全局(None)实例不处理事件
             if event.bot_id:
@@ -184,7 +189,10 @@ class ModuleInvokeNode(MessageNode):
             if ctx.cancelled or getattr(event, "_stopped", False):
                 break
             try:
-                await module.handle(event)
+                if hasattr(module, "process_event"):
+                    await module.process_event(event)
+                else:
+                    await module.handle(event)
             except Exception as e:
                 self.log.exception(
                     f"[Dispatch] {module.module_name}(bot {module.bot_id}) 处理 {event.event_type} 异常: {e}"

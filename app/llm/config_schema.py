@@ -54,6 +54,14 @@ SCHEMA = {
         "type": "number", "label": "回复冷却时间(秒)", "description": "群聊时Bot回复后多少秒内不再响应新消息",
         "default": 5, "min": 1, "max": 30, "group": "group_switch",
     },
+    "stream_output": {
+        "type": "boolean", "label": "流式输出", "description": "启用后 LLM 回复按句子流式发送（支持带 tools 的工具调用）",
+        "default": False, "group": "group_switch",
+    },
+    "stream_sentence_max_length": {
+        "type": "number", "label": "流式单句最大长度", "description": "流式输出时每条消息的最大字符数",
+        "default": 50, "min": 10, "max": 200, "group": "group_switch",
+    },
 
     "system_prompt": {
         "type": "textarea", "label": "系统提示词", "description": "设定AI角色的系统提示词",

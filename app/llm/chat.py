@@ -6,6 +6,7 @@
 
 
 import asyncio
+import json
 import time
 
 from app.llm import logger
@@ -14,6 +15,7 @@ from app.llm.prompt import build_messages
 from app.llm.providers import get_provider
 from app.llm.tags import strip_all_tags
 from app.llm.scheduler import extract_reminder_note, has_schedule_intent
+from app.llm.splitter import split_sentences
 from app.llm.trigger import check_trigger, extract_text
 from app.llm.tool import build_tools, make_executor
 
@@ -241,6 +243,386 @@ async def call_llm_and_reply(module, event, session_mgr, config,
         logger.add_info(f"#{module.bot_id}").info(f"回复完成 -> {session_id} (task: {session.task_id})")
     except Exception as e:
         logger.add_info(f"#{module.bot_id}").error(f"消息发送失败: {e}")
+
+
+async def generate_response(runtime, event, ctx=None) -> str | None:
+    """LLM 流水线专用生成函数：只生成回复文本，不发送消息。
+
+    与 ``call_llm_and_reply`` 保持相同的会话/历史/定时逻辑，
+    但把“发送”留给 LLM 流水线统一处理，以便 post_response / pre_send 钩子介入。
+    """
+    config = runtime.config
+    if not config.get("api_key", ""):
+        logger.add_info(f"#{runtime.bot_id}").error("[LLM] API 密钥未配置，跳过处理")
+        return None
+    message_type = getattr(event, "message_type", "")
+    if message_type not in ("group", "private"):
+        return None
+
+    if message_type == "private":
+        if not config.get("private_enable", True):
+            return None
+        is_private = True
+        session_id = f"private_{event.user_id}"
+        user_id = str(event.user_id)
+        group_id = None
+        include_pre_history = config.get("include_private_pre_history", "default")
+    else:
+        if not config.get("group_enable", False):
+            return None
+        is_private = False
+        session_id = f"group_{event.group.group_id}"
+        user_id = str(event.user_id)
+        group_id = str(event.group.group_id)
+        include_pre_history = config.get("include_pre_history", False)
+
+    if ctx is not None:
+        if ctx.session_id:
+            session_id = ctx.session_id
+        user_text = (ctx.user_text or "").strip()
+    else:
+        user_text = extract_text(event.message).strip()
+
+    if not user_text:
+        return None
+    max_msg_len = config.get("max_message_length", 50)
+    user_text = user_text[:max_msg_len]
+
+    session_mgr = SessionManager(str(runtime.bot_id))
+    session = session_mgr.get_session(session_id)
+    if not session:
+        session = session_mgr.create_session(
+            session_id,
+            "private" if is_private else "group",
+            config.get("session_timeout", 60),
+        )
+        if not is_private:
+            session.reply_cooldown = config.get("reply_cooldown", 5)
+        await asyncio.to_thread(session_mgr.restore_session_from_archive, session, session_id)
+    else:
+        if not is_private and not session.can_reply():
+            return None
+        session.add_participant(user_id)
+
+    session_mgr.add_message(session_id, "user", user_text, user_id)
+
+    model = config.get("model", "deepseek-chat")
+    system_prompt = config.get("system_prompt", "你是一个友好的助手。")
+    max_tokens = config.get("max_tokens", 1024)
+    temperature = config.get("temperature", 0.7)
+    history_rounds = config.get("history_rounds", 50)
+
+    pre_history_text = ""
+    if group_id:
+        pre_history_text = await fetch_online_history(event, group_id, count=history_rounds)
+        if pre_history_text:
+            pre_history_text = f"群聊近期记录:\n{pre_history_text}"
+    elif is_private and include_pre_history in ("history", "load"):
+        pre_history_text = await fetch_private_online_history(event, user_id, count=history_rounds)
+        if pre_history_text and include_pre_history == "history":
+            pre_history_text = f"近期聊天记录:\n{pre_history_text}"
+
+    session_history = session_mgr.get_history(session_id, limit=history_rounds)
+    user_text_current = session.data.history[-1]["content"] if session.data.history else ""
+    # 防重复：history 尾部就是刚追加的当前用户消息，避免同一消息出现两次
+    if (session_history and session_history[-1].get("role") == "user"
+            and session_history[-1].get("content") == user_text_current):
+        session_history = session_history[:-1]
+
+    schedule_enable = config.get("schedule_enable", True)
+    # 定时意图检测：用于「紧贴提醒」+「模型未调工具时的确定性兜底」
+    intent = has_schedule_intent(user_text) if schedule_enable else False
+
+    messages = build_messages(
+        system_prompt=system_prompt,
+        pre_history_text=pre_history_text,
+        history=session_history,
+        user_text=user_text,
+        with_schedule_instruction=schedule_enable,
+        schedule_nudge=intent,
+    )
+
+    logger.add_info(f"#{runtime.bot_id}").info(
+        f"API 请求 -> {session_id} (task: {session.task_id}), 消息数: {len(messages)}"
+    )
+
+    schedule_tools = []
+    if schedule_enable:
+        from app.llm.scheduler import build_schedule_tool
+
+        schedule_tools = [build_schedule_tool(runtime, session_id, is_private)]
+
+    provider = get_provider(config)
+    response = await provider.chat(
+        messages,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        tools=build_tools(schedule_tools) if schedule_tools else None,
+        tool_executor=make_executor(schedule_tools) if schedule_tools else None,
+    )
+
+    if not response.ok:
+        clean_response = "抱歉，我暂时无法回答，请稍后再试。"
+    else:
+        # 工具结果（定时任务已在工具循环中执行，最终回复是 LLM 基于结果的确认）
+        if response.tool_results:
+            for tr in response.tool_results:
+                logger.add_info(f"#{runtime.bot_id}").info(
+                    f"[Tool] {tr['name']} 执行 -> {str(tr['result'])[:80]}"
+                )
+        # 防御：剥离角色提示词可能输出的 <type=...> 标签，避免漏到客户端
+        clean_response = strip_all_tags(response.text)
+
+    # 兜底：用户明确提了定时请求但模型未调用工具 → 模块确定性排程（保证任务一定创建）
+    if intent and not response.tool_results:
+        scheduler = getattr(runtime, "scheduler", None)
+        if scheduler:
+            note = extract_reminder_note(user_text)
+            entry = await scheduler.schedule(session_id, {"trigger": user_text[:60], "content": note})
+            if entry:
+                logger.add_info(f"#{runtime.bot_id}").info(
+                    f"[定时] 模型未调工具，兜底创建 {session_id}: {user_text[:30]} -> "
+                    f"{entry.next_at:%Y-%m-%d %H:%M} ({entry.repeat})"
+                )
+            else:
+                logger.add_info(f"#{runtime.bot_id}").warning(
+                    f"[定时] 兜底排程失败（时间无法解析）: {user_text}"
+                )
+
+    session_mgr.add_message(session_id, "assistant", clean_response)
+    if not is_private:
+        session.mark_replied()
+    await asyncio.to_thread(session_mgr.history.save_session, session)
+    return clean_response
+
+
+async def stream_response(runtime, event, ctx=None):
+    """流式生成回复：按完整句子产出文本，内部处理多轮工具调用。
+
+    与 ``generate_response`` 的会话/历史逻辑保持一致；
+    但每次产出一个完整句子（str），由 LlmPipeline 负责 pre_send / 发送 / post_send。
+    """
+    config = runtime.config
+    if not config.get("api_key", ""):
+        logger.add_info(f"#{runtime.bot_id}").error("[LLM] API 密钥未配置，跳过处理")
+        return
+
+    message_type = getattr(event, "message_type", "")
+    if message_type not in ("group", "private"):
+        return
+
+    if message_type == "private":
+        if not config.get("private_enable", True):
+            return
+        is_private = True
+        session_id = f"private_{event.user_id}"
+        user_id = str(event.user_id)
+        group_id = None
+        include_pre_history = config.get("include_private_pre_history", "default")
+    else:
+        if not config.get("group_enable", False):
+            return
+        is_private = False
+        session_id = f"group_{event.group.group_id}"
+        user_id = str(event.user_id)
+        group_id = str(event.group.group_id)
+        include_pre_history = config.get("include_pre_history", False)
+
+    if ctx is not None:
+        if ctx.session_id:
+            session_id = ctx.session_id
+        user_text = (ctx.user_text or "").strip()
+    else:
+        user_text = extract_text(event.message).strip()
+
+    if not user_text:
+        return
+    max_msg_len = int(
+        config.get("stream_sentence_max_length")
+        or config.get("max_message_length", 50)
+        or 50
+    )
+    user_text = user_text[:max_msg_len]
+
+    session_mgr = SessionManager(str(runtime.bot_id))
+    session = session_mgr.get_session(session_id)
+    if not session:
+        session = session_mgr.create_session(
+            session_id,
+            "private" if is_private else "group",
+            config.get("session_timeout", 60),
+        )
+        if not is_private:
+            session.reply_cooldown = config.get("reply_cooldown", 5)
+        await asyncio.to_thread(session_mgr.restore_session_from_archive, session, session_id)
+    else:
+        if not is_private and not session.can_reply():
+            return
+        session.add_participant(user_id)
+
+    session_mgr.add_message(session_id, "user", user_text, user_id)
+
+    model = config.get("model", "deepseek-chat")
+    system_prompt = config.get("system_prompt", "你是一个友好的助手。")
+    max_tokens = config.get("max_tokens", 1024)
+    temperature = config.get("temperature", 0.7)
+    history_rounds = config.get("history_rounds", 50)
+
+    pre_history_text = ""
+    if group_id:
+        pre_history_text = await fetch_online_history(event, group_id, count=history_rounds)
+        if pre_history_text:
+            pre_history_text = f"群聊近期记录:\n{pre_history_text}"
+    elif is_private and include_pre_history in ("history", "load"):
+        pre_history_text = await fetch_private_online_history(event, user_id, count=history_rounds)
+        if pre_history_text and include_pre_history == "history":
+            pre_history_text = f"近期聊天记录:\n{pre_history_text}"
+
+    session_history = session_mgr.get_history(session_id, limit=history_rounds)
+    user_text_current = session.data.history[-1]["content"] if session.data.history else ""
+    if (session_history and session_history[-1].get("role") == "user"
+            and session_history[-1].get("content") == user_text_current):
+        session_history = session_history[:-1]
+
+    schedule_enable = config.get("schedule_enable", True)
+    intent = has_schedule_intent(user_text) if schedule_enable else False
+
+    messages = build_messages(
+        system_prompt=system_prompt,
+        pre_history_text=pre_history_text,
+        history=session_history,
+        user_text=user_text,
+        with_schedule_instruction=schedule_enable,
+        schedule_nudge=intent,
+    )
+
+    logger.add_info(f"#{runtime.bot_id}").info(
+        f"流式 API 请求 -> {session_id} (task: {session.task_id}), 消息数: {len(messages)}"
+    )
+
+    schedule_tools = []
+    if schedule_enable:
+        from app.llm.scheduler import build_schedule_tool
+
+        schedule_tools = [build_schedule_tool(runtime, session_id, is_private)]
+
+    tools = build_tools(schedule_tools) if schedule_tools else None
+    tool_executor = make_executor(schedule_tools) if schedule_tools else None
+    provider = get_provider(config)
+
+    full_text = ""
+    tool_results: list[dict] = []
+
+    for _round in range(5):
+        round_text = ""
+        buffer = ""
+        tool_calls: dict[int, dict] = {}
+        stream_error = ""
+
+        async for ev in provider.chat_stream(
+            messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            tools=tools,
+            tool_executor=tool_executor,
+        ):
+            if ev.type == "text":
+                round_text += ev.text
+                full_text += ev.text
+                buffer += ev.text
+                sentences, buffer = split_sentences(buffer, max_length=max_msg_len)
+                for sentence in sentences:
+                    yield sentence
+            elif ev.type == "tool_call":
+                tc = ev.tool_call or {}
+                index = int(tc.get("index", 0) or 0)
+                slot = tool_calls.setdefault(index, {
+                    "id": "",
+                    "type": "function",
+                    "function": {"name": "", "arguments": ""},
+                })
+                slot["id"] += tc.get("id", "")
+                slot["function"]["name"] += tc.get("function", {}).get("name", "")
+                slot["function"]["arguments"] += tc.get("function", {}).get("arguments", "")
+            elif ev.type == "error":
+                stream_error = ev.text
+                break
+
+        if buffer.strip():
+            yield buffer.strip()
+            buffer = ""
+
+        if stream_error:
+            if not full_text:
+                yield "抱歉，我暂时无法回答，请稍后再试。"
+            return
+
+        if not tool_calls:
+            break
+
+        # 组装完整 tool_calls
+        complete_tool_calls = []
+        for idx in sorted(tool_calls):
+            tc = tool_calls[idx]
+            raw_args = tc["function"]["arguments"]
+            try:
+                tc["function"]["arguments"] = json.loads(raw_args) if raw_args.strip() else {}
+            except json.JSONDecodeError:
+                tc["function"]["arguments"] = {}
+            complete_tool_calls.append(tc)
+
+        messages.append({
+            "role": "assistant",
+            "content": round_text or None,
+            "tool_calls": complete_tool_calls,
+        })
+
+        for tc in complete_tool_calls:
+            name = tc["function"]["name"]
+            args = tc["function"]["arguments"]
+            try:
+                exec_result = await tool_executor(name, args) if tool_executor else "工具执行器不可用"
+            except Exception as e:
+                exec_result = f"error: 工具执行异常 {e}"
+            if not isinstance(exec_result, str):
+                exec_result = str(exec_result)
+            tool_results.append({"name": name, "args": args, "result": exec_result})
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc.get("id", ""),
+                "content": exec_result,
+            })
+    else:
+        logger.add_info(f"#{runtime.bot_id}").warning("流式工具循环超过 5 轮，强制结束")
+
+    # 兜底：用户明确提了定时请求但模型未调用工具 → 确定性排程
+    if intent and not tool_results:
+        scheduler = getattr(runtime, "scheduler", None)
+        if scheduler:
+            note = extract_reminder_note(user_text)
+            entry = await scheduler.schedule(
+                session_id,
+                {"trigger": user_text[:60], "content": note},
+            )
+            if entry:
+                logger.add_info(f"#{runtime.bot_id}").info(
+                    f"[定时] 流式模型未调工具，兜底创建 {session_id}: {user_text[:30]} -> "
+                    f"{entry.next_at:%Y-%m-%d %H:%M} ({entry.repeat})"
+                )
+            else:
+                logger.add_info(f"#{runtime.bot_id}").warning(
+                    f"[定时] 兜底排程失败（时间无法解析）: {user_text}"
+                )
+
+    session_mgr.add_message(session_id, "assistant", full_text)
+    if not is_private:
+        session.mark_replied()
+    await asyncio.to_thread(session_mgr.history.save_session, session)
+
+    if ctx is not None:
+        ctx.response_text = full_text
 
 
 async def handle_commands(module, session_mgr, session_id, group_id, user_id,

@@ -1,6 +1,6 @@
 """模块声明：防撤回。"""
 
-from app.modules import BaseModule
+from app.modules import BaseModule, module_hook
 from .config_schema import SCHEMA
 
 
@@ -9,7 +9,6 @@ class Module(BaseModule):
     sign = "RecallBack"
     description = "防撤回模块，监听消息并转发被撤回的消息"
     authority_type = "all"
-    subscribe = ("message_group", "message_private", "notice_group_recall", "notice_private_recall")
     default_config = {
         "cache_time": 600,
         "enable_group_listen": True,
@@ -28,6 +27,10 @@ class Module(BaseModule):
     }
     config_schema = SCHEMA
 
+    @module_hook("message_group", order=10)
+    @module_hook("message_private", order=10)
+    @module_hook("notice_group_recall", order=10)
+    @module_hook("notice_private_recall", order=10)
     async def handle(self, event):
         from .service import handle
 

@@ -16,7 +16,7 @@ from typing import Callable
 import aiohttp
 
 from app.llm import logger
-from .base import BaseProvider, LLMResponse
+from .base import BaseProvider, LLMResponse, StreamEvent
 
 RETRYABLE_STATUS = {408, 409, 429, 500, 502, 503, 504, 529}
 
@@ -71,6 +71,49 @@ class OpenAICompatProvider(BaseProvider):
                         raise ConnectionError(f"HTTP {resp.status}: {body[:200]}")
                     raise _FatalError(f"HTTP {resp.status}: {body[:200]}")
                 return await resp.json()
+
+    async def _stream_once(self, api_key: str, payload: dict, timeout: int):
+        """发起一次流式 HTTP 请求，逐块产出 StreamEvent。"""
+        if not api_key:
+            raise _FatalError("API 密钥未配置")
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                self._endpoint(), headers=headers, json=payload,
+                timeout=aiohttp.ClientTimeout(total=timeout),
+            ) as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    if resp.status in (401, 403):
+                        raise _AuthError(f"HTTP {resp.status}: {body[:200]}")
+                    if resp.status in RETRYABLE_STATUS:
+                        raise ConnectionError(f"HTTP {resp.status}: {body[:200]}")
+                    raise _FatalError(f"HTTP {resp.status}: {body[:200]}")
+                while True:
+                    raw_line = await resp.content.readline()
+                    if not raw_line:
+                        break
+                    line = raw_line.decode("utf-8", errors="ignore").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    choices = chunk.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta", {}) or {}
+                    finish_reason = choices[0].get("finish_reason", "")
+                    if delta.get("content"):
+                        yield StreamEvent(type="text", text=delta["content"])
+                    for tc in delta.get("tool_calls") or []:
+                        yield StreamEvent(type="tool_call", tool_call=tc)
+                    if finish_reason:
+                        yield StreamEvent(type="done", finish_reason=finish_reason)
 
     async def _request(self, payload: dict, timeout: int) -> dict | None:
         """带重试的请求。认证失败自动轮换 key；最终失败返回 None。"""
@@ -198,3 +241,61 @@ class OpenAICompatProvider(BaseProvider):
         logger.add_info("Api").warning(f"工具循环超过 {max_tool_rounds} 轮，强制结束")
         # 保留已执行工具结果与最后一次响应，避免已完成的工具调用静默丢失
         return self._to_response(result, tool_results)
+
+    async def chat_stream(
+        self,
+        messages: list[dict],
+        *,
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 1024,
+        timeout: int = 30,
+        tools: list[dict] | None = None,
+        tool_executor=None,
+    ):
+        """流式对话请求：逐块产出 StreamEvent，支持 tools 碎片解析。
+
+        注意：工具执行循环由调用方（LlmPipeline / chat.stream_response）负责，
+        这里只负责单次 HTTP 流式请求的解析。
+        """
+        model = model or self.config.get("model", "deepseek-chat")
+        payload: dict = {
+            "model": model,
+            "messages": list(messages),
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": True,
+        }
+        if tools:
+            payload["tools"] = tools
+
+        for attempt in range(self.max_retries):
+            key = self.api_keys[attempt % len(self.api_keys)]
+            started = False
+            try:
+                async for event in self._stream_once(key, payload, timeout):
+                    started = True
+                    yield event
+                return
+            except _AuthError as e:
+                if attempt < self.max_retries - 1:
+                    logger.add_info("Api").warning(
+                        f"API key {attempt % len(self.api_keys) + 1} 认证失败，轮换下一个: {e}"
+                    )
+                    await asyncio.sleep(0.5)
+                    continue
+                yield StreamEvent(type="error", text=str(e))
+                return
+            except _FatalError as e:
+                yield StreamEvent(type="error", text=str(e))
+                return
+            except Exception as e:
+                if started or attempt >= self.max_retries - 1:
+                    yield StreamEvent(type="error", text=str(e))
+                    return
+                logger.add_info("Api").warning(
+                    f"流式请求失败，{2 ** attempt}s 后重试 ({attempt + 1}/{self.max_retries}): {e}"
+                )
+                await asyncio.sleep(2 ** attempt)
+
+        yield StreamEvent(type="error", text="流式请求最终失败")

@@ -1,6 +1,6 @@
 """Provider 注册表。"""
 
-from .base import BaseProvider, LLMResponse
+from .base import BaseProvider, LLMResponse, StreamEvent
 from .openai_compat import OpenAICompatProvider
 
 PROVIDERS = {"openai": OpenAICompatProvider}
@@ -13,4 +13,4 @@ def get_provider(config: dict) -> BaseProvider:
     return cls(config)
 
 
-__all__ = ["BaseProvider", "LLMResponse", "OpenAICompatProvider", "get_provider", "PROVIDERS"]
+__all__ = ["BaseProvider", "LLMResponse", "StreamEvent", "OpenAICompatProvider", "get_provider", "PROVIDERS"]
