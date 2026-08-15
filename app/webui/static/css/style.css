@@ -257,7 +257,7 @@ body { font-family: "Microsoft YaHei", Arial, sans-serif; background: var(--bg);
 .module-search-input { width: 100%; padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; background: var(--bg); color: var(--text); outline: none; }
 .module-search-input:focus { border-color: var(--blue); }
 
-.module-name-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.module-name-text { flex: 1 1 auto; min-width: fit-content; white-space: normal; word-break: break-word; }
 .module-actions { display: flex; gap: 4px; margin-left: 6px; }
 .module-action-btn { background: none; border: 0; cursor: pointer; font-size: 13px; opacity: 0.5; padding: 2px; }
 .module-action-btn:hover { opacity: 1; }

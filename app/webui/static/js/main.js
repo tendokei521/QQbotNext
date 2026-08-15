@@ -575,7 +575,6 @@ function renderModuleList() {
     if (!container) return;
     const query = (document.getElementById('module-search')?.value || '').trim().toLowerCase();
     const items = allModuleItems;
-    const hiddenSet = new Set(modulePrefs.hidden || []);
     const pinnedSet = new Set(modulePrefs.pinned || []);
     const recentSet = new Set(modulePrefs.recent || []);
 
@@ -584,9 +583,6 @@ function renderModuleList() {
         const sign = (item.getAttribute('data-sign') || '').toLowerCase();
         const tags = (item.getAttribute('data-tags') || '').toLowerCase();
         const mod = item.getAttribute('data-module');
-        if (hiddenSet.has(mod)) return false;
-        // 默认隐藏的模块只有被置顶后才显示
-        if (item.getAttribute('data-hidden') === '1' && !pinnedSet.has(mod)) return false;
         if (query && !name.includes(query) && !sign.includes(query) && !tags.includes(query)) return false;
         return true;
     });
@@ -682,15 +678,6 @@ function togglePinModule(modName, event) {
     const arr = modulePrefs.pinned || [];
     if (arr.includes(modName)) modulePrefs.pinned = arr.filter(x => x !== modName);
     else modulePrefs.pinned = [modName, ...arr];
-    saveModulePrefs();
-    renderModuleList();
-}
-
-function toggleHideModule(modName, event) {
-    if (event) event.stopPropagation();
-    const arr = modulePrefs.hidden || [];
-    if (arr.includes(modName)) modulePrefs.hidden = arr.filter(x => x !== modName);
-    else modulePrefs.hidden = [modName, ...arr];
     saveModulePrefs();
     renderModuleList();
 }
