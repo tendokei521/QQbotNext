@@ -271,6 +271,59 @@ class TaskScheduler:
         if self.bot is None:
             logger.add_info(f"#{self.bot_id}").warning(f"[定时任务] 无可用 Bot，跳过发送 {entry.id}")
             return
+
+        config = self.module.config
+        # 定时任务也支持流式：与普通消息使用同一套流式发送配置
+        if config.get("stream_output", False) and config.get("stream_proactive_scheduled_enabled", False):
+            session = self.session_mgr.get_session(entry.session_id)
+            if session is None:
+                session = self.session_mgr.create_session(
+                    entry.session_id,
+                    "group" if entry.is_group else "private",
+                    int(config.get("session_timeout", 60)),
+                )
+                await asyncio.to_thread(self.session_mgr.restore_session_from_archive, session, entry.session_id)
+
+            from app.llm.initiative_stream import stream_send_initiative
+
+            messages = self._build_messages(entry)
+            try:
+                full_text = await stream_send_initiative(
+                    self.module,
+                    self.bot,
+                    entry.session_id,
+                    entry.is_group,
+                    entry.target,
+                    messages,
+                    model=config.get("model", "deepseek-chat"),
+                    temperature=config.get("temperature", 0.7),
+                    max_tokens=config.get("max_tokens", 1024),
+                )
+            except Exception as e:
+                logger.add_info(f"#{self.bot_id}").error(f"[定时任务] 流式生成异常，改用固定内容: {e}")
+                full_text = ""
+
+            clean = strip_all_tags(full_text).strip()
+            if not clean:
+                clean = entry.content
+                try:
+                    if entry.is_group:
+                        await self.bot.send_group_msg(group_id=int(entry.target), message=clean)
+                    else:
+                        await self.bot.send_private_msg(user_id=int(entry.target), message=clean)
+                except Exception as e:
+                    logger.add_info(f"#{self.bot_id}").error(f"[定时任务] 发送失败 {entry.id} -> {entry.session_id}: {e}")
+            else:
+                logger.add_info(f"#{self.bot_id}").info(
+                    f"[定时任务] 流式触发 {entry.id} -> {entry.session_id}: {clean[:50]}"
+                )
+
+            if session:
+                self.session_mgr.add_message(entry.session_id, "assistant", clean)
+                await asyncio.to_thread(self.session_mgr.history.save_session, session)
+            self._save()
+            return
+
         try:
             resp = await self._generate_reply(entry)
         except Exception as e:
@@ -305,21 +358,13 @@ class TaskScheduler:
             logger.add_info(f"#{self.bot_id}").error(f"[定时任务] 发送失败 {entry.id} -> {entry.session_id}: {e}")
         self._save()
 
-    async def _generate_reply(self, entry: TaskEntry):
-        """构建并执行一次带系统提示词的 LLM 请求（会话已过期则从归档恢复上下文）。"""
+    def _build_messages(self, entry: TaskEntry) -> list[dict]:
+        """构建定时任务触发的 LLM 消息。"""
         session = self.session_mgr.get_session(entry.session_id)
-        if session is None:
-            session = self.session_mgr.create_session(
-                entry.session_id,
-                "group" if entry.is_group else "private",
-                int(self.module.config.get("session_timeout", 60)),
-            )
-            await asyncio.to_thread(self.session_mgr.restore_session_from_archive, session, entry.session_id)
-
         config = self.module.config
         history = self.session_mgr.get_history(
             entry.session_id, limit=int(config.get("history_rounds", 50))
-        )
+        ) if session else []
         system_prompt = config.get("system_prompt", "你是一个友好的助手。")
         now_str = datetime.now().strftime("%Y年%m月%d日 %H:%M")
         job_json = json.dumps({
@@ -335,18 +380,31 @@ class TaskScheduler:
             .replace("{{current_time}}", now_str)
             .replace("{{job_json}}", job_json)
         )
-        messages = build_messages(
+        return build_messages(
             system_prompt=system_prompt,
             history=history,
             user_text=user_prompt,
             with_schedule_instruction=False,
         )
-        provider = get_provider(dict(config.raw_config))
+
+    async def _generate_reply(self, entry: TaskEntry):
+        """构建并执行一次带系统提示词的 LLM 请求（会话已过期则从归档恢复上下文）。"""
+        session = self.session_mgr.get_session(entry.session_id)
+        if session is None:
+            session = self.session_mgr.create_session(
+                entry.session_id,
+                "group" if entry.is_group else "private",
+                int(self.module.config.get("session_timeout", 60)),
+            )
+            await asyncio.to_thread(self.session_mgr.restore_session_from_archive, session, entry.session_id)
+
+        messages = self._build_messages(entry)
+        provider = get_provider(dict(self.module.config.raw_config))
         return await provider.chat(
             messages,
-            model=config.get("model", "deepseek-chat"),
-            temperature=config.get("temperature", 0.7),
-            max_tokens=config.get("max_tokens", 1024),
+            model=self.module.config.get("model", "deepseek-chat"),
+            temperature=self.module.config.get("temperature", 0.7),
+            max_tokens=self.module.config.get("max_tokens", 1024),
         )
 
     def _complete(self, entry: TaskEntry) -> None:

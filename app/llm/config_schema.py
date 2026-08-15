@@ -148,6 +148,10 @@ SCHEMA = {
         "type": "boolean", "label": "严格按顺序发送", "description": "保持生成顺序逐条发送（建议开启）",
         "default": True, "group": "group_stream",
     },
+    "stream_proactive_scheduled_enabled": {
+        "type": "boolean", "label": "主动/定时也使用流式", "description": "开启后主动消息和定时任务使用与普通消息相同的流式发送配置",
+        "default": False, "group": "group_stream",
+    },
 
     "system_prompt": {
         "type": "textarea", "label": "系统提示词", "description": "设定AI角色的系统提示词",

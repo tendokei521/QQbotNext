@@ -169,7 +169,41 @@ class ProactiveManager:
 
         # 生成期间新消息检查
         start_last = self._data.get(session_id, {}).get("last_user_time", 0)
-        provider = get_provider(dict(self.module.config.raw_config))
+        config = self.module.config
+
+        # 主动消息也支持流式：与普通消息使用同一套流式发送配置
+        if config.get("stream_output", False) and config.get("stream_proactive_scheduled_enabled", False):
+            from app.llm.initiative_stream import stream_send_initiative
+
+            full_text = await stream_send_initiative(
+                self.module,
+                self.bot,
+                session_id,
+                is_group,
+                target,
+                messages,
+                model=config.get("model", "deepseek-chat"),
+                temperature=config.get("temperature", 0.7),
+                max_tokens=config.get("max_tokens", 1024),
+            )
+            clean = strip_all_tags(full_text).strip()
+            if not clean:
+                if not is_group:
+                    self._schedule_next_private(session_id)
+                return
+            if session:
+                self.session_mgr.add_message(session_id, "assistant", clean)
+                await asyncio.to_thread(self.session_mgr.history.save_session, session)
+            self._data.setdefault(session_id, {})["unanswered_count"] = unanswered + 1
+            self._save()
+            logger.add_info(f"#{self.module.bot_id}").info(
+                f"[主动消息] {session_id} 流式主动发言完成（未回复 {unanswered + 1} 次）"
+            )
+            if not is_group:
+                self._schedule_next_private(session_id)
+            return
+
+        provider = get_provider(dict(config.raw_config))
         resp = await provider.chat(
             messages,
             model=self.module.config.get("model", "deepseek-chat"),
