@@ -308,6 +308,12 @@ textarea.auto-resize { resize: none; overflow-y: hidden; min-height: 80px; font-
 .authority-group_owner { background: #8a3a8f; color: white; }
 .authority-owner { background: #c0392b; color: white; }
 
+/* Agent 特殊兼容面板 */
+.agent-panel-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.agent-panel-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.agent-panel-table th, .agent-panel-table td { padding: 6px 4px; border-bottom: 1px solid var(--border); text-align: left; }
+.agent-panel-table th { color: var(--muted); font-weight: 600; }
+
 /* ==================== 底部控制台 ==================== */
 .console-wrapper { position: fixed; bottom: 0; left: 280px; right: 0; background: white; border-top: 1px solid var(--border); box-shadow: 0 -2px 10px rgba(0,0,0,0.1); transition: transform 0.3s ease; z-index: 100; }
 .console-wrapper.collapsed { transform: translateY(calc(100% - 40px)); }

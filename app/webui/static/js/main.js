@@ -534,6 +534,7 @@ document.querySelectorAll('.module-card-btn').forEach(item => {
             // 隐藏的 iframe 测量为 0，显示后重新按内容自适应高度
             const pluginFrame = targetCard.querySelector('[id^="plugin-page-"]');
             if (pluginFrame && typeof resizePluginPage === 'function') resizePluginPage(pluginFrame);
+            if (modName === 'agent') loadAgentPanels();
             setTimeout(() => {
                 targetCard.querySelectorAll('textarea.auto-resize').forEach(el => autoResize(el));
                 if (pluginFrame && typeof resizePluginPage === 'function') resizePluginPage(pluginFrame);
@@ -830,6 +831,203 @@ function forceSave(mod) {
 
 function markAllModulesClean() {
     Object.keys(_autoSave).forEach(mod => markModuleClean(mod));
+}
+
+// ==================== Agent 特殊兼容面板 ====================
+function agentBotQuery() {
+    const botId = getCurrentBotId();
+    return botId ? `?bot_id=${botId}` : '';
+}
+
+function agentEsc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+        {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
+    ));
+}
+
+async function loadAgentPanels() {
+    await Promise.all([loadAgentTasks(), loadAgentProactive()]);
+}
+
+async function loadAgentTasks() {
+    const statusEl = document.getElementById('agent-task-status');
+    if (!getCurrentBotId()) {
+        if (statusEl) statusEl.textContent = '请先选择账号';
+        return;
+    }
+    if (statusEl) statusEl.textContent = '加载中…';
+    try {
+        const res = await apiFetch(`/api/agent/tasks${agentBotQuery()}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        renderAgentTasks(data.tasks || []);
+        if (statusEl) statusEl.textContent = '';
+    } catch (e) {
+        console.error('加载 Agent 任务失败:', e);
+        if (statusEl) statusEl.textContent = '加载失败';
+    }
+}
+
+function renderAgentTasks(tasks) {
+    const body = document.getElementById('agent-task-body');
+    if (!body) return;
+    if (!tasks.length) {
+        body.innerHTML = '<tr><td colspan="7" style="color:#718096;">—</td></tr>';
+        return;
+    }
+    body.innerHTML = tasks.map(t => {
+        const taskId = t.task_id || t.id || '';
+        const next = t.next_trigger_time
+            ? new Date(t.next_trigger_time * 1000).toLocaleString()
+            : '—';
+        return `<tr>
+            <td>${agentEsc(taskId)}</td>
+            <td>${agentEsc(t.session_id || '')}</td>
+            <td>${agentEsc(t.repeat || '')}</td>
+            <td>${agentEsc(next)}</td>
+            <td>${agentEsc(t.fired_count ?? '')}</td>
+            <td>${agentEsc(t.content || '')}</td>
+            <td>
+                <button class="btn-save" style="padding:2px 8px;font-size:12px;" onclick="triggerAgentTask('${agentEsc(taskId)}')">立即触发</button>
+                <button class="btn-save" style="padding:2px 8px;font-size:12px;background:#a33;" onclick="cancelAgentTask('${agentEsc(taskId)}')">取消</button>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+async function addAgentTask() {
+    const type = document.getElementById('agent-task-type').value;
+    const target = document.getElementById('agent-task-target').value.trim();
+    const trigger = document.getElementById('agent-task-trigger').value.trim();
+    const content = document.getElementById('agent-task-content').value.trim();
+    if (!target || !trigger || !content) {
+        showToast('请填写目标、时间表达式和内容', 'error');
+        return;
+    }
+    try {
+        const res = await apiFetch(`/api/agent/tasks${agentBotQuery()}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                is_group: type === 'group',
+                target,
+                trigger,
+                content,
+            }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            showToast(data.message || '添加失败', 'error');
+            return;
+        }
+        showToast('任务已添加', 'success');
+        document.getElementById('agent-task-trigger').value = '';
+        document.getElementById('agent-task-content').value = '';
+        await loadAgentTasks();
+    } catch (e) {
+        console.error('添加 Agent 任务失败:', e);
+        showToast('添加失败', 'error');
+    }
+}
+
+async function triggerAgentTask(taskId) {
+    try {
+        const res = await apiFetch(`/api/agent/tasks/${encodeURIComponent(taskId)}/trigger${agentBotQuery()}`, {
+            method: 'POST',
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            showToast(data.message || '触发失败', 'error');
+            return;
+        }
+        showToast(data.message || '已触发', 'success');
+        await loadAgentTasks();
+    } catch (e) {
+        console.error('触发 Agent 任务失败:', e);
+        showToast('触发失败', 'error');
+    }
+}
+
+async function cancelAgentTask(taskId) {
+    try {
+        const res = await apiFetch(`/api/agent/tasks/${encodeURIComponent(taskId)}/cancel${agentBotQuery()}`, {
+            method: 'POST',
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            showToast(data.message || '取消失败', 'error');
+            return;
+        }
+        showToast(data.message || '已取消', 'success');
+        await loadAgentTasks();
+    } catch (e) {
+        console.error('取消 Agent 任务失败:', e);
+        showToast('取消失败', 'error');
+    }
+}
+
+async function loadAgentProactive() {
+    const statusEl = document.getElementById('agent-proactive-status');
+    if (!getCurrentBotId()) {
+        if (statusEl) statusEl.textContent = '请先选择账号';
+        return;
+    }
+    if (statusEl) statusEl.textContent = '加载中…';
+    try {
+        const res = await apiFetch(`/api/agent/proactive/status${agentBotQuery()}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        renderAgentProactive(data.sessions || []);
+        if (statusEl) statusEl.textContent = '';
+    } catch (e) {
+        console.error('加载 Agent 主动状态失败:', e);
+        if (statusEl) statusEl.textContent = '加载失败';
+    }
+}
+
+function renderAgentProactive(sessions) {
+    const body = document.getElementById('agent-proactive-body');
+    if (!body) return;
+    if (!sessions.length) {
+        body.innerHTML = '<tr><td colspan="7" style="color:#718096;">—</td></tr>';
+        return;
+    }
+    body.innerHTML = sessions.map(s => {
+        const next = s.next_trigger_time
+            ? new Date(s.next_trigger_time * 1000).toLocaleString()
+            : '—';
+        return `<tr>
+            <td>${agentEsc(s.session_id || '')}</td>
+            <td>${agentEsc(s.type || '')}</td>
+            <td>${s.enabled ? '✅' : '❌'}</td>
+            <td>${agentEsc(s.unanswered ?? '')}</td>
+            <td>${agentEsc(next)}</td>
+            <td>${agentEsc(s.timer || '')}</td>
+            <td>
+                <button class="btn-save" style="padding:2px 8px;font-size:12px;" onclick="triggerAgentProactive('${agentEsc(s.session_id || '')}')">立即触发</button>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+async function triggerAgentProactive(sessionId) {
+    try {
+        const res = await apiFetch(`/api/agent/proactive/trigger${agentBotQuery()}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionId }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            showToast(data.message || '触发失败', 'error');
+            return;
+        }
+        showToast(data.message || '已触发', 'success');
+        await loadAgentProactive();
+    } catch (e) {
+        console.error('触发 Agent 主动消息失败:', e);
+        showToast('触发失败', 'error');
+    }
 }
 
 // ==================== 日志 WebSocket ====================

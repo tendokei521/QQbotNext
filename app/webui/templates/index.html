@@ -581,6 +581,77 @@
                         </button>
                     </div>
                     {% endif %}
+
+                    {% if mod_name == 'agent' %}
+                    <!-- 框架级 Agent 特殊兼容：定时任务 + 主动消息状态 -->
+                    <div class="config-group" data-group-id="agent-tasks" style="margin-top:16px;">
+                        <div class="config-group-header collapsible" onclick="toggleConfigGroup(this)">
+                            <span class="config-group-title">定时任务</span>
+                            <i class="fas fa-chevron-down config-group-toggle"></i>
+                        </div>
+                        <div class="config-group-body">
+                            <div class="agent-panel-row">
+                                <select id="agent-task-type" class="form-control" style="width:88px;">
+                                    <option value="private">私聊</option>
+                                    <option value="group">群聊</option>
+                                </select>
+                                <input id="agent-task-target" type="text" class="form-control" placeholder="QQ号 / 群号" style="width:120px;">
+                                <input id="agent-task-trigger" type="text" class="form-control" placeholder="时间表达式：明天早上8点 / 每天中午12点 / 5分钟后 / 08:30" style="flex:1;min-width:200px;">
+                                <input id="agent-task-content" type="text" class="form-control" placeholder="到时要发送的内容" style="flex:1;min-width:160px;">
+                                <button type="button" class="btn-save" onclick="addAgentTask()">添加</button>
+                            </div>
+                            <div style="margin:10px 0;">
+                                <button type="button" class="btn-save" onclick="loadAgentTasks()">刷新任务</button>
+                                <span id="agent-task-status" style="margin-left:8px;font-size:12px;color:#718096;"></span>
+                            </div>
+                            <table class="agent-panel-table">
+                                <thead>
+                                    <tr>
+                                        <th>任务ID</th>
+                                        <th>会话</th>
+                                        <th>重复</th>
+                                        <th>下次触发</th>
+                                        <th>次数</th>
+                                        <th>内容</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="agent-task-body">
+                                    <tr><td colspan="7" style="color:#718096;">—</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="config-group" data-group-id="agent-proactive">
+                        <div class="config-group-header collapsible" onclick="toggleConfigGroup(this)">
+                            <span class="config-group-title">主动消息状态</span>
+                            <i class="fas fa-chevron-down config-group-toggle"></i>
+                        </div>
+                        <div class="config-group-body">
+                            <div style="margin:10px 0;">
+                                <button type="button" class="btn-save" onclick="loadAgentProactive()">刷新状态</button>
+                                <span id="agent-proactive-status" style="margin-left:8px;font-size:12px;color:#718096;"></span>
+                            </div>
+                            <table class="agent-panel-table">
+                                <thead>
+                                    <tr>
+                                        <th>会话</th>
+                                        <th>类型</th>
+                                        <th>启用</th>
+                                        <th>未回复</th>
+                                        <th>下次触发</th>
+                                        <th>计时器</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="agent-proactive-body">
+                                    <tr><td colspan="7" style="color:#718096;">—</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
                 {% endfor %}
             </div>
