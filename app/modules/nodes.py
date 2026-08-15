@@ -86,9 +86,8 @@ class AgentNode(MessageNode):
         if getattr(event, "_stopped", False):
             await next_()
             return
-        # 模块已声明跳过 LLM 回复（event.llm.stop()）→ 仅维护主动消息观察
+        # 模块已声明跳过 LLM 回复（event.llm.stop()）→ 不视为触发 LLM，不重置主动消息
         if getattr(event, "_llm_stop", False):
-            await self._observe_proactive(runtime, event)
             await next_()
             return
         # 非阻塞提交到 LLM 流水线（由 LlmPipeline 后台执行，避免卡住模块 Worker）
@@ -100,16 +99,6 @@ class AgentNode(MessageNode):
 
             await agent_handle(runtime, event)
         await next_()
-
-    @staticmethod
-    async def _observe_proactive(runtime, event) -> None:
-        """主动消息观察：模块跳过 LLM 回复时也维护 Agent 的活跃状态。"""
-        pm = getattr(runtime, "proactive", None)
-        if pm is None:
-            return
-        is_group = event.event_type == "message_group"
-        sid = f"group_{event.group.group_id}" if is_group else f"private_{event.user_id}"
-        await pm.on_message(sid, is_group, is_self=(event.user_id == event.self_id))
 
 
 class ModuleRouterNode(MessageNode):

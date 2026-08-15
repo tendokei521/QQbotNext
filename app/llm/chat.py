@@ -23,14 +23,7 @@ import re
 
 
 async def handle(module, event):
-    """唯一入口：主动消息观察 + api_key 校验 + 消息类型开关过滤后分发。"""
-    # 主动消息观察（先于 api_key/开关检查，独立于被动回复）
-    pm = getattr(module, "proactive", None)
-    if pm is not None and event.event_type in ("message_group", "message_private"):
-        is_group = event.event_type == "message_group"
-        sid = f"group_{event.group.group_id}" if is_group else f"private_{event.user_id}"
-        await pm.on_message(sid, is_group, is_self=(event.user_id == event.self_id))
-
+    """唯一入口：api_key 校验 + 消息类型开关过滤后分发。"""
     config = module.config
     api_key = config.get("api_key", "")
     if not api_key:
@@ -83,6 +76,11 @@ async def handle_group(module, event, config):
     if len(user_text) > max_msg_len:
         user_text = user_text[:max_msg_len]
 
+    # 只有真正触发 LLM 的消息才更新主动消息状态
+    pm = getattr(module, "proactive", None)
+    if pm is not None:
+        await pm.on_message(session_id, True, is_self=(event.user_id == event.self_id))
+
     session = session_mgr.get_session(session_id)
     if not session:
         session = session_mgr.create_session(session_id, "group", config.get("session_timeout", 60))
@@ -120,6 +118,11 @@ async def handle_private(module, event, config):
         return
     max_msg_len = config.get("max_message_length", 50)
     user_text = raw_text[:max_msg_len]
+
+    # 只有真正进入 LLM 的私信才更新主动消息状态
+    pm = getattr(module, "proactive", None)
+    if pm is not None:
+        await pm.on_message(session_id, False, is_self=(event.user_id == event.self_id))
 
     session = session_mgr.get_session(session_id)
     if not session:

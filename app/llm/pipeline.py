@@ -60,8 +60,6 @@ class LlmPipeline:
                 await agent_handle(self.runtime, ctx.event)
                 return
 
-            await self._observe(ctx)
-
             # 群聊必须满足触发条件（@ 或关键词），否则不进入 LLM 流水线
             if ctx.event.event_type == "message_group":
                 config = self.runtime.config
@@ -86,11 +84,26 @@ class LlmPipeline:
                 if not ctx.user_text:
                     return
 
+            config = self.runtime.config
+            # 没有 key 或对应场景未启用时，不视为“触发 LLM”，不重置主动消息状态
+            if not config.get("api_key", ""):
+                return
+            if ctx.event.event_type == "message_group" and not config.get("group_enable", False):
+                return
+            if ctx.event.event_type == "message_private":
+                if not config.get("private_enable", True):
+                    return
+                if not ctx.user_text.strip():
+                    return
+
             # 1. 请求前钩子（可暂停/防抖/合并/跳过）
             if not await self._run_stage("pre_request", ctx):
                 return
             if job.skip or job.superseded:
                 return
+
+            # 只有真正进入 LLM 请求前才更新主动消息状态（群聊普通消息不重置沉默计时器）
+            await self._observe(ctx)
 
             # 2. 实际 LLM 请求
             if self.runtime.config.get("stream_output", False):
