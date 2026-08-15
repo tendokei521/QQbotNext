@@ -188,7 +188,7 @@ class LlmPipeline:
             interrupted = False
 
             async for sentence in stream_response(self.runtime, ctx.event, ctx):
-                if self.is_stale(job):
+                if self.is_stale(ctx.job):
                     interrupted = True
                     break
 
@@ -233,11 +233,11 @@ class LlmPipeline:
             send_message=send_message,
             pre_send=pre_send_hook,
             post_send=post_send_hook,
-            should_cancel=lambda: self.is_stale(job),
+            should_cancel=lambda: self.is_stale(ctx.job),
         )
         try:
             async for sentence in stream_response(self.runtime, ctx.event, ctx):
-                if self.is_stale(job):
+                if self.is_stale(ctx.job):
                     interrupted = True
                     break
                 await pool.put(Message.from_text(sentence))
