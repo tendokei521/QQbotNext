@@ -567,8 +567,8 @@ async function refreshAllModulesData(silent = false) {
                     toggle.checked = moduleData.enabled;
                 }
                 // 2. 更新权限控件（使用已有的 updatePermissionDisplay）
-                if (moduleData.permission) {
-                    updatePermissionDisplay(moduleName, moduleData.permission);
+                if (moduleData.permission_config) {
+                    updatePermissionDisplay(moduleName, moduleData.permission_config);
                 }
                 // 3. 更新配置输入框
                 const container = document.getElementById(`config-container-${moduleName}`);
@@ -1049,7 +1049,7 @@ async function refreshModulePermission(moduleName) {
         if (response.ok) {
             const modules = await response.json();
             if (modules[moduleName]) {
-                updatePermissionDisplay(moduleName, modules[moduleName].permission);
+                updatePermissionDisplay(moduleName, modules[moduleName].permission_config);
             }
         }
     } catch (e) {

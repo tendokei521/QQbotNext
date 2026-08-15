@@ -101,7 +101,7 @@ class BotService:
                 "enabled": mod.authority.enabled,
                 "permission": mod.permission,
                 "bot_id": mod.bot_id,
-                "permission": {
+                "permission_config": {
                     "group_mode": mod.authority.permission.group_mode,
                     "group_list": mod.authority.permission.group_list,
                     "user_mode": mod.authority.permission.user_mode,
@@ -139,7 +139,7 @@ class BotService:
             "enabled": enabled,
             "permission": permission,
             "bot_id": bot_id,
-            "permission": {
+            "permission_config": {
                 "group_mode": perm.group_mode,
                 "group_list": perm.group_list,
                 "user_mode": perm.user_mode,

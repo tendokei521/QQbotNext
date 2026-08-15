@@ -101,18 +101,18 @@
             <div class="permission-col">
                 <label style="font-size: 13px; font-weight: 600; color: #718096;">群组模式</label>
                 <select id="group-mode-{{ mod_name }}" class="mode-select">
-                    <option value="whitelist" {% if mod.permission.group_mode == 'whitelist' %}selected{% endif %}>白名单 (仅响应以下)</option>
-                    <option value="blacklist" {% if mod.permission.group_mode == 'blacklist' %}selected{% endif %}>黑名单 (不响应以下)</option>
+                    <option value="whitelist" {% if mod.permission_config.group_mode == 'whitelist' %}selected{% endif %}>白名单 (仅响应以下)</option>
+                    <option value="blacklist" {% if mod.permission_config.group_mode == 'blacklist' %}selected{% endif %}>黑名单 (不响应以下)</option>
                 </select>
-                <textarea id="group-list-{{ mod_name }}" class="form-control auto-resize mt-2" placeholder="群号，每行一个">{{ mod.permission.group_list | join('\n') }}</textarea>
+                <textarea id="group-list-{{ mod_name }}" class="form-control auto-resize mt-2" placeholder="群号，每行一个">{{ mod.permission_config.group_list | join('\n') }}</textarea>
             </div>
             <div class="permission-col">
                 <label style="font-size: 13px; font-weight: 600; color: #718096;">用户模式</label>
                 <select id="user-mode-{{ mod_name }}" class="mode-select">
-                    <option value="whitelist" {% if mod.permission.user_mode == 'whitelist' %}selected{% endif %}>白名单 (仅响应以下)</option>
-                    <option value="blacklist" {% if mod.permission.user_mode == 'blacklist' %}selected{% endif %}>黑名单 (不响应以下)</option>
+                    <option value="whitelist" {% if mod.permission_config.user_mode == 'whitelist' %}selected{% endif %}>白名单 (仅响应以下)</option>
+                    <option value="blacklist" {% if mod.permission_config.user_mode == 'blacklist' %}selected{% endif %}>黑名单 (不响应以下)</option>
                 </select>
-                <textarea id="user-list-{{ mod_name }}" class="form-control auto-resize mt-2" placeholder="QQ号，每行一个">{{ mod.permission.user_list | join('\n') }}</textarea>
+                <textarea id="user-list-{{ mod_name }}" class="form-control auto-resize mt-2" placeholder="QQ号，每行一个">{{ mod.permission_config.user_list | join('\n') }}</textarea>
             </div>
         </div>
         <button type="button" class="btn-save" onclick="savePermission('{{ mod_name }}')">
