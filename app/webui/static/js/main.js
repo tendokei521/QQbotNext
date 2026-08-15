@@ -540,33 +540,25 @@ document.querySelectorAll('.module-card-btn').forEach(item => {
                 if (pluginFrame && typeof resizePluginPage === 'function') resizePluginPage(pluginFrame);
             }, 100);
         }
-        recordRecentModule(modName);
     });
 });
 
 // ==================== 模块侧边栏增强 ====================
-let modulePrefs = { pinned: [], hidden: [], recent: [], collapsed: {} };
+let moduleCollapsed = {};
 let moduleGridView = false;
 let allModuleItems = [];
 
-async function loadModulePrefs() {
+function loadModuleCollapsed() {
     try {
-        const res = await apiFetch('/api/webui/module-preferences');
-        if (res.ok) modulePrefs = await res.json();
-    } catch (e) {}
-    if (!modulePrefs.pinned) modulePrefs.pinned = [];
-    if (!modulePrefs.hidden) modulePrefs.hidden = [];
-    if (!modulePrefs.recent) modulePrefs.recent = [];
-    if (!modulePrefs.collapsed) modulePrefs.collapsed = {};
+        moduleCollapsed = JSON.parse(localStorage.getItem('qqbot_module_collapsed') || '{}');
+    } catch (e) {
+        moduleCollapsed = {};
+    }
 }
 
-async function saveModulePrefs() {
+function saveModuleCollapsed() {
     try {
-        await apiFetch('/api/webui/module-preferences', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ module_preferences: modulePrefs })
-        });
+        localStorage.setItem('qqbot_module_collapsed', JSON.stringify(moduleCollapsed));
     } catch (e) {}
 }
 
@@ -575,14 +567,11 @@ function renderModuleList() {
     if (!container) return;
     const query = (document.getElementById('module-search')?.value || '').trim().toLowerCase();
     const items = allModuleItems;
-    const pinnedSet = new Set(modulePrefs.pinned || []);
-    const recentSet = new Set(modulePrefs.recent || []);
 
     const visibleItems = items.filter(item => {
         const name = (item.getAttribute('data-name') || '').toLowerCase();
         const sign = (item.getAttribute('data-sign') || '').toLowerCase();
         const tags = (item.getAttribute('data-tags') || '').toLowerCase();
-        const mod = item.getAttribute('data-module');
         if (query && !name.includes(query) && !sign.includes(query) && !tags.includes(query)) return false;
         return true;
     });
@@ -590,29 +579,18 @@ function renderModuleList() {
     const fragment = document.createDocumentFragment();
 
     if (!query) {
-        const pinnedItems = visibleItems.filter(item =>
-            pinnedSet.has(item.getAttribute('data-module')) || item.getAttribute('data-pinned') === '1'
-        );
-        const recentItems = visibleItems.filter(item =>
-            recentSet.has(item.getAttribute('data-module')) && !pinnedItems.includes(item)
-        );
-        const others = visibleItems.filter(item => !pinnedItems.includes(item) && !recentItems.includes(item));
-
-        const groups = [];
-        if (pinnedItems.length) groups.push(['📌 置顶', pinnedItems]);
-        if (recentItems.length) groups.push(['🕒 最近使用', recentItems]);
-
         const byCat = {};
-        others.forEach(item => {
+        visibleItems.forEach(item => {
             const cat = item.getAttribute('data-category') || '未分类';
             if (!byCat[cat]) byCat[cat] = [];
             byCat[cat].push(item);
         });
-        Object.keys(byCat).sort().forEach(cat => groups.push([cat, byCat[cat]]));
+
+        const groups = Object.keys(byCat).sort().map(cat => [cat, byCat[cat]]);
 
         groups.forEach(([title, list]) => {
             const group = document.createElement('div');
-            group.className = 'module-group' + ((modulePrefs.collapsed || {})[title] ? ' collapsed' : '');
+            group.className = 'module-group' + (moduleCollapsed[title] ? ' collapsed' : '');
             const header = document.createElement('div');
             header.className = 'module-group-header';
             header.onclick = function() { toggleModuleGroup(this); };
@@ -648,11 +626,9 @@ function toggleModuleGroup(header) {
     const group = header.parentElement;
     const title = header.querySelector('span')?.textContent || '';
     group.classList.toggle('collapsed');
-    if (modulePrefs.collapsed) {
-        if (group.classList.contains('collapsed')) modulePrefs.collapsed[title] = true;
-        else delete modulePrefs.collapsed[title];
-        saveModulePrefs();
-    }
+    if (group.classList.contains('collapsed')) moduleCollapsed[title] = true;
+    else delete moduleCollapsed[title];
+    saveModuleCollapsed();
 }
 
 function filterModules() {
@@ -664,22 +640,6 @@ function toggleModuleView() {
     if (!list) return;
     moduleGridView = !moduleGridView;
     list.classList.toggle('module-grid', moduleGridView);
-}
-
-function recordRecentModule(modName) {
-    if (!modName) return;
-    modulePrefs.recent = [modName, ...(modulePrefs.recent || []).filter(x => x !== modName)].slice(0, 8);
-    saveModulePrefs();
-    renderModuleList();
-}
-
-function togglePinModule(modName, event) {
-    if (event) event.stopPropagation();
-    const arr = modulePrefs.pinned || [];
-    if (arr.includes(modName)) modulePrefs.pinned = arr.filter(x => x !== modName);
-    else modulePrefs.pinned = [modName, ...arr];
-    saveModulePrefs();
-    renderModuleList();
 }
 
 /**
@@ -1932,8 +1892,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // 捕获初始模块节点，供侧边栏分组/搜索使用
     allModuleItems = Array.from(document.querySelectorAll('#module-list .module-item'));
 
-    // 模块侧边栏：加载用户偏好并分组渲染
-    loadModulePrefs().then(() => renderModuleList());
+    // 模块侧边栏：恢复折叠状态并分组渲染
+    loadModuleCollapsed();
+    renderModuleList();
 
     // 快捷键：/ 聚焦模块搜索框
     document.addEventListener('keydown', function(e) {

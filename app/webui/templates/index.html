@@ -366,9 +366,6 @@
                         <i class="fas fa-cube"></i>
                         <span class="module-name-text">{{ mod.name }}</span>
                         <span class="authority-badge authority-{{ mod.permission|lower }}">{{ 'admin' if mod.permission == 'group_admin' else mod.permission }}</span>
-                        <span class="module-actions">
-                            <button class="module-action-btn" onclick="togglePinModule('{{ mod_name }}', event)" title="置顶/取消置顶">📌</button>
-                        </span>
                     </div>
                     <div class="module-desc">{{ mod.description }}</div>
                     <div class="module-switch">
