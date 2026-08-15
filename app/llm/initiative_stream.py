@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from app.domain.message import Message
@@ -37,16 +36,6 @@ async def stream_send_initiative(
     """
     config = runtime.config
     provider = get_provider(dict(config.raw_config))
-
-    if config.get("debug_prompt", False):
-        try:
-            prompt_text = json.dumps(messages, ensure_ascii=False, indent=2)
-        except Exception:
-            prompt_text = str(messages)
-        from app.llm import logger
-
-        logger.add_info(f"#{runtime.bot_id}").info(f"[Prompt] {session_id}\n{prompt_text}")
-
     max_len = int(
         config.get("stream_sentence_max_length")
         or config.get("max_message_length", 50)

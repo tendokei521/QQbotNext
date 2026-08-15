@@ -29,6 +29,8 @@ class Module(BaseModule):
         "include_quote": True,
         "fetch_at_nickname": True,
         "fetch_quote_content": True,
+        # 调试
+        "debug_prompt": False,
     }
     config_schema = SCHEMA
 
@@ -180,3 +182,17 @@ class Module(BaseModule):
             if texts:
                 separator = str(self.config.get("merge_separator", "\n") or "\n")
                 ctx.user_text = separator.join(texts)
+
+    # ==================== 调试 ====================
+
+    @llm_hook("pre_request", event_type="*", order=10)
+    async def debug_prompt_hook(self, ctx: LlmContext):
+        """开启调试时，标记本轮需要打印完整 prompt。"""
+        enabled = bool(self.config.get("debug_prompt", False))
+        ctx.state["debug_prompt"] = enabled
+        if enabled:
+            from app.llm import logger
+
+            logger.add_info(f"#{self.bot_id}").info(
+                f"[Prompt] {ctx.session_id} user_text:\n{ctx.user_text}"
+            )

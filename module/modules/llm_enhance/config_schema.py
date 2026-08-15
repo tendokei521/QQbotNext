@@ -4,6 +4,7 @@ SCHEMA = {
     # ==================== 分组 ====================
     "group_debounce": {"type": "group", "label": "防抖", "collapsible": True},
     "group_context": {"type": "group", "label": "用户信息感知", "collapsible": True},
+    "group_debug": {"type": "group", "label": "调试", "collapsible": True},
 
     # ==================== 防抖 ====================
     "debounce_enable": {
@@ -77,5 +78,14 @@ SCHEMA = {
         "description": "关闭时不请求原始消息内容",
         "default": True,
         "group": "group_context",
+    },
+
+    # ==================== 调试 ====================
+    "debug_prompt": {
+        "type": "boolean",
+        "label": "调试本轮 Prompt",
+        "description": "开启后在本轮 LLM 请求前打印完整 prompt 到日志",
+        "default": False,
+        "group": "group_debug",
     },
 }

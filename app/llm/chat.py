@@ -22,9 +22,9 @@ from app.llm.tool import build_tools, make_executor
 import re
 
 
-def _log_debug_prompt(runtime, config, session_id: str, messages: list[dict]) -> None:
-    """调试配置开启时，打印本轮完整 prompt。"""
-    if not config.get("debug_prompt", False):
+def _log_debug_prompt(runtime, session_id: str, messages: list[dict], debug_enabled: bool = False) -> None:
+    """调试开关开启时，打印本轮完整 prompt。"""
+    if not debug_enabled:
         return
     try:
         text = json.dumps(messages, ensure_ascii=False, indent=2)
@@ -356,7 +356,7 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
         schedule_nudge=intent,
     )
 
-    _log_debug_prompt(runtime, config, session_id, messages)
+    _log_debug_prompt(runtime, session_id, messages, debug_enabled=bool(ctx and ctx.state.get("debug_prompt", False)))
 
     logger.add_info(f"#{runtime.bot_id}").info(
         f"API 请求 -> {session_id} (task: {session.task_id}), 消息数: {len(messages)}"
@@ -513,7 +513,7 @@ async def stream_response(runtime, event, ctx=None):
         schedule_nudge=intent,
     )
 
-    _log_debug_prompt(runtime, config, session_id, messages)
+    _log_debug_prompt(runtime, session_id, messages, debug_enabled=bool(ctx and ctx.state.get("debug_prompt", False)))
 
     logger.add_info(f"#{runtime.bot_id}").info(
         f"流式 API 请求 -> {session_id} (task: {session.task_id}), 消息数: {len(messages)}"
