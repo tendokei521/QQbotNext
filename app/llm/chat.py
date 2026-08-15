@@ -81,7 +81,7 @@ async def handle_group(module, event, config):
         user_text = re.sub(r"\[CQ:at,qq=\d+\]", "", user_text).strip()
         user_text = re.sub(r"@\S+\s*", "", user_text).strip()
 
-    max_msg_len = config.get("max_message_length", 50)
+    max_msg_len = config.get("max_message_length", 200)
     if not user_text:
         return
     if len(user_text) > max_msg_len:
@@ -127,7 +127,7 @@ async def handle_private(module, event, config):
 
     if not raw_text:
         return
-    max_msg_len = config.get("max_message_length", 50)
+    max_msg_len = config.get("max_message_length", 200)
     user_text = raw_text[:max_msg_len]
 
     # 只有真正进入 LLM 的私信才更新主动消息状态
@@ -301,7 +301,7 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
         return None
     # 框架用户感知已格式化上下文时，不再截断整个 user_text（原始文本已在 pipeline 截断）
     if not (ctx is not None and ctx.state.get("user_context")):
-        max_msg_len = config.get("max_message_length", 50)
+        max_msg_len = config.get("max_message_length", 200)
         user_text = user_text[:max_msg_len]
 
     session_mgr = SessionManager(str(runtime.bot_id))
@@ -458,8 +458,8 @@ async def stream_response(runtime, event, ctx=None):
         return
     max_msg_len = int(
         config.get("stream_sentence_max_length")
-        or config.get("max_message_length", 50)
-        or 50
+        or config.get("max_message_length", 200)
+        or 200
     )
     # 框架用户感知已格式化上下文时，不再截断整个 user_text（原始文本已在 pipeline 截断）
     if not (ctx is not None and ctx.state.get("user_context")):

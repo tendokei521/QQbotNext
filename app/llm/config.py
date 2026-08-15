@@ -24,10 +24,10 @@ DEFAULT_LLM_CONFIG: dict = {
     "private_enable": True,
     "session_timeout": 60,
     "history_rounds": 50,
-    "max_message_length": 50,
+    "max_message_length": 200,
     # 流式输出
     "stream_output": False,
-    "stream_sentence_max_length": 50,
+    "stream_sentence_max_length": 200,
     # 流式回复设置（消息池 / 发送频率 / 前后缀）
     "stream_send_pool_enabled": False,
     "stream_send_by_sentence": True,

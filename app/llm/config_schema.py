@@ -69,7 +69,7 @@ SCHEMA = {
     },
     "stream_sentence_max_length": {
         "type": "number", "label": "单句最大长度", "description": "流式输出时每条消息的最大字符数",
-        "default": 50, "min": 10, "max": 200, "group": "group_stream",
+        "default": 200, "min": 10, "max": 500, "group": "group_stream",
     },
     "stream_send_interval_mode": {
         "type": "select", "label": "发送间隔模式", "description": "none=不等待；fixed=固定间隔；length_curve=按字数曲线",
@@ -163,7 +163,7 @@ SCHEMA = {
     },
     "max_message_length": {
         "type": "number", "label": "消息最大长度", "description": "单条消息的最大字符数",
-        "default": 50, "min": 20, "max": 100, "group": "group_session",
+        "default": 200, "min": 20, "max": 500, "group": "group_session",
     },
     "include_pre_history": {
         "type": "boolean", "label": "包含群聊会话前历史", "description": "群聊时是否将会话开始前的群消息作为背景信息提供给LLM（不计入会话历史）",

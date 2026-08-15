@@ -97,7 +97,7 @@ class LlmPipeline:
                     return
 
             # 先截断原始用户消息，避免后续上下文包装后被 max_message_length 截掉“发送了”
-            max_msg_len = int(config.get("max_message_length", 50) or 50)
+            max_msg_len = int(config.get("max_message_length", 200) or 200)
             ctx.user_text = ctx.user_text[:max_msg_len]
 
             # 1. 请求前钩子（可暂停/防抖/合并/跳过）

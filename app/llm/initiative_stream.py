@@ -38,8 +38,8 @@ async def stream_send_initiative(
     provider = get_provider(dict(config.raw_config))
     max_len = int(
         config.get("stream_sentence_max_length")
-        or config.get("max_message_length", 50)
-        or 50
+        or config.get("max_message_length", 200)
+        or 200
     )
 
     async def send_message(msg: Message) -> None:
