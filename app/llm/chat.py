@@ -456,13 +456,13 @@ async def stream_response(runtime, event, ctx=None):
 
     if not user_text:
         return
+    max_msg_len = int(
+        config.get("stream_sentence_max_length")
+        or config.get("max_message_length", 50)
+        or 50
+    )
     # 框架用户感知已格式化上下文时，不再截断整个 user_text（原始文本已在 pipeline 截断）
     if not (ctx is not None and ctx.state.get("user_context")):
-        max_msg_len = int(
-            config.get("stream_sentence_max_length")
-            or config.get("max_message_length", 50)
-            or 50
-        )
         user_text = user_text[:max_msg_len]
 
     session_mgr = SessionManager(str(runtime.bot_id))
