@@ -148,17 +148,51 @@ class LlmPipeline:
         """流式路径：按句子发送，并触发 pre_send / post_send / post_stream 钩子。"""
         from app.llm.chat import stream_response
 
-        async for sentence in stream_response(self.runtime, ctx.event, ctx):
-            msg = Message.from_text(sentence)
+        config = self.runtime.config
+        pool_enabled = config.get("stream_send_pool_enabled", False)
 
-            if not await self._run_stage("pre_send", ctx, msg):
-                return
-            if getattr(msg, "skip", False):
-                continue
+        if not pool_enabled:
+            async for sentence in stream_response(self.runtime, ctx.event, ctx):
+                msg = Message.from_text(sentence)
 
+                if not await self._run_stage("pre_send", ctx, msg):
+                    return
+                if getattr(msg, "skip", False):
+                    continue
+
+                await self._send(ctx, msg)
+
+                await self._run_stage("post_send", ctx, msg)
+
+            await self._run_stage("post_stream", ctx)
+            return
+
+        from app.llm.send_pool import StreamSendPool
+
+        async def send_message(msg: Message) -> None:
             await self._send(ctx, msg)
 
+        async def pre_send_hook(msg: Message) -> bool:
+            if not await self._run_stage("pre_send", ctx, msg):
+                return True
+            return getattr(msg, "skip", False)
+
+        async def post_send_hook(msg: Message) -> None:
             await self._run_stage("post_send", ctx, msg)
+
+        pool = StreamSendPool(
+            config,
+            send_message=send_message,
+            pre_send=pre_send_hook,
+            post_send=post_send_hook,
+        )
+        try:
+            async for sentence in stream_response(self.runtime, ctx.event, ctx):
+                await pool.put(Message.from_text(sentence))
+            await pool.finish()
+            await pool.wait_drained()
+        finally:
+            pool.shutdown()
 
         await self._run_stage("post_stream", ctx)
 

@@ -28,6 +28,24 @@ DEFAULT_LLM_CONFIG: dict = {
     # 流式输出
     "stream_output": False,
     "stream_sentence_max_length": 50,
+    # 流式回复设置（消息池 / 发送频率 / 前后缀）
+    "stream_send_pool_enabled": False,
+    "stream_send_by_sentence": True,
+    "stream_send_interval_mode": "none",       # none / fixed / length_curve
+    "stream_send_interval_base_ms": 600,
+    "stream_send_interval_min_ms": 100,
+    "stream_send_interval_max_ms": 3000,
+    "stream_send_curve": "sqrt",               # fixed / sqrt / log / inverse / short_long
+    "stream_send_curve_k": 200,
+    "stream_short_message_length": 10,
+    "stream_short_message_delay_ms": 1200,
+    "stream_long_message_delay_ms": 400,
+    "stream_send_prefix": "",
+    "stream_send_suffix": "",
+    "stream_send_max_queue": 20,
+    "stream_queue_full_policy": "backpressure", # backpressure / drop_newest / drop_oldest
+    "stream_flush_on_finish": True,
+    "stream_keep_order": True,
     "trigger_at": False,
     "trigger_keyword": [],
     "include_pre_history": False,

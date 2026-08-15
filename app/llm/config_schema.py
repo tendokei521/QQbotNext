@@ -9,6 +9,7 @@ SCHEMA = {
     "group_trigger": {"type": "group", "label": "触发设置", "collapsible": True},
     "group_proactive": {"type": "group", "label": "主动消息", "collapsible": True},
     "group_schedule": {"type": "group", "label": "定时任务", "collapsible": True},
+    "group_stream": {"type": "group", "label": "流式回复", "collapsible": True},
     "group_permission": {"type": "group", "label": "权限", "collapsible": True},
 
     # ==================== 配置项 ====================
@@ -56,11 +57,96 @@ SCHEMA = {
     },
     "stream_output": {
         "type": "boolean", "label": "流式输出", "description": "启用后 LLM 回复按句子流式发送（支持带 tools 的工具调用）",
-        "default": False, "group": "group_switch",
+        "default": False, "group": "group_stream",
+    },
+    "stream_send_pool_enabled": {
+        "type": "boolean", "label": "启用流式消息池", "description": "开启后流式句子进入有序消息池，按频率发送",
+        "default": False, "group": "group_stream",
+    },
+    "stream_send_by_sentence": {
+        "type": "boolean", "label": "按句子发送", "description": "按句切分后逐条发送",
+        "default": True, "group": "group_stream",
     },
     "stream_sentence_max_length": {
-        "type": "number", "label": "流式单句最大长度", "description": "流式输出时每条消息的最大字符数",
-        "default": 50, "min": 10, "max": 200, "group": "group_switch",
+        "type": "number", "label": "单句最大长度", "description": "流式输出时每条消息的最大字符数",
+        "default": 50, "min": 10, "max": 200, "group": "group_stream",
+    },
+    "stream_send_interval_mode": {
+        "type": "select", "label": "发送间隔模式", "description": "none=不等待；fixed=固定间隔；length_curve=按字数曲线",
+        "default": "none", "group": "group_stream",
+        "options": {
+            "none": "不等待",
+            "fixed": "固定间隔",
+            "length_curve": "按字数曲线",
+        },
+    },
+    "stream_send_interval_base_ms": {
+        "type": "number", "label": "基础发送间隔(ms)", "description": "固定间隔或曲线的基础延迟",
+        "default": 600, "min": 0, "max": 10000, "group": "group_stream",
+    },
+    "stream_send_interval_min_ms": {
+        "type": "number", "label": "最短发送间隔(ms)", "description": "最终延迟的下限",
+        "default": 100, "min": 0, "max": 10000, "group": "group_stream",
+    },
+    "stream_send_interval_max_ms": {
+        "type": "number", "label": "最长发送间隔(ms)", "description": "最终延迟的上限",
+        "default": 3000, "min": 0, "max": 30000, "group": "group_stream",
+    },
+    "stream_send_curve": {
+        "type": "select", "label": "发送曲线", "description": "按字数计算延迟的曲线",
+        "default": "sqrt", "group": "group_stream",
+        "options": {
+            "fixed": "固定",
+            "sqrt": "平方根（短句稍慢，长句增速放缓）",
+            "log": "对数（长句增速更平缓）",
+            "inverse": "反比（短句慢，长句快）",
+            "short_long": "短/长两档",
+        },
+    },
+    "stream_send_curve_k": {
+        "type": "number", "label": "曲线强度", "description": "曲线系数 k，越大延迟随字数增长越明显",
+        "default": 200, "min": 0, "max": 5000, "group": "group_stream",
+    },
+    "stream_short_message_length": {
+        "type": "number", "label": "短句阈值(字)", "description": "short_long 曲线中判断短句的长度阈值",
+        "default": 10, "min": 1, "max": 100, "group": "group_stream",
+    },
+    "stream_short_message_delay_ms": {
+        "type": "number", "label": "短句发送延迟(ms)", "description": "short_long 曲线中短句的延迟",
+        "default": 1200, "min": 0, "max": 10000, "group": "group_stream",
+    },
+    "stream_long_message_delay_ms": {
+        "type": "number", "label": "长句发送延迟(ms)", "description": "short_long 曲线中长句的延迟",
+        "default": 400, "min": 0, "max": 10000, "group": "group_stream",
+    },
+    "stream_send_prefix": {
+        "type": "string", "label": "发送前缀", "description": "每条流式消息发送前追加的文本",
+        "default": "", "group": "group_stream",
+    },
+    "stream_send_suffix": {
+        "type": "string", "label": "发送后缀", "description": "每条流式消息发送后追加的文本",
+        "default": "", "group": "group_stream",
+    },
+    "stream_send_max_queue": {
+        "type": "number", "label": "消息池最大排队数", "description": "队列满时的处理策略见下",
+        "default": 20, "min": 1, "max": 200, "group": "group_stream",
+    },
+    "stream_queue_full_policy": {
+        "type": "select", "label": "队列满策略", "description": "消息池满时的行为",
+        "default": "backpressure", "group": "group_stream",
+        "options": {
+            "backpressure": "背压（等待队列有空位）",
+            "drop_newest": "丢弃新消息",
+            "drop_oldest": "丢弃最旧消息",
+        },
+    },
+    "stream_flush_on_finish": {
+        "type": "boolean", "label": "结束后立即清空", "description": "流结束后是否忽略剩余间隔立即发送剩余消息",
+        "default": True, "group": "group_stream",
+    },
+    "stream_keep_order": {
+        "type": "boolean", "label": "严格按顺序发送", "description": "保持生成顺序逐条发送（建议开启）",
+        "default": True, "group": "group_stream",
     },
 
     "system_prompt": {
