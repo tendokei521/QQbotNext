@@ -83,6 +83,11 @@ function isVisible(item: ItemDef): boolean {
   return props.config[cond.key] === cond.value
 }
 
+/** 复杂 widget 需要单独渲染 label/description，简单字段由 FieldControl 自带 */
+function isComplexType(item: ItemDef): boolean {
+  return ['string_list', 'list', 'dynamic', 'repeater'].includes(String(item.schema.type).toLowerCase())
+}
+
 function currentValue(item: ItemDef): any {
   const v = props.config[item.key]
   return v !== undefined ? v : item.schema.default
@@ -122,8 +127,12 @@ function currentValue(item: ItemDef): any {
             <div class="group-body">
               <template v-for="item in g.items" :key="item.key">
                 <div v-if="isVisible(item)" class="config-item">
+                  <template v-if="isComplexType(item)">
+                    <div v-if="item.schema.label" class="field-label">{{ item.schema.label || item.key }}</div>
+                    <div v-if="item.schema.description" class="field-desc">{{ item.schema.description }}</div>
+                  </template>
                   <FieldControl
-                    v-if="!['string_list', 'list', 'dynamic', 'repeater'].includes(String(item.schema.type).toLowerCase())"
+                    v-if="!isComplexType(item)"
                     :field-key="item.key"
                     :schema="item.schema"
                     :value="currentValue(item)"
@@ -194,6 +203,20 @@ function currentValue(item: ItemDef): any {
   border-left: 3px solid rgba(var(--v-theme-primary), 0.35);
   border-radius: 8px;
   background: rgba(var(--v-theme-on-surface), 0.015);
+}
+
+.field-label {
+  font-size: 13.5px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.field-desc {
+  font-size: 12px;
+  color: rgba(var(--v-theme-on-surface), 0.55);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  margin-bottom: 8px;
 }
 
 .flat-fields {
