@@ -29,8 +29,11 @@ const loadingFields = ref(false)
 const error = ref('')
 // 当前选中项的字段值草稿
 const draft = reactive<Record<string, any>>({})
+// 用户一旦编辑就不再被外部快照覆盖，避免输入过程中被重置
+const touched = ref(false)
 
 function emitValue() {
+  touched.value = true
   const saved = { ...(props.modelValue || {}) }
   saved[selected.value] = { ...draft }
   emit('update:modelValue', saved)
@@ -98,6 +101,17 @@ watch(
   (v) => {
     if (v && v !== selected.value) selected.value = v
   },
+)
+watch(
+  () => props.modelValue,
+  (val) => {
+    if (touched.value || !selected.value) return
+    const saved = (val || {})[selected.value] || {}
+    fields.value.forEach((f) => {
+      draft[f.key] = saved[f.key] ?? f.default ?? (f.type === 'boolean' ? false : '')
+    })
+  },
+  { deep: true },
 )
 
 if (props.botId) loadOptions()

@@ -28,6 +28,8 @@ const mode = ref<string>(props.modeValue || 'all')
 const loading = ref(false)
 const error = ref('')
 const dragIndex = ref<number | null>(null)
+// 用户一旦编辑就不再被外部快照覆盖，避免操作过程中被重置
+const interacted = ref(false)
 const sortable = computed(() => !!props.schema.sortable)
 const checkboxes = computed(() => !!props.schema.checkboxes)
 const modeSelect = computed(() => !!props.schema.mode_select)
@@ -36,6 +38,7 @@ const nameField = computed(() => props.schema.name_field || 'name')
 const metaFields = computed<string[]>(() => props.schema.meta_fields || [])
 
 function emitValue() {
+  interacted.value = true
   const out: Record<string, { enabled: boolean; index: number }> = {}
   rows.value.forEach((r, i) => {
     out[r.id] = { enabled: r.enabled, index: i }
@@ -60,9 +63,9 @@ async function load() {
     if (!data?.ok) throw new Error(data?.message || '加载失败')
     mode.value = data.mode || 'all'
     rows.value = (data.items || []).map((item: any) => ({
-      id: String(item[idField.value]),
-      name: String(item[nameField.value] ?? item.id),
-      meta: metaFields.value.map((f) => item.meta?.[f] ?? item[f]),
+      id: String(item.id ?? item[idField.value] ?? ''),
+      name: String(item.name ?? item[nameField.value] ?? item.id ?? ''),
+      meta: Array.isArray(item.meta) ? item.meta : metaFields.value.map((f) => item.meta?.[f] ?? item[f]),
       enabled: item.enabled ?? true,
       index: item.index ?? 0,
     }))
@@ -118,6 +121,21 @@ watch(
   (v) => {
     if (v && v !== mode.value) mode.value = v
   },
+)
+watch(
+  () => props.modelValue,
+  (val) => {
+    if (interacted.value || rows.value.length === 0) return
+    rows.value.forEach((r) => {
+      const saved = (val || {})[r.id]
+      if (saved) {
+        r.enabled = saved.enabled
+        r.index = saved.index
+      }
+    })
+    rows.value.sort((a, b) => a.index - b.index)
+  },
+  { deep: true },
 )
 
 if (props.botId) load()

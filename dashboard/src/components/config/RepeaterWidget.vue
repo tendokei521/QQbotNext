@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import FieldControl from './FieldControl.vue'
 
 const props = defineProps<{
@@ -20,6 +20,8 @@ let seq = 0
 const items = ref<RepeaterItem[]>(
   (props.modelValue ?? []).map((v) => ({ __id: ++seq, values: { ...v } })),
 )
+// 用户一旦编辑就不再被外部快照覆盖，避免输入过程中被重置
+const touched = ref(false)
 
 function templateKeys(): string[] {
   const tpl = props.schema.template || {}
@@ -47,11 +49,23 @@ function onSub(i: number, key: string, v: any) {
 }
 
 function emitValue() {
+  touched.value = true
   emit(
     'update:modelValue',
     items.value.map((it) => ({ ...it.values })),
   )
 }
+
+// 外部配置（如切账号 / WS 同步）到达时，若用户尚未编辑则同步渲染
+watch(
+  () => props.modelValue,
+  (val) => {
+    if (!touched.value) {
+      items.value = (val ?? []).map((v) => ({ __id: ++seq, values: { ...v } }))
+    }
+  },
+  { deep: true },
+)
 </script>
 
 <template>
