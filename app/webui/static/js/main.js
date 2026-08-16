@@ -284,16 +284,16 @@ async function loadBotCards() {
                 <div class="bot-card-body">
                     <div class="bot-card-field">
                         <label>WebSocket 地址</label>
-                        <input type="text" class="form-control bot-ws-url" value="${cfg.ws_url || ''}" placeholder="ws://...">
+                        <input type="text" class="form-control bot-ws-url" value="${cfg.ws_url || ''}" placeholder="ws://..." onblur="saveBotConfigs(true)">
                     </div>
                     <div class="bot-card-field">
                         <label>Access Token</label>
-                        <input type="text" class="form-control bot-access-token" value="${cfg.access_token || ''}" placeholder="无 Token" autocomplete="off">
+                        <input type="text" class="form-control bot-access-token" value="${cfg.access_token || ''}" placeholder="无 Token" autocomplete="off" onblur="saveBotConfigs(true)">
                         <div class="bot-card-hint">保存后立即生效；留空并保存 = 清除 Token</div>
                     </div>
                     <div class="bot-card-field">
                         <label>Owner ID</label>
-                        <input type="text" class="form-control bot-owner-id" value="${cfg.owner_id || ''}" placeholder="管理员QQ号">
+                        <input type="text" class="form-control bot-owner-id" value="${cfg.owner_id || ''}" placeholder="管理员QQ号" onblur="saveBotConfigs(true)">
                     </div>
                     <div class="bot-card-field bot-card-field-switch">
                         <div class="bot-switch-row">
@@ -339,7 +339,7 @@ async function loadBotCards() {
     }
 }
 
-async function saveBotConfigs() {
+async function saveBotConfigs(quiet = false) {
     const cards = document.querySelectorAll('#bot-cards-container .bot-config-card');
     const bots = [];
     cards.forEach(card => {
@@ -364,7 +364,7 @@ async function saveBotConfigs() {
         });
         const result = await response.json();
         if (response.ok && result.status === 'success') {
-            showToast('配置已保存，建议刷新页面', 'success');
+            if (!quiet) showToast('配置已保存，建议刷新页面', 'success');
         } else {
             showToast(result.message || '保存失败', 'error');
         }

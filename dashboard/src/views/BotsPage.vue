@@ -24,6 +24,7 @@ const drafts = reactive<Record<number, { ws_url: string; access_token: string; o
 const saving = ref(false)
 const loadingCards = ref(false)
 const deleteTarget = ref<number | null>(null)
+let saveTimer: ReturnType<typeof setTimeout> | null = null
 
 function draftOf(index: number) {
   if (!drafts[index]) {
@@ -54,24 +55,44 @@ async function loadCards() {
   }
 }
 
-async function saveAll() {
+function buildPayload(): BotConfig[] {
+  return Object.entries(drafts).map(([index, d]) => ({
+    index: parseInt(index, 10),
+    ws_url: d.ws_url.trim(),
+    access_token: d.access_token,
+    owner_id: d.owner_id.trim() ? parseInt(d.owner_id.trim(), 10) : null,
+    auto_connect: d.auto_connect,
+  }))
+}
+
+async function persistDrafts(showToast = true): Promise<boolean> {
+  if (saving.value) return false
   saving.value = true
   try {
-    const payload: BotConfig[] = Object.entries(drafts).map(([index, d]) => ({
-      index: parseInt(index, 10),
-      ws_url: d.ws_url.trim(),
-      access_token: d.access_token,
-      owner_id: d.owner_id.trim() ? parseInt(d.owner_id.trim(), 10) : null,
-      auto_connect: d.auto_connect,
-    }))
-    await bots.saveBotConfig(payload)
-    notify.push('配置已保存', 'success')
-    await loadCards()
+    await bots.saveBotConfig(buildPayload())
+    if (showToast) notify.push('配置已保存', 'success')
+    return true
   } catch (err) {
     notify.push(errorMessage(err), 'error')
+    return false
   } finally {
     saving.value = false
   }
+}
+
+async function saveAll() {
+  if (await persistDrafts(true)) {
+    await loadCards()
+  }
+}
+
+/** 输入框失焦后自动保存一次（防抖，避免连续切换输入框时重复提交） */
+function scheduleSave() {
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => {
+    saveTimer = null
+    void persistDrafts(false)
+  }, 400)
 }
 
 async function addBot() {
@@ -173,6 +194,7 @@ onMounted(loadCards)
               hide-details
               class="mb-3"
               @update:model-value="(v: string) => { draftOf(b.index).ws_url = v }"
+              @blur="scheduleSave()"
             />
             <v-text-field
               :model-value="draftOf(b.index).access_token"
@@ -183,6 +205,7 @@ onMounted(loadCards)
               autocomplete="off"
               class="mb-3"
               @update:model-value="(v: string) => { draftOf(b.index).access_token = v }"
+              @blur="scheduleSave()"
             />
             <v-text-field
               :model-value="draftOf(b.index).owner_id"
@@ -192,6 +215,7 @@ onMounted(loadCards)
               hide-details
               class="mb-3"
               @update:model-value="(v: string) => { draftOf(b.index).owner_id = v }"
+              @blur="scheduleSave()"
             />
             <v-switch
               :model-value="draftOf(b.index).auto_connect"

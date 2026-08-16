@@ -158,16 +158,16 @@
                         <div class="bot-card-body">
                             <div class="bot-card-field">
                                 <label>WebSocket 地址</label>
-                                <input type="text" class="form-control bot-ws-url" value="{{ bot.ws_url or '' }}" placeholder="ws://...">
+                                <input type="text" class="form-control bot-ws-url" value="{{ bot.ws_url or '' }}" placeholder="ws://..." onblur="saveBotConfigs(true)">
                             </div>
                             <div class="bot-card-field">
                                 <label>Access Token</label>
-                                <input type="text" class="form-control bot-access-token" value="{{ bot.access_token or '' }}" placeholder="无 Token" autocomplete="off">
+                                <input type="text" class="form-control bot-access-token" value="{{ bot.access_token or '' }}" placeholder="无 Token" autocomplete="off" onblur="saveBotConfigs(true)">
                                 <div class="bot-card-hint">保存后立即生效；留空并保存 = 清除 Token</div>
                             </div>
                             <div class="bot-card-field">
                                 <label>Owner ID</label>
-                                <input type="text" class="form-control bot-owner-id" value="{{ bot.owner_id or '' }}" placeholder="管理员QQ号">
+                                <input type="text" class="form-control bot-owner-id" value="{{ bot.owner_id or '' }}" placeholder="管理员QQ号" onblur="saveBotConfigs(true)">
                             </div>
                             <div class="bot-card-field bot-card-field-switch">
                                 <div class="bot-switch-row">
