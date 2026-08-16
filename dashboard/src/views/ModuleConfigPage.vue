@@ -283,7 +283,7 @@ onMounted(async () => {
     <div class="app-page-subtitle" style="padding-left: 44px">{{ mod.description }}</div>
 
     <!-- 单一服务模式 -->
-    <v-card variant="outlined" class="mb-4 single-service-bar" :class="{ 'is-on': ssOn }">
+    <v-card variant="outlined" class="mb-4">
       <v-card-text class="d-flex align-center justify-space-between flex-wrap gap-2 py-3">
         <div class="d-flex align-center gap-2">
           <v-icon icon="mdi-server" color="purple" />
@@ -357,14 +357,6 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.single-service-bar {
-  border-left: 4px solid rgb(var(--v-theme-secondary));
-}
-
-.single-service-bar.is-on {
-  border-left-color: rgb(var(--v-theme-secondary));
-}
-
 .plugin-frame {
   width: 100%;
   min-height: 240px;
