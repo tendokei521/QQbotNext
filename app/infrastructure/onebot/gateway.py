@@ -401,22 +401,25 @@ class OneBotGateway:
         # 转发消息拉取
         if isinstance(event, MessageEvent) and event.event_type in ("message_group", "message_private"):
             event = await self._attach_forward_msg(event, conn)
-            # 日志：[Recv][#idx][群名] 名字:内容（私信无群名）
+            # 日志：[接收<-][#idx][群名] 名字:内容（私信无群名）
             text = _message_log_text(event).strip()
             if text:
                 name = event.user.card or event.user.nickname or ""
-                prefix = f"Recv] [#{conn.index}"
+                prefix = f"接收<-] [#{conn.index}"
                 if event.event_type == "message_group":
                     group_name = self._lookup_group_name(conn, event.group.group_id)
                     prefix += f"] [{group_name}({event.group.group_id})" if group_name else f"[{event.group.group_id}]"
                 name_info = f"{name}({event.user_id})" if name else f"{event.user_id}"
                 recv_logger.prefix(prefix).info(f"{name_info}: {text}")
+        elif isinstance(event, MessageEvent) and event.event_type == "bot_send_msg":
+            # 机器人自己发送的消息不进入 recv，已由 API 发送侧 [发送->] 覆盖
+            pass
         elif isinstance(event, BaseEvent):
             if event.event_type not in ("bot_heartbeat",):
                 text = _event_text(event)
                 if text:
                     # 与消息一致：群事件前缀拼 [群id]（notice 无群名，仅 id）
-                    prefix = f"Recv] [#{conn.index}"
+                    prefix = f"通知<-] [#{conn.index}"
                     group_id = getattr(event, "group_id", 0) or 0
                     if group_id:
                         prefix += f"] [{group_id}"

@@ -36,10 +36,10 @@ class LogService:
         except OSError:
             return []
 
-    def get_recent_logs(self, max_lines: int = 50, levels: list[str] | None = None) -> list[dict]:
+    def get_recent_logs(self, max_lines: int = 50, levels: list[str] | None = None, source: str = "debug") -> list[dict]:
         from app.infrastructure.config.config_service import mask_ws_url
 
-        log_file = self.log_dir / "debug.log"
+        log_file = self.log_dir / ("user.log" if source == "user" else "debug.log")
         if not log_file.exists():
             return []
         if levels is None:

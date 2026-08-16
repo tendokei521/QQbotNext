@@ -23,9 +23,24 @@ def setup_dir(folder_path: str | Path) -> None:
 
 
 class SixHourRotatingHandler(BaseRotatingHandler):
-    """每 6 小时轮转日志，按级别拆分 debug/warn/errors，并清理过期归档。"""
+    """每 6 小时轮转日志，按级别拆分 debug/warn/errors/user，并清理过期归档。
+
+    同组内所有 handler 共享同一个轮转时间；任一 handler 触发轮转时，
+    会同时拆分组内全部文件，保证四个日志文件始终同步归档。
+    """
 
     ROTATION_INTERVAL = 6 * 60 * 60  # 21600 秒
+
+    _handlers: list["SixHourRotatingHandler"] = []
+    _next_rollover_time: float | None = None
+    _rolling = False
+
+    @classmethod
+    def reset(cls):
+        """清空轮转组（重新初始化日志系统时调用）。"""
+        cls._handlers.clear()
+        cls._next_rollover_time = None
+        cls._rolling = False
 
     def __init__(self, filename, level=logging.NOTSET, backup_count=48):
         self.base_filename = filename
@@ -33,7 +48,11 @@ class SixHourRotatingHandler(BaseRotatingHandler):
         self.logs_dir = os.path.dirname(os.path.abspath(filename)) or "./logs"
         setup_dir(self.logs_dir)
         self._recover_recent_logs()
-        self.next_rollover_time = self._compute_next_rollover()
+        cls = self.__class__
+        cls._handlers.append(self)
+        if cls._next_rollover_time is None:
+            cls._next_rollover_time = self._compute_next_rollover()
+        self.next_rollover_time = cls._next_rollover_time
         super().__init__(filename, mode="a", encoding="utf-8")
         self.setLevel(level)
 
@@ -82,7 +101,8 @@ class SixHourRotatingHandler(BaseRotatingHandler):
     def shouldRollover(self, record):
         return 1 if time.time() >= self.next_rollover_time else 0
 
-    def doRollover(self):
+    def _rotate_file(self):
+        """归档当前 handler 对应的单个日志文件。"""
         self.stream.close()
         archive_time = self.next_rollover_time - self.ROTATION_INTERVAL
         archive_folder = self._get_archive_folder(archive_time)
@@ -101,9 +121,23 @@ class SixHourRotatingHandler(BaseRotatingHandler):
                     shutil.move(self.base_filename, archive_file)
             except Exception as e:  # pragma: no cover
                 print(f"归档日志失败: {e}")
-        self._cleanup_old_archives()
         self.stream = self._open()
-        self.next_rollover_time = self._compute_next_rollover()
+
+    def doRollover(self):
+        cls = self.__class__
+        if cls._rolling:
+            return
+        cls._rolling = True
+        try:
+            for handler in cls._handlers:
+                handler._rotate_file()
+            if cls._handlers:
+                cls._handlers[0]._cleanup_old_archives()
+            cls._next_rollover_time = self._compute_next_rollover()
+            for handler in cls._handlers:
+                handler.next_rollover_time = cls._next_rollover_time
+        finally:
+            cls._rolling = False
 
     def _cleanup_old_archives(self):
         try:
@@ -171,6 +205,45 @@ class CallerModuleFormatter(logging.Formatter):
         return super().format(record)
 
 
+class UserLogFilter(logging.Filter):
+    """只放行用户简洁日志：系统日志 + 消息交互 + API 错误。
+
+    过滤掉 API 底层成功日志（API(->)/(<-) 与普通 [API] 成功），
+    也过滤掉 DEBUG 内部细节。
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno < logging.INFO:
+            return False
+        if record.levelno >= logging.WARNING:
+            return True
+        msg = record.getMessage()
+        if msg.startswith("[API]") or "API(->)" in msg or "API(<-)" in msg:
+            return False
+        return True
+
+
+_user_log_filter = UserLogFilter()
+
+# 控制台是否打印原始日志；由 WebUI 配置 show_raw_logs 驱动
+_console_show_raw = False
+
+
+class ConsoleModeFilter(logging.Filter):
+    """控制台显示模式过滤器：原始模式不过滤，简洁模式与 user.log 同步。"""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if _console_show_raw:
+            return True
+        return _user_log_filter.filter(record)
+
+
+def set_console_mode(show_raw_logs: bool) -> None:
+    """设置控制台打印模式：True=原始日志，False=用户简洁日志。"""
+    global _console_show_raw
+    _console_show_raw = bool(show_raw_logs)
+
+
 def _build_logger(log_dir: str | Path) -> logging.Logger:
     logs_dir = str(log_dir)
     setup_dir(logs_dir)
@@ -178,6 +251,8 @@ def _build_logger(log_dir: str | Path) -> logging.Logger:
     logger_.setLevel(logging.DEBUG)
     logger_.handlers.clear()
     logger_.propagate = False
+
+    SixHourRotatingHandler.reset()
 
     lf = CallerModuleFormatter(
         fmt="[%(name)s] %(asctime)s.%(msecs)03d - %(levelname)s - %(message)s",
@@ -189,8 +264,19 @@ def _build_logger(log_dir: str | Path) -> logging.Logger:
         handler.setFormatter(lf)
         logger_.addHandler(handler)
 
+    # 用户简洁日志：与 debug/warn/errors 同步轮换，只写入用户可见日志
+    user_handler = SixHourRotatingHandler(
+        filename=os.path.join(logs_dir, "user.log"),
+        level=logging.INFO,
+        backup_count=48,
+    )
+    user_handler.addFilter(_user_log_filter)
+    user_handler.setFormatter(lf)
+    logger_.addHandler(user_handler)
+
     console = logging.StreamHandler(sys.stdout)
     console.setLevel(logging.DEBUG)
+    console.addFilter(ConsoleModeFilter())
     console.setFormatter(lf)
     logger_.addHandler(console)
     return logger_

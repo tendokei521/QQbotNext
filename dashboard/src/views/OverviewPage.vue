@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useBotsStore, type BotStatus } from '@/stores/bots'
 import { useModulesStore } from '@/stores/modules'
 import { useLogsStore } from '@/stores/logs'
+import { useWebuiStore } from '@/stores/webui'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
@@ -11,6 +12,7 @@ import EmptyState from '@/components/EmptyState.vue'
 const bots = useBotsStore()
 const modules = useModulesStore()
 const logs = useLogsStore()
+const webui = useWebuiStore()
 const notify = useNotifyStore()
 const router = useRouter()
 
@@ -27,7 +29,18 @@ const STATUS_TEXT: Record<BotStatus, string> = {
 const statusColor = (s: BotStatus) =>
   s === 'connected' ? 'success' : s === 'connecting' || s === 'reconnecting' ? 'warning' : 'error'
 
-const previewLogs = computed(() => logs.filtered.slice(-12).reverse())
+function isSimpleLog(row: { level: string; message: string }) {
+  if (webui.config.logs.show_raw_logs) return true
+  const msg = String(row.message || '')
+  const level = String(row.level || '').toLowerCase()
+  const isApiError = ['warning', 'error'].includes(level)
+  const isUserApiLog = msg.includes('[发送->]') || msg.includes('[请求->]')
+  if (msg.startsWith('[API]') && !isUserApiLog && !isApiError) return false
+  if (!isApiError && (msg.includes('API(->)') || msg.includes('API(<-)'))) return false
+  return true
+}
+
+const previewLogs = computed(() => logs.filtered.filter(isSimpleLog).slice(-12).reverse())
 
 const pinnedModules = computed(() =>
   modules.list

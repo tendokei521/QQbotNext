@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import http from '@/api/http'
-import { onLogSnapshot, onSocketMessage } from '@/api/socket'
+import { onLogSnapshot, onSocketMessage, setLogMode } from '@/api/socket'
+import { useWebuiStore } from './webui'
 
 export interface LogItem {
   timestamp: string
@@ -13,6 +14,10 @@ const MAX_CACHE = 1000
 
 function itemKey(item: LogItem): string {
   return `${item.timestamp}|${item.level}|${item.message}`
+}
+
+function currentMode(): 'simple' | 'raw' {
+  return useWebuiStore().config.logs.show_raw_logs ? 'raw' : 'simple'
 }
 
 /** 日志控制台状态：WS 快照增量渲染 / 过滤 / 暂停 / 清空 */
@@ -77,10 +82,12 @@ export const useLogsStore = defineStore('logs', () => {
     pendingCount.value = 0
   }
 
-  /** 重新拉取全量日志（修改级别设置后调用） */
+  /** 重新拉取全量日志（修改级别/模式后调用） */
   async function refresh() {
+    const mode = currentMode()
+    setLogMode(mode)
     try {
-      const res = await http.get<LogItem[]>('/api/logs')
+      const res = await http.get<LogItem[]>('/api/logs', { params: { mode } })
       logs.value = res.data || []
       cache.value = [...logs.value]
     } catch {

@@ -7,6 +7,24 @@ let ws: WebSocket | null = null
 let retryTimer: number | null = null
 let manualClosed = false
 let logArrayHandler: MessageHandler | null = null
+let logMode: 'simple' | 'raw' = 'simple'
+
+/** 切换日志推送模式（simple=用户简洁日志 / raw=原始日志），并立即重连日志 WS。 */
+export function setLogMode(mode: 'simple' | 'raw'): void {
+  if (logMode === mode) return
+  logMode = mode
+  if (retryTimer) {
+    clearTimeout(retryTimer)
+    retryTimer = null
+  }
+  if (ws) {
+    const old = ws
+    ws = null
+    old.onclose = null
+    old.close()
+  }
+  connectSocket()
+}
 
 /** 订阅指定 type 的广播消息（bot_status_updated / module_config_updated ...） */
 export function onSocketMessage(type: string, handler: MessageHandler): () => void {
@@ -33,7 +51,10 @@ export function connectSocket(): void {
 
   const t = token.get()
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  const query = t ? `?token=${encodeURIComponent(t)}` : ''
+  const params = new URLSearchParams()
+  if (t) params.set('token', t)
+  params.set('mode', logMode)
+  const query = `?${params.toString()}`
   ws = new WebSocket(`${proto}://${location.host}/ws/logs${query}`)
 
   ws.onmessage = (ev) => {

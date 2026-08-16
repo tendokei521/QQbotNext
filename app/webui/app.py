@@ -85,9 +85,11 @@ def create_app(container) -> FastAPI:
         log_service = container.get(LogService)
 
         webui_cfg = config_service.get_webui_config()
+        source = "user" if not webui_cfg.get("logs", {}).get("show_raw_logs", False) else "debug"
         logs = log_service.get_recent_logs(
             webui_cfg.get("logs", {}).get("max_lines", 50),
             webui_cfg.get("logs", {}).get("visible_levels", ["info", "warning", "error"]),
+            source=source,
         )
         # 注入访问令牌：GET / 本身不鉴权，前端凭此 token 调用受保护的 /api 与 /ws/logs
         return templates.TemplateResponse(
@@ -113,9 +115,11 @@ def create_app(container) -> FastAPI:
         log_service = container.get(LogService)
 
         webui_cfg = config_service.get_webui_config()
+        source = "user" if not webui_cfg.get("logs", {}).get("show_raw_logs", False) else "debug"
         logs = log_service.get_recent_logs(
             webui_cfg.get("logs", {}).get("max_lines", 50),
             webui_cfg.get("logs", {}).get("visible_levels", ["info", "warning", "error"]),
+            source=source,
         )
         from app.core.settings import Settings
 
@@ -183,7 +187,7 @@ def _install_bot_lifecycle_listener(container) -> None:
 
 
 def _install_config_listener(container) -> None:
-    from app.core.logger import logger
+    from app.core.logger import logger, set_console_mode
     from app.infrastructure.config.config_service import ConfigService
 
     config_service = container.get(ConfigService)
@@ -191,6 +195,7 @@ def _install_config_listener(container) -> None:
     async def on_config_change(scope: str, payload):
         if scope == "webui":
             cfg = payload
+            set_console_mode(cfg.get("logs", {}).get("show_raw_logs", False))
             await manager.broadcast(json.dumps({"type": "webui_config_updated", "config": cfg}))
             await manager.broadcast(json.dumps({
                 "type": "single_service_updated",
@@ -227,6 +232,8 @@ def _install_config_listener(container) -> None:
 
 
 def _install_auth_middleware(app: FastAPI, container) -> None:
+    import base64
+
     from app.core.settings import Settings
     from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -236,12 +243,31 @@ def _install_auth_middleware(app: FastAPI, container) -> None:
         return
     webui_logger.info("[WebUI] 已启用访问令牌鉴权")
 
+    def _extract_token(request: Request) -> str:
+        """从 Authorization(Bearer/Basic) 或 query token 中提取令牌。"""
+        auth = request.headers.get("authorization", "")
+        if auth.lower().startswith("bearer "):
+            return auth[7:].strip()
+        if auth.lower().startswith("basic "):
+            try:
+                decoded = base64.b64decode(auth[6:]).decode("utf-8", errors="ignore")
+                # Basic 格式为 username:password，这里把 password 当作 WebUI token
+                return decoded.split(":", 1)[1] if ":" in decoded else ""
+            except Exception:
+                return ""
+        return request.query_params.get("token", "").strip()
+
     @app.middleware("http")
     async def auth_middleware(request: Request, call_next):
-        if request.url.path.startswith("/api") or request.url.path == "/ws/logs":
-            auth = request.headers.get("authorization", "")
-            query_token = request.query_params.get("token", "")
-            provided = auth[7:] if auth.lower().startswith("bearer ") else query_token
-            if provided != token:
+        # 所有 HTTP 路由（含首页/旧版 UI/模块自定义页/静态资源）都要求鉴权，
+        # 避免 token 被未授权访问者从页面源码中取走。
+        if _extract_token(request) != token:
+            if request.url.path.startswith("/api"):
                 return JSONResponse(status_code=401, content={"status": "error", "message": "未授权"})
+            # 非 API 页面返回 Basic 质询，浏览器会弹出登录框；用户以 token 作为密码即可。
+            return JSONResponse(
+                status_code=401,
+                content={"status": "error", "message": "未授权"},
+                headers={"WWW-Authenticate": 'Basic realm="QQBotNext WebUI"'},
+            )
         return await call_next(request)

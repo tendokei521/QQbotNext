@@ -56,7 +56,7 @@ async def save_logs_config(request: Request):
         data = {}
     config = cfg_service.get_webui_config()
     logs_cfg = config.setdefault("logs", {})
-    for key in ("visible_levels", "max_lines", "console_height"):
+    for key in ("show_raw_logs", "visible_levels", "max_lines", "console_height"):
         if key in data:
             logs_cfg[key] = data[key]
     await cfg_service.save_webui_config(config)

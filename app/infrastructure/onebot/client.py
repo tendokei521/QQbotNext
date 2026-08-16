@@ -18,6 +18,97 @@ from app.domain.bot import IBot
 from app.domain.message import Message, MessageSegment, SegmentLike
 
 
+# 消息发送类 API：用户日志显示为 [发送->]
+MESSAGE_SEND_ACTIONS = {
+    "send_msg",
+    "send_group_msg",
+    "send_private_msg",
+    "send_forward_msg",
+    "send_group_forward_msg",
+    "send_private_forward_msg",
+}
+
+# 消息交互/操作类 API：用户日志显示为 [请求->]
+INTERACTIVE_REQUEST_ACTIONS = {
+    "send_poke",
+    "send_like",
+    "send_group_sign",
+    "set_essence_msg",
+    "delete_essence_msg",
+    "set_msg_emoji_like",
+    "delete_msg",
+}
+
+
+def _message_preview(message: Any) -> str:
+    """把 OneBot message 参数转成简短文本预览。"""
+    if isinstance(message, str):
+        return message
+    if isinstance(message, MessageSegment):
+        return message.data.get("text", "") if message.type == "text" else f"[{message.type}]"
+    if isinstance(message, list):
+        parts = []
+        for seg in message:
+            if isinstance(seg, MessageSegment):
+                parts.append(seg.data.get("text", "") if seg.type == "text" else f"[{seg.type}]")
+            elif isinstance(seg, dict):
+                seg_type = seg.get("type", "")
+                seg_data = seg.get("data", {}) or {}
+                parts.append(seg_data.get("text", "") if seg_type == "text" else f"[{seg_type}]")
+            else:
+                parts.append(str(seg))
+        return "".join(parts)
+    return str(message)
+
+
+def _target_text(params: dict) -> str:
+    if params.get("group_id"):
+        return f"群 {params['group_id']}"
+    if params.get("user_id"):
+        return f"用户 {params['user_id']}"
+    return "未知目标"
+
+
+def _interactive_request_text(action: str, params: dict) -> str:
+    if action == "send_poke":
+        return f"向 {params.get('user_id')} 戳了戳"
+    if action == "send_like":
+        return f"赞了 {params.get('user_id')} x{params.get('times', 1)}"
+    if action == "send_group_sign":
+        return f"群 {params.get('group_id')} 签到"
+    if action == "set_essence_msg":
+        return f"设置精华消息 {params.get('message_id')}"
+    if action == "delete_essence_msg":
+        return f"取消精华消息 {params.get('message_id')}"
+    if action == "set_msg_emoji_like":
+        return f"回应表情 {params.get('emoji_id')} 消息 {params.get('message_id')}"
+    if action == "delete_msg":
+        return f"撤回消息 {params.get('message_id')}"
+    return f"{action} {params}"
+
+
+def _log_user_api(action: str, params: dict | None, response: dict | None = None, error: str | None = None) -> None:
+    """按 API 类型输出用户可读的简洁日志；普通 API 成功时静默。"""
+    params = params or {}
+    if action in MESSAGE_SEND_ACTIONS:
+        target = _target_text(params)
+        preview = _message_preview(params.get("message"))
+        if error:
+            api_logger.logger.error(f"[发送->] {target}: {preview} 失败: {error}")
+        elif response and response.get("status") != "ok":
+            api_logger.logger.warning(f"[发送->] {target}: {preview} 失败: {response.get('retcode')} {response.get('message')}")
+        else:
+            api_logger.logger.info(f"[发送->] {target}: {preview}")
+    elif action in INTERACTIVE_REQUEST_ACTIONS:
+        text = _interactive_request_text(action, params)
+        if error:
+            api_logger.logger.error(f"[请求->] {text} 失败: {error}")
+        elif response and response.get("status") != "ok":
+            api_logger.logger.warning(f"[请求->] {text} 失败: {response.get('retcode')} {response.get('message')}")
+        else:
+            api_logger.logger.info(f"[请求->] {text}")
+
+
 class BotConnection(IBot):
     """单个机器人连接：连接状态 + 全部 OneBot API。"""
 
@@ -62,6 +153,7 @@ class BotConnection(IBot):
         """真正发送（绕过 outbound_hook，供 SendNode 调用）。"""
         if not self.websocket:
             api_logger.error(f"[#{self.index}] API 未连接，请求被拒: {action}")
+            _log_user_api(action, params, error="API 未连接")
             return None
         echo_id = str(uuid.uuid4())
         payload = {"action": action, "params": params or {}, "echo": echo_id}
@@ -74,15 +166,18 @@ class BotConnection(IBot):
             api_logger.debug(f"[#{self.index}] API(->) {action} | echo:{echo_id[:8]}")
             response = await asyncio.wait_for(future, timeout=timeout_sec)
             if response.get("status") != "ok":
-                api_logger.warning(f"[API] {action} 失败: {response.get('retcode')} {response.get('message')}")
+                api_logger.warning(f"{action} 失败: {response.get('retcode')} {response.get('message')}")
             else:
                 api_logger.debug(f"[#{self.index}] API(<-) {action} | echo:{echo_id[:8]}")
+            _log_user_api(action, params, response=response)
             return response
         except asyncio.TimeoutError:
             api_logger.error(f"[#{self.index}] API 超时 {action} ({timeout_sec}s)")
+            _log_user_api(action, params, error=f"超时 ({timeout_sec}s)")
             return None
         except Exception as e:
             api_logger.error(f"[#{self.index}] API 异常 {action}: {e}")
+            _log_user_api(action, params, error=str(e))
             return None
         finally:
             self._pending.pop(echo_id, None)

@@ -5,6 +5,7 @@ import { onSocketMessage } from '@/api/socket'
 
 export interface WebuiConfig {
   logs: {
+    show_raw_logs: boolean
     visible_levels: string[]
     max_lines: number
     console_height: number
@@ -24,7 +25,7 @@ export interface ModulePreferences {
 /** webui 配置中心：日志设置 / 单一服务 / 多群管理 / 模块偏好 */
 export const useWebuiStore = defineStore('webui', () => {
   const config = ref<WebuiConfig>({
-    logs: { visible_levels: ['info', 'warning', 'error'], max_lines: 50, console_height: 200 },
+    logs: { show_raw_logs: false, visible_levels: ['info', 'warning', 'error'], max_lines: 50, console_height: 200 },
     single_service: {},
     multi_group: { show_all: false, groups: {} },
   })

@@ -13,7 +13,18 @@ const settingsOpen = ref(false)
 const filterInput = ref('')
 const bodyEl = ref<HTMLDivElement | null>(null)
 
-const visibleRows = computed(() => logs.filtered.slice(-1000))
+function isSimpleLog(row: { level: string; message: string }) {
+  if (webui.config.logs.show_raw_logs) return true
+  const msg = String(row.message || '')
+  const level = String(row.level || '').toLowerCase()
+  const isApiError = ['warning', 'error'].includes(level)
+  const isUserApiLog = msg.includes('[发送->]') || msg.includes('[请求->]')
+  if (msg.startsWith('[API]') && !isUserApiLog && !isApiError) return false
+  if (!isApiError && (msg.includes('API(->)') || msg.includes('API(<-)'))) return false
+  return true
+}
+
+const visibleRows = computed(() => logs.filtered.filter(isSimpleLog).slice(-1000))
 
 // 可写 computed：webui.load() 覆盖配置后仍绑定到最新值
 const levels = computed<string[]>({
@@ -28,6 +39,12 @@ const maxLines = computed<number>({
     webui.config.logs.max_lines = v
   },
 })
+const showRawLogs = computed<boolean>({
+  get: () => webui.config.logs.show_raw_logs,
+  set: (v) => {
+    webui.config.logs.show_raw_logs = v
+  },
+})
 
 function onFilterInput() {
   logs.setFilter(filterInput.value)
@@ -36,6 +53,7 @@ function onFilterInput() {
 async function saveLogsSettings() {
   try {
     await webui.saveLogs({
+      show_raw_logs: showRawLogs.value,
       visible_levels: levels.value,
       max_lines: maxLines.value,
     })
@@ -134,6 +152,17 @@ onMounted(() => {
             class="mt-3"
             hide-details
           />
+          <v-switch
+            v-model="showRawLogs"
+            label="显示原始日志"
+            color="primary"
+            density="compact"
+            class="mt-2"
+            hide-details
+          />
+          <div class="text-caption mt-1" style="color: rgba(var(--v-theme-on-surface), 0.55)">
+            默认关闭；开启后显示完整技术日志
+          </div>
         </v-card-text>
         <v-card-actions>
           <v-spacer />

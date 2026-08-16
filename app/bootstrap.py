@@ -10,7 +10,7 @@ import asyncio
 import contextlib
 
 from app.core.container import Container
-from app.core.logger import logger, setup_logging
+from app.core.logger import logger, set_console_mode, setup_logging
 from app.core.settings import Settings, load_settings
 from app.core.task_manager import TaskManager
 from app.infrastructure.cache import Cache
@@ -147,6 +147,7 @@ async def run(settings: Settings | None = None) -> None:
     await db.connect()
     config_service = _container.get(ConfigService)
     await config_service.init()
+    set_console_mode(config_service.get_webui_config().get("logs", {}).get("show_raw_logs", False))
 
     # 迁移旧 LLM 数据文件（历史模块目录 → data/llm），幂等，仅在启动时执行
     from app.llm import migrate_legacy_data

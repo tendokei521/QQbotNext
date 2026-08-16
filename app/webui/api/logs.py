@@ -19,4 +19,9 @@ async def api_logs(request: Request):
     config = container.get(ConfigService).get_webui_config()
     levels = config.get("logs", {}).get("visible_levels", ["info", "warning", "error"])
     max_lines = config.get("logs", {}).get("max_lines", 50)
-    return JSONResponse(content=container.get(LogService).get_recent_logs(max_lines, levels))
+
+    mode = request.query_params.get("mode", "")
+    if mode not in ("simple", "raw"):
+        mode = "raw" if config.get("logs", {}).get("show_raw_logs", False) else "simple"
+    source = "user" if mode == "simple" else "debug"
+    return JSONResponse(content=container.get(LogService).get_recent_logs(max_lines, levels, source=source))

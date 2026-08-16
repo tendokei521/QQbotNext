@@ -1,10 +1,11 @@
 // ==================== 全局配置 ====================
 let webuiConfig = window.WEBUI_CONFIG || {
-    logs: { visible_levels: ['info', 'warning', 'error'], max_lines: 50 }
+    logs: { show_raw_logs: false, visible_levels: ['info', 'warning', 'error'], max_lines: 50 }
 };
 let botsData = window.BOTS_DATA || [];
 let visibleLevels = webuiConfig.logs?.visible_levels || ['info', 'warning', 'error'];
 let maxLogLines = webuiConfig.logs?.max_lines || 50;
+let showRawLogs = webuiConfig.logs?.show_raw_logs === true;
 let currentBotId = null;
 
 // ==================== 工具函数 ====================
@@ -462,6 +463,7 @@ function openLogsConfigModal() {
     document.getElementById('log-level-warning').checked = levels.includes('warning');
     document.getElementById('log-level-error').checked = levels.includes('error');
     document.getElementById('log-max-lines').value = maxLogLines;
+    document.getElementById('log-show-raw').checked = showRawLogs;
     openModal('logs-config-modal');
 }
 
@@ -473,6 +475,7 @@ async function saveLogsConfig() {
     if (document.getElementById('log-level-error').checked) levels.push('error');
 
     const maxLines = parseInt(document.getElementById('log-max-lines').value);
+    const raw = document.getElementById('log-show-raw').checked;
 
     if (levels.length === 0) {
         showToast('至少选择一个日志级别', 'warning');
@@ -484,6 +487,7 @@ async function saveLogsConfig() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+                show_raw_logs: raw,
                 visible_levels: levels,
                 max_lines: maxLines
             })
@@ -493,10 +497,12 @@ async function saveLogsConfig() {
         if (response.ok && result.status === 'success') {
             visibleLevels = levels;
             maxLogLines = maxLines;
-            webuiConfig.logs = { ...webuiConfig.logs, visible_levels: levels, max_lines: maxLines };
+            showRawLogs = raw;
+            webuiConfig.logs = { ...webuiConfig.logs, show_raw_logs: raw, visible_levels: levels, max_lines: maxLines };
             showToast(result.message, 'success');
             closeModal('logs-config-modal');
             refreshLogs();
+            reconnectLogsWebSocket();
         } else {
             showToast(result.message || '保存失败', 'error');
         }
@@ -1132,9 +1138,22 @@ async function triggerAgentProactive(sessionId) {
 // ==================== 日志 WebSocket ====================
 let ws = null;
 
+function currentLogMode() {
+    return showRawLogs ? 'raw' : 'simple';
+}
+
+function reconnectLogsWebSocket() {
+    if (ws) {
+        ws.onclose = null;
+        ws.close();
+        ws = null;
+    }
+    connectLogsWebSocket();
+}
+
 function connectLogsWebSocket() {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(apiWsUrl(`${wsProtocol}//${window.location.host}/ws/logs`));
+    ws = new WebSocket(apiWsUrl(`${wsProtocol}//${window.location.host}/ws/logs?mode=${currentLogMode()}`));
 
     ws.onmessage = function(event) {
         try {
@@ -1210,10 +1229,14 @@ function handleConfigUpdate(data) {
 }
 
 function handleWebuiConfigUpdate(config) {
+    const prevRaw = showRawLogs;
     webuiConfig = config;
     visibleLevels = config.logs?.visible_levels || ['info', 'warning', 'error'];
     maxLogLines = config.logs?.max_lines || 50;
+    showRawLogs = config.logs?.show_raw_logs === true;
     updateLogLevelCheckboxes();
+    renderLogsAll();
+    if (prevRaw !== showRawLogs) reconnectLogsWebSocket();
     showToast('WebUI 配置已更新', 'info');
 }
 
@@ -1380,6 +1403,18 @@ function _logMatches(log) {
         || String(log.timestamp || '').toLowerCase().includes(kw);
 }
 
+/** 简洁日志模式：隐藏普通 API 成功日志，保留消息交互/通知/系统/错误。 */
+function _isSimpleLog(log) {
+    if (showRawLogs) return true;
+    const msg = String(log.message || '');
+    const level = String(log.level || '').toLowerCase();
+    const isApiError = ['warning', 'error'].includes(level);
+    const isUserApiLog = msg.includes('[发送->]') || msg.includes('[请求->]');
+    if (msg.startsWith('[API]') && !isUserApiLog && !isApiError) return false;
+    if (!isApiError && (msg.includes('API(->)') || msg.includes('API(<-)'))) return false;
+    return true;
+}
+
 /** 创建单条日志 DOM（textContent 防 XSS：用户消息原文会进日志）。 */
 function _buildLogItem(log) {
     const div = document.createElement('div');
@@ -1406,7 +1441,7 @@ function renderLogsAll() {
     logsContainer.innerHTML = '';
     let shown = 0;
     for (const log of logCache) {
-        if (_logMatches(log)) { logsContainer.appendChild(_buildLogItem(log)); shown++; }
+        if (_logMatches(log) && _isSimpleLog(log)) { logsContainer.appendChild(_buildLogItem(log)); shown++; }
     }
     updateLogFilterCount(shown);
     if (isBottom) logsContainer.scrollTop = logsContainer.scrollHeight;
@@ -1437,7 +1472,9 @@ function updateLogsDisplay(newArr) {
     // 常规增量：仅追加新增行，保持滚动跟随
     const logsContainer = document.getElementById('logs-container');
     const isBottom = logsContainer.scrollHeight - logsContainer.scrollTop - logsContainer.clientHeight < 50;
-    for (const log of added) logsContainer.appendChild(_buildLogItem(log));
+    for (const log of added) {
+        if (_isSimpleLog(log)) logsContainer.appendChild(_buildLogItem(log));
+    }
     if (isBottom) logsContainer.scrollTop = logsContainer.scrollHeight;
     updateLogFilterCount(logCache.length);
 }
@@ -1481,7 +1518,7 @@ function updateLogFilterCount(shown) {
 
 async function refreshLogs() {
     try {
-        const response = await apiFetch('/api/logs');
+        const response = await apiFetch(`/api/logs?mode=${currentLogMode()}`);
         if (response.ok) {
             const logs = await response.json();
             updateLogsDisplay(logs);
@@ -1496,6 +1533,7 @@ async function loadWebuiConfig() {
             webuiConfig = await response.json();
             visibleLevels = webuiConfig.logs?.visible_levels || ['info', 'warning', 'error'];
             maxLogLines = webuiConfig.logs?.max_lines || 50;
+            showRawLogs = webuiConfig.logs?.show_raw_logs === true;
         }
     } catch (e) {}
 }

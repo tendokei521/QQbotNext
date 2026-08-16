@@ -81,7 +81,11 @@ def build_ws_router():
                 config = config_service.get_webui_config()
                 levels = config.get("logs", {}).get("visible_levels", ["info", "warning", "error"])
                 max_lines = config.get("logs", {}).get("max_lines", 50)
-                logs = log_service.get_recent_logs(max_lines, levels)
+                mode = websocket.query_params.get("mode", "")
+                if mode not in ("simple", "raw"):
+                    mode = "raw" if config.get("logs", {}).get("show_raw_logs", False) else "simple"
+                source = "user" if mode == "simple" else "debug"
+                logs = log_service.get_recent_logs(max_lines, levels, source=source)
                 await websocket.send_text(json.dumps(logs))
                 await asyncio.sleep(1)
         except (WebSocketDisconnect, _WSDisconnect, asyncio.CancelledError):

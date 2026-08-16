@@ -23,11 +23,18 @@ const maxLines = computed<number>({
     webui.config.logs.max_lines = v
   },
 })
+const showRawLogs = computed<boolean>({
+  get: () => webui.config.logs.show_raw_logs,
+  set: (v) => {
+    webui.config.logs.show_raw_logs = v
+  },
+})
 
 async function saveLogs() {
   saving.value = true
   try {
     await webui.saveLogs({
+      show_raw_logs: showRawLogs.value,
       visible_levels: levels.value,
       max_lines: maxLines.value,
     })
@@ -140,8 +147,16 @@ onMounted(() => {
               hide-details
               class="mt-2"
             />
+            <v-switch
+              v-model="showRawLogs"
+              label="显示原始日志"
+              color="primary"
+              density="compact"
+              class="mt-2"
+              hide-details
+            />
             <div class="text-caption mt-2" style="color: rgba(var(--v-theme-on-surface), 0.55)">
-              修改后需保存；日志页面实时生效
+              修改后需保存；日志页面实时生效；默认关闭，开启后显示完整技术日志
             </div>
           </v-card-text>
         </v-card>

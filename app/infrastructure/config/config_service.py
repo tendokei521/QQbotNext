@@ -18,7 +18,7 @@ from app.infrastructure.persistence.database import Database
 Listener = Callable[[str, Any], Awaitable[None]]
 
 DEFAULT_WEBUI_CONFIG: dict = {
-    "logs": {"visible_levels": ["info", "warning", "error"], "max_lines": 50, "console_height": 200},
+    "logs": {"show_raw_logs": False, "visible_levels": ["info", "warning", "error"], "max_lines": 50, "console_height": 200},
     "single_service": {},
     "multi_group": {"show_all": False, "groups": {}},
 }
