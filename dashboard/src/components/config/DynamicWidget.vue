@@ -136,11 +136,17 @@ if (props.botId) loadOptions()
       <div v-if="loadingFields" class="hint"><v-progress-circular size="16" indeterminate /> 加载字段…</div>
       <div v-else class="fields-box">
         <template v-for="f in fields" :key="f.key">
-          <StringListWidget
+          <div
             v-if="String(f.type || '').toLowerCase() === 'string_list'"
-            :model-value="(draft[f.key] as string[]) || []"
-            @update:model-value="(v: string[]) => { draft[f.key] = v; emitValue() }"
-          />
+            class="dynamic-subfield"
+          >
+            <div v-if="f.label" class="field-label">{{ f.label }}</div>
+            <div v-if="f.description" class="field-desc">{{ f.description }}</div>
+            <StringListWidget
+              :model-value="(draft[f.key] as string[]) || []"
+              @update:model-value="(v: string[]) => { draft[f.key] = v; emitValue() }"
+            />
+          </div>
           <FieldControl
             v-else
             :field-key="f.key"
@@ -182,5 +188,23 @@ if (props.botId) loadOptions()
   border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
   border-radius: 10px;
   background: rgba(var(--v-theme-on-surface), 0.02);
+}
+
+.dynamic-subfield {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field-label {
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.field-desc {
+  font-size: 12px;
+  color: rgba(var(--v-theme-on-surface), 0.55);
+  line-height: 1.5;
+  white-space: pre-wrap;
 }
 </style>

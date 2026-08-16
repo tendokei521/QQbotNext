@@ -82,11 +82,21 @@ watch(
       </div>
       <div class="card-body">
         <template v-for="key in templateKeys()" :key="key">
-          <StringListWidget
+          <div
             v-if="String((schema.template || {})[key]?.type || '').toLowerCase() === 'string_list'"
-            :model-value="(item.values[key] as string[]) || []"
-            @update:model-value="(v: string[]) => onSub(i, key, v)"
-          />
+            class="repeater-subfield"
+          >
+            <div v-if="(schema.template || {})[key]?.label" class="field-label">
+              {{ (schema.template || {})[key].label }}
+            </div>
+            <div v-if="(schema.template || {})[key]?.description" class="field-desc">
+              {{ (schema.template || {})[key].description }}
+            </div>
+            <StringListWidget
+              :model-value="(item.values[key] as string[]) || []"
+              @update:model-value="(v: string[]) => onSub(i, key, v)"
+            />
+          </div>
           <FieldControl
             v-else
             :field-key="key"
@@ -135,5 +145,23 @@ watch(
   flex-direction: column;
   gap: 12px;
   padding: 12px;
+}
+
+.repeater-subfield {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field-label {
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.field-desc {
+  font-size: 12px;
+  color: rgba(var(--v-theme-on-surface), 0.55);
+  line-height: 1.5;
+  white-space: pre-wrap;
 }
 </style>
