@@ -179,6 +179,64 @@ class Module(BaseModule):
 
 ---
 
+## 4.3 模块给 LLM 提供工具（`@tool`）
+
+模块可以把方法暴露给 LLM 作为 function calling 工具：
+
+```python
+from app.llm import tool, ToolContext
+
+class Module(BaseModule):
+    @tool(
+        description="查询某城市天气",
+        parameters={
+            "type": "object",
+            "properties": {"city": {"type": "string", "description": "城市"}},
+            "required": ["city"],
+        },
+    )
+    async def query_weather(self, ctx: ToolContext, args: dict) -> str:
+        # ctx.bot / ctx.session_id / ctx.event / ctx.user_id 可用
+        return "晴，25℃"
+```
+
+- 工具名默认 = 方法名；
+- 处理器签名：`(self, ctx: ToolContext, args: dict) -> str`；
+- 也兼容旧式 `TOOLS` 类属性声明；
+- 工具执行带 20s 超时、异常兜底、结果截断；
+- 模块未启用（authority.enabled=False）时工具自动不注入。
+
+## 4.4 模块给 LLM 注入技能（`@skill` / `SKILLS`）
+
+技能是写入 system prompt 的能力说明，让模型知道“何时用、怎么做”：
+
+```python
+from app.llm import skill
+
+class Module(BaseModule):
+    SKILLS = {
+        "周报助手": {
+            "description": "用户说'写周报'时使用",
+            "instructions": "1. 调用 collect_events 收集\n2. 按三节输出",
+            "tools": ["collect_events"],
+            "examples": [{"input": "写周报", "output": "…"}],
+        }
+    }
+
+    # 或简写
+    SKILLS = {"欢迎": "打招呼时先说欢迎"}
+
+    # 或装饰器形式
+    @skill(name="周报助手", description="写周报时使用", instructions="…")
+    async def weekly_report(self): ...
+```
+
+- 技能默认全部注入；
+- 模块 config 里的 `skills_enabled`（`{"<技能名>": bool}`）可单独开关技能；
+- 工具同理可用 `tools_enabled`（`{"<工具名>": bool}`）单独开关。
+
+---
+
 ## 5. `LlmContext` 参数说明
 
 所有 LLM 钩子都会收到 `ctx: LlmContext`。

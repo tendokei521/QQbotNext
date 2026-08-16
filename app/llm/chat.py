@@ -17,9 +17,39 @@ from app.llm.tags import strip_all_tags
 from app.llm.scheduler import extract_reminder_note, has_schedule_intent
 from app.llm.splitter import split_sentences
 from app.llm.trigger import check_trigger, extract_text
-from app.llm.tool import build_tools, make_executor
+from app.llm.tool import ToolContext, build_tools, make_executor
 
 import re
+
+
+def _collect_llm_ext(runtime, event, session_id: str, is_private: bool, schedule_enable: bool):
+    """收集本次请求的模块工具 + 技能 + ToolContext。
+
+    返回 (specs, skill_blocks, ctx)；specs 已包含内置 schedule_task。
+    """
+    specs = []
+    if schedule_enable:
+        from app.llm.scheduler import build_schedule_tool
+
+        specs.append(build_schedule_tool(runtime, session_id, is_private))
+
+    if getattr(runtime, "llm_tools", None) is not None:
+        specs.extend(runtime.llm_tools.enabled_specs())
+
+    skill_blocks = []
+    if getattr(runtime, "skills", None) is not None:
+        skill_blocks = runtime.skills.prompt_blocks()
+
+    ctx = ToolContext(
+        module=runtime,
+        bot=event.bot,
+        session_id=session_id,
+        event=event,
+        runtime=runtime,
+        user_id=getattr(event, "user_id", None),
+        group_id=getattr(getattr(event, "group", None), "group_id", None),
+    )
+    return specs, skill_blocks, ctx
 
 
 def _log_debug_prompt(runtime, session_id: str, messages: list[dict], debug_enabled: bool = False) -> None:
@@ -182,6 +212,10 @@ async def call_llm_and_reply(module, event, session_mgr, config,
     # 定时意图检测：用于「紧贴提醒」+「模型未调工具时的确定性兜底」
     intent = has_schedule_intent(user_text) if schedule_enable else False
 
+    all_specs, skill_blocks, tool_ctx = _collect_llm_ext(
+        module, event, session_id, is_private, schedule_enable
+    )
+
     messages = build_messages(
         system_prompt=system_prompt,
         pre_history_text=pre_history_text,
@@ -189,18 +223,12 @@ async def call_llm_and_reply(module, event, session_mgr, config,
         user_text=user_text,
         with_schedule_instruction=schedule_enable,
         schedule_nudge=intent,
+        skills=skill_blocks,
     )
 
     logger.add_info(f"#{module.bot_id}").info(
         f"API 请求 -> {session_id} (task: {session.task_id}), 消息数: {len(messages)}"
     )
-
-    # 原生 function calling：装配 schedule_task 工具，由 provider 工具循环处理
-    schedule_tools = []
-    if schedule_enable:
-        from app.llm.scheduler import build_schedule_tool
-
-        schedule_tools = [build_schedule_tool(module, session_id, is_private)]
 
     provider = get_provider(config)
     response = await provider.chat(
@@ -208,8 +236,8 @@ async def call_llm_and_reply(module, event, session_mgr, config,
         model=model,
         temperature=temperature,
         max_tokens=max_tokens,
-        tools=build_tools(schedule_tools) if schedule_tools else None,
-        tool_executor=make_executor(schedule_tools) if schedule_tools else None,
+        tools=build_tools(all_specs) if all_specs else None,
+        tool_executor=make_executor(all_specs, tool_ctx) if all_specs else None,
     )
 
     if not response.ok:
@@ -356,6 +384,10 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
     # 定时意图检测：用于「紧贴提醒」+「模型未调工具时的确定性兜底」
     intent = has_schedule_intent(user_text) if schedule_enable else False
 
+    all_specs, skill_blocks, tool_ctx = _collect_llm_ext(
+        runtime, event, session_id, is_private, schedule_enable
+    )
+
     messages = build_messages(
         system_prompt=system_prompt,
         pre_history_text=pre_history_text,
@@ -363,6 +395,7 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
         user_text=user_text,
         with_schedule_instruction=schedule_enable,
         schedule_nudge=intent,
+        skills=skill_blocks,
     )
 
     _log_debug_prompt(runtime, session_id, messages, debug_enabled=bool(ctx and ctx.state.get("debug_prompt", False)))
@@ -371,20 +404,14 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
         f"API 请求 -> {session_id} (task: {session.task_id}), 消息数: {len(messages)}"
     )
 
-    schedule_tools = []
-    if schedule_enable:
-        from app.llm.scheduler import build_schedule_tool
-
-        schedule_tools = [build_schedule_tool(runtime, session_id, is_private)]
-
     provider = get_provider(config)
     response = await provider.chat(
         messages,
         model=model,
         temperature=temperature,
         max_tokens=max_tokens,
-        tools=build_tools(schedule_tools) if schedule_tools else None,
-        tool_executor=make_executor(schedule_tools) if schedule_tools else None,
+        tools=build_tools(all_specs) if all_specs else None,
+        tool_executor=make_executor(all_specs, tool_ctx) if all_specs else None,
     )
 
     if not response.ok:
@@ -522,6 +549,10 @@ async def stream_response(runtime, event, ctx=None):
     schedule_enable = config.get("schedule_enable", True)
     intent = has_schedule_intent(user_text) if schedule_enable else False
 
+    all_specs, skill_blocks, tool_ctx = _collect_llm_ext(
+        runtime, event, session_id, is_private, schedule_enable
+    )
+
     messages = build_messages(
         system_prompt=system_prompt,
         pre_history_text=pre_history_text,
@@ -529,6 +560,7 @@ async def stream_response(runtime, event, ctx=None):
         user_text=user_text,
         with_schedule_instruction=schedule_enable,
         schedule_nudge=intent,
+        skills=skill_blocks,
     )
 
     _log_debug_prompt(runtime, session_id, messages, debug_enabled=bool(ctx and ctx.state.get("debug_prompt", False)))
@@ -537,14 +569,8 @@ async def stream_response(runtime, event, ctx=None):
         f"流式 API 请求 -> {session_id} (task: {session.task_id}), 消息数: {len(messages)}"
     )
 
-    schedule_tools = []
-    if schedule_enable:
-        from app.llm.scheduler import build_schedule_tool
-
-        schedule_tools = [build_schedule_tool(runtime, session_id, is_private)]
-
-    tools = build_tools(schedule_tools) if schedule_tools else None
-    tool_executor = make_executor(schedule_tools) if schedule_tools else None
+    tools = build_tools(all_specs) if all_specs else None
+    tool_executor = make_executor(all_specs, tool_ctx) if all_specs else None
     provider = get_provider(config)
 
     full_text = ""

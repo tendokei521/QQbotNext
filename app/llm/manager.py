@@ -19,6 +19,8 @@ from app.llm.pipeline import LlmPipeline
 from app.llm.proactive import ProactiveManager
 from app.llm.scheduler import TaskScheduler
 from app.llm.session import SessionManager
+from app.llm.skills import SkillRegistry
+from app.llm.tool import ModuleToolRegistry
 
 
 class _Services:
@@ -53,6 +55,9 @@ class AgentRuntime:
         # LLM 流水线：模块可在任意阶段注册钩子
         self.llm_hooks = LlmHookRegistry()
         self.llm_pipeline = LlmPipeline(self, task_manager=task_manager)
+        # 模块扩展：@tool 工具 + 技能
+        self.llm_tools = ModuleToolRegistry(logger)
+        self.skills = SkillRegistry(logger)
 
     def set_bot(self, bot) -> None:
         self._bot = bot

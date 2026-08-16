@@ -589,7 +589,7 @@ async def handle_schedule_tool(module, session_id: str, is_private: bool, args: 
 
 def build_schedule_tool(module, session_id: str, is_private: bool) -> ToolSpec:
     """构造绑定到当前会话的 schedule_task 工具。"""
-    async def _handler(args: dict) -> str:
+    async def _handler(ctx, args: dict) -> str:
         return await handle_schedule_tool(module, session_id, is_private, args)
 
     return ToolSpec(

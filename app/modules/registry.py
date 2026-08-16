@@ -161,6 +161,13 @@ class ModuleRegistry:
                             handler=handler,
                             module=instance,
                         )
+            # 注册模块工具（@tool / TOOLS）与技能（@skill / SKILLS）到该 Bot 的 AgentRuntime
+            if self.services and self.services.agent_manager:
+                runtime = self.services.agent_manager.get_runtime(bot_id)
+                if runtime is not None:
+                    runtime.llm_tools.register_module(instance)
+                    runtime.skills.register_module(instance)
+
             # 自动注册模块声明的 list/dynamic 数据源
             providers = self.services.providers if self.services else None
             if providers is not None:
@@ -268,13 +275,19 @@ class ModuleRegistry:
             del self._modules[module_name]
 
     def _unregister_llm_hooks(self, instance, bot_id) -> None:
-        """卸载模块实例时注销其注册的 LLM 钩子。"""
+        """卸载模块实例时注销其注册的 LLM 钩子 / 工具 / 技能。"""
         if not (self.services and self.services.agent_manager):
             return
         runtime = self.services.agent_manager.get_runtime(bot_id)
-        if runtime is not None and hasattr(runtime, "llm_hooks"):
+        if runtime is None:
+            return
+        if hasattr(runtime, "llm_hooks"):
             runtime.llm_hooks.unregister_module(instance)
-        if runtime is not None and hasattr(runtime, "llm_pipeline"):
+        if hasattr(runtime, "llm_tools"):
+            runtime.llm_tools.unregister_module(instance)
+        if hasattr(runtime, "skills"):
+            runtime.skills.unregister_module(instance)
+        if hasattr(runtime, "llm_pipeline"):
             runtime.llm_pipeline.cancel_for_module(instance)
 
     @staticmethod

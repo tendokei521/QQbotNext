@@ -195,6 +195,31 @@ class Module(BaseModule):
 - `continue` 是 Python 关键字，手动放行请用 `event.llm.resume()`；
 - 内置 `llm_enhance` 模块演示了“防抖合并 + 群聊用户信息感知”。
 
+### LLM 工具与技能
+
+模块可以把能力暴露给 LLM：
+
+```python
+from app.llm import tool, skill
+
+class Module(BaseModule):
+    @tool(description="查询天气", parameters={"type": "object", "properties": {"city": {"type": "string"}}})
+    async def query_weather(self, ctx, args):
+        return "晴"
+
+    SKILLS = {
+        "周报助手": {
+            "description": "用户说'写周报'时使用",
+            "instructions": "1. 收集数据 2. 按三段输出",
+            "tools": ["query_weather"],
+        }
+    }
+```
+
+- `@tool`：注册为 LLM function calling 工具（带 `ToolContext` / 超时 / 截断）
+- `SKILLS` / `@skill`：注入 system prompt 的技能说明
+- 模块 `config` 里可用 `tools_enabled` / `skills_enabled` 单独开关工具与技能
+
 ### 流式输出（带 tools）
 
 在 LLM 配置开启 `stream_output` 后，LLM 回复会按句子流式发送，并且仍然支持定时任务等工具调用。
