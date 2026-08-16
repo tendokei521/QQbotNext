@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import FieldControl from './FieldControl.vue'
+import StringListWidget from './StringListWidget.vue'
 
 const props = defineProps<{
   schema: Record<string, any>
@@ -32,7 +33,11 @@ function add() {
   const values: Record<string, any> = {}
   const tpl = props.schema.template || {}
   Object.entries(tpl).forEach(([key, s]: [string, any]) => {
-    values[key] = s.default ?? (s.type === 'boolean' ? false : '')
+    if (String(s.type || '').toLowerCase() === 'string_list') {
+      values[key] = Array.isArray(s.default) ? [...s.default] : []
+    } else {
+      values[key] = s.default ?? (s.type === 'boolean' ? false : '')
+    }
   })
   items.value.push({ __id: ++seq, values })
   emitValue()
@@ -76,14 +81,20 @@ watch(
         <v-btn variant="text" icon="mdi-delete-outline" color="error" size="small" @click="remove(i)" />
       </div>
       <div class="card-body">
-        <FieldControl
-          v-for="key in templateKeys()"
-          :key="key"
-          :field-key="key"
-          :schema="(schema.template || {})[key]"
-          :value="item.values[key]"
-          @update="(v: any) => onSub(i, key, v)"
-        />
+        <template v-for="key in templateKeys()" :key="key">
+          <StringListWidget
+            v-if="String((schema.template || {})[key]?.type || '').toLowerCase() === 'string_list'"
+            :model-value="(item.values[key] as string[]) || []"
+            @update:model-value="(v: string[]) => onSub(i, key, v)"
+          />
+          <FieldControl
+            v-else
+            :field-key="key"
+            :schema="(schema.template || {})[key]"
+            :value="item.values[key]"
+            @update="(v: any) => onSub(i, key, v)"
+          />
+        </template>
       </div>
     </div>
     <v-btn size="small" variant="tonal" prepend-icon="mdi-plus" class="align-self-start" @click="add">

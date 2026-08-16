@@ -2,6 +2,7 @@
 import { reactive, ref, watch } from 'vue'
 import http, { errorMessage } from '@/api/http'
 import FieldControl from './FieldControl.vue'
+import StringListWidget from './StringListWidget.vue'
 
 interface DynOption {
   value: string
@@ -134,14 +135,20 @@ if (props.botId) loadOptions()
       />
       <div v-if="loadingFields" class="hint"><v-progress-circular size="16" indeterminate /> 加载字段…</div>
       <div v-else class="fields-box">
-        <FieldControl
-          v-for="f in fields"
-          :key="f.key"
-          :field-key="f.key"
-          :schema="f"
-          :value="draft[f.key]"
-          @update="(v: any) => { draft[f.key] = v; emitValue() }"
-        />
+        <template v-for="f in fields" :key="f.key">
+          <StringListWidget
+            v-if="String(f.type || '').toLowerCase() === 'string_list'"
+            :model-value="(draft[f.key] as string[]) || []"
+            @update:model-value="(v: string[]) => { draft[f.key] = v; emitValue() }"
+          />
+          <FieldControl
+            v-else
+            :field-key="f.key"
+            :schema="f"
+            :value="draft[f.key]"
+            @update="(v: any) => { draft[f.key] = v; emitValue() }"
+          />
+        </template>
       </div>
     </template>
   </div>
