@@ -300,9 +300,13 @@ onMounted(async () => {
       v-if="showSingleServiceWarning"
       type="warning"
       variant="tonal"
+      density="compact"
       class="mb-4"
-      :title="`当前账号非本模块指定服务账号，该模块在部分群下不会触发：${affectedGroups.map((g) => g.name).join('、')}`"
-    />
+    >
+      <div class="text-caption">
+        当前账号非本模块指定服务账号，该模块在部分群下不会触发：{{ affectedGroups.map((g) => g.name).join('、') }}
+      </div>
+    </v-alert>
 
     <!-- 插件自定义配置页 -->
     <v-card v-if="mod.has_page" variant="outlined" class="mb-4">

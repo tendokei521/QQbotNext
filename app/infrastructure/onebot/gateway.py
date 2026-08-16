@@ -335,13 +335,25 @@ class OneBotGateway:
                         # 不视为断连、也不当作事件。
                         continue
                     else:
+                        # 连接级失败响应（如 token 验证失败）：视为连接失败并断开，
+                        # 不应继续解码成普通事件处理。
                         bot_logger.warning(f"WebSocket失败响应: {msg_dict}")
-                        if start_type:
-                            start_type = False
-                            conn.bot_id = 0
-                            for t in login_tasks:
-                                t.cancel()
-                            break
+                        reason = msg_dict.get("message") or msg_dict.get("wording") or "连接失败"
+                        start_type = False
+                        conn.bot_id = 0
+                        for t in login_tasks:
+                            t.cancel()
+                        conn.status = "error"
+                        conn.last_error = reason
+                        await self._notify_status(conn, "error", reason)
+                        if conn.websocket:
+                            try:
+                                await conn.websocket.close()
+                            except Exception:
+                                pass
+                            conn.websocket = None
+                        self._reset_conn_state(conn)
+                        break
 
                     # 2. 解码为领域事件并入队处理（不阻塞接收循环）
                     event = decode(msg_dict, conn)

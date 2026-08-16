@@ -148,7 +148,7 @@ watch(
   align-items: center;
   gap: 8px;
   color: rgba(var(--v-theme-on-surface), 0.55);
-  font-size: 13px;
+  font-size: 12px;
   padding: 12px 0;
 }
 

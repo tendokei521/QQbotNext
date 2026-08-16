@@ -71,7 +71,7 @@ function onSearch() {
 async function onToggle(m: ModuleData, v: boolean | null) {
   const enabled = !!v
   try {
-    await modules.toggle(m.name, enabled)
+    await modules.toggle(m._key, enabled)
     notify.push(`模块 ${m.name} 已${enabled ? '启用' : '禁用'}`, 'success')
   } catch (err) {
     notify.push(errorMessage(err), 'error')
