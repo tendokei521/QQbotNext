@@ -131,7 +131,33 @@ class BaseEvent:
 
 @dataclass
 class MessageEvent(BaseEvent):
-    """消息类事件（群消息 / 私聊消息）。"""
+    """消息类事件（群消息 / 私聊消息）。
+
+    对应 OneBot v11 中 ``post_type="message"`` / ``"message_sent"`` 的上报。
+    解码器（``app/infrastructure/onebot/codec.py``）从 payload 中提取以下可能字段：
+
+    公共字段（由 BaseEvent 承载）：
+    - ``time``: int，事件发生时间（Unix 秒）
+    - ``self_id``: int，收到事件的机器人 QQ
+    - ``user_id``: int，发送者 QQ
+    - ``post_type``: str，``"message"`` / ``"message_sent"``
+
+    message 事件字段：
+    - ``message_type``: str，``"private"`` 或 ``"group"``
+    - ``sub_type``: str
+      - private：``friend`` / ``group`` / ``other`` / ``self``
+      - group：``normal`` / ``anonymous`` / ``notice``
+    - ``message_id``: int，消息 ID
+    - ``group_id``: int，群号（仅群消息）
+    - ``message``: list[MessageSegment]，消息段数组（也兼容字符串形式）
+    - ``raw_message``: str，原始消息文本
+    - ``font``: int，字体（未单独存字段，保留在 ``raw``）
+    - ``target_id``: int，私聊/发送场景的接收者 QQ（未单独存字段，保留在 ``raw``）
+    - ``sender``: dict，发送者信息，解码为 ``UserInfo``：
+      ``user_id`` / ``nickname`` / ``card`` / ``role`` / ``sex`` / ``age`` / ``area`` / ``level`` / ``title`` / ``group_id``
+    - ``user``: UserInfo，解码后的发送者
+    - ``group``: GroupInfo，解码后的群信息（仅群消息，含 ``group_id`` / ``group_name`` / 发送者群内角色）
+    """
 
     message_type: str = ""
     sub_type: str = ""
@@ -163,12 +189,31 @@ class MessageEvent(BaseEvent):
 
 @dataclass
 class GroupMessageEvent(MessageEvent):
+    """群消息事件。
+
+    除 MessageEvent 公共字段外，OneBot 群消息 payload 还常含：
+    - ``group_id``: int，群号
+    - ``anonymous``: dict，匿名信息（如有）
+    - ``sender.group_id``: int，发送者所在群
+    - ``sender.role``: str，``owner`` / ``admin`` / ``member``
+    - ``sender.card``: str，群名片
+    """
+
     event_type: str = "message_group"
     message_type: str = "group"
 
 
 @dataclass
 class PrivateMessageEvent(MessageEvent):
+    """私聊消息事件。
+
+    除 MessageEvent 公共字段外，OneBot 私聊消息 payload 还常含：
+    - ``sub_type``: str，``friend`` / ``group`` / ``other`` / ``self``
+    - ``sender.user_id``: int，发送者 QQ
+    - ``sender.nickname``: str，昵称
+    - ``target_id``: int，接收者 QQ（部分实现/发送事件场景）
+    """
+
     event_type: str = "message_private"
     message_type: str = "private"
 
