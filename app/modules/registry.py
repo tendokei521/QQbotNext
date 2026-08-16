@@ -211,7 +211,10 @@ class ModuleRegistry:
             if bot_id not in self._modules[entry.name]:
                 if await self.load_single(entry.name, bot_id, bot):
                     count += 1
-        self.log.info(f"[Module] Bot {bot_id} 模块加载完成: {count} 个新增")
+        if bot_id is None:
+            self.log.info(f"[Module] 模块预加载完成: {count} 个新增")
+        else:
+            self.log.info(f"[Module] Bot {bot_id} 模块加载完成: {count} 个新增")
         return count
 
     async def unload(self, bot_id: Any = None) -> None:
