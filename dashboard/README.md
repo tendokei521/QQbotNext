@@ -5,10 +5,10 @@ QQBot Next 新版管理后台：Vue 3 + Vuetify 3 + Vite + TypeScript。
 ## 功能
 
 - **总览首页**：Bot 状态 / 模块统计 / 最近日志
-- **账号管理**：WS 连接配置卡片（增删改查）、连接/断开/重连、多群管理
+- **账号管理**：WS 连接配置卡片（增删改查、输入框失焦自动保存）、连接/断开/重连、多群管理
 - **功能模块**：搜索、分类分组、启停、schema 配置表单（boolean/integer/float/password/select/textarea/time/string_list/list/dynamic/repeater + 分组折叠 + showIf）、权限黑白名单、单一服务模式、插件自定义页 iframe
 - **Agent 面板**：框架级 LLM 配置 + 定时任务 + 主动消息状态
-- **日志控制台**：WebSocket 实时流、过滤、暂停、级别设置、高度拖拽
+- **日志控制台**：WebSocket 实时流、过滤、暂停、级别设置、高度拖拽、“显示原始日志”切换（默认简洁日志）
 - **设置**：浅/暗双主题（AstrBot 同款设计令牌）、日志偏好
 
 ## 开发

@@ -107,7 +107,7 @@ except Exception as e:
 ## 9. 测试要求
 
 - 新增/修改功能必须配套测试，位于 `tests/`，命名 `test_*.py`。
-- 提交前必须全量通过：`venv\Scripts\python.exe -m pytest -q`（当前基线 142 个用例全绿）。
+- 提交前必须全量通过：`venv\Scripts\python.exe -m pytest -q`（当前基线 165 个用例全绿）。
 - 测试用 `pytest-asyncio`（`asyncio_mode = "auto"`，无需 `@pytest.mark.asyncio`）。
 
 ## 10. 工具链现状与建议

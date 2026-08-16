@@ -32,7 +32,7 @@ module/                  ★ 插件目录（三级结构）
 ├── configs/             每模块配置（<name>/config.json + authority.json，迁移源）
 └── data/                每模块可选持久化数据（get_data_path 自动创建）
 data/                    SQLite（app.db）+ 框架级 LLM 数据（data/llm）
-logs/                    debug.log / warn.log / errors.log + 归档目录
+logs/                    debug.log / warn.log / errors.log / user.log + 归档目录
 ```
 
 > **注意**：模块配置迁移源从旧的 `modules/<name>/configs.json`、`authority.json` 迁到
@@ -76,24 +76,30 @@ python main.py
 所有配置集中在 **SQLite（`data/app.db`）**，通过 WebUI 修改即落库：
 - 账号配置（ws_url / owner_id / auto_connect）
 - 模块配置 + 权限（启停 / 黑白名单）
-- WebUI 偏好（日志显示级别 / 单一服务 / 多群管理）
+- WebUI 偏好（日志显示级别 / “显示原始日志”开关 / 单一服务 / 多群管理）
 
 > **旧 JSON 迁移**：首次启动若 DB 为空，会从 `webserver/webconfig.json`、`webui/webui_config.json`、`module/configs/*/config.json`、`module/configs/*/authority.json` 自动迁移一次。迁移后以 SQLite 为准，旧 JSON 仅作迁移源保留。
 
 ## 5. 日志
 
-- **文件**：`logs/debug.log`（全部）、`logs/warn.log`（WARNING+）、`logs/errors.log`（ERROR+）
-- **轮转**：每 6 小时归档到 `logs/YYYY-MM-DD-HH/` 子目录，保留 48 份，超出自动清理
-- **控制台**：同步输出；WebUI 右下角控制台实时查看（WebSocket 推送，刷新间隔 1s）
+- **文件**：
+  - `logs/debug.log`：原始完整日志（全部级别）
+  - `logs/warn.log`：WARNING+
+  - `logs/errors.log`：ERROR+
+  - `logs/user.log`：用户简洁日志（系统日志 + 消息收发/通知/请求 + API 错误，不含 API 底层成功日志与 DEBUG）
+- **轮转**：`debug.log / warn.log / errors.log / user.log` 四个文件每 6 小时**同步归档**到 `logs/YYYY-MM-DD-HH/` 子目录，保留 48 份，超出自动清理
+- **WebUI**：日志面板默认显示简洁日志；开启“显示原始日志”后读取 `debug.log` 显示完整技术日志
+- **控制台**：控制台输出与 WebUI 的“显示原始日志”开关同步；无论开关状态，`debug.log` 始终完整记录
 - **查看最近日志（按级别）**：
   ```bash
   tail -100 logs/debug.log
+  tail -100 logs/user.log
   grep ERROR logs/errors.log | tail -50
   ```
 
 ## 6. 账号连接
 
-- WebUI「账号连接管理」里增删改账号；`auto_connect=true` 的账号启动时自动连接。
+- WebUI「账号连接管理」里增删改账号；账号配置输入框失焦会自动保存，也可点“保存所有配置”手动保存。`auto_connect=true` 的账号启动时自动连接。
 - **断线重连**：auto_connect 账号掉线后按**指数退避**自动重连：
   `10s → 20s → 40s → 80s → 160s → 300s（封顶）`，连接成功归零。
 - 连接失败常见原因：OneBot 服务未启动 / 地址端口错误 / `access_token` 不匹配 → 查 `logs/errors.log`。
@@ -201,7 +207,7 @@ venv\Scripts\python.exe -c "import sqlite3; c=sqlite3.connect('data/app.db'); pr
 
 - **打不开**：确认进程在跑；确认 `WEBUI_HOST/PORT`；外网访问需放行端口或反代。
 - **模块列表为空**：首次打开时模块列表来自「全局实例」，若为空说明模块未加载成功 → 查 `logs/errors.log` 的 `[Module]` 加载失败记录。
-- **实时日志不显示**：控制台走 `/ws/logs` WebSocket，若浏览器控制台报错刷新即可；后端日志仍会写入 `logs/`。
+- **实时日志不显示**：控制台走 `/ws/logs?mode=simple|raw` WebSocket，若浏览器控制台报错刷新即可；后端日志仍会写入 `logs/`。
 - **改了模块配置不生效**：点「保存配置」后模块运行逻辑读 `module.config`；个别模块需「刷新模块」重载。
 
 ## 12. 常见问题排查
@@ -219,6 +225,7 @@ venv\Scripts\python.exe -c "import sqlite3; c=sqlite3.connect('data/app.db'); pr
 | 现象 | 原因与处理 |
 |---|---|
 | 某 Bot 反复「连接失败」 | 地址/`access_token` 错，或 OneBot 未启动；改配置或关掉它的 auto_connect |
+| 连接后立即报 `token验证失败` / `WebSocket失败响应` | OneBot 端 `access_token` 不匹配；现在会视为连接失败并断开，检查 token 后重连 |
 | Bot 连上了但群列表空 | 登录信息获取失败 → 查 `logs/errors.log` 的 `获取群聊列表失败` |
 | 重连太频繁 | 已是指数退避；若仍嫌吵，把该 Bot 的 auto_connect 关掉改手动 |
 
@@ -253,7 +260,7 @@ venv\Scripts\python.exe -c "import sqlite3; c=sqlite3.connect('data/app.db'); pr
 venv\Scripts\python.exe -m pytest -q
 ```
 - 覆盖：领域编解码 / 权限 / 配置中心(含迁移) / 模块注册表 / 事件分发 / Provider 与 list/dynamic API / 定时任务。
-- 新增功能后跑一遍全量，确保 50+ 用例全绿。
+- 新增功能后跑一遍全量，确保 165+ 用例全绿。
 
 ## 15. 架构演进备忘（本版相对 v1 的变化）
 
@@ -268,3 +275,5 @@ venv\Scripts\python.exe -m pytest -q
 - **模块流水线 + LLM 流水线**：模块流水线在前（`@module_hook`），LLM 流水线在后
   （`@llm_hook`：pre_request / post_response / pre_send / post_send）；LLM 请求池
   `app/llm/pool.py` 支持同会话防抖合并；`event.llm.resume()` 手动放行。
+- **日志双系统**：`debug.log` 保留原始完整日志，新增 `user.log` 简洁日志；
+  `debug/warn/errors/user` 四文件同步 6h 轮转；WebUI“显示原始日志”开关与控制台输出同步。

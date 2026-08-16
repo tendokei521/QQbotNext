@@ -289,7 +289,7 @@
 ### 2.4 logs（文件 `api/logs.py`，tags: logs）
 
 #### GET /logs
-- 查询参数：无
+- 查询参数：`mode`（可选）：`simple`（默认，读取 `user.log`）或 `raw`（读取 `debug.log`）；缺省时按 WebUI 配置 `show_raw_logs` 决定
 - 响应：**直接数组（JSON 数组，不是对象）**：`LogItem[]`
   - 遵循 `webui_config.logs.visible_levels`（缺省 `["info","warning","error"]`）与 `max_lines`（缺省 50）。
 - `LogItem`：`{ "timestamp": string, "level": string, "message": string }`
@@ -305,7 +305,7 @@
 - 成功（200）：`{"status":"success","message":"配置已保存"}`；保存成功后经 `config_service.save_webui_config` 触发 `webui` scope 广播（见 §3）。
 
 #### POST /webui/config/logs
-- 请求体 JSON：`{ "visible_levels": string[]?, "max_lines": int?, "console_height": int? }`（只更新在请求体中的键）
+- 请求体 JSON：`{ "show_raw_logs": bool?, "visible_levels": string[]?, "max_lines": int?, "console_height": int? }`（只更新在请求体中的键；`show_raw_logs` 默认 `false` = 简洁日志）
 - 成功（200）：`{"status":"success","message":"日志配置已保存"}`
 
 #### GET /webui/module-preferences
@@ -338,10 +338,11 @@
 ### 连接
 
 ```
-ws(s)://<host>/ws/logs[?token=<WEBUI_TOKEN>]
+ws(s)://<host>/ws/logs[?token=<WEBUI_TOKEN>][&mode=simple|raw]
 ```
 - 鉴权：非空 token 时传 `?token=` 或 `Authorization: Bearer`（HTTP 中间件不覆盖 WS，端点内自校验）；失败 `close(4401)`。
-- 后端逻辑：接受连接后加入 `ConnectionManager`，随后**每秒**循环：读 `get_recent_logs(max_lines, visible_levels)` 并经 `send_text(json.dumps(logs))` 推送，直到断开（`manager.disconnect`）。
+- `mode`：`simple`（默认，读取 `user.log`）或 `raw`（读取 `debug.log`）；缺省时按 WebUI 配置 `show_raw_logs` 决定。
+- 后端逻辑：接受连接后加入 `ConnectionManager`，随后**每秒**循环：按 `mode` 读 `get_recent_logs(max_lines, visible_levels, source=...)` 并经 `send_text(json.dumps(logs))` 推送，直到断开（`manager.disconnect`）。
 - connection manager 支持**广播**（多连接 push）。
 
 ### 收到的消息类型
@@ -350,7 +351,7 @@ WS 通道会混合推送两类内容：
 
 **(a) 纯日志快照**：对象顶层为 **JSON 数组**（`LogItem[]`），即 `get_recent_logs` 的返回。前端以此为准渲染控制台。
 - `LogItem`：`{ "timestamp": string, "level": string, "message": string }`
-  - `level` 枚举：`debug` / `info` / `warning` / `error`（`get_recent_logs` 读取 `debug.log`，按 `" - "` 拆分，`parts[1].strip().lower()`）。
+  - `level` 枚举：`debug` / `info` / `warning` / `error`（`get_recent_logs` 按 `" - "` 拆分，`parts[1].strip().lower()`；`mode=simple` 读 `user.log`，`mode=raw` 读 `debug.log`）。
   - 渲染方式（旧前端 `_buildLogItem`）：`<span class="log-time">timestamp</span>` + `<span class="log-level {level}">LEVEL.toUpperCase()</span>` + `<span class="log-message">message</span>`；用 `textContent` 防 XSS。
   - 增量 diff：按 `timestamp|level|message` 键从尾部对齐新旧数组，只追加新增行（`updateLogsDisplay`）。
 

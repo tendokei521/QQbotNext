@@ -10,7 +10,7 @@ app/
 ├── core/                       核心内核（无业务依赖）
 │   ├── settings.py             pydantic-settings 配置（.env，变量名=字段名大写）
 │   ├── container.py            轻量 DI 容器
-│   ├── logger.py               日志（6h 轮转 / 分级别文件 / 前缀 Logger）
+│   ├── logger.py               日志（6h 轮转 / debug+warn+errors+user / 简洁+原始双视图）
 │   ├── task_manager.py         统一后台任务管理（可追踪、级联取消）
 │   └── event_bus.py            类型化事件总线（框架级发布订阅）
 ├── domain/                     领域层（协议无关）
@@ -95,6 +95,13 @@ python main.py
    `module/configs/*/config.json`、`module/configs/*/authority.json`）——首次运行后以 SQLite 为准；
 4. 按配置自动连接 `auto_connect=true` 的账号，加载对应模块；
 5. 启动 WebUI（默认 `http://127.0.0.1:9200`）与定时调度器。
+
+### 日志
+
+- **文件**：`logs/debug.log`（原始完整）、`warn.log`、`errors.log`、`user.log`（用户简洁日志）
+- **轮转**：四个文件每 6 小时同步归档到 `logs/YYYY-MM-DD-HH/`，保留 48 份
+- **WebUI**：日志面板默认显示简洁日志；开启“显示原始日志”后显示完整技术日志
+- **控制台**：控制台输出与 WebUI 的“显示原始日志”开关同步；无论开关状态，`debug.log` 始终完整记录
 
 ### 关键配置（.env）
 
@@ -225,7 +232,8 @@ class Module(BaseModule):
 - 模块配置/权限/账号配置从 JSON 文件迁移到 SQLite（首次启动自动迁移，旧 JSON 保留为迁移源）；
 - 消息收发统一走 `event.bot`（IBot 抽象），不再透传 websocket；
 - 后台任务经 `TaskManager` 统一管理，模块热重载自动级联取消；
-- 移除了文件监听（watchdog），配置变更通过事件广播实时推送到 WebUI。
+- 移除了文件监听（watchdog），配置变更通过事件广播实时推送到 WebUI；
+- 日志改为双系统：`debug.log` 保留原始完整日志，新增 `user.log` 简洁日志，`debug/warn/errors/user` 四文件同步 6h 轮转；WebUI“显示原始日志”开关与控制台输出同步。
 
 ## 测试
 
