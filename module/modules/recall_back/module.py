@@ -30,12 +30,17 @@ class Module(BaseModule):
 
     @module_hook("message_group", order=10)
     @module_hook("message_private", order=10)
+    async def handle_message(self, event):
+        from .service import handle_message
+
+        await handle_message(self, event)
+
     @module_hook("notice_group_recall", order=10)
     @module_hook("notice_private_recall", order=10)
-    async def handle(self, event):
-        from .service import handle
+    async def handle_recall(self, event):
+        from .service import handle_recall
 
-        await handle(self, event)
+        await handle_recall(self, event)
 
     async def on_load(self):
         """旧配置迁移 + 启动清理 + 运行中周期清理。"""

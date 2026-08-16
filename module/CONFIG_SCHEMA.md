@@ -12,13 +12,15 @@ module/modules/<name>/
 ├── __init__.py        # 一句话说明
 ├── module.py          # Module(BaseModule)：声明元数据 + handle 薄入口（只路由，不写业务）
 ├── config_schema.py   # SCHEMA 字典
-├── service.py         # async handle(module, event)（唯一业务入口，顶部做启用检查）
+├── service.py         # async handle_xxx(module, event)（每个语义事件一个入口）
 ├── xxx_api.py         # 可选：模块专属 API 封装类（网络请求，见下）
 └── xxx_db.py          # 可选：模块私有持久化库（如 notice_recall_back/recall_db.py）
 ```
 
-- **入口链统一**：`module.py → service.handle(module, event)`，禁止更深子包层（如 `src/`、`intro`）；
-  业务较复杂时可拆 `service/` 目录，但入口仍须是 `service/__init__.py` 导出的 `handle`。
+- **入口链**：`module.py → service.<入口函数>(module, event)`，不同语义事件路由到不同处理函数，
+  不在一个入口里再按 `event.event_type` 内部分发；同类事件可复用同一入口。
+  禁止更深子包层（如 `src/`、`intro`）；业务较复杂时可拆 `service/` 目录，
+  但入口仍须由 `service/__init__.py` 导出。
 - **平级辅助文件**：除 `service/` 目录外，可用**平级模块级文件**承载独立职责，只被 `service.py` import、不直接暴露入口：
   - `xxx_api.py`：模块专属 API 封装类（网络请求，继承共享客户端，见下）；
   - `xxx_db.py`：模块私有持久化（JSON/SQLite）。
