@@ -23,6 +23,26 @@ from app.webui.api import webui_cfg as webui_router
 from app.webui.ws import build_ws_router, manager
 
 _BASE_DIR = Path(__file__).resolve().parent
+# 新版 Dashboard（Vue3+Vuetify）构建产物目录：dashboard/dist
+_DASHBOARD_DIST = _BASE_DIR.parent.parent / "dashboard" / "dist"
+
+
+def _render_dashboard(request: Request, webui_token: str) -> HTMLResponse | None:
+    """渲染新版 Dashboard（存在构建产物时使用）。
+
+    - 读取 dashboard/dist/index.html，注入 window.WEBUI_TOKEN（鉴权引导）；
+    - 不存在产物时返回 None，由调用方回退旧版模板。
+    """
+    index = _DASHBOARD_DIST / "index.html"
+    if not index.exists():
+        return None
+    html = index.read_text(encoding="utf-8")
+    token_script = f"<script>window.WEBUI_TOKEN={json.dumps(webui_token)};</script>"
+    if "<head>" in html:
+        html = html.replace("<head>", f"<head>{token_script}", 1)
+    else:
+        html = token_script + html
+    return HTMLResponse(html)
 
 
 def create_app(container) -> FastAPI:
@@ -45,8 +65,17 @@ def create_app(container) -> FastAPI:
     # 可选鉴权（WEBUI_TOKEN 非空时生效）
     _install_auth_middleware(app, container)
 
+    # 新版 Dashboard 首页（构建产物存在时优先；JS 资源经根挂载提供）
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
+        from app.core.settings import Settings
+
+        webui_token = container.get(Settings).webui_token or ""
+        dashboard = _render_dashboard(request, webui_token)
+        if dashboard is not None:
+            return dashboard
+
+        # ---- 旧版 UI 回退路径（dashboard/dist 不存在时） ----
         from app.infrastructure.config.config_service import ConfigService
         from app.services.bot_service import BotService
         from app.services.log_service import LogService
@@ -61,6 +90,33 @@ def create_app(container) -> FastAPI:
             webui_cfg.get("logs", {}).get("visible_levels", ["info", "warning", "error"]),
         )
         # 注入访问令牌：GET / 本身不鉴权，前端凭此 token 调用受保护的 /api 与 /ws/logs
+        return templates.TemplateResponse(
+            request, "index.html", {
+                "request": request,
+                "bots": bot_service.get_bots_data(),
+                "modules": bot_service.get_modules_data(),
+                "logs": logs,
+                "webui_config": webui_cfg,
+                "webui_token": webui_token,
+            }
+        )
+
+    # 旧版 UI 保留路径：/legacy（无论新版是否存在都可访问，作回退）
+    @app.get("/legacy", response_class=HTMLResponse)
+    async def legacy_index(request: Request):
+        from app.infrastructure.config.config_service import ConfigService
+        from app.services.bot_service import BotService
+        from app.services.log_service import LogService
+
+        bot_service = container.get(BotService)
+        config_service = container.get(ConfigService)
+        log_service = container.get(LogService)
+
+        webui_cfg = config_service.get_webui_config()
+        logs = log_service.get_recent_logs(
+            webui_cfg.get("logs", {}).get("max_lines", 50),
+            webui_cfg.get("logs", {}).get("visible_levels", ["info", "warning", "error"]),
+        )
         from app.core.settings import Settings
 
         webui_token = container.get(Settings).webui_token or ""
@@ -74,6 +130,11 @@ def create_app(container) -> FastAPI:
                 "webui_token": webui_token,
             }
         )
+
+    # 新版 Dashboard 静态资源根挂载（放在所有路由之后，仅兜底未匹配路径：
+    # /assets/* 等由这里提供；/api、/static、/legacy 等已在上方注册，优先级更高）
+    if _DASHBOARD_DIST.exists():
+        app.mount("/", StaticFiles(directory=str(_DASHBOARD_DIST), html=True), name="dashboard")
 
     # 配置变更 → WS 广播（单点广播源，前端按 type 处理）
     _install_config_listener(container)

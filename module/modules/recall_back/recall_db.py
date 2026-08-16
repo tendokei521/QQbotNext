@@ -78,10 +78,17 @@ class RecallDB:
             # 每群上限（旧版 max_messages_per_group 语义）：经群索引只淘汰该群最旧消息
             if max_per_group > 0:
                 group_id = str(data.get("group_id", "") or "")
+                # 重新构建群索引，避免索引与 _db 不一致（如配置调整/旧数据遗留）导致 KeyError 或漏淘汰
+                self._group_index = None
                 self._ensure_group_index()
                 gids = self._group_index.setdefault(group_id, [])
-                gids.append(message_id)
+                # 注意：_ensure_group_index() 在消息已写入 _db 后重建，索引已包含 message_id，不能再 append，否则产生重复项
+                # 防御：索引中若混入已不存在的 message_id，先剔除再选最旧，并同步回索引
+                gids = [k for k in gids if k in self._db]
+                self._group_index[group_id] = gids
                 while len(gids) > max_per_group:
+                    if not gids:
+                        break
                     oldest = min(gids, key=lambda k: self._db[k].get("time", 0))
                     del self._db[oldest]
                     gids.remove(oldest)

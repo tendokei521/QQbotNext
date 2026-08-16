@@ -14,3 +14,10 @@ data/app.db-shm
 data/app.db-journal
 data/llm/
 module/data/
+
+# 前端 Dashboard（保留 dist 提交，使无 Node 环境也能直接运行新版 UI）
+dashboard/node_modules/
+dashboard/dist/*.map
+
+# pnpm 全局存储 / 本地缓存
+.pnpm-store/

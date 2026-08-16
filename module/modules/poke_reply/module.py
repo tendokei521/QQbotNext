@@ -19,7 +19,7 @@ class Module(BaseModule):
     description = "跟随戳一戳、被戳反戳、被戳概率回复"
     permission = "everyone"
     subscribe = ("notice_poke",)
-    category = "消息"
+    category = "通知"
     default_config = {
         "enable_follow_poke": True,
         "follow_poke_probability": 0.3,

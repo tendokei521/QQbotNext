@@ -29,6 +29,36 @@ from app.services.scheduler import SchedulerService
 _container: Container | None = None
 
 
+def _silence_websocket_logs() -> None:
+    """抑制 WebSocket 连接级噪音日志，保留启动横幅与错误。
+
+    来源（均落到 uvicorn.error）：
+    - uvicorn 自身：握手时输出 `WebSocket /ws/logs [accepted]`（INFO）；
+    - websockets 库：uvicorn 构造协议时把 `uvicorn.error` 传给了 websockets
+      （venv 中 uvicorn websockets_impl.py:108 `logger=logging.getLogger("uvicorn.error")`），
+      因此连接开闭的 `connection open/closed`（INFO）也打在 uvicorn.error 上。
+    处理：对 uvicorn.error 加 Filter，仅滤掉 INFO 级的连接噪音关键词；
+    WARNING+（真实错误）与启动横幅（Started/Waiting/Uvicorn running/…）不受影响。
+    另对 websockets.* 独立 logger 降级，防御其他路径。
+    """
+    import logging
+
+    _NOISE = ("connection open", "connection closed", "connection rejected", "WebSocket")
+
+    class _WebSocketNoiseFilter(logging.Filter):
+        """过滤 uvicorn.error 中 WebSocket 连接级 INFO 消息。"""
+
+        def filter(self, record: logging.LogRecord) -> bool:
+            if record.levelno >= logging.WARNING:
+                return True
+            msg = record.getMessage()
+            return not any(k in msg for k in _NOISE)
+
+    logging.getLogger("uvicorn.error").addFilter(_WebSocketNoiseFilter())
+    for name in ("websockets.server", "websockets.client", "websockets.protocol"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
 def build_container(settings: Settings | None = None) -> Container:
     """构建依赖容器（对象已装配好，等待 run() 做异步初始化）。"""
     settings = settings or load_settings()
@@ -113,7 +143,6 @@ async def run(settings: Settings | None = None) -> None:
     settings = settings or load_settings()
     setup_logging(settings.log_dir)
     _container = build_container(settings)
-
     db = _container.get(Database)
     await db.connect()
     config_service = _container.get(ConfigService)
@@ -138,6 +167,8 @@ async def run(settings: Settings | None = None) -> None:
     from app.webui.app import create_app
     import uvicorn
 
+    _silence_websocket_logs()
+
     app = create_app(_container)
     host, port = settings.webui_host, settings.webui_port
     logger.info(f"WebUI 启动中: http://{host}:{port}" + (f"（token: {'已设置' if settings.webui_token else '未设置'}）"))
@@ -150,7 +181,7 @@ async def run(settings: Settings | None = None) -> None:
         await scheduler.shutdown()
         await bot_service.shutdown()
         # 先停止 Agent 运行时（定时/主动），再取消残留任务、关 DB
-        agent_manager.shutdown()
+        _container.get(AgentManager).shutdown()
         task_manager = _container.get(TaskManager)
         task_manager.cancel_all()
         await db.close()

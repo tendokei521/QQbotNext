@@ -224,6 +224,13 @@ async def call_llm_and_reply(module, event, session_mgr, config,
         # 防御：剥离角色提示词可能输出的 <type=...> 标签，避免漏到客户端
         clean_response = strip_all_tags(response.text)
 
+    # 兜底：模型返回空内容时避免“不回复”，给用户一个可见的占位回复
+    if not clean_response:
+        logger.add_info(f"#{module.bot_id}").warning(
+            f"[LLM] 模型返回空回复，使用兜底文本 -> {session_id}"
+        )
+        clean_response = "抱歉，我暂时无法回答，请稍后再试。"
+
     # 兜底：用户明确提了定时请求但模型未调用工具 → 模块确定性排程（保证任务一定创建）
     if intent and not response.tool_results:
         scheduler = getattr(module, "scheduler", None)
@@ -391,6 +398,13 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
                 )
         # 防御：剥离角色提示词可能输出的 <type=...> 标签，避免漏到客户端
         clean_response = strip_all_tags(response.text)
+
+    # 兜底：模型返回空内容时避免“不回复”，给用户一个可见的占位回复
+    if not clean_response:
+        logger.add_info(f"#{runtime.bot_id}").warning(
+            f"[LLM] 模型返回空回复，使用兜底文本 -> {session_id}"
+        )
+        clean_response = "抱歉，我暂时无法回答，请稍后再试。"
 
     # 兜底：用户明确提了定时请求但模型未调用工具 → 模块确定性排程（保证任务一定创建）
     if intent and not response.tool_results:
@@ -637,6 +651,14 @@ async def stream_response(runtime, event, ctx=None):
                 logger.add_info(f"#{runtime.bot_id}").warning(
                     f"[定时] 兜底排程失败（时间无法解析）: {user_text}"
                 )
+
+    # 兜底：流式响应为空时避免“不回复”，给用户一个可见的占位回复
+    if not full_text.strip():
+        logger.add_info(f"#{runtime.bot_id}").warning(
+            f"[LLM] 流式模型返回空回复，使用兜底文本 -> {session_id}"
+        )
+        full_text = "抱歉，我暂时无法回答，请稍后再试。"
+        yield full_text
 
     session_mgr.add_message(session_id, "assistant", full_text)
     if not is_private:

@@ -258,9 +258,14 @@ class SessionManager:
         session = self.get_session(session_id)
         if not session or session.data is None:
             return []
+        # 过滤掉空 assistant 消息：模型返回空内容不应再作为上下文回灌
+        filtered = [
+            m for m in session.data.history
+            if not (m.get("role") == "assistant" and not str(m.get("content") or "").strip())
+        ]
         return [
             {"role": m["role"], "content": m["content"]}
-            for m in session.data.history[-limit:]
+            for m in filtered[-limit:]
         ]
 
     # ── 多对话操作 ────────────────────────────────────────
@@ -314,7 +319,10 @@ class SessionManager:
             conv_id = data.get("conv_id") or data.get("task_id")
             conv = Conversation(title=data.get("title", ""), conv_id=conv_id)
             conv.task_id = data.get("task_id", conv.task_id)
-            conv.data.history = data.get("messages", []) or []
+            conv.data.history = [
+                m for m in (data.get("messages", []) or [])
+                if not (m.get("role") == "assistant" and not str(m.get("content") or "").strip())
+            ]
             session.conversations[conv.id] = conv
         latest = max(convs, key=lambda d: d.get("saved_at", 0))
         session.active_id = latest.get("conv_id") or latest.get("task_id")

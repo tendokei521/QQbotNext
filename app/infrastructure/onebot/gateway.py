@@ -635,7 +635,13 @@ def _event_text(event: BaseEvent) -> str:
             op = getattr(event, "operator_id", 0) or uid
             return f"{op}撤回了一条消息"
         if t == "notice_group_emoji":
-            return f"{uid}回应了表情"
+            emoji_ids = [
+                str(e.get("emoji_id", ""))
+                for e in (getattr(event, "emoji_likes", []) or [])
+                if isinstance(e, dict) and e.get("emoji_id")
+            ]
+            suffix = f" id:{','.join(emoji_ids)}" if emoji_ids else ""
+            return f"{uid}回应了表情{suffix}"
         if t == "notice_group_increase":
             return f"{uid}入群"
         if t == "notice_group_decrease":

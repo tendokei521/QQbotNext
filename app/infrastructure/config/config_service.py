@@ -248,10 +248,11 @@ class ConfigService:
         gateway.get_bots_info()（纯地址，不含 token）。
         """
         result = []
-        for b in self._bots:
+        for index, b in enumerate(self._bots):
             base, token = split_ws_url(b.get("ws_url", ""))
             result.append({
                 **{k: v for k, v in dict(b).items() if k != "access_token"},
+                "index": index,
                 "ws_url": base,
                 "access_token": token,
             })

@@ -229,6 +229,11 @@ _root_logger: logging.Logger | None = None
 def setup_logging(log_dir: str | Path = "logs") -> PrefixLogger:
     """初始化日志系统（应用启动时调用一次），返回主 Logger。"""
     global _root_logger
+    # Windows 控制台默认 GBK：群名/消息含特殊 Unicode（如 \u01ff、RTL 控制符）时
+    # StreamHandler 写 stdout 会抛 UnicodeEncodeError 并刷屏 "--- Logging error ---"；
+    # 改为"无法编码则替换为占位符"，控制台不崩溃、文件日志仍完整落盘。
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     _root_logger = _build_logger(log_dir)
     return PrefixLogger(_root_logger, "Main")
 

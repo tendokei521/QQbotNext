@@ -59,6 +59,26 @@ start.bat
 
 > Linux/macOS 可运行 `scripts/requirements.sh` 后执行 `start.sh`。
 
+## WebUI（管理后台）
+
+内置两套前端：
+
+| 入口 | 说明 |
+|------|------|
+| `/` | **新版 Dashboard（Vue 3 + Vuetify 3）**，`dashboard/dist` 存在时自动启用 |
+| `/legacy` | 旧版 UI（原生 HTML/JS），始终可访问，作回退 |
+
+新版 Dashboard 源码在 [`dashboard/`](dashboard/)，风格对齐 AstrBot dashboard（浅/暗双主题、卡片化布局、实时日志控制台、模块配置 schema 表单等）。构建方法：
+
+```bash
+cd dashboard
+pnpm install          # 首次
+pnpm build            # 产物输出到 dashboard/dist，浏览器刷新即可生效
+```
+
+> 未构建（或 `dashboard/dist` 不存在）时服务自动回退到旧版 UI，互不影响。
+> `dist` 已纳入版本库，克隆后无需 Node 环境即可直接使用新版 UI。
+
 ### 手动启动
 
 ```bash
