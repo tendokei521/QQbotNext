@@ -14,7 +14,7 @@ class Module(BaseModule):
     sign = "EmojiReply"
     description = "根据消息关键词发送 Emoji 回应，并跟随群消息附加的 Emoji"
     permission = "everyone"
-    category = "消息"
+    category = "通知"
     default_config = {
         "follow_emoji": True,
         "follow_emoji_prob": 0.5,
