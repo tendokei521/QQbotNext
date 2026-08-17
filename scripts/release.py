@@ -8,7 +8,8 @@
 - 自动同步 pyproject.toml 与 dashboard/package.json 的版本号；
 - 运行 pytest 与 Dashboard 构建作为发布前门禁；
 - 提交发布改动、打 annotated tag 并推送 main + tag；
-- 优先使用 gh CLI，否则用 Windows 凭据管理器 / GH_TOKEN 调 GitHub API 创建 Release。
+- 默认把 GitHub Release 交给 .github/workflows/release.yml 创建；
+  如需在本地直接建 Release，加 --create-release（优先 gh CLI，否则用 GitHub API）。
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT = ROOT / "pyproject.toml"
 DASHBOARD_PKG = ROOT / "dashboard" / "package.json"
 CHANGELOG = ROOT / "CHANGELOG.md"
+RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 DEFAULT_REPO = "tendokei521/QQbotNext"
 
 SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
@@ -230,6 +232,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-dashboard", action="store_true", help="跳过 Dashboard 构建")
     parser.add_argument("--skip-push", action="store_true", help="不推送 main/tag")
     parser.add_argument("--skip-release", action="store_true", help="不创建 GitHub Release")
+    parser.add_argument("--create-release", action="store_true", help="即使存在 GitHub Actions 工作流，也在本地直接创建 Release")
     parser.add_argument("--allow-dirty", action="store_true", help="允许非干净工作区发布")
     return parser.parse_args()
 
@@ -258,8 +261,10 @@ def main() -> None:
     tag_release(tag)
     if not args.skip_push:
         push_release(tag)
-    if not args.skip_release:
+    if not args.skip_release and (args.create_release or not RELEASE_WORKFLOW.exists()):
         create_release(tag, notes_path, args.repo)
+    elif not args.skip_release:
+        log("检测到 GitHub Actions Release 工作流，跳过本地创建 Release（如需本地创建请加 --create-release）")
 
     log(f"发布完成：{tag} -> https://github.com/{args.repo}/releases/tag/{tag}")
 
