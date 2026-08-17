@@ -137,17 +137,34 @@ class BotConnection(IBot):
         self._last_connect_attempt: float = 0.0
         # 出站拦截钩子（bootstrap 装配）：若设置，_send 先经出站节点链
         self.outbound_hook = None
+        # 消息发送成功钩子注册表（bootstrap 装配）
+        self.send_hook_registry = None
 
     # ---------- 底层请求 ----------
     async def _send(self, action: str, params: dict | None = None, timeout_sec: int = 10) -> dict | None:
         """发送 API 请求。若装配了出站链，先经拦截节点（可改写 params / 吞掉发送）。"""
+        params = params or {}
         if self.outbound_hook is not None:
             try:
-                return await self.outbound_hook(action, params or {})
+                response = await self.outbound_hook(action, params)
             except Exception as e:
                 api_logger.error(f"[#{self.index}] 出站链异常 {action}: {e}")
-                return None
-        return await self._direct_send(action, params, timeout_sec)
+                response = None
+        else:
+            response = await self._direct_send(action, params, timeout_sec)
+        await self._run_send_hooks(action, params, response)
+        return response
+
+    async def _run_send_hooks(self, action: str, params: dict, response: dict | None) -> None:
+        """发送成功后触发 @send_hook 注册的钩子（由 BotConnection 持有注册表）。"""
+        if self.send_hook_registry is None:
+            return
+        try:
+            await self.send_hook_registry.run(self, action, params, response)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            api_logger.error(f"[#{self.index}] 发送后钩子执行异常 {action}: {e}")
 
     async def _direct_send(self, action: str, params: dict | None = None, timeout_sec: int = 10) -> dict | None:
         """真正发送（绕过 outbound_hook，供 SendNode 调用）。"""

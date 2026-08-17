@@ -50,6 +50,8 @@ class OneBotGateway:
         self._connect_locks: dict[int, asyncio.Lock] = {}  # 防止监督循环与 WebUI 并发双开
         # 出站拦截钩子工厂（bootstrap 注入）：传入连接 → 返回 (action, params) 钩子
         self.outbound_hook_factory = None
+        # 消息发送成功钩子注册表（bootstrap 注入）
+        self.send_hook_registry = None
 
     # ==================== 对外查询 ====================
     def get_bots_info(self) -> list[dict]:
@@ -139,6 +141,7 @@ class OneBotGateway:
         conn.index = index
         if self.outbound_hook_factory:
             conn.outbound_hook = self.outbound_hook_factory(conn)
+        conn.send_hook_registry = self.send_hook_registry
         self.connections[index] = conn
         return index
 

@@ -16,7 +16,7 @@ from app.modules.base import (
     ServiceAccess,
     resolve_enabled_ids,
 )
-from app.modules.hooks import llm_hook, module_hook
+from app.modules.hooks import SendContext, SendHookRegistry, llm_hook, module_hook, send_hook
 from app.modules.dispatcher import ModuleDispatcher
 from app.modules.keyword import match_keywords
 from app.modules.registry import ModuleRegistry
@@ -38,6 +38,9 @@ __all__ = [
     "match_keywords",
     "module_hook",
     "llm_hook",
+    "send_hook",
+    "SendContext",
+    "SendHookRegistry",
     # 插件 API
     "get_modules",
     "get_config_path",

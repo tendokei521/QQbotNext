@@ -166,7 +166,7 @@ SCHEMA = {"greeting": {"type": "text", "label": "问候语", "default": "你好"
 
 ```python
 # module.py
-from app.modules import BaseModule, module_hook, llm_hook
+from app.modules import BaseModule, module_hook, llm_hook, send_hook
 
 class Module(BaseModule):
     # 模块流水线：按事件类型注册处理函数（subscribe 可自动推导）
@@ -188,11 +188,16 @@ class Module(BaseModule):
         from app.domain.message import Message
         parts = [ctx.response_text[i:i+50] for i in range(0, len(ctx.response_text), 50)]
         ctx.response_messages = [Message.from_text(p) for p in parts]
+
+    # 消息发送成功后可拿到响应里的 message_id
+    @send_hook(message_type="*", order=10)
+    async def after_send(self, ctx):
+        message_id = ctx.message_id
 ```
 
 要点：
 
-- 模块流水线在前，LLM 流水线在后；
+- 模块流水线在前，LLM 流水线在后，发送成功钩子独立于两条流水线；
 - `event.llm.stop()` 跳过 LLM 回复；
 - `continue` 是 Python 关键字，手动放行请用 `event.llm.resume()`；
 - 内置 `llm_enhance` 模块演示了“防抖合并 + 群聊用户信息感知”。

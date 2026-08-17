@@ -161,6 +161,21 @@ class ModuleRegistry:
                             handler=handler,
                             module=instance,
                         )
+            # 注册消息发送成功钩子（@send_hook）
+            send_hooks = cls.collect_send_hooks()
+            if send_hooks and self.services and self.services.send_hooks:
+                for hook in send_hooks:
+                    handler = getattr(instance, hook["method"], None)
+                    if handler is None:
+                        continue
+                    self.services.send_hooks.register(
+                        bot_id=bot_id,
+                        module=instance,
+                        handler=handler,
+                        message_type=hook.get("message_type", "*"),
+                        order=hook.get("order", 100),
+                    )
+
             # 注册模块工具（@tool / TOOLS）与技能（@skill / SKILLS）到该 Bot 的 AgentRuntime
             if self.services and self.services.agent_manager:
                 runtime = self.services.agent_manager.get_runtime(bot_id)
@@ -231,6 +246,7 @@ class ModuleRegistry:
             if instance is None:
                 continue
             self._unregister_llm_hooks(instance, bot_id)
+            self._unregister_send_hooks(instance)
             try:
                 await instance.on_unload()
             except Exception as e:
@@ -260,6 +276,7 @@ class ModuleRegistry:
         instance = bot_modules.pop(bot_id, None)
         if instance:
             self._unregister_llm_hooks(instance, bot_id)
+            self._unregister_send_hooks(instance)
             try:
                 await instance.on_unload()
             except Exception as e:
@@ -273,6 +290,11 @@ class ModuleRegistry:
                     self.log.warning(f"[Module] {module_name} 定时任务注销异常: {e}")
         if not bot_modules:
             del self._modules[module_name]
+
+    def _unregister_send_hooks(self, instance) -> None:
+        """卸载模块实例时注销其消息发送成功钩子。"""
+        if self.services and self.services.send_hooks:
+            self.services.send_hooks.unregister_module(instance)
 
     def _unregister_llm_hooks(self, instance, bot_id) -> None:
         """卸载模块实例时注销其注册的 LLM 钩子 / 工具 / 技能。"""

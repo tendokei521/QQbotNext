@@ -216,6 +216,7 @@ class ServiceAccess:
     providers: Any = None
     scheduler: Any = None
     agent_manager: Any = None  # 框架级 LLM Agent 运行时管理
+    send_hooks: Any = None     # 消息发送成功钩子注册表 SendHookRegistry
     extra: dict[str, Any] = field(default_factory=dict)
 
     def __getitem__(self, key: str) -> Any:
@@ -302,6 +303,16 @@ class BaseModule(ABC):
                 llm_hooks.append(dict(item))
 
         return module_hooks, llm_hooks
+
+    @classmethod
+    def collect_send_hooks(cls) -> list[dict]:
+        """收集类中所有 @send_hook 装饰的发送后钩子。"""
+        send_hooks: list[dict] = []
+        for klass in reversed(cls.__mro__):
+            for name, attr in vars(klass).items():
+                for meta in getattr(attr, "__send_hook_meta__", []):
+                    send_hooks.append({"method": name, **meta})
+        return send_hooks
 
     # ---------- 事件入口 ----------
     async def process_event(self, event: BaseEvent) -> None:

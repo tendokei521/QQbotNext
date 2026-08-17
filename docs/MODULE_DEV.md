@@ -33,7 +33,7 @@ class Module(BaseModule):
 
 ## 2. 两种流水线
 
-框架把消息处理分成两条流水线：
+框架把消息处理分成两条流水线，另有一条出站发送后钩子：
 
 ```text
 模块流水线（前）
@@ -43,6 +43,10 @@ class Module(BaseModule):
 LLM 流水线（后）
   @llm_hook 注册的处理函数
   → pre_request / post_response / pre_send / post_send / post_stream
+
+消息发送成功后（出站）
+  @send_hook 注册的处理函数
+  → 收到 SendContext，其中 ctx.message_id 为发送成功响应的消息 ID
 ```
 
 ---
@@ -176,6 +180,48 @@ class Module(BaseModule):
 | `pre_send` | 每条消息发送前 | `(self, ctx, msg)` |
 | `post_send` | 每条消息发送后 | `(self, ctx, msg)` |
 | `post_stream` | 流式回复整体结束后 | `(self, ctx)` |
+
+---
+
+## 4.5 消息发送后钩子：`@send_hook`
+
+### 用法
+
+```python
+from app.modules import BaseModule, send_hook
+
+class Module(BaseModule):
+    @send_hook(message_type="*", order=10)
+    async def after_send(self, ctx):
+        message_id = ctx.message_id
+        self.ctx.services.cache.set(f"sent:{ctx.bot_id}:{message_id}", ctx.message_type, 300)
+```
+
+参数：
+
+- `message_type`：只对指定发送类型生效，`"group"` / `"private"` / `"*"`。
+- `order`：同一模块内多个发送钩子的执行顺序，越小越先执行。
+
+### 回调参数 `SendContext`
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `ctx.message_id` | `int` | **发送成功响应里的 `data.message_id`** |
+| `ctx.bot` | `IBot` | 当前发送消息的 Bot 连接 |
+| `ctx.bot_id` | `int \| None` | Bot QQ 号 |
+| `ctx.action` | `str` | OneBot 动作，如 `send_group_msg` / `send_private_msg` |
+| `ctx.params` | `dict` | 发送参数 |
+| `ctx.response` | `dict` | OneBot 完整成功响应 |
+| `ctx.message_type` | `str` | `"group"` / `"private"` |
+| `ctx.group_id` | `int \| None` | 群号（群消息） |
+| `ctx.user_id` | `int \| None` | 用户 QQ（私聊消息） |
+
+说明：
+
+- 只有发送 API 返回 `status == "ok"` 且响应 `data.message_id` 存在时才触发；
+- 发送被出站节点拦截（未真正发出去）时不会触发；
+- 钩子按模块所属 Bot 匹配，只对本 Bot 的发送生效；
+- 模块热重载 / 卸载时会自动注销对应钩子。
 
 ---
 
@@ -356,7 +402,7 @@ async def after_stream(self, ctx: LlmContext):
 ## 8. 完整示例
 
 ```python
-from app.modules import BaseModule, module_hook, llm_hook
+from app.modules import BaseModule, module_hook, llm_hook, send_hook
 
 class Module(BaseModule):
     permission = "member"
@@ -390,6 +436,11 @@ class Module(BaseModule):
 
     @llm_hook("post_stream", event_type="*", order=50)
     async def after_stream(self, ctx):
+        pass
+
+    @send_hook(message_type="*", order=60)
+    async def after_send(self, ctx):
+        # ctx.message_id 为发送成功响应的消息 ID
         pass
 ```
 
