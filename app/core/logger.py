@@ -103,7 +103,8 @@ class SixHourRotatingHandler(BaseRotatingHandler):
 
     def _rotate_file(self):
         """归档当前 handler 对应的单个日志文件。"""
-        self.stream.close()
+        if self.stream is not None:
+            self.stream.close()
         archive_time = self.next_rollover_time - self.ROTATION_INTERVAL
         archive_folder = self._get_archive_folder(archive_time)
         setup_dir(archive_folder)

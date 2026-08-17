@@ -6,12 +6,20 @@
 - Session.data / task_id 为「当前活跃对话」的代理，保证旧调用不破坏。
 """
 
+import re
 import time
 import threading
 import uuid
 
 from app.llm import logger
 from app.llm.history import HistoryManager
+
+# 防御：模型/中转偶发的孤立 "rate." 不应作为有效助手回复回灌上下文
+_JUNK_ASSISTANT_RE = re.compile(r"^\s*rate\.\s*$", re.IGNORECASE)
+
+
+def _is_junk_assistant(content) -> bool:
+    return bool(content and _JUNK_ASSISTANT_RE.match(str(content)))
 
 
 class ConversationData:
@@ -241,6 +249,8 @@ class SessionManager:
     def add_message(self, session_id: str, role: str, content: str, user_id: str = ""):
         session = self.get_session(session_id)
         if session and session.data is not None:
+            if role == "assistant" and _is_junk_assistant(content):
+                return
             msg = {"role": role, "content": content, "time": int(time.time())}
             if user_id:
                 msg["user_id"] = user_id
@@ -258,10 +268,13 @@ class SessionManager:
         session = self.get_session(session_id)
         if not session or session.data is None:
             return []
-        # 过滤掉空 assistant 消息：模型返回空内容不应再作为上下文回灌
+        # 过滤掉空 assistant 消息与已知杂散 token：模型返回空/rate. 不应再作为上下文回灌
         filtered = [
             m for m in session.data.history
-            if not (m.get("role") == "assistant" and not str(m.get("content") or "").strip())
+            if not (
+                m.get("role") == "assistant"
+                and (not str(m.get("content") or "").strip() or _is_junk_assistant(m.get("content")))
+            )
         ]
         return [
             {"role": m["role"], "content": m["content"]}
@@ -321,7 +334,10 @@ class SessionManager:
             conv.task_id = data.get("task_id", conv.task_id)
             conv.data.history = [
                 m for m in (data.get("messages", []) or [])
-                if not (m.get("role") == "assistant" and not str(m.get("content") or "").strip())
+                if not (
+                    m.get("role") == "assistant"
+                    and (not str(m.get("content") or "").strip() or _is_junk_assistant(m.get("content")))
+                )
             ]
             session.conversations[conv.id] = conv
         latest = max(convs, key=lambda d: d.get("saved_at", 0))

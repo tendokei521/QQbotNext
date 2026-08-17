@@ -47,6 +47,8 @@ logs/                           日志目录
 
 ### 简单开始（推荐）
 
+linux环境下需要执行 `dos2unix requirements.sh`进行换行符清洗
+
 ```bash
 # 1. 自动创建虚拟环境并安装依赖
 scripts\requirements.bat

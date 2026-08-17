@@ -15,7 +15,7 @@ from app.llm.prompt import build_messages
 from app.llm.providers import get_provider
 from app.llm.tags import strip_all_tags
 from app.llm.scheduler import extract_reminder_note, has_schedule_intent
-from app.llm.splitter import split_sentences
+from app.llm.splitter import split_sentences, strip_stream_artifacts
 from app.llm.trigger import check_trigger, extract_text
 from app.llm.tool import ToolContext, build_tools, make_executor
 
@@ -250,7 +250,7 @@ async def call_llm_and_reply(module, event, session_mgr, config,
                     f"[Tool] {tr['name']} 执行 -> {str(tr['result'])[:80]}"
                 )
         # 防御：剥离角色提示词可能输出的 <type=...> 标签，避免漏到客户端
-        clean_response = strip_all_tags(response.text)
+        clean_response = strip_stream_artifacts(strip_all_tags(response.text))
 
     # 兜底：模型返回空内容时避免“不回复”，给用户一个可见的占位回复
     if not clean_response:
@@ -424,7 +424,7 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
                     f"[Tool] {tr['name']} 执行 -> {str(tr['result'])[:80]}"
                 )
         # 防御：剥离角色提示词可能输出的 <type=...> 标签，避免漏到客户端
-        clean_response = strip_all_tags(response.text)
+        clean_response = strip_stream_artifacts(strip_all_tags(response.text))
 
     # 兜底：模型返回空内容时避免“不回复”，给用户一个可见的占位回复
     if not clean_response:
@@ -573,11 +573,11 @@ async def stream_response(runtime, event, ctx=None):
     tool_executor = make_executor(all_specs, tool_ctx) if all_specs else None
     provider = get_provider(config)
 
-    full_text = ""
+    full_text_parts: list[str] = []
     tool_results: list[dict] = []
 
     for _round in range(5):
-        round_text = ""
+        round_text_parts: list[str] = []
         buffer = ""
         tool_calls: dict[int, dict] = {}
         stream_error = ""
@@ -591,12 +591,14 @@ async def stream_response(runtime, event, ctx=None):
             tool_executor=tool_executor,
         ):
             if ev.type == "text":
-                round_text += ev.text
-                full_text += ev.text
                 buffer += ev.text
                 sentences, buffer = split_sentences(buffer, max_length=max_msg_len)
                 for sentence in sentences:
-                    yield sentence
+                    clean = strip_stream_artifacts(sentence)
+                    if clean:
+                        round_text_parts.append(clean)
+                        full_text_parts.append(clean)
+                        yield clean
             elif ev.type == "tool_call":
                 tc = ev.tool_call or {}
                 index = int(tc.get("index", 0) or 0)
@@ -612,9 +614,15 @@ async def stream_response(runtime, event, ctx=None):
                 stream_error = ev.text
                 break
 
-        if buffer.strip():
-            yield buffer.strip()
-            buffer = ""
+        tail = strip_stream_artifacts(buffer.strip())
+        if tail:
+            round_text_parts.append(tail)
+            full_text_parts.append(tail)
+            yield tail
+        buffer = ""
+
+        round_text = "".join(round_text_parts)
+        full_text = "".join(full_text_parts)
 
         if stream_error:
             if not full_text:
@@ -881,7 +889,10 @@ async def fetch_online_history(event, group_id: str, count: int = 10) -> str:
         if not result or not isinstance(result, dict):
             return ""
         messages = result.get("messages", [])
-        return _format_history(messages, count)
+        self_ids = {str(event.self_id)}
+        if getattr(event, "bot_id", None):
+            self_ids.add(str(event.bot_id))
+        return _format_history(messages, count, self_ids=self_ids)
     except Exception as e:
         logger.add_info("Src").warning(f"获取群聊历史失败: {e}")
         return ""
@@ -893,19 +904,26 @@ async def fetch_private_online_history(event, user_id: str, count: int = 10) -> 
         if not result or not isinstance(result, dict):
             return ""
         messages = result.get("messages", [])
-        return _format_history(messages, count)
+        self_ids = {str(event.self_id)}
+        if getattr(event, "bot_id", None):
+            self_ids.add(str(event.bot_id))
+        return _format_history(messages, count, self_ids=self_ids)
     except Exception as e:
         logger.add_info("Src").warning(f"获取私聊历史失败: {e}")
         return ""
 
 
-def _format_history(messages, count: int) -> str:
+def _format_history(messages, count: int, self_ids: set[str] | None = None) -> str:
     if not messages:
         return ""
+    self_ids = self_ids or set()
     lines = []
     for msg in messages[-count:]:
         if isinstance(msg, dict):
             sender = msg.get("sender", {})
+            user_id = sender.get("user_id", "")
+            if user_id is not None and str(user_id) in self_ids:
+                continue
             nickname = sender.get("nickname", "未知")
             content = _extract_msg_text(msg)
             if content:

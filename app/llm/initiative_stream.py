@@ -15,7 +15,7 @@ from typing import Any
 from app.domain.message import Message
 from app.llm.providers import get_provider
 from app.llm.send_pool import StreamSendPool
-from app.llm.splitter import split_sentences
+from app.llm.splitter import split_sentences, strip_stream_artifacts
 
 
 async def stream_send_initiative(
@@ -50,7 +50,7 @@ async def stream_send_initiative(
 
     pool = StreamSendPool(config, send_message=send_message)
 
-    full_text = ""
+    full_text_parts: list[str] = []
     buffer = ""
 
     try:
@@ -61,20 +61,24 @@ async def stream_send_initiative(
             max_tokens=max_tokens,
         ):
             if ev.type == "text":
-                full_text += ev.text
                 buffer += ev.text
                 sentences, buffer = split_sentences(buffer, max_length=max_len)
                 for sentence in sentences:
-                    await pool.put(Message.from_text(sentence))
+                    clean = strip_stream_artifacts(sentence)
+                    if clean:
+                        full_text_parts.append(clean)
+                        await pool.put(Message.from_text(clean))
             elif ev.type == "error":
                 break
 
-        if buffer.strip():
-            await pool.put(Message.from_text(buffer.strip()))
+        tail = strip_stream_artifacts(buffer.strip())
+        if tail:
+            full_text_parts.append(tail)
+            await pool.put(Message.from_text(tail))
 
         await pool.finish()
         await pool.wait_drained()
     finally:
         await pool.shutdown()
 
-    return full_text
+    return "".join(full_text_parts)

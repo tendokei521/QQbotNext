@@ -45,6 +45,13 @@ SCHEMA = {
         "default": True,
         "group": "group_context",
     },
+    "include_time": {
+        "type": "boolean",
+        "label": "包含当前时间",
+        "description": "在最新一轮用户消息开头插入当前时间，例如 (时间：2026-08-17 10:00:00)",
+        "default": True,
+        "group": "group_context",
+    },
     "include_sender": {
         "type": "boolean",
         "label": "包含发送者信息",

@@ -2,7 +2,7 @@
 
 包含：
 - 防抖：同一会话短时间内连续消息只触发一次 LLM 请求；
-- 用户信息感知：群聊/私聊请求前附加发送者 / 提到了 / 引用 / 发送内容；
+- 用户信息感知：群聊/私聊请求前附加发送者 / 提到了 / 引用 / 发送内容 / 当前时间；
 - 调试：开启后打印本轮 prompt。
 """
 
@@ -27,6 +27,7 @@ class Module(BaseModule):
         "merge_separator": "\n",
         # 用户信息感知
         "context_enable": True,
+        "include_time": True,
         "include_sender": True,
         "include_mentioned": True,
         "include_quote": True,
@@ -96,14 +97,21 @@ class Module(BaseModule):
 
     @llm_hook("pre_request", event_type="*", order=20)
     async def format_user_context(self, ctx: LlmContext):
-        """在防抖/合并后，把上下文格式化为最终 user_text。"""
+        """在防抖/合并后，把上下文格式化为最终 user_text，并在最新一轮开头插入当前时间。"""
         info = ctx.state.get("user_context")
         if not info:
             return
 
+        from datetime import datetime
+
         event = ctx.event
         is_group = event.event_type == "message_group"
         parts: list[str] = []
+
+        # 时间感知：放在最新一轮上下文的开头
+        time_line = ""
+        if self.config.get("include_time", True):
+            time_line = f"(时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')})"
 
         if is_group:
             if self.config.get("include_sender", True) and info.get("sender"):
@@ -121,8 +129,13 @@ class Module(BaseModule):
         if self.config.get("include_sent", True) and sent_text:
             parts.append(f"发送了：{sent_text}")
 
+        if time_line:
+            parts.insert(0, time_line)
+
         if parts:
             ctx.user_text = "\n".join(parts)
+        elif time_line:
+            ctx.user_text = f"{time_line}\n{ctx.user_text}".strip()
 
     @llm_hook("pre_request", event_type="*", order=25)
     async def interrupt_config_hook(self, ctx: LlmContext):
