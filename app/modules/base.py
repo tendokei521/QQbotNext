@@ -217,6 +217,10 @@ class ServiceAccess:
     scheduler: Any = None
     agent_manager: Any = None  # 框架级 LLM Agent 运行时管理
     send_hooks: Any = None     # 消息发送成功钩子注册表 SendHookRegistry
+    before_send_hooks: Any = None   # 消息发送前钩子注册表
+    api_hooks: Any = None           # 任意 API 调用后钩子注册表
+    lifecycle_hooks: Any = None     # Bot 生命周期钩子注册表
+    event_completed_hooks: Any = None  # 事件处理完成钩子注册表
     extra: dict[str, Any] = field(default_factory=dict)
 
     def __getitem__(self, key: str) -> Any:
@@ -313,6 +317,56 @@ class BaseModule(ABC):
                 for meta in getattr(attr, "__send_hook_meta__", []):
                     send_hooks.append({"method": name, **meta})
         return send_hooks
+
+    @classmethod
+    def collect_before_send_hooks(cls) -> list[dict]:
+        """收集类中所有 @before_send_hook 装饰的发送前钩子。"""
+        hooks: list[dict] = []
+        for klass in reversed(cls.__mro__):
+            for name, attr in vars(klass).items():
+                for meta in getattr(attr, "__before_send_hook_meta__", []):
+                    hooks.append({"method": name, **meta})
+        return hooks
+
+    @classmethod
+    def collect_api_hooks(cls) -> list[dict]:
+        """收集类中所有 @api_hook 装饰的 API 调用后钩子。"""
+        hooks: list[dict] = []
+        for klass in reversed(cls.__mro__):
+            for name, attr in vars(klass).items():
+                for meta in getattr(attr, "__api_hook_meta__", []):
+                    hooks.append({"method": name, **meta})
+        return hooks
+
+    @classmethod
+    def collect_lifecycle_hooks(cls) -> list[dict]:
+        """收集类中所有 @bot_lifecycle_hook 装饰的生命周期钩子。"""
+        hooks: list[dict] = []
+        for klass in reversed(cls.__mro__):
+            for name, attr in vars(klass).items():
+                for meta in getattr(attr, "__lifecycle_hook_meta__", []):
+                    hooks.append({"method": name, **meta})
+        return hooks
+
+    @classmethod
+    def collect_event_completed_hooks(cls) -> list[dict]:
+        """收集类中所有 @event_completed_hook 装饰的处理完成钩子。"""
+        hooks: list[dict] = []
+        for klass in reversed(cls.__mro__):
+            for name, attr in vars(klass).items():
+                for meta in getattr(attr, "__event_completed_hook_meta__", []):
+                    hooks.append({"method": name, **meta})
+        return hooks
+
+    @classmethod
+    def collect_tool_call_hooks(cls) -> list[dict]:
+        """收集类中所有 @tool_call_hook 装饰的 LLM 工具调用后钩子。"""
+        hooks: list[dict] = []
+        for klass in reversed(cls.__mro__):
+            for name, attr in vars(klass).items():
+                for meta in getattr(attr, "__tool_call_hook_meta__", []):
+                    hooks.append({"method": name, **meta})
+        return hooks
 
     # ---------- 事件入口 ----------
     async def process_event(self, event: BaseEvent) -> None:

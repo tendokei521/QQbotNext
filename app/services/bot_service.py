@@ -11,12 +11,14 @@ from app.domain.bot import IBot
 
 
 class BotService:
-    def __init__(self, *, gateway, registry, config_service, dispatcher, agent_manager=None) -> None:
+    def __init__(self, *, gateway, registry, config_service, dispatcher, agent_manager=None,
+             lifecycle_hooks=None) -> None:
         self.gateway = gateway
         self.registry = registry
         self.config_service = config_service
         self.dispatcher = dispatcher
         self.agent_manager = agent_manager
+        self.lifecycle_hooks = lifecycle_hooks
 
         # 网关回调注入：登录装配 / 事件派发 / 配置读取
         self.gateway.login_handler = self.on_bot_login
@@ -30,6 +32,11 @@ class BotService:
             self.agent_manager.ensure_runtime(conn.bot_id, bot=conn)
         await self.registry.load_all(conn.bot_id, bot=conn)
         logger.info(f"[BotService] Bot {conn.bot_id} 模块装配完成")
+        if self.lifecycle_hooks is not None:
+            try:
+                await self.lifecycle_hooks.run(conn, "login", "已登录")
+            except Exception as e:
+                logger.warning(f"[BotService] 登录钩子执行异常: {e}")
 
     # ==================== 连接操作（WebUI 调用） ====================
     async def start(self) -> None:

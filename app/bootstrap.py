@@ -20,7 +20,13 @@ from app.infrastructure.persistence.database import Database
 from app.llm.manager import AgentManager
 from app.modules.base import ServiceAccess
 from app.modules.dispatcher import ModuleDispatcher
-from app.modules.hooks import SendHookRegistry
+from app.modules.hooks import (
+    ApiHookRegistry,
+    BeforeSendHookRegistry,
+    EventCompletedHookRegistry,
+    LifecycleHookRegistry,
+    SendHookRegistry,
+)
 from app.modules.registry import ModuleRegistry
 from app.services.bot_service import BotService
 from app.services.log_service import LogService
@@ -87,13 +93,23 @@ def build_container(settings: Settings | None = None) -> Container:
     # 框架级 LLM Agent 运行时管理（配置/会话/定时/主动/工具，随 Bot 登录装配）
     agent_manager = AgentManager(config_service=config_service, task_manager=task_manager)
     container.register_factory(AgentManager, lambda: agent_manager)
-    # 消息发送成功钩子注册表（模块 @send_hook 按 bot 注册）
+    # 插件钩子注册表（模块按 bot 注册）
     send_hook_registry = SendHookRegistry()
     container.register_factory(SendHookRegistry, lambda: send_hook_registry)
+    before_send_hook_registry = BeforeSendHookRegistry()
+    container.register_factory(BeforeSendHookRegistry, lambda: before_send_hook_registry)
+    api_hook_registry = ApiHookRegistry()
+    container.register_factory(ApiHookRegistry, lambda: api_hook_registry)
+    lifecycle_hook_registry = LifecycleHookRegistry()
+    container.register_factory(LifecycleHookRegistry, lambda: lifecycle_hook_registry)
+    event_completed_hook_registry = EventCompletedHookRegistry()
+    container.register_factory(EventCompletedHookRegistry, lambda: event_completed_hook_registry)
     services = ServiceAccess(
         cache=cache, config_service=config_service, task_manager=task_manager,
         settings=settings, providers=providers, scheduler=scheduler,
         agent_manager=agent_manager, send_hooks=send_hook_registry,
+        before_send_hooks=before_send_hook_registry, api_hooks=api_hook_registry,
+        lifecycle_hooks=lifecycle_hook_registry, event_completed_hooks=event_completed_hook_registry,
     )
     container.register_factory(ServiceAccess, lambda: services)
 
@@ -104,6 +120,9 @@ def build_container(settings: Settings | None = None) -> Container:
     # OneBot 网关
     gateway = OneBotGateway(settings=settings, cache=cache, logger_=logger)
     gateway.send_hook_registry = send_hook_registry
+    gateway.before_send_hook_registry = before_send_hook_registry
+    gateway.api_hook_registry = api_hook_registry
+    gateway.lifecycle_hook_registry = lifecycle_hook_registry
     container.register_factory(OneBotGateway, lambda: gateway)
 
     # 节点注册表：内置入站链（路由 → 权限 → 派发 → Agent 兜底），框架/模块可插入/替换
@@ -126,7 +145,8 @@ def build_container(settings: Settings | None = None) -> Container:
 
     # 事件分发（走节点链）
     dispatcher = ModuleDispatcher(
-        registry=registry, config_service=config_service, gateway=gateway, node_registry=node_registry
+        registry=registry, config_service=config_service, gateway=gateway, node_registry=node_registry,
+        event_completed_hooks=event_completed_hook_registry,
     )
     container.register_factory(ModuleDispatcher, lambda: dispatcher)
 
@@ -134,6 +154,7 @@ def build_container(settings: Settings | None = None) -> Container:
     bot_service = BotService(
         gateway=gateway, registry=registry, config_service=config_service,
         dispatcher=dispatcher, agent_manager=agent_manager,
+        lifecycle_hooks=lifecycle_hook_registry,
     )
     container.register_factory(BotService, lambda: bot_service)
     log_service = LogService(settings.log_dir)

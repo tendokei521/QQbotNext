@@ -195,6 +195,10 @@ class Module(BaseModule):
         message_id = ctx.message_id
 ```
 
+框架还提供 `@before_send_hook`（发送前拦截/改写）、`@api_hook`（任意 OneBot API 调用后）、
+`@bot_lifecycle_hook`（登录/断线）、`@event_completed_hook`（事件处理完成）、
+`@tool_call_hook`（LLM 工具调用后），详见 `docs/MODULE_DEV.md`。
+
 要点：
 
 - 模块流水线在前，LLM 流水线在后，发送成功钩子独立于两条流水线；

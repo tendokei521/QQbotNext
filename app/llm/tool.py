@@ -9,10 +9,12 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from app.core.logger import logger
+from app.llm.hooks import ToolCallContext
 
 # 单次工具执行超时（秒）
 TOOL_TIMEOUT = 20
@@ -94,17 +96,64 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
         for spec in specs:
             if spec.name != name:
                 continue
+            started = time.monotonic()
+            error = ""
+            success = True
             try:
                 result = await asyncio.wait_for(spec.handler(ctx, args), timeout=TOOL_TIMEOUT)
             except asyncio.TimeoutError:
+                success = False
+                error = f"timeout({TOOL_TIMEOUT}s)"
                 result = f"error: 工具 {name} 执行超时（{TOOL_TIMEOUT}s）"
             except Exception as e:
+                success = False
+                error = str(e)
                 logger.add_info("Tool").warning(f"[Tool] {name} 执行异常: {e}")
                 result = f"error: 工具 {name} 执行异常: {e}"
+            duration_ms = (time.monotonic() - started) * 1000
+            await _run_tool_call_hooks(ctx, spec, name, args, result, success, error, duration_ms)
             return _truncate_result(result)
         return f"error: 未知工具 {name}"
 
     return _executor
+
+
+async def _run_tool_call_hooks(
+    tool_ctx: ToolContext | None,
+    spec: ToolSpec,
+    name: str,
+    args: dict,
+    result: str,
+    success: bool,
+    error: str,
+    duration_ms: float,
+) -> None:
+    """执行 LLM 工具调用后钩子（runtime.llm_tool_call_hooks）。"""
+    if tool_ctx is None:
+        return
+    runtime = getattr(tool_ctx, "runtime", None)
+    registry = getattr(runtime, "llm_tool_call_hooks", None) if runtime is not None else None
+    if registry is None:
+        return
+    event = getattr(tool_ctx, "event", None)
+    event_type = getattr(event, "event_type", "") if event is not None else ""
+    bot_id = getattr(runtime, "bot_id", None)
+    if bot_id is None and tool_ctx.bot is not None:
+        bot_id = getattr(tool_ctx.bot, "bot_id", None)
+    extra = {"error": error} if error else {}
+    call_ctx = ToolCallContext(
+        name=name,
+        args=dict(args or {}),
+        result=str(result),
+        success=success,
+        duration_ms=duration_ms,
+        tool_ctx=tool_ctx,
+        module=spec.module,
+        bot_id=bot_id,
+        event_type=event_type,
+        extra=extra,
+    )
+    await registry.run(call_ctx)
 
 
 def tool(*, description: str = "", parameters: dict | None = None) -> Callable:

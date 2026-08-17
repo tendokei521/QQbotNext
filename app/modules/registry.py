@@ -176,12 +176,84 @@ class ModuleRegistry:
                         order=hook.get("order", 100),
                     )
 
+            # 注册消息发送前钩子（@before_send_hook）
+            before_send_hooks = cls.collect_before_send_hooks()
+            if before_send_hooks and self.services and self.services.before_send_hooks:
+                for hook in before_send_hooks:
+                    handler = getattr(instance, hook["method"], None)
+                    if handler is None:
+                        continue
+                    self.services.before_send_hooks.register(
+                        bot_id=bot_id,
+                        module=instance,
+                        handler=handler,
+                        message_type=hook.get("message_type", "*"),
+                        order=hook.get("order", 100),
+                    )
+
+            # 注册任意 API 调用后钩子（@api_hook）
+            api_hooks = cls.collect_api_hooks()
+            if api_hooks and self.services and self.services.api_hooks:
+                for hook in api_hooks:
+                    handler = getattr(instance, hook["method"], None)
+                    if handler is None:
+                        continue
+                    self.services.api_hooks.register(
+                        bot_id=bot_id,
+                        module=instance,
+                        handler=handler,
+                        action=hook.get("action", "*"),
+                        order=hook.get("order", 100),
+                    )
+
+            # 注册 Bot 生命周期钩子（@bot_lifecycle_hook）
+            lifecycle_hooks = cls.collect_lifecycle_hooks()
+            if lifecycle_hooks and self.services and self.services.lifecycle_hooks:
+                for hook in lifecycle_hooks:
+                    handler = getattr(instance, hook["method"], None)
+                    if handler is None:
+                        continue
+                    self.services.lifecycle_hooks.register(
+                        bot_id=bot_id,
+                        module=instance,
+                        handler=handler,
+                        state=hook.get("state", "*"),
+                        order=hook.get("order", 100),
+                    )
+
+            # 注册事件处理完成钩子（@event_completed_hook）
+            event_completed_hooks = cls.collect_event_completed_hooks()
+            if event_completed_hooks and self.services and self.services.event_completed_hooks:
+                for hook in event_completed_hooks:
+                    handler = getattr(instance, hook["method"], None)
+                    if handler is None:
+                        continue
+                    self.services.event_completed_hooks.register(
+                        bot_id=bot_id,
+                        module=instance,
+                        handler=handler,
+                        order=hook.get("order", 100),
+                    )
+
             # 注册模块工具（@tool / TOOLS）与技能（@skill / SKILLS）到该 Bot 的 AgentRuntime
             if self.services and self.services.agent_manager:
                 runtime = self.services.agent_manager.get_runtime(bot_id)
                 if runtime is not None:
                     runtime.llm_tools.register_module(instance)
                     runtime.skills.register_module(instance)
+                    # 注册 LLM 工具调用后钩子（@tool_call_hook）
+                    tool_call_hooks = cls.collect_tool_call_hooks()
+                    if tool_call_hooks and hasattr(runtime, "llm_tool_call_hooks"):
+                        for hook in tool_call_hooks:
+                            handler = getattr(instance, hook["method"], None)
+                            if handler is None:
+                                continue
+                            runtime.llm_tool_call_hooks.register(
+                                event_type=hook.get("event_type", "*"),
+                                order=hook.get("order", 100),
+                                handler=handler,
+                                module=instance,
+                            )
 
             # 自动注册模块声明的 list/dynamic 数据源
             providers = self.services.providers if self.services else None
@@ -246,7 +318,7 @@ class ModuleRegistry:
             if instance is None:
                 continue
             self._unregister_llm_hooks(instance, bot_id)
-            self._unregister_send_hooks(instance)
+            self._unregister_plugin_hooks(instance)
             try:
                 await instance.on_unload()
             except Exception as e:
@@ -276,7 +348,7 @@ class ModuleRegistry:
         instance = bot_modules.pop(bot_id, None)
         if instance:
             self._unregister_llm_hooks(instance, bot_id)
-            self._unregister_send_hooks(instance)
+            self._unregister_plugin_hooks(instance)
             try:
                 await instance.on_unload()
             except Exception as e:
@@ -291,10 +363,19 @@ class ModuleRegistry:
         if not bot_modules:
             del self._modules[module_name]
 
-    def _unregister_send_hooks(self, instance) -> None:
-        """卸载模块实例时注销其消息发送成功钩子。"""
-        if self.services and self.services.send_hooks:
-            self.services.send_hooks.unregister_module(instance)
+    def _unregister_plugin_hooks(self, instance) -> None:
+        """卸载模块实例时注销其全部插件钩子。"""
+        if self.services is None:
+            return
+        for attr in ("send_hooks", "before_send_hooks", "api_hooks", "lifecycle_hooks", "event_completed_hooks"):
+            reg = getattr(self.services, attr, None)
+            if reg is not None:
+                reg.unregister_module(instance)
+        if self.services.agent_manager is not None:
+            for runtime in self.services.agent_manager.runtimes().values():
+                reg = getattr(runtime, "llm_tool_call_hooks", None)
+                if reg is not None:
+                    reg.unregister_module(instance)
 
     def _unregister_llm_hooks(self, instance, bot_id) -> None:
         """卸载模块实例时注销其注册的 LLM 钩子 / 工具 / 技能。"""

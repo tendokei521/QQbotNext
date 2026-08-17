@@ -225,6 +225,93 @@ class Module(BaseModule):
 
 ---
 
+## 4.6 更多钩子总览
+
+### 4.6.1 `@before_send_hook`：发送前钩子
+
+```python
+from app.modules import BaseModule, before_send_hook
+
+class Module(BaseModule):
+    @before_send_hook(message_type="*", order=10)
+    async def before_send(self, ctx):
+        if "脏词" in ctx.params.get("message", ""):
+            ctx.skip = True   # 拦截本次发送
+        ctx.params["message"] = str(ctx.params.get("message", "")).strip()  # 改写
+```
+
+- 参数：`message_type`（`"group"` / `"private"` / `"*"`）、`order`
+- `ctx.skip = True` 可拦截发送
+- 修改 `ctx.params` 可改写发送内容
+
+### 4.6.2 `@api_hook`：任意 OneBot API 调用后
+
+```python
+from app.modules import BaseModule, api_hook
+
+class Module(BaseModule):
+    @api_hook(action="delete_msg", order=10)
+    async def after_delete(self, ctx):
+        self.ctx.services.cache.set(f"deleted:{ctx.params.get('message_id')}", True, 60)
+
+    @api_hook(action="send_*", order=20)
+    async def after_any_send(self, ctx):
+        pass
+```
+
+- `action` 支持精确匹配或通配：`"send_group_msg"`、`"send_*"`、`"*"`
+- `ctx.success` 表示是否为 `status == "ok"`
+- 发送类 API 可通过 `ctx.message_id` 拿消息 ID
+
+### 4.6.3 `@bot_lifecycle_hook`：Bot 生命周期
+
+```python
+from app.modules import BaseModule, bot_lifecycle_hook
+
+class Module(BaseModule):
+    @bot_lifecycle_hook(state="login", order=10)
+    async def on_login(self, ctx):
+        pass
+
+    @bot_lifecycle_hook(state="disconnected", order=20)
+    async def on_disconnect(self, ctx):
+        pass
+```
+
+- `state`：`"login"` / `"connected"` / `"disconnected"` / `"error"` / `"*"`
+
+### 4.6.4 `@event_completed_hook`：事件处理完成
+
+```python
+from app.modules import BaseModule, event_completed_hook
+
+class Module(BaseModule):
+    @event_completed_hook(order=10)
+    async def after_event(self, ctx):
+        # ctx.event / ctx.duration_ms / ctx.state
+        pass
+```
+
+在入站事件模块链处理完成后触发；LLM 流水线是后台异步任务，不等待其完成。
+
+### 4.6.5 `@tool_call_hook`：LLM 工具调用后
+
+```python
+from app.modules import BaseModule, tool_call_hook
+from app.llm import ToolCallContext
+
+class Module(BaseModule):
+    @tool_call_hook(event_type="*", order=10)
+    async def after_tool_call(self, ctx: ToolCallContext):
+        # ctx.name / ctx.args / ctx.result / ctx.success / ctx.duration_ms
+        pass
+```
+
+- 成功和异常超时都会触发
+- 工具调用后钩子挂在对应 Bot 的 AgentRuntime 上，模块卸载时自动注销
+
+---
+
 ## 4.3 模块给 LLM 提供工具（`@tool`）
 
 模块可以把方法暴露给 LLM 作为 function calling 工具：

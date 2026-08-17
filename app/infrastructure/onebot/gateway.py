@@ -50,8 +50,11 @@ class OneBotGateway:
         self._connect_locks: dict[int, asyncio.Lock] = {}  # 防止监督循环与 WebUI 并发双开
         # 出站拦截钩子工厂（bootstrap 注入）：传入连接 → 返回 (action, params) 钩子
         self.outbound_hook_factory = None
-        # 消息发送成功钩子注册表（bootstrap 注入）
+        # 插件钩子注册表（bootstrap 注入）
         self.send_hook_registry = None
+        self.before_send_hook_registry = None
+        self.api_hook_registry = None
+        self.lifecycle_hook_registry = None
 
     # ==================== 对外查询 ====================
     def get_bots_info(self) -> list[dict]:
@@ -123,6 +126,13 @@ class OneBotGateway:
         except Exception as e:
             self.log.warning(f"[Gateway] 状态广播失败: {e}")
 
+        # 插件级 Bot 生命周期钩子（@bot_lifecycle_hook）
+        if self.lifecycle_hook_registry is not None:
+            try:
+                await self.lifecycle_hook_registry.run(conn, state, detail)
+            except Exception as e:
+                self.log.warning(f"[Gateway] 生命周期钩子执行失败: {e}")
+
     # ==================== 连接管理 ====================
     async def add_bot(
         self, ws_url: str, owner_id: int | None, auto_connect: bool = False, index: int | None = None
@@ -142,6 +152,8 @@ class OneBotGateway:
         if self.outbound_hook_factory:
             conn.outbound_hook = self.outbound_hook_factory(conn)
         conn.send_hook_registry = self.send_hook_registry
+        conn.before_send_hook_registry = self.before_send_hook_registry
+        conn.api_hook_registry = self.api_hook_registry
         self.connections[index] = conn
         return index
 

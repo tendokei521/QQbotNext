@@ -137,13 +137,27 @@ class BotConnection(IBot):
         self._last_connect_attempt: float = 0.0
         # 出站拦截钩子（bootstrap 装配）：若设置，_send 先经出站节点链
         self.outbound_hook = None
-        # 消息发送成功钩子注册表（bootstrap 装配）
+        # 插件钩子注册表（bootstrap 装配）
         self.send_hook_registry = None
+        self.before_send_hook_registry = None
+        self.api_hook_registry = None
 
     # ---------- 底层请求 ----------
     async def _send(self, action: str, params: dict | None = None, timeout_sec: int = 10) -> dict | None:
         """发送 API 请求。若装配了出站链，先经拦截节点（可改写 params / 吞掉发送）。"""
         params = params or {}
+        # 插件级发送前钩子：可改写 params / 拦截发送
+        if self.before_send_hook_registry is not None:
+            try:
+                allowed = await self.before_send_hook_registry.run(self, action, params)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                api_logger.error(f"[#{self.index}] 发送前钩子执行异常 {action}: {e}")
+                allowed = True
+            if not allowed:
+                return None
+
         if self.outbound_hook is not None:
             try:
                 response = await self.outbound_hook(action, params)
@@ -153,6 +167,7 @@ class BotConnection(IBot):
         else:
             response = await self._direct_send(action, params, timeout_sec)
         await self._run_send_hooks(action, params, response)
+        await self._run_api_hooks(action, params, response)
         return response
 
     async def _run_send_hooks(self, action: str, params: dict, response: dict | None) -> None:
@@ -165,6 +180,20 @@ class BotConnection(IBot):
             raise
         except Exception as e:
             api_logger.error(f"[#{self.index}] 发送后钩子执行异常 {action}: {e}")
+
+    async def _run_api_hooks(self, action: str, params: dict, response: dict | None) -> None:
+        """任意 OneBot API 调用后触发 @api_hook 注册的钩子。"""
+        if self.api_hook_registry is None:
+            return
+        # 出站链存在但返回 None = 被拦截，未产生真实 API 调用，不触发 api_hook
+        if self.outbound_hook is not None and response is None:
+            return
+        try:
+            await self.api_hook_registry.run(self, action, params, response)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            api_logger.error(f"[#{self.index}] API 后钩子执行异常 {action}: {e}")
 
     async def _direct_send(self, action: str, params: dict | None = None, timeout_sec: int = 10) -> dict | None:
         """真正发送（绕过 outbound_hook，供 SendNode 调用）。"""

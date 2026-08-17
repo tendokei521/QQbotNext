@@ -16,7 +16,26 @@ from app.modules.base import (
     ServiceAccess,
     resolve_enabled_ids,
 )
-from app.modules.hooks import SendContext, SendHookRegistry, llm_hook, module_hook, send_hook
+from app.modules.hooks import (
+    ApiContext,
+    ApiHookRegistry,
+    BeforeSendContext,
+    BeforeSendHookRegistry,
+    EventCompletedContext,
+    EventCompletedHookRegistry,
+    LifecycleContext,
+    LifecycleHookRegistry,
+    SendContext,
+    SendHookRegistry,
+    api_hook,
+    before_send_hook,
+    bot_lifecycle_hook,
+    event_completed_hook,
+    llm_hook,
+    module_hook,
+    send_hook,
+    tool_call_hook,
+)
 from app.modules.dispatcher import ModuleDispatcher
 from app.modules.keyword import match_keywords
 from app.modules.registry import ModuleRegistry
@@ -41,6 +60,19 @@ __all__ = [
     "send_hook",
     "SendContext",
     "SendHookRegistry",
+    "before_send_hook",
+    "BeforeSendContext",
+    "BeforeSendHookRegistry",
+    "api_hook",
+    "ApiContext",
+    "ApiHookRegistry",
+    "bot_lifecycle_hook",
+    "LifecycleContext",
+    "LifecycleHookRegistry",
+    "event_completed_hook",
+    "EventCompletedContext",
+    "EventCompletedHookRegistry",
+    "tool_call_hook",
     # 插件 API
     "get_modules",
     "get_config_path",

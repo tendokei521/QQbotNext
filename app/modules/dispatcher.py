@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from app.core.logger import logger
@@ -25,11 +26,13 @@ class ModuleDispatcher:
         config_service: Any,
         gateway: Any,
         node_registry: Any = None,
+        event_completed_hooks: Any = None,
         log=None,
     ) -> None:
         self.registry = registry
         self.config_service = config_service
         self.gateway = gateway
+        self.event_completed_hooks = event_completed_hooks
         self.log = log or logger
 
         if node_registry is None:
@@ -43,4 +46,14 @@ class ModuleDispatcher:
         ctx = MessageContext(event=event, bot=getattr(event, "bot", None), state={})
         # 挂载节点链上下文，供模块 event.stop() 短路整条链路
         event._ctx = ctx
+        started = time.monotonic()
         await NodeRunner(self.node_registry.inbound_nodes()).run(ctx)
+        if self.event_completed_hooks is not None:
+            try:
+                await self.event_completed_hooks.run(
+                    event,
+                    state=ctx.state,
+                    duration_ms=(time.monotonic() - started) * 1000,
+                )
+            except Exception as e:
+                self.log.exception(f"[Dispatch] 事件完成钩子执行异常: {e}")
