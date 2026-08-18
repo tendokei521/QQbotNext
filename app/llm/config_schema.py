@@ -166,7 +166,7 @@ SCHEMA = {
         "default": 200, "min": 20, "max": 500, "group": "group_session",
     },
     "include_pre_history": {
-        "type": "boolean", "label": "包含群聊会话前历史", "description": "群聊时是否将会话开始前的群消息作为背景信息提供给LLM（不计入会话历史）",
+        "type": "boolean", "label": "包含群聊环境背景", "description": "开启时拉取群聊最近消息，并附上群名/群号/当前时间作为 LLM 背景信息（不计入会话历史；未开启则完全不拉取在线历史）",
         "default": False, "group": "group_session",
     },
     "include_private_pre_history": {

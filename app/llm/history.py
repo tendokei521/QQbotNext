@@ -135,7 +135,9 @@ class HistoryManager:
             role = msg.get("role", "?")
             content = msg.get("content", "")
             if role == "user":
-                sender = msg.get("user_id", "用户")
+                user_id = msg.get("user_id", "")
+                nickname = msg.get("nickname", "") or user_id or "用户"
+                sender = f"{nickname}({user_id})" if (nickname and user_id and nickname != str(user_id)) else nickname
                 lines.append(f"[{sender}]: {content}")
             elif role == "assistant":
                 lines.append(f"[助手]: {content}")

@@ -8,8 +8,14 @@
 import asyncio
 import json
 import time
+from datetime import datetime
 
 from app.llm import logger
+from app.llm.group_context import (
+    build_group_env_text,
+    fetch_group_online_history,
+    fetch_private_online_history,
+)
 from app.llm.session import SessionManager
 from app.llm.prompt import build_messages
 from app.llm.providers import get_provider
@@ -20,6 +26,72 @@ from app.llm.trigger import check_trigger, extract_text
 from app.llm.tool import ToolContext, build_tools, make_executor
 
 import re
+
+
+def _event_nickname(event) -> str:
+    """取发送者群名片/昵称，用于会话历史保留发送者身份。"""
+    user = getattr(event, "user", None)
+    if user is None:
+        return ""
+    return getattr(user, "card", "") or getattr(user, "nickname", "") or ""
+
+
+def _format_session_history(history: list[dict], is_private: bool) -> list[dict]:
+    """把带发送者元数据的会话历史渲染成纯文本消息，避免多余字段进入 API。
+
+    群聊格式：``[10:23] 昵称(QQ): 内容``
+    私聊格式：``[10:23] 昵称: 内容``（无昵称时退化为 QQ/“用户”）
+    """
+    result = []
+    for m in history:
+        content = m.get("content", "")
+        if m.get("role") == "assistant":
+            # 助手消息一般就是 Bot 自己的回复，保持原样即可
+            rendered = content
+        else:
+            nickname = m.get("nickname") or ""
+            user_id = m.get("user_id") or ""
+            if is_private:
+                sender = nickname or (f"用户({user_id})" if user_id else "用户")
+            else:
+                if nickname and user_id:
+                    sender = f"{nickname}({user_id})"
+                elif nickname:
+                    sender = nickname
+                elif user_id:
+                    sender = f"用户({user_id})"
+                else:
+                    sender = "用户"
+            ts = m.get("time")
+            time_prefix = ""
+            if ts:
+                try:
+                    time_prefix = datetime.fromtimestamp(int(ts)).strftime("[%m-%d %H:%M] ")
+                except Exception:
+                    pass
+            rendered = f"{time_prefix}{sender}: {content}"
+        result.append({"role": m["role"], "content": rendered})
+    return result
+
+
+async def _build_group_pre_history(event, group_id: str, count: int) -> str:
+    """根据 include_pre_history 配置，拉取并组装群聊环境背景块。
+
+    不拉取在线历史时返回空字符串；本函数不改变“非 @ 不入会话历史”的策略。
+    """
+    history_text = await fetch_group_online_history(
+        event.bot,
+        group_id,
+        count=count,
+        self_ids={str(event.self_id), str(getattr(event, "bot_id", "") or "")},
+    )
+    if not history_text:
+        return ""
+    return build_group_env_text(
+        group_id=group_id,
+        group_name=getattr(event.group, "group_name", "") or "",
+        history_text=history_text,
+    )
 
 
 def _collect_llm_ext(runtime, event, session_id: str, is_private: bool, schedule_enable: bool):
@@ -132,7 +204,13 @@ async def handle_group(module, event, config):
             return
         session.add_participant(user_id)
 
-    session_mgr.add_message(session_id, "user", user_text, user_id)
+    session_mgr.add_message(
+        session_id,
+        "user",
+        user_text,
+        user_id,
+        nickname=_event_nickname(event),
+    )
     await call_llm_and_reply(
         module, event, session_mgr, config,
         session_id, user_id, group_id, is_private=False,
@@ -170,7 +248,13 @@ async def handle_private(module, event, config):
         session = session_mgr.create_session(session_id, "private", config.get("session_timeout", 60))
         await asyncio.to_thread(session_mgr.restore_session_from_archive, session, session_id)
 
-    session_mgr.add_message(session_id, "user", user_text, user_id)
+    session_mgr.add_message(
+        session_id,
+        "user",
+        user_text,
+        user_id,
+        nickname=_event_nickname(event),
+    )
     await call_llm_and_reply(
         module, event, session_mgr, config,
         session_id, user_id, None, is_private=True,
@@ -190,14 +274,20 @@ async def call_llm_and_reply(module, event, session_mgr, config,
     if not session:
         return
 
-    # 前置历史（群聊近期 / 私信近期）
+    # 前置历史（群聊近期 / 私信近期）。
+    # 群聊只有 include_pre_history 开启时才拉在线记录作为背景；
+    # 非 @ 群消息仍然不写入会话历史，保持原有“不积累”策略。
     pre_history_text = ""
     if group_id:
-        pre_history_text = await fetch_online_history(event, group_id, count=history_rounds)
-        if pre_history_text:
-            pre_history_text = f"群聊近期记录:\n{pre_history_text}"
+        if include_pre_history:
+            pre_history_text = await _build_group_pre_history(event, group_id, count=history_rounds)
     elif is_private and include_pre_history in ("history", "load"):
-        pre_history_text = await fetch_private_online_history(event, user_id, count=history_rounds)
+        pre_history_text = await fetch_private_online_history(
+            event.bot,
+            user_id,
+            count=history_rounds,
+            self_ids={str(event.self_id), str(getattr(event, "bot_id", "") or "")},
+        )
         if pre_history_text and include_pre_history == "history":
             pre_history_text = f"近期聊天记录:\n{pre_history_text}"
 
@@ -207,6 +297,7 @@ async def call_llm_and_reply(module, event, session_mgr, config,
     if (session_history and session_history[-1].get("role") == "user"
             and session_history[-1].get("content") == user_text):
         session_history = session_history[:-1]
+    session_history = _format_session_history(session_history, is_private)
 
     schedule_enable = config.get("schedule_enable", True)
     # 定时意图检测：用于「紧贴提醒」+「模型未调工具时的确定性兜底」
@@ -355,7 +446,13 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
             return None
         session.add_participant(user_id)
 
-    session_mgr.add_message(session_id, "user", user_text, user_id)
+    session_mgr.add_message(
+        session_id,
+        "user",
+        user_text,
+        user_id,
+        nickname=_event_nickname(event),
+    )
 
     model = config.get("model", "deepseek-chat")
     system_prompt = config.get("system_prompt", "你是一个友好的助手。")
@@ -365,11 +462,15 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
 
     pre_history_text = ""
     if group_id:
-        pre_history_text = await fetch_online_history(event, group_id, count=history_rounds)
-        if pre_history_text:
-            pre_history_text = f"群聊近期记录:\n{pre_history_text}"
+        if include_pre_history:
+            pre_history_text = await _build_group_pre_history(event, group_id, count=history_rounds)
     elif is_private and include_pre_history in ("history", "load"):
-        pre_history_text = await fetch_private_online_history(event, user_id, count=history_rounds)
+        pre_history_text = await fetch_private_online_history(
+            event.bot,
+            user_id,
+            count=history_rounds,
+            self_ids={str(event.self_id), str(getattr(event, "bot_id", "") or "")},
+        )
         if pre_history_text and include_pre_history == "history":
             pre_history_text = f"近期聊天记录:\n{pre_history_text}"
 
@@ -379,6 +480,7 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
     if (session_history and session_history[-1].get("role") == "user"
             and session_history[-1].get("content") == user_text_current):
         session_history = session_history[:-1]
+    session_history = _format_session_history(session_history, is_private)
 
     schedule_enable = config.get("schedule_enable", True)
     # 定时意图检测：用于「紧贴提醒」+「模型未调工具时的确定性兜底」
@@ -522,7 +624,13 @@ async def stream_response(runtime, event, ctx=None):
             return
         session.add_participant(user_id)
 
-    session_mgr.add_message(session_id, "user", user_text, user_id)
+    session_mgr.add_message(
+        session_id,
+        "user",
+        user_text,
+        user_id,
+        nickname=_event_nickname(event),
+    )
 
     model = config.get("model", "deepseek-chat")
     system_prompt = config.get("system_prompt", "你是一个友好的助手。")
@@ -532,11 +640,15 @@ async def stream_response(runtime, event, ctx=None):
 
     pre_history_text = ""
     if group_id:
-        pre_history_text = await fetch_online_history(event, group_id, count=history_rounds)
-        if pre_history_text:
-            pre_history_text = f"群聊近期记录:\n{pre_history_text}"
+        if include_pre_history:
+            pre_history_text = await _build_group_pre_history(event, group_id, count=history_rounds)
     elif is_private and include_pre_history in ("history", "load"):
-        pre_history_text = await fetch_private_online_history(event, user_id, count=history_rounds)
+        pre_history_text = await fetch_private_online_history(
+            event.bot,
+            user_id,
+            count=history_rounds,
+            self_ids={str(event.self_id), str(getattr(event, "bot_id", "") or "")},
+        )
         if pre_history_text and include_pre_history == "history":
             pre_history_text = f"近期聊天记录:\n{pre_history_text}"
 
@@ -545,6 +657,7 @@ async def stream_response(runtime, event, ctx=None):
     if (session_history and session_history[-1].get("role") == "user"
             and session_history[-1].get("content") == user_text_current):
         session_history = session_history[:-1]
+    session_history = _format_session_history(session_history, is_private)
 
     schedule_enable = config.get("schedule_enable", True)
     intent = has_schedule_intent(user_text) if schedule_enable else False
@@ -883,64 +996,4 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
     return False
 
 
-async def fetch_online_history(event, group_id: str, count: int = 10) -> str:
-    try:
-        result = await event.bot.get_msg_history(group_id=int(group_id), user_id=0, count=count, reverse_order=False)
-        if not result or not isinstance(result, dict):
-            return ""
-        messages = result.get("messages", [])
-        self_ids = {str(event.self_id)}
-        if getattr(event, "bot_id", None):
-            self_ids.add(str(event.bot_id))
-        return _format_history(messages, count, self_ids=self_ids)
-    except Exception as e:
-        logger.add_info("Src").warning(f"获取群聊历史失败: {e}")
-        return ""
 
-
-async def fetch_private_online_history(event, user_id: str, count: int = 10) -> str:
-    try:
-        result = await event.bot.get_msg_history(group_id=0, user_id=int(user_id), count=count, reverse_order=False)
-        if not result or not isinstance(result, dict):
-            return ""
-        messages = result.get("messages", [])
-        self_ids = {str(event.self_id)}
-        if getattr(event, "bot_id", None):
-            self_ids.add(str(event.bot_id))
-        return _format_history(messages, count, self_ids=self_ids)
-    except Exception as e:
-        logger.add_info("Src").warning(f"获取私聊历史失败: {e}")
-        return ""
-
-
-def _format_history(messages, count: int, self_ids: set[str] | None = None) -> str:
-    if not messages:
-        return ""
-    self_ids = self_ids or set()
-    lines = []
-    for msg in messages[-count:]:
-        if isinstance(msg, dict):
-            sender = msg.get("sender", {})
-            user_id = sender.get("user_id", "")
-            if user_id is not None and str(user_id) in self_ids:
-                continue
-            nickname = sender.get("nickname", "未知")
-            content = _extract_msg_text(msg)
-            if content:
-                if len(content) > 50:
-                    content = content[:50] + "..."
-                lines.append(f"{nickname}: {content}")
-    return "\n".join(lines)
-
-
-def _extract_msg_text(msg: dict) -> str:
-    message = msg.get("message", [])
-    if isinstance(message, list):
-        texts = []
-        for item in message:
-            if isinstance(item, dict) and item.get("type") == "text":
-                texts.append(item.get("data", {}).get("text", ""))
-        return "".join(texts)
-    if isinstance(message, str):
-        return message
-    return ""

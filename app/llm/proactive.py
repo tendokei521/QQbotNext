@@ -17,6 +17,11 @@ from datetime import datetime
 from typing import Any
 
 from app.llm import logger, llm_data_dir
+from app.llm.group_context import (
+    build_group_env_text,
+    fetch_group_name,
+    fetch_group_online_history,
+)
 from app.llm.prompt import build_messages
 from app.llm.providers import get_provider
 from app.llm.session import SessionManager
@@ -160,8 +165,28 @@ class ProactiveManager:
         prompt_tpl = self._cfg("proactive_prompt", DEFAULT_PROACTIVE_PROMPT)
         user_prompt = prompt_tpl.replace("{{unanswered_count}}", str(unanswered)).replace("{{current_time}}", now_str)
 
+        pre_history_text = ""
+        if is_group and self.module.config.get("include_pre_history", False):
+            # 与普通回复一致：只有 include_pre_history 开启才拉在线群聊记录作为背景；
+            # 主动消息也不会把非 @ 群消息写入会话历史。
+            history_text = await fetch_group_online_history(
+                self.bot,
+                target,
+                count=int(self.module.config.get("history_rounds", 50)),
+                self_ids={str(self.module.bot_id), str(getattr(self.bot, "bot_id", "") or "")},
+            )
+            if history_text:
+                group_name = await fetch_group_name(self.bot, target)
+                pre_history_text = build_group_env_text(
+                    group_id=target,
+                    group_name=group_name,
+                    history_text=history_text,
+                    current_time=now_str,
+                )
+
         messages = build_messages(
             system_prompt=system_prompt,
+            pre_history_text=pre_history_text,
             history=history,
             user_text=user_prompt,
             with_schedule_instruction=False,

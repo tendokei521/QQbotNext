@@ -10,6 +10,7 @@ import re
 import time
 import threading
 import uuid
+from typing import Any
 
 from app.llm import logger
 from app.llm.history import HistoryManager
@@ -246,14 +247,31 @@ class SessionManager:
     # ── 消息 ──────────────────────────────────────────────
     MAX_HISTORY_MESSAGES = 200  # 单对话内存/归档有界：超过后裁剪最旧消息
 
-    def add_message(self, session_id: str, role: str, content: str, user_id: str = ""):
+    def add_message(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        user_id: str = "",
+        nickname: str = "",
+        message_id: Any = None,
+        timestamp: int | None = None,
+    ):
         session = self.get_session(session_id)
         if session and session.data is not None:
             if role == "assistant" and _is_junk_assistant(content):
                 return
-            msg = {"role": role, "content": content, "time": int(time.time())}
+            msg = {
+                "role": role,
+                "content": content,
+                "time": int(time.time()) if timestamp is None else int(timestamp),
+            }
             if user_id:
-                msg["user_id"] = user_id
+                msg["user_id"] = str(user_id)
+            if nickname:
+                msg["nickname"] = str(nickname)
+            if message_id not in (None, ""):
+                msg["message_id"] = str(message_id)
             history = session.data.history
             history.append(msg)
             if len(history) > self.MAX_HISTORY_MESSAGES:
@@ -276,10 +294,14 @@ class SessionManager:
                 and (not str(m.get("content") or "").strip() or _is_junk_assistant(m.get("content")))
             )
         ]
-        return [
-            {"role": m["role"], "content": m["content"]}
-            for m in filtered[-limit:]
-        ]
+        result = []
+        for m in filtered[-limit:]:
+            item = {"role": m["role"], "content": m["content"]}
+            for key in ("user_id", "nickname", "message_id", "time"):
+                if m.get(key) is not None:
+                    item[key] = m[key]
+            result.append(item)
+        return result
 
     # ── 多对话操作 ────────────────────────────────────────
     def new_conversation(self, session_id: str, title: str = "") -> dict | None:

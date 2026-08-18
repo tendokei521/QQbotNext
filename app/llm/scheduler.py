@@ -20,6 +20,11 @@ import time
 from datetime import datetime
 
 from app.llm import logger, llm_data_dir
+from app.llm.group_context import (
+    build_group_env_text,
+    fetch_group_name,
+    fetch_group_online_history,
+)
 from app.llm.prompt import build_messages
 from app.llm.providers import get_provider
 from app.llm.session import SessionManager
@@ -286,7 +291,7 @@ class TaskScheduler:
 
             from app.llm.initiative_stream import stream_send_initiative
 
-            messages = self._build_messages(entry)
+            messages = await self._build_messages(entry)
             try:
                 full_text = await stream_send_initiative(
                     self.module,
@@ -358,7 +363,7 @@ class TaskScheduler:
             logger.add_info(f"#{self.bot_id}").error(f"[定时任务] 发送失败 {entry.id} -> {entry.session_id}: {e}")
         self._save()
 
-    def _build_messages(self, entry: TaskEntry) -> list[dict]:
+    async def _build_messages(self, entry: TaskEntry) -> list[dict]:
         """构建定时任务触发的 LLM 消息。"""
         session = self.session_mgr.get_session(entry.session_id)
         config = self.module.config
@@ -380,8 +385,29 @@ class TaskScheduler:
             .replace("{{current_time}}", now_str)
             .replace("{{job_json}}", job_json)
         )
+
+        pre_history_text = ""
+        if entry.is_group and config.get("include_pre_history", False):
+            # 与普通回复一致：定时任务也只有 include_pre_history 开启时才拉在线群聊记录作为背景，
+            # 不会把非 @ 群消息写入会话历史。
+            history_text = await fetch_group_online_history(
+                self.bot,
+                entry.target,
+                count=int(config.get("history_rounds", 50)),
+                self_ids={str(self.bot_id), str(getattr(self.bot, "bot_id", "") or "")},
+            )
+            if history_text:
+                group_name = await fetch_group_name(self.bot, entry.target)
+                pre_history_text = build_group_env_text(
+                    group_id=entry.target,
+                    group_name=group_name,
+                    history_text=history_text,
+                    current_time=now_str,
+                )
+
         return build_messages(
             system_prompt=system_prompt,
+            pre_history_text=pre_history_text,
             history=history,
             user_text=user_prompt,
             with_schedule_instruction=False,
@@ -398,7 +424,7 @@ class TaskScheduler:
             )
             await asyncio.to_thread(self.session_mgr.restore_session_from_archive, session, entry.session_id)
 
-        messages = self._build_messages(entry)
+        messages = await self._build_messages(entry)
         provider = get_provider(dict(self.module.config.raw_config))
         return await provider.chat(
             messages,
