@@ -24,6 +24,7 @@ from app.llm.group_context import (
     build_group_env_text,
     fetch_group_name,
     fetch_group_online_history,
+    format_history_for_llm,
 )
 from app.llm.prompt import build_messages
 from app.llm.providers import get_provider
@@ -370,6 +371,7 @@ class TaskScheduler:
         history = self.session_mgr.get_history(
             entry.session_id, limit=int(config.get("history_rounds", 50))
         ) if session else []
+        history = format_history_for_llm(history, is_private=not entry.is_group)
         system_prompt = config.get("system_prompt", "你是一个友好的助手。")
         now_str = datetime.now().strftime("%Y年%m月%d日 %H:%M")
         job_json = json.dumps({

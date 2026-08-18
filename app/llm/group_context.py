@@ -158,6 +158,43 @@ async def fetch_group_name(bot: Any, group_id: Any) -> str:
         return ""
 
 
+def format_history_for_llm(history: list[dict], is_private: bool = False) -> list[dict]:
+    """把带发送者元数据的会话历史渲染成纯文本消息，避免多余字段进入 API。
+
+    群聊格式：``[08-18 12:30] 昵称(QQ): 内容``
+    私聊格式：``[08-18 12:30] 昵称: 内容``
+    """
+    result = []
+    for m in history:
+        content = m.get("content", "")
+        if m.get("role") == "assistant":
+            rendered = content
+        else:
+            nickname = m.get("nickname") or ""
+            user_id = m.get("user_id") or ""
+            if is_private:
+                sender = nickname or (f"用户({user_id})" if user_id else "用户")
+            else:
+                if nickname and user_id:
+                    sender = f"{nickname}({user_id})"
+                elif nickname:
+                    sender = nickname
+                elif user_id:
+                    sender = f"用户({user_id})"
+                else:
+                    sender = "用户"
+            ts = m.get("time")
+            time_prefix = ""
+            if ts:
+                try:
+                    time_prefix = datetime.fromtimestamp(int(ts)).strftime("[%m-%d %H:%M] ")
+                except Exception:
+                    pass
+            rendered = f"{time_prefix}{sender}: {content}"
+        result.append({"role": m["role"], "content": rendered})
+    return result
+
+
 def build_group_env_text(
     *,
     group_id: Any,

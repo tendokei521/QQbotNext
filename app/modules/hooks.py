@@ -301,6 +301,8 @@ class SendHookRegistry(_HookRegistry):
         if bot is None or not response or response.get("status") != "ok":
             return
         data = response.get("data") or {}
+        if not isinstance(data, dict):
+            return
         message_id = data.get("message_id")
         if message_id is None:
             return
@@ -424,7 +426,7 @@ class ApiHookRegistry(_HookRegistry):
         params = params or {}
         success = bool(response and response.get("status") == "ok")
         data = (response or {}).get("data") or {}
-        message_id = data.get("message_id")
+        message_id = data.get("message_id") if isinstance(data, dict) else None
         message_type = _resolve_send_message_type(action, params)
         ctx = ApiContext(
             action=action,

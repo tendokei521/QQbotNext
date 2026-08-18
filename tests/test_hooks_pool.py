@@ -260,6 +260,44 @@ async def test_send_hook_registry_skips_failed_or_missing_id():
     assert got == []
 
 
+async def test_send_hook_registry_accepts_list_data():
+    """get_group_list 等返回 data 为 list 的 API 不应让发送后钩子抛异常。"""
+    got = []
+
+    async def handler(ctx):
+        got.append(ctx)
+
+    reg = SendHookRegistry(log=None)
+    reg.register(bot_id=123, module=object(), handler=handler)
+    await reg.run(
+        _FakeSendBot(),
+        "get_group_list",
+        {},
+        {"status": "ok", "data": [{"group_id": 1}]},
+    )
+    assert got == []
+
+
+async def test_api_hook_registry_accepts_list_data():
+    """get_group_list 等返回 data 为 list 的 API 应正常触发 api_hook，message_id 为 None。"""
+    got = []
+
+    async def handler(ctx):
+        got.append(ctx)
+
+    reg = ApiHookRegistry(log=None)
+    reg.register(bot_id=123, module=object(), handler=handler)
+    await reg.run(
+        _FakeSendBot(),
+        "get_group_list",
+        {},
+        {"status": "ok", "data": [{"group_id": 1}]},
+    )
+    assert len(got) == 1
+    assert got[0].success is True
+    assert got[0].message_id is None
+
+
 class _Event:
     pass
 

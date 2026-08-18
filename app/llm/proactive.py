@@ -21,6 +21,7 @@ from app.llm.group_context import (
     build_group_env_text,
     fetch_group_name,
     fetch_group_online_history,
+    format_history_for_llm,
 )
 from app.llm.prompt import build_messages
 from app.llm.providers import get_provider
@@ -160,6 +161,7 @@ class ProactiveManager:
         # 上下文
         session = self.session_mgr.get_session(session_id)
         history = self.session_mgr.get_history(session_id, limit=int(self.module.config.get("history_rounds", 50))) if session else []
+        history = format_history_for_llm(history, is_private=not is_group)
         system_prompt = self.module.config.get("system_prompt", "你是一个友好的助手。")
         now_str = datetime.now().strftime("%Y年%m月%d日 %H:%M")
         prompt_tpl = self._cfg("proactive_prompt", DEFAULT_PROACTIVE_PROMPT)
