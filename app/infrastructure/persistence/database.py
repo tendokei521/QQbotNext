@@ -52,6 +52,44 @@ CREATE TABLE IF NOT EXISTS kv (
     key        TEXT PRIMARY KEY,
     value_json TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS provider_presets (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    provider    TEXT NOT NULL DEFAULT 'openai',
+    config_json TEXT NOT NULL,
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS provider_models (
+    id          TEXT PRIMARY KEY,
+    preset_id   TEXT NOT NULL,
+    model       TEXT NOT NULL,
+    provider_type TEXT NOT NULL DEFAULT 'chat',
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    config_json TEXT NOT NULL,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS provider_settings (
+    key        TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS config_profiles (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    config_json TEXT NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS config_routes (
+    umo        TEXT PRIMARY KEY,
+    profile_id TEXT NOT NULL
+);
 """
 
 

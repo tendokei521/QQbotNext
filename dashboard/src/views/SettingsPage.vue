@@ -46,6 +46,16 @@ async function saveLogs() {
   }
 }
 
+const showExperimental = computed<boolean>({
+  get: () => !!webui.config.experimental?.show_experimental,
+  set: (v) => {
+    webui.config.experimental.show_experimental = v
+    webui.saveExperimental({ show_experimental: v }).catch((err) => {
+      notify.push(errorMessage(err), 'error')
+    })
+  },
+})
+
 onMounted(() => {
   if (!webui.config.logs.max_lines) webui.load()
 })
@@ -93,6 +103,24 @@ onMounted(() => {
             </div>
             <div class="text-caption mt-3" style="color: rgba(var(--v-theme-on-surface), 0.55)">
               选择后立即生效并保存在本地浏览器
+            </div>
+          </v-card-text>
+        </v-card>
+
+        <v-card variant="outlined" class="mb-4">
+          <v-card-title class="d-flex align-center">
+            <v-icon icon="mdi-flask-outline" class="mr-2" color="warning" /> 实验性选项
+          </v-card-title>
+          <v-card-text>
+            <v-switch
+              v-model="showExperimental"
+              label="显示实验性选项"
+              color="warning"
+              density="compact"
+              hide-details
+            />
+            <div class="text-caption mt-2" style="color: rgba(var(--v-theme-on-surface), 0.55)">
+              开启后，导航中会显示「配置档案」等实验性功能入口
             </div>
           </v-card-text>
         </v-card>

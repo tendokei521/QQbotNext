@@ -27,7 +27,7 @@ from app.llm.group_context import (
     format_history_for_llm,
 )
 from app.llm.prompt import build_messages
-from app.llm.providers import get_provider
+from app.llm.providers import chat_with_fallback, get_provider
 from app.llm.session import SessionManager
 from app.llm.tags import strip_all_tags
 from app.llm.time_parser import advance_repeat, parse_schedule
@@ -427,13 +427,30 @@ class TaskScheduler:
             await asyncio.to_thread(self.session_mgr.restore_session_from_archive, session, entry.session_id)
 
         messages = await self._build_messages(entry)
-        provider = get_provider(dict(self.module.config.raw_config))
-        return await provider.chat(
-            messages,
-            model=self.module.config.get("model", "deepseek-chat"),
-            temperature=self.module.config.get("temperature", 0.7),
-            max_tokens=self.module.config.get("max_tokens", 1024),
-        )
+        if hasattr(self.module.config, "set_session"):
+            self.module.config.set_session(entry.session_id)
+        try:
+            if hasattr(self.module, "provider_chain"):
+                chain = self.module.provider_chain()
+                if chain:
+                    return await chat_with_fallback(
+                        chain,
+                        messages,
+                        model=self.module.config.get("model", "deepseek-chat"),
+                        temperature=self.module.config.get("temperature", 0.7),
+                        max_tokens=self.module.config.get("max_tokens", 1024),
+                    )
+            # 兼容旧模块/测试：直接走模块自己的 get_provider
+            provider = get_provider(dict(self.module.config.raw_config))
+            return await provider.chat(
+                messages,
+                model=self.module.config.get("model", "deepseek-chat"),
+                temperature=self.module.config.get("temperature", 0.7),
+                max_tokens=self.module.config.get("max_tokens", 1024),
+            )
+        finally:
+            if hasattr(self.module.config, "clear_session"):
+                self.module.config.clear_session()
 
     def _complete(self, entry: TaskEntry) -> None:
         self._tasks.pop(entry.id, None)

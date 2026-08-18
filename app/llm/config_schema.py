@@ -2,8 +2,6 @@
 
 SCHEMA = {
     # ==================== 分组定义 ====================
-    "group_api": {"type": "group", "label": "API 设置", "collapsible": True},
-    "group_model": {"type": "group", "label": "模型参数", "collapsible": True},
     "group_switch": {"type": "group", "label": "功能开关", "collapsible": True},
     "group_session": {"type": "group", "label": "会话管理", "collapsible": True},
     "group_trigger": {"type": "group", "label": "触发设置", "collapsible": True},
@@ -13,36 +11,6 @@ SCHEMA = {
     "group_permission": {"type": "group", "label": "权限", "collapsible": True},
 
     # ==================== 配置项 ====================
-    "api_key": {
-        "type": "password", "label": "API密钥", "description": "OpenAI API密钥或其他兼容API密钥（多 key 换行/逗号分隔，自动轮换）",
-        "default": "", "placeholder": "sk-...", "group": "group_api",
-    },
-    "api_base": {
-        "type": "text", "label": "API基础URL", "description": "API接口地址，支持OpenAI兼容格式",
-        "default": "https://api.deepseek.com", "placeholder": "https://api.deepseek.com", "group": "group_api",
-    },
-    "provider": {
-        "type": "select", "label": "Provider 类型", "description": "LLM 后端实现（当前内置 openai 兼容）",
-        "default": "openai", "group": "group_api",
-        "options": {"openai": "OpenAI 兼容（DeepSeek/中转等）"},
-    },
-    "retry_attempts": {
-        "type": "number", "label": "最大重试次数", "description": "限流/5xx/网络错误时重试（认证错误不重试）",
-        "default": 3, "min": 1, "max": 6, "group": "group_api",
-    },
-    "model": {
-        "type": "text", "label": "模型名称", "description": "使用的LLM模型",
-        "default": "deepseek-chat", "placeholder": "deepseek-chat", "group": "group_model",
-    },
-    "max_tokens": {
-        "type": "number", "label": "最大输出Token", "description": "模型回复的最大token数",
-        "default": 1024, "min": 50, "max": 4096, "group": "group_model",
-    },
-    "temperature": {
-        "type": "number", "label": "温度", "description": "回复的随机性，0-1之间",
-        "default": 0.7, "min": 0.0, "max": 2.0, "step": 0.1, "group": "group_model",
-    },
-
     "group_enable": {
         "type": "boolean", "label": "群回复启用", "description": "是否启用群LLM功能",
         "default": False, "group": "group_switch",

@@ -64,6 +64,8 @@ class LlmPipeline:
 
     async def _run(self, job: LlmJob) -> None:
         ctx = job.ctx
+        # 按会话切换配置档案（对齐 AstrBot UMO 路由）
+        self.runtime.config.set_session(ctx.session_id)
         try:
             # #chat 指令仍然走原 chat.handle（它会自己发送回复）
             if ctx.user_text.startswith("#chat "):
@@ -99,7 +101,7 @@ class LlmPipeline:
 
             config = self.runtime.config
             # 没有 key 或对应场景未启用时，不视为“触发 LLM”，不重置主动消息状态
-            if not config.get("api_key", ""):
+            if not self.runtime.provider_config().get("api_key", ""):
                 return
             if ctx.event.event_type == "message_group" and not config.get("group_enable", False):
                 return
@@ -177,6 +179,7 @@ class LlmPipeline:
                 f"[LLM Pipeline] 任务异常: {e}"
             )
         finally:
+            self.runtime.config.clear_session()
             self.pool.finish(job)
 
     async def _run_stream(self, ctx: LlmContext) -> None:

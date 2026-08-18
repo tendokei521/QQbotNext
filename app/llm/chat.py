@@ -19,7 +19,7 @@ from app.llm.group_context import (
 )
 from app.llm.session import SessionManager
 from app.llm.prompt import build_messages
-from app.llm.providers import get_provider
+from app.llm.providers import chat_with_fallback, iter_stream_with_fallback
 from app.llm.tags import strip_all_tags
 from app.llm.scheduler import extract_reminder_note, has_schedule_intent
 from app.llm.splitter import split_sentences, strip_stream_artifacts
@@ -103,25 +103,51 @@ def _log_debug_prompt(runtime, session_id: str, messages: list[dict], debug_enab
     logger.add_info(f"#{runtime.bot_id}").info(f"[Prompt] {session_id}\n{text}")
 
 
+def _provider_config_for(module) -> dict:
+    """取传给 Provider 的配置：优先走运行时合并（Provider 预设），兼容旧对象。"""
+    if hasattr(module, "provider_config"):
+        return module.provider_config()
+    config = getattr(module, "config", None)
+    if hasattr(config, "raw_config"):
+        return dict(config.raw_config)
+    return dict(config or {})
+
+
+def _provider_chain_for(module) -> list[dict]:
+    """取按顺序尝试的 provider 配置链（主模型 + 回退模型）；旧对象退化为单条配置。"""
+    if hasattr(module, "provider_chain"):
+        return module.provider_chain()
+    return [_provider_config_for(module)]
+
+
 async def handle(module, event):
     """唯一入口：api_key 校验 + 消息类型开关过滤后分发。"""
     config = module.config
-    api_key = config.get("api_key", "")
+    api_key = _provider_config_for(module).get("api_key", "")
     if not api_key:
-        logger.add_info(f"#{module.bot_id}").error(f"[{module.name}] API 密钥未配置，跳过处理")
+        logger.add_info(f"#{module.bot_id}").error(f"[{module.name}] API 密钥未配置，请先在 Provider 预设中选择连接配置")
         return
 
     message_type = event.message_type
     if message_type not in ("group", "private"):
         return
     if message_type == "private":
-        if not config.get("private_enable", True):
-            return
-        await handle_private(module, event, config)
+        session_id = f"private_{event.user_id}"
     else:
-        if not config.get("group_enable", False):
-            return
-        await handle_group(module, event, config)
+        session_id = f"group_{event.group.group_id}"
+    config = module.config
+    config.set_session(session_id)
+    try:
+        if message_type == "private":
+            if not config.get("private_enable", True):
+                return
+            await handle_private(module, event, config)
+        else:
+            if not config.get("group_enable", False):
+                return
+            await handle_group(module, event, config)
+    finally:
+        config.clear_session()
 
 
 async def handle_group(module, event, config):
@@ -289,8 +315,8 @@ async def call_llm_and_reply(module, event, session_mgr, config,
         f"API 请求 -> {session_id} (task: {session.task_id}), 消息数: {len(messages)}"
     )
 
-    provider = get_provider(config)
-    response = await provider.chat(
+    response = await chat_with_fallback(
+        _provider_chain_for(module),
         messages,
         model=model,
         temperature=temperature,
@@ -360,8 +386,8 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
     但把“发送”留给 LLM 流水线统一处理，以便 post_response / pre_send 钩子介入。
     """
     config = runtime.config
-    if not config.get("api_key", ""):
-        logger.add_info(f"#{runtime.bot_id}").error("[LLM] API 密钥未配置，跳过处理")
+    if not runtime.provider_config().get("api_key", ""):
+        logger.add_info(f"#{runtime.bot_id}").error("[LLM] API 密钥未配置，请在 Provider 预设中选择连接配置")
         return None
     message_type = getattr(event, "message_type", "")
     if message_type not in ("group", "private"):
@@ -474,8 +500,8 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
         f"API 请求 -> {session_id} (task: {session.task_id}), 消息数: {len(messages)}"
     )
 
-    provider = get_provider(config)
-    response = await provider.chat(
+    response = await chat_with_fallback(
+        _provider_chain_for(runtime),
         messages,
         model=model,
         temperature=temperature,
@@ -533,8 +559,8 @@ async def stream_response(runtime, event, ctx=None):
     但每次产出一个完整句子（str），由 LlmPipeline 负责 pre_send / 发送 / post_send。
     """
     config = runtime.config
-    if not config.get("api_key", ""):
-        logger.add_info(f"#{runtime.bot_id}").error("[LLM] API 密钥未配置，跳过处理")
+    if not runtime.provider_config().get("api_key", ""):
+        logger.add_info(f"#{runtime.bot_id}").error("[LLM] API 密钥未配置，请在 Provider 预设中选择连接配置")
         return
 
     message_type = getattr(event, "message_type", "")
@@ -652,7 +678,7 @@ async def stream_response(runtime, event, ctx=None):
 
     tools = build_tools(all_specs) if all_specs else None
     tool_executor = make_executor(all_specs, tool_ctx) if all_specs else None
-    provider = get_provider(config)
+    provider_chain = _provider_chain_for(runtime)
 
     full_text_parts: list[str] = []
     tool_results: list[dict] = []
@@ -663,7 +689,8 @@ async def stream_response(runtime, event, ctx=None):
         tool_calls: dict[int, dict] = {}
         stream_error = ""
 
-        async for ev in provider.chat_stream(
+        async for ev in iter_stream_with_fallback(
+            provider_chain,
             messages,
             model=model,
             temperature=temperature,

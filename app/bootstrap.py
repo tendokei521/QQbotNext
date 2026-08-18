@@ -29,7 +29,11 @@ from app.modules.hooks import (
 )
 from app.modules.registry import ModuleRegistry
 from app.services.bot_service import BotService
+from app.llm.providers.runtime_manager import ProviderRuntimeManager
+from app.services.config_profile_service import ConfigProfileService
 from app.services.log_service import LogService
+from app.services.provider_model_service import ProviderModelService
+from app.services.provider_preset_service import ProviderPresetService
 from app.services.provider_service import ProviderRegistry
 from app.services.scheduler import SchedulerService
 
@@ -84,6 +88,17 @@ def build_container(settings: Settings | None = None) -> Container:
     # 配置中心
     config_service = ConfigService(db, settings.project_root)
     container.register_factory(ConfigService, lambda: config_service)
+    # Provider 预设服务（LLM 连接配置独立管理）
+    provider_preset_service = ProviderPresetService(config_service)
+    container.register_factory(ProviderPresetService, lambda: provider_preset_service)
+    # Provider 运行时/模型/全局设置服务
+    provider_runtime_manager = ProviderRuntimeManager(config_service)
+    container.register_factory(ProviderRuntimeManager, lambda: provider_runtime_manager)
+    provider_model_service = ProviderModelService(config_service, provider_runtime_manager)
+    container.register_factory(ProviderModelService, lambda: provider_model_service)
+    # 配置档案 / 路由服务
+    config_profile_service = ConfigProfileService(config_service)
+    container.register_factory(ConfigProfileService, lambda: config_profile_service)
 
     # 模块可访问的服务集合
     providers = ProviderRegistry()
@@ -174,6 +189,12 @@ async def run(settings: Settings | None = None) -> None:
     config_service = _container.get(ConfigService)
     await config_service.init()
     set_console_mode(config_service.get_webui_config().get("logs", {}).get("show_raw_logs", False))
+
+    # 迁移旧的 Agent 内联 API 配置到 Provider 预设（幂等，启动时执行）
+    provider_preset_service = _container.get(ProviderPresetService)
+    await provider_preset_service.migrate_legacy_agent_configs()
+    provider_model_service = _container.get(ProviderModelService)
+    await provider_model_service.migrate_legacy_models()
 
     # 迁移旧 LLM 数据文件（历史模块目录 → data/llm），幂等，仅在启动时执行
     from app.llm import migrate_legacy_data

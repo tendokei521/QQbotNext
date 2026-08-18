@@ -15,6 +15,9 @@ export interface WebuiConfig {
     show_all: boolean
     groups: Record<string, { service_bot_index: number }>
   }
+  experimental: {
+    show_experimental: boolean
+  }
 }
 
 export interface ModulePreferences {
@@ -28,6 +31,7 @@ export const useWebuiStore = defineStore('webui', () => {
     logs: { show_raw_logs: false, visible_levels: ['info', 'warning', 'error'], max_lines: 50, console_height: 200 },
     single_service: {},
     multi_group: { show_all: false, groups: {} },
+    experimental: { show_experimental: false },
   })
   const preferences = ref<ModulePreferences>({})
 
@@ -66,6 +70,12 @@ export const useWebuiStore = defineStore('webui', () => {
     return unwrap(res.data)
   }
 
+  async function saveExperimental(patch: Partial<WebuiConfig['experimental']>) {
+    // 走通用 /webui/config 保存接口，避免新增路由未生效时的 405
+    const res = await http.post('/api/webui/config', { experimental: patch })
+    return unwrap(res.data)
+  }
+
   // WS 实时同步
   onSocketMessage('webui_config_updated', (msg) => {
     if (msg.config) config.value = { ...config.value, ...msg.config }
@@ -85,5 +95,6 @@ export const useWebuiStore = defineStore('webui', () => {
     saveSingleService,
     saveMultiGroup,
     savePreferences,
+    saveExperimental,
   }
 })

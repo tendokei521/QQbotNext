@@ -39,12 +39,33 @@ def _split_keys(api_key: str) -> list[str]:
 
 class OpenAICompatProvider(BaseProvider):
     name = "openai"
+    alias_names = ("openai", "deepseek", "openrouter", "moonshot", "zhipu", "ollama", "lm_studio", "siliconflow")
 
     def __init__(self, config: dict) -> None:
         super().__init__(config)
         self.api_keys = _split_keys(config.get("api_key", "")) or [""]
         self.api_base = (config.get("api_base", "") or "https://api.deepseek.com").rstrip("/")
         self.max_retries = max(1, int(config.get("retry_attempts", 3) or 3))
+
+    async def get_models(self) -> list[str]:
+        """拉取 OpenAI 兼容 /models 列表。"""
+        if not self.api_keys or not self.api_keys[0]:
+            return []
+        base = self.api_base
+        if not base.endswith("/v1"):
+            base += "/v1"
+        url = f"{base}/models"
+        headers = {
+            "Authorization": f"Bearer {self.api_keys[0]}",
+            "Content-Type": "application/json",
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                if resp.status != 200:
+                    logger.add_info("Api").error(f"拉取模型列表失败 HTTP {resp.status}")
+                    return []
+                data = await resp.json()
+        return [str(item.get("id")) for item in (data.get("data") or []) if isinstance(item, dict) and item.get("id")]
 
     def _endpoint(self) -> str:
         base = self.api_base

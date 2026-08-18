@@ -21,6 +21,14 @@ DEFAULT_WEBUI_CONFIG: dict = {
     "logs": {"show_raw_logs": False, "visible_levels": ["info", "warning", "error"], "max_lines": 50, "console_height": 200},
     "single_service": {},
     "multi_group": {"show_all": False, "groups": {}},
+    "experimental": {"show_experimental": False},
+}
+
+DEFAULT_PROVIDER_SETTINGS: dict = {
+    "default_preset_id": "",
+    "default_model_id": "",
+    "fallback_model_ids": [],
+    "provider_pool": ["*"],
 }
 
 # OneBot ws_url 中 access_token 的对外打码哨兵（WebUI/页面不泄露真实令牌）
@@ -89,6 +97,11 @@ class ConfigService:
         self._webui: dict = dict(DEFAULT_WEBUI_CONFIG)
         self._module_config: dict[str, dict[str, dict]] = {}      # module -> {bot_id: config}
         self._module_authority: dict[str, dict[str, dict]] = {}   # module -> {bot_id: authority}
+        self._provider_presets: dict[str, dict] = {}              # preset_id -> preset
+        self._provider_models: dict[str, dict] = {}               # model_id -> model
+        self._provider_settings: dict = dict(DEFAULT_PROVIDER_SETTINGS)
+        self._config_profiles: dict[str, dict] = {}               # profile_id -> profile
+        self._config_routes: dict[str, str] = {}                  # umo -> profile_id
 
     # ==================== 生命周期 ====================
     async def init(self) -> None:
@@ -220,8 +233,56 @@ class ConfigService:
                 "user_list": self.db.loads(r["user_list"], []),
             }
 
+        # provider presets
+        rows = await self.db.fetchall("SELECT * FROM provider_presets")
+        for r in rows:
+            self._provider_presets[r["id"]] = {
+                "id": r["id"],
+                "name": r["name"],
+                "provider": r["provider"],
+                "config": self.db.loads(r["config_json"], {}),
+                "enabled": bool(r["enabled"]),
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+            }
+
+        # provider models
+        rows = await self.db.fetchall("SELECT * FROM provider_models")
+        for r in rows:
+            self._provider_models[r["id"]] = {
+                "id": r["id"],
+                "preset_id": r["preset_id"],
+                "model": r["model"],
+                "provider_type": r["provider_type"],
+                "enabled": bool(r["enabled"]),
+                "config": self.db.loads(r["config_json"], {}),
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+            }
+
+        # provider settings
+        rows = await self.db.fetchall("SELECT * FROM provider_settings")
+        for r in rows:
+            self._provider_settings[r["key"]] = self.db.loads(r["value_json"], None)
+
+        # config profiles
+        rows = await self.db.fetchall("SELECT * FROM config_profiles")
+        for r in rows:
+            self._config_profiles[r["id"]] = {
+                "id": r["id"],
+                "name": r["name"],
+                "config": self.db.loads(r["config_json"], {}),
+                "updated_at": r["updated_at"],
+            }
+
+        # config routes
+        rows = await self.db.fetchall("SELECT * FROM config_routes")
+        for r in rows:
+            self._config_routes[r["umo"]] = r["profile_id"]
+
         self.log.debug(
-            f"[Config] 加载完成: bots={len(self._bots)} modules={len(self._module_config)}"
+            f"[Config] 加载完成: bots={len(self._bots)} modules={len(self._module_config)} "
+            f"presets={len(self._provider_presets)} models={len(self._provider_models)} profiles={len(self._config_profiles)}"
         )
 
     # ==================== 变更通知 ====================
@@ -404,6 +465,216 @@ class ConfigService:
             )
         except Exception as e:
             self.log.error(f"[Config] 持久化权限失败 {module}/{key}: {e}")
+
+    # ==================== Provider 预设（全局共享连接配置） ====================
+    def list_provider_presets(self) -> list[dict]:
+        """返回全部 Provider 预设（深拷贝，调用方可安全修改）。"""
+        import copy
+
+        return [copy.deepcopy(self._provider_presets[k]) for k in sorted(self._provider_presets)]
+
+    def get_provider_preset(self, preset_id: str) -> dict | None:
+        """按 ID 返回 Provider 预设（深拷贝），不存在返回 None。"""
+        import copy
+
+        preset = self._provider_presets.get(str(preset_id))
+        return copy.deepcopy(preset) if preset else None
+
+    def upsert_provider_preset(self, preset_id: str, preset: dict) -> None:
+        """更新内存缓存并异步落盘（无事件循环时仅内存生效）。"""
+        key = str(preset_id)
+        self._provider_presets[key] = dict(preset)
+        self._schedule_persist(self._persist_provider_preset, key)
+
+    async def save_provider_preset(self, preset_id: str, preset: dict) -> None:
+        """持久化 Provider 预设并广播变更。"""
+        key = str(preset_id)
+        self._provider_presets[key] = dict(preset)
+        await self._persist_provider_preset(key)
+        await self._notify("provider_presets", self.list_provider_presets())
+
+    async def delete_provider_preset(self, preset_id: str) -> bool:
+        """删除 Provider 预设并广播变更。"""
+        key = str(preset_id)
+        if key not in self._provider_presets:
+            return False
+        del self._provider_presets[key]
+        try:
+            await self.db.execute("DELETE FROM provider_presets WHERE id = ?", (key,))
+        except Exception as e:
+            self.log.error(f"[Config] 删除 Provider 预设失败 {key}: {e}")
+            return False
+        await self._notify("provider_presets", self.list_provider_presets())
+        return True
+
+    async def _persist_provider_preset(self, preset_id: str) -> None:
+        try:
+            preset = self._provider_presets.get(preset_id)
+            if preset is None:
+                await self.db.execute("DELETE FROM provider_presets WHERE id = ?", (preset_id,))
+                return
+            await self.db.execute(
+                "INSERT OR REPLACE INTO provider_presets "
+                "(id, name, provider, config_json, enabled, created_at, updated_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (
+                    preset_id,
+                    preset.get("name", ""),
+                    preset.get("provider", "openai"),
+                    self.db.dumps(preset.get("config", {})),
+                    1 if preset.get("enabled", True) else 0,
+                    int(preset.get("created_at", 0)),
+                    int(preset.get("updated_at", 0)),
+                ),
+            )
+        except Exception as e:
+            self.log.error(f"[Config] 持久化 Provider 预设失败 {preset_id}: {e}")
+
+    # ==================== Provider 模型（连接预设下的模型实例） ====================
+    def list_provider_models(self, preset_id: str | None = None) -> list[dict]:
+        """返回模型实例列表（深拷贝），可按预设过滤。"""
+        import copy
+
+        models = [copy.deepcopy(self._provider_models[k]) for k in sorted(self._provider_models)]
+        if preset_id:
+            models = [m for m in models if m.get("preset_id") == preset_id]
+        return models
+
+    def get_provider_model(self, model_id: str) -> dict | None:
+        import copy
+
+        model = self._provider_models.get(str(model_id))
+        return copy.deepcopy(model) if model else None
+
+    async def save_provider_model(self, model_id: str, model: dict) -> None:
+        """持久化模型实例并广播变更。"""
+        key = str(model_id)
+        self._provider_models[key] = dict(model)
+        await self._persist_provider_model(key)
+        await self._notify("provider_models", self.list_provider_models())
+
+    async def delete_provider_model(self, model_id: str) -> bool:
+        key = str(model_id)
+        if key not in self._provider_models:
+            return False
+        del self._provider_models[key]
+        try:
+            await self.db.execute("DELETE FROM provider_models WHERE id = ?", (key,))
+        except Exception as e:
+            self.log.error(f"[Config] 删除 Provider 模型失败 {key}: {e}")
+            return False
+        await self._notify("provider_models", self.list_provider_models())
+        return True
+
+    async def _persist_provider_model(self, model_id: str) -> None:
+        try:
+            model = self._provider_models.get(model_id)
+            if model is None:
+                await self.db.execute("DELETE FROM provider_models WHERE id = ?", (model_id,))
+                return
+            await self.db.execute(
+                "INSERT OR REPLACE INTO provider_models "
+                "(id, preset_id, model, provider_type, enabled, config_json, created_at, updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    model_id,
+                    model.get("preset_id", ""),
+                    model.get("model", ""),
+                    model.get("provider_type", "chat"),
+                    1 if model.get("enabled", True) else 0,
+                    self.db.dumps(model.get("config", {})),
+                    int(model.get("created_at", 0)),
+                    int(model.get("updated_at", 0)),
+                ),
+            )
+        except Exception as e:
+            self.log.error(f"[Config] 持久化 Provider 模型失败 {model_id}: {e}")
+
+    # ==================== Provider 全局设置 ====================
+    def get_provider_settings(self) -> dict:
+        import copy
+
+        return {**DEFAULT_PROVIDER_SETTINGS, **copy.deepcopy(self._provider_settings)}
+
+    async def save_provider_settings(self, settings: dict) -> None:
+        merged = {**DEFAULT_PROVIDER_SETTINGS, **(settings or {})}
+        self._provider_settings = dict(merged)
+        for key, value in merged.items():
+            await self.db.execute(
+                "INSERT OR REPLACE INTO provider_settings (key, value_json) VALUES (?,?)",
+                (key, self.db.dumps(value)),
+            )
+        await self._notify("provider_settings", self.get_provider_settings())
+
+    # ==================== 配置档案 / 路由 ====================
+    def list_config_profiles(self) -> list[dict]:
+        import copy
+
+        return [copy.deepcopy(self._config_profiles[k]) for k in sorted(self._config_profiles)]
+
+    def get_config_profile(self, profile_id: str) -> dict | None:
+        import copy
+
+        profile = self._config_profiles.get(str(profile_id))
+        return copy.deepcopy(profile) if profile else None
+
+    async def save_config_profile(self, profile_id: str, profile: dict) -> None:
+        key = str(profile_id)
+        self._config_profiles[key] = dict(profile)
+        await self._persist_config_profile(key)
+        await self._notify("config_profiles", self.list_config_profiles())
+
+    async def delete_config_profile(self, profile_id: str) -> bool:
+        key = str(profile_id)
+        if key not in self._config_profiles:
+            return False
+        # 同时清理指向该档案的路由
+        for umo, pid in list(self._config_routes.items()):
+            if pid == key:
+                del self._config_routes[umo]
+                await self.db.execute("DELETE FROM config_routes WHERE umo = ?", (umo,))
+        del self._config_profiles[key]
+        await self.db.execute("DELETE FROM config_profiles WHERE id = ?", (key,))
+        await self._notify("config_profiles", self.list_config_profiles())
+        await self._notify("config_routes", self.get_config_routes())
+        return True
+
+    async def _persist_config_profile(self, profile_id: str) -> None:
+        try:
+            profile = self._config_profiles.get(profile_id)
+            if profile is None:
+                await self.db.execute("DELETE FROM config_profiles WHERE id = ?", (profile_id,))
+                return
+            await self.db.execute(
+                "INSERT OR REPLACE INTO config_profiles (id, name, config_json, updated_at) VALUES (?,?,?,?)",
+                (
+                    profile_id,
+                    profile.get("name", ""),
+                    self.db.dumps(profile.get("config", {})),
+                    int(profile.get("updated_at", 0)),
+                ),
+            )
+        except Exception as e:
+            self.log.error(f"[Config] 持久化配置档案失败 {profile_id}: {e}")
+
+    def get_config_routes(self) -> dict[str, str]:
+        return dict(self._config_routes)
+
+    async def set_config_route(self, umo: str, profile_id: str) -> None:
+        self._config_routes[str(umo)] = str(profile_id)
+        await self.db.execute(
+            "INSERT OR REPLACE INTO config_routes (umo, profile_id) VALUES (?,?)",
+            (str(umo), str(profile_id)),
+        )
+        await self._notify("config_routes", self.get_config_routes())
+
+    async def delete_config_route(self, umo: str) -> bool:
+        if umo not in self._config_routes:
+            return False
+        del self._config_routes[umo]
+        await self.db.execute("DELETE FROM config_routes WHERE umo = ?", (umo,))
+        await self._notify("config_routes", self.get_config_routes())
+        return True
 
     def _schedule_persist(self, persist_fn: Callable[..., Any], *args: Any) -> None:
         try:

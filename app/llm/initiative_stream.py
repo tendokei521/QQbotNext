@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.domain.message import Message
-from app.llm.providers import get_provider
+from app.llm.providers import iter_stream_with_fallback
 from app.llm.send_pool import StreamSendPool
 from app.llm.splitter import split_sentences, strip_stream_artifacts
 
@@ -35,7 +35,10 @@ async def stream_send_initiative(
     发送由消息池完成，调用方不要重复发送。
     """
     config = runtime.config
-    provider = get_provider(dict(config.raw_config))
+    if hasattr(runtime, "provider_chain"):
+        chain = runtime.provider_chain()
+    else:
+        chain = [dict(config.raw_config)]
     max_len = int(
         config.get("stream_sentence_max_length")
         or config.get("max_message_length", 200)
@@ -54,7 +57,8 @@ async def stream_send_initiative(
     buffer = ""
 
     try:
-        async for ev in provider.chat_stream(
+        async for ev in iter_stream_with_fallback(
+            chain,
             messages,
             model=model or config.get("model", "deepseek-chat"),
             temperature=temperature,

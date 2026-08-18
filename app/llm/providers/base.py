@@ -42,9 +42,14 @@ class BaseProvider:
     """对话 Provider 基类。子类实现 chat()，处理「调哪个 LLM、如何容错」。"""
 
     name = "base"
+    alias_names: tuple[str, ...] = ()
 
     def __init__(self, config: dict) -> None:
         self.config = config or {}
+
+    async def get_models(self) -> list[str]:
+        """返回该连接可用的模型列表；不支持时返回空列表。"""
+        return []
 
     async def chat(
         self,

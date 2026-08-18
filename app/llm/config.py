@@ -12,11 +12,17 @@ from typing import Any
 from app.modules.base import ModulePermission
 
 DEFAULT_LLM_CONFIG: dict = {
+    # 连接参数已抽离到 Provider 预设，Agent 只保存引用；
+    # 以下 legacy 字段保留默认值用于兼容存量代码/自动迁移，WebUI 不再展示
+    "provider_preset_id": "",
+    "provider_model_id": "",
+    "provider_model_pool": [],
+    "fallback_model_ids": [],
     "api_key": "",
     "api_base": "https://api.deepseek.com",
-    "model": "deepseek-chat",
     "provider": "openai",
     "retry_attempts": 3,
+    "model": "deepseek-chat",
     "system_prompt": "你是一个友好的助手。",
     "max_tokens": 1024,
     "temperature": 0.7,
@@ -78,6 +84,9 @@ AGENT_CONFIG_MODULE = "agent"
 # 旧模块（迁移源）
 LEGACY_CONFIG_MODULE = "llm_chat_v2"
 
+# 旧的内联连接字段：已由 Provider 预设取代，接口返回时需过滤，避免泄露密钥
+LEGACY_LLM_CONNECTION_KEYS = ("api_key", "api_base", "provider", "retry_attempts")
+
 # 默认权限（黑名单 + 空列表 = 放行所有）
 _DEFAULT_AUTHORITY: dict = {
     "enabled": True,
@@ -99,6 +108,28 @@ class AgentConfig:
         self._service = config_service
         self._bot = bot_id
         self._migrated = False
+        self._current_umo: str | None = None
+
+    # ── 会话配置档案（对齐 AstrBot UMO 路由） ───────────────
+    def set_session(self, umo: str | None) -> None:
+        """设置当前会话的 UMO；存在路由时后续 get/raw_config 会合并对应档案。"""
+        self._current_umo = str(umo) if umo else None
+
+    def clear_session(self) -> None:
+        self._current_umo = None
+
+    def _profile_config(self) -> dict:
+        if not self._current_umo:
+            return {}
+        routes = self._service.get_config_routes()
+        profile_id = routes.get(self._current_umo)
+        if not profile_id:
+            return {}
+        profile = self._service.get_config_profile(profile_id)
+        if not profile:
+            return {}
+        config = profile.get("config", {}) or {}
+        return config if isinstance(config, dict) else {}
 
     # ── 配置读写 ─────────────────────────────────────────
     def get(self, key: str, default: Any = None) -> Any:
@@ -106,12 +137,14 @@ class AgentConfig:
         data = self._service.get_module_config(AGENT_CONFIG_MODULE, self._bot) or {}
         if key in data and data[key] is not None:
             return data[key]
+        profile = self._profile_config()
+        if key in profile and profile[key] is not None:
+            return profile[key]
         if key in DEFAULT_LLM_CONFIG and DEFAULT_LLM_CONFIG[key] is not None:
             return DEFAULT_LLM_CONFIG[key]
         return default
 
-    @property
-    def raw_config(self) -> dict:
+    def _base_raw_config(self) -> dict:
         self._ensure_migrated()
         stored = self._service.get_module_config(AGENT_CONFIG_MODULE, self._bot) or {}
         result: dict = {}
@@ -125,17 +158,23 @@ class AgentConfig:
                 result[key] = value
         return result
 
+    @property
+    def raw_config(self) -> dict:
+        result = self._base_raw_config()
+        result.update(self._profile_config())
+        return result
+
     def set(self, key: str, value: Any, auto_save: bool = True) -> None:
         self._ensure_migrated()
-        data = dict(self.raw_config)
+        data = self._base_raw_config()
         data[key] = value
         self._service.set_module_config(AGENT_CONFIG_MODULE, self._bot, data, persist=auto_save)
 
     def save(self) -> None:
-        self._service.set_module_config(AGENT_CONFIG_MODULE, self._bot, dict(self.raw_config), persist=True)
+        self._service.set_module_config(AGENT_CONFIG_MODULE, self._bot, self._base_raw_config(), persist=True)
 
     async def save_async(self) -> None:
-        await self._service.save_module_config(AGENT_CONFIG_MODULE, self._bot, dict(self.raw_config))
+        await self._service.save_module_config(AGENT_CONFIG_MODULE, self._bot, self._base_raw_config())
 
     # ── 启停 / 权限（module_authority("agent")） ──────────
     def _authority(self) -> dict:

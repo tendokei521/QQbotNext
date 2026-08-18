@@ -7,6 +7,7 @@ import json
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from app.llm.config import LEGACY_LLM_CONNECTION_KEYS
 from app.services.bot_service import PASSWORD_MASK as _PASSWORD_MASK
 from app.services.bot_service import _mask_password_config
 from app.webui.api.deps import get_container, parse_bot_id
@@ -86,7 +87,8 @@ class _AgentProxy:
 
         self.bot_id = runtime.bot_id
         self.config = runtime.config
-        self.config_schema = SCHEMA
+        # 复制一份 schema 并注入 Preset 选项，使模块配置页/Agent 表单共用
+        self.config_schema = dict(SCHEMA)
         self.authority = _AgentAuthority(runtime)
 
 
@@ -180,7 +182,10 @@ async def update_config(module_name: str, request: Request, bot_id: int | None =
         data = await request.json()
     except Exception:
         data = {}
-    for key, value in (data or {}).items():
+    data = data or {}
+    for key in LEGACY_LLM_CONNECTION_KEYS:
+        data.pop(key, None)
+    for key, value in data.items():
         # password 字段值为脱敏哨兵时保留旧值（用户未修改密码）
         field = module.config_schema.get(key)
         if isinstance(field, dict) and field.get("type") == "password" and value == _PASSWORD_MASK:

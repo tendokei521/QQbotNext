@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from app.core.logger import logger
 from app.domain.bot import IBot
+from app.llm.config import LEGACY_LLM_CONNECTION_KEYS
 
 
 class BotService:
@@ -144,6 +145,9 @@ class BotService:
             enabled = True
             perm = ModulePermission()
             permission = config.get("permission", "member")
+        for key in LEGACY_LLM_CONNECTION_KEYS:
+            config.pop(key, None)
+        schema = _split_schema(SCHEMA)
         return {
             "name": "LLM服务",
             "name_sign": "Agent",
@@ -163,7 +167,7 @@ class BotService:
                 "user_list": perm.user_list,
             },
             "config": _mask_password_config(config, SCHEMA),
-            "config_schema": _split_schema(SCHEMA),
+            "config_schema": schema,
             # 不设独立 page：Agent 配置走框架自身的 schema 表单（与普通模块统一排版），
             # 读写由 app/webui/api/modules.py 的 _AgentProxy 桥接到 AgentRuntime。
             "has_page": False,

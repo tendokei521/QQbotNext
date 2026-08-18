@@ -24,7 +24,7 @@ from app.llm.group_context import (
     format_history_for_llm,
 )
 from app.llm.prompt import build_messages
-from app.llm.providers import get_provider
+from app.llm.providers import chat_with_fallback
 from app.llm.session import SessionManager
 from app.llm.tags import strip_all_tags
 
@@ -197,6 +197,8 @@ class ProactiveManager:
         # 生成期间新消息检查
         start_last = self._data.get(session_id, {}).get("last_user_time", 0)
         config = self.module.config
+        if hasattr(config, "set_session"):
+            config.set_session(session_id)
 
         # 主动消息也支持流式：与普通消息使用同一套流式发送配置
         if config.get("stream_output", False) and config.get("stream_proactive_enabled", False):
@@ -213,6 +215,8 @@ class ProactiveManager:
                 temperature=config.get("temperature", 0.7),
                 max_tokens=config.get("max_tokens", 1024),
             )
+            if hasattr(config, "clear_session"):
+                config.clear_session()
             clean = strip_all_tags(full_text).strip()
             if not clean:
                 if not is_group:
@@ -230,13 +234,19 @@ class ProactiveManager:
                 self._schedule_next_private(session_id)
             return
 
-        provider = get_provider(dict(config.raw_config))
-        resp = await provider.chat(
+        if hasattr(self.module, "provider_chain"):
+            chain = self.module.provider_chain()
+        else:
+            chain = [dict(config.raw_config)]
+        resp = await chat_with_fallback(
+            chain,
             messages,
             model=self.module.config.get("model", "deepseek-chat"),
             temperature=self.module.config.get("temperature", 0.7),
             max_tokens=self.module.config.get("max_tokens", 1024),
         )
+        if hasattr(config, "clear_session"):
+            config.clear_session()
         if self._data.get(session_id, {}).get("last_user_time", 0) != start_last:
             logger.add_info(f"#{self.module.bot_id}").info(f"[主动消息] {session_id} 生成期间用户来消息，丢弃本次")
             return

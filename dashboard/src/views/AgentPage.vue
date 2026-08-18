@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import http, { errorMessage } from '@/api/http'
 import { useBotsStore } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
@@ -14,7 +14,43 @@ const notify = useNotifyStore()
 const botId = ref<number | null>(null)
 const enabled = ref(false)
 const schema = ref<Record<string, any>>({})
+const providerModels = ref<{ id: string; preset_id: string; preset_name?: string; model: string }[]>([])
 const draft = reactive<Record<string, any>>({})
+const poolModelIds = ref<string[]>([])
+const poolDialog = ref(false)
+const pendingPoolModelId = ref('')
+const availablePoolModels = computed(() => providerModels.value.filter((m) => !poolModelIds.value.includes(m.id)))
+
+function poolLabel(id: string): string {
+  const m = providerModels.value.find((x) => x.id === id)
+  return m ? `${m.preset_name || m.preset_id} / ${m.model}` : id
+}
+
+function syncPool() {
+  draft.provider_model_pool = [...poolModelIds.value]
+  onChange('provider_model_pool', [...poolModelIds.value])
+}
+
+function addPoolModel() {
+  if (!pendingPoolModelId.value || poolModelIds.value.includes(pendingPoolModelId.value)) return
+  poolModelIds.value.push(pendingPoolModelId.value)
+  syncPool()
+  poolDialog.value = false
+  pendingPoolModelId.value = ''
+}
+
+function removePoolModel(index: number) {
+  poolModelIds.value.splice(index, 1)
+  syncPool()
+}
+
+function movePoolModel(index: number, delta: number) {
+  const target = index + delta
+  if (target < 0 || target >= poolModelIds.value.length) return
+  const [moved] = poolModelIds.value.splice(index, 1)
+  poolModelIds.value.splice(target, 0, moved)
+  syncPool()
+}
 const permission = ref<PermissionConfig>({
   group_mode: 'blacklist',
   group_list: [],
@@ -27,9 +63,19 @@ let autosaveTimer: number | null = null
 let dirtyFlag = false
 
 async function load() {
+  // 刷新/首次进入时机器人列表可能还没加载：先补齐并恢复上次选择，避免误报“请先选择账号”
+  if (!bots.bots.length) {
+    try {
+      await bots.fetchBots()
+    } catch {
+      /* 列表加载失败时走下面的空态 */
+    }
+  }
+  if (bots.currentIndex === null && bots.bots.length) {
+    bots.restoreSelection()
+  }
   botId.value = bots.currentBot?.bot_id ?? null
   if (botId.value === null) {
-    notify.push('请先连接 Bot 后配置 Agent', 'warning')
     return
   }
   loading.value = true
@@ -41,12 +87,22 @@ async function load() {
       permission: PermissionConfig
       config: Record<string, any>
       schema: Record<string, any>
+      provider_presets: { id: string; name: string }[]
+      provider_models: { id: string; preset_id: string; preset_name?: string; model: string }[]
     }>('/api/agent/config', { params: { bot_id: botId.value } })
     const data = res.data
     enabled.value = !!data.enabled
     schema.value = data.schema || {}
+    providerModels.value = data.provider_models || []
     Object.keys(draft).forEach((k) => delete draft[k])
     Object.assign(draft, data.config || {})
+    const storedPool = Array.isArray(draft.provider_model_pool) ? draft.provider_model_pool : []
+    const legacyPool = [
+      draft.provider_model_id,
+      ...(Array.isArray(draft.fallback_model_ids) ? draft.fallback_model_ids : []),
+    ].filter(Boolean)
+    poolModelIds.value = (storedPool.length ? storedPool : legacyPool).map(String)
+    draft.provider_model_pool = [...poolModelIds.value]
     permission.value = {
       group_mode: data.permission?.group_mode || 'blacklist',
       group_list: [...(data.permission?.group_list || [])],
@@ -156,14 +212,80 @@ onMounted(load)
         <v-card-title class="d-flex align-center">
           <v-icon icon="mdi-cogs" class="mr-2" color="primary" /> Agent 配置
           <v-spacer />
+          <v-chip
+            v-if="poolModelIds.length"
+            size="small"
+            variant="tonal"
+            color="primary"
+            class="mr-1"
+          >
+            {{ poolModelIds.length }} 个模型 · 按顺序请求
+          </v-chip>
+          <v-btn size="small" variant="tonal" prepend-icon="mdi-api" class="mr-1" @click="$router.push('/provider-presets')">
+            管理预设
+          </v-btn>
           <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-content-save" :loading="saveStatus === 'saving'" @click="doSave">
             保存配置
           </v-btn>
         </v-card-title>
         <v-card-text>
+          <div class="pool-block mb-4">
+            <div class="pool-head d-flex align-center mb-1">
+              <v-icon icon="mdi-format-list-numbered" class="mr-1" color="primary" size="small" />
+              <span class="font-weight-medium">Provider 模型（按顺序请求，从上到下依次尝试）</span>
+              <v-spacer />
+              <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-plus" @click="pendingPoolModelId = ''; poolDialog = true">
+                添加模型
+              </v-btn>
+            </div>
+            <v-list v-if="poolModelIds.length" density="compact">
+              <v-list-item v-for="(id, i) in poolModelIds" :key="id">
+                <template #prepend>
+                  <span class="pool-order">{{ i + 1 }}</span>
+                </template>
+                <v-list-item-title>{{ poolLabel(id) }}</v-list-item-title>
+                <template #append>
+                  <v-btn size="x-small" variant="text" icon="mdi-arrow-up" :disabled="i === 0" @click="movePoolModel(i, -1)" />
+                  <v-btn size="x-small" variant="text" icon="mdi-arrow-down" :disabled="i === poolModelIds.length - 1" @click="movePoolModel(i, 1)" />
+                  <v-btn size="x-small" variant="text" icon="mdi-close" color="error" @click="removePoolModel(i)" />
+                </template>
+              </v-list-item>
+            </v-list>
+            <div v-else class="text-caption text-center pa-4" style="color: rgba(var(--v-theme-on-surface), 0.45)">
+              尚未配置模型，请添加一个 Provider 模型
+            </div>
+          </div>
+
+          <v-divider class="mb-4" />
+
           <ConfigForm :module-name="'agent'" :schema="schema" :config="draft" :bot-id="botId" @change="onChange" />
         </v-card-text>
       </v-card>
+
+      <v-dialog v-model="poolDialog" max-width="420">
+        <v-card>
+          <v-card-title class="d-flex align-center">
+            <v-icon icon="mdi-plus" class="mr-2" color="primary" /> 添加 Provider 模型
+          </v-card-title>
+          <v-card-text>
+            <v-select
+              v-model="pendingPoolModelId"
+              :items="availablePoolModels.map((m) => ({ title: `${m.preset_name || m.preset_id} / ${m.model}`, value: m.id }))"
+              label="选择模型"
+              density="comfortable"
+              hide-details
+            />
+            <div v-if="!availablePoolModels.length" class="text-caption mt-2" style="color: rgba(var(--v-theme-on-surface), 0.55)">
+              没有可添加的模型，请先到「Provider 预设」页配置连接与模型
+            </div>
+          </v-card-text>
+          <v-card-actions>
+            <v-spacer />
+            <v-btn variant="text" @click="poolDialog = false">取消</v-btn>
+            <v-btn color="primary" variant="tonal" :disabled="!pendingPoolModelId" @click="addPoolModel">添加</v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
 
       <AgentPanels :bot-id="botId" />
     </template>
@@ -179,5 +301,26 @@ onMounted(load)
   padding: 80px 0;
   color: rgba(var(--v-theme-on-surface), 0.45);
   font-size: 14px;
+}
+
+.pool-block {
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: rgba(var(--v-theme-on-surface), 0.015);
+}
+
+.pool-order {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: rgba(var(--v-theme-primary), 0.12);
+  color: rgb(var(--v-theme-primary));
+  font-size: 12px;
+  font-weight: 600;
+  margin-right: 10px;
 }
 </style>

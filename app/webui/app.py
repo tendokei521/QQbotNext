@@ -17,8 +17,10 @@ from app.core.logger import webui_logger
 from app.core.event_bus import BotLifecycleEvent, ConfigChangedEvent, event_bus
 from app.webui.api import agent as agent_router
 from app.webui.api import bots as bots_router
+from app.webui.api import config_profiles as config_profiles_router
 from app.webui.api import logs as logs_router
 from app.webui.api import modules as modules_router
+from app.webui.api import provider_presets as provider_presets_router
 from app.webui.api import webui_cfg as webui_router
 from app.webui.ws import build_ws_router, manager
 
@@ -59,6 +61,10 @@ def create_app(container) -> FastAPI:
     app.include_router(modules_router.router, prefix="/api")
     app.include_router(agent_router.router, prefix="/api")
     app.include_router(logs_router.router, prefix="/api")
+    app.include_router(provider_presets_router.router, prefix="/api")
+    app.include_router(provider_presets_router.models_router, prefix="/api")
+    app.include_router(provider_presets_router.settings_router, prefix="/api")
+    app.include_router(config_profiles_router.router, prefix="/api")
     app.include_router(webui_router.router, prefix="/api")
     app.include_router(build_ws_router())
 
@@ -225,6 +231,31 @@ def _install_config_listener(container) -> None:
                     "user_mode": auth.get("user_mode", "blacklist"),
                     "user_list": auth.get("user_list", []),
                 },
+            }))
+        elif scope == "provider_presets":
+            await manager.broadcast(json.dumps({
+                "type": "provider_presets_updated",
+                "presets": payload,
+            }))
+        elif scope == "provider_models":
+            await manager.broadcast(json.dumps({
+                "type": "provider_models_updated",
+                "models": payload,
+            }))
+        elif scope == "provider_settings":
+            await manager.broadcast(json.dumps({
+                "type": "provider_settings_updated",
+                "settings": payload,
+            }))
+        elif scope == "config_profiles":
+            await manager.broadcast(json.dumps({
+                "type": "config_profiles_updated",
+                "profiles": payload,
+            }))
+        elif scope == "config_routes":
+            await manager.broadcast(json.dumps({
+                "type": "config_routes_updated",
+                "routes": payload,
             }))
 
     config_service.on_change(on_config_change)

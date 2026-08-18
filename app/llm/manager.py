@@ -42,6 +42,7 @@ class AgentRuntime:
 
     def __init__(self, bot_id: Any, config_service, task_manager, bot=None) -> None:
         self.bot_id = bot_id
+        self.config_service = config_service
         self.config = AgentConfig(config_service, bot_id)
         self.config.migrate_from_legacy()  # 首启从 llm_chat_v2 迁移配置与权限
         self.task_manager = task_manager
@@ -59,6 +60,68 @@ class AgentRuntime:
         # 模块扩展：@tool 工具 + 技能
         self.llm_tools = ModuleToolRegistry(logger)
         self.skills = SkillRegistry(logger)
+
+    def _config_for_model_id(self, model_id: str) -> dict | None:
+        """解析指定模型实例的完整 provider 配置。"""
+        model = self.config_service.get_provider_model(model_id)
+        preset = self.config_service.get_provider_preset(model["preset_id"]) if model else None
+        if not model or not preset:
+            return None
+        config = dict(self.config._base_raw_config())
+        config["provider"] = preset.get("provider", "openai")
+        config.update(preset.get("config", {}) or {})
+        config.update(model.get("config", {}) or {})
+        config["model"] = model.get("model", "")
+        config["provider_preset_id"] = preset.get("id", "")
+        config["provider_model_id"] = model.get("id", "")
+        return config
+
+    def provider_config(self) -> dict:
+        """返回主 provider 的完整配置（用于兼容旧调用路径）。"""
+        chain = self.provider_chain()
+        return chain[0] if chain else dict(self.config.raw_config)
+
+    def provider_chain(self) -> list[dict]:
+        """按顺序返回可尝试的 provider 配置链。
+
+        优先使用 provider_model_pool（有序模型池）；为空时兼容旧结构：
+        provider_model_id 作为首个 + fallback_model_ids 依次追加。
+        """
+        config = dict(self.config.raw_config)
+        chain: list[dict] = []
+
+        pool_ids = [str(i) for i in (config.get("provider_model_pool", []) or []) if str(i)]
+        if pool_ids:
+            for model_id in pool_ids:
+                cfg = self._config_for_model_id(model_id)
+                if cfg:
+                    chain.append(cfg)
+            return chain
+
+        primary_id = str(config.get("provider_model_id", "") or "")
+        if primary_id:
+            primary = self._config_for_model_id(primary_id)
+            if primary:
+                chain.append(primary)
+        else:
+            # 兼容旧结构：provider_preset_id + model
+            preset_id = str(config.get("provider_preset_id", "") or "")
+            if preset_id:
+                preset = self.config_service.get_provider_preset(preset_id)
+                if preset:
+                    cfg = dict(self.config._base_raw_config())
+                    cfg["provider"] = preset.get("provider", "openai")
+                    cfg.update(preset.get("config", {}) or {})
+                    chain.append(cfg)
+
+        fallback_ids = [str(i) for i in (config.get("fallback_model_ids", []) or []) if str(i)]
+        for fb_id in fallback_ids:
+            if fb_id == primary_id:
+                continue
+            fb = self._config_for_model_id(fb_id)
+            if fb:
+                chain.append(fb)
+        return chain
 
     def set_bot(self, bot) -> None:
         self._bot = bot

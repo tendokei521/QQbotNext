@@ -10,7 +10,10 @@ import json
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
+from app.llm.config import LEGACY_LLM_CONNECTION_KEYS
 from app.services.bot_service import PASSWORD_MASK as _PASSWORD_MASK
+from app.services.provider_model_service import ProviderModelService
+from app.services.provider_preset_service import ProviderPresetService
 from app.webui.api.deps import get_container, parse_bot_id
 
 router = APIRouter(prefix="/agent", tags=["agent"])
@@ -66,6 +69,15 @@ async def agent_config(request: Request, bot_id: int | None = Depends(parse_bot_
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
     perm = runtime.config.permission
+    raw_config = dict(runtime.config.raw_config)
+    for key in LEGACY_LLM_CONNECTION_KEYS:
+        raw_config.pop(key, None)
+    schema = _split_schema(SCHEMA)
+    presets = container.get(ProviderPresetService).list_presets()
+    preset_name_map = {p["id"]: p["name"] for p in presets}
+    provider_models = container.get(ProviderModelService).list_models()
+    for m in provider_models:
+        m["preset_name"] = preset_name_map.get(m.get("preset_id", ""), m.get("preset_id", ""))
     return JSONResponse(content={
         "ok": True,
         "bot_id": bot_id,
@@ -76,8 +88,10 @@ async def agent_config(request: Request, bot_id: int | None = Depends(parse_bot_
             "user_mode": perm.user_mode,
             "user_list": perm.user_list,
         },
-        "config": _mask_password_config(dict(runtime.config.raw_config), SCHEMA),
-        "schema": _split_schema(SCHEMA),
+        "config": _mask_password_config(raw_config, SCHEMA),
+        "schema": schema,
+        "provider_presets": presets,
+        "provider_models": provider_models,
     })
 
 
@@ -94,8 +108,11 @@ async def agent_config_update(request: Request, bot_id: int | None = Depends(par
     except Exception:
         data = {}
     data = data or {}
-    # 配置字段（password 为脱敏哨兵时保留旧值）
-    for key, value in data.get("config", {}).items():
+    # 配置字段（password 为脱敏哨兵时保留旧值；legacy 连接字段不允许再写入）
+    incoming_config = data.get("config", {}) or {}
+    for key in LEGACY_LLM_CONNECTION_KEYS:
+        incoming_config.pop(key, None)
+    for key, value in incoming_config.items():
         field = SCHEMA.get(key)
         if isinstance(field, dict) and field.get("type") == "password" and value == _PASSWORD_MASK:
             continue
