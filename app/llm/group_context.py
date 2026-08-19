@@ -1,8 +1,12 @@
 """群聊环境上下文构建（不改动“非 @ 不入会话历史”的现有策略）。
 
 用途：
-- 在 `include_pre_history` 开启时，把群聊最近在线消息格式化为“带发送者、时间、QQ”的背景文本；
+- 在 `include_pre_history` 开启时，把群聊最近在线消息格式化为“带发送者、时间”的背景文本；
 - 组装群名 / 群号 / 当前时间 / 最近记录等 system 提示块，供普通对话、主动消息、定时任务复用。
+
+消息打标统一约定（换用消融测试验证过的最优打标方式）：
+- 群聊：``MM-DD HH:MM 昵称(QQ): 内容`` —— 昵称相同用 QQ 区分，核心是“谁 + 什么时候”；
+- 私聊：``MM-DD HH:MM 我/对方: 内容`` —— 私聊只有两方，不需要昵称，用角色（我/对方）即可分清。
 """
 
 from __future__ import annotations
@@ -23,6 +27,33 @@ _NON_TEXT_SEGMENTS = {
     "reply": "引用",
     "forward": "合并转发",
 }
+
+# bot 自己的固定标签（群聊/私聊一致）；私聊对方用“对方”，不展示昵称
+SELF_TAG = "我"
+PRIVATE_OTHER_TAG = "对方"
+
+
+def _time_prefix(ts: Any) -> str:
+    """把 unix 时间戳格式化为 ``MM-DD HH:MM `` 前缀；非法/缺失返回空串。"""
+    if ts is None:
+        return ""
+    try:
+        return datetime.fromtimestamp(int(ts)).strftime("%m-%d %H:%M ")
+    except Exception:
+        return ""
+
+
+def _group_sender_label(nickname: str, user_id: Any, include_user_id: bool) -> str:
+    """群聊发送者标签：昵称为主，昵称缺失时回退 QQ，必要时附 (QQ) 区分同名。"""
+    parts: list[str] = []
+    if nickname:
+        parts.append(nickname)
+    if include_user_id and user_id not in (None, ""):
+        if parts:
+            parts.append(f"({user_id})")
+        else:
+            parts.append(str(user_id))
+    return "".join(parts) if parts else "用户"
 
 
 def _segment_text(segment: Any) -> str | None:
@@ -66,41 +97,53 @@ def format_online_history(
     include_time: bool = True,
     include_user_id: bool = True,
     max_content: int = 200,
+    is_private: bool = False,
 ) -> str:
     """把 OneBot 消息列表格式化为群聊/私聊背景文本。
 
-    每行形如：``[10:23] 昵称(10001): 消息内容``。
+    每行形如：``MM-DD HH:MM 昵称(QQ): 内容``（群聊）或 ``MM-DD HH:MM 对方: 内容``（私聊）。
+    bot 自己的消息统一打标为「我」，不再跳过——让模型能看到对话两侧、判断“哪些是我说的”。
     消息内容过长时截断，避免背景块把上下文撑爆。
+
+    Args:
+        messages: OneBot get_msg_history 返回的消息列表。
+        count: 最多保留的最近消息条数。
+        self_ids: bot 自己的 QQ 集合，用于把 bot 消息打标为「我」。
+        include_time: 是否追加 ``MM-DD HH:MM `` 时间前缀。
+        include_user_id: 群聊时是否在昵称后附加 (QQ) 以区分同名。
+        max_content: 单条内容最长长度，超出截断。
+        is_private: True=私聊（对方只显示为「对方」，不显示昵称/QQ）。
+
+    Returns:
+        格式化后的背景文本（每行一条消息）。
     """
     if not messages:
         return ""
-    self_ids = self_ids or set()
+    self_ids = {str(x) for x in (self_ids or set())}
     lines: list[str] = []
     for msg in messages[-count:]:
         if not isinstance(msg, dict):
             continue
         sender = msg.get("sender", {}) or {}
         user_id = sender.get("user_id", "")
-        if user_id is not None and str(user_id) in self_ids:
-            continue
-        nickname = sender.get("card") or sender.get("nickname") or str(user_id) or "未知"
+        is_self = str(user_id) in self_ids
+
         content = extract_msg_text(msg.get("message"))
         if not content:
             continue
         if len(content) > max_content:
             content = content[:max_content] + "..."
 
-        prefix = ""
-        if include_time:
-            ts = msg.get("time")
-            if ts:
-                try:
-                    prefix += datetime.fromtimestamp(int(ts)).strftime("[%m-%d %H:%M] ")
-                except Exception:
-                    pass
-        if include_user_id and user_id not in (None, ""):
-            nickname = f"{nickname}({user_id})"
-        lines.append(f"{prefix}{nickname}: {content}")
+        if is_self:
+            label = SELF_TAG
+        elif is_private:
+            label = PRIVATE_OTHER_TAG
+        else:
+            nickname = sender.get("card") or sender.get("nickname") or str(user_id) or "未知"
+            label = _group_sender_label(nickname, user_id, include_user_id)
+
+        prefix = _time_prefix(msg.get("time")) if include_time else ""
+        lines.append(f"{prefix}{label}: {content}")
     return "\n".join(lines)
 
 
@@ -132,7 +175,7 @@ async def fetch_private_online_history(
     count: int = 50,
     self_ids: set[str] | None = None,
 ) -> str:
-    """拉取私聊最近消息，格式化为带发送者/时间/QQ 的背景文本。"""
+    """拉取私聊最近消息，格式化为不带昵称的私聊背景文本（我方=我、对方=对方）。"""
     try:
         result = await bot.get_msg_history(
             group_id=0,
@@ -143,7 +186,7 @@ async def fetch_private_online_history(
         if not result or not isinstance(result, dict):
             return ""
         messages = result.get("messages", []) or []
-        return format_online_history(messages, count, self_ids=self_ids)
+        return format_online_history(messages, count, self_ids=self_ids, is_private=True)
     except Exception:
         return ""
 
@@ -161,37 +204,32 @@ async def fetch_group_name(bot: Any, group_id: Any) -> str:
 def format_history_for_llm(history: list[dict], is_private: bool = False) -> list[dict]:
     """把带发送者元数据的会话历史渲染成纯文本消息，避免多余字段进入 API。
 
-    群聊格式：``[08-18 12:30] 昵称(QQ): 内容``
-    私聊格式：``[08-18 12:30] 昵称: 内容``
+    打标方式（与在线历史一致）：
+    - 群聊：``MM-DD HH:MM 昵称(QQ): 内容``；
+    - 私聊：``MM-DD HH:MM 我/对方: 内容``（私聊不需要昵称）；
+    - bot 自己的回复统一打标为「我」。
+
+    Args:
+        history: 会话历史条目（role/content/nickname/user_id/time 等字段）。
+        is_private: True=私聊模式（对方不显示昵称，只显示「对方」）。
+
+    Returns:
+        OpenAI messages 风格的历史列表，content 已渲染为打标文本。
     """
     result = []
     for m in history:
+        role = m.get("role", "user")
         content = m.get("content", "")
-        if m.get("role") == "assistant":
-            rendered = content
+        if role == "assistant":
+            sender = SELF_TAG
+        elif is_private:
+            sender = PRIVATE_OTHER_TAG
         else:
             nickname = m.get("nickname") or ""
             user_id = m.get("user_id") or ""
-            if is_private:
-                sender = nickname or (f"用户({user_id})" if user_id else "用户")
-            else:
-                if nickname and user_id:
-                    sender = f"{nickname}({user_id})"
-                elif nickname:
-                    sender = nickname
-                elif user_id:
-                    sender = f"用户({user_id})"
-                else:
-                    sender = "用户"
-            ts = m.get("time")
-            time_prefix = ""
-            if ts:
-                try:
-                    time_prefix = datetime.fromtimestamp(int(ts)).strftime("[%m-%d %H:%M] ")
-                except Exception:
-                    pass
-            rendered = f"{time_prefix}{sender}: {content}"
-        result.append({"role": m["role"], "content": rendered})
+            sender = _group_sender_label(nickname, user_id, include_user_id=True)
+        rendered = f"{_time_prefix(m.get('time'))}{sender}: {content}"
+        result.append({"role": role, "content": rendered})
     return result
 
 
