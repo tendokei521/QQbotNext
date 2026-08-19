@@ -71,8 +71,7 @@ export const useWebuiStore = defineStore('webui', () => {
   }
 
   async function saveExperimental(patch: Partial<WebuiConfig['experimental']>) {
-    // 走通用 /webui/config 保存接口，避免新增路由未生效时的 405
-    const res = await http.post('/api/webui/config', { experimental: patch })
+    const res = await http.post('/api/webui/config/experimental', patch)
     return unwrap(res.data)
   }
 
