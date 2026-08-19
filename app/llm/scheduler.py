@@ -19,7 +19,7 @@ import re
 import time
 from datetime import datetime
 
-from app.llm import logger, llm_data_dir
+from app.llm import logger, llm_data_dir, safe_bot_id
 from app.llm.group_context import (
     build_group_env_text,
     fetch_group_name,
@@ -133,7 +133,12 @@ class TaskScheduler:
 
         if data_dir is None:
             data_dir = llm_data_dir()
-        self._file = os.path.join(data_dir, f"tasks_data_{module.bot_id}.json")
+        # 每个账号一个目录：data/llm/<bot_id>/tasks_data.json
+        self._dir = os.path.join(data_dir, safe_bot_id(module.bot_id))
+        os.makedirs(self._dir, exist_ok=True)
+        self._file = os.path.join(self._dir, "tasks_data.json")
+        # 兼容：旧版扁平文件 data/llm/tasks_data_<bot>.json（迁移期回退读取）
+        self._legacy_file = os.path.join(data_dir, f"tasks_data_{module.bot_id}.json")
         self._load()
         self._restore()
 
@@ -488,9 +493,11 @@ class TaskScheduler:
     # ── 持久化 ───────────────────────────────────────────
     def _load(self) -> None:
         try:
-            if not os.path.exists(self._file):
+            # 优先新目录文件；不存在则回退旧扁平文件（迁移期兼容）
+            file_path = self._file if os.path.exists(self._file) else self._legacy_file
+            if not os.path.exists(file_path):
                 return
-            with open(self._file, "r", encoding="utf-8") as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             items = data.get("tasks", []) if isinstance(data, dict) else data
             for item in items or []:

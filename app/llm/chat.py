@@ -25,6 +25,7 @@ from app.llm.scheduler import extract_reminder_note, has_schedule_intent
 from app.llm.splitter import split_sentences, strip_stream_artifacts
 from app.llm.trigger import check_trigger, extract_text
 from app.llm.tool import ToolContext, build_tools, make_executor
+from app.llm.tool_loop import normalize_and_execute_tool_calls
 
 import re
 
@@ -715,9 +716,12 @@ async def stream_response(runtime, event, ctx=None):
                     "type": "function",
                     "function": {"name": "", "arguments": ""},
                 })
-                slot["id"] += tc.get("id", "")
-                slot["function"]["name"] += tc.get("function", {}).get("name", "")
-                slot["function"]["arguments"] += tc.get("function", {}).get("arguments", "")
+                # 防御：部分模型/中转商的流式工具碎片里 id/name/arguments 可能为 null，
+                # 直接拼接会抛 "can only concatenate str (not NoneType) to str"。
+                frag = tc.get("function") or {}
+                slot["id"] += tc.get("id") or ""
+                slot["function"]["name"] += frag.get("name") or ""
+                slot["function"]["arguments"] += frag.get("arguments") or ""
             elif ev.type == "error":
                 stream_error = ev.text
                 break
@@ -733,6 +737,11 @@ async def stream_response(runtime, event, ctx=None):
         full_text = "".join(full_text_parts)
 
         if stream_error:
+            # 记录失败详情，便于定位（error 事件文本通常含 API 返回的状态码与原因）
+            logger.add_info(f"#{runtime.bot_id}").error(
+                f"[LLM] 流式请求失败 -> {session_id} (task: {session.task_id}), "
+                f"round={_round}, 已产文本={bool(full_text_parts)}, 工具数={len(tool_calls)}: {stream_error}"
+            )
             if not full_text:
                 yield "抱歉，我暂时无法回答，请稍后再试。"
             return
@@ -740,38 +749,20 @@ async def stream_response(runtime, event, ctx=None):
         if not tool_calls:
             break
 
-        # 组装完整 tool_calls
-        complete_tool_calls = []
-        for idx in sorted(tool_calls):
-            tc = tool_calls[idx]
-            raw_args = tc["function"]["arguments"]
-            try:
-                tc["function"]["arguments"] = json.loads(raw_args) if raw_args.strip() else {}
-            except json.JSONDecodeError:
-                tc["function"]["arguments"] = {}
-            complete_tool_calls.append(tc)
+        # 组装完整 tool_calls（碎片按 index 有序）→ 复用共享 helper：
+        # id 自洽（缺 id 生成 call_{index}）+ arguments 解析 + 执行 + 构造回传，
+        # 与 openai_compat.chat() 的非流式工具循环共用同一套逻辑。
+        tool_calls_list = [tool_calls[idx] for idx in sorted(tool_calls)]
+        normalized_calls, tool_messages = await normalize_and_execute_tool_calls(
+            tool_calls_list, tool_executor, tool_results
+        )
 
         messages.append({
             "role": "assistant",
             "content": round_text or None,
-            "tool_calls": complete_tool_calls,
+            "tool_calls": normalized_calls,
         })
-
-        for tc in complete_tool_calls:
-            name = tc["function"]["name"]
-            args = tc["function"]["arguments"]
-            try:
-                exec_result = await tool_executor(name, args) if tool_executor else "工具执行器不可用"
-            except Exception as e:
-                exec_result = f"error: 工具执行异常 {e}"
-            if not isinstance(exec_result, str):
-                exec_result = str(exec_result)
-            tool_results.append({"name": name, "args": args, "result": exec_result})
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc.get("id", ""),
-                "content": exec_result,
-            })
+        messages.extend(tool_messages)
     else:
         logger.add_info(f"#{runtime.bot_id}").warning("流式工具循环超过 5 轮，强制结束")
 
@@ -797,7 +788,8 @@ async def stream_response(runtime, event, ctx=None):
     # 兜底：流式响应为空时避免“不回复”，给用户一个可见的占位回复
     if not full_text.strip():
         logger.add_info(f"#{runtime.bot_id}").warning(
-            f"[LLM] 流式模型返回空回复，使用兜底文本 -> {session_id}"
+            f"[LLM] 流式模型返回空回复，使用兜底文本 -> {session_id} "
+            f"(task: {session.task_id}, 已执行工具数={len(tool_results)})"
         )
         full_text = "抱歉，我暂时无法回答，请稍后再试。"
         yield full_text

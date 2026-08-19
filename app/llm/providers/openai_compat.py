@@ -16,6 +16,7 @@ from typing import Callable
 import aiohttp
 
 from app.llm import logger
+from app.llm.tool_loop import normalize_and_execute_tool_calls
 from .base import BaseProvider, LLMResponse, StreamEvent
 
 RETRYABLE_STATUS = {408, 409, 429, 500, 502, 503, 504, 529}
@@ -233,31 +234,18 @@ class OpenAICompatProvider(BaseProvider):
             if not tool_calls or tool_executor is None:
                 return self._to_response(result, tool_results)
 
-            # 工具循环：保留 assistant tool_calls，追加各工具结果，重发
+            # 工具循环：保留 assistant tool_calls，追加各工具结果，重发。
+            # 复用共享 helper（与流式 stream_response 同一套逻辑）：
+            # id 自洽 + arguments 解析 + 执行 + 构造回传。
+            normalized_calls, tool_messages = await normalize_and_execute_tool_calls(
+                tool_calls, tool_executor, tool_results
+            )
             payload["messages"].append({
                 "role": "assistant",
                 "content": message.get("content") or None,
-                "tool_calls": tool_calls,
+                "tool_calls": normalized_calls,
             })
-            for tc in tool_calls:
-                fn = tc.get("function", {}) or {}
-                name = fn.get("name", "")
-                try:
-                    args = json.loads(fn.get("arguments") or "{}")
-                except json.JSONDecodeError:
-                    args = {}
-                try:
-                    exec_result = await tool_executor(name, args)
-                except Exception as e:
-                    exec_result = f"error: 工具执行异常 {e}"
-                if not isinstance(exec_result, str):
-                    exec_result = str(exec_result)
-                tool_results.append({"name": name, "args": args, "result": exec_result})
-                payload["messages"].append({
-                    "role": "tool",
-                    "tool_call_id": tc.get("id", ""),
-                    "content": exec_result,
-                })
+            payload["messages"].extend(tool_messages)
 
         logger.add_info("Api").warning(f"工具循环超过 {max_tool_rounds} 轮，强制结束")
         # 保留已执行工具结果与最后一次响应，避免已完成的工具调用静默丢失

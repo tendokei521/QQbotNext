@@ -16,7 +16,7 @@ import time
 from datetime import datetime
 from typing import Any
 
-from app.llm import logger, llm_data_dir
+from app.llm import logger, llm_data_dir, bot_data_dir
 from app.llm.group_context import (
     build_group_env_text,
     fetch_group_name,
@@ -55,7 +55,11 @@ class ProactiveManager:
         self._timers: dict[str, asyncio.Task] = {}       # 私聊下次主动任务
         self._group_timers: dict[str, asyncio.Task] = {}  # 群聊沉默计时器
         self._data: dict[str, dict] = {}
-        self._file = os.path.join(llm_data_dir(), "proactive_data.json")
+        # 每个账号一个目录：data/llm/<bot_id>/proactive_data.json
+        # （旧版共用根目录一份，多账号会互相覆盖；此处按 bot 隔离）
+        self._dir = bot_data_dir(module.bot_id)
+        self._file = os.path.join(self._dir, "proactive_data.json")
+        self._legacy_file = os.path.join(llm_data_dir(), "proactive_data.json")
         self._load()
         self._restore()
 
@@ -278,8 +282,10 @@ class ProactiveManager:
     # ── 持久化 / 清理 ────────────────────────────────────
     def _load(self) -> None:
         try:
-            if os.path.exists(self._file):
-                with open(self._file, "r", encoding="utf-8") as f:
+            # 优先新目录文件；不存在则回退旧版根目录共享文件（迁移期兼容）
+            file_path = self._file if os.path.exists(self._file) else self._legacy_file
+            if os.path.exists(file_path):
+                with open(file_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 if isinstance(data, dict):
                     self._data = data

@@ -10,18 +10,19 @@ import os
 import re
 import time
 
-from app.llm import logger, llm_data_dir
+from app.llm import logger, llm_data_dir, safe_bot_id
 
 # task_id 由 uuid4().hex[:12] 生成，仅允许十六进制（防路径穿越）
 _TASK_ID_RE = re.compile(r"^[0-9a-f]{8,32}$")
 
 
 class HistoryManager:
-    """本地历史管理器 - 按 bot_id 独立。"""
+    """本地历史管理器 - 按 bot_id 独立（磁盘按 <bot_id>/history 隔离）。"""
 
     def __init__(self, bot_id: str):
         self.bot_id = bot_id
-        self.history_dir = os.path.join(llm_data_dir(), "history")
+        # 每个账号独立目录：data/llm/<bot_id>/history
+        self.history_dir = os.path.join(llm_data_dir(), safe_bot_id(bot_id), "history")
         os.makedirs(self.history_dir, exist_ok=True)
 
     def _file_path(self, task_id: str) -> str:

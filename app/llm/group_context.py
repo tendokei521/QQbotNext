@@ -206,8 +206,9 @@ def format_history_for_llm(history: list[dict], is_private: bool = False) -> lis
 
     打标方式（与在线历史一致）：
     - 群聊：``MM-DD HH:MM 昵称(QQ): 内容``；
-    - 私聊：``MM-DD HH:MM 我/对方: 内容``（私聊不需要昵称）；
-    - bot 自己的回复统一打标为「我」。
+    - 私聊：``MM-DD HH:MM 对方: 内容``（私聊不需要昵称）；
+    - bot 自己的回复（assistant）不加任何「时间/我: 」前缀，直接返回原文，
+      避免模型模仿“MM-DD HH:MM 我: ”的格式，把该前缀也写进回复内容从而污染历史。
 
     Args:
         history: 会话历史条目（role/content/nickname/user_id/time 等字段）。
@@ -221,8 +222,11 @@ def format_history_for_llm(history: list[dict], is_private: bool = False) -> lis
         role = m.get("role", "user")
         content = m.get("content", "")
         if role == "assistant":
-            sender = SELF_TAG
-        elif is_private:
+            # 模型自己的回复不再加“时间+我: ”前缀：避免模型模仿该格式，
+            # 把“MM-DD HH:MM 我: ”也写进回复内容（会污染历史并自我强化）。
+            result.append({"role": role, "content": content})
+            continue
+        if is_private:
             sender = PRIVATE_OTHER_TAG
         else:
             nickname = m.get("nickname") or ""
