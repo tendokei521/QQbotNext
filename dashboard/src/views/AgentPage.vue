@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import http, { errorMessage } from '@/api/http'
 import { useBotsStore } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
@@ -61,8 +61,16 @@ const loading = ref(false)
 const saveStatus = ref<'clean' | 'dirty' | 'saving' | 'error'>('clean')
 let autosaveTimer: number | null = null
 let dirtyFlag = false
+// 待保存的目标 bot：自动保存触发时确定，避免切换到新 Bot 后把旧草稿写进新 Bot
+let pendingBotId: number | null = null
+let editSeq = 0
 
 async function load() {
+  // 先取消挂起的自动保存：切换账号/重新加载时丢弃未保存编辑，防止跨 Bot 误写
+  if (autosaveTimer) {
+    clearTimeout(autosaveTimer)
+    autosaveTimer = null
+  }
   // 刷新/首次进入时机器人列表可能还没加载：先补齐并恢复上次选择，避免误报“请先选择账号”
   if (!bots.bots.length) {
     try {
@@ -118,28 +126,28 @@ async function load() {
   }
 }
 
-function onChange(key: string, value: any) {
-  draft[key] = value
+function scheduleAgentSave() {
+  pendingBotId = botId.value
   dirtyFlag = true
+  editSeq += 1
   saveStatus.value = 'dirty'
   if (autosaveTimer) clearTimeout(autosaveTimer)
   autosaveTimer = window.setTimeout(doSave, 2000)
+}
+
+function onChange(key: string, value: any) {
+  draft[key] = value
+  scheduleAgentSave()
 }
 
 function onPermissionChange(v: PermissionConfig) {
   permission.value = v
-  dirtyFlag = true
-  saveStatus.value = 'dirty'
-  if (autosaveTimer) clearTimeout(autosaveTimer)
-  autosaveTimer = window.setTimeout(doSave, 2000)
+  scheduleAgentSave()
 }
 
 function onEnabledChange(v: boolean | null) {
   enabled.value = !!v
-  dirtyFlag = true
-  saveStatus.value = 'dirty'
-  if (autosaveTimer) clearTimeout(autosaveTimer)
-  autosaveTimer = window.setTimeout(doSave, 2000)
+  scheduleAgentSave()
 }
 
 async function doSave() {
@@ -148,17 +156,24 @@ async function doSave() {
     autosaveTimer = null
   }
   if (!dirtyFlag) return
+  const targetBotId = pendingBotId ?? botId.value
+  const snapshotSeq = editSeq
+  pendingBotId = null
   saveStatus.value = 'saving'
   try {
     await http.post(
       '/api/agent/config',
       { config: { ...draft }, permission: permission.value, enabled: enabled.value },
-      { params: { bot_id: botId.value } },
+      { params: { bot_id: targetBotId } },
     )
+    // 已切换到其它 Bot：该保存属于旧 Bot，不推进当前编辑状态（load 会重建草稿）
+    if (targetBotId !== botId.value) return
+    if (editSeq !== snapshotSeq) return // 保存期间又有新编辑：保留 dirty，交由下一次保存
     dirtyFlag = false
     saveStatus.value = 'clean'
     notify.push('Agent 配置已保存', 'success')
   } catch (err) {
+    if (editSeq !== snapshotSeq) return
     saveStatus.value = 'error'
     notify.push(errorMessage(err), 'error')
   }
@@ -170,6 +185,13 @@ watch(
 )
 
 onMounted(load)
+
+onUnmounted(() => {
+  if (autosaveTimer) {
+    clearTimeout(autosaveTimer)
+    autosaveTimer = null
+  }
+})
 </script>
 
 <template>

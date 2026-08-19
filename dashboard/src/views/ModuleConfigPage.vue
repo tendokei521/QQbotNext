@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useModulesStore, type PermissionConfig } from '@/stores/modules'
 import { useWebuiStore } from '@/stores/webui'
@@ -62,6 +62,9 @@ let autosaveTimer: number | null = null
 let permTimer: number | null = null
 let dirtyFlag = false
 let permDirtyFlag = false
+// 编辑序号：保存期间若又有新编辑，完成时按序号判断不清理 dirty，避免最新编辑丢失
+let editSeq = 0
+let permEditSeq = 0
 
 function initFromModule() {
   const m = mod.value
@@ -83,6 +86,7 @@ function initFromModule() {
 function onChange(key: string, value: any) {
   draft[key] = value
   dirtyFlag = true
+  editSeq += 1
   saveStatus.value = 'dirty'
   if (autosaveTimer) clearTimeout(autosaveTimer)
   autosaveTimer = window.setTimeout(doSave, 2000)
@@ -94,13 +98,16 @@ async function doSave() {
     autosaveTimer = null
   }
   if (!dirtyFlag) return
+  const snapshotSeq = editSeq
   saveStatus.value = 'saving'
   try {
     await modules.saveConfig(name, { ...draft })
+    if (editSeq !== snapshotSeq) return // 保存期间有新编辑：保留 dirty，交由下一次保存
     dirtyFlag = false
     saveStatus.value = 'clean'
     saveMsg.value = `已保存 ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`
   } catch (err) {
+    if (editSeq !== snapshotSeq) return
     saveStatus.value = 'error'
     notify.push(errorMessage(err), 'error')
   }
@@ -109,6 +116,7 @@ async function doSave() {
 function onPermissionChange(v: PermissionConfig) {
   permission.value = v
   permDirtyFlag = true
+  permEditSeq += 1
   if (permTimer) clearTimeout(permTimer)
   permTimer = window.setTimeout(doSavePermission, 2000)
 }
@@ -119,11 +127,14 @@ async function doSavePermission() {
     permTimer = null
   }
   if (!permDirtyFlag) return
+  const snapshotSeq = permEditSeq
   try {
     await modules.savePermission(name, permission.value)
+    if (permEditSeq !== snapshotSeq) return // 保存期间有新编辑：保留 dirty
     permDirtyFlag = false
     notify.push('权限已保存', 'success')
   } catch (err) {
+    if (permEditSeq !== snapshotSeq) return
     notify.push(errorMessage(err), 'error')
   }
 }
@@ -136,7 +147,8 @@ async function onToggleEnabled(v: boolean | null) {
     notify.push(`模块 ${mod.value.name} 已${v ? '启用' : '禁用'}`, 'success')
   } catch (err) {
     notify.push(errorMessage(err), 'error')
-    if (mod.value) mod.value.enabled = !v
+    // 走 store.patch 改写响应式对象，避免改到 list 派生出的非响应副本
+    modules.patch(name, { enabled: !v })
   }
 }
 
@@ -255,6 +267,15 @@ onMounted(async () => {
   loadGroups()
   await ensureModule()
   await nextTick()
+})
+
+onUnmounted(() => {
+  if (autosaveTimer) clearTimeout(autosaveTimer)
+  if (permTimer) clearTimeout(permTimer)
+  if (retryTimer) clearTimeout(retryTimer)
+  autosaveTimer = null
+  permTimer = null
+  retryTimer = null
 })
 </script>
 

@@ -89,18 +89,31 @@ async function loadFields() {
   }
 }
 
-function onSelect(v: string) {
+async function onSelect(v: string) {
+  if (v === selected.value) return
   selected.value = v
   Object.keys(draft).forEach((k) => delete draft[k])
-  loadFields()
-  emitValue()
+  // 先等字段加载完成（读取尚未被覆盖的已存值），再通知父级选中项变化；
+  // 不在这里用空草稿覆盖 modelValue，避免清掉该选项已保存的数据
+  await loadFields()
+  emit('update:selectedValue', selected.value)
 }
 
-watch(() => props.botId, loadOptions)
+watch(() => props.botId, () => {
+  // 切换 Bot 后选项集变化：清理旧选中/草稿/编辑标记，重新加载
+  selected.value = ''
+  Object.keys(draft).forEach((k) => delete draft[k])
+  touched.value = false
+  loadOptions()
+})
 watch(
   () => props.selectedValue,
-  (v) => {
-    if (v && v !== selected.value) selected.value = v
+  async (v) => {
+    if (v && v !== selected.value) {
+      selected.value = v
+      Object.keys(draft).forEach((k) => delete draft[k])
+      await loadFields()
+    }
   },
 )
 watch(

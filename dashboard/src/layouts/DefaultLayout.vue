@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useThemeStore } from '@/stores/theme'
 import { useBotsStore, type BotStatus } from '@/stores/bots'
@@ -18,9 +18,17 @@ const route = useRoute()
 const drawer = ref(false)
 const rail = ref(false)
 const multiGroupOpen = ref(false)
+const busyAction = ref(false)
+
+// 桌面/移动断点：桌面永久展开侧边栏，移动端可收起（导航图标切换）
+const isDesktop = ref(window.innerWidth >= 768)
+function onResize() {
+  isDesktop.value = window.innerWidth >= 768
+  if (isDesktop.value) drawer.value = true
+}
 
 // 小屏默认收起侧边栏（抽屉模式）
-if (window.innerWidth >= 768) drawer.value = true
+if (isDesktop.value) drawer.value = true
 
 const STATUS_TEXT: Record<BotStatus, string> = {
   connected: '已连接',
@@ -82,27 +90,37 @@ const hasCurrentBot = computed(() => bots.currentIndex !== null)
 
 async function onBotSelect() {
   bots.selectBot(bots.currentIndex!)
-  await refreshScopedData()
+  try {
+    await refreshScopedData()
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  }
 }
 
 async function refreshScopedData() {
   // 账号切换后：模块数据随 bot_id 刷新（各页面按需再拉）
   const { useModulesStore } = await import('@/stores/modules')
-  useModulesStore().load()
+  await useModulesStore().load()
 }
 
 async function act(fn: () => Promise<unknown>, okMsg: string) {
+  // 防抖：连接/断开/重连进行中忽略重复点击
+  if (busyAction.value) return
+  busyAction.value = true
   try {
     await fn()
     notify.push(okMsg, 'success')
     await bots.fetchBots()
   } catch (err) {
     notify.push(errorMessage(err), 'error')
+  } finally {
+    busyAction.value = false
   }
 }
 
 onMounted(async () => {
   connectSocket()
+  window.addEventListener('resize', onResize)
   try {
     await Promise.all([bots.fetchBots(), webui.load()])
     bots.restoreSelection()
@@ -110,6 +128,10 @@ onMounted(async () => {
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   }
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', onResize)
 })
 </script>
 
@@ -121,7 +143,7 @@ onMounted(async () => {
       rail-width="72"
       width="248"
       class="app-drawer"
-      permanent
+      :permanent="isDesktop"
     >
       <template #prepend>
         <div class="drawer-brand">
@@ -156,7 +178,7 @@ onMounted(async () => {
     </v-navigation-drawer>
 
     <v-app-bar flat class="app-topbar" height="56">
-      <v-app-bar-nav-icon v-if="!drawer" @click="drawer = true" />
+      <v-app-bar-nav-icon v-if="!isDesktop" @click="drawer = !drawer" />
 
       <div class="topbar-account">
         <v-select
@@ -217,7 +239,7 @@ onMounted(async () => {
             color="success"
             variant="tonal"
             prepend-icon="mdi-plug"
-            :disabled="isConnected || !hasCurrentBot"
+            :disabled="isConnected || !hasCurrentBot || busyAction"
             title="连接当前账号"
             @click="act(() => bots.connect(bots.currentIndex!), '已发送连接请求')"
           >
@@ -227,7 +249,7 @@ onMounted(async () => {
             color="error"
             variant="tonal"
             prepend-icon="mdi-unlink"
-            :disabled="!isConnected"
+            :disabled="!isConnected || busyAction"
             title="断开当前账号"
             @click="act(() => bots.disconnect(bots.currentIndex!), '已断开')"
           >
@@ -237,7 +259,7 @@ onMounted(async () => {
             color="warning"
             variant="tonal"
             prepend-icon="mdi-restart"
-            :disabled="!hasCurrentBot"
+            :disabled="!hasCurrentBot || busyAction"
             title="重连当前账号"
             @click="act(() => bots.reconnect(bots.currentIndex!), '已发送重连请求')"
           >

@@ -110,7 +110,7 @@ SCHEMA = {
     },
     "stream_flush_on_finish": {
         "type": "boolean", "label": "结束后立即清空", "description": "流结束后是否忽略剩余间隔立即发送剩余消息",
-        "default": True, "group": "group_stream",
+        "default": False, "group": "group_stream",
     },
     "stream_keep_order": {
         "type": "boolean", "label": "严格按顺序发送", "description": "保持生成顺序逐条发送（建议开启）",

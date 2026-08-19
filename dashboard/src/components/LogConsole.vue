@@ -26,25 +26,17 @@ function isSimpleLog(row: { level: string; message: string }) {
 
 const visibleRows = computed(() => logs.filtered.filter(isSimpleLog).slice(-1000))
 
-// 可写 computed：webui.load() 覆盖配置后仍绑定到最新值
-const levels = computed<string[]>({
-  get: () => webui.config.logs.visible_levels,
-  set: (v) => {
-    webui.config.logs.visible_levels = v
-  },
-})
-const maxLines = computed<number>({
-  get: () => webui.config.logs.max_lines,
-  set: (v) => {
-    webui.config.logs.max_lines = v
-  },
-})
-const showRawLogs = computed<boolean>({
-  get: () => webui.config.logs.show_raw_logs,
-  set: (v) => {
-    webui.config.logs.show_raw_logs = v
-  },
-})
+// 弹窗草稿：打开时从 store 快照，保存时才写回，取消可直接丢弃（不再即时改 live 配置）
+const editLevels = ref<string[]>([])
+const editMaxLines = ref(50)
+const editShowRawLogs = ref(false)
+
+function openSettings() {
+  editLevels.value = [...webui.config.logs.visible_levels]
+  editMaxLines.value = webui.config.logs.max_lines
+  editShowRawLogs.value = webui.config.logs.show_raw_logs
+  settingsOpen.value = true
+}
 
 function onFilterInput() {
   logs.setFilter(filterInput.value)
@@ -53,9 +45,9 @@ function onFilterInput() {
 async function saveLogsSettings() {
   try {
     await webui.saveLogs({
-      show_raw_logs: showRawLogs.value,
-      visible_levels: levels.value,
-      max_lines: maxLines.value,
+      show_raw_logs: editShowRawLogs.value,
+      visible_levels: editLevels.value,
+      max_lines: editMaxLines.value,
     })
     settingsOpen.value = false
     notify.push('日志设置已保存', 'success')
@@ -111,7 +103,7 @@ onMounted(() => {
           :title="logs.paused ? '继续接收日志' : '暂停接收日志'"
           @click="logs.togglePause()"
         />
-        <v-btn size="small" variant="tonal" icon="mdi-cog-outline" title="日志显示设置" @click="settingsOpen = true" />
+        <v-btn size="small" variant="tonal" icon="mdi-cog-outline" title="日志显示设置" @click="openSettings" />
         <v-btn size="small" variant="tonal" icon="mdi-delete-outline" title="清空日志" @click="logs.clear()" />
       </div>
     </div>
@@ -135,7 +127,7 @@ onMounted(() => {
           <v-checkbox
             v-for="lv in ['debug', 'info', 'warning', 'error']"
             :key="lv"
-            v-model="levels"
+            v-model="editLevels"
             :label="lv"
             :value="lv"
             density="compact"
@@ -143,7 +135,7 @@ onMounted(() => {
             color="primary"
           />
           <v-text-field
-            v-model.number="maxLines"
+            v-model.number="editMaxLines"
             label="显示行数"
             type="number"
             min="10"
@@ -153,7 +145,7 @@ onMounted(() => {
             hide-details
           />
           <v-switch
-            v-model="showRawLogs"
+            v-model="editShowRawLogs"
             label="显示原始日志"
             color="primary"
             density="compact"

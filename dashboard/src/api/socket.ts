@@ -57,6 +57,18 @@ export function connectSocket(): void {
   const query = `?${params.toString()}`
   ws = new WebSocket(`${proto}://${location.host}/ws/logs${query}`)
 
+  ws.onopen = () => {
+    // 广播“已连接/重连成功”，各 store 借此重拉状态与模块数据，弥补断线期间的丢失更新
+    const set = handlers.get('socket_open')
+    set?.forEach((h) => {
+      try {
+        h({ type: 'socket_open' })
+      } catch {
+        /* 单个处理器异常不影响其他处理 */
+      }
+    })
+  }
+
   ws.onmessage = (ev) => {
     let payload: any
     try {

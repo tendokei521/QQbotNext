@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useModulesStore, type ModuleData } from '@/stores/modules'
 import { useNotifyStore } from '@/stores/notify'
@@ -12,6 +12,7 @@ const router = useRouter()
 
 const search = ref('')
 const collapsed = ref<Record<string, boolean>>({})
+const toggling = reactive<Record<string, boolean>>({})
 const searchRef = ref<HTMLInputElement | null>(null)
 
 const PERMISSION_LABEL: Record<string, string> = {
@@ -56,6 +57,8 @@ const groups = computed(() => {
 })
 
 function isCollapsed(cat: string): boolean {
+  // 搜索时强制展开所有分组，避免匹配结果被折叠隐藏
+  if (search.value.trim()) return false
   return !!collapsed.value[cat]
 }
 
@@ -64,18 +67,19 @@ function toggleCat(cat: string) {
   localStorage.setItem('qqbot_module_collapsed', JSON.stringify(collapsed.value))
 }
 
-function onSearch() {
-  // 搜索时自动展开所有分组（无搜索词时恢复折叠态）
-}
-
 async function onToggle(m: ModuleData, v: boolean | null) {
+  if (toggling[m._key]) return
   const enabled = !!v
+  toggling[m._key] = true
   try {
     await modules.toggle(m._key, enabled)
     notify.push(`模块 ${m.name} 已${enabled ? '启用' : '禁用'}`, 'success')
   } catch (err) {
     notify.push(errorMessage(err), 'error')
-    m.enabled = !enabled // 回滚
+    // 通过 store.patch 改写响应式对象，失败回滚才能反映到界面
+    modules.patch(m._key, { enabled: !enabled })
+  } finally {
+    toggling[m._key] = false
   }
 }
 
@@ -107,7 +111,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         <h1 class="app-page-title">功能模块</h1>
         <div class="app-page-subtitle">共 {{ modules.count }} 个模块，点击进入配置</div>
       </div>
-      <v-btn variant="tonal" prepend-icon="mdi-refresh" :loading="modules.reloading" @click="modules.reloadAll()">
+      <v-btn variant="tonal" prepend-icon="mdi-refresh" :loading="modules.reloading" @click="modules.reloadAll().catch((e: unknown) => notify.push(errorMessage(e), 'error'))">
         刷新模块
       </v-btn>
     </div>
@@ -122,7 +126,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       clearable
       prepend-inner-icon="mdi-magnify"
       class="mb-4"
-      @update:model-value="onSearch"
     />
 
     <!-- 首载骨架屏 -->
@@ -158,6 +161,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                     color="primary"
                     density="compact"
                     hide-details
+                    :loading="toggling[m._key]"
+                    :disabled="toggling[m._key]"
                     @click.stop
                     @update:model-value="(v: boolean | null) => onToggle(m, v)"
                   />
@@ -197,6 +202,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                     color="primary"
                     density="compact"
                     hide-details
+                    :loading="toggling[m._key]"
+                    :disabled="toggling[m._key]"
                     @click.stop
                     @update:model-value="(v: boolean | null) => onToggle(m, v)"
                   />
@@ -213,7 +220,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           :title="search ? `没有匹配「${search}」的模块` : '暂无模块'"
           description="尝试更换关键词，或刷新模块列表"
         >
-          <v-btn size="small" variant="tonal" prepend-icon="mdi-refresh" @click="modules.reloadAll()">刷新模块</v-btn>
+          <v-btn size="small" variant="tonal" prepend-icon="mdi-refresh" @click="modules.reloadAll().catch((e: unknown) => notify.push(errorMessage(e), 'error'))">刷新模块</v-btn>
         </EmptyState>
       </v-card>
     </template>

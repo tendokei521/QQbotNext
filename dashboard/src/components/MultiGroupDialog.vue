@@ -42,9 +42,11 @@ async function load() {
       const infos = bg.groups_info || []
       bg.groups.forEach((gid, i) => {
         const key = String(gid)
-        const row = map.get(key) || { gid: key, name: String(infos[i]?.group_name ?? gid), botIndexes: [] }
+        const row = map.get(key) || { gid: key, name: '', botIndexes: [] }
+        // 优先填真实群名；后到的 bot 也可补填，避免某个 bot 无 group_name 时永远显示裸 gid
+        if (infos[i]?.group_name) row.name = String(infos[i].group_name)
+        if (!row.name) row.name = key
         row.botIndexes.push(bg.index)
-        if (infos[i]?.group_name && !row.name) row.name = String(infos[i].group_name)
         map.set(key, row)
       })
     })

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useBotsStore, type BotConfig, type BotStatus } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
@@ -24,6 +24,7 @@ const drafts = reactive<Record<number, { ws_url: string; access_token: string; o
 const saving = ref(false)
 const loadingCards = ref(false)
 const deleteTarget = ref<number | null>(null)
+const acting = reactive<Record<number, boolean>>({})
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
 function draftOf(index: number) {
@@ -38,8 +39,10 @@ async function loadCards() {
   try {
     const [configs, statuses] = await Promise.all([bots.fetchBotConfig(), bots.fetchBots()])
     // 以配置列表为主填充草稿：/api/bots/config 返回的 index 缺失时按列表位置兜底
+    const seen = new Set<number>()
     configs.forEach((cfg, pos) => {
       const index = Number(cfg.index ?? pos)
+      seen.add(index)
       const b = statuses.find((s) => s.index === index)
       drafts[index] = {
         ws_url: cfg.ws_url ?? b?.ws_url ?? '',
@@ -48,6 +51,10 @@ async function loadCards() {
         auto_connect: cfg.auto_connect ?? b?.auto_connect ?? false,
       }
     })
+    // 清理已删除/失效的草稿，避免残留旧索引被再次全量保存而“复活”账号
+    for (const key of Object.keys(drafts)) {
+      if (!seen.has(Number(key))) delete drafts[Number(key)]
+    }
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   } finally {
@@ -56,13 +63,18 @@ async function loadCards() {
 }
 
 function buildPayload(): BotConfig[] {
-  return Object.entries(drafts).map(([index, d]) => ({
-    index: parseInt(index, 10),
-    ws_url: d.ws_url.trim(),
-    access_token: d.access_token,
-    owner_id: d.owner_id.trim() ? parseInt(d.owner_id.trim(), 10) : null,
-    auto_connect: d.auto_connect,
-  }))
+  return Object.entries(drafts).map(([index, d]) => {
+    const ownerRaw = d.owner_id.trim()
+    const owner = ownerRaw ? Number(ownerRaw) : null
+    return {
+      index: parseInt(index, 10),
+      ws_url: d.ws_url.trim(),
+      access_token: d.access_token,
+      // 非法数字不静默存 NaN：统一按 null 处理
+      owner_id: owner !== null && Number.isInteger(owner) && owner >= 0 ? owner : null,
+      auto_connect: d.auto_connect,
+    }
+  })
 }
 
 async function persistDrafts(showToast = true): Promise<boolean> {
@@ -81,6 +93,11 @@ async function persistDrafts(showToast = true): Promise<boolean> {
 }
 
 async function saveAll() {
+  // 取消挂起的自动保存，避免手动保存后 timer 再重复全量写一次
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
   if (await persistDrafts(true)) {
     await loadCards()
   }
@@ -109,17 +126,25 @@ async function addBot() {
 
 async function doDelete() {
   if (deleteTarget.value === null) return
+  // 立即取消挂起的自动保存，防止删除竞态把被删账号重新写回
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
   try {
     await bots.deleteBotConfig(deleteTarget.value)
     notify.push('已删除账号配置', 'success')
     deleteTarget.value = null
-    await Promise.all([loadCards(), bots.fetchBots()])
+    // loadCards 已同时拉取配置与状态，无需再单独 fetchBots
+    await loadCards()
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   }
 }
 
 async function act(index: number, kind: 'connect' | 'disconnect' | 'reconnect') {
+  if (acting[index]) return
+  acting[index] = true
   try {
     if (kind === 'connect') await bots.connect(index)
     else if (kind === 'disconnect') await bots.disconnect(index)
@@ -128,10 +153,18 @@ async function act(index: number, kind: 'connect' | 'disconnect' | 'reconnect') 
     await bots.fetchBots()
   } catch (err) {
     notify.push(errorMessage(err), 'error')
+  } finally {
+    acting[index] = false
   }
 }
 
 onMounted(loadCards)
+onUnmounted(() => {
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
+})
 </script>
 
 <template>
@@ -224,6 +257,7 @@ onMounted(loadCards)
               density="compact"
               hide-details
               @update:model-value="(v: boolean | null) => { draftOf(b.index).auto_connect = !!v }"
+              @change="scheduleSave()"
             />
             <v-divider class="my-3" />
             <div class="info-grid">
@@ -246,9 +280,9 @@ onMounted(loadCards)
           </v-card-text>
 
           <v-card-actions>
-            <v-btn color="success" variant="tonal" size="small" prepend-icon="mdi-plug" :disabled="b.status === 'connected'" @click="act(b.index, 'connect')">连接</v-btn>
-            <v-btn color="error" variant="tonal" size="small" prepend-icon="mdi-unlink" :disabled="b.status !== 'connected'" @click="act(b.index, 'disconnect')">断开</v-btn>
-            <v-btn color="warning" variant="tonal" size="small" prepend-icon="mdi-restart" @click="act(b.index, 'reconnect')">重连</v-btn>
+            <v-btn color="success" variant="tonal" size="small" prepend-icon="mdi-plug" :loading="acting[b.index]" :disabled="b.status === 'connected' || acting[b.index]" @click="act(b.index, 'connect')">连接</v-btn>
+            <v-btn color="error" variant="tonal" size="small" prepend-icon="mdi-unlink" :disabled="b.status !== 'connected' || acting[b.index]" @click="act(b.index, 'disconnect')">断开</v-btn>
+            <v-btn color="warning" variant="tonal" size="small" prepend-icon="mdi-restart" :disabled="acting[b.index]" @click="act(b.index, 'reconnect')">重连</v-btn>
           </v-card-actions>
         </v-card>
       </v-col>

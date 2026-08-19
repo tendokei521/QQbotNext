@@ -77,10 +77,17 @@ const groupDefs = computed(() => {
 // 折叠状态（按分组 id）
 const collapsed = reactive<Record<string, boolean>>({})
 
+function effectiveValue(key: string): any {
+  if (props.config[key] !== undefined) return props.config[key]
+  const def = parsed.value.items.find((it) => it.key === key)?.schema?.default
+  return def
+}
+
 function isVisible(item: ItemDef): boolean {
   const cond = item.schema.showIf
   if (!cond) return true
-  return props.config[cond.key] === cond.value
+  // 用“含 schema 默认值的有效值”判断，避免控制项仅存在于默认时依赖项被误隐藏
+  return effectiveValue(cond.key) === cond.value
 }
 
 /** 复杂 widget 需要单独渲染 label/description，简单字段由 FieldControl 自带 */

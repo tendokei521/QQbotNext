@@ -50,6 +50,8 @@ export const useBotsStore = defineStore('bots', () => {
   }
 
   function selectBot(index: number) {
+    // 只在状态列表已包含该索引时才选中，避免指向尚未同步的连接条目
+    if (!bots.value.some((b) => b.index === index)) return
     currentIndex.value = index
     localStorage.setItem(CURRENT_BOT_KEY, String(index))
   }
@@ -116,6 +118,11 @@ export const useBotsStore = defineStore('bots', () => {
   // WS 实时状态同步
   onSocketMessage('bot_status_updated', (msg) => {
     if (msg.bot) patchStatus(msg.bot)
+  })
+
+  // WS 重连/首次连接成功后重拉状态，弥补断线期间丢失的 status 更新
+  onSocketMessage('socket_open', () => {
+    fetchBots()
   })
 
   return {

@@ -25,6 +25,22 @@ export interface ModulePreferences {
   [key: string]: any
 }
 
+/** 递归合并嵌套的 webui 配置：浅合并会把整个嵌套对象（如 logs）整体替换而丢字段 */
+function deepMerge<T>(base: T, patch: any): T {
+  if (!base || typeof base !== 'object' || Array.isArray(base) || !patch || typeof patch !== 'object' || Array.isArray(patch)) {
+    return (patch === undefined ? base : patch) as T
+  }
+  const result: Record<string, any> = { ...(base as Record<string, any>) }
+  for (const key of Object.keys(patch)) {
+    const bv = (base as Record<string, any>)[key]
+    const pv = patch[key]
+    result[key] = bv && typeof bv === 'object' && !Array.isArray(bv) && pv && typeof pv === 'object' && !Array.isArray(pv)
+      ? deepMerge(bv, pv)
+      : pv
+  }
+  return result as T
+}
+
 /** webui 配置中心：日志设置 / 单一服务 / 多群管理 / 模块偏好 */
 export const useWebuiStore = defineStore('webui', () => {
   const config = ref<WebuiConfig>({
@@ -38,7 +54,7 @@ export const useWebuiStore = defineStore('webui', () => {
   async function load() {
     try {
       const res = await http.get<WebuiConfig>('/api/webui/config')
-      if (res.data) config.value = { ...config.value, ...res.data }
+      if (res.data) config.value = deepMerge(config.value, res.data)
     } catch {
       /* 初始默认值兜底 */
     }
@@ -77,7 +93,7 @@ export const useWebuiStore = defineStore('webui', () => {
 
   // WS 实时同步
   onSocketMessage('webui_config_updated', (msg) => {
-    if (msg.config) config.value = { ...config.value, ...msg.config }
+    if (msg.config) config.value = deepMerge(config.value, msg.config)
   })
   onSocketMessage('single_service_updated', (msg) => {
     if (msg.single_service) config.value.single_service = msg.single_service

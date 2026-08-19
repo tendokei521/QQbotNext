@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import http, { errorMessage } from '@/api/http'
 import { useNotifyStore } from '@/stores/notify'
 
@@ -35,6 +35,11 @@ const tasks = ref<TaskItem[]>([])
 const proactive = ref<ProactiveSession[]>([])
 const loadingTasks = ref(false)
 const loadingProactive = ref(false)
+// 操作防重：避免双击重复创建/触发/取消
+const addingTask = ref(false)
+const busyTasks = ref(false)
+const busyProactive = ref(false)
+let pollTimer: number | null = null
 
 const addForm = ref({ type: 'private', target: '', trigger: '', content: '', repeat: '' })
 
@@ -82,11 +87,13 @@ function loadAll() {
 }
 
 async function addTask() {
+  if (addingTask.value) return
   const f = addForm.value
   if (!f.trigger.trim() || !f.content.trim() || !f.target.trim()) {
     notify.push('请填写时间表达式、目标与内容', 'warning')
     return
   }
+  addingTask.value = true
   try {
     const res = await http.post(
       '/api/agent/tasks',
@@ -103,41 +110,77 @@ async function addTask() {
     await loadTasks()
   } catch (err) {
     notify.push(errorMessage(err), 'error')
+  } finally {
+    addingTask.value = false
   }
 }
 
 async function triggerTask(taskId: string) {
+  if (busyTasks.value) return
+  busyTasks.value = true
   try {
     await http.post(`/api/agent/tasks/${taskId}/trigger`, null, { params: { bot_id: props.botId } })
     notify.push('已立即触发任务', 'success')
     await loadTasks()
   } catch (err) {
     notify.push(errorMessage(err), 'error')
+  } finally {
+    busyTasks.value = false
   }
 }
 
 async function cancelTask(taskId: string) {
+  if (busyTasks.value) return
+  busyTasks.value = true
   try {
     await http.post(`/api/agent/tasks/${taskId}/cancel`, null, { params: { bot_id: props.botId } })
     notify.push('已取消任务', 'success')
     await loadTasks()
   } catch (err) {
     notify.push(errorMessage(err), 'error')
+  } finally {
+    busyTasks.value = false
   }
 }
 
 async function triggerProactive(sessionId: string) {
+  if (busyProactive.value) return
+  busyProactive.value = true
   try {
     await http.post('/api/agent/proactive/trigger', { session_id: sessionId }, { params: { bot_id: props.botId } })
     notify.push('已触发主动发言', 'success')
     await loadProactive()
   } catch (err) {
     notify.push(errorMessage(err), 'error')
+  } finally {
+    busyProactive.value = false
+  }
+}
+
+// 后台任务/主动消息状态会随时间变化，轻量轮询保证列表不过期
+function startPolling() {
+  if (pollTimer) return
+  pollTimer = window.setInterval(() => {
+    if (props.botId) {
+      loadTasks()
+      loadProactive()
+    }
+  }, 15000)
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    window.clearInterval(pollTimer)
+    pollTimer = null
   }
 }
 
 watch(() => props.botId, loadAll)
-onMounted(loadAll)
+onMounted(() => {
+  loadAll()
+  startPolling()
+})
+onUnmounted(stopPolling)
 </script>
 
 <template>
@@ -165,7 +208,7 @@ onMounted(loadAll)
           <v-text-field v-model="addForm.trigger" label="时间表达式（如：明天早上8点 / 每天中午12点）" density="compact" variant="outlined" hide-details />
           <v-text-field v-model="addForm.content" label="要发送的内容" density="compact" variant="outlined" hide-details />
           <v-text-field v-model="addForm.repeat" label="重复规则（可选）" density="compact" variant="outlined" hide-details style="max-width: 160px" />
-          <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="addTask">添加</v-btn>
+          <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" :loading="addingTask" :disabled="addingTask" @click="addTask">添加</v-btn>
         </div>
 
         <v-table density="compact" class="mt-3">
@@ -192,8 +235,8 @@ onMounted(loadAll)
               <td class="text-caption">{{ t.fired_count }}</td>
               <td class="text-caption task-content">{{ t.content }}</td>
               <td>
-                <v-btn size="x-small" variant="text" color="primary" @click="triggerTask(t.task_id)">触发</v-btn>
-                <v-btn size="x-small" variant="text" color="error" @click="cancelTask(t.task_id)">取消</v-btn>
+                <v-btn size="x-small" variant="text" color="primary" :loading="busyTasks" :disabled="busyTasks" @click="triggerTask(t.task_id)">触发</v-btn>
+                <v-btn size="x-small" variant="text" color="error" :disabled="busyTasks" @click="cancelTask(t.task_id)">取消</v-btn>
               </td>
             </tr>
           </tbody>
@@ -234,7 +277,7 @@ onMounted(loadAll)
               <td class="text-caption">{{ fmtTime(s.next_trigger_time) }}</td>
               <td class="text-caption">{{ s.timer || '—' }}</td>
               <td>
-                <v-btn size="x-small" variant="text" color="primary" :disabled="!s.enabled" @click="triggerProactive(s.session_id)">触发</v-btn>
+                <v-btn size="x-small" variant="text" color="primary" :loading="busyProactive" :disabled="busyProactive || !s.enabled" @click="triggerProactive(s.session_id)">触发</v-btn>
               </td>
             </tr>
           </tbody>

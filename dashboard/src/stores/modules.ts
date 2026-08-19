@@ -54,21 +54,26 @@ export const useModulesStore = defineStore('modules', () => {
 
   const bots = useBotsStore()
 
+  // 请求序号：丢弃过期响应，避免快速切换账号时旧响覆盖新的模块数据
+  let loadSeq = 0
+
   /** 同步到当前选中账号的作用域 */
   function syncBotScope() {
     botId.value = bots.currentBot?.bot_id ?? null
   }
 
   async function load(): Promise<void> {
+    const seq = ++loadSeq
     loading.value = true
     try {
       syncBotScope()
       const res = await http.get<Record<string, ModuleData>>('/api/modules', {
         params: { bot_id: botId.value },
       })
+      if (seq !== loadSeq) return
       modules.value = res.data || {}
     } finally {
-      loading.value = false
+      if (seq === loadSeq) loading.value = false
     }
   }
 
@@ -140,6 +145,11 @@ export const useModulesStore = defineStore('modules', () => {
     }
   })
   onSocketMessage('modules_reloaded', () => {
+    load()
+  })
+
+  // WS 重连/首次连接成功后重拉模块数据，弥补断线期间的更新
+  onSocketMessage('socket_open', () => {
     load()
   })
 

@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.core.logger import webui_logger
-from app.core.event_bus import BotLifecycleEvent, ConfigChangedEvent, event_bus
+from app.core.event_bus import BotLifecycleEvent, event_bus
 from app.webui.api import agent as agent_router
 from app.webui.api import bots as bots_router
 from app.webui.api import config_profiles as config_profiles_router
@@ -174,7 +174,11 @@ def _install_bot_lifecycle_listener(container) -> None:
     gateway = container.get(OneBotGateway)
 
     async def on_bot_lifecycle(event: BotLifecycleEvent) -> None:
-        info = gateway.get_bot_info_by_index(event.bot_index) or {}
+        stat = {}
+        for s in gateway.get_bots_info():
+            if s["index"] == event.bot_index:
+                stat = s
+                break
         await manager.broadcast(json.dumps({
             "type": "bot_status_updated",
             "bot": {
@@ -182,7 +186,11 @@ def _install_bot_lifecycle_listener(container) -> None:
                 "bot_id": event.bot_id,
                 "status": event.state,
                 "last_error": event.detail or None,
-                "login_info": info.get("login_info"),
+                "login_info": stat.get("login_info"),
+                "reconnect_attempts": stat.get("reconnect_attempts"),
+                "ws_url": stat.get("ws_url"),
+                "owner_id": stat.get("owner_id"),
+                "auto_connect": stat.get("auto_connect"),
             },
         }))
         if event.state == "connected" and event.bot_id:
@@ -266,7 +274,6 @@ def _install_auth_middleware(app: FastAPI, container) -> None:
     import base64
 
     from app.core.settings import Settings
-    from starlette.middleware.base import BaseHTTPMiddleware
 
     settings = container.get(Settings)
     token = (settings.webui_token or "").strip()

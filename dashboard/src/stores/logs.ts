@@ -55,9 +55,15 @@ export const useLogsStore = defineStore('logs', () => {
     // 从尾部对齐：跳过与旧快照重复的尾部行，仅追加新增
     let i = items.length - 1
     while (i >= 0 && prevKeys.has(itemKey(items[i]))) i--
-    const fresh = items.slice(0, i + 1)
-    if (fresh.length) {
-      logs.value = [...logs.value, ...fresh].slice(-MAX_CACHE)
+    if (i < 0) {
+      // 与上一帧无任何尾部重叠（如大 burst 冲满窗口 / 服务端缓冲重置）：
+      // 整帧替换而不是丢弃，避免一批新日志静默消失
+      logs.value = items
+    } else {
+      const fresh = items.slice(0, i + 1)
+      if (fresh.length) {
+        logs.value = [...logs.value, ...fresh].slice(-MAX_CACHE)
+      }
     }
     cache.value = items
     pendingCount.value = 0
@@ -88,8 +94,9 @@ export const useLogsStore = defineStore('logs', () => {
     setLogMode(mode)
     try {
       const res = await http.get<LogItem[]>('/api/logs', { params: { mode } })
-      logs.value = res.data || []
-      cache.value = [...logs.value]
+      cache.value = res.data || []
+      // 暂停期间不覆盖已冻结的视图，恢复时以上面最新 cache 全量重绘
+      if (!paused.value) logs.value = [...cache.value]
     } catch {
       /* 网络异常时等待下一帧 WS 快照即可 */
     }

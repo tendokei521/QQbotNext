@@ -100,11 +100,13 @@ async def api_bots_config_save(request: Request):
 
 @router.post("/bots/config/add")
 async def api_bots_config_add(request: Request):
-    from app.infrastructure.config.config_service import ConfigService
+    from app.services.bot_service import BotService
 
     container = get_container(request)
-    cfg_service = container.get(ConfigService)
-    index = await cfg_service.add_bot({"ws_url": "", "owner_id": None, "auto_connect": False})
+    # Reuse BotService.add_bot: persist the config AND register a gateway connection
+    # (status "disconnected") at once, so /api/bots (status list) includes the new
+    # account immediately and the cards / account selector refresh right away.
+    index = await container.get(BotService).add_bot("", None, False)
     return _ok("已添加新账号配置", index=index)
 
 
@@ -121,6 +123,8 @@ async def api_bots_config_delete(index: int, request: Request):
     ok = await cfg_service.delete_bot(index)
     if not ok:
         return _err(404, f"索引 {index} 不存在")
+    # 配置列表已压缩索引，立即对齐 gateway 连接映射，避免前端短暂错位
+    await bot_service.gateway.reconcile()
     return _ok("已删除账号配置")
 
 

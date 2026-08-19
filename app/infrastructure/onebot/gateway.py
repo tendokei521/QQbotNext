@@ -19,7 +19,7 @@ from typing import Any, Awaitable, Callable
 import websockets
 
 from app.core.event_bus import BotLifecycleEvent, event_bus
-from app.core.logger import logger, websocket_logger
+from app.core.logger import logger
 from app.domain.events import BaseEvent, MessageEvent, NoticeEvent, RequestEvent
 from app.infrastructure.cache import Cache
 from app.infrastructure.config.config_service import mask_ws_url, split_ws_url
@@ -275,7 +275,7 @@ class OneBotGateway:
                 await self._notify_status(conn, "connected", "已登录")
                 self.connect_type = False
                 return True
-            self.log.info(f"获取账号信息失败，将尝试从消息流中自动获取 self_id")
+            self.log.info("获取账号信息失败，将尝试从消息流中自动获取 self_id")
             self.connect_type = False
             return False
         except Exception as e:
@@ -571,6 +571,15 @@ class OneBotGateway:
             await asyncio.gather(*(self.connect_bot(i) for i in auto_indices))
         if self._supervise_task is None or self._supervise_task.done():
             self._supervise_task = asyncio.create_task(self._supervise(), name="gateway_supervise")
+
+    async def reconcile(self) -> None:
+        """按当前配置列表立即收敛连接映射，增删账号后保持索引一致。
+
+        WebUI 在增/删账号后主动调用，避免依赖监督循环（10s 周期）造成索引漂移窗口。
+        """
+        getter = getattr(self, "bots_provider", None)
+        bots_config = getter() if getter else []
+        await self._reconcile(bots_config)
 
     async def _reconcile(self, bots_config: list[dict]) -> None:
         """按 config 序号收敛 gateway 连接映射，消除删除中间账号导致的索引漂移。

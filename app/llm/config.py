@@ -50,7 +50,7 @@ DEFAULT_LLM_CONFIG: dict = {
     "stream_send_suffix": "",
     "stream_send_max_queue": 20,
     "stream_queue_full_policy": "backpressure", # backpressure / drop_newest / drop_oldest
-    "stream_flush_on_finish": True,
+    "stream_flush_on_finish": False,
     "stream_keep_order": True,
     # 主动消息 / 定时任务也使用流式发送（与普通消息同一套流式配置）
     "stream_proactive_enabled": False,

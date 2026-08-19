@@ -36,6 +36,8 @@ const fetchingModels = ref(false)
 const testingId = ref('')
 const savingSource = ref(false)
 const savingModel = ref(false)
+// 请求序号：快速切换预设时丢弃过期响应，避免模型表显示别的预设的数据
+let modelsSeq = 0
 
 const sourceDialog = ref(false)
 const editingSourceId = ref('')
@@ -95,16 +97,19 @@ async function loadModels() {
     models.value = []
     return
   }
+  const seq = ++modelsSeq
   loadingModels.value = true
   try {
     const res = await http.get<{ ok: boolean; models: ProviderModel[] }>('/api/provider-models', {
       params: { preset_id: selectedPresetId.value },
     })
+    if (seq !== modelsSeq) return
     models.value = res.data?.models || []
   } catch (err) {
+    if (seq !== modelsSeq) return
     notify.push(errorMessage(err), 'error')
   } finally {
-    loadingModels.value = false
+    if (seq === modelsSeq) loadingModels.value = false
   }
 }
 

@@ -17,6 +17,7 @@ const notify = useNotifyStore()
 const router = useRouter()
 
 const refreshing = ref(false)
+const connecting = ref(false)
 
 const STATUS_TEXT: Record<BotStatus, string> = {
   connected: '已连接',
@@ -61,7 +62,7 @@ const isLoading = computed(() => bots.loading || modules.loading || refreshing.v
 async function refreshAll() {
   refreshing.value = true
   try {
-    await Promise.all([bots.fetchBots(), modules.load()])
+    await Promise.all([bots.fetchBots(), modules.load(), logs.refresh()])
     notify.push('状态已刷新', 'success')
   } catch (err) {
     notify.push(errorMessage(err), 'error')
@@ -71,16 +72,20 @@ async function refreshAll() {
 }
 
 async function connectCurrent() {
+  if (connecting.value) return
   if (bots.currentIndex === null) {
     notify.push('请先选择账号', 'warning')
     return
   }
+  connecting.value = true
   try {
     await bots.connect(bots.currentIndex)
     notify.push('已发送连接请求', 'success')
     await bots.fetchBots()
   } catch (err) {
     notify.push(errorMessage(err), 'error')
+  } finally {
+    connecting.value = false
   }
 }
 
@@ -159,7 +164,7 @@ onMounted(() => {
               </v-list>
             </v-card-text>
             <v-card-actions>
-              <v-btn v-if="bots.currentIndex !== null && bots.currentBot?.status !== 'connected'" color="primary" variant="tonal" prepend-icon="mdi-plug" size="small" @click="connectCurrent">
+              <v-btn v-if="bots.currentIndex !== null && bots.currentBot?.status !== 'connected'" color="primary" variant="tonal" prepend-icon="mdi-plug" size="small" :loading="connecting" :disabled="connecting" @click="connectCurrent">
                 连接当前账号
               </v-btn>
               <v-btn variant="text" size="small" to="/bots">管理账号 →</v-btn>

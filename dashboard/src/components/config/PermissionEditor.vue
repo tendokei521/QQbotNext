@@ -20,16 +20,28 @@ const local = reactive<PermissionConfig>({
 const groupText = ref(local.group_list.join('\n'))
 const userText = ref(local.user_list.join('\n'))
 
+function listsEqual(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((x, i) => x === b[i])
+}
+
 watch(
   () => props.modelValue,
   (v) => {
     if (!v) return
+    const modeChanged = (v.group_mode || 'blacklist') !== local.group_mode
+    const listsChanged =
+      !listsEqual(v.group_list || [], local.group_list) ||
+      !listsEqual(v.user_list || [], local.user_list)
     local.group_mode = v.group_mode || 'blacklist'
     local.group_list = [...(v.group_list || [])]
     local.user_mode = v.user_mode || 'blacklist'
     local.user_list = [...(v.user_list || [])]
-    groupText.value = local.group_list.join('\n')
-    userText.value = local.user_list.join('\n')
+    // 仅外部变化才重写文本区（本组件回显 == 当前 local，跳过），
+    // 避免每次按键触发重排、剥掉空行/移动光标
+    if (modeChanged || listsChanged) {
+      groupText.value = local.group_list.join('\n')
+      userText.value = local.user_list.join('\n')
+    }
   },
 )
 

@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Awaitable, Callable
+from typing import Awaitable, Callable
 
 from app.domain.message import Message
 from app.llm.send_policy import SendPolicy
@@ -66,7 +66,7 @@ class StreamSendPool:
     async def finish(self) -> None:
         """通知消息池：不会再有新消息。"""
         self._finished = True
-        if self.config.get("stream_flush_on_finish", True):
+        if self.config.get("stream_flush_on_finish", False):
             self._flush = True
         if self._queue.empty():
             self._drained.set()
