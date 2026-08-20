@@ -2,7 +2,8 @@
 
 包含：
 - 防抖：同一会话短时间内连续消息只触发一次 LLM 请求；
-- 用户信息感知：群聊/私聊请求前附加发送者 / 提到了 / 引用 / 发送内容 / 当前时间；
+- 用户信息感知：发送者 / 提到了 / 引用 / 发送内容 / 当前时间（开关已迁入 Agent 配置）；
+- 回复打断：LLM 输出期间新消息中断（开关已迁入 Agent 配置）；
 - 调试：开启后打印本轮 prompt。
 """
 
@@ -11,10 +12,30 @@ from app.modules import BaseModule, llm_hook
 from .config_schema import SCHEMA
 
 
+def _agent_cfg(ctx: LlmContext):
+    """优先读 Agent 配置（用户信息感知/回复打断已迁入 Agent），无则返回 None。"""
+    return getattr(getattr(ctx, "runtime", None), "config", None)
+
+
+def _ctx_cfg(ctx: LlmContext, key: str, default):
+    """从 Agent 配置读开关；异常/缺失时回退 default。"""
+    cfg = _agent_cfg(ctx)
+    if cfg is not None and hasattr(cfg, "get"):
+        try:
+            return cfg.get(key, default)
+        except Exception:
+            pass
+    return default
+
+
+def _ctx_enabled(ctx: LlmContext, key: str, default: bool) -> bool:
+    return bool(_ctx_cfg(ctx, key, default))
+
+
 class Module(BaseModule):
     name = "LLM增强"
     sign = "LlmEnhance"
-    description = "LLM 请求防抖 + 用户信息感知 + 调试"
+    description = "LLM 请求防抖 + 用户信息感知 + 回复打断 + 调试"
     permission = "everyone"
     subscribe = ()
     category = "LLM"
@@ -25,20 +46,6 @@ class Module(BaseModule):
         "debounce_seconds": 1.5,
         "merge_messages": False,
         "merge_separator": "\n",
-        # 用户信息感知
-        "context_enable": True,
-        "include_time": True,
-        "include_sender": True,
-        "include_mentioned": True,
-        "include_quote": True,
-        "include_quote_sender": True,
-        "include_sent": True,
-        "fetch_at_nickname": True,
-        "fetch_quote_content": True,
-        # 回复打断
-        "interrupt_enable": False,
-        "interrupt_save_sent": True,
-        "interrupt_debug": False,
         # 调试
         "debug_prompt": False,
     }
@@ -63,10 +70,10 @@ class Module(BaseModule):
 
     @llm_hook("pre_request", event_type="*", order=-100)
     async def collect_user_context(self, ctx: LlmContext):
-        """收集上下文信息，暂存到 ctx.state，不直接修改 user_text。"""
-        if not self.config.get("context_enable", True):
-            return
+        """收集上下文信息，暂存到 ctx.state，不直接修改 user_text。
 
+        开关来自 Agent 配置（用户信息感知已并入 Agent，取消总开关，按子项生效）。
+        """
         event = ctx.event
         info = {
             "sender": None,
@@ -78,16 +85,16 @@ class Module(BaseModule):
 
         if event.event_type == "message_group":
             # 发送者
-            if self.config.get("include_sender", True):
+            if _ctx_enabled(ctx, "include_sender", True):
                 nickname = event.user.card or event.user.nickname or ""
                 info["sender"] = f"{nickname}({event.user_id})" if nickname else str(event.user_id)
 
             # 提到了（自动过滤机器人自身）
-            if self.config.get("include_mentioned", True):
+            if _ctx_enabled(ctx, "include_mentioned", True):
                 info["mentioned"] = await self._collect_at_info(ctx)
 
         # 引用消息
-        if self.config.get("include_quote", True):
+        if _ctx_enabled(ctx, "include_quote", True):
             quote = await self._collect_quote_info(ctx)
             if quote:
                 info["quote"] = quote["text"]
@@ -110,23 +117,23 @@ class Module(BaseModule):
 
         # 时间感知：放在最新一轮上下文的开头
         time_line = ""
-        if self.config.get("include_time", True):
+        if _ctx_enabled(ctx, "include_time", True):
             time_line = f"(时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')})"
 
         if is_group:
-            if self.config.get("include_sender", True) and info.get("sender"):
+            if _ctx_enabled(ctx, "include_sender", True) and info.get("sender"):
                 parts.append(f"发送者：{info['sender']}")
-            if self.config.get("include_mentioned", True) and info.get("mentioned"):
+            if _ctx_enabled(ctx, "include_mentioned", True) and info.get("mentioned"):
                 parts.append("提到了(用户名)：" + "、".join(info["mentioned"]))
 
-        if self.config.get("include_quote", True) and info.get("quote"):
-            if is_group and self.config.get("include_quote_sender", True) and info.get("quote_sender"):
+        if _ctx_enabled(ctx, "include_quote", True) and info.get("quote"):
+            if is_group and _ctx_enabled(ctx, "include_quote_sender", True) and info.get("quote_sender"):
                 parts.append(f"引用了：{info['quote_sender']}发送的引用消息：“{info['quote']}”")
             else:
                 parts.append(f"引用了：{info['quote']}")
 
         sent_text = ctx.user_text.strip() or (info.get("sent_text") or "").strip()
-        if self.config.get("include_sent", True) and sent_text:
+        if _ctx_enabled(ctx, "include_sent", True) and sent_text:
             parts.append(f"发送了：{sent_text}")
 
         if time_line:
@@ -140,9 +147,9 @@ class Module(BaseModule):
     @llm_hook("pre_request", event_type="*", order=25)
     async def interrupt_config_hook(self, ctx: LlmContext):
         """把回复打断开关同步到运行时，供 LlmPipeline 判断是否打断旧任务。"""
-        ctx.runtime.interrupt_enabled = bool(self.config.get("interrupt_enable", False))
-        ctx.runtime.interrupt_save_sent = bool(self.config.get("interrupt_save_sent", True))
-        if self.config.get("interrupt_debug", False):
+        ctx.runtime.interrupt_enabled = _ctx_enabled(ctx, "interrupt_enable", False)
+        ctx.runtime.interrupt_save_sent = _ctx_enabled(ctx, "interrupt_save_sent", True)
+        if _ctx_enabled(ctx, "interrupt_debug", False):
             from app.llm import logger
 
             logger.add_info(f"#{self.bot_id}").info(
@@ -172,7 +179,7 @@ class Module(BaseModule):
                 continue
 
             nickname = qq
-            if self.config.get("fetch_at_nickname", True):
+            if _ctx_enabled(ctx, "fetch_at_nickname", True):
                 fetched = await self._fetch_group_member_nickname(ctx, qq)
                 if fetched:
                     nickname = fetched
@@ -203,7 +210,7 @@ class Module(BaseModule):
 
     async def _collect_quote_info(self, ctx: LlmContext) -> dict | None:
         event = ctx.event
-        if not event.bot or not self.config.get("fetch_quote_content", True):
+        if not event.bot or not _ctx_enabled(ctx, "fetch_quote_content", True):
             return None
 
         reply_id = None

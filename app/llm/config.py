@@ -60,6 +60,19 @@ DEFAULT_LLM_CONFIG: dict = {
     "include_pre_history": False,
     "include_private_pre_history": "default",
     "reply_cooldown": 5,
+    # 用户信息感知（LLM 增强注入：发送者 / 提到 / 引用 / 正文 / 时间；无总开关，按子项生效）
+    "include_time": True,
+    "include_sender": True,
+    "include_mentioned": True,
+    "include_quote": True,
+    "include_quote_sender": True,
+    "include_sent": True,
+    "fetch_at_nickname": True,
+    "fetch_quote_content": True,
+    # 回复打断
+    "interrupt_enable": False,
+    "interrupt_save_sent": True,
+    "interrupt_debug": False,
     # 权限：Agent 可响应的事件权限角色
     "permission": "member",
     # 主动消息

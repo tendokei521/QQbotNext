@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any
 
@@ -31,6 +32,14 @@ _NON_TEXT_SEGMENTS = {
 # bot 自己的固定标签（群聊/私聊一致）；私聊对方用“对方”，不展示昵称
 SELF_TAG = "我"
 PRIVATE_OTHER_TAG = "对方"
+
+# 已自带“发送者/发送了/时间”自描述内容（LLM 增强模块 llm_enhance 产出的散文块）。
+# 这类内容再套外层“MM-DD HH:MM 昵称(QQ):”会变成重复脏信息，渲染时应原样输出。
+_ENHANCED_RE = re.compile(r"(?:^|\n)发送了：|^\(时间：")
+
+
+def _is_enhanced_context(content: str) -> bool:
+    return bool(content and _ENHANCED_RE.search(content))
 
 
 def _time_prefix(ts: Any) -> str:
@@ -142,6 +151,11 @@ def format_online_history(
             nickname = sender.get("card") or sender.get("nickname") or str(user_id) or "未知"
             label = _group_sender_label(nickname, user_id, include_user_id)
 
+        # 内容已自带“发送者/发送了/时间”自描述（LLM 增强块）时不再套外层前缀，避免重复脏信息
+        if _is_enhanced_context(content):
+            lines.append(content)
+            continue
+
         prefix = _time_prefix(msg.get("time")) if include_time else ""
         lines.append(f"{prefix}{label}: {content}")
     return "\n".join(lines)
@@ -224,6 +238,11 @@ def format_history_for_llm(history: list[dict], is_private: bool = False) -> lis
         if role == "assistant":
             # 模型自己的回复不再加“时间+我: ”前缀：避免模型模仿该格式，
             # 把“MM-DD HH:MM 我: ”也写进回复内容（会污染历史并自我强化）。
+            result.append({"role": role, "content": content})
+            continue
+        # 内容已自带“发送者/发送了/时间”自描述（LLM 增强块）时不再套外层前缀，
+        # 避免同一句出现两份“时间/发送者”的重复脏信息。
+        if _is_enhanced_context(content):
             result.append({"role": role, "content": content})
             continue
         if is_private:

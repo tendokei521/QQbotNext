@@ -7,6 +7,7 @@ import json
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from app.core.logger import logger
 from app.llm.config import LEGACY_LLM_CONNECTION_KEYS
 from app.services.bot_service import PASSWORD_MASK as _PASSWORD_MASK
 from app.services.bot_service import _mask_password_config
@@ -104,6 +105,56 @@ def _resolve_module(container, module_name, bot_id):
     return container.get(ModuleRegistry).get(module_name, bot_id)
 
 
+async def _sync_module_runtime(module, enabled: bool) -> None:
+    """禁用/启用时联动模块生命周期，避免「关闭了但定时任务/后台任务还在跑」。
+
+    - 禁用：执行 on_unload → 取消该模块后台任务（owner=module:<name>:<bot>）→ 注销其定时任务；
+    - 启用：重新注册模块定时任务并执行 on_load（恢复动态每日任务等）。
+    仅对真实模块实例生效（agent 等虚拟模块走运行时开关，不在此列）。
+    """
+    if module is None or getattr(module, "module_name", None) is None:
+        return
+    module_name = module.module_name
+    bot_id = getattr(module, "bot_id", None)
+    services = getattr(getattr(module, "ctx", None), "services", None)
+
+    if enabled:
+        scheduler = getattr(services, "scheduler", None) if services else None
+        if scheduler is not None and bot_id is not None:
+            try:
+                await scheduler.register_module(module)
+            except Exception as e:
+                logger.warning(f"[Module] {module_name} 启用后定时任务注册异常: {e}")
+        on_load = getattr(module, "on_load", None)
+        if on_load is not None:
+            try:
+                await on_load()
+            except Exception as e:
+                logger.warning(f"[Module] {module_name} on_load 异常: {e}")
+        return
+
+    try:
+        on_unload = getattr(module, "on_unload", None)
+        if on_unload is not None:
+            await on_unload()
+    except Exception as e:
+        logger.warning(f"[Module] {module_name} on_unload 异常: {e}")
+
+    if services is not None and bot_id is not None:
+        task_manager = getattr(services, "task_manager", None)
+        if task_manager is not None:
+            try:
+                task_manager.cancel_owner(f"module:{module_name}:{bot_id}")
+            except Exception as e:
+                logger.warning(f"[Module] {module_name} 后台任务取消异常: {e}")
+        scheduler = getattr(services, "scheduler", None)
+        if scheduler is not None:
+            try:
+                await scheduler.unload_module(module_name, bot_id)
+            except Exception as e:
+                logger.warning(f"[Module] {module_name} 定时任务注销异常: {e}")
+
+
 @router.get("/modules")
 async def api_modules(request: Request, bot_id: int | None = Depends(parse_bot_id)):
     from app.services.bot_service import BotService
@@ -131,6 +182,8 @@ async def toggle_module(module_name: str, request: Request,
     if not module:
         return _err(404, f"模块 {module_name} (Bot {bot_id}) 不存在")
     module.authority.set_enabled(enabled)
+    # 生命周期联动：禁用 -> 停止定时任务/取消后台任务；启用 -> 恢复定时任务（含动态每日任务）
+    await _sync_module_runtime(module, enabled)
     await manager.broadcast(json.dumps(_authority_payload(module, bot_id, enabled)))
     return _ok(f"模块 {module.name} (Bot {bot_id}) 已{'启用' if enabled else '禁用'}")
 

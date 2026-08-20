@@ -74,8 +74,31 @@ const groupDefs = computed(() => {
   return defs
 })
 
-// 折叠状态（按分组 id）
-const collapsed = reactive<Record<string, boolean>>({})
+// 展开状态（按分组 id）：boolean 为唯一真相源。
+// 注意：v-expansion-panels 在 accordion（非 multiple）模式下，@update:model-value
+// emit 的是「单个索引」——展开为数字 0，收起为 undefined；只有 multiple 模式才是数组。
+// 所以 handler 必须兼容数组与单值两种形态，否则 0 这个 falsy 值会被误判成「关闭」，
+// 导致“收缩后再次点击打不开”。
+const open = reactive<Record<string, boolean>>({})
+
+function isPanelOpen(v: unknown): boolean {
+  if (v === undefined || v === null) return false
+  if (Array.isArray(v)) {
+    const arr = v as number[]
+    return arr.length > 0 && arr.includes(0)
+  }
+  // 单值形态（accordion / 非 multiple）：展开 = 序号 0
+  return Number(v) === 0
+}
+
+function panelsValue(gid: string): number[] {
+  // 传回 prop 的始终是数组形态（Vuetify 内部会 wrapInArray），缺省 = 展开
+  return open[gid] === false ? [] : [0]
+}
+
+function panelsUpdate(gid: string, v: unknown): void {
+  open[gid] = isPanelOpen(v)
+}
 
 function effectiveValue(key: string): any {
   if (props.config[key] !== undefined) return props.config[key]
@@ -123,11 +146,12 @@ function currentValue(item: ItemDef): any {
         :key="g.id"
         variant="accordion"
         class="mb-3"
-        :model-value="collapsed[g.id] ? [] : [0]"
-        @update:model-value="(v: unknown) => { collapsed[g.id] = !((v as number[]) || []).includes(0) }"
+        :model-value="panelsValue(g.id)"
+        @update:model-value="(v: unknown) => panelsUpdate(g.id, v)"
       >
         <v-expansion-panel>
           <v-expansion-panel-title class="group-title">
+            <v-icon size="small" class="mr-1" :icon="open[g.id] === false ? 'mdi-chevron-right' : 'mdi-chevron-down'" />
             {{ g.label }}
           </v-expansion-panel-title>
           <v-expansion-panel-text>

@@ -30,6 +30,10 @@ async def daily_sign_in(module, bot):
     """定时任务：全群打卡 + 成功通知。"""
     from .notify import _send_success_notify
 
+    # 纵深防御：即使任务未及时取消，模块被禁用也绝不执行打卡
+    if not getattr(getattr(module, "authority", None), "enabled", True):
+        return
+
     logger = module_logger.add_info(f"#{module.bot_id}").add_info(module.name)
     config = module.config
     if not config.get("enable_daily_auto_signin", True):
