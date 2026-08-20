@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive } from 'vue'
+import { computed, reactive, watch } from 'vue'
 import FieldControl from './FieldControl.vue'
 import StringListWidget from './StringListWidget.vue'
 import ListWidget from './ListWidget.vue'
@@ -11,6 +11,7 @@ const props = defineProps<{
   schema: Record<string, any>
   config: Record<string, any>
   botId: number | null
+  activeGroup?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -81,6 +82,14 @@ const groupDefs = computed(() => {
 // 导致“收缩后再次点击打不开”。
 const open = reactive<Record<string, boolean>>({})
 
+// 外部子侧边栏点击分组时，强制展开对应面板
+watch(
+  () => props.activeGroup,
+  (gid) => {
+    if (gid) open[gid] = true
+  },
+)
+
 function isPanelOpen(v: unknown): boolean {
   if (v === undefined || v === null) return false
   if (Array.isArray(v)) {
@@ -143,6 +152,7 @@ function currentValue(item: ItemDef): any {
     <template v-else>
       <v-expansion-panels
         v-for="g in groupDefs"
+        :id="`group-${g.id}`"
         :key="g.id"
         variant="accordion"
         class="mb-3"
