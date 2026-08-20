@@ -206,7 +206,7 @@ onUnmounted(() => {
                 :title="item.title"
                 :prepend-icon="item.icon"
                 rounded="lg"
-                class="nav-item nav-group-parent"
+                class="nav-item"
                 :class="{ 'nav-item--active': isAgentActive }"
               />
             </template>
@@ -441,13 +441,7 @@ onUnmounted(() => {
   color: rgb(var(--v-theme-primary));
 }
 
-/* Agent 分组父项与子菜单整块保持透明，不显示灰底 */
-.nav-group-parent.nav-item--active,
-.nav-group-parent.nav-item--active:hover {
-  background: transparent !important;
-  box-shadow: none !important;
-}
-
+/* 子菜单容器保持透明，根侧边栏选中效果不受影响 */
 .nav-list :deep(.v-list-group__items) {
   background: transparent !important;
 }
