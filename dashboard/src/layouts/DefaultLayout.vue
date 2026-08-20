@@ -5,6 +5,7 @@ import { useThemeStore } from '@/stores/theme'
 import { useBotsStore, type BotStatus } from '@/stores/bots'
 import { useWebuiStore } from '@/stores/webui'
 import { useNotifyStore } from '@/stores/notify'
+import { useAgentNavStore } from '@/stores/agentNav'
 import { connectSocket } from '@/api/socket'
 import { errorMessage } from '@/api/http'
 import MultiGroupDialog from '@/components/MultiGroupDialog.vue'
@@ -13,6 +14,7 @@ const themeStore = useThemeStore()
 const bots = useBotsStore()
 const webui = useWebuiStore()
 const notify = useNotifyStore()
+const agentNav = useAgentNavStore()
 const route = useRoute()
 
 const drawer = ref(false)
@@ -53,11 +55,13 @@ interface NavItem {
 
 const navItems = computed<NavItem[]>(() => {
   const showExperimental = !!webui.config.experimental?.show_experimental
-  const agentChildren: NavChild[] = [
-    { to: '/agent?section=sec-permission', title: '响应范围控制' },
-    { to: '/agent?section=sec-models', title: 'Provider 模型池' },
-    { to: '/agent?section=sec-agent-panels', title: '定时任务 / 主动消息' },
-  ]
+  const agentChildren: NavChild[] = agentNav.sections.length
+    ? agentNav.sections.map((s) => ({ to: s.to, title: s.title }))
+    : [
+        { to: '/agent?section=sec-permission', title: '响应范围控制' },
+        { to: '/agent?section=sec-models', title: 'Provider 模型池' },
+        { to: '/agent?section=sec-agent-panels', title: '定时任务 / 主动消息' },
+      ]
   if (showExperimental) {
     agentChildren.push({ to: '/agent/memory', title: 'Agent 长期记忆' })
   }
@@ -437,22 +441,23 @@ onUnmounted(() => {
   color: rgb(var(--v-theme-primary));
 }
 
-/* Agent 配置下的二级子菜单：更小字号、缩进、弱化颜色 */
+/* Agent 配置下的二级子菜单：更小字号、缩进、弱化颜色；未选中时保持透明 */
 .nav-child {
   font-size: 12.5px;
   min-height: 32px;
   padding-left: 30px !important;
   color: rgba(var(--v-theme-on-surface), 0.65);
+  background: transparent !important;
 }
 
 .nav-child:hover {
-  background: rgba(var(--v-theme-primary), 0.07);
+  background: rgba(var(--v-theme-primary), 0.07) !important;
 }
 
 .nav-child--active {
   color: rgb(var(--v-theme-primary)) !important;
   font-weight: 600;
-  background: rgba(var(--v-theme-primary), 0.08);
+  background: rgba(var(--v-theme-primary), 0.08) !important;
 }
 
 .drawer-footer {

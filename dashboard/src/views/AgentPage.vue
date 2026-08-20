@@ -8,6 +8,7 @@ import type { PermissionConfig } from '@/stores/modules'
 import ConfigForm from '@/components/config/ConfigForm.vue'
 import PermissionEditor from '@/components/config/PermissionEditor.vue'
 import AgentPanels from '@/components/agent/AgentPanels.vue'
+import { useAgentNavStore, type AgentNavSection } from '@/stores/agentNav'
 import { filterSchemaExcludeGroup } from '@/utils/schema'
 
 const bots = useBotsStore()
@@ -18,6 +19,20 @@ const enabled = ref(false)
 const schema = ref<Record<string, any>>({})
 const route = useRoute()
 const activeGroup = ref('')
+const agentNav = useAgentNavStore()
+
+function updateAgentNavSections() {
+  const sections: AgentNavSection[] = [
+    { to: '/agent?section=sec-permission', title: '响应范围控制' },
+    { to: '/agent?section=sec-models', title: 'Provider 模型池' },
+  ]
+  const groups = (schema.value?.groups || {}) as Record<string, any>
+  Object.entries(groups).forEach(([id, def]) => {
+    sections.push({ to: `/agent?section=group-${id}`, title: def?.label || id })
+  })
+  sections.push({ to: '/agent?section=sec-agent-panels', title: '定时任务 / 主动消息' })
+  agentNav.setSections(sections)
+}
 
 function scrollToSection(section: string) {
   if (!section) return
@@ -123,6 +138,7 @@ async function load() {
     const data = res.data
     enabled.value = !!data.enabled
     schema.value = filterSchemaExcludeGroup(data.schema || {}, 'group_memory')
+    updateAgentNavSections()
     providerModels.value = data.provider_models || []
     Object.keys(draft).forEach((k) => delete draft[k])
     Object.assign(draft, data.config || {})
