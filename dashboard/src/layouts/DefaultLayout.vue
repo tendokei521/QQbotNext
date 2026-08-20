@@ -441,7 +441,7 @@ onUnmounted(() => {
   color: rgb(var(--v-theme-primary));
 }
 
-/* Agent 配置下的二级子菜单：更小字号、缩进、弱化颜色；未选中时保持透明 */
+/* Agent 配置下的二级子菜单：更小字号、缩进、弱化颜色；始终透明无背景 */
 .nav-child {
   font-size: 12.5px;
   min-height: 32px;
@@ -451,13 +451,13 @@ onUnmounted(() => {
 }
 
 .nav-child:hover {
-  background: rgba(var(--v-theme-primary), 0.07) !important;
+  background: transparent !important;
 }
 
 .nav-child--active {
   color: rgb(var(--v-theme-primary)) !important;
   font-weight: 600;
-  background: rgba(var(--v-theme-primary), 0.08) !important;
+  background: transparent !important;
 }
 
 .drawer-footer {
