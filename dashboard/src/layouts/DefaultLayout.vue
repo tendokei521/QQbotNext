@@ -44,13 +44,16 @@ const navItems = computed(() => {
     { to: '/', title: '总览', icon: 'mdi-view-dashboard-outline' },
     { to: '/bots', title: '账号管理', icon: 'mdi-robot-outline' },
     { to: '/modules', title: '功能模块', icon: 'mdi-cube-outline' },
-    { to: '/agent', title: 'Agent 面板', icon: 'mdi-creation-outline' },
     { to: '/provider-presets', title: 'Provider 预设', icon: 'mdi-api' },
+    { to: '/agent', title: 'Agent 面板', icon: 'mdi-creation-outline' },
     { to: '/logs', title: '日志', icon: 'mdi-console' },
     { to: '/settings', title: '设置', icon: 'mdi-cog-outline' },
   ]
   if (showExperimental) {
-    items.splice(5, 0, { to: '/config-profiles', title: '配置档案', icon: 'mdi-book-multiple' })
+    items.splice(5, 0,
+      { to: '/agent/memory', title: 'Agent 长期记忆', icon: 'mdi-brain' },
+      { to: '/config-profiles', title: '配置档案', icon: 'mdi-book-multiple' },
+    )
   }
   return items
 })

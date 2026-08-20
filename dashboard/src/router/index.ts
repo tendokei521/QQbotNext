@@ -14,6 +14,7 @@ const router = createRouter({
         { path: 'modules/agent', redirect: '/agent' },
         { path: 'modules/:name', name: 'module-config', component: () => import('@/views/ModuleConfigPage.vue'), meta: { title: '模块配置' } },
         { path: 'agent', name: 'agent', component: () => import('@/views/AgentPage.vue'), meta: { title: 'Agent 面板' } },
+        { path: 'agent/memory', name: 'agent-memory', component: () => import('@/views/AgentMemoryPage.vue'), meta: { title: 'Agent 长期记忆' } },
         { path: 'provider-presets', name: 'provider-presets', component: () => import('@/views/ProviderPresetsPage.vue'), meta: { title: 'Provider 预设' } },
         { path: 'config-profiles', name: 'config-profiles', component: () => import('@/views/ConfigProfilesPage.vue'), meta: { title: '配置档案' } },
         { path: 'logs', name: 'logs', component: () => import('@/views/LogsPage.vue'), meta: { title: '日志' } },
