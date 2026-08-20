@@ -7,6 +7,9 @@ import type { PermissionConfig } from '@/stores/modules'
 import ConfigForm from '@/components/config/ConfigForm.vue'
 import PermissionEditor from '@/components/config/PermissionEditor.vue'
 import AgentPanels from '@/components/agent/AgentPanels.vue'
+import PageWithSections from '@/components/common/PageWithSections.vue'
+import type { SectionItem } from '@/components/common/PageSectionNav.vue'
+import { filterSchemaExcludeGroup } from '@/utils/schema'
 
 const bots = useBotsStore()
 const notify = useNotifyStore()
@@ -14,6 +17,24 @@ const notify = useNotifyStore()
 const botId = ref<number | null>(null)
 const enabled = ref(false)
 const schema = ref<Record<string, any>>({})
+const activeGroup = ref('')
+
+const sectionItems = computed<SectionItem[]>(() => {
+  const items: SectionItem[] = [
+    { id: 'sec-permission', label: '响应范围控制', icon: 'mdi-shield-account-outline' },
+    { id: 'sec-models', label: 'Provider 模型池', icon: 'mdi-format-list-numbered' },
+  ]
+  const groups = (schema.value?.groups || {}) as Record<string, any>
+  Object.entries(groups).forEach(([id, def]) => {
+    items.push({ id: `group-${id}`, label: def?.label || id })
+  })
+  items.push({ id: 'sec-agent-panels', label: '定时任务 / 主动消息', icon: 'mdi-calendar-clock' })
+  return items
+})
+
+function onSectionSelect(id: string) {
+  if (id.startsWith('group-')) activeGroup.value = id.slice('group-'.length)
+}
 const providerModels = ref<{ id: string; preset_id: string; preset_name?: string; model: string }[]>([])
 const draft = reactive<Record<string, any>>({})
 const poolModelIds = ref<string[]>([])
@@ -100,7 +121,7 @@ async function load() {
     }>('/api/agent/config', { params: { bot_id: botId.value } })
     const data = res.data
     enabled.value = !!data.enabled
-    schema.value = data.schema || {}
+    schema.value = filterSchemaExcludeGroup(data.schema || {}, 'group_memory')
     providerModels.value = data.provider_models || []
     Object.keys(draft).forEach((k) => delete draft[k])
     Object.assign(draft, data.config || {})
@@ -221,68 +242,81 @@ onUnmounted(() => {
     <template v-else>
       <v-progress-linear v-if="loading" indeterminate color="primary" />
 
-      <v-card variant="outlined" class="mb-4">
-        <v-card-title class="d-flex align-center">
-          <v-icon icon="mdi-shield-account-outline" class="mr-2" color="primary" /> 响应范围控制
-        </v-card-title>
-        <v-card-text>
-          <PermissionEditor :model-value="permission" @update:model-value="onPermissionChange" />
-        </v-card-text>
-      </v-card>
+      <PageWithSections :sections="sectionItems" @select="onSectionSelect">
+        <v-card id="sec-permission" variant="outlined" class="mb-4">
+          <v-card-title class="d-flex align-center">
+            <v-icon icon="mdi-shield-account-outline" class="mr-2" color="primary" /> 响应范围控制
+          </v-card-title>
+          <v-card-text>
+            <PermissionEditor :model-value="permission" @update:model-value="onPermissionChange" />
+          </v-card-text>
+        </v-card>
 
-      <v-card variant="outlined" class="mb-4">
-        <v-card-title class="d-flex align-center">
-          <v-icon icon="mdi-cogs" class="mr-2" color="primary" /> Agent 配置
-          <v-spacer />
-          <v-chip
-            v-if="poolModelIds.length"
-            size="small"
-            variant="tonal"
-            color="primary"
-            class="mr-1"
-          >
-            {{ poolModelIds.length }} 个模型 · 按顺序请求
-          </v-chip>
-          <v-btn size="small" variant="tonal" prepend-icon="mdi-api" class="mr-1" @click="$router.push('/provider-presets')">
-            管理预设
-          </v-btn>
-          <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-content-save" :loading="saveStatus === 'saving'" @click="doSave">
-            保存配置
-          </v-btn>
-        </v-card-title>
-        <v-card-text>
-          <div class="pool-block mb-4">
-            <div class="pool-head d-flex align-center mb-1">
-              <v-icon icon="mdi-format-list-numbered" class="mr-1" color="primary" size="small" />
-              <span class="font-weight-medium">Provider 模型（按顺序请求，从上到下依次尝试）</span>
-              <v-spacer />
-              <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-plus" @click="pendingPoolModelId = ''; poolDialog = true">
-                添加模型
-              </v-btn>
+        <v-card id="sec-config" variant="outlined" class="mb-4">
+          <v-card-title class="d-flex align-center">
+            <v-icon icon="mdi-cogs" class="mr-2" color="primary" /> Agent 配置
+            <v-spacer />
+            <v-chip
+              v-if="poolModelIds.length"
+              size="small"
+              variant="tonal"
+              color="primary"
+              class="mr-1"
+            >
+              {{ poolModelIds.length }} 个模型 · 按顺序请求
+            </v-chip>
+            <v-btn size="small" variant="tonal" prepend-icon="mdi-api" class="mr-1" @click="$router.push('/provider-presets')">
+              管理预设
+            </v-btn>
+            <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-content-save" :loading="saveStatus === 'saving'" @click="doSave">
+              保存配置
+            </v-btn>
+          </v-card-title>
+          <v-card-text>
+            <div id="sec-models" class="pool-block mb-4">
+              <div class="pool-head d-flex align-center mb-1">
+                <v-icon icon="mdi-format-list-numbered" class="mr-1" color="primary" size="small" />
+                <span class="font-weight-medium">Provider 模型（按顺序请求，从上到下依次尝试）</span>
+                <v-spacer />
+                <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-plus" @click="pendingPoolModelId = ''; poolDialog = true">
+                  添加模型
+                </v-btn>
+              </div>
+              <v-list v-if="poolModelIds.length" density="compact">
+                <v-list-item v-for="(id, i) in poolModelIds" :key="id">
+                  <template #prepend>
+                    <span class="pool-order">{{ i + 1 }}</span>
+                  </template>
+                  <v-list-item-title>{{ poolLabel(id) }}</v-list-item-title>
+                  <template #append>
+                    <v-btn size="x-small" variant="text" icon="mdi-arrow-up" :disabled="i === 0" @click="movePoolModel(i, -1)" />
+                    <v-btn size="x-small" variant="text" icon="mdi-arrow-down" :disabled="i === poolModelIds.length - 1" @click="movePoolModel(i, 1)" />
+                    <v-btn size="x-small" variant="text" icon="mdi-close" color="error" @click="removePoolModel(i)" />
+                  </template>
+                </v-list-item>
+              </v-list>
+              <div v-else class="text-caption text-center pa-4" style="color: rgba(var(--v-theme-on-surface), 0.45)">
+                尚未配置模型，请添加一个 Provider 模型
+              </div>
             </div>
-            <v-list v-if="poolModelIds.length" density="compact">
-              <v-list-item v-for="(id, i) in poolModelIds" :key="id">
-                <template #prepend>
-                  <span class="pool-order">{{ i + 1 }}</span>
-                </template>
-                <v-list-item-title>{{ poolLabel(id) }}</v-list-item-title>
-                <template #append>
-                  <v-btn size="x-small" variant="text" icon="mdi-arrow-up" :disabled="i === 0" @click="movePoolModel(i, -1)" />
-                  <v-btn size="x-small" variant="text" icon="mdi-arrow-down" :disabled="i === poolModelIds.length - 1" @click="movePoolModel(i, 1)" />
-                  <v-btn size="x-small" variant="text" icon="mdi-close" color="error" @click="removePoolModel(i)" />
-                </template>
-              </v-list-item>
-            </v-list>
-            <div v-else class="text-caption text-center pa-4" style="color: rgba(var(--v-theme-on-surface), 0.45)">
-              尚未配置模型，请添加一个 Provider 模型
-            </div>
-          </div>
 
-          <v-divider class="mb-4" />
+            <v-divider class="mb-4" />
 
-          <ConfigForm :module-name="'agent'" :schema="schema" :config="draft" :bot-id="botId" @change="onChange" />
-        </v-card-text>
-      </v-card>
+            <ConfigForm
+              :module-name="'agent'"
+              :schema="schema"
+              :config="draft"
+              :bot-id="botId"
+              :active-group="activeGroup"
+              @change="onChange"
+            />
+          </v-card-text>
+        </v-card>
+
+        <div id="sec-agent-panels">
+          <AgentPanels :bot-id="botId" />
+        </div>
+      </PageWithSections>
 
       <v-dialog v-model="poolDialog" max-width="420">
         <v-card>
@@ -308,8 +342,6 @@ onUnmounted(() => {
           </v-card-actions>
         </v-card>
       </v-dialog>
-
-      <AgentPanels :bot-id="botId" />
     </template>
   </div>
 </template>

@@ -14,6 +14,8 @@ const props = withDefaults(
 
 const activeId = ref('')
 
+const emit = defineEmits<{ (e: 'select', id: string): void }>()
+
 function scrollToId(id: string) {
   const el = document.getElementById(id)
   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -21,6 +23,7 @@ function scrollToId(id: string) {
 
 function onSelect(id: string) {
   activeId.value = id
+  emit('select', id)
   scrollToId(id)
 }
 </script>
