@@ -178,9 +178,20 @@ class SessionManager:
         self.sessions: dict[str, Session] = {}
         self.lock = threading.RLock()
         self.history = HistoryManager(bot_id)
+        # 会话过期/归档时的可选回调（长期记忆归档蒸馏用）：callable(session)
+        self.on_archive = None
         self._stop_event = threading.Event()
         self._cleanup_thread: threading.Thread | None = None
         self._start_auto_cleanup()
+
+    def _notify_archive(self, session) -> None:
+        cb = self.on_archive
+        if cb is None:
+            return
+        try:
+            cb(session)
+        except Exception:
+            pass
 
     def stop_cleanup(self):
         self._stop_event.set()
@@ -214,6 +225,7 @@ class SessionManager:
             for sid in expired:
                 session = self.sessions.pop(sid)
                 self.history.save_session(session)
+                self._notify_archive(session)
                 logger.add_info(f"#{self.bot_id}").info(
                     f"会话过期已归档: {sid}"
                 )
@@ -235,6 +247,7 @@ class SessionManager:
             if session:
                 del self.sessions[session_id]
                 self.history.save_session(session)
+                self._notify_archive(session)
             return None
 
     def destroy_session(self, session_id: str):
@@ -242,6 +255,7 @@ class SessionManager:
             session = self.sessions.pop(session_id, None)
             if session:
                 self.history.save_session(session)
+                self._notify_archive(session)
                 logger.add_info(f"#{self.bot_id}").info(f"会话已结束: {session_id}")
 
     # ── 消息 ──────────────────────────────────────────────

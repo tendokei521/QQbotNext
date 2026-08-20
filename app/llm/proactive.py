@@ -190,12 +190,23 @@ class ProactiveManager:
                     current_time=now_str,
                 )
 
+        memory_text = ""
+        memory = getattr(self.module, "memory", None)
+        if memory is not None:
+            try:
+                memory_text = await memory.recall_block_async(
+                    session_id, "" if is_group else target, bot=self.bot
+                )
+            except Exception:
+                memory_text = ""
+
         messages = build_messages(
             system_prompt=system_prompt,
             pre_history_text=pre_history_text,
             history=history,
             user_text=user_prompt,
             with_schedule_instruction=False,
+            memory_text=memory_text,
         )
 
         # 生成期间新消息检查

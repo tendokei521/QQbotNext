@@ -10,6 +10,7 @@ SCHEMA = {
     "group_stream": {"type": "group", "label": "流式回复", "collapsible": True},
     "group_proactive": {"type": "group", "label": "主动消息", "collapsible": True},
     "group_schedule": {"type": "group", "label": "定时任务", "collapsible": True},
+    "group_memory": {"type": "group", "label": "长期记忆", "collapsible": True},
     "group_permission": {"type": "group", "label": "权限", "collapsible": True},
 
     # ==================== 配置项 ====================
@@ -291,5 +292,55 @@ SCHEMA = {
         "type": "textarea", "label": "定时触发提示词", "description": "定时任务触发时给 LLM 的指令，可用 {{content}} / {{current_time}} / {{job_json}} 占位",
         "default": "你被一个定时任务唤醒，这不是一次用户对话。\n规则：\n1. 这不是聊天轮次：不要打招呼，不要反问用户。\n2. 结合最近的历史对话理解与用户的关系和上下文，用符合你人设的语气自然开口。\n3. 自然地说明你联系的原因，参考任务内容即可，不要提及\"定时任务\"\"工具\"等技术细节。\n4. 当前时间：{{current_time}}；需要完成的事情：{{content}}。\n任务信息：{{job_json}}",
         "rows": 7, "group": "group_schedule",
+    },
+
+    # ==================== 长期记忆 ====================
+    "memory_enable": {
+        "type": "boolean", "label": "长期记忆总开关", "description": "关闭后不写入、不注入记忆（数据保留）",
+        "default": True, "group": "group_memory",
+    },
+    "memory_private_enable": {
+        "type": "boolean", "label": "私聊记忆", "description": "私聊场景记录与注入",
+        "default": True, "group": "group_memory",
+    },
+    "memory_group_enable": {
+        "type": "boolean", "label": "群聊记忆", "description": "群聊场景记录与注入（按群内成员 owner 隔离）",
+        "default": True, "group": "group_memory",
+    },
+    "memory_recall_max": {
+        "type": "number", "label": "注入条数上限", "description": "每次请求最多注入几条长期记忆",
+        "default": 8, "min": 1, "max": 30, "group": "group_memory",
+    },
+    "memory_recall_max_chars": {
+        "type": "number", "label": "注入字符上限", "description": "记忆块总字符数上限，防止撑爆上下文",
+        "default": 600, "min": 100, "max": 3000, "group": "group_memory",
+    },
+    "memory_save_deterministic": {
+        "type": "boolean", "label": "“记住…”确定性兜底", "description": "检测到“记住/我喜欢/我叫…”等指令时直接入库，不依赖模型调工具",
+        "default": True, "group": "group_memory",
+    },
+    "memory_extract_enable": {
+        "type": "boolean", "label": "自动蒸馏", "description": "对话后自动提炼值得记住的事实（额外少量 LLM 调用）",
+        "default": True, "group": "group_memory",
+    },
+    "memory_extract_interval_min": {
+        "type": "number", "label": "蒸馏最小间隔(分钟)", "description": "同一会话两次蒸馏之间的最小间隔，控制成本",
+        "default": 10, "min": 1, "max": 1440, "group": "group_memory",
+    },
+    "memory_max_per_owner": {
+        "type": "number", "label": "每对象记忆上限", "description": "每个用户/群保存的记忆条数上限，超出按重要度与新旧淘汰",
+        "default": 300, "min": 10, "max": 5000, "group": "group_memory",
+    },
+    "memory_user_cross_group": {
+        "type": "boolean", "label": "跨群用户画像", "description": "允许把用户画像跨群共享（默认关闭，保护隐私）",
+        "default": False, "group": "group_memory",
+    },
+    "memory_audit_enable": {
+        "type": "boolean", "label": "事件记录", "description": "记录记忆的写入/读取/删除/注入事件（#chat memory audit 查看）",
+        "default": True, "group": "group_memory",
+    },
+    "memory_audit_inject": {
+        "type": "boolean", "label": "记录每次注入", "description": "是否记录每次向提示词的记忆注入（默认关闭，避免日志噪音）",
+        "default": False, "group": "group_memory",
     },
 }

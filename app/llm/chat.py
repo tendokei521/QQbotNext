@@ -90,6 +90,19 @@ def _collect_llm_ext(runtime, event, session_id: str, is_private: bool, schedule
         user_id=getattr(event, "user_id", None),
         group_id=getattr(getattr(event, "group", None), "group_id", None),
     )
+
+    # 长期记忆：会话启用时追加三个原生记忆工具
+    memory = getattr(runtime, "memory", None)
+    if memory is not None:
+        try:
+            if memory.enabled() and memory.scene_enabled(session_id):
+                from app.llm.memory.tool import build_memory_tools
+
+                specs.extend(
+                    build_memory_tools(runtime, session_id, getattr(event, "user_id", None), is_private)
+                )
+        except Exception:
+            pass
     return specs, skill_blocks, ctx
 
 
@@ -119,6 +132,49 @@ def _provider_chain_for(module) -> list[dict]:
     if hasattr(module, "provider_chain"):
         return module.provider_chain()
     return [_provider_config_for(module)]
+
+
+async def _memory_block(module, session_id: str, user_id, user_text: str, bot=None) -> str:
+    """取长期记忆注入块（含群聊提及扩展）；未装配 / 未启用 / 异常时返回空串。"""
+    memory = getattr(module, "memory", None)
+    if memory is None:
+        return ""
+    try:
+        if hasattr(memory, "recall_block_async"):
+            return await memory.recall_block_async(session_id, user_id, query=user_text, bot=bot)
+        return memory.recall_block(session_id, user_id, query=user_text)
+    except Exception:
+        return ""
+
+
+def _maybe_autosave(module, session_id: str, user_id, user_text: str) -> None:
+    """确定性“记住…”兜底入库；异常静默，不阻断主流程。"""
+    memory = getattr(module, "memory", None)
+    if memory is None:
+        return
+    try:
+        memory.autosave(session_id, user_id, user_text)
+    except Exception:
+        return
+
+
+def _fire_consolidate(module, session_id: str, user_id, is_group: bool,
+                      user_text: str, reply_text: str) -> None:
+    """回复完成后触发（限频）隐式蒸馏；仅异步调度，不阻塞发送。"""
+    memory = getattr(module, "memory", None)
+    if memory is None:
+        return
+    try:
+        memory.maybe_consolidate(
+            session_id, is_group,
+            [
+                {"role": "user", "content": user_text, "user_id": str(user_id or "")},
+                {"role": "assistant", "content": reply_text},
+            ],
+            source="chat",
+        )
+    except Exception:
+        return
 
 
 async def handle(module, event):
@@ -288,6 +344,7 @@ async def call_llm_and_reply(module, event, session_mgr, config,
 
     session_history = session_mgr.get_history(session_id, limit=history_rounds)
     user_text = session.data.history[-1]["content"] if session.data.history else ""
+    _maybe_autosave(module, session_id, user_id, user_text)
     # 防重复：history 尾部就是刚追加的当前用户消息，去掉避免同一消息出现两次
     if (session_history and session_history[-1].get("role") == "user"
             and session_history[-1].get("content") == user_text):
@@ -310,6 +367,7 @@ async def call_llm_and_reply(module, event, session_mgr, config,
         with_schedule_instruction=schedule_enable,
         schedule_nudge=intent,
         skills=skill_blocks,
+        memory_text=await _memory_block(module, session_id, user_id, user_text, bot=event.bot),
     )
 
     logger.add_info(f"#{module.bot_id}").info(
@@ -365,6 +423,7 @@ async def call_llm_and_reply(module, event, session_mgr, config,
     if not is_private:
         session.mark_replied()
     await asyncio.to_thread(session_mgr.history.save_session, session)
+    _fire_consolidate(module, session_id, user_id, not is_private, user_text, clean_response)
 
     try:
         if is_private:
@@ -471,6 +530,7 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
 
     session_history = session_mgr.get_history(session_id, limit=history_rounds)
     user_text_current = session.data.history[-1]["content"] if session.data.history else ""
+    _maybe_autosave(runtime, session_id, user_id, user_text)
     # 防重复：history 尾部就是刚追加的当前用户消息，避免同一消息出现两次
     if (session_history and session_history[-1].get("role") == "user"
             and session_history[-1].get("content") == user_text_current):
@@ -493,6 +553,7 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
         with_schedule_instruction=schedule_enable,
         schedule_nudge=intent,
         skills=skill_blocks,
+        memory_text=await _memory_block(runtime, session_id, user_id, user_text, bot=event.bot),
     )
 
     _log_debug_prompt(runtime, session_id, messages, debug_enabled=bool(ctx and ctx.state.get("debug_prompt", False)))
@@ -550,6 +611,7 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
     if not is_private:
         session.mark_replied()
     await asyncio.to_thread(session_mgr.history.save_session, session)
+    _fire_consolidate(runtime, session_id, user_id, not is_private, user_text, clean_response)
     return clean_response
 
 
@@ -649,6 +711,7 @@ async def stream_response(runtime, event, ctx=None):
 
     session_history = session_mgr.get_history(session_id, limit=history_rounds)
     user_text_current = session.data.history[-1]["content"] if session.data.history else ""
+    _maybe_autosave(runtime, session_id, user_id, user_text)
     if (session_history and session_history[-1].get("role") == "user"
             and session_history[-1].get("content") == user_text_current):
         session_history = session_history[:-1]
@@ -669,6 +732,7 @@ async def stream_response(runtime, event, ctx=None):
         with_schedule_instruction=schedule_enable,
         schedule_nudge=intent,
         skills=skill_blocks,
+        memory_text=await _memory_block(runtime, session_id, user_id, user_text, bot=event.bot),
     )
 
     _log_debug_prompt(runtime, session_id, messages, debug_enabled=bool(ctx and ctx.state.get("debug_prompt", False)))
@@ -798,6 +862,7 @@ async def stream_response(runtime, event, ctx=None):
     if not is_private:
         session.mark_replied()
     await asyncio.to_thread(session_mgr.history.save_session, session)
+    _fire_consolidate(runtime, session_id, user_id, not is_private, user_text, full_text)
 
     if ctx is not None:
         ctx.response_text = full_text
@@ -979,6 +1044,13 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
         session_mgr.destroy_session(session_id)
         await send("会话已强制结束")
         return True
+
+    elif action == "memory" or action.startswith("memory "):
+        from app.llm.memory.commands import handle_memory_command
+
+        return await handle_memory_command(
+            module, session_id, user_id, is_admin, is_private, action, send
+        )
 
     return False
 

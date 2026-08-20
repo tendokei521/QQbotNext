@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
+
+# 用于从异常消息中回挖 HTTP 状态码（历史异常可能不带 code 属性）
+_HTTP_RE = re.compile(r"\bHTTP[ /_]?(\d{3})\b", re.IGNORECASE)
 
 
 @dataclass
@@ -36,6 +40,76 @@ class StreamEvent:
     text: str = ""
     tool_call: dict | None = None
     finish_reason: str = ""
+
+
+def _safe_str(e: Exception) -> str:
+    try:
+        return (str(e) or "").strip()
+    except Exception:
+        return ""
+
+
+def _infer_code(e: Exception) -> str:
+    """推断 LLM 请求异常的错误码：优先已标注的 code，其次 HTTP 状态码/errno/异常类型。"""
+    code = getattr(e, "code", None)
+    if code:
+        if isinstance(code, int):
+            return f"HTTP {code}"
+        return str(code)
+    status = getattr(e, "status", None)
+    if isinstance(status, int):
+        return f"HTTP {status}"
+    if isinstance(e, TimeoutError):
+        return "TIMEOUT"
+    m = _HTTP_RE.search(_safe_str(e))
+    if m:
+        return f"HTTP {m.group(1)}"
+    errno = getattr(e, "errno", None)
+    if errno is not None:
+        return f"ERRNO-{errno}"
+    name = type(e).__name__
+    if name in (
+        "ClientConnectorError",
+        "ClientConnectionError",
+        "ClientOSError",
+        "ServerDisconnectedError",
+        "ClientError",
+        "ConnectionError",
+    ):
+        return "CONNECT"
+    if name in ("ClientPayloadError",):
+        return "PAYLOAD"
+    if name in ("ServerTimeoutError", "ClientTimeoutError"):
+        return "TIMEOUT"
+    # 消息特征兜底（普通异常/字符串化网络错误）
+    low = _safe_str(e).lower()
+    if any(m in low for m in ("timed out", "timeout")) and "http" not in low:
+        return "TIMEOUT"
+    if "cannot connect" in low:
+        return "CONNECT"
+    if any(m in low for m in ("connection refused", "connection reset")):
+        return "CONNECT"
+    if any(m in low for m in ("name or service not known", "nodename nor servname", "getaddrinfo")):
+        return "DNS"
+    return name or "ERR"
+
+
+def format_llm_error(e: Exception, fallback: str = "请求失败") -> str:
+    """统一格式化 LLM 请求错误：带错误码前缀，如 ``[HTTP 429] 上游限流``。
+
+    消息里若已重复错误码前缀（如 ``HTTP 429: xxx``），会去掉重复部分，
+    避免日志出现 ``[HTTP 429] HTTP 429: xxx`` 的冗余。
+    """
+    code = _infer_code(e)
+    msg = _safe_str(e)
+    if not msg:
+        return f"[{code}] {fallback}"
+    if code:
+        lowered = msg.lower()
+        if lowered.startswith(code.lower()):
+            rest = msg[len(code):].lstrip(":/- ").strip()
+            return f"[{code}] {rest}" if rest else f"[{code}]"
+    return f"[{code}] {msg}"
 
 
 class BaseProvider:

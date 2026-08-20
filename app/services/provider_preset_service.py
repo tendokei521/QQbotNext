@@ -12,6 +12,7 @@ from typing import Any
 
 from app.infrastructure.config.config_service import ConfigService
 from app.llm.providers import get_provider
+from app.llm.providers.base import format_llm_error
 from app.core.logger import logger
 
 PASSWORD_MASK = "••••••••"
@@ -214,7 +215,7 @@ class ProviderPresetService:
             if remote_models:
                 return {"ok": True, "message": "连接正常", "reply": "", "models": remote_models[:5]}
         except Exception as e:
-            logger.debug(f"[ProviderPreset] /models 测试不可用，回退 chat: {e}")
+            logger.debug(f"[ProviderPreset] /models 测试不可用，回退 chat: {format_llm_error(e)}")
 
         # 回退：最小 chat 请求；只关心是否成功返回，不关心是否真的生成了文本
         try:
@@ -226,8 +227,8 @@ class ProviderPresetService:
                 timeout=int(config.get("timeout", 20) or 20),
             )
         except Exception as e:
-            logger.error(f"[ProviderPreset] 测试失败 {preset_id}: {e}")
-            return {"ok": False, "message": str(e)}
+            logger.error(f"[ProviderPreset] 测试失败 {preset_id}: {format_llm_error(e)}")
+            return {"ok": False, "message": format_llm_error(e)}
 
         # 请求已成功返回（raw 非空）即视为连接正常；
         # 某些模型 max_tokens 被 reasoning 占用时 text 可能为空，不应误报失败。

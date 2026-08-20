@@ -17,17 +17,32 @@ import aiohttp
 
 from app.llm import logger
 from app.llm.tool_loop import normalize_and_execute_tool_calls
-from .base import BaseProvider, LLMResponse, StreamEvent
+from .base import BaseProvider, LLMResponse, StreamEvent, format_llm_error
 
 RETRYABLE_STATUS = {408, 409, 429, 500, 502, 503, 504, 529}
 
 
-class _FatalError(Exception):
+class _LLMError(Exception):
+    """LLM 请求错误基类，携带错误码（写入日志 / StreamEvent.error）。"""
+
+    code = "ERR"
+
+    def __init__(self, message: str = "", code: str | None = None):
+        super().__init__(message)
+        if code:
+            self.code = code
+
+
+class _FatalError(_LLMError):
     """不可恢复错误（认证/参数）：不重试。"""
 
 
-class _AuthError(Exception):
+class _AuthError(_LLMError):
     """认证失败（401/403）：当前 key 无效，轮换到下一个 key。"""
+
+
+class _RetryableError(_LLMError):
+    """可重试错误（限流 429 / 服务端 5xx / 部分 4xx / 网络）：指数退避重试。"""
 
 
 def _split_keys(api_key: str) -> list[str]:
@@ -78,7 +93,7 @@ class OpenAICompatProvider(BaseProvider):
     async def _post(self, api_key: str, payload: dict, timeout: int) -> dict:
         """发送单次请求，返回解析后的 JSON。非可重试错误抛 _FatalError。"""
         if not api_key:
-            raise _FatalError("API 密钥未配置")
+            raise _FatalError("API 密钥未配置", code="NO-API-KEY")
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         async with aiohttp.ClientSession() as session:
             async with session.post(
@@ -88,16 +103,18 @@ class OpenAICompatProvider(BaseProvider):
                 if resp.status != 200:
                     body = await resp.text()
                     if resp.status in (401, 403):
-                        raise _AuthError(f"HTTP {resp.status}: {body[:200]}")
+                        raise _AuthError(f"HTTP {resp.status}: {body[:200]}", code=f"HTTP {resp.status}")
                     if resp.status in RETRYABLE_STATUS:
-                        raise ConnectionError(f"HTTP {resp.status}: {body[:200]}")
-                    raise _FatalError(f"HTTP {resp.status}: {body[:200]}")
+                        raise _RetryableError(
+                            f"HTTP {resp.status}: {body[:200]}", code=f"HTTP {resp.status}"
+                        )
+                    raise _FatalError(f"HTTP {resp.status}: {body[:200]}", code=f"HTTP {resp.status}")
                 return await resp.json()
 
     async def _stream_once(self, api_key: str, payload: dict, timeout: int):
         """发起一次流式 HTTP 请求，逐块产出 StreamEvent。"""
         if not api_key:
-            raise _FatalError("API 密钥未配置")
+            raise _FatalError("API 密钥未配置", code="NO-API-KEY")
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         async with aiohttp.ClientSession() as session:
             async with session.post(
@@ -107,10 +124,12 @@ class OpenAICompatProvider(BaseProvider):
                 if resp.status != 200:
                     body = await resp.text()
                     if resp.status in (401, 403):
-                        raise _AuthError(f"HTTP {resp.status}: {body[:200]}")
+                        raise _AuthError(f"HTTP {resp.status}: {body[:200]}", code=f"HTTP {resp.status}")
                     if resp.status in RETRYABLE_STATUS:
-                        raise ConnectionError(f"HTTP {resp.status}: {body[:200]}")
-                    raise _FatalError(f"HTTP {resp.status}: {body[:200]}")
+                        raise _RetryableError(
+                            f"HTTP {resp.status}: {body[:200]}", code=f"HTTP {resp.status}"
+                        )
+                    raise _FatalError(f"HTTP {resp.status}: {body[:200]}", code=f"HTTP {resp.status}")
                 while True:
                     raw_line = await resp.content.readline()
                     if not raw_line:
@@ -145,20 +164,20 @@ class OpenAICompatProvider(BaseProvider):
             try:
                 return await self._post(key, payload, timeout)
             except _AuthError as e:
-                last_error = str(e)
+                last_error = format_llm_error(e)
                 if attempt < self.max_retries - 1:
                     logger.add_info("Api").warning(
-                        f"API key {attempt % len(self.api_keys) + 1} 认证失败，轮换下一个: {e}"
+                        f"API key {attempt % len(self.api_keys) + 1} 认证失败，轮换下一个: {last_error}"
                     )
                     await asyncio.sleep(0.5)
                 else:
                     logger.add_info("Api").error(f"所有 API key 认证均失败: {last_error}")
                     return None
             except _FatalError as e:
-                logger.add_info("Api").error(f"API 不可恢复错误: {e}")
+                logger.add_info("Api").error(f"API 不可恢复错误: {format_llm_error(e)}")
                 return None
             except Exception as e:
-                last_error = str(e)
+                last_error = format_llm_error(e)
                 if attempt < self.max_retries - 1:
                     delay = 2 ** attempt
                     logger.add_info("Api").warning(
@@ -289,21 +308,21 @@ class OpenAICompatProvider(BaseProvider):
             except _AuthError as e:
                 if attempt < self.max_retries - 1:
                     logger.add_info("Api").warning(
-                        f"API key {attempt % len(self.api_keys) + 1} 认证失败，轮换下一个: {e}"
+                        f"API key {attempt % len(self.api_keys) + 1} 认证失败，轮换下一个: {format_llm_error(e)}"
                     )
                     await asyncio.sleep(0.5)
                     continue
-                yield StreamEvent(type="error", text=str(e))
+                yield StreamEvent(type="error", text=format_llm_error(e))
                 return
             except _FatalError as e:
-                yield StreamEvent(type="error", text=str(e))
+                yield StreamEvent(type="error", text=format_llm_error(e))
                 return
             except Exception as e:
                 if started or attempt >= self.max_retries - 1:
-                    yield StreamEvent(type="error", text=str(e))
+                    yield StreamEvent(type="error", text=format_llm_error(e))
                     return
                 logger.add_info("Api").warning(
-                    f"流式请求失败，{2 ** attempt}s 后重试 ({attempt + 1}/{self.max_retries}): {e}"
+                    f"流式请求失败，{2 ** attempt}s 后重试 ({attempt + 1}/{self.max_retries}): {format_llm_error(e)}"
                 )
                 await asyncio.sleep(2 ** attempt)
 

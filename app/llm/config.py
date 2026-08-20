@@ -90,6 +90,19 @@ DEFAULT_LLM_CONFIG: dict = {
     # 定时任务
     "schedule_enable": True,
     "schedule_prompt": "你被一个定时任务唤醒，这不是一次用户对话。\n规则：\n1. 这不是聊天轮次：不要打招呼，不要反问用户。\n2. 结合最近的历史对话理解与用户的关系和上下文，用符合你人设的语气自然开口。\n3. 自然地说明你联系的原因，参考任务内容即可，不要提及\"定时任务\"\"工具\"等技术细节。\n4. 当前时间：{{current_time}}；需要完成的事情：{{content}}。\n任务信息：{{job_json}}",
+    # 长期记忆
+    "memory_enable": True,                # 总开关
+    "memory_private_enable": True,        # 私聊场景
+    "memory_group_enable": True,          # 群聊场景
+    "memory_recall_max": 8,               # 注入条数上限
+    "memory_recall_max_chars": 600,       # 注入字符上限
+    "memory_save_deterministic": True,    # “记住…”确定性兜底
+    "memory_extract_enable": True,        # 隐式蒸馏
+    "memory_extract_interval_min": 10,    # 蒸馏限频（分钟）
+    "memory_max_per_owner": 300,          # 每 owner 条数上限
+    "memory_user_cross_group": False,     # 跨群用户画像（默认关）
+    "memory_audit_enable": True,          # 事件记录
+    "memory_audit_inject": False,         # 是否记录每次注入（默认关，避免日志噪音）
 }
 
 # 框架级 Agent 配置/权限存储的 module_name

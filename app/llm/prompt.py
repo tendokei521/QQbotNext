@@ -30,6 +30,7 @@ def build_messages(
     with_schedule_instruction: bool = True,
     schedule_nudge: bool = False,
     skills: list[str] | None = None,
+    memory_text: str = "",
 ) -> list[dict]:
     """组装 LLM 消息列表。
 
@@ -41,6 +42,7 @@ def build_messages(
         with_schedule_instruction: 是否追加「定时任务协议」指令
         schedule_nudge: 是否在用户消息前插入「必须调用 schedule_task 工具」的紧贴提醒
         skills: 模块技能 prompt 块列表（逐个追加为 system 消息）
+        memory_text: 长期记忆文本块，为空则跳过（默认空 = 旧调用方零影响）
     """
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
 
@@ -49,6 +51,9 @@ def build_messages(
 
     for block in skills or []:
         messages.append({"role": "system", "content": block})
+
+    if memory_text:
+        messages.append({"role": "system", "content": memory_text})
 
     if pre_history_text:
         messages.append({"role": "system", "content": pre_history_text})

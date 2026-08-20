@@ -80,7 +80,11 @@ async def chat_with_fallback(
             )
         except Exception as e:
             from app.llm import logger
-            logger.add_info("LLM").warning(f"回退：模型 {cfg.get('provider_model_id', cfg.get('model'))} 请求异常: {e}")
+            from .base import format_llm_error
+
+            logger.add_info("LLM").warning(
+                f"回退：模型 {cfg.get('provider_model_id', cfg.get('model'))} 请求异常: {format_llm_error(e)}"
+            )
             last = LLMResponse(text="", raw=None)
             continue
         if resp.ok or resp.raw is not None:
@@ -118,7 +122,11 @@ async def iter_stream_with_fallback(
                 yield ev
         except Exception as e:
             from app.llm import logger
-            logger.add_info("LLM").warning(f"流式回退：模型 {cfg.get('provider_model_id', cfg.get('model'))} 请求异常: {e}")
+            from .base import format_llm_error
+
+            logger.add_info("LLM").warning(
+                f"流式回退：模型 {cfg.get('provider_model_id', cfg.get('model'))} 请求异常: {format_llm_error(e)}"
+            )
             if started:
                 raise
             continue
