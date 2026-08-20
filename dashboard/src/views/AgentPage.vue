@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import http, { errorMessage } from '@/api/http'
 import { useBotsStore } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
@@ -7,8 +8,6 @@ import type { PermissionConfig } from '@/stores/modules'
 import ConfigForm from '@/components/config/ConfigForm.vue'
 import PermissionEditor from '@/components/config/PermissionEditor.vue'
 import AgentPanels from '@/components/agent/AgentPanels.vue'
-import PageWithSections from '@/components/common/PageWithSections.vue'
-import type { SectionItem } from '@/components/common/PageSectionNav.vue'
 import { filterSchemaExcludeGroup } from '@/utils/schema'
 
 const bots = useBotsStore()
@@ -17,24 +16,26 @@ const notify = useNotifyStore()
 const botId = ref<number | null>(null)
 const enabled = ref(false)
 const schema = ref<Record<string, any>>({})
+const route = useRoute()
 const activeGroup = ref('')
 
-const sectionItems = computed<SectionItem[]>(() => {
-  const items: SectionItem[] = [
-    { id: 'sec-permission', label: '响应范围控制', icon: 'mdi-shield-account-outline' },
-    { id: 'sec-models', label: 'Provider 模型池', icon: 'mdi-format-list-numbered' },
-  ]
-  const groups = (schema.value?.groups || {}) as Record<string, any>
-  Object.entries(groups).forEach(([id, def]) => {
-    items.push({ id: `group-${id}`, label: def?.label || id })
+function scrollToSection(section: string) {
+  if (!section) return
+  if (section.startsWith('group-')) activeGroup.value = section.slice('group-'.length)
+  nextTick(() => {
+    const el = document.getElementById(section)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
   })
-  items.push({ id: 'sec-agent-panels', label: '定时任务 / 主动消息', icon: 'mdi-calendar-clock' })
-  return items
-})
-
-function onSectionSelect(id: string) {
-  if (id.startsWith('group-')) activeGroup.value = id.slice('group-'.length)
 }
+
+function handleSectionQuery() {
+  scrollToSection(String(route.query.section || ''))
+}
+
+watch(
+  () => route.query.section,
+  () => handleSectionQuery(),
+)
 const providerModels = ref<{ id: string; preset_id: string; preset_name?: string; model: string }[]>([])
 const draft = reactive<Record<string, any>>({})
 const poolModelIds = ref<string[]>([])
@@ -140,6 +141,7 @@ async function load() {
     }
     saveStatus.value = 'clean'
     dirtyFlag = false
+    handleSectionQuery()
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   } finally {
@@ -242,8 +244,7 @@ onUnmounted(() => {
     <template v-else>
       <v-progress-linear v-if="loading" indeterminate color="primary" />
 
-      <PageWithSections :sections="sectionItems" @select="onSectionSelect">
-        <v-card id="sec-permission" variant="outlined" class="mb-4">
+      <v-card id="sec-permission" variant="outlined" class="mb-4">
           <v-card-title class="d-flex align-center">
             <v-icon icon="mdi-shield-account-outline" class="mr-2" color="primary" /> 响应范围控制
           </v-card-title>
@@ -316,7 +317,6 @@ onUnmounted(() => {
         <div id="sec-agent-panels">
           <AgentPanels :bot-id="botId" />
         </div>
-      </PageWithSections>
 
       <v-dialog v-model="poolDialog" max-width="420">
         <v-card>

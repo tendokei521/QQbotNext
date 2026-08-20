@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useThemeStore } from '@/stores/theme'
 import { useBotsStore, type BotStatus } from '@/stores/bots'
@@ -38,25 +38,58 @@ const STATUS_TEXT: Record<BotStatus, string> = {
   error: '错误',
 }
 
-const navItems = computed(() => {
+interface NavChild {
+  to: string
+  title: string
+  icon?: string
+}
+
+interface NavItem {
+  to?: string
+  title: string
+  icon?: string
+  children?: NavChild[]
+}
+
+const navItems = computed<NavItem[]>(() => {
   const showExperimental = !!webui.config.experimental?.show_experimental
-  const items = [
+  const agentChildren: NavChild[] = [
+    { to: '/agent?section=sec-permission', title: '响应范围控制' },
+    { to: '/agent?section=sec-models', title: 'Provider 模型池' },
+    { to: '/agent?section=sec-agent-panels', title: '定时任务 / 主动消息' },
+  ]
+  if (showExperimental) {
+    agentChildren.push({ to: '/agent/memory', title: 'Agent 长期记忆' })
+  }
+  const items: NavItem[] = [
     { to: '/', title: '总览', icon: 'mdi-view-dashboard-outline' },
     { to: '/bots', title: '账号管理', icon: 'mdi-robot-outline' },
     { to: '/modules', title: '功能模块', icon: 'mdi-cube-outline' },
     { to: '/provider-presets', title: 'Provider 预设', icon: 'mdi-api' },
-    { to: '/agent', title: 'Agent 面板', icon: 'mdi-creation-outline' },
+    { title: 'Agent 面板', icon: 'mdi-creation-outline', children: agentChildren },
     { to: '/logs', title: '日志', icon: 'mdi-console' },
     { to: '/settings', title: '设置', icon: 'mdi-cog-outline' },
   ]
   if (showExperimental) {
-    items.splice(5, 0,
-      { to: '/agent/memory', title: 'Agent 长期记忆', icon: 'mdi-brain' },
-      { to: '/config-profiles', title: '配置档案', icon: 'mdi-book-multiple' },
-    )
+    items.splice(6, 0, { to: '/config-profiles', title: '配置档案', icon: 'mdi-book-multiple' })
   }
   return items
 })
+
+const openedGroups = ref<string[]>([])
+const isAgentActive = computed(() => route.path.startsWith('/agent'))
+
+watch(
+  () => route.path,
+  () => {
+    if (isAgentActive.value) {
+      if (!openedGroups.value.includes('Agent 面板')) openedGroups.value.push('Agent 面板')
+    } else {
+      openedGroups.value = openedGroups.value.filter((g) => g !== 'Agent 面板')
+    }
+  },
+  { immediate: true },
+)
 
 const botOptions = computed(() =>
   bots.bots.map((b) => {
@@ -161,16 +194,39 @@ onUnmounted(() => {
       </template>
 
       <v-list nav density="comfortable" class="pa-2 nav-list">
-        <v-list-item
-          v-for="item in navItems"
-          :key="item.to"
-          :to="item.to"
-          :title="item.title"
-          :prepend-icon="item.icon"
-          rounded="lg"
-          class="nav-item"
-          :class="{ 'nav-item--active': route.path === item.to || (item.to !== '/' && route.path.startsWith(item.to)) }"
-        />
+        <template v-for="item in navItems" :key="item.title">
+          <v-list-group v-if="item.children" v-model="openedGroups" :value="item.title">
+            <template #activator="{ props }">
+              <v-list-item
+                v-bind="props"
+                :title="item.title"
+                :prepend-icon="item.icon"
+                rounded="lg"
+                class="nav-item"
+                :class="{ 'nav-item--active': isAgentActive }"
+              />
+            </template>
+            <v-list-item
+              v-for="child in item.children"
+              :key="child.to"
+              :to="child.to"
+              :title="child.title"
+              density="compact"
+              class="nav-child"
+              :class="{ 'nav-child--active': route.fullPath === child.to }"
+            />
+          </v-list-group>
+          <v-list-item
+            v-else
+            :key="item.to"
+            :to="item.to"
+            :title="item.title"
+            :prepend-icon="item.icon"
+            rounded="lg"
+            class="nav-item"
+            :class="{ 'nav-item--active': item.to ? route.path === item.to || (item.to !== '/' && route.path.startsWith(item.to)) : false }"
+          />
+        </template>
       </v-list>
 
       <template #append>
@@ -379,6 +435,24 @@ onUnmounted(() => {
 
 .nav-item--active :deep(.v-list-item__prepend) {
   color: rgb(var(--v-theme-primary));
+}
+
+/* Agent 配置下的二级子菜单：更小字号、缩进、弱化颜色 */
+.nav-child {
+  font-size: 12.5px;
+  min-height: 32px;
+  padding-left: 30px !important;
+  color: rgba(var(--v-theme-on-surface), 0.65);
+}
+
+.nav-child:hover {
+  background: rgba(var(--v-theme-primary), 0.07);
+}
+
+.nav-child--active {
+  color: rgb(var(--v-theme-primary)) !important;
+  font-weight: 600;
+  background: rgba(var(--v-theme-primary), 0.08);
 }
 
 .drawer-footer {
