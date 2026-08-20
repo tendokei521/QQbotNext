@@ -376,7 +376,11 @@ class TaskScheduler:
         history = self.session_mgr.get_history(
             entry.session_id, limit=int(config.get("history_rounds", 50))
         ) if session else []
-        history = format_history_for_llm(history, is_private=not entry.is_group)
+        _meta_flags = {
+            "normalize_enhanced": bool(config.get("experimental_long_term_memory", False)),
+            "mask_nickname": bool(config.get("meta_mask_nickname", False)),
+        }
+        history = format_history_for_llm(history, is_private=not entry.is_group, **_meta_flags)
         system_prompt = config.get("system_prompt", "你是一个友好的助手。")
         now_str = datetime.now().strftime("%Y年%m月%d日 %H:%M")
         job_json = json.dumps({
@@ -402,6 +406,7 @@ class TaskScheduler:
                 entry.target,
                 count=int(config.get("history_rounds", 50)),
                 self_ids={str(self.bot_id), str(getattr(self.bot, "bot_id", "") or "")},
+                **_meta_flags,
             )
             if history_text:
                 group_name = await fetch_group_name(self.bot, entry.target)
@@ -412,12 +417,26 @@ class TaskScheduler:
                     current_time=now_str,
                 )
 
+        memory_text = ""
+        memory = getattr(self.module, "memory", None)
+        if memory is not None and memory.enabled():
+            try:
+                memory_text = await memory.recall_block_async(
+                    entry.session_id,
+                    entry.target if not entry.is_group else "",
+                    user_prompt,
+                    bot=self.bot,
+                )
+            except Exception:
+                memory_text = ""
+
         return build_messages(
             system_prompt=system_prompt,
             pre_history_text=pre_history_text,
             history=history,
             user_text=user_prompt,
             with_schedule_instruction=False,
+            memory_text=memory_text,
         )
 
     async def _generate_reply(self, entry: TaskEntry):

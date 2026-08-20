@@ -12,6 +12,7 @@ from app.llm.session import SessionManager
 class FakeConfig:
     def __init__(self, data=None):
         self.data = dict(DEFAULT_LLM_CONFIG)
+        self.data.update({"memory_enable": True, "experimental_long_term_memory": True})
         if data:
             self.data.update(data)
 

@@ -33,13 +33,93 @@ _NON_TEXT_SEGMENTS = {
 SELF_TAG = "我"
 PRIVATE_OTHER_TAG = "对方"
 
-# 已自带“发送者/发送了/时间”自描述内容（LLM 增强模块 llm_enhance 产出的散文块）。
+# 已自带“发送者/发送者昵称/发送了/消息正文/时间”自描述内容（LLM 增强模块 llm_enhance 产出的散文块）。
 # 这类内容再套外层“MM-DD HH:MM 昵称(QQ):”会变成重复脏信息，渲染时应原样输出。
-_ENHANCED_RE = re.compile(r"(?:^|\n)发送了：|^\(时间：")
+# 同时兼容旧历史（发送者/发送了）与当前单行格式（昵称(QQ): 正文）。
+_ENHANCED_RE = re.compile(
+    r"(?:^|\n)(?:发送者：|发送者昵称：|发送了：|消息正文：)|^\(时间："
+)
+
+# 句子型/超长昵称的判定阈值
+_SENTENCE_LIKE_RE = re.compile(r"[\s，。！？、；：,.!?;:]")
+_SENTENCE_LIKE_MAX_LEN = 12
+
+
+def safe_nickname(nickname: str, user_id: Any = "") -> str:
+    """把句子型/超长昵称脱敏为 ``用户<QQ>``，普通昵称保留原样。
+
+    目的：避免昵称内容（如“学费”）进入 LLM 上下文后被当成对话内容。
+    """
+    nick = (nickname or "").strip()
+    if not nick:
+        return f"用户{user_id}" if user_id not in (None, "") else "用户"
+    if len(nick) > _SENTENCE_LIKE_MAX_LEN or _SENTENCE_LIKE_RE.search(nick):
+        return f"用户{user_id}" if user_id not in (None, "") else "用户"
+    return nick
+
+
+def safe_sender_label(sender: str) -> str:
+    """把 ``昵称(QQ)`` 形式的发送者标签脱敏为安全标签。
+
+    普通昵称保留 ``昵称(QQ)``；句子型/超长昵称转为 ``用户<QQ>``。
+    """
+    sender = (sender or "").strip()
+    m = re.match(r"^(.*)\((\d+)\)$", sender)
+    if m:
+        nick, qq = m.group(1), m.group(2)
+        safe = safe_nickname(nick, qq)
+        if safe == f"用户{qq}":
+            return safe
+        return f"{safe}({qq})"
+    return safe_nickname(sender, "")
 
 
 def _is_enhanced_context(content: str) -> bool:
     return bool(content and _ENHANCED_RE.search(content))
+
+
+def _normalize_enhanced_content(content: str) -> str:
+    """把旧/新分节增强格式统一归一化为单行 ``昵称(QQ): 正文``。
+
+    旧历史可能是：:
+        发送者：X
+        发送了：Y
+
+    也可能是新分节：:
+        发送者昵称：X
+        消息正文：Y
+
+    统一转成：:
+        X: Y
+
+    并顺带对发送者做脱敏，避免历史里的句子型昵称继续污染 LLM。
+    """
+    lines = (content or "").split("\n")
+    time_line = ""
+    sender_line = ""
+    text_line = ""
+    meta_lines: list[str] = []
+
+    for line in lines:
+        if line.startswith("(时间：") and line.endswith(")"):
+            time_line = line
+        elif line.startswith("发送者：") or line.startswith("发送者昵称："):
+            sender_line = line.split("：", 1)[1] if "：" in line else ""
+        elif line.startswith("发送了：") or line.startswith("消息正文："):
+            text_line = line.split("：", 1)[1] if "：" in line else ""
+        else:
+            stripped = line.strip()
+            if stripped:
+                meta_lines.append(line)
+
+    out: list[str] = []
+    if time_line:
+        out.append(time_line)
+    if sender_line or text_line:
+        label = safe_sender_label(sender_line) if sender_line else "用户"
+        out.append(f"{label}: {text_line}" if text_line else label)
+    out.extend(meta_lines)
+    return "\n".join(out) if out else (content or "")
 
 
 def _time_prefix(ts: Any) -> str:
@@ -52,11 +132,17 @@ def _time_prefix(ts: Any) -> str:
         return ""
 
 
-def _group_sender_label(nickname: str, user_id: Any, include_user_id: bool) -> str:
-    """群聊发送者标签：昵称为主，昵称缺失时回退 QQ，必要时附 (QQ) 区分同名。"""
-    parts: list[str] = []
-    if nickname:
-        parts.append(nickname)
+def _group_sender_label(
+    nickname: str, user_id: Any, include_user_id: bool, mask_nickname: bool = False
+) -> str:
+    """群聊发送者标签：普通昵称保留；mask_nickname=True 时句子型昵称转为 用户<QQ>。"""
+    if mask_nickname:
+        nick = safe_nickname(nickname, user_id)
+        if nick == f"用户{user_id}" and user_id not in (None, ""):
+            return nick
+    else:
+        nick = (nickname or "").strip()
+    parts: list[str] = [nick] if nick else []
     if include_user_id and user_id not in (None, ""):
         if parts:
             parts.append(f"({user_id})")
@@ -107,6 +193,8 @@ def format_online_history(
     include_user_id: bool = True,
     max_content: int = 200,
     is_private: bool = False,
+    normalize_enhanced: bool = False,
+    mask_nickname: bool = False,
 ) -> str:
     """把 OneBot 消息列表格式化为群聊/私聊背景文本。
 
@@ -122,6 +210,8 @@ def format_online_history(
         include_user_id: 群聊时是否在昵称后附加 (QQ) 以区分同名。
         max_content: 单条内容最长长度，超出截断。
         is_private: True=私聊（对方只显示为「对方」，不显示昵称/QQ）。
+        normalize_enhanced: True=把历史中的旧/新分节增强格式归一化为单行（实验性）。
+        mask_nickname: True=对句子型昵称脱敏为 用户<QQ>（实验性）。
 
     Returns:
         格式化后的背景文本（每行一条消息）。
@@ -149,11 +239,12 @@ def format_online_history(
             label = PRIVATE_OTHER_TAG
         else:
             nickname = sender.get("card") or sender.get("nickname") or str(user_id) or "未知"
-            label = _group_sender_label(nickname, user_id, include_user_id)
+            label = _group_sender_label(nickname, user_id, include_user_id, mask_nickname)
 
-        # 内容已自带“发送者/发送了/时间”自描述（LLM 增强块）时不再套外层前缀，避免重复脏信息
+        # 内容已自带“发送者/发送了/时间”自描述（LLM 增强块）时不再套外层前缀。
+        # 实验性开启时才归一化为单行脱敏格式；默认保持历史原样，避免影响真人感。
         if _is_enhanced_context(content):
-            lines.append(content)
+            lines.append(_normalize_enhanced_content(content) if normalize_enhanced else content)
             continue
 
         prefix = _time_prefix(msg.get("time")) if include_time else ""
@@ -166,6 +257,9 @@ async def fetch_group_online_history(
     group_id: Any,
     count: int = 50,
     self_ids: set[str] | None = None,
+    *,
+    normalize_enhanced: bool = False,
+    mask_nickname: bool = False,
 ) -> str:
     """拉取群聊最近消息，格式化为带发送者/时间/QQ 的背景文本。"""
     try:
@@ -178,7 +272,13 @@ async def fetch_group_online_history(
         if not result or not isinstance(result, dict):
             return ""
         messages = result.get("messages", []) or []
-        return format_online_history(messages, count, self_ids=self_ids)
+        return format_online_history(
+            messages,
+            count,
+            self_ids=self_ids,
+            normalize_enhanced=normalize_enhanced,
+            mask_nickname=mask_nickname,
+        )
     except Exception:
         return ""
 
@@ -215,7 +315,13 @@ async def fetch_group_name(bot: Any, group_id: Any) -> str:
         return ""
 
 
-def format_history_for_llm(history: list[dict], is_private: bool = False) -> list[dict]:
+def format_history_for_llm(
+    history: list[dict],
+    is_private: bool = False,
+    *,
+    normalize_enhanced: bool = False,
+    mask_nickname: bool = False,
+) -> list[dict]:
     """把带发送者元数据的会话历史渲染成纯文本消息，避免多余字段进入 API。
 
     打标方式（与在线历史一致）：
@@ -227,6 +333,8 @@ def format_history_for_llm(history: list[dict], is_private: bool = False) -> lis
     Args:
         history: 会话历史条目（role/content/nickname/user_id/time 等字段）。
         is_private: True=私聊模式（对方不显示昵称，只显示「对方」）。
+        normalize_enhanced: True=把历史中的旧/新分节增强格式归一化为单行（实验性）。
+        mask_nickname: True=对句子型昵称脱敏为 用户<QQ>（实验性）。
 
     Returns:
         OpenAI messages 风格的历史列表，content 已渲染为打标文本。
@@ -240,17 +348,20 @@ def format_history_for_llm(history: list[dict], is_private: bool = False) -> lis
             # 把“MM-DD HH:MM 我: ”也写进回复内容（会污染历史并自我强化）。
             result.append({"role": role, "content": content})
             continue
-        # 内容已自带“发送者/发送了/时间”自描述（LLM 增强块）时不再套外层前缀，
-        # 避免同一句出现两份“时间/发送者”的重复脏信息。
+        # 内容已自带“发送者/发送了/时间”自描述（LLM 增强块）时不再套外层前缀。
+        # 实验性开启时才归一化为单行脱敏格式；默认保持历史原样。
         if _is_enhanced_context(content):
-            result.append({"role": role, "content": content})
+            result.append({
+                "role": role,
+                "content": _normalize_enhanced_content(content) if normalize_enhanced else content,
+            })
             continue
         if is_private:
             sender = PRIVATE_OTHER_TAG
         else:
             nickname = m.get("nickname") or ""
             user_id = m.get("user_id") or ""
-            sender = _group_sender_label(nickname, user_id, include_user_id=True)
+            sender = _group_sender_label(nickname, user_id, include_user_id=True, mask_nickname=mask_nickname)
         rendered = f"{_time_prefix(m.get('time'))}{sender}: {content}"
         result.append({"role": role, "content": rendered})
     return result

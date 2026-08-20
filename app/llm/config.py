@@ -92,8 +92,9 @@ DEFAULT_LLM_CONFIG: dict = {
     # 定时任务
     "schedule_enable": True,
     "schedule_prompt": "你被一个定时任务唤醒，这不是一次用户对话。\n规则：\n1. 这不是聊天轮次：不要打招呼，不要反问用户。\n2. 结合最近的历史对话理解与用户的关系和上下文，用符合你人设的语气自然开口。\n3. 自然地说明你联系的原因，参考任务内容即可，不要提及\"定时任务\"\"工具\"等技术细节。\n4. 当前时间：{{current_time}}；需要完成的事情：{{content}}。\n任务信息：{{job_json}}",
-    # 长期记忆
-    "memory_enable": True,                # 总开关
+    # 长期记忆（实验性方案：需开启 experimental_long_term_memory 才生效）
+    "experimental_long_term_memory": False,  # 实验性总开关：开启后才启用长期记忆 + 新版单行脱敏提示词
+    "memory_enable": False,               # 总开关（默认关闭，避免影响真人感）
     "memory_private_enable": True,        # 私聊场景
     "memory_group_enable": True,          # 群聊场景
     "memory_recall_max": 8,               # 注入条数上限
@@ -111,6 +112,11 @@ DEFAULT_LLM_CONFIG: dict = {
     "memory_max_age_days": 180,           # 超过此龄不注入（数据保留）
     "memory_on_reset": "suspend",         # 会话重置时：suspend / clear / keep
     "memory_upgrade_saved_only": True,    # 重置 suspend 时只保留“已保存/已确认”型记忆
+    # 感知增强提示词细调（实验性；默认全部使用旧版，保持真人感）
+    "meta_sender_style": "legacy",        # 发送者标签样式：legacy=发送者： / new=发送者昵称： / single=昵称(QQ): 正文
+    "meta_sent_style": "legacy",          # 正文标签样式：legacy=发送了： / new=消息正文：
+    "meta_instruction_mode": "legacy",    # 消息元信息消歧说明：off=不注入 / legacy=旧版说明 / new=新版说明
+    "meta_mask_nickname": False,          # 是否对句子型/超长昵称脱敏为 用户<QQ>
 }
 
 # 框架级 Agent 配置/权限存储的 module_name

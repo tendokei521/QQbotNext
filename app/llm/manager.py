@@ -10,11 +10,13 @@ AgentRuntime 暴露与旧模块一致的接口（.config / .ctx / .bot_id / .sch
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from app.llm import logger
 from app.llm.config import AgentConfig
 from app.llm.hooks import LlmHookRegistry, ToolCallHookRegistry
+from app.llm.memory import MemoryManager
 from app.llm.pipeline import LlmPipeline
 from app.llm.proactive import ProactiveManager
 from app.llm.scheduler import TaskScheduler
@@ -52,6 +54,12 @@ class AgentRuntime:
         self.session_mgr = SessionManager(str(bot_id))
         self.scheduler = TaskScheduler(self)
         self.proactive = ProactiveManager(self)
+        self.memory = MemoryManager(self)
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = None
+        self.session_mgr.on_archive = self._on_session_archive
 
         # LLM 流水线：模块可在任意阶段注册钩子
         self.llm_hooks = LlmHookRegistry()
@@ -127,6 +135,23 @@ class AgentRuntime:
         self._bot = bot
         self.ctx.bot = bot
 
+    def _on_session_archive(self, session) -> None:
+        """会话过期/结束时触发长期记忆归档蒸馏（异步提交到主事件循环）。"""
+        memory = getattr(self, "memory", None)
+        if memory is None or self._loop is None or self._loop.is_closed():
+            return
+        try:
+            history = list(getattr(getattr(session, "data", None), "history", None) or [])
+            coro = memory.consolidate_archived(
+                session.id,
+                getattr(session, "type", "private") == "group",
+                history,
+                source="archive",
+            )
+            asyncio.run_coroutine_threadsafe(coro, self._loop)
+        except Exception:
+            pass
+
     def stop(self) -> None:
         """停止定时任务与主动消息计时器（任务数据保留，重启恢复）。"""
         try:
@@ -143,6 +168,10 @@ class AgentRuntime:
             pass
         try:
             self.llm_pipeline.shutdown()
+        except Exception:
+            pass
+        try:
+            self.memory.stop()
         except Exception:
             pass
         logger.add_info(f"#{self.bot_id}").info("[Agent] 运行时已停止")

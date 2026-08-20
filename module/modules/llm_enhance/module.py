@@ -104,16 +104,32 @@ class Module(BaseModule):
 
     @llm_hook("pre_request", event_type="*", order=20)
     async def format_user_context(self, ctx: LlmContext):
-        """在防抖/合并后，把上下文格式化为最终 user_text，并在最新一轮开头插入当前时间。"""
+        """在防抖/合并后，把上下文格式化为最终 user_text，并在最新一轮开头插入当前时间。
+
+        提示词格式由实验性细调配置控制：
+        - meta_sender_style：legacy / new / single
+        - meta_sent_style：legacy / new
+        - meta_mask_nickname：是否把句子型昵称脱敏为 用户<QQ>
+        """
+        from datetime import datetime
+
+        from app.llm.group_context import safe_sender_label
+
         info = ctx.state.get("user_context")
         if not info:
             return
 
-        from datetime import datetime
-
         event = ctx.event
         is_group = event.event_type == "message_group"
+        sender_style = str(_ctx_cfg(ctx, "meta_sender_style", "legacy") or "legacy").lower()
+        sent_style = str(_ctx_cfg(ctx, "meta_sent_style", "legacy") or "legacy").lower()
+        mask_nickname = _ctx_enabled(ctx, "meta_mask_nickname", False)
+
+        def _render_sender(s: str) -> str:
+            return safe_sender_label(s) if mask_nickname else s
+
         parts: list[str] = []
+        sender_label = ""
 
         # 时间感知：放在最新一轮上下文的开头
         time_line = ""
@@ -122,25 +138,42 @@ class Module(BaseModule):
 
         if is_group:
             if _ctx_enabled(ctx, "include_sender", True) and info.get("sender"):
-                parts.append(f"发送者：{info['sender']}")
+                sender = _render_sender(info["sender"])
+                if sender_style == "single":
+                    sender_label = sender
+                elif sender_style == "new":
+                    parts.append(f"发送者昵称：{sender}")
+                else:
+                    parts.append(f"发送者：{sender}")
             if _ctx_enabled(ctx, "include_mentioned", True) and info.get("mentioned"):
-                parts.append("提到了(用户名)：" + "、".join(info["mentioned"]))
+                mentioned = [_render_sender(m) for m in info["mentioned"]]
+                parts.append("提到了(用户名)：" + "、".join(mentioned))
 
         if _ctx_enabled(ctx, "include_quote", True) and info.get("quote"):
             if is_group and _ctx_enabled(ctx, "include_quote_sender", True) and info.get("quote_sender"):
-                parts.append(f"引用了：{info['quote_sender']}发送的引用消息：“{info['quote']}”")
+                quote_sender = _render_sender(info["quote_sender"])
+                parts.append(f"引用了：{quote_sender}发送的引用消息：“{info['quote']}”")
             else:
                 parts.append(f"引用了：{info['quote']}")
 
         sent_text = ctx.user_text.strip() or (info.get("sent_text") or "").strip()
         if _ctx_enabled(ctx, "include_sent", True) and sent_text:
-            parts.append(f"发送了：{sent_text}")
+            if sender_style == "single" and sender_label:
+                parts.insert(0, f"{sender_label}: {sent_text}")
+            elif sent_style == "new":
+                parts.append(f"消息正文：{sent_text}")
+            else:
+                parts.append(f"发送了：{sent_text}")
+        elif sender_style == "single" and sender_label:
+            parts.insert(0, sender_label)
 
         if time_line:
             parts.insert(0, time_line)
 
         if parts:
             ctx.user_text = "\n".join(parts)
+            # 标记已注入“发送者/发送了/引用/时间”等元信息，供 prompt 构建追加消歧说明
+            ctx.state["message_meta_injected"] = True
         elif time_line:
             ctx.user_text = f"{time_line}\n{ctx.user_text}".strip()
 

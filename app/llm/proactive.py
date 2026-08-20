@@ -165,7 +165,11 @@ class ProactiveManager:
         # 上下文
         session = self.session_mgr.get_session(session_id)
         history = self.session_mgr.get_history(session_id, limit=int(self.module.config.get("history_rounds", 50))) if session else []
-        history = format_history_for_llm(history, is_private=not is_group)
+        _meta_flags = {
+            "normalize_enhanced": bool(self.module.config.get("experimental_long_term_memory", False)),
+            "mask_nickname": bool(self.module.config.get("meta_mask_nickname", False)),
+        }
+        history = format_history_for_llm(history, is_private=not is_group, **_meta_flags)
         system_prompt = self.module.config.get("system_prompt", "你是一个友好的助手。")
         now_str = datetime.now().strftime("%Y年%m月%d日 %H:%M")
         prompt_tpl = self._cfg("proactive_prompt", DEFAULT_PROACTIVE_PROMPT)
@@ -180,6 +184,7 @@ class ProactiveManager:
                 target,
                 count=int(self.module.config.get("history_rounds", 50)),
                 self_ids={str(self.module.bot_id), str(getattr(self.bot, "bot_id", "") or "")},
+                **_meta_flags,
             )
             if history_text:
                 group_name = await fetch_group_name(self.bot, target)
@@ -190,12 +195,26 @@ class ProactiveManager:
                     current_time=now_str,
                 )
 
+        memory_text = ""
+        memory = getattr(self.module, "memory", None)
+        if memory is not None and memory.enabled():
+            try:
+                memory_text = await memory.recall_block_async(
+                    session_id,
+                    target if not is_group else "",
+                    user_prompt,
+                    bot=self.bot,
+                )
+            except Exception:
+                memory_text = ""
+
         messages = build_messages(
             system_prompt=system_prompt,
             pre_history_text=pre_history_text,
             history=history,
             user_text=user_prompt,
             with_schedule_instruction=False,
+            memory_text=memory_text,
         )
 
         # 生成期间新消息检查

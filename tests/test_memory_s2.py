@@ -17,6 +17,7 @@ def _mkmanager(bot_id="bots2m", data=None):
     class Cfg:
         def __init__(self, d):
             self.data = dict(DEFAULT_LLM_CONFIG)
+            self.data.update({"memory_enable": True, "experimental_long_term_memory": True})
             self.data.update(d or {})
 
         def get(self, k, default=None):

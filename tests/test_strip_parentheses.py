@@ -80,6 +80,7 @@ def _make(bot_id, data=None, enabled=None):
 class _FullConfig:
     def __init__(self, data=None, enabled=None):
         self.data = dict(DEFAULT_LLM_CONFIG)
+        self.data.update({"memory_enable": True, "experimental_long_term_memory": True})
         if data:
             self.data.update(data)
         if enabled is not None:

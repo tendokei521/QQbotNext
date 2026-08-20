@@ -85,7 +85,14 @@ class MemoryManager:
             return default
 
     def enabled(self) -> bool:
-        return bool(self._get("memory_enable", True))
+        if not bool(self._get("memory_enable", True)):
+            return False
+        # 实验性总开关：未显式配置（旧配置/测试）时按 memory_enable 兼容；
+        # 显式配置后必须同时开启 experimental_long_term_memory 才生效。
+        experimental = self._get("experimental_long_term_memory", None)
+        if experimental is None:
+            return True
+        return bool(experimental)
 
     def scene_enabled(self, session_id: str) -> bool:
         if not self.enabled():

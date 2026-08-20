@@ -10,7 +10,7 @@ SCHEMA = {
     "group_stream": {"type": "group", "label": "流式回复", "collapsible": True},
     "group_proactive": {"type": "group", "label": "主动消息", "collapsible": True},
     "group_schedule": {"type": "group", "label": "定时任务", "collapsible": True},
-    "group_memory": {"type": "group", "label": "长期记忆", "collapsible": True},
+    "group_memory": {"type": "group", "label": "长期记忆（实验性）", "collapsible": True},
     "group_permission": {"type": "group", "label": "权限", "collapsible": True},
 
     # ==================== 配置项 ====================
@@ -296,10 +296,14 @@ SCHEMA = {
         "rows": 7, "group": "group_schedule",
     },
 
-    # ==================== 长期记忆 ====================
+    # ==================== 长期记忆（实验性） ====================
+    "experimental_long_term_memory": {
+        "type": "boolean", "label": "启用长期记忆实验方案", "description": "开启后才启用长期记忆，并同步使用新版单行脱敏提示词；关闭时保持默认无记忆 + 旧版感知增强格式",
+        "default": False, "group": "group_memory",
+    },
     "memory_enable": {
-        "type": "boolean", "label": "长期记忆总开关", "description": "关闭后不写入、不注入记忆（数据保留）",
-        "default": True, "group": "group_memory",
+        "type": "boolean", "label": "长期记忆总开关", "description": "关闭后不写入、不注入记忆（数据保留）；需同时开启上方实验性开关才生效",
+        "default": False, "group": "group_memory",
     },
     "memory_private_enable": {
         "type": "boolean", "label": "私聊记忆", "description": "私聊场景记录与注入",
@@ -370,4 +374,45 @@ SCHEMA = {
         "type": "boolean", "label": "重置只保留已保存型", "description": "重置挂起时仅保留“明确保存/已确认”型记忆，自动蒸馏型一律挂起",
         "default": True, "group": "group_memory",
     },
+
+    # ==================== 感知增强提示词细调（实验性） ====================
+    "meta_sender_style": {
+        "type": "select", "label": "发送者标签样式", "description": "旧版=“发送者：”；新版=“发送者昵称：”；单行=“昵称(QQ): 正文”",
+        "default": "legacy", "group": "group_memory",
+        "options": {
+            "legacy": "旧版：发送者：昵称(QQ)",
+            "new": "新版：发送者昵称：昵称(QQ)",
+            "single": "单行：昵称(QQ): 正文",
+        },
+    },
+    "meta_sent_style": {
+        "type": "select", "label": "正文标签样式", "description": "旧版=“发送了：”；新版=“消息正文：”（单行发送者样式下自动合并为一行）",
+        "default": "legacy", "group": "group_memory",
+        "options": {
+            "legacy": "旧版：发送了：正文",
+            "new": "新版：消息正文：正文",
+        },
+    },
+    "meta_instruction_mode": {
+        "type": "select", "label": "消息元信息消歧说明", "description": "选择注入哪一套系统级提示词说明；off 表示完全不注入",
+        "default": "legacy", "group": "group_memory",
+        "options": {
+            "off": "不注入",
+            "legacy": "旧版说明（保持真人感）",
+            "new": "新版说明（单行脱敏 + 不知道名字不要叫代号）",
+        },
+    },
+    "meta_mask_nickname": {
+        "type": "boolean", "label": "句子型昵称脱敏", "description": "开启后把像句子/超长的昵称替换为 用户<QQ>，避免昵称内容被当作对话内容；普通短昵称保留",
+        "default": False, "group": "group_memory",
+    },
 }
+
+# 长期记忆（实验性）细调项：只有开启 experimental_long_term_memory 后才显示
+for _key, _def in SCHEMA.items():
+    if (
+        isinstance(_def, dict)
+        and _def.get("group") == "group_memory"
+        and _key != "experimental_long_term_memory"
+    ):
+        _def["showIf"] = {"key": "experimental_long_term_memory", "value": True}

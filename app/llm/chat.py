@@ -8,7 +8,7 @@
 import asyncio
 import json
 import time
-from datetime import datetime
+from typing import Any
 
 from app.llm import logger
 from app.llm.group_context import (
@@ -18,10 +18,9 @@ from app.llm.group_context import (
     format_history_for_llm,
 )
 from app.llm.session import SessionManager
-from app.llm.prompt import build_messages
+from app.llm.prompt import LEGACY_MESSAGE_META_INSTRUCTION, MESSAGE_META_INSTRUCTION, build_messages
 from app.llm.providers import chat_with_fallback, iter_stream_with_fallback
 from app.llm.tags import maybe_strip_parentheses, strip_all_tags
-from app.llm.scheduler import extract_reminder_note, has_schedule_intent
 from app.llm.splitter import split_sentences, strip_stream_artifacts
 from app.llm.trigger import check_trigger, extract_text
 from app.llm.tool import ToolContext, build_tools, make_executor
@@ -38,12 +37,30 @@ def _event_nickname(event) -> str:
     return getattr(user, "card", "") or getattr(user, "nickname", "") or ""
 
 
-def _format_session_history(history: list[dict], is_private: bool) -> list[dict]:
+def _format_session_history(
+    history: list[dict],
+    is_private: bool,
+    *,
+    normalize_enhanced: bool = False,
+    mask_nickname: bool = False,
+) -> list[dict]:
     """兼容包装：委托给 group_context 的共享渲染函数。"""
-    return format_history_for_llm(history, is_private=is_private)
+    return format_history_for_llm(
+        history,
+        is_private=is_private,
+        normalize_enhanced=normalize_enhanced,
+        mask_nickname=mask_nickname,
+    )
 
 
-async def _build_group_pre_history(event, group_id: str, count: int) -> str:
+async def _build_group_pre_history(
+    event,
+    group_id: str,
+    count: int,
+    *,
+    normalize_enhanced: bool = False,
+    mask_nickname: bool = False,
+) -> str:
     """根据 include_pre_history 配置，拉取并组装群聊环境背景块。
 
     不拉取在线历史时返回空字符串；本函数不改变“非 @ 不入会话历史”的策略。
@@ -53,6 +70,8 @@ async def _build_group_pre_history(event, group_id: str, count: int) -> str:
         group_id,
         count=count,
         self_ids={str(event.self_id), str(getattr(event, "bot_id", "") or "")},
+        normalize_enhanced=normalize_enhanced,
+        mask_nickname=mask_nickname,
     )
     if not history_text:
         return ""
@@ -91,7 +110,72 @@ def _collect_llm_ext(runtime, event, session_id: str, is_private: bool, schedule
         group_id=getattr(getattr(event, "group", None), "group_id", None),
     )
 
+    # 长期记忆原生工具：memory_save / recall / delete / correct / deny
+    memory = getattr(runtime, "memory", None)
+    if memory is not None and memory.enabled():
+        from app.llm.memory import build_memory_tools
+
+        memory_user_id = str(getattr(event, "user_id", "") or "")
+        specs.extend(build_memory_tools(runtime, session_id, memory_user_id, is_private))
+
     return specs, skill_blocks, ctx
+
+
+async def _memory_block(runtime, session_id: str, user_id: Any, user_text: str, bot) -> str:
+    """召回长期记忆块；未启用或异常时返回空串。"""
+    memory = getattr(runtime, "memory", None)
+    if memory is None or not memory.enabled():
+        return ""
+    try:
+        return await memory.recall_block_async(session_id, user_id, user_text, bot=bot)
+    except Exception:
+        return ""
+
+
+def _memory_autosave(runtime, session_id: str, user_id: Any, text: str) -> None:
+    """确定性“记住…”兜底写入；未启用或异常时静默跳过。"""
+    memory = getattr(runtime, "memory", None)
+    if memory is None or not memory.enabled():
+        return
+    try:
+        memory.autosave(session_id, user_id, text)
+    except Exception:
+        pass
+
+
+def _memory_consolidate(runtime, session_id: str, is_private: bool, session_mgr) -> None:
+    """回复后触发限频隐式蒸馏；未启用或异常时静默跳过。"""
+    memory = getattr(runtime, "memory", None)
+    if memory is None or not memory.enabled():
+        return
+    try:
+        history = session_mgr.get_history(session_id, limit=20)
+        memory.maybe_consolidate(session_id, not is_private, history, source="chat")
+    except Exception:
+        pass
+
+
+def _message_meta_instruction(runtime, ctx) -> str | None:
+    """根据 meta_instruction_mode 选择消息元信息消歧说明文本。
+
+    off=不注入；legacy=旧版说明（默认）；new=新版单行脱敏说明。
+    """
+    if ctx is None or not ctx.state.get("message_meta_injected"):
+        return None
+    mode = str(runtime.config.get("meta_instruction_mode", "legacy") or "legacy").lower()
+    if mode == "off":
+        return None
+    if mode == "new":
+        return MESSAGE_META_INSTRUCTION
+    return LEGACY_MESSAGE_META_INSTRUCTION
+
+
+def _history_meta_flags(runtime) -> dict:
+    """计算历史渲染的实验性标志：是否归一化单行、是否脱敏昵称。"""
+    return {
+        "normalize_enhanced": bool(runtime.config.get("experimental_long_term_memory", False)),
+        "mask_nickname": bool(runtime.config.get("meta_mask_nickname", False)),
+    }
 
 
 def _log_debug_prompt(runtime, session_id: str, messages: list[dict], debug_enabled: bool = False) -> None:
@@ -290,9 +374,12 @@ async def call_llm_and_reply(module, event, session_mgr, config,
     # 群聊只有 include_pre_history 开启时才拉在线记录作为背景；
     # 非 @ 群消息仍然不写入会话历史，保持原有“不积累”策略。
     pre_history_text = ""
+    _meta_flags = _history_meta_flags(module)
     if group_id:
         if include_pre_history:
-            pre_history_text = await _build_group_pre_history(event, group_id, count=history_rounds)
+            pre_history_text = await _build_group_pre_history(
+                event, group_id, count=history_rounds, **_meta_flags
+            )
     elif is_private and include_pre_history in ("history", "load"):
         pre_history_text = await fetch_private_online_history(
             event.bot,
@@ -309,24 +396,26 @@ async def call_llm_and_reply(module, event, session_mgr, config,
     if (session_history and session_history[-1].get("role") == "user"
             and session_history[-1].get("content") == user_text):
         session_history = session_history[:-1]
-    session_history = _format_session_history(session_history, is_private)
+    session_history = _format_session_history(session_history, is_private, **_meta_flags)
 
     schedule_enable = config.get("schedule_enable", True)
-    # 定时意图检测：用于「紧贴提醒」+「模型未调工具时的确定性兜底」
-    intent = has_schedule_intent(user_text) if schedule_enable else False
 
     all_specs, skill_blocks, tool_ctx = _collect_llm_ext(
         module, event, session_id, is_private, schedule_enable
     )
 
+    _memory_autosave(module, session_id, user_id, user_text)
+    memory_text = await _memory_block(module, session_id, user_id, user_text, event.bot)
     messages = build_messages(
         system_prompt=system_prompt,
         pre_history_text=pre_history_text,
         history=session_history,
         user_text=user_text,
         with_schedule_instruction=schedule_enable,
-        schedule_nudge=intent,
+        schedule_nudge=False,
         skills=skill_blocks,
+        memory_text=memory_text,
+        message_meta_instruction=_message_meta_instruction(module, None),
     )
 
     logger.add_info(f"#{module.bot_id}").info(
@@ -362,26 +451,12 @@ async def call_llm_and_reply(module, event, session_mgr, config,
         )
         clean_response = "抱歉，我暂时无法回答，请稍后再试。"
 
-    # 兜底：用户明确提了定时请求但模型未调用工具 → 模块确定性排程（保证任务一定创建）
-    if intent and not response.tool_results:
-        scheduler = getattr(module, "scheduler", None)
-        if scheduler:
-            note = extract_reminder_note(user_text)
-            entry = await scheduler.schedule(session_id, {"trigger": user_text[:60], "content": note})
-            if entry:
-                logger.add_info(f"#{module.bot_id}").info(
-                    f"[定时] 模型未调工具，兜底创建 {session_id}: {user_text[:30]} -> "
-                    f"{entry.next_at:%Y-%m-%d %H:%M} ({entry.repeat})"
-                )
-            else:
-                logger.add_info(f"#{module.bot_id}").warning(
-                    f"[定时] 兜底排程失败（时间无法解析）: {user_text}"
-                )
-
     session_mgr.add_message(session_id, "assistant", _clean_output_for_history(config, clean_response))
     if not is_private:
         session.mark_replied()
     await asyncio.to_thread(session_mgr.history.save_session, session)
+
+    _memory_consolidate(module, session_id, is_private, session_mgr)
 
     try:
         if is_private:
@@ -473,9 +548,12 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
     history_rounds = config.get("history_rounds", 50)
 
     pre_history_text = ""
+    _meta_flags = _history_meta_flags(runtime)
     if group_id:
         if include_pre_history:
-            pre_history_text = await _build_group_pre_history(event, group_id, count=history_rounds)
+            pre_history_text = await _build_group_pre_history(
+                event, group_id, count=history_rounds, **_meta_flags
+            )
     elif is_private and include_pre_history in ("history", "load"):
         pre_history_text = await fetch_private_online_history(
             event.bot,
@@ -492,24 +570,31 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
     if (session_history and session_history[-1].get("role") == "user"
             and session_history[-1].get("content") == user_text_current):
         session_history = session_history[:-1]
-    session_history = _format_session_history(session_history, is_private)
+    session_history = _format_session_history(session_history, is_private, **_meta_flags)
 
     schedule_enable = config.get("schedule_enable", True)
-    # 定时意图检测：用于「紧贴提醒」+「模型未调工具时的确定性兜底」
-    intent = has_schedule_intent(user_text) if schedule_enable else False
 
     all_specs, skill_blocks, tool_ctx = _collect_llm_ext(
         runtime, event, session_id, is_private, schedule_enable
     )
 
+    # 确定性“记住…”兜底应使用用户原始文本，而不是 llm_enhance 增强后的元信息块
+    memory_source_text = user_text
+    if ctx is not None:
+        info = ctx.state.get("user_context") or {}
+        memory_source_text = (info.get("sent_text") or user_text).strip()
+    _memory_autosave(runtime, session_id, user_id, memory_source_text)
+    memory_text = await _memory_block(runtime, session_id, user_id, memory_source_text, event.bot)
     messages = build_messages(
         system_prompt=system_prompt,
         pre_history_text=pre_history_text,
         history=session_history,
         user_text=user_text,
         with_schedule_instruction=schedule_enable,
-        schedule_nudge=intent,
+        schedule_nudge=False,
         skills=skill_blocks,
+        memory_text=memory_text,
+        message_meta_instruction=_message_meta_instruction(runtime, ctx),
     )
 
     _log_debug_prompt(runtime, session_id, messages, debug_enabled=bool(ctx and ctx.state.get("debug_prompt", False)))
@@ -547,26 +632,12 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
         )
         clean_response = "抱歉，我暂时无法回答，请稍后再试。"
 
-    # 兜底：用户明确提了定时请求但模型未调用工具 → 模块确定性排程（保证任务一定创建）
-    if intent and not response.tool_results:
-        scheduler = getattr(runtime, "scheduler", None)
-        if scheduler:
-            note = extract_reminder_note(user_text)
-            entry = await scheduler.schedule(session_id, {"trigger": user_text[:60], "content": note})
-            if entry:
-                logger.add_info(f"#{runtime.bot_id}").info(
-                    f"[定时] 模型未调工具，兜底创建 {session_id}: {user_text[:30]} -> "
-                    f"{entry.next_at:%Y-%m-%d %H:%M} ({entry.repeat})"
-                )
-            else:
-                logger.add_info(f"#{runtime.bot_id}").warning(
-                    f"[定时] 兜底排程失败（时间无法解析）: {user_text}"
-                )
-
     session_mgr.add_message(session_id, "assistant", _clean_output_for_history(config, clean_response))
     if not is_private:
         session.mark_replied()
     await asyncio.to_thread(session_mgr.history.save_session, session)
+
+    _memory_consolidate(runtime, session_id, is_private, session_mgr)
     return clean_response
 
 
@@ -651,9 +722,12 @@ async def stream_response(runtime, event, ctx=None):
     history_rounds = config.get("history_rounds", 50)
 
     pre_history_text = ""
+    _meta_flags = _history_meta_flags(runtime)
     if group_id:
         if include_pre_history:
-            pre_history_text = await _build_group_pre_history(event, group_id, count=history_rounds)
+            pre_history_text = await _build_group_pre_history(
+                event, group_id, count=history_rounds, **_meta_flags
+            )
     elif is_private and include_pre_history in ("history", "load"):
         pre_history_text = await fetch_private_online_history(
             event.bot,
@@ -669,23 +743,31 @@ async def stream_response(runtime, event, ctx=None):
     if (session_history and session_history[-1].get("role") == "user"
             and session_history[-1].get("content") == user_text_current):
         session_history = session_history[:-1]
-    session_history = _format_session_history(session_history, is_private)
+    session_history = _format_session_history(session_history, is_private, **_meta_flags)
 
     schedule_enable = config.get("schedule_enable", True)
-    intent = has_schedule_intent(user_text) if schedule_enable else False
 
     all_specs, skill_blocks, tool_ctx = _collect_llm_ext(
         runtime, event, session_id, is_private, schedule_enable
     )
 
+    # 确定性“记住…”兜底应使用用户原始文本，而不是 llm_enhance 增强后的元信息块
+    memory_source_text = user_text
+    if ctx is not None:
+        info = ctx.state.get("user_context") or {}
+        memory_source_text = (info.get("sent_text") or user_text).strip()
+    _memory_autosave(runtime, session_id, user_id, memory_source_text)
+    memory_text = await _memory_block(runtime, session_id, user_id, memory_source_text, event.bot)
     messages = build_messages(
         system_prompt=system_prompt,
         pre_history_text=pre_history_text,
         history=session_history,
         user_text=user_text,
         with_schedule_instruction=schedule_enable,
-        schedule_nudge=intent,
+        schedule_nudge=False,
         skills=skill_blocks,
+        memory_text=memory_text,
+        message_meta_instruction=_message_meta_instruction(runtime, ctx),
     )
 
     _log_debug_prompt(runtime, session_id, messages, debug_enabled=bool(ctx and ctx.state.get("debug_prompt", False)))
@@ -783,25 +865,6 @@ async def stream_response(runtime, event, ctx=None):
     else:
         logger.add_info(f"#{runtime.bot_id}").warning("流式工具循环超过 5 轮，强制结束")
 
-    # 兜底：用户明确提了定时请求但模型未调用工具 → 确定性排程
-    if intent and not tool_results:
-        scheduler = getattr(runtime, "scheduler", None)
-        if scheduler:
-            note = extract_reminder_note(user_text)
-            entry = await scheduler.schedule(
-                session_id,
-                {"trigger": user_text[:60], "content": note},
-            )
-            if entry:
-                logger.add_info(f"#{runtime.bot_id}").info(
-                    f"[定时] 流式模型未调工具，兜底创建 {session_id}: {user_text[:30]} -> "
-                    f"{entry.next_at:%Y-%m-%d %H:%M} ({entry.repeat})"
-                )
-            else:
-                logger.add_info(f"#{runtime.bot_id}").warning(
-                    f"[定时] 兜底排程失败（时间无法解析）: {user_text}"
-                )
-
     # 兜底：流式响应为空时避免“不回复”，给用户一个可见的占位回复
     if not full_text.strip():
         logger.add_info(f"#{runtime.bot_id}").warning(
@@ -815,6 +878,8 @@ async def stream_response(runtime, event, ctx=None):
     if not is_private:
         session.mark_replied()
     await asyncio.to_thread(session_mgr.history.save_session, session)
+
+    _memory_consolidate(runtime, session_id, is_private, session_mgr)
 
     if ctx is not None:
         ctx.response_text = full_text
@@ -888,6 +953,12 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
             session_mgr.history.save_session(session)
         created = session_mgr.new_conversation(session_id, title)
         if created:
+            memory = getattr(module, "memory", None)
+            if memory is not None:
+                try:
+                    memory.on_session_reset(session_id, user_id)
+                except Exception:
+                    pass
             await send(f"已开启新对话「{created['title']}」(task: {created['task_id']})")
         else:
             await send("创建失败")
@@ -978,7 +1049,18 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
         await send("\n".join(lines))
         return True
 
+    elif action.startswith("memory"):
+        from app.llm.memory import handle_memory_command
+
+        return await handle_memory_command(module, session_id, user_id, is_admin, is_private, action, send)
+
     elif action == "exit":
+        memory = getattr(module, "memory", None)
+        if memory is not None:
+            try:
+                memory.on_session_reset(session_id, user_id)
+            except Exception:
+                pass
         if session:
             session_mgr.add_message(session_id, "assistant", "#chat exit")
             history_mgr.save_session(session)
@@ -990,6 +1072,12 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
         if not is_admin:
             await send("权限不足，无法执行此命令")
             return True
+        memory = getattr(module, "memory", None)
+        if memory is not None:
+            try:
+                memory.on_session_reset(session_id, user_id)
+            except Exception:
+                pass
         if session:
             session_mgr.add_message(session_id, "assistant", "#chat stop")
             history_mgr.save_session(session)
