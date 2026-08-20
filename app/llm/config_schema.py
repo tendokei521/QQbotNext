@@ -29,8 +29,7 @@ SCHEMA = {
     "stream_output": {
         "type": "boolean", "label": "流式输出", "description": "启用后 LLM 回复按句子流式发送（支持带 tools 的工具调用）",
         "default": False, "group": "group_stream",
-    },
-    "stream_send_pool_enabled": {
+    },    "stream_send_pool_enabled": {
         "type": "boolean", "label": "启用流式消息池", "description": "开启后流式句子进入有序消息池，按频率发送",
         "default": False, "group": "group_stream",
     },
@@ -146,7 +145,10 @@ SCHEMA = {
         "options": {"default": "不加载", "history": "加载为背景消息", "load": "加载为会话历史"},
         "group": "group_session",
     },
-
+    "clean_output_parentheses": {
+        "type": "boolean", "label": "强制清洗括号内容", "description": "写入会话历史时剥离大模型输出中的（…）/(…)内容，避免后续回复模仿括号风格（本次展示原文不变）",
+        "default": True, "group": "group_session",
+    },
     "trigger_at": {
         "type": "boolean", "label": "@触发", "description": "被@时启动对话（默认关闭，群聊默认不响应普通消息）",
         "default": False, "group": "group_trigger",
@@ -342,5 +344,30 @@ SCHEMA = {
     "memory_audit_inject": {
         "type": "boolean", "label": "记录每次注入", "description": "是否记录每次向提示词的记忆注入（默认关闭，避免日志噪音）",
         "default": False, "group": "group_memory",
+    },
+    "memory_min_confidence": {
+        "type": "number", "label": "注入最低置信度", "description": "低于此置信度的记忆默认不注入（被点名时仍上浮供核对）",
+        "default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05, "group": "group_memory",
+    },
+    "memory_inject_hedge": {
+        "type": "boolean", "label": "低可信试探语气", "description": "中/低置信记忆注入时加“（好像）/（记不太清）”前缀，让模型以询问而非断言回应",
+        "default": True, "group": "group_memory",
+    },
+    "memory_max_age_days": {
+        "type": "number", "label": "记忆最大龄(天)", "description": "超过此龄不再注入（数据保留，可 #chat memory list --all 查看）；0=不限",
+        "default": 180, "min": 0, "max": 3650, "group": "group_memory",
+    },
+    "memory_on_reset": {
+        "type": "select", "label": "会话重置时记忆", "description": "#chat new/exit/stop 或 memory reset 时如何处置记忆",
+        "default": "suspend", "group": "group_memory",
+        "options": {
+            "suspend": "挂起旧记忆（默认，数据保留）",
+            "clear": "清除该对象记忆",
+            "keep": "保持不变",
+        },
+    },
+    "memory_upgrade_saved_only": {
+        "type": "boolean", "label": "重置只保留已保存型", "description": "重置挂起时仅保留“明确保存/已确认”型记忆，自动蒸馏型一律挂起",
+        "default": True, "group": "group_memory",
     },
 }

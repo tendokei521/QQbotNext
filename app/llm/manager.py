@@ -10,13 +10,11 @@ AgentRuntime 暴露与旧模块一致的接口（.config / .ctx / .bot_id / .sch
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from app.llm import logger
 from app.llm.config import AgentConfig
 from app.llm.hooks import LlmHookRegistry, ToolCallHookRegistry
-from app.llm.memory.manager import MemoryManager
 from app.llm.pipeline import LlmPipeline
 from app.llm.proactive import ProactiveManager
 from app.llm.scheduler import TaskScheduler
@@ -54,13 +52,6 @@ class AgentRuntime:
         self.session_mgr = SessionManager(str(bot_id))
         self.scheduler = TaskScheduler(self)
         self.proactive = ProactiveManager(self)
-        self.memory = MemoryManager(self)
-        # 会话过期归档 → 隐式蒸馏（在事件循环上调度）
-        try:
-            self._loop = asyncio.get_running_loop()
-        except RuntimeError:
-            self._loop = None
-        self.session_mgr.on_archive = self._archive_memory
 
         # LLM 流水线：模块可在任意阶段注册钩子
         self.llm_hooks = LlmHookRegistry()
@@ -136,31 +127,6 @@ class AgentRuntime:
         self._bot = bot
         self.ctx.bot = bot
 
-    def _archive_memory(self, session) -> None:
-        """会话归档钩子：把整段对话交给记忆蒸馏（线程安全地调度到事件循环）。"""
-        try:
-            if self._loop is None or not self._loop.is_running():
-                return
-            messages = []
-            for conv in (session.conversations or {}).values():
-                for m in (conv.data.history or []):
-                    if m.get("role") == "user":
-                        messages.append({
-                            "role": "user",
-                            "content": str(m.get("content") or ""),
-                            "user_id": str(m.get("user_id") or ""),
-                        })
-            if not messages:
-                return
-            asyncio.run_coroutine_threadsafe(
-                self.memory.consolidate_archived(
-                    session.id, session.type == "group", messages
-                ),
-                self._loop,
-            )
-        except Exception:
-            pass
-
     def stop(self) -> None:
         """停止定时任务与主动消息计时器（任务数据保留，重启恢复）。"""
         try:
@@ -169,10 +135,6 @@ class AgentRuntime:
             pass
         try:
             self.proactive.stop()
-        except Exception:
-            pass
-        try:
-            self.memory.stop()
         except Exception:
             pass
         try:

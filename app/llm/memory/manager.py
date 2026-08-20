@@ -30,6 +30,14 @@ _MEMBER_CACHE_TTL = 300
 # @qq 解析
 _AT_RE = re.compile(r"\[CQ:at,qq=(\d+)\]|@(\d{5,})")
 
+# 各来源的默认置信度（v2：来源越“用户明确/可溯源”越高）
+_SOURCE_CONFIDENCE = {
+    "tool": 0.8,
+    "deterministic": 0.75,
+    "correct": 0.85,
+    "extract": 0.55,
+}
+
 
 def scope_owners(session_id: str, user_id: Any = None) -> list[str]:
     """某会话+发言人「可见」的记忆 owner 列表（隔离边界：绝不越权）。"""
@@ -106,16 +114,32 @@ class MemoryManager:
         source_user: Any = "",
         source_task: str = "",
         keywords: str = "",
+        confidence: float | None = None,
+        supersede_conflicts: bool | None = None,
     ) -> str | None:
-        """写一条记忆（含淘汰 + 审计）。未启用返回 None。"""
+        """写一条记忆（含置信度/冲突下架 + 淘汰 + 审计）。未启用返回 None。
+
+        confidence=None 时按来源取默认；supersede_conflicts=None 时按是否
+        「用户明确型来源」（tool/deterministic/correct）决定——改口自动下架旧说。
+        """
         try:
             if not self.enabled():
                 return None
+            conf = (
+                float(confidence) if confidence is not None
+                else float(_SOURCE_CONFIDENCE.get(source, 0.5))
+            )
+            sc = (
+                source in ("tool", "deterministic", "correct")
+                if supersede_conflicts is None
+                else bool(supersede_conflicts)
+            )
             mid = self.store.upsert_fact(
                 content, owner,
                 importance=importance, keywords=keywords,
                 source=source, source_user=str(source_user or ""),
                 source_task=str(source_task or ""),
+                confidence=conf, supersede_conflicts=sc,
             )
             maxp = int(self._get("memory_max_per_owner", 300))
             self.store.enforce_limit(owner, maxp)
@@ -142,7 +166,7 @@ class MemoryManager:
             owner = self.own_owner(session_id, user_id)
             self.save_fact(
                 clause, owner,
-                importance=0.8, source="deterministic",
+                importance=0.85, source="deterministic",
                 source_user=str(user_id or ""),
             )
             logger.add_info(f"#{self.bot_id}").info(
@@ -152,6 +176,16 @@ class MemoryManager:
         except Exception as e:
             logger.add_info(f"#{self.bot_id}").warning(f"[记忆] 自动保存异常: {e}")
             return None
+
+    def _recall_params(self, owners: list[str]) -> dict:
+        """供注入/工具召回共用的 v2 过滤参数。"""
+        return {
+            "min_confidence": float(self._get("memory_min_confidence", 0.5)),
+            "max_age_days": float(self._get("memory_max_age_days", 180)),
+            "owner_resets": {o: self.store.get_reset(o) for o in owners},
+            "keep_saved_before_reset": bool(self._get("memory_upgrade_saved_only", True)),
+            "hedge": bool(self._get("memory_inject_hedge", True)),
+        }
 
     def visible_recall(
         self,
@@ -173,6 +207,7 @@ class MemoryManager:
         limit = int(limit if limit is not None else self._get("memory_recall_max", 8))
         max_chars = int(max_chars if max_chars is not None else self._get("memory_recall_max_chars", 600))
         owners = self.scope_owners(session_id, user_id)
+        params = self._recall_params(owners)
         hits = rank(
             self.store,
             owners=owners,
@@ -180,13 +215,17 @@ class MemoryManager:
             limit=limit,
             max_chars=max_chars,
             mention_owners=mention_owners,
+            min_confidence=0.0,  # 工具显式搜索：低置信也展示（带试探语气）
+            max_age_days=params["max_age_days"],
+            owner_resets=params["owner_resets"],
+            keep_saved_before_reset=params["keep_saved_before_reset"],
         )
         if audit and self._audit_enabled():
             self.store.audit(
                 "read", owner=",".join(owners), user_id=str(user_id or ""),
                 summary=f"query={query}", source="tool",
             )
-        return render_block(hits)
+        return render_block(hits, hedge=params["hedge"])
 
     def delete_own(self, session_id: str, user_id: Any, target: str) -> int:
         """只删本人层记忆：优先 id，其次词匹配。返回删除条数。"""
@@ -207,6 +246,53 @@ class MemoryManager:
                 summary=f"query={target}", source="tool",
             )
         return deleted
+
+    def on_session_reset(self, session_id: str, user_id: Any = None) -> str:
+        """会话重置（#chat new / exit / stop / memory reset）时的记忆处理。
+
+        按配置 memory_on_reset：
+        - suspend（默认）：写 owner 重置线 → 旧记忆默认挂起不注入（数据保留）；
+        - clear：物理清除该 owner 记忆；
+        - keep：什么都不做。
+        返回描述文案（供命令回显）。
+        """
+        try:
+            if not self.enabled():
+                return "长期记忆未启用"
+            mode = str(self._get("memory_on_reset", "suspend")).strip().lower()
+            own = self.own_owner(session_id, user_id)
+            if mode == "clear":
+                n = self.store.clear(own)
+                if self._audit_enabled():
+                    self.store.audit("clear", owner=own, user_id=str(user_id or ""),
+                                     summary=f"on_session_reset clear {own}", source="reset")
+                return f"已清除 {n} 条个人记忆"
+            if mode == "suspend" or mode == "":
+                self.store.set_reset(own)
+                if self._audit_enabled():
+                    self.store.audit("reset", owner=own, user_id=str(user_id or ""),
+                                     summary=f"on_session_reset suspend {own}", source="reset")
+                return "已重置记忆上下文（旧记忆挂起）"
+            return "记忆保持现状（keep）"
+        except Exception as e:
+            logger.add_info(f"#{self.bot_id}").warning(f"[记忆] 会话重置处理异常: {e}")
+            return "重置处理失败"
+
+    # ── 纠错闭环（S5） ───────────────────────────────────
+    def deny_own(self, session_id: str, user_id: Any, target: str) -> int:
+        """用户否认 → 本人层命中记忆下架（negative，不删除）。"""
+        own = self.own_owner(session_id, user_id)
+        return self.store.deny(own, target)
+
+    def confirm_own(self, session_id: str, user_id: Any, target: str) -> int:
+        """用户确认 → 本人层命中记忆置信度上调并置 confirmed。"""
+        own = self.own_owner(session_id, user_id)
+        return self.store.confirm(own, target)
+
+    def correct_own(self, session_id: str, user_id: Any, old: str, new: str) -> str | None:
+        """纠错：本人层旧说置 superseded，写入新说 active。返回新 id。"""
+        own = self.own_owner(session_id, user_id)
+        return self.store.correct(own, old, new, source_user=str(user_id or ""))
 
     # ── 注入 ─────────────────────────────────────────────
     def recall_block(
@@ -230,6 +316,7 @@ class MemoryManager:
             limit = int(limit if limit is not None else self._get("memory_recall_max", 8))
             max_chars = int(max_chars if max_chars is not None else self._get("memory_recall_max_chars", 600))
             owners = self.scope_owners(session_id, user_id)
+            params = self._recall_params(owners)
             hits = rank(
                 self.store,
                 owners=owners,
@@ -237,9 +324,13 @@ class MemoryManager:
                 limit=limit,
                 max_chars=max_chars,
                 mention_owners=mention_owners,
-                require_match=False,  # 注入是“常驻记忆”，不排除未命中项
+                require_match=False,  # 注入是“模糊常驻记忆”，不排除未命中项
+                min_confidence=params["min_confidence"],
+                max_age_days=params["max_age_days"],
+                owner_resets=params["owner_resets"],
+                keep_saved_before_reset=params["keep_saved_before_reset"],
             )
-            block = render_block(hits)
+            block = render_block(hits, hedge=params["hedge"])
             want_inject = (
                 bool(audit_inject) if audit_inject is not None
                 else bool(self._get("memory_audit_inject", False))
@@ -421,10 +512,13 @@ class MemoryManager:
                     owner = self.own_owner(session_id, uid)
                     if not owner:
                         continue
+                    conf = float(f.get("confidence") or 0.55)
                     mid = self.save_fact(
                         f["content"], owner,
                         importance=importance,
                         source="extract", source_user=uid,
+                        confidence=max(0.0, min(1.0, conf)),
+                        supersede_conflicts=False,  # 蒸馏不自动下架既有记忆
                     )
                     if mid:
                         total += 1

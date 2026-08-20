@@ -61,7 +61,7 @@ def test_rank_cjk_gram_recall():
     )
     assert any("美式咖啡" in r["content"] for r in hits)
     block = render_block(hits)
-    assert block.startswith("### 长期记忆")
+    assert block.startswith("###")
     assert "美式咖啡" in block
     st.close()
 

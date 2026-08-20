@@ -1,16 +1,14 @@
-"""长期记忆存储层（P0）：SQLite 单文件，按 bot_id 隔离。
+"""长期记忆存储层（v2）：SQLite 单文件，按 bot_id 隔离。
 
-数据布局：``data/llm/<bot_id>/memory/memory.db``（与 history / tasks_data 同级）。
+v2 新增（S1）：
+- 记忆**状态**：``status = active | negative | superseded``（expired 为按时间计算的过滤态，不落库）；
+- 记忆**置信度**：``confidence`` + ``confirmed`` + ``evidence_count``（同一事实再次出现累计证据）；
+- 失效时间：``expires_at``（NULL=长期）；
+- owner 级重置线：``memory_owners.last_reset_at``（会话重置后旧记忆默认挂起不注入）；
+- 纠错闭环：``correct / deny / confirm / supersede``，状态迁移全部写审计。
 
-- ``memories``：事实表。``owner`` 是隔离维度的核心：
-    - ``user_<uid>``            私聊用户画像（私聊可见、跨群可选）
-    - ``group_<gid>``           群公共事实（全群可见）
-    - ``user_<uid>@group_<gid>`` 群内某成员画像（仅该群可见）
-    - ``global``                全局设定（不使用用户内容）
-- ``memory_events``：审计表（write/read/inject/delete/forget/clear/distill）。
-
-线程模型：单连接 + RLock（记忆操作都是毫秒级小事务）；事件循环内请用
-``asyncio.to_thread`` 包装（与 session.history.save_session 同样风格）。
+隔离仍由 ``owner`` 决定（私聊=用户、群公共、群成员、跨群）。线程模型不变：单连接 + RLock，
+事件循环内请用 ``asyncio.to_thread`` 或 manager 封装。
 """
 
 from __future__ import annotations
@@ -21,7 +19,7 @@ import sqlite3
 import threading
 import time
 import uuid
-
+from difflib import SequenceMatcher
 from typing import Any, Iterable
 
 from app.llm import logger, llm_data_dir, safe_bot_id
@@ -31,23 +29,29 @@ _SAFE_PART_RE = re.compile(r"^[0-9a-zA-Z_\-]+$")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
-    id          TEXT PRIMARY KEY,
-    bot_id      TEXT NOT NULL,
-    owner       TEXT NOT NULL,
-    kind        TEXT NOT NULL DEFAULT 'fact',
-    content     TEXT NOT NULL,
-    keywords    TEXT NOT NULL DEFAULT '',
-    importance  REAL NOT NULL DEFAULT 0.5,
-    visibility  TEXT NOT NULL DEFAULT 'group',
-    source      TEXT NOT NULL DEFAULT 'tool',
-    source_user TEXT NOT NULL DEFAULT '',
-    source_task TEXT NOT NULL DEFAULT '',
-    embedding   BLOB,
-    created_at  INTEGER NOT NULL,
-    updated_at  INTEGER NOT NULL,
-    hit_count   INTEGER NOT NULL DEFAULT 0
+    id            TEXT PRIMARY KEY,
+    bot_id        TEXT NOT NULL,
+    owner         TEXT NOT NULL,
+    kind          TEXT NOT NULL DEFAULT 'fact',
+    content       TEXT NOT NULL,
+    keywords      TEXT NOT NULL DEFAULT '',
+    importance    REAL NOT NULL DEFAULT 0.5,
+    visibility    TEXT NOT NULL DEFAULT 'group',
+    source        TEXT NOT NULL DEFAULT 'tool',
+    source_user   TEXT NOT NULL DEFAULT '',
+    source_task   TEXT NOT NULL DEFAULT '',
+    embedding     BLOB,
+    status        TEXT NOT NULL DEFAULT 'active',
+    confidence    REAL NOT NULL DEFAULT 0.5,
+    confirmed     INTEGER NOT NULL DEFAULT 0,
+    expires_at    INTEGER,
+    evidence_count INTEGER NOT NULL DEFAULT 0,
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL,
+    hit_count     INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_mem_owner ON memories(bot_id, owner, updated_at);
+CREATE INDEX IF NOT EXISTS idx_mem_status ON memories(bot_id, owner, status);
 
 CREATE TABLE IF NOT EXISTS memory_events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,7 +65,33 @@ CREATE TABLE IF NOT EXISTS memory_events (
     source_task TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_events_owner ON memory_events(bot_id, owner, ts);
+
+CREATE TABLE IF NOT EXISTS memory_owners (
+    bot_id        TEXT NOT NULL,
+    owner         TEXT NOT NULL,
+    last_reset_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (bot_id, owner)
+);
 """
+
+# 仅 active 状态
+_STATUS_ACTIVE = "active"
+# 用户明确否认 → 下架不注入（可恢复）
+_STATUS_NEGATIVE = "negative"
+# 被 correct / 矛盾改口替换 → 不再注入（可审计）
+_STATUS_SUPERSEDED = "superseded"
+
+# 语义冲突判定：命中「否定极性对」即视为说法冲突（“喜欢喝美式” vs “喝不惯美式”）
+_NEGATION_PAIRS = (
+    ("喜欢", "不喜欢"), ("喜欢", "讨厌"), ("喜欢", "讨厌喝"), ("喜欢", "不喝"),
+    ("喜欢", "喝不惯"), ("喜欢", "喝不了"), ("喜欢", "不习惯"), ("喜欢", "不爱"),
+    ("喜欢", "戒"), ("爱", "不爱"), ("爱", "不喜欢"),
+    ("住在", "搬"), ("住在", "离开"), ("住", "不住"), ("是", "不是"), ("有", "没有"),
+    ("要吃", "不吃"), ("接受", "拒绝"), ("同意", "不同意"), ("要", "不要"),
+)
+
+# 近义合并阈值：改口/同义词改动（未命中否定对）→ 合并为一条（保留原 id）
+_SIM_MERGE = 0.85
 
 
 def _safe_part(value: Any) -> str:
@@ -93,12 +123,7 @@ def owner_global() -> str:
 
 
 def session_owner(session_id: str, user_id: Any = None) -> str:
-    """按 session_id 推导 owner（会话级记忆落点）。
-
-    - private_<uid> → user_<uid>
-    - group_<gid>（无 user_id）→ group_<gid>
-    - group_<gid> + user_id → user_<uid>@group_<gid>（群内成员画像）
-    """
+    """按 session_id 推导 owner（会话级记忆落点）。"""
     session_id = str(session_id or "")
     if session_id.startswith("private_"):
         return owner_private(session_id[len("private_"):])
@@ -116,6 +141,25 @@ def summarize(text: Any, limit: int = 200) -> str:
     if len(s) > limit:
         return s[:limit] + "…"
     return s
+
+
+def text_similarity(a: str, b: str) -> float:
+    """两个文本的相似度（0~1），用于近义合并。"""
+    if not a or not b:
+        return 0.0
+    return SequenceMatcher(None, str(a), str(b)).ratio()
+
+
+def has_negation_conflict(a: str, b: str) -> bool:
+    """判断两条说法是否构成语义冲突（一分句在 a、否定分句在 b，或反之）。"""
+    if not a or not b or a == b:
+        return False
+    aa = str(a)
+    bb = str(b)
+    for x, y in _NEGATION_PAIRS:
+        if (x in aa and y in bb) or (y in aa and x in bb):
+            return True
+    return False
 
 
 class MemoryStore:
@@ -140,6 +184,25 @@ class MemoryStore:
             except Exception:
                 pass
             self._conn.commit()
+            self._ensure_columns()
+
+    def _ensure_columns(self) -> None:
+        """老库迁移：为 memories 补齐 v2 新增列（幂等）。"""
+        cols = {r["name"] for r in self._fetch("PRAGMA table_info(memories)")}
+        additions = {
+            "status": "TEXT NOT NULL DEFAULT 'active'",
+            "confidence": "REAL NOT NULL DEFAULT 0.5",
+            "confirmed": "INTEGER NOT NULL DEFAULT 0",
+            "expires_at": "INTEGER",
+            "evidence_count": "INTEGER NOT NULL DEFAULT 0",
+        }
+        for name, ddl in additions.items():
+            if name not in cols:
+                self._execute(f"ALTER TABLE memories ADD COLUMN {name} {ddl}")
+        self._conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_owner_reset ON memory_owners(bot_id, owner)"
+        )
+        self._execute("CREATE INDEX IF NOT EXISTS idx_mem_status ON memories(bot_id, owner, status)")
 
     # ── 生命周期 ─────────────────────────────────────────
     def close(self) -> None:
@@ -177,37 +240,121 @@ class MemoryStore:
         source_task: str = "",
         kind: str = "fact",
         visibility: str = "group",
+        confidence: float = 0.5,
+        status: str = _STATUS_ACTIVE,
+        confirmed: int = 0,
+        expires_at: int | None = None,
+        evidence_count: int = 1,
+        supersede_conflicts: bool = False,
     ) -> str:
-        """写入/更新一条事实。同 owner 同内容视为同一条（更新时间与重要度）。返回 id。"""
+        """写入/更新一条记忆。
+
+        - 同 owner 同内容 → 同一 id，更新并累计 ``evidence_count``（再次出现=证据+1）；
+        - 近义（未命中否定对，相似 ≥0.85）→ 合并到已有行（换成最新措辞，保留 id）；
+        - ``supersede_conflicts=True``（用户明确/工具写入时）→ 先对同 owner 中
+          「语义冲突」的 active 记忆判 superseded，避免新旧两条并存；
+        - 原 negative/superseded 被再次说出 → 重新置 active。
+        """
         content = str(content or "").strip()
         if not content:
             raise ValueError("记忆内容不能为空")
         content = content[:1000]
         keywords = (str(keywords or "").strip())[:300]
         now = int(time.time())
-        existing = self._fetch_one(
-            "SELECT id FROM memories WHERE bot_id=? AND owner=? AND content=?",
-            (self.bot_id, owner, content),
-        )
-        if existing:
-            self._execute(
-                "UPDATE memories SET importance=?, keywords=?, source=?,"
-                " source_user=?, source_task=?, visibility=?, updated_at=? WHERE id=?",
-                (float(importance), keywords, source, str(source_user or ""),
-                 str(source_task or ""), visibility, now, existing["id"]),
-            )
-            return existing["id"]
-        mid = uuid.uuid4().hex
-        self._execute(
-            "INSERT INTO memories (id, bot_id, owner, kind, content, keywords,"
-            " importance, visibility, source, source_user, source_task,"
-            " created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (mid, self.bot_id, owner, kind, content, keywords, float(importance),
-             visibility, source, str(source_user or ""), str(source_task or ""),
-             now, now),
-        )
-        return mid
+        confidence = max(0.0, min(1.0, float(confidence)))
 
+        with self._lock:
+            # 1) 精确判重
+            existing = self._fetch_one(
+                "SELECT * FROM memories WHERE bot_id=? AND owner=? AND content=?",
+                (self.bot_id, owner, content),
+            )
+            if existing:
+                self._update_existing(existing, content, owner, importance, keywords,
+                                      source, source_user, source_task, visibility,
+                                      confidence, status, confirmed, expires_at, now)
+                return existing["id"]
+
+            # 2) 语义冲突 → 先下架旧说（优先于近义合并，避免“我不喜欢”被并到“我喜欢”）
+            if supersede_conflicts:
+                self._supersede_conflicts(owner, content)
+
+            # 3) 近义合并：命中 → 替换措辞并合并（仅 active 行）
+            dup = self._find_near_dupe(owner, content)
+            if dup:
+                self._execute(
+                    "UPDATE memories SET content=?, keywords=?, importance=?,"
+                    " source=?, source_user=?, source_task=?, visibility=?,"
+                    " confidence=MAX(confidence,?), status='active', confirmed=?,"
+                    " expires_at=?, evidence_count=MIN(evidence_count+1,99), updated_at=? WHERE id=?",
+                    (content, keywords, float(importance), source, str(source_user or ""),
+                     str(source_task or ""), visibility, confidence, int(confirmed or 0),
+                     expires_at, now, dup["id"]),
+                )
+                return dup["id"]
+
+            # 4) 新写入
+            mid = uuid.uuid4().hex
+            self._execute(
+                "INSERT INTO memories (id, bot_id, owner, kind, content, keywords,"
+                " importance, visibility, source, source_user, source_task,"
+                " status, confidence, confirmed, expires_at, evidence_count,"
+                " created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (mid, self.bot_id, owner, kind, content, keywords, float(importance),
+                 visibility, source, str(source_user or ""), str(source_task or ""),
+                 status, confidence, int(confirmed or 0), expires_at,
+                 max(1, int(evidence_count or 1)), now, now),
+            )
+            return mid
+
+    def _update_existing(self, row, content, owner, importance, keywords, source,
+                         source_user, source_task, visibility, confidence, status,
+                         confirmed, expires_at, now) -> None:
+        self._execute(
+            "UPDATE memories SET importance=?, keywords=?, source=?, source_user=?,"
+            " source_task=?, visibility=?, status=?, confidence=MAX(confidence,?),"
+            " confirmed=?, expires_at=COALESCE(?, expires_at),"
+            " evidence_count=MIN(evidence_count+1,99), updated_at=? WHERE id=?",
+            (float(importance), keywords, source, str(source_user or ""),
+             str(source_task or ""), visibility,
+             _STATUS_ACTIVE if status != _STATUS_ACTIVE else row.get("status") or _STATUS_ACTIVE,
+             confidence, int(confirmed or 0), expires_at, now, row["id"]),
+        )
+
+    def _find_near_dupe(self, owner: str, content: str) -> dict | None:
+        rows = self.list_by_owner(owner, limit=500)
+        for r in rows:
+            if r["content"] == content:
+                continue
+            if text_similarity(r["content"], content) >= _SIM_MERGE:
+                return r
+        return None
+
+    def _supersede_conflicts(self, owner: str, content: str) -> int:
+        """把同 owner 内与 content 语义冲突的 active 记忆置为 superseded。"""
+        conflicts = self.find_conflicts(owner, content)
+        for row in conflicts:
+            self._execute(
+                "UPDATE memories SET status=?, updated_at=? WHERE id=?",
+                (_STATUS_SUPERSEDED, int(time.time()), row["id"]),
+            )
+            self.audit("supersede", owner=owner, user_id=str(row.get("source_user") or ""),
+                       summary=f"{row['content'][:60]} -> {content[:60]}", source="conflict")
+        return len(conflicts)
+
+    def find_conflicts(self, owner: str, content: str) -> list[dict]:
+        """返回同 owner 中与给定内容存在语义冲突的 active 记忆（并不含自身措辞）。"""
+        result = []
+        for r in self.list_by_owner(owner, limit=1000):
+            if r.get("status") != _STATUS_ACTIVE:
+                continue
+            if r["content"] == content:
+                continue
+            if has_negation_conflict(r["content"], content):
+                result.append(r)
+        return result
+
+    # ── 读取 ─────────────────────────────────────────────
     def get(self, mid: str) -> dict | None:
         return self._fetch_one(
             "SELECT * FROM memories WHERE bot_id=? AND id=?",
@@ -220,34 +367,40 @@ class MemoryStore:
             (self.bot_id, mid, owner),
         )
 
-    def list_by_owner(self, owner: str, limit: int = 50) -> list[dict]:
+    def _status_clause(self, include_all: bool) -> str:
+        return "" if include_all else " AND status='active'"
+
+    def list_by_owner(self, owner: str, limit: int = 50, include_all: bool = False) -> list[dict]:
         return self._fetch(
-            "SELECT * FROM memories WHERE bot_id=? AND owner=? "
-            "ORDER BY updated_at DESC, importance DESC LIMIT ?",
+            "SELECT * FROM memories WHERE bot_id=? AND owner=?" + self._status_clause(include_all)
+            + " ORDER BY updated_at DESC, importance DESC LIMIT ?",
             (self.bot_id, owner, int(limit)),
         )
 
-    def list_for_owners(self, owners: list[str], limit: int = 100) -> list[dict]:
-        """跨 owner 批量拉取（不超过 SQLite 变量上限时用 IN）。"""
+    def list_for_owners(self, owners: list[str], limit: int = 100, include_all: bool = False) -> list[dict]:
+        """跨 owner 批量拉取（默认仅 active）。"""
         owners = [o for o in owners if o]
         if not owners:
             return []
         marks = ",".join("?" for _ in owners)
         return self._fetch(
-            f"SELECT * FROM memories WHERE bot_id=? AND owner IN ({marks}) "
-            f"ORDER BY updated_at DESC LIMIT ?",
+            "SELECT * FROM memories WHERE bot_id=? AND owner IN (" + marks + ")"
+            + self._status_clause(include_all)
+            + " ORDER BY updated_at DESC LIMIT ?",
             (self.bot_id, *owners, int(limit)),
         )
 
-    def search_in_owners(self, owners: list[str], query: str, limit: int = 100) -> list[dict]:
+    def search_in_owners(self, owners: list[str], query: str, limit: int = 100,
+                         include_all: bool = False) -> list[dict]:
         """关键词搜索（content/keywords 模糊匹配），召回得分由 recall 层计算。"""
         owners = [o for o in owners if o]
         if not owners:
             return []
         marks = ",".join("?" for _ in owners)
         rows = self._fetch(
-            f"SELECT * FROM memories WHERE bot_id=? AND owner IN ({marks}) "
-            f"ORDER BY updated_at DESC LIMIT ?",
+            "SELECT * FROM memories WHERE bot_id=? AND owner IN (" + marks + ")"
+            + self._status_clause(include_all)
+            + " ORDER BY updated_at DESC LIMIT ?",
             (self.bot_id, *owners, max(int(limit), 200)),
         )
         tokens = _tokenize(query)
@@ -260,6 +413,98 @@ class MemoryStore:
                 result.append(row)
         return result[: int(limit)]
 
+    def find_by_query(self, owner: str, target: str, include_all: bool = False) -> list[dict]:
+        """按 id 或内容/关键词命中查找（active 优先），供 correct/deny/confirm 使用。"""
+        if not target:
+            return []
+        direct = self.get_owned(target, owner)
+        if direct:
+            return [direct]
+        rows = self.list_by_owner(owner, limit=1000, include_all=include_all)
+        tokens = _tokenize(target)
+        matched = []
+        for r in rows:
+            hay = (r.get("content") or "") + " " + (r.get("keywords") or "")
+            if any(t in hay for t in tokens):
+                matched.append(r)
+        matched.sort(key=lambda r: 0 if r.get("status") == _STATUS_ACTIVE else 1)
+        return matched
+
+    # ── 状态管理（v2） ───────────────────────────────────
+    def set_status(self, mid: str, status: str, owner: str | None = None) -> bool:
+        if owner:
+            cur = self._execute(
+                "UPDATE memories SET status=?, updated_at=? WHERE bot_id=? AND id=? AND owner=?",
+                (status, int(time.time()), self.bot_id, mid, owner),
+            )
+        else:
+            cur = self._execute(
+                "UPDATE memories SET status=?, updated_at=? WHERE bot_id=? AND id=?",
+                (status, int(time.time()), self.bot_id, mid),
+            )
+        return cur.rowcount > 0
+
+    def deny(self, owner: str, target: str) -> int:
+        """用户否认 → 命中记忆置 negative（下架不注入，可恢复）。"""
+        rows = [r for r in self.find_by_query(owner, target) if r.get("status") == _STATUS_ACTIVE]
+        for r in rows:
+            self.set_status(r["id"], _STATUS_NEGATIVE, owner=owner)
+            self.audit("deny", owner=owner, user_id=str(r.get("source_user") or ""),
+                       summary=r["content"], source="manual")
+        return len(rows)
+
+    def confirm(self, owner: str, target: str) -> int:
+        """用户确认 → 置信度上调并置 confirmed=1。"""
+        rows = [r for r in self.find_by_query(owner, target) if r.get("status") == _STATUS_ACTIVE]
+        for r in rows:
+            self._execute(
+                "UPDATE memories SET confidence=MIN(confidence+0.2, 1.0), confirmed=1,"
+                " status='active', updated_at=? WHERE id=?",
+                (int(time.time()), r["id"]),
+            )
+            self.audit("confirm", owner=owner, user_id=str(r.get("source_user") or ""),
+                       summary=r["content"], source="manual")
+        return len(rows)
+
+    def supersede(self, owner: str, target: str) -> int:
+        """把匹配的 active 记忆置 superseded（correct 的旧条处理）。"""
+        rows = [r for r in self.find_by_query(owner, target) if r.get("status") == _STATUS_ACTIVE]
+        for r in rows:
+            self.set_status(r["id"], _STATUS_SUPERSEDED, owner=owner)
+        return len(rows)
+
+    def correct(self, owner: str, old_target: str, new_content: str,
+                new_confidence: float = 0.85, source_user: str = "") -> str | None:
+        """纠错：旧说置 superseded，写入新说 active。返回新 id；无旧说时仅写入。"""
+        new_content = (new_content or "").strip()
+        if not new_content:
+            return None
+        old = self.supersede(owner, old_target)
+        mid = self.upsert_fact(
+            new_content, owner,
+            importance=0.8, source="correct", source_user=str(source_user or ""),
+            confidence=float(new_confidence), supersede_conflicts=True,
+        )
+        self.audit("correct", owner=owner, user_id=str(source_user or ""),
+                   summary=f"{old} 条旧记忆 -> {new_content}", source="manual")
+        return mid
+
+    # ── owner 重置线（v2） ───────────────────────────────
+    def set_reset(self, owner: str) -> None:
+        self._execute(
+            "INSERT INTO memory_owners (bot_id, owner, last_reset_at) VALUES (?,?,?)"
+            " ON CONFLICT(bot_id, owner) DO UPDATE SET last_reset_at=excluded.last_reset_at",
+            (self.bot_id, owner, int(time.time())),
+        )
+
+    def get_reset(self, owner: str) -> int:
+        row = self._fetch_one(
+            "SELECT last_reset_at FROM memory_owners WHERE bot_id=? AND owner=?",
+            (self.bot_id, owner),
+        )
+        return int(row["last_reset_at"]) if row else 0
+
+    # ── 删除 ─────────────────────────────────────────────
     def delete_fact(self, mid: str, owner: str | None = None) -> bool:
         if owner:
             cur = self._execute(
@@ -274,7 +519,7 @@ class MemoryStore:
         return cur.rowcount > 0
 
     def delete_by_query(self, owner: str, query: str) -> int:
-        """删除该 owner 下内容包含任一查询词的记忆，返回删除条数。"""
+        """物理删除该 owner 下内容包含任一查询词的记忆，返回删除条数。"""
         tokens = _tokenize(query)
         if not tokens:
             return 0
@@ -305,9 +550,16 @@ class MemoryStore:
         )
         return int(row["n"]) if row else 0
 
+    def count_active_by_owner(self, owner: str) -> int:
+        row = self._fetch_one(
+            "SELECT COUNT(*) AS n FROM memories WHERE bot_id=? AND owner=? AND status='active'",
+            (self.bot_id, owner),
+        )
+        return int(row["n"]) if row else 0
+
     # ── 淘汰 ─────────────────────────────────────────────
     def enforce_limit(self, owner: str, max_per_owner: int) -> int:
-        """超过上限时按「重要度低 + 旧」优先淘汰，返回淘汰条数。"""
+        """超过上限时按「重要度低 + 旧」优先物理淘汰 active 记忆。"""
         max_per_owner = max(1, int(max_per_owner))
         rows = self.list_by_owner(owner, limit=10_000)
         if len(rows) <= max_per_owner:

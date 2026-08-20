@@ -26,6 +26,8 @@ DEFAULT_LLM_CONFIG: dict = {
     "system_prompt": "你是一个友好的助手。",
     "max_tokens": 1024,
     "temperature": 0.7,
+    # 记录历史时强制清洗助手输出里的（…）/(…) 内容，避免后续回复模仿括号风格
+    "clean_output_parentheses": True,
     "group_enable": False,
     "private_enable": True,
     "session_timeout": 60,
@@ -103,6 +105,12 @@ DEFAULT_LLM_CONFIG: dict = {
     "memory_user_cross_group": False,     # 跨群用户画像（默认关）
     "memory_audit_enable": True,          # 事件记录
     "memory_audit_inject": False,         # 是否记录每次注入（默认关，避免日志噪音）
+    # 记忆 v2：权威降级 / 置信度 / 状态管理
+    "memory_min_confidence": 0.5,         # 注入所需最低置信度（低置信默认不注入）
+    "memory_inject_hedge": True,          # 中/低置信条目标“（好像）/（记不太清）”
+    "memory_max_age_days": 180,           # 超过此龄不注入（数据保留）
+    "memory_on_reset": "suspend",         # 会话重置时：suspend / clear / keep
+    "memory_upgrade_saved_only": True,    # 重置 suspend 时只保留“已保存/已确认”型记忆
 }
 
 # 框架级 Agent 配置/权限存储的 module_name

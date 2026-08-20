@@ -18,16 +18,19 @@ _AUTOSAVE_TRIGGERS = (
 
 _LEAD_FILLERS = re.compile(r"^[好的嗯哦噢额啊哈]+\s*")
 _TAIL_PUNCT = " ，,。！!?？的呀哦呃了"
+# 疑问词：抽出的“记忆”若含这些词，多半是问题而非事实，禁止入库
+_INTERROGATIVE = ("什么", "谁", "哪", "怎么", "为什么", "如何", "吗", "呢", "？", "?")
 
 
 def autosave_clause(text: str) -> str:
-    """从用户消息抽出要长期记住的主句；抽不出返回空串。
+    """从用户消息抽出要长期记住的主句；抽不出 / 命中疑问返回空串。
 
     例：
       "记住我喜欢喝美式"        → "我喜欢喝美式"
       "帮我记住我叫小明"        → "我叫小明"
       "我是前端工程师"         → "前端工程师"
       "还记得我吗？"           → ""（疑问）
+      "我喜欢什么"            → ""（疑问，不误存“什么”）
     """
     t = (text or "").strip()
     if not t or len(t) > 120:
@@ -50,6 +53,8 @@ def autosave_clause(text: str) -> str:
         return ""
     clause = rest.strip(_TAIL_PUNCT).strip()
     if len(clause) < 2:
+        return ""
+    if any(w in clause for w in _INTERROGATIVE):
         return ""
     return clause[:120]
 

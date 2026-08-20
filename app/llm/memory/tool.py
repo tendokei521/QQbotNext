@@ -84,6 +84,33 @@ async def _handle_delete(runtime, session_id, user_id, args) -> str:
     return f"success: 已删除 {n} 条记忆"
 
 
+async def _handle_correct(runtime, session_id, user_id, args) -> str:
+    memory = getattr(runtime, "memory", None)
+    if memory is None:
+        return "error: 记忆服务不可用"
+    old = str(args.get("old") or "").strip()
+    new = str(args.get("content") or args.get("new") or "").strip()
+    if not old or not new:
+        return "error: 需要 old（旧说法）与 content（新说法）"
+    mid = memory.correct_own(session_id, user_id, old, new)
+    if mid:
+        return "success: 已纠正——旧说法下架，新说法已记住"
+    return "error: 纠正失败（新内容为空，或没有匹配的旧记忆）"
+
+
+async def _handle_deny(runtime, session_id, user_id, args) -> str:
+    memory = getattr(runtime, "memory", None)
+    if memory is None:
+        return "error: 记忆服务不可用"
+    target = str(args.get("id") or args.get("query") or "").strip()
+    if not target:
+        return "error: 需要提供 id 或 query"
+    n = memory.deny_own(session_id, user_id, target)
+    if n == 0:
+        return "error: 未找到可下架的记忆（只允许下架当前对话本人的记忆）"
+    return f"success: 已下架 {n} 条相关记忆（之后不再引用）"
+
+
 def build_memory_tools(
     runtime: Any, session_id: str, user_id: Any, is_private: bool
 ) -> list[ToolSpec]:
@@ -98,6 +125,12 @@ def build_memory_tools(
 
     async def _delete(_ctx, args: dict) -> str:
         return await _handle_delete(runtime, session_id, user_id, args)
+
+    async def _correct(_ctx, args: dict) -> str:
+        return await _handle_correct(runtime, session_id, user_id, args)
+
+    async def _deny(_ctx, args: dict) -> str:
+        return await _handle_deny(runtime, session_id, user_id, args)
 
     return [
         ToolSpec(
@@ -165,5 +198,36 @@ def build_memory_tools(
                 },
             },
             handler=_delete,
+        ),
+        ToolSpec(
+            name="memory_correct",
+            description=(
+                "纠正一条记忆：用户说“你记错了/其实是……/不是那样，是……”时调用。"
+                "旧说法下架（不再引用），新说法写入。只作用于当前对话本人的记忆。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "old": {"type": "string", "description": "被纠正的旧说法关键词/原内容片段。"},
+                    "content": {"type": "string", "description": "纠正后的新说法（一句话）。"},
+                },
+                "required": ["old", "content"],
+            },
+            handler=_correct,
+        ),
+        ToolSpec(
+            name="memory_deny",
+            description=(
+                "用户否认某条记忆（“我没说过/不是真的/以后别提这个”）时调用："
+                "把相关记忆下架（不再注入）。只作用于当前对话本人的记忆，可恢复。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "记忆 id。"},
+                    "query": {"type": "string", "description": "按关键词下架，如“美式”。"},
+                },
+            },
+            handler=_deny,
         ),
     ]

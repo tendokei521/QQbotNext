@@ -15,10 +15,14 @@ from app.llm.memory.store import owner_group_member, owner_private
 
 _USAGE = (
     "用法：\n"
-    "#chat memory list\n"
+    "#chat memory list [--all]\n"
     "#chat memory search <词>\n"
+    "#chat memory correct <旧词> <新事实>\n"
+    "#chat memory deny <词|id>\n"
+    "#chat memory confirm <词|id>\n"
     "#chat memory forget <id|词>\n"
     "#chat memory clear\n"
+    "#chat memory reset [hard]\n"
     "#chat memory audit [owner]（管理员）"
 )
 
@@ -56,12 +60,18 @@ async def _dispatch(memory, session_id, user_id, is_admin, action: str) -> str:
     owners = memory.scope_owners(session_id, user_id)
 
     if cmd == "list":
-        rows = store.list_for_owners(owners, limit=30)
+        include_all = arg in ("--all", "all", "-a")
+        rows = store.list_for_owners(owners, limit=30, include_all=include_all)
         if not rows:
             return "当前可见记忆：无（还没有记住任何内容）"
-        lines = [f"当前可见记忆 {len(rows)} 条："]
+        lines = [f"当前可见记忆 {len(rows)} 条：" + ("（含已下架/被替换）" if include_all else "")]
         for r in rows:
-            lines.append(f"  - [{r['id'][:6]}] {r['content']} (重要度{r['importance']:.1f})")
+            status = r.get("status") or "active"
+            mark = "" if status == "active" else f" [{status}]"
+            lines.append(
+                f"  - [{r['id'][:6]}]{mark} {r['content']} "
+                f"(置信{r.get('confidence', 0):.2f}{'·已确认' if r.get('confirmed') else ''})"
+            )
         return "\n".join(lines)
 
     if cmd == "search":
@@ -74,6 +84,26 @@ async def _dispatch(memory, session_id, user_id, is_admin, action: str) -> str:
         for r in hits:
             lines.append(f"  - [{r['id'][:6]}] {r['content']}")
         return "\n".join(lines)
+
+    if cmd == "correct":
+        parts = arg.split(maxsplit=1)
+        if len(parts) < 2 or not parts[1]:
+            return "用法：#chat memory correct <旧词> <新事实>"
+        old, new = parts
+        mid = memory.correct_own(session_id, user_id, old, new)
+        return "已纠正：旧记忆已下架，新记忆已写入" if mid else "纠错失败（新内容为空或无旧记忆命中）"
+
+    if cmd == "deny":
+        if not arg:
+            return "用法：#chat memory deny <词|id>"
+        n = memory.deny_own(session_id, user_id, arg)
+        return f"已下架 {n} 条相关记忆（可恢复）" if n else "未找到可下架的记忆（仅限本人记忆）"
+
+    if cmd == "confirm":
+        if not arg:
+            return "用法：#chat memory confirm <词|id>"
+        n = memory.confirm_own(session_id, user_id, arg)
+        return f"已确认 {n} 条记忆（置信度已上调）" if n else "未找到可确认的记忆"
 
     if cmd == "forget":
         if not arg:
@@ -91,6 +121,16 @@ async def _dispatch(memory, session_id, user_id, is_admin, action: str) -> str:
             note = "（群公共记忆需管理员另行处理）"
         store.audit("clear", owner=own, user_id=str(user_id), summary=f"clear {own}", source="manual")
         return f"已清空 {count} 条个人记忆{note}"
+
+    if cmd == "reset":
+        hard = arg in ("hard", "clear", "--hard", "--clear")
+        if hard:
+            own = _own_owner(session_id, user_id)
+            n = store.clear(own)
+            store.audit("clear", owner=own, user_id=str(user_id), summary="memory reset hard", source="manual")
+            return f"已彻底清除 {n} 条个人记忆"
+        msg = memory.on_session_reset(session_id, user_id)
+        return msg or "已重置记忆上下文"
 
     if cmd == "audit":
         if not is_admin:

@@ -61,3 +61,41 @@ user 消息 → 会话历史 + ② 记忆注入(召回 owner=群公共+本人+�
 - `memory_enable=false` 一键关闭（数据保留）；删除 `memory/` 包 + `agent` 配置 `memory_*` 字段即回退。
 - 记忆按 bot、按 owner 隔离；跨群默认关；`#chat memory forget/clear` 可定点清除；audit 全留痕可解释可删除。
 - 蒸馏触发额外 LLM 调用，靠 `memory_extract_interval_min` 限频，任何异常静默降级不阻断主流程。
+
+---
+
+## 7. v2：权威降级 · 置信度 · 状态管理
+
+> 定位：记忆是「模型对聊天历史的**模糊记忆**」，不是需要遵守的规则，也不是事实断言。
+> 缓解“错误讨论 / 重置后旧记忆仍生效”靠以下机制。
+
+### 7.1 记忆不再像“事实”
+- 注入块标题为「供参考（可能不准确）的历史记忆」；
+- 内容按置信度加试探前缀：高（≥0.75）陈述、中（0.5~0.75）`（好像）`、低（<0.5）`（记不太清）`；
+- 低置信默认不注入（被点名时才上浮供核对）。
+
+### 7.2 置信度
+- 来源定起点：tool 0.8 / deterministic 0.75 / correct 0.85 / extract 0.55；
+- 确认 `confirmed=1` 上调、再次出现累计 `evidence_count`（评分上浮）；
+- 过滤：`memory_min_confidence`、`memory_max_age_days`、`expires_at`。
+
+### 7.3 状态管理（`status`）
+- `active` → `correct` 置 `superseded` + 写新说 active；
+- `active` → `deny` 置 `negative`（下架不注入、可恢复）；
+- 矛盾判重（否定词对：喜欢↔不喜欢/喝不惯…）写在 `upsert_fact(supersede_conflicts=True)`：用户明确来源自动下架旧说，防止新旧双条并存；
+- 近义（相似度 ≥0.85）自动合并为一条；
+- 真删除仅 `clear` / `reset hard`；`list --all` 可查全部状态。
+
+### 7.4 蒸馏只“复述”不“捏造”
+- 只记录用户明确说过的内容；行内含推断词（看起来/应该会/估计…）直接丢弃；
+- 输出信度词 `[很确定]/[好像]/[不确定]` → confidence 0.65/0.55/0.45；
+- 蒸馏不自动下架既有记忆（避免误杀）。
+
+### 7.5 会话重置（suspend/clear/keep）
+- 只在**显式**重置（`#chat new` / `#chat exit` / `#chat stop` / `#chat memory reset`）写 `last_reset_at`（被动超时归档只做蒸馏，不挂起，避免频繁断记忆）；
+- suspend（默认）：`updated_at < last_reset_at` 的旧记忆默认不注入，仅「已保存/已确认」型保留（`memory_upgrade_saved_only`）。
+
+### 7.6 纠错闭环入口
+- 命令：`#chat memory list [--all] / correct <旧> <新> / deny <词|id> / confirm <词|id> / reset [hard]`；
+- 工具：`memory_correct` / `memory_deny`（模型在对话中感知“记错了/不是这样/我没说过”时调用）。
+

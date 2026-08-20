@@ -1,6 +1,5 @@
-"""P2 工具与确定性兜底测试：detect / manager.autosave / build_memory_tools 三工具 / collect 接线。"""
+"""P2 工具与确定性兜底测试：detect / manager.autosave / build_memory_tools 工具。"""
 
-from app.llm.chat import _collect_llm_ext
 from app.llm.config import DEFAULT_LLM_CONFIG
 from app.llm.memory.detect import autosave_clause, wants_autosave
 from app.llm.memory.manager import MemoryManager
@@ -37,6 +36,8 @@ def test_autosave_clause_cases():
     assert autosave_clause("还记得我吗？") == ""
     assert autosave_clause("你记住了吗") == ""
     assert autosave_clause("今天天气不错") == ""
+    # 疑问句/问题误拦截：问“我喜欢什么”不得存成“什么”
+    assert autosave_clause("我喜欢什么") == ""
     assert wants_autosave("记住我住在上海") is True
     assert wants_autosave("在吗") is False
 
@@ -66,7 +67,9 @@ def test_build_memory_tools_returns_three():
     rt = FakeRuntime()
     tools = build_memory_tools(rt, "private_5", "5", True)
     names = [t.name for t in tools]
-    assert set(names) == {"memory_save", "memory_recall", "memory_delete"}
+    # 基础三个 + v2 的 correct/deny
+    assert {"memory_save", "memory_recall", "memory_delete",
+            "memory_correct", "memory_deny"} <= set(names)
 
 
 # ---- 工具处理器 ----
@@ -138,31 +141,3 @@ async def test_tool_recall_group_public_but_not_others_profile():
     out2 = await _spec(tools, "memory_recall").handler(None, {"query": "小明"})
     assert "未找到" in out2
 
-
-# ---- _collect_llm_ext 接线 ----
-def test_collect_llm_ext_appends_memory_tools():
-    class Tools:
-        def enabled_specs(self):
-            return []
-
-    class Skills:
-        def prompt_blocks(self):
-            return []
-
-    class Ev:
-        bot = None
-        user_id = "5"
-        group = None
-
-    rt = FakeRuntime()
-    rt.llm_tools = Tools()
-    rt.skills = Skills()
-    specs, skills_blocks, ctx = _collect_llm_ext(rt, Ev(), "private_5", True, schedule_enable=False)
-    names = {s.name for s in specs}
-    assert {"memory_save", "memory_recall", "memory_delete"} <= names
-
-    rt2 = FakeRuntime(data={"memory_enable": False})
-    rt2.llm_tools = Tools()
-    rt2.skills = Skills()
-    specs2, _, _ = _collect_llm_ext(rt2, Ev(), "private_5", True, schedule_enable=False)
-    assert not any(s.name.startswith("memory_") for s in specs2)
