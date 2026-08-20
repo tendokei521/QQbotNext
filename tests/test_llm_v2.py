@@ -1,12 +1,9 @@
 """llm_chat_v2 重构测试：prompt / provider / 会话-对话分离。"""
 
-import asyncio
-
 from app.llm.prompt import build_messages
 from app.llm.providers import get_provider
 from app.llm.providers.openai_compat import _split_keys
 from app.llm import session as session_mod
-from app.llm.history import HistoryManager
 
 
 # ---------- prompt ----------
@@ -185,3 +182,25 @@ def test_session_manager_stats(tmp_path):
     assert stats["active"] == 2
     assert stats["groups"] == 1 and stats["privates"] == 1
     mgr.stop_cleanup()
+
+
+def test_provider_endpoint_normalization():
+    """api_base 支持默认端点、v1 端点、完整 chat/completions 端点。"""
+    from app.llm.providers.openai_compat import OpenAICompatProvider
+
+    p1 = OpenAICompatProvider({"api_key": "k", "api_base": "https://api.example.com"})
+    assert p1._endpoint() == "https://api.example.com/v1/chat/completions"
+    assert p1._normalize_base() == "https://api.example.com/v1"
+
+    p2 = OpenAICompatProvider({"api_key": "k", "api_base": "https://api.example.com/v1"})
+    assert p2._endpoint() == "https://api.example.com/v1/chat/completions"
+
+    p3 = OpenAICompatProvider({"api_key": "k", "api_base": "https://api.example.com/v1/chat/completions"})
+    assert p3._endpoint() == "https://api.example.com/v1/chat/completions"
+    assert p3._normalize_base() == "https://api.example.com/v1"
+
+    p4 = OpenAICompatProvider({"api_key": "k", "api_base": "https://opencode.ai/zen/go"})
+    assert p4._endpoint() == "https://opencode.ai/zen/go/v1/chat/completions"
+
+    p5 = OpenAICompatProvider({"api_key": "k", "api_base": "https://opencode.ai/zen/go/v1/chat/completions"})
+    assert p5._endpoint() == "https://opencode.ai/zen/go/v1/chat/completions"

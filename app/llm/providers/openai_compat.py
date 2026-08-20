@@ -63,13 +63,38 @@ class OpenAICompatProvider(BaseProvider):
         self.api_base = (config.get("api_base", "") or "https://api.deepseek.com").rstrip("/")
         self.max_retries = max(1, int(config.get("retry_attempts", 3) or 3))
 
+    def _normalize_base(self) -> str:
+        """把 api_base 归一化为“可用于拼 /models 或 /chat/completions 的基地址”。
+
+        支持三种填法：
+        - 默认端点：https://api.example.com           -> https://api.example.com/v1
+        - v1 端点：  https://api.example.com/v1        -> https://api.example.com/v1
+        - 完整端点：https://api.example.com/v1/chat/completions
+                                                    -> https://api.example.com/v1
+        """
+        base = self.api_base.rstrip("/")
+        if base.endswith("/chat/completions"):
+            base = base[: -len("/chat/completions")].rstrip("/")
+        if not base.endswith("/v1"):
+            base += "/v1"
+        return base
+
+    def _endpoint(self) -> str:
+        """返回实际请求的 chat/completions 地址。
+
+        如果 api_base 已经是完整端点（以 /chat/completions 结尾），直接使用；
+        否则自动补全 /v1/chat/completions。
+        """
+        base = self.api_base.rstrip("/")
+        if base.endswith("/chat/completions"):
+            return base
+        return f"{self._normalize_base()}/chat/completions"
+
     async def get_models(self) -> list[str]:
         """拉取 OpenAI 兼容 /models 列表。"""
         if not self.api_keys or not self.api_keys[0]:
             return []
-        base = self.api_base
-        if not base.endswith("/v1"):
-            base += "/v1"
+        base = self._normalize_base()
         url = f"{base}/models"
         headers = {
             "Authorization": f"Bearer {self.api_keys[0]}",
@@ -82,12 +107,6 @@ class OpenAICompatProvider(BaseProvider):
                     return []
                 data = await resp.json()
         return [str(item.get("id")) for item in (data.get("data") or []) if isinstance(item, dict) and item.get("id")]
-
-    def _endpoint(self) -> str:
-        base = self.api_base
-        if not base.endswith("/v1"):
-            base += "/v1"
-        return f"{base}/chat/completions"
 
     # ---------- 底层请求 ----------
     async def _post(self, api_key: str, payload: dict, timeout: int) -> dict:
