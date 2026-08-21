@@ -4,6 +4,7 @@ SCHEMA = {
     # ==================== 分组定义 ====================
     "group_switch": {"type": "group", "label": "功能开关", "collapsible": True},
     "group_session": {"type": "group", "label": "会话管理", "collapsible": True},
+    "group_compress": {"type": "group", "label": "上下文压缩", "collapsible": True},
     "group_trigger": {"type": "group", "label": "触发设置", "collapsible": True},
     "group_context": {"type": "group", "label": "用户信息感知", "collapsible": True},
     "group_interrupt": {"type": "group", "label": "回复打断", "collapsible": True},
@@ -130,6 +131,23 @@ SCHEMA = {
     "history_rounds": {
         "type": "number", "label": "历史对话轮数", "description": "保留多少轮对话历史",
         "default": 50, "min": 5, "max": 100, "group": "group_session",
+    },
+    "context_compress_enable": {
+        "type": "boolean", "label": "启用上下文压缩", "description": "历史过长时调用 LLM 压缩旧对话，保留最近 25% 原文（仿 AstrBot）",
+        "default": True, "group": "group_compress",
+    },
+    "context_compress_threshold": {
+        "type": "number", "label": "压缩触发阈值", "description": "历史条数超过 history_rounds 的该比例时触发压缩",
+        "default": 0.75, "min": 0.1, "max": 0.95, "step": 0.05, "group": "group_compress",
+    },
+    "context_compress_keep_ratio": {
+        "type": "number", "label": "保留最近比例", "description": "压缩后保留最近多少比例的历史原文（默认 25%）",
+        "default": 0.25, "min": 0.05, "max": 0.5, "step": 0.05, "group": "group_compress",
+    },
+    "context_compress_prompt": {
+        "type": "textarea", "label": "压缩提示词", "description": "让 LLM 生成摘要的指令",
+        "default": "请把上面的历史对话压缩成一份简洁但完整的摘要，用于后续对话无缝续接：\n1. 覆盖所有核心话题及最终结论/结果；\n2. 高亮最近的主要关注点；\n3. 如有工具调用、任务进度或待办，说明当前状态和下一步；\n4. 保留用户的重要个人信息、偏好、称呼等关键事实；\n5. 使用与对话相同的语言输出。\n只输出摘要内容，不要输出额外解释。",
+        "rows": 6, "group": "group_compress",
     },
     "max_message_length": {
         "type": "number", "label": "消息最大长度", "description": "单条消息的最大字符数",

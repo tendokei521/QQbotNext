@@ -11,6 +11,7 @@ import time
 from typing import Any
 
 from app.llm import logger
+from app.llm.compress import maybe_compress_context
 from app.llm.group_context import (
     build_group_env_text,
     fetch_group_online_history,
@@ -400,6 +401,9 @@ async def call_llm_and_reply(module, event, session_mgr, config,
             and session_history[-1].get("content") == user_text):
         session_history = session_history[:-1]
     session_history = _format_session_history(session_history, is_private, **_meta_flags)
+    session_history = await maybe_compress_context(
+        _provider_chain_for(module), config, session_history, history_rounds
+    )
 
     schedule_enable = config.get("schedule_enable", True)
 
@@ -574,6 +578,9 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
             and session_history[-1].get("content") == user_text_current):
         session_history = session_history[:-1]
     session_history = _format_session_history(session_history, is_private, **_meta_flags)
+    session_history = await maybe_compress_context(
+        _provider_chain_for(runtime), config, session_history, history_rounds
+    )
 
     schedule_enable = config.get("schedule_enable", True)
 
@@ -747,6 +754,9 @@ async def stream_response(runtime, event, ctx=None):
             and session_history[-1].get("content") == user_text_current):
         session_history = session_history[:-1]
     session_history = _format_session_history(session_history, is_private, **_meta_flags)
+    session_history = await maybe_compress_context(
+        _provider_chain_for(runtime), config, session_history, history_rounds
+    )
 
     schedule_enable = config.get("schedule_enable", True)
 
