@@ -403,8 +403,8 @@ SCHEMA = {
         },
     },
     "meta_mask_nickname": {
-        "type": "boolean", "label": "句子型昵称脱敏", "description": "开启后把像句子/超长的昵称替换为 用户<QQ>，避免昵称内容被当作对话内容；普通短昵称保留",
-        "default": False, "group": "group_memory",
+        "type": "boolean", "label": "句子型昵称脱敏", "description": "开启后把像句子/超长的昵称替换为 用户<QQ>，避免昵称内容被当作对话内容；普通短昵称保留（默认开启）",
+        "default": True, "group": "group_memory",
     },
 }
 

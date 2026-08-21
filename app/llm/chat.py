@@ -171,10 +171,13 @@ def _message_meta_instruction(runtime, ctx) -> str | None:
 
 
 def _history_meta_flags(runtime) -> dict:
-    """计算历史渲染的实验性标志：是否归一化单行、是否脱敏昵称。"""
+    """计算历史渲染标志：是否归一化单行、是否脱敏昵称。
+
+    mask_nickname 恒为 True：句子型/超长昵称一律脱敏，避免昵称内容泄漏进 LLM 上下文。
+    """
     return {
         "normalize_enhanced": bool(runtime.config.get("experimental_long_term_memory", False)),
-        "mask_nickname": bool(runtime.config.get("meta_mask_nickname", False)),
+        "mask_nickname": True,
     }
 
 

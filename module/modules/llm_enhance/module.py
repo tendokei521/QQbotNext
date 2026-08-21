@@ -123,10 +123,10 @@ class Module(BaseModule):
         is_group = event.event_type == "message_group"
         sender_style = str(_ctx_cfg(ctx, "meta_sender_style", "legacy") or "legacy").lower()
         sent_style = str(_ctx_cfg(ctx, "meta_sent_style", "legacy") or "legacy").lower()
-        mask_nickname = _ctx_enabled(ctx, "meta_mask_nickname", False)
 
         def _render_sender(s: str) -> str:
-            return safe_sender_label(s) if mask_nickname else s
+            # 安全兜底：句子型/超长昵称始终脱敏，防止昵称内容被当成对话正文
+            return safe_sender_label(s)
 
         parts: list[str] = []
         sender_label = ""

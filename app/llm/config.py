@@ -116,7 +116,7 @@ DEFAULT_LLM_CONFIG: dict = {
     "meta_sender_style": "legacy",        # 发送者标签样式：legacy=发送者： / new=发送者昵称： / single=昵称(QQ): 正文
     "meta_sent_style": "legacy",          # 正文标签样式：legacy=发送了： / new=消息正文：
     "meta_instruction_mode": "legacy",    # 消息元信息消歧说明：off=不注入 / legacy=旧版说明 / new=新版说明
-    "meta_mask_nickname": False,          # 是否对句子型/超长昵称脱敏为 用户<QQ>
+    "meta_mask_nickname": True,           # 是否对句子型/超长昵称脱敏为 用户<QQ>（默认开启，防止昵称内容泄漏进正文）
 }
 
 # 框架级 Agent 配置/权限存储的 module_name

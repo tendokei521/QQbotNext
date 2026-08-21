@@ -122,6 +122,43 @@ def _normalize_enhanced_content(content: str) -> str:
     return "\n".join(out) if out else (content or "")
 
 
+def _mask_enhanced_content(content: str) -> str:
+    """对已带增强标记的历史内容做“仅脱敏”，保留原有旧/新/单行格式。
+
+    与 `_normalize_enhanced_content` 不同，本函数不把多行改写成单行，
+    只把句子型/超长昵称替换为 `用户<QQ>`，用于在不切换新版格式时防止泄漏。
+    """
+    lines = (content or "").split("\n")
+    out: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            out.append(line)
+            continue
+
+        # 旧/新分节：发送者：xxx / 发送者昵称：xxx
+        if stripped.startswith("发送者：") or stripped.startswith("发送者昵称："):
+            prefix, _, rest = stripped.partition("：")
+            out.append(f"{prefix}：{safe_sender_label(rest)}")
+            continue
+
+        # 引用了：xxx发送的引用消息：“...”
+        m = re.match(r"^(引用了：)(.*?)(发送的引用消息：.*)$", stripped)
+        if m:
+            out.append(m.group(1) + safe_sender_label(m.group(2)) + m.group(3))
+            continue
+
+        # 单行：昵称(QQ): 正文 / 昵称: 正文
+        m = re.match(r"^(.+?)(?:\((\d+)\))?: (.*)$", stripped)
+        if m:
+            label = m.group(1) + (f"({m.group(2)})" if m.group(2) else "")
+            out.append(f"{safe_sender_label(label)}: {m.group(3)}")
+            continue
+
+        out.append(line)
+    return "\n".join(out)
+
+
 def _time_prefix(ts: Any) -> str:
     """把 unix 时间戳格式化为 ``MM-DD HH:MM `` 前缀；非法/缺失返回空串。"""
     if ts is None:
@@ -242,9 +279,15 @@ def format_online_history(
             label = _group_sender_label(nickname, user_id, include_user_id, mask_nickname)
 
         # 内容已自带“发送者/发送了/时间”自描述（LLM 增强块）时不再套外层前缀。
-        # 实验性开启时才归一化为单行脱敏格式；默认保持历史原样，避免影响真人感。
+        # 实验性开启时归一化为单行脱敏；未开启但要求脱敏时只做“仅脱敏”，保留原格式。
         if _is_enhanced_context(content):
-            lines.append(_normalize_enhanced_content(content) if normalize_enhanced else content)
+            if normalize_enhanced:
+                rendered = _normalize_enhanced_content(content)
+            elif mask_nickname:
+                rendered = _mask_enhanced_content(content)
+            else:
+                rendered = content
+            lines.append(rendered)
             continue
 
         prefix = _time_prefix(msg.get("time")) if include_time else ""
@@ -349,12 +392,15 @@ def format_history_for_llm(
             result.append({"role": role, "content": content})
             continue
         # 内容已自带“发送者/发送了/时间”自描述（LLM 增强块）时不再套外层前缀。
-        # 实验性开启时才归一化为单行脱敏格式；默认保持历史原样。
+        # 实验性开启时归一化为单行脱敏；未开启但要求脱敏时只做“仅脱敏”，保留原格式。
         if _is_enhanced_context(content):
-            result.append({
-                "role": role,
-                "content": _normalize_enhanced_content(content) if normalize_enhanced else content,
-            })
+            if normalize_enhanced:
+                rendered = _normalize_enhanced_content(content)
+            elif mask_nickname:
+                rendered = _mask_enhanced_content(content)
+            else:
+                rendered = content
+            result.append({"role": role, "content": rendered})
             continue
         if is_private:
             sender = PRIVATE_OTHER_TAG

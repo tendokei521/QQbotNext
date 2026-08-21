@@ -2,7 +2,9 @@
 
 from app.llm.group_context import (
     _is_enhanced_context,
+    _mask_enhanced_content,
     _normalize_enhanced_content,
+    format_history_for_llm,
     safe_nickname,
     safe_sender_label,
 )
@@ -66,3 +68,32 @@ def test_normalize_enhanced_content_old_to_single_line():
 def test_normalize_enhanced_content_keeps_plain_single_line():
     new = "用户1901691195: 你好"
     assert _normalize_enhanced_content(new) == new
+
+
+def test_mask_enhanced_content_keeps_old_format_but_masks_sender():
+    old = "发送者：老师，今年的学费也是一次性交吗(1901691195)\n发送了：你好"
+    masked = _mask_enhanced_content(old)
+    assert masked == "发送者：用户1901691195\n发送了：你好"
+    assert "学费" not in masked
+
+
+def test_mask_enhanced_content_masks_single_line_sender():
+    single = "老师，今年的学费也是一次性交吗(1901691195): 你好"
+    masked = _mask_enhanced_content(single)
+    assert masked == "用户1901691195: 你好"
+    assert "学费" not in masked
+
+
+def test_format_history_for_llm_masks_enhanced_without_normalize():
+    history = [{
+        "role": "user",
+        "content": "发送者：老师，今年的学费也是一次性交吗(1901691195)\n发送了：你好",
+    }]
+    rendered = format_history_for_llm(
+        history,
+        is_private=False,
+        normalize_enhanced=False,
+        mask_nickname=True,
+    )
+    assert rendered[0]["content"] == "发送者：用户1901691195\n发送了：你好"
+    assert "学费" not in rendered[0]["content"]
