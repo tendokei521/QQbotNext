@@ -359,6 +359,28 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.nav-child {
+  background: transparent !important;
+}
+
+.nav-child :deep(.v-list-item) {
+  background: transparent !important;
+}
+
+.nav-child :deep(.v-list-item__overlay) {
+  opacity: 0 !important;
+  background: transparent !important;
+}
+
+/* hover 时也不要有背景 */
+.nav-child:hover :deep(.v-list-item) {
+  background: transparent !important;
+}
+
+.nav-child:hover :deep(.v-list-item__overlay) {
+  opacity: 0 !important;
+}
+
 /* 侧边栏固定停留：长页面滚动时始终保持可见 */
 .app-drawer {
   position: fixed !important;
