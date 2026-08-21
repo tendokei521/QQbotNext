@@ -1,19 +1,13 @@
-"""上下文压缩策略（仿 AstrBot LLMSummaryCompressor，轮数阈值版）。
+"""上下文压缩策略（仿 AstrBot LLMSummaryCompressor，仅压缩超出轮数限制的部分）。
 
-触发条件：
-- 开启 `context_compress_enable`
-- 会话历史条数 > `history_rounds * context_compress_threshold`（默认 75%）
-
-行为：
-- 把超出阈值的历史中“最早部分”交给 LLM 压缩成一段摘要；
-- 最近 `history_rounds * context_compress_keep_ratio`（默认 25%）条消息保留原文；
-- 最终返回：`system 摘要块 + 最近原文`，供本次请求使用。
+逻辑：
+- 会话历史超过 `history_rounds` 时，只把**超出** `history_rounds` 的最早部分交给 LLM 压缩成摘要；
+- 最近 `history_rounds` 条消息保留原文，不压缩；
+- 最终返回：`system 摘要块 + 最近 history_rounds 条原文`，供本次请求使用。
 - 压缩失败时静默回退为原始历史，不阻塞对话。
 """
 
 from __future__ import annotations
-
-from typing import Any
 
 from app.llm import logger
 from app.llm.providers import chat_with_fallback
@@ -27,39 +21,28 @@ DEFAULT_COMPRESS_PROMPT = """请把上面的历史对话压缩成一份简洁但
 只输出摘要内容，不要输出额外解释。"""
 
 
-def _ratio(config: dict, key: str, default: float) -> float:
-    try:
-        value = float(config.get(key, default))
-    except (TypeError, ValueError):
-        value = default
-    if not 0 < value < 1:
-        value = default
-    return value
-
-
 def should_compress(history: list[dict], history_rounds: int, config: dict) -> bool:
-    """历史条数是否超过 history_rounds * threshold。"""
+    """历史是否超过了允许保留的轮数。"""
     if not config.get("context_compress_enable", True):
         return False
     if not history:
         return False
-    threshold = _ratio(config, "context_compress_threshold", 0.75)
-    limit = max(1, int(history_rounds * threshold))
-    return len(history) > limit
+    return len(history) > int(history_rounds)
 
 
 def split_history(
     history: list[dict],
-    keep_ratio: float = 0.25,
+    history_rounds: int,
 ) -> tuple[list[dict], list[dict]]:
-    """把历史切成「待压缩旧段」和「保留原文的最近段」。
+    """切成「超出的旧段」和「保留原文的最近段」。
 
-    至少保留 1 条最近消息；keep_ratio 会被限制在 (0, 1)。
+    只压缩超出 `history_rounds` 的部分；`history_rounds` 以内的消息全部保留。
     """
-    keep_ratio = min(max(float(keep_ratio), 0.05), 0.95)
-    keep_count = max(1, int(len(history) * keep_ratio))
+    keep_count = max(0, int(history_rounds))
+    if keep_count <= 0:
+        return history, []
     if keep_count >= len(history):
-        keep_count = max(1, len(history) - 1)
+        return [], history
     return history[:-keep_count], history[-keep_count:]
 
 
@@ -81,15 +64,14 @@ async def maybe_compress_context(
     history: list[dict],
     history_rounds: int,
 ) -> list[dict]:
-    """如果上下文过长，用 LLM 压缩旧段并保留最近 25% 原文。
+    """如果历史超过 history_rounds，把超出的旧段压缩成摘要，保留最近 history_rounds 条原文。
 
     返回可直接传给 build_messages 的 history 列表；未触发或失败时原样返回。
     """
     if not should_compress(history, history_rounds, config):
         return history
 
-    keep_ratio = _ratio(config, "context_compress_keep_ratio", 0.25)
-    old_history, recent_history = split_history(history, keep_ratio)
+    old_history, recent_history = split_history(history, history_rounds)
     if not old_history:
         return history
 
@@ -121,6 +103,6 @@ async def maybe_compress_context(
 
     block = "【更早对话摘要】\n" + summary
     logger.add_info("LLM").info(
-        f"上下文压缩: 旧 {len(old_history)} 条 -> 摘要，保留最近 {len(recent_history)} 条原文"
+        f"上下文压缩: 超出部分 {len(old_history)} 条 -> 摘要，保留最近 {len(recent_history)} 条原文"
     )
     return [{"role": "system", "content": block}, *recent_history]

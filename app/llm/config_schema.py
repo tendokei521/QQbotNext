@@ -133,16 +133,8 @@ SCHEMA = {
         "default": 50, "min": 5, "max": 100, "group": "group_session",
     },
     "context_compress_enable": {
-        "type": "boolean", "label": "启用上下文压缩", "description": "历史过长时调用 LLM 压缩旧对话，保留最近 25% 原文（仿 AstrBot）",
+        "type": "boolean", "label": "启用上下文压缩", "description": "历史超过 history_rounds 时，只把超出的部分压缩成摘要，保留最近 history_rounds 条原文（仿 AstrBot）",
         "default": True, "group": "group_compress",
-    },
-    "context_compress_threshold": {
-        "type": "number", "label": "压缩触发阈值", "description": "历史条数超过 history_rounds 的该比例时触发压缩",
-        "default": 0.75, "min": 0.1, "max": 0.95, "step": 0.05, "group": "group_compress",
-    },
-    "context_compress_keep_ratio": {
-        "type": "number", "label": "保留最近比例", "description": "压缩后保留最近多少比例的历史原文（默认 25%）",
-        "default": 0.25, "min": 0.05, "max": 0.5, "step": 0.05, "group": "group_compress",
     },
     "context_compress_prompt": {
         "type": "textarea", "label": "压缩提示词", "description": "让 LLM 生成摘要的指令",

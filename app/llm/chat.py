@@ -394,7 +394,7 @@ async def call_llm_and_reply(module, event, session_mgr, config,
         if pre_history_text and include_pre_history == "history":
             pre_history_text = f"近期聊天记录:\n{pre_history_text}"
 
-    session_history = session_mgr.get_history(session_id, limit=history_rounds)
+    session_history = session_mgr.get_history(session_id, limit=session_mgr.MAX_HISTORY_MESSAGES)
     user_text = session.data.history[-1]["content"] if session.data.history else ""
     # 防重复：history 尾部就是刚追加的当前用户消息，去掉避免同一消息出现两次
     if (session_history and session_history[-1].get("role") == "user"
@@ -571,7 +571,7 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
         if pre_history_text and include_pre_history == "history":
             pre_history_text = f"近期聊天记录:\n{pre_history_text}"
 
-    session_history = session_mgr.get_history(session_id, limit=history_rounds)
+    session_history = session_mgr.get_history(session_id, limit=session_mgr.MAX_HISTORY_MESSAGES)
     user_text_current = session.data.history[-1]["content"] if session.data.history else ""
     # 防重复：history 尾部就是刚追加的当前用户消息，避免同一消息出现两次
     if (session_history and session_history[-1].get("role") == "user"
@@ -748,7 +748,7 @@ async def stream_response(runtime, event, ctx=None):
         if pre_history_text and include_pre_history == "history":
             pre_history_text = f"近期聊天记录:\n{pre_history_text}"
 
-    session_history = session_mgr.get_history(session_id, limit=history_rounds)
+    session_history = session_mgr.get_history(session_id, limit=session_mgr.MAX_HISTORY_MESSAGES)
     user_text_current = session.data.history[-1]["content"] if session.data.history else ""
     if (session_history and session_history[-1].get("role") == "user"
             and session_history[-1].get("content") == user_text_current):

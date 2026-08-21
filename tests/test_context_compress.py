@@ -1,4 +1,4 @@
-"""上下文压缩策略测试。"""
+"""上下文压缩策略测试：只压缩超出 history_rounds 的部分。"""
 
 from app.llm.compress import (
     build_summary_messages,
@@ -14,38 +14,38 @@ def _history(n: int) -> list[dict]:
     ]
 
 
-def test_should_compress_below_threshold():
-    cfg = {"context_compress_enable": True, "context_compress_threshold": 0.75}
-    # 50 * 0.75 = 37.5，38 条才触发
-    assert not should_compress(_history(37), 50, cfg)
-    assert should_compress(_history(38), 50, cfg)
+def test_should_compress_when_exceeds_rounds():
+    cfg = {"context_compress_enable": True}
+    assert not should_compress(_history(50), 50, cfg)
+    assert should_compress(_history(51), 50, cfg)
 
 
 def test_should_compress_disabled():
-    cfg = {"context_compress_enable": False, "context_compress_threshold": 0.75}
+    cfg = {"context_compress_enable": False}
     assert not should_compress(_history(100), 50, cfg)
 
 
-def test_should_compress_invalid_threshold_falls_back():
-    cfg = {"context_compress_enable": True, "context_compress_threshold": 2}
-    # 无效阈值回退 0.75
-    assert should_compress(_history(38), 50, cfg)
+def test_split_history_only_splits_excess():
+    history = _history(60)
+    old, recent = split_history(history, 50)
+    assert len(recent) == 50
+    assert len(old) == 10
+    assert recent[0] == history[-50]
+    assert old[-1] == history[-51]
 
 
-def test_split_history_keeps_ratio():
-    history = _history(100)
-    old, recent = split_history(history, 0.25)
-    assert len(recent) == 25
-    assert len(old) == 75
-    assert recent[0] == history[-25]
-    assert old[-1] == history[-26]
-
-
-def test_split_history_keeps_at_least_one():
-    history = _history(1)
-    old, recent = split_history(history, 0.25)
+def test_split_history_keeps_all_when_within_rounds():
+    history = _history(30)
+    old, recent = split_history(history, 50)
     assert old == []
     assert recent == history
+
+
+def test_split_history_keeps_at_least_recent_when_zero_rounds():
+    history = _history(3)
+    old, recent = split_history(history, 0)
+    assert old == history
+    assert recent == []
 
 
 def test_build_summary_messages_appends_ack_when_last_user():
