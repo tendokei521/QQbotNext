@@ -14,6 +14,8 @@ const search = ref('')
 const collapsed = ref<Record<string, boolean>>({})
 const toggling = reactive<Record<string, boolean>>({})
 const searchRef = ref<HTMLInputElement | null>(null)
+const fileInput = ref<HTMLInputElement | null>(null)
+const installing = ref(false)
 
 const PERMISSION_LABEL: Record<string, string> = {
   everyone: '所有人',
@@ -83,6 +85,41 @@ async function onToggle(m: ModuleData, v: boolean | null) {
   }
 }
 
+async function onInstallFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  installing.value = true
+  try {
+    await modules.installZip(file)
+    notify.push(`插件 ${file.name} 安装成功`, 'success')
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  } finally {
+    installing.value = false
+  }
+}
+
+async function onReload(m: ModuleData) {
+  try {
+    await modules.reloadSingle(m._key)
+    notify.push(`模块 ${m.name} 已重新加载`, 'success')
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  }
+}
+
+async function onUninstall(m: ModuleData) {
+  if (!window.confirm(`确认软卸载「${m.name}」？模块文件不会被删除，可在设置中恢复。`)) return
+  try {
+    await modules.uninstall(m._key)
+    notify.push(`模块 ${m.name} 已软卸载`, 'success')
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  }
+}
+
 function onKeydown(e: KeyboardEvent) {
   const tag = (e.target as HTMLElement)?.tagName
   if (e.key === '/' && tag !== 'INPUT' && tag !== 'TEXTAREA') {
@@ -111,6 +148,22 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         <h1 class="app-page-title">功能模块</h1>
         <div class="app-page-subtitle">共 {{ modules.count }} 个模块，点击进入配置</div>
       </div>
+      <v-btn
+        variant="tonal"
+        prepend-icon="mdi-package-variant"
+        :loading="installing"
+        class="mr-2"
+        @click="fileInput?.click()"
+      >
+        安装插件
+      </v-btn>
+      <input
+        ref="fileInput"
+        type="file"
+        accept=".zip"
+        hidden
+        @change="onInstallFile"
+      />
       <v-btn variant="tonal" prepend-icon="mdi-refresh" :loading="modules.reloading" @click="modules.reloadAll().catch((e: unknown) => notify.push(errorMessage(e), 'error'))">
         刷新模块
       </v-btn>
@@ -166,6 +219,21 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                     @click.stop
                     @update:model-value="(v: boolean | null) => onToggle(m, v)"
                   />
+                  <v-menu location="bottom end">
+                    <template #activator="{ props }">
+                      <v-btn
+                        v-bind="props"
+                        icon="mdi-dots-vertical"
+                        size="x-small"
+                        variant="text"
+                        @click.stop
+                      />
+                    </template>
+                    <v-list density="compact">
+                      <v-list-item @click="onReload(m)">重载</v-list-item>
+                      <v-list-item @click="onUninstall(m)">卸载</v-list-item>
+                    </v-list>
+                  </v-menu>
                 </template>
               </v-card-item>
             </v-card>
@@ -207,6 +275,21 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                     @click.stop
                     @update:model-value="(v: boolean | null) => onToggle(m, v)"
                   />
+                  <v-menu location="bottom end">
+                    <template #activator="{ props }">
+                      <v-btn
+                        v-bind="props"
+                        icon="mdi-dots-vertical"
+                        size="x-small"
+                        variant="text"
+                        @click.stop
+                      />
+                    </template>
+                    <v-list density="compact">
+                      <v-list-item @click="onReload(m)">重载</v-list-item>
+                      <v-list-item @click="onUninstall(m)">卸载</v-list-item>
+                    </v-list>
+                  </v-menu>
                 </template>
               </v-card-item>
             </v-card>

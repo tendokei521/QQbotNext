@@ -32,6 +32,17 @@ export interface ModuleData {
     items?: Record<string, any>
   }
   has_page: boolean
+  source: 'local' | 'zip'
+  version: string
+  can_uninstall: boolean
+}
+
+export interface UninstalledModuleData {
+  module_name: string
+  source: 'local' | 'zip'
+  display_name: string
+  version: string
+  uninstalled_at: number
 }
 
 /** Agent 已拥有独立侧边栏入口，不再出现在“功能模块”列表中 */
@@ -43,6 +54,7 @@ export const useModulesStore = defineStore('modules', () => {
   const loading = ref(false)
   const reloading = ref(false)
   const botId = ref<number | null>(null)
+  const uninstalledModules = ref<UninstalledModuleData[]>([])
 
   const list = computed(() =>
     Object.entries(modules.value)
@@ -87,6 +99,46 @@ export const useModulesStore = defineStore('modules', () => {
     } finally {
       reloading.value = false
     }
+  }
+
+  async function loadUninstalled(): Promise<void> {
+    const res = await http.get<{ ok: boolean; modules: UninstalledModuleData[] }>('/api/modules/uninstalled')
+    uninstalledModules.value = res.data?.modules || []
+  }
+
+  async function installZip(file: File): Promise<void> {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await http.post('/api/modules/install-zip', form)
+    unwrap(res.data)
+    await Promise.all([load(), loadUninstalled()])
+  }
+
+  async function uninstall(name: string): Promise<void> {
+    syncBotScope()
+    const res = await http.post(`/api/modules/${name}/uninstall`, null, {
+      params: { bot_id: botId.value },
+    })
+    unwrap(res.data)
+    await Promise.all([load(), loadUninstalled()])
+  }
+
+  async function install(name: string): Promise<void> {
+    syncBotScope()
+    const res = await http.post(`/api/modules/${name}/install`, null, {
+      params: { bot_id: botId.value },
+    })
+    unwrap(res.data)
+    await Promise.all([load(), loadUninstalled()])
+  }
+
+  async function reloadSingle(name: string): Promise<void> {
+    syncBotScope()
+    const res = await http.post(`/api/modules/${name}/reload`, null, {
+      params: { bot_id: botId.value },
+    })
+    unwrap(res.data)
+    await load()
   }
 
   async function toggle(name: string, enabled: boolean): Promise<void> {
@@ -158,12 +210,18 @@ export const useModulesStore = defineStore('modules', () => {
     loading,
     reloading,
     botId,
+    uninstalledModules,
     list,
     count,
     enabledCount,
     syncBotScope,
     load,
+    loadUninstalled,
     reloadAll,
+    reloadSingle,
+    installZip,
+    uninstall,
+    install,
     toggle,
     saveConfig,
     savePermission,

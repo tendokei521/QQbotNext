@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useModulesStore, type UninstalledModuleData } from '@/stores/modules'
 import { useThemeStore } from '@/stores/theme'
 import { useWebuiStore } from '@/stores/webui'
 import { useNotifyStore } from '@/stores/notify'
@@ -7,9 +8,12 @@ import { errorMessage } from '@/api/http'
 
 const themeStore = useThemeStore()
 const webui = useWebuiStore()
+const modules = useModulesStore()
 const notify = useNotifyStore()
 
 const saving = ref(false)
+const uninstalledDialog = ref(false)
+const uninstalledLoading = ref(false)
 // 可写 computed：webui.load() 覆盖配置后仍绑定到最新值
 const levels = computed<string[]>({
   get: () => webui.config.logs.visible_levels,
@@ -55,6 +59,27 @@ const showExperimental = computed<boolean>({
     })
   },
 })
+
+async function openUninstalledDialog() {
+  uninstalledDialog.value = true
+  uninstalledLoading.value = true
+  try {
+    await modules.loadUninstalled()
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  } finally {
+    uninstalledLoading.value = false
+  }
+}
+
+async function reinstallModule(item: UninstalledModuleData) {
+  try {
+    await modules.install(item.module_name)
+    notify.push(`模块 ${item.display_name} 已恢复安装`, 'success')
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  }
+}
 
 onMounted(() => {
   if (!webui.config.logs.max_lines) webui.load()
@@ -125,6 +150,19 @@ onMounted(() => {
           </v-card-text>
         </v-card>
 
+        <v-card variant="outlined" class="mb-4">
+          <v-card-title class="d-flex align-center">
+            <v-icon icon="mdi-package-variant" class="mr-2" color="primary" /> 插件管理
+            <v-spacer />
+            <v-btn size="small" variant="tonal" prepend-icon="mdi-package-removed" @click="openUninstalledDialog">
+              已卸载模块
+            </v-btn>
+          </v-card-title>
+          <v-card-text class="text-caption" style="color: rgba(var(--v-theme-on-surface), 0.55)">
+            软卸载只屏蔽模块加载与显示，不会删除插件文件、配置或数据；可在此恢复安装。
+          </v-card-text>
+        </v-card>
+
         <v-card variant="outlined">
           <v-card-title class="d-flex align-center">
             <v-icon icon="mdi-information-outline" class="mr-2" color="primary" /> 关于
@@ -190,6 +228,40 @@ onMounted(() => {
         </v-card>
       </v-col>
     </v-row>
+
+    <v-dialog v-model="uninstalledDialog" max-width="620">
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon icon="mdi-package-removed" class="mr-2" color="primary" /> 已卸载模块
+          <v-spacer />
+          <v-btn icon="mdi-close" variant="text" size="small" @click="uninstalledDialog = false" />
+        </v-card-title>
+        <v-card-text>
+          <v-progress-linear v-if="uninstalledLoading" indeterminate color="primary" />
+          <v-list v-else density="compact">
+            <v-list-item
+              v-for="item in modules.uninstalledModules"
+              :key="item.module_name"
+            >
+              <v-list-item-title>{{ item.display_name }}</v-list-item-title>
+              <v-list-item-subtitle>
+                {{ item.module_name }} · {{ item.source === 'zip' ? 'zip 插件' : '本地模块' }} · v{{ item.version || '0.0.0' }}
+              </v-list-item-subtitle>
+              <template #append>
+                <v-btn size="small" variant="tonal" prepend-icon="mdi-arrow-up-bold-circle" @click="reinstallModule(item)">
+                  安装
+                </v-btn>
+              </template>
+            </v-list-item>
+            <v-list-item v-if="!modules.uninstalledModules.length">
+              <v-list-item-title class="text-caption text-center py-3" style="color: rgba(var(--v-theme-on-surface), 0.45)">
+                暂无已卸载模块
+              </v-list-item-title>
+            </v-list-item>
+          </v-list>
+        </v-card-text>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
