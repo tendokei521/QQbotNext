@@ -24,6 +24,19 @@ interface ProviderModel {
   updated_at: number
 }
 
+const MODALITY_OPTIONS = [
+  { title: '文本', value: 'text' },
+  { title: '图像', value: 'image' },
+  { title: '音频/语音', value: 'audio' },
+  { title: '工具调用', value: 'tool_use' },
+]
+const MODALITY_LABELS: Record<string, string> = {
+  text: '文本',
+  image: '图像',
+  audio: '音频/语音',
+  tool_use: '工具调用',
+}
+
 const notify = useNotifyStore()
 const presets = ref<ProviderPreset[]>([])
 const models = ref<ProviderModel[]>([])
@@ -57,6 +70,7 @@ const modelForm = reactive({
   preset_id: '',
   model: '',
   provider_type: 'chat',
+  modalities: ['text', 'tool_use'] as string[],
   temperature: 0.7,
   max_tokens: 1024,
   enabled: true,
@@ -72,6 +86,18 @@ const settingsForm = reactive({
 })
 
 const selectedPreset = computed(() => presets.value.find((p) => p.id === selectedPresetId.value))
+
+function defaultModalitiesFor(type: string): string[] {
+  if (type === 'tts' || type === 'stt') return ['audio']
+  if (type === 'embedding' || type === 'rerank') return ['text']
+  return ['text', 'tool_use']
+}
+
+function modelModalityLabels(model: ProviderModel): string[] {
+  const list = model.config?.modalities
+  if (!Array.isArray(list)) return ['文本']
+  return list.map((item: string) => MODALITY_LABELS[item] || item)
+}
 
 async function loadPresets() {
   loadingPresets.value = true
@@ -248,6 +274,7 @@ function openCreateModel() {
     preset_id: selectedPresetId.value,
     model: '',
     provider_type: 'chat',
+    modalities: defaultModalitiesFor('chat'),
     temperature: 0.7,
     max_tokens: 1024,
     enabled: true,
@@ -257,10 +284,14 @@ function openCreateModel() {
 
 function openEditModel(model: ProviderModel) {
   editingModelId.value = model.id
+  const savedModalities = Array.isArray(model.config?.modalities)
+    ? model.config.modalities
+    : defaultModalitiesFor(model.provider_type)
   Object.assign(modelForm, {
     preset_id: model.preset_id,
     model: model.model,
     provider_type: model.provider_type,
+    modalities: [...savedModalities],
     temperature: model.config.temperature ?? 0.7,
     max_tokens: model.config.max_tokens ?? 1024,
     enabled: model.enabled,
@@ -279,6 +310,7 @@ async function saveModel() {
       preset_id: modelForm.preset_id,
       model: modelForm.model.trim(),
       provider_type: modelForm.provider_type,
+      modalities: [...modelForm.modalities],
       temperature: Number(modelForm.temperature) || 0.7,
       max_tokens: Number(modelForm.max_tokens) || 1024,
       enabled: modelForm.enabled,
@@ -442,6 +474,7 @@ onMounted(loadPresets)
                   <tr>
                     <th>模型</th>
                     <th>类型</th>
+                    <th>支持能力</th>
                     <th>温度</th>
                     <th>Max Tokens</th>
                     <th>状态</th>
@@ -450,11 +483,20 @@ onMounted(loadPresets)
                 </thead>
                 <tbody>
                   <tr v-if="models.length === 0">
-                    <td colspan="6" class="text-center text-caption pa-6">该连接下还没有模型实例，请拉取或手动添加</td>
+                    <td colspan="7" class="text-center text-caption pa-6">该连接下还没有模型实例，请拉取或手动添加</td>
                   </tr>
                   <tr v-for="m in models" :key="m.id">
                     <td class="font-weight-medium">{{ m.model }}</td>
                     <td><v-chip size="x-small" variant="tonal">{{ m.provider_type }}</v-chip></td>
+                    <td>
+                      <v-chip
+                        v-for="cap in modelModalityLabels(m)"
+                        :key="cap"
+                        size="x-small"
+                        variant="tonal"
+                        class="mr-1"
+                      >{{ cap }}</v-chip>
+                    </td>
                     <td class="text-caption">{{ m.config.temperature ?? 0.7 }}</td>
                     <td class="text-caption">{{ m.config.max_tokens ?? 1024 }}</td>
                     <td>
@@ -564,6 +606,22 @@ onMounted(loadPresets)
             hide-details
             class="mb-3"
           />
+          <div class="mb-3">
+            <div class="text-caption mb-1">支持能力/模态</div>
+            <div class="d-flex flex-wrap">
+              <v-checkbox
+                v-for="opt in MODALITY_OPTIONS"
+                :key="opt.value"
+                v-model="modelForm.modalities"
+                :value="opt.value"
+                :label="opt.title"
+                density="compact"
+                hide-details
+                color="primary"
+                class="mr-4"
+              />
+            </div>
+          </div>
           <v-row>
             <v-col cols="6">
               <v-text-field v-model.number="modelForm.temperature" label="温度" type="number" step="0.1" min="0" max="2" density="comfortable" hide-details />
