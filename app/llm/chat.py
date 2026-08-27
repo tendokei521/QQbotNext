@@ -21,6 +21,11 @@ from app.llm.group_context import (
 from app.llm.session import SessionManager
 from app.llm.prompt import LEGACY_MESSAGE_META_INSTRUCTION, MESSAGE_META_INSTRUCTION, build_messages
 from app.llm.providers import chat_with_fallback, iter_stream_with_fallback
+from app.llm.providers.modalities import (
+    normalize_modalities,
+    sanitize_contexts_by_modalities,
+    supports_tool_use,
+)
 from app.llm.tags import maybe_strip_parentheses, strip_all_tags
 from app.llm.splitter import split_sentences, strip_stream_artifacts
 from app.llm.trigger import check_trigger, extract_text
@@ -210,6 +215,13 @@ def _provider_chain_for(module) -> list[dict]:
     return [_provider_config_for(module)]
 
 
+def _modalities_for_chain(provider_chain: list[dict]) -> list[str] | None:
+    """取主模型声明的模态能力；未配置时返回 None（兼容旧行为=全部放行）。"""
+    if not provider_chain:
+        return None
+    return normalize_modalities((provider_chain[0] or {}).get("modalities"))
+
+
 def _clean_output_for_history(config, text: str) -> str:
     """写入会话历史前的守卫：按开关清洗助手输出中的（…）/(…)，阻止括号风格自我强化。
 
@@ -369,6 +381,8 @@ async def call_llm_and_reply(module, event, session_mgr, config,
     max_tokens = config.get("max_tokens", 1024)
     temperature = config.get("temperature", 0.7)
     history_rounds = config.get("history_rounds", 50)
+    provider_chain = _provider_chain_for(module)
+    modalities = _modalities_for_chain(provider_chain)
 
     session = session_mgr.get_session(session_id)
     if not session:
@@ -402,7 +416,7 @@ async def call_llm_and_reply(module, event, session_mgr, config,
         session_history = session_history[:-1]
     session_history = _format_session_history(session_history, is_private, **_meta_flags)
     session_history = await maybe_compress_context(
-        _provider_chain_for(module), config, session_history, history_rounds
+        provider_chain, config, session_history, history_rounds
     )
 
     schedule_enable = config.get("schedule_enable", True)
@@ -424,19 +438,21 @@ async def call_llm_and_reply(module, event, session_mgr, config,
         memory_text=memory_text,
         message_meta_instruction=_message_meta_instruction(module, None),
     )
+    messages = sanitize_contexts_by_modalities(messages, modalities)
 
     logger.add_info(f"#{module.bot_id}").info(
         f"API 请求 -> {session_id} (task: {session.task_id}), 消息数: {len(messages)}"
     )
 
+    use_tools = bool(all_specs) and supports_tool_use(modalities)
     response = await chat_with_fallback(
-        _provider_chain_for(module),
+        provider_chain,
         messages,
         model=model,
         temperature=temperature,
         max_tokens=max_tokens,
-        tools=build_tools(all_specs) if all_specs else None,
-        tool_executor=make_executor(all_specs, tool_ctx) if all_specs else None,
+        tools=build_tools(all_specs) if use_tools else None,
+        tool_executor=make_executor(all_specs, tool_ctx) if use_tools else None,
     )
 
     if not response.ok:
@@ -553,6 +569,8 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
     max_tokens = config.get("max_tokens", 1024)
     temperature = config.get("temperature", 0.7)
     history_rounds = config.get("history_rounds", 50)
+    provider_chain = _provider_chain_for(runtime)
+    modalities = _modalities_for_chain(provider_chain)
 
     pre_history_text = ""
     _meta_flags = _history_meta_flags(runtime)
@@ -579,7 +597,7 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
         session_history = session_history[:-1]
     session_history = _format_session_history(session_history, is_private, **_meta_flags)
     session_history = await maybe_compress_context(
-        _provider_chain_for(runtime), config, session_history, history_rounds
+        provider_chain, config, session_history, history_rounds
     )
 
     schedule_enable = config.get("schedule_enable", True)
@@ -606,6 +624,7 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
         memory_text=memory_text,
         message_meta_instruction=_message_meta_instruction(runtime, ctx),
     )
+    messages = sanitize_contexts_by_modalities(messages, modalities)
 
     _log_debug_prompt(runtime, session_id, messages, debug_enabled=bool(ctx and ctx.state.get("debug_prompt", False)))
 
@@ -613,14 +632,15 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
         f"API 请求 -> {session_id} (task: {session.task_id}), 消息数: {len(messages)}"
     )
 
+    use_tools = bool(all_specs) and supports_tool_use(modalities)
     response = await chat_with_fallback(
-        _provider_chain_for(runtime),
+        provider_chain,
         messages,
         model=model,
         temperature=temperature,
         max_tokens=max_tokens,
-        tools=build_tools(all_specs) if all_specs else None,
-        tool_executor=make_executor(all_specs, tool_ctx) if all_specs else None,
+        tools=build_tools(all_specs) if use_tools else None,
+        tool_executor=make_executor(all_specs, tool_ctx) if use_tools else None,
     )
 
     if not response.ok:
@@ -730,6 +750,8 @@ async def stream_response(runtime, event, ctx=None):
     max_tokens = config.get("max_tokens", 1024)
     temperature = config.get("temperature", 0.7)
     history_rounds = config.get("history_rounds", 50)
+    provider_chain = _provider_chain_for(runtime)
+    modalities = _modalities_for_chain(provider_chain)
 
     pre_history_text = ""
     _meta_flags = _history_meta_flags(runtime)
@@ -755,7 +777,7 @@ async def stream_response(runtime, event, ctx=None):
         session_history = session_history[:-1]
     session_history = _format_session_history(session_history, is_private, **_meta_flags)
     session_history = await maybe_compress_context(
-        _provider_chain_for(runtime), config, session_history, history_rounds
+        provider_chain, config, session_history, history_rounds
     )
 
     schedule_enable = config.get("schedule_enable", True)
@@ -782,6 +804,7 @@ async def stream_response(runtime, event, ctx=None):
         memory_text=memory_text,
         message_meta_instruction=_message_meta_instruction(runtime, ctx),
     )
+    messages = sanitize_contexts_by_modalities(messages, modalities)
 
     _log_debug_prompt(runtime, session_id, messages, debug_enabled=bool(ctx and ctx.state.get("debug_prompt", False)))
 
@@ -789,9 +812,9 @@ async def stream_response(runtime, event, ctx=None):
         f"流式 API 请求 -> {session_id} (task: {session.task_id}), 消息数: {len(messages)}"
     )
 
-    tools = build_tools(all_specs) if all_specs else None
-    tool_executor = make_executor(all_specs, tool_ctx) if all_specs else None
-    provider_chain = _provider_chain_for(runtime)
+    use_tools = bool(all_specs) and supports_tool_use(modalities)
+    tools = build_tools(all_specs) if use_tools else None
+    tool_executor = make_executor(all_specs, tool_ctx) if use_tools else None
 
     full_text_parts: list[str] = []
     tool_results: list[dict] = []

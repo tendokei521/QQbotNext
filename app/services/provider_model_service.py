@@ -14,6 +14,7 @@ from typing import Any
 
 from app.core.logger import logger
 from app.infrastructure.config.config_service import ConfigService
+from app.llm.providers.modalities import default_modalities_for, normalize_modalities
 from app.llm.providers.runtime_manager import ProviderRuntimeManager
 
 PASSWORD_MASK = "••••••••"
@@ -65,16 +66,21 @@ class ProviderModelService:
         if not model_name:
             raise ValueError("模型名称不能为空")
         model_id = str(data.get("id") or uuid.uuid4().hex[:12])
+        provider_type = str(data.get("provider_type", "chat")).strip() or "chat"
+        modalities = normalize_modalities(data.get("modalities"))
+        if modalities is None:
+            modalities = default_modalities_for(provider_type)
         now = int(time.time())
         model = {
             "id": model_id,
             "preset_id": preset_id,
             "model": model_name,
-            "provider_type": str(data.get("provider_type", "chat")).strip() or "chat",
+            "provider_type": provider_type,
             "enabled": bool(data.get("enabled", True)),
             "config": {
                 "temperature": float(data.get("temperature", 0.7) or 0.7),
                 "max_tokens": int(data.get("max_tokens", 1024) or 1024),
+                "modalities": modalities,
             },
             "created_at": now,
             "updated_at": now,
@@ -93,6 +99,12 @@ class ProviderModelService:
             config["temperature"] = float(data.get("temperature", 0.7) or 0.7)
         if "max_tokens" in data:
             config["max_tokens"] = int(data.get("max_tokens", 1024) or 1024)
+        if "modalities" in data:
+            normalized = normalize_modalities(data.get("modalities"))
+            if normalized is None:
+                config.pop("modalities", None)
+            else:
+                config["modalities"] = normalized
         updated = {
             **old,
             "model": str(data.get("model", old.get("model", ""))).strip() or old.get("model", ""),

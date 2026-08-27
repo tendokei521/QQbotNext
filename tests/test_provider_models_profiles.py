@@ -81,6 +81,34 @@ async def test_provider_model_crud_and_delete_ref(preset_service, model_service,
     assert model_service.get_model(created["id"]) is None
 
 
+async def test_provider_model_modalities(preset_service, model_service, config_service):
+    preset = await preset_service.create_preset({
+        "name": "模态测试",
+        "provider": "openai",
+        "config": {"api_base": "https://api.deepseek.com", "api_key": "sk-model"},
+    })
+
+    created = await model_service.create_model(preset["id"], {
+        "model": "gpt-4o",
+        "provider_type": "chat",
+        "modalities": ["text", "image", "tool_use"],
+    })
+    assert created["config"]["modalities"] == ["text", "image", "tool_use"]
+
+    # 新建时未显式声明，按能力类型给默认值
+    defaulted = await model_service.create_model(preset["id"], {
+        "model": "voice-model",
+        "provider_type": "tts",
+    })
+    assert defaulted["config"]["modalities"] == ["audio"]
+
+    # 更新时过滤非法值并去重
+    updated = await model_service.update_model(created["id"], {
+        "modalities": ["text", "image", "bad", "image"],
+    })
+    assert updated["config"]["modalities"] == ["text", "image"]
+
+
 async def test_provider_settings_save(model_service):
     settings = await model_service.save_settings({
         "default_preset_id": "p1",
