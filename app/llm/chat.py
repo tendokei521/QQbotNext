@@ -88,8 +88,8 @@ async def _build_group_pre_history(
     )
 
 
-def _collect_llm_ext(runtime, event, session_id: str, is_private: bool, schedule_enable: bool):
-    """收集本次请求的模块工具 + 技能 + ToolContext。
+async def _collect_llm_ext(runtime, event, session_id: str, is_private: bool, schedule_enable: bool):
+    """收集本次请求的模块工具 + 技能 + 知识库 + MCP + ToolContext。
 
     返回 (specs, skill_blocks, ctx)；specs 已包含内置 schedule_task。
     """
@@ -123,6 +123,19 @@ def _collect_llm_ext(runtime, event, session_id: str, is_private: bool, schedule
 
         memory_user_id = str(getattr(event, "user_id", "") or "")
         specs.extend(build_memory_tools(runtime, session_id, memory_user_id, is_private))
+
+    # 知识库原生工具
+    knowledge = getattr(runtime, "knowledge", None)
+    if knowledge is not None and knowledge.enabled():
+        from app.llm.knowledge import build_knowledge_tools
+
+        specs.extend(build_knowledge_tools(runtime))
+
+    # MCP 工具（异步连接后暴露）
+    mcp = getattr(runtime, "mcp_manager", None)
+    if mcp is not None and mcp.enabled():
+        await mcp.ensure_ready()
+        specs.extend(mcp.build_tools())
 
     return specs, skill_blocks, ctx
 
@@ -421,7 +434,7 @@ async def call_llm_and_reply(module, event, session_mgr, config,
 
     schedule_enable = config.get("schedule_enable", True)
 
-    all_specs, skill_blocks, tool_ctx = _collect_llm_ext(
+    all_specs, skill_blocks, tool_ctx = await _collect_llm_ext(
         module, event, session_id, is_private, schedule_enable
     )
 
@@ -602,7 +615,7 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
 
     schedule_enable = config.get("schedule_enable", True)
 
-    all_specs, skill_blocks, tool_ctx = _collect_llm_ext(
+    all_specs, skill_blocks, tool_ctx = await _collect_llm_ext(
         runtime, event, session_id, is_private, schedule_enable
     )
 
@@ -782,7 +795,7 @@ async def stream_response(runtime, event, ctx=None):
 
     schedule_enable = config.get("schedule_enable", True)
 
-    all_specs, skill_blocks, tool_ctx = _collect_llm_ext(
+    all_specs, skill_blocks, tool_ctx = await _collect_llm_ext(
         runtime, event, session_id, is_private, schedule_enable
     )
 

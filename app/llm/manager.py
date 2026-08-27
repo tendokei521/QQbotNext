@@ -16,6 +16,8 @@ from typing import Any
 from app.llm import logger
 from app.llm.config import AgentConfig
 from app.llm.hooks import LlmHookRegistry, ToolCallHookRegistry
+from app.llm.knowledge import KnowledgeManager
+from app.llm.mcp import MCPManager
 from app.llm.memory import MemoryManager
 from app.llm.pipeline import LlmPipeline
 from app.llm.proactive import ProactiveManager
@@ -42,19 +44,22 @@ class AgentRuntime:
     name = "LLM Agent"
     module_name = "llm_chat_v2"
 
-    def __init__(self, bot_id: Any, config_service, task_manager, bot=None) -> None:
+    def __init__(self, bot_id: Any, config_service, task_manager, bot=None, provider_runtime_manager=None) -> None:
         self.bot_id = bot_id
         self.config_service = config_service
         self.config = AgentConfig(config_service, bot_id)
         self.config.migrate_from_legacy()  # 首启从 llm_chat_v2 迁移配置与权限
         self.task_manager = task_manager
         self._bot = bot
+        self.provider_runtime_manager = provider_runtime_manager
         self.ctx = _Ctx(bot, task_manager)
 
         self.session_mgr = SessionManager(str(bot_id))
         self.scheduler = TaskScheduler(self)
         self.proactive = ProactiveManager(self)
         self.memory = MemoryManager(self)
+        self.knowledge = KnowledgeManager(self)
+        self.mcp_manager = MCPManager(self)
         try:
             self._loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -77,6 +82,7 @@ class AgentRuntime:
             return None
         config = dict(self.config._base_raw_config())
         config["provider"] = preset.get("provider", "openai")
+        config["provider_type"] = model.get("provider_type", "chat")
         config.update(preset.get("config", {}) or {})
         config.update(model.get("config", {}) or {})
         config["model"] = model.get("model", "")
@@ -174,15 +180,24 @@ class AgentRuntime:
             self.memory.stop()
         except Exception:
             pass
+        try:
+            self.knowledge.stop()
+        except Exception:
+            pass
+        try:
+            self.mcp_manager.close()
+        except Exception:
+            pass
         logger.add_info(f"#{self.bot_id}").info("[Agent] 运行时已停止")
 
 
 class AgentManager:
     """按 bot_id 管理 Agent 运行时（bootstrap 单例）。"""
 
-    def __init__(self, config_service, task_manager) -> None:
+    def __init__(self, config_service, task_manager, provider_runtime_manager=None) -> None:
         self.config_service = config_service
         self.task_manager = task_manager
+        self.provider_runtime_manager = provider_runtime_manager
         self._runtimes: dict[Any, AgentRuntime] = {}
 
     def ensure_runtime(self, bot_id: Any, bot=None) -> AgentRuntime | None:
@@ -191,7 +206,13 @@ class AgentManager:
             return None
         runtime = self._runtimes.get(bot_id)
         if runtime is None:
-            runtime = AgentRuntime(bot_id, self.config_service, self.task_manager, bot=bot)
+            runtime = AgentRuntime(
+                bot_id,
+                self.config_service,
+                self.task_manager,
+                bot=bot,
+                provider_runtime_manager=self.provider_runtime_manager,
+            )
             self._runtimes[bot_id] = runtime
             logger.add_info(f"#{bot_id}").info("[Agent] 运行时已装配")
         elif bot is not None:

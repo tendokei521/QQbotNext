@@ -120,6 +120,14 @@ DEFAULT_LLM_CONFIG: dict = {
     "meta_sent_style": "legacy",          # 正文标签样式：legacy=发送了： / new=消息正文：
     "meta_instruction_mode": "legacy",    # 消息元信息消歧说明：off=不注入 / legacy=旧版说明 / new=新版说明
     "meta_mask_nickname": True,           # 是否对句子型/超长昵称脱敏为 用户<QQ>（默认开启，防止昵称内容泄漏进正文）
+    # 知识库
+    "knowledge_enable": False,            # 知识库总开关
+    "knowledge_embedding_model_id": "",   # 指定 embedding 模型实例 id；空则自动选第一个 embedding 模型
+    "knowledge_recall_limit": 5,          # 默认检索条数
+    "knowledge_recall_max_chars": 2000,   # 检索结果最大输出字符
+    # MCP（Model Context Protocol）stdio server 配置
+    # [{"name":"filesystem","command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","/tmp"],"env":{},"timeout":30}]
+    "mcp_servers": [],
 }
 
 # 框架级 Agent 配置/权限存储的 module_name

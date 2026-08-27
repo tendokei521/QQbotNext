@@ -55,6 +55,7 @@ class ProviderRuntimeManager:
             **(model.get("config", {}) or {}),
         }
         merged["provider"] = preset.get("provider", "openai")
+        merged["provider_type"] = model.get("provider_type", "chat")
         merged["model"] = model.get("model", "")
         merged["provider_preset_id"] = preset.get("id", "")
         merged["provider_model_id"] = model.get("id", "")
@@ -129,6 +130,10 @@ class ProviderRuntimeManager:
                 return {"ok": True, "message": "连接正常", "reply": "", "models": remote_models[:5]}
         except Exception as e:
             logger.debug(f"[ProviderModel] /models 测试不可用，回退 chat: {e}")
+
+        # 非 chat 能力（embedding/rerank/tts/stt）没有 /models 可测时，仅校验配置已加载
+        if not hasattr(instance, "chat"):
+            return {"ok": True, "message": "能力配置已加载", "reply": ""}
 
         # 回退：最小 chat 请求；只关心是否成功返回，不关心是否真的生成了文本
         try:

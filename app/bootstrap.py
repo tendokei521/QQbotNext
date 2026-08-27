@@ -107,7 +107,11 @@ def build_container(settings: Settings | None = None) -> Container:
     scheduler = SchedulerService()
     container.register_factory(SchedulerService, lambda: scheduler)
     # 框架级 LLM Agent 运行时管理（配置/会话/定时/主动/工具，随 Bot 登录装配）
-    agent_manager = AgentManager(config_service=config_service, task_manager=task_manager)
+    agent_manager = AgentManager(
+        config_service=config_service,
+        task_manager=task_manager,
+        provider_runtime_manager=provider_runtime_manager,
+    )
     container.register_factory(AgentManager, lambda: agent_manager)
     # 插件钩子注册表（模块按 bot 注册）
     send_hook_registry = SendHookRegistry()

@@ -7,7 +7,11 @@
 from __future__ import annotations
 
 from .base import BaseProvider, LLMResponse, StreamEvent
+from .embedding import OpenAIEmbeddingProvider
 from .openai_compat import OpenAICompatProvider
+from .rerank import get_rerank_provider
+from .stt import OpenAIWhisperSTTProvider
+from .tts import OpenAITTSProvider
 
 PROVIDERS: dict[str, type[BaseProvider]] = {
     "openai": OpenAICompatProvider,
@@ -47,7 +51,16 @@ def get_provider_class(provider: str) -> type[BaseProvider]:
 
 
 def get_provider(config: dict) -> BaseProvider:
-    """按 config.provider 返回 Provider 实例；未知类型回退 openai。"""
+    """按 config.provider_type + config.provider 返回对应能力 Provider。"""
+    provider_type = str((config or {}).get("provider_type", "chat")).lower()
+    if provider_type == "embedding":
+        return OpenAIEmbeddingProvider(config)
+    if provider_type == "rerank":
+        return get_rerank_provider(config)
+    if provider_type == "tts":
+        return OpenAITTSProvider(config)
+    if provider_type == "stt":
+        return OpenAIWhisperSTTProvider(config)
     provider_name = (config or {}).get("provider", "openai")
     cls = get_provider_class(provider_name)
     return cls(config)
