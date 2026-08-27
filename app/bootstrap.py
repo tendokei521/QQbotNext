@@ -32,6 +32,7 @@ from app.services.bot_service import BotService
 from app.llm.providers.runtime_manager import ProviderRuntimeManager
 from app.services.config_profile_service import ConfigProfileService
 from app.services.log_service import LogService
+from app.services.module_install_service import ModuleInstallService
 from app.services.provider_model_service import ProviderModelService
 from app.services.provider_preset_service import ProviderPresetService
 from app.services.provider_service import ProviderRegistry
@@ -128,8 +129,18 @@ def build_container(settings: Settings | None = None) -> Container:
     )
     container.register_factory(ServiceAccess, lambda: services)
 
+    # 插件软卸载状态服务（唯一真相：module/uninstalled_modules.json）
+    install_service = ModuleInstallService(settings.uninstalled_modules_file)
+    container.register_factory(ModuleInstallService, lambda: install_service)
+
     # 模块系统
-    registry = ModuleRegistry(modules_dir=settings.modules_dir, config_service=config_service, services=services)
+    registry = ModuleRegistry(
+        modules_dir=settings.modules_dir,
+        plugins_dir=settings.plugins_dir,
+        config_service=config_service,
+        services=services,
+        install_service=install_service,
+    )
     container.register_factory(ModuleRegistry, lambda: registry)
 
     # OneBot 网关

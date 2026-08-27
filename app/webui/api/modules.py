@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import tempfile
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.core.logger import logger
 from app.llm.config import LEGACY_LLM_CONNECTION_KEYS
 from app.services.bot_service import PASSWORD_MASK as _PASSWORD_MASK
 from app.services.bot_service import _mask_password_config
+from app.services.module_install_service import ModuleInstallService
 from app.webui.api.deps import get_container, parse_bot_id
 from app.webui.ws import manager
 
@@ -163,6 +168,14 @@ async def api_modules(request: Request, bot_id: int | None = Depends(parse_bot_i
     return JSONResponse(content=container.get(BotService).get_modules_data(bot_id))
 
 
+@router.get("/modules/uninstalled")
+async def list_uninstalled_modules(request: Request):
+    """返回软卸载模块清单（设置页面弹窗用）。"""
+    container = get_container(request)
+    install_service = container.get(ModuleInstallService)
+    return JSONResponse(content={"ok": True, "modules": install_service.list_uninstalled()})
+
+
 @router.get("/modules/{module_name}")
 async def api_module(module_name: str, request: Request, bot_id: int | None = Depends(parse_bot_id)):
     from app.services.bot_service import BotService
@@ -266,6 +279,89 @@ async def reload_modules(request: Request, bot_id: int | None = Depends(parse_bo
     await bot_service.registry.reload_all(bot_id, bot=bot)
     await manager.broadcast(json.dumps({"type": "modules_reloaded", "bot_id": bot_id}))
     return _ok("模块已重新加载")
+
+
+@router.post("/modules/{module_name}/reload")
+async def reload_single_module(
+    module_name: str,
+    request: Request,
+    bot_id: int | None = Depends(parse_bot_id),
+):
+    """手动热重载单个模块。"""
+    from app.modules.registry import ModuleRegistry
+    from app.services.bot_service import BotService
+
+    container = get_container(request)
+    bot_service = container.get(BotService)
+    registry = container.get(ModuleRegistry)
+    bot = bot_service.gateway.find_conn_by_bot_id(bot_id) if bot_id else None
+    ok = await registry.reload_single(module_name, bot_id, bot=bot)
+    if not ok:
+        return _err(404, f"模块 {module_name} (Bot {bot_id}) 重载失败或不存在")
+    await manager.broadcast(json.dumps({"type": "modules_reloaded", "bot_id": bot_id}))
+    return _ok(f"模块 {module_name} 已重新加载")
+
+
+@router.post("/modules/{module_name}/uninstall")
+async def uninstall_module(
+    module_name: str,
+    request: Request,
+    bot_id: int | None = Depends(parse_bot_id),
+):
+    """软卸载模块：只写配置文件，不删除模块文件。"""
+    from app.modules.registry import ModuleRegistry
+
+    container = get_container(request)
+    registry = container.get(ModuleRegistry)
+    try:
+        await registry.uninstall_module(module_name)
+    except ValueError as e:
+        return _err(400, str(e))
+    await manager.broadcast(json.dumps({"type": "modules_reloaded", "bot_id": bot_id}))
+    return _ok(f"模块 {module_name} 已软卸载（文件保留）")
+
+
+@router.post("/modules/{module_name}/install")
+async def reinstall_module(
+    module_name: str,
+    request: Request,
+    bot_id: int | None = Depends(parse_bot_id),
+):
+    """清除软卸载记录并重新加载模块。"""
+    from app.modules.registry import ModuleRegistry
+    from app.services.bot_service import BotService
+
+    container = get_container(request)
+    bot_service = container.get(BotService)
+    registry = container.get(ModuleRegistry)
+    bot = bot_service.gateway.find_conn_by_bot_id(bot_id) if bot_id else None
+    ok = await registry.reinstall_module(module_name, bot_id)
+    if not ok:
+        return _err(404, f"模块 {module_name} 目录不存在或安装失败")
+    await manager.broadcast(json.dumps({"type": "modules_reloaded", "bot_id": bot_id}))
+    return _ok(f"模块 {module_name} 已恢复安装")
+
+
+@router.post("/modules/install-zip")
+async def install_module_zip(request: Request, file: UploadFile = File(...)):
+    """上传 zip 插件并安装到 module/plugins。"""
+    from app.modules.registry import ModuleRegistry
+
+    container = get_container(request)
+    registry = container.get(ModuleRegistry)
+    fd, tmp_path = tempfile.mkstemp(suffix=".zip")
+    os.close(fd)
+    try:
+        with open(tmp_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        info = await registry.install_from_zip(tmp_path)
+    except ValueError as e:
+        return _err(400, str(e))
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+    await manager.broadcast(json.dumps({"type": "modules_reloaded", "bot_id": None}))
+    return _ok("插件安装成功", plugin=info)
 
 
 # ==================== 自定义配置页 ====================

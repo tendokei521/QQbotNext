@@ -49,6 +49,16 @@ class Settings(BaseSettings):
         return self.module_dir / "modules"
 
     @property
+    def plugins_dir(self) -> Path:
+        """外部 zip 插件安装目录（module/plugins）。"""
+        return self.module_dir / "plugins"
+
+    @property
+    def uninstalled_modules_file(self) -> Path:
+        """软卸载模块状态文件（module/uninstalled_modules.json）。"""
+        return self.module_dir / "uninstalled_modules.json"
+
+    @property
     def module_configs_dir(self) -> Path:
         """模块配置目录（module/configs）。"""
         return self.module_dir / "configs"

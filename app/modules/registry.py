@@ -9,7 +9,12 @@
 from __future__ import annotations
 
 import importlib
+import json
+import os
+import shutil
 import sys
+import tempfile
+import zipfile
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -27,10 +32,14 @@ class ModuleRegistry:
         config_service: Any,
         services: ServiceAccess,
         log=None,
+        plugins_dir: Path | str | None = None,
+        install_service: Any = None,
     ) -> None:
         self.modules_dir = Path(modules_dir)
+        self.plugins_dir = Path(plugins_dir) if plugins_dir else None
         self.config_service = config_service
         self.services = services
+        self.install_service = install_service
         self.log = log or logger
         self._modules: dict[str, dict[Any, BaseModule]] = {}
 
@@ -66,21 +75,67 @@ class ModuleRegistry:
         return sorted(self._modules.keys())
 
     def module_page_path(self, module_name: str) -> Path | None:
-        """自定义配置页：module/modules/<name>/pages/index.html。无则返回 None。"""
+        """自定义配置页：模块目录/pages/index.html。无则返回 None。"""
         page = self._resolve_module_path(module_name) / "pages" / "index.html"
         return page if page.is_file() else None
 
     def module_has_page(self, module_name: str) -> bool:
         return self.module_page_path(module_name) is not None
 
+    # ---------- 软卸载状态 ----------
+    def _is_uninstalled(self, module_name: str) -> bool:
+        if self.install_service is None:
+            return False
+        return bool(self.install_service.is_uninstalled(module_name))
+
+    def _module_source(self, module_name: str) -> str:
+        """返回模块来源：local 或 zip。"""
+        local = self._resolve_module_dir(module_name, source="local")
+        if local and local.is_dir():
+            return "local"
+        plugin = self._resolve_module_dir(module_name, source="zip")
+        if plugin and plugin.is_dir():
+            return "zip"
+        return "local"
+
+    @staticmethod
+    def _read_manifest(module_dir: Path) -> dict:
+        """读取 module.json（如有）。无 manifest 返回空 dict。"""
+        manifest = module_dir / "module.json"
+        if not manifest.is_file():
+            return {}
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
     # ---------- 加载 / 卸载 ----------
-    def _resolve_module_path(self, module_name: str):
-        """解析模块目录路径。点号名（parent.child）→ modules/<parent>/<child>。"""
+    def _resolve_module_dir(self, module_name: str, source: str | None = None) -> Path:
+        """解析模块目录路径。
+
+        优先 module/modules/<name>，其次 module/plugins/<name>。
+        source 可强制指定 local 或 zip。
+        """
         parts = module_name.split(".")
-        path = self.modules_dir
+        if source == "zip" and self.plugins_dir is not None:
+            path = self.plugins_dir
+        else:
+            path = self.modules_dir
         for p in parts:
             path = path / p
         return path
+
+    def _resolve_module_path(self, module_name: str):
+        """兼容旧调用：返回实际存在的模块目录。"""
+        return self._resolve_module_dir(module_name)
+
+    def _iter_module_roots(self):
+        """返回 [(dir, source)]：本地模块目录 + 外部插件目录。"""
+        roots = [(self.modules_dir, "local")]
+        if self.plugins_dir is not None:
+            roots.append((self.plugins_dir, "zip"))
+        return roots
 
     async def load_single(
         self,
@@ -89,13 +144,21 @@ class ModuleRegistry:
         bot: IBot | None = None,
         parent: BaseModule | None = None,
     ) -> bool:
-        module_path = self._resolve_module_path(module_name)
+        if self._is_uninstalled(module_name):
+            return False
+        source = self._module_source(module_name)
+        module_path = self._resolve_module_dir(module_name, source)
         if not module_path.is_dir() or module_name.startswith(("_", ".")):
             return False
 
         try:
             self._purge_module_cache(module_name)
-            mod = importlib.import_module(f"module.modules.{module_name}.module")
+            import_path = (
+                f"module.modules.{module_name}.module"
+                if source == "local"
+                else f"module.plugins.{module_name}.module"
+            )
+            mod = importlib.import_module(import_path)
             cls = getattr(mod, "Module", None)
             if cls is None:
                 self.log.error(f"[Module] {module_name} 缺少 module.py 中的 Module 类")
@@ -119,6 +182,12 @@ class ModuleRegistry:
             instance.bot_id = bot_id
             instance.parent = parent          # 父模块引用（None = 顶层模块）
             instance.children: dict = {}       # 子模块：{短名: 实例}
+            instance.source = source
+            instance.version = str(self._read_manifest(module_path).get("version", "") or "")
+            instance.plugin_dir = str(module_path)
+            instance.can_uninstall = True  # 本地/外部插件都允许软卸载（文件保留）
+            if not instance.version:
+                instance.version = "0.0.0"
 
             # 收集装饰器钩子并绑定到实例
             module_hooks, llm_hooks = cls.collect_hooks()
@@ -292,19 +361,26 @@ class ModuleRegistry:
             return False
 
     async def load_all(self, bot_id: Any = None, bot: IBot | None = None) -> int:
-        """加载模块目录下所有模块到指定 bot_id。"""
+        """加载本地模块与外部插件到指定 bot_id。"""
         count = 0
-        if not self.modules_dir.exists():
-            self.log.warning(f"[Module] 模块目录不存在: {self.modules_dir}")
-            return 0
-        for entry in sorted(self.modules_dir.iterdir()):
-            if not entry.is_dir() or entry.name.startswith(("_", ".")):
+        seen: set[str] = set()
+        for root, source in self._iter_module_roots():
+            if not root.exists():
+                self.log.warning(f"[Module] {source} 模块目录不存在: {root}")
                 continue
-            if entry.name not in self._modules:
-                self._modules[entry.name] = {}
-            if bot_id not in self._modules[entry.name]:
-                if await self.load_single(entry.name, bot_id, bot):
-                    count += 1
+            for entry in sorted(root.iterdir()):
+                if not entry.is_dir() or entry.name.startswith(("_", ".")):
+                    continue
+                if entry.name in seen:
+                    continue
+                seen.add(entry.name)
+                if self._is_uninstalled(entry.name):
+                    continue
+                if entry.name not in self._modules:
+                    self._modules[entry.name] = {}
+                if bot_id not in self._modules[entry.name]:
+                    if await self.load_single(entry.name, bot_id, bot):
+                        count += 1
         if bot_id is None:
             self.log.info(f"[Module] 模块预加载完成: {count} 个新增")
         else:
@@ -363,6 +439,157 @@ class ModuleRegistry:
         if not bot_modules:
             del self._modules[module_name]
 
+    # ---------- zip 安装 / 软卸载 / 恢复安装 ----------
+    async def install_from_zip(self, zip_path: str | Path) -> dict:
+        """安装 zip 插件到 module/plugins/<name>，然后加载全局实例。
+
+        不删除已有文件：若目标已存在且处于软卸载状态，则只清除卸载记录并重新加载。
+        """
+        if self.plugins_dir is None:
+            raise ValueError("未配置外部插件目录 plugins_dir")
+        if self.install_service is None:
+            raise ValueError("未配置安装状态服务 install_service")
+        zip_path = Path(zip_path)
+        if not zip_path.is_file():
+            raise ValueError(f"插件压缩包不存在: {zip_path}")
+
+        self.plugins_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=self.plugins_dir, prefix=".zip-") as tmp:
+            tmp_dir = Path(tmp)
+            self._extract_zip_plugin(zip_path, tmp_dir)
+            manifest = self._find_manifest(tmp_dir)
+            name = str((manifest.get("name") or "").strip())
+            if not name:
+                raise ValueError("module.json 缺少 name 字段")
+            if name.startswith(("_", ".")) or "/" in name or "\\" in name:
+                raise ValueError(f"非法插件名: {name}")
+
+            root = tmp_dir
+            if tmp_dir.name != name:
+                # 若压缩包含单一顶层目录，取其内容
+                if len([p for p in tmp_dir.iterdir() if p.is_dir()]) == 1 and (
+                    tmp_dir / name
+                ).is_dir():
+                    root = tmp_dir / name
+            final_dir = self.plugins_dir / name
+            if final_dir.exists():
+                if not self.install_service.is_uninstalled(name):
+                    raise ValueError(f"插件 {name} 已安装，请先卸载或使用覆盖安装")
+                # 软卸载状态：复用已有文件，不清除/覆盖
+                self.install_service.reinstall(name)
+                return await self._after_install_from_zip(name, manifest)
+
+            # 移动解压内容到最终目录
+            if root == tmp_dir:
+                shutil.copytree(str(tmp_dir), str(final_dir))
+            else:
+                shutil.move(str(root), str(final_dir))
+
+            self.install_service.reinstall(name)
+            return await self._after_install_from_zip(name, manifest)
+
+    async def _after_install_from_zip(self, name: str, manifest: dict) -> dict:
+        """安装/恢复后加载全局实例，返回模块信息。"""
+        ok = await self.load_single(name, None)
+        if not ok:
+            raise ValueError(f"插件 {name} 安装后加载失败")
+        return {
+            "module_name": name,
+            "display_name": manifest.get("display_name") or name,
+            "version": manifest.get("version", ""),
+            "source": "zip",
+        }
+
+    async def uninstall_module(self, module_name: str) -> None:
+        """软卸载：只写配置文件，不删除模块目录/配置/数据。"""
+        if self.install_service is None:
+            raise ValueError("未配置安装状态服务 install_service")
+        instances = list(self._modules.get(module_name, {}).values())
+        display_name = ""
+        version = ""
+        source = "local"
+        if instances:
+            first = instances[0]
+            display_name = getattr(first, "name", "") or ""
+            version = getattr(first, "version", "") or ""
+            source = getattr(first, "source", self._module_source(module_name)) or "local"
+        else:
+            source = self._module_source(module_name)
+
+        for bot_id in list(self._modules.get(module_name, {}).keys()):
+            await self.unload_single(module_name, bot_id)
+
+        self.install_service.uninstall(
+            module_name,
+            source=source,
+            display_name=display_name or module_name,
+            version=version,
+        )
+        self.log.info(f"[Module] 已软卸载 {module_name}（文件保留）")
+
+    async def reinstall_module(self, module_name: str, bot_id: Any = None) -> bool:
+        """清除软卸载记录并重新加载指定模块。"""
+        if self.install_service is None:
+            raise ValueError("未配置安装状态服务 install_service")
+        source = self._module_source(module_name)
+        module_path = self._resolve_module_dir(module_name, source)
+        if not module_path.is_dir():
+            self.log.warning(f"[Module] 恢复安装失败：{module_name} 目录不存在: {module_path}")
+            return False
+        self.install_service.reinstall(module_name)
+        ok = await self.load_single(module_name, bot_id)
+        if not ok:
+            self.log.warning(f"[Module] 恢复安装 {module_name} 后加载失败，重新标记软卸载")
+            self.install_service.uninstall(
+                module_name,
+                source=source,
+                display_name=module_name,
+            )
+        return ok
+
+    @staticmethod
+    def _extract_zip_plugin(zip_path: Path, target_dir: Path) -> None:
+        """校验并安全解压插件 zip。"""
+        try:
+            with zipfile.ZipFile(zip_path, "r") as z:
+                names = z.namelist()
+                if not names:
+                    raise ValueError("插件压缩包为空")
+                for entry in names:
+                    normalized = entry.replace("\\", "/")
+                    if normalized.startswith("/") or ".." in normalized.split("/"):
+                        raise ValueError(f"插件压缩包包含非法路径: {entry}")
+                if not ModuleRegistry._find_manifest_entry(names):
+                    raise ValueError("压缩包不是合法插件：未找到 module.json")
+                z.extractall(target_dir)
+        except zipfile.BadZipFile as e:
+            raise ValueError("插件压缩包格式错误") from e
+
+    @staticmethod
+    def _find_manifest_entry(names: list[str]) -> str | None:
+        for name in names:
+            if name.replace("\\", "/").endswith("module.json"):
+                return name
+        return None
+
+    @staticmethod
+    def _find_manifest(root: Path) -> dict:
+        """在解压目录中查找 module.json 并解析。"""
+        candidates = [
+            root / "module.json",
+            *[p / "module.json" for p in root.iterdir() if p.is_dir()],
+        ]
+        for cfg in candidates:
+            if cfg.is_file():
+                try:
+                    data = json.loads(cfg.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError) as e:
+                    raise ValueError("module.json 格式错误") from e
+                if not isinstance(data, dict):
+                    raise ValueError("module.json 必须为 JSON 对象")
+                return data
+        raise ValueError("未找到 module.json")
+
     def _unregister_plugin_hooks(self, instance) -> None:
         """卸载模块实例时注销其全部插件钩子。"""
         if self.services is None:
@@ -395,6 +622,10 @@ class ModuleRegistry:
 
     @staticmethod
     def _purge_module_cache(module_name: str) -> None:
-        prefix = f"module.modules.{module_name}"
-        for key in [k for k in sys.modules if k == prefix or k.startswith(prefix + ".")]:
-            del sys.modules[key]
+        prefixes = (
+            f"module.modules.{module_name}",
+            f"module.plugins.{module_name}",
+        )
+        for prefix in prefixes:
+            for key in [k for k in sys.modules if k == prefix or k.startswith(prefix + ".")]:
+                del sys.modules[key]

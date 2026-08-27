@@ -123,6 +123,9 @@ class BotService:
                 "config": _mask_password_config(dict(mod.config.raw_config), mod.config_schema),
                 "config_schema": _split_schema(mod.config_schema),
                 "has_page": self.registry.module_has_page(mod_name),
+                "source": getattr(mod, "source", "local"),
+                "version": getattr(mod, "version", "") or "0.0.0",
+                "can_uninstall": True,
             }
         # 虚拟 Agent 模块（框架级注入，不依赖模块目录）：即使所有模块被删也保留 LLM 界面
         data["agent"] = self._agent_module_data(bot_id)
