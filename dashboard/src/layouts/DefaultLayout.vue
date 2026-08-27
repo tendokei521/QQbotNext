@@ -62,9 +62,8 @@ const navItems = computed<NavItem[]>(() => {
         { to: '/agent?section=sec-models', title: 'Provider 模型池' },
         { to: '/agent?section=sec-agent-panels', title: '定时任务 / 主动消息' },
       ]
-  if (showExperimental) {
-    agentChildren.push({ to: '/agent/memory', title: 'Agent 长期记忆' })
-  }
+  // 长期记忆虽标记为实验性，但作为常驻入口保留
+  agentChildren.push({ to: '/agent/memory', title: 'Agent 长期记忆' })
   const items: NavItem[] = [
     { to: '/', title: '总览', icon: 'mdi-view-dashboard-outline' },
     { to: '/bots', title: '账号管理', icon: 'mdi-robot-outline' },

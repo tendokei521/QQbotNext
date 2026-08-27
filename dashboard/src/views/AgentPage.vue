@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import http, { errorMessage } from '@/api/http'
 import { useBotsStore } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
+import { useWebuiStore } from '@/stores/webui'
 import type { PermissionConfig } from '@/stores/modules'
 import ConfigForm from '@/components/config/ConfigForm.vue'
 import PermissionEditor from '@/components/config/PermissionEditor.vue'
@@ -13,8 +14,10 @@ import { filterSchemaExcludeGroup } from '@/utils/schema'
 
 const bots = useBotsStore()
 const notify = useNotifyStore()
+const webui = useWebuiStore()
 
 const botId = ref<number | null>(null)
+const showExperimental = computed(() => !!webui.config.experimental?.show_experimental)
 const enabled = ref(false)
 const schema = ref<Record<string, any>>({})
 const route = useRoute()
@@ -138,6 +141,11 @@ async function load() {
     const data = res.data
     enabled.value = !!data.enabled
     schema.value = filterSchemaExcludeGroup(data.schema || {}, 'group_memory')
+    if (!showExperimental.value) {
+      // 知识库 / MCP 属于实验性配置：未开启“显示实验性选项”时不显示
+      schema.value = filterSchemaExcludeGroup(schema.value, 'group_knowledge')
+      schema.value = filterSchemaExcludeGroup(schema.value, 'group_mcp')
+    }
     updateAgentNavSections()
     providerModels.value = data.provider_models || []
     Object.keys(draft).forEach((k) => delete draft[k])

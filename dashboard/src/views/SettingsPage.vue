@@ -145,7 +145,7 @@ onMounted(() => {
               hide-details
             />
             <div class="text-caption mt-2" style="color: rgba(var(--v-theme-on-surface), 0.55)">
-              开启后，导航中会显示「配置档案」等实验性功能入口
+              开启后，导航中会显示「配置档案」，并在 Agent 面板显示「知识库 / MCP」等实验性配置入口
             </div>
           </v-card-text>
         </v-card>
