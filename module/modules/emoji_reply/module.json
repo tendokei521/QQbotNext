@@ -1,0 +1,9 @@
+{
+  "name": "emoji_reply",
+  "display_name": "Emoji回复",
+  "sign": "EmojiReply",
+  "version": "1.0.0",
+  "description": "根据消息关键词发送 Emoji 回应，并跟随群消息附加的 Emoji",
+  "entry": "module.py",
+  "api_version": 1
+}

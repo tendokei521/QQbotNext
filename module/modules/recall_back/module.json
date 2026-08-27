@@ -1,0 +1,9 @@
+{
+  "name": "recall_back",
+  "display_name": "防撤回模块",
+  "sign": "RecallBack",
+  "version": "1.0.0",
+  "description": "防撤回模块，监听消息并转发被撤回的消息",
+  "entry": "module.py",
+  "api_version": 1
+}

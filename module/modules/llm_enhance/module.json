@@ -1,0 +1,9 @@
+{
+  "name": "llm_enhance",
+  "display_name": "LLM增强",
+  "sign": "LlmEnhance",
+  "version": "1.0.0",
+  "description": "LLM 请求防抖 + 用户信息感知 + 回复打断 + 调试",
+  "entry": "module.py",
+  "api_version": 1
+}

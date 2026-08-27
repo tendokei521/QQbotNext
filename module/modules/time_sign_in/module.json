@@ -1,0 +1,9 @@
+{
+  "name": "time_sign_in",
+  "display_name": "群打卡",
+  "sign": "TimeSignInModule",
+  "version": "1.0.0",
+  "description": "每日自动群打卡 + #打卡/#全群打卡 指令",
+  "entry": "module.py",
+  "api_version": 1
+}

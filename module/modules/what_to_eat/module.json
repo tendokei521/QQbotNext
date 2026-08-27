@@ -1,0 +1,9 @@
+{
+  "name": "what_to_eat",
+  "display_name": "今天吃什么",
+  "sign": "WhatToEat",
+  "version": "1.0.0",
+  "description": "遇到“吃什么”时随机推荐食物",
+  "entry": "module.py",
+  "api_version": 1
+}

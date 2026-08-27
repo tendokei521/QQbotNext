@@ -1,0 +1,9 @@
+{
+  "name": "example",
+  "display_name": "示例模块",
+  "sign": "Example",
+  "version": "1.0.0",
+  "description": "这是一个标准演示模块",
+  "entry": "module.py",
+  "api_version": 1
+}
