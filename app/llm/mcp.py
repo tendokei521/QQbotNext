@@ -164,17 +164,25 @@ class MCPManager:
         self._specs: list[ToolSpec] = []
         self._ready = False
 
-    def enabled(self) -> bool:
+    def _servers(self) -> list[dict]:
         try:
-            servers = self.runtime.config.get("mcp_servers", []) or []
+            raw = self.runtime.config.get("mcp_servers", []) or []
         except Exception:
-            servers = []
-        return bool(servers)
+            raw = []
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except json.JSONDecodeError:
+                raw = []
+        return [s for s in raw if isinstance(s, dict)] if isinstance(raw, list) else []
+
+    def enabled(self) -> bool:
+        return bool(self._servers())
 
     async def ensure_ready(self) -> bool:
         if self._ready:
             return True
-        servers = self.runtime.config.get("mcp_servers", []) or []
+        servers = self._servers()
         if not servers:
             return False
         for cfg in servers:

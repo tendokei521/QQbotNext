@@ -12,6 +12,8 @@ SCHEMA = {
     "group_proactive": {"type": "group", "label": "主动消息", "collapsible": True},
     "group_schedule": {"type": "group", "label": "定时任务", "collapsible": True},
     "group_memory": {"type": "group", "label": "长期记忆（实验性）", "collapsible": True},
+    "group_knowledge": {"type": "group", "label": "知识库", "collapsible": True},
+    "group_mcp": {"type": "group", "label": "MCP 工具", "collapsible": True},
     "group_permission": {"type": "group", "label": "权限", "collapsible": True},
 
     # ==================== 配置项 ====================
@@ -383,6 +385,26 @@ SCHEMA = {
     "memory_upgrade_saved_only": {
         "type": "boolean", "label": "重置只保留已保存型", "description": "重置挂起时仅保留“明确保存/已确认”型记忆，自动蒸馏型一律挂起",
         "default": True, "group": "group_memory",
+    },
+
+    # ==================== 知识库 ====================
+    "knowledge_enable": {
+        "type": "boolean", "label": "启用知识库", "description": "开启后 LLM 可使用 knowledge_search / knowledge_add / knowledge_delete 工具",
+        "default": False, "group": "group_knowledge",
+    },
+    "knowledge_embedding_model_id": {
+        "type": "string", "label": "Embedding 模型实例 ID", "description": "留空自动选择第一个启用且能力类型为 Embedding 的模型实例",
+        "default": "", "group": "group_knowledge",
+    },
+    "knowledge_recall_limit": {
+        "type": "number", "label": "默认检索条数", "description": "knowledge_search 默认返回的片段数量",
+        "default": 5, "min": 1, "max": 20, "group": "group_knowledge",
+    },
+
+    # ==================== MCP ====================
+    "mcp_servers": {
+        "type": "textarea", "label": "MCP Servers (JSON 数组)", "description": "每个元素：{\"name\":\"...\",\"command\":\"...\",\"args\":[...],\"env\":{},\"cwd\":\"...\",\"timeout\":30}",
+        "default": "[]", "rows": 5, "group": "group_mcp",
     },
 
     # ==================== 感知增强提示词细调（实验性） ====================
