@@ -25,6 +25,7 @@ const router = createRouter({
         { path: 'agent/napcat', name: 'agent-napcat', component: () => import('@/views/AgentNapcatPage.vue'), meta: { title: 'Agent NapCat 工具' } },
         { path: 'agent/panels', name: 'agent-panels', component: () => import('@/views/AgentPanelsPage.vue'), meta: { title: 'Agent 定时任务 / 主动消息' } },
         { path: 'provider-presets', name: 'provider-presets', component: () => import('@/views/ProviderPresetsPage.vue'), meta: { title: 'Provider 预设' } },
+        { path: 'sessions', name: 'sessions', component: () => import('@/views/SessionsPage.vue'), meta: { title: '会话数据' } },
         { path: 'config-profiles', name: 'config-profiles', component: () => import('@/views/ConfigProfilesPage.vue'), meta: { title: '配置档案' } },
         { path: 'logs', name: 'logs', component: () => import('@/views/LogsPage.vue'), meta: { title: '日志' } },
         { path: 'settings', name: 'settings', component: () => import('@/views/SettingsPage.vue'), meta: { title: '设置' } },
