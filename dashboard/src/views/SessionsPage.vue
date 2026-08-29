@@ -52,6 +52,15 @@ const loadingConversation = ref(false)
 
 const selectedSessionId = ref('')
 const selectedTaskId = ref('')
+const selectedTaskIds = ref<string[]>([])
+
+const editDialog = ref(false)
+const editingIndex = ref(-1)
+const editContent = ref('')
+
+const newMessageRole = ref<'user' | 'assistant' | 'system'>('user')
+const newMessageContent = ref('')
+const restoreFileInput = ref<HTMLInputElement | null>(null)
 
 const botId = computed(() => bots.currentBot?.bot_id ?? null)
 
@@ -109,6 +118,7 @@ async function loadSessions() {
       conversations.value = []
       conversation.value = null
       selectedTaskId.value = ''
+      selectedTaskIds.value = []
     }
   } catch (err) {
     notify.push(errorMessage(err), 'error')
@@ -129,6 +139,9 @@ async function loadConversations() {
       { params: { bot_id: botId.value } },
     )
     conversations.value = res.data?.session?.conversations || []
+    selectedTaskIds.value = selectedTaskIds.value.filter((id) =>
+      conversations.value.some((c) => c.task_id === id),
+    )
     if (selectedTaskId.value && !conversations.value.some((c) => c.task_id === selectedTaskId.value)) {
       selectedTaskId.value = conversations.value[0]?.task_id || ''
     }
@@ -168,8 +181,17 @@ async function openConversation(taskId: string) {
 function selectSession(id: string) {
   selectedSessionId.value = id
   selectedTaskId.value = ''
+  selectedTaskIds.value = []
   conversation.value = null
   loadConversations()
+}
+
+function toggleTaskSelection(taskId: string) {
+  if (selectedTaskIds.value.includes(taskId)) {
+    selectedTaskIds.value = selectedTaskIds.value.filter((id) => id !== taskId)
+  } else {
+    selectedTaskIds.value.push(taskId)
+  }
 }
 
 async function renameConversation(target: ConversationSummary) {
@@ -207,8 +229,137 @@ async function deleteConversation(target: ConversationSummary) {
       conversation.value = null
       selectedTaskId.value = ''
     }
+    selectedTaskIds.value = selectedTaskIds.value.filter((id) => id !== target.task_id)
     await loadConversations()
     await loadSessions()
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  }
+}
+
+async function bulkDeleteConversations() {
+  if (!selectedTaskIds.value.length) return
+  if (!window.confirm(`确认删除选中的 ${selectedTaskIds.value.length} 个对话？`)) return
+  try {
+    await http.post(
+      '/api/sessions/bulk-delete',
+      { session_id: selectedSessionId.value, task_ids: selectedTaskIds.value },
+      { params: { bot_id: botId.value } },
+    )
+    notify.push('批量删除完成', 'success')
+    selectedTaskIds.value = []
+    if (selectedTaskId.value && !conversations.value.some((c) => c.task_id === selectedTaskId.value)) {
+      conversation.value = null
+      selectedTaskId.value = ''
+    }
+    await loadConversations()
+    await loadSessions()
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  }
+}
+
+async function deleteSession() {
+  if (!selectedSessionId.value) return
+  if (!window.confirm(`确认删除整个会话 ${selectedSessionId.value}？该操作不可恢复。`)) return
+  try {
+    await http.delete(`/api/sessions/${encodeURIComponent(selectedSessionId.value)}`, {
+      params: { bot_id: botId.value },
+    })
+    notify.push('会话已删除', 'success')
+    selectedSessionId.value = ''
+    selectedTaskId.value = ''
+    selectedTaskIds.value = []
+    conversation.value = null
+    await loadSessions()
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  }
+}
+
+async function exportSession() {
+  if (!selectedSessionId.value || botId.value == null) return
+  try {
+    const res = await http.get(`/api/sessions/${encodeURIComponent(selectedSessionId.value)}/export`, {
+      params: { bot_id: botId.value },
+      responseType: 'blob',
+    })
+    const blob = res.data instanceof Blob ? res.data : new Blob([res.data])
+    saveBlob(blob, `${selectedSessionId.value}.session.json`)
+    notify.push('会话备份已开始', 'success')
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  }
+}
+
+function openRestorePicker() {
+  restoreFileInput.value?.click()
+}
+
+function onRestoreFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = async () => {
+    try {
+      const payload = JSON.parse(String(reader.result || '{}'))
+      const res = await http.post<{ ok: boolean; restored?: number; session_id?: string }>(
+        '/api/sessions/restore',
+        payload,
+        { params: { bot_id: botId.value } },
+      )
+      notify.push(`恢复完成，导入 ${res.data?.restored ?? '?'} 个对话`, 'success')
+      selectedSessionId.value = res.data?.session_id || selectedSessionId.value
+      selectedTaskId.value = ''
+      conversation.value = null
+      await loadSessions()
+    } catch (err) {
+      notify.push(errorMessage(err), 'error')
+    } finally {
+      input.value = ''
+    }
+  }
+  reader.readAsText(file)
+}
+
+function openEditMessage(index: number) {
+  if (!conversation.value) return
+  editingIndex.value = index
+  editContent.value = conversation.value.messages[index]?.content || ''
+  editDialog.value = true
+}
+
+async function saveEditMessage() {
+  if (editingIndex.value < 0 || !conversation.value) return
+  try {
+    const res = await http.put<{ ok: boolean; conversation: ConversationDetail }>(
+      `/api/sessions/${encodeURIComponent(selectedSessionId.value)}/conversations/${conversation.value.task_id}/messages/${editingIndex.value}`,
+      { content: editContent.value },
+      { params: { bot_id: botId.value } },
+    )
+    conversation.value = res.data?.conversation || conversation.value
+    editDialog.value = false
+    notify.push('消息已更新', 'success')
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  }
+}
+
+async function addMessage() {
+  if (!conversation.value || !newMessageContent.value.trim()) return
+  try {
+    const res = await http.post<{ ok: boolean; conversation: ConversationDetail }>(
+      `/api/sessions/${encodeURIComponent(selectedSessionId.value)}/conversations/${conversation.value.task_id}/messages`,
+      { role: newMessageRole.value, content: newMessageContent.value.trim() },
+      { params: { bot_id: botId.value } },
+    )
+    conversation.value = res.data?.conversation || conversation.value
+    newMessageContent.value = ''
+    newMessageRole.value = 'user'
+    await loadConversations()
+    await loadSessions()
+    notify.push('消息已添加', 'success')
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   }
@@ -249,6 +400,7 @@ async function exportConversation(format: 'text' | 'json') {
 watch(botId, () => {
   selectedSessionId.value = ''
   selectedTaskId.value = ''
+  selectedTaskIds.value = []
   conversation.value = null
   loadSessions()
 })
@@ -263,10 +415,24 @@ onMounted(() => {
     <div class="app-page-header" style="align-items: center">
       <div>
         <h1 class="app-page-title">会话数据</h1>
-        <div class="app-page-subtitle">查看、编辑和导出当前账号的本地会话历史</div>
+        <div class="app-page-subtitle">查看、编辑、导出和恢复当前账号的本地会话历史</div>
       </div>
       <v-spacer />
+      <v-btn v-if="selectedSessionId" variant="tonal" prepend-icon="mdi-file-upload-outline" class="mr-1" @click="exportSession">
+        导出当前会话
+      </v-btn>
+      <v-btn variant="tonal" prepend-icon="mdi-upload" class="mr-1" @click="openRestorePicker">导入备份</v-btn>
+      <v-btn v-if="selectedSessionId" variant="tonal" prepend-icon="mdi-delete-empty" color="error" @click="deleteSession">
+        删除当前会话
+      </v-btn>
       <v-btn variant="tonal" prepend-icon="mdi-refresh" @click="loadSessions">刷新</v-btn>
+      <input
+        ref="restoreFileInput"
+        type="file"
+        accept="application/json,.json"
+        class="d-none"
+        @change="onRestoreFile"
+      />
     </div>
 
     <v-row class="mt-2">
@@ -310,6 +476,17 @@ onMounted(() => {
         <v-card variant="outlined" class="h-full">
           <v-card-title class="d-flex align-center">
             <v-icon icon="mdi-message-text-outline" class="mr-2" color="primary" /> 对话线程
+            <v-spacer />
+            <v-btn
+              v-if="selectedTaskIds.length"
+              size="x-small"
+              variant="tonal"
+              color="error"
+              prepend-icon="mdi-delete"
+              @click="bulkDeleteConversations"
+            >
+              删除选中
+            </v-btn>
           </v-card-title>
           <v-card-text class="pa-2">
             <v-progress-linear v-if="loadingConversations" indeterminate color="primary" />
@@ -326,6 +503,14 @@ onMounted(() => {
                 :active="selectedTaskId === c.task_id"
                 @click="openConversation(c.task_id)"
               >
+                <template #prepend>
+                  <v-checkbox-btn
+                    :model-value="selectedTaskIds.includes(c.task_id)"
+                    density="compact"
+                    @update:model-value="toggleTaskSelection(c.task_id)"
+                    @click.stop
+                  />
+                </template>
                 <v-list-item-title class="text-body-2">{{ c.title }}</v-list-item-title>
                 <v-list-item-subtitle class="text-caption">
                   {{ c.messages }} 条消息 · {{ fmtTime(c.saved_at) }}
@@ -357,7 +542,7 @@ onMounted(() => {
             <template v-else-if="!conversation">
               <div class="text-caption text-center pa-6">暂无消息内容</div>
             </template>
-            <div v-else class="session-messages" style="max-height: calc(100vh - 260px); overflow-y: auto">
+            <div v-else class="session-messages" style="max-height: calc(100vh - 320px); overflow-y: auto">
               <div v-for="(msg, index) in conversation.messages" :key="index" class="message-row">
                 <div class="message-meta">
                   <v-chip size="x-small" :color="roleColor(msg.role)" variant="tonal">{{ roleLabel(msg.role) }}</v-chip>
@@ -367,23 +552,62 @@ onMounted(() => {
                   <span v-if="msg.message_id" class="text-caption" style="opacity: 0.55">消息 {{ msg.message_id }}</span>
                   <span class="text-caption" style="opacity: 0.55">{{ fmtTime(msg.time) }}</span>
                   <v-spacer />
-                  <v-btn
-                    size="x-small"
-                    variant="text"
-                    icon="mdi-delete"
-                    color="error"
-                    title="删除消息"
-                    @click="deleteMessage(index)"
-                  />
+                  <v-btn size="x-small" variant="text" icon="mdi-pencil" title="编辑消息" @click="openEditMessage(index)" />
+                  <v-btn size="x-small" variant="text" icon="mdi-delete" color="error" title="删除消息" @click="deleteMessage(index)" />
                 </div>
                 <div class="message-content">{{ msg.content }}</div>
               </div>
               <div v-if="!conversation.messages.length" class="text-caption text-center pa-6">该对话没有消息</div>
             </div>
+
+            <v-divider v-if="conversation" class="my-3" />
+
+            <v-form v-if="conversation" class="add-message-form" @submit.prevent="addMessage">
+              <div class="d-flex align-center gap-2">
+                <v-select
+                  v-model="newMessageRole"
+                  :items="[
+                    { title: '用户', value: 'user' },
+                    { title: '助手', value: 'assistant' },
+                    { title: '系统', value: 'system' },
+                  ]"
+                  density="compact"
+                  hide-details
+                  class="add-role"
+                />
+                <v-text-field
+                  v-model="newMessageContent"
+                  placeholder="新增消息内容"
+                  density="compact"
+                  hide-details
+                  class="add-content"
+                />
+                <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" type="submit" :disabled="!newMessageContent.trim()">
+                  添加
+                </v-btn>
+              </div>
+            </v-form>
           </v-card-text>
         </v-card>
       </v-col>
     </v-row>
+
+    <v-dialog v-model="editDialog" max-width="560">
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon icon="mdi-pencil" class="mr-2" color="primary" />
+          编辑消息
+        </v-card-title>
+        <v-card-text>
+          <v-textarea v-model="editContent" auto-grow rows="5" label="消息内容" />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="editDialog = false">取消</v-btn>
+          <v-btn color="primary" variant="tonal" @click="saveEditMessage">保存</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -417,5 +641,18 @@ onMounted(() => {
 .message-content {
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.add-message-form {
+  padding: 0 4px;
+}
+
+.add-role {
+  width: 120px;
+  flex: 0 0 auto;
+}
+
+.add-content {
+  flex: 1 1 auto;
 }
 </style>
