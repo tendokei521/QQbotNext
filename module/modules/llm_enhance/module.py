@@ -285,28 +285,6 @@ class Module(BaseModule):
             return "[" + ",".join(s.type for s in msg.segments) + "]"
         return ""
 
-    # ==================== 防抖 ====================
-
-    @llm_hook("pre_request", event_type="*", order=0)
-    async def debounce_pre_request(self, ctx: LlmContext):
-        """LLM 请求前进入请求池：只放行防抖窗口内的最后一条消息。"""
-        if not self.config.get("debounce_enable", True):
-            return
-
-        pool = ctx.runtime.llm_pipeline.pool
-        raw_debounce = self.config.get("debounce_seconds", 1.5)
-        debounce = float(raw_debounce) if raw_debounce is not None else 1.5
-        ok = await pool.wait_for_continue(ctx.job, debounce=debounce)
-        if not ok:
-            ctx.job.skip = True
-            return
-
-        if self.config.get("merge_messages", False):
-            texts = pool.take_pending_texts(ctx.job.group_key)
-            if texts:
-                separator = str(self.config.get("merge_separator", "\n") or "\n")
-                ctx.user_text = separator.join(texts)
-
     # ==================== 调试 ====================
 
     @llm_hook("pre_request", event_type="*", order=30)
