@@ -1,0 +1,1 @@
+.preset-grid[data-v-6e13b1b1]{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}.preset-card[data-v-6e13b1b1]{cursor:pointer;transition:border-color .15s ease,background-color .15s ease}.preset-card.is-active[data-v-6e13b1b1]{border-color:rgb(var(--v-theme-purple));background:rgba(var(--v-theme-purple),.08)}
