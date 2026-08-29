@@ -108,6 +108,16 @@ watch(
       </v-card-title>
       <v-card-text class="text-caption" style="opacity: 0.65">
         开启后，LLM 将获得调用 NapCat/OneBot API 的能力。请谨慎开启敏感管理工具。
+        <div class="mt-2">
+          <v-switch
+            :model-value="!!agent.draft.napcat_tools_debug"
+            label="NapCat 调试日志（完整记录请求/响应）"
+            color="warning"
+            density="compact"
+            hide-details
+            @update:model-value="(v: any) => agent.onChange('napcat_tools_debug', !!v)"
+          />
+        </div>
       </v-card-text>
     </v-card>
 
