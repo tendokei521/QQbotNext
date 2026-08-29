@@ -51,12 +51,12 @@ const folders = computed<LogFolder[]>(() => {
       files: a.files,
     }))
   return [
-    ...archiveFolders,
     {
       key: 'current',
       label: '当前轮次',
       files: list.value.current,
     },
+    ...archiveFolders,
   ]
 })
 
@@ -133,8 +133,8 @@ async function loadList() {
   try {
     const res = await http.get<ExportListResponse>('/api/logs/export/list')
     list.value = res.data
-    // 默认全部折叠，用户点开文件夹后再选择
-    expanded.value = {}
+    // 默认展开“当前轮次”，历史归档保持折叠
+    expanded.value = { current: true }
     selected.value = []
   } catch (err) {
     notify.push(errorMessage(err), 'error')
@@ -165,7 +165,13 @@ async function downloadZip() {
 watch(
   () => props.modelValue,
   (open) => {
-    if (open && !list.value.current.length && !list.value.archives.length) loadList()
+    if (!open) return
+    if (!list.value.current.length && !list.value.archives.length) {
+      loadList()
+    } else {
+      // 重复打开也默认展开当前轮次
+      expanded.value = { current: true }
+    }
   },
 )
 
