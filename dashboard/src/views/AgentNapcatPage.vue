@@ -99,7 +99,7 @@ watch(
 </script>
 
 <template>
-  <AgentSubPage title="NapCat 工具" subtitle="把 NapCat/OneBot API 暴露给 LLM 作为 function calling 工具" icon="mdi-robot-industrial" color="teal">
+  <AgentSubPage title="Napcat Tools" subtitle="把 NapCat/OneBot API 暴露给 LLM 作为 function calling 工具" icon="mdi-robot-industrial" color="teal">
     <v-card variant="outlined" class="mb-4">
       <v-card-title class="d-flex align-center">
         <v-icon icon="mdi-power" class="mr-2" color="teal" /> 总开关
