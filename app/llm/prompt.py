@@ -47,6 +47,7 @@ def build_messages(
     skills: list[str] | None = None,
     memory_text: str = "",
     message_meta_instruction: str | None = None,
+    current_user_info: str = "",
 ) -> list[dict]:
     """组装 LLM 消息列表。
 
@@ -60,6 +61,7 @@ def build_messages(
         skills: 模块技能 prompt 块列表（逐个追加为 system 消息）
         memory_text: 长期记忆文本块，为空则跳过（默认空 = 旧调用方零影响）
         message_meta_instruction: “发送者/正文”消歧说明文本；传入非空字符串时追加为 system 消息
+        current_user_info: 当前会话身份提示（如私聊对方 QQ），非空时追加为 system 消息
     """
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
 
@@ -68,6 +70,9 @@ def build_messages(
 
     if message_meta_instruction:
         messages.append({"role": "system", "content": message_meta_instruction})
+
+    if current_user_info:
+        messages.append({"role": "system", "content": current_user_info})
 
     for block in skills or []:
         messages.append({"role": "system", "content": block})
