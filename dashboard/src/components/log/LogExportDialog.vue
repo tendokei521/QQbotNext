@@ -38,6 +38,7 @@ const downloadingZip = ref(false)
 const list = ref<ExportListResponse>({ ok: true, logs_dir: '', current: [], archives: [] })
 const selected = ref<string[]>([])
 const expanded = ref<Record<string, boolean>>({})
+const searchQuery = ref('')
 
 const selectedCount = computed(() => selected.value.length)
 const hasSelection = computed(() => selected.value.length > 0)
@@ -58,6 +59,29 @@ const folders = computed<LogFolder[]>(() => {
     },
     ...archiveFolders,
   ]
+})
+
+const allFiles = computed<{ folder: LogFolder; file: LogFileInfo }[]>(() => {
+  const result: { folder: LogFolder; file: LogFileInfo }[] = []
+  for (const folder of folders.value) {
+    for (const file of folder.files) {
+      result.push({ folder, file })
+    }
+  }
+  return result
+})
+
+const filteredFolders = computed<LogFolder[]>(() => {
+  const query = searchQuery.value.trim().toLowerCase()
+  if (!query) return folders.value
+  return folders.value
+    .map((folder) => {
+      const files = folder.files.filter(
+        (f) => f.name.toLowerCase().includes(query) || folder.label.toLowerCase().includes(query),
+      )
+      return files.length ? { ...folder, files } : null
+    })
+    .filter((x): x is LogFolder => !!x)
 })
 
 function itemKey(folder: string, name: string): string {
@@ -117,6 +141,15 @@ function toggleFile(folder: string, name: string) {
 
 function folderSelectedAll(folder: LogFolder): boolean {
   return folder.files.length > 0 && folder.files.every((f) => hasFile(folder.key, f.name))
+}
+
+function selectAll() {
+  const keys = allFiles.value.map(({ folder, file }) => itemKey(folder.key, file.name))
+  selected.value = Array.from(new Set(keys))
+}
+
+function clearAll() {
+  selected.value = []
 }
 
 function toggleFolderAll(folder: LogFolder) {
@@ -202,8 +235,22 @@ onMounted(() => {
       <div class="log-export-body">
         <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-2" />
 
+        <div class="log-toolbar">
+          <v-text-field
+            v-model="searchQuery"
+            label="搜索日志文件或时间段"
+            prepend-inner-icon="mdi-magnify"
+            density="comfortable"
+            variant="outlined"
+            hide-details
+            class="log-search"
+          />
+          <v-btn size="small" variant="tonal" prepend-icon="mdi-select-all" @click="selectAll">全选所有</v-btn>
+          <v-btn size="small" variant="text" prepend-icon="mdi-select-off" @click="clearAll">清空</v-btn>
+        </div>
+
         <div class="folder-scroll">
-          <div v-for="folder in folders" :key="folder.key" class="folder-block">
+          <div v-for="folder in filteredFolders" :key="folder.key" class="folder-block">
             <div class="folder-row" @click="toggleFolder(folder.key)">
               <v-icon size="small" :icon="isExpanded(folder.key) ? 'mdi-chevron-down' : 'mdi-chevron-right'" />
               <span class="folder-label">{{ folder.label }}</span>
@@ -280,6 +327,19 @@ onMounted(() => {
   padding: 0 24px;
   display: flex;
   flex-direction: column;
+}
+
+.log-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+
+.log-search {
+  flex: 1 1 auto;
+  max-width: 320px;
 }
 
 .folder-scroll {

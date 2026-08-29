@@ -163,5 +163,17 @@ export const useAgentConfigStore = defineStore('agentConfig', {
       this.draft.provider_model_pool = [...this.poolModelIds]
       this.onChange('provider_model_pool', [...this.poolModelIds])
     },
+    applyConfig(config: Record<string, any>) {
+      this.clearDraft()
+      Object.assign(this.draft, config || {})
+      const storedPool = Array.isArray(this.draft.provider_model_pool) ? this.draft.provider_model_pool : []
+      const legacyPool = [
+        this.draft.provider_model_id,
+        ...(Array.isArray(this.draft.fallback_model_ids) ? this.draft.fallback_model_ids : []),
+      ].filter(Boolean)
+      this.poolModelIds = (storedPool.length ? storedPool : legacyPool).map(String)
+      this.draft.provider_model_pool = [...this.poolModelIds]
+      this.scheduleSave()
+    },
   },
 })

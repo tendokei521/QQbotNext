@@ -3,6 +3,9 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useBotsStore } from '@/stores/bots'
 import { useAgentConfigStore } from '@/stores/agentConfig'
+import AgentTemplateDialog from '@/components/agent/AgentTemplateDialog.vue'
+import AgentConfigSearchDialog from '@/components/agent/AgentConfigSearchDialog.vue'
+import AgentCopyConfigDialog from '@/components/agent/AgentCopyConfigDialog.vue'
 
 const bots = useBotsStore()
 const agent = useAgentConfigStore()
@@ -10,6 +13,9 @@ const router = useRouter()
 const loading = ref(false)
 
 const botId = computed(() => bots.currentBot?.bot_id ?? null)
+const templateDialog = ref(false)
+const searchDialog = ref(false)
+const copyDialog = ref(false)
 
 const pages = computed(() => [
   {
@@ -86,6 +92,18 @@ const pages = computed(() => [
   },
 ])
 
+const warnings = computed(() => {
+  const list: string[] = []
+  if (!agent.poolModelIds.length) list.push('尚未配置 Provider 模型，Agent 无法回复')
+  if (agent.draft.memory_enable && !agent.draft.experimental_long_term_memory) {
+    list.push('长期记忆已开启，但实验性长期记忆开关未开启')
+  }
+  if (agent.draft.knowledge_enable && !agent.draft.knowledge_embedding_model_id) {
+    list.push('知识库已开启，但未指定 Embedding 模型')
+  }
+  return list
+})
+
 async function ensureLoaded() {
   if (botId.value === null) {
     loading.value = true
@@ -124,10 +142,28 @@ onMounted(ensureLoaded)
     <template v-else>
       <v-progress-linear v-if="loading" indeterminate color="primary" />
 
+      <v-card v-if="warnings.length" variant="outlined" color="warning" class="mb-4">
+        <v-card-text class="d-flex flex-column gap-1">
+          <div v-for="w in warnings" :key="w" class="d-flex align-center gap-2">
+            <v-icon size="small" icon="mdi-alert-circle-outline" />
+            <span>{{ w }}</span>
+          </div>
+        </v-card-text>
+      </v-card>
+
       <v-card variant="outlined" class="mb-4">
         <v-card-title class="d-flex align-center">
           <v-icon icon="mdi-view-dashboard-outline" class="mr-2" color="primary" /> 配置入口
           <v-spacer />
+          <v-btn size="small" variant="tonal" prepend-icon="mdi-book-multiple" class="mr-2" @click="templateDialog = true">
+            配置模板
+          </v-btn>
+          <v-btn size="small" variant="tonal" prepend-icon="mdi-magnify" class="mr-2" @click="searchDialog = true">
+            搜索配置
+          </v-btn>
+          <v-btn size="small" variant="tonal" prepend-icon="mdi-content-copy" class="mr-2" @click="copyDialog = true">
+            复制配置
+          </v-btn>
           <v-btn size="small" variant="tonal" prepend-icon="mdi-content-save" :loading="agent.saveStatus === 'saving'" @click="agent.save()">
             保存配置
           </v-btn>
@@ -154,6 +190,10 @@ onMounted(ensureLoaded)
           </div>
         </v-card-text>
       </v-card>
+
+      <AgentTemplateDialog v-model="templateDialog" />
+      <AgentConfigSearchDialog v-model="searchDialog" />
+      <AgentCopyConfigDialog v-model="copyDialog" />
     </template>
   </div>
 </template>

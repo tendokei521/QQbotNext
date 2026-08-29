@@ -1,17 +1,34 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import http, { errorMessage } from '@/api/http'
 import ConfigForm from '@/components/config/ConfigForm.vue'
 import AgentSubPage from '@/components/agent/AgentSubPage.vue'
 import { useAgentConfigStore } from '@/stores/agentConfig'
 import { useBotsStore } from '@/stores/bots'
+import { useNotifyStore } from '@/stores/notify'
 import { filterSchemaByPage } from '@/utils/schema'
 
 const agent = useAgentConfigStore()
 const bots = useBotsStore()
+const notify = useNotifyStore()
 
 const schema = computed(() => filterSchemaByPage(agent.schema, 'model'))
 const poolDialog = ref(false)
 const pendingPoolModelId = ref('')
+const testingId = ref('')
+
+async function testModel(id: string) {
+  if (testingId.value) return
+  testingId.value = id
+  try {
+    const res = await http.post(`/api/provider-models/${id}/test`, null)
+    notify.push(res.data?.message || '模型连接正常', 'success')
+  } catch (err: any) {
+    notify.push(errorMessage(err), 'error')
+  } finally {
+    testingId.value = ''
+  }
+}
 
 const availablePoolModels = computed(() =>
   agent.providerModels.filter((m) => !agent.poolModelIds.includes(m.id)),
@@ -66,6 +83,15 @@ watch(
             <template #prepend><span class="pool-order">{{ i + 1 }}</span></template>
             <v-list-item-title>{{ poolLabel(id) }}</v-list-item-title>
             <template #append>
+              <v-btn
+                size="x-small"
+                variant="text"
+                prepend-icon="mdi-play"
+                :loading="testingId === id"
+                @click="testModel(id)"
+              >
+                测试
+              </v-btn>
               <v-btn size="x-small" variant="text" icon="mdi-arrow-up" :disabled="i === 0" @click="movePoolModel(i, -1)" />
               <v-btn size="x-small" variant="text" icon="mdi-arrow-down" :disabled="i === agent.poolModelIds.length - 1" @click="movePoolModel(i, 1)" />
               <v-btn size="x-small" variant="text" icon="mdi-close" color="error" @click="removePoolModel(i)" />

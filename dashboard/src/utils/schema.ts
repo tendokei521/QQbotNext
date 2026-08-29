@@ -4,7 +4,7 @@ function isGroupDef(def: any): boolean {
   return !!def && typeof def === 'object' && def.type === 'group'
 }
 
-function splitSchema(schema: Record<string, any>): { groups: Record<string, any>; items: Record<string, any> } {
+export function splitSchema(schema: Record<string, any>): { groups: Record<string, any>; items: Record<string, any> } {
   const raw = schema || {}
   if (raw.items && typeof raw.items === 'object' && (raw.groups || typeof raw.groups === 'object')) {
     return {
