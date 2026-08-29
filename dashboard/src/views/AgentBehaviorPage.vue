@@ -4,12 +4,11 @@ import ConfigForm from '@/components/config/ConfigForm.vue'
 import AgentSubPage from '@/components/agent/AgentSubPage.vue'
 import { useAgentConfigStore } from '@/stores/agentConfig'
 import { useBotsStore } from '@/stores/bots'
-import { filterSchemaByGroup } from '@/utils/schema'
+import { filterSchemaByPage } from '@/utils/schema'
 
 const agent = useAgentConfigStore()
 const bots = useBotsStore()
-
-const schema = computed(() => filterSchemaByGroup(agent.schema, 'group_memory'))
+const schema = computed(() => filterSchemaByPage(agent.schema, 'behavior'))
 
 onMounted(() => agent.load())
 watch(
@@ -19,10 +18,10 @@ watch(
 </script>
 
 <template>
-  <AgentSubPage title="Agent 长期记忆" subtitle="长期记忆与感知增强提示词细调（实验性）" icon="mdi-brain" color="warning">
+  <AgentSubPage title="对话行为" subtitle="用户信息感知、回复打断、触发与冷却" icon="mdi-account-voice" color="secondary">
     <v-card variant="outlined" class="mb-4">
       <v-card-title class="d-flex align-center">
-        <v-icon icon="mdi-brain" class="mr-2" color="warning" /> 长期记忆（实验性）
+        <v-icon icon="mdi-account-voice" class="mr-2" color="secondary" /> 对话行为
       </v-card-title>
       <v-card-text>
         <ConfigForm :module-name="'agent'" :schema="schema" :config="agent.draft" :bot-id="agent.botId" @change="agent.onChange" />

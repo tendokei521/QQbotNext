@@ -1,244 +1,102 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
-import http, { errorMessage } from '@/api/http'
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useBotsStore } from '@/stores/bots'
-import { useNotifyStore } from '@/stores/notify'
-import { useWebuiStore } from '@/stores/webui'
-import type { PermissionConfig } from '@/stores/modules'
-import ConfigForm from '@/components/config/ConfigForm.vue'
-import PermissionEditor from '@/components/config/PermissionEditor.vue'
-import AgentPanels from '@/components/agent/AgentPanels.vue'
-import { useAgentNavStore, type AgentNavSection } from '@/stores/agentNav'
-import { filterSchemaExcludeGroup } from '@/utils/schema'
+import { useAgentConfigStore } from '@/stores/agentConfig'
 
 const bots = useBotsStore()
-const notify = useNotifyStore()
-const webui = useWebuiStore()
-
-const botId = ref<number | null>(null)
-const showExperimental = computed(() => !!webui.config.experimental?.show_experimental)
-const enabled = ref(false)
-const schema = ref<Record<string, any>>({})
-const route = useRoute()
-const activeGroup = ref('')
-const agentNav = useAgentNavStore()
-
-function updateAgentNavSections() {
-  const sections: AgentNavSection[] = [
-    { to: '/agent?section=sec-permission', title: '响应范围控制' },
-    { to: '/agent?section=sec-models', title: 'Provider 模型池' },
-  ]
-  const groups = (schema.value?.groups || {}) as Record<string, any>
-  Object.entries(groups).forEach(([id, def]) => {
-    sections.push({ to: `/agent?section=group-${id}`, title: def?.label || id })
-  })
-  sections.push({ to: '/agent?section=sec-agent-panels', title: '定时任务 / 主动消息' })
-  agentNav.setSections(sections)
-}
-
-function scrollToSection(section: string) {
-  if (!section) return
-  if (section.startsWith('group-')) activeGroup.value = section.slice('group-'.length)
-  nextTick(() => {
-    const el = document.getElementById(section)
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  })
-}
-
-function handleSectionQuery() {
-  scrollToSection(String(route.query.section || ''))
-}
-
-watch(
-  () => route.query.section,
-  () => handleSectionQuery(),
-)
-const providerModels = ref<{ id: string; preset_id: string; preset_name?: string; model: string }[]>([])
-const draft = reactive<Record<string, any>>({})
-const poolModelIds = ref<string[]>([])
-const poolDialog = ref(false)
-const pendingPoolModelId = ref('')
-const availablePoolModels = computed(() => providerModels.value.filter((m) => !poolModelIds.value.includes(m.id)))
-
-function poolLabel(id: string): string {
-  const m = providerModels.value.find((x) => x.id === id)
-  return m ? `${m.preset_name || m.preset_id} / ${m.model}` : id
-}
-
-function syncPool() {
-  draft.provider_model_pool = [...poolModelIds.value]
-  onChange('provider_model_pool', [...poolModelIds.value])
-}
-
-function addPoolModel() {
-  if (!pendingPoolModelId.value || poolModelIds.value.includes(pendingPoolModelId.value)) return
-  poolModelIds.value.push(pendingPoolModelId.value)
-  syncPool()
-  poolDialog.value = false
-  pendingPoolModelId.value = ''
-}
-
-function removePoolModel(index: number) {
-  poolModelIds.value.splice(index, 1)
-  syncPool()
-}
-
-function movePoolModel(index: number, delta: number) {
-  const target = index + delta
-  if (target < 0 || target >= poolModelIds.value.length) return
-  const [moved] = poolModelIds.value.splice(index, 1)
-  poolModelIds.value.splice(target, 0, moved)
-  syncPool()
-}
-const permission = ref<PermissionConfig>({
-  group_mode: 'blacklist',
-  group_list: [],
-  user_mode: 'blacklist',
-  user_list: [],
-})
+const agent = useAgentConfigStore()
+const router = useRouter()
 const loading = ref(false)
-const saveStatus = ref<'clean' | 'dirty' | 'saving' | 'error'>('clean')
-let autosaveTimer: number | null = null
-let dirtyFlag = false
-// 待保存的目标 bot：自动保存触发时确定，避免切换到新 Bot 后把旧草稿写进新 Bot
-let pendingBotId: number | null = null
-let editSeq = 0
 
-async function load() {
-  // 先取消挂起的自动保存：切换账号/重新加载时丢弃未保存编辑，防止跨 Bot 误写
-  if (autosaveTimer) {
-    clearTimeout(autosaveTimer)
-    autosaveTimer = null
-  }
-  // 刷新/首次进入时机器人列表可能还没加载：先补齐并恢复上次选择，避免误报“请先选择账号”
-  if (!bots.bots.length) {
-    try {
-      await bots.fetchBots()
-    } catch {
-      /* 列表加载失败时走下面的空态 */
-    }
-  }
-  if (bots.currentIndex === null && bots.bots.length) {
-    bots.restoreSelection()
-  }
-  botId.value = bots.currentBot?.bot_id ?? null
+const botId = computed(() => bots.currentBot?.bot_id ?? null)
+
+const pages = computed(() => [
+  {
+    to: '/agent/basic',
+    title: '基础配置',
+    icon: 'mdi-tune-variant',
+    desc: '提示词、群/私聊开关、历史与触发',
+    status: '已配置',
+    color: 'primary',
+  },
+  {
+    to: '/agent/model',
+    title: '模型',
+    icon: 'mdi-api',
+    desc: 'Provider 模型池与调用参数',
+    status: agent.poolModelIds.length ? `${agent.poolModelIds.length} 个模型` : '未配置模型',
+    color: 'info',
+  },
+  {
+    to: '/agent/behavior',
+    title: '对话行为',
+    icon: 'mdi-account-voice',
+    desc: '用户信息感知、回复打断、冷却',
+    status: '可调',
+    color: 'secondary',
+  },
+  {
+    to: '/agent/stream',
+    title: '流式回复',
+    icon: 'mdi-wave',
+    desc: '流式开关、发送频率与预设',
+    status: agent.draft.stream_output ? '开启' : '关闭',
+    color: 'purple',
+  },
+  {
+    to: '/agent/permission',
+    title: '权限',
+    icon: 'mdi-shield-account-outline',
+    desc: '黑白名单与角色权限',
+    status: agent.permission.group_mode === 'blacklist' ? '黑名单' : '白名单',
+    color: 'success',
+  },
+  {
+    to: '/agent/memory',
+    title: '长期记忆',
+    icon: 'mdi-brain',
+    desc: '记忆开关、召回与可信度',
+    status: agent.draft.memory_enable ? '开启' : '关闭',
+    color: 'warning',
+  },
+  {
+    to: '/agent/knowledge',
+    title: '知识库',
+    icon: 'mdi-book-open-variant',
+    desc: '知识库检索与 Embedding 模型',
+    status: agent.draft.knowledge_enable ? '开启' : '关闭',
+    color: 'deep-purple',
+  },
+  {
+    to: '/agent/mcp',
+    title: 'MCP 工具',
+    icon: 'mdi-server-network',
+    desc: 'MCP stdio server 配置',
+    status: agent.draft.mcp_servers ? '已配置' : '未配置',
+    color: 'blue-grey',
+  },
+  {
+    to: '/agent/panels',
+    title: '定时任务 / 主动消息',
+    icon: 'mdi-clock-outline',
+    desc: '定时触发与主动发言',
+    status: '管理',
+    color: 'brown',
+  },
+])
+
+async function ensureLoaded() {
   if (botId.value === null) {
-    return
-  }
-  loading.value = true
-  try {
-    const res = await http.get<{
-      ok: boolean
-      bot_id: number | null
-      enabled: boolean
-      permission: PermissionConfig
-      config: Record<string, any>
-      schema: Record<string, any>
-      provider_presets: { id: string; name: string }[]
-      provider_models: { id: string; preset_id: string; preset_name?: string; model: string }[]
-    }>('/api/agent/config', { params: { bot_id: botId.value } })
-    const data = res.data
-    enabled.value = !!data.enabled
-    schema.value = filterSchemaExcludeGroup(data.schema || {}, 'group_memory')
-    if (!showExperimental.value) {
-      // 知识库 / MCP 属于实验性配置：未开启“显示实验性选项”时不显示
-      schema.value = filterSchemaExcludeGroup(schema.value, 'group_knowledge')
-      schema.value = filterSchemaExcludeGroup(schema.value, 'group_mcp')
-    }
-    updateAgentNavSections()
-    providerModels.value = data.provider_models || []
-    Object.keys(draft).forEach((k) => delete draft[k])
-    Object.assign(draft, data.config || {})
-    const storedPool = Array.isArray(draft.provider_model_pool) ? draft.provider_model_pool : []
-    const legacyPool = [
-      draft.provider_model_id,
-      ...(Array.isArray(draft.fallback_model_ids) ? draft.fallback_model_ids : []),
-    ].filter(Boolean)
-    poolModelIds.value = (storedPool.length ? storedPool : legacyPool).map(String)
-    draft.provider_model_pool = [...poolModelIds.value]
-    permission.value = {
-      group_mode: data.permission?.group_mode || 'blacklist',
-      group_list: [...(data.permission?.group_list || [])],
-      user_mode: data.permission?.user_mode || 'blacklist',
-      user_list: [...(data.permission?.user_list || [])],
-    }
-    saveStatus.value = 'clean'
-    dirtyFlag = false
-    handleSectionQuery()
-  } catch (err) {
-    notify.push(errorMessage(err), 'error')
-  } finally {
+    loading.value = true
+    await bots.fetchBots()
+    if (bots.currentIndex === null && bots.bots.length) bots.restoreSelection()
     loading.value = false
   }
+  await agent.load()
 }
 
-function scheduleAgentSave() {
-  pendingBotId = botId.value
-  dirtyFlag = true
-  editSeq += 1
-  saveStatus.value = 'dirty'
-  if (autosaveTimer) clearTimeout(autosaveTimer)
-  autosaveTimer = window.setTimeout(doSave, 2000)
-}
-
-function onChange(key: string, value: any) {
-  draft[key] = value
-  scheduleAgentSave()
-}
-
-function onPermissionChange(v: PermissionConfig) {
-  permission.value = v
-  scheduleAgentSave()
-}
-
-function onEnabledChange(v: boolean | null) {
-  enabled.value = !!v
-  scheduleAgentSave()
-}
-
-async function doSave() {
-  if (autosaveTimer) {
-    clearTimeout(autosaveTimer)
-    autosaveTimer = null
-  }
-  if (!dirtyFlag) return
-  const targetBotId = pendingBotId ?? botId.value
-  const snapshotSeq = editSeq
-  pendingBotId = null
-  saveStatus.value = 'saving'
-  try {
-    await http.post(
-      '/api/agent/config',
-      { config: { ...draft }, permission: permission.value, enabled: enabled.value },
-      { params: { bot_id: targetBotId } },
-    )
-    // 已切换到其它 Bot：该保存属于旧 Bot，不推进当前编辑状态（load 会重建草稿）
-    if (targetBotId !== botId.value) return
-    if (editSeq !== snapshotSeq) return // 保存期间又有新编辑：保留 dirty，交由下一次保存
-    dirtyFlag = false
-    saveStatus.value = 'clean'
-    notify.push('Agent 配置已保存', 'success')
-  } catch (err) {
-    if (editSeq !== snapshotSeq) return
-    saveStatus.value = 'error'
-    notify.push(errorMessage(err), 'error')
-  }
-}
-
-watch(
-  () => bots.currentBot?.bot_id,
-  () => load(),
-)
-
-onMounted(load)
-
-onUnmounted(() => {
-  if (autosaveTimer) {
-    clearTimeout(autosaveTimer)
-    autosaveTimer = null
-  }
-})
+onMounted(ensureLoaded)
 </script>
 
 <template>
@@ -247,130 +105,75 @@ onUnmounted(() => {
       <div class="d-flex align-center gap-2 flex-wrap">
         <h1 class="app-page-title">Agent 面板</h1>
         <v-chip size="small" variant="tonal" color="primary">LLM · 框架级</v-chip>
-        <v-chip v-if="saveStatus === 'saving'" size="small" color="primary" variant="flat">
+        <v-chip v-if="agent.saveStatus === 'saving'" size="small" color="primary" variant="flat">
           <v-progress-circular size="12" indeterminate class="mr-1" /> 保存中…
         </v-chip>
-        <v-chip v-else-if="saveStatus === 'error'" size="small" color="error" variant="flat">保存失败</v-chip>
-        <v-chip v-else-if="saveStatus === 'dirty'" size="small" color="warning" variant="flat">未保存</v-chip>
+        <v-chip v-else-if="agent.saveStatus === 'error'" size="small" color="error" variant="flat">保存失败</v-chip>
+        <v-chip v-else-if="agent.saveStatus === 'dirty'" size="small" color="warning" variant="flat">未保存</v-chip>
       </div>
-      <div class="d-flex align-center gap-3">
-        <v-switch :model-value="enabled" color="primary" label="启用 Agent" density="compact" hide-details @update:model-value="onEnabledChange" />
-      </div>
+      <v-switch v-model="agent.enabled" color="primary" label="启用 Agent" density="compact" hide-details @update:model-value="(v: any) => agent.onEnabledChange(v)" />
     </div>
     <div class="app-page-subtitle">框架级 LLM Agent：配置、权限、定时任务与主动消息</div>
 
     <div v-if="botId === null" class="empty-tip">
       <v-icon icon="mdi-robot-off-outline" size="56" color="rgba(var(--v-theme-on-surface), 0.3)" />
       <div>请先在顶栏选择并连接一个 Bot，再配置 Agent</div>
-      <v-btn variant="tonal" prepend-icon="mdi-refresh" class="mt-2" @click="load">重试</v-btn>
+      <v-btn variant="tonal" prepend-icon="mdi-refresh" class="mt-2" @click="ensureLoaded">重试</v-btn>
     </div>
 
     <template v-else>
       <v-progress-linear v-if="loading" indeterminate color="primary" />
 
-      <v-card id="sec-permission" variant="outlined" class="mb-4">
-          <v-card-title class="d-flex align-center">
-            <v-icon icon="mdi-shield-account-outline" class="mr-2" color="primary" /> 响应范围控制
-          </v-card-title>
-          <v-card-text>
-            <PermissionEditor :model-value="permission" @update:model-value="onPermissionChange" />
-          </v-card-text>
-        </v-card>
-
-        <v-card id="sec-config" variant="outlined" class="mb-4">
-          <v-card-title class="d-flex align-center">
-            <v-icon icon="mdi-cogs" class="mr-2" color="primary" /> Agent 配置
-            <v-spacer />
-            <v-chip
-              v-if="poolModelIds.length"
-              size="small"
+      <v-card variant="outlined" class="mb-4">
+        <v-card-title class="d-flex align-center">
+          <v-icon icon="mdi-view-dashboard-outline" class="mr-2" color="primary" /> 配置入口
+          <v-spacer />
+          <v-btn size="small" variant="tonal" prepend-icon="mdi-content-save" :loading="agent.saveStatus === 'saving'" @click="agent.save()">
+            保存配置
+          </v-btn>
+        </v-card-title>
+        <v-card-text>
+          <div class="agent-grid">
+            <v-card
+              v-for="p in pages"
+              :key="p.to"
               variant="tonal"
-              color="primary"
-              class="mr-1"
+              class="agent-card"
+              :color="p.color"
+              @click="router.push(p.to)"
             >
-              {{ poolModelIds.length }} 个模型 · 按顺序请求
-            </v-chip>
-            <v-btn size="small" variant="tonal" prepend-icon="mdi-api" class="mr-1" @click="$router.push('/provider-presets')">
-              管理预设
-            </v-btn>
-            <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-content-save" :loading="saveStatus === 'saving'" @click="doSave">
-              保存配置
-            </v-btn>
-          </v-card-title>
-          <v-card-text>
-            <div id="sec-models" class="pool-block mb-4">
-              <div class="pool-head d-flex align-center mb-1">
-                <v-icon icon="mdi-format-list-numbered" class="mr-1" color="primary" size="small" />
-                <span class="font-weight-medium">Provider 模型（按顺序请求，从上到下依次尝试）</span>
-                <v-spacer />
-                <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-plus" @click="pendingPoolModelId = ''; poolDialog = true">
-                  添加模型
-                </v-btn>
-              </div>
-              <v-list v-if="poolModelIds.length" density="compact">
-                <v-list-item v-for="(id, i) in poolModelIds" :key="id">
-                  <template #prepend>
-                    <span class="pool-order">{{ i + 1 }}</span>
-                  </template>
-                  <v-list-item-title>{{ poolLabel(id) }}</v-list-item-title>
-                  <template #append>
-                    <v-btn size="x-small" variant="text" icon="mdi-arrow-up" :disabled="i === 0" @click="movePoolModel(i, -1)" />
-                    <v-btn size="x-small" variant="text" icon="mdi-arrow-down" :disabled="i === poolModelIds.length - 1" @click="movePoolModel(i, 1)" />
-                    <v-btn size="x-small" variant="text" icon="mdi-close" color="error" @click="removePoolModel(i)" />
-                  </template>
-                </v-list-item>
-              </v-list>
-              <div v-else class="text-caption text-center pa-4" style="color: rgba(var(--v-theme-on-surface), 0.45)">
-                尚未配置模型，请添加一个 Provider 模型
-              </div>
-            </div>
-
-            <v-divider class="mb-4" />
-
-            <ConfigForm
-              :module-name="'agent'"
-              :schema="schema"
-              :config="draft"
-              :bot-id="botId"
-              :active-group="activeGroup"
-              @change="onChange"
-            />
-          </v-card-text>
-        </v-card>
-
-        <div id="sec-agent-panels">
-          <AgentPanels :bot-id="botId" />
-        </div>
-
-      <v-dialog v-model="poolDialog" max-width="420">
-        <v-card>
-          <v-card-title class="d-flex align-center">
-            <v-icon icon="mdi-plus" class="mr-2" color="primary" /> 添加 Provider 模型
-          </v-card-title>
-          <v-card-text>
-            <v-select
-              v-model="pendingPoolModelId"
-              :items="availablePoolModels.map((m) => ({ title: `${m.preset_name || m.preset_id} / ${m.model}`, value: m.id }))"
-              label="选择模型"
-              density="comfortable"
-              hide-details
-            />
-            <div v-if="!availablePoolModels.length" class="text-caption mt-2" style="color: rgba(var(--v-theme-on-surface), 0.55)">
-              没有可添加的模型，请先到「Provider 预设」页配置连接与模型
-            </div>
-          </v-card-text>
-          <v-card-actions>
-            <v-spacer />
-            <v-btn variant="text" @click="poolDialog = false">取消</v-btn>
-            <v-btn color="primary" variant="tonal" :disabled="!pendingPoolModelId" @click="addPoolModel">添加</v-btn>
-          </v-card-actions>
-        </v-card>
-      </v-dialog>
+              <v-card-text class="d-flex align-center">
+                <v-icon :icon="p.icon" size="30" class="mr-3" />
+                <div>
+                  <div class="font-weight-medium">{{ p.title }}</div>
+                  <div class="text-caption" style="opacity: 0.75">{{ p.desc }}</div>
+                  <v-chip size="x-small" variant="tonal" class="mt-1">{{ p.status }}</v-chip>
+                </div>
+              </v-card-text>
+            </v-card>
+          </div>
+        </v-card-text>
+      </v-card>
     </template>
   </div>
 </template>
 
 <style scoped>
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.agent-card {
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.agent-card:hover {
+  transform: translateY(-2px);
+}
+
 .empty-tip {
   display: flex;
   flex-direction: column;
@@ -378,27 +181,5 @@ onUnmounted(() => {
   gap: 10px;
   padding: 80px 0;
   color: rgba(var(--v-theme-on-surface), 0.45);
-  font-size: 14px;
-}
-
-.pool-block {
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-  border-radius: 10px;
-  padding: 8px 10px;
-  background: rgba(var(--v-theme-on-surface), 0.015);
-}
-
-.pool-order {
-  width: 22px;
-  height: 22px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  background: rgba(var(--v-theme-primary), 0.12);
-  color: rgb(var(--v-theme-primary));
-  font-size: 12px;
-  font-weight: 600;
-  margin-right: 10px;
 }
 </style>

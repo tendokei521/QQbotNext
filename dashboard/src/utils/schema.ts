@@ -58,3 +58,45 @@ export function filterSchemaExcludeGroup(
   })
   return rebuildSchema(nextGroups, nextItems)
 }
+
+/** 按页面（page 元数据）过滤 schema：只保留指定页面的字段及其所在分组。 */
+export function filterSchemaByPage(
+  schema: Record<string, any>,
+  page: string,
+): Record<string, any> {
+  const { groups, items } = splitSchema(schema)
+  const nextGroups: Record<string, any> = {}
+  const nextItems: Record<string, any> = {}
+  const usedGroups = new Set<string>()
+  Object.entries(items).forEach(([key, def]: [string, any]) => {
+    if (!def || typeof def !== 'object') return
+    if (def.page !== page) return
+    nextItems[key] = def
+    if (def.group) usedGroups.add(String(def.group))
+  })
+  Object.entries(groups).forEach(([key, def]) => {
+    if (usedGroups.has(key)) nextGroups[key] = def
+  })
+  return rebuildSchema(nextGroups, nextItems)
+}
+
+/** 按重要性过滤：basic|advanced|expert，可配合 page 使用。 */
+export function filterSchemaByImportance(
+  schema: Record<string, any>,
+  importance: string,
+): Record<string, any> {
+  const { groups, items } = splitSchema(schema)
+  const nextGroups: Record<string, any> = {}
+  const nextItems: Record<string, any> = {}
+  const usedGroups = new Set<string>()
+  Object.entries(items).forEach(([key, def]: [string, any]) => {
+    if (!def || typeof def !== 'object') return
+    if (def.importance !== importance) return
+    nextItems[key] = def
+    if (def.group) usedGroups.add(String(def.group))
+  })
+  Object.entries(groups).forEach(([key, def]) => {
+    if (usedGroups.has(key)) nextGroups[key] = def
+  })
+  return rebuildSchema(nextGroups, nextItems)
+}

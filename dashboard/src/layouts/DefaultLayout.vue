@@ -5,7 +5,6 @@ import { useThemeStore } from '@/stores/theme'
 import { useBotsStore, type BotStatus } from '@/stores/bots'
 import { useWebuiStore } from '@/stores/webui'
 import { useNotifyStore } from '@/stores/notify'
-import { useAgentNavStore } from '@/stores/agentNav'
 import { connectSocket } from '@/api/socket'
 import { errorMessage } from '@/api/http'
 import MultiGroupDialog from '@/components/MultiGroupDialog.vue'
@@ -14,7 +13,6 @@ const themeStore = useThemeStore()
 const bots = useBotsStore()
 const webui = useWebuiStore()
 const notify = useNotifyStore()
-const agentNav = useAgentNavStore()
 const route = useRoute()
 
 const drawer = ref(false)
@@ -55,13 +53,18 @@ interface NavItem {
 
 const navItems = computed<NavItem[]>(() => {
   const showExperimental = !!webui.config.experimental?.show_experimental
-  const agentChildren: NavChild[] = agentNav.sections.length
-    ? agentNav.sections.map((s) => ({ to: s.to, title: s.title }))
-    : [
-        { to: '/agent?section=sec-permission', title: '响应范围控制' },
-        { to: '/agent?section=sec-models', title: 'Provider 模型池' },
-        { to: '/agent?section=sec-agent-panels', title: '定时任务 / 主动消息' },
-      ]
+  const agentChildren: NavChild[] = [
+    { to: '/agent', title: '概览' },
+    { to: '/agent/basic', title: '基础配置' },
+    { to: '/agent/model', title: '模型' },
+    { to: '/agent/behavior', title: '对话行为' },
+    { to: '/agent/stream', title: '流式回复' },
+    { to: '/agent/permission', title: '权限' },
+    { to: '/agent/memory', title: '长期记忆' },
+    { to: '/agent/knowledge', title: '知识库' },
+    { to: '/agent/mcp', title: 'MCP 工具' },
+    { to: '/agent/panels', title: '定时任务 / 主动消息' },
+  ]
   // 长期记忆虽标记为实验性，但作为常驻入口保留
   agentChildren.push({ to: '/agent/memory', title: 'Agent 长期记忆' })
   const items: NavItem[] = [
