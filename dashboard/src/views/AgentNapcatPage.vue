@@ -15,7 +15,18 @@ interface NapCatTool {
   risk: 'read' | 'send' | 'admin'
   permission: string
   scopes: string[]
+  base_permission: string
+  base_scopes: string[]
+  sensitivity: 'normal' | 'high' | 'critical'
   enabled: boolean
+  blocked: boolean
+  blocked_reason: string
+  warning: string
+}
+
+interface ToolOverride {
+  permission?: string
+  scopes?: string[]
 }
 
 const agent = useAgentConfigStore()
@@ -34,6 +45,36 @@ const enabled = computed<boolean>({
 
 const denied = computed<string[]>(() => Array.isArray(agent.draft.napcat_tools_denied) ? agent.draft.napcat_tools_denied : [])
 const allowed = computed<string[]>(() => Array.isArray(agent.draft.napcat_tools_allowed) ? agent.draft.napcat_tools_allowed : [])
+const overrides = computed<Record<string, ToolOverride>>(() => agent.draft.napcat_tool_overrides || {})
+
+function toolPermission(tool: NapCatTool): string {
+  return overrides.value[tool.name]?.permission || tool.base_permission || tool.permission
+}
+
+function toolScopes(tool: NapCatTool): string[] {
+  return overrides.value[tool.name]?.scopes || tool.base_scopes || tool.scopes
+}
+
+function updateOverride(tool: NapCatTool, partial: ToolOverride) {
+  const current = overrides.value[tool.name] || {}
+  const next = { ...overrides.value, [tool.name]: { ...current, ...partial } }
+  agent.onChange('napcat_tool_overrides', next)
+}
+
+function setToolPermission(tool: NapCatTool, permission: string) {
+  updateOverride(tool, { permission })
+}
+
+function toggleToolScope(tool: NapCatTool, scope: string) {
+  const current = toolScopes(tool)
+  const scopes = current.includes(scope) ? current.filter((s) => s !== scope) : [...current, scope]
+  updateOverride(tool, { scopes })
+}
+
+function isSensitiveWide(tool: NapCatTool): boolean {
+  if (!['high', 'critical'].includes(tool.sensitivity)) return false
+  return ['everyone', 'member'].includes(toolPermission(tool))
+}
 
 function isToolOn(name: string): boolean {
   if (denied.value.includes(name)) return false
@@ -56,6 +97,7 @@ function toggleTool(name: string) {
 function resetToggles() {
   agent.onChange('napcat_tools_denied', [])
   agent.onChange('napcat_tools_allowed', [])
+  agent.onChange('napcat_tool_overrides', {})
 }
 
 function riskColor(risk: string): string {
@@ -63,7 +105,11 @@ function riskColor(risk: string): string {
 }
 
 function permissionLabel(permission: string): string {
-  return permission === 'group_admin' ? '群管理' : permission === 'group_owner' ? '群主' : permission === 'owner' ? 'Bot拥有者' : '成员'
+  if (permission === 'everyone') return '所有人'
+  if (permission === 'group_admin') return '群管理'
+  if (permission === 'group_owner') return '群主'
+  if (permission === 'owner') return 'Bot拥有者'
+  return '成员'
 }
 
 function riskLabel(risk: string): string {
@@ -151,6 +197,45 @@ watch(
                 @update:model-value="toggleTool(tool.name)"
               />
             </div>
+            <div class="tool-policy" :class="{ 'is-disabled': !enabled }">
+              <v-select
+                :model-value="toolPermission(tool)"
+                :disabled="!enabled"
+                :items="[
+                  { title: '所有人', value: 'everyone' },
+                  { title: '成员及以上', value: 'member' },
+                  { title: '群管理及以上', value: 'group_admin' },
+                  { title: '群主', value: 'group_owner' },
+                  { title: 'Bot拥有者', value: 'owner' },
+                ]"
+                label="触发权限"
+                variant="outlined"
+                density="compact"
+                hide-details
+                @update:model-value="(v: any) => setToolPermission(tool, v)"
+              />
+              <div class="scope-check">
+                <v-checkbox
+                  :model-value="toolScopes(tool).includes('group')"
+                  :disabled="!enabled"
+                  label="群聊"
+                  density="compact"
+                  hide-details
+                  @update:model-value="toggleToolScope(tool, 'group')"
+                />
+                <v-checkbox
+                  :model-value="toolScopes(tool).includes('private')"
+                  :disabled="!enabled"
+                  label="私聊"
+                  density="compact"
+                  hide-details
+                  @update:model-value="toggleToolScope(tool, 'private')"
+                />
+              </div>
+              <v-alert v-if="isSensitiveWide(tool)" type="warning" variant="tonal" density="compact" class="mt-2">
+                ⚠️ {{ tool.name }} 是高/极高敏感工具，默认权限为 {{ permissionLabel(tool.base_permission) }}，当前放宽为 {{ permissionLabel(toolPermission(tool)) }}。
+              </v-alert>
+            </div>
             <div v-if="detailKey === tool.name" class="tool-detail">
               <div class="text-caption mb-1">参数 Schema</div>
               <pre class="tool-pre">{{ JSON.stringify(tool.parameters, null, 2) }}</pre>
@@ -217,6 +302,25 @@ watch(
 
 .tool-meta {
   align-items: center;
+}
+
+.tool-policy {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(var(--v-theme-on-surface), 0.1);
+}
+
+.tool-policy.is-disabled {
+  opacity: 0.55;
+}
+
+.scope-check {
+  display: flex;
+  gap: 8px;
 }
 
 .tool-detail {
