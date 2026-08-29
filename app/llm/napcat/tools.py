@@ -32,11 +32,24 @@ async def _handler(runtime, tool: dict, ctx: ToolContext | None, args: dict) -> 
     if bot is None:
         return "error: 当前上下文无可用 Bot"
     name = str(tool.get("name", ""))
+    debug = False
+    try:
+        debug = bool(getattr(runtime, "config", None).get("napcat_tools_debug", False))
+    except Exception:
+        pass
+    if debug:
+        logger.add_info("NapCatTool").info(
+            f"[NapCatDebug] 请求 {name} args={json.dumps(args, ensure_ascii=False)}"
+        )
     try:
         response = await bot.call_api(name, args)
     except Exception as e:
         logger.add_info("NapCatTool").warning(f"[NapCat] {name} 执行异常: {e}")
         return f"error: {name} 执行异常: {e}"
+    if debug:
+        logger.add_info("NapCatTool").info(
+            f"[NapCatDebug] 响应 {name} response={json.dumps(response, ensure_ascii=False, default=str)}"
+        )
     result = _format_result(response, name)
     max_len = 2000
     try:

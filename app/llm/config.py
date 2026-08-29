@@ -133,6 +133,7 @@ DEFAULT_LLM_CONFIG: dict = {
     "napcat_tools_allowed": [],        # 空=全部；非空=只允许白名单
     "napcat_tools_denied": [],         # 黑名单（优先级高于白名单）
     "napcat_tools_max_result": 2000,   # 返回结果截断长度
+    "napcat_tools_debug": False,       # 调试：完整记录 NapCat 请求与响应
 }
 
 # 框架级 Agent 配置/权限存储的 module_name

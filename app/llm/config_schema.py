@@ -438,6 +438,10 @@ SCHEMA = {
         "type": "number", "label": "返回结果截断长度", "description": "API 返回内容超过该长度后截断，防止撑爆上下文",
         "default": 2000, "min": 100, "max": 20000, "group": "group_napcat",
     },
+    "napcat_tools_debug": {
+        "type": "boolean", "label": "NapCat 调试日志", "description": "开启后完整记录每个 NapCat 工具调用的请求参数与响应内容",
+        "default": False, "group": "group_napcat",
+    },
 
     # ==================== 感知增强提示词细调（实验性） ====================
     "meta_sender_style": {
