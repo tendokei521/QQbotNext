@@ -75,6 +75,8 @@ function selectedItems() {
     return {
       // 前端“当前轮次”用 current 展示，后端用空字符串表示当前目录
       folder: item.folder === 'current' ? '' : item.folder,
+      // 同时提供 file（后端规范字段）与 name（兼容旧逻辑）
+      file: item.name,
       name: item.name,
     }
   })
@@ -228,11 +230,13 @@ onMounted(() => {
                   <span class="file-name">{{ f.name }}</span>
                   <span class="file-meta">{{ fmtSize(f.size) }} · {{ fmtTime(f.mtime) }}</span>
                 </div>
-                <v-checkbox-btn
-                  :model-value="hasFile(folder.key, f.name)"
-                  color="primary"
-                  @update:model-value="toggleFile(folder.key, f.name)"
-                />
+                <div class="checkbox-side">
+                  <v-checkbox-btn
+                    :model-value="hasFile(folder.key, f.name)"
+                    color="primary"
+                    @update:model-value="toggleFile(folder.key, f.name)"
+                  />
+                </div>
               </div>
               <div v-if="!folder.files.length" class="empty-files">
                 该时段暂无日志文件
@@ -329,8 +333,11 @@ onMounted(() => {
   background: rgba(var(--v-theme-primary), 0.04);
 }
 
-.file-row :deep(.v-checkbox-btn) {
+.checkbox-side {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .file-info {
