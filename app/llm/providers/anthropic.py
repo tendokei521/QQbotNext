@@ -67,6 +67,18 @@ def _to_anthropic_tools(tools: list[dict] | None) -> list[dict]:
     return result
 
 
+def _tool_use_blocks(blocks: list[dict]) -> list[dict]:
+    result = []
+    for b in blocks or []:
+        if isinstance(b, dict) and b.get("type") == "tool_use":
+            result.append({
+                "id": str(b.get("id", "")),
+                "name": str(b.get("name", "")),
+                "input": b.get("input", {}) or {},
+            })
+    return result
+
+
 class AnthropicProvider(BaseProvider):
     name = "anthropic"
     alias_names = ("anthropic", "claude")
@@ -105,50 +117,94 @@ class AnthropicProvider(BaseProvider):
         tool_executor=None,
         max_tool_rounds: int = 5,
     ) -> LLMResponse:
+        from app.llm.tool_loop import normalize_and_execute_tool_calls
+
         model = model or self.config.get("model", "claude-3-5-sonnet-20241022")
         system, chat_messages = _normalize_messages(messages)
-        payload: dict = {
-            "model": model,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "messages": chat_messages,
-        }
-        if system:
-            payload["system"] = system
         anth_tools = _to_anthropic_tools(tools)
-        if anth_tools:
-            payload["tools"] = anth_tools
+        tool_results: list[dict] = []
 
         if not self.api_key:
             return LLMResponse(text="", raw=None)
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self._endpoint(),
-                    headers=self._headers(),
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=timeout),
-                ) as resp:
-                    if resp.status != 200:
-                        body = await resp.text()
-                        logger.add_info("Anthropic").error(
-                            f"Anthropic 请求失败 HTTP {resp.status}: {body[:200]}"
-                        )
-                        return LLMResponse(text="", raw=None)
-                    data = await resp.json()
-        except Exception as e:
-            logger.add_info("Anthropic").error(f"Anthropic 请求异常: {format_llm_error(e)}")
-            return LLMResponse(text="", raw=None)
+        for _round in range(max_tool_rounds):
+            payload: dict = {
+                "model": model,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "messages": chat_messages,
+            }
+            if system:
+                payload["system"] = system
+            if anth_tools:
+                payload["tools"] = anth_tools
 
-        content_blocks = data.get("content", []) or []
-        text = "".join(
-            str(block.get("text", ""))
-            for block in content_blocks
-            if isinstance(block, dict) and block.get("type") == "text"
-        ).strip()
-        usage = data.get("usage", {}) or {}
-        return LLMResponse(text=text, usage=usage, raw=data)
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        self._endpoint(),
+                        headers=self._headers(),
+                        json=payload,
+                        timeout=aiohttp.ClientTimeout(total=timeout),
+                    ) as resp:
+                        if resp.status != 200:
+                            body = await resp.text()
+                            logger.add_info("Anthropic").error(
+                                f"Anthropic 请求失败 HTTP {resp.status}: {body[:200]}"
+                            )
+                            return LLMResponse(text="", raw=None)
+                        data = await resp.json()
+            except Exception as e:
+                logger.add_info("Anthropic").error(f"Anthropic 请求异常: {format_llm_error(e)}")
+                return LLMResponse(text="", raw=None)
+
+            content_blocks = data.get("content", []) or []
+            text = "".join(
+                str(block.get("text", ""))
+                for block in content_blocks
+                if isinstance(block, dict) and block.get("type") == "text"
+            ).strip()
+            tool_uses = _tool_use_blocks(content_blocks)
+            if not tool_uses or tool_executor is None:
+                usage = data.get("usage", {}) or {}
+                return LLMResponse(text=text, usage=usage, raw=data, tool_results=tool_results)
+
+            # Anthropic tool_use → OpenAI-style tool_calls → 共享工具执行器
+            tool_calls = [{
+                "id": tu["id"],
+                "type": "function",
+                "function": {
+                    "name": tu["name"],
+                    "arguments": json.dumps(tu["input"], ensure_ascii=False),
+                },
+            } for tu in tool_uses]
+            normalized, result_messages = await normalize_and_execute_tool_calls(
+                tool_calls, tool_executor, tool_results
+            )
+
+            # 构造 assistant 内容块 + user tool_result 内容块
+            assistant_content = []
+            if text:
+                assistant_content.append({"type": "text", "text": text})
+            for tu in tool_uses:
+                assistant_content.append({
+                    "type": "tool_use",
+                    "id": tu["id"],
+                    "name": tu["name"],
+                    "input": tu["input"],
+                })
+            chat_messages.append({"role": "assistant", "content": assistant_content})
+            result_content = []
+            for msg in result_messages:
+                result_content.append({
+                    "type": "tool_result",
+                    "tool_use_id": msg.get("tool_call_id", ""),
+                    "content": msg.get("content", ""),
+                })
+            chat_messages.append({"role": "user", "content": result_content})
+
+        logger.add_info("Anthropic").warning(f"工具循环超过 {max_tool_rounds} 轮，强制结束")
+        return LLMResponse(text=text, raw=data, tool_results=tool_results)
 
     async def chat_stream(
         self,

@@ -68,6 +68,19 @@ def _to_gemini_tools(tools: list[dict] | None) -> list[dict]:
     return [{"functionDeclarations": declarations}] if declarations else []
 
 
+def _function_calls(parts: list[dict]) -> list[dict]:
+    result = []
+    for p in parts or []:
+        if isinstance(p, dict) and p.get("functionCall"):
+            fc = p["functionCall"] or {}
+            result.append({
+                "id": "",  # Gemini 无客户端 tool_call_id，由共享 helper 自动补全
+                "name": str(fc.get("name", "")),
+                "args": fc.get("args", {}) or {},
+            })
+    return result
+
+
 class GeminiProvider(BaseProvider):
     name = "gemini"
     alias_names = ("gemini", "google")
@@ -112,59 +125,107 @@ class GeminiProvider(BaseProvider):
         tool_executor=None,
         max_tool_rounds: int = 5,
     ) -> LLMResponse:
+        from app.llm.tool_loop import normalize_and_execute_tool_calls
+
         model = model or self.config.get("model", "gemini-2.0-flash")
         contents, system = _normalize_messages(messages)
-        payload: dict = {
-            "contents": contents,
-            "generationConfig": {
-                "temperature": temperature,
-                "maxOutputTokens": max_tokens,
-            },
-        }
-        if system:
-            payload["systemInstruction"] = {"parts": [{"text": system}]}
         gemini_tools = _to_gemini_tools(tools)
-        if gemini_tools:
-            payload["tools"] = gemini_tools
+        tool_results: list[dict] = []
 
         if not self.api_key:
             return LLMResponse(text="", raw=None)
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self._url(model, stream=False),
-                    headers={"Content-Type": "application/json"},
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=timeout),
-                ) as resp:
-                    if resp.status != 200:
-                        body = await resp.text()
-                        logger.add_info("Gemini").error(
-                            f"Gemini 请求失败 HTTP {resp.status}: {body[:200]}"
-                        )
-                        return LLMResponse(text="", raw=None)
-                    data = await resp.json()
-        except Exception as e:
-            logger.add_info("Gemini").error(f"Gemini 请求异常: {format_llm_error(e)}")
-            return LLMResponse(text="", raw=None)
+        for _round in range(max_tool_rounds):
+            payload: dict = {
+                "contents": contents,
+                "generationConfig": {
+                    "temperature": temperature,
+                    "maxOutputTokens": max_tokens,
+                },
+            }
+            if system:
+                payload["systemInstruction"] = {"parts": [{"text": system}]}
+            if gemini_tools:
+                payload["tools"] = gemini_tools
 
-        candidates = data.get("candidates", []) or []
-        parts = []
-        if candidates:
-            content = (candidates[0].get("content", {}) or {})
-            parts = content.get("parts", []) or []
-        text = "".join(
-            str(p.get("text", ""))
-            for p in parts
-            if isinstance(p, dict) and p.get("text")
-        ).strip()
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        self._url(model, stream=False),
+                        headers={"Content-Type": "application/json"},
+                        json=payload,
+                        timeout=aiohttp.ClientTimeout(total=timeout),
+                    ) as resp:
+                        if resp.status != 200:
+                            body = await resp.text()
+                            logger.add_info("Gemini").error(
+                                f"Gemini 请求失败 HTTP {resp.status}: {body[:200]}"
+                            )
+                            return LLMResponse(text="", raw=None)
+                        data = await resp.json()
+            except Exception as e:
+                logger.add_info("Gemini").error(f"Gemini 请求异常: {format_llm_error(e)}")
+                return LLMResponse(text="", raw=None)
+
+            candidates = data.get("candidates", []) or []
+            parts = []
+            if candidates:
+                content = (candidates[0].get("content", {}) or {})
+                parts = content.get("parts", []) or []
+            text = "".join(
+                str(p.get("text", ""))
+                for p in parts
+                if isinstance(p, dict) and p.get("text")
+            ).strip()
+
+            calls = _function_calls(parts)
+            if not calls or tool_executor is None:
+                usage = data.get("usageMetadata", {}) or {}
+                normalized_usage = {
+                    "prompt_tokens": usage.get("promptTokenCount", 0),
+                    "completion_tokens": usage.get("candidatesTokenCount", 0),
+                }
+                return LLMResponse(text=text, usage=normalized_usage, raw=data, tool_results=tool_results)
+
+            tool_calls = [{
+                "id": c["id"],
+                "type": "function",
+                "function": {
+                    "name": c["name"],
+                    "arguments": json.dumps(c["args"], ensure_ascii=False),
+                },
+            } for c in calls]
+            normalized, result_messages = await normalize_and_execute_tool_calls(
+                tool_calls, tool_executor, tool_results
+            )
+
+            # Gemini 角色：assistant 对应 model，工具结果通过 user 的 functionResponse 回传
+            assistant_parts = []
+            if text:
+                assistant_parts.append({"text": text})
+            for c in calls:
+                assistant_parts.append({
+                    "functionCall": {"name": c["name"], "args": c["args"]},
+                })
+            contents.append({"role": "model", "parts": assistant_parts})
+
+            user_parts = []
+            for idx, msg in enumerate(result_messages):
+                user_parts.append({
+                    "functionResponse": {
+                        "name": calls[idx]["name"] if idx < len(calls) else "",
+                        "response": {"result": msg.get("content", "")},
+                    },
+                })
+            contents.append({"role": "user", "parts": user_parts})
+
+        logger.add_info("Gemini").warning(f"工具循环超过 {max_tool_rounds} 轮，强制结束")
         usage = data.get("usageMetadata", {}) or {}
         normalized_usage = {
             "prompt_tokens": usage.get("promptTokenCount", 0),
             "completion_tokens": usage.get("candidatesTokenCount", 0),
         }
-        return LLMResponse(text=text, usage=normalized_usage, raw=data)
+        return LLMResponse(text=text, usage=normalized_usage, raw=data, tool_results=tool_results)
 
     async def chat_stream(
         self,
