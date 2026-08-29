@@ -127,9 +127,14 @@ async def api_log_export_zip(request: Request):
     from app.core.logger import logger
 
     try:
-        items = await request.json()
+        data = await request.json()
     except Exception:
-        items = []
+        data = None
+    # 兼容两种 payload：直接数组，或 {items: [...]}
+    if isinstance(data, dict):
+        items = data.get("items") or []
+    else:
+        items = data
     if not isinstance(items, list) or not items:
         return JSONResponse(status_code=400, content={"status": "error", "message": "请选择至少一个日志文件"})
 
