@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
@@ -145,13 +144,7 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
             started = time.monotonic()
             error = ""
             success = True
-            session_id = getattr(ctx, "session_id", "") if ctx is not None else ""
-            user_id = getattr(ctx, "user_id", None) if ctx is not None else None
-            group_id = getattr(ctx, "group_id", None) if ctx is not None else None
-            logger.add_info("Tool").info(
-                f"[Tool] 调用 {name} 会话={session_id} user={user_id} group={group_id} "
-                f"args={json.dumps(args, ensure_ascii=False)}"
-            )
+            logger.add_info("Tool").info(f"[ToolCall]调用工具：{name}")
             if not spec.allows(ctx):
                 error = "forbidden"
                 success = False
@@ -170,7 +163,7 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
                     result = f"error: 工具 {name} 执行异常: {e}"
             duration_ms = (time.monotonic() - started) * 1000
             logger.add_info("Tool").info(
-                f"[Tool] 返回 {name} success={success} duration={duration_ms:.0f}ms "
+                f"[ToolCall]返回：{name} success={success} duration={duration_ms:.0f}ms "
                 f"error={error} result={str(result)[:200]}"
             )
             await _run_tool_call_hooks(ctx, spec, name, args, result, success, error, duration_ms)
