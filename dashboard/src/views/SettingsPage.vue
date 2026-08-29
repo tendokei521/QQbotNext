@@ -5,6 +5,7 @@ import { useThemeStore } from '@/stores/theme'
 import { useWebuiStore } from '@/stores/webui'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
+import LogExportDialog from '@/components/log/LogExportDialog.vue'
 
 const themeStore = useThemeStore()
 const webui = useWebuiStore()
@@ -12,6 +13,7 @@ const modules = useModulesStore()
 const notify = useNotifyStore()
 
 const saving = ref(false)
+const exportDialog = ref(false)
 const uninstalledDialog = ref(false)
 const uninstalledLoading = ref(false)
 // 可写 computed：webui.load() 覆盖配置后仍绑定到最新值
@@ -187,7 +189,10 @@ onMounted(() => {
           <v-card-title class="d-flex align-center">
             <v-icon icon="mdi-filter-outline" class="mr-2" color="primary" /> 日志显示设置
             <v-spacer />
-            <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-content-save" :loading="saving" @click="saveLogs">
+            <v-btn size="small" variant="tonal" prepend-icon="mdi-file-export-outline" @click="exportDialog = true">
+              导出日志
+            </v-btn>
+            <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-content-save" class="ml-2" :loading="saving" @click="saveLogs">
               保存
             </v-btn>
           </v-card-title>
@@ -228,6 +233,8 @@ onMounted(() => {
         </v-card>
       </v-col>
     </v-row>
+
+    <LogExportDialog v-model="exportDialog" />
 
     <v-dialog v-model="uninstalledDialog" max-width="620">
       <v-card>
