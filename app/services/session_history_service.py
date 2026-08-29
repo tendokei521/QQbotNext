@@ -98,6 +98,49 @@ class SessionHistoryService:
         self._sync_active_messages(session_id, task_id, new_messages)
         return data
 
+    def edit_message(self, session_id: str, task_id: str, index: int, content: str) -> dict:
+        content = str(content or "")
+        data = self.history.load_history(task_id)
+        if data is None:
+            raise ValueError("对话不存在")
+        messages = data.get("messages", []) or []
+        try:
+            index = int(index)
+        except (TypeError, ValueError):
+            raise ValueError("消息索引不合法")
+        if index < 0 or index >= len(messages):
+            raise ValueError(f"消息索引越界: {index}")
+        messages = [dict(m) for m in messages]
+        messages[index]["content"] = content
+        data = self.history.update_history(task_id, messages=messages)
+        if data is None:
+            raise ValueError("对话不存在")
+        self._sync_active_messages(session_id, task_id, messages)
+        return data
+
+    def add_message(self, session_id: str, task_id: str, payload: dict) -> dict:
+        data = self.history.load_history(task_id)
+        if data is None:
+            raise ValueError("对话不存在")
+        role = str(payload.get("role", "") or "").strip()
+        content = str(payload.get("content", "") or "").strip()
+        if role not in ("user", "assistant", "system"):
+            raise ValueError("role 必须是 user / assistant / system")
+        if not content:
+            raise ValueError("消息内容不能为空")
+        message: dict = {"role": role, "content": content}
+        for key in ("user_id", "nickname", "message_id", "time"):
+            value = payload.get(key)
+            if value not in (None, ""):
+                message[key] = value
+        messages = list(data.get("messages", []) or [])
+        messages.append(message)
+        data = self.history.update_history(task_id, messages=messages)
+        if data is None:
+            raise ValueError("对话不存在")
+        self._sync_active_messages(session_id, task_id, messages)
+        return data
+
     def delete_conversation(self, session_id: str, task_id: str) -> bool:
         """删除对话归档。
 
@@ -119,13 +162,106 @@ class SessionHistoryService:
 
         return self.history.delete_history(task_id)
 
-    # ---------- 导出 ----------
+    def delete_session(self, session_id: str) -> int:
+        """删除一个会话及其全部对话归档。"""
+        tasks = self.history.list_tasks(session_id)
+        if not tasks:
+            return 0
+        # 从内存中彻底移除，避免后续保存把归档写回
+        self.session_mgr.forget_session(session_id)
+        deleted = 0
+        for task in tasks:
+            if self.history.delete_history(str(task.get("task_id", ""))):
+                deleted += 1
+        return deleted
+
+    def bulk_delete_sessions(self, session_ids: list[str]) -> dict:
+        result = {"sessions": [], "conversations": 0, "failed": []}
+        for sid in session_ids:
+            try:
+                count = self.delete_session(sid)
+                result["sessions"].append(sid)
+                result["conversations"] += count
+            except Exception as e:
+                result["failed"].append({"session_id": sid, "error": str(e)})
+        return result
+
+    def bulk_delete_conversations(self, session_id: str, task_ids: list[str]) -> dict:
+        result = {"deleted": [], "failed": []}
+        for tid in task_ids:
+            try:
+                if self.delete_conversation(session_id, tid):
+                    result["deleted"].append(tid)
+                else:
+                    result["failed"].append({"task_id": tid, "error": "对话不存在"})
+            except Exception as e:
+                result["failed"].append({"task_id": tid, "error": str(e)})
+        return result
+
+    # ---------- 导出 / 备份 ----------
 
     def export_text(self, task_id: str) -> str | None:
         return self.history.export_text(task_id)
 
     def export_json(self, task_id: str) -> dict | None:
         return self.history.load_history(task_id)
+
+    def export_session_json(self, session_id: str) -> dict | None:
+        tasks = self.history.list_tasks(session_id)
+        if not tasks:
+            return None
+        conversations = []
+        for task in tasks:
+            data = self.history.load_history(str(task.get("task_id", "")))
+            if data:
+                conversations.append(data)
+        return {
+            "session_id": session_id,
+            "type": str(tasks[0].get("type", "") or ""),
+            "conversations": conversations,
+        }
+
+    def restore_session(self, data: dict) -> dict:
+        """从备份对象恢复会话。
+
+        支持两种输入：
+        - 会话备份：``{"session_id": "...", "type": "...", "conversations": [...]}``
+        - 单对话备份：``{"task_id": "...", "session_id": "...", "messages": [...]}``
+        """
+        if not isinstance(data, dict):
+            raise ValueError("备份数据必须是一个对象")
+
+        conversations = data.get("conversations")
+        if isinstance(conversations, list):
+            session_id = str(data.get("session_id", "") or "").strip()
+            if not session_id:
+                raise ValueError("备份缺少 session_id")
+            session_type = str(data.get("type", "") or "").strip() or "group"
+            restored = []
+            for raw in conversations or []:
+                if not isinstance(raw, dict):
+                    continue
+                conv = dict(raw)
+                conv["session_id"] = session_id
+                conv["type"] = session_type
+                conv["bot_id"] = self.bot_id
+                restored.append(self.history.import_conversation(conv))
+            return {"session_id": session_id, "type": session_type, "restored": len(restored)}
+
+        task_id = str(data.get("task_id", "") or "").strip()
+        if not task_id:
+            raise ValueError("备份缺少 task_id 或 conversations")
+        conv = dict(data)
+        conv.setdefault("session_id", str(data.get("session_id", "") or "unknown"))
+        conv.setdefault("type", str(data.get("type", "") or "group"))
+        conv.setdefault("bot_id", self.bot_id)
+        restored = self.history.import_conversation(conv)
+        return {
+            "session_id": str(conv.get("session_id", "")),
+            "type": str(conv.get("type", "")),
+            "restored": 1,
+            "conversation": restored,
+        }
 
     # ---------- 活跃会话同步 ----------
 

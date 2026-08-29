@@ -268,6 +268,19 @@ class SessionManager:
                 self._notify_archive(session)
                 logger.add_info(f"#{self.bot_id}").info(f"会话已结束: {session_id}")
 
+    def forget_session(self, session_id: str) -> bool:
+        """从内存中移除会话，但不写回归档。
+
+        用于「删除整个会话」等需要彻底清掉归档的操作，
+        避免 destroy_session 先保存再删除导致历史又被写回。
+        """
+        with self.lock:
+            exist = session_id in self.sessions
+            if exist:
+                self.sessions.pop(session_id, None)
+                logger.add_info(f"#{self.bot_id}").info(f"会话已从内存移除: {session_id}")
+            return exist
+
     # ── 消息 ──────────────────────────────────────────────
     MAX_HISTORY_MESSAGES = 200  # 单对话内存/归档有界：超过后裁剪最旧消息
 

@@ -95,6 +95,48 @@ async def rename_conversation(
     return _ok("对话已重命名", conversation=conversation)
 
 
+@router.put("/{session_id}/conversations/{task_id}/messages/{index}")
+async def edit_message(
+    session_id: str,
+    task_id: str,
+    index: int,
+    request: Request,
+    bot_id: int | None = Depends(parse_bot_id),
+):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    content = str((body or {}).get("content", "") or "")
+    try:
+        conversation = _service(bot_id).edit_message(session_id, task_id, index, content)
+    except ValueError as e:
+        return _err(400, str(e))
+    except Exception as e:
+        return _err(500, f"编辑消息失败: {e}")
+    return _ok("消息已更新", conversation=conversation)
+
+
+@router.post("/{session_id}/conversations/{task_id}/messages")
+async def add_message(
+    session_id: str,
+    task_id: str,
+    request: Request,
+    bot_id: int | None = Depends(parse_bot_id),
+):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        conversation = _service(bot_id).add_message(session_id, task_id, body or {})
+    except ValueError as e:
+        return _err(400, str(e))
+    except Exception as e:
+        return _err(500, f"添加消息失败: {e}")
+    return _ok("消息已添加", conversation=conversation)
+
+
 @router.delete("/{session_id}/conversations/{task_id}/messages/{index}")
 async def delete_message(
     session_id: str,
@@ -128,6 +170,87 @@ async def delete_conversation(
     if not ok:
         return _err(404, f"对话不存在: {task_id}")
     return _ok("对话已删除")
+
+
+@router.delete("/{session_id}")
+async def delete_session(
+    session_id: str,
+    request: Request,
+    bot_id: int | None = Depends(parse_bot_id),
+):
+    try:
+        deleted = _service(bot_id).delete_session(session_id)
+    except ValueError as e:
+        return _err(400, str(e))
+    except Exception as e:
+        return _err(500, f"删除会话失败: {e}")
+    if deleted == 0:
+        return _err(404, f"会话不存在或没有归档: {session_id}")
+    return _ok(f"会话已删除（{deleted} 个对话）", deleted=deleted)
+
+
+@router.get("/{session_id}/export")
+async def export_session(
+    session_id: str,
+    request: Request,
+    bot_id: int | None = Depends(parse_bot_id),
+):
+    try:
+        data = _service(bot_id).export_session_json(session_id)
+    except ValueError as e:
+        return _err(400, str(e))
+    except Exception as e:
+        return _err(500, f"导出会话失败: {e}")
+    if data is None:
+        return _err(404, f"会话不存在: {session_id}")
+    filename = f"{session_id}.session.json"
+    return Response(
+        content=json.dumps(data, ensure_ascii=False, indent=2),
+        media_type="application/json; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/bulk-delete")
+async def bulk_delete_sessions(request: Request, bot_id: int | None = Depends(parse_bot_id)):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    body = body or {}
+    session_ids = [str(s).strip() for s in (body.get("session_ids") or []) if str(s).strip()]
+    task_ids = [str(t).strip() for t in (body.get("task_ids") or []) if str(t).strip()]
+    try:
+        service = _service(bot_id)
+        if session_ids:
+            result = service.bulk_delete_sessions(session_ids)
+        elif task_ids:
+            session_id = str(body.get("session_id", "") or "").strip()
+            if not session_id:
+                return _err(400, "缺少 session_id 或 session_ids")
+            result = service.bulk_delete_conversations(session_id, task_ids)
+        else:
+            return _err(400, "缺少要删除的会话或对话")
+    except ValueError as e:
+        return _err(400, str(e))
+    except Exception as e:
+        return _err(500, f"批量删除失败: {e}")
+    return _ok("批量删除完成", **result)
+
+
+@router.post("/restore")
+async def restore_sessions(request: Request, bot_id: int | None = Depends(parse_bot_id)):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        result = _service(bot_id).restore_session(body or {})
+    except ValueError as e:
+        return _err(400, str(e))
+    except Exception as e:
+        return _err(500, f"恢复失败: {e}")
+    return _ok("恢复完成", **result)
 
 
 @router.get("/{session_id}/conversations/{task_id}/export")

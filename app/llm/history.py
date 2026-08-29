@@ -175,6 +175,26 @@ class HistoryManager:
         )
         return data
 
+    def import_conversation(self, data: dict) -> dict:
+        """导入/恢复一条完整对话记录。"""
+        conv = dict(data or {})
+        task_id = str(conv.get("task_id", "") or "")
+        if not task_id or not _TASK_ID_RE.match(task_id):
+            raise ValueError(f"非法 task_id: {task_id}")
+        conv["task_id"] = task_id
+        conv.setdefault("bot_id", self.bot_id)
+        conv.setdefault("saved_at", int(time.time()))
+        conv.setdefault("messages", [])
+        file_path = self._file_path(task_id)
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(conv, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.add_info(f"#{self.bot_id}").error(f"导入历史失败 (task: {task_id}): {e}")
+            raise
+        logger.add_info(f"#{self.bot_id}").debug(f"历史已导入: {task_id} (messages={len(conv.get('messages') or [])})")
+        return conv
+
     def delete_history(self, task_id: str) -> bool:
         try:
             file_path = self._file_path(task_id)
@@ -440,6 +460,22 @@ class SQLiteHistoryStore:
             f"历史已更新(SQLite): {task_id} (title={data.get('title')!r}, messages={len(data.get('messages') or [])})"
         )
         return data
+
+    def import_conversation(self, data: dict) -> dict:
+        """导入/恢复一条完整对话记录。"""
+        conv = dict(data or {})
+        task_id = str(conv.get("task_id", "") or "")
+        if not task_id or not _TASK_ID_RE.match(task_id):
+            raise ValueError(f"非法 task_id: {task_id}")
+        conv["task_id"] = task_id
+        conv.setdefault("bot_id", self.bot_id)
+        conv.setdefault("saved_at", int(time.time()))
+        conv.setdefault("messages", [])
+        self._insert_conversation(conv)
+        logger.add_info(f"#{self.bot_id}").debug(
+            f"历史已导入(SQLite): {task_id} (messages={len(conv.get('messages') or [])})"
+        )
+        return conv
 
     def delete_history(self, task_id: str) -> bool:
         with self._lock:
