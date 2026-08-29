@@ -281,6 +281,7 @@ Agent 配置已从通用表单升级为**专属领域页面**：
 | 长期记忆 | 记忆开关、召回与可信度 |
 | 知识库 | 知识库检索与 Embedding 模型 |
 | MCP 工具 | MCP stdio server 配置 |
+| NapCat 工具 | 把 NapCat/OneBot API 暴露给 LLM |
 | 定时任务 / 主动消息 | 任务与主动发言管理 |
 
 流式回复内置三档发送节奏预设：

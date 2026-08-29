@@ -24,6 +24,12 @@
 - 日志列表放入固定滚动框，按时间段默认折叠展示
 - 支持当前轮次与历史归档日志选择，并打包 ZIP 下载
 
+### NapCat 工具
+
+- 新增 `IBot.call_api` 通用 API 入口
+- 新增数据驱动的 NapCat/OneBot 工具包：`app/llm/napcat/`
+- Agent 新增 NapCat 工具配置页，可按风险等级/权限/作用域开关工具
+
 ## [2.0.0] - 2026-08-17
 
 QQBot Next 2.0 首个正式 Release：基于 OneBot 协议的多账号 QQ 机器人框架，采用分层 + 插件架构。
