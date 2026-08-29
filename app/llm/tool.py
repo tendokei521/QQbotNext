@@ -15,11 +15,21 @@ from typing import Any, Awaitable, Callable
 
 from app.core.logger import logger
 from app.llm.hooks import ToolCallContext
+from app.llm.telemetry import ToolCallRecord
 
 # 单次工具执行超时（秒）
 TOOL_TIMEOUT = 20
 # 工具结果截断长度（防止 pollute 上下文）
 TOOL_RESULT_MAX = 2000
+
+# 工具级权限：与模块权限语义一致（private 下群管理/群主降级为 member）
+TOOL_PERMISSION_RANK = {
+    "everyone": 0,
+    "member": 0,
+    "group_admin": 1,
+    "group_owner": 2,
+    "owner": 3,
+}
 
 ToolHandler = Callable[["ToolContext", dict], Awaitable[str]]
 
@@ -56,12 +66,47 @@ class ToolSpec:
         parameters: dict,
         handler: ToolHandler,
         module: Any = None,
+        permission: str = "everyone",
+        scopes: list[str] | tuple[str, ...] | None = None,
     ) -> None:
         self.name = name
         self.description = description
         self.parameters = parameters
         self.handler = handler
         self.module = module
+        self.permission = (permission or "everyone").lower()
+        self.scopes = tuple(s.lower() for s in (scopes or ("group", "private")) if s)
+
+    def allows(self, ctx: ToolContext | None) -> bool:
+        """工具级权限/作用域校验；主动/定时等无事件场景默认放行。"""
+        if ctx is None:
+            # 不携带调用上下文时保留旧行为（框架内部工具）
+            return True
+        event = getattr(ctx, "event", None)
+        scope = "*"
+        if event is not None:
+            event_type = getattr(event, "event_type", "") or ""
+            if event_type == "message_group" or (getattr(event, "group", None) is not None):
+                scope = "group"
+            elif event_type == "message_private" or getattr(event, "user_id", None):
+                scope = "private"
+        if "*" not in self.scopes and scope not in self.scopes:
+            return False
+
+        if self.permission == "everyone":
+            return True
+        if event is None:
+            # 主动/定时触发来源不归属于普通群成员，按最低权限放行（框架内部工具可另行控制）
+            return True
+
+        role = getattr(event, "permission_role", None) or getattr(event, "role", None) or "member"
+        if self.permission == "owner":
+            return bool(getattr(event, "is_bot_owner", False))
+        required = TOOL_PERMISSION_RANK.get(self.permission, 0)
+        if self.permission in ("group_admin", "group_owner") and scope == "private":
+            required = 0
+        current = TOOL_PERMISSION_RANK.get(role, 0)
+        return current >= required
 
     def to_openai(self) -> dict:
         return {
@@ -99,19 +144,35 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
             started = time.monotonic()
             error = ""
             success = True
-            try:
-                result = await asyncio.wait_for(spec.handler(ctx, args), timeout=TOOL_TIMEOUT)
-            except asyncio.TimeoutError:
+            if not spec.allows(ctx):
+                error = "forbidden"
                 success = False
-                error = f"timeout({TOOL_TIMEOUT}s)"
-                result = f"error: 工具 {name} 执行超时（{TOOL_TIMEOUT}s）"
-            except Exception as e:
-                success = False
-                error = str(e)
-                logger.add_info("Tool").warning(f"[Tool] {name} 执行异常: {e}")
-                result = f"error: 工具 {name} 执行异常: {e}"
+                result = f"error: 无权限调用工具 {name}"
+            else:
+                try:
+                    result = await asyncio.wait_for(spec.handler(ctx, args), timeout=TOOL_TIMEOUT)
+                except asyncio.TimeoutError:
+                    success = False
+                    error = f"timeout({TOOL_TIMEOUT}s)"
+                    result = f"error: 工具 {name} 执行超时（{TOOL_TIMEOUT}s）"
+                except Exception as e:
+                    success = False
+                    error = str(e)
+                    logger.add_info("Tool").warning(f"[Tool] {name} 执行异常: {e}")
+                    result = f"error: 工具 {name} 执行异常: {e}"
             duration_ms = (time.monotonic() - started) * 1000
             await _run_tool_call_hooks(ctx, spec, name, args, result, success, error, duration_ms)
+            runtime = getattr(ctx, "runtime", None) if ctx is not None else None
+            telemetry = getattr(runtime, "telemetry", None) if runtime is not None else None
+            if telemetry is not None:
+                telemetry.record_tool(ToolCallRecord(
+                    bot_id=getattr(runtime, "bot_id", None),
+                    session_id=getattr(ctx, "session_id", "") if ctx is not None else "",
+                    name=name,
+                    success=success,
+                    duration_ms=duration_ms,
+                    error=error,
+                ))
             return _truncate_result(result)
         return f"error: 未知工具 {name}"
 
@@ -156,7 +217,13 @@ async def _run_tool_call_hooks(
     await registry.run(call_ctx)
 
 
-def tool(*, description: str = "", parameters: dict | None = None) -> Callable:
+def tool(
+    *,
+    description: str = "",
+    parameters: dict | None = None,
+    permission: str = "everyone",
+    scopes: list[str] | tuple[str, ...] | None = None,
+) -> Callable:
     """装饰器：把一个模块方法声明为 LLM 工具。
 
     用法：
@@ -169,6 +236,11 @@ def tool(*, description: str = "", parameters: dict | None = None) -> Callable:
             @tool(description="查询天气", parameters={"type":"object","properties":{"city":{"type":"string"}}})
             async def query_weather(self, ctx: ToolContext, args: dict) -> str:
                 return "晴"
+
+    进阶权限/作用域：
+
+        @tool(permission="group_admin", scopes=["group"])
+        async def delete_message(self, ctx, args): ...
     """
 
     def decorator(fn):
@@ -176,6 +248,8 @@ def tool(*, description: str = "", parameters: dict | None = None) -> Callable:
         metas.append({
             "description": description,
             "parameters": parameters or {"type": "object", "properties": {}},
+            "permission": permission,
+            "scopes": list(scopes) if scopes else None,
         })
         setattr(fn, "__tool_meta__", metas)
         return fn
@@ -224,6 +298,8 @@ class ModuleToolRegistry:
                 parameters=parameters,
                 handler=lambda ctx, args, m=method: m(ctx, args),
                 module=module,
+                permission=rec.get("permission", "everyone"),
+                scopes=rec.get("scopes"),
             )
             self._specs.append(spec)
             self._by_name[name] = spec

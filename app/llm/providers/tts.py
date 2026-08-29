@@ -12,6 +12,7 @@ from .base import BaseProvider
 
 class OpenAITTSProvider(BaseProvider):
     name = "openai_tts"
+    capabilities = ("tts",)
 
     def __init__(self, config: dict) -> None:
         super().__init__(config)

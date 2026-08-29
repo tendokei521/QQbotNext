@@ -132,6 +132,42 @@ async def agent_config_update(request: Request, bot_id: int | None = Depends(par
     return _ok(f"Bot {bot_id} Agent 配置已更新")
 
 
+# ==================== LLM 遥测 ====================
+
+@router.get("/telemetry")
+async def agent_telemetry(
+    request: Request,
+    bot_id: int | None = Depends(parse_bot_id),
+    limit: int = 30,
+):
+    container = get_container(request)
+    runtime, _ = _runtime(container, bot_id)
+    if runtime is None:
+        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+    telemetry = getattr(runtime, "telemetry", None)
+    if telemetry is None:
+        return JSONResponse(content={"ok": True, "stats": {}, "recent": [], "recent_tools": []})
+    return JSONResponse(content={
+        "ok": True,
+        "stats": telemetry.stats(),
+        "recent": telemetry.recent(limit=max(1, min(limit, 200))),
+        "recent_tools": telemetry.recent_tools(max(1, min(limit, 200))),
+    })
+
+
+@router.post("/telemetry/reset")
+async def agent_telemetry_reset(request: Request, bot_id: int | None = Depends(parse_bot_id)):
+    container = get_container(request)
+    runtime, _ = _runtime(container, bot_id)
+    if runtime is None:
+        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+    telemetry = getattr(runtime, "telemetry", None)
+    if telemetry is None:
+        return _ok("该 Bot 无遥测数据")
+    result = telemetry.reset()
+    return _ok(f"Bot {bot_id} LLM 遥测已重置", **result)
+
+
 # ==================== 定时任务 ====================
 
 @router.get("/tasks")

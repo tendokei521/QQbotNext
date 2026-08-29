@@ -10,11 +10,13 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from typing import Any
 
 from app.domain.message import Message
 from app.llm.context import LlmContext, LlmJob
+from app.llm.locks import SessionLockManager
 from app.llm.pool import LlmPool
 
 
@@ -23,6 +25,7 @@ class LlmPipeline:
         self.runtime = runtime
         self.task_manager = task_manager
         self.pool = LlmPool()
+        self.session_locks = SessionLockManager()
         self._tasks: set[asyncio.Task] = set()
         self._session_generation: dict[str, int] = {}
 
@@ -66,6 +69,8 @@ class LlmPipeline:
         ctx = job.ctx
         # 按会话切换配置档案（对齐 AstrBot UMO 路由）
         self.runtime.config.set_session(ctx.session_id)
+        session_lock: asyncio.Lock | None = None
+        lock_acquired = False
         try:
             # #chat 指令仍然走原 chat.handle（它会自己发送回复）
             if ctx.user_text.startswith("#chat "):
@@ -115,11 +120,22 @@ class LlmPipeline:
             max_msg_len = int(config.get("max_message_length", 200) or 200)
             ctx.user_text = ctx.user_text[:max_msg_len]
 
+            # 默认启用 LlmPool 的“同会话最新消息取代旧消息”语义，
+            # 避免同一会话多个任务同时进入 LLM 请求（pre_request 中的防抖仍可叠加）。
+            if not await self.pool.wait_for_continue(ctx.job, debounce=0):
+                return
+
             # 1. 请求前钩子（可暂停/防抖/合并/跳过）
             if not await self._run_stage("pre_request", ctx):
                 return
             if job.skip or job.superseded:
                 return
+
+            # 同一会话的 LLM 请求/历史写入串行化：新消息会先通过 LlmPool 标记旧任务 superseded，
+            # 因此这里不会启动并发请求；旧任务释放后才能进入下一轮。
+            session_lock = self.session_locks.lock(ctx.session_id)
+            await session_lock.acquire()
+            lock_acquired = True
 
             # 确认本轮真正会触发 LLM 后，再使同一会话旧任务过期（回复打断）
             if getattr(self.runtime, "interrupt_enabled", False):
@@ -179,6 +195,9 @@ class LlmPipeline:
                 f"[LLM Pipeline] 任务异常: {e}"
             )
         finally:
+            if lock_acquired and session_lock is not None:
+                if session_lock.locked():
+                    session_lock.release()
             self.runtime.config.clear_session()
             self.pool.finish(job)
 
@@ -289,12 +308,16 @@ class LlmPipeline:
         """执行某个 LLM 阶段的所有钩子。返回 False 表示应中止。"""
         hooks = self.runtime.llm_hooks.get(stage, ctx.event.event_type)
         for hook in hooks:
+            hook_start = time.monotonic()
             try:
                 if msg is None:
                     await hook.handler(ctx)
                 else:
                     await hook.handler(ctx, msg)
             except asyncio.CancelledError:
+                telemetry = getattr(self.runtime, "telemetry", None)
+                if telemetry is not None:
+                    telemetry.record_hook(stage, (time.monotonic() - hook_start) * 1000)
                 raise
             except Exception as e:
                 from app.core.logger import logger
@@ -302,6 +325,10 @@ class LlmPipeline:
                 logger.add_info(f"#{self.runtime.bot_id}").exception(
                     f"[LLM Hook] {stage} 处理异常: {e}"
                 )
+            finally:
+                telemetry = getattr(self.runtime, "telemetry", None)
+                if telemetry is not None:
+                    telemetry.record_hook(stage, (time.monotonic() - hook_start) * 1000)
             if ctx.job.skip or ctx.job.superseded:
                 return False
         return True

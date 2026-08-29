@@ -13,6 +13,7 @@ from .base import BaseProvider
 
 class OpenAIEmbeddingProvider(BaseProvider):
     name = "openai_embedding"
+    capabilities = ("embedding",)
 
     def __init__(self, config: dict) -> None:
         super().__init__(config)

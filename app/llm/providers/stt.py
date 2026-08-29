@@ -14,6 +14,7 @@ from .base import BaseProvider
 
 class OpenAIWhisperSTTProvider(BaseProvider):
     name = "openai_stt"
+    capabilities = ("stt",)
 
     def __init__(self, config: dict) -> None:
         super().__init__(config)

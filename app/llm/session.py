@@ -13,7 +13,7 @@ import uuid
 from typing import Any
 
 from app.llm import logger
-from app.llm.history import HistoryManager
+from app.llm.history import SQLiteHistoryStore
 
 # 防御：模型/中转偶发的孤立 "rate." 不应作为有效助手回复回灌上下文
 _JUNK_ASSISTANT_RE = re.compile(r"^\s*rate\.\s*$", re.IGNORECASE)
@@ -177,7 +177,7 @@ class SessionManager:
         self.bot_id = bot_id
         self.sessions: dict[str, Session] = {}
         self.lock = threading.RLock()
-        self.history = HistoryManager(bot_id)
+        self.history = SQLiteHistoryStore(bot_id)
         # 会话过期/归档时的可选回调（长期记忆归档蒸馏用）：callable(session)
         self.on_archive = None
         self._stop_event = threading.Event()
@@ -204,6 +204,16 @@ class SessionManager:
         self._stop_event.clear()
         if not self._cleanup_thread or not self._cleanup_thread.is_alive():
             self._start_auto_cleanup()
+
+    def close(self):
+        """关闭历史存储连接并停止清理线程。"""
+        self.stop_cleanup()
+        try:
+            close_fn = getattr(self.history, "close", None)
+            if callable(close_fn):
+                close_fn()
+        except Exception:
+            pass
 
     def _start_auto_cleanup(self):
         def cleanup_task():

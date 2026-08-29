@@ -12,6 +12,7 @@ from .base import BaseProvider
 
 class JinaRerankProvider(BaseProvider):
     name = "jina_rerank"
+    capabilities = ("rerank",)
 
     def __init__(self, config: dict) -> None:
         super().__init__(config)
@@ -61,6 +62,7 @@ class JinaRerankProvider(BaseProvider):
 
 class CohereRerankProvider(BaseProvider):
     name = "cohere_rerank"
+    capabilities = ("rerank",)
 
     def __init__(self, config: dict) -> None:
         super().__init__(config)

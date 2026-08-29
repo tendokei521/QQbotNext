@@ -9,12 +9,16 @@ from __future__ import annotations
 from .base import BaseProvider, LLMResponse, StreamEvent
 from .embedding import OpenAIEmbeddingProvider
 from .openai_compat import OpenAICompatProvider
+from .anthropic import AnthropicProvider
+from .gemini import GeminiProvider
 from .rerank import get_rerank_provider
 from .stt import OpenAIWhisperSTTProvider
 from .tts import OpenAITTSProvider
 
 PROVIDERS: dict[str, type[BaseProvider]] = {
     "openai": OpenAICompatProvider,
+    "anthropic": AnthropicProvider,
+    "gemini": GeminiProvider,
 }
 
 # 常见 OpenAI 兼容别名：在适配器真正拆分前，统一映射到 openai 兼容实现
@@ -36,6 +40,8 @@ PROVIDER_ALIASES: dict[str, str] = {
     "ppio": "openai",
     "tokenpony": "openai",
     "compshare": "openai",
+    "claude": "anthropic",
+    "google": "gemini",
 }
 
 
@@ -48,6 +54,31 @@ def normalize_provider_type(provider: str) -> str:
 def get_provider_class(provider: str) -> type[BaseProvider]:
     """按 provider 类型返回适配器类；未知类型回退 openai。"""
     return PROVIDERS.get(normalize_provider_type(provider), OpenAICompatProvider)
+
+
+def register_provider(
+    name: str,
+    cls: type[BaseProvider],
+    aliases: tuple[str, ...] = (),
+) -> None:
+    """运行期注册一个新的 Provider 适配器，供第三方模块/插件调用。"""
+    name = (name or "").strip().lower()
+    if not name or not cls:
+        raise ValueError("register_provider 需要 name 和 provider class")
+    PROVIDERS[name] = cls
+    for alias in aliases:
+        alias = (alias or "").strip().lower()
+        if alias:
+            PROVIDER_ALIASES[alias] = name
+
+
+def provider_supports(config: dict, capability: str) -> bool:
+    """按配置判断 provider 是否支持某项能力（chat / stream / embedding 等）。"""
+    try:
+        provider = get_provider(config)
+        return bool(getattr(provider, "supports", lambda _c: False)(capability))
+    except Exception:
+        return False
 
 
 def get_provider(config: dict) -> BaseProvider:
@@ -154,6 +185,8 @@ __all__ = [
     "get_provider",
     "get_provider_class",
     "normalize_provider_type",
+    "register_provider",
+    "provider_supports",
     "chat_with_fallback",
     "iter_stream_with_fallback",
     "PROVIDERS",

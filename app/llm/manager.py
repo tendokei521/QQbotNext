@@ -24,6 +24,7 @@ from app.llm.proactive import ProactiveManager
 from app.llm.scheduler import TaskScheduler
 from app.llm.session import SessionManager
 from app.llm.skills import SkillRegistry
+from app.llm.telemetry import TelemetryRecorder
 from app.llm.tool import ModuleToolRegistry
 
 
@@ -73,6 +74,8 @@ class AgentRuntime:
         # 模块扩展：@tool 工具 + 技能
         self.llm_tools = ModuleToolRegistry(logger)
         self.skills = SkillRegistry(logger)
+        # LLM 可观测性：调用/工具/钩子耗时
+        self.telemetry = TelemetryRecorder()
 
     def _config_for_model_id(self, model_id: str) -> dict | None:
         """解析指定模型实例的完整 provider 配置。"""
@@ -169,7 +172,7 @@ class AgentRuntime:
         except Exception:
             pass
         try:
-            self.session_mgr.stop_cleanup()
+            self.session_mgr.close()
         except Exception:
             pass
         try:

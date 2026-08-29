@@ -251,6 +251,39 @@ def _clean_output_for_history(config, text: str) -> str:
     return maybe_strip_parentheses(text, True)
 
 
+def _record_stream_telemetry(
+    runtime,
+    session_id: str,
+    provider_chain: list[dict],
+    model: str,
+    messages: list[dict],
+    full_text_parts: list[str],
+    tool_results: list[dict],
+    stream_start: float,
+    success: bool,
+    error_text: str = "",
+) -> None:
+    """流式生成的统一遥测落点。"""
+    telemetry = getattr(runtime, "telemetry", None)
+    if telemetry is None:
+        return
+    full_text = "".join(full_text_parts)
+    first_cfg = provider_chain[0] if provider_chain else {}
+    telemetry.record_call_simple(
+        bot_id=runtime.bot_id,
+        session_id=session_id,
+        provider=str(first_cfg.get("provider", "openai") or "openai"),
+        model=str(first_cfg.get("model", model) or model),
+        stream=True,
+        success=success,
+        latency_ms=(time.monotonic() - stream_start) * 1000,
+        message_count=len(messages),
+        tool_calls=len(tool_results),
+        characters=len(full_text),
+        error=error_text,
+    )
+
+
 async def handle(module, event):
     """唯一入口：api_key 校验 + 消息类型开关过滤后分发。"""
     config = module.config
@@ -646,6 +679,7 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
     )
 
     use_tools = bool(all_specs) and supports_tool_use(modalities)
+    response_start = time.monotonic()
     response = await chat_with_fallback(
         provider_chain,
         messages,
@@ -655,6 +689,7 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
         tools=build_tools(all_specs) if use_tools else None,
         tool_executor=make_executor(all_specs, tool_ctx) if use_tools else None,
     )
+    response_latency_ms = (time.monotonic() - response_start) * 1000
 
     if not response.ok:
         clean_response = "抱歉，我暂时无法回答，请稍后再试。"
@@ -674,6 +709,26 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
             f"[LLM] 模型返回空回复，使用兜底文本 -> {session_id}"
         )
         clean_response = "抱歉，我暂时无法回答，请稍后再试。"
+
+    telemetry = getattr(runtime, "telemetry", None)
+    if telemetry is not None:
+        usage = response.usage or {}
+        first_cfg = provider_chain[0] if provider_chain else {}
+        telemetry.record_call_simple(
+            bot_id=runtime.bot_id,
+            session_id=session_id,
+            provider=str(first_cfg.get("provider", "openai") or "openai"),
+            model=str(first_cfg.get("model", model) or model),
+            stream=False,
+            success=bool(response.ok),
+            latency_ms=response_latency_ms,
+            input_tokens=int(usage.get("prompt_tokens") or 0),
+            output_tokens=int(usage.get("completion_tokens") or 0),
+            message_count=len(messages),
+            tool_calls=len(response.tool_results or []),
+            characters=len(clean_response),
+            error="" if response.ok else "empty_response",
+        )
 
     session_mgr.add_message(session_id, "assistant", _clean_output_for_history(config, clean_response))
     if not is_private:
@@ -831,6 +886,8 @@ async def stream_response(runtime, event, ctx=None):
 
     full_text_parts: list[str] = []
     tool_results: list[dict] = []
+    stream_start = time.monotonic()
+    stream_error_text = ""
 
     for _round in range(5):
         round_text_parts: list[str] = []
@@ -886,12 +943,17 @@ async def stream_response(runtime, event, ctx=None):
 
         if stream_error:
             # 记录失败详情，便于定位（error 事件文本通常含 API 返回的状态码与原因）
+            stream_error_text = stream_error
             logger.add_info(f"#{runtime.bot_id}").error(
                 f"[LLM] 流式请求失败 -> {session_id} (task: {session.task_id}), "
                 f"round={_round}, 已产文本={bool(full_text_parts)}, 工具数={len(tool_calls)}: {stream_error}"
             )
             if not full_text:
                 yield "抱歉，我暂时无法回答，请稍后再试。"
+            _record_stream_telemetry(
+                runtime, session_id, provider_chain, model, messages,
+                full_text_parts, tool_results, stream_start, False, stream_error_text,
+            )
             return
 
         if not tool_calls:
@@ -929,6 +991,19 @@ async def stream_response(runtime, event, ctx=None):
     await asyncio.to_thread(session_mgr.history.save_session, session)
 
     _memory_consolidate(runtime, session_id, is_private, session_mgr)
+
+    _record_stream_telemetry(
+        runtime,
+        session_id,
+        provider_chain,
+        model,
+        messages,
+        full_text_parts,
+        tool_results,
+        stream_start,
+        success=bool("".join(full_text_parts).strip()) and not stream_error_text,
+        error_text=stream_error_text,
+    )
 
     if ctx is not None:
         ctx.response_text = full_text

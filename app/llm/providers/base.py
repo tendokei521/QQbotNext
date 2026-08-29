@@ -117,9 +117,14 @@ class BaseProvider:
 
     name = "base"
     alias_names: tuple[str, ...] = ()
+    capabilities: tuple[str, ...] = ("chat", "stream")
 
     def __init__(self, config: dict) -> None:
         self.config = config or {}
+
+    def supports(self, capability: str) -> bool:
+        """声明该 Provider 是否支持某项能力。"""
+        return capability in self.capabilities
 
     async def get_models(self) -> list[str]:
         """返回该连接可用的模型列表；不支持时返回空列表。"""
