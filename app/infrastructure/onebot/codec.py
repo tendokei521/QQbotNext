@@ -30,6 +30,7 @@ EVENT_NAMES: dict[str, str] = {
     "request_group": "群申请",
     "request_private": "好友申请",
     "notice_poke": "戳一戳",
+    "notice_input_status": "对方正在输入",
     "notice_group_emoji": "群表情",
     "notice_group_recall": "群撤回",
     "notice_private_recall": "私信撤回",
@@ -108,7 +109,6 @@ def _decode_notice(payload: dict, bot: IBot) -> NoticeEvent:
     sub_type = payload.get("sub_type", "")
 
     event_type_map = {
-        "notify": "notice_poke",
         "group_msg_emoji_like": "notice_group_emoji",
         "group_recall": "notice_group_recall",
         "friend_recall": "notice_private_recall",
@@ -117,6 +117,14 @@ def _decode_notice(payload: dict, bot: IBot) -> NoticeEvent:
         "bot_offline": "bot_offline",
     }
     event_type = event_type_map.get(notice_type, f"notice_{notice_type}")
+    # OneBot `notify` 有多个子类型：poke / input_status / lucky_king / honor ...
+    if notice_type == "notify":
+        if sub_type == "input_status":
+            event_type = "notice_input_status"
+        elif sub_type == "poke":
+            event_type = "notice_poke"
+        else:
+            event_type = f"notice_{sub_type}"
 
     common = _base(payload, bot, event_type)
     common.update(

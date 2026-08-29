@@ -72,6 +72,18 @@ def test_decode_poke_notice():
     assert event.group_id == 999
 
 
+def test_decode_input_status_not_notice_poke():
+    payload = _base_payload(
+        post_type="notice", notice_type="notify", sub_type="input_status",
+        group_id=0, user_id=1901691195, self_id=3437542570,
+    )
+    event = decode(payload, FakeBot())
+    assert isinstance(event, NoticeEvent)
+    assert event.event_type == "notice_input_status"
+    assert event.group_id == 0
+    assert event.target_id == 0
+
+
 def test_decode_recall_notice():
     payload = _base_payload(
         post_type="notice", notice_type="group_recall",

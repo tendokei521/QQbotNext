@@ -666,6 +666,8 @@ def _event_text(event: BaseEvent) -> str:
     t = event.event_type
     uid = event.user_id or 0
     if isinstance(event, NoticeEvent):
+        if t == "notice_input_status":
+            return f"{uid}正在输入"
         if t == "notice_poke":
             operator = getattr(event, "operator_id", 0) or uid
             target = getattr(event, "target_id", 0) or 0
