@@ -32,12 +32,17 @@ async def _handler(runtime, tool: dict, ctx: ToolContext | None, args: dict) -> 
     if bot is None:
         return "error: 当前上下文无可用 Bot"
     name = str(tool.get("name", ""))
+    session_id = getattr(ctx, "session_id", "") if ctx is not None else ""
+    logger.add_info("NapCatTool").info(
+        f"[NapCat] 调用 {name} 会话={session_id} args={json.dumps(args, ensure_ascii=False)}"
+    )
     try:
         response = await bot.call_api(name, args)
     except Exception as e:
         logger.add_info("NapCatTool").warning(f"[NapCat] {name} 执行异常: {e}")
         return f"error: {name} 执行异常: {e}"
     result = _format_result(response, name)
+    logger.add_info("NapCatTool").info(f"[NapCat] {name} 返回: {result[:500]}")
     max_len = 2000
     try:
         max_len = int(getattr(runtime, "config", None).get("napcat_tools_max_result", DEFAULT_MAX_RESULT) or DEFAULT_MAX_RESULT)
