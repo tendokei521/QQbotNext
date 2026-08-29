@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from app.llm.config import LEGACY_LLM_CONNECTION_KEYS
+from app.llm.config_schema import STREAM_PRESETS
 from app.services.bot_service import PASSWORD_MASK as _PASSWORD_MASK
 from app.services.provider_model_service import ProviderModelService
 from app.services.provider_preset_service import ProviderPresetService
@@ -92,6 +93,7 @@ async def agent_config(request: Request, bot_id: int | None = Depends(parse_bot_
         "schema": schema,
         "provider_presets": presets,
         "provider_models": provider_models,
+        "stream_presets": STREAM_PRESETS,
     })
 
 

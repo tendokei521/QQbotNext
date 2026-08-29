@@ -3,6 +3,7 @@
 SCHEMA = {
     # ==================== 分组定义 ====================
     "group_switch": {"type": "group", "label": "功能开关", "collapsible": True},
+    "group_model": {"type": "group", "label": "模型参数", "collapsible": True},
     "group_session": {"type": "group", "label": "会话管理", "collapsible": True},
     "group_compress": {"type": "group", "label": "上下文压缩", "collapsible": True},
     "group_trigger": {"type": "group", "label": "触发设置", "collapsible": True},
@@ -28,6 +29,18 @@ SCHEMA = {
     "reply_cooldown": {
         "type": "number", "label": "回复冷却时间(秒)", "description": "群聊时Bot回复后多少秒内不再响应新消息",
         "default": 5, "min": 1, "max": 30, "group": "group_switch",
+    },
+    "model": {
+        "type": "string", "label": "默认模型（回退）", "description": "未配置模型池时的默认模型名",
+        "default": "deepseek-chat", "group": "group_model",
+    },
+    "temperature": {
+        "type": "number", "label": "温度", "description": "随机性；越大回复越有创造性",
+        "default": 0.7, "min": 0, "max": 2, "step": 0.1, "group": "group_model",
+    },
+    "max_tokens": {
+        "type": "number", "label": "最大输出 Tokens", "description": "单次回复的最大 token 数",
+        "default": 1024, "min": 1, "max": 32768, "group": "group_model",
     },
     "stream_output": {
         "type": "boolean", "label": "流式输出", "description": "启用后 LLM 回复按句子流式发送（支持带 tools 的工具调用）",
@@ -448,3 +461,94 @@ for _key, _def in SCHEMA.items():
         and _key != "experimental_long_term_memory"
     ):
         _def["showIf"] = {"key": "experimental_long_term_memory", "value": True}
+
+# ==================== 前端页面/重要性元数据 ====================
+# Agent 前端用专用页面承载核心配置，不再只依赖通用 ConfigForm。
+_PAGE_BY_GROUP = {
+    "group_switch": "basic",
+    "group_model": "model",
+    "group_session": "basic",
+    "group_compress": "basic",
+    "group_trigger": "behavior",
+    "group_context": "behavior",
+    "group_interrupt": "behavior",
+    "group_stream": "stream",
+    "group_proactive": "panels",
+    "group_schedule": "panels",
+    "group_memory": "memory",
+    "group_knowledge": "knowledge",
+    "group_mcp": "mcp",
+    "group_permission": "permission",
+}
+
+_IMPORTANCE_BY_GROUP = {
+    "group_switch": "basic",
+    "group_model": "basic",
+    "group_session": "basic",
+    "group_compress": "advanced",
+    "group_trigger": "basic",
+    "group_context": "advanced",
+    "group_interrupt": "advanced",
+    "group_stream": "advanced",
+    "group_proactive": "advanced",
+    "group_schedule": "advanced",
+    "group_memory": "advanced",
+    "group_knowledge": "advanced",
+    "group_mcp": "advanced",
+    "group_permission": "basic",
+}
+
+for _key, _def in SCHEMA.items():
+    if isinstance(_def, dict) and _def.get("group"):
+        _def.setdefault("page", _PAGE_BY_GROUP.get(_def["group"], "basic"))
+        _def.setdefault("importance", _IMPORTANCE_BY_GROUP.get(_def["group"], "advanced"))
+
+# ==================== 流式回复预设 ====================
+# fast：平均 500–1000ms；normal：平均 1000–2000ms；slow：平均 3000–4000ms
+STREAM_PRESETS: dict[str, dict] = {
+    "fast": {
+        "label": "快速",
+        "description": "平均约 500–1000ms，消息紧跟生成节奏",
+        "config": {
+            "stream_send_interval_mode": "fixed",
+            "stream_send_interval_base_ms": 750,
+            "stream_send_interval_min_ms": 500,
+            "stream_send_interval_max_ms": 1000,
+            "stream_send_curve": "sqrt",
+            "stream_send_curve_k": 200,
+            "stream_short_message_length": 10,
+            "stream_short_message_delay_ms": 500,
+            "stream_long_message_delay_ms": 1000,
+        },
+    },
+    "normal": {
+        "label": "正常",
+        "description": "平均约 1000–2000ms，自然但有节奏",
+        "config": {
+            "stream_send_interval_mode": "fixed",
+            "stream_send_interval_base_ms": 1500,
+            "stream_send_interval_min_ms": 1000,
+            "stream_send_interval_max_ms": 2000,
+            "stream_send_curve": "sqrt",
+            "stream_send_curve_k": 200,
+            "stream_short_message_length": 10,
+            "stream_short_message_delay_ms": 1200,
+            "stream_long_message_delay_ms": 2000,
+        },
+    },
+    "slow": {
+        "label": "偏慢",
+        "description": "平均约 3000–4000ms，更有“思考感”",
+        "config": {
+            "stream_send_interval_mode": "fixed",
+            "stream_send_interval_base_ms": 3500,
+            "stream_send_interval_min_ms": 3000,
+            "stream_send_interval_max_ms": 4000,
+            "stream_send_curve": "sqrt",
+            "stream_send_curve_k": 200,
+            "stream_short_message_length": 10,
+            "stream_short_message_delay_ms": 3000,
+            "stream_long_message_delay_ms": 4000,
+        },
+    },
+}
