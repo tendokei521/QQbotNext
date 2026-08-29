@@ -83,6 +83,14 @@ const pages = computed(() => [
     color: 'blue-grey',
   },
   {
+    to: '/agent/napcat',
+    title: 'NapCat 工具',
+    icon: 'mdi-robot-industrial',
+    desc: '把 NapCat/OneBot API 暴露给 LLM',
+    status: agent.draft.napcat_tools_enable ? '开启' : '关闭',
+    color: 'teal',
+  },
+  {
     to: '/agent/panels',
     title: '定时任务 / 主动消息',
     icon: 'mdi-clock-outline',

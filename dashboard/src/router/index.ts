@@ -22,6 +22,7 @@ const router = createRouter({
         { path: 'agent/memory', name: 'agent-memory', component: () => import('@/views/AgentMemoryPage.vue'), meta: { title: 'Agent 长期记忆' } },
         { path: 'agent/knowledge', name: 'agent-knowledge', component: () => import('@/views/AgentKnowledgePage.vue'), meta: { title: 'Agent 知识库' } },
         { path: 'agent/mcp', name: 'agent-mcp', component: () => import('@/views/AgentMcpPage.vue'), meta: { title: 'Agent MCP 工具' } },
+        { path: 'agent/napcat', name: 'agent-napcat', component: () => import('@/views/AgentNapcatPage.vue'), meta: { title: 'Agent NapCat 工具' } },
         { path: 'agent/panels', name: 'agent-panels', component: () => import('@/views/AgentPanelsPage.vue'), meta: { title: 'Agent 定时任务 / 主动消息' } },
         { path: 'provider-presets', name: 'provider-presets', component: () => import('@/views/ProviderPresetsPage.vue'), meta: { title: 'Provider 预设' } },
         { path: 'config-profiles', name: 'config-profiles', component: () => import('@/views/ConfigProfilesPage.vue'), meta: { title: '配置档案' } },

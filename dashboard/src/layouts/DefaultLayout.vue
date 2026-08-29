@@ -63,6 +63,7 @@ const navItems = computed<NavItem[]>(() => {
     { to: '/agent/memory', title: '长期记忆' },
     { to: '/agent/knowledge', title: '知识库' },
     { to: '/agent/mcp', title: 'MCP 工具' },
+    { to: '/agent/napcat', title: 'NapCat 工具' },
     { to: '/agent/panels', title: '定时任务 / 主动消息' },
   ]
   const items: NavItem[] = [
