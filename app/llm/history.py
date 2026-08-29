@@ -152,6 +152,29 @@ class HistoryManager:
                 lines.append(f"[{role}]: {content}")
         return "\n".join(lines)
 
+    def update_history(self, task_id: str, *, title: str | None = None, messages: list | None = None) -> dict | None:
+        """更新归档里的标题或消息列表，返回更新后的完整数据。"""
+        data = self.load_history(task_id)
+        if data is None:
+            return None
+        if title is not None:
+            data["title"] = str(title).strip()
+        if messages is not None:
+            if not isinstance(messages, list):
+                raise ValueError("messages 必须是数组")
+            data["messages"] = messages
+        try:
+            file_path = self._file_path(task_id)
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.add_info(f"#{self.bot_id}").error(f"更新历史失败 (task: {task_id}): {e}")
+            raise
+        logger.add_info(f"#{self.bot_id}").debug(
+            f"历史已更新: {task_id} (title={data.get('title')!r}, messages={len(data.get('messages') or [])})"
+        )
+        return data
+
     def delete_history(self, task_id: str) -> bool:
         try:
             file_path = self._file_path(task_id)
@@ -400,6 +423,23 @@ class SQLiteHistoryStore:
             else:
                 lines.append(f"[{role}]: {content}")
         return "\n".join(lines)
+
+    def update_history(self, task_id: str, *, title: str | None = None, messages: list | None = None) -> dict | None:
+        """更新归档里的标题或消息列表，返回更新后的完整数据。"""
+        data = self.load_history(task_id)
+        if data is None:
+            return None
+        if title is not None:
+            data["title"] = str(title).strip()
+        if messages is not None:
+            if not isinstance(messages, list):
+                raise ValueError("messages 必须是数组")
+            data["messages"] = messages
+        self._insert_conversation(data)
+        logger.add_info(f"#{self.bot_id}").debug(
+            f"历史已更新(SQLite): {task_id} (title={data.get('title')!r}, messages={len(data.get('messages') or [])})"
+        )
+        return data
 
     def delete_history(self, task_id: str) -> bool:
         with self._lock:
