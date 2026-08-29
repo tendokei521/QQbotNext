@@ -65,12 +65,6 @@ function setToolPermission(tool: NapCatTool, permission: string) {
   updateOverride(tool, { permission })
 }
 
-function toggleToolScope(tool: NapCatTool, scope: string) {
-  const current = toolScopes(tool)
-  const scopes = current.includes(scope) ? current.filter((s) => s !== scope) : [...current, scope]
-  updateOverride(tool, { scopes })
-}
-
 function isSensitiveWide(tool: NapCatTool): boolean {
   if (!['high', 'critical'].includes(tool.sensitivity)) return false
   return ['everyone', 'member'].includes(toolPermission(tool))
@@ -183,9 +177,9 @@ watch(
                 <div class="tool-name">{{ tool.name }}</div>
                 <div class="tool-desc">{{ tool.description }}</div>
                 <div class="tool-meta d-flex gap-2 flex-wrap">
-                  <v-chip size="x-small" variant="tonal" :color="riskColor(tool.risk)">{{ riskLabel(tool.risk) }}</v-chip>
-                  <v-chip size="x-small" variant="tonal">权限: {{ permissionLabel(tool.permission) }}</v-chip>
-                  <v-chip size="x-small" variant="tonal">作用域: {{ tool.scopes.join(', ') }}</v-chip>
+                  <v-chip size="small" variant="tonal" :color="riskColor(tool.risk)">{{ riskLabel(tool.risk) }}</v-chip>
+                  <v-chip size="small" variant="tonal">权限: {{ permissionLabel(toolPermission(tool)) }}</v-chip>
+                  <v-chip size="small" variant="tonal">作用域: {{ toolScopes(tool).join(' / ') }}</v-chip>
                 </div>
               </div>
               <v-switch
@@ -214,23 +208,9 @@ watch(
                 hide-details
                 @update:model-value="(v: any) => setToolPermission(tool, v)"
               />
-              <div class="scope-check">
-                <v-checkbox
-                  :model-value="toolScopes(tool).includes('group')"
-                  :disabled="!enabled"
-                  label="群聊"
-                  density="compact"
-                  hide-details
-                  @update:model-value="toggleToolScope(tool, 'group')"
-                />
-                <v-checkbox
-                  :model-value="toolScopes(tool).includes('private')"
-                  :disabled="!enabled"
-                  label="私聊"
-                  density="compact"
-                  hide-details
-                  @update:model-value="toggleToolScope(tool, 'private')"
-                />
+              <div class="tool-scope-static">
+                <span class="text-caption">作用域：</span>
+                <span class="font-weight-medium">{{ toolScopes(tool).join(' / ') }}</span>
               </div>
               <v-alert v-if="isSensitiveWide(tool)" type="warning" variant="tonal" density="compact" class="mt-2">
                 ⚠️ {{ tool.name }} 是高/极高敏感工具，默认权限为 {{ permissionLabel(tool.base_permission) }}，当前放宽为 {{ permissionLabel(toolPermission(tool)) }}。
@@ -291,11 +271,11 @@ watch(
 
 .tool-name {
   font-weight: 600;
-  font-size: 15px;
+  font-size: 16px;
 }
 
 .tool-desc {
-  font-size: 13px;
+  font-size: 14px;
   color: rgba(var(--v-theme-on-surface), 0.65);
   margin: 2px 0 4px;
 }
@@ -318,9 +298,13 @@ watch(
   opacity: 0.55;
 }
 
-.scope-check {
-  display: flex;
-  gap: 8px;
+.tool-policy :deep(.v-select) {
+  max-width: 180px;
+}
+
+.tool-scope-static {
+  font-size: 14px;
+  color: rgba(var(--v-theme-on-surface), 0.7);
 }
 
 .tool-detail {
