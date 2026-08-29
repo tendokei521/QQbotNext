@@ -339,6 +339,24 @@ class Module(BaseModule):
 - 工具执行带 20s 超时、异常兜底、结果截断；
 - 模块未启用（authority.enabled=False）时工具自动不注入。
 
+工具支持**权限与作用域**：
+
+```python
+@tool(
+    description="仅管理员可使用的群管工具",
+    parameters={...},
+    permission="group_admin",   # everyone / member / group_admin / group_owner / owner
+    scopes=["group"],           # group / private / ["*"]
+)
+async def admin_delete(self, ctx: ToolContext, args: dict) -> str:
+    ...
+```
+
+- `permission` 默认 `everyone`；
+- `scopes` 默认 `["group", "private"]`；
+- 私聊场景下 `group_admin` / `group_owner` 自动降级为 `member`，与模块权限语义一致；
+- 无权限时工具执行返回 `error: 无权限调用工具 <name>`，并触发 `tool_call_hook` 记录失败。
+
 ## 4.4 模块给 LLM 注入技能（`@skill` / `SKILLS`）
 
 技能是写入 system prompt 的能力说明，让模型知道“何时用、怎么做”：

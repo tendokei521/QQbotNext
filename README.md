@@ -34,7 +34,7 @@ module/                         插件目录（三级结构）
 ├── modules/                    业务插件主体（每个子目录 = 一个插件）
 ├── configs/                    每模块配置（<name>/config.json + authority.json，迁移源）
 └── data/                       每模块可选持久化数据（get_data_path 自动创建）
-data/                           SQLite（data/app.db）+ 框架级 LLM 数据（data/llm）
+data/                           SQLite（data/app.db）+ 框架级 LLM 数据（data/llm，含历史/记忆/知识库）
 logs/                           日志目录
 ```
 
@@ -230,6 +230,40 @@ class Module(BaseModule):
 - `@tool`：注册为 LLM function calling 工具（带 `ToolContext` / 超时 / 截断）
 - `SKILLS` / `@skill`：注入 system prompt 的技能说明
 - 模块 `config` 里可用 `tools_enabled` / `skills_enabled` 单独开关工具与技能
+
+工具支持**权限与作用域**：
+
+```python
+@tool(
+    description="删除群消息",
+    parameters={...},
+    permission="group_admin",      # everyone/member/group_admin/group_owner/owner
+    scopes=["group"],              # group / private / ["*"]
+)
+async def delete_message(self, ctx, args):
+    ...
+```
+
+### 模型 Provider
+
+框架内置三类原生适配器：
+
+| Provider | 说明 |
+|---|---|
+| `openai` | OpenAI 兼容协议（DeepSeek / Ollama / OpenRouter 等） |
+| `anthropic` | Anthropic Claude Messages API |
+| `gemini` | Google Gemini Generative Language API |
+
+第三方插件还可以用 `register_provider(name, cls, aliases=...)` 运行期注册新适配器。
+
+### LLM 可观测性
+
+每次 LLM 请求会记录延迟 / token / provider / model / 工具调用 / LLM 钩子耗时，可以通过 WebUI 读取：
+
+```http
+GET /agent/telemetry?bot_id=<qq>&limit=30
+POST /agent/telemetry/reset?bot_id=<qq>
+```
 
 ### 流式输出（带 tools）
 

@@ -5,6 +5,8 @@ aiohttp>=3.8
 brotlicffi>=1.1
 curl_cffi>=0.15
 aiosqlite>=0.19
+# 可选：知识库 ANN 检索，安装后自动启用 sqlite-vec（pip install -e .[vector] 或 pip install sqlite-vec）
+# sqlite-vec>=0.1.6
 pydantic>=2.4
 pydantic-settings>=2.0
 jinja2>=3.1

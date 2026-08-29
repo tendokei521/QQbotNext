@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### LLM 可扩展性优化（P0/P1）
+
+- 新增 LLM 可观测性：`/agent/telemetry` 记录延迟 / token / provider / model / 工具 / 钩子耗时
+- 会话历史从 JSON 目录扫描迁移到 SQLite 索引存储，旧 JSON 自动导入
+- 新增会话级异步锁与 LlmPool 默认串行化，避免同会话并发请求/写历史
+- Provider 增加能力协商与运行期注册；新增 Anthropic / Gemini 原生适配器
+- 工具增加权限与作用域：`@tool(permission=..., scopes=[...])`
+- 知识库检索可选启用 sqlite-vec ANN 后端，未安装时自动回退 SQLite 余弦扫描
+
 ## [2.0.0] - 2026-08-17
 
 QQBot Next 2.0 首个正式 Release：基于 OneBot 协议的多账号 QQ 机器人框架，采用分层 + 插件架构。
