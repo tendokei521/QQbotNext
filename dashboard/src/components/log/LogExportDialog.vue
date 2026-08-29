@@ -70,7 +70,14 @@ function parseKey(key: string): { folder: string; name: string } {
 }
 
 function selectedItems() {
-  return selected.value.map(parseKey)
+  return selected.value.map((key) => {
+    const item = parseKey(key)
+    return {
+      // 前端“当前轮次”用 current 展示，后端用空字符串表示当前目录
+      folder: item.folder === 'current' ? '' : item.folder,
+      name: item.name,
+    }
+  })
 }
 
 function fmtSize(size: number): string {
@@ -320,6 +327,10 @@ onMounted(() => {
 
 .file-row:hover {
   background: rgba(var(--v-theme-primary), 0.04);
+}
+
+.file-row :deep(.v-checkbox-btn) {
+  margin-left: auto;
 }
 
 .file-info {
