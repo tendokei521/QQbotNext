@@ -97,6 +97,13 @@ async def format_user_context(ctx):
         if user_id:
             qq_line = f"(QQ: {user_id})"
 
+    # 群聊：注入当前群号，避免调用 NapCat send_poke 等工具时遗漏 group_id
+    group_line = ""
+    if is_group:
+        group_id = getattr(getattr(event, "group", None), "group_id", None)
+        if group_id:
+            group_line = f"(当前群号: {group_id})"
+
     if is_group:
         if _ctx_enabled(ctx, "include_sender", True) and info.get("sender"):
             sender = _render_sender(info["sender"])
@@ -128,6 +135,8 @@ async def format_user_context(ctx):
     elif sender_style == "single" and sender_label:
         parts.insert(0, sender_label)
 
+    if group_line:
+        parts.insert(0, group_line)
     if qq_line:
         parts.insert(0, qq_line)
     if time_line:

@@ -191,13 +191,13 @@ NAP_CAT_TOOLS: list[dict] = [
     },
     {
         "name": "send_poke",
-        "description": "发送戳一戳。",
+        "description": "发送戳一戳。群聊中必须填写当前群号 group_id，否则会变成私聊戳一戳；私聊只需填写 user_id。",
         "parameters": {
             "type": "object",
             "properties": {
-                "user_id": {"type": "integer"},
-                "group_id": {"type": "integer"},
-                "target_id": {"type": "integer"},
+                "user_id": {"type": "integer", "description": "被戳的用户 QQ 号"},
+                "group_id": {"type": "integer", "description": "群号；群聊中戳一戳必填，应填写当前群号"},
+                "target_id": {"type": "integer", "description": "目标 QQ 号（NapCat 扩展字段），通常可省略"},
             },
             "required": ["user_id"],
         },
