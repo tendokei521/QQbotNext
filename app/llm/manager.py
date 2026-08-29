@@ -15,6 +15,7 @@ from typing import Any
 
 from app.llm import logger
 from app.llm.config import AgentConfig
+from app.llm.enhance import install_framework_hooks
 from app.llm.hooks import LlmHookRegistry, ToolCallHookRegistry
 from app.llm.knowledge import KnowledgeManager
 from app.llm.mcp import MCPManager
@@ -69,6 +70,7 @@ class AgentRuntime:
 
         # LLM 流水线：模块可在任意阶段注册钩子
         self.llm_hooks = LlmHookRegistry()
+        install_framework_hooks(self)
         self.llm_tool_call_hooks = ToolCallHookRegistry(logger)
         self.llm_pipeline = LlmPipeline(self, task_manager=task_manager)
         # 模块扩展：@tool 工具 + 技能

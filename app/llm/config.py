@@ -67,6 +67,7 @@ DEFAULT_LLM_CONFIG: dict = {
     "reply_cooldown": 5,
     # 用户信息感知（LLM 增强注入：发送者 / 提到 / 引用 / 正文 / 时间；无总开关，按子项生效）
     "include_time": True,
+    "include_private_qq": True,     # 私信时独立注入对方 QQ
     "include_sender": True,
     "include_mentioned": True,
     "include_quote": True,
@@ -78,6 +79,7 @@ DEFAULT_LLM_CONFIG: dict = {
     "interrupt_enable": False,
     "interrupt_save_sent": True,
     "interrupt_debug": False,
+    "debug_prompt": False,             # 打印本轮完整 prompt（调试）
     # 权限：Agent 可响应的事件权限角色
     "permission": "member",
     # 主动消息

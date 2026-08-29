@@ -190,6 +190,11 @@ SCHEMA = {
         "description": "在最新一轮用户消息开头插入当前时间，例如 (时间：2026-08-17 10:00:00)",
         "default": True, "group": "group_context",
     },
+    "include_private_qq": {
+        "type": "boolean", "label": "私信包含对方QQ",
+        "description": "私信场景下在时间行后独立注入对方 QQ，格式：(QQ: 123456789)",
+        "default": True, "group": "group_context",
+    },
     "include_sender": {
         "type": "boolean", "label": "包含发送者信息",
         "description": "群聊中附加发送者昵称和 QQ",
@@ -241,6 +246,11 @@ SCHEMA = {
         "type": "boolean", "label": "调试回复打断",
         "description": "开启后打印回复被打断的日志",
         "default": False, "group": "group_interrupt",
+    },
+    "debug_prompt": {
+        "type": "boolean", "label": "调试打印 Prompt",
+        "description": "开启后打印本轮完整用户上下文与 prompt",
+        "default": False, "group": "group_context",
     },
 
     # ==================== 权限 ====================
