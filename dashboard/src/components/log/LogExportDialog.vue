@@ -198,10 +198,10 @@ onMounted(() => {
             <div class="folder-row" @click="toggleFolder(folder.key)">
               <v-icon size="small" :icon="isExpanded(folder.key) ? 'mdi-chevron-down' : 'mdi-chevron-right'" />
               <span class="folder-label">{{ folder.label }}</span>
-              <v-chip size="x-small" variant="tonal" class="ml-2">{{ folder.files.length }} 个文件</v-chip>
+              <v-chip size="small" variant="tonal" class="ml-2">{{ folder.files.length }} 个文件</v-chip>
               <v-spacer />
               <v-btn
-                size="x-small"
+                size="small"
                 variant="text"
                 :disabled="!folder.files.length"
                 @click.stop="toggleFolderAll(folder)"
@@ -217,14 +217,15 @@ onMounted(() => {
                 class="file-row"
                 @click="toggleFile(folder.key, f.name)"
               >
+                <div class="file-info">
+                  <span class="file-name">{{ f.name }}</span>
+                  <span class="file-meta">{{ fmtSize(f.size) }} · {{ fmtTime(f.mtime) }}</span>
+                </div>
                 <v-checkbox-btn
                   :model-value="hasFile(folder.key, f.name)"
                   color="primary"
-                  density="compact"
                   @update:model-value="toggleFile(folder.key, f.name)"
                 />
-                <span class="file-name">{{ f.name }}</span>
-                <span class="file-meta">{{ fmtSize(f.size) }} · {{ fmtTime(f.mtime) }}</span>
               </div>
               <div v-if="!folder.files.length" class="empty-files">
                 该时段暂无日志文件
@@ -287,8 +288,8 @@ onMounted(() => {
 .folder-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 10px 8px;
+  gap: 8px;
+  padding: 12px 10px;
   border-radius: 6px;
   cursor: pointer;
   user-select: none;
@@ -301,18 +302,18 @@ onMounted(() => {
 
 .folder-label {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .folder-files {
-  padding: 2px 8px 8px 28px;
+  padding: 4px 8px 10px 28px;
 }
 
 .file-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 2px 4px;
+  gap: 10px;
+  padding: 8px 6px;
   border-radius: 6px;
   cursor: pointer;
 }
@@ -321,19 +322,27 @@ onMounted(() => {
   background: rgba(var(--v-theme-primary), 0.04);
 }
 
+.file-info {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .file-name {
-  font-size: 13px;
+  font-size: 15px;
+  font-weight: 500;
 }
 
 .file-meta {
-  margin-left: auto;
-  font-size: 12px;
+  font-size: 13px;
   color: rgba(var(--v-theme-on-surface), 0.55);
 }
 
 .empty-files {
-  padding: 6px 10px;
-  font-size: 12px;
+  padding: 8px 10px;
+  font-size: 13px;
   color: rgba(var(--v-theme-on-surface), 0.5);
 }
 
