@@ -128,6 +128,11 @@ DEFAULT_LLM_CONFIG: dict = {
     # MCP（Model Context Protocol）stdio server 配置
     # [{"name":"filesystem","command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","/tmp"],"env":{},"timeout":30}]
     "mcp_servers": [],
+    # NapCat / OneBot 通用工具：数据驱动地暴露 NapCat API 给 LLM
+    "napcat_tools_enable": False,      # 总开关
+    "napcat_tools_allowed": [],        # 空=全部；非空=只允许白名单
+    "napcat_tools_denied": [],         # 黑名单（优先级高于白名单）
+    "napcat_tools_max_result": 2000,   # 返回结果截断长度
 }
 
 # 框架级 Agent 配置/权限存储的 module_name

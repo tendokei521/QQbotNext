@@ -166,3 +166,7 @@ class IBot(ABC):
 
     @abstractmethod
     async def set_restart(self, delay: int = 0) -> dict: ...
+
+    # ---------- 通用 API ----------
+    @abstractmethod
+    async def call_api(self, action: str, params: dict | None = None) -> dict | None: ...

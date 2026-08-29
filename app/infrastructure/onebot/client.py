@@ -435,6 +435,10 @@ class BotConnection(IBot):
     async def set_restart(self, delay: int = 0) -> dict:
         return await self._send("set_restart", {"delay": delay})
 
+    async def call_api(self, action: str, params: dict | None = None) -> dict | None:
+        """通用 OneBot/NapCat API 调用入口，供 LLM 扩展工具使用。"""
+        return await self._send(str(action), params or {})
+
 
 def _to_payload(message: SegmentLike) -> Any:
     """把 str / Message / 段数组 统一为 OneBot message 参数。"""

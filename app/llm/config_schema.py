@@ -15,6 +15,7 @@ SCHEMA = {
     "group_memory": {"type": "group", "label": "长期记忆（实验性）", "collapsible": True},
     "group_knowledge": {"type": "group", "label": "知识库", "collapsible": True},
     "group_mcp": {"type": "group", "label": "MCP 工具", "collapsible": True},
+    "group_napcat": {"type": "group", "label": "NapCat 工具", "collapsible": True},
     "group_permission": {"type": "group", "label": "权限", "collapsible": True},
 
     # ==================== 配置项 ====================
@@ -420,6 +421,24 @@ SCHEMA = {
         "default": "[]", "rows": 5, "group": "group_mcp",
     },
 
+    # ==================== NapCat 工具 ====================
+    "napcat_tools_enable": {
+        "type": "boolean", "label": "启用 NapCat 工具", "description": "把 NapCat/OneBot API 暴露给 LLM 作为 function calling 工具",
+        "default": False, "group": "group_napcat",
+    },
+    "napcat_tools_allowed": {
+        "type": "string_list", "label": "允许的工具（白名单）", "description": "留空表示允许全部；非空时只允许列出的工具",
+        "default": [], "group": "group_napcat",
+    },
+    "napcat_tools_denied": {
+        "type": "string_list", "label": "禁用的工具（黑名单）", "description": "黑名单优先于白名单，可在此关闭敏感工具",
+        "default": [], "group": "group_napcat",
+    },
+    "napcat_tools_max_result": {
+        "type": "number", "label": "返回结果截断长度", "description": "API 返回内容超过该长度后截断，防止撑爆上下文",
+        "default": 2000, "min": 100, "max": 20000, "group": "group_napcat",
+    },
+
     # ==================== 感知增强提示词细调（实验性） ====================
     "meta_sender_style": {
         "type": "select", "label": "发送者标签样式", "description": "旧版=“发送者：”；新版=“发送者昵称：”；单行=“昵称(QQ): 正文”",
@@ -478,6 +497,7 @@ _PAGE_BY_GROUP = {
     "group_memory": "memory",
     "group_knowledge": "knowledge",
     "group_mcp": "mcp",
+    "group_napcat": "napcat",
     "group_permission": "permission",
 }
 
@@ -495,6 +515,7 @@ _IMPORTANCE_BY_GROUP = {
     "group_memory": "advanced",
     "group_knowledge": "advanced",
     "group_mcp": "advanced",
+    "group_napcat": "advanced",
     "group_permission": "basic",
 }
 
