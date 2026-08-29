@@ -58,13 +58,13 @@ def _file_info(path: Path) -> dict:
 
 
 def _safe_resolve(log_dir: Path, folder: str, filename: str) -> Path:
-    if folder:
-        folder = str(folder or "").strip()
+    folder = str(folder or "").strip()
+    if folder in ("", "current"):
+        base = log_dir
+    else:
         if not _ARCHIVE_FOLDER_RE.match(folder):
             raise ValueError(f"非法归档目录: {folder}")
         base = log_dir / folder
-    else:
-        base = log_dir
     filename = str(filename or "").strip()
     if filename not in LOG_FILENAMES:
         raise ValueError(f"非法日志文件名: {filename}")
