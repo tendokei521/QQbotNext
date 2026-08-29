@@ -170,6 +170,57 @@ async def agent_telemetry_reset(request: Request, bot_id: int | None = Depends(p
     return _ok(f"Bot {bot_id} LLM 遥测已重置", **result)
 
 
+# ==================== 知识库管理 ====================
+
+@router.get("/knowledge/items")
+async def agent_knowledge_items(request: Request, bot_id: int | None = Depends(parse_bot_id), limit: int = 100):
+    container = get_container(request)
+    runtime, _ = _runtime(container, bot_id)
+    if runtime is None:
+        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+    try:
+        items = runtime.knowledge.list(limit=max(1, min(limit, 500)))
+    except Exception as e:
+        return _err(500, f"读取知识库失败: {e}")
+    return JSONResponse(content={"ok": True, "items": items})
+
+
+@router.post("/knowledge/items")
+async def agent_knowledge_add(request: Request, bot_id: int | None = Depends(parse_bot_id)):
+    container = get_container(request)
+    runtime, _ = _runtime(container, bot_id)
+    if runtime is None:
+        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    title = str((body or {}).get("title", "") or "").strip()
+    content = str((body or {}).get("content", "") or "").strip()
+    source = str((body or {}).get("source", "manual") or "manual").strip()
+    if not content:
+        return _err(400, "内容不能为空")
+    cid, message = await runtime.knowledge.add_text(content, title=title, source=source)
+    if cid is None:
+        return _err(400, message)
+    return _ok("知识库条目已添加", cid=cid)
+
+
+@router.delete("/knowledge/items/{cid}")
+async def agent_knowledge_delete(cid: str, request: Request, bot_id: int | None = Depends(parse_bot_id)):
+    container = get_container(request)
+    runtime, _ = _runtime(container, bot_id)
+    if runtime is None:
+        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+    try:
+        ok = runtime.knowledge.delete(cid)
+    except Exception as e:
+        return _err(500, f"删除知识库失败: {e}")
+    if not ok:
+        return _err(404, "知识库条目不存在")
+    return _ok("知识库条目已删除")
+
+
 # ==================== 定时任务 ====================
 
 @router.get("/tasks")
