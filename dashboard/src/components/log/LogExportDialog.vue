@@ -21,6 +21,12 @@ interface ExportListResponse {
   archives: ArchiveInfo[]
 }
 
+interface LogFolder {
+  key: string
+  label: string
+  files: LogFileInfo[]
+}
+
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
@@ -29,12 +35,30 @@ const emit = defineEmits<{
 const notify = useNotifyStore()
 const loading = ref(false)
 const downloadingZip = ref(false)
-const downloadingFiles = ref(false)
 const list = ref<ExportListResponse>({ ok: true, logs_dir: '', current: [], archives: [] })
 const selected = ref<string[]>([])
+const expanded = ref<Record<string, boolean>>({})
 
 const selectedCount = computed(() => selected.value.length)
 const hasSelection = computed(() => selected.value.length > 0)
+
+const folders = computed<LogFolder[]>(() => {
+  const archiveFolders: LogFolder[] = [...list.value.archives]
+    .sort((a, b) => (a.folder < b.folder ? 1 : -1))
+    .map((a) => ({
+      key: a.folder,
+      label: a.folder,
+      files: a.files,
+    }))
+  return [
+    ...archiveFolders,
+    {
+      key: 'current',
+      label: '当前轮次',
+      files: list.value.current,
+    },
+  ]
+})
 
 function itemKey(folder: string, name: string): string {
   return `${folder}|${name}`
@@ -61,6 +85,14 @@ function fmtTime(ts: number): string {
   return new Date(ts * 1000).toLocaleString('zh-CN', { hour12: false })
 }
 
+function isExpanded(key: string): boolean {
+  return !!expanded.value[key]
+}
+
+function toggleFolder(key: string) {
+  expanded.value[key] = !expanded.value[key]
+}
+
 function hasFile(folder: string, name: string): boolean {
   return selected.value.includes(itemKey(folder, name))
 }
@@ -74,37 +106,17 @@ function toggleFile(folder: string, name: string) {
   }
 }
 
-function selectCurrentAll() {
-  const keys = list.value.current.map((f) => itemKey('', f.name))
-  selected.value = Array.from(new Set([...selected.value, ...keys]))
+function folderSelectedAll(folder: LogFolder): boolean {
+  return folder.files.length > 0 && folder.files.every((f) => hasFile(folder.key, f.name))
 }
 
-function clearCurrent() {
-  const keys = list.value.current.map((f) => itemKey('', f.name))
-  selected.value = selected.value.filter((k) => !keys.includes(k))
-}
-
-function selectArchiveAll(folder: string) {
-  const archive = list.value.archives.find((a) => a.folder === folder)
-  if (!archive) return
-  const keys = archive.files.map((f) => itemKey(folder, f.name))
-  selected.value = Array.from(new Set([...selected.value, ...keys]))
-}
-
-function clearArchive(folder: string) {
-  const archive = list.value.archives.find((a) => a.folder === folder)
-  if (!archive) return
-  const keys = archive.files.map((f) => itemKey(folder, f.name))
-  selected.value = selected.value.filter((k) => !keys.includes(k))
-}
-
-function allCurrentSelected(): boolean {
-  return list.value.current.length > 0 && list.value.current.every((f) => hasFile('', f.name))
-}
-
-function allArchiveSelected(folder: string): boolean {
-  const archive = list.value.archives.find((a) => a.folder === folder)
-  return !!archive && archive.files.length > 0 && archive.files.every((f) => hasFile(folder, f.name))
+function toggleFolderAll(folder: LogFolder) {
+  const keys = folder.files.map((f) => itemKey(folder.key, f.name))
+  if (folderSelectedAll(folder)) {
+    selected.value = selected.value.filter((k) => !keys.includes(k))
+  } else {
+    selected.value = Array.from(new Set([...selected.value, ...keys]))
+  }
 }
 
 function saveBlob(blob: Blob, filename: string) {
@@ -121,9 +133,9 @@ async function loadList() {
   try {
     const res = await http.get<ExportListResponse>('/api/logs/export/list')
     list.value = res.data
-    // 默认全选当前轮次
-    const currentKeys = list.value.current.map((f) => itemKey('', f.name))
-    selected.value = Array.from(new Set([...selected.value, ...currentKeys]))
+    // 默认全部折叠，用户点开文件夹后再选择
+    expanded.value = {}
+    selected.value = []
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   } finally {
@@ -150,32 +162,6 @@ async function downloadZip() {
   }
 }
 
-async function downloadSingle(item: { folder: string; name: string }) {
-  const params: Record<string, string> = { file: item.name }
-  if (item.folder) params.folder = item.folder
-  const res = await http.get('/api/logs/export/download', { params, responseType: 'blob' })
-  const filename = item.folder ? `${item.folder}_${item.name}` : item.name
-  const blob = res.data instanceof Blob ? res.data : new Blob([res.data])
-  saveBlob(blob, filename)
-}
-
-async function downloadSelectedIndividually() {
-  if (!hasSelection.value || downloadingFiles.value) return
-  downloadingFiles.value = true
-  try {
-    const items = selectedItems()
-    for (const item of items) {
-      await downloadSingle(item)
-      await new Promise((r) => setTimeout(r, 300))
-    }
-    notify.push('独立文件下载已开始', 'success')
-  } catch (err) {
-    notify.push(errorMessage(err), 'error')
-  } finally {
-    downloadingFiles.value = false
-  }
-}
-
 watch(
   () => props.modelValue,
   (open) => {
@@ -190,7 +176,7 @@ onMounted(() => {
 
 <template>
   <v-dialog :model-value="props.modelValue" max-width="720" @update:model-value="emit('update:modelValue', $event)">
-    <v-card>
+    <v-card class="log-export-card">
       <v-card-title class="d-flex align-center">
         <v-icon icon="mdi-file-export-outline" class="mr-2" color="primary" />
         导出日志
@@ -198,90 +184,55 @@ onMounted(() => {
         <v-btn icon="mdi-close" variant="text" size="small" @click="emit('update:modelValue', false)" />
       </v-card-title>
 
-      <v-card-text>
-        <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-3" />
+      <div class="log-export-body">
+        <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-2" />
 
-        <!-- 当前轮次 -->
-        <div class="log-group">
-          <div class="log-group-head">
-            <v-icon icon="mdi-clock-outline" size="small" /> 当前轮次
-            <v-spacer />
-            <v-btn v-if="!allCurrentSelected()" size="x-small" variant="text" @click="selectCurrentAll">全选</v-btn>
-            <v-btn v-else size="x-small" variant="text" @click="clearCurrent">取消全选</v-btn>
-          </div>
-          <v-list density="compact" class="log-file-list">
-            <v-list-item v-for="f in list.current" :key="itemKey('', f.name)">
-              <template #prepend>
+        <div class="folder-scroll">
+          <div v-for="folder in folders" :key="folder.key" class="folder-block">
+            <div class="folder-row" @click="toggleFolder(folder.key)">
+              <v-icon size="small" :icon="isExpanded(folder.key) ? 'mdi-chevron-down' : 'mdi-chevron-right'" />
+              <span class="folder-label">{{ folder.label }}</span>
+              <v-chip size="x-small" variant="tonal" class="ml-2">{{ folder.files.length }} 个文件</v-chip>
+              <v-spacer />
+              <v-btn
+                size="x-small"
+                variant="text"
+                :disabled="!folder.files.length"
+                @click.stop="toggleFolderAll(folder)"
+              >
+                {{ folderSelectedAll(folder) ? '取消全选' : '全选' }}
+              </v-btn>
+            </div>
+
+            <div v-if="isExpanded(folder.key)" class="folder-files">
+              <div
+                v-for="f in folder.files"
+                :key="itemKey(folder.key, f.name)"
+                class="file-row"
+                @click="toggleFile(folder.key, f.name)"
+              >
                 <v-checkbox-btn
-                  :model-value="hasFile('', f.name)"
+                  :model-value="hasFile(folder.key, f.name)"
                   color="primary"
                   density="compact"
-                  @update:model-value="toggleFile('', f.name)"
+                  @update:model-value="toggleFile(folder.key, f.name)"
                 />
-              </template>
-              <v-list-item-title>{{ f.name }}</v-list-item-title>
-              <v-list-item-subtitle>{{ fmtSize(f.size) }} · {{ fmtTime(f.mtime) }}</v-list-item-subtitle>
-            </v-list-item>
-          </v-list>
-        </div>
-
-        <!-- 历史归档 -->
-        <div class="log-group">
-          <div class="log-group-head">
-            <v-icon icon="mdi-archive-outline" size="small" /> 历史归档（6 小时轮转）
-          </div>
-          <div v-for="arch in list.archives" :key="arch.folder" class="archive-block">
-            <div class="archive-head">
-              <v-icon icon="mdi-folder-outline" size="small" /> {{ arch.folder }}
-              <v-spacer />
-              <v-btn v-if="!allArchiveSelected(arch.folder)" size="x-small" variant="text" @click="selectArchiveAll(arch.folder)">全选</v-btn>
-              <v-btn v-else size="x-small" variant="text" @click="clearArchive(arch.folder)">取消全选</v-btn>
-            </div>
-            <v-list density="compact" class="log-file-list">
-              <v-list-item v-for="f in arch.files" :key="itemKey(arch.folder, f.name)">
-                <template #prepend>
-                  <v-checkbox-btn
-                    :model-value="hasFile(arch.folder, f.name)"
-                    color="primary"
-                    density="compact"
-                    @update:model-value="toggleFile(arch.folder, f.name)"
-                  />
-                </template>
-                <v-list-item-title>{{ f.name }}</v-list-item-title>
-                <v-list-item-subtitle>{{ fmtSize(f.size) }} · {{ fmtTime(f.mtime) }}</v-list-item-subtitle>
-              </v-list-item>
-            </v-list>
-          </div>
-          <div v-if="!list.archives.length" class="text-caption pa-2" style="opacity: 0.55">
-            暂无历史归档日志
-          </div>
-        </div>
-
-        <!-- 中间：独立文件下载 -->
-        <div class="middle-download">
-          <div class="text-subtitle-2 mb-1">下载方式</div>
-          <div class="d-flex align-center flex-wrap gap-3">
-            <v-btn
-              variant="outlined"
-              color="primary"
-              prepend-icon="mdi-file-download-outline"
-              :disabled="!hasSelection || downloadingFiles"
-              :loading="downloadingFiles"
-              @click="downloadSelectedIndividually"
-            >
-              下载独立文件
-            </v-btn>
-            <div class="text-caption" style="opacity: 0.6">
-              逐个下载所选日志，文件名保持原样
+                <span class="file-name">{{ f.name }}</span>
+                <span class="file-meta">{{ fmtSize(f.size) }} · {{ fmtTime(f.mtime) }}</span>
+              </div>
+              <div v-if="!folder.files.length" class="empty-files">
+                该时段暂无日志文件
+              </div>
             </div>
           </div>
         </div>
-      </v-card-text>
+      </div>
 
-      <v-card-actions class="app-card-actions">
-        <span class="text-caption mr-auto" style="opacity: 0.65">
+      <v-card-actions class="download-bar">
+        <span class="text-caption" style="opacity: 0.65">
           已选 {{ selectedCount }} 个文件
         </span>
+        <v-spacer />
         <v-btn variant="text" @click="emit('update:modelValue', false)">取消</v-btn>
         <v-btn
           color="primary"
@@ -299,37 +250,89 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.log-group {
-  margin-bottom: 16px;
-}
-
-.log-group-head,
-.archive-head {
+.log-export-card {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 600;
-  font-size: 13.5px;
-  padding: 4px 0;
+  flex-direction: column;
+  max-height: 80vh;
 }
 
-.archive-block {
-  border-left: 3px solid rgba(var(--v-theme-primary), 0.25);
-  padding-left: 8px;
-  margin-bottom: 10px;
+.log-export-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 24px;
+  display: flex;
+  flex-direction: column;
 }
 
-.log-file-list {
-  max-height: 240px;
+.folder-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 52vh;
   overflow-y: auto;
   border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
   border-radius: 8px;
+  padding: 4px;
 }
 
-.middle-download {
+.folder-block {
+  margin-bottom: 2px;
+}
+
+.folder-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.12s ease;
+}
+
+.folder-row:hover {
+  background: rgba(var(--v-theme-primary), 0.06);
+}
+
+.folder-label {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.folder-files {
+  padding: 2px 8px 8px 28px;
+}
+
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.file-row:hover {
+  background: rgba(var(--v-theme-primary), 0.04);
+}
+
+.file-name {
+  font-size: 13px;
+}
+
+.file-meta {
+  margin-left: auto;
+  font-size: 12px;
+  color: rgba(var(--v-theme-on-surface), 0.55);
+}
+
+.empty-files {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: rgba(var(--v-theme-on-surface), 0.5);
+}
+
+.download-bar {
   border-top: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-  padding: 12px 0;
-  margin: 12px 0;
+  flex-shrink: 0;
 }
 </style>
