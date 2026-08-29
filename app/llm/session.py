@@ -13,7 +13,7 @@ import uuid
 from typing import Any
 
 from app.llm import logger
-from app.llm.history import SQLiteHistoryStore
+from app.llm.storage import create_history_store
 
 # 防御：模型/中转偶发的孤立 "rate." 不应作为有效助手回复回灌上下文
 _JUNK_ASSISTANT_RE = re.compile(r"^\s*rate\.\s*$", re.IGNORECASE)
@@ -177,7 +177,7 @@ class SessionManager:
         self.bot_id = bot_id
         self.sessions: dict[str, Session] = {}
         self.lock = threading.RLock()
-        self.history = SQLiteHistoryStore(bot_id)
+        self.history = create_history_store(bot_id)
         # 会话过期/归档时的可选回调（长期记忆归档蒸馏用）：callable(session)
         self.on_archive = None
         self._stop_event = threading.Event()
