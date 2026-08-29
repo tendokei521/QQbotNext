@@ -79,7 +79,6 @@ DEFAULT_LLM_CONFIG: dict = {
     "interrupt_enable": False,
     "interrupt_save_sent": True,
     "interrupt_debug": False,
-    "debug_prompt": False,             # 打印本轮完整 prompt（调试）
     # 权限：Agent 可响应的事件权限角色
     "permission": "member",
     # 主动消息

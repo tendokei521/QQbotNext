@@ -149,15 +149,6 @@ async def interrupt_config_hook(ctx):
         )
 
 
-async def debug_prompt_hook(ctx):
-    enabled = bool(_ctx_cfg(ctx, "debug_prompt", False))
-    ctx.state["debug_prompt"] = enabled
-    if enabled:
-        logger.add_info(f"#{ctx.runtime.bot_id}").info(
-            f"[Prompt] {ctx.session_id} user_text:\n{ctx.user_text}"
-        )
-
-
 # ---------- 群成员昵称 / 引用辅助 ----------
 
 _NICK_CACHE: dict[str, str] = {}
@@ -259,4 +250,3 @@ def install_framework_hooks(runtime) -> None:
     registry.register(stage="pre_request", event_type="*", order=-100, handler=collect_user_context)
     registry.register(stage="pre_request", event_type="*", order=20, handler=format_user_context)
     registry.register(stage="pre_request", event_type="*", order=25, handler=interrupt_config_hook)
-    registry.register(stage="pre_request", event_type="*", order=30, handler=debug_prompt_hook)

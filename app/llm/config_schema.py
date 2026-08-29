@@ -247,11 +247,6 @@ SCHEMA = {
         "description": "开启后打印回复被打断的日志",
         "default": False, "group": "group_interrupt",
     },
-    "debug_prompt": {
-        "type": "boolean", "label": "调试打印 Prompt",
-        "description": "开启后打印本轮完整用户上下文与 prompt",
-        "default": False, "group": "group_context",
-    },
 
     # ==================== 权限 ====================
     "permission": {
