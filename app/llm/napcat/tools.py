@@ -8,7 +8,7 @@ from typing import Any
 from app.llm import logger
 from app.llm.tool import ToolContext, ToolSpec
 from app.llm.napcat.manifest import NAP_CAT_TOOLS
-from app.llm.napcat.security import is_tool_enabled
+from app.llm.napcat.security import resolve_tool_policy
 
 DEFAULT_MAX_RESULT = 2000
 
@@ -61,17 +61,37 @@ async def _handler(runtime, tool: dict, ctx: ToolContext | None, args: dict) -> 
     return result
 
 
-def build_napcat_tools(runtime: Any) -> list[ToolSpec]:
-    """根据配置生成本 Bot 可用的 NapCat 工具。"""
+def _ctx_scope(ctx: ToolContext | None) -> str | None:
+    if ctx is None:
+        return None
+    event = getattr(ctx, "event", None)
+    if event is None:
+        return None
+    event_type = getattr(event, "event_type", "") or ""
+    if event_type == "message_group" or getattr(event, "group", None) is not None:
+        return "group"
+    if event_type == "message_private" or getattr(event, "user_id", None):
+        return "private"
+    return None
+
+
+def build_napcat_tools(runtime: Any, ctx: ToolContext | None = None) -> list[ToolSpec]:
+    """根据配置与当前会话作用域生成本轮可用的 NapCat 工具。"""
     specs: list[ToolSpec] = []
+    scope = _ctx_scope(ctx)
     for tool in NAP_CAT_TOOLS:
-        if not is_tool_enabled(runtime, tool):
+        policy = resolve_tool_policy(runtime, tool)
+        if not policy["enabled"] or policy["blocked"]:
             continue
+        scopes = policy["scopes"]
+        # 会话过滤：群聊只保留 group/*，私聊只保留 private/*
+        if scope is not None and "*" not in scopes and scope not in scopes:
+            continue
+
         name = str(tool.get("name", ""))
         description = str(tool.get("description", ""))
         parameters = tool.get("parameters") or {"type": "object", "properties": {}}
-        permission = str(tool.get("permission", "member"))
-        scopes = tool.get("scopes", ["*"])
+        permission = policy["permission"]
 
         async def _tool_handler(ctx: ToolContext, args: dict, _tool=tool):
             return await _handler(runtime, _tool, ctx, args)

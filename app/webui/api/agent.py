@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from app.llm.config import LEGACY_LLM_CONNECTION_KEYS
 from app.llm.config_schema import STREAM_PRESETS
 from app.llm.napcat.manifest import NAP_CAT_TOOLS
-from app.llm.napcat.security import is_tool_enabled
+from app.llm.napcat.security import resolve_tool_policy
 from app.services.bot_service import PASSWORD_MASK as _PASSWORD_MASK
 from app.services.provider_model_service import ProviderModelService
 from app.services.provider_preset_service import ProviderPresetService
@@ -233,9 +233,9 @@ async def agent_napcat_tools(request: Request, bot_id: int | None = Depends(pars
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
     tools = []
     for tool in NAP_CAT_TOOLS:
+        policy = resolve_tool_policy(runtime, tool)
         item = dict(tool)
-        # parameters 为 JSON 可序列化 dict
-        item["enabled"] = bool(is_tool_enabled(runtime, tool))
+        item.update(policy)
         tools.append(item)
     return JSONResponse(content={"ok": True, "tools": tools})
 

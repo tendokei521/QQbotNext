@@ -461,3 +461,31 @@ NAP_CAT_TOOLS: list[dict] = [
         "scopes": ["*"],
     },
 ]
+
+# ==================== 敏感度标注（写死，不随前端编辑改变） ====================
+_CRITICAL_TOOLS = {
+    "set_group_leave",
+    "set_group_whole_ban",
+    "set_group_kick",
+    "set_group_admin",
+    "set_group_name",
+    "clean_cache",
+}
+_HIGH_TOOLS = {
+    "delete_msg",
+    "set_essence_msg",
+    "delete_essence_msg",
+    "set_group_card",
+    "set_group_ban",
+    "set_group_add_request",
+    "set_friend_add_request",
+}
+
+for _tool in NAP_CAT_TOOLS:
+    _name = str(_tool.get("name", ""))
+    if _name in _CRITICAL_TOOLS:
+        _tool["sensitivity"] = "critical"
+    elif _name in _HIGH_TOOLS:
+        _tool["sensitivity"] = "high"
+    else:
+        _tool["sensitivity"] = "normal"

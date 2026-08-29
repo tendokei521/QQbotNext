@@ -137,11 +137,11 @@ async def _collect_llm_ext(runtime, event, session_id: str, is_private: bool, sc
         await mcp.ensure_ready()
         specs.extend(mcp.build_tools())
 
-    # NapCat / OneBot 通用工具（数据驱动清单）
+    # NapCat / OneBot 通用工具（数据驱动清单，按当前会话作用域过滤）
     if bool(runtime.config.get("napcat_tools_enable", False)):
         from app.llm.napcat import build_napcat_tools
 
-        specs.extend(build_napcat_tools(runtime))
+        specs.extend(build_napcat_tools(runtime, ctx))
 
     return specs, skill_blocks, ctx
 
