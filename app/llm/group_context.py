@@ -29,17 +29,9 @@ _NON_TEXT_SEGMENTS = {
     "forward": "合并转发",
 }
 
-# bot 自己的固定标签（群聊/私聊一致）；私聊对方显示“对方(QQ)”，便于工具调用与身份区分
+# bot 自己的固定标签（群聊/私聊一致）；私聊对方用“对方”，不展示昵称
 SELF_TAG = "我"
 PRIVATE_OTHER_TAG = "对方"
-
-
-def private_other_label(user_id: Any = "") -> str:
-    """私聊对方标签：优先显示 QQ，方便 LLM 在工具调用中拿到对方账号。"""
-    uid = str(user_id or "").strip()
-    if uid:
-        return f"{PRIVATE_OTHER_TAG}({uid})"
-    return PRIVATE_OTHER_TAG
 
 # 已自带“发送者/发送者昵称/发送了/消息正文/时间”自描述内容（LLM 增强模块 llm_enhance 产出的散文块）。
 # 这类内容再套外层“MM-DD HH:MM 昵称(QQ):”会变成重复脏信息，渲染时应原样输出。
@@ -281,7 +273,7 @@ def format_online_history(
         if is_self:
             label = SELF_TAG
         elif is_private:
-            label = private_other_label(user_id)
+            label = PRIVATE_OTHER_TAG
         else:
             nickname = sender.get("card") or sender.get("nickname") or str(user_id) or "未知"
             label = _group_sender_label(nickname, user_id, include_user_id, mask_nickname)
@@ -411,7 +403,7 @@ def format_history_for_llm(
             result.append({"role": role, "content": rendered})
             continue
         if is_private:
-            sender = private_other_label(m.get("user_id") or "")
+            sender = PRIVATE_OTHER_TAG
         else:
             nickname = m.get("nickname") or ""
             user_id = m.get("user_id") or ""

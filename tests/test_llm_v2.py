@@ -28,33 +28,6 @@ def test_build_messages_no_tags_no_history():
     assert m[1] == {"role": "user", "content": "hi"}
 
 
-def test_private_history_label_contains_qq():
-    from app.llm.group_context import format_history_for_llm
-
-    history = [{
-        "role": "user",
-        "content": "你好",
-        "user_id": "1901691195",
-        "nickname": "对方",
-        "time": 1788004959,
-    }]
-    rendered = format_history_for_llm(history, is_private=True)
-    assert "对方(1901691195):" in rendered[0]["content"]
-
-
-def test_build_messages_current_user_info():
-    m = build_messages(
-        system_prompt="sys",
-        user_text="hi",
-        with_schedule_instruction=False,
-        current_user_info="当前私聊会话的对方 QQ 号：1901691195",
-    )
-    assert any(
-        msg.get("role") == "system" and "1901691195" in msg.get("content", "")
-        for msg in m
-    )
-
-
 def test_strip_all_tags():
     """防御性标签剥离：任意 <type=xxx>（含 mood/action/中文）均剥离，不留空行。"""
     from app.llm.tags import strip_all_tags

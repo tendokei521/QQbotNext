@@ -489,7 +489,6 @@ async def call_llm_and_reply(module, event, session_mgr, config,
         skills=skill_blocks,
         memory_text=memory_text,
         message_meta_instruction=_message_meta_instruction(module, None),
-        current_user_info=(f"当前私聊会话的对方 QQ 号：{user_id}" if is_private else ""),
     )
     messages = sanitize_contexts_by_modalities(messages, modalities)
 
@@ -676,7 +675,6 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
         skills=skill_blocks,
         memory_text=memory_text,
         message_meta_instruction=_message_meta_instruction(runtime, ctx),
-        current_user_info=(f"当前私聊会话的对方 QQ 号：{user_id}" if is_private else ""),
     )
     messages = sanitize_contexts_by_modalities(messages, modalities)
 
@@ -879,7 +877,6 @@ async def stream_response(runtime, event, ctx=None):
         skills=skill_blocks,
         memory_text=memory_text,
         message_meta_instruction=_message_meta_instruction(runtime, ctx),
-        current_user_info=(f"当前私聊会话的对方 QQ 号：{user_id}" if is_private else ""),
     )
     messages = sanitize_contexts_by_modalities(messages, modalities)
 
