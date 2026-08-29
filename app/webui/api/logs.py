@@ -144,7 +144,8 @@ async def api_log_export_zip(request: Request):
         if not isinstance(item, dict):
             continue
         try:
-            path = _safe_resolve(log_dir, str(item.get("folder", "") or ""), str(item.get("file", "") or ""))
+            filename = str(item.get("file") or item.get("name") or "")
+            path = _safe_resolve(log_dir, str(item.get("folder", "") or ""), filename)
         except ValueError as e:
             logger.warning(f"[LogExport] 跳过非法项: {e}")
             continue
