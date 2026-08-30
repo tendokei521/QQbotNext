@@ -162,8 +162,8 @@ SCHEMA = {"greeting": {"type": "text", "label": "问候语", "default": "你好"
 访问配置、启停状态与缓存；通过 `event.bot` 调用全部 OneBot API。
 
 插件可以声明接管框架内置能力：`provides` 表示本插件提供的能力，`supersedes` 表示启用时
-自动接管并禁用对应框架能力，卸载/禁用时自动恢复。内置能力见
-`docs/MODULE_DEV.md` 的「全局能力注册表」。
+自动接管并禁用对应框架能力，卸载/禁用时自动恢复。内置能力与完整用法见
+[`docs/FEATURE_REGISTRY.md`](docs/FEATURE_REGISTRY.md)。
 
 ### 装饰器风格（推荐）
 
@@ -308,6 +308,7 @@ Agent 配置已从通用表单升级为**专属领域页面**：
 | 函数 | 用途 |
 |---|---|
 | `get_modules()` | 已加载模块对象列表 |
+| `get_features(bot_id=None)` | 全局能力注册表状态（含接管者） |
 | `get_config_path(name)` | 模块配置目录 `module/configs/<name>/` |
 | `get_data_path(name)` | 模块数据目录 `module/data/<name>/`（自动创建，供持久化自定义数据） |
 

@@ -88,6 +88,8 @@ event.is_member
 框架提供统一的“能力接管”机制，插件可以声明自己接管/禁用某个框架内置能力，并在插件
 卸载/禁用时自动恢复。
 
+> 详细说明、API 与多租约规则见 [`docs/FEATURE_REGISTRY.md`](FEATURE_REGISTRY.md)。
+
 ### 2.6.1 插件声明接管
 
 在 `Module` 上声明 `supersedes`：
