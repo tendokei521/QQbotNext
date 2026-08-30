@@ -19,6 +19,15 @@ def get_modules() -> list[Any]:
     return container.get(ModuleRegistry).loaded()
 
 
+def get_features(bot_id: Any = None) -> list[dict]:
+    """获取全局能力注册表状态（含接管者信息）。"""
+    from app.bootstrap import get_container
+    from app.modules.features import FeatureRegistry
+
+    container = get_container()
+    return container.get(FeatureRegistry).status(bot_id)
+
+
 def get_config_path(module_name: str, create: bool = True) -> str:
     """获取模块配置目录（module/configs/<name>/）。"""
     from app.bootstrap import get_container

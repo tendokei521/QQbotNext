@@ -35,6 +35,8 @@ export interface ModuleData {
   source: 'local' | 'zip'
   version: string
   can_uninstall: boolean
+  provides?: string[]
+  supersedes?: string[]
 }
 
 export interface UninstalledModuleData {

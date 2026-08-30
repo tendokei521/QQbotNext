@@ -509,6 +509,10 @@ class TaskScheduler:
         for task_id in list(self._timers.keys()):
             self._cancel_timer(task_id)
 
+    def resume(self) -> None:
+        """恢复被暂停的定时任务：按当前配置重新武装尚未过期的任务。"""
+        self._restore()
+
     # ── 持久化 ───────────────────────────────────────────
     def _load(self) -> None:
         try:

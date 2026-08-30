@@ -221,6 +221,7 @@ class ServiceAccess:
     api_hooks: Any = None           # 任意 API 调用后钩子注册表
     lifecycle_hooks: Any = None     # Bot 生命周期钩子注册表
     event_completed_hooks: Any = None  # 事件处理完成钩子注册表
+    features: Any = None            # 全局 FeatureRegistry（能力接管/恢复）
     extra: dict[str, Any] = field(default_factory=dict)
 
     def __getitem__(self, key: str) -> Any:
@@ -275,6 +276,8 @@ class BaseModule(ABC):
     order: int = 100                # 分类内排序
     hidden: bool = False            # 是否默认隐藏
     pinned: bool = False            # 是否默认置顶
+    provides: tuple = ()            # 本插件提供的能力（feature_id 列表）
+    supersedes: tuple = ()          # 启用时自动接管/禁用的能力（feature_id 列表）
 
     def __init__(self, ctx: ModuleContext) -> None:
         self.ctx = ctx

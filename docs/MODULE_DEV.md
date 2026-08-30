@@ -83,6 +83,67 @@ event.is_member
 
 ---
 
+## 2.6 全局能力注册表（FeatureRegistry）
+
+框架提供统一的“能力接管”机制，插件可以声明自己接管/禁用某个框架内置能力，并在插件
+卸载/禁用时自动恢复。
+
+### 2.6.1 插件声明接管
+
+在 `Module` 上声明 `supersedes`：
+
+```python
+from app.modules import BaseModule
+
+class Module(BaseModule):
+    name = "我的主动回复"
+    provides = ("proactive",)     # 本插件提供的能力（可选，用于标识/WebUI）
+    supersedes = ("proactive",)   # 启用时自动接管并禁用框架主动消息
+```
+
+- `provides`：本插件提供的能力 ID（信息性，供 WebUI 与后续能力路由使用）
+- `supersedes`：启用/加载时自动接管的框架能力 ID；禁用/卸载时自动释放并恢复
+
+### 2.6.2 手动控制
+
+插件也可以直接在生命周期里手动接管/释放：
+
+```python
+class Module(BaseModule):
+    async def on_load(self):
+        await self.ctx.services.features.suppress("proactive", self, self.bot_id)
+
+    async def on_unload(self):
+        await self.ctx.services.features.release("proactive", self, self.bot_id)
+```
+
+查询状态：
+
+```python
+self.ctx.services.features.query("proactive", self.bot_id)
+self.ctx.services.features.status(self.bot_id)
+```
+
+### 2.6.3 已注册框架能力
+
+| feature_id | 说明 |
+|---|---|
+| `proactive` | 框架主动消息（私聊/群聊主动发言） |
+| `schedule` | 框架定时任务 |
+| `memory` | 长期记忆总开关 |
+| `knowledge` | 知识库总开关 |
+| `napcat_tools` | NapCat 工具总开关 |
+| `agent` | 框架级 Agent 整体启停 |
+
+### 2.6.4 多租约行为
+
+- 同一能力允许被多个插件同时接管；
+- 只要还有任一租约持有者，能力就保持禁用；
+- 最后一个租约释放时，自动恢复“第一个租约接管前”的状态；
+- 因此两个主动回复插件不会互相覆盖，后启用者退出后仍会回到前启用者/框架状态。
+
+---
+
 ## 3. 模块流水线钩子：`@module_hook`
 
 ### 3.1 用法

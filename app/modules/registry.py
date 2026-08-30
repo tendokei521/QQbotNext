@@ -343,6 +343,13 @@ class ModuleRegistry:
             except Exception as e:
                 self.log.warning(f"[Module] {module_name} on_load 异常: {e}")
 
+            # 插件声明 supersedes：加载后自动接管框架能力（已禁用模块不接管）
+            try:
+                if self.services and self.services.features and getattr(getattr(instance, "authority", None), "enabled", True):
+                    self.services.features.acquire_module(instance)
+            except Exception as e:
+                self.log.warning(f"[Module] {module_name} Feature 接管异常: {e}")
+
             # 递归加载子模块：父模块目录下的子目录，且含 module.py（忽略 service/ 等普通目录）
             for child_entry in sorted(module_path.iterdir()):
                 if not child_entry.is_dir() or child_entry.name.startswith(("_", ".")):
@@ -399,6 +406,10 @@ class ModuleRegistry:
                 await instance.on_unload()
             except Exception as e:
                 self.log.warning(f"[Module] {module_name} on_unload 异常: {e}")
+            try:
+                self.services.features.release_module(instance) if self.services and self.services.features else 0
+            except Exception as e:
+                self.log.warning(f"[Module] {module_name} Feature 释放异常: {e}")
             self.services.task_manager.cancel_owner(f"module:{module_name}:{bot_id}")
             scheduler = self.services.scheduler if self.services else None
             if scheduler is not None:
@@ -429,6 +440,10 @@ class ModuleRegistry:
                 await instance.on_unload()
             except Exception as e:
                 self.log.warning(f"[Module] {module_name} on_unload 异常: {e}")
+            try:
+                self.services.features.release_module(instance) if self.services and self.services.features else 0
+            except Exception as e:
+                self.log.warning(f"[Module] {module_name} Feature 释放异常: {e}")
             self.services.task_manager.cancel_owner(f"module:{module_name}:{bot_id}")
             scheduler = self.services.scheduler if self.services else None
             if scheduler is not None:

@@ -206,6 +206,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                   <v-chip size="x-small" class="ml-1" :color="PERMISSION_COLOR[m.permission] || 'default'" variant="tonal">
                     {{ PERMISSION_LABEL[m.permission] || m.permission }}
                   </v-chip>
+                  <v-chip v-if="m.supersedes?.length" size="x-small" class="ml-1" color="warning" variant="tonal">
+                    接管: {{ m.supersedes.join(', ') }}
+                  </v-chip>
                 </v-card-title>
                 <v-card-subtitle class="app-line-clamp-2">{{ m.description }}</v-card-subtitle>
                 <template #append>
@@ -261,6 +264,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                   <span class="app-line-clamp-1">{{ m.name }}</span>
                   <v-chip size="x-small" class="ml-1" :color="PERMISSION_COLOR[m.permission] || 'default'" variant="tonal">
                     {{ PERMISSION_LABEL[m.permission] || m.permission }}
+                  </v-chip>
+                  <v-chip v-if="m.supersedes?.length" size="x-small" class="ml-1" color="warning" variant="tonal">
+                    接管: {{ m.supersedes.join(', ') }}
                   </v-chip>
                 </v-card-title>
                 <v-card-subtitle class="app-line-clamp-2">{{ m.description }}</v-card-subtitle>

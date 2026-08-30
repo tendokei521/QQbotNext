@@ -136,6 +136,11 @@ async def _sync_module_runtime(module, enabled: bool) -> None:
                 await on_load()
             except Exception as e:
                 logger.warning(f"[Module] {module_name} on_load 异常: {e}")
+        try:
+            if services is not None and getattr(services, "features", None) is not None:
+                services.features.acquire_module(module)
+        except Exception as e:
+            logger.warning(f"[Module] {module_name} 启用后 Feature 接管异常: {e}")
         return
 
     try:
@@ -144,6 +149,12 @@ async def _sync_module_runtime(module, enabled: bool) -> None:
             await on_unload()
     except Exception as e:
         logger.warning(f"[Module] {module_name} on_unload 异常: {e}")
+
+    try:
+        if services is not None and getattr(services, "features", None) is not None:
+            services.features.release_module(module)
+    except Exception as e:
+        logger.warning(f"[Module] {module_name} 禁用后 Feature 释放异常: {e}")
 
     if services is not None and bot_id is not None:
         task_manager = getattr(services, "task_manager", None)
@@ -174,6 +185,15 @@ async def list_uninstalled_modules(request: Request):
     container = get_container(request)
     install_service = container.get(ModuleInstallService)
     return JSONResponse(content={"ok": True, "modules": install_service.list_uninstalled()})
+
+
+@router.get("/modules/features")
+async def list_features(request: Request, bot_id: int | None = Depends(parse_bot_id)):
+    from app.modules.features import FeatureRegistry
+
+    container = get_container(request)
+    features = container.get(FeatureRegistry).status(bot_id)
+    return JSONResponse(content={"ok": True, "features": features})
 
 
 @router.get("/modules/{module_name}")

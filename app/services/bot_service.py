@@ -126,6 +126,8 @@ class BotService:
                 "source": getattr(mod, "source", "local"),
                 "version": getattr(mod, "version", "") or "0.0.0",
                 "can_uninstall": True,
+                "provides": list(getattr(mod, "provides", ()) or ()),
+                "supersedes": list(getattr(mod, "supersedes", ()) or ()),
             }
         # 虚拟 Agent 模块（框架级注入，不依赖模块目录）：即使所有模块被删也保留 LLM 界面
         data["agent"] = self._agent_module_data(bot_id)
@@ -174,6 +176,8 @@ class BotService:
             # 不设独立 page：Agent 配置走框架自身的 schema 表单（与普通模块统一排版），
             # 读写由 app/webui/api/modules.py 的 _AgentProxy 桥接到 AgentRuntime。
             "has_page": False,
+            "provides": [],
+            "supersedes": [],
         }
 
     def get_module_data(self, module_name: str, bot_id: int | None = None) -> dict | None:

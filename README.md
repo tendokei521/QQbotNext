@@ -161,6 +161,10 @@ SCHEMA = {"greeting": {"type": "text", "label": "问候语", "default": "你好"
 插件可通过 `module.config.get(key)` / `module.authority.enabled` / `module.ctx.services.cache`
 访问配置、启停状态与缓存；通过 `event.bot` 调用全部 OneBot API。
 
+插件可以声明接管框架内置能力：`provides` 表示本插件提供的能力，`supersedes` 表示启用时
+自动接管并禁用对应框架能力，卸载/禁用时自动恢复。内置能力见
+`docs/MODULE_DEV.md` 的「全局能力注册表」。
+
 ### 装饰器风格（推荐）
 
 新架构支持用装饰器直观注册“模块流水线钩子”和“LLM 流水线钩子”：

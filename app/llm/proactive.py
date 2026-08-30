@@ -359,6 +359,10 @@ class ProactiveManager:
         for session_id in list(self._group_timers.keys()):
             self._cancel(self._group_timers, session_id)
 
+    def resume(self) -> None:
+        """恢复被暂停的主动消息：按当前配置重新武装可用的私聊/群聊计时器。"""
+        self._restore()
+
     # ── 管理接口 ─────────────────────────────────────────
     def status(self) -> list[dict]:
         """每会话状态：启用、类型、下次触发、未回复数、计时器类型。"""

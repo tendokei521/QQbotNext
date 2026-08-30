@@ -20,6 +20,15 @@ from app.infrastructure.persistence.database import Database
 from app.llm.manager import AgentManager
 from app.modules.base import ServiceAccess
 from app.modules.dispatcher import ModuleDispatcher
+from app.modules.features import (
+    AgentFeatureController,
+    FeatureRegistry,
+    KnowledgeFeatureController,
+    MemoryFeatureController,
+    NapcatToolsFeatureController,
+    ProactiveFeatureController,
+    ScheduleFeatureController,
+)
 from app.modules.hooks import (
     ApiHookRegistry,
     BeforeSendHookRegistry,
@@ -113,6 +122,15 @@ def build_container(settings: Settings | None = None) -> Container:
         provider_runtime_manager=provider_runtime_manager,
     )
     container.register_factory(AgentManager, lambda: agent_manager)
+    # 全局功能/能力注册表：框架内置能力可被插件自动接管、恢复
+    feature_registry = FeatureRegistry()
+    feature_registry.register(ProactiveFeatureController(agent_manager))
+    feature_registry.register(ScheduleFeatureController(agent_manager))
+    feature_registry.register(MemoryFeatureController(agent_manager))
+    feature_registry.register(KnowledgeFeatureController(agent_manager))
+    feature_registry.register(NapcatToolsFeatureController(agent_manager))
+    feature_registry.register(AgentFeatureController(agent_manager))
+    container.register_factory(FeatureRegistry, lambda: feature_registry)
     # 插件钩子注册表（模块按 bot 注册）
     send_hook_registry = SendHookRegistry()
     container.register_factory(SendHookRegistry, lambda: send_hook_registry)
@@ -130,6 +148,7 @@ def build_container(settings: Settings | None = None) -> Container:
         agent_manager=agent_manager, send_hooks=send_hook_registry,
         before_send_hooks=before_send_hook_registry, api_hooks=api_hook_registry,
         lifecycle_hooks=lifecycle_hook_registry, event_completed_hooks=event_completed_hook_registry,
+        features=feature_registry,
     )
     container.register_factory(ServiceAccess, lambda: services)
 
