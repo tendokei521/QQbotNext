@@ -29,6 +29,12 @@ SCHEMA = {
         "default": [],
         "placeholder": "关键词:emoji_id",
     },
+    "keyword_symbol_clean": {
+        "type": "boolean",
+        "label": "符号清洗",
+        "description": "开启后判断关键词前先移除消息中的标点、符号与空白，用于命中带符号分隔的关键词（如“哈-哈-哈”可命中“哈哈哈”）",
+        "default": False,
+    },
     "keyword_follow_prob": {
         "type": "number",
         "label": "关键词跟随概率",

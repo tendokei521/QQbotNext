@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from app.infrastructure.cache import Cache
 from module.modules.emoji_reply.service import (
+    clean_symbols,
     handle_emoji_notice,
     handle_message,
     parse_keyword_emoji_list,
@@ -45,6 +46,42 @@ def test_parse_keyword_emoji_list():
         ("test", "456"),
     ]
     assert parse_keyword_emoji_list([]) == []
+
+
+def test_clean_symbols_removes_punctuation_and_whitespace():
+    assert clean_symbols("哈-哈 哈，哈哈！") == "哈哈哈哈哈"
+    assert clean_symbols("Hello, world!") == "Helloworld"
+    assert clean_symbols("") == ""
+
+
+async def test_handle_message_symbol_clean_enabled_matches_with_symbols():
+    module = _make_module({
+        "keyword_follow_enable": True,
+        "keyword_emoji_list": ["哈哈哈:123"],
+        "keyword_follow_prob": 1.0,
+        "cooldown_seconds": 0,
+        "keyword_symbol_clean": True,
+    })
+    bot = FakeBot()
+    event = SimpleNamespace(message_id=102, text="哈-哈 哈，哈哈哈！", bot=bot)
+
+    await handle_message(module, event)
+    assert bot.calls == [(102, "123")]
+
+
+async def test_handle_message_symbol_clean_disabled_keeps_exact_match():
+    module = _make_module({
+        "keyword_follow_enable": True,
+        "keyword_emoji_list": ["哈哈哈:123"],
+        "keyword_follow_prob": 1.0,
+        "cooldown_seconds": 0,
+        "keyword_symbol_clean": False,
+    })
+    bot = FakeBot()
+    event = SimpleNamespace(message_id=103, text="哈-哈 哈", bot=bot)
+
+    await handle_message(module, event)
+    assert bot.calls == []
 
 
 async def test_handle_message_sends_matching_emoji_and_cooldown():

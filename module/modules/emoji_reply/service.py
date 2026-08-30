@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import random
+import re
 
 from app.core.logger import module_logger
 
@@ -16,9 +17,17 @@ from app.core.logger import module_logger
 _COOLDOWN_MSG = "emoji_reply:msg:{bot_id}:{message_id}"
 _COOLDOWN_EMOJI = "emoji_reply:emoji:{bot_id}:{message_id}:{emoji_id}"
 
+# 关键词匹配用：移除标点、符号与空白，保留中文/字母/数字
+_SYMBOL_RE = re.compile(r"[\W_]+")
+
 
 def _logger(module):
     return module_logger.add_info(f"#{module.bot_id}").add_info(module.name)
+
+
+def clean_symbols(text: str) -> str:
+    """移除标点、符号与空白，保留中文/字母/数字（应对关键词间有符号）。"""
+    return _SYMBOL_RE.sub("", text or "")
 
 
 def parse_keyword_emoji_list(items) -> list[tuple[str, str]]:
@@ -108,10 +117,15 @@ async def handle_message(module, event) -> None:
     if not keyword_emojis:
         return
 
+    clean_enabled = bool(module.config.get("keyword_symbol_clean", False))
     text = event.text or ""
+    if clean_enabled:
+        text = clean_symbols(text)
+
     processed = False
     for keyword, emoji_id in keyword_emojis:
-        if keyword not in text:
+        match_keyword = clean_symbols(keyword) if clean_enabled else keyword
+        if not match_keyword or match_keyword not in text:
             continue
         if random.random() >= prob:
             continue

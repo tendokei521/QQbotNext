@@ -20,6 +20,7 @@ class Module(BaseModule):
         "follow_emoji_prob": 0.5,
         "keyword_follow_enable": True,
         "keyword_emoji_list": [],
+        "keyword_symbol_clean": False,
         "keyword_follow_prob": 0.5,
         "cooldown_seconds": 60,
     }
