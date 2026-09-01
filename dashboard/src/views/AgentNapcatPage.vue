@@ -18,6 +18,8 @@ interface NapCatTool {
   base_permission: string
   base_scopes: string[]
   sensitivity: 'normal' | 'high' | 'critical'
+  category: string
+  doc_url: string
   enabled: boolean
   blocked: boolean
   blocked_reason: string
@@ -37,6 +39,42 @@ const schema = computed(() => filterSchemaByPage(agent.schema, 'napcat'))
 const tools = ref<NapCatTool[]>([])
 const loading = ref(false)
 const detailKey = ref('')
+
+const DOC_CATEGORY_ORDER = [
+  '流式传输扩展',
+  '流式接口',
+  '群组扩展',
+  '核心接口',
+  '群组接口',
+  '扩展接口',
+  '系统接口',
+  '用户接口',
+  '系统扩展',
+  '消息扩展',
+  '文件接口',
+  'Go-CQHTTP',
+  '消息接口',
+  '文件扩展',
+  '用户扩展',
+  '频道接口',
+  'AI 扩展',
+]
+
+const toolGroups = computed(() => {
+  const map = new Map<string, NapCatTool[]>()
+  for (const tool of tools.value) {
+    const category = tool.category || '未分类'
+    if (!map.has(category)) map.set(category, [])
+    map.get(category)!.push(tool)
+  }
+  return Array.from(map.entries())
+    .sort((a, b) => {
+      const ia = DOC_CATEGORY_ORDER.indexOf(a[0])
+      const ib = DOC_CATEGORY_ORDER.indexOf(b[0])
+      return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib)
+    })
+    .map(([category, items]) => ({ category, items }))
+})
 
 const enabled = computed<boolean>({
   get: () => !!agent.draft.napcat_tools_enable,
@@ -165,65 +203,99 @@ watch(
       <v-card-title class="d-flex align-center">
         <v-icon icon="mdi-robot-industrial" class="mr-2" color="teal" /> 可用工具
         <v-spacer />
+        <v-btn
+          size="small"
+          variant="outlined"
+          prepend-icon="mdi-open-in-new"
+          href="https://napcat.apifox.cn/"
+          target="_blank"
+          rel="noopener"
+        >
+          NapCat API 文档
+        </v-btn>
         <v-btn size="small" variant="tonal" :disabled="!enabled" @click="resetToggles">恢复默认</v-btn>
       </v-card-title>
       <v-card-text>
         <v-progress-linear v-if="loading" indeterminate color="primary" />
 
         <div class="tool-list">
-          <div v-for="tool in tools" :key="tool.name" class="tool-item" :class="{ 'is-off': !enabled || !isToolOn(tool.name) }">
-            <div class="tool-row">
-              <div class="tool-info">
-                <div class="tool-name">{{ tool.name }}</div>
-                <div class="tool-desc">{{ tool.description }}</div>
-                <div class="tool-meta d-flex gap-2 flex-wrap">
-                  <v-chip size="small" variant="tonal" :color="riskColor(tool.risk)">{{ riskLabel(tool.risk) }}</v-chip>
-                  <v-chip size="small" variant="tonal">权限: {{ permissionLabel(toolPermission(tool)) }}</v-chip>
-                  <v-chip size="small" variant="tonal">作用域: {{ toolScopes(tool).join(' / ') }}</v-chip>
+          <template v-for="group in toolGroups" :key="group.category">
+            <div class="tool-category">
+              <span class="tool-category-name">{{ group.category }}</span>
+              <span class="tool-category-count">{{ group.items.length }}</span>
+            </div>
+            <div
+              v-for="tool in group.items"
+              :key="tool.name"
+              class="tool-item"
+              :class="{ 'is-off': !enabled || !isToolOn(tool.name) }"
+            >
+              <div class="tool-row">
+                <div class="tool-info">
+                  <div class="tool-name">
+                    {{ tool.name }}
+                    <a
+                      v-if="tool.doc_url"
+                      :href="tool.doc_url"
+                      target="_blank"
+                      rel="noopener"
+                      class="tool-doc-link"
+                      @click.stop
+                    >
+                      <v-icon icon="mdi-open-in-new" size="x-small" />
+                      文档
+                    </a>
+                  </div>
+                  <div class="tool-desc">{{ tool.description }}</div>
+                  <div class="tool-meta d-flex gap-2 flex-wrap">
+                    <v-chip size="small" variant="tonal" :color="riskColor(tool.risk)">{{ riskLabel(tool.risk) }}</v-chip>
+                    <v-chip size="small" variant="tonal">权限: {{ permissionLabel(toolPermission(tool)) }}</v-chip>
+                    <v-chip size="small" variant="tonal">作用域: {{ toolScopes(tool).join(' / ') }}</v-chip>
+                  </div>
                 </div>
+                <v-switch
+                  :model-value="enabled && isToolOn(tool.name)"
+                  :disabled="!enabled"
+                  color="primary"
+                  density="compact"
+                  hide-details
+                  @update:model-value="toggleTool(tool.name)"
+                />
               </div>
-              <v-switch
-                :model-value="enabled && isToolOn(tool.name)"
-                :disabled="!enabled"
-                color="primary"
-                density="compact"
-                hide-details
-                @update:model-value="toggleTool(tool.name)"
-              />
-            </div>
-            <div class="tool-policy" :class="{ 'is-disabled': !enabled }">
-              <v-select
-                :model-value="toolPermission(tool)"
-                :disabled="!enabled"
-                :items="[
-                  { title: '所有人', value: 'everyone' },
-                  { title: '成员及以上', value: 'member' },
-                  { title: '群管理及以上', value: 'group_admin' },
-                  { title: '群主', value: 'group_owner' },
-                  { title: 'Bot拥有者', value: 'owner' },
-                ]"
-                label="触发权限"
-                variant="outlined"
-                density="compact"
-                hide-details
-                @update:model-value="(v: any) => setToolPermission(tool, v)"
-              />
-              <div class="tool-scope-static">
-                <span class="text-caption">作用域：</span>
-                <span class="font-weight-medium">{{ toolScopes(tool).join(' / ') }}</span>
+              <div class="tool-policy" :class="{ 'is-disabled': !enabled }">
+                <v-select
+                  :model-value="toolPermission(tool)"
+                  :disabled="!enabled"
+                  :items="[
+                    { title: '所有人', value: 'everyone' },
+                    { title: '成员及以上', value: 'member' },
+                    { title: '群管理及以上', value: 'group_admin' },
+                    { title: '群主', value: 'group_owner' },
+                    { title: 'Bot拥有者', value: 'owner' },
+                  ]"
+                  label="触发权限"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                  @update:model-value="(v: any) => setToolPermission(tool, v)"
+                />
+                <div class="tool-scope-static">
+                  <span class="text-caption">作用域：</span>
+                  <span class="font-weight-medium">{{ toolScopes(tool).join(' / ') }}</span>
+                </div>
+                <v-alert v-if="isSensitiveWide(tool)" type="warning" variant="tonal" density="compact" class="mt-2">
+                  ⚠️ {{ tool.name }} 是高/极高敏感工具，默认权限为 {{ permissionLabel(tool.base_permission) }}，当前放宽为 {{ permissionLabel(toolPermission(tool)) }}。
+                </v-alert>
               </div>
-              <v-alert v-if="isSensitiveWide(tool)" type="warning" variant="tonal" density="compact" class="mt-2">
-                ⚠️ {{ tool.name }} 是高/极高敏感工具，默认权限为 {{ permissionLabel(tool.base_permission) }}，当前放宽为 {{ permissionLabel(toolPermission(tool)) }}。
-              </v-alert>
+              <div v-if="detailKey === tool.name" class="tool-detail">
+                <div class="text-caption mb-1">参数 Schema</div>
+                <pre class="tool-pre">{{ JSON.stringify(tool.parameters, null, 2) }}</pre>
+              </div>
+              <v-btn v-else size="x-small" variant="text" prepend-icon="mdi-code-json" @click="detailKey = tool.name">
+                查看参数
+              </v-btn>
             </div>
-            <div v-if="detailKey === tool.name" class="tool-detail">
-              <div class="text-caption mb-1">参数 Schema</div>
-              <pre class="tool-pre">{{ JSON.stringify(tool.parameters, null, 2) }}</pre>
-            </div>
-            <v-btn v-else size="x-small" variant="text" prepend-icon="mdi-code-json" @click="detailKey = tool.name">
-              查看参数
-            </v-btn>
-          </div>
+          </template>
         </div>
       </v-card-text>
     </v-card>
@@ -244,6 +316,48 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.tool-category {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 4px 2px;
+  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.1);
+}
+
+.tool-category:first-child {
+  margin-top: 0;
+}
+
+.tool-category-name {
+  font-weight: 700;
+  font-size: 15px;
+  color: rgba(var(--v-theme-on-surface), 0.85);
+}
+
+.tool-category-count {
+  font-size: 12px;
+  color: rgba(var(--v-theme-on-surface), 0.55);
+  background: rgba(var(--v-theme-on-surface), 0.08);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.tool-doc-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 8px;
+  font-size: 12px;
+  color: rgb(var(--v-theme-primary));
+  text-decoration: none;
+  vertical-align: middle;
+}
+
+.tool-doc-link:hover {
+  text-decoration: underline;
 }
 
 .tool-item {
