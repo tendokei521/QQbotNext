@@ -39,6 +39,7 @@ const schema = computed(() => filterSchemaByPage(agent.schema, 'napcat'))
 const tools = ref<NapCatTool[]>([])
 const loading = ref(false)
 const detailKey = ref('')
+const collapsed = ref<Record<string, boolean>>({})
 
 const DOC_CATEGORY_ORDER = [
   '流式传输扩展',
@@ -132,6 +133,10 @@ function resetToggles() {
   agent.onChange('napcat_tool_overrides', {})
 }
 
+function toggleCategory(category: string) {
+  collapsed.value = { ...collapsed.value, [category]: !collapsed.value[category] }
+}
+
 function riskColor(risk: string): string {
   return risk === 'read' ? 'success' : risk === 'send' ? 'info' : 'warning'
 }
@@ -220,81 +225,84 @@ watch(
 
         <div class="tool-list">
           <template v-for="group in toolGroups" :key="group.category">
-            <div class="tool-category">
+            <div class="tool-category" @click="toggleCategory(group.category)">
+              <v-icon :icon="collapsed[group.category] ? 'mdi-chevron-down' : 'mdi-chevron-up'" size="small" />
               <span class="tool-category-name">{{ group.category }}</span>
               <span class="tool-category-count">{{ group.items.length }}</span>
             </div>
-            <div
-              v-for="tool in group.items"
-              :key="tool.name"
-              class="tool-item"
-              :class="{ 'is-off': !enabled || !isToolOn(tool.name) }"
-            >
-              <div class="tool-row">
-                <div class="tool-info">
-                  <div class="tool-name">
-                    {{ tool.name }}
-                    <a
-                      v-if="tool.doc_url"
-                      :href="tool.doc_url"
-                      target="_blank"
-                      rel="noopener"
-                      class="tool-doc-link"
-                      @click.stop
-                    >
-                      <v-icon icon="mdi-open-in-new" size="x-small" />
-                      文档
-                    </a>
+            <template v-if="!collapsed[group.category]">
+              <div
+                v-for="tool in group.items"
+                :key="tool.name"
+                class="tool-item"
+                :class="{ 'is-off': !enabled || !isToolOn(tool.name) }"
+              >
+                <div class="tool-row">
+                  <div class="tool-info">
+                    <div class="tool-name">
+                      {{ tool.name }}
+                      <a
+                        v-if="tool.doc_url"
+                        :href="tool.doc_url"
+                        target="_blank"
+                        rel="noopener"
+                        class="tool-doc-link"
+                        @click.stop
+                      >
+                        <v-icon icon="mdi-open-in-new" size="x-small" />
+                        文档
+                      </a>
+                    </div>
+                    <div class="tool-desc">{{ tool.description }}</div>
+                    <div class="tool-meta d-flex gap-2 flex-wrap">
+                      <v-chip size="small" variant="tonal" :color="riskColor(tool.risk)">{{ riskLabel(tool.risk) }}</v-chip>
+                      <v-chip size="small" variant="tonal">权限: {{ permissionLabel(toolPermission(tool)) }}</v-chip>
+                      <v-chip size="small" variant="tonal">作用域: {{ toolScopes(tool).join(' / ') }}</v-chip>
+                    </div>
                   </div>
-                  <div class="tool-desc">{{ tool.description }}</div>
-                  <div class="tool-meta d-flex gap-2 flex-wrap">
-                    <v-chip size="small" variant="tonal" :color="riskColor(tool.risk)">{{ riskLabel(tool.risk) }}</v-chip>
-                    <v-chip size="small" variant="tonal">权限: {{ permissionLabel(toolPermission(tool)) }}</v-chip>
-                    <v-chip size="small" variant="tonal">作用域: {{ toolScopes(tool).join(' / ') }}</v-chip>
+                  <v-switch
+                    :model-value="enabled && isToolOn(tool.name)"
+                    :disabled="!enabled"
+                    color="primary"
+                    density="compact"
+                    hide-details
+                    @update:model-value="toggleTool(tool.name)"
+                  />
+                </div>
+                <div class="tool-policy" :class="{ 'is-disabled': !enabled }">
+                  <v-select
+                    :model-value="toolPermission(tool)"
+                    :disabled="!enabled"
+                    :items="[
+                      { title: '所有人', value: 'everyone' },
+                      { title: '成员及以上', value: 'member' },
+                      { title: '群管理及以上', value: 'group_admin' },
+                      { title: '群主', value: 'group_owner' },
+                      { title: 'Bot拥有者', value: 'owner' },
+                    ]"
+                    label="触发权限"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                    @update:model-value="(v: any) => setToolPermission(tool, v)"
+                  />
+                  <div class="tool-scope-static">
+                    <span class="text-caption">作用域：</span>
+                    <span class="font-weight-medium">{{ toolScopes(tool).join(' / ') }}</span>
                   </div>
+                  <v-alert v-if="isSensitiveWide(tool)" type="warning" variant="tonal" density="compact" class="mt-2">
+                    ⚠️ {{ tool.name }} 是高/极高敏感工具，默认权限为 {{ permissionLabel(tool.base_permission) }}，当前放宽为 {{ permissionLabel(toolPermission(tool)) }}。
+                  </v-alert>
                 </div>
-                <v-switch
-                  :model-value="enabled && isToolOn(tool.name)"
-                  :disabled="!enabled"
-                  color="primary"
-                  density="compact"
-                  hide-details
-                  @update:model-value="toggleTool(tool.name)"
-                />
-              </div>
-              <div class="tool-policy" :class="{ 'is-disabled': !enabled }">
-                <v-select
-                  :model-value="toolPermission(tool)"
-                  :disabled="!enabled"
-                  :items="[
-                    { title: '所有人', value: 'everyone' },
-                    { title: '成员及以上', value: 'member' },
-                    { title: '群管理及以上', value: 'group_admin' },
-                    { title: '群主', value: 'group_owner' },
-                    { title: 'Bot拥有者', value: 'owner' },
-                  ]"
-                  label="触发权限"
-                  variant="outlined"
-                  density="compact"
-                  hide-details
-                  @update:model-value="(v: any) => setToolPermission(tool, v)"
-                />
-                <div class="tool-scope-static">
-                  <span class="text-caption">作用域：</span>
-                  <span class="font-weight-medium">{{ toolScopes(tool).join(' / ') }}</span>
+                <div v-if="detailKey === tool.name" class="tool-detail">
+                  <div class="text-caption mb-1">参数 Schema</div>
+                  <pre class="tool-pre">{{ JSON.stringify(tool.parameters, null, 2) }}</pre>
                 </div>
-                <v-alert v-if="isSensitiveWide(tool)" type="warning" variant="tonal" density="compact" class="mt-2">
-                  ⚠️ {{ tool.name }} 是高/极高敏感工具，默认权限为 {{ permissionLabel(tool.base_permission) }}，当前放宽为 {{ permissionLabel(toolPermission(tool)) }}。
-                </v-alert>
+                <v-btn v-else size="x-small" variant="text" prepend-icon="mdi-code-json" @click="detailKey = tool.name">
+                  查看参数
+                </v-btn>
               </div>
-              <div v-if="detailKey === tool.name" class="tool-detail">
-                <div class="text-caption mb-1">参数 Schema</div>
-                <pre class="tool-pre">{{ JSON.stringify(tool.parameters, null, 2) }}</pre>
-              </div>
-              <v-btn v-else size="x-small" variant="text" prepend-icon="mdi-code-json" @click="detailKey = tool.name">
-                查看参数
-              </v-btn>
-            </div>
+            </template>
           </template>
         </div>
       </v-card-text>
@@ -325,6 +333,8 @@ watch(
   margin-top: 8px;
   padding: 4px 2px;
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.1);
+  cursor: pointer;
+  user-select: none;
 }
 
 .tool-category:first-child {
