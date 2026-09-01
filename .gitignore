@@ -21,3 +21,6 @@ dashboard/dist/*.map
 
 # pnpm 全局存储 / 本地缓存
 .pnpm-store/
+
+# 本地废弃代码存档（QQ 客户端实验功能回退后保留）
+deprecated/qq-client/
