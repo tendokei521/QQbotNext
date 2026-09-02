@@ -121,6 +121,14 @@ async def _collect_llm_ext(runtime, event, session_id: str, is_private: bool, sc
 
     specs.extend(build_session_tools(runtime, ctx))
 
+    # Tavily 联网搜索（系统级工具，不进入 NapCat 前端清单）
+    if bool(runtime.config.get("tavily_enable", False)):
+        tavily_api_key = str(runtime.config.get("tavily_api_key", "") or "").strip()
+        if tavily_api_key:
+            from app.llm.tavily_search import build_tavily_tool
+
+            specs.append(build_tavily_tool(runtime))
+
     # 长期记忆原生工具：memory_save / recall / delete / correct / deny
     memory = getattr(runtime, "memory", None)
     if memory is not None and memory.enabled():

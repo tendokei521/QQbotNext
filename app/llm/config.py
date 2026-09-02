@@ -126,6 +126,12 @@ DEFAULT_LLM_CONFIG: dict = {
     "knowledge_embedding_model_id": "",   # 指定 embedding 模型实例 id；空则自动选第一个 embedding 模型
     "knowledge_recall_limit": 5,          # 默认检索条数
     "knowledge_recall_max_chars": 2000,   # 检索结果最大输出字符
+    # Tavily 联网搜索（系统级工具，不进入 NapCat 前端清单）
+    "tavily_enable": False,               # 总开关
+    "tavily_api_key": "",                 # Tavily API Key（password 脱敏）
+    "tavily_max_results": 5,              # 默认搜索结果条数
+    "tavily_search_depth": "basic",       # basic / advanced
+    "tavily_max_content_chars": 2000,     # 返回结果最大字符数
     # MCP（Model Context Protocol）stdio server 配置
     # [{"name":"filesystem","command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","/tmp"],"env":{},"timeout":30}]
     "mcp_servers": [],

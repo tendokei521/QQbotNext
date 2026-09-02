@@ -14,6 +14,7 @@ SCHEMA = {
     "group_schedule": {"type": "group", "label": "定时任务", "collapsible": True},
     "group_memory": {"type": "group", "label": "长期记忆（实验性）", "collapsible": True},
     "group_knowledge": {"type": "group", "label": "知识库", "collapsible": True},
+    "group_tavily": {"type": "group", "label": "Tavily 联网搜索", "collapsible": True},
     "group_mcp": {"type": "group", "label": "MCP 工具", "collapsible": True},
     "group_napcat": {"type": "group", "label": "NapCat 工具", "collapsible": True},
     "group_permission": {"type": "group", "label": "权限", "collapsible": True},
@@ -420,6 +421,32 @@ SCHEMA = {
         "default": 5, "min": 1, "max": 20, "group": "group_knowledge",
     },
 
+    # ==================== Tavily 联网搜索 ====================
+    "tavily_enable": {
+        "type": "boolean", "label": "启用 Tavily 搜索", "description": "开启后 LLM 可使用 tavily_search 工具进行联网搜索",
+        "default": False, "group": "group_tavily",
+    },
+    "tavily_api_key": {
+        "type": "password", "label": "Tavily API Key", "description": "在 https://app.tavily.com 获取，格式 tvly-xxx",
+        "default": "", "group": "group_tavily",
+    },
+    "tavily_max_results": {
+        "type": "number", "label": "默认搜索条数", "description": "tavily_search 默认返回的结果数量",
+        "default": 5, "min": 1, "max": 20, "group": "group_tavily",
+    },
+    "tavily_search_depth": {
+        "type": "select", "label": "搜索深度", "description": "basic 快且省额度；advanced 结果更准但成本更高",
+        "default": "basic", "group": "group_tavily",
+        "options": {
+            "basic": "basic（推荐）",
+            "advanced": "advanced（更准）",
+        },
+    },
+    "tavily_max_content_chars": {
+        "type": "number", "label": "返回内容截断长度", "description": "搜索结果文本超过该长度后截断，防止撑爆上下文",
+        "default": 2000, "min": 500, "max": 20000, "group": "group_tavily",
+    },
+
     # ==================== MCP ====================
     "mcp_servers": {
         "type": "textarea", "label": "MCP Servers (JSON 数组)", "description": "每个元素：{\"name\":\"...\",\"command\":\"...\",\"args\":[...],\"env\":{},\"cwd\":\"...\",\"timeout\":30}",
@@ -505,6 +532,7 @@ _PAGE_BY_GROUP = {
     "group_schedule": "panels",
     "group_memory": "memory",
     "group_knowledge": "knowledge",
+    "group_tavily": "basic",
     "group_mcp": "mcp",
     "group_napcat": "napcat",
     "group_permission": "permission",
@@ -523,6 +551,7 @@ _IMPORTANCE_BY_GROUP = {
     "group_schedule": "advanced",
     "group_memory": "advanced",
     "group_knowledge": "advanced",
+    "group_tavily": "advanced",
     "group_mcp": "advanced",
     "group_napcat": "advanced",
     "group_permission": "basic",
