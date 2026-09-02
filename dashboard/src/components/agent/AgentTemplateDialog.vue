@@ -21,6 +21,7 @@ const profiles = ref<ProfileItem[]>([])
 const loading = ref(false)
 const saving = ref(false)
 const applyingId = ref('')
+const deletingId = ref('')
 const newName = ref('')
 
 async function loadProfiles() {
@@ -70,6 +71,21 @@ async function applyProfile(profile: ProfileItem) {
   }
 }
 
+async function deleteProfile(profile: ProfileItem) {
+  if (deletingId.value) return
+  if (!window.confirm(`确认删除模板「${profile.name}」？`)) return
+  deletingId.value = profile.id
+  try {
+    await http.delete(`/api/config-profiles/${profile.id}`)
+    notify.push('模板已删除', 'success')
+    await loadProfiles()
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  } finally {
+    deletingId.value = ''
+  }
+}
+
 watch(
   () => props.modelValue,
   (open) => {
@@ -110,6 +126,16 @@ onMounted(() => {
               {{ Object.keys(p.config || {}).length }} 个配置项 · 更新于 {{ new Date(p.updated_at * 1000).toLocaleString('zh-CN', { hour12: false }) }}
             </v-list-item-subtitle>
             <template #append>
+              <v-btn
+                size="x-small"
+                variant="text"
+                icon="mdi-close"
+                color="error"
+                title="删除模板"
+                :disabled="deletingId !== ''"
+                :loading="deletingId === p.id"
+                @click.stop="deleteProfile(p)"
+              />
               <v-btn size="small" variant="tonal" prepend-icon="mdi-arrow-up-bold-circle" :loading="applyingId === p.id" @click="applyProfile(p)">
                 应用
               </v-btn>
