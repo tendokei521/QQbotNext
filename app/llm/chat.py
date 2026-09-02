@@ -116,6 +116,11 @@ async def _collect_llm_ext(runtime, event, session_id: str, is_private: bool, sc
         group_id=getattr(getattr(event, "group", None), "group_id", None),
     )
 
+    # 系统级会话上下文工具（不展示在 NapCat 前端清单）
+    from app.llm.session_tools import build_session_tools
+
+    specs.extend(build_session_tools(runtime, ctx))
+
     # 长期记忆原生工具：memory_save / recall / delete / correct / deny
     memory = getattr(runtime, "memory", None)
     if memory is not None and memory.enabled():
