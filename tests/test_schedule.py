@@ -403,13 +403,19 @@ async def test_schedule_tool_handler(tmp_path):
                                        {"action": "create", "trigger": "随便什么", "note": "x"})
         assert r.startswith("error: 无法解析时间表达式"), r
 
+        # 重复 create 不新建：同一会话同类型任务应返回已有任务
+        r = await handle_schedule_tool(module, "private_100", True,
+                                       {"action": "create", "trigger": "明天早上8点", "note": "该吃药了"})
+        assert "已存在相同定时任务" in r
+        assert len(sched.status()) == 1
+
         # delete 不存在的任务
         r = await handle_schedule_tool(module, "private_100", True, {"action": "delete", "job_id": "deadbeef"})
         assert r.startswith("error:")
 
-        # delete 自己的任务
+        # delete 自己的任务：兼容旧工具结果里的 8 位前缀 id
         tid = sched.status()[0]["task_id"]
-        r = await handle_schedule_tool(module, "private_100", True, {"action": "delete", "job_id": tid})
+        r = await handle_schedule_tool(module, "private_100", True, {"action": "delete", "job_id": tid[:8]})
         assert r.startswith("success: 已删除"), r
         assert sched.status() == []
 

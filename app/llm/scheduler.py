@@ -205,6 +205,54 @@ class TaskScheduler:
         )
         return entry
 
+    # ── 重复检测 ─────────────────────────────────────────
+    def _task_signature(self, entry: TaskEntry) -> tuple:
+        """生成用于去重的任务签名：重复类型 + 触发时刻/锚点。"""
+        if entry.repeat == "interval":
+            return (entry.repeat, entry.interval_seconds)
+        t = entry.next_at
+        if entry.repeat == "once":
+            return (entry.repeat, t.date().toordinal(), t.hour, t.minute, t.second)
+        if entry.repeat == "weekly":
+            return (entry.repeat, entry.weekday, t.hour, t.minute, t.second)
+        if entry.repeat == "monthly":
+            return (entry.repeat, entry.dom, t.hour, t.minute, t.second)
+        return (entry.repeat, t.hour, t.minute, t.second)
+
+    def _trigger_signature(self, trigger_expr: str) -> tuple | None:
+        """按自然语言 trigger 生成同样的去重签名；无法解析返回 None。"""
+        parsed = parse_schedule(trigger_expr)
+        if parsed is None:
+            return None
+        repeat = parsed["repeat"]
+        t = parsed["next_at"]
+        if repeat == "interval":
+            return (repeat, parsed.get("interval_seconds"))
+        if repeat == "once":
+            return (repeat, t.date().toordinal(), t.hour, t.minute, t.second)
+        if repeat == "weekly":
+            return (repeat, parsed.get("weekday"), t.hour, t.minute, t.second)
+        if repeat == "monthly":
+            return (repeat, parsed.get("dom"), t.hour, t.minute, t.second)
+        return (repeat, t.hour, t.minute, t.second)
+
+    def find_similar(self, session_id: str, trigger_expr: str) -> TaskEntry | None:
+        """查找本会话已存在的同类型定时任务，避免 LLM 重复 create。"""
+        sig = self._trigger_signature(trigger_expr)
+        norm = re.sub(r"\s+", "", trigger_expr or "").lower()
+        for e in self._tasks.values():
+            if not e.active or e.session_id != session_id:
+                continue
+            if sig is not None:
+                try:
+                    if self._task_signature(e) == sig:
+                        return e
+                except Exception:
+                    pass
+            elif norm and norm == re.sub(r"\s+", "", e.trigger_expr or "").lower():
+                return e
+        return None
+
     # ── 触发 ─────────────────────────────────────────────
     async def trigger_now(self, task_id: str) -> bool:
         """立即触发一次。一次性任务触发后结束；周期任务推进到下一触发时间。"""
@@ -619,6 +667,15 @@ async def handle_schedule_tool(module, session_id: str, is_private: bool, args: 
         note = str(args.get("note") or "").strip()
         if not trigger or not note:
             return "error: create 需要同时提供 trigger 与 note"
+        existing = scheduler.find_similar(session_id, trigger)
+        if existing is not None:
+            logger.add_info(f"#{bot_id}").info(
+                f"[定时任务] 工具 create 跳过重复 -> {session_id}: {trigger}"
+            )
+            return (
+                f"success: 本会话已存在相同定时任务，id={existing.id}，重复方式={existing.repeat}，"
+                f"下次触发时间={existing.next_at:%Y-%m-%d %H:%M:%S}，未重复创建。"
+            )
         entry = await scheduler.schedule(session_id, {"trigger": trigger, "content": note})
         if entry is None:
             logger.add_info(f"#{bot_id}").warning(f"[定时任务] 工具 create 失败: trigger={trigger}")
@@ -631,7 +688,7 @@ async def handle_schedule_tool(module, session_id: str, is_private: bool, args: 
             f"[定时任务] 工具 create -> {session_id}: {trigger} @ {entry.next_at:%Y-%m-%d %H:%M} ({entry.repeat})"
         )
         return (
-            f"success: 已创建定时任务，id={entry.id[:8]}，重复方式={entry.repeat}，"
+            f"success: 已创建定时任务，id={entry.id}，重复方式={entry.repeat}，"
             f"下次触发时间={entry.next_at:%Y-%m-%d %H:%M:%S}。"
         )
 
@@ -642,22 +699,27 @@ async def handle_schedule_tool(module, session_id: str, is_private: bool, args: 
         lines = []
         for t in rows:
             next_s = datetime.fromtimestamp(t["next_trigger_time"]).strftime("%Y-%m-%d %H:%M")
-            lines.append(f"id={t['task_id'][:8]} | {t['repeat']} | 下次 {next_s} | {t['content'][:30]}")
+            lines.append(f"id={t['task_id']} | {t['repeat']} | 下次 {next_s} | {t['content'][:30]}")
         return "本会话定时任务:\n" + "\n".join(lines)
 
     if action == "delete":
         job_id = str(args.get("job_id") or "").strip()
         if not job_id:
             return "error: delete 需要提供 job_id"
-        task = next(
-            (t for t in scheduler.status() if t["task_id"] == job_id and t["session_id"] == session_id),
-            None,
-        )
-        if task is None:
+        matches = [
+            t for t in scheduler.status()
+            if t["session_id"] == session_id
+            and (t["task_id"] == job_id or t["task_id"].startswith(job_id))
+        ]
+        if not matches:
             return f"error: 未找到本会话的任务 {job_id}（用 list 查看）"
-        if scheduler.cancel(job_id):
-            return f"success: 已删除定时任务 {job_id[:8]}"
-        return f"error: 删除任务 {job_id} 失败"
+        if len(matches) > 1:
+            ids = ", ".join(t["task_id"] for t in matches)
+            return f"error: 任务 id {job_id} 前缀不唯一（{ids}），请使用完整 id 重试"
+        task = matches[0]
+        if scheduler.cancel(task["task_id"]):
+            return f"success: 已删除定时任务 {task['task_id']}"
+        return f"error: 删除任务 {task['task_id']} 失败"
 
     return "error: action 必须是 create / list / delete 之一"
 
