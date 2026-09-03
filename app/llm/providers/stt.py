@@ -58,6 +58,6 @@ class OpenAIWhisperSTTProvider(BaseProvider):
             ) as resp:
                 if resp.status != 200:
                     body = await resp.text()
-                    raise ValueError(f"STT 请求失败 HTTP {resp.status}: {body[:200]}")
+                    raise ValueError(f"STT 请求失败 HTTP {resp.status}: {body}")
                 result = await resp.json()
         return str(result.get("text") or "")

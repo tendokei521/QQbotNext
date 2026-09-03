@@ -54,7 +54,7 @@ class JinaRerankProvider(BaseProvider):
             ) as resp:
                 if resp.status != 200:
                     body = await resp.text()
-                    raise ValueError(f"Rerank 请求失败 HTTP {resp.status}: {body[:200]}")
+                    raise ValueError(f"Rerank 请求失败 HTTP {resp.status}: {body}")
                 result = await resp.json()
         results = result.get("results") or []
         return [int(item.get("index", 0) or 0) for item in results if isinstance(item, dict)]
@@ -102,7 +102,7 @@ class CohereRerankProvider(BaseProvider):
             ) as resp:
                 if resp.status != 200:
                     body = await resp.text()
-                    raise ValueError(f"Rerank 请求失败 HTTP {resp.status}: {body[:200]}")
+                    raise ValueError(f"Rerank 请求失败 HTTP {resp.status}: {body}")
                 result = await resp.json()
         results = result.get("results") or []
         return [int(item.get("index", 0) or 0) for item in results if isinstance(item, dict)]

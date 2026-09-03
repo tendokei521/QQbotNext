@@ -54,6 +54,6 @@ class OpenAITTSProvider(BaseProvider):
             ) as resp:
                 if resp.status != 200:
                     body = await resp.text()
-                    raise ValueError(f"TTS 请求失败 HTTP {resp.status}: {body[:200]}")
+                    raise ValueError(f"TTS 请求失败 HTTP {resp.status}: {body}")
                 audio = await resp.read()
         return audio, voice or self.voice

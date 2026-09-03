@@ -150,7 +150,7 @@ class AnthropicProvider(BaseProvider):
                         if resp.status != 200:
                             body = await resp.text()
                             logger.add_info("Anthropic").error(
-                                f"Anthropic 请求失败 HTTP {resp.status}: {body[:200]}"
+                                f"Anthropic 请求失败 HTTP {resp.status}: {body}"
                             )
                             return LLMResponse(text="", raw=None)
                         data = await resp.json()
@@ -247,9 +247,9 @@ class AnthropicProvider(BaseProvider):
                     if resp.status != 200:
                         body = await resp.text()
                         logger.add_info("Anthropic").error(
-                            f"Anthropic 流式请求失败 HTTP {resp.status}: {body[:200]}"
+                            f"Anthropic 流式请求失败 HTTP {resp.status}: {body}"
                         )
-                        yield StreamEvent(type="error", text=f"HTTP {resp.status}: {body[:200]}")
+                        yield StreamEvent(type="error", text=f"HTTP {resp.status}: {body}")
                         return
                     async for line in resp.content:
                         line_text = line.decode("utf-8", errors="ignore").strip()

@@ -122,12 +122,12 @@ class OpenAICompatProvider(BaseProvider):
                 if resp.status != 200:
                     body = await resp.text()
                     if resp.status in (401, 403):
-                        raise _AuthError(f"HTTP {resp.status}: {body[:200]}", code=f"HTTP {resp.status}")
+                        raise _AuthError(f"HTTP {resp.status}: {body}", code=f"HTTP {resp.status}")
                     if resp.status in RETRYABLE_STATUS:
                         raise _RetryableError(
-                            f"HTTP {resp.status}: {body[:200]}", code=f"HTTP {resp.status}"
+                            f"HTTP {resp.status}: {body}", code=f"HTTP {resp.status}"
                         )
-                    raise _FatalError(f"HTTP {resp.status}: {body[:200]}", code=f"HTTP {resp.status}")
+                    raise _FatalError(f"HTTP {resp.status}: {body}", code=f"HTTP {resp.status}")
                 return await resp.json()
 
     async def _stream_once(self, api_key: str, payload: dict, timeout: int):
@@ -143,12 +143,12 @@ class OpenAICompatProvider(BaseProvider):
                 if resp.status != 200:
                     body = await resp.text()
                     if resp.status in (401, 403):
-                        raise _AuthError(f"HTTP {resp.status}: {body[:200]}", code=f"HTTP {resp.status}")
+                        raise _AuthError(f"HTTP {resp.status}: {body}", code=f"HTTP {resp.status}")
                     if resp.status in RETRYABLE_STATUS:
                         raise _RetryableError(
-                            f"HTTP {resp.status}: {body[:200]}", code=f"HTTP {resp.status}"
+                            f"HTTP {resp.status}: {body}", code=f"HTTP {resp.status}"
                         )
-                    raise _FatalError(f"HTTP {resp.status}: {body[:200]}", code=f"HTTP {resp.status}")
+                    raise _FatalError(f"HTTP {resp.status}: {body}", code=f"HTTP {resp.status}")
                 while True:
                     raw_line = await resp.content.readline()
                     if not raw_line:

@@ -70,7 +70,7 @@ class OpenAIEmbeddingProvider(BaseProvider):
             ) as resp:
                 if resp.status != 200:
                     body = await resp.text()
-                    raise ValueError(f"Embedding 请求失败 HTTP {resp.status}: {body[:200]}")
+                    raise ValueError(f"Embedding 请求失败 HTTP {resp.status}: {body}")
                 result = await resp.json()
         items = (result.get("data") or [])
         items.sort(key=lambda x: int(x.get("index", 0) or 0))
