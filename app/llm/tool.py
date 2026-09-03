@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
@@ -32,6 +33,15 @@ TOOL_PERMISSION_RANK = {
 }
 
 ToolHandler = Callable[["ToolContext", dict], Awaitable[str]]
+
+# OpenAI function name 仅允许字母/数字/下划线/连字符
+_TOOL_NAME_SAFE_RE = re.compile(r"[^a-zA-Z0-9_-]+")
+
+
+def sanitize_tool_name(name: str) -> str:
+    """把工具名清洗成 OpenAI 认可的 function.name（^[a-zA-Z0-9_-]+$）。"""
+    cleaned = _TOOL_NAME_SAFE_RE.sub("_", str(name or ""))
+    return cleaned or "tool"
 
 
 @dataclass
@@ -69,7 +79,12 @@ class ToolSpec:
         permission: str = "everyone",
         scopes: list[str] | tuple[str, ...] | None = None,
     ) -> None:
-        self.name = name
+        raw_name = str(name or "")
+        self.name = sanitize_tool_name(raw_name)
+        if self.name != raw_name:
+            logger.warning(
+                f"[Tool] 工具名 {raw_name!r} 不符合 OpenAI function.name 规范，已清洗为 {self.name!r}"
+            )
         self.description = description
         self.parameters = parameters
         self.handler = handler

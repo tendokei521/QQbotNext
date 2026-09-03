@@ -121,6 +121,19 @@ def test_tool_scope_private_only():
     assert spec.allows(ToolContext(event=_GroupEvent())) is False
 
 
+def test_tool_spec_sanitizes_invalid_openai_name():
+    from app.llm.tool import ToolSpec, sanitize_tool_name
+
+    assert sanitize_tool_name(".ocr_image") == "_ocr_image"
+    assert sanitize_tool_name(".handle_quick_operation") == "_handle_quick_operation"
+
+    async def handler(ctx, args):
+        return "ok"
+
+    spec = ToolSpec(name=".ocr_image", description="", parameters={}, handler=handler)
+    assert spec.to_openai()["function"]["name"] == "_ocr_image"
+
+
 # ---------- 知识库向量后端回退 ----------
 
 def test_knowledge_store_vector_backend_fallback(tmp_path):
