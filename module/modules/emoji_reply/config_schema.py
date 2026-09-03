@@ -46,8 +46,8 @@ SCHEMA = {
     },
     "cooldown_seconds": {
         "type": "number",
-        "label": "同一消息处理冷却时长（秒）",
-        "description": "同一消息 ID 在冷却时间内不会被重复处理；0 表示不冷却",
+        "label": "同一表情冷却时长（秒）",
+        "description": "同一消息上的同一个 Emoji 在冷却时间内不会重复发送；0 表示不冷却。同一消息上的不同 Emoji 不受影响",
         "default": 60,
         "min": 0,
         "step": 1,

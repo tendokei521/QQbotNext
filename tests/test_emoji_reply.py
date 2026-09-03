@@ -1,6 +1,6 @@
 """Emoji 回复插件测试。
 
-覆盖：关键词列表解析、消息关键词发送 Emoji、跟随群消息 Emoji、同一消息冷却去重。
+覆盖：关键词列表解析、消息关键词发送 Emoji、跟随群消息 Emoji、同一消息同一表情冷却去重。
 """
 
 from types import SimpleNamespace
@@ -84,7 +84,7 @@ async def test_handle_message_symbol_clean_disabled_keeps_exact_match():
     assert bot.calls == []
 
 
-async def test_handle_message_sends_matching_emoji_and_cooldown():
+async def test_handle_message_allows_different_emoji_on_same_message():
     module = _make_module({
         "keyword_follow_enable": True,
         "keyword_emoji_list": ["哈哈:123", "再见:456"],
@@ -97,9 +97,14 @@ async def test_handle_message_sends_matching_emoji_and_cooldown():
     await handle_message(module, event)
     assert bot.calls == [(100, "123")]
 
-    # 同一消息 ID 在冷却期内不重复处理
+    # 同一消息 ID 上的不同 Emoji 在冷却期内仍可发送
+    different_emoji_event = SimpleNamespace(message_id=100, text="再见", bot=bot)
+    await handle_message(module, different_emoji_event)
+    assert bot.calls == [(100, "123"), (100, "456")]
+
+    # 同一消息 ID 上的同一 Emoji 不会重复发送
     await handle_message(module, event)
-    assert bot.calls == [(100, "123")]
+    assert bot.calls == [(100, "123"), (100, "456")]
 
 
 async def test_handle_message_disabled_or_no_keyword():
@@ -121,7 +126,7 @@ async def test_handle_message_disabled_or_no_keyword():
     assert bot.calls == []
 
 
-async def test_handle_emoji_notice_follows_and_dedup():
+async def test_handle_emoji_notice_allows_different_emoji_on_same_message():
     module = _make_module({
         "follow_emoji": True,
         "follow_emoji_prob": 1.0,
@@ -138,9 +143,19 @@ async def test_handle_emoji_notice_follows_and_dedup():
     await handle_emoji_notice(module, event)
     assert bot.calls == [(200, "123")]
 
-    # 同一消息再次上报不重复跟随
+    # 同一消息 ID 上的不同 Emoji 在冷却期内仍会跟随
+    other_event = SimpleNamespace(
+        message_id=200,
+        emoji_is_add=True,
+        emoji_likes=[{"emoji_id": "456", "count": 1}],
+        bot=bot,
+    )
+    await handle_emoji_notice(module, other_event)
+    assert bot.calls == [(200, "123"), (200, "456")]
+
+    # 同一消息 ID 上的同一 Emoji 不会重复跟随
     await handle_emoji_notice(module, event)
-    assert bot.calls == [(200, "123")]
+    assert bot.calls == [(200, "123"), (200, "456")]
 
 
 async def test_handle_emoji_notice_ignores_remove():

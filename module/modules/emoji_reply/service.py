@@ -2,8 +2,8 @@
 
 - handle_emoji_notice：群消息被添加 Emoji 时，按概率跟随同一个 Emoji；
 - handle_message：消息文本命中关键词时，按概率给该消息添加配置的 Emoji 回应；
-- 使用缓存按 (bot, message_id, emoji_id) 做幂等，并按配置对整个消息 ID 做冷却，
-  避免同一消息被重复处理。
+- 使用缓存按 (bot, message_id, emoji_id) 做幂等；冷却只针对同一消息上的同一 Emoji，
+  同一消息的不同 Emoji 仍可正常跟随/发送。
 """
 
 from __future__ import annotations
@@ -13,8 +13,7 @@ import re
 
 from app.core.logger import module_logger
 
-# 冷却 key 前缀：整个消息粒度和单个 Emoji 粒度都做幂等
-_COOLDOWN_MSG = "emoji_reply:msg:{bot_id}:{message_id}"
+# 冷却 key 前缀：只按“同一消息 + 同一 Emoji”做幂等，不阻塞同一消息上的其它 Emoji
 _COOLDOWN_EMOJI = "emoji_reply:emoji:{bot_id}:{message_id}:{emoji_id}"
 
 # 关键词匹配用：移除标点、符号与空白，保留中文/字母/数字
@@ -61,11 +60,6 @@ async def handle_emoji_notice(module, event) -> None:
     prob = float(module.config.get("follow_emoji_prob", 0.5) or 0)
     log = _logger(module)
 
-    msg_key = _COOLDOWN_MSG.format(bot_id=module.bot_id, message_id=message_id)
-    if cooldown > 0 and cache.has(msg_key):
-        return
-
-    processed = False
     for emoji in event.emoji_likes or []:
         if not isinstance(emoji, dict):
             continue
@@ -86,13 +80,9 @@ async def handle_emoji_notice(module, event) -> None:
             cache.set(emoji_key, True, cooldown)
         try:
             await event.bot.set_msg_emoji_like(message_id, emoji_id)
-            processed = True
             log.debug(f"跟随 Emoji {emoji_id} on msg {message_id}")
         except Exception as e:
             log.error(f"跟随 Emoji {emoji_id} 失败: {e}")
-
-    if processed and cooldown > 0:
-        cache.set(msg_key, True, cooldown)
 
 
 async def handle_message(module, event) -> None:
@@ -109,10 +99,6 @@ async def handle_message(module, event) -> None:
     prob = float(module.config.get("keyword_follow_prob", 0.5) or 0)
     log = _logger(module)
 
-    msg_key = _COOLDOWN_MSG.format(bot_id=module.bot_id, message_id=message_id)
-    if cooldown > 0 and cache.has(msg_key):
-        return
-
     keyword_emojis = parse_keyword_emoji_list(module.config.get("keyword_emoji_list", []))
     if not keyword_emojis:
         return
@@ -122,7 +108,6 @@ async def handle_message(module, event) -> None:
     if clean_enabled:
         text = clean_symbols(text)
 
-    processed = False
     for keyword, emoji_id in keyword_emojis:
         match_keyword = clean_symbols(keyword) if clean_enabled else keyword
         if not match_keyword or match_keyword not in text:
@@ -140,10 +125,6 @@ async def handle_message(module, event) -> None:
 
         try:
             await event.bot.set_msg_emoji_like(message_id, emoji_id)
-            processed = True
             log.debug(f"关键词 {keyword} → Emoji {emoji_id} on msg {message_id}")
         except Exception as e:
             log.error(f"关键词 Emoji {emoji_id} 发送失败: {e}")
-
-    if processed and cooldown > 0:
-        cache.set(msg_key, True, cooldown)
