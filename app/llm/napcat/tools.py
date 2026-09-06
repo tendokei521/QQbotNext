@@ -104,6 +104,8 @@ def build_napcat_tools(runtime: Any, ctx: ToolContext | None = None) -> list[Too
             permission=permission,
             scopes=scopes,
             module=None,
+            source="napcat",
+            category=str(tool.get("category", "NapCat")),
         )
         specs.append(spec)
     return specs

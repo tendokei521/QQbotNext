@@ -180,4 +180,6 @@ def build_tavily_tool(runtime: Any) -> ToolSpec:
         permission="member",
         scopes=("*",),
         module=None,
+        source="system",
+        category="联网搜索",
     )

@@ -135,12 +135,20 @@ DEFAULT_LLM_CONFIG: dict = {
     # MCP（Model Context Protocol）stdio server 配置
     # [{"name":"filesystem","command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","/tmp"],"env":{},"timeout":30}]
     "mcp_servers": [],
+    # 统一工具管理：四类工具各自的开关与日志输出
+    "system_tools_enabled": {},        # 系统工具开关：{"tool_name": bool}
+    "system_tools_log_enabled": True,  # 系统工具普通调用日志
+    "module_tools_enabled": {},        # 模块工具开关：{"tool_name": bool}
+    "module_tools_log_enabled": True,  # 模块工具普通调用日志
+    "mcp_tools_enabled": {},           # MCP 工具开关：{"tool_name": bool}
+    "mcp_tools_log_enabled": True,     # MCP 工具普通调用日志
     # NapCat / OneBot 通用工具：数据驱动地暴露 NapCat API 给 LLM
     "napcat_tools_enable": False,      # 总开关
     "napcat_tools_allowed": [],        # 空=全部；非空=只允许白名单
     "napcat_tools_denied": [],         # 黑名单（优先级高于白名单）
     "napcat_tools_max_result": 2000,   # 返回结果截断长度
     "napcat_tools_debug": False,       # 调试：完整记录 NapCat 请求与响应
+    "napcat_tools_log_enabled": True,  # NapCat 工具普通调用日志
     "napcat_tool_overrides": {},       # 工具权限/作用域覆盖：{"send_poke":{"permission":"member","scopes":["private"]}}
 }
 

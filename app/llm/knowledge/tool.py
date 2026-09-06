@@ -91,6 +91,8 @@ def build_knowledge_tools(runtime: Any) -> list[ToolSpec]:
                 "required": ["content"],
             },
             handler=_add,
+            source="system",
+            category="知识库",
         ),
         ToolSpec(
             name="knowledge_search",
@@ -107,6 +109,8 @@ def build_knowledge_tools(runtime: Any) -> list[ToolSpec]:
                 "required": ["query"],
             },
             handler=_search,
+            source="system",
+            category="知识库",
         ),
         ToolSpec(
             name="knowledge_delete",
@@ -121,5 +125,7 @@ def build_knowledge_tools(runtime: Any) -> list[ToolSpec]:
                 "required": ["id"],
             },
             handler=_delete,
+            source="system",
+            category="知识库",
         ),
     ]

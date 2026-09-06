@@ -738,6 +738,8 @@ def build_schedule_tool(module, session_id: str, is_private: bool) -> ToolSpec:
         ),
         parameters=SCHEDULE_TASK_SCHEMA,
         handler=_handler,
+        source="system",
+        category="定时任务",
     )
 
 

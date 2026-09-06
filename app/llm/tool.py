@@ -78,6 +78,8 @@ class ToolSpec:
         module: Any = None,
         permission: str = "everyone",
         scopes: list[str] | tuple[str, ...] | None = None,
+        source: str = "system",
+        category: str = "",
     ) -> None:
         raw_name = str(name or "")
         self.name = sanitize_tool_name(raw_name)
@@ -91,6 +93,8 @@ class ToolSpec:
         self.module = module
         self.permission = (permission or "everyone").lower()
         self.scopes = tuple(s.lower() for s in (scopes or ("group", "private")) if s)
+        self.source = source
+        self.category = category
 
     def allows(self, ctx: ToolContext | None) -> bool:
         """工具级权限/作用域校验；主动/定时等无事件场景默认放行。"""
@@ -159,7 +163,24 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
             started = time.monotonic()
             error = ""
             success = True
-            logger.add_info("Tool").info(f"[ToolCall]调用工具：{name}")
+
+            def _log_enabled() -> bool:
+                if ctx is None:
+                    return True
+                runtime = getattr(ctx, "runtime", None)
+                config = getattr(runtime, "config", None) if runtime is not None else None
+                if config is None:
+                    return True
+                if spec.source == "napcat":
+                    return bool(config.get("napcat_tools_log_enabled", True))
+                if spec.source == "mcp":
+                    return bool(config.get("mcp_tools_log_enabled", True))
+                if spec.source == "module":
+                    return bool(config.get("module_tools_log_enabled", True))
+                return bool(config.get("system_tools_log_enabled", True))
+
+            if _log_enabled():
+                logger.add_info("Tool").info(f"[ToolCall]调用工具：{name}")
             if not spec.allows(ctx):
                 error = "forbidden"
                 success = False
@@ -177,10 +198,11 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
                     logger.add_info("Tool").warning(f"[Tool] {name} 执行异常: {e}")
                     result = f"error: 工具 {name} 执行异常: {e}"
             duration_ms = (time.monotonic() - started) * 1000
-            logger.add_info("Tool").info(
-                f"[ToolCall]返回：{name} success={success} duration={duration_ms:.0f}ms "
-                f"error={error} result={str(result)[:200]}"
-            )
+            if _log_enabled():
+                logger.add_info("Tool").info(
+                    f"[ToolCall]返回：{name} success={success} duration={duration_ms:.0f}ms "
+                    f"error={error} result={str(result)[:200]}"
+                )
             await _run_tool_call_hooks(ctx, spec, name, args, result, success, error, duration_ms)
             runtime = getattr(ctx, "runtime", None) if ctx is not None else None
             telemetry = getattr(runtime, "telemetry", None) if runtime is not None else None
@@ -320,6 +342,8 @@ class ModuleToolRegistry:
                 module=module,
                 permission=rec.get("permission", "everyone"),
                 scopes=rec.get("scopes"),
+                source="module",
+                category=getattr(module, "module_name", "模块工具"),
             )
             self._specs.append(spec)
             self._by_name[name] = spec

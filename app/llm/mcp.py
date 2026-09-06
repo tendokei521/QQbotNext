@@ -223,6 +223,8 @@ class MCPManager:
                         description=f"[MCP:{name}] {desc or tool_name}",
                         parameters=parameters,
                         handler=handler,
+                        source="mcp",
+                        category="MCP",
                     ))
                 logger.add_info("MCP").info(
                     f"MCP {name} 连接成功，暴露 {len(tools)} 个工具"

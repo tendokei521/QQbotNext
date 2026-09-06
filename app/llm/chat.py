@@ -156,7 +156,32 @@ async def _collect_llm_ext(runtime, event, session_id: str, is_private: bool, sc
 
         specs.extend(build_napcat_tools(runtime, ctx))
 
-    return specs, skill_blocks, ctx
+    # 统一按四类工具的用户开关过滤：
+    # - 系统工具由 system_tools_enabled + 前置功能开关共同决定
+    # - 模块工具 / MCP 工具由各自 enabled map 单独控制
+    # - NapCat 工具已在上方由 security.resolve_tool_policy 过滤，这里直接放行
+    from app.llm.system_tools import is_system_tool_enabled
+
+    system_enabled = runtime.config.get("system_tools_enabled", {}) or {}
+    module_enabled = runtime.config.get("module_tools_enabled", {}) or {}
+    mcp_enabled = runtime.config.get("mcp_tools_enabled", {}) or {}
+    filtered: list = []
+    for spec in specs:
+        if spec.source == "napcat":
+            filtered.append(spec)
+        elif spec.source == "mcp":
+            if not (isinstance(mcp_enabled, dict) and not mcp_enabled.get(spec.name, True)):
+                filtered.append(spec)
+        elif spec.source == "module":
+            if not (isinstance(module_enabled, dict) and not module_enabled.get(spec.name, True)):
+                filtered.append(spec)
+        elif spec.source == "system":
+            if is_system_tool_enabled(runtime, spec):
+                filtered.append(spec)
+        else:
+            filtered.append(spec)
+
+    return filtered, skill_blocks, ctx
 
 
 async def _memory_block(runtime, session_id: str, user_id: Any, user_text: str, bot) -> str:

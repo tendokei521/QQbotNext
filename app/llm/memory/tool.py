@@ -161,6 +161,8 @@ def build_memory_tools(
                 "required": ["content"],
             },
             handler=_save,
+            source="system",
+            category="长期记忆",
         ),
         ToolSpec(
             name="memory_recall",
@@ -183,6 +185,8 @@ def build_memory_tools(
                 "required": ["query"],
             },
             handler=_recall,
+            source="system",
+            category="长期记忆",
         ),
         ToolSpec(
             name="memory_delete",
@@ -198,6 +202,8 @@ def build_memory_tools(
                 },
             },
             handler=_delete,
+            source="system",
+            category="长期记忆",
         ),
         ToolSpec(
             name="memory_correct",
@@ -214,6 +220,8 @@ def build_memory_tools(
                 "required": ["old", "content"],
             },
             handler=_correct,
+            source="system",
+            category="长期记忆",
         ),
         ToolSpec(
             name="memory_deny",
@@ -229,5 +237,7 @@ def build_memory_tools(
                 },
             },
             handler=_deny,
+            source="system",
+            category="长期记忆",
         ),
     ]

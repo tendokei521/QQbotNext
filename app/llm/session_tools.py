@@ -155,6 +155,8 @@ def build_session_tools(runtime: Any, ctx: Any) -> list[ToolSpec]:
             handler=_current_session,
             permission="member",
             scopes=("*",),
+            source="system",
+            category="会话",
         ),
         ToolSpec(
             name="get_session_history",
@@ -175,5 +177,7 @@ def build_session_tools(runtime: Any, ctx: Any) -> list[ToolSpec]:
             handler=_session_history,
             permission="member",
             scopes=("*",),
+            source="system",
+            category="会话",
         ),
     ]
