@@ -63,8 +63,13 @@ const navItems = computed<NavItem[]>(() => {
     { to: '/agent/memory', title: '长期记忆' },
     { to: '/agent/knowledge', title: '知识库' },
     { to: '/agent/mcp', title: 'MCP 工具' },
-    { to: '/agent/napcat', title: 'Napcat Tools' },
     { to: '/agent/panels', title: '定时任务 / 主动消息' },
+  ]
+  const toolChildren: NavChild[] = [
+    { to: '/tools/system', title: 'System Tools' },
+    { to: '/tools/napcat', title: 'Napcat Tools' },
+    { to: '/tools/mcp', title: 'MCP Tools' },
+    { to: '/tools/module', title: '模块 Tools' },
   ]
   const items: NavItem[] = [
     { to: '/', title: '总览', icon: 'mdi-view-dashboard-outline' },
@@ -73,6 +78,7 @@ const navItems = computed<NavItem[]>(() => {
     { to: '/provider-presets', title: 'Provider 预设', icon: 'mdi-api' },
     { to: '/sessions', title: '会话数据', icon: 'mdi-chat-outline' },
     { title: 'Agent 面板', icon: 'mdi-creation-outline', children: agentChildren },
+    { title: 'Tool 管理', icon: 'mdi-toolbox-outline', children: toolChildren },
     { to: '/logs', title: '日志', icon: 'mdi-console' },
     { to: '/settings', title: '设置', icon: 'mdi-cog-outline' },
   ]
@@ -84,6 +90,7 @@ const navItems = computed<NavItem[]>(() => {
 
 const openedGroups = ref<string[]>([])
 const isAgentActive = computed(() => route.path.startsWith('/agent'))
+const isToolsActive = computed(() => route.path.startsWith('/tools'))
 
 watch(
   () => route.path,
@@ -92,6 +99,11 @@ watch(
       if (!openedGroups.value.includes('Agent 面板')) openedGroups.value.push('Agent 面板')
     } else {
       openedGroups.value = openedGroups.value.filter((g) => g !== 'Agent 面板')
+    }
+    if (isToolsActive.value) {
+      if (!openedGroups.value.includes('Tool 管理')) openedGroups.value.push('Tool 管理')
+    } else {
+      openedGroups.value = openedGroups.value.filter((g) => g !== 'Tool 管理')
     }
   },
   { immediate: true },

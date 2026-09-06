@@ -83,7 +83,7 @@ const pages = computed(() => [
     color: 'blue-grey',
   },
   {
-    to: '/agent/napcat',
+    to: '/tools/napcat',
     title: 'Napcat Tools',
     icon: 'mdi-robot-industrial',
     desc: '把 NapCat/OneBot API 暴露给 LLM',
