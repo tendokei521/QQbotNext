@@ -14,6 +14,7 @@ from app.llm.config import LEGACY_LLM_CONNECTION_KEYS
 from app.llm.config_schema import STREAM_PRESETS
 from app.llm.napcat.manifest import NAP_CAT_TOOLS
 from app.llm.napcat.security import resolve_tool_policy
+from app.llm.system_tools import list_system_tools
 from app.services.bot_service import PASSWORD_MASK as _PASSWORD_MASK
 from app.services.provider_model_service import ProviderModelService
 from app.services.provider_preset_service import ProviderPresetService
@@ -237,7 +238,100 @@ async def agent_napcat_tools(request: Request, bot_id: int | None = Depends(pars
         item = dict(tool)
         item.update(policy)
         tools.append(item)
-    return JSONResponse(content={"ok": True, "tools": tools})
+    return JSONResponse(content={
+        "ok": True,
+        "log_enabled": bool(runtime.config.get("napcat_tools_log_enabled", True)),
+        "tools": tools,
+    })
+
+
+# ==================== 统一 Tool 管理：系统 / 模块 / MCP 工具清单 ====================
+
+@router.get("/system/tools")
+async def agent_system_tools(request: Request, bot_id: int | None = Depends(parse_bot_id)):
+    container = get_container(request)
+    runtime, _ = _runtime(container, bot_id)
+    if runtime is None:
+        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+    return JSONResponse(content={
+        "ok": True,
+        "log_enabled": bool(runtime.config.get("system_tools_log_enabled", True)),
+        "tools": list_system_tools(runtime),
+    })
+
+
+@router.get("/module/tools")
+async def agent_module_tools(request: Request, bot_id: int | None = Depends(parse_bot_id)):
+    container = get_container(request)
+    runtime, _ = _runtime(container, bot_id)
+    if runtime is None:
+        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+    module_map = runtime.config.get("module_tools_enabled", {}) or {}
+    tools = []
+    for spec in runtime.llm_tools.all_specs():
+        module = spec.module
+        ready = True
+        module_name = getattr(module, "module_name", "模块")
+        module_label = getattr(module, "name", module_name)
+        if module is not None:
+            authority = getattr(module, "authority", None)
+            if authority is not None and not getattr(authority, "enabled", True):
+                ready = False
+            try:
+                module_config = getattr(module, "config", None)
+                module_tools = module_config.get("tools_enabled", {}) if module_config is not None else {}
+                if isinstance(module_tools, dict) and spec.name in module_tools and not module_tools.get(spec.name):
+                    ready = False
+            except Exception:
+                pass
+        user_enabled = module_map.get(spec.name, True) if isinstance(module_map, dict) else True
+        tools.append({
+            "name": spec.name,
+            "description": spec.description,
+            "parameters": spec.parameters,
+            "category": spec.category or "模块工具",
+            "source": spec.source,
+            "module": module_name,
+            "module_label": module_label,
+            "enabled": bool(user_enabled),
+            "ready": bool(ready),
+            "effective": bool(user_enabled and ready),
+            "prerequisite": f"模块 {module_label} 未启用" if not ready else "",
+        })
+    return JSONResponse(content={
+        "ok": True,
+        "log_enabled": bool(runtime.config.get("module_tools_log_enabled", True)),
+        "tools": tools,
+    })
+
+
+@router.get("/mcp/tools")
+async def agent_mcp_tools(request: Request, bot_id: int | None = Depends(parse_bot_id)):
+    container = get_container(request)
+    runtime, _ = _runtime(container, bot_id)
+    if runtime is None:
+        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+    await runtime.mcp_manager.ensure_ready()
+    mcp_map = runtime.config.get("mcp_tools_enabled", {}) or {}
+    tools = []
+    for spec in runtime.mcp_manager.build_tools():
+        user_enabled = mcp_map.get(spec.name, True) if isinstance(mcp_map, dict) else True
+        tools.append({
+            "name": spec.name,
+            "description": spec.description,
+            "parameters": spec.parameters,
+            "category": spec.category or "MCP",
+            "source": spec.source,
+            "enabled": bool(user_enabled),
+            "ready": True,
+            "effective": bool(user_enabled),
+            "prerequisite": "",
+        })
+    return JSONResponse(content={
+        "ok": True,
+        "log_enabled": bool(runtime.config.get("mcp_tools_log_enabled", True)),
+        "tools": tools,
+    })
 
 
 # ==================== 定时任务 ====================
