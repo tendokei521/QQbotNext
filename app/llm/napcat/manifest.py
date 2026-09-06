@@ -527,7 +527,7 @@ NAP_CAT_TOOLS: list[dict] = [
         "doc_url": "https://napcat.apifox.cn/298305106e0",
     },
     {
-        "name": ".handle_quick_operation",
+        "name": "_handle_quick_operation",
         "description": "处理来自事件上报的快速操作请求",
         "parameters": {
             "type": "object",
@@ -555,7 +555,7 @@ NAP_CAT_TOOLS: list[dict] = [
         "doc_url": "https://napcat.apifox.cn/226658889e0",
     },
     {
-        "name": ".ocr_image",
+        "name": "_ocr_image",
         "description": "识别图片中的文字内容(仅Windows端支持)",
         "parameters": {
             "type": "object",
