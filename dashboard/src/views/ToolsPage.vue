@@ -54,7 +54,7 @@ watch(
 
     <v-card variant="outlined" class="mb-4">
       <v-tabs
-        v-model="activeTab"
+        :model-value="activeTab"
         color="primary"
         align-tabs="start"
         density="comfortable"
