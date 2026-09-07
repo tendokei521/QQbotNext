@@ -22,9 +22,17 @@ const pages = computed(() => [
     to: '/agent/basic',
     title: '基础配置',
     icon: 'mdi-tune-variant',
-    desc: '提示词、群/私聊开关、历史与触发',
+    desc: '群/私聊开关、历史与触发',
     status: '已配置',
     color: 'primary',
+  },
+  {
+    to: '/agent/role',
+    title: '角色设定',
+    icon: 'mdi-account-heart',
+    desc: '角色预设与系统提示词编辑',
+    status: agent.draft.system_prompt ? '已设置' : '未设置',
+    color: 'pink',
   },
   {
     to: '/agent/model',

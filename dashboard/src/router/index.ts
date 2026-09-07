@@ -15,6 +15,7 @@ const router = createRouter({
         { path: 'modules/:name', name: 'module-config', component: () => import('@/views/ModuleConfigPage.vue'), meta: { title: '模块配置' } },
         { path: 'agent', name: 'agent', component: () => import('@/views/AgentPage.vue'), meta: { title: 'Agent 面板' } },
         { path: 'agent/basic', name: 'agent-basic', component: () => import('@/views/AgentBasicPage.vue'), meta: { title: 'Agent 基础配置' } },
+        { path: 'agent/role', name: 'agent-role', component: () => import('@/views/AgentRolePage.vue'), meta: { title: 'Agent 角色设定' } },
         { path: 'agent/model', name: 'agent-model', component: () => import('@/views/AgentModelPage.vue'), meta: { title: 'Agent 模型' } },
         { path: 'agent/behavior', name: 'agent-behavior', component: () => import('@/views/AgentBehaviorPage.vue'), meta: { title: 'Agent 对话行为' } },
         { path: 'agent/stream', name: 'agent-stream', component: () => import('@/views/AgentStreamPage.vue'), meta: { title: 'Agent 流式回复' } },

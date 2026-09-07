@@ -19,7 +19,16 @@ watch(
 </script>
 
 <template>
-  <AgentSubPage title="基础配置" subtitle="提示词、群/私聊开关、历史与触发" icon="mdi-tune-variant" color="primary">
+  <AgentSubPage title="基础配置" subtitle="群/私聊开关、历史与触发" icon="mdi-tune-variant" color="primary">
+    <v-card variant="tonal" color="pink" class="mb-4">
+      <v-card-text class="d-flex align-center flex-wrap gap-2">
+        <v-icon icon="mdi-account-heart" color="pink" />
+        <span class="flex-grow-1">角色提示词已独立到「角色设定」页面，支持预设管理。</span>
+        <v-btn variant="text" prepend-icon="mdi-arrow-right" @click="$router.push('/agent/role')">
+          去编辑角色
+        </v-btn>
+      </v-card-text>
+    </v-card>
     <v-card v-if="agent.botId !== null" variant="outlined" class="mb-4">
       <v-card-title class="d-flex align-center">
         <v-icon icon="mdi-tune-variant" class="mr-2" color="primary" /> 基础配置
