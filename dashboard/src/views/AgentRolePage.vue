@@ -59,7 +59,7 @@ function startNew() {
   Object.assign(form, {
     name: '',
     description: '',
-    system_prompt: agent.draft.system_prompt || '',
+    system_prompt: '',
   })
 }
 
@@ -301,36 +301,7 @@ onMounted(() => {
             </div>
           </v-card-text>
         </v-card>
-
-        <v-card variant="outlined">
-          <v-card-title class="d-flex align-center">
-            <v-icon icon="mdi-robot-happy-outline" class="mr-2" color="primary" /> 当前 Agent 提示词
-            <v-spacer />
-            <v-chip v-if="agent.draft.system_prompt" size="small" variant="tonal">
-              {{ agent.draft.system_prompt.length }} 字
-            </v-chip>
-          </v-card-title>
-          <v-card-text>
-            <div v-if="agent.draft.system_prompt" class="role-prompt-preview">
-              {{ agent.draft.system_prompt }}
-            </div>
-            <div v-else class="text-caption text-center py-4" style="opacity: 0.55">
-              当前 Agent 未设置角色提示词
-            </div>
-          </v-card-text>
-        </v-card>
       </v-col>
     </v-row>
   </AgentSubPage>
 </template>
-
-<style scoped>
-.role-prompt-preview {
-  white-space: pre-wrap;
-  font-size: 13px;
-  line-height: 1.6;
-  opacity: 0.85;
-  max-height: 240px;
-  overflow-y: auto;
-}
-</style>

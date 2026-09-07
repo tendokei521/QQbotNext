@@ -56,6 +56,7 @@ const navItems = computed<NavItem[]>(() => {
   const agentChildren: NavChild[] = [
     { to: '/agent', title: '概览' },
     { to: '/agent/basic', title: '基础配置' },
+    { to: '/agent/role', title: '角色设定' },
     { to: '/agent/model', title: '模型' },
     { to: '/agent/behavior', title: '对话行为' },
     { to: '/agent/stream', title: '流式回复' },
@@ -221,7 +222,7 @@ onUnmounted(() => {
                 :prepend-icon="item.icon"
                 rounded="lg"
                 class="nav-item"
-                :class="{ 'nav-item--active': isAgentActive }"
+                :class="{ 'nav-item--active': item.title === 'Agent 面板' ? isAgentActive : item.title === 'Tool 管理' ? isToolsActive : false }"
               />
             </template>
             <v-list-item
