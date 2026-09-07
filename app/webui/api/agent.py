@@ -18,6 +18,7 @@ from app.llm.system_tools import list_system_tools
 from app.services.bot_service import PASSWORD_MASK as _PASSWORD_MASK
 from app.services.provider_model_service import ProviderModelService
 from app.services.provider_preset_service import ProviderPresetService
+from app.services.role_preset_service import RolePresetService
 from app.webui.api.deps import get_container, parse_bot_id
 
 router = APIRouter(prefix="/agent", tags=["agent"])
@@ -97,6 +98,7 @@ async def agent_config(request: Request, bot_id: int | None = Depends(parse_bot_
         "provider_presets": presets,
         "provider_models": provider_models,
         "stream_presets": STREAM_PRESETS,
+        "role_presets": container.get(RolePresetService).list_presets(),
     })
 
 

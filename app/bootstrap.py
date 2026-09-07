@@ -45,6 +45,7 @@ from app.services.module_install_service import ModuleInstallService
 from app.services.provider_model_service import ProviderModelService
 from app.services.provider_preset_service import ProviderPresetService
 from app.services.provider_service import ProviderRegistry
+from app.services.role_preset_service import RolePresetService
 from app.services.scheduler import SchedulerService
 
 _container: Container | None = None
@@ -109,6 +110,9 @@ def build_container(settings: Settings | None = None) -> Container:
     # 配置档案 / 路由服务
     config_profile_service = ConfigProfileService(config_service)
     container.register_factory(ConfigProfileService, lambda: config_profile_service)
+    # 角色预设服务
+    role_preset_service = RolePresetService(config_service)
+    container.register_factory(RolePresetService, lambda: role_preset_service)
 
     # 模块可访问的服务集合
     providers = ProviderRegistry()

@@ -102,6 +102,7 @@ class ConfigService:
         self._provider_settings: dict = dict(DEFAULT_PROVIDER_SETTINGS)
         self._config_profiles: dict[str, dict] = {}               # profile_id -> profile
         self._config_routes: dict[str, str] = {}                  # umo -> profile_id
+        self._role_presets: dict[str, dict] = {}                  # role_id -> role preset
 
     # ==================== 生命周期 ====================
     async def init(self) -> None:
@@ -280,9 +281,21 @@ class ConfigService:
         for r in rows:
             self._config_routes[r["umo"]] = r["profile_id"]
 
+        # role presets
+        rows = await self.db.fetchall("SELECT * FROM role_presets")
+        for r in rows:
+            self._role_presets[r["id"]] = {
+                "id": r["id"],
+                "name": r["name"],
+                "description": r["description"],
+                "system_prompt": r["system_prompt"],
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+            }
+
         self.log.debug(
             f"[Config] 加载完成: bots={len(self._bots)} modules={len(self._module_config)} "
-            f"presets={len(self._provider_presets)} models={len(self._provider_models)} profiles={len(self._config_profiles)}"
+            f"presets={len(self._provider_presets)} models={len(self._provider_models)} profiles={len(self._config_profiles)} roles={len(self._role_presets)}"
         )
 
     # ==================== 变更通知 ====================
@@ -675,6 +688,61 @@ class ConfigService:
         await self.db.execute("DELETE FROM config_routes WHERE umo = ?", (umo,))
         await self._notify("config_routes", self.get_config_routes())
         return True
+
+    # ==================== 角色预设 ====================
+    def list_role_presets(self) -> list[dict]:
+        """返回全部角色预设（深拷贝，调用方可安全修改）。"""
+        import copy
+
+        return [copy.deepcopy(self._role_presets[k]) for k in sorted(self._role_presets)]
+
+    def get_role_preset(self, role_id: str) -> dict | None:
+        """按 ID 返回角色预设（深拷贝），不存在返回 None。"""
+        import copy
+
+        preset = self._role_presets.get(str(role_id))
+        return copy.deepcopy(preset) if preset else None
+
+    async def save_role_preset(self, role_id: str, preset: dict) -> None:
+        key = str(role_id)
+        self._role_presets[key] = dict(preset)
+        await self._persist_role_preset(key)
+        await self._notify("role_presets", self.list_role_presets())
+
+    async def delete_role_preset(self, role_id: str) -> bool:
+        key = str(role_id)
+        if key not in self._role_presets:
+            return False
+        del self._role_presets[key]
+        try:
+            await self.db.execute("DELETE FROM role_presets WHERE id = ?", (key,))
+        except Exception as e:
+            self.log.error(f"[Config] 删除角色预设失败 {key}: {e}")
+            return False
+        await self._notify("role_presets", self.list_role_presets())
+        return True
+
+    async def _persist_role_preset(self, role_id: str) -> None:
+        try:
+            preset = self._role_presets.get(role_id)
+            if preset is None:
+                await self.db.execute("DELETE FROM role_presets WHERE id = ?", (role_id,))
+                return
+            await self.db.execute(
+                "INSERT OR REPLACE INTO role_presets "
+                "(id, name, description, system_prompt, created_at, updated_at) "
+                "VALUES (?,?,?,?,?,?)",
+                (
+                    role_id,
+                    preset.get("name", ""),
+                    preset.get("description", ""),
+                    preset.get("system_prompt", ""),
+                    int(preset.get("created_at", 0)),
+                    int(preset.get("updated_at", 0)),
+                ),
+            )
+        except Exception as e:
+            self.log.error(f"[Config] 持久化角色预设失败 {role_id}: {e}")
 
     def _schedule_persist(self, persist_fn: Callable[..., Any], *args: Any) -> None:
         try:

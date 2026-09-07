@@ -90,6 +90,15 @@ CREATE TABLE IF NOT EXISTS config_routes (
     umo        TEXT PRIMARY KEY,
     profile_id TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS role_presets (
+    id            TEXT PRIMARY KEY,
+    name          TEXT NOT NULL,
+    description   TEXT NOT NULL DEFAULT '',
+    system_prompt TEXT NOT NULL,
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL
+);
 """
 
 

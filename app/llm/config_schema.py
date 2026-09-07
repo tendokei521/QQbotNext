@@ -139,7 +139,7 @@ SCHEMA = {
 
     "system_prompt": {
         "type": "textarea", "label": "系统提示词", "description": "设定AI角色的系统提示词",
-        "default": "你是一个友好的助手。", "placeholder": "你是一个友好的助手...", "group": "group_session",
+        "default": "你是一个友好的助手。", "placeholder": "你是一个友好的助手...", "group": "group_session", "page": "role",
     },
     "session_timeout": {
         "type": "number", "label": "会话超时时间(秒)", "description": "无消息后多久结束会话",
