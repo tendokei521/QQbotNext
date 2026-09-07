@@ -30,7 +30,7 @@ const pages = computed(() => [
     to: '/agent/role',
     title: '角色设定',
     icon: 'mdi-account-heart',
-    desc: '角色预设与系统提示词编辑',
+    desc: '人格预设选择与提示词预览',
     status: agent.draft.system_prompt ? '已设置' : '未设置',
     color: 'pink',
   },
