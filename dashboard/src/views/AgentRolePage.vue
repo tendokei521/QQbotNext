@@ -271,7 +271,7 @@ onMounted(() => {
               class="mt-3"
               spellcheck="false"
             />
-            <div class="d-flex flex-wrap gap-2 mt-3">
+            <div class="d-flex flex-wrap gap-3 mt-3">
               <v-btn
                 color="primary"
                 variant="tonal"

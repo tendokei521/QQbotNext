@@ -286,7 +286,7 @@ watch(
                       </a>
                     </div>
                     <div class="tool-desc">{{ tool.description }}</div>
-                    <div class="tool-meta d-flex gap-2 flex-wrap">
+                    <div class="tool-meta d-flex gap-3 flex-wrap">
                       <v-chip size="small" variant="tonal" :color="riskColor(tool.risk)">{{ riskLabel(tool.risk) }}</v-chip>
                       <v-chip size="small" variant="tonal">权限: {{ permissionLabel(toolPermission(tool)) }}</v-chip>
                       <v-chip size="small" variant="tonal">作用域: {{ toolScopes(tool).join(' / ') }}</v-chip>

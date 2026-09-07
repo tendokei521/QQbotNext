@@ -107,7 +107,7 @@ onMounted(() => {
         <v-btn icon="mdi-close" variant="text" size="small" @click="emit('update:modelValue', false)" />
       </v-card-title>
       <v-card-text>
-        <div class="d-flex gap-2 align-center mb-4">
+        <div class="d-flex gap-3 align-center mb-4">
           <v-text-field
             v-model="newName"
             label="模板名称"

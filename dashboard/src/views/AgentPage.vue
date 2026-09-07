@@ -171,13 +171,13 @@ onMounted(ensureLoaded)
         <v-card-title class="d-flex align-center">
           <v-icon icon="mdi-view-dashboard-outline" class="mr-2" color="primary" /> 配置入口
           <v-spacer />
-          <v-btn size="small" variant="tonal" prepend-icon="mdi-book-multiple" class="mr-2" @click="templateDialog = true">
+          <v-btn size="small" variant="tonal" prepend-icon="mdi-book-multiple" class="mr-3" @click="templateDialog = true">
             配置模板
           </v-btn>
-          <v-btn size="small" variant="tonal" prepend-icon="mdi-magnify" class="mr-2" @click="searchDialog = true">
+          <v-btn size="small" variant="tonal" prepend-icon="mdi-magnify" class="mr-3" @click="searchDialog = true">
             搜索配置
           </v-btn>
-          <v-btn size="small" variant="tonal" prepend-icon="mdi-content-copy" class="mr-2" @click="copyDialog = true">
+          <v-btn size="small" variant="tonal" prepend-icon="mdi-content-copy" class="mr-3" @click="copyDialog = true">
             复制配置
           </v-btn>
           <v-btn size="small" variant="tonal" prepend-icon="mdi-content-save" :loading="agent.saveStatus === 'saving'" @click="agent.save()">

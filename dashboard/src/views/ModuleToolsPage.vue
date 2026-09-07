@@ -238,7 +238,7 @@ watch(
 .tool-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   flex-wrap: wrap;
   margin-top: 4px;
 }
