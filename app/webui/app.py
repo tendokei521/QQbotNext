@@ -46,7 +46,11 @@ def _render_dashboard(request: Request, webui_token: str) -> HTMLResponse | None
         html = html.replace("<head>", f"<head>{token_script}", 1)
     else:
         html = token_script + html
-    return HTMLResponse(html)
+    response = HTMLResponse(html)
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 def create_app(container) -> FastAPI:
