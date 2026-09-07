@@ -64,6 +64,13 @@ const sourceForm = reactive({
   enabled: true,
 })
 
+const configDialog = ref(false)
+const editingConfigPresetId = ref('')
+const configJsonText = ref('')
+const configError = ref('')
+const configSaving = ref(false)
+const providerTemplate = ref<any>(null)
+
 const modelDialog = ref(false)
 const editingModelId = ref('')
 const modelForm = reactive({
@@ -255,6 +262,65 @@ async function saveSource() {
   }
 }
 
+async function loadTemplate() {
+  try {
+    const res = await http.get<{ ok: boolean; template: any }>('/api/provider-presets/template')
+    providerTemplate.value = res.data?.template || null
+  } catch {
+    providerTemplate.value = null
+  }
+}
+
+function openConfigEditor(preset: ProviderPreset) {
+  editingConfigPresetId.value = preset.id
+  configJsonText.value = JSON.stringify({ ...(preset.config || {}) }, null, 2)
+  configError.value = ''
+  configDialog.value = true
+}
+
+function resetToTemplate() {
+  if (!providerTemplate.value) return
+  configJsonText.value = JSON.stringify({ ...(providerTemplate.value.config || {}) }, null, 2)
+  configError.value = ''
+}
+
+async function saveConfigJson() {
+  let config: Record<string, any>
+  try {
+    config = JSON.parse(configJsonText.value)
+  } catch {
+    configError.value = 'JSON 格式不正确'
+    return
+  }
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    configError.value = '配置必须是 JSON 对象'
+    return
+  }
+  if (!config.api_base?.trim()) {
+    configError.value = 'api_base 不能为空'
+    return
+  }
+  if (config.headers !== undefined && (typeof config.headers !== 'object' || config.headers === null || Array.isArray(config.headers))) {
+    configError.value = 'headers 必须是对象'
+    return
+  }
+  if (config.extra_body !== undefined && (typeof config.extra_body !== 'object' || config.extra_body === null || Array.isArray(config.extra_body))) {
+    configError.value = 'extra_body 必须是对象'
+    return
+  }
+  configSaving.value = true
+  try {
+    await http.put(`/api/provider-presets/${editingConfigPresetId.value}`, { config })
+    notify.push('Provider 配置文件已保存', 'success')
+    configDialog.value = false
+    await loadPresets()
+  } catch (err) {
+    configError.value = errorMessage(err)
+  } finally {
+    configSaving.value = false
+  }
+}
+
 async function deleteSource(preset: ProviderPreset) {
   if (!window.confirm(`确认删除连接预设「${preset.name}」？其下模型会一并删除，引用该预设的 Agent 将恢复为默认（空）。`)) return
   try {
@@ -397,7 +463,10 @@ async function testPreset(preset: ProviderPreset) {
   }
 }
 
-onMounted(loadPresets)
+onMounted(() => {
+  loadPresets()
+  loadTemplate()
+})
 </script>
 
 <template>
@@ -453,6 +522,7 @@ onMounted(loadPresets)
               <v-chip size="small" variant="tonal" class="ml-2">{{ selectedPreset.provider }}</v-chip>
               <v-spacer />
               <v-btn size="small" variant="tonal" prepend-icon="mdi-pencil" @click="openEditSource(selectedPreset)">编辑连接</v-btn>
+              <v-btn size="small" variant="tonal" prepend-icon="mdi-file-code-outline" class="ml-1" @click="openConfigEditor(selectedPreset)">编辑配置文件</v-btn>
               <v-btn size="small" variant="tonal" prepend-icon="mdi-test-tube" class="ml-1" :loading="testingId === `preset:${selectedPreset.id}`" @click="testPreset(selectedPreset)">测试连接</v-btn>
             </v-card-title>
             <v-card-text class="text-caption">
@@ -572,6 +642,39 @@ onMounted(loadPresets)
       </v-card>
     </v-dialog>
 
+    <!-- 配置文件编辑 -->
+    <v-dialog v-model="configDialog" max-width="760">
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon icon="mdi-file-code-outline" class="mr-2" color="primary" /> 编辑 Provider 配置文件
+          <v-spacer />
+          <v-btn size="small" variant="tonal" prepend-icon="mdi-restore" :disabled="!providerTemplate" @click="resetToTemplate">
+            重置为基础模板
+          </v-btn>
+        </v-card-title>
+        <v-card-text>
+          <v-alert type="info" variant="tonal" density="compact" class="mb-2">
+            所有预设都从“基础通用兼容 Provider”派生。你可以在 JSON 中直接添加
+            <code>headers</code>（自定义请求头）、<code>extra_body</code>（请求体扩展字段）等特殊配置。
+          </v-alert>
+          <v-textarea
+            v-model="configJsonText"
+            rows="20"
+            spellcheck="false"
+            class="provider-config-editor"
+          />
+          <v-alert v-if="configError" type="error" variant="tonal" density="compact" class="mt-2">
+            {{ configError }}
+          </v-alert>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="configDialog = false">取消</v-btn>
+          <v-btn color="primary" variant="tonal" :loading="configSaving" @click="saveConfigJson">保存配置</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- 模型编辑 -->
     <v-dialog v-model="modelDialog" max-width="480">
       <v-card>
@@ -677,3 +780,11 @@ onMounted(loadPresets)
     </v-dialog>
   </div>
 </template>
+
+<style scoped>
+.provider-config-editor :deep(textarea) {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+</style>
