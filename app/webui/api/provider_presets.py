@@ -61,6 +61,11 @@ async def create_provider_preset(request: Request):
     return _ok("Provider 预设创建成功", preset=preset)
 
 
+@router.get("/template")
+async def get_provider_preset_template(request: Request):
+    return JSONResponse(content={"ok": True, "template": _service(request).get_template()})
+
+
 @router.get("/{preset_id}")
 async def get_provider_preset(preset_id: str, request: Request):
     preset = _service(request).get_preset(preset_id)

@@ -6,6 +6,7 @@ Agent 只需要通过 provider_preset_id 引用它，不再重复填写连接信
 
 from __future__ import annotations
 
+import copy
 import time
 import uuid
 from typing import Any
@@ -19,6 +20,40 @@ PASSWORD_MASK = "••••••••"
 
 # 预设配置里对外必须脱敏的字段
 _SECRET_FIELDS = {"api_key", "key", "api_token", "token", "secret"}
+
+# 基础通用兼容 Provider 模板：所有 OpenAI 兼容预设都从它派生
+BASE_PROVIDER_TEMPLATE: dict = {
+    "provider": "openai",
+    "name": "基础通用兼容 Provider",
+    "config": {
+        "api_base": "",
+        "api_key": "",
+        "retry_attempts": 3,
+        "timeout": 30,
+        "headers": {},
+        "extra_body": {},
+    },
+}
+
+
+def _normalize_config(config: dict, old: dict | None = None) -> dict:
+    """合并并规范化预设配置，保留所有扩展字段（headers / extra_body 等）。"""
+    result = dict(old or {})
+    for key, value in (config or {}).items():
+        if value is not None:
+            result[key] = value
+    if "api_base" in result:
+        result["api_base"] = str(result.get("api_base", "") or "").strip().rstrip("/")
+    if "api_key" in result:
+        result["api_key"] = str(result.get("api_key", "") or "").strip()
+    if "retry_attempts" in result:
+        result["retry_attempts"] = int(result.get("retry_attempts", 3) or 3)
+    if "timeout" in result:
+        result["timeout"] = int(result.get("timeout", 30) or 30)
+    for key in ("headers", "extra_body"):
+        if key in result and not isinstance(result.get(key), dict):
+            raise ValueError(f"{key} 必须是对象")
+    return result
 
 
 def _masked_config(config: dict) -> dict:
@@ -48,6 +83,10 @@ class ProviderPresetService:
         self.config_service = config_service
 
     # ── 查询 ───────────────────────────────────────────
+    def get_template(self) -> dict:
+        """返回基础通用兼容 Provider 模板（深拷贝）。"""
+        return copy.deepcopy(BASE_PROVIDER_TEMPLATE)
+
     def list_presets(self) -> list[dict]:
         """列出全部预设（对外脱敏）。"""
         return [_public_preset(p) for p in self.config_service.list_provider_presets()]
@@ -77,6 +116,7 @@ class ProviderPresetService:
             raise ValueError("config 必须是对象")
         if not name:
             raise ValueError("预设名称不能为空")
+        config = _normalize_config(config, copy.deepcopy(BASE_PROVIDER_TEMPLATE["config"]))
         if not str(config.get("api_base", "")).strip():
             raise ValueError("API 基础 URL 不能为空")
 
@@ -86,12 +126,7 @@ class ProviderPresetService:
             "id": preset_id,
             "name": name,
             "provider": provider,
-            "config": {
-                "api_base": str(config.get("api_base", "")).strip().rstrip("/"),
-                "api_key": str(config.get("api_key", "")).strip(),
-                "retry_attempts": int(config.get("retry_attempts", 3) or 3),
-                "timeout": int(config.get("timeout", 30) or 30),
-            },
+            "config": config,
             "enabled": bool(data.get("enabled", True)),
             "created_at": now,
             "updated_at": now,
@@ -111,18 +146,9 @@ class ProviderPresetService:
             raise ValueError("config 必须是对象")
 
         old_config = old.get("config", {}) or {}
-        merged_config = dict(old_config)
-        if "api_base" in config:
-            merged_config["api_base"] = str(config.get("api_base", "")).strip().rstrip("/")
-        if "api_key" in config:
-            if config.get("api_key") == PASSWORD_MASK:
-                merged_config["api_key"] = old_config.get("api_key", "")
-            else:
-                merged_config["api_key"] = str(config.get("api_key", "")).strip()
-        if "retry_attempts" in config:
-            merged_config["retry_attempts"] = int(config.get("retry_attempts", 3) or 3)
-        if "timeout" in config:
-            merged_config["timeout"] = int(config.get("timeout", 30) or 30)
+        merged_config = _normalize_config(config, copy.deepcopy(old_config))
+        if str(config.get("api_key", "")) == PASSWORD_MASK:
+            merged_config["api_key"] = old_config.get("api_key", "")
 
         updated = {
             **old,

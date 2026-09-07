@@ -17,7 +17,14 @@ import aiohttp
 
 from app.llm import logger
 from app.llm.tool_loop import normalize_and_execute_tool_calls
-from .base import BaseProvider, LLMResponse, StreamEvent, format_llm_error
+from .base import (
+    BaseProvider,
+    LLMResponse,
+    StreamEvent,
+    build_extra_body,
+    build_extra_headers,
+    format_llm_error,
+)
 
 RETRYABLE_STATUS = {408, 409, 429, 500, 502, 503, 504, 529}
 
@@ -63,6 +70,15 @@ class OpenAICompatProvider(BaseProvider):
         self.api_base = (config.get("api_base", "") or "https://api.deepseek.com").rstrip("/")
         self.max_retries = max(1, int(config.get("retry_attempts", 3) or 3))
 
+    def _extra_headers(self) -> dict:
+        return build_extra_headers(self.config)
+
+    def _extra_body(self) -> dict:
+        return build_extra_body(self.config)
+
+    def _has_auth(self) -> bool:
+        return bool(self.api_keys[0]) or bool(self._extra_headers())
+
     def _normalize_base(self) -> str:
         """把 api_base 归一化为“可用于拼 /models 或 /chat/completions 的基地址”。
 
@@ -92,14 +108,13 @@ class OpenAICompatProvider(BaseProvider):
 
     async def get_models(self) -> list[str]:
         """拉取 OpenAI 兼容 /models 列表。"""
-        if not self.api_keys or not self.api_keys[0]:
+        if not self._has_auth():
             return []
         base = self._normalize_base()
         url = f"{base}/models"
-        headers = {
-            "Authorization": f"Bearer {self.api_keys[0]}",
-            "Content-Type": "application/json",
-        }
+        headers = {"Content-Type": "application/json", **self._extra_headers()}
+        if self.api_keys[0]:
+            headers["Authorization"] = f"Bearer {self.api_keys[0]}"
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as resp:
                 if resp.status != 200:
@@ -111,9 +126,11 @@ class OpenAICompatProvider(BaseProvider):
     # ---------- 底层请求 ----------
     async def _post(self, api_key: str, payload: dict, timeout: int) -> dict:
         """发送单次请求，返回解析后的 JSON。非可重试错误抛 _FatalError。"""
-        if not api_key:
+        if not api_key and not self._extra_headers():
             raise _FatalError("API 密钥未配置", code="NO-API-KEY")
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json", **self._extra_headers()}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 self._endpoint(), headers=headers, json=payload,
@@ -132,9 +149,11 @@ class OpenAICompatProvider(BaseProvider):
 
     async def _stream_once(self, api_key: str, payload: dict, timeout: int):
         """发起一次流式 HTTP 请求，逐块产出 StreamEvent。"""
-        if not api_key:
+        if not api_key and not self._extra_headers():
             raise _FatalError("API 密钥未配置", code="NO-API-KEY")
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json", **self._extra_headers()}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 self._endpoint(), headers=headers, json=payload,
@@ -258,6 +277,7 @@ class OpenAICompatProvider(BaseProvider):
         }
         if tools:
             payload["tools"] = tools
+        payload.update(self._extra_body())
 
         tool_results: list[dict] = []
         for _round in range(max_tool_rounds):
@@ -315,6 +335,7 @@ class OpenAICompatProvider(BaseProvider):
         }
         if tools:
             payload["tools"] = tools
+        payload.update(self._extra_body())
 
         for attempt in range(self.max_retries):
             key = self.api_keys[attempt % len(self.api_keys)]

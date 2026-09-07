@@ -8,7 +8,7 @@ from __future__ import annotations
 import aiohttp
 
 from app.llm import logger
-from .base import BaseProvider
+from .base import BaseProvider, build_extra_headers
 
 
 class OpenAIEmbeddingProvider(BaseProvider):
@@ -21,6 +21,9 @@ class OpenAIEmbeddingProvider(BaseProvider):
         self.api_base = (config.get("api_base", "") or "https://api.deepseek.com").rstrip("/")
         self.model = config.get("model", "text-embedding-3-small")
         self.timeout = int(config.get("timeout", 30) or 30)
+
+    def _extra_headers(self) -> dict:
+        return build_extra_headers(self.config)
 
     def _base(self) -> str:
         base = self.api_base.rstrip("/")
@@ -37,13 +40,16 @@ class OpenAIEmbeddingProvider(BaseProvider):
         return f"{self._base()}/embeddings"
 
     async def get_models(self) -> list[str]:
-        if not self.api_key:
+        if not self.api_key and not self._extra_headers():
             return []
         try:
+            headers = {"Content-Type": "application/json", **self._extra_headers()}
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     f"{self._base()}/models",
-                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    headers=headers,
                     timeout=aiohttp.ClientTimeout(total=self.timeout),
                 ) as resp:
                     if resp.status != 200:
@@ -54,13 +60,15 @@ class OpenAIEmbeddingProvider(BaseProvider):
             return []
 
     async def embed(self, texts: list[str], model: str | None = None) -> list[list[float]]:
-        if not self.api_key:
+        if not self.api_key and not self._extra_headers():
             raise ValueError("Embedding API 密钥未配置")
         payload = {
             "model": model or self.model,
             "input": texts,
         }
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json", **self._extra_headers()}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 self._endpoint(),

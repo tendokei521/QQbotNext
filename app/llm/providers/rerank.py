@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import aiohttp
 
-from .base import BaseProvider
+from .base import BaseProvider, build_extra_headers
 
 
 class JinaRerankProvider(BaseProvider):
@@ -23,6 +23,9 @@ class JinaRerankProvider(BaseProvider):
         self.model = config.get("model", "jina-reranker-v2-base-multilingual")
         self.timeout = int(config.get("timeout", 30) or 30)
 
+    def _extra_headers(self) -> dict:
+        return build_extra_headers(self.config)
+
     def _endpoint(self) -> str:
         base = self.api_base.rstrip("/")
         if base.endswith("/rerank"):
@@ -32,7 +35,7 @@ class JinaRerankProvider(BaseProvider):
         return base + "/v1/rerank"
 
     async def rerank(self, query: str, documents: list[str], *, top_n: int | None = None) -> list[int]:
-        if not self.api_key:
+        if not self.api_key and not self._extra_headers():
             raise ValueError("Rerank API 密钥未配置")
         payload = {
             "model": self.model,
@@ -41,10 +44,9 @@ class JinaRerankProvider(BaseProvider):
         }
         if top_n:
             payload["top_n"] = top_n
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
+        headers = {"Content-Type": "application/json", **self._extra_headers()}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 self._endpoint(),
@@ -73,6 +75,9 @@ class CohereRerankProvider(BaseProvider):
         self.model = config.get("model", "rerank-multilingual-v3.0")
         self.timeout = int(config.get("timeout", 30) or 30)
 
+    def _extra_headers(self) -> dict:
+        return build_extra_headers(self.config)
+
     def _endpoint(self) -> str:
         base = self.api_base.rstrip("/")
         if base.endswith("/rerank"):
@@ -80,7 +85,7 @@ class CohereRerankProvider(BaseProvider):
         return base + "/v2/rerank"
 
     async def rerank(self, query: str, documents: list[str], *, top_n: int | None = None) -> list[int]:
-        if not self.api_key:
+        if not self.api_key and not self._extra_headers():
             raise ValueError("Rerank API 密钥未配置")
         payload = {
             "model": self.model,
@@ -89,10 +94,9 @@ class CohereRerankProvider(BaseProvider):
         }
         if top_n:
             payload["top_n"] = top_n
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
+        headers = {"Content-Type": "application/json", **self._extra_headers()}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 self._endpoint(),

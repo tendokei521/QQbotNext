@@ -9,7 +9,7 @@ from pathlib import Path
 
 import aiohttp
 
-from .base import BaseProvider
+from .base import BaseProvider, build_extra_headers
 
 
 class OpenAIWhisperSTTProvider(BaseProvider):
@@ -33,14 +33,19 @@ class OpenAIWhisperSTTProvider(BaseProvider):
             return base + "/audio/transcriptions"
         return base + "/v1/audio/transcriptions"
 
+    def _extra_headers(self) -> dict:
+        return build_extra_headers(self.config)
+
     async def transcribe(self, audio_file: str | Path, *, model: str | None = None) -> str:
-        if not self.api_key:
+        if not self.api_key and not self._extra_headers():
             raise ValueError("STT API 密钥未配置")
         audio = Path(audio_file)
         if not audio.is_file():
             raise ValueError(f"音频文件不存在: {audio}")
         filename = audio.name or "audio.mp3"
-        headers = {"Authorization": f"Bearer {self.api_key}"}
+        headers = {**self._extra_headers()}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         form = aiohttp.FormData()
         form.add_field("model", model or self.model)
         form.add_field(

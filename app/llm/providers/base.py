@@ -112,6 +112,20 @@ def format_llm_error(e: Exception, fallback: str = "请求失败") -> str:
     return f"[{code}] {msg}"
 
 
+def build_extra_headers(config: dict) -> dict:
+    """从 Provider 预设配置中提取自定义请求头（headers / extra_headers）。"""
+    raw = (config or {}).get("headers") or (config or {}).get("extra_headers") or {}
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): str(v) for k, v in raw.items() if v is not None}
+
+
+def build_extra_body(config: dict) -> dict:
+    """从 Provider 预设配置中提取自定义请求体扩展字段（extra_body）。"""
+    raw = (config or {}).get("extra_body") or {}
+    return raw if isinstance(raw, dict) else {}
+
+
 class BaseProvider:
     """对话 Provider 基类。子类实现 chat()，处理「调哪个 LLM、如何容错」。"""
 

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import aiohttp
 
-from .base import BaseProvider
+from .base import BaseProvider, build_extra_headers
 
 
 class OpenAITTSProvider(BaseProvider):
@@ -32,8 +32,11 @@ class OpenAITTSProvider(BaseProvider):
             return base + "/audio/speech"
         return base + "/v1/audio/speech"
 
+    def _extra_headers(self) -> dict:
+        return build_extra_headers(self.config)
+
     async def synthesize(self, text: str, *, voice: str | None = None) -> tuple[bytes, str]:
-        if not self.api_key:
+        if not self.api_key and not self._extra_headers():
             raise ValueError("TTS API 密钥未配置")
         payload = {
             "model": self.model,
@@ -41,10 +44,9 @@ class OpenAITTSProvider(BaseProvider):
             "voice": voice or self.voice,
             "response_format": "mp3",
         }
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
+        headers = {"Content-Type": "application/json", **self._extra_headers()}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 self._endpoint(),
