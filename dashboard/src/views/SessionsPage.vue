@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { AxiosError } from 'axios'
 import http, { errorMessage } from '@/api/http'
 import { useBotsStore } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
@@ -58,11 +59,18 @@ const editDialog = ref(false)
 const editingIndex = ref(-1)
 const editContent = ref('')
 
+const deletingTaskId = ref('')
+const bulkDeleting = ref(false)
+
 const newMessageRole = ref<'user' | 'assistant' | 'system'>('user')
 const newMessageContent = ref('')
 const restoreFileInput = ref<HTMLInputElement | null>(null)
 
 const botId = computed(() => bots.currentBot?.bot_id ?? null)
+
+function isNotFoundError(err: unknown): boolean {
+  return err instanceof AxiosError && err.response?.status === 404
+}
 
 function typeLabel(type: string): string {
   return type === 'group' ? '群聊' : type === 'private' ? '私聊' : type || '未知'
@@ -218,7 +226,9 @@ async function renameConversation(target: ConversationSummary) {
 }
 
 async function deleteConversation(target: ConversationSummary) {
+  if (deletingTaskId.value) return
   if (!window.confirm(`确认删除对话「${target.title}」？该操作不可恢复。`)) return
+  deletingTaskId.value = target.task_id
   try {
     await http.delete(
       `/api/sessions/${encodeURIComponent(selectedSessionId.value)}/conversations/${target.task_id}`,
@@ -233,20 +243,41 @@ async function deleteConversation(target: ConversationSummary) {
     await loadConversations()
     await loadSessions()
   } catch (err) {
+    // 对话可能已经被删除（重复点击/多端操作），按成功处理并刷新列表
+    if (isNotFoundError(err)) {
+      notify.push('对话已不存在，已刷新列表', 'info')
+      if (selectedTaskId.value === target.task_id) {
+        conversation.value = null
+        selectedTaskId.value = ''
+      }
+      selectedTaskIds.value = selectedTaskIds.value.filter((id) => id !== target.task_id)
+      await loadConversations()
+      await loadSessions()
+      return
+    }
     notify.push(errorMessage(err), 'error')
+  } finally {
+    deletingTaskId.value = ''
   }
 }
 
 async function bulkDeleteConversations() {
   if (!selectedTaskIds.value.length) return
+  if (bulkDeleting.value) return
   if (!window.confirm(`确认删除选中的 ${selectedTaskIds.value.length} 个对话？`)) return
+  bulkDeleting.value = true
   try {
-    await http.post(
+    const res = await http.post<{ ok: boolean; deleted?: string[]; failed?: { task_id: string; error: string }[] }>(
       '/api/sessions/bulk-delete',
       { session_id: selectedSessionId.value, task_ids: selectedTaskIds.value },
       { params: { bot_id: botId.value } },
     )
-    notify.push('批量删除完成', 'success')
+    const failed = res.data?.failed || []
+    if (failed.length) {
+      notify.push(`批量删除完成，${failed.length} 个对话可能已被删除或不存在`, 'warning')
+    } else {
+      notify.push('批量删除完成', 'success')
+    }
     selectedTaskIds.value = []
     if (selectedTaskId.value && !conversations.value.some((c) => c.task_id === selectedTaskId.value)) {
       conversation.value = null
@@ -256,6 +287,8 @@ async function bulkDeleteConversations() {
     await loadSessions()
   } catch (err) {
     notify.push(errorMessage(err), 'error')
+  } finally {
+    bulkDeleting.value = false
   }
 }
 
@@ -483,6 +516,8 @@ onMounted(() => {
               variant="tonal"
               color="error"
               prepend-icon="mdi-delete"
+              :disabled="bulkDeleting"
+              :loading="bulkDeleting"
               @click="bulkDeleteConversations"
             >
               删除选中
@@ -516,8 +551,17 @@ onMounted(() => {
                   {{ c.messages }} 条消息 · {{ fmtTime(c.saved_at) }}
                 </v-list-item-subtitle>
                 <template #append>
-                  <v-btn size="x-small" variant="text" icon="mdi-pencil" title="重命名" @click.stop="renameConversation(c)" />
-                  <v-btn size="x-small" variant="text" icon="mdi-delete" color="error" title="删除对话" @click.stop="deleteConversation(c)" />
+                  <v-btn size="x-small" variant="text" icon="mdi-pencil" title="重命名" :disabled="deletingTaskId !== ''" @click.stop="renameConversation(c)" />
+                  <v-btn
+                    size="x-small"
+                    variant="text"
+                    icon="mdi-delete"
+                    color="error"
+                    title="删除对话"
+                    :disabled="deletingTaskId !== ''"
+                    :loading="deletingTaskId === c.task_id"
+                    @click.stop="deleteConversation(c)"
+                  />
                 </template>
               </v-list-item>
             </v-list>
