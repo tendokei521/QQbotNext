@@ -15,6 +15,7 @@ from app.llm.config_schema import STREAM_PRESETS
 from app.llm.napcat.manifest import NAP_CAT_TOOLS
 from app.llm.napcat.security import resolve_tool_policy
 from app.llm.system_tools import list_system_tools
+from app.infrastructure.config.config_service import ConfigService
 from app.services.bot_service import PASSWORD_MASK as _PASSWORD_MASK
 from app.services.provider_model_service import ProviderModelService
 from app.services.provider_preset_service import ProviderPresetService
@@ -73,6 +74,11 @@ async def agent_config(request: Request, bot_id: int | None = Depends(parse_bot_
     runtime, _ = _runtime(container, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+    # 兼容旧格式：若 agent 配置里保存了旧 system_prompt，自动转为角色预设
+    config_service = container.get(ConfigService)
+    stored_config = config_service.get_module_config("agent", bot_id) or {}
+    role_preset_service = container.get(RolePresetService)
+    await role_preset_service.ensure_legacy_prompt(bot_id, stored_config.get("system_prompt"))
     perm = runtime.config.permission
     raw_config = dict(runtime.config.raw_config)
     for key in LEGACY_LLM_CONNECTION_KEYS:
@@ -98,7 +104,7 @@ async def agent_config(request: Request, bot_id: int | None = Depends(parse_bot_
         "provider_presets": presets,
         "provider_models": provider_models,
         "stream_presets": STREAM_PRESETS,
-        "role_presets": container.get(RolePresetService).list_presets(),
+        "role_presets": role_preset_service.list_presets(),
     })
 
 

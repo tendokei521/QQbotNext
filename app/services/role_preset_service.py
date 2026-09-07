@@ -68,6 +68,28 @@ class RolePresetService:
         logger.info(f"[RolePreset] 更新角色 {role_id}")
         return dict(updated)
 
+    async def ensure_legacy_prompt(self, bot_id: Any, system_prompt: str | None) -> dict | None:
+        """兼容旧格式：把 Agent 配置里已有的 system_prompt 自动保存为角色预设。
+
+        预设名称固定为 f"{bot_id}角色设定"，幂等：
+        - 不存在则创建；
+        - 已存在但内容不一致则更新；
+        - 内容一致则原样返回。
+        """
+        prompt = str(system_prompt or "").strip()
+        if not prompt:
+            return None
+        target_name = f"{bot_id}角色设定"
+        existing = next((p for p in self.list_presets() if p.get("name") == target_name), None)
+        if existing is not None:
+            if existing.get("system_prompt") != prompt:
+                return await self.update_preset(existing["id"], {
+                    "name": target_name,
+                    "system_prompt": prompt,
+                })
+            return existing
+        return await self.create_preset(target_name, "自动兼容保存的历史角色设定", prompt)
+
     async def delete_preset(self, role_id: str) -> None:
         deleted = await self.config_service.delete_role_preset(role_id)
         if not deleted:
