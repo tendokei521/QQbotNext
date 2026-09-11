@@ -1,7 +1,7 @@
 """curl_cffi HTTP 客户端封装（自 fabric_api/aiohttp/classes/curlcffi.py 移植，裁剪）。
 
 - 浏览器指纹模拟（impersonate="chrome"），自动管理 Cookie；
-- 提供 GET / GET_BINARY / POST，支持自定义 headers / proxy / timeout；
+- 提供 GET / GET_BINARY / POST / stream，支持自定义 headers / proxy / timeout；
 - 裁剪掉原封装的 SOUP（bs4）、SAVE / GATHER 等本项目暂不需要的能力。
 
 用法（API 封装类继承本类）：
@@ -84,6 +84,33 @@ class CurlCffiClient:
         """GET 请求，返回响应（调用方取 .content 二进制）。"""
         session = self._require_session()
         return await session.get(
+            url,
+            impersonate=self.impersonate,
+            proxy=self.proxy,
+            headers=headers or self.headers,
+            timeout=timeout,
+        )
+
+    def stream(
+        self,
+        method: str,
+        url: str,
+        headers: dict[str, Any] | None = None,
+        timeout: int = 60,
+    ):
+        """流式请求：返回 async 上下文管理器，响应体按块读取（大文件下载用）。
+
+        用法::
+
+            async with client.stream("GET", url) as resp:
+                async for chunk in resp.aiter_content(chunk_size=1 << 20):
+                    fh.write(chunk)
+
+        注意：必须用 ``async with`` 包裹，否则连接不会释放。
+        """
+        session = self._require_session()
+        return session.stream(
+            method,
             url,
             impersonate=self.impersonate,
             proxy=self.proxy,
