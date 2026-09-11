@@ -7,7 +7,7 @@ from .config_schema import SCHEMA
 class Module(BaseModule):
     name = "B站视频解析"
     sign = "BilibiliParser"
-    description = "自动解析B站视频链接，支持小程序卡片、短链和直链"
+    description = "自动解析B站视频链接，合并转发视频简介 + 720P 视频"
     permission = "member"
     category = "消息"
     default_config = {
@@ -23,6 +23,15 @@ class Module(BaseModule):
         "is_reply": True,
         "enable_bv_dedup": True,
         "bv_dedup_timeout": 60,
+        # 合并转发 + 720P 视频
+        "use_forward_msg": True,
+        "enable_video_download": True,
+        "video_quality": "720",
+        "video_max_mb": 80,
+        "video_download_timeout": 60,
+        "video_cache_enabled": True,
+        "video_cache_ttl_minutes": 720,
+        "video_cache_max_mb": 1024,
     }
     config_schema = SCHEMA
 
