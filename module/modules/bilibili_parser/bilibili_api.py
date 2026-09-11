@@ -8,7 +8,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import os
 import re
 import time
 import urllib.parse
@@ -16,6 +18,7 @@ import urllib.parse
 from app.core.logger import module_logger
 from app.infrastructure.curl_cffi import CurlCffiClient
 from . import wbi
+from .video import DEFAULT_QN, HEIGHT_TO_QN, QUALITY_NAMES  # noqa: F401（对插件内部复用）
 
 BILI_HEADERS = {
     "User-Agent": (
@@ -34,15 +37,8 @@ BILIBILI_API_PLAYURL_WBI = "https://api.bilibili.com/x/player/wbi/playurl"
 # （ftypisom，含 vide+soun 双轨），**无需 ffmpeg 合并**，且匿名可达 720P。
 FNVAL_SINGLE = 0
 
-# 清晰度代码 -> 名称（部分高清晰度需登录/大会员）
-QUALITY_NAMES = {
-    6: "240P", 16: "360P", 32: "480P", 64: "720P", 74: "720P60",
-    80: "1080P", 112: "1080P+", 116: "1080P60", 120: "4K", 125: "HDR", 127: "8K",
-}
-
-# 配置里的分辨率档位 -> B站清晰度代码 qn
-HEIGHT_TO_QN = {"360": 16, "480": 32, "720": 64}
-DEFAULT_QN = 64
+# 下载分块大小（1 MB）
+DOWNLOAD_CHUNK = 1 << 20
 
 # playurl 风控重试：实测该接口有**按请求随机命中**的风控（约 50%，与是否重复请求同一视频无关），
 # 命中时返回 code=0 但 data={"v_voucher": ...}（无 durl），风控窗口约 5~6 秒。
@@ -218,6 +214,36 @@ class BilibiliAPI(CurlCffiClient):
             module_logger.warning(f"[BilibiliAPI] playurl {reason}，{delay}s 后重试（{attempt}/{PLAYURL_RETRIES}）")
             await _sleep(delay)
         return None
+
+    async def download_durl(self, segments: list, dest: str, timeout: int = 60) -> str:
+        """把 ``durl`` 各分片顺序下载到 ``dest``（流式 + ``.part`` 原子改名）。
+
+        单文件模式多数稿件只有 1 段，长视频可能多段：按顺序写入同一文件即为完整 mp4。
+        失败时清理半成品，避免残留被误当成完整文件。
+        """
+        os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
+        part = dest + ".part"
+        with contextlib.suppress(OSError):
+            os.remove(part)
+
+        try:
+            with open(part, "wb") as fh:
+                for seg in segments or []:
+                    url = (seg or {}).get("url")
+                    if not url:
+                        continue
+                    async with self.stream("GET", url, headers=self.headers, timeout=timeout) as resp:
+                        if resp.status_code not in (200, 206):
+                            raise RuntimeError(f"下载失败：HTTP {resp.status_code}")
+                        async for chunk in resp.aiter_content(chunk_size=DOWNLOAD_CHUNK):
+                            if chunk:
+                                fh.write(chunk)
+            os.replace(part, dest)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.remove(part)
+            raise
+        return dest
 
     @classmethod
     def filter_bv_dedup(cls, video_ids: list, timeout: int, bot_id=None) -> list:
