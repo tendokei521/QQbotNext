@@ -20,12 +20,15 @@ from app.infrastructure.curl_cffi import CurlCffiClient
 from . import wbi
 from .video import DEFAULT_QN, HEIGHT_TO_QN, QUALITY_NAMES  # noqa: F401（对插件内部复用）
 
+# 注意：**不要在这里设置 User-Agent**。
+#
+# CurlCffiClient 的 impersonate="chrome" 会给出一整套**版本自洽**的浏览器指纹
+# （TLS JA3/JA4 + HTTP/2 帧 + 自带 UA）。此前这里写死 UA=Chrome/116，经 headers= 覆盖后
+# 形成「指纹说新 Chrome、UA 说 116」的矛盾，被 B站风控判定为异常客户端：
+# 实测同一批视频单次请求 10 次，覆盖 UA → 5 次返回 v_voucher（data 只有 v_voucher，无 durl）；
+# 去掉 UA 覆盖（沿用指纹自带 UA）→ **0 次风控**（9 OK / 1 个稿件本身不可解析）。
+# 协议（HTTP/2 vs HTTP/1.1）与是否注入 buvid3 均与命中率无关，故只保留 Referer。
 BILI_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/116.0.0.0 Safari/537.36 Edg/116.0.1938.69"
-    ),
     "Referer": "https://www.bilibili.com/",
 }
 
@@ -40,9 +43,9 @@ FNVAL_SINGLE = 0
 # 下载分块大小（1 MB）
 DOWNLOAD_CHUNK = 1 << 20
 
-# playurl 风控重试：实测该接口有**按请求随机命中**的风控（约 50%，与是否重复请求同一视频无关），
-# 命中时返回 code=0 但 data={"v_voucher": ...}（无 durl），风控窗口约 5~6 秒。
-# 因此退避间隔必须跨越该窗口：4 次尝试（t≈0 / +2 / +7 / +17s），最坏多等 17 秒。
+# playurl 风控兜底重试：命中时返回 code=0 但 data={"v_voucher": ...}（无 durl），
+# 实测风控窗口约 5~6 秒。主要成因（UA 与指纹不一致）已在 BILI_HEADERS 处修复，
+# 这里保留退避重试作为残余风控/IP 限速的兜底：4 次尝试（t≈0 / +2 / +7 / +17s）。
 # 该链路跑在后台任务里，且结果落盘缓存，同一视频只付一次代价。
 PLAYURL_RETRIES = 4
 PLAYURL_BACKOFF = (2.0, 5.0, 10.0)
