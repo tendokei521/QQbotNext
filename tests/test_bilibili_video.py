@@ -2,6 +2,7 @@
 
 import os
 
+from module.modules.bilibili_parser import bilibili_api as bapi
 from module.modules.bilibili_parser import video
 from module.modules.bilibili_parser.bilibili_api import BilibiliAPI
 
@@ -73,17 +74,30 @@ def test_pick_stale_by_ttl_and_capacity():
     assert video.pick_stale(entries, 0, 0, now=now) == []
 
 
+def test_pick_page_matches_index_and_falls_back():
+    pages = [{"cid": 1, "page": 1, "part": "P1"}, {"cid": 2, "page": 2, "part": "P2"}]
+    assert video.pick_page({"cid": 999, "pages": pages}, 2)["cid"] == 2
+    assert video.pick_page({"cid": 999, "pages": pages}, 9)["cid"] == 1  # 越界回落第一 P
+    assert video.pick_page({"cid": 5, "pages": []}, 1)["cid"] == 5  # 无 pages 用顶层 cid
+    assert video.pick_page({}, 1)["cid"] is None
+
+
 # ==================== 流式下载（假 stream，不联网） ====================
 
 
 class _FakeStreamResp:
-    def __init__(self, chunks, status=200):
+    def __init__(self, chunks, status=200, fail_after=None):
         self._chunks = chunks
         self.status_code = status
+        self._fail_after = fail_after
 
     async def aiter_content(self, chunk_size=0):
-        for chunk in self._chunks:
+        for index, chunk in enumerate(self._chunks):
+            if self._fail_after is not None and index >= self._fail_after:
+                raise ConnectionError("curl: (92) HTTP/2 stream 1 was not closed cleanly")
             yield chunk
+        if self._fail_after is not None and self._fail_after >= len(self._chunks):
+            raise ConnectionError("curl: (92) HTTP/2 stream 1 was not closed cleanly")
 
 
 class _FakeStream:
@@ -109,7 +123,8 @@ def _api_with_stream(chunks_by_url: dict, status: int = 200) -> BilibiliAPI:
     return api
 
 
-async def test_download_durl_concats_segments_and_replaces_part(tmp_path):
+async def test_download_durl_concats_segments_and_replaces_part(tmp_path, monkeypatch):
+    monkeypatch.setattr(bapi, "_sleep", _no_sleep)
     dest = str(tmp_path / "v.mp4")
     api = _api_with_stream({"http://a": [b"ab", b"cd"], "http://b": [b"ef"]})
 
@@ -120,7 +135,35 @@ async def test_download_durl_concats_segments_and_replaces_part(tmp_path):
     assert not os.path.exists(dest + ".part")  # 原子改名，无残留
 
 
-async def test_download_durl_cleans_part_on_failure(tmp_path):
+async def _no_sleep(seconds):
+    return None
+
+
+async def test_download_durl_retries_and_rolls_back_partial_segment(tmp_path, monkeypatch):
+    """分片中断（curl 92）→ 回滚到本片起始偏移再重试，最终文件不得出现重复字节。"""
+    monkeypatch.setattr(bapi, "_sleep", _no_sleep)
+    dest = str(tmp_path / "v.mp4")
+    api = BilibiliAPI()
+
+    # 第 1 次：写一半后中断；第 2 次：完整成功
+    scripts = [_FakeStreamResp([b"AB"], fail_after=1), _FakeStreamResp([b"AB", b"CD"])]
+    calls = []
+
+    def fake_stream(method, url, headers=None, timeout=60):
+        calls.append(url)
+        return _FakeStream(scripts.pop(0) if scripts else _FakeStreamResp([b"AB", b"CD"]))
+
+    api.stream = fake_stream
+
+    await api.download_durl([{"url": "http://a", "size": 4}], dest, timeout=5)
+
+    assert len(calls) == 2  # 中断一次后重试成功
+    with open(dest, "rb") as fh:
+        assert fh.read() == b"ABCD"  # 不是 ABABCD
+
+
+async def test_download_durl_cleans_part_on_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(bapi, "_sleep", _no_sleep)
     dest = str(tmp_path / "v.mp4")
     api = _api_with_stream({"http://a": [b"x"]}, status=500)
 

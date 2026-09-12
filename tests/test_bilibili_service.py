@@ -106,12 +106,14 @@ def _make_module(config: dict, bot: FakeBot | None = None) -> SimpleNamespace:
 class FakeAPI:
     """替身 API：按 vid 返回预设信息，playurl 返回预设结果，下载写固定字节。"""
 
-    def __init__(self, infos: dict, play=None, download_error: Exception | None = None) -> None:
+    def __init__(self, infos: dict, play=None, download_error: Exception | None = None,
+                 pagelist: list | None = None) -> None:
         self._infos = infos
         self._play = play
         self._download_error = download_error
+        self._pagelist = pagelist or []
         self.downloads: list[str] = []
-        self.playurl_calls: list[str] = []
+        self.playurl_calls: list[tuple] = []
 
     async def __aenter__(self):
         return self
@@ -125,8 +127,11 @@ class FakeAPI:
     async def get_video_info(self, vid, timeout=10, cookie=""):
         return self._infos.get(vid)
 
+    async def get_pagelist(self, bvid, timeout=10):
+        return self._pagelist
+
     async def get_playurl_single(self, bvid, cid, qn=64, cookie="", timeout=10):
-        self.playurl_calls.append(bvid)
+        self.playurl_calls.append((bvid, cid))
         return self._play
 
     async def download_durl(self, segments, dest, timeout=60):
@@ -208,9 +213,48 @@ async def test_only_first_video_is_downloaded(monkeypatch, tmp_path):
     await service.handle(_make_module({}), event)
 
     assert len(bot.forward_calls) == 2
-    assert fake.playurl_calls == ["BV1zq836rEbk"]  # 只对第一个视频取流
+    assert fake.playurl_calls == [("BV1zq836rEbk", INFO["cid"])]  # 只对第一个视频取流
     assert len(bot.forward_calls[0]["msgdata"]) == 2  # 简介 + 视频
-    assert len(bot.forward_calls[1]["msgdata"]) == 1  # 仅简介
+    assert len(forward_calls_items := bot.forward_calls[1]["msgdata"]) == 1  # 仅简介
+
+
+async def test_page_param_selects_cid_and_cache_name(monkeypatch, tmp_path):
+    """`?p=2` 应选第 2 P 的 cid，且缓存文件名带 p2。"""
+    _patch_data_path(monkeypatch, tmp_path)
+    info = dict(INFO, pages=[{"cid": 111, "page": 1}, {"cid": 222, "page": 2}])
+    fake = FakeAPI({"BV1zq836rEbk": info}, play=PLAY)
+    _patch_api(monkeypatch, fake)
+    bot = FakeBot()
+    event = FakeEvent("https://www.bilibili.com/video/BV1zq836rEbk?p=2", bot)
+
+    await service.handle(_make_module({}), event)
+
+    assert fake.playurl_calls == [("BV1zq836rEbk", 222)]
+    assert fake.downloads[0].endswith("BV1zq836rEbk_p2.mp4")
+
+
+async def test_pagelist_fallback_when_view_has_no_cid(monkeypatch, tmp_path):
+    """view 未带 cid 时用 pagelist 交叉校正（与参考实现一致）。"""
+    _patch_data_path(monkeypatch, tmp_path)
+    info = dict(INFO, cid=None, pages=[])
+    fake = FakeAPI({"BV1zq836rEbk": info}, play=PLAY, pagelist=[{"cid": 333, "page": 1}])
+    _patch_api(monkeypatch, fake)
+    bot = FakeBot()
+    event = FakeEvent("BV1zq836rEbk", bot)
+
+    await service.handle(_make_module({}), event)
+
+    assert fake.playurl_calls == [("BV1zq836rEbk", 333)]
+    assert len(bot.forward_calls[0]["msgdata"]) == 2
+
+
+def test_extract_page_map_and_missing_page():
+    texts = [
+        "看这个 https://www.bilibili.com/video/BV1zq836rEbk?p=3 和 https://www.bilibili.com/video/BV2aaaaaaaaa/",
+        "裸号 BV3bbbbbbbbb",
+    ]
+    assert bapi.extract_page_map(texts) == {"BV1ZQ836REBK": 3}
+    assert bapi.extract_page_map([]) == {}
 
 
 async def test_handle_legacy_mode_uses_reply_message(monkeypatch):
@@ -269,4 +313,4 @@ async def test_video_cache_hit_skips_playurl(monkeypatch, tmp_path):
 
     await service.handle(module, event)  # 首次：下载
     await service.handle(module, event)  # 二次：命中缓存
-    assert fake.playurl_calls == ["BV1zq836rEbk"]
+    assert fake.playurl_calls == [("BV1zq836rEbk", INFO["cid"])]

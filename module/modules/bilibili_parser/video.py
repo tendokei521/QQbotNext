@@ -67,6 +67,21 @@ def pick_single(play_data: dict | None) -> dict | None:
     }
 
 
+def pick_page(info: dict, page: int = 1) -> dict:
+    """按分 P 序号选页面（含 ``cid``）；越界回落第一 P，无 ``pages`` 时用顶层 ``cid``。
+
+    与参考实现 ``pick_page`` 等价：多 P 稿件的分 P cid 只存在于 ``pages[].cid``，
+    顶层 ``cid`` 恒为第 1 P。
+    """
+    pages = (info or {}).get("pages") or []
+    for item in pages:
+        if item.get("page") == page:
+            return item
+    if pages:
+        return pages[0]
+    return {"cid": (info or {}).get("cid"), "page": 1, "part": (info or {}).get("title")}
+
+
 def cache_path(cache_dir: str, bvid: str, page: int = 1) -> str:
     """本地缓存文件路径：``<cache_dir>/<bvid>_p<page>.mp4``。"""
     return os.path.join(cache_dir, f"{bvid}_p{int(page or 1)}{VIDEO_EXT}")

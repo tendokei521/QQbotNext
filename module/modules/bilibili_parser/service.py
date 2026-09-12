@@ -44,11 +44,13 @@ async def handle(module, event):
     if not segments:
         return
 
-    # 1. 从文本段提取链接
+    # 1. 从文本段提取链接（同时收集 ?p=N 分 P 参数，参考实现 parse_video_id 的等价物）
     bv_list: list = []
+    page_map: dict = {}
     if config.get("enable_link_video", True):
         texts = [seg["data"].get("text", "") for seg in segments if seg.get("type") == "text"]
         bv_list.extend(bapi.extract_from_text(texts))
+        page_map = bapi.extract_page_map(texts)
 
     # 2. 从 JSON 段（小程序卡片）提取链接
     if config.get("enable_json_video", True):
@@ -59,7 +61,7 @@ async def handle(module, event):
         return
 
     # 3-6. 网络请求（短链归一 + 视频信息）走 BilibiliAPI 封装（curl_cffi 指纹模拟）
-    results: list[tuple[str, dict]] = []
+    results: list[tuple[str, dict, int]] = []
     async with bapi.BilibiliAPI() as api:
         bv_ids = await api.extract_b23(bv_list)
         if not bv_ids:
@@ -89,7 +91,7 @@ async def handle(module, event):
                     cookie=config.get("cookie", "") or "",
                 )
                 if info:
-                    results.append((vid, info))
+                    results.append((vid, info, page_map.get(str(vid).upper(), 1)))
             except Exception as e:
                 logger.error(f"解析 {vid} 失败: {e}")
 
@@ -131,7 +133,7 @@ async def _send_legacy(module, event, results: list) -> None:
     chain: list = []
     if config.get("is_reply", True) and event.message_id:
         chain.append({"type": "reply", "data": {"id": event.message_id}})
-    for i, (_vid, info) in enumerate(results):
+    for i, (_vid, info, _page) in enumerate(results):
         if i > 0:
             chain.append({"type": "text", "data": {"text": "\n──────────────\n"}})
         chain.extend(bapi.build_video_message(info, config.get("show_cover", True)))
@@ -154,11 +156,13 @@ async def _parse_and_send(module, bot, target: dict, results: list) -> None:
 
     try:
         async with bapi.BilibiliAPI() as api:
-            for index, (_vid, info) in enumerate(results):
+            for index, (_vid, info, page) in enumerate(results):
                 video_file = video_error = None
                 # 只下载第一个视频（其余仅发简介节点）
                 if enable_download and index == 0:
-                    video_file, video_error = await _fetch_video(module, api, info, qn=qn, logger=logger)
+                    video_file, video_error = await _fetch_video(
+                        module, api, info, page=page, qn=qn, logger=logger
+                    )
                 nodes = fwd.build_forward_nodes(
                     info,
                     uin=uin,
@@ -171,16 +175,25 @@ async def _parse_and_send(module, bot, target: dict, results: list) -> None:
         logger.error(f"合并转发发送失败: {e}")
 
 
-async def _fetch_video(module, api, info: dict, *, qn: int, logger) -> tuple[str | None, str | None]:
-    """取 720P 单文件流并下载到本地缓存，返回 ``(文件路径, 失败原因)``。"""
+async def _fetch_video(module, api, info: dict, *, page: int = 1, qn: int, logger) -> tuple[str | None, str | None]:
+    """取 720P 单文件流并下载到本地缓存，返回 ``(文件路径, 失败原因)``。
+
+    选 cid 与参考实现一致：先按分 P 序号 ``pick_page``，cid 缺失时用 ``pagelist`` 交叉校正。
+    """
     config = module.config
     bvid = info.get("bvid") or ""
-    cid = info.get("cid")
+    page_info = vlib.pick_page(info, page)
+    cid = page_info.get("cid")
+    if not cid and bvid:
+        pagelist = await api.get_pagelist(bvid, timeout=int(config.get("timeout", 10) or 10))
+        page_info = pagelist[0] if pagelist else page_info
+        cid = page_info.get("cid")
     if not bvid or not cid:
-        return None, "缺少 cid"
+        return None, "无法确定 cid"
 
+    page_no = int(page_info.get("page") or 1)
     cache_dir = os.path.join(get_data_path(module.module_name), CACHE_SUBDIR)
-    dest = vlib.cache_path(cache_dir, bvid, 1)
+    dest = vlib.cache_path(cache_dir, bvid, page_no)
     ttl = int(config.get("video_cache_ttl_minutes", 720) or 720)
     if config.get("video_cache_enabled", True) and vlib.is_fresh(dest, ttl):
         logger.debug(f"{bvid} 命中本地视频缓存")

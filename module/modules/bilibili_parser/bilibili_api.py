@@ -34,6 +34,7 @@ BILI_HEADERS = {
 
 BILIBILI_API_URL = "https://api.bilibili.com/x/web-interface/view"
 BILIBILI_API_NAV = "https://api.bilibili.com/x/web-interface/nav"
+BILIBILI_API_PAGELIST = "https://api.bilibili.com/x/player/pagelist"
 BILIBILI_API_PLAYURL_WBI = "https://api.bilibili.com/x/player/wbi/playurl"
 
 # playurl 参数：fnval=0 请求「单文件」模式 —— 实测返回音视频合一的 mp4
@@ -42,6 +43,12 @@ FNVAL_SINGLE = 0
 
 # 下载分块大小（1 MB）
 DOWNLOAD_CHUNK = 1 << 20
+
+# 分片下载重试：CDN（upos）会偶发中断连接，报
+# ``curl: (92) HTTP/2 stream 1 was not closed cleanly: INTERNAL_ERROR``。
+# 重试前必须把文件 truncate 回**本片起始偏移**，否则重复字节会写坏文件。
+DOWNLOAD_RETRIES = 3
+DOWNLOAD_RETRY_BACKOFF = 1.5
 
 # playurl 风控兜底重试：命中时返回 code=0 但 data={"v_voucher": ...}（无 durl），
 # 实测风控窗口约 5~6 秒。主要成因（UA 与指纹不一致）已在 BILI_HEADERS 处修复，
@@ -63,6 +70,8 @@ REGEX_DIRECT_LINK = re.compile(
     r"https?://(?:www\.)?bilibili\.com/video/(BV[a-zA-Z0-9]{10}|av\d+)/?[^\s]*",
     re.IGNORECASE,
 )
+# 分 P 参数：https://www.bilibili.com/video/BVxxxxxxxxxx?p=2
+REGEX_PAGE = re.compile(r"[?&]p=(\d+)", re.IGNORECASE)
 
 # B站允许的域名白名单（防止恶意链接/非 B 站域名）
 _ALLOWED_DOMAINS = (
@@ -138,6 +147,18 @@ class BilibiliAPI(CurlCffiClient):
         except Exception as e:
             module_logger.error(f"[BilibiliAPI] 获取视频信息失败: {e}")
             return None
+
+    async def get_pagelist(self, bvid: str, timeout: int = 10) -> list:
+        """分 P 列表（cid / 分 P 标题）——``view`` 未带 cid 时用于交叉校正。"""
+        try:
+            resp = await self.GET(
+                BILIBILI_API_PAGELIST, params={"bvid": bvid}, headers=self.headers, timeout=timeout
+            )
+            payload = resp.json() or {}
+            return payload.get("data") or []
+        except Exception as e:
+            module_logger.error(f"[BilibiliAPI] 获取分P列表失败: {e}")
+            return []
 
     async def get_mixin_key(self, timeout: int = 10, force: bool = False) -> str:
         """获取（并类级缓存）WBI mixin_key。
@@ -222,25 +243,47 @@ class BilibiliAPI(CurlCffiClient):
         """把 ``durl`` 各分片顺序下载到 ``dest``（流式 + ``.part`` 原子改名）。
 
         单文件模式多数稿件只有 1 段，长视频可能多段：按顺序写入同一文件即为完整 mp4。
-        失败时清理半成品，避免残留被误当成完整文件。
+
+        容错：CDN 会偶发中断（``curl: (92) HTTP/2 stream not closed cleanly``），
+        因此每个分片失败后**回滚到本片起始偏移**再重试（最多 ``DOWNLOAD_RETRIES`` 次）——
+        不回滚直接重试会把重复字节写进文件。整体失败时清理半成品。
         """
         os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
         part = dest + ".part"
         with contextlib.suppress(OSError):
             os.remove(part)
 
+        written = 0
         try:
             with open(part, "wb") as fh:
                 for seg in segments or []:
                     url = (seg or {}).get("url")
                     if not url:
                         continue
-                    async with self.stream("GET", url, headers=self.headers, timeout=timeout) as resp:
-                        if resp.status_code not in (200, 206):
-                            raise RuntimeError(f"下载失败：HTTP {resp.status_code}")
-                        async for chunk in resp.aiter_content(chunk_size=DOWNLOAD_CHUNK):
-                            if chunk:
-                                fh.write(chunk)
+                    offset = fh.tell()  # 本片起始偏移：重试前回滚到此
+                    for attempt in range(1, DOWNLOAD_RETRIES + 1):
+                        try:
+                            async with self.stream("GET", url, headers=self.headers, timeout=timeout) as resp:
+                                if resp.status_code not in (200, 206):
+                                    raise RuntimeError(f"下载失败：HTTP {resp.status_code}")
+                                async for chunk in resp.aiter_content(chunk_size=DOWNLOAD_CHUNK):
+                                    if chunk:
+                                        fh.write(chunk)
+                            break
+                        except Exception as e:
+                            if attempt >= DOWNLOAD_RETRIES:
+                                raise
+                            module_logger.warning(
+                                f"[BilibiliAPI] 分片下载中断（{attempt}/{DOWNLOAD_RETRIES}），回滚重试: {e}"
+                            )
+                            fh.seek(offset)
+                            fh.truncate(offset)
+                            await _sleep(DOWNLOAD_RETRY_BACKOFF)
+                    written = fh.tell()
+
+            expected = sum(int((s or {}).get("size") or 0) for s in segments or [])
+            if expected and written != expected:
+                module_logger.warning(f"[BilibiliAPI] 下载字节数 {written} 与接口 size {expected} 不一致")
             os.replace(part, dest)
         except BaseException:
             with contextlib.suppress(OSError):
@@ -325,6 +368,24 @@ def extract_from_text(raw: list) -> list:
         for match in REGEX_SHORT.finditer(item):
             bv_list.append(match.group().strip())
     return bv_list
+
+
+def extract_page_map(raw: list) -> dict:
+    """从文本中提取 ``?p=N`` 分 P 参数，返回 ``{BV号大写: page}``。
+
+    参考实现的 ``parse_video_id`` 支持 ``?p=``；本插件按 BV 批量提取，
+    因此在提取链接的同时单独收集分 P 参数，供选 cid 与缓存命名使用。
+    """
+    pages: dict[str, int] = {}
+    for item in raw or []:
+        for match in REGEX_DIRECT_LINK.finditer(item):
+            page_match = REGEX_PAGE.search(match.group(0))
+            if page_match:
+                try:
+                    pages[match.group(1).strip().upper()] = max(1, int(page_match.group(1)))
+                except ValueError:
+                    continue
+    return pages
 
 
 def extract_from_json(raw: list) -> list:
