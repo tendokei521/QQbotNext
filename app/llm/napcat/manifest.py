@@ -130,25 +130,6 @@ NAP_CAT_TOOLS: list[dict] = [
         "doc_url": "https://napcat.apifox.cn/226656970e0",
     },
     {
-        "name": "get_msg_history",
-        "description": "获取群聊或私聊历史消息。",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "group_id": {"type": "integer"},
-                "user_id": {"type": "integer"},
-                "count": {"type": "integer", "description": "获取条数"},
-                "reverse_order": {"type": "boolean"},
-            },
-            "required": ["count"],
-        },
-        "risk": "read",
-        "permission": "member",
-        "scopes": ["group", "private"],
-        "category": "消息接口",
-        "doc_url": "https://napcat.apifox.cn/",
-    },
-    {
         "name": "get_msg",
         "description": "获取单条消息详情。",
         "parameters": {
@@ -528,6 +509,9 @@ NAP_CAT_TOOLS: list[dict] = [
     },
     {
         "name": "_handle_quick_operation",
+        # 真实 OneBot action 带前导点，不能直接用作 OpenAI function.name（非法字符），
+        # 因此工具名改为下划线前缀，并在 action 里保留真实 action 名。
+        "action": ".handle_quick_operation",
         "description": "处理来自事件上报的快速操作请求",
         "parameters": {
             "type": "object",
@@ -556,6 +540,9 @@ NAP_CAT_TOOLS: list[dict] = [
     },
     {
         "name": "_ocr_image",
+        # 真实 OneBot action 带前导点（正式版为 ocr_image，本条目是内部实现版），
+        # 工具名不能带点，故用下划线前缀 + action 保留真实名。
+        "action": ".ocr_image",
         "description": "识别图片中的文字内容(仅Windows端支持)",
         "parameters": {
             "type": "object",

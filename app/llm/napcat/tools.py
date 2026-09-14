@@ -27,11 +27,23 @@ def _format_result(response: dict | None, name: str) -> str:
     return text
 
 
+def resolve_action(tool: dict) -> str:
+    """工具名 → 真实 OneBot action。
+
+    默认与工具名相同；仅当工具名不能直接当 action 用时（例如 NapCat 的
+    ``.ocr_image`` / ``.handle_quick_operation`` 这类带前导点的 Go-CQHTTP
+    兼容接口，点名不合法无法作为 OpenAI function.name），条目才用
+    ``action`` 字段显式声明真实 action。
+    """
+    return str(tool.get("action") or tool.get("name") or "")
+
+
 async def _handler(runtime, tool: dict, ctx: ToolContext | None, args: dict) -> str:
     bot = getattr(ctx, "bot", None) if ctx is not None else None
     if bot is None:
         return "error: 当前上下文无可用 Bot"
     name = str(tool.get("name", ""))
+    action = resolve_action(tool)
     debug = False
     try:
         debug = bool(getattr(runtime, "config", None).get("napcat_tools_debug", False))
@@ -39,10 +51,10 @@ async def _handler(runtime, tool: dict, ctx: ToolContext | None, args: dict) -> 
         pass
     if debug:
         logger.add_info("NapCatTool").info(
-            f"[NapCatDebug] 请求 {name} args={json.dumps(args, ensure_ascii=False)}"
+            f"[NapCatDebug] 请求 {name} action={action} args={json.dumps(args, ensure_ascii=False)}"
         )
     try:
-        response = await bot.call_api(name, args)
+        response = await bot.call_api(action, args)
     except Exception as e:
         logger.add_info("NapCatTool").warning(f"[NapCat] {name} 执行异常: {e}")
         return f"error: {name} 执行异常: {e}"
