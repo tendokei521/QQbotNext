@@ -316,6 +316,14 @@ SCHEMA = {
         "default": "你在群聊/私聊中发起主动消息，像真人一样自然开口。当前时间：{{current_time}}；之前已主动发言但无人接话的次数：{{unanswered_count}}。结合最近对话，自然地说一句适合此刻的话。",
         "rows": 5, "group": "group_proactive",
     },
+    "proactive_prompt_enable": {
+        "type": "boolean", "label": "工具主动性提示", "description": "注入一块「主动性」system 提示：教模型何时该查聊天记录、何时该戳一戳（只讲时机，不讲参数；没有对应工具时自动不注入）",
+        "default": True, "group": "group_proactive",
+    },
+    "proactive_history_intent_nudge": {
+        "type": "boolean", "label": "历史意图补强", "description": "用户追问历史（刚才/之前/说过什么/哪条）时，在同一块里补一句「必须调用 get_chat_history 核实」",
+        "default": True, "group": "group_proactive",
+    },
 
     # ==================== 定时任务 ====================
     "schedule_enable": {

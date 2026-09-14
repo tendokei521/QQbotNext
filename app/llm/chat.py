@@ -233,6 +233,22 @@ def _message_meta_instruction(runtime, ctx) -> str | None:
     return LEGACY_MESSAGE_META_INSTRUCTION
 
 
+def _proactive_instruction(config, all_specs, user_text: str, ctx=None) -> str | None:
+    """本轮「主动性」协议块：只在本轮确有对应工具时注入（唯一一块 system 提示）。
+
+    用户原始文本优先取 llm_enhance 暂存的 sent_text，避免元信息前缀干扰意图识别。
+    """
+    from app.llm.prompt import build_proactive_instruction
+
+    raw_text = user_text
+    if ctx is not None:
+        info = ctx.state.get("user_context") or {}
+        raw_text = (info.get("sent_text") or user_text) or user_text
+    return build_proactive_instruction(
+        config, raw_text, available_tools={spec.name for spec in (all_specs or [])}
+    )
+
+
 def _history_meta_flags(runtime) -> dict:
     """计算历史渲染标志：是否归一化单行、是否脱敏昵称。
 
@@ -527,6 +543,7 @@ async def call_llm_and_reply(module, event, session_mgr, config,
         skills=skill_blocks,
         memory_text=memory_text,
         message_meta_instruction=_message_meta_instruction(module, None),
+        proactive_instruction=_proactive_instruction(config, all_specs, user_text),
     )
     messages = sanitize_contexts_by_modalities(messages, modalities)
 
@@ -713,6 +730,7 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
         skills=skill_blocks,
         memory_text=memory_text,
         message_meta_instruction=_message_meta_instruction(runtime, ctx),
+        proactive_instruction=_proactive_instruction(config, all_specs, user_text, ctx),
     )
     messages = sanitize_contexts_by_modalities(messages, modalities)
 
@@ -915,6 +933,7 @@ async def stream_response(runtime, event, ctx=None):
         skills=skill_blocks,
         memory_text=memory_text,
         message_meta_instruction=_message_meta_instruction(runtime, ctx),
+        proactive_instruction=_proactive_instruction(config, all_specs, user_text, ctx),
     )
     messages = sanitize_contexts_by_modalities(messages, modalities)
 

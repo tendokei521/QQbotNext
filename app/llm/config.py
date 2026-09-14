@@ -140,6 +140,9 @@ DEFAULT_LLM_CONFIG: dict = {
     "system_tools_log_enabled": True,  # 系统工具普通调用日志
     # get_chat_history：本地记录少于该条数时自动补拉 QQ 聊天记录（0=总是补拉）
     "history_auto_qq_min_local": 4,
+    # 工具主动性提示词（唯一一块「主动性」system 块）
+    "proactive_prompt_enable": True,          # 是否注入「主动性」协议块
+    "proactive_history_intent_nudge": True,   # 命中历史意图时在同一块内补强
     "module_tools_enabled": {},        # 模块工具开关：{"tool_name": bool}
     "module_tools_log_enabled": True,  # 模块工具普通调用日志
     "mcp_tools_enabled": {},           # MCP 工具开关：{"tool_name": bool}

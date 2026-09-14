@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import re
+
 
 SCHEDULE_INSTRUCTION = """### 定时任务
 当用户请求在特定时间做某事 / 提醒 / 定时回复时（例如"明天早上8点提醒我吃药"、"每周五下午6点发我周报"、"5分钟后叫我"、"每天中午提醒我喝水"），调用 schedule_task 工具来安排，不要用文字描述安排过程，也不要询问用户。
@@ -15,6 +17,89 @@ SCHEDULE_INSTRUCTION = """### 定时任务
 - 创建新提醒前，先调用 list 查看本会话已有任务；如果已存在相同时间/重复方式的任务，不要重复创建
 - 一次用户请求只创建一个新提醒；不要为同一个提醒多次调用 create
 - 只有用户明确提出定时需求时才调用工具，其余情况不要调用"""
+
+# ==================== 主动性协议（唯一一块“主动性”system 块） ====================
+# 只讲“什么时候该做”，不讲“怎么填参数”（参数交给工具 description，避免重复）。
+# 内部按当前可用工具动态裁剪；没有可用能力时整块不注入。
+PROACTIVE_HISTORY_LINE = (
+    "- 上下文不足时先查记录：用户问“刚才/之前聊了什么”“我说过什么”“你指的是哪条”，"
+    "或当前对话记录不足以回答时，调用 get_chat_history（无需参数；本地记录不足会自动补拉 "
+    "QQ 聊天记录）。先查到内容再回答，不要凭猜测，也不要说“我不记得”。"
+)
+PROACTIVE_POKE_LINE = (
+    "- 想引起注意或表达态度时：可以调用 send_poke 戳一戳（打招呼、催、调侃、卖萌、叫人）。"
+    "群聊中带上当前群号，私聊只需对方 QQ。同一会话不要连着戳，也不要每条消息都戳。"
+)
+PROACTIVE_FOOTER_LINE = (
+    "- 这些动作都是可选的：拿不准就不用。机械地每次都戳，比不做更糟。"
+)
+# 命中历史意图时的紧贴补强（仍属于同一块，不额外增加 system 消息）
+PROACTIVE_HISTORY_NUDGE = (
+    "- 就本轮而言：用户在追问历史，必须先调用 get_chat_history 核实内容再回答，"
+    "不要直接说“我不记得”，也不要凭印象编。"
+)
+
+# 历史意图识别：保守匹配，避免把“帮我记录一下”之类误判成查记录
+_HISTORY_INTENT_RE = re.compile(
+    r"(聊天记录|聊天历史|历史消息|"
+    r"刚才|刚刚|上次|上回|"
+    r"(之前|前面|早些|昨天|前天)(说|聊|讲|提)|"
+    r"(说过|聊过|讲过|提到过|问过)(什么|啥|的)|"
+    r"哪一?(条|句)|指的哪|"
+    r"(我|我们|你)(说过|问过|聊过)|"
+    r"还记得|你记得吗|翻.{0,4}(记录|聊天))"
+)
+
+_POKE_TOOL_NAMES = ("send_poke", "group_poke", "friend_poke")
+
+
+def history_intent(text: str) -> bool:
+    """用户是否在追问历史（用于在同一块里补强一句“必须查记录”）。"""
+    return bool(_HISTORY_INTENT_RE.search(str(text or "")))
+
+
+def build_proactive_instruction(
+    config,
+    user_text: str = "",
+    *,
+    available_tools=None,
+) -> str | None:
+    """组装唯一的「主动性」system 块；没有可用能力时返回 None。
+
+    Args:
+        config: 运行时配置（读取 proactive_prompt_enable / proactive_history_intent_nudge）
+        user_text: 用户原始文本，用于历史意图补强
+        available_tools: 本轮实际可用的工具名集合；给定时按能力裁剪，
+            避免教模型调用本轮不存在的工具
+    """
+    if config is not None and hasattr(config, "get"):
+        try:
+            if not bool(config.get("proactive_prompt_enable", True)):
+                return None
+        except Exception:
+            pass
+
+    tools = set(available_tools) if available_tools is not None else None
+    has_history = tools is None or "get_chat_history" in tools
+    has_poke = tools is None or any(name in tools for name in _POKE_TOOL_NAMES)
+    if not has_history and not has_poke:
+        return None
+
+    lines = ["### 主动性", "你可以像人一样主动使用能力，而不是只被动回答。"]
+    if has_history:
+        lines.append(PROACTIVE_HISTORY_LINE)
+        nudge = True
+        if config is not None and hasattr(config, "get"):
+            try:
+                nudge = bool(config.get("proactive_history_intent_nudge", True))
+            except Exception:
+                nudge = True
+        if nudge and history_intent(user_text):
+            lines.append(PROACTIVE_HISTORY_NUDGE)
+    if has_poke:
+        lines.append(PROACTIVE_POKE_LINE)
+    lines.append(PROACTIVE_FOOTER_LINE)
+    return "\n".join(lines)
 
 # 紧贴用户消息的系统提醒：抑制角色"口头答应"倾向，提高工具调用率
 RECENT_SCHEDULE_NUDGE = (
@@ -49,6 +134,7 @@ def build_messages(
     skills: list[str] | None = None,
     memory_text: str = "",
     message_meta_instruction: str | None = None,
+    proactive_instruction: str | None = None,
 ) -> list[dict]:
     """组装 LLM 消息列表。
 
@@ -62,11 +148,16 @@ def build_messages(
         skills: 模块技能 prompt 块列表（逐个追加为 system 消息）
         memory_text: 长期记忆文本块，为空则跳过（默认空 = 旧调用方零影响）
         message_meta_instruction: “发送者/正文”消歧说明文本；传入非空字符串时追加为 system 消息
+        proactive_instruction: 「主动性」协议块（见 build_proactive_instruction）；
+            仍是一块 system，为空则完全不注入
     """
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
 
     if with_schedule_instruction:
         messages.append({"role": "system", "content": SCHEDULE_INSTRUCTION})
+
+    if proactive_instruction:
+        messages.append({"role": "system", "content": proactive_instruction})
 
     if message_meta_instruction:
         messages.append({"role": "system", "content": message_meta_instruction})
