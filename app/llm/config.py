@@ -143,6 +143,9 @@ DEFAULT_LLM_CONFIG: dict = {
     # 工具主动性提示词（唯一一块「主动性」system 块）
     "proactive_prompt_enable": True,          # 是否注入「主动性」协议块
     "proactive_history_intent_nudge": True,   # 命中历史意图时在同一块内补强
+    # 输出侧动作通道：模型可用 [reply] 引用当前消息、[@QQ] 真实 @ 某人
+    "outbound_directive_enable": True,        # 总开关（关闭后标记不再解析，也不会教模型用）
+    "outbound_directive_max_at": 3,           # 单条回复最多 @ 人数
     "module_tools_enabled": {},        # 模块工具开关：{"tool_name": bool}
     "module_tools_log_enabled": True,  # 模块工具普通调用日志
     "mcp_tools_enabled": {},           # MCP 工具开关：{"tool_name": bool}

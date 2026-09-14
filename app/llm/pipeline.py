@@ -15,6 +15,7 @@ import uuid
 from typing import Any
 
 from app.domain.message import Message
+from app.llm.actions import build_outbound_builder
 from app.llm.context import LlmContext, LlmJob
 from app.llm.locks import SessionLockManager
 from app.llm.pool import LlmPool
@@ -159,7 +160,12 @@ class LlmPipeline:
                 return
 
             ctx.response_text = response_text
-            ctx.response_messages = [Message.from_text(response_text)]
+            # 输出侧动作通道：把 [reply]/[@QQ] 指令转成真正的消息段（无指令时等价纯文本）
+            outbound = build_outbound_builder(ctx.event, config).build(response_text)
+            if outbound is None:
+                # 只有指令、没有正文：不发空消息
+                return
+            ctx.response_messages = [outbound]
 
             # 3. 请求后钩子（可拆分/改写）
             if not await self._run_stage("post_response", ctx):
@@ -207,6 +213,8 @@ class LlmPipeline:
 
         config = self.runtime.config
         pool_enabled = config.get("stream_send_pool_enabled", False)
+        # 输出侧动作通道：只有本轮首片能带 [reply]/[@QQ]，后续片仅剥离标记
+        outbound = build_outbound_builder(ctx.event, config)
 
         if not pool_enabled:
             sent_parts: list[str] = []
@@ -217,7 +225,9 @@ class LlmPipeline:
                     interrupted = True
                     break
 
-                msg = Message.from_text(sentence)
+                msg = outbound.build(sentence)
+                if msg is None:
+                    continue
 
                 if not await self._run_stage("pre_send", ctx, msg):
                     return
@@ -265,7 +275,9 @@ class LlmPipeline:
                 if self.is_stale(ctx.job):
                     interrupted = True
                     break
-                await pool.put(Message.from_text(sentence))
+                msg = outbound.build(sentence)
+                if msg is not None:
+                    await pool.put(msg)
 
             if not interrupted:
                 await pool.finish()

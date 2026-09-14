@@ -324,6 +324,14 @@ SCHEMA = {
         "type": "boolean", "label": "历史意图补强", "description": "用户追问历史（刚才/之前/说过什么/哪条）时，在同一块里补一句「必须调用 get_chat_history 核实」",
         "default": True, "group": "group_proactive",
     },
+    "outbound_directive_enable": {
+        "type": "boolean", "label": "引用/@ 输出通道", "description": "允许模型在回复开头用 [reply] 引用当前消息、用 [@QQ] 真实 @ 某人；标记会被解析成消息段并从正文剥离",
+        "default": True, "group": "group_proactive",
+    },
+    "outbound_directive_max_at": {
+        "type": "number", "label": "单条最多 @ 人数", "description": "一条回复里 [@QQ] 的数量上限，避免刷屏",
+        "default": 3, "min": 0, "max": 5, "group": "group_proactive",
+    },
 
     # ==================== 定时任务 ====================
     "schedule_enable": {

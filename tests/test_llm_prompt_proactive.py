@@ -11,6 +11,7 @@ from app.llm.prompt import (
     PROACTIVE_HISTORY_LINE,
     PROACTIVE_HISTORY_NUDGE,
     PROACTIVE_POKE_LINE,
+    PROACTIVE_QUOTE_LINE,
     build_messages,
     build_proactive_instruction,
     history_intent,
@@ -23,7 +24,11 @@ NO_TOOLS = {"get_current_session"}
 
 
 def _cfg(**over):
-    base = {"proactive_prompt_enable": True, "proactive_history_intent_nudge": True}
+    base = {
+        "proactive_prompt_enable": True,
+        "proactive_history_intent_nudge": True,
+        "outbound_directive_enable": True,
+    }
     base.update(over)
     return base
 
@@ -65,14 +70,26 @@ def test_history_line_only_when_history_tool_available():
     assert PROACTIVE_FOOTER_LINE in history_block and PROACTIVE_FOOTER_LINE in poke_block
 
 
-def test_no_block_when_no_relevant_tool():
-    assert build_proactive_instruction(_cfg(), "你好", available_tools=NO_TOOLS) is None
+def test_no_block_when_no_relevant_capability():
+    # 没有历史工具、没有戳一戳、且输出通道关闭 → 整块不注入
+    assert build_proactive_instruction(
+        _cfg(outbound_directive_enable=False), "你好", available_tools=NO_TOOLS
+    ) is None
+
+
+def test_quote_line_only_when_outbound_channel_enabled():
+    on = build_proactive_instruction(_cfg(), "", available_tools=NO_TOOLS)
+    off = build_proactive_instruction(_cfg(outbound_directive_enable=False), "", available_tools=NO_TOOLS)
+
+    assert PROACTIVE_QUOTE_LINE in on
+    assert off is None  # 无历史/无戳 + 通道关闭 → 无块
 
 
 def test_unknown_tools_keeps_both_lines():
     """不传 available_tools（旧调用方/单测）时保留完整协议。"""
     block = build_proactive_instruction(_cfg(), "")
     assert PROACTIVE_HISTORY_LINE in block and PROACTIVE_POKE_LINE in block
+    assert PROACTIVE_QUOTE_LINE in block
 
 
 # ---------- 意图补强（仍属同一块） ----------

@@ -30,8 +30,13 @@ PROACTIVE_POKE_LINE = (
     "- 想引起注意或表达态度时：可以调用 send_poke 戳一戳（打招呼、催、调侃、卖萌、叫人）。"
     "群聊中带上当前群号，私聊只需对方 QQ。同一会话不要连着戳，也不要每条消息都戳。"
 )
+PROACTIVE_QUOTE_LINE = (
+    "- 回复的是更早的、或多人交错容易混淆的消息时：在回复最前面写 [reply] 表示引用对方刚发的那条消息"
+    "（引用是社交可见的动作，只在必要时用，一条回复最多引用一次）。"
+    "需要点名某人时写 [@QQ号]，例如 [@10001]；这些标记会自动变成真正的引用/@，正文里不要保留标记。"
+)
 PROACTIVE_FOOTER_LINE = (
-    "- 这些动作都是可选的：拿不准就不用。机械地每次都戳，比不做更糟。"
+    "- 这些动作都是可选的：拿不准就不用。机械地每次都戳、每条都引用，比不做更糟。"
 )
 # 命中历史意图时的紧贴补强（仍属于同一块，不额外增加 system 消息）
 PROACTIVE_HISTORY_NUDGE = (
@@ -53,6 +58,16 @@ _HISTORY_INTENT_RE = re.compile(
 _POKE_TOOL_NAMES = ("send_poke", "group_poke", "friend_poke")
 
 
+def _cfg_flag(config, key: str, default: bool) -> bool:
+    """从配置读取布尔开关（缺省/异常时返回 default）。"""
+    if config is not None and hasattr(config, "get"):
+        try:
+            return bool(config.get(key, default))
+        except Exception:
+            return default
+    return default
+
+
 def history_intent(text: str) -> bool:
     """用户是否在追问历史（用于在同一块里补强一句“必须查记录”）。"""
     return bool(_HISTORY_INTENT_RE.search(str(text or "")))
@@ -67,39 +82,34 @@ def build_proactive_instruction(
     """组装唯一的「主动性」system 块；没有可用能力时返回 None。
 
     Args:
-        config: 运行时配置（读取 proactive_prompt_enable / proactive_history_intent_nudge）
+        config: 运行时配置（读取 proactive_prompt_enable / proactive_history_intent_nudge /
+            outbound_directive_enable）
         user_text: 用户原始文本，用于历史意图补强
         available_tools: 本轮实际可用的工具名集合；给定时按能力裁剪，
             避免教模型调用本轮不存在的工具
     """
-    if config is not None and hasattr(config, "get"):
-        try:
-            if not bool(config.get("proactive_prompt_enable", True)):
-                return None
-        except Exception:
-            pass
+    if not _cfg_flag(config, "proactive_prompt_enable", True):
+        return None
 
     tools = set(available_tools) if available_tools is not None else None
     has_history = tools is None or "get_chat_history" in tools
     has_poke = tools is None or any(name in tools for name in _POKE_TOOL_NAMES)
-    if not has_history and not has_poke:
+    has_quote = _cfg_flag(config, "outbound_directive_enable", True)
+    if not has_history and not has_poke and not has_quote:
         return None
 
     lines = ["### 主动性", "你可以像人一样主动使用能力，而不是只被动回答。"]
     if has_history:
         lines.append(PROACTIVE_HISTORY_LINE)
-        nudge = True
-        if config is not None and hasattr(config, "get"):
-            try:
-                nudge = bool(config.get("proactive_history_intent_nudge", True))
-            except Exception:
-                nudge = True
-        if nudge and history_intent(user_text):
+        if _cfg_flag(config, "proactive_history_intent_nudge", True) and history_intent(user_text):
             lines.append(PROACTIVE_HISTORY_NUDGE)
     if has_poke:
         lines.append(PROACTIVE_POKE_LINE)
+    if has_quote:
+        lines.append(PROACTIVE_QUOTE_LINE)
     lines.append(PROACTIVE_FOOTER_LINE)
     return "\n".join(lines)
+
 
 # 紧贴用户消息的系统提醒：抑制角色"口头答应"倾向，提高工具调用率
 RECENT_SCHEDULE_NUDGE = (

@@ -10,7 +10,9 @@ import json
 import time
 from typing import Any
 
+from app.domain.message import Message
 from app.llm import logger
+from app.llm.actions import build_outbound_builder
 from app.llm.compress import maybe_compress_context
 from app.llm.group_context import (
     build_group_env_text,
@@ -581,6 +583,16 @@ async def call_llm_and_reply(module, event, session_mgr, config,
         )
         clean_response = "抱歉，我暂时无法回答，请稍后再试。"
 
+    # 输出侧动作通道：把 [reply]/[@QQ] 指令转成真正的消息段并剥离标记
+    # （无指令时与纯文本发送等价；标记不会进入会话历史，也不会漏给用户）
+    out_msg = build_outbound_builder(event, config).build(clean_response)
+    if out_msg is None:
+        logger.add_info(f"#{module.bot_id}").info(
+            f"[LLM] 回复仅含输出指令，改用兜底文本 -> {session_id}"
+        )
+        out_msg = Message.from_text("抱歉，我暂时无法回答，请稍后再试。")
+    clean_response = out_msg.text
+
     session_mgr.add_message(session_id, "assistant", _clean_output_for_history(config, clean_response))
     if not is_private:
         session.mark_replied()
@@ -590,9 +602,9 @@ async def call_llm_and_reply(module, event, session_mgr, config,
 
     try:
         if is_private:
-            await event.bot.send_private_msg(user_id=int(user_id), message=clean_response)
+            await event.bot.send_private_msg(user_id=int(user_id), message=out_msg)
         else:
-            await event.bot.send_group_msg(group_id=int(group_id), message=clean_response)
+            await event.bot.send_group_msg(group_id=int(group_id), message=out_msg)
         # 主动消息观察：Bot 发言后重置群聊沉默计时器（on_bot_sent 入口）
         pm = getattr(module, "proactive", None)
         if pm is not None:
