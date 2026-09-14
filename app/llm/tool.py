@@ -22,6 +22,16 @@ from app.llm.telemetry import ToolCallRecord
 TOOL_TIMEOUT = 20
 # 工具结果截断长度（防止 pollute 上下文）
 TOOL_RESULT_MAX = 2000
+# 工具失败约定：处理器以 "error: ..." 文本报告失败
+ERROR_RESULT_PREFIX = "error:"
+
+
+def is_error_result(result: Any) -> bool:
+    """工具返回文本是否表示失败（统一约定：以 ``error:`` 开头）。
+
+    约定见各工具实现（``error: 无权限调用工具 xxx`` / ``error: {name} 调用失败: retcode ...``）。
+    """
+    return str(result or "").lstrip().startswith(ERROR_RESULT_PREFIX)
 
 # 工具级权限：与模块权限语义一致（private 下群管理/群主降级为 member）
 TOOL_PERMISSION_RANK = {
@@ -197,6 +207,11 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
                     error = str(e)
                     logger.add_info("Tool").warning(f"[Tool] {name} 执行异常: {e}")
                     result = f"error: 工具 {name} 执行异常: {e}"
+            # 工具用 "error: ..." 文本报错（而非抛异常）时，此前会被记为 success=True，
+            # 导致 1404/未连接之类的接口错误在日志与遥测里彻底不可见。
+            if success and is_error_result(result):
+                success = False
+                error = "error_result"
             duration_ms = (time.monotonic() - started) * 1000
             if _log_enabled():
                 logger.add_info("Tool").info(
