@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### 工具主动性与聊天记录
+
+- 新增系统工具 `get_chat_history`（取代 `get_session_history`）：零参数、自动定位当前会话，
+  本地记录不足时自动补拉 QQ 聊天记录（`scope=auto/local/qq`），取不到时给明确路标
+- 新增输出侧动作通道：模型可用 `[reply]` 引用当前消息、`[@QQ]` 真实 @ 某人
+  （`outbound_directive_enable`，默认开启；仅本轮首句生效，指令不会漏给用户）
+- 新增唯一一块「主动性」system 提示：按本轮可用工具裁剪，只讲时机不讲参数；
+  命中历史意图时在同一块内补强「必须先查记录」
+- 新增戳一戳节流 `poke_cooldown_seconds`（默认 20s，同会话同一人），失败不占冷却
+- 修复 `fetch_*_online_history` 未解包 OneBot 响应信封（`data.messages`）导致
+  群聊环境背景 / 私聊前历史 / 主动发言群背景长期静默失效的问题
+- 修复工具以 `error:` 文本报错时被记为 `success=True`（1404 等接口错误此前不可见）
+- 修复工具名与 OneBot action 不一致：删除伪工具 `get_msg_history`，
+  为 `.ocr_image` / `.handle_quick_operation` 补 action 别名
+
 ### LLM 可扩展性优化（P0/P1）
 
 - 新增 LLM 可观测性：`/agent/telemetry` 记录延迟 / token / provider / model / 工具 / 钩子耗时
