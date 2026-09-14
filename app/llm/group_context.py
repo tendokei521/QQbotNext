@@ -295,6 +295,24 @@ def format_online_history(
     return "\n".join(lines)
 
 
+def extract_history_messages(result: Any) -> list[dict]:
+    """从 OneBot ``get_*_msg_history`` 响应中取出 messages 列表。
+
+    OneBot 响应为完整信封 ``{"status": "ok", "retcode": 0, "data": {"messages": [...]}}``；
+    这里同时兼容已被调用方解包的 ``{"messages": [...]}``，以及失败响应（返回空列表）。
+
+    历史回归：此前直接读 ``result["messages"]``，与真实响应结构差一层，导致群聊/私聊
+    在线历史永远为空——「群聊环境背景」以及主动发言/定时任务的群背景实际上是静默失效的。
+    """
+    if not isinstance(result, dict):
+        return []
+    data = result.get("data")
+    if isinstance(data, dict) and data.get("messages") is not None:
+        return list(data.get("messages") or [])
+    messages = result.get("messages")
+    return list(messages) if isinstance(messages, list) else []
+
+
 async def fetch_group_online_history(
     bot: Any,
     group_id: Any,
@@ -312,9 +330,9 @@ async def fetch_group_online_history(
             count=count,
             reverse_order=False,
         )
-        if not result or not isinstance(result, dict):
+        messages = extract_history_messages(result)
+        if not messages:
             return ""
-        messages = result.get("messages", []) or []
         return format_online_history(
             messages,
             count,
@@ -340,9 +358,9 @@ async def fetch_private_online_history(
             count=count,
             reverse_order=False,
         )
-        if not result or not isinstance(result, dict):
+        messages = extract_history_messages(result)
+        if not messages:
             return ""
-        messages = result.get("messages", []) or []
         return format_online_history(messages, count, self_ids=self_ids, is_private=True)
     except Exception:
         return ""
