@@ -43,6 +43,15 @@ CREATE TABLE IF NOT EXISTS bots (
     auto_connect INTEGER NOT NULL DEFAULT 0
 );
 
+-- 每个连接（index）上一次成功登录的账号快照：
+-- 断开后运行时状态会清空，前端据此回退展示「上次连接的账号」，连接成功时刷新。
+CREATE TABLE IF NOT EXISTS bot_accounts (
+    bot_index     INTEGER PRIMARY KEY,
+    user_id       TEXT,
+    nickname      TEXT NOT NULL DEFAULT '',
+    last_login_at INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS webui_config (
     key        TEXT PRIMARY KEY,
     value_json TEXT NOT NULL
@@ -119,6 +128,19 @@ class Database:
         await self._conn.executescript(SCHEMA)
         await self._conn.commit()
         logger.debug(f"[DB] SQLite 已初始化") #: "){self.path}")
+
+    async def table_columns(self, table: str) -> set[str]:
+        """返回表的列名集合（老库迁移探测用）。"""
+        rows = await self.fetchall(f"PRAGMA table_info({table})")
+        return {r["name"] for r in rows}
+
+    async def ensure_columns(self, table: str, additions: dict[str, str]) -> None:
+        """老库迁移：为既有表补齐新增列（幂等，列已存在则跳过）。"""
+        cols = await self.table_columns(table)
+        for name, ddl in additions.items():
+            if name not in cols:
+                await self.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+                logger.info(f"[DB] 迁移：{table} 新增列 {name}")
 
     async def close(self) -> None:
         if self._conn:

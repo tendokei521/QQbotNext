@@ -108,6 +108,36 @@ async def test_save_and_load_bots(config_service):
     assert config_service.get_bots()[0]["auto_connect"] is True
 
 
+async def test_bot_accounts_table_created(tmp_path):
+    """新库与老库都应存在 bot_accounts 表（老库靠 CREATE TABLE IF NOT EXISTS 补建）。"""
+    path = tmp_path / "fresh.db"
+    db = Database(path)
+    await db.connect()
+    try:
+        assert "bot_accounts" in {r["name"] for r in await db.fetchall(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )}
+        cols = await db.table_columns("bot_accounts")
+        assert cols >= {"bot_index", "user_id", "nickname", "last_login_at"}
+    finally:
+        await db.close()
+
+
+async def test_ensure_columns_is_idempotent(tmp_path):
+    """ensure_columns 老库迁移：缺列则补，重复调用不报错。"""
+    path = tmp_path / "legacy.db"
+    db = Database(path)
+    await db.connect()
+    try:
+        await db.execute("CREATE TABLE legacy_tbl (id INTEGER PRIMARY KEY)")
+        await db.ensure_columns("legacy_tbl", {"extra": "TEXT"})
+        assert "extra" in await db.table_columns("legacy_tbl")
+        await db.ensure_columns("legacy_tbl", {"extra": "TEXT"})  # 幂等
+        assert "extra" in await db.table_columns("legacy_tbl")
+    finally:
+        await db.close()
+
+
 async def test_module_config_read_write(config_service):
     config_service.set_module_config("demo", None, {"a": 1, "b": "x"})
     assert config_service.get_module_config("demo", None) == {"a": 1, "b": "x"}
