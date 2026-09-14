@@ -80,7 +80,9 @@ def test_cron_next_time():
 
     from app.services.scheduler import ScheduledTask
 
-    now = datetime.now()
+    # 截断到整分再算“下一分钟”：否则恰好跨分钟边界时，
+    # future_minute 会变成“刚过的那一分钟”，下次触发要等一小时 → 偶发失败
+    now = datetime.now().replace(second=0, microsecond=0)
     # 下一分钟触发
     future_minute = (now.minute + 1) % 60
     cron = f"{future_minute} * * * *"
