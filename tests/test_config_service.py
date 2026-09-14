@@ -138,6 +138,65 @@ async def test_ensure_columns_is_idempotent(tmp_path):
         await db.close()
 
 
+async def test_save_and_load_bot_accounts(config_service, settings, project_root):
+    """上次登录账号：首次写入返回 True 并落盘；重启后仍可读回。"""
+    assert await config_service.save_bot_account(0, 12345, "小明") is True
+    info = config_service.get_bot_account(0)
+    assert info and info["user_id"] == "12345" and info["nickname"] == "小明"
+    assert info["last_login_at"] > 0
+
+    # 重启：新 ConfigService 从 SQLite 重新加载
+    db2 = Database(settings.db_path)
+    await db2.connect()
+    try:
+        cfg2 = ConfigService(db2, project_root)
+        await cfg2.init()
+        assert cfg2.get_bot_account(0)["nickname"] == "小明"
+    finally:
+        await db2.close()
+
+
+async def test_save_bot_account_same_account_is_noop(config_service):
+    """账号相同 → 不重复写库、不通知（满足「相同不变」）。"""
+    assert await config_service.save_bot_account(0, 1, "A") is True
+    assert await config_service.save_bot_account(0, 1, "A") is False
+    # 同一账号换了昵称也视为不变（只有 user_id 变化才算换账号）
+    assert await config_service.save_bot_account(0, 1, "A2") is False
+    # 未登录成功的空值不落盘
+    assert await config_service.save_bot_account(1, 0, "") is False
+    assert config_service.get_bot_account(1) is None
+
+
+async def test_bot_account_changes_when_switching_account(config_service):
+    assert await config_service.save_bot_account(0, 111, "旧号") is True
+    assert await config_service.save_bot_account(0, 222, "新号") is True
+    info = config_service.get_bot_account(0)
+    assert info["user_id"] == "222" and info["nickname"] == "新号"
+
+
+async def test_delete_bot_drops_stale_accounts(config_service):
+    """删除账号后快照作废（后续 index 前移，不能让旧账号挂到复用索引上）。"""
+    await config_service.save_bots([
+        {"ws_url": "ws://a", "owner_id": None, "auto_connect": False},
+        {"ws_url": "ws://b", "owner_id": None, "auto_connect": False},
+    ])
+    await config_service.save_bot_account(0, 1, "A")
+    await config_service.save_bot_account(1, 2, "B")
+    assert await config_service.delete_bot(0) is True
+    assert config_service.get_bot_account(0) is None
+    assert config_service.get_bot_account(1) is None
+
+
+async def test_save_bots_trims_out_of_range_accounts(config_service):
+    await config_service.save_bots([
+        {"ws_url": "ws://a", "owner_id": None, "auto_connect": False},
+        {"ws_url": "ws://b", "owner_id": None, "auto_connect": False},
+    ])
+    await config_service.save_bot_account(1, 2, "B")
+    await config_service.save_bots([{"ws_url": "ws://a", "owner_id": None, "auto_connect": False}])
+    assert config_service.get_bot_account(1) is None
+
+
 async def test_module_config_read_write(config_service):
     config_service.set_module_config("demo", None, {"a": 1, "b": "x"})
     assert config_service.get_module_config("demo", None) == {"a": 1, "b": "x"}

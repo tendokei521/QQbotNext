@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -94,6 +95,9 @@ class ConfigService:
 
         # 内存缓存（source of truth for 读取）
         self._bots: list[dict] = []
+        # 每个连接（index）上一次成功登录的账号快照：{"user_id": str, "nickname": str, "last_login_at": int}
+        # 断开后运行时状态会清空，前端据此回退展示；连接成功时由 gateway 回调刷新。
+        self._bot_accounts: dict[int, dict] = {}
         self._webui: dict = dict(DEFAULT_WEBUI_CONFIG)
         self._module_config: dict[str, dict[str, dict]] = {}      # module -> {bot_id: config}
         self._module_authority: dict[str, dict[str, dict]] = {}   # module -> {bot_id: authority}
@@ -212,6 +216,16 @@ class ConfigService:
                 "owner_id": owner_id,
                 "auto_connect": bool(r["auto_connect"]),
             })
+
+        # 上次登录账号快照（老库无此表时由 SCHEMA 的 CREATE TABLE IF NOT EXISTS 补建）
+        rows = await self.db.fetchall("SELECT * FROM bot_accounts")
+        self._bot_accounts = {}
+        for r in rows:
+            self._bot_accounts[int(r["bot_index"])] = {
+                "user_id": r["user_id"],
+                "nickname": r["nickname"] or "",
+                "last_login_at": int(r["last_login_at"] or 0),
+            }
 
         # webui
         rows = await self.db.fetchall("SELECT * FROM webui_config")
@@ -361,6 +375,9 @@ class ConfigService:
         await self.db.run_in_transaction(sqls)   # 先落库，成功后再更新内存缓存
         self._bots = normalized
         await self._notify("bots", self._bots)
+        # 全量保存可能删掉末尾账号 → 清理越界快照，避免旧账号挂在被复用的 index 上
+        if any(i >= len(normalized) for i in self._bot_accounts):
+            await self.drop_bot_accounts_from(len(normalized))
 
     @staticmethod
     def _find_old_token(old: list[dict], index: int, base: str) -> str:
@@ -385,7 +402,62 @@ class ConfigService:
             return False
         self._bots.pop(index)
         await self.save_bots(self._bots)
+        await self.drop_bot_accounts_from(index)
         return True
+
+    # ==================== 上次登录账号快照 ====================
+    def get_bot_accounts(self) -> dict[int, dict]:
+        """返回全部连接的「上次登录账号」快照（深拷贝，读方安全）。"""
+        import copy
+
+        return {idx: copy.deepcopy(info) for idx, info in self._bot_accounts.items()}
+
+    def get_bot_account(self, index: int) -> dict | None:
+        info = self._bot_accounts.get(index)
+        return dict(info) if info else None
+
+    async def save_bot_account(self, index: int, user_id: Any, nickname: str = "") -> bool:
+        """记录某连接本次成功登录的账号。
+
+        与库中快照相同（user_id 一致）时直接返回 False，不写库、不通知
+        —— 满足「账号相同不变、不同才换」；返回 True 表示账号确实发生了变化。
+        """
+        try:
+            normalized = str(user_id) if user_id is not None else ""
+        except Exception:
+            normalized = ""
+        if not normalized or normalized == "0":
+            return False
+
+        old = self._bot_accounts.get(index)
+        if old and str(old.get("user_id")) == normalized:
+            return False
+
+        info = {
+            "user_id": normalized,
+            "nickname": str(nickname or ""),
+            "last_login_at": int(time.time()),
+        }
+        await self.db.execute(
+            "INSERT OR REPLACE INTO bot_accounts (bot_index, user_id, nickname, last_login_at) "
+            "VALUES (?,?,?,?)",
+            (int(index), info["user_id"], info["nickname"], info["last_login_at"]),
+        )
+        self._bot_accounts[int(index)] = info
+        await self._notify("bot_accounts", {"index": int(index), **info})
+        return True
+
+    async def drop_bot_accounts_from(self, index: int) -> None:
+        """账号被删除后清理快照：删除中间账号会使后续 index 前移，故 >= index 全部作废。"""
+        stale = [i for i in self._bot_accounts if i >= index]
+        if not stale:
+            return
+        for i in stale:
+            self._bot_accounts.pop(i, None)
+        await self.db.run_in_transaction(
+            [("DELETE FROM bot_accounts WHERE bot_index >= ?", (index,))]
+        )
+        await self._notify("bot_accounts", {"dropped_from": index})
 
     # ==================== webui ====================
     def get_webui_config(self) -> dict:
