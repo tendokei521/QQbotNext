@@ -172,6 +172,10 @@ SCHEMA = {
         "options": {"default": "不加载", "history": "加载为背景消息", "load": "加载为会话历史"},
         "group": "group_session",
     },
+    "history_auto_qq_min_local": {
+        "type": "number", "label": "聊天记录工具补拉阈值", "description": "get_chat_history 默认（scope=auto）在本地会话记录少于该条数时自动补拉 QQ 聊天记录；0=总是补拉",
+        "default": 4, "min": 0, "max": 50, "group": "group_session",
+    },
     "clean_output_parentheses": {
         "type": "boolean", "label": "强制清洗括号内容", "description": "写入会话历史时剥离大模型输出中的（…）/(…)内容，避免后续回复模仿括号风格（本次展示原文不变）",
         "default": True, "group": "group_session",

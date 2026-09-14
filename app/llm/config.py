@@ -138,6 +138,8 @@ DEFAULT_LLM_CONFIG: dict = {
     # 统一工具管理：四类工具各自的开关与日志输出
     "system_tools_enabled": {},        # 系统工具开关：{"tool_name": bool}
     "system_tools_log_enabled": True,  # 系统工具普通调用日志
+    # get_chat_history：本地记录少于该条数时自动补拉 QQ 聊天记录（0=总是补拉）
+    "history_auto_qq_min_local": 4,
     "module_tools_enabled": {},        # 模块工具开关：{"tool_name": bool}
     "module_tools_log_enabled": True,  # 模块工具普通调用日志
     "mcp_tools_enabled": {},           # MCP 工具开关：{"tool_name": bool}

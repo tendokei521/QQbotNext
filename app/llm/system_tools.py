@@ -14,7 +14,7 @@ from app.llm.tool import ToolSpec
 _SYSTEM_TOOL_PREREQUISITES: dict[str, tuple[str, str]] = {
     "schedule_task": ("schedule_enable", "定时任务未启用"),
     "get_current_session": ("", "始终可用"),
-    "get_session_history": ("", "始终可用"),
+    "get_chat_history": ("", "始终可用"),
     "tavily_search": ("tavily_enable", "Tavily 联网搜索未启用"),
     "memory_save": ("memory_enable", "长期记忆未启用"),
     "memory_recall": ("memory_enable", "长期记忆未启用"),
