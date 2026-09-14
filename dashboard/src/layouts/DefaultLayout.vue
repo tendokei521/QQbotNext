@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useThemeStore } from '@/stores/theme'
-import { useBotsStore, type BotStatus } from '@/stores/bots'
+import { useBotsStore, resolveAccount, resolvedBotId, type BotStatus } from '@/stores/bots'
 import { useWebuiStore } from '@/stores/webui'
 import { useNotifyStore } from '@/stores/notify'
 import { connectSocket } from '@/api/socket'
@@ -113,9 +113,12 @@ watch(
 
 const botOptions = computed(() =>
   bots.bots.map((b) => {
-    const title = b.bot_id ? `Bot ${b.bot_id}` : `Bot #${b.index}`
-    const subtitle = b.login_info?.nickname
-      ? `${b.login_info.nickname}${b.bot_id ? '' : ' · 未连接'}`
+    const acc = resolveAccount(b)
+    const botId = resolvedBotId(b)
+    // 未连接但有上次账号快照时，用快照显示「昵称 + 未连接」，而不是退化成 Bot #index
+    const title = botId ? `Bot ${botId}` : `Bot #${b.index}`
+    const subtitle = acc?.nickname
+      ? `${acc.nickname}${b.status === 'connected' ? '' : ' · 未连接'}`
       : STATUS_TEXT[b.status]
     return {
       title,
@@ -306,7 +309,9 @@ onUnmounted(() => {
         >
           <v-icon start :icon="isConnected ? 'mdi-check-circle' : 'mdi-alert-circle'" size="small" />
           <span>{{ currentStatusText }}</span>
-          <span v-if="bots.currentBot?.bot_id" class="chip-bot-id"> | {{ bots.currentBot.bot_id }}</span>
+          <span v-if="bots.currentBot && resolvedBotId(bots.currentBot)" class="chip-bot-id">
+            | {{ resolvedBotId(bots.currentBot) }}
+          </span>
         </v-chip>
       </div>
 

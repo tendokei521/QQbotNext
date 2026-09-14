@@ -5,6 +5,14 @@ import { onSocketMessage } from '@/api/socket'
 
 export type BotStatus = 'connected' | 'disconnected' | 'connecting' | 'reconnecting' | 'error'
 
+/** 账号身份信息：登录返回的 login_info 与「上次登录账号」快照同构 */
+export interface BotAccount {
+  user_id?: number | string | null
+  nickname?: string | null
+  last_login_at?: number | null
+  [key: string]: any
+}
+
 export interface BotData {
   index: number
   status: BotStatus
@@ -13,7 +21,11 @@ export interface BotData {
   access_token?: string
   owner_id?: number | null
   auto_connect?: boolean
-  login_info?: { user_id?: number; nickname?: string } | null
+  login_info?: BotAccount | null
+  /** 上一次成功登录的账号快照（后端落盘）：断开后用于回退展示 */
+  last_account?: BotAccount | null
+  /** 后端已合并好：连接中/已连接为实时 login_info，否则回退快照 */
+  account?: BotAccount | null
   last_error?: string | null
   [key: string]: any
 }
@@ -27,6 +39,30 @@ export interface BotConfig {
 }
 
 const CURRENT_BOT_KEY = 'qqbot_current_bot_index'
+
+/** 账号身份是否有效（user_id/bot_id 为 0 或空视为无账号） */
+function hasAccount(acc?: BotAccount | null): boolean {
+  if (!acc) return false
+  const id = Number(acc.user_id)
+  if (!Number.isNaN(id) && id > 0) return true
+  return !!acc.nickname
+}
+
+/**
+ * 统一取账号身份：连接中/已连接用实时 login_info，
+ * 离线回退到持久化的 last_account（两者都是快照，故展示层统一用 hasAccount 判定）。
+ */
+export function resolveAccount(bot: BotData): BotAccount | null {
+  const live = bot.status === 'connected' && hasAccount(bot.login_info) ? bot.login_info : null
+  return live ?? bot.login_info ?? bot.account ?? bot.last_account ?? null
+}
+
+/** 标题用 bot_id：离线时回退到上次登录账号的 user_id，保证「显示上一次连接的账号」 */
+export function resolvedBotId(bot: BotData): number | null {
+  if (bot.bot_id) return bot.bot_id
+  const id = Number(resolveAccount(bot)?.user_id)
+  return Number.isNaN(id) || id <= 0 ? null : id
+}
 
 /** 账号（Bot）状态中心：列表 / 当前选中 / 连接控制 / WS 实时状态同步 */
 export const useBotsStore = defineStore('bots', () => {
@@ -132,6 +168,8 @@ export const useBotsStore = defineStore('bots', () => {
     currentBot,
     connectedCount,
     botCount,
+    resolveAccount,
+    resolvedBotId,
     restoreSelection,
     selectBot,
     fetchBots,

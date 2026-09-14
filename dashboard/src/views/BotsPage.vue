@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, reactive, ref } from 'vue'
-import { useBotsStore, type BotConfig, type BotStatus } from '@/stores/bots'
+import { useBotsStore, resolveAccount, resolvedBotId, type BotConfig, type BotStatus } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
@@ -205,13 +205,15 @@ onUnmounted(() => {
               </v-avatar>
             </template>
             <v-card-title class="text-body-1 font-weight-bold">
-              账号 #{{ b.index }}{{ b.bot_id ? ` · Bot ${b.bot_id}` : '' }}
+              账号 #{{ b.index }}<template v-if="resolvedBotId(b)"> · Bot {{ resolvedBotId(b) }}</template>
             </v-card-title>
             <v-card-subtitle class="d-flex align-center gap-2">
               <v-chip size="x-small" :color="statusColor(b.status)" variant="tonal">
                 <v-icon start size="x-small" icon="mdi-circle" /> {{ STATUS_TEXT[b.status] }}
               </v-chip>
-              <span v-if="b.login_info?.nickname" class="text-caption app-line-clamp-1">{{ b.login_info.nickname }} ({{ b.login_info.user_id }})</span>
+              <span v-if="resolveAccount(b)?.nickname" class="text-caption app-line-clamp-1">
+                {{ resolveAccount(b)!.nickname }}<template v-if="Number(resolveAccount(b)!.user_id) > 0"> ({{ resolveAccount(b)!.user_id }})</template>
+              </span>
             </v-card-subtitle>
             <template #append>
               <v-btn variant="text" icon="mdi-delete-outline" color="error" size="small" title="删除此账号配置" @click="deleteTarget = b.index" />
@@ -263,7 +265,11 @@ onUnmounted(() => {
             <div class="info-grid">
               <div>
                 <div class="info-label">Bot ID</div>
-                <div class="info-value">{{ b.bot_id || '未连接' }}</div>
+                <div class="info-value">
+                  <template v-if="resolvedBotId(b)">Bot {{ resolvedBotId(b) }}</template>
+                  <template v-else>未连接</template>
+                  <span v-if="!b.bot_id && resolvedBotId(b)" class="info-hint">上次连接</span>
+                </div>
               </div>
               <div>
                 <div class="info-label">索引</div>
@@ -322,6 +328,14 @@ onUnmounted(() => {
 .info-value {
   font-size: 13.5px;
   font-weight: 500;
+}
+
+/* 「上次连接」标注：明确该账号来自快照而非当前实时连接 */
+.info-hint {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 400;
+  color: rgba(var(--v-theme-on-surface), 0.45);
 }
 
 .error-tip {

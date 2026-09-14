@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useBotsStore, type BotStatus } from '@/stores/bots'
+import { useBotsStore, resolveAccount, resolvedBotId, type BotStatus } from '@/stores/bots'
 import { useModulesStore } from '@/stores/modules'
 import { useLogsStore } from '@/stores/logs'
 import { useWebuiStore } from '@/stores/webui'
@@ -152,10 +152,10 @@ onMounted(() => {
                     <v-icon :icon="b.status === 'connected' ? 'mdi-check-circle' : 'mdi-alert-circle'" :color="statusColor(b.status)" size="small" />
                   </template>
                   <v-list-item-title>
-                    {{ b.bot_id ? `Bot ${b.bot_id}` : `Bot #${b.index}` }}
+                    {{ resolvedBotId(b) ? `Bot ${resolvedBotId(b)}` : `Bot #${b.index}` }}
                   </v-list-item-title>
                   <v-list-item-subtitle>
-                    {{ STATUS_TEXT[b.status] }}{{ b.login_info?.nickname ? ` · ${b.login_info.nickname}` : '' }}{{ b.last_error ? ` · ${b.last_error}` : '' }}
+                    {{ STATUS_TEXT[b.status] }}{{ resolveAccount(b)?.nickname ? ` · ${resolveAccount(b)!.nickname}` : '' }}{{ b.last_error ? ` · ${b.last_error}` : '' }}
                   </v-list-item-subtitle>
                   <template #append>
                     <v-chip size="x-small" :color="statusColor(b.status)" variant="tonal">{{ STATUS_TEXT[b.status] }}</v-chip>
