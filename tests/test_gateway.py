@@ -288,3 +288,77 @@ def test_message_log_text_other_types_default_to_abbrev():
     ]
     for seg in cases:
         assert _message_log_text(_msg_event([seg])) == f"[{seg.type}]", seg.type
+
+
+class _AccountConn:
+    """最小 Bot 桩：只提供登录信息 + 账号快照所需字段。"""
+
+    def __init__(self, index: int):
+        self.index = index
+        self.bot_id = 0
+        self.login_info = {}
+        self.status = "connecting"
+        self.ws_url = "ws://127.0.0.1:1"
+        self.owner_id = None
+        self.auto_connect = False
+        self.reconnect_attempts = 0
+        self.last_error = None
+
+    async def get_login_info(self):
+        return {"status": "ok", "retcode": 0, "data": {"user_id": 987654, "nickname": "小明"}}
+
+
+async def test_login_records_last_account_snapshot():
+    """登录成功 → 写入账号快照；断开后 last_account / account 仍可回退展示。"""
+    gw = OneBotGateway(settings=_Settings(), cache=Cache())
+    conn = _AccountConn(0)
+    gw.connections = {0: conn}
+
+    saved: dict = {}
+
+    async def _saver(index, user_id, nickname):
+        saved.update(index=index, user_id=user_id, nickname=nickname)
+        return True
+
+    gw.account_saver = _saver
+    gw.account_lookup = lambda: {
+        0: {"user_id": str(saved.get("user_id")), "nickname": saved.get("nickname", ""), "last_login_at": 1}
+    }
+
+    assert await gw._get_login_info(conn) is True
+    assert (saved["index"], saved["user_id"], saved["nickname"]) == (0, 987654, "小明")
+
+    info = gw.get_bots_info()[0]
+    assert info["login_info"]["nickname"] == "小明"
+    assert info["last_account"]["nickname"] == "小明"
+    assert info["account"]["user_id"] == 987654
+
+    # 断开：运行时登录态清空，但快照仍在 → 前端可回退展示上次账号
+    gw._reset_conn_state(conn)
+    conn.status = "disconnected"
+    info = gw.get_bots_info()[0]
+    assert info["login_info"] == {}
+    assert info["last_account"]["nickname"] == "小明"
+    assert info["account"]["nickname"] == "小明"
+
+
+async def test_login_account_saver_failure_does_not_break_login():
+    """快照写入失败不得影响登录主流程（登录回调照常执行）。"""
+    gw = OneBotGateway(settings=_Settings(), cache=Cache())
+    conn = _AccountConn(0)
+    gw.connections = {0: conn}
+
+    async def _boom(index, user_id, nickname):  # noqa: ARG001
+        raise RuntimeError("db down")
+
+    gw.account_saver = _boom
+    logged_in = asyncio.Event()
+
+    async def _login(conn_):
+        logged_in.set()
+
+    gw.login_handler = _login
+
+    assert await gw._get_login_info(conn) is True
+    assert logged_in.is_set(), "登录回调必须照常执行"
+    assert conn.bot_id == 987654

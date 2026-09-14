@@ -27,6 +27,8 @@ from app.infrastructure.onebot.client import BotConnection
 from app.infrastructure.onebot.codec import decode, event_name
 
 LoginHandler = Callable[[BotConnection], Awaitable[None]]
+# 登录成功后记录账号快照（index, user_id, nickname）→ 返回是否发生变化
+AccountSaver = Callable[[int, Any, str], Awaitable[bool]]
 
 
 class OneBotGateway:
@@ -48,6 +50,11 @@ class OneBotGateway:
         self.connect_type = False
         self._supervise_task: asyncio.Task | None = None
         self._connect_locks: dict[int, asyncio.Lock] = {}  # 防止监督循环与 WebUI 并发双开
+        # 登录成功时的账号快照写入器（BotService 注入 → ConfigService）；
+        # 供前端在断开状态回退展示「上次连接的账号」。
+        self.account_saver: AccountSaver | None = None
+        # 账号快照读取器（BotService 注入 → ConfigService.get_bot_accounts）
+        self.account_lookup: Callable[[], dict[int, dict]] | None = None
         # 出站拦截钩子工厂（bootstrap 注入）：传入连接 → 返回 (action, params) 钩子
         self.outbound_hook_factory = None
         # 插件钩子注册表（bootstrap 注入）
@@ -57,10 +64,17 @@ class OneBotGateway:
         self.lifecycle_hook_registry = None
 
     # ==================== 对外查询 ====================
+    def get_last_account(self, index: int) -> dict | None:
+        """上一次成功登录的账号快照（断开后前端回退展示用）。"""
+        if not self.account_lookup:
+            return None
+        return self.account_lookup().get(index)
+
     def get_bots_info(self) -> list[dict]:
         result: list[dict] = []
         for index, conn in sorted(self.connections.items()):
             base, _ = split_ws_url(conn.ws_url)
+            last_account = self.get_last_account(conn.index)
             result.append({
                 "index": conn.index,
                 "bot_id": conn.bot_id,
@@ -68,6 +82,9 @@ class OneBotGateway:
                 "status": conn.status,
                 "ws_url": base,  # 对外只暴露基础地址（access_token 独立字段，不回显）
                 "login_info": conn.login_info,
+                # 上次登录账号快照 + 统一字段：连接中/已连接用实时，否则回退快照
+                "last_account": last_account,
+                "account": conn.login_info or last_account,
                 "reconnect_attempts": conn.reconnect_attempts,
                 "last_error": conn.last_error,
                 "auto_connect": conn.auto_connect,
@@ -79,11 +96,14 @@ class OneBotGateway:
         if not conn:
             return None
         base, _ = split_ws_url(conn.ws_url)
+        last_account = self.get_last_account(conn.index)
         return {
             "bot_id": conn.bot_id,
             "owner_id": conn.owner_id,
             "status": conn.status,
             "login_info": conn.login_info,
+            "last_account": last_account,
+            "account": conn.login_info or last_account,
             "ws_url": base,
         }
 
@@ -260,6 +280,19 @@ class OneBotGateway:
         return None
 
     # ==================== 登录信息 ====================
+    async def _record_login_account(self, conn: BotConnection) -> None:
+        """记录本次登录账号快照（供断开后回退展示）。
+
+        失败只告警，绝不影响登录主流程；账号未变化时 saver 内部为 no-op，
+        因此重连同一账号不会反复写库/刷屏。
+        """
+        if not self.account_saver:
+            return
+        try:
+            await self.account_saver(conn.index, conn.bot_id, (conn.login_info or {}).get("nickname", ""))
+        except Exception as e:
+            self.log.warning(f"[Gateway] 记录上次登录账号失败 (#{conn.index}): {e}")
+
     async def _get_login_info(self, conn: BotConnection) -> bool:
         try:
             resp = await conn.get_login_info()
@@ -268,6 +301,7 @@ class OneBotGateway:
                 conn.bot_id = int(data.get("user_id", 0) or 0)
                 conn.login_info = data
                 self.log.info(f"登录成功 | #{conn.index} | {conn.bot_id} | {data.get('nickname', '')}")
+                await self._record_login_account(conn)
                 if self.login_handler:
                     await self.login_handler(conn)
                 # 强制重新广播（此时才有真实 bot_id，前端据此刷新模块数据）

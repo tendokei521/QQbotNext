@@ -25,6 +25,9 @@ class BotService:
         self.gateway.login_handler = self.on_bot_login
         self.gateway.dispatch_handler = self.dispatcher.dispatch
         self.gateway.bots_provider = self.config_service.get_bots
+        # 上次登录账号快照：登录成功写入，查询时读取（断开后前端回退展示）
+        self.gateway.account_saver = self.on_account_login
+        self.gateway.account_lookup = self.config_service.get_bot_accounts
 
     # ==================== 登录装配 ====================
     async def on_bot_login(self, conn: IBot) -> None:
@@ -38,6 +41,31 @@ class BotService:
                 await self.lifecycle_hooks.run(conn, "login", "已登录")
             except Exception as e:
                 logger.warning(f"[BotService] 登录钩子执行异常: {e}")
+
+    async def on_account_login(self, index: int, bot_id: int | None, nickname: str) -> bool:
+        """登录成功 → 记录该连接本次登录的账号快照。
+
+        账号未变化时 ConfigService 内部为 no-op（不写库、不通知），
+        符合「账号相同不变、不同才换」：只有换了账号才广播刷新前端。
+        """
+        changed = await self.config_service.save_bot_account(index, bot_id, nickname)
+        if changed:
+            logger.info(f"[BotService] 连接 #{index} 的登录账号已更新: {bot_id} ({nickname})")
+            await self._notify_account_changed(index)
+        return changed
+
+    async def _notify_account_changed(self, index: int) -> None:
+        """广播「上次账号已更新」，让所有已打开的 WebUI 立即换成新账号。"""
+        from app.core.event_bus import BotAccountUpdatedEvent, event_bus
+
+        conn = self.gateway.connections.get(index)
+        try:
+            await event_bus.publish(BotAccountUpdatedEvent(
+                bot_index=index,
+                user_id=conn.bot_id if conn else None,
+            ))
+        except Exception as e:
+            logger.warning(f"[BotService] 账号变更广播失败 (#{index}): {e}")
 
     # ==================== 连接操作（WebUI 调用） ====================
     async def start(self) -> None:

@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.core.logger import webui_logger
-from app.core.event_bus import BotLifecycleEvent, event_bus
+from app.core.event_bus import BotAccountUpdatedEvent, BotLifecycleEvent, event_bus
 from app.webui.api import agent as agent_router
 from app.webui.api import bots as bots_router
 from app.webui.api import config_profiles as config_profiles_router
@@ -166,11 +166,12 @@ _bot_lifecycle_subscribed = False
 
 
 def _install_bot_lifecycle_listener(container) -> None:
-    """订阅 BotLifecycleEvent：连接状态变化实时推送给前端。
+    """订阅 BotLifecycleEvent / BotAccountUpdatedEvent：连接状态与账号变化实时推前端。
 
     - state=connected（登录成功，带真实 bot_id）→ 顺带广播 modules_reloaded，
       前端收到后刷新模块数据（登录时模块刚装配完）；
-    - 同一状态经 gateway._notify_status 去重，不会刷屏。
+    - 同一状态经 gateway._notify_status 去重，不会刷屏；
+    - 账号变化（换了账号登录）单独事件：即使状态没变也要让前端换掉「上次连接账号」。
     """
     global _bot_lifecycle_subscribed
     if _bot_lifecycle_subscribed:
@@ -181,31 +182,54 @@ def _install_bot_lifecycle_listener(container) -> None:
 
     gateway = container.get(OneBotGateway)
 
-    async def on_bot_lifecycle(event: BotLifecycleEvent) -> None:
+    def _status_payload(index: int, **overrides) -> dict:
+        """组装某 index 的最新账号/连接信息（含 last_account / account 回退字段）。"""
         stat = {}
         for s in gateway.get_bots_info():
-            if s["index"] == event.bot_index:
+            if s["index"] == index:
                 stat = s
                 break
+        return {
+            "index": index,
+            "bot_id": stat.get("bot_id"),
+            "status": stat.get("status"),
+            "last_error": stat.get("last_error"),
+            "login_info": stat.get("login_info"),
+            "last_account": stat.get("last_account"),
+            "account": stat.get("account"),
+            "reconnect_attempts": stat.get("reconnect_attempts"),
+            "ws_url": stat.get("ws_url"),
+            "owner_id": stat.get("owner_id"),
+            "auto_connect": stat.get("auto_connect"),
+            **overrides,
+        }
+
+    async def on_bot_lifecycle(event: BotLifecycleEvent) -> None:
         await manager.broadcast(json.dumps({
             "type": "bot_status_updated",
-            "bot": {
-                "index": event.bot_index,
-                "bot_id": event.bot_id,
-                "status": event.state,
-                "last_error": event.detail or None,
-                "login_info": stat.get("login_info"),
-                "reconnect_attempts": stat.get("reconnect_attempts"),
-                "ws_url": stat.get("ws_url"),
-                "owner_id": stat.get("owner_id"),
-                "auto_connect": stat.get("auto_connect"),
-            },
+            # 状态是权威值：连接中/断开由事件给，避免读到竞态中的旧状态
+            "bot": _status_payload(
+                event.bot_index,
+                bot_id=event.bot_id,
+                status=event.state,
+                last_error=event.detail or None,
+            ),
         }))
         if event.state == "connected" and event.bot_id:
             await manager.broadcast(json.dumps({"type": "modules_reloaded", "bot_id": event.bot_id}))
 
     event_bus.subscribe(BotLifecycleEvent, on_bot_lifecycle)
     webui_logger.debug("[WebUI] Bot 生命周期监听已注册")
+
+    async def on_bot_account_updated(event: BotAccountUpdatedEvent) -> None:
+        # 账号换了但状态可能没变（同一连接重登另一账号）→ 单独推一次账号信息
+        await manager.broadcast(json.dumps({
+            "type": "bot_status_updated",
+            "bot": _status_payload(event.bot_index, bot_id=event.user_id),
+        }))
+
+    event_bus.subscribe(BotAccountUpdatedEvent, on_bot_account_updated)
+    webui_logger.debug("[WebUI] Bot 账号变更监听已注册")
 
 
 def _install_config_listener(container) -> None:

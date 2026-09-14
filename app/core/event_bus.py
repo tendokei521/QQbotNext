@@ -72,3 +72,15 @@ class BotLifecycleEvent:
 class ModulesReloadedEvent:
     def __init__(self, bot_id: int | None) -> None:
         self.bot_id = bot_id
+
+
+class BotAccountUpdatedEvent:
+    """某连接上次登录账号发生变化（换了账号登录）→ 通知 WebUI 刷新账号信息。
+
+    与 BotLifecycleEvent 分开：连接状态可能没变（同一连接、同一状态），
+    但账号身份变了，需要前端把「上次连接账号」换成新账号。
+    """
+
+    def __init__(self, bot_index: int, user_id: int | None = None) -> None:
+        self.bot_index = bot_index
+        self.user_id = user_id
