@@ -158,6 +158,7 @@ DEFAULT_LLM_CONFIG: dict = {
     "napcat_tools_debug": False,       # 调试：完整记录 NapCat 请求与响应
     "napcat_tools_log_enabled": True,  # NapCat 工具普通调用日志
     "napcat_tool_overrides": {},       # 工具权限/作用域覆盖：{"send_poke":{"permission":"member","scopes":["private"]}}
+    "poke_cooldown_seconds": 20,       # 戳一戳节流：同会话同一人该秒数内不重复戳（0=不节流）
 }
 
 # 框架级 Agent 配置/权限存储的 module_name

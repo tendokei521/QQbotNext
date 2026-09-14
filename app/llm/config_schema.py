@@ -494,6 +494,10 @@ SCHEMA = {
         "type": "boolean", "label": "NapCat 调试日志", "description": "开启后完整记录每个 NapCat 工具调用的请求参数与响应内容",
         "default": False, "group": "group_napcat",
     },
+    "poke_cooldown_seconds": {
+        "type": "number", "label": "戳一戳节流(秒)", "description": "同一会话里对同一个人，该秒数内不重复戳一戳（0=不节流）；失败不占用冷却",
+        "default": 20, "min": 0, "max": 600, "group": "group_napcat",
+    },
 
     # ==================== 感知增强提示词细调（实验性） ====================
     "meta_sender_style": {

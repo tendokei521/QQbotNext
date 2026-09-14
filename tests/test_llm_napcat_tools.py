@@ -17,6 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.llm.napcat import tools as napcat_tools
 from app.llm.napcat.manifest import NAP_CAT_TOOLS
 from app.llm.napcat.tools import build_napcat_tools, resolve_action
 from app.llm.tool import ToolContext, is_error_result, sanitize_tool_name
@@ -26,6 +27,14 @@ _DOC_URL_RE = re.compile(r"^https://napcat\.apifox\.cn/\d+e0$")
 
 GROUP_ID = 778459818
 USER_ID = 10001
+
+
+@pytest.fixture(autouse=True)
+def _clean_poke_state():
+    """戳一戳节流是模块级状态，逐用例清空，避免相互影响。"""
+    napcat_tools._POKE_LAST.clear()
+    yield
+    napcat_tools._POKE_LAST.clear()
 
 
 @pytest.fixture
@@ -136,3 +145,94 @@ async def test_handler_reports_api_failure_as_error_text(runtime):
 
     assert is_error_result(result)
     assert "1404" in result
+
+
+# ---------- 戳一戳节流（防止「每条消息都戳」） ----------
+
+
+class _Clock:
+    def __init__(self):
+        self.t = 1000.0
+
+    def __call__(self):
+        return self.t
+
+
+async def test_poke_is_throttled_per_target(runtime, monkeypatch):
+    clock = _Clock()
+    monkeypatch.setattr(napcat_tools, "_now", clock)
+    runtime.config["poke_cooldown_seconds"] = 20
+
+    bot = _FakeBot()
+    ctx = _group_ctx(bot, runtime)
+    specs = {spec.name: spec for spec in build_napcat_tools(runtime, ctx)}
+    poke = specs["send_poke"]
+
+    first = await poke.handler(ctx, {"user_id": USER_ID})
+    assert not is_error_result(first)
+    assert len(bot.calls) == 1
+
+    clock.t += 5
+    second = await poke.handler(ctx, {"user_id": USER_ID})
+    assert is_error_result(second)
+    assert "冷却中" in second
+    assert len(bot.calls) == 1  # 被拦下，没有再发出去
+
+    clock.t += 20  # 超过 20s 窗口
+    third = await poke.handler(ctx, {"user_id": USER_ID})
+    assert not is_error_result(third)
+    assert len(bot.calls) == 2
+
+
+async def test_poke_throttle_is_per_target_and_can_be_disabled(runtime, monkeypatch):
+    clock = _Clock()
+    monkeypatch.setattr(napcat_tools, "_now", clock)
+
+    bot = _FakeBot()
+    ctx = _group_ctx(bot, runtime)
+    specs = {spec.name: spec for spec in build_napcat_tools(runtime, ctx)}
+    poke = specs["send_poke"]
+
+    await poke.handler(ctx, {"user_id": USER_ID})
+    # 换一个人不共享冷却
+    other = await poke.handler(ctx, {"user_id": 20002})
+    assert not is_error_result(other)
+    assert len(bot.calls) == 2
+
+    # 关闭节流后可以连续戳
+    runtime.config["poke_cooldown_seconds"] = 0
+    again = await poke.handler(ctx, {"user_id": USER_ID})
+    assert not is_error_result(again)
+    assert len(bot.calls) == 3
+
+
+async def test_failed_poke_does_not_consume_cooldown(runtime, monkeypatch):
+    clock = _Clock()
+    monkeypatch.setattr(napcat_tools, "_now", clock)
+    runtime.config["poke_cooldown_seconds"] = 60
+
+    bot = _FakeBot({"status": "failed", "retcode": 1404, "message": "不支持", "data": None})
+    ctx = _group_ctx(bot, runtime)
+    specs = {spec.name: spec for spec in build_napcat_tools(runtime, ctx)}
+    poke = specs["send_poke"]
+
+    await poke.handler(ctx, {"user_id": USER_ID})  # 失败
+    retry = await poke.handler(ctx, {"user_id": USER_ID})  # 失败不占冷却 → 仍会真的重试
+
+    assert "冷却中" not in retry
+    assert len(bot.calls) == 2
+
+
+async def test_other_tools_are_not_throttled(runtime, monkeypatch):
+    clock = _Clock()
+    monkeypatch.setattr(napcat_tools, "_now", clock)
+    runtime.config["poke_cooldown_seconds"] = 600
+
+    bot = _FakeBot()
+    ctx = _group_ctx(bot, runtime)
+    specs = {spec.name: spec for spec in build_napcat_tools(runtime, ctx)}
+
+    for _ in range(3):
+        result = await specs["get_group_member_list"].handler(ctx, {"group_id": GROUP_ID})
+        assert not is_error_result(result)
+    assert len(bot.calls) == 3

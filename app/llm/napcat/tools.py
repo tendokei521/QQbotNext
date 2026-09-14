@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 from app.llm import logger
@@ -38,12 +39,74 @@ def resolve_action(tool: dict) -> str:
     return str(tool.get("action") or tool.get("name") or "")
 
 
+# ---------- 戳一戳节流 ----------
+# 主动性提示会鼓励模型在合适时机戳一戳；没有节流就会变成每条消息都戳。
+POKE_ACTIONS = frozenset({"send_poke", "group_poke", "friend_poke"})
+DEFAULT_POKE_COOLDOWN_SECONDS = 20
+_POKE_LAST: dict[str, float] = {}
+_POKE_LAST_MAX = 500
+
+
+def _now() -> float:
+    return time.monotonic()
+
+
+def _poke_key(runtime, ctx: ToolContext | None, args: dict) -> str:
+    """节流键：同一会话里对同一个人的戳一戳才互相计时。"""
+    bot_id = str(getattr(runtime, "bot_id", "") or "")
+    session_id = str(getattr(ctx, "session_id", "") or "") if ctx is not None else ""
+    target = str((args or {}).get("user_id") or (args or {}).get("target_id") or "")
+    return f"{bot_id}:{session_id}:{target}"
+
+
+def _poke_cooldown(runtime) -> float:
+    try:
+        value = getattr(runtime, "config", None).get(
+            "poke_cooldown_seconds", DEFAULT_POKE_COOLDOWN_SECONDS
+        )
+        return max(0.0, float(value))
+    except Exception:
+        return float(DEFAULT_POKE_COOLDOWN_SECONDS)
+
+
+def poke_cooldown_left(runtime, ctx: ToolContext | None, args: dict) -> float:
+    """距下次可戳还剩多少秒；0 表示可以戳。"""
+    window = _poke_cooldown(runtime)
+    if window <= 0:
+        return 0.0
+    last = _POKE_LAST.get(_poke_key(runtime, ctx, args))
+    if last is None:
+        return 0.0
+    left = window - (_now() - last)
+    return left if left > 0 else 0.0
+
+
+def record_poke(runtime, ctx: ToolContext | None, args: dict) -> None:
+    """记录一次成功的戳一戳（失败不占用冷却，避免模型无法重试）。"""
+    key = _poke_key(runtime, ctx, args)
+    _POKE_LAST[key] = _now()
+    if len(_POKE_LAST) > _POKE_LAST_MAX:
+        cutoff = _now() - 3600
+        for stale in [k for k, ts in _POKE_LAST.items() if ts < cutoff]:
+            _POKE_LAST.pop(stale, None)
+        if len(_POKE_LAST) > _POKE_LAST_MAX:
+            _POKE_LAST.clear()
+
+
 async def _handler(runtime, tool: dict, ctx: ToolContext | None, args: dict) -> str:
     bot = getattr(ctx, "bot", None) if ctx is not None else None
     if bot is None:
         return "error: 当前上下文无可用 Bot"
     name = str(tool.get("name", ""))
     action = resolve_action(tool)
+    args = args or {}
+    if action in POKE_ACTIONS:
+        left = poke_cooldown_left(runtime, ctx, args)
+        if left > 0:
+            return (
+                f"error: 戳一戳冷却中（还需 {int(left) + 1} 秒）"
+                "——同一会话不要连续戳同一个人"
+            )
     debug = False
     try:
         debug = bool(getattr(runtime, "config", None).get("napcat_tools_debug", False))
@@ -58,6 +121,8 @@ async def _handler(runtime, tool: dict, ctx: ToolContext | None, args: dict) -> 
     except Exception as e:
         logger.add_info("NapCatTool").warning(f"[NapCat] {name} 执行异常: {e}")
         return f"error: {name} 执行异常: {e}"
+    if action in POKE_ACTIONS and isinstance(response, dict) and response.get("status") == "ok":
+        record_poke(runtime, ctx, args)
     if debug:
         logger.add_info("NapCatTool").info(
             f"[NapCatDebug] 响应 {name} response={json.dumps(response, ensure_ascii=False, default=str)}"
