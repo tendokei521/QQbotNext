@@ -4,8 +4,10 @@
 
 ### 工具主动性与聊天记录
 
-- 新增系统工具 `get_chat_history`（取代 `get_session_history`）：零参数、自动定位当前会话，
+- 新增系统工具 `get_chat_history`（取代 `get_session_history`）：默认零参数、自动定位当前会话，
   本地记录不足时自动补拉 QQ 聊天记录（`scope=auto/local/qq`），取不到时给明确路标
+- `get_chat_history` 支持跨会话：私聊里用 `group_name`/`group_id` 查“发起人自己也是成员”的群
+  （结果只回给发起人，`history_cross_query_enable` 可关）；群聊里查别的群、查别人的私聊一律拒绝
 - 新增输出侧动作通道：模型可用 `[reply]` 引用当前消息、`[@QQ]` 真实 @ 某人
   （`outbound_directive_enable`，默认开启；仅本轮首句生效，指令不会漏给用户）
 - 新增唯一一块「主动性」system 提示：按本轮可用工具裁剪，只讲时机不讲参数；

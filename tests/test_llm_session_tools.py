@@ -21,8 +21,9 @@ def llm_data_dir(tmp_path, monkeypatch):
 class _FakeBot:
     """记录 get_msg_history 调用，返回构造好的 OneBot 历史消息。"""
 
-    def __init__(self, messages=None, group_name="测试群"):
+    def __init__(self, messages=None, group_name="测试群", *, member=True, groups=None):
         self.calls: list[dict] = []
+        self.member_calls: list[dict] = []
         self.messages = messages if messages is not None else [
             {
                 "time": 1788342159,
@@ -36,6 +37,11 @@ class _FakeBot:
             },
         ]
         self.group_name = group_name
+        self.member = member
+        self.groups = groups if groups is not None else [
+            {"group_id": 778459818, "group_name": "蛋挞空间站"},
+            {"group_id": 12345, "group_name": "测试群"},
+        ]
 
     async def get_msg_history(self, group_id=0, user_id=0, count=20, reverse_order=False):
         self.calls.append({"group_id": group_id, "user_id": user_id, "count": count})
@@ -43,6 +49,15 @@ class _FakeBot:
 
     async def get_group_info(self, group_id, no_cache=False):
         return {"status": "ok", "data": {"group_name": self.group_name}}
+
+    async def get_group_list(self):
+        return {"status": "ok", "data": list(self.groups)}
+
+    async def get_group_member_info(self, group_id, user_id, no_cache=False):
+        self.member_calls.append({"group_id": group_id, "user_id": user_id})
+        if not self.member:
+            return {"status": "failed", "retcode": 1404, "message": "群成员不存在", "data": None}
+        return {"status": "ok", "data": {"user_id": user_id, "nickname": "成员"}}
 
 
 def _ctx(runtime, bot, session_id, *, user_id=None, group_id=None, event=None):
@@ -174,13 +189,152 @@ async def test_chat_history_private_uses_current_peer(llm_data_dir):
     ctx = _ctx(runtime, bot, "private_888", user_id=888)
 
     result = await _tool(runtime, ctx, "get_chat_history").handler(
-        ctx, {"scope": "qq", "group_id": 999, "user_id": 777}
+        ctx, {"scope": "qq", "user_id": 888}
     )
 
-    # 目标只认当前会话：user_id=888，模型传参被忽略
     assert bot.calls == [{"group_id": 0, "user_id": 888, "count": 30}]
     assert "晚上一起打游戏吗" in result
     assert "【QQ 聊天记录】" in result
+
+
+# ---------- 跨会话查询（私聊问“群里说了什么”） ----------
+
+
+async def test_private_session_can_query_group_the_requester_is_in(llm_data_dir):
+    runtime = SimpleNamespace(bot_id="bot_cross_ok", config={})
+    bot = _FakeBot()
+    ctx = _ctx(runtime, bot, "private_888", user_id=888)
+
+    result = await _tool(runtime, ctx, "get_chat_history").handler(
+        ctx, {"group_id": 778459818}
+    )
+
+    # 先校验发起人是否该群成员，再取该群历史
+    assert bot.member_calls == [{"group_id": 778459818, "user_id": 888}]
+    assert bot.calls == [{"group_id": 778459818, "user_id": 0, "count": 30}]
+    assert "跨会话查询" in result
+    assert "晚上一起打游戏吗" in result
+
+
+async def test_private_session_can_query_group_by_name(llm_data_dir):
+    runtime = SimpleNamespace(bot_id="bot_cross_name", config={})
+    bot = _FakeBot()
+    ctx = _ctx(runtime, bot, "private_888", user_id=888)
+
+    result = await _tool(runtime, ctx, "get_chat_history").handler(
+        ctx, {"group_name": "蛋挞空间站"}
+    )
+
+    assert bot.calls and bot.calls[0]["group_id"] == 778459818
+    assert "跨会话查询" in result
+
+
+async def test_ambiguous_group_name_asks_for_group_id(llm_data_dir):
+    runtime = SimpleNamespace(bot_id="bot_cross_amb", config={})
+    bot = _FakeBot(groups=[
+        {"group_id": 1, "group_name": "测试群一号"},
+        {"group_id": 2, "group_name": "测试群二号"},
+    ])
+    ctx = _ctx(runtime, bot, "private_888", user_id=888)
+
+    result = await _tool(runtime, ctx, "get_chat_history").handler(
+        ctx, {"group_name": "测试群"}
+    )
+
+    assert "匹配到多个群" in result
+    assert bot.calls == []  # 歧义时不查任何记录
+
+
+async def test_cross_query_refused_when_requester_not_in_group(llm_data_dir):
+    runtime = SimpleNamespace(bot_id="bot_cross_deny", config={})
+    bot = _FakeBot(member=False)
+    ctx = _ctx(runtime, bot, "private_888", user_id=888)
+
+    result = await _tool(runtime, ctx, "get_chat_history").handler(
+        ctx, {"group_id": 778459818}
+    )
+
+    assert "不是群 778459818 的成员" in result
+    assert bot.calls == []  # 校验失败不取任何记录
+
+
+async def test_cross_query_refused_in_group_session(llm_data_dir):
+    """群聊里查别的群会把内容泄漏给不在该群的人，直接拒绝。"""
+    runtime = SimpleNamespace(bot_id="bot_cross_group", config={})
+    bot = _FakeBot()
+    ctx = _ctx(runtime, bot, "group_12345", user_id=10001, group_id=12345)
+
+    result = await _tool(runtime, ctx, "get_chat_history").handler(
+        ctx, {"group_id": 778459818}
+    )
+
+    assert "群聊里不支持查询其它群" in result
+    assert bot.calls == [] and bot.member_calls == []
+
+
+async def test_cross_query_refused_when_disabled(llm_data_dir):
+    runtime = SimpleNamespace(bot_id="bot_cross_off", config={"history_cross_query_enable": False})
+    bot = _FakeBot()
+    ctx = _ctx(runtime, bot, "private_888", user_id=888)
+
+    result = await _tool(runtime, ctx, "get_chat_history").handler(
+        ctx, {"group_id": 778459818}
+    )
+
+    assert "跨会话查询已关闭" in result
+    assert bot.calls == []
+
+
+async def test_cannot_read_other_private_chats(llm_data_dir):
+    runtime = SimpleNamespace(bot_id="bot_peer_deny", config={})
+    bot = _FakeBot()
+    ctx = _ctx(runtime, bot, "private_888", user_id=888)
+
+    result = await _tool(runtime, ctx, "get_chat_history").handler(
+        ctx, {"user_id": 777}
+    )
+
+    assert "只能查询当前会话这条私聊" in result
+    assert bot.calls == []
+
+
+async def test_cross_query_rejects_two_targets_and_bad_ids(llm_data_dir):
+    runtime = SimpleNamespace(bot_id="bot_cross_args", config={})
+    bot = _FakeBot()
+    ctx = _ctx(runtime, bot, "private_888", user_id=888)
+    spec = _tool(runtime, ctx, "get_chat_history")
+
+    assert "一次只能查一个目标" in await spec.handler(ctx, {"group_id": 1, "user_id": 888})
+    assert "必须是纯数字群号" in await spec.handler(ctx, {"group_id": "群一"})
+    assert bot.calls == []
+
+
+async def test_cross_query_local_scope_tells_model_to_use_qq(llm_data_dir):
+    runtime = SimpleNamespace(bot_id="bot_cross_local", config={})
+    bot = _FakeBot()
+    ctx = _ctx(runtime, bot, "private_888", user_id=888)
+
+    result = await _tool(runtime, ctx, "get_chat_history").handler(
+        ctx, {"group_id": 778459818, "scope": "local"}
+    )
+
+    assert "跨会话查询请用 scope=qq" in result
+    assert bot.calls == []
+
+
+async def test_current_group_and_peer_targets_still_allowed(llm_data_dir):
+    """传了当前会话自己的群号/QQ 时不算跨会话，也不触发成员校验。"""
+    runtime = SimpleNamespace(bot_id="bot_same", config={})
+    bot = _FakeBot()
+    ctx = _ctx(runtime, bot, "group_12345", user_id=10001, group_id=12345)
+
+    result = await _tool(runtime, ctx, "get_chat_history").handler(
+        ctx, {"group_id": 12345, "scope": "qq"}
+    )
+
+    assert bot.member_calls == []
+    assert bot.calls and bot.calls[0]["group_id"] == 12345
+    assert "跨会话查询" not in result
 
 
 async def test_chat_history_empty_gives_next_step_hint(llm_data_dir):

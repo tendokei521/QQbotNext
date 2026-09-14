@@ -7,11 +7,14 @@
 
 历史工具演进：原 ``get_session_history`` 只读本地记录，模型在“本地记录不足”时便无从
 下手（只能换工具猜或直接说“我不记得”），且与 NapCat 的两个 history 工具形成三选一。
-现统一为 **``get_chat_history``（零参数单入口）**：
+现统一为 **``get_chat_history``**：
 
-- 目标（群号/对方 QQ）一律从当前会话推导，模型无法借此读取其他会话的记录；
+- 默认不传参：目标从当前会话推导，模型不需要知道 id；
 - ``scope=auto``（默认）先给本地记录，本地条数不足 ``history_auto_qq_min_local`` 时自动
   补拉 QQ 原始聊天记录；
+- 可选跨会话：私聊里可用 ``group_id`` / ``group_name`` 查“发起人自己也是成员”的群
+  （回答只回给发起人）；群聊里查别的群、以及查别人的私聊一律拒绝（见
+  ``_resolve_history_target``）；
 - 取不到记录时给出明确路标（告诉模型下一步可以查 QQ），而不是一句“暂无记录”。
 """
 
@@ -188,8 +191,125 @@ async def _handle_current_session(ctx, args: dict) -> str:
     return "\n".join(lines)
 
 
+def _int_id(value: Any) -> str:
+    """把模型传来的 id 归一化为纯数字字符串；非法返回空串。"""
+    try:
+        return str(int(str(value).strip()))
+    except (TypeError, ValueError):
+        return ""
+
+
+async def _resolve_group_by_name(bot, name: str) -> tuple[str, str]:
+    """群名 → 群号；返回 (group_id, error_text)。精确匹配优先，其次唯一子串匹配。"""
+    if bot is None:
+        return "", "当前没有可用连接，无法按群名解析群号，请改用 group_id。"
+    try:
+        resp = await bot.get_group_list()
+    except Exception:
+        return "", "获取群列表失败，请改用 group_id 指定群号。"
+    groups = (resp or {}).get("data") if isinstance(resp, dict) else []
+    exact: list[tuple[str, str]] = []
+    fuzzy: list[tuple[str, str]] = []
+    for item in groups if isinstance(groups, list) else []:
+        if not isinstance(item, dict):
+            continue
+        gid = str(item.get("group_id") or "")
+        gname = str(item.get("group_name") or "")
+        if not gid:
+            continue
+        if gname == name:
+            exact.append((gid, gname))
+        elif name in gname:
+            fuzzy.append((gid, gname))
+    if len(exact) == 1:
+        return exact[0][0], ""
+    if not exact and len(fuzzy) == 1:
+        return fuzzy[0][0], ""
+    cands = exact or fuzzy
+    if not cands:
+        return "", f"没找到群名包含「{name}」的群（机器人可能不在该群），请改用 group_id。"
+    shown = "、".join(f"{n}({g})" for g, n in cands[:5])
+    return "", f"群名「{name}」匹配到多个群：{shown}。请用 group_id 指定其中一个。"
+
+
+async def _is_group_member(bot, group_id: str, user_id: str) -> bool:
+    """发起人是否为该群成员（跨会话查询的授权凭据）；查询失败一律视为无权限。"""
+    if bot is None or not group_id or not user_id:
+        return False
+    try:
+        resp = await bot.get_group_member_info(group_id=int(group_id), user_id=int(user_id))
+    except Exception:
+        return False
+    if not isinstance(resp, dict) or resp.get("status") != "ok":
+        return False
+    data = resp.get("data") or {}
+    if not isinstance(data, dict) or not data:
+        return False
+    echoed = str(data.get("user_id") or "")
+    return not echoed or echoed == str(user_id)
+
+
+async def _resolve_history_target(
+    ctx, bot, args: dict, *, is_private: bool, current_group: str, current_peer: str
+) -> tuple[str, str, str, str]:
+    """解析查询目标；返回 (group_id, user_id, cross_note, error)。
+
+    安全模型（简洁但显式）：
+    - 默认当前会话，始终允许；
+    - 跨会话**只允许私聊发起、且发起人是该群成员**（结果只回给发起人）；
+    - 群聊里不允许查别的群（回答会发进本群，等于泄漏给不在该群的人）；
+    - 任何情况下都不允许查别人的私聊记录。
+    """
+    raw_group = args.get("group_id")
+    raw_user = args.get("user_id")
+    name = str(args.get("group_name") or "").strip()
+    group_id = _int_id(raw_group)
+    user_id = _int_id(raw_user)
+
+    if raw_group not in (None, "") and not group_id:
+        return "", "", "", "error: group_id 必须是纯数字群号"
+    if raw_user not in (None, "") and not user_id:
+        return "", "", "", "error: user_id 必须是纯数字 QQ 号"
+    if name and not group_id:
+        group_id, err = await _resolve_group_by_name(bot, name)
+        if err:
+            return "", "", "", f"error: {err}"
+    if group_id and user_id:
+        return "", "", "", "error: 一次只能查一个目标（group_id / group_name 与 user_id 二选一）"
+
+    if group_id and group_id != current_group:
+        if not is_private:
+            return "", "", "", (
+                "error: 群聊里不支持查询其它群的记录（会把别的群内容发到本群）。"
+                "请在私聊里让我查。"
+            )
+        if not bool(_cfg(ctx, "history_cross_query_enable", True)):
+            return "", "", "", "error: 跨会话查询已关闭（history_cross_query_enable=false）"
+        requester = str(getattr(ctx, "user_id", "") or "")
+        if not await _is_group_member(bot, group_id, requester):
+            return "", "", "", (
+                f"error: 你不是群 {group_id} 的成员，不能查询该群的聊天记录"
+            )
+        return group_id, "", f"（跨会话查询：群 {group_id}）", ""
+
+    if user_id and user_id != current_peer:
+        return "", "", "", (
+            "error: 只能查询当前会话这条私聊的记录，不能读取你与其他人/机器人的私聊"
+        )
+
+    if group_id:
+        return group_id, "", "", ""
+    if user_id:
+        return "", user_id, "", ""
+    return current_group, current_peer, "", ""
+
+
 async def _handle_chat_history(ctx, args: dict) -> str:
-    """当前会话的聊天记录：本地优先，不足时自动补拉 QQ 历史（零参数）。"""
+    """当前会话的聊天记录：本地优先，不足时自动补拉 QQ 历史。
+
+    默认零参数（当前会话）；可选传入 ``group_id`` / ``group_name`` / ``user_id``
+    以查询跨会话目标（授权规则见 ``_resolve_history_target``）。
+    """
     if ctx is None:
         return "error: 当前无会话上下文"
 
@@ -206,16 +326,29 @@ async def _handle_chat_history(ctx, args: dict) -> str:
     limit = _parse_limit(args, default=DEFAULT_LIMIT, maximum=100)
     is_private = _is_private(session_id)
 
-    # 目标一律从当前会话推导（不接受模型传参），避免越权读取其他会话
+    # 当前会话目标（默认值；显式传参可查跨会话目标，授权规则见 _resolve_history_target）
     fallback_target = session_id.split("_", 1)[1] if "_" in session_id else ""
     if is_private:
-        group_id, user_id = "", str(getattr(ctx, "user_id", None) or fallback_target or "")
+        current_group, current_peer = "", str(getattr(ctx, "user_id", None) or fallback_target or "")
     else:
-        group_id = str(getattr(ctx, "group_id", None) or fallback_target or "")
-        user_id = ""
+        current_group, current_peer = str(getattr(ctx, "group_id", None) or fallback_target or ""), ""
+
+    group_id, user_id, cross_note, error = await _resolve_history_target(
+        ctx, bot, args, is_private=is_private,
+        current_group=current_group, current_peer=current_peer,
+    )
+    if error:
+        return error
+    # 本地会话记录只覆盖当前会话；跨会话目标只能走 QQ
+    is_cross = (group_id or user_id) != (current_group or current_peer)
+
+    if is_cross and scope == "local":
+        return (
+            f"error: 本地会话记录只覆盖当前会话，跨会话查询请用 scope=qq（或 auto）{cross_note}"
+        )
 
     local_lines: list[str] = []
-    if scope in ("auto", "local"):
+    if scope in ("auto", "local") and not is_cross:
         local_lines = _render_local_lines(runtime, session_id, is_private, limit)
 
     try:
@@ -224,13 +357,16 @@ async def _handle_chat_history(ctx, args: dict) -> str:
         min_local = DEFAULT_AUTO_QQ_MIN_LOCAL
     min_local = max(0, min(min_local, 50))
 
-    need_qq = scope == "qq" or (scope == "auto" and len(local_lines) < min_local)
+    need_qq = is_cross or scope == "qq" or (scope == "auto" and len(local_lines) < min_local)
     qq_text = ""
     if need_qq:
         qq_text = await _fetch_qq_history(bot, runtime, group_id, user_id, limit)
 
     head_bits = [f"会话 {session_id}（{'私聊' if is_private else '群聊'}）"]
-    head_bits.append(f"本地记录 {len(local_lines)} 条")
+    if cross_note:
+        head_bits.append(cross_note.strip("（）"))
+    if not is_cross:
+        head_bits.append(f"本地记录 {len(local_lines)} 条")
     if need_qq:
         head_bits.append("QQ 记录：已补拉" if qq_text else "QQ 记录：未取到")
     elif not local_lines:
@@ -251,7 +387,12 @@ async def _handle_chat_history(ctx, args: dict) -> str:
 
     # 完全取不到：给明确路标，避免模型改用臆测/说“我不记得”
     hints = [f"{head}。"]
-    if scope == "local":
+    if is_cross:
+        hints.append(
+            "该目标没有取到聊天记录（可能是新群/无历史，或机器人不在该群、连接不可用）。"
+            "不要编造该群的内容；可以换个群名或稍后重试。"
+        )
+    elif scope == "local":
         hints.append("本地没有可读记录；如需 QQ 原始聊天记录，请调用本工具并指定 scope=qq。")
     else:
         hints.append(
@@ -291,11 +432,14 @@ def build_session_tools(runtime: Any, ctx: Any) -> list[ToolSpec]:
         ToolSpec(
             name="get_chat_history",
             description=(
-                "获取当前会话的聊天记录，无需任何参数（会话对象自动取当前群/当前对方）。"
-                "默认先给本地会话记录，本地条数不足时自动补拉 QQ 原始聊天记录（最近 30 条）。"
-                "当用户问“刚才/之前聊了什么”“我说过什么”“你指的是哪条”，"
-                "或需要更早的上下文来回答时调用；不要在记录不足时凭猜测回答或说“我不记得”。"
-                "scope=local 只看本地；scope=qq 强制查 QQ 聊天记录。"
+                "获取聊天记录。不传参数＝当前会话（默认先给本地记录，本地条数不足时自动补拉 "
+                "QQ 原始聊天记录，最近 30 条）；当用户问“刚才/之前聊了什么”“我说过什么”"
+                "“你指的是哪条”，或需要更早的上下文来回答时调用；不要在记录不足时凭猜测回答"
+                "或说“我不记得”。\n"
+                "跨会话（仅私聊场景）：用户在私聊里问“群里/某群说了什么”时，用 group_name（群名，"
+                "如“蛋挞空间站”）或 group_id 指定该群；只允许查询发起人自己也是成员的群，"
+                "结果只发给发起人。不要用它去查别的私聊记录。\n"
+                "scope：auto=本地优先、不足补 QQ（默认）；local=仅本地（仅当前会话）；qq=仅 QQ。"
             ),
             parameters={
                 "type": "object",
@@ -308,6 +452,18 @@ def build_session_tools(runtime: Any, ctx: Any) -> list[ToolSpec]:
                     "limit": {
                         "type": "integer",
                         "description": "返回条数，1~100，默认 30。",
+                    },
+                    "group_id": {
+                        "type": "integer",
+                        "description": "要查询的群号；只在私聊里、且你/发起人是该群成员时可用（跨会话查询）",
+                    },
+                    "group_name": {
+                        "type": "string",
+                        "description": "要查询的群名（用户通常只说群名）；与 group_id 二选一，匹配到多个群时会返回候选让用户确认",
+                    },
+                    "user_id": {
+                        "type": "integer",
+                        "description": "私聊对方的 QQ 号；只允许查当前会话这一条私聊，其它一律拒绝",
                     },
                 },
             },
