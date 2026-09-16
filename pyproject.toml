@@ -23,6 +23,10 @@ dependencies = [
 dev = [
     "pytest>=7.4",
     "pytest-asyncio>=0.21",
+    # starlette.testclient 基于 httpx 实现（tests/test_plugin_page.py 依赖）；
+    # 注意：starlette 的弃用文案会提示安装 "httpx2"，但该包在 PyPI 上并不存在，
+    # 真实依赖始终是 httpx，切勿照抄警告文案。
+    "httpx>=0.27",
 ]
 vector = [
     "sqlite-vec>=0.1.6",
