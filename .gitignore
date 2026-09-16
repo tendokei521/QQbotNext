@@ -22,5 +22,14 @@ dashboard/dist/*.map
 # pnpm 全局存储 / 本地缓存
 .pnpm-store/
 
+# 测试 / 静态检查产物（覆盖率与 lint 报告由 CI 生成并作为 artifact 归档，不入库）
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+ruff-report.txt
+
 # 本地废弃代码存档（QQ 客户端实验功能回退后保留）
 deprecated/qq-client/

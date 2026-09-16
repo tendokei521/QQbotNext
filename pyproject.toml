@@ -27,6 +27,9 @@ dev = [
     # 注意：starlette 的弃用文案会提示安装 "httpx2"，但该包在 PyPI 上并不存在，
     # 真实依赖始终是 httpx，切勿照抄警告文案。
     "httpx>=0.27",
+    # 静态检查与覆盖率（CI 中用于报告；详见 STYLE.md §10）
+    "ruff>=0.6",
+    "pytest-cov>=5.0",
 ]
 vector = [
     "sqlite-vec>=0.1.6",
@@ -45,7 +48,61 @@ include = ["app*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# 注意：此处不添加 --cov 默认项，保证本地 `pytest -q` 快速；
+# 覆盖率仅在 CI 中显式开启（见 .github/workflows/ci.yml）。
 
 [tool.ruff]
 line-length = 120
 target-version = "py310"
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "deprecated",       # 旧版客户端存档，不参与检查
+    "dashboard",        # 前端（Vue/Vite），非 Python
+    "module/plugins",   # 外部安装的 zip 插件
+    "scripts/*_ablation.py",  # 一次性实验脚本，风格不统一
+]
+
+[tool.ruff.lint]
+# 规则集与 STYLE.md §10 一致：E/F（pycodestyle+pyflakes）、I（isort）、UP（pyupgrade）、B（bugbear）
+# 说明：CI 现阶段以 --exit-zero 运行（只报告、不阻断），待存量问题清理后再收紧为阻断。
+select = ["E", "F", "I", "UP", "B"]
+
+# 逐条忽略的理由（每条都写清"为什么"，避免变成无意识放行）
+ignore = [
+    "E501",   # 行长由 line-length 控制，且注释/中文字符串超长不应阻断
+    "B008",   # FastAPI 依赖注入惯用 Depends() 作为默认值
+    "B904",   # 允许 except 块内直接 raise（本项目大量自定义异常已带上下文）
+    "UP038",  # isinstance 的 X | Y 写法在 3.10 上并非始终更快，保持元组写法
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 测试文件允许：断言内赋值、lambda 赋值、未使用变量（夹具）等
+"tests/**" = ["B011", "E402"]
+# __init__.py 常做再导出，F401（未使用导入）在此属正常
+"**/__init__.py" = ["F401"]
+
+[tool.coverage.run]
+# 覆盖率只统计业务代码，排除测试自身、脚本与存档
+source = ["app", "module"]
+omit = [
+    "tests/*",
+    "scripts/*",
+    "deprecated/*",
+    "*/__init__.py",
+]
+
+[tool.coverage.report]
+# 先只出报告、不设失败阈值（--cov-fail-under 暂不启用）；
+# 待拿到真实基线后，再加入"不得下降"的棘轮阈值。
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
+
