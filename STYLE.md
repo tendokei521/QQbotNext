@@ -124,13 +124,32 @@ except Exception as e:
 
 ## 11. 提交规范（Commit）
 
-- **提交信息格式**：`YYYY.M.D HH:MM`（本地时间，如 `2026.8.14 16:10`）。
-  每次 commit / push 的信息就是当时的日期时间，不写功能描述。
-- **生成方式**：`git commit -m "$(Get-Date -Format 'yyyy.M.d HH:mm')"`（Windows PowerShell）。
-- **模板文件**：仓库根目录 `.gitmessage` 已提供模板；执行
-  `git config commit.template .gitmessage` 后，`git commit`（不带 -m）会预填该格式。
-- **一次性提交**：工作区的所有改动一次性 commit + push，不拆碎提交。
-- **提交前自查**：`pytest -q` 全绿；不提交 `data/` 运行时数据之外的临时文件。
+> 本节于 2025 年修订：原先规定「提交信息 = 时间戳」「工作区改动一次性提交」，
+> 两者与 `AGENTS.md` 的提交规则（Conventional Commits + 一步一提交）直接冲突，
+> 且仓库历史中两套风格并存。现统一为 **Conventional Commits + 一步一提交**，
+> `AGENTS.md` 为准一来源；本节如与 `AGENTS.md` 不一致，以 `AGENTS.md` 为准。
+
+- **格式**：`<type>(<scope>): <subject>`
+
+  ```
+  feat(dashboard): add PageSectionNav component
+  fix(llm): remove schedule fallback
+  docs: add agent commit rules
+  refactor(provider): normalize api_base endpoints
+  ```
+
+- **type 取值**：`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `perf` / `build` / `ci` / `style`。
+- **scope**：可选，取受影响的分层或组件名（`llm`/`gateway`/`config`/`dashboard`/`deps`…）。
+- **subject**：祈使句、小写开头、不加句号，说明"做了什么"（英文；遵守本仓库注释用中文的约定时，
+  可写中文 subject，但 type/scope 仍用英文）。
+- **一步一提交**：每完成一个可独立提交的步骤立即提交，保持"小而完整"、一个提交只做一件事，
+  便于回滚与审查；**不要**攒到最后一次性提交。
+- **不混入无关改动**：工作区若有与当前步骤无关的改动，只 `git add` 相关文件，不要顺手带进当前提交。
+- **不提交运行时产物**：`data/`、`logs/`、`__pycache__`、`.env` 等（见 `.gitignore`）。
+- **提交前自查**：`venv\Scripts\python.exe -m pytest -q` 全绿。
+- **模板**：仓库根目录 `.gitmessage` 提供 Conventional Commits 预填模板，执行
+  `git config commit.template .gitmessage` 后 `git commit`（不带 `-m`）即可启用。
+
 
 ---
 
