@@ -54,6 +54,50 @@ async def test_session_lock_serializes():
     assert "group_1" not in lm._locks
 
 
+async def test_session_lock_reclaims_idle_entry():
+    """空闲会话的锁必须被回收：否则会话数无界时会永久累积（内存泄漏）。"""
+    lm = SessionLockManager()
+    for i in range(200):
+        await lm.acquire(f"group_{i}")
+        lm.release(f"group_{i}")
+    assert lm.tracked_count() == 0
+    assert lm.active_count() == 0
+
+
+async def test_session_lock_keeps_entry_while_held():
+    """持锁期间不得回收条目，否则并发协程会拿到两把不同的锁而失去互斥。"""
+    lm = SessionLockManager()
+    # 持有 group_2 的锁不放：条目必须保留，且第二次 lock() 返回同一把锁
+    await lm.acquire("group_2")
+    assert lm.tracked_count() == 1
+    assert lm.lock("group_2") is lm.lock("group_2")
+    assert lm.lock("group_2").locked() is True
+    lm.release("group_2")
+    assert lm.tracked_count() == 0
+
+
+async def test_session_lock_still_mutually_exclusive():
+    """回收逻辑不得破坏互斥：并发进入同一会话的临界区必须串行。"""
+    lm = SessionLockManager()
+    order: list[str] = []
+
+    async def worker(tag: str) -> None:
+        async with lm.lock("same"):
+            order.append(f"{tag}-enter")
+            await asyncio.sleep(0.01)
+            order.append(f"{tag}-exit")
+
+    await asyncio.gather(*(worker(t) for t in "abc"))
+    # 每对 enter/exit 必须相邻，不能交错（交错即说明拿到了不同的锁）
+    for i in range(0, len(order), 2):
+        assert order[i].endswith("-enter")
+        assert order[i + 1] == order[i].replace("-enter", "-exit")
+    assert len(order) == 6
+    assert lm.active_count() == 0
+
+
+
+
 # ---------- Provider 注册 / 能力 ----------
 
 def test_provider_registry_has_native_adapters():
