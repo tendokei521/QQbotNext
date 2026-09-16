@@ -95,7 +95,9 @@ class HistoryManager:
                     data = json.load(f)
                 if data.get("session_id") == session_id:
                     result.append(data)
-            except Exception:
+            except Exception as e:
+                # 单个历史文件损坏不应影响其余文件读取，但必须留痕（否则表现为"历史凭空消失"）
+                logger.debug(f"[History] 跳过无法读取的历史文件 {filename}: {e}")
                 continue
         result.sort(key=lambda d: d.get("saved_at", 0))
         return result
@@ -122,7 +124,8 @@ class HistoryManager:
                     "messages": len(data.get("messages", []) or []),
                     "saved_at": data.get("saved_at", 0),
                 })
-            except Exception:
+            except Exception as e:
+                logger.debug(f"[History] 跳过无法解析的任务文件 {filename}: {e}")
                 continue
         tasks.sort(key=lambda t: t.get("saved_at", 0), reverse=True)
         return tasks
@@ -264,8 +267,8 @@ class SQLiteHistoryStore:
         try:
             if old_conn is not None:
                 old_conn.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[History] 关闭旧连接失败（切换目录时，已忽略）: {e}")
         self._history_dir = new_dir
         old_db_path = self.db_path
         # 测试/自定义目录共享时不带 bot_id，保证不同 bot_id 可读取同一归档
@@ -280,7 +283,9 @@ class SQLiteHistoryStore:
         data = dict(row)
         try:
             data["messages"] = json.loads(data.get("messages") or "[]")
-        except Exception:
+        except Exception as e:
+            # 库内 messages 字段损坏：降级为空列表，避免单行坏数据导致整表读取失败
+            logger.debug(f"[History] 解析 messages 字段失败，降级为空列表: {e}")
             data["messages"] = []
         return data
 
@@ -493,5 +498,5 @@ class SQLiteHistoryStore:
         with self._lock:
             try:
                 self._conn.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[History] 关闭 SQLite 连接失败（已忽略）: {e}")

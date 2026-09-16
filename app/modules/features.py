@@ -71,6 +71,17 @@ class ConfigToggleFeature(_RuntimeAccess, FeatureController):
         values = [bool(runtime.config.get(k, False)) for k in self.keys]
         return any(values)
 
+    def _call_quietly(self, label: str, fn, /, *args: Any) -> None:
+        """调用运行时的 stop/resume 等控制方法；失败只降级不抛出。
+
+        接管/恢复是"尽力而为"：某个运行时组件停不下来不应阻断整个 feature 切换，
+        因此这里吞掉异常，但用 debug 留痕，避免排查时完全无线索。
+        """
+        try:
+            fn(*args)
+        except Exception as e:
+            logger.debug(f"[Feature] {self.label} {label} 失败（已忽略）: {e}")
+
     def status(self, bot_id: Any) -> dict:
         runtime = self.runtime(bot_id)
         return {
@@ -115,10 +126,7 @@ class ProactiveFeatureController(ConfigToggleFeature):
         if runtime is None:
             return {}
         snapshot = super().suppress(bot_id)
-        try:
-            runtime.proactive.stop()
-        except Exception:
-            pass
+        self._call_quietly("暂停", runtime.proactive.stop)
         return snapshot
 
     def restore(self, bot_id: Any, snapshot: dict) -> None:
@@ -126,10 +134,7 @@ class ProactiveFeatureController(ConfigToggleFeature):
         if runtime is None or not snapshot:
             return
         super().restore(bot_id, snapshot)
-        try:
-            runtime.proactive.resume()
-        except Exception:
-            pass
+        self._call_quietly("恢复", runtime.proactive.resume)
 
 
 class ScheduleFeatureController(ConfigToggleFeature):
@@ -148,10 +153,7 @@ class ScheduleFeatureController(ConfigToggleFeature):
         if runtime is None:
             return {}
         snapshot = super().suppress(bot_id)
-        try:
-            runtime.scheduler.stop()
-        except Exception:
-            pass
+        self._call_quietly("暂停", runtime.scheduler.stop)
         return snapshot
 
     def restore(self, bot_id: Any, snapshot: dict) -> None:
@@ -159,10 +161,7 @@ class ScheduleFeatureController(ConfigToggleFeature):
         if runtime is None or not snapshot:
             return
         super().restore(bot_id, snapshot)
-        try:
-            runtime.scheduler.resume()
-        except Exception:
-            pass
+        self._call_quietly("恢复", runtime.scheduler.resume)
 
 
 class MemoryFeatureController(ConfigToggleFeature):
@@ -221,14 +220,8 @@ class AgentFeatureController(_RuntimeAccess, FeatureController):
             return {}
         snapshot = {"enabled": bool(runtime.config.enabled)}
         runtime.config.set_enabled(False)
-        try:
-            runtime.proactive.stop()
-        except Exception:
-            pass
-        try:
-            runtime.scheduler.stop()
-        except Exception:
-            pass
+        self._call_quietly("暂停", runtime.proactive.stop)
+        self._call_quietly("暂停", runtime.scheduler.stop)
         logger.info(f"[Feature] Agent 已由插件接管并暂停 ({bot_id})")
         return snapshot
 
@@ -237,14 +230,8 @@ class AgentFeatureController(_RuntimeAccess, FeatureController):
         if runtime is None or not snapshot:
             return
         runtime.config.set_enabled(bool(snapshot.get("enabled", True)))
-        try:
-            runtime.proactive.resume()
-        except Exception:
-            pass
-        try:
-            runtime.scheduler.resume()
-        except Exception:
-            pass
+        self._call_quietly("恢复", runtime.proactive.resume)
+        self._call_quietly("恢复", runtime.scheduler.resume)
         logger.info(f"[Feature] Agent 已恢复 ({bot_id})")
 
 
