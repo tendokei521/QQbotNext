@@ -86,9 +86,12 @@ pnpm build            # 产物输出到 dashboard/dist，浏览器刷新即可�
 ```bash
 # 首次启动
 venv\Scripts\activate.bat          # 激活虚拟环境
-pip install -r <pyproject>        # 或 pip install -e .
+pip install -e ".[dev]"           # 安装依赖（依赖清单以 pyproject.toml 为准）
 python main.py
 ```
+
+> `requirements.txt` 只是指向 `pyproject.toml` 的安装指针（内容为 `.[dev]`），
+> 依赖版本一律以 `pyproject.toml` 为准，不要在 `requirements.txt` 里重复维护依赖。
 
 首次启动会：
 1. 读取 `.env`（缺省用默认值，参考 `.env.example`）；

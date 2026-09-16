@@ -1,16 +1,15 @@
-fastapi>=0.115
-uvicorn[standard]>=0.23
-websockets>=12
-aiohttp>=3.8
-brotlicffi>=1.1
-curl_cffi>=0.15
-aiosqlite>=0.19
-# 可选：知识库 ANN 检索，安装后自动启用 sqlite-vec（pip install -e .[vector] 或 pip install sqlite-vec）
-# sqlite-vec>=0.1.6
-pydantic>=2.4
-pydantic-settings>=2.0
-jinja2>=3.1
-python-multipart>=0.0.6
-python-dotenv>=1.0
-pytest>=7.4
-pytest-asyncio>=0.21
+# 依赖唯一事实源（single source of truth）是 pyproject.toml，本文件只是安装指针。
+#
+# 历史背景：本文件曾手工维护一份与 pyproject.toml 平行的依赖清单，结果两边漂移——
+# 有人把 starlette 弃用警告里的 "httpx2" 直接抄了进来，而该包在 PyPI 上并不存在，
+# 导致首次安装（scripts/requirements.bat / .sh）必然失败。为避免再次漂移，
+# 这里不再重复列举任何版本约束，一律从 pyproject.toml 解析。
+#
+# 说明：
+# - `.`       安装运行时依赖（pyproject.toml [project.dependencies]）与包本体；
+#             这里刻意用普通安装而非 `-e .`：本仓库 venv 内 setuptools 为 57.4.0，
+#             早于 PEP 660，editable 安装会直接报 "missing the 'build_editable' hook"。
+# - `[dev]`   额外安装开发/测试依赖（pytest、pytest-asyncio、httpx）；
+# - `[vector]` 知识库 ANN 检索（sqlite-vec），可选，按需执行：
+#              pip install -e ".[dev,vector]"
+.[dev]
