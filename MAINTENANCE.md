@@ -267,6 +267,39 @@ venv\Scripts\python.exe -m pytest -q
   venv\Scripts\python.exe -m pytest --collect-only -q | Select-Object -Last 2
   ```
 
+### 静态检查（ruff）
+
+```bash
+venv\Scripts\python.exe -m ruff check .                    # 检查
+venv\Scripts\python.exe -m ruff check --statistics .        # 按规则统计违规分布
+venv\Scripts\python.exe -m ruff check --fix .               # 自动修可修项
+```
+
+> 规则集见 `pyproject.toml` 的 `[tool.ruff.lint]`（`E/F/I/UP/B`）。
+> **当前 CI 以 `--exit-zero` 运行（只报告、不阻断）**——存量违规尚未清理完，
+> 先在每次 CI 日志/artifact（`ruff-report`）里观察数量，分批清理后再去掉 `--exit-zero` 收紧门禁。
+
+### 覆盖率
+
+```bash
+venv\Scripts\python.exe -m pytest -q --cov --cov-report=term-missing
+venv\Scripts\python.exe -m pytest -q --cov --cov-report=html   # 产物 htmlcov/index.html
+```
+
+> 统计范围见 `pyproject.toml` 的 `[tool.coverage.run]`（`app` + `module`）。
+> **当前不设失败阈值**：CI 只生成 `coverage.xml` 与 `htmlcov/` 作为 artifact 供下载，
+> 拿到稳定基线后再加 `--cov-fail-under` 作"不得下降"的棘轮。
+
+### CI（`.github/workflows/ci.yml`）
+
+push / PR 时自动执行三组校验，无需手动触发：
+
+| job | 内容 |
+|---|---|
+| `backend` | py3.10 + py3.12 矩阵跑全量测试；3.10 上额外跑 ruff 报告与覆盖率；产物上传为 artifact |
+| `deps` | 校验 `requirements.txt` 仍是指向 `pyproject.toml` 的纯指针、无不存在包、测试依赖未混入运行时；并构建发行包 |
+| `dashboard` | `pnpm install --frozen-lockfile` + `pnpm build`，确保前端源码可构建 |
+
 ## 15. 架构演进备忘（本版相对 v1 的变化）
 
 - 旧 `basic/`、`webserver/` 单体 → `app/` 分层（core/domain/infrastructure/modules/services/webui）

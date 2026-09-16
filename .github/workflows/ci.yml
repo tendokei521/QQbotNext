@@ -41,8 +41,56 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      # 静态检查：现阶段只报告、不阻断（--exit-zero）。
+      # 待存量问题清理完毕后，去掉 --exit-zero 即收紧为阻断门禁（见 STYLE.md §10）。
+      - name: Ruff lint (report only)
+        run: |
+          echo "::group::ruff check --statistics"
+          ruff check --statistics --exit-zero .
+          echo "::endgroup::"
+          # 生成可下载的完整报告（后续清理存量问题时按文件逐个处理）
+          ruff check --output-format=concise --exit-zero . > ruff-report.txt || true
+          echo "违规条数：$(wc -l < ruff-report.txt)"
+          echo "### Ruff 违规统计（不阻断）" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          ruff check --statistics --exit-zero . 2>&1 | head -50 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Run backend tests
         run: python -m pytest -q
+
+      # 覆盖率：只在 3.10 上跑一次（避免多版本重复上传），且不设阈值（先拿基线）。
+      - name: Run tests with coverage
+        if: matrix.python-version == '3.10'
+        run: |
+          python -m pytest -q \
+            --cov --cov-report=term-missing --cov-report=xml --cov-report=html
+
+      - name: Coverage summary
+        if: matrix.python-version == '3.10'
+        run: |
+          echo "### 覆盖率报告（不设阈值，仅记录基线）" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          python -m coverage report --skip-covered | tail -40 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage artifacts
+        if: matrix.python-version == '3.10'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            htmlcov/
+          if-no-files-found: warn
+
+      - name: Upload lint artifact
+        if: matrix.python-version == '3.10'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruff-report
+          path: ruff-report.txt
+          if-no-files-found: warn
 
       - name: Show collected test count
         run: python -m pytest --collect-only -q | tail -2

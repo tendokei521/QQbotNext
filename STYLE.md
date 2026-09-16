@@ -117,17 +117,43 @@ except Exception as e:
   随迭代增长，需要时用 `pytest --collect-only -q | tail -2` 取当前值）。
 - 测试用 `pytest-asyncio`（`asyncio_mode = "auto"`，无需 `@pytest.mark.asyncio`）。
 
-## 10. 工具链现状与建议
+## 10. 工具链现状
 
-- 已配置：`pyproject.toml` 中 `[tool.ruff] line-length=120, target-version="py310"`、`[tool.pytest.ini_options]`。
-- 建议（暂未启用）：安装 ruff 后启用规则集（`select = ["E", "F", "I", "UP", "B"]`），可自动拦截：未使用导入、旧式注解（`Optional`/`Dict`）、`print` 调试残留。
-- 提交前自查清单：
-  - [ ] 无未使用的 import
-  - [ ] 注解用 `X | None` / 内置泛型
-  - [ ] 异常用 `logger.exception` 记录
-  - [ ] 中文注释解释了"为什么"
-  - [ ] 新增依赖须**同步两处**：`pyproject.toml` 与根目录 `requirements.txt`
-  - [ ] `pytest -q` 全绿
+### 10.1 已启用
+
+- **ruff**（`pyproject.toml` 的 `[tool.ruff]`）：`line-length=120`、`target-version="py310"`，
+  规则集 `select = ["E", "F", "I", "UP", "B"]`（对应 STYLE.md 各项约定：未使用导入、
+  旧式注解 `Optional`/`Dict`、导入顺序、常见 bugbear 陷阱）。
+- **pytest-cov**：`[tool.coverage.*]` 已配置统计范围（`app` + `module`，排除 `tests/`、
+  `scripts/`、`deprecated/`）。
+- **CI**（`.github/workflows/ci.yml`）：push/PR 自动跑测试 + 依赖元数据校验 + 前端构建。
+
+> ⚠️ **当前 ruff 与覆盖率均为"报告不阻断"**：CI 里 ruff 用 `--exit-zero`，
+> 覆盖率未设 `--cov-fail-under`。原因是存量违规尚未清理，先拿基线再收紧。
+> **收紧方式**：删掉 CI 中的 `--exit-zero`、给 pytest 加 `--cov-fail-under=<略高于当前值>`。
+
+### 10.2 本地用法
+
+```bash
+venv\Scripts\activate.bat
+pip install -e ".[dev]"          # 一次性，装齐 ruff / pytest-cov
+
+ruff check .                     # 静态检查（清理存量时用 --statistics 看分布）
+ruff check --fix .               # 自动修可修项（I/UP/F401 等）
+pytest -q                        # 日常：快速跑测试（不统计覆盖率）
+pytest -q --cov --cov-report=term-missing   # 需要覆盖率时
+```
+
+### 10.3 提交前自查清单
+
+- [ ] `ruff check .` 无**新增**违规（存量违规按批次清理，不要一次改一片）
+- [ ] 无未使用的 import
+- [ ] 注解用 `X | None` / 内置泛型
+- [ ] 异常用 `logger.exception` 记录；**禁止 `except: pass`**（由 `tests/test_no_silent_except.py` 强制）
+- [ ] 中文注释解释了"为什么"
+- [ ] 新增依赖只改 `pyproject.toml` 一处：**不要**在 `requirements.txt` 里重复列举
+      （该文件已改为指向 `pyproject.toml` 的纯指针，CI 会校验）
+- [ ] `pytest -q` 全绿
 
 ## 11. 提交规范（Commit）
 
