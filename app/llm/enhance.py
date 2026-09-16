@@ -16,8 +16,9 @@ def _ctx_cfg(ctx, key: str, default: Any):
     if cfg is not None and hasattr(cfg, "get"):
         try:
             return cfg.get(key, default)
-        except Exception:
-            pass
+        except Exception as e:
+            # 配置读取失败时退回默认值，避免钩子因个别配置异常整体中断
+            logger.debug(f"[Enhance] 读取配置 {key} 失败，使用默认值 {default!r}: {e}")
     return default
 
 
@@ -203,8 +204,9 @@ async def _fetch_group_member_nickname(ctx, qq: str) -> str:
         if nickname:
             _NICK_CACHE[cache_key] = nickname
             return nickname
-    except Exception:
-        pass
+    except Exception as e:
+        # 取群名片失败不影响主流程（只是后续提示词少了昵称信息），留痕便于排查 API 异常
+        logger.debug(f"[Enhance] 获取群成员昵称失败（group={group_id}, qq={qq}）: {e}")
     return ""
 
 

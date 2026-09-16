@@ -94,5 +94,5 @@ class KnowledgeManager:
     def stop(self) -> None:
         try:
             self.store.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[Knowledge] 关闭知识库存储失败（已忽略）: {e}")

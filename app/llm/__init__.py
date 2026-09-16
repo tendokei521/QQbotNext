@@ -112,8 +112,9 @@ def _migrate_bot_dirs() -> None:
             try:
                 with open(src, "r", encoding="utf-8") as f:
                     bot_id = safe_bot_id((json.load(f) or {}).get("bot_id") or "unknown")
-            except Exception:
-                pass
+            except Exception as e:
+                # 读不出 bot_id 会把该历史归到 unknown 目录：迁移只跑一次，必须留痕便于人工纠正
+                logger.warning(f"[LLM] 读取历史文件 bot_id 失败，归入 unknown（{name}）: {e}")
             dst_dir = os.path.join(bot_data_dir(bot_id), "history")
             os.makedirs(dst_dir, exist_ok=True)
             dst = os.path.join(dst_dir, name)

@@ -181,8 +181,9 @@ class MemoryStore:
             self._conn.executescript(_SCHEMA)
             try:
                 self._conn.execute("PRAGMA journal_mode=WAL")
-            except Exception:
-                pass
+            except Exception as e:
+                # 某些文件系统（如网络盘）不支持 WAL：退回默认 journal 模式仍可正常工作
+                logger.debug(f"[Memory] 启用 WAL 失败，退回默认日志模式: {e}")
             self._conn.commit()
             self._ensure_columns()
 
@@ -209,8 +210,8 @@ class MemoryStore:
         with self._lock:
             try:
                 self._conn.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[Memory] 关闭 SQLite 连接失败（已忽略）: {e}")
 
     def _execute(self, sql: str, params: Iterable[Any] = ()) -> sqlite3.Cursor:
         with self._lock:

@@ -488,7 +488,9 @@ class MemoryManager:
             )
             self._distill_tasks.add(task)
             task.add_done_callback(self._distill_tasks.discard)
-        except Exception:
+        except Exception as e:
+            # 蒸馏调度失败会让"记忆永不再更新"却毫无迹象，必须留痕（warning 而非 debug）
+            logger.warning(f"[Memory] 触发记忆蒸馏失败（session={session_id}）: {e}")
             return
 
     async def _run_distill(
@@ -555,5 +557,5 @@ class MemoryManager:
         self._distill_tasks.clear()
         try:
             self.store.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[Memory] 关闭记忆存储失败（已忽略）: {e}")
