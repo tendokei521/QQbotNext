@@ -259,8 +259,13 @@ venv\Scripts\python.exe -c "import sqlite3; c=sqlite3.connect('data/app.db'); pr
 ```bash
 venv\Scripts\python.exe -m pytest -q
 ```
-- 覆盖：领域编解码 / 权限 / 配置中心(含迁移) / 模块注册表 / 事件分发 / Provider 与 list/dynamic API / 定时任务。
-- 新增功能后跑一遍全量，确保 165+ 用例全绿。
+- 覆盖：领域编解码 / 权限 / 配置中心(含迁移) / 模块注册表 / 事件分发 / Provider 与 list/dynamic API /
+  定时任务 / LLM 流水线与记忆 / 节点链 / 模块安装。
+- 新增功能后跑一遍全量，确保**全绿无失败**。
+  基线用例数会随迭代增长，此处不再写死数字（写死必然过期），需要时用下面的命令取当前值：
+  ```bash
+  venv\Scripts\python.exe -m pytest --collect-only -q | Select-Object -Last 2
+  ```
 
 ## 15. 架构演进备忘（本版相对 v1 的变化）
 

@@ -88,4 +88,5 @@ QQBot Next 2.0 首个正式 Release：基于 OneBot 协议的多账号 QQ 机器
 
 ### 测试
 
-- 全量测试基线：`168 passed`
+- 全量测试基线：`168 passed`（该数字为**当次发布时点**的快照，后续版本会增长，不代表当前基线；
+  当前基线以 `pytest --collect-only -q` 实际输出为准）
