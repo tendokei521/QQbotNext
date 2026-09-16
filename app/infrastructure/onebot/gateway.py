@@ -398,8 +398,12 @@ class OneBotGateway:
                         if conn.websocket:
                             try:
                                 await conn.websocket.close()
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                # 关闭失败仅记 debug：连接随后会被置空并由监督循环重建，
+                                # 但留痕便于排查"连接未真正释放"类问题
+                                logger.add_info(f"#{conn.index}").debug(
+                                    f"[Gateway] 关闭异常连接失败（已忽略）: {e}"
+                                )
                             conn.websocket = None
                         self._reset_conn_state(conn)
                         break
@@ -421,8 +425,10 @@ class OneBotGateway:
             if conn.websocket:
                 try:
                     await conn.websocket.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.add_info(f"#{conn.index}").debug(
+                        f"[Gateway] 连接失败后关闭 ws 失败（已忽略）: {e}"
+                    )
                 conn.websocket = None
             # 清空登录态 + 让在途 API 请求立即失败（与 disconnect_bot 一致）
             self._reset_conn_state(conn)

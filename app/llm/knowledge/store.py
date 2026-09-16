@@ -17,6 +17,7 @@ from typing import Any
 
 from app.llm import llm_data_dir, safe_bot_id
 from app.llm.knowledge.vector import SQLiteVecVectorStore
+from app.core.logger import logger
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS knowledge_chunks (
@@ -68,12 +69,12 @@ class KnowledgeStore:
         with self._lock:
             try:
                 self._conn.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[Knowledge] 关闭 SQLite 连接失败（已忽略）: {e}")
         try:
             self.vector_backend.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[Knowledge] 关闭向量后端失败（已忽略）: {e}")
 
     def add(
         self,
@@ -157,7 +158,9 @@ class KnowledgeStore:
         for row in rows:
             try:
                 vec = json.loads(row["embedding"].decode("utf-8"))
-            except Exception:
+            except Exception as e:
+                # 单条 embedding 损坏不应导致整次检索失败，跳过并留痕
+                logger.debug(f"[Knowledge] 跳过损坏的 embedding（id={row['id']}）: {e}")
                 continue
             score = cosine(embedding, vec)
             scored.append({**dict(row), "_score": score})

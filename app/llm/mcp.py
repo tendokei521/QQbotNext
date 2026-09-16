@@ -146,11 +146,13 @@ class MCPClient:
         if self.proc is not None and self.proc.returncode is None:
             try:
                 self.proc.terminate()
-            except Exception:
+            except Exception as e:
+                # terminate 失败很常见（进程可能已退出）；再尝试强杀，仍失败则留痕
+                logger.debug(f"[MCP] terminate 失败，改为 kill: {e}")
                 try:
                     self.proc.kill()
-                except Exception:
-                    pass
+                except Exception as e2:
+                    logger.debug(f"[MCP] kill 子进程失败（可能已退出，已忽略）: {e2}")
         if self._reader_task is not None:
             self._reader_task.cancel()
 
@@ -235,8 +237,8 @@ class MCPManager:
                 )
                 try:
                     client.close()
-                except Exception:
-                    pass
+                except Exception as e2:
+                    logger.debug(f"[MCP] 失败后清理客户端 {name} 出错（已忽略）: {e2}")
         self._ready = True
         return bool(self._clients)
 
@@ -247,8 +249,8 @@ class MCPManager:
         for client in self._clients.values():
             try:
                 client.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[MCP] 关闭客户端失败（已忽略）: {e}")
         self._clients.clear()
         self._specs.clear()
         self._ready = False
