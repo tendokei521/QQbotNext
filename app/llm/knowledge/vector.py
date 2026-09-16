@@ -15,6 +15,16 @@ import json
 import sqlite3
 from typing import Any
 
+from app.core.logger import logger as _logger
+
+
+def _log_debug(msg: str) -> None:
+    """向量后端是可选增强，异常一律降级而非上抛；用 debug 留痕以便排查降级原因。"""
+    try:
+        _logger.debug(f"[Vector] {msg}")
+    except Exception:  # noqa: BLE001 - 日志本身失败不得影响检索主流程
+        pass
+
 
 class SQLiteVecVectorStore:
     """sqlite-vec 可选后端（按 bot_id 共享同一个 SQLite 文件）。
@@ -45,7 +55,9 @@ class SQLiteVecVectorStore:
             conn.commit()
             self._conn = conn
             self._enabled = True
-        except Exception:
+        except Exception as e:
+            # sqlite-vec 未安装或加载失败：属预期内的可选能力缺失，降级为默认余弦检索
+            _log_debug(f"sqlite-vec 不可用，回退默认余弦检索: {e}")
             self._conn = None
             self._enabled = False
 
@@ -67,8 +79,8 @@ class SQLiteVecVectorStore:
                 m = re.search(r"float\[(\d+)\]", row[0])
                 if m:
                     self._dim = int(m.group(1))
-        except Exception:
-            pass
+        except Exception as e:
+            _log_debug(f"读取向量维度失败（按未知维度处理）: {e}")
         return self._dim
 
     def _ensure_table(self, dim: int) -> bool:
@@ -85,7 +97,9 @@ class SQLiteVecVectorStore:
             self._conn.commit()
             self._dim = dim
             return True
-        except Exception:
+        except Exception as e:
+            # 建表失败（维度不一致/扩展缺失）→ 关闭 ANN 能力，调用方回退余弦检索
+            _log_debug(f"创建向量表失败，已关闭 ANN 检索: {e}")
             self._enabled = False
             return False
 
@@ -139,7 +153,9 @@ class SQLiteVecVectorStore:
                 "ORDER BY vc.distance LIMIT ?",
                 (str(bot_id), vec_json, int(limit)),
             ).fetchall()
-        except Exception:
+        except Exception as e:
+            # 检索失败返回空列表；若不留痕，调用方会把"出错"误读为"无匹配"
+            _log_debug(f"ANN 检索失败，返回空结果: {e}")
             return []
         results = []
         for chunk_id, distance in rows:
@@ -159,13 +175,13 @@ class SQLiteVecVectorStore:
                 if row:
                     self._conn.execute("DELETE FROM vec_chunks WHERE rowid=?", (row[0],))
                     self._conn.execute("DELETE FROM vector_rows WHERE rowid=?", (row[0],))
-        except Exception:
-            pass
+        except Exception as e:
+            _log_debug(f"删除向量行失败（可能已不存在）: {e}")
 
     def close(self) -> None:
         if self._conn is not None:
             try:
                 self._conn.close()
-            except Exception:
-                pass
+            except Exception as e:
+                _log_debug(f"关闭向量库连接失败: {e}")
             self._conn = None

@@ -160,39 +160,30 @@ class AgentRuntime:
                 source="archive",
             )
             asyncio.run_coroutine_threadsafe(coro, self._loop)
-        except Exception:
-            pass
+        except Exception as e:
+            # 归档整理是后台增强，失败不应影响会话主流程，但需留痕以便排查
+            logger.add_info(f"#{self.bot_id}").debug(f"[Agent] 归档整理调度失败（已忽略）: {e}")
 
     def stop(self) -> None:
-        """停止定时任务与主动消息计时器（任务数据保留，重启恢复）。"""
-        try:
-            self.scheduler.stop()
-        except Exception:
-            pass
-        try:
-            self.proactive.stop()
-        except Exception:
-            pass
-        try:
-            self.session_mgr.close()
-        except Exception:
-            pass
-        try:
-            self.llm_pipeline.shutdown()
-        except Exception:
-            pass
-        try:
-            self.memory.stop()
-        except Exception:
-            pass
-        try:
-            self.knowledge.stop()
-        except Exception:
-            pass
-        try:
-            self.mcp_manager.close()
-        except Exception:
-            pass
+        """停止定时任务与主动消息计时器（任务数据保留，重启恢复）。
+
+        各组件按 best-effort 逐个关闭：单个组件关闭失败不应阻断其余组件的关闭，
+        因此逐个 try/except 并记录 debug 日志（而非静默 pass，便于定位关闭卡滞原因）。
+        """
+        components = (
+            ("scheduler", self.scheduler.stop),
+            ("proactive", self.proactive.stop),
+            ("session_mgr", self.session_mgr.close),
+            ("llm_pipeline", self.llm_pipeline.shutdown),
+            ("memory", self.memory.stop),
+            ("knowledge", self.knowledge.stop),
+            ("mcp_manager", self.mcp_manager.close),
+        )
+        for name, stop in components:
+            try:
+                stop()
+            except Exception as e:
+                logger.add_info(f"#{self.bot_id}").debug(f"[Agent] 关闭 {name} 失败（已忽略）: {e}")
         logger.add_info(f"#{self.bot_id}").info("[Agent] 运行时已停止")
 
 

@@ -193,7 +193,9 @@ async def _memory_block(runtime, session_id: str, user_id: Any, user_text: str, 
         return ""
     try:
         return await memory.recall_block_async(session_id, user_id, user_text, bot=bot)
-    except Exception:
+    except Exception as e:
+        # 记忆召回属增强能力：失败不阻断回复，但需留痕，否则表现为"记忆突然失效"
+        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(f"[Memory] 召回失败（已忽略）: {e}")
         return ""
 
 
@@ -204,8 +206,8 @@ def _memory_autosave(runtime, session_id: str, user_id: Any, text: str) -> None:
         return
     try:
         memory.autosave(session_id, user_id, text)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(f"[Memory] 兜底写入失败（已忽略）: {e}")
 
 
 def _memory_consolidate(runtime, session_id: str, is_private: bool, session_mgr) -> None:
@@ -216,8 +218,9 @@ def _memory_consolidate(runtime, session_id: str, is_private: bool, session_mgr)
     try:
         history = session_mgr.get_history(session_id, limit=20)
         memory.maybe_consolidate(session_id, not is_private, history, source="chat")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(f"[Memory] 隐式蒸馏触发失败（已忽略）: {e}")
+
 
 
 def _message_meta_instruction(runtime, ctx) -> str | None:
@@ -1156,8 +1159,10 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
             if memory is not None:
                 try:
                     memory.on_session_reset(session_id, user_id)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.add_info(f"#{getattr(module, 'bot_id', '?')}").debug(
+                        f"[Memory] 会话重置钩子失败（已忽略）: {e}"
+                    )
             await send(f"已开启新对话「{created['title']}」(task: {created['task_id']})")
         else:
             await send("创建失败")
@@ -1258,8 +1263,10 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
         if memory is not None:
             try:
                 memory.on_session_reset(session_id, user_id)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.add_info(f"#{getattr(module, 'bot_id', '?')}").debug(
+                    f"[Memory] 会话重置钩子失败（已忽略）: {e}"
+                )
         if session:
             session_mgr.add_message(session_id, "assistant", "#chat exit")
             history_mgr.save_session(session)
@@ -1275,8 +1282,10 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
         if memory is not None:
             try:
                 memory.on_session_reset(session_id, user_id)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.add_info(f"#{getattr(module, 'bot_id', '?')}").debug(
+                    f"[Memory] 会话重置钩子失败（已忽略）: {e}"
+                )
         if session:
             session_mgr.add_message(session_id, "assistant", "#chat stop")
             history_mgr.save_session(session)
