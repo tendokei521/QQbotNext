@@ -355,8 +355,13 @@ class LlmPipeline:
         if pm is not None:
             try:
                 await pm.on_bot_sent(ctx.session_id, ctx.event.message_type != "private")
-            except Exception:
-                pass
+            except Exception as e:
+                # 主动消息状态更新失败不影响本条消息发送，但会导致沉默计时不准，需留痕
+                from app.core.logger import logger
+
+                logger.add_info(f"#{self.runtime.bot_id}").debug(
+                    f"[LLM Pipeline] 更新主动消息发送状态失败（已忽略）: {e}"
+                )
 
     async def _observe(self, ctx: LlmContext) -> None:
         pm = getattr(self.runtime, "proactive", None)

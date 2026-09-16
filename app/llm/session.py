@@ -190,8 +190,9 @@ class SessionManager:
             return
         try:
             cb(session)
-        except Exception:
-            pass
+        except Exception as e:
+            # 归档回调由外部注入：其异常不应影响会话归档主流程，但需留痕
+            logger.debug(f"[Session] 归档回调执行失败（已忽略）: {e}")
 
     def stop_cleanup(self):
         self._stop_event.set()
@@ -212,8 +213,8 @@ class SessionManager:
             close_fn = getattr(self.history, "close", None)
             if callable(close_fn):
                 close_fn()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[Session] 关闭历史存储失败（已忽略）: {e}")
 
     def _start_auto_cleanup(self):
         def cleanup_task():

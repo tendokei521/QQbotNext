@@ -225,6 +225,9 @@ class AgentManager:
         for runtime in self._runtimes.values():
             try:
                 runtime.stop()
-            except Exception:
-                pass
+            except Exception as e:
+                # 单个运行时停止失败不应阻断其余运行时的关闭（best-effort）
+                logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(
+                    f"[Agent] 停止运行时失败（已忽略）: {e}"
+                )
         self._runtimes.clear()

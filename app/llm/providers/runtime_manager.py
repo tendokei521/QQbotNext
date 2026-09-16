@@ -97,8 +97,8 @@ class ProviderRuntimeManager:
             if callable(terminate):
                 try:
                     terminate()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[ProviderRuntime] 终止实例失败（已忽略）: {e}")
         self._instances.clear()
 
     # ── 模型能力 ───────────────────────────────────────

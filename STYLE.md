@@ -86,6 +86,12 @@ async def add_bot(
 ## 7. 错误处理与日志
 
 - **异常永不裸吞**：`except` 必须记录日志或显式处理；禁止 `except: pass`。
+  本规则现已由测试 `tests/test_no_silent_except.py` **自动强制**（AST 扫描全库，
+  禁止"异常体只有 pass/continue/break/return None"的处理块）。确需静默的位置
+  （如"写日志本身失败"的兜底）必须加入该测试的白名单并注明理由。
+- **按严重度选级别**：降级/可忽略用 `debug`；可能影响用户可感知行为用 `warning`
+  （例如记忆蒸馏调度失败——静默会让"记忆永不再更新"毫无迹象）；
+  未预期故障用 `exception` 保留堆栈。
 - **统一用 `logger.exception(...)` 记录带堆栈的异常**（在 except 块内），替代 `traceback.print_exc()` + `logger.error()` 组合：
 
 ```python

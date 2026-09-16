@@ -110,8 +110,8 @@ async def _handler(runtime, tool: dict, ctx: ToolContext | None, args: dict) -> 
     debug = False
     try:
         debug = bool(getattr(runtime, "config", None).get("napcat_tools_debug", False))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.add_info("NapCatTool").debug(f"[NapCatTool] 读取 debug 开关失败，按关闭处理: {e}")
     if debug:
         logger.add_info("NapCatTool").info(
             f"[NapCatDebug] 请求 {name} action={action} args={json.dumps(args, ensure_ascii=False)}"
@@ -131,8 +131,8 @@ async def _handler(runtime, tool: dict, ctx: ToolContext | None, args: dict) -> 
     max_len = 2000
     try:
         max_len = int(getattr(runtime, "config", None).get("napcat_tools_max_result", DEFAULT_MAX_RESULT) or DEFAULT_MAX_RESULT)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.add_info("NapCatTool").debug(f"[NapCatTool] 读取结果长度上限失败，使用默认 {max_len}: {e}")
     if len(result) > max_len:
         result = result[:max_len] + "\n…(结果过长已截断)"
     return result

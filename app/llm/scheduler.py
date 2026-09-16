@@ -247,8 +247,9 @@ class TaskScheduler:
                 try:
                     if self._task_signature(e) == sig:
                         return e
-                except Exception:
-                    pass
+                except Exception as ex:
+                    # 签名计算失败只是"这条不匹配"，继续比较其余任务即可
+                    logger.add_info(f"#{self.bot_id}").debug(f"[定时任务] 计算任务签名失败，跳过该条: {ex}")
             elif norm and norm == re.sub(r"\s+", "", e.trigger_expr or "").lower():
                 return e
         return None
@@ -581,7 +582,9 @@ class TaskScheduler:
                         entry.is_group = False
                     if entry.active:
                         self._tasks[entry.id] = entry
-                except Exception:
+                except Exception as ex:
+                    # 单条任务数据损坏不应导致其余任务全部丢失，跳过并留痕
+                    logger.add_info(f"#{self.bot_id}").debug(f"[定时任务] 跳过无法解析的任务条目: {ex}")
                     continue
         except Exception as e:
             logger.add_info(f"#{self.bot_id}").warning(f"[定时任务] 加载状态失败: {e}")

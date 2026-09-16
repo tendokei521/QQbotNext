@@ -10,6 +10,7 @@ import json
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
+from app.core.logger import logger
 from app.llm.config import LEGACY_LLM_CONNECTION_KEYS
 from app.llm.config_schema import STREAM_PRESETS
 from app.llm.napcat.manifest import NAP_CAT_TOOLS
@@ -290,8 +291,9 @@ async def agent_module_tools(request: Request, bot_id: int | None = Depends(pars
                 module_tools = module_config.get("tools_enabled", {}) if module_config is not None else {}
                 if isinstance(module_tools, dict) and spec.name in module_tools and not module_tools.get(spec.name):
                     ready = False
-            except Exception:
-                pass
+            except Exception as e:
+                # 读取单个模块的工具开关失败：按"未就绪"保守处理，并留痕
+                logger.debug(f"[AgentAPI] 读取工具开关失败（{spec.name}）: {e}")
         user_enabled = module_map.get(spec.name, True) if isinstance(module_map, dict) else True
         tools.append({
             "name": spec.name,

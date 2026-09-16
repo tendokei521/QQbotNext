@@ -23,6 +23,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from app.core.logger import logger
 from app.llm.group_context import (
     fetch_group_name,
     fetch_group_online_history,
@@ -55,8 +56,9 @@ def _cfg(ctx, key: str, default: Any):
     if cfg is not None and hasattr(cfg, "get"):
         try:
             return cfg.get(key, default)
-        except Exception:
-            pass
+        except Exception as e:
+            # 配置读取失败退回默认值：工具仍可工作，但需留痕便于排查配置异常
+            logger.debug(f"[SessionTools] 读取配置 {key} 失败，使用默认值 {default!r}: {e}")
     return default
 
 
