@@ -1,0 +1,106 @@
+name: CI
+
+# 说明：此前仓库只有 release.yml（tag 触发），push/PR 阶段从不跑测试，
+# 坏提交可以一直躺在 main 上，直到发布时才暴露（例如 requirements.txt 里
+# 混入 PyPI 上不存在的 "httpx2"，首次安装必然失败却无人发现）。
+# 本工作流把同一套校验前置到 push / PR。
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # 同一分支的新推送取消上一次未完成的运行，避免排队浪费
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.12']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run backend tests
+        run: python -m pytest -q
+
+      - name: Show collected test count
+        run: python -m pytest --collect-only -q | tail -2
+
+  deps:
+    name: Dependency metadata sanity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      # 防止 requirements.txt 再次出现"平行维护"的漂移：
+      # 1) requirements.txt 必须只是指向 pyproject.toml 的指针，不得重复列举依赖；
+      # 2) 不得出现 PyPI 上不存在的包（历史故障：httpx2）；
+      # 3) 测试期依赖不得混入运行时 dependencies。
+      # 具体逻辑在 ci_check_pyproject.py（可本地运行，便于测试）。
+      - name: Validate dependency metadata
+        run: |
+          # tomllib 仅 Python 3.11+ 内置；本 job 固定 3.10，故用 tomli 兜底
+          python -m pip install --quiet tomli
+          python ci_check_pyproject.py
+
+      - name: Build distributions
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+
+  # 校验前端源码仍可正常构建（dist 已纳入版本库，供无 Node 环境直接使用）。
+  # 注意：这里只验证"能否构建"，不强制 dist 与源码逐字节一致——
+  # 构建产物含内容哈希文件名，直接 diff 会产生噪声。
+  dashboard:
+    name: Dashboard build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: dashboard/pnpm-lock.yaml
+
+      - name: Install dashboard dependencies
+        working-directory: dashboard
+        run: pnpm install --frozen-lockfile
+
+      - name: Build dashboard
+        working-directory: dashboard
+        run: pnpm build
