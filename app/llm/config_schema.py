@@ -328,11 +328,23 @@ SCHEMA = {
         "rows": 5, "group": "group_proactive",
     },
     "proactive_prompt_enable": {
-        "type": "boolean", "label": "工具主动性提示", "description": "注入一块「主动性」system 提示：教模型何时该查聊天记录、何时该戳一戳（只讲时机，不讲参数；没有对应工具时自动不注入）",
+        "type": "boolean", "label": "工具主动性提示", "description": "注入一块「主动性」system 提示：教模型何时该查聊天记录/取环境信息/戳一戳（只讲时机，不讲参数；没有对应工具时自动不注入）",
         "default": True, "group": "group_proactive",
     },
     "proactive_history_intent_nudge": {
         "type": "boolean", "label": "历史意图补强", "description": "用户追问历史（刚才/之前/说过什么/哪条）时，在同一块里补一句「必须调用 get_chat_history 核实」",
+        "default": True, "group": "group_proactive",
+    },
+    "proactive_env_prompt_enable": {
+        "type": "boolean", "label": "环境感知提示", "description": "在同一块里教模型何时该自己取聊天环境信息（群名群号/群里谁在说/某人是谁/被@/这条回的哪条），而非凭昵称或 ID 猜",
+        "default": True, "group": "group_proactive",
+    },
+    "proactive_unresolved_prompt_enable": {
+        "type": "boolean", "label": "未展开标记说明", "description": "解释【未展开:...】标记的含义并说明必须先 expand_context 展开；expand_context 不可用时自动不注入",
+        "default": True, "group": "group_proactive",
+    },
+    "proactive_env_intent_nudge": {
+        "type": "boolean", "label": "环境意图补强", "description": "用户问群/成员/某条消息相关信息时，在同一块里补一句「必须先取得实际环境数据再回答」",
         "default": True, "group": "group_proactive",
     },
     "outbound_directive_enable": {

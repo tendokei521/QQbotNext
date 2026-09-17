@@ -31,6 +31,19 @@ PROACTIVE_POKE_LINE = (
     "- 想引起注意或表达态度时：可以调用 send_poke 戳一戳（打招呼、催、调侃、卖萌、叫人）。"
     "群聊中带上当前群号，私聊只需对方 QQ。同一会话不要连着戳，也不要每条消息都戳。"
 )
+# 环境行：只讲"什么时候该自己取环境信息"，不讲参数（参数留给工具 description）。
+# {tools} 由 env_line() 按本轮实际可用工具填入——不能教它调一个本轮不存在的工具。
+PROACTIVE_ENV_LINE = (
+    "- 需要聊天环境信息时先自己取，不要猜：涉及“这个群是什么群/群名群号”“群里刚才谁在说”"
+    "“某人是谁”“我是不是被 @ 了”“这条是回的哪条”时，先调用 {tools} 拿到实际数据再回答；"
+    "同一轮不要重复查同一条信息。"
+)
+# 未展开标记的语义：模型看到【未展开:用户123】必须知道"这不是内容，是还没拿到的内容"。
+PROACTIVE_UNRESOLVED_LINE = (
+    "- 记录里出现【未展开:用户123】/【未展开:引用456】这类标记，表示该处内容你还没拿到："
+    "先调用 expand_context 展开（可一次传多个 id）再回答；确实取不到就直接说这项拿不到，"
+    "不要按标记里的数字猜内容，也不要凭印象编。"
+)
 PROACTIVE_QUOTE_LINE = (
     "- 回复的是更早的、或多人交错容易混淆的消息时：在回复最前面写 [reply] 表示引用对方刚发的那条消息"
     "（引用是社交可见的动作，只在必要时用，一条回复最多引用一次）。"
@@ -39,10 +52,21 @@ PROACTIVE_QUOTE_LINE = (
 PROACTIVE_FOOTER_LINE = (
     "- 这些动作都是可选的：拿不准就不用。机械地每次都戳、每条都引用，比不做更糟。"
 )
+# 有按需展开能力时追加的例外条款：环境缺口不属于"可做可不做"；
+# 同时明确"没有手段就照常回答"——避免模型为无法展开的内容回一句"我无法完整回答"污染闲聊。
+PROACTIVE_FOOTER_UNRESOLVED_LINE = (
+    "- 例外：若回答依赖【未展开:…】里的内容，那就不是“可做可不做”，必须先展开；"
+    "若本轮确实没有任何可用手段，就照常回答，不要专门回一句“我无法完整回答”。"
+)
 # 命中历史意图时的紧贴补强（仍属于同一块，不额外增加 system 消息）
 PROACTIVE_HISTORY_NUDGE = (
     "- 就本轮而言：用户在追问历史，必须先调用 get_chat_history 核实内容再回答，"
     "不要直接说“我不记得”，也不要凭印象编。"
+)
+# 命中环境意图时的紧贴补强（同一块内）
+PROACTIVE_ENV_NUDGE = (
+    "- 就本轮而言：用户在问群 / 成员 / 某条消息相关的信息，你必须先取得实际环境数据"
+    "（expand_context / get_current_session）再回答，不要凭昵称、ID 或印象作答。"
 )
 
 # 历史意图识别：保守匹配，避免把“帮我记录一下”之类误判成查记录
@@ -54,6 +78,14 @@ _HISTORY_INTENT_RE = re.compile(
     r"哪一?(条|句)|指的哪|"
     r"(我|我们|你)(说过|问过|聊过)|"
     r"还记得|你记得吗|翻.{0,4}(记录|聊天))"
+)
+
+# 环境意图识别：同样保守——只有明确指向"群 / 成员 / 某条消息"才算
+_ENV_INTENT_RE = re.compile(
+    r"(这个群|本群|群里|群名|群号|管理员|群主|群里的人|"
+    r"谁在|都在聊|谁说的|哪条消息|这条消息|上面那条|"
+    r"@我|被@|at我|提到我|"
+    r"这个人|那个人|他是谁|她是谁)"
 )
 
 _POKE_TOOL_NAMES = ("send_poke", "group_poke", "friend_poke")
@@ -74,6 +106,18 @@ def history_intent(text: str) -> bool:
     return bool(_HISTORY_INTENT_RE.search(str(text or "")))
 
 
+def env_intent(text: str) -> bool:
+    """用户是否在问聊天环境（群 / 成员 / 某条消息）——补强一句“必须先取实际数据”。"""
+    return bool(_ENV_INTENT_RE.search(str(text or "")))
+
+
+def env_line(has_expand: bool) -> str:
+    """环境行文本：按本轮实际可用工具填入工具名（不教它调不存在的工具）。"""
+    if has_expand:
+        return PROACTIVE_ENV_LINE.format(tools="expand_context / get_current_session")
+    return PROACTIVE_ENV_LINE.format(tools="get_current_session")
+
+
 def build_proactive_instruction(
     config,
     user_text: str = "",
@@ -84,8 +128,9 @@ def build_proactive_instruction(
 
     Args:
         config: 运行时配置（读取 proactive_prompt_enable / proactive_history_intent_nudge /
-            outbound_directive_enable）
-        user_text: 用户原始文本，用于历史意图补强
+            proactive_env_prompt_enable / proactive_unresolved_prompt_enable /
+            proactive_env_intent_nudge / outbound_directive_enable）
+        user_text: 用户原始文本，用于历史/环境意图补强
         available_tools: 本轮实际可用的工具名集合；给定时按能力裁剪，
             避免教模型调用本轮不存在的工具
     """
@@ -96,7 +141,12 @@ def build_proactive_instruction(
     has_history = tools is None or "get_chat_history" in tools
     has_poke = tools is None or any(name in tools for name in _POKE_TOOL_NAMES)
     has_quote = _cfg_flag(config, "outbound_directive_enable", True)
-    if not has_history and not has_poke and not has_quote:
+    has_env = tools is None or "get_current_session" in tools
+    has_expand = tools is None or "expand_context" in tools
+
+    show_env = has_env and _cfg_flag(config, "proactive_env_prompt_enable", True)
+    show_unresolved = has_expand and _cfg_flag(config, "proactive_unresolved_prompt_enable", True)
+    if not (has_history or has_poke or has_quote or show_env or show_unresolved):
         return None
 
     lines = ["### 主动性", "你可以像人一样主动使用能力，而不是只被动回答。"]
@@ -104,11 +154,19 @@ def build_proactive_instruction(
         lines.append(PROACTIVE_HISTORY_LINE)
         if _cfg_flag(config, "proactive_history_intent_nudge", True) and history_intent(user_text):
             lines.append(PROACTIVE_HISTORY_NUDGE)
+    if show_env:
+        lines.append(env_line(has_expand))
+    if show_unresolved:
+        lines.append(PROACTIVE_UNRESOLVED_LINE)
+    if show_env and _cfg_flag(config, "proactive_env_intent_nudge", True) and env_intent(user_text):
+        lines.append(PROACTIVE_ENV_NUDGE)
     if has_poke:
         lines.append(PROACTIVE_POKE_LINE)
     if has_quote:
         lines.append(PROACTIVE_QUOTE_LINE)
     lines.append(PROACTIVE_FOOTER_LINE)
+    if show_unresolved:
+        lines.append(PROACTIVE_FOOTER_UNRESOLVED_LINE)
     return "\n".join(lines)
 
 

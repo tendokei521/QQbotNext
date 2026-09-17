@@ -7,20 +7,30 @@
 from types import SimpleNamespace
 
 from app.llm.prompt import (
+    PROACTIVE_ENV_LINE,
+    PROACTIVE_ENV_NUDGE,
     PROACTIVE_FOOTER_LINE,
+    PROACTIVE_FOOTER_UNRESOLVED_LINE,
     PROACTIVE_HISTORY_LINE,
     PROACTIVE_HISTORY_NUDGE,
     PROACTIVE_POKE_LINE,
     PROACTIVE_QUOTE_LINE,
+    PROACTIVE_UNRESOLVED_LINE,
     build_messages,
     build_proactive_instruction,
+    env_intent,
+    env_line,
     history_intent,
 )
 
 ALL_TOOLS = {"get_chat_history", "send_poke", "get_current_session", "schedule_task"}
 HISTORY_ONLY = {"get_chat_history", "get_current_session"}
 POKE_ONLY = {"send_poke"}
-NO_TOOLS = {"get_current_session"}
+ENV_ONLY = {"get_current_session"}
+ENV_WITH_EXPAND = {"get_current_session", "expand_context"}
+HISTORY_NO_ENV = {"get_chat_history"}   # 有历史能力但没有任何环境能力
+# 与环境/历史/戳一戳都无关的能力：不应触发任何一行
+UNRELATED_TOOLS = {"schedule_task"}
 
 
 def _cfg(**over):
@@ -71,18 +81,71 @@ def test_history_line_only_when_history_tool_available():
 
 
 def test_no_block_when_no_relevant_capability():
-    # 没有历史工具、没有戳一戳、且输出通道关闭 → 整块不注入
+    # 与环境/历史/戳一戳都无关的能力，且输出通道关闭 → 整块不注入
     assert build_proactive_instruction(
-        _cfg(outbound_directive_enable=False), "你好", available_tools=NO_TOOLS
+        _cfg(outbound_directive_enable=False), "你好", available_tools=UNRELATED_TOOLS
     ) is None
 
 
 def test_quote_line_only_when_outbound_channel_enabled():
-    on = build_proactive_instruction(_cfg(), "", available_tools=NO_TOOLS)
-    off = build_proactive_instruction(_cfg(outbound_directive_enable=False), "", available_tools=NO_TOOLS)
+    on = build_proactive_instruction(_cfg(), "", available_tools=UNRELATED_TOOLS)
+    off = build_proactive_instruction(_cfg(outbound_directive_enable=False), "", available_tools=UNRELATED_TOOLS)
 
     assert PROACTIVE_QUOTE_LINE in on
-    assert off is None  # 无历史/无戳 + 通道关闭 → 无块
+    assert off is None  # 无环境/历史/戳 + 通道关闭 → 无块
+
+
+# ---------- 环境感知 ----------
+
+
+def test_env_line_added_when_session_tool_available():
+    """get_current_session 是"聊天环境信息"的工具，必须在场时被讲出来。"""
+    block = build_proactive_instruction(_cfg(outbound_directive_enable=False), "", available_tools=ENV_ONLY)
+
+    assert block is not None
+    assert env_line(False) in block
+    assert "get_current_session" in block
+    assert "expand_context" not in block  # 本轮没有该工具就不许提
+
+
+def test_env_line_names_expand_tool_when_available():
+    block = build_proactive_instruction(_cfg(), "", available_tools=ENV_WITH_EXPAND)
+
+    assert env_line(True) in block
+    assert "expand_context" in block
+    assert PROACTIVE_UNRESOLVED_LINE in block
+
+
+def test_env_line_absent_without_env_capability():
+    block = build_proactive_instruction(_cfg(), "", available_tools=HISTORY_NO_ENV)
+
+    assert "先自己取" not in block
+    assert PROACTIVE_UNRESOLVED_LINE not in block
+
+
+def test_unresolved_line_requires_expand_tool():
+    with_expand = build_proactive_instruction(_cfg(), "", available_tools=ENV_WITH_EXPAND)
+    without_expand = build_proactive_instruction(_cfg(), "", available_tools=ENV_ONLY)
+
+    assert PROACTIVE_UNRESOLVED_LINE in with_expand
+    assert PROACTIVE_UNRESOLVED_LINE not in without_expand
+    # 无未展开能力时，footer 的例外条款也不该出现（避免承诺不存在的手段）
+    assert PROACTIVE_FOOTER_UNRESOLVED_LINE in with_expand
+    assert PROACTIVE_FOOTER_UNRESOLVED_LINE not in without_expand
+
+
+def test_env_can_be_disabled_independently():
+    off_env = build_proactive_instruction(
+        _cfg(proactive_env_prompt_enable=False), "", available_tools=ENV_WITH_EXPAND
+    )
+    off_marker = build_proactive_instruction(
+        _cfg(proactive_unresolved_prompt_enable=False), "", available_tools=ENV_WITH_EXPAND
+    )
+
+    assert "先自己取" not in off_env
+    assert PROACTIVE_UNRESOLVED_LINE in off_env  # 标记行独立于环境行
+    assert PROACTIVE_UNRESOLVED_LINE not in off_marker
+    assert "先自己取" in off_marker
 
 
 def test_unknown_tools_keeps_both_lines():
@@ -90,6 +153,7 @@ def test_unknown_tools_keeps_both_lines():
     block = build_proactive_instruction(_cfg(), "")
     assert PROACTIVE_HISTORY_LINE in block and PROACTIVE_POKE_LINE in block
     assert PROACTIVE_QUOTE_LINE in block
+    assert "先自己取" in block and PROACTIVE_UNRESOLVED_LINE in block
 
 
 # ---------- 意图补强（仍属同一块） ----------
@@ -101,6 +165,38 @@ def test_history_intent_detection_is_conservative():
     # 不能把「帮我记录一下」误判成查历史
     for text in ["帮我记录一下这件事", "记录一下我的生日", "明天下午三点提醒我"]:
         assert not history_intent(text), text
+
+
+def test_env_intent_detection_is_conservative():
+    for text in ["这个群是干什么的", "群里刚才谁在说游戏", "你知道张三这个人吗", "上面那条消息说的是啥", "你被@了吗"]:
+        assert env_intent(text), text
+    for text in ["今天天气不错", "帮我写个周报", "明天下午三点提醒我", "1加1等于几"]:
+        assert not env_intent(text), text
+
+
+def test_env_nudge_added_inside_same_block_on_env_intent():
+    block = build_proactive_instruction(_cfg(), "这个群是干什么的", available_tools=ENV_WITH_EXPAND)
+
+    assert PROACTIVE_ENV_NUDGE in block
+    assert block.count("### 主动性") == 1
+
+    plain = build_proactive_instruction(_cfg(), "今天天气不错", available_tools=ENV_WITH_EXPAND)
+    assert PROACTIVE_ENV_NUDGE not in plain
+
+    off = build_proactive_instruction(
+        _cfg(proactive_env_intent_nudge=False), "这个群是干什么的", available_tools=ENV_WITH_EXPAND
+    )
+    assert PROACTIVE_ENV_NUDGE not in off
+    assert "先自己取" in off
+
+
+def test_footer_keeps_soft_tone_but_exempts_unresolved():
+    """footer 既要保住"别机械调用"，又要让"环境缺口"成为必须做的事。"""
+    block = build_proactive_instruction(_cfg(), "", available_tools=ENV_WITH_EXPAND)
+
+    assert "拿不准就不用" in block
+    assert "必须先展开" in block
+    assert "照常回答" in block  # 没有手段时不许回"我无法完整回答"
 
 
 def test_nudge_added_inside_same_block_on_history_intent():

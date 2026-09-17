@@ -151,6 +151,9 @@ DEFAULT_LLM_CONFIG: dict = {
     # 工具主动性提示词（唯一一块「主动性」system 块）
     "proactive_prompt_enable": True,          # 是否注入「主动性」协议块
     "proactive_history_intent_nudge": True,   # 命中历史意图时在同一块内补强
+    "proactive_env_prompt_enable": True,      # 环境行：教模型何时该自己取聊天环境信息
+    "proactive_unresolved_prompt_enable": True,  # 未展开标记语义行（需 expand_context 可用）
+    "proactive_env_intent_nudge": True,       # 命中环境意图时在同一块内补强
     # 输出侧动作通道：模型可用 [reply] 引用当前消息、[@QQ] 真实 @ 某人
     "outbound_directive_enable": True,        # 总开关（关闭后标记不再解析，也不会教模型用）
     "outbound_directive_max_at": 3,           # 单条回复最多 @ 人数
