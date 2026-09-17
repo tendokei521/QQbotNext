@@ -117,11 +117,33 @@ def _context_expand_flags(config) -> dict:
     return flags
 
 
-async def _collect_llm_ext(runtime, event, session_id: str, is_private: bool, schedule_enable: bool):
+async def _collect_llm_ext(
+    runtime,
+    event,
+    session_id: str,
+    is_private: bool,
+    schedule_enable: bool,
+    *,
+    bot=None,
+    user_id=None,
+    group_id=None,
+):
     """收集本次请求的模块工具 + 技能 + 知识库 + MCP + ToolContext。
 
     返回 (specs, skill_blocks, ctx)；specs 已包含内置 schedule_task。
+
+    ``event`` 允许为 None（主动消息 / 定时任务路径没有触发事件）。此时会话目标必须由调用方
+    用 ``bot`` / ``user_id`` / ``group_id`` 显式给出——会话类工具（get_current_session /
+    get_chat_history / expand_context）本来就是从 ToolContext 推导当前会话，不依赖事件。
     """
+    if bot is None and event is not None:
+        bot = getattr(event, "bot", None)
+    if user_id is None and event is not None:
+        user_id = getattr(event, "user_id", None)
+    if group_id is None and event is not None:
+        group = getattr(event, "group", None)
+        group_id = getattr(group, "group_id", None) if group is not None else None
+
     specs = []
     if schedule_enable:
         from app.llm.scheduler import build_schedule_tool
@@ -137,12 +159,12 @@ async def _collect_llm_ext(runtime, event, session_id: str, is_private: bool, sc
 
     ctx = ToolContext(
         module=runtime,
-        bot=event.bot,
+        bot=bot,
         session_id=session_id,
         event=event,
         runtime=runtime,
-        user_id=getattr(event, "user_id", None),
-        group_id=getattr(getattr(event, "group", None), "group_id", None),
+        user_id=user_id,
+        group_id=group_id,
     )
 
     # 系统级会话上下文工具（不展示在 NapCat 前端清单）
@@ -170,7 +192,7 @@ async def _collect_llm_ext(runtime, event, session_id: str, is_private: bool, sc
     if memory is not None and memory.enabled():
         from app.llm.memory import build_memory_tools
 
-        memory_user_id = str(getattr(event, "user_id", "") or "")
+        memory_user_id = str(user_id or "")
         specs.extend(build_memory_tools(runtime, session_id, memory_user_id, is_private))
 
     # 知识库原生工具
@@ -534,6 +556,40 @@ async def handle_private(module, event, config):
         session_id, user_id, None, is_private=True,
         include_pre_history=config.get("include_private_pre_history", "default"),
     )
+
+
+async def build_initiative_tools(
+    runtime,
+    session_id: str,
+    is_private: bool,
+    *,
+    bot=None,
+    user_id=None,
+    group_id=None,
+    schedule_enable: bool = False,
+):
+    """主动消息 / 定时任务路径的工具与「主动性」提示块（没有触发事件）。
+
+    这两条路径此前**完全不传 tools**，也就完全没有主动性：模型只能看到会话历史，
+    拿不到群名、成员信息，也无法展开记录里的 @ / 引用。返回
+    ``(specs, skill_blocks, tool_ctx, proactive_instruction)``，其中提示块同样按本轮
+    实际可用工具裁剪（没有能力的行不会出现）。
+
+    ``schedule_enable`` 默认 False：主动发言/定时任务自身不需要再创建定时任务。
+    """
+    specs, skill_blocks, tool_ctx = await _collect_llm_ext(
+        runtime,
+        None,
+        session_id,
+        is_private,
+        schedule_enable,
+        bot=bot,
+        user_id=user_id,
+        group_id=group_id,
+    )
+    # 无用户提问 → 不做历史/环境意图补强（user_text=""），只给常驻协议行
+    instruction = _proactive_instruction(runtime.config, specs, "")
+    return specs, skill_blocks, tool_ctx, instruction
 
 
 async def call_llm_and_reply(module, event, session_mgr, config,

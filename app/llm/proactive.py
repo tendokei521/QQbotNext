@@ -184,6 +184,9 @@ class ProactiveManager:
                 target,
                 count=int(self.module.config.get("history_rounds", 50)),
                 self_ids={str(self.module.bot_id), str(getattr(self.bot, "bot_id", "") or "")},
+                resolve_at=bool(self.module.config.get("fetch_at_nickname", True)),
+                mark_unresolved=bool(self.module.config.get("context_expand_enable", True)),
+                bot_id=str(self.module.bot_id),
                 **_meta_flags,
             )
             if history_text:
@@ -208,6 +211,27 @@ class ProactiveManager:
             except Exception:
                 memory_text = ""
 
+        # 主动消息同样要能"自己取环境"：补齐工具 + 主动性提示块（此前完全不传 tools）
+        from app.llm.chat import _max_tool_rounds, build_initiative_tools
+        from app.llm.providers.modalities import normalize_modalities, supports_tool_use
+        from app.llm.tool import build_tools, make_executor
+
+        all_specs, skill_blocks, tool_ctx, instruction = await build_initiative_tools(
+            self.module,
+            session_id,
+            not is_group,
+            bot=self.bot,
+            user_id=None if is_group else target,
+            group_id=target if is_group else None,
+        )
+        chain_for_modalities = (
+            self.module.provider_chain() if hasattr(self.module, "provider_chain") else []
+        )
+        modalities = normalize_modalities(
+            (chain_for_modalities[0] or {}).get("modalities") if chain_for_modalities else None
+        )
+        use_tools = bool(all_specs) and supports_tool_use(modalities)
+
         messages = build_messages(
             system_prompt=system_prompt,
             pre_history_text=pre_history_text,
@@ -215,6 +239,8 @@ class ProactiveManager:
             user_text=user_prompt,
             with_schedule_instruction=False,
             memory_text=memory_text,
+            skills=skill_blocks,
+            proactive_instruction=instruction,
         )
 
         # 生成期间新消息检查
@@ -222,6 +248,7 @@ class ProactiveManager:
         config = self.module.config
         if hasattr(config, "set_session"):
             config.set_session(session_id)
+        max_tool_rounds = _max_tool_rounds(config)
 
         # 主动消息也支持流式：与普通消息使用同一套流式发送配置
         if config.get("stream_output", False) and config.get("stream_proactive_enabled", False):
@@ -237,6 +264,9 @@ class ProactiveManager:
                 model=config.get("model", "deepseek-chat"),
                 temperature=config.get("temperature", 0.7),
                 max_tokens=config.get("max_tokens", 1024),
+                tools=build_tools(all_specs) if use_tools else None,
+                tool_executor=make_executor(all_specs, tool_ctx) if use_tools else None,
+                max_tool_rounds=max_tool_rounds,
             )
             if hasattr(config, "clear_session"):
                 config.clear_session()
@@ -267,6 +297,9 @@ class ProactiveManager:
             model=self.module.config.get("model", "deepseek-chat"),
             temperature=self.module.config.get("temperature", 0.7),
             max_tokens=self.module.config.get("max_tokens", 1024),
+            tools=build_tools(all_specs) if use_tools else None,
+            tool_executor=make_executor(all_specs, tool_ctx) if use_tools else None,
+            max_tool_rounds=max_tool_rounds,
         )
         if hasattr(config, "clear_session"):
             config.clear_session()

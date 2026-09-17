@@ -346,7 +346,16 @@ class TaskScheduler:
 
             from app.llm.initiative_stream import stream_send_initiative
 
-            messages = await self._build_messages(entry)
+            all_specs, skill_blocks, tool_ctx, instruction = await self._collect_tools(entry)
+            messages = await self._build_messages(entry, instruction=instruction, skill_blocks=skill_blocks)
+
+            from app.llm.chat import _max_tool_rounds
+            from app.llm.providers.modalities import normalize_modalities, supports_tool_use
+            from app.llm.tool import build_tools, make_executor
+
+            chain_probe = self.module.provider_chain() if hasattr(self.module, "provider_chain") else []
+            modalities = normalize_modalities((chain_probe[0] or {}).get("modalities") if chain_probe else None)
+            use_tools = bool(all_specs) and supports_tool_use(modalities)
             try:
                 full_text = await stream_send_initiative(
                     self.module,
@@ -358,6 +367,9 @@ class TaskScheduler:
                     model=config.get("model", "deepseek-chat"),
                     temperature=config.get("temperature", 0.7),
                     max_tokens=config.get("max_tokens", 1024),
+                    tools=build_tools(all_specs) if use_tools else None,
+                    tool_executor=make_executor(all_specs, tool_ctx) if use_tools else None,
+                    max_tool_rounds=_max_tool_rounds(config),
                 )
             except Exception as e:
                 logger.add_info(f"#{self.bot_id}").error(f"[定时任务] 流式生成异常，改用固定内容: {e}")
@@ -418,7 +430,31 @@ class TaskScheduler:
             logger.add_info(f"#{self.bot_id}").error(f"[定时任务] 发送失败 {entry.id} -> {entry.session_id}: {e}")
         self._save()
 
-    async def _build_messages(self, entry: TaskEntry) -> list[dict]:
+    async def _collect_tools(self, entry: TaskEntry):
+        """定时任务路径的工具与「主动性」提示块（无触发事件，会话目标显式给出）。
+
+        与主动消息同一个入口：没有事件时会话类工具靠 ToolContext 推导当前会话，
+        所以必须显式传 bot / user_id / group_id。此前该路径完全不传 tools，
+        模型拿不到群名、成员信息，也无法展开记录里的 @ / 引用。
+        """
+        from app.llm.chat import build_initiative_tools
+
+        return await build_initiative_tools(
+            self.module,
+            entry.session_id,
+            not entry.is_group,
+            bot=self.bot,
+            user_id=None if entry.is_group else entry.target,
+            group_id=entry.target if entry.is_group else None,
+        )
+
+    async def _build_messages(
+        self,
+        entry: TaskEntry,
+        *,
+        instruction: str | None = None,
+        skill_blocks: list[str] | None = None,
+    ) -> list[dict]:
         """构建定时任务触发的 LLM 消息。"""
         session = self.session_mgr.get_session(entry.session_id)
         config = self.module.config
@@ -486,6 +522,8 @@ class TaskScheduler:
             user_text=user_prompt,
             with_schedule_instruction=False,
             memory_text=memory_text,
+            skills=skill_blocks,
+            proactive_instruction=instruction,
         )
 
     async def _generate_reply(self, entry: TaskEntry):
@@ -499,7 +537,20 @@ class TaskScheduler:
             )
             await asyncio.to_thread(self.session_mgr.restore_session_from_archive, session, entry.session_id)
 
-        messages = await self._build_messages(entry)
+        all_specs, skill_blocks, tool_ctx, instruction = await self._collect_tools(entry)
+        messages = await self._build_messages(entry, instruction=instruction, skill_blocks=skill_blocks)
+
+        from app.llm.chat import _max_tool_rounds
+        from app.llm.providers.modalities import normalize_modalities, supports_tool_use
+        from app.llm.tool import build_tools, make_executor
+
+        chain_probe = self.module.provider_chain() if hasattr(self.module, "provider_chain") else []
+        modalities = normalize_modalities((chain_probe[0] or {}).get("modalities") if chain_probe else None)
+        use_tools = bool(all_specs) and supports_tool_use(modalities)
+        tools = build_tools(all_specs) if use_tools else None
+        tool_executor = make_executor(all_specs, tool_ctx) if use_tools else None
+        max_tool_rounds = _max_tool_rounds(self.module.config)
+
         if hasattr(self.module.config, "set_session"):
             self.module.config.set_session(entry.session_id)
         try:
@@ -512,14 +563,28 @@ class TaskScheduler:
                         model=self.module.config.get("model", "deepseek-chat"),
                         temperature=self.module.config.get("temperature", 0.7),
                         max_tokens=self.module.config.get("max_tokens", 1024),
+                        tools=tools,
+                        tool_executor=tool_executor,
+                        max_tool_rounds=max_tool_rounds,
                     )
             # 兼容旧模块/测试：直接走模块自己的 get_provider
             provider = get_provider(dict(self.module.config.raw_config))
+            legacy_kwargs: dict = {}
+            if tools is not None:
+                from app.llm.providers import _accepts_kwarg
+
+                if _accepts_kwarg(provider.chat, "tools"):
+                    legacy_kwargs = {
+                        "tools": tools,
+                        "tool_executor": tool_executor,
+                        "max_tool_rounds": max_tool_rounds,
+                    }
             return await provider.chat(
                 messages,
                 model=self.module.config.get("model", "deepseek-chat"),
                 temperature=self.module.config.get("temperature", 0.7),
                 max_tokens=self.module.config.get("max_tokens", 1024),
+                **legacy_kwargs,
             )
         finally:
             if hasattr(self.module.config, "clear_session"):
