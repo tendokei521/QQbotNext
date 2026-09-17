@@ -497,6 +497,10 @@ class TaskScheduler:
                 entry.target,
                 count=int(config.get("history_rounds", 50)),
                 self_ids={str(self.bot_id), str(getattr(self.bot, "bot_id", "") or "")},
+                # 与普通回复/主动消息一致：@ 预展开 + 未展开标记（缺口可由 expand_context 解决）
+                resolve_at=bool(config.get("fetch_at_nickname", True)),
+                mark_unresolved=bool(config.get("context_expand_enable", True)),
+                bot_id=str(self.bot_id),
                 **_meta_flags,
             )
             if history_text:
