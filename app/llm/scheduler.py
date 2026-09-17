@@ -346,6 +346,9 @@ class TaskScheduler:
 
             from app.llm.initiative_stream import stream_send_initiative
 
+            # 会话配置档案先切换：工具集与提示块读取的是会话级配置
+            if hasattr(config, "set_session"):
+                config.set_session(entry.session_id)
             all_specs, skill_blocks, tool_ctx, instruction = await self._collect_tools(entry)
             messages = await self._build_messages(entry, instruction=instruction, skill_blocks=skill_blocks)
 
@@ -374,6 +377,9 @@ class TaskScheduler:
             except Exception as e:
                 logger.add_info(f"#{self.bot_id}").error(f"[定时任务] 流式生成异常，改用固定内容: {e}")
                 full_text = ""
+            finally:
+                if hasattr(config, "clear_session"):
+                    config.clear_session()
 
             clean = strip_all_tags(full_text).strip()
             if not clean:
@@ -537,6 +543,9 @@ class TaskScheduler:
             )
             await asyncio.to_thread(self.session_mgr.restore_session_from_archive, session, entry.session_id)
 
+        # 会话配置档案先切换：工具集与提示块读取的是会话级配置（与 chat.handle 的顺序一致）
+        if hasattr(self.module.config, "set_session"):
+            self.module.config.set_session(entry.session_id)
         all_specs, skill_blocks, tool_ctx, instruction = await self._collect_tools(entry)
         messages = await self._build_messages(entry, instruction=instruction, skill_blocks=skill_blocks)
 
@@ -551,8 +560,6 @@ class TaskScheduler:
         tool_executor = make_executor(all_specs, tool_ctx) if use_tools else None
         max_tool_rounds = _max_tool_rounds(self.module.config)
 
-        if hasattr(self.module.config, "set_session"):
-            self.module.config.set_session(entry.session_id)
         try:
             if hasattr(self.module, "provider_chain"):
                 chain = self.module.provider_chain()

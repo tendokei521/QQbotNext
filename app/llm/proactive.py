@@ -211,6 +211,14 @@ class ProactiveManager:
             except Exception:
                 memory_text = ""
 
+        # 会话配置档案先切换：工具集与提示块读取的都是会话级配置
+        # （与 chat.handle 的顺序一致，否则会话档案里的开关会被默认档案覆盖）
+        start_last = self._data.get(session_id, {}).get("last_user_time", 0)
+        config = self.module.config
+        if hasattr(config, "set_session"):
+            config.set_session(session_id)
+        max_tool_rounds = _max_tool_rounds(config)
+
         # 主动消息同样要能"自己取环境"：补齐工具 + 主动性提示块（此前完全不传 tools）
         from app.llm.chat import _max_tool_rounds, build_initiative_tools
         from app.llm.providers.modalities import normalize_modalities, supports_tool_use
@@ -242,13 +250,6 @@ class ProactiveManager:
             skills=skill_blocks,
             proactive_instruction=instruction,
         )
-
-        # 生成期间新消息检查
-        start_last = self._data.get(session_id, {}).get("last_user_time", 0)
-        config = self.module.config
-        if hasattr(config, "set_session"):
-            config.set_session(session_id)
-        max_tool_rounds = _max_tool_rounds(config)
 
         # 主动消息也支持流式：与普通消息使用同一套流式发送配置
         if config.get("stream_output", False) and config.get("stream_proactive_enabled", False):
