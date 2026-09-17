@@ -138,6 +138,9 @@ DEFAULT_LLM_CONFIG: dict = {
     # 统一工具管理：四类工具各自的开关与日志输出
     "system_tools_enabled": {},        # 系统工具开关：{"tool_name": bool}
     "system_tools_log_enabled": True,  # 系统工具普通调用日志
+    # 工具调用循环轮数上限（流式与非流式共用）：调大后"展开环境→再判断→再展开"这类
+    # 多段链条不会在第 5 轮被硬切（此前流式硬编码 5、非流式走 Provider 默认值，两处不一致）
+    "max_tool_rounds": 5,
     # get_chat_history：本地记录少于该条数时自动补拉 QQ 聊天记录（0=总是补拉）
     "history_auto_qq_min_local": 4,
     # get_chat_history 跨会话：私聊里查询"自己也是成员"的群历史（群聊里一律拒绝）

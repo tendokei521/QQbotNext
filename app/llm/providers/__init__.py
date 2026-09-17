@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import inspect
+
 from .base import BaseProvider, LLMResponse, StreamEvent
 from .embedding import OpenAIEmbeddingProvider
 from .openai_compat import OpenAICompatProvider
@@ -97,6 +99,23 @@ def get_provider(config: dict) -> BaseProvider:
     return cls(config)
 
 
+def _accepts_kwarg(fn, name: str) -> bool:
+    """Provider 的 chat 是否接受某关键字参数。
+
+    第三方通过 ``register_provider`` 注册的适配器可能没有 ``max_tool_rounds`` 形参；
+    直接传会抛 TypeError，而调用方（chat_with_fallback）的异常兜底会把它吞成
+    “换下一个 Provider”，表现为静默降级。这里先内省一次，不支持就不传。
+    """
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        # 无法内省（C 扩展/装饰器遮蔽）时按“接受”处理，由调用方异常兜底
+        return True
+    if name in params:
+        return True
+    return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+
 async def chat_with_fallback(
     config_chain: list[dict],
     messages: list[dict],
@@ -107,12 +126,16 @@ async def chat_with_fallback(
     timeout: int = 30,
     tools: list[dict] | None = None,
     tool_executor=None,
+    max_tool_rounds: int = 5,
 ) -> LLMResponse:
     """按顺序尝试 config_chain，直到某个 provider 成功返回（包括空文本但请求成功）。"""
     last: LLMResponse | None = None
     for cfg in config_chain:
         provider = get_provider(cfg)
         try:
+            kwargs: dict = {}
+            if _accepts_kwarg(provider.chat, "max_tool_rounds"):
+                kwargs["max_tool_rounds"] = max_tool_rounds
             resp = await provider.chat(
                 messages,
                 model=cfg.get("model") or model,
@@ -121,6 +144,7 @@ async def chat_with_fallback(
                 timeout=int(cfg.get("timeout", timeout) or timeout),
                 tools=tools,
                 tool_executor=tool_executor,
+                **kwargs,
             )
         except Exception as e:
             from app.llm import logger

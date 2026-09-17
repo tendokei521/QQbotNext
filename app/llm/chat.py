@@ -238,6 +238,23 @@ def _message_meta_instruction(runtime, ctx) -> str | None:
     return LEGACY_MESSAGE_META_INSTRUCTION
 
 
+DEFAULT_MAX_TOOL_ROUNDS = 5
+
+
+def _max_tool_rounds(config, default: int = DEFAULT_MAX_TOOL_ROUNDS) -> int:
+    """工具循环轮数上限（配置 ``max_tool_rounds``），流式与非流式共用同一值。
+
+    以前非流式走 Provider 默认值、流式在 ``stream_response`` 里硬编码 ``range(5)``，
+    两处不一致且不可配置。而“展开缺失的聊天环境 → 再判断是否还缺 → 再展开”本身就是
+    多段链条，轮数被硬切就表现为模型“半途而废”直接作答。
+    """
+    try:
+        value = int(config.get("max_tool_rounds", default) or default)
+    except (TypeError, ValueError):
+        return default
+    return max(1, min(value, 20))
+
+
 def _proactive_instruction(config, all_specs, user_text: str, ctx=None) -> str | None:
     """本轮「主动性」协议块：只在本轮确有对应工具时注入（唯一一块 system 提示）。
 
@@ -565,6 +582,7 @@ async def call_llm_and_reply(module, event, session_mgr, config,
         max_tokens=max_tokens,
         tools=build_tools(all_specs) if use_tools else None,
         tool_executor=make_executor(all_specs, tool_ctx) if use_tools else None,
+        max_tool_rounds=_max_tool_rounds(config),
     )
 
     if not response.ok:
@@ -765,6 +783,7 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
         max_tokens=max_tokens,
         tools=build_tools(all_specs) if use_tools else None,
         tool_executor=make_executor(all_specs, tool_ctx) if use_tools else None,
+        max_tool_rounds=_max_tool_rounds(config),
     )
     response_latency_ms = (time.monotonic() - response_start) * 1000
 
@@ -966,8 +985,10 @@ async def stream_response(runtime, event, ctx=None):
     tool_results: list[dict] = []
     stream_start = time.monotonic()
     stream_error_text = ""
+    # 与非流式共用同一轮数上限（此前这里硬编码 5，两处不一致且不可配）
+    max_tool_rounds = _max_tool_rounds(config)
 
-    for _round in range(5):
+    for _round in range(max_tool_rounds):
         round_text_parts: list[str] = []
         buffer = ""
         tool_calls: dict[int, dict] = {}
@@ -1052,7 +1073,9 @@ async def stream_response(runtime, event, ctx=None):
         })
         messages.extend(tool_messages)
     else:
-        logger.add_info(f"#{runtime.bot_id}").warning("流式工具循环超过 5 轮，强制结束")
+        logger.add_info(f"#{runtime.bot_id}").warning(
+            f"流式工具循环超过 {max_tool_rounds} 轮，强制结束（可调大 max_tool_rounds 配置）"
+        )
 
     # 兜底：流式响应为空时避免“不回复”，给用户一个可见的占位回复
     if not full_text.strip():

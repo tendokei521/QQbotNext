@@ -17,6 +17,7 @@ SCHEMA = {
     "group_tavily": {"type": "group", "label": "Tavily 联网搜索", "collapsible": True},
     "group_mcp": {"type": "group", "label": "MCP 工具", "collapsible": True},
     "group_napcat": {"type": "group", "label": "NapCat 工具", "collapsible": True},
+    "group_tools": {"type": "group", "label": "工具调用", "collapsible": True},
     "group_permission": {"type": "group", "label": "权限", "collapsible": True},
 
     # ==================== 配置项 ====================
@@ -477,6 +478,14 @@ SCHEMA = {
         "default": "[]", "rows": 5, "group": "group_mcp",
     },
 
+    # ==================== 工具调用 ====================
+    "max_tool_rounds": {
+        "type": "number", "label": "工具调用轮数上限",
+        "description": "一次回复里允许的「模型→调工具→回填→再判断」循环轮数（流式与非流式共用）。"
+                       "调大后多段式任务（如逐个展开引用的消息/@ 对象再作答）不会中途被截断，代价是极端情况下耗时与 token 增加",
+        "default": 5, "min": 1, "max": 20, "group": "group_tools",
+    },
+
     # ==================== NapCat 工具 ====================
     "napcat_tools_enable": {
         "type": "boolean", "label": "启用 NapCat 工具", "description": "把 NapCat/OneBot API 暴露给 LLM 作为 function calling 工具",
@@ -563,6 +572,7 @@ _PAGE_BY_GROUP = {
     "group_tavily": "basic",
     "group_mcp": "mcp",
     "group_napcat": "napcat",
+    "group_tools": "basic",
     "group_permission": "permission",
 }
 
@@ -582,6 +592,7 @@ _IMPORTANCE_BY_GROUP = {
     "group_tavily": "advanced",
     "group_mcp": "advanced",
     "group_napcat": "advanced",
+    "group_tools": "advanced",
     "group_permission": "basic",
 }
 

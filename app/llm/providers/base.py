@@ -152,7 +152,16 @@ class BaseProvider:
         temperature: float = 0.7,
         max_tokens: int = 1024,
         timeout: int = 30,
+        tools: list[dict] | None = None,
+        tool_executor=None,
+        max_tool_rounds: int = 5,
     ) -> LLMResponse:
+        """对话请求（子类实现）。
+
+        ``tools`` / ``tool_executor`` / ``max_tool_rounds`` 是原生 function calling
+        的工具循环参数；不支持工具的 Provider 可以忽略它们（基类签名在此声明，
+        便于调用方统一传参而无需逐家内省）。
+        """
         raise NotImplementedError
 
     async def chat_stream(

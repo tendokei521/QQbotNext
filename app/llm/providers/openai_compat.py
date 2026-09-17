@@ -305,7 +305,9 @@ class OpenAICompatProvider(BaseProvider):
             })
             payload["messages"].extend(tool_messages)
 
-        logger.add_info("Api").warning(f"工具循环超过 {max_tool_rounds} 轮，强制结束")
+        logger.add_info("Api").warning(
+            f"工具循环超过 {max_tool_rounds} 轮，强制结束（可调大 max_tool_rounds 配置）"
+        )
         # 保留已执行工具结果与最后一次响应，避免已完成的工具调用静默丢失
         return self._to_response(result, tool_results)
 
