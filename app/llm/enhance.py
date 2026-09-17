@@ -161,8 +161,6 @@ async def interrupt_config_hook(ctx):
 
 # ---------- 群成员昵称 / 引用辅助 ----------
 
-_NICK_CACHE: dict[str, str] = {}
-
 
 async def _collect_at_info(ctx) -> list[str]:
     event = ctx.event
@@ -190,24 +188,19 @@ async def _collect_at_info(ctx) -> list[str]:
 
 
 async def _fetch_group_member_nickname(ctx, qq: str) -> str:
+    """反查群成员昵称；实现与缓存已抽到 ``app.llm.nicknames``（与背景块渲染共用）。
+
+    共用缓存意味着：本轮触发消息里展开过的 @ 对象，背景块渲染时直接命中，不重复请求。
+    """
+    from app.llm.nicknames import fetch_nickname
+
     event = ctx.event
     group_id = getattr(event.group, "group_id", None)
     if not group_id or not event.bot:
         return ""
-    cache_key = f"llm_enhance:nick:{event.bot_id}:{group_id}:{qq}"
-    if cache_key in _NICK_CACHE:
-        return _NICK_CACHE[cache_key]
-    try:
-        resp = await event.bot.get_group_member_info(group_id=group_id, user_id=int(qq))
-        data = (resp or {}).get("data", {}) or {}
-        nickname = data.get("card") or data.get("nickname") or ""
-        if nickname:
-            _NICK_CACHE[cache_key] = nickname
-            return nickname
-    except Exception as e:
-        # 取群名片失败不影响主流程（只是后续提示词少了昵称信息），留痕便于排查 API 异常
-        logger.debug(f"[Enhance] 获取群成员昵称失败（group={group_id}, qq={qq}）: {e}")
-    return ""
+    return await fetch_nickname(
+        event.bot, group_id, qq, bot_id=str(getattr(event, "bot_id", "") or "")
+    )
 
 
 async def _collect_quote_info(ctx) -> dict | None:
