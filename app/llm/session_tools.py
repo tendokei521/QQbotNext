@@ -29,6 +29,7 @@ from app.llm.group_context import (
     fetch_group_online_history,
     fetch_private_online_history,
     format_history_for_llm,
+    unresolved_items,
 )
 from app.llm.session import SessionManager
 from app.llm.tool import ToolSpec
@@ -385,6 +386,11 @@ async def _handle_chat_history(ctx, args: dict) -> str:
         head_bits.append("QQ 记录：已补拉" if qq_text else "QQ 记录：未取到")
     elif not local_lines:
         head_bits.append("QQ 记录：未查询")
+    # 缺口清单：记录里还有展不开的内容（未取到昵称的 @、被引用的消息等）时先告诉模型，
+    # 让它不必逐行扫描就知道"还缺什么"，也不必凭 id 猜内容。
+    unresolved = unresolved_items("\n".join(local_lines) + "\n" + qq_text)
+    if unresolved:
+        head_bits.append(f"未展开 {len(unresolved)} 处：{'、'.join(unresolved)}（可用 expand_context 展开）")
     head = "；".join(head_bits)
 
     blocks: list[str] = []

@@ -256,3 +256,84 @@ async def test_pre_history_block_honours_flags():
 
     assert "@三哥(123) 在吗" in expanded
     assert "@123 在吗" in raw
+
+
+# ---------- 缺口摘要 ----------
+
+
+def test_unresolved_items_dedupes_and_preserves_order():
+    from app.llm.group_context import unresolved_items
+
+    text = "a 【未展开:用户123】 b 【未展开:引用456】 c 【未展开:用户123】"
+
+    assert unresolved_items(text) == ["用户123", "引用456"]
+    assert unresolved_items("没有缺口") == []
+    assert unresolved_items(None) == []
+
+
+def test_unresolved_summary_counts_occurrences():
+    from app.llm.group_context import unresolved_summary
+
+    summary = unresolved_summary("【未展开:用户123】【未展开:用户123】【未展开:引用456】")
+
+    assert "3 处" in summary
+    assert "用户123" in summary and "引用456" in summary
+    assert "expand_context" in summary
+    assert unresolved_summary("干净的内容") == ""
+
+
+async def test_env_block_appends_gap_summary_only_when_needed():
+    from app.llm.group_context import build_group_env_text
+
+    dirty = build_group_env_text(
+        group_id=778,
+        group_name="测试群",
+        history_text="12-01 10:00 小明: 【未展开:用户123】在吗",
+        current_time="2026-09-17 10:00:00",
+    )
+    clean = build_group_env_text(
+        group_id=778,
+        history_text="12-01 10:00 小明: 在吗",
+        current_time="2026-09-17 10:00:00",
+    )
+
+    assert "未展开" in dirty
+    assert "expand_context" in dirty
+    assert "未展开" not in clean
+
+
+async def test_env_block_summary_appears_in_pre_history():
+    from app.llm.chat import _build_group_pre_history
+
+    event = SimpleNamespace(
+        bot=_FakeBot(_envelope(AT_MESSAGES), member_fail=True),
+        self_id=10001,
+        bot_id=10001,
+        group=SimpleNamespace(group_name="测试群"),
+    )
+
+    block = await _build_group_pre_history(event, "778", count=10, mark_unresolved=True)
+
+    assert "最近群聊记录：" in block
+    assert "未展开" in block
+
+
+async def test_chat_history_tool_reports_unresolved_head():
+    """get_chat_history 的头部要给出缺口清单，模型无需逐行扫描。"""
+    from app.llm.session_tools import build_session_tools
+
+    runtime = SimpleNamespace(bot_id="10001", config={"history_auto_qq_min_local": 0})
+    ctx = SimpleNamespace(
+        runtime=runtime,
+        bot=_FakeBot(_envelope(AT_MESSAGES), member_fail=True),
+        session_id="group_778",
+        user_id=20002,
+        group_id=778,
+        event=SimpleNamespace(event_type="message_group", group=SimpleNamespace(group_id=778)),
+    )
+    spec = next(s for s in build_session_tools(runtime, ctx) if s.name == "get_chat_history")
+
+    result = await spec.handler(ctx, {"scope": "qq"})
+
+    assert "未展开" in result
+    assert "expand_context" in result

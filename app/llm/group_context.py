@@ -45,6 +45,35 @@ UNRESOLVED_AT = "【未展开:用户{qq}】"
 UNRESOLVED_REPLY = "【未展开:引用{id}】"
 UNRESOLVED_FORWARD = "【未展开:合并转发】"
 
+# 缺口扫描：与上面的标记格式保持同源（渲染出什么就扫什么）
+_UNRESOLVED_RE = re.compile(r"【未展开:([^】]+)】")
+
+
+def unresolved_items(text: Any) -> list[str]:
+    """列出文本里的未展开项（去重保序），如 ``['用户123', '引用456']``。"""
+    seen: list[str] = []
+    for item in _UNRESOLVED_RE.findall(str(text or "")):
+        if item not in seen:
+            seen.append(item)
+    return seen
+
+
+def unresolved_summary(text: Any) -> str:
+    """生成「缺口摘要」行；没有缺口时返回空串。
+
+    模型不必自己逐行扫描上下文就能知道"缺什么"，也不必靠提示词记住标记形态：
+    ``【本段含 2 处未展开内容：用户123、引用456；可调用 expand_context 展开】``
+    """
+    raw = str(text or "")
+    items = unresolved_items(raw)
+    if not items:
+        return ""
+    total = len(_UNRESOLVED_RE.findall(raw))
+    return (
+        f"【本段含 {total} 处未展开内容：{'、'.join(items)}；"
+        "可调用 expand_context 展开后再回答】"
+    )
+
 # 已自带“发送者/发送者昵称/发送了/消息正文/时间”自描述内容（LLM 增强模块 llm_enhance 产出的散文块）。
 # 这类内容再套外层“MM-DD HH:MM 昵称(QQ):”会变成重复脏信息，渲染时应原样输出。
 # 同时兼容旧历史（发送者/发送了）与当前单行格式（昵称(QQ): 正文）。
@@ -539,6 +568,9 @@ def build_group_env_text(
 
     只有 history_text 非空时才附加“最近群聊记录”小节；
     如果调用方不想要任何背景，可以直接不调用本函数。
+
+    记录里存在未展开内容时，末尾追加一行缺口摘要（见 :func:`unresolved_summary`）：
+    让模型不必自己逐行扫描就知道缺什么。
     """
     lines: list[str] = []
     if group_name:
@@ -550,4 +582,7 @@ def build_group_env_text(
     if history_text:
         lines.append("最近群聊记录：")
         lines.append(history_text)
+        summary = unresolved_summary(history_text)
+        if summary:
+            lines.append(summary)
     return "\n".join(lines)
