@@ -15,6 +15,8 @@ import re
 from datetime import datetime
 from typing import Any
 
+from app.core.logger import logger
+
 # 非文本消息段的展示名，避免模型完全看不到非文本消息
 _NON_TEXT_SEGMENTS = {
     "image": "图片",
@@ -32,6 +34,16 @@ _NON_TEXT_SEGMENTS = {
 # bot 自己的固定标签（群聊/私聊一致）；私聊对方用“对方”，不展示昵称
 SELF_TAG = "我"
 PRIVATE_OTHER_TAG = "对方"
+
+# ==================== “未展开”标记 ====================
+# 只标记**可被解决的缺口**（marker must be actionable）：
+# - @ 用户：本轮尝试反查过昵称但没取到（无权限/退群/连接异常）→ 标记后可让模型按需展开；
+# - 引用 / 合并转发：正文没有被内联，需要按 id 取。
+# 图片/语音/文件等「内容型」缺口在无对应能力时**保持 ``[图片]`` 这类纯占位**，
+# 标成“未展开”只会诱导模型空转或谎称无法回答。
+UNRESOLVED_AT = "【未展开:用户{qq}】"
+UNRESOLVED_REPLY = "【未展开:引用{id}】"
+UNRESOLVED_FORWARD = "【未展开:合并转发】"
 
 # 已自带“发送者/发送者昵称/发送了/消息正文/时间”自描述内容（LLM 增强模块 llm_enhance 产出的散文块）。
 # 这类内容再套外层“MM-DD HH:MM 昵称(QQ):”会变成重复脏信息，渲染时应原样输出。
@@ -188,7 +200,20 @@ def _group_sender_label(
     return "".join(parts) if parts else "用户"
 
 
-def _segment_text(segment: Any) -> str | None:
+def _segment_text(
+    segment: Any,
+    at_names: dict[str, str] | None = None,
+    mark_unresolved: bool = False,
+) -> str | None:
+    """消息段 → 可读文本。
+
+    Args:
+        segment: OneBot 消息段（dict 或对象）。
+        at_names: ``{qq: 昵称}`` 映射；命中时把 ``@123`` 渲染成 ``@三哥(123)``
+            （复用全局 ``昵称(QQ)`` 约定，不引入新语法）。
+        mark_unresolved: 反查失败/未提供时是否输出 ``【未展开:...】`` 标记；
+            False 时保持历史的裸 ``@123`` 行为。
+    """
     if isinstance(segment, dict):
         stype = segment.get("type", "")
         data = segment.get("data", {}) or {}
@@ -199,15 +224,40 @@ def _segment_text(segment: Any) -> str | None:
         text = data.get("text", "")
         return text if text else None
     if stype == "at":
-        qq = data.get("qq", "")
-        return f"@{qq}" if qq not in (None, "", "all") else "@所有人"
+        qq = str(data.get("qq", "") or "")
+        if qq in (None, "", "all", "0"):
+            return "@所有人"
+        name = (at_names or {}).get(qq)
+        if name:
+            return f"@{name}({qq})"
+        if mark_unresolved:
+            return UNRESOLVED_AT.format(qq=qq)
+        return f"@{qq}"
+    if stype == "reply":
+        if mark_unresolved:
+            reply_id = str(data.get("id", "") or "")
+            # 没有 id 就无从展开，保持旧占位而不是打一个无法解决的标记
+            if reply_id:
+                return UNRESOLVED_REPLY.format(id=reply_id)
+        return f"[{_NON_TEXT_SEGMENTS['reply']}]"
+    if stype == "forward":
+        if mark_unresolved:
+            return UNRESOLVED_FORWARD
+        return f"[{_NON_TEXT_SEGMENTS['forward']}]"
     if stype in _NON_TEXT_SEGMENTS:
         return f"[{_NON_TEXT_SEGMENTS[stype]}]"
     return None
 
 
-def extract_msg_text(message: Any) -> str:
-    """从 OneBot 消息段中提取可读文本；非文本段用 [图片]/[表情] 之类的占位表示。"""
+def extract_msg_text(
+    message: Any,
+    at_names: dict[str, str] | None = None,
+    mark_unresolved: bool = False,
+) -> str:
+    """从 OneBot 消息段中提取可读文本；非文本段用 [图片]/[表情] 之类的占位表示。
+
+    ``at_names`` / ``mark_unresolved`` 见 :func:`_segment_text`。
+    """
     if isinstance(message, str):
         return message
     if not isinstance(message, list):
@@ -215,7 +265,7 @@ def extract_msg_text(message: Any) -> str:
 
     parts: list[str] = []
     for seg in message:
-        text = _segment_text(seg)
+        text = _segment_text(seg, at_names, mark_unresolved)
         if text:
             parts.append(text)
     return "".join(parts).strip()
@@ -232,6 +282,8 @@ def format_online_history(
     is_private: bool = False,
     normalize_enhanced: bool = False,
     mask_nickname: bool = False,
+    at_names: dict[str, str] | None = None,
+    mark_unresolved: bool = False,
 ) -> str:
     """把 OneBot 消息列表格式化为群聊/私聊背景文本。
 
@@ -249,6 +301,8 @@ def format_online_history(
         is_private: True=私聊（对方只显示为「对方」，不显示昵称/QQ）。
         normalize_enhanced: True=把历史中的旧/新分节增强格式归一化为单行（实验性）。
         mask_nickname: True=对句子型昵称脱敏为 用户<QQ>（实验性）。
+        at_names: ``{qq: 昵称}``；把内容里的 ``@123`` 渲染成 ``@三哥(123)``。
+        mark_unresolved: 未展开项是否输出 ``【未展开:...】`` 标记（见模块常量注释）。
 
     Returns:
         格式化后的背景文本（每行一条消息）。
@@ -264,7 +318,7 @@ def format_online_history(
         user_id = sender.get("user_id", "")
         is_self = str(user_id) in self_ids
 
-        content = extract_msg_text(msg.get("message"))
+        content = extract_msg_text(msg.get("message"), at_names, mark_unresolved)
         if not content:
             continue
         if len(content) > max_content:
@@ -313,6 +367,26 @@ def extract_history_messages(result: Any) -> list[dict]:
     return list(messages) if isinstance(messages, list) else []
 
 
+def collect_at_ids(messages: list) -> list[str]:
+    """收集一批 OneBot 消息里出现的 @ 对象 QQ（去重、保序、跳过全体/机器人无关项）。"""
+    seen: list[str] = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        for seg in msg.get("message") or []:
+            if isinstance(seg, dict):
+                stype, data = seg.get("type", ""), seg.get("data", {}) or {}
+            else:
+                stype, data = getattr(seg, "type", ""), getattr(seg, "data", {}) or {}
+            if stype != "at":
+                continue
+            qq = str(data.get("qq", "") or "")
+            if not qq or qq in ("all", "0") or qq in seen:
+                continue
+            seen.append(qq)
+    return seen
+
+
 async def fetch_group_online_history(
     bot: Any,
     group_id: Any,
@@ -321,8 +395,17 @@ async def fetch_group_online_history(
     *,
     normalize_enhanced: bool = False,
     mask_nickname: bool = False,
+    resolve_at: bool = True,
+    mark_unresolved: bool = False,
+    bot_id: Any = "",
 ) -> str:
-    """拉取群聊最近消息，格式化为带发送者/时间/QQ 的背景文本。"""
+    """拉取群聊最近消息，格式化为带发送者/时间/QQ 的背景文本。
+
+    ``resolve_at=True`` 时把记录里的 ``@123`` 预展开成 ``@三哥(123)``——这是"补全消息
+    环境"里**成本最低的一刀**：QQ 群里的 @ 是高频骨架，而反查能力（含缓存）本来就有。
+    反查失败（无权限/已退群/连接异常）在 ``mark_unresolved=True`` 时输出
+    ``【未展开:用户123】``，让模型知道"这里缺东西"而不是把裸 id 当正文猜。
+    """
     try:
         result = await bot.get_msg_history(
             group_id=int(group_id),
@@ -333,14 +416,28 @@ async def fetch_group_online_history(
         messages = extract_history_messages(result)
         if not messages:
             return ""
+
+        at_names: dict[str, str] = {}
+        if resolve_at:
+            from app.llm.nicknames import resolve_nicknames
+
+            window = [m for m in messages[-count:] if isinstance(m, dict)]
+            at_names = await resolve_nicknames(
+                bot, group_id, collect_at_ids(window), bot_id=bot_id
+            )
+
         return format_online_history(
             messages,
             count,
             self_ids=self_ids,
             normalize_enhanced=normalize_enhanced,
             mask_nickname=mask_nickname,
+            at_names=at_names,
+            mark_unresolved=mark_unresolved,
         )
-    except Exception:
+    except Exception as e:
+        # 背景块取不到时退回空串（调用方本来就把空块当作“无背景”），但必须留痕
+        logger.debug(f"[GroupContext] 拉取群 {group_id} 在线历史失败（已忽略）: {e}")
         return ""
 
 

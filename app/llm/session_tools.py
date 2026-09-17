@@ -105,15 +105,27 @@ def _bot_self_ids(bot, runtime) -> set[str]:
     return ids
 
 
-async def _fetch_qq_history(bot, runtime, group_id: str, user_id: str, limit: int) -> str:
-    """补拉当前会话对象的 QQ 原始聊天记录；失败返回空串。"""
+async def _fetch_qq_history(ctx, bot, runtime, group_id: str, user_id: str, limit: int) -> str:
+    """补拉当前会话对象的 QQ 原始聊天记录；失败返回空串。
+
+    群聊记录沿用渲染层的“骨架预展开”开关：``@123`` 尽力展开成 ``@三哥(123)``，
+    展开不到的部分在 ``context_expand_enable`` 开启时输出 ``【未展开:用户123】``
+    （模型据此可以再调 expand_context 按需展开）。
+    """
     if bot is None:
         return ""
     self_ids = _bot_self_ids(bot, runtime)
     try:
         if group_id:
             return await fetch_group_online_history(
-                bot, group_id, count=limit, self_ids=self_ids, mask_nickname=True
+                bot,
+                group_id,
+                count=limit,
+                self_ids=self_ids,
+                mask_nickname=True,
+                resolve_at=bool(_cfg(ctx, "fetch_at_nickname", True)),
+                mark_unresolved=bool(_cfg(ctx, "context_expand_enable", True)),
+                bot_id=getattr(runtime, "bot_id", "") or "",
             )
         if user_id:
             return await fetch_private_online_history(
@@ -362,7 +374,7 @@ async def _handle_chat_history(ctx, args: dict) -> str:
     need_qq = is_cross or scope == "qq" or (scope == "auto" and len(local_lines) < min_local)
     qq_text = ""
     if need_qq:
-        qq_text = await _fetch_qq_history(bot, runtime, group_id, user_id, limit)
+        qq_text = await _fetch_qq_history(ctx, bot, runtime, group_id, user_id, limit)
 
     head_bits = [f"会话 {session_id}（{'私聊' if is_private else '群聊'}）"]
     if cross_note:

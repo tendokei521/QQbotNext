@@ -181,6 +181,12 @@ SCHEMA = {
         "type": "boolean", "label": "允许私聊跨会话查群记录", "description": "私聊里允许用 get_chat_history 查询“发起人自己也是成员”的群历史（结果只回给发起人）；群聊里查别的群、以及查别人的私聊始终被拒绝",
         "default": True, "group": "group_session",
     },
+    "context_expand_enable": {
+        "type": "boolean", "label": "未展开内容标记与按需展开",
+        "description": "聊天记录里展不开的内容（未取到昵称的 @、被引用的消息等）渲染成【未展开:...】标记，"
+                       "并允许模型用 expand_context 按需展开；关闭后恢复为裸 @123 之类的旧渲染且不暴露展开工具",
+        "default": True, "group": "group_session",
+    },
     "clean_output_parentheses": {
         "type": "boolean", "label": "强制清洗括号内容", "description": "写入会话历史时剥离大模型输出中的（…）/(…)内容，避免后续回复模仿括号风格（本次展示原文不变）",
         "default": True, "group": "group_session",

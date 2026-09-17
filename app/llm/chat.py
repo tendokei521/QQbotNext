@@ -68,10 +68,17 @@ async def _build_group_pre_history(
     *,
     normalize_enhanced: bool = False,
     mask_nickname: bool = False,
+    resolve_at: bool = True,
+    mark_unresolved: bool = False,
 ) -> str:
     """根据 include_pre_history 配置，拉取并组装群聊环境背景块。
 
     不拉取在线历史时返回空字符串；本函数不改变“非 @ 不入会话历史”的策略。
+
+    ``resolve_at`` 会把背景块里的 ``@123`` 预展开成 ``@三哥(123)``（复用
+    ``app.llm.nicknames`` 与其缓存），``mark_unresolved`` 让取不到的部分输出
+    ``【未展开:...】`` 标记——背景块是"群里其他人聊了什么"的唯一可见窗口，
+    此前这里只有裸 ``@123``，模型既不知道是谁、也没有"这里缺东西"的感知。
     """
     history_text = await fetch_group_online_history(
         event.bot,
@@ -80,6 +87,9 @@ async def _build_group_pre_history(
         self_ids={str(event.self_id), str(getattr(event, "bot_id", "") or "")},
         normalize_enhanced=normalize_enhanced,
         mask_nickname=mask_nickname,
+        resolve_at=resolve_at,
+        mark_unresolved=mark_unresolved,
+        bot_id=getattr(event, "bot_id", "") or "",
     )
     if not history_text:
         return ""
@@ -88,6 +98,23 @@ async def _build_group_pre_history(
         group_name=getattr(event.group, "group_name", "") or "",
         history_text=history_text,
     )
+
+
+def _context_expand_flags(config) -> dict:
+    """渲染层「骨架预展开」开关。
+
+    - ``resolve_at``：复用既有的 ``fetch_at_nickname``（@ 昵称反查总开关）；
+    - ``mark_unresolved``：``context_expand_enable``，控制 ``【未展开:...】`` 标记
+      （与按需展开能力同开同关：标记必须可被解决，否则只会诱导模型空转）。
+    """
+    flags = {"resolve_at": True, "mark_unresolved": True}
+    for key, name in (("fetch_at_nickname", "resolve_at"), ("context_expand_enable", "mark_unresolved")):
+        try:
+            flags[name] = bool(config.get(key, True))
+        except Exception as e:
+            # 配置读取异常不能影响回复主流程，退回默认（开启）并留痕
+            logger.add_info("Chat").debug(f"[Context] 读取配置 {key} 失败，按默认开启处理: {e}")
+    return flags
 
 
 async def _collect_llm_ext(runtime, event, session_id: str, is_private: bool, schedule_enable: bool):
@@ -524,7 +551,8 @@ async def call_llm_and_reply(module, event, session_mgr, config,
     if group_id:
         if include_pre_history:
             pre_history_text = await _build_group_pre_history(
-                event, group_id, count=history_rounds, **_meta_flags
+                event, group_id, count=history_rounds, **_meta_flags,
+                **_context_expand_flags(config),
             )
     elif is_private and include_pre_history in ("history", "load"):
         pre_history_text = await fetch_private_online_history(
@@ -717,7 +745,8 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
     if group_id:
         if include_pre_history:
             pre_history_text = await _build_group_pre_history(
-                event, group_id, count=history_rounds, **_meta_flags
+                event, group_id, count=history_rounds, **_meta_flags,
+                **_context_expand_flags(config),
             )
     elif is_private and include_pre_history in ("history", "load"):
         pre_history_text = await fetch_private_online_history(
@@ -922,7 +951,8 @@ async def stream_response(runtime, event, ctx=None):
     if group_id:
         if include_pre_history:
             pre_history_text = await _build_group_pre_history(
-                event, group_id, count=history_rounds, **_meta_flags
+                event, group_id, count=history_rounds, **_meta_flags,
+                **_context_expand_flags(config),
             )
     elif is_private and include_pre_history in ("history", "load"):
         pre_history_text = await fetch_private_online_history(

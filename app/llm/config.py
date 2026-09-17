@@ -145,6 +145,9 @@ DEFAULT_LLM_CONFIG: dict = {
     "history_auto_qq_min_local": 4,
     # get_chat_history 跨会话：私聊里查询"自己也是成员"的群历史（群聊里一律拒绝）
     "history_cross_query_enable": True,
+    # 上下文「骨架补全」：聊天记录里展不开的内容标成【未展开:...】并允许按需展开
+    # （与 expand_context 工具同开同关；@ 昵称预展开沿用上面的 fetch_at_nickname）
+    "context_expand_enable": True,
     # 工具主动性提示词（唯一一块「主动性」system 块）
     "proactive_prompt_enable": True,          # 是否注入「主动性」协议块
     "proactive_history_intent_nudge": True,   # 命中历史意图时在同一块内补强
