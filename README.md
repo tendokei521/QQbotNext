@@ -239,6 +239,23 @@ class Module(BaseModule):
 - `SKILLS` / `@skill`：注入 system prompt 的技能说明
 - 模块 `config` 里可用 `tools_enabled` / `skills_enabled` 单独开关工具与技能
 
+### 上下文补全（聊天环境自己取）
+
+聊天记录里常常只剩"骨架"（`@123`、`[引用]`），框架分三层把"血肉"补齐，让模型不必猜：
+
+1. **预展开**：渲染层把 `@123` 反查成 `@三哥(123)`（`app/llm/nicknames.py` 共享缓存，
+   与触发消息的 @ 解析共用，同一个人只查一次）；
+2. **缺口标记 + 摘要**：实在取不到才标 `【未展开:用户123】`，并在背景块 / `get_chat_history`
+   头部给出 `【本段含 2 处未展开内容：…；可调用 expand_context 展开后再回答】`；
+3. **按需展开**：系统工具 `expand_context` 按 id 展开（`users[]` 是谁、`messages[]` 被引用
+   消息与合并转发一层），零参数时自动从本轮触发消息推导——模型不需要先知道 id。
+
+只有**能被解决**的缺口才会被标记（图片/语音无法转文字就不标记）。相关开关与设计说明见
+[`docs/context-expand-design.md`](docs/context-expand-design.md)：`fetch_at_nickname`、
+`context_expand_enable`、`max_tool_rounds`、`proactive_env_prompt_enable` 等。
+
+> 主动消息与定时任务同样具备这套能力（此前这两条路径完全不传 tools）。
+
 工具支持**权限与作用域**：
 
 ```python
