@@ -11,10 +11,14 @@ from typing import Any
 
 from app.llm.tool import ToolSpec
 
-_SYSTEM_TOOL_PREREQUISITES: dict[str, tuple[str, str]] = {
+# 前置开关：(config 键, 未启用时的说明, 键缺失时的默认值)
+# 默认值必须与功能实际默认保持一致：``context_expand_enable`` 一类"默认开启"的功能，
+# 若在配置里读不到该键却被当作 False，会出现"spec 已加入但被系统过滤掉"的静默消失。
+_SYSTEM_TOOL_PREREQUISITES: dict[str, tuple] = {
     "schedule_task": ("schedule_enable", "定时任务未启用"),
     "get_current_session": ("", "始终可用"),
     "get_chat_history": ("", "始终可用"),
+    "expand_context": ("context_expand_enable", "上下文按需展开未启用", True),
     "tavily_search": ("tavily_enable", "Tavily 联网搜索未启用"),
     "memory_save": ("memory_enable", "长期记忆未启用"),
     "memory_recall": ("memory_enable", "长期记忆未启用"),
@@ -36,14 +40,16 @@ def _cfg_get(runtime: Any, key: str, default: Any = None) -> Any:
 
 
 def _prereq_state(runtime: Any, name: str) -> tuple[bool, str]:
-    key, label = _SYSTEM_TOOL_PREREQUISITES.get(name, ("", ""))
+    entry = _SYSTEM_TOOL_PREREQUISITES.get(name, ("", ""))
+    key, label = entry[0], entry[1]
+    default = entry[2] if len(entry) > 2 else False
     if not key:
         return True, ""
     if name.startswith("memory_"):
         memory = getattr(runtime, "memory", None)
         if memory is not None and hasattr(memory, "enabled"):
             return bool(memory.enabled()), label
-    return bool(_cfg_get(runtime, key, False)), label
+    return bool(_cfg_get(runtime, key, default)), label
 
 
 def _spec_meta(spec: ToolSpec, ready: bool, prerequisite: str, enabled: bool = True) -> dict:
@@ -71,6 +77,10 @@ def _build_specs(runtime: Any) -> list[ToolSpec]:
     from app.llm.session_tools import build_session_tools
 
     specs.extend(build_session_tools(runtime, None))
+
+    from app.llm.context_tools import build_context_tools
+
+    specs.extend(build_context_tools(runtime, None))
 
     from app.llm.tavily_search import build_tavily_tool
 

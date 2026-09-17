@@ -150,6 +150,13 @@ async def _collect_llm_ext(runtime, event, session_id: str, is_private: bool, sc
 
     specs.extend(build_session_tools(runtime, ctx))
 
+    # 按需展开上下文（@ 对象 / 被引用消息 / 合并转发）——与渲染层的未展开标记同开同关：
+    # 标记必须可被解决，否则只会诱导模型空转或谎称无法回答。
+    if bool(runtime.config.get("context_expand_enable", True)):
+        from app.llm.context_tools import build_context_tools
+
+        specs.extend(build_context_tools(runtime, ctx))
+
     # Tavily 联网搜索（系统级工具，不进入 NapCat 前端清单）
     if bool(runtime.config.get("tavily_enable", False)):
         tavily_api_key = str(runtime.config.get("tavily_api_key", "") or "").strip()
