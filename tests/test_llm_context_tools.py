@@ -129,10 +129,10 @@ async def test_expand_user_in_group_reports_identity_and_relation():
 
     result = await _call(_ctx(bot, event), {"users": ["123"]})
 
-    assert "【用户 123】" in result
+    assert "（我看了下这个人）" in result
     assert "三哥" in result
     assert "admin" in result
-    assert "relation：当前消息 @ 的对象" in result
+    assert "关系：当前消息 @ 的对象" in result
 
 
 async def test_expand_user_writes_shared_nickname_cache():
@@ -164,10 +164,10 @@ async def test_expand_message_reports_sender_and_text():
 
     result = await _call(_ctx(bot, event), {"messages": ["999"]})
 
-    assert "【消息 999】" in result
+    assert "（我翻到了这条消息）" in result
     assert "三哥(123)" in result
     assert "晚上一起打游戏吗" in result
-    assert "relation：当前消息引用的消息" in result
+    assert "关系：当前消息引用的消息" in result
 
 
 async def test_expand_message_unwraps_forward_one_level():
@@ -184,7 +184,7 @@ async def test_expand_message_unwraps_forward_one_level():
 
     result = await _call(_ctx(bot), {"messages": ["999"]})
 
-    assert "合并转发内容：" in result
+    assert "转发内容 —— " in result
     assert "小明: 早" in result
 
 
@@ -239,7 +239,7 @@ async def test_forward_lookup_uses_containing_message_id():
 
     assert bot.forward_ids == ["999"]  # 不碰内部 forward id，也就不需要兜底重试
     assert "小明: 早" in result
-    assert "已展开 1 项" in result
+    assert result.startswith("（我翻到了这条消息）")
 
 
 async def test_forward_lookup_falls_back_to_inner_id():
@@ -272,9 +272,9 @@ async def test_forward_failure_is_reported_not_hidden():
 
     result = await _call(_ctx(bot), {"messages": ["999"]})
 
-    assert "未取到" in result
-    assert "1404" in result  # 失败原因如实回传，模型才不会换个工具重复试同一件事
-    assert "只取到部分信息" in result  # 不能算进"已展开"
+    assert "没取到" in result
+    assert "1404" in result          # 失败原因如实回传，模型才不会换个工具重复试同一件事
+    assert "（这条只翻到一半）" in result   # 不能假装拿到了正文
 
 
 async def test_numeric_forward_id_would_be_rejected():
@@ -317,7 +317,7 @@ async def test_get_msg_retries_with_raw_string_id():
 
 
 async def test_message_without_readable_body_is_flagged():
-    """消息只有发送者、正文无内容时，必须标出"未取到正文"。"""
+    """消息只有发送者、正文无内容时，必须如实标注"没拿到正文"。"""
     bot = _Bot(messages={"999": {
         "sender": {"user_id": 1, "nickname": "n"},
         "message": [{"type": "image", "data": {}}],
@@ -325,8 +325,8 @@ async def test_message_without_readable_body_is_flagged():
 
     result = await _call(_ctx(bot), {"messages": ["999"]})
 
-    assert "未取到正文" in result
-    assert "只取到部分信息" in result
+    assert "正文没拿到" in result
+    assert "（这条只翻到一半）" in result
 
 
 # ---------- 批量 / 并发 ----------
@@ -347,7 +347,9 @@ async def test_expand_bulk_runs_concurrently():
     result = await _call(_ctx(_SlowBot()), {"users": [1, 2, 3]})
 
     assert len(started) == 3  # 三个都同时处于执行中
-    assert "已展开 3 项" in result
+    # T2：结果里不再有"已展开 N 项"这类汇总头（它会把模型带向汇报体）
+    assert "已展开" not in result
+    assert result.count("（我看了下这个人）") == 3
 
 
 async def test_expand_reports_only_resolved_items():
@@ -355,8 +357,8 @@ async def test_expand_reports_only_resolved_items():
 
     result = await _call(_ctx(bot), {"users": [123, 999]})
 
-    assert "已展开 1 项" in result
-    assert "999" not in result.split("\n", 1)[1]
+    assert result.count("（我看了下这个人）") == 1
+    assert "999" not in result
 
 
 # ---------- expand_recent：按位置取（"上一条/刚才那条"） ----------
@@ -402,7 +404,7 @@ async def test_expand_recent_expands_forward_and_registers_focus():
 
     result = await _call(_ctx(bot), {"count": 1}, tool="expand_recent")
 
-    assert "合并转发内容：小明: 早" in result
+    assert "转发内容 —— 小明: 早" in result
     # 取回即登记：后续渲染/下一轮请求能看到"已展开"
     assert focus.summary_of("10001", "group_778", "1002")
 
@@ -419,7 +421,7 @@ async def test_expand_recent_falls_back_to_inner_forward_id():
     result = await _call(_ctx(bot), {"count": 1}, tool="expand_recent")
 
     assert [c[0] for c in bot.calls if c[0] == "forward"] == ["forward", "forward"]
-    assert "合并转发内容：小明: 早" in result
+    assert "转发内容 —— 小明: 早" in result
 
 
 async def test_expand_recent_count_is_clamped():
@@ -451,8 +453,34 @@ async def test_expand_recent_reports_unreadable_rows():
 
     result = await _call(_ctx(bot), {"count": 1}, tool="expand_recent")
 
-    assert "未取到正文" in result
-    assert "只取到部分信息" in result
+    assert "正文没拿到" in result
+    assert "（最近这条只翻到一半" in result
+
+
+# ---------- 摘要抽取（供焦点表 / 已展开标记） ----------
+
+
+def test_summaries_extract_clean_sentence():
+    from app.llm.context_tools import summarize_message, summarize_user
+
+    assert summarize_user("（我看了下这个人）昵称：三哥；群名片：三哥 [QQ 123] [关系：指定展开的用户]") == "三哥"
+    assert summarize_user("（我看了下这个人）昵称：小红 [QQ 9] [关系：指定展开的用户]") == "小红"
+
+    msg = "（我翻到了这条消息）三哥(123)：晚上一起打游戏吗 [id 999] [关系：当前消息引用的消息]"
+    assert summarize_message(msg) == "三哥(123)：晚上一起打游戏吗"
+
+    fwd = "（我翻到了这条消息）小红(2)：转发内容 —— 小明: 早 ｜ 小刚: 早啊 [id 999] [关系：当前消息引用的消息]"
+    assert summarize_message(fwd) == "转发：小明: 早 ｜ 小刚: 早啊"
+    assert summarize_message("") == ""
+
+
+def test_cache_hit_summary_has_no_stale_head():
+    """第二次取回用登记摘要时，不该把旧的"（我翻到了…）"头一起带出来。"""
+    from app.llm.context_tools import summarize_message
+
+    first = "（我翻到了这条消息）三哥(123)：早 [id 999] [关系：指定展开的消息]"
+
+    assert not summarize_message(first).startswith("（")
 
 
 # ---------- 错误与边界 ----------
@@ -490,7 +518,7 @@ async def test_fetch_entities_from_event_derives_relations():
 
     result = await fetch_entities(ctx, messages=["999"])
 
-    assert "relation：当前消息引用的消息" in result.blocks[0]
+    assert "关系：当前消息引用的消息" in result.blocks[0]
 
 
 async def test_expand_all_failures_returns_error():

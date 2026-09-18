@@ -230,7 +230,18 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
                     duration_ms=duration_ms,
                     error=error,
                 ))
-            return _truncate_result(result)
+            # 结果侧的「回应要求」：拼在工具结果末尾（位置最贴近生成点），
+            # 压住"工具返回后必写长串汇报"的倾向。详见 tool_loop 模块 docstring。
+            # 放在截断**之后**，保证这条要求不会被 2000 字上限砍掉；
+            # 失败结果不追加（见 append_reply_directive）。
+            final = _truncate_result(result)
+            if runtime is not None:
+                from app.llm.tool_loop import append_reply_directive, reply_directive
+
+                final = append_reply_directive(
+                    final, reply_directive(getattr(runtime, "config", None))
+                )
+            return final
         return f"error: 未知工具 {name}"
 
     return _executor

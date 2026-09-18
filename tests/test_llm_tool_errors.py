@@ -45,20 +45,27 @@ async def test_error_text_result_marks_tool_call_failed():
     result, seen = await _run(_failing_handler)
 
     assert result.startswith("error:")
+    # 失败结果不追加「回应要求」：此时模型需要的是纠错而不是语气约束
+    assert "给你自己看的资料" not in result
     assert len(seen) == 1
     assert seen[0].success is False
     assert seen[0].extra.get("error") == "error_result"
 
 
 async def test_normal_text_result_is_still_success():
-    """正常文本结果不能被误判为失败。"""
+    """正常文本结果不能被误判为失败。
+
+    注意：成功结果末尾会拼上「回应要求」（``tool_loop.DEFAULT_REPLY_DIRECTIVE``），
+    因此这里断言前缀而非全等；失败结果不拼（见下一条用例）。
+    """
 
     async def _ok_handler(_ctx, _args):
         return "晴朗，25℃"
 
     result, seen = await _run(_ok_handler)
 
-    assert result == "晴朗，25℃"
+    assert result.startswith("晴朗，25℃")
+    assert "给你自己看的资料" in result      # 回应要求已附加
     assert seen[0].success is True
     assert seen[0].extra == {}
 

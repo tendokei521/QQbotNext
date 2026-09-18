@@ -540,6 +540,17 @@ SCHEMA = {
                        "调大后多段式任务（如逐个展开引用的消息/@ 对象再作答）不会中途被截断，代价是极端情况下耗时与 token 增加",
         "default": 5, "min": 1, "max": 20, "group": "group_tools",
     },
+    "tool_result_directive_enable": {
+        "type": "boolean", "label": "工具结果附带回应要求",
+        "description": "在工具结果末尾拼一句「用你自己的口吻回应，不要复述/不要列条目」。"
+                       "工具结果之后没有新的用户发言，模型容易写成长串汇报；这句要求放在离生成最近的位置来压住它",
+        "default": True, "group": "group_tools",
+    },
+    "tool_result_directive": {
+        "type": "textarea", "label": "回应要求文本",
+        "description": "留空=使用内置默认。可改成更贴合角色语气的说法（例如“用你平时的语气说一两句就够了”）",
+        "default": "", "rows": 3, "group": "group_tools",
+    },
 
     # ==================== NapCat 工具 ====================
     "napcat_tools_enable": {

@@ -19,6 +19,14 @@
 - **参数解析失败不再静默降级**：以前 ``arguments`` 解析失败会退化成 ``args={}`` 照常执行，
   工具收到空参后返回 error/误导结果回传给模型，模型只会得出“这工具不好用”的结论而放弃
   调用（正是“主动性”流失的主要来源之一）。现在直接回传可纠正的错误文本，不执行工具。
+
+结果侧约定（回应要求）：
+- 工具结果之后的那一轮生成，最后一条消息是 ``role: tool``——**没有新的用户发言**，
+  模型的任务天然变成"处理/汇报这份结果"，于是输出长串总结（真实日志里 8 条、约 300 字）。
+  人设与协议块都在上下文最前面，离生成点太远，压不住它。
+- 因此这里提供「回应要求」文本，由工具执行器拼在**结果末尾**（位置最贴近生成），
+  而不是新增一条 system 消息——Anthropic/Gemini 的适配器会把中途的 system 上提到最前面
+  （``anthropic._normalize_messages`` / ``gemini._normalize_messages``），加了也会静默失效。
 """
 
 from __future__ import annotations
@@ -26,6 +34,44 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any, Callable
+
+# 默认「回应要求」：只讲"用什么口吻回应"，不涉及具体内容
+DEFAULT_REPLY_DIRECTIVE = (
+    "（上面这些是给你自己看的资料，不是要你转述的稿子：直接用你自己的口吻回应用户，"
+    "不要复述、不要列条目、不要以“根据记录/已展开”开头；一两句就够。"
+    "若还需要更多信息，可以继续调用工具。）"
+)
+
+ERROR_RESULT_PREFIX = "error:"
+
+
+def reply_directive(config: Any) -> str:
+    """读取「回应要求」文本；未启用或读取失败时返回空串。"""
+    if config is None:
+        return ""
+    try:
+        if not bool(config.get("tool_result_directive_enable", True)):
+            return ""
+        text = config.get("tool_result_directive")
+    except Exception:
+        # 配置对象异常不应影响工具结果回传：按"不追加"处理（保守）
+        return ""
+    if text in (None, ""):
+        return DEFAULT_REPLY_DIRECTIVE
+    return str(text).strip()
+
+
+def append_reply_directive(result: str, directive: str) -> str:
+    """把「回应要求」拼到工具结果末尾。
+
+    - 失败结果（``error:`` 前缀）不追加：此时模型需要的是纠错，不是语气约束；
+    - 空结果不追加（保持"无内容"的语义）。
+    """
+    if not directive or not isinstance(result, str) or not result.strip():
+        return result
+    if result.lstrip().startswith(ERROR_RESULT_PREFIX):
+        return result
+    return f"{result}\n\n{directive}"
 
 
 def _parse_arguments(raw_args: Any) -> tuple[dict, str, str]:

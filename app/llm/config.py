@@ -141,6 +141,10 @@ DEFAULT_LLM_CONFIG: dict = {
     # 工具调用循环轮数上限（流式与非流式共用）：调大后"展开环境→再判断→再展开"这类
     # 多段链条不会在第 5 轮被硬切（此前流式硬编码 5、非流式走 Provider 默认值，两处不一致）
     "max_tool_rounds": 5,
+    # 工具结果尾部的「回应要求」：压住"工具返回后写长串汇报"的倾向
+    # （拼在结果末尾而不是新增 system —— 中途 system 在 Anthropic/Gemini 会被上提到最前）
+    "tool_result_directive_enable": True,
+    "tool_result_directive": "",       # 空=用内置默认（见 tool_loop.DEFAULT_REPLY_DIRECTIVE）
     # get_chat_history：本地记录少于该条数时自动补拉 QQ 聊天记录（0=总是补拉）
     "history_auto_qq_min_local": 4,
     # get_chat_history 跨会话：私聊里查询"自己也是成员"的群历史（群聊里一律拒绝）

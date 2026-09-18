@@ -206,3 +206,75 @@ async def test_non_str_result_is_stringified():
     _, messages = await normalize_and_execute_tool_calls([_call("t", "{}")], _executor, [])
 
     assert messages[0]["content"] == "{'status': 'ok'}"
+
+
+# ---------- 「回应要求」拼在工具结果末尾（T1） ----------
+
+
+class _BadCfg(dict):
+    def get(self, key, default=None):
+        raise RuntimeError("配置后端异常")
+
+
+def test_reply_directive_default_and_switch():
+    from app.llm.tool_loop import DEFAULT_REPLY_DIRECTIVE, reply_directive
+
+    assert reply_directive(None) == ""
+    assert reply_directive({}) == DEFAULT_REPLY_DIRECTIVE          # 空=用内置默认
+    assert reply_directive({"tool_result_directive": "简短点"}) == "简短点"
+    assert reply_directive({"tool_result_directive_enable": False}) == ""
+    assert reply_directive(_BadCfg()) == ""                        # 配置异常按不追加
+
+
+def test_default_directive_says_short_and_no_report():
+    from app.llm.tool_loop import DEFAULT_REPLY_DIRECTIVE
+
+    assert "不要复述" in DEFAULT_REPLY_DIRECTIVE
+    assert "一两句就够" in DEFAULT_REPLY_DIRECTIVE
+    assert "继续调用工具" in DEFAULT_REPLY_DIRECTIVE  # 保留多段任务的能力
+
+
+def test_append_reply_directive_skips_errors_and_empty():
+    from app.llm.tool_loop import append_reply_directive
+
+    assert append_reply_directive("内容", "") == "内容"
+    assert append_reply_directive("内容", "【要求】") == "内容\n\n【要求】"
+    assert append_reply_directive("error: 取不到", "【要求】") == "error: 取不到"
+    assert append_reply_directive("", "【要求】") == ""
+
+
+async def test_executor_appends_directive_to_successful_result():
+    """工具结果末尾必须带上回应要求（抑制"工具返回后写长串汇报"的落点）。"""
+    from types import SimpleNamespace
+
+    from app.llm.tool import ToolContext, ToolSpec, make_executor
+
+    async def _handler(_ctx, _args):
+        return "（我翻到了这条消息）三哥(123)：早"
+
+    spec = ToolSpec(name="t", description="", parameters={"type": "object", "properties": {}},
+                    handler=_handler, scopes=("*",))
+    runtime = SimpleNamespace(bot_id="1", config={}, telemetry=None, llm_tool_call_hooks=None)
+    executor = make_executor([spec], ToolContext(runtime=runtime))
+
+    result = await executor("t", {})
+
+    assert result.startswith("（我翻到了这条消息）")
+    assert "给你自己看的资料" in result
+
+
+async def test_executor_respects_disabled_directive():
+    from types import SimpleNamespace
+
+    from app.llm.tool import ToolContext, ToolSpec, make_executor
+
+    async def _handler(_ctx, _args):
+        return "结果"
+
+    spec = ToolSpec(name="t", description="", parameters={"type": "object", "properties": {}},
+                    handler=_handler, scopes=("*",))
+    runtime = SimpleNamespace(bot_id="1", config={"tool_result_directive_enable": False},
+                              telemetry=None, llm_tool_call_hooks=None)
+    executor = make_executor([spec], ToolContext(runtime=runtime))
+
+    assert await executor("t", {}) == "结果"

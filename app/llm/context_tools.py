@@ -143,30 +143,50 @@ def _truncate(text: str, limit: int) -> str:
 
 
 def summarize_user(text: str, limit: int = 40) -> str:
-    """从用户展开文本里抽一句话摘要（供焦点表/已展开标记使用）。"""
-    m = re.search(r"昵称：([^；]+)", text or "")
-    if m:
-        return m.group(1).strip()[:limit]
-    m = re.search(r"群名片：([^；]+)", text or "")
-    return m.group(1).strip()[:limit] if m else ""
+    """从用户展开文本里抽一句话摘要（供焦点表/已展开标记使用）。
 
-
-def summarize_message(text: str, limit: int = 60) -> str:
-    """从消息展开文本里抽一句话摘要（谁 + 说了什么 / 转发了什么）。"""
-    body = str(text or "").strip()
-    if not body:
-        return ""
-    m = re.search(r"合并转发内容：(.+)", body)
-    if m:
-        return ("转发：" + m.group(1)).strip()[:limit]
-    m = re.search(r"来自\s*([^；]+)；(.+?)(?:；relation|$)", body)
-    if m:
-        return f"{m.group(1)}：{m.group(2)}".strip()[:limit]
+    适配第一人称格式：``（我看了下这个人）昵称：三哥；群名片：… [QQ 123] [关系：…]``
+    ——方括号里的 id/关系不算摘要内容，遇到 ``[`` 即停。
+    """
+    body = str(text or "").lstrip("（").strip()
+    for key in ("昵称：", "群名片："):
+        m = re.search(key + r"([^；\[]+)", str(text or ""))
+        if m and m.group(1).strip():
+            return m.group(1).strip()[:limit]
     return body[:limit]
 
 
+def summarize_message(text: str, limit: int = 60) -> str:
+    """从消息展开文本里抽一句话摘要（谁 + 说了什么 / 转发了什么）。
+
+    适配第一人称格式：
+    ``（我翻到了这条消息）三哥(123)：正文 [id 999] [关系：…]``
+    ``（我翻到了这条消息）三哥(123)：转发内容 —— 小明: 早 [id 999] [关系：…]``
+    """
+    body = str(text or "").strip()
+    if not body:
+        return ""
+    m = re.search(r"转发内容 —— (.+?)(?:\s*\[id|\s*\[关系|$)", body)
+    if m:
+        return ("转发：" + m.group(1)).strip()[:limit]
+    # 去掉开头的"（我翻到了这条消息）"之类说明，再取"发送者：正文"
+    stripped = re.sub(r"^（[^）]*）", "", body).strip()
+    m = re.search(r"^(.+?)[：:](.+?)(?:\s*\[id|\s*\[关系|$)", stripped)
+    if m:
+        return f"{m.group(1)}：{m.group(2)}".strip()[:limit]
+    m = re.search(r"转发内容 —— (.+)", body)
+    if m:
+        return ("转发：" + m.group(1)).strip()[:limit]
+    return stripped[:limit]
+
+
 async def _describe_user(bot: Any, group_id: Any, qq: str, relation: str, *, bot_id: Any = "") -> tuple[str, bool]:
-    """把一个 QQ 展开成"是谁"（群聊优先取群名片/角色）；返回 (文本, 是否取到内容)。"""
+    """把一个 QQ 展开成"是谁"（群聊优先取群名片/角色）；返回 (文本, 是否取到内容)。
+
+    文本用**第一人称"我看到的"**口吻（``（我看了下这个人）……``），而不是字段清单式的
+    "【用户 123】昵称：…；relation：…"——后者读起来像一份待总结的报告，会把模型带向
+    "复述/汇报"的语气。
+    """
     try:
         if group_id not in (None, ""):
             resp = await bot.get_group_member_info(group_id=int(group_id), user_id=int(qq))
@@ -186,14 +206,14 @@ async def _describe_user(bot: Any, group_id: Any, qq: str, relation: str, *, bot
                 bits.append(f"等级：{data.get('level')}")
             if data.get("title"):
                 bits.append(f"头衔：{data.get('title')}")
-            return f"【用户 {qq}】{'；'.join(bits)}；relation：{relation}", True
+            return f"（我看了下这个人）{'；'.join(bits)} [QQ {qq}] [关系：{relation}]", True
         resp = await bot.get_stranger_info(user_id=int(qq))
         data = (resp or {}).get("data") if isinstance(resp, dict) else None
         data = data if isinstance(data, dict) else {}
         if not data:
             return "", False
         nickname = str(data.get("nickname") or "") or "未知"
-        return f"【用户 {qq}】昵称：{nickname}；relation：{relation}", True
+        return f"（我看了下这个人）昵称：{nickname} [QQ {qq}] [关系：{relation}]", True
     except Exception as e:
         logger.debug(f"[ExpandContext] 展开用户 {qq} 失败（已忽略）: {e}")
         return "", False
@@ -202,8 +222,8 @@ async def _describe_user(bot: Any, group_id: Any, qq: str, relation: str, *, bot
 async def _describe_message(bot: Any, mid: str, limit: int, relation: str) -> tuple[str, bool]:
     """把一条消息 id 展开成"谁说的、说了什么"（含合并转发的一层内容）。
 
-    返回 ``(文本, 是否取到正文)``：只有发送者、正文仍是 ``[合并转发]`` 这类占位时第二项为
-    False——调用方据此如实汇报，绝不能让模型以为"已展开"就直接开始回答。
+    返回 ``(文本, 是否取到正文)``：只有发送者、正文仍是占位时第二项为 False——
+    调用方据此如实汇报，绝不能让模型以为"已展开"就直接开始回答。
     """
     try:
         data = await _fetch_message(bot, mid)
@@ -213,34 +233,31 @@ async def _describe_message(bot: Any, mid: str, limit: int, relation: str) -> tu
         label = str(sender.get("card") or sender.get("nickname") or sender.get("user_id") or "未知")
         sender_id = str(sender.get("user_id") or "")
         text = extract_msg_text(data.get("message"))
-        bits = [f"来自 {label}" + (f"({sender_id})" if sender_id else "")]
+        bits = [f"{label}" + (f"({sender_id})" if sender_id else "")]
         if has_real_content(text):
             bits.append(_truncate(text, limit))
         # 合并转发：再展开一层（一层深度的"引用链"，不递归，避免无界展开）。
         # 注意：get_forward_msg 要的是**承载转发的那条消息的 id**（也就是这里的 mid），
         # 不是转发节点内部的 forward id——后者是超长整型字符串（如 7686537322889496857），
         # 既超出 int32、也超出 JS 安全整数范围。内部 id 只作为兜底再试一次。
-        inner_id = ""
-        for seg in _segments(data.get("message")):
-            if _seg_type(seg) == "forward":
-                inner_id = str(_seg_field(seg, "id", "") or "")
-                break
         forward_ok = False
-        if inner_id or has_forward_segment(data.get("message")):
+        if has_forward_segment(data.get("message")):
             nodes, forward_error = await _describe_forward(bot, str(mid), limit)
+            inner_id = forward_inner_id(data.get("message"))
             if not nodes and inner_id and inner_id != str(mid):
                 nodes, fallback_error = await _describe_forward(bot, inner_id, limit)
                 forward_error = forward_error or fallback_error
             if nodes:
-                bits.append("合并转发内容：" + nodes)
+                bits.append("转发内容 —— " + nodes)
                 forward_ok = True
             else:
                 # 如实报告失败原因：否则模型会以为拿到了内容，或者换个工具把同一件事再试一遍
-                bits.append(f"合并转发内容：未取到（{forward_error or '原因未知'}）")
+                bits.append(f"转发内容没取到（{forward_error or '原因未知'}）")
         got_content = has_real_content(text) or forward_ok
-        if not got_content:
-            bits.append("（本条未取到正文）")
-        return f"【消息 {mid}】{'；'.join(bits)}；relation：{relation}", got_content
+        if not forward_ok and not has_real_content(text):
+            bits.append("（正文没拿到）")
+        head = "（我翻到了这条消息）" if got_content else "（这条只翻到一半）"
+        return f"{head}{'：'.join(bits)} [id {mid}] [关系：{relation}]", got_content
     except Exception as e:
         logger.debug(f"[ExpandContext] 展开消息 {mid} 失败（已忽略）: {e}")
         return "", False
@@ -325,19 +342,19 @@ class EntityResult:
         return bool(self.blocks)
 
     def render(self) -> str:
+        """工具结果文本。
+
+        用**第一人称"我看到的"**并**去掉"已展开 N 项"这类汇总头**——汇总头读起来像一份
+        待总结的报告，直接把模型带向"复述/汇报"的语气。（逐条块自身已标明
+        "（我翻到了这条消息）/（这条只翻到一半）"，无需再套一层统计。）
+        """
         if not self.ok:
+            # 全失败：保持 "error:" 前缀（项目约定：工具失败结果可被识别与统计）
             return (
                 "error: 没有取到任何可展开的内容"
                 "（消息可能已过期、id 不合法、机器人无权限或连接不可用）。"
             )
-        lines: list[str] = []
-        if self.blocks:
-            lines.append(f"已展开 {len(self.blocks)} 项：")
-            lines.extend(self.blocks)
-        if self.partial:
-            lines.append(f"以下 {len(self.partial)} 项只取到部分信息（正文未取到）：")
-            lines.extend(self.partial)
-        return "\n".join(lines)
+        return "\n".join([*self.blocks, *self.partial])
 
 
 def _entity_ids(ctx) -> tuple[Any, str, str, Any, set[str]]:
@@ -389,7 +406,7 @@ async def fetch_entities(
         relation = "当前消息 @ 的对象" if qq in from_event_users else "指定展开的用户"
         cached = focus.summary_of(bot_id, session_id, qq) if session_id else ""
         if cached:
-            return f"【用户 {qq}】昵称：{cached}（本会话已展开过）；relation：{relation}", True
+            return f"（这个人我之前已经看过）昵称：{cached} [QQ {qq}] [关系：{relation}]", True
         text, ok = await _describe_user(bot, group_id, qq, relation, bot_id=bot_id)
         if ok and text:
             focus.note(bot_id, session_id, qq, kind="user", label=f"用户{qq}",
@@ -400,7 +417,7 @@ async def fetch_entities(
         relation = "当前消息引用的消息" if mid in from_event_messages else "指定展开的消息"
         cached = focus.summary_of(bot_id, session_id, mid) if session_id else ""
         if cached:
-            return f"【消息 {mid}】{cached}（本会话已展开过）；relation：{relation}", True
+            return f"（这条我之前已经看过了）{cached} [id {mid}] [关系：{relation}]", True
         text, ok = await _describe_message(bot, mid, limit, relation)
         if ok and text:
             focus.note(bot_id, session_id, mid, kind="message", label=f"消息{mid}",
@@ -469,7 +486,7 @@ async def fetch_recent(ctx, count: int = 1, *, limit: int = DEFAULT_ITEM_CHARS) 
         sender_id = str(sender.get("user_id") or "")
         msg_id = str(msg.get("message_id") or msg.get("real_id") or msg.get("message_seq") or "")
         text = extract_msg_text(msg.get("message"), at_names, False, msg_id)
-        bits = [f"来自 {label}" + (f"({sender_id})" if sender_id else "")]
+        bits = [f"{label}" + (f"({sender_id})" if sender_id else "")]
         ok = has_real_content(text)
         if ok:
             bits.append(_truncate(text, limit))
@@ -480,15 +497,15 @@ async def fetch_recent(ctx, count: int = 1, *, limit: int = DEFAULT_ITEM_CHARS) 
                 nodes, fallback_error = await _describe_forward(bot, inner_id, limit)
                 forward_error = forward_error or fallback_error
             if nodes:
-                bits.append("合并转发内容：" + nodes)
+                bits.append("转发内容 —— " + nodes)
                 ok = True
             else:
-                bits.append(f"合并转发内容：未取到（{forward_error or '原因未知'}）")
+                bits.append(f"转发内容没取到（{forward_error or '原因未知'}）")
         if not ok:
-            bits.append("（本条未取到正文）")
-        block = f"第 {len(result.blocks) + len(result.partial) + 1} 近的消息" + (
-            f"（id {msg_id}）" if msg_id else ""
-        ) + f"：{'；'.join(bits)}"
+            bits.append("（正文没拿到）")
+        head = "（我刚翻的最近消息" if ok else "（最近这条只翻到一半"
+        suffix = f"，id {msg_id}）" if msg_id else "）"
+        block = f"{head}{suffix}{'：'.join(bits)}"
         (result.blocks if ok else result.partial).append(block)
         if msg_id:
             result.refs.append(msg_id)
