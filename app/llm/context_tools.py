@@ -20,7 +20,7 @@ from typing import Any
 
 from app.core.logger import logger
 from app.llm import nicknames
-from app.llm.group_context import extract_msg_text
+from app.llm.group_context import extract_msg_text, has_real_content
 from app.llm.tool import ToolSpec
 
 # 单条内容默认截断长度（工具结果外层还有 TOOL_RESULT_MAX=2000 的总截断，
@@ -111,8 +111,8 @@ def _truncate(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit] + "…"
 
 
-async def _describe_user(bot: Any, group_id: Any, qq: str, relation: str, *, bot_id: Any = "") -> str:
-    """把一个 QQ 展开成"是谁"（群聊优先取群名片/角色）。"""
+async def _describe_user(bot: Any, group_id: Any, qq: str, relation: str, *, bot_id: Any = "") -> tuple[str, bool]:
+    """把一个 QQ 展开成"是谁"（群聊优先取群名片/角色）；返回 (文本, 是否取到内容)。"""
     try:
         if group_id not in (None, ""):
             resp = await bot.get_group_member_info(group_id=int(group_id), user_id=int(qq))
@@ -120,9 +120,9 @@ async def _describe_user(bot: Any, group_id: Any, qq: str, relation: str, *, bot
             data = data if isinstance(data, dict) else {}
             nickname = str(data.get("card") or data.get("nickname") or "")
             # 共享昵称缓存：本次展开过的昵称，后续渲染背景块直接命中
-            nicknames.remember(bot_id, group_id, qq, str(data.get("card") or data.get("nickname") or ""))
+            nicknames.remember(bot_id, group_id, qq, nickname)
             if not data:
-                return ""
+                return "", False
             bits = [f"昵称：{nickname or '未知'}"]
             if data.get("card"):
                 bits.append(f"群名片：{data.get('card')}")
@@ -132,76 +132,120 @@ async def _describe_user(bot: Any, group_id: Any, qq: str, relation: str, *, bot
                 bits.append(f"等级：{data.get('level')}")
             if data.get("title"):
                 bits.append(f"头衔：{data.get('title')}")
-            return f"【用户 {qq}】{'；'.join(bits)}；relation：{relation}"
+            return f"【用户 {qq}】{'；'.join(bits)}；relation：{relation}", True
         resp = await bot.get_stranger_info(user_id=int(qq))
         data = (resp or {}).get("data") if isinstance(resp, dict) else None
         data = data if isinstance(data, dict) else {}
         if not data:
-            return ""
+            return "", False
         nickname = str(data.get("nickname") or "") or "未知"
-        return f"【用户 {qq}】昵称：{nickname}；relation：{relation}"
+        return f"【用户 {qq}】昵称：{nickname}；relation：{relation}", True
     except Exception as e:
         logger.debug(f"[ExpandContext] 展开用户 {qq} 失败（已忽略）: {e}")
-        return ""
+        return "", False
 
 
-async def _describe_message(bot: Any, mid: str, limit: int, relation: str) -> str:
-    """把一条消息 id 展开成"谁说的、说了什么"（含合并转发的一层内容）。"""
+async def _describe_message(bot: Any, mid: str, limit: int, relation: str) -> tuple[str, bool]:
+    """把一条消息 id 展开成"谁说的、说了什么"（含合并转发的一层内容）。
+
+    返回 ``(文本, 是否取到正文)``：只有发送者、正文仍是 ``[合并转发]`` 这类占位时第二项为
+    False——调用方据此如实汇报，绝不能让模型以为"已展开"就直接开始回答。
+    """
     try:
-        message_id: Any = int(mid) if str(mid).lstrip("-").isdigit() else mid
-        resp = await bot.get_msg(message_id=message_id)
-        data = (resp or {}).get("data") if isinstance(resp, dict) else None
+        data = await _fetch_message(bot, mid)
         if not isinstance(data, dict) or not data:
-            return ""
+            return "", False
         sender = data.get("sender") or {}
         label = str(sender.get("card") or sender.get("nickname") or sender.get("user_id") or "未知")
         sender_id = str(sender.get("user_id") or "")
         text = extract_msg_text(data.get("message"))
         bits = [f"来自 {label}" + (f"({sender_id})" if sender_id else "")]
-        if text:
+        if has_real_content(text):
             bits.append(_truncate(text, limit))
-        # 合并转发：再展开一层（这是一层深度的"引用链"，不递归，避免无界展开）
+        # 合并转发：再展开一层（一层深度的"引用链"，不递归，避免无界展开）
         forward_id = ""
         for seg in _segments(data.get("message")):
             if _seg_type(seg) == "forward":
                 forward_id = str(_seg_field(seg, "id", "") or "")
                 break
+        forward_ok = False
         if forward_id:
-            nodes = await _describe_forward(bot, forward_id, limit)
+            nodes, forward_error = await _describe_forward(bot, forward_id, limit)
             if nodes:
                 bits.append("合并转发内容：" + nodes)
-        return f"【消息 {mid}】{'；'.join(bits)}；relation：{relation}"
+                forward_ok = True
+            else:
+                # 如实报告失败原因：否则模型会以为拿到了内容，或者换个工具把同一件事再试一遍
+                bits.append(f"合并转发内容：未取到（{forward_error or '原因未知'}）")
+        got_content = has_real_content(text) or forward_ok
+        if not got_content:
+            bits.append("（本条未取到正文）")
+        return f"【消息 {mid}】{'；'.join(bits)}；relation：{relation}", got_content
     except Exception as e:
         logger.debug(f"[ExpandContext] 展开消息 {mid} 失败（已忽略）: {e}")
-        return ""
+        return "", False
 
 
-async def _describe_forward(bot: Any, forward_id: str, limit: int) -> str:
-    """合并转发 → 逐条摘要（截断条数与单条长度）。"""
+async def _fetch_message(bot: Any, mid: str) -> dict:
+    """取单条消息（兼容 message_id 为字符串/超出 int32 的数字）。
+
+    ``get_msg`` 的契约是 ``message_id: int``，但模型可能传进来一个转发 id；
+    数字形式取不到时退回原始字符串再试一次，避免"消息存在却报取不到"。
+    """
+    raw = str(mid).strip()
+    attempts: list[Any] = []
+    if raw.lstrip("-").isdigit():
+        attempts.append(int(raw))
+    if raw not in attempts:
+        attempts.append(raw)
+    last: dict = {}
+    for message_id in attempts:
+        resp = await bot.get_msg(message_id=message_id)
+        data = (resp or {}).get("data") if isinstance(resp, dict) else None
+        if isinstance(data, dict) and data:
+            return data
+        last = resp if isinstance(resp, dict) else {}
+    logger.debug(
+        f"[ExpandContext] get_msg 未取到消息 {mid}: {last.get('retcode')} {last.get('message')}"
+    )
+    return {}
+
+
+async def _describe_forward(bot: Any, forward_id: str, limit: int) -> tuple[str, str]:
+    """合并转发 → 逐条摘要；返回 ``(内容, 失败原因)``。
+
+    ``id`` 必须按**字符串**传：OneBot 的 forward id 是长整型字符串
+    （可能超出 int32 / JS 安全整数范围），强转 int 会被 NapCat 拒为
+    「1200 消息已过期或者为内层消息」——实测同一个 id 用字符串就能取到。
+    """
     try:
-        message_id: Any = int(forward_id) if str(forward_id).isdigit() else forward_id
-        resp = await bot.get_forward_msg(id=message_id)
+        resp = await bot.get_forward_msg(id=str(forward_id))
     except Exception as e:
         logger.debug(f"[ExpandContext] 展开合并转发 {forward_id} 失败（已忽略）: {e}")
-        return ""
+        return "", str(e)
+    if isinstance(resp, dict) and resp.get("status") not in (None, "ok"):
+        return "", f"{resp.get('retcode')} {resp.get('message') or ''}".strip()
     data = (resp or {}).get("data") if isinstance(resp, dict) else None
     if not isinstance(data, dict):
-        return ""
+        return "", "响应为空"
     nodes = data.get("messages") or data.get("message") or []
     if not isinstance(nodes, list):
-        return ""
+        return "", "响应结构异常"
     parts: list[str] = []
     for node in nodes[:MAX_FORWARD_NODES]:
         if not isinstance(node, dict):
             continue
         sender = node.get("sender") or {}
         label = str(sender.get("nickname") or sender.get("user_id") or "未知")
-        text = _truncate(extract_msg_text(node.get("message") or node.get("content")), limit // 2 or 50)
-        if text:
-            parts.append(f"{label}: {text}")
+        node_text = extract_msg_text(node.get("message") or node.get("content"))
+        if not has_real_content(node_text):
+            continue
+        parts.append(f"{label}: {_truncate(node_text, limit // 2 or 50)}")
     if len(nodes) > MAX_FORWARD_NODES:
         parts.append(f"…（共 {len(nodes)} 条，已省略）")
-    return " ｜ ".join(parts)
+    if not parts:
+        return "", "转发里没有可读文本"
+    return " ｜ ".join(parts), ""
 
 
 async def _handle_expand(ctx, args: dict) -> str:
@@ -216,7 +260,9 @@ async def _handle_expand(ctx, args: dict) -> str:
     users = _int_ids(args.get("users"))[:MAX_ITEMS]
     messages = _str_ids(args.get("messages"))[:MAX_ITEMS]
     event = getattr(ctx, "event", None)
+    runtime = getattr(ctx, "runtime", None)
     self_ids = {
+        str(getattr(runtime, "bot_id", "") or ""),
         str(getattr(ctx, "bot_id", "") or ""),
         str(getattr(event, "self_id", "") or "") if event is not None else "",
         str(getattr(event, "bot_id", "") or "") if event is not None else "",
@@ -236,7 +282,6 @@ async def _handle_expand(ctx, args: dict) -> str:
             return "本轮消息里没有需要展开的 @ 对象或被引用消息。"
 
     group_id = getattr(ctx, "group_id", None)
-    runtime = getattr(ctx, "runtime", None)
     bot_id = str(getattr(runtime, "bot_id", "") or getattr(ctx, "bot_id", "") or "")
     limit = _limit(args)
 
@@ -244,11 +289,11 @@ async def _handle_expand(ctx, args: dict) -> str:
         derive_targets(event, self_ids) if event is not None else ([], [])
     )
 
-    async def _user_block(qq: str) -> str:
+    async def _user_block(qq: str) -> tuple[str, bool]:
         relation = "当前消息 @ 的对象" if qq in from_event_users else f"{relation_hint}的用户"
         return await _describe_user(bot, group_id, qq, relation, bot_id=bot_id)
 
-    async def _message_block(mid: str) -> str:
+    async def _message_block(mid: str) -> tuple[str, bool]:
         relation = "当前消息引用的消息" if mid in from_event_messages else f"{relation_hint}的消息"
         return await _describe_message(bot, mid, limit, relation)
 
@@ -256,14 +301,21 @@ async def _handle_expand(ctx, args: dict) -> str:
         *[_user_block(qq) for qq in users],
         *[_message_block(mid) for mid in messages],
     )
-    found = [b for b in blocks if b]
-    if not found:
+    resolved = [text for text, got in blocks if text and got]
+    partial = [text for text, got in blocks if text and not got]
+    if not resolved and not partial:
         return (
             "error: 没有取到任何可展开的内容"
             "（消息可能已过期、id 不合法、机器人无权限或连接不可用）。"
         )
-    head = f"已展开 {len(found)} 项（{relation_hint}）："
-    return head + "\n" + "\n".join(found)
+    lines: list[str] = []
+    if resolved:
+        lines.append(f"已展开 {len(resolved)} 项：")
+        lines.extend(resolved)
+    if partial:
+        lines.append(f"以下 {len(partial)} 项只取到部分信息（正文未取到）：")
+        lines.extend(partial)
+    return "\n".join(lines)
 
 
 def build_context_tools(runtime: Any, ctx: Any) -> list[ToolSpec]:

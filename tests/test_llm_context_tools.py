@@ -26,22 +26,30 @@ class _Bot:
     async def get_group_member_info(self, group_id, user_id):
         self.calls.append(("member", group_id, user_id))
         info = self.members.get(int(user_id))
-        return {"status": "ok", "data": info} if info else {"status": "failed", "data": None}
+        if info:
+            return {"status": "ok", "data": info}
+        return {"status": "failed", "retcode": 1404, "message": "成员不存在", "data": None}
 
     async def get_stranger_info(self, user_id, no_cache=False):
         self.calls.append(("stranger", user_id))
         info = self.stranger.get(int(user_id))
-        return {"status": "ok", "data": info} if info else {"status": "failed", "data": None}
+        if info:
+            return {"status": "ok", "data": info}
+        return {"status": "failed", "retcode": 1404, "message": "用户不存在", "data": None}
 
     async def get_msg(self, message_id):
         self.calls.append(("msg", message_id))
         data = self.messages.get(str(message_id))
-        return {"status": "ok", "data": data} if data else {"status": "failed", "data": None}
+        if data:
+            return {"status": "ok", "data": data}
+        return {"status": "failed", "retcode": 1404, "message": "消息不存在", "data": None}
 
     async def get_forward_msg(self, id):
         self.calls.append(("forward", id))
         data = self.forwards.get(str(id))
-        return {"status": "ok", "data": data} if data else {"status": "failed", "data": None}
+        if data:
+            return {"status": "ok", "data": data}
+        return {"status": "failed", "retcode": 1404, "message": "消息不存在", "data": None}
 
 
 def _ctx(bot, event=None, *, group_id=778, bot_id="10001"):
@@ -174,6 +182,114 @@ async def test_expand_respects_content_limit():
 
     assert "…" in result
     assert long_text not in result
+
+
+# ---------- 合并转发：id 必须按字符串传（真实日志回归） ----------
+
+
+class _StrictForwardBot(_Bot):
+    """模拟 NapCat：get_forward_msg 只接受字符串 id，数字会被拒为 1200。
+
+    真实日志证据：同一个 id 传字符串能取到，传 int 得到
+    「1200 消息已过期或者为内层消息」。
+    """
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.forward_ids: list = []
+
+    async def get_forward_msg(self, id):
+        self.forward_ids.append(id)
+        if not isinstance(id, str):
+            return {"status": "failed", "retcode": 1200,
+                    "message": "消息已过期或者为内层消息，无法获取转发消息"}
+        return await super().get_forward_msg(id)
+
+
+async def test_forward_id_is_passed_as_string():
+    bot = _StrictForwardBot(
+        messages={"999": {
+            "sender": {"user_id": 123, "nickname": "张三"},
+            "message": [{"type": "forward", "data": {"id": "7686537322889496857"}}],
+        }},
+        forwards={"7686537322889496857": {"messages": [
+            {"sender": {"nickname": "小明"}, "message": [{"type": "text", "data": {"text": "早"}}]},
+        ]}},
+    )
+
+    result = await _call(_ctx(bot), {"messages": ["999"]})
+
+    assert bot.forward_ids == ["7686537322889496857"]
+    assert "小明: 早" in result
+    assert "已展开 1 项" in result
+
+
+async def test_forward_failure_is_reported_not_hidden():
+    """转发展开失败时不能让模型以为拿到了内容（历史上会静默只剩 [合并转发]）。"""
+    bot = _StrictForwardBot(
+        messages={"999": {
+            "sender": {"user_id": 123, "nickname": "张三"},
+            "message": [{"type": "forward", "data": {"id": "576048059"}}],
+        }},
+    )
+
+    result = await _call(_ctx(bot), {"messages": ["999"]})
+
+    assert "未取到" in result
+    assert "1404" in result  # 失败原因如实回传，模型才不会换个工具重复试同一件事
+    assert "只取到部分信息" in result  # 不能算进"已展开"
+
+
+async def test_numeric_forward_id_would_be_rejected():
+    """回归证据：把 forward id 当数字传会被 OneBot 拒（1200），字符串则成功。"""
+    bot = _StrictForwardBot(
+        messages={"999": {
+            "sender": {"user_id": 123, "nickname": "张三"},
+            "message": [{"type": "forward", "data": {"id": "576048059"}}],
+        }},
+        forwards={"576048059": {"messages": [
+            {"sender": {"nickname": "小明"}, "message": [{"type": "text", "data": {"text": "早"}}]},
+        ]}},
+    )
+
+    rejected = await bot.get_forward_msg(576048059)
+    accepted = await bot.get_forward_msg("576048059")
+
+    assert rejected["retcode"] == 1200
+    assert accepted["status"] == "ok"
+
+
+async def test_get_msg_retries_with_raw_string_id():
+    """message_id 数字形式取不到时，退回原始字符串再试一次。"""
+    seen: list = []
+
+    class _IdBot(_Bot):
+        async def get_msg(self, message_id):
+            seen.append(message_id)
+            if isinstance(message_id, int):
+                return {"status": "failed", "retcode": 1200, "data": None}
+            return {"status": "ok", "data": {
+                "sender": {"user_id": 1, "nickname": "n"},
+                "message": [{"type": "text", "data": {"text": "内容"}}],
+            }}
+
+    result = await _call(_ctx(_IdBot()), {"messages": ["576048059"]})
+
+    assert seen == [576048059, "576048059"]
+    assert "内容" in result
+
+
+async def test_message_without_readable_body_is_flagged():
+    """消息只有发送者、正文无内容时，必须标出"未取到正文"。"""
+    bot = _Bot(messages={"999": {
+        "sender": {"user_id": 1, "nickname": "n"},
+        "message": [{"type": "image", "data": {}}],
+    }})
+
+    result = await _call(_ctx(bot), {"messages": ["999"]})
+
+    assert "未取到正文" in result
+    assert "只取到部分信息" in result
 
 
 # ---------- 批量 / 并发 ----------

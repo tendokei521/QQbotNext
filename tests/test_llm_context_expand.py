@@ -20,11 +20,13 @@ from app.llm import nicknames
 from app.llm.group_context import (
     UNRESOLVED_AT,
     UNRESOLVED_FORWARD,
+    UNRESOLVED_FORWARD_ID,
     UNRESOLVED_REPLY,
     collect_at_ids,
     extract_msg_text,
     fetch_group_online_history,
     format_online_history,
+    has_real_content,
 )
 
 AT_MESSAGES = [
@@ -118,12 +120,28 @@ def test_at_all_stays_readable():
 
 def test_reply_and_forward_markers():
     reply = [{"type": "reply", "data": {"id": "456"}}]
-    forward = [{"type": "forward", "data": {"id": "f1"}}]
+    forward = [{"type": "forward", "data": {"id": "7686537322889496857"}}]
 
     assert extract_msg_text(reply) == "[引用]"
     assert extract_msg_text(reply, None, True) == UNRESOLVED_REPLY.format(id="456")
     assert extract_msg_text(forward) == "[合并转发]"
-    assert extract_msg_text(forward, None, True) == UNRESOLVED_FORWARD
+    # 合并转发必须带上 id：OneBot 的 forward id 是长整型字符串，模型要拿它去展开
+    assert extract_msg_text(forward, None, True) == UNRESOLVED_FORWARD_ID.format(id="7686537322889496857")
+
+
+def test_forward_without_id_falls_back_to_plain_marker():
+    assert extract_msg_text([{"type": "forward", "data": {}}], None, True) == UNRESOLVED_FORWARD
+
+
+def test_has_real_content_ignores_placeholders_and_markers():
+    assert has_real_content("晚上一起打游戏吗")
+    assert not has_real_content("[合并转发]")
+    assert not has_real_content("[图片][表情]")
+    assert not has_real_content(UNRESOLVED_FORWARD_ID.format(id="123"))
+    assert not has_real_content("【未展开:引用456】")
+    assert not has_real_content("")
+    # 占位符之外还有真内容时仍算有内容
+    assert has_real_content("[图片]这是图里的文字")
 
 
 def test_reply_without_id_is_not_marked():
@@ -337,3 +355,82 @@ async def test_chat_history_tool_reports_unresolved_head():
 
     assert "未展开" in result
     assert "expand_context" in result
+
+
+# ---------- 触发消息的引用：不能只给一个段名 ----------
+
+
+def _quote_ctx(bot, message):
+    """最小 ctx：让 enhance._collect_quote_info 能跑起来的字段集合。
+
+    注意 event.message 在真实链路里是 ``MessageSegment`` 对象（不是 dict），
+    用 ``Message.from_onebot`` 转换，别让测试掩盖类型差异。
+    """
+    from app.domain.message import Message
+
+    return SimpleNamespace(
+        event=SimpleNamespace(bot=bot, message=Message.from_onebot(message).segments),
+        runtime=SimpleNamespace(config={"fetch_quote_content": True}),
+    )
+
+
+class _QuoteBot:
+    def __init__(self, quoted_message):
+        self.quoted = quoted_message
+        self.calls: list = []
+
+    async def get_msg(self, message_id):
+        self.calls.append(message_id)
+        return {"status": "ok", "data": {
+            "sender": {"user_id": 1901691195, "nickname": "桉"},
+            "message": self.quoted,
+        }}
+
+
+async def test_quoted_forward_becomes_actionable_marker():
+    """回归（真实日志）：被引用的是一条合并转发时，此前只渲染成 "[forward]"，
+    模型既不知道那是什么、也拿不到 id，只能干瞪眼。现在必须给出可解决的标记 + id。"""
+    from app.llm.enhance import _collect_quote_info
+
+    ctx = _quote_ctx(_QuoteBot([{"type": "forward", "data": {"id": "7686537322889496857"}}]),
+                     [{"type": "reply", "data": {"id": "576048059"}}])
+
+    info = await _collect_quote_info(ctx)
+
+    assert info["text"] == UNRESOLVED_REPLY.format(id="576048059")
+    assert "[forward]" not in info["text"]
+
+
+async def test_quoted_text_still_wins_over_marker():
+    from app.llm.enhance import _collect_quote_info
+
+    ctx = _quote_ctx(_QuoteBot([{"type": "text", "data": {"text": "晚上一起打游戏吗"}}]),
+                     [{"type": "reply", "data": {"id": "576048059"}}])
+
+    info = await _collect_quote_info(ctx)
+
+    assert info["text"] == "晚上一起打游戏吗"
+
+
+async def test_quoted_lookup_failure_yields_marker_not_silence():
+    """取引用内容失败时也要把 id 交给模型（而不是整段引用信息消失）。"""
+    from app.llm.enhance import _collect_quote_info
+
+    class _BrokenBot:
+        async def get_msg(self, message_id):
+            raise RuntimeError("连接已断开")
+
+    ctx = _quote_ctx(_BrokenBot(), [{"type": "reply", "data": {"id": "576048059"}}])
+
+    info = await _collect_quote_info(ctx)
+
+    assert info["text"] == UNRESOLVED_REPLY.format(id="576048059")
+
+
+def test_segments_to_text_renders_forward_marker_with_id():
+    from app.llm.enhance import _segments_to_text
+
+    assert _segments_to_text([{"type": "forward", "data": {"id": "7686537322889496857"}}]) == (
+        UNRESOLVED_FORWARD_ID.format(id="7686537322889496857")
+    )
+    assert _segments_to_text([{"type": "text", "data": {"text": "你好"}}]) == "你好"

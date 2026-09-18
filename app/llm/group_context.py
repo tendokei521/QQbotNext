@@ -44,9 +44,25 @@ PRIVATE_OTHER_TAG = "对方"
 UNRESOLVED_AT = "【未展开:用户{qq}】"
 UNRESOLVED_REPLY = "【未展开:引用{id}】"
 UNRESOLVED_FORWARD = "【未展开:合并转发】"
+# 合并转发段自带 ``data.id``（OneBot 的 forward id：字符串，且可能超出 JS 安全整数范围），
+# 带上它模型才能直接去展开；不带 id 的标记只能干瞪眼。
+# 实测：把该 id 强转 int 再调 get_forward_msg 会被 NapCat 拒为
+# 「1200 消息已过期或者为内层消息」——必须按字符串传递（见 IBot.get_forward_msg(id: str)）。
+UNRESOLVED_FORWARD_ID = "【未展开:合并转发{id}】"
 
 # 缺口扫描：与上面的标记格式保持同源（渲染出什么就扫什么）
 _UNRESOLVED_RE = re.compile(r"【未展开:([^】]+)】")
+# 占位符（[图片]/[合并转发] 之类）与未展开标记都不算"真实内容"
+_PLACEHOLDER_RE = re.compile(r"【未展开:[^】]*】|\[[^\]]{1,10}\]")
+
+
+def has_real_content(text: Any) -> bool:
+    """文本里除占位符/未展开标记外是否还有真实内容。
+
+    用途：判断"这条引用/消息是不是其实什么都没拿到"——只有 ``[合并转发]`` 这类占位时，
+    不能对模型宣称"已展开"（否则它会以为拿到了内容，直接开始回答）。
+    """
+    return bool(_PLACEHOLDER_RE.sub("", str(text or "")).strip())
 
 
 def unresolved_items(text: Any) -> list[str]:
@@ -63,14 +79,17 @@ def unresolved_summary(text: Any) -> str:
 
     模型不必自己逐行扫描上下文就能知道"缺什么"，也不必靠提示词记住标记形态：
     ``【本段含 2 处未展开内容：用户123、引用456；可调用 expand_context 展开】``
+
+    同一项出现多次时标明"（N 类）"——否则"9 处"后面只列 6 项会让模型以为漏看了。
     """
     raw = str(text or "")
     items = unresolved_items(raw)
     if not items:
         return ""
     total = len(_UNRESOLVED_RE.findall(raw))
+    kinds = f"（{len(items)} 类）" if total != len(items) else ""
     return (
-        f"【本段含 {total} 处未展开内容：{'、'.join(items)}；"
+        f"【本段含 {total} 处未展开内容{kinds}：{'、'.join(items)}；"
         "可调用 expand_context 展开后再回答】"
     )
 
@@ -271,6 +290,9 @@ def _segment_text(
         return f"[{_NON_TEXT_SEGMENTS['reply']}]"
     if stype == "forward":
         if mark_unresolved:
+            forward_id = str(data.get("id", "") or "")
+            if forward_id:
+                return UNRESOLVED_FORWARD_ID.format(id=forward_id)
             return UNRESOLVED_FORWARD
         return f"[{_NON_TEXT_SEGMENTS['forward']}]"
     if stype in _NON_TEXT_SEGMENTS:
