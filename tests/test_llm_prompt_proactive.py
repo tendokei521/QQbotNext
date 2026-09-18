@@ -15,6 +15,7 @@ from app.llm.prompt import (
     PROACTIVE_HISTORY_NUDGE,
     PROACTIVE_POKE_LINE,
     PROACTIVE_QUOTE_LINE,
+    PROACTIVE_REFERENT_LINE,
     PROACTIVE_UNRESOLVED_LINE,
     build_messages,
     build_proactive_instruction,
@@ -199,6 +200,43 @@ def test_footer_keeps_soft_tone_but_exempts_unresolved():
     assert "拿不准就不用" in block
     assert "必须先展开" in block
     assert "照常回答" in block  # 没有手段时不许回"我无法完整回答"
+
+
+# ---------- 指代解析（R4） ----------
+
+
+def test_referent_lines_require_positional_tool():
+    """指代解析三条依赖 expand_recent（按位置取）；没有它就不该教。"""
+    with_recent = build_proactive_instruction(_cfg(), "", available_tools=ENV_WITH_EXPAND)
+    without_recent = build_proactive_instruction(
+        _cfg(), "", available_tools={"get_current_session", "expand_message"}
+    )
+
+    assert PROACTIVE_REFERENT_LINE in with_recent
+    assert PROACTIVE_REFERENT_LINE not in without_recent
+
+
+def test_referent_lines_cover_three_points():
+    block = build_proactive_instruction(_cfg(), "", available_tools=ENV_WITH_EXPAND)
+
+    assert "当前对话焦点" in block          # 怎么读焦点行
+    assert "回指" in block                  # 回指该指向谁（焦点优先，不是最新）
+    assert "都取回" in block or "一起取回" in block   # 候选不明怎么办
+    assert "按位置指代" in block or "不需要 id" in block  # 按位置指代用 expand_recent
+    assert "已展开" in block                # 已取过的不必重复取
+
+
+def test_referent_lines_can_be_disabled():
+    off = build_proactive_instruction(
+        _cfg(referent_prompt_enable=False), "", available_tools=ENV_WITH_EXPAND
+    )
+    off_resolve = build_proactive_instruction(
+        _cfg(referent_resolve_enable=False), "", available_tools=ENV_WITH_EXPAND
+    )
+
+    assert PROACTIVE_REFERENT_LINE not in off
+    assert PROACTIVE_REFERENT_LINE not in off_resolve
+    assert "先自己取" in off  # 其它行不受影响
 
 
 def test_nudge_added_inside_same_block_on_history_intent():
