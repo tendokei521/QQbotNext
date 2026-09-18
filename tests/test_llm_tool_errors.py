@@ -89,3 +89,35 @@ def test_is_error_result_only_matches_error_prefix():
     assert not is_error_result("errors: 只是普通文本")
     assert not is_error_result("")
     assert not is_error_result(None)
+
+
+def test_result_budget_can_be_disabled_per_tool():
+    """工具可声明"结果不截断"（max_result=0），不被全局 TOOL_RESULT_MAX 砍掉。"""
+    from app.llm.tool import _truncate_result
+
+    long_text = "x" * 5000
+
+    assert _truncate_result(long_text, 0) == long_text        # 不截断
+    assert len(_truncate_result(long_text, None)) < 5000      # 用全局默认
+    assert _truncate_result(long_text, 100).endswith("已截断)")
+    assert _truncate_result("短", 0) == "短"
+
+
+async def test_executor_honours_tool_budget():
+    """执行器按工具自身预算回传（context_tools 的展开工具即用 0=不截断）。"""
+    from types import SimpleNamespace
+
+    from app.llm.tool import ToolContext, ToolSpec, make_executor
+
+    payload = "正文内容" * 1000
+
+    async def _handler(_ctx, _args):
+        return payload
+
+    spec = ToolSpec(name="big", description="", parameters={"type": "object", "properties": {}},
+                    handler=_handler, scopes=("*",), max_result=0)
+    runtime = SimpleNamespace(bot_id="1", config={"tool_result_directive_enable": False},
+                              telemetry=None, llm_tool_call_hooks=None)
+    result = await make_executor([spec], ToolContext(runtime=runtime))("big", {})
+
+    assert payload in result

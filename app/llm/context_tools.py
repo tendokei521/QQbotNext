@@ -35,14 +35,15 @@ from app.llm.group_context import (
 )
 from app.llm.tool import ToolSpec
 
-# 单条内容默认截断长度（工具结果外层还有 TOOL_RESULT_MAX=2000 的总截断，
-# 这里先按条截断，避免"展开 5 条"时最后几条被外层整体砍掉）
-DEFAULT_ITEM_CHARS = 500
+# 内容截断策略：**默认不截断**（0 = 不限制）。
+# 这些工具的目的就是"把骨架补成血肉"，截断等于把血肉又削掉一块（实测出现过
+# 「能花那么多时」这种砍在词中间的摘要）。需要限长时由调用方显式传 ``limit``。
+DEFAULT_ITEM_CHARS = 0
 MAX_ITEMS = 10
 # expand_recent 一次最多取几条
 MAX_RECENT = 5
-# 合并转发最多摘几条
-MAX_FORWARD_NODES = 10
+# 合并转发最多摘几条（0 = 全部）
+MAX_FORWARD_NODES = 0
 
 
 def _as_list(value: Any) -> list:
@@ -76,11 +77,18 @@ def _str_ids(value: Any) -> list[str]:
 
 
 def _limit(args: dict) -> int:
+    """解析可选的 ``limit``（单条最大字符数）。
+
+    默认 **0 = 不截断**；调用方显式给出正数时才限制（用于极端情况下的上下文保护）。
+    """
+    raw = args.get("limit")
+    if raw in (None, ""):
+        return DEFAULT_ITEM_CHARS
     try:
-        value = int(args.get("limit") or DEFAULT_ITEM_CHARS)
+        value = int(raw)
     except (TypeError, ValueError):
-        value = DEFAULT_ITEM_CHARS
-    return max(50, min(value, 2000))
+        return DEFAULT_ITEM_CHARS
+    return max(0, value)
 
 
 def _segments(message: Any) -> list:
@@ -138,46 +146,54 @@ def derive_targets(event: Any, self_ids: set[str]) -> tuple[list[str], list[str]
 
 
 def _truncate(text: str, limit: int) -> str:
+    """按 ``limit`` 截断；``limit <= 0`` 表示不截断（默认行为）。"""
     text = (text or "").strip()
+    if limit is None or limit <= 0:
+        return text
     return text if len(text) <= limit else text[:limit] + "…"
 
 
-def summarize_user(text: str, limit: int = 40) -> str:
+def summarize_user(text: str) -> str:
     """从用户展开文本里抽一句话摘要（供焦点表/已展开标记使用）。
 
     适配第一人称格式：``（我看了下这个人）昵称：三哥；群名片：… [QQ 123] [关系：…]``
     ——方括号里的 id/关系不算摘要内容，遇到 ``[`` 即停。
+
+    **不截断**：摘要是"已展开"时复用给模型的正文（``（这条我之前已经看过了）…``），
+    截断会让模型看到的比实际更少（实测出现过「能花那么多时」这种砍在词中间的）。
     """
     body = str(text or "").lstrip("（").strip()
     for key in ("昵称：", "群名片："):
         m = re.search(key + r"([^；\[]+)", str(text or ""))
         if m and m.group(1).strip():
-            return m.group(1).strip()[:limit]
-    return body[:limit]
+            return m.group(1).strip()
+    return body
 
 
-def summarize_message(text: str, limit: int = 60) -> str:
+def summarize_message(text: str) -> str:
     """从消息展开文本里抽一句话摘要（谁 + 说了什么 / 转发了什么）。
 
     适配第一人称格式：
     ``（我翻到了这条消息）三哥(123)：正文 [id 999] [关系：…]``
     ``（我翻到了这条消息）三哥(123)：转发内容 —— 小明: 早 [id 999] [关系：…]``
+
+    **不截断**（理由同 :func:`summarize_user`）。
     """
     body = str(text or "").strip()
     if not body:
         return ""
     m = re.search(r"转发内容 —— (.+?)(?:\s*\[id|\s*\[关系|$)", body)
     if m:
-        return ("转发：" + m.group(1)).strip()[:limit]
+        return ("转发：" + m.group(1)).strip()
     # 去掉开头的"（我翻到了这条消息）"之类说明，再取"发送者：正文"
     stripped = re.sub(r"^（[^）]*）", "", body).strip()
     m = re.search(r"^(.+?)[：:](.+?)(?:\s*\[id|\s*\[关系|$)", stripped)
     if m:
-        return f"{m.group(1)}：{m.group(2)}".strip()[:limit]
+        return f"{m.group(1)}：{m.group(2)}".strip()
     m = re.search(r"转发内容 —— (.+)", body)
     if m:
-        return ("转发：" + m.group(1)).strip()[:limit]
-    return stripped[:limit]
+        return ("转发：" + m.group(1)).strip()
+    return stripped
 
 
 async def _describe_user(bot: Any, group_id: Any, qq: str, relation: str, *, bot_id: Any = "") -> tuple[str, bool]:
@@ -309,7 +325,10 @@ async def _describe_forward(bot: Any, forward_ref: str, limit: int) -> tuple[str
     if not isinstance(nodes, list):
         return "", "响应结构异常"
     parts: list[str] = []
-    for node in nodes[:MAX_FORWARD_NODES]:
+    # ``MAX_FORWARD_NODES=0`` 表示不限制（默认）：转发本来就常是"要看的正文"，
+    # 砍条数等于把用户想让它看的内容丢掉。
+    window = nodes if not MAX_FORWARD_NODES else nodes[:MAX_FORWARD_NODES]
+    for node in window:
         if not isinstance(node, dict):
             continue
         sender = node.get("sender") or {}
@@ -317,8 +336,8 @@ async def _describe_forward(bot: Any, forward_ref: str, limit: int) -> tuple[str
         node_text = extract_msg_text(node.get("message") or node.get("content"))
         if not has_real_content(node_text):
             continue
-        parts.append(f"{label}: {_truncate(node_text, limit // 2 or 50)}")
-    if len(nodes) > MAX_FORWARD_NODES:
+        parts.append(f"{label}: {_truncate(node_text, limit)}")
+    if MAX_FORWARD_NODES and len(nodes) > MAX_FORWARD_NODES:
         parts.append(f"…（共 {len(nodes)} 条，已省略）")
     if not parts:
         return "", "转发里没有可读文本"
@@ -598,6 +617,9 @@ def _context_spec(name: str, description: str, parameters: dict, handler) -> Too
         scopes=("*",),
         source="system",
         category="会话",
+        # 这三个工具的任务就是"把骨架补成血肉"：结果**不截断**（0=不限制）。
+        # 实测过截断的代价——摘要被砍成「能花那么多时」，模型据此答错。
+        max_result=0,
     )
 
 
@@ -630,7 +652,7 @@ def build_context_tools(runtime: Any, ctx: Any) -> list[ToolSpec]:
                 "type": "object",
                 "properties": {
                     "count": {"type": "integer", "description": "取最近几条，1~5，默认 1。"},
-                    "limit": {"type": "integer", "description": "单条内容最大字符数，默认 500。"},
+                    "limit": {"type": "integer", "description": "单条内容最大字符数；不传=完整返回。"},
                 },
             },
             _recent,
@@ -651,7 +673,10 @@ def build_context_tools(runtime: Any, ctx: Any) -> list[ToolSpec]:
                         "items": {"type": "string"},
                         "description": "要展开的消息 id，可多个（引用消息/合并转发）。",
                     },
-                    "limit": {"type": "integer", "description": "单条内容最大字符数，默认 500。"},
+                    "limit": {
+                        "type": "integer",
+                        "description": "单条内容最大字符数；不传=完整返回（默认不截断）。",
+                    },
                 },
             },
             _message,

@@ -39,7 +39,9 @@ _PERSON_RE = re.compile(r"(他是谁|她是谁|这个人|那个人|是谁呀|是
 # 文本里显式出现的 id（5 位以上数字，通常是 QQ 号或消息 id）
 _EXPLICIT_ID_RE = re.compile(r"\b(\d{5,})\b")
 
-_MAX_BLOCK_CHARS = 1500
+# 预取块**不设长度上限**：这里装的就是"要看的正文"，砍掉等于让模型看得更少
+# （与 context_tools 的"不截断"策略一致；需要保护上下文时从候选数
+#  ``referent_prefetch_max`` 与 ``expand_recent`` 的 count 入手，而不是砍内容）。
 
 
 @dataclass
@@ -274,7 +276,10 @@ async def build_block(
                 # 避免同一条消息被取两次、也不让它在块里出现两遍。
                 covered: set[str] = set()
                 if recent:
-                    result_recent = await fetch_recent(ctx, count=recent, limit=400)
+                    result_recent = await fetch_recent(
+                        ctx, count=recent,
+                        limit=int(_cfg(runtime, "referent_prefetch_item_chars", 0) or 0),
+                    )
                     blocks.extend(result_recent.blocks)
                     if not result_recent.blocks and result_recent.partial:
                         blocks.extend(result_recent.partial)
@@ -301,11 +306,7 @@ async def build_block(
         parts.append(fetched_text)
 
     block = "\n\n".join(p for p in parts if p)
-    if not block:
-        return ""
-    if len(block) > _MAX_BLOCK_CHARS:
-        block = block[:_MAX_BLOCK_CHARS] + "…"
-    return block
+    return block if block else ""
 
 
 async def focus_only_block(runtime: Any, session_id: str) -> str:

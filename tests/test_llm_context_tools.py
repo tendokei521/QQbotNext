@@ -189,6 +189,7 @@ async def test_expand_message_unwraps_forward_one_level():
 
 
 async def test_expand_respects_content_limit():
+    """显式传 limit 时才截断（默认不截断）。"""
     long_text = "x" * 1000
     bot = _Bot(messages={"999": {
         "sender": {"user_id": 1, "nickname": "n"},
@@ -199,6 +200,59 @@ async def test_expand_respects_content_limit():
 
     assert "…" in result
     assert long_text not in result
+
+
+async def test_expand_message_does_not_truncate_by_default():
+    """默认完整返回：真实故障是摘要被砍成「能花那么多时」，模型据此答错。"""
+    long_text = "这是一段很长的正文" * 200      # 2000 字
+    bot = _Bot(messages={"999": {
+        "sender": {"user_id": 1, "nickname": "n"},
+        "message": [{"type": "text", "data": {"text": long_text}}],
+    }})
+
+    result = await _call(_ctx(bot), {"messages": ["999"]})
+
+    assert long_text in result
+    assert "…" not in result
+    assert "已截断" not in result
+
+
+async def test_summary_is_not_clipped():
+    """登记摘要不截断：它是"已看过"时复用给模型的正文，砍了模型就更瞎。"""
+    from app.llm.context_tools import summarize_message
+
+    long_forward = "转发内容 —— " + " ｜ ".join(f"某人{i}: 第{i}条内容" for i in range(20))
+    text = f"（我翻到了这条消息）三哥(123)：{long_forward} [id 999] [关系：指定展开的消息]"
+
+    summary = summarize_message(text)
+
+    assert summary.startswith("转发：某人0: 第0条内容")
+    assert summary.endswith("第19条内容")
+    assert "…" not in summary
+
+
+async def test_forward_nodes_are_not_capped_by_default():
+    """转发条数默认不限制（此前 10 条封顶 + "已省略"）。"""
+    nodes = [{"sender": {"nickname": f"n{i}"},
+              "message": [{"type": "text", "data": {"text": f"第{i}条"}}]} for i in range(15)]
+    bot = _Bot(
+        messages={"999": {"sender": {"user_id": 1, "nickname": "n"},
+                          "message": [{"type": "forward", "data": {"id": "f"}}]}},
+        forwards={"999": {"messages": nodes}},
+    )
+
+    result = await _call(_ctx(bot), {"messages": ["999"]})
+
+    assert "第0条" in result and "第14条" in result
+    assert "已省略" not in result
+
+
+async def test_context_tools_declare_unlimited_result_budget():
+    """三个展开工具自身声明"结果不截断"，不受全局 TOOL_RESULT_MAX 限制。"""
+    runtime = SimpleNamespace(bot_id="1", config={})
+
+    for spec in build_context_tools(runtime, None):
+        assert spec.max_result == 0
 
 
 # ---------- 合并转发：要用"承载转发的那条消息 id"，且按字符串传 ----------

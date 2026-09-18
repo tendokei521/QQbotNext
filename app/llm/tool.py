@@ -90,6 +90,7 @@ class ToolSpec:
         scopes: list[str] | tuple[str, ...] | None = None,
         source: str = "system",
         category: str = "",
+        max_result: int | None = None,
     ) -> None:
         raw_name = str(name or "")
         self.name = sanitize_tool_name(raw_name)
@@ -105,6 +106,8 @@ class ToolSpec:
         self.scopes = tuple(s.lower() for s in (scopes or ("group", "private")) if s)
         self.source = source
         self.category = category
+        # 结果长度上限：None=用全局默认；0=不截断（"把正文给我"类工具用）
+        self.max_result = max_result
 
     def allows(self, ctx: ToolContext | None) -> bool:
         """工具级权限/作用域校验；主动/定时等无事件场景默认放行。"""
@@ -153,11 +156,13 @@ def build_tools(specs: list[ToolSpec]) -> list[dict]:
     return [s.to_openai() for s in specs]
 
 
-def _truncate_result(text: str) -> str:
+def _truncate_result(text: str, max_len: int | None = None) -> str:
+    """按工具自身预算截断结果；``max_len=0`` 表示不截断，``None`` 用全局默认。"""
     text = str(text)
-    if len(text) > TOOL_RESULT_MAX:
-        return text[:TOOL_RESULT_MAX] + "\n…(结果过长已截断)"
-    return text
+    budget = TOOL_RESULT_MAX if max_len is None else int(max_len)
+    if budget <= 0 or len(text) <= budget:
+        return text
+    return text[:budget] + "\n…(结果过长已截断)"
 
 
 def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> ToolHandler:
@@ -232,9 +237,9 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
                 ))
             # 结果侧的「回应要求」：拼在工具结果末尾（位置最贴近生成点），
             # 压住"工具返回后必写长串汇报"的倾向。详见 tool_loop 模块 docstring。
-            # 放在截断**之后**，保证这条要求不会被 2000 字上限砍掉；
+            # 放在截断**之后**，保证这条要求不会被长度上限砍掉；
             # 失败结果不追加（见 append_reply_directive）。
-            final = _truncate_result(result)
+            final = _truncate_result(result, spec.max_result)
             if runtime is not None:
                 from app.llm.tool_loop import append_reply_directive, reply_directive
 
