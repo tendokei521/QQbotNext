@@ -25,19 +25,34 @@ QQ 消息进入 LLM 时经常只剩"骨架"：`@123`、`[引用]`、`消息 id`�
 2. **只标记可被解决的缺口**（marker must be actionable）：图片/语音无法转文字就不标记；
    标了却解决不了，只会让模型空转或谎称"无法完整回答"。
 3. **缺口由代码算出来告诉模型，不靠模型自省**：渲染层与工具头部直接给出缺口摘要。
-4. **标记与手段同开同关**：`context_expand_enable` 同时控制标记与 `expand_context`。
+4. **标记与手段同开同关**：`context_expand_enable` 同时控制标记与三个 `expand_*` 工具。
 5. **提示词只负责最后一段**：能预展开/能预扫描的都做完了，提示词才讲得通、才有人信。
+6. **结果口吻也是有影响的输入**：工具结果用"我看到的"第一人称、不写"已展开 N 项"这类汇总头
+   ——汇总头 + 字段清单读起来像待总结的报告，会把模型带向"复述/汇报"。
 
 ## 3. 分层
 
 | 层 | 实现 | 作用 |
 |---|---|---|
-| 反查层 | `app/llm/nicknames.py` | id → 昵称（群名片优先），共享 TTL-less 缓存 + 批量并发；`enhance` 与渲染层共用 |
-| 渲染层 | `group_context._segment_text / extract_msg_text / format_online_history / fetch_group_online_history` | 预展开 `@123`；展不开才落 `【未展开:…】`；末尾追加缺口摘要 |
-| 摘要层 | `group_context.unresolved_items / unresolved_summary` | `【本段含 N 处未展开内容：…；可调用 expand_context 展开后再回答】` |
-| 工具层 | `app/llm/context_tools.py` → `expand_context` | 按需展开：`users[]`（是谁）/ `messages[]`（被引用消息、合并转发一层）/ 零参数从触发消息推导 |
-| 提示词层 | `prompt.build_proactive_instruction` | 环境行 + 未展开标记语义 + footer 例外条款；按本轮实际可用工具裁剪 |
-| 机制层 | `tool_loop`（并发执行、参数失败不静默）、`max_tool_rounds`、`chat.build_initiative_tools` | 让"一次展开多个 id"不会超时、不会被静默降级；主动消息/定时任务路径也有工具 |
+| 反查层 | `app/llm/nicknames.py` | id → 昵称（群名片优先），共享缓存 + 批量并发；`enhance` 与渲染层共用 |
+| 渲染层 | `group_context._segment_text / extract_msg_text / format_online_history / fetch_group_online_history` | 预展开 `@123`；展不开才落 `【未展开:…】`；已取回的落 `【已展开:… → 摘要】`；末尾追加缺口摘要 |
+| 摘要层 | `group_context.unresolved_items / unresolved_summary` | `【本段含 N 处未展开内容（M 类）：…；可调用 expand_message 展开后再回答】` |
+| 工具层 | `app/llm/context_tools.py` | 三个意图工具：`expand_recent`（按位置）/ `expand_message`（按 id）/ `expand_user`（按 QQ）；公共取回 API `fetch_entities` / `fetch_recent` |
+| 指代层 | `app/llm/focus.py` + `referent.py` | 会话焦点表 + 指代判定 + 确定性预取（见 [referent-resolution-design.md](referent-resolution-design.md)） |
+| 提示词层 | `prompt.build_proactive_instruction` | 环境行 + 未展开标记语义 + 指代解析三条 + footer 例外条款；按本轮实际可用工具裁剪 |
+| 机制层 | `tool_loop`（并发执行、参数失败不静默、结果尾附回应要求）、`max_tool_rounds`、`chat.build_initiative_tools` | 让"一次展开多个 id"不会超时、不被静默降级、不写成长串汇报；主动消息/定时任务路径也有工具 |
+
+### 工具结果的实际形态
+
+```
+（我翻到了这条消息）老师…(1901691195)：转发内容 —— 无聊的阿忧: 真让他调成了 ｜ NlKO: … [id 576048059] [关系：当前消息引用的消息]
+
+（上面这些是给你自己看的资料，不是要你转述的稿子：直接用你自己的口吻回应用户，
+  不要复述、不要列条目、不要以“根据记录/已展开”开头；一两句就够。若还需要更多信息，可以继续调用工具。）
+```
+
+第二段是「回应要求」（`tool_result_directive*`），拼在结果末尾而非新增 system 消息——
+`anthropic` / `gemini` 适配器会把所有 system 上提到顶层参数，中途加的会静默失效。
 
 ## 4. 接入点
 
@@ -55,11 +70,14 @@ QQ 消息进入 LLM 时经常只剩"骨架"：`@123`、`[引用]`、`消息 id`�
 | 键 | 默认 | 作用 |
 |---|---|---|
 | `fetch_at_nickname` | True | @ 昵称反查总开关（同时管渲染层预展开） |
-| `context_expand_enable` | True | 未展开标记 + `expand_context` 工具（同开同关） |
+| `context_expand_enable` | True | 未展开标记 + 三个 `expand_*` 工具 + 三态渲染（同开同关） |
 | `max_tool_rounds` | 5 | 工具循环轮数上限（流式/非流式共用） |
+| `tool_result_directive_enable` | True | 工具结果末尾附「回应要求」 |
+| `tool_result_directive` | 空 | 自定义回应要求文本（空=内置默认） |
+| `referent_*` | 见指代设计文档 | 焦点表 / 预取 / 歧义策略 / 指代提示行 |
 | `proactive_prompt_enable` | True | 「主动性」整块 |
 | `proactive_env_prompt_enable` | True | 环境行 |
-| `proactive_unresolved_prompt_enable` | True | `【未展开:…】` 语义行（需 `expand_context`） |
+| `proactive_unresolved_prompt_enable` | True | `【未展开:…】` 语义行（需展开工具可用） |
 | `proactive_env_intent_nudge` | True | 环境意图补强 |
 
 ## 6. 约定（改动时必须遵守）
@@ -76,10 +94,15 @@ QQ 消息进入 LLM 时经常只剩"骨架"：`@123`、`[引用]`、`消息 id`�
    「1200 消息已过期或者为内层消息」。因此：
    - 渲染标记时由调用方把整条消息 id 传进来（`format_online_history` 取 `message_id`，
      `enhance` 取 `reply_id`）；
-   - `expand_context` 先用消息 id 取，失败才退回段内 id 兜底；
+   - 取回时先用消息 id，失败才退回段内 id 兜底（`expand_message` 与 `expand_recent` 一致）；
    - 一律按**字符串**传（`IBot.get_forward_msg(id: str)`）。
-7. 工具必须**如实汇报**：只取到发送者、正文仍是占位时不能算"已展开"
-   （`has_real_content` 判定 + 「只取到部分信息」分组），否则模型会以为拿到了内容就直接作答。
+7. 工具必须**如实汇报**：只取到发送者、正文仍是占位时不能算"翻到了"
+   （`has_real_content` 判定 + `（这条只翻到一半）`/`（正文没拿到）` 措辞），
+   否则模型会以为拿到了内容就直接作答。
+8. **结果文本口吻**：第一人称"我看到的"，不写"已展开 N 项"这类汇总头；
+   摘要抽取（`summarize_user` / `summarize_message`）必须与新格式同源，改了格式要一起改。
+9. 位置敏感的风格约束（如「回应要求」）**不能靠新增 system 消息**——Anthropic/Gemini 会把
+   中途 system 上提到最前面；要么拼进已有内容（tool 结果/user 文本），要么用 user 角色。
 
 ## 7. 验证
 
@@ -87,10 +110,11 @@ QQ 消息进入 LLM 时经常只剩"骨架"：`@123`、`[引用]`、`消息 id`�
 - 单轮 prompt 全量：`ctx.state["debug_prompt"]`
 - 调用率：`GET /agent/telemetry?bot_id=<qq>`（`tool_calls` / 耗时 / 成功率）
 - 消融：`logs/prompt_ablation/user_context_*.json`（裸 ID vs 预展开的现成对照格式）
-- 观测指标：prompt 里裸 `@数字` 的出现次数（应趋近 0）、`expand_context` 调用率、
-  兜底话术（"抱歉，我暂时无法回答"）出现率
+- 观测指标：prompt 里裸 `@数字` 的出现次数（应趋近 0）、`expand_*` 调用率、
+  同一 id 的重复取回次数（应为 0）、兜底话术（"抱歉，我暂时无法回答"）出现率
 
 ## 8. 其他参考
 
+- 指代消解设计：[docs/referent-resolution-design.md](referent-resolution-design.md)
 - 长期记忆设计：[docs/memory-design.md](memory-design.md)
 - 模块开发：[docs/MODULE_DEV.md](MODULE_DEV.md)

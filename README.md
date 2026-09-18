@@ -246,13 +246,30 @@ class Module(BaseModule):
 1. **预展开**：渲染层把 `@123` 反查成 `@三哥(123)`（`app/llm/nicknames.py` 共享缓存，
    与触发消息的 @ 解析共用，同一个人只查一次）；
 2. **缺口标记 + 摘要**：实在取不到才标 `【未展开:用户123】`，并在背景块 / `get_chat_history`
-   头部给出 `【本段含 2 处未展开内容：…；可调用 expand_context 展开后再回答】`；
-3. **按需展开**：系统工具 `expand_context` 按 id 展开（`users[]` 是谁、`messages[]` 被引用
-   消息与合并转发一层），零参数时自动从本轮触发消息推导——模型不需要先知道 id。
+   头部给出 `【本段含 2 处未展开内容：…；可调用 expand_message 展开后再回答】`；
+3. **按需展开**：三个系统工具按意图分区——`expand_recent`（按位置："上一条/刚才那条"，
+   不需要 id）、`expand_message`（按 id：被引用消息 / 合并转发）、`expand_user`（按 QQ：是谁）。
+   取回过的内容登记为「已展开」，后续不再重复取。
 
-只有**能被解决**的缺口才会被标记（图片/语音无法转文字就不标记）。相关开关与设计说明见
-[`docs/context-expand-design.md`](docs/context-expand-design.md)：`fetch_at_nickname`、
-`context_expand_enable`、`max_tool_rounds`、`proactive_env_prompt_enable` 等。
+只有**能被解决**的缺口才会被标记（图片/语音无法转文字就不标记）。
+
+### 指代消解（知道用户说的是哪一条）
+
+「那你能做到消息里的那个样子吗」这类**纯回指**句没有任何 id，靠模型自省会挑错对象。
+框架维护一张**会话焦点表**（谁刚被讨论过、摘要是什么），每轮请求注入「当前对话焦点」，
+并在判定出明确指向时**确定性预取**（不依赖模型决定要不要调工具，也就不再静默十几秒）：
+
+| 场景 | 处理 |
+|---|---|
+| 回复某条 / @ 某人 | 直接定目标，框架预取 |
+| "上一条 / 刚才那条 / 刚才的消息" | `expand_recent` 按位置取回 |
+| 纯回指（"那个样子/那条"） | 焦点优先 + 位置邻近；候选不明按 `referent_ambiguous_policy` **都取回** |
+| 已经取过的内容 | 渲染为 `【已展开:… → 摘要】`，工具命中登记**零 API 调用** |
+
+相关开关与设计说明见 [`docs/context-expand-design.md`](docs/context-expand-design.md)、
+[`docs/referent-resolution-design.md`](docs/referent-resolution-design.md)：
+`fetch_at_nickname`、`context_expand_enable`、`referent_*`、`max_tool_rounds`、
+`tool_result_directive*`、`proactive_env_prompt_enable` 等。
 
 > 主动消息与定时任务同样具备这套能力（此前这两条路径完全不传 tools）。
 
