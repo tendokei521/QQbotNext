@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -51,10 +52,64 @@ UNRESOLVED_FORWARD = "【未展开:合并转发】"
 # （``format_online_history`` 取 ``message_id``，``enhance`` 取 ``reply_id``）。
 UNRESOLVED_FORWARD_ID = "【未展开:合并转发{id}】"
 
+# ==================== “已展开”标记（状态迁移） ====================
+# 本会话已经取回过内容的 id 不再标"未展开"，而是给出摘要——这样：
+# - 模型知道"这个我看过了"（不必重复取，也不会以为还缺）；
+# - 下一轮请求仍能看到上一轮讨论过的内容（工具结果本身不进会话历史）。
+EXPANDED_REPLY = "【已展开:引用{id} → {summary}】"
+EXPANDED_FORWARD = "【已展开:合并转发{id} → {summary}】"
+
 # 缺口扫描：与上面的标记格式保持同源（渲染出什么就扫什么）
 _UNRESOLVED_RE = re.compile(r"【未展开:([^】]+)】")
-# 占位符（[图片]/[合并转发] 之类）与未展开标记都不算"真实内容"
-_PLACEHOLDER_RE = re.compile(r"【未展开:[^】]*】|\[[^\]]{1,10}\]")
+# 占位符、未展开标记、已展开标记都不算"真实内容"
+_PLACEHOLDER_RE = re.compile(r"【(?:未展开|已展开):[^】]*】|\[[^\]]{1,10}\]")
+
+
+@dataclass
+class ExpandedRefs:
+    """已展开映射（由 ``focus.expanded_refs`` 之类的登记表提供）。
+
+    分开两个字典避免"QQ 号与消息 id 数字恰好相同"时的语义串号。
+    """
+
+    messages: dict[str, str] = field(default_factory=dict)
+    users: dict[str, str] = field(default_factory=dict)
+
+    def message_summary(self, ref: Any) -> str:
+        return self.messages.get(str(ref or "").strip(), "")
+
+    def user_name(self, qq: Any) -> str:
+        return self.users.get(str(qq or "").strip(), "")
+
+
+def _expanded_marker(kind: str, ref: str, summary: str) -> str:
+    text = _clip_summary(summary)
+    if kind == "reply":
+        return EXPANDED_REPLY.format(id=ref, summary=text)
+    return EXPANDED_FORWARD.format(id=ref, summary=text)
+
+
+def _clip_summary(summary: str, limit: int = 80) -> str:
+    text = " ".join(str(summary or "").split())
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+def lookup_expanded(bot_id: Any, session_id: Any) -> ExpandedRefs:
+    """按会话查"已展开"登记（懒加载 focus，避免模块级循环依赖）。"""
+    if bot_id in (None, "") or session_id in (None, ""):
+        return ExpandedRefs()
+    try:
+        from app.llm import focus as _focus
+
+        data = _focus.expanded_refs(bot_id, session_id)
+    except Exception as e:
+        # 登记表读取失败不影响渲染主流程，按"都还没展开"处理并留痕
+        logger.debug(f"[GroupContext] 读取已展开登记失败（按未展开处理）: {e}")
+        return ExpandedRefs()
+    return ExpandedRefs(
+        messages=dict(data.get("messages") or {}),
+        users=dict(data.get("users") or {}),
+    )
 
 
 def has_real_content(text: Any) -> bool:
@@ -254,6 +309,7 @@ def _segment_text(
     at_names: dict[str, str] | None = None,
     mark_unresolved: bool = False,
     message_id: Any = None,
+    expanded: "ExpandedRefs | None" = None,
 ) -> str | None:
     """消息段 → 可读文本。
 
@@ -266,6 +322,8 @@ def _segment_text(
         message_id: **承载该消息段的整条消息 id**。合并转发的展开入口要的是这个 id
             （见 ``context_tools``），不是段内 ``data.id``（那是转发节点内部 id，
             超长且超出 int32/JS 安全整数范围）。
+        expanded: 已展开登记（本会话取过的 id → 摘要）。命中时把"未展开"升级为
+            ``【已展开:… → 摘要】``；@ 对象命中时直接用已知昵称渲染。
     """
     if isinstance(segment, dict):
         stype = segment.get("type", "")
@@ -280,7 +338,7 @@ def _segment_text(
         qq = str(data.get("qq", "") or "")
         if qq in (None, "", "all", "0"):
             return "@所有人"
-        name = (at_names or {}).get(qq)
+        name = (at_names or {}).get(qq) or (expanded.user_name(qq) if expanded else "")
         if name:
             return f"@{name}({qq})"
         if mark_unresolved:
@@ -291,14 +349,20 @@ def _segment_text(
             reply_id = str(data.get("id", "") or "")
             # 没有 id 就无从展开，保持旧占位而不是打一个无法解决的标记
             if reply_id:
+                summary = expanded.message_summary(reply_id) if expanded else ""
+                if summary:
+                    return _expanded_marker("reply", reply_id, summary)
                 return UNRESOLVED_REPLY.format(id=reply_id)
         return f"[{_NON_TEXT_SEGMENTS['reply']}]"
     if stype == "forward":
         if mark_unresolved:
-            # 优先用整条消息的 id（可直接交给 expand_context → get_forward_msg），
+            # 优先用整条消息的 id（可直接交给 expand_message → get_forward_msg），
             # 拿不到才退回段内 id
             ref = str(message_id or data.get("id", "") or "")
             if ref:
+                summary = expanded.message_summary(ref) if expanded else ""
+                if summary:
+                    return _expanded_marker("forward", ref, summary)
                 return UNRESOLVED_FORWARD_ID.format(id=ref)
             return UNRESOLVED_FORWARD
         return f"[{_NON_TEXT_SEGMENTS['forward']}]"
@@ -312,11 +376,12 @@ def extract_msg_text(
     at_names: dict[str, str] | None = None,
     mark_unresolved: bool = False,
     message_id: Any = None,
+    expanded: "ExpandedRefs | None" = None,
 ) -> str:
     """从 OneBot 消息段中提取可读文本；非文本段用 [图片]/[表情] 之类的占位表示。
 
-    ``at_names`` / ``mark_unresolved`` / ``message_id`` 见 :func:`_segment_text`
-    （``message_id`` 是承载这些段的整条消息 id，合并转发标记会用到它）。
+    ``at_names`` / ``mark_unresolved`` / ``message_id`` / ``expanded`` 见
+    :func:`_segment_text`（``message_id`` 是承载这些段的整条消息 id，合并转发标记会用到它）。
     """
     if isinstance(message, str):
         return message
@@ -325,7 +390,7 @@ def extract_msg_text(
 
     parts: list[str] = []
     for seg in message:
-        text = _segment_text(seg, at_names, mark_unresolved, message_id)
+        text = _segment_text(seg, at_names, mark_unresolved, message_id, expanded)
         if text:
             parts.append(text)
     return "".join(parts).strip()
@@ -344,6 +409,7 @@ def format_online_history(
     mask_nickname: bool = False,
     at_names: dict[str, str] | None = None,
     mark_unresolved: bool = False,
+    expanded: "ExpandedRefs | None" = None,
 ) -> str:
     """把 OneBot 消息列表格式化为群聊/私聊背景文本。
 
@@ -363,6 +429,7 @@ def format_online_history(
         mask_nickname: True=对句子型昵称脱敏为 用户<QQ>（实验性）。
         at_names: ``{qq: 昵称}``；把内容里的 ``@123`` 渲染成 ``@三哥(123)``。
         mark_unresolved: 未展开项是否输出 ``【未展开:...】`` 标记（见模块常量注释）。
+        expanded: 已展开登记；命中时输出 ``【已展开:... → 摘要】``（状态迁移）。
 
     Returns:
         格式化后的背景文本（每行一条消息）。
@@ -380,7 +447,7 @@ def format_online_history(
 
         # 整条消息 id：合并转发标记要用它（不是转发段内部的 data.id）
         msg_id = msg.get("message_id") or msg.get("real_id") or msg.get("message_seq") or ""
-        content = extract_msg_text(msg.get("message"), at_names, mark_unresolved, msg_id)
+        content = extract_msg_text(msg.get("message"), at_names, mark_unresolved, msg_id, expanded)
         if not content:
             continue
         if len(content) > max_content:
@@ -460,6 +527,8 @@ async def fetch_group_online_history(
     resolve_at: bool = True,
     mark_unresolved: bool = False,
     bot_id: Any = "",
+    session_id: Any = "",
+    expanded: "ExpandedRefs | None" = None,
 ) -> str:
     """拉取群聊最近消息，格式化为带发送者/时间/QQ 的背景文本。
 
@@ -467,6 +536,9 @@ async def fetch_group_online_history(
     环境"里**成本最低的一刀**：QQ 群里的 @ 是高频骨架，而反查能力（含缓存）本来就有。
     反查失败（无权限/已退群/连接异常）在 ``mark_unresolved=True`` 时输出
     ``【未展开:用户123】``，让模型知道"这里缺东西"而不是把裸 id 当正文猜。
+
+    ``expanded`` 给定时，本会话已取回过的 id 渲染成 ``【已展开:… → 摘要】``；
+    不传时自动按 ``bot_id``/``session_id`` 查焦点表（调用方通常只想传这两个）。
     """
     try:
         result = await bot.get_msg_history(
@@ -488,6 +560,10 @@ async def fetch_group_online_history(
                 bot, group_id, collect_at_ids(window), bot_id=bot_id
             )
 
+        refs = expanded
+        if refs is None and session_id not in (None, ""):
+            refs = lookup_expanded(bot_id, session_id)
+
         return format_online_history(
             messages,
             count,
@@ -496,6 +572,7 @@ async def fetch_group_online_history(
             mask_nickname=mask_nickname,
             at_names=at_names,
             mark_unresolved=mark_unresolved,
+            expanded=refs,
         )
     except Exception as e:
         # 背景块取不到时退回空串（调用方本来就把空块当作“无背景”），但必须留痕
@@ -508,6 +585,9 @@ async def fetch_private_online_history(
     user_id: Any,
     count: int = 50,
     self_ids: set[str] | None = None,
+    *,
+    bot_id: Any = "",
+    session_id: Any = "",
 ) -> str:
     """拉取私聊最近消息，格式化为不带昵称的私聊背景文本（我方=我、对方=对方）。"""
     try:
@@ -520,8 +600,13 @@ async def fetch_private_online_history(
         messages = extract_history_messages(result)
         if not messages:
             return ""
-        return format_online_history(messages, count, self_ids=self_ids, is_private=True)
-    except Exception:
+        refs = lookup_expanded(bot_id, session_id) if session_id not in (None, "") else None
+        return format_online_history(
+            messages, count, self_ids=self_ids, is_private=True, expanded=refs
+        )
+    except Exception as e:
+        # 背景块取不到时退回空串（调用方把空块当作“无背景”），但必须留痕
+        logger.debug(f"[GroupContext] 拉取私聊 {user_id} 在线历史失败（已忽略）: {e}")
         return ""
 
 

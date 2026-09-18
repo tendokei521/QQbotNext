@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from app.llm import nicknames
+from app.llm import focus, nicknames
 from app.llm.context_tools import build_context_tools, derive_targets
 from app.llm.tool import ToolContext
 
@@ -76,6 +76,7 @@ async def _call(ctx, args: dict) -> str:
 
 def setup_function(_fn):
     nicknames.clear_cache()
+    focus.clear_all()
 
 
 # ---------- 目标推导 ----------

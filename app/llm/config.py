@@ -148,6 +148,14 @@ DEFAULT_LLM_CONFIG: dict = {
     # 上下文「骨架补全」：聊天记录里展不开的内容标成【未展开:...】并允许按需展开
     # （与 expand_context 工具同开同关；@ 昵称预展开沿用上面的 fetch_at_nickname）
     "context_expand_enable": True,
+    # 指代消解（设计基准 docs/referent-resolution-design.md）
+    "referent_resolve_enable": True,           # 总开关（焦点表 + 预取 + 焦点行）
+    "referent_prefetch_enable": True,          # 确定性预取：有明确指向时框架直接取回
+    "referent_ambiguous_policy": "fetch_all",  # fetch_all / focus_first / ask
+    "referent_prefetch_max": 2,                # 一轮最多预取几个候选
+    "referent_focus_ttl": 1800,                # 焦点项存活秒数
+    "referent_focus_max": 12,                  # 每会话焦点项上限
+    "referent_prompt_enable": True,            # 「指代解析」提示行（按能力裁剪）
     # 工具主动性提示词（唯一一块「主动性」system 块）
     "proactive_prompt_enable": True,          # 是否注入「主动性」协议块
     "proactive_history_intent_nudge": True,   # 命中历史意图时在同一块内补强

@@ -187,6 +187,7 @@ class ProactiveManager:
                 resolve_at=bool(self.module.config.get("fetch_at_nickname", True)),
                 mark_unresolved=bool(self.module.config.get("context_expand_enable", True)),
                 bot_id=str(self.module.bot_id),
+                session_id=session_id,
                 **_meta_flags,
             )
             if history_text:

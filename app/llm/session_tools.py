@@ -111,7 +111,8 @@ async def _fetch_qq_history(ctx, bot, runtime, group_id: str, user_id: str, limi
 
     群聊记录沿用渲染层的“骨架预展开”开关：``@123`` 尽力展开成 ``@三哥(123)``，
     展开不到的部分在 ``context_expand_enable`` 开启时输出 ``【未展开:用户123】``
-    （模型据此可以再调 expand_context 按需展开）。
+    （模型据此可以再调 expand_* 按需展开）；本会话取回过的 id 会渲染成
+    ``【已展开:... → 摘要】``（依据 session_id 查焦点表）。
     """
     if bot is None:
         return ""
@@ -127,10 +128,13 @@ async def _fetch_qq_history(ctx, bot, runtime, group_id: str, user_id: str, limi
                 resolve_at=bool(_cfg(ctx, "fetch_at_nickname", True)),
                 mark_unresolved=bool(_cfg(ctx, "context_expand_enable", True)),
                 bot_id=getattr(runtime, "bot_id", "") or "",
+                session_id=getattr(ctx, "session_id", "") or "",
             )
         if user_id:
             return await fetch_private_online_history(
-                bot, user_id, count=limit, self_ids=self_ids
+                bot, user_id, count=limit, self_ids=self_ids,
+                bot_id=getattr(runtime, "bot_id", "") or "",
+                session_id=getattr(ctx, "session_id", "") or "",
             )
     except Exception:
         return ""

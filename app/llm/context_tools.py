@@ -16,10 +16,11 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 
 from app.core.logger import logger
-from app.llm import nicknames
+from app.llm import focus, nicknames
 from app.llm.group_context import extract_msg_text, has_real_content
 from app.llm.tool import ToolSpec
 
@@ -114,6 +115,29 @@ def derive_targets(event: Any, self_ids: set[str]) -> tuple[list[str], list[str]
 def _truncate(text: str, limit: int) -> str:
     text = (text or "").strip()
     return text if len(text) <= limit else text[:limit] + "…"
+
+
+def summarize_user(text: str, limit: int = 40) -> str:
+    """从用户展开文本里抽一句话摘要（供焦点表/已展开标记使用）。"""
+    m = re.search(r"昵称：([^；]+)", text or "")
+    if m:
+        return m.group(1).strip()[:limit]
+    m = re.search(r"群名片：([^；]+)", text or "")
+    return m.group(1).strip()[:limit] if m else ""
+
+
+def summarize_message(text: str, limit: int = 60) -> str:
+    """从消息展开文本里抽一句话摘要（谁 + 说了什么 / 转发了什么）。"""
+    body = str(text or "").strip()
+    if not body:
+        return ""
+    m = re.search(r"合并转发内容：(.+)", body)
+    if m:
+        return ("转发：" + m.group(1)).strip()[:limit]
+    m = re.search(r"来自\s*([^；]+)；(.+?)(?:；relation|$)", body)
+    if m:
+        return f"{m.group(1)}：{m.group(2)}".strip()[:limit]
+    return body[:limit]
 
 
 async def _describe_user(bot: Any, group_id: Any, qq: str, relation: str, *, bot_id: Any = "") -> tuple[str, bool]:
@@ -294,6 +318,7 @@ async def _handle_expand(ctx, args: dict) -> str:
 
     group_id = getattr(ctx, "group_id", None)
     bot_id = str(getattr(runtime, "bot_id", "") or getattr(ctx, "bot_id", "") or "")
+    session_id = str(getattr(ctx, "session_id", "") or "")
     limit = _limit(args)
 
     from_event_users, from_event_messages = (
@@ -302,11 +327,30 @@ async def _handle_expand(ctx, args: dict) -> str:
 
     async def _user_block(qq: str) -> tuple[str, bool]:
         relation = "当前消息 @ 的对象" if qq in from_event_users else f"{relation_hint}的用户"
-        return await _describe_user(bot, group_id, qq, relation, bot_id=bot_id)
+        cached = focus.summary_of(bot_id, session_id, qq) if session_id else ""
+        if cached:
+            # 本会话已取过：直接复用登记摘要，零 API 调用（杜绝"重读取"）
+            return f"【用户 {qq}】昵称：{cached}（本会话已展开过）；relation：{relation}", True
+        text, ok = await _describe_user(bot, group_id, qq, relation, bot_id=bot_id)
+        if ok and text:
+            focus.note(
+                bot_id, session_id, qq, kind="user",
+                label=f"用户{qq}", summary=summarize_user(text), source="expand",
+            )
+        return text, ok
 
     async def _message_block(mid: str) -> tuple[str, bool]:
         relation = "当前消息引用的消息" if mid in from_event_messages else f"{relation_hint}的消息"
-        return await _describe_message(bot, mid, limit, relation)
+        cached = focus.summary_of(bot_id, session_id, mid) if session_id else ""
+        if cached:
+            return f"【消息 {mid}】{cached}（本会话已展开过）；relation：{relation}", True
+        text, ok = await _describe_message(bot, mid, limit, relation)
+        if ok and text:
+            focus.note(
+                bot_id, session_id, mid, kind="message",
+                label=f"消息{mid}", summary=summarize_message(text), source="expand",
+            )
+        return text, ok
 
     blocks = await asyncio.gather(
         *[_user_block(qq) for qq in users],

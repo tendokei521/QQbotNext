@@ -501,6 +501,7 @@ class TaskScheduler:
                 resolve_at=bool(config.get("fetch_at_nickname", True)),
                 mark_unresolved=bool(config.get("context_expand_enable", True)),
                 bot_id=str(self.bot_id),
+                session_id=entry.session_id,
                 **_meta_flags,
             )
             if history_text:

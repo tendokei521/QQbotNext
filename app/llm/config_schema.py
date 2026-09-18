@@ -184,8 +184,39 @@ SCHEMA = {
     "context_expand_enable": {
         "type": "boolean", "label": "未展开内容标记与按需展开",
         "description": "聊天记录里展不开的内容（未取到昵称的 @、被引用的消息等）渲染成【未展开:...】标记，"
-                       "并允许模型用 expand_context 按需展开；关闭后恢复为裸 @123 之类的旧渲染且不暴露展开工具",
+                       "并允许模型用 expand_* 工具按需展开；关闭后恢复为裸 @123 之类的旧渲染且不暴露展开工具",
         "default": True, "group": "group_session",
+    },
+    "referent_resolve_enable": {
+        "type": "boolean", "label": "指代消解",
+        "description": "维护会话焦点表，并在每轮请求注入「当前对话焦点」，让模型知道用户回指的“那条/刚才的”是哪一条；"
+                       "同时把本会话已取回过的内容渲染为「已展开」，避免重复读取",
+        "default": True, "group": "group_session",
+    },
+    "referent_prefetch_enable": {
+        "type": "boolean", "label": "指代预取",
+        "description": "判定出明确指向（回复某条、提到“上一条/那个消息”）时，框架在请求前直接把内容取回并放进上下文，"
+                       "不依赖模型自己决定要不要调工具（更快、命中率更高）",
+        "default": True, "group": "group_session",
+    },
+    "referent_ambiguous_policy": {
+        "type": "select", "label": "指代不明时的处理",
+        "description": "候选不止一个且难以判断时：都取回（推荐）/ 只取焦点最高项 / 先向用户确认",
+        "default": "fetch_all",
+        "options": {"fetch_all": "都取回", "focus_first": "只取焦点项", "ask": "让模型先确认"},
+        "group": "group_session",
+    },
+    "referent_prefetch_max": {
+        "type": "number", "label": "预取候选上限", "description": "一轮最多预取几个候选（预算保护）",
+        "default": 2, "min": 1, "max": 5, "group": "group_session",
+    },
+    "referent_focus_ttl": {
+        "type": "number", "label": "焦点存活时长(秒)", "description": "焦点项多久没被关注就从焦点表淘汰",
+        "default": 1800, "min": 60, "max": 86400, "group": "group_session",
+    },
+    "referent_focus_max": {
+        "type": "number", "label": "焦点项上限", "description": "每会话保留的焦点项数量上限",
+        "default": 12, "min": 3, "max": 50, "group": "group_session",
     },
     "clean_output_parentheses": {
         "type": "boolean", "label": "强制清洗括号内容", "description": "写入会话历史时剥离大模型输出中的（…）/(…)内容，避免后续回复模仿括号风格（本次展示原文不变）",
@@ -345,6 +376,12 @@ SCHEMA = {
     },
     "proactive_env_intent_nudge": {
         "type": "boolean", "label": "环境意图补强", "description": "用户问群/成员/某条消息相关信息时，在同一块里补一句「必须先取得实际环境数据再回答」",
+        "default": True, "group": "group_proactive",
+    },
+    "referent_prompt_enable": {
+        "type": "boolean", "label": "指代解析提示",
+        "description": "在同一块里说明如何读「当前对话焦点」、回指（那条/刚才的/那个样子）该指向谁、候选不明时怎么办、"
+                       "已展开的内容不必重复取；无对应工具时自动不注入",
         "default": True, "group": "group_proactive",
     },
     "outbound_directive_enable": {

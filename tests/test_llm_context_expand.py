@@ -22,6 +22,7 @@ from app.llm.group_context import (
     UNRESOLVED_FORWARD,
     UNRESOLVED_FORWARD_ID,
     UNRESOLVED_REPLY,
+    ExpandedRefs,
     collect_at_ids,
     extract_msg_text,
     fetch_group_online_history,
@@ -86,7 +87,10 @@ def _envelope(messages):
 
 
 def setup_function(_fn):
+    from app.llm import focus as _focus
+
     nicknames.clear_cache()
+    _focus.clear_all()
 
 
 # ---------- 段级渲染 ----------
@@ -458,3 +462,90 @@ def test_history_forward_row_carries_message_id():
 
     assert UNRESOLVED_FORWARD_ID.format(id="576048059") in text
     assert "7686537322889496857" not in text
+
+
+# ---------- 状态迁移：未展开 → 已展开 ----------
+
+
+def test_forward_row_renders_expanded_state_when_registered():
+    """本会话取回过的 id 必须从"未展开"升级为"已展开（带摘要）"——否则下一轮又当缺的。"""
+    messages = [{
+        "time": 1788342159,
+        "message_id": 576048059,
+        "sender": {"user_id": 1901691195, "nickname": "桉"},
+        "message": [{"type": "forward", "data": {"id": "7686537322889496857"}}],
+    }]
+    expanded = ExpandedRefs(messages={"576048059": "B站《学校的8种违法行为》"})
+
+    text = format_online_history(
+        messages, 10, self_ids=set(), mark_unresolved=True, expanded=expanded
+    )
+
+    assert "【已展开:合并转发576048059 → B站《学校的8种违法行为》】" in text
+    assert "【未展开" not in text
+
+
+def test_reply_row_renders_expanded_state():
+    from app.llm.group_context import extract_msg_text
+
+    reply = [{"type": "reply", "data": {"id": "456"}}]
+    expanded = ExpandedRefs(messages={"456": "成人向对话记录"})
+
+    assert extract_msg_text(reply, None, True, None, expanded) == "【已展开:引用456 → 成人向对话记录】"
+
+
+def test_at_renders_known_name_from_registry():
+    """登记里有昵称时，@ 直接用昵称渲染（不再标未展开）。"""
+    at = [{"type": "at", "data": {"qq": "123"}}]
+    expanded = ExpandedRefs(users={"123": "三哥"})
+
+    assert extract_msg_text(at, None, True, None, expanded) == "@三哥(123)"
+
+
+def test_expanded_marker_is_not_counted_as_unresolved():
+    from app.llm.group_context import unresolved_items, unresolved_summary
+
+    text = "【已展开:合并转发576048059 → B站视频】"
+
+    assert unresolved_items(text) == []
+    assert unresolved_summary(text) == ""
+    assert not has_real_content(text)
+
+
+def test_expanded_summary_is_clipped():
+    messages = [{
+        "message_id": "1",
+        "sender": {"user_id": 1},
+        "message": [{"type": "forward", "data": {"id": "f"}}],
+    }]
+    expanded = ExpandedRefs(messages={"1": "x" * 300})
+
+    text = format_online_history(messages, 5, self_ids=set(), mark_unresolved=True, expanded=expanded)
+
+    assert "…" in text
+    assert len(text) < 200
+
+
+async def test_lookup_expanded_bridges_focus_registry():
+    """渲染层按 bot_id/session_id 自动查焦点表（无需调用方手动传 expanded）。"""
+    from app.llm import focus
+    from app.llm.group_context import lookup_expanded
+
+    focus.clear_all()
+    focus.note("b1", "group_778", "576048059", kind="message", summary="B站视频", source="expand")
+    bot = _FakeBot(_envelope([{
+        "time": 1788342159,
+        "message_id": 576048059,
+        "sender": {"user_id": 1901691195, "nickname": "桉"},
+        "message": [{"type": "forward", "data": {"id": "f"}}],
+    }]))
+
+    text = await fetch_group_online_history(
+        bot, 778, count=10, self_ids=set(), mark_unresolved=True,
+        bot_id="b1", session_id="group_778",
+    )
+
+    assert "【已展开:合并转发576048059 → B站视频】" in text
+    assert lookup_expanded("b1", "group_778").message_summary("576048059") == "B站视频"
+    assert lookup_expanded("b1", "nope").messages == {}
+    focus.clear_all()

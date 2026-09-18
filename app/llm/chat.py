@@ -70,6 +70,8 @@ async def _build_group_pre_history(
     mask_nickname: bool = False,
     resolve_at: bool = True,
     mark_unresolved: bool = False,
+    bot_id: Any = "",
+    session_id: Any = "",
 ) -> str:
     """根据 include_pre_history 配置，拉取并组装群聊环境背景块。
 
@@ -79,6 +81,8 @@ async def _build_group_pre_history(
     ``app.llm.nicknames`` 与其缓存），``mark_unresolved`` 让取不到的部分输出
     ``【未展开:...】`` 标记——背景块是"群里其他人聊了什么"的唯一可见窗口，
     此前这里只有裸 ``@123``，模型既不知道是谁、也没有"这里缺东西"的感知。
+    ``bot_id``/``session_id`` 用于查"已展开"登记：本会话取回过的 id 渲染成
+    ``【已展开:... → 摘要】``，不再重复标记为缺失。
     """
     history_text = await fetch_group_online_history(
         event.bot,
@@ -89,7 +93,8 @@ async def _build_group_pre_history(
         mask_nickname=mask_nickname,
         resolve_at=resolve_at,
         mark_unresolved=mark_unresolved,
-        bot_id=getattr(event, "bot_id", "") or "",
+        bot_id=bot_id or getattr(event, "bot_id", "") or "",
+        session_id=session_id,
     )
     if not history_text:
         return ""
@@ -616,6 +621,8 @@ async def call_llm_and_reply(module, event, session_mgr, config,
             pre_history_text = await _build_group_pre_history(
                 event, group_id, count=history_rounds, **_meta_flags,
                 **_context_expand_flags(config),
+                bot_id=getattr(event, "bot_id", "") or "",
+                session_id=session_id,
             )
     elif is_private and include_pre_history in ("history", "load"):
         pre_history_text = await fetch_private_online_history(
@@ -623,6 +630,8 @@ async def call_llm_and_reply(module, event, session_mgr, config,
             user_id,
             count=history_rounds,
             self_ids={str(event.self_id), str(getattr(event, "bot_id", "") or "")},
+            bot_id=getattr(event, "bot_id", "") or "",
+            session_id=session_id,
         )
         if pre_history_text and include_pre_history == "history":
             pre_history_text = f"近期聊天记录:\n{pre_history_text}"
@@ -810,6 +819,8 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
             pre_history_text = await _build_group_pre_history(
                 event, group_id, count=history_rounds, **_meta_flags,
                 **_context_expand_flags(config),
+                bot_id=getattr(event, "bot_id", "") or "",
+                session_id=session_id,
             )
     elif is_private and include_pre_history in ("history", "load"):
         pre_history_text = await fetch_private_online_history(
@@ -817,6 +828,8 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
             user_id,
             count=history_rounds,
             self_ids={str(event.self_id), str(getattr(event, "bot_id", "") or "")},
+            bot_id=getattr(event, "bot_id", "") or "",
+            session_id=session_id,
         )
         if pre_history_text and include_pre_history == "history":
             pre_history_text = f"近期聊天记录:\n{pre_history_text}"
@@ -1016,6 +1029,8 @@ async def stream_response(runtime, event, ctx=None):
             pre_history_text = await _build_group_pre_history(
                 event, group_id, count=history_rounds, **_meta_flags,
                 **_context_expand_flags(config),
+                bot_id=getattr(event, "bot_id", "") or "",
+                session_id=session_id,
             )
     elif is_private and include_pre_history in ("history", "load"):
         pre_history_text = await fetch_private_online_history(
@@ -1023,6 +1038,8 @@ async def stream_response(runtime, event, ctx=None):
             user_id,
             count=history_rounds,
             self_ids={str(event.self_id), str(getattr(event, "bot_id", "") or "")},
+            bot_id=getattr(event, "bot_id", "") or "",
+            session_id=session_id,
         )
         if pre_history_text and include_pre_history == "history":
             pre_history_text = f"近期聊天记录:\n{pre_history_text}"
