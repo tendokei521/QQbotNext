@@ -434,3 +434,27 @@ def test_segments_to_text_renders_forward_marker_with_id():
         UNRESOLVED_FORWARD_ID.format(id="7686537322889496857")
     )
     assert _segments_to_text([{"type": "text", "data": {"text": "你好"}}]) == "你好"
+
+
+def test_segments_to_text_prefers_containing_message_id():
+    """合并转发标记要用"承载转发的那条消息 id"（展开入口要的是它）。"""
+    from app.llm.enhance import _segments_to_text
+
+    assert _segments_to_text(
+        [{"type": "forward", "data": {"id": "7686537322889496857"}}], message_id="576048059"
+    ) == UNRESOLVED_FORWARD_ID.format(id="576048059")
+
+
+def test_history_forward_row_carries_message_id():
+    """背景块里的合并转发行也必须带"整条消息 id"（真实日志里的 576048059 这类）。"""
+    messages = [{
+        "time": 1788342159,
+        "message_id": 576048059,
+        "sender": {"user_id": 1901691195, "nickname": "桉"},
+        "message": [{"type": "forward", "data": {"id": "7686537322889496857"}}],
+    }]
+
+    text = format_online_history(messages, 10, self_ids=set(), mark_unresolved=True)
+
+    assert UNRESOLVED_FORWARD_ID.format(id="576048059") in text
+    assert "7686537322889496857" not in text

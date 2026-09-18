@@ -44,10 +44,11 @@ PRIVATE_OTHER_TAG = "对方"
 UNRESOLVED_AT = "【未展开:用户{qq}】"
 UNRESOLVED_REPLY = "【未展开:引用{id}】"
 UNRESOLVED_FORWARD = "【未展开:合并转发】"
-# 合并转发段自带 ``data.id``（OneBot 的 forward id：字符串，且可能超出 JS 安全整数范围），
-# 带上它模型才能直接去展开；不带 id 的标记只能干瞪眼。
-# 实测：把该 id 强转 int 再调 get_forward_msg 会被 NapCat 拒为
-# 「1200 消息已过期或者为内层消息」——必须按字符串传递（见 IBot.get_forward_msg(id: str)）。
+# 合并转发标记里的 id 是**承载转发的那条消息的 id**（不是转发节点内部的 forward id）：
+# 展开入口 ``get_forward_msg(id=...)`` 要的就是这个 id；内部 id 是可能超出
+# int32 / JS 安全整数范围的长整型字符串，传进去会被 NapCat 拒为
+# 「1200 消息已过期或者为内层消息」。渲染时由调用方把整条消息 id 传进来
+# （``format_online_history`` 取 ``message_id``，``enhance`` 取 ``reply_id``）。
 UNRESOLVED_FORWARD_ID = "【未展开:合并转发{id}】"
 
 # 缺口扫描：与上面的标记格式保持同源（渲染出什么就扫什么）
@@ -252,6 +253,7 @@ def _segment_text(
     segment: Any,
     at_names: dict[str, str] | None = None,
     mark_unresolved: bool = False,
+    message_id: Any = None,
 ) -> str | None:
     """消息段 → 可读文本。
 
@@ -261,6 +263,9 @@ def _segment_text(
             （复用全局 ``昵称(QQ)`` 约定，不引入新语法）。
         mark_unresolved: 反查失败/未提供时是否输出 ``【未展开:...】`` 标记；
             False 时保持历史的裸 ``@123`` 行为。
+        message_id: **承载该消息段的整条消息 id**。合并转发的展开入口要的是这个 id
+            （见 ``context_tools``），不是段内 ``data.id``（那是转发节点内部 id，
+            超长且超出 int32/JS 安全整数范围）。
     """
     if isinstance(segment, dict):
         stype = segment.get("type", "")
@@ -290,9 +295,11 @@ def _segment_text(
         return f"[{_NON_TEXT_SEGMENTS['reply']}]"
     if stype == "forward":
         if mark_unresolved:
-            forward_id = str(data.get("id", "") or "")
-            if forward_id:
-                return UNRESOLVED_FORWARD_ID.format(id=forward_id)
+            # 优先用整条消息的 id（可直接交给 expand_context → get_forward_msg），
+            # 拿不到才退回段内 id
+            ref = str(message_id or data.get("id", "") or "")
+            if ref:
+                return UNRESOLVED_FORWARD_ID.format(id=ref)
             return UNRESOLVED_FORWARD
         return f"[{_NON_TEXT_SEGMENTS['forward']}]"
     if stype in _NON_TEXT_SEGMENTS:
@@ -304,10 +311,12 @@ def extract_msg_text(
     message: Any,
     at_names: dict[str, str] | None = None,
     mark_unresolved: bool = False,
+    message_id: Any = None,
 ) -> str:
     """从 OneBot 消息段中提取可读文本；非文本段用 [图片]/[表情] 之类的占位表示。
 
-    ``at_names`` / ``mark_unresolved`` 见 :func:`_segment_text`。
+    ``at_names`` / ``mark_unresolved`` / ``message_id`` 见 :func:`_segment_text`
+    （``message_id`` 是承载这些段的整条消息 id，合并转发标记会用到它）。
     """
     if isinstance(message, str):
         return message
@@ -316,7 +325,7 @@ def extract_msg_text(
 
     parts: list[str] = []
     for seg in message:
-        text = _segment_text(seg, at_names, mark_unresolved)
+        text = _segment_text(seg, at_names, mark_unresolved, message_id)
         if text:
             parts.append(text)
     return "".join(parts).strip()
@@ -369,7 +378,9 @@ def format_online_history(
         user_id = sender.get("user_id", "")
         is_self = str(user_id) in self_ids
 
-        content = extract_msg_text(msg.get("message"), at_names, mark_unresolved)
+        # 整条消息 id：合并转发标记要用它（不是转发段内部的 data.id）
+        msg_id = msg.get("message_id") or msg.get("real_id") or msg.get("message_seq") or ""
+        content = extract_msg_text(msg.get("message"), at_names, mark_unresolved, msg_id)
         if not content:
             continue
         if len(content) > max_content:

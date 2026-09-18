@@ -85,6 +85,11 @@ def _seg_type(seg: Any) -> str:
     return seg.get("type", "") if isinstance(seg, dict) else getattr(seg, "type", "")
 
 
+def has_forward_segment(message: Any) -> bool:
+    """消息段里是否含合并转发（决定要不要去取转发内容）。"""
+    return any(_seg_type(seg) == "forward" for seg in _segments(message))
+
+
 def derive_targets(event: Any, self_ids: set[str]) -> tuple[list[str], list[str]]:
     """从本轮触发消息里推导要展开的对象；返回 ``(users, messages)``。
 
@@ -162,15 +167,21 @@ async def _describe_message(bot: Any, mid: str, limit: int, relation: str) -> tu
         bits = [f"来自 {label}" + (f"({sender_id})" if sender_id else "")]
         if has_real_content(text):
             bits.append(_truncate(text, limit))
-        # 合并转发：再展开一层（一层深度的"引用链"，不递归，避免无界展开）
-        forward_id = ""
+        # 合并转发：再展开一层（一层深度的"引用链"，不递归，避免无界展开）。
+        # 注意：get_forward_msg 要的是**承载转发的那条消息的 id**（也就是这里的 mid），
+        # 不是转发节点内部的 forward id——后者是超长整型字符串（如 7686537322889496857），
+        # 既超出 int32、也超出 JS 安全整数范围。内部 id 只作为兜底再试一次。
+        inner_id = ""
         for seg in _segments(data.get("message")):
             if _seg_type(seg) == "forward":
-                forward_id = str(_seg_field(seg, "id", "") or "")
+                inner_id = str(_seg_field(seg, "id", "") or "")
                 break
         forward_ok = False
-        if forward_id:
-            nodes, forward_error = await _describe_forward(bot, forward_id, limit)
+        if inner_id or has_forward_segment(data.get("message")):
+            nodes, forward_error = await _describe_forward(bot, str(mid), limit)
+            if not nodes and inner_id and inner_id != str(mid):
+                nodes, fallback_error = await _describe_forward(bot, inner_id, limit)
+                forward_error = forward_error or fallback_error
             if nodes:
                 bits.append("合并转发内容：" + nodes)
                 forward_ok = True
@@ -211,17 +222,17 @@ async def _fetch_message(bot: Any, mid: str) -> dict:
     return {}
 
 
-async def _describe_forward(bot: Any, forward_id: str, limit: int) -> tuple[str, str]:
+async def _describe_forward(bot: Any, forward_ref: str, limit: int) -> tuple[str, str]:
     """合并转发 → 逐条摘要；返回 ``(内容, 失败原因)``。
 
-    ``id`` 必须按**字符串**传：OneBot 的 forward id 是长整型字符串
-    （可能超出 int32 / JS 安全整数范围），强转 int 会被 NapCat 拒为
-    「1200 消息已过期或者为内层消息」——实测同一个 id 用字符串就能取到。
+    ``id`` 传**承载转发的那条消息的 id**（协议上 NapCat 也接受该消息的 id），
+    并且一律按**字符串**传：这类 id 常是超出 int32 / JS 安全整数范围的长整型字符串，
+    强转 int 会丢精度并被拒为「1200 消息已过期或者为内层消息」。
     """
     try:
-        resp = await bot.get_forward_msg(id=str(forward_id))
+        resp = await bot.get_forward_msg(id=str(forward_ref))
     except Exception as e:
-        logger.debug(f"[ExpandContext] 展开合并转发 {forward_id} 失败（已忽略）: {e}")
+        logger.debug(f"[ExpandContext] 展开合并转发 {forward_ref} 失败（已忽略）: {e}")
         return "", str(e)
     if isinstance(resp, dict) and resp.get("status") not in (None, "ok"):
         return "", f"{resp.get('retcode')} {resp.get('message') or ''}".strip()

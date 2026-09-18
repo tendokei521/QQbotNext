@@ -221,7 +221,7 @@ async def _collect_quote_info(ctx) -> dict | None:
         sender = data.get("sender", {}) or {}
         sender_nickname = sender.get("card") or sender.get("nickname") or ""
         sender_id = sender.get("user_id", "")
-        text = _segments_to_text(data.get("message"))
+        text = _segments_to_text(data.get("message"), message_id=reply_id)
         if not text or not has_real_content(text):
             # 被引用的消息本身没有正文（合并转发 / 图片 / 已过期）：只回一个 "[forward]"
             # 之类段名对模型毫无用处——它既不知道那是什么、也拿不到 id 去展开。
@@ -242,18 +242,21 @@ async def _collect_quote_info(ctx) -> dict | None:
         }
 
 
-def _segments_to_text(message) -> str:
+def _segments_to_text(message, message_id: Any = None) -> str:
     """消息段 → 可读文本（与群聊背景块同一套渲染：@ 展开、非文本占位、缺口标记）。
 
+    ``message_id`` 是承载这些段的整条消息 id：合并转发标记用它（展开入口要的是这个 id，
+    不是转发段内部的 ``data.id``——后者超长且超出 int32/JS 安全整数范围）。
+
     历史问题：这里此前只拼段类型名，合并转发会渲染成英文 ``[forward]``——既不是内容也不
-    含 id，模型拿着它什么也做不了。现在委托给 ``group_context.extract_msg_text``（标记
-    为未展开），无法识别的段类型再退回段名列表兜底。
+    含可用的 id，模型拿着它什么也做不了。现在委托给 ``group_context.extract_msg_text``
+    （标记为未展开），无法识别的段类型再退回段名列表兜底。
     """
     from app.domain.message import Message
 
     if isinstance(message, str):
         return message
-    rendered = extract_msg_text(message, mark_unresolved=True)
+    rendered = extract_msg_text(message, mark_unresolved=True, message_id=message_id)
     if has_real_content(rendered):
         return rendered
     msg = Message.from_onebot(message)

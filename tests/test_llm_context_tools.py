@@ -184,7 +184,7 @@ async def test_expand_respects_content_limit():
     assert long_text not in result
 
 
-# ---------- 合并转发：id 必须按字符串传（真实日志回归） ----------
+# ---------- 合并转发：要用"承载转发的那条消息 id"，且按字符串传 ----------
 
 
 class _StrictForwardBot(_Bot):
@@ -206,7 +206,27 @@ class _StrictForwardBot(_Bot):
         return await super().get_forward_msg(id)
 
 
-async def test_forward_id_is_passed_as_string():
+async def test_forward_lookup_uses_containing_message_id():
+    """首选「承载转发的消息 id」——真实日志里模型正是这样传才成功的。"""
+    bot = _StrictForwardBot(
+        messages={"999": {
+            "sender": {"user_id": 123, "nickname": "张三"},
+            "message": [{"type": "forward", "data": {"id": "7686537322889496857"}}],
+        }},
+        forwards={"999": {"messages": [
+            {"sender": {"nickname": "小明"}, "message": [{"type": "text", "data": {"text": "早"}}]},
+        ]}},
+    )
+
+    result = await _call(_ctx(bot), {"messages": ["999"]})
+
+    assert bot.forward_ids == ["999"]  # 不碰内部 forward id，也就不需要兜底重试
+    assert "小明: 早" in result
+    assert "已展开 1 项" in result
+
+
+async def test_forward_lookup_falls_back_to_inner_id():
+    """消息 id 取不到时才退回段内 forward id（且同样按字符串传）。"""
     bot = _StrictForwardBot(
         messages={"999": {
             "sender": {"user_id": 123, "nickname": "张三"},
@@ -219,9 +239,9 @@ async def test_forward_id_is_passed_as_string():
 
     result = await _call(_ctx(bot), {"messages": ["999"]})
 
-    assert bot.forward_ids == ["7686537322889496857"]
+    assert bot.forward_ids == ["999", "7686537322889496857"]
+    assert all(isinstance(i, str) for i in bot.forward_ids)
     assert "小明: 早" in result
-    assert "已展开 1 项" in result
 
 
 async def test_forward_failure_is_reported_not_hidden():
