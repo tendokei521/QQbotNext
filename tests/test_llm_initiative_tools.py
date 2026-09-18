@@ -59,7 +59,8 @@ async def test_initiative_tools_include_context_tools_without_event():
     )
     names = {s.name for s in specs}
 
-    assert {"get_current_session", "get_chat_history", "expand_context"} <= names
+    assert {"get_current_session", "get_chat_history"} <= names
+    assert {"expand_recent", "expand_message", "expand_user"} <= names
     # 主动消息/定时任务自身不需要再创建定时任务
     assert "schedule_task" not in names
     assert ctx.event is None
@@ -278,7 +279,7 @@ async def test_scheduled_message_gets_proactive_block_and_tools(tmp_path, monkey
     assert "### 主动性" in joined
     assert "先自己取" in joined
     tool_names = {t["function"]["name"] for t in captured["kwargs"].get("tools") or []}
-    assert "expand_context" in tool_names
+    assert {"expand_recent", "expand_message", "expand_user"} <= tool_names
     assert "get_current_session" in tool_names
     assert captured["kwargs"]["max_tool_rounds"] == 5
 
@@ -309,7 +310,7 @@ async def test_scheduled_message_skips_tools_when_disabled(tmp_path, monkeypatch
         sched.stop()
 
     tool_names = {t["function"]["name"] for t in captured["kwargs"].get("tools") or []}
-    assert "expand_context" not in tool_names
+    assert not ({"expand_recent", "expand_message", "expand_user"} & tool_names)
     assert "get_current_session" in tool_names
 
 

@@ -27,7 +27,8 @@ ALL_TOOLS = {"get_chat_history", "send_poke", "get_current_session", "schedule_t
 HISTORY_ONLY = {"get_chat_history", "get_current_session"}
 POKE_ONLY = {"send_poke"}
 ENV_ONLY = {"get_current_session"}
-ENV_WITH_EXPAND = {"get_current_session", "expand_context"}
+EXPAND_TOOLS = {"expand_recent", "expand_message", "expand_user"}
+ENV_WITH_EXPAND = {"get_current_session"} | EXPAND_TOOLS
 HISTORY_NO_ENV = {"get_chat_history"}   # 有历史能力但没有任何环境能力
 # 与环境/历史/戳一戳都无关的能力：不应触发任何一行
 UNRELATED_TOOLS = {"schedule_task"}
@@ -105,14 +106,15 @@ def test_env_line_added_when_session_tool_available():
     assert block is not None
     assert env_line(False) in block
     assert "get_current_session" in block
-    assert "expand_context" not in block  # 本轮没有该工具就不许提
+    assert "expand_message" not in block  # 本轮没有该工具就不许提
 
 
-def test_env_line_names_expand_tool_when_available():
+def test_env_line_names_expand_tools_when_available():
     block = build_proactive_instruction(_cfg(), "", available_tools=ENV_WITH_EXPAND)
 
     assert env_line(True) in block
-    assert "expand_context" in block
+    for name in ("expand_recent", "expand_message", "expand_user"):
+        assert name in block
     assert PROACTIVE_UNRESOLVED_LINE in block
 
 

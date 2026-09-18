@@ -16,12 +16,17 @@ from app.llm.tool import ToolContext
 
 
 class _Bot:
-    def __init__(self, *, members=None, messages=None, forwards=None, stranger=None):
+    def __init__(self, *, members=None, messages=None, forwards=None, stranger=None, history=None):
         self.members = members or {}
         self.messages = messages or {}
         self.forwards = forwards or {}
         self.stranger = stranger or {}
+        self.history = history or []
         self.calls: list[tuple] = []
+
+    async def get_msg_history(self, group_id=0, user_id=0, count=20, reverse_order=False):
+        self.calls.append(("history", group_id, user_id, count))
+        return {"status": "ok", "retcode": 0, "data": {"messages": self.history[-count:]}}
 
     async def get_group_member_info(self, group_id, user_id):
         self.calls.append(("member", group_id, user_id))
@@ -69,9 +74,20 @@ def _event(segments, self_id=10001):
     return SimpleNamespace(message=segments, self_id=self_id, bot_id=self_id)
 
 
-async def _call(ctx, args: dict) -> str:
-    spec = build_context_tools(ctx.runtime, ctx)[0]
-    return await spec.handler(ctx, args)
+def _spec(ctx, name: str):
+    return next(s for s in build_context_tools(ctx.runtime, ctx) if s.name == name)
+
+
+async def _call(ctx, args: dict, tool: str | None = None) -> str:
+    """按参数自动选择分区工具：users → expand_user；messages → expand_message。"""
+    if tool is None:
+        if args.get("users"):
+            tool = "expand_user"
+        elif args.get("messages"):
+            tool = "expand_message"
+        else:
+            tool = "expand_recent"
+    return await _spec(ctx, tool).handler(ctx, args)
 
 
 def setup_function(_fn):
@@ -111,7 +127,7 @@ async def test_expand_user_in_group_reports_identity_and_relation():
     bot = _Bot(members={123: {"nickname": "张三", "card": "三哥", "role": "admin", "level": "3"}})
     event = _event([{"type": "at", "data": {"qq": "123"}}])
 
-    result = await _call(_ctx(bot, event), {})
+    result = await _call(_ctx(bot, event), {"users": ["123"]})
 
     assert "【用户 123】" in result
     assert "三哥" in result
@@ -146,7 +162,7 @@ async def test_expand_message_reports_sender_and_text():
     }})
     event = _event([{"type": "reply", "data": {"id": "999"}}])
 
-    result = await _call(_ctx(bot, event), {})
+    result = await _call(_ctx(bot, event), {"messages": ["999"]})
 
     assert "【消息 999】" in result
     assert "三哥(123)" in result
@@ -343,22 +359,138 @@ async def test_expand_reports_only_resolved_items():
     assert "999" not in result.split("\n", 1)[1]
 
 
+# ---------- expand_recent：按位置取（"上一条/刚才那条"） ----------
+
+
+def _history_msg(msg_id, nick, text, *, user_id=20002, forward_id=None):
+    segments = []
+    if forward_id:
+        segments.append({"type": "forward", "data": {"id": forward_id}})
+    if text:
+        segments.append({"type": "text", "data": {"text": text}})
+    return {
+        "time": 1788342159,
+        "message_id": msg_id,
+        "sender": {"user_id": user_id, "nickname": nick, "card": ""},
+        "message": segments,
+    }
+
+
+async def test_expand_recent_returns_last_messages():
+    """用户说"上一条/刚才那条"时不需要任何 id：直接按位置取回最近几条。"""
+    bot = _Bot(history=[
+        _history_msg(1001, "小明", "在吗"),
+        _history_msg(1002, "小红", "刚发了张图"),
+    ])
+
+    result = await _call(_ctx(bot), {"count": 2}, tool="expand_recent")
+
+    assert "在吗" in result and "刚发了张图" in result
+    assert "小明(20002)" in result
+    assert "1002" in result
+    assert bot.calls == [("history", 778, 0, 2)]
+
+
+async def test_expand_recent_expands_forward_and_registers_focus():
+    """转发展开用"承载转发的那条消息 id"（1002），取回后写入焦点登记。"""
+    bot = _Bot(
+        history=[_history_msg(1002, "小红", "", forward_id="f1")],
+        forwards={"1002": {"messages": [
+            {"sender": {"nickname": "小明"}, "message": [{"type": "text", "data": {"text": "早"}}]},
+        ]}},
+    )
+
+    result = await _call(_ctx(bot), {"count": 1}, tool="expand_recent")
+
+    assert "合并转发内容：小明: 早" in result
+    # 取回即登记：后续渲染/下一轮请求能看到"已展开"
+    assert focus.summary_of("10001", "group_778", "1002")
+
+
+async def test_expand_recent_falls_back_to_inner_forward_id():
+    """消息 id 取不到时才退回转发节点内部 id。"""
+    bot = _Bot(
+        history=[_history_msg(1002, "小红", "", forward_id="f1")],
+        forwards={"f1": {"messages": [
+            {"sender": {"nickname": "小明"}, "message": [{"type": "text", "data": {"text": "早"}}]},
+        ]}},
+    )
+
+    result = await _call(_ctx(bot), {"count": 1}, tool="expand_recent")
+
+    assert [c[0] for c in bot.calls if c[0] == "forward"] == ["forward", "forward"]
+    assert "合并转发内容：小明: 早" in result
+
+
+async def test_expand_recent_count_is_clamped():
+    from app.llm.context_tools import MAX_RECENT
+
+    bot = _Bot(history=[_history_msg(1000 + i, "n", f"m{i}") for i in range(10)])
+
+    await _call(_ctx(bot), {"count": 99}, tool="expand_recent")
+
+    assert bot.calls == [("history", 778, 0, MAX_RECENT)]
+
+
+async def test_expand_recent_private_queries_user_history():
+    bot = _Bot(history=[_history_msg(1001, "对方", "你好", user_id=20002)])
+
+    result = await _call(_ctx(bot, None, group_id=None), {"count": 1}, tool="expand_recent")
+
+    assert "你好" in result
+    assert bot.calls == [("history", 0, 20002, 1)]
+
+
+async def test_expand_recent_reports_unreadable_rows():
+    """最近消息只有图片时如实标注"未取到正文"，不假装读到。"""
+    bot = _Bot(history=[{
+        "message_id": 1003,
+        "sender": {"user_id": 1, "nickname": "n"},
+        "message": [{"type": "image", "data": {}}],
+    }])
+
+    result = await _call(_ctx(bot), {"count": 1}, tool="expand_recent")
+
+    assert "未取到正文" in result
+    assert "只取到部分信息" in result
+
+
 # ---------- 错误与边界 ----------
 
 
-async def test_expand_without_targets_and_without_event_is_actionable():
-    result = await _call(_ctx(_Bot(), None, group_id=None), {})
+async def test_expand_message_requires_ids():
+    """分区工具的参数缺失要给可行动的错误（不再有"零参数通用工具"）。"""
+    result = await _call(_ctx(_Bot()), {}, tool="expand_message")
+    assert result.startswith("error:")
+    assert "messages" in result
+
+    result_user = await _call(_ctx(_Bot()), {}, tool="expand_user")
+    assert result_user.startswith("error:")
+    assert "users" in result_user
+
+
+async def test_fetch_recent_without_history_is_actionable():
+    """没有历史/连接不可用时，expand_recent 也要给出可行动的错误。"""
+    result = await _call(_ctx(_Bot()), {"count": 1}, tool="expand_recent")
 
     assert result.startswith("error:")
-    assert "users" in result and "messages" in result
+    assert "没有取到最近的消息" in result
 
 
-async def test_expand_with_nothing_to_expand():
-    event = _event([{"type": "text", "data": {"text": "普通消息"}}])
+async def test_fetch_entities_from_event_derives_relations():
+    """零参数取回（预取路径）从本轮触发消息推导目标，并标注 relation。"""
+    from app.llm.context_tools import fetch_entities
 
-    result = await _call(_ctx(_Bot(), event), {})
+    bot = _Bot(messages={"999": {
+        "sender": {"user_id": 123, "nickname": "张三"},
+        "message": [{"type": "text", "data": {"text": "早"}}],
+    }})
+    event = _event([{"type": "at", "data": {"qq": "456"}}, {"type": "reply", "data": {"id": "999"}}])
+    ctx = _ctx(bot, event)
 
-    assert "没有需要展开" in result
+    result = await fetch_entities(ctx, messages=["999"])
+
+    assert "relation：当前消息引用的消息" in result.blocks[0]
 
 
 async def test_expand_all_failures_returns_error():
@@ -375,7 +507,7 @@ async def test_expand_without_bot_returns_error():
         bot = None
         runtime = SimpleNamespace(bot_id="1", config={})
 
-    spec = build_context_tools(_NoBot.runtime, _NoBot())[0]
+    spec = _spec(_NoBot(), "expand_user")
 
     assert (await spec.handler(_NoBot(), {"users": [1]})).startswith("error: 当前上下文无可用 Bot")
 
@@ -392,29 +524,40 @@ async def test_expand_ignores_invalid_ids():
 # ---------- 工具元数据 / 开关 ----------
 
 
-def test_tool_spec_metadata():
+def test_tool_specs_are_split_by_intent():
+    """按意图分区：按位置取 / 按 id 取消息 / 按 QQ 取人——三个工具各自讲清何时调用。"""
     runtime = SimpleNamespace(bot_id="1", config={})
-    spec = build_context_tools(runtime, None)[0]
+    specs = {s.name: s for s in build_context_tools(runtime, None)}
 
-    assert spec.name == "expand_context"
-    assert spec.source == "system"
-    assert spec.permission == "member"
-    assert spec.scopes == ("*",)
-    assert "【未展开" in spec.description
-    assert set(spec.parameters["properties"]) == {"users", "messages", "limit"}
+    assert set(specs) == {"expand_recent", "expand_message", "expand_user"}
+    for spec in specs.values():
+        assert spec.source == "system"
+        assert spec.permission == "member"
+        assert spec.scopes == ("*",)
+
+    assert set(specs["expand_recent"].parameters["properties"]) == {"count", "limit"}
+    assert set(specs["expand_message"].parameters["properties"]) == {"messages", "limit"}
+    assert set(specs["expand_user"].parameters["properties"]) == {"users"}
+    # 每个工具的 description 都要写清"何时必须调用"
+    assert "上一条" in specs["expand_recent"].description
+    assert "【未展开" in specs["expand_message"].description
+    assert "是谁" in specs["expand_user"].description
 
 
 def test_tool_is_listed_as_system_tool_and_gated_by_config():
     from app.llm.system_tools import list_system_tools
 
+    names = {"expand_recent", "expand_message", "expand_user"}
     runtime = SimpleNamespace(bot_id="1", config={})
-    entry = next(i for i in list_system_tools(runtime) if i["name"] == "expand_context")
-    assert entry["effective"] is True
+    listed = {i["name"]: i for i in list_system_tools(runtime)}
+    for name in names:
+        assert listed[name]["effective"] is True
 
     off = SimpleNamespace(bot_id="1", config={"context_expand_enable": False})
-    entry_off = next(i for i in list_system_tools(off) if i["name"] == "expand_context")
-    assert entry_off["effective"] is False
-    assert entry_off["prerequisite"] == "上下文按需展开未启用"
+    listed_off = {i["name"]: i for i in list_system_tools(off)}
+    for name in names:
+        assert listed_off[name]["effective"] is False
+        assert listed_off[name]["prerequisite"] == "上下文按需展开未启用"
 
 
 async def test_collect_llm_ext_registers_tool_unless_disabled():
@@ -425,23 +568,24 @@ async def test_collect_llm_ext_registers_tool_unless_disabled():
     event.user_id = 20002
     event.group = SimpleNamespace(group_id=778)
     event.event_type = "message_group"
+    names = {"expand_recent", "expand_message", "expand_user"}
 
     on = SimpleNamespace(bot_id="1", config={}, llm_tools=None, skills=None, memory=None,
                          knowledge=None, mcp_manager=None)
     specs, _skills, _ctx2 = await _collect_llm_ext(on, event, "group_778", False, False)
-    assert "expand_context" in {s.name for s in specs}
+    assert names <= {s.name for s in specs}
 
     off = SimpleNamespace(bot_id="1", config={"context_expand_enable": False}, llm_tools=None,
                           skills=None, memory=None, knowledge=None, mcp_manager=None)
     specs_off, _s, _c = await _collect_llm_ext(off, event, "group_778", False, False)
-    assert "expand_context" not in {s.name for s in specs_off}
+    assert not (names & {s.name for s in specs_off})
 
 
 async def test_handler_uses_bound_context_not_invocation_context():
     """与其它系统工具一致：处理器用构建时绑定的会话上下文（调用期的 ToolContext 只做权限校验）。"""
     bot = _Bot(members={123: {"nickname": "张三"}})
     ctx = _ctx(bot)
-    spec = build_context_tools(ctx.runtime, ctx)[0]
+    spec = _spec(ctx, "expand_user")
 
     result = await spec.handler(ToolContext(bot=None, runtime=ctx.runtime), {"users": [123]})
 

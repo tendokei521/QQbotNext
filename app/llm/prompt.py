@@ -40,9 +40,10 @@ PROACTIVE_ENV_LINE = (
 )
 # 未展开标记的语义：模型看到【未展开:用户123】必须知道"这不是内容，是还没拿到的内容"。
 PROACTIVE_UNRESOLVED_LINE = (
-    "- 记录里出现【未展开:用户123】/【未展开:引用456】这类标记，表示该处内容你还没拿到："
-    "先调用 expand_context 展开（可一次传多个 id）再回答；确实取不到就直接说这项拿不到，"
-    "不要按标记里的数字猜内容，也不要凭印象编。"
+    "- 记录里出现【未展开:用户123】/【未展开:引用456】/【未展开:合并转发456】这类标记，"
+    "表示该处内容你还没拿到：按类型调用 expand_user / expand_message（可一次传多个 id）再回答；"
+    "标记成【已展开:… → 摘要】的表示本会话已经取过，不要再重复取。"
+    "确实取不到就直接说这项拿不到，不要按标记里的数字猜内容，也不要凭印象编。"
 )
 PROACTIVE_QUOTE_LINE = (
     "- 回复的是更早的、或多人交错容易混淆的消息时：在回复最前面写 [reply] 表示引用对方刚发的那条消息"
@@ -58,6 +59,15 @@ PROACTIVE_FOOTER_UNRESOLVED_LINE = (
     "- 例外：若回答依赖【未展开:…】里的内容，那就不是“可做可不做”，必须先展开；"
     "若本轮确实没有任何可用手段，就照常回答，不要专门回一句“我无法完整回答”。"
 )
+# 指代解析（依赖焦点行与实际取回能力）：解释"当前对话焦点"怎么读、回指怎么指、候选不明怎么办。
+PROACTIVE_REFERENT_LINE = (
+    "- 环境块里的“当前对话焦点”列出最近被讨论过的对象及其摘要：用户说“那个/那条/刚才说的/"
+    "你刚看的/那个样子”这类**回指**时，优先指焦点里最新的那条，而不是群里时间上最新的消息。\n"
+    "- 候选不止一个、你不确定用户指哪个时：先用 expand_recent 看清最近两条"
+    "（必要时把“上一轮讨论过的那条”和“最近一条”一起取回）再判断，不要只挑一条就答；"
+    "回答时可以用一句话说明你按哪条理解。\n"
+    "- 用户说“上一条消息/刚才那条”这类**按位置指代**时用 expand_recent，不需要 id。"
+)
 # 命中历史意图时的紧贴补强（仍属于同一块，不额外增加 system 消息）
 PROACTIVE_HISTORY_NUDGE = (
     "- 就本轮而言：用户在追问历史，必须先调用 get_chat_history 核实内容再回答，"
@@ -66,7 +76,8 @@ PROACTIVE_HISTORY_NUDGE = (
 # 命中环境意图时的紧贴补强（同一块内）
 PROACTIVE_ENV_NUDGE = (
     "- 就本轮而言：用户在问群 / 成员 / 某条消息相关的信息，你必须先取得实际环境数据"
-    "（expand_context / get_current_session）再回答，不要凭昵称、ID 或印象作答。"
+    "（expand_message / expand_user / get_current_session）再回答，"
+    "不要凭昵称、ID 或印象作答。"
 )
 
 # 历史意图识别：保守匹配，避免把“帮我记录一下”之类误判成查记录
@@ -89,6 +100,8 @@ _ENV_INTENT_RE = re.compile(
 )
 
 _POKE_TOOL_NAMES = ("send_poke", "group_poke", "friend_poke")
+# 按需展开工具（按意图分区，见 context_tools）
+_EXPAND_TOOL_NAMES = ("expand_recent", "expand_message", "expand_user")
 
 
 def _cfg_flag(config, key: str, default: bool) -> bool:
@@ -114,8 +127,15 @@ def env_intent(text: str) -> bool:
 def env_line(has_expand: bool) -> str:
     """环境行文本：按本轮实际可用工具填入工具名（不教它调不存在的工具）。"""
     if has_expand:
-        return PROACTIVE_ENV_LINE.format(tools="expand_context / get_current_session")
+        return PROACTIVE_ENV_LINE.format(tools="expand_recent / expand_message / expand_user / get_current_session")
     return PROACTIVE_ENV_LINE.format(tools="get_current_session")
+
+
+def has_any_expand(tools: set[str] | None) -> bool:
+    """本轮是否有任一按需展开工具（三个工具任一可用即算）。"""
+    if tools is None:
+        return True
+    return any(name in tools for name in _EXPAND_TOOL_NAMES)
 
 
 def build_proactive_instruction(
@@ -129,7 +149,7 @@ def build_proactive_instruction(
     Args:
         config: 运行时配置（读取 proactive_prompt_enable / proactive_history_intent_nudge /
             proactive_env_prompt_enable / proactive_unresolved_prompt_enable /
-            proactive_env_intent_nudge / outbound_directive_enable）
+            proactive_env_intent_nudge / referent_prompt_enable / outbound_directive_enable）
         user_text: 用户原始文本，用于历史/环境意图补强
         available_tools: 本轮实际可用的工具名集合；给定时按能力裁剪，
             避免教模型调用本轮不存在的工具
@@ -142,11 +162,18 @@ def build_proactive_instruction(
     has_poke = tools is None or any(name in tools for name in _POKE_TOOL_NAMES)
     has_quote = _cfg_flag(config, "outbound_directive_enable", True)
     has_env = tools is None or "get_current_session" in tools
-    has_expand = tools is None or "expand_context" in tools
+    has_expand = has_any_expand(tools)
+    has_recent = tools is None or "expand_recent" in tools
 
     show_env = has_env and _cfg_flag(config, "proactive_env_prompt_enable", True)
     show_unresolved = has_expand and _cfg_flag(config, "proactive_unresolved_prompt_enable", True)
-    if not (has_history or has_poke or has_quote or show_env or show_unresolved):
+    # 指代解析行需要"焦点行 + 按位置取回"两块能力同时在场才有意义
+    show_referent = (
+        has_recent
+        and _cfg_flag(config, "referent_prompt_enable", True)
+        and _cfg_flag(config, "referent_resolve_enable", True)
+    )
+    if not (has_history or has_poke or has_quote or show_env or show_unresolved or show_referent):
         return None
 
     lines = ["### 主动性", "你可以像人一样主动使用能力，而不是只被动回答。"]
@@ -154,6 +181,8 @@ def build_proactive_instruction(
         lines.append(PROACTIVE_HISTORY_LINE)
         if _cfg_flag(config, "proactive_history_intent_nudge", True) and history_intent(user_text):
             lines.append(PROACTIVE_HISTORY_NUDGE)
+    if show_referent:
+        lines.append(PROACTIVE_REFERENT_LINE)
     if show_env:
         lines.append(env_line(has_expand))
     if show_unresolved:
