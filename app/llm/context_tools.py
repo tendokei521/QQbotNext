@@ -22,12 +22,14 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from app.core.logger import logger
 from app.llm import focus, nicknames
 from app.llm.group_context import (
+    _NON_TEXT_SEGMENTS,
     collect_at_ids,
     extract_history_messages,
     extract_msg_text,
@@ -44,6 +46,8 @@ MAX_ITEMS = 10
 MAX_RECENT = 5
 # 合并转发最多摘几条（0 = 全部）
 MAX_FORWARD_NODES = 0
+# 嵌套转发递归渲染的最大深度（防病态深度；超出时保留 id 让模型按 id 再展开）
+MAX_FORWARD_DEPTH = 5
 
 
 def _as_list(value: Any) -> list:
@@ -304,8 +308,91 @@ async def _fetch_message(bot: Any, mid: str) -> dict:
     return {}
 
 
+def _forward_time_prefix(ts: Any) -> str:
+    """节点时间前缀 ``MM-DD HH:MM ``（与 group_context 的既有打标一致）。"""
+    if ts in (None, ""):
+        return ""
+    try:
+        return time.strftime("%m-%d %H:%M ", time.localtime(int(ts)))
+    except (TypeError, ValueError, OSError):
+        return ""
+
+
+def _render_node_segments(segments: Any, *, depth: int, seen: set[str]) -> str:
+    """渲染转发节点里的消息段，**对齐 NapCat 返回结构**。
+
+    NapCat 的 ``get_forward_msg`` 节点里：
+    - 嵌套转发是**带内联内容的**（``data.content`` 直接给出子节点数组）→ 递归渲染，
+      而不是丢掉内容只留一个 ``[合并转发]``；
+    - 回复段带 ``id``（``{"type":"reply","data":{"id":...}}``）→ 保留 id 写成
+      ``[引用{id}]``，而不是无信息量的 ``[引用]``；
+    - 其余非文本段沿用项目统一的占位名（``[图片]``/``[表情]``/``[语音]``…）。
+    """
+    if not isinstance(segments, list):
+        return str(segments or "").strip()
+    parts: list[str] = []
+    for seg in segments:
+        stype = _seg_type(seg)
+        if stype == "text":
+            parts.append(str(_seg_field(seg, "text", "") or ""))
+        elif stype == "at":
+            qq = str(_seg_field(seg, "qq", "") or "")
+            name = str(_seg_field(seg, "nickname", "") or "")
+            if qq in ("", "all", "0"):
+                parts.append("@所有人")
+            else:
+                # NapCat 有时会附带 nickname（没有也不要紧，给 qq）
+                parts.append(f"@{name}({qq})" if name else f"@{qq}")
+        elif stype == "reply":
+            reply_id = str(_seg_field(seg, "id", "") or "")
+            parts.append(f"[引用{reply_id}]" if reply_id else "[引用]")
+        elif stype == "forward":
+            inner_id = str(_seg_field(seg, "id", "") or "")
+            inner = _seg_field(seg, "content", None)
+            if isinstance(inner, list) and inner and depth < MAX_FORWARD_DEPTH and inner_id not in seen:
+                seen.add(inner_id)
+                parts.append(
+                    "[嵌套转发：" + _render_forward_nodes(inner, depth=depth + 1, seen=seen) + "]"
+                )
+            else:
+                parts.append(f"[合并转发{(' ' + inner_id) if inner_id else ''}]")
+        elif stype in _NON_TEXT_SEGMENTS:
+            parts.append(f"[{_NON_TEXT_SEGMENTS[stype]}]")
+        elif stype:
+            parts.append(f"[{stype}]")
+    return "".join(parts).strip()
+
+
+def _render_forward_nodes(nodes: Any, *, depth: int = 0, seen: set[str] | None = None) -> str:
+    """把转发节点数组渲染成 ``MM-DD HH:MM 昵称(QQ): 内容 ｜ …``。
+
+    字段取法与 NapCat 返回一致：``sender.{card,nickname,user_id}``、``time``、
+    ``message``（部分实现放在 ``content``）。
+    """
+    if not isinstance(nodes, list):
+        return ""
+    seen = seen if seen is not None else set()
+    lines: list[str] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        sender = node.get("sender") or {}
+        nick = str(sender.get("card") or sender.get("nickname") or sender.get("user_id") or "未知")
+        uid = str(sender.get("user_id") or "")
+        label = f"{nick}({uid})" if uid and uid != nick else nick
+        body = _render_node_segments(
+            node.get("message") if node.get("message") is not None else node.get("content"),
+            depth=depth,
+            seen=seen,
+        )
+        if not body:
+            continue
+        lines.append(f"{_forward_time_prefix(node.get('time'))}{label}: {body}")
+    return " ｜ ".join(lines)
+
+
 async def _describe_forward(bot: Any, forward_ref: str, limit: int) -> tuple[str, str]:
-    """合并转发 → 逐条摘要；返回 ``(内容, 失败原因)``。
+    """合并转发 → 逐条正文；返回 ``(内容, 失败原因)``。
 
     ``id`` 传**承载转发的那条消息的 id**（协议上 NapCat 也接受该消息的 id），
     并且一律按**字符串**传：这类 id 常是超出 int32 / JS 安全整数范围的长整型字符串，
@@ -324,24 +411,15 @@ async def _describe_forward(bot: Any, forward_ref: str, limit: int) -> tuple[str
     nodes = data.get("messages") or data.get("message") or []
     if not isinstance(nodes, list):
         return "", "响应结构异常"
-    parts: list[str] = []
     # ``MAX_FORWARD_NODES=0`` 表示不限制（默认）：转发本来就常是"要看的正文"，
     # 砍条数等于把用户想让它看的内容丢掉。
     window = nodes if not MAX_FORWARD_NODES else nodes[:MAX_FORWARD_NODES]
-    for node in window:
-        if not isinstance(node, dict):
-            continue
-        sender = node.get("sender") or {}
-        label = str(sender.get("nickname") or sender.get("user_id") or "未知")
-        node_text = extract_msg_text(node.get("message") or node.get("content"))
-        if not has_real_content(node_text):
-            continue
-        parts.append(f"{label}: {_truncate(node_text, limit)}")
+    rendered = _render_forward_nodes(window)
     if MAX_FORWARD_NODES and len(nodes) > MAX_FORWARD_NODES:
-        parts.append(f"…（共 {len(nodes)} 条，已省略）")
-    if not parts:
+        rendered += f" ｜ …（共 {len(nodes)} 条，已省略）"
+    if not rendered:
         return "", "转发里没有可读文本"
-    return " ｜ ".join(parts), ""
+    return _truncate(rendered, limit), ""
 
 
 @dataclass

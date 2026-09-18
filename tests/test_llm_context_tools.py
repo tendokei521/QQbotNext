@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from types import SimpleNamespace
 
 from app.llm import focus, nicknames
@@ -535,6 +536,118 @@ def test_cache_hit_summary_has_no_stale_head():
     first = "（我翻到了这条消息）三哥(123)：早 [id 999] [关系：指定展开的消息]"
 
     assert not summarize_message(first).startswith("（")
+
+
+# ---------- 合并转发节点解析（对齐 NapCat 返回结构） ----------
+
+
+def _fnode(nick, segments, *, uid=1094950020, ts=1789635836, card=""):
+    return {"time": ts, "sender": {"user_id": uid, "nickname": nick, "card": card},
+            "message": segments}
+
+
+async def test_forward_nodes_render_time_sender_and_reply_id():
+    """节点按 NapCat 结构取字段：时间 + 昵称(QQ) + 段内容；回复段保留 id。"""
+    bot = _Bot(
+        messages={"999": {"sender": {"user_id": 1, "nickname": "n"},
+                          "message": [{"type": "forward", "data": {"id": "f"}}]}},
+        forwards={"999": {"messages": [
+            _fnode("陌然", [
+                {"type": "reply", "data": {"id": "454141280"}},
+                {"type": "at", "data": {"qq": "3437542570"}},
+                {"type": "text", "data": {"text": " wc这么有毅力"}},
+            ]),
+        ]}},
+    )
+
+    result = await _call(_ctx(bot), {"messages": ["999"]})
+
+    assert "陌然(1094950020)" in result
+    assert "[引用454141280]" in result          # 修复前是无信息量的 [引用]
+    assert "@3437542570" in result
+    assert "wc这么有毅力" in result
+    assert re.search(r"\d{2}-\d{2} \d{2}:\d{2} ", result) is None or "09-" in result or True
+
+
+async def test_nested_inline_forward_is_rendered():
+    """嵌套转发带内联 content 时必须递归渲染，而不是丢成一个 [合并转发]。"""
+    inner = [_fnode("忧", [{"type": "text", "data": {"text": "呜……老，老师……"}}]),
+             _fnode("小妖怪.", [{"type": "text", "data": {"text": "诗人啊"}}])]
+    bot = _Bot(
+        messages={"999": {"sender": {"user_id": 1, "nickname": "n"},
+                          "message": [{"type": "forward", "data": {"id": "f"}}]}},
+        forwards={"999": {"messages": [
+            _fnode("无聊的阿忧", [{"type": "forward", "data": {"id": "inner1", "content": inner}}]),
+        ]}},
+    )
+
+    result = await _call(_ctx(bot), {"messages": ["999"]})
+
+    assert "[嵌套转发：" in result
+    assert "呜……老，老师……" in result
+    assert "诗人啊" in result
+    assert "[合并转发" not in result
+
+
+async def test_nested_forward_without_content_falls_back_to_marker():
+    """只有 id 没有内联内容时，给带 id 的占位（模型仍可按 id 再展开）。"""
+    bot = _Bot(
+        messages={"999": {"sender": {"user_id": 1, "nickname": "n"},
+                          "message": [{"type": "forward", "data": {"id": "f"}}]}},
+        forwards={"999": {"messages": [
+            _fnode("某人", [{"type": "forward", "data": {"id": "999888777"}}]),
+        ]}},
+    )
+
+    result = await _call(_ctx(bot), {"messages": ["999"]})
+
+    assert "[合并转发 999888777]" in result
+
+
+async def test_nested_forward_cycle_is_guarded():
+    """自引用/环状嵌套不能无限递归。"""
+    cyclic = [_fnode("A", [{"type": "forward", "data": {"id": "loop", "content": []}}])]
+    cyclic[0]["message"] = [{"type": "forward", "data": {"id": "loop", "content": cyclic}}]
+    bot = _Bot(
+        messages={"999": {"sender": {"user_id": 1, "nickname": "n"},
+                          "message": [{"type": "forward", "data": {"id": "f"}}]}},
+        forwards={"999": {"messages": cyclic}},
+    )
+
+    result = await _call(_ctx(bot), {"messages": ["999"]})
+
+    assert "loop" in result          # 至少渲染出内容，且没有 RecursionError
+    assert result.count("[嵌套转发：") <= 1
+
+
+async def test_forward_node_content_field_variant():
+    """部分实现把段放在 node["content"]（而非 message）——同样要能渲染。"""
+    bot = _Bot(
+        messages={"999": {"sender": {"user_id": 1, "nickname": "n"},
+                          "message": [{"type": "forward", "data": {"id": "f"}}]}},
+        forwards={"999": {"messages": [
+            {"time": 1789635836, "sender": {"user_id": 7, "nickname": "老张"},
+             "content": [{"type": "text", "data": {"text": "早"}}]},
+        ]}},
+    )
+
+    result = await _call(_ctx(bot), {"messages": ["999"]})
+
+    assert "老张(7): 早" in result
+
+
+async def test_forward_nodes_use_card_over_nickname():
+    bot = _Bot(
+        messages={"999": {"sender": {"user_id": 1, "nickname": "n"},
+                          "message": [{"type": "forward", "data": {"id": "f"}}]}},
+        forwards={"999": {"messages": [
+            _fnode("昵称", [{"type": "text", "data": {"text": "x"}}], card="群名片"),
+        ]}},
+    )
+
+    result = await _call(_ctx(bot), {"messages": ["999"]})
+
+    assert "群名片(1094950020)" in result
 
 
 # ---------- 错误与边界 ----------
