@@ -105,6 +105,26 @@ async def _build_group_pre_history(
     )
 
 
+async def _referent_block(runtime, session_id: str, user_text: str, ctx) -> str:
+    """指代消解块：「当前对话焦点 + 指代解析 + 已预取内容」（见 referent.py）。
+
+    **用用户原始文本判定**（不含 ``发送者：``/``引用了：`` 之类的元信息前缀）——否则
+    元信息里的 QQ 号会被误当成用户给出的消息 id。失败不影响回复主流程。
+    """
+    try:
+        from app.llm.enhance import _raw_user_text
+        from app.llm.referent import build_block
+
+        event = getattr(ctx, "event", None)
+        raw = _raw_user_text(event) if event is not None else ""
+        return await build_block(runtime, session_id, raw or user_text, ctx)
+    except Exception as e:
+        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(
+            f"[Referent] 构建指代块失败（已忽略）: {e}"
+        )
+        return ""
+
+
 def _context_expand_flags(config) -> dict:
     """渲染层「骨架预展开」开关。
 
@@ -154,6 +174,11 @@ async def _collect_llm_ext(
         from app.llm.scheduler import build_schedule_tool
 
         specs.append(build_schedule_tool(runtime, session_id, is_private))
+
+    # 进入新一轮：焦点表按轮次衰减显著性（见 docs/referent-resolution-design.md）
+    from app.llm import focus
+
+    focus.begin_turn(getattr(runtime, "bot_id", ""), session_id)
 
     if getattr(runtime, "llm_tools", None) is not None:
         specs.extend(runtime.llm_tools.enabled_specs())
@@ -655,6 +680,11 @@ async def call_llm_and_reply(module, event, session_mgr, config,
 
     _memory_autosave(module, session_id, user_id, user_text)
     memory_text = await _memory_block(module, session_id, user_id, user_text, event.bot)
+    # 指代消解：焦点行 + 明确指向时的确定性预取（放在背景块之前，信息密度更高）
+    _referent_text = await _referent_block(tool_ctx.runtime, session_id, user_text, tool_ctx)
+    if _referent_text:
+        pre_history_text = f"{_referent_text}\n\n{pre_history_text}" if pre_history_text else _referent_text
+
     messages = build_messages(
         system_prompt=system_prompt,
         pre_history_text=pre_history_text,
@@ -858,6 +888,11 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
         memory_source_text = (info.get("sent_text") or user_text).strip()
     _memory_autosave(runtime, session_id, user_id, memory_source_text)
     memory_text = await _memory_block(runtime, session_id, user_id, memory_source_text, event.bot)
+    # 指代消解：焦点行 + 明确指向时的确定性预取（放在背景块之前，信息密度更高）
+    _referent_text = await _referent_block(tool_ctx.runtime, session_id, user_text, tool_ctx)
+    if _referent_text:
+        pre_history_text = f"{_referent_text}\n\n{pre_history_text}" if pre_history_text else _referent_text
+
     messages = build_messages(
         system_prompt=system_prompt,
         pre_history_text=pre_history_text,
@@ -1067,6 +1102,11 @@ async def stream_response(runtime, event, ctx=None):
         memory_source_text = (info.get("sent_text") or user_text).strip()
     _memory_autosave(runtime, session_id, user_id, memory_source_text)
     memory_text = await _memory_block(runtime, session_id, user_id, memory_source_text, event.bot)
+    # 指代消解：焦点行 + 明确指向时的确定性预取（放在背景块之前，信息密度更高）
+    _referent_text = await _referent_block(tool_ctx.runtime, session_id, user_text, tool_ctx)
+    if _referent_text:
+        pre_history_text = f"{_referent_text}\n\n{pre_history_text}" if pre_history_text else _referent_text
+
     messages = build_messages(
         system_prompt=system_prompt,
         pre_history_text=pre_history_text,

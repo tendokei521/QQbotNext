@@ -314,6 +314,7 @@ class EntityResult:
 
     blocks: list[str] = field(default_factory=list)    # 已取到内容
     partial: list[str] = field(default_factory=list)   # 只取到部分信息（正文未取到）
+    refs: list[str] = field(default_factory=list)      # 本次涉及的 id（去重用）
 
     @property
     def ok(self) -> bool:
@@ -410,6 +411,7 @@ async def fetch_entities(
         *[_user_block(qq) for qq in users],
         *[_message_block(mid) for mid in messages],
     )
+    result.refs = [str(x) for x in list(users) + list(messages)]
     for text, got in pairs:
         if not text:
             continue
@@ -488,6 +490,8 @@ async def fetch_recent(ctx, count: int = 1, *, limit: int = DEFAULT_ITEM_CHARS) 
             f"（id {msg_id}）" if msg_id else ""
         ) + f"：{'；'.join(bits)}"
         (result.blocks if ok else result.partial).append(block)
+        if msg_id:
+            result.refs.append(msg_id)
         if ok and msg_id:
             focus.note(bot_id, session_id, msg_id, kind="message",
                        label=f"消息{msg_id}", summary=summarize_message(block), source="expand")

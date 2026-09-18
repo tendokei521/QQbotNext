@@ -554,6 +554,13 @@ class TaskScheduler:
         all_specs, skill_blocks, tool_ctx, instruction = await self._collect_tools(entry)
         messages = await self._build_messages(entry, instruction=instruction, skill_blocks=skill_blocks)
 
+        # 焦点行（定时任务没有用户提问 → 不做预取）
+        from app.llm.referent import focus_only_block
+
+        focus_text = await focus_only_block(self.module, entry.session_id)
+        if focus_text:
+            messages = [{"role": "system", "content": focus_text}, *messages]
+
         from app.llm.chat import _max_tool_rounds
         from app.llm.providers.modalities import normalize_modalities, supports_tool_use
         from app.llm.tool import build_tools, make_executor

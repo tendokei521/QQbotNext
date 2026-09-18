@@ -241,6 +241,13 @@ class ProactiveManager:
         )
         use_tools = bool(all_specs) and supports_tool_use(modalities)
 
+        # 焦点行（主动消息没有用户提问 → 不做预取）：让模型知道"群里刚才在聊什么"
+        from app.llm.referent import focus_only_block
+
+        focus_text = await focus_only_block(self.module, session_id)
+        if focus_text:
+            pre_history_text = f"{focus_text}\n\n{pre_history_text}" if pre_history_text else focus_text
+
         messages = build_messages(
             system_prompt=system_prompt,
             pre_history_text=pre_history_text,
