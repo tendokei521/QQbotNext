@@ -474,6 +474,21 @@ def _entity_ids(ctx) -> tuple[Any, str, str, Any, set[str]]:
     )
 
 
+def _record_expansion(
+    ctx, kind: str, ref: Any, *, summary: str = "", content: str = "", source: str = ""
+) -> None:
+    """把"本次取回"记进本轮记账本（请求收尾时落进历史补全登记）。
+
+    失败静默：记账只是增强，不该影响工具本身的返回。
+    """
+    try:
+        ledger = (getattr(ctx, "extra", None) or {}).get("expansion_ledger")
+        if ledger is not None:
+            ledger.record(kind, ref, summary, content=content, source=source)
+    except Exception as e:  # noqa: BLE001 —— 记账失败不影响工具返回，但要留痕
+        logger.debug(f"[Expand] 补全记账失败（已忽略）: {e}")
+
+
 async def fetch_entities(
     ctx,
     *,
@@ -506,8 +521,10 @@ async def fetch_entities(
             return f"（这个人我之前已经看过）昵称：{cached} [QQ {qq}] [关系：{relation}]", True
         text, ok = await _describe_user(bot, group_id, qq, relation, bot_id=bot_id)
         if ok and text:
+            summary = summarize_user(text)
             focus.note(bot_id, session_id, qq, kind="user", label=f"用户{qq}",
-                       summary=summarize_user(text), source=source)
+                       summary=summary, source=source)
+            _record_expansion(ctx, "user", qq, summary=summary, content=text, source=source)
         return text, ok
 
     async def _message_block(mid: str) -> tuple[str, bool]:
@@ -517,8 +534,10 @@ async def fetch_entities(
             return f"（这条我之前已经看过了）{cached} [id {mid}] [关系：{relation}]", True
         text, ok = await _describe_message(bot, mid, limit, relation)
         if ok and text:
+            summary = summarize_message(text)
             focus.note(bot_id, session_id, mid, kind="message", label=f"消息{mid}",
-                       summary=summarize_message(text), source=source)
+                       summary=summary, source=source)
+            _record_expansion(ctx, "message", mid, summary=summary, content=text, source=source)
         return text, ok
 
     pairs = await asyncio.gather(
@@ -607,8 +626,12 @@ async def fetch_recent(ctx, count: int = 1, *, limit: int = DEFAULT_ITEM_CHARS) 
         if msg_id:
             result.refs.append(msg_id)
         if ok and msg_id:
+            summary = summarize_message(block)
             focus.note(bot_id, session_id, msg_id, kind="message",
-                       label=f"消息{msg_id}", summary=summarize_message(block), source="expand")
+                       label=f"消息{msg_id}", summary=summary, source="expand")
+            _record_expansion(
+                ctx, "message", msg_id, summary=summary, content=block, source="expand_recent"
+            )
     return result
 
 

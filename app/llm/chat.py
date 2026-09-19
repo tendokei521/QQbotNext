@@ -67,19 +67,42 @@ def _images_enabled(config) -> bool:
         return True
 
 
+def _commit_history_enrichment(runtime, session_id: str, ctx=None) -> int:
+    """请求收尾：把本轮工具取回的内容写进「补全登记」（失败不影响回复）。"""
+    try:
+        from app.llm.history_enrich import commit
+
+        trigger = ""
+        if ctx is not None:
+            trigger = str(getattr(ctx.event, "message_id", "") or "")
+        return commit(getattr(runtime, "bot_id", ""), session_id, trigger_message_id=trigger)
+    except Exception as e:  # noqa: BLE001
+        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(
+            f"[HistoryEnrich] 回写失败（已忽略）: {e}"
+        )
+        return 0
+
+
 def _format_session_history(
     history: list[dict],
     is_private: bool,
     *,
     normalize_enhanced: bool = False,
     mask_nickname: bool = False,
+    bot_id: Any = "",
+    session_id: Any = "",
 ) -> list[dict]:
-    """兼容包装：委托给 group_context 的共享渲染函数。"""
+    """兼容包装：委托给 group_context 的共享渲染函数。
+
+    传入 ``bot_id`` / ``session_id`` 时接入补全登记（取回过的内容留在历史里）。
+    """
     return format_history_for_llm(
         history,
         is_private=is_private,
         normalize_enhanced=normalize_enhanced,
         mask_nickname=mask_nickname,
+        bot_id=bot_id,
+        session_id=session_id,
     )
 
 
@@ -679,7 +702,11 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
     if (session_history and session_history[-1].get("role") == "user"
             and session_history[-1].get("content") == user_text):
         session_history = session_history[:-1]
-    session_history = _format_session_history(session_history, is_private, **_meta_flags)
+    session_history = _format_session_history(
+        session_history, is_private,
+        bot_id=getattr(runtime, "bot_id", ""), session_id=session_id,
+        **_meta_flags,
+    )
     session_history = await maybe_compress_context(
         provider_chain, config, session_history, history_rounds
     )
@@ -688,6 +715,11 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
     all_specs, skill_blocks, tool_ctx = await _collect_llm_ext(
         runtime, event, session_id, is_private, schedule_enable
     )
+    # 工具取回内容的记账本（补全回写：请求收尾时按本轮 message_id 落进历史）
+    from app.llm.history_enrich import ledger_for
+
+    tool_ctx.extra["expansion_ledger"] = ledger_for(getattr(runtime, "bot_id", ""), session_id)
+    tool_ctx.extra["trigger_message_id"] = str(getattr(event, "message_id", "") or "")
 
     _memory_autosave(runtime, session_id, user_id, raw_user_text or user_text)
     memory_text = await _memory_block(runtime, session_id, user_id, raw_user_text or user_text, event.bot)
@@ -874,6 +906,7 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
         session.mark_replied()
     await asyncio.to_thread(session_mgr.history.save_session, session)
 
+    _commit_history_enrichment(runtime, session_id, ctx)
     _memory_consolidate(runtime, session_id, is_private, session_mgr)
     return clean_response
 
@@ -1044,6 +1077,7 @@ async def stream_response(runtime, event, ctx=None):
         session.mark_replied()
     await asyncio.to_thread(session_mgr.history.save_session, session)
 
+    _commit_history_enrichment(runtime, session_id, ctx)
     _memory_consolidate(runtime, session_id, is_private, session_mgr)
 
     _record_stream_telemetry(

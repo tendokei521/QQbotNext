@@ -587,60 +587,38 @@ def format_history_for_llm(
     *,
     normalize_enhanced: bool = False,
     mask_nickname: bool = False,
+    bot_id: Any = "",
+    session_id: Any = "",
 ) -> list[dict]:
-    """把带发送者元数据的会话历史渲染成纯文本消息，避免多余字段进入 API。
+    """把会话历史渲染成纯文本 messages（渲染实现见 history_model.render_history_entry）。
 
-    打标方式（与在线历史一致）：
+    打标方式：
     - 群聊：``MM-DD HH:MM 昵称(QQ): 内容``；
     - 私聊：``MM-DD HH:MM 对方: 内容``（私聊不需要昵称）；
     - bot 自己的回复（assistant）不加任何「时间/我: 」前缀，直接返回原文，
-      避免模型模仿“MM-DD HH:MM 我: ”的格式，把该前缀也写进回复内容从而污染历史。
+      避免模型模仿该格式把前缀写进回复内容从而污染历史。
 
-    Args:
-        history: 会话历史条目（role/content/nickname/user_id/time 等字段）。
-        is_private: True=私聊模式（对方不显示昵称，只显示「对方」）。
-        normalize_enhanced: True=把历史中的旧/新分节增强格式归一化为单行（实验性）。
-        mask_nickname: True=对句子型昵称脱敏为 用户<QQ>（实验性）。
+    条目可以是新的结构化形态（base/turn）或旧文本形态（仅 content）。
 
-    Returns:
-        OpenAI messages 风格的历史列表，content 已渲染为打标文本。
+    传入 ``bot_id`` / ``session_id`` 时接入「补全登记」（``history_enrich``）：
+    本会话取回过的引用/合并转发/用户名会把占位升级为 ``【已展开:… → 摘要】``，
+    取回过的单条消息作为附加块排在对应条目之后——**信息一旦查看过就留在历史里**。
     """
+    render_content = None
+    entry_blocks = None
+    if session_id not in (None, ""):
+        from app.llm import history_enrich
+
+        render_content, entry_blocks = history_enrich.rendering_for(session_id, bot_id)
+
     return render_history(
         history,
         is_private=is_private,
         normalize_enhanced=normalize_enhanced,
         mask_nickname=mask_nickname,
+        render_content=render_content,
+        entry_blocks=entry_blocks,
     )
-
-    result = []
-    for m in history:
-        role = m.get("role", "user")
-        content = m.get("content", "")
-        if role == "assistant":
-            # 模型自己的回复不再加“时间+我: ”前缀：避免模型模仿该格式，
-            # 把“MM-DD HH:MM 我: ”也写进回复内容（会污染历史并自我强化）。
-            result.append({"role": role, "content": content})
-            continue
-        # 内容已自带“发送者/发送了/时间”自描述（LLM 增强块）时不再套外层前缀。
-        # 实验性开启时归一化为单行脱敏；未开启但要求脱敏时只做“仅脱敏”，保留原格式。
-        if _is_enhanced_context(content):
-            if normalize_enhanced:
-                rendered = _normalize_enhanced_content(content)
-            elif mask_nickname:
-                rendered = _mask_enhanced_content(content)
-            else:
-                rendered = content
-            result.append({"role": role, "content": rendered})
-            continue
-        if is_private:
-            sender = PRIVATE_OTHER_TAG
-        else:
-            nickname = m.get("nickname") or ""
-            user_id = m.get("user_id") or ""
-            sender = _group_sender_label(nickname, user_id, include_user_id=True, mask_nickname=mask_nickname)
-        rendered = f"{_time_prefix(m.get('time'))}{sender}: {content}"
-        result.append({"role": role, "content": rendered})
-    return result
 
 
 def build_group_env_text(
