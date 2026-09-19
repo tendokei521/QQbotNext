@@ -21,9 +21,7 @@ from app.llm.group_context import (
     build_group_env_text,
     fetch_group_name,
     fetch_group_online_history,
-    format_history_for_llm,
 )
-from app.llm.prompt import build_messages
 from app.llm.providers import chat_with_fallback
 from app.llm.session import SessionManager
 from app.llm.tags import strip_all_tags

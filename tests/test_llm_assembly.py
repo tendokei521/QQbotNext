@@ -47,7 +47,6 @@ def test_equivalent_to_legacy_minimal():
         history=[{"role": "user", "content": "上一句"}],
         user_text="现在的消息",
         with_schedule_instruction=True,
-        schedule_nudge=False,
         skills=[],
         memory_text="",
         message_meta_instruction=LEGACY_MESSAGE_META_INSTRUCTION,
@@ -84,7 +83,6 @@ def test_equivalent_with_all_blocks_present():
         history=[{"role": "user", "content": "上一句"}],
         user_text="现在的消息",
         with_schedule_instruction=True,
-        schedule_nudge=False,
         skills=["技能A", "技能B"],
         memory_text="### 长期记忆\n- 喜欢美式",
         message_meta_instruction=LEGACY_MESSAGE_META_INSTRUCTION,
@@ -120,7 +118,6 @@ def test_equivalent_without_schedule_and_with_off_meta():
         user_text="现在的消息",
         history=[{"role": "user", "content": "上一句"}],
         with_schedule_instruction=False,
-        schedule_nudge=False,
         message_meta_instruction=None,
     )
     assert new == old

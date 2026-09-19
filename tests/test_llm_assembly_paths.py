@@ -169,3 +169,72 @@ async def test_both_paths_share_deduplicated_history(monkeypatch, tmp_path):
     user_texts = [m["content"] for m in second if m["role"] == "user"]
     assert user_texts.count("第二条") == 1, user_texts
     assert any("现在几点" in str(t) for t in user_texts), user_texts
+
+
+# ---------- #chat 指令入口 ----------
+
+
+async def test_handle_dispatches_chat_commands(monkeypatch):
+    """``#chat`` 指令必须被派发到 handle_commands；非指令消息静默交给流水线。
+
+    回归：``handle`` 曾经同时承担"旧版自己发消息"的完整回复路径，
+    非指令消息会被重复回复。现在它只做指令分发。
+    """
+    from app.llm import chat
+
+    seen: list[tuple] = []
+
+    async def _fake_commands(module, session_mgr, session_id, group_id, user_id,
+                             raw_text, is_admin, is_private, event=None):
+        seen.append((session_id, group_id, raw_text, is_private))
+        return True
+
+    monkeypatch.setattr(chat, "handle_commands", _fake_commands)
+    module = _CommandModule()
+
+    await chat.handle(module, _command_event("#chat memory list", message_type="private"))
+    assert seen == [("private_20002", None, "#chat memory list", True)]
+    assert module.config.get("_session") is None  # 会话档案已清理
+
+    seen.clear()
+    await chat.handle(module, _command_event("#chat schedule list", message_type="group"))
+    assert seen == [("group_466052056", "466052056", "#chat schedule list", False)]
+
+    # 非指令消息：不派发、不自己回复
+    seen.clear()
+    await chat.handle(module, _command_event("你好", message_type="private"))
+    assert seen == []
+
+
+class _CommandModule:
+    bot_id = 778
+    name = "agent"
+
+    def __init__(self):
+        self.config = _SessionCfg({"private_enable": True, "group_enable": True})
+
+    def provider_config(self):
+        return {"api_key": "sk-test"}
+
+
+class _SessionCfg(dict):
+    def set_session(self, session_id):
+        self["_session"] = session_id
+
+    def clear_session(self):
+        self.pop("_session", None)
+
+
+def _command_event(text: str, *, message_type: str):
+    from app.domain.events import MessageSegment
+
+    payload = {
+        "message_type": message_type,
+        "user_id": 20002,
+        "self_id": 778,
+        "is_admin": True,
+        "message": [MessageSegment("text", {"text": text})],
+    }
+    if message_type == "group":
+        payload["group"] = types.SimpleNamespace(group_id=466052056)
+    return types.SimpleNamespace(**payload)

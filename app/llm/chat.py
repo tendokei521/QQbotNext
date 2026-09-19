@@ -1,7 +1,14 @@
 """核心聊天逻辑（框架级 MainAgent 流程）。
 
-指令系统（#chat 开头）：
-  #chat task / export / list / load / new / exit / stop / proactive / schedule
+职责已收敛为三块：
+
+1. **取值**：``prepare_prompt`` 把事件归一化成 ``assembly.PromptRequest``
+   （会话/历史/背景/工具/记忆/指代/图片）；
+2. **请求**：``generate_response``（非流式）与 ``stream_response``（流式），
+   两者只差 provider 调用方式；
+3. **指令**：``#chat`` 指令入口 ``handle`` → ``handle_commands``。
+
+消息的**顺序与清洗**不在本模块，见 ``app.llm.assembly``（块表）。
 """
 
 
@@ -10,9 +17,7 @@ import json
 import time
 from typing import Any
 
-from app.domain.message import Message
 from app.llm import logger
-from app.llm.actions import build_outbound_builder
 from app.llm.compress import maybe_compress_context
 from app.llm.group_context import (
     build_group_env_text,
@@ -24,21 +29,13 @@ from app.llm.session import SessionManager
 from app.llm import assembly
 from app.llm.assembly import PromptRequest
 from app.llm.image import collect_image_segments
-from app.llm.prompt import LEGACY_MESSAGE_META_INSTRUCTION, MESSAGE_META_INSTRUCTION, build_messages
 from app.llm.providers import chat_with_fallback, iter_stream_with_fallback
-from app.llm.providers.modalities import (
-    normalize_modalities,
-    sanitize_contexts_by_modalities,
-    supports_image,
-    supports_tool_use,
-)
+from app.llm.providers.modalities import normalize_modalities, supports_tool_use
 from app.llm.tags import maybe_strip_parentheses, strip_all_tags
 from app.llm.splitter import split_sentences, strip_stream_artifacts
-from app.llm.trigger import check_trigger, extract_text
+from app.llm.trigger import extract_text
 from app.llm.tool import ToolContext, build_tools, make_executor
 from app.llm.tool_loop import normalize_and_execute_tool_calls
-
-import re
 
 
 def _event_nickname(event) -> str:
@@ -49,57 +46,11 @@ def _event_nickname(event) -> str:
     return getattr(user, "card", "") or getattr(user, "nickname", "") or ""
 
 
-async def apply_image_content(
-    messages: list[dict],
-    *,
-    event,
-    runtime,
-    ctx,
-    config,
-    modalities: list[str] | None,
-    user_text: str,
-) -> list[dict]:
-    """把本轮触发消息里的图片挂到 user 消息上（模型支持图片时）。
-
-    返回（可能被替换最后一条 user content 的）messages。以下情况原样返回：
-    - 关闭了 ``image_understanding_enable``；
-    - 模型模态未声明 ``image``（文本模型保持现有的 ``[图片]`` 占位语义）；
-    - 本轮消息没有可用图片（解析不到 URL/base64）。
-    """
-    if not _images_enabled(config) or not supports_image(modalities):
-        return messages
-    from app.llm.image import build_user_content, collect_image_segments, max_image_bytes, resolve_images
-
-    if not collect_image_segments(event):
-        return messages
-    # 优先复用流水线（pre_request 之前）已解析的结果，避免重复解析/重复下载
-    images = None
-    if ctx is not None:
-        images = ctx.state.get("user_images")
-    if images is None:
-        images = await resolve_images(
-            event,
-            bot=getattr(event, "bot", None),
-            max_images=int(config.get("image_max_count", 4) or 4),
-            max_bytes=max_image_bytes(config),
-        )
-        if ctx is not None:
-            ctx.state["user_images"] = images
-    content = build_user_content(images, text=user_text)
-    if not content:
-        return messages
-    for msg in reversed(messages):
-        if msg.get("role") == "user":
-            msg["content"] = content
-            break
-    return messages
-
-
 def _images_enabled(config) -> bool:
     """图片是否随请求传给模型（默认开；仅对声明了 image 模态的模型生效）。"""
     try:
         return bool(config.get("image_understanding_enable", True))
-    except Exception:  # noqa: BLE001 —— 配置对象异常时按默认开处理
+    except Exception:  # noqa: BLE001
         return True
 
 
@@ -367,19 +318,6 @@ def _memory_consolidate(runtime, session_id: str, is_private: bool, session_mgr)
 
 
 
-def _message_meta_instruction(runtime, ctx) -> str | None:
-    """根据 meta_instruction_mode 选择消息元信息消歧说明文本。
-
-    off=不注入；legacy=旧版说明（默认）；new=新版单行脱敏说明。
-    """
-    if ctx is None or not ctx.state.get("message_meta_injected"):
-        return None
-    mode = str(runtime.config.get("meta_instruction_mode", "legacy") or "legacy").lower()
-    if mode == "off":
-        return None
-    if mode == "new":
-        return MESSAGE_META_INSTRUCTION
-    return LEGACY_MESSAGE_META_INSTRUCTION
 
 
 DEFAULT_MAX_TOOL_ROUNDS = 5
@@ -528,7 +466,11 @@ def _record_stream_telemetry(
 
 
 async def handle(module, event):
-    """唯一入口：api_key 校验 + 消息类型开关过滤后分发。"""
+    """``#chat`` 指令入口（普通消息不经此处：由 LlmPipeline 走 generate/stream_response）。
+
+    流水线在 ``ctx.user_text.startswith("#chat ")`` 时把事件交给本函数；
+    因此这里只需要处理指令，不再保留"旧版自己发消息"的完整回复路径。
+    """
     config = module.config
     api_key = _provider_config_for(module).get("api_key", "")
     if not api_key:
@@ -542,124 +484,40 @@ async def handle(module, event):
         session_id = f"private_{event.user_id}"
     else:
         session_id = f"group_{event.group.group_id}"
+
+    raw_text = extract_text(event.message).strip()
+    if not raw_text.startswith("#chat "):
+        # 非指令消息由流水线负责；这里静默返回，避免出现两条回复路径
+        return
+
     config = module.config
     config.set_session(session_id)
     try:
         if message_type == "private":
             if not config.get("private_enable", True):
                 return
-            await handle_private(module, event, config)
         else:
             if not config.get("group_enable", False):
                 return
-            await handle_group(module, event, config)
+        await _handle_command_event(module, event, config)
     finally:
         config.clear_session()
 
 
-async def handle_group(module, event, config):
+async def _handle_command_event(module, event, config) -> None:
+    """把 ``#chat`` 指令派发给命令处理器（群/私聊共用）。"""
     session_mgr = SessionManager(str(module.bot_id))
-    group_id = str(event.group.group_id)
-    user_id = str(event.user_id)
-    self_id = str(event.self_id)
-    message_data = event.message
-    session_id = f"group_{group_id}"
-    raw_text = extract_text(message_data).strip()
-    is_admin = event.is_admin
-
-    if raw_text.startswith("#chat "):
-        await handle_commands(
-            module, session_mgr, session_id, group_id, user_id,
-            raw_text, is_admin, is_private=False, event=event,
-        )
-        return
-
-    trigger_at = config.get("trigger_at", True)
-    trigger_keyword = config.get("trigger_keyword", [])
-    triggered, is_at, user_text = check_trigger(message_data, self_id, trigger_at, trigger_keyword)
-    if not triggered:
-        return
-
-    if is_at:
-        user_text = re.sub(r"\[CQ:at,qq=\d+\]", "", user_text).strip()
-        user_text = re.sub(r"@\S+\s*", "", user_text).strip()
-
-    max_msg_len = config.get("max_message_length", 200)
-    if not user_text:
-        return
-    if len(user_text) > max_msg_len:
-        user_text = user_text[:max_msg_len]
-
-    # 只有真正触发 LLM 的消息才更新主动消息状态
-    pm = getattr(module, "proactive", None)
-    if pm is not None:
-        await pm.on_message(session_id, True, is_self=(event.user_id == event.self_id))
-
-    session = session_mgr.get_session(session_id)
-    if not session:
-        session = session_mgr.create_session(session_id, "group", config.get("session_timeout", 60))
-        session.reply_cooldown = config.get("reply_cooldown", 5)
-        await asyncio.to_thread(session_mgr.restore_session_from_archive, session, session_id)
+    is_private = event.message_type == "private"
+    if is_private:
+        session_id = f"private_{event.user_id}"
+        group_id = None
     else:
-        if not session.can_reply() and not is_at:
-            return
-        session.add_participant(user_id)
-
-    session_mgr.add_message(
-        session_id,
-        "user",
-        user_text,
-        user_id,
-        nickname=_event_nickname(event),
-    )
-    await call_llm_and_reply(
-        module, event, session_mgr, config,
-        session_id, user_id, group_id, is_private=False,
-        include_pre_history=config.get("include_pre_history", False),
-    )
-
-
-async def handle_private(module, event, config):
-    session_mgr = SessionManager(str(module.bot_id))
-    user_id = str(event.user_id)
-    message_data = event.message
-    session_id = f"private_{user_id}"
-    raw_text = extract_text(message_data).strip()
-    is_admin = event.is_admin
-
-    if raw_text.startswith("#chat "):
-        await handle_commands(
-            module, session_mgr, session_id, None, user_id,
-            raw_text, is_admin, is_private=True, event=event,
-        )
-        return
-
-    if not raw_text:
-        return
-    max_msg_len = config.get("max_message_length", 200)
-    user_text = raw_text[:max_msg_len]
-
-    # 只有真正进入 LLM 的私信才更新主动消息状态
-    pm = getattr(module, "proactive", None)
-    if pm is not None:
-        await pm.on_message(session_id, False, is_self=(event.user_id == event.self_id))
-
-    session = session_mgr.get_session(session_id)
-    if not session:
-        session = session_mgr.create_session(session_id, "private", config.get("session_timeout", 60))
-        await asyncio.to_thread(session_mgr.restore_session_from_archive, session, session_id)
-
-    session_mgr.add_message(
-        session_id,
-        "user",
-        user_text,
-        user_id,
-        nickname=_event_nickname(event),
-    )
-    await call_llm_and_reply(
-        module, event, session_mgr, config,
-        session_id, user_id, None, is_private=True,
-        include_pre_history=config.get("include_private_pre_history", "default"),
+        group_id = str(event.group.group_id)
+        session_id = f"group_{group_id}"
+    await handle_commands(
+        module, session_mgr, session_id, group_id, str(event.user_id),
+        extract_text(event.message).strip(), event.is_admin,
+        is_private=is_private, event=event,
     )
 
 
@@ -695,155 +553,6 @@ async def build_initiative_tools(
     # 无用户提问 → 不做历史/环境意图补强（user_text=""），只给常驻协议行
     instruction = _proactive_instruction(runtime.config, specs, "")
     return specs, skill_blocks, tool_ctx, instruction
-
-
-async def call_llm_and_reply(module, event, session_mgr, config,
-                             session_id, user_id, group_id, is_private, include_pre_history):
-    model = config.get("model", "deepseek-chat")
-    system_prompt = config.get("system_prompt", "你是一个友好的助手。")
-    max_tokens = config.get("max_tokens", 1024)
-    temperature = config.get("temperature", 0.7)
-    history_rounds = config.get("history_rounds", 50)
-    provider_chain = _provider_chain_for(module)
-    modalities = _modalities_for_chain(provider_chain)
-
-    session = session_mgr.get_session(session_id)
-    if not session:
-        return
-
-    # 前置历史（群聊近期 / 私信近期）。
-    # 群聊只有 include_pre_history 开启时才拉在线记录作为背景；
-    # 非 @ 群消息仍然不写入会话历史，保持原有“不积累”策略。
-    pre_history_text = ""
-    _meta_flags = _history_meta_flags(module)
-    if group_id:
-        if include_pre_history:
-            pre_history_text = await _build_group_pre_history(
-                event, group_id, count=history_rounds, **_meta_flags,
-                **_context_expand_flags(config),
-                bot_id=getattr(event, "bot_id", "") or "",
-                session_id=session_id,
-            )
-    elif is_private and include_pre_history in ("history", "load"):
-        pre_history_text = await fetch_private_online_history(
-            event.bot,
-            user_id,
-            count=history_rounds,
-            self_ids={str(event.self_id), str(getattr(event, "bot_id", "") or "")},
-            bot_id=getattr(event, "bot_id", "") or "",
-            session_id=session_id,
-        )
-        if pre_history_text and include_pre_history == "history":
-            pre_history_text = f"近期聊天记录:\n{pre_history_text}"
-
-    session_history = session_mgr.get_history(session_id, limit=session_mgr.MAX_HISTORY_MESSAGES)
-    user_text = session.data.history[-1]["content"] if session.data.history else ""
-    # 防重复：history 尾部就是刚追加的当前用户消息，去掉避免同一消息出现两次
-    if (session_history and session_history[-1].get("role") == "user"
-            and session_history[-1].get("content") == user_text):
-        session_history = session_history[:-1]
-    session_history = _format_session_history(session_history, is_private, **_meta_flags)
-    session_history = await maybe_compress_context(
-        provider_chain, config, session_history, history_rounds
-    )
-
-    schedule_enable = config.get("schedule_enable", True)
-
-    all_specs, skill_blocks, tool_ctx = await _collect_llm_ext(
-        module, event, session_id, is_private, schedule_enable
-    )
-
-    _memory_autosave(module, session_id, user_id, user_text)
-    memory_text = await _memory_block(module, session_id, user_id, user_text, event.bot)
-    # 指代消解：焦点行 + 明确指向时的确定性预取（放在背景块之前，信息密度更高）
-    _referent_text = await _referent_block(tool_ctx.runtime, session_id, user_text, tool_ctx)
-    if _referent_text:
-        pre_history_text = f"{_referent_text}\n\n{pre_history_text}" if pre_history_text else _referent_text
-
-    messages = build_messages(
-        system_prompt=system_prompt,
-        pre_history_text=pre_history_text,
-        history=session_history,
-        user_text=user_text,
-        with_schedule_instruction=schedule_enable,
-        schedule_nudge=False,
-        skills=skill_blocks,
-        memory_text=memory_text,
-        message_meta_instruction=_message_meta_instruction(module, None),
-        proactive_instruction=_proactive_instruction(config, all_specs, user_text),
-    )
-    messages = sanitize_contexts_by_modalities(messages, modalities)
-    # 多模态：本轮消息带图且模型声明 image 模态时，把图片块挂到 user 消息上
-    messages = await apply_image_content(
-        messages, event=event, runtime=module, ctx=None, config=config,
-        modalities=modalities, user_text=user_text,
-    )
-
-    logger.add_info(f"#{module.bot_id}").info(
-        f"API 请求 -> {session_id} (task: {session.task_id}), 消息数: {len(messages)}"
-    )
-
-    use_tools = bool(all_specs) and supports_tool_use(modalities)
-    response = await chat_with_fallback(
-        provider_chain,
-        messages,
-        model=model,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        tools=build_tools(all_specs) if use_tools else None,
-        tool_executor=make_executor(all_specs, tool_ctx) if use_tools else None,
-        max_tool_rounds=_max_tool_rounds(config),
-        max_empty_retries=_max_empty_retries(config),
-    )
-
-    if not response.ok:
-        clean_response = "抱歉，我暂时无法回答，请稍后再试。"
-    else:
-        # 工具结果（定时任务已在工具循环中执行，最终回复是 LLM 基于结果的确认）
-        if response.tool_results:
-            for tr in response.tool_results:
-                logger.add_info(f"#{module.bot_id}").info(
-                    f"[Tool] {tr['name']} 执行 -> {str(tr['result'])[:80]}"
-                )
-        # 防御：剥离角色提示词可能输出的 <type=...> 标签，避免漏到客户端
-        clean_response = strip_stream_artifacts(strip_all_tags(response.text))
-
-    # 兜底：模型返回空内容时避免“不回复”，给用户一个可见的占位回复
-    if not clean_response:
-        logger.add_info(f"#{module.bot_id}").warning(
-            f"[LLM] 模型返回空回复，使用兜底文本 -> {session_id}"
-        )
-        clean_response = "抱歉，我暂时无法回答，请稍后再试。"
-
-    # 输出侧动作通道：把 [reply]/[@QQ] 指令转成真正的消息段并剥离标记
-    # （无指令时与纯文本发送等价；标记不会进入会话历史，也不会漏给用户）
-    out_msg = build_outbound_builder(event, config).build(clean_response)
-    if out_msg is None:
-        logger.add_info(f"#{module.bot_id}").info(
-            f"[LLM] 回复仅含输出指令，改用兜底文本 -> {session_id}"
-        )
-        out_msg = Message.from_text("抱歉，我暂时无法回答，请稍后再试。")
-    clean_response = out_msg.text
-
-    session_mgr.add_message(session_id, "assistant", _clean_output_for_history(config, clean_response))
-    if not is_private:
-        session.mark_replied()
-    await asyncio.to_thread(session_mgr.history.save_session, session)
-
-    _memory_consolidate(module, session_id, is_private, session_mgr)
-
-    try:
-        if is_private:
-            await event.bot.send_private_msg(user_id=int(user_id), message=out_msg)
-        else:
-            await event.bot.send_group_msg(group_id=int(group_id), message=out_msg)
-        # 主动消息观察：Bot 发言后重置群聊沉默计时器（on_bot_sent 入口）
-        pm = getattr(module, "proactive", None)
-        if pm is not None:
-            await pm.on_bot_sent(session_id, not is_private)
-        logger.add_info(f"#{module.bot_id}").info(f"回复完成 -> {session_id} (task: {session.task_id})")
-    except Exception as e:
-        logger.add_info(f"#{module.bot_id}").error(f"消息发送失败: {e}")
 
 
 async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):

@@ -19,7 +19,7 @@ import base64
 import pytest
 
 from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
-from app.llm.chat import apply_image_content
+from app.llm.assembly import PromptRequest, place_images
 from app.llm.image import (
     build_user_content,
     collect_image_segments,
@@ -221,57 +221,90 @@ class _Cfg(dict):
         self.pop("_session", None)
 
 
-async def test_apply_image_content_replaces_last_user_message():
-    event = _event([("text", {"text": "看看"}), ("image", {"url": "https://a/1.png"})])
-    messages = [{"role": "system", "content": "sys"}, {"role": "user", "content": "看看"}]
-    out = await apply_image_content(
-        messages, event=event, runtime=None, ctx=None, config=_Cfg(), modalities=["text", "image"],
-        user_text="看看",
+def _req_with_images(*, modalities, config=None, text="看看", images=None):
+    event = _event([("text", {"text": text}), ("image", {"url": "https://a/1.png"})])
+    return PromptRequest(
+        config=config or _Cfg(),
+        event=event,
+        session_id="group_778",
+        user_text=text,
+        user_images=images if images is not None else [{"kind": "url", "value": "https://a/1.png"}],
+        modalities=modalities,
     )
+
+
+def test_place_images_replaces_last_user_message():
+    req = _req_with_images(modalities=["text", "image"], text="看看")
+    messages = [{"role": "system", "content": "sys"}, {"role": "user", "content": "看看"}]
+    out = place_images(messages, req)
     assert isinstance(out[-1]["content"], list)
     assert out[-1]["content"][1]["type"] == "image_url"
 
 
-async def test_apply_image_content_skipped_for_text_only_model():
-    event = _event([("image", {"url": "https://a/1.png"})])
+def test_place_images_skipped_for_text_only_model():
+    req = _req_with_images(modalities=["text", "tool_use"], text="[图片]")
     messages = [{"role": "user", "content": "[图片]"}]
-    out = await apply_image_content(
-        messages, event=event, runtime=None, ctx=None, config=_Cfg(),
-        modalities=["text", "tool_use"], user_text="[图片]",
-    )
+    out = place_images(messages, req)
     assert out[-1]["content"] == "[图片]"  # 文本模型语义完全不变
 
 
-async def test_apply_image_content_skipped_when_disabled():
-    event = _event([("image", {"url": "https://a/1.png"})])
-    messages = [{"role": "user", "content": "[图片]"}]
-    out = await apply_image_content(
-        messages, event=event, runtime=None, ctx=None,
+def test_place_images_skipped_when_disabled():
+    req = _req_with_images(
+        modalities=["text", "image"],
         config=_Cfg({"image_understanding_enable": False}),
-        modalities=["text", "image"], user_text="[图片]",
+        text="[图片]",
     )
+    messages = [{"role": "user", "content": "[图片]"}]
+    out = place_images(messages, req)
     assert out[-1]["content"] == "[图片]"
 
 
-async def test_apply_image_content_without_images_is_noop():
-    event = _event([("text", {"text": "只有文字"})])
+def test_place_images_without_resolved_images_is_noop():
+    req = _req_with_images(modalities=["text", "image"], text="只有文字", images=[])
     messages = [{"role": "user", "content": "只有文字"}]
-    out = await apply_image_content(
-        messages, event=event, runtime=None, ctx=None, config=_Cfg(),
-        modalities=["text", "image"], user_text="只有文字",
-    )
+    out = place_images(messages, req)
     assert out[-1]["content"] == "只有文字"
 
 
 @pytest.mark.parametrize("modalities", [None, ["text", "image"], ["text", "image", "audio", "tool_use"]])
-async def test_apply_image_content_works_for_permissive_and_explicit_modalities(modalities):
-    event = _event([("image", {"url": "https://a/1.png"})])
+def test_place_images_works_for_permissive_and_explicit_modalities(modalities):
+    req = _req_with_images(modalities=modalities, text="看图")
     messages = [{"role": "user", "content": "看图"}]
-    out = await apply_image_content(
-        messages, event=event, runtime=None, ctx=None, config=_Cfg(),
-        modalities=modalities, user_text="看图",
-    )
+    out = place_images(messages, req)
     assert isinstance(out[-1]["content"], list)
+
+
+def test_sanitize_is_the_last_line_of_defense_for_unsupported_models():
+    """清洗永远是最后一步兜底：万一有图块漏进 messages，文本模型也只会看到 [Image]。
+
+    ``place_images`` 已有模态门控（文本模型根本不加图块），这里验证兜底仍然有效。
+    """
+    from app.llm.assembly import sanitize
+
+    req = _req_with_images(modalities=["text"], text="看看")
+    messages = [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "看看"},
+            {"type": "image_url", "image_url": {"url": "https://a/1.png"}},
+        ],
+    }]
+    out = sanitize(messages, req)
+    assert out[-1]["content"] == [
+        {"type": "text", "text": "看看"},
+        {"type": "text", "text": "[Image]"},
+    ]
+
+
+def test_build_messages_keeps_images_for_image_capable_model():
+    """声明了 image 模态的模型拿到的是真图块（不是 [Image] 占位）。"""
+    from app.llm.assembly import build_messages
+
+    req = _req_with_images(modalities=["text", "image"], text="看看")
+    messages = build_messages(req)
+    content = messages[-1]["content"]
+    assert isinstance(content, list)
+    assert content[1] == {"type": "image_url", "image_url": {"url": "https://a/1.png"}}
 
 
 # ---------- 流水线门控：@我 + 只发图 不能被整轮丢弃 ----------

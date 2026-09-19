@@ -164,10 +164,18 @@ def build_proactive(req: PromptRequest) -> list[dict]:
 def message_meta_instruction(req: PromptRequest) -> str | None:
     """消息格式说明：让模型知道"发送者：…"是元信息、只有正文才是用户说的话。
 
-    模式：``off`` 不注入；``new`` 用单行脱敏版；其余用默认真人感版。
-    ``experimental_long_term_memory`` 打开时自动切到新版。
+    模式（``meta_instruction_mode`` 优先，兼容 ``meta_sender_style``）：
+    ``off`` 不注入；``new`` 用单行脱敏版；其余用默认真人感版。
+    此外，仅当本轮**真的注入了元信息**（``ctx.state["message_meta_injected"]``）时才注入说明——
+    否则说明本身就是噪音，会诱导模型去找并不存在的"发送者："前缀。
     """
-    mode = str(req.cfg("meta_sender_style", "legacy") or "legacy").lower()
+    ctx = req.ctx
+    if ctx is not None and not ctx.state.get("message_meta_injected"):
+        return None
+    mode = req.cfg("meta_instruction_mode")
+    if mode is None:
+        mode = req.cfg("meta_sender_style", "legacy")
+    mode = str(mode or "legacy").lower()
     if mode == "off":
         return None
     if mode == "new":

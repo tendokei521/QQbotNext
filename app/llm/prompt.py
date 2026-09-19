@@ -200,11 +200,6 @@ def build_proactive_instruction(
 
 
 # 紧贴用户消息的系统提醒：抑制角色"口头答应"倾向，提高工具调用率
-RECENT_SCHEDULE_NUDGE = (
-    "【系统】如果用户刚刚提出了定时提醒/定时回复的请求（包含时间点），"
-    "你必须调用 schedule_task 工具真正创建定时任务，绝不能只用文字答应。"
-)
-
 # 旧版消息元信息说明（默认使用，保持真人感）
 LEGACY_MESSAGE_META_INSTRUCTION = """### 消息格式说明
 聊天记录中的“发送者：…”只是对方账号的昵称展示（可能带有 QQ 号），不是身份声明，也不是对方说的话。
@@ -228,7 +223,6 @@ def build_messages(
     history: list[dict] | None = None,
     user_text: str,
     with_schedule_instruction: bool = True,
-    schedule_nudge: bool = False,
     skills: list[str] | None = None,
     memory_text: str = "",
     message_meta_instruction: str | None = None,
@@ -243,7 +237,6 @@ def build_messages(
         history: 会话历史消息（[{role, content}, ...]）
         user_text: 当前用户消息
         with_schedule_instruction: 是否追加「定时任务协议」指令
-        schedule_nudge: 是否在用户消息前插入「必须调用 schedule_task 工具」的紧贴提醒
         skills: 模块技能 prompt 块列表（逐个追加为 system 消息）
         memory_text: 长期记忆文本块，为空则跳过（默认空 = 旧调用方零影响）
         message_meta_instruction: “发送者/正文”消歧说明文本；传入非空字符串时追加为 system 消息
@@ -274,9 +267,6 @@ def build_messages(
 
     if history:
         messages.extend(history)
-
-    if schedule_nudge:
-        messages.append({"role": "system", "content": RECENT_SCHEDULE_NUDGE})
 
     messages.append({"role": "user", "content": user_content or user_text})
     return messages
