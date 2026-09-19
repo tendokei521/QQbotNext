@@ -46,6 +46,19 @@ def _event_nickname(event) -> str:
     return getattr(user, "card", "") or getattr(user, "nickname", "") or ""
 
 
+def _segments_as_dicts(message: Any) -> list[dict]:
+    """把事件里的消息段统一成 ``[{"type": ..., "data": {...}}]``（存历史用）。"""
+    segments: list[dict] = []
+    for seg in message or []:
+        if isinstance(seg, dict):
+            segments.append({"type": str(seg.get("type", "")), "data": dict(seg.get("data", {}) or {})})
+            continue
+        stype = getattr(seg, "type", "")
+        if stype:
+            segments.append({"type": str(stype), "data": dict(getattr(seg, "data", {}) or {})})
+    return segments
+
+
 def _images_enabled(config) -> bool:
     """图片是否随请求传给模型（默认开；仅对声明了 image 模态的模型生效）。"""
     try:
@@ -630,8 +643,24 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
             return None, None, None
         session.add_participant(user_id)
 
+    # 写历史：结构化（基础信息 + 原始段 + message_id）。
+    # 正文与元信息分离存放——时间/群号/发送者由渲染器按当前配置重排，
+    # "提到了/引用了"这类附注随正文回放；message_id 是后续"按需补全"的锚点。
+    from app.llm.history_model import split_user_context
+
+    body_text, meta_lines = split_user_context(user_text)
     session_mgr.add_message(
-        session_id, "user", user_text, user_id, nickname=_event_nickname(event)
+        session_id,
+        "user",
+        body_text or user_text,
+        user_id,
+        nickname=_event_nickname(event),
+        message_id=getattr(event, "message_id", None),
+        timestamp=getattr(event, "time", None),
+        segments=_segments_as_dicts(getattr(event, "message", None)),
+        group_id=group_id if not is_private else None,
+        is_private=is_private,
+        meta_lines=meta_lines,
     )
 
     provider_chain = _provider_chain_for(runtime)
@@ -765,61 +794,6 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
     if message_type not in ("group", "private"):
         return None
 
-    if message_type == "private":
-        if not config.get("private_enable", True):
-            return None
-        is_private = True
-        session_id = f"private_{event.user_id}"
-        user_id = str(event.user_id)
-        group_id = None
-        include_pre_history = config.get("include_private_pre_history", "default")
-    else:
-        if not config.get("group_enable", False):
-            return None
-        is_private = False
-        session_id = f"group_{event.group.group_id}"
-        user_id = str(event.user_id)
-        group_id = str(event.group.group_id)
-        include_pre_history = config.get("include_pre_history", False)
-
-    if ctx is not None:
-        if ctx.session_id:
-            session_id = ctx.session_id
-        user_text = (ctx.user_text or "").strip()
-    else:
-        user_text = extract_text(event.message).strip()
-
-    if not user_text:
-        return None
-    # 框架用户感知已格式化上下文时，不再截断整个 user_text（原始文本已在 pipeline 截断）
-    if not (ctx is not None and ctx.state.get("user_context")):
-        max_msg_len = config.get("max_message_length", 200)
-        user_text = user_text[:max_msg_len]
-
-    session_mgr = SessionManager(str(runtime.bot_id))
-    session = session_mgr.get_session(session_id)
-    if not session:
-        session = session_mgr.create_session(
-            session_id,
-            "private" if is_private else "group",
-            config.get("session_timeout", 60),
-        )
-        if not is_private:
-            session.reply_cooldown = config.get("reply_cooldown", 5)
-        await asyncio.to_thread(session_mgr.restore_session_from_archive, session, session_id)
-    else:
-        if not is_private and not session.can_reply() and not (ctx is not None and ctx.state.get("is_at")):
-            return None
-        session.add_participant(user_id)
-
-    session_mgr.add_message(
-        session_id,
-        "user",
-        user_text,
-        user_id,
-        nickname=_event_nickname(event),
-    )
-
     # 取值（会话/历史/背景/工具/记忆/指代/图片）全部收敛在 prepare_prompt；
     # 顺序与清洗交给 assembly（PromtRequest → 块表 → 归位 → 按模态清洗）。
     req, session, meta = await prepare_prompt(runtime, event, ctx)
@@ -830,6 +804,8 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
     modalities = meta["modalities"]
     all_specs = meta["all_specs"]
     tool_ctx = meta["tool_ctx"]
+    session_mgr = meta["session_mgr"]
+    is_private = meta["is_private"]
 
     messages = assembly.build_messages(req)
 

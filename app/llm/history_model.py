@@ -135,8 +135,10 @@ class BaseInfo:
     group_id: str = ""
     is_private: bool = False
     text: str = ""
-    #: 原始 OneBot 消息段（保留 @/引用/转发/图片，供未来重渲染与"按需展开"定位）
+    #: 原始 OneBot 消息段（保留 @/引用/转发/图片，供重渲染与"按需展开"定位）
     segments: list[dict] = field(default_factory=list)
+    #: 基础信息里的附注行（如"提到了(用户名)：…"），渲染时接在正文之后
+    meta_lines: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         data: dict[str, Any] = {"time": int(self.time or 0)}
@@ -152,6 +154,8 @@ class BaseInfo:
             data["text"] = str(self.text)
         if self.segments:
             data["segments"] = list(self.segments)
+        if self.meta_lines:
+            data["meta_lines"] = [str(x) for x in self.meta_lines if str(x or "").strip()]
         return data
 
     @classmethod
@@ -165,6 +169,7 @@ class BaseInfo:
             is_private=bool(data.get("is_private", False)),
             text=str(data.get("text", "") or ""),
             segments=list(data.get("segments", []) or []),
+            meta_lines=[str(x) for x in (data.get("meta_lines", []) or []) if str(x or "").strip()],
         )
 
 
@@ -359,6 +364,7 @@ def render_history_entry(
             include_time=include_time,
             include_user_id=include_user_id,
             mask_nickname=mask_nickname,
+            meta_lines=base.meta_lines,
         )
 
     return None
@@ -383,8 +389,9 @@ def _single_line(
     include_time: bool,
     include_user_id: bool,
     mask_nickname: bool,
+    meta_lines: list[str] | None = None,
 ) -> str:
-    """``MM-DD HH:MM 昵称(QQ): 正文`` 形态。"""
+    """``MM-DD HH:MM 昵称(QQ): 正文`` 形态；附注行接在正文之后。"""
     if sender_id and str(sender_id) in self_ids:
         label = SELF_TAG
     elif is_private:
@@ -395,7 +402,42 @@ def _single_line(
             include_user_id=include_user_id, mask_nickname=mask_nickname,
         )
     prefix = time_prefix(time) if include_time else ""
-    return f"{prefix}{label}: {content}"
+    lines = [f"{prefix}{label}: {content}"]
+    for line in meta_lines or []:
+        text = normalize_newlines(line).strip()
+        if text:
+            lines.append(text)
+    return "\n".join(lines)
+
+
+#: 基础信息里的附注行前缀（写侧保留、读侧原样回放；渲染器自己负责 时间/群号/发送者）
+META_LINE_PREFIXES = ("提到了", "引用了")
+#: 由渲染器按当前配置重排的行（写侧丢弃，避免同一信息两处出现）
+RENDERED_LINE_PREFIXES = ("发送者：", "发送者昵称：", "(时间", "（时间", "(当前群号", "（当前群号")
+
+
+def split_user_context(text: Any) -> tuple[str, list[str]]:
+    """把 enhanced user_text 拆成 ``(正文, 附注行)``。
+
+    写侧用它把「正文」与「元信息」分开存：时间/群号/发送者由渲染器按当前配置重排，
+    "提到了/引用了" 这类正文相关附注随正文回放。
+    """
+    body_parts: list[str] = []
+    meta_lines: list[str] = []
+    for raw in normalize_newlines(text).split("\n"):
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("发送了：") or line.startswith("消息正文："):
+            body_parts.append(line.split("：", 1)[1] if "：" in line else "")
+            continue
+        if line.startswith(RENDERED_LINE_PREFIXES):
+            continue
+        if line.startswith(META_LINE_PREFIXES):
+            meta_lines.append(line)
+            continue
+        body_parts.append(line)
+    return "\n".join(part for part in body_parts if part).strip(), meta_lines
 
 
 def _render_enhanced(

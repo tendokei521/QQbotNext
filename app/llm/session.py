@@ -294,24 +294,49 @@ class SessionManager:
         nickname: str = "",
         message_id: Any = None,
         timestamp: int | None = None,
+        *,
+        segments: list | None = None,
+        group_id: Any = None,
+        is_private: bool = False,
+        meta_lines: list[str] | None = None,
     ):
+        """追加一条历史。
+
+        传入 ``segments`` 时写入**结构化形状**（``base`` + 顶层 ``content`` 兼容字段）：
+        基础信息（时间/发送者/群号/正文/原始段）与正文分离，渲染时再组装，因此
+        格式/脱敏/补全都能在读取侧决定；不传 ``segments`` 时保持旧形状（仅 content）。
+        """
         session = self.get_session(session_id)
         if session and session.data is not None:
             if role == "assistant" and _is_junk_assistant(content):
                 return
-            msg = {
-                "role": role,
-                "content": content,
-                "time": int(time.time()) if timestamp is None else int(timestamp),
-            }
+            now = int(time.time()) if timestamp is None else int(timestamp)
+            entry: dict[str, Any] = {"role": role, "time": now}
+            if segments:
+                entry["base"] = {
+                    "time": now,
+                    "sender_id": str(user_id or ""),
+                    "sender_name": str(nickname or ""),
+                    "group_id": str(group_id or ""),
+                    "is_private": bool(is_private),
+                    "text": str(content or ""),
+                    "segments": list(segments),
+                }
+                if meta_lines:
+                    entry["base"]["meta_lines"] = [str(x) for x in meta_lines if str(x or "").strip()]
+                # 兼容字段：老渲染/老读者（含 UI 导出、记忆蒸馏）仍能按 content 读到本条
+                entry["content"] = str(content or "")
+            else:
+                entry["content"] = content
+
             if user_id:
-                msg["user_id"] = str(user_id)
+                entry["user_id"] = str(user_id)
             if nickname:
-                msg["nickname"] = str(nickname)
+                entry["nickname"] = str(nickname)
             if message_id not in (None, ""):
-                msg["message_id"] = str(message_id)
+                entry["message_id"] = str(message_id)
             history = session.data.history
-            history.append(msg)
+            history.append(entry)
             if len(history) > self.MAX_HISTORY_MESSAGES:
                 dropped = len(history) - self.MAX_HISTORY_MESSAGES
                 del history[:dropped]
@@ -335,7 +360,7 @@ class SessionManager:
         result = []
         for m in filtered[-limit:]:
             item = {"role": m["role"], "content": m["content"]}
-            for key in ("user_id", "nickname", "message_id", "time"):
+            for key in ("user_id", "nickname", "message_id", "time", "base", "turn"):
                 if m.get(key) is not None:
                     item[key] = m[key]
             result.append(item)
