@@ -540,6 +540,13 @@ SCHEMA = {
                        "调大后多段式任务（如逐个展开引用的消息/@ 对象再作答）不会中途被截断，代价是极端情况下耗时与 token 增加",
         "default": 5, "min": 1, "max": 20, "group": "group_tools",
     },
+    "empty_reply_retries": {
+        "type": "number", "label": "空回复重试次数",
+        "description": "请求成功结束却既无文本也无工具调用时，同一模型再试的次数（流式与非流式共用）。"
+                       "偶现的空回复多半是网关提前断流或只回了思考内容，重试一次即可避免把「暂时无法回答」发给用户；"
+                       "0 = 关闭重试（故障时会快一些失败）",
+        "default": 1, "min": 0, "max": 3, "group": "group_tools",
+    },
     "tool_result_directive_enable": {
         "type": "boolean", "label": "工具结果附带回应要求",
         "description": "在工具结果末尾拼一句「用你自己的口吻回应，不要复述/不要列条目」。"

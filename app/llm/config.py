@@ -141,6 +141,9 @@ DEFAULT_LLM_CONFIG: dict = {
     # 工具调用循环轮数上限（流式与非流式共用）：调大后"展开环境→再判断→再展开"这类
     # 多段链条不会在第 5 轮被硬切（此前流式硬编码 5、非流式走 Provider 默认值，两处不一致）
     "max_tool_rounds": 5,
+    # 空回复重试：请求成功结束却既无文本也无工具调用（网关提前断流 / 只回思考内容）时，
+    # 同一 provider 再试的次数；0 = 关闭。避免偶现空回复直接把兜底话术发给用户。
+    "empty_reply_retries": 1,
     # 工具结果尾部的「回应要求」：压住"工具返回后写长串汇报"的倾向
     # （拼在结果末尾而不是新增 system —— 中途 system 在 Anthropic/Gemini 会被上提到最前）
     "tool_result_directive_enable": True,

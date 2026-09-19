@@ -113,7 +113,7 @@ def _stream_stub(rounds: list[list[StreamEvent]], seen: dict):
     """构造一个假的流式请求函数：按轮次产出预置事件。"""
 
     async def _fake(chain, messages, *, model=None, temperature=0.7, max_tokens=1024,
-                    timeout=30, tools=None, tool_executor=None):
+                    timeout=30, tools=None, tool_executor=None, **kwargs):
         seen.setdefault("tools", tools)
         seen["rounds"] = seen.get("rounds", 0) + 1
         index = min(seen["rounds"] - 1, len(rounds) - 1)

@@ -341,6 +341,23 @@ def _max_tool_rounds(config, default: int = DEFAULT_MAX_TOOL_ROUNDS) -> int:
     return max(1, min(value, 20))
 
 
+DEFAULT_EMPTY_REPLY_RETRIES = 1
+
+
+def _max_empty_retries(config, default: int = DEFAULT_EMPTY_REPLY_RETRIES) -> int:
+    """空回复重试次数（配置 ``empty_reply_retries``），流式与非流式共用。
+
+    偶现问题：请求成功结束却既无文本也无工具调用（网关提前断流 / 只回思考内容），
+    表现就是用户收到兜底文本「抱歉，我暂时无法回答」。这里给一次确定性重试的机会，
+    上限 3 次，避免真正故障时空跑 LLM 请求。0 = 关闭。
+    """
+    try:
+        value = int(config.get("empty_reply_retries", default))
+    except (TypeError, ValueError):
+        return default
+    return max(0, min(value, 3))
+
+
 def _proactive_instruction(config, all_specs, user_text: str, ctx=None) -> str | None:
     """本轮「主动性」协议块：只在本轮确有对应工具时注入（唯一一块 system 提示）。
 
@@ -713,6 +730,7 @@ async def call_llm_and_reply(module, event, session_mgr, config,
         tools=build_tools(all_specs) if use_tools else None,
         tool_executor=make_executor(all_specs, tool_ctx) if use_tools else None,
         max_tool_rounds=_max_tool_rounds(config),
+        max_empty_retries=_max_empty_retries(config),
     )
 
     if not response.ok:
@@ -924,6 +942,7 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
         tools=build_tools(all_specs) if use_tools else None,
         tool_executor=make_executor(all_specs, tool_ctx) if use_tools else None,
         max_tool_rounds=_max_tool_rounds(config),
+        max_empty_retries=_max_empty_retries(config),
     )
     response_latency_ms = (time.monotonic() - response_start) * 1000
 
@@ -1152,6 +1171,7 @@ async def stream_response(runtime, event, ctx=None):
             max_tokens=max_tokens,
             tools=tools,
             tool_executor=tool_executor,
+            max_empty_retries=_max_empty_retries(config),
         ):
             if ev.type == "text":
                 buffer += ev.text

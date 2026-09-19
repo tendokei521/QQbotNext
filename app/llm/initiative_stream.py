@@ -24,6 +24,17 @@ from app.llm.tool_loop import normalize_and_execute_tool_calls
 
 # 与 chat.DEFAULT_MAX_TOOL_ROUNDS 保持一致（调用方通常会显式传配置值）
 DEFAULT_MAX_TOOL_ROUNDS = 5
+# 与 chat.DEFAULT_EMPTY_REPLY_RETRIES 保持一致（对齐不能 import chat：会循环导入）
+DEFAULT_EMPTY_REPLY_RETRIES = 1
+
+
+def _max_empty_retries(config, default: int = DEFAULT_EMPTY_REPLY_RETRIES) -> int:
+    """空回复重试次数，取值口径与 ``chat._max_empty_retries`` 一致（0–3）。"""
+    try:
+        value = int((config or {}).get("empty_reply_retries", default))
+    except (TypeError, ValueError):
+        return default
+    return max(0, min(value, 3))
 
 
 def _accumulate_tool_call(slot_map: dict, tc: dict) -> None:
@@ -100,6 +111,8 @@ async def stream_send_initiative(
                 max_tokens=max_tokens,
                 tools=tools if use_tools else None,
                 tool_executor=tool_executor if use_tools else None,
+                # 主动消息/定时任务同样吃「空回复重试」：零产出会让本轮静默不发
+                max_empty_retries=_max_empty_retries(config),
             ):
                 if ev.type == "text":
                     buffer += ev.text
