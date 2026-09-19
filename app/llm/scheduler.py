@@ -350,7 +350,14 @@ class TaskScheduler:
             if hasattr(config, "set_session"):
                 config.set_session(entry.session_id)
             all_specs, skill_blocks, tool_ctx, instruction = await self._collect_tools(entry)
-            messages = await self._build_messages(entry, instruction=instruction, skill_blocks=skill_blocks)
+
+            # 焦点行（定时任务没有用户提问 → 不做预取）：随其他块一起进装配
+            from app.llm.referent import focus_only_block
+
+            focus_text = await focus_only_block(self.module, entry.session_id) or ""
+            messages = await self._build_messages(
+                entry, instruction=instruction, skill_blocks=skill_blocks, focus_text=focus_text
+            )
 
             from app.llm.chat import _max_tool_rounds
             from app.llm.providers.modalities import normalize_modalities, supports_tool_use
@@ -460,18 +467,19 @@ class TaskScheduler:
         *,
         instruction: str | None = None,
         skill_blocks: list[str] | None = None,
+        focus_text: str = "",
     ) -> list[dict]:
-        """构建定时任务触发的 LLM 消息。"""
+        """构建定时任务触发的 LLM 消息。
+
+        与普通回复共用 ``assembly`` 装配：块顺序（人设/主动性/格式说明/技能/记忆/背景/
+        历史/本轮）由块表决定，这里只负责取原料。历史与记忆的取法与 chat 一致
+        （含超 ``history_rounds`` 的上下文压缩）。
+        """
+        from app.llm.assembly import PromptRequest, build_messages as build_from_request
+        from app.llm.assembly_inputs import collect_history_materials
+
         session = self.session_mgr.get_session(entry.session_id)
         config = self.module.config
-        history = self.session_mgr.get_history(
-            entry.session_id, limit=int(config.get("history_rounds", 50))
-        ) if session else []
-        _meta_flags = {
-            "normalize_enhanced": bool(config.get("experimental_long_term_memory", False)),
-            "mask_nickname": bool(config.get("meta_mask_nickname", False)),
-        }
-        history = format_history_for_llm(history, is_private=not entry.is_group, **_meta_flags)
         system_prompt = config.get("system_prompt", "你是一个友好的助手。")
         now_str = datetime.now().strftime("%Y年%m月%d日 %H:%M")
         job_json = json.dumps({
@@ -492,12 +500,15 @@ class TaskScheduler:
         if entry.is_group and config.get("include_pre_history", False):
             # 与普通回复一致：定时任务也只有 include_pre_history 开启时才拉在线群聊记录作为背景，
             # 不会把非 @ 群消息写入会话历史。
+            _meta_flags = {
+                "normalize_enhanced": bool(config.get("experimental_long_term_memory", False)),
+                "mask_nickname": bool(config.get("meta_mask_nickname", False)),
+            }
             history_text = await fetch_group_online_history(
                 self.bot,
                 entry.target,
                 count=int(config.get("history_rounds", 50)),
                 self_ids={str(self.bot_id), str(getattr(self.bot, "bot_id", "") or "")},
-                # 与普通回复/主动消息一致：@ 预展开 + 未展开标记（缺口可由 expand_context 解决）
                 resolve_at=bool(config.get("fetch_at_nickname", True)),
                 mark_unresolved=bool(config.get("context_expand_enable", True)),
                 bot_id=str(self.bot_id),
@@ -513,29 +524,38 @@ class TaskScheduler:
                     current_time=now_str,
                 )
 
-        memory_text = ""
-        memory = getattr(self.module, "memory", None)
-        if memory is not None and memory.enabled():
-            try:
-                memory_text = await memory.recall_block_async(
-                    entry.session_id,
-                    entry.target if not entry.is_group else "",
-                    user_prompt,
-                    bot=self.bot,
-                )
-            except Exception:
-                memory_text = ""
-
-        return build_messages(
-            system_prompt=system_prompt,
-            pre_history_text=pre_history_text,
-            history=history,
-            user_text=user_prompt,
-            with_schedule_instruction=False,
-            memory_text=memory_text,
-            skills=skill_blocks,
-            proactive_instruction=instruction,
+        materials = await collect_history_materials(
+            runtime=self.module,
+            session_mgr=self.session_mgr,
+            session_id=entry.session_id,
+            is_private=not entry.is_group,
+            config=config,
+            query_text=entry.content,
+            user_id=entry.target if not entry.is_group else None,
+            bot=self.bot,
         )
+
+        req = PromptRequest(
+            runtime=self.module,
+            ctx=None,
+            config=config,
+            session_id=entry.session_id,
+            is_private=not entry.is_group,
+            user_id=entry.target if not entry.is_group else None,
+            group_id=entry.target if entry.is_group else None,
+            kind="schedule",
+            user_text=user_prompt,
+            raw_user_text=user_prompt,
+            history=materials["history"],
+            pre_history_text=pre_history_text,
+            referent_text=focus_text,
+            skill_blocks=list(skill_blocks or []),
+            memory_text=materials["memory_text"],
+            available_tools=None,
+            modalities=None,
+            schedule_enable=False,
+        )
+        return build_from_request(req)
 
     async def _generate_reply(self, entry: TaskEntry):
         """构建并执行一次带系统提示词的 LLM 请求（会话已过期则从归档恢复上下文）。"""
@@ -552,14 +572,14 @@ class TaskScheduler:
         if hasattr(self.module.config, "set_session"):
             self.module.config.set_session(entry.session_id)
         all_specs, skill_blocks, tool_ctx, instruction = await self._collect_tools(entry)
-        messages = await self._build_messages(entry, instruction=instruction, skill_blocks=skill_blocks)
 
-        # 焦点行（定时任务没有用户提问 → 不做预取）
+        # 焦点行（定时任务没有用户提问 → 不做预取）：随其他块一起进装配
         from app.llm.referent import focus_only_block
 
-        focus_text = await focus_only_block(self.module, entry.session_id)
-        if focus_text:
-            messages = [{"role": "system", "content": focus_text}, *messages]
+        focus_text = await focus_only_block(self.module, entry.session_id) or ""
+        messages = await self._build_messages(
+            entry, instruction=instruction, skill_blocks=skill_blocks, focus_text=focus_text
+        )
 
         from app.llm.chat import _max_tool_rounds
         from app.llm.providers.modalities import normalize_modalities, supports_tool_use

@@ -162,14 +162,11 @@ class ProactiveManager:
         if max_unanswered > 0 and unanswered >= max_unanswered:
             return
 
-        # 上下文
+        # 上下文：历史渲染 + 记忆召回（口径与 chat 主路径一致，含超 history_rounds 的压缩）
+        from app.llm.assembly import PromptRequest, build_messages as build_from_request
+        from app.llm.assembly_inputs import collect_history_materials
+
         session = self.session_mgr.get_session(session_id)
-        history = self.session_mgr.get_history(session_id, limit=int(self.module.config.get("history_rounds", 50))) if session else []
-        _meta_flags = {
-            "normalize_enhanced": bool(self.module.config.get("experimental_long_term_memory", False)),
-            "mask_nickname": bool(self.module.config.get("meta_mask_nickname", False)),
-        }
-        history = format_history_for_llm(history, is_private=not is_group, **_meta_flags)
         system_prompt = self.module.config.get("system_prompt", "你是一个友好的助手。")
         now_str = datetime.now().strftime("%Y年%m月%d日 %H:%M")
         prompt_tpl = self._cfg("proactive_prompt", DEFAULT_PROACTIVE_PROMPT)
@@ -179,6 +176,10 @@ class ProactiveManager:
         if is_group and self.module.config.get("include_pre_history", False):
             # 与普通回复一致：只有 include_pre_history 开启才拉在线群聊记录作为背景；
             # 主动消息也不会把非 @ 群消息写入会话历史。
+            _meta_flags = {
+                "normalize_enhanced": bool(self.module.config.get("experimental_long_term_memory", False)),
+                "mask_nickname": bool(self.module.config.get("meta_mask_nickname", False)),
+            }
             history_text = await fetch_group_online_history(
                 self.bot,
                 target,
@@ -198,19 +199,6 @@ class ProactiveManager:
                     history_text=history_text,
                     current_time=now_str,
                 )
-
-        memory_text = ""
-        memory = getattr(self.module, "memory", None)
-        if memory is not None and memory.enabled():
-            try:
-                memory_text = await memory.recall_block_async(
-                    session_id,
-                    target if not is_group else "",
-                    user_prompt,
-                    bot=self.bot,
-                )
-            except Exception:
-                memory_text = ""
 
         # 会话配置档案先切换：工具集与提示块读取的都是会话级配置
         # （与 chat.handle 的顺序一致，否则会话档案里的开关会被默认档案覆盖）
@@ -241,23 +229,42 @@ class ProactiveManager:
         )
         use_tools = bool(all_specs) and supports_tool_use(modalities)
 
-        # 焦点行（主动消息没有用户提问 → 不做预取）：让模型知道"群里刚才在聊什么"
+        # 焦点行（主动消息没有用户提问 → 不做预取）：让模型知道"群里刚才在聊什么"。
+        # 作为装配器的 referent 块（与 chat 的背景块同一位置），不再手工拼接。
         from app.llm.referent import focus_only_block
 
-        focus_text = await focus_only_block(self.module, session_id)
-        if focus_text:
-            pre_history_text = f"{focus_text}\n\n{pre_history_text}" if pre_history_text else focus_text
+        focus_text = await focus_only_block(self.module, session_id) or ""
 
-        messages = build_messages(
-            system_prompt=system_prompt,
-            pre_history_text=pre_history_text,
-            history=history,
-            user_text=user_prompt,
-            with_schedule_instruction=False,
-            memory_text=memory_text,
-            skills=skill_blocks,
-            proactive_instruction=instruction,
+        materials = await collect_history_materials(
+            runtime=self.module,
+            session_mgr=self.session_mgr,
+            session_id=session_id,
+            is_private=not is_group,
+            config=config,
+            query_text=user_prompt,
+            user_id=target if not is_group else None,
+            bot=self.bot,
         )
+        req = PromptRequest(
+            runtime=self.module,
+            config=config,
+            session_id=session_id,
+            is_private=not is_group,
+            user_id=target if not is_group else None,
+            group_id=target if is_group else None,
+            kind="proactive",
+            user_text=user_prompt,
+            raw_user_text=user_prompt,
+            history=materials["history"],
+            pre_history_text=pre_history_text,
+            referent_text=focus_text,
+            skill_blocks=list(skill_blocks or []),
+            memory_text=materials["memory_text"],
+            available_tools={spec.name for spec in (all_specs or [])},
+            modalities=modalities,
+            schedule_enable=False,
+        )
+        messages = build_from_request(req)
 
         # 主动消息也支持流式：与普通消息使用同一套流式发送配置
         if config.get("stream_output", False) and config.get("stream_proactive_enabled", False):
