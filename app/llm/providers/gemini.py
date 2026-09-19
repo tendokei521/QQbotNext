@@ -11,6 +11,7 @@ API 形态说明：Gemini 的流式默认按 `alt=sse` 返回，可被本适配�
 from __future__ import annotations
 
 import json
+import re
 
 import aiohttp
 
@@ -18,6 +19,48 @@ from app.llm import logger
 from .base import BaseProvider, LLMResponse, StreamEvent, format_llm_error
 
 _DEFAULT_BASE = "https://generativelanguage.googleapis.com/v1beta"
+_DATA_URL_RE = re.compile(r"^data:image/([a-z0-9.+-]+);base64,(.+)$", re.IGNORECASE | re.DOTALL)
+
+
+def _parse_data_url(url: str) -> tuple[str, str] | None:
+    """``data:image/png;base64,xxxx`` → (mime, base64 数据)。"""
+    match = _DATA_URL_RE.match(str(url or "").strip())
+    if not match:
+        return None
+    return f"image/{match.group(1).lower()}", match.group(2)
+
+
+def _to_gemini_parts(content: Any) -> list[dict]:
+    """把统一的 content（字符串 / OpenAI 风格块数组）转成 Gemini parts。"""
+    if not isinstance(content, list):
+        return [{"text": str(content or "")}]
+    parts: list[dict] = []
+    for part in content:
+        if not isinstance(part, dict):
+            parts.append({"text": str(part)})
+            continue
+        part_type = str(part.get("type", "")).lower()
+        if part_type in ("text", "input_text"):
+            parts.append({"text": str(part.get("text", ""))})
+        elif part_type == "tool_result":
+            parts.append({"text": f"[工具结果] {str(part.get('content', ''))}"})
+        elif part_type in ("image_url", "image"):
+            image_url = part.get("image_url", part)
+            url = ""
+            if isinstance(image_url, dict):
+                url = str(image_url.get("url", "") or "")
+            elif isinstance(image_url, str):
+                url = image_url
+            parsed = _parse_data_url(url)
+            if parsed:
+                parts.append({"inlineData": {"mimeType": parsed[0], "data": parsed[1]}})
+            elif url.lower().startswith(("http://", "https://")):
+                parts.append({"fileData": {"fileUri": url}})
+            else:
+                parts.append({"text": "[Image]"})
+        else:
+            parts.append({"text": str(part)})
+    return parts or [{"text": ""}]
 
 
 def _normalize_messages(messages: list[dict]) -> tuple[list[dict], str | None]:
@@ -49,7 +92,7 @@ def _normalize_messages(messages: list[dict]) -> tuple[list[dict], str | None]:
             contents.append({"role": "user", "parts": [{"text": f"[工具结果] {text}"}]})
             continue
         gemini_role = "model" if role == "assistant" else "user"
-        contents.append({"role": gemini_role, "parts": [{"text": text}]})
+        contents.append({"role": gemini_role, "parts": _to_gemini_parts(content)})
     system = "\n".join(p for p in system_parts if p) or None
     return contents, system
 

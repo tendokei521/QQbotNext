@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import aiohttp
@@ -17,6 +18,52 @@ from .base import BaseProvider, LLMResponse, StreamEvent, format_llm_error
 
 _DEFAULT_BASE = "https://api.anthropic.com"
 _API_VERSION = "2023-06-01"
+_DATA_URL_RE = re.compile(r"^data:image/([a-z0-9.+-]+);base64,(.+)$", re.IGNORECASE | re.DOTALL)
+
+
+def _parse_data_url(url: str) -> tuple[str, str] | None:
+    """``data:image/png;base64,xxxx`` → (media_type, base64 数据)。"""
+    match = _DATA_URL_RE.match(str(url or "").strip())
+    if not match:
+        return None
+    return f"image/{match.group(1).lower()}", match.group(2)
+
+
+def _to_anthropic_content(content: Any) -> list[dict]:
+    """把统一的 content（字符串 / OpenAI 风格块数组）转成 Anthropic 内容块。"""
+    if not isinstance(content, list):
+        return [{"type": "text", "text": str(content or "")}]
+    blocks: list[dict] = []
+    for part in content:
+        if not isinstance(part, dict):
+            blocks.append({"type": "text", "text": str(part)})
+            continue
+        part_type = str(part.get("type", "")).lower()
+        if part_type in ("text", "input_text"):
+            blocks.append({"type": "text", "text": str(part.get("text", ""))})
+        elif part_type == "tool_result":
+            blocks.append({"type": "text", "text": f"[工具结果] {str(part.get('content', ''))}"})
+        elif part_type in ("image_url", "image"):
+            image_url = part.get("image_url", part)
+            url = ""
+            if isinstance(image_url, dict):
+                url = str(image_url.get("url", "") or "")
+            elif isinstance(image_url, str):
+                url = image_url
+            parsed = _parse_data_url(url)
+            if parsed:
+                blocks.append({
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": parsed[0], "data": parsed[1]},
+                })
+            elif url.lower().startswith(("http://", "https://")):
+                blocks.append({"type": "image", "source": {"type": "url", "url": url}})
+            else:
+                # 无法识别的图片载荷：降级为占位文本，避免整轮请求 400
+                blocks.append({"type": "text", "text": "[Image]"})
+        else:
+            blocks.append({"type": "text", "text": str(part)})
+    return blocks or [{"type": "text", "text": ""}]
 
 
 def _normalize_messages(messages: list[dict]) -> tuple[str | None, list[dict]]:
@@ -47,7 +94,10 @@ def _normalize_messages(messages: list[dict]) -> tuple[str | None, list[dict]]:
         if role == "tool":
             chat_messages.append({"role": "user", "content": f"[工具结果] {text}"})
             continue
-        chat_messages.append({"role": role if role in ("user", "assistant") else "user", "content": text})
+        chat_messages.append({
+            "role": role if role in ("user", "assistant") else "user",
+            "content": _to_anthropic_content(content),
+        })
     system = "\n".join(p for p in system_parts if p) or None
     return system, chat_messages
 

@@ -144,6 +144,11 @@ DEFAULT_LLM_CONFIG: dict = {
     # 空回复重试：请求成功结束却既无文本也无工具调用（网关提前断流 / 只回思考内容）时，
     # 同一 provider 再试的次数；0 = 关闭。避免偶现空回复直接把兜底话术发给用户。
     "empty_reply_retries": 1,
+    # 多模态图片同传：仅对「模型配置里声明了 image 模态」的模型生效（在「模型」页勾选）。
+    # 文本模型的 [图片] 占位语义完全不变。
+    "image_understanding_enable": True,
+    "image_max_count": 4,        # 单轮最多传几张图（超出部分只留占位）
+    "image_max_mb": 10,          # 单张图体积上限（MB），超出跳过并记日志
     # 工具结果尾部的「回应要求」：压住"工具返回后写长串汇报"的倾向
     # （拼在结果末尾而不是新增 system —— 中途 system 在 Anthropic/Gemini 会被上提到最前）
     "tool_result_directive_enable": True,

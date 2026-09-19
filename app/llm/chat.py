@@ -26,6 +26,7 @@ from app.llm.providers import chat_with_fallback, iter_stream_with_fallback
 from app.llm.providers.modalities import (
     normalize_modalities,
     sanitize_contexts_by_modalities,
+    supports_image,
     supports_tool_use,
 )
 from app.llm.tags import maybe_strip_parentheses, strip_all_tags
@@ -43,6 +44,60 @@ def _event_nickname(event) -> str:
     if user is None:
         return ""
     return getattr(user, "card", "") or getattr(user, "nickname", "") or ""
+
+
+async def apply_image_content(
+    messages: list[dict],
+    *,
+    event,
+    runtime,
+    ctx,
+    config,
+    modalities: list[str] | None,
+    user_text: str,
+) -> list[dict]:
+    """把本轮触发消息里的图片挂到 user 消息上（模型支持图片时）。
+
+    返回（可能被替换最后一条 user content 的）messages。以下情况原样返回：
+    - 关闭了 ``image_understanding_enable``；
+    - 模型模态未声明 ``image``（文本模型保持现有的 ``[图片]`` 占位语义）；
+    - 本轮消息没有可用图片（解析不到 URL/base64）。
+    """
+    if not _images_enabled(config) or not supports_image(modalities):
+        return messages
+    from app.llm.image import build_user_content, collect_image_segments, max_image_bytes, resolve_images
+
+    if not collect_image_segments(event):
+        return messages
+    # 优先复用流水线（pre_request 之前）已解析的结果，避免重复解析/重复下载
+    images = None
+    if ctx is not None:
+        images = ctx.state.get("user_images")
+    if images is None:
+        images = await resolve_images(
+            event,
+            bot=getattr(event, "bot", None),
+            max_images=int(config.get("image_max_count", 4) or 4),
+            max_bytes=max_image_bytes(config),
+        )
+        if ctx is not None:
+            ctx.state["user_images"] = images
+    content = build_user_content(images, text=user_text)
+    if not content:
+        return messages
+    for msg in reversed(messages):
+        if msg.get("role") == "user":
+            msg["content"] = content
+            break
+    return messages
+
+
+def _images_enabled(config) -> bool:
+    """图片是否随请求传给模型（默认开；仅对声明了 image 模态的模型生效）。"""
+    try:
+        return bool(config.get("image_understanding_enable", True))
+    except Exception:  # noqa: BLE001 —— 配置对象异常时按默认开处理
+        return True
 
 
 def _format_session_history(
@@ -715,6 +770,11 @@ async def call_llm_and_reply(module, event, session_mgr, config,
         proactive_instruction=_proactive_instruction(config, all_specs, user_text),
     )
     messages = sanitize_contexts_by_modalities(messages, modalities)
+    # 多模态：本轮消息带图且模型声明 image 模态时，把图片块挂到 user 消息上
+    messages = await apply_image_content(
+        messages, event=event, runtime=module, ctx=None, config=config,
+        modalities=modalities, user_text=user_text,
+    )
 
     logger.add_info(f"#{module.bot_id}").info(
         f"API 请求 -> {session_id} (task: {session.task_id}), 消息数: {len(messages)}"
@@ -924,6 +984,11 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
         proactive_instruction=_proactive_instruction(config, all_specs, user_text, ctx),
     )
     messages = sanitize_contexts_by_modalities(messages, modalities)
+    # 多模态：本轮消息带图且模型声明 image 模态时，把图片块挂到 user 消息上
+    messages = await apply_image_content(
+        messages, event=event, runtime=runtime, ctx=ctx, config=config,
+        modalities=modalities, user_text=messages[-1].get("content") or user_text,
+    )
 
     _log_debug_prompt(runtime, session_id, messages, debug_enabled=bool(ctx and ctx.state.get("debug_prompt", False)))
 
@@ -1139,6 +1204,11 @@ async def stream_response(runtime, event, ctx=None):
         proactive_instruction=_proactive_instruction(config, all_specs, user_text, ctx),
     )
     messages = sanitize_contexts_by_modalities(messages, modalities)
+    # 多模态：本轮消息带图且模型声明 image 模态时，把图片块挂到 user 消息上
+    messages = await apply_image_content(
+        messages, event=event, runtime=runtime, ctx=ctx, config=config,
+        modalities=modalities, user_text=messages[-1].get("content") or user_text,
+    )
 
     _log_debug_prompt(runtime, session_id, messages, debug_enabled=bool(ctx and ctx.state.get("debug_prompt", False)))
 

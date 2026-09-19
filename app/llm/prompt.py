@@ -233,6 +233,7 @@ def build_messages(
     memory_text: str = "",
     message_meta_instruction: str | None = None,
     proactive_instruction: str | None = None,
+    user_content: list[dict] | None = None,
 ) -> list[dict]:
     """组装 LLM 消息列表。
 
@@ -248,6 +249,8 @@ def build_messages(
         message_meta_instruction: “发送者/正文”消歧说明文本；传入非空字符串时追加为 system 消息
         proactive_instruction: 「主动性」协议块（见 build_proactive_instruction）；
             仍是一块 system，为空则完全不注入
+        user_content: 本轮 user 消息的多模态内容块（OpenAI 风格）。
+            传入时替换纯文本 content，仅用于「本轮触发消息带图 + 模型支持图片」的场景
     """
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
 
@@ -275,5 +278,5 @@ def build_messages(
     if schedule_nudge:
         messages.append({"role": "system", "content": RECENT_SCHEDULE_NUDGE})
 
-    messages.append({"role": "user", "content": user_text})
+    messages.append({"role": "user", "content": user_content or user_text})
     return messages

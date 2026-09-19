@@ -547,6 +547,22 @@ SCHEMA = {
                        "0 = 关闭重试（故障时会快一些失败）",
         "default": 1, "min": 0, "max": 3, "group": "group_tools",
     },
+    "image_understanding_enable": {
+        "type": "boolean", "label": "图片理解（多模态同传）",
+        "description": "把本轮消息里的图片直接传给模型。仅对「模型」页勾选了 image 模态的模型生效；"
+                       "文本模型不受影响，仍显示 [图片] 占位",
+        "default": True, "group": "group_tools",
+    },
+    "image_max_count": {
+        "type": "number", "label": "单轮最多图片数",
+        "description": "一次请求最多附带几张图，超出部分不再传给模型（避免 token 与带宽失控）",
+        "default": 4, "min": 1, "max": 10, "group": "group_tools",
+    },
+    "image_max_mb": {
+        "type": "number", "label": "单张图片体积上限(MB)",
+        "description": "超过该体积的图片跳过传输并记录日志（base64 会让请求体膨胀约 1/3，过大易被网关拒绝）",
+        "default": 10, "min": 1, "max": 50, "group": "group_tools",
+    },
     "tool_result_directive_enable": {
         "type": "boolean", "label": "工具结果附带回应要求",
         "description": "在工具结果末尾拼一句「用你自己的口吻回应，不要复述/不要列条目」。"

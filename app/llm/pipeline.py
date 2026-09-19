@@ -66,6 +66,37 @@ class LlmPipeline:
         """判断任务是否已被同一会话的新消息打断。"""
         return self._session_generation.get(job.group_key, 0) != job.generation
 
+    async def _resolve_images(self, ctx: LlmContext) -> list[dict]:
+        """解析本轮消息的图片（仅当模型声明了 image 模态且开关打开）。
+
+        放在 LLM 请求之前调用，好处是：拿不到可用 URL 的图片会先留下日志，
+        而不是等 provider 返回 400 才发现；解析结果缓存在 ctx.state 供 chat 侧复用。
+        """
+        if not self.runtime.config.get("image_understanding_enable", True):
+            return []
+        try:
+            from app.llm.providers.modalities import normalize_modalities, supports_image
+
+            chain = self.runtime.provider_chain() if callable(
+                getattr(self.runtime, "provider_chain", None)
+            ) else []
+            modalities = normalize_modalities((chain[0] or {}).get("modalities") if chain else None)
+            if not supports_image(modalities):
+                return []
+            from app.llm.image import max_image_bytes, resolve_images
+
+            return await resolve_images(
+                ctx.event,
+                bot=ctx.bot,
+                max_images=int(self.runtime.config.get("image_max_count", 4) or 4),
+                max_bytes=max_image_bytes(self.runtime.config),
+            )
+        except Exception as e:  # noqa: BLE001 —— 图片解析失败必须降级为纯文本，不能阻断对话
+            from app.core.logger import logger
+
+            logger.add_info(f"#{self.runtime.bot_id}").warning(f"图片解析失败，按纯文本处理: {e}")
+            return []
+
     async def _run(self, job: LlmJob) -> None:
         ctx = job.ctx
         # 按会话切换配置档案（对齐 AstrBot UMO 路由）
@@ -79,6 +110,13 @@ class LlmPipeline:
 
                 await agent_handle(self.runtime, ctx.event)
                 return
+
+            # 图片段（本轮触发消息）：「@我 + 只发图」/私聊纯图片也应当进入 LLM
+            from app.llm.image import collect_image_segments
+
+            has_image = bool(collect_image_segments(ctx.event))
+            if has_image:
+                ctx.state["has_image"] = True
 
             # 群聊必须满足触发条件（@ 或关键词），否则不进入 LLM 流水线
             if ctx.event.event_type == "message_group":
@@ -102,7 +140,7 @@ class LlmPipeline:
                     user_text = re.sub(r"@\S+\s*", "", user_text).strip()
 
                 ctx.user_text = user_text.strip()
-                if not ctx.user_text:
+                if not ctx.user_text and not has_image:
                     return
 
             config = self.runtime.config
@@ -114,7 +152,8 @@ class LlmPipeline:
             if ctx.event.event_type == "message_private":
                 if not config.get("private_enable", True):
                     return
-                if not ctx.user_text.strip():
+                # 私聊纯图片同样放行（图片内容由多模态链路承载）
+                if not ctx.user_text.strip() and not has_image:
                     return
 
             # 先截断原始用户消息，避免后续上下文包装后被 max_message_length 截掉“发送了”
@@ -131,6 +170,11 @@ class LlmPipeline:
                 return
             if job.skip or job.superseded:
                 return
+
+            # 图片预解析：放在这里是为了「不可用的图片在整轮开销之前就暴露」，
+            # 解析结果存 ctx.state，chat 侧直接复用（不重复解析/重复下载）。
+            if has_image:
+                ctx.state["user_images"] = await self._resolve_images(ctx)
 
             # 同一会话的 LLM 请求/历史写入串行化：新消息会先通过 LlmPool 标记旧任务 superseded，
             # 因此这里不会启动并发请求；旧任务释放后才能进入下一轮。
