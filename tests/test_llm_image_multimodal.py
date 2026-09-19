@@ -9,7 +9,8 @@
 3. 体积超限/数量超限跳过；
 4. OpenAI 风格 content 块组装（纯图片时补引导文本）；
 5. Anthropic / Gemini 各自的图片块翻译（此前会把 dict 压成纯文本 / str(dict)）；
-6. chat.apply_image_content 的开关与模态门控（文本模型保持 [图片] 占位语义）。
+6. `assembly.place_images` 的开关与模态门控（文本模型保持 [图片] 占位语义），
+   以及 `assembly.sanitize` 作为最后一层兜底（漏进来的图块也会被替换）。
 """
 
 from __future__ import annotations

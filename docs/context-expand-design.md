@@ -58,12 +58,13 @@ QQ 消息进入 LLM 时经常只剩"骨架"：`@123`、`[引用]`、`消息 id`�
 
 | 入口 | 工具来源 | 提示块 |
 |---|---|---|
-| 普通对话（`call_llm_and_reply` / `generate_response` / `stream_response`） | `chat._collect_llm_ext` | `_proactive_instruction` |
+| 普通对话（`chat.prepare_prompt` → `generate_response` / `stream_response`） | `chat._collect_llm_ext` | `assembly.BLOCKS` 的 `proactive` 块（取 `_proactive_instruction`） |
 | 主动消息（`proactive._check_and_chat`） | `chat.build_initiative_tools`（`event=None`） | 同上（无用户提问 → 不做意图补强） |
 | 定时任务（`scheduler._generate_reply` / 流式分支） | 同上（`scheduler._collect_tools`） | 同上 |
 
 - 三条路径都在**切换会话配置档案之后**收集工具（与 `chat.handle` 顺序一致）。
 - 主动/定时路径的 `ToolContext` 没有 `event`，会话目标由 `bot` / `user_id` / `group_id` 显式给出。
+- 块顺序与清洗统一由 `app/llm/assembly.py` 的块表决定（见该模块文档）。
 
 ## 5. 配置项
 
