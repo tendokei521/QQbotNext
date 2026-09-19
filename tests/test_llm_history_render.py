@@ -108,7 +108,8 @@ def test_online_history_group_labels_and_self_tag():
     lines = text.splitlines()
     assert lines[0].endswith("小明(20002): 在吗")
     assert lines[1].endswith("小red(30003): [引用]收到")
-    assert lines[2].endswith("我: [图片]")
+    # 图片带上承载消息 id：模型可用 expand_image 按需取回（历史不内联图片）
+    assert lines[2].endswith("我: [图片#1003]")
 
 
 def test_online_history_private_hides_nickname():
@@ -124,8 +125,8 @@ def test_online_history_without_id_hides_user_id():
 def test_online_history_mark_unresolved_marks_actionable_gaps():
     text = format_online_history(ONLINE, self_ids={"778"}, mark_unresolved=True)
     assert UNRESOLVED_REPLY.format(id="456") in text
-    assert UNRESOLVED_FORWARD_ID.format(id="1003") not in text  # 图片不是可展开缺口
-    assert "[图片]" in text
+    assert UNRESOLVED_FORWARD_ID.format(id="1003") not in text  # 图片不是"未展开"缺口
+    assert "[图片#1003]" in text  # 但带 id，可按需 expand_image
 
 
 def test_online_history_expanded_registry_upgrades_marker():

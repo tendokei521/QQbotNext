@@ -708,6 +708,124 @@ async def _handle_expand_user(ctx, args: dict) -> str:
     return (await fetch_entities(ctx, users=users, limit=_limit(args))).render()
 
 
+async def _handle_expand_image(ctx, args: dict) -> str:
+    """按消息 id 取回历史消息里的图片，供视觉模型"直接看到"。
+
+    返回文本说明（已取回的消息 id / 图片数量 / 发送者），并把图片载荷排进
+    "本轮稍后随请求传回"的队列（由 ``drain_round_images`` 取出）。
+    非视觉模型拿到的是文字说明 + 占位，不会因此报错。
+    """
+    guard = _context_guard(ctx)
+    if guard:
+        return guard
+    args = args or {}
+    messages = _str_ids(args.get("messages"))[:MAX_ITEMS] or _str_ids(args.get("message_id"))[:MAX_ITEMS]
+    if not messages:
+        return "error: 请给出要取图片的消息 id（messages 数组）。"
+    bot = getattr(ctx, "bot", None)
+    if bot is None:
+        return "error: 当前上下文无可用 Bot"
+
+    from app.llm.image import resolve_images
+
+    lines: list[str] = []
+    queued = 0
+    for mid in messages:
+        try:
+            resp = await bot.get_msg(int(mid)) if str(mid).isdigit() else {}
+        except Exception as e:  # noqa: BLE001 —— 取不到就如实说明
+            logger.debug(f"[ExpandImage] get_msg({mid}) 失败: {e}")
+            resp = {}
+        data = (resp or {}).get("data") or {}
+        segments = data.get("message") or []
+        image_segs = [
+            seg for seg in segments
+            if (seg.get("type") if isinstance(seg, dict) else getattr(seg, "type", "")) == "image"
+        ]
+        if not image_segs:
+            lines.append(f"消息 {mid}：没有图片（可能不是图片消息或消息已过期）")
+            continue
+        sender = data.get("sender") or {}
+        who = sender.get("card") or sender.get("nickname") or sender.get("user_id") or "未知"
+        images = await resolve_images(
+            _ImageEvent(image_segs), bot=bot,
+            max_images=len(image_segs), max_bytes=_max_image_bytes(ctx),
+        )
+        if not images:
+            lines.append(f"消息 {mid}：有 {len(image_segs)} 张图，但拿不到可用图片地址")
+            continue
+        queued += len(images)
+        _record_round_images(ctx, images)
+        _record_expansion(
+            ctx, "image", mid,
+            summary=f"{who} 发的 {len(images)} 张图（已取回）",
+            content=f"{who}: [图片 x{len(images)}]", source="expand_image",
+        )
+        lines.append(f"消息 {mid}：已取回 {who} 发的 {len(images)} 张图片，图片随本条一起提供")
+    if queued:
+        lines.append("（图片已记为本轮补全，**下一轮对话里你会直接看到它**；先别猜图片内容）")
+    return "\n".join(lines) if lines else "error: 没有取到任何图片"
+
+
+class _ImageEvent:
+    """最小事件替身：让 ``image.resolve_images`` 能处理一批图片段。"""
+
+    def __init__(self, segments: list) -> None:
+        self.message = [
+            seg if not isinstance(seg, dict) else _SegView(seg) for seg in segments
+        ]
+
+
+class _SegView:
+    def __init__(self, seg: dict) -> None:
+        self.type = str(seg.get("type", ""))
+        self.data = dict(seg.get("data", {}) or {})
+
+
+def _max_image_bytes(ctx) -> int:
+    from app.llm.image import DEFAULT_MAX_IMAGE_BYTES, max_image_bytes
+
+    config = getattr(getattr(ctx, "runtime", None), "config", None)
+    if config is None or not hasattr(config, "get"):
+        return DEFAULT_MAX_IMAGE_BYTES
+    try:
+        return max_image_bytes(config)
+    except Exception:  # noqa: BLE001
+        return DEFAULT_MAX_IMAGE_BYTES
+
+
+def _extra(ctx) -> dict:
+    """取 ToolContext.extra；缺失时补一个（注意不能写 ``or {}``，空 dict 会被丢掉）。"""
+    extra = getattr(ctx, "extra", None)
+    if not isinstance(extra, dict):
+        extra = {}
+        try:
+            setattr(ctx, "extra", extra)
+        except Exception as e:  # noqa: BLE001 —— 只读 ctx 时不至于崩
+            logger.debug(f"[Expand] 无法写入 ToolContext.extra: {e}")
+    return extra
+
+
+def _record_round_images(ctx, images: list[dict]) -> None:
+    """把"本轮要随请求传回的图片"记到 ToolContext.extra（由 chat 落地）。"""
+    try:
+        bucket = _extra(ctx).setdefault("round_images", [])
+        for image in images:
+            if isinstance(image, dict) and image.get("value") and image not in bucket:
+                bucket.append(dict(image))
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"[ExpandImage] 记录待传图片失败（已忽略）: {e}")
+
+
+def drain_round_images(ctx) -> list[dict]:
+    """取出并清空"本轮待随请求传回"的图片（tool_ctx 可能为 None）。"""
+    extra = getattr(ctx, "extra", None)
+    if not isinstance(extra, dict):
+        return []
+    images = extra.pop("round_images", []) or []
+    return [i for i in images if isinstance(i, dict) and i.get("value")]
+
+
 def _context_spec(name: str, description: str, parameters: dict, handler) -> ToolSpec:
     return ToolSpec(
         name=name,
@@ -718,7 +836,7 @@ def _context_spec(name: str, description: str, parameters: dict, handler) -> Too
         scopes=("*",),
         source="system",
         category="会话",
-        # 这三个工具的任务就是"把骨架补成血肉"：结果**不截断**（0=不限制）。
+        # 这些工具的任务就是"把骨架补成血肉"：结果**不截断**（0=不限制）。
         # 实测过截断的代价——摘要被砍成「能花那么多时」，模型据此答错。
         max_result=0,
     )
@@ -739,6 +857,9 @@ def build_context_tools(runtime: Any, ctx: Any) -> list[ToolSpec]:
 
     async def _user(_ctx, _args: dict) -> str:
         return await _handle_expand_user(ctx, _args)
+
+    async def _image(_ctx, _args: dict) -> str:
+        return await _handle_expand_image(ctx, _args)
 
     return [
         _context_spec(
@@ -800,5 +921,25 @@ def build_context_tools(runtime: Any, ctx: Any) -> list[ToolSpec]:
                 },
             },
             _user,
+        ),
+        _context_spec(
+            "expand_image",
+            (
+                "取回历史消息里的图片（图片会在**下一轮**随请求提供，届时你直接看得到）。\n"
+                "当聊天记录里出现 [图片#123] / [语音#123] 这类带 id 的占位、"
+                "用户说“看看那张图/上一条发的图”、或你判断某条历史消息里有图且与当前问题相关时调用。\n"
+                "只取必要的图（一次 1~2 张），不要为了凑热闹把历史图片全翻出来。"
+            ),
+            {
+                "type": "object",
+                "properties": {
+                    "messages": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "要取图片的消息 id（形如 [图片#123] 里的 123），可多个。",
+                    },
+                },
+            },
+            _image,
         ),
     ]

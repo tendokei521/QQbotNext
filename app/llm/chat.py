@@ -83,6 +83,30 @@ def _commit_history_enrichment(runtime, session_id: str, ctx=None) -> int:
         return 0
 
 
+def _append_round_images(messages: list[dict], tool_ctx, modalities) -> None:
+    """把 ``expand_image`` 取回的图片追加为一条 user 消息（仅视觉模型）。
+
+    图片不塞进原用户消息（那是历史内容，不是本轮发言），而是作为"补全材料"附在末尾；
+    文本模型跳过（图片块会被清洗成 [Image]，没有意义）。
+    """
+    if tool_ctx is None:
+        return
+    try:
+        from app.llm.context_tools import drain_round_images
+        from app.llm.image import build_user_content
+        from app.llm.providers.modalities import supports_image
+
+        images = drain_round_images(tool_ctx)
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"[ExpandImage] 取待传图片失败（已忽略）: {e}")
+        return
+    if not images or not supports_image(modalities):
+        return
+    content = build_user_content(images, text="（以下是你刚取回的历史图片）")
+    if content:
+        messages.append({"role": "user", "content": content})
+
+
 def _format_session_history(
     history: list[dict],
     is_private: bool,
@@ -840,6 +864,7 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
     is_private = meta["is_private"]
 
     messages = assembly.build_messages(req)
+    _append_round_images(messages, tool_ctx, modalities)
 
     _log_debug_prompt(runtime, session_id, messages, debug_enabled=bool(ctx and ctx.state.get("debug_prompt", False)))
 
@@ -955,6 +980,7 @@ async def stream_response(runtime, event, ctx=None):
     )
 
     messages = assembly.build_messages(req)
+    _append_round_images(messages, tool_ctx, modalities)
 
     _log_debug_prompt(runtime, session_id, messages, debug_enabled=bool(ctx and ctx.state.get("debug_prompt", False)))
 

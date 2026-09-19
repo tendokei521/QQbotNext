@@ -43,6 +43,9 @@ _NON_TEXT_SEGMENTS = {
 SELF_TAG = "我"
 PRIVATE_OTHER_TAG = "对方"
 
+#: 可"按需取回"的内容型段（渲染成 ``[图片#<消息id>]``，模型可调用 expand_image）
+_EXPANDABLE_SEGMENTS = ("image", "record", "video")
+
 # ==================== “未展开”标记 ====================
 # 只标记**可被解决的缺口**（marker must be actionable）：
 # - @ 用户：本轮尝试反查过昵称但没取到（无权限/退群/连接异常）→ 标记后可让模型按需展开；
@@ -334,6 +337,10 @@ def _segment_text(
             return UNRESOLVED_FORWARD
         return f"[{_NON_TEXT_SEGMENTS['forward']}]"
     if stype in _NON_TEXT_SEGMENTS:
+        # 图片/语音等「内容型」段：带上承载消息 id，模型可用 expand_image 按需取回
+        # （历史不内联图片，避免上下文与带宽膨胀；讨论焦点的那张仍直接同传）
+        if stype in _EXPANDABLE_SEGMENTS and str(message_id or ""):
+            return f"[{_NON_TEXT_SEGMENTS[stype]}#{message_id}]"
         return f"[{_NON_TEXT_SEGMENTS[stype]}]"
     return None
 

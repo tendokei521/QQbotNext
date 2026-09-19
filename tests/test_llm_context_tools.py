@@ -720,11 +720,11 @@ async def test_expand_ignores_invalid_ids():
 
 
 def test_tool_specs_are_split_by_intent():
-    """按意图分区：按位置取 / 按 id 取消息 / 按 QQ 取人——三个工具各自讲清何时调用。"""
+    """按意图分区：按位置取 / 按 id 取消息 / 按 QQ 取人 / 按 id 取图——各自讲清何时调用。"""
     runtime = SimpleNamespace(bot_id="1", config={})
     specs = {s.name: s for s in build_context_tools(runtime, None)}
 
-    assert set(specs) == {"expand_recent", "expand_message", "expand_user"}
+    assert set(specs) == {"expand_recent", "expand_message", "expand_user", "expand_image"}
     for spec in specs.values():
         assert spec.source == "system"
         assert spec.permission == "member"
@@ -733,10 +733,12 @@ def test_tool_specs_are_split_by_intent():
     assert set(specs["expand_recent"].parameters["properties"]) == {"count", "limit"}
     assert set(specs["expand_message"].parameters["properties"]) == {"messages", "limit"}
     assert set(specs["expand_user"].parameters["properties"]) == {"users"}
+    assert set(specs["expand_image"].parameters["properties"]) == {"messages"}
     # 每个工具的 description 都要写清"何时必须调用"
     assert "上一条" in specs["expand_recent"].description
     assert "【未展开" in specs["expand_message"].description
     assert "是谁" in specs["expand_user"].description
+    assert "[图片#" in specs["expand_image"].description
 
 
 def test_tool_is_listed_as_system_tool_and_gated_by_config():
