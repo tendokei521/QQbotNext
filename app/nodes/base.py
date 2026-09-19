@@ -32,6 +32,8 @@ class MessageContext:
     # 出站用：要执行的动作与参数
     action: str = ""
     params: dict[str, Any] = field(default_factory=dict)
+    # 出站用：本次 API 的超时（秒）；None = 由客户端按 action 分级解析
+    timeout: float | int | None = None
 
 
 class MessageNode(ABC):

@@ -68,7 +68,7 @@ class _FakeBot:
         self._result = result
         self.sent = []
 
-    async def _direct_send(self, action, params):
+    async def _direct_send(self, action, params, timeout=None):
         self.sent.append((action, params))
         return self._result
 

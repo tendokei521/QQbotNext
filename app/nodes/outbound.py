@@ -27,7 +27,7 @@ class SendNode(MessageNode):
         if direct is None:
             ctx.state["response"] = None
             return
-        ctx.state["response"] = await direct(ctx.action, ctx.params)
+        ctx.state["response"] = await direct(ctx.action, ctx.params, ctx.timeout)
         await next_()
 
 
@@ -37,7 +37,10 @@ class OutboundPipeline:
     def __init__(self, nodes: list[MessageNode]) -> None:
         self._runner = NodeRunner(nodes)
 
-    async def run(self, bot, action: str, params: dict) -> dict | None:
-        ctx = MessageContext(bot=bot, action=action, params=dict(params or {}), state={})
+    async def run(self, bot, action: str, params: dict,
+                  timeout: float | int | None = None) -> dict | None:
+        ctx = MessageContext(
+            bot=bot, action=action, params=dict(params or {}), state={}, timeout=timeout
+        )
         await self._runner.run(ctx)
         return ctx.state.get("response")

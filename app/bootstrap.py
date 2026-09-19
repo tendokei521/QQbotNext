@@ -193,7 +193,7 @@ def build_container(settings: Settings | None = None) -> Container:
     # 出站链：默认仅终端 SendNode（发送前可插节点拦截/改写）
     outbound_pipeline = OutboundPipeline([SendNode()])
     gateway.outbound_hook_factory = lambda conn: (
-        lambda action, params: outbound_pipeline.run(conn, action, params)
+        lambda action, params, timeout=None: outbound_pipeline.run(conn, action, params, timeout)
     )
 
     # 事件分发（走节点链）

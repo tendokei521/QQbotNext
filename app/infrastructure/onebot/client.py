@@ -9,13 +9,96 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import uuid
+from collections import deque
 from typing import Any
 
 from app.core.logger import api_logger
 from app.domain.bot import IBot
 from app.domain.message import Message, MessageSegment, SegmentLike
+
+
+# ==================== API 超时分级 ====================
+# 历史问题：所有 API 共用固定 10s。合并转发（视频/多节点）在 NapCat 侧要先上传再组装，
+# 实测 720P 单节点转发需要 10s 以上，于是「发送成功但调用方收到超时」，
+# 且迟到响应因为 future 已被回收而被记为「未找到对应请求」。
+# 下面按 action 语义给出量级：越像“传文件/批量取数据”的越宽松。
+DEFAULT_API_TIMEOUT = 10
+
+API_TIMEOUT_SECONDS: dict[str, int] = {
+    # 合并转发：整包消息节点需要上传/组装，慢是常态
+    "send_forward_msg": 60,
+    "send_group_forward_msg": 60,
+    "send_private_forward_msg": 60,
+    # 拉取合并转发内容：节点多时逐个下载
+    "get_forward_msg": 30,
+    # 媒体转换：NapCat 要把资源转成文件/URL
+    "get_image": 30,
+    "get_record": 30,
+    # 长列表与历史：群大时返回体很大
+    "get_group_member_list": 20,
+    "get_group_list": 20,
+    "get_friend_list": 20,
+    "get_group_msg_history": 20,
+    "get_friend_msg_history": 20,
+    # 群管理：服务端要落库/下发
+    "set_group_kick": 20,
+    "set_group_ban": 20,
+    "set_group_anonymous_ban": 20,
+    "set_group_leave": 20,
+    "set_group_name": 20,
+    "set_group_special_title": 20,
+    "set_group_card": 20,
+    "set_group_whole_ban": 20,
+    "set_group_admin": 20,
+    "set_group_anonymous": 20,
+    # 请求审批与撤回
+    "set_friend_add_request": 20,
+    "set_group_add_request": 20,
+    "delete_msg": 20,
+    # 客户端侧重活
+    "clean_cache": 30,
+    "set_restart": 20,
+}
+
+# 迟到响应留痕：超时/被回收的 echo 若之后才回来，记在这里便于排查
+ORPHAN_ECHO_LIMIT = 20
+
+
+def resolve_api_timeout(action: str, explicit: float | int | None = None) -> float:
+    """解析某次 API 调用的超时：显式值 > 分级表 > 默认。
+
+    显式值非正数视为未指定，避免 0/负数立刻超时的误用。
+    """
+    if explicit is not None:
+        try:
+            value = float(explicit)
+        except (TypeError, ValueError):
+            value = 0.0
+        if value > 0:
+            return value
+    return float(API_TIMEOUT_SECONDS.get(action, DEFAULT_API_TIMEOUT))
+
+
+def _callable_accepts_timeout(fn: Any) -> bool:
+    """出站链 hook 是否接受第三个参数（超时）。
+
+    装配点（bootstrap）是 ``lambda action, params, timeout=None``；但第三方/测试可能
+    装配旧式两参 hook。这里内省一次，避免用「调用失败再重试」来猜签名。
+    """
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    positional = [
+        p for p in params.values()
+        if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    if any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in params.values()):
+        return True
+    return len(positional) >= 3
 
 
 # 消息发送类 API：用户日志显示为 [发送->]
@@ -133,18 +216,36 @@ class BotConnection(IBot):
         self.all_group_list_info: list = []
         self.index: int | None = None
         self._pending: dict[str, asyncio.Future] = {}
+        # 超时后被回收的 echo：迟到响应落这里（只留痕，不复用）
+        self._orphan_echoes: deque[str] = deque(maxlen=ORPHAN_ECHO_LIMIT)
         self._lock = asyncio.Lock()
         self._last_connect_attempt: float = 0.0
         # 出站拦截钩子（bootstrap 装配）：若设置，_send 先经出站节点链
-        self.outbound_hook = None
+        self._outbound_hook = None
+        self._outbound_hook_wants_timeout = False
         # 插件钩子注册表（bootstrap 装配）
         self.send_hook_registry = None
         self.before_send_hook_registry = None
         self.api_hook_registry = None
 
+    # ---------- 出站链 hook（装配期设置，签名内省一次） ----------
+    @property
+    def outbound_hook(self):
+        return self._outbound_hook
+
+    @outbound_hook.setter
+    def outbound_hook(self, fn) -> None:
+        self._outbound_hook = fn
+        self._outbound_hook_wants_timeout = _callable_accepts_timeout(fn) if fn is not None else False
+
     # ---------- 底层请求 ----------
-    async def _send(self, action: str, params: dict | None = None, timeout_sec: int = 10) -> dict | None:
-        """发送 API 请求。若装配了出站链，先经拦截节点（可改写 params / 吞掉发送）。"""
+    async def _send(
+        self, action: str, params: dict | None = None, timeout_sec: float | int | None = None
+    ) -> dict | None:
+        """发送 API 请求。若装配了出站链，先经拦截节点（可改写 params / 吞掉发送）。
+
+        timeout_sec 为 None 时按 action 走 API_TIMEOUT_SECONDS 分级表。
+        """
         params = params or {}
         # 插件级发送前钩子：可改写 params / 拦截发送
         if self.before_send_hook_registry is not None:
@@ -158,9 +259,12 @@ class BotConnection(IBot):
             if not allowed:
                 return None
 
-        if self.outbound_hook is not None:
+        if self._outbound_hook is not None:
             try:
-                response = await self.outbound_hook(action, params)
+                if self._outbound_hook_wants_timeout:
+                    response = await self._outbound_hook(action, params, timeout_sec)
+                else:
+                    response = await self._outbound_hook(action, params)
             except Exception as e:
                 api_logger.error(f"[#{self.index}] 出站链异常 {action}: {e}")
                 response = None
@@ -195,12 +299,18 @@ class BotConnection(IBot):
         except Exception as e:
             api_logger.error(f"[#{self.index}] API 后钩子执行异常 {action}: {e}")
 
-    async def _direct_send(self, action: str, params: dict | None = None, timeout_sec: int = 10) -> dict | None:
-        """真正发送（绕过 outbound_hook，供 SendNode 调用）。"""
+    async def _direct_send(
+        self, action: str, params: dict | None = None, timeout_sec: float | int | None = None
+    ) -> dict | None:
+        """真正发送（绕过 outbound_hook，供 SendNode 调用）。
+
+        超时按 ``resolve_api_timeout`` 解析：显式值 > 分级表 > 默认 10s。
+        """
         if not self.websocket:
             api_logger.error(f"[#{self.index}] API 未连接，请求被拒: {action}")
             _log_user_api(action, params, error="API 未连接")
             return None
+        timeout = resolve_api_timeout(action, timeout_sec)
         echo_id = str(uuid.uuid4())
         payload = {"action": action, "params": params or {}, "echo": echo_id}
         loop = asyncio.get_running_loop()
@@ -210,7 +320,7 @@ class BotConnection(IBot):
             async with self._lock:
                 await self.websocket.send(json.dumps(payload))
             api_logger.debug(f"[#{self.index}] API(->) {action} | echo:{echo_id[:8]}")
-            response = await asyncio.wait_for(future, timeout=timeout_sec)
+            response = await asyncio.wait_for(future, timeout=timeout)
             if response.get("status") != "ok":
                 api_logger.warning(f"{action} 失败: {response.get('retcode')} {response.get('message')}")
             else:
@@ -218,8 +328,10 @@ class BotConnection(IBot):
             _log_user_api(action, params, response=response)
             return response
         except asyncio.TimeoutError:
-            api_logger.error(f"[#{self.index}] API 超时 {action} ({timeout_sec}s)")
-            _log_user_api(action, params, error=f"超时 ({timeout_sec}s)")
+            # 服务端可能仍在处理：把 echo 记为「已超时」，迟到响应只留痕不复用
+            self._orphan_echoes.append(echo_id)
+            api_logger.error(f"[#{self.index}] API 超时 {action} ({timeout:g}s)，响应未到")
+            _log_user_api(action, params, error=f"超时 ({timeout:g}s)")
             return None
         except Exception as e:
             api_logger.error(f"[#{self.index}] API 异常 {action}: {e}")
@@ -235,6 +347,13 @@ class BotConnection(IBot):
             return False
         future = self._pending.get(echo_id)
         if not future:
+            if echo_id in self._orphan_echoes:
+                # 超时后才回来的响应：请求方已放弃，这里只能留痕（服务端可能已执行）
+                api_logger.warning(
+                    f"[#{self.index}] 超时请求的迟到响应 action={message.get('action', '?')} "
+                    f"echo={echo_id[:8]}（请求方已放弃，仅留痕）"
+                )
+                return False
             api_logger.warning(f"[#{self.index}] 未找到对应请求 echo={echo_id[:8]}")
             return False
         if not future.done():
@@ -292,7 +411,11 @@ class BotConnection(IBot):
             params["target_id"] = target_id
         return await self._send("send_poke", params)
 
-    async def send_forward_msg(self, group_id: int = 0, user_id: int = 0, msgdata: list = None) -> dict:
+    async def send_forward_msg(
+        self, group_id: int = 0, user_id: int = 0, msgdata: list = None,
+        timeout: float | int | None = None,
+    ) -> dict:
+        """合并转发。默认走分级超时（60s）：节点要上传/组装，10s 必超时。"""
         msgdata = msgdata or []
         if group_id:
             params = {"group_id": group_id, "messages": msgdata}
@@ -300,10 +423,10 @@ class BotConnection(IBot):
         else:
             params = {"user_id": user_id, "messages": msgdata}
             action = "send_private_forward_msg"
-        return await self._send(action, params)
+        return await self._send(action, params, timeout)
 
-    async def get_forward_msg(self, id: str) -> dict:
-        return await self._send("get_forward_msg", {"id": id})
+    async def get_forward_msg(self, id: str, timeout: float | int | None = None) -> dict:
+        return await self._send("get_forward_msg", {"id": id}, timeout)
 
     async def send_like(self, user_id: int, times: int = 1) -> dict:
         return await self._send("send_like", {"user_id": user_id, "times": times})
@@ -372,7 +495,7 @@ class BotConnection(IBot):
         return await self._send("set_msg_emoji_like", {"message_id": message_id, "emoji_id": emoji_id})
 
     async def get_msg_history(self, group_id: int = 0, user_id: int = 0, count: int = 20,
-                              reverse_order: bool = False) -> dict:
+                              reverse_order: bool = False, timeout: float | int | None = None) -> dict:
         if group_id:
             params = {"group_id": group_id, "count": count, "reverse_order": reverse_order}
             action = "get_group_msg_history"
@@ -382,7 +505,7 @@ class BotConnection(IBot):
         else:
             api_logger.error("get_msg_history: group_id 与 user_id 均为空")
             return {}
-        return await self._send(action, params)
+        return await self._send(action, params, timeout)
 
     # ---------- 信息获取 ----------
     async def get_login_info(self) -> dict:
@@ -417,11 +540,11 @@ class BotConnection(IBot):
     async def get_version_info(self) -> dict:
         return await self._send("get_version_info", {})
 
-    async def get_image(self, file: str) -> dict:
-        return await self._send("get_image", {"file": file})
+    async def get_image(self, file: str, timeout: float | int | None = None) -> dict:
+        return await self._send("get_image", {"file": file}, timeout)
 
-    async def get_record(self, file: str, out_format: str = "mp3") -> dict:
-        return await self._send("get_record", {"file": file, "out_format": out_format})
+    async def get_record(self, file: str, out_format: str = "mp3", timeout: float | int | None = None) -> dict:
+        return await self._send("get_record", {"file": file, "out_format": out_format}, timeout)
 
     async def can_send_image(self) -> dict:
         return await self._send("can_send_image", {})
@@ -435,9 +558,13 @@ class BotConnection(IBot):
     async def set_restart(self, delay: int = 0) -> dict:
         return await self._send("set_restart", {"delay": delay})
 
-    async def call_api(self, action: str, params: dict | None = None) -> dict | None:
-        """通用 OneBot/NapCat API 调用入口，供 LLM 扩展工具使用。"""
-        return await self._send(str(action), params or {})
+    async def call_api(self, action: str, params: dict | None = None,
+                       timeout: float | int | None = None) -> dict | None:
+        """通用 OneBot/NapCat API 调用入口，供 LLM 扩展工具使用。
+
+        未显式给 timeout 时按 action 走分级表；表外 action 使用默认 10s。
+        """
+        return await self._send(str(action), params or {}, timeout)
 
 
 def _to_payload(message: SegmentLike) -> Any:
