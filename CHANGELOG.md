@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### 重构：LLM 消息组装收敛为「块表 + 一次装配」
+
+同一类请求此前在四处各自组装 messages（`chat.generate_response`、`chat.stream_response`、
+`scheduler._build_messages`、主动消息内联），块顺序与取值口径各写一遍。现在：
+
+- 新增 `app/llm/assembly.py`：`PromptRequest`（一次请求的全部输入）+ 声明式块表
+  `BLOCKS`（人设 / 定时协议 / 主动性 / 格式说明 / 技能 / 记忆 / 背景 / 历史 / 本轮）
+  + `PromptAssembler`。**想改顺序只改块表**，想加块只加一个 `build_xxx(req)` 函数
+- 取值收敛为唯一入口 `chat.prepare_prompt`：会话、历史去重与渲染、上下文压缩、
+  工具与技能、记忆召回、指代块、图片解析都在此完成；`generate_response` 与
+  `stream_response` 只差 provider 调用方式
+- 图片归位（`place_images`）移到清洗之前，模态清洗恢复为**最后一层兜底**；
+  文本模型仍是 `[图片]` 占位，声明 `image` 模态的模型直接收到图块
+- 统一三处不一致：记忆检索与意图判定一律用**用户原始正文**；历史去重与
+  "刚追加的 user 消息"同源比较；上下文压缩在四条路径上一致生效
+- 主动消息与定时任务获得与普通回复相同的块结构（此前缺「消息格式说明」），
+  焦点行从手工拼接收进 `referent` 块
+- 删除不可达的旧回复路径 `call_llm_and_reply` / `handle_group` / `handle_private`
+  （约 150 行）、重复的 `_message_meta_instruction`、死参数 `schedule_nudge`
+  与常量 `RECENT_SCHEDULE_NUDGE`；`chat.py` 1562 → 1285 行
+- 新增 `describe(req)`：输出 `[{block, role, chars}]`，不开 debug 也能看清本轮发了什么
+
 ### 稳定性修复
 
 - 修复 OneBot API 超时一律 10s 导致的假失败：改为按 action 分级（合并转发 60s、
