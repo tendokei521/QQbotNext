@@ -70,8 +70,13 @@ async def collect_user_context(ctx):
 
 
 async def format_user_context(ctx):
-    """把上下文格式化为最终 user_text：时间 / 私信 QQ / 发送者 / 发送正文。"""
+    """把上下文格式化为最终 user_text：时间 / 私信 QQ / 发送者 / 发送正文。
+
+    组装规则复用 ``history_model.build_current_turn_text``——与历史条目同一套字段语义
+    （头部行 + 正文 + 附注行），避免"本轮"和"历史"两套格式各自漂移。
+    """
     from app.llm.group_context import safe_sender_label
+    from app.llm.history_model import build_current_turn_text
 
     info = ctx.state.get("user_context")
     if not info:
@@ -85,26 +90,24 @@ async def format_user_context(ctx):
     def _render_sender(s: str) -> str:
         return safe_sender_label(s)
 
-    parts: list[str] = []
+    head_lines: list[str] = []
+    tail_lines: list[str] = []
     sender_label = ""
 
-    time_line = ""
     if _ctx_enabled(ctx, "include_time", True):
-        time_line = f"(时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')})"
+        head_lines.append(f"(时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')})")
 
     # 私信：独立注入对方 QQ（类似时间行）
-    qq_line = ""
     if not is_group and _ctx_enabled(ctx, "include_private_qq", True):
         user_id = getattr(event, "user_id", None)
         if user_id:
-            qq_line = f"(QQ: {user_id})"
+            head_lines.append(f"(QQ: {user_id})")
 
     # 群聊：注入当前群号，避免调用 NapCat send_poke 等工具时遗漏 group_id
-    group_line = ""
     if is_group:
         group_id = getattr(getattr(event, "group", None), "group_id", None)
         if group_id:
-            group_line = f"(当前群号: {group_id})"
+            head_lines.append(f"(当前群号: {group_id})")
 
     if is_group:
         if _ctx_enabled(ctx, "include_sender", True) and info.get("sender"):
@@ -112,43 +115,39 @@ async def format_user_context(ctx):
             if sender_style == "single":
                 sender_label = sender
             elif sender_style == "new":
-                parts.append(f"发送者昵称：{sender}")
+                head_lines.append(f"发送者昵称：{sender}")
             else:
-                parts.append(f"发送者：{sender}")
+                head_lines.append(f"发送者：{sender}")
         if _ctx_enabled(ctx, "include_mentioned", True) and info.get("mentioned"):
             mentioned = [_render_sender(m) for m in info["mentioned"]]
-            parts.append("提到了(用户名)：" + "、".join(mentioned))
+            tail_lines.append("提到了(用户名)：" + "、".join(mentioned))
 
     if _ctx_enabled(ctx, "include_quote", True) and info.get("quote"):
         if is_group and _ctx_enabled(ctx, "include_quote_sender", True) and info.get("quote_sender"):
             quote_sender = _render_sender(info["quote_sender"])
-            parts.append(f"引用了：{quote_sender}发送的引用消息：“{info['quote']}”")
+            tail_lines.append(f"引用了：{quote_sender}发送的引用消息：“{info['quote']}”")
         else:
-            parts.append(f"引用了：{info['quote']}")
+            tail_lines.append(f"引用了：{info['quote']}")
 
     sent_text = ctx.user_text.strip() or (info.get("sent_text") or "").strip()
-    if _ctx_enabled(ctx, "include_sent", True) and sent_text:
-        if sender_style == "single" and sender_label:
-            parts.insert(0, f"{sender_label}: {sent_text}")
-        elif sent_style == "new":
-            parts.append(f"消息正文：{sent_text}")
-        else:
-            parts.append(f"发送了：{sent_text}")
-    elif sender_style == "single" and sender_label:
-        parts.insert(0, sender_label)
+    if not _ctx_enabled(ctx, "include_sent", True):
+        sent_text = ""
+    # single 风格把发送者塞进正文行；此时不再单独输出「发送者：」行
+    if sender_style == "single":
+        head_lines = [line for line in head_lines if not line.startswith(("发送者：", "发送者昵称："))]
 
-    if group_line:
-        parts.insert(0, group_line)
-    if qq_line:
-        parts.insert(0, qq_line)
-    if time_line:
-        parts.insert(0, time_line)
-
-    if parts:
-        ctx.user_text = "\n".join(parts)
+    formatted = build_current_turn_text(
+        sent_text=sent_text,
+        current_text=ctx.user_text,
+        sender_label=sender_label,
+        head_lines=head_lines,
+        tail_lines=tail_lines,
+        sender_style=sender_style,
+        sent_style=sent_style,
+    )
+    ctx.user_text = formatted
+    if len(formatted.splitlines()) > 1 or formatted != (info.get("sent_text") or "").strip():
         ctx.state["message_meta_injected"] = True
-    elif time_line:
-        ctx.user_text = f"{time_line}\n{ctx.user_text}".strip()
 
 
 async def interrupt_config_hook(ctx):

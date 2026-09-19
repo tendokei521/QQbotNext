@@ -295,79 +295,77 @@ def render_history_entry(
     include_time: bool = True,
     include_user_id: bool = True,
     mask_nickname: bool = False,
+    content_renderer=None,
     render_content=None,
     normalize_enhanced: bool = False,
 ) -> str | None:
     """把一条历史渲染成模型可读文本。返回 None 表示"本条不进上下文"。
 
+    渲染决策链（**唯一判定点**，四条历史路径共用）：
+
+    1. 取内容：``content_renderer(entry)``（如在线历史把 OneBot 段渲染成文本）
+       → 否则结构化 ``base.text`` → 否则旧文本 ``legacy_text``；
+    2. 内容本身是"增强块"（自带 ``发送者：/发送了：/时间：`` 分节）→ 原样输出
+       （可归一化为单行），不再套外层前缀；
+    3. 其余 → ``MM-DD HH:MM 昵称(QQ): 正文`` 单行形态（assistant 不加前缀）。
+
     Args:
-        entry: ``HistoryEntry`` 或旧式 dict（``{role, content, time, user_id, nickname}``）。
+        entry: ``HistoryEntry`` 或旧式 dict。
         is_private: 私聊形态（对方显示为「对方」）。
         self_ids: bot 自己的 QQ 集合（命中时标为「我」）。
         include_time: 是否加 ``MM-DD HH:MM `` 前缀。
         include_user_id: 群聊是否在昵称后附 ``(QQ)``。
         mask_nickname: 是否把句子型昵称脱敏为 ``用户<QQ>``。
-        render_content: ``callable(entry) -> str | None``；给定且条目是结构化的，
-            用它的返回值作为正文（用于接入"按需展开/图片展开"等富渲染）。
-            返回 None 表示本条无正文（不进上下文）。
+        content_renderer: ``callable(entry) -> str | None``；优先级最高，
+            用于在线历史（OneBot 原始段 → 文本）。返回 None 表示本条无内容。
+        render_content: ``callable(entry) -> str | None``；仅在条目是结构化
+            （带 base）时生效，用于接入"按需展开/图片展开"等富渲染。
         normalize_enhanced: 增强块是否归一化成单行 ``昵称(QQ): 正文``。
     """
     entry = _as_entry(entry)
     role = entry.role or "user"
-    # assistant 永远不加前缀：避免模型模仿 "MM-DD HH:MM 我: " 写进回复污染历史
-    if role == "assistant":
-        content = entry.base.text if entry.is_structured else entry.legacy_text
-        return normalize_newlines(content) or None
 
-    self_ids = {str(x) for x in (self_ids or set())}
-    base = entry.base
-
-    # 旧数据优先：有 legacy_text 说明"正文已冻在文本里"（可能自带增强分节），
-    # 此时 base 里的 time/sender 只是同一条旧记录的回填，不能据此走结构化渲染
-    if entry.legacy_text.strip():
-        text = normalize_newlines(entry.legacy_text)
-        if is_enhanced_content(text):
-            if not normalize_enhanced and mask_nickname:
-                text = mask_enhanced_content(text)
-            return _render_enhanced(text, meta_lines=entry.meta_lines, normalize_enhanced=normalize_enhanced)
-        return _single_line(
-            content=text,
-            time=base.time,
-            sender_id=base.sender_id,
-            sender_name=base.sender_name,
-            is_private=is_private,
-            self_ids=self_ids,
-            include_time=include_time,
-            include_user_id=include_user_id,
-            mask_nickname=mask_nickname,
-        )
-
-    if entry.is_structured:
-        if base.text and is_enhanced_content(base.text):
-            return _render_enhanced(base.text, normalize_enhanced=normalize_enhanced)
+    content: str | None = None
+    if content_renderer is not None:
+        content = content_renderer(entry)
+        if content is not None:
+            content = str(content)
+    elif entry.legacy_text.strip():
+        # 旧数据优先：内容已冻在文本里（可能自带增强分节）
+        content = normalize_newlines(entry.legacy_text)
+    elif entry.is_structured:
         if render_content is not None:
             content = render_content(entry)
-            if not content or not str(content).strip():
-                return None
-            content = str(content)
+            content = str(content) if content is not None else None
         else:
-            content = base.text
-            if not str(content or "").strip():
-                return None  # 无正文（也没有富渲染钩子）→ 本条不进上下文
-        return _single_line(
-            content=content,
-            time=base.time,
-            sender_id=base.sender_id,
-            sender_name=base.sender_name,
-            is_private=is_private,
-            self_ids=self_ids,
-            include_time=include_time,
-            include_user_id=include_user_id,
-            mask_nickname=mask_nickname,
-            meta_lines=base.meta_lines,
-        )
+            content = entry.base.text
 
-    return None
+    if content is None or not str(content).strip():
+        return None
+    content = str(content)
+
+    if is_enhanced_content(content):
+        if not normalize_enhanced and mask_nickname:
+            content = mask_enhanced_content(content)
+        return _render_enhanced(content, meta_lines=entry.meta_lines, normalize_enhanced=normalize_enhanced)
+
+    # assistant 永远不加前缀：避免模型模仿 "MM-DD HH:MM 我: " 写进回复污染历史
+    if role == "assistant":
+        return content
+
+    base = entry.base
+    return _single_line(
+        content=content,
+        time=base.time,
+        sender_id=base.sender_id,
+        sender_name=base.sender_name,
+        is_private=is_private,
+        self_ids={str(x) for x in (self_ids or set())},
+        include_time=include_time,
+        include_user_id=include_user_id,
+        mask_nickname=mask_nickname,
+        meta_lines=base.meta_lines,
+    )
 
 
 def _as_entry(entry: HistoryEntry | dict) -> HistoryEntry:
@@ -494,6 +492,85 @@ def mask_enhanced_content(content: str) -> str:
         else:
             out.append(line)
     return "\n".join(out)
+
+
+def online_message_to_entry(raw: Any) -> HistoryEntry | None:
+    """OneBot ``get_*_msg_history`` 里的一条消息 → ``HistoryEntry``。
+
+    在线历史与会话历史据此共用同一渲染器：段渲染（@ 昵称/未展开标记/已展开摘要）
+    由调用方通过 ``content_renderer`` 注入，本函数只做字段搬运。
+    """
+    if not isinstance(raw, dict):
+        return None
+    sender = raw.get("sender", {}) or {}
+    user_id = sender.get("user_id", "")
+    # 昵称缺失时不要回填成 QQ：交给 sender_label 只输出 ID，避免 "30003(30003)"
+    nickname = sender.get("card") or sender.get("nickname") or ""
+    segments = message_segments(raw.get("message"))
+    message_id = raw.get("message_id") or raw.get("real_id") or raw.get("message_seq") or ""
+    return HistoryEntry(
+        role="user",
+        message_id=str(message_id or ""),
+        base=BaseInfo(
+            time=int(raw.get("time", 0) or 0),
+            sender_id=str(user_id or ""),
+            sender_name=str(nickname or ""),
+            group_id=str(raw.get("group_id", "") or ""),
+            is_private=False,
+            text="",
+            segments=segments,
+        ),
+    )
+
+
+def message_segments(message: Any) -> list[dict]:
+    """统一消息段形状为 ``[{"type": ..., "data": {...}}]``（兼容对象与 dict）。"""
+    if isinstance(message, str):
+        return [{"type": "text", "data": {"text": message}}] if message else []
+    if not isinstance(message, list):
+        return []
+    segments: list[dict] = []
+    for seg in message:
+        if isinstance(seg, dict):
+            segments.append({"type": str(seg.get("type", "")), "data": dict(seg.get("data", {}) or {})})
+            continue
+        stype = getattr(seg, "type", "")
+        if stype:
+            segments.append({"type": str(stype), "data": dict(getattr(seg, "data", {}) or {})})
+    return segments
+
+
+def build_current_turn_text(
+    *,
+    sent_text: str,
+    current_text: str = "",
+    sender_label: str = "",
+    head_lines: list[str] | None = None,
+    tail_lines: list[str] | None = None,
+    sender_style: str = "legacy",
+    sent_style: str = "legacy",
+) -> str:
+    """组装「本轮消息」文本块（与历史条目同一套字段语义）。
+
+    - ``head_lines``：头部行（时间 / QQ / 群号 / ``发送者：``），按给定顺序放最前；
+    - 正文：``昵称(QQ): 正文``（``sender_style="single"``）/ ``发送了：正文``（默认）
+      / ``消息正文：正文``（``sent_style="new"``）；
+    - ``tail_lines``：附注行（提到了 / 引用了），固定排在正文之后；
+    - 什么都没拼出来时返回 ``current_text``（调用方已格式化过的原文）。
+    """
+    body = ""
+    if sender_style == "single" and sender_label:
+        body = f"{sender_label}: {sent_text}" if sent_text else sender_label
+    elif sent_text:
+        body = f"消息正文：{sent_text}" if sent_style == "new" else f"发送了：{sent_text}"
+
+    lines: list[str] = [str(x) for x in (head_lines or []) if str(x or "").strip()]
+    if body:
+        lines.append(body)
+    lines.extend(str(x) for x in (tail_lines or []) if str(x or "").strip())
+
+    text = "\n".join(lines).strip()
+    return text or current_text
 
 
 def render_history(entries: list, *, entry_renderer=None, **kwargs) -> list[dict]:

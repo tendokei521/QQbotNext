@@ -19,6 +19,7 @@ from typing import Any
 from app.core.logger import logger
 from app.llm import history_model as _hm
 from app.llm.history_model import (
+    online_message_to_entry,
     render_history,
     sender_label,
     time_prefix,
@@ -404,43 +405,37 @@ def format_online_history(
         return ""
     self_ids = {str(x) for x in (self_ids or set())}
     lines: list[str] = []
-    for msg in messages[-count:]:
-        if not isinstance(msg, dict):
-            continue
-        sender = msg.get("sender", {}) or {}
-        user_id = sender.get("user_id", "")
-        is_self = str(user_id) in self_ids
 
-        # 整条消息 id：合并转发标记要用它（不是转发段内部的 data.id）
-        msg_id = msg.get("message_id") or msg.get("real_id") or msg.get("message_seq") or ""
-        content = extract_msg_text(msg.get("message"), at_names, mark_unresolved, msg_id, expanded)
+    def _content(entry) -> str | None:
+        """OneBot 原始段 → 文本（本渲染器只负责"取内容"，其余交给 history_model）。"""
+        base = entry.base
+        msg_id = entry.message_id
+        content = extract_msg_text(
+            base.segments, at_names, mark_unresolved, msg_id, expanded
+        )
         if not content:
-            continue
+            return None
         if len(content) > max_content:
             content = content[:max_content] + "..."
+        return content
 
-        if is_self:
-            label = SELF_TAG
-        elif is_private:
-            label = PRIVATE_OTHER_TAG
-        else:
-            nickname = sender.get("card") or sender.get("nickname") or str(user_id) or "未知"
-            label = _group_sender_label(nickname, user_id, include_user_id, mask_nickname)
-
-        # 内容已自带“发送者/发送了/时间”自描述（LLM 增强块）时不再套外层前缀。
-        # 实验性开启时归一化为单行脱敏；未开启但要求脱敏时只做“仅脱敏”，保留原格式。
-        if _is_enhanced_context(content):
-            if normalize_enhanced:
-                rendered = _normalize_enhanced_content(content)
-            elif mask_nickname:
-                rendered = _mask_enhanced_content(content)
-            else:
-                rendered = content
-            lines.append(rendered)
+    for raw in messages[-count:]:
+        entry = online_message_to_entry(raw)
+        if entry is None:
             continue
-
-        prefix = _time_prefix(msg.get("time")) if include_time else ""
-        lines.append(f"{prefix}{label}: {content}")
+        rendered = _hm.render_history_entry(
+            entry,
+            is_private=is_private,
+            self_ids=self_ids,
+            include_time=include_time,
+            include_user_id=include_user_id,
+            mask_nickname=mask_nickname,
+            normalize_enhanced=normalize_enhanced,
+            content_renderer=_content,
+        )
+        if rendered is None:
+            continue
+        lines.append(rendered)
     return "\n".join(lines)
 
 
