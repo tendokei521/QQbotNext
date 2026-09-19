@@ -106,6 +106,7 @@ def count_images(event: Any) -> int:
 
 
 def collect_image_segments(event: Any) -> list[Any]:
+    """收集图片段；事件没有 message 字段（主动消息/测试替身）时返回空列表。"""
     return [seg for seg in (getattr(event, "message", None) or []) if _seg_type(seg) == "image"]
 
 

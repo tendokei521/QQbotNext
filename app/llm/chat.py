@@ -21,6 +21,9 @@ from app.llm.group_context import (
     format_history_for_llm,
 )
 from app.llm.session import SessionManager
+from app.llm import assembly
+from app.llm.assembly import PromptRequest
+from app.llm.image import collect_image_segments
 from app.llm.prompt import LEGACY_MESSAGE_META_INSTRUCTION, MESSAGE_META_INSTRUCTION, build_messages
 from app.llm.providers import chat_with_fallback, iter_stream_with_fallback
 from app.llm.providers.modalities import (
@@ -843,11 +846,207 @@ async def call_llm_and_reply(module, event, session_mgr, config,
         logger.add_info(f"#{module.bot_id}").error(f"消息发送失败: {e}")
 
 
+async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
+    """把一个事件（或定时/主动请求）归一化成 ``assembly.PromptRequest``。
+
+    这是**唯一**的"取值"入口：模型参数、前置背景、去重、渲染、压缩、技能与工具、
+    记忆检索、指代块、图片解析都在这里完成，之后的装配（顺序/清洗）交给
+    ``assembly.PromptAssembler``。此前这些步骤在 4 条路径里各写一遍，导致
+    "记忆检索用什么文本""去重比哪个字符串"这类分歧。
+
+    返回 ``(req, session, meta)``；``meta`` 供调用方取模型参数与工具集
+    （``model`` / ``max_tokens`` / ``temperature`` / ``modalities`` /
+    ``all_specs`` / ``tool_ctx`` / ``provider_chain``）。
+    """
+    config = runtime.config
+    message_type = getattr(event, "message_type", "")
+    if message_type not in ("group", "private"):
+        return None, None, None
+
+    if message_type == "private":
+        is_private = True
+        session_id = f"private_{event.user_id}"
+        user_id = str(event.user_id)
+        group_id = None
+        include_pre_history = config.get("include_private_pre_history", "default")
+    else:
+        is_private = False
+        session_id = f"group_{event.group.group_id}"
+        user_id = str(event.user_id)
+        group_id = str(event.group.group_id)
+        include_pre_history = config.get("include_pre_history", False)
+
+    if ctx is not None and ctx.session_id:
+        session_id = ctx.session_id
+
+    # 用户原始正文（未包裹元信息）：记忆检索与意图判定都用它，避免元信息里的
+    # QQ 号被当成消息 id、昵称污染检索。事件可能没有 message（主动/测试替身）。
+    from app.llm.enhance import _raw_user_text
+
+    segment_text = _raw_user_text(event).strip()
+    raw_user_text = ""
+    if ctx is not None:
+        info = ctx.state.get("user_context") or {}
+        raw_user_text = (info.get("sent_text") or "").strip()
+    if not raw_user_text:
+        raw_user_text = segment_text
+
+    # 本轮 user 内容：流水线已注入元信息时用注入后的文本，否则用原始正文
+    if ctx is not None and ctx.user_text:
+        user_text = ctx.user_text
+    else:
+        user_text = raw_user_text
+    if not user_text.strip() and not collect_image_segments(event):
+        return None, None, None
+
+    # 截断：单把尺子（max_message_length）；原始正文已由流水线截过，这里只兜底
+    max_msg_len = int(config.get("max_message_length", 200) or 200)
+    user_text = user_text[:max_msg_len]
+    raw_user_text = raw_user_text[:max_msg_len]
+
+    session_mgr = session_mgr or SessionManager(str(runtime.bot_id))
+    session = session_mgr.get_session(session_id)
+    if not session:
+        session = session_mgr.create_session(
+            session_id,
+            "private" if is_private else "group",
+            config.get("session_timeout", 60),
+        )
+        if not is_private:
+            session.reply_cooldown = config.get("reply_cooldown", 5)
+        await asyncio.to_thread(session_mgr.restore_session_from_archive, session, session_id)
+    else:
+        # 群聊冷却：非 @ 且不在冷却窗口内 → 本轮不触发（与旧 generate_response 一致）
+        if not is_private and not session.can_reply() and not (ctx is not None and ctx.state.get("is_at")):
+            return None, None, None
+        session.add_participant(user_id)
+
+    session_mgr.add_message(
+        session_id, "user", user_text, user_id, nickname=_event_nickname(event)
+    )
+
+    provider_chain = _provider_chain_for(runtime)
+    modalities = _modalities_for_chain(provider_chain)
+    history_rounds = config.get("history_rounds", 50)
+    _meta_flags = _history_meta_flags(runtime)
+
+    pre_history_text = await _fetch_pre_history(
+        runtime, event, is_private=is_private, group_id=group_id, user_id=user_id,
+        include_pre_history=include_pre_history, history_rounds=history_rounds,
+        session_id=session_id, meta_flags=_meta_flags,
+    )
+
+    session_history = session_mgr.get_history(session_id, limit=session_mgr.MAX_HISTORY_MESSAGES)
+    # 防重复：history 尾部就是刚追加的当前用户消息（存的就是 user_text）→ 去掉
+    if (session_history and session_history[-1].get("role") == "user"
+            and session_history[-1].get("content") == user_text):
+        session_history = session_history[:-1]
+    session_history = _format_session_history(session_history, is_private, **_meta_flags)
+    session_history = await maybe_compress_context(
+        provider_chain, config, session_history, history_rounds
+    )
+
+    schedule_enable = config.get("schedule_enable", True)
+    all_specs, skill_blocks, tool_ctx = await _collect_llm_ext(
+        runtime, event, session_id, is_private, schedule_enable
+    )
+
+    _memory_autosave(runtime, session_id, user_id, raw_user_text or user_text)
+    memory_text = await _memory_block(runtime, session_id, user_id, raw_user_text or user_text, event.bot)
+    # 指代消解：焦点行 + 明确指向时的确定性预取（放在背景块之前，信息密度更高）
+    referent_text = await _referent_block(tool_ctx.runtime, session_id, user_text, tool_ctx)
+
+    # 图片：先归一化（拿不到的图片提前留日志），是否真正传给模型由 assembly 的模态门控决定
+    user_images: list[dict] = []
+    if collect_image_segments(event) and _images_enabled(config):
+        try:
+            from app.llm.image import max_image_bytes, resolve_images
+
+            user_images = await resolve_images(
+                event,
+                bot=getattr(event, "bot", None),
+                max_images=int(config.get("image_max_count", 4) or 4),
+                max_bytes=max_image_bytes(config),
+            )
+        except Exception as e:  # noqa: BLE001 —— 图片解析失败必须降级为纯文本
+            logger.add_info(f"#{runtime.bot_id}").warning(f"图片解析失败，按纯文本处理: {e}")
+
+    req = PromptRequest(
+        runtime=runtime,
+        event=event,
+        ctx=ctx,
+        config=config,
+        session_id=session_id,
+        is_private=is_private,
+        user_id=user_id,
+        group_id=group_id,
+        kind="chat",
+        user_text=user_text,
+        raw_user_text=raw_user_text,
+        memory_source_text=raw_user_text or user_text,
+        history=session_history,
+        pre_history_text=pre_history_text,
+        referent_text=referent_text,
+        skill_blocks=skill_blocks,
+        memory_text=memory_text,
+        available_tools={spec.name for spec in (all_specs or [])},
+        modalities=modalities,
+        schedule_enable=schedule_enable,
+        user_images=user_images,
+    )
+    meta = {
+        "model": config.get("model", "deepseek-chat"),
+        "max_tokens": config.get("max_tokens", 1024),
+        "temperature": config.get("temperature", 0.7),
+        "history_rounds": history_rounds,
+        "provider_chain": provider_chain,
+        "modalities": modalities,
+        "all_specs": all_specs,
+        "tool_ctx": tool_ctx,
+        "session": session,
+        "session_mgr": session_mgr,
+        "is_private": is_private,
+        "user_id": user_id,
+        "group_id": group_id,
+        "session_id": session_id,
+    }
+    return req, session, meta
+
+
+async def _fetch_pre_history(
+    runtime, event, *, is_private, group_id, user_id, include_pre_history,
+    history_rounds, session_id, meta_flags,
+) -> str:
+    """前置背景：群聊在线记录 / 私聊近期记录（与既有触发条件完全一致）。"""
+    if group_id:
+        if not include_pre_history:
+            return ""
+        return await _build_group_pre_history(
+            event, group_id, count=history_rounds, **meta_flags,
+            **_context_expand_flags(runtime.config),
+            bot_id=getattr(event, "bot_id", "") or "",
+            session_id=session_id,
+        )
+    if is_private and include_pre_history in ("history", "load"):
+        text = await fetch_private_online_history(
+            event.bot,
+            user_id,
+            count=history_rounds,
+            self_ids={str(event.self_id), str(getattr(event, "bot_id", "") or "")},
+            bot_id=getattr(event, "bot_id", "") or "",
+            session_id=session_id,
+        )
+        if text and include_pre_history == "history":
+            text = f"近期聊天记录:\n{text}"
+        return text
+    return ""
+
+
 async def generate_response(runtime, event, ctx=None) -> str | None:
     """LLM 流水线专用生成函数：只生成回复文本，不发送消息。
 
-    与 ``call_llm_and_reply`` 保持相同的会话/历史/定时逻辑，
-    但把“发送”留给 LLM 流水线统一处理，以便 post_response / pre_send 钩子介入。
+    会话/历史/背景/工具/记忆/图片的取值全部收敛在 ``prepare_prompt``，
+    消息顺序与清洗交给 ``assembly``。
     """
     config = runtime.config
     if not runtime.provider_config().get("api_key", ""):
@@ -912,83 +1111,18 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
         nickname=_event_nickname(event),
     )
 
-    model = config.get("model", "deepseek-chat")
-    system_prompt = config.get("system_prompt", "你是一个友好的助手。")
-    max_tokens = config.get("max_tokens", 1024)
-    temperature = config.get("temperature", 0.7)
-    history_rounds = config.get("history_rounds", 50)
-    provider_chain = _provider_chain_for(runtime)
-    modalities = _modalities_for_chain(provider_chain)
+    # 取值（会话/历史/背景/工具/记忆/指代/图片）全部收敛在 prepare_prompt；
+    # 顺序与清洗交给 assembly（PromtRequest → 块表 → 归位 → 按模态清洗）。
+    req, session, meta = await prepare_prompt(runtime, event, ctx)
+    if req is None:
+        return None
+    session_id = meta["session_id"]
+    provider_chain = meta["provider_chain"]
+    modalities = meta["modalities"]
+    all_specs = meta["all_specs"]
+    tool_ctx = meta["tool_ctx"]
 
-    pre_history_text = ""
-    _meta_flags = _history_meta_flags(runtime)
-    if group_id:
-        if include_pre_history:
-            pre_history_text = await _build_group_pre_history(
-                event, group_id, count=history_rounds, **_meta_flags,
-                **_context_expand_flags(config),
-                bot_id=getattr(event, "bot_id", "") or "",
-                session_id=session_id,
-            )
-    elif is_private and include_pre_history in ("history", "load"):
-        pre_history_text = await fetch_private_online_history(
-            event.bot,
-            user_id,
-            count=history_rounds,
-            self_ids={str(event.self_id), str(getattr(event, "bot_id", "") or "")},
-            bot_id=getattr(event, "bot_id", "") or "",
-            session_id=session_id,
-        )
-        if pre_history_text and include_pre_history == "history":
-            pre_history_text = f"近期聊天记录:\n{pre_history_text}"
-
-    session_history = session_mgr.get_history(session_id, limit=session_mgr.MAX_HISTORY_MESSAGES)
-    user_text_current = session.data.history[-1]["content"] if session.data.history else ""
-    # 防重复：history 尾部就是刚追加的当前用户消息，避免同一消息出现两次
-    if (session_history and session_history[-1].get("role") == "user"
-            and session_history[-1].get("content") == user_text_current):
-        session_history = session_history[:-1]
-    session_history = _format_session_history(session_history, is_private, **_meta_flags)
-    session_history = await maybe_compress_context(
-        provider_chain, config, session_history, history_rounds
-    )
-
-    schedule_enable = config.get("schedule_enable", True)
-
-    all_specs, skill_blocks, tool_ctx = await _collect_llm_ext(
-        runtime, event, session_id, is_private, schedule_enable
-    )
-
-    # 确定性“记住…”兜底应使用用户原始文本，而不是 llm_enhance 增强后的元信息块
-    memory_source_text = user_text
-    if ctx is not None:
-        info = ctx.state.get("user_context") or {}
-        memory_source_text = (info.get("sent_text") or user_text).strip()
-    _memory_autosave(runtime, session_id, user_id, memory_source_text)
-    memory_text = await _memory_block(runtime, session_id, user_id, memory_source_text, event.bot)
-    # 指代消解：焦点行 + 明确指向时的确定性预取（放在背景块之前，信息密度更高）
-    _referent_text = await _referent_block(tool_ctx.runtime, session_id, user_text, tool_ctx)
-    if _referent_text:
-        pre_history_text = f"{_referent_text}\n\n{pre_history_text}" if pre_history_text else _referent_text
-
-    messages = build_messages(
-        system_prompt=system_prompt,
-        pre_history_text=pre_history_text,
-        history=session_history,
-        user_text=user_text,
-        with_schedule_instruction=schedule_enable,
-        schedule_nudge=False,
-        skills=skill_blocks,
-        memory_text=memory_text,
-        message_meta_instruction=_message_meta_instruction(runtime, ctx),
-        proactive_instruction=_proactive_instruction(config, all_specs, user_text, ctx),
-    )
-    messages = sanitize_contexts_by_modalities(messages, modalities)
-    # 多模态：本轮消息带图且模型声明 image 模态时，把图片块挂到 user 消息上
-    messages = await apply_image_content(
-        messages, event=event, runtime=runtime, ctx=ctx, config=config,
-        modalities=modalities, user_text=messages[-1].get("content") or user_text,
-    )
+    messages = assembly.build_messages(req)
 
     _log_debug_prompt(runtime, session_id, messages, debug_enabled=bool(ctx and ctx.state.get("debug_prompt", False)))
 
@@ -1001,9 +1135,9 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
     response = await chat_with_fallback(
         provider_chain,
         messages,
-        model=model,
-        temperature=temperature,
-        max_tokens=max_tokens,
+        model=meta["model"],
+        temperature=meta["temperature"],
+        max_tokens=meta["max_tokens"],
         tools=build_tools(all_specs) if use_tools else None,
         tool_executor=make_executor(all_specs, tool_ctx) if use_tools else None,
         max_tool_rounds=_max_tool_rounds(config),
