@@ -17,6 +17,12 @@ from datetime import datetime
 from typing import Any
 
 from app.core.logger import logger
+from app.llm import history_model as _hm
+from app.llm.history_model import (
+    render_history,
+    sender_label,
+    time_prefix,
+)
 
 # 非文本消息段的展示名，避免模型完全看不到非文本消息
 _NON_TEXT_SEGMENTS = {
@@ -149,45 +155,20 @@ def unresolved_summary(text: Any) -> str:
         "可调用 expand_context 展开后再回答】"
     )
 
-# 已自带“发送者/发送者昵称/发送了/消息正文/时间”自描述内容（LLM 增强模块 llm_enhance 产出的散文块）。
-# 这类内容再套外层“MM-DD HH:MM 昵称(QQ):”会变成重复脏信息，渲染时应原样输出。
-# 同时兼容旧历史（发送者/发送了）与当前单行格式（昵称(QQ): 正文）。
-_ENHANCED_RE = re.compile(
-    r"(?:^|\n)(?:发送者：|发送者昵称：|发送了：|消息正文：)|^\(时间："
-)
-
-# 句子型/超长昵称的判定阈值
-_SENTENCE_LIKE_RE = re.compile(r"[\s，。！？、；：,.!?;:]")
-_SENTENCE_LIKE_MAX_LEN = 12
+# 渲染与脱敏的实现在 history_model（单一来源）；这里保留同名别名，避免调用点大面积改动。
+_ENHANCED_RE = _hm._ENHANCED_RE
+_SENTENCE_LIKE_RE = _hm._SENTENCE_LIKE_RE
+_SENTENCE_LIKE_MAX_LEN = _hm._SENTENCE_LIKE_MAX_LEN
 
 
 def safe_nickname(nickname: str, user_id: Any = "") -> str:
-    """把句子型/超长昵称脱敏为 ``用户<QQ>``，普通昵称保留原样。
-
-    目的：避免昵称内容（如“学费”）进入 LLM 上下文后被当成对话内容。
-    """
-    nick = (nickname or "").strip()
-    if not nick:
-        return f"用户{user_id}" if user_id not in (None, "") else "用户"
-    if len(nick) > _SENTENCE_LIKE_MAX_LEN or _SENTENCE_LIKE_RE.search(nick):
-        return f"用户{user_id}" if user_id not in (None, "") else "用户"
-    return nick
+    """句子型/超长昵称脱敏为 ``用户<QQ>``（实现见 ``history_model.safe_nickname``）。"""
+    return _hm.safe_nickname(nickname, user_id)
 
 
 def safe_sender_label(sender: str) -> str:
-    """把 ``昵称(QQ)`` 形式的发送者标签脱敏为安全标签。
-
-    普通昵称保留 ``昵称(QQ)``；句子型/超长昵称转为 ``用户<QQ>``。
-    """
-    sender = (sender or "").strip()
-    m = re.match(r"^(.*)\((\d+)\)$", sender)
-    if m:
-        nick, qq = m.group(1), m.group(2)
-        safe = safe_nickname(nick, qq)
-        if safe == f"用户{qq}":
-            return safe
-        return f"{safe}({qq})"
-    return safe_nickname(sender, "")
+    """``昵称(QQ)`` 标签脱敏（实现见 ``history_model.safe_sender_label``）。"""
+    return _hm.safe_sender_label(sender)
 
 
 def _is_enhanced_context(content: str) -> bool:
@@ -277,31 +258,16 @@ def _mask_enhanced_content(content: str) -> str:
 
 def _time_prefix(ts: Any) -> str:
     """把 unix 时间戳格式化为 ``MM-DD HH:MM `` 前缀；非法/缺失返回空串。"""
-    if ts is None:
-        return ""
-    try:
-        return datetime.fromtimestamp(int(ts)).strftime("%m-%d %H:%M ")
-    except Exception:
-        return ""
+    return time_prefix(ts)
 
 
 def _group_sender_label(
     nickname: str, user_id: Any, include_user_id: bool, mask_nickname: bool = False
 ) -> str:
     """群聊发送者标签：普通昵称保留；mask_nickname=True 时句子型昵称转为 用户<QQ>。"""
-    if mask_nickname:
-        nick = safe_nickname(nickname, user_id)
-        if nick == f"用户{user_id}" and user_id not in (None, ""):
-            return nick
-    else:
-        nick = (nickname or "").strip()
-    parts: list[str] = [nick] if nick else []
-    if include_user_id and user_id not in (None, ""):
-        if parts:
-            parts.append(f"({user_id})")
-        else:
-            parts.append(str(user_id))
-    return "".join(parts) if parts else "用户"
+    return sender_label(
+        nickname, user_id, include_user_id=include_user_id, mask_nickname=mask_nickname
+    )
 
 
 def _segment_text(
@@ -644,6 +610,13 @@ def format_history_for_llm(
     Returns:
         OpenAI messages 风格的历史列表，content 已渲染为打标文本。
     """
+    return render_history(
+        history,
+        is_private=is_private,
+        normalize_enhanced=normalize_enhanced,
+        mask_nickname=mask_nickname,
+    )
+
     result = []
     for m in history:
         role = m.get("role", "user")
