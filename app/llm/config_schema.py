@@ -563,6 +563,12 @@ SCHEMA = {
         "description": "超过该体积的图片跳过传输并记录日志（base64 会让请求体膨胀约 1/3，过大易被网关拒绝）",
         "default": 10, "min": 1, "max": 50, "group": "group_tools",
     },
+    "history_background_enable": {
+        "type": "boolean", "label": "注入在线聊天环境背景",
+        "description": "开启时额外注入「最近群聊记录」背景块（指代焦点行不受影响）。"
+                       "会话历史已是主来源；若发现同一批消息在两处重复出现，可关掉本项",
+        "default": True, "group": "group_tools",
+    },
     "tool_result_directive_enable": {
         "type": "boolean", "label": "工具结果附带回应要求",
         "description": "在工具结果末尾拼一句「用你自己的口吻回应，不要复述/不要列条目」。"

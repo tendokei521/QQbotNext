@@ -96,7 +96,8 @@ def test_replace_markers_without_registry_is_noop():
 # ---------- 附加块 ----------
 
 
-def test_supplementary_blocks_returns_message_content_not_reply():
+def test_supplementary_blocks_returns_fetched_content():
+    """取回过内容的 ref（不限 kind）都作为附加块；正文里已体现的则不重复。"""
     history_enrich.remember("group_1", 778, items=[
         {"kind": "message", "ref": "900", "summary": "短摘要", "content": "完整内容在这里"},
         {"kind": "reply", "ref": "456", "summary": "引用摘要"},
@@ -107,6 +108,14 @@ def test_supplementary_blocks_returns_message_content_not_reply():
         "base": {"segments": [{"type": "reply", "data": {"id": "456"}}]},
     }
     blocks = history_enrich.supplementary_blocks("group_1", 778, entry)
+    assert blocks == [
+        {"role": "user", "content": "【已取回:消息456】引用摘要"},
+        {"role": "user", "content": "【已取回:消息900】完整内容在这里"},
+    ]
+    # 正文里已经通过占位替换体现了 456 → 不再重复附加它
+    blocks = history_enrich.supplementary_blocks(
+        "group_1", 778, entry, text="【已展开:引用456 → 引用摘要】"
+    )
     assert blocks == [{"role": "user", "content": "【已取回:消息900】完整内容在这里"}]
 
 

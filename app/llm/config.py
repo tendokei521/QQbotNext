@@ -149,6 +149,9 @@ DEFAULT_LLM_CONFIG: dict = {
     "image_understanding_enable": True,
     "image_max_count": 4,        # 单轮最多传几张图（超出部分只留占位）
     "image_max_mb": 10,          # 单张图体积上限（MB），超出跳过并记日志
+    # 会话历史是主历史来源；在线「聊天环境背景」默认仍注入（指代行保留）。
+    # 关掉后历史只来自会话记录，避免同一批消息在两处重复出现。
+    "history_background_enable": True,
     # 工具结果尾部的「回应要求」：压住"工具返回后写长串汇报"的倾向
     # （拼在结果末尾而不是新增 system —— 中途 system 在 Anthropic/Gemini 会被上提到最前）
     "tool_result_directive_enable": True,

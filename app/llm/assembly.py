@@ -201,8 +201,16 @@ def build_memory(req: PromptRequest) -> list[dict]:
 
 
 def build_background(req: PromptRequest) -> list[dict]:
-    """背景块：指代消解行 + 聊天环境背景合并为一条 system（指代在前，信息密度更高）。"""
-    parts = [p for p in (req.referent_text, req.pre_history_text) if p and p.strip()]
+    """背景块：指代消解行 + 聊天环境背景合并为一条 system（指代在前，信息密度更高）。
+
+    可用 ``history_background_enable`` 关掉"聊天环境背景"部分（指代行保留）——
+    目标是把会话历史作为唯一历史来源时，避免同一批消息在两处出现。
+    """
+    parts: list[str] = []
+    if req.referent_text and req.referent_text.strip():
+        parts.append(req.referent_text)
+    if req.cfg("history_background_enable", True) and req.pre_history_text and req.pre_history_text.strip():
+        parts.append(req.pre_history_text)
     if not parts:
         return []
     return [{"role": "system", "content": "\n\n".join(parts)}]

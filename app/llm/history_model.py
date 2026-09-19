@@ -593,11 +593,17 @@ def render_history(
         if content is not None:
             parsed = _as_entry(entry)
             result.append({"role": parsed.role or "user", "content": content})
-        if entry_blocks is not None:
-            try:
-                result.extend(entry_blocks(entry) or [])
-            except Exception as e:  # noqa: BLE001 —— 附加块失败不应影响历史渲染
-                from app.core.logger import logger
+        if entry_blocks is None:
+            continue
+        try:
+            extra = entry_blocks(entry, text=content or "")
+        except TypeError:
+            # 兼容只接受一个参数的附加块回调
+            extra = entry_blocks(entry)
+        except Exception as e:  # noqa: BLE001 —— 附加块失败不应影响历史渲染
+            from app.core.logger import logger
 
-                logger.debug(f"[HistoryModel] 附加块渲染失败（已忽略）: {e}")
+            logger.debug(f"[HistoryModel] 附加块渲染失败（已忽略）: {e}")
+            continue
+        result.extend(extra or [])
     return result

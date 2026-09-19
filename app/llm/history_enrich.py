@@ -177,24 +177,33 @@ def to_expanded_refs(session_id: Any, bot_id: Any) -> dict[str, dict[str, str]]:
     return out
 
 
-def supplementary_blocks(session_id: Any, bot_id: Any, entry: dict | Any) -> list[dict]:
-    """工具取回的单条消息 → 附加块（排在该条历史之后，不塞进它的正文）。"""
+def supplementary_blocks(
+    session_id: Any, bot_id: Any, entry: dict | Any, *, text: str = ""
+) -> list[dict]:
+    """工具取回的单条消息 → 附加块（排在该条历史之后，不塞进它的正文）。
+
+    ``text`` 为该条**已渲染**的正文：若正文里已经通过占位替换体现了这份内容
+    （``【已展开:… → …】``），就不再重复附加。
+    """
     refs = entry_refs(entry)
     if not refs:
         return []
+    body = str(text or "")
     blocks: list[dict] = []
     seen: set[str] = set()
     for ref in refs:
         if ref in seen:
             continue
         seen.add(ref)
+        if ref and ref in body:
+            continue  # 正文里已体现（占位已替换）
         item = lookup(session_id, bot_id, ref)
-        if not item or item.get("kind") != "message":
+        if not item:
             continue
-        text = str(item.get("content") or item.get("summary") or "").strip()
-        if not text:
+        content = str(item.get("content") or item.get("summary") or "").strip()
+        if not content:
             continue
-        blocks.append({"role": "user", "content": f"【已取回:消息{ref}】{text}"})
+        blocks.append({"role": "user", "content": f"【已取回:消息{ref}】{content}"})
     return blocks
 
 
@@ -297,8 +306,8 @@ def rendering_for(session_id: Any, bot_id: Any) -> tuple[Any, Any] | tuple[None,
             return None
         return replace_markers(text, session_id, bot_id)
 
-    def entry_blocks(entry) -> list[dict]:
-        return supplementary_blocks(session_id, bot_id, entry)
+    def entry_blocks(entry, *, text: str = "") -> list[dict]:
+        return supplementary_blocks(session_id, bot_id, entry, text=text)
 
     return render_content, entry_blocks
 
