@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 from typing import Awaitable, Callable
 
+from app.core.logger import logger
 from app.domain.message import Message
 from app.llm.send_policy import SendPolicy
 
@@ -40,6 +41,9 @@ class StreamSendPool:
         self._flush = False
         self._cancelled = False
         self._drained = asyncio.Event()
+        # 「已取出队列、但尚未发送结束」的条数：finish() 只据此判断是否还有在途消息，
+        # 队列空不代表发完（发送节奏有 sleep）。
+        self._inflight = 0
         self._paused = asyncio.Event()
         self._paused.set()
         self._sender_task = asyncio.create_task(self._sender_loop())
@@ -68,11 +72,21 @@ class StreamSendPool:
         self._finished = True
         if self.config.get("stream_flush_on_finish", False):
             self._flush = True
-        if self._queue.empty():
+        if self._queue.empty() and self._inflight == 0:
             self._drained.set()
 
     async def wait_drained(self) -> None:
-        """等待队列清空且 sender 结束。"""
+        """等待队列清空**且最后一条已真正发送完**。
+
+        只等「队列为空」是不够的：``finish()`` 在队列为空时会立刻置位 ``_drained``，
+        但此时发送协程可能还卡在发送节奏的 ``sleep`` 里（消息已被取出、正等待发送）。
+        调用方（LlmPipeline）随后会 ``shutdown()`` 取消发送协程，于是最后一条消息
+        被静默丢弃——表现为「模型明明回了，用户却收不到」。
+        因此 ``_drained`` 只在「无排队 + 无在途」时置位，这里等它即可。
+
+        发送协程自身的异常不在这里抛出（它的异常已在 ``_sender_loop`` 内记日志，
+        抛出会顶掉流水线收尾逻辑并造成"Task exception was never retrieved"噪音）。
+        """
         await self._drained.wait()
 
     def pause(self) -> None:
@@ -110,14 +124,28 @@ class StreamSendPool:
         return Message.from_text(prefix + str(msg) + suffix)
 
     async def _sender_loop(self) -> None:
+        """流式发送循环。
+
+        正常结束条件：``finish()`` 已调用、队列为空且无在途消息 → 置位 ``_drained``
+        并退出（这样 ``wait_drained()`` 才有确定的完成语义）。
+        单条发送失败不能吞掉：记 error 日志并继续发后面的（一条失败不该让整段回复中断），
+        同时保证循环最终仍会置位 ``_drained``，否则调用方会一直等在收尾上。
+        """
         try:
             while True:
+                # 收尾退出：不再有新消息、队列已空、上一条也已发完 → 置位并结束
+                if self._finished and self._queue.empty() and self._inflight == 0:
+                    self._drained.set()
+                    return
+
                 msg = await self._queue.get()
+                self._inflight += 1
 
                 # 回复打断：任务已过期则不再发送剩余消息
                 if self._should_cancel and self._should_cancel():
                     self._cancelled = True
                     self._queue.task_done()
+                    self._inflight -= 1
                     break
 
                 try:
@@ -138,9 +166,16 @@ class StreamSendPool:
 
                     if self._post_send is not None:
                         await self._post_send(final_msg)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    # 单条发送失败：留痕后继续处理后续消息，避免整段流式回复被打断
+                    logger.add_info("StreamSendPool").error(f"[发送池] 单条消息发送失败（已跳过）: {e}")
                 finally:
                     self._queue.task_done()
-                    if self._finished and self._queue.empty():
-                        self._drained.set()
+                    self._inflight -= 1
         except asyncio.CancelledError:
             raise
+        finally:
+            # 无论正常收尾、被取消还是异常退出，都解除调用方等待，避免收尾死等
+            self._drained.set()
