@@ -47,7 +47,7 @@ class ProactiveManager:
 
     def __init__(self, module) -> None:
         self.module = module
-        self.bot = module.ctx.bot
+        self._bound_bot = getattr(module, "bot", None) or getattr(getattr(module, "ctx", None), "bot", None)
         self.task_manager = module.ctx.services.task_manager
         self.session_mgr = SessionManager(str(module.bot_id))
         self._timers: dict[str, asyncio.Task] = {}       # 私聊下次主动任务
@@ -60,6 +60,27 @@ class ProactiveManager:
         self._legacy_file = os.path.join(llm_data_dir(), "proactive_data.json")
         self._load()
         self._restore()
+
+    @property
+    def bot(self):
+        """实时取当前连接（登录/换号后由 AgentRuntime 重绑）。
+
+        连接是 index 级对象、会被换号复用，缓存旧连接会让主动消息按旧账号
+        发到已被换号的 socket 上，所以每次读取都从运行时取最新绑定。
+        优先 ``module.bot``（AgentRuntime 的实时连接），回退 ``module.ctx.bot``
+        与构造期快照（兼容只提供 ctx.bot 的测试替身）。
+
+        保留 setter：不走 __init__ 的构造路径需要一个可写入口
+        （对齐原 ``self.bot`` 字段的语义）。
+        """
+        current = getattr(self.module, "bot", None)
+        if current is not None:
+            return current
+        return self._bound_bot or getattr(getattr(self.module, "ctx", None), "bot", None)
+
+    @bot.setter
+    def bot(self, value) -> None:
+        self._bound_bot = value
 
     # ── 配置读取 ─────────────────────────────────────────
     def _cfg(self, key: str, default: Any = None) -> Any:
