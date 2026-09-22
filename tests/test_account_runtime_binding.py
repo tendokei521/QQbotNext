@@ -224,6 +224,34 @@ def test_bind_account_evicts_runtime_whose_connection_was_taken_over(monkeypatch
         mgr.shutdown()
 
 
+def test_evicted_runtime_does_not_close_shared_session_manager(monkeypatch, tmp_path):
+    """回收单个运行时的软停止不得关掉共享的会话管理器。
+
+    ``SessionManager`` 是按 bot_id 的进程级单例，被同一账号的所有运行时共享；
+    若回收时把它 ``close()`` 掉，随后登录重建的运行时（拿到同一个单例）会对着
+    已关闭的历史库操作，报 "Cannot operate on a closed database" 并静默丢掉回复。
+    """
+    monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
+    mgr = AgentManager(_CfgSvc(), _TaskMgr())
+    conn = _FakeBot(index=0, bot_id=3437542570)
+    try:
+        runtime = mgr.bind_account(3437542570, bot=conn)
+        session_mgr = runtime.session_mgr
+
+        # 触发回收（连接换号）
+        conn.bot_id = 3569937952
+        mgr.bind_account(3569937952, bot=conn)
+
+        # 共享单例的历史库必须仍然可用（关掉的话这里会抛
+        # "Cannot operate on a closed database"）
+        session = session_mgr.create_session("private_1", "private")
+        session_mgr.add_message("private_1", "user", "还在吗")
+        session_mgr.history.save_session(session)
+        assert session_mgr.get_history("private_1")
+    finally:
+        mgr.shutdown()
+
+
 def test_detach_bot_clears_connection(monkeypatch, tmp_path):
     """解绑后运行时不得再持有旧连接（避免把消息发到已换号的 socket 上）。"""
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
