@@ -57,14 +57,27 @@ def _segments(raw_message: Any) -> list[MessageSegment]:
 
 
 def _base(payload: dict, bot: IBot, event_type: str) -> dict:
+    """构造事件公共字段。
+
+    ``bot_id`` 一律以 payload 的 ``self_id`` 为准（OneBot 上报里它就等于"哪个账号
+    收到了这条消息"，是权威账号），连接上的 bot_id 只在 payload 缺失时兜底。
+
+    历史问题：这里直接取 ``bot.bot_id``。连接是「index」级对象、可被复用于另一个账号，
+    重连/换号窗口里它可能是 0 或上一个账号，于是事件的 bot_id 与真实账号不一致——
+    ``AgentNode`` 按事件 bot_id 查运行时就会查不到（表现为 LLM 完全不回复）或查到
+    另一个账号的运行时（表现为用错人设/发错号）。改用 self_id 后事件自带权威账号，
+    不再依赖连接缓存的刷新时机。
+    """
+    self_id = int(payload.get("self_id", 0) or 0)
+    fallback = int(getattr(bot, "bot_id", 0) or 0) if bot else 0
     return dict(
         event_type=event_type,
         post_type=payload.get("post_type", ""),
         time=int(payload.get("time", 0)),
         user_id=int(payload.get("user_id", 0) or 0),
-        self_id=int(payload.get("self_id", 0) or 0),
+        self_id=self_id,
         bot=bot,
-        bot_id=bot.bot_id if bot else None,
+        bot_id=self_id or fallback or None,
         bot_index=bot.index if bot else None,
         owner_id=bot.owner_id if bot else None,
         raw=payload,

@@ -108,6 +108,17 @@ class BaseEvent:
         """LLM 门控：event.llm.stop() 跳过本次事件的 LLM 回复。"""
         return LlmGate(self)
 
+    @property
+    def account_id(self) -> int | None:
+        """本条事件所属的**权威账号**（QQ 号）。
+
+        优先取 payload 的 ``self_id``（OneBot 上报里它就是"哪个账号收到/发出这条消息"），
+        再回退到连接上的 ``bot_id``。连接是 index 级对象、会被复用于另一个账号，
+        而各类按账号隔离的资源（Agent 运行时 / 模块配置 / 会话历史）都必须用账号定位，
+        所以调用方一律用本属性，不要直接读 ``bot_id``。
+        """
+        return self.self_id or self.bot_id or None
+
     def stop(self) -> None:
         """强制终止本事件在节点链中的继续传播（对齐 astrbot stop_event）。
 
