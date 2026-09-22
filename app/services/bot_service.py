@@ -31,9 +31,12 @@ class BotService:
 
     # ==================== 登录装配 ====================
     async def on_bot_login(self, conn: IBot) -> None:
-        # 先装配 Agent 运行时，再加载模块；这样模块的 @llm_hook 才能注册到 runtime.llm_hooks
+        # 先装配 Agent 运行时，再加载模块；这样模块的 @llm_hook 才能注册到 runtime.llm_hooks。
+        # 用 bind_account 而非 ensure_runtime：连接是 index 级对象、可被换号复用，
+        # 它负责把「账号运行时 ↔ 当前持有该账号的连接」重新对齐并回收幽灵运行时。
         if self.agent_manager is not None:
-            self.agent_manager.ensure_runtime(conn.bot_id, bot=conn)
+            bind = getattr(self.agent_manager, "bind_account", None) or self.agent_manager.ensure_runtime
+            bind(conn.bot_id, bot=conn)
         await self.registry.load_all(conn.bot_id, bot=conn)
         logger.info(f"[BotService] Bot {conn.bot_id} 模块装配完成")
         if self.lifecycle_hooks is not None:

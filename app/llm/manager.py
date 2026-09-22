@@ -146,6 +146,19 @@ class AgentRuntime:
         self._bot = bot
         self.ctx.bot = bot
 
+    def detach_bot(self) -> None:
+        """解绑连接（换号路径用）：运行时保留但不再持有旧连接对象。
+
+        否则运行时会把回复/主动消息发送到「已被另一个账号占据」的连接上
+        （表现为跨号发送或发到已断开的 socket 上静默丢弃）。
+        """
+        self._bot = None
+        self.ctx.bot = None
+
+    @property
+    def bot(self):
+        return self._bot
+
     def _on_session_archive(self, session) -> None:
         """会话过期/结束时触发长期记忆归档蒸馏（异步提交到主事件循环）。"""
         memory = getattr(self, "memory", None)
@@ -214,6 +227,43 @@ class AgentManager:
         elif bot is not None:
             runtime.set_bot(bot)
         return runtime
+
+    def bind_account(self, bot_id: Any, bot=None) -> AgentRuntime | None:
+        """登录/换号入口：把账号的运行时与「当前真正持有该账号的连接」绑好。
+
+        与 ``ensure_runtime`` 的区别是它会做两件自愈动作，因为连接是 index 级对象、
+        可以被换号复用，而运行时是按账号 keyed 的长生命周期对象：
+
+        1. **归位**：若该账号的运行时之前绑在别的连接上（账号在 index 之间漂移），
+           重绑到当前连接——否则回复/主动消息会继续走旧连接（跨号发送或发到死 socket）。
+        2. **回收**：把「仍然绑在当前这条连接上、但账号已不是它」的其它运行时停掉并移除。
+           这种"幽灵运行时"会继续跑定时任务/主动消息，并按旧人设通过已被换号的连接发言。
+        """
+        if bot_id is None:
+            return None
+        runtime = self.ensure_runtime(bot_id, bot=bot)
+        if runtime is None or bot is None:
+            return runtime
+        if getattr(runtime, "_bot", None) is not bot:
+            runtime.set_bot(bot)
+        for key, other in list(self._runtimes.items()):
+            if other is runtime or str(key) == str(bot_id):
+                continue
+            if getattr(other, "_bot", None) is bot:
+                self._evict_runtime(other, f"连接 #{getattr(bot, 'index', '?')} 已换成账号 {bot_id}")
+        return runtime
+
+    def _evict_runtime(self, runtime: AgentRuntime, reason: str) -> None:
+        """停掉并移除一个运行时（best-effort：单个失败不影响其余清理）。"""
+        bot_id = getattr(runtime, "bot_id", None)
+        for key, value in list(self._runtimes.items()):
+            if value is runtime:
+                self._runtimes.pop(key, None)
+        try:
+            runtime.stop()
+        except Exception as e:
+            logger.add_info(f"#{bot_id}").warning(f"[Agent] 回收运行时时停止失败（已忽略）: {e}")
+        logger.add_info(f"#{bot_id}").info(f"[Agent] 运行时已回收：{reason}")
 
     def get_runtime(self, bot_id: Any) -> AgentRuntime | None:
         return self._runtimes.get(bot_id)
