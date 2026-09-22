@@ -177,21 +177,28 @@ class AgentRuntime:
             # 归档整理是后台增强，失败不应影响会话主流程，但需留痕以便排查
             logger.add_info(f"#{self.bot_id}").debug(f"[Agent] 归档整理调度失败（已忽略）: {e}")
 
-    def stop(self) -> None:
+    def stop(self, close_session: bool = True) -> None:
         """停止定时任务与主动消息计时器（任务数据保留，重启恢复）。
 
         各组件按 best-effort 逐个关闭：单个组件关闭失败不应阻断其余组件的关闭，
         因此逐个 try/except 并记录 debug 日志（而非静默 pass，便于定位关闭卡滞原因）。
+
+        ``close_session=False`` 用于「回收单个运行时」的软停止（如连接换号触发的
+        运行时淘汰）：此时不能关会话管理器——``SessionManager`` 是按 bot_id 的进程级
+        单例、被同一账号的所有运行时共享，关掉会把其它仍存活者（以及随后登录重建的
+        运行时）的历史库连接一起关死，导致「Cannot operate on a closed database」。
+        只有真正退出（AgentManager.shutdown）才连会话一起关。
         """
-        components = (
+        components = [
             ("scheduler", self.scheduler.stop),
             ("proactive", self.proactive.stop),
-            ("session_mgr", self.session_mgr.close),
             ("llm_pipeline", self.llm_pipeline.shutdown),
             ("memory", self.memory.stop),
             ("knowledge", self.knowledge.stop),
             ("mcp_manager", self.mcp_manager.close),
-        )
+        ]
+        if close_session:
+            components.append(("session_mgr", self.session_mgr.close))
         for name, stop in components:
             try:
                 stop()
@@ -260,7 +267,9 @@ class AgentManager:
             if value is runtime:
                 self._runtimes.pop(key, None)
         try:
-            runtime.stop()
+            # 软停止：不关会话管理器（按 bot_id 的进程级单例，仍可能被其他运行时/后续
+            # 重建的运行时使用），只停本运行时自己的定时器与后台任务。
+            runtime.stop(close_session=False)
         except Exception as e:
             logger.add_info(f"#{bot_id}").warning(f"[Agent] 回收运行时时停止失败（已忽略）: {e}")
         logger.add_info(f"#{bot_id}").info(f"[Agent] 运行时已回收：{reason}")
