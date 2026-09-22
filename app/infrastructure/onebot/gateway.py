@@ -512,14 +512,31 @@ class OneBotGateway:
         if isinstance(event, MessageEvent) and event.group.group_id and event.event_type == "message_group":
             indexes = await self._wait_for_message(event, conn)
             if indexes is None:
+                # 去重让位：同群多 Bot 时只有抢到处理权的那一个继续派发。
+                # 必须留痕——否则表现为「@了机器人却完全没反应」，而模块链/LLM 侧
+                # 一条日志都不会有，无从判断是被去重吞了还是别的原因。
+                bot_logger.debug(
+                    f"[去重] 群 {event.group.group_id} 消息 {event.message_id} 让位给其它账号"
+                    f"（本连接 #{conn.index}/{conn.bot_id}，同群在线={await self._message_indexes(event)}）"
+                )
                 return
+            bot_logger.debug(
+                f"[去重] 群 {event.group.group_id} 消息 {event.message_id} 由 #{conn.index}/{conn.bot_id} 处理"
+                f"（同群在线={indexes}）"
+            )
 
         # 忽略标记检查
         if self._is_ignore(event):
+            bot_logger.debug(
+                f"[忽略] 命中忽略标记，丢弃事件 {event.event_type}"
+                f"（用户 {event.user_id}，连接 #{conn.index}/{conn.bot_id}）"
+            )
             return
 
         # 派发
         await self._dispatch(event)
+        if isinstance(event, MessageEvent) and event.event_type == "message_group":
+            bot_logger.debug(f"[派发] 群 {event.group.group_id} 消息 {event.message_id} 已进入模块/LLM 节点链")
 
     async def _dispatch(self, event: BaseEvent) -> None:
         """派发到模块事件总线（由 bootstrap 注入）。"""

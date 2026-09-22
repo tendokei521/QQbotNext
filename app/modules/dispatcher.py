@@ -47,7 +47,22 @@ class ModuleDispatcher:
         # 挂载节点链上下文，供模块 event.stop() 短路整条链路
         event._ctx = ctx
         started = time.monotonic()
+        gated = event.event_type in ("message_group", "message_private")
+        if gated:
+            # 群聊"完全没反应"的排查锚点：确认事件确实进了节点链（否则问题在更上游）
+            self.log.add_info(f"#{getattr(event, 'bot_index', '?')}").debug(
+                f"[Dispatch] {event.event_type} 进入节点链"
+                f"（account={getattr(event, 'account_id', None)} self_id={event.self_id} "
+                f"bot_id={event.bot_id} 群={getattr(getattr(event, 'group', None), 'group_id', None)}）"
+            )
         await NodeRunner(self.node_registry.inbound_nodes()).run(ctx)
+        if gated:
+            self.log.add_info(f"#{getattr(event, 'bot_index', '?')}").debug(
+                f"[Dispatch] {event.event_type} 节点链结束"
+                f"（llm_stop={getattr(event, '_llm_stop', False)} "
+                f"stopped={getattr(event, '_stopped', False)} "
+                f"已提交LLM={getattr(event, '_llm_job', None) is not None}）"
+            )
         if self.event_completed_hooks is not None:
             try:
                 await self.event_completed_hooks.run(
