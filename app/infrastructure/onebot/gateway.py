@@ -77,7 +77,7 @@ class OneBotGateway:
             last_account = self.get_last_account(conn.index)
             result.append({
                 "index": conn.index,
-                "bot_id": conn.bot_id,
+                "bot_id": self._effective_bot_id(conn, last_account),
                 "owner_id": conn.owner_id,
                 "status": conn.status,
                 "ws_url": base,  # 对外只暴露基础地址（access_token 独立字段，不回显）
@@ -91,6 +91,22 @@ class OneBotGateway:
             })
         return result
 
+    @staticmethod
+    def _effective_bot_id(conn, last_account: dict | None) -> int | None:
+        """对外公布的账号：实时 bot_id 优先，缺失时回退「上次登录账号」快照。
+
+        WebUI 用这个值当 ``?bot_id=`` 去读写 agent 配置。若在重连窗口里直接吐
+        ``conn.bot_id``（此时可能已被重置为 0），前端就会把账号判成 null / 用错
+        账号，于是「配置看着一样却存到了另一个账号上、当前账号不生效」。
+        """
+        if conn.bot_id:
+            return conn.bot_id
+        try:
+            fallback = int((last_account or {}).get("user_id") or 0)
+        except (TypeError, ValueError):
+            return None
+        return fallback or None
+
     def get_bot_info_by_index(self, index: int) -> dict | None:
         conn = self.connections.get(index)
         if not conn:
@@ -98,7 +114,7 @@ class OneBotGateway:
         base, _ = split_ws_url(conn.ws_url)
         last_account = self.get_last_account(conn.index)
         return {
-            "bot_id": conn.bot_id,
+            "bot_id": self._effective_bot_id(conn, last_account),
             "owner_id": conn.owner_id,
             "status": conn.status,
             "login_info": conn.login_info,
