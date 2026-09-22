@@ -573,13 +573,34 @@ class OneBotGateway:
                 indexes.append(conn.index)
         return indexes
 
+    @staticmethod
+    def _mentions_bot(event: MessageEvent, bot_id) -> bool:
+        """消息里的 at 段是否点到了 ``bot_id``（与 app.llm.trigger.is_at_me 同一判据）。"""
+        if bot_id is None:
+            return False
+        for seg in event.message or []:
+            seg_type = getattr(seg, "type", None) or (seg.get("type") if isinstance(seg, dict) else "")
+            if seg_type != "at":
+                continue
+            data = getattr(seg, "data", None) or (seg.get("data") if isinstance(seg, dict) else {}) or {}
+            if str(data.get("qq", "")) == str(bot_id):
+                return True
+        return False
+
     async def _wait_for_message(self, event: MessageEvent, conn: BotConnection):
         """同群多 Bot 消息去重：有界等待其它 bot 到达，恰好一个 bot 处理。
 
         - 无 bot 跟踪该群（启动初期/新群）→ 直接放行，绝不丢消息；
         - 单 bot → 立即放行；
-        - 多 bot → 等待同群其它 bot（最多 wait_timeout 秒），
-          由最先完成的 bot 通过 _done 标记抢到处理权，其余跳过。
+        - 多 bot → 等待同群其它 bot（最多 wait_timeout 秒），由完成等待的一个
+          bot 抢到处理权，其余跳过。
+
+        **@ 定向**：这条消息若 @ 了本连接之外的账号，处理权必须让给它——否则
+        "谁先完成谁抢到"会把处理权交给没被 @ 的账号，它在节点链里判定
+        `is_at_me == False` 后静默跳过，而被 @ 的账号又被去重吞掉 →
+        表现为「群里 @ 机器人完全没反应」（私聊没有同群概念，故不受影响）。
+
+        让位是有界的：被 @ 的账号一直没来处理（掉线等）时仍然放行，绝不丢消息。
 
         key 设计：base_key 含 message_id（一条消息唯一，同群同秒多条不混淆），
         slot 用固定键存储各 bot 到达标记，所有 bot 读写同一个 slot/done_key，
@@ -607,6 +628,24 @@ class OneBotGateway:
         if isinstance(data, dict) and data.get(f"{bot_index}") is False:
             data[f"{bot_index}"] = True
             cache.set(base_key, data, 3)
+
+        # 本账号是否被 @；是否有别的在线账号被 @（后者才该回这条）
+        at_me = self._mentions_bot(event, conn.bot_id)
+        others_mentioned = any(
+            other.index != bot_index and self._mentions_bot(event, other.bot_id)
+            for other in self.connections.values()
+        )
+        if not at_me and others_mentioned:
+            # 让位给被 @ 的账号：不抢 _done，等它处理；它有界没来则本账号兜底放行
+            deadline = time.monotonic() + wait_timeout
+            while time.monotonic() < deadline:
+                if cache.has(done_key):
+                    return None
+                await asyncio.sleep(0.05)
+            if cache.has(done_key):
+                return None
+            cache.set(done_key, True, 3)
+            return indexes
 
         deadline = time.monotonic() + wait_timeout
         while time.monotonic() < deadline:
