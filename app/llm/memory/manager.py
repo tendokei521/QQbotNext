@@ -255,7 +255,7 @@ class MemoryManager:
         return deleted
 
     def on_session_reset(self, session_id: str, user_id: Any = None) -> str:
-        """会话重置（#chat new / exit / stop / memory reset）时的记忆处理。
+        """会话重置（#llm new / exit / stop / memory reset）时的记忆处理。
 
         按配置 memory_on_reset：
         - suspend（默认）：写 owner 重置线 → 旧记忆默认挂起不注入（数据保留）；

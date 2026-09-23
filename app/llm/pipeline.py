@@ -104,8 +104,8 @@ class LlmPipeline:
         session_lock: asyncio.Lock | None = None
         lock_acquired = False
         try:
-            # #chat 指令仍然走原 chat.handle（它会自己发送回复）
-            if ctx.user_text.startswith("#chat "):
+            # #llm 指令仍然走原 chat.handle（它会自己发送回复）
+            if ctx.user_text.startswith("#llm "):
                 from app.llm.chat import handle as agent_handle
 
                 await agent_handle(self.runtime, ctx.event)

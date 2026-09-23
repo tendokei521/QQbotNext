@@ -1,4 +1,4 @@
-"""P1 注入链路测试：build_messages 记忆块 / 召回评分 / manager 注入 / #chat memory 命令。"""
+"""P1 注入链路测试：build_messages 记忆块 / 召回评分 / manager 注入 / #llm memory 命令。"""
 
 from app.llm.config import DEFAULT_LLM_CONFIG
 from app.llm.memory.commands import handle_memory_command
@@ -100,7 +100,7 @@ def test_recall_block_injects_and_toggles():
     assert mgr3.recall_block("private_5", user_id="5") == ""
 
 
-# ---- #chat memory 命令 ----
+# ---- #llm memory 命令 ----
 async def _dispatch(rt, session_id, user_id, action, is_admin=True, is_private=False):
     sent = []
 

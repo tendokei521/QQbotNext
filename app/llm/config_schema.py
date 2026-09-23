@@ -454,7 +454,7 @@ SCHEMA = {
         "default": False, "group": "group_memory",
     },
     "memory_audit_enable": {
-        "type": "boolean", "label": "事件记录", "description": "记录记忆的写入/读取/删除/注入事件（#chat memory audit 查看）",
+        "type": "boolean", "label": "事件记录", "description": "记录记忆的写入/读取/删除/注入事件（#llm memory audit 查看）",
         "default": True, "group": "group_memory",
     },
     "memory_audit_inject": {
@@ -470,11 +470,11 @@ SCHEMA = {
         "default": True, "group": "group_memory",
     },
     "memory_max_age_days": {
-        "type": "number", "label": "记忆最大龄(天)", "description": "超过此龄不再注入（数据保留，可 #chat memory list --all 查看）；0=不限",
+        "type": "number", "label": "记忆最大龄(天)", "description": "超过此龄不再注入（数据保留，可 #llm memory list --all 查看）；0=不限",
         "default": 180, "min": 0, "max": 3650, "group": "group_memory",
     },
     "memory_on_reset": {
-        "type": "select", "label": "会话重置时记忆", "description": "#chat new/exit/stop 或 memory reset 时如何处置记忆",
+        "type": "select", "label": "会话重置时记忆", "description": "#llm new/exit/stop 或 memory reset 时如何处置记忆",
         "default": "suspend", "group": "group_memory",
         "options": {
             "suspend": "挂起旧记忆（默认，数据保留）",

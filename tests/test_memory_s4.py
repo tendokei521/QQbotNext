@@ -1,4 +1,4 @@
-"""S4 记忆重置（休眠模块级）测试：suspend/clear/keep、#chat memory reset 命令。"""
+"""S4 记忆重置（休眠模块级）测试：suspend/clear/keep、#llm memory reset 命令。"""
 
 import time
 

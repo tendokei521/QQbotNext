@@ -28,7 +28,7 @@
 
 - 隔离由 owner + `scope_owners()` **代码强制**，不在召回层越权。
 - 上限淘汰：`memory_max_per_owner`（默认 300），按 `重要度×时间衰减` 最低者淘汰。
-- 审计：write / read / inject / delete / forget / clear / distill 全留痕，`#chat memory audit` 查看。
+- 审计：write / read / inject / delete / forget / clear / distill 全留痕，`#llm memory audit` 查看。
 
 ## 4. 能力与接入点
 
@@ -39,7 +39,7 @@
 | 原生工具 | `tool.py`：memory_save / memory_recall / memory_delete | `chat._collect_llm_ext` 按会话追加（复用 ToolSpec + 工具循环） |
 | 确定性兜底 | `detect.py`：“记住/我喜欢/我叫…”直接入库 | `chat.py` 三入口 `_maybe_autosave` |
 | 隐式蒸馏 | `extract.py`（按用户分组、LLM 一次调用）+ 限频 | 回复后 `_fire_consolidate` + 会话归档 `session.on_archive` |
-| 管理命令 | `commands.py` | `#chat memory list / search / forget / clear / audit` |
+| 管理命令 | `commands.py` | `#llm memory list / search / forget / clear / audit` |
 | 配置 | `config.py` 默认值 + `config_schema.py` Web 表单 | `group_memory` 分组 |
 
 消息流示意（群聊“小明喜欢什么”）：
@@ -59,7 +59,7 @@ user 消息 → 会话历史 + ② 记忆注入(召回 owner=群公共+本人+�
 ## 6. 回滚与安全
 
 - `memory_enable=false` 一键关闭（数据保留）；删除 `memory/` 包 + `agent` 配置 `memory_*` 字段即回退。
-- 记忆按 bot、按 owner 隔离；跨群默认关；`#chat memory forget/clear` 可定点清除；audit 全留痕可解释可删除。
+- 记忆按 bot、按 owner 隔离；跨群默认关；`#llm memory forget/clear` 可定点清除；audit 全留痕可解释可删除。
 - 蒸馏触发额外 LLM 调用，靠 `memory_extract_interval_min` 限频，任何异常静默降级不阻断主流程。
 
 ---
@@ -92,10 +92,10 @@ user 消息 → 会话历史 + ② 记忆注入(召回 owner=群公共+本人+�
 - 蒸馏不自动下架既有记忆（避免误杀）。
 
 ### 7.5 会话重置（suspend/clear/keep）
-- 只在**显式**重置（`#chat new` / `#chat exit` / `#chat stop` / `#chat memory reset`）写 `last_reset_at`（被动超时归档只做蒸馏，不挂起，避免频繁断记忆）；
+- 只在**显式**重置（`#llm new` / `#llm exit` / `#llm stop` / `#llm memory reset`）写 `last_reset_at`（被动超时归档只做蒸馏，不挂起，避免频繁断记忆）；
 - suspend（默认）：`updated_at < last_reset_at` 的旧记忆默认不注入，仅「已保存/已确认」型保留（`memory_upgrade_saved_only`）。
 
 ### 7.6 纠错闭环入口
-- 命令：`#chat memory list [--all] / correct <旧> <新> / deny <词|id> / confirm <词|id> / reset [hard]`；
+- 命令：`#llm memory list [--all] / correct <旧> <新> / deny <词|id> / confirm <词|id> / reset [hard]`；
 - 工具：`memory_correct` / `memory_deny`（模型在对话中感知“记错了/不是这样/我没说过”时调用）。
 

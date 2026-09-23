@@ -6,7 +6,7 @@
    （会话/历史/背景/工具/记忆/指代/图片）；
 2. **请求**：``generate_response``（非流式）与 ``stream_response``（流式），
    两者只差 provider 调用方式；
-3. **指令**：``#chat`` 指令入口 ``handle`` → ``handle_commands``。
+3. **指令**：``#llm`` 指令入口 ``handle`` → ``handle_commands``。
 
 消息的**顺序与清洗**不在本模块，见 ``app.llm.assembly``（块表）。
 """
@@ -526,9 +526,9 @@ def _record_stream_telemetry(
 
 
 async def handle(module, event):
-    """``#chat`` 指令入口（普通消息不经此处：由 LlmPipeline 走 generate/stream_response）。
+    """``#llm`` 指令入口（普通消息不经此处：由 LlmPipeline 走 generate/stream_response）。
 
-    流水线在 ``ctx.user_text.startswith("#chat ")`` 时把事件交给本函数；
+    流水线在 ``ctx.user_text.startswith("#llm ")`` 时把事件交给本函数；
     因此这里只需要处理指令，不再保留"旧版自己发消息"的完整回复路径。
     """
     config = module.config
@@ -546,7 +546,7 @@ async def handle(module, event):
         session_id = f"group_{event.group.group_id}"
 
     raw_text = extract_text(event.message).strip()
-    if not raw_text.startswith("#chat "):
+    if not raw_text.startswith("#llm "):
         # 非指令消息由流水线负责；这里静默返回，避免出现两条回复路径
         return
 
@@ -565,7 +565,7 @@ async def handle(module, event):
 
 
 async def _handle_command_event(module, event, config) -> None:
-    """把 ``#chat`` 指令派发给命令处理器（群/私聊共用）。"""
+    """把 ``#llm`` 指令派发给命令处理器（群/私聊共用）。"""
     session_mgr = SessionManager(str(module.bot_id))
     is_private = event.message_type == "private"
     if is_private:
@@ -1126,7 +1126,7 @@ async def stream_response(runtime, event, ctx=None):
 async def handle_commands(module, session_mgr, session_id, group_id, user_id,
                           raw_text, is_admin, is_private, event=None) -> bool:
     cmd = raw_text.strip()
-    if not cmd.startswith("#chat "):
+    if not cmd.startswith("#llm "):
         return False
     parts = cmd.split(maxsplit=1)
     if len(parts) < 2:
@@ -1160,7 +1160,7 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
         if not convs:
             await send("当前会话暂无对话记录")
             return True
-        lines = [f"当前会话 {len(convs)} 个对话（#chat switch <id> 切换）:"]
+        lines = [f"当前会话 {len(convs)} 个对话（#llm switch <id> 切换）:"]
         for c in convs[:10]:
             mark = " *" if c["id"] == session.active_id else ""
             lines.append(f"  {c['id'][:8]} | {c['title']} | {c['count']}条{mark}")
@@ -1227,10 +1227,10 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
         return True
 
     elif action == "export" or action.startswith("export "):
-        sub = raw_text[len("#chat export "):].strip()
+        sub = raw_text[len("#llm export "):].strip()
         export_task_id = sub if sub and " " not in sub else (session.task_id if session else "")
         if not export_task_id:
-            await send("当前没有活跃会话可导出，请指定任务ID: #chat export <task_id>")
+            await send("当前没有活跃会话可导出，请指定任务ID: #llm export <task_id>")
             return True
         text = history_mgr.export_text(export_task_id)
         if text:
@@ -1276,7 +1276,7 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
             return True
         rows = scheduler.status()
         if not rows:
-            await send("暂无定时任务（对话中提出定时请求，或用 #chat schedule add 手动添加）")
+            await send("暂无定时任务（对话中提出定时请求，或用 #llm schedule add 手动添加）")
             return True
         lines = ["定时任务:"]
         for r in rows:
@@ -1285,7 +1285,7 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
                 f"  {r['task_id'][:8]} | {r['session_id']} | {r['repeat']} | "
                 f"下次 {next_s} | {r['content'][:20]}"
             )
-        lines.append("#chat schedule cancel <id> 取消；页面也可管理")
+        lines.append("#llm schedule cancel <id> 取消；页面也可管理")
         await send("\n".join(lines))
         return True
 
@@ -1304,7 +1304,7 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
                     f"[Memory] 会话重置钩子失败（已忽略）: {e}"
                 )
         if session:
-            session_mgr.add_message(session_id, "assistant", "#chat exit")
+            session_mgr.add_message(session_id, "assistant", "#llm exit")
             history_mgr.save_session(session)
         session_mgr.destroy_session(session_id)
         await send("已退出会话")
@@ -1323,7 +1323,7 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
                     f"[Memory] 会话重置钩子失败（已忽略）: {e}"
                 )
         if session:
-            session_mgr.add_message(session_id, "assistant", "#chat stop")
+            session_mgr.add_message(session_id, "assistant", "#llm stop")
             history_mgr.save_session(session)
         session_mgr.destroy_session(session_id)
         await send("会话已强制结束")

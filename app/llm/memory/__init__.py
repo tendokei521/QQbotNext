@@ -6,7 +6,7 @@
 - 原生工具：``build_memory_tools``（memory_save / memory_recall / memory_delete）；
 - 确定性兜底：``detect.autosave_clause / wants_autosave``；
 - 隐式蒸馏：``extract`` + ``MemoryManager.maybe_consolidate``（回复后限频 + 归档 force）；
-- 管理命令：``commands.handle_memory_command``（#chat memory ...）。
+- 管理命令：``commands.handle_memory_command``（#llm memory ...）。
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""P3 群聊隔离与审计测试：提及扩展 / 注入隔离 / 工具召回他人画像 / #chat memory audit。"""
+"""P3 群聊隔离与审计测试：提及扩展 / 注入隔离 / 工具召回他人画像 / #llm memory audit。"""
 
 from app.llm.config import DEFAULT_LLM_CONFIG
 from app.llm.memory.commands import handle_memory_command

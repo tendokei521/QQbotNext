@@ -1,6 +1,6 @@
-"""#chat memory 命令（P1：list / search / forget / clear；P3 增 audit）。
+"""#llm memory 命令（P1：list / search / forget / clear；P3 增 audit）。
 
-沿用 ``#chat schedule`` 的命令风格。隔离规则：
+沿用 ``#llm schedule`` 的命令风格。隔离规则：
 - list / search：展示当前会话「可见」owner（私聊=本人；群聊=群公共+本人）；
 - forget / clear：只作用于「本人」层（群公共/他人记忆不可由普通成员误删）；
 - audit：管理员，见 P3。
@@ -15,15 +15,15 @@ from app.llm.memory.store import owner_group_member, owner_private
 
 _USAGE = (
     "用法：\n"
-    "#chat memory list [--all]\n"
-    "#chat memory search <词>\n"
-    "#chat memory correct <旧词> <新事实>\n"
-    "#chat memory deny <词|id>\n"
-    "#chat memory confirm <词|id>\n"
-    "#chat memory forget <id|词>\n"
-    "#chat memory clear\n"
-    "#chat memory reset [hard]\n"
-    "#chat memory audit [owner]（管理员）"
+    "#llm memory list [--all]\n"
+    "#llm memory search <词>\n"
+    "#llm memory correct <旧词> <新事实>\n"
+    "#llm memory deny <词|id>\n"
+    "#llm memory confirm <词|id>\n"
+    "#llm memory forget <id|词>\n"
+    "#llm memory clear\n"
+    "#llm memory reset [hard]\n"
+    "#llm memory audit [owner]（管理员）"
 )
 
 
@@ -76,7 +76,7 @@ async def _dispatch(memory, session_id, user_id, is_admin, action: str) -> str:
 
     if cmd == "search":
         if not arg:
-            return "用法：#chat memory search <词>"
+            return "用法：#llm memory search <词>"
         hits = rank(store, owners=owners, query=arg, limit=10, max_chars=2000)
         if not hits:
             return f"未找到与「{arg}」相关的记忆"
@@ -88,26 +88,26 @@ async def _dispatch(memory, session_id, user_id, is_admin, action: str) -> str:
     if cmd == "correct":
         parts = arg.split(maxsplit=1)
         if len(parts) < 2 or not parts[1]:
-            return "用法：#chat memory correct <旧词> <新事实>"
+            return "用法：#llm memory correct <旧词> <新事实>"
         old, new = parts
         mid = memory.correct_own(session_id, user_id, old, new)
         return "已纠正：旧记忆已下架，新记忆已写入" if mid else "纠错失败（新内容为空或无旧记忆命中）"
 
     if cmd == "deny":
         if not arg:
-            return "用法：#chat memory deny <词|id>"
+            return "用法：#llm memory deny <词|id>"
         n = memory.deny_own(session_id, user_id, arg)
         return f"已下架 {n} 条相关记忆（可恢复）" if n else "未找到可下架的记忆（仅限本人记忆）"
 
     if cmd == "confirm":
         if not arg:
-            return "用法：#chat memory confirm <词|id>"
+            return "用法：#llm memory confirm <词|id>"
         n = memory.confirm_own(session_id, user_id, arg)
         return f"已确认 {n} 条记忆（置信度已上调）" if n else "未找到可确认的记忆"
 
     if cmd == "forget":
         if not arg:
-            return "用法：#chat memory forget <id|词>"
+            return "用法：#llm memory forget <id|词>"
         deleted = _forget(store, session_id, user_id, arg)
         if deleted == 0:
             return "没有可删除的记忆（只允许删除你自己的记忆）"

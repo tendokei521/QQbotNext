@@ -208,7 +208,7 @@ def supplementary_blocks(
 
 
 def clear(session_id: Any = None, bot_id: Any = None) -> None:
-    """清理登记（测试与 "#chat new" 用）。"""
+    """清理登记（测试与 "#llm new" 用）。"""
     with _LOCK:
         store = _load()
         if session_id is None:

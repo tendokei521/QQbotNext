@@ -420,7 +420,7 @@ resp = await provider.chat(messages, model=model, temperature=0.7, max_tokens=15
 
 - 内置 `openai`（OpenAI/DeepSeek/中转兼容）：**429/5xx/网络错误指数退避重试**（`retry_attempts`），认证 4xx 立即失败，`api_key` 支持多 key 换行/逗号分隔轮换；
 - 新增后端 = 在 `providers/` 加一个 `BaseProvider` 子类并注册到 `PROVIDERS`。
-- 会话/对话分离：`#chat new [标题]` 开新对话、`#chat switch <id>` 切换、`#chat list` 列出当前会话的多个对话线程。
+- 会话/对话分离：`#llm new [标题]` 开新对话、`#llm switch <id>` 切换、`#llm list` 列出当前会话的多个对话线程。
 - **主动消息**（化用 astrbot_plugin_proactive_chat）：`proactive_*` 配置分组——私聊按随机间隔主动发言、
   群聊沉默后主动开口、免打扰时段、未回复上限；状态持久化到 `proactive_data.json`；
   模块自带 `pages/index.html`（LLM 基础 + 主动消息合并配置页，WebUI 中以自定义页渲染）。
