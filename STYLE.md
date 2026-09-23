@@ -112,9 +112,15 @@ except Exception as e:
 
 ## 9. 测试要求
 
-- 新增/修改功能必须配套测试，位于 `tests/`，命名 `test_*.py`。
-- 提交前必须全量通过：`venv\Scripts\python.exe -m pytest -q`（**全绿无失败**；基线用例数不写死，
-  随迭代增长，需要时用 `pytest --collect-only -q | tail -2` 取当前值）。
+- 新增/修改功能必须配套测试，位于 `tests/`，命名 `test_*.py`（用例可与功能一起留到该功能收尾时再跑全量）。
+- **验证按改动规模分层**（细则以 `AGENTS.md`「验证规则」为准，本节不重复定义）：
+  - 小改动（文档/注释/文案/重命名/格式化）→ **不跑测试直接提交**；
+  - 局部逻辑改动 → 只跑相关测试文件（`pytest -q tests/test_x.py`）；
+  - 大工程收尾 / 发版前 → 全量 `venv\Scripts\python.exe -m pytest -q`（**全绿无失败**）
+    + `ruff check .` 无新增违规；基线用例数不写死，随迭代增长，需要时用
+    `pytest --collect-only -q | tail -2` 取当前值。
+- CI（`.github/workflows/ci.yml`）在每次 push/PR 跑全量测试，是本地豁免全量后的安全网。
+- 任何档位都**不许带着已知失败提交**：跑了且失败，就先修或先说明。
 - 测试用 `pytest-asyncio`（`asyncio_mode = "auto"`，无需 `@pytest.mark.asyncio`）。
 
 ## 10. 工具链现状
@@ -146,14 +152,17 @@ pytest -q --cov --cov-report=term-missing   # 需要覆盖率时
 
 ### 10.3 提交前自查清单
 
-- [ ] `ruff check .` 无**新增**违规（存量违规按批次清理，不要一次改一片）
+> 按 `AGENTS.md` 的验证分档执行：小改动档位只走下面这些"看代码"的条目，
+> 带 🔬 的两条留到大工程收尾 / 局部逻辑改动时执行。
+
 - [ ] 无未使用的 import
 - [ ] 注解用 `X | None` / 内置泛型
 - [ ] 异常用 `logger.exception` 记录；**禁止 `except: pass`**（由 `tests/test_no_silent_except.py` 强制）
 - [ ] 中文注释解释了"为什么"
 - [ ] 新增依赖只改 `pyproject.toml` 一处：**不要**在 `requirements.txt` 里重复列举
       （该文件已改为指向 `pyproject.toml` 的纯指针，CI 会校验）
-- [ ] `pytest -q` 全绿
+- [ ] 🔬 改动相关测试全绿（小改动档位可不跑；大工程收尾时改为 `pytest -q` 全量全绿）
+- [ ] 🔬 `ruff check .` 无**新增**违规（存量违规按批次清理，不要一次改一片；小改动档位可留到收尾时跑）
 
 ## 11. 提交规范（Commit）
 
@@ -161,6 +170,7 @@ pytest -q --cov --cov-report=term-missing   # 需要覆盖率时
 > 两者与 `AGENTS.md` 的提交规则（Conventional Commits + 一步一提交）直接冲突，
 > 且仓库历史中两套风格并存。现统一为 **Conventional Commits + 一步一提交**，
 > `AGENTS.md` 为准一来源；本节如与 `AGENTS.md` 不一致，以 `AGENTS.md` 为准。
+> 提交前要跑多少测试同样以 `AGENTS.md`「验证规则」为准（小改动不必跑全量）。
 
 - **格式**：`<type>(<scope>): <subject>`
 
@@ -179,7 +189,8 @@ pytest -q --cov --cov-report=term-missing   # 需要覆盖率时
   便于回滚与审查；**不要**攒到最后一次性提交。
 - **不混入无关改动**：工作区若有与当前步骤无关的改动，只 `git add` 相关文件，不要顺手带进当前提交。
 - **不提交运行时产物**：`data/`、`logs/`、`__pycache__`、`.env` 等（见 `.gitignore`）。
-- **提交前自查**：`venv\Scripts\python.exe -m pytest -q` 全绿。
+- **提交前自查**：按 `AGENTS.md`「验证规则」分档执行——小改动直接提交（不跑测试），
+  局部逻辑改动跑相关测试文件，大工程收尾时 `venv\Scripts\python.exe -m pytest -q` 全量全绿。
 - **模板**：仓库根目录 `.gitmessage` 提供 Conventional Commits 预填模板，执行
   `git config commit.template .gitmessage` 后 `git commit`（不带 `-m`）即可启用。
 

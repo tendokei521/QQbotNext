@@ -261,7 +261,8 @@ venv\Scripts\python.exe -m pytest -q
 ```
 - 覆盖：领域编解码 / 权限 / 配置中心(含迁移) / 模块注册表 / 事件分发 / Provider 与 list/dynamic API /
   定时任务 / LLM 流水线与记忆 / 节点链 / 模块安装。
-- 新增功能后跑一遍全量，确保**全绿无失败**。
+- 新增功能**收尾时**跑一遍全量，确保**全绿无失败**；日常小改动（文档/注释/文案等）不必跑全量，
+  按 `AGENTS.md`「验证规则」分档执行（CI 每次 push 也会跑全量兜底）。
   基线用例数会随迭代增长，此处不再写死数字（写死必然过期），需要时用下面的命令取当前值：
   ```bash
   venv\Scripts\python.exe -m pytest --collect-only -q | Select-Object -Last 2
