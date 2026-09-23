@@ -16,6 +16,7 @@ from typing import Any
 
 from app.domain.message import Message
 from app.llm.actions import build_outbound_builder
+from app.llm.commands import is_command
 from app.llm.context import LlmContext, LlmJob
 from app.llm.locks import SessionLockManager
 from app.llm.pool import LlmPool
@@ -105,7 +106,7 @@ class LlmPipeline:
         lock_acquired = False
         try:
             # #llm 指令仍然走原 chat.handle（它会自己发送回复）
-            if ctx.user_text.startswith("#llm "):
+            if is_command(ctx.user_text):
                 from app.llm.chat import handle as agent_handle
 
                 await agent_handle(self.runtime, ctx.event)

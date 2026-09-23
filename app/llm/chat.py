@@ -6,7 +6,7 @@
    （会话/历史/背景/工具/记忆/指代/图片）；
 2. **请求**：``generate_response``（非流式）与 ``stream_response``（流式），
    两者只差 provider 调用方式；
-3. **指令**：``#llm`` 指令入口 ``handle`` → ``handle_commands``。
+3. **指令**：``#llm`` 指令入口 ``handle`` → ``handle_commands``（总表与帮助见 ``app.llm.commands``）。
 
 消息的**顺序与清洗**不在本模块，见 ``app.llm.assembly``（块表）。
 """
@@ -18,6 +18,13 @@ import time
 from typing import Any
 
 from app.llm import logger
+from app.llm.commands import (
+    build_help_nodes,
+    build_help_text,
+    chunk_text,
+    is_help_action,
+    parse_action,
+)
 from app.llm.compress import maybe_compress_context
 from app.llm.group_context import (
     build_group_env_text,
@@ -528,15 +535,12 @@ def _record_stream_telemetry(
 async def handle(module, event):
     """``#llm`` 指令入口（普通消息不经此处：由 LlmPipeline 走 generate/stream_response）。
 
-    流水线在 ``ctx.user_text.startswith("#llm ")`` 时把事件交给本函数；
+    流水线在 ``commands.is_command(ctx.user_text)`` 时把事件交给本函数；
     因此这里只需要处理指令，不再保留"旧版自己发消息"的完整回复路径。
-    """
-    config = module.config
-    api_key = _provider_config_for(module).get("api_key", "")
-    if not api_key:
-        logger.add_info(f"#{module.bot_id}").error(f"[{module.name}] API 密钥未配置，请先在 Provider 预设中选择连接配置")
-        return
 
+    ``#llm help`` 是**静态指令表**：不依赖模型，也不检查 API 密钥——密钥没配好时
+    正是最需要看指令表的时候。其余指令仍需密钥与场景开关齐备。
+    """
     message_type = event.message_type
     if message_type not in ("group", "private"):
         return
@@ -546,7 +550,8 @@ async def handle(module, event):
         session_id = f"group_{event.group.group_id}"
 
     raw_text = extract_text(event.message).strip()
-    if not raw_text.startswith("#llm "):
+    action = parse_action(raw_text)
+    if action is None:
         # 非指令消息由流水线负责；这里静默返回，避免出现两条回复路径
         return
 
@@ -558,6 +563,14 @@ async def handle(module, event):
                 return
         else:
             if not config.get("group_enable", False):
+                return
+
+        if not is_help_action(action):
+            api_key = _provider_config_for(module).get("api_key", "")
+            if not api_key:
+                logger.add_info(f"#{module.bot_id}").error(
+                    f"[{module.name}] API 密钥未配置，请先在 Provider 预设中选择连接配置"
+                )
                 return
         await _handle_command_event(module, event, config)
     finally:
@@ -1126,13 +1139,10 @@ async def stream_response(runtime, event, ctx=None):
 async def handle_commands(module, session_mgr, session_id, group_id, user_id,
                           raw_text, is_admin, is_private, event=None) -> bool:
     cmd = raw_text.strip()
-    if not cmd.startswith("#llm "):
-        return False
-    parts = cmd.split(maxsplit=1)
-    if len(parts) < 2:
+    action = parse_action(cmd)
+    if action is None:
         return False
 
-    action = parts[1].strip()
     history_mgr = session_mgr.history
     bot = event.bot
 
@@ -1142,6 +1152,13 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
             await bot.send_private_msg(user_id=int(user_id), message=text)
         else:
             await bot.send_group_msg(group_id=int(group_id), message=text)
+
+    if is_help_action(action):
+        await _send_help(
+            module, event, bot, is_private=is_private,
+            group_id=group_id, user_id=user_id, send=send,
+        )
+        return True
 
     session = session_mgr.get_session(session_id)
 
@@ -1167,8 +1184,11 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
         await send("\n".join(lines))
         return True
 
-    elif action.startswith("switch "):
-        target = action[7:].strip()
+    elif action == "switch" or action.startswith("switch "):
+        target = action[len("switch"):].strip()
+        if not target:
+            await send("用法：#llm switch <conv_id|task_id>（可用 #llm list 查看）")
+            return True
         if not session:
             await send("当前没有活跃会话")
             return True
@@ -1204,8 +1224,11 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
             await send("创建失败")
         return True
 
-    elif action.startswith("load "):
-        load_task_id = action[5:].strip()
+    elif action == "load" or action.startswith("load "):
+        load_task_id = action[len("load"):].strip()
+        if not load_task_id:
+            await send("用法：#llm load <task_id>")
+            return True
         data = history_mgr.load_history(load_task_id)
         if not data:
             await send(f"未找到任务: {load_task_id}")
@@ -1227,7 +1250,7 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
         return True
 
     elif action == "export" or action.startswith("export "):
-        sub = raw_text[len("#llm export "):].strip()
+        sub = action[len("export"):].strip()
         export_task_id = sub if sub and " " not in sub else (session.task_id if session else "")
         if not export_task_id:
             await send("当前没有活跃会话可导出，请指定任务ID: #llm export <task_id>")
@@ -1276,7 +1299,7 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
             return True
         rows = scheduler.status()
         if not rows:
-            await send("暂无定时任务（对话中提出定时请求，或用 #llm schedule add 手动添加）")
+            await send("暂无定时任务（可在对话中直接提出定时请求，或用 WebUI 的「定时任务」页面添加）")
             return True
         lines = ["定时任务:"]
         for r in rows:
@@ -1329,7 +1352,55 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
         await send("会话已强制结束")
         return True
 
-    return False
+    # 未知动作：明确回一句（此前静默返回，用户会以为机器人坏了）
+    await send(f"未知指令：{action}\n发送 #llm help 查看全部指令")
+    return True
+
+
+def _availability(module) -> dict:
+    """当前 bot 实际启用的能力（帮助里标注「本 bot 未启用」，避免照着表试却没反应）。"""
+    memory = getattr(module, "memory", None)
+    memory_on = False
+    if memory is not None:
+        try:
+            memory_on = bool(memory.enabled())
+        except Exception as e:  # noqa: BLE001 —— 帮助渲染不能因为探测失败而中断
+            logger.add_info(f"#{getattr(module, 'bot_id', '?')}").debug(
+                f"[#llm help] 记忆启用状态探测失败（按未启用展示）: {e}"
+            )
+    return {
+        "schedule": getattr(module, "scheduler", None) is not None,
+        "proactive": getattr(module, "proactive", None) is not None,
+        "memory": memory_on,
+    }
+
+
+async def _send_help(module, event, bot, *, is_private, group_id, user_id, send) -> None:
+    """发送 `#llm help`：优先合并转发，失败降级为分段纯文本。
+
+    合并转发把"说明 + 每个分组"拆成独立节点，长指令表在 QQ 里可展开阅读，
+    不会像单条长文本那样被折叠成"[合并转发]"或被截断。
+    """
+    log = logger.add_info(f"#{getattr(module, 'bot_id', '?')}")
+    available = _availability(module)
+    self_id = getattr(event, "self_id", None) or getattr(module, "bot_id", None)
+    nodes = build_help_nodes(uin=self_id, available=available)
+
+    resp: Any = None
+    try:
+        if is_private:
+            resp = await bot.send_forward_msg(user_id=int(user_id), msgdata=nodes)
+        else:
+            resp = await bot.send_forward_msg(group_id=int(group_id), msgdata=nodes)
+        if isinstance(resp, dict) and resp.get("status") == "ok":
+            return
+        reason = resp.get("message") if isinstance(resp, dict) else resp
+        log.debug(f"[#llm help] 合并转发未成功（{reason}），降级为纯文本")
+    except Exception as e:  # noqa: BLE001 —— 合并转发不被支持时必须降级而不是静默失败
+        log.debug(f"[#llm help] 合并转发异常（{e}），降级为纯文本")
+
+    for chunk in chunk_text(build_help_text(available=available)):
+        await send(chunk)
 
 
 
