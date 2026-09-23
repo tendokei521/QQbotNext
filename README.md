@@ -239,6 +239,26 @@ class Module(BaseModule):
 - `SKILLS` / `@skill`：注入 system prompt 的技能说明
 - 模块 `config` 里可用 `tools_enabled` / `skills_enabled` 单独开关工具与技能
 
+### 指令交互（`#llm`）
+
+在会话里直接发 `#llm <动作>` 即可管理机器人的会话、定时任务、主动消息与长期记忆，
+**不需要 @ 机器人**（群聊需开启「群聊回复」，私聊需开启「私聊回复」）。发 `#llm help`
+（或单独发 `#llm`）会以**合并转发**形式返回完整指令表，每个分组一个节点：
+
+```
+#llm help                                  # 指令表（合并转发）
+#llm task / list / switch <id> / new / load <id> / export / exit / stop
+#llm schedule / schedule cancel <id>       # 定时任务
+#llm proactive [session_id]                # 主动消息
+#llm memory list | search | correct | deny | confirm | forget | clear | reset | audit
+```
+
+- 指令回复统一以「# 」开头，便于与聊天内容区分；`#llm stop`、`#llm memory audit` 仅 Bot 拥有者可用；
+- `#llm help` 是**静态指令表**，不依赖模型：API 密钥没配好时也能查看；
+- 指令总表定义在 `app/llm/commands.py`（`COMMAND_GROUPS`），新增指令时表与
+  `chat.handle_commands` 两处必须同步——`tests/test_llm_help.py` 会逐条校验，防止帮助与实际行为漂移；
+- 合并转发不被实现支持时自动降级为分段纯文本。
+
 ### 上下文补全（聊天环境自己取）
 
 聊天记录里常常只剩"骨架"（`@123`、`[引用]`），框架分三层把"血肉"补齐，让模型不必猜：
