@@ -327,6 +327,19 @@ GET /agent/telemetry?bot_id=<qq>&limit=30
 POST /agent/telemetry/reset?bot_id=<qq>
 ```
 
+日志里**一次请求只落一行 token 用量**（含工具多轮与重试的累计），在整轮请求完全结束后打印：
+
+```
+[Api] 本次请求消耗: 输入 1234（缓存命中 1000 / 未命中 234） / 输出 567 / 合计 1801 tokens | 回复 27 字符 | model=deepseek-chat | 流式
+```
+
+- 命中/未命中**直接取上游字段**（DeepSeek `prompt_cache_hit_tokens`/`prompt_cache_miss_tokens`、
+  OpenAI `prompt_tokens_details.cached_tokens`、Anthropic `cache_read_input_tokens`），不自己估算；
+- 流式请求会自动带 `stream_options.include_usage` 让上游回报 usage；个别上游不认这个参数时会
+  自动去掉重发一次（该次拿不到 token 数，但不影响回复）；
+- 上游一个字都没报 usage 时**不打印**这一行（宁缺毋编）；
+- 可用 `extra_body.stream_options` 覆盖默认行为。
+
 ### Agent 配置页面
 
 Agent 配置已从通用表单升级为**专属领域页面**：
