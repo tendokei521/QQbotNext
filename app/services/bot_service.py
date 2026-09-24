@@ -78,7 +78,9 @@ class BotService:
         return await self.gateway.connect_bot(index)
 
     async def disconnect(self, index: int) -> None:
-        await self.gateway.disconnect_bot(index)
+        # manual=True：用户主动断开，监督循环不得把它自动连回来
+        # （否则 auto_connect 账号最多 10s 后又连接，日志表现为「断开后又连上」）
+        await self.gateway.disconnect_bot(index, manual=True)
 
     async def reconnect(self, index: int) -> bool:
         return await self.gateway.reconnect_bot(index)

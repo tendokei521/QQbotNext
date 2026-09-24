@@ -88,6 +88,8 @@ class OneBotGateway:
                 "reconnect_attempts": conn.reconnect_attempts,
                 "last_error": conn.last_error,
                 "auto_connect": conn.auto_connect,
+                # 本次运行期间是否被用户手动断开（为 True 时监督循环不会自动重连）
+                "suppress_auto_reconnect": bool(getattr(conn, "suppress_auto_reconnect", False)),
             })
         return result
 
@@ -217,7 +219,18 @@ class OneBotGateway:
 
             conn.status = "connecting"
             conn.last_error = None
+            # 走到这里 = 显式连接请求（WebUI 连接/重连，或监督循环的掉线恢复）：
+            # 解除「用户手动断开」的抑制，让该账号重新参与自动重连。
+            conn.suppress_auto_reconnect = False
+            epoch = getattr(conn, "connect_epoch", 0)
             websocket = await self._connect_websocket(conn.ws_url)
+            if getattr(conn, "connect_epoch", 0) != epoch:
+                # 握手期间收到了断开请求 → 本次连接已作废，丢弃结果（不要覆盖 disconnected 状态）
+                if websocket is not None:
+                    with contextlib.suppress(Exception):
+                        await websocket.close()
+                self.log.info(f"机器人索引: {index} 连接已取消（握手期间收到断开请求）")
+                return False
             if websocket:
                 conn.websocket = websocket
                 conn.status = "connected"
@@ -236,8 +249,26 @@ class OneBotGateway:
             await self._notify_status(conn, "error", conn.last_error)
             return False
 
-    async def disconnect_bot(self, index: int) -> None:
+    async def disconnect_bot(self, index: int, *, manual: bool = False) -> None:
+        """断开连接。
+
+        ``manual=True`` = 用户在 WebUI 主动点「断开」（``/api/bots/{index}/disconnect``）：
+        置位 ``suppress_auto_reconnect``，监督循环不再把这个账号自动连回来，
+        直到用户显式「连接 / 重连」（或重新打开它的自动连接开关 / 重启进程）。
+
+        不加这个标记时，``_supervise`` 会把「status=disconnected 且 auto_connect=True」
+        当成掉线，最多 10s 后又连接 —— 日志里表现为「断开连接」之后紧跟「连接成功」，
+        即「点了断开，一段时间后又连接」。
+        """
         conn = self.connections.get(index)
+        if conn is not None:
+            if manual:
+                conn.suppress_auto_reconnect = True
+                self.log.info(f"机器人索引: {index} 用户主动断开：本次运行期间不再自动重连（连接/重连可恢复）")
+            # 作废正在握手的 connect_bot（见 connect_bot 的 epoch 校验），
+            # 否则握手成功会把刚置好的断开状态覆盖回 connected。
+            conn.connect_epoch = getattr(conn, "connect_epoch", 0) + 1
+
         task_key = f"{index}"
         task = self.bot_server_tasks.pop(task_key, None)
         if task and not task.done():
@@ -717,6 +748,9 @@ class OneBotGateway:
                 conn.owner_id = cfg.get("owner_id")
                 changed = True
             if bool(cfg.get("auto_connect", False)) != conn.auto_connect:
+                # 重新打开「自动连接」开关 = 明确要它在线 → 解除手动断开的抑制
+                if cfg.get("auto_connect") and not conn.auto_connect:
+                    conn.suppress_auto_reconnect = False
                 conn.auto_connect = bool(cfg.get("auto_connect", False))
                 changed = True
             if changed:
@@ -736,6 +770,9 @@ class OneBotGateway:
                     for index in list(self.connections.keys()):
                         conn = self.connections[index]
                         if not conn.auto_connect or conn.status in ("connected", "connecting"):
+                            continue
+                        if getattr(conn, "suppress_auto_reconnect", False):
+                            # 用户主动断开：只保留「意外掉线」的自动恢复语义，不把它的断开连回来
                             continue
                         # 指数退避：10s → 20s → 40s → 80s → 160s → 300s 封顶
                         backoff = min(10 * (2 ** min(conn.reconnect_attempts, 4)), 300)
