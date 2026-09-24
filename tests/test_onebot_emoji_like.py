@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.llm import emoji_lexicon
+from app.llm import emoji_lexicon, qq_faces
 from app.llm.group_log.store import GroupLogStore
 from app.llm.onebot_tools.manifest import ONEBOT_TOOLS
 from app.llm.onebot_tools.tools import _handler
@@ -81,6 +81,80 @@ def test_valid_emoji_id_shape():
     assert not emoji_lexicon.is_valid_emoji_id("-1;rm -rf")
 
 
+# ==================== 全量映射（客户端系统表情表） ====================
+
+
+def test_face_table_is_full_and_numeric():
+    """表是客户端表的快照（近 300 条），不是十几个常见表情的摘录。"""
+    assert len(qq_faces.SYSFACE_IDS) >= 250
+    assert all(v.isdigit() for v in qq_faces.SYSFACE_IDS.values())
+    # 网上那份"微笑=1"的列表是错的：QQ 实际是 撇嘴=1、微笑=14
+    assert qq_faces.SYSFACE_IDS["撇嘴"] == "1"
+    assert qq_faces.SYSFACE_IDS["微笑"] == "14"
+
+
+def test_lexicon_covers_every_face_in_client_table():
+    """全量映射：客户端表里每个名字都能解析到自己的 id。"""
+    for name, emoji_id in qq_faces.SYSFACE_IDS.items():
+        assert emoji_lexicon.resolve(name) == (emoji_id, "table"), name
+
+
+def test_lexicon_ids_match_client_table():
+    """抽查一批名字的 id（改错数字 = 贴错表情，且不可撤回）。"""
+    tags = emoji_lexicon.DEFAULT_TAGS
+    assert tags["爱心"] == "66"
+    assert tags["赞"] == "76"
+    assert tags["笑哭"] == "182"
+    assert tags["doge"] == "179"
+    assert tags["惊恐"] == "26"
+    assert tags["疑问"] == "32"
+    assert tags["吃瓜"] == "271"
+    assert tags["比心"] == "319"
+    assert tags["捂脸"] == "264"
+    assert emoji_lexicon.label_for("76") == "赞"
+    assert emoji_lexicon.label_for("66") == "爱心"
+
+
+def test_alias_tags_bridge_colloquial_names():
+    """口语别名桥到表内正式名（不造 id）。"""
+    assert emoji_lexicon.resolve("问号")[0] == qq_faces.SYSFACE_IDS["疑问"]
+    assert emoji_lexicon.resolve("无语")[0] == qq_faces.SYSFACE_IDS["面无表情"]
+    assert emoji_lexicon.resolve("加油")[0] == qq_faces.SYSFACE_IDS["打call"]
+    assert emoji_lexicon.resolve("狗头")[0] == qq_faces.SYSFACE_IDS["doge"]
+    assert emoji_lexicon.resolve("大兵")[0] == qq_faces.SYSFACE_IDS["悠闲"]
+    # 口语"点个赞"桥到经典赞(76)；表内同名表情（点赞 201）不被别名覆盖
+    assert emoji_lexicon.resolve("点个赞！")[0] == qq_faces.SYSFACE_IDS["赞"]
+    assert emoji_lexicon.resolve("点赞")[0] == qq_faces.SYSFACE_IDS["点赞"]
+
+
+def test_single_char_names_only_match_exactly():
+    """单字名不做包含匹配，否则"很困难"会被当成贴「困」。"""
+    assert emoji_lexicon.resolve("很困难") == ("", "")
+    assert emoji_lexicon.resolve("喝茶") == ("", "")
+    assert emoji_lexicon.resolve("我快哭了")[0] == qq_faces.SYSFACE_IDS["快哭了"]
+    assert emoji_lexicon.resolve("困")[0] == qq_faces.SYSFACE_IDS["困"]
+
+
+def test_large_faces_are_marked_for_calibration():
+    """大表情/动态表情（faceType 2/3）标记出来，供真机校准。"""
+    assert qq_faces.LARGE_FACES
+    assert emoji_lexicon.is_large_face("捂脸")
+    assert emoji_lexicon.is_large_face(qq_faces.SYSFACE_IDS["捂脸"])
+    assert not emoji_lexicon.is_large_face("赞")
+
+
+def test_numeric_face_name_is_treated_as_name_not_id():
+    """「666」既是客户端表里的表情名、又不是表里的 id → 按名字解析（避免贴不存在的 id）。"""
+    assert emoji_lexicon.resolve("666") == (qq_faces.SYSFACE_IDS["666"], "table")
+    # 真 id 仍然优先走 explicit（上下文里 [♡66] 的数字要能原样复用）
+    assert emoji_lexicon.resolve("66") == ("66", "explicit")
+
+
+def test_available_tags_reports_total():
+    text = emoji_lexicon.available_tags()
+    assert "赞" in text and "共" in text
+
+
 # ==================== 工具声明 ====================
 
 
@@ -101,6 +175,13 @@ async def test_semantic_tag_becomes_real_api_call():
     result, _ = await _call(bot, {"reaction": "赞", "message_id": 777})
     assert bot.calls == [(ACTION, {"message_id": 777, "emoji_id": emoji_lexicon.DEFAULT_TAGS["赞"]})]
     assert result.startswith("{")  # 成功返回 OneBot data
+
+
+async def test_modern_face_name_becomes_real_id():
+    """全量词表里的"新表情"（大表情）同样能落到正确 id 上。"""
+    bot = FakeBot()
+    await _call(bot, {"reaction": "吃瓜", "message_id": 777})
+    assert bot.calls[0][1]["emoji_id"] == qq_faces.SYSFACE_IDS["吃瓜"]
 
 
 async def test_message_id_defaults_to_current_message():
