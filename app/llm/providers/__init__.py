@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 
-from .base import BaseProvider, LLMResponse, StreamEvent
+from .base import BaseProvider, LLMResponse, StreamEvent, format_usage, has_token_usage, merge_usage
 from .embedding import OpenAIEmbeddingProvider
 from .openai_compat import OpenAICompatProvider
 from .anthropic import AnthropicProvider
@@ -117,6 +117,41 @@ def _accepts_kwarg(fn, name: str) -> bool:
     return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
 
 
+def _model_label(chain: list[dict], fallback: str | None = None) -> str:
+    """请求日志里用的模型名（优先 provider 预设的 provider_model_id）。"""
+    for cfg in chain or []:
+        name = str((cfg or {}).get("provider_model_id") or (cfg or {}).get("model") or "").strip()
+        if name:
+            return name
+    return str(fallback or "").strip()
+
+
+def log_token_usage(
+    usage: dict | None,
+    *,
+    model: str = "",
+    chars: int | None = None,
+    stream: bool = False,
+) -> None:
+    """一次请求**完全结束后**（含工具轮/重试）info 一次本次 token 消耗。
+
+    - 上游给什么就记什么（输入/输出/命中/未命中/合计，见 ``base.format_usage``）；
+    - 上游一个字都没报就**不打这一行**——宁缺毋编，避免日志里出现编造的 token 数；
+    - ``chars`` / ``model`` 只作上下文，便于和"API 请求 -> session"那行对上。
+    """
+    if not has_token_usage(usage):
+        return
+    from app.llm import logger
+
+    text = f"本次请求消耗: {format_usage(usage)}"
+    if chars is not None:
+        text += f" | 回复 {chars} 字符"
+    if model:
+        text += f" | model={model}"
+    text += " | 流式" if stream else " | 非流式"
+    logger.add_info("Api").info(text)
+
+
 async def chat_with_fallback(
     config_chain: list[dict],
     messages: list[dict],
@@ -144,52 +179,65 @@ async def chat_with_fallback(
     last_empty: LLMResponse | None = None
     retries = max(0, int(max_empty_retries or 0))
     delay = max(0.0, float(empty_retry_backoff or 0.0))
+    # 本次请求（含空回复重试与回退下一个 provider）的 token 消耗：结束后 info 一次
+    total_usage: dict = {}
+    returned: LLMResponse | None = None
 
-    for cfg in chain:
-        provider = get_provider(cfg)
-        for attempt in range(retries + 1):
-            try:
-                kwargs: dict = {}
-                if _accepts_kwarg(provider.chat, "max_tool_rounds"):
-                    kwargs["max_tool_rounds"] = max_tool_rounds
-                resp = await provider.chat(
-                    messages,
-                    model=cfg.get("model") or model,
-                    temperature=cfg.get("temperature", temperature),
-                    max_tokens=cfg.get("max_tokens", max_tokens),
-                    timeout=int(cfg.get("timeout", timeout) or timeout),
-                    tools=tools,
-                    tool_executor=tool_executor,
-                    **kwargs,
-                )
-            except Exception as e:
-                from app.llm import logger
-                from .base import format_llm_error
-
-                logger.add_info("LLM").warning(
-                    f"回退：模型 {cfg.get('provider_model_id', cfg.get('model'))} 请求异常: {format_llm_error(e)}"
-                )
-                last = LLMResponse(text="", raw=None)
-                break
-            last = resp
-            if resp.ok or resp.raw is not None:
-                # 空内容但仍算请求成功：重试同 provider，避免偶现的空回复直接兜底
-                if _response_is_empty(resp) and attempt < retries:
+    try:
+        for cfg in chain:
+            provider = get_provider(cfg)
+            for attempt in range(retries + 1):
+                try:
+                    kwargs: dict = {}
+                    if _accepts_kwarg(provider.chat, "max_tool_rounds"):
+                        kwargs["max_tool_rounds"] = max_tool_rounds
+                    resp = await provider.chat(
+                        messages,
+                        model=cfg.get("model") or model,
+                        temperature=cfg.get("temperature", temperature),
+                        max_tokens=cfg.get("max_tokens", max_tokens),
+                        timeout=int(cfg.get("timeout", timeout) or timeout),
+                        tools=tools,
+                        tool_executor=tool_executor,
+                        **kwargs,
+                    )
+                except Exception as e:
                     from app.llm import logger
+                    from .base import format_llm_error
 
                     logger.add_info("LLM").warning(
-                        f"空回复重试 [{attempt + 1}/{retries}]：模型 "
-                        f"{cfg.get('provider_model_id', cfg.get('model'))}"
+                        f"回退：模型 {cfg.get('provider_model_id', cfg.get('model'))} 请求异常: {format_llm_error(e)}"
                     )
-                    if delay:
-                        await asyncio.sleep(delay)
-                    continue
-                if _response_is_empty(resp):
-                    last_empty = resp
+                    last = LLMResponse(text="", raw=None)
                     break
-                return resp
-            break
-    return last_empty or last or LLMResponse(text="", raw=None)
+                last = resp
+                merge_usage(total_usage, resp.usage)
+                if resp.ok or resp.raw is not None:
+                    # 空内容但仍算请求成功：重试同 provider，避免偶现的空回复直接兜底
+                    if _response_is_empty(resp) and attempt < retries:
+                        from app.llm import logger
+
+                        logger.add_info("LLM").warning(
+                            f"空回复重试 [{attempt + 1}/{retries}]：模型 "
+                            f"{cfg.get('provider_model_id', cfg.get('model'))}"
+                        )
+                        if delay:
+                            await asyncio.sleep(delay)
+                        continue
+                    if _response_is_empty(resp):
+                        last_empty = resp
+                        break
+                    returned = resp
+                    return resp
+                break
+        returned = last_empty or last or LLMResponse(text="", raw=None)
+        return returned
+    finally:
+        log_token_usage(
+            total_usage,
+            model=_model_label(chain, model),
+            chars=len(returned.text) if returned is not None else None,
+        )
 
 
 def _response_is_empty(resp: LLMResponse | None) -> bool:
@@ -218,6 +266,7 @@ async def iter_stream_with_fallback(
     tool_executor=None,
     max_empty_retries: int = 1,
     empty_retry_backoff: float = 0.4,
+    usage_sink: dict | None = None,
 ):
     """按顺序尝试 config_chain 的流式 provider；仅在首个事件前出错才切换到下一个。
 
@@ -225,54 +274,81 @@ async def iter_stream_with_fallback(
     同 provider 重试 ``max_empty_retries`` 次（退避 ``empty_retry_backoff`` 秒），
     再换下一个 provider。只重试“没产出任何事件”的情况——一旦有 tool_call 或文本产出，
     重试就可能重复执行工具/重复发送，绝不能做。
+
+    token 消耗：上游在流末尾回报的 usage 会累加，**本次流式请求结束时 info 一次**。
+    带 ``usage_sink`` 时改为写进调用方的 dict（不在这里打日志）——流式的工具循环在
+    调用方，由它把多轮汇总后只打一行。
     """
     chain = list(config_chain or [])
     retries = max(0, int(max_empty_retries or 0))
     delay = max(0.0, float(empty_retry_backoff or 0.0))
-    for cfg in chain:
-        provider = get_provider(cfg)
-        for attempt in range(retries + 1):
-            started = False
-            got_content = False
-            try:
-                async for ev in provider.chat_stream(
-                    messages,
-                    model=cfg.get("model") or model,
-                    temperature=cfg.get("temperature", temperature),
-                    max_tokens=cfg.get("max_tokens", max_tokens),
-                    timeout=int(cfg.get("timeout", timeout) or timeout),
-                    tools=tools,
-                    tool_executor=tool_executor,
-                ):
-                    if ev.type in ("text", "tool_call"):
-                        got_content = True
-                    started = True
-                    yield ev
-            except Exception as e:
-                from app.llm import logger
-                from .base import format_llm_error
+    total_usage: dict = {}
+    text_chars = 0
 
-                logger.add_info("LLM").warning(
-                    f"流式回退：模型 {cfg.get('provider_model_id', cfg.get('model'))} 请求异常: "
-                    f"{format_llm_error(e)}"
-                )
-                if started:
-                    raise
-                break  # 换下一个 provider
-            if got_content:
-                return
-            if attempt < retries:
-                from app.llm import logger
+    try:
+        for cfg in chain:
+            provider = get_provider(cfg)
+            for attempt in range(retries + 1):
+                started = False
+                got_content = False
+                try:
+                    async for ev in provider.chat_stream(
+                        messages,
+                        model=cfg.get("model") or model,
+                        temperature=cfg.get("temperature", temperature),
+                        max_tokens=cfg.get("max_tokens", max_tokens),
+                        timeout=int(cfg.get("timeout", timeout) or timeout),
+                        tools=tools,
+                        tool_executor=tool_executor,
+                    ):
+                        if ev.type in ("text", "tool_call"):
+                            got_content = True
+                        # 第三方适配器可能自造事件对象：usage 用 getattr 兜底
+                        event_usage = getattr(ev, "usage", None)
+                        if event_usage:
+                            merge_usage(total_usage, event_usage)
+                            # 带 sink 时**立刻**回写（不等 finally）：客户端提前 break
+                            # 也能拿到已产出的 usage，调用方随后可以正常打一行汇总
+                            if usage_sink is not None:
+                                merge_usage(usage_sink, event_usage)
+                        if ev.type == "text" and getattr(ev, "text", ""):
+                            text_chars += len(ev.text)
+                        started = True
+                        yield ev
+                except Exception as e:
+                    from app.llm import logger
+                    from .base import format_llm_error
 
-                logger.add_info("LLM").warning(
-                    f"空回复重试 [{attempt + 1}/{retries}]：模型 "
-                    f"{cfg.get('provider_model_id', cfg.get('model'))} 流式无产出"
-                )
-                if delay:
-                    await asyncio.sleep(delay)
-                continue
-            # 该 provider 用尽重试：留给调用方的兜底文本，继续尝试下一个 provider
-            break
+                    logger.add_info("LLM").warning(
+                        f"流式回退：模型 {cfg.get('provider_model_id', cfg.get('model'))} 请求异常: "
+                        f"{format_llm_error(e)}"
+                    )
+                    if started:
+                        raise
+                    break  # 换下一个 provider
+                if got_content:
+                    return
+                if attempt < retries:
+                    from app.llm import logger
+
+                    logger.add_info("LLM").warning(
+                        f"空回复重试 [{attempt + 1}/{retries}]：模型 "
+                        f"{cfg.get('provider_model_id', cfg.get('model'))} 流式无产出"
+                    )
+                    if delay:
+                        await asyncio.sleep(delay)
+                    continue
+                # 该 provider 用尽重试：留给调用方的兜底文本，继续尝试下一个 provider
+                break
+    finally:
+        # 带 sink 时调用方自己打一行（流式的工具循环在它那边）；这里只负责"没有 sink"的直调
+        if usage_sink is None:
+            log_token_usage(
+                total_usage,
+                model=_model_label(chain, model),
+                chars=text_chars or None,
+                stream=True,
+            )
 
 
 __all__ = [
@@ -287,6 +363,7 @@ __all__ = [
     "provider_supports",
     "chat_with_fallback",
     "iter_stream_with_fallback",
+    "log_token_usage",
     "PROVIDERS",
     "PROVIDER_ALIASES",
 ]

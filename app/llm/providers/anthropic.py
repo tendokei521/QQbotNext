@@ -14,7 +14,7 @@ from typing import Any
 import aiohttp
 
 from app.llm import logger
-from .base import BaseProvider, LLMResponse, StreamEvent, format_llm_error
+from .base import BaseProvider, LLMResponse, StreamEvent, format_llm_error, merge_usage
 
 _DEFAULT_BASE = "https://api.anthropic.com"
 _API_VERSION = "2023-06-01"
@@ -173,6 +173,7 @@ class AnthropicProvider(BaseProvider):
         system, chat_messages = _normalize_messages(messages)
         anth_tools = _to_anthropic_tools(tools)
         tool_results: list[dict] = []
+        total_usage: dict = {}  # 工具多轮的 token 消耗累计（本次请求结束后统一记一次）
 
         if not self.api_key:
             return LLMResponse(text="", raw=None)
@@ -202,12 +203,14 @@ class AnthropicProvider(BaseProvider):
                             logger.add_info("Anthropic").error(
                                 f"Anthropic 请求失败 HTTP {resp.status}: {body}"
                             )
-                            return LLMResponse(text="", raw=None)
+                            return LLMResponse(text="", raw=None, usage=total_usage)
                         data = await resp.json()
             except Exception as e:
                 logger.add_info("Anthropic").error(f"Anthropic 请求异常: {format_llm_error(e)}")
-                return LLMResponse(text="", raw=None)
+                return LLMResponse(text="", raw=None, usage=total_usage)
 
+            # usage：Anthropic 每轮都会报 input/output（缓存读写在 message.usage 里）
+            merge_usage(total_usage, data.get("usage", {}) or {})
             content_blocks = data.get("content", []) or []
             text = "".join(
                 str(block.get("text", ""))
@@ -216,8 +219,7 @@ class AnthropicProvider(BaseProvider):
             ).strip()
             tool_uses = _tool_use_blocks(content_blocks)
             if not tool_uses or tool_executor is None:
-                usage = data.get("usage", {}) or {}
-                return LLMResponse(text=text, usage=usage, raw=data, tool_results=tool_results)
+                return LLMResponse(text=text, usage=total_usage, raw=data, tool_results=tool_results)
 
             # Anthropic tool_use → OpenAI-style tool_calls → 共享工具执行器
             tool_calls = [{
@@ -254,7 +256,7 @@ class AnthropicProvider(BaseProvider):
             chat_messages.append({"role": "user", "content": result_content})
 
         logger.add_info("Anthropic").warning(f"工具循环超过 {max_tool_rounds} 轮，强制结束")
-        return LLMResponse(text=text, raw=data, tool_results=tool_results)
+        return LLMResponse(text=text, usage=total_usage, raw=data, tool_results=tool_results)
 
     async def chat_stream(
         self,
@@ -301,6 +303,10 @@ class AnthropicProvider(BaseProvider):
                         )
                         yield StreamEvent(type="error", text=f"HTTP {resp.status}: {body}")
                         return
+                    # Anthropic 的 usage 分两处：message_start 给 input（含缓存读写），
+                    # message_delta 给 output。分别取，不累加（否则 output 会被算两次）。
+                    input_usage: dict = {}
+                    output_usage: dict = {}
                     async for line in resp.content:
                         line_text = line.decode("utf-8", errors="ignore").strip()
                         if not line_text.startswith("data:"):
@@ -316,7 +322,16 @@ class AnthropicProvider(BaseProvider):
                             delta = data.get("delta", {}) or {}
                             if delta.get("type") == "text_delta":
                                 yield StreamEvent(type="text", text=str(delta.get("text", "")))
+                        elif data.get("type") == "message_start":
+                            message = data.get("message", {}) or {}
+                            merge_usage(input_usage, message.get("usage", {}) or {})
                         elif data.get("type") == "message_delta":
+                            merge_usage(output_usage, data.get("usage", {}) or {})
+                            merged = dict(input_usage)
+                            if output_usage.get("output_tokens") is not None:
+                                merged["output_tokens"] = output_usage["output_tokens"]
+                            if merged:
+                                yield StreamEvent(type="usage", usage=merged)
                             yield StreamEvent(type="done", finish_reason=str(data.get("delta", {}).get("stop_reason", "")))
         except Exception as e:
             logger.add_info("Anthropic").error(f"Anthropic 流式请求异常: {format_llm_error(e)}")

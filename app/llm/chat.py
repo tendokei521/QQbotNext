@@ -36,7 +36,7 @@ from app.llm.session import SessionManager
 from app.llm import assembly
 from app.llm.assembly import PromptRequest
 from app.llm.image import collect_image_segments
-from app.llm.providers import chat_with_fallback, iter_stream_with_fallback
+from app.llm.providers import chat_with_fallback, iter_stream_with_fallback, log_token_usage
 from app.llm.providers.modalities import normalize_modalities, supports_tool_use
 from app.llm.tags import maybe_strip_parentheses, strip_all_tags
 from app.llm.splitter import split_sentences, strip_stream_artifacts
@@ -510,6 +510,7 @@ def _record_stream_telemetry(
     stream_start: float,
     success: bool,
     error_text: str = "",
+    usage: dict | None = None,
 ) -> None:
     """流式生成的统一遥测落点。"""
     telemetry = getattr(runtime, "telemetry", None)
@@ -517,6 +518,7 @@ def _record_stream_telemetry(
         return
     full_text = "".join(full_text_parts)
     first_cfg = provider_chain[0] if provider_chain else {}
+    tokens = usage or {}
     telemetry.record_call_simple(
         bot_id=runtime.bot_id,
         session_id=session_id,
@@ -525,6 +527,8 @@ def _record_stream_telemetry(
         stream=True,
         success=success,
         latency_ms=(time.monotonic() - stream_start) * 1000,
+        input_tokens=int(tokens.get("prompt_tokens") or tokens.get("input_tokens") or 0),
+        output_tokens=int(tokens.get("completion_tokens") or tokens.get("output_tokens") or 0),
         message_count=len(messages),
         tool_calls=len(tool_results),
         characters=len(full_text),
@@ -1029,6 +1033,8 @@ async def stream_response(runtime, event, ctx=None):
     tool_results: list[dict] = []
     stream_start = time.monotonic()
     stream_error_text = ""
+    # 本次请求（含工具多轮/空回复重试）的 token 消耗：全部结束、发完最后一段后 info 一次
+    usage_sink: dict = {}
     # 与非流式共用同一轮数上限（此前这里硬编码 5，两处不一致且不可配）
     max_tool_rounds = _max_tool_rounds(config)
 
@@ -1047,6 +1053,7 @@ async def stream_response(runtime, event, ctx=None):
             tools=tools,
             tool_executor=tool_executor,
             max_empty_retries=_max_empty_retries(config),
+            usage_sink=usage_sink,
         ):
             if ev.type == "text":
                 buffer += ev.text
@@ -1097,6 +1104,13 @@ async def stream_response(runtime, event, ctx=None):
             _record_stream_telemetry(
                 runtime, session_id, provider_chain, model, messages,
                 full_text_parts, tool_results, stream_start, False, stream_error_text,
+                usage=usage_sink,
+            )
+            log_token_usage(
+                usage_sink,
+                model=str(meta["model"] or ""),
+                chars=len("".join(full_text_parts)),
+                stream=True,
             )
             return
 
@@ -1150,6 +1164,15 @@ async def stream_response(runtime, event, ctx=None):
         stream_start,
         success=bool("".join(full_text_parts).strip()) and not stream_error_text,
         error_text=stream_error_text,
+        usage=usage_sink,
+    )
+
+    # 本次请求到此完全结束：info 一次 token 消耗（上游没报 usage 就不打）
+    log_token_usage(
+        usage_sink,
+        model=str(meta["model"] or ""),
+        chars=len("".join(full_text_parts)),
+        stream=True,
     )
 
     if ctx is not None:

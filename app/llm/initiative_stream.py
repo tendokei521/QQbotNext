@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.domain.message import Message
-from app.llm.providers import iter_stream_with_fallback
+from app.llm.providers import iter_stream_with_fallback, log_token_usage
 from app.llm.send_pool import StreamSendPool
 from app.llm.splitter import split_sentences, strip_stream_artifacts
 from app.llm.tool_loop import normalize_and_execute_tool_calls
@@ -97,6 +97,8 @@ async def stream_send_initiative(
 
     full_text_parts: list[str] = []
     tool_results: list[dict] = []
+    # 本次请求（含工具多轮/空回复重试）的 token 消耗：结束后 info 一次
+    usage_sink: dict = {}
 
     try:
         for _round in range(rounds):
@@ -113,6 +115,7 @@ async def stream_send_initiative(
                 tool_executor=tool_executor if use_tools else None,
                 # 主动消息/定时任务同样吃「空回复重试」：零产出会让本轮静默不发
                 max_empty_retries=_max_empty_retries(config),
+                usage_sink=usage_sink,
             ):
                 if ev.type == "text":
                     buffer += ev.text
@@ -149,6 +152,13 @@ async def stream_send_initiative(
         await pool.finish()
         await pool.wait_drained()
     finally:
+        # 无论正常结束还是中途异常，都只 info 一次本次请求的 token 消耗
+        log_token_usage(
+            usage_sink,
+            model=str(model or config.get("model", "") or ""),
+            chars=len("".join(full_text_parts)),
+            stream=True,
+        )
         await pool.shutdown()
 
     return "".join(full_text_parts)

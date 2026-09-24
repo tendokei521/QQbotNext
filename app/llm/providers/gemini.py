@@ -16,10 +16,22 @@ import re
 import aiohttp
 
 from app.llm import logger
-from .base import BaseProvider, LLMResponse, StreamEvent, format_llm_error
+from .base import BaseProvider, LLMResponse, StreamEvent, format_llm_error, merge_usage
 
 _DEFAULT_BASE = "https://generativelanguage.googleapis.com/v1beta"
 _DATA_URL_RE = re.compile(r"^data:image/([a-z0-9.+-]+);base64,(.+)$", re.IGNORECASE | re.DOTALL)
+
+
+def _normalize_usage(usage: dict) -> dict:
+    """Gemini ``usageMetadata`` → 统一的 prompt/completion 字段（含缓存命中）。"""
+    normalized = {
+        "prompt_tokens": usage.get("promptTokenCount", 0),
+        "completion_tokens": usage.get("candidatesTokenCount", 0),
+    }
+    cached = usage.get("cachedContentTokenCount")
+    if cached is not None:
+        normalized["prompt_cache_hit_tokens"] = cached
+    return normalized
 
 
 def _parse_data_url(url: str) -> tuple[str, str] | None:
@@ -174,6 +186,7 @@ class GeminiProvider(BaseProvider):
         contents, system = _normalize_messages(messages)
         gemini_tools = _to_gemini_tools(tools)
         tool_results: list[dict] = []
+        total_usage: dict = {}  # 工具多轮的 token 消耗累计（本次请求结束后统一记一次）
 
         if not self.api_key:
             return LLMResponse(text="", raw=None)
@@ -204,12 +217,13 @@ class GeminiProvider(BaseProvider):
                             logger.add_info("Gemini").error(
                                 f"Gemini 请求失败 HTTP {resp.status}: {body}"
                             )
-                            return LLMResponse(text="", raw=None)
+                            return LLMResponse(text="", raw=None, usage=total_usage)
                         data = await resp.json()
             except Exception as e:
                 logger.add_info("Gemini").error(f"Gemini 请求异常: {format_llm_error(e)}")
-                return LLMResponse(text="", raw=None)
+                return LLMResponse(text="", raw=None, usage=total_usage)
 
+            merge_usage(total_usage, _normalize_usage(data.get("usageMetadata", {}) or {}))
             candidates = data.get("candidates", []) or []
             parts = []
             if candidates:
@@ -223,12 +237,7 @@ class GeminiProvider(BaseProvider):
 
             calls = _function_calls(parts)
             if not calls or tool_executor is None:
-                usage = data.get("usageMetadata", {}) or {}
-                normalized_usage = {
-                    "prompt_tokens": usage.get("promptTokenCount", 0),
-                    "completion_tokens": usage.get("candidatesTokenCount", 0),
-                }
-                return LLMResponse(text=text, usage=normalized_usage, raw=data, tool_results=tool_results)
+                return LLMResponse(text=text, usage=total_usage, raw=data, tool_results=tool_results)
 
             tool_calls = [{
                 "id": c["id"],
@@ -263,12 +272,7 @@ class GeminiProvider(BaseProvider):
             contents.append({"role": "user", "parts": user_parts})
 
         logger.add_info("Gemini").warning(f"工具循环超过 {max_tool_rounds} 轮，强制结束")
-        usage = data.get("usageMetadata", {}) or {}
-        normalized_usage = {
-            "prompt_tokens": usage.get("promptTokenCount", 0),
-            "completion_tokens": usage.get("candidatesTokenCount", 0),
-        }
-        return LLMResponse(text=text, usage=normalized_usage, raw=data, tool_results=tool_results)
+        return LLMResponse(text=text, usage=total_usage, raw=data, tool_results=tool_results)
 
     async def chat_stream(
         self,
@@ -326,6 +330,12 @@ class GeminiProvider(BaseProvider):
                             data = json.loads(raw)
                         except json.JSONDecodeError:
                             continue
+                        # usageMetadata 通常只出现在最后一个 chunk（含缓存命中数）
+                        if data.get("usageMetadata"):
+                            yield StreamEvent(
+                                type="usage",
+                                usage=_normalize_usage(data.get("usageMetadata", {}) or {}),
+                            )
                         candidates = data.get("candidates", []) or []
                         if candidates:
                             content = (candidates[0].get("content", {}) or {})

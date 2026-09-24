@@ -33,6 +33,7 @@ class StreamEvent:
         - text: 文本增量
         - tool_call: 工具调用碎片（需要按 index 累积）
         - done: 本轮流结束
+        - usage: 上游在流末尾回报的 usage（只带 usage，不带文本）
         - error: 流式请求失败
     """
 
@@ -40,6 +41,140 @@ class StreamEvent:
     text: str = ""
     tool_call: dict | None = None
     finish_reason: str = ""
+    usage: dict = field(default_factory=dict)
+
+
+#: 判断「上游到底有没有报 usage」时要看的字段（各家拼写不同）
+_TOKEN_USAGE_KEYS = (
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "input_tokens",
+    "output_tokens",
+    "prompt_cache_hit_tokens",
+    "prompt_cache_miss_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+    "prompt_tokens_details",
+)
+
+
+def _as_int(value: Any) -> int | None:
+    """能当整数看就返回整数，否则 None（bool 不算数字）。"""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def merge_usage(target: dict, usage: dict | None) -> dict:
+    """把一次调用的 usage 累加进 ``target``（跨工具轮/跨重试求和）。
+
+    数值字段相加（含 ``prompt_tokens_details`` 这类嵌套字典），非数值字段首次写入保留。
+    """
+    if not isinstance(usage, dict):
+        return target
+    for key, value in usage.items():
+        if isinstance(value, dict):
+            node = target.get(key)
+            if not isinstance(node, dict):
+                node = {}
+                target[key] = node
+            merge_usage(node, value)
+            continue
+        number = _as_int(value)
+        if number is not None:
+            target[key] = _as_int(target.get(key)) or 0
+            target[key] += number
+        elif key not in target:
+            target[key] = value
+    return target
+
+
+def has_token_usage(usage: dict | None) -> bool:
+    """上游有没有真的回报 token 数（全 0 也算报了）。"""
+    if not isinstance(usage, dict):
+        return False
+    for key in _TOKEN_USAGE_KEYS:
+        value = usage.get(key)
+        if value is None:
+            continue
+        if isinstance(value, dict):
+            if value:
+                return True
+            continue
+        return True
+    return False
+
+
+def cache_hit_miss(usage: dict | None) -> tuple[int | None, int | None]:
+    """从各家 usage 里取出 ``(缓存命中, 未命中)``；上游没给就返回 ``(None, None)``。
+
+    - DeepSeek：``prompt_cache_hit_tokens`` / ``prompt_cache_miss_tokens``；
+    - OpenAI：``prompt_tokens_details.cached_tokens``（未命中 = 输入 - 命中）；
+    - Anthropic：``cache_read_input_tokens``（命中）/ ``cache_creation_input_tokens``（写入）。
+
+    **不自己估算**：上游没报就是 ``None``，宁缺毋编。
+    """
+    if not isinstance(usage, dict):
+        return None, None
+    hit = _as_int(usage.get("prompt_cache_hit_tokens"))
+    miss = _as_int(usage.get("prompt_cache_miss_tokens"))
+    if hit is None and miss is None:
+        details = usage.get("prompt_tokens_details")
+        if isinstance(details, dict):
+            cached = _as_int(details.get("cached_tokens"))
+            if cached is not None:
+                hit = cached
+                prompt = _as_int(usage.get("prompt_tokens"))
+                miss = max(prompt - cached, 0) if prompt is not None else None
+    if hit is None and miss is None:
+        read = _as_int(usage.get("cache_read_input_tokens"))
+        write = _as_int(usage.get("cache_creation_input_tokens"))
+        if read is not None or write is not None:
+            hit, miss = read, write
+    return hit, miss
+
+
+def input_output_tokens(usage: dict | None) -> tuple[int | None, int | None]:
+    """从各家 usage 里取出 ``(输入, 输出)``；上游没给就返回 ``(None, None)``。"""
+    if not isinstance(usage, dict):
+        return None, None
+    prompt = _as_int(usage.get("prompt_tokens"))
+    if prompt is None:
+        prompt = _as_int(usage.get("input_tokens"))
+    completion = _as_int(usage.get("completion_tokens"))
+    if completion is None:
+        completion = _as_int(usage.get("output_tokens"))
+    return prompt, completion
+
+
+def format_usage(usage: dict | None) -> str:
+    """把 usage 拼成一行可读文本：**上游给什么就用什么**，缺的字段不编。
+
+    形如 ``输入 1234（缓存命中 1000 / 未命中 234）/ 输出 567 / 合计 1801 tokens``；
+    只有命中/未命中时退化为 ``缓存命中 1000 / 未命中 234 tokens``；什么都没有返回空串。
+    """
+    prompt, completion = input_output_tokens(usage)
+    hit, miss = cache_hit_miss(usage)
+    total = _as_int((usage or {}).get("total_tokens")) if isinstance(usage, dict) else None
+
+    parts: list[str] = []
+    if prompt is not None:
+        detail = ""
+        if hit is not None or miss is not None:
+            detail = f"（缓存命中 {hit if hit is not None else '?'} / 未命中 {miss if miss is not None else '?'}）"
+        parts.append(f"输入 {prompt}{detail}")
+    elif hit is not None or miss is not None:
+        parts.append(f"缓存命中 {hit if hit is not None else '?'} / 未命中 {miss if miss is not None else '?'}")
+    if completion is not None:
+        parts.append(f"输出 {completion}")
+    if total is not None:
+        parts.append(f"合计 {total}")
+    return " ".join([" / ".join(parts), "tokens"]) if parts else ""
+
 
 
 def _safe_str(e: Exception) -> str:

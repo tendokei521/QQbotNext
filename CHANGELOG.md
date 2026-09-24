@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### 新增：LLM 请求结束后 info 一次本次 token 消耗
+
+此前只有非流式路径在**每一轮**（含工具循环的中间轮）打一行"回复 N 字符 | 输入 X / 输出 Y"，
+流式路径完全没有 token 记录。现在：
+
+- **一次请求只落一行**：整轮请求（含工具多轮、空回复重试、provider 回退）完全结束后统一 info：
+  `[Api] 本次请求消耗: 输入 1234（缓存命中 1000 / 未命中 234） / 输出 567 / 合计 1801 tokens | 回复 27 字符 | model=... | 流式`；
+- **上游报什么就用什么**：DeepSeek `prompt_cache_hit_tokens`/`prompt_cache_miss_tokens`、
+  OpenAI `prompt_tokens_details.cached_tokens`、Anthropic `cache_read_input_tokens`/
+  `cache_creation_input_tokens`、Gemini `cachedContentTokenCount` 直接取用，不自己估算；
+  上游一个字没报就不打这一行；
+- **流式也能拿到 usage**：OpenAI 兼容流自动带 `stream_options.include_usage`
+  （`extra_body.stream_options` 可覆盖；上游 400/422 不认该参数时自动去掉重发一次），
+  Anthropic `message_start`/`message_delta`、Gemini `usageMetadata` 同样会解析；
+  流式工具循环由调用方（`chat.stream_response` / `initiative_stream`）汇总多轮后只打一行；
+- **顺带修正**：非流式 `chat()` 与 Anthropic/Gemini 的工具循环现在**累加**各轮 usage 再上报，
+  遥测（`/agent/telemetry`）不再只记最后一轮；流式遥测也开始记录 input/output tokens；
+- 测试：新增 `tests/test_llm_token_usage.py`（usage 归一 / 跨轮累加 / 只打一行 / 无 usage 不打）。
+
 ### 新增：表情回应词表改为 QQ 系统表情全量映射
 
 此前 `set_msg_emoji_like` 的 `reaction` 只有十来个手写的常见表情，模型想表达别的只能猜数字
