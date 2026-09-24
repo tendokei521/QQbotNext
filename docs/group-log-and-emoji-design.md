@@ -30,7 +30,7 @@ L1 接入    module/modules/group_log：群消息 / 表情 / 戳 / 撤回 / send
 L2 渲染    group_log/render.py：聚合、去重、预算、区块包裹（纯函数）
 L3 取值    group_log/context.py：build_context_text（四个装配路径唯一口径）
 L4 装配    assembly.BLOCKS 的 group_log 块（背景之后、会话历史之前）
-L5 闭环    emoji_lexicon（语义→id）+ OneBot 工具的"贴前先读/成功记账" + emoji_reply 共用记录
+L5 闭环    qq_faces（客户端表）+ emoji_lexicon（语义→id）+ OneBot 工具的"贴前先读/成功记账" + emoji_reply 共用记录
 ```
 
 ## 3. 记录面（`app/llm/group_log/`）
@@ -109,7 +109,7 @@ L5 闭环    emoji_lexicon（语义→id）+ OneBot 工具的"贴前先读/成�
 
 | 参数 | 说明 |
 |---|---|
-| `reaction` | **首选**：语义标签（赞/比心/笑哭/doge/吃瓜/问号/无语/惊恐/加油…），由词表解析 |
+| `reaction` | **首选**：语义标签 = QQ 系统表情**全量名**（微笑/呲牙/疑问/爱心/赞/比心/笑哭/doge/吃瓜/捂脸…）+ 口语别名（点个赞/狗头/问号/无语/加油），由词表解析 |
 | `emoji_id` | 精确复用上下文里出现过的数字 id（如 `[♡66]` 里的 66） |
 | `message_id` | **可选**：不传默认给当前这条消息（模型在上下文里看不到裸 id） |
 | `reason` | 可选：为什么贴，只入记录用于回溯 |
@@ -122,12 +122,20 @@ L5 闭环    emoji_lexicon（语义→id）+ OneBot 工具的"贴前先读/成�
 4. 调用成功后写 `KIND_EMOJI(by_me=True)`，下一轮环境块就能显示"我给这条贴了 X"；
 5. 失败**不记账**，否则幂等判断会误以为已经贴过。
 
-### 5.3 词表来源：观察优先
+### 5.3 词表来源：从客户端表导出，观察优先
 
-- `observed`：本群真实出现过的 id（记录面）→ 最可靠的一手证据；
-- `DEFAULT_TAGS`：校准过的常见表情，作用是给模型"入门词表"，**不是权威**；
-- 校准方法写在模块 docstring 里（开 `onebot_tools_debug`，贴候选 id，看记录面落下来的
-  `emoji_id`）。**没校准过的条目不要凭印象补**——贴错不可撤回。
+- **全量表**（`app/llm/qq_faces.py`，生成物）：QQ 客户端下发的 `face_config.sysface`，
+  由 `scripts/export_napcat_faces.py` 从本机 NapCat 包里导出（296 个名字 → `QSid`）。
+  它同时是 OneBot `face` 段的 id 与 `set_msg_emoji_like` 的 `emoji_id` 空间，所以
+  `DEFAULT_TAGS` = 表内全量名 + 口语别名（点个赞/狗头/问号/无语/加油），不再只有十几个常见表情；
+- **别手抄网上的列表**：流传最广的那份把「微笑」记成 `1`，QQ 实际是
+  `撇嘴=1、微笑=14、爱心=66、赞=76`；照抄会贴错，而回应不可撤回。客户端升级后跑
+  `python scripts/export_napcat_faces.py --check` 核对（`--write` 重新生成）；
+- `observed`：本群真实出现过的 id（记录面）→ 最可靠的一手证据，解析时据此标注来源；
+- **大表情待校准**：`QSid >= 222` 或带 `AniStickerType` 的名字（捂脸/吃瓜/比心/打call…）
+  在客户端里走 `faceType 2/3`，表情回应是否同样吃这套 id，要用 `onebot_tools_debug`
+  贴一次、看记录面落下来的 `emoji_id` 才能定——这批已由 `qq_faces.LARGE_FACES` 标出，
+  **没校准过的形态不要当成已知**。
 
 ### 5.4 `emoji_reply` 插件与 LLM 共用记录
 
@@ -219,5 +227,6 @@ venv\Scripts\python.exe -m pytest tests/test_group_log_store.py tests/test_group
 
 覆盖：幂等 / 保留与入账时间口径 / 分片隔离 / 重启恢复 / 坏数据 / 私聊只记戳 /
 注入剥离（写入与渲染两侧）/ 去重与影子行 / 预算丢弃 / 我的动作反馈 /
-"关掉即与今天一致" / 语义解析与拒绝猜测 / 贴前先读 / 成功才记账 / 句柄回填 /
-显示名三层判定、verdict 命中与改名失效、闸门超限静默降级、失败降级、后台预热。
+"关掉即与今天一致" / 表情词表全量映射与真实 id（客户端表对照）/ 单字名只认精确匹配 /
+数字名字（666）与真 id 的区分 / 大表情标记 / 语义解析与拒绝猜测 / 贴前先读 / 成功才记账 /
+句柄回填 / 显示名三层判定、verdict 命中与改名失效、闸门超限静默降级、失败降级、后台预热。
