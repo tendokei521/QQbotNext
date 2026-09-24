@@ -54,6 +54,29 @@ def _history_message_ids(history: Iterable[Any]) -> set[str]:
     return ids
 
 
+def scope_for_tool_ctx(tool_ctx: Any) -> str:
+    """工具调用上下文 → 记录面分片键（表情闭环与渲染共用同一口径）。
+
+    群聊取群号；私聊取**对方 QQ**（``self<b>_<bot_id>`` 这类只有自己知道的键按空处理）。
+    """
+    event = getattr(tool_ctx, "event", None)
+    group_id = getattr(tool_ctx, "group_id", None) or getattr(event, "group_id", None)
+    if not group_id:
+        group = getattr(event, "group", None)
+        group_id = getattr(group, "group_id", None) if group is not None else None
+    if group_id:
+        return make_scope(True, group_id=group_id)
+    session_id = str(getattr(tool_ctx, "session_id", "") or "")
+    if session_id.startswith("private_"):
+        peer = session_id[len("private_"):]
+        if peer and not peer.startswith("self"):
+            return make_scope(False, user_id=peer)
+    user_id = getattr(tool_ctx, "user_id", None)
+    if user_id and not str(user_id).startswith("self"):
+        return make_scope(False, user_id=user_id)
+    return ""
+
+
 def build_context_text(
     runtime: Any,
     session_id: str,

@@ -251,14 +251,38 @@ NAP_CAT_TOOLS: list[dict] = [
     },
     {
         "name": "set_msg_emoji_like",
-        "description": "给消息添加表情回应。",
+        "description": (
+            "给消息添加表情回应（相当于人类对某条消息点个表情）。\n"
+            "用法要点：\n"
+            "- 首选给 reaction（语义标签，如 赞/比心/笑哭/doge/吃瓜/问号/无语/惊恐/加油），"
+            "由框架翻译成正确的表情 id；\n"
+            "- 若聊天环境记录里已经出现某个表情（形如 [♡66]），可以把那个数字作为 emoji_id 直接复用；\n"
+            "- 不传 message_id 默认给**当前这条消息**贴（最常用）；\n"
+            "- 贴之前框架会先读这条消息上已有的回应：同一个表情不会重复贴；\n"
+            "- 表情回应**无法撤回**，所以它比文字更慎重：只在确实想表态时用，"
+            "一条消息不要连贴多个，也不要在每轮都贴。"
+        ),
         "parameters": {
             "type": "object",
             "properties": {
-                "message_id": {"type": "integer"},
-                "emoji_id": {"type": "string"},
+                "reaction": {
+                    "type": "string",
+                    "description": "语义标签（首选）：赞/比心/笑哭/doge/吃瓜/问号/无语/惊恐/加油 等",
+                },
+                "emoji_id": {
+                    "type": "string",
+                    "description": "精确复用某个表情 id（上下文里出现过的数字，如 66）；"
+                                   "与 reaction 二选一，给定时优先生效",
+                },
+                "message_id": {
+                    "type": "integer",
+                    "description": "目标消息 id；不传则默认给当前这条消息贴",
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "可选：为什么要贴（只用于记录与回溯，不发给用户）",
+                },
             },
-            "required": ["message_id", "emoji_id"],
         },
         "risk": "send",
         "permission": "member",

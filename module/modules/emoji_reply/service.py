@@ -24,6 +24,82 @@ def _logger(module):
     return module_logger.add_info(f"#{module.bot_id}").add_info(module.name)
 
 
+def _group_log(module):
+    """取群聊记录存储（未装/未启用时为 None）。
+
+    它与 LLM 侧共用**同一份记录**：插件贴过的表情必须让模型看得见，
+    否则模型会重复贴同一个表情（插件与 LLM 双贴）。
+    """
+    manager = getattr(getattr(module.ctx, "services", None), "agent_manager", None)
+    bot_id = getattr(module, "bot_id", None)
+    if manager is None or bot_id is None:
+        return None
+    try:
+        runtime = manager.get_runtime(bot_id)
+    except Exception as e:  # noqa: BLE001 - 记录面不可用不能影响表情回应
+        _logger(module).debug(f"[Emoji] 取 runtime 失败（忽略）: {e}")
+        return None
+    from app.llm.group_log.store import store_of
+
+    return store_of(runtime)
+
+
+def _scope_of(event) -> str:
+    """记录面分片键：群聊按群；私聊不在本模块记录范围内（返回空串）。"""
+    from app.llm.group_log.events import make_scope
+
+    group = getattr(event, "group", None)
+    group_id = getattr(group, "group_id", None) or getattr(event, "group_id", None)
+    if not group_id:
+        return ""
+    return make_scope(True, group_id=group_id)
+
+
+def _already_reacted(module, event, emoji_id: str) -> bool:
+    """这条消息上是否已经有同一个表情（包含机器人自己贴的）。"""
+    store = _group_log(module)
+    scope = _scope_of(event)
+    message_id = getattr(event, "message_id", 0) or 0
+    if store is None or not scope or not message_id:
+        return False
+    try:
+        return any(
+            str(item.get("emoji_id")) == str(emoji_id)
+            for item in store.reactions_of(scope, message_id)
+        )
+    except Exception as e:  # noqa: BLE001
+        _logger(module).debug(f"[Emoji] 读记录失败（按未贴处理）: {e}")
+        return False
+
+
+def _record_mine(module, event, emoji_id: str, *, reason: str) -> None:
+    """把插件贴的表情记进群聊记录（标记 by_me），供 LLM 侧"我做过什么"与幂等判断。"""
+    store = _group_log(module)
+    scope = _scope_of(event)
+    message_id = getattr(event, "message_id", 0) or 0
+    if store is None or not scope or not message_id or not emoji_id:
+        return
+    try:
+        import time as _time
+
+        from app.llm.group_log.events import KIND_EMOJI, LogEvent
+
+        group = getattr(event, "group", None)
+        store.append_many([LogEvent(
+            ts=int(_time.time()),
+            kind=KIND_EMOJI,
+            scope=scope,
+            group_id=str(getattr(event, "group_id", "") or getattr(group, "group_id", "") or ""),
+            message_id=str(message_id),
+            user_id=str(module.bot_id or ""),
+            nickname="我",
+            payload={"emoji_id": str(emoji_id), "is_add": True, "reason": reason},
+            by_me=True,
+        )])
+    except Exception as e:  # noqa: BLE001
+        _logger(module).debug(f"[Emoji] 写记录失败（忽略）: {e}")
+
+
 def clean_symbols(text: str) -> str:
     """移除标点、符号与空白，保留中文/字母/数字（应对关键词间有符号）。"""
     return _SYMBOL_RE.sub("", text or "")
@@ -72,6 +148,9 @@ async def handle_emoji_notice(module, event) -> None:
         )
         if cooldown > 0 and cache.has(emoji_key):
             continue
+        # 记录面优先：这条消息上已经有同一个表情（我或别人贴的）→ 不再跟随
+        if _already_reacted(module, event, emoji_id):
+            continue
         if random.random() >= prob:
             continue
 
@@ -80,6 +159,7 @@ async def handle_emoji_notice(module, event) -> None:
             cache.set(emoji_key, True, cooldown)
         try:
             await event.bot.set_msg_emoji_like(message_id, emoji_id)
+            _record_mine(module, event, emoji_id, reason="follow")
             log.debug(f"跟随 Emoji {emoji_id} on msg {message_id}")
         except Exception as e:
             log.error(f"跟随 Emoji {emoji_id} 失败: {e}")
@@ -120,11 +200,15 @@ async def handle_message(module, event) -> None:
         )
         if cooldown > 0 and cache.has(emoji_key):
             continue
+        # 记录面优先：同一条消息上已有同一个表情 → 不再重复贴（与 LLM 侧同一口径）
+        if _already_reacted(module, event, emoji_id):
+            continue
         if cooldown > 0:
             cache.set(emoji_key, True, cooldown)
 
         try:
             await event.bot.set_msg_emoji_like(message_id, emoji_id)
+            _record_mine(module, event, emoji_id, reason=f"keyword:{keyword}")
             log.debug(f"关键词 {keyword} → Emoji {emoji_id} on msg {message_id}")
         except Exception as e:
             log.error(f"关键词 Emoji {emoji_id} 发送失败: {e}")
