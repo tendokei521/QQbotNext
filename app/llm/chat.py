@@ -734,15 +734,22 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
         session_id=session_id, meta_flags=_meta_flags,
     )
 
-    session_history = session_mgr.get_history(session_id, limit=session_mgr.MAX_HISTORY_MESSAGES)
+    session_history_raw = session_mgr.get_history(session_id, limit=session_mgr.MAX_HISTORY_MESSAGES)
     # 防重复：history 尾部就是刚追加的当前用户消息（存的就是 user_text）→ 去掉
-    if (session_history and session_history[-1].get("role") == "user"
-            and session_history[-1].get("content") == user_text):
-        session_history = session_history[:-1]
-    session_history = _format_session_history(
-        session_history, is_private,
-        bot_id=getattr(runtime, "bot_id", ""), session_id=session_id,
-        **_meta_flags,
+    if (session_history_raw and session_history_raw[-1].get("role") == "user"
+            and session_history_raw[-1].get("content") == user_text):
+        session_history_raw = session_history_raw[:-1]
+    # 渲染时把 message_id 贴回消息对象：群聊环境记录要靠它判断"这条已在会话历史里"，
+    # 否则同一句话会在历史与背景里各出现一次（双源去重失效）。
+    from app.llm.group_context import with_message_ids
+
+    session_history = with_message_ids(
+        session_history_raw,
+        _format_session_history(
+            session_history_raw, is_private,
+            bot_id=getattr(runtime, "bot_id", ""), session_id=session_id,
+            **_meta_flags,
+        ),
     )
     session_history = await maybe_compress_context(
         provider_chain, config, session_history, history_rounds

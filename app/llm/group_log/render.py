@@ -146,6 +146,7 @@ def render_environment(
 
     lines: list[str] = []
     consumed: set[str] = set()
+    shadow: set[str] = set()
     for event in events or []:
         if not isinstance(event, LogEvent):
             continue
@@ -156,6 +157,8 @@ def render_environment(
                 continue
             if event.message_id and event.message_id in covered:
                 stats.dropped_covered += 1          # 正文已在会话历史里
+                # 正文不重复，但它上面的互动不能跟着消失：交给影子行承接。
+                shadow.add(event.message_id)
                 continue
             who = "我" if event.by_me else _person(event)
             line = f"{_time_label(event.ts)} {who}: {text}"
@@ -180,7 +183,7 @@ def render_environment(
                          else f"{_time_label(event.ts)} {who} 戳了一下{where}")
             continue
 
-    # 没被任何消息行消费掉的互动（正文被去重/为空/被裁）→ 补一条影子行，
+    # 没被任何消息行消费掉的互动（正文被去重、为空、或被裁）→ 补一条影子行，
     # 否则"这条消息上有反应"就彻底看不见了。
     for message_id, items in reactions.items():
         if message_id in consumed:
@@ -191,14 +194,16 @@ def render_environment(
         mine = [t for t in items if t.get("by_me")]
         suffix = f" [我给这条贴了 {_emoji_tags(mine)}]" if mine else ""
         lines.append(f"（消息 {message_id} 上）[♡{tags}]{suffix}")
+        shadow.add(message_id)
 
-    # 会话历史已覆盖的消息：正文不重复，但"我做过什么"必须留下（否则模型不知道
-    # 自己已经贴过，会重复贴）
-    for message_id, my_actions in actions.items():
-        if message_id in consumed or message_id in reactions:
+    # 正文已被会话历史承载、也没有别人互动的消息：至少留下"我做过什么"，
+    # 否则模型不知道自己在那个话题上已经表达过态度。
+    for message_id in shadow:
+        if message_id in reactions:
             continue
         ids = "、".join(
-            str(x).split(":", 1)[-1] for x in my_actions or [] if str(x).startswith("emoji:")
+            str(x).split(":", 1)[-1] for x in (actions.get(message_id) or [])
+            if str(x).startswith("emoji:")
         )
         if ids:
             lines.append(f"（消息 {message_id} 上）[我给这条贴了 {ids}]")

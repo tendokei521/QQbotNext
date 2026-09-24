@@ -628,6 +628,27 @@ def format_history_for_llm(
     )
 
 
+def with_message_ids(entries: list, rendered: list[dict]) -> list[dict]:
+    """给渲染后的 messages 补回 ``message_id``。
+
+    **为什么需要**：渲染器只产出 ``{role, content}``，会话历史里那条消息的
+    ``message_id`` 就丢了——于是"这份历史已经呈现过哪些消息"在装配层无从判断，
+    群聊环境记录的双源去重直接失效（同一条消息会在历史和背景里各出现一次）。
+
+    对齐方式：``render_history`` 按入口顺序产出消息（一条历史可能产出 0 条或 1+N 条），
+    所以这里按**入口序**贴回。一条历史产出多条（附加块）时，只有首条代表"那条消息本身"。
+    """
+    cursor = 0
+    for entry in entries or []:
+        data = entry if isinstance(entry, dict) else getattr(entry, "__dict__", {}) or {}
+        base = data.get("base") if isinstance(data.get("base"), dict) else {}
+        mid = str(data.get("message_id") or base.get("message_id") or "").strip()
+        if mid and cursor < len(rendered):
+            rendered[cursor].update({"message_id": mid})
+        cursor += 1  # 空内容被跳过时该条不出现，但下标仍要推进
+    return rendered
+
+
 def build_group_env_text(
     *,
     group_id: Any,
