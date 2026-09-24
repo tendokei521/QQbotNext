@@ -126,7 +126,7 @@ DEFAULT_LLM_CONFIG: dict = {
     "knowledge_embedding_model_id": "",   # 指定 embedding 模型实例 id；空则自动选第一个 embedding 模型
     "knowledge_recall_limit": 5,          # 默认检索条数
     "knowledge_recall_max_chars": 2000,   # 检索结果最大输出字符
-    # Tavily 联网搜索（系统级工具，不进入 NapCat 前端清单）
+    # Tavily 联网搜索（系统级工具，不进入 OneBot 前端清单）
     "tavily_enable": False,               # 总开关
     "tavily_api_key": "",                 # Tavily API Key（password 脱敏）
     "tavily_max_results": 5,              # 默认搜索结果条数
@@ -184,14 +184,14 @@ DEFAULT_LLM_CONFIG: dict = {
     "module_tools_log_enabled": True,  # 模块工具普通调用日志
     "mcp_tools_enabled": {},           # MCP 工具开关：{"tool_name": bool}
     "mcp_tools_log_enabled": True,     # MCP 工具普通调用日志
-    # NapCat / OneBot 通用工具：数据驱动地暴露 NapCat API 给 LLM
-    "napcat_tools_enable": False,      # 总开关
-    "napcat_tools_allowed": [],        # 空=全部；非空=只允许白名单
-    "napcat_tools_denied": [],         # 黑名单（优先级高于白名单）
-    "napcat_tools_max_result": 2000,   # 返回结果截断长度
-    "napcat_tools_debug": False,       # 调试：完整记录 NapCat 请求与响应
-    "napcat_tools_log_enabled": True,  # NapCat 工具普通调用日志
-    "napcat_tool_overrides": {},       # 工具权限/作用域覆盖：{"send_poke":{"permission":"member","scopes":["private"]}}
+    # OneBot 通用工具：数据驱动地暴露 OneBot API 给 LLM
+    "onebot_tools_enable": False,      # 总开关
+    "onebot_tools_allowed": [],        # 空=全部；非空=只允许白名单
+    "onebot_tools_denied": [],         # 黑名单（优先级高于白名单）
+    "onebot_tools_max_result": 2000,   # 返回结果截断长度
+    "onebot_tools_debug": False,       # 调试：完整记录 OneBot 请求与响应
+    "onebot_tools_log_enabled": True,  # OneBot 工具普通调用日志
+    "onebot_tool_overrides": {},       # 工具权限/作用域覆盖：{"send_poke":{"permission":"member","scopes":["private"]}}
     "poke_cooldown_seconds": 20,       # 戳一戳节流：同会话同一人该秒数内不重复戳（0=不节流）
     # 群聊环境记录（由「群聊记录」模块持续写入，这里只管"一次请求塞多少"）
     "group_log_enable": True,          # 是否把群聊记录作为环境块注入（模块未装/未启用时自动为空）
@@ -216,6 +216,29 @@ _DEFAULT_AUTHORITY: dict = {
     "user_mode": "blacklist",
     "user_list": [],
 }
+
+
+def legacy_key_of(key: str) -> str:
+    """新键 → 旧键（``onebot_tools_*`` → ``napcat_tools_*``）。
+
+    「NapCat 工具」这套配置在 2026-09 改名成「OneBot 工具」（协议名字才是 OneBot），
+    但用户库里存的还是旧键。没有这层映射，升级后读不到旧键就会回落到默认值——
+    ``onebot_tools_enable`` 默认 False，等于把用户已经打开的开关**静默关掉**。
+    """
+    text = str(key or "")
+    if text.startswith("onebot_"):
+        return "napcat_" + text[len("onebot_"):]
+    return ""
+
+
+def _pick(candidates: list[tuple[dict, str]], fallback: Any) -> Any:
+    """按顺序取第一个存在的非空值（``item`` 可为 None）。"""
+    for data, key in candidates:
+        if not isinstance(data, dict):
+            continue
+        if key in data and data[key] is not None:
+            return data[key]
+    return fallback
 
 
 class AgentConfig:
@@ -256,18 +279,39 @@ class AgentConfig:
     def get(self, key: str, default: Any = None) -> Any:
         self._ensure_migrated()
         data = self._service.get_module_config(AGENT_CONFIG_MODULE, self._bot) or {}
-        if key in data and data[key] is not None:
-            return data[key]
         profile = self._profile_config()
-        if key in profile and profile[key] is not None:
-            return profile[key]
+        legacy = legacy_key_of(key)
+        candidates = [(data, key), (profile, key)]
+        if legacy:
+            candidates += [(data, legacy), (profile, legacy)]
+        value = _pick(candidates, None)
+        if value is not None:
+            return value
         if key in DEFAULT_LLM_CONFIG and DEFAULT_LLM_CONFIG[key] is not None:
             return DEFAULT_LLM_CONFIG[key]
         return default
 
-    def _base_raw_config(self) -> dict:
+    def _adapted_stored(self) -> dict:
+        """已存配置 → 新键口径。
+
+        只做 ``napcat_* → onebot_tools_*`` 的**内存适配**（不改用户数据）：新键存在时
+        以新键为准，旧键仅在缺少新键时补位。这样「升级不丢设置」且「新键为唯一事实源」。
+        """
         self._ensure_migrated()
-        stored = self._service.get_module_config(AGENT_CONFIG_MODULE, self._bot) or {}
+        raw = self._service.get_module_config(AGENT_CONFIG_MODULE, self._bot) or {}
+        if not isinstance(raw, dict):
+            return {}
+        adapted = dict(raw)
+        for key in DEFAULT_LLM_CONFIG:
+            legacy = legacy_key_of(key)
+            if not legacy or key in adapted:
+                continue
+            if legacy in raw and raw[legacy] is not None:
+                adapted[key] = raw[legacy]
+        return adapted
+
+    def _base_raw_config(self) -> dict:
+        stored = self._adapted_stored()
         result: dict = {}
         for key, default_value in DEFAULT_LLM_CONFIG.items():
             if key in stored and stored[key] is not None:

@@ -57,7 +57,7 @@ UNRESOLVED_REPLY = "【未展开:引用{id}】"
 UNRESOLVED_FORWARD = "【未展开:合并转发】"
 # 合并转发标记里的 id 是**承载转发的那条消息的 id**（不是转发节点内部的 forward id）：
 # 展开入口 ``get_forward_msg(id=...)`` 要的就是这个 id；内部 id 是可能超出
-# int32 / JS 安全整数范围的长整型字符串，传进去会被 NapCat 拒为
+# int32 / JS 安全整数范围的长整型字符串，传进去会被 OneBot 拒为
 # 「1200 消息已过期或者为内层消息」。渲染时由调用方把整条消息 id 传进来
 # （``format_online_history`` 取 ``message_id``，``enhance`` 取 ``reply_id``）。
 UNRESOLVED_FORWARD_ID = "【未展开:合并转发{id}】"

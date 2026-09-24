@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### 改名：NapCat 工具 → OneBot 工具（旧配置键仍生效）
+
+「OneBot」是协议名，NapCat 只是本项目使用的协议端实现之一，因此把四处对外命名统一到协议名：
+
+- 包路径 `app/llm/napcat/` → `app/llm/onebot_tools/`；
+  符号 `NAP_CAT_TOOLS` / `build_napcat_tools` → `ONEBOT_TOOLS` / `build_onebot_tools`；
+  工具来源标识 `spec.source` 由 `"napcat"` 改为 `"onebot"`
+- 配置键 `napcat_tools_*` / `napcat_tool_overrides` → `onebot_tools_*` / `onebot_tool_overrides`；
+  **旧键仍会被读取**（新键优先，只做内存适配、不改写用户数据）——否则升级后
+  `onebot_tools_enable` 回落默认 `False`，等于把用户已打开的开关静默关掉（见
+  `tests/test_llm_config_legacy_keys.py`）
+- Dashboard：路由 `/tools/napcat` → `/tools/onebot`、页面 `OnebotToolsPage.vue`、
+  tab id 与 localStorage 字段名同步；展示文案 "NapCat Tools" → "OneBot Tools"
+- 上游 API 文档地址（`napcat.apifox.cn`）**保持不变**：那是三方协议端的真实文档站，改了就是死链
+
 ### 重构：会话历史「基础信息 + 轮次信息」，查看过的内容留在历史里
 
 历史此前是「一条冻结文本」：`enhance` 把「时间/群号/发送者/发送了」拼成字符串整条落库，

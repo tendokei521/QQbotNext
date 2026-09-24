@@ -51,7 +51,7 @@ from app.modules.features import (
     FeatureRegistry,
     KnowledgeFeatureController,
     MemoryFeatureController,
-    NapcatToolsFeatureController,
+    OneBotToolsFeatureController,
     ProactiveFeatureController,
     ScheduleFeatureController,
 )
@@ -81,7 +81,7 @@ __all__ = [
     "ScheduleFeatureController",
     "MemoryFeatureController",
     "KnowledgeFeatureController",
-    "NapcatToolsFeatureController",
+    "OneBotToolsFeatureController",
     "AgentFeatureController",
     "module_hook",
     "llm_hook",

@@ -1,4 +1,4 @@
-"""NapCat / OneBot API 工具清单。
+"""OneBot API 工具清单。
 
 每条记录：
 - name: 对应 OneBot action
@@ -9,7 +9,7 @@
 - scopes: group / private / ["*"]
 """
 
-NAP_CAT_TOOLS: list[dict] = [
+ONEBOT_TOOLS: list[dict] = [
     # ---------- 只读/状态 ----------
     {
         "name": "get_login_info",
@@ -33,7 +33,7 @@ NAP_CAT_TOOLS: list[dict] = [
     },
     {
         "name": "get_version_info",
-        "description": "获取 NapCat/OneBot 版本信息。",
+        "description": "获取 OneBot 协议端版本信息。",
         "parameters": {"type": "object", "properties": {}},
         "risk": "read",
         "permission": "member",
@@ -206,7 +206,7 @@ NAP_CAT_TOOLS: list[dict] = [
             "properties": {
                 "user_id": {"type": "integer", "description": "被戳的用户 QQ 号"},
                 "group_id": {"type": "integer", "description": "群号；群聊中戳一戳必填，应填写当前群号"},
-                "target_id": {"type": "integer", "description": "目标 QQ 号（NapCat 扩展字段），通常可省略"},
+                "target_id": {"type": "integer", "description": "目标 QQ 号（OneBot 扩展字段），通常可省略"},
             },
             "required": ["user_id"],
         },
@@ -523,7 +523,7 @@ NAP_CAT_TOOLS: list[dict] = [
     },
     {
         "name": "clean_cache",
-        "description": "清理 NapCat/OneBot 缓存。",
+        "description": "清理 OneBot 协议端缓存。",
         "parameters": {"type": "object", "properties": {}},
         "risk": "admin",
         "permission": "owner",
@@ -4779,7 +4779,7 @@ _HIGH_TOOLS = {
     "set_friend_add_request",
 }
 
-for _tool in NAP_CAT_TOOLS:
+for _tool in ONEBOT_TOOLS:
     _name = str(_tool.get("name", ""))
     if _name in _CRITICAL_TOOLS:
         _tool["sensitivity"] = "critical"

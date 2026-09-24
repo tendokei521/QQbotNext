@@ -119,7 +119,7 @@ async def test_get_current_session_private(llm_data_dir):
 
 
 async def test_session_history_tool_replaced_by_chat_history(llm_data_dir):
-    """三个历史工具（本地 + 两个 NapCat）收敛为一个零参数入口。"""
+    """三个历史工具（本地 + 两个 OneBot）收敛为一个零参数入口。"""
     runtime = SimpleNamespace(bot_id="bot_names", config={})
     ctx = _ctx(runtime, SimpleNamespace(), "group_1", user_id=1, group_id=1)
     names = {t.name for t in build_session_tools(runtime, ctx)}

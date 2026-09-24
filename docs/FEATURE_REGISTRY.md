@@ -13,7 +13,7 @@
 - 框架定时任务：`schedule`
 - 长期记忆：`memory`
 - 知识库：`knowledge`
-- NapCat Tools：`napcat_tools`
+- OneBot Tools：`onebot_tools`
 - 框架级 Agent 整体启停：`agent`
 
 当第三方插件也实现同类能力时（例如“新的主动回复插件”），需要有一个统一机制让插件：
@@ -102,7 +102,7 @@ print(get_features(bot_id=self.bot_id))
 | `schedule` | 关闭 `schedule_enable`，停止定时任务计时器 | 还原配置，重新武装任务 |
 | `memory` | 关闭 `memory_enable` | 还原配置 |
 | `knowledge` | 关闭 `knowledge_enable` | 还原配置 |
-| `napcat_tools` | 关闭 `napcat_tools_enable` | 还原配置 |
+| `onebot_tools` | 关闭 `onebot_tools_enable` | 还原配置 |
 | `agent` | 关闭 `AgentRuntime.config.enabled`，停止主动消息/定时任务计时器 | 恢复启用状态，重新武装计时器 |
 
 这些控制器由框架在启动时注册，插件无需手动注册。

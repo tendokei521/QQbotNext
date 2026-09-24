@@ -273,7 +273,7 @@ async def _collect_llm_ext(
         group_id=group_id,
     )
 
-    # 系统级会话上下文工具（不展示在 NapCat 前端清单）
+    # 系统级会话上下文工具（不展示在 OneBot 前端清单）
     from app.llm.session_tools import build_session_tools
 
     specs.extend(build_session_tools(runtime, ctx))
@@ -285,7 +285,7 @@ async def _collect_llm_ext(
 
         specs.extend(build_context_tools(runtime, ctx))
 
-    # Tavily 联网搜索（系统级工具，不进入 NapCat 前端清单）
+    # Tavily 联网搜索（系统级工具，不进入 OneBot 前端清单）
     if bool(runtime.config.get("tavily_enable", False)):
         tavily_api_key = str(runtime.config.get("tavily_api_key", "") or "").strip()
         if tavily_api_key:
@@ -314,16 +314,16 @@ async def _collect_llm_ext(
         await mcp.ensure_ready()
         specs.extend(mcp.build_tools())
 
-    # NapCat / OneBot 通用工具（数据驱动清单，按当前会话作用域过滤）
-    if bool(runtime.config.get("napcat_tools_enable", False)):
-        from app.llm.napcat import build_napcat_tools
+    # OneBot 通用工具（数据驱动清单，按当前会话作用域过滤）
+    if bool(runtime.config.get("onebot_tools_enable", False)):
+        from app.llm.onebot_tools import build_onebot_tools
 
-        specs.extend(build_napcat_tools(runtime, ctx))
+        specs.extend(build_onebot_tools(runtime, ctx))
 
     # 统一按四类工具的用户开关过滤：
     # - 系统工具由 system_tools_enabled + 前置功能开关共同决定
     # - 模块工具 / MCP 工具由各自 enabled map 单独控制
-    # - NapCat 工具已在上方由 security.resolve_tool_policy 过滤，这里直接放行
+    # - OneBot 工具已在上方由 security.resolve_tool_policy 过滤，这里直接放行
     from app.llm.system_tools import is_system_tool_enabled
 
     system_enabled = runtime.config.get("system_tools_enabled", {}) or {}
@@ -331,7 +331,7 @@ async def _collect_llm_ext(
     mcp_enabled = runtime.config.get("mcp_tools_enabled", {}) or {}
     filtered: list = []
     for spec in specs:
-        if spec.source == "napcat":
+        if spec.source == "onebot":
             filtered.append(spec)
         elif spec.source == "mcp":
             if not (isinstance(mcp_enabled, dict) and not mcp_enabled.get(spec.name, True)):

@@ -23,7 +23,7 @@ const router = createRouter({
         { path: 'agent/memory', name: 'agent-memory', component: () => import('@/views/AgentMemoryPage.vue'), meta: { title: 'Agent 长期记忆' } },
         { path: 'agent/knowledge', name: 'agent-knowledge', component: () => import('@/views/AgentKnowledgePage.vue'), meta: { title: 'Agent 知识库' } },
         { path: 'agent/mcp', name: 'agent-mcp', component: () => import('@/views/AgentMcpPage.vue'), meta: { title: 'Agent MCP 工具' } },
-        { path: 'agent/napcat', redirect: '/tools/napcat' },
+        { path: 'agent/onebot', redirect: '/tools/onebot' },
         { path: 'agent/panels', name: 'agent-panels', component: () => import('@/views/AgentPanelsPage.vue'), meta: { title: 'Agent 定时任务 / 主动消息' } },
         {
           path: 'tools',
@@ -31,7 +31,7 @@ const router = createRouter({
           meta: { title: 'Tool 管理' },
           children: [
             { path: 'system', name: 'tools-system', component: () => import('@/views/SystemToolsPage.vue'), meta: { title: 'System Tools' } },
-            { path: 'napcat', name: 'tools-napcat', component: () => import('@/views/NapcatToolsPage.vue'), meta: { title: 'Napcat Tools' } },
+            { path: 'onebot', name: 'tools-onebot', component: () => import('@/views/OnebotToolsPage.vue'), meta: { title: 'OneBot Tools' } },
             { path: 'mcp', name: 'tools-mcp', component: () => import('@/views/McpToolsPage.vue'), meta: { title: 'MCP Tools' } },
             { path: 'module', name: 'tools-module', component: () => import('@/views/ModuleToolsPage.vue'), meta: { title: '模块 Tools' } },
           ],

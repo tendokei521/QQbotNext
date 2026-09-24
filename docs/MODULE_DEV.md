@@ -134,7 +134,7 @@ self.ctx.services.features.status(self.bot_id)
 | `schedule` | 框架定时任务 |
 | `memory` | 长期记忆总开关 |
 | `knowledge` | 知识库总开关 |
-| `napcat_tools` | NapCat 工具总开关 |
+| `onebot_tools` | OneBot 工具总开关 |
 | `agent` | 框架级 Agent 整体启停 |
 
 ### 2.6.4 多租约行为

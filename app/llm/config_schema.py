@@ -16,7 +16,7 @@ SCHEMA = {
     "group_knowledge": {"type": "group", "label": "知识库", "collapsible": True},
     "group_tavily": {"type": "group", "label": "Tavily 联网搜索", "collapsible": True},
     "group_mcp": {"type": "group", "label": "MCP 工具", "collapsible": True},
-    "group_napcat": {"type": "group", "label": "NapCat 工具", "collapsible": True},
+    "group_onebot": {"type": "group", "label": "OneBot 工具", "collapsible": True},
     "group_tools": {"type": "group", "label": "工具调用", "collapsible": True},
     "group_permission": {"type": "group", "label": "权限", "collapsible": True},
 
@@ -605,30 +605,30 @@ SCHEMA = {
         "default": "", "rows": 3, "group": "group_tools",
     },
 
-    # ==================== NapCat 工具 ====================
-    "napcat_tools_enable": {
-        "type": "boolean", "label": "启用 NapCat 工具", "description": "把 NapCat/OneBot API 暴露给 LLM 作为 function calling 工具",
-        "default": False, "group": "group_napcat",
+    # ==================== OneBot 工具 ====================
+    "onebot_tools_enable": {
+        "type": "boolean", "label": "启用 OneBot 工具", "description": "把 OneBot API 暴露给 LLM 作为 function calling 工具",
+        "default": False, "group": "group_onebot",
     },
-    "napcat_tools_allowed": {
+    "onebot_tools_allowed": {
         "type": "string_list", "label": "允许的工具（白名单）", "description": "留空表示允许全部；非空时只允许列出的工具",
-        "default": [], "group": "group_napcat",
+        "default": [], "group": "group_onebot",
     },
-    "napcat_tools_denied": {
+    "onebot_tools_denied": {
         "type": "string_list", "label": "禁用的工具（黑名单）", "description": "黑名单优先于白名单，可在此关闭敏感工具",
-        "default": [], "group": "group_napcat",
+        "default": [], "group": "group_onebot",
     },
-    "napcat_tools_max_result": {
+    "onebot_tools_max_result": {
         "type": "number", "label": "返回结果截断长度", "description": "API 返回内容超过该长度后截断，防止撑爆上下文",
-        "default": 2000, "min": 100, "max": 20000, "group": "group_napcat",
+        "default": 2000, "min": 100, "max": 20000, "group": "group_onebot",
     },
-    "napcat_tools_debug": {
-        "type": "boolean", "label": "NapCat 调试日志", "description": "开启后完整记录每个 NapCat 工具调用的请求参数与响应内容",
-        "default": False, "group": "group_napcat",
+    "onebot_tools_debug": {
+        "type": "boolean", "label": "OneBot 调试日志", "description": "开启后完整记录每个 OneBot 工具调用的请求参数与响应内容",
+        "default": False, "group": "group_onebot",
     },
     "poke_cooldown_seconds": {
         "type": "number", "label": "戳一戳节流(秒)", "description": "同一会话里对同一个人，该秒数内不重复戳一戳（0=不节流）；失败不占用冷却",
-        "default": 20, "min": 0, "max": 600, "group": "group_napcat",
+        "default": 20, "min": 0, "max": 600, "group": "group_onebot",
     },
 
     # ==================== 感知增强提示词细调（实验性） ====================
@@ -690,7 +690,7 @@ _PAGE_BY_GROUP = {
     "group_knowledge": "knowledge",
     "group_tavily": "basic",
     "group_mcp": "mcp",
-    "group_napcat": "napcat",
+    "group_onebot": "onebot",
     "group_tools": "basic",
     "group_permission": "permission",
 }
@@ -710,7 +710,7 @@ _IMPORTANCE_BY_GROUP = {
     "group_knowledge": "advanced",
     "group_tavily": "advanced",
     "group_mcp": "advanced",
-    "group_napcat": "advanced",
+    "group_onebot": "advanced",
     "group_tools": "advanced",
     "group_permission": "basic",
 }

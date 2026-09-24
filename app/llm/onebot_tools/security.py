@@ -1,8 +1,6 @@
-"""NapCat 工具策略解析：总开关 / 白黑名单 / 覆盖权限 / 敏感度拦截。"""
+"""OneBot 工具策略解析：总开关 / 白黑名单 / 覆盖权限 / 敏感度拦截。"""
 
 from __future__ import annotations
-
-from typing import Any
 
 PERMISSION_PATH = ("everyone", "member", "group_admin", "group_owner", "owner")
 
@@ -12,14 +10,14 @@ def _overrides(runtime) -> dict:
         return {}
     try:
         config = getattr(runtime, "config", None)
-        raw = config.get("napcat_tool_overrides", {}) if config is not None else {}
+        raw = config.get("onebot_tool_overrides", {}) if config is not None else {}
         return dict(raw or {})
     except Exception:
         return {}
 
 
 def resolve_tool_policy(runtime, tool: dict) -> dict:
-    """返回某个 NapCat 工具的最终策略。"""
+    """返回某个 OneBot 工具的最终策略。"""
     name = str(tool.get("name", "") or "")
     base_permission = str(tool.get("permission", "member") or "member")
     base_scopes = list(tool.get("scopes", ["*"]) or ["*"])
@@ -28,9 +26,9 @@ def resolve_tool_policy(runtime, tool: dict) -> dict:
 
     try:
         config = getattr(runtime, "config", None)
-        enabled = bool(config.get("napcat_tools_enable", False)) if config is not None else False
-        denied = list(config.get("napcat_tools_denied", []) or []) if config is not None else []
-        allowed = list(config.get("napcat_tools_allowed", []) or []) if config is not None else []
+        enabled = bool(config.get("onebot_tools_enable", False)) if config is not None else False
+        denied = list(config.get("onebot_tools_denied", []) or []) if config is not None else []
+        allowed = list(config.get("onebot_tools_allowed", []) or []) if config is not None else []
     except Exception:
         enabled = False
         denied = []
@@ -50,7 +48,7 @@ def resolve_tool_policy(runtime, tool: dict) -> dict:
 
     if not enabled:
         blocked = True
-        blocked_reason = "napcat_tools_enable=false"
+        blocked_reason = "onebot_tools_enable=false"
     elif name in denied:
         blocked = True
         blocked_reason = "denied"

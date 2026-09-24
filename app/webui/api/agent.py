@@ -13,8 +13,8 @@ from fastapi.responses import JSONResponse
 from app.core.logger import logger
 from app.llm.config import LEGACY_LLM_CONNECTION_KEYS
 from app.llm.config_schema import STREAM_PRESETS
-from app.llm.napcat.manifest import NAP_CAT_TOOLS
-from app.llm.napcat.security import resolve_tool_policy
+from app.llm.onebot_tools.manifest import ONEBOT_TOOLS
+from app.llm.onebot_tools.security import resolve_tool_policy
 from app.llm.system_tools import list_system_tools
 from app.infrastructure.config.config_service import ConfigService
 from app.services.bot_service import PASSWORD_MASK as _PASSWORD_MASK
@@ -233,23 +233,23 @@ async def agent_knowledge_delete(cid: str, request: Request, bot_id: int | None 
     return _ok("知识库条目已删除")
 
 
-# ==================== NapCat 工具清单 ====================
+# ==================== OneBot 工具清单 ====================
 
-@router.get("/napcat/tools")
-async def agent_napcat_tools(request: Request, bot_id: int | None = Depends(parse_bot_id)):
+@router.get("/onebot/tools")
+async def agent_onebot_tools(request: Request, bot_id: int | None = Depends(parse_bot_id)):
     container = get_container(request)
     runtime, _ = _runtime(container, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
     tools = []
-    for tool in NAP_CAT_TOOLS:
+    for tool in ONEBOT_TOOLS:
         policy = resolve_tool_policy(runtime, tool)
         item = dict(tool)
         item.update(policy)
         tools.append(item)
     return JSONResponse(content={
         "ok": True,
-        "log_enabled": bool(runtime.config.get("napcat_tools_log_enabled", True)),
+        "log_enabled": bool(runtime.config.get("onebot_tools_log_enabled", True)),
         "tools": tools,
     })
 

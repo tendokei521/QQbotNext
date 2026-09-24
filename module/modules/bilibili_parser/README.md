@@ -54,7 +54,7 @@ _parse_and_send（慢，仅第一个视频）
 
 ## 依赖与前提
 
-- 需要 NapCat 支持 `send_group_forward_msg` / `send_private_forward_msg`（节点内的视频片段走本地 `file:///` 上传）；
+- 需要 OneBot 支持 `send_group_forward_msg` / `send_private_forward_msg`（节点内的视频片段走本地 `file:///` 上传）；
 - `1/bili-video-parser` 是**同源的参考实现**（sync + requests），本插件按其结论做了 async 移植：
   `wbi.py`（签名纯函数）、`video.py`（取流整理 + 缓存策略）、`bilibili_api.py`（网络层）。
   该目录未纳入 git，插件不依赖它，可独立部署。

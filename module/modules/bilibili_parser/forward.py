@@ -5,7 +5,7 @@
 一条视频对应一条合并转发，内含两个**分开的节点**：
 
 1. 简介节点：标题 / 封面 / UP / 统计 / 简介 / 链接（复用 ``build_video_message``，**不含 reply 段**）；
-2. 视频节点：720P mp4（本地文件用 ``file:///`` URI，避免 NapCat 再回源 CDN 直链）；
+2. 视频节点：720P mp4（本地文件用 ``file:///`` URI，避免 OneBot 再回源 CDN 直链）；
    取流或下载失败时降级为文本节点（原因 + 链接），简介节点照常发送。
 """
 
@@ -17,7 +17,7 @@ from .bilibili_api import build_video_message
 
 # 合并转发卡片上显示的发送者名
 FORWARD_NAME = "B站解析"
-# 无可用 uin 时的兜底（NapCat 要求节点带 uin）
+# 无可用 uin 时的兜底（OneBot 要求节点带 uin）
 FALLBACK_UIN = "10000"
 
 

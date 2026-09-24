@@ -1,4 +1,4 @@
-"""Tavily 联网搜索工具（系统级，不进入 NapCat 前端清单）。
+"""Tavily 联网搜索工具（系统级，不进入 OneBot 前端清单）。
 
 - 通过 Tavily Search API 提供 LLM 联网搜索能力；
 - 只生成一个 Tavily ToolSpec，由 ``chat._collect_llm_ext`` 按配置追加；

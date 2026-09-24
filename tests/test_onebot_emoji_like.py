@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 from app.llm import emoji_lexicon
 from app.llm.group_log.store import GroupLogStore
-from app.llm.napcat.manifest import NAP_CAT_TOOLS
-from app.llm.napcat.tools import _handler
+from app.llm.onebot_tools.manifest import ONEBOT_TOOLS
+from app.llm.onebot_tools.tools import _handler
 from app.llm.tool import ToolContext
 
 ACTION = "set_msg_emoji_like"
@@ -27,7 +27,7 @@ class FakeBot:
 
 
 def _tool_def() -> dict:
-    return next(t for t in NAP_CAT_TOOLS if t["name"] == ACTION)
+    return next(t for t in ONEBOT_TOOLS if t["name"] == ACTION)
 
 
 def _ctx(bot: FakeBot, store: GroupLogStore | None = None, *, message_id: int = 777,

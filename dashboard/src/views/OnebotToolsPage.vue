@@ -8,7 +8,7 @@ import { useToolsStore } from '@/stores/tools'
 import { useNotifyStore } from '@/stores/notify'
 import { filterSchemaByPage } from '@/utils/schema'
 
-interface NapCatTool {
+interface OneBotTool {
   name: string
   description: string
   parameters: Record<string, any>
@@ -35,9 +35,9 @@ const agent = useAgentConfigStore()
 const bots = useBotsStore()
 const toolsStore = useToolsStore()
 const notify = useNotifyStore()
-const schema = computed(() => filterSchemaByPage(agent.schema, 'napcat'))
+const schema = computed(() => filterSchemaByPage(agent.schema, 'onebot'))
 
-const tools = ref<NapCatTool[]>([])
+const tools = ref<OneBotTool[]>([])
 const loading = ref(false)
 const detailKey = ref('')
 
@@ -62,7 +62,7 @@ const DOC_CATEGORY_ORDER = [
 ]
 
 const toolGroups = computed(() => {
-  const map = new Map<string, NapCatTool[]>()
+  const map = new Map<string, OneBotTool[]>()
   for (const tool of tools.value) {
     const category = tool.category || '未分类'
     if (!map.has(category)) map.set(category, [])
@@ -78,38 +78,38 @@ const toolGroups = computed(() => {
 })
 
 const enabled = computed<boolean>({
-  get: () => !!agent.draft.napcat_tools_enable,
-  set: (v: boolean) => agent.onChange('napcat_tools_enable', v),
+  get: () => !!agent.draft.onebot_tools_enable,
+  set: (v: boolean) => agent.onChange('onebot_tools_enable', v),
 })
 
 const logEnabled = computed<boolean>({
-  get: () => !!agent.draft.napcat_tools_log_enabled,
-  set: (v: boolean) => agent.onChange('napcat_tools_log_enabled', !!v),
+  get: () => !!agent.draft.onebot_tools_log_enabled,
+  set: (v: boolean) => agent.onChange('onebot_tools_log_enabled', !!v),
 })
 
-const denied = computed<string[]>(() => Array.isArray(agent.draft.napcat_tools_denied) ? agent.draft.napcat_tools_denied : [])
-const allowed = computed<string[]>(() => Array.isArray(agent.draft.napcat_tools_allowed) ? agent.draft.napcat_tools_allowed : [])
-const overrides = computed<Record<string, ToolOverride>>(() => agent.draft.napcat_tool_overrides || {})
+const denied = computed<string[]>(() => Array.isArray(agent.draft.onebot_tools_denied) ? agent.draft.onebot_tools_denied : [])
+const allowed = computed<string[]>(() => Array.isArray(agent.draft.onebot_tools_allowed) ? agent.draft.onebot_tools_allowed : [])
+const overrides = computed<Record<string, ToolOverride>>(() => agent.draft.onebot_tool_overrides || {})
 
-function toolPermission(tool: NapCatTool): string {
+function toolPermission(tool: OneBotTool): string {
   return overrides.value[tool.name]?.permission || tool.base_permission || tool.permission
 }
 
-function toolScopes(tool: NapCatTool): string[] {
+function toolScopes(tool: OneBotTool): string[] {
   return overrides.value[tool.name]?.scopes || tool.base_scopes || tool.scopes
 }
 
-function updateOverride(tool: NapCatTool, partial: ToolOverride) {
+function updateOverride(tool: OneBotTool, partial: ToolOverride) {
   const current = overrides.value[tool.name] || {}
   const next = { ...overrides.value, [tool.name]: { ...current, ...partial } }
-  agent.onChange('napcat_tool_overrides', next)
+  agent.onChange('onebot_tool_overrides', next)
 }
 
-function setToolPermission(tool: NapCatTool, permission: string) {
+function setToolPermission(tool: OneBotTool, permission: string) {
   updateOverride(tool, { permission })
 }
 
-function isSensitiveWide(tool: NapCatTool): boolean {
+function isSensitiveWide(tool: OneBotTool): boolean {
   if (!['high', 'critical'].includes(tool.sensitivity)) return false
   return ['everyone', 'member'].includes(toolPermission(tool))
 }
@@ -122,29 +122,29 @@ function isToolOn(name: string): boolean {
 
 function toggleTool(name: string) {
   if (isToolOn(name)) {
-    agent.onChange('napcat_tools_denied', Array.from(new Set([...denied.value, name])))
-    agent.onChange('napcat_tools_allowed', allowed.value.filter((x) => x !== name))
+    agent.onChange('onebot_tools_denied', Array.from(new Set([...denied.value, name])))
+    agent.onChange('onebot_tools_allowed', allowed.value.filter((x) => x !== name))
   } else {
-    agent.onChange('napcat_tools_denied', denied.value.filter((x) => x !== name))
+    agent.onChange('onebot_tools_denied', denied.value.filter((x) => x !== name))
     if (allowed.value.length) {
-      agent.onChange('napcat_tools_allowed', Array.from(new Set([...allowed.value, name])))
+      agent.onChange('onebot_tools_allowed', Array.from(new Set([...allowed.value, name])))
     }
   }
 }
 
 function resetToggles() {
-  agent.onChange('napcat_tools_denied', [])
-  agent.onChange('napcat_tools_allowed', [])
-  agent.onChange('napcat_tool_overrides', {})
+  agent.onChange('onebot_tools_denied', [])
+  agent.onChange('onebot_tools_allowed', [])
+  agent.onChange('onebot_tool_overrides', {})
 }
 
 function isCollapsed(category: string): boolean {
-  return !!toolsStore.collapsedOf('napcat')[category]
+  return !!toolsStore.collapsedOf('onebot')[category]
 }
 
 function toggleCategory(category: string) {
-  const next = { ...toolsStore.collapsedOf('napcat'), [category]: !isCollapsed(category) }
-  toolsStore.setCollapsed('napcat', next)
+  const next = { ...toolsStore.collapsedOf('onebot'), [category]: !isCollapsed(category) }
+  toolsStore.setCollapsed('onebot', next)
 }
 
 function riskColor(risk: string): string {
@@ -167,7 +167,7 @@ async function loadTools() {
   if (!agent.botId) return
   loading.value = true
   try {
-    const res = await http.get<{ ok: boolean; log_enabled: boolean; tools: NapCatTool[] }>('/api/agent/napcat/tools', {
+    const res = await http.get<{ ok: boolean; log_enabled: boolean; tools: OneBotTool[] }>('/api/agent/onebot/tools', {
       params: { bot_id: agent.botId },
     })
     tools.value = res.data.tools || []
@@ -179,12 +179,12 @@ async function loadTools() {
 }
 
 function restoreScroll() {
-  const top = toolsStore.scrollTop.napcat || 0
+  const top = toolsStore.scrollTop.onebot || 0
   if (top) window.scrollTo(0, top)
 }
 
 function saveScroll() {
-  toolsStore.setScroll('napcat', window.scrollY || 0)
+  toolsStore.setScroll('onebot', window.scrollY || 0)
 }
 
 onMounted(async () => {
@@ -217,7 +217,7 @@ watch(
         <v-switch v-model="enabled" color="primary" density="compact" hide-details />
       </v-card-title>
       <v-card-text class="text-caption" style="opacity: 0.65; display: flex; flex-wrap: wrap; gap: 16px">
-        <span>开启后，LLM 将获得调用 NapCat/OneBot API 的能力。请谨慎开启敏感管理工具。</span>
+        <span>开启后，LLM 将获得调用 OneBot API 的能力。请谨慎开启敏感管理工具。</span>
         <v-switch
           v-model="logEnabled"
           label="输出普通调用日志"
@@ -226,12 +226,12 @@ watch(
           hide-details
         />
         <v-switch
-          :model-value="!!agent.draft.napcat_tools_debug"
+          :model-value="!!agent.draft.onebot_tools_debug"
           label="详细调试日志（请求/响应）"
           color="warning"
           density="compact"
           hide-details
-          @update:model-value="(v: any) => agent.onChange('napcat_tools_debug', !!v)"
+          @update:model-value="(v: any) => agent.onChange('onebot_tools_debug', !!v)"
         />
       </v-card-text>
     </v-card>
@@ -248,7 +248,7 @@ watch(
           target="_blank"
           rel="noopener"
         >
-          NapCat API 文档
+          OneBot API 文档
         </v-btn>
         <v-btn size="small" variant="tonal" :disabled="!enabled" @click="resetToggles">恢复默认</v-btn>
       </v-card-title>

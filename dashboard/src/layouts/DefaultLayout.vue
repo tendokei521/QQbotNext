@@ -68,7 +68,7 @@ const navItems = computed<NavItem[]>(() => {
   ]
   const toolChildren: NavChild[] = [
     { to: '/tools/system', title: 'System Tools' },
-    { to: '/tools/napcat', title: 'Napcat Tools' },
+    { to: '/tools/onebot', title: 'OneBot Tools' },
     { to: '/tools/mcp', title: 'MCP Tools' },
     { to: '/tools/module', title: '模块 Tools' },
   ]

@@ -18,7 +18,7 @@ from typing import Any
 # 指令前缀：改这一处即可全局生效（pipeline 分流 / chat.handle / handle_commands 共用）
 PREFIX = "#llm"
 
-# 合并转发节点的发送者名与 uin 兜底（NapCat 要求节点带 uin；优先用 bot 自身 QQ）
+# 合并转发节点的发送者名与 uin 兜底（OneBot 要求节点带 uin；优先用 bot 自身 QQ）
 FORWARD_NAME = "指令表"
 FALLBACK_UIN = "10000"
 

@@ -9,13 +9,13 @@ const tools = useToolsStore()
 
 const TABS: { value: ToolTab; to: string; label: string; icon: string }[] = [
   { value: 'system', to: '/tools/system', label: 'System Tools', icon: 'mdi-cog-outline' },
-  { value: 'napcat', to: '/tools/napcat', label: 'Napcat Tools', icon: 'mdi-robot-industrial' },
+  { value: 'onebot', to: '/tools/onebot', label: 'OneBot Tools', icon: 'mdi-robot-industrial' },
   { value: 'mcp', to: '/tools/mcp', label: 'MCP Tools', icon: 'mdi-server-network' },
   { value: 'module', to: '/tools/module', label: '模块 Tools', icon: 'mdi-puzzle-outline' },
 ]
 
 const activeTab = computed<ToolTab>(() => {
-  if (route.path.startsWith('/tools/napcat')) return 'napcat'
+  if (route.path.startsWith('/tools/onebot')) return 'onebot'
   if (route.path.startsWith('/tools/mcp')) return 'mcp'
   if (route.path.startsWith('/tools/module')) return 'module'
   return 'system'

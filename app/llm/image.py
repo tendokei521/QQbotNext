@@ -64,7 +64,7 @@ def _as_int(value: Any) -> int | None:
 
 
 def _sniff_mime(data: bytes) -> str:
-    """按魔数嗅探图片格式：NapCat 给的 ``file`` 名经常没有扩展名。"""
+    """按魔数嗅探图片格式：OneBot 给的 ``file`` 名经常没有扩展名。"""
     if data.startswith(b"\xff\xd8\xff"):
         return "image/jpeg"
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
@@ -164,7 +164,7 @@ async def _resolve_one(seg: Any, *, bot: Any, max_bytes: int) -> dict | None:
                 return None
             return {"kind": "url", "value": candidate}
 
-    # 3) base64:// 形态（NapCat 常用）
+    # 3) base64:// 形态（OneBot 常用）
     raw_b64 = ""
     for candidate in (str(data.get("base64", "") or "").strip(), file_value):
         if candidate.lower().startswith("base64://"):
@@ -176,7 +176,7 @@ async def _resolve_one(seg: Any, *, bot: Any, max_bytes: int) -> dict | None:
     if raw_b64:
         return _from_base64(raw_b64, mime=mime, max_bytes=max_bytes)
 
-    # 4) 兜底：让 NapCat 把 file 转成可访问 URL（get_image），异常不影响主流程
+    # 4) 兜底：让 OneBot 把 file 转成可访问 URL（get_image），异常不影响主流程
     if bot is not None and file_value:
         try:
             resp = await bot.get_image(file_value)

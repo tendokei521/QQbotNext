@@ -1,4 +1,4 @@
-"""防撤回持久化消息库（吸收自 astrbot NapcatPrerequisite message_db）。
+"""防撤回持久化消息库（吸收自 astrbot OnebotPrerequisite message_db）。
 
 - 消息事件到达时异步落盘（JSON，module/data/notice_recall_back/message_db_<bot>.json）；
 - 撤回时先查内存缓存、未命中查磁盘——重启后仍能恢复被撤回消息；

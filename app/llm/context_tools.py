@@ -319,9 +319,9 @@ def _forward_time_prefix(ts: Any) -> str:
 
 
 def _render_node_segments(segments: Any, *, depth: int, seen: set[str]) -> str:
-    """渲染转发节点里的消息段，**对齐 NapCat 返回结构**。
+    """渲染转发节点里的消息段，**对齐 OneBot 返回结构**。
 
-    NapCat 的 ``get_forward_msg`` 节点里：
+    OneBot 的 ``get_forward_msg`` 节点里：
     - 嵌套转发是**带内联内容的**（``data.content`` 直接给出子节点数组）→ 递归渲染，
       而不是丢掉内容只留一个 ``[合并转发]``；
     - 回复段带 ``id``（``{"type":"reply","data":{"id":...}}``）→ 保留 id 写成
@@ -341,7 +341,7 @@ def _render_node_segments(segments: Any, *, depth: int, seen: set[str]) -> str:
             if qq in ("", "all", "0"):
                 parts.append("@所有人")
             else:
-                # NapCat 有时会附带 nickname（没有也不要紧，给 qq）
+                # OneBot 有时会附带 nickname（没有也不要紧，给 qq）
                 parts.append(f"@{name}({qq})" if name else f"@{qq}")
         elif stype == "reply":
             reply_id = str(_seg_field(seg, "id", "") or "")
@@ -366,7 +366,7 @@ def _render_node_segments(segments: Any, *, depth: int, seen: set[str]) -> str:
 def _render_forward_nodes(nodes: Any, *, depth: int = 0, seen: set[str] | None = None) -> str:
     """把转发节点数组渲染成 ``MM-DD HH:MM 昵称(QQ): 内容 ｜ …``。
 
-    字段取法与 NapCat 返回一致：``sender.{card,nickname,user_id}``、``time``、
+    字段取法与 OneBot 返回一致：``sender.{card,nickname,user_id}``、``time``、
     ``message``（部分实现放在 ``content``）。
     """
     if not isinstance(nodes, list):
@@ -394,7 +394,7 @@ def _render_forward_nodes(nodes: Any, *, depth: int = 0, seen: set[str] | None =
 async def _describe_forward(bot: Any, forward_ref: str, limit: int) -> tuple[str, str]:
     """合并转发 → 逐条正文；返回 ``(内容, 失败原因)``。
 
-    ``id`` 传**承载转发的那条消息的 id**（协议上 NapCat 也接受该消息的 id），
+    ``id`` 传**承载转发的那条消息的 id**（协议上 OneBot 也接受该消息的 id），
     并且一律按**字符串**传：这类 id 常是超出 int32 / JS 安全整数范围的长整型字符串，
     强转 int 会丢精度并被拒为「1200 消息已过期或者为内层消息」。
     """

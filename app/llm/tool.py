@@ -186,8 +186,8 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
                 config = getattr(runtime, "config", None) if runtime is not None else None
                 if config is None:
                     return True
-                if spec.source == "napcat":
-                    return bool(config.get("napcat_tools_log_enabled", True))
+                if spec.source == "onebot":
+                    return bool(config.get("onebot_tools_log_enabled", True))
                 if spec.source == "mcp":
                     return bool(config.get("mcp_tools_log_enabled", True))
                 if spec.source == "module":

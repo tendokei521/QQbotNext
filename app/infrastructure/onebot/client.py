@@ -21,7 +21,7 @@ from app.domain.message import Message, MessageSegment, SegmentLike
 
 
 # ==================== API 超时分级 ====================
-# 历史问题：所有 API 共用固定 10s。合并转发（视频/多节点）在 NapCat 侧要先上传再组装，
+# 历史问题：所有 API 共用固定 10s。合并转发（视频/多节点）在 OneBot 侧要先上传再组装，
 # 实测 720P 单节点转发需要 10s 以上，于是「发送成功但调用方收到超时」，
 # 且迟到响应因为 future 已被回收而被记为「未找到对应请求」。
 # 下面按 action 语义给出量级：越像“传文件/批量取数据”的越宽松。
@@ -34,7 +34,7 @@ API_TIMEOUT_SECONDS: dict[str, int] = {
     "send_private_forward_msg": 60,
     # 拉取合并转发内容：节点多时逐个下载
     "get_forward_msg": 30,
-    # 媒体转换：NapCat 要把资源转成文件/URL
+    # 媒体转换：OneBot 要把资源转成文件/URL
     "get_image": 30,
     "get_record": 30,
     # 长列表与历史：群大时返回体很大
@@ -565,7 +565,7 @@ class BotConnection(IBot):
 
     async def call_api(self, action: str, params: dict | None = None,
                        timeout: float | int | None = None) -> dict | None:
-        """通用 OneBot/NapCat API 调用入口，供 LLM 扩展工具使用。
+        """通用 OneBot API 调用入口，供 LLM 扩展工具使用。
 
         未显式给 timeout 时按 action 走分级表；表外 action 使用默认 10s。
         """

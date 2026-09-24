@@ -91,11 +91,11 @@ const pages = computed(() => [
     color: 'blue-grey',
   },
   {
-    to: '/tools/napcat',
-    title: 'Napcat Tools',
+    to: '/tools/onebot',
+    title: 'OneBot Tools',
     icon: 'mdi-robot-industrial',
-    desc: '把 NapCat/OneBot API 暴露给 LLM',
-    status: agent.draft.napcat_tools_enable ? '开启' : '关闭',
+    desc: '把 OneBot API 暴露给 LLM',
+    status: agent.draft.onebot_tools_enable ? '开启' : '关闭',
     color: 'teal',
   },
   {

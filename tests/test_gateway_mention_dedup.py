@@ -84,7 +84,7 @@ async def test_mentioned_account_wins_regardless_of_arrival_order():
 
 
 async def test_non_mentioned_account_does_not_steal_when_message_ids_align():
-    """message_id 一致（同一 NapCat 实例）时，没被 @ 的账号必须让位、不重复响应。"""
+    """message_id 一致（同一 OneBot 实例）时，没被 @ 的账号必须让位、不重复响应。"""
     gw, a, b = _gateway()
     passed = await _both(gw, a, b, mention=BOT_A, first="B", same_mid=True)
     assert passed == {"A": True, "B": False}, f"应恰好被 @ 的 A 处理 → {passed}"

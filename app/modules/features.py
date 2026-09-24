@@ -11,7 +11,7 @@
 - ``schedule``：框架定时任务
 - ``memory``：长期记忆总开关
 - ``knowledge``：知识库总开关
-- ``napcat_tools``：NapCat 工具总开关
+- ``onebot_tools``：OneBot 工具总开关
 - ``agent``：框架级 Agent 整体启停
 """
 
@@ -188,15 +188,15 @@ class KnowledgeFeatureController(ConfigToggleFeature):
         )
 
 
-class NapcatToolsFeatureController(ConfigToggleFeature):
-    """NapCat 工具总开关。"""
+class OneBotToolsFeatureController(ConfigToggleFeature):
+    """OneBot 工具总开关。"""
 
     def __init__(self, agent_manager: Any) -> None:
         super().__init__(
             agent_manager,
-            feature_id="napcat_tools",
-            label="NapCat Tools",
-            keys=("napcat_tools_enable",),
+            feature_id="onebot_tools",
+            label="OneBot Tools",
+            keys=("onebot_tools_enable",),
         )
 
 

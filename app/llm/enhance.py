@@ -103,7 +103,7 @@ async def format_user_context(ctx):
         if user_id:
             head_lines.append(f"(QQ: {user_id})")
 
-    # 群聊：注入当前群号，避免调用 NapCat send_poke 等工具时遗漏 group_id
+    # 群聊：注入当前群号，避免调用 OneBot send_poke 等工具时遗漏 group_id
     if is_group:
         group_id = getattr(getattr(event, "group", None), "group_id", None)
         if group_id:

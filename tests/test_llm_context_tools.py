@@ -260,7 +260,7 @@ async def test_context_tools_declare_unlimited_result_budget():
 
 
 class _StrictForwardBot(_Bot):
-    """模拟 NapCat：get_forward_msg 只接受字符串 id，数字会被拒为 1200。
+    """模拟 OneBot：get_forward_msg 只接受字符串 id，数字会被拒为 1200。
 
     真实日志证据：同一个 id 传字符串能取到，传 int 得到
     「1200 消息已过期或者为内层消息」。
@@ -538,7 +538,7 @@ def test_cache_hit_summary_has_no_stale_head():
     assert not summarize_message(first).startswith("（")
 
 
-# ---------- 合并转发节点解析（对齐 NapCat 返回结构） ----------
+# ---------- 合并转发节点解析（对齐 OneBot 返回结构） ----------
 
 
 def _fnode(nick, segments, *, uid=1094950020, ts=1789635836, card=""):
@@ -547,7 +547,7 @@ def _fnode(nick, segments, *, uid=1094950020, ts=1789635836, card=""):
 
 
 async def test_forward_nodes_render_time_sender_and_reply_id():
-    """节点按 NapCat 结构取字段：时间 + 昵称(QQ) + 段内容；回复段保留 id。"""
+    """节点按 OneBot 结构取字段：时间 + 昵称(QQ) + 段内容；回复段保留 id。"""
     bot = _Bot(
         messages={"999": {"sender": {"user_id": 1, "nickname": "n"},
                           "message": [{"type": "forward", "data": {"id": "f"}}]}},

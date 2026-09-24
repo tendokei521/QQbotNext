@@ -1,7 +1,7 @@
 # 群聊记录（环境背景）与表情闭环 设计定稿
 
 > 状态：**A~G 已完成并测试通过**（记录面 `app/llm/group_log/`、模块 `module/modules/group_log/`、
-> 装配块 `assembly.build_group_log`、表情工具与词表 `app/llm/emoji_lexicon.py` + `napcat/tools.py`）。
+> 装配块 `assembly.build_group_log`、表情工具与词表 `app/llm/emoji_lexicon.py` + `OneBot/tools.py`）。
 > 起因：模型对"群里现在什么气氛、别人对哪条消息做了什么反应"没有持续来源——会话历史只在
 > 消息**触发机器人**时写入（`pipeline.check_trigger` 不通过直接 return），且完全不含互动；
 > 而贴表情的 `emoji_id` 是数字串，模型只能猜，贴错还**不可撤回**。
@@ -30,7 +30,7 @@ L1 接入    module/modules/group_log：群消息 / 表情 / 戳 / 撤回 / send
 L2 渲染    group_log/render.py：聚合、去重、预算、区块包裹（纯函数）
 L3 取值    group_log/context.py：build_context_text（四个装配路径唯一口径）
 L4 装配    assembly.BLOCKS 的 group_log 块（背景之后、会话历史之前）
-L5 闭环    emoji_lexicon（语义→id）+ napcat 工具的"贴前先读/成功记账" + emoji_reply 共用记录
+L5 闭环    emoji_lexicon（语义→id）+ OneBot 工具的"贴前先读/成功记账" + emoji_reply 共用记录
 ```
 
 ## 3. 记录面（`app/llm/group_log/`）
@@ -101,7 +101,7 @@ L5 闭环    emoji_lexicon（语义→id）+ napcat 工具的"贴前先读/成�
 （`chat.prepare_prompt` / 流式 / `proactive` / `scheduler`）：无 store、开关关闭、
 读异常、窗口为空 → 返回空串（空块不注入），主流程不受影响。
 
-## 5. 表情闭环（`emoji_lexicon.py` + `napcat/tools.py`）
+## 5. 表情闭环（`emoji_lexicon.py` + `OneBot/tools.py`）
 
 ### 5.1 语义化参数
 
@@ -126,7 +126,7 @@ L5 闭环    emoji_lexicon（语义→id）+ napcat 工具的"贴前先读/成�
 
 - `observed`：本群真实出现过的 id（记录面）→ 最可靠的一手证据；
 - `DEFAULT_TAGS`：校准过的常见表情，作用是给模型"入门词表"，**不是权威**；
-- 校准方法写在模块 docstring 里（开 `napcat_tools_debug`，贴候选 id，看记录面落下来的
+- 校准方法写在模块 docstring 里（开 `onebot_tools_debug`，贴候选 id，看记录面落下来的
   `emoji_id`）。**没校准过的条目不要凭印象补**——贴错不可撤回。
 
 ### 5.4 `emoji_reply` 插件与 LLM 共用记录
@@ -158,7 +158,7 @@ Agent（`app/llm/config.py` + `config_schema.py`）：`group_log_enable`（默�
 ```bash
 venv\Scripts\python.exe -m pytest tests/test_group_log_store.py tests/test_group_log_module.py \
     tests/test_group_log_render.py tests/test_group_log_context.py tests/test_group_log_integration.py \
-    tests/test_group_log_handles.py tests/test_napcat_emoji_like.py -q
+    tests/test_group_log_handles.py tests/test_onebot_tools_emoji_like.py -q
 ```
 
 覆盖：幂等 / 保留与入账时间口径 / 分片隔离 / 重启恢复 / 坏数据 / 私聊只记戳 /

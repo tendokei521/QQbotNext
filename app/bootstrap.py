@@ -25,7 +25,7 @@ from app.modules.features import (
     FeatureRegistry,
     KnowledgeFeatureController,
     MemoryFeatureController,
-    NapcatToolsFeatureController,
+    OneBotToolsFeatureController,
     ProactiveFeatureController,
     ScheduleFeatureController,
 )
@@ -132,7 +132,7 @@ def build_container(settings: Settings | None = None) -> Container:
     feature_registry.register(ScheduleFeatureController(agent_manager))
     feature_registry.register(MemoryFeatureController(agent_manager))
     feature_registry.register(KnowledgeFeatureController(agent_manager))
-    feature_registry.register(NapcatToolsFeatureController(agent_manager))
+    feature_registry.register(OneBotToolsFeatureController(agent_manager))
     feature_registry.register(AgentFeatureController(agent_manager))
     container.register_factory(FeatureRegistry, lambda: feature_registry)
     # 插件钩子注册表（模块按 bot 注册）

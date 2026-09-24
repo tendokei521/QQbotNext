@@ -1,4 +1,4 @@
-"""NapCat ToolSpec 构建与执行。"""
+"""OneBot ToolSpec 构建与执行。"""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from typing import Any
 
 from app.llm import logger
 from app.llm.group_log.store import store_of
-from app.llm.napcat.manifest import NAP_CAT_TOOLS
-from app.llm.napcat.security import resolve_tool_policy
+from app.llm.onebot_tools.manifest import ONEBOT_TOOLS
+from app.llm.onebot_tools.security import resolve_tool_policy
 from app.llm.tool import ToolContext, ToolSpec
 
 DEFAULT_MAX_RESULT = 2000
@@ -32,7 +32,7 @@ def _format_result(response: dict | None, name: str) -> str:
 def resolve_action(tool: dict) -> str:
     """工具名 → 真实 OneBot action。
 
-    默认与工具名相同；仅当工具名不能直接当 action 用时（例如 NapCat 的
+    默认与工具名相同；仅当工具名不能直接当 action 用时（例如 OneBot 的
     ``.ocr_image`` / ``.handle_quick_operation`` 这类带前导点的 Go-CQHTTP
     兼容接口，点名不合法无法作为 OpenAI function.name），条目才用
     ``action`` 字段显式声明真实 action。
@@ -118,17 +118,17 @@ async def _handler(runtime, tool: dict, ctx: ToolContext | None, args: dict) -> 
         args = params
     debug = False
     try:
-        debug = bool(getattr(runtime, "config", None).get("napcat_tools_debug", False))
+        debug = bool(getattr(runtime, "config", None).get("onebot_tools_debug", False))
     except Exception as e:
-        logger.add_info("NapCatTool").debug(f"[NapCatTool] 读取 debug 开关失败，按关闭处理: {e}")
+        logger.add_info("OneBotTool").debug(f"[OneBotTool] 读取 debug 开关失败，按关闭处理: {e}")
     if debug:
-        logger.add_info("NapCatTool").info(
-            f"[NapCatDebug] 请求 {name} action={action} args={json.dumps(args, ensure_ascii=False)}"
+        logger.add_info("OneBotTool").info(
+            f"[OneBotDebug] 请求 {name} action={action} args={json.dumps(args, ensure_ascii=False)}"
         )
     try:
         response = await bot.call_api(action, args)
     except Exception as e:
-        logger.add_info("NapCatTool").warning(f"[NapCat] {name} 执行异常: {e}")
+        logger.add_info("OneBotTool").warning(f"[OneBot] {name} 执行异常: {e}")
         return f"error: {name} 执行异常: {e}"
     if action in POKE_ACTIONS and isinstance(response, dict) and response.get("status") == "ok":
         record_poke(runtime, ctx, args)
@@ -136,15 +136,15 @@ async def _handler(runtime, tool: dict, ctx: ToolContext | None, args: dict) -> 
         # 成功才记账：失败不写"我贴过"，否则模型会以为已经贴上了（幂等判断在这里失真）
         _emoji_like_record(runtime, ctx, args, str(args.get("emoji_id", "") or ""))
     if debug:
-        logger.add_info("NapCatTool").info(
-            f"[NapCatDebug] 响应 {name} response={json.dumps(response, ensure_ascii=False, default=str)}"
+        logger.add_info("OneBotTool").info(
+            f"[OneBotDebug] 响应 {name} response={json.dumps(response, ensure_ascii=False, default=str)}"
         )
     result = _format_result(response, name)
     max_len = 2000
     try:
-        max_len = int(getattr(runtime, "config", None).get("napcat_tools_max_result", DEFAULT_MAX_RESULT) or DEFAULT_MAX_RESULT)
+        max_len = int(getattr(runtime, "config", None).get("onebot_tools_max_result", DEFAULT_MAX_RESULT) or DEFAULT_MAX_RESULT)
     except Exception as e:
-        logger.add_info("NapCatTool").debug(f"[NapCatTool] 读取结果长度上限失败，使用默认 {max_len}: {e}")
+        logger.add_info("OneBotTool").debug(f"[OneBotTool] 读取结果长度上限失败，使用默认 {max_len}: {e}")
     if len(result) > max_len:
         result = result[:max_len] + "\n…(结果过长已截断)"
     return result
@@ -277,11 +277,11 @@ def _emoji_like_record(runtime, ctx: ToolContext | None, args: dict, emoji_id: s
     )])
 
 
-def build_napcat_tools(runtime: Any, ctx: ToolContext | None = None) -> list[ToolSpec]:
-    """根据配置与当前会话作用域生成本轮可用的 NapCat 工具。"""
+def build_onebot_tools(runtime: Any, ctx: ToolContext | None = None) -> list[ToolSpec]:
+    """根据配置与当前会话作用域生成本轮可用的 OneBot 工具。"""
     specs: list[ToolSpec] = []
     scope = _ctx_scope(ctx)
-    for tool in NAP_CAT_TOOLS:
+    for tool in ONEBOT_TOOLS:
         policy = resolve_tool_policy(runtime, tool)
         if not policy["enabled"] or policy["blocked"]:
             continue
@@ -306,8 +306,8 @@ def build_napcat_tools(runtime: Any, ctx: ToolContext | None = None) -> list[Too
             permission=permission,
             scopes=scopes,
             module=None,
-            source="napcat",
-            category=str(tool.get("category", "NapCat")),
+            source="onebot",
+            category=str(tool.get("category", "onebot")),
         )
         specs.append(spec)
     return specs
