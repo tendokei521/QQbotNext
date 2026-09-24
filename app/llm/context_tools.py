@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.core.logger import logger
-from app.llm import focus, nicknames
+from app.llm import display_names, focus, nicknames
 from app.llm.group_context import (
     _NON_TEXT_SEGMENTS,
     collect_at_ids,
@@ -212,14 +212,21 @@ async def _describe_user(bot: Any, group_id: Any, qq: str, relation: str, *, bot
             resp = await bot.get_group_member_info(group_id=int(group_id), user_id=int(qq))
             data = (resp or {}).get("data") if isinstance(resp, dict) else None
             data = data if isinstance(data, dict) else {}
-            nickname = str(data.get("card") or data.get("nickname") or "")
+            raw = str(data.get("card") or data.get("nickname") or "")
             # 共享昵称缓存：本次展开过的昵称，后续渲染背景块直接命中
-            nicknames.remember(bot_id, group_id, qq, nickname)
+            nicknames.remember(bot_id, group_id, qq, raw)
             if not data:
                 return "", False
-            bits = [f"昵称：{nickname or '未知'}"]
-            if data.get("card"):
-                bits.append(f"群名片：{data.get('card')}")
+            # 展示值过显示名映射：句子型昵称/群名片不能原样进上下文
+            shown = display_names.display_name(
+                raw, qq, bot_id=bot_id, group_id=group_id, runtime=_runtime_of(bot)
+            )
+            bits = [f"昵称：{shown or '未知'}"]
+            card_raw = str(data.get("card") or "")
+            if card_raw:
+                bits.append("群名片：" + display_names.display_name(
+                    card_raw, qq, bot_id=bot_id, group_id=group_id, runtime=_runtime_of(bot)
+                ))
             if data.get("role"):
                 bits.append(f"角色：{data.get('role')}")
             if data.get("level"):
@@ -232,7 +239,9 @@ async def _describe_user(bot: Any, group_id: Any, qq: str, relation: str, *, bot
         data = data if isinstance(data, dict) else {}
         if not data:
             return "", False
-        nickname = str(data.get("nickname") or "") or "未知"
+        nickname = display_names.display_name(
+            str(data.get("nickname") or ""), qq, runtime=_runtime_of(bot)
+        ) or "未知"
         return f"（我看了下这个人）昵称：{nickname} [QQ {qq}] [关系：{relation}]", True
     except Exception as e:
         logger.debug(f"[ExpandContext] 展开用户 {qq} 失败（已忽略）: {e}")
@@ -249,11 +258,13 @@ async def _describe_message(bot: Any, mid: str, limit: int, relation: str) -> tu
         data = await _fetch_message(bot, mid)
         if not isinstance(data, dict) or not data:
             return "", False
-        sender = data.get("sender") or {}
-        label = str(sender.get("card") or sender.get("nickname") or sender.get("user_id") or "未知")
-        sender_id = str(sender.get("user_id") or "")
+        label = display_names.display_for_sender(
+            data.get("sender") or {},
+            bot_id=getattr(bot, "bot_id", ""),
+            runtime=_runtime_of(bot),
+        )
         text = extract_msg_text(data.get("message"))
-        bits = [f"{label}" + (f"({sender_id})" if sender_id else "")]
+        bits = [label]
         if has_real_content(text):
             bits.append(_truncate(text, limit))
         # 合并转发：再展开一层（一层深度的"引用链"，不递归，避免无界展开）。
@@ -363,11 +374,12 @@ def _render_node_segments(segments: Any, *, depth: int, seen: set[str]) -> str:
     return "".join(parts).strip()
 
 
-def _render_forward_nodes(nodes: Any, *, depth: int = 0, seen: set[str] | None = None) -> str:
+def _render_forward_nodes(nodes: Any, *, depth: int = 0, seen: set[str] | None = None,
+                          runtime: Any = None) -> str:
     """把转发节点数组渲染成 ``MM-DD HH:MM 昵称(QQ): 内容 ｜ …``。
 
     字段取法与 OneBot 返回一致：``sender.{card,nickname,user_id}``、``time``、
-    ``message``（部分实现放在 ``content``）。
+    ``message``（部分实现放在 ``content``）。昵称一律经显示名映射（句子型→``用户<QQ>``）。
     """
     if not isinstance(nodes, list):
         return ""
@@ -376,10 +388,7 @@ def _render_forward_nodes(nodes: Any, *, depth: int = 0, seen: set[str] | None =
     for node in nodes:
         if not isinstance(node, dict):
             continue
-        sender = node.get("sender") or {}
-        nick = str(sender.get("card") or sender.get("nickname") or sender.get("user_id") or "未知")
-        uid = str(sender.get("user_id") or "")
-        label = f"{nick}({uid})" if uid and uid != nick else nick
+        label = display_names.display_for_sender(node.get("sender") or {}, runtime=runtime)
         body = _render_node_segments(
             node.get("message") if node.get("message") is not None else node.get("content"),
             depth=depth,
@@ -414,7 +423,7 @@ async def _describe_forward(bot: Any, forward_ref: str, limit: int) -> tuple[str
     # ``MAX_FORWARD_NODES=0`` 表示不限制（默认）：转发本来就常是"要看的正文"，
     # 砍条数等于把用户想让它看的内容丢掉。
     window = nodes if not MAX_FORWARD_NODES else nodes[:MAX_FORWARD_NODES]
-    rendered = _render_forward_nodes(window)
+    rendered = _render_forward_nodes(window, runtime=_runtime_of(bot))
     if MAX_FORWARD_NODES and len(nodes) > MAX_FORWARD_NODES:
         rendered += f" ｜ …（共 {len(nodes)} 条，已省略）"
     if not rendered:
@@ -452,6 +461,17 @@ class EntityResult:
                 "（消息可能已过期、id 不合法、机器人无权限或连接不可用）。"
             )
         return "\n".join([*self.blocks, *self.partial])
+
+
+def _runtime_of(source: Any) -> Any:
+    """从 ToolContext 或 Bot 上取 AgentRuntime（显示名映射需要它做灰区判定预热）。
+
+    取不到就返回 None —— 映射层会退化成"安全名"，不影响任何渲染。
+    """
+    runtime = getattr(source, "runtime", None)
+    if runtime is not None:
+        return runtime
+    return getattr(source, "agent_runtime", None) or getattr(source, "_runtime", None)
 
 
 def _entity_ids(ctx) -> tuple[Any, str, str, Any, set[str]]:
@@ -597,12 +617,15 @@ async def fetch_recent(ctx, count: int = 1, *, limit: int = DEFAULT_ITEM_CHARS) 
     for msg in messages[-count:]:
         if not isinstance(msg, dict):
             continue
-        sender = msg.get("sender") or {}
-        label = str(sender.get("card") or sender.get("nickname") or sender.get("user_id") or "未知")
-        sender_id = str(sender.get("user_id") or "")
+        label = display_names.display_for_sender(
+            msg.get("sender") or {},
+            bot_id=bot_id,
+            group_id=group_id,
+            runtime=_runtime_of(ctx),
+        )
         msg_id = str(msg.get("message_id") or msg.get("real_id") or msg.get("message_seq") or "")
         text = extract_msg_text(msg.get("message"), at_names, False, msg_id)
-        bits = [f"{label}" + (f"({sender_id})" if sender_id else "")]
+        bits = [label]
         ok = has_real_content(text)
         if ok:
             bits.append(_truncate(text, limit))
@@ -746,7 +769,12 @@ async def _handle_expand_image(ctx, args: dict) -> str:
             lines.append(f"消息 {mid}：没有图片（可能不是图片消息或消息已过期）")
             continue
         sender = data.get("sender") or {}
-        who = sender.get("card") or sender.get("nickname") or sender.get("user_id") or "未知"
+        who = display_names.display_for_sender(
+            sender,
+            bot_id=getattr(ctx, "bot_id", "") or getattr(bot, "bot_id", ""),
+            group_id=getattr(ctx, "group_id", ""),
+            runtime=_runtime_of(ctx),
+        )
         images = await resolve_images(
             _ImageEvent(image_segs), bot=bot,
             max_images=len(image_segs), max_bytes=_max_image_bytes(ctx),

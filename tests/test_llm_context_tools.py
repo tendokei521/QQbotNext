@@ -512,6 +512,149 @@ async def test_expand_recent_reports_unreadable_rows():
     assert "（最近这条只翻到一半" in result
 
 
+# ---------- 显示名映射：句子型昵称不能原样进上下文（回归） ----------
+
+#: 线上真实案例：群成员把整句话当昵称，工具结果里被当成人名
+SENTENCE_NICK = "老师，今年的学费也是一次性交吗"
+
+
+async def test_expand_image_masks_sentence_like_sender(monkeypatch):
+    """用户报的那条：expand_image 的返回里不能出现整句话当人名。"""
+    from app.llm import display_names
+
+    display_names.clear_cache()
+    monkeypatch.setattr(display_names, "HOURLY_CALL_LIMIT", 0)  # 判定不可用 → 必须安全名
+
+    bot = _Bot(messages={"2001": {
+        "sender": {"user_id": 30003, "nickname": SENTENCE_NICK, "card": ""},
+        "message": [{"type": "image", "data": {"url": "https://example.com/a.png"}}],
+    }})
+    ctx = _ctx(bot)
+
+    result = await _spec(ctx, "expand_image").handler(ctx, {"messages": ["2001"]})
+
+    assert SENTENCE_NICK not in result
+    assert "用户30003" in result
+    assert "1 张图片" in result
+
+
+async def test_expand_recent_masks_sentence_like_sender(monkeypatch):
+    from app.llm import display_names
+
+    display_names.clear_cache()
+    monkeypatch.setattr(display_names, "HOURLY_CALL_LIMIT", 0)
+
+    bot = _Bot(history=[_history_msg(1005, SENTENCE_NICK, "交了吗", user_id=30003)])
+
+    result = await _call(_ctx(bot), {"count": 1}, tool="expand_recent")
+
+    assert SENTENCE_NICK not in result
+    assert "用户30003" in result
+    assert "交了吗" in result
+
+
+async def test_expand_message_masks_sentence_like_sender(monkeypatch):
+    from app.llm import display_names
+
+    display_names.clear_cache()
+    monkeypatch.setattr(display_names, "HOURLY_CALL_LIMIT", 0)
+
+    bot = _Bot(messages={"3001": {
+        "sender": {"user_id": 30003, "nickname": SENTENCE_NICK, "card": ""},
+        "message": [{"type": "text", "data": {"text": "今年涨了"}}],
+    }})
+
+    result = await _call(_ctx(bot), {"messages": ["3001"]}, tool="expand_message")
+
+    assert SENTENCE_NICK not in result
+    assert "用户30003" in result
+    assert "今年涨了" in result
+
+
+async def test_expand_user_masks_sentence_like_nickname(monkeypatch):
+    """展开"这个人是谁"时，昵称/群名片同样要过映射。"""
+    from app.llm import display_names
+
+    display_names.clear_cache()
+    monkeypatch.setattr(display_names, "HOURLY_CALL_LIMIT", 0)
+
+    bot = _Bot(members={123: {"nickname": SENTENCE_NICK, "card": SENTENCE_NICK}})
+
+    result = await _call(_ctx(bot), {"users": [123]}, tool="expand_user")
+
+    assert SENTENCE_NICK not in result
+    assert "用户123" in result
+
+
+async def test_forward_nodes_mask_sentence_like_sender(monkeypatch):
+    """合并转发节点里的昵称也要映射（否则转发整段都是句子型"人名"）。"""
+    from app.llm import display_names
+
+    display_names.clear_cache()
+    monkeypatch.setattr(display_names, "HOURLY_CALL_LIMIT", 0)
+
+    bot = _Bot(
+        history=[_history_msg(1006, "小红", "", forward_id="f9")],
+        forwards={"1006": {"messages": [
+            {"sender": {"user_id": 41001, "nickname": SENTENCE_NICK},
+             "message": [{"type": "text", "data": {"text": "早"}}]},
+        ]}},
+    )
+
+    result = await _call(_ctx(bot), {"count": 1}, tool="expand_recent")
+
+    assert SENTENCE_NICK not in result
+    assert "用户41001" in result
+    assert "早" in result
+
+
+async def test_normal_nickname_is_kept(monkeypatch):
+    """普通昵称不受影响：仍是 昵称(QQ) 形态（不能因为加映射把正常人名也改掉）。"""
+    from app.llm import display_names
+
+    display_names.clear_cache()
+    bot = _Bot(history=[_history_msg(1007, "三哥", "在吗", user_id=30003)])
+
+    result = await _call(_ctx(bot), {"count": 1}, tool="expand_recent")
+
+    assert "三哥(30003)" in result
+
+
+async def test_expand_image_uses_verdict_when_name_approved(monkeypatch):
+    """灰区长昵称被判定为真名后，显示名应还原（而不是永远脱敏）。"""
+    from app.llm import display_names
+
+    display_names.clear_cache()
+    gray = "夜风里的旅人甲乙丙丁戊己庚辛壬癸子"  # 17 字：落在灰区
+
+    async def fake_chat(chain, messages, **kwargs):
+        return SimpleNamespace(ok=True, text="1")
+
+    monkeypatch.setattr("app.llm.providers.chat_with_fallback", fake_chat)
+    runtime_cfg = {"model": "probe", "api_key": "sk-test"}
+    bot = _Bot(messages={"2002": {
+        "sender": {"user_id": 50005, "nickname": gray, "card": ""},
+        "message": [{"type": "image", "data": {"url": "https://example.com/b.png"}}],
+    }})
+    ctx = _ctx(bot)
+    ctx.runtime.config = runtime_cfg
+    ctx.runtime.provider_chain = lambda: [{"provider": "probe", "model": "probe"}]
+
+    # 首次：判定还没回来 → 安全名
+    first = await _spec(ctx, "expand_image").handler(ctx, {"messages": ["2002"]})
+    assert "用户50005" in first
+
+    # 等后台判定完成，再渲染同一批数据 → 还原真名
+    import asyncio
+
+    for _ in range(30):
+        await asyncio.sleep(0.01)
+        if not display_names._PREFETCH:
+            break
+    second = await _spec(ctx, "expand_image").handler(ctx, {"messages": ["2002"]})
+    assert gray in second
+
+
 # ---------- 摘要抽取（供焦点表 / 已展开标记） ----------
 
 

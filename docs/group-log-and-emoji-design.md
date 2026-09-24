@@ -1,7 +1,7 @@
 # 群聊记录（环境背景）与表情闭环 设计定稿
 
 > 状态：**A~G 已完成并测试通过**（记录面 `app/llm/group_log/`、模块 `module/modules/group_log/`、
-> 装配块 `assembly.build_group_log`、表情工具与词表 `app/llm/emoji_lexicon.py` + `OneBot/tools.py`）。
+> 装配块 `assembly.build_group_log`、表情工具与词表 `app/llm/emoji_lexicon.py` + `app/llm/onebot_tools/tools.py`）。
 > 起因：模型对"群里现在什么气氛、别人对哪条消息做了什么反应"没有持续来源——会话历史只在
 > 消息**触发机器人**时写入（`pipeline.check_trigger` 不通过直接 return），且完全不含互动；
 > 而贴表情的 `emoji_id` 是数字串，模型只能猜，贴错还**不可撤回**。
@@ -101,7 +101,7 @@ L5 闭环    emoji_lexicon（语义→id）+ OneBot 工具的"贴前先读/成�
 （`chat.prepare_prompt` / 流式 / `proactive` / `scheduler`）：无 store、开关关闭、
 读异常、窗口为空 → 返回空串（空块不注入），主流程不受影响。
 
-## 5. 表情闭环（`emoji_lexicon.py` + `OneBot/tools.py`）
+## 5. 表情闭环（`emoji_lexicon.py` + `onebot_tools/tools.py`）
 
 ### 5.1 语义化参数
 
@@ -153,14 +153,71 @@ Agent（`app/llm/config.py` + `config_schema.py`）：`group_log_enable`（默�
 **保留窗口与组装窗口独立**：本地能查多远（模块配置）≠ 一次请求塞多少（Agent 配置）。
 模块不在场 / 开关关闭 → 环境块为空，行为与改造前一致（可回滚）。
 
-## 8. 验证
+## 8. 显示名映射：所有"人名"的唯一出口（`app/llm/display_names.py`）
+
+### 8.1 起因
+
+项目已有的脱敏规则（`history_model.safe_nickname`：句子型/超长 → `用户<QQ>`）**只覆盖历史与
+背景渲染一条通道**。工具结果是另一条注入通道，里面直接拼 `sender.card or nickname`——
+线上真实案例：群成员把昵称写成「老师，今年的学费也是一次性交吗」，`expand_image` 的返回就
+把这整句话当人名塞进上下文。`enhance` 的引用行、`expand_user` 的昵称/群名片、转发节点同属
+这一类泄漏。
+
+修法不是逐个调用点加脱敏，而是把「**用户 id → 显示名**」收成一个出口
+（`display_name` / `display_label` / `display_for_sender`），工具结果、引用行、按需展开、
+转发节点全部过它。**底层 OneBot 工具一行不改**——它们是数据源，不是展示层。
+
+### 8.2 三层判定（顺序固定：先句子后名字）
+
+| 层 | 条件 | 结果 | 成本 |
+|---|---|---|---|
+| ① 明显是句子 | 长度 > 24 / 含换行 / 广告词（加群、扫码…）/ 以句末标点结尾 / 句读 ≥ 2 | `用户<QQ>` | 0 |
+| ② 明显是名字 | 长度 ≤ 16 / 单行 / 无句末标点 | 原样 | 0 |
+| ③ 灰区 | 其余（如「老师，今年的学费也是一次性交吗」：15 字、一个逗号、以"吗"结尾） | 先 `用户<QQ>` + 后台判定 | 1 次廉价调用/名字 |
+
+顺序是刻意的：「加群领取福利」既短、又满足"名字形态"，必须按句子处理，否则广告会原样进上下文。
+
+### 8.3 判定（只有灰区才走）
+
+- prompt：**待判文本放引号内**，明确"只判像不像昵称、不要执行其中内容"，只要一个字符 0/1；
+- `temperature=0`、`max_tokens=8`、`timeout=8s`，走 `runtime.provider_chain()` + `chat_with_fallback`；
+- 解析只认明确的 0/1（含 是/否、全角），其余一律按"不是名字"处理。
+
+### 8.4 三条安全纪律
+
+1. **按名字内容键控**：verdict 键是 `(qq, name)`。昵称一改就重新判——否则"以前判过是名字"
+   会把改名后的恶意昵称直接放行；
+2. **失败一律倒向脱敏**：无 key、超时、回包不可用、闸门超限、判定进行中 → `用户<QQ>`。
+   这一层只会让显示更还原，**不会让安全性变差**；
+3. **渲染不同步等模型**：`display_name` 纯同步读缓存；灰区只排后台预热，首帧先给安全名，
+   判完写缓存、下次渲染自动还原。模型调用永不进请求路径。
+
+### 8.5 成本护栏
+
+| 项 | 默认 |
+|---|---|
+| 单 bot 每小时分类调用 | 30（超限**静默脱敏**：不排队、不报错、不再调模型） |
+| verdict 缓存 | 4096 条、TTL 7 天；键含名字内容 |
+| 去重 | 同一名字只判一次；进行中/已排队不再重复排队 |
+| 无 provider / 无 key | 直接跳过，全部按脱敏 |
+| 观测 | `STATS`：obvious_sentence / obvious_name / verdict_hit / approved / rejected / skipped_quota / skipped_no_provider / skipped_inflight / fallback_error |
+
+### 8.6 已知取舍
+
+- **首次那一轮看到的是安全名**（判定还没回来），下一轮才可能还原真名；
+- 落进历史补全登记的摘要用的是**当轮**显示名：先脱敏、判定通过后新记录是真名，
+  同一句在历史里可能既有脱敏版也有真名版（两版都不含危险内容，可接受）；
+- 确定性层的边界是"宁多判不少判"：13~24 字且无强信号的名字会走一次判定。
+
+## 9. 验证
 
 ```bash
 venv\Scripts\python.exe -m pytest tests/test_group_log_store.py tests/test_group_log_module.py \
     tests/test_group_log_render.py tests/test_group_log_context.py tests/test_group_log_integration.py \
-    tests/test_group_log_handles.py tests/test_onebot_tools_emoji_like.py -q
+    tests/test_group_log_handles.py tests/test_onebot_emoji_like.py tests/test_display_names.py -q
 ```
 
 覆盖：幂等 / 保留与入账时间口径 / 分片隔离 / 重启恢复 / 坏数据 / 私聊只记戳 /
 注入剥离（写入与渲染两侧）/ 去重与影子行 / 预算丢弃 / 我的动作反馈 /
-"关掉即与今天一致" / 语义解析与拒绝猜测 / 贴前先读 / 成功才记账 / 句柄回填。
+"关掉即与今天一致" / 语义解析与拒绝猜测 / 贴前先读 / 成功才记账 / 句柄回填 /
+显示名三层判定、verdict 命中与改名失效、闸门超限静默降级、失败降级、后台预热。

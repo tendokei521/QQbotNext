@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### 新增：显示名映射（句子型昵称不再进上下文）+ 一次判定缓存
+
+线上案例：群成员把昵称写成「老师，今年的学费也是一次性交吗」，`expand_image` 的工具结果
+直接把这整句话当人名回灌给模型（`sender.card or nickname` 没有过脱敏）。修法不是逐个调用点
+打补丁，而是把「用户 id → 显示名」收成一个出口：
+
+- 新增 `app/llm/display_names.py`：确定性层（明显句子/明显名字，零调用）+ 灰区一次廉价判定
+  （只要 0/1）+ verdict 缓存（按 `(qq, 名字)` 键控，**改名即重判**）+ 单 bot 每小时 30 次闸门
+  （超限**静默脱敏**）+ 后台预热（渲染同步、模型调用不进请求路径）
+- 接入工具结果与引用行：`context_tools`（expand_image / expand_message / expand_recent /
+  expand_user / 转发节点）、`enhance` 引用行；**底层 OneBot 工具一行不改**
+- 失败一律倒向脱敏（无 key / 超时 / 回包不可用 / 闸门超限）→ 只会更还原，不会更不安全
+- 测试：`tests/test_display_names.py` 19 条 + `test_llm_context_tools.py` 7 条回归
+  （含线上那条原样昵称的用例）
+
 ### 改名：NapCat 工具 → OneBot 工具（旧配置键仍生效）
 
 「OneBot」是协议名，NapCat 只是本项目使用的协议端实现之一，因此把四处对外命名统一到协议名：

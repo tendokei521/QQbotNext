@@ -203,6 +203,23 @@ async def _fetch_group_member_nickname(ctx, qq: str) -> str:
     )
 
 
+def _display_sender(ctx, sender: dict) -> str:
+    """引用行的发送者显示名（句子型昵称 → ``用户<QQ>``）。
+
+    取不到 runtime 时映射层会退化成安全名，不影响渲染。
+    """
+    from app.llm import display_names
+
+    runtime = getattr(ctx, "runtime", None)
+    event = getattr(ctx, "event", None)
+    return display_names.display_for_sender(
+        sender,
+        bot_id=str(getattr(runtime, "bot_id", "") or getattr(event, "bot_id", "") or ""),
+        group_id=str(getattr(getattr(event, "group", None), "group_id", "") or ""),
+        runtime=runtime,
+    )
+
+
 async def _collect_quote_info(ctx) -> dict | None:
     event = ctx.event
     if not event.bot or not _ctx_enabled(ctx, "fetch_quote_content", True):
@@ -228,7 +245,9 @@ async def _collect_quote_info(ctx) -> dict | None:
             text = UNRESOLVED_REPLY.format(id=reply_id)
         return {
             "text": text,
-            "sender_nickname": sender_nickname or str(sender_id),
+            # 引用行的发送者也要走显示名映射：句子型昵称混进"引用了"这一行，
+            # 模型会把它当成某人说的话（与工具结果同一类泄漏）。
+            "sender_nickname": _display_sender(ctx, sender) or sender_nickname or str(sender_id),
             "sender_id": sender_id,
         }
     except Exception as e:
