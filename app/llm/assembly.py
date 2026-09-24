@@ -35,10 +35,12 @@ messages（OpenAI 风格）
 | 5 | skills | system ×N | ``runtime.skills.prompt_blocks()`` | 有技能时 |
 | 6 | memory | system | ``memory.recall_block_async`` | 记忆有召回 |
 | 7 | background | system | 指代块 + 聊天环境背景（合并为一块） | 任一非空 |
-| 8 | history | 对话 | 会话历史（已渲染打标） | 非空 |
-| 9 | user | user | 本轮消息（可含图片块） | 始终 |
+| 8 | group_log | system | 群聊环境记录（消息 + 互动 + 我的动作） | 群聊记录模块在场且有记录 |
+| 9 | history | 对话 | 会话历史（已渲染打标） | 非空 |
+| 10 | user | user | 本轮消息（可含图片块） | 始终 |
 
 注意：块 6 在块 7 之前是历史既有行为；块 7 内部"指代在前、环境在后"用 ``\n\n`` 连接。
+块 8 与块 7 是两个**不同来源**（持续记录 vs 按需拉取），正文按 message_id 去重。
 """
 
 from __future__ import annotations
@@ -92,6 +94,10 @@ class PromptRequest:
     referent_text: str = ""
     skill_blocks: list[str] = field(default_factory=list)
     memory_text: str = ""
+    #: 群聊环境记录块（群聊记录模块产出，见 ``app.llm.group_log.context``）。
+    #: 与 ``pre_history_text``（在线历史拉取）是**两个来源**：前者含互动（表情/戳/撤回）
+    #: 与"我做过什么"，后者只有消息正文。两者正文按 message_id 去重，不会重复出现。
+    group_log_text: str = ""
 
     # 能力与模态
     available_tools: set[str] | None = None
@@ -221,6 +227,16 @@ def build_history(req: PromptRequest) -> list[dict]:
     return list(req.history or [])
 
 
+def build_group_log(req: PromptRequest) -> list[dict]:
+    """群聊环境记录块（消息 + 互动 + 我的动作）。
+
+    独立成块（而不是并进 ``background``）是为了让"这次请求为什么带了/没带群聊记录"
+    能从块表一眼看出：它是**另一个来源**，有自己的开关、窗口与预算。
+    """
+    text = str(req.group_log_text or "").strip()
+    return [{"role": "system", "content": text}] if text else []
+
+
 def build_user(req: PromptRequest) -> list[dict]:
     """本轮消息。图片块由 ``place_images`` 在清洗前归位。"""
     return [{"role": "user", "content": req.user_text}]
@@ -252,6 +268,7 @@ BLOCKS: tuple[Block, ...] = (
     Block("skills", build_skills),
     Block("memory", build_memory),
     Block("background", build_background),
+    Block("group_log", build_group_log),
     Block("history", build_history),
     Block("user", build_user),
 )

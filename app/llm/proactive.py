@@ -264,6 +264,19 @@ class ProactiveManager:
             user_id=target if not is_group else None,
             bot=self.bot,
         )
+        # 群聊环境记录块（持续记录面，含互动）：与上面按需拉取的在线历史是两个来源，
+        # 正文按 message_id 去重；模块不在场时为空串。
+        from app.llm.group_log.context import build_context_text
+
+        group_log_text = build_context_text(
+            self.module,
+            session_id,
+            history=materials["history"],
+            is_private=not is_group,
+            group_id=target if is_group else None,
+            user_id=None if is_group else target,
+        )
+
         req = PromptRequest(
             runtime=self.module,
             config=config,
@@ -276,6 +289,7 @@ class ProactiveManager:
             raw_user_text=user_prompt,
             history=materials["history"],
             pre_history_text=pre_history_text,
+            group_log_text=group_log_text,
             referent_text=focus_text,
             skill_blocks=list(skill_blocks or []),
             memory_text=materials["memory_text"],

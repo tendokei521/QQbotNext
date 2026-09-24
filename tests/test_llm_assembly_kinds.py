@@ -31,6 +31,7 @@ def test_declared_block_order_covers_all_kinds():
         "skills",
         "memory",
         "background",
+        "group_log",
         "history",
         "user",
     ]

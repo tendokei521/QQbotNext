@@ -90,6 +90,7 @@ class GroupLogStore:
             "deduped": 0,
             "dropped_by_retention": 0,
             "dropped_by_backpressure": 0,
+            "dropped_by_bad_data": 0,
             "written": 0,
             "loaded": 0,
         }
@@ -142,7 +143,9 @@ class GroupLogStore:
             if not isinstance(event, LogEvent):
                 try:
                     event = LogEvent.from_dict(dict(event))  # type: ignore[arg-type]
-                except Exception:  # noqa: BLE001 - 坏数据不阻断记录
+                except Exception as e:  # noqa: BLE001 - 坏数据不阻断记录
+                    self.stats["dropped_by_bad_data"] += 1
+                    self.log.debug(f"[GroupLog] 丢弃无法解析的事件: {e}")
                     continue
             scope = event.scope
             if not scope:
@@ -398,7 +401,9 @@ class GroupLogStore:
                 continue
             try:
                 event = LogEvent.from_dict(json.loads(line))
-            except Exception:  # noqa: BLE001 - 坏行跳过，不让一条脏数据卡住恢复
+            except Exception as e:  # noqa: BLE001 - 坏行跳过，不让一条脏数据卡住恢复
+                self.stats["dropped_by_bad_data"] += 1
+                self.log.debug(f"[GroupLog] 跳过坏记录行（{path.name}）: {e}")
                 continue
             if not event.scope:
                 event.scope = scope

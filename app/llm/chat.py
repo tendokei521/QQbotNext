@@ -752,6 +752,18 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
     all_specs, skill_blocks, tool_ctx = await _collect_llm_ext(
         runtime, event, session_id, is_private, schedule_enable
     )
+    # 群聊环境记录块：持续记录面（消息 + 表情/戳/撤回 + 我的动作），
+    # 与上面的 pre_history（按需拉取在线历史）是两个来源，正文按 message_id 去重。
+    from app.llm.group_log.context import build_context_text
+
+    group_log_text = build_context_text(
+        runtime,
+        session_id,
+        history=session_history,
+        is_private=is_private,
+        group_id=group_id,
+        user_id=user_id,
+    )
     # 工具取回内容的记账本（补全回写：请求收尾时按本轮 message_id 落进历史）
     from app.llm.history_enrich import ledger_for
 
@@ -793,6 +805,7 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
         memory_source_text=raw_user_text or user_text,
         history=session_history,
         pre_history_text=pre_history_text,
+        group_log_text=group_log_text,
         referent_text=referent_text,
         skill_blocks=skill_blocks,
         memory_text=memory_text,

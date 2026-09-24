@@ -167,6 +167,30 @@ SCHEMA = {
         "type": "boolean", "label": "包含群聊环境背景", "description": "开启时拉取群聊最近消息，并附上群名/群号/当前时间作为 LLM 背景信息（不计入会话历史；未开启则完全不拉取在线历史）",
         "default": False, "group": "group_session",
     },
+    "group_log_enable": {
+        "type": "boolean", "label": "注入群聊环境记录",
+        "description": "把「群聊记录」模块持续记录的内容（群消息 + 表情回应 + 戳一戳 + 撤回 + 我的发言）"
+                       "作为环境块注入上下文。它与上面的「包含群聊环境背景」是两个来源："
+                       "本项是持续记录（含互动），上面是每次请求临时拉取的在线历史；"
+                       "两者正文按 message_id 去重，不会重复出现。模块未安装/未启用时本项自动为空",
+        "default": True, "group": "group_session",
+    },
+    "group_log_window_minutes": {
+        "type": "number", "label": "群聊记录窗口（分钟）",
+        "description": "每次请求最多带回最近多少分钟的群聊记录（本地保留窗口由模块配置决定，此处只控制组装）",
+        "default": 60, "min": 1, "max": 1440, "group": "group_session",
+    },
+    "group_log_window_limit": {
+        "type": "number", "label": "群聊记录条数上限",
+        "description": "每次请求最多带回多少条群聊记录（超出时保留最新的）",
+        "default": 50, "min": 1, "max": 500, "group": "group_session",
+    },
+    "group_log_max_chars": {
+        "type": "number", "label": "群聊环境块字符预算",
+        "description": "环境块的字符上限；超出时从最旧的记录开始丢弃并写日志。0 表示不限制（"
+                       "注意：长消息本身不截断，不限制预算会显著增加 token 消耗）",
+        "default": 4000, "min": 0, "max": 20000, "group": "group_session",
+    },
     "include_private_pre_history": {
         "type": "select", "label": "包含私信会话前历史", "description": "私信时是否将会话开始前的私信消息提供给LLM",
         "default": "default",

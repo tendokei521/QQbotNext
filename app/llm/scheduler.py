@@ -554,6 +554,19 @@ class TaskScheduler:
             bot=self.bot,
         )
 
+        # 群聊环境记录块（持续记录面，含互动）：与按需拉取的在线历史是两个来源，
+        # 正文按 message_id 去重；模块不在场时为空串。
+        from app.llm.group_log.context import build_context_text
+
+        group_log_text = build_context_text(
+            self.module,
+            entry.session_id,
+            history=materials["history"],
+            is_private=not entry.is_group,
+            group_id=entry.target if entry.is_group else None,
+            user_id=None if entry.is_group else entry.target,
+        )
+
         req = PromptRequest(
             runtime=self.module,
             ctx=None,
@@ -567,6 +580,7 @@ class TaskScheduler:
             raw_user_text=user_prompt,
             history=materials["history"],
             pre_history_text=pre_history_text,
+            group_log_text=group_log_text,
             referent_text=focus_text,
             skill_blocks=list(skill_blocks or []),
             memory_text=materials["memory_text"],

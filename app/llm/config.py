@@ -193,6 +193,11 @@ DEFAULT_LLM_CONFIG: dict = {
     "napcat_tools_log_enabled": True,  # NapCat 工具普通调用日志
     "napcat_tool_overrides": {},       # 工具权限/作用域覆盖：{"send_poke":{"permission":"member","scopes":["private"]}}
     "poke_cooldown_seconds": 20,       # 戳一戳节流：同会话同一人该秒数内不重复戳（0=不节流）
+    # 群聊环境记录（由「群聊记录」模块持续写入，这里只管"一次请求塞多少"）
+    "group_log_enable": True,          # 是否把群聊记录作为环境块注入（模块未装/未启用时自动为空）
+    "group_log_window_minutes": 60,    # 组装窗口：最近多少分钟
+    "group_log_window_limit": 50,      # 组装窗口：最多多少条
+    "group_log_max_chars": 4000,       # 环境块字符预算（超预算从最旧开始丢；0=不限制）
 }
 
 # 框架级 Agent 配置/权限存储的 module_name

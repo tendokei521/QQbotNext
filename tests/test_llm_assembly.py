@@ -12,10 +12,12 @@ chat.stream_response / scheduler._build_messages / proactive 内联），
 
 from __future__ import annotations
 
-from app.llm.assembly import BLOCKS, PromptRequest, PromptAssembler, describe
+from app.llm.assembly import BLOCKS, PromptAssembler, PromptRequest, describe
 from app.llm.prompt import (
     LEGACY_MESSAGE_META_INSTRUCTION,
     SCHEDULE_INSTRUCTION,
+)
+from app.llm.prompt import (
     build_messages as legacy_build_messages,
 )
 
@@ -148,6 +150,7 @@ def test_block_order_is_declared_and_stable():
         "skills",
         "memory",
         "background",
+        "group_log",
         "history",
         "user",
     ]
@@ -174,9 +177,25 @@ def test_describe_snapshot_typical_group_chat():
         {"block": "skills", "role": "-", "chars": 0, "messages": 0},
         {"block": "memory", "role": "-", "chars": 0, "messages": 0},
         {"block": "background", "role": "system", "chars": len("焦点\n\n环境"), "messages": 1},
+        {"block": "group_log", "role": "-", "chars": 0, "messages": 0},
         {"block": "history", "role": "user", "chars": len("上一句"), "messages": 1},
         {"block": "user", "role": "user", "chars": len("现在的消息"), "messages": 1},
     ]
+
+
+def test_group_log_block_lands_between_background_and_history():
+    """群聊环境记录块的位置与内容：背景之后、会话历史之前。"""
+    req = _req(
+        config={"system_prompt": "你是助手", "outbound_directive_enable": False},
+        pre_history_text="环境",
+        group_log_text="【群聊环境记录】\n14:03 三哥(30003): 绝了",
+    )
+    rows = describe(req)
+    names = [r["block"] for r in rows]
+    assert names.index("background") < names.index("group_log") < names.index("history")
+    row = [r for r in rows if r["block"] == "group_log"][0]
+    assert row["role"] == "system"
+    assert row["chars"] == len("【群聊环境记录】\n14:03 三哥(30003): 绝了")
 
 
 def test_describe_reports_media_for_image_turn():
