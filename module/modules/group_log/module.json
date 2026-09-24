@@ -1,0 +1,9 @@
+{
+  "name": "group_log",
+  "display_name": "群聊记录",
+  "sign": "GroupLog",
+  "version": "1.0.0",
+  "description": "持续记录群聊可见事件（消息/表情/戳/撤回/我的发言），作为 LLM 的环境背景",
+  "entry": "module.py",
+  "api_version": 1
+}

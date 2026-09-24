@@ -89,12 +89,16 @@ def test_capacity_eviction_clears_index_so_event_can_be_reappended():
     assert store.append_many([_msg(mid="1")]) == 1
 
 
-def test_prune_by_hours():
-    now = int(time.time())
+def test_prune_by_hours_uses_ingest_stamps():
+    """过了保留时长的记录会被淘汰（保留窗口按入账时间滚动）。"""
     store = GroupLogStore(bot_id=1, retention_hours=1)
-    store.append_many([_msg(mid="old", ts=now - 7200), _msg(mid="new", ts=now)])
-    assert [e.message_id for e in store.recent(GROUP)] == ["new"]
-    assert store.stats["dropped_by_retention"] == 1
+    store.append_many([_msg(mid="old"), _msg(mid="new")])
+    assert len(store.recent(GROUP)) == 2
+    # 把两条的入账时间伪造成 2 小时前 → 均已过期
+    store._stamps[GROUP] = type(store._stamps[GROUP])([time.time() - 7200] * 2)
+    assert store.prune(GROUP) == 2
+    assert store.recent(GROUP) == []
+    assert store.stats["dropped_by_retention"] == 2
 
 
 def test_zero_retention_count_rejects_everything():
@@ -102,6 +106,13 @@ def test_zero_retention_count_rejects_everything():
     assert store.append_many([_msg()]) == 0
     assert store.recent(GROUP) == []
     assert store.stats["dropped_by_retention"] == 1
+
+
+def test_retention_uses_ingest_time_not_event_time():
+    """迟到/补录的旧消息不能被"按事件时间"立刻淘汰掉（曾因此整类记录静默消失）。"""
+    store = GroupLogStore(bot_id=1, retention_hours=1)
+    store.append_many([_msg(mid="late", ts=int(time.time()) - 86400 * 3)])
+    assert [e.message_id for e in store.recent(GROUP)] == ["late"]
 
 
 # ==================== 窗口与分片隔离 ====================

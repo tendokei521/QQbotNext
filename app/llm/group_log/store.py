@@ -75,10 +75,12 @@ class GroupLogStore:
         self.log = log or logger.add_info(f"#{self.bot_id}" if self.bot_id else "GroupLog")
 
         self._events: dict[str, deque] = {}
+        self._stamps: dict[str, deque] = {}
         self._keys: dict[str, set] = {}
         self._by_message: dict[str, dict[str, list]] = {}
         self._covered: dict[str, set] = {}
         self._pending: dict[str, list] = {}
+        self._seq = 0
         self._writer: asyncio.Task | None = None
         self._closing = False
 
@@ -245,15 +247,25 @@ class GroupLogStore:
     # ==================== 保留与淘汰 ====================
 
     def prune(self, scope: str) -> int:
-        """按保留窗口淘汰过期事件，返回淘汰条数。"""
+        """按保留窗口淘汰过期事件，返回淘汰条数。
+
+        **按入账时间（wall clock）而不是事件自带时间**：迟到的记录、或重启后从磁盘
+        恢复的旧记录，事件时间可能已是几小时前，若按事件时间淘汰就会刚记下就被删掉。
+        事件时间只用于展示与排序。
+        """
         if self.retention_hours <= 0:
             return 0
-        cutoff = int(time.time() - self.retention_hours * 3600)
-        bucket = self._events.get(str(scope or ""))
+        cutoff = time.time() - self.retention_hours * 3600
+        scope = str(scope or "")
+        bucket = self._events.get(scope)
+        stamps = self._stamps.get(scope)
         if not bucket:
             return 0
+        if stamps is None:  # 兜底：状态不完整时按"无过期"处理，不误删数据
+            return 0
         removed = 0
-        while bucket and bucket[0].ts < cutoff:
+        while stamps and stamps[0] < cutoff:
+            stamps.popleft()
             self._drop(scope, bucket.popleft())
             removed += 1
         if removed:
@@ -265,8 +277,12 @@ class GroupLogStore:
 
     def _index(self, scope: str, event: LogEvent) -> None:
         bucket = self._events.setdefault(scope, deque())
+        stamps = self._stamps.setdefault(scope, deque())
         dropped = bucket.popleft() if len(bucket) >= self.retention_count else None
+        if dropped is not None:
+            stamps.popleft()
         bucket.append(event)
+        stamps.append(time.time())  # 入账时间：保留窗口只看它
         self._keys.setdefault(scope, set()).add(event.key)
         if event.message_id:
             self._by_message.setdefault(scope, {}).setdefault(event.message_id, []).append(event)
