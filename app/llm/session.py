@@ -345,6 +345,30 @@ class SessionManager:
                 )
             session.touch()
 
+    def mark_last_assistant_message_id(self, session_id: str, message_id: Any) -> bool:
+        """把最近一条 assistant 历史补上 ``message_id``（发送成功后调用）。
+
+        **为什么需要**：机器人自己发出的消息以前在历史里是无句柄的，于是
+        "这条是它说的"无法被引用、也无法在群聊记录里做正文去重（同一句话会以
+        环境视角再出现一份）。这里按"最近一条 assistant"定位——只在**发送之后**
+        调用，此时它必然是刚发出去的那条。
+        """
+        mid = str(message_id or "").strip()
+        if not mid:
+            return False
+        session = self.get_session(session_id)
+        if not session or session.data is None:
+            return False
+        for entry in reversed(session.data.history):
+            if entry.get("role") != "assistant":
+                continue
+            if str(entry.get("message_id") or "") == mid:
+                return False  # 已经打过同一个 id，不重复写
+            entry["message_id"] = mid
+            session.touch()
+            return True
+        return False
+
     def get_history(self, session_id: str, limit: int = 10) -> list[dict]:
         session = self.get_session(session_id)
         if not session or session.data is None:

@@ -392,9 +392,10 @@ class LlmPipeline:
 
     async def _send(self, ctx: LlmContext, msg: Message) -> None:
         if ctx.event.message_type == "private":
-            await ctx.bot.send_private_msg(ctx.event.user_id, msg)
+            response = await ctx.bot.send_private_msg(ctx.event.user_id, msg)
         else:
-            await ctx.bot.send_group_msg(ctx.event.group.group_id, msg)
+            response = await ctx.bot.send_group_msg(ctx.event.group.group_id, msg)
+        self._mark_sent_message_id(ctx, response)
 
         pm = getattr(self.runtime, "proactive", None)
         if pm is not None:
@@ -407,6 +408,29 @@ class LlmPipeline:
                 logger.add_info(f"#{self.runtime.bot_id}").debug(
                     f"[LLM Pipeline] 更新主动消息发送状态失败（已忽略）: {e}"
                 )
+
+    def _mark_sent_message_id(self, ctx: LlmContext, response: Any) -> None:
+        """把发送响应里的 message_id 补到刚写入的 assistant 历史条目上。
+
+        有了句柄，机器人的发言才能被引用、才能在群聊环境记录里按 message_id 去重
+        （否则同一句话会在"会话历史"和"环境记录"里各出现一份）。
+        发送失败或响应缺 id 时静默跳过——这是增强信息，不是主流程。
+        """
+        data = response.get("data") if isinstance(response, dict) else None
+        message_id = (data or {}).get("message_id") if isinstance(data, dict) else None
+        if not message_id:
+            return
+        session_mgr = getattr(self.runtime, "session_mgr", None)
+        if session_mgr is None or not hasattr(session_mgr, "mark_last_assistant_message_id"):
+            return
+        try:
+            session_mgr.mark_last_assistant_message_id(ctx.session_id, message_id)
+        except Exception as e:  # noqa: BLE001 - 句柄回填失败不影响发送结果
+            from app.core.logger import logger
+
+            logger.add_info(f"#{self.runtime.bot_id}").debug(
+                f"[LLM Pipeline] 回填 message_id 失败（已忽略）: {e}"
+            )
 
     async def _observe(self, ctx: LlmContext) -> None:
         pm = getattr(self.runtime, "proactive", None)
