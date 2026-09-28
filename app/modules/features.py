@@ -13,6 +13,7 @@
 - ``knowledge``：知识库总开关
 - ``onebot_tools``：OneBot 工具总开关
 - ``agent``：框架级 Agent 整体启停
+- ``assembly``：消息组装器（插件可整体替换本轮 messages 的组装）
 """
 
 from __future__ import annotations
@@ -37,9 +38,26 @@ class FeatureController:
         """暂停该能力，返回用于恢复的快照。"""
         raise NotImplementedError
 
+    def suppress_with_owner(self, bot_id: Any, owner: Any) -> dict:
+        """带租约占有者的接管入口。
+
+        需要知道「谁在接管」的能力（例如 ``assembly``：要把 ``runtime.assembler``
+        换成插件自己的装配器）覆盖此方法；默认忽略 owner，与 ``suppress`` 等价，
+        因此既有的与第三方控制器无需改动。
+        """
+        return self.suppress(bot_id)
+
     def restore(self, bot_id: Any, snapshot: dict) -> None:
         """按快照恢复该能力。"""
         raise NotImplementedError
+
+    def on_owner_changed(self, bot_id: Any, owner: Any) -> None:
+        """「交棒」钩子：租约集合变化后，把当前**生效**的占有者切给 ``owner``。
+
+        只对接管是「装上某个对象」的能力有意义（例如 ``assembly`` 要把
+        ``runtime.assembler`` 指回仍然在场的租约持有者）；默认不用处理。
+        """
+        return None
 
 
 class _RuntimeAccess:
@@ -235,6 +253,66 @@ class AgentFeatureController(_RuntimeAccess, FeatureController):
         logger.info(f"[Feature] Agent 已恢复 ({bot_id})")
 
 
+class AssemblerFeatureController(_RuntimeAccess, FeatureController):
+    """消息组装器接管：把 ``runtime.assembler`` 换成插件自己的装配器。
+
+    插件声明 ``supersedes = ("assembly",)`` 并提供 ``build(req) -> list[dict]``，
+    即可整体替换本轮请求 messages 的组装（1:1 复刻第三方组装格式的接入点）；
+    卸载/禁用时自动还原框架默认装配器。装配器缺 ``build`` 时忽略接管并留痕，
+    避免把一个不合格的对象装进运行时后每轮请求都炸。
+    """
+
+    feature_id = "assembly"
+    label = "消息组装"
+
+    def status(self, bot_id: Any) -> dict:
+        runtime = self.runtime(bot_id)
+        assembler = getattr(runtime, "assembler", None) if runtime is not None else None
+        return {
+            "feature_id": self.feature_id,
+            "label": self.label,
+            "enabled": runtime is not None,
+            "assembler": type(assembler).__name__ if assembler is not None else "",
+        }
+
+    def suppress(self, bot_id: Any) -> dict:
+        """无占有者的接管入口：不知道要装哪个装配器，只能忽略。"""
+        logger.warning("[Feature] 消息组装接管缺少占有者，已忽略（请用 supersedes=(\"assembly\",)）")
+        return {}
+
+    def suppress_with_owner(self, bot_id: Any, owner: Any) -> dict:
+        runtime = self.runtime(bot_id)
+        if runtime is None:
+            return {}
+        if not callable(getattr(owner, "build", None)):
+            logger.warning(
+                f"[Feature] {getattr(owner, 'name', owner)} 声明接管消息组装但没有 build(req)，已忽略"
+            )
+            return {}
+        snapshot = {"assembler": getattr(runtime, "assembler", None)}
+        runtime.assembler = owner
+        logger.info(f"[Feature] 消息组装已由 {getattr(owner, 'name', owner)} 接管 ({bot_id})")
+        return snapshot
+
+    def restore(self, bot_id: Any, snapshot: dict) -> None:
+        runtime = self.runtime(bot_id)
+        if runtime is None or not snapshot:
+            return
+        # 局部 import：modules 层不在模块级依赖 llm 层（装配根才允许知道全部组件）
+        from app.llm.assembly import PromptAssembler
+
+        runtime.assembler = snapshot.get("assembler") or PromptAssembler()
+        logger.info(f"[Feature] 消息组装已恢复 ({bot_id})")
+
+    def on_owner_changed(self, bot_id: Any, owner: Any) -> None:
+        """交棒：把 ``runtime.assembler`` 指回仍然在场的租约持有者。"""
+        runtime = self.runtime(bot_id)
+        if runtime is None or not callable(getattr(owner, "build", None)):
+            return
+        runtime.assembler = owner
+        logger.info(f"[Feature] 消息组装交棒给 {getattr(owner, 'name', owner)} ({bot_id})")
+
+
 @dataclass
 class FeatureLease:
     """一个插件对某个 feature 的接管租约。"""
@@ -299,10 +377,12 @@ class FeatureRegistry:
         owners = [getattr(lease.owner, "name", getattr(lease.owner, "module_name", "插件"))
                   for lease in leases]
         if not leases:
-            snapshot = controller.suppress(bot_id)
+            snapshot = controller.suppress_with_owner(bot_id, owner)
         else:
-            # 已处于被接管状态：新租约不需要再次 suppress，只需记录占有者
+            # 已处于被接管状态：新租约不需要再次 suppress，只需记录占有者；
+            # 生效的仍是**第一个**租约持有者（多租约「先到先得」语义）。
             snapshot = leases[0].snapshot
+            controller.on_owner_changed(bot_id, leases[0].owner)
         leases.append(FeatureLease(feature_id=feature_id, bot_id=bot_id, owner=owner, snapshot=snapshot))
         owner_label = getattr(owner, "name", getattr(owner, "module_name", str(owner)))
         logger.info(f"[Feature] {controller.label} 被 {owner_label} 接管 (bot {bot_id})，当前租约: {owners + [owner_label]}")
@@ -320,6 +400,10 @@ class FeatureRegistry:
             return False
         if remaining:
             self._leases[key] = remaining
+            # 交棒：生效者换成仍在场的下一个租约持有者（如 assembly 要把装配器指回它）
+            controller = self.get(feature_id)
+            if controller is not None:
+                controller.on_owner_changed(bot_id, remaining[0].owner)
             return True
         self._leases.pop(key, None)
         snapshot_value = original[0].snapshot if original else {}
@@ -343,6 +427,10 @@ class FeatureRegistry:
             count += 1
             if remaining:
                 self._leases[key] = remaining
+                # 交棒：与 release() 同一语义（模块卸载/热重载走这条路径）
+                controller = self.get(original[0].feature_id if original else "")
+                if controller is not None and original:
+                    controller.on_owner_changed(original[0].bot_id, remaining[0].owner)
                 continue
             self._leases.pop(key, None)
             snapshot_value = original[0].snapshot if original else {}

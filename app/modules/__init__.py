@@ -45,6 +45,7 @@ from app.modules.hooks import (
 from app.modules.dispatcher import ModuleDispatcher
 from app.modules.features import (
     AgentFeatureController,
+    AssemblerFeatureController,
     ConfigToggleFeature,
     FeatureController,
     FeatureLease,
@@ -83,6 +84,7 @@ __all__ = [
     "KnowledgeFeatureController",
     "OneBotToolsFeatureController",
     "AgentFeatureController",
+    "AssemblerFeatureController",
     "module_hook",
     "llm_hook",
     "send_hook",

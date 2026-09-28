@@ -14,6 +14,7 @@ import asyncio
 from typing import Any
 
 from app.llm import logger
+from app.llm.assembly import PromptAssembler
 from app.llm.config import AgentConfig
 from app.llm.enhance import install_framework_hooks
 from app.llm.hooks import LlmHookRegistry, ToolCallHookRegistry
@@ -73,6 +74,8 @@ class AgentRuntime:
         install_framework_hooks(self)
         self.llm_tool_call_hooks = ToolCallHookRegistry(logger)
         self.llm_pipeline = LlmPipeline(self, task_manager=task_manager)
+        # 消息组装器：插件可声明 supersedes=("assembly",) 整体替换（FeatureRegistry 自动还原）
+        self.assembler = PromptAssembler()
         # 模块扩展：@tool 工具 + 技能
         self.llm_tools = ModuleToolRegistry(logger)
         self.skills = SkillRegistry(logger)
