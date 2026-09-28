@@ -142,6 +142,15 @@ SCHEMA = {
         "type": "textarea", "label": "系统提示词", "description": "设定AI角色的系统提示词",
         "default": "你是一个友好的助手。", "placeholder": "你是一个友好的助手...", "group": "group_session", "page": "role",
     },
+    "system_prompt_style": {
+        "type": "select", "label": "消息组装风格",
+        "description": "分块=人设/定时协议/技能/记忆/背景各一条 system（默认）；单条=把所有 system 块折成一条（对齐 AstrBot 的组装形态，便于迁移比对）",
+        "default": "blocks", "group": "group_session",
+        "options": {
+            "blocks": "分块：每类一块 system（默认）",
+            "single": "单条：折成一整条 system prompt",
+        },
+    },
     "session_timeout": {
         "type": "number", "label": "会话超时时间(秒)", "description": "无消息后多久结束会话",
         "default": 60, "min": 30, "max": 300, "group": "group_session",

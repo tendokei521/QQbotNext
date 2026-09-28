@@ -24,6 +24,9 @@ DEFAULT_LLM_CONFIG: dict = {
     "retry_attempts": 3,
     "model": "deepseek-chat",
     "system_prompt": "你是一个友好的助手。",
+    # 消息组装风格：blocks=框架默认（人设/协议/技能/记忆/背景各一条 system）；
+    # single=把所有 system 块折成一条（对齐 AstrBot 那种「一整条 system prompt」形态）
+    "system_prompt_style": "blocks",
     "max_tokens": 1024,
     "temperature": 0.7,
     # 记录历史时强制清洗助手输出里的（…）/(…) 内容，避免后续回复模仿括号风格

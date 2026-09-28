@@ -22,7 +22,10 @@ messages（OpenAI 风格）
 - **顺序只看 ``BLOCK_ORDER``**，不藏在函数体里；
 - **每个块是独立函数** ``build_xxx(req) -> list[dict]``，只读 req、不产生副作用，可单测；
 - **`describe(req)`** 返回 ``[{block, role, chars}]``，`[Prompt]` 调试日志与黄金快照测试都用它，
-  想回答"这次请求发了什么"不必再打印全文。
+  想回答"这次请求发了什么"不必再打印全文；
+- **组装风格可切**：``system_prompt_style="single"`` 时把所有 system 块折成一条
+  （``fold_system_blocks``），对齐第三方框架「一整条 system prompt」的形态；默认
+  ``blocks`` 保持上表的既有形态不变。
 
 ## 块顺序（与重构前的既有顺序保持一致）
 
@@ -243,7 +246,11 @@ def build_user(req: PromptRequest) -> list[dict]:
 
 
 def build_all_blocks(req: PromptRequest) -> list[tuple[Block, list[dict]]]:
-    """按固定顺序生成所有块，返回 (块定义, 消息) 以便 describe/调试归因。"""
+    """按固定顺序生成所有块，返回 (块定义, 消息) 以便 describe/调试归因。
+
+    ``system_prompt_style == "single"`` 时把所有 system 块折成一条（见
+    ``fold_system_blocks``）；默认 ``blocks`` 保持既有形态不变。
+    """
     built: list[tuple[Block, list[dict]]] = []
     for block in BLOCKS:
         try:
@@ -256,7 +263,52 @@ def build_all_blocks(req: PromptRequest) -> list[tuple[Block, list[dict]]]:
                 f"[Assembly] 块 {block.name} 构建失败（已跳过）: {e}"
             )
             built.append((block, []))
+    if system_style(req) == SYSTEM_STYLE_SINGLE:
+        built = fold_system_blocks(built)
     return built
+
+
+#: 组装风格：各块各自一条 system（默认，保持既有形态）
+SYSTEM_STYLE_BLOCKS = "blocks"
+#: 组装风格：所有 system 块折成一条（对齐 AstrBot 「一整条 system prompt」的形态）
+SYSTEM_STYLE_SINGLE = "single"
+
+
+def system_style(req: PromptRequest) -> str:
+    """读取本轮组装风格（未知值一律按默认 ``blocks`` 处理）。"""
+    style = str(req.cfg("system_prompt_style", SYSTEM_STYLE_BLOCKS) or SYSTEM_STYLE_BLOCKS)
+    return SYSTEM_STYLE_SINGLE if style.strip().lower() == SYSTEM_STYLE_SINGLE else SYSTEM_STYLE_BLOCKS
+
+
+def fold_system_blocks(built: list[tuple[Block, list[dict]]]) -> list[tuple[Block, list[dict]]]:
+    """把各块的 system 消息折成一条，挂在**第一个**含 system 的块上。
+
+    - 只折叠 ``role == "system"`` 且 content 为字符串的消息，文本按块顺序用
+      ``\\n\\n`` 连接（空内容丢弃）；其余角色（历史 / 本轮 user）与多模态块原样保留；
+    - 在**块结果**上折叠而不是在摊平后的消息列表上，是为了让 ``describe()`` 的
+      「块 ↔ 消息」对位继续成立：被折走消息的块显示为无消息，一眼能看出它去了哪。
+    """
+    texts: list[str] = []
+    target: int | None = None
+    kept_blocks: list[list[dict]] = []
+    for index, (_block, msgs) in enumerate(built):
+        kept: list[dict] = []
+        for msg in msgs:
+            content = msg.get("content")
+            if msg.get("role") == "system" and isinstance(content, str):
+                if target is None:
+                    target = index
+                if content.strip():
+                    texts.append(content)
+                continue
+            kept.append(msg)
+        kept_blocks.append(kept)
+
+    if target is None:
+        return built  # 没有任何 system 块 → 原样返回
+
+    kept_blocks[target].insert(0, {"role": "system", "content": "\n\n".join(texts)})
+    return [(block, kept_blocks[index]) for index, (block, _msgs) in enumerate(built)]
 
 
 #: 块顺序 —— 想调整顺序/插块，只改这张表
