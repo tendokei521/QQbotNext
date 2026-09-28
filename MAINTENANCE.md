@@ -102,6 +102,11 @@ python main.py
 - WebUI「账号连接管理」里增删改账号；账号配置输入框失焦会自动保存，也可点“保存所有配置”手动保存。`auto_connect=true` 的账号启动时自动连接。
 - **断线重连**：auto_connect 账号掉线后按**指数退避**自动重连：
   `10s → 20s → 40s → 80s → 160s → 300s（封顶）`，连接成功归零。
+- **正常关闭（1000）也算掉线**：OneBot 服务端重启/自己下线时会以 1000 关掉客户端连接，
+  现在同样走掉线收尾——日志 `WebSocket 连接结束: 服务端关闭连接 (code=1000 …)`、
+  账号置为 `error`、在途 API 请求立刻失败（不再干等满超时），随后由上面的退避重连拉回。
+  历史 bug：这一路曾被 `websockets` 的迭代器静默吞掉 → 状态仍 `connected`、Supervise 不重连，
+  表现为「机器人不干活，日志里却一条断线记录都没有」（见 §12.2）。
 - **手动断开**：点「断开」是明确意图，只停「意外掉线」的自动重连语义——该账号在**本次运行期间**
   不再被监督循环自动连回（`/api/bots` 里 `suppress_auto_reconnect=true` 可确认）。
   恢复自动重连的方式：点「连接 / 重连」，或把该账号的「自动连接」开关关掉再打开，或重启进程。
@@ -234,6 +239,7 @@ venv\Scripts\python.exe -c "import sqlite3; c=sqlite3.connect('data/app.db'); pr
 | 连接后立即报 `token验证失败` / `WebSocket失败响应` | OneBot 端 `access_token` 不匹配；现在会视为连接失败并断开，检查 token 后重连 |
 | Bot 连上了但群列表空 | 登录信息获取失败 → 查 `logs/errors.log` 的 `获取群聊列表失败` |
 | 重连太频繁 | 已是指数退避；若仍嫌吵，把该 Bot 的 auto_connect 关掉改手动 |
+| 机器人「莫名其妙」不干活，日志里**没有任何断线记录**，发送报 `received 1000 (OK) normal; then sent 1000 (OK) normal` | 旧版 bug：服务端以 **1000 正常关闭**时 `websockets` 的 `__aiter__` 会吞掉 `ConnectionClosedOK`、接收循环静默退出 → 状态仍 `connected`，监督循环永不重连（僵死到人工重启；线上案例远端只停了 7 秒，客户端僵了 6 小时+）。现已修复：正常关闭同样走掉线收尾（日志 `WebSocket 连接结束: 服务端关闭连接 (code=1000 …)`），另有 `_sweep_zombies()` 每 10s 兜底扫描僵尸连接。排查工具：`scripts/log_timeline.py`（时间线含 `[关]` 标记）与 `scripts/diag_disconnect_pairs.py` |
 | 点了「断开」，过一会儿又自己连上 | 旧版会这样：auto_connect 账号断开后被监督循环当掉线连回（现已修复，手动断开在本次运行期间生效） |
 | 断开后确实不再重连，但想让它在下面自己回来 | 点「连接 / 重连」，或重新打开该账号的「自动连接」开关，或重启进程 |
 

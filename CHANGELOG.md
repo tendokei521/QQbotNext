@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### 修复：服务端正常关闭（1000）不再变成僵尸连接（断线静默死亡）
+
+线上案例（2026-09-27 23:48:26，远端 SnowLuma 日志与 app 日志逐秒对照）：SnowLuma 运行时重启，
+三个 session 同时关闭，并以 **1000（正常关闭）** 断开所有客户端；远端 23:48:33/34 就恢复监听
+（只停了约 7 秒），而 QQbotNext 一直僵死到人工重启 —— 00:00 打卡 18 次全失败、06:00 仍在报
+`received 1000 (OK) normal; then sent 1000 (OK) normal`，那条在途合并转发则干等满 60s 超时。
+
+- **根因**：`websockets` 的 `Connection.__aiter__` 会把「正常关闭」的 `ConnectionClosedOK`
+  直接吞掉、让 `async for` **正常退出**（不抛异常），而 `_bot_server` 只处理了 `except` 分支 →
+  不记日志、不清 `conn.websocket`、不改 `status`、不放行在途请求；状态永远停在 `connected`
+  → 监督循环判定「在线」永不重连，之后每次发送都抛 `ConnectionClosed` 立即失败。
+  异常断线（1006/1011 等）本来就会重连，**只有 1000 这一路是静默的**，所以表现为「莫名其妙」。
+- **修法**：连接收尾统一为 `_handle_connection_end()`（留痕 + `status=error` + 广播 +
+  清 ws + `fail_pending`），异常断线与正常关闭都必须走；正常关闭现在会打出
+  `WebSocket 连接结束: 服务端关闭连接 (code=1000 …)`（WARNING，此前完全静默）。
+- **加固**：监督循环新增 `_sweep_zombies()` —— `status=connected` 但 ws 已带 `close_code`、
+  或接收任务已消失时按掉线处理，再走指数退避重连。
+- **顺带**：未知事件（`未知类型 <uid>`）打出原始 payload。线上那条「未知类型 3437542570」
+  实为 SnowLuma 重启前推的 session-closed 通知，此前只能靠时间猜。
+- 测试：新增 `tests/test_gateway_silent_close.py`（真实 ws 服务端以 1000 关闭 → 必须转入掉线态、
+  在途请求立刻失败、监督循环自动连回；僵尸判定单元用例）；`scripts/log_timeline.py` 的时间线
+  现在也会标注 `WebSocket 连接结束`。
+
 ### 新增：LLM 请求结束后 info 一次本次 token 消耗
 
 此前只有非流式路径在**每一轮**（含工具循环的中间轮）打一行"回复 N 字符 | 输入 X / 输出 Y"，
