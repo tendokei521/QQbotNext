@@ -25,7 +25,7 @@ from app.llm.group_context import (
     fetch_group_name,
     fetch_group_online_history,
 )
-from app.llm.providers import chat_with_fallback, get_provider
+from app.llm.providers import get_provider
 from app.llm.session import SessionManager
 from app.llm.tags import strip_all_tags
 from app.llm.time_parser import advance_repeat, parse_schedule
@@ -662,15 +662,20 @@ class TaskScheduler:
             if hasattr(self.module, "provider_chain"):
                 chain = self.module.provider_chain()
                 if chain:
-                    return await chat_with_fallback(
-                        chain,
-                        messages,
-                        model=self.module.config.get("model", "deepseek-chat"),
-                        temperature=self.module.config.get("temperature", 0.7),
-                        max_tokens=self.module.config.get("max_tokens", 1024),
-                        tools=tools,
-                        tool_executor=tool_executor,
-                        max_tool_rounds=max_tool_rounds,
+                    from app.llm.providers.invoker import resolve_invoker
+
+                    return await resolve_invoker(self.module).chat(
+                        runtime=self.module,
+                        chain=chain,
+                        messages=messages,
+                        params={
+                            "model": self.module.config.get("model", "deepseek-chat"),
+                            "temperature": self.module.config.get("temperature", 0.7),
+                            "max_tokens": self.module.config.get("max_tokens", 1024),
+                            "tools": tools,
+                            "tool_executor": tool_executor,
+                            "max_tool_rounds": max_tool_rounds,
+                        },
                     )
             # 兼容旧模块/测试：直接走模块自己的 get_provider
             provider = get_provider(dict(self.module.config.raw_config))

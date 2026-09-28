@@ -205,6 +205,11 @@ DEFAULT_LLM_CONFIG: dict = {
     # 滚动保留最近 prompt_dump_max_entries 条，供与第三方框架的组装结果逐条 diff
     "prompt_dump_enable": False,       # 默认关闭：正常运行时零 IO
     "prompt_dump_max_entries": 20,     # 滚动保留条数
+    # 上下文 token 预算（对齐 AstrBot ContextManager）：0 = 关闭（默认）。
+    # 开启后超预算就从**最旧的历史消息**丢起，system 与最后一条 user 永不丢；
+    # 估算按字符启发式（context_token_chars_per_token），只用于防爆、不用于计费。
+    "context_token_budget": 0,
+    "context_token_chars_per_token": 2.0,
 }
 
 # 框架级 Agent 配置/权限存储的 module_name

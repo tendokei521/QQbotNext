@@ -103,7 +103,8 @@ async def _run_once(rt, text, monkeypatch):
             return LLMResponse(text="无")
         return LLMResponse(text="好的，我已经记住了（笑）")
 
-    monkeypatch.setattr("app.llm.chat.chat_with_fallback", fake_chat)
+    # 请求出口已收口到 runtime.invoker（默认实现按属性查找转调 providers），
+    # 因此这里只需要打 providers 这一层的补丁。
     monkeypatch.setattr("app.llm.providers.chat_with_fallback", fake_chat)
     ev = types.SimpleNamespace(message_type="private", user_id="5", group=None, bot=None, self_id="5")
     ctx = types.SimpleNamespace(session_id="", user_text=text, state={})

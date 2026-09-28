@@ -23,6 +23,7 @@ from app.llm.mcp import MCPManager
 from app.llm.memory import MemoryManager
 from app.llm.pipeline import LlmPipeline
 from app.llm.proactive import ProactiveManager
+from app.llm.providers.invoker import ProviderInvoker
 from app.llm.scheduler import TaskScheduler
 from app.llm.session import SessionManager
 from app.llm.skills import SkillRegistry
@@ -76,6 +77,8 @@ class AgentRuntime:
         self.llm_pipeline = LlmPipeline(self, task_manager=task_manager)
         # 消息组装器：插件可声明 supersedes=("assembly",) 整体替换（FeatureRegistry 自动还原）
         self.assembler = PromptAssembler()
+        # provider 调用策略：插件可声明 supersedes=("provider_invoker",) 整体替换
+        self.invoker = ProviderInvoker()
         # 模块扩展：@tool 工具 + 技能
         self.llm_tools = ModuleToolRegistry(logger)
         self.skills = SkillRegistry(logger)

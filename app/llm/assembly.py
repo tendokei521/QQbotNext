@@ -551,6 +551,11 @@ async def apply_post_assemble(
         return None
     result = list(final)
 
+    # token 预算裁剪（默认关闭）：超预算先从最旧历史丢起，system 与本轮提问必留
+    from app.llm.token_budget import apply_budget
+
+    result = apply_budget(result, getattr(runtime, "config", None), bot_id=getattr(runtime, "bot_id", None))
+
     # 请求落盘（默认关闭）：把「最终发出去的东西」留成可比对的证据
     from app.llm.prompt_dump import record as _record_dump
 

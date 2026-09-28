@@ -36,7 +36,8 @@ from app.llm.session import SessionManager
 from app.llm import assembly
 from app.llm.assembly import PromptRequest
 from app.llm.image import collect_image_segments
-from app.llm.providers import chat_with_fallback, iter_stream_with_fallback, log_token_usage
+from app.llm.providers import log_token_usage
+from app.llm.providers.invoker import resolve_invoker
 from app.llm.providers.modalities import normalize_modalities, supports_tool_use
 from app.llm.tags import maybe_strip_parentheses, strip_all_tags
 from app.llm.splitter import split_sentences, strip_stream_artifacts
@@ -915,16 +916,19 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
 
     use_tools = bool(all_specs) and supports_tool_use(modalities)
     response_start = time.monotonic()
-    response = await chat_with_fallback(
-        provider_chain,
-        messages,
-        model=meta["model"],
-        temperature=meta["temperature"],
-        max_tokens=meta["max_tokens"],
-        tools=build_tools(all_specs) if use_tools else None,
-        tool_executor=make_executor(all_specs, tool_ctx) if use_tools else None,
-        max_tool_rounds=_max_tool_rounds(config),
-        max_empty_retries=_max_empty_retries(config),
+    response = await resolve_invoker(runtime).chat(
+        runtime=runtime,
+        chain=provider_chain,
+        messages=messages,
+        params={
+            "model": meta["model"],
+            "temperature": meta["temperature"],
+            "max_tokens": meta["max_tokens"],
+            "tools": build_tools(all_specs) if use_tools else None,
+            "tool_executor": make_executor(all_specs, tool_ctx) if use_tools else None,
+            "max_tool_rounds": _max_tool_rounds(config),
+            "max_empty_retries": _max_empty_retries(config),
+        },
     )
     response_latency_ms = (time.monotonic() - response_start) * 1000
 
@@ -1052,16 +1056,19 @@ async def stream_response(runtime, event, ctx=None):
         tool_calls: dict[int, dict] = {}
         stream_error = ""
 
-        async for ev in iter_stream_with_fallback(
-            provider_chain,
-            messages,
-            model=meta["model"],
-            temperature=meta["temperature"],
-            max_tokens=meta["max_tokens"],
-            tools=tools,
-            tool_executor=tool_executor,
-            max_empty_retries=_max_empty_retries(config),
-            usage_sink=usage_sink,
+        async for ev in resolve_invoker(runtime).stream(
+            runtime=runtime,
+            chain=provider_chain,
+            messages=messages,
+            params={
+                "model": meta["model"],
+                "temperature": meta["temperature"],
+                "max_tokens": meta["max_tokens"],
+                "tools": tools,
+                "tool_executor": tool_executor,
+                "max_empty_retries": _max_empty_retries(config),
+                "usage_sink": usage_sink,
+            },
         ):
             if ev.type == "text":
                 buffer += ev.text

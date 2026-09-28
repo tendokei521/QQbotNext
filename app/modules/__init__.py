@@ -54,6 +54,8 @@ from app.modules.features import (
     MemoryFeatureController,
     OneBotToolsFeatureController,
     ProactiveFeatureController,
+    ProviderInvokerFeatureController,
+    RuntimeSlotFeatureController,
     ScheduleFeatureController,
 )
 from app.modules.keyword import match_keywords
@@ -80,6 +82,8 @@ __all__ = [
     "ConfigToggleFeature",
     "ProactiveFeatureController",
     "ScheduleFeatureController",
+    "RuntimeSlotFeatureController",
+    "ProviderInvokerFeatureController",
     "MemoryFeatureController",
     "KnowledgeFeatureController",
     "OneBotToolsFeatureController",

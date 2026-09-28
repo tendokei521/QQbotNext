@@ -210,7 +210,8 @@ async def test_check_and_chat_reaches_provider_call(tmp_path, monkeypatch):
     monkeypatch.setattr("app.llm.assembly_inputs.collect_history_materials", fake_materials)
     monkeypatch.setattr("app.llm.referent.focus_only_block", fake_focus)
     monkeypatch.setattr("app.llm.group_log.context.build_context_text", fake_group_log)
-    monkeypatch.setattr("app.llm.proactive.chat_with_fallback", fake_chat)
+    # 请求出口已收口到 runtime.invoker（默认实现按属性查找转调 providers）
+    monkeypatch.setattr("app.llm.providers.chat_with_fallback", fake_chat)
 
     with pytest.raises(_Boom):
         await pm.manual_trigger("private_10001")

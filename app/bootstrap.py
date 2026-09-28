@@ -28,6 +28,7 @@ from app.modules.features import (
     MemoryFeatureController,
     OneBotToolsFeatureController,
     ProactiveFeatureController,
+    ProviderInvokerFeatureController,
     ScheduleFeatureController,
 )
 from app.modules.hooks import (
@@ -136,6 +137,7 @@ def build_container(settings: Settings | None = None) -> Container:
     feature_registry.register(OneBotToolsFeatureController(agent_manager))
     feature_registry.register(AgentFeatureController(agent_manager))
     feature_registry.register(AssemblerFeatureController(agent_manager))
+    feature_registry.register(ProviderInvokerFeatureController(agent_manager))
     container.register_factory(FeatureRegistry, lambda: feature_registry)
     # 插件钩子注册表（模块按 bot 注册）
     send_hook_registry = SendHookRegistry()

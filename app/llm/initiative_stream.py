@@ -17,7 +17,8 @@ from __future__ import annotations
 from typing import Any
 
 from app.domain.message import Message
-from app.llm.providers import iter_stream_with_fallback, log_token_usage
+from app.llm.providers import log_token_usage
+from app.llm.providers.invoker import resolve_invoker
 from app.llm.send_pool import StreamSendPool
 from app.llm.splitter import split_sentences, strip_stream_artifacts
 from app.llm.tool_loop import normalize_and_execute_tool_calls
@@ -105,17 +106,20 @@ async def stream_send_initiative(
             buffer = ""
             tool_calls: dict[int, dict] = {}
 
-            async for ev in iter_stream_with_fallback(
-                chain,
-                messages,
-                model=model or config.get("model", "deepseek-chat"),
-                temperature=temperature,
-                max_tokens=max_tokens,
-                tools=tools if use_tools else None,
-                tool_executor=tool_executor if use_tools else None,
-                # 主动消息/定时任务同样吃「空回复重试」：零产出会让本轮静默不发
-                max_empty_retries=_max_empty_retries(config),
-                usage_sink=usage_sink,
+            async for ev in resolve_invoker(runtime).stream(
+                runtime=runtime,
+                chain=chain,
+                messages=messages,
+                params={
+                    "model": model or config.get("model", "deepseek-chat"),
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    "tools": tools if use_tools else None,
+                    "tool_executor": tool_executor if use_tools else None,
+                    # 主动消息/定时任务同样吃「空回复重试」：零产出会让本轮静默不发
+                    "max_empty_retries": _max_empty_retries(config),
+                    "usage_sink": usage_sink,
+                },
             ):
                 if ev.type == "text":
                     buffer += ev.text

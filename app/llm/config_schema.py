@@ -181,6 +181,16 @@ SCHEMA = {
         "type": "number", "label": "请求落盘保留条数", "description": "滚动文件最多保留多少轮请求（从最旧开始丢）",
         "default": 20, "min": 1, "max": 500, "group": "group_session",
     },
+    "context_token_budget": {
+        "type": "number", "label": "上下文 token 预算",
+        "description": "0=关闭（默认）。开启后超预算就从最旧的历史消息丢起（system 与人设、本轮提问永不丢），避免长会话把请求顶到上游 context length 上限",
+        "default": 0, "min": 0, "max": 200000, "group": "group_compress",
+    },
+    "context_token_chars_per_token": {
+        "type": "number", "label": "token 估算：每 token 字符数",
+        "description": "粗估用（中文约 1-2 字符/token，英文约 4）；只影响防爆裁剪，不影响真实计费",
+        "default": 2.0, "min": 0.5, "max": 8, "group": "group_compress",
+    },
     "include_pre_history": {
         "type": "boolean", "label": "包含群聊环境背景", "description": "开启时拉取群聊最近消息，并附上群名/群号/当前时间作为 LLM 背景信息（不计入会话历史；未开启则完全不拉取在线历史）",
         "default": False, "group": "group_session",
