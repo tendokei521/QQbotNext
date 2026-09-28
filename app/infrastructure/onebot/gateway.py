@@ -402,6 +402,8 @@ class OneBotGateway:
         worker = asyncio.create_task(
             self._dispatch_worker(index, queue), name=f"dispatch_worker:{index}"
         )
+        # 「连接级失败响应」在循环内已自行收尾，用它避免退出后再走一遍收尾逻辑
+        connection_ended = False
 
         try:
             async for message in conn.websocket:
@@ -453,6 +455,7 @@ class OneBotGateway:
                                 )
                             conn.websocket = None
                         self._reset_conn_state(conn)
+                        connection_ended = True
                         break
 
                     # 2. 解码为领域事件并入队处理（不阻塞接收循环）
@@ -465,20 +468,19 @@ class OneBotGateway:
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            bot_logger.error(f"WebSocket 连接结束: {e}")
-            conn.status = "error"
-            conn.last_error = str(e)
-            await self._notify_status(conn, "error", str(e))
-            if conn.websocket:
-                try:
-                    await conn.websocket.close()
-                except Exception as e:
-                    logger.add_info(f"#{conn.index}").debug(
-                        f"[Gateway] 连接失败后关闭 ws 失败（已忽略）: {e}"
-                    )
-                conn.websocket = None
-            # 清空登录态 + 让在途 API 请求立即失败（与 disconnect_bot 一致）
-            self._reset_conn_state(conn)
+            connection_ended = True
+            await self._handle_connection_end(conn, index, f"{e}", bot_logger, abnormal=True)
+        else:
+            if not connection_ended:
+                # 关键：websockets 的 Connection.__aiter__ 会把「正常关闭（1000）」的
+                # ConnectionClosedOK 直接吞掉、让 async for 正常退出（不抛异常）。
+                # 不在这里显式收尾就会留下僵尸连接：status 永远停在 connected →
+                # 监督循环判定「在线」永不重连，之后每次发送都抛 ConnectionClosed
+                # 立即失败。真实案例：远端只重启约 7 秒，客户端僵死 6 小时以上，
+                # 而且日志里连一条断线记录都没有。
+                await self._handle_connection_end(
+                    conn, index, self._close_reason(conn), bot_logger, abnormal=False
+                )
         finally:
             worker.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -487,6 +489,45 @@ class OneBotGateway:
                 if not t.done():
                     t.cancel()
             self.bot_server_tasks.pop(f"{index}", None)
+
+    async def _handle_connection_end(
+        self, conn, index: int, reason: str, bot_logger, *, abnormal: bool
+    ) -> None:
+        """连接结束的统一收尾：留痕 → 置掉线态 → 广播 → 清 ws → 在途请求立即失败。
+
+        异常断线（ConnectionClosedError 等）与正常关闭（1000）**必须**走同一套收尾：
+        前者由 ``except`` 分支触发，后者由 ``async for`` 正常退出的 ``else`` 分支触发。
+        少了后者就是「僵尸连接」——状态仍 connected，监督循环永远不重连。
+        """
+        text = f"WebSocket 连接结束: {reason}"
+        if abnormal:
+            bot_logger.error(text)
+        else:
+            # 正常关闭是服务端主动行为（重启/下线）：必须留痕（否则无从发现），
+            # 但用 WARNING，不必惊动 errors.log
+            bot_logger.warning(text)
+        conn.status = "error"
+        conn.last_error = reason
+        await self._notify_status(conn, "error", reason)
+        if conn.websocket:
+            try:
+                await conn.websocket.close()
+            except Exception as e:
+                # 关闭失败仅记 debug：连接随后会被置空并由监督循环重建，但留痕便于排查
+                bot_logger.debug(f"[Gateway] 关闭已结束的连接失败（已忽略）: {e}")
+            conn.websocket = None
+        # 清空登录态 + 让在途 API 请求立即失败（与 disconnect_bot 一致）
+        self._reset_conn_state(conn)
+
+    @staticmethod
+    def _close_reason(conn) -> str:
+        """正常关闭的可读原因：带上 close_code/close_reason，便于定位是哪一端关的。"""
+        code = getattr(conn.websocket, "close_code", None)
+        reason = getattr(conn.websocket, "close_reason", None)
+        if code is None:
+            return "连接已结束（未收到关闭帧）"
+        suffix = f" {reason}" if reason else ""
+        return f"服务端关闭连接 (code={code}{suffix})"
 
     async def _dispatch_worker(self, index: int, queue: asyncio.Queue) -> None:
         """串行处理该 bot 的事件队列，独立于接收循环。
@@ -537,6 +578,11 @@ class OneBotGateway:
                     group_id = getattr(event, "group_id", 0) or 0
                     if group_id:
                         prefix += f"] [{group_id}"
+                    if event_name(event.event_type) == "未知类型":
+                        # 未收录的类型只打得出「未知类型 <uid>」这种没信息量的文本。
+                        # 端侧排查（线上那条「未知类型 3437542570」实为 SnowLuma 重启前
+                        # 推的 session-closed 通知）必须能看到原始 payload，否则只能靠时间猜。
+                        text = f"{text} | raw={_raw_payload_text(event)}"
                     recv_logger.prefix(prefix).info(text)
 
         # 群消息多 Bot 同步（仅当同群多 Bot 时等待全部收到，避免重复响应）
@@ -767,6 +813,7 @@ class OneBotGateway:
                 try:
                     bots_config = getter()  # 同步 provider（ConfigService.get_bots）
                     await self._reconcile(bots_config)
+                    await self._sweep_zombies()
                     for index in list(self.connections.keys()):
                         conn = self.connections[index]
                         if not conn.auto_connect or conn.status in ("connected", "connecting"):
@@ -783,6 +830,40 @@ class OneBotGateway:
                         await self.connect_bot(index)
                 except Exception as e:
                     self.log.error(f"监督循环异常: {e}")
+
+    async def _sweep_zombies(self) -> None:
+        """把「状态还写着 connected、连接其实已经没了」的账号改成掉线态，交给重连逻辑。
+
+        正常收尾（``_handle_connection_end`` / ``disconnect_bot``）都会改状态；
+        这里兜住没走到收尾的静默路径（接收任务消失、ws 已被对端关闭等）——
+        否则监督循环会把它们当成「在线」，永不重连，表现为静默死亡。
+        """
+        for index, conn in list(self.connections.items()):
+            if conn.status != "connected" or not self._connection_gone(index, conn):
+                continue
+            self.log.warning(f"机器人索引: {index} 连接已不存在但状态仍是 connected，按掉线处理")
+            conn.status = "error"
+            conn.last_error = "连接已不存在（僵尸连接，已按掉线处理）"
+            await self._notify_status(conn, "error", conn.last_error)
+            if conn.websocket is not None:
+                with contextlib.suppress(Exception):
+                    await conn.websocket.close()
+            conn.websocket = None
+            self._reset_conn_state(conn)
+
+    def _connection_gone(self, index: int, conn) -> bool:
+        """connected 状态下「连接已消失」的判定（任一命中即视为已消失）。
+
+        调用方（``_sweep_zombies``）已限定只看 status=="connected"：握手中的
+        "connecting" 期间 websocket 尚未赋值、任务尚未创建，用本判据会被误判。
+        """
+        if conn.websocket is None:
+            return True
+        # 对端关闭后 websockets 会写入 close_code；收尾若没走到，这里能兜住
+        if getattr(conn.websocket, "close_code", None) is not None:
+            return True
+        task = self.bot_server_tasks.get(f"{index}")
+        return task is None or task.done()
 
     async def shutdown(self) -> None:
         if self._supervise_task:
@@ -808,6 +889,18 @@ def _message_log_text(event: MessageEvent) -> str:
         else:
             parts.append(f"[{seg.type}]")
     return "".join(parts)
+
+
+def _raw_payload_text(event: BaseEvent, limit: int = 500) -> str:
+    """未知事件的原始 payload（截断防刷屏）：只在未收录类型上打，正常流量零开销。"""
+    raw = getattr(event, "raw", None) or {}
+    try:
+        text = json.dumps(raw, ensure_ascii=False)
+    except (TypeError, ValueError):
+        text = repr(raw)
+    if len(text) > limit:
+        return f"{text[:limit]}…(共 {len(text)} 字符)"
+    return text
 
 
 def _event_text(event: BaseEvent) -> str:
