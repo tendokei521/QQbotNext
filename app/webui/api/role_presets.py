@@ -44,6 +44,9 @@ async def create_preset(request: Request):
             body.get("name", ""),
             body.get("description", ""),
             body.get("system_prompt", ""),
+            begin_dialogs=body.get("begin_dialogs"),
+            tools=body.get("tools"),
+            skills=body.get("skills"),
         )
     except ValueError as e:
         return _err(400, str(e))

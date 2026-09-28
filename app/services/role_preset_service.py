@@ -1,7 +1,8 @@
 """角色预设服务：独立管理可复用的角色系统提示词。
 
-每个角色预设只保存名称、描述与 system_prompt；Agent 配置通过
-「应用到当前 Agent」把预设提示词写入当前 bot 的 system_prompt。
+每个角色预设保存名称、描述、system_prompt，以及可选的
+``begin_dialogs``（预设对话，对齐 AstrBot persona）/ ``tools`` / ``skills``；
+Agent 配置通过「应用到当前 Agent」把预设提示词写入当前 bot 的 system_prompt。
 """
 
 from __future__ import annotations
@@ -14,6 +15,48 @@ from app.core.logger import logger
 from app.infrastructure.config.config_service import ConfigService
 
 
+def normalize_begin_dialogs(value: Any) -> list[dict]:
+    """归一化预设对话：只保留 ``{role: user|assistant, content: 非空字符串}``。
+
+    对齐 AstrBot persona 的 ``begin_dialogs``（组装时前插到历史最前、不落库）；
+    这里只负责存储与校验，如何进 prompt 由装配器/插件决定。
+    """
+    result: list[dict] = []
+    for item in value or []:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role", "") or "").strip().lower()
+        content = str(item.get("content", "") or "").strip()
+        if role not in ("user", "assistant") or not content:
+            continue
+        result.append({"role": role, "content": content})
+    return result
+
+
+def normalize_name_list(value: Any) -> list[str] | None:
+    """归一化工具/技能名列表：``None`` = 不限制；``[]`` = 显式禁用；字符串按单元素处理。"""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, (list, tuple, set)):
+        return None
+    names = [str(v).strip() for v in value if str(v or "").strip()]
+    return list(dict.fromkeys(names))  # 去重保序
+
+
+def with_extended_defaults(preset: dict | None) -> dict | None:
+    """补齐扩展字段：旧预设（库里没有这些键）读出来也有一致的形状。"""
+    if preset is None:
+        return None
+    return {
+        **preset,
+        "begin_dialogs": normalize_begin_dialogs(preset.get("begin_dialogs")),
+        "tools": normalize_name_list(preset.get("tools")),
+        "skills": normalize_name_list(preset.get("skills")),
+    }
+
+
 class RolePresetService:
     """角色预设 CRUD。"""
 
@@ -21,12 +64,21 @@ class RolePresetService:
         self.config_service = config_service
 
     def list_presets(self) -> list[dict]:
-        return self.config_service.list_role_presets()
+        return [with_extended_defaults(p) or {} for p in self.config_service.list_role_presets()]
 
     def get_preset(self, role_id: str) -> dict | None:
-        return self.config_service.get_role_preset(role_id)
+        return with_extended_defaults(self.config_service.get_role_preset(role_id))
 
-    async def create_preset(self, name: str, description: str = "", system_prompt: str = "") -> dict:
+    async def create_preset(
+        self,
+        name: str,
+        description: str = "",
+        system_prompt: str = "",
+        *,
+        begin_dialogs: Any = None,
+        tools: Any = None,
+        skills: Any = None,
+    ) -> dict:
         name = str(name or "").strip()
         system_prompt = str(system_prompt or "").strip()
         if not name:
@@ -40,6 +92,9 @@ class RolePresetService:
             "name": name,
             "description": str(description or "").strip(),
             "system_prompt": system_prompt,
+            "begin_dialogs": normalize_begin_dialogs(begin_dialogs),
+            "tools": normalize_name_list(tools),
+            "skills": normalize_name_list(skills),
             "created_at": now,
             "updated_at": now,
         }
@@ -62,6 +117,9 @@ class RolePresetService:
             "name": name,
             "description": str(data.get("description", old.get("description", "")) or "").strip(),
             "system_prompt": system_prompt,
+            "begin_dialogs": normalize_begin_dialogs(data.get("begin_dialogs", old.get("begin_dialogs"))),
+            "tools": normalize_name_list(data.get("tools", old.get("tools"))),
+            "skills": normalize_name_list(data.get("skills", old.get("skills"))),
             "updated_at": int(time.time()),
         }
         await self.config_service.save_role_preset(role_id, updated)

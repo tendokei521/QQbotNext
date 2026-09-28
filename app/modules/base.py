@@ -216,6 +216,8 @@ class ServiceAccess:
     providers: Any = None
     scheduler: Any = None
     agent_manager: Any = None  # 框架级 LLM Agent 运行时管理
+    config_profiles: Any = None  # 配置档案与路由（ConfigProfileService）：按会话 UMO 换整套配置
+    role_presets: Any = None     # 角色预设（RolePresetService）：可复用人设（含预设对话/工具/技能）
     send_hooks: Any = None     # 消息发送成功钩子注册表 SendHookRegistry
     before_send_hooks: Any = None   # 消息发送前钩子注册表
     api_hooks: Any = None           # 任意 API 调用后钩子注册表

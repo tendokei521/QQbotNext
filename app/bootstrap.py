@@ -155,6 +155,7 @@ def build_container(settings: Settings | None = None) -> Container:
         before_send_hooks=before_send_hook_registry, api_hooks=api_hook_registry,
         lifecycle_hooks=lifecycle_hook_registry, event_completed_hooks=event_completed_hook_registry,
         features=feature_registry,
+        config_profiles=config_profile_service, role_presets=role_preset_service,
     )
     container.register_factory(ServiceAccess, lambda: services)
 
