@@ -1,6 +1,8 @@
 """把 gateway 日志整理成时间线：每个 index 的账号、每条收到的消息、每次回复。
 
-输出用于判断「哪些消息被回复 / 哪些被吞」，并标注账号在 index 间的漂移。
+输出用于判断「哪些消息被回复 / 哪些被吞」，并标注账号在 index 间的漂移；
+断连也进时间线——包括服务端以 1000 正常关闭（`WebSocket 连接结束`），
+这类静默断开在旧版会表现为「没有任何断线记录的僵死」。
 
 用法: venv\\Scripts\\python.exe scripts\\log_timeline.py 1\\log\\debug.log
 """
@@ -21,6 +23,8 @@ ASSEMBLE = re.compile(r"\[LLM\]\s*\[#(?P<bid>\d+)\]\s*\[Agent\]")
 SESS = re.compile(r"\[LLM\]\s*\[#(?P<bid>\d+)\]\s*(?P<what>创建会话|会话过期已归档|[^ ]*API 请求[^ ]*|流式 API 请求)[:：]?\s*(?P<rest>.*)$")
 DISC = re.compile(r"机器人索引:\s*(?P<idx>\d+)\s*断开连接")
 CFG = re.compile(r"机器人索引:\s*(?P<idx>\d+)\s*配置已更新")
+# 例: [#0] WebSocket 连接结束: 服务端关闭连接 (code=1000 session closed)
+CLOSE = re.compile(r"\[#(?P<idx>\d+)\]\s*WebSocket 连接结束:\s*(?P<reason>.*)$")
 
 # 只关心目标群的消息
 FOCUS_GROUPS = {"466052056", "1034395464"}
@@ -29,7 +33,8 @@ FOCUS_GROUPS = {"466052056", "1034395464"}
 def main(path: str) -> None:
     lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
     events: list[tuple[str, str, str]] = []
-    order = {"login": 0, "assemble": 1, "disc": 2, "cfg": 3, "recv": 4, "send": 5, "llm": 6}
+    order = {"login": 0, "assemble": 1, "disc": 2, "close": 3, "cfg": 4,
+             "recv": 5, "send": 6, "llm": 7}
     for raw in lines:
         m = TS.match(raw)
         if not m:
@@ -44,6 +49,8 @@ def main(path: str) -> None:
             events.append((ts, "disc", f"index {mm.group('idx')} 断开"))
         elif (mm := CFG.search(body)):
             events.append((ts, "cfg", f"index {mm.group('idx')} 配置已更新（将断开重连）"))
+        elif (mm := CLOSE.search(body)):
+            events.append((ts, "close", f"#{mm.group('idx')} 连接结束: {mm.group('reason').strip()[:60]}"))
         elif (mm := RECV.search(body)):
             gid = mm.group("gid") or mm.group("gid2") or ""
             if gid in FOCUS_GROUPS:
@@ -59,7 +66,7 @@ def main(path: str) -> None:
 
     events.sort(key=lambda e: (e[0], order.get(e[1], 9)))
     for ts, kind, text in events:
-        marker = {"login": "登", "assemble": "装", "disc": "断", "cfg": "改",
+        marker = {"login": "登", "assemble": "装", "disc": "断", "close": "关", "cfg": "改",
                   "recv": "收", "send": "发", "llm": "LLM"}.get(kind, "?")
         print(f"{ts[11:]} [{marker}] {text}")
 
@@ -69,6 +76,7 @@ def main(path: str) -> None:
     print("  运行时装配:", sum(1 for e in events if e[1] == "assemble"))
     print("  收到消息:", sum(1 for e in events if e[1] == "recv"))
     print("  发出消息:", sum(1 for e in events if e[1] == "send"))
+    print("  连接结束:", sum(1 for e in events if e[1] == "close"))
     print("  LLM 事件:", sum(1 for e in events if e[1] == "llm"))
 
 
