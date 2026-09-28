@@ -40,7 +40,7 @@ messages（OpenAI 风格）
 | 7 | background | system | 指代块 + 聊天环境背景（合并为一块） | 任一非空 |
 | 8 | group_log | system | 群聊环境记录（消息 + 互动 + 我的动作） | 群聊记录模块在场且有记录 |
 | 9 | history | 对话 | 会话历史（已渲染打标） | 非空 |
-| 10 | user | user | 本轮消息（可含图片块） | 始终 |
+| 10 | user | user | 本轮消息（可含额外内容块与图片块） | 始终 |
 
 注意：块 6 在块 7 之前是历史既有行为；块 7 内部"指代在前、环境在后"用 ``\n\n`` 连接。
 块 8 与块 7 是两个**不同来源**（持续记录 vs 按需拉取），正文按 message_id 去重。
@@ -110,6 +110,10 @@ class PromptRequest:
     # 多模态
     user_images: list[dict] | None = None
     with_images: bool = True
+    #: user 侧「额外内容块」（纯文本）：如 ``<system_reminder>``、``<Quoted Message>``、
+    #: ``[Image Attachment: path …]``。对齐 AstrBot 的 ``extra_user_content_parts``：
+    #: 有值时 user content 变成多块数组，顺序为「正文 → 额外块 → 图片」。
+    extra_user_content_parts: list[str] = field(default_factory=list)
 
     def cfg(self, key: str, default: Any = None) -> Any:
         """读配置（缺 config / 异常时返回 default，避免块因配置对象异常整体炸掉）。"""
@@ -240,9 +244,29 @@ def build_group_log(req: PromptRequest) -> list[dict]:
     return [{"role": "system", "content": text}] if text else []
 
 
+def _extra_text_parts(req: PromptRequest) -> list[dict]:
+    """把 ``extra_user_content_parts`` 转成多模态 text 块；空白项丢弃。"""
+    return [
+        {"type": "text", "text": str(part)}
+        for part in (req.extra_user_content_parts or [])
+        if str(part or "").strip()
+    ]
+
+
 def build_user(req: PromptRequest) -> list[dict]:
-    """本轮消息。图片块由 ``place_images`` 在清洗前归位。"""
-    return [{"role": "user", "content": req.user_text}]
+    """本轮消息。图片块由 ``place_images`` 在清洗前归位。
+
+    没有 ``extra_user_content_parts`` 时保持**纯字符串** content（与旧行为逐字一致）；
+    有值时改多块数组（正文 → 额外块），空正文只留额外块。
+    """
+    parts = _extra_text_parts(req)
+    if not parts:
+        return [{"role": "user", "content": req.user_text}]
+    content: list[dict] = []
+    if str(req.user_text or "").strip():
+        content.append({"type": "text", "text": req.user_text})
+    content.extend(parts)
+    return [{"role": "user", "content": content}]
 
 
 def build_all_blocks(req: PromptRequest) -> list[tuple[Block, list[dict]]]:
@@ -436,6 +460,11 @@ def place_images(messages: list[dict], req: PromptRequest) -> list[dict]:
     content = build_user_content(req.user_images, text=req.user_text)
     if not content:
         return messages
+    extra = _extra_text_parts(req)
+    if extra:
+        # 额外块插在正文之后、图片之前（对齐 AstrBot assemble_context 的顺序）
+        index = 1 if content and content[0].get("type") == "text" else 0
+        content[index:index] = extra
     for msg in reversed(messages):
         if msg.get("role") == "user":
             msg["content"] = content
