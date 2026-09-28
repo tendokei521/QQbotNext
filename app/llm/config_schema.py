@@ -172,6 +172,15 @@ SCHEMA = {
         "type": "number", "label": "消息最大长度", "description": "单条消息的最大字符数",
         "default": 200, "min": 20, "max": 500, "group": "group_session",
     },
+    "prompt_dump_enable": {
+        "type": "boolean", "label": "请求落盘（迁移对账）",
+        "description": "开启后把每轮最终请求 messages 原样写到 data/llm/<账号>/prompt_dump.jsonl，供与第三方框架的组装结果逐条 diff；默认关闭（正常运行时零 IO）",
+        "default": False, "group": "group_session",
+    },
+    "prompt_dump_max_entries": {
+        "type": "number", "label": "请求落盘保留条数", "description": "滚动文件最多保留多少轮请求（从最旧开始丢）",
+        "default": 20, "min": 1, "max": 500, "group": "group_session",
+    },
     "include_pre_history": {
         "type": "boolean", "label": "包含群聊环境背景", "description": "开启时拉取群聊最近消息，并附上群名/群号/当前时间作为 LLM 背景信息（不计入会话历史；未开启则完全不拉取在线历史）",
         "default": False, "group": "group_session",

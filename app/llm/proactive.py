@@ -308,7 +308,7 @@ class ProactiveManager:
             session_id=session_id,
             user_text=user_prompt,
         )
-        messages = await apply_post_assemble(self.module, ctx, build_for(self.module, req))
+        messages = await apply_post_assemble(self.module, ctx, build_for(self.module, req), req=req)
         if messages is None:
             # 钩子要求本轮不发言：私聊仍要排下一次，否则计时器再也不会被武装
             if not is_group:

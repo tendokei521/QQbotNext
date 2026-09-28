@@ -519,8 +519,14 @@ def build_for(runtime: Any, req: PromptRequest) -> list[dict]:
     return assembler.build(req)
 
 
-async def apply_post_assemble(runtime: Any, ctx: Any, messages: list[dict]) -> list[dict] | None:
-    """把本轮 messages 挂到 ``ctx`` 并执行 ``post_assemble`` 钩子。
+async def apply_post_assemble(
+    runtime: Any,
+    ctx: Any,
+    messages: list[dict],
+    *,
+    req: PromptRequest | None = None,
+) -> list[dict] | None:
+    """把本轮 messages 挂到 ``ctx``、执行 ``post_assemble`` 钩子，并按需落盘。
 
     四条组装路径（chat 非流式 / chat 流式 / 主动消息 / 定时任务）统一在此收口，
     因此插件不必按路径分别打补丁。
@@ -528,7 +534,8 @@ async def apply_post_assemble(runtime: Any, ctx: Any, messages: list[dict]) -> l
     - 钩子可原地改写 ``ctx.messages``（增删 / 重排 / 替换），也可整体重新赋值；
     - 返回 ``None`` 表示**本轮不请求 LLM**：钩子把 messages 置空，或标记
       ``ctx.job.skip`` / ``ctx.job.superseded``（与流水线其它阶段的中止语义一致）；
-    - ``ctx`` 为 None（无流水线的直调场景）时构造合成上下文，钩子仍能拿到 messages。
+    - ``ctx`` 为 None（无流水线的直调场景）时构造合成上下文，钩子仍能拿到 messages；
+    - ``req`` 给出时用于落盘归类（``prompt_dump_enable`` 开启才写，见 ``prompt_dump``）。
     """
     from app.llm.context import LlmContext
     from app.llm.hooks import run_stage
@@ -542,4 +549,15 @@ async def apply_post_assemble(runtime: Any, ctx: Any, messages: list[dict]) -> l
         final = messages
     if not proceed or not final:
         return None
-    return list(final)
+    result = list(final)
+
+    # 请求落盘（默认关闭）：把「最终发出去的东西」留成可比对的证据
+    from app.llm.prompt_dump import record as _record_dump
+
+    _record_dump(
+        runtime,
+        result,
+        session_id=getattr(req, "session_id", "") or getattr(ctx, "session_id", ""),
+        kind=getattr(req, "kind", ""),
+    )
+    return result

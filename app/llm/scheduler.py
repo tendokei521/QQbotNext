@@ -618,7 +618,7 @@ class TaskScheduler:
             session_id=entry.session_id,
             user_text=user_prompt,
         )
-        return await apply_post_assemble(self.module, ctx, build_for(self.module, req))
+        return await apply_post_assemble(self.module, ctx, build_for(self.module, req), req=req)
 
     async def _generate_reply(self, entry: TaskEntry):
         """构建并执行一次带系统提示词的 LLM 请求（会话已过期则从归档恢复上下文）。"""

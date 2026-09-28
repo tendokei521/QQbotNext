@@ -201,6 +201,10 @@ DEFAULT_LLM_CONFIG: dict = {
     "group_log_window_minutes": 60,    # 组装窗口：最近多少分钟
     "group_log_window_limit": 50,      # 组装窗口：最多多少条
     "group_log_max_chars": 4000,       # 环境块字符预算（超预算从最旧开始丢；0=不限制）
+    # 请求 messages 落盘（迁移对账用）：开启后写到 data/llm/<bot_id>/prompt_dump.jsonl，
+    # 滚动保留最近 prompt_dump_max_entries 条，供与第三方框架的组装结果逐条 diff
+    "prompt_dump_enable": False,       # 默认关闭：正常运行时零 IO
+    "prompt_dump_max_entries": 20,     # 滚动保留条数
 }
 
 # 框架级 Agent 配置/权限存储的 module_name
