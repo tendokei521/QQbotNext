@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 import uuid
 from typing import Any
 
@@ -18,6 +17,7 @@ from app.domain.message import Message
 from app.llm.actions import build_outbound_builder
 from app.llm.commands import is_command
 from app.llm.context import LlmContext, LlmJob
+from app.llm.hooks import run_stage
 from app.llm.locks import SessionLockManager
 from app.llm.pool import LlmPool
 
@@ -362,33 +362,12 @@ class LlmPipeline:
         await asyncio.to_thread(session_mgr.history.save_session, session)
 
     async def _run_stage(self, stage: str, ctx: LlmContext, msg: Any = None) -> bool:
-        """执行某个 LLM 阶段的所有钩子。返回 False 表示应中止。"""
-        hooks = self.runtime.llm_hooks.get(stage, ctx.event.event_type)
-        for hook in hooks:
-            hook_start = time.monotonic()
-            try:
-                if msg is None:
-                    await hook.handler(ctx)
-                else:
-                    await hook.handler(ctx, msg)
-            except asyncio.CancelledError:
-                telemetry = getattr(self.runtime, "telemetry", None)
-                if telemetry is not None:
-                    telemetry.record_hook(stage, (time.monotonic() - hook_start) * 1000)
-                raise
-            except Exception as e:
-                from app.core.logger import logger
+        """执行某个 LLM 阶段的所有钩子。返回 False 表示应中止。
 
-                logger.add_info(f"#{self.runtime.bot_id}").exception(
-                    f"[LLM Hook] {stage} 处理异常: {e}"
-                )
-            finally:
-                telemetry = getattr(self.runtime, "telemetry", None)
-                if telemetry is not None:
-                    telemetry.record_hook(stage, (time.monotonic() - hook_start) * 1000)
-            if ctx.job.skip or ctx.job.superseded:
-                return False
-        return True
+        实现抽到 ``app.llm.hooks.run_stage``：主动性/定时路径没有 LlmPipeline，
+        需要同一套钩子语义（含 post_assemble）。
+        """
+        return await run_stage(self.runtime, stage, ctx, msg)
 
     async def _send(self, ctx: LlmContext, msg: Message) -> None:
         if ctx.event.message_type == "private":

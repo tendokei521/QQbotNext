@@ -42,6 +42,10 @@ DEFAULT_SCHEDULE_PROMPT = (
     "任务信息：{{job_json}}"
 )
 
+#: ``_generate_reply`` 的「本轮不请求」哨兵：post_assemble 钩子要求跳过时返回它，
+#: 与"LLM 调用失败（resp=None → 回落固定内容）"区分开，避免把中止误当失败。
+_ABORTED = object()
+
 
 class TaskEntry:
     """单个定时任务。"""
@@ -377,6 +381,14 @@ class TaskScheduler:
             messages = await self._build_messages(
                 entry, instruction=instruction, skill_blocks=skill_blocks, focus_text=focus_text
             )
+            if messages is None:
+                # post_assemble 要求本轮不请求：会话档案已切换，先清掉再返回
+                if hasattr(config, "clear_session"):
+                    config.clear_session()
+                logger.add_info(f"#{self.bot_id}").info(
+                    f"[定时任务] post_assemble 要求跳过 {entry.id} -> {entry.session_id}"
+                )
+                return
 
             from app.llm.chat import _max_tool_rounds
             from app.llm.providers.modalities import normalize_modalities, supports_tool_use
@@ -434,6 +446,12 @@ class TaskScheduler:
             logger.add_info(f"#{self.bot_id}").error(f"[定时任务] LLM 生成异常，改用固定内容: {e}")
             resp = None
 
+        if resp is _ABORTED:
+            logger.add_info(f"#{self.bot_id}").info(
+                f"[定时任务] post_assemble 要求跳过 {entry.id} -> {entry.session_id}"
+            )
+            return
+
         if resp is not None and resp.ok:
             text = resp.text
         else:
@@ -487,15 +505,19 @@ class TaskScheduler:
         instruction: str | None = None,
         skill_blocks: list[str] | None = None,
         focus_text: str = "",
-    ) -> list[dict]:
+    ) -> list[dict] | None:
         """构建定时任务触发的 LLM 消息。
 
         与普通回复共用 ``assembly`` 装配：块顺序（人设/主动性/格式说明/技能/记忆/背景/
         历史/本轮）由块表决定，这里只负责取原料。历史与记忆的取法与 chat 一致
         （含超 ``history_rounds`` 的上下文压缩）。
+
+        返回 ``None`` 表示 ``post_assemble`` 钩子要求本轮不请求 LLM（与"构建失败"区分：
+        构建失败会抛异常，由 ``_fire`` 的兜底逻辑回落固定内容）。
         """
-        from app.llm.assembly import PromptRequest, build_messages as build_from_request
+        from app.llm.assembly import PromptRequest, apply_post_assemble, build_for
         from app.llm.assembly_inputs import collect_history_materials
+        from app.llm.context import LlmContext
 
         session = self.session_mgr.get_session(entry.session_id)
         config = self.module.config
@@ -588,7 +610,15 @@ class TaskScheduler:
             modalities=None,
             schedule_enable=False,
         )
-        return build_from_request(req)
+        # post_assemble：插件可在此读写本轮请求（定时任务路径没有事件对象，ctx.event 为 None）
+        ctx = LlmContext(
+            event=None,
+            runtime=self.module,
+            bot=self.bot,
+            session_id=entry.session_id,
+            user_text=user_prompt,
+        )
+        return await apply_post_assemble(self.module, ctx, build_for(self.module, req))
 
     async def _generate_reply(self, entry: TaskEntry):
         """构建并执行一次带系统提示词的 LLM 请求（会话已过期则从归档恢复上下文）。"""
@@ -613,6 +643,9 @@ class TaskScheduler:
         messages = await self._build_messages(
             entry, instruction=instruction, skill_blocks=skill_blocks, focus_text=focus_text
         )
+        if messages is None:
+            # post_assemble 要求本轮不请求：与"LLM 失败回落固定内容"区分开
+            return _ABORTED
 
         from app.llm.chat import _max_tool_rounds
         from app.llm.providers.modalities import normalize_modalities, supports_tool_use

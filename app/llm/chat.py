@@ -900,8 +900,12 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
     session_mgr = meta["session_mgr"]
     is_private = meta["is_private"]
 
-    messages = assembly.build_messages(req)
+    messages = assembly.build_for(runtime, req)
     _append_round_images(messages, tool_ctx, modalities)
+    # post_assemble：插件可在此读写本轮请求（1:1 复刻第三方组装格式的接入点）
+    messages = await assembly.apply_post_assemble(runtime, ctx, messages)
+    if messages is None:
+        return None
 
     _log_debug_prompt(runtime, session_id, messages, debug_enabled=bool(ctx and ctx.state.get("debug_prompt", False)))
 
@@ -1016,8 +1020,12 @@ async def stream_response(runtime, event, ctx=None):
         or 200
     )
 
-    messages = assembly.build_messages(req)
+    messages = assembly.build_for(runtime, req)
     _append_round_images(messages, tool_ctx, modalities)
+    # post_assemble：插件可在此读写本轮请求（1:1 复刻第三方组装格式的接入点）
+    messages = await assembly.apply_post_assemble(runtime, ctx, messages)
+    if messages is None:
+        return
 
     _log_debug_prompt(runtime, session_id, messages, debug_enabled=bool(ctx and ctx.state.get("debug_prompt", False)))
 

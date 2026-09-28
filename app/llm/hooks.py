@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -128,3 +129,42 @@ class ToolCallHookRegistry:
                 self.log.add_info(f"#{ctx.bot_id}").exception(
                     f"[ToolCallHook] {getattr(hook.module, 'module_name', '?')} 处理异常: {e}"
                 )
+
+
+async def run_stage(runtime: Any, stage: str, ctx: Any, msg: Any = None) -> bool:
+    """执行某阶段的所有 LLM 钩子；返回 ``False`` 表示本轮应中止发送。
+
+    从 ``LlmPipeline._run_stage`` 抽出，供四条组装路径共用（chat 非流式 / chat 流式 /
+    主动消息 / 定时任务）——此前只有前两条走流水线，后两条完全不触发钩子。
+
+    对没有事件对象的合成上下文（主动性/定时路径）容错：``ctx.event`` 为 None 时按
+    ``"*"`` 匹配钩子，``ctx.job`` 为 None 时跳过 skip/superseded 判定。
+    """
+    event = getattr(ctx, "event", None)
+    event_type = getattr(event, "event_type", "*") or "*"
+    registry = getattr(runtime, "llm_hooks", None)
+    hooks = registry.get(stage, event_type) if registry is not None else []
+    telemetry = getattr(runtime, "telemetry", None)
+
+    for hook in hooks:
+        hook_start = time.monotonic()
+        try:
+            if msg is None:
+                await hook.handler(ctx)
+            else:
+                await hook.handler(ctx, msg)
+        except asyncio.CancelledError:
+            if telemetry is not None:
+                telemetry.record_hook(stage, (time.monotonic() - hook_start) * 1000)
+            raise
+        except Exception as e:
+            logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").exception(
+                f"[LLM Hook] {stage} 处理异常: {e}"
+            )
+        finally:
+            if telemetry is not None:
+                telemetry.record_hook(stage, (time.monotonic() - hook_start) * 1000)
+        job = getattr(ctx, "job", None)
+        if job is not None and (job.skip or job.superseded):
+            return False
+    return True

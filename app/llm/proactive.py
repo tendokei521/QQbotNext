@@ -182,8 +182,9 @@ class ProactiveManager:
             return
 
         # 上下文：历史渲染 + 记忆召回（口径与 chat 主路径一致，含超 history_rounds 的压缩）
-        from app.llm.assembly import PromptRequest, build_messages as build_from_request
+        from app.llm.assembly import PromptRequest, apply_post_assemble, build_for
         from app.llm.assembly_inputs import collect_history_materials
+        from app.llm.context import LlmContext
 
         session = self.session_mgr.get_session(session_id)
         system_prompt = self.module.config.get("system_prompt", "你是一个友好的助手。")
@@ -297,7 +298,20 @@ class ProactiveManager:
             modalities=modalities,
             schedule_enable=False,
         )
-        messages = build_from_request(req)
+        # post_assemble：插件可在此读写本轮请求（主动性路径没有事件对象，ctx.event 为 None）
+        ctx = LlmContext(
+            event=None,
+            runtime=self.module,
+            bot=self.bot,
+            session_id=session_id,
+            user_text=user_prompt,
+        )
+        messages = await apply_post_assemble(self.module, ctx, build_for(self.module, req))
+        if messages is None:
+            # 钩子要求本轮不发言：私聊仍要排下一次，否则计时器再也不会被武装
+            if not is_group:
+                self._schedule_next_private(session_id)
+            return
 
         # 主动消息也支持流式：与普通消息使用同一套流式发送配置
         if config.get("stream_output", False) and config.get("stream_proactive_enabled", False):

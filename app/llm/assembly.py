@@ -413,3 +413,52 @@ def build_messages(req: PromptRequest) -> list[dict]:
 def describe(req: PromptRequest) -> list[dict]:
     """模块级快捷方式（等价于 ``PromptAssembler().describe(req)``）。"""
     return PromptAssembler().describe(req)
+
+
+# ==================== 可替换装配 + post_assemble 阶段 ====================
+
+
+def build_for(runtime: Any, req: PromptRequest) -> list[dict]:
+    """按「运行时装配器」装配 messages。
+
+    装配器取自 ``runtime.assembler``（``AgentRuntime`` 默认 ``PromptAssembler()``）。
+    插件可用 ``supersedes = ("assembly",)`` 声明接管，或直接赋值 ``runtime.assembler``
+    换成一个自带 ``build(req) -> list[dict]`` 的对象 —— 这是 1:1 复刻第三方组装
+    格式（例如 AstrBot 的 ``build_main_agent``）的接入点。
+
+    装配器缺失或不合格时回退默认装配器并留痕，避免一个坏装配器让整轮请求炸掉。
+    """
+    assembler = getattr(runtime, "assembler", None)
+    if not callable(getattr(assembler, "build", None)):
+        if assembler is not None:
+            logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").warning(
+                f"[Assembly] runtime.assembler 不可用（{type(assembler).__name__}），已回退默认装配器"
+            )
+        assembler = PromptAssembler()
+    return assembler.build(req)
+
+
+async def apply_post_assemble(runtime: Any, ctx: Any, messages: list[dict]) -> list[dict] | None:
+    """把本轮 messages 挂到 ``ctx`` 并执行 ``post_assemble`` 钩子。
+
+    四条组装路径（chat 非流式 / chat 流式 / 主动消息 / 定时任务）统一在此收口，
+    因此插件不必按路径分别打补丁。
+
+    - 钩子可原地改写 ``ctx.messages``（增删 / 重排 / 替换），也可整体重新赋值；
+    - 返回 ``None`` 表示**本轮不请求 LLM**：钩子把 messages 置空，或标记
+      ``ctx.job.skip`` / ``ctx.job.superseded``（与流水线其它阶段的中止语义一致）；
+    - ``ctx`` 为 None（无流水线的直调场景）时构造合成上下文，钩子仍能拿到 messages。
+    """
+    from app.llm.context import LlmContext
+    from app.llm.hooks import run_stage
+
+    if ctx is None:
+        ctx = LlmContext(event=None, runtime=runtime, bot=None, session_id="", user_text="")
+    ctx.messages = list(messages or [])
+    proceed = await run_stage(runtime, "post_assemble", ctx)
+    final = getattr(ctx, "messages", None)
+    if final is None:
+        final = messages
+    if not proceed or not final:
+        return None
+    return list(final)

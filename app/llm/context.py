@@ -18,13 +18,16 @@ from app.domain.events import BaseEvent
 class LlmContext:
     """一次 LLM 流水线处理的上下文。"""
 
-    event: BaseEvent
+    #: 主动性/定时路径没有事件对象，此处为 None（钩子里访问 ctx.event 需自行兜底）
+    event: BaseEvent | None
     runtime: Any
     bot: IBot
     session_id: str
     user_text: str = ""
     response_text: str = ""
     response_messages: list = field(default_factory=list)
+    #: 本轮组装后的请求 messages（``post_assemble`` 阶段可读、可整体改写；置空 = 跳过本轮请求）
+    messages: list = field(default_factory=list)
     state: dict = field(default_factory=dict)
     job: "LlmJob | None" = None
 
