@@ -162,3 +162,55 @@ async def test_restore_skips_disabled(tmp_path):
         assert "private_99999" not in pm._group_timers
     finally:
         pm.stop()
+
+
+# ==================== 主动消息真正发起（回归：取值阶段曾直接崩溃） ====================
+
+
+class _Boom(Exception):
+    """哨兵：证明执行已经走到 provider 调用，而不是在取值阶段就炸了。"""
+
+
+async def test_check_and_chat_reaches_provider_call(tmp_path, monkeypatch):
+    """回归：_check_and_chat 里 ``_max_tool_rounds`` 曾排在其函数内 import 之前被调用。
+
+    Python 把函数内 import 视为**局部绑定**，因此那个调用会抛 UnboundLocalError，
+    表现为「主动消息永远发不出去」——#llm proactive 与所有到点的主动发言一起失效。
+    本用例在修复前必红。
+    """
+    pm, _ = make_pm(tmp_path, {
+        "proactive_friend_enable": True,
+        "proactive_friend_sessions": ["10001"],
+        # 关掉免打扰窗口：否则用例在凌晨 1-7 点会提前返回，覆盖不到目标分支
+        "proactive_quiet_hours_start": 0,
+        "proactive_quiet_hours_end": 0,
+    })
+    # 生产里 module.config 是 AgentConfig（真有 set_session）；测试替身用 ModuleConfig，
+    # 其 __getattr__ 会把缺失属性返回 None，导致 hasattr(config, "set_session") 恒为 True
+    # 却在调用时 TypeError —— 这里补上真实方法，让用例能走到待验证的那一行。
+    pm.module.config.set_session = lambda session_id: None
+    pm.module.config.clear_session = lambda: None
+
+    async def fake_tools(*args, **kwargs):
+        return [], [], None, None
+
+    async def fake_materials(**kwargs):
+        return {"history": [], "memory_text": ""}
+
+    async def fake_focus(*args, **kwargs):
+        return ""
+
+    def fake_group_log(*args, **kwargs):
+        return ""
+
+    async def fake_chat(*args, **kwargs):
+        raise _Boom("已到达 provider 调用")
+
+    monkeypatch.setattr("app.llm.chat.build_initiative_tools", fake_tools)
+    monkeypatch.setattr("app.llm.assembly_inputs.collect_history_materials", fake_materials)
+    monkeypatch.setattr("app.llm.referent.focus_only_block", fake_focus)
+    monkeypatch.setattr("app.llm.group_log.context.build_context_text", fake_group_log)
+    monkeypatch.setattr("app.llm.proactive.chat_with_fallback", fake_chat)
+
+    with pytest.raises(_Boom):
+        await pm.manual_trigger("private_10001")

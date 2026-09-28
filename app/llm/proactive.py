@@ -220,6 +220,13 @@ class ProactiveManager:
                     current_time=now_str,
                 )
 
+        # 主动消息同样要能"自己取环境"：补齐工具 + 主动性提示块（此前完全不传 tools）
+        # 注意：函数内 import 是局部绑定，必须排在下面调用 _max_tool_rounds 之前；
+        # 否则整段主动消息会在发起前抛 UnboundLocalError（#llm proactive 同样失效）。
+        from app.llm.chat import _max_tool_rounds, build_initiative_tools
+        from app.llm.providers.modalities import normalize_modalities, supports_tool_use
+        from app.llm.tool import build_tools, make_executor
+
         # 会话配置档案先切换：工具集与提示块读取的都是会话级配置
         # （与 chat.handle 的顺序一致，否则会话档案里的开关会被默认档案覆盖）
         start_last = self._data.get(session_id, {}).get("last_user_time", 0)
@@ -227,11 +234,6 @@ class ProactiveManager:
         if hasattr(config, "set_session"):
             config.set_session(session_id)
         max_tool_rounds = _max_tool_rounds(config)
-
-        # 主动消息同样要能"自己取环境"：补齐工具 + 主动性提示块（此前完全不传 tools）
-        from app.llm.chat import _max_tool_rounds, build_initiative_tools
-        from app.llm.providers.modalities import normalize_modalities, supports_tool_use
-        from app.llm.tool import build_tools, make_executor
 
         all_specs, skill_blocks, tool_ctx, instruction = await build_initiative_tools(
             self.module,
