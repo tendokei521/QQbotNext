@@ -317,6 +317,9 @@ async def delete_message(self, ctx, args):
 | `gemini` | Google Gemini Generative Language API |
 
 第三方插件还可以用 `register_provider(name, cls, aliases=...)` 运行期注册新适配器。
+> 它只替换**HTTP 适配器**（框架既定调用约定之内）；要连调用约定一起换
+> （回退链/重试/工具循环放在哪一层），用 `supersedes = ("provider_invoker",)`，
+> 见下文「[接管消息组装](#接管消息组装迁移--复刻第三方组装格式)」。
 
 ### LLM 可观测性
 
@@ -339,6 +342,39 @@ POST /agent/telemetry/reset?bot_id=<qq>
   自动去掉重发一次（该次拿不到 token 数，但不影响回复）；
 - 上游一个字都没报 usage 时**不打印**这一行（宁缺毋编）；
 - 可用 `extra_body.stream_options` 覆盖默认行为。
+
+### 接管消息组装（迁移 / 复刻第三方组装格式）
+
+从别的框架（例如 AstrBot）迁移过来时，往往要 1:1 复刻它「发给模型的东西」。
+框架为此开了三个口子，**都在单账号粒度上生效**：
+
+| 口子 | 用途 | 插件侧写法 |
+|---|---|---|
+| `@llm_hook("post_assemble")` | 事后微调本轮请求 | `ctx.messages` 可增删/重排/整体替换；置空 = 本轮不请求 LLM |
+| `supersedes = ("assembly",)` | **整体替换组装** | 实现 `build(req) -> list[dict]`（`req` 含历史/背景/记忆/技能/图片等全部归一化输入） |
+| `supersedes = ("provider_invoker",)` | **整体替换 provider 调用约定** | 实现 `chat()` / `stream()`（第三方把工具循环放在 runner 层时用） |
+
+四条组装路径（普通回复非流式/流式、主动消息、定时任务）统一收口，插件不必按路径分别打补丁。
+`post_assemble` 与两个「装槽」能力都由 `FeatureRegistry` 管租约：禁用/卸载自动还原，
+多个接管者先到先得 + 交棒。详见 [`docs/MODULE_DEV.md` §4.7](docs/MODULE_DEV.md)。
+
+配套的迁移对账开关（Agent 配置页「会话 / 压缩」组，**默认都不改变现有行为**）：
+
+| 配置键 | 默认 | 用途 |
+|---|---|---|
+| `system_prompt_style` | `blocks` | `single` = 把所有 system 块折成一整条（对齐第三方「一整条 system prompt」形态） |
+| `prompt_dump_enable` | 关 | 每轮**最终**请求 messages 落盘 `data/llm/<账号>/prompt_dump.jsonl`，供逐条 diff |
+| `context_token_budget` | `0` | >0 启用 token 预算裁剪：从最旧历史丢起，system 与本轮提问永不丢 |
+
+落盘内容可直接查：
+
+```http
+GET    /agent/prompt-dumps?bot_id=<qq>&session_id=group_xxx&limit=10
+DELETE /agent/prompt-dumps?bot_id=<qq>
+```
+
+历史侧配套：`SessionManager.history_snapshot()` 给**未投影的原始条目**（自带渲染器组装用），
+`import_history()` 把外部历史批量搬进来让框架既有组装器也能读到。
 
 ### Agent 配置页面
 

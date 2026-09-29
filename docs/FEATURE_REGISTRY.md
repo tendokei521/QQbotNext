@@ -36,6 +36,9 @@
 | `provides` | `BaseModule` 类属性：本插件提供的能力 ID（信息性） |
 | `supersedes` | `BaseModule` 类属性：本插件启用时自动接管的能力 ID |
 | 租约（Lease） | 一个插件对某能力在某 Bot 实例上的接管记录 |
+| `suppress_with_owner()` | （可选覆盖）带租约占有者的接管入口：需要知道「谁在接管」的能力用它装上接管者对象，默认转调 `suppress()` |
+| `on_owner_changed()` | （可选覆盖）交棒钩子：租约集合变化后把生效者切给当前持有者，默认不处理 |
+| 装槽型能力 | `assembly` / `provider_invoker`：接管 = 把运行时属性指向插件对象，交棒 = 指回仍在场者，释放 = 还原 |
 
 ---
 
@@ -53,6 +56,27 @@ class Module(BaseModule):
     provides = ("proactive",)      # 我提供主动消息能力
     supersedes = ("proactive",)    # 我启用时接管框架主动消息
 ```
+
+「装槽型」能力（`assembly` / `provider_invoker`）除了 `supersedes` 还要实现对应方法——
+接管时框架会把该账号运行时的对应属性指向**你的模块对象**：
+
+```python
+class Module(BaseModule):
+    supersedes = ("assembly", "provider_invoker")
+
+    def build(self, req):                      # 接管 assembly：返回本轮 messages
+        return my_assemble(req)
+
+    async def chat(self, *, runtime, chain, messages, params):   # 接管 provider_invoker
+        return await my_runner.chat(messages, params)
+
+    async def stream(self, *, runtime, chain, messages, params):
+        async for event in my_runner.stream(messages, params):
+            yield event
+```
+
+缺方法时**忽略接管并留痕**，不会把不合格对象装进运行时（否则每轮请求都会炸）。
+详见 [`MODULE_DEV.md` §4.7](MODULE_DEV.md#47-接管组装与调用策略迁移复刻第三方组装格式)。
 
 只需要这两行，框架会自动：
 
@@ -104,6 +128,8 @@ print(get_features(bot_id=self.bot_id))
 | `knowledge` | 关闭 `knowledge_enable` | 还原配置 |
 | `onebot_tools` | 关闭 `onebot_tools_enable` | 还原配置 |
 | `agent` | 关闭 `AgentRuntime.config.enabled`，停止主动消息/定时任务计时器 | 恢复启用状态，重新武装计时器 |
+| `assembly` | `runtime.assembler = 接管者`（需实现 `build(req)`） | 还原接管前的装配器（交棒 / 框架默认） |
+| `provider_invoker` | `runtime.invoker = 接管者`（需实现 `chat()` + `stream()`） | 还原接管前的调用策略（交棒 / 框架默认） |
 
 这些控制器由框架在启动时注册，插件无需手动注册。
 
@@ -127,6 +153,17 @@ print(get_features(bot_id=self.bot_id))
 - 因此两个主动回复插件不会互相覆盖；
 - 后启用者退出后，仍会回到前启用者或框架原始状态。
 
+「装槽型」能力（`assembly` / `provider_invoker`）额外有**交棒**语义：
+
+```text
+插件 A 接管 assembly  → runtime.assembler = A
+插件 B 接管 assembly  → 仍是 A（先到先得，B 只加租约）
+插件 A 卸载           → runtime.assembler = B（交棒给仍在场者）
+插件 B 卸载           → runtime.assembler = 框架默认装配器
+```
+
+这一条很关键：否则 A 被卸载/热重载后，运行时还指着 A 的旧实例在跑。
+
 ---
 
 ## 7. 使用建议
@@ -135,7 +172,12 @@ print(get_features(bot_id=self.bot_id))
 2. 不要直接硬编码别的模块名/内部配置 key；
 3. 如果只是“临时暂停”，请用 `features.suppress()` / `features.release()`；
 4. 插件作者不应直接调用 `FeatureRegistry.register()`，框架能力由框架注册；
-5. WebUI 模块卡片会显示“接管: xxx”，用于识别插件声明的能力冲突关系。
+5. WebUI 模块卡片会显示“接管: xxx”，用于识别插件声明的能力冲突关系；
+6. 自定义控制器时：只在需要「谁在接管」时才覆盖 `suppress_with_owner()`，
+   只在接管是「装上某个对象」时才覆盖 `on_owner_changed()`——两者默认实现
+   已保证既有控制器（含第三方）行为不变；
+7. 装槽型能力的接管者必须实现约定方法（`assembly` → `build(req)`；
+   `provider_invoker` → `chat()` + `stream()`），否则接管会被忽略。
 
 ---
 

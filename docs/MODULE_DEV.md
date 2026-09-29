@@ -136,13 +136,21 @@ self.ctx.services.features.status(self.bot_id)
 | `knowledge` | 知识库总开关 |
 | `onebot_tools` | OneBot 工具总开关 |
 | `agent` | 框架级 Agent 整体启停 |
+| `assembly` | 消息组装器：本模块实现 `build(req) -> list[dict]` 即可整体替换本轮 messages 的组装 |
+| `provider_invoker` | provider 调用策略：本模块实现 `chat()` / `stream()` 即可替换调用约定（回退链/重试/参数透传） |
+
+> 后两个是「装槽型」能力：接管时框架把该账号运行时的 `assembler` / `invoker`
+> 指向你的模块对象，交棒时指回仍在场的接管者，卸载/禁用时自动还原。
+> 缺对应方法时忽略接管并留痕（不会把一个不合格的对象装进去，导致每轮请求都炸）。
 
 ### 2.6.4 多租约行为
 
 - 同一能力允许被多个插件同时接管；
 - 只要还有任一租约持有者，能力就保持禁用；
 - 最后一个租约释放时，自动恢复“第一个租约接管前”的状态；
-- 因此两个主动回复插件不会互相覆盖，后启用者退出后仍会回到前启用者/框架状态。
+- 因此两个主动回复插件不会互相覆盖，后启用者退出后仍会回到前启用者/框架状态；
+- 「装槽型」能力（`assembly` / `provider_invoker`）是**先到先得**：多个接管者时
+  生效的是第一个，先到者释放后**交棒**给仍在场的下一个，最后一个释放才还原。
 
 ---
 
@@ -238,11 +246,18 @@ class Module(BaseModule):
 
 | 阶段 | 触发时机 | 参数 |
 |---|---|---|
-| `pre_request` | LLM 请求前 | `(self, ctx)` |
+| `pre_request` | LLM 请求前（**组装之前**，`ctx.user_text` 已就绪） | `(self, ctx)` |
+| `post_assemble` | 本轮 messages 组装完成、请求发出前 | `(self, ctx)` |
 | `post_response` | 非流式完整回复生成后 | `(self, ctx)` |
 | `pre_send` | 每条消息发送前 | `(self, ctx, msg)` |
 | `post_send` | 每条消息发送后 | `(self, ctx, msg)` |
 | `post_stream` | 流式回复整体结束后 | `(self, ctx)` |
+
+`post_assemble` 是**唯一能读到最终请求 messages** 的阶段：`ctx.messages` 可直接增删、
+重排、整体赋值；把它置空（或标记 `ctx.job.skip`）表示本轮不请求 LLM。
+四条组装路径统一在此收口——普通回复（非流式/流式）、主动消息、定时任务，
+所以不必按路径分别打补丁。想**整体替换**组装（而不是事后微调）见
+[§4.7](#47-接管组装与调用策略迁移复刻第三方组装格式)。
 
 ---
 
@@ -375,6 +390,66 @@ class Module(BaseModule):
 
 ---
 
+## 4.7 接管组装与调用策略（迁移/复刻第三方组装格式）
+
+把另一个框架（例如 AstrBot）的组装与请求模式 1:1 搬过来时，事后钩子不够用——
+需要**整体替换**两处：消息怎么组装、provider 怎么调用。框架为此开了两个「槽」，
+都在**单账号粒度**上生效（模块实例本就按 `(模块, bot_id)` 一份）：
+
+```python
+from app.modules import BaseModule, llm_hook
+
+class Module(BaseModule):
+    name = "AstrBot 组装复刻"
+    sign = "AstrBotAssembly"
+    # 声明式接管：启用时装上，禁用/卸载自动还原（多个接管者时先到先得 + 交棒）
+    supersedes = ("assembly", "provider_invoker")
+
+    # 1) 替换组装：入参是一次请求的全部归一化输入，返回 OpenAI 风格 messages
+    def build(self, req):
+        # req.session_id / req.user_text / req.history / req.pre_history_text
+        # req.referent_text / req.group_log_text / req.skill_blocks / req.memory_text
+        # req.extra_user_content_parts / req.available_tools / req.modalities / req.user_images
+        return my_assemble(req)
+
+    # 2) 替换 provider 调用策略（第三方把工具循环放在 runner 层时用这个）
+    async def chat(self, *, runtime, chain, messages, params):
+        return await my_runner.chat(messages, params)
+
+    async def stream(self, *, runtime, chain, messages, params):
+        async for event in my_runner.stream(messages, params):
+            yield event
+```
+
+「槽」的取值口径：
+
+| 槽 | 默认实现 | 默认行为 | 接管者需要实现 |
+|---|---|---|---|
+| `runtime.assembler` | `PromptAssembler`（块表） | 人设/协议/技能/记忆/背景/群聊记录/历史/本轮 | `build(req) -> list[dict]` |
+| `runtime.invoker` | `ProviderInvoker` | 多 provider 回退链 + 空回复重试 + 参数白名单透传 | `chat(*, runtime, chain, messages, params)` / `stream(...)` |
+
+配套的三个开关（Agent 配置页「会话 / 压缩」组，**都默认关闭/保持原行为**）：
+
+| 配置键 | 默认 | 用途 |
+|---|---|---|
+| `system_prompt_style` | `blocks` | `single` = 把所有 system 块折成一整条（对齐第三方「一整条 system prompt」形态） |
+| `prompt_dump_enable` | `False` | 每轮最终 messages 落盘 `data/llm/<bot_id>/prompt_dump.jsonl`，供逐条 diff |
+| `prompt_dump_max_entries` | `20` | 落盘滚动保留条数 |
+| `context_token_budget` | `0` | >0 启用 token 预算裁剪（从最旧历史丢，system 与本轮提问必留） |
+| `context_token_chars_per_token` | `2.0` | 估算参数（只用于防爆，不用于计费） |
+
+**验证对账的做法**：打开 `prompt_dump_enable` → 跑一轮真实对话 → 取
+`data/llm/<bot_id>/prompt_dump.jsonl` 最后一条（或
+`GET /api/agent/prompt-dumps?bot_id=<qq>&session_id=group_xxx`）与第三方框架同轮的
+`messages` 逐条 diff。落盘的是 **`post_assemble` 之后、token 裁剪之后**的最终形态，
+也就是真正发出去的东西。
+
+历史侧配套：`SessionManager.history_snapshot()` 给未投影的原始条目（自带渲染器组装用），
+`import_history()` 把外部历史批量搬进来让框架既有组装器也能读到，二者详见
+`app/llm/session.py` 的模块 docstring（含存储契约字段表）。
+
+---
+
 ## 4.3 模块给 LLM 提供工具（`@tool`）
 
 模块可以把方法暴露给 LLM 作为 function calling 工具：
@@ -461,15 +536,16 @@ from app.llm import LlmContext
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `ctx.event` | `BaseEvent` | 原始消息事件 |
+| `ctx.event` | `BaseEvent \| None` | 原始消息事件；**主动性/定时路径没有事件对象，此处为 `None`** |
 | `ctx.runtime` | `AgentRuntime` | 当前 Bot 的 Agent 运行时 |
 | `ctx.bot` | `IBot` | 当前 Bot 连接 |
 | `ctx.session_id` | `str` | 会话 ID，如 `group_123` / `private_456` |
 | `ctx.user_text` | `str` | 本次用户输入文本 |
+| `ctx.messages` | `list[dict]` | **本轮组装后的请求 messages**（仅 `post_assemble` 阶段可读写） |
 | `ctx.response_text` | `str` | LLM 完整回复文本 |
 | `ctx.response_messages` | `list[Message]` | 待发送的消息列表 |
 | `ctx.state` | `dict` | 钩子间共享的临时状态 |
-| `ctx.job` | `LlmJob` | 当前 LLM 任务对象 |
+| `ctx.job` | `LlmJob` | 当前 LLM 任务对象；主动性路径为 `None` |
 
 `LlmJob` 常用字段：
 
