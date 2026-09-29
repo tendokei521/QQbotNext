@@ -1,8 +1,8 @@
 # 插件接管 LLM 组装（AstrBot 迁移）— 改造完成记录
 
-> **状态：全部完成。** 8/8 项改造落地，11 个提交（`10e604a` … `23ca9fc`），
-> 全量测试 **1045 passed**（起点 957），改动过的 35 个代码文件**零新增 ruff 违规**
-> （合计 32 → 26）。
+> **状态：全部完成。** 8/8 项框架改造 + 1 个参考插件落地，13 个提交
+> （`10e604a` … `5687c16`），全量测试 **1071 passed**（起点 957），
+> 改动过的代码文件与新增文件**零 ruff 违规**（存量 32 → 26）。
 
 ## 0. 目标与结论
 
@@ -115,12 +115,29 @@ projected = sm.get_history("group_123", limit=50)    # 投影视图（可直接�
   `app.llm.providers.chat_with_fallback`（`tests/test_strip_parentheses.py` 已同步；
   该用例同时充当「请求确实经 invoker 转发」的反向证明）。
 
-## 6. 后续可选
+## 6. 参考插件：`module/modules/astrbot_alignment/`
 
-- 写一个真实的 AstrBot 组装复刻插件骨架，做端到端验证（未动工）；
-- 若要连**主循环**（trigger 判定、防抖/打断、历史落库、流式切句）也一起复刻，
-  那是「接管 agent」路径：`supersedes = ("agent",)` + `@module_hook`，
-  用 `assembler` / `invoker` 两个槽已能覆盖其中组装与 provider 两段。
+`5687c16` 交付的 AstrBot 组装对齐插件（26 例测试），是这套接口的第一个真实使用者：
+
+- `supersedes = ("assembly",)` 接管单账号的消息组装；`@llm_hook("pre_request")`
+  在组装前预取群名（组装是同步的）；
+- system prompt 段落顺序与 AstrBot 逐条对齐：安全段（最后执行但前插）→ GenUI →
+  persona `\n# Persona Instructions\n\n{...}\n` → skills → router → workspace →
+  local → 工具调用段 → live → 联网引用；
+- 用户消息块顺序：正文（`prompt_prefix`）→ 媒体占位 → `<Quoted Message>` →
+  `<system_reminder>` → 群聊上下文块 → 图片；单文本块降级为纯字符串；
+- 历史默认走 `history_snapshot()` 只投影 `role`/`content`（与 AstrBot 的
+  `Message.model_dump()` 一致），persona 的 `begin_dialogs` 前插；
+- 原文常量单独放 `astrbot_prompts.py`（逐字，含 `Belows` 拼写这类上游特征）；
+- 3 处刻意差异与未复刻项在插件 README 里如实列出。
+
+**后续可选**（本次未做）：
+
+- 连**主循环**一起复刻（trigger 判定、防抖/打断、历史落库、流式切句）→ 那是
+  「接管 agent」路径：`supersedes = ("agent",)` + `@module_hook`；
+- 若要复刻 AstrBot 的 runner 层工具循环（每轮重算 context），需要 `provider_invoker`
+  槽之外再让 provider 层暴露「本轮中间 messages」——目前框架的 provider 内部自己跑
+  工具循环，`runtime.invoker` 只能换单轮调用约定。
 
 ## 7. 顺带发现但**未修**的问题（与本次改造无关）
 

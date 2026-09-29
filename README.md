@@ -376,6 +376,10 @@ DELETE /agent/prompt-dumps?bot_id=<qq>
 历史侧配套：`SessionManager.history_snapshot()` 给**未投影的原始条目**（自带渲染器组装用），
 `import_history()` 把外部历史批量搬进来让框架既有组装器也能读到。
 
+> **参考实现**：[`module/modules/astrbot_alignment/`](module/modules/astrbot_alignment/README.md)
+> —— 在单账号下接管组装，把 AstrBot 的 system prompt 段落顺序与用户消息块顺序 1:1 复刻，
+> 可直接作为迁移对账的起点；改造成别的第三方框架照抄它即可。
+
 ### Agent 配置页面
 
 Agent 配置已从通用表单升级为**专属领域页面**：
