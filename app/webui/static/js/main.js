@@ -1201,6 +1201,12 @@ function handleConfigUpdate(data) {
             // 模块重载/登录装配完成 → 静默同步模块数据（手动刷新已有「正在重新加载」提示）
             refreshAllModulesData(true);
             break;
+        case 'resources_updated':
+            // 资源（角色预设 / Provider 模型 / 配置档案…）增删改 → 只刷新资源选择器的候选
+            if (typeof refreshResourceWidgets === 'function') {
+                refreshResourceWidgets(data.kinds || []);
+            }
+            break;
         case 'single_service_updated':
             if (data.single_service) {
                 singleServiceConfig = data.single_service;

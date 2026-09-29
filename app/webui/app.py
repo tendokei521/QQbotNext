@@ -33,6 +33,16 @@ _BASE_DIR = Path(__file__).resolve().parent
 # 新版 Dashboard（Vue3+Vuetify）构建产物目录：dashboard/dist
 _DASHBOARD_DIST = _BASE_DIR.parent.parent / "dashboard" / "dist"
 
+#: 配置变更 scope → 受影响的资源种类（`resources_updated` 广播用；空元组 = 不影响任何资源）
+_CONFIG_SCOPE_RESOURCES: dict[str, tuple[str, ...]] = {
+    "role_presets": ("role_preset",),
+    "config_profiles": ("config_profile",),
+    "provider_presets": ("provider_preset",),
+    "provider_models": ("provider_model",),
+    "provider_settings": ("provider_model",),
+    "config_routes": (),
+}
+
 
 def _render_dashboard(request: Request, webui_token: str) -> HTMLResponse | None:
     """渲染新版 Dashboard（存在构建产物时使用）。
@@ -307,6 +317,15 @@ def _install_config_listener(container) -> None:
             await manager.broadcast(json.dumps({
                 "type": "role_presets_updated",
                 "presets": payload,
+            }))
+
+        # 资源导向的通用事件：前端资源选择器据此**只刷新对应种类的候选**，
+        # 不必自己把上面这些 scope 映射成资源种类（映射只在这一处维护）
+        kinds = _CONFIG_SCOPE_RESOURCES.get(scope)
+        if kinds:
+            await manager.broadcast(json.dumps({
+                "type": "resources_updated",
+                "kinds": list(kinds),
             }))
 
     config_service.on_change(on_config_change)

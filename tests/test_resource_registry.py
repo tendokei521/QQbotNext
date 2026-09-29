@@ -273,3 +273,58 @@ def test_legacy_widget_script_implements_resource_picker():
     assert "encodeURIComponent(kind)" in js, "必须按种类拉候选"
     assert "资源种类未注册" in js and "（已删除或未找到）" in js, "未注册/悬挂引用要有可读提示"
     assert "initResourceWidget(moduleName, key, el)" in js, "必须在 initConfigWidgets 里注册"
+
+
+# ==================== 资源变更 → WS 广播（前端据此局部刷新下拉） ====================
+
+
+async def test_resources_updated_broadcast_only_for_resource_scopes(container, monkeypatch):
+    """配置变更按 scope 映射成资源种类广播；非资源 scope 不该产生该事件。"""
+    from app.infrastructure.config.config_service import ConfigService
+    from app.webui import app as webui_app
+    from app.webui.ws import manager
+
+    sent: list[str] = []
+
+    async def fake_broadcast(payload):
+        sent.append(payload)
+
+    monkeypatch.setattr(manager, "broadcast", fake_broadcast)
+
+    captured: dict = {}
+    config_service = container.get(ConfigService)
+    monkeypatch.setattr(config_service, "on_change", lambda cb: captured.setdefault("cb", cb))
+    webui_app._install_config_listener(container)
+    on_change = captured["cb"]
+
+    def resource_events():
+        return [p for p in sent if '"resources_updated"' in p]
+
+    await on_change("role_presets", [])
+    assert any("role_preset" in p for p in resource_events()), "角色预设变更要触达资源选择器"
+
+    sent.clear()
+    await on_change("provider_models", [])
+    assert any("provider_model" in p for p in resource_events())
+
+    sent.clear()
+    await on_change("config_routes", {})  # 映射为空元组 → 不影响任何资源
+    assert resource_events() == []
+
+    sent.clear()
+    await on_change("webui", {})  # 非资源 scope
+    assert resource_events() == []
+
+
+def test_both_uis_subscribe_to_resource_events():
+    """静态自检：两套前端都订阅了资源事件，否则只有刷新页面才看得到新候选。"""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    vue = (root / "dashboard" / "src" / "components" / "config" / "FieldControl.vue").read_text(encoding="utf-8")
+    assert "onSocketMessage('resources_updated'" in vue and "onBeforeUnmount" in vue, "新版需订阅并在卸载时退订"
+
+    js = (root / "app" / "webui" / "static" / "js" / "widgets.js").read_text(encoding="utf-8")
+    main_js = (root / "app" / "webui" / "static" / "js" / "main.js").read_text(encoding="utf-8")
+    assert "function refreshResourceWidgets" in js and "resourceReloaders" in js
+    assert "case 'resources_updated':" in main_js, "旧版要在统一 WS 分派里接上"

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import http, { errorMessage } from '@/api/http'
+import { connectSocket, onSocketMessage } from '@/api/socket'
 
 const props = defineProps<{
   fieldKey: string
@@ -88,6 +89,27 @@ watch(
   },
   { immediate: true },
 )
+
+// 资源增删改 → 只刷新对应种类的候选；断线重连也补一次（期间可能错过变更）。
+// 这样配置页开着时新建/改名/删除预设，下拉里立刻能看到。
+let unsubscribeResources: (() => void) | null = null
+let unsubscribeOpen: (() => void) | null = null
+if (isResource.value) {
+  connectSocket()
+  unsubscribeResources = onSocketMessage('resources_updated', (msg: any) => {
+    const kinds = Array.isArray(msg?.kinds) ? msg.kinds.map(String) : []
+    if (!kinds.length || kinds.includes(resourceKind.value)) void loadResourceOptions()
+  })
+  unsubscribeOpen = onSocketMessage('socket_open', () => {
+    if (isResource.value) void loadResourceOptions()
+  })
+}
+onBeforeUnmount(() => {
+  unsubscribeResources?.()
+  unsubscribeOpen?.()
+  unsubscribeResources = null
+  unsubscribeOpen = null
+})
 
 const resourceModelValue = computed(() => {
   if (isMultiResource.value) {

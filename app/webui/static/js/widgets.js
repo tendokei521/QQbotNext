@@ -484,6 +484,21 @@ function initRepeaterWidget(mod, key, el) {
 }
 
 // ---------- 资源引用（type: resource / resources） ----------
+/** 已挂载的资源选择器的刷新回调：WS 收到 resources_updated 时按 kinds 局部刷新。 */
+const resourceReloaders = [];
+
+/** 资源增删改后刷新资源选择器候选；kinds 为空表示全部。 */
+function refreshResourceWidgets(kinds) {
+    const wanted = Array.isArray(kinds) ? kinds.map(String) : [];
+    resourceReloaders.forEach(function (entry) {
+        try {
+            if (!wanted.length || wanted.indexOf(entry.kind) >= 0) entry.reload();
+        } catch (e) {
+            console.error('[Resource] 刷新候选失败:', e);
+        }
+    });
+}
+
 /**
  * 资源引用字段：候选来自框架资源注册表（GET /api/resources/<kind>）。
  *
@@ -594,6 +609,14 @@ function initResourceWidget(moduleName, key, el) {
             status.style.color = '#e57373';
         }
     }
+
+    /** 刷新候选：先把用户当前选择收进 original，避免刷新把未保存的改动冲掉。 */
+    function reload() {
+        original = currentValues();
+        options = [];
+        void load();
+    }
+    resourceReloaders.push({ kind: kind, reload: reload });
 
     window.__configWidgets[widgetKey(moduleName, key)] = {
         type: 'resource',
