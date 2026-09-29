@@ -213,11 +213,12 @@ class ServiceAccess:
     config_service: Any = None
     task_manager: Any = None
     settings: Any = None
-    providers: Any = None
+    providers: Any = None           # 数据源注册表（ProviderRegistry）：只管 list/dynamic 的模块数据源
     scheduler: Any = None
     agent_manager: Any = None  # 框架级 LLM Agent 运行时管理
     config_profiles: Any = None  # 配置档案与路由（ConfigProfileService）：按会话 UMO 换整套配置
     role_presets: Any = None     # 角色预设（RolePresetService）：可复用人设（含预设对话/工具/技能）
+    resources: Any = None        # 系统资源注册表（ResourceRegistry）：schema resource 字段的候选来源
     send_hooks: Any = None     # 消息发送成功钩子注册表 SendHookRegistry
     before_send_hooks: Any = None   # 消息发送前钩子注册表
     api_hooks: Any = None           # 任意 API 调用后钩子注册表

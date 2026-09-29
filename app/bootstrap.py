@@ -47,6 +47,7 @@ from app.services.module_install_service import ModuleInstallService
 from app.services.provider_model_service import ProviderModelService
 from app.services.provider_preset_service import ProviderPresetService
 from app.services.provider_service import ProviderRegistry
+from app.services.resource_registry import ResourceRegistry
 from app.services.role_preset_service import RolePresetService
 from app.services.scheduler import SchedulerService
 
@@ -150,6 +151,53 @@ def build_container(settings: Settings | None = None) -> Container:
     container.register_factory(LifecycleHookRegistry, lambda: lifecycle_hook_registry)
     event_completed_hook_registry = EventCompletedHookRegistry()
     container.register_factory(EventCompletedHookRegistry, lambda: event_completed_hook_registry)
+    # 系统资源注册表：模块配置里的 resource 字段（下拉选预设）与 /api/resources 都用它
+    resource_registry = ResourceRegistry()
+    resource_registry.register(
+        "role_preset", lambda q: role_preset_service.list_presets(),
+        label="角色预设", desc="可复用的角色设定（system_prompt / 预设对话 / 工具 / 技能）",
+    )
+    resource_registry.register(
+        "config_profile", lambda q: config_profile_service.list_profiles(),
+        label="配置档案", desc="一套可复用的 Agent 配置快照（可经路由绑定会话）",
+    )
+    resource_registry.register(
+        "provider_preset", lambda q: provider_preset_service.list_presets(),
+        label="Provider 预设", desc="模型连接配置（api_base / 密钥由框架保管）",
+    )
+
+    def _model_resources(q):
+        """Provider 模型候选：label 带上模型名与能力类型，便于下拉区分。"""
+        rows = provider_model_service.list_models(q.filters.get("preset_id") or None)
+        wanted = str(q.filters.get("provider_type") or "").strip()
+        out = []
+        for row in rows or []:
+            kind = str(row.get("provider_type") or "chat")
+            if wanted and kind != wanted:
+                continue
+            name = str(row.get("name") or row.get("model") or row.get("id") or "")
+            out.append({"id": row.get("id"), "name": f"{name}（{kind}）"})
+        return out
+
+    resource_registry.register(
+        "provider_model", _model_resources,
+        label="Provider 模型", desc="具体模型实例；可用 provider_type 过滤（如 embedding）",
+    )
+
+    def _bot_resources(q):
+        """Bot 账号候选（只列已登录过的账号）。"""
+        return [
+            {
+                "id": str(row.get("bot_id") or ""),
+                "name": f"#{row.get('index', '?')} {row.get('nickname') or row.get('bot_id') or '未登录'}",
+            }
+            for row in (config_service.get_bots_public() or [])
+            if row.get("bot_id")
+        ]
+
+    resource_registry.register("bot", _bot_resources, label="Bot 账号", desc="已配置的连接及其登录账号")
+    container.register_factory(ResourceRegistry, lambda: resource_registry)
+
     services = ServiceAccess(
         cache=cache, config_service=config_service, task_manager=task_manager,
         settings=settings, providers=providers, scheduler=scheduler,
@@ -158,6 +206,7 @@ def build_container(settings: Settings | None = None) -> Container:
         lifecycle_hooks=lifecycle_hook_registry, event_completed_hooks=event_completed_hook_registry,
         features=feature_registry,
         config_profiles=config_profile_service, role_presets=role_preset_service,
+        resources=resource_registry,
     )
     container.register_factory(ServiceAccess, lambda: services)
 
@@ -174,6 +223,16 @@ def build_container(settings: Settings | None = None) -> Container:
         install_service=install_service,
     )
     container.register_factory(ModuleRegistry, lambda: registry)
+
+    def _module_resources(q):
+        """已加载模块候选（value=模块名，label=模块显示名）。"""
+        out = []
+        for name, instances in registry.loaded_map().items():
+            first = next(iter(instances.values()), None)
+            out.append({"id": name, "name": str(getattr(first, "name", "") or name)})
+        return out
+
+    resource_registry.register("module", _module_resources, label="模块", desc="已加载的模块名")
 
     # OneBot 网关
     gateway = OneBotGateway(settings=settings, cache=cache, logger_=logger)
