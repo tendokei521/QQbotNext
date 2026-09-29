@@ -450,6 +450,83 @@ class Module(BaseModule):
 
 ---
 
+## 4.8 模块 ↔ 框架交互面（资源引用 / 系统 LLM / 依赖自检）
+
+三件事一句话：**选系统资源用资源字段，发模型请求用 `self.llm_chat`，用之前先声明 `requires`。**
+
+### 4.8.1 配置里直接引用系统资源（`type: "resource"`）
+
+不用手抄 ID、也不用自己写 `dynamic` 数据源 —— 框架把「可被引用的资源」注册成统一目录，
+WebUI（新版与 /legacy）都会渲染成下拉框：
+
+```python
+"persona_preset_id": {
+    "type": "resource",          # 多选写 "resources"（值变成 id 数组）
+    "resource": "role_preset",   # 资源种类，见下表
+    "label": "角色预设",
+    "default": "",
+    "filters": {},               # 可选：透传给候选接口的过滤条件
+},
+```
+
+| 内置种类 | 说明 | 常用 filters |
+|---|---|---|
+| `role_preset` | 角色预设（提示词 + 预设对话 + 工具/技能） | — |
+| `config_profile` | 配置档案（可经路由绑定会话的整套 Agent 配置） | — |
+| `provider_preset` | Provider 连接预设（api_base / 密钥由框架保管） | — |
+| `provider_model` | Provider 模型实例 | `{"provider_type": "embedding"}` |
+| `bot` | Bot 账号 | — |
+| `module` | 已加载的模块名 | — |
+
+- 运行时读法不变：`module.config.get("persona_preset_id")` 拿到资源 id；
+- **诊断不静默**：种类名写错时字段带 `issues: ["unknown_resource:<kind>"]`，界面显示
+  「资源种类未注册：<kind>」；存了但资源被删的悬挂引用显示「`<id>`（已删除或未找到）」，
+  且**拉不到候选时保存会回填原值**（不会把已存配置抹掉）；
+- 全量清单：`GET /api/resources`（种类）与 `ctx.services.resources.options(kind)`；
+- 自定义种类：`ctx.services.resources.register(kind, handler, label=...)`（在 `on_load` 里加）。
+
+### 4.8.2 用系统 provider 发模型请求：`self.llm_chat`
+
+```python
+resp = await self.llm_chat([{"role": "user", "content": "把这句话翻成英文：你好"}])
+if resp.ok:
+    text = resp.text
+
+# 指定模型（model_id 通常来自上面 resource 字段的下拉）
+resp = await self.llm_chat(messages, model_id=self.config.get("model_id"), system="你是翻译官", temperature=0.3)
+
+# 流式；候选与自检
+async for ev in self.llm_stream(messages):
+    ...
+models = self.ctx.services.llm.models(kind="chat")     # 或 "embedding" / "all"
+info = self.ctx.services.llm.resolve(model_id="...")   # 脱敏摘要（不含密钥）
+```
+
+解析顺序：显式 `model_id` → 显式 `preset_id` → **本账号 Agent 配置的模型池**。
+密钥、多 provider 回退、空回复重试、token 记账、遥测全留在框架；拿不到配置时返回空
+`LLMResponse`（`resp.ok` 为假）并留痕，不抛异常。
+
+> 顺带消除一个命名坑：`ctx.services.providers` 是**数据源注册表**（list/dynamic 的模块
+> 数据源，群/好友等），与 LLM provider 无关；它现在有语义化别名 `data_sources`。
+
+### 4.8.3 声明依赖并在加载时自检
+
+```python
+class Module(BaseModule):
+    requires = ("llm", "role_presets")      # 服务名，或可接管能力的 feature_id（如 "assembly"）
+
+    async def on_load(self):
+        if "llm" in self.missing_requirements():   # 也可直接用返回列表做降级
+            ...                                    # 例如关掉本模块的模型相关功能
+```
+
+- 加载时框架自动校验，缺失**只 WARNING 不阻断**加载（日志会点名缺了什么）；
+- 名字解析：先看 `ctx.services.<name>`，再看 `FeatureRegistry` 是否有同名能力；
+- 框架能力清单：`ctx.services.capabilities()` 或 `GET /api/framework/capabilities`
+  （版本 / schema 版本与字段类型 / 资源种类 / 可用服务 / 可接管能力）。
+
+---
+
 ## 4.3 模块给 LLM 提供工具（`@tool`）
 
 模块可以把方法暴露给 LLM 作为 function calling 工具：
