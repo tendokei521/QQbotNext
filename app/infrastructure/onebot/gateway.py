@@ -599,10 +599,8 @@ class OneBotGateway:
             )
             return
 
-        # 派发
+        # 派发（不再为每条群消息补一条「已进入节点链」DEBUG：接收日志 + Agent 门控日志已够定位）
         await self._dispatch(event)
-        if isinstance(event, MessageEvent) and event.event_type == "message_group":
-            bot_logger.debug(f"[派发] 群 {event.group.group_id} 消息 {event.message_id} 已进入模块/LLM 节点链")
 
     async def _dispatch(self, event: BaseEvent) -> None:
         """派发到模块事件总线（由 bootstrap 注入）。"""
