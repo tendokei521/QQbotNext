@@ -283,6 +283,7 @@ def build_container(settings: Settings | None = None) -> Container:
         gateway=gateway, registry=registry, config_service=config_service,
         dispatcher=dispatcher, agent_manager=agent_manager,
         lifecycle_hooks=lifecycle_hook_registry,
+        resource_registry=resource_registry,
     )
     container.register_factory(BotService, lambda: bot_service)
     log_service = LogService(settings.log_dir)

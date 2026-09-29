@@ -5,21 +5,22 @@
 
 from __future__ import annotations
 
-
 from app.core.logger import logger
 from app.domain.bot import IBot
 from app.llm.config import LEGACY_LLM_CONNECTION_KEYS
+from app.modules.schema_utils import webui_schema
 
 
 class BotService:
     def __init__(self, *, gateway, registry, config_service, dispatcher, agent_manager=None,
-             lifecycle_hooks=None) -> None:
+             lifecycle_hooks=None, resource_registry=None) -> None:
         self.gateway = gateway
         self.registry = registry
         self.config_service = config_service
         self.dispatcher = dispatcher
         self.agent_manager = agent_manager
         self.lifecycle_hooks = lifecycle_hooks
+        self.resource_registry = resource_registry
 
         # 网关回调注入：登录装配 / 事件派发 / 配置读取
         self.gateway.login_handler = self.on_bot_login
@@ -154,7 +155,9 @@ class BotService:
                     "user_list": mod.authority.permission.user_list,
                 },
                 "config": _mask_password_config(dict(mod.config.raw_config), mod.config_schema),
-                "config_schema": _split_schema(mod.config_schema),
+                "config_schema": webui_schema(
+                    mod.config_schema, registry=self.resource_registry, source_module=mod_name
+                ),
                 "has_page": self.registry.module_has_page(mod_name),
                 "source": getattr(mod, "source", "local"),
                 "version": getattr(mod, "version", "") or "0.0.0",
@@ -185,7 +188,7 @@ class BotService:
             permission = config.get("permission", "member")
         for key in LEGACY_LLM_CONNECTION_KEYS:
             config.pop(key, None)
-        schema = _split_schema(SCHEMA)
+        schema = webui_schema(SCHEMA, registry=self.resource_registry, source_module="agent")
         return {
             "name": "LLM服务",
             "name_sign": "Agent",
@@ -229,14 +232,10 @@ class BotService:
 
 
 def _split_schema(schema: dict) -> dict:
-    groups: dict = {}
-    items: dict = {}
-    for key, value in (schema or {}).items():
-        if isinstance(value, dict) and value.get("type") == "group":
-            groups[key] = value
-        else:
-            items[key] = value
-    return {"groups": groups, "items": items}
+    """兼容旧调用：schema 分区已迁到 `app.modules.schema_utils.split_schema`。"""
+    from app.modules.schema_utils import split_schema
+
+    return split_schema(schema)
 
 
 # 密码字段脱敏哨兵：前端显示此值，保存时后端识别并保留旧值

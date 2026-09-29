@@ -5,21 +5,21 @@
 
 from __future__ import annotations
 
-import json
-
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from app.core.logger import logger
+from app.infrastructure.config.config_service import ConfigService
 from app.llm.config import LEGACY_LLM_CONNECTION_KEYS
 from app.llm.config_schema import STREAM_PRESETS
 from app.llm.onebot_tools.manifest import ONEBOT_TOOLS
 from app.llm.onebot_tools.security import resolve_tool_policy
 from app.llm.system_tools import list_system_tools
-from app.infrastructure.config.config_service import ConfigService
+from app.modules.schema_utils import webui_schema
 from app.services.bot_service import PASSWORD_MASK as _PASSWORD_MASK
 from app.services.provider_model_service import ProviderModelService
 from app.services.provider_preset_service import ProviderPresetService
+from app.services.resource_registry import ResourceRegistry
 from app.services.role_preset_service import RolePresetService
 from app.webui.api.deps import get_container, parse_bot_id
 
@@ -44,16 +44,6 @@ def _runtime(container, bot_id):
     if manager is None:
         return None, None
     return manager.get_runtime(bot_id), manager
-
-
-def _split_schema(schema: dict) -> dict:
-    groups, items = {}, {}
-    for key, value in (schema or {}).items():
-        if isinstance(value, dict) and value.get("type") == "group":
-            groups[key] = value
-        else:
-            items[key] = value
-    return {"groups": groups, "items": items}
 
 
 def _mask_password_config(config: dict, schema: dict) -> dict:
@@ -84,7 +74,7 @@ async def agent_config(request: Request, bot_id: int | None = Depends(parse_bot_
     raw_config = dict(runtime.config.raw_config)
     for key in LEGACY_LLM_CONNECTION_KEYS:
         raw_config.pop(key, None)
-    schema = _split_schema(SCHEMA)
+    schema = webui_schema(SCHEMA, registry=container.get(ResourceRegistry), source_module="agent")
     presets = container.get(ProviderPresetService).list_presets()
     preset_name_map = {p["id"]: p["name"] for p in presets}
     provider_models = container.get(ProviderModelService).list_models()
