@@ -271,6 +271,13 @@ async def update_config(module_name: str, request: Request, bot_id: int | None =
     data = data or {}
     for key in LEGACY_LLM_CONNECTION_KEYS:
         data.pop(key, None)
+    # 资源字段的悬挂引用策略（on_missing）：声明 clear 的字段在引用失效时丢弃该值
+    from app.modules.resource_validation import apply_on_missing
+    from app.services.resource_registry import ResourceRegistry
+
+    data, cleared_fields = await apply_on_missing(
+        module.config_schema, data, container.get(ResourceRegistry)
+    )
     for key, value in data.items():
         # password 字段值为脱敏哨兵时保留旧值（用户未修改密码）
         field = module.config_schema.get(key)
@@ -286,7 +293,7 @@ async def update_config(module_name: str, request: Request, bot_id: int | None =
         # 广播前脱敏：password 字段打码，避免明文密码经 WS 泄露（与读取接口一致）
         "config": _mask_password_config(module.config.raw_config, module.config_schema),
     }))
-    return _ok(f"模块 {module.name} (Bot {bot_id}) 配置已更新")
+    return _ok(f"模块 {module.name} (Bot {bot_id}) 配置已更新", **(dict(cleared=cleared_fields) if cleared_fields else {}))
 
 
 @router.post("/modules/reload")
