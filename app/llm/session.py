@@ -4,16 +4,48 @@
 - Conversation：窗口内的对话线程，拥有独立的 history / tags / task_id，
   支持切换、删除；
 - Session.data / task_id 为「当前活跃对话」的代理，保证旧调用不破坏。
+
+## 历史存储契约（插件可依赖）
+
+存储条目字段：
+
+- ``role``：``user`` / ``assistant`` / ``system``（必填）
+- ``content``：纯文本正文（**兼容字段**；结构化条目也保留它）
+- ``time``：秒级时间戳
+- ``user_id`` / ``nickname``：发送者（助手条目通常为空）
+- ``message_id``：OneBot 消息句柄（发送成功后回填，用于引用/去重）
+- ``base``：结构化条目才有的原始信息
+  ``{time, sender_id, sender_name, group_id, is_private, text, segments, meta_lines?}``
+
+两个读取入口的区别（迁移复刻第三方组装格式时用后者）：
+
+- ``get_history()``：**投影视图** —— 只保留上表子集、过滤空/杂散 assistant，
+  直接可喂 OpenAI 风格 messages；
+- ``history_snapshot()``：**原始条目副本** —— 不投影、不渲染，插件可用自己的
+  渲染器（例如 1:1 复刻 AstrBot 的历史格式）组装。
+
+写入侧：``add_message()`` 追加单条（框架主路径用），``import_history()`` 批量
+导入外部历史（迁移用；支持 AstrBot/OpenAI 风格 ``{role, content}``）。
+
+旁路自有历史：插件**接管 agent**（``supersedes = ("agent",)``）后框架不再跑
+``prepare_prompt``，也就不会再写框架历史；此时插件可以用 ``import_history`` /
+``history_snapshot`` 自己管一套，或继续沿用框架这套存储。
 """
 
+import copy
 import re
-import time
 import threading
+import time
 import uuid
 from typing import Any
 
 from app.llm import logger
 from app.llm.storage import create_history_store
+
+#: 存储层条目字段（读取侧可依赖的契约，见模块 docstring）
+HISTORY_ENTRY_FIELDS = ("role", "content", "time", "user_id", "nickname", "message_id", "base")
+#: 参与组装的角色白名单（导入外部历史时用）
+HISTORY_ROLES = ("user", "assistant", "system")
 
 # 防御：模型/中转偶发的孤立 "rate." 不应作为有效助手回复回灌上下文
 _JUNK_ASSISTANT_RE = re.compile(r"^\s*rate\.\s*$", re.IGNORECASE)
@@ -21,6 +53,72 @@ _JUNK_ASSISTANT_RE = re.compile(r"^\s*rate\.\s*$", re.IGNORECASE)
 
 def _is_junk_assistant(content) -> bool:
     return bool(content and _JUNK_ASSISTANT_RE.match(str(content)))
+
+
+def _content_to_text(content: Any) -> str:
+    """多模态 content → 纯文本（只取文本块；图片等在框架里由 segments 承载）。"""
+    if isinstance(content, list):
+        return "".join(
+            str(block.get("text", ""))
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+    return str(content or "")
+
+
+def normalize_import_entry(entry: Any) -> dict | None:
+    """把外部历史条目归一化成框架存储形状；无法识别的返回 None。
+
+    接受两类输入：
+
+    - 外部/裸风格：``{"role": "user", "content": "…"}``（AstrBot ``Message`` dump、
+      OpenAI messages 都是这个形状；content 为多模态数组时只取文本块）；
+    - 框架存储形状：额外带 ``time`` / ``user_id`` / ``nickname`` / ``message_id`` /
+      ``segments`` / ``group_id`` / ``is_private`` 时一并保留。
+
+    ``timestamp`` 与 ``time`` 都接受；缺失时用当前时间。空正文且无 ``segments``
+    的条目丢弃（框架渲染器不喜欢空条目）。
+    """
+    if not isinstance(entry, dict):
+        return None
+    role = str(entry.get("role", "") or "").strip().lower()
+    if role not in HISTORY_ROLES:
+        return None
+    segments = entry.get("segments")
+    segments = list(segments) if isinstance(segments, list) else []
+    content = _content_to_text(entry.get("content"))
+    if not content.strip() and not segments:
+        return None
+
+    raw_ts = entry.get("timestamp", entry.get("time"))
+    try:
+        ts = int(raw_ts) if raw_ts is not None else int(time.time())
+    except (TypeError, ValueError):
+        ts = int(time.time())
+
+    result: dict[str, Any] = {"role": role, "time": ts, "content": content}
+    if entry.get("user_id"):
+        result["user_id"] = str(entry["user_id"])
+    if entry.get("nickname"):
+        result["nickname"] = str(entry["nickname"])
+    if entry.get("message_id") not in (None, ""):
+        result["message_id"] = str(entry["message_id"])
+    if segments:
+        result["base"] = {
+            "time": ts,
+            "sender_id": str(entry.get("user_id") or ""),
+            "sender_name": str(entry.get("nickname") or ""),
+            "group_id": str(entry.get("group_id") or ""),
+            "is_private": bool(entry.get("is_private", False)),
+            "text": content,
+            "segments": segments,
+        }
+        meta_lines = entry.get("meta_lines")
+        if isinstance(meta_lines, list):
+            kept = [str(x) for x in meta_lines if str(x or "").strip()]
+            if kept:
+                result["base"]["meta_lines"] = kept
+    return result
 
 
 class ConversationData:
@@ -391,6 +489,92 @@ class SessionManager:
         return result
 
     # ── 多对话操作 ────────────────────────────────────────
+    def history_snapshot(
+        self,
+        session_id: str,
+        *,
+        limit: int | None = None,
+        include_junk: bool = False,
+    ) -> list[dict]:
+        """返回**未投影的原始历史条目副本**（插件自带渲染器组装用）。
+
+        与 ``get_history()`` 的区别：不做字段投影、不渲染、不裁字段——``base``
+        里的 ``segments`` / ``meta_lines`` 原样保留，因此插件可以按自己的格式
+        （例如 1:1 复刻 AstrBot 的 ``[昵称/时间]: 正文``）重新渲染。
+
+        默认仍过滤已知杂散 assistant（空内容 / ``rate.``），``include_junk=True``
+        时原样返回全部；返回的是深拷贝，改它不会动到存储。
+        """
+        session = self.get_session(session_id)
+        if not session or session.data is None:
+            return []
+        items = list(session.data.history)
+        if not include_junk:
+            items = [
+                m for m in items
+                if not (
+                    m.get("role") == "assistant"
+                    and (not str(m.get("content") or "").strip() or _is_junk_assistant(m.get("content")))
+                )
+            ]
+        if limit is not None:
+            items = items[-limit:] if limit > 0 else []
+        return [copy.deepcopy(m) for m in items]
+
+    def import_history(
+        self,
+        session_id: str,
+        entries: list[Any],
+        *,
+        replace: bool = False,
+        session_type: str = "group",
+        timeout: int = 60,
+        persist: bool = True,
+    ) -> dict:
+        """把外部历史批量写入本框架会话（迁移用）。
+
+        - 条目可为 AstrBot/OpenAI 风格 ``{role, content}`` 或框架存储形状
+          （见 ``normalize_import_entry``）；
+        - ``replace=True`` 覆盖当前对话历史，否则追加；
+        - 会话不存在时按 ``session_type`` 新建（迁移时不必先造会话）；
+        - 无法识别的条目**计数丢弃而不抛异常**：迁移要能"尽量搬、别中断"；
+        - 超出 ``MAX_HISTORY_MESSAGES`` 时从最旧开始丢。
+
+        返回 ``{"imported", "skipped", "dropped", "total"}``。
+        """
+        raw = list(entries or [])
+        normalized = [e for e in (normalize_import_entry(x) for x in raw) if e is not None]
+
+        session = self.get_session(session_id)
+        if session is None:
+            session = self.create_session(session_id, session_type, timeout)
+        if session.data is None:
+            return {"imported": 0, "skipped": len(raw), "dropped": 0, "total": 0}
+
+        with self.lock:
+            history = session.data.history
+            if replace:
+                history.clear()
+            history.extend(normalized)
+            dropped = 0
+            if len(history) > self.MAX_HISTORY_MESSAGES:
+                dropped = len(history) - self.MAX_HISTORY_MESSAGES
+                del history[:dropped]
+            session.touch()
+
+        if persist:
+            self.history.save_session(session)
+        logger.add_info(f"#{self.bot_id}").info(
+            f"导入外部历史: {session_id} 写入 {len(normalized)} 条"
+            f"（丢弃 {len(raw) - len(normalized)}，裁剪 {dropped}）"
+        )
+        return {
+            "imported": len(normalized),
+            "skipped": len(raw) - len(normalized),
+            "dropped": dropped,
+            "total": len(session.data.history),
+        }
+
     def new_conversation(self, session_id: str, title: str = "") -> dict | None:
         session = self.get_session(session_id)
         if not session:
