@@ -210,3 +210,31 @@ def test_resources_endpoint_filters_pass_through(container):
     resp = client.get("/api/resources/provider_model?provider_type=embedding&bot_id=1")
     assert resp.status_code == 200
     assert resp.json()["kind"] == "provider_model"
+
+
+async def test_module_schema_reaches_api_with_resource_field(container):
+    """端到端（API 合同层）：WebUI 拿到的模块 schema 里，人设字段是可渲染的资源引用。
+
+    这是"界面能直接选系统预设"的最小证据链：模块注册表加载 → schema 归一化
+    （种类校验 + issues + source_module）→ bot_service 下发 → 前端按 resource 拉候选。
+    """
+    from pathlib import Path
+
+    from app.modules.registry import ModuleRegistry
+    from app.services.bot_service import BotService
+
+    # BotService 持有的是容器里的注册表实例：把它的模块目录定向到仓库真实目录，
+    # 这样加载出来的模块才会经过 bot_service 的 schema 归一化链路。
+    registry = container.get(ModuleRegistry)
+    registry.modules_dir = Path(__file__).resolve().parent.parent / "module" / "modules"
+    bot_id = 20250930
+    assert await registry.load_single("astrbot_alignment", bot_id) is True
+    try:
+        data = container.get(BotService).get_modules_data(bot_id)
+        field = data["astrbot_alignment"]["config_schema"]["items"]["persona_preset_id"]
+        assert field["type"] == "resource"
+        assert field["resource"] == "role_preset"
+        assert field["issues"] == [], "种类必须已注册，否则界面会显示「资源种类未注册」"
+        assert field["source_module"] == "astrbot_alignment"
+    finally:
+        await registry.unload_single("astrbot_alignment", bot_id)
