@@ -177,6 +177,7 @@ function currentValue(item: ItemDef): any {
                     :field-key="item.key"
                     :schema="item.schema"
                     :value="currentValue(item)"
+                    :bot-id="botId"
                     @update="(v: any) => emit('change', item.key, v)"
                   />
                   <StringListWidget

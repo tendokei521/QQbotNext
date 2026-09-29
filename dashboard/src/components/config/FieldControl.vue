@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
+import http, { errorMessage } from '@/api/http'
 
 const props = defineProps<{
   fieldKey: string
   schema: Record<string, any>
   value: any
+  /** 资源引用字段需要（bot_id 只对"某账号下的资源"有意义，可选） */
+  botId?: number | null
 }>()
 
 const emit = defineEmits<{
@@ -18,6 +21,88 @@ const isSelect = computed(() => type.value === 'select')
 const isTextarea = computed(() => type.value === 'textarea')
 const isTime = computed(() => type.value === 'time')
 const isPassword = computed(() => type.value === 'password')
+// 资源引用（见 app/services/resource_registry.py）：值是资源 id，下拉直接从框架拉候选
+const isResource = computed(() => type.value === 'resource' || type.value === 'resources')
+const isMultiResource = computed(() => type.value === 'resources')
+
+const resourceKind = computed(() => String(props.schema.resource || '').trim())
+const resourceOptions = ref<{ value: string; label: string }[]>([])
+const resourceError = ref('')
+const resourceLoading = ref(false)
+
+/** 只透传 schema.filters 里声明的过滤条件（如 { provider_type: "embedding" }）。 */
+const resourceParams = computed(() => {
+  const params: Record<string, any> = {}
+  const filters = props.schema.filters
+  if (filters && typeof filters === 'object' && !Array.isArray(filters)) Object.assign(params, filters)
+  if (props.botId !== undefined && props.botId !== null) params.bot_id = props.botId
+  return params
+})
+
+async function loadResourceOptions() {
+  const kind = resourceKind.value
+  resourceOptions.value = []
+  resourceError.value = ''
+  if (!kind) {
+    resourceError.value = '该字段未声明 resource（资源种类）'
+    return
+  }
+  resourceLoading.value = true
+  try {
+    const { data } = await http.get(`/api/resources/${encodeURIComponent(kind)}`, { params: resourceParams.value })
+    resourceOptions.value = (data?.options || []) as { value: string; label: string }[]
+  } catch (e: any) {
+    // 404 = 资源种类未注册（框架版本不含该种类 / 插件没装）：给可读提示，而不是一个空下拉
+    resourceError.value =
+      e?.response?.status === 404 ? `资源种类未注册：${kind}` : errorMessage?.(e) || `资源加载失败：${kind}`
+  } finally {
+    resourceLoading.value = false
+  }
+}
+
+/** 悬挂引用：存的值已不在候选里（资源被删）时补一条占位，避免显示成空白。 */
+watch(
+  [resourceOptions, () => props.value],
+  () => {
+    if (!isResource.value) return
+    const values = isMultiResource.value
+      ? (Array.isArray(props.value) ? props.value.map(String) : [])
+      : props.value !== undefined && props.value !== null && props.value !== ''
+        ? [String(props.value)]
+        : []
+    const missing = values.filter((v) => !resourceOptions.value.some((o) => String(o.value) === v))
+    if (missing.length) {
+      resourceOptions.value = [
+        ...resourceOptions.value,
+        ...missing.map((v) => ({ value: v, label: `${v}（已删除或未找到）` })),
+      ]
+    }
+  },
+  { immediate: true, deep: false },
+)
+
+watch(
+  resourceKind,
+  () => {
+    if (isResource.value) void loadResourceOptions()
+  },
+  { immediate: true },
+)
+
+const resourceModelValue = computed(() => {
+  if (isMultiResource.value) {
+    return Array.isArray(props.value) ? props.value.map(String) : []
+  }
+  return props.value === undefined || props.value === null || props.value === '' ? undefined : String(props.value)
+})
+
+function onResourceInput(v: any) {
+  if (isMultiResource.value) {
+    emit('update', Array.isArray(v) ? v.map(String) : [])
+    return
+  }
+  emit('update', v ? String(v) : '')
+}
 
 const numberAttrs = computed(() => {
   const attrs: Record<string, number | undefined> = {}
@@ -68,6 +153,24 @@ function onBoolInput(v: boolean | null) {
       inset
       hide-details
       @update:model-value="onBoolInput"
+    />
+
+    <v-autocomplete
+      v-else-if="isResource"
+      :model-value="resourceModelValue"
+      :items="resourceOptions"
+      :multiple="isMultiResource"
+      :loading="resourceLoading"
+      :error-messages="resourceError"
+      :placeholder="schema.placeholder || (resourceLoading ? '加载中…' : '请选择')"
+      chips
+      closable-chips
+      clearable
+      hide-details="auto"
+      density="comfortable"
+      item-title="label"
+      item-value="value"
+      @update:model-value="onResourceInput"
     />
 
     <v-select
