@@ -328,3 +328,47 @@ def test_both_uis_subscribe_to_resource_events():
     main_js = (root / "app" / "webui" / "static" / "js" / "main.js").read_text(encoding="utf-8")
     assert "function refreshResourceWidgets" in js and "resourceReloaders" in js
     assert "case 'resources_updated':" in main_js, "旧版要在统一 WS 分派里接上"
+
+
+# ==================== bot / group 种类（按账号） ====================
+
+
+async def test_bot_kind_uses_login_snapshot(container, monkeypatch):
+    """bot 候选来自登录账号快照（早期版本读了连接配置里不存在的 bot_id，永远为空）。"""
+    from app.infrastructure.config.config_service import ConfigService
+
+    config_service = container.get(ConfigService)
+    monkeypatch.setattr(
+        config_service,
+        "get_bot_accounts",
+        lambda: {0: {"user_id": "10001", "nickname": "甲"}, 1: {"user_id": "", "nickname": "未登录"}},
+    )
+    options = await container.get(ResourceRegistry).options("bot")
+    assert options == [{"value": "10001", "label": "#0 甲"}], "空账号的连接要被跳过"
+
+
+async def test_group_kind_needs_bot_and_reads_group_list(container, monkeypatch):
+    """group 候选按账号取；账号不在线时返回空（不是报错）。"""
+    from app.infrastructure.config.config_service import ConfigService
+    from app.infrastructure.onebot.gateway import OneBotGateway
+
+    config_service = container.get(ConfigService)
+    monkeypatch.setattr(config_service, "get_bot_accounts", lambda: {0: {"user_id": "10001", "nickname": "甲"}})
+    registry = container.get(ResourceRegistry)
+
+    assert await registry.options("group") == [], "没给 bot_id → 空候选"
+    assert await registry.options("group", bot_id="99999") == [], "账号不在快照里 → 空候选"
+
+    class _FakeBot:
+        async def get_group_list(self):
+            return {"data": [{"group_id": 777, "group_name": "测试群"}, {"group_id": 888, "group_name": ""}]}
+
+    container.get(OneBotGateway).connections[0] = _FakeBot()
+    options = await registry.options("group", bot_id="10001")
+    assert options == [
+        {"value": "777", "label": "测试群"},
+        {"value": "888", "label": "888"},
+    ], "群名为空时回退 group_id，绝不产出空标签"
+
+    meta = registry.get("group")
+    assert meta is not None and meta.needs_bot is True, "该种类必须声明 needs_bot"

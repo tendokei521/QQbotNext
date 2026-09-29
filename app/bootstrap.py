@@ -186,15 +186,20 @@ def build_container(settings: Settings | None = None) -> Container:
     )
 
     def _bot_resources(q):
-        """Bot 账号候选（只列已登录过的账号）。"""
-        return [
-            {
-                "id": str(row.get("bot_id") or ""),
-                "name": f"#{row.get('index', '?')} {row.get('nickname') or row.get('bot_id') or '未登录'}",
-            }
-            for row in (config_service.get_bots_public() or [])
-            if row.get("bot_id")
-        ]
+        """Bot 账号候选：只列「上次登录过」的连接。
+
+        账号来自 `get_bot_accounts()` 的登录快照（`{"user_id","nickname"}`），
+        不是连接配置里的字段（配置里没有 bot_id，早期版本这里读错键会永远返回空）。
+        """
+        accounts = config_service.get_bot_accounts() or {}
+        out = []
+        for index, info in sorted(accounts.items(), key=lambda kv: str(kv[0])):
+            bot_id = str((info or {}).get("user_id") or "").strip()
+            if not bot_id:
+                continue
+            nickname = str((info or {}).get("nickname") or "")
+            out.append({"id": bot_id, "name": f"#{index} {nickname or bot_id}"})
+        return out
 
     resource_registry.register("bot", _bot_resources, label="Bot 账号", desc="已配置的连接及其登录账号")
     container.register_factory(ResourceRegistry, lambda: resource_registry)
@@ -255,6 +260,41 @@ def build_container(settings: Settings | None = None) -> Container:
 
     # OneBot 网关
     gateway = OneBotGateway(settings=settings, cache=cache, logger_=logger)
+
+    def _bot_of(bot_id):
+        """按 bot_id 反查当前持有该账号的连接（IBot）；未登录/已换号时返回 None。"""
+        target = str(bot_id or "").strip()
+        if not target:
+            return None
+        for index, info in (config_service.get_bot_accounts() or {}).items():
+            if str((info or {}).get("user_id") or "") == target:
+                return gateway.connections.get(index)
+        return None
+
+    async def _group_resources(q):
+        """群候选：按账号取（需要 bot_id），账号不在线时返回空而不是报错。
+
+        与 `type: "list"` + `endpoint: "groups"` 同源（都走 `bot.get_group_list()`），
+        区别只是这里适配「下拉选一个群」的资源引用字段。
+        """
+        bot = _bot_of(q.bot_id)
+        if bot is None:
+            return []
+        resp = await bot.get_group_list()
+        return [
+            {
+                "group_id": str(row.get("group_id", "")),
+                "group_name": str(row.get("group_name") or row.get("group_id") or ""),
+            }
+            for row in ((resp or {}).get("data") or [])
+            if row.get("group_id")
+        ]
+
+    resource_registry.register(
+        "group", _group_resources, label="群", needs_bot=True,
+        value_field="group_id", label_field="group_name",
+        desc="该账号当前所在的群（需要 bot_id；与 list 的 groups 数据源同源）",
+    )
     gateway.send_hook_registry = send_hook_registry
     gateway.before_send_hook_registry = before_send_hook_registry
     gateway.api_hook_registry = api_hook_registry

@@ -477,6 +477,7 @@ WebUI（新版与 /legacy）都会渲染成下拉框：
 | `provider_model` | Provider 模型实例 | `{"provider_type": "embedding"}` |
 | `bot` | Bot 账号 | — |
 | `module` | 已加载的模块名 | — |
+| `group` | 该账号当前所在的群（**需要 bot_id**，与 `list` 的 `groups` 数据源同源） | — |
 
 - 运行时读法不变：`module.config.get("persona_preset_id")` 拿到资源 id；
 - **诊断不静默**：种类名写错时字段带 `issues: ["unknown_resource:<kind>"]`，界面显示

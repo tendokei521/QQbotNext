@@ -193,6 +193,7 @@ class Module(BaseModule):
 | `provider_model` | Provider 模型实例（可 `filters={"provider_type": "embedding"}` 过滤） |
 | `bot` | Bot 账号 |
 | `module` | 已加载的模块名 |
+| `group` | 该账号当前所在的群（需要 bot_id；与 `list` 的 `groups` 同源） |
 
 - 运行时读法不变：`module.config.get("persona_preset_id")` 得到资源 id；
 - 悬挂引用（资源被删）在界面上显示成「`<id>`（已删除或未找到）」，不会变成空白；
