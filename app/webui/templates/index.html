@@ -50,6 +50,14 @@
              data-widget-type="string_list"
              data-widget-key="{{ mod_name }}.{{ key }}"
              data-value='{{ current_value | tojson }}'></div>
+    {% elif schema.type == 'resource' or schema.type == 'resources' %}
+        <div class="widget" id="widget-{{ mod_name }}-{{ key }}"
+             data-widget-type="resource"
+             data-widget-key="{{ mod_name }}.{{ key }}"
+             data-resource="{{ schema.resource or '' }}"
+             data-multiple="{{ '1' if schema.type == 'resources' else '0' }}"
+             data-filters='{{ (schema.filters or {}) | tojson }}'
+             data-value='{{ current_value | tojson }}'></div>
     {% elif schema.type == 'list' %}
         <div class="widget" id="widget-{{ mod_name }}-{{ key }}"
              data-widget-type="list"

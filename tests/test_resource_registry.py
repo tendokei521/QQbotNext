@@ -238,3 +238,38 @@ async def test_module_schema_reaches_api_with_resource_field(container):
         assert field["source_module"] == "astrbot_alignment"
     finally:
         await registry.unload_single("astrbot_alignment", bot_id)
+
+
+async def test_legacy_ui_renders_resource_widget(container):
+    """旧版 UI（/legacy）也要能渲染资源选择器，否则回退路径下资源字段会退化成文本框。"""
+    from pathlib import Path
+
+    from starlette.testclient import TestClient
+
+    from app.modules.registry import ModuleRegistry
+    from app.webui.app import create_app
+
+    registry = container.get(ModuleRegistry)
+    registry.modules_dir = Path(__file__).resolve().parent.parent / "module" / "modules"
+    assert await registry.load_single("astrbot_alignment", None) is True
+    try:
+        html = TestClient(create_app(container)).get("/legacy").text
+        assert 'data-widget-type="resource"' in html, "模板应输出资源组件占位"
+        assert 'data-resource="role_preset"' in html
+        assert 'data-multiple="0"' in html
+        assert "persona_preset_id" in html
+    finally:
+        await registry.unload_single("astrbot_alignment", None)
+
+
+def test_legacy_widget_script_implements_resource_picker():
+    """静态自检：旧版组件脚本确实实现了资源选择器（且带可读诊断）。"""
+    from pathlib import Path
+
+    js = (
+        Path(__file__).resolve().parent.parent / "app" / "webui" / "static" / "js" / "widgets.js"
+    ).read_text(encoding="utf-8")
+    assert "function initResourceWidget" in js
+    assert "encodeURIComponent(kind)" in js, "必须按种类拉候选"
+    assert "资源种类未注册" in js and "（已删除或未找到）" in js, "未注册/悬挂引用要有可读提示"
+    assert "initResourceWidget(moduleName, key, el)" in js, "必须在 initConfigWidgets 里注册"

@@ -1,4 +1,4 @@
-﻿/* QQBot 配置小组件：string_list / list / dynamic / repeater / showIf。
+/* QQBot 配置小组件：string_list / list / dynamic / repeater / showIf。
    由 main.js 在 DOMContentLoaded 时调用 initAllConfigWidgets() 初始化。 */
 
 // ==================== 配置小组件（string_list / list / dynamic / repeater / showIf） ====================
@@ -483,6 +483,136 @@ function initRepeaterWidget(mod, key, el) {
     };
 }
 
+// ---------- 资源引用（type: resource / resources） ----------
+/**
+ * 资源引用字段：候选来自框架资源注册表（GET /api/resources/<kind>）。
+ *
+ * 与新版 Dashboard 的 ResourceSelect 同一口径：种类未注册 / 加载失败都给可读提示，
+ * 悬挂引用（存了但资源已删）补一条「（已删除或未找到）」，绝不显示成空白下拉。
+ * bot_id 由 getCurrentBotId() 现取（当前内置种类都不需要，将来"某账号下的资源"才用）。
+ */
+function initResourceWidget(moduleName, key, el) {
+    const kind = (el.getAttribute('data-resource') || '').trim();
+    const multiple = el.getAttribute('data-multiple') === '1';
+    let filters = {};
+    try { filters = JSON.parse(el.getAttribute('data-filters') || '{}') || {}; } catch (e) { filters = {}; }
+    let raw = null;
+    try { raw = JSON.parse(el.getAttribute('data-value') || 'null'); } catch (e) { raw = null; }
+    // 保存时的兜底值：拉不到候选（接口挂了/种类未注册）时按原值回填，别把已存配置抹掉
+    let original = multiple
+        ? (Array.isArray(raw) ? raw.map(String) : [])
+        : (raw === null || raw === undefined ? '' : String(raw));
+
+    const box = document.createElement('div');
+    const status = document.createElement('div');
+    status.style.cssText = 'font-size:12px;margin-top:4px;color:rgba(255,255,255,0.55);';
+    box.appendChild(status);
+    el.appendChild(box);
+
+    let select = null;
+    let options = [];
+
+    function currentValues() {
+        if (select) {
+            return multiple
+                ? Array.prototype.map.call(select.selectedOptions, function (o) { return o.value; })
+                : select.value;
+        }
+        return original;
+    }
+
+    function buildSelect() {
+        if (select) select.remove();
+        select = document.createElement('select');
+        select.className = 'form-control';
+        select.id = 'config-' + moduleName + '-' + key;   // 让 showIf / 脏标记等既有逻辑仍能定位
+        if (multiple) {
+            select.multiple = true;
+            select.size = Math.min(Math.max(options.length, 2), 8);
+        } else {
+            const empty = document.createElement('option');
+            empty.value = '';
+            empty.textContent = '（不使用）';
+            select.appendChild(empty);
+        }
+        const selected = multiple
+            ? (Array.isArray(original) ? original : [])
+            : [String(original === '' ? '' : original)];
+        options.forEach(function (o) {
+            const opt = document.createElement('option');
+            opt.value = o.value;
+            opt.textContent = o.label;
+            opt.selected = selected.indexOf(o.value) >= 0;
+            select.appendChild(opt);
+        });
+        select.addEventListener('change', function () {
+            if (typeof markModuleDirty === 'function') markModuleDirty(moduleName);
+        });
+        box.insertBefore(select, status);
+    }
+
+    async function load() {
+        if (!kind) {
+            status.textContent = '该字段未声明 resource（资源种类）';
+            status.style.color = '#e57373';
+            return;
+        }
+        status.style.color = 'rgba(255,255,255,0.55)';
+        status.textContent = '加载中…';
+        const params = new URLSearchParams();
+        Object.keys(filters).forEach(function (k) { params.set(k, filters[k]); });
+        const botId = (typeof getCurrentBotId === 'function') ? getCurrentBotId() : '';
+        if (botId) params.set('bot_id', botId);
+        const qs = params.toString();
+        try {
+            const resp = await apiFetch('/api/resources/' + encodeURIComponent(kind) + (qs ? '?' + qs : ''));
+            const data = await resp.json().catch(function () { return {}; });
+            if (!resp.ok) {
+                // 404 = 种类未注册：明确说出来，而不是留一个空下拉让人以为"没有数据"
+                status.textContent = resp.status === 404
+                    ? ('资源种类未注册：' + kind)
+                    : ('资源加载失败：' + (data && data.message ? data.message : resp.status));
+                status.style.color = '#e57373';
+                return;
+            }
+            options = (data.options || []).map(function (o) {
+                return { value: String(o.value), label: String(o.label) };
+            });
+            // 悬挂引用：存了但候选里没有（资源被删）→ 补一条可读选项
+            const stored = multiple
+                ? (Array.isArray(original) ? original : [])
+                : (original === '' ? [] : [String(original)]);
+            stored.forEach(function (v) {
+                if (!options.some(function (o) { return o.value === v; })) {
+                    options.push({ value: v, label: v + '（已删除或未找到）' });
+                }
+            });
+            status.textContent = options.length ? '' : '（该资源暂无候选）';
+            buildSelect();
+        } catch (e) {
+            status.textContent = '资源加载失败：' + (e && e.message ? e.message : e);
+            status.style.color = '#e57373';
+        }
+    }
+
+    window.__configWidgets[widgetKey(moduleName, key)] = {
+        type: 'resource',
+        get: function () {
+            const out = {};
+            out[key] = currentValues();
+            return out;
+        },
+        set: function (v) {
+            original = multiple
+                ? (Array.isArray(v) ? v.map(String) : [])
+                : (v === null || v === undefined ? '' : String(v));
+            if (select) buildSelect();
+            else void load();
+        },
+    };
+    void load();
+}
+
 // ---------- 初始化 / 条件显示 / 刷新 ----------
 function initConfigWidgets(moduleName) {
     const container = document.getElementById('config-container-' + moduleName);
@@ -499,6 +629,7 @@ function initConfigWidgets(moduleName) {
             else if (wtype === 'list') initListWidget(moduleName, key, el);
             else if (wtype === 'dynamic') initDynamicWidget(moduleName, key, el);
             else if (wtype === 'repeater') initRepeaterWidget(moduleName, key, el);
+            else if (wtype === 'resource') initResourceWidget(moduleName, key, el);
         } catch (e) {
             console.error('[Widget] 初始化失败 ' + moduleName + ':', e);
         }
