@@ -76,19 +76,19 @@ def test_cron_field_matching():
 
 
 def test_cron_next_time():
-    from datetime import datetime, timedelta
+    from datetime import datetime
 
     from app.services.scheduler import ScheduledTask
 
-    # 截断到整分再算“下一分钟”：否则恰好跨分钟边界时，
-    # future_minute 会变成“刚过的那一分钟”，下次触发要等一小时 → 偶发失败
+    # 目标分钟取"当前分钟 + 2"：_next_cron() 内部会**再读一次** now，而测试的 now 被截断到整分，
+    # 因此内部 now 的分钟最多比它大 1（跨过分钟边界时）。取 +2 才能保证目标分钟一定"还没到"，
+    # 不会掉进"目标已过 → 下一次要等一小时"的分支（此前偶发失败的真实原因）。
     now = datetime.now().replace(second=0, microsecond=0)
-    # 下一分钟触发
-    future_minute = (now.minute + 1) % 60
+    future_minute = (now.minute + 2) % 60
     cron = f"{future_minute} * * * *"
     task = ScheduledTask("t", cron, lambda: None)
     delta = task._next_cron()
-    assert 0 < delta < 120, f"应在一两分钟内触发，实际 {delta:.0f}s"
+    assert 0 < delta < 180, f"应在几分钟内触发，实际 {delta:.0f}s"
 
     # 每天固定时间（05:00）→ 距明天 05:00 或今天 05:00 的差值
     task2 = ScheduledTask("t2", "0 5 * * *", lambda: None)
