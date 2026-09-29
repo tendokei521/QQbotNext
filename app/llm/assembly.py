@@ -31,7 +31,7 @@ messages（OpenAI 风格）
 
 | # | 块 | 角色 | 来源 | 条件 |
 |---|---|---|---|---|
-| 1 | persona | system | ``config.system_prompt`` | 始终 |
+| 1 | persona | system | ``config.persona_preset_id``（活引用）或 ``config.system_prompt`` | 始终 |
 | 2 | schedule | system | ``prompt.SCHEDULE_INSTRUCTION`` | ``schedule_enable`` |
 | 3 | proactive | system | ``prompt.build_proactive_instruction`` | 有可用能力时 |
 | 4 | message_meta | system | ``LEGACY_/MESSAGE_META_INSTRUCTION`` | 消歧说明开启时 |
@@ -148,10 +148,68 @@ class Block:
 # ==================== 各块实现（只读 req，无副作用） ====================
 
 
+def resolve_persona_preset(req: PromptRequest) -> dict | None:
+    """按 ``persona_preset_id`` 解析角色预设（同步读配置中心，不阻塞）。
+
+    只认 ``req.cfg("persona_preset_id")`` 指向的预设；预设不存在（悬挂引用）或读不到时
+    返回 ``None`` 并留痕，由调用方回退到 ``system_prompt``。
+    """
+    preset_id = str(req.cfg("persona_preset_id", "") or "").strip()
+    if not preset_id:
+        return None
+    service = getattr(req.runtime, "config_service", None)
+    getter = getattr(service, "get_role_preset", None)
+    if not callable(getter):
+        return None
+    try:
+        preset = getter(preset_id)
+    except Exception as e:  # noqa: BLE001 —— 预设读取失败不该让整轮请求炸掉
+        logger.add_info(f"#{getattr(req.runtime, 'bot_id', '?')}").warning(
+            f"[Assembly] 读取角色预设失败（已忽略）: {preset_id}: {e}"
+        )
+        return None
+    if not isinstance(preset, dict):
+        logger.add_info(f"#{getattr(req.runtime, 'bot_id', '?')}").warning(
+            f"[Assembly] 角色预设不存在（悬挂引用）: {preset_id}，已回退 system_prompt"
+        )
+        return None
+    return preset
+
+
 def build_persona(req: PromptRequest) -> list[dict]:
-    """基础人设。"""
+    """基础人设：优先 ``persona_preset_id``（活引用），否则用 ``system_prompt``。"""
+    preset = resolve_persona_preset(req)
+    if preset is not None:
+        text = str(preset.get("system_prompt") or "").strip()
+        if text:
+            return [{"role": "system", "content": text}]
+        logger.add_info(f"#{getattr(req.runtime, 'bot_id', '?')}").warning(
+            "[Assembly] 角色预设没有 system_prompt，已回退 system_prompt"
+        )
     system_prompt = req.cfg("system_prompt", "你是一个友好的助手。")
     return [{"role": "system", "content": system_prompt}]
+
+
+def persona_begin_dialogs(req: PromptRequest) -> list[dict]:
+    """角色预设的预设对话（前插到历史最前，对齐 AstrBot 的 ``begin_dialogs``）。
+
+    只保留 ``{role: user|assistant, content: 非空}``，脏条目丢弃而不是抛错。
+    """
+    preset = resolve_persona_preset(req)
+    if preset is None:
+        return []
+    rows = preset.get("begin_dialogs")
+    if not isinstance(rows, list):
+        return []
+    result: list[dict] = []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").lower()
+        content = str(item.get("content") or "").strip()
+        if role in ("user", "assistant") and content:
+            result.append({"role": role, "content": content})
+    return result
 
 
 def build_schedule_instruction(req: PromptRequest) -> list[dict]:
@@ -230,8 +288,8 @@ def build_background(req: PromptRequest) -> list[dict]:
 
 
 def build_history(req: PromptRequest) -> list[dict]:
-    """会话历史（调用方已渲染打标并压缩）。"""
-    return list(req.history or [])
+    """会话历史（调用方已渲染打标并压缩）；角色预设的预设对话前插到最前。"""
+    return list(persona_begin_dialogs(req)) + list(req.history or [])
 
 
 def build_group_log(req: PromptRequest) -> list[dict]:

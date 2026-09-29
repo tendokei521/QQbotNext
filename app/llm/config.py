@@ -24,6 +24,10 @@ DEFAULT_LLM_CONFIG: dict = {
     "retry_attempts": 3,
     "model": "deepseek-chat",
     "system_prompt": "你是一个友好的助手。",
+    # 角色预设**活引用**：填预设 ID 时，每轮组装都按 ID 实时解析预设的提示词与预设对话，
+    # 因此改预设名/改提示词立刻生效（不需要"应用一次"把内容拷进 system_prompt）；
+    # 留空则完全走下面的 system_prompt —— 旧行为逐字不变。
+    "persona_preset_id": "",
     # 消息组装风格：blocks=框架默认（人设/协议/技能/记忆/背景各一条 system）；
     # single=把所有 system 块折成一条（对齐 AstrBot 那种「一整条 system prompt」形态）
     "system_prompt_style": "blocks",

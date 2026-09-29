@@ -142,6 +142,12 @@ SCHEMA = {
         "type": "textarea", "label": "系统提示词", "description": "设定AI角色的系统提示词",
         "default": "你是一个友好的助手。", "placeholder": "你是一个友好的助手...", "group": "group_session", "page": "role",
     },
+    "persona_preset_id": {
+        "type": "resource", "resource": "role_preset",
+        "label": "角色预设（活引用）",
+        "description": "选预设后，每轮组装按 ID 实时解析提示词与预设对话（改预设名/改提示词即时生效，无需重新“应用”）；留空则用上面的系统提示词",
+        "default": "", "group": "group_session", "page": "role",
+    },
     "system_prompt_style": {
         "type": "select", "label": "消息组装风格",
         "description": "分块=人设/定时协议/技能/记忆/背景各一条 system（默认）；单条=把所有 system 块折成一条（对齐 AstrBot 的组装形态，便于迁移比对）",
