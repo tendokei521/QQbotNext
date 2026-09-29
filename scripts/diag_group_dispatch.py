@@ -1,7 +1,9 @@
 """忠实复现：用远端 app.db + 真实网关接收/派发链路，重放「群聊 @ 不触发」。
 
-与 diag_account_swap_e2e 的差别：本脚本走 gateway._process_event（含同群多 Bot
-去重、忽略标记），而不是直接调 dispatcher，因此能定位「事件在派发前被谁吞掉」。
+与 diag_account_swap_e2e 的差别：本脚本走 gateway._process_event（含日志 / 忽略标记），
+而不是直接调 dispatcher，因此能定位「事件在派发前被谁吞掉」。
+
+注：网关的「同群多 Bot 去重」已移除（LLM 每账号独立），本脚本相应不再追踪去重结果。
 
 用法: venv\\Scripts\\python.exe scripts\\diag_group_dispatch.py 1\\data\\app.db
 """
@@ -135,17 +137,6 @@ async def main(db_file: str) -> None:
     import app.llm.chat as chat_mod
 
     chat_mod.iter_stream_with_fallback = patched_iter
-
-    # 覆写去重，暴露它到底放行还是吞掉（只影响本复现脚本的观测）
-    real_wait = gateway._wait_for_message
-
-    async def traced_wait(event, conn):
-        result = await real_wait(event, conn)
-        print(f"      [dedup] index={conn.index} 账号={conn.bot_id} → "
-              f"{'放行' if result is not None else '吞掉(None)'}", flush=True)
-        return result
-
-    gateway._wait_for_message = traced_wait
 
     # 登录两个账号（index0=B 3437542570, index1=A 3569937952，与线上 13:32 一致）
     conn0 = FakeConn(0, BOT_B, "才羽 ミドリ")

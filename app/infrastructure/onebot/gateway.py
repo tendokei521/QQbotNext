@@ -2,10 +2,12 @@
 
 替代原 webserver/ws_connect.py + ws_botserver.py：
 - 管理多账号连接 / 重连 / 断开；
-- 消息循环：API 响应消费 → payload 解码 → 转发消息拉取 → 多 Bot 同步去重 → 日志 → 派发；
+- 消息循环：API 响应消费 → payload 解码 → 转发消息拉取 → 日志 → 派发；
 - 登录后通过注入的 login_handler 触发模块加载（解耦 infrastructure 与 modules）。
 
-注意：多账号同群消息去重逻辑（wait_for_message / _eventable）自原项目忠实移植。
+账号隔离：每个账号独立处理自己收到的每条消息，不做跨账号"同群去重"。
+LLM 运行时按 ``event.account_id`` 取用，触发规则（@ / 关键词）由各账号自行判定；
+确需"同群只由一个账号响应"时用 WebUI 的单一服务（single_service）显式声明。
 """
 
 from __future__ import annotations
@@ -395,7 +397,7 @@ class OneBotGateway:
         start_type = False
         login_tasks: list[asyncio.Task] = []
         # 事件处理 worker：接收循环只负责「解析 + API 响应匹配 + 入队」，
-        # 耗时处理（模块调用 / 转发拉取 / 多 Bot 去重）在 worker 串行执行。
+        # 耗时处理（模块调用 / 转发拉取 / LLM 触发）在 worker 串行执行。
         # 若不这样拆分，模块内 await API 响应（如 send_private_msg 等 echo）时，
         # 接收循环被阻塞、无法消费该响应 → 请求/响应自锁 → 10s 超时。
         queue: asyncio.Queue = asyncio.Queue(maxsize=1024)  # 有界背压，防异常洪峰撑爆内存
@@ -552,7 +554,11 @@ class OneBotGateway:
     async def _process_event(
         self, event: BaseEvent, conn: BotConnection, bot_logger, recv_logger
     ) -> None:
-        """单条事件处理（原接收循环第 3~6 步）：转发拉取 / 日志 / 去重 / 忽略 / 派发。"""
+        """单条事件处理（原接收循环第 3~6 步）：转发拉取 / 日志 / 忽略 / 派发。
+
+        不做跨账号去重：每个账号独立处理自己收到的消息（多账号同群时各自按
+        自己的触发规则决定是否回复），避免"消息被其它账号吞掉后无人响应"。
+        """
         # 转发消息拉取
         if isinstance(event, MessageEvent) and event.event_type in ("message_group", "message_private"):
             event = await self._attach_forward_msg(event, conn)
@@ -584,23 +590,6 @@ class OneBotGateway:
                         # 推的 session-closed 通知）必须能看到原始 payload，否则只能靠时间猜。
                         text = f"{text} | raw={_raw_payload_text(event)}"
                     recv_logger.prefix(prefix).info(text)
-
-        # 群消息多 Bot 同步（仅当同群多 Bot 时等待全部收到，避免重复响应）
-        if isinstance(event, MessageEvent) and event.group.group_id and event.event_type == "message_group":
-            indexes = await self._wait_for_message(event, conn)
-            if indexes is None:
-                # 去重让位：同群多 Bot 时只有抢到处理权的那一个继续派发。
-                # 必须留痕——否则表现为「@了机器人却完全没反应」，而模块链/LLM 侧
-                # 一条日志都不会有，无从判断是被去重吞了还是别的原因。
-                bot_logger.debug(
-                    f"[去重] 群 {event.group.group_id} 消息 {event.message_id} 让位给其它账号"
-                    f"（本连接 #{conn.index}/{conn.bot_id}，同群在线={await self._message_indexes(event)}）"
-                )
-                return
-            bot_logger.debug(
-                f"[去重] 群 {event.group.group_id} 消息 {event.message_id} 由 #{conn.index}/{conn.bot_id} 处理"
-                f"（同群在线={indexes}）"
-            )
 
         # 忽略标记检查
         if self._is_ignore(event):
@@ -638,115 +627,6 @@ class OneBotGateway:
             self.cache.set(key, count - 1, 60)
             return True
         return False
-
-    # ==================== 多 Bot 同步去重（移植） ====================
-    async def _message_indexes(self, event: MessageEvent) -> list[int]:
-        group_id = event.group.group_id
-        indexes = []
-        for conn in self.connections.values():
-            if not conn.all_group_list:
-                continue
-            if group_id in conn.all_group_list:
-                indexes.append(conn.index)
-        return indexes
-
-    @staticmethod
-    def _mentions_bot(event: MessageEvent, bot_id) -> bool:
-        """消息里的 at 段是否点到了 ``bot_id``（与 app.llm.trigger.is_at_me 同一判据）。"""
-        if bot_id is None:
-            return False
-        for seg in event.message or []:
-            seg_type = getattr(seg, "type", None) or (seg.get("type") if isinstance(seg, dict) else "")
-            if seg_type != "at":
-                continue
-            data = getattr(seg, "data", None) or (seg.get("data") if isinstance(seg, dict) else {}) or {}
-            if str(data.get("qq", "")) == str(bot_id):
-                return True
-        return False
-
-    async def _wait_for_message(self, event: MessageEvent, conn: BotConnection):
-        """同群多 Bot 消息去重：有界等待其它 bot 到达，恰好一个 bot 处理。
-
-        - 无 bot 跟踪该群（启动初期/新群）→ 直接放行，绝不丢消息；
-        - 单 bot → 立即放行；
-        - 多 bot → 等待同群其它 bot（最多 wait_timeout 秒），由完成等待的一个
-          bot 抢到处理权，其余跳过。
-
-        **@ 定向**：这条消息若 @ 了本连接之外的账号，处理权必须让给它——否则
-        "谁先完成谁抢到"会把处理权交给没被 @ 的账号，它在节点链里判定
-        `is_at_me == False` 后静默跳过，而被 @ 的账号又被去重吞掉 →
-        表现为「群里 @ 机器人完全没反应」（私聊没有同群概念，故不受影响）。
-
-        让位是有界的：被 @ 的账号一直没来处理（掉线等）时仍然放行，绝不丢消息。
-
-        key 设计：base_key 含 message_id（一条消息唯一，同群同秒多条不混淆），
-        slot 用固定键存储各 bot 到达标记，所有 bot 读写同一个 slot/done_key，
-        避免各 bot 独立计数导致 slot 分裂、双双超时成为处理者。
-        """
-        msgtime = event.time
-        group_id = event.group.group_id
-        message_id = event.message_id
-        bot_index = conn.index
-        indexes = await self._message_indexes(event)
-        if not indexes:
-            return [bot_index]  # 无跟踪 → 放行（不丢弃）
-
-        base_key = f"{msgtime}_{group_id}_{message_id}"
-        done_key = f"{base_key}_done"
-        cache = self.cache
-        wait_timeout = 1.5
-
-        # 创建到达标记 slot（同步段无 await，并发安全）
-        if not cache.has(base_key):
-            index_data = {f"{i}": False for i in indexes}
-            cache.set(base_key, index_data, 3)
-
-        data = cache.get(base_key)
-        if isinstance(data, dict) and data.get(f"{bot_index}") is False:
-            data[f"{bot_index}"] = True
-            cache.set(base_key, data, 3)
-
-        # 本账号是否被 @；是否有别的在线账号被 @（后者才该回这条）
-        at_me = self._mentions_bot(event, conn.bot_id)
-        others_mentioned = any(
-            other.index != bot_index and self._mentions_bot(event, other.bot_id)
-            for other in self.connections.values()
-        )
-        if not at_me and others_mentioned:
-            # 让位给被 @ 的账号：不抢 _done，等它处理；它有界没来则本账号兜底放行
-            deadline = time.monotonic() + wait_timeout
-            while time.monotonic() < deadline:
-                if cache.has(done_key):
-                    return None
-                await asyncio.sleep(0.05)
-            if cache.has(done_key):
-                return None
-            cache.set(done_key, True, 3)
-            return indexes
-
-        deadline = time.monotonic() + wait_timeout
-        while time.monotonic() < deadline:
-            if cache.has(done_key):
-                return None  # 已有 bot 处理 → 跳过
-            data = cache.get(base_key)
-            if isinstance(data, dict) and all(data.values()):
-                # 全到齐：抢 _done（单事件循环内 check+set 原子，恰好一个成功）
-                if not cache.has(done_key):
-                    cache.set(done_key, True, 3)
-                    return indexes
-                return None
-            await asyncio.sleep(0.05)
-
-        # 超时：成为处理者，补全标记避免其它 bot 继续空等
-        if not cache.has(done_key):
-            cache.set(done_key, True, 3)
-            data = cache.get(base_key)
-            if isinstance(data, dict):
-                for i in list(data.keys()):
-                    data[i] = True
-                cache.set(base_key, data, 3)
-            return indexes
-        return None
 
     # ==================== 生命周期 ====================
     async def start_all(self, bots_config: list[dict]) -> None:

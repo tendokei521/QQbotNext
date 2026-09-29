@@ -1,7 +1,8 @@
-"""网关去重/消息处理时延回归测试。
+"""网关消息处理回归测试。
 
-背景：原 _eventable_sync 存在 off-by-one，每消息在 Windows 上白白等待 ~1.6s。
-修复后 _wait_for_message 必须即时返回。
+背景：网关曾做「同群多 Bot 同步去重」——一条群消息只放行一个账号进节点链，
+其余账号直接 return。这与「LLM 每账号独立」冲突（消息会被别的账号吞掉），
+现已移除：每个账号各自派发，是否回复由各自 Agent 的触发规则（@ / 关键词）判定。
 """
 
 import asyncio
@@ -39,56 +40,53 @@ def _event(msg_id: int, group_id=999, t=None):
     )
 
 
-def _gateway():
+class _NullLogger:
+    """吞掉日志的最小 logger 桩（_process_event 需要 bot/recv 两个 logger）。"""
+
+    def debug(self, *_a, **_k):
+        pass
+
+    info = debug
+
+    def prefix(self, *_a, **_k):
+        return self
+
+    def add_info(self, *_a, **_k):
+        return self
+
+
+async def test_each_account_dispatches_group_message_independently():
+    """回归：同群多账号各账号独立派发，不存在跨账号吞消息（去重）。
+
+    线上表现：同群两个账号，只有一个账号能进节点链；另一个账号的消息被「同群去重」
+    直接吞掉（历史上还出现过被 @ 的账号反而被吞 → 群里 @ 机器人完全没反应）。
+    用户要求 LLM 按账号独立，故网关切掉去重：每个账号自己收到的消息都要派发，
+    回不回由各账号 Agent 的触发规则决定。
+    """
     gw = OneBotGateway(settings=_Settings(), cache=Cache())
-    gw.connections = {1: _Conn(1, [999])}
-    return gw
+    conn0, conn1 = _Conn(0, [999]), _Conn(1, [999])
+    gw.connections = {0: conn0, 1: conn1}
+
+    seen: list[tuple] = []
+
+    async def handler(event):
+        seen.append((event.bot_index, event.self_id))
+
+    gw.dispatch_handler = handler
+
+    for conn in (conn0, conn1):
+        event = _event(1)
+        event.bot_index = conn.index
+        event.self_id = 1000 + conn.index
+        await gw._process_event(event, conn, _NullLogger(), _NullLogger())
+
+    assert seen == [(0, 1000), (1, 1001)], f"同群两个账号都必须各自派发 → {seen}"
 
 
-async def test_wait_for_message_returns_immediately():
-    """单 bot 场景：连续快速消息，每次去重判定即时返回（回归：曾等待 ~1.6s）。"""
-    gw = _gateway()
-    for i in range(10):
-        t0 = time.perf_counter()
-        idx = await gw._wait_for_message(_event(i), gw.connections[1])
-        elapsed = time.perf_counter() - t0
-        assert idx is not None, "单 bot 消息不应被去重跳过"
-        assert elapsed < 0.1, f"去重耗时异常: {elapsed:.3f}s"
-
-
-async def test_multi_bot_exactly_one_handler():
-    """同群多 bot：恰好一个 bot 被放行处理，其余跳过（_done 标记）。"""
-    gw = OneBotGateway(settings=_Settings(), cache=Cache())
-    gw.connections = {0: _Conn(0, [999]), 1: _Conn(1, [999])}
-
-    # 两个 bot 并发到达同一消息 → 恰好一个返回非 None
-    results = await asyncio.gather(
-        gw._wait_for_message(_event(1), gw.connections[1]),
-        gw._wait_for_message(_event(1), gw.connections[0]),
-    )
-    handlers = [r for r in results if r is not None]
-    assert len(handlers) == 1, f"应恰好一个处理者，实际 {len(handlers)}"
-
-
-async def test_empty_tracking_passes_through():
-    """无 bot 跟踪该群（启动初期/新群）→ 放行而非丢弃消息。"""
-    gw = OneBotGateway(settings=_Settings(), cache=Cache())
-    gw.connections = {1: _Conn(1, [])}  # bot 群列表为空
-
-    idx = await gw._wait_for_message(_event(5), gw.connections[1])
-    assert idx is not None, "空跟踪不应丢弃消息"
-
-
-async def test_timeout_fallback_processes():
-    """同群另一 bot 永不到达 → 等待超时后由等待方处理（不再永久丢弃）。"""
-    gw = OneBotGateway(settings=_Settings(), cache=Cache())
-    gw.connections = {0: _Conn(0, [999]), 1: _Conn(1, [999])}
-
-    t0 = time.perf_counter()
-    idx = await gw._wait_for_message(_event(9), gw.connections[1])  # bot 0 永不到达
-    elapsed = time.perf_counter() - t0
-    assert idx is not None
-    assert elapsed < 5, f"超时兜底应 <5s，实际 {elapsed:.2f}s"
+async def test_process_event_has_no_cross_account_dedup_api():
+    """去重实现已移除：网关不得再暴露 _wait_for_message / _mentions_bot 等入口。"""
+    for name in ("_wait_for_message", "_message_indexes", "_mentions_bot"):
+        assert not hasattr(OneBotGateway, name), f"{name} 应随跨账号去重一并移除"
 
 
 def _msg_event(segs):
