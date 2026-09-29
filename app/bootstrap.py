@@ -207,6 +207,14 @@ def build_container(settings: Settings | None = None) -> Container:
     )
     container.register_factory(ModuleLLMClient, lambda: module_llm)
 
+    def _capabilities() -> dict:
+        """框架能力清单（延迟计算：services 自身此刻还在构造中）。"""
+        from app.services.capabilities import collect_capabilities
+
+        return collect_capabilities(
+            services=services, features=feature_registry, resources=resource_registry
+        )
+
     services = ServiceAccess(
         cache=cache, config_service=config_service, task_manager=task_manager,
         settings=settings, providers=providers, data_sources=providers, scheduler=scheduler,
@@ -217,7 +225,7 @@ def build_container(settings: Settings | None = None) -> Container:
         lifecycle_hooks=lifecycle_hook_registry, event_completed_hooks=event_completed_hook_registry,
         features=feature_registry,
         config_profiles=config_profile_service, role_presets=role_preset_service,
-        resources=resource_registry,
+        resources=resource_registry, capabilities=_capabilities,
     )
     container.register_factory(ServiceAccess, lambda: services)
 

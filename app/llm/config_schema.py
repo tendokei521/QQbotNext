@@ -545,7 +545,8 @@ SCHEMA = {
         "default": False, "group": "group_knowledge",
     },
     "knowledge_embedding_model_id": {
-        "type": "string", "label": "Embedding 模型实例 ID", "description": "留空自动选择第一个启用且能力类型为 Embedding 的模型实例",
+        "type": "resource", "resource": "provider_model", "filters": {"provider_type": "embedding"},
+        "label": "Embedding 模型实例", "description": "下拉直接选模型实例（只列能力类型为 Embedding 的）；留空自动选择第一个启用且能力类型为 Embedding 的模型实例",
         "default": "", "group": "group_knowledge",
     },
     "knowledge_recall_limit": {

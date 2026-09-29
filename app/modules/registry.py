@@ -338,6 +338,16 @@ class ModuleRegistry:
                     await scheduler.register_module(instance)
                 except Exception as e:
                     self.log.warning(f"[Module] {module_name} 定时任务注册异常: {e}")
+            # 依赖自检：requires 里声明的服务/能力缺失时只警告不阻断（模块可据此降级）
+            try:
+                missing = instance.missing_requirements()
+                if missing:
+                    self.log.warning(
+                        f"[Module] {module_name} 声明依赖缺失: {', '.join(missing)}（相关功能会降级）"
+                    )
+            except Exception as e:  # noqa: BLE001 —— 自检失败不该影响模块加载
+                self.log.debug(f"[Module] {module_name} 依赖自检失败（已忽略）: {e}")
+
             try:
                 await instance.on_load()
             except Exception as e:

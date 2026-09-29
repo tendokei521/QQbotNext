@@ -17,6 +17,8 @@ from __future__ import annotations
 import copy
 from typing import Any
 
+#: schema 契约版本：新增类型/改变字段语义时递增（模块可据此判断框架能否渲染）
+SCHEMA_VERSION = 2
 #: 与前端两套渲染器一致的基础类型（新增类型请先加进这里，否则会被标 unknown_type）
 SIMPLE_TYPES = (
     "text", "string", "password", "number", "integer", "float",

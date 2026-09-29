@@ -231,6 +231,7 @@ class ServiceAccess:
     lifecycle_hooks: Any = None     # Bot 生命周期钩子注册表
     event_completed_hooks: Any = None  # 事件处理完成钩子注册表
     features: Any = None            # 全局 FeatureRegistry（能力接管/恢复）
+    capabilities: Any = None        # 能力清单（callable() -> dict）：模块自检框架有什么
     extra: dict[str, Any] = field(default_factory=dict)
 
     def __getitem__(self, key: str) -> Any:
@@ -287,6 +288,9 @@ class BaseModule(ABC):
     pinned: bool = False            # 是否默认置顶
     provides: tuple = ()            # 本插件提供的能力（feature_id 列表）
     supersedes: tuple = ()          # 启用时自动接管/禁用的能力（feature_id 列表）
+    #: 声明的框架依赖（服务名或 feature_id，如 ("llm", "role_presets")）：
+    #: 加载时自动校验，缺失只 WARNING 不阻断；模块可用 self.missing_requirements() 据此降级
+    requires: tuple = ()
 
     def __init__(self, ctx: ModuleContext) -> None:
         self.ctx = ctx
@@ -407,6 +411,17 @@ class BaseModule(ABC):
     async def on_load(self) -> None: ...
 
     async def on_unload(self) -> None: ...
+
+    # ---------- 框架依赖自检 ----------
+    def missing_requirements(self) -> list[str]:
+        """本模块 ``requires`` 里框架未提供的部分（空列表 = 满足或未声明）。
+
+        加载时框架会自动校验并 WARNING 列出缺失项；模块也可在 ``on_load``
+        或业务入口据此降级（例如没有 ``llm`` 就关掉自己的模型相关功能）。
+        """
+        from app.modules.requirements import missing_requirements
+
+        return missing_requirements(self)
 
     # ---------- 调系统 LLM（模块自己的模型请求） ----------
     async def llm_chat(self, messages: list[dict], **kwargs):
