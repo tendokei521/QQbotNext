@@ -18,6 +18,7 @@ from app.infrastructure.config.config_service import ConfigService
 from app.infrastructure.onebot.gateway import OneBotGateway
 from app.infrastructure.persistence.database import Database
 from app.llm.manager import AgentManager
+from app.llm.module_client import ModuleLLMClient
 from app.modules.base import ServiceAccess
 from app.modules.dispatcher import ModuleDispatcher
 from app.modules.features import (
@@ -198,10 +199,20 @@ def build_container(settings: Settings | None = None) -> Container:
     resource_registry.register("bot", _bot_resources, label="Bot 账号", desc="已配置的连接及其登录账号")
     container.register_factory(ResourceRegistry, lambda: resource_registry)
 
+    # 模块用 LLM 客户端：让模块用「系统的 provider」而不必自备密钥
+    module_llm = ModuleLLMClient(
+        agent_manager=agent_manager,
+        runtime_manager=provider_runtime_manager,
+        model_service=provider_model_service,
+    )
+    container.register_factory(ModuleLLMClient, lambda: module_llm)
+
     services = ServiceAccess(
         cache=cache, config_service=config_service, task_manager=task_manager,
-        settings=settings, providers=providers, scheduler=scheduler,
-        agent_manager=agent_manager, send_hooks=send_hook_registry,
+        settings=settings, providers=providers, data_sources=providers, scheduler=scheduler,
+        agent_manager=agent_manager, llm=module_llm,
+        provider_presets=provider_preset_service, provider_models=provider_model_service,
+        send_hooks=send_hook_registry,
         before_send_hooks=before_send_hook_registry, api_hooks=api_hook_registry,
         lifecycle_hooks=lifecycle_hook_registry, event_completed_hooks=event_completed_hook_registry,
         features=feature_registry,

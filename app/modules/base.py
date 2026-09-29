@@ -214,8 +214,14 @@ class ServiceAccess:
     task_manager: Any = None
     settings: Any = None
     providers: Any = None           # 数据源注册表（ProviderRegistry）：只管 list/dynamic 的模块数据源
+    #: ``providers`` 的语义化别名（同一个对象）：它跟 LLM provider 无关，
+    #: 用 LLM 请用 ``llm``，别被 "providers" 这个词误导。
+    data_sources: Any = None
     scheduler: Any = None
     agent_manager: Any = None  # 框架级 LLM Agent 运行时管理
+    llm: Any = None            # 模块用 LLM 客户端（ModuleLLMClient）：chat/stream/models/resolve
+    provider_presets: Any = None  # Provider 预设服务（ProviderPresetService）：连接配置（含密钥，只读列表用）
+    provider_models: Any = None   # Provider 模型服务（ProviderModelService）：模型实例 CRUD/清单
     config_profiles: Any = None  # 配置档案与路由（ConfigProfileService）：按会话 UMO 换整套配置
     role_presets: Any = None     # 角色预设（RolePresetService）：可复用人设（含预设对话/工具/技能）
     resources: Any = None        # 系统资源注册表（ResourceRegistry）：schema resource 字段的候选来源
@@ -401,6 +407,45 @@ class BaseModule(ABC):
     async def on_load(self) -> None: ...
 
     async def on_unload(self) -> None: ...
+
+    # ---------- 调系统 LLM（模块自己的模型请求） ----------
+    async def llm_chat(self, messages: list[dict], **kwargs):
+        """用系统 provider 做一次 LLM 请求（密钥 / 回退链 / 记账都留在框架）。
+
+        缺省用**本账号** Agent 配置的模型池；也可传 ``model_id`` / ``preset_id`` 指定
+        （通常来自配置里 ``type: "resource"`` 的下拉选择）。没有可用配置时返回空
+        ``LLMResponse``（``resp.ok`` 为假），模块据此走降级分支。
+
+        例：``resp = await self.llm_chat([{"role": "user", "content": "你好"}])``
+        """
+        client = getattr(getattr(self, "ctx", None), "services", None)
+        client = getattr(client, "llm", None)
+        if client is None:
+            return self._llm_unavailable("llm_chat")
+        kwargs.setdefault("bot_id", self.bot_id)
+        return await client.chat(messages, **kwargs)
+
+    async def llm_stream(self, messages: list[dict], **kwargs):
+        """流式版 ``llm_chat``（逐个事件产出）；没有可用配置时不产出任何事件。"""
+        client = getattr(getattr(self, "ctx", None), "services", None)
+        client = getattr(client, "llm", None)
+        if client is None:
+            self._llm_unavailable("llm_stream")
+            return
+        kwargs.setdefault("bot_id", self.bot_id)
+        async for event in client.stream(messages, **kwargs):
+            yield event
+
+    def _llm_unavailable(self, where: str):
+        """框架没注入 LLM 客户端时的兜底：留痕并返回空响应（不抛，避免模块直接崩）。"""
+        from app.core.logger import module_logger
+        from app.llm.providers.base import LLMResponse
+
+        module_logger.add_info(f"#{self.bot_id}").warning(
+            f"[{self.module_name}] ctx.services.llm 不可用（{where}）："
+            "该框架版本未提供模块 LLM 客户端"
+        )
+        return LLMResponse(text="", raw=None)
 
     # ---------- 业务入口 ----------
     async def handle(self, event: BaseEvent) -> None:
