@@ -8,8 +8,9 @@ from __future__ import annotations
 SCHEMA: dict = {
     # ── 人设 ──────────────────────────────────────────────
     "persona_preset_id": {
-        "type": "string", "label": "角色预设 ID（可选）",
-        "description": "填角色预设 ID 时，用人设的 system_prompt 与 begin_dialogs；留空则用 Agent 配置里的系统提示词",
+        "type": "resource", "resource": "role_preset",
+        "label": "角色预设（可选）",
+        "description": "下拉直接选系统里的角色预设；留空则用 Agent 配置里的系统提示词。改预设名/提示词即时生效，不用重新“应用”",
         "default": "",
     },
     "persona_begin_dialogs": {

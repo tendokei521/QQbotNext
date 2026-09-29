@@ -166,6 +166,41 @@ class Module(BaseModule):
 | `select` | 下拉框（`options` 为 `{value: label}` 字典） | 字符串 |
 | `textarea` | 多行输入（`rows`） | 字符串 |
 | `time` | 时间选择器 | `"HH:MM"` |
+| `resource` | **资源下拉框**：候选来自框架资源注册表，可直接选系统预设 | 资源 id（字符串） |
+| `resources` | 资源多选（同上，可多选） | 资源 id 数组 |
+
+### resource / resources —— 直接引用系统资源（推荐替代「手抄 ID」）
+
+不用手抄 ID，也不用自己写 `dynamic` 数据源：框架已把「可被引用的资源」注册成统一目录
+（`app/services/resource_registry.py`，可用 `GET /api/resources` 查看全部种类）：
+
+```python
+"persona_preset_id": {
+    "type": "resource",          # 多选写 "resources"
+    "resource": "role_preset",   # 资源种类（见下表）
+    "label": "角色预设",
+    "default": "",
+    "allow_empty": True,         # 允许留空（界面上可清空）
+    "filters": {},               # 可选：透传给候选接口的过滤条件
+},
+```
+
+| 内置资源种类 | 说明 |
+|---|---|
+| `role_preset` | 角色预设（system_prompt + 预设对话 + 工具/技能） |
+| `config_profile` | 配置档案（可经路由绑定会话的整套 Agent 配置） |
+| `provider_preset` | Provider 连接预设（api_base / 密钥由框架保管） |
+| `provider_model` | Provider 模型实例（可 `filters={"provider_type": "embedding"}` 过滤） |
+| `bot` | Bot 账号 |
+| `module` | 已加载的模块名 |
+
+- 运行时读法不变：`module.config.get("persona_preset_id")` 得到资源 id；
+- 悬挂引用（资源被删）在界面上显示成「`<id>`（已删除或未找到）」，不会变成空白；
+- 种类名写错时字段会带上 `issues: ["unknown_resource:<kind>"]`（随 schema 下发），
+  界面显示「资源种类未注册：<kind>」——**不会**伪装成"这个下拉没有数据"。
+
+> 想新增资源种类：框架侧在 `bootstrap.py` 里 `resource_registry.register(kind, handler, ...)`；
+> 模块也可以在自己的 `on_load` 中调用 `module.ctx.services.resources.register(...)`。
 
 ### string_list —— 可增删的字符串列表
 
@@ -406,25 +441,47 @@ async def register_schedule(module):
 - 配置变更（WebUI 修改时间）后需「刷新模块」重新 on_load 生效；
 - 参考实现：`msg_df_password`（cron_time）、`time_sign_in`（daily_signin_time）。
 
-### LLM Provider 抽象（框架级 app/llm）
+### 调系统 LLM（推荐：`self.llm_chat`）
 
-`app/llm/providers/` 提供「调哪个 LLM」与「怎么用」解耦：
+模块要做一次模型请求（翻译 / 摘要 / 分类 / 判意…）时，**不要**自备 api_key、也不要自己拼
+provider 配置 —— 用框架给的客户端（`ctx.services.llm`，模块侧快捷方式 `self.llm_chat`）：
 
 ```python
-from app.llm.providers import get_provider
+# 1) 用本账号 Agent 配置的模型池（默认；即"系统的 provider"）
+resp = await self.llm_chat([{"role": "user", "content": "把这句话翻成英文：你好"}])
+if resp.ok:
+    text = resp.text
 
-provider = get_provider(config)                  # 按 config["provider"] 选择
-resp = await provider.chat(messages, model=model, temperature=0.7, max_tokens=150)
-# resp: LLMResponse(text, reasoning, usage, raw)；resp.ok 判断是否成功
+# 2) 指定模型：model_id 通常来自配置里 type="resource" 的下拉
+model_id = self.config.get("model_id")
+resp = await self.llm_chat(messages, model_id=model_id, system="你是翻译官", temperature=0.3)
+
+# 3) 流式
+async for ev in self.llm_stream(messages, model_id=model_id):
+    if ev.type == "text":
+        ...
 ```
 
-- 内置 `openai`（OpenAI/DeepSeek/中转兼容）：**429/5xx/网络错误指数退避重试**（`retry_attempts`），认证 4xx 立即失败，`api_key` 支持多 key 换行/逗号分隔轮换；
-- 新增后端 = 在 `providers/` 加一个 `BaseProvider` 子类并注册到 `PROVIDERS`。
-- 会话/对话分离：`#llm new [标题]` 开新对话、`#llm switch <id>` 切换、`#llm list` 列出当前会话的多个对话线程；
-  完整指令表见 `#llm help`（合并转发发送，总表在 `app/llm/commands.py`）。
-- **主动消息**（化用 astrbot_plugin_proactive_chat）：`proactive_*` 配置分组——私聊按随机间隔主动发言、
-  群聊沉默后主动开口、免打扰时段、未回复上限；状态持久化到 `proactive_data.json`；
-  模块自带 `pages/index.html`（LLM 基础 + 主动消息合并配置页，WebUI 中以自定义页渲染）。
+- **密钥、回退链（多 provider 轮询）、空回复重试、token 记账、遥测**全部留在框架，
+  模块配置里不该再出现 api_key；
+- 候选清单：`self.ctx.services.llm.models(kind="chat")`（也可 `"embedding"` / `"all"`）；
+  解析自检：`self.ctx.services.llm.resolve(model_id=...)` —— 只回脱敏摘要，不含密钥；
+- 拿不到配置时返回**空** `LLMResponse`（`resp.ok` 为假）并留痕，不抛异常；
+  模块据此走降级分支（例如回一句固定文案）。
+
+> 旧的直连方式仍然可用、存量模块不受影响，但不再推荐：
+> `from app.llm.providers import get_provider` → `get_provider(dict(module.config.raw_config))`
+> —— 它要求模块自己保管 `api_key`，也没有回退与记账。
+
+### 会话/对话与其它框架能力
+
+- 会话与对话分离：`#llm new [标题]` 开新对话、`#llm switch <id>` 切换、`#llm list` 列出；
+- 历史读取：`runtime.session_mgr.history_snapshot(session_id)` 给**未投影的原始条目**
+  （自带渲染器时用），`get_history()` 给**投影视图**（可直接喂 messages），
+  `import_history()` 可批量导入外部历史；
+- 主动消息与定时任务：`proactive_*` 配置分组 + `#llm schedule`；
+- 角色预设 / 配置档案：`ctx.services.role_presets` / `ctx.services.config_profiles`；
+- 系统资源目录：`ctx.services.resources`（`options(kind)` / `kinds()`）。
 
 ### 数据源 LIST_PROVIDERS / DYNAMIC_PROVIDERS
 

@@ -445,6 +445,14 @@ def test_config_defaults_match_schema():
         assert SCHEMA[key]["default"] == default, f"{key} 默认值不一致：schema={SCHEMA[key]['default']} code={default}"
 
 
+def test_persona_field_is_a_resource_reference():
+    """本插件是 `type: "resource"` 的首个使用者：人设直接在界面下拉选系统角色预设。"""
+    field = SCHEMA["persona_preset_id"]
+    assert field["type"] == "resource"
+    assert field["resource"] == "role_preset", "种类必须是框架注册过的（否则 schema 会带 unknown_resource）"
+    assert field["default"] == DEFAULT_CONFIG["persona_preset_id"] == ""
+
+
 # ==================== 端到端：真容器里加载即接管 ====================
 
 
