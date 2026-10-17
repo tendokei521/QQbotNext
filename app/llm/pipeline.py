@@ -40,7 +40,19 @@ class LlmPipeline:
         session_id = f"group_{event.group.group_id}" if is_group else f"private_{event.user_id}"
         user_text = event.text.strip()
 
-        # 回复打断：代际在 _run 中确认真正触发 LLM 后再递增，避免普通消息误打断
+        # 回复打断：代际必须在**新消息提交时**抬高，否则打断失效。
+        #
+        # 历史坑（b86fc18）：代际自增曾被搬到 _run 里"确认真正触发 LLM 后"再执行，
+        # 结果是任务自己抬高代际、再把自己认领为最新代际——于是
+        # ① 旧任务在会话锁上排队时被打断，拿到锁后立刻"自我复活"，照样发请求；
+        # ② 正在流式输出的任务被打断后只要再执行一次该赋值就复活，剩余句子继续发。
+        # 两者都会表现为"开了打断还是一条条挨个回复"。
+        #
+        # 这里在提交时只对**确实会触发 LLM**的消息抬高代际（与 _run 的准入判定
+        # 共用 _would_trigger_llm，避免两处漂移）：群聊里没被 @/未命中关键词的
+        # 普通消息不会误打断，这正是 b86fc18 原本要防的问题。
+        if self._would_trigger_llm(event, user_text, is_group):
+            self.interrupt_session(session_id)
         generation = self._session_generation.get(session_id, 0)
 
         ctx = LlmContext(
@@ -60,12 +72,68 @@ class LlmPipeline:
         return task
 
     def interrupt_session(self, session_id: str) -> None:
-        """手动使某会话的旧任务过期。"""
+        """使某会话的旧任务过期（代际单调递增）。"""
         self._session_generation[session_id] = self._session_generation.get(session_id, 0) + 1
 
     def is_stale(self, job: LlmJob) -> bool:
-        """判断任务是否已被同一会话的新消息打断。"""
-        return self._session_generation.get(job.group_key, 0) != job.generation
+        """判断任务是否已被同一会话的新消息打断。
+
+        代际只增不减，因此用 ``>`` 而不是 ``!=``：任何"自己认领当前代际"的写法
+        都不该能把一个已被取代的任务重新判定为新鲜（这正是打断失效的成因）。
+        """
+        return self._session_generation.get(job.group_key, 0) > job.generation
+
+    def _adopt_generation_if_latest(self, job: LlmJob) -> bool:
+        """任务进入 LLM 请求前的最后一道判定：我是否仍是最新任务？
+
+        返回 ``True`` 表示可以把本轮代际认领为当前值并继续；
+        返回 ``False`` 表示本任务在等待会话锁期间已被新消息取代，应当放弃。
+
+        关键：只有"我的代际已经等于当前代际"才允许继续。若当前代际更高，
+        说明已有更新的任务提交过，本任务**不得**把自己的代际改写成当前值——
+        那会让 ``is_stale`` 永久失去判断力。
+        """
+        current = self._session_generation.get(job.group_key, 0)
+        if current > job.generation:
+            return False
+        job.generation = current
+        return True
+
+    def _would_trigger_llm(self, event, user_text: str, is_group: bool) -> bool:
+        """轻量判定：这条消息是否**真的会触发 LLM**（与 _run 的准入条件同源）。
+
+        只覆盖与"消息本身"有关的准入：``#llm`` 指令走独立分支、群聊需 @/关键词、
+        私聊非空文本或图片。会话配置（group_enable / private_enable / api_key）
+        属于运行期判定，不在这里读取——提交时 ``config`` 的会话路由可能还没切换。
+
+        用途：只有真触发的消息才允许打断同会话旧任务；普通群聊消息不打断。
+        """
+        if is_command(user_text):
+            return False
+        if not is_group:
+            # 私聊：纯图片也算触发（图片由多模态链路承载）
+            if user_text.strip():
+                return True
+            try:
+                from app.llm.image import collect_image_segments
+
+                return bool(collect_image_segments(event))
+            except Exception:  # noqa: BLE001 —— 判定失败按"不打断"处理，保守优先
+                return False
+
+        config = self.runtime.config
+        from app.llm.trigger import check_trigger
+
+        try:
+            triggered, _is_at, text = check_trigger(
+                event.message,
+                event.self_id,
+                config.get("trigger_at", False),
+                config.get("trigger_keyword", []),
+            )
+        except Exception:  # noqa: BLE001 —— 判定失败按"不打断"处理，保守优先
+            return False
+        return bool(triggered and (text.strip() or user_text.strip()))
 
     async def _resolve_images(self, ctx: LlmContext) -> list[dict]:
         """解析本轮消息的图片（仅当模型声明了 image 模态且开关打开）。
@@ -183,10 +251,14 @@ class LlmPipeline:
             await session_lock.acquire()
             lock_acquired = True
 
-            # 确认本轮真正会触发 LLM 后，再使同一会话旧任务过期（回复打断）
-            if getattr(self.runtime, "interrupt_enabled", False):
-                self.interrupt_session(ctx.session_id)
-                ctx.job.generation = self._session_generation.get(ctx.session_id, 0)
+            # 确认本轮真正会触发 LLM 后，再判定自己是否已被后来的消息取代（回复打断）。
+            # 注意：这里**不能**重新抬高代际并认领（历史 b86fc18 的写法），
+            # 否则在会话锁上排队的旧任务会"自我复活"，打断彻底失效。
+            #
+            # 位置在 #llm 指令分支之后：指令不产生流式回复、也不参与打断代际，
+            # 不能被本判定顺手丢掉（否则新消息会把正在排队的指令顶掉）。
+            if not self._adopt_generation_if_latest(ctx.job):
+                return
 
             # 只有真正进入 LLM 请求前才更新主动消息状态（群聊普通消息不重置沉默计时器）
             await self._observe(ctx)
@@ -266,7 +338,7 @@ class LlmPipeline:
             interrupted = False
 
             async for sentence in stream_response(self.runtime, ctx.event, ctx):
-                if self.is_stale(ctx.job):
+                if self._should_break_stream(ctx):
                     interrupted = True
                     break
 
@@ -313,11 +385,11 @@ class LlmPipeline:
             send_message=send_message,
             pre_send=pre_send_hook,
             post_send=post_send_hook,
-            should_cancel=lambda: self.is_stale(ctx.job),
+            should_cancel=lambda: self._should_break_stream(ctx),
         )
         try:
             async for sentence in stream_response(self.runtime, ctx.event, ctx):
-                if self.is_stale(ctx.job):
+                if self._should_break_stream(ctx):
                     interrupted = True
                     break
                 msg = outbound.build(sentence)
@@ -335,6 +407,24 @@ class LlmPipeline:
             ctx.state["interrupted"] = True
 
         await self._run_stage("post_stream", ctx)
+
+    def _should_break_stream(self, ctx: LlmContext) -> bool:
+        """流式发送中途是否应当停止继续发剩余句子。
+
+        两个条件同时成立才算"打断"：
+
+        1. 本任务已被同会话新消息取代（``is_stale``）——代际只增不减；
+        2. 该会话确实开启了回复打断（``interrupt_enable``）。
+
+        第 2 条是尊重功能开关的原始契约（"收到新消息时取消剩余发送并开始新一次回复"）：
+        开关关闭时，在跑的一轮仍按老行为把已生成的句子发完。
+        """
+        if ctx.job is None or not self.is_stale(ctx.job):
+            return False
+        try:
+            return bool(self.runtime.config.get("interrupt_enable", False))
+        except Exception:  # noqa: BLE001 —— 配置读取失败按"不打断"处理，保守优先
+            return False
 
     async def _save_sent_history(self, ctx: LlmContext, sent_parts: list[str]) -> None:
         """回复被打断时，把实际已发送的内容写入历史。"""
