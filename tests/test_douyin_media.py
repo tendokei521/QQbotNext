@@ -217,6 +217,16 @@ def test_extract_video_qualities_empty():
     assert media.extract_nwm_url({"aweme_detail": {}}) is None
 
 
+def test_pick_quality_prefers_requested_then_falls_back_to_best():
+    qualities = media.extract_video_qualities(DETAIL_VIDEO)
+    assert media.pick_quality(qualities, "highest")["ratio"] == "1080p"
+    assert media.pick_quality(qualities, "")["ratio"] == "1080p"
+    assert media.pick_quality(qualities, "540p")["ratio"] == "540p"
+    # 指定档位不存在时回落最高可用，而不是整条降级成文本
+    assert media.pick_quality(qualities, "480p")["ratio"] == "1080p"
+    assert media.pick_quality([], "highest") is None
+
+
 # ---------------- 图集 ----------------
 
 

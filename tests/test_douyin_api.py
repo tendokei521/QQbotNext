@@ -215,9 +215,11 @@ class FakeStream:
 def _api_with_stream(responses: list) -> DouyinAPI:
     api = DouyinAPI()
     queue = list(responses)
+    api.stream_calls = []
 
     def fake_stream(method, url, headers=None, timeout=60):
-        return FakeStream(queue.pop(0))
+        api.stream_calls.append(url)
+        return FakeStream(queue.pop(0) if queue else FakeStreamResp([b"extra"]))
 
     api.stream = fake_stream
     return api
@@ -264,6 +266,34 @@ async def test_download_cleans_part_on_failure(tmp_path, monkeypatch):
 
 async def _no_sleep(seconds):
     return None
+
+
+async def test_download_aborts_when_exceeding_max_bytes(tmp_path, monkeypatch):
+    """体积上限是边下边卡的：超限立即中断、清理半成品，且不再重试。"""
+    monkeypatch.setattr(api_mod, "_sleep", _no_sleep)
+    dest = str(tmp_path / "v.mp4")
+    api = _api_with_stream([FakeStreamResp([b"AAAA", b"BBBB"])])
+
+    try:
+        await api.download("http://cdn/x", dest, timeout=5, max_bytes=6)
+        raise AssertionError("应抛出 DownloadTooLarge")
+    except api_mod.DownloadTooLarge:
+        pass
+
+    assert len(api.stream_calls) == 1  # 超限是确定放弃，不重试
+    assert not os.path.exists(dest)
+    assert not os.path.exists(dest + ".part")
+
+
+async def test_download_within_max_bytes_succeeds(tmp_path, monkeypatch):
+    monkeypatch.setattr(api_mod, "_sleep", _no_sleep)
+    dest = str(tmp_path / "v.mp4")
+    api = _api_with_stream([FakeStreamResp([b"AAAA", b"BBBB"])])
+
+    await api.download("http://cdn/x", dest, timeout=5, max_bytes=8)
+
+    with open(dest, "rb") as fh:
+        assert fh.read() == b"AAAABBBB"
 
 
 # ==================== 去重 ====================

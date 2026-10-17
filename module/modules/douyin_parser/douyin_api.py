@@ -84,6 +84,13 @@ async def _sleep(seconds: float) -> None:
     await asyncio.sleep(seconds)
 
 
+class DownloadTooLarge(Exception):
+    """下载体积超过调用方给的上限（``download(max_bytes=...)``）。
+
+    抖音接口不返回文件大小，只能边下边卡：超限立即中断，避免白下几百 MB 再删。
+    """
+
+
 class DouyinAPI(CurlCffiClient):
     """抖音 API 封装：短链归一 + 作品详情 + 主页作品 + 流式下载。
 
@@ -230,11 +237,15 @@ class DouyinAPI(CurlCffiClient):
 
     # ---------- 下载 ----------
 
-    async def download(self, url: str, dest: str, timeout: int = 60, headers: dict | None = None) -> str:
+    async def download(
+        self, url: str, dest: str, timeout: int = 60, headers: dict | None = None, max_bytes: int = 0
+    ) -> str:
         """把 ``url`` 流式下载到 ``dest``（``.part`` + 原子改名）。
 
         容错：CDN 偶发中断连接，失败后**回滚到起始偏移**再重试（最多 ``DOWNLOAD_RETRIES`` 次）——
         不回滚直接重试会把重复字节写进文件。整体失败时清理半成品。
+
+        ``max_bytes > 0`` 时边下边卡体积，超限抛 ``DownloadTooLarge``（半成品同样清理）。
         """
         os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
         part = dest + PART_SUFFIX
@@ -251,9 +262,16 @@ class DouyinAPI(CurlCffiClient):
                             if resp.status_code not in (200, 206):
                                 raise RuntimeError(f"下载失败：HTTP {resp.status_code}")
                             async for chunk in resp.aiter_content(chunk_size=DOWNLOAD_CHUNK):
-                                if chunk:
-                                    fh.write(chunk)
+                                if not chunk:
+                                    continue
+                                fh.write(chunk)
+                                if max_bytes > 0 and fh.tell() > max_bytes:
+                                    raise DownloadTooLarge(
+                                        f"体积超过上限（已下载 {fh.tell()} 字节）"
+                                    )
                         break
+                    except DownloadTooLarge:
+                        raise
                     except Exception as e:
                         if attempt >= DOWNLOAD_RETRIES:
                             raise
@@ -289,3 +307,12 @@ class DouyinAPI(CurlCffiClient):
         for key in [k for k, v in cls._aweme_cache.items() if (now - v) >= timeout]:
             del cls._aweme_cache[key]
         return fresh
+
+
+def filter_aweme_dedup(aweme_ids: list, timeout: int, bot_id=None) -> list:
+    """过滤空串 + 委托 ``DouyinAPI`` 去重（按 bot_id 独立）。
+
+    业务层调这个模块级函数而不是类方法：便于单测替换 ``DouyinAPI`` 替身时不影响去重逻辑。
+    """
+    ids = [str(x) for x in aweme_ids if x and str(x).strip()]
+    return DouyinAPI.filter_aweme_dedup(ids, timeout, bot_id=bot_id)

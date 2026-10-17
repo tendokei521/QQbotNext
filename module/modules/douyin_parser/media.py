@@ -270,6 +270,23 @@ def extract_nwm_url(data: dict) -> str | None:
     return qualities[0]["url"] if qualities else None
 
 
+def pick_quality(qualities: list, prefer: str = "highest") -> dict | None:
+    """按配置挑一档清晰度。
+
+    ``highest``（或缺省）取最高可用；指定档位取不到时**回落最高可用**，
+    避免因为某条作品没有该档位而整条降级成文本。
+    """
+    if not qualities:
+        return None
+    want = (prefer or "highest").strip().lower()
+    if want in ("", "highest"):
+        return qualities[0]
+    for quality in qualities:
+        if str(quality.get("ratio") or "").lower() == want:
+            return quality
+    return qualities[0]
+
+
 def _is_animated_image(img: dict) -> bool:
     """判定是否为动图 / Live 图（这类要走 ``video`` 字段拿 mp4）。"""
     return bool(
