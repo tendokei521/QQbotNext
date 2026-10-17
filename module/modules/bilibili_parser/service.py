@@ -18,8 +18,9 @@ from __future__ import annotations
 import os
 
 from app.core.logger import module_logger
-from app.modules import get_data_path
+from app.modules import get_data_path, media_cache
 from app.modules.groups import check_group_enabled
+
 from . import bilibili_api as bapi
 from . import forward as fwd
 from . import video as vlib
@@ -195,7 +196,7 @@ async def _fetch_video(module, api, info: dict, *, page: int = 1, qn: int, logge
     cache_dir = os.path.join(get_data_path(module.module_name), CACHE_SUBDIR)
     dest = vlib.cache_path(cache_dir, bvid, page_no)
     ttl = int(config.get("video_cache_ttl_minutes", 720) or 720)
-    if config.get("video_cache_enabled", True) and vlib.is_fresh(dest, ttl):
+    if config.get("video_cache_enabled", True) and media_cache.is_fresh(dest, ttl):
         logger.debug(f"{bvid} 命中本地视频缓存")
         return dest, None
 
@@ -212,7 +213,7 @@ async def _fetch_video(module, api, info: dict, *, page: int = 1, qn: int, logge
 
     max_mb = int(config.get("video_max_mb", 80) or 0)
     if max_mb > 0 and single["total_size"] > max_mb * 1024 * 1024:
-        return None, f"体积 {vlib.human_size(single['total_size'])} 超过上限 {max_mb}MB"
+        return None, f"体积 {media_cache.human_size(single['total_size'])} 超过上限 {max_mb}MB"
 
     try:
         os.makedirs(cache_dir, exist_ok=True)
@@ -223,26 +224,14 @@ async def _fetch_video(module, api, info: dict, *, page: int = 1, qn: int, logge
         logger.error(f"{bvid} 视频下载失败: {e}")
         return None, "视频下载失败"
 
-    logger.info(f"{bvid} 视频就绪：{single['quality_name']} {vlib.human_size(single['total_size'])}")
+    logger.info(f"{bvid} 视频就绪：{single['quality_name']} {media_cache.human_size(single['total_size'])}")
     _sweep_cache(cache_dir, ttl, int(config.get("video_cache_max_mb", 1024) or 0), logger)
     return dest, None
 
 
 def _sweep_cache(cache_dir: str, ttl_minutes: int, max_mb: int, logger) -> None:
-    """按 TTL + 容量上限清理本地视频缓存（删最旧的）。"""
-    try:
-        entries = []
-        for name in os.listdir(cache_dir):
-            path = os.path.join(cache_dir, name)
-            if os.path.isfile(path):
-                entries.append((path, os.path.getmtime(path), os.path.getsize(path)))
-        stale = vlib.pick_stale(entries, ttl_minutes, max_mb * 1024 * 1024)
-        for path in stale:
-            os.remove(path)
-        if stale:
-            logger.debug(f"清理视频缓存 {len(stale)} 个文件")
-    except OSError as e:
-        logger.warning(f"清理视频缓存失败: {e}")
+    """按 TTL + 容量上限清理本地视频缓存（通用策略见 ``app/modules/media_cache.py``）。"""
+    media_cache.sweep(cache_dir, ttl_minutes, max_mb, logger)
 
 
 async def _send_forward(bot, target: dict, nodes: list) -> None:

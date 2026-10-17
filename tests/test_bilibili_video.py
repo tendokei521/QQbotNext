@@ -6,8 +6,7 @@ from module.modules.bilibili_parser import bilibili_api as bapi
 from module.modules.bilibili_parser import video
 from module.modules.bilibili_parser.bilibili_api import BilibiliAPI
 
-
-# ==================== 纯逻辑：整理 / 格式化 / 缓存 ====================
+# ==================== 纯逻辑：取流整理 / 缓存命名 ====================
 
 
 def test_pick_single_normalizes_durl():
@@ -36,42 +35,9 @@ def test_pick_single_returns_none_on_risk_control():
     assert video.pick_single({"durl": [{"size": 1}]}) is None  # 无 url
 
 
-def test_human_size_and_duration():
-    assert video.human_size(512) == "512.0B"
-    assert video.human_size(2048) == "2.0KB"
-    assert video.human_size(45 * 1024 * 1024) == "45.0MB"
-    assert video.format_duration(125120) == "02:05"
-    assert video.format_duration(3_600_000) == "1:00:00"
-    assert video.format_duration(0) == "-"
-
-
-def test_cache_path_and_freshness(tmp_path):
+def test_cache_path(tmp_path):
     path = video.cache_path(str(tmp_path), "BV1zq836rEbk", 2)
     assert path.endswith("BV1zq836rEbk_p2.mp4")
-
-    assert video.is_fresh(path, 60) is False  # 文件不存在
-
-    with open(path, "wb") as fh:
-        fh.write(b"x")
-    now = os.path.getmtime(path) + 10
-    assert video.is_fresh(path, 60, now=now) is True
-    assert video.is_fresh(path, 60, now=now + 3600) is False  # 超过 TTL
-    assert video.is_fresh(path, 0, now=now + 10 ** 6) is True  # TTL<=0 永不过期
-
-
-def test_pick_stale_by_ttl_and_capacity():
-    entries = [
-        ("old.mp4", 1000.0, 10),
-        ("mid.mp4", 2000.0, 10),
-        ("new.mp4", 3000.0, 10),
-    ]
-    now = 3000.0
-    # 只按 TTL：1000/2000 均已过期（TTL=10 分钟 = 600s）
-    assert video.pick_stale(entries, 10, 0, now=now) == ["old.mp4", "mid.mp4"]
-    # 只按容量：上限 25B → 淘汰最旧的
-    assert video.pick_stale(entries, 0, 25, now=now) == ["old.mp4"]
-    # 都不限制 → 不删
-    assert video.pick_stale(entries, 0, 0, now=now) == []
 
 
 def test_pick_page_matches_index_and_falls_back():
