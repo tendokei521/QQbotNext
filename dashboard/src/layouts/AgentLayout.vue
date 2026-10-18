@@ -102,6 +102,6 @@ watch(
       <v-btn variant="tonal" prepend-icon="mdi-refresh" @click="ensureLoaded">重试</v-btn>
     </EmptyState>
 
-    <slot v-else />
+    <router-view v-else />
   </div>
 </template>
