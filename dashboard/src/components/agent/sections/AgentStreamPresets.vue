@@ -8,58 +8,9 @@ import { useAgentConfigStore } from '@/stores/agentConfig'
 
 const agent = useAgentConfigStore()
 
-// 后端未下发预设时的兜底（与 app/llm/config_schema.py 的 STREAM_PRESETS 保持同值）
-const fallbackPresets: Record<string, any> = {
-  fast: {
-    label: '快速',
-    description: '平均约 500–1000ms，消息紧跟生成节奏',
-    config: {
-      stream_send_interval_mode: 'fixed',
-      stream_send_interval_base_ms: 750,
-      stream_send_interval_min_ms: 500,
-      stream_send_interval_max_ms: 1000,
-      stream_send_curve: 'sqrt',
-      stream_send_curve_k: 200,
-      stream_short_message_length: 10,
-      stream_short_message_delay_ms: 500,
-      stream_long_message_delay_ms: 1000,
-    },
-  },
-  normal: {
-    label: '正常',
-    description: '平均约 1000–2000ms，自然但有节奏',
-    config: {
-      stream_send_interval_mode: 'fixed',
-      stream_send_interval_base_ms: 1500,
-      stream_send_interval_min_ms: 1000,
-      stream_send_interval_max_ms: 2000,
-      stream_send_curve: 'sqrt',
-      stream_send_curve_k: 200,
-      stream_short_message_length: 10,
-      stream_short_message_delay_ms: 1200,
-      stream_long_message_delay_ms: 2000,
-    },
-  },
-  slow: {
-    label: '偏慢',
-    description: '平均约 3000–4000ms，更有“思考感”',
-    config: {
-      stream_send_interval_mode: 'fixed',
-      stream_send_interval_base_ms: 3500,
-      stream_send_interval_min_ms: 3000,
-      stream_send_interval_max_ms: 4000,
-      stream_send_curve: 'sqrt',
-      stream_send_curve_k: 200,
-      stream_short_message_length: 10,
-      stream_short_message_delay_ms: 3000,
-      stream_long_message_delay_ms: 4000,
-    },
-  },
-}
-
-const presets = computed<Record<string, any>>(() =>
-  Object.keys(agent.streamPresets).length ? agent.streamPresets : fallbackPresets,
-)
+// 预设的唯一来源是后端 /api/agent/config 的 stream_presets（config_schema.STREAM_PRESETS）。
+// 此前这里还硬编码了一份 fallback，与后端逐值重复，已删除。
+const presets = computed<Record<string, any>>(() => agent.streamPresets)
 const presetKeys = computed(() => Object.keys(presets.value))
 
 function matchesPreset(key: string): boolean {
@@ -86,7 +37,7 @@ function applyPreset(key: string) {
       <v-chip v-else size="small" variant="tonal">自定义</v-chip>
     </v-card-title>
     <v-card-text>
-      <div class="preset-grid">
+      <div v-if="presetKeys.length" class="preset-grid">
         <v-card
           v-for="(p, key) in presets"
           :key="key"
@@ -106,6 +57,9 @@ function applyPreset(key: string) {
       </div>
       <div class="text-caption mt-3" style="opacity: 0.6">
         预设会覆盖基础间隔、最短/最长间隔和短语延迟；保存后生效。
+      </div>
+      <div v-if="!presetKeys.length" class="text-caption text-center pa-4" style="opacity: 0.55">
+        未获取到发送节奏预设（配置加载失败时可点右上角重试）
       </div>
     </v-card-text>
   </v-card>

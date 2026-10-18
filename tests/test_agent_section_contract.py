@@ -182,3 +182,24 @@ def test_basic_section_stays_beginner_friendly():
         if (SCHEMA.get(key) or {}).get("importance") == "advanced"
     ]
     assert not advanced, f"基础分区混入了 advanced 档字段，应移到进阶分区: {advanced}"
+
+
+def test_stream_presets_are_renderable_and_target_the_stream_section():
+    """流式预设只有后端一份（前端曾硬编码重复副本，已随本次重构删除）。
+
+    这里保证后端下发的预设结构完整，且预设改写的字段都落在「流式回复」分区里——
+    否则「点预设」会静默改掉用户看不见的配置项。
+    """
+    from app.llm.config_schema import STREAM_PRESETS
+
+    assert STREAM_PRESETS, "STREAM_PRESETS 不能为空，否则前端预设区退化成空壳"
+
+    stream_fields = set(_fields_by_section()["stream"])
+    for key, preset in STREAM_PRESETS.items():
+        assert preset.get("label"), f"预设 {key} 缺少 label"
+        assert "description" in preset, f"预设 {key} 缺少 description"
+        config = preset.get("config")
+        assert isinstance(config, dict) and config, f"预设 {key} 的 config 不能为空"
+        stray = sorted(set(config) - stream_fields)
+        assert not stray, f"预设 {key} 改写了不属于「流式回复」分区的字段: {stray}"
+

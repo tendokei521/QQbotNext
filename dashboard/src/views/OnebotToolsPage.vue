@@ -6,7 +6,8 @@ import { useAgentConfigStore } from '@/stores/agentConfig'
 import { useBotsStore } from '@/stores/bots'
 import { useToolsStore } from '@/stores/tools'
 import { useNotifyStore } from '@/stores/notify'
-import { filterSchemaByPage } from '@/utils/schema'
+import { agentSectionById, agentSectionSelector } from '@/agent/sections'
+import { filterSchemaBySection } from '@/utils/schema'
 
 interface OneBotTool {
   name: string
@@ -35,7 +36,11 @@ const agent = useAgentConfigStore()
 const bots = useBotsStore()
 const toolsStore = useToolsStore()
 const notify = useNotifyStore()
-const schema = computed(() => filterSchemaByPage(agent.schema, 'onebot'))
+// OneBot 分区由 registry 描述（路径挂在 /tools/onebot），字段选择同样走分区选择器
+const onebotSection = agentSectionById('onebot')
+const schema = computed(() =>
+  onebotSection ? filterSchemaBySection(agent.schema, agentSectionSelector(onebotSection)) : {},
+)
 
 const tools = ref<OneBotTool[]>([])
 const loading = ref(false)
