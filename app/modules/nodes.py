@@ -20,6 +20,7 @@ from app.modules.authority import (
     check_module_permission,
     compute_event_permission,
     is_single_service_skipped,
+    roster_lists,
 )
 from app.modules.base import BaseModule
 from app.modules.registry import ModuleRegistry
@@ -105,7 +106,10 @@ class AgentNode(MessageNode):
             )
             await next_()
             return
-        compute_event_permission(event)
+        # 名册身份（拥有者/管理者）优先于群角色：这两个名单是 Agent 自己的身份，
+        # 跨群生效，所以必须由 Agent 配置提供
+        _owner_roster, _manager_roster = roster_lists(getattr(runtime, "config", None))
+        compute_event_permission(event, owner_list=_owner_roster, manager_list=_manager_roster)
         if not check_module_permission(gate, event):
             self._account_logger(event).debug(
                 f"[Agent] 跳过：账号 {account_id} 权限不足"

@@ -1,37 +1,80 @@
 """语义化权限系统：角色 + 模块级过滤。
 
-事件角色：
+事件角色（身份）：
 - ``member``：普通群成员
 - ``group_admin``：群管理员
 - ``group_owner``：群主
-- ``owner``：Bot 拥有者
+- ``manager``：Agent 管理者（配置里的 ``agent_manager_list``）
+- ``owner``：Bot 拥有者，或配置里的 ``agent_owner_list``
 
 模块声明 ``permission``：
 - ``everyone``：所有人
 - ``member``：普通成员及以上
 - ``group_admin``：群管理/群主
 - ``group_owner``：群主
-- ``owner``：仅 Bot 拥有者
+- ``manager``：管理者与拥有者
+- ``owner``：仅拥有者
+
+**为什么要有名册**：群角色是 QQ 群给的，管不到「谁有资格调教这个 Bot」。名册
+（``agent_owner_list`` / ``agent_manager_list``）是 Agent 自己的身份，跨群生效：
+有人在任何群里说句话，只要 QQ 号在拥有者名册里，他就是 owner 档。
 
 黑白名单仍然作为前置 scope 过滤，先于角色判断。
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from app.domain.events import BaseEvent
 from app.modules.base import BaseModule, ModulePermission
 
-PERMISSIONS = ("everyone", "member", "group_admin", "group_owner", "owner")
+PERMISSIONS = ("everyone", "member", "group_admin", "group_owner", "manager", "owner")
 
 ROLE_RANK = {
     "member": 0,
     "group_admin": 1,
     "group_owner": 2,
-    "owner": 3,
+    "manager": 3,
+    "owner": 4,
 }
 
 
-def compute_event_permission(event: BaseEvent) -> str:
+def _as_id_set(value: object) -> set[str]:
+    """把配置里的 QQ 号名册规整成字符串集合（容忍空值、数字、空白项）。"""
+    if not value:
+        return set()
+    if isinstance(value, str):
+        value = value.replace(",", "\n").splitlines()  # noqa: PLW2901 - 允许 "1,2,3" 写法
+    if not isinstance(value, Iterable):
+        return set()
+    return {str(item).strip() for item in value if str(item).strip()}
+
+
+def roster_lists(config: object) -> tuple[set[str], set[str]]:
+    """从 Agent 配置里取出 (拥有者名册, 管理者名册)。
+
+    ``config`` 既可能是 dict 也可能是带 ``.get`` 的配置对象；取不到就返回空集合，
+    绝不因为配置缺字段而抛错（权限判断不该成为新的崩溃点）。
+    """
+    getter = getattr(config, "get", None)
+    if not callable(getter):
+        return set(), set()
+    try:
+        return (
+            _as_id_set(getter("agent_owner_list", [])),
+            _as_id_set(getter("agent_manager_list", [])),
+        )
+    except Exception:  # noqa: BLE001 - 配置结构异常时退化为「无名册」
+        return set(), set()
+
+
+def compute_event_permission(
+    event: BaseEvent,
+    *,
+    owner_list: Iterable[object] | None = None,
+    manager_list: Iterable[object] | None = None,
+) -> str:
     """计算事件最终权限角色，并写回 event 上的语义化字段。"""
     role = "member"
     user_role = getattr(getattr(event, "user", None), "role", "") or ""
@@ -48,8 +91,17 @@ def compute_event_permission(event: BaseEvent) -> str:
     owner_id = getattr(event, "owner_id", None)
     event.is_bot_owner = bool(event.user_id) and owner_id is not None and event.user_id == owner_id
 
-    if event.is_bot_owner:
+    # 名册身份（Agent 自己的 owner/manager）优先于群角色：群主不等于有资格改配置
+    user_key = str(getattr(event, "user_id", "") or "")
+    in_owner_roster = bool(user_key) and user_key in _as_id_set(owner_list)
+    in_manager_roster = bool(user_key) and user_key in _as_id_set(manager_list)
+    event.is_agent_owner = in_owner_roster
+    event.is_agent_manager = in_manager_roster
+
+    if event.is_bot_owner or in_owner_roster:
         event.permission_role = "owner"
+    elif in_manager_roster:
+        event.permission_role = "manager"
     elif event.is_group_owner:
         event.permission_role = "group_owner"
     elif role == "group_admin":
@@ -134,7 +186,8 @@ def check_module_permission(module: BaseModule, event: BaseEvent) -> bool:
     policy = getattr(module, "permission", "member") or "member"
 
     # 私聊场景没有群角色概念：群管理/群主策略自动降级为 member，
-    # 避免私聊被“仅群管理”错误拦截；owner 仍表示仅 Bot 拥有者。
+    # 避免私聊被“仅群管理”错误拦截。
+    # manager / owner 是**名册身份**（不是群角色），私聊里照样有效，故不降级。
     if getattr(event, "event_type", "") == "message_private":
         if policy in ("group_admin", "group_owner"):
             policy = "member"

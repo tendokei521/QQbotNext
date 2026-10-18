@@ -2,16 +2,18 @@
 
 from app.domain.events import GroupMessageEvent
 from app.modules.authority import (
+    PERMISSIONS,
+    ROLE_RANK,
     check_module_enabled,
     check_module_permission,
     compute_event_permission,
+    roster_lists,
 )
 from app.modules.base import (
     BaseModule,
     ModuleAuthority,
     ModuleConfig,
     ModuleContext,
-    ModulePermission,
     ServiceAccess,
 )
 
@@ -146,3 +148,81 @@ def test_module_enabled_flag():
     mod = _make_module("member", {"enabled": False})
     assert mod.authority.enabled is False
     assert check_module_enabled(mod) is False
+
+# ==================== 名册身份（agent_owner_list / agent_manager_list） ====================
+
+
+def test_roster_owner_beats_group_role():
+    """群主不等于有资格调教 Bot：名册里的拥有者压过群主。"""
+    event = _event(role="owner", owner_id=1)
+    assert compute_event_permission(event, owner_list={"100"}) == "owner"
+
+
+def test_roster_manager_sits_between_group_owner_and_owner():
+    assert ROLE_RANK["group_owner"] < ROLE_RANK["manager"] < ROLE_RANK["owner"]
+
+
+def test_roster_manager_identity():
+    event = _event(role="member", owner_id=1)
+    assert compute_event_permission(event, manager_list=[100]) == "manager"
+
+
+def test_owner_roster_beats_manager_roster():
+    event = _event(role="member", owner_id=1)
+    role = compute_event_permission(event, owner_list=["100"], manager_list=["100"])
+    assert role == "owner"
+
+
+def test_bot_owner_still_wins_with_empty_rosters():
+    event = _event(role="member", owner_id=100)
+    assert compute_event_permission(event, owner_list=set(), manager_list=set()) == "owner"
+
+
+def test_unlisted_user_keeps_group_role():
+    event = _event(role="admin", owner_id=1)
+    assert compute_event_permission(event, owner_list={"999"}, manager_list={"998"}) == "group_admin"
+
+
+def test_manager_policy_requires_manager():
+    mod = _make_module("manager")
+    member = _perm_event()
+    assert check_module_permission(mod, member) is False
+
+    manager = _event()
+    compute_event_permission(manager, manager_list={"100"})
+    assert check_module_permission(mod, manager) is True
+
+    owner = _event()
+    compute_event_permission(owner, owner_list={"100"})
+    assert check_module_permission(mod, owner) is True
+
+
+def test_manager_policy_not_downgraded_in_private_chat():
+    """manager 是名册身份而不是群角色，私聊里不该被降级成 member。"""
+    mod = _make_module("manager")
+    event = _event()
+    event.event_type = "message_private"
+    compute_event_permission(event, manager_list={"100"})
+    assert check_module_permission(mod, event) is True
+
+    other = _event()
+    other.event_type = "message_private"
+    compute_event_permission(other)
+    assert check_module_permission(mod, other) is False
+
+
+def test_roster_lists_parses_common_shapes():
+    assert roster_lists({}) == (set(), set())
+    assert roster_lists({"agent_owner_list": ["1", " 2 ", ""]}) == ({"1", "2"}, set())
+    assert roster_lists({"agent_owner_list": "3,4"}) == ({"3", "4"}, set())
+    assert roster_lists({"agent_manager_list": [5, 6]}) == (set(), {"5", "6"})
+    # 配置对象异常不应让权限判断崩掉
+    assert roster_lists(object()) == (set(), set())
+
+
+def test_every_permission_policy_has_rank():
+    """PERMISSIONS 里每档都必须有等级，否则 check_module_permission 会静默按 member 处理。"""
+    for policy in PERMISSIONS:
+        if policy == "everyone":
+            continue
+        assert policy in ROLE_RANK, f"权限档位 {policy} 没有 ROLE_RANK"
