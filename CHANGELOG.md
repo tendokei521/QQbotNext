@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### 修复：token 消耗那一行不再把回退模型记成主模型名
+
+`[Api] 本次请求消耗: ... | model=deepseek-chat | 流式` 此前固定取**回退链第一个配置**
+（`chain[0]`）的名字，而真正服务请求的可能是链上的 backup：主模型 429/超时/空回复后回退，
+这一行仍写主模型名，于是 backup 的 token 消耗被记在主模型头上（成本/排障都会读错）。
+
+- **按实际服务者取名**：`chat_with_fallback` / `iter_stream_with_fallback` 记录真正回了
+  响应（或已产出事件）的那个配置，`provider_model_id` 优先、否则 `model`；
+- **流式把名字回传给调用方**：带 `usage_sink` 时写进保留键 `SERVED_MODEL_KEY`
+  （`"_served_model"`，字符串非 token 数，`merge_usage` / `format_usage` 都当没看见），
+  `chat.stream_response` / `initiative_stream` 打那一行时读它；
+- **遥测同源**：流式 `_record_stream_telemetry` 也改用实际服务者，`/agent/telemetry`
+  里的 model 不再与日志打架；
+- 全部 provider 零产出（没有实际服务者）时退化为最后一个尝试过的模型名；
+- 测试：`tests/test_llm_token_usage.py` 新增非流式/流式回退后写 backup 模型名的用例。
+
 ### 修复：服务端正常关闭（1000）不再变成僵尸连接（断线静默死亡）
 
 线上案例（2026-09-27 23:48:26，远端 SnowLuma 日志与 app 日志逐秒对照）：SnowLuma 运行时重启，

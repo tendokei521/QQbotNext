@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.domain.message import Message
-from app.llm.providers import log_token_usage
+from app.llm.providers import SERVED_MODEL_KEY, log_token_usage
 from app.llm.providers.invoker import resolve_invoker
 from app.llm.send_pool import StreamSendPool
 from app.llm.splitter import split_sentences, strip_stream_artifacts
@@ -156,10 +156,11 @@ async def stream_send_initiative(
         await pool.finish()
         await pool.wait_drained()
     finally:
-        # 无论正常结束还是中途异常，都只 info 一次本次请求的 token 消耗
+        # 无论正常结束还是中途异常，都只 info 一次本次请求的 token 消耗；
+        # 模型名取实际服务者（回退后不是主模型），与 chat.stream_response 同源
         log_token_usage(
             usage_sink,
-            model=str(model or config.get("model", "") or ""),
+            model=str(usage_sink.get(SERVED_MODEL_KEY) or model or config.get("model", "") or ""),
             chars=len("".join(full_text_parts)),
             stream=True,
         )

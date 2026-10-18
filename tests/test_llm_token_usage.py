@@ -11,6 +11,7 @@ import pytest
 import app.llm
 from app.llm.providers import (
     PROVIDERS,
+    SERVED_MODEL_KEY,
     LLMResponse,
     StreamEvent,
     chat_with_fallback,
@@ -174,6 +175,64 @@ async def test_chat_with_fallback_logs_once_with_total(monkeypatch, fake_logger)
     assert "model=probe-model" in line
 
 
+class _FailingUsageProvider:
+    """主模型：请求直接异常（非流式回退场景）。"""
+
+    name = "probe_failing_usage"
+
+    def __init__(self, config: dict) -> None:
+        self.config = config or {}
+
+    def supports(self, _capability: str) -> bool:
+        return False
+
+    async def chat(self, messages, **kwargs) -> LLMResponse:
+        raise RuntimeError("boom")
+
+
+async def test_chat_fallback_logs_served_model_not_primary(monkeypatch, fake_logger):
+    """回退到 backup 后，token 消耗那一行必须写 backup 的模型名。
+
+    历史 bug：日志固定取回退链第一个配置（``chain[0]``）的名字，于是 backup 的
+    消耗被记在主模型头上（日志里出现「model=主模型」但实际是回退模型在服务）。
+    """
+    monkeypatch.setitem(PROVIDERS, "probe_failing_usage", _FailingUsageProvider)
+    monkeypatch.setitem(PROVIDERS, "probe_usage", _UsageProvider)
+    chain = [
+        {"provider": "probe_failing_usage", "model": "primary-model"},
+        {"provider": "probe_usage", "model": "backup-model"},
+    ]
+
+    resp = await chat_with_fallback(chain, [{"role": "user", "content": "hi"}])
+
+    assert resp.text == "ok"
+    usage_lines = [line for line in fake_logger.lines if "本次请求消耗" in line]
+    assert len(usage_lines) == 1
+    assert "model=backup-model" in usage_lines[0]
+    assert "primary-model" not in usage_lines[0]
+
+
+async def test_chat_fallback_uses_last_attempted_model_when_all_fail(monkeypatch, fake_logger):
+    """全部 provider 失败：没有「实际服务者」，写最后一个尝试过的模型名。"""
+
+    class _AllFail(_FailingUsageProvider):
+        async def chat(self, messages, **kwargs) -> LLMResponse:
+            return LLMResponse(text="", raw=None, usage={"prompt_tokens": 3, "completion_tokens": 0})
+
+    monkeypatch.setitem(PROVIDERS, "probe_failing_usage", _AllFail)
+    chain = [
+        {"provider": "probe_failing_usage", "model": "primary-model"},
+        {"provider": "probe_failing_usage", "model": "backup-model"},
+    ]
+
+    resp = await chat_with_fallback(chain, [{"role": "user", "content": "hi"}], max_empty_retries=0)
+
+    assert not resp.ok
+    usage_lines = [line for line in fake_logger.lines if "本次请求消耗" in line]
+    assert len(usage_lines) == 1
+    assert "model=backup-model" in usage_lines[0]
+
+
 class _StreamUsageProvider:
     """假的流式 provider：文本 + 末尾 usage 事件。"""
 
@@ -203,13 +262,16 @@ async def test_stream_usage_sink_accumulates_without_logging(monkeypatch, fake_l
         )
     ]
     assert [ev.type for ev in events] == ["text", "usage"]
-    assert sink == {"prompt_tokens": 7, "completion_tokens": 3}
+    assert sink["prompt_tokens"] == 7 and sink["completion_tokens"] == 3
+    # 保留键：实际服务的模型名（调用方据此拼日志/遥测，不是 token 数）
+    assert sink[SERVED_MODEL_KEY] == "m"
     assert fake_logger.lines == []
 
     # 调用方拿着 sink 打一行（多轮再合并就是全程总量）
-    log_token_usage(sink, model="m", stream=True)
+    log_token_usage(sink, model=sink[SERVED_MODEL_KEY], stream=True)
     assert len(fake_logger.lines) == 1
     assert "流式" in fake_logger.lines[0]
+    assert "model=m" in fake_logger.lines[0]
 
 
 async def test_stream_without_sink_logs_once(monkeypatch, fake_logger):
@@ -224,6 +286,116 @@ async def test_stream_without_sink_logs_once(monkeypatch, fake_logger):
     assert len(events) == 2
     assert len(fake_logger.lines) == 1
     assert "输入 7 / 输出 3 tokens" in fake_logger.lines[0]
+
+
+class _FailingStreamProvider:
+    """主模型：首个事件之前就抛异常（触发流式回退）。"""
+
+    name = "probe_failing_stream"
+
+    def __init__(self, config: dict) -> None:
+        self.config = config or {}
+
+    def supports(self, _capability: str) -> bool:
+        return True
+
+    async def chat_stream(self, messages, **kwargs):
+        raise RuntimeError("boom")
+        yield  # pragma: no cover - 让本方法保持异步生成器
+
+
+async def test_stream_fallback_logs_served_model_not_primary(monkeypatch, fake_logger):
+    """流式回退到 backup：没有 sink 时那一行必须写 backup 的模型名。"""
+    monkeypatch.setitem(PROVIDERS, "probe_failing_stream", _FailingStreamProvider)
+    monkeypatch.setitem(PROVIDERS, "probe_stream_usage", _StreamUsageProvider)
+    chain = [
+        {"provider": "probe_failing_stream", "model": "primary-model"},
+        {"provider": "probe_stream_usage", "model": "backup-model"},
+    ]
+
+    events = [
+        ev
+        async for ev in iter_stream_with_fallback(chain, [{"role": "user", "content": "hi"}])
+    ]
+
+    assert [ev.type for ev in events] == ["text", "usage"]
+    usage_lines = [line for line in fake_logger.lines if "本次请求消耗" in line]
+    assert len(usage_lines) == 1
+    assert "model=backup-model" in usage_lines[0]
+    assert "primary-model" not in usage_lines[0]
+
+
+async def test_stream_fallback_records_served_model_into_sink(monkeypatch, fake_logger):
+    """带 sink（流式工具循环）：实际模型名写进保留键，供调用方拼那一行。"""
+    monkeypatch.setitem(PROVIDERS, "probe_failing_stream", _FailingStreamProvider)
+    monkeypatch.setitem(PROVIDERS, "probe_stream_usage", _StreamUsageProvider)
+    chain = [
+        {"provider": "probe_failing_stream", "model": "primary-model"},
+        {"provider": "probe_stream_usage", "model": "backup-model"},
+    ]
+    sink: dict = {}
+
+    events = [
+        ev
+        async for ev in iter_stream_with_fallback(
+            chain, [{"role": "user", "content": "hi"}], usage_sink=sink
+        )
+    ]
+
+    assert [ev.type for ev in events] == ["text", "usage"]
+    assert sink[SERVED_MODEL_KEY] == "backup-model"
+    # 带 sink 时由调用方打那一行：这里只留回退 warning，不打 token 行
+    assert not [line for line in fake_logger.lines if "本次请求消耗" in line]
+
+
+async def test_stream_all_empty_still_names_last_attempted_model(monkeypatch, fake_logger):
+    """全部 provider 零产出：没有「实际服务者」，保留键退化为最后一个尝试过的模型。"""
+
+    class _AlwaysEmpty:
+        name = "probe_empty_stream"
+
+        def __init__(self, config: dict) -> None:
+            self.config = config or {}
+
+        def supports(self, _capability: str) -> bool:
+            return True
+
+        async def chat_stream(self, messages, **kwargs):
+            return
+            yield  # pragma: no cover - 让本方法保持异步生成器
+
+    monkeypatch.setitem(PROVIDERS, "probe_empty_stream", _AlwaysEmpty)
+    chain = [
+        {"provider": "probe_empty_stream", "model": "primary-model"},
+        {"provider": "probe_empty_stream", "model": "backup-model"},
+    ]
+    sink: dict = {}
+
+    events = [
+        ev
+        async for ev in iter_stream_with_fallback(
+            chain, [{"role": "user", "content": "hi"}], max_empty_retries=0,
+            empty_retry_backoff=0, usage_sink=sink,
+        )
+    ]
+
+    assert events == []
+    assert sink[SERVED_MODEL_KEY] == "backup-model"
+
+
+async def test_stream_sink_keeps_model_when_client_breaks_early(monkeypatch, fake_logger):
+    """客户端提前 break（拿到足够句子就停）：保留键仍要留下实际模型名。"""
+    monkeypatch.setitem(PROVIDERS, "probe_stream_usage", _StreamUsageProvider)
+    sink: dict = {}
+
+    async for _ev in iter_stream_with_fallback(
+        [{"provider": "probe_stream_usage", "model": "m"}],
+        [{"role": "user", "content": "hi"}],
+        usage_sink=sink,
+    ):
+        break
+
+    assert sink[SERVED_MODEL_KEY] == "m"
 
 
 # ==================== OpenAI 兼容解析 ====================

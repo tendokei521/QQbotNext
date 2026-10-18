@@ -117,13 +117,20 @@ def _accepts_kwarg(fn, name: str) -> bool:
     return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
 
 
-def _model_label(chain: list[dict], fallback: str | None = None) -> str:
-    """请求日志里用的模型名（优先 provider 预设的 provider_model_id）。"""
-    for cfg in chain or []:
-        name = str((cfg or {}).get("provider_model_id") or (cfg or {}).get("model") or "").strip()
-        if name:
-            return name
-    return str(fallback or "").strip()
+#: ``usage_sink`` 里的保留键：本次请求**实际服务**的模型名（不是回退链里第一个）。
+#: 它是字符串、不是 token 数，所以 merge_usage / format_usage 都当没看见；
+#: 只给调用方（流式工具循环在调用方）拼日志/遥测用。
+SERVED_MODEL_KEY = "_served_model"
+
+
+def _cfg_model_label(cfg: dict | None, fallback: str | None = None) -> str:
+    """单个 provider 配置对应的模型名（优先 provider 预设的 provider_model_id）。
+
+    注意取的是**具体配置**而非 ``chain[0]``：回退链上真正服务请求的可能是后面的
+    backup 配置，日志/遥测若固定写第一个就会把 backup 的消耗记在主模型头上。
+    """
+    name = str((cfg or {}).get("provider_model_id") or (cfg or {}).get("model") or "").strip()
+    return name or str(fallback or "").strip()
 
 
 def log_token_usage(
@@ -182,6 +189,9 @@ async def chat_with_fallback(
     # 本次请求（含空回复重试与回退下一个 provider）的 token 消耗：结束后 info 一次
     total_usage: dict = {}
     returned: LLMResponse | None = None
+    # 真正服务本次请求的配置（空回复/异常回退后**不是** chain[0]）：日志必须写它，
+    # 否则会把回退模型（如 backup）的消耗记在主模型（primary）头上。
+    served_cfg: dict | None = None
 
     try:
         for cfg in chain:
@@ -212,6 +222,9 @@ async def chat_with_fallback(
                     break
                 last = resp
                 merge_usage(total_usage, resp.usage)
+                # 回了响应（哪怕空/无 choices）= 该 provider 真的被请求过：token 消耗
+                # 里可能就有它一份，日志名字要记它而不是 chain[0]
+                served_cfg = cfg
                 if resp.ok or resp.raw is not None:
                     # 空内容但仍算请求成功：重试同 provider，避免偶现的空回复直接兜底
                     if _response_is_empty(resp) and attempt < retries:
@@ -229,13 +242,14 @@ async def chat_with_fallback(
                         break
                     returned = resp
                     return resp
+                # resp.ok 与 raw 都为假（上游没返回 choices）：换下一个 provider
                 break
         returned = last_empty or last or LLMResponse(text="", raw=None)
         return returned
     finally:
         log_token_usage(
             total_usage,
-            model=_model_label(chain, model),
+            model=_cfg_model_label(served_cfg, model),
             chars=len(returned.text) if returned is not None else None,
         )
 
@@ -277,13 +291,16 @@ async def iter_stream_with_fallback(
 
     token 消耗：上游在流末尾回报的 usage 会累加，**本次流式请求结束时 info 一次**。
     带 ``usage_sink`` 时改为写进调用方的 dict（不在这里打日志）——流式的工具循环在
-    调用方，由它把多轮汇总后只打一行。
+    调用方，由它把多轮汇总后只打一行。此时 ``usage_sink[SERVED_MODEL_KEY]`` 会被写成
+    实际服务本轮的模型名，调用方据此拼日志/遥测，避免回退后仍记主模型名。
     """
     chain = list(config_chain or [])
     retries = max(0, int(max_empty_retries or 0))
     delay = max(0.0, float(empty_retry_backoff or 0.0))
     total_usage: dict = {}
     text_chars = 0
+    # 实际服务本轮的配置（空回复/异常回退后**不是** chain[0]）
+    served_cfg: dict | None = None
 
     try:
         for cfg in chain:
@@ -303,6 +320,11 @@ async def iter_stream_with_fallback(
                     ):
                         if ev.type in ("text", "tool_call"):
                             got_content = True
+                            # 有产出 = 这个 provider 真在服务本轮：立刻定名，客户端提前
+                            # break 也能拿到（调用方随后打的那一行要写对模型）
+                            served_cfg = cfg
+                            if usage_sink is not None:
+                                usage_sink[SERVED_MODEL_KEY] = _cfg_model_label(cfg, model)
                         # 第三方适配器可能自造事件对象：usage 用 getattr 兜底
                         event_usage = getattr(ev, "usage", None)
                         if event_usage:
@@ -324,6 +346,10 @@ async def iter_stream_with_fallback(
                         f"{format_llm_error(e)}"
                     )
                     if started:
+                        # 已经产出过事件：本轮由它服务，异常上抛但名字要留住
+                        served_cfg = cfg
+                        if usage_sink is not None:
+                            usage_sink[SERVED_MODEL_KEY] = _cfg_model_label(cfg, model)
                         raise
                     break  # 换下一个 provider
                 if got_content:
@@ -345,10 +371,14 @@ async def iter_stream_with_fallback(
         if usage_sink is None:
             log_token_usage(
                 total_usage,
-                model=_model_label(chain, model),
+                model=_cfg_model_label(served_cfg, model),
                 chars=text_chars or None,
                 stream=True,
             )
+        elif SERVED_MODEL_KEY not in usage_sink:
+            # 全部 provider 零产出：没有「实际服务者」，退化为最后一个尝试过的
+            last_cfg = chain[-1] if chain else None
+            usage_sink[SERVED_MODEL_KEY] = _cfg_model_label(served_cfg or last_cfg, model)
 
 
 __all__ = [
@@ -364,6 +394,7 @@ __all__ = [
     "chat_with_fallback",
     "iter_stream_with_fallback",
     "log_token_usage",
+    "SERVED_MODEL_KEY",
     "PROVIDERS",
     "PROVIDER_ALIASES",
 ]
