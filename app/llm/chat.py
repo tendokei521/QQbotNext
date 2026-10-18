@@ -500,6 +500,128 @@ def _clean_output_for_history(config, text: str) -> str:
     return maybe_strip_parentheses(text, True)
 
 
+# ==================== 发言通道（文本=思考，发言=send_message） ====================
+
+
+def _build_speech(config):
+    """按配置构造本轮发言记账本；不该启用时返回 None（= 旧的文本即发言）。"""
+    from app.llm.speech import (
+        DEFAULT_MAX_BUBBLE_CHARS,
+        DEFAULT_MAX_BUBBLES,
+        SpeechOutbox,
+        speech_via_tool,
+    )
+
+    if not speech_via_tool(config):
+        return None
+    try:
+        max_bubbles = int(config.get("speech_max_bubbles", DEFAULT_MAX_BUBBLES) or DEFAULT_MAX_BUBBLES)
+        max_chars = int(
+            config.get("speech_max_bubble_chars", DEFAULT_MAX_BUBBLE_CHARS) or DEFAULT_MAX_BUBBLE_CHARS
+        )
+    except Exception:  # noqa: BLE001 —— 配置异常时用默认值，不要因此关掉发言通道
+        max_bubbles, max_chars = DEFAULT_MAX_BUBBLES, DEFAULT_MAX_BUBBLE_CHARS
+    return SpeechOutbox(max_bubbles=max_bubbles, max_chars=max_chars)
+
+
+def _speech_intent(config) -> bool:
+    """配置**想**开发言通道吗（不看流式这一条）——用于"配置了但没生效"的告警。"""
+    from app.llm.prompt import is_qq_agent
+
+    try:
+        return bool(config.get("speech_via_tool", False)) and is_qq_agent(config)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _speech_fallback_enabled(config) -> bool:
+    """静默时是否仍要补一句兜底话术（本档位默认关闭：静默比"抱歉我无法回答"更拟人）。"""
+    try:
+        return bool(config.get("speech_fallback_enable", False))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _should_force_speak(config, ctx, is_private: bool) -> bool:
+    """是否属于"被直接点名，必须回应"的场景（@ / 私聊 / 拍一拍）。
+
+    这类场景一句话不说会被当成掉线，因此允许额外补一轮把话说出来；
+    群里没被点名的闲聊则不该强制——那正是静默要保护的部分。
+    """
+    try:
+        if not bool(config.get("speech_force_reply_on_call", True)):
+            return False
+    except Exception:  # noqa: BLE001
+        return False
+    if is_private:
+        return True
+    return bool(ctx is not None and ctx.state.get("is_at"))
+
+
+async def _flush_speech(speech, session_mgr, session_id: str, config, event):
+    """把 outbox 里的气泡变成待发送消息，并在发送前写好这一条的历史。
+
+    **顺序是有意的**：先写 assistant 历史、再 yield 给 pipeline 发送。pipeline 发送成功后
+    会调 ``mark_last_assistant_message_id``，它认"最近一条 assistant"——此时那条必须
+    正好是刚发出去的这个气泡，否则 message_id 会落到别的历史上（旧流式路径就是这个顺序
+    反了：先发后写，句柄永远补在上一条上）。
+    """
+    from app.llm.actions import OutboundDirectives, assemble_message
+
+    is_group = (
+        getattr(event, "event_type", "") == "message_group"
+        or getattr(event, "group", None) is not None
+    )
+    for bubble in speech.take():
+        text = strip_stream_artifacts(strip_all_tags(bubble.text)).strip()
+        if not text:
+            continue
+        directives = OutboundDirectives(reply=bool(bubble.reply_to), ats=list(bubble.at))
+        message = assemble_message(
+            text,
+            directives,
+            event,
+            is_group=is_group,
+            reply_message_id=bubble.reply_to or None,
+        )
+        session_mgr.add_message(session_id, "assistant", _clean_output_for_history(config, text))
+        yield message
+
+
+async def _force_speak_round(
+    runtime, speech, messages, provider_chain, meta, tools, tool_executor
+) -> None:
+    """被点名却没开口时的补救：非流式再要一次（只关心会不会调 send_message）。
+
+    用非流式而不是再来一轮流式：这里不需要把文本流给用户，只需要一次工具调用。
+    轮数上限刻意压到 2（一次展开 + 一次发言），失败也只是回到静默，不会拖住会话。
+    """
+    from app.llm.speech import FORCE_SPEAK_REMINDER
+
+    messages.append({"role": "user", "content": FORCE_SPEAK_REMINDER})
+    try:
+        await resolve_invoker(runtime).chat(
+            runtime=runtime,
+            chain=provider_chain,
+            messages=messages,
+            params={
+                "model": meta["model"],
+                "temperature": meta["temperature"],
+                "max_tokens": meta["max_tokens"],
+                "tools": tools,
+                "tool_executor": tool_executor,
+                "max_tool_rounds": 2,
+                "max_empty_retries": 0,
+            },
+        )
+    except Exception as e:  # noqa: BLE001 —— 补救轮失败就回到静默，不能让整轮炸掉
+        logger.add_info(f"#{runtime.bot_id}").warning(f"[LLM] 强制发言补救轮失败（按静默处理）: {e}")
+    if speech.spoken == 0 and speech.queued == 0:
+        logger.add_info(f"#{runtime.bot_id}").warning(
+            "[LLM] 被直接点名但补一轮后仍未开口（模型可能没调用 send_message）"
+        )
+
+
 def _record_stream_telemetry(
     runtime,
     session_id: str,
@@ -764,6 +886,18 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
     all_specs, skill_blocks, tool_ctx = await _collect_llm_ext(
         runtime, event, session_id, is_private, schedule_enable
     )
+    # 发言通道（P2）：文本只当思考，真正的发言走 send_message / finish。
+    # 只在「拟人化档位 + speech_via_tool + 流式」三者齐备时挂上；否则保持旧的文本即发言。
+    speech = _build_speech(config)
+    if speech is not None:
+        from app.llm.speech import build_speech_tools
+
+        all_specs = list(all_specs or []) + build_speech_tools(speech)
+    elif _speech_intent(config):
+        logger.add_info(f"#{runtime.bot_id}").warning(
+            "[LLM] 已开启 speech_via_tool 但当前不是拟人化档位或未开流式输出，"
+            "本轮按「文本即发言」处理（发言通道需要轮次边界才能 flush）"
+        )
     # 群聊环境记录块：持续记录面（消息 + 表情/戳/撤回 + 我的动作），
     # 与上面的 pre_history（按需拉取在线历史）是两个来源，正文按 message_id 去重。
     from app.llm.group_log.context import build_context_text
@@ -836,6 +970,7 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
         "modalities": modalities,
         "all_specs": all_specs,
         "tool_ctx": tool_ctx,
+        "speech": speech,
         "session": session,
         "session_mgr": session_mgr,
         "is_private": is_private,
@@ -1025,6 +1160,15 @@ async def stream_response(runtime, event, ctx=None):
         or 200
     )
 
+    # 发言通道（P2）：``speech`` 非 None 时，模型输出的文本只是思考，发言靠 send_message；
+    # 本轮一句话没说 = 静默（正常结局），不再用兜底话术填空。
+    from app.llm.speech import DEFAULT_REMINDER_ROUNDS, SPEAK_REMINDER
+
+    speech = meta.get("speech")
+    speech_by_tool = speech is not None
+    reminder_rounds = int(config.get("speech_reminder_rounds", DEFAULT_REMINDER_ROUNDS) or 0)
+    spoken_parts: list[str] = []
+
     messages = assembly.build_for(runtime, req)
     _append_round_images(messages, tool_ctx, modalities)
     # post_assemble：插件可在此读写本轮请求（1:1 复刻第三方组装格式的接入点）
@@ -1073,6 +1217,9 @@ async def stream_response(runtime, event, ctx=None):
         ):
             if ev.type == "text":
                 buffer += ev.text
+                if speech_by_tool:
+                    # 思考：只累积不发送。切句也只在真正要发文本时才有意义。
+                    continue
                 sentences, buffer = split_sentences(buffer, max_length=max_msg_len)
                 for sentence in sentences:
                     clean = strip_stream_artifacts(sentence)
@@ -1100,9 +1247,14 @@ async def stream_response(runtime, event, ctx=None):
 
         tail = strip_stream_artifacts(buffer.strip())
         if tail:
-            round_text_parts.append(tail)
-            full_text_parts.append(tail)
-            yield tail
+            if speech_by_tool:
+                # 思考尾段同样不发送（但要留在 full_text 里，供遥测/调试看模型想了什么）
+                round_text_parts.append(tail)
+                full_text_parts.append(tail)
+            else:
+                round_text_parts.append(tail)
+                full_text_parts.append(tail)
+                yield tail
         buffer = ""
 
         round_text = "".join(round_text_parts)
@@ -1147,27 +1299,79 @@ async def stream_response(runtime, event, ctx=None):
             "tool_calls": normalized_calls,
         })
         messages.extend(tool_messages)
+
+        if speech_by_tool:
+            # round 边界 flush：模型一旦调 send_message，本轮工具执行完就真发出去，
+            # 它随后还能继续"想下一句"。体感接近真人"想一句说一句"，
+            # 也不至于因为工具循环很久而让群友干等。
+            async for message in _flush_speech(speech, session_mgr, session_id, config, event):
+                spoken_parts.append(message.text)
+                yield message
+            rounds_left = max_tool_rounds - (_round + 1)
+            if rounds_left > 0 and speech.spoken == 0 and rounds_left <= reminder_rounds:
+                # 剩的轮次不多了还没开口：用 user 角色提醒（中途 system 会被适配器上提到最前）
+                messages.append({
+                    "role": "user",
+                    "content": SPEAK_REMINDER.format(rounds=rounds_left),
+                })
     else:
         logger.add_info(f"#{runtime.bot_id}").warning(
             f"流式工具循环超过 {max_tool_rounds} 轮，强制结束（可调大 max_tool_rounds 配置）"
         )
 
-    # 兜底：流式响应为空时避免“不回复”，给用户一个可见的占位回复
-    if not full_text.strip():
-        logger.add_info(f"#{runtime.bot_id}").warning(
-            f"[LLM] 流式模型返回空回复，使用兜底文本 -> {session_id} "
-            f"(task: {session.task_id}, 已执行工具数={len(tool_results)})"
-        )
-        full_text = "抱歉，我暂时无法回答，请稍后再试。"
-        yield full_text
+    if speech_by_tool:
+        # 被直接点名（@ / 私聊）却一句话没说：再要一次，避免"叫了不理"。
+        # 用非流式补一轮是因为这里只关心"有没有入稿"，不需要把文本流给用户。
+        if speech.spoken == 0 and _should_force_speak(config, ctx, is_private):
+            await _force_speak_round(
+                runtime, speech, messages, provider_chain, meta, tools, tool_executor
+            )
+            async for message in _flush_speech(speech, session_mgr, session_id, config, event):
+                spoken_parts.append(message.text)
+                yield message
 
-    session_mgr.add_message(session_id, "assistant", _clean_output_for_history(config, full_text))
-    if not is_private:
-        session.mark_replied()
-    await asyncio.to_thread(session_mgr.history.save_session, session)
+        full_text = "\n".join(spoken_parts)
+        if speech.spoken == 0:
+            # 静默：不发、不写 assistant 历史。这是正常结局，不是失败——但必须留痕，
+            # 否则"哑火太多"会变成查不到原因的现象。
+            logger.add_info(f"#{runtime.bot_id}").info(
+                f"[LLM] 静默（看过但没说话）-> {session_id} (task: {session.task_id}, "
+                f"finished={speech.finished}, reason={speech.finish_reason or '-'})"
+            )
+            if ctx is not None:
+                ctx.state["silent"] = True
+            if _speech_fallback_enabled(config):
+                fallback = "抱歉，我暂时无法回答，请稍后再试。"
+                full_text = fallback
+                spoken_parts.append(fallback)
+                yield fallback
+        elif not is_private:
+            session.mark_replied()
+        await asyncio.to_thread(session_mgr.history.save_session, session)
+    else:
+        # 兜底：流式响应为空时避免“不回复”，给用户一个可见的占位回复
+        if not full_text.strip():
+            logger.add_info(f"#{runtime.bot_id}").warning(
+                f"[LLM] 流式模型返回空回复，使用兜底文本 -> {session_id} "
+                f"(task: {session.task_id}, 已执行工具数={len(tool_results)})"
+            )
+            full_text = "抱歉，我暂时无法回答，请稍后再试。"
+            yield full_text
+
+        session_mgr.add_message(session_id, "assistant", _clean_output_for_history(config, full_text))
+        if not is_private:
+            session.mark_replied()
+        await asyncio.to_thread(session_mgr.history.save_session, session)
 
     _commit_history_enrichment(runtime, session_id, ctx)
     _memory_consolidate(runtime, session_id, is_private, session_mgr)
+
+    # 成功判定：旧路径看"有没有产出文本"；发言通道下"看过但没说话"同样是成功，
+    # 用它去记失败会让"哑火"与"故障"混在一起。
+    if speech_by_tool:
+        stream_success = not stream_error_text
+    else:
+        stream_success = bool("".join(full_text_parts).strip()) and not stream_error_text
 
     _record_stream_telemetry(
         runtime,
@@ -1178,7 +1382,7 @@ async def stream_response(runtime, event, ctx=None):
         full_text_parts,
         tool_results,
         stream_start,
-        success=bool("".join(full_text_parts).strip()) and not stream_error_text,
+        success=stream_success,
         error_text=stream_error_text,
         usage=usage_sink,
     )

@@ -106,7 +106,14 @@ def detect_caps(
         vision = True
     caps["vision"] = vision
 
-    speech_by_tool = bool(_cfg(config, "speech_via_tool", False))
+    # 发言通道：与 ``speech.speech_via_tool`` 同一判定（档位 + 开关 + 流式），
+    # 否则会出现"提示词说文本不会发出去、实际文本就是发出去"的自相矛盾。
+    try:
+        from app.llm.speech import speech_via_tool
+
+        speech_by_tool = speech_via_tool(config)
+    except Exception:  # noqa: BLE001
+        speech_by_tool = bool(_cfg(config, "speech_via_tool", False))
     caps["speech_by_tool"] = speech_by_tool
     caps["outbound_directive"] = bool(_cfg(config, "outbound_directive_enable", True))
     # 引用/@ 的输出通道：工具通道与行内指令通道二选一

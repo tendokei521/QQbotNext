@@ -210,6 +210,36 @@ SCHEMA = {
             "head": "开头",
         },
     },
+    "speech_via_tool": {
+        "type": "boolean", "label": "发言走工具（文本=思考）",
+        "description": "开启后模型输出的文本只是思考，发言必须调用 send_message；不调用就是这一轮不接话（静默）。需要流式输出开启，否则自动回落到「文本即发言」",
+        "default": False, "group": "group_behavior",
+    },
+    "speech_max_bubbles": {
+        "type": "number", "label": "单轮最多几条",
+        "description": "一轮最多发几条气泡（防复读机式刷屏）",
+        "default": 4, "min": 1, "max": 10, "group": "group_behavior",
+    },
+    "speech_max_bubble_chars": {
+        "type": "number", "label": "单条字数上限",
+        "description": "单条气泡字数上限，超长会被裁短（QQ 单条太长会被折叠，也不像人说话）",
+        "default": 300, "min": 20, "max": 2000, "group": "group_behavior",
+    },
+    "speech_reminder_rounds": {
+        "type": "number", "label": "催发言提醒轮次",
+        "description": "工具轮次剩这么多还没开口时，注入一条【系统提醒】催促发言（0=不提醒）",
+        "default": 3, "min": 0, "max": 10, "group": "group_behavior",
+    },
+    "speech_force_reply_on_call": {
+        "type": "boolean", "label": "被点名必须回应",
+        "description": "被 @ / 私聊时若一句话没说，再补一轮要求它发言（防「叫了不理」）",
+        "default": True, "group": "group_behavior",
+    },
+    "speech_fallback_enable": {
+        "type": "boolean", "label": "静默时补兜底话术",
+        "description": "关闭（默认）=静默就是真沉默，符合拟人化；开启则静默时仍发「抱歉，我暂时无法回答」",
+        "default": False, "group": "group_behavior",
+    },
     "session_timeout": {
         "type": "number", "label": "会话超时时间(秒)", "description": "无消息后多久结束会话",
         "default": 60, "min": 30, "max": 300, "group": "group_session",

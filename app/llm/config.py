@@ -46,6 +46,18 @@ DEFAULT_LLM_CONFIG: dict = {
     "user_message_format": "single_line",
     # 时间行位置：tail=挪到消息末尾（默认，让逐轮稳定的行靠前，前缀缓存更有效）；head=旧行为
     "prompt_time_position": "tail",
+    # 发言通道：True=模型输出的文本只是思考，发言必须调用 send_message（不调用=静默）。
+    # 需要 assembly_profile=qq_agent 且 stream_output=True（非流式没有轮次边界可 flush）。
+    "speech_via_tool": False,
+    # 一轮最多发几条气泡 / 单条气泡字数上限（防复读机式刷屏）
+    "speech_max_bubbles": 4,
+    "speech_max_bubble_chars": 300,
+    # 剩余轮次提醒：剩这么多轮还没开口就注入一条【系统提醒】催发言
+    "speech_reminder_rounds": 3,
+    # 被直接点名（@/私聊）却一句话没说时，允许再补一轮把话说出来
+    "speech_force_reply_on_call": True,
+    # 静默时是否仍补一句"抱歉我暂时无法回答"（本档位默认关闭：静默更拟人）
+    "speech_fallback_enable": False,
     "max_tokens": 1024,
     "temperature": 0.7,
     # 记录历史时强制清洗助手输出里的（…）/(…) 内容，避免后续回复模仿括号风格

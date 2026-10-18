@@ -338,12 +338,12 @@ class LlmPipeline:
             sent_parts: list[str] = []
             interrupted = False
 
-            async for sentence in stream_response(self.runtime, ctx.event, ctx):
+            async for item in stream_response(self.runtime, ctx.event, ctx):
                 if self._should_break_stream(ctx):
                     interrupted = True
                     break
 
-                msg = outbound.build(sentence)
+                msg = self._as_message(item, outbound)
                 if msg is None:
                     continue
 
@@ -389,11 +389,11 @@ class LlmPipeline:
             should_cancel=lambda: self._should_break_stream(ctx),
         )
         try:
-            async for sentence in stream_response(self.runtime, ctx.event, ctx):
+            async for item in stream_response(self.runtime, ctx.event, ctx):
                 if self._should_break_stream(ctx):
                     interrupted = True
                     break
-                msg = outbound.build(sentence)
+                msg = self._as_message(item, outbound)
                 if msg is not None:
                     await pool.put(msg)
 
@@ -408,6 +408,21 @@ class LlmPipeline:
             ctx.state["interrupted"] = True
 
         await self._run_stage("post_stream", ctx)
+
+    def _as_message(self, item: Any, outbound) -> Message | None:
+        """把流式产出物统一成待发送的 ``Message``。
+
+        两条流式语义并存：
+
+        - **文本即发言**（旧）：``stream_response`` 逐句 yield 字符串，由 ``outbound``
+          解析首片的 ``[reply]``/``[@QQ]`` 指令；
+        - **发言通道**（``speech_via_tool``）：``stream_response`` yield 的已经是构造好的
+          ``Message``（气泡自带引用/@ 段），不能再过一遍指令解析——
+          否则正文里的 ``[...]`` 会二次剥离。
+        """
+        if isinstance(item, Message):
+            return item if item.segments else None
+        return outbound.build(str(item or ""))
 
     def _should_break_stream(self, ctx: LlmContext) -> bool:
         """流式发送中途是否应当停止继续发剩余句子。
