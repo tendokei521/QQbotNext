@@ -503,3 +503,87 @@ def build_user_content(images: Iterable[dict], *, text: str = "") -> list[dict] 
     if not text.strip():
         parts.insert(0, {"type": "text", "text": "[用户发送了图片]"})
     return parts
+
+
+# ==================== 会话历史里的图片 ====================
+
+
+def history_image_segments(entry: Any) -> list[Any]:
+    """历史条目里的图片段（``base.segments`` 里的 ``image`` / ``mface``）。
+
+    兼容两种形状：结构化条目（``{"base": {"segments": [...]}}`` / ``HistoryEntry``）
+    与旧条目（``{"segments": [...]}``）。
+    """
+    base: Any
+    if isinstance(entry, dict):
+        base = entry.get("base")
+        if not isinstance(base, dict):
+            return [s for s in (entry.get("segments") or []) if _seg_type(s) in IMAGE_LIKE_SEGMENTS]
+        segments = base.get("segments") or []
+    else:
+        base = getattr(entry, "base", None)
+        segments = getattr(base, "segments", None) or getattr(entry, "segments", None) or []
+    return [s for s in segments if _seg_type(s) in IMAGE_LIKE_SEGMENTS]
+
+
+def history_image_parts(
+    entry: Any,
+    *,
+    max_images: int = 4,
+    max_bytes: int = DEFAULT_MAX_IMAGE_BYTES,
+) -> list[dict]:
+    """历史条目的图片段 → ``image_url`` 内容块（**纯本地解析，不发起网络请求**）。
+
+    为什么只做本地解析：历史渲染发生在每轮请求前，逐图 ``get_image`` 会把一次
+    对话变成一串 API 调用；而且 QQ 直链会过期，历史图片本就该"能用就用"。
+    因此只接受段里已经带地址的形态（``url`` / ``data:image/…`` / ``base64://``）；
+    只有 ``file``（QQ 内部文件名，需要 ``get_image`` 换直链）的段保持
+    ``[图片#id]`` 占位，交给 ``expand_image`` 按需取回。
+    """
+    parts: list[dict] = []
+    limit = max(1, int(max_images or 1))
+    for seg in history_image_segments(entry):
+        if len(parts) >= limit:
+            break
+        item = _local_image_entry(seg, max_bytes=max_bytes)
+        if not item:
+            continue
+        if item["kind"] == "base64":
+            mime = str(item.get("mime", "") or "image/png")
+            url = f"data:{mime};base64,{item['value']}"
+        else:
+            url = str(item.get("value", "") or "")
+        if url:
+            parts.append({"type": "image_url", "image_url": {"url": url}})
+    return parts
+
+
+def _local_image_entry(seg: Any, *, max_bytes: int) -> dict | None:
+    """图片段 → 条目（仅本地可解析形态；不下载、不调 OneBot）。
+
+    与 ``_resolve_one`` 的差别只在最后一步：这里**没有** ``get_image`` 兜底。
+    """
+    data = _seg_data(seg)
+    file_value = str(data.get("file", "") or "").strip()
+
+    # 1) 直链（含 data URL：OpenAI 兼容接口两者都吃）
+    for candidate in (str(data.get("url", "") or "").strip(), file_value):
+        lowered = candidate.lower()
+        if lowered.startswith(("http://", "https://", "data:image/")):
+            return {"kind": "url", "value": candidate}
+
+    # 2) base64:// 形态（OneBot 常用）→ 解出字节后按魔数校正 MIME
+    raw_b64 = ""
+    for candidate in (str(data.get("base64", "") or "").strip(), file_value):
+        lowered = candidate.lower()
+        if lowered.startswith("base64://"):
+            raw_b64 = candidate[len("base64://"):]
+            break
+        if lowered.startswith("base64:"):
+            raw_b64 = candidate[len("base64:"):]
+            break
+    if raw_b64:
+        return _from_base64(raw_b64, mime=_mime_from_name(file_value), max_bytes=max_bytes)
+
+    # 3) 只剩 file 名（QQ 内部文件名）：本地拿不到地址，保持占位
+    return None

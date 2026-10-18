@@ -35,10 +35,10 @@ from app.llm.group_context import (
 from app.llm.session import SessionManager
 from app.llm import assembly
 from app.llm.assembly import PromptRequest
-from app.llm.image import collect_image_segments
+from app.llm.image import collect_image_segments, max_image_bytes
 from app.llm.providers import SERVED_MODEL_KEY, log_token_usage
 from app.llm.providers.invoker import resolve_invoker
-from app.llm.providers.modalities import normalize_modalities, supports_tool_use
+from app.llm.providers.modalities import normalize_modalities, supports_image, supports_tool_use
 from app.llm.tags import maybe_strip_parentheses, strip_all_tags
 from app.llm.splitter import split_sentences, strip_stream_artifacts
 from app.llm.trigger import extract_text
@@ -132,10 +132,12 @@ def _format_session_history(
     mask_nickname: bool = False,
     bot_id: Any = "",
     session_id: Any = "",
+    entry_media=None,
 ) -> list[dict]:
     """兼容包装：委托给 group_context 的共享渲染函数。
 
     传入 ``bot_id`` / ``session_id`` 时接入补全登记（取回过的内容留在历史里）。
+    ``entry_media`` 见 :func:`_history_media_hook`。
     """
     return format_history_for_llm(
         history,
@@ -144,7 +146,48 @@ def _format_session_history(
         mask_nickname=mask_nickname,
         bot_id=bot_id,
         session_id=session_id,
+        entry_media=entry_media,
     )
+
+
+def _history_media_hook(
+    entries: list,
+    *,
+    include_images: bool,
+    max_images: int = 4,
+    max_bytes: int | None = None,
+):
+    """会话历史图片的渲染钩子（配合 ``history_model.render_history`` 的 ``entry_media``）。
+
+    - **文本模型**：不动正文（渲染器已给出 ``[图片#<消息id>]`` 占位），
+      模型可 ``expand_image`` 按需取回；
+    - **视觉模型**：把历史里存的图片地址直接内联成 ``image_url`` 块，模型下一轮仍看得见
+      上一轮发的图；地址过期/只有 ``file`` 名时自然退化为占位。
+
+    内联预算按**由新到旧**分配：最多 ``max_images`` 张（与单轮图片上限同一把尺子），
+    避免长会话把上下文撑爆。
+    """
+    from app.llm.image import DEFAULT_MAX_IMAGE_BYTES, history_image_parts, history_image_segments
+
+    if max_bytes is None:
+        max_bytes = DEFAULT_MAX_IMAGE_BYTES
+
+    allowed: set[int] = set()
+    if include_images:
+        left = max(1, int(max_images or 1))
+        for entry in reversed(list(entries or [])):
+            count = len(history_image_segments(entry))
+            if count and left > 0:
+                allowed.add(id(entry))
+                left -= count
+
+    def hook(entry: Any, *, text: str = ""):
+        if not history_image_segments(entry) or id(entry) not in allowed:
+            return None
+        # 正文保持渲染器结果（占位/正文），只把图片块接在后面
+        return None, history_image_parts(entry, max_images=max_images, max_bytes=max_bytes)
+
+    return hook
 
 
 async def _build_group_pre_history(
@@ -856,15 +899,20 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
     from app.llm.history_model import split_user_context
 
     body_text, meta_lines = split_user_context(user_text)
+    event_segments = _segments_as_dicts(getattr(event, "message", None))
+    # 纯图片/表情消息没有正文：**不能**把元信息（"(QQ: …)"/时间行）冻成正文，
+    # 否则历史里这条会显示成一串元信息，图片段（base.segments）反倒被无视。
+    # 留空正文 + 保留 segments，渲染器会给出 [图片#id] 占位。
+    stored_text = body_text if event_segments else (body_text or user_text)
     session_mgr.add_message(
         session_id,
         "user",
-        body_text or user_text,
+        stored_text,
         user_id,
         nickname=_event_nickname(event),
         message_id=getattr(event, "message_id", None),
         timestamp=getattr(event, "time", None),
-        segments=_segments_as_dicts(getattr(event, "message", None)),
+        segments=event_segments,
         group_id=group_id if not is_private else None,
         is_private=is_private,
         meta_lines=meta_lines,
@@ -882,10 +930,16 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
     )
 
     session_history_raw = session_mgr.get_history(session_id, limit=session_mgr.MAX_HISTORY_MESSAGES)
-    # 防重复：history 尾部就是刚追加的当前用户消息（存的就是 user_text）→ 去掉
-    if (session_history_raw and session_history_raw[-1].get("role") == "user"
-            and session_history_raw[-1].get("content") == user_text):
-        session_history_raw = session_history_raw[:-1]
+    # 防重复：history 尾部就是刚追加的当前用户消息 → 去掉。
+    # 结构化条目存的是**正文**（不是 user_text），所以先按 message_id 比对（唯一锚点），
+    # 拿不到 id 时退回旧的文本比对；否则当前这条会在历史里再出现一次
+    # （带图的消息还会因此把同一张图传两遍）。
+    if session_history_raw and session_history_raw[-1].get("role") == "user":
+        tail = session_history_raw[-1]
+        tail_mid = str(tail.get("message_id") or "")
+        event_mid = str(getattr(event, "message_id", "") or "")
+        if (event_mid and tail_mid == event_mid) or (not event_mid and tail.get("content") == user_text):
+            session_history_raw = session_history_raw[:-1]
     # 渲染时把 message_id 贴回消息对象：群聊环境记录要靠它判断"这条已在会话历史里"，
     # 否则同一句话会在历史与背景里各出现一次（双源去重失效）。
     from app.llm.group_context import with_message_ids
@@ -895,6 +949,13 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
         _format_session_history(
             session_history_raw, is_private,
             bot_id=getattr(runtime, "bot_id", ""), session_id=session_id,
+            entry_media=_history_media_hook(
+                session_history_raw,
+                # 历史图片与"本轮图片"同一道门：开关 + 模型声明 image 模态
+                include_images=_images_enabled(config) and supports_image(modalities),
+                max_images=int(config.get("image_max_count", 4) or 4),
+                max_bytes=max_image_bytes(config),
+            ),
             **_meta_flags,
         ),
     )
@@ -960,7 +1021,7 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
     user_images: list[dict] = []
     if collect_image_segments(event) and _images_enabled(config):
         try:
-            from app.llm.image import max_image_bytes, resolve_images
+            from app.llm.image import resolve_images
 
             user_images = await resolve_images(
                 event,

@@ -287,6 +287,31 @@ class HistoryEntry:
 # ==================== 唯一渲染器 ====================
 
 
+#: 正文为空时用段占位顶替的段类型 → 展示名（与 group_context 同口径）
+_PLACEHOLDER_SEGMENTS = {"image": "图片", "mface": "图片"}
+
+
+def _segment_placeholders(entry: HistoryEntry) -> str | None:
+    """正文为空时，从 ``base.segments`` 生成占位文本（``[图片#<消息id>]``）。
+
+    只处理"内容型"段（图片/商城表情）：没有正文的回合至少要让模型知道
+    "这里发过一张图"，并且带上可展开的 id（``expand_image`` 用）。
+    """
+    mid = str(entry.message_id or "").strip()
+    parts: list[str] = []
+    for seg in entry.base.segments or []:
+        if isinstance(seg, dict):
+            stype = str(seg.get("type", "") or "")
+        else:
+            stype = str(getattr(seg, "type", "") or "")
+        label = _PLACEHOLDER_SEGMENTS.get(stype)
+        if not label:
+            continue
+        # 只有 image 能按 id 取回（expand_image）；mface 只留纯占位
+        parts.append(f"[{label}#{mid}]" if mid and stype == "image" else f"[{label}]")
+    return "".join(parts) or None
+
+
 def render_history_entry(
     entry: HistoryEntry | dict,
     *,
@@ -339,6 +364,11 @@ def render_history_entry(
             content = str(content) if content is not None else None
         else:
             content = entry.base.text
+        if not str(content or "").strip():
+            # 正文为空（纯图片/表情等没有文字的回合）：用段占位顶替。
+            # 否则这条会从历史里整条消失——模型既看不到"这里发过图"，
+            # 也无从用 expand_image 按需取回（base.segments 存在的意义之一）。
+            content = _segment_placeholders(entry)
 
     if content is None or not str(content).strip():
         return None
@@ -411,7 +441,11 @@ def _single_line(
 #: 基础信息里的附注行前缀（写侧保留、读侧原样回放；渲染器自己负责 时间/群号/发送者）
 META_LINE_PREFIXES = ("提到了", "引用了")
 #: 由渲染器按当前配置重排的行（写侧丢弃，避免同一信息两处出现）
-RENDERED_LINE_PREFIXES = ("发送者：", "发送者昵称：", "(时间", "（时间", "(当前群号", "（当前群号")
+#: ``(QQ: …)`` 是私聊场景注入的对方 QQ（见 ``enhance.format_user_context``），
+#: 与时间/群号同级：不进正文，否则纯图片消息的正文会退化成 "（QQ: 1901691195）"。
+RENDERED_LINE_PREFIXES = (
+    "发送者：", "发送者昵称：", "(时间", "（时间", "(当前群号", "（当前群号", "(QQ", "（QQ",
+)
 
 
 def split_user_context(text: Any) -> tuple[str, list[str]]:
@@ -578,6 +612,7 @@ def render_history(
     *,
     entry_renderer=None,
     entry_blocks=None,
+    entry_media=None,
     **kwargs,
 ) -> list[dict]:
     """批量渲染为 OpenAI messages。
@@ -585,18 +620,50 @@ def render_history(
     ``entry_renderer``：单条渲染器（默认本模块 ``render_history_entry``）。
     ``entry_blocks``：``callable(entry) -> list[dict]``，为该条追加附加块
     （如"工具取回的单条消息"），排在它之后。
+    ``entry_media``：``callable(entry, text=...) -> (text, parts) | None``，
+    把该条的多模态内容接回消息上（如会话历史里的图片）：
+
+    - 返回的 ``text`` 覆盖渲染文本（``None`` = 不改）；
+    - 返回的 ``parts`` 是追加在文本之后的内容块（``image_url`` 等）；非空时
+      该条的 ``content`` 变成块数组，文本为空则只发块。
     """
     renderer = entry_renderer or render_history_entry
     result: list[dict] = []
     for entry in entries or []:
         content = renderer(entry, **kwargs)
-        if content is not None:
-            parsed = _as_entry(entry)
-            result.append({"role": parsed.role or "user", "content": content})
+        text: Any = content
+        parts: list[dict] = []
+        if entry_media is not None:
+            try:
+                media = entry_media(entry, text=content or "")
+            except TypeError:
+                # 兼容只接受一个参数的媒体回调
+                media = entry_media(entry)
+            except Exception as e:  # noqa: BLE001 —— 媒体渲染失败只降级为纯文本
+                from app.core.logger import logger
+
+                logger.debug(f"[HistoryModel] 历史媒体渲染失败（已忽略）: {e}")
+                media = None
+            if media:
+                new_text, media_parts = media
+                if new_text is not None:
+                    text = new_text
+                parts = [p for p in (media_parts or []) if isinstance(p, dict)]
+        parsed = _as_entry(entry)
+        role = parsed.role or "user"
+        if parts:
+            blocks: list[dict] = []
+            if str(text or "").strip():
+                blocks.append({"type": "text", "text": str(text)})
+            blocks.extend(parts)
+            if blocks:
+                result.append({"role": role, "content": blocks})
+        elif text is not None:
+            result.append({"role": role, "content": text})
         if entry_blocks is None:
             continue
         try:
-            extra = entry_blocks(entry, text=content or "")
+            extra = entry_blocks(entry, text=str(text or ""))
         except TypeError:
             # 兼容只接受一个参数的附加块回调
             extra = entry_blocks(entry)

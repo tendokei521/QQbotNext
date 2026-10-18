@@ -46,12 +46,29 @@ def split_history(
     return history[:-keep_count], history[-keep_count:]
 
 
+def _text_only(message: dict) -> dict:
+    """多模态消息 → 纯文本消息（摘要请求不传图块）。
+
+    历史里可能带着会话图片的 ``image_url`` 块；摘要模型不一定声明 image 模态，
+    原样发过去会被网关拒（整段压缩随之失败）。摘要只需要文字，这里先剥成文本。
+    """
+    content = message.get("content")
+    if not isinstance(content, list):
+        return message
+    texts = [
+        str(part.get("text", "") or "")
+        for part in content
+        if isinstance(part, dict) and part.get("type") == "text"
+    ]
+    return {**message, "content": "\n".join(t for t in texts if t)}
+
+
 def build_summary_messages(old_history: list[dict], prompt: str) -> list[dict]:
     """构造用于生成摘要的 messages。"""
     messages: list[dict] = [
         {"role": "system", "content": "你是一个对话摘要助手。请只输出摘要内容。"}
     ]
-    messages.extend(old_history)
+    messages.extend(_text_only(m) for m in old_history if isinstance(m, dict))
     if messages[-1]["role"] != "assistant":
         messages.append({"role": "assistant", "content": "Acknowledged."})
     messages.append({"role": "user", "content": prompt})

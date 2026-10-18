@@ -596,6 +596,7 @@ def format_history_for_llm(
     mask_nickname: bool = False,
     bot_id: Any = "",
     session_id: Any = "",
+    entry_media=None,
 ) -> list[dict]:
     """把会话历史渲染成纯文本 messages（渲染实现见 history_model.render_history_entry）。
 
@@ -610,6 +611,9 @@ def format_history_for_llm(
     传入 ``bot_id`` / ``session_id`` 时接入「补全登记」（``history_enrich``）：
     本会话取回过的引用/合并转发/用户名会把占位升级为 ``【已展开:… → 摘要】``，
     取回过的单条消息作为附加块排在对应条目之后——**信息一旦查看过就留在历史里**。
+
+    ``entry_media`` 见 :func:`history_model.render_history`：会话历史里的图片靠它
+    接回消息（视觉模型内联 ``image_url``，文本模型留 ``[图片#id]`` 占位）。
     """
     render_content = None
     entry_blocks = None
@@ -625,6 +629,7 @@ def format_history_for_llm(
         mask_nickname=mask_nickname,
         render_content=render_content,
         entry_blocks=entry_blocks,
+        entry_media=entry_media,
     )
 
 
