@@ -110,10 +110,12 @@ export interface VirtualGroupSpec {
 export function buildSectionSchema(
   schema: Record<string, any>,
   specs: VirtualGroupSpec[],
+  skipKeys: string[] = [],
 ): { groups: Record<string, any>; items: Record<string, any> } {
   const { items } = splitSchema(schema)
   const groups: Record<string, any> = {}
   const nextItems: Record<string, any> = {}
+  const skipped = new Set(skipKeys)
 
   specs.forEach((spec) => {
     const excluded = new Set(spec.excludeFields || [])
@@ -127,7 +129,8 @@ export function buildSectionSchema(
             })
             .map(([key]) => key)
 
-    const present = keys.filter((key) => items[key])
+    // skipKeys = 由本页定制卡片负责渲染的字段（如人格预设选择器），表单里不再重复
+    const present = keys.filter((key) => items[key] && !skipped.has(key))
     if (!present.length) return
 
     groups[spec.id] = {

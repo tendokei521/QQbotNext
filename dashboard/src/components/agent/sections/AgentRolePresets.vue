@@ -132,13 +132,18 @@ onMounted(() => {
           <v-btn variant="tonal" prepend-icon="mdi-account-heart" @click="goToPersonas">前往人格编辑</v-btn>
         </v-card-title>
         <v-card-text>
-          <div class="d-flex align-center flex-wrap gap-2 mb-2">
+          <div class="d-flex align-center flex-wrap gap-2">
             <v-chip v-if="currentPreset" size="small" color="pink" variant="tonal">{{ currentPreset.name }}</v-chip>
             <v-chip v-else-if="agent.draft.system_prompt" size="small" variant="tonal">自定义提示词</v-chip>
             <v-chip v-else size="small" variant="tonal">未启用</v-chip>
           </div>
-          <div class="prompt-preview">
-            {{ agent.draft.system_prompt || '当前 Agent 未启用任何人格提示词' }}
+          <!--
+            这里原来还把整段 system_prompt 预览了一遍，而下方「人格设定 → 系统提示词」显示的就是
+            同一段文字：同一页里同一个人格文本出现两次，光这一块就多占约 300px。
+            预览留给「选择人格」里的待应用项（那里是看过再决定），当前生效的正文交给下面表单。
+          -->
+          <div class="text-caption mt-2" style="opacity: 0.6">
+            当前生效的正文见下方「人格设定 → 系统提示词」。
           </div>
         </v-card-text>
       </v-card>

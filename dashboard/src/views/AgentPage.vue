@@ -11,7 +11,7 @@ import { useAgentConfigStore } from '@/stores/agentConfig'
 import AgentTemplateDialog from '@/components/agent/AgentTemplateDialog.vue'
 import AgentConfigSearchDialog from '@/components/agent/AgentConfigSearchDialog.vue'
 import AgentCopyConfigDialog from '@/components/agent/AgentCopyConfigDialog.vue'
-import { agentSectionBadge, agentSectionImportance, sectionsOfArea, ADVANCED_INDEX_PATH } from '@/agent/sections'
+import { agentSectionBadge, sectionsOfArea, ADVANCED_INDEX_PATH } from '@/agent/sections'
 
 const agent = useAgentConfigStore()
 const router = useRouter()
@@ -19,26 +19,29 @@ const router = useRouter()
 const templateDialog = ref(false)
 const searchDialog = ref(false)
 const copyDialog = ref(false)
-// 新手只需要 basic 档分区；进阶配置默认收起
-const onlyBasic = ref(false)
 
-// 只列「常用」区域的分区：进阶页在「高级设置」里，混进来会让新手面对 9 张卡片
-const pages = computed(() => {
-  const list = sectionsOfArea('agent').map((section) => ({
+/*
+ * 只列「常用」区域的分区：进阶页在「高级设置」里，混进来会让新手面对 9 张卡片。
+ *
+ * 这里原来还有「只看基础」开关 + 每张卡的「高级」徽标。分区拆分把进阶项移到独立区域之后，
+ * 这两个东西同时失效了：徽标按「分区内全部字段都是 basic 才算基础」判定，而 importance
+ * 已经是字段级，几乎每页都至少有一个进阶字段 → 6 张卡 5 张标「高级」，一开筛选只剩 1 张。
+ * 区域划分已经表达了「常用/进阶」，再叠一层筛选只会互相打架，故移除。
+ */
+const pages = computed(() =>
+  sectionsOfArea('agent').map((section) => ({
     to: section.path,
     title: section.title,
     desc: section.subtitle,
     icon: section.icon,
     color: section.color,
-    advanced: agentSectionImportance(section, agent.schema) === 'advanced',
     status: agentSectionBadge(section.id, {
       draft: agent.draft,
       poolModelIds: agent.poolModelIds,
       permission: agent.permission,
     }),
-  }))
-  return onlyBasic.value ? list.filter((p) => !p.advanced) : list
-})
+  })),
+)
 
 const warnings = computed(() => {
   const list: string[] = []
@@ -68,14 +71,6 @@ const warnings = computed(() => {
       <v-card-title class="d-flex align-center">
         <v-icon icon="mdi-view-dashboard-outline" class="mr-2" color="primary" /> 配置入口
         <v-spacer />
-        <v-switch
-          v-model="onlyBasic"
-          color="primary"
-          label="只看基础"
-          density="compact"
-          hide-details
-          class="mr-3"
-        />
         <v-btn size="small" variant="tonal" prepend-icon="mdi-book-multiple" class="mr-3" @click="templateDialog = true">
           配置模板
         </v-btn>
@@ -101,7 +96,6 @@ const warnings = computed(() => {
               <div>
                 <div class="font-weight-medium d-flex align-center gap-2">
                   {{ p.title }}
-                  <v-chip v-if="p.advanced" size="x-small" variant="text" color="secondary">高级</v-chip>
                 </div>
                 <div class="text-caption" style="opacity: 0.75">{{ p.desc }}</div>
                 <v-chip size="x-small" variant="tonal" class="mt-1">{{ p.status }}</v-chip>

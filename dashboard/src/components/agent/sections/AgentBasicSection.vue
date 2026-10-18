@@ -1,10 +1,13 @@
 <script setup lang="ts">
 /**
- * 「基础配置」页的定制 UI：Agent 总开关 + Provider 模型池 + 人格预设。
+ * 「基础配置」页的定制 UI：Agent 总闸 + Provider 模型池 + 人格预设。
  *
  * 三件事必须放在同一页：用户配 Agent 的动作顺序就是「开 → 给模型 → 给人格」。
- * 之前总开关在面板头部（每个配置页都能看到，看着像只影响本页），模型池在「模型」页、
+ * 之前总闸在面板头部（每个配置页都能看到，看着像只影响本页），模型池在「模型」页、
  * 人格预设又在「角色」页，配一次要跳三页。
+ *
+ * 命名注意：这里的开关是「是否回复」的总闸，配置表里还有一组「响应场景」（群/私信）——
+ * 两者不同层，所以卡片标题直接叫「启用 Agent」，不叫「总开关」，避免和下面那组撞名。
  *
  * 无 props、自读 store，这样 AgentSectionPage 能用统一的 ``<component :is>`` 挂载。
  */
@@ -19,7 +22,7 @@ const agent = useAgentConfigStore()
   <div>
     <v-card variant="outlined" class="mb-4">
       <v-card-title class="d-flex align-center">
-        <v-icon icon="mdi-power" class="mr-2" color="primary" /> Agent 总开关
+        <v-icon icon="mdi-power" class="mr-2" color="primary" /> 启用 Agent
         <v-spacer />
         <v-switch
           v-model="agent.enabled"
@@ -31,8 +34,8 @@ const agent = useAgentConfigStore()
         />
       </v-card-title>
       <v-card-text class="text-body-2" style="opacity: 0.8">
-        关闭后所有 Bot 都不再响应消息（定时任务与主动消息同样停止）。
-        下面的群聊/私聊开关决定「哪些场景」回复，这里是「是否回复」的总闸。
+        关闭后这个 Bot 完全不再响应消息（定时任务与主动消息同样停止）。
+        下面「响应场景」再决定群聊/私聊是否回复。
       </v-card-text>
     </v-card>
 

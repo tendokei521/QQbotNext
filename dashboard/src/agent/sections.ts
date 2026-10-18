@@ -30,6 +30,13 @@ export interface AgentSection {
   order: number
   /** 页内子分组：决定段内导航、分组标题与字段归属 */
   groups: VirtualGroupSpec[]
+  /**
+   * 由本页定制卡片渲染、不在 schema 表单里重复出现的字段。
+   *
+   * 例如「基础配置」的人格预设选择器已经做成卡片，`persona_preset_id` 不该再在
+   * 表单里出现一次；但它的**归属**仍由 groups 声明，契约测试照样能校验覆盖率。
+   */
+  customFields: string[]
   /** 定制组件是否排在 schema 表单之前（默认之后） */
   customFirst: boolean
 }
@@ -44,6 +51,7 @@ interface RawSection {
   area?: AgentSectionArea
   order?: number
   customFirst?: boolean
+  customFields?: string[]
   groups: VirtualGroupSpec[]
 }
 
@@ -63,6 +71,7 @@ export const AGENT_SECTIONS: AgentSection[] = RAW.sections
     area: s.area ?? 'agent',
     order: s.order ?? 100,
     groups: s.groups,
+    customFields: s.customFields ?? [],
     customFirst: s.customFirst === true,
   }))
   .sort((a, b) => a.order - b.order)
@@ -127,7 +136,7 @@ export function agentSectionSchema(
   section: AgentSection,
   schema: Record<string, any>,
 ): Record<string, any> {
-  return buildSectionSchema(schema, section.groups)
+  return buildSectionSchema(schema, section.groups, section.customFields)
 }
 
 export interface AgentBadgeInput {
@@ -190,10 +199,11 @@ export function agentSectionBadge(id: string, input: AgentBadgeInput): string {
 export type AgentSectionImportance = 'basic' | 'advanced'
 
 /**
- * 分区的重要性：只有当分区内**所有**字段都是 basic 时才算基础分区。
+ * 分区内是否全部为 basic 档字段。
  *
- * 后端为每个字段标注 importance；这里把它变成「哪些页面是新手必需」的口径，
- * 用于概览页的基础/进阶筛选与徽标。
+ * 注意：**不要**再用它给概览卡片打「高级」徽标。importance 是字段级之后，几乎每个
+ * 分区都至少有一个进阶字段，这个判定会把 6 张常用卡里的 5 张都标成高级（实测如此）。
+ * 「常用 / 进阶」的划分已经由 area 表达。保留此函数仅用于「分区自查」类工具。
  */
 export function agentSectionImportance(
   section: AgentSection,

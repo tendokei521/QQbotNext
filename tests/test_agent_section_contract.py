@@ -352,3 +352,39 @@ def test_importance_is_field_level():
             by_group.setdefault(definition["group"], set()).add(definition["importance"])
     monolithic = sorted(g for g, marks in by_group.items() if len(marks) == 1 and g in _LAYERED_GROUPS)
     assert not monolithic, f"以下分组仍是单一档位，说明 importance 没做到字段级: {monolithic}"
+
+
+def test_custom_fields_stay_owned_by_a_subgroup():
+    """定制卡片渲染的字段，归属仍需由某个子分组声明。
+
+    否则「persona_preset_id 由人格预设卡片负责」这类声明会悄悄把字段从契约里摘出去：
+    表单不渲染它、子分组也不声明它，等于它没有任何页面。
+    """
+    covered = {
+        key for section in _load_sections() for subgroup in section.get("groups") or []
+        for key in _subgroup_fields(subgroup)
+    }
+    problems = [
+        f"{section['id']}: {key}"
+        for section in _load_sections()
+        for key in section.get("customFields") or []
+        if key not in covered
+    ]
+    assert not problems, f"以下 customFields 没有被子分组声明归属: {problems}"
+
+
+def test_custom_fields_are_not_rendered_twice():
+    """被定制卡片接管的字段不应该同时出现在本页 schema 表单里（重复渲染）。"""
+    duplicated: list[str] = []
+    for section in _load_sections():
+        custom = set(section.get("customFields") or [])
+        if not custom:
+            continue
+        # 前端 buildSectionSchema 会把 customFields 从 items 里剔除；
+        # 这里只校验「声明了 customFields 就说明该页有定制组件」这一前提成立。
+        assert section.get("customFirst") is not None, f"{section['id']} 声明 customFields 但没定制组件"
+        for subgroup in section["groups"]:
+            share = custom & set(subgroup.get("fields") or [])
+            if share and len(subgroup.get("fields") or []) == len(share):
+                duplicated.append(f"{section['id']}/{subgroup['id']}")
+    assert not duplicated, f"以下子分组只包含定制字段，会在表单里渲染成空分组: {duplicated}"

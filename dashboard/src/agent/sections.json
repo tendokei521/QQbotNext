@@ -46,10 +46,11 @@
       "area": "agent",
       "order": 10,
       "customFirst": true,
+      "customFields": ["persona_preset_id"],
       "groups": [
         {
           "id": "basic_switch",
-          "label": "总开关",
+          "label": "响应场景",
           "icon": "mdi-toggle-switch-outline",
           "fields": ["group_enable", "private_enable"]
         },
@@ -84,7 +85,7 @@
       "color": "success",
       "area": "agent",
       "order": 20,
-      "customFirst": true,
+      "customFirst": false,
       "groups": [
         {
           "id": "permission_role",
