@@ -342,7 +342,9 @@ class GeminiProvider(BaseProvider):
                             parts = content.get("parts", []) or []
                             for p in parts:
                                 if isinstance(p, dict) and p.get("text"):
-                                    yield StreamEvent(type="text", text=str(p["text"]))
+                                    # thought=True 是 Gemini 的思考片段：单独成事件（不算正文）
+                                    kind = "reasoning" if p.get("thought") else "text"
+                                    yield StreamEvent(type=kind, text=str(p["text"]))
         except Exception as e:
             logger.add_info("Gemini").error(f"Gemini 流式请求异常: {format_llm_error(e)}")
             yield StreamEvent(type="error", text=format_llm_error(e))

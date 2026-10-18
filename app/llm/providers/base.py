@@ -31,6 +31,11 @@ class StreamEvent:
 
     type:
         - text: 文本增量
+        - reasoning: 思考增量（deepseek reasoning_content / Anthropic thinking_delta /
+          Gemini thought part）。它**不算回复正文**，不能发给用户，但必须单独成事件：
+          思考模型可能把整个 ``max_tokens`` 预算都花在这里、正文一个字节都没有，
+          上层若不区分「想过但没正文」和「真的什么都没产出」，就会把这种情况判成空回复
+          （重试同一 prompt 必然再打满一次，纯烧钱），也看不出真实原因。
         - tool_call: 工具调用碎片（需要按 index 累积）
         - done: 本轮流结束
         - usage: 上游在流末尾回报的 usage（只带 usage，不带文本）

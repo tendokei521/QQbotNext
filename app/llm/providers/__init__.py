@@ -318,8 +318,12 @@ async def iter_stream_with_fallback(
                         tools=tools,
                         tool_executor=tool_executor,
                     ):
-                        if ev.type in ("text", "tool_call"):
+                        if ev.type in ("text", "tool_call", "reasoning"):
                             got_content = True
+                            # 思考也算产出：上游确实在跑，只是把预算花在 reasoning 里。
+                            # 同一条 prompt 原样重试必然再打满一次（线上为此白烧了 17.5 万
+                            # token 仍拿不到正文），所以不在这里重试；正文为空的收敛重试
+                            # 交给调用方（它能改 prompt：追加「直接作答」提醒）。
                             # 有产出 = 这个 provider 真在服务本轮：立刻定名，客户端提前
                             # break 也能拿到（调用方随后打的那一行要写对模型）
                             served_cfg = cfg

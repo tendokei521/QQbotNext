@@ -322,6 +322,9 @@ class AnthropicProvider(BaseProvider):
                             delta = data.get("delta", {}) or {}
                             if delta.get("type") == "text_delta":
                                 yield StreamEvent(type="text", text=str(delta.get("text", "")))
+                            elif delta.get("type") == "thinking_delta":
+                                # 扩展思考：思考增量单独成事件（不算正文），见 StreamEvent 说明
+                                yield StreamEvent(type="reasoning", text=str(delta.get("thinking", "")))
                         elif data.get("type") == "message_start":
                             message = data.get("message", {}) or {}
                             merge_usage(input_usage, message.get("usage", {}) or {})

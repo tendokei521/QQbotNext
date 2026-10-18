@@ -70,6 +70,9 @@ def events_from_chunk(chunk: dict) -> list[StreamEvent]:
 
     注意顺序：**先看 usage 再看 choices**——开了 ``stream_options.include_usage`` 后，
     上游会在最后发一个 ``choices: []`` 只带 ``usage`` 的 chunk，先 ``continue`` 就丢了。
+
+    思考流也在这里解析：DeepSeek 系思考模型在流式里只发 ``delta.reasoning_content``
+    （此时 ``delta.content`` 恒为 null），旧实现只认 ``content`` → 整条流被当成"零产出"。
     """
     events: list[StreamEvent] = []
     usage = chunk.get("usage")
@@ -81,6 +84,10 @@ def events_from_chunk(chunk: dict) -> list[StreamEvent]:
     first = choices[0] or {}
     delta = first.get("delta", {}) or {}
     finish_reason = first.get("finish_reason", "")
+    # reasoning_content 是 DeepSeek/vLLM 系的写法，reasoning 是部分中转商的写法
+    reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+    if reasoning:
+        events.append(StreamEvent(type="reasoning", text=str(reasoning)))
     if delta.get("content"):
         events.append(StreamEvent(type="text", text=delta["content"]))
     for tc in delta.get("tool_calls") or []:
