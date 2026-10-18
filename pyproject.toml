@@ -17,6 +17,8 @@ dependencies = [
     "jinja2>=3.1",
     "python-multipart>=0.0.6",
     "python-dotenv>=1.0",
+    # 动图拆帧（GIF/动态 WebP → 静态帧）：视觉模型只读首帧，必须自己解码
+    "pillow>=10.0",
 ]
 
 [project.optional-dependencies]

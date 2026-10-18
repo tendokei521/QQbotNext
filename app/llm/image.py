@@ -5,22 +5,30 @@ LLM 完全看不到图片内容。本模块负责把「本轮触发消息」里�
 OpenAI 风格的 ``{"type": "image_url", ...}`` 内容块；Anthropic / Gemini 的
 格式差异由各自 provider 的原生化逻辑处理（见 providers/anthropic.py、gemini.py）。
 
+动图（GIF / 动态 WebP / QQ 表情包）在这里被拆成若干静态帧后并入同一组图片块：
+视觉模型这条路上「动图只看得到首帧」是上游实现决定的，框架自己拆帧才可控。
+拆帧是纯计算，见 ``app/llm/animated.py``。
+
 设计约束：
 - **只处理本轮触发的那条消息**。群聊历史背景（``get_chat_history`` / 预历史）仍然
   是纯文本占位，否则十张历史图片就是十个图块，token 直接爆掉；
 - **必须能拿到可用 URL 才算数**。``file`` 往往是 QQ 内部文件名（``xxx.image``），
   直接塞进 API 只会换来一个 400，所以优先 ``url`` → ``base64`` → data/http 形态的 ``file``；
-- **有大小上限**。超出 ``max_image_bytes`` 的图片跳过并留日志，避免单张巨图拖垮请求。
+- **有大小上限**。超出 ``max_image_bytes`` 的图片跳过并留日志，避免单张巨图拖垮请求；
+- **只在「看起来是动图」时才下载**。静态图走原有的 URL 直传，不额外拉一遍流量。
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import re
 from typing import Any, Iterable
 
 from app.core.logger import logger
+from app.llm.animated import DEFAULT_FRAME_MAX_EDGE
+from app.llm.animated import DEFAULT_MAX_FRAMES as DEFAULT_GIF_MAX_FRAMES
 
 # 单张图片字节上限：base64 后约 1.33 倍，10MB 原图 ≈ 13MB 请求体，多数网关会直接拒
 DEFAULT_MAX_IMAGE_BYTES = 10 * 1024 * 1024
@@ -37,6 +45,31 @@ _EXT_MIME = {
     "webp": "image/webp",
     "bmp": "image/bmp",
 }
+
+#: 会被当成「图片」处理的段类型。``mface`` 是 QQ 商城表情，data 里同样有
+#: url/file；不认它等于表情包整类都看不到。
+IMAGE_LIKE_SEGMENTS = ("image", "mface")
+
+#: 动图的**快速线索**（命中才去下字节看 n_frames）。
+#: 真正的判定永远是 Pillow 的 ``n_frames > 1``（见 animated.py），这里只负责
+#: 把「显然不是动图」的静态图挡在下载之外，避免每张图都多拉一次流量。
+_ANIMATED_EXTS = ("gif", "webp", "apng")
+_ANIMATED_MARKERS = ("动画表情", "动图", "animated")
+
+#: 下载动图时的超时（秒）：QQ 图片 CDN 通常在 1s 内返回，15s 已是兜底
+_ANIMATED_FETCH_TIMEOUT = 15.0
+
+
+def _cfg(config: Any, key: str, default: Any) -> Any:
+    """从配置对象/字典读一个键（AgentConfig 与 dict 都支持 ``get``，读失败回默认）。"""
+    if config is None:
+        return default
+    try:
+        value = config.get(key, default)
+    except Exception as e:  # noqa: BLE001 —— 配置读失败不该拖垮图片解析
+        logger.debug(f"[Image] 读取配置 {key} 失败（用默认值）: {e}")
+        return default
+    return default if value is None else value
 
 
 def _log():
@@ -85,7 +118,7 @@ def _mime_from_name(name: str) -> str:
 
 def _is_understandable_image(seg: Any) -> bool:
     """该图片段是否可能是可用 URL / base64（否则不值得额外发起 get_image 拉取）。"""
-    if _seg_type(seg) != "image":
+    if _seg_type(seg) not in IMAGE_LIKE_SEGMENTS:
         return False
     data = _seg_data(seg)
     for key in ("url", "base64", "file"):
@@ -101,13 +134,21 @@ def _is_understandable_image(seg: Any) -> bool:
 
 
 def count_images(event: Any) -> int:
-    """本轮消息里的图片段数量（不校验可用性，仅用于日志/门控）。"""
-    return sum(1 for seg in (getattr(event, "message", None) or []) if _seg_type(seg) == "image")
+    """本轮消息里的图片段数量（不校验可用性，仅用于日志/门控）。
+
+    含 ``mface``（QQ 商城表情）：表情包也算「这条消息有图」，否则只发表情包的消息
+    会被当成纯文本空消息丢掉。
+    """
+    return sum(
+        1 for seg in (getattr(event, "message", None) or []) if _seg_type(seg) in IMAGE_LIKE_SEGMENTS
+    )
 
 
 def collect_image_segments(event: Any) -> list[Any]:
-    """收集图片段；事件没有 message 字段（主动消息/测试替身）时返回空列表。"""
-    return [seg for seg in (getattr(event, "message", None) or []) if _seg_type(seg) == "image"]
+    """收集图片段（image + mface）；事件没有 message 字段时返回空列表。"""
+    return [
+        seg for seg in (getattr(event, "message", None) or []) if _seg_type(seg) in IMAGE_LIKE_SEGMENTS
+    ]
 
 
 def max_image_bytes(config: Any = None) -> int:
@@ -128,20 +169,209 @@ async def resolve_images(
     bot: Any = None,
     max_images: int = 4,
     max_bytes: int = DEFAULT_MAX_IMAGE_BYTES,
+    config: Any = None,
 ) -> list[dict]:
     """把本轮消息里的图片解析为 ``[{"kind": "url"|"base64", "value": ...}]``。
+
+    动图（GIF / 动态 WebP / 表情包）会被拆成若干静态帧，每个帧条目带同一个
+    ``note``，由 ``build_user_content`` 渲染成一句说明——模型才知道「这是同一张动图
+    的连续帧」，而不是六张互不相干的图。
+
+    Args:
+        event: 消息事件（只用到 ``message`` 字段）。
+        bot: 当前账号连接，用于 ``get_image`` 兜底换直链。
+        max_images: **静态图**数量上限；动图帧另有 ``gif_max_frames`` 预算。
+        max_bytes: 单张（或单个动图原始字节）体积上限。
+        config: Agent 配置（读 ``gif_*`` 开关）；缺省时按内置默认值。
 
     解析不到的图片会被跳过（并记一条 warning），不会阻断整轮请求。
     """
     images: list[dict] = []
+    limit = max(1, int(max_images or 1))
+    gif_enable = bool(_cfg(config, "gif_understanding_enable", True))
+    frame_budget = max(1, int(_cfg(config, "gif_max_frames", DEFAULT_GIF_MAX_FRAMES) or DEFAULT_GIF_MAX_FRAMES))
+    max_edge = int(_cfg(config, "gif_frame_max_edge", DEFAULT_FRAME_MAX_EDGE) or DEFAULT_FRAME_MAX_EDGE)
+    probe_all = bool(_cfg(config, "gif_probe_all_images", False))
+    static_used = 0
+    warned_limit = False
+
     for seg in collect_image_segments(event):
-        if len(images) >= max(1, int(max_images or 1)):
-            _log().warning(f"图片数量超过上限 {max_images}，后续图片未传给模型")
-            break
+        # 动图优先：命中线索才下字节确认，确认是动图就拆帧（帧走独立的帧数预算，
+        # 不吃静态图的 max_images 配额——一张表情包不该挤掉同一轮的 4 张静态图）
+        if gif_enable and frame_budget > 0 and _animated_hint(seg, probe_all=probe_all):
+            entries = await _resolve_animated(
+                seg, bot=bot, max_bytes=max_bytes,
+                max_frames=frame_budget, max_edge=max_edge,
+            )
+            if entries:
+                images.extend(entries)
+                if len(entries) > 1:  # 真的拆成了多帧，扣预算
+                    frame_budget -= len(entries)
+                    _log().debug(f"动图拆帧：{len(entries)} 帧（剩余帧预算 {frame_budget}）")
+                continue
+        if static_used >= limit:
+            if not warned_limit:
+                _log().warning(f"图片数量超过上限 {max_images}，后续图片未传给模型")
+                warned_limit = True
+            continue
         resolved = await _resolve_one(seg, bot=bot, max_bytes=max_bytes)
         if resolved:
             images.append(resolved)
+            static_used += 1
     return images
+
+
+def _animated_hint(seg: Any, *, probe_all: bool = False) -> bool:
+    """段是否「看起来是动图」——命中才值得下载字节去确认 ``n_frames``。
+
+    判定线索来自 NapCat/OneBot 的实际上报形态：
+    - 文件名/URL 带 .gif / .webp / .apng（QQ 表情包常见 ``xxx.gif``）；
+    - ``summary`` 是 ``[动画表情]``（QQ 客户端本身就是这么标动图的）；
+    - ``mface``（商城表情）基本都是动的；
+    - ``sub_type == "1"``：NapCat 用它标表情图片。
+    这些线索**只用于省流量**，真的动图与否由 Pillow 的 ``n_frames`` 说了算。
+    """
+    if probe_all:
+        return True
+    data = _seg_data(seg)
+    if _seg_type(seg) == "mface":
+        return True
+    if str(data.get("sub_type", "") or "").strip() == "1":
+        return True
+    for key in ("file", "url", "summary", "path"):
+        value = str(data.get(key, "") or "").strip().lower()
+        if not value:
+            continue
+        if any(marker in value for marker in _ANIMATED_MARKERS):
+            return True
+        ext = value.rsplit(".", 1)[-1].split("?", 1)[0].split("&", 1)[0]
+        if ext in _ANIMATED_EXTS:
+            return True
+    return False
+
+
+async def _resolve_animated(
+    seg: Any, *, bot: Any, max_bytes: int, max_frames: int, max_edge: int
+) -> list[dict] | None:
+    """动图段 → 帧条目列表。
+
+    Returns:
+        帧条目列表（多帧或退化成单帧）；拿不到字节时返回 ``None``（交给常规路径）。
+        **注意**：只要字节拿到了就一定返回条目——确认「其实不是动图」时用已下载的
+        字节直接构造单图条目，避免同一次请求里重复下载同一张图。
+    """
+    from app.llm.animated import extract_frames
+
+    data, mime = await _segment_bytes(seg, bot=bot, max_bytes=max_bytes)
+    if not data:
+        return None
+
+    # 拆帧是 CPU 活（动图解码），必须离开事件循环
+    frames = await asyncio.to_thread(extract_frames, data, max_frames=max_frames, max_edge=max_edge)
+    if not frames:
+        return [_entry_from_bytes(data, mime)]
+
+    note = f"【这是一张动图表情，下面 {len(frames)} 张图是它按时间顺序拆出的连续帧】"
+    return [
+        {
+            "kind": "base64",
+            "value": base64.b64encode(frame).decode("ascii"),
+            "mime": "image/jpeg",
+            "note": note,
+        }
+        for frame in frames
+    ]
+
+
+def _entry_from_bytes(data: bytes, mime: str) -> dict | None:
+    """原始字节 → 单图片条目（超过体积上限返回 None）。"""
+    if not data:
+        return None
+    if len(data) > DEFAULT_MAX_IMAGE_BYTES:
+        _log().warning(f"图片超过体积上限，已跳过（{len(data) / 1024 / 1024:.1f}MB）")
+        return None
+    return {"kind": "base64", "value": base64.b64encode(data).decode("ascii"), "mime": mime or "image/png"}
+
+
+async def _segment_bytes(seg: Any, *, bot: Any, max_bytes: int) -> tuple[bytes | None, str]:
+    """把图片段取成原始字节（data URL / base64:// / http 直链 / get_image 兜底）。"""
+    data = _seg_data(seg)
+    file_value = str(data.get("file", "") or "").strip()
+
+    # 1) data:image/...;base64,xxx
+    for candidate in (str(data.get("base64", "") or "").strip(), file_value):
+        match = _DATA_URL_RE.match(candidate)
+        if not match:
+            continue
+        payload = match.group(2)
+        if len(payload) * 0.75 > max_bytes:
+            _log().warning(f"图片超过体积上限，已跳过（{len(payload) * 0.75 / 1024 / 1024:.1f}MB）")
+            return None, ""
+        try:
+            return base64.b64decode(payload), f"image/{match.group(1).lower()}"
+        except (binascii.Error, ValueError) as e:
+            _log().warning(f"data URL 解码失败: {e}")
+            continue
+
+    # 2) base64://xxx（OneBot 常用形态）
+    for candidate in (str(data.get("base64", "") or "").strip(), file_value):
+        lowered = candidate.lower()
+        if not lowered.startswith("base64:"):
+            continue
+        raw = candidate[len("base64://"):] if lowered.startswith("base64://") else candidate[len("base64:"):]
+        try:
+            decoded = base64.b64decode(raw)
+        except (binascii.Error, ValueError) as e:
+            _log().warning(f"base64 图片解码失败: {e}")
+            continue
+        # MIME 按魔数嗅探：file 名经常缺失/后缀不靠谱，声明错的 MIME 会让网关 400
+        return decoded, _sniff_mime(decoded)
+
+    # 3) http(s) 直链
+    for candidate in (str(data.get("url", "") or "").strip(), file_value):
+        if candidate.lower().startswith(("http://", "https://")):
+            return await _download_bytes(candidate, max_bytes=max_bytes)
+
+    # 4) 让 OneBot 把 file 换成可访问 URL
+    if bot is not None and file_value:
+        try:
+            resp = await bot.get_image(file_value)
+        except Exception as e:  # noqa: BLE001 —— 取不到就降级，不能拖垮本轮对话
+            _log().warning(f"get_image 失败（动图按静态图处理）: {e}")
+            return None, ""
+        payload = (resp or {}).get("data", {}) or {}
+        for key in ("url", "file"):
+            candidate = str(payload.get(key, "") or "").strip()
+            if candidate.lower().startswith(("http://", "https://")):
+                return await _download_bytes(candidate, max_bytes=max_bytes)
+    return None, ""
+
+
+async def _download_bytes(url: str, *, max_bytes: int, timeout: float = _ANIMATED_FETCH_TIMEOUT) -> tuple[bytes | None, str]:
+    """下载图片/动图字节；超时、超限、非 200 都返回 ``(None, "")`` 并留日志。"""
+    import aiohttp
+
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    _log().warning(f"动图下载失败（HTTP {resp.status}）")
+                    return None, ""
+                declared = int(resp.headers.get("Content-Length") or 0)
+                if declared > max_bytes:
+                    _log().warning(f"动图超过体积上限，已跳过（{declared / 1024 / 1024:.1f}MB）")
+                    return None, ""
+                buffer = bytearray()
+                async for chunk in resp.content.iter_chunked(64 * 1024):
+                    buffer.extend(chunk)
+                    if len(buffer) > max_bytes:
+                        _log().warning(f"动图超过体积上限，已跳过（>{max_bytes / 1024 / 1024:.0f}MB）")
+                        return None, ""
+                data = bytes(buffer)
+                return data, _sniff_mime(data)
+    except Exception as e:  # noqa: BLE001 —— 网络问题一律降级为「当静态图处理」
+        _log().warning(f"动图下载异常（按静态图处理）: {e}")
+        return None, ""
 
 
 async def _resolve_one(seg: Any, *, bot: Any, max_bytes: int) -> dict | None:
@@ -206,7 +436,24 @@ def _from_base64(raw_b64: str, *, mime: str, max_bytes: int) -> dict | None:
     if len(payload) * 0.75 > max_bytes:
         _log().warning(f"图片超过体积上限，已跳过（{len(payload) * 0.75 / 1024 / 1024:.1f}MB）")
         return None
-    return {"kind": "base64", "value": payload, "mime": mime}
+    return {"kind": "base64", "value": payload, "mime": _sniff_b64_mime(payload, mime)}
+
+
+def _sniff_b64_mime(payload: str, declared: str = "") -> str:
+    """按魔数校正 base64 载荷的 MIME。
+
+    OneBot 的 ``file`` 名经常缺失或后缀不靠谱（``xxx.image``），声明的 MIME 与真实
+    字节不一致时网关会直接 400；这里解出前 64 字节嗅探一次，认不出就保留声明值。
+    """
+    try:
+        head = base64.b64decode(payload[:96] + "=" * (-len(payload[:96]) % 4))
+    except (binascii.Error, ValueError):
+        return declared or "image/png"
+    sniffed = _sniff_mime(head)
+    if sniffed == "image/png" and declared:
+        # _sniff_mime 的兜底值不是证据，别用它覆盖明确的声明
+        return declared
+    return sniffed
 
 
 def image_url_from_bytes(data: bytes, *, mime: str = "", name: str = "") -> str | None:
@@ -226,11 +473,14 @@ def image_url_from_bytes(data: bytes, *, mime: str = "", name: str = "") -> str 
 def build_user_content(images: Iterable[dict], *, text: str = "") -> list[dict] | None:
     """把已解析的图片 + 文本组合成 OpenAI 风格 content 块数组。
 
+    条目可带 ``note``（如动图拆帧的「以下 N 张是同一张动图的连续帧」）：同一组 note
+    只在**第一次**出现时插一段说明文本，让模型知道后面这几张图属于同一件事。
     没有任何可用图片时返回 None，调用方保持原有的纯字符串 content 行为。
     """
     parts: list[dict] = []
     if text.strip():
         parts.append({"type": "text", "text": text})
+    last_note = ""
     for image in images or []:
         if not isinstance(image, dict):
             continue
@@ -238,6 +488,10 @@ def build_user_content(images: Iterable[dict], *, text: str = "") -> list[dict] 
         value = str(image.get("value", "") or "").strip()
         if not value:
             continue
+        note = str(image.get("note", "") or "").strip()
+        if note and note != last_note:
+            parts.append({"type": "text", "text": note})
+            last_note = note
         if kind == "base64":
             mime = str(image.get("mime", "") or "image/png").strip() or "image/png"
             parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{value}"}})

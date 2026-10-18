@@ -798,6 +798,7 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
                 bot=getattr(event, "bot", None),
                 max_images=int(config.get("image_max_count", 4) or 4),
                 max_bytes=max_image_bytes(config),
+                config=config,
             )
         except Exception as e:  # noqa: BLE001 —— 图片解析失败必须降级为纯文本
             logger.add_info(f"#{runtime.bot_id}").warning(f"图片解析失败，按纯文本处理: {e}")

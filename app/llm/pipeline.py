@@ -159,6 +159,7 @@ class LlmPipeline:
                 bot=ctx.bot,
                 max_images=int(self.runtime.config.get("image_max_count", 4) or 4),
                 max_bytes=max_image_bytes(self.runtime.config),
+                config=self.runtime.config,
             )
         except Exception as e:  # noqa: BLE001 —— 图片解析失败必须降级为纯文本，不能阻断对话
             from app.core.logger import logger

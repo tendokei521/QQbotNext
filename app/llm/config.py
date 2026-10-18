@@ -156,6 +156,14 @@ DEFAULT_LLM_CONFIG: dict = {
     "image_understanding_enable": True,
     "image_max_count": 4,        # 单轮最多传几张图（超出部分只留占位）
     "image_max_mb": 10,          # 单张图体积上限（MB），超出跳过并记日志
+    # 动图/表情包拆帧：视觉模型对 GIF 往往只读第一帧，框架自己拆成若干静态帧
+    # 才能"看到"整段表情变化。帧数与尺寸直接决定 token，默认值偏保守。
+    "gif_understanding_enable": True,
+    "gif_max_frames": 6,          # 单张动图最多拆几帧（多条动图共享这份预算）
+    "gif_frame_max_edge": 512,    # 每帧长边上限（像素）：512 是"看得清又不贵"的平衡点
+    # 线索命中才会下载字节确认（省流量）；NapCat 之外的实现若不给 summary/后缀，
+    # 打开这个开关可让所有图片都探测一次 n_frames（代价：每张图多一次下载）
+    "gif_probe_all_images": False,
     # 会话历史是主历史来源；在线「聊天环境背景」默认仍注入（指代行保留）。
     # 关掉后历史只来自会话记录，避免同一批消息在两处重复出现。
     "history_background_enable": True,

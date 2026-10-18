@@ -778,6 +778,7 @@ async def _handle_expand_image(ctx, args: dict) -> str:
         images = await resolve_images(
             _ImageEvent(image_segs), bot=bot,
             max_images=len(image_segs), max_bytes=_max_image_bytes(ctx),
+            config=_runtime_config(ctx),
         )
         if not images:
             lines.append(f"消息 {mid}：有 {len(image_segs)} 张图，但拿不到可用图片地址")
@@ -810,10 +811,15 @@ class _SegView:
         self.data = dict(seg.get("data", {}) or {})
 
 
+def _runtime_config(ctx):
+    """取运行时的 Agent 配置（缺失返回 None，调用方各自回默认值）。"""
+    return getattr(getattr(ctx, "runtime", None), "config", None)
+
+
 def _max_image_bytes(ctx) -> int:
     from app.llm.image import DEFAULT_MAX_IMAGE_BYTES, max_image_bytes
 
-    config = getattr(getattr(ctx, "runtime", None), "config", None)
+    config = _runtime_config(ctx)
     if config is None or not hasattr(config, "get"):
         return DEFAULT_MAX_IMAGE_BYTES
     try:

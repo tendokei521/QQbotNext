@@ -622,6 +622,32 @@ SCHEMA = {
         "description": "超过该体积的图片跳过传输并记录日志（base64 会让请求体膨胀约 1/3，过大易被网关拒绝）",
         "default": 10, "min": 1, "max": 50, "group": "group_tools",
     },
+    "gif_understanding_enable": {
+        "type": "boolean", "label": "动图/表情包拆帧理解",
+        "description": "把 GIF、动态 WebP、QQ 表情包拆成若干张静态帧一起传给模型。"
+                       "多数模型对 image/gif 只读第一帧，拆帧后才看得到整段表情变化。"
+                       "同样只对勾选了 image 模态的模型生效",
+        "default": True, "group": "group_tools",
+    },
+    "gif_max_frames": {
+        "type": "number", "label": "动图最多拆几帧",
+        "description": "单条消息里所有动图共享这份帧数预算（等间隔采样，必含首尾帧）。"
+                       "帧数直接换算成 token，表情变化简单时 3~4 帧通常就够",
+        "default": 6, "min": 1, "max": 16, "group": "group_tools",
+    },
+    "gif_frame_max_edge": {
+        "type": "number", "label": "动图帧长边上限(像素)",
+        "description": "每帧缩放后的最长边。512 兼顾清晰度与体积；"
+                       "调小可显著省 token（384 左右对表情包语义几乎无损）",
+        "default": 512, "min": 256, "max": 1024, "group": "group_tools",
+    },
+    "gif_probe_all_images": {
+        "type": "boolean", "label": "所有图片都探测动图",
+        "description": "默认只对「.gif/.webp 后缀、[动画表情] 标注、sub_type=1、商城表情」这些线索命中的图片"
+                       "才下载确认；若你的 OneBot 实现不提供这些线索、动图识别不到，"
+                       "可打开本项让每张图都探测一次（代价：每张图多一次下载）",
+        "default": False, "group": "group_tools",
+    },
     "history_background_enable": {
         "type": "boolean", "label": "注入在线聊天环境背景",
         "description": "开启时额外注入「最近群聊记录」背景块（指代焦点行不受影响）。"
