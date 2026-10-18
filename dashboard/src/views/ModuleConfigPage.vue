@@ -370,7 +370,7 @@ onUnmounted(() => {
   </div>
 
   <div v-else-if="modules.loading" class="empty-tip">
-    <v-skeleton-loader type="card-heading, article, actions" class="rounded-xl w-100" style="max-width: 900px" />
+    <v-skeleton-loader type="heading, article, actions" class="rounded-xl w-100" style="max-width: 900px" />
   </div>
   <div v-else class="empty-tip">
     <v-icon icon="mdi-cube-off-outline" size="56" color="rgba(var(--v-theme-on-surface), 0.3)" />

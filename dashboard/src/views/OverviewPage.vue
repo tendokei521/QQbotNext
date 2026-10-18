@@ -126,7 +126,7 @@ onMounted(() => {
         <v-skeleton-loader type="list-item-two-line, list-item-two-line, list-item-two-line, actions" class="rounded-xl" />
       </v-col>
       <v-col cols="12" lg="7">
-        <v-skeleton-loader type="card-heading, list-item-three-line, actions" class="rounded-xl" />
+        <v-skeleton-loader type="heading, list-item-three-line, actions" class="rounded-xl" />
       </v-col>
     </v-row>
 
