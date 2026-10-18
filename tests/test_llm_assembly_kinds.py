@@ -26,6 +26,7 @@ def test_declared_block_order_covers_all_kinds():
     assert EXPECTED_BLOCKS == [
         "persona",
         "behavior",
+        "emoji_hint",
         "schedule",
         "proactive",
         "message_meta",

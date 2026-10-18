@@ -41,6 +41,11 @@ DEFAULT_LLM_CONFIG: dict = {
     # 参与度（改写行为段「该说/不该说」的首行）与贴表情活跃度（0~3，改写频率行）
     "participation": "medium",
     "emoji_react_level": 1,
+    # user 侧格式：single_line=本轮消息与历史条目同一形态（昵称(QQ): 正文，默认）；
+    # legacy=六行元信息块（时间/群号/发送者/发送了…）。仅 qq_agent 档生效。
+    "user_message_format": "single_line",
+    # 时间行位置：tail=挪到消息末尾（默认，让逐轮稳定的行靠前，前缀缓存更有效）；head=旧行为
+    "prompt_time_position": "tail",
     "max_tokens": 1024,
     "temperature": 0.7,
     # 记录历史时强制清洗助手输出里的（…）/(…) 内容，避免后续回复模仿括号风格

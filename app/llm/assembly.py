@@ -32,18 +32,21 @@ messages（OpenAI 风格）
 | # | 块 | 角色 | 来源 | 条件 |
 |---|---|---|---|---|
 | 1 | persona | system | ``config.persona_preset_id``（活引用）或 ``config.system_prompt`` | 始终 |
-| 2 | schedule | system | ``prompt.SCHEDULE_INSTRUCTION`` | ``schedule_enable`` |
-| 3 | proactive | system | ``prompt.build_proactive_instruction`` | 有可用能力时 |
-| 4 | message_meta | system | ``LEGACY_/MESSAGE_META_INSTRUCTION`` | 消歧说明开启时 |
-| 5 | skills | system ×N | ``runtime.skills.prompt_blocks()`` | 有技能时 |
-| 6 | memory | system | ``memory.recall_block_async`` | 记忆有召回 |
-| 7 | background | system | 指代块 + 聊天环境背景（合并为一块） | 任一非空 |
-| 8 | group_log | system | 群聊环境记录（消息 + 互动 + 我的动作） | 群聊记录模块在场且有记录 |
-| 9 | history | 对话 | 会话历史（已渲染打标） | 非空 |
-| 10 | user | user | 本轮消息（可含额外内容块与图片块） | 始终 |
+| 2 | behavior | system | ``persona_rules``（行为规则段） | ``assembly_profile=qq_agent`` 且未关 |
+| 3 | emoji_hint | system | ``emoji_lexicon.available_tags`` | 能贴表情且活跃度 > 0 |
+| 4 | schedule | system | ``prompt.SCHEDULE_INSTRUCTION`` | ``schedule_enable`` |
+| 5 | proactive | system | ``prompt.build_proactive_instruction`` | 有可用能力时 |
+| 6 | message_meta | system | ``LEGACY_/MESSAGE_META_/SINGLE_LINE_…`` | 消歧说明开启时 |
+| 7 | skills | system ×N | ``runtime.skills.prompt_blocks()`` | 有技能时 |
+| 8 | memory | system | ``memory.recall_block_async`` | 记忆有召回 |
+| 9 | background | system | 指代块 + 聊天环境背景（合并为一块） | 任一非空 |
+| 10 | group_log | system | 群聊环境记录（消息 + 互动 + 我的动作） | 群聊记录模块在场且有记录 |
+| 11 | history | 对话 | 会话历史（已渲染打标） | 非空 |
+| 12 | user | user | 本轮消息（可含额外内容块与图片块） | 始终 |
 
-注意：块 6 在块 7 之前是历史既有行为；块 7 内部"指代在前、环境在后"用 ``\n\n`` 连接。
-块 8 与块 7 是两个**不同来源**（持续记录 vs 按需拉取），正文按 message_id 去重。
+注意：块 8 在块 9 之前是历史既有行为；块 9 内部"指代在前、环境在后"用 ``\n\n`` 连接。
+块 10 与块 9 是两个**不同来源**（持续记录 vs 按需拉取），正文按 message_id 去重。
+块 2/3 只在 ``assembly_profile=qq_agent`` 档出现，``legacy`` 档恒为空（见 ``persona_rules``）。
 """
 
 from __future__ import annotations
@@ -55,8 +58,12 @@ from app.core.logger import logger
 from app.llm.prompt import (
     LEGACY_MESSAGE_META_INSTRUCTION,
     MESSAGE_META_INSTRUCTION,
+    PROFILE_QQ_AGENT,
     SCHEDULE_INSTRUCTION,
+    SINGLE_LINE_MESSAGE_META_INSTRUCTION,
     build_proactive_instruction,
+    emoji_hint_line,
+    user_message_format,
 )
 
 
@@ -255,6 +262,36 @@ def build_behavior(req: PromptRequest) -> list[dict]:
     return [{"role": "system", "content": text}] if str(text).strip() else []
 
 
+def build_emoji_hint(req: PromptRequest) -> list[dict]:
+    """【可用表情】提示行：把可贴标签摆进 prompt，省得模型去翻工具文档。
+
+    三条注入条件（任一不满足就整块不出现）：本轮真的能贴表情、活跃度 > 0、
+    词典里确实有标签。标签表是静态的，所以这段在会话内逐字稳定，不破坏前缀缓存。
+    """
+    if assembly_profile(req) != PROFILE_QQ_AGENT:
+        return []
+    tools = req.available_tools
+    if tools is not None and "set_msg_emoji_like" not in tools:
+        return []
+    try:
+        level = int(req.cfg("emoji_react_level", 1) or 0)
+    except (TypeError, ValueError):
+        level = 1
+    if level <= 0:
+        return []
+    try:
+        from app.llm.emoji_lexicon import available_tags
+
+        tags = available_tags(20)
+    except Exception as e:  # noqa: BLE001 —— 词典不可用不该影响整轮组装
+        logger.add_info(f"#{getattr(req.runtime, 'bot_id', '?')}").warning(
+            f"[Assembly] 读取表情词典失败（已跳过表情提示）: {e}"
+        )
+        return []
+    text = emoji_hint_line(tags)
+    return [{"role": "system", "content": text}] if text else []
+
+
 def build_proactive(req: PromptRequest) -> list[dict]:
     """「主动性」协议块：按本轮实际可用工具裁剪，没有可用能力时整块不注入。
 
@@ -277,6 +314,9 @@ def message_meta_instruction(req: PromptRequest) -> str | None:
     ``off`` 不注入；``new`` 用单行脱敏版；其余用默认真人感版。
     此外，仅当本轮**真的注入了元信息**（``ctx.state["message_meta_injected"]``）时才注入说明——
     否则说明本身就是噪音，会诱导模型去找并不存在的"发送者："前缀。
+
+    ``qq_agent`` 档 + 单行格式时改用**单行格式图例**：老说明讲的是"发送者：/发送了："
+    那一套，格式已经变了却还在解释旧格式，等于给模型一本错的手册。
     """
     ctx = req.ctx
     if ctx is not None and not ctx.state.get("message_meta_injected"):
@@ -287,6 +327,8 @@ def message_meta_instruction(req: PromptRequest) -> str | None:
     mode = str(mode or "legacy").lower()
     if mode == "off":
         return None
+    if assembly_profile(req) == PROFILE_QQ_AGENT and user_message_format(req.config) == "single_line":
+        return SINGLE_LINE_MESSAGE_META_INSTRUCTION
     if mode == "new":
         return MESSAGE_META_INSTRUCTION
     if bool(req.cfg("experimental_long_term_memory", False)):
@@ -437,6 +479,8 @@ BLOCKS: tuple[Block, ...] = (
     # 行为规则紧跟人格：人格讲"我是谁"，行为段讲"在这个群里怎么说话"，
     # 越硬的约束越靠前（对齐 QQ-agent 的段落顺序，见 persona_rules 模块 docstring）
     Block("behavior", build_behavior),
+    # 表情标签提示紧随行为段（行为段的【表情与拍一拍】指着它）
+    Block("emoji_hint", build_emoji_hint),
     Block("schedule", build_schedule_instruction),
     Block("proactive", build_proactive),
     Block("message_meta", build_message_meta),

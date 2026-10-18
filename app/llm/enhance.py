@@ -74,6 +74,10 @@ async def format_user_context(ctx):
 
     组装规则复用 ``history_model.build_current_turn_text``——与历史条目同一套字段语义
     （头部行 + 正文 + 附注行），避免"本轮"和"历史"两套格式各自漂移。
+
+    ``assembly_profile=qq_agent`` + ``user_message_format=single_line`` 时改成**单行**形态：
+    本轮消息和历史条目长得一样（``昵称(QQ): 正文``），时间挪到末尾，六行元信息块消失。
+    旧形态下"本轮是六行块、历史是单行"本身就是模型混乱的来源之一。
     """
     from app.llm.group_context import safe_sender_label
     from app.llm.history_model import build_current_turn_text
@@ -82,10 +86,23 @@ async def format_user_context(ctx):
     if not info:
         return
 
+    cfg = getattr(getattr(ctx, "runtime", None), "config", None)
+
+    def _on(key: str, default: bool) -> bool:
+        return bool(_ctx_cfg(ctx, key, default))
+
+    from app.llm.prompt import prompt_time_position, user_message_format
+
     event = ctx.event
     is_group = event.event_type == "message_group"
     sender_style = str(_ctx_cfg(ctx, "meta_sender_style", "legacy") or "legacy").lower()
     sent_style = str(_ctx_cfg(ctx, "meta_sent_style", "legacy") or "legacy").lower()
+
+    # 档位开关：legacy 档两个判定都退回旧行为（时间在头、六行块）
+    single_line = user_message_format(cfg) == "single_line"
+    time_position = prompt_time_position(cfg)
+    if single_line:
+        sender_style = "single"
 
     def _render_sender(s: str) -> str:
         return safe_sender_label(s)
@@ -94,23 +111,27 @@ async def format_user_context(ctx):
     tail_lines: list[str] = []
     sender_label = ""
 
-    if _ctx_enabled(ctx, "include_time", True):
-        head_lines.append(f"(时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')})")
+    time_line = ""
+    if _on("include_time", True):
+        time_line = f"(时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')})"
+        if time_position == "head":
+            head_lines.append(time_line)
 
     # 私信：独立注入对方 QQ（类似时间行）
-    if not is_group and _ctx_enabled(ctx, "include_private_qq", True):
+    if not is_group and _on("include_private_qq", True):
         user_id = getattr(event, "user_id", None)
         if user_id:
             head_lines.append(f"(QQ: {user_id})")
 
-    # 群聊：注入当前群号，避免调用 OneBot send_poke 等工具时遗漏 group_id
+    # 群聊：注入当前群号，避免调用 OneBot send_poke 等工具时遗漏 group_id。
+    # 单行形态下它仍留在头部：这是**逐轮稳定**的一行，放前面才能吃到前缀缓存。
     if is_group:
         group_id = getattr(getattr(event, "group", None), "group_id", None)
         if group_id:
             head_lines.append(f"(当前群号: {group_id})")
 
     if is_group:
-        if _ctx_enabled(ctx, "include_sender", True) and info.get("sender"):
+        if _on("include_sender", True) and info.get("sender"):
             sender = _render_sender(info["sender"])
             if sender_style == "single":
                 sender_label = sender
@@ -118,19 +139,21 @@ async def format_user_context(ctx):
                 head_lines.append(f"发送者昵称：{sender}")
             else:
                 head_lines.append(f"发送者：{sender}")
-        if _ctx_enabled(ctx, "include_mentioned", True) and info.get("mentioned"):
+        if _on("include_mentioned", True) and info.get("mentioned"):
             mentioned = [_render_sender(m) for m in info["mentioned"]]
             tail_lines.append("提到了(用户名)：" + "、".join(mentioned))
 
-    if _ctx_enabled(ctx, "include_quote", True) and info.get("quote"):
-        if is_group and _ctx_enabled(ctx, "include_quote_sender", True) and info.get("quote_sender"):
+    if _on("include_quote", True) and info.get("quote"):
+        if is_group and _on("include_quote_sender", True) and info.get("quote_sender"):
             quote_sender = _render_sender(info["quote_sender"])
             tail_lines.append(f"引用了：{quote_sender}发送的引用消息：“{info['quote']}”")
         else:
             tail_lines.append(f"引用了：{info['quote']}")
+    if time_position == "tail" and time_line:
+        tail_lines.append(time_line)
 
     sent_text = ctx.user_text.strip() or (info.get("sent_text") or "").strip()
-    if not _ctx_enabled(ctx, "include_sent", True):
+    if not _on("include_sent", True):
         sent_text = ""
     # single 风格把发送者塞进正文行；此时不再单独输出「发送者：」行
     if sender_style == "single":

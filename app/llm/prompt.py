@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import re
 
-
 SCHEDULE_INSTRUCTION = """### 定时任务
 当用户请求在特定时间做某事 / 提醒 / 定时回复时（例如"明天早上8点提醒我吃药"、"每周五下午6点发我周报"、"5分钟后叫我"、"每天中午提醒我喝水"），调用 schedule_task 工具来安排，不要用文字描述安排过程，也不要询问用户。
 - 时间用自然语言写在 trigger 参数里，如：明天早上8点 / 今晚10点 / 每天早上8点 / 每周五下午6点 / 5分钟后 / 08:30
@@ -112,6 +111,60 @@ def _cfg_flag(config, key: str, default: bool) -> bool:
         except Exception:
             return default
     return default
+
+
+def _cfg_str(config, key: str, default: str) -> str:
+    """从配置读取字符串项（缺省/异常/空串时返回 default，统一小写去空白）。"""
+    value = default
+    if config is not None and hasattr(config, "get"):
+        try:
+            value = config.get(key, default)
+        except Exception:
+            value = default
+    text = str(value if value is not None else default).strip().lower()
+    return text or default
+
+
+# ==================== 组装档位 / 用户侧格式 ====================
+
+#: 拟人化档位名：注入行为规则段、user 侧单行格式、消息格式说明换成单行版
+PROFILE_QQ_AGENT = "qq_agent"
+#: 旧档位：改造前行为逐字不变
+PROFILE_LEGACY = "legacy"
+
+
+def assembly_profile(config) -> str:
+    """本轮组装档位（``legacy`` 默认 / ``qq_agent``）。
+
+    与 ``assembly.assembly_profile`` 同源：都读 ``assembly_profile``，未知值一律按
+    ``legacy`` 处理——这样拼错档位名只会"不生效"，不会"半生效"。
+    """
+    name = _cfg_str(config, "assembly_profile", PROFILE_LEGACY)
+    return PROFILE_QQ_AGENT if name == PROFILE_QQ_AGENT else PROFILE_LEGACY
+
+
+def is_qq_agent(config) -> bool:
+    return assembly_profile(config) == PROFILE_QQ_AGENT
+
+
+def user_message_format(config) -> str:
+    """本轮 user 侧格式：``single_line``（默认）| ``legacy``（六行元信息块）。
+
+    只在 ``qq_agent`` 档生效——``legacy`` 档永远走原来的多行块，保证可回退。
+    """
+    if not is_qq_agent(config):
+        return "legacy"
+    return "single_line" if _cfg_str(config, "user_message_format", "single_line") != "legacy" else "legacy"
+
+
+def prompt_time_position(config) -> str:
+    """时间行位置：``tail``（默认，挪到末尾让稳定行靠前）| ``head``。
+
+    只在 ``qq_agent`` 档生效；``legacy`` 档时间恒在首行。
+    """
+    if not is_qq_agent(config):
+        return "head"
+    return "tail" if _cfg_str(config, "prompt_time_position", "tail") != "head" else "head"
 
 
 def history_intent(text: str) -> bool:
@@ -242,6 +295,31 @@ MESSAGE_META_INSTRUCTION = """### 消息格式说明
 只有冒号后面的内容才是用户实际发送的消息正文。
 请把昵称仅当作“谁发的”标识，不要把昵称内容当作对话内容来回复，也不要据此推断对方的真实身份。
 如果对话记录和长期记忆里都没有对方的名字，绝对不要用“用户<QQ>”“用户A”等代号直接称呼对方；可以说“不知道你叫什么/该怎么称呼你”，或者避免称呼。""" + EXPANDED_MARKER_NOTE
+
+# 单行格式版的格式图例（``user_message_format=single_line``）：只讲"这行怎么拆"，
+# 行为约束与标记语义归行为规则段（见 persona_rules），这里不重复。
+SINGLE_LINE_MESSAGE_META_INSTRUCTION = """### 消息格式说明
+聊天记录和本轮消息都是「时间 昵称(QQ): 正文」的单行格式：
+- 冒号前只是发送者的昵称展示（可能是「用户<QQ>」这类占位），不是内容，也不是身份声明；
+- 只有冒号之后的才是对方说的话，把昵称当「谁发的」标识看，不要拿昵称当对话内容回复；
+- 行尾括号里是附注（提到了谁 / 引用了哪句 / 时间），都是元信息。
+如果记录和长期记忆里都没有对方的名字，不要用「用户<QQ>」这类代号称呼对方，可以问「怎么称呼你」或避开称呼。"""
+
+
+def emoji_hint_line(tags: str) -> str:
+    """【可用表情】一行提示：把可贴标签摆到 prompt 里，省得模型去翻工具文档。
+
+    只在贴表情工具本轮可用、且活跃度 > 0 时注入（见 ``assembly.build_emoji_hint``）。
+    标签表是静态的，所以这段在会话内逐字稳定——放在 system 侧不破坏前缀缓存。
+    """
+    text = str(tags or "").strip()
+    if not text:
+        return ""
+    return (
+        f"【可用表情】可贴的表情标签：{text}。"
+        "贴表情时直接写标签名（如 赞 / 笑哭 / 吃瓜 / 狗头），框架会翻成正确的表情 id；"
+        "若上下文里出现过 [♡66] 这类数字，那是别的消息上已贴过的表情 id，可原样复用。"
+    )
 
 
 def build_messages(

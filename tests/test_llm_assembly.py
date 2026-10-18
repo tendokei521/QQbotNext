@@ -145,6 +145,7 @@ def test_block_order_is_declared_and_stable():
     assert [b.name for b in BLOCKS] == [
         "persona",
         "behavior",
+        "emoji_hint",
         "schedule",
         "proactive",
         "message_meta",
@@ -172,6 +173,7 @@ def test_describe_snapshot_typical_group_chat():
     assert rows == [
         {"block": "persona", "role": "system", "chars": 4, "messages": 1},
         {"block": "behavior", "role": "-", "chars": 0, "messages": 0},
+        {"block": "emoji_hint", "role": "-", "chars": 0, "messages": 0},
         {"block": "schedule", "role": "system", "chars": len(SCHEDULE_INSTRUCTION), "messages": 1},
         {"block": "proactive", "role": "-", "chars": 0, "messages": 0},
         {

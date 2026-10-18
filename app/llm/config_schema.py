@@ -192,6 +192,24 @@ SCHEMA = {
         "description": "0=几乎不贴；1=每 3~5 轮一次（默认）；2=优先考虑贴；3=能贴就贴",
         "default": 1, "min": 0, "max": 3, "group": "group_behavior",
     },
+    "user_message_format": {
+        "type": "select", "label": "本轮消息格式",
+        "description": "单行=与历史条目同一形态「昵称(QQ): 正文」（默认，拟人化档位下生效）；多行=旧版时间/群号/发送者/发送了 六行元信息块",
+        "default": "single_line", "group": "group_behavior",
+        "options": {
+            "single_line": "单行：昵称(QQ): 正文（默认）",
+            "legacy": "多行：六行元信息块",
+        },
+    },
+    "prompt_time_position": {
+        "type": "select", "label": "时间行位置",
+        "description": "末尾=把时间挪到消息最后（默认，前头的稳定行不变，前缀缓存更划算）；开头=旧行为",
+        "default": "tail", "group": "group_behavior",
+        "options": {
+            "tail": "末尾（默认）",
+            "head": "开头",
+        },
+    },
     "session_timeout": {
         "type": "number", "label": "会话超时时间(秒)", "description": "无消息后多久结束会话",
         "default": 60, "min": 30, "max": 300, "group": "group_session",
