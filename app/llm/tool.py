@@ -239,8 +239,10 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
             # 压住"工具返回后必写长串汇报"的倾向。详见 tool_loop 模块 docstring。
             # 放在截断**之后**，保证这条要求不会被长度上限砍掉；
             # 失败结果不追加（见 append_reply_directive）。
+            # 发言通道工具（source="speech"）不追加：模型已经用 send_message 说过话了，
+            # 再要求它"用自己口吻回应"只会让它把同一句再说一遍。
             final = _truncate_result(result, spec.max_result)
-            if runtime is not None:
+            if runtime is not None and spec.source != "speech":
                 from app.llm.tool_loop import append_reply_directive, reply_directive
 
                 final = append_reply_directive(

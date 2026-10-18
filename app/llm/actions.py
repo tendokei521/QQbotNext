@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 from app.domain.message import Message, MessageSegment
 
@@ -91,11 +92,17 @@ def assemble_message(
     event,
     *,
     is_group: bool = True,
+    reply_message_id: Any = None,
 ) -> Message:
-    """按 OneBot 段序组装消息：reply → at… → text。"""
+    """按 OneBot 段序组装消息：reply → at… → text。
+
+    ``reply_message_id`` 用于**显式指定**被引用的消息（发言通道的
+    ``send_message(reply_to_message_id=…)`` 走这条路）；缺省时沿用旧口径——
+    引用触发本轮的那条消息。
+    """
     segments: list[MessageSegment] = []
     if directives.reply:
-        message_id = getattr(event, "message_id", None)
+        message_id = reply_message_id if reply_message_id not in (None, "") else getattr(event, "message_id", None)
         if message_id not in (None, ""):
             segments.append(MessageSegment.reply(message_id))
     if directives.ats and is_group:
