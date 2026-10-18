@@ -7,25 +7,29 @@
  * 只有一个分组时不渲染导航，避免给单卡片页面多加一条侧栏。
  */
 import { computed, nextTick, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import ConfigForm from '@/components/config/ConfigForm.vue'
 import PageWithSections from '@/components/common/PageWithSections.vue'
 import type { SectionItem } from '@/components/common/PageSectionNav.vue'
 import { useAgentConfigStore } from '@/stores/agentConfig'
-import { configGroupDomId, filterSchemaBySection, splitSchema } from '@/utils/schema'
-import { agentGroupIcon, agentSectionSelector, type AgentSection } from '@/agent/sections'
+import { configGroupDomId, splitSchema } from '@/utils/schema'
+import { agentSectionSchema, type AgentSection } from '@/agent/sections'
 
 const props = defineProps<{ section: AgentSection }>()
 
 const agent = useAgentConfigStore()
+const route = useRoute()
 
-const schema = computed(() => filterSchemaBySection(agent.schema, agentSectionSelector(props.section)))
+// 页内分组结构来自 registry（不是后端 group）：标题、顺序、字段归属都由
+// sections.json 决定，后端 group 在这里已被重写成本页的子分组 id。
+const schema = computed(() => agentSectionSchema(props.section, agent.schema))
 
 const navItems = computed<SectionItem[]>(() => {
   const { groups } = splitSchema(schema.value)
   return Object.entries(groups).map(([id, def]: [string, any]) => ({
     id: configGroupDomId(id),
     label: def?.label || id,
-    icon: agentGroupIcon(id),
+    icon: def?.icon || 'mdi-circle-small',
   }))
 })
 
@@ -49,6 +53,22 @@ watch(
   () => {
     activeGroup.value = null
   },
+)
+
+// 配置搜索跳转带来 ?group=xxx 时展开并滚动到对应卡片
+watch(
+  () => route.query.group,
+  async (groupId) => {
+    if (typeof groupId !== 'string' || !groupId) return
+    onSelectSection(configGroupDomId(groupId))
+    // 等面板展开（activeGroup 生效）后布局才最终确定，再滚动才准
+    await nextTick()
+    await nextTick()
+    document
+      .getElementById(configGroupDomId(groupId))
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  },
+  { immediate: true },
 )
 </script>
 

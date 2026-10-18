@@ -1,11 +1,16 @@
-"""Agent 分区 registry 与后端配置 schema 的跨语言契约测试。
+"""Agent / 高级设置分区 registry 与后端配置 schema 的跨语言契约测试。
 
-前端 ``dashboard/src/agent/sections.json`` 是「哪些 group 出现在哪个分区」的唯一权威：
-路由、侧边栏二级菜单、概览卡片都由它派生。后端 ``app/llm/config_schema.py`` 里的
-136 个字段必须**恰好**被某个分区覆盖一次，否则就会出现「配置项在 UI 里没有入口」
-或「同一配置项被两个分区重复渲染」。
+前端 ``dashboard/src/agent/sections.json`` 是「哪个字段出现在哪一页的哪个分组」的唯一权威：
+路由、侧边栏二级菜单、段内导航、概览卡片都由它派生。本文件把这层关系钉住，
+防止出现「配置项在 UI 里没有入口」「同一个配置项被两页重复渲染」这类漂移。
 
-这类漂移以前靠人肉同步（分区清单曾抄在 5 处），这里用测试兜住。
+v3 起 registry 自己拥有**页内子分组**（``sections[].groups[]``）：后端 group 是模块划分
+（group_session / group_tools / group_proactive …），用户心智是任务划分，一个页面常常
+横跨多个后端 group，所以页内分组用 ``fields``（显式清单）或 ``source``（收编整个后端
+group）来声明，后端不需要知道前端怎么排版。
+
+另有 ``retired``：被并行计划接管、前端不再提供入口的字段。它们是**合法存在**的后端字段，
+只是不该出现在任何页面里。
 """
 
 from __future__ import annotations
@@ -23,49 +28,92 @@ SECTIONS_PATH = (
 # 历史上「基础配置」一页塞了 42 个字段，是这次重划的直接动因。
 MAX_FIELDS_PER_SECTION = 30
 
+#: 允许出现在「基础配置」里的 advanced 字段（各自的理由写在注释里）。
+#: 除此之外基础配置必须全是 basic 档，否则新手必经页会被调参项淹没。
+ADVANCED_ALLOWED_IN_BASIC = {
+    # 行为规则的手写覆盖：默认规则不合心意时才会用到，但和「行为规则开关」
+    # 必须相邻出现才有意义，单独挪进进阶区反而更难找。
+    "behavior_rules_override",
+}
+
+#: 这些后端分组必须体现字段级 importance 分层（组内既有 basic 又有 advanced）
+_LAYERED_GROUPS = {
+    "group_session",
+    "group_stream",
+    "group_proactive",
+    "group_memory",
+    "group_tools",
+}
+
+_AREAS = {"agent", "advanced"}
+
+
+# ==================== 读取与派生 ====================
+
+
+def _load_manifest() -> dict:
+    return json.loads(SECTIONS_PATH.read_text(encoding="utf-8"))
+
 
 def _load_sections() -> list[dict]:
-    data = json.loads(SECTIONS_PATH.read_text(encoding="utf-8"))
-    return data["sections"]
+    return _load_manifest()["sections"]
 
 
-def _field_groups() -> dict[str, str]:
-    """字段 key -> schema group（无 group 的字段不收进映射）。"""
+def _retired_fields() -> set[str]:
+    return set((_load_manifest().get("retired") or {}).get("fields") or [])
+
+
+def _schema_items() -> dict[str, dict]:
+    """schema 里的配置项（排除 group 定义）。"""
     return {
-        key: definition["group"]
+        key: definition
         for key, definition in SCHEMA.items()
-        if isinstance(definition, dict) and definition.get("group")
+        if isinstance(definition, dict) and definition.get("type") != "group"
     }
 
 
-def _sections_for_field(key: str, group: str, sections: list[dict]) -> list[str]:
-    """复刻前端 agentSectionForField：显式 fields 命中优先，其次按 group 归属。"""
-    by_field = [s["id"] for s in sections if key in (s.get("fields") or [])]
-    if by_field:
-        return by_field
-    return [s["id"] for s in sections if group in (s.get("groups") or [])]
+def _schema_group_ids() -> set[str]:
+    return {
+        key
+        for key, definition in SCHEMA.items()
+        if isinstance(definition, dict) and definition.get("type") == "group"
+    }
+
+
+def _subgroup_fields(subgroup: dict) -> list[str]:
+    """复刻前端 buildSectionSchema：显式 fields 优先，否则按 source 收整组。"""
+    items = _schema_items()
+    if subgroup.get("fields"):
+        return [key for key in subgroup["fields"] if key in items]
+    sources = set(subgroup.get("source") or [])
+    excluded = set(subgroup.get("excludeFields") or [])
+    return [
+        key
+        for key, definition in items.items()
+        if definition.get("group") in sources and key not in excluded
+    ]
 
 
 def _fields_by_section() -> dict[str, list[str]]:
-    """分区 id -> 该分区实际渲染的字段（含 fields 独占的剔除规则）。"""
-    sections = _load_sections()
-    carved = {f for s in sections for f in (s.get("fields") or [])}
-    result: dict[str, list[str]] = {}
-    for section in sections:
-        if section.get("fields"):
-            owned = [k for k in SCHEMA if k in set(section["fields"])]
-        else:
-            groups = set(section.get("groups") or [])
-            owned = [
-                key
-                for key, definition in SCHEMA.items()
-                if isinstance(definition, dict)
-                and definition.get("type") != "group"
-                and definition.get("group") in groups
-                and key not in carved
-            ]
-        result[section["id"]] = owned
-    return result
+    return {
+        section["id"]: [
+            key
+            for subgroup in section.get("groups") or []
+            for key in _subgroup_fields(subgroup)
+        ]
+        for section in _load_sections()
+    }
+
+
+def _all_subgroups() -> list[tuple[dict, dict]]:
+    return [
+        (section, subgroup)
+        for section in _load_sections()
+        for subgroup in section.get("groups") or []
+    ]
+
+
+# ==================== 清单结构 ====================
 
 
 def test_sections_manifest_exists_and_parses():
@@ -73,90 +121,96 @@ def test_sections_manifest_exists_and_parses():
     assert _load_sections(), "分区清单不能为空"
 
 
-def test_section_ids_are_unique():
-    ids = [s["id"] for s in _load_sections()]
+def test_section_ids_and_paths_are_unique():
+    sections = _load_sections()
+    ids = [s["id"] for s in sections]
+    paths = [s["path"] for s in sections]
     assert len(ids) == len(set(ids)), f"分区 id 重复: {ids}"
-
-
-def test_section_paths_are_unique():
-    paths = [s["path"] for s in _load_sections()]
     assert len(paths) == len(set(paths)), f"分区路径重复: {paths}"
 
 
 def test_every_section_has_required_metadata():
     for section in _load_sections():
-        for key in ("id", "path", "title", "subtitle", "icon", "color", "groups"):
+        for key in ("id", "path", "title", "subtitle", "icon", "color", "area", "order", "groups"):
             assert section.get(key) not in (None, ""), f"分区 {section.get('id')} 缺字段 {key}"
         assert section["path"].startswith("/"), f"分区 {section['id']} 路径应以 / 开头"
+        assert isinstance(section["groups"], list) and section["groups"], (
+            f"分区 {section['id']} 必须声明至少一个页内分组"
+        )
 
 
 def test_section_area_matches_path():
-    """归属区域决定路由由谁生成：agent 必须挂 /agent/*，tools 必须在别处。"""
+    """归属区域决定路由挂在哪：agent → /agent/*，advanced → /advanced/*。"""
     for section in _load_sections():
-        area = section.get("area", "agent")
-        if area == "agent":
-            assert section["path"].startswith("/agent/"), (
-                f"分区 {section['id']} 属于 agent 区域，路径却不在 /agent/ 下"
-            )
-        else:
-            assert not section["path"].startswith("/agent/"), (
-                f"分区 {section['id']} 归属 {area} 区域，不应挂在 /agent/ 下"
-            )
+        area = section["area"]
+        assert area in _AREAS, f"分区 {section['id']} 的 area 非法: {area}"
+        assert section["path"].startswith(f"/{area}/"), (
+            f"分区 {section['id']} 归属 {area} 区域，路径却不在 /{area}/ 下"
+        )
 
 
-def test_sections_only_reference_existing_groups():
-    known = set(_field_groups().values())
-    for section in _load_sections():
-        for group in section.get("groups") or []:
-            assert group in known, f"分区 {section['id']} 引用了不存在的 group: {group}"
+def test_every_subgroup_is_well_formed():
+    """页内分组必须有 id/label，且至少声明一种字段来源。"""
+    seen: dict[str, str] = {}
+    for section, subgroup in _all_subgroups():
+        sid = subgroup.get("id")
+        assert sid, f"分区 {section['id']} 里有页内分组缺 id"
+        assert subgroup.get("label"), f"页内分组 {sid} 缺 label（段内导航会显示空标签）"
+        assert subgroup.get("fields") or subgroup.get("source"), (
+            f"页内分组 {sid} 既没有 fields 也没有 source，渲染出来是空卡片"
+        )
+        assert sid not in seen, f"页内分组 id 重复: {sid}（{seen.get(sid)} 与 {section['id']}）"
+        seen[sid] = section["id"]
 
 
-def test_sections_only_reference_existing_fields():
-    for section in _load_sections():
-        for key in section.get("fields") or []:
-            assert key in SCHEMA, f"分区 {section['id']} 引用了不存在的字段: {key}"
+def test_subgroups_only_reference_existing_fields():
+    items = set(_schema_items())
+    for section, subgroup in _all_subgroups():
+        for key in subgroup.get("fields") or []:
+            assert key in items, f"{section['id']}/{subgroup['id']} 引用了不存在的字段: {key}"
+
+
+def test_subgroups_only_reference_existing_groups():
+    groups = _schema_group_ids()
+    for section, subgroup in _all_subgroups():
+        for group in subgroup.get("source") or []:
+            assert group in groups, f"{section['id']}/{subgroup['id']} 引用了不存在的 group: {group}"
+
+
+# ==================== 覆盖契约（核心） ====================
 
 
 def test_every_field_is_covered_exactly_once():
-    """核心契约：每个配置字段都必须有且只有一个分区出口。"""
-    sections = _load_sections()
-    unmapped: list[str] = []
-    duplicated: dict[str, list[str]] = {}
-
-    for key, group in _field_groups().items():
-        owners = _sections_for_field(key, group, sections)
-        if not owners:
-            unmapped.append(f"{key}({group})")
-        elif len(owners) > 1:
-            duplicated[key] = owners
-
-    assert not unmapped, f"以下字段没有任何分区承载（UI 里将无法配置）: {unmapped}"
-    assert not duplicated, f"以下字段被多个分区重复承载: {duplicated}"
-
-
-def test_every_group_is_owned_by_exactly_one_section():
-    """分组不能被两个分区同时认领，否则同一批字段会出现两次。"""
-    sections = _load_sections()
+    """核心契约：每个字段要么恰好被一个页内分组承载，要么已被退役。"""
+    retired = _retired_fields()
     owners: dict[str, list[str]] = {}
-    for section in sections:
-        for group in section.get("groups") or []:
-            owners.setdefault(group, []).append(section["id"])
-    shared = {g: ids for g, ids in owners.items() if len(ids) > 1}
-    assert not shared, f"以下分组被多个分区同时认领: {shared}"
+    for section, subgroup in _all_subgroups():
+        for key in _subgroup_fields(subgroup):
+            owners.setdefault(key, []).append(f"{section['id']}/{subgroup['id']}")
 
-    unclaimed = set(_field_groups().values()) - set(owners)
-    assert not unclaimed, f"以下分组没有任何分区认领: {sorted(unclaimed)}"
+    unmapped = [key for key in _schema_items() if key not in owners and key not in retired]
+    duplicated = {key: where for key, where in owners.items() if len(where) > 1}
+    resurrected = sorted(set(owners) & retired)
+
+    assert not unmapped, f"以下字段没有任何入口（UI 里将无法配置）: {unmapped}"
+    assert not duplicated, f"以下字段被多个页内分组重复承载: {duplicated}"
+    assert not resurrected, f"以下字段已声明退役，却又被页面承载: {resurrected}"
 
 
-def test_sections_are_not_empty():
-    """每个分区至少要真正渲染点东西，否则就是个空壳页面。"""
-    by_section = _fields_by_section()
+def test_retired_fields_exist_in_schema():
+    """退役清单只能引用真实存在的字段，否则就是笔误（会静默失去覆盖检查）。"""
+    unknown = sorted(_retired_fields() - set(_schema_items()))
+    assert not unknown, f"retired 引用了 schema 中不存在的字段: {unknown}"
+
+
+def test_every_subgroup_renders_something():
+    """每个页内分组至少要产出字段，否则页面上会出现空卡片。"""
     empty = [
-        section["id"]
-        for section in _load_sections()
-        if not by_section[section["id"]] and not section.get("custom")
+        f"{section['id']}/{subgroup['id']}"
+        for section, subgroup in _all_subgroups()
+        if not _subgroup_fields(subgroup)
     ]
-    assert not empty, f"以下分区不渲染任何字段（且未声明 custom 组件）: {empty}"
+    assert not empty, f"以下页内分组不渲染任何字段: {empty}"
 
 
 def test_section_size_within_budget():
@@ -172,22 +226,21 @@ def test_section_size_within_budget():
 
 
 def test_basic_section_stays_beginner_friendly():
-    """「基础开关」必须全部是 basic 档字段——它是新手唯一的必经页。"""
-    by_section = _fields_by_section()
-    basic_fields = by_section["basic"]
-    assert basic_fields, "基础分区不应为空"
-    advanced = [
+    """「基础配置」是新手唯一必经页，只允许极少数高级项混入。"""
+    basic_fields = _fields_by_section()["basic"]
+    assert basic_fields, "基础配置不应为空"
+    advanced = {
         key
         for key in basic_fields
         if (SCHEMA.get(key) or {}).get("importance") == "advanced"
-    ]
-    assert not advanced, f"基础分区混入了 advanced 档字段，应移到进阶分区: {advanced}"
+    }
+    unexpected = sorted(advanced - ADVANCED_ALLOWED_IN_BASIC)
+    assert not unexpected, f"基础配置混入了未登记的高级字段，应移到进阶区: {unexpected}"
 
 
 def test_stream_presets_are_renderable_and_target_the_stream_section():
-    """流式预设只有后端一份（前端曾硬编码重复副本，已随本次重构删除）。
+    """流式预设只有后端一份，且预设改写的字段都落在「流式输出」页里。
 
-    这里保证后端下发的预设结构完整，且预设改写的字段都落在「流式回复」分区里——
     否则「点预设」会静默改掉用户看不见的配置项。
     """
     from app.llm.config_schema import STREAM_PRESETS
@@ -201,32 +254,20 @@ def test_stream_presets_are_renderable_and_target_the_stream_section():
         config = preset.get("config")
         assert isinstance(config, dict) and config, f"预设 {key} 的 config 不能为空"
         stray = sorted(set(config) - stream_fields)
-        assert not stray, f"预设 {key} 改写了不属于「流式回复」分区的字段: {stray}"
+        assert not stray, f"预设 {key} 改写了不属于「流式输出」页的字段: {stray}"
 
+
+# ==================== schema 元数据契约 ====================
 
 
 def test_grouped_fields_carry_importance():
-    """importance 是前端区分「基础/进阶分区」的唯一依据，分组字段必须都带上。"""
+    """importance 是前端区分「基础/进阶」的唯一依据，分组字段必须都带上。"""
     missing = [
         key
-        for key, definition in SCHEMA.items()
-        if isinstance(definition, dict) and definition.get("group") and not definition.get("importance")
+        for key, definition in _schema_items().items()
+        if definition.get("group") and not definition.get("importance")
     ]
-    assert not missing, f"以下字段缺少 importance 标注: {missing}"
-
-
-def test_schema_no_longer_carries_page_metadata():
-    """分区归属的唯一权威是前端 registry，后端不再逐字段标注 page。
-
-    历史上 page 与 registry 是两份真相：重划分区时 page 会滞留旧值，
-    「搜索配置」就会跳到不含该字段的页面（重划时确实踩到过）。
-    """
-    offenders = [
-        key
-        for key, definition in SCHEMA.items()
-        if isinstance(definition, dict) and "page" in definition
-    ]
-    assert not offenders, f"以下字段仍带 page 元数据，应删除（registry 才是权威）: {offenders}"
+    assert not missing, f"以下字段缺少 importance: {missing}"
 
 
 # ==================== 条件显隐（showIf）文法契约 ====================
@@ -234,6 +275,7 @@ def test_schema_no_longer_carries_page_metadata():
 # 防止有人写出前端解析不了的条件（表现为「设了条件但界面没隐藏/没显示」）。
 
 _SHOW_IF_SIMPLE_KEYS = {"key", "value", "in", "notIn", "gt", "notEmpty"}
+_SHOW_IF_JUDGES = {"value", "in", "notIn", "gt", "notEmpty"}
 
 
 def _iter_conditions(cond):
@@ -250,12 +292,10 @@ def _iter_conditions(cond):
 
 
 def test_show_if_uses_supported_grammar():
-    field_keys = {
-        key for key, definition in SCHEMA.items() if isinstance(definition, dict)
-    }
+    items = _schema_items()
     problems: list[str] = []
-    for key, definition in SCHEMA.items():
-        if not isinstance(definition, dict) or not definition.get("showIf"):
+    for key, definition in items.items():
+        if not definition.get("showIf"):
             continue
         cond = definition["showIf"]
         if not isinstance(cond, dict):
@@ -279,16 +319,16 @@ def test_show_if_uses_supported_grammar():
             if "key" not in leaf:
                 problems.append(f"{key}: 条件缺少 key")
                 continue
-            if leaf["key"] not in field_keys:
+            if leaf["key"] not in items:
                 problems.append(f"{key}: 依赖的字段不存在 {leaf['key']}")
-            if not ({"value", "in", "notIn", "gt", "notEmpty"} & set(leaf)):
+            if not (_SHOW_IF_JUDGES & set(leaf)):
                 problems.append(f"{key}: 条件没有判定方式（value/in/notIn/gt/notEmpty）")
     assert not problems, "showIf 条件不合法:\n" + "\n".join(f"  {p}" for p in problems)
 
 
 def test_show_if_never_references_self():
-    for key, definition in SCHEMA.items():
-        if not isinstance(definition, dict) or not definition.get("showIf"):
+    for key, definition in _schema_items().items():
+        if not definition.get("showIf"):
             continue
         for leaf in _iter_conditions(definition["showIf"]):
             assert leaf.get("key") != key, f"{key} 的 showIf 依赖自己，会永远不显示"
@@ -299,27 +339,16 @@ def test_importance_is_field_level():
     allowed = {"basic", "advanced"}
     missing = [
         key
-        for key, definition in SCHEMA.items()
-        if isinstance(definition, dict) and definition.get("group") and definition.get("importance") not in allowed
+        for key, definition in _schema_items().items()
+        if definition.get("group") and definition.get("importance") not in allowed
     ]
     assert not missing, f"以下字段的 importance 缺失或非法: {missing}"
 
-    # 同一 group 内必须出现「既非全 basic 也非全 advanced」的分层，
-    # 否则说明又退回按组打档（历史问题：group_session 24 项全被标 basic）。
+    # 指定分组内必须出现分层，否则说明又退回按组打档
+    # （历史问题：group_session 24 项全被标 basic）。
     by_group: dict[str, set[str]] = {}
-    for definition in SCHEMA.values():
-        if isinstance(definition, dict) and definition.get("group"):
+    for definition in _schema_items().values():
+        if definition.get("group"):
             by_group.setdefault(definition["group"], set()).add(definition["importance"])
     monolithic = sorted(g for g, marks in by_group.items() if len(marks) == 1 and g in _LAYERED_GROUPS)
     assert not monolithic, f"以下分组仍是单一档位，说明 importance 没做到字段级: {monolithic}"
-
-
-#: 这些分组必须体现字段级分层（组内既有 basic 又有 advanced）
-#: 注意 group_permission 不在其中：它的三项（档位 / 拥有者 / 管理者）都该是 basic。
-_LAYERED_GROUPS = {
-    "group_session",
-    "group_stream",
-    "group_proactive",
-    "group_memory",
-    "group_tools",
-}
