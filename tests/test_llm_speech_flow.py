@@ -92,10 +92,14 @@ def _config(**over):
 
 
 def _runtime(bot_id: int, config: dict):
+    from app.llm.session import SessionManager
+
     rt = types.SimpleNamespace()
     rt.bot_id = bot_id
     rt.config = dict(config)
     rt.memory = None
+    # 生产运行时带 session_mgr：发送成功后 pipeline 靠它回填 assistant 历史的 message_id
+    rt.session_mgr = SessionManager(str(bot_id))
     rt.skills = _Skills()
     rt.llm_tools = _Tools()
     rt.telemetry = _Telemetry()
@@ -291,3 +295,64 @@ async def test_speech_off_keeps_text_as_speech(monkeypatch, tmp_path):
 
     assert sent == ["就这样吧。"]
     assert _assistant_history(997) == ["就这样吧。"]
+
+
+class _FakeBot:
+    """最小的发送接口：记录每条待发消息，并回一个 message_id。"""
+
+    def __init__(self):
+        self.sent: list = []
+
+    async def send_group_msg(self, group_id, message):
+        self.sent.append(message)
+        return {"status": "ok", "data": {"message_id": 9000 + len(self.sent)}}
+
+    async def send_private_msg(self, user_id, message):
+        self.sent.append(message)
+        return {"status": "ok", "data": {"message_id": 9000 + len(self.sent)}}
+
+
+async def test_pipeline_sends_bubbles_and_backfills_history_id(monkeypatch, tmp_path):
+    """走真正的 pipeline 出口：气泡变成真消息，发送后 message_id 补到对应那条历史上。
+
+    这条用例守的是"发言通道没有绕开原有发送路径"——pre_send/post_send 钩子、
+    group_log 的「我的发言」入账、发送间隔策略都挂在 ``_send`` 上，
+    任何自建发送实现都会漏掉其中一半。
+    """
+    from app.domain.message import Message
+    from app.llm.pipeline import LlmPipeline
+
+    _register(monkeypatch)
+    monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
+    STREAM_SCRIPT.extend([
+        [
+            _text("（先回一句）"),
+            _tool_call("send_message", '{"messages": ["第一句", "第二句"], "reply_to_message_id": "22350"}'),
+        ],
+        [_text("（说完）")],
+    ])
+    rt = _runtime(998, _config())
+    event = _event()
+    ctx = _ctx(event)
+    bot = _FakeBot()
+    ctx.bot = bot
+
+    await LlmPipeline(rt)._run_stream(ctx)
+
+    assert len(bot.sent) == 2, "两条气泡应各自成为一条真消息"
+    assert all(isinstance(m, Message) for m in bot.sent)
+    assert [seg.type for seg in bot.sent[0].segments] == ["reply", "text"]
+    assert bot.sent[0].segments[0].data["id"] == "22350"
+    assert [m.text for m in bot.sent] == ["第一句", "第二句"]
+
+    from app.llm.session import SessionManager
+
+    entries = [
+        item
+        for item in SessionManager("998").get_history("group_466052056", limit=50)
+        if item.get("role") == "assistant"
+    ]
+    assert [e.get("content") for e in entries] == ["第一句", "第二句"]
+    assert [str(e.get("message_id")) for e in entries] == ["9001", "9002"], (
+        "每条气泡的历史都要拿到自己那条消息的 id（顺序反了会落到上一条上）"
+    )

@@ -103,6 +103,31 @@ async def test_send_message_truncates_long_bubble_instead_of_rejecting():
     assert len(outbox.take()[0].text) == 10
 
 
+def test_bubble_becomes_message_with_reply_at_text_order():
+    """气泡 → 待发消息：段序必须是 reply → at… → text（QQ 只认这个顺序）。"""
+    from app.llm.actions import OutboundDirectives, assemble_message
+
+    message = assemble_message(
+        "那我先睡了",
+        OutboundDirectives(reply=True, ats=["10001", "10002"]),
+        object(),  # 事件对象：这里走显式 reply_message_id，不读 event.message_id
+        is_group=True,
+        reply_message_id="22350",
+    )
+    assert [seg.type for seg in message.segments] == ["reply", "at", "at", "text"]
+    assert message.segments[0].data["id"] == "22350"
+    assert [seg.data["qq"] for seg in message.segments[1:3]] == ["10001", "10002"]
+    assert message.text == "那我先睡了"
+
+
+def test_bubble_without_targets_is_plain_text():
+    """没有引用/@ 的气泡就是一条纯文本消息（不要凭空造段）。"""
+    from app.llm.actions import OutboundDirectives, assemble_message
+
+    message = assemble_message("嗯", OutboundDirectives(), object(), is_group=True)
+    assert [seg.type for seg in message.segments] == ["text"]
+
+
 def test_speech_tools_are_marked_speech_source():
     """``source="speech"`` 让工具执行器跳过「回应要求」追加（否则模型会把话再说一遍）。"""
     specs = build_speech_tools(SpeechOutbox())

@@ -502,6 +502,9 @@ def _clean_output_for_history(config, text: str) -> str:
 
 # ==================== 发言通道（文本=思考，发言=send_message） ====================
 
+#: 「配置想开发言通道但没生效」的告警去重（bot_id 集合）：持久性配置矛盾不该每条刷日志
+_WARNED_SPEECH_INTENT: set = set()
+
 
 def _build_speech(config):
     """按配置构造本轮发言记账本；不该启用时返回 None（= 旧的文本即发言）。"""
@@ -894,10 +897,14 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
 
         all_specs = list(all_specs or []) + build_speech_tools(speech)
     elif _speech_intent(config):
-        logger.add_info(f"#{runtime.bot_id}").warning(
-            "[LLM] 已开启 speech_via_tool 但当前不是拟人化档位或未开流式输出，"
-            "本轮按「文本即发言」处理（发言通道需要轮次边界才能 flush）"
-        )
+        # 只在第一次告警：配置矛盾是持久状态，每条消息刷一遍日志没有信息量
+        warn_key = (getattr(runtime, "bot_id", 0), "speech_intent")
+        if warn_key not in _WARNED_SPEECH_INTENT:
+            _WARNED_SPEECH_INTENT.add(warn_key)
+            logger.add_info(f"#{runtime.bot_id}").warning(
+                "[LLM] 已开启 speech_via_tool 但当前不是拟人化档位或未开流式输出，"
+                "按「文本即发言」处理（发言通道需要轮次边界才能 flush）"
+            )
     # 群聊环境记录块：持续记录面（消息 + 表情/戳/撤回 + 我的动作），
     # 与上面的 pre_history（按需拉取在线历史）是两个来源，正文按 message_id 去重。
     from app.llm.group_log.context import build_context_text

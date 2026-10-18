@@ -305,6 +305,12 @@ def label_of(entry, ctx) -> list[str]      # @我/提到我/提到我(备注名)
 
 ### P2 · 发言通道（核心，3~5 天，风险中高）
 
+> **状态：已落地**（`22415da` 记账本 + `19c8db6` 接入流式主循环）。与本文的差异见
+> `prompt-assembly-redesign.md §9`：非流式路径明确不支持（只告警）、强制补救轮
+> 只在 @/私聊时触发、`tool_loop.py` 的改动落在 `tool.make_executor`（按
+> `source="speech"` 跳过「回应要求」）。验收 1/2/3/4/5/7 已有单测覆盖，
+> 第 6 条（打断）沿用原有 `_should_break_stream` 判定，未新增用例。
+
 改动：
 - 新增 `app/llm/speech.py`（outbox + 两个工具 + flush）
 - `chat.py`：`prepare_prompt` 注入 speech 工具；`generate_response`/`stream_response` 走 outbox；
