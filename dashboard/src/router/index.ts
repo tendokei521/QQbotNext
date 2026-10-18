@@ -1,45 +1,23 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { AGENT_SECTIONS } from '@/agent/sections'
 
-// 分区 id → 页面组件。动态 import 无法由数据派生，只能显式映射；
-// 其余导航元数据（路径/标题/图标）一律来自 @/agent/sections。
-const AGENT_PAGE_COMPONENTS: Record<string, () => Promise<unknown>> = {
-  basic: () => import('@/views/AgentBasicPage.vue'),
-  role: () => import('@/views/AgentRolePage.vue'),
-  model: () => import('@/views/AgentModelPage.vue'),
-  behavior: () => import('@/views/AgentBehaviorPage.vue'),
-  stream: () => import('@/views/AgentStreamPage.vue'),
-  permission: () => import('@/views/AgentPermissionPage.vue'),
-  memory: () => import('@/views/AgentMemoryPage.vue'),
-  knowledge: () => import('@/views/AgentKnowledgePage.vue'),
-  mcp: () => import('@/views/AgentMcpPage.vue'),
-  panels: () => import('@/views/AgentPanelsPage.vue'),
-}
-
 /**
  * 由 registry 生成 /agent/* 子路由（作为 AgentLayout 的 children）。
  *
- * 只生成 ``area === 'agent'`` 的分区：``onebot`` 分区的界面挂在 Tool 管理下
- * （``/tools/onebot``），这里不再重复注册，仅保留 ``/agent/onebot`` 的历史重定向。
+ * 所有「区域为 agent」的分区共用同一个通用页面 ``AgentSectionPage``：
+ * 分区元数据来自 registry，字段来自后端 schema，定制 UI 来自 customSections，
+ * 所以新增分区只需改 sections.json，不必再新增页面文件。
  *
- * 缺组件时立刻抛错而不是让 vue-router 在跳转时抛一句看不懂的话——
- * 这是「往 sections.json 加了分区却忘了加页面」的快速失败点。
+ * ``onebot`` 分区的界面挂在 Tool 管理下（``/tools/onebot``），这里不重复注册，
+ * 仅保留 ``/agent/onebot`` 的历史重定向。
  */
 const agentSectionRoutes = AGENT_SECTIONS.filter((section) => section.area === 'agent').map(
-  (section) => {
-    const component = AGENT_PAGE_COMPONENTS[section.id]
-    if (!component) {
-      throw new Error(
-        `[agent-sections] 分区 "${section.id}" 缺少页面组件映射，请补进 router/index.ts 的 AGENT_PAGE_COMPONENTS`,
-      )
-    }
-    return {
-      path: section.path.replace(/^\/agent\//, ''),
-      name: `agent-${section.id}`,
-      component,
-      meta: { title: `Agent ${section.title}` },
-    }
-  },
+  (section) => ({
+    path: section.path.replace(/^\/agent\//, ''),
+    name: `agent-${section.id}`,
+    component: () => import('@/views/AgentSectionPage.vue'),
+    meta: { title: `Agent ${section.title}` },
+  }),
 )
 
 // 使用 hash 路由：构建产物由 FastAPI 静态挂载，无需服务端 SPA fallback 配置

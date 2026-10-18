@@ -30,7 +30,7 @@ function onSelect(id: string) {
 
 <template>
   <div class="page-with-sections" :class="`is-${props.position}`">
-    <PageSectionNav :sections="props.sections" :active="activeId" @select="onSelect" />
+    <PageSectionNav :sections="props.sections" :position="props.position" :active="activeId" @select="onSelect" />
     <div class="page-with-sections__content">
       <slot />
     </div>

@@ -1,13 +1,14 @@
 <script setup lang="ts">
+/**
+ * 「流式回复」分区的定制 UI：发送节奏预设卡片。
+ * 参数表单由 AgentConfigSection 统一渲染。
+ */
 import { computed } from 'vue'
-import ConfigForm from '@/components/config/ConfigForm.vue'
 import { useAgentConfigStore } from '@/stores/agentConfig'
-import { filterSchemaByPage } from '@/utils/schema'
 
 const agent = useAgentConfigStore()
 
-const schema = computed(() => filterSchemaByPage(agent.schema, 'stream'))
-
+// 后端未下发预设时的兜底（与 app/llm/config_schema.py 的 STREAM_PRESETS 保持同值）
 const fallbackPresets: Record<string, any> = {
   fast: {
     label: '快速',
@@ -75,50 +76,39 @@ function applyPreset(key: string) {
 </script>
 
 <template>
-  <div>
-    <v-card variant="outlined" class="mb-4">
-      <v-card-title class="d-flex align-center">
-        <v-icon icon="mdi-wave" class="mr-2" color="purple" /> 发送节奏预设
-        <v-spacer />
-        <v-chip v-if="activePreset" size="small" variant="tonal" color="purple">
-          当前：{{ presets[activePreset]?.label }}
-        </v-chip>
-        <v-chip v-else size="small" variant="tonal">自定义</v-chip>
-      </v-card-title>
-      <v-card-text>
-        <div class="preset-grid">
-          <v-card
-            v-for="(p, key) in presets"
-            :key="key"
-            variant="outlined"
-            class="preset-card"
-            :class="{ 'is-active': activePreset === key }"
-            @click="applyPreset(String(key))"
-          >
-            <v-card-text>
-              <div class="d-flex align-center justify-space-between">
-                <span class="font-weight-medium">{{ p.label }}</span>
-                <v-icon color="success" v-if="activePreset === key">mdi-check-circle</v-icon>
-              </div>
-              <div class="text-caption mt-1" style="opacity: 0.75">{{ p.description }}</div>
-            </v-card-text>
-          </v-card>
-        </div>
-        <div class="text-caption mt-3" style="opacity: 0.6">
-          预设会覆盖基础间隔、最短/最长间隔和短语延迟；保存后生效。
-        </div>
-      </v-card-text>
-    </v-card>
-
-    <v-card variant="outlined" class="mb-4">
-      <v-card-title class="d-flex align-center">
-        <v-icon icon="mdi-tune" class="mr-2" color="purple" /> 高级流式参数
-      </v-card-title>
-      <v-card-text>
-        <ConfigForm :module-name="'agent'" :schema="schema" :config="agent.draft" :bot-id="agent.botId" @change="agent.onChange" />
-      </v-card-text>
-    </v-card>
-  </div>
+  <v-card variant="outlined" class="mb-4">
+    <v-card-title class="d-flex align-center">
+      <v-icon icon="mdi-wave" class="mr-2" color="purple" /> 发送节奏预设
+      <v-spacer />
+      <v-chip v-if="activePreset" size="small" variant="tonal" color="purple">
+        当前：{{ presets[activePreset]?.label }}
+      </v-chip>
+      <v-chip v-else size="small" variant="tonal">自定义</v-chip>
+    </v-card-title>
+    <v-card-text>
+      <div class="preset-grid">
+        <v-card
+          v-for="(p, key) in presets"
+          :key="key"
+          variant="outlined"
+          class="preset-card"
+          :class="{ 'is-active': activePreset === key }"
+          @click="applyPreset(String(key))"
+        >
+          <v-card-text>
+            <div class="d-flex align-center justify-space-between">
+              <span class="font-weight-medium">{{ p.label }}</span>
+              <v-icon v-if="activePreset === key" color="success">mdi-check-circle</v-icon>
+            </div>
+            <div class="text-caption mt-1" style="opacity: 0.75">{{ p.description }}</div>
+          </v-card-text>
+        </v-card>
+      </div>
+      <div class="text-caption mt-3" style="opacity: 0.6">
+        预设会覆盖基础间隔、最短/最长间隔和短语延迟；保存后生效。
+      </div>
+    </v-card-text>
+  </v-card>
 </template>
 
 <style scoped>

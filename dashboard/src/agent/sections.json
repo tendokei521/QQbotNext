@@ -19,7 +19,8 @@
       "icon": "mdi-account-heart",
       "color": "pink",
       "groups": [],
-      "fields": ["system_prompt", "persona_preset_id"]
+      "fields": ["system_prompt", "persona_preset_id"],
+      "customFirst": true
     },
     {
       "id": "model",
@@ -28,7 +29,8 @@
       "subtitle": "Provider 模型池与调用参数",
       "icon": "mdi-api",
       "color": "info",
-      "groups": ["group_model"]
+      "groups": ["group_model"],
+      "customFirst": true
     },
     {
       "id": "behavior",
@@ -46,7 +48,8 @@
       "subtitle": "流式开关、发送频率与预设",
       "icon": "mdi-wave",
       "color": "purple",
-      "groups": ["group_stream"]
+      "groups": ["group_stream"],
+      "customFirst": true
     },
     {
       "id": "permission",
@@ -73,7 +76,8 @@
       "subtitle": "知识库检索与 Embedding 模型",
       "icon": "mdi-book-open-variant",
       "color": "deep-purple",
-      "groups": ["group_knowledge"]
+      "groups": ["group_knowledge"],
+      "customFirst": true
     },
     {
       "id": "mcp",
@@ -82,7 +86,8 @@
       "subtitle": "MCP stdio server 配置",
       "icon": "mdi-server-network",
       "color": "blue-grey",
-      "groups": ["group_mcp"]
+      "groups": ["group_mcp"],
+      "customFirst": true
     },
     {
       "id": "onebot",

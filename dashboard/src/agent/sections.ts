@@ -27,6 +27,8 @@ export interface AgentSection {
   groups: string[]
   /** 需要从某个 group 里只取部分字段时的显式清单（覆盖 groups） */
   fields?: string[]
+  /** 定制组件是否排在 schema 表单之前（默认之后） */
+  customFirst: boolean
   /** 归属区域：agent 走 /agent/*；tools 复用 Tool 管理下的既有页面 */
   area: AgentSectionArea
 }
@@ -40,6 +42,7 @@ interface RawSection {
   color: string
   groups: string[]
   fields?: string[]
+  customFirst?: boolean
   area?: AgentSectionArea
 }
 
@@ -54,6 +57,7 @@ export const AGENT_SECTIONS: AgentSection[] = RAW.sections.map((s) => ({
   color: s.color,
   groups: s.groups,
   fields: s.fields,
+  customFirst: s.customFirst === true,
   area: s.area ?? 'agent',
 }))
 
@@ -86,14 +90,35 @@ export function agentSectionForField(key: string, group?: string): AgentSection 
   return AGENT_SECTIONS.find((s) => s.groups.includes(group))
 }
 
+/**
+ * 被某个分区用 ``fields`` 显式独占的字段。
+ *
+ * 这些字段不再被「凭所属分组」选中的其它分区顺带渲染——否则 group_session 里的
+ * system_prompt / persona_preset_id 既会出现在「基础配置」也会出现在「角色设定」。
+ */
+const CARVED_OUT_FIELDS: string[] = Array.from(
+  new Set(AGENT_SECTIONS.flatMap((s) => s.fields || [])),
+)
+
+/** 把分区转成 utils/schema 的过滤选择器。 */
+export function agentSectionSelector(section: AgentSection): {
+  groups: string[]
+  fields?: string[]
+  excludeFields?: string[]
+} {
+  if (section.fields && section.fields.length) {
+    return { groups: [], fields: section.fields }
+  }
+  return { groups: section.groups, excludeFields: CARVED_OUT_FIELDS }
+}
+
 export interface AgentBadgeInput {
   draft: Record<string, any>
   poolModelIds: string[]
   permission: { group_mode: string }
 }
 
-/** 概览卡片右上角的状态徽标（纯表现层，故留在 TS 而不是 JSON）。 */
-export function agentSectionBadge(id: string, input: AgentBadgeInput): string {
+/** 概览卡片右上角的状态徽标（纯表现层，故留在 TS 而不是 JSON）。 */export function agentSectionBadge(id: string, input: AgentBadgeInput): string {
   const draft = input.draft
   switch (id) {
     case 'basic':
@@ -121,4 +146,32 @@ export function agentSectionBadge(id: string, input: AgentBadgeInput): string {
     default:
       return ''
   }
+}
+
+/**
+ * 分组图标：仅供段内导航/分组标题使用，纯展示，未收录的分组回退小圆点。
+ * 这份映射不参与「哪个字段属于哪页」的判定，故不进 sections.json。
+ */
+const GROUP_ICONS: Record<string, string> = {
+  group_switch: 'mdi-toggle-switch-outline',
+  group_trigger: 'mdi-call-split',
+  group_session: 'mdi-chat-processing-outline',
+  group_context: 'mdi-account-details-outline',
+  group_interrupt: 'mdi-hand-back-right-outline',
+  group_stream: 'mdi-wave',
+  group_model: 'mdi-api',
+  group_permission: 'mdi-shield-account-outline',
+  group_memory: 'mdi-brain',
+  group_knowledge: 'mdi-book-open-variant',
+  group_tools: 'mdi-toolbox-outline',
+  group_tavily: 'mdi-web',
+  group_mcp: 'mdi-server-network',
+  group_onebot: 'mdi-robot-industrial',
+  group_proactive: 'mdi-bell-ring-outline',
+  group_schedule: 'mdi-clock-outline',
+  group_compress: 'mdi-arrow-collapse-vertical',
+}
+
+export function agentGroupIcon(groupId: string): string {
+  return GROUP_ICONS[groupId] || 'mdi-circle-small'
 }

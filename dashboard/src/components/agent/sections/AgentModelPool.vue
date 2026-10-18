@@ -1,15 +1,16 @@
 <script setup lang="ts">
+/**
+ * 「模型」分区的定制 UI：Provider 模型池（顺序请求 / 测试 / 增删改序）。
+ * 分区的 schema 字段由 AgentConfigSection 统一渲染，这里只管池子。
+ */
 import { computed, ref } from 'vue'
 import http, { errorMessage } from '@/api/http'
-import ConfigForm from '@/components/config/ConfigForm.vue'
 import { useAgentConfigStore } from '@/stores/agentConfig'
 import { useNotifyStore } from '@/stores/notify'
-import { filterSchemaByPage } from '@/utils/schema'
 
 const agent = useAgentConfigStore()
 const notify = useNotifyStore()
 
-const schema = computed(() => filterSchemaByPage(agent.schema, 'model'))
 const poolDialog = ref(false)
 const pendingPoolModelId = ref('')
 const testingId = ref('')
@@ -59,50 +60,37 @@ function movePoolModel(index: number, delta: number) {
 </script>
 
 <template>
-  <div>
-    <v-card variant="outlined" class="mb-4">
-      <v-card-title class="d-flex align-center">
-        <v-icon icon="mdi-api" class="mr-2" color="info" /> Provider 模型（按顺序请求）
-        <v-spacer />
-        <v-btn size="small" variant="tonal" prepend-icon="mdi-plus" @click="poolDialog = true">
-          添加模型
-        </v-btn>
-      </v-card-title>
-      <v-card-text>
-        <v-list v-if="agent.poolModelIds.length" density="compact">
-          <v-list-item v-for="(id, i) in agent.poolModelIds" :key="id">
-            <template #prepend><span class="pool-order">{{ i + 1 }}</span></template>
-            <v-list-item-title>{{ poolLabel(id) }}</v-list-item-title>
-            <template #append>
-              <v-btn
-                size="x-small"
-                variant="text"
-                prepend-icon="mdi-play"
-                :loading="testingId === id"
-                @click="testModel(id)"
-              >
-                测试
-              </v-btn>
-              <v-btn size="x-small" variant="text" icon="mdi-arrow-up" :disabled="i === 0" @click="movePoolModel(i, -1)" />
-              <v-btn size="x-small" variant="text" icon="mdi-arrow-down" :disabled="i === agent.poolModelIds.length - 1" @click="movePoolModel(i, 1)" />
-              <v-btn size="x-small" variant="text" icon="mdi-close" color="error" @click="removePoolModel(i)" />
-            </template>
-          </v-list-item>
-        </v-list>
-        <div v-else class="text-caption text-center pa-4" style="color: rgba(var(--v-theme-on-surface), 0.45)">
-          尚未配置模型，请添加一个 Provider 模型
-        </div>
-      </v-card-text>
-    </v-card>
-
-    <v-card variant="outlined" class="mb-4">
-      <v-card-title class="d-flex align-center">
-        <v-icon icon="mdi-cog-outline" class="mr-2" color="info" /> 模型参数
-      </v-card-title>
-      <v-card-text>
-        <ConfigForm :module-name="'agent'" :schema="schema" :config="agent.draft" :bot-id="agent.botId" @change="agent.onChange" />
-      </v-card-text>
-    </v-card>
+  <v-card variant="outlined" class="mb-4">
+    <v-card-title class="d-flex align-center">
+      <v-icon icon="mdi-api" class="mr-2" color="info" /> Provider 模型（按顺序请求）
+      <v-spacer />
+      <v-btn size="small" variant="tonal" prepend-icon="mdi-plus" @click="poolDialog = true">添加模型</v-btn>
+    </v-card-title>
+    <v-card-text>
+      <v-list v-if="agent.poolModelIds.length" density="compact">
+        <v-list-item v-for="(id, i) in agent.poolModelIds" :key="id">
+          <template #prepend><span class="pool-order">{{ i + 1 }}</span></template>
+          <v-list-item-title>{{ poolLabel(id) }}</v-list-item-title>
+          <template #append>
+            <v-btn size="x-small" variant="text" prepend-icon="mdi-play" :loading="testingId === id" @click="testModel(id)">
+              测试
+            </v-btn>
+            <v-btn size="x-small" variant="text" icon="mdi-arrow-up" :disabled="i === 0" @click="movePoolModel(i, -1)" />
+            <v-btn
+              size="x-small"
+              variant="text"
+              icon="mdi-arrow-down"
+              :disabled="i === agent.poolModelIds.length - 1"
+              @click="movePoolModel(i, 1)"
+            />
+            <v-btn size="x-small" variant="text" icon="mdi-close" color="error" @click="removePoolModel(i)" />
+          </template>
+        </v-list-item>
+      </v-list>
+      <div v-else class="text-caption text-center pa-4" style="color: rgba(var(--v-theme-on-surface), 0.45)">
+        尚未配置模型，请添加一个 Provider 模型
+      </div>
+    </v-card-text>
 
     <v-dialog v-model="poolDialog" max-width="420">
       <v-card>
@@ -125,7 +113,7 @@ function movePoolModel(index: number, delta: number) {
         </v-card-actions>
       </v-card>
     </v-dialog>
-  </div>
+  </v-card>
 </template>
 
 <style scoped>
