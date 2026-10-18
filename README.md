@@ -306,6 +306,28 @@ async def delete_message(self, ctx, args):
     ...
 ```
 
+### 图片与动图理解（视觉模型）
+
+本轮消息里的图片会随请求直接传给声明了 `image` 模态的模型；文本模型照旧只看到
+`[图片]` 占位，语义不变。
+
+**动图与表情包会被拆帧**：GIF / 动态 WebP / QQ 商城表情（`mface`）先解码成若干张
+静态帧再一起送出，并附一句「这几张是同一张动图的连续帧」——多数网关对 `image/gif`
+只读第一帧，甚至直接 400，框架自己拆帧才保证「动图看得到」。
+
+| 配置项（Agent → 工具与联网） | 默认 | 说明 |
+|---|---|---|
+| `image_understanding_enable` | 开 | 图片是否随请求传给模型（仅视觉模型生效） |
+| `image_max_count` / `image_max_mb` | 4 / 10 | 单轮静态图张数、单张体积上限 |
+| `gif_understanding_enable` | 开 | 动图是否拆帧 |
+| `gif_max_frames` | 6 | 单条消息所有动图**共享**的帧数预算（等间隔采样，必含首尾帧） |
+| `gif_frame_max_edge` | 512 | 每帧长边上限（像素），调小可省 token |
+| `gif_probe_all_images` | 关 | OneBot 实现不给动图线索时，让每张图都探测一次 `n_frames` |
+
+实现分两层：`app/llm/image.py` 负责「段 → 图片/帧条目」（含动图线索判断、取字节、
+体积上限），`app/llm/animated.py` 是纯计算的拆帧逻辑（Pillow 解码 → 等间隔取帧 →
+白底合成 → JPEG）。历史消息里的动图同样能按需取回（`expand_image` 走同一条通路）。
+
 ### 模型 Provider
 
 框架内置三类原生适配器：
