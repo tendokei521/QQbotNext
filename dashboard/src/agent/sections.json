@@ -1,0 +1,107 @@
+{
+  "_comment": "Agent 配置分区单一权威。前端路由 / 侧边栏二级菜单 / 概览卡片都由它派生；后端 schema 契约测试也读这份文件，禁止在前端或后端另抄一份分区清单。",
+  "version": 1,
+  "sections": [
+    {
+      "id": "basic",
+      "path": "/agent/basic",
+      "title": "基础配置",
+      "subtitle": "群/私聊开关、历史与触发",
+      "icon": "mdi-tune-variant",
+      "color": "primary",
+      "groups": ["group_switch", "group_session", "group_compress", "group_tavily", "group_tools"]
+    },
+    {
+      "id": "role",
+      "path": "/agent/role",
+      "title": "角色设定",
+      "subtitle": "从已有的人格预设中选择并应用到当前 Agent",
+      "icon": "mdi-account-heart",
+      "color": "pink",
+      "groups": [],
+      "fields": ["system_prompt", "persona_preset_id"]
+    },
+    {
+      "id": "model",
+      "path": "/agent/model",
+      "title": "模型",
+      "subtitle": "Provider 模型池与调用参数",
+      "icon": "mdi-api",
+      "color": "info",
+      "groups": ["group_model"]
+    },
+    {
+      "id": "behavior",
+      "path": "/agent/behavior",
+      "title": "对话行为",
+      "subtitle": "用户信息感知、回复打断、触发与冷却",
+      "icon": "mdi-account-voice",
+      "color": "secondary",
+      "groups": ["group_trigger", "group_context", "group_interrupt"]
+    },
+    {
+      "id": "stream",
+      "path": "/agent/stream",
+      "title": "流式回复",
+      "subtitle": "流式开关、发送频率与预设",
+      "icon": "mdi-wave",
+      "color": "purple",
+      "groups": ["group_stream"]
+    },
+    {
+      "id": "permission",
+      "path": "/agent/permission",
+      "title": "权限",
+      "subtitle": "黑白名单与角色权限",
+      "icon": "mdi-shield-account-outline",
+      "color": "success",
+      "groups": ["group_permission"]
+    },
+    {
+      "id": "memory",
+      "path": "/agent/memory",
+      "title": "长期记忆",
+      "subtitle": "长期记忆与感知增强提示词细调（实验性）",
+      "icon": "mdi-brain",
+      "color": "warning",
+      "groups": ["group_memory"]
+    },
+    {
+      "id": "knowledge",
+      "path": "/agent/knowledge",
+      "title": "知识库",
+      "subtitle": "知识库检索与 Embedding 模型",
+      "icon": "mdi-book-open-variant",
+      "color": "deep-purple",
+      "groups": ["group_knowledge"]
+    },
+    {
+      "id": "mcp",
+      "path": "/agent/mcp",
+      "title": "MCP 工具",
+      "subtitle": "MCP stdio server 配置",
+      "icon": "mdi-server-network",
+      "color": "blue-grey",
+      "groups": ["group_mcp"]
+    },
+    {
+      "id": "onebot",
+      "path": "/tools/onebot",
+      "title": "OneBot 工具",
+      "subtitle": "把 OneBot API 暴露给 LLM",
+      "icon": "mdi-robot-industrial",
+      "color": "teal",
+      "area": "tools",
+      "groups": ["group_onebot"]
+    },
+    {
+      "id": "panels",
+      "path": "/agent/panels",
+      "title": "定时任务 / 主动消息",
+      "subtitle": "定时触发与主动发言",
+      "icon": "mdi-clock-outline",
+      "color": "brown",
+      "groups": ["group_proactive", "group_schedule"]
+    }
+  ]
+}

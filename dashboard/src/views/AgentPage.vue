@@ -6,6 +6,7 @@ import { useAgentConfigStore } from '@/stores/agentConfig'
 import AgentTemplateDialog from '@/components/agent/AgentTemplateDialog.vue'
 import AgentConfigSearchDialog from '@/components/agent/AgentConfigSearchDialog.vue'
 import AgentCopyConfigDialog from '@/components/agent/AgentCopyConfigDialog.vue'
+import { AGENT_SECTIONS, agentSectionBadge } from '@/agent/sections'
 
 const bots = useBotsStore()
 const agent = useAgentConfigStore()
@@ -17,96 +18,20 @@ const templateDialog = ref(false)
 const searchDialog = ref(false)
 const copyDialog = ref(false)
 
-const pages = computed(() => [
-  {
-    to: '/agent/basic',
-    title: '基础配置',
-    icon: 'mdi-tune-variant',
-    desc: '群/私聊开关、历史与触发',
-    status: '已配置',
-    color: 'primary',
-  },
-  {
-    to: '/agent/role',
-    title: '角色设定',
-    icon: 'mdi-account-heart',
-    desc: '人格预设选择与提示词预览',
-    status: agent.draft.system_prompt ? '已设置' : '未设置',
-    color: 'pink',
-  },
-  {
-    to: '/agent/model',
-    title: '模型',
-    icon: 'mdi-api',
-    desc: 'Provider 模型池与调用参数',
-    status: agent.poolModelIds.length ? `${agent.poolModelIds.length} 个模型` : '未配置模型',
-    color: 'info',
-  },
-  {
-    to: '/agent/behavior',
-    title: '对话行为',
-    icon: 'mdi-account-voice',
-    desc: '用户信息感知、回复打断、冷却',
-    status: '可调',
-    color: 'secondary',
-  },
-  {
-    to: '/agent/stream',
-    title: '流式回复',
-    icon: 'mdi-wave',
-    desc: '流式开关、发送频率与预设',
-    status: agent.draft.stream_output ? '开启' : '关闭',
-    color: 'purple',
-  },
-  {
-    to: '/agent/permission',
-    title: '权限',
-    icon: 'mdi-shield-account-outline',
-    desc: '黑白名单与角色权限',
-    status: agent.permission.group_mode === 'blacklist' ? '黑名单' : '白名单',
-    color: 'success',
-  },
-  {
-    to: '/agent/memory',
-    title: '长期记忆',
-    icon: 'mdi-brain',
-    desc: '记忆开关、召回与可信度',
-    status: agent.draft.memory_enable ? '开启' : '关闭',
-    color: 'warning',
-  },
-  {
-    to: '/agent/knowledge',
-    title: '知识库',
-    icon: 'mdi-book-open-variant',
-    desc: '知识库检索与 Embedding 模型',
-    status: agent.draft.knowledge_enable ? '开启' : '关闭',
-    color: 'deep-purple',
-  },
-  {
-    to: '/agent/mcp',
-    title: 'MCP 工具',
-    icon: 'mdi-server-network',
-    desc: 'MCP stdio server 配置',
-    status: agent.draft.mcp_servers ? '已配置' : '未配置',
-    color: 'blue-grey',
-  },
-  {
-    to: '/tools/onebot',
-    title: 'OneBot Tools',
-    icon: 'mdi-robot-industrial',
-    desc: '把 OneBot API 暴露给 LLM',
-    status: agent.draft.onebot_tools_enable ? '开启' : '关闭',
-    color: 'teal',
-  },
-  {
-    to: '/agent/panels',
-    title: '定时任务 / 主动消息',
-    icon: 'mdi-clock-outline',
-    desc: '定时触发与主动发言',
-    status: '管理',
-    color: 'brown',
-  },
-])
+const pages = computed(() =>
+  AGENT_SECTIONS.map((section) => ({
+    to: section.path,
+    title: section.title,
+    desc: section.subtitle,
+    icon: section.icon,
+    color: section.color,
+    status: agentSectionBadge(section.id, {
+      draft: agent.draft,
+      poolModelIds: agent.poolModelIds,
+      permission: agent.permission,
+    }),
+  })),
+)
 
 const warnings = computed(() => {
   const list: string[] = []

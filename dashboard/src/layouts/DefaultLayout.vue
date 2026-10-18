@@ -8,6 +8,7 @@ import { useNotifyStore } from '@/stores/notify'
 import { connectSocket } from '@/api/socket'
 import { errorMessage } from '@/api/http'
 import MultiGroupDialog from '@/components/MultiGroupDialog.vue'
+import { agentSidebarEntries } from '@/agent/sections'
 
 const themeStore = useThemeStore()
 const bots = useBotsStore()
@@ -53,19 +54,8 @@ interface NavItem {
 
 const navItems = computed<NavItem[]>(() => {
   const showExperimental = !!webui.config.experimental?.show_experimental
-  const agentChildren: NavChild[] = [
-    { to: '/agent', title: '概览' },
-    { to: '/agent/basic', title: '基础配置' },
-    { to: '/agent/role', title: '角色设定' },
-    { to: '/agent/model', title: '模型' },
-    { to: '/agent/behavior', title: '对话行为' },
-    { to: '/agent/stream', title: '流式回复' },
-    { to: '/agent/permission', title: '权限' },
-    { to: '/agent/memory', title: '长期记忆' },
-    { to: '/agent/knowledge', title: '知识库' },
-    { to: '/agent/mcp', title: 'MCP 工具' },
-    { to: '/agent/panels', title: '定时任务 / 主动消息' },
-  ]
+  // Agent 二级菜单由 @/agent/sections 派生，避免与路由/概览卡片各抄一份
+  const agentChildren: NavChild[] = agentSidebarEntries()
   const toolChildren: NavChild[] = [
     { to: '/tools/system', title: 'System Tools' },
     { to: '/tools/onebot', title: 'OneBot Tools' },
