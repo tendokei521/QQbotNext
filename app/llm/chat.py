@@ -36,7 +36,7 @@ from app.llm.session import SessionManager
 from app.llm import assembly
 from app.llm.assembly import PromptRequest
 from app.llm.image import collect_image_segments
-from app.llm.providers import log_token_usage
+from app.llm.providers import SERVED_MODEL_KEY, log_token_usage
 from app.llm.providers.invoker import resolve_invoker
 from app.llm.providers.modalities import normalize_modalities, supports_tool_use
 from app.llm.tags import maybe_strip_parentheses, strip_all_tags
@@ -52,6 +52,15 @@ def _event_nickname(event) -> str:
     if user is None:
         return ""
     return getattr(user, "card", "") or getattr(user, "nickname", "") or ""
+
+
+def _served_model_label(usage_sink: dict | None, fallback: Any) -> str:
+    """本次请求实际服务的模型名（回退后由 provider 层写进 usage_sink）。
+
+    取不到（调用方被插件整体替换、没走 provider 层）时退回配置里的主模型名。
+    """
+    served = str((usage_sink or {}).get(SERVED_MODEL_KEY) or "").strip()
+    return served or str(fallback or "").strip()
 
 
 def _segments_as_dicts(message: Any) -> list[dict]:
@@ -187,14 +196,21 @@ async def _referent_block(runtime, session_id: str, user_text: str, ctx) -> str:
 
     **用用户原始文本判定**（不含 ``发送者：``/``引用了：`` 之类的元信息前缀）——否则
     元信息里的 QQ 号会被误当成用户给出的消息 id。失败不影响回复主流程。
+
+    有 event 时**只认原始文本**（哪怕为空）：图片/语音/表情这类没有文字的回合，
+    原始文本就是空串，此时**不能**回退到带 ``(QQ: …)`` 的 ``user_text``——那串数字会被
+    指代判定当成"用户给出的消息 id"，进而 ``get_msg(QQ号)`` 空转一次（真实日志
+    private_1901691195 / 2026-10-18 22:49：``get_msg 未取到消息 1901691195: 100 None``）。
+    没有正文就没有可判定的指代；焦点行仍由 ``build_block`` 给出。
     """
     try:
         from app.llm.enhance import _raw_user_text
         from app.llm.referent import build_block
 
         event = getattr(ctx, "event", None)
-        raw = _raw_user_text(event) if event is not None else ""
-        return await build_block(runtime, session_id, raw or user_text, ctx)
+        if event is not None:
+            return await build_block(runtime, session_id, _raw_user_text(event), ctx)
+        return await build_block(runtime, session_id, user_text, ctx)
     except Exception as e:
         logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(
             f"[Referent] 构建指代块失败（已忽略）: {e}"
@@ -649,7 +665,8 @@ def _record_stream_telemetry(
         bot_id=runtime.bot_id,
         session_id=session_id,
         provider=str(first_cfg.get("provider", "openai") or "openai"),
-        model=str(first_cfg.get("model", model) or model),
+        # 实际服务者（回退后不是 chain[0]）：与 token 消耗那一行同源，避免遥测也记错模型
+        model=_served_model_label(tokens, first_cfg.get("model", model)),
         stream=True,
         success=success,
         latency_ms=(time.monotonic() - stream_start) * 1000,
@@ -1294,7 +1311,7 @@ async def stream_response(runtime, event, ctx=None):
             )
             log_token_usage(
                 usage_sink,
-                model=str(meta["model"] or ""),
+                model=_served_model_label(usage_sink, meta["model"]),
                 chars=len("".join(full_text_parts)),
                 stream=True,
             )
@@ -1408,7 +1425,7 @@ async def stream_response(runtime, event, ctx=None):
     # 本次请求到此完全结束：info 一次 token 消耗（上游没报 usage 就不打）
     log_token_usage(
         usage_sink,
-        model=str(meta["model"] or ""),
+        model=_served_model_label(usage_sink, meta["model"]),
         chars=len("".join(full_text_parts)),
         stream=True,
     )

@@ -276,3 +276,25 @@ async def test_chat_referent_block_uses_raw_user_text():
 
     assert "当前对话焦点" in block
     assert all(c[0] != "get_msg" or c[1] != 1901691195 for c in bot.calls)
+
+
+async def test_image_only_message_never_prefetches_meta_qq_as_message_id():
+    """图片消息没有正文：回退到带 ``(QQ: …)`` 元信息的 user_text 会让 QQ 号被当成消息 id。
+
+    真实日志（private_1901691195 / 2026-10-18 22:49）：用户只发了一张图，
+    指代块却拿 ``(QQ: 1901691195)`` 当文本判定 → ``get_msg(message_id=1901691195)``
+    → ``100 miss``。没有正文就没有可判定的指代，元信息数字一律不能进判定。
+    """
+    from app.llm.chat import _referent_block
+
+    bot = _Bot()
+    event = _event([{"type": "image", "data": {"url": "https://a/1.png"}}])
+    ctx = SimpleNamespace(bot=bot, runtime=_runtime(), session_id="private_1901691195",
+                          group_id=None, event=event)
+
+    block = await _referent_block(
+        _runtime(), "private_1901691195", "(QQ: 1901691195)\n(时间：2026-10-18 22:49:18)", ctx
+    )
+
+    assert all(c[0] != "get_msg" for c in bot.calls)   # 不能拿 QQ 号去 get_msg
+    assert block == ""                                 # 无正文也无焦点 → 空块
