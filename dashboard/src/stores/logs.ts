@@ -51,19 +51,33 @@ export const useLogsStore = defineStore('logs', () => {
       return
     }
     const prev = cache.value
-    const prevKeys = new Set(prev.map(itemKey))
-    // 从尾部对齐：跳过与旧快照重复的尾部行，仅追加新增
-    let i = items.length - 1
-    while (i >= 0 && prevKeys.has(itemKey(items[i]))) i--
-    if (i < 0) {
-      // 与上一帧无任何尾部重叠（如大 burst 冲满窗口 / 服务端缓冲重置）：
-      // 整帧替换而不是丢弃，避免一批新日志静默消失
-      logs.value = items
-    } else {
-      const fresh = items.slice(0, i + 1)
-      if (fresh.length) {
-        logs.value = [...logs.value, ...fresh].slice(-MAX_CACHE)
+    if (!items.length) {
+      // 服务端窗口为空（日志被清空 / 过滤后无内容）：清掉已渲染行
+      logs.value = []
+      cache.value = items
+      pendingCount.value = 0
+      return
+    }
+    // 增量判定以「上一帧的最后一行」为锚点：
+    // 服务端每秒推最近 N 行，旧行还在窗口里时锚点必然还在窗口内，锚点之后的才是真正的新行。
+    // 注意不能拿新旧数组做「尾部逐位对齐」：新行是追加在窗口末尾的，一有新日志尾部就必然不同，
+    // 会把整帧当「无重叠」而整帧替换，把累积的滚动历史冲掉（旧版 UI 正是这个问题）。
+    const anchor = prev.length ? itemKey(prev[prev.length - 1]) : ''
+    let fresh = items
+    if (anchor) {
+      let idx = -1
+      for (let t = items.length - 1; t >= 0; t--) {
+        if (itemKey(items[t]) === anchor) {
+          idx = t
+          break
+        }
       }
+      // 锚点不在窗口内 = 一秒内新增超过窗口容量（整窗翻页）/ 日志轮转：
+      // 此时整窗都是尚未渲染的行，整段追加，绝不用窗口覆盖已累积的历史
+      fresh = idx >= 0 ? items.slice(idx + 1) : items
+    }
+    if (fresh.length) {
+      logs.value = [...logs.value, ...fresh].slice(-MAX_CACHE)
     }
     cache.value = items
     pendingCount.value = 0

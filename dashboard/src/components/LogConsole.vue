@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useLogsStore } from '@/stores/logs'
 import { useWebuiStore } from '@/stores/webui'
 import { useNotifyStore } from '@/stores/notify'
@@ -56,21 +56,51 @@ async function saveLogsSettings() {
   }
 }
 
-// 新日志到达时：仅在用户本来就停在底部附近时跟随滚动，避免打断回看
-async function scrollToBottomIfNeeded() {
-  await nextTick()
-  const el = bodyEl.value
-  if (!el) return
-  const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-  if (distanceFromBottom < 80) el.scrollTop = el.scrollHeight
+// 新日志到达时：仅在用户本来就停在底部附近时跟随滚动，避免打断回看。
+// 判定必须基于「DOM 更新前」的位置（由 scroll 监听维护 followTail）：
+// 更新后列表可能被整帧替换 / 浏览器把 scrollTop 钳位，此时现测会把
+// 「用户本来就在底部」误判成「已经上滚」，于是既贴不回底部、又漏掉后续跟随。
+let followTail = true
+let scrollEl: HTMLDivElement | null = null
+
+function isNearBottom(el: HTMLDivElement): boolean {
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 80
 }
 
-watch(() => visibleRows.value.length, () => {
-  if (!logs.paused) void scrollToBottomIfNeeded()
+function syncFollowTail() {
+  const el = bodyEl.value
+  if (el) followTail = isNearBottom(el)
+}
+
+async function followTailAfterUpdate() {
+  await nextTick()
+  const el = bodyEl.value
+  if (!el || !followTail) return
+  el.scrollTop = el.scrollHeight
+  followTail = isNearBottom(el)
+}
+
+// 触发信号取「末行」而不是行数：累积缓冲到 MAX_CACHE 后行数恒定，
+// 只看行数会漏掉新日志、从此不再跟随。
+const tailToken = computed(() => {
+  const rows = visibleRows.value
+  const last = rows[rows.length - 1]
+  return last ? `${rows.length}|${last.timestamp}|${last.level}|${last.message}` : ''
+})
+
+watch(tailToken, () => {
+  if (!logs.paused) void followTailAfterUpdate()
 })
 
 onMounted(() => {
+  scrollEl = bodyEl.value
+  scrollEl?.addEventListener('scroll', syncFollowTail, { passive: true })
   if (!logs.logs.length) logs.refresh()
+})
+
+onUnmounted(() => {
+  scrollEl?.removeEventListener('scroll', syncFollowTail)
+  scrollEl = null
 })
 </script>
 
