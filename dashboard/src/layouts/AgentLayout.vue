@@ -9,7 +9,12 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import EmptyState from '@/components/EmptyState.vue'
-import { AGENT_INDEX_PATH, agentSectionByPath } from '@/agent/sections'
+import {
+  ADVANCED_INDEX_PATH,
+  AGENT_INDEX_PATH,
+  agentSectionByPath,
+  type AgentSectionArea,
+} from '@/agent/sections'
 import { useAgentConfigStore } from '@/stores/agentConfig'
 import { useBotsStore } from '@/stores/bots'
 
@@ -20,6 +25,20 @@ const agent = useAgentConfigStore()
 
 // 当前路由对应的分区（index 路由没有分区）
 const section = computed(() => agentSectionByPath(route.path))
+/**
+ * 当前所在的配置区：agent（常用）或 advanced（进阶调参）。
+ * 两个区共用这个外壳（bot 守卫 / 加载 / 保存状态完全一致），只有标题与返回目标不同。
+ */
+const area = computed<AgentSectionArea>(() =>
+  section.value ? section.value.area : route.path.startsWith('/advanced') ? 'advanced' : 'agent',
+)
+const indexPath = computed(() => (area.value === 'advanced' ? ADVANCED_INDEX_PATH : AGENT_INDEX_PATH))
+const panelTitle = computed(() => (area.value === 'advanced' ? '高级设置' : 'Agent 面板'))
+const panelSubtitle = computed(() =>
+  area.value === 'advanced'
+    ? '进阶调参：工具能力、主动消息、消息与输出通道'
+    : '框架级 LLM Agent：配置、权限、会话与对话行为',
+)
 const botId = computed(() => bots.currentBot?.bot_id ?? null)
 const booting = ref(false)
 
@@ -50,15 +69,17 @@ watch(
           variant="text"
           prepend-icon="mdi-arrow-left"
           class="mr-1"
-          @click="router.push(AGENT_INDEX_PATH)"
+          @click="router.push(indexPath)"
         >
-          返回 Agent 面板
+          返回{{ panelTitle }}
         </v-btn>
         <h1 class="app-page-title">
           <v-icon v-if="section" :icon="section.icon" size="28" class="mr-1" :color="section.color" />
-          {{ section ? section.title : 'Agent 面板' }}
+          {{ section ? section.title : panelTitle }}
         </h1>
-        <v-chip v-if="!section" size="small" variant="tonal" color="primary">LLM · 框架级</v-chip>
+        <v-chip v-if="!section" size="small" variant="tonal" color="primary">
+          {{ area === 'advanced' ? '进阶调参' : 'LLM · 框架级' }}
+        </v-chip>
         <v-chip v-if="agent.saveStatus === 'saving'" size="small" color="primary" variant="flat">
           <v-progress-circular size="12" indeterminate class="mr-1" /> 保存中…
         </v-chip>
@@ -66,15 +87,19 @@ watch(
         <v-chip v-else-if="agent.saveStatus === 'dirty'" size="small" color="warning" variant="flat">未保存</v-chip>
       </div>
       <div class="d-flex align-center gap-2">
-        <v-switch
-          v-if="!section"
-          v-model="agent.enabled"
-          color="primary"
-          label="启用 Agent"
-          density="compact"
-          hide-details
-          @update:model-value="(v: any) => agent.onEnabledChange(v)"
-        />
+        <!--
+          Agent 启用开关移到「基础配置」页：它是整个 Agent 的总闸，不属于任何一个具体
+          配置页的头部；放在这里会让每个配置页都出现一个"看起来只影响本页"的开关。
+          头部只保留只读状态，让人一眼知道当前是开还是关。
+        -->
+        <v-chip
+          size="small"
+          variant="flat"
+          :color="agent.enabled ? 'success' : 'grey'"
+          :prepend-icon="agent.enabled ? 'mdi-check-circle-outline' : 'mdi-pause-circle-outline'"
+        >
+          {{ agent.enabled ? 'Agent 已启用' : 'Agent 未启用' }}
+        </v-chip>
         <v-btn
           size="small"
           color="primary"
@@ -88,7 +113,7 @@ watch(
       </div>
     </div>
     <div class="app-page-subtitle">
-      {{ section ? section.subtitle : '框架级 LLM Agent：配置、权限、定时任务与主动消息' }}
+      {{ section ? section.subtitle : panelSubtitle }}
     </div>
 
     <v-progress-linear v-if="agent.loading || booting" indeterminate color="primary" class="mb-3" />

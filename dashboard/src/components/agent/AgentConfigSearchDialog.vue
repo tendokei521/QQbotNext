@@ -17,13 +17,14 @@ const query = ref('')
 const fields = computed(() => {
   const { items } = splitSchema(agent.schema)
   return Object.entries(items).map(([key, def]) => {
-    const section = agentSectionForField(key, def?.group || '')
+    const hit = agentSectionForField(key, def?.group || '')
     return {
       key,
       label: def?.label || key,
       description: def?.description || '',
-      sectionTitle: section?.title || '',
-      path: section?.path || '',
+      sectionTitle: hit?.section.title || '',
+      path: hit?.section.path || '',
+      groupId: hit?.groupId || '',
     }
   })
 })
@@ -36,10 +37,12 @@ const results = computed(() => {
     .slice(0, 30)
 })
 
-function openField(field: { path: string }) {
+function openField(field: { path: string; groupId: string }) {
   if (!field.path) return
   emit('update:modelValue', false)
-  router.push(field.path)
+  // 用 query 带页内分组：hash 路由下再拼 "#group-xxx" 会被当成路由 hash 的一部分。
+  // AgentConfigSection 读到 group 参数后会展开并滚动到对应卡片。
+  router.push({ path: field.path, query: field.groupId ? { group: field.groupId } : {} })
 }
 
 watch(

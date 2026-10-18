@@ -8,7 +8,7 @@ import { useNotifyStore } from '@/stores/notify'
 import { connectSocket } from '@/api/socket'
 import { errorMessage } from '@/api/http'
 import MultiGroupDialog from '@/components/MultiGroupDialog.vue'
-import { agentSidebarEntries } from '@/agent/sections'
+import { advancedSidebarEntries, agentSidebarEntries } from '@/agent/sections'
 
 const themeStore = useThemeStore()
 const bots = useBotsStore()
@@ -56,6 +56,7 @@ const navItems = computed<NavItem[]>(() => {
   const showExperimental = !!webui.config.experimental?.show_experimental
   // Agent 二级菜单由 @/agent/sections 派生，避免与路由/概览卡片各抄一份
   const agentChildren: NavChild[] = agentSidebarEntries()
+  const advancedChildren: NavChild[] = advancedSidebarEntries()
   const toolChildren: NavChild[] = [
     { to: '/tools/system', title: 'System Tools' },
     { to: '/tools/onebot', title: 'OneBot Tools' },
@@ -70,6 +71,7 @@ const navItems = computed<NavItem[]>(() => {
     { to: '/personas', title: '人格设定', icon: 'mdi-account-heart-outline' },
     { to: '/sessions', title: '会话数据', icon: 'mdi-chat-outline' },
     { title: 'Agent 面板', icon: 'mdi-creation-outline', children: agentChildren },
+    { title: '高级设置', icon: 'mdi-tune', children: advancedChildren },
     { title: 'Tool 管理', icon: 'mdi-toolbox-outline', children: toolChildren },
     { to: '/logs', title: '日志', icon: 'mdi-console' },
     { to: '/settings', title: '设置', icon: 'mdi-cog-outline' },

@@ -6,8 +6,8 @@ import { useAgentConfigStore } from '@/stores/agentConfig'
 import { useBotsStore } from '@/stores/bots'
 import { useToolsStore } from '@/stores/tools'
 import { useNotifyStore } from '@/stores/notify'
-import { agentSectionById, agentSectionSelector } from '@/agent/sections'
-import { filterSchemaBySection } from '@/utils/schema'
+import { agentSectionById } from '@/agent/sections'
+import { buildSectionSchema } from '@/utils/schema'
 
 interface OneBotTool {
   name: string
@@ -36,11 +36,10 @@ const agent = useAgentConfigStore()
 const bots = useBotsStore()
 const toolsStore = useToolsStore()
 const notify = useNotifyStore()
-// OneBot 分区由 registry 描述（路径挂在 /tools/onebot），字段选择同样走分区选择器
-const onebotSection = agentSectionById('onebot')
-const schema = computed(() =>
-  onebotSection ? filterSchemaBySection(agent.schema, agentSectionSelector(onebotSection)) : {},
-)
+// OneBot 字段由 registry 的「工具与能力」页 adv_onebot 子分组声明；
+// 本页只渲染那一块，避免把 Tavily/知识库等其它字段也搬进工具管理页。
+const onebotSpec = agentSectionById('adv_tools')?.groups.find((g) => g.id === 'adv_onebot')
+const schema = computed(() => (onebotSpec ? buildSectionSchema(agent.schema, [onebotSpec]) : {}))
 
 const tools = ref<OneBotTool[]>([])
 const loading = ref(false)

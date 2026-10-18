@@ -2,23 +2,23 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import { AGENT_SECTIONS } from '@/agent/sections'
 
 /**
- * 由 registry 生成 /agent/* 子路由（作为 AgentLayout 的 children）。
+ * 由 registry 生成子路由：``/agent/*``（常用）与 ``/advanced/*``（进阶调参）。
  *
- * 所有「区域为 agent」的分区共用同一个通用页面 ``AgentSectionPage``：
+ * 两个区域共用同一个通用页面 ``AgentSectionPage`` 与同一个外壳 ``AgentLayout``：
  * 分区元数据来自 registry，字段来自后端 schema，定制 UI 来自 customSections，
  * 所以新增分区只需改 sections.json，不必再新增页面文件。
- *
- * ``onebot`` 分区的界面挂在 Tool 管理下（``/tools/onebot``），这里不重复注册，
- * 仅保留 ``/agent/onebot`` 的历史重定向。
  */
-const agentSectionRoutes = AGENT_SECTIONS.filter((section) => section.area === 'agent').map(
-  (section) => ({
-    path: section.path.replace(/^\/agent\//, ''),
-    name: `agent-${section.id}`,
+function sectionRoutes(area: 'agent' | 'advanced', prefix: string) {
+  return AGENT_SECTIONS.filter((section) => section.area === area).map((section) => ({
+    path: section.path.replace(new RegExp(`^${prefix}/`), ''),
+    name: `${area}-${section.id}`,
     component: () => import('@/views/AgentSectionPage.vue'),
-    meta: { title: `Agent ${section.title}` },
-  }),
-)
+    meta: { title: section.title },
+  }))
+}
+
+const agentSectionRoutes = sectionRoutes('agent', '/agent')
+const advancedSectionRoutes = sectionRoutes('advanced', '/advanced')
 
 // 使用 hash 路由：构建产物由 FastAPI 静态挂载，无需服务端 SPA fallback 配置
 const router = createRouter({
@@ -47,10 +47,28 @@ const router = createRouter({
             ...agentSectionRoutes,
           ],
         },
-        // OneBot 工具界面归属 Tool 管理，保留历史路径重定向
+        // 进阶调参区：与 Agent 面板同级，共用同一个外壳（bot 守卫 / 保存状态）
+        {
+          path: 'advanced',
+          component: () => import('@/layouts/AgentLayout.vue'),
+          children: [
+            {
+              path: '',
+              name: 'advanced',
+              component: () => import('@/views/AdvancedPage.vue'),
+              meta: { title: '高级设置' },
+            },
+            ...advancedSectionRoutes,
+          ],
+        },
+        // 历史深链：分区重构前的路径统一落到新位置
         { path: 'agent/onebot', redirect: '/tools/onebot' },
-        // MCP 已并入「工具与联网」分区，保留历史深链
-        { path: 'agent/mcp', redirect: '/agent/tools' },
+        { path: 'agent/role', redirect: '/agent/basic' },
+        { path: 'agent/model', redirect: '/agent/basic' },
+        { path: 'agent/tools', redirect: '/advanced/tools' },
+        { path: 'agent/mcp', redirect: '/advanced/tools' },
+        { path: 'agent/knowledge', redirect: '/advanced/tools' },
+        { path: 'agent/panels', redirect: '/advanced/proactive' },
         {
           path: 'tools',
           component: () => import('@/views/ToolsPage.vue'),

@@ -11,7 +11,7 @@ import { useAgentConfigStore } from '@/stores/agentConfig'
 import AgentTemplateDialog from '@/components/agent/AgentTemplateDialog.vue'
 import AgentConfigSearchDialog from '@/components/agent/AgentConfigSearchDialog.vue'
 import AgentCopyConfigDialog from '@/components/agent/AgentCopyConfigDialog.vue'
-import { AGENT_SECTIONS, agentSectionBadge, agentSectionImportance } from '@/agent/sections'
+import { agentSectionBadge, agentSectionImportance, sectionsOfArea, ADVANCED_INDEX_PATH } from '@/agent/sections'
 
 const agent = useAgentConfigStore()
 const router = useRouter()
@@ -22,8 +22,9 @@ const copyDialog = ref(false)
 // 新手只需要 basic 档分区；进阶配置默认收起
 const onlyBasic = ref(false)
 
+// 只列「常用」区域的分区：进阶页在「高级设置」里，混进来会让新手面对 9 张卡片
 const pages = computed(() => {
-  const list = AGENT_SECTIONS.map((section) => ({
+  const list = sectionsOfArea('agent').map((section) => ({
     to: section.path,
     title: section.title,
     desc: section.subtitle,
@@ -107,6 +108,18 @@ const warnings = computed(() => {
               </div>
             </v-card-text>
           </v-card>
+        </div>
+
+        <v-divider class="my-4" />
+        <div class="d-flex align-center">
+          <v-icon icon="mdi-tune" size="small" class="mr-2" />
+          <div class="text-body-2">
+            工具能力、主动消息、消息与输出通道等进阶项移到独立的
+            <a class="text-primary text-decoration-none" href="#" @click.prevent="router.push(ADVANCED_INDEX_PATH)">
+              高级设置
+            </a>
+            区。
+          </div>
         </div>
       </v-card-text>
     </v-card>
