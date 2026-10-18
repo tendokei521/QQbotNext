@@ -203,3 +203,13 @@ def test_stream_presets_are_renderable_and_target_the_stream_section():
         stray = sorted(set(config) - stream_fields)
         assert not stray, f"预设 {key} 改写了不属于「流式回复」分区的字段: {stray}"
 
+
+
+def test_grouped_fields_carry_importance():
+    """importance 是前端区分「基础/进阶分区」的唯一依据，分组字段必须都带上。"""
+    missing = [
+        key
+        for key, definition in SCHEMA.items()
+        if isinstance(definition, dict) and definition.get("group") and not definition.get("importance")
+    ]
+    assert not missing, f"以下字段缺少 importance 标注: {missing}"
