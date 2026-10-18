@@ -45,10 +45,10 @@
       "id": "behavior",
       "path": "/agent/behavior",
       "title": "对话行为",
-      "subtitle": "用户信息感知与回复打断",
+      "subtitle": "拟人行为规则、用户信息感知与回复打断",
       "icon": "mdi-account-voice",
       "color": "secondary",
-      "groups": ["group_context", "group_interrupt"]
+      "groups": ["group_behavior", "group_context", "group_interrupt"]
     },
     {
       "id": "stream",

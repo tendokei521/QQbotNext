@@ -31,6 +31,16 @@ DEFAULT_LLM_CONFIG: dict = {
     # 消息组装风格：blocks=框架默认（人设/协议/技能/记忆/背景各一条 system）；
     # single=把所有 system 块折成一条（对齐 AstrBot 那种「一整条 system prompt」形态）
     "system_prompt_style": "blocks",
+    # 组装档位：legacy=改造前的旧行为（逐字不变）；qq_agent=注入独立的行为规则段
+    # （对齐外部拟人化实现：安全/工作方式/反AI味/主体性/该说不该说/群聊节奏…）。
+    # 用一个总闸而不是散开关，为的是能一键回退与 A/B。
+    "assembly_profile": "legacy",
+    # 行为规则细调：总开关 / 整体覆盖（安全规则与工作方式仍强制追加）
+    "behavior_rules_enable": True,
+    "behavior_rules_override": "",
+    # 参与度（改写行为段「该说/不该说」的首行）与贴表情活跃度（0~3，改写频率行）
+    "participation": "medium",
+    "emoji_react_level": 1,
     "max_tokens": 1024,
     "temperature": 0.7,
     # 记录历史时强制清洗助手输出里的（…）/(…) 内容，避免后续回复模仿括号风格

@@ -144,6 +144,7 @@ def test_components_are_independent_and_named():
 def test_block_order_is_declared_and_stable():
     assert [b.name for b in BLOCKS] == [
         "persona",
+        "behavior",
         "schedule",
         "proactive",
         "message_meta",
@@ -157,7 +158,11 @@ def test_block_order_is_declared_and_stable():
 
 
 def test_describe_snapshot_typical_group_chat():
-    """典型群聊：块序列 + 角色 + 长度。任何顺序变化都会在此显形。"""
+    """典型群聊：块序列 + 角色 + 长度。任何顺序变化都会在此显形。
+
+    ``behavior`` 是空块也算一行：块表宣称的顺序与"这次到底发了什么"要能一眼对齐
+    （``legacy`` 档下它恒为空，见 ``persona_rules``）。
+    """
     req = _req(
         config={"system_prompt": "你是助手", "outbound_directive_enable": False},
         pre_history_text="环境",
@@ -166,6 +171,7 @@ def test_describe_snapshot_typical_group_chat():
     rows = describe(req)
     assert rows == [
         {"block": "persona", "role": "system", "chars": 4, "messages": 1},
+        {"block": "behavior", "role": "-", "chars": 0, "messages": 0},
         {"block": "schedule", "role": "system", "chars": len(SCHEDULE_INSTRUCTION), "messages": 1},
         {"block": "proactive", "role": "-", "chars": 0, "messages": 0},
         {

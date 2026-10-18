@@ -143,6 +143,7 @@ def build_proactive_instruction(
     user_text: str = "",
     *,
     available_tools=None,
+    dedupe: bool = False,
 ) -> str | None:
     """组装唯一的「主动性」system 块；没有可用能力时返回 None。
 
@@ -153,6 +154,9 @@ def build_proactive_instruction(
         user_text: 用户原始文本，用于历史/环境意图补强
         available_tools: 本轮实际可用的工具名集合；给定时按能力裁剪，
             避免教模型调用本轮不存在的工具
+        dedupe: 与行为规则块（``persona_rules``）去重。行为段已经讲了"引用/@ 怎么用、
+            戳一戳怎么用、什么该说什么不该说、怎么翻记录"，这里只保留**每轮变化**的行
+            （意图补强、指代解析、未展开标记语义）——同一主题两处引导会让模型左右脑互搏。
     """
     if not _cfg_flag(config, "proactive_prompt_enable", True):
         return None
@@ -165,6 +169,22 @@ def build_proactive_instruction(
     has_expand = has_any_expand(tools)
     has_recent = tools is None or "expand_recent" in tools
 
+    if dedupe:
+        # 行为段已覆盖：翻记录/戳一戳/引用与@ 的通用用法、以及"这些动作可做可不做"的声明。
+        # 这里只剩"这一轮为什么要做"和"标记语义"这类必须贴在本轮上下文附近的引导。
+        history_nudge = has_history and bool(
+            _cfg_flag(config, "proactive_history_intent_nudge", True) and history_intent(user_text)
+        )
+        has_history = False          # 通用"想查就查"的行归行为段
+        has_poke = False
+        has_quote = False
+    else:
+        history_nudge = bool(
+            has_history
+            and _cfg_flag(config, "proactive_history_intent_nudge", True)
+            and history_intent(user_text)
+        )
+
     show_env = has_env and _cfg_flag(config, "proactive_env_prompt_enable", True)
     show_unresolved = has_expand and _cfg_flag(config, "proactive_unresolved_prompt_enable", True)
     # 指代解析行需要"焦点行 + 按位置取回"两块能力同时在场才有意义
@@ -173,14 +193,17 @@ def build_proactive_instruction(
         and _cfg_flag(config, "referent_prompt_enable", True)
         and _cfg_flag(config, "referent_resolve_enable", True)
     )
-    if not (has_history or has_poke or has_quote or show_env or show_unresolved or show_referent):
+    if not (has_history or has_poke or has_quote or history_nudge or show_env or show_unresolved or show_referent):
         return None
 
-    lines = ["### 主动性", "你可以像人一样主动使用能力，而不是只被动回答。"]
+    if dedupe:
+        lines = ["### 上下文补全（本轮的可用手段）"]
+    else:
+        lines = ["### 主动性", "你可以像人一样主动使用能力，而不是只被动回答。"]
     if has_history:
         lines.append(PROACTIVE_HISTORY_LINE)
-        if _cfg_flag(config, "proactive_history_intent_nudge", True) and history_intent(user_text):
-            lines.append(PROACTIVE_HISTORY_NUDGE)
+    if history_nudge:
+        lines.append(PROACTIVE_HISTORY_NUDGE)
     if show_referent:
         lines.append(PROACTIVE_REFERENT_LINE)
     if show_env:
@@ -193,7 +216,8 @@ def build_proactive_instruction(
         lines.append(PROACTIVE_POKE_LINE)
     if has_quote:
         lines.append(PROACTIVE_QUOTE_LINE)
-    lines.append(PROACTIVE_FOOTER_LINE)
+    if not dedupe:
+        lines.append(PROACTIVE_FOOTER_LINE)
     if show_unresolved:
         lines.append(PROACTIVE_FOOTER_UNRESOLVED_LINE)
     return "\n".join(lines)

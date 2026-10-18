@@ -25,6 +25,7 @@ def test_declared_block_order_covers_all_kinds():
     """块表是唯一的顺序来源：chat / proactive / schedule / summary 共用同一张表。"""
     assert EXPECTED_BLOCKS == [
         "persona",
+        "behavior",
         "schedule",
         "proactive",
         "message_meta",

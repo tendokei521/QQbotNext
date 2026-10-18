@@ -219,15 +219,53 @@ def build_schedule_instruction(req: PromptRequest) -> list[dict]:
     return [{"role": "system", "content": SCHEDULE_INSTRUCTION}]
 
 
+def assembly_profile(req: PromptRequest) -> str:
+    """组装档位：``legacy``（默认，旧行为逐字不变）或 ``qq_agent``（对齐外部实现）。
+
+    用**一个总闸**而不是散落的开关，是为了能一键回退与 A/B：某次改动效果不好时，
+    把档位切回 ``legacy`` 就回到改造前，不必逐个关块。
+    """
+    return str(req.cfg("assembly_profile", "legacy") or "legacy").strip().lower()
+
+
+def build_behavior(req: PromptRequest) -> list[dict]:
+    """行为规则块：拟人化的主来源（独立成段，不塞进人格正文）。
+
+    三条纪律：
+
+    1. **只在 ``qq_agent`` 档注入**——``legacy`` 下整块消失，改造前的提示词逐字不变；
+    2. **段落里点名的工具按本轮能力裁剪**（见 ``persona_rules.detect_caps``）：
+       工具没开就整句消失，否则模型会去调不存在的工具；
+    3. **``behavior_rules_override`` 可整体替换**，但安全规则与工作方式强制追加——
+       一次误配置不该能把"不越权 / 不泄露 / 怎么发言"整套删掉。
+    """
+    if assembly_profile(req) != "qq_agent":
+        return []
+    if not bool(req.cfg("behavior_rules_enable", True)):
+        return []
+
+    from app.llm import persona_rules
+
+    caps = persona_rules.detect_caps(req.available_tools, req.config, req.modalities)
+    override = str(req.cfg("behavior_rules_override", "") or "").strip()
+    if override:
+        text = persona_rules.override_with_safety(override, caps)
+    else:
+        text = persona_rules.render(req.runtime, req.available_tools, req.config, req.modalities)
+    return [{"role": "system", "content": text}] if str(text).strip() else []
+
+
 def build_proactive(req: PromptRequest) -> list[dict]:
     """「主动性」协议块：按本轮实际可用工具裁剪，没有可用能力时整块不注入。
 
     意图判定用**原始正文**（``req.intent_text``），避免元信息前缀干扰。
+    ``qq_agent`` 档下去重：通用用法归行为段，这里只留本轮的意图补强与标记语义。
     """
     text = build_proactive_instruction(
         req.config,
         req.intent_text,
         available_tools=req.available_tools,
+        dedupe=assembly_profile(req) == "qq_agent",
     )
     return [{"role": "system", "content": text}] if text else []
 
@@ -396,6 +434,9 @@ def fold_system_blocks(built: list[tuple[Block, list[dict]]]) -> list[tuple[Bloc
 #: 块顺序 —— 想调整顺序/插块，只改这张表
 BLOCKS: tuple[Block, ...] = (
     Block("persona", build_persona),
+    # 行为规则紧跟人格：人格讲"我是谁"，行为段讲"在这个群里怎么说话"，
+    # 越硬的约束越靠前（对齐 QQ-agent 的段落顺序，见 persona_rules 模块 docstring）
+    Block("behavior", build_behavior),
     Block("schedule", build_schedule_instruction),
     Block("proactive", build_proactive),
     Block("message_meta", build_message_meta),

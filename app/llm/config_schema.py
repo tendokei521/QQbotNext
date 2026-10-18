@@ -8,6 +8,7 @@ SCHEMA = {
     "group_compress": {"type": "group", "label": "上下文压缩", "collapsible": True},
     "group_trigger": {"type": "group", "label": "触发设置", "collapsible": True},
     "group_context": {"type": "group", "label": "用户信息感知", "collapsible": True},
+    "group_behavior": {"type": "group", "label": "行为规则（拟人化）", "collapsible": True},
     "group_interrupt": {"type": "group", "label": "回复打断", "collapsible": True},
     "group_stream": {"type": "group", "label": "流式回复", "collapsible": True},
     "group_proactive": {"type": "group", "label": "主动消息", "collapsible": True},
@@ -156,6 +157,40 @@ SCHEMA = {
             "blocks": "分块：每类一块 system（默认）",
             "single": "单条：折成一整条 system prompt",
         },
+    },
+    "assembly_profile": {
+        "type": "select", "label": "组装档位",
+        "description": "legacy=改造前的旧行为（逐字不变）；qq_agent=注入独立的行为规则段（安全/工作方式/反AI味/主体性/该说不该说/群聊节奏…），拟人化效果更好",
+        "default": "legacy", "group": "group_behavior",
+        "options": {
+            "legacy": "旧版：只有人格设定（默认）",
+            "qq_agent": "拟人化：人格 + 行为规则段",
+        },
+    },
+    "behavior_rules_enable": {
+        "type": "boolean", "label": "注入行为规则段",
+        "description": "关闭后即使档位是拟人化也不注入（排查「为什么回复变味」时用）",
+        "default": True, "group": "group_behavior",
+    },
+    "behavior_rules_override": {
+        "type": "textarea", "label": "覆盖行为规则",
+        "description": "留空=用内置行为规则；填写后整体替换行为段，但【安全规则】与【工作方式】仍强制追加（防一次误配置删掉底线）",
+        "default": "", "rows": 8, "group": "group_behavior",
+    },
+    "participation": {
+        "type": "select", "label": "参与度",
+        "description": "改写行为段【该说/不该说】的首行：安静=多在潜水，活跃=多接话（仍选择性接，不刷屏）",
+        "default": "medium", "group": "group_behavior",
+        "options": {
+            "low": "安静：少开口",
+            "medium": "普通群友（默认）",
+            "high": "活跃：多接话",
+        },
+    },
+    "emoji_react_level": {
+        "type": "number", "label": "贴表情活跃度",
+        "description": "0=几乎不贴；1=每 3~5 轮一次（默认）；2=优先考虑贴；3=能贴就贴",
+        "default": 1, "min": 0, "max": 3, "group": "group_behavior",
     },
     "session_timeout": {
         "type": "number", "label": "会话超时时间(秒)", "description": "无消息后多久结束会话",
@@ -746,6 +781,7 @@ _IMPORTANCE_BY_GROUP = {
     "group_compress": "advanced",
     "group_trigger": "basic",
     "group_context": "advanced",
+    "group_behavior": "advanced",
     "group_interrupt": "advanced",
     "group_stream": "advanced",
     "group_proactive": "advanced",
