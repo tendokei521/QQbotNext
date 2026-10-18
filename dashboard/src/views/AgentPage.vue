@@ -1,19 +1,21 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+/**
+ * Agent 概览（index）。
+ *
+ * 头部 / bot 守卫 / loading / 保存按钮由 ``AgentLayout`` 统一提供，
+ * 本页只负责健康警告、分区入口卡片与三个配置对话框。
+ */
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useBotsStore } from '@/stores/bots'
 import { useAgentConfigStore } from '@/stores/agentConfig'
 import AgentTemplateDialog from '@/components/agent/AgentTemplateDialog.vue'
 import AgentConfigSearchDialog from '@/components/agent/AgentConfigSearchDialog.vue'
 import AgentCopyConfigDialog from '@/components/agent/AgentCopyConfigDialog.vue'
 import { AGENT_SECTIONS, agentSectionBadge } from '@/agent/sections'
 
-const bots = useBotsStore()
 const agent = useAgentConfigStore()
 const router = useRouter()
-const loading = ref(false)
 
-const botId = computed(() => bots.currentBot?.bot_id ?? null)
 const templateDialog = ref(false)
 const searchDialog = ref(false)
 const copyDialog = ref(false)
@@ -44,98 +46,59 @@ const warnings = computed(() => {
   }
   return list
 })
-
-async function ensureLoaded() {
-  if (botId.value === null) {
-    loading.value = true
-    await bots.fetchBots()
-    if (bots.currentIndex === null && bots.bots.length) bots.restoreSelection()
-    loading.value = false
-  }
-  await agent.load()
-}
-
-onMounted(ensureLoaded)
 </script>
 
 <template>
   <div>
-    <div class="app-page-header" style="align-items: center">
-      <div class="d-flex align-center gap-2 flex-wrap">
-        <h1 class="app-page-title">Agent 面板</h1>
-        <v-chip size="small" variant="tonal" color="primary">LLM · 框架级</v-chip>
-        <v-chip v-if="agent.saveStatus === 'saving'" size="small" color="primary" variant="flat">
-          <v-progress-circular size="12" indeterminate class="mr-1" /> 保存中…
-        </v-chip>
-        <v-chip v-else-if="agent.saveStatus === 'error'" size="small" color="error" variant="flat">保存失败</v-chip>
-        <v-chip v-else-if="agent.saveStatus === 'dirty'" size="small" color="warning" variant="flat">未保存</v-chip>
-      </div>
-      <v-switch v-model="agent.enabled" color="primary" label="启用 Agent" density="compact" hide-details @update:model-value="(v: any) => agent.onEnabledChange(v)" />
-    </div>
-    <div class="app-page-subtitle">框架级 LLM Agent：配置、权限、定时任务与主动消息</div>
+    <v-card v-if="warnings.length" variant="outlined" color="warning" class="mb-4">
+      <v-card-text class="d-flex flex-column gap-1">
+        <div v-for="w in warnings" :key="w" class="d-flex align-center gap-2">
+          <v-icon size="small" icon="mdi-alert-circle-outline" />
+          <span>{{ w }}</span>
+        </div>
+      </v-card-text>
+    </v-card>
 
-    <div v-if="botId === null" class="empty-tip">
-      <v-icon icon="mdi-robot-off-outline" size="56" color="rgba(var(--v-theme-on-surface), 0.3)" />
-      <div>请先在顶栏选择并连接一个 Bot，再配置 Agent</div>
-      <v-btn variant="tonal" prepend-icon="mdi-refresh" class="mt-2" @click="ensureLoaded">重试</v-btn>
-    </div>
+    <v-card variant="outlined" class="mb-4">
+      <v-card-title class="d-flex align-center">
+        <v-icon icon="mdi-view-dashboard-outline" class="mr-2" color="primary" /> 配置入口
+        <v-spacer />
+        <v-btn size="small" variant="tonal" prepend-icon="mdi-book-multiple" class="mr-3" @click="templateDialog = true">
+          配置模板
+        </v-btn>
+        <v-btn size="small" variant="tonal" prepend-icon="mdi-magnify" class="mr-3" @click="searchDialog = true">
+          搜索配置
+        </v-btn>
+        <v-btn size="small" variant="tonal" prepend-icon="mdi-content-copy" class="mr-3" @click="copyDialog = true">
+          复制配置
+        </v-btn>
+      </v-card-title>
+      <v-card-text>
+        <div class="agent-grid">
+          <v-card
+            v-for="p in pages"
+            :key="p.to"
+            variant="tonal"
+            class="agent-card"
+            :color="p.color"
+            @click="router.push(p.to)"
+          >
+            <v-card-text class="d-flex align-center">
+              <v-icon :icon="p.icon" size="30" class="mr-3" />
+              <div>
+                <div class="font-weight-medium">{{ p.title }}</div>
+                <div class="text-caption" style="opacity: 0.75">{{ p.desc }}</div>
+                <v-chip size="x-small" variant="tonal" class="mt-1">{{ p.status }}</v-chip>
+              </div>
+            </v-card-text>
+          </v-card>
+        </div>
+      </v-card-text>
+    </v-card>
 
-    <template v-else>
-      <v-progress-linear v-if="loading" indeterminate color="primary" />
-
-      <v-card v-if="warnings.length" variant="outlined" color="warning" class="mb-4">
-        <v-card-text class="d-flex flex-column gap-1">
-          <div v-for="w in warnings" :key="w" class="d-flex align-center gap-2">
-            <v-icon size="small" icon="mdi-alert-circle-outline" />
-            <span>{{ w }}</span>
-          </div>
-        </v-card-text>
-      </v-card>
-
-      <v-card variant="outlined" class="mb-4">
-        <v-card-title class="d-flex align-center">
-          <v-icon icon="mdi-view-dashboard-outline" class="mr-2" color="primary" /> 配置入口
-          <v-spacer />
-          <v-btn size="small" variant="tonal" prepend-icon="mdi-book-multiple" class="mr-3" @click="templateDialog = true">
-            配置模板
-          </v-btn>
-          <v-btn size="small" variant="tonal" prepend-icon="mdi-magnify" class="mr-3" @click="searchDialog = true">
-            搜索配置
-          </v-btn>
-          <v-btn size="small" variant="tonal" prepend-icon="mdi-content-copy" class="mr-3" @click="copyDialog = true">
-            复制配置
-          </v-btn>
-          <v-btn size="small" variant="tonal" prepend-icon="mdi-content-save" :loading="agent.saveStatus === 'saving'" @click="agent.save()">
-            保存配置
-          </v-btn>
-        </v-card-title>
-        <v-card-text>
-          <div class="agent-grid">
-            <v-card
-              v-for="p in pages"
-              :key="p.to"
-              variant="tonal"
-              class="agent-card"
-              :color="p.color"
-              @click="router.push(p.to)"
-            >
-              <v-card-text class="d-flex align-center">
-                <v-icon :icon="p.icon" size="30" class="mr-3" />
-                <div>
-                  <div class="font-weight-medium">{{ p.title }}</div>
-                  <div class="text-caption" style="opacity: 0.75">{{ p.desc }}</div>
-                  <v-chip size="x-small" variant="tonal" class="mt-1">{{ p.status }}</v-chip>
-                </div>
-              </v-card-text>
-            </v-card>
-          </div>
-        </v-card-text>
-      </v-card>
-
-      <AgentTemplateDialog v-model="templateDialog" />
-      <AgentConfigSearchDialog v-model="searchDialog" />
-      <AgentCopyConfigDialog v-model="copyDialog" />
-    </template>
+    <AgentTemplateDialog v-model="templateDialog" />
+    <AgentConfigSearchDialog v-model="searchDialog" />
+    <AgentCopyConfigDialog v-model="copyDialog" />
   </div>
 </template>
 
@@ -153,14 +116,5 @@ onMounted(ensureLoaded)
 
 .agent-card:hover {
   transform: translateY(-2px);
-}
-
-.empty-tip {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 80px 0;
-  color: rgba(var(--v-theme-on-surface), 0.45);
 }
 </style>

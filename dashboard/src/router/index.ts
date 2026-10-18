@@ -17,7 +17,7 @@ const AGENT_PAGE_COMPONENTS: Record<string, () => Promise<unknown>> = {
 }
 
 /**
- * 由 registry 生成 /agent/* 子路由。
+ * 由 registry 生成 /agent/* 子路由（作为 AgentLayout 的 children）。
  *
  * 只生成 ``area === 'agent'`` 的分区：``onebot`` 分区的界面挂在 Tool 管理下
  * （``/tools/onebot``），这里不再重复注册，仅保留 ``/agent/onebot`` 的历史重定向。
@@ -34,7 +34,7 @@ const agentSectionRoutes = AGENT_SECTIONS.filter((section) => section.area === '
       )
     }
     return {
-      path: section.path.replace(/^\//, ''),
+      path: section.path.replace(/^\/agent\//, ''),
       name: `agent-${section.id}`,
       component,
       meta: { title: `Agent ${section.title}` },
@@ -55,10 +55,22 @@ const router = createRouter({
         { path: 'modules', name: 'modules', component: () => import('@/views/ModulesPage.vue'), meta: { title: '功能模块' } },
         { path: 'modules/agent', redirect: '/agent' },
         { path: 'modules/:name', name: 'module-config', component: () => import('@/views/ModuleConfigPage.vue'), meta: { title: '模块配置' } },
-        { path: 'agent', name: 'agent', component: () => import('@/views/AgentPage.vue'), meta: { title: 'Agent 面板' } },
+        // Agent 配置区共享外壳：bot 守卫 / 头部 / 保存状态 / 段落导航都在 layout 里
+        {
+          path: 'agent',
+          component: () => import('@/layouts/AgentLayout.vue'),
+          children: [
+            {
+              path: '',
+              name: 'agent',
+              component: () => import('@/views/AgentPage.vue'),
+              meta: { title: 'Agent 面板' },
+            },
+            ...agentSectionRoutes,
+          ],
+        },
         // OneBot 工具界面归属 Tool 管理，保留历史路径重定向
         { path: 'agent/onebot', redirect: '/tools/onebot' },
-        ...agentSectionRoutes,
         {
           path: 'tools',
           component: () => import('@/views/ToolsPage.vue'),

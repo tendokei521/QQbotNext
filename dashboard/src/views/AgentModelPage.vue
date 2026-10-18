@@ -1,15 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import http, { errorMessage } from '@/api/http'
 import ConfigForm from '@/components/config/ConfigForm.vue'
-import AgentSubPage from '@/components/agent/AgentSubPage.vue'
 import { useAgentConfigStore } from '@/stores/agentConfig'
-import { useBotsStore } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
 import { filterSchemaByPage } from '@/utils/schema'
 
 const agent = useAgentConfigStore()
-const bots = useBotsStore()
 const notify = useNotifyStore()
 
 const schema = computed(() => filterSchemaByPage(agent.schema, 'model'))
@@ -59,16 +56,10 @@ function movePoolModel(index: number, delta: number) {
   agent.poolModelIds.splice(target, 0, moved)
   agent.syncPool()
 }
-
-onMounted(() => agent.load())
-watch(
-  () => bots.currentBot?.bot_id,
-  () => agent.load(true),
-)
 </script>
 
 <template>
-  <AgentSubPage title="模型" subtitle="Provider 模型池与调用参数" icon="mdi-api" color="info">
+  <div>
     <v-card variant="outlined" class="mb-4">
       <v-card-title class="d-flex align-center">
         <v-icon icon="mdi-api" class="mr-2" color="info" /> Provider 模型（按顺序请求）
@@ -134,7 +125,7 @@ watch(
         </v-card-actions>
       </v-card>
     </v-dialog>
-  </AgentSubPage>
+  </div>
 </template>
 
 <style scoped>

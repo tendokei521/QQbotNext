@@ -1,32 +1,26 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue'
+import { computed } from 'vue'
 import ConfigForm from '@/components/config/ConfigForm.vue'
-import AgentSubPage from '@/components/agent/AgentSubPage.vue'
 import { useAgentConfigStore } from '@/stores/agentConfig'
-import { useBotsStore } from '@/stores/bots'
 import { filterSchemaByGroup } from '@/utils/schema'
 
 const agent = useAgentConfigStore()
-const bots = useBotsStore()
-
 const schema = computed(() => filterSchemaByGroup(agent.schema, 'group_memory'))
-
-onMounted(() => agent.load())
-watch(
-  () => bots.currentBot?.bot_id,
-  () => agent.load(true),
-)
 </script>
 
 <template>
-  <AgentSubPage title="Agent 长期记忆" subtitle="长期记忆与感知增强提示词细调（实验性）" icon="mdi-brain" color="warning">
-    <v-card variant="outlined" class="mb-4">
-      <v-card-title class="d-flex align-center">
-        <v-icon icon="mdi-brain" class="mr-2" color="warning" /> 长期记忆（实验性）
-      </v-card-title>
-      <v-card-text>
-        <ConfigForm :module-name="'agent'" :schema="schema" :config="agent.draft" :bot-id="agent.botId" @change="agent.onChange" />
-      </v-card-text>
-    </v-card>
-  </AgentSubPage>
+  <v-card variant="outlined" class="mb-4">
+    <v-card-title class="d-flex align-center">
+      <v-icon icon="mdi-brain" class="mr-2" color="warning" /> 长期记忆（实验性）
+    </v-card-title>
+    <v-card-text>
+      <ConfigForm
+        :module-name="'agent'"
+        :schema="schema"
+        :config="agent.draft"
+        :bot-id="agent.botId"
+        @change="agent.onChange"
+      />
+    </v-card-text>
+  </v-card>
 </template>

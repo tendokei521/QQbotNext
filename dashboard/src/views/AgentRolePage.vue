@@ -2,7 +2,6 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import http, { errorMessage } from '@/api/http'
-import AgentSubPage from '@/components/agent/AgentSubPage.vue'
 import { useAgentConfigStore } from '@/stores/agentConfig'
 import { useNotifyStore } from '@/stores/notify'
 
@@ -68,19 +67,14 @@ function goToPersonas() {
   router.push('/personas')
 }
 
+// 配置由 AgentLayout 负责加载；本页只额外加载人格预设列表
 onMounted(() => {
-  agent.load()
   loadPresets()
 })
 </script>
 
 <template>
-  <AgentSubPage
-    title="角色设定"
-    subtitle="从已有的人格预设中选择并应用到当前 Agent"
-    icon="mdi-account-heart"
-    color="pink"
-  >
+  <div>
     <v-row class="mt-2">
       <v-col cols="12" md="4">
         <v-card variant="outlined" class="h-full">
@@ -191,7 +185,7 @@ onMounted(() => {
         </v-card>
       </v-col>
     </v-row>
-  </AgentSubPage>
+  </div>
 </template>
 
 <style scoped>

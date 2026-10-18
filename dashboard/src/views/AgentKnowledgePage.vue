@@ -1,10 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import http, { errorMessage } from '@/api/http'
 import ConfigForm from '@/components/config/ConfigForm.vue'
-import AgentSubPage from '@/components/agent/AgentSubPage.vue'
 import { useAgentConfigStore } from '@/stores/agentConfig'
-import { useBotsStore } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
 import { filterSchemaByPage } from '@/utils/schema'
 
@@ -18,7 +16,6 @@ interface KnowledgeItem {
 }
 
 const agent = useAgentConfigStore()
-const bots = useBotsStore()
 const notify = useNotifyStore()
 const schema = computed(() => filterSchemaByPage(agent.schema, 'knowledge'))
 
@@ -77,21 +74,16 @@ function fmtTime(ts: number): string {
   return new Date(ts * 1000).toLocaleString('zh-CN', { hour12: false })
 }
 
-onMounted(async () => {
-  await agent.load()
-  loadItems()
-})
+// 配置由 AgentLayout 负责加载；本页只需跟随 agent.botId 变化重载知识条目
 watch(
-  () => bots.currentBot?.bot_id,
-  async () => {
-    await agent.load(true)
-    loadItems()
-  },
+  () => agent.botId,
+  () => loadItems(),
+  { immediate: true },
 )
 </script>
 
 <template>
-  <AgentSubPage title="知识库" subtitle="知识库检索与 Embedding 模型" icon="mdi-book-open-variant" color="deep-purple">
+  <div>
     <v-card variant="outlined" class="mb-4">
       <v-card-title class="d-flex align-center">
         <v-icon icon="mdi-book-open-variant" class="mr-2" color="deep-purple" /> 知识库配置
@@ -133,7 +125,7 @@ watch(
         </v-list>
       </v-card-text>
     </v-card>
-  </AgentSubPage>
+  </div>
 </template>
 
 <style scoped>
