@@ -14,7 +14,7 @@ const CUSTOM_SECTION_LOADERS: Record<string, () => Promise<unknown>> = {
   stream: () => import('@/components/agent/sections/AgentStreamPresets.vue'),
   role: () => import('@/components/agent/sections/AgentRolePresets.vue'),
   knowledge: () => import('@/components/agent/sections/AgentKnowledgeItems.vue'),
-  mcp: () => import('@/components/agent/sections/AgentMcpServers.vue'),
+  tools: () => import('@/components/agent/sections/AgentMcpServers.vue'),
   permission: () => import('@/components/agent/sections/AgentPermissionScope.vue'),
   panels: () => import('@/components/agent/sections/AgentPanelsSection.vue'),
 }

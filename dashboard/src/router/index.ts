@@ -49,6 +49,8 @@ const router = createRouter({
         },
         // OneBot 工具界面归属 Tool 管理，保留历史路径重定向
         { path: 'agent/onebot', redirect: '/tools/onebot' },
+        // MCP 已并入「工具与联网」分区，保留历史深链
+        { path: 'agent/mcp', redirect: '/agent/tools' },
         {
           path: 'tools',
           component: () => import('@/views/ToolsPage.vue'),

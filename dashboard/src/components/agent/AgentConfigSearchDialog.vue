@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAgentConfigStore } from '@/stores/agentConfig'
 import { splitSchema } from '@/utils/schema'
+import { agentSectionForField } from '@/agent/sections'
 
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{ (e: 'update:modelValue', value: boolean): void }>()
@@ -11,16 +12,20 @@ const agent = useAgentConfigStore()
 const router = useRouter()
 const query = ref('')
 
+// 目标分区由 registry 解析，不再依赖后端每个字段的 page 元数据
+// （分组重划后 page 会和分区不一致，例如 group_session 的字段已迁到「会话管理」）
 const fields = computed(() => {
   const { items } = splitSchema(agent.schema)
-  return Object.entries(items)
-    .map(([key, def]) => ({
+  return Object.entries(items).map(([key, def]) => {
+    const section = agentSectionForField(key, def?.group || '')
+    return {
       key,
       label: def?.label || key,
       description: def?.description || '',
-      page: def?.page || 'basic',
-      group: def?.group || '',
-    }))
+      sectionTitle: section?.title || '',
+      path: section?.path || '',
+    }
+  })
 })
 
 const results = computed(() => {
@@ -31,9 +36,10 @@ const results = computed(() => {
     .slice(0, 30)
 })
 
-function openField(field: { page: string; group: string }) {
+function openField(field: { path: string }) {
+  if (!field.path) return
   emit('update:modelValue', false)
-  router.push(`/agent/${field.page}`)
+  router.push(field.path)
 }
 
 watch(
@@ -65,7 +71,7 @@ watch(
         <v-list density="compact" class="mt-3" max-height="400" style="overflow-y: auto">
           <v-list-item v-for="f in results" :key="f.key" @click="openField(f)">
             <v-list-item-title>{{ f.label }}</v-list-item-title>
-            <v-list-item-subtitle>{{ f.key }} · {{ f.description }}</v-list-item-subtitle>
+            <v-list-item-subtitle>{{ f.key }} · {{ f.sectionTitle }}</v-list-item-subtitle>
           </v-list-item>
           <v-list-item v-if="!results.length">
             <v-list-item-title class="text-caption text-center py-3" style="opacity: 0.5">

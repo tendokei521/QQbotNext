@@ -1,15 +1,15 @@
 {
   "_comment": "Agent 配置分区单一权威。前端路由 / 侧边栏二级菜单 / 概览卡片都由它派生；后端 schema 契约测试也读这份文件，禁止在前端或后端另抄一份分区清单。",
-  "version": 1,
+  "version": 2,
   "sections": [
     {
       "id": "basic",
       "path": "/agent/basic",
-      "title": "基础配置",
-      "subtitle": "群/私聊开关、历史与触发",
-      "icon": "mdi-tune-variant",
+      "title": "基础开关",
+      "subtitle": "群/私聊开关、单次响应与触发条件",
+      "icon": "mdi-toggle-switch-outline",
       "color": "primary",
-      "groups": ["group_switch", "group_session", "group_compress", "group_tavily", "group_tools"]
+      "groups": ["group_switch", "group_trigger"]
     },
     {
       "id": "role",
@@ -33,13 +33,22 @@
       "customFirst": true
     },
     {
+      "id": "session",
+      "path": "/agent/session",
+      "title": "会话管理",
+      "subtitle": "历史上下文、会话隔离与上下文压缩",
+      "icon": "mdi-chat-processing-outline",
+      "color": "cyan",
+      "groups": ["group_session", "group_compress"]
+    },
+    {
       "id": "behavior",
       "path": "/agent/behavior",
       "title": "对话行为",
-      "subtitle": "用户信息感知、回复打断、触发与冷却",
+      "subtitle": "用户信息感知与回复打断",
       "icon": "mdi-account-voice",
       "color": "secondary",
-      "groups": ["group_trigger", "group_context", "group_interrupt"]
+      "groups": ["group_context", "group_interrupt"]
     },
     {
       "id": "stream",
@@ -50,15 +59,6 @@
       "color": "purple",
       "groups": ["group_stream"],
       "customFirst": true
-    },
-    {
-      "id": "permission",
-      "path": "/agent/permission",
-      "title": "权限",
-      "subtitle": "黑白名单与角色权限",
-      "icon": "mdi-shield-account-outline",
-      "color": "success",
-      "groups": ["group_permission"]
     },
     {
       "id": "memory",
@@ -80,14 +80,31 @@
       "customFirst": true
     },
     {
-      "id": "mcp",
-      "path": "/agent/mcp",
-      "title": "MCP 工具",
-      "subtitle": "MCP stdio server 配置",
-      "icon": "mdi-server-network",
-      "color": "blue-grey",
-      "groups": ["group_mcp"],
-      "customFirst": true
+      "id": "tools",
+      "path": "/agent/tools",
+      "title": "工具与联网",
+      "subtitle": "工具调用、Tavily 联网搜索与 MCP server",
+      "icon": "mdi-toolbox-outline",
+      "color": "indigo",
+      "groups": ["group_tools", "group_tavily", "group_mcp"]
+    },
+    {
+      "id": "panels",
+      "path": "/agent/panels",
+      "title": "定时任务 / 主动消息",
+      "subtitle": "定时触发与主动发言",
+      "icon": "mdi-clock-outline",
+      "color": "brown",
+      "groups": ["group_proactive", "group_schedule"]
+    },
+    {
+      "id": "permission",
+      "path": "/agent/permission",
+      "title": "权限",
+      "subtitle": "黑白名单与角色权限",
+      "icon": "mdi-shield-account-outline",
+      "color": "success",
+      "groups": ["group_permission"]
     },
     {
       "id": "onebot",
@@ -98,15 +115,6 @@
       "color": "teal",
       "area": "tools",
       "groups": ["group_onebot"]
-    },
-    {
-      "id": "panels",
-      "path": "/agent/panels",
-      "title": "定时任务 / 主动消息",
-      "subtitle": "定时触发与主动发言",
-      "icon": "mdi-clock-outline",
-      "color": "brown",
-      "groups": ["group_proactive", "group_schedule"]
     }
   ]
 }

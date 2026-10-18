@@ -11,7 +11,7 @@ import { useAgentConfigStore } from '@/stores/agentConfig'
 import AgentTemplateDialog from '@/components/agent/AgentTemplateDialog.vue'
 import AgentConfigSearchDialog from '@/components/agent/AgentConfigSearchDialog.vue'
 import AgentCopyConfigDialog from '@/components/agent/AgentCopyConfigDialog.vue'
-import { AGENT_SECTIONS, agentSectionBadge } from '@/agent/sections'
+import { AGENT_SECTIONS, agentSectionBadge, agentSectionImportance } from '@/agent/sections'
 
 const agent = useAgentConfigStore()
 const router = useRouter()
@@ -19,21 +19,25 @@ const router = useRouter()
 const templateDialog = ref(false)
 const searchDialog = ref(false)
 const copyDialog = ref(false)
+// 新手只需要 basic 档分区；进阶配置默认收起
+const onlyBasic = ref(false)
 
-const pages = computed(() =>
-  AGENT_SECTIONS.map((section) => ({
+const pages = computed(() => {
+  const list = AGENT_SECTIONS.map((section) => ({
     to: section.path,
     title: section.title,
     desc: section.subtitle,
     icon: section.icon,
     color: section.color,
+    advanced: agentSectionImportance(section, agent.schema) === 'advanced',
     status: agentSectionBadge(section.id, {
       draft: agent.draft,
       poolModelIds: agent.poolModelIds,
       permission: agent.permission,
     }),
-  })),
-)
+  }))
+  return onlyBasic.value ? list.filter((p) => !p.advanced) : list
+})
 
 const warnings = computed(() => {
   const list: string[] = []
@@ -63,6 +67,14 @@ const warnings = computed(() => {
       <v-card-title class="d-flex align-center">
         <v-icon icon="mdi-view-dashboard-outline" class="mr-2" color="primary" /> 配置入口
         <v-spacer />
+        <v-switch
+          v-model="onlyBasic"
+          color="primary"
+          label="只看基础"
+          density="compact"
+          hide-details
+          class="mr-3"
+        />
         <v-btn size="small" variant="tonal" prepend-icon="mdi-book-multiple" class="mr-3" @click="templateDialog = true">
           配置模板
         </v-btn>
@@ -86,7 +98,10 @@ const warnings = computed(() => {
             <v-card-text class="d-flex align-center">
               <v-icon :icon="p.icon" size="30" class="mr-3" />
               <div>
-                <div class="font-weight-medium">{{ p.title }}</div>
+                <div class="font-weight-medium d-flex align-center gap-2">
+                  {{ p.title }}
+                  <v-chip v-if="p.advanced" size="x-small" variant="text" color="secondary">高级</v-chip>
+                </div>
                 <div class="text-caption" style="opacity: 0.75">{{ p.desc }}</div>
                 <v-chip size="x-small" variant="tonal" class="mt-1">{{ p.status }}</v-chip>
               </div>

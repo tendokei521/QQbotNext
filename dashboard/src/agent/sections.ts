@@ -12,6 +12,7 @@
  */
 
 import manifest from './sections.json'
+import { filterSchemaBySection, splitSchema } from '@/utils/schema'
 
 export type AgentSectionArea = 'agent' | 'tools'
 
@@ -118,34 +119,58 @@ export interface AgentBadgeInput {
   permission: { group_mode: string }
 }
 
-/** 概览卡片右上角的状态徽标（纯表现层，故留在 TS 而不是 JSON）。 */export function agentSectionBadge(id: string, input: AgentBadgeInput): string {
+/** 概览卡片右上角的状态徽标（纯表现层，故留在 TS 而不是 JSON）。 */
+export function agentSectionBadge(id: string, input: AgentBadgeInput): string {
   const draft = input.draft
   switch (id) {
-    case 'basic':
-      return '已配置'
+    case 'basic': {
+      const on = [draft.group_enable && '群聊', draft.private_enable && '私聊'].filter(Boolean)
+      return on.length ? on.join(' + ') : '未开启'
+    }
     case 'role':
       return draft.system_prompt ? '已设置' : '未设置'
     case 'model':
       return input.poolModelIds.length ? `${input.poolModelIds.length} 个模型` : '未配置模型'
+    case 'session':
+      return draft.history_rounds ? `${draft.history_rounds} 轮历史` : '可调'
     case 'behavior':
-      return '可调'
+      return draft.interrupt_enable ? '打断已开' : '打断关闭'
     case 'stream':
       return draft.stream_output ? '开启' : '关闭'
-    case 'permission':
-      return input.permission.group_mode === 'blacklist' ? '黑名单' : '白名单'
     case 'memory':
       return draft.memory_enable ? '开启' : '关闭'
     case 'knowledge':
       return draft.knowledge_enable ? '开启' : '关闭'
-    case 'mcp':
-      return draft.mcp_servers ? '已配置' : '未配置'
-    case 'onebot':
-      return draft.onebot_tools_enable ? '开启' : '关闭'
+    case 'tools':
+      if (draft.mcp_servers) return 'MCP 已配'
+      return draft.tavily_enable ? 'Tavily 开' : '未配置'
     case 'panels':
       return '管理'
+    case 'permission':
+      return input.permission.group_mode === 'blacklist' ? '黑名单' : '白名单'
+    case 'onebot':
+      return draft.onebot_tools_enable ? '开启' : '关闭'
     default:
       return ''
   }
+}
+
+export type AgentSectionImportance = 'basic' | 'advanced'
+
+/**
+ * 分区的重要性：只有当分区内**所有**字段都是 basic 时才算基础分区。
+ *
+ * 后端早就为每个字段标注了 importance，但前端此前从未使用；这里把它变成
+ * 「哪些分区是新手必需」的口径，用于概览页的基础/高级筛选与徽标。
+ */
+export function agentSectionImportance(
+  section: AgentSection,
+  schema: Record<string, any>,
+): AgentSectionImportance {
+  const { items } = splitSchema(filterSchemaBySection(schema, agentSectionSelector(section)))
+  const values = Object.values(items).map((def: any) => def?.importance || 'basic')
+  if (!values.length) return 'basic'
+  return values.every((v) => v === 'basic') ? 'basic' : 'advanced'
 }
 
 /**
