@@ -181,6 +181,10 @@ DEFAULT_LLM_CONFIG: dict = {
     # 空回复重试：请求成功结束却既无文本也无工具调用（网关提前断流 / 只回思考内容）时，
     # 同一 provider 再试的次数；0 = 关闭。避免偶现空回复直接把兜底话术发给用户。
     "empty_reply_retries": 1,
+    # 思考吃满输出的收敛重试：思考模型把 max_tokens 全花在 reasoning 里、正文没写出来时，
+    # 追加一次「不要复述思考、直接作答」的提醒再要一枪（换问法，不是重复同一 prompt——
+    # 后者必然同样打满）。只是尽力而为，根治办法是调大「模型」页的 max_tokens 或缩短上下文。
+    "reasoning_overflow_retries": 1,
     # 多模态图片同传：仅对「模型配置里声明了 image 模态」的模型生效（在「模型」页勾选）。
     # 文本模型的 [图片] 占位语义完全不变。
     "image_understanding_enable": True,

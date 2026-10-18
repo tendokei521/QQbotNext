@@ -306,7 +306,7 @@
           "id": "adv_tool_loop",
           "label": "工具循环",
           "icon": "mdi-sync",
-          "fields": ["max_tool_rounds", "empty_reply_retries"]
+          "fields": ["max_tool_rounds", "empty_reply_retries", "reasoning_overflow_retries"]
         },
         {
           "id": "adv_media",

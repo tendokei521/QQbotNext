@@ -100,6 +100,8 @@ async def stream_send_initiative(
     tool_results: list[dict] = []
     # 本次请求（含工具多轮/空回复重试）的 token 消耗：结束后 info 一次
     usage_sink: dict = {}
+    # 思考字符数：只用于诊断「想过但没正文」，绝不发给用户
+    reasoning_chars = 0
 
     try:
         for _round in range(rounds):
@@ -131,6 +133,9 @@ async def stream_send_initiative(
                             await pool.put(Message.from_text(clean))
                 elif ev.type == "tool_call":
                     _accumulate_tool_call(tool_calls, ev.tool_call or {})
+                elif ev.type == "reasoning":
+                    # 思考只计数、不发送（否则内心独白会漏进群里）
+                    reasoning_chars += len(ev.text or "")
                 elif ev.type == "error":
                     break
 
@@ -152,6 +157,15 @@ async def stream_send_initiative(
                 "tool_calls": normalized_calls,
             })
             messages.extend(tool_messages)
+
+        # 一句话没发不等于"模型没干活"：把思考字数留下来，避免日志里看不出真实原因
+        if reasoning_chars and not full_text_parts:
+            from app.llm import logger
+
+            logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").warning(
+                f"[LLM] 主动消息只产出思考、无正文（reasoning {reasoning_chars} 字符，"
+                f"多半是思考吃满 max_tokens={max_tokens}）：本轮静默"
+            )
 
         await pool.finish()
         await pool.wait_drained()

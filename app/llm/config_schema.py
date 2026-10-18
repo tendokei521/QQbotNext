@@ -718,6 +718,15 @@ SCHEMA = {
                        "0 = 关闭重试（故障时会快一些失败）",
         "default": 1, "min": 0, "max": 3, "group": "group_tools",
     },
+    "reasoning_overflow_retries": {
+        "type": "number", "label": "思考吃满预算的收敛重试",
+        "description": "思考模型把 max_tokens 全花在 reasoning 里、正文一个字都没写出来时，"
+                       "追加一次「不要复述思考、直接给最终回答」的提醒再要一枪的次数（流式与非流式共用）。"
+                       "同样的 prompt 原样重试必然同样打满，所以这里换的是问法而不是重复；"
+                       "注意它只是尽力而为——预算真的不够时仍会失败，根治办法是把「模型」页的 max_tokens 调大"
+                       "或缩短上下文。0 = 关闭（只记日志、直接走兜底）",
+        "default": 1, "min": 0, "max": 2, "group": "group_tools",
+    },
     "image_understanding_enable": {
         "type": "boolean", "label": "图片理解（多模态同传）",
         "description": "把本轮消息里的图片直接传给模型。仅对「模型」页勾选了 image 模态的模型生效；"
@@ -973,7 +982,8 @@ _BASIC_FIELDS = {
     "proactive_max_unanswered", "proactive_quiet_hours_start", "proactive_quiet_hours_end",
     "proactive_group_idle_minutes", "schedule_enable",
     # 能力与成本
-    "max_tool_rounds", "empty_reply_retries", "memory_enable", "memory_extract_enable",
+    "max_tool_rounds", "empty_reply_retries", "reasoning_overflow_retries",
+    "memory_enable", "memory_extract_enable",
 }
 
 for _key, _def in SCHEMA.items():

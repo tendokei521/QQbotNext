@@ -481,6 +481,58 @@ def _max_empty_retries(config, default: int = DEFAULT_EMPTY_REPLY_RETRIES) -> in
     return max(0, min(value, 3))
 
 
+DEFAULT_REASONING_OVERFLOW_RETRIES = 1
+
+#: 思考吃满预算后追加的收敛提示（只在本轮确实想过、却一个正文字都没有时追加一次）。
+REASONING_OVERFLOW_NUDGE = (
+    "【系统提醒】上一轮你的思考把输出预算用满了，正文还没开始就被截断，"
+    "对方什么都没收到。这一轮不要复述思考过程，直接给最终回答；"
+    "如果要看图，就只说你看到的关键内容，别长篇推理。"
+)
+
+
+def _reasoning_overflow_retries(config, default: int = DEFAULT_REASONING_OVERFLOW_RETRIES) -> int:
+    """思考吃满 ``max_tokens`` 时的收敛重试次数（配置 ``reasoning_overflow_retries``）。
+
+    思考模型（deepseek-v4-flash / reasoner 系）把全部输出预算花在 ``reasoning_content``
+    里时，正文一个字节都没有。同一条 prompt 原样重试必然同样打满（纯烧钱），所以改成
+    追加一次「直接作答」提醒再要一枪。0 = 关闭。
+    """
+    try:
+        value = int(config.get("reasoning_overflow_retries", default))
+    except (TypeError, ValueError):
+        return default
+    return max(0, min(value, 2))
+
+
+def _effective_max_tokens(provider_chain, fallback) -> tuple[int, str]:
+    """本次请求**真正生效**的 ``max_tokens``，以及它来自哪一层配置。
+
+    取值优先级（高 → 低）：
+
+    1. ``provider_models.<id>.config_json.max_tokens``（模型实例，WebUI「Provider 预设 → 模型」页）
+    2. ``provider_presets.<id>.config_json.max_tokens``（连接预设，同一页的预设表单）
+    3. Agent 配置 ``max_tokens``（WebUI「Agent → 最大输出 Tokens」）
+
+    前两层在 ``ProviderRuntimeManager._config_for_model_id`` 里已合并进链上每个 cfg，
+    而 ``chat_with_fallback`` 用 ``cfg.get("max_tokens", max_tokens)`` 取值 —— 所以
+    **链上配置赢**，Agent 页那个数字只在链上没写时才生效。这里只为把结论打出来，
+    排查时不必再翻数据库猜「8192 是哪来的」。
+    """
+    for cfg in provider_chain or []:
+        value = (cfg or {}).get("max_tokens")
+        if value in (None, ""):
+            continue
+        try:
+            return int(value), "provider 模型/预设"
+        except (TypeError, ValueError):
+            break
+    try:
+        return int(fallback or 0), "agent 配置"
+    except (TypeError, ValueError):
+        return 0, "agent 配置"
+
+
 def _proactive_instruction(config, all_specs, user_text: str, ctx=None) -> str | None:
     """本轮「主动性」协议块：只在本轮确有对应工具时注入（唯一一块 system 提示）。
 
@@ -1147,6 +1199,7 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
     )
 
     use_tools = bool(all_specs) and supports_tool_use(modalities)
+    eff_max_tokens, max_tokens_src = _effective_max_tokens(provider_chain, meta["max_tokens"])
     response_start = time.monotonic()
     response = await resolve_invoker(runtime).chat(
         runtime=runtime,
@@ -1162,6 +1215,35 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
             "max_empty_retries": _max_empty_retries(config),
         },
     )
+    # 非流式的同款毛病：思考把 max_tokens 吃满时 text 为空、reasoning 有内容。
+    # 原样重试没意义，追加一次「直接作答」提醒再要一枪（reasoning 只有部分
+    # provider 会填，取不到就不动，保持旧行为）。
+    overflow_used = 0
+    while (
+        not response.ok
+        and (getattr(response, "reasoning", "") or "").strip()
+        and overflow_used < _reasoning_overflow_retries(config)
+    ):
+        overflow_used += 1
+        logger.add_info(f"#{runtime.bot_id}").warning(
+            f"[LLM] 思考吃满输出预算（reasoning {len(response.reasoning)} 字符, "
+            f"max_tokens={eff_max_tokens}（来自{max_tokens_src}）），追加一次收敛轮 -> {session_id}"
+        )
+        messages.append({"role": "user", "content": REASONING_OVERFLOW_NUDGE})
+        response = await resolve_invoker(runtime).chat(
+            runtime=runtime,
+            chain=provider_chain,
+            messages=messages,
+            params={
+                "model": meta["model"],
+                "temperature": meta["temperature"],
+                "max_tokens": meta["max_tokens"],
+                "tools": build_tools(all_specs) if use_tools else None,
+                "tool_executor": make_executor(all_specs, tool_ctx) if use_tools else None,
+                "max_tool_rounds": _max_tool_rounds(config),
+                "max_empty_retries": _max_empty_retries(config),
+            },
+        )
     response_latency_ms = (time.monotonic() - response_start) * 1000
 
     if not response.ok:
@@ -1178,8 +1260,15 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
 
     # 兜底：模型返回空内容时避免“不回复”，给用户一个可见的占位回复
     if not clean_response:
+        reasoning_chars = len(getattr(response, "reasoning", "") or "")
+        hint = (
+            f"，思考 {reasoning_chars} 字符但无正文（多半是思考吃满 max_tokens"
+            f"={eff_max_tokens}，来自{max_tokens_src}）"
+            if reasoning_chars
+            else ""
+        )
         logger.add_info(f"#{runtime.bot_id}").warning(
-            f"[LLM] 模型返回空回复，使用兜底文本 -> {session_id}"
+            f"[LLM] 模型返回空回复，使用兜底文本 -> {session_id}{hint}"
         )
         clean_response = "抱歉，我暂时无法回答，请稍后再试。"
 
@@ -1274,8 +1363,13 @@ async def stream_response(runtime, event, ctx=None):
 
     _log_debug_prompt(runtime, session_id, messages, debug_enabled=bool(ctx and ctx.state.get("debug_prompt", False)))
 
+    # 本次请求真正生效的 max_tokens（链上 provider 配置赢过 Agent 配置）：打出来，
+    # 免得再出现「8192 到底哪设的」这种排查——见 _effective_max_tokens。
+    eff_max_tokens, max_tokens_src = _effective_max_tokens(provider_chain, meta["max_tokens"])
+
     logger.add_info(f"#{runtime.bot_id}").info(
-        f"流式 API 请求 -> {session_id} (task: {session.task_id}), 消息数: {len(messages)}"
+        f"流式 API 请求 -> {session_id} (task: {session.task_id}), 消息数: {len(messages)}, "
+        f"max_tokens={eff_max_tokens}（来自{max_tokens_src}）"
     )
 
     use_tools = bool(all_specs) and supports_tool_use(modalities)
@@ -1284,18 +1378,25 @@ async def stream_response(runtime, event, ctx=None):
 
     full_text_parts: list[str] = []
     tool_results: list[dict] = []
+    # 全程思考字符数（只在诊断日志里用：证明「想过但没正文」而不是空回复）
+    reasoning_total = 0
     stream_start = time.monotonic()
     stream_error_text = ""
     # 本次请求（含工具多轮/空回复重试）的 token 消耗：全部结束、发完最后一段后 info 一次
     usage_sink: dict = {}
     # 与非流式共用同一轮数上限（此前这里硬编码 5，两处不一致且不可配）
     max_tool_rounds = _max_tool_rounds(config)
+    # 「思考吃满预算」的收敛重试预算（只补一次，避免把轮数全耗在同一个问题上）
+    overflow_retries = _reasoning_overflow_retries(config)
+    overflow_used = 0
 
     for _round in range(max_tool_rounds):
         round_text_parts: list[str] = []
         buffer = ""
         tool_calls: dict[int, dict] = {}
         stream_error = ""
+        reasoning_chars = 0
+        finish_reason = ""
 
         async for ev in resolve_invoker(runtime).stream(
             runtime=runtime,
@@ -1340,6 +1441,11 @@ async def stream_response(runtime, event, ctx=None):
             elif ev.type == "error":
                 stream_error = ev.text
                 break
+            elif ev.type == "reasoning":
+                # 思考流只计数、绝不发给用户；留着是为了区分「想过但没正文」和真正的空回复
+                reasoning_chars += len(ev.text or "")
+            elif ev.type == "done":
+                finish_reason = ev.finish_reason or finish_reason
 
         tail = strip_stream_artifacts(buffer.strip())
         if tail:
@@ -1354,6 +1460,7 @@ async def stream_response(runtime, event, ctx=None):
         buffer = ""
 
         round_text = "".join(round_text_parts)
+        reasoning_total += reasoning_chars
         full_text = "".join(full_text_parts)
 
         if stream_error:
@@ -1377,6 +1484,24 @@ async def stream_response(runtime, event, ctx=None):
                 stream=True,
             )
             return
+
+        # 思考吃满输出预算：模型把 max_tokens 全花在 reasoning 里，正文还没开始就被截断
+        # （线上表现：输出 8192 = 上限、回复 0 字符、用户收到兜底话术）。同一条 prompt
+        # 原样重试必然再打满一次，所以改成追加一次「直接作答」提醒再要一枪。
+        if (
+            not round_text
+            and not tool_calls
+            and reasoning_chars
+            and overflow_used < overflow_retries
+        ):
+            overflow_used += 1
+            logger.add_info(f"#{runtime.bot_id}").warning(
+                f"[LLM] 思考吃满输出预算（reasoning {reasoning_chars} 字符, "
+                f"finish={finish_reason or '?'}, max_tokens={eff_max_tokens}"
+                f"（来自{max_tokens_src}）），追加一次收敛轮而非原样重试 -> {session_id}"
+            )
+            messages.append({"role": "user", "content": REASONING_OVERFLOW_NUDGE})
+            continue
 
         if not tool_calls:
             break
@@ -1447,9 +1572,17 @@ async def stream_response(runtime, event, ctx=None):
     else:
         # 兜底：流式响应为空时避免“不回复”，给用户一个可见的占位回复
         if not full_text.strip():
+            # 若模型其实想过（只是没写出正文），把真实原因和预算来源一并留痕，
+            # 否则日志只剩下"空回复"，看不出是「思考吃满 max_tokens」还是网关断流。
+            reason = (
+                f"，思考 {reasoning_total} 字符但无正文（多半是思考吃满 max_tokens"
+                f"={eff_max_tokens}，来自{max_tokens_src}）"
+                if reasoning_total
+                else ""
+            )
             logger.add_info(f"#{runtime.bot_id}").warning(
                 f"[LLM] 流式模型返回空回复，使用兜底文本 -> {session_id} "
-                f"(task: {session.task_id}, 已执行工具数={len(tool_results)})"
+                f"(task: {session.task_id}, 已执行工具数={len(tool_results)}{reason})"
             )
             full_text = "抱歉，我暂时无法回答，请稍后再试。"
             yield full_text
