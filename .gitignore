@@ -30,6 +30,8 @@ htmlcov/
 .pytest_cache/
 .ruff_cache/
 ruff-report.txt
+# `pip install -e .`（scripts/requirements.bat 用的就是它）生成的 egg-info
+*.egg-info/
 
 # 本地废弃代码存档（QQ 客户端实验功能回退后保留）
 deprecated/qq-client/
