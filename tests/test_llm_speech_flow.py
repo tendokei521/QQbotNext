@@ -73,6 +73,9 @@ class _Telemetry:
     def record_call_simple(self, **kwargs):
         return None
 
+    def record_tool(self, *args, **kwargs):
+        return None
+
 
 def _config(**over):
     base = {
@@ -226,7 +229,9 @@ async def test_at_trigger_forces_one_more_round(monkeypatch, tmp_path):
     assert sent == ["干嘛"]
     assert TIMELINE == ["round", "force", "send:干嘛"]
     assert CHAT_MESSAGES and CHAT_MESSAGES[0][-1]["role"] == "user"
-    assert "必须发一条消息" in str(CHAT_MESSAGES[0][-1]["content"])
+    # 措辞必须带"文本不会发出去"这个因果：实测纯祈使句（"你必须调用"）反而无效
+    assert "文本不会发出去" in str(CHAT_MESSAGES[0][-1]["content"])
+    assert "send_message" in str(CHAT_MESSAGES[0][-1]["content"])
     assert _assistant_history(993) == ["干嘛"]
 
 

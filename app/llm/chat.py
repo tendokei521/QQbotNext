@@ -893,9 +893,20 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
     # 只在「拟人化档位 + speech_via_tool + 流式」三者齐备时挂上；否则保持旧的文本即发言。
     speech = _build_speech(config)
     if speech is not None:
-        from app.llm.speech import build_speech_tools
+        from app.llm.speech import build_speech_tools, persona_output_conflicts
 
         all_specs = list(all_specs or []) + build_speech_tools(speech)
+        # 人格卡里若还留着「输出：以第一人称…纯文本」这类条款，会和发言通道打架
+        # （实测：模型跟着人设的输出格式走，于是只写文本、整轮静默）。运行时不改用户文本，
+        # 只提醒一次，把该挪的条款指出来。
+        conflicts = persona_output_conflicts(config)
+        warn_key = (getattr(runtime, "bot_id", 0), "persona_output")
+        if conflicts and warn_key not in _WARNED_SPEECH_INTENT:
+            _WARNED_SPEECH_INTENT.add(warn_key)
+            logger.add_info(f"#{runtime.bot_id}").warning(
+                "[LLM] 人格卡里有「输出格式」条款，会与发言通道（文本=思考）冲突，"
+                f"建议移到行为层或删掉：{conflicts}"
+            )
     elif _speech_intent(config):
         # 只在第一次告警：配置矛盾是持久状态，每条消息刷一遍日志没有信息量
         warn_key = (getattr(runtime, "bot_id", 0), "speech_intent")

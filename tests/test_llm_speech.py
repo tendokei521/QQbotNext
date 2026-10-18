@@ -16,11 +16,19 @@ from app.llm.speech import (
     DEFAULT_MAX_BUBBLES,
     FORCE_SPEAK_REMINDER,
     SPEAK_REMINDER,
+    SPEECH_PROTOCOL,
     SpeechOutbox,
     build_speech_tools,
     normalize_messages,
     speech_via_tool,
 )
+
+#: 发言通道生效的完整条件（档位 + 开关 + 流式）
+SPEECH_CONFIG: dict = {
+    "assembly_profile": "qq_agent",
+    "speech_via_tool": True,
+    "stream_output": True,
+}
 
 
 def _tools(outbox: SpeechOutbox) -> dict:
@@ -103,8 +111,69 @@ async def test_send_message_truncates_long_bubble_instead_of_rejecting():
     assert len(outbox.take()[0].text) == 10
 
 
+def test_speech_protocol_is_injected_into_the_user_turn():
+    """发言协议必须贴在**最后一条 user 消息末尾**——位置错了模型就不照做。
+
+    实测（同一份真实请求，deepseek-v4-flash）：协议只在 system 行为段里、
+    或作为尾部 system 追加时，模型依然只输出文本（整轮静默）；
+    贴到 user 消息里才稳定调用 send_message。这条用例把这个位置钉死。
+    """
+    from app.llm.assembly import PromptRequest, apply_speech_protocol
+
+    req = PromptRequest(config=SPEECH_CONFIG)
+    messages = [
+        {"role": "system", "content": "人设"},
+        {"role": "user", "content": "10-18 19:00 小明(20002): 在吗"},
+    ]
+    out = apply_speech_protocol(messages, req)
+
+    assert out[-1]["role"] == "user"
+    assert out[-1]["content"].startswith("10-18 19:00 小明(20002): 在吗")
+    assert out[-1]["content"].rstrip().endswith(SPEECH_PROTOCOL)
+    assert out[0] == {"role": "system", "content": "人设"}, "system 侧不能被改写"
+    assert "文本不会发出去" in SPEECH_PROTOCOL
+    assert "send_message" in SPEECH_PROTOCOL
+    assert "不想接话就直接结束" in SPEECH_PROTOCOL, "必须同时给出「沉默」这个正常出口"
+
+
+def test_speech_protocol_respects_multimodal_user_content():
+    """多模态 user 消息（content 是块数组）时把协议作为 text 块追加，不破坏结构。"""
+    from app.llm.assembly import PromptRequest, apply_speech_protocol
+
+    req = PromptRequest(config=SPEECH_CONFIG)
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "看图"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}},
+            ],
+        }
+    ]
+    out = apply_speech_protocol(messages, req)
+    assert out[-1]["content"][-1] == {"type": "text", "text": SPEECH_PROTOCOL}
+    assert out[-1]["content"][0]["text"] == "看图"
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"assembly_profile": "legacy", "speech_via_tool": True, "stream_output": True},
+        {"assembly_profile": "qq_agent", "speech_via_tool": False, "stream_output": True},
+        {"assembly_profile": "qq_agent", "speech_via_tool": True, "stream_output": False},
+        {},
+    ],
+)
+def test_speech_protocol_absent_when_channel_off(config):
+    """文本即发言的档位贴这句就是假话——必须一个字都不加。"""
+    from app.llm.assembly import PromptRequest, apply_speech_protocol
+
+    messages = [{"role": "user", "content": "在吗"}]
+    out = apply_speech_protocol(messages, PromptRequest(config=config))
+    assert out == [{"role": "user", "content": "在吗"}]
+
+
 def test_bubble_becomes_message_with_reply_at_text_order():
-    """气泡 → 待发消息：段序必须是 reply → at… → text（QQ 只认这个顺序）。"""
     from app.llm.actions import OutboundDirectives, assemble_message
 
     message = assemble_message(

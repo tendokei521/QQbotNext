@@ -39,6 +39,7 @@ round 边界：outbox 里的气泡按顺序真发（走 pipeline 原有发送路
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -51,16 +52,42 @@ DEFAULT_MAX_BUBBLE_CHARS = 300
 #: 剩余轮次提醒阈值：剩这么多轮还没开口就催一次
 DEFAULT_REMINDER_ROUNDS = 3
 
+#: 「发言协议」——贴在**本轮 user 消息末尾**的那两行。
+#:
+#: ## 为什么必须在 user 侧（实测结论，不要随意搬回 system）
+#:
+#: 同一份真实请求（27 条 messages + 162 个工具），deepseek-v4-flash 的对照结果：
+#:
+#: | 协议位置 | 结果 |
+#: |---|---|
+#: | 只写在 system 行为段里 | 输出纯文本 → 静默 |
+#: | 作为**尾部 system** 消息追加（"必须要调用"） | 仍然静默 |
+#: | 贴在 user 消息里（同一条或另起一条） | 稳定调用 send_message |
+#: | 只写"你必须调用"（祈使、不带因果） | 仍然静默 |
+#: | 陈述"文本不会发出去"+ 两种正常结局 | 稳定调用 |
+#:
+#: 原因：人设块里本来就写着「输出：以第一人称回答…输出纯文本段落即可」，
+#: system 层两条相反指令打架时，模型跟着更近/更具体的那条走；
+#: 而「你输出的文本不会发出去」是**关于本程序的事实**，贴在消息旁边才有分量。
+SPEECH_PROTOCOL = (
+    "【发言协议】你输出的文本不会发出去，只有调用 send_message 的内容会到达聊天里。"
+    "想说话就调用 send_message（字符串=一条，字符串数组=多条）；"
+    "不想接话就直接结束，这很正常。"
+)
+
 #: 「系统提醒」文本：必须在**没有发言**时才注入，否则等于催已经说过话的人再说一遍。
 #: 用 user 角色——Anthropic/Gemini 适配器会把中途的 system 上提到最前，加了等于没加。
 SPEAK_REMINDER = (
-    "【系统提醒】工具调用轮次只剩 {rounds} 轮。如果你打算回应，请立刻调用 send_message "
-    "把话发出去，不要再调用其它工具——轮次耗尽后群友收不到任何内容。"
+    "【系统提醒】工具调用轮次只剩 {rounds} 轮。你输出的文本不会发出去："
+    "如果打算回应，请现在调用 send_message 把话发出去，不要再调用其它工具；"
+    "确实不想接话就直接结束。"
 )
-#: 被直接点名（@/拍一拍/私聊）却没开口时的强制重试提醒
+#: 被直接点名（@/拍一拍/私聊）却没开口时的强制重试提醒。
+#: 注意措辞：写成"你必须调用"（纯祈使）实测**无效**，必须带上"文本不会发出去"这个因果。
 FORCE_SPEAK_REMINDER = (
-    "【系统提醒】对方正在直接叫你（@你/戳你/私聊你），这一轮你必须发一条消息回应"
-    "（调用 send_message）；实在不想说话也应给一句短的（如「干嘛」「……」「等下」）。"
+    "【系统提醒】对方正在直接叫你（@你/戳你/私聊你）。"
+    "你输出的文本不会发出去，只有 send_message 的内容会发到聊天里——"
+    "所以请用 send_message 回一条；实在不想说话也应给一句短的（如「干嘛」「……」「等下」）。"
 )
 
 #: 入稿成功的回执：只陈述事实 + 防重复，不再教它怎么写（那是行为段的事）
@@ -199,6 +226,32 @@ class SpeechOutbox:
             "dropped": self.dropped,
             "silent": self.silent,
         }
+
+
+#: 人格卡里不该出现的「输出格式」条款（正则）：这些属于行为层，留在人设里会和发言协议打架。
+#: 实测就是这一句把模型拽回文本输出（人设块比 system 行为段更靠前、更像是"给我下的命令"）。
+_OUTPUT_CLAUSE_RE = re.compile(r"输出[：:]|纯文本|以第一人称|不要使用Markdown|不要用Markdown")
+
+
+def persona_output_conflicts(config: Any) -> list[str]:
+    """扫人格卡，返回与发言通道冲突的「输出格式」条款片段（给一次性告警用）。
+
+    **不改人格卡**：人设是用户的数据，运行时不替用户改字。只把命中处捞出来提醒——
+    「你输出的文本只是思考」是程序事实，而「输出纯文本段落即可」是人设里的输出格式规定，
+    两者放同一条 system 里，模型会跟着更具体的人设条款走。
+    """
+    try:
+        prompt = str(config.get("system_prompt") or "")
+    except Exception:  # noqa: BLE001
+        return []
+    if not prompt:
+        return []
+    hits: list[str] = []
+    for line in prompt.splitlines():
+        text = line.strip()
+        if text and _OUTPUT_CLAUSE_RE.search(text):
+            hits.append(text[:80])
+    return hits
 
 
 def normalize_messages(raw: Any) -> list[str]:

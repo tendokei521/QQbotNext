@@ -500,11 +500,11 @@ class PromptAssembler:
         self.blocks = blocks
 
     def build(self, req: PromptRequest) -> list[dict]:
-        """装配 messages：生成块 → 归位 → 按模态清洗（唯一兜底）。"""
+        """装配 messages：生成块 → 归位 → 按模态清洗（唯一兜底）→ 贴发言协议。"""
         built = build_all_blocks(req)
         messages = flatten(built)
         messages = place_images(messages, req)
-        return sanitize(messages, req)
+        return apply_speech_protocol(sanitize(messages, req), req)
 
     def describe(self, req: PromptRequest) -> list[dict]:
         """返回 ``[{block, role, chars}]``：不打印全文也能看清本轮发了什么。
@@ -524,6 +524,48 @@ class PromptAssembler:
 def flatten(built: list[tuple[Block, list[dict]]]) -> list[dict]:
     """把 ``(块, 消息)`` 摊平成最终消息列表。"""
     return [msg for _block, messages in built for msg in messages]
+
+
+def apply_speech_protocol(messages: list[dict], req: PromptRequest) -> list[dict]:
+    """发言通道开启时，把「发言协议」贴到**本轮 user 消息末尾**。
+
+    ## 为什么必须贴在 user 侧
+
+    同一份真实请求（27 条 messages + 162 个工具，deepseek-v4-flash）的对照实验：
+
+    - 协议只写在 system 行为段里 → 模型照旧输出纯文本 → 整轮静默；
+    - 协议作为**尾部 system** 消息追加（"必须调用"）→ 仍然静默；
+    - 协议贴在 user 消息里（同一条尾部或另起一条）→ 稳定调用 ``send_message``。
+
+    根因不是"模型不会用工具"，而是**两条相反指令打架**：人设块里写着
+    "输出：以第一人称回答…输出纯文本段落即可"，而行为段说"文本不会发出去"。
+    system 层里模型跟着更近、更具体的那条走。把关于本程序的事实
+    （"你输出的文本不会发出去"）贴到消息旁边，才压得住人设里的输出格式条款。
+
+    副作用可控：只改最后一条 user 消息，历史前缀（system + 之前的对话）逐字不变，
+    前缀缓存不受影响。
+
+    另外这条**只在发言通道生效时**才贴（``speech.speech_via_tool``）：
+    文本即发言的档位贴这句就是自相矛盾的假话。
+    """
+    from app.llm.speech import SPEECH_PROTOCOL, speech_via_tool
+
+    config = getattr(req, "config", None)
+    if config is None or not speech_via_tool(config):
+        return messages
+
+    for msg in reversed(messages):
+        if not isinstance(msg, dict) or msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            msg["content"] = f"{content}\n\n{SPEECH_PROTOCOL}"
+        elif isinstance(content, list):
+            content.append({"type": "text", "text": SPEECH_PROTOCOL})
+        else:
+            continue
+        return messages
+    return messages
 
 
 def describe_blocks(
