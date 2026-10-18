@@ -213,3 +213,17 @@ def test_grouped_fields_carry_importance():
         if isinstance(definition, dict) and definition.get("group") and not definition.get("importance")
     ]
     assert not missing, f"以下字段缺少 importance 标注: {missing}"
+
+
+def test_schema_no_longer_carries_page_metadata():
+    """分区归属的唯一权威是前端 registry，后端不再逐字段标注 page。
+
+    历史上 page 与 registry 是两份真相：重划分区时 page 会滞留旧值，
+    「搜索配置」就会跳到不含该字段的页面（重划时确实踩到过）。
+    """
+    offenders = [
+        key
+        for key, definition in SCHEMA.items()
+        if isinstance(definition, dict) and "page" in definition
+    ]
+    assert not offenders, f"以下字段仍带 page 元数据，应删除（registry 才是权威）: {offenders}"

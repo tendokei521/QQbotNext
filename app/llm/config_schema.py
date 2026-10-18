@@ -140,13 +140,13 @@ SCHEMA = {
 
     "system_prompt": {
         "type": "textarea", "label": "系统提示词", "description": "设定AI角色的系统提示词",
-        "default": "你是一个友好的助手。", "placeholder": "你是一个友好的助手...", "group": "group_session", "page": "role",
+        "default": "你是一个友好的助手。", "placeholder": "你是一个友好的助手...", "group": "group_session",
     },
     "persona_preset_id": {
         "type": "resource", "resource": "role_preset",
         "label": "角色预设（活引用）",
         "description": "选预设后，每轮组装按 ID 实时解析提示词与预设对话（改预设名/改提示词即时生效，无需重新“应用”）；留空则用上面的系统提示词",
-        "default": "", "group": "group_session", "page": "role",
+        "default": "", "group": "group_session",
     },
     "system_prompt_style": {
         "type": "select", "label": "消息组装风格",
@@ -734,28 +734,11 @@ for _key, _def in SCHEMA.items():
     ):
         _def["showIf"] = {"key": "experimental_long_term_memory", "value": True}
 
-# ==================== 前端页面/重要性元数据 ====================
-# Agent 前端用专用页面承载核心配置，不再只依赖通用 ConfigForm。
-_PAGE_BY_GROUP = {
-    "group_switch": "basic",
-    "group_model": "model",
-    "group_session": "basic",
-    "group_compress": "basic",
-    "group_trigger": "behavior",
-    "group_context": "behavior",
-    "group_interrupt": "behavior",
-    "group_stream": "stream",
-    "group_proactive": "panels",
-    "group_schedule": "panels",
-    "group_memory": "memory",
-    "group_knowledge": "knowledge",
-    "group_tavily": "basic",
-    "group_mcp": "mcp",
-    "group_onebot": "onebot",
-    "group_tools": "basic",
-    "group_permission": "permission",
-}
-
+# ==================== 前端重要性元数据 ====================
+# 「哪个字段出现在哪个前端分区」不再由后端描述：唯一权威是
+# dashboard/src/agent/sections.json（按 group 归属 + 少量 fields 独占声明），
+# tests/test_agent_section_contract.py 校验 schema 与它的覆盖一致性。
+# 后端只保留 importance 这一档语义，供前端区分「基础分区 / 进阶分区」。
 _IMPORTANCE_BY_GROUP = {
     "group_switch": "basic",
     "group_model": "basic",
@@ -778,7 +761,6 @@ _IMPORTANCE_BY_GROUP = {
 
 for _key, _def in SCHEMA.items():
     if isinstance(_def, dict) and _def.get("group"):
-        _def.setdefault("page", _PAGE_BY_GROUP.get(_def["group"], "basic"))
         _def.setdefault("importance", _IMPORTANCE_BY_GROUP.get(_def["group"], "advanced"))
 
 # ==================== 流式回复预设 ====================
