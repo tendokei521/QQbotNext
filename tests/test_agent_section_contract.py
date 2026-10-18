@@ -307,7 +307,7 @@ def test_importance_is_field_level():
     # 同一 group 内必须出现「既非全 basic 也非全 advanced」的分层，
     # 否则说明又退回按组打档（历史问题：group_session 24 项全被标 basic）。
     by_group: dict[str, set[str]] = {}
-    for key, definition in SCHEMA.items():
+    for definition in SCHEMA.values():
         if isinstance(definition, dict) and definition.get("group"):
             by_group.setdefault(definition["group"], set()).add(definition["importance"])
     monolithic = sorted(g for g, marks in by_group.items() if len(marks) == 1 and g in _LAYERED_GROUPS)

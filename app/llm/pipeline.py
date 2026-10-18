@@ -19,7 +19,7 @@ from app.llm.commands import is_command
 from app.llm.context import LlmContext, LlmJob
 from app.llm.hooks import run_stage
 from app.llm.locks import SessionLockManager
-from app.llm.pool import LlmPool
+from app.llm.pool import LlmPool, merge_debounced_texts
 
 
 class LlmPipeline:
@@ -230,10 +230,21 @@ class LlmPipeline:
             max_msg_len = int(config.get("max_message_length", 200) or 200)
             ctx.user_text = ctx.user_text[:max_msg_len]
 
-            # 默认启用 LlmPool 的“同会话最新消息取代旧消息”语义，
-            # 避免同一会话多个任务同时进入 LLM 请求（pre_request 中的防抖仍可叠加）。
-            if not await self.pool.wait_for_continue(ctx.job, debounce=0):
+            # 消息抖动：等静默 N 秒再请求，并把窗口内到达的多条消息合并进同一轮。
+            #
+            # 历史行为是 debounce=0（立即请求），于是用户连发四条消息会变成四次请求、
+            # 四次回复——观感就是「一条一条挨个回」。开启抖动后由 LlmPool 只放行最新
+            # Job，被取代的 Job 在这里返回 False 直接退出，它们的文本已攒在
+            # _pending_texts 里，由存活 Job 取出合并。
+            debounce = float(config.get("message_debounce_seconds", 0) or 0)
+            max_wait = float(config.get("message_debounce_max_wait", 0) or 0) if debounce > 0 else 0.0
+            if not await self.pool.wait_for_continue(ctx.job, debounce=debounce, max_wait=max_wait):
                 return
+            if debounce > 0:
+                batch = self.pool.take_pending_texts(ctx.session_id)
+                if len(batch) > 1:
+                    ctx.user_text = merge_debounced_texts(batch, max_msg_len)
+                    ctx.state["debounced_count"] = len(batch)
 
             # 1. 请求前钩子（可暂停/防抖/合并/跳过）
             if not await self._run_stage("pre_request", ctx):

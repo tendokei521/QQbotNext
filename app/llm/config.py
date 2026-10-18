@@ -96,6 +96,9 @@ DEFAULT_LLM_CONFIG: dict = {
     "stream_scheduled_enabled": False,
     "trigger_at": False,
     "trigger_keyword": [],
+    # 消息抖动：等静默 N 秒再请求，把窗口内多条消息合并成同一轮（0=关闭）
+    "message_debounce_seconds": 0,
+    "message_debounce_max_wait": 15,
     "include_pre_history": False,
     "include_private_pre_history": "default",
     "reply_cooldown": 5,
