@@ -223,20 +223,23 @@ def build_proactive_instruction(
     has_recent = tools is None or "expand_recent" in tools
 
     if dedupe:
-        # 行为段已覆盖：翻记录/戳一戳/引用与@ 的通用用法、以及"这些动作可做可不做"的声明。
-        # 这里只剩"这一轮为什么要做"和"标记语义"这类必须贴在本轮上下文附近的引导。
+        # 行为段已覆盖：翻记录/戳一戳/引用与@ 的通用用法、未展开标记语义、以及
+        # "这些动作可做可不做"的声明。这里只剩**每轮变化**的引导：本轮意图补强、
+        # 焦点回指、按需取环境信息，以及"什么时候它是必须而非可选"这一条优先级说明。
         history_nudge = has_history and bool(
             _cfg_flag(config, "proactive_history_intent_nudge", True) and history_intent(user_text)
         )
         has_history = False          # 通用"想查就查"的行归行为段
         has_poke = False
         has_quote = False
+        marker_semantics = False     # 【未展开】标记语义归行为段
     else:
         history_nudge = bool(
             has_history
             and _cfg_flag(config, "proactive_history_intent_nudge", True)
             and history_intent(user_text)
         )
+        marker_semantics = True
 
     show_env = has_env and _cfg_flag(config, "proactive_env_prompt_enable", True)
     show_unresolved = has_expand and _cfg_flag(config, "proactive_unresolved_prompt_enable", True)
@@ -261,7 +264,7 @@ def build_proactive_instruction(
         lines.append(PROACTIVE_REFERENT_LINE)
     if show_env:
         lines.append(env_line(has_expand))
-    if show_unresolved:
+    if show_unresolved and marker_semantics:
         lines.append(PROACTIVE_UNRESOLVED_LINE)
     if show_env and _cfg_flag(config, "proactive_env_intent_nudge", True) and env_intent(user_text):
         lines.append(PROACTIVE_ENV_NUDGE)

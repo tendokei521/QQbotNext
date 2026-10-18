@@ -169,7 +169,7 @@ def work_protocol(caps: dict) -> str:
 
     if caps.get("speech_by_tool"):
         add(
-            "你输出的文本只是思考，**不会发到 QQ**；要发言必须调用 send_message"
+            "你输出的文本只是思考，不会发到 QQ；要发言必须调用 send_message"
             "（字符串=一条，字符串数组=多条）。看完决定不回就直接结束，这是正常节奏。"
         )
         add(
@@ -185,7 +185,7 @@ def work_protocol(caps: dict) -> str:
             )
     else:
         add(
-            "你输出的正文会**直接发到 QQ**，所以不要写 Markdown（**、#、``` 在 QQ 上是乱码），"
+            "你输出的正文会直接发到 QQ，所以不要写 Markdown（星号、井号、反引号在 QQ 上是乱码），"
             "也不要写「我这就回复你」这类过渡句。"
         )
         add(

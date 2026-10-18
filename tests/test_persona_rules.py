@@ -258,4 +258,6 @@ def test_proactive_block_dedupes_in_qq_agent_profile():
     assert "[reply]" not in deduped
     assert "send_poke" not in deduped
     assert "上下文补全" in deduped
+    # 【未展开】标记语义归行为段（persona_rules.work_protocol 第 6 条），不再重复
+    assert "未展开:用户123" not in deduped
     assert len(deduped) < len(legacy)
