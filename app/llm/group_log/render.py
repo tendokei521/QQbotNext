@@ -78,6 +78,12 @@ def _time_label(ts: Any) -> str:
         return "--:--"
 
 
+def _id_tag(message_id: Any) -> str:
+    """消息 id 标签 ``#22350 ``（供引用/按需展开定位）；没有 id 时什么都不加。"""
+    mid = str(message_id or "").strip()
+    return f"#{mid} " if mid else ""
+
+
 def _person(event: LogEvent) -> str:
     """主体显示名：``昵称(QQ)`` → ``昵称`` → ``QQ`` → ``某人``。"""
     label = str(event.nickname or "").strip()
@@ -161,7 +167,9 @@ def render_environment(
                 shadow.add(event.message_id)
                 continue
             who = "我" if event.by_me else _person(event)
-            line = f"{_time_label(event.ts)} {who}: {text}"
+            # 消息 id 必须露出来：模型要用它做引用（send_message 的 reply_to_message_id）
+            # 和"按需展开"（expand_message）。只出现在行首，正文本身不掺标记。
+            line = f"{_time_label(event.ts)} {_id_tag(event.message_id)}{who}: {text}"
             if event.reply_to:
                 line += f" [↩{event.reply_to}]"
             if event.message_id:

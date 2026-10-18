@@ -51,6 +51,24 @@ def test_golden_snapshot_basic():
     assert result.stats.dropped_by_budget == 0
 
 
+def test_message_lines_carry_message_id():
+    """消息行必须带 ``#id``：模型靠它做引用（reply_to_message_id）与按需展开。
+
+    没有 id，发言通道的 ``reply_to_message_id`` 参数就是死参数——模型无从知道该填什么。
+    """
+    events = [_msg("绝了", mid="22350"), _msg("哈哈", mid="22351", ts=TS + 60)]
+    lines = render_environment(events).text.splitlines()
+    assert any("#22350 三哥(30003): 绝了" in line for line in lines)
+    assert any("#22351 三哥(30003): 哈哈" in line for line in lines)
+
+
+def test_message_without_id_renders_clean():
+    """没有 id 的事件不能留下 ``# `` 这种空标签。"""
+    lines = render_environment([_msg("嗯", mid="")]).text.splitlines()
+    assert any("三哥(30003): 嗯" in line for line in lines)
+    assert not any("# " in line for line in lines)
+
+
 def test_my_actions_are_shown():
     """我贴过的表情要渲染成"我给这条贴了 66"，作为行为反馈。"""
     events = [_msg("走吗", mid="1")]
