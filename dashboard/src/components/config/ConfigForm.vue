@@ -115,11 +115,34 @@ function effectiveValue(key: string): any {
   return def
 }
 
+function isTruthy(v: any): boolean {
+  if (Array.isArray(v)) return v.length > 0
+  if (typeof v === 'string') return v.trim() !== ''
+  return v !== null && v !== undefined && v !== false && v !== 0
+}
+
+/**
+ * showIf 求值（与后端 `config_schema.py` 的条件文法一一对应）。
+ *
+ * 支持：`{key, value}` 相等、`{key, in:[...]}`、`{key, notIn:[...]}`、
+ * `{key, gt:n}`、`{key, notEmpty:true}`，以及 `{allOf:[...]}` / `{anyOf:[...]}` 组合。
+ * 用「含 schema 默认值的有效值」判断，避免控制项尚未写进 config 时依赖项被误隐藏。
+ */
+function matchesCondition(cond: any): boolean {
+  if (!cond || typeof cond !== 'object') return true
+  if (Array.isArray(cond.allOf)) return cond.allOf.every(matchesCondition)
+  if (Array.isArray(cond.anyOf)) return cond.anyOf.some(matchesCondition)
+  const current = effectiveValue(cond.key)
+  if ('value' in cond) return current === cond.value
+  if (Array.isArray(cond.in)) return cond.in.includes(current)
+  if (Array.isArray(cond.notIn)) return !cond.notIn.includes(current)
+  if (typeof cond.gt === 'number') return Number(current) > cond.gt
+  if (cond.notEmpty) return isTruthy(current)
+  return true
+}
+
 function isVisible(item: ItemDef): boolean {
-  const cond = item.schema.showIf
-  if (!cond) return true
-  // 用“含 schema 默认值的有效值”判断，避免控制项仅存在于默认时依赖项被误隐藏
-  return effectiveValue(cond.key) === cond.value
+  return matchesCondition(item.schema.showIf)
 }
 
 /** 复杂 widget 需要单独渲染 label/description，简单字段由 FieldControl 自带 */

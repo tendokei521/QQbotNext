@@ -7,6 +7,7 @@ SCHEMA = {
     "group_session": {"type": "group", "label": "会话管理", "collapsible": True},
     "group_compress": {"type": "group", "label": "上下文压缩", "collapsible": True},
     "group_trigger": {"type": "group", "label": "触发设置", "collapsible": True},
+    "group_debounce": {"type": "group", "label": "消息抖动", "collapsible": True},
     "group_context": {"type": "group", "label": "用户信息感知", "collapsible": True},
     "group_behavior": {"type": "group", "label": "行为规则（拟人化）", "collapsible": True},
     "group_interrupt": {"type": "group", "label": "回复打断", "collapsible": True},
@@ -371,6 +372,23 @@ SCHEMA = {
         "type": "string_list", "label": "触发关键词", "description": "包含此关键词时触发（可选）",
         "default": [], "placeholder": "例如：AI、助手", "group": "group_trigger",
     },
+    "message_debounce_seconds": {
+        "type": "number", "label": "消息抖动(秒)",
+        "description": (
+            "收到能触发 LLM 的消息后先等这么久；期间又来新消息则重新计时，"
+            "并把这几条消息**合并成同一轮请求**（避免连发四条消息变成四次请求、四次回复）。"
+            "0 = 关闭（立即请求，保持旧行为）"
+        ),
+        "default": 0, "min": 0, "max": 30, "group": "group_debounce",
+    },
+    "message_debounce_max_wait": {
+        "type": "number", "label": "抖动最长等待(秒)",
+        "description": (
+            "持续刷屏时每来一条消息都会重置计时，这个上限保证到点强制放行，"
+            "避免一直等不到静默、永远不响应。应明显大于「消息抖动」"
+        ),
+        "default": 15, "min": 1, "max": 120, "group": "group_debounce",
+    },
 
     # ==================== 用户信息感知（LLM 增强注入；无总开关，按子项生效） ====================
     "include_time": {
@@ -438,15 +456,26 @@ SCHEMA = {
 
     # ==================== 权限 ====================
     "permission": {
-        "type": "select", "label": "权限角色", "description": "Agent 可响应的事件权限角色",
+        "type": "select", "label": "响应权限档位", "description": "Agent 可响应的事件权限角色（按角色高低判定：拥有者 > 管理者 > 群主 > 群管理 > 成员）",
         "default": "member", "group": "group_permission",
         "options": {
             "everyone": "所有人",
             "member": "普通成员及以上",
             "group_admin": "群管理/群主",
             "group_owner": "仅群主",
-            "owner": "仅 Bot 拥有者",
+            "manager": "管理者和拥有者",
+            "owner": "仅拥有者",
         },
+    },
+    "agent_owner_list": {
+        "type": "string_list", "label": "拥有者（QQ号）",
+        "description": "每行一个 QQ 号。拥有者享有最高权限，可越过任何档位限制。留空时回退为「Bot 拥有者」（即账号本身的主人）",
+        "default": [], "placeholder": "每行一个 QQ 号", "group": "group_permission",
+    },
+    "agent_manager_list": {
+        "type": "string_list", "label": "管理者（QQ号）",
+        "description": "每行一个 QQ 号。管理者高于群主但低于拥有者，适合授予「帮我调教 Bot」的人",
+        "default": [], "placeholder": "每行一个 QQ 号", "group": "group_permission",
     },
 
     # ==================== 主动消息 ====================
@@ -808,44 +837,153 @@ SCHEMA = {
     },
 }
 
-# 长期记忆（实验性）细调项：只有开启 experimental_long_term_memory 后才显示
-for _key, _def in SCHEMA.items():
-    if (
-        isinstance(_def, dict)
-        and _def.get("group") == "group_memory"
-        and _key != "experimental_long_term_memory"
-    ):
-        _def["showIf"] = {"key": "experimental_long_term_memory", "value": True}
+# ==================== 条件显隐（showIf） ====================
+# 目标：把「只在某个功能开启后才有意义」的调参项收起来，界面上不生一堆无用开关。
+#
+# 条件文法（前后端共用，前端 config/utils 的 isVisible 实现同一套语义）：
+#   {"key": k, "value": v}      —— 相等
+#   {"key": k, "in": [...]}     —— 取值在集合内（多选一）
+#   {"key": k, "notIn": [...]}  —— 取值不在集合内
+#   {"key": k, "gt": n}         —— 数值大于 n
+#   {"key": k, "notEmpty": true}—— 非空（字符串 / 列表）
+#   {"allOf": [...]} / {"anyOf": [...]}
+# 未列出的字段一律常显示。
+
+# 「哪个字段出现在哪个前端分区」不在这里：唯一权威是
+# dashboard/src/agent/sections.json；tests/test_agent_section_contract.py 校验覆盖一致性。
+
+
+def _on(key: str) -> dict:
+    """布尔型父开关：``key`` 为真时才显示。"""
+    return {"key": key, "value": True}
+
+
+def _gate(fields: list[str], cond: dict) -> None:
+    """给 ``fields`` 追加一个显隐条件；已有条件则合成为 allOf（全部满足才显示）。"""
+    for key in fields:
+        definition = SCHEMA.get(key)
+        if not isinstance(definition, dict):
+            continue
+        existing = definition.get("showIf")
+        if not existing:
+            definition["showIf"] = cond
+        elif isinstance(existing, dict) and "allOf" in existing:
+            existing["allOf"].append(cond)
+        else:
+            definition["showIf"] = {"allOf": [existing, cond]}
+
+
+def _group_fields(group: str, *, exclude: tuple[str, ...] = ()) -> list[str]:
+    return [
+        key
+        for key, definition in SCHEMA.items()
+        if isinstance(definition, dict)
+        and definition.get("group") == group
+        and key not in exclude
+    ]
+
+
+# ── 长期记忆：两级门（实验开关 → 记忆总开关 → 其余细调） ──────────────
+_gate(["memory_enable"], _on("experimental_long_term_memory"))
+_gate(
+    _group_fields("group_memory", exclude=("experimental_long_term_memory", "memory_enable")),
+    _on("memory_enable"),
+)
+_gate(_group_fields("group_memory", exclude=("experimental_long_term_memory",)), _on("experimental_long_term_memory"))
+
+# ── 流式回复：除总开关外，所有节奏参数都只在流式开启后才有意义 ────────
+_gate(_group_fields("group_stream", exclude=("stream_output",)), _on("stream_output"))
+
+# 间隔参数只在「固定间隔 / 按字数曲线」下有效
+_gate(
+    ["stream_send_interval_base_ms", "stream_send_interval_min_ms", "stream_send_interval_max_ms"],
+    {"key": "stream_send_interval_mode", "in": ["fixed", "length_curve"]},
+)
+# 曲线形状与系数只在「按字数曲线」下有效
+_gate(["stream_send_curve", "stream_send_curve_k"], {"key": "stream_send_interval_mode", "in": ["length_curve"]})
+# 短/长句延迟只属于 short_long 曲线
+_gate(
+    ["stream_short_message_length", "stream_short_message_delay_ms", "stream_long_message_delay_ms"],
+    {"key": "stream_send_curve", "value": "short_long"},
+)
+# 队列参数只在消息池开启后有效
+_gate(["stream_send_max_queue", "stream_queue_full_policy"], _on("stream_send_pool_enabled"))
+# 复用流式的两处开关也依赖流式总开关
+_gate(["stream_proactive_enabled", "stream_scheduled_enabled"], _on("stream_output"))
+
+# ── 上下文：群聊记录窗口 / 指代消解 / 压缩 / token 预算 ──────────────
+_gate(["group_log_window_minutes", "group_log_window_limit", "group_log_max_chars"], _on("group_log_enable"))
+_gate(
+    ["referent_prefetch_enable", "referent_ambiguous_policy", "referent_prefetch_max", "referent_focus_ttl", "referent_focus_max"],
+    _on("referent_resolve_enable"),
+)
+_gate(["context_compress_prompt"], _on("context_compress_enable"))
+_gate(["context_token_chars_per_token"], {"key": "context_token_budget", "gt": 0})
+
+# ── 消息抖动 ──────────────────────────────────────────────────────
+_gate(["message_debounce_max_wait"], {"key": "message_debounce_seconds", "gt": 0})
+
+# ── 能力开关：各自只在启用后展开参数 ────────────────────────────────
+_gate(_group_fields("group_tavily", exclude=("tavily_enable",)), _on("tavily_enable"))
+_gate(_group_fields("group_knowledge", exclude=("knowledge_enable",)), _on("knowledge_enable"))
+_gate(_group_fields("group_onebot", exclude=("onebot_tools_enable",)), _on("onebot_tools_enable"))
+_gate(["image_max_count", "image_max_mb"], _on("image_understanding_enable"))
+_gate(["gif_max_frames", "gif_frame_max_edge", "gif_probe_all_images"], _on("gif_understanding_enable"))
+_gate(["schedule_prompt"], _on("schedule_enable"))
+
+# ── 主动消息：私聊 / 群聊各自展开 ──────────────────────────────────
+_gate(
+    [
+        "proactive_friend_sessions",
+        "proactive_min_interval_minutes",
+        "proactive_max_interval_minutes",
+        "proactive_max_unanswered",
+        "proactive_quiet_hours_start",
+        "proactive_quiet_hours_end",
+        "proactive_prompt",
+    ],
+    _on("proactive_friend_enable"),
+)
+_gate(["proactive_group_sessions", "proactive_group_idle_minutes"], _on("proactive_group_enable"))
 
 # ==================== 前端重要性元数据 ====================
-# 「哪个字段出现在哪个前端分区」不再由后端描述：唯一权威是
-# dashboard/src/agent/sections.json（按 group 归属 + 少量 fields 独占声明），
-# tests/test_agent_section_contract.py 校验 schema 与它的覆盖一致性。
-# 后端只保留 importance 这一档语义，供前端区分「基础分区 / 进阶分区」。
-_IMPORTANCE_BY_GROUP = {
-    "group_switch": "basic",
-    "group_model": "basic",
-    "group_session": "basic",
-    "group_compress": "advanced",
-    "group_trigger": "basic",
-    "group_context": "advanced",
-    "group_behavior": "advanced",
-    "group_interrupt": "advanced",
-    "group_stream": "advanced",
-    "group_proactive": "advanced",
-    "group_schedule": "advanced",
-    "group_memory": "advanced",
-    "group_knowledge": "advanced",
-    "group_tavily": "advanced",
-    "group_mcp": "advanced",
-    "group_onebot": "advanced",
-    "group_tools": "advanced",
-    "group_permission": "basic",
+# field 级（不再按组统一）：只有「用户真的会去改」的项标 basic，
+# 其余标 advanced —— 前端「只看基础」用它筛选，避免 145 项平铺。
+_BASIC_FIELDS = {
+    # 基础配置
+    "group_enable", "private_enable",
+    "model", "temperature", "max_tokens",
+    "system_prompt", "persona_preset_id",
+    "assembly_profile", "behavior_rules_enable", "participation", "emoji_react_level",
+    # 权限
+    "permission", "agent_owner_list", "agent_manager_list",
+    # 会话管理
+    "session_timeout", "history_rounds", "max_message_length",
+    "referent_resolve_enable", "context_compress_enable", "context_token_budget",
+    # 对话行为
+    "trigger_at", "trigger_keyword", "message_debounce_seconds", "reply_cooldown",
+    "interrupt_enable",
+    # 流式输出
+    "stream_output", "stream_send_by_sentence", "stream_send_interval_mode",
+    "stream_send_interval_base_ms",
+    # 主动消息 / 定时任务
+    "proactive_friend_enable", "proactive_group_enable",
+    "proactive_friend_sessions", "proactive_group_sessions",
+    "proactive_min_interval_minutes", "proactive_max_interval_minutes",
+    "proactive_max_unanswered", "proactive_quiet_hours_start", "proactive_quiet_hours_end",
+    "proactive_group_idle_minutes", "schedule_enable",
+    # 能力与成本
+    "max_tool_rounds", "empty_reply_retries", "memory_enable", "memory_extract_enable",
 }
 
 for _key, _def in SCHEMA.items():
     if isinstance(_def, dict) and _def.get("group"):
-        _def.setdefault("importance", _IMPORTANCE_BY_GROUP.get(_def["group"], "advanced"))
+        _def["importance"] = "basic" if _key in _BASIC_FIELDS else "advanced"
+
+# 契约测试用：声明这些 id 一定会被填充（避免上面拼错 key 却静默无效果）
+assert _BASIC_FIELDS <= {k for k, d in SCHEMA.items() if isinstance(d, dict)}, (
+    "importance 名单里存在 schema 中不存在的 key"
+)
 
 # ==================== 流式回复预设 ====================
 # fast：平均 500–1000ms；normal：平均 1000–2000ms；slow：平均 3000–4000ms

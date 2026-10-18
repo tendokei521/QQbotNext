@@ -227,3 +227,99 @@ def test_schema_no_longer_carries_page_metadata():
         if isinstance(definition, dict) and "page" in definition
     ]
     assert not offenders, f"以下字段仍带 page 元数据，应删除（registry 才是权威）: {offenders}"
+
+
+# ==================== 条件显隐（showIf）文法契约 ====================
+# 前端 ConfigForm.isVisible 与后端 _gate 共用同一套文法；这里把文法钉住，
+# 防止有人写出前端解析不了的条件（表现为「设了条件但界面没隐藏/没显示」）。
+
+_SHOW_IF_SIMPLE_KEYS = {"key", "value", "in", "notIn", "gt", "notEmpty"}
+
+
+def _iter_conditions(cond):
+    """深度遍历条件树，产出所有叶子条件。"""
+    if not isinstance(cond, dict):
+        yield cond
+        return
+    for combinator in ("allOf", "anyOf"):
+        if combinator in cond:
+            for child in cond[combinator]:
+                yield from _iter_conditions(child)
+            return
+    yield cond
+
+
+def test_show_if_uses_supported_grammar():
+    field_keys = {
+        key for key, definition in SCHEMA.items() if isinstance(definition, dict)
+    }
+    problems: list[str] = []
+    for key, definition in SCHEMA.items():
+        if not isinstance(definition, dict) or not definition.get("showIf"):
+            continue
+        cond = definition["showIf"]
+        if not isinstance(cond, dict):
+            problems.append(f"{key}: showIf 必须是对象")
+            continue
+        for combinator in ("allOf", "anyOf"):
+            if combinator in cond:
+                children = cond[combinator]
+                if not isinstance(children, list) or not children:
+                    problems.append(f"{key}: {combinator} 必须是非空数组")
+                extra = set(cond) - {combinator}
+                if extra:
+                    problems.append(f"{key}: {combinator} 不能与其它键混用: {sorted(extra)}")
+        for leaf in _iter_conditions(cond):
+            if not isinstance(leaf, dict):
+                problems.append(f"{key}: 条件叶子必须是对象")
+                continue
+            unknown = set(leaf) - _SHOW_IF_SIMPLE_KEYS
+            if unknown:
+                problems.append(f"{key}: 未知条件键 {sorted(unknown)}")
+            if "key" not in leaf:
+                problems.append(f"{key}: 条件缺少 key")
+                continue
+            if leaf["key"] not in field_keys:
+                problems.append(f"{key}: 依赖的字段不存在 {leaf['key']}")
+            if not ({"value", "in", "notIn", "gt", "notEmpty"} & set(leaf)):
+                problems.append(f"{key}: 条件没有判定方式（value/in/notIn/gt/notEmpty）")
+    assert not problems, "showIf 条件不合法:\n" + "\n".join(f"  {p}" for p in problems)
+
+
+def test_show_if_never_references_self():
+    for key, definition in SCHEMA.items():
+        if not isinstance(definition, dict) or not definition.get("showIf"):
+            continue
+        for leaf in _iter_conditions(definition["showIf"]):
+            assert leaf.get("key") != key, f"{key} 的 showIf 依赖自己，会永远不显示"
+
+
+def test_importance_is_field_level():
+    """importance 必须是字段级且取值合法（不再按 group 统一打档）。"""
+    allowed = {"basic", "advanced"}
+    missing = [
+        key
+        for key, definition in SCHEMA.items()
+        if isinstance(definition, dict) and definition.get("group") and definition.get("importance") not in allowed
+    ]
+    assert not missing, f"以下字段的 importance 缺失或非法: {missing}"
+
+    # 同一 group 内必须出现「既非全 basic 也非全 advanced」的分层，
+    # 否则说明又退回按组打档（历史问题：group_session 24 项全被标 basic）。
+    by_group: dict[str, set[str]] = {}
+    for key, definition in SCHEMA.items():
+        if isinstance(definition, dict) and definition.get("group"):
+            by_group.setdefault(definition["group"], set()).add(definition["importance"])
+    monolithic = sorted(g for g, marks in by_group.items() if len(marks) == 1 and g in _LAYERED_GROUPS)
+    assert not monolithic, f"以下分组仍是单一档位，说明 importance 没做到字段级: {monolithic}"
+
+
+#: 这些分组必须体现字段级分层（组内既有 basic 又有 advanced）
+#: 注意 group_permission 不在其中：它的三项（档位 / 拥有者 / 管理者）都该是 basic。
+_LAYERED_GROUPS = {
+    "group_session",
+    "group_stream",
+    "group_proactive",
+    "group_memory",
+    "group_tools",
+}

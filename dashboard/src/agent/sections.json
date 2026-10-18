@@ -9,7 +9,7 @@
       "subtitle": "群/私聊开关、单次响应与触发条件",
       "icon": "mdi-toggle-switch-outline",
       "color": "primary",
-      "groups": ["group_switch", "group_trigger"]
+      "groups": ["group_switch"]
     },
     {
       "id": "role",
@@ -48,7 +48,7 @@
       "subtitle": "拟人行为规则、用户信息感知与回复打断",
       "icon": "mdi-account-voice",
       "color": "secondary",
-      "groups": ["group_behavior", "group_context", "group_interrupt"]
+      "groups": ["group_behavior", "group_context", "group_interrupt", "group_trigger", "group_debounce"]
     },
     {
       "id": "stream",
