@@ -93,7 +93,7 @@
 
 {% macro render_config_item(mod_name, key, schema, current_value, mod_config=None) %}
     <div class="form-group config-item" data-config-key="{{ key }}" data-config-type="{{ schema.type }}"
-         {% if schema.showIf %}data-showif-key="{{ schema.showIf.key }}" data-showif-value='{{ schema.showIf.value | tojson }}'{% endif %}>
+         {% if schema.showIf %}data-showif='{{ schema.showIf | tojson }}'{% endif %}>
         <label>{{ schema.label or key }}</label>
         {% if schema.description %}
         <div style="font-size: 12px; color: #718096; margin-bottom: 8px;">{{ schema.description | replace('\n', '<br>') | safe }}</div>

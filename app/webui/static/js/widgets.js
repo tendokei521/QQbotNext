@@ -726,21 +726,46 @@ function reloadDataWidgets() {
     });
 }
 
+// showIf 求值：与后端 config_schema.py / 新版前端 ConfigForm 共用同一套条件文法。
+// 支持 {key,value} / {key,in} / {key,notIn} / {key,gt} / {key,notEmpty}
+// 以及 {allOf:[...]} / {anyOf:[...]} 组合。
+// 历史版本只认 {key,value}，模板也只下发这两段属性；统一改成整段条件 JSON 后，
+// 后端新增复杂条件不会再让这个页面渲染失败（曾因 showIf.value 为 Undefined 直接 500）。
+function showIfTruthy(value) {
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === 'string') return value.trim() !== '';
+    return value !== null && value !== undefined && value !== false && value !== 0;
+}
+
+function showIfControlValue(container, key) {
+    const control = container.querySelector('.config-item[data-config-key="' + key + '"]');
+    if (!control) return undefined;            // 找不到控制项 → 无法判定
+    const el = control.querySelector('input,select,textarea');
+    if (!el) return undefined;
+    return el.type === 'checkbox' ? el.checked : el.value;
+}
+
+function showIfMatches(container, cond) {
+    if (!cond || typeof cond !== 'object') return true;
+    if (Array.isArray(cond.allOf)) return cond.allOf.every((c) => showIfMatches(container, c));
+    if (Array.isArray(cond.anyOf)) return cond.anyOf.some((c) => showIfMatches(container, c));
+    if (!cond.key) return true;
+    const current = showIfControlValue(container, cond.key);
+    if (current === undefined) return true;    // 控制项不在本页 → 保持可见，避免整块消失
+    if ('value' in cond) return String(current) === String(cond.value);
+    if (Array.isArray(cond.in)) return cond.in.some((v) => String(v) === String(current));
+    if (Array.isArray(cond.notIn)) return !cond.notIn.some((v) => String(v) === String(current));
+    if (typeof cond.gt === 'number') return Number(current) > cond.gt;
+    if (cond.notEmpty) return showIfTruthy(current);
+    return true;
+}
+
 function applyShowIf(moduleName) {
     const container = document.getElementById('config-container-' + moduleName);
     if (!container) return;
-    container.querySelectorAll('.config-item[data-showif-key]').forEach(function (item) {
-        const condKey = item.getAttribute('data-showif-key');
-        const rawCond = item.getAttribute('data-showif-value');
-        let condVal = rawCond;
-        try { condVal = JSON.parse(rawCond); } catch (e) { /* keep raw */ }
-        const control = container.querySelector('.config-item[data-config-key="' + condKey + '"]');
-        let current = null;
-        if (control) {
-            const el = control.querySelector('input,select');
-            if (el) current = el.type === 'checkbox' ? el.checked : el.value;
-        }
-        const visible = current === null || String(current) === String(condVal);
-        item.style.display = visible ? '' : 'none';
+    container.querySelectorAll('.config-item[data-showif]').forEach(function (item) {
+        let cond = null;
+        try { cond = JSON.parse(item.getAttribute('data-showif') || 'null'); } catch (e) { cond = null; }
+        item.style.display = showIfMatches(container, cond) ? '' : 'none';
     });
 }

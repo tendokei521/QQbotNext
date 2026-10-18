@@ -354,7 +354,7 @@ async def test_pipeline_lets_image_only_at_message_through(monkeypatch):
     event = _event([("at", {"qq": "3569937952"}), ("image", {"url": "https://a/1.png"})])
     stages: list[str] = []
 
-    async def _continue(_job, debounce=0.0):
+    async def _continue(_job, debounce=0.0, max_wait=0.0):
         return True  # 让流程继续，直到 pre_request
 
     async def _record_stage(stage, ctx, *args, **kwargs):
