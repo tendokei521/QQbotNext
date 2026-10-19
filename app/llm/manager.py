@@ -15,7 +15,7 @@ from typing import Any
 
 from app.llm import logger
 from app.llm.assembly import PromptAssembler
-from app.llm.config import AgentConfig
+from app.llm.config import DEFAULT_LLM_CONFIG, AgentConfig
 from app.llm.enhance import install_framework_hooks
 from app.llm.hooks import LlmHookRegistry, ToolCallHookRegistry
 from app.llm.knowledge import KnowledgeManager
@@ -24,6 +24,7 @@ from app.llm.memory import MemoryManager
 from app.llm.pipeline import LlmPipeline
 from app.llm.proactive import ProactiveManager
 from app.llm.providers.invoker import ProviderInvoker
+from app.llm.request_policy import TRACKED_KEYS, merge_config_layers
 from app.llm.scheduler import TaskScheduler
 from app.llm.session import SessionManager
 from app.llm.skills import SkillRegistry
@@ -34,8 +35,8 @@ from app.llm.tool import ModuleToolRegistry
 def _origin_of(*layers: tuple[str, dict]) -> str:
     """返回最先提供 ``max_tokens`` 的那一层名字（高优先级在前）。
 
-    ``layers`` 按优先级降序给 (名称, 该层的原始 dict)；全都没有则返回 ``"agent 配置"``
-    （agent 层由 ``_base_raw_config`` 铺满默认值，永远能兜住）。
+    保留这个薄封装只为兼容既有调用与用例：真正的合并+溯源已经统一到
+    ``request_policy.merge_config_layers``（它会为 ``TRACKED_KEYS`` 逐键记来源）。
     """
     for name, cfg in layers:
         if isinstance(cfg, dict) and cfg.get("max_tokens") not in (None, ""):
@@ -98,28 +99,31 @@ class AgentRuntime:
         self.telemetry = TelemetryRecorder()
 
     def _config_for_model_id(self, model_id: str) -> dict | None:
-        """解析指定模型实例的完整 provider 配置。"""
+        """解析指定模型实例的完整 provider 配置。
+
+        合并走 ``request_policy.merge_config_layers``（**唯一实现**）——此前
+        ``ProviderRuntimeManager.resolve_provider_config`` 里还躺着另一份等价逻辑，
+        两份会漂移：改了一处、另一处仍按旧口径合并。
+        """
         model = self.config_service.get_provider_model(model_id)
         preset = self.config_service.get_provider_preset(model["preset_id"]) if model else None
         if not model or not preset:
             return None
-        config = dict(self.config._base_raw_config())
-        config["provider"] = preset.get("provider", "openai")
-        config["provider_type"] = model.get("provider_type", "chat")
-        preset_cfg = preset.get("config", {}) or {}
-        model_cfg = model.get("config", {}) or {}
-        config.update(preset_cfg)
-        config.update(model_cfg)
-        config["model"] = model.get("model", "")
-        config["provider_preset_id"] = preset.get("id", "")
-        config["provider_model_id"] = model.get("id", "")
-        # max_tokens / temperature 这类"三层都能设"的项，合并后光看 cfg 分辨不出谁给的。
-        # 这里把**实际生效那一层**记下来，供 chat._effective_max_tokens 与告警使用
-        # （此前溯源函数只能看到合并结果，永远报「provider 模型/预设」，等于没溯源）。
-        config["_max_tokens_origin"] = _origin_of(
-            ("provider 模型", model_cfg), ("连接预设", preset_cfg), ("agent 配置", config)
-        )
-        return config
+        return merge_config_layers(
+            base=self.config._base_raw_config(),
+            # 只要"用户显式动过"的键：base 铺满了默认值，拿它做溯源等于没溯源
+            agent_layer=self.config.explicit_values(TRACKED_KEYS),
+            preset_layer=preset.get("config", {}) or {},
+            model_layer=model.get("config", {}) or {},
+            defaults=DEFAULT_LLM_CONFIG,
+            meta={
+                "provider": preset.get("provider", "openai"),
+                "provider_type": model.get("provider_type", "chat"),
+                "model": model.get("model", ""),
+                "provider_preset_id": preset.get("id", ""),
+                "provider_model_id": model.get("id", ""),
+            },
+        ).config
 
     def provider_config(self) -> dict:
         """返回主 provider 的完整配置（用于兼容旧调用路径）。"""
@@ -219,10 +223,20 @@ class AgentRuntime:
             if preset_id:
                 preset = self.config_service.get_provider_preset(preset_id)
                 if preset:
-                    cfg = dict(self.config._base_raw_config())
-                    cfg["provider"] = preset.get("provider", "openai")
-                    cfg.update(preset.get("config", {}) or {})
-                    chain.append(cfg)
+                    # 走同一个合并实现：这条旧路径此前手写 update，溯源与校验都会漏掉
+                    chain.append(
+                        merge_config_layers(
+                            base=self.config._base_raw_config(),
+                            agent_layer=self.config.explicit_values(TRACKED_KEYS),
+                            preset_layer=preset.get("config", {}) or {},
+                            defaults=DEFAULT_LLM_CONFIG,
+                            meta={
+                                "provider": preset.get("provider", "openai"),
+                                "provider_preset_id": preset.get("id", ""),
+                                "model": str(config.get("model", "") or ""),
+                            },
+                        ).config
+                    )
 
         fallback_ids = [str(i) for i in (config.get("fallback_model_ids", []) or []) if str(i)]
         for fb_id in fallback_ids:

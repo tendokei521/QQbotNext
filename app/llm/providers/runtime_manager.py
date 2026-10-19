@@ -12,6 +12,8 @@ from typing import Any
 
 from app.core.logger import logger
 from app.infrastructure.config.config_service import ConfigService
+from app.llm.request_policy import merge_config_layers
+
 from . import get_provider, get_provider_class
 
 
@@ -42,7 +44,12 @@ class ProviderRuntimeManager:
 
     # ── 配置解析 ───────────────────────────────────────
     def resolve_provider_config(self, model_id: str) -> dict | None:
-        """合并连接预设 + 模型实例，返回可直接传给 Provider 的完整配置。"""
+        """合并连接预设 + 模型实例，返回可直接传给 Provider 的完整配置。
+
+        合并逻辑统一走 ``request_policy.merge_config_layers``：这里此前有一份**手写**的
+        ``{**preset, **model}``，与 ``AgentRuntime._config_for_model_id`` 的版本等价但不
+        同源——两份会漂移，而且这一份没有逐键溯源（``_max_tokens_origin``）。
+        """
         model = self.config_service.get_provider_model(model_id)
         if model is None:
             return None
@@ -50,15 +57,17 @@ class ProviderRuntimeManager:
         if preset is None:
             return None
 
-        merged = {
-            **(preset.get("config", {}) or {}),
-            **(model.get("config", {}) or {}),
-        }
-        merged["provider"] = preset.get("provider", "openai")
-        merged["provider_type"] = model.get("provider_type", "chat")
-        merged["model"] = model.get("model", "")
-        merged["provider_preset_id"] = preset.get("id", "")
-        merged["provider_model_id"] = model.get("id", "")
+        merged = merge_config_layers(
+            preset_layer=preset.get("config", {}) or {},
+            model_layer=model.get("config", {}) or {},
+            meta={
+                "provider": preset.get("provider", "openai"),
+                "provider_type": model.get("provider_type", "chat"),
+                "model": model.get("model", ""),
+                "provider_preset_id": preset.get("id", ""),
+                "provider_model_id": model.get("id", ""),
+            },
+        ).config
         return _resolve_env_keys(merged)
 
     def resolve_preset_config(self, preset_id: str) -> dict | None:

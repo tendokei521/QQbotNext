@@ -381,6 +381,33 @@ class AgentConfig:
                 result[key] = value
         return result
 
+    def explicit_values(self, keys: Any = None) -> dict:
+        """只返回**显式设置过**的键值（供 provider 层做"值来自哪一层"的溯源）。
+
+        ``_base_raw_config()`` 会把每个键都铺上默认值，光看它无法区分"用户设成 1024"
+        和"没人动过、默认就是 1024"。这里只挑用户真的动过的键，让
+        ``request_policy.merge_config_layers`` 能把来源如实标成 agent 层或内置默认。
+        """
+        keys = list(keys) if keys is not None else list(DEFAULT_LLM_CONFIG)
+        stored = self._adapted_stored()
+        profile = self._profile_config()
+        result: dict = {}
+        for key in keys:
+            if key in stored and stored[key] is not None:
+                result[key] = stored[key]
+                continue
+            if key in profile and profile[key] is not None:
+                result[key] = profile[key]
+                continue
+            legacy = legacy_key_of(key)
+            if not legacy:
+                continue
+            if legacy in stored and stored[legacy] is not None:
+                result[key] = stored[legacy]
+            elif legacy in profile and profile[legacy] is not None:
+                result[key] = profile[legacy]
+        return result
+
     def has_explicit(self, key: str) -> bool:
         """用户是否**显式**设置过该键（而不是吃默认值）。
 
