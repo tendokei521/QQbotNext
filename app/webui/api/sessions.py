@@ -154,6 +154,53 @@ async def delete_message(
     return _ok("消息已删除", conversation=conversation)
 
 
+@router.put("/{session_id}/conversations/{task_id}/messages/{index}/media/{seg_index}")
+async def replace_message_media(
+    session_id: str,
+    task_id: str,
+    index: int,
+    seg_index: int,
+    request: Request,
+    bot_id: int | None = Depends(parse_bot_id),
+):
+    """替换某条消息里的第 ``seg_index`` 张图（请求体直接是图片字节）。
+
+    用原始 body 而不是 multipart：前端 ``fetch(url, {method:'PUT', body: file})`` 一行搞定，
+    后端也不必为「一个文件字段」引入表单解析。MIME 由字节嗅探决定，``?mime=`` 仅作提示。
+    """
+    try:
+        blob = await request.body()
+    except Exception:
+        blob = b""
+    mime = str(request.query_params.get("mime", "") or "").strip()
+    try:
+        result = _service(bot_id).replace_message_media(session_id, task_id, index, seg_index, blob, mime)
+    except ValueError as e:
+        return _err(400, str(e))
+    except Exception as e:
+        return _err(500, f"替换图片失败: {e}")
+    return _ok("图片已替换", **result)
+
+
+@router.delete("/{session_id}/conversations/{task_id}/messages/{index}/media/{seg_index}")
+async def remove_message_media(
+    session_id: str,
+    task_id: str,
+    index: int,
+    seg_index: int,
+    request: Request,
+    bot_id: int | None = Depends(parse_bot_id),
+):
+    """移除某条消息里的第 ``seg_index`` 张图（引用消失后那张本地图才能删）。"""
+    try:
+        result = _service(bot_id).remove_message_media(session_id, task_id, index, seg_index)
+    except ValueError as e:
+        return _err(400, str(e))
+    except Exception as e:
+        return _err(500, f"移除图片失败: {e}")
+    return _ok("图片已移除", **result)
+
+
 @router.delete("/{session_id}/conversations/{task_id}")
 async def delete_conversation(
     session_id: str,
@@ -162,14 +209,16 @@ async def delete_conversation(
     bot_id: int | None = Depends(parse_bot_id),
 ):
     try:
-        ok = _service(bot_id).delete_conversation(session_id, task_id)
+        outcome = _service(bot_id).delete_conversation(session_id, task_id)
     except ValueError as e:
         return _err(400, str(e))
     except Exception as e:
         return _err(500, f"删除对话失败: {e}")
-    if not ok:
+    if not outcome.get("deleted"):
         return _err(404, f"对话不存在: {task_id}")
-    return _ok("对话已删除")
+    mode = str(outcome.get("mode", "deleted"))
+    message = "对话已删除" if mode != "cleared" else "这是活跃会话的唯一对话，已清空内容（会话仍在运行）"
+    return _ok(message, mode=mode)
 
 
 @router.delete("/{session_id}")
@@ -194,20 +243,61 @@ async def export_session(
     session_id: str,
     request: Request,
     bot_id: int | None = Depends(parse_bot_id),
+    with_media: bool = Query(True, description="是否把图片一起打进 zip（默认打）"),
 ):
+    """导出会话：默认返回**含图片的 zip 备份包**（``session.json`` + ``media/``）。
+
+    只导 JSON 时，图片只剩一个 sha 指向，换台机器导回去全是"文件缺失"；
+    打包才叫备份。``with_media=false`` 可退回纯 JSON（对账/看结构时用）。
+    """
     try:
-        data = _service(bot_id).export_session_json(session_id)
+        service = _service(bot_id)
+        if not with_media:
+            data = service.export_session_json(session_id)
+            if data is None:
+                return _err(404, f"会话不存在: {session_id}")
+            return Response(
+                content=json.dumps(data, ensure_ascii=False, indent=2),
+                media_type="application/json; charset=utf-8",
+                headers={"Content-Disposition": f'attachment; filename="{session_id}.session.json"'},
+            )
+        bundle = service.export_session_bundle(session_id)
     except ValueError as e:
         return _err(400, str(e))
     except Exception as e:
         return _err(500, f"导出会话失败: {e}")
-    if data is None:
+    if bundle is None:
         return _err(404, f"会话不存在: {session_id}")
-    filename = f"{session_id}.session.json"
+    blob, filename, summary = bundle
     return Response(
-        content=json.dumps(data, ensure_ascii=False, indent=2),
-        media_type="application/json; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        content=blob,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Media-Count": str(summary.get("media", 0)),
+            "X-Media-Missing": str(summary.get("missing", 0)),
+        },
+    )
+
+
+@router.post("/restore-bundle")
+async def restore_bundle(request: Request, bot_id: int | None = Depends(parse_bot_id)):
+    """从 zip 备份包恢复会话（图片先落盘，再导入历史，指向保持可用）。"""
+    try:
+        blob = await request.body()
+    except Exception:
+        blob = b""
+    if not blob:
+        return _err(400, "备份文件为空")
+    try:
+        result = _service(bot_id).restore_bundle(blob)
+    except ValueError as e:
+        return _err(400, str(e))
+    except Exception as e:
+        return _err(500, f"恢复失败: {e}")
+    return _ok(
+        f"已恢复 {result.get('restored', 0)} 个对话、{result.get('media', 0)} 张图片",
+        **result,
     )
 
 

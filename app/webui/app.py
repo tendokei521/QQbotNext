@@ -20,6 +20,7 @@ from app.webui.api import bots as bots_router
 from app.webui.api import config_profiles as config_profiles_router
 from app.webui.api import framework as framework_router
 from app.webui.api import logs as logs_router
+from app.webui.api import media as media_router
 from app.webui.api import modules as modules_router
 from app.webui.api import provider_presets as provider_presets_router
 from app.webui.api import prompt_dump as prompt_dump_router
@@ -84,6 +85,7 @@ def create_app(container) -> FastAPI:
     app.include_router(provider_presets_router.models_router, prefix="/api")
     app.include_router(provider_presets_router.settings_router, prefix="/api")
     app.include_router(sessions_router.router, prefix="/api")
+    app.include_router(media_router.router, prefix="/api")
     app.include_router(config_profiles_router.router, prefix="/api")
     app.include_router(role_presets_router.router, prefix="/api")
     app.include_router(prompt_dump_router.router, prefix="/api")
