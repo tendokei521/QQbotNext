@@ -276,6 +276,8 @@ class SessionManager:
         self.sessions: dict[str, Session] = {}
         self.lock = threading.RLock()
         self.history = create_history_store(bot_id)
+        # 流式发言的"当前这条 assistant 历史"跟踪（见 upsert_streaming_assistant）
+        self._streaming_entries: dict[str, dict] = {}
         # 会话过期/归档时的可选回调（长期记忆归档蒸馏用）：callable(session)
         self.on_archive = None
         self._stop_event = threading.Event()
@@ -442,6 +444,45 @@ class SessionManager:
                     f"历史裁剪: {session_id} 丢弃最旧 {dropped} 条 (上限 {self.MAX_HISTORY_MESSAGES})"
                 )
             session.touch()
+
+    def upsert_streaming_assistant(self, session_id: str, text: str) -> bool:
+        """流式路径专用：把本轮 assistant 正文写进历史，**支持边发边更新**。
+
+        为什么要能更新而不是只追加：流式是一句一句 yield 出去的，而历史里这条发言
+        只有一条。若等全部发完才 ``add_message``，pipeline 在每片发送成功后调
+        ``mark_last_assistant_message_id`` 时「最近一条 assistant」还是**上一轮**的，
+        句柄于是全补在上一轮的发言上（引用指错、群聊环境记录按 message_id 去重失效）。
+
+        第一次调用插入一条（此刻它就是"最近一条 assistant"），后续调用只改同一条的
+        正文。条目用对象身份跟踪（历史裁剪把列表切片后引用失效，此时下一个分片会
+        重新插入一条，最多多一条空壳，不会写坏别人的条目）。
+        """
+        session = self.get_session(session_id)
+        if not session or session.data is None:
+            return False
+        content = str(text or "")
+        if not content.strip() or _is_junk_assistant(content):
+            return False
+        history = session.data.history
+        entry = self._streaming_entries.get(session_id)
+        if entry is None or not any(entry is e for e in history):
+            entry = {"role": "assistant", "time": int(time.time()), "content": content}
+            history.append(entry)
+            self._streaming_entries[session_id] = entry
+            if len(history) > self.MAX_HISTORY_MESSAGES:
+                dropped = len(history) - self.MAX_HISTORY_MESSAGES
+                del history[:dropped]
+                logger.add_info(f"#{self.bot_id}").debug(
+                    f"历史裁剪: {session_id} 丢弃最旧 {dropped} 条 (上限 {self.MAX_HISTORY_MESSAGES})"
+                )
+        else:
+            entry["content"] = content
+        session.touch()
+        return True
+
+    def end_streaming_assistant(self, session_id: str) -> None:
+        """本轮流式发言结束：释放 upsert 的跟踪标记（下轮重新插入新条目）。"""
+        self._streaming_entries.pop(session_id, None)
 
     def mark_last_assistant_message_id(self, session_id: str, message_id: Any) -> bool:
         """把最近一条 assistant 历史补上 ``message_id``（发送成功后调用）。

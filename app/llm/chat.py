@@ -1423,6 +1423,25 @@ async def stream_response(runtime, event, ctx=None):
     overflow_retries = _reasoning_overflow_retries(config)
     overflow_used = 0
 
+    def _write_partial_history(text: str) -> bool:
+        """流式边发边写历史：先落一条，后续分片只更新它。返回是否写成功。
+
+        pipeline 在**每片发送成功后**调 ``mark_last_assistant_message_id``，它认
+        "最近一条 assistant"。如果等全部发完才写历史，那个"最近一条"还是**上一轮**的
+        发言 —— message_id 就全补在上一轮上（引用指错、环境记录去重失效）。
+        发言通道（speech）本来就是先写后发，这里把纯文本流式路径对齐。
+        """
+        upsert = getattr(session_mgr, "upsert_streaming_assistant", None)
+        if not callable(upsert):
+            return False
+        try:
+            return bool(upsert(session_id, text))
+        except Exception as e:  # noqa: BLE001 —— 句柄回填是增强信息，不该中断回复
+            logger.add_info(f"#{runtime.bot_id}").debug(
+                f"[LLM] 流式历史预写失败（已忽略）: {e}"
+            )
+            return False
+
     for _round in range(max_tool_rounds):
         round_text_parts: list[str] = []
         buffer = ""
@@ -1456,6 +1475,8 @@ async def stream_response(runtime, event, ctx=None):
                     if clean:
                         round_text_parts.append(clean)
                         full_text_parts.append(clean)
+                        # 先写历史再发送（pipeline 发送成功后会回填 message_id）
+                        _write_partial_history("".join(full_text_parts))
                         yield clean
             elif ev.type == "tool_call":
                 tc = ev.tool_call or {}
@@ -1489,6 +1510,7 @@ async def stream_response(runtime, event, ctx=None):
             else:
                 round_text_parts.append(tail)
                 full_text_parts.append(tail)
+                _write_partial_history("".join(full_text_parts))
                 yield tail
         buffer = ""
 
@@ -1635,7 +1657,13 @@ async def stream_response(runtime, event, ctx=None):
             full_text = "抱歉，我暂时无法回答，请稍后再试。"
             yield full_text
 
-        session_mgr.add_message(session_id, "assistant", _clean_output_for_history(config, full_text))
+        # 收尾把正文定稿到**同一条**历史（分片发送期间已 upsert 过）。stub/旧
+        # session_mgr 没有 upsert 时才退回 add_message，保证行为不回退。
+        _cleaned = _clean_output_for_history(config, full_text)
+        if not _write_partial_history(_cleaned):
+            session_mgr.add_message(session_id, "assistant", _cleaned)
+        if hasattr(session_mgr, "end_streaming_assistant"):
+            session_mgr.end_streaming_assistant(session_id)
         if not is_private:
             session.mark_replied()
         await asyncio.to_thread(session_mgr.history.save_session, session)
