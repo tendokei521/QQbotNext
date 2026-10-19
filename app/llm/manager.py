@@ -126,11 +126,75 @@ class AgentRuntime:
         chain = self.provider_chain()
         return chain[0] if chain else dict(self.config.raw_config)
 
+    def _global_provider_settings(self) -> dict:
+        """「Provider 全局设置」（默认模型 / fallback / pool）。读不到一律当空。"""
+        getter = getattr(self.config_service, "get_provider_settings", None)
+        if not callable(getter):
+            return {}
+        try:
+            return getter() or {}
+        except Exception as e:  # noqa: BLE001 —— 设置读失败不该拖垮整条链
+            logger.add_info(f"#{self.bot_id}").warning(
+                f"[Provider] 读取全局设置失败（已忽略）: {e}"
+            )
+            return {}
+
+    def _chain_from_global_settings(self) -> list[dict]:
+        """Agent 页没有指定模型时，用「Provider 全局设置」兜底。
+
+        **此前这三个字段有完整 UI、独立 API、独立数据表，运行时却一次都没被读过** ——
+        用户在唯一写着「默认模型」的地方做的选择永远不生效；新 bot 更糟：配了全局
+        默认模型仍然一句话不回，且没有任何日志指向"没有可用模型"。
+
+        语义（保守）：只在本 bot 的 Agent 配置**没给出任何模型**时接管，避免悄悄
+        改变已有 bot 的模型选择；``provider_pool`` 是允许清单，``*`` 或不填表示全允许。
+        """
+        settings = self._global_provider_settings()
+        ids: list[str] = []
+        primary = str(settings.get("default_model_id", "") or "").strip()
+        if primary:
+            ids.append(primary)
+        for raw in settings.get("fallback_model_ids", []) or []:
+            mid = str(raw or "").strip()
+            if mid and mid not in ids:
+                ids.append(mid)
+        if not ids:
+            return []
+
+        pool = [
+            str(p or "").strip()
+            for p in (settings.get("provider_pool", []) or [])
+            if str(p or "").strip()
+        ]
+        allow = None if (not pool or "*" in pool) else set(pool)
+
+        chain: list[dict] = []
+        for mid in ids:
+            if allow is not None and mid not in allow:
+                logger.add_info(f"#{self.bot_id}").warning(
+                    f"[Provider] 全局设置里的模型 {mid} 不在 provider_pool 允许清单内，已跳过"
+                )
+                continue
+            cfg = self._config_for_model_id(mid)
+            if cfg:
+                chain.append(cfg)
+            else:
+                logger.add_info(f"#{self.bot_id}").warning(
+                    f"[Provider] 全局设置引用的模型不存在（可能已被删除）: {mid}"
+                )
+        if chain:
+            names = [str(c.get("provider_model_id") or c.get("model") or "") for c in chain]
+            logger.add_info(f"#{self.bot_id}").info(
+                f"[Provider] Agent 页未指定模型，改用「Provider 全局设置」的模型链: {names}"
+            )
+        return chain
+
     def provider_chain(self) -> list[dict]:
         """按顺序返回可尝试的 provider 配置链。
 
         优先使用 provider_model_pool（有序模型池）；为空时兼容旧结构：
-        provider_model_id 作为首个 + fallback_model_ids 依次追加。
+        provider_model_id 作为首个 + fallback_model_ids 依次追加；**这两层都没有时**
+        回落到「Provider 全局设置」的默认模型 / fallback（见 _chain_from_global_settings）。
         """
         config = dict(self.config.raw_config)
         chain: list[dict] = []
@@ -141,7 +205,8 @@ class AgentRuntime:
                 cfg = self._config_for_model_id(model_id)
                 if cfg:
                     chain.append(cfg)
-            return chain
+            if chain:
+                return chain
 
         primary_id = str(config.get("provider_model_id", "") or "")
         if primary_id:
@@ -166,6 +231,15 @@ class AgentRuntime:
             fb = self._config_for_model_id(fb_id)
             if fb:
                 chain.append(fb)
+
+        if not chain:
+            chain = self._chain_from_global_settings()
+        if not chain:
+            # 这条日志此前不存在：表现为 bot 一句话不回、日志里毫无线索
+            logger.add_info(f"#{self.bot_id}").error(
+                "[Provider] 没有可用模型：Agent 页未选择模型，且「Provider 全局设置」里也没有"
+                "默认模型——请在 Agent 页选择模型，或在 Provider 预设页设置全局默认模型"
+            )
         return chain
 
     def set_bot(self, bot) -> None:
