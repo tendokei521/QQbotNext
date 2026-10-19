@@ -78,10 +78,27 @@ async def add_bot(
 ## 6. 代码组织
 
 - **分层依赖只向下**：`core → domain → infrastructure → modules/services → webui`；装配只在 `app/bootstrap.py`。
-- **单文件单职责**：一个文件只做一件事（参考 `app/llm/` 的拆分）。
-- **函数内惰性导入是惯例**：为规避循环依赖与支持热重载，允许（且鼓励）在函数内 `from .service import handle`、`from app.bootstrap import get_container`；模块级导入仍按 标准库 → 三方 → 本地 排序。
-- 函数尽量 ≤ 50 行；超过说明该拆了。
-- 业务插件目录结构固定：`module/modules/<name>/{module.py, service.py, config_schema.py}`，模块内部用**相对导入**。
+  > ⚠️ `app/llm/` **目前不在这条链上**：它被 `services`/`modules`/`webui` 依赖，又反过来依赖 `modules`，
+  > 并与另外 23 个文件互为循环依赖（见 §12.1）。新增代码不要加深这个环。
+- **单文件单职责**：一个文件只做一件事。判据不是行数，而是"改它时你是否被迫同时读几个无关文件"。
+- **函数内惰性导入是最后手段，不是惯例**：仅当**确实无法**通过构造函数/参数注入解决时才用，
+  且在 import 行上方注释说明"为什么必须在这里"。它会让依赖图在静态分析中不可见
+  （全库现存 315 处），是循环依赖的**症状**而非解法——治因不治症。
+  模块级导入仍按 标准库 → 三方 → 本地 排序。
+  > 修订说明：原文写的是"允许（且鼓励）"。把缺陷写成风格，会让新代码持续复制它。
+- **函数行数分档**：新增函数 ≤ 50 行；修改存量函数时若它已 > 80 行，先把你要改的部分拆出来再动。
+  > 原文为"函数尽量 ≤ 50 行"——规定与实际相差太远（全库 41 个函数 ≥ 80 行，最大 378 行），
+  > 无人执行的规范等于没有规范。改为分档后至少**新增**部分是能守住的（见 §12.1 验收指标）。
+- **业务插件目录**（细节以 `docs/MODULE_DEV.md §1` 为准，本文件不重复定义）：
+  `module.py` **必须**；`service.py`、`config_schema.py`、`pages/` **可选**；
+  业务一多就把 `service.py` 升级为 `service/` 子包（如 `df_password`、`recall_back`、`time_sign_in`）。
+  模块内部用**相对导入**。
+  > 原文写"目录结构固定：`{module.py, service.py, config_schema.py}`"——实际 13 个插件有 7 个不符
+  > （4 个没有 `service.py`，3 个用 `service/` 子包）。规范应向已存在的合理做法靠拢，而不是反过来。
+- **三个 "module" 概念不要混**（命名撞车的根源，动手前先确认自己在说哪一个）：
+  `app/modules/` = 插件**框架**（`BaseModule`/注册表/权限/hook）；
+  `module/modules/` = 业务插件**实现**；
+  `module/plugins/` = zip 安装的**外部**插件。
 
 ## 7. 错误处理与日志
 
@@ -104,8 +121,16 @@ except Exception as e:
 
 ## 8. 设计模式惯例
 
-- **门面**：包装外部服务（ConfigService）的读写，如 `ModuleConfig`、`AgentConfig`——模块永远不直接碰 SQLite。
-- **依赖注入**：一切组件通过容器装配（`bootstrap.py`），构造函数收依赖，不内部 import 单例（桥接函数 `app.core.container.service()` 除外）。
+- **门面**：包装外部服务（ConfigService）的读写，如 `ModuleConfig`、`AgentConfig`——**业务代码永远不直接碰 SQLite**。
+  新增持久化一律走 `app/infrastructure/persistence/` 的 `Database` / `BaseRepository`。
+  > ⚠️ 现状有 10 处例外：`llm/history.py`、`llm/memory/store.py`、`llm/knowledge/store.py`、
+  > `llm/knowledge/vector.py` 直连 `sqlite3`，而 `BaseRepository` 至今零引用（见 §12.6）。
+  > 那是待还的债，**不要照抄**。
+- **依赖注入**：一切组件通过容器装配（`bootstrap.py`），构造函数收依赖。
+  **禁止**在业务代码里直调 `get_container()` 或 `from app.bootstrap import ...`——那是服务定位器反模式，
+  会把模块焊进 `bootstrap` 所在的循环依赖（现状 71 处，见 §12.2）。
+  > 原豁免条款「桥接函数 `app.core.container.service()` 除外」**已废止**：该函数全库零引用，
+  > 唯一作用是留下一条 `container → bootstrap` 的反向依赖边，把 DI 容器本身拖进了循环。
 - **节点链**：一切会触碰消息的能力实现 `MessageNode.process(ctx, next_)`；拦截=不调 `next_()`。
 - **事件驱动**：跨切面变化走 `EventBus` / `ConfigService.on_change`，不轮询。
 - **模块权限**：所有业务模块继承 `BaseModule`，声明式元数据，业务里不重复实现权限判断。
@@ -138,6 +163,14 @@ except Exception as e:
 > 覆盖率未设 `--cov-fail-under`。原因是存量违规尚未清理，先拿基线再收紧。
 > **收紧方式**：删掉 CI 中的 `--exit-zero`、给 pytest 加 `--cov-fail-under=<略高于当前值>`。
 
+**但"全库不阻断"不等于"增量可以脏"**——这两件事必须分开看，否则 `--exit-zero` 会变成永久的免责声明：
+
+- **增量零容忍**：改动涉及的**文件**，ruff 违规数不得增加。局部/大工程档位都要跑
+  `ruff check <本次改过的文件>`（不是全库）。新增代码应当零违规。
+- **存量单调递减**：清理可以慢，但只能往下走。做大工程收尾时顺手清一批，
+  并在 `MAINTENANCE.md §CI` 里更新一次基线数字（当前见该文件）。
+- **阈值棘轮**：`--cov-fail-under` 一旦加上，只允许往上调，不允许为了过 CI 而调低。
+
 ### 10.2 本地用法
 
 ```bash
@@ -159,10 +192,14 @@ pytest -q --cov --cov-report=term-missing   # 需要覆盖率时
 - [ ] 注解用 `X | None` / 内置泛型
 - [ ] 异常用 `logger.exception` 记录；**禁止 `except: pass`**（由 `tests/test_no_silent_except.py` 强制）
 - [ ] 中文注释解释了"为什么"
+- [ ] **没有新增** `get_container()` 直调 / `from app.bootstrap import ...`（§8）
+- [ ] **没有新增**函数内惰性 import；确需新增的已在 import 上方注明原因（§6）
+- [ ] 新增函数 ≤ 50 行（改存量长函数时，先拆你要动的那部分）
+- [ ] 涉及 `app/webui/api/` 或 §12 列出的区域时，确认没有加深循环依赖
 - [ ] 新增依赖只改 `pyproject.toml` 一处：**不要**在 `requirements.txt` 里重复列举
       （该文件已改为指向 `pyproject.toml` 的纯指针，CI 会校验）
 - [ ] 🔬 改动相关测试全绿（小改动档位可不跑；大工程收尾时改为 `pytest -q` 全量全绿）
-- [ ] 🔬 `ruff check .` 无**新增**违规（存量违规按批次清理，不要一次改一片；小改动档位可留到收尾时跑）
+- [ ] 🔬 `ruff check <本次改过的文件>` 无**新增**违规（不是全库；存量按批次清理，见 §10.1）
 
 ## 11. 提交规范（Commit）
 
@@ -194,7 +231,62 @@ pytest -q --cov --cov-report=term-missing   # 需要覆盖率时
 - **模板**：仓库根目录 `.gitmessage` 提供 Conventional Commits 预填模板，执行
   `git config commit.template .gitmessage` 后 `git commit`（不带 `-m`）即可启用。
 
+## 12. 已知架构债（可量化，改动前必读）
+
+> 本节数字为 **AST 解析全库 import 图实测**得出，不是估计。动手前先读这里：
+> **不要以现状为范例**。债还掉一部分后请把新数字更新回本节（这是唯一的进度记录）。
+
+### 12.1 一个 24 文件 / 12,112 行的强连通块
+
+`app/llm/chat.py` 所在的一块里有 24 个文件**互为递归依赖**，任何一处都无法单独理解：
+`chat`(2192) `context_tools`(1059) `scheduler`(967) `assembly`(790) `image`(623)
+`image_media`(617) `pipeline`(582) `session_history_service`(557) `webui/api/modules`(539)
+`features`(538) `proactive`(520) `webui/api/agent`(435) `manager`(433) `bootstrap`(416)
+`webui/api/sessions`(378) `webui/app`(375) `referent`(314) `initiative_stream`(196)
+`webui/api/media`(132) `system_tools`(126) `app/modules`(116) `core/container`(97)
+`modules/api`(81) `webui/api/framework`(29)。
+
+后果：只改 `chat.py` 一处，静态可达 **143 个文件 / 约 4.2 万行**（`app/` 总长才 3.8 万行）。
+
+**验收指标：任何入口文件的可达闭包 ≤ 8,000 行。** 现状 chat.py = 42,000+。
+自检办法：对目标文件做一次函数级 import 闭包统计（含函数内 import），别只看文件顶部。
+
+### 12.2 服务定位器 71 处
+
+`get_container()` 被直调 **71 次 / 14 个文件**，其中 **65 次在 `app/webui/api/*`**——
+这是 webui 那 6 个文件被焊进 §12.1 循环的直接原因。
+目标：全部改为构造函数注入（`app/webui/api/deps.py` 已是 FastAPI 依赖注入入口，应统一走那里）。
+
+### 12.3 两套同名调度器
+
+`app/services/scheduler.py::SchedulerService`（203 行，模块 `SCHEDULES=` 声明式定点任务）
+与 `app/llm/scheduler.py::TaskScheduler`（834 行，LLM 语义定时，落盘 `tasks_data.json`）
+在时间解析、到点触发、取 bot 连接上**零复用**。改任一处前先确认改的是哪一个。
+
+### 12.4 双前端
+
+`dashboard/`（Vue3 + Vuetify）与 `app/webui/static/`（手写 `main.js` 74KB + `widgets.js` 36KB +
+`index.html` 46KB + `style.css` 37KB ≈ 195KB）功能重叠：同一张 Agent 配置表单实现了两遍
+（`DynamicWidget.vue` vs `widgets.js`）。`app/webui/app.py` 保留 `/legacy` 回退。
+**schema 每加一个字段要改两处，第二处极易漏且没有测试会红。**
+
+### 12.5 巨型数据伪装成代码
+
+`app/llm/onebot_tools/manifest.py` **4,789 行**（纯 `ONEBOT_TOOLS` 字面量）、
+`app/llm/config_schema.py` **1,037 行**（纯 `SCHEMA` 字面量）。改一条工具描述会淹没在 4789 行的
+diff 里。目标：迁成 `data/schemas/*.json` + pydantic 校验 + 生成脚本。
+
+### 12.6 领域层空心
+
+`app/domain/` 仅 **459 行 / 4 文件**，全是 DTO，没有业务规则。真正该属于领域的判断
+（"何时该主动说话""下次触发怎么算""人格规则怎么裁"）散在 `llm/proactive.py`、
+`llm/scheduler.py`、`llm/persona_rules.py` 里，与 LLM 调用、JSON 落盘混居。
+同时 `BaseRepository` 零引用（见 §8 门面）。
 
 ---
 
-*本规范依据代码库实际风格整理，2025 年定稿。新增约定请先与本文件核对，必要时经讨论后更新。*
+*本规范依据代码库实际风格整理，2025 年定稿、2025 年按实测复核修订（§6 / §8 / §10.1 / §12）。
+新增约定请先与本文件核对，必要时经讨论后更新。*
+
+*遇到规范与代码不一致时，先判断哪一边是对的——**既不要把既成事实直接写成规范，
+也不要把无人执行的理想一直留在文档里。** 这两种做法都会让下一个人（或 Agent）照着错的做。*
