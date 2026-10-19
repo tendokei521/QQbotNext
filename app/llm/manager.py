@@ -31,6 +31,18 @@ from app.llm.telemetry import TelemetryRecorder
 from app.llm.tool import ModuleToolRegistry
 
 
+def _origin_of(*layers: tuple[str, dict]) -> str:
+    """返回最先提供 ``max_tokens`` 的那一层名字（高优先级在前）。
+
+    ``layers`` 按优先级降序给 (名称, 该层的原始 dict)；全都没有则返回 ``"agent 配置"``
+    （agent 层由 ``_base_raw_config`` 铺满默认值，永远能兜住）。
+    """
+    for name, cfg in layers:
+        if isinstance(cfg, dict) and cfg.get("max_tokens") not in (None, ""):
+            return name
+    return "agent 配置"
+
+
 class _Services:
     def __init__(self, task_manager) -> None:
         self.task_manager = task_manager
@@ -94,11 +106,19 @@ class AgentRuntime:
         config = dict(self.config._base_raw_config())
         config["provider"] = preset.get("provider", "openai")
         config["provider_type"] = model.get("provider_type", "chat")
-        config.update(preset.get("config", {}) or {})
-        config.update(model.get("config", {}) or {})
+        preset_cfg = preset.get("config", {}) or {}
+        model_cfg = model.get("config", {}) or {}
+        config.update(preset_cfg)
+        config.update(model_cfg)
         config["model"] = model.get("model", "")
         config["provider_preset_id"] = preset.get("id", "")
         config["provider_model_id"] = model.get("id", "")
+        # max_tokens / temperature 这类"三层都能设"的项，合并后光看 cfg 分辨不出谁给的。
+        # 这里把**实际生效那一层**记下来，供 chat._effective_max_tokens 与告警使用
+        # （此前溯源函数只能看到合并结果，永远报「provider 模型/预设」，等于没溯源）。
+        config["_max_tokens_origin"] = _origin_of(
+            ("provider 模型", model_cfg), ("连接预设", preset_cfg), ("agent 配置", config)
+        )
         return config
 
     def provider_config(self) -> dict:

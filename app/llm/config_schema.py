@@ -44,7 +44,10 @@ SCHEMA = {
         "default": 0.7, "min": 0, "max": 2, "step": 0.1, "group": "group_model",
     },
     "max_tokens": {
-        "type": "number", "label": "最大输出 Tokens", "description": "单次回复的最大 token 数",
+        "type": "number", "label": "最大输出 Tokens",
+        "description": "单次回复的最大 token 数（思考模型的思考也算在里面，预算被打满时正文可能是空的）。"
+                       "**优先级最低**：若「Provider 预设 → 模型」页给该模型填了「最大输出 Tokens」，"
+                       "以那一层为准，本项不生效（日志会明确提示被覆盖）",
         "default": 1024, "min": 1, "max": 32768, "group": "group_model",
     },
     "stream_output": {

@@ -514,23 +514,61 @@ def _effective_max_tokens(provider_chain, fallback) -> tuple[int, str]:
     2. ``provider_presets.<id>.config_json.max_tokens``（连接预设，同一页的预设表单）
     3. Agent 配置 ``max_tokens``（WebUI「Agent → 最大输出 Tokens」）
 
-    前两层在 ``ProviderRuntimeManager._config_for_model_id`` 里已合并进链上每个 cfg，
-    而 ``chat_with_fallback`` 用 ``cfg.get("max_tokens", max_tokens)`` 取值 —— 所以
-    **链上配置赢**，Agent 页那个数字只在链上没写时才生效。这里只为把结论打出来，
-    排查时不必再翻数据库猜「8192 是哪来的」。
+    前两层在 ``AgentRuntime._config_for_model_id`` 里合并进链上每个 cfg，而
+    ``chat_with_fallback`` 用 ``cfg.get("max_tokens", max_tokens)`` 取值 —— 所以
+    **链上配置赢**，Agent 页那个数字只在链上没写时才生效。
+
+    来源由 ``_config_for_model_id`` 写进 ``_max_tokens_origin``（合并后的 cfg 恒带该键，
+    光看值是分辨不出三层的）；拿不到标记时才退回「链上 = provider、否则 agent」的粗判。
     """
     for cfg in provider_chain or []:
         value = (cfg or {}).get("max_tokens")
         if value in (None, ""):
             continue
         try:
-            return int(value), "provider 模型/预设"
+            origin = str((cfg or {}).get("_max_tokens_origin") or "provider 模型/预设")
+            return int(value), origin
         except (TypeError, ValueError):
             break
     try:
         return int(fallback or 0), "agent 配置"
     except (TypeError, ValueError):
         return 0, "agent 配置"
+
+
+#: 已经提醒过的 (bot_id, agent 值, 生效值)，避免每条消息刷同一条告警
+_MAX_TOKENS_WARNED: set[tuple] = set()
+
+
+def _max_tokens_override_note(runtime, effective: int, origin: str) -> str:
+    """Agent 页显式设了 max_tokens 却被 provider 层覆盖时，给一句可操作的提示。
+
+    这是「配置假象」的显式化：用户以为改的是 Agent 页，实际生效的是「Provider 预设 →
+    模型」里那个值，而此前没有任何地方告诉他。只在**用户显式设过**且值确实不同时提示，
+    否则只是默认值差异，属于噪音。
+    """
+    if origin == "agent 配置":
+        return ""
+    config = getattr(runtime, "config", None)
+    checker = getattr(config, "has_explicit", None)
+    if not callable(checker):
+        return ""
+    try:
+        if not checker("max_tokens"):
+            return ""
+        agent_value = int(config.get("max_tokens", 0) or 0)
+    except Exception:  # noqa: BLE001 —— 诊断辅助，失败不影响主流程
+        return ""
+    if not agent_value or agent_value == effective:
+        return ""
+    marker = (getattr(runtime, "bot_id", ""), agent_value, effective, origin)
+    if marker in _MAX_TOKENS_WARNED:
+        return ""
+    _MAX_TOKENS_WARNED.add(marker)
+    return (
+        f"Agent 页的 max_tokens={agent_value} 未生效，本次实际用 {effective}"
+        f"（来自{origin}）—— 要改「Provider 预设 → 模型」里该模型的「最大输出 Tokens」"
+    )
 
 
 def _proactive_instruction(config, all_specs, user_text: str, ctx=None) -> str | None:
@@ -1200,6 +1238,9 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
 
     use_tools = bool(all_specs) and supports_tool_use(modalities)
     eff_max_tokens, max_tokens_src = _effective_max_tokens(provider_chain, meta["max_tokens"])
+    _mt_note = _max_tokens_override_note(runtime, eff_max_tokens, max_tokens_src)
+    if _mt_note:
+        logger.add_info(f"#{runtime.bot_id}").warning(f"[LLM] {_mt_note}")
     response_start = time.monotonic()
     response = await resolve_invoker(runtime).chat(
         runtime=runtime,
@@ -1366,6 +1407,9 @@ async def stream_response(runtime, event, ctx=None):
     # 本次请求真正生效的 max_tokens（链上 provider 配置赢过 Agent 配置）：打出来，
     # 免得再出现「8192 到底哪设的」这种排查——见 _effective_max_tokens。
     eff_max_tokens, max_tokens_src = _effective_max_tokens(provider_chain, meta["max_tokens"])
+    _mt_note = _max_tokens_override_note(runtime, eff_max_tokens, max_tokens_src)
+    if _mt_note:
+        logger.add_info(f"#{runtime.bot_id}").warning(f"[LLM] {_mt_note}")
 
     logger.add_info(f"#{runtime.bot_id}").info(
         f"流式 API 请求 -> {session_id} (task: {session.task_id}), 消息数: {len(messages)}, "

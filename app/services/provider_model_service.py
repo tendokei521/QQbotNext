@@ -71,17 +71,25 @@ class ProviderModelService:
         if modalities is None:
             modalities = default_modalities_for(provider_type)
         now = int(time.time())
+        model_config: dict = {
+            "temperature": float(data.get("temperature", 0.7) or 0.7),
+            "modalities": modalities,
+        }
+        # max_tokens **只在用户显式填写时**落库。此前无条件写 ``data.get(..., 1024) or 1024``，
+        # 于是每个新建模型都带一个"看起来像用户设置"的 1024，并在运行时永远覆盖 Agent 页
+        # 「最大输出 Tokens」——那一页于是变成死配置，且没有任何提示。
+        # 不写这个键 = 交回 Agent 层（见 chat._effective_max_tokens 的三层优先级）。
+        if data.get("max_tokens") not in (None, ""):
+            model_config["max_tokens"] = int(data.get("max_tokens") or 0) or None
+            if not model_config["max_tokens"]:
+                model_config.pop("max_tokens")
         model = {
             "id": model_id,
             "preset_id": preset_id,
             "model": model_name,
             "provider_type": provider_type,
             "enabled": bool(data.get("enabled", True)),
-            "config": {
-                "temperature": float(data.get("temperature", 0.7) or 0.7),
-                "max_tokens": int(data.get("max_tokens", 1024) or 1024),
-                "modalities": modalities,
-            },
+            "config": model_config,
             "created_at": now,
             "updated_at": now,
         }
@@ -98,7 +106,13 @@ class ProviderModelService:
         if "temperature" in data:
             config["temperature"] = float(data.get("temperature", 0.7) or 0.7)
         if "max_tokens" in data:
-            config["max_tokens"] = int(data.get("max_tokens", 1024) or 1024)
+            # 显式清空（None/""/0）= 不覆盖，交回 Agent 页「最大输出 Tokens」那一层。
+            # 此前把空值也折成 1024，等于用户永远没法把那层控制权还回去。
+            value = data.get("max_tokens")
+            if value in (None, "") or not int(value or 0):
+                config.pop("max_tokens", None)
+            else:
+                config["max_tokens"] = int(value)
         if "modalities" in data:
             normalized = normalize_modalities(data.get("modalities"))
             if normalized is None:

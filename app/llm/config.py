@@ -381,6 +381,26 @@ class AgentConfig:
                 result[key] = value
         return result
 
+    def has_explicit(self, key: str) -> bool:
+        """用户是否**显式**设置过该键（而不是吃默认值）。
+
+        用于区分「用户把 max_tokens 改成 8192」和「没人动过、拿的是默认 1024」——
+        前者被 provider 层覆盖时必须告警，后者只是默认值恰好更大/更小，告警就是噪音。
+        """
+        stored = self._adapted_stored()
+        if key in stored and stored[key] is not None:
+            return True
+        profile = self._profile_config()
+        if key in profile and profile[key] is not None:
+            return True
+        legacy = legacy_key_of(key)
+        if legacy:
+            if legacy in stored and stored[legacy] is not None:
+                return True
+            if legacy in profile and profile[legacy] is not None:
+                return True
+        return False
+
     @property
     def raw_config(self) -> dict:
         result = self._base_raw_config()
