@@ -289,6 +289,15 @@ def label_of(entry, ctx) -> list[str]      # @我/提到我/提到我(备注名)
 
 ### P1 · 表达层（1~2 天，风险低）
 
+> **状态：已落地**（`5df5366` 行为规则独立成段）。实际改动与本文一致：
+> 新增 `app/llm/persona_rules.py`（`detect_caps` + 分段 `render`），改
+> `assembly.py`（`behavior` 块 + `assembly_profile`/`behavior_rules_*`）、`config.py`、
+> `config_schema.py`、`prompt.py`（`qq_agent` 档下 proactive 行去重）。
+> `tests/test_persona_rules.py` **14 例**，本文 4 条验收逐条覆盖：
+> ① `test_segment_order_is_stable` ② `test_rendered_tool_names_are_real_tools`
+> ③ `test_speech_contract_follows_capability` ④ `test_override_keeps_safety_and_work_protocol`。
+> 段落数在后续 prompt 重构中收敛（487 → 409 行），语义未变。
+
 改动：
 - 新增 `app/llm/persona_rules.py`（14 段 + `detect_caps` + `render`）
 - `app/llm/assembly.py`：新增 `behavior` 块；`blocks` 顺序调整；profile 判断
