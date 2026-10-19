@@ -704,6 +704,35 @@ def build_for(runtime: Any, req: PromptRequest) -> list[dict]:
     return assembler.build(req)
 
 
+def _request_limits(runtime: Any) -> tuple[int, int]:
+    """本轮真正会用到的 ``(max_tokens, context_window)``。
+
+    取回退链**第一个**可用配置的生效值（回退器会按各自的配置发请求，这里只需要
+    "本轮打算给多少输出、模型窗口多大"这两个数来算输入上限）。任何一个读不出来
+    都退化为 0 = 未知，收口函数随后改用用户自定的 ``context_token_budget``。
+    """
+    chain: list[dict] = []
+    try:
+        getter = getattr(runtime, "provider_chain", None)
+        chain = list(getter() if callable(getter) else (getter or []))
+    except Exception:  # noqa: BLE001 —— 拿不到链就不做窗口推断
+        chain = []
+    cfg = next((c for c in chain if isinstance(c, dict)), None)
+    if not cfg:
+        return 0, 0
+    try:
+        from app.llm.request_policy import plan_max_tokens
+
+        max_tokens = int(plan_max_tokens(cfg).value or 0)
+    except Exception:  # noqa: BLE001
+        max_tokens = 0
+    try:
+        window = int(cfg.get("context_window", 0) or 0)
+    except (TypeError, ValueError):
+        window = 0
+    return max_tokens, window
+
+
 async def apply_post_assemble(
     runtime: Any,
     ctx: Any,
@@ -736,10 +765,18 @@ async def apply_post_assemble(
         return None
     result = list(final)
 
-    # token 预算裁剪（默认关闭）：超预算先从最旧历史丢起，system 与本轮提问必留
-    from app.llm.token_budget import apply_budget
+    # 请求大小收口（唯一一处）：知道"模型窗口 − 输出预算"就从最旧历史丢起，
+    # system 与本轮提问必留；不知道窗口时退化为用户自定的 context_token_budget。
+    from app.llm.token_budget import apply_request_policy
 
-    result = apply_budget(result, getattr(runtime, "config", None), bot_id=getattr(runtime, "bot_id", None))
+    _mt, _window = _request_limits(runtime)
+    result = apply_request_policy(
+        result,
+        getattr(runtime, "config", None),
+        max_tokens=_mt,
+        context_window=_window,
+        bot_id=getattr(runtime, "bot_id", None),
+    )
 
     # 请求落盘（默认关闭）：把「最终发出去的东西」留成可比对的证据
     from app.llm.prompt_dump import record as _record_dump

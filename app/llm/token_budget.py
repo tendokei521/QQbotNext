@@ -137,3 +137,98 @@ def apply_budget(messages: list[dict], config: Any, *, bot_id: Any = None) -> li
         f"[Context] token 预算裁剪：估算 {estimated} > 上限 {limit}，丢弃最旧 {dropped} 条历史"
     )
     return trimmed
+
+
+#: 窗口留给"估算误差"的余量比例：估算用字符启发式，CJK/代码/JSON 偏差可达两三成，
+#: 不留余量就会在边界上被上游 400。宁可少放几条历史，也不要整轮失败。
+WINDOW_SAFETY_RATIO = 0.05
+#: 窗口减完输出预算后仍低于此值时，说明必留内容本身就装不下：不裁到负数，
+#: 只记一条可操作的 warning（用户该做的是调大 max_tokens 或缩短上下文）。
+MIN_INPUT_FLOOR = 256
+
+
+def request_limit(
+    config: Any,
+    *,
+    max_tokens: int = 0,
+    context_window: int = 0,
+) -> tuple[int, str]:
+    """本轮**输入**上限与来源说明（0 = 不限）。
+
+    优先级：模型窗口 > ``context_token_budget`` > 不限。窗口才是物理上限——
+    ``输入 + max_tokens`` 超了上游直接 400，而 ``context_token_budget`` 只是用户
+    自定的软阈值，所以有窗口时以窗口为准（软阈值退化为它的下界）。
+    """
+    try:
+        window = int(context_window or 0)
+    except (TypeError, ValueError):
+        window = 0
+    soft = budget(config)
+    if window > 0:
+        try:
+            reserve = max(0, int(max_tokens or 0))
+        except (TypeError, ValueError):
+            reserve = 0
+        usable = int(window * (1 - WINDOW_SAFETY_RATIO)) - reserve
+        usable = max(MIN_INPUT_FLOOR, usable)
+        why = f"模型窗口 {window} − 输出 {reserve} − {int(WINDOW_SAFETY_RATIO * 100)}% 余量"
+        if soft > 0:
+            usable = min(usable, soft)
+            why += f"，且 ≤ 配置上限 {soft}"
+        return usable, why
+    if soft > 0:
+        return soft, f"配置 context_token_budget={soft}"
+    return 0, ""
+
+
+def apply_request_policy(
+    messages: list[dict],
+    config: Any,
+    *,
+    max_tokens: int = 0,
+    context_window: int = 0,
+    bot_id: Any = None,
+    quiet: bool = False,
+) -> list[dict]:
+    """装配**唯一收口**：按模型窗口裁剪上下文，并在日志里交代这次请求的大小。
+
+    与 ``apply_budget`` 的区别：这里认识 "模型窗口 − 输出预算"，所以默认就生效
+    （只要知道窗口），不必先让用户配一个 ``context_token_budget``。三个"装不下"的
+    真因因此能在**发送前**被发现，而不是被上游一句 400 打发：
+
+    - 历史太长 → 从最旧的历史丢起（system 与本轮提问必留）；
+    - ``max_tokens`` 太大 → 日志直接指出来（该调小的是输出预算，不是砍历史）；
+    - 必留内容本身就超 → 明确说"裁剪解决不了"，别让用户以为系统尽力了。
+
+    返回（可能被裁剪后的）messages；不改动入参列表本身。
+    """
+    ratio = chars_per_token(config)
+    limit, why = request_limit(config, max_tokens=max_tokens, context_window=context_window)
+    estimated = estimate_tokens(messages, per_token_chars=ratio)
+    tag = f"#{bot_id or '?'}"
+    if limit <= 0:
+        if not quiet:
+            logger.add_info(tag).debug(
+                f"[Context] 本轮输入估算 ≈{estimated} token（未设上限：配置页可填模型上下文窗口）"
+            )
+        return messages
+    if estimated <= limit:
+        if not quiet:
+            logger.add_info(tag).debug(
+                f"[Context] 本轮输入估算 ≈{estimated} / 上限 {limit} token（{why}）"
+            )
+        return messages
+    trimmed, dropped = truncate(messages, limit, per_token_chars=ratio, bot_id=bot_id)
+    left = estimate_tokens(trimmed, per_token_chars=ratio)
+    if left > limit:
+        logger.add_info(tag).warning(
+            f"[Context] 输入 {estimated} token 超过上限 {limit}（{why}），但丢光历史仍剩 {left}："
+            f"裁剪解决不了这个问题 —— 要么调小「最大输出 Token」（当前 {max_tokens or '未设'}），"
+            f"要么缩短本轮提问/工具回执"
+        )
+    else:
+        logger.add_info(tag).info(
+            f"[Context] 输入 {estimated} > 上限 {limit}（{why}），丢弃最旧 {dropped} 条历史 "
+            f"→ {left} token"
+        )
+    return trimmed

@@ -44,10 +44,34 @@ def _origin_of(*layers: tuple[str, dict]) -> str:
     return "agent 配置"
 
 
+def _apply_max_tokens_plan(effective) -> dict:
+    """把 ``plan_max_tokens`` 的结论落到链上配置，并把来源一并交给下游。
+
+    这一层是"请求真正被发出去"前的最后一站，所以思考下限与窗口封顶在这里生效：
+    模型页与写侧校验是第一道（用户在页面上看到的就是生效值），这里是第二道——
+    老配置（页面上没重存过）也可能低于思考下限，而"预算全花在 reasoning 里"的
+    空回复不该留到运行时才发现。
+
+    落盘形状：``max_tokens`` = 生效值，``_max_tokens_origin`` = 带抬升/封顶说明的
+    来源串（chat 的日志与 ``[Budget]`` 行直接用这个串）。
+    """
+    from app.llm.request_policy import plan_max_tokens
+
+    cfg = dict(effective.config)
+    try:
+        plan = plan_max_tokens(cfg)
+    except Exception as e:  # noqa: BLE001 —— 计划失败就用合并值，不能因此不发请求
+        logger.add_info("LLM").warning(f"[max_tokens] 规划失败，沿用合并值: {e}")
+        return cfg
+    if plan.value and plan.value != cfg.get("max_tokens"):
+        cfg["max_tokens"] = plan.value
+    cfg["_max_tokens_origin"] = plan.describe()
+    return cfg
+
+
 class _Services:
     def __init__(self, task_manager) -> None:
         self.task_manager = task_manager
-
 
 class _Ctx:
     def __init__(self, bot, task_manager) -> None:
@@ -109,7 +133,7 @@ class AgentRuntime:
         preset = self.config_service.get_provider_preset(model["preset_id"]) if model else None
         if not model or not preset:
             return None
-        return merge_config_layers(
+        effective = merge_config_layers(
             base=self.config._base_raw_config(),
             # 只要"用户显式动过"的键：base 铺满了默认值，拿它做溯源等于没溯源
             agent_layer=self.config.explicit_values(TRACKED_KEYS),
@@ -123,7 +147,8 @@ class AgentRuntime:
                 "provider_preset_id": preset.get("id", ""),
                 "provider_model_id": model.get("id", ""),
             },
-        ).config
+        )
+        return _apply_max_tokens_plan(effective)
 
     def provider_config(self) -> dict:
         """返回主 provider 的完整配置（用于兼容旧调用路径）。"""
@@ -225,17 +250,19 @@ class AgentRuntime:
                 if preset:
                     # 走同一个合并实现：这条旧路径此前手写 update，溯源与校验都会漏掉
                     chain.append(
-                        merge_config_layers(
-                            base=self.config._base_raw_config(),
-                            agent_layer=self.config.explicit_values(TRACKED_KEYS),
-                            preset_layer=preset.get("config", {}) or {},
-                            defaults=DEFAULT_LLM_CONFIG,
-                            meta={
-                                "provider": preset.get("provider", "openai"),
-                                "provider_preset_id": preset.get("id", ""),
-                                "model": str(config.get("model", "") or ""),
-                            },
-                        ).config
+                        _apply_max_tokens_plan(
+                            merge_config_layers(
+                                base=self.config._base_raw_config(),
+                                agent_layer=self.config.explicit_values(TRACKED_KEYS),
+                                preset_layer=preset.get("config", {}) or {},
+                                defaults=DEFAULT_LLM_CONFIG,
+                                meta={
+                                    "provider": preset.get("provider", "openai"),
+                                    "provider_preset_id": preset.get("id", ""),
+                                    "model": str(config.get("model", "") or ""),
+                                },
+                            )
+                        )
                     )
 
         fallback_ids = [str(i) for i in (config.get("fallback_model_ids", []) or []) if str(i)]
