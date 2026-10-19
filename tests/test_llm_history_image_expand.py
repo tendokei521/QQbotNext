@@ -1,8 +1,9 @@
-"""H4b 历史图片按需取回测试。
+﻿"""H4b 历史图片按需取回测试。
 
 约定：
 - 历史里的图片渲染成 ``[图片#<消息id>]``（可展开标记），**不内联**（避免上下文膨胀）；
 - 模型调用 ``expand_image`` 按 id 取回 → 图片排进"本轮待传"队列；
+- 取回时**先落盘再内联**：队列里是本地字节（base64），不是会过期的 QQ 直链；
 - 视觉模型：图片作为一条"补全材料"user 消息附在请求末尾（不塞进原用户发言）；
 - 文本模型：只留文字说明，不发图片块（清洗兜底也不会让它 400）；
 - 讨论焦点（本轮触发消息）的图片仍走既有直接同传路径，与此无关。
@@ -10,11 +11,36 @@
 
 from __future__ import annotations
 
+import base64
 import types
 
-from app.llm import history_enrich
+import pytest
+
+from app.llm import history_enrich, image_media
+from app.llm import image as image_mod
 from app.llm.context_tools import _handle_expand_image, drain_round_images
 from app.llm.group_context import format_online_history
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+PNG_B64 = base64.b64encode(PNG_BYTES).decode()
+#: 队列里"一张图"的标准形状：本地字节 + 本地指向
+LOCAL_IMAGE = {
+    "kind": "base64",
+    "value": PNG_B64,
+    "mime": "image/png",
+    "media": {"sha": image_media.sha_of(PNG_BYTES), "mime": "image/png", "bytes": len(PNG_BYTES)},
+}
+
+
+@pytest.fixture(autouse=True)
+def _offline_download(monkeypatch):
+    """expand_image 现在会落盘：把下载换成固定 PNG 字节，测试不联网。"""
+
+    async def _download(url, *, max_bytes, timeout=0):
+        return PNG_BYTES, image_media.sniff_mime(PNG_BYTES)
+
+    monkeypatch.setattr(image_mod, "_download_bytes", _download)
+    return _download
 
 
 class _Bot:
@@ -42,6 +68,7 @@ class _Bot:
 def _ctx(bot, *, modalities=("text", "image"), store_dir=None):
     return types.SimpleNamespace(
         bot=bot,
+        bot_id=778,
         session_id="group_466",
         user_id="20002",
         group_id="466",
@@ -91,7 +118,7 @@ async def test_expand_image_queues_payloads_and_records(tmp_path, monkeypatch):
     assert "已取回" in out
     assert bot.calls == [1003]
     images = drain_round_images(ctx)
-    assert images == [{"kind": "url", "value": "https://cdn.example/pic.png"}]
+    assert images == [LOCAL_IMAGE]
     # 队列被清空（只传一次）
     assert drain_round_images(ctx) == []
     # 记账：请求收尾会写进补全登记
@@ -136,7 +163,7 @@ def test_round_images_appended_for_vision_model():
     from app.llm.chat import _append_round_images
 
     ctx = _ctx(_Bot())
-    ctx.extra["round_images"] = [{"kind": "url", "value": "https://cdn.example/pic.png"}]
+    ctx.extra["round_images"] = [dict(LOCAL_IMAGE)]
     messages = _messages()
     _append_round_images(messages, ctx, ["text", "image"])
 
@@ -144,14 +171,15 @@ def test_round_images_appended_for_vision_model():
     content = messages[-1]["content"]
     assert isinstance(content, list)
     assert content[0]["type"] == "text"
-    assert content[1] == {"type": "image_url", "image_url": {"url": "https://cdn.example/pic.png"}}
+    assert content[1]["type"] == "image_url"
+    assert content[1]["image_url"]["url"] == f"data:image/png;base64,{PNG_B64}"
 
 
 def test_round_images_skipped_for_text_only_model():
     from app.llm.chat import _append_round_images
 
     ctx = _ctx(_Bot(), modalities=("text",))
-    ctx.extra["round_images"] = [{"kind": "url", "value": "https://cdn.example/pic.png"}]
+    ctx.extra["round_images"] = [dict(LOCAL_IMAGE)]
     messages = _messages()
     _append_round_images(messages, ctx, ["text"])
 
@@ -167,7 +195,7 @@ def test_round_images_appended_returns_true_when_queued():
     from app.llm.context_tools import append_round_images
 
     ctx = _ctx(_Bot())
-    ctx.extra["round_images"] = [{"kind": "url", "value": "https://cdn.example/pic.png"}]
+    ctx.extra["round_images"] = [dict(LOCAL_IMAGE)]
 
     assert append_round_images(_messages(), ctx, ["text", "image"]) is True
     assert append_round_images(_messages(), ctx, ["text", "image"]) is False  # 队列已空
@@ -178,7 +206,7 @@ def test_round_images_drained_only_once():
     from app.llm.context_tools import append_round_images, drain_round_images
 
     ctx = _ctx(_Bot())
-    ctx.extra["round_images"] = [{"kind": "url", "value": "https://cdn.example/pic.png"}]
+    ctx.extra["round_images"] = [dict(LOCAL_IMAGE)]
     messages = _messages()
 
     append_round_images(messages, ctx, ["text", "image"])

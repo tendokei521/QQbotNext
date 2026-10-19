@@ -19,11 +19,14 @@ import types
 
 import pytest
 
-from app.llm import chat
+from app.llm import chat, image_media
+from app.llm import image as image_mod
 from app.llm.providers import PROVIDERS
 from app.llm.providers.base import BaseProvider, LLMResponse, StreamEvent
 
 CALLS: list[list[dict]] = []
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 32
 
 TOOL_CALL = {
     "index": 0,
@@ -110,6 +113,12 @@ def _reset():
 def probe(monkeypatch, tmp_path):
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
     monkeypatch.setitem(PROVIDERS, "img_probe", _Probe)
+
+    async def _download(url, *, max_bytes, timeout=0):
+        # 图片现在先落盘再内联：下载换成固定 PNG 字节，测试不联网
+        return PNG_BYTES, image_media.sniff_mime(PNG_BYTES)
+
+    monkeypatch.setattr(image_mod, "_download_bytes", _download)
 
 
 def _runtime(bot_id: int, config: dict):

@@ -734,6 +734,12 @@ async def _handle_expand_user(ctx, args: dict) -> str:
 async def _handle_expand_image(ctx, args: dict) -> str:
     """按消息 id 取回历史消息里的图片，供视觉模型"直接看到"。
 
+    两条路，**本地优先**：
+
+    1. 会话历史里那条消息已经落过盘（``data.media``）→ 直接读本地字节，连 OneBot 都不用问；
+       QQ 侧消息过期了也照样能给模型看图；
+    2. 没有本地指向 → 再 ``get_msg`` 取回原消息、解析并落盘（为下一轮留指向）。
+
     返回文本说明（已取回的消息 id / 图片数量 / 发送者），并把图片载荷排进
     "本轮稍后随请求传回"的队列（由 ``drain_round_images`` 取出）。
     非视觉模型拿到的是文字说明 + 占位，不会因此报错。
@@ -750,10 +756,34 @@ async def _handle_expand_image(ctx, args: dict) -> str:
         return "error: 当前上下文无可用 Bot"
 
     from app.llm.image import resolve_images
+    from app.llm.image_media import message_media_refs
 
+    bot_id = getattr(ctx, "bot_id", "") or getattr(bot, "bot_id", "") or getattr(
+        getattr(ctx, "runtime", None), "bot_id", ""
+    )
+    local_entries = _session_entries(ctx)
     lines: list[str] = []
     queued = 0
     for mid in messages:
+        local_refs = message_media_refs(local_entries, mid)
+        if local_refs:
+            image_segs = [{"type": "image", "data": {"media": dict(ref)}} for ref in local_refs]
+            who = "（本地缓存）"
+            images = await resolve_images(
+                _ImageEvent(image_segs), bot=bot, bot_id=bot_id,
+                max_images=len(image_segs), max_bytes=_max_image_bytes(ctx),
+                config=_runtime_config(ctx), segments=image_segs,
+            )
+            if images:
+                queued += len(images)
+                _record_round_images(ctx, images)
+                _record_expansion(
+                    ctx, "image", mid,
+                    summary=f"会话历史里的 {len(images)} 张图（本地缓存）",
+                    content="[本地缓存的图片]", source="expand_image",
+                )
+                lines.append(f"消息 {mid}：已从本地缓存取回 {len(images)} 张图片，图片随本条一起提供")
+                continue
         try:
             resp = await bot.get_msg(int(mid)) if str(mid).isdigit() else {}
         except Exception as e:  # noqa: BLE001 —— 取不到就如实说明
@@ -771,12 +801,12 @@ async def _handle_expand_image(ctx, args: dict) -> str:
         sender = data.get("sender") or {}
         who = display_names.display_for_sender(
             sender,
-            bot_id=getattr(ctx, "bot_id", "") or getattr(bot, "bot_id", ""),
+            bot_id=bot_id,
             group_id=getattr(ctx, "group_id", ""),
             runtime=_runtime_of(ctx),
         )
         images = await resolve_images(
-            _ImageEvent(image_segs), bot=bot,
+            _ImageEvent(image_segs), bot=bot, bot_id=bot_id,
             max_images=len(image_segs), max_bytes=_max_image_bytes(ctx),
             config=_runtime_config(ctx),
         )
@@ -797,6 +827,24 @@ async def _handle_expand_image(ctx, args: dict) -> str:
         # 而当时根本没有代码把图片递出去 —— 模型只能凭文字瞎猜，用户看到的是编造的描述。
         lines.append("（图片已记为本轮补全材料，**会在本轮的下一次请求里随消息一起提供**；本轮先别猜图片内容）")
     return "\n".join(lines) if lines else "error: 没有取到任何图片"
+
+
+def _session_entries(ctx) -> list:
+    """当前会话的历史条目（只读用途：复用本地图片指向）。取不到按空处理。"""
+    try:
+        from app.llm.session import SessionManager
+
+        session_id = str(getattr(ctx, "session_id", "") or "")
+        if not session_id:
+            return []
+        bot_id = getattr(ctx, "bot_id", "") or getattr(getattr(ctx, "bot", None), "bot_id", "") or getattr(
+            getattr(ctx, "runtime", None), "bot_id", ""
+        )
+        mgr = SessionManager(str(bot_id))
+        return mgr.get_history(session_id, limit=mgr.MAX_HISTORY_MESSAGES)
+    except Exception as e:  # noqa: BLE001 —— 拿不到历史就当没有本地指向
+        logger.debug(f"[ExpandImage] 读取会话历史失败（按无缓存处理）: {e}")
+        return []
 
 
 def append_round_images(messages: list[dict], tool_ctx, modalities) -> bool:
@@ -866,7 +914,7 @@ def _extra(ctx) -> dict:
     if not isinstance(extra, dict):
         extra = {}
         try:
-            setattr(ctx, "extra", extra)
+            ctx.extra = extra
         except Exception as e:  # noqa: BLE001 —— 只读 ctx 时不至于崩
             logger.debug(f"[Expand] 无法写入 ToolContext.extra: {e}")
     return extra

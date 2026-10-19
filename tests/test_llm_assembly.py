@@ -1,4 +1,4 @@
-"""装配器等价性 + 块序列黄金快照（重构的安全网）。
+﻿"""装配器等价性 + 块序列黄金快照（重构的安全网）。
 
 背景：同一类请求此前在四个地方各自组装 messages（chat.generate_response /
 chat.stream_response / scheduler._build_messages / proactive 内联），
@@ -12,7 +12,12 @@ chat.stream_response / scheduler._build_messages / proactive 内联），
 
 from __future__ import annotations
 
+import base64
+
 from app.llm.assembly import BLOCKS, PromptAssembler, PromptRequest, describe
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+PNG_B64 = base64.b64encode(PNG_BYTES).decode()
 from app.llm.prompt import (
     LEGACY_MESSAGE_META_INSTRUCTION,
     SCHEDULE_INSTRUCTION,
@@ -218,7 +223,7 @@ def test_describe_reports_media_for_image_turn():
         self_id=3,
         message=[MessageSegment("image", {"url": "https://a/1.png"})],
     )
-    resolved = [{"kind": "url", "value": "https://a/1.png"}]
+    resolved = [{"kind": "base64", "value": PNG_B64, "mime": "image/png"}]
     req = PromptRequest(
         config={"system_prompt": "s", "outbound_directive_enable": False},
         event=event,

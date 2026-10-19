@@ -138,8 +138,12 @@ class LlmPipeline:
     async def _resolve_images(self, ctx: LlmContext) -> list[dict]:
         """解析本轮消息的图片（仅当模型声明了 image 模态且开关打开）。
 
-        放在 LLM 请求之前调用，好处是：拿不到可用 URL 的图片会先留下日志，
-        而不是等 provider 返回 400 才发现；解析结果缓存在 ctx.state 供 chat 侧复用。
+        放在 LLM 请求之前调用有两个好处：① 拿不到字节的图片先留日志、退化成占位、
+        而不是等 provider 报错；② **字节在这里就落到本地仓**（每个账号一个 ``media/``），
+        历史里只留本地指向，后面任何一轮请求都不再依赖会过期的 QQ 直链。
+
+        落盘结果写在段自身上（``seg.data["media"]``），所以 ``chat`` 那一侧拿到的是同一批
+        已落盘的段，一张图全程只下载一次。解析结果缓存在 ``ctx.state`` 供调试查看。
         """
         if not self.runtime.config.get("image_understanding_enable", True):
             return []
@@ -152,14 +156,33 @@ class LlmPipeline:
             modalities = normalize_modalities((chain[0] or {}).get("modalities") if chain else None)
             if not supports_image(modalities):
                 return []
-            from app.llm.image import max_image_bytes, resolve_images
+            from app.llm.image import (
+                cache_enabled,
+                collect_image_segments,
+                max_image_bytes,
+                persist_images,
+                resolve_images,
+            )
 
+            segments = collect_image_segments(ctx.event)
+            if not segments:
+                return []
+            bot_id = getattr(self.runtime, "bot_id", "")
+            if cache_enabled(self.runtime.config):
+                await persist_images(
+                    segments,
+                    bot_id=bot_id,
+                    bot=ctx.bot,
+                    max_bytes=max_image_bytes(self.runtime.config),
+                )
             return await resolve_images(
                 ctx.event,
                 bot=ctx.bot,
+                bot_id=bot_id,
                 max_images=int(self.runtime.config.get("image_max_count", 4) or 4),
                 max_bytes=max_image_bytes(self.runtime.config),
                 config=self.runtime.config,
+                segments=segments,
             )
         except Exception as e:  # noqa: BLE001 —— 图片解析失败必须降级为纯文本，不能阻断对话
             from app.core.logger import logger

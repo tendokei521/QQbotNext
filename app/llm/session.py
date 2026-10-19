@@ -340,6 +340,29 @@ class SessionManager:
                 logger.add_info(f"#{self.bot_id}").info(
                     f"会话过期已归档: {sid}"
                 )
+        self._maybe_gc_media()
+
+    #: 本地图片清理的最小间隔（引用中的图永远不会被删，这里只收无主文件）
+    MEDIA_GC_INTERVAL = 6 * 3600
+
+    def _maybe_gc_media(self) -> None:
+        """按 TTL + 容量上限清一次本地图片仓（每 :attr:`MEDIA_GC_INTERVAL` 最多一次）。
+
+        图片落盘后就成了"无人引用就没人管"的垃圾：删掉的会话/消息、被替换掉的旧图
+        都还躺在 ``data/llm/<bot_id>/media/`` 里。挂在每 30 秒的清理线程上顺手做，
+        比另起一个定时器省事；``gc`` 本身只删**没有会话引用**的文件，
+        所以历史里的图片不会因为超时突然消失。
+        """
+        now = time.time()
+        if now - getattr(self, "_last_media_gc", 0.0) < self.MEDIA_GC_INTERVAL:
+            return
+        self._last_media_gc = now
+        try:
+            from app.llm import image_media
+
+            image_media.gc(self.bot_id)
+        except Exception as e:  # noqa: BLE001 —— 清理失败不影响会话与对话
+            logger.add_info(f"#{self.bot_id}").debug(f"本地图片清理失败（已忽略）: {e}")
 
     # ── 会话 CRUD ─────────────────────────────────────────
     def create_session(self, session_id: str, session_type: str, timeout: int = 60) -> Session:

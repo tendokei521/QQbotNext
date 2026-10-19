@@ -35,7 +35,15 @@ from app.llm.group_context import (
 from app.llm.session import SessionManager
 from app.llm import assembly
 from app.llm.assembly import PromptRequest
-from app.llm.image import collect_image_segments, max_image_bytes
+from app.llm.image import (
+    IMAGE_LIKE_SEGMENTS,
+    backfill_history_media,
+    cache_enabled,
+    collect_image_segments,
+    inline_budget,
+    max_image_bytes,
+    persist_images,
+)
 from app.llm.providers import SERVED_MODEL_KEY, log_token_usage
 from app.llm.providers.invoker import resolve_invoker
 from app.llm.providers.modalities import normalize_modalities, supports_image, supports_tool_use
@@ -143,15 +151,19 @@ def _history_media_hook(
     entries: list,
     *,
     include_images: bool,
+    bot_id: Any = "",
     max_images: int = 4,
     max_bytes: int | None = None,
+    max_mb: float | None = None,
+    max_edge: int | None = None,
 ):
     """会话历史图片的渲染钩子（配合 ``history_model.render_history`` 的 ``entry_media``）。
 
     - **文本模型**：不动正文（渲染器已给出 ``[图片#<消息id>]`` 占位），
       模型可 ``expand_image`` 按需取回；
-    - **视觉模型**：把历史里存的图片地址直接内联成 ``image_url`` 块，模型下一轮仍看得见
-      上一轮发的图；地址过期/只有 ``file`` 名时自然退化为占位。
+    - **视觉模型**：把历史里的**本地指向**（``data.media`` 的 sha）内联成 ``image_url`` 块，
+      模型下一轮仍看得见上一轮发的图。**远端直链永远不进请求**——QQ 图片链接会过期，
+      过期后不是"少一张图"，而是网关拉不到 → 整条请求 400；文件已丢时自然退化为占位。
 
     内联预算按**由新到旧**分配：最多 ``max_images`` 张（与单轮图片上限同一把尺子），
     避免长会话把上下文撑爆。
@@ -174,7 +186,14 @@ def _history_media_hook(
         if not history_image_segments(entry) or id(entry) not in allowed:
             return None
         # 正文保持渲染器结果（占位/正文），只把图片块接在后面
-        return None, history_image_parts(entry, max_images=max_images, max_bytes=max_bytes)
+        return None, history_image_parts(
+            entry,
+            bot_id=bot_id,
+            max_images=max_images,
+            max_bytes=max_bytes,
+            max_mb=max_mb,
+            max_edge=max_edge,
+        )
 
     return hook
 
@@ -1078,6 +1097,20 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
 
     body_text, meta_lines = split_user_context(user_text)
     event_segments = _segments_as_dicts(getattr(event, "message", None))
+    # 图片：**收到即落盘**。历史里只留本地指向（sha），远端直链不写进历史——QQ 图片链接
+    # 带 rkey 会过期，留着只会让下一轮请求被网关 400（详见 app/llm/image_media.py）。
+    # 这里跑在写历史之前，所以落盘结果随本条一起进归档；本轮请求也复用同一批已落盘的段，
+    # 一张图只下载一次。
+    if event_segments and _images_enabled(config) and cache_enabled(config):
+        try:
+            await persist_images(
+                event_segments,
+                bot_id=getattr(runtime, "bot_id", ""),
+                bot=getattr(event, "bot", None),
+                max_bytes=max_image_bytes(config),
+            )
+        except Exception as e:  # noqa: BLE001 —— 落盘失败只降级为占位，不能拖垮本轮对话
+            logger.add_info(f"#{runtime.bot_id}").warning(f"图片落盘失败，按占位处理: {e}")
     # 纯图片/表情消息没有正文：**不能**把元信息（"(QQ: …)"/时间行）冻成正文，
     # 否则历史里这条会显示成一串元信息，图片段（base.segments）反倒被无视。
     # 留空正文 + 保留 segments，渲染器会给出 [图片#id] 占位。
@@ -1100,6 +1133,26 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
     modalities = _modalities_for_chain(provider_chain)
     history_rounds = config.get("history_rounds", 50)
     _meta_flags = _history_meta_flags(runtime)
+    # 内联预算（单张 MB 上限、长边上限）：落盘上限与"能塞进请求体"的上限是两把尺子，
+    # 10MB 原图 base64 后接近 13MB，多数网关直接 400，所以这里先缩再发。
+    _inline_budget = inline_budget(config)
+    # 历史图片回填：改造前存的是远端直链（会过期），只要链接还活着就趁现在落成本地。
+    # 必须改**会话里的真实条目**（get_history 返回深拷贝，改它等于没改）；
+    # 只在视觉模型上做，且有张数/耗时双闸，不能把一轮请求拖成十几秒。
+    if _images_enabled(config) and cache_enabled(config) and supports_image(modalities):
+        live_data = getattr(session, "data", None)
+        live_entries = getattr(live_data, "history", None)
+        if live_entries:
+            try:
+                await backfill_history_media(
+                    live_entries,
+                    bot_id=getattr(runtime, "bot_id", ""),
+                    bot=getattr(event, "bot", None),
+                    max_bytes=max_image_bytes(config),
+                    max_entries=int(config.get("image_max_count", 4) or 4),
+                )
+            except Exception as e:  # noqa: BLE001 —— 回填是增强，失败只降级
+                logger.add_info(f"#{runtime.bot_id}").debug(f"历史图片回填失败（已忽略）: {e}")
 
     pre_history_text = await _fetch_pre_history(
         runtime, event, is_private=is_private, group_id=group_id, user_id=user_id,
@@ -1131,8 +1184,11 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
                 session_history_raw,
                 # 历史图片与"本轮图片"同一道门：开关 + 模型声明 image 模态
                 include_images=_images_enabled(config) and supports_image(modalities),
+                bot_id=getattr(runtime, "bot_id", ""),
                 max_images=int(config.get("image_max_count", 4) or 4),
                 max_bytes=max_image_bytes(config),
+                max_mb=_inline_budget[0],
+                max_edge=_inline_budget[1],
             ),
             **_meta_flags,
         ),
@@ -1195,19 +1251,26 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
     # 指代消解：焦点行 + 明确指向时的确定性预取（放在背景块之前，信息密度更高）
     referent_text = await _referent_block(tool_ctx.runtime, session_id, user_text, tool_ctx)
 
-    # 图片：先归一化（拿不到的图片提前留日志），是否真正传给模型由 assembly 的模态门控决定
+    # 图片：复用上面**已经落盘**的那批段（一张图只下载一次），渲染成 base64 块；
+    # 是否真正传给模型由 assembly 的模态门控决定。
     user_images: list[dict] = []
-    if collect_image_segments(event) and _images_enabled(config):
+    if _images_enabled(config):
         try:
             from app.llm.image import resolve_images
 
-            user_images = await resolve_images(
-                event,
-                bot=getattr(event, "bot", None),
-                max_images=int(config.get("image_max_count", 4) or 4),
-                max_bytes=max_image_bytes(config),
-                config=config,
-            )
+            image_segments = [
+                seg for seg in event_segments if seg.get("type") in IMAGE_LIKE_SEGMENTS
+            ]
+            if image_segments:
+                user_images = await resolve_images(
+                    event,
+                    bot=getattr(event, "bot", None),
+                    bot_id=getattr(runtime, "bot_id", ""),
+                    max_images=int(config.get("image_max_count", 4) or 4),
+                    max_bytes=max_image_bytes(config),
+                    config=config,
+                    segments=image_segments,
+                )
         except Exception as e:  # noqa: BLE001 —— 图片解析失败必须降级为纯文本
             logger.add_info(f"#{runtime.bot_id}").warning(f"图片解析失败，按纯文本处理: {e}")
 

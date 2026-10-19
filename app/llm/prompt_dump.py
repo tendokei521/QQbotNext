@@ -78,6 +78,38 @@ def _write_all(path: str, entries: list[dict]) -> None:
     os.replace(tmp, path)
 
 
+def _short_media_url(value: Any) -> str:
+    """把 base64 图片地址压成一行说明（保留前缀与长度，肉眼可核）。"""
+    text = str(value or "")
+    if not text.startswith("data:"):
+        return text
+    head, _, payload = text.partition(",")
+    return f"{head},<{len(payload)} chars>"
+
+
+def _redact_media(value: Any) -> Any:
+    """递归把多模态块里的 base64 载荷脱敏。
+
+    图片改成"本地字节内联"之后，一条 user 消息可能捎带几 MB 的 base64；dump 通道是
+    JSONL 且保留最近若干条，原样写进去会让文件迅速涨到上百 MB（还拖慢每次写入）。
+    只留"这里有一张 data:image/png 的图、载荷多长"，对账时够用。
+    """
+    if isinstance(value, list):
+        return [_redact_media(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: (
+                {**val, "url": _short_media_url(val.get("url"))}
+                if key == "image_url" and isinstance(val, dict)
+                else _redact_media(val)
+            )
+            for key, val in value.items()
+        }
+    if isinstance(value, str) and value.startswith("data:image/"):
+        return _short_media_url(value)
+    return value
+
+
 def record(
     runtime: Any,
     messages: list[dict],
@@ -86,7 +118,7 @@ def record(
     session_id: str = "",
     kind: str = "",
 ) -> bool:
-    """把本轮最终 messages 追加进滚动 JSONL。
+    """把本轮最终 messages 追加进滚动 JSONL（base64 图片载荷先脱敏）。
 
     返回是否真的落盘；未开启、序列化失败、磁盘异常等一律返回 False 并 debug 留痕，
     绝不向上抛 —— 这条通道是排查辅助，不能反过来影响对话。
@@ -103,7 +135,7 @@ def record(
             "session_id": str(session_id or ""),
             "kind": str(kind or "chat"),
             "count": len(messages or []),
-            "messages": list(messages or []),
+            "messages": _redact_media(list(messages or [])),
         }
         entries = _read_all(path)
         entries.append(entry)

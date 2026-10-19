@@ -1,4 +1,4 @@
-"""``extra_user_content_parts``：user 侧额外内容块（对齐 AstrBot）。
+﻿"""``extra_user_content_parts``：user 侧额外内容块（对齐 AstrBot）。
 
 AstrBot 把 ``<system_reminder>`` / ``<Quoted Message>`` / ``[Image Attachment: path …]``
 这类内容作为 **user 消息的额外文本块**追加（``ProviderRequest.extra_user_content_parts``），
@@ -13,9 +13,17 @@ AstrBot 把 ``<system_reminder>`` / ``<Quoted Message>`` / ``[Image Attachment: 
 
 from __future__ import annotations
 
+import base64
+
 from app.llm.assembly import PromptAssembler, PromptRequest
 
 BASE_CONFIG = {"system_prompt": "你是助手", "outbound_directive_enable": False}
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+PNG_B64 = base64.b64encode(PNG_BYTES).decode()
+PNG_DATA_URL = f"data:image/png;base64,{PNG_B64}"
+#: 图片条目现在是"本地字节"（base64），远端 URL 一律不进请求体
+LOCAL_IMAGE = [{"kind": "base64", "value": PNG_B64, "mime": "image/png"}]
 
 
 def _req(**kw) -> PromptRequest:
@@ -83,7 +91,7 @@ def test_empty_user_text_keeps_only_parts():
 
 def _image_req(**kw) -> PromptRequest:
     kw.setdefault("modalities", ["text", "image"])
-    kw.setdefault("user_images", [{"kind": "url", "value": "https://a/1.png"}])
+    kw.setdefault("user_images", LOCAL_IMAGE)
     return _req(**kw)
 
 
@@ -94,7 +102,7 @@ def test_place_images_keeps_parts_between_text_and_image():
     assert content == [
         {"type": "text", "text": "你好"},
         {"type": "text", "text": "<system_reminder>id=1</system_reminder>"},
-        {"type": "image_url", "image_url": {"url": "https://a/1.png"}},
+        {"type": "image_url", "image_url": {"url": PNG_DATA_URL}},
     ]
 
 

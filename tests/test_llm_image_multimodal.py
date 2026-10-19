@@ -5,11 +5,13 @@
 没有任何地方构造过图片块。本文件锁住"生成侧"：
 
 1. OneBot 图片段 → 可用图片载荷（http/data/base64/file 四种形态）；
-2. 拿不到可用来源的图片（``file: xxx.image``）不硬塞，若 bot 能 get_image 则兜底；
-3. 体积超限/数量超限跳过；
-4. OpenAI 风格 content 块组装（纯图片时补引导文本）；
-5. Anthropic / Gemini 各自的图片块翻译（此前会把 dict 压成纯文本 / str(dict)）；
-6. `assembly.place_images` 的开关与模态门控（文本模型保持 [图片] 占位语义），
+2. **落盘优先**：远程直链会被下载成本地字节，请求体里只出现 base64
+   （直链会过期，过期后网关拉不到 → 整条请求 400，见 app/llm/image_media.py）；
+3. 拿不到可用来源的图片（``file: xxx.image``）不硬塞，若 bot 能 get_image 则兜底；
+4. 体积超限/数量超限跳过；
+5. OpenAI 风格 content 块组装（纯图片时补引导文本）；
+6. Anthropic / Gemini 各自的图片块翻译（此前会把 dict 压成纯文本 / str(dict)）；
+7. `assembly.place_images` 的开关与模态门控（文本模型保持 [图片] 占位语义），
    以及 `assembly.sanitize` 作为最后一层兜底（漏进来的图块也会被替换）。
 """
 
@@ -20,6 +22,8 @@ import base64
 import pytest
 
 from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
+from app.llm import image as image_mod
+from app.llm import image_media
 from app.llm.assembly import PromptRequest, place_images
 from app.llm.image import (
     build_user_content,
@@ -27,6 +31,7 @@ from app.llm.image import (
     count_images,
     image_url_from_bytes,
     max_image_bytes,
+    persist_images,
     resolve_images,
 )
 from app.llm.providers.anthropic import _normalize_messages as anthropic_normalize
@@ -35,6 +40,15 @@ from app.llm.providers.gemini import _normalize_messages as gemini_normalize
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 32
 PNG_B64 = base64.b64encode(PNG_BYTES).decode()
 PNG_DATA_URL = f"data:image/png;base64,{PNG_B64}"
+#: "已解析的一张图"的标准形状（本地字节 + 本地指向）——远端 URL 不再允许出现在请求体
+LOCAL_IMAGE = [
+    {
+        "kind": "base64",
+        "value": PNG_B64,
+        "mime": "image/png",
+        "media": {"sha": image_media.sha_of(PNG_BYTES), "mime": "image/png", "bytes": len(PNG_BYTES)},
+    }
+]
 
 
 def _event(segments):
@@ -50,25 +64,53 @@ def _event(segments):
     )
 
 
+@pytest.fixture
+def offline_download(monkeypatch):
+    """把"下载远程图片"换成返回固定 PNG 字节（测试全程不联网）。"""
+
+    async def _download(url, *, max_bytes, timeout=0):
+        return PNG_BYTES, image_media.sniff_mime(PNG_BYTES)
+
+    monkeypatch.setattr(image_mod, "_download_bytes", _download)
+    return _download
+
+
+def _assert_local_base64(entry):
+    """一条图片条目必须是**本地字节**：kind=base64、带 mime、带本地指向、不是 URL。"""
+    assert entry["kind"] == "base64"
+    assert entry["mime"] == "image/png"
+    assert base64.b64decode(entry["value"]) == PNG_BYTES
+    assert entry["media"]["sha"] == image_media.sha_of(PNG_BYTES)
+    assert not str(entry["value"]).startswith("http")
+
+
 # ---------- 解析 ----------
 
 
-async def test_resolve_http_url():
-    images = await resolve_images(_event([("image", {"url": "https://cdn.example/a.png"})]))
-    assert images == [{"kind": "url", "value": "https://cdn.example/a.png"}]
-
-
-async def test_resolve_data_url_kept_as_is():
-    images = await resolve_images(_event([("image", {"file": PNG_DATA_URL})]))
-    assert images[0]["kind"] == "url"
-    assert images[0]["value"].startswith("data:image/png;base64,")
-
-
-async def test_resolve_base64_scheme_uses_named_mime():
+async def test_resolve_http_url_downloads_instead_of_passing_it_through(offline_download):
+    """远程直链现在必须变成"本地字节"——原样透传就是历史里那个 400 的根源。"""
     images = await resolve_images(
-        _event([("image", {"base64": f"base64://{PNG_B64}", "file": "a.jpg"})])
+        _event([("image", {"url": "https://cdn.example/a.png"})]), bot_id="test_bot"
     )
-    assert images == [{"kind": "base64", "value": PNG_B64, "mime": "image/jpeg"}]
+
+    assert len(images) == 1
+    _assert_local_base64(images[0])
+    assert image_media.path_of("test_bot", images[0]["media"]["sha"])
+
+
+async def test_resolve_data_url_becomes_local_bytes():
+    images = await resolve_images(_event([("image", {"file": PNG_DATA_URL})]), bot_id="test_bot")
+
+    _assert_local_base64(images[0])
+
+
+async def test_resolve_base64_scheme_sniffs_real_mime():
+    """``file: a.jpg`` 只是名字：真实格式按魔数走（声明错的 MIME 会让网关 400）。"""
+    images = await resolve_images(
+        _event([("image", {"base64": f"base64://{PNG_B64}", "file": "a.jpg"})]), bot_id="test_bot"
+    )
+
+    _assert_local_base64(images[0])
 
 
 async def test_file_only_without_bot_is_skipped():
@@ -77,7 +119,7 @@ async def test_file_only_without_bot_is_skipped():
     assert images == []
 
 
-async def test_file_only_with_bot_falls_back_to_get_image():
+async def test_file_only_with_bot_falls_back_to_get_image(offline_download):
     class _Bot:
         def __init__(self):
             self.calls = []
@@ -87,9 +129,11 @@ async def test_file_only_with_bot_falls_back_to_get_image():
             return {"status": "ok", "data": {"url": "http://127.0.0.1:3000/img/a.png"}}
 
     bot = _Bot()
-    images = await resolve_images(_event([("image", {"file": "abc.image"})]), bot=bot)
+    images = await resolve_images(
+        _event([("image", {"file": "abc.image"})]), bot=bot, bot_id="test_bot"
+    )
     assert bot.calls == ["abc.image"]
-    assert images == [{"kind": "url", "value": "http://127.0.0.1:3000/img/a.png"}]
+    _assert_local_base64(images[0])
 
 
 async def test_get_image_without_url_is_skipped():
@@ -112,14 +156,60 @@ async def test_get_image_exception_is_swallowed():
 
 async def test_size_limit_skips_huge_image():
     big = base64.b64encode(b"x" * 4096).decode()
-    images = await resolve_images(_event([("image", {"base64": f"base64://{big}"})]), max_bytes=1024)
+    images = await resolve_images(
+        _event([("image", {"base64": f"base64://{big}"})]), max_bytes=1024, bot_id="test_bot"
+    )
     assert images == []
 
 
-async def test_max_count_limits_images():
+async def test_download_failure_degrades_to_placeholder(monkeypatch):
+    """下载失败＝这一张不发（占位），绝不回退成"把直链丢给网关"。"""
+
+    async def _boom(url, *, max_bytes, timeout=0):
+        return None, ""
+
+    monkeypatch.setattr(image_mod, "_download_bytes", _boom)
+    images = await resolve_images(
+        _event([("image", {"url": "https://cdn.example/expired.png"})]), bot_id="test_bot"
+    )
+    assert images == []
+
+
+async def test_max_count_limits_images(offline_download):
     event = _event([("image", {"url": f"https://cdn.example/{i}.png"}) for i in range(5)])
-    images = await resolve_images(event, max_images=2)
+    images = await resolve_images(event, max_images=2, bot_id="test_bot")
     assert len(images) == 2
+
+
+async def test_persist_images_writes_local_ref_and_drops_remote_url(offline_download):
+    """收消息时落盘：段里只剩本地指向，远端直链被抹掉（它只会过期）。"""
+    segments = [{"type": "image", "data": {"url": "https://cdn.example/a.png", "file": "a.image"}},
+                {"type": "text", "data": {"text": "看图"}}]
+
+    saved = await persist_images(segments, bot_id="test_bot", max_bytes=max_image_bytes({}))
+
+    assert saved == 1
+    data = segments[0]["data"]
+    assert data["media"]["sha"] == image_media.sha_of(PNG_BYTES)
+    assert "url" not in data
+
+
+async def test_resolve_reuses_persisted_segment_without_download(monkeypatch):
+    """已经落过盘的段不再下载（一张图全程只取一次）。"""
+
+    async def _boom(url, *, max_bytes, timeout=0):
+        raise AssertionError("不该再下载")
+
+    monkeypatch.setattr(image_mod, "_download_bytes", _boom)
+    segments = [{"type": "image", "data": {}}]
+    await persist_images(
+        [{"type": "image", "data": {"file": PNG_DATA_URL}}], bot_id="test_bot"
+    )  # 先落一份
+    segments[0]["data"]["media"] = image_media.save_bytes("test_bot", PNG_BYTES)
+
+    images = await resolve_images(bot_id="test_bot", segments=segments)
+
+    _assert_local_base64(images[0])
 
 
 def test_count_and_collect_images():
@@ -146,23 +236,23 @@ def test_image_url_from_bytes_sniffs_mime():
 
 def test_build_user_content_keeps_text_and_image_order():
     content = build_user_content(
-        [{"kind": "url", "value": "https://a/1.png"}], text="看看这个"
+        [{"kind": "base64", "value": PNG_B64, "mime": "image/png"}], text="看看这个"
     )
     assert content == [
         {"type": "text", "text": "看看这个"},
-        {"type": "image_url", "image_url": {"url": "https://a/1.png"}},
+        {"type": "image_url", "image_url": {"url": PNG_DATA_URL}},
     ]
 
 
 def test_build_user_content_image_only_adds_lead_text():
-    content = build_user_content([{"kind": "url", "value": "https://a/1.png"}], text="")
+    content = build_user_content([{"kind": "base64", "value": PNG_B64}], text="")
     assert content[0]["type"] == "text"
     assert "图片" in content[0]["text"]
 
 
 def test_build_user_content_without_images_returns_none():
     assert build_user_content([], text="只有文字") is None
-    assert build_user_content([{"kind": "url", "value": ""}], text="x") is None
+    assert build_user_content([{"kind": "base64", "value": ""}], text="x") is None
 
 
 # ---------- provider 翻译 ----------
@@ -229,7 +319,7 @@ def _req_with_images(*, modalities, config=None, text="看看", images=None):
         event=event,
         session_id="group_778",
         user_text=text,
-        user_images=images if images is not None else [{"kind": "url", "value": "https://a/1.png"}],
+        user_images=images if images is not None else LOCAL_IMAGE,
         modalities=modalities,
     )
 
@@ -305,7 +395,7 @@ def test_build_messages_keeps_images_for_image_capable_model():
     messages = build_messages(req)
     content = messages[-1]["content"]
     assert isinstance(content, list)
-    assert content[1] == {"type": "image_url", "image_url": {"url": "https://a/1.png"}}
+    assert content[1] == {"type": "image_url", "image_url": {"url": PNG_DATA_URL}}
 
 
 # ---------- 流水线门控：@我 + 只发图 不能被整轮丢弃 ----------
@@ -343,7 +433,7 @@ class _BoomLocks:
         return _BoomLock()
 
 
-async def test_pipeline_lets_image_only_at_message_through(monkeypatch):
+async def test_pipeline_lets_image_only_at_message_through(monkeypatch, offline_download):
     """回归：此前 ``if not ctx.user_text: return`` 会把「@我 + 只发图」整轮丢掉。"""
     from app.llm.context import LlmContext, LlmJob
     from app.llm.pipeline import LlmPipeline
@@ -370,7 +460,11 @@ async def test_pipeline_lets_image_only_at_message_through(monkeypatch):
 
     assert stages == ["pre_request"]          # 没有被 `if not ctx.user_text: return` 拦下
     assert ctx.state.get("has_image") is True
-    assert ctx.state.get("user_images") == [{"kind": "url", "value": "https://a/1.png"}]
+    images = ctx.state.get("user_images") or []
+    assert len(images) == 1
+    _assert_local_base64(images[0])
+    # 落盘结果写在段自身上：chat 稍后拿到的就是同一批（不再二次下载）
+    assert image_media.segment_media(event.message[1]) is not None
 
 
 async def test_pipeline_resolve_images_skips_text_only_model(monkeypatch):

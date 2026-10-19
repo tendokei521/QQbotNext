@@ -1,4 +1,4 @@
-"""上下文按需展开工具（expand_context）测试。
+﻿"""上下文按需展开工具（expand_context）测试。
 
 它补的是渲染层展不开的那部分：更早/被引用的消息正文、合并转发内容、某个 QQ 是谁。
 要求：零参数可用（从本轮触发消息推导）、支持批量且并发、返回自解释（带 relation）、
@@ -11,9 +11,24 @@ import asyncio
 import re
 from types import SimpleNamespace
 
-from app.llm import focus, nicknames
+import pytest
+
+from app.llm import focus, image_media, nicknames
+from app.llm import image as image_mod
 from app.llm.context_tools import build_context_tools, derive_targets
 from app.llm.tool import ToolContext
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+
+
+@pytest.fixture(autouse=True)
+def _offline_image_download(monkeypatch):
+    """expand_image 现在会先落盘再内联：下载换成固定 PNG 字节，测试不联网。"""
+
+    async def _download(url, *, max_bytes, timeout=0):
+        return PNG_BYTES, image_media.sniff_mime(PNG_BYTES)
+
+    monkeypatch.setattr(image_mod, "_download_bytes", _download)
 
 
 class _Bot:

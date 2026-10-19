@@ -256,12 +256,17 @@ def test_build_user_content_emits_note_once():
 
 
 def test_build_user_content_static_images_unchanged():
-    parts = build_user_content([{"kind": "url", "value": "https://cdn.example/a.png"}], text="")
+    parts = build_user_content([{"kind": "base64", "value": "AAA", "mime": "image/png"}], text="")
 
     assert parts == [
         {"type": "text", "text": "[用户发送了图片]"},
-        {"type": "image_url", "image_url": {"url": "https://cdn.example/a.png"}},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}},
     ]
+
+
+def test_build_user_content_drops_remote_url_entries():
+    """远端地址永远不进请求体（历史直链会过期 → 网关拉不到 → 整轮 400）。"""
+    assert build_user_content([{"kind": "url", "value": "https://cdn.example/a.png"}], text="") is None
 
 
 def test_place_images_puts_frames_into_user_message():
