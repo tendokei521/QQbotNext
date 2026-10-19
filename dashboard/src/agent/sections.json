@@ -2,8 +2,9 @@
   "version": 3,
   "note": "分区与段内分组的唯一权威。groups 里每一项是本页自己的子分组：用 fields 显式列字段（顺序即展示顺序），或用 source 收整组后端 group。retired 里的字段前端不再提供任何入口（被别的计划接管），后端字段保留。",
   "retired": {
-    "note": "组装标准化由并行计划接管：信息感知成为固定流程（消息组装全面化 + 固定上传 tool），这些开关不再暴露给用户。后端字段与默认值保留，等那个计划落地后再一并退役。",
+    "note": "组装标准化由并行计划接管：信息感知成为固定流程（消息组装全面化 + 固定上传 tool），这些开关不再暴露给用户。后端字段与默认值保留，等那个计划落地后再一并退役。另：max_tokens（最大输出 Tokens）也在此退役——它只是「模型链全空时」的最后一层兜底，真正该改的地方是「Provider 预设 → 模型」页该模型的「最大输出 Token」（跟着模型走、带思考下限、日志写来源）。后端字段保留，供旧配置读取。",
     "fields": [
+      "max_tokens",
       "include_time",
       "include_private_qq",
       "include_sender",
@@ -72,7 +73,7 @@
           "id": "basic_model",
           "label": "模型参数",
           "icon": "mdi-api",
-          "fields": ["model", "temperature", "max_tokens"]
+          "fields": ["model", "temperature"]
         }
       ]
     },

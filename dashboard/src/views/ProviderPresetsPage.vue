@@ -20,6 +20,15 @@ interface ProviderModel {
   provider_type: string
   enabled: boolean
   config: Record<string, any>
+  /** 后端算好的「当下真正会用多少、来源是哪一层」（只含预设+模型两层） */
+  effective?: {
+    max_tokens: number
+    max_tokens_origin: string
+    max_tokens_notes: string[]
+    context_window: number
+    reasoning: boolean
+    overrides: string[]
+  }
   created_at: number
   updated_at: number
 }
@@ -79,7 +88,11 @@ const modelForm = reactive({
   provider_type: 'chat',
   modalities: ['text', 'tool_use'] as string[],
   temperature: 0.7,
-  max_tokens: 1024,
+  // null = 不覆盖（回落到连接预设 → Agent 页 → 内置默认）。字段类型必须是
+  // `number | null`：写成数字就会在每次保存时把一个"看起来像用户设置"的值烘进去。
+  max_tokens: null as number | null,
+  context_window: null as number | null,
+  reasoning: null as boolean | null,
   enabled: true,
 })
 
@@ -105,6 +118,25 @@ function modelModalityLabels(model: ProviderModel): string[] {
   if (!Array.isArray(list)) return ['文本']
   return list.map((item: string) => MODALITY_LABELS[item] || item)
 }
+
+/** 生效值的来源配色：模型自己设的（蓝）vs 继承来的（灰） */
+function maxTokensOriginColor(model: ProviderModel): string {
+  const origin = model.effective?.max_tokens_origin || ''
+  return origin.includes('provider 模型') ? 'primary' : 'medium-emphasis'
+}
+
+const maxTokensHint = computed(() => {
+  const window = Number(modelForm.context_window) || 0
+  if (modelForm.max_tokens == null) {
+    return window
+      ? `留空 = 跟随下一层（当前窗口 ${window}，未设上限时按窗口的 1/4 推导）`
+      : '留空 = 跟随「连接预设 → Agent 页 → 内置默认」'
+  }
+  if (window && Number(modelForm.max_tokens) >= window) {
+    return `不能大于等于上下文窗口（${window}）—— 输出也算在窗口里`
+  }
+  return ''
+})
 
 async function loadPresets() {
   loadingPresets.value = true
@@ -342,7 +374,10 @@ function openCreateModel() {
     provider_type: 'chat',
     modalities: defaultModalitiesFor('chat'),
     temperature: 0.7,
-    max_tokens: 1024,
+    // 留空 = 不覆盖（回落到连接预设 → Agent 页 → 内置默认）
+    max_tokens: null,
+    context_window: null,
+    reasoning: null,
     enabled: true,
   })
   modelDialog.value = true
@@ -359,10 +394,18 @@ function openEditModel(model: ProviderModel) {
     provider_type: model.provider_type,
     modalities: [...savedModalities],
     temperature: model.config.temperature ?? 0.7,
-    max_tokens: model.config.max_tokens ?? 1024,
+    // `?? 1024` 会把"没设"变成一个"看起来像用户设的"值再存回去 —— 那正是
+    // Agent 页「最大输出 Tokens」被杀死的路径。这里必须保持 null 原样。
+    max_tokens: model.config.max_tokens ?? null,
+    context_window: model.config.context_window ?? null,
+    reasoning: typeof model.config.reasoning === 'boolean' ? model.config.reasoning : null,
     enabled: model.enabled,
   })
   modelDialog.value = true
+}
+
+function resetMaxTokensToInherit() {
+  modelForm.max_tokens = null
 }
 
 async function saveModel() {
@@ -378,7 +421,11 @@ async function saveModel() {
       provider_type: modelForm.provider_type,
       modalities: [...modelForm.modalities],
       temperature: Number(modelForm.temperature) || 0.7,
-      max_tokens: Number(modelForm.max_tokens) || 1024,
+      // 空 / null → 不覆盖；后端按三态处理（0 与空串同样视为"清除覆盖"）。
+      // 用 `?? null` 而不是 `Number(...) || 1024`：后者会把"没设"变成一个写死的值。
+      max_tokens: modelForm.max_tokens == null ? null : Number(modelForm.max_tokens),
+      context_window: modelForm.context_window == null ? null : Number(modelForm.context_window),
+      reasoning: modelForm.reasoning,
       enabled: modelForm.enabled,
     }
     if (editingModelId.value) {
@@ -568,7 +615,26 @@ onMounted(() => {
                       >{{ cap }}</v-chip>
                     </td>
                     <td class="text-caption">{{ m.config.temperature ?? 0.7 }}</td>
-                    <td class="text-caption">{{ m.config.max_tokens ?? 1024 }}</td>
+                    <td class="text-caption">
+                      {{ m.effective?.max_tokens ?? '—' }}
+                      <v-tooltip location="top" max-width="320">
+                        <template #activator="{ props }">
+                          <v-icon
+                            v-bind="props"
+                            size="x-small"
+                            :color="maxTokensOriginColor(m)"
+                            class="ml-1"
+                          >mdi-information-outline</v-icon>
+                        </template>
+                        <div>来源：{{ m.effective?.max_tokens_origin || '内置默认' }}</div>
+                        <div v-if="m.config.max_tokens == null">
+                          该模型未设置覆盖，跟随下一层
+                        </div>
+                        <div v-for="note in m.effective?.max_tokens_notes || []" :key="note">{{ note }}</div>
+                        <div v-if="m.effective?.context_window">上下文窗口：{{ m.effective.context_window }}</div>
+                        <div v-if="m.effective?.reasoning">思考模型（输出预算有下限）</div>
+                      </v-tooltip>
+                    </td>
                     <td>
                       <v-chip size="x-small" :color="m.enabled ? 'success' : 'default'" variant="tonal">
                         {{ m.enabled ? '启用' : '停用' }}
@@ -730,7 +796,59 @@ onMounted(() => {
               <v-text-field v-model.number="modelForm.temperature" label="温度" type="number" step="0.1" min="0" max="2" density="comfortable" hide-details />
             </v-col>
             <v-col cols="6">
-              <v-text-field v-model.number="modelForm.max_tokens" label="最大输出 Token" type="number" min="1" max="65536" density="comfortable" hide-details />
+              <v-text-field
+                v-model.number="modelForm.max_tokens"
+                label="最大输出 Token"
+                type="number"
+                min="1"
+                max="1000000"
+                density="comfortable"
+                hide-details
+                clearable
+                placeholder="留空 = 跟随下一层"
+                :hint="maxTokensHint"
+                persistent-hint
+              >
+                <template #append-inner>
+                  <v-btn
+                    v-if="modelForm.max_tokens != null"
+                    size="x-small"
+                    variant="text"
+                    @click="resetMaxTokensToInherit"
+                  >恢复继承</v-btn>
+                </template>
+              </v-text-field>
+            </v-col>
+          </v-row>
+          <v-row>
+            <v-col cols="6">
+              <v-text-field
+                v-model.number="modelForm.context_window"
+                label="上下文窗口（可选）"
+                type="number"
+                min="1"
+                density="comfortable"
+                hide-details
+                clearable
+                placeholder="留空 = 不限制"
+                hint="填了才能在发送前发现「装不下」，不用等上游报错"
+                persistent-hint
+              />
+            </v-col>
+            <v-col cols="6">
+              <v-select
+                v-model="modelForm.reasoning"
+                :items="[
+                  { title: '自动（按模型名判断）', value: null },
+                  { title: '是，思考模型', value: true },
+                  { title: '否，普通模型', value: false },
+                ]"
+                label="思考模型"
+                density="comfortable"
+                hide-details
+                hint="思考模型会先花预算思考，输出上限有下限"
+                persistent-hint
+              />
             </v-col>
           </v-row>
           <v-switch v-model="modelForm.enabled" label="启用" color="primary" density="compact" hide-details class="mt-2" />

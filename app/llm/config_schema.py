@@ -44,11 +44,12 @@ SCHEMA = {
         "default": 0.7, "min": 0, "max": 2, "step": 0.1, "group": "group_model",
     },
     "max_tokens": {
-        "type": "number", "label": "最大输出 Tokens",
-        "description": "单次回复的最大 token 数（思考模型的思考也算在里面，预算被打满时正文可能是空的）。"
-                       "**优先级最低**：若「Provider 预设 → 模型」页给该模型填了「最大输出 Tokens」，"
-                       "以那一层为准，本项不生效（日志会明确提示被覆盖）",
-        "default": 1024, "min": 1, "max": 32768, "group": "group_model",
+        "type": "number", "label": "最大输出 Tokens（兜底）",
+        "description": "**只在整条模型链上都没有设置时才生效**（最后一层兜底）。"
+                       "真正该改的地方是「Provider 预设 → 模型」页该模型的「最大输出 Token」："
+                       "那里的值优先，且能跟着模型走（思考模型还有 2048 的下限）。"
+                       "日志会写明本次生效的值来自哪一层。",
+        "default": 1024, "min": 1, "max": 1000000, "group": "group_model",
     },
     "stream_output": {
         "type": "boolean", "label": "流式输出", "description": "启用后 LLM 回复按句子流式发送（支持带 tools 的工具调用）",
@@ -964,7 +965,9 @@ _gate(["proactive_group_sessions", "proactive_group_idle_minutes"], _on("proacti
 _BASIC_FIELDS = {
     # 基础配置
     "group_enable", "private_enable",
-    "model", "temperature", "max_tokens",
+    # 注意：max_tokens 不在这里 —— 它只在模型链全空时兜底，值得改它的地方是
+    # 「Provider 预设 → 模型」页，摆在 Agent 首页只会继续误导
+    "model", "temperature",
     "system_prompt", "persona_preset_id",
     "assembly_profile", "behavior_rules_enable", "participation", "emoji_react_level",
     # 权限
