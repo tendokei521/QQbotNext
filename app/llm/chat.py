@@ -1503,20 +1503,11 @@ async def stream_response(runtime, event, ctx=None):
                 f"[LLM] 流式请求失败 -> {session_id} (task: {session.task_id}), "
                 f"round={_round}, 已产文本={bool(full_text_parts)}, 工具数={len(tool_calls)}: {stream_error}"
             )
-            if not full_text:
-                yield "抱歉，我暂时无法回答，请稍后再试。"
-            _record_stream_telemetry(
-                runtime, session_id, provider_chain, model, messages,
-                full_text_parts, tool_results, stream_start, False, stream_error_text,
-                usage=usage_sink,
-            )
-            log_token_usage(
-                usage_sink,
-                model=_served_model_label(usage_sink, meta["model"]),
-                chars=len("".join(full_text_parts)),
-                stream=True,
-            )
-            return
+            # 这里**不能 return**：此前直接 return 跳过了写历史 / mark_replied /
+            # 记忆蒸馏 / 遥测落库，而用户那边其实已经收到正文（流式是边产边发的）。
+            # 后果：下一轮上下文里"我刚说过的话"不存在，用户追问时模型一脸茫然；
+            # 群里也因为没有 mark_replied 被当成"没回复过"。统一走下面的收尾逻辑。
+            break
 
         # 思考吃满输出预算：模型把 max_tokens 全花在 reasoning 里，正文还没开始就被截断
         # （线上表现：输出 8192 = 上限、回复 0 字符、用户收到兜底话术）。同一条 prompt
@@ -1584,7 +1575,12 @@ async def stream_response(runtime, event, ctx=None):
     if speech_by_tool:
         # 被直接点名（@ / 私聊）却一句话没说：再要一次，避免"叫了不理"。
         # 用非流式补一轮是因为这里只关心"有没有入稿"，不需要把文本流给用户。
-        if speech.spoken == 0 and _should_force_speak(config, ctx, is_private):
+        # 流式已失败时不再补：错误多半是认证/配额/上下文超长，再打一枪只会再烧一次钱。
+        if (
+            speech.spoken == 0
+            and not stream_error_text
+            and _should_force_speak(config, ctx, is_private)
+        ):
             await _force_speak_round(
                 runtime, speech, messages, provider_chain, meta, tools, tool_executor
             )
@@ -1595,18 +1591,29 @@ async def stream_response(runtime, event, ctx=None):
         full_text = "\n".join(spoken_parts)
         if speech.spoken == 0:
             # 静默：不发、不写 assistant 历史。这是正常结局，不是失败——但必须留痕，
-            # 否则"哑火太多"会变成查不到原因的现象。
-            logger.add_info(f"#{runtime.bot_id}").info(
-                f"[LLM] 静默（看过但没说话）-> {session_id} (task: {session.task_id}, "
-                f"finished={speech.finished}, reason={speech.finish_reason or '-'})"
+            # 否则"哑火太多"会变成查不到原因的现象。流式失败要说失败，别说静默。
+            log = logger.add_info(f"#{runtime.bot_id}")
+            detail = (
+                f"{session_id} (task: {session.task_id}, finished={speech.finished}, "
+                f"reason={speech.finish_reason or '-'}"
             )
-            if ctx is not None:
+            if stream_error_text:
+                log.error(f"[LLM] 流式失败且未开口 -> {detail}, error={stream_error_text})")
+            else:
+                log.info(f"[LLM] 静默（看过但没说话）-> {detail})")
+            if ctx is not None and not stream_error_text:
                 ctx.state["silent"] = True
             if _speech_fallback_enabled(config):
                 fallback = "抱歉，我暂时无法回答，请稍后再试。"
                 full_text = fallback
                 spoken_parts.append(fallback)
                 yield fallback
+                # 兜底话术**已经发给用户**了 → 必须进历史，否则下一轮"我没说过"
+                session_mgr.add_message(
+                    session_id, "assistant", _clean_output_for_history(config, fallback)
+                )
+                if not is_private:
+                    session.mark_replied()
         elif not is_private:
             session.mark_replied()
         await asyncio.to_thread(session_mgr.history.save_session, session)
