@@ -28,7 +28,7 @@ app/
 ├── services/            bot_service / scheduler(定时) / log_service / provider(数据源)
 └── webui/               管理后台（api/ + schemas/ + templates/ + static/）
 module/                  ★ 插件目录（三级结构）
-├── modules/             业务插件主体（<name>/module.py、config_schema.py、service.py、pages/）
+├── modules/             业务插件主体（`<name>/module.py` 必须；`config_schema.py`/`service.py`/`pages/` 可选）
 ├── configs/             每模块配置（<name>/config.json + authority.json，迁移源）
 └── data/                每模块可选持久化数据（get_data_path 自动创建）
 data/                    SQLite（app.db）+ 框架级 LLM 数据（data/llm）
@@ -38,6 +38,9 @@ logs/                    debug.log / warn.log / errors.log / user.log + 归档�
 > **注意**：模块配置迁移源从旧的 `modules/<name>/configs.json`、`authority.json` 迁到
 > `module/configs/<name>/config.json`、`authority.json`；模块主体代码在 `module/modules/<name>/`。
 > 首次启动若 DB 为空，自动从 `module/configs/*/` 迁移一次，之后以 SQLite 为准。
+
+> ⚠️ 上图的「分层」与实际依赖并不完全一致：`app/llm/` 被 24 个文件互为循环依赖（12,112 行），
+> `app/webui/api/` 也在该环内。改动前请先读 **`STYLE.md §12 已知架构债`**。
 
 ## 3. 启动 / 停止
 
@@ -123,15 +126,19 @@ python main.py
 
 ```
 module/modules/<name>/
-  module.py              插件声明（Module(BaseModule)）
-  config_schema.py       WebUI 表单定义
-  service.py             业务逻辑
-  pages/index.html       可选自定义配置页
+  module.py              必须：插件声明（Module(BaseModule)）
+  config_schema.py       可选：WebUI 表单定义
+  service.py             可选：业务逻辑（业务一多就升级成 service/ 子包）
+  pages/index.html       可选：自定义配置页
 module/configs/<name>/
   config.json            配置迁移源（首次启动迁入 SQLite，之后以 SQLite 为准）
   authority.json         权限迁移源
 module/data/<name>/      可选持久化数据（get_data_path 自动创建）
 ```
+
+> 只有 `module.py` 是必需的。现状里 13 个插件有 4 个没有 `service.py`（逻辑直接在 `module.py`），
+> 3 个用了 `service/` 子包（`df_password`、`recall_back`、`time_sign_in`）。
+> 契约细节见 `docs/MODULE_DEV.md §1`。
 
 ```python
 # module.py —— 声明
