@@ -50,7 +50,30 @@ class _AuthError(_LLMError):
 
 
 class _RetryableError(_LLMError):
-    """可重试错误（限流 429 / 服务端 5xx / 部分 4xx / 网络）：指数退避重试。"""
+    """可重试错误（限流 429 / 服务端 5xx / 部分 4xx / 网络）：指数退避重试。
+
+    ``retry_after`` 是上游 ``Retry-After`` 头里的秒数：给了就听它的，别自作聪明
+    用 1s/2s/4s 去撞同一道限流墙。
+    """
+
+    def __init__(self, message: str = "", code: str | None = None, retry_after: float | None = None):
+        super().__init__(message, code)
+        self.retry_after = retry_after
+
+
+def _retry_after_of(resp) -> float | None:
+    """从响应头取 ``Retry-After``（秒）。只认数字；HTTP-date 形式忽略。"""
+    raw = ""
+    try:
+        raw = str(resp.headers.get("Retry-After") or resp.headers.get("retry-after") or "").strip()
+    except Exception:  # noqa: BLE001 —— 头读不到就当没有
+        return None
+    if not raw:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return None
 
 
 def _split_keys(api_key: str) -> list[str]:
@@ -131,7 +154,9 @@ class OpenAICompatProvider(BaseProvider):
         super().__init__(config)
         self.api_keys = _split_keys(config.get("api_key", "")) or [""]
         self.api_base = (config.get("api_base", "") or "https://api.deepseek.com").rstrip("/")
-        self.max_retries = max(1, int(config.get("retry_attempts", 3) or 3))
+        # HTTP 层瞬态重试次数。默认 2 而不是 3：这一层的每一次都会重发**全量上下文**，
+        # 三层重试（本层 × 空回复 × 收敛）相乘起来能把一轮变成十几次请求。
+        self.max_retries = max(1, int(config.get("retry_attempts", 2) or 2))
 
     def _extra_headers(self) -> dict:
         return build_extra_headers(self.config)
@@ -205,7 +230,9 @@ class OpenAICompatProvider(BaseProvider):
                         raise _AuthError(f"HTTP {resp.status}: {body}", code=f"HTTP {resp.status}")
                     if resp.status in RETRYABLE_STATUS:
                         raise _RetryableError(
-                            f"HTTP {resp.status}: {body}", code=f"HTTP {resp.status}"
+                            f"HTTP {resp.status}: {body}",
+                            code=f"HTTP {resp.status}",
+                            retry_after=_retry_after_of(resp),
                         )
                     raise _FatalError(f"HTTP {resp.status}: {body}", code=f"HTTP {resp.status}")
                 return await resp.json()
@@ -228,7 +255,9 @@ class OpenAICompatProvider(BaseProvider):
                         raise _AuthError(f"HTTP {resp.status}: {body}", code=f"HTTP {resp.status}")
                     if resp.status in RETRYABLE_STATUS:
                         raise _RetryableError(
-                            f"HTTP {resp.status}: {body}", code=f"HTTP {resp.status}"
+                            f"HTTP {resp.status}: {body}",
+                            code=f"HTTP {resp.status}",
+                            retry_after=_retry_after_of(resp),
                         )
                     raise _FatalError(f"HTTP {resp.status}: {body}", code=f"HTTP {resp.status}")
                 dropped = 0
@@ -279,7 +308,8 @@ class OpenAICompatProvider(BaseProvider):
             except Exception as e:
                 last_error = format_llm_error(e)
                 if attempt < self.max_retries - 1:
-                    delay = 2 ** attempt
+                    # 上游给了 Retry-After 就听它的；没有才用指数退避
+                    delay = getattr(e, "retry_after", None) or (2 ** attempt)
                     logger.add_info("Api").warning(
                         f"API 请求失败，{delay}s 后重试 ({attempt + 1}/{self.max_retries}): {last_error}"
                     )
@@ -452,9 +482,11 @@ class OpenAICompatProvider(BaseProvider):
                 if started or attempt >= self.max_retries - 1:
                     yield StreamEvent(type="error", text=format_llm_error(e))
                     return
+                delay = getattr(e, "retry_after", None) or (2 ** attempt)
                 logger.add_info("Api").warning(
-                    f"流式请求失败，{2 ** attempt}s 后重试 ({attempt + 1}/{self.max_retries}): {format_llm_error(e)}"
+                    f"流式请求失败，{delay}s 后重试 ({attempt + 1}/{self.max_retries}): {format_llm_error(e)}"
                 )
-                await asyncio.sleep(2 ** attempt)
+                await asyncio.sleep(delay)
 
         yield StreamEvent(type="error", text="流式请求最终失败")
+

@@ -33,6 +33,10 @@ CHAT_PARAMS = (
     "max_tool_rounds",
     "max_empty_retries",
     "empty_retry_backoff",
+    # 整轮的请求次数/累计输入 token 闸门与"这份上下文大概多少 token"的估算
+    # （见 request_policy.TurnBudget）：第三方接管调用策略时把它继续往下传即可
+    "budget",
+    "input_tokens_estimate",
 )
 #: ``stream()`` 会透传的参数名
 STREAM_PARAMS = (
@@ -45,6 +49,8 @@ STREAM_PARAMS = (
     "max_empty_retries",
     "empty_retry_backoff",
     "usage_sink",
+    "budget",
+    "input_tokens_estimate",
 )
 
 

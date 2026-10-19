@@ -30,6 +30,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -289,6 +290,15 @@ _DETERMINISTIC_MARKERS = (
     "invalid_request_error",
     "content policy",
     "safety",
+    # 中文上游（国内中转/自建网关）常见文案
+    "模型不存在",
+    "不存在",
+    "无权限",
+    "未授权",
+    "参数错误",
+    "内容审核",
+    "超长",
+    "上下文",
 )
 
 
@@ -356,6 +366,30 @@ def _status_of(exc: Any) -> int | None:
         if isinstance(status, int):
             return status
     return None
+
+
+_STATUS_RE = re.compile(r"\b([45]\d\d)\b")
+
+
+def classify_error_text(text: str) -> Failure:
+    """错误**文案** → 失败分类（没有异常对象可看时用）。
+
+    provider 适配器会把上游的错误报文包成 ``StreamEvent(type="error")``，回退器
+    拿到的只有一句话。这里和 ``classify_exception`` 用同一套关键词与状态码口径，
+    避免"异常路径判确定性、事件路径判瞬态"这种两套标准。
+    """
+    detail = str(text or "").strip()
+    lowered = detail.lower()
+    status_match = _STATUS_RE.search(detail)
+    if status_match:
+        status = int(status_match.group(1))
+        if status in _TRANSIENT_STATUS or 500 <= status < 600:
+            return Failure(FailureKind.TRANSIENT, detail[:200], retry_same=True)
+        return Failure(FailureKind.DETERMINISTIC, detail[:200], switch_provider=False)
+    if any(marker in lowered for marker in _DETERMINISTIC_MARKERS):
+        return Failure(FailureKind.DETERMINISTIC, detail[:200], switch_provider=False)
+    # 文案里既没有状态码也没有确定性关键词：当成瞬态抖一次（总次数由 TurnBudget 兜住）
+    return Failure(FailureKind.TRANSIENT, detail[:200], retry_same=True)
 
 
 def classify_exception(exc: BaseException, *, detail: str = "") -> Failure:
@@ -456,10 +490,17 @@ class TurnBudget:
     为什么必须有：``retry_attempts × empty_reply_retries × reasoning_overflow_retries
     × provider 数`` 最坏能乘到十几次，而每一次都带着全量上下文——线上就是这么把
     16.7 万 token 发了三遍的。这里给整轮一个硬上限。
+
+    关键区分：**工具轮是合法的多次请求，不算重试**。``max_tool_rounds`` 是用户
+    明确配置的"模型→调工具→再判断"轮数，把它算进重试额度会让配置 5 轮的任务在第
+    4 轮被预算掐死（而且日志会诬告"重试用尽"）。所以额度分两半：``base_requests``
+    是合法轮次，档位给的是**额外的**重试余量。
     """
 
     profile: str = DEFAULT_RETRY_PROFILE
     max_input_tokens: int = 0  # 0 = 不限（沿用 context_token_budget 的语义）
+    #: 合法轮次（工具循环的轮数上限）：不占重试额度，否则"配 5 轮"会被预算掐在第 4 轮
+    base_requests: int = 0
     requests: int = 0
     input_tokens: int = 0
     denied_reasons: list[str] = field(default_factory=list)
@@ -468,17 +509,27 @@ class TurnBudget:
     def from_config(cls, config: Any) -> TurnBudget:
         profile = retry_profile_of(config)
         limit = 0
+        base = 0
         getter = getattr(config, "get", None)
         if callable(getter):
             try:
                 limit = _as_int(getter("turn_token_budget", 0), 0)
             except Exception:  # noqa: BLE001
                 limit = 0
-        return cls(profile=profile, max_input_tokens=max(0, limit))
+            try:
+                base = _as_int(getter("max_tool_rounds", 0), 0)
+            except Exception:  # noqa: BLE001
+                base = 0
+        return cls(profile=profile, max_input_tokens=max(0, limit), base_requests=max(0, base))
+
+    @property
+    def retry_requests(self) -> int:
+        """档位给的**额外**请求额度（重试用）。"""
+        return RETRY_PROFILES.get(self.profile, RETRY_PROFILES[DEFAULT_RETRY_PROFILE])["max_requests"]
 
     @property
     def max_requests(self) -> int:
-        return RETRY_PROFILES.get(self.profile, RETRY_PROFILES[DEFAULT_RETRY_PROFILE])["max_requests"]
+        return self.retry_requests + max(0, self.base_requests)
 
     @property
     def transient_retries(self) -> int:
@@ -520,6 +571,8 @@ class TurnBudget:
             "profile": self.profile,
             "requests": self.requests,
             "max_requests": self.max_requests,
+            "base_requests": self.base_requests,
+            "retry_requests": self.retry_requests,
             "input_tokens": self.input_tokens,
             "max_input_tokens": self.max_input_tokens,
             "denied": list(self.denied_reasons),
@@ -527,6 +580,8 @@ class TurnBudget:
 
     def describe(self) -> str:
         text = f"请求 {self.requests}/{self.max_requests}"
+        if self.base_requests:
+            text += f"（工具轮上限 {self.base_requests} + 重试余量 {self.retry_requests}）"
         if self.input_tokens:
             text += f"，累计输入 ≈{self.input_tokens} token"
             if self.max_input_tokens:
@@ -552,6 +607,9 @@ __all__ = [
     "plan_max_tokens",
     "is_reasoning_model",
     "classify_exception",
+    "classify_error_text",
     "classify_response",
     "retry_profile_of",
 ]
+
+

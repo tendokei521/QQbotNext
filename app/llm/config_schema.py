@@ -731,6 +731,26 @@ SCHEMA = {
                        "或缩短上下文。0 = 关闭（只记日志、直接走兜底）",
         "default": 1, "min": 0, "max": 2, "group": "group_tools",
     },
+    "retry_profile": {
+        "type": "select", "label": "重试档位",
+        "description": "一整轮对话最多能发几次请求、累计烧多少输入 token 的总闸门。"
+                       "节流：最多 2 次请求、不重试；均衡：4 次请求、同模型最多重试 1 次；"
+                       "抗压：6 次请求、同模型最多重试 3 次。"
+                       "闸门管的是**总账**——没有它，「HTTP 重试 × 空回复重试 × 收敛重试 × 回退模型数」"
+                       "会相乘成十几次请求，每次都带着全量上下文",
+        "default": "balanced", "group": "group_tools",
+        "options": {
+            "thrifty": "节流（省钱优先）",
+            "balanced": "均衡（推荐）",
+            "resilient": "抗压（可用性优先）",
+        },
+    },
+    "turn_token_budget": {
+        "type": "number", "label": "单轮输入 Token 上限",
+        "description": "一轮对话（含所有重试与回退）累计输入 token 的上限，0 = 不设上限（只用档位的次数闸门）。"
+                       "超过就停止重试并如实写日志，而不是继续把同一份上下文重发一遍",
+        "default": 0, "min": 0, "max": 2000000, "group": "group_tools",
+    },
     "image_understanding_enable": {
         "type": "boolean", "label": "图片理解（多模态同传）",
         "description": "把本轮消息里的图片直接传给模型。仅对「模型」页勾选了 image 模态的模型生效；"

@@ -21,7 +21,9 @@ DEFAULT_LLM_CONFIG: dict = {
     "api_key": "",
     "api_base": "https://api.deepseek.com",
     "provider": "openai",
-    "retry_attempts": 3,
+    # HTTP 层瞬态重试（429/5xx/超时）次数。默认 2：这一层每次都会重发全量上下文，
+    # 配合 retry_profile 的总次数闸门一起控制一轮的真实成本。
+    "retry_attempts": 2,
     "model": "deepseek-chat",
     "system_prompt": "你是一个友好的助手。",
     # 角色预设**活引用**：填预设 ID 时，每轮组装都按 ID 实时解析预设的提示词与预设对话，
@@ -185,6 +187,14 @@ DEFAULT_LLM_CONFIG: dict = {
     # 追加一次「不要复述思考、直接作答」的提醒再要一枪（换问法，不是重复同一 prompt——
     # 后者必然同样打满）。只是尽力而为，根治办法是调大「模型」页的 max_tokens 或缩短上下文。
     "reasoning_overflow_retries": 1,
+    # 重试档位（thrifty / balanced / resilient）：决定**一整轮**最多能发几次请求、
+    # 最多累计烧多少输入 token（见 request_policy.TurnBudget）。这是硬闸门——
+    # 没有它，"HTTP 重试 × 空回复重试 × 收敛重试 × provider 数"会乘成十几次，
+    # 每次都带着全量上下文（线上为此把 16.7 万 token 发了三遍）。
+    "retry_profile": "balanced",
+    # 一轮对话累计输入 token 上限：0 = 不设上限（只用档位的次数闸门）。
+    # 超过就停止重试并如实告知，而不是继续把同样的上下文重发。
+    "turn_token_budget": 0,
     # 多模态图片同传：仅对「模型配置里声明了 image 模态」的模型生效（在「模型」页勾选）。
     # 文本模型的 [图片] 占位语义完全不变。
     "image_understanding_enable": True,

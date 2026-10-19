@@ -9,6 +9,15 @@ from __future__ import annotations
 import asyncio
 import inspect
 
+from app.llm.request_policy import (
+    Failure,
+    FailureKind,
+    TurnBudget,
+    classify_error_text,
+    classify_exception,
+    classify_response,
+)
+
 from .base import BaseProvider, LLMResponse, StreamEvent, format_usage, has_token_usage, merge_usage
 from .embedding import OpenAIEmbeddingProvider
 from .openai_compat import OpenAICompatProvider
@@ -122,6 +131,52 @@ def _accepts_kwarg(fn, name: str) -> bool:
 #: 只给调用方（流式工具循环在调用方）拼日志/遥测用。
 SERVED_MODEL_KEY = "_served_model"
 
+#: 值得"同 provider 再试一次"的失败类别（外部条件可能变化的那几类）。
+#: ``EMPTY_CUT`` 不在此列：它要的是**更大的预算**，而回退器改不了 max_tokens，
+#: 原样重发只会把同样的预算再烧一遍 —— 交给 chat 层（它知道生效预算是多少）。
+_RETRY_SAME_KINDS = frozenset({
+    FailureKind.TRANSIENT,
+    FailureKind.EMPTY_SUSPECT,
+})
+
+
+def _attempt_allowance(max_empty_retries: int, budget) -> int:
+    """单 provider 的重试额度：有 TurnBudget 时以档位为准（配置项降为上限）。"""
+    configured = max(0, int(max_empty_retries or 0))
+    if budget is None:
+        return configured
+    return min(configured, max(0, int(budget.transient_retries)))
+
+
+def _should_retry_same(failure, attempt: int, allowance: int, *, provider_failed: bool = False) -> bool:
+    """要不要**同 provider**再试一次（``failure`` 为 None 表示有产出）。
+
+    重试必须有且只有一个归属层，否则会相乘烧钱：
+
+    - **HTTP 层瞬态**（429/5xx/超时）由 ``openai_compat`` 内部按 ``retry_attempts``
+      带退避重试 —— 它能看到状态码与 ``Retry-After``；
+    - **整轮请求次数**由 ``TurnBudget`` 封顶；
+    - 所以当错误**已经冒到回退层**（``provider_failed=True``），说明适配器内部的
+      瞬态重试已经用尽，这里再试一次只是把同一份上下文重发一遍。此时只做"换下一个
+      provider"。
+
+    回退层唯一该重试的是**根本没报错、只是零产出**的情况（网关提前断流／计费了却
+    没内容），且只在外部条件可能变化时（瞬态/疑似）——"只有思考没有正文"与"被预算
+    截断"都不在此列：前者要换问法、后者要抬预算，都不是原样重发能解决的。
+    """
+    if failure is None or provider_failed or not failure.retry_same:
+        return False
+    if failure.kind not in _RETRY_SAME_KINDS:
+        return False
+    return attempt < allowance
+
+
+def _retry_delay(failure, default: float) -> float:
+    """退避秒数：上游给了 ``Retry-After`` 就听它的。"""
+    if failure is not None and failure.retry_after:
+        return max(0.0, float(failure.retry_after))
+    return max(0.0, float(default or 0.0))
+
 
 def _cfg_model_label(cfg: dict | None, fallback: str | None = None) -> str:
     """单个 provider 配置对应的模型名（优先 provider 预设的 provider_model_id）。
@@ -172,11 +227,24 @@ async def chat_with_fallback(
     max_tool_rounds: int = 5,
     max_empty_retries: int = 1,
     empty_retry_backoff: float = 0.4,
+    budget: TurnBudget | None = None,
+    input_tokens_estimate: int = 0,
 ) -> LLMResponse:
     """按顺序尝试 config_chain，直到某个 provider 成功返回。
 
-    “成功但空内容”不算成功：``max_empty_retries`` 控制同 provider 的空回复重试次数
-    （默认 1 次，退避 ``empty_retry_backoff`` 秒），仍空则换下一个 provider。
+    **重试决策由失败分类决定，不再"空了就原样再来一次"**：
+
+    - 瞬态（429/5xx/超时/网关抖动/计费了却没产出）→ 同 provider 退避重试，听
+      ``Retry-After``；用尽后换下一个 provider；
+    - 确定性（参数/权限/模型不存在/上下文超长/余额/审核）→ **立刻停整条链**。
+      换模型、原样重发都一样失败，只会多烧一遍上下文；
+    - 被 max_tokens 截断 → 不在这里重试（回退器改不了预算），记一条可操作日志后
+      换下一个 provider，抬预算的事交给 chat 层。
+
+    ``budget`` 给整轮一个总请求次数与累计输入 token 上限：没有这个闸门，
+    ``retry_attempts × 空回复重试 × 收敛重试 × provider 数`` 会乘成十几次，
+    每次都带着全量上下文（线上为此把 16.7 万 token 发了三遍）。
+
     全部软失败时返回最后一个响应（保留 raw），让调用方的兜底分支继续生效。
     """
     chain = list(config_chain or [])
@@ -186,17 +254,31 @@ async def chat_with_fallback(
     last_empty: LLMResponse | None = None
     retries = max(0, int(max_empty_retries or 0))
     delay = max(0.0, float(empty_retry_backoff or 0.0))
+    allowance = _attempt_allowance(retries, budget)
     # 本次请求（含空回复重试与回退下一个 provider）的 token 消耗：结束后 info 一次
     total_usage: dict = {}
     returned: LLMResponse | None = None
     # 真正服务本次请求的配置（空回复/异常回退后**不是** chain[0]）：日志必须写它，
     # 否则会把回退模型（如 backup）的消耗记在主模型（primary）头上。
     served_cfg: dict | None = None
+    blocked_reason = ""
 
     try:
         for cfg in chain:
             provider = get_provider(cfg)
-            for attempt in range(retries + 1):
+            failure: Failure | None = None
+            for attempt in range(allowance + 1):
+                if budget is not None:
+                    allowed, why = budget.allow(
+                        estimated_input=input_tokens_estimate,
+                        reason=f"回退链 {_cfg_model_label(cfg, model)} 第 {attempt + 1} 次请求",
+                    )
+                    if not allowed:
+                        from app.llm import logger
+
+                        logger.add_info("LLM").warning(f"请求预算用尽，停止重试：{why}")
+                        blocked_reason = why
+                        break
                 try:
                     kwargs: dict = {}
                     if _accepts_kwarg(provider.chat, "max_tool_rounds"):
@@ -215,34 +297,78 @@ async def chat_with_fallback(
                     from app.llm import logger
                     from .base import format_llm_error
 
+                    failure = classify_exception(e)
+                    if budget is not None:
+                        budget.charge(estimated_input=input_tokens_estimate)
                     logger.add_info("LLM").warning(
-                        f"回退：模型 {cfg.get('provider_model_id', cfg.get('model'))} 请求异常: {format_llm_error(e)}"
+                        f"回退：模型 {_cfg_model_label(cfg, model)} 请求异常"
+                        f"（{failure.describe()}）: {format_llm_error(e)}"
                     )
                     last = LLMResponse(text="", raw=None)
+                    # 适配器内部的瞬态重试已经用尽（见 _should_retry_same 的说明），
+                    # 这里只决定"换下一个"还是"整条链停"
+                    if failure.deterministic:
+                        from app.llm import logger as _lg
+
+                        _lg.add_info("LLM").error(
+                            f"确定性失败（{failure.describe()}），停止整条回退链："
+                            "换模型或原样重发都不会成功"
+                        )
+                        returned = last
+                        return last
                     break
                 last = resp
                 merge_usage(total_usage, resp.usage)
+                if budget is not None:
+                    budget.charge(estimated_input=input_tokens_estimate, usage=resp.usage)
                 # 回了响应（哪怕空/无 choices）= 该 provider 真的被请求过：token 消耗
                 # 里可能就有它一份，日志名字要记它而不是 chain[0]
                 served_cfg = cfg
-                if resp.ok or resp.raw is not None:
-                    # 空内容但仍算请求成功：重试同 provider，避免偶现的空回复直接兜底
-                    if _response_is_empty(resp) and attempt < retries:
-                        from app.llm import logger
-
-                        logger.add_info("LLM").warning(
-                            f"空回复重试 [{attempt + 1}/{retries}]：模型 "
-                            f"{cfg.get('provider_model_id', cfg.get('model'))}"
-                        )
-                        if delay:
-                            await asyncio.sleep(delay)
-                        continue
-                    if _response_is_empty(resp):
-                        last_empty = resp
-                        break
+                failure = classify_response(
+                    text=resp.text,
+                    reasoning=getattr(resp, "reasoning", "") or "",
+                    tool_results=resp.tool_results,
+                    finish_reason=str((resp.raw or {}).get("finish_reason", "") or "")
+                    if isinstance(resp.raw, dict) else "",
+                    usage=resp.usage,
+                    max_tokens=int(cfg.get("max_tokens", max_tokens) or 0),
+                )
+                if failure is None:
                     returned = resp
                     return resp
-                # resp.ok 与 raw 都为假（上游没返回 choices）：换下一个 provider
+                if failure.kind == FailureKind.EMPTY_CUT:
+                    from app.llm import logger
+
+                    logger.add_info("LLM").warning(
+                        f"模型 {_cfg_model_label(cfg, model)} 的正文被 max_tokens="
+                        f"{cfg.get('max_tokens', max_tokens)} 截断（输出 {failure.detail}）。"
+                        "这不是重试能解决的问题：请调大「Provider 预设 → 模型」页该模型的"
+                        "「最大输出 Token」，或缩短上下文"
+                    )
+                last_empty = resp
+                if _should_retry_same(failure, attempt, allowance):
+                    from app.llm import logger
+
+                    logger.add_info("LLM").warning(
+                        f"重试 [{attempt + 1}/{allowance}]：模型 {_cfg_model_label(cfg, model)}"
+                        f"（{failure.describe()}）"
+                    )
+                    sleep_for = _retry_delay(failure, delay)
+                    if sleep_for:
+                        await asyncio.sleep(sleep_for)
+                    continue
+                if failure.deterministic:
+                    from app.llm import logger
+
+                    logger.add_info("LLM").error(
+                        f"确定性失败（{failure.describe()}），停止整条回退链："
+                        "换模型或原样重发都不会成功"
+                    )
+                    blocked_reason = failure.detail
+                    returned = resp
+                    return resp
+                break
+            if blocked_reason:
                 break
         returned = last_empty or last or LLMResponse(text="", raw=None)
         return returned
@@ -258,6 +384,10 @@ def _response_is_empty(resp: LLMResponse | None) -> bool:
     """响应是否“成功但没有任何可展示内容”。
 
     只有工具结果、没有文本的轮次不算空回复（那是正常的工具循环中间态）。
+
+    判定口径已统一到 ``request_policy.classify_response``（它额外区分"被预算截断"
+    "只有思考" "计费了却没产出"）；保留这个薄封装是因为"空/非空"这个二元问题在
+    日志与第三方插件里仍然常用。
     """
     if resp is None:
         return True
@@ -281,21 +411,33 @@ async def iter_stream_with_fallback(
     max_empty_retries: int = 1,
     empty_retry_backoff: float = 0.4,
     usage_sink: dict | None = None,
+    budget: TurnBudget | None = None,
+    input_tokens_estimate: int = 0,
 ):
     """按顺序尝试 config_chain 的流式 provider；仅在首个事件前出错才切换到下一个。
 
-    额外处理「连上了但什么都没产出」：流式请求成功结束却既无文本也无工具调用时，
-    同 provider 重试 ``max_empty_retries`` 次（退避 ``empty_retry_backoff`` 秒），
-    再换下一个 provider。只重试“没产出任何事件”的情况——一旦有 tool_call 或文本产出，
-    重试就可能重复执行工具/重复发送，绝不能做。
+    **重试决策由失败分类决定**（与 ``chat_with_fallback`` 同一张表）：
+
+    - 瞬态（429/5xx/超时/网关抖动/计费了却没产出）→ 同 provider 退避重试，听
+      ``Retry-After``；用尽后换下一个 provider；
+    - 确定性（参数/权限/模型不存在/上下文超长/余额/审核）→ 停整条链并交出真因；
+    - 被 max_tokens 截断（``finish_reason=length`` 且无产出）→ 记一条可操作日志后
+      换下一个 provider（回退器改不了预算，原样重发只会再烧一遍）。
+
+    绝不重试"已产出内容"的情况：一旦有文本/工具调用/思考产出，重试就可能重复发送、
+    重复执行工具。整条链都没产出时交出**最后一个真实错误**，否则调用方只看到
+    "空回复"，429/余额不足/模型不存在这些真因彻底丢失。
 
     token 消耗：上游在流末尾回报的 usage 会累加，**本次流式请求结束时 info 一次**。
     带 ``usage_sink`` 时改为写进调用方的 dict（不在这里打日志）——流式的工具循环在
     调用方，由它把多轮汇总后只打一行。此时 ``usage_sink[SERVED_MODEL_KEY]`` 会被写成
     实际服务本轮的模型名，调用方据此拼日志/遥测，避免回退后仍记主模型名。
+
+    ``budget`` 给整轮一个总请求次数与累计输入 token 上限（见 ``TurnBudget``）。
     """
     chain = list(config_chain or [])
     retries = max(0, int(max_empty_retries or 0))
+    allowance = _attempt_allowance(retries, budget)
     delay = max(0.0, float(empty_retry_backoff or 0.0))
     total_usage: dict = {}
     text_chars = 0
@@ -308,9 +450,23 @@ async def iter_stream_with_fallback(
         for cfg in chain:
             provider = get_provider(cfg)
             provider_error = ""
-            for attempt in range(retries + 1):
+            failure: Failure | None = None
+            for attempt in range(allowance + 1):
+                if budget is not None:
+                    allowed, why = budget.allow(
+                        estimated_input=input_tokens_estimate,
+                        reason=f"流式回退链 {_cfg_model_label(cfg, model)} 第 {attempt + 1} 次请求",
+                    )
+                    if not allowed:
+                        from app.llm import logger
+
+                        logger.add_info("LLM").warning(f"请求预算用尽，停止重试：{why}")
+                        provider_error = provider_error or why
+                        break
                 started = False
                 got_content = False
+                attempt_usage: dict = {}
+                finish_reason = ""
                 try:
                     async for ev in provider.chat_stream(
                         messages,
@@ -333,6 +489,8 @@ async def iter_stream_with_fallback(
                             # 回退链于是形同虚设，备用模型一次都不会被请求。
                             provider_error = ev.text or "provider error"
                             break
+                        if ev.type == "done":
+                            finish_reason = str(getattr(ev, "finish_reason", "") or "")
                         if ev.type in ("text", "tool_call", "reasoning"):
                             got_content = True
                             # 思考也算产出：上游确实在跑，只是把预算花在 reasoning 里。
@@ -348,6 +506,7 @@ async def iter_stream_with_fallback(
                         event_usage = getattr(ev, "usage", None)
                         if event_usage:
                             merge_usage(total_usage, event_usage)
+                            merge_usage(attempt_usage, event_usage)
                             # 带 sink 时**立刻**回写（不等 finally）：客户端提前 break
                             # 也能拿到已产出的 usage，调用方随后可以正常打一行汇总
                             if usage_sink is not None:
@@ -360,9 +519,12 @@ async def iter_stream_with_fallback(
                     from app.llm import logger
                     from .base import format_llm_error
 
+                    failure = classify_exception(e)
+                    if budget is not None:
+                        budget.charge(estimated_input=input_tokens_estimate, usage=attempt_usage)
                     logger.add_info("LLM").warning(
-                        f"流式回退：模型 {cfg.get('provider_model_id', cfg.get('model'))} 请求异常: "
-                        f"{format_llm_error(e)}"
+                        f"流式回退：模型 {_cfg_model_label(cfg, model)} 请求异常"
+                        f"（{failure.describe()}）: {format_llm_error(e)}"
                     )
                     if started:
                         # 已经产出过事件：本轮由它服务，异常上抛但名字要留住
@@ -371,23 +533,60 @@ async def iter_stream_with_fallback(
                             usage_sink[SERVED_MODEL_KEY] = _cfg_model_label(cfg, model)
                         raise
                     provider_error = provider_error or format_llm_error(e)
-                    break  # 换下一个 provider
+                else:
+                    if budget is not None:
+                        budget.charge(estimated_input=input_tokens_estimate, usage=attempt_usage)
+                    if not got_content and not provider_error:
+                        failure = classify_response(
+                            finish_reason=finish_reason,
+                            usage=attempt_usage,
+                            max_tokens=int(cfg.get("max_tokens", max_tokens) or 0),
+                        )
                 if got_content:
                     return
-                if provider_error:
-                    # 确定性失败：同 provider 原样重试没有意义（它内部已按 retry_attempts
-                    # 试过），直接换下一个
-                    break
-                if attempt < retries:
+                if not provider_error and failure is None:
+                    failure = classify_response(
+                        finish_reason=finish_reason,
+                        usage=attempt_usage,
+                        max_tokens=int(cfg.get("max_tokens", max_tokens) or 0),
+                    )
+                if provider_error and failure is None:
+                    failure = classify_error_text(provider_error)
+                if failure is not None and failure.kind == FailureKind.EMPTY_CUT:
                     from app.llm import logger
 
                     logger.add_info("LLM").warning(
-                        f"空回复重试 [{attempt + 1}/{retries}]：模型 "
-                        f"{cfg.get('provider_model_id', cfg.get('model'))} 流式无产出"
+                        f"模型 {_cfg_model_label(cfg, model)} 的正文被 max_tokens="
+                        f"{cfg.get('max_tokens', max_tokens)} 截断（{failure.detail}）。"
+                        "这不是重试能解决的问题：请调大「Provider 预设 → 模型」页该模型的"
+                        "「最大输出 Token」，或缩短上下文"
                     )
-                    if delay:
-                        await asyncio.sleep(delay)
+                if _should_retry_same(failure, attempt, allowance, provider_failed=bool(provider_error)):
+                    from app.llm import logger
+
+                    logger.add_info("LLM").warning(
+                        f"流式重试 [{attempt + 1}/{allowance}]：模型 "
+                        f"{_cfg_model_label(cfg, model)}（{failure.describe() if failure else ''}）"
+                    )
+                    sleep_for = _retry_delay(failure, delay)
+                    if sleep_for:
+                        await asyncio.sleep(sleep_for)
                     continue
+                if failure is not None and failure.deterministic:
+                    from app.llm import logger
+
+                    logger.add_info("LLM").error(
+                        f"确定性失败（{failure.describe()}），停止整条回退链："
+                        "换模型或原样重发都不会成功"
+                    )
+                    last_error = provider_error or failure.detail
+                    provider_error = ""
+                    break
+                if not (failure is not None and failure.switch_provider):
+                    # 不该换 provider（例如"只有思考没有正文"）：留给调用方收敛
+                    last_error = provider_error or (failure.detail if failure else "")
+                    provider_error = ""
+                    break
                 # 该 provider 用尽重试：留给调用方的兜底文本，继续尝试下一个 provider
                 break
             if provider_error:
@@ -395,9 +594,13 @@ async def iter_stream_with_fallback(
 
                 last_error = provider_error
                 logger.add_info("LLM").warning(
-                    f"流式回退：模型 {cfg.get('provider_model_id', cfg.get('model'))} 失败，"
+                    f"流式回退：模型 {_cfg_model_label(cfg, model)} 失败，"
                     f"换下一个: {provider_error}"
                 )
+            if failure is not None and failure.deterministic:
+                break
+            if failure is not None and not failure.switch_provider:
+                break
         # 整条链都没产出：把最后一个真实错误交出去。否则调用方只看到"空回复"，
         # 上游到底报了什么（429 / 余额不足 / 模型不存在）彻底丢失。
         if last_error:
