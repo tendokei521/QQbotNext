@@ -302,9 +302,12 @@ async def iter_stream_with_fallback(
     # 实际服务本轮的配置（空回复/异常回退后**不是** chain[0]）
     served_cfg: dict | None = None
 
+    #: 整条链最后一个真实错误：全都起不来时交出去，别让真因随"空回复"一起消失
+    last_error = ""
     try:
         for cfg in chain:
             provider = get_provider(cfg)
+            provider_error = ""
             for attempt in range(retries + 1):
                 started = False
                 got_content = False
@@ -318,6 +321,18 @@ async def iter_stream_with_fallback(
                         tools=tools,
                         tool_executor=tool_executor,
                     ):
+                        if ev.type == "error":
+                            if got_content:
+                                # 已产出过正文后中途断流：如实上报，由调用方收尾
+                                yield ev
+                                return
+                            # 一个正文字都没有就报错 = 这个 provider 起不来。
+                            # **不能**把 error 事件透出去：消费端（chat.stream_response /
+                            # initiative_stream）一收到 error 就 break，生成器就此挂起，
+                            # 下面"换下一个 provider"的逻辑再也走不到 —— 多 provider
+                            # 回退链于是形同虚设，备用模型一次都不会被请求。
+                            provider_error = ev.text or "provider error"
+                            break
                         if ev.type in ("text", "tool_call", "reasoning"):
                             got_content = True
                             # 思考也算产出：上游确实在跑，只是把预算花在 reasoning 里。
@@ -355,9 +370,14 @@ async def iter_stream_with_fallback(
                         if usage_sink is not None:
                             usage_sink[SERVED_MODEL_KEY] = _cfg_model_label(cfg, model)
                         raise
+                    provider_error = provider_error or format_llm_error(e)
                     break  # 换下一个 provider
                 if got_content:
                     return
+                if provider_error:
+                    # 确定性失败：同 provider 原样重试没有意义（它内部已按 retry_attempts
+                    # 试过），直接换下一个
+                    break
                 if attempt < retries:
                     from app.llm import logger
 
@@ -370,6 +390,18 @@ async def iter_stream_with_fallback(
                     continue
                 # 该 provider 用尽重试：留给调用方的兜底文本，继续尝试下一个 provider
                 break
+            if provider_error:
+                from app.llm import logger
+
+                last_error = provider_error
+                logger.add_info("LLM").warning(
+                    f"流式回退：模型 {cfg.get('provider_model_id', cfg.get('model'))} 失败，"
+                    f"换下一个: {provider_error}"
+                )
+        # 整条链都没产出：把最后一个真实错误交出去。否则调用方只看到"空回复"，
+        # 上游到底报了什么（429 / 余额不足 / 模型不存在）彻底丢失。
+        if last_error:
+            yield StreamEvent(type="error", text=last_error)
     finally:
         # 带 sink 时调用方自己打一行（流式的工具循环在它那边）；这里只负责"没有 sink"的直调
         if usage_sink is None:
