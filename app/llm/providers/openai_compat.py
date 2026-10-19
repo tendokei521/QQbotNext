@@ -269,7 +269,10 @@ class OpenAICompatProvider(BaseProvider):
             first = choices[0]
             message = first.get("message", {}) or {}
             content = (message.get("content") or "").strip()
-            reasoning = (message.get("reasoning_content") or "") or ""
+            # reasoning_content 是 DeepSeek/vLLM 系的写法，reasoning 是部分中转商的
+            # 写法（流式解析早已两种都认，这里此前只认前者，导致中转商用户的
+            # 「思考吃满预算」诊断与收敛轮全部失效）
+            reasoning = (message.get("reasoning_content") or message.get("reasoning") or "") or ""
             if first.get("finish_reason") == "length":
                 logger.add_info("Api").warning("回复因 max_tokens 限制被截断")
         # token 消耗不在这里打：本次请求（含工具轮）结束后由 chat_with_fallback 统一 info 一次

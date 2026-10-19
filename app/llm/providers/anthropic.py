@@ -217,9 +217,19 @@ class AnthropicProvider(BaseProvider):
                 for block in content_blocks
                 if isinstance(block, dict) and block.get("type") == "text"
             ).strip()
+            # 扩展思考块（``type="thinking"``）不是正文，绝不能拼进回复；但上层要靠它
+            # 区分「想过但没写正文」和真的空回复，所以单独取出来填 reasoning。
+            reasoning = "".join(
+                str(block.get("thinking", ""))
+                for block in content_blocks
+                if isinstance(block, dict) and block.get("type") == "thinking"
+            )
             tool_uses = _tool_use_blocks(content_blocks)
             if not tool_uses or tool_executor is None:
-                return LLMResponse(text=text, usage=total_usage, raw=data, tool_results=tool_results)
+                return LLMResponse(
+                    text=text, reasoning=reasoning, usage=total_usage, raw=data,
+                    tool_results=tool_results,
+                )
 
             # Anthropic tool_use → OpenAI-style tool_calls → 共享工具执行器
             tool_calls = [{
@@ -256,7 +266,10 @@ class AnthropicProvider(BaseProvider):
             chat_messages.append({"role": "user", "content": result_content})
 
         logger.add_info("Anthropic").warning(f"工具循环超过 {max_tool_rounds} 轮，强制结束")
-        return LLMResponse(text=text, usage=total_usage, raw=data, tool_results=tool_results)
+        return LLMResponse(
+            text=text, reasoning=reasoning, usage=total_usage, raw=data,
+            tool_results=tool_results,
+        )
 
     async def chat_stream(
         self,

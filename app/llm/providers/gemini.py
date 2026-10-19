@@ -146,18 +146,26 @@ class GeminiProvider(BaseProvider):
         self.api_key = str(config.get("api_key", "") or "").strip()
         self.api_base = (config.get("api_base", "") or _DEFAULT_BASE).rstrip("/")
 
-    def _url(self, model: str, stream: bool = False) -> str:
+    def _base(self) -> str:
+        """归一到 ``.../v1beta``：``api_base`` 可能带也可能不带这个后缀。"""
         if self.api_base.endswith("/v1beta"):
-            base = self.api_base
-        else:
-            base = self.api_base.rstrip("/") + "/v1beta"
-        action = "streamGenerateContent?alt=sse" if stream else "generateContent"
-        return f"{base}/models/{model}:{action}&key={self.api_key}"
+            return self.api_base
+        return self.api_base.rstrip("/") + "/v1beta"
+
+    def _url(self, model: str, stream: bool = False) -> str:
+        base = self._base()
+        if stream:
+            return f"{base}/models/{model}:streamGenerateContent?alt=sse&key={self.api_key}"
+        # 非流式**必须自己起 query**。此前复用 ``action`` 里的 ``?alt=sse`` 再拼
+        # ``&key=``，非流式就变成 ``...:generateContent&key=KEY``——key 落在 path 里，
+        # 从不上到 query，也没发 ``x-goog-api-key`` 头，于是每一轮都 401/404，
+        # 被下面降级成空回复（用户只看到兜底话术）。
+        return f"{base}/models/{model}:generateContent?key={self.api_key}"
 
     async def get_models(self) -> list[str]:
         if not self.api_key:
             return []
-        url = f"{self.api_base.rstrip('/')}/v1beta/models?key={self.api_key}"
+        url = f"{self._base()}/models?key={self.api_key}"
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
@@ -229,15 +237,27 @@ class GeminiProvider(BaseProvider):
             if candidates:
                 content = (candidates[0].get("content", {}) or {})
                 parts = content.get("parts", []) or []
+            # Gemini 的思考片段带 ``thought: true``：必须与正文分开。流式分支早已区分，
+            # 非流式此前把两者一起拼进 text —— 用户的回复里会直接出现模型的内心独白；
+            # 思考吃满 maxOutputTokens 时更糟：text 非空 ⇒ 上层不判空、不触发收敛轮，
+            # 用户收到的"整条回复"全是思考碎片。
             text = "".join(
                 str(p.get("text", ""))
                 for p in parts
-                if isinstance(p, dict) and p.get("text")
+                if isinstance(p, dict) and p.get("text") and not p.get("thought")
             ).strip()
+            reasoning = "".join(
+                str(p.get("text", ""))
+                for p in parts
+                if isinstance(p, dict) and p.get("text") and p.get("thought")
+            )
 
             calls = _function_calls(parts)
             if not calls or tool_executor is None:
-                return LLMResponse(text=text, usage=total_usage, raw=data, tool_results=tool_results)
+                return LLMResponse(
+                    text=text, reasoning=reasoning, usage=total_usage, raw=data,
+                    tool_results=tool_results,
+                )
 
             tool_calls = [{
                 "id": c["id"],
@@ -272,7 +292,10 @@ class GeminiProvider(BaseProvider):
             contents.append({"role": "user", "parts": user_parts})
 
         logger.add_info("Gemini").warning(f"工具循环超过 {max_tool_rounds} 轮，强制结束")
-        return LLMResponse(text=text, usage=total_usage, raw=data, tool_results=tool_results)
+        return LLMResponse(
+            text=text, reasoning=reasoning, usage=total_usage, raw=data,
+            tool_results=tool_results,
+        )
 
     async def chat_stream(
         self,
