@@ -31,7 +31,12 @@ async def collect_history_materials(
     from app.llm.group_context import format_history_for_llm
 
     rounds = int(config.get("history_rounds", 50) or 50)
-    history = session_mgr.get_history(session_id, limit=rounds) if session_mgr else []
+    # 取全量再压缩：``maybe_compress_context`` 的判据是 ``len(history) > history_rounds``，
+    # 而这里此前先 ``get_history(limit=rounds)`` 把条数**削到 rounds 以内**再传进去 ——
+    # 条件永远不成立，压缩分支是彻底的死代码（主动消息/定时任务的长会话从不压缩，
+    # 只是一路把最旧的整段丢掉）。口径与 chat 主路径一致：按 MAX_HISTORY_MESSAGES 取满。
+    fetch_limit = getattr(session_mgr, "MAX_HISTORY_MESSAGES", 200) if session_mgr else 0
+    history = session_mgr.get_history(session_id, limit=fetch_limit) if session_mgr else []
     history = format_history_for_llm(
         history,
         is_private=is_private,
