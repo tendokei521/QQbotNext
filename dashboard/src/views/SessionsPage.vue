@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { AxiosError } from 'axios'
-import http, { errorMessage } from '@/api/http'
+import http, { errorMessage, token } from '@/api/http'
 import { useBotsStore } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
 
@@ -31,6 +31,16 @@ interface ConversationDetail {
   messages: HistoryMessage[]
 }
 
+/** 一条消息里的图片：`seg` 是段下标（换/删要回传给后端），`url` 是本地图片地址 */
+interface HistoryImage {
+  seg: number
+  sha: string
+  mime: string
+  bytes: number
+  status: 'cached' | 'missing' | 'uncached'
+  url: string
+}
+
 interface HistoryMessage {
   role: string
   content: string
@@ -38,6 +48,15 @@ interface HistoryMessage {
   nickname?: string
   message_id?: string
   time?: number
+  images?: HistoryImage[]
+}
+
+interface MediaStats {
+  count: number
+  bytes: number
+  referenced: number
+  unreferenced: number
+  files?: { name: string; sha: string; mime: string; bytes: number; referenced: boolean }[]
 }
 
 const bots = useBotsStore()
@@ -65,11 +84,42 @@ const bulkDeleting = ref(false)
 const newMessageRole = ref<'user' | 'assistant' | 'system'>('user')
 const newMessageContent = ref('')
 const restoreFileInput = ref<HTMLInputElement | null>(null)
+const mediaFileInput = ref<HTMLInputElement | null>(null)
+
+/** 本地图片仓（每账号一个 media/ 目录）的占用情况 */
+const mediaStats = ref<MediaStats | null>(null)
+const loadingMedia = ref(false)
+const purgingMedia = ref(false)
+
+/** 图片预览 / 换图的目标 */
+const previewImage = ref<HistoryImage | null>(null)
+const imageBusy = ref('')
+const pendingImageTarget = ref<{ index: number; image: HistoryImage } | null>(null)
 
 const botId = computed(() => bots.currentBot?.bot_id ?? null)
 
 function isNotFoundError(err: unknown): boolean {
   return err instanceof AxiosError && err.response?.status === 404
+}
+
+function fmtBytes(bytes?: number): string {
+  const n = Number(bytes || 0)
+  if (!n) return '0 B'
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
+
+/**
+ * 图片地址要带上 bot_id 与 token：`<img>` 发不了 Authorization 头，
+ * 所以走 `?token=`（服务端鉴权中间件认这个参数）。
+ */
+function imageSrc(image: HistoryImage): string {
+  if (!image?.url || botId.value == null) return ''
+  const params = new URLSearchParams({ bot_id: String(botId.value) })
+  const t = token.get()
+  if (t) params.set('token', t)
+  return `${image.url}?${params.toString()}`
 }
 
 function typeLabel(type: string): string {
@@ -119,6 +169,8 @@ async function loadSessions() {
     sessions.value = res.data?.sessions || []
     if (!selectedSessionId.value || !sessions.value.some((s) => s.session_id === selectedSessionId.value)) {
       selectedSessionId.value = sessions.value[0]?.session_id || ''
+      selectedTaskId.value = '' // 换了会话：旧对话 id 不再有效
+      conversation.value = null
     }
     if (selectedSessionId.value) {
       await loadConversations()
@@ -133,16 +185,24 @@ async function loadSessions() {
   } finally {
     loadingSessions.value = false
   }
+  await loadMediaStats()
 }
 
-async function loadConversations() {
+/**
+ * 拉当前会话的对话列表。
+ *
+ * `autoOpen=false` 用于「刚删完东西」：不要再替用户自动打开第一个对话——
+ * 以前删掉唯一对话后，这里会立刻去打开一个已经不存在的对话，界面于是弹出
+ * 「该会话不存在 / 对话不存在」。删完就停在列表上，用户点哪个打开哪个。
+ */
+async function loadConversations(autoOpen = true) {
   if (!selectedSessionId.value || botId.value == null) {
     conversations.value = []
     return
   }
   loadingConversations.value = true
   try {
-    const res = await http.get<{ ok: boolean; session: { conversations: ConversationSummary[] } }>(
+    const res = await http.get<{ ok: boolean; session: { conversations: ConversationSummary[]; empty?: boolean } }>(
       `/api/sessions/${encodeURIComponent(selectedSessionId.value)}`,
       { params: { bot_id: botId.value } },
     )
@@ -151,20 +211,45 @@ async function loadConversations() {
       conversations.value.some((c) => c.task_id === id),
     )
     if (selectedTaskId.value && !conversations.value.some((c) => c.task_id === selectedTaskId.value)) {
-      selectedTaskId.value = conversations.value[0]?.task_id || ''
-    }
-    if (!selectedTaskId.value && conversations.value.length) {
-      selectedTaskId.value = conversations.value[0].task_id
+      selectedTaskId.value = ''
+      conversation.value = null
     }
     if (selectedTaskId.value) {
       await openConversation(selectedTaskId.value)
+    } else if (autoOpen && conversations.value.length) {
+      await openConversation(conversations.value[0].task_id)
     } else {
       conversation.value = null
     }
   } catch (err) {
+    if (isNotFoundError(err)) {
+      // 会话在这期间被删掉了：列表归零，不弹错误（这不是用户操作失败）
+      conversations.value = []
+      selectedTaskId.value = ''
+      conversation.value = null
+      return
+    }
     notify.push(errorMessage(err), 'error')
   } finally {
     loadingConversations.value = false
+  }
+}
+
+async function loadMediaStats() {
+  if (botId.value == null) {
+    mediaStats.value = null
+    return
+  }
+  loadingMedia.value = true
+  try {
+    const res = await http.get<MediaStats & { ok: boolean }>('/api/media', {
+      params: { bot_id: botId.value },
+    })
+    mediaStats.value = res.data || null
+  } catch (err) {
+    mediaStats.value = null
+  } finally {
+    loadingMedia.value = false
   }
 }
 
@@ -179,8 +264,14 @@ async function openConversation(taskId: string) {
     )
     conversation.value = res.data?.conversation || null
   } catch (err) {
-    notify.push(errorMessage(err), 'error')
     conversation.value = null
+    if (isNotFoundError(err)) {
+      // 对话已被删除（多端操作 / 刚归档）：静默把选中项清掉，别再弹「不存在」
+      selectedTaskId.value = ''
+      await loadConversations(false)
+      return
+    }
+    notify.push(errorMessage(err), 'error')
   } finally {
     loadingConversation.value = false
   }
@@ -230,18 +321,19 @@ async function deleteConversation(target: ConversationSummary) {
   if (!window.confirm(`确认删除对话「${target.title}」？该操作不可恢复。`)) return
   deletingTaskId.value = target.task_id
   try {
-    await http.delete(
+    const res = await http.delete<{ ok: boolean; mode?: string; message?: string }>(
       `/api/sessions/${encodeURIComponent(selectedSessionId.value)}/conversations/${target.task_id}`,
       { params: { bot_id: botId.value } },
     )
-    notify.push('对话已删除', 'success')
+    notify.push(res.data?.message || '对话已删除', 'success')
     if (selectedTaskId.value === target.task_id) {
       conversation.value = null
       selectedTaskId.value = ''
     }
     selectedTaskIds.value = selectedTaskIds.value.filter((id) => id !== target.task_id)
-    await loadConversations()
     await loadSessions()
+    await loadConversations(false) // 删完不自动打开：「列表」才是此刻该停的地方
+    await loadMediaStats()
   } catch (err) {
     // 对话可能已经被删除（重复点击/多端操作），按成功处理并刷新列表
     if (isNotFoundError(err)) {
@@ -251,8 +343,8 @@ async function deleteConversation(target: ConversationSummary) {
         selectedTaskId.value = ''
       }
       selectedTaskIds.value = selectedTaskIds.value.filter((id) => id !== target.task_id)
-      await loadConversations()
       await loadSessions()
+      await loadConversations(false)
       return
     }
     notify.push(errorMessage(err), 'error')
@@ -279,12 +371,11 @@ async function bulkDeleteConversations() {
       notify.push('批量删除完成', 'success')
     }
     selectedTaskIds.value = []
-    if (selectedTaskId.value && !conversations.value.some((c) => c.task_id === selectedTaskId.value)) {
-      conversation.value = null
-      selectedTaskId.value = ''
-    }
-    await loadConversations()
+    conversation.value = null
+    selectedTaskId.value = ''
     await loadSessions()
+    await loadConversations(false)
+    await loadMediaStats()
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   } finally {
@@ -305,6 +396,7 @@ async function deleteSession() {
     selectedTaskIds.value = []
     conversation.value = null
     await loadSessions()
+    await loadMediaStats()
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   }
@@ -318,8 +410,9 @@ async function exportSession() {
       responseType: 'blob',
     })
     const blob = res.data instanceof Blob ? res.data : new Blob([res.data])
-    saveBlob(blob, `${selectedSessionId.value}.session.json`)
-    notify.push('会话备份已开始', 'success')
+    // 备份包含 session.json + media/（图片字节），所以是 zip
+    saveBlob(blob, `${selectedSessionId.value}.session.zip`)
+    notify.push('会话备份已开始（含图片）', 'success')
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   }
@@ -333,27 +426,140 @@ function onRestoreFile(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
-  const reader = new FileReader()
-  reader.onload = async () => {
-    try {
-      const payload = JSON.parse(String(reader.result || '{}'))
-      const res = await http.post<{ ok: boolean; restored?: number; session_id?: string }>(
-        '/api/sessions/restore',
-        payload,
-        { params: { bot_id: botId.value } },
+  const isZip = /\.zip$/i.test(file.name) || file.type === 'application/zip'
+  const finish = (err?: unknown) => {
+    input.value = ''
+    if (err) notify.push(errorMessage(err), 'error')
+  }
+  if (!isZip) {
+    // 兼容旧的纯 JSON 备份
+    const reader = new FileReader()
+    reader.onload = async () => {
+      try {
+        const payload = JSON.parse(String(reader.result || '{}'))
+        const res = await http.post<{ ok: boolean; restored?: number; session_id?: string }>(
+          '/api/sessions/restore',
+          payload,
+          { params: { bot_id: botId.value } },
+        )
+        notify.push(`恢复完成，导入 ${res.data?.restored ?? '?'} 个对话`, 'success')
+        selectedSessionId.value = res.data?.session_id || selectedSessionId.value
+        selectedTaskId.value = ''
+        conversation.value = null
+        await loadSessions()
+        await loadMediaStats()
+        finish()
+      } catch (err) {
+        finish(err)
+      }
+    }
+    reader.readAsText(file)
+    return
+  }
+  // zip 备份：图片会一起落盘，指向自然可用
+  file
+    .arrayBuffer()
+    .then((buffer) =>
+      http.post<{ ok: boolean; restored?: number; media?: number }>(
+        '/api/sessions/restore-bundle',
+        buffer,
+        {
+          params: { bot_id: botId.value },
+          headers: { 'Content-Type': 'application/zip' },
+        },
+      ),
+    )
+    .then(async (res) => {
+      notify.push(
+        `恢复完成：${res.data?.restored ?? 0} 个对话、${res.data?.media ?? 0} 张图片`,
+        'success',
       )
-      notify.push(`恢复完成，导入 ${res.data?.restored ?? '?'} 个对话`, 'success')
-      selectedSessionId.value = res.data?.session_id || selectedSessionId.value
       selectedTaskId.value = ''
       conversation.value = null
       await loadSessions()
-    } catch (err) {
-      notify.push(errorMessage(err), 'error')
-    } finally {
-      input.value = ''
-    }
+      await loadMediaStats()
+      finish()
+    })
+    .catch(finish)
+}
+
+// ---------- 会话里的图片：预览 / 换图 / 移除 ----------
+
+function openImagePreview(image: HistoryImage) {
+  if (image.status !== 'cached') return
+  previewImage.value = image
+}
+
+function pickReplacement(index: number, image: HistoryImage) {
+  pendingImageTarget.value = { index, image }
+  mediaFileInput.value?.click()
+}
+
+async function onReplacementPicked(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  const target = pendingImageTarget.value
+  input.value = ''
+  pendingImageTarget.value = null
+  if (!file || !target || !conversation.value) return
+  const key = `replace-${target.index}-${target.image.seg}`
+  imageBusy.value = key
+  try {
+    const res = await http.put<{ ok: boolean; conversation: ConversationDetail }>(
+      `/api/sessions/${encodeURIComponent(selectedSessionId.value)}/conversations/${conversation.value.task_id}/messages/${target.index}/media/${target.image.seg}`,
+      file,
+      {
+        params: { bot_id: botId.value, mime: file.type || '' },
+        headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      },
+    )
+    conversation.value = res.data?.conversation || conversation.value
+    notify.push('图片已替换（模型下一轮就用这张新图）', 'success')
+    await loadMediaStats()
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  } finally {
+    imageBusy.value = ''
   }
-  reader.readAsText(file)
+}
+
+async function removeImage(index: number, image: HistoryImage) {
+  if (!conversation.value) return
+  if (!window.confirm('确认从这条消息里移除这张图片？移除后模型不再看到它。')) return
+  const key = `remove-${index}-${image.seg}`
+  imageBusy.value = key
+  try {
+    const res = await http.delete<{ ok: boolean; conversation: ConversationDetail }>(
+      `/api/sessions/${encodeURIComponent(selectedSessionId.value)}/conversations/${conversation.value.task_id}/messages/${index}/media/${image.seg}`,
+      { params: { bot_id: botId.value } },
+    )
+    conversation.value = res.data?.conversation || conversation.value
+    notify.push('图片已移除', 'success')
+    await loadMediaStats()
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  } finally {
+    imageBusy.value = ''
+  }
+}
+
+async function purgeMedia() {
+  if (botId.value == null || purgingMedia.value) return
+  if (!window.confirm('清理所有"没有任何会话引用"的本地图片？被引用的图片不会被删。')) return
+  purgingMedia.value = true
+  try {
+    const res = await http.post<{ ok: boolean; removed?: number; kept_referenced?: number; message?: string }>(
+      '/api/media/purge',
+      {},
+      { params: { bot_id: botId.value } },
+    )
+    notify.push(res.data?.message || `已清理 ${res.data?.removed ?? 0} 张图片`, 'success')
+    await loadMediaStats()
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  } finally {
+    purgingMedia.value = false
+  }
 }
 
 function openEditMessage(index: number) {
@@ -451,6 +657,20 @@ onMounted(() => {
         <div class="app-page-subtitle">查看、编辑、导出和恢复当前账号的本地会话历史</div>
       </div>
       <v-spacer />
+      <v-chip v-if="mediaStats" size="small" variant="tonal" class="mr-2" :loading="loadingMedia">
+        <v-icon icon="mdi-image-multiple" start size="small" />
+        {{ mediaStats.count }} 张 · {{ fmtBytes(mediaStats.bytes) }} · 可清理 {{ mediaStats.unreferenced }}
+      </v-chip>
+      <v-btn
+        v-if="mediaStats && mediaStats.unreferenced > 0"
+        variant="tonal"
+        prepend-icon="mdi-broom"
+        class="mr-1"
+        :loading="purgingMedia"
+        @click="purgeMedia"
+      >
+        清理未引用图片
+      </v-btn>
       <v-btn v-if="selectedSessionId" variant="tonal" prepend-icon="mdi-file-upload-outline" class="mr-1" @click="exportSession">
         导出当前会话
       </v-btn>
@@ -462,9 +682,16 @@ onMounted(() => {
       <input
         ref="restoreFileInput"
         type="file"
-        accept="application/json,.json"
+        accept="application/zip,application/json,.zip,.json"
         class="d-none"
         @change="onRestoreFile"
+      />
+      <input
+        ref="mediaFileInput"
+        type="file"
+        accept="image/*"
+        class="d-none"
+        @change="onReplacementPicked"
       />
     </div>
 
@@ -599,6 +826,42 @@ onMounted(() => {
                   <v-btn size="x-small" variant="text" icon="mdi-pencil" title="编辑消息" @click="openEditMessage(index)" />
                   <v-btn size="x-small" variant="text" icon="mdi-delete" color="error" title="删除消息" @click="deleteMessage(index)" />
                 </div>
+                <div v-if="msg.images && msg.images.length" class="message-images">
+                  <div v-for="image in msg.images" :key="`${image.seg}-${image.sha}`" class="image-tile">
+                    <button
+                      v-if="image.status === 'cached'"
+                      type="button"
+                      class="image-thumb"
+                      :title="`点击预览 · ${fmtBytes(image.bytes)}`"
+                      @click="openImagePreview(image)"
+                    >
+                      <img :src="imageSrc(image)" :alt="`图片 ${image.sha}`" loading="lazy" />
+                    </button>
+                    <div v-else class="image-missing" :title="image.status === 'missing' ? '本地文件已丢失（可从备份恢复）' : '这张图没有落盘'">
+                      <v-icon icon="mdi-image-off" size="20" />
+                      <span class="text-caption">{{ image.status === 'missing' ? '文件缺失' : '未缓存' }}</span>
+                    </div>
+                    <div class="image-actions">
+                      <v-btn
+                        size="x-small"
+                        variant="text"
+                        icon="mdi-swap-horizontal"
+                        title="用新图片替换"
+                        :loading="imageBusy === `replace-${index}-${image.seg}`"
+                        @click="pickReplacement(index, image)"
+                      />
+                      <v-btn
+                        size="x-small"
+                        variant="text"
+                        icon="mdi-image-remove"
+                        color="error"
+                        title="从消息里移除这张图"
+                        :loading="imageBusy === `remove-${index}-${image.seg}`"
+                        @click="removeImage(index, image)"
+                      />
+                    </div>
+                  </div>
+                </div>
                 <div class="message-content">{{ msg.content }}</div>
               </div>
               <div v-if="!conversation.messages.length" class="text-caption text-center pa-6">该对话没有消息</div>
@@ -652,6 +915,29 @@ onMounted(() => {
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <v-dialog :model-value="!!previewImage" max-width="860" @update:model-value="previewImage = null">
+      <v-card v-if="previewImage">
+        <v-card-title class="d-flex align-center">
+          <v-icon icon="mdi-image" class="mr-2" color="primary" />
+          本地图片
+          <v-chip size="x-small" variant="tonal" class="ml-2">{{ previewImage.mime }}</v-chip>
+          <v-chip size="x-small" variant="tonal" class="ml-1">{{ fmtBytes(previewImage.bytes) }}</v-chip>
+          <v-spacer />
+          <span class="text-caption" style="opacity: 0.55">{{ previewImage.sha }}</span>
+        </v-card-title>
+        <v-card-text class="text-center">
+          <img :src="imageSrc(previewImage)" alt="本地图片" style="max-width: 100%; max-height: 70vh" />
+        </v-card-text>
+        <v-card-actions>
+          <span class="text-caption ml-2" style="opacity: 0.65">
+            这张图和模型请求里用的是同一份本地字节
+          </span>
+          <v-spacer />
+          <v-btn variant="text" @click="previewImage = null">关闭</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -685,6 +971,56 @@ onMounted(() => {
 .message-content {
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.message-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0 8px;
+}
+
+.image-tile {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
+  background: rgba(var(--v-theme-on-surface), 0.03);
+}
+
+.image-thumb {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.image-thumb img {
+  display: block;
+  width: 132px;
+  height: 132px;
+  object-fit: cover;
+}
+
+.image-missing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 132px;
+  height: 132px;
+  opacity: 0.6;
+}
+
+.image-actions {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: flex;
+  gap: 2px;
+  background: rgba(var(--v-theme-surface), 0.82);
+  border-radius: 6px;
 }
 
 .add-message-form {
