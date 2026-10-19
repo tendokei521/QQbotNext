@@ -92,9 +92,16 @@ async def api_bots_config_save(request: Request):
     container = get_container(request)
     try:
         data = await request.json()
-    except Exception:
-        data = {}
-    await container.get(ConfigService).save_bots(data.get("bots", []))
+    except Exception as e:
+        # 绝不能把解析失败折成空 dict 再往下走：save_bots 会先 **DELETE FROM bots**
+        # 再按 payload 重建，于是「body 被代理截断 / 非法 JSON / 前端字段名漂移」
+        # 会把全部账号配置清空，还回一句「配置已保存」。其他写接口缺字段一律 400。
+        return _err(400, f"请求体不是合法 JSON，未改动任何账号配置: {e}")
+    bots = data.get("bots") if isinstance(data, dict) else None
+    if not isinstance(bots, list):
+        # 空数组合法（= 用户主动删光所有账号），但**缺字段**和**类型错误**必须拒绝
+        return _err(400, "请求体缺少 bots 数组，未改动任何账号配置")
+    await container.get(ConfigService).save_bots(bots)
     return _ok("配置已保存")
 
 
