@@ -15,6 +15,8 @@ import pytest
 from app.llm.speech import (
     DEFAULT_MAX_BUBBLES,
     FORCE_SPEAK_REMINDER,
+    QUEUE_DUP,
+    QUEUE_OK,
     SPEAK_REMINDER,
     SPEECH_PROTOCOL,
     SpeechOutbox,
@@ -109,6 +111,36 @@ async def test_send_message_truncates_long_bubble_instead_of_rejecting():
     assert reply.startswith("ok:")
     assert outbox.queued == 1
     assert len(outbox.take()[0].text) == 10
+    # 截断必须**告诉模型**：否则它以为整段已送达，用户只收到被砍断的半句
+    assert "截断" in reply
+
+
+def test_truncated_bubble_is_deduplicated_on_the_truncated_text():
+    """去重必须按**裁剪后**的文本比对。
+
+    旧实现是「按全文比对、存裁剪后的文本」：``clean in self._seen`` 用的是全文，
+    而 ``self._seen.add(clean)`` 存的是裁剪结果 → 超长正文重复入稿永远判不出重复，
+    同一段长文会被切成同样的前 10 字反复排进队列。
+    """
+    outbox = SpeechOutbox(max_chars=10, max_bubbles=4)
+    long_text = "很" * 50
+
+    first, _ = outbox.queue(long_text)
+    second, note = outbox.queue(long_text)
+
+    assert first == QUEUE_OK
+    assert second == QUEUE_DUP, f"同样的超长正文应判重，实际 {second}"
+    assert outbox.queued == 1
+    assert outbox.dropped == 1
+
+
+def test_truncation_note_reaches_the_model_in_batch_write():
+    """批量入稿里同批有成功项时，截断附注也不能被丢掉。"""
+    outbox = SpeechOutbox(max_chars=10, max_bubbles=4)
+    accepted, notes = outbox.queue_many(["短句", "很" * 50])
+
+    assert accepted == 2
+    assert any("截断" in n for n in notes), f"截断附注丢了：{notes}"
 
 
 def test_speech_protocol_is_injected_into_the_user_turn():

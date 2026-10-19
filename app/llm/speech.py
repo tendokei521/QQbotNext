@@ -97,6 +97,11 @@ QUEUED_LIMIT = (
     "error: 本轮已排队 {count}/{limit} 条，不再接受新消息。"
     "把想说的留到下一轮，或先调用 finish 收尾。"
 )
+#: 被截断时的附注：必须说清"发出去的比你想的短"，否则模型以为整段已经送达
+TRUNCATED_NOTE = (
+    "注意：单条上限 {limit} 字，这条已**截断**到 {limit} 字；"
+    "剩下的内容请拆成下一条再发，不要以为它已经发出去了。"
+)
 
 #: ``SpeechOutbox.queue`` 的三种结局（字符串常量，避免 bool 把"去重"算成"入稿"）
 QUEUE_OK = "queued"
@@ -155,6 +160,8 @@ class SpeechOutbox:
         - ``"rejected"``：空正文 / 超出条数上限。
 
         超长正文**裁剪**而不是拒绝：拒绝会让模型反复重试同一条。
+        但裁剪必须**告诉模型**（回执里带附注）——否则它以为整段已经发出去了，
+        用户看到的却是被砍断的半句话，而模型完全不知道要补发。
         """
         clean = str(text or "").strip()
         if not clean:
@@ -163,13 +170,19 @@ class SpeechOutbox:
             return QUEUE_REJECTED, QUEUED_LIMIT.format(
                 count=len(self.bubbles), limit=self.max_bubbles
             )
+        # 去重必须在**裁剪之后**做：此前是「按全文比对、存裁剪后的文本」，
+        # 于是超长正文重复入稿永远不会被判重（每次全文都不一样地进了 _seen）。
+        truncated = False
+        if len(clean) > self.max_chars:
+            clean = clean[: self.max_chars]
+            truncated = True
         if clean in self._seen:
             self.dropped += 1
             return QUEUE_DUP, "ok: 这句本轮已经排队过了，已跳过重复的一条。"
-        if len(clean) > self.max_chars:
-            clean = clean[: self.max_chars]
         self._seen.add(clean)
         self.bubbles.append(SpeechBubble(text=clean, reply_to=str(reply_to or ""), at=tuple(at)))
+        if truncated:
+            return QUEUE_OK, TRUNCATED_NOTE.format(limit=self.max_chars)
         return QUEUE_OK, ""
 
     def queue_many(
@@ -186,7 +199,9 @@ class SpeechOutbox:
             status, message = self.queue(raw, reply_to=reply_to, at=at)
             if status == QUEUE_OK:
                 accepted += 1
-            elif message:
+            # 附注与结局无关：截断是"入稿成功但内容被砍"，属于 QUEUE_OK 也要告诉模型，
+            # 此前 elif 挂在非 OK 分支上，批量入稿时截断附注会被直接丢掉。
+            if message:
                 notes.append(message)
             if len(self.bubbles) >= max(1, int(self.max_bubbles)):
                 break
@@ -341,6 +356,10 @@ def build_speech_tools(outbox: SpeechOutbox) -> list[ToolSpec]:
         reply = QUEUED_OK.format(count=accepted)
         if len(texts) > accepted:
             reply += f"\n（另 {len(texts) - accepted} 条未入稿：已到本轮条数上限，或与本轮某条重复）"
+        if notes:
+            # 逐条附注必须回传：被截断、去重、超上限都是模型需要知道的实情。
+            # 此前只要有一条入稿成功就把 notes 全丢了 —— 模型以为整段已送达。
+            reply += "\n" + "\n".join(notes)
         return reply
 
     async def _finish(ctx, args: dict) -> str:
