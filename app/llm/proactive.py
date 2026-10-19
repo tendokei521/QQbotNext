@@ -330,6 +330,7 @@ class ProactiveManager:
                 max_tokens=config.get("max_tokens", 1024),
                 tools=build_tools(all_specs) if use_tools else None,
                 tool_executor=make_executor(all_specs, tool_ctx) if use_tools else None,
+                tool_ctx=tool_ctx,
                 max_tool_rounds=max_tool_rounds,
             )
             if hasattr(config, "clear_session"):

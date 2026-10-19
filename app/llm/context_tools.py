@@ -792,8 +792,40 @@ async def _handle_expand_image(ctx, args: dict) -> str:
         )
         lines.append(f"消息 {mid}：已取回 {who} 发的 {len(images)} 张图片，图片随本条一起提供")
     if queued:
-        lines.append("（图片已记为本轮补全，**下一轮对话里你会直接看到它**；先别猜图片内容）")
+        # 措辞要贴合实际时机：图片会在**本轮的下一次请求**里随消息一起送达（chat 的工具轮
+        # 边界与补图轮都会抽走 round_images）。此前写的是「下一轮对话里你会直接看到它」，
+        # 而当时根本没有代码把图片递出去 —— 模型只能凭文字瞎猜，用户看到的是编造的描述。
+        lines.append("（图片已记为本轮补全材料，**会在本轮的下一次请求里随消息一起提供**；本轮先别猜图片内容）")
     return "\n".join(lines) if lines else "error: 没有取到任何图片"
+
+
+def append_round_images(messages: list[dict], tool_ctx, modalities) -> bool:
+    """把 ``expand_image`` 本轮取回的图片追加为一条 user 消息（仅视觉模型）。
+
+    图片不塞进原用户消息（那是历史内容，不是本轮发言），而是作为"补全材料"附在末尾；
+    文本模型跳过（图片块会被清洗成 ``[Image]``，没有意义）。
+
+    放在这里而不是 ``chat``：主动消息 / 定时任务的流式工具循环也要用，而
+    ``initiative_stream`` 不能 import ``chat``（循环导入）。返回是否真的追加了内容，
+    非流式路径靠它决定"要不要补问一轮"。
+    """
+    if tool_ctx is None:
+        return False
+    try:
+        from app.llm.image import build_user_content
+        from app.llm.providers.modalities import supports_image
+
+        images = drain_round_images(tool_ctx)
+    except Exception as e:  # noqa: BLE001 —— 补图是增强，失败不该影响主流程
+        logger.debug(f"[ExpandImage] 取待传图片失败（已忽略）: {e}")
+        return False
+    if not images or not supports_image(modalities):
+        return False
+    content = build_user_content(images, text="（以下是你刚取回的历史图片）")
+    if content:
+        messages.append({"role": "user", "content": content})
+        return True
+    return False
 
 
 class _ImageEvent:
@@ -959,7 +991,7 @@ def build_context_tools(runtime: Any, ctx: Any) -> list[ToolSpec]:
         _context_spec(
             "expand_image",
             (
-                "取回历史消息里的图片（图片会在**下一轮**随请求提供，届时你直接看得到）。\n"
+                "取回历史消息里的图片（图片会在**本轮的下一次请求**里随消息提供，届时你直接看得到）。\n"
                 "当聊天记录里出现 [图片#123] / [语音#123] 这类带 id 的占位、"
                 "用户说“看看那张图/上一条发的图”、或你判断某条历史消息里有图且与当前问题相关时调用。\n"
                 "只取必要的图（一次 1~2 张），不要为了凑热闹把历史图片全翻出来。"

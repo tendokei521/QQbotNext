@@ -157,3 +157,53 @@ def test_round_images_skipped_for_text_only_model():
 
     # 文本模型：不追加图片消息（队列里的图也不会被发出去）
     assert len(messages) == 2
+
+
+# ==================== 工具轮中途取回的图片必须当轮送达 ====================
+
+
+def test_round_images_appended_returns_true_when_queued():
+    """返回值供非流式路径判断「要不要补问一轮」。"""
+    from app.llm.context_tools import append_round_images
+
+    ctx = _ctx(_Bot())
+    ctx.extra["round_images"] = [{"kind": "url", "value": "https://cdn.example/pic.png"}]
+
+    assert append_round_images(_messages(), ctx, ["text", "image"]) is True
+    assert append_round_images(_messages(), ctx, ["text", "image"]) is False  # 队列已空
+
+
+def test_round_images_drained_only_once():
+    """补图轮不能反复追加同一张图（否则补问轮无终止条件）。"""
+    from app.llm.context_tools import append_round_images, drain_round_images
+
+    ctx = _ctx(_Bot())
+    ctx.extra["round_images"] = [{"kind": "url", "value": "https://cdn.example/pic.png"}]
+    messages = _messages()
+
+    append_round_images(messages, ctx, ["text", "image"])
+
+    assert len(messages) == 3
+    assert drain_round_images(ctx) == []
+
+
+async def test_expand_image_receipt_points_at_this_round_not_next_dialogue(tmp_path, monkeypatch):
+    """回执措辞必须与实际时机一致。
+
+    旧文案是「**下一轮对话里你会直接看到它**」，但当时没有任何代码把图片递出去：
+    模型只能凭文字描述瞎猜，用户看到的是编造的画面。现在图片在本轮下一次请求就送到，
+    回执也必须这么说（否则模型会在一轮之内重复取图，或干脆放弃描述）。
+    """
+    monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
+    monkeypatch.setattr(history_enrich, "_STORE", None, raising=False)
+    history_enrich._LEDGERS.clear()
+
+    bot = _Bot()
+    ctx = _ctx(bot)
+    ctx.extra["expansion_ledger"] = history_enrich.ledger_for(778, "group_466")
+
+    result = await _handle_expand_image(ctx, {"messages": ["1003"]})
+
+    assert "下一轮对话" not in result
+    assert "本轮" in result
+    assert len(drain_round_images(ctx)) == 1

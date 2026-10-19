@@ -100,28 +100,15 @@ def _commit_history_enrichment(runtime, session_id: str, ctx=None) -> int:
         return 0
 
 
-def _append_round_images(messages: list[dict], tool_ctx, modalities) -> None:
+def _append_round_images(messages: list[dict], tool_ctx, modalities) -> bool:
     """把 ``expand_image`` 取回的图片追加为一条 user 消息（仅视觉模型）。
 
-    图片不塞进原用户消息（那是历史内容，不是本轮发言），而是作为"补全材料"附在末尾；
-    文本模型跳过（图片块会被清洗成 [Image]，没有意义）。
+    实现在 ``context_tools.append_round_images``（主动消息/定时任务的工具轮也要用，
+    而它们不能 import 本模块）。见该函数的说明与时机问题。
     """
-    if tool_ctx is None:
-        return
-    try:
-        from app.llm.context_tools import drain_round_images
-        from app.llm.image import build_user_content
-        from app.llm.providers.modalities import supports_image
+    from app.llm.context_tools import append_round_images
 
-        images = drain_round_images(tool_ctx)
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"[ExpandImage] 取待传图片失败（已忽略）: {e}")
-        return
-    if not images or not supports_image(modalities):
-        return
-    content = build_user_content(images, text="（以下是你刚取回的历史图片）")
-    if content:
-        messages.append({"role": "user", "content": content})
+    return append_round_images(messages, tool_ctx, modalities)
 
 
 def _format_session_history(
@@ -1242,20 +1229,25 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
     if _mt_note:
         logger.add_info(f"#{runtime.bot_id}").warning(f"[LLM] {_mt_note}")
     response_start = time.monotonic()
-    response = await resolve_invoker(runtime).chat(
-        runtime=runtime,
-        chain=provider_chain,
-        messages=messages,
-        params={
-            "model": meta["model"],
-            "temperature": meta["temperature"],
-            "max_tokens": meta["max_tokens"],
-            "tools": build_tools(all_specs) if use_tools else None,
-            "tool_executor": make_executor(all_specs, tool_ctx) if use_tools else None,
-            "max_tool_rounds": _max_tool_rounds(config),
-            "max_empty_retries": _max_empty_retries(config),
-        },
-    )
+    call_params = {
+        "model": meta["model"],
+        "temperature": meta["temperature"],
+        "max_tokens": meta["max_tokens"],
+        "tools": build_tools(all_specs) if use_tools else None,
+        "tool_executor": make_executor(all_specs, tool_ctx) if use_tools else None,
+        "max_tool_rounds": _max_tool_rounds(config),
+        "max_empty_retries": _max_empty_retries(config),
+    }
+
+    async def _invoke():
+        return await resolve_invoker(runtime).chat(
+            runtime=runtime,
+            chain=provider_chain,
+            messages=messages,
+            params=dict(call_params),
+        )
+
+    response = await _invoke()
     # 非流式的同款毛病：思考把 max_tokens 吃满时 text 为空、reasoning 有内容。
     # 原样重试没意义，追加一次「直接作答」提醒再要一枪（reasoning 只有部分
     # provider 会填，取不到就不动，保持旧行为）。
@@ -1271,20 +1263,17 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
             f"max_tokens={eff_max_tokens}（来自{max_tokens_src}）），追加一次收敛轮 -> {session_id}"
         )
         messages.append({"role": "user", "content": REASONING_OVERFLOW_NUDGE})
-        response = await resolve_invoker(runtime).chat(
-            runtime=runtime,
-            chain=provider_chain,
-            messages=messages,
-            params={
-                "model": meta["model"],
-                "temperature": meta["temperature"],
-                "max_tokens": meta["max_tokens"],
-                "tools": build_tools(all_specs) if use_tools else None,
-                "tool_executor": make_executor(all_specs, tool_ctx) if use_tools else None,
-                "max_tool_rounds": _max_tool_rounds(config),
-                "max_empty_retries": _max_empty_retries(config),
-            },
+        response = await _invoke()
+
+    # expand_image 补图轮：非流式的工具循环跑在 provider 内部（openai_compat.chat 里
+    # while 循环），chat.py 拿不到中间态，于是工具轮里取回的图片**从未**送达模型——
+    # 而工具回执却对模型说「下一轮对话里你会直接看到它」。这里把本轮积攒的图片
+    # 作为补全材料追加后再问一次（上限 1 次，防模型反复取图造成死循环）。
+    if _append_round_images(messages, tool_ctx, modalities):
+        logger.add_info(f"#{runtime.bot_id}").info(
+            f"[ExpandImage] 工具轮取回的图片已作为补全材料追加，补问一轮 -> {session_id}"
         )
+        response = await _invoke()
     response_latency_ms = (time.monotonic() - response_start) * 1000
 
     if not response.ok:
@@ -1564,6 +1553,14 @@ async def stream_response(runtime, event, ctx=None):
             "tool_calls": normalized_calls,
         })
         messages.extend(tool_messages)
+
+        # 工具轮里 expand_image 取回的图片必须**在本轮**递给模型：此前只在请求开始时
+        # 抽一次 round_images，工具执行期间积攒的那些要等下一轮对话才被抽走，
+        # 于是模型当轮只能凭工具回执里的文字描述瞎猜（还被告知"你会直接看到"）。
+        if _append_round_images(messages, tool_ctx, modalities):
+            logger.add_info(f"#{runtime.bot_id}").info(
+                f"[ExpandImage] 工具轮取回的图片已追加到下一轮请求 -> {session_id}"
+            )
 
         if speech_by_tool:
             # round 边界 flush：模型一旦调 send_message，本轮工具执行完就真发出去，

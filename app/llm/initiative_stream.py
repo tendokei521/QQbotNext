@@ -66,6 +66,7 @@ async def stream_send_initiative(
     max_tokens: int = 1024,
     tools: list[dict] | None = None,
     tool_executor=None,
+    tool_ctx=None,
     max_tool_rounds: int = DEFAULT_MAX_TOOL_ROUNDS,
 ) -> str:
     """使用流式 + 消息池发送一段主动/定时内容，返回完整文本。
@@ -157,6 +158,18 @@ async def stream_send_initiative(
                 "tool_calls": normalized_calls,
             })
             messages.extend(tool_messages)
+
+            # 工具轮里 expand_image 取回的图片必须在本轮递给模型（否则模型只能凭
+            # 工具回执的文字描述瞎猜）。延迟 import：initiative_stream 不能顶层
+            # import chat（循环导入）。
+            from app.llm.chat import _append_round_images, _modalities_for_chain
+
+            if _append_round_images(messages, tool_ctx, _modalities_for_chain(chain)):
+                from app.llm import logger
+
+                logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").info(
+                    "[ExpandImage] 主动/定时任务工具轮取回的图片已追加到下一轮请求"
+                )
 
         # 一句话没发不等于"模型没干活"：把思考字数留下来，避免日志里看不出真实原因
         if reasoning_chars and not full_text_parts:
