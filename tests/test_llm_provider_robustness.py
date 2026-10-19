@@ -182,3 +182,55 @@ def test_openai_compat_non_stream_still_accepts_reasoning_content():
     )
 
     assert (resp.text, resp.reasoning) == ("答", "想过")
+
+
+# ==================== 3. 上游错误报文不能当成「零产出」 ====================
+
+
+def test_error_chunk_becomes_error_event():
+    """``{"error": ...}`` 是 200 连接内的上游错误报文，必须产出 error 事件。
+
+    旧实现只 ``return events``（因为没有 choices），整条流对上层等于「成功但零产出」：
+    同 prompt 原样重试（确定性必失败）→ 再换 provider → 兜底话术，
+    而真因（upstream timeout / 配额）从没进过日志。
+    """
+    from app.llm.providers.openai_compat import events_from_chunk
+
+    events = events_from_chunk({"error": {"message": "upstream timeout", "type": "server_error"}})
+
+    assert [ev.type for ev in events] == ["error"]
+    assert events[0].text == "upstream timeout"
+
+
+def test_flat_error_chunk_becomes_error_event():
+    from app.llm.providers.openai_compat import events_from_chunk
+
+    events = events_from_chunk({"type": "error", "message": "quota exceeded"})
+
+    assert [ev.type for ev in events] == ["error"]
+    assert events[0].text == "quota exceeded"
+
+
+def test_error_chunk_with_null_choices_is_not_swallowed():
+    from app.llm.providers.openai_compat import events_from_chunk
+
+    events = events_from_chunk({"choices": None, "error": {"message": "boom"}})
+
+    assert [ev.type for ev in events] == ["error"]
+
+
+def test_usage_only_chunk_still_works():
+    """修 error 报文不能误伤「只有 usage 没有 choices」的合法收尾块。"""
+    from app.llm.providers.openai_compat import events_from_chunk
+
+    events = events_from_chunk({"choices": [], "usage": {"prompt_tokens": 5}})
+
+    assert [ev.type for ev in events] == ["usage"]
+
+
+def test_normal_chunk_has_no_error_event():
+    from app.llm.providers.openai_compat import events_from_chunk
+
+    events = events_from_chunk({"choices": [{"delta": {"content": "hi"}}]})
+
+    assert [ev.type for ev in events] == ["text"]

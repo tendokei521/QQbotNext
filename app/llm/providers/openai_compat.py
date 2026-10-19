@@ -65,6 +65,26 @@ def _split_keys(api_key: str) -> list[str]:
 _STREAM_OPTIONS_HINTS = ("stream_options", "include_usage")
 
 
+def _chunk_error_text(chunk: dict) -> str:
+    """取出 SSE chunk 里的上游错误文本（``{"error": ...}`` / ``{"type":"error",...}``）。
+
+    OpenAI 兼容中转（one-api / new-api / vLLM / Azure 风格）在**200 连接内**下发
+    错误报文是常态。旧实现走 ``chunk.get("choices") or []`` 后直接 ``return events``，
+    错误报文被当成"没有 choices 的正常 chunk"丢掉 —— 整条流对上层等于「成功但零产出」，
+    于是又走「同 prompt 原样重试」并最终发兜底话术，而真因（upstream timeout /
+    context length exceeded / quota）从没进过日志。
+    """
+    err = chunk.get("error")
+    if err:
+        if isinstance(err, dict):
+            return str(err.get("message") or err.get("type") or err)
+        return str(err)
+    # 少数网关用 {"type": "error", "message": "..."} 的扁平形态
+    if chunk.get("type") == "error":
+        return str(chunk.get("message") or chunk.get("detail") or chunk)
+    return ""
+
+
 def events_from_chunk(chunk: dict) -> list[StreamEvent]:
     """把一个 SSE data chunk 解析成事件（纯函数，便于单测）。
 
@@ -73,8 +93,14 @@ def events_from_chunk(chunk: dict) -> list[StreamEvent]:
 
     思考流也在这里解析：DeepSeek 系思考模型在流式里只发 ``delta.reasoning_content``
     （此时 ``delta.content`` 恒为 null），旧实现只认 ``content`` → 整条流被当成"零产出"。
+
+    上游错误报文（``{"error": ...}``）同样要产出 ``error`` 事件，而不是被当成
+    "没有 choices 的普通 chunk"丢掉。
     """
     events: list[StreamEvent] = []
+    error_text = _chunk_error_text(chunk)
+    if error_text:
+        events.append(StreamEvent(type="error", text=error_text))
     usage = chunk.get("usage")
     if isinstance(usage, dict) and usage:
         events.append(StreamEvent(type="usage", usage=dict(usage)))
@@ -205,6 +231,7 @@ class OpenAICompatProvider(BaseProvider):
                             f"HTTP {resp.status}: {body}", code=f"HTTP {resp.status}"
                         )
                     raise _FatalError(f"HTTP {resp.status}: {body}", code=f"HTTP {resp.status}")
+                dropped = 0
                 while True:
                     raw_line = await resp.content.readline()
                     if not raw_line:
@@ -218,9 +245,16 @@ class OpenAICompatProvider(BaseProvider):
                     try:
                         chunk = json.loads(data)
                     except json.JSONDecodeError:
+                        # 半截 JSON = 连接被截断或上游发了非标准块：至少留个痕，
+                        # 否则这段时间模型已吐出的正文会凭空少一截而没有解释
+                        dropped += 1
                         continue
                     for event in events_from_chunk(chunk):
                         yield event
+                if dropped:
+                    logger.add_info("Api").warning(
+                        f"流式响应有 {dropped} 个 SSE 数据块无法解析（上游报错或连接被截断），已丢弃"
+                    )
 
     async def _request(self, payload: dict, timeout: int) -> dict | None:
         """带重试的请求。认证失败自动轮换 key；最终失败返回 None。"""
