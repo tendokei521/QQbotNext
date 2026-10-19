@@ -216,6 +216,14 @@ class LlmPipeline:
             config = self.runtime.config
             # 没有 key 或对应场景未启用时，不视为“触发 LLM”，不重置主动消息状态
             if not self.runtime.provider_config().get("api_key", ""):
+                # 静默 return 是最难查的一类"机器人不回话"：用户看不到任何东西，
+                # 日志里连一行都没有。这里明确交代一句，并说清该去哪配。
+                from app.core.logger import logger
+
+                logger.add_info(f"#{getattr(self.runtime, 'bot_id', '?')}").warning(
+                    "[LLM] 未配置 API Key，本轮消息不进入 LLM（在「Provider 预设」页填写；"
+                    "自建网关若靠额外请求头鉴权，请在预设里配 extra_headers）"
+                )
                 return
             if ctx.event.event_type == "message_group" and not config.get("group_enable", False):
                 return

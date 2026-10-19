@@ -41,9 +41,11 @@ from app.llm.providers.invoker import resolve_invoker
 from app.llm.providers.modalities import normalize_modalities, supports_image, supports_tool_use
 from app.llm.tags import maybe_strip_parentheses, strip_all_tags
 from app.llm.splitter import split_sentences, strip_stream_artifacts
-from app.llm.trigger import extract_text
+from app.llm.token_budget import estimate_tokens
 from app.llm.tool import ToolContext, build_tools, make_executor
 from app.llm.tool_loop import normalize_and_execute_tool_calls
+from app.llm.trigger import extract_text
+from app.llm.request_policy import TurnBudget, retry_profile_of
 
 
 def _event_nickname(event) -> str:
@@ -466,6 +468,105 @@ def _max_empty_retries(config, default: int = DEFAULT_EMPTY_REPLY_RETRIES) -> in
     except (TypeError, ValueError):
         return default
     return max(0, min(value, 3))
+
+
+def _usage_snapshot(usage: dict | None) -> dict:
+    """usage 累计快照（用来算"这一轮请求自己花了多少"）。"""
+    if not usage:
+        return {}
+    return {k: v for k, v in usage.items() if isinstance(v, (int, float))}
+
+
+def _usage_delta(usage: dict | None, before: dict, key: str) -> int:
+    """本次请求的单项 token 增量（上游没报就返回 0，绝不编）。"""
+    if not usage:
+        return 0
+    try:
+        return max(0, int(usage.get(key, 0) or 0) - int(before.get(key, 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _log_request_line(
+    runtime,
+    *,
+    session_id: str,
+    round_index: int,
+    served_model: str,
+    max_tokens: int,
+    max_tokens_src: str,
+    input_tokens: int,
+    output_tokens: int,
+    input_estimate: int,
+    finish_reason: str,
+    text_chars: int,
+    reasoning_chars: int,
+    tools: int,
+    error: str,
+    budget: TurnBudget,
+) -> None:
+    """**每一次**真实请求打一行结构化记录（流式路径）。
+
+    为什么值得单独一行：出问题时大家看的就是日志，而此前一次请求的信息散在四五处
+    （模型名在一行、token 在另一行、max_tokens 只在开头可能出现、重试次数只体现在
+    多条"重试"警告里）。这里一行给全，并且用固定字段名 ``key=value`` 便于 grep：
+
+        model= in= out= max_tokens=(来源) finish= text= reasoning= tools= retry=n/m
+
+    上游没回报 token 时写 ``in=?`` ``out=?`` 而不是 0 —— 0 会被误读成"没花 token"。
+    """
+    from app.llm.providers.base import has_token_usage
+
+    reported = has_token_usage(
+        {"prompt_tokens": input_tokens, "completion_tokens": output_tokens}
+    )
+    in_txt = str(input_tokens) if reported else f"?≈{input_estimate}"
+    out_txt = str(output_tokens) if reported else "?"
+    parts = [
+        f"model={served_model or '?'}",
+        f"round={round_index + 1}",
+        f"in={in_txt}",
+        f"out={out_txt}",
+        f"max_tokens={max_tokens}({max_tokens_src})",
+        f"finish={finish_reason or '-'}",
+        f"text={text_chars}字",
+    ]
+    if reasoning_chars:
+        parts.append(f"reasoning={reasoning_chars}字")
+    if tools:
+        parts.append(f"tools={tools}")
+    parts.append(f"budget={budget.requests}/{budget.max_requests}")
+    log = logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}")
+    if error:
+        parts.append(f"error={error}")
+        log.warning("[LLM] 请求 " + " ".join(parts) + f" -> {session_id}")
+    else:
+        log.info("[LLM] 请求 " + " ".join(parts) + f" -> {session_id}")
+
+
+def _turn_budget(config) -> TurnBudget:
+    """本轮请求的总预算闸门（请求次数 + 累计输入 token）。
+
+    为什么需要它：重试散在三层（HTTP 适配器 ``retry_attempts``、回退层空回复重试、
+    调用方收敛重试），每层单独看都"只多一次"，乘起来却是十几次，而且**每次都重发
+    全量上下文**（线上为此把 16.7 万 token 发了三遍还没出头）。这里把总账收在一处：
+    档位决定最多几次请求、累计输入 token 到线就停，停了如实写日志。
+
+    注意它只是**闸门**，不改变重试策略本身（谁该重试仍由失败分类决定）。
+    """
+    try:
+        return TurnBudget.from_config(config)
+    except Exception as e:  # noqa: BLE001 —— 预算读不出来不该拖垮整轮回复
+        logger.add_info("LLM").warning(f"[Budget] 预算配置解析失败，改用默认档位: {e}")
+        return TurnBudget(profile=retry_profile_of(None))
+
+
+def _input_tokens_estimate(messages: list[dict]) -> int:
+    """这份上下文大概多少输入 token（用于预算累计；上游回了真实 usage 就以真实值为准）。"""
+    try:
+        return int(estimate_tokens(messages))
+    except Exception:  # noqa: BLE001 —— 估算失败就当 0，闸门退化为只按次数算
+        return 0
 
 
 DEFAULT_REASONING_OVERFLOW_RETRIES = 1
@@ -1229,6 +1330,9 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
     if _mt_note:
         logger.add_info(f"#{runtime.bot_id}").warning(f"[LLM] {_mt_note}")
     response_start = time.monotonic()
+    # 本轮总闸门：所有重试（HTTP / 空回复 / 收敛 / 回退）都从这一本账上扣
+    turn_budget = _turn_budget(config)
+    input_tokens_estimate = _input_tokens_estimate(messages)
     call_params = {
         "model": meta["model"],
         "temperature": meta["temperature"],
@@ -1237,6 +1341,8 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
         "tool_executor": make_executor(all_specs, tool_ctx) if use_tools else None,
         "max_tool_rounds": _max_tool_rounds(config),
         "max_empty_retries": _max_empty_retries(config),
+        "budget": turn_budget,
+        "input_tokens_estimate": input_tokens_estimate,
     }
 
     async def _invoke():
@@ -1275,6 +1381,28 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
         )
         response = await _invoke()
     response_latency_ms = (time.monotonic() - response_start) * 1000
+    _log_request_line(
+        runtime,
+        session_id=session_id,
+        round_index=0,
+        served_model=str((response.raw or {}).get("model", "") if isinstance(response.raw, dict) else "")
+        or meta["model"],
+        max_tokens=eff_max_tokens,
+        max_tokens_src=max_tokens_src,
+        input_tokens=int((response.usage or {}).get("prompt_tokens", 0) or 0),
+        output_tokens=int((response.usage or {}).get("completion_tokens", 0) or 0),
+        input_estimate=input_tokens_estimate,
+        finish_reason=str(getattr(response, "finish_reason", "") or ""),
+        text_chars=len(getattr(response, "text", "") or ""),
+        reasoning_chars=len(getattr(response, "reasoning", "") or ""),
+        tools=len(response.tool_results or []),
+        error="" if response.ok else "未产出可用响应",
+        budget=turn_budget,
+    )
+    logger.add_info(f"#{runtime.bot_id}").info(
+        f"[Budget] 本轮 {turn_budget.describe()}"
+        f"，max_tokens={eff_max_tokens}（来自{max_tokens_src}）-> {session_id}"
+    )
 
     if not response.ok:
         clean_response = "抱歉，我暂时无法回答，请稍后再试。"
@@ -1422,6 +1550,9 @@ async def stream_response(runtime, event, ctx=None):
     # 「思考吃满预算」的收敛重试预算（只补一次，避免把轮数全耗在同一个问题上）
     overflow_retries = _reasoning_overflow_retries(config)
     overflow_used = 0
+    # 本轮总闸门：工具多轮 + 空回复重试 + 收敛重试都从这一本账上扣
+    turn_budget = _turn_budget(config)
+    input_tokens_estimate = _input_tokens_estimate(messages)
 
     def _write_partial_history(text: str) -> bool:
         """流式边发边写历史：先落一条，后续分片只更新它。返回是否写成功。
@@ -1449,6 +1580,7 @@ async def stream_response(runtime, event, ctx=None):
         stream_error = ""
         reasoning_chars = 0
         finish_reason = ""
+        usage_before = _usage_snapshot(usage_sink)
 
         async for ev in resolve_invoker(runtime).stream(
             runtime=runtime,
@@ -1462,6 +1594,8 @@ async def stream_response(runtime, event, ctx=None):
                 "tool_executor": tool_executor,
                 "max_empty_retries": _max_empty_retries(config),
                 "usage_sink": usage_sink,
+                "budget": turn_budget,
+                "input_tokens_estimate": input_tokens_estimate,
             },
         ):
             if ev.type == "text":
@@ -1517,6 +1651,23 @@ async def stream_response(runtime, event, ctx=None):
         round_text = "".join(round_text_parts)
         reasoning_total += reasoning_chars
         full_text = "".join(full_text_parts)
+        _log_request_line(
+            runtime,
+            session_id=session_id,
+            round_index=_round,
+            served_model=_served_model_label(usage_sink, meta["model"]),
+            max_tokens=eff_max_tokens,
+            max_tokens_src=max_tokens_src,
+            input_tokens=_usage_delta(usage_sink, usage_before, "prompt_tokens"),
+            output_tokens=_usage_delta(usage_sink, usage_before, "completion_tokens"),
+            input_estimate=input_tokens_estimate,
+            finish_reason=finish_reason,
+            text_chars=len(round_text),
+            reasoning_chars=reasoning_chars,
+            tools=len(tool_calls),
+            error=stream_error,
+            budget=turn_budget,
+        )
 
         if stream_error:
             # 记录失败详情，便于定位（error 事件文本通常含 API 返回的状态码与原因）
@@ -1698,6 +1849,10 @@ async def stream_response(runtime, event, ctx=None):
         model=_served_model_label(usage_sink, meta["model"]),
         chars=len("".join(full_text_parts)),
         stream=True,
+    )
+    logger.add_info(f"#{runtime.bot_id}").info(
+        f"[Budget] 本轮 {turn_budget.describe()}"
+        f"，max_tokens={eff_max_tokens}（来自{max_tokens_src}）-> {session_id}"
     )
 
     if ctx is not None:
