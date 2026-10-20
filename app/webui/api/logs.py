@@ -9,11 +9,11 @@ import time
 import zipfile
 from pathlib import Path
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
-from app.webui.api.deps import get_container
+from app.webui.api.deps import get_config_service, get_log_service
 
 router = APIRouter(tags=["logs"])
 
@@ -22,12 +22,12 @@ _ARCHIVE_FOLDER_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-\d{2}$")
 
 
 @router.get("/logs")
-async def api_logs(request: Request):
-    from app.infrastructure.config.config_service import ConfigService
-    from app.services.log_service import LogService
-
-    container = get_container(request)
-    config = container.get(ConfigService).get_webui_config()
+async def api_logs(
+    request: Request,
+    config_service=Depends(get_config_service),
+    log_service=Depends(get_log_service),
+):
+    config = config_service.get_webui_config()
     levels = config.get("logs", {}).get("visible_levels", ["info", "warning", "error"])
     max_lines = config.get("logs", {}).get("max_lines", 50)
 
@@ -35,17 +35,14 @@ async def api_logs(request: Request):
     if mode not in ("simple", "raw"):
         mode = "raw" if config.get("logs", {}).get("show_raw_logs", False) else "simple"
     source = "user" if mode == "simple" else "debug"
-    return JSONResponse(content=container.get(LogService).get_recent_logs(max_lines, levels, source=source))
+    return JSONResponse(content=log_service.get_recent_logs(max_lines, levels, source=source))
 
 
 # ==================== 日志导出 ====================
 
 
-def _log_dir(request: Request) -> Path:
-    from app.services.log_service import LogService
-
-    container = get_container(request)
-    return Path(container.get(LogService).log_dir)
+def _log_dir(log_service) -> Path:
+    return Path(log_service.log_dir)
 
 
 def _file_info(path: Path) -> dict:
@@ -77,8 +74,8 @@ def _safe_resolve(log_dir: Path, folder: str, filename: str) -> Path:
 
 
 @router.get("/logs/export/list")
-async def api_log_export_list(request: Request):
-    log_dir = _log_dir(request)
+async def api_log_export_list(log_service=Depends(get_log_service)):
+    log_dir = _log_dir(log_service)
     current = []
     for name in LOG_FILENAMES:
         p = log_dir / name
@@ -106,9 +103,13 @@ async def api_log_export_list(request: Request):
 
 
 @router.get("/logs/export/download")
-async def api_log_export_download(request: Request, folder: str = "", file: str = ""):
+async def api_log_export_download(
+    folder: str = "",
+    file: str = "",
+    log_service=Depends(get_log_service),
+):
     try:
-        log_dir = _log_dir(request)
+        log_dir = _log_dir(log_service)
         path = _safe_resolve(log_dir, folder, file)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
@@ -123,7 +124,7 @@ async def api_log_export_download(request: Request, folder: str = "", file: str 
 
 
 @router.post("/logs/export/zip")
-async def api_log_export_zip(request: Request):
+async def api_log_export_zip(request: Request, log_service=Depends(get_log_service)):
     from app.core.logger import logger
 
     try:
@@ -135,10 +136,11 @@ async def api_log_export_zip(request: Request):
         items = data.get("items") or []
     else:
         items = data
+
     if not isinstance(items, list) or not items:
         return JSONResponse(status_code=400, content={"status": "error", "message": "请选择至少一个日志文件"})
 
-    log_dir = _log_dir(request)
+    log_dir = _log_dir(log_service)
     validated: list[tuple[Path, str]] = []
     for item in items:
         if not isinstance(item, dict):

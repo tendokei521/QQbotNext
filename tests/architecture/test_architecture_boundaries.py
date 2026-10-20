@@ -41,11 +41,13 @@ AGENT_PREFIXES = ("app.agent",)  # P2 后 agent 层只有这一个前缀（app.l
 _BUDGET = {
     # P3 已清零：生产代码不再从装配根取容器（改用 app.core.container.get_active）
     "bootstrap_imports": 0,
-    # 剩下 64 处全在 app/webui/api/*，且都是 FastAPI 依赖（request.app.state.container）。
-    # 下一步：把每个端点改成 Depends 注入具体服务，而不是自己从容器里捞。
-    "get_container_calls": 64,
+    # 剩下的都在 app/webui/api/*。`deps.py` 已经给每个服务备了具名依赖
+    # （get_bot_service 等），把端点改成 `Depends(get_xxx_service)` 就能继续降。
+    # logs.py 已清零（含 3 条 HTTP 用例守住）。
+    "get_container_calls": 63,
+    # 端点里自己 `container.get(类型)` 的次数（服务定位的味道）。目标 0。
+    "webui_container_get_calls": 53,
     # app/webui/api/{agent,media,modules,prompt_dump}.py 直接 import app.agent.*
-    # P4 引入 application/ 门面后应降到 0
     "webui_to_agent_imports": 13,
 }
 
@@ -214,6 +216,40 @@ def test_get_container_calls_within_budget():
         offenders,
         "get_container_calls",
         "把依赖改成函数参数或 FastAPI Depends；webui/api/deps.py 是落点。",
+    )
+
+
+def _count_container_get_calls(path: Path) -> int:
+    """数 `container.get(...)`：端点自己从容器里按类型捞服务。"""
+    tree = _parse(path)
+    if tree is None:
+        return 0
+    total = 0
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        if (
+            isinstance(fn, ast.Attribute)
+            and fn.attr == "get"
+            and isinstance(fn.value, ast.Name)
+            and fn.value.id == "container"
+        ):
+            total += 1
+    return total
+
+
+def test_webui_container_get_calls_within_budget():
+    """端点不该自己 `container.get(类型)`：依赖应当出现在函数签名上。"""
+    offenders: list[tuple[str, str]] = []
+    for path in _iter_py("app/webui/api"):
+        n = _count_container_get_calls(path)
+        if n:
+            offenders.extend([(_rel(path), f"container.get() ×{n}")] * n)
+    _report(
+        offenders,
+        "webui_container_get_calls",
+        "改成 `x = Depends(get_x_service)`（deps.py 已备好每个服务的具名依赖）。",
     )
 
 
