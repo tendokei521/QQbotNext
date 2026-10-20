@@ -183,7 +183,7 @@ def test_install_specs_builds_pip_command():
 
     ok, message = check_deps.install_specs(["pillow>=10.0", "fastapi>=0.115"], python="PY", timeout=30, runner=runner)
 
-    assert ok is True and message == "pip 退出码 0"
+    assert ok is True and message == "pip exited with code 0"
     cmd, timeout = calls[0]
     assert cmd == ["PY", "-m", "pip", "install", "pillow>=10.0", "fastapi>=0.115"]
     assert timeout == 30
@@ -207,7 +207,7 @@ def test_install_specs_handles_oserror():
 def test_install_specs_noop_on_empty_list():
     ok, message = check_deps.install_specs([])
 
-    assert ok is True and "无需安装" in message
+    assert ok is True and "nothing to install" in message
 
 
 # ==================== CLI 退出码契约 ====================

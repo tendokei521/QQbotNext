@@ -118,10 +118,10 @@ class Problem:
 
     def describe(self) -> str:
         if self.kind == "missing":
-            return f"缺少 {self.spec}"
+            return f"missing (required: {self.spec})"
         if self.kind == "mismatch":
-            return f"版本不符 {self.spec}（已装 {self.installed}）"
-        return f"依赖声明非法 {self.spec}：{self.reason}"
+            return f"version mismatch (installed {self.installed}, required: {self.spec})"
+        return f"invalid requirement declaration: {self.reason}"
 
 
 def installed_version(name: str) -> str | None:
@@ -143,7 +143,7 @@ def check_python(requires: str, version: str | None = None) -> str | None:
     current = version or ".".join(str(part) for part in sys.version_info[:3])
     if spec.contains(current, prereleases=True):
         return None
-    return f"当前 Python {current} 不满足 requires-python {requires}"
+    return f"interpreter Python {current} does not satisfy requires-python {requires}"
 
 
 def check_requirements(
@@ -185,53 +185,56 @@ def install_specs(
 ) -> tuple[bool, str]:
     """调 pip 装一批 spec。返回 ``(是否成功, 说明)``；不抛异常。"""
     if not specs:
-        return True, "无需安装"
+        return True, "nothing to install"
     cmd = [python or sys.executable, "-m", "pip", "install", *specs]
-    print(f"[deps] 安装缺失依赖 → {' '.join(cmd[3:])}", flush=True)
+    print(f"[deps] installing {len(specs)} package(s): pip install {' '.join(specs)}", flush=True)
     try:
         proc = runner(cmd, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as e:
-        return False, f"调用 pip 失败：{e}"
+        return False, f"failed to invoke pip: {e}"
     code = getattr(proc, "returncode", 1)
-    return code == 0, f"pip 退出码 {code}"
+    return code == 0, f"pip exited with code {code}"
 
 
 # ==================== CLI ====================
 
 
-def _report(problems: Sequence[Problem], *, quiet: bool) -> None:
+def _report(problems: Sequence[Problem], *, quiet: bool, checked: int = 0) -> None:
     if not problems:
         if not quiet:
-            print("[deps] 依赖齐全，可以启动。", flush=True)
+            print(f"[deps] ok: {checked} requirement(s) satisfied", flush=True)
         return
-    print(f"[deps] 发现 {len(problems)} 项问题：", flush=True)
+    print(f"[deps] {len(problems)} requirement(s) not satisfied:", flush=True)
     for problem in problems:
         print(f"  - {problem.name}: {problem.describe()}", flush=True)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="启动前依赖自检（缺什么装什么）")
-    parser.add_argument("--check", action="store_true", help="只检查、不安装（缺则退出码 1）")
-    parser.add_argument("--dev", action="store_true", help="连同 [dev] 可选组一起检查")
-    parser.add_argument("--vector", action="store_true", help="连同 [vector] 可选组一起检查")
-    parser.add_argument("--group", action="append", default=[], help="额外指定可选组名（可重复）")
-    parser.add_argument("--pyproject", default=str(DEFAULT_PYPROJECT), help="pyproject.toml 路径")
-    parser.add_argument("--python", default=None, help="用哪个解释器跑 pip（缺省当前解释器）")
-    parser.add_argument("--timeout", type=float, default=900, help="pip 安装超时秒数")
-    parser.add_argument("--json", action="store_true", help="输出机器可读 JSON 报告")
-    parser.add_argument("--quiet", action="store_true", help="只在有问题时出声")
+    parser = argparse.ArgumentParser(
+        description="Pre-flight dependency check: compare pyproject.toml with what is installed, install what is missing.",
+    )
+    parser.add_argument("--check", action="store_true", help="report only, never install (exit 1 when incomplete)")
+    parser.add_argument("--dev", action="store_true", help="also check the [dev] optional group")
+    parser.add_argument("--vector", action="store_true", help="also check the [vector] optional group")
+    parser.add_argument("--group", action="append", default=[], help="extra optional group name (repeatable)")
+    parser.add_argument("--pyproject", default=str(DEFAULT_PYPROJECT), help="path to pyproject.toml")
+    parser.add_argument("--python", default=None, help="interpreter used to run pip (default: current)")
+    parser.add_argument("--timeout", type=float, default=900, help="pip install timeout in seconds")
+    parser.add_argument("--json", action="store_true", help="emit a machine-readable JSON report")
+    parser.add_argument("--quiet", action="store_true", help="stay silent unless something is wrong")
     args = parser.parse_args(argv)
 
     try:
         pyproject = load_pyproject(args.pyproject)
     except (OSError, ValueError) as e:
-        print(f"[deps] 读不了 {args.pyproject}：{e}", file=sys.stderr, flush=True)
+        print(f"[deps] cannot read {args.pyproject}: {e}", file=sys.stderr, flush=True)
         return 2
 
     requires = requires_python(pyproject)
     version_problem = check_python(requires)
     if version_problem:
-        print(f"[deps] {version_problem}；请换对应版本的 Python 再启动。", file=sys.stderr, flush=True)
+        print(f"[deps] {version_problem}", file=sys.stderr, flush=True)
+        print("[deps] install a matching Python and try again", file=sys.stderr, flush=True)
         return 3
 
     groups = [g for g in args.group if g]
@@ -250,7 +253,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"[deps] {message}", file=sys.stderr, flush=True)
         problems = check_requirements(specs)
         installed_now = [p.spec for p in problems if p.kind != "invalid"]
-
     if args.json:
         print(
             json.dumps(
@@ -269,7 +271,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             flush=True,
         )
     else:
-        _report(problems, quiet=args.quiet)
+        _report(problems, quiet=args.quiet, checked=len(specs))
 
     return 0 if not problems else 1
 
