@@ -6,7 +6,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from app.services.config_profile_service import ConfigProfileService
-from app.webui.api.deps import get_container
+from app.webui.api.deps import get_config_profile_service
 
 router = APIRouter(prefix="/config-profiles", tags=["config-profiles"])
 
@@ -20,7 +20,8 @@ def _err(status: int, message: str):
 
 
 def _service(request: Request) -> ConfigProfileService:
-    return get_container(request).get(ConfigProfileService)
+    """本文件内所有端点共用的服务入口（`deps.py` 的具名依赖）。"""
+    return get_config_profile_service(request)
 
 
 async def _json_body(request: Request) -> dict:

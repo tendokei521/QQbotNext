@@ -6,7 +6,6 @@ import json
 import os
 import shutil
 import tempfile
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -15,8 +14,18 @@ from app.agent.config import LEGACY_LLM_CONNECTION_KEYS
 from app.core.logger import logger
 from app.services.bot_service import PASSWORD_MASK as _PASSWORD_MASK
 from app.services.bot_service import _mask_password_config
-from app.services.module_install_service import ModuleInstallService
-from app.webui.api.deps import get_container, parse_bot_id
+from app.webui.api.deps import (
+    get_agent_manager,
+    get_bot_service,
+    get_feature_registry,
+    get_gateway,
+    get_module_install_service,
+    get_module_registry,
+    get_provider_registry,
+    get_resource_registry,
+    get_settings,
+    parse_bot_id,
+)
 from app.webui.ws import manager
 
 router = APIRouter(tags=["modules"])
@@ -51,10 +60,9 @@ def _authority_payload(module, bot_id, enabled):
 VIRTUAL_AGENT_MODULE = "agent"
 
 
-def _get_agent_runtime(container, bot_id):
-    from app.agent.runtime import AgentManager
+def _get_agent_runtime(agent_manager, bot_id):
 
-    manager = container.get(AgentManager)
+    manager = agent_manager
     if manager is None or bot_id is None:
         return None
     return manager.get_runtime(bot_id)
@@ -98,16 +106,14 @@ class _AgentProxy:
         self.authority = _AgentAuthority(runtime)
 
 
-def _resolve_module(container, module_name, bot_id):
+def _resolve_module(agent_manager, registry, module_name, bot_id):
     """按名称解析模块：'agent' 为框架虚拟模块（读运行时），否则查注册表。"""
     if module_name == VIRTUAL_AGENT_MODULE:
-        runtime = _get_agent_runtime(container, bot_id)
+        runtime = _get_agent_runtime(agent_manager, bot_id)
         if runtime is None:
             return None
         return _AgentProxy(runtime)
-    from app.plugin.registry import ModuleRegistry
-
-    return container.get(ModuleRegistry).get(module_name, bot_id)
+    return registry.get(module_name, bot_id)
 
 
 async def _sync_module_runtime(module, enabled: bool) -> None:
@@ -172,36 +178,29 @@ async def _sync_module_runtime(module, enabled: bool) -> None:
 
 
 @router.get("/modules")
-async def api_modules(request: Request, bot_id: int | None = Depends(parse_bot_id)):
-    from app.services.bot_service import BotService
+async def api_modules(request: Request, bot_id: int | None = Depends(parse_bot_id), bot_service=Depends(get_bot_service)):
 
-    container = get_container(request)
-    return JSONResponse(content=container.get(BotService).get_modules_data(bot_id))
+    return JSONResponse(content=bot_service.get_modules_data(bot_id))
 
 
 @router.get("/modules/uninstalled")
-async def list_uninstalled_modules(request: Request):
+async def list_uninstalled_modules(request: Request, install_service=Depends(get_module_install_service)):
     """返回软卸载模块清单（设置页面弹窗用）。"""
-    container = get_container(request)
-    install_service = container.get(ModuleInstallService)
+    install_service = install_service
     return JSONResponse(content={"ok": True, "modules": install_service.list_uninstalled()})
 
 
 @router.get("/modules/features")
-async def list_features(request: Request, bot_id: int | None = Depends(parse_bot_id)):
-    from app.plugin.features import FeatureRegistry
+async def list_features(request: Request, bot_id: int | None = Depends(parse_bot_id), features=Depends(get_feature_registry)):
 
-    container = get_container(request)
-    features = container.get(FeatureRegistry).status(bot_id)
+    features = features.status(bot_id)
     return JSONResponse(content={"ok": True, "features": features})
 
 
 @router.get("/modules/{module_name}")
-async def api_module(module_name: str, request: Request, bot_id: int | None = Depends(parse_bot_id)):
-    from app.services.bot_service import BotService
+async def api_module(module_name: str, request: Request, bot_id: int | None = Depends(parse_bot_id), bot_service=Depends(get_bot_service)):
 
-    container = get_container(request)
-    data = container.get(BotService).get_modules_data(bot_id).get(module_name)
+    data = bot_service.get_modules_data(bot_id).get(module_name)
     if data is None:
         return _err(404, f"Module {module_name} not found")
     return JSONResponse(content={module_name: data})
@@ -209,9 +208,8 @@ async def api_module(module_name: str, request: Request, bot_id: int | None = De
 
 @router.post("/module/{module_name}/toggle")
 async def toggle_module(module_name: str, request: Request,
-                        bot_id: int | None = Depends(parse_bot_id), enabled: bool = Form(...)):
-    container = get_container(request)
-    module = _resolve_module(container, module_name, bot_id)
+                        bot_id: int | None = Depends(parse_bot_id), enabled: bool = Form(...), agent_manager=Depends(get_agent_manager), registry=Depends(get_module_registry)):
+    module = _resolve_module(agent_manager, registry, module_name, bot_id)
     if not module:
         return _err(404, f"模块 {module_name} (Bot {bot_id}) 不存在")
     module.authority.set_enabled(enabled)
@@ -226,11 +224,10 @@ async def update_permission(
     module_name: str, request: Request, bot_id: int | None = Depends(parse_bot_id),
     group_mode: str = Form(...), group_list: str = Form(""),
     user_mode: str = Form(...), user_list: str = Form(""),
-):
-    container = get_container(request)
+    agent_manager=Depends(get_agent_manager), registry=Depends(get_module_registry)):
     if not bot_id:
         return _err(404, f"模块 {module_name} 无 Bot ID 实例")
-    module = _resolve_module(container, module_name, bot_id)
+    module = _resolve_module(agent_manager, registry, module_name, bot_id)
     if not module:
         return _err(404, f"模块 {module_name} (Bot {bot_id}) 不存在")
 
@@ -244,23 +241,20 @@ async def update_permission(
 
 @router.get("/module/{module_name}/config")
 async def get_module_config(module_name: str, request: Request,
-                            bot_id: int | None = Depends(parse_bot_id)):
+                            bot_id: int | None = Depends(parse_bot_id), bot_service=Depends(get_bot_service)):
     """读取模块配置（自定义配置页用）。返回已脱敏（password 打码）的配置。"""
-    from app.services.bot_service import BotService
 
-    container = get_container(request)
-    data = container.get(BotService).get_modules_data(bot_id).get(module_name)
+    data = bot_service.get_modules_data(bot_id).get(module_name)
     if data is None:
         return _err(404, f"模块 {module_name} 不存在")
     return JSONResponse(content={"ok": True, "module": module_name, "bot_id": bot_id, "config": data["config"]})
 
 
 @router.post("/module/{module_name}/config")
-async def update_config(module_name: str, request: Request, bot_id: int | None = Depends(parse_bot_id)):
-    container = get_container(request)
+async def update_config(module_name: str, request: Request, bot_id: int | None = Depends(parse_bot_id), resource_registry=Depends(get_resource_registry), agent_manager=Depends(get_agent_manager), registry=Depends(get_module_registry)):
     if not bot_id:
         return _err(404, f"模块 {module_name} 无 Bot ID 实例")
-    module = _resolve_module(container, module_name, bot_id)
+    module = _resolve_module(agent_manager, registry, module_name, bot_id)
     if not module:
         return _err(404, f"模块 {module_name} (Bot {bot_id}) 不存在")
 
@@ -273,10 +267,9 @@ async def update_config(module_name: str, request: Request, bot_id: int | None =
         data.pop(key, None)
     # 资源字段的悬挂引用策略（on_missing）：声明 clear 的字段在引用失效时丢弃该值
     from app.plugin.resource_validation import apply_on_missing
-    from app.services.resource_registry import ResourceRegistry
 
     data, cleared_fields = await apply_on_missing(
-        module.config_schema, data, container.get(ResourceRegistry)
+        module.config_schema, data, resource_registry
     )
     for key, value in data.items():
         # password 字段值为脱敏哨兵时保留旧值（用户未修改密码）
@@ -297,11 +290,9 @@ async def update_config(module_name: str, request: Request, bot_id: int | None =
 
 
 @router.post("/modules/reload")
-async def reload_modules(request: Request, bot_id: int | None = Depends(parse_bot_id)):
-    from app.services.bot_service import BotService
+async def reload_modules(request: Request, bot_id: int | None = Depends(parse_bot_id), bot_service=Depends(get_bot_service)):
 
-    container = get_container(request)
-    bot_service = container.get(BotService)
+    bot_service = bot_service
     bot = bot_service.gateway.find_conn_by_bot_id(bot_id) if bot_id else None
     await bot_service.registry.reload_all(bot_id, bot=bot)
     await manager.broadcast(json.dumps({"type": "modules_reloaded", "bot_id": bot_id}))
@@ -313,14 +304,11 @@ async def reload_single_module(
     module_name: str,
     request: Request,
     bot_id: int | None = Depends(parse_bot_id),
-):
+    bot_service=Depends(get_bot_service), registry=Depends(get_module_registry)):
     """手动热重载单个模块。"""
-    from app.plugin.registry import ModuleRegistry
-    from app.services.bot_service import BotService
 
-    container = get_container(request)
-    bot_service = container.get(BotService)
-    registry = container.get(ModuleRegistry)
+    bot_service = bot_service
+    registry = registry
     bot = bot_service.gateway.find_conn_by_bot_id(bot_id) if bot_id else None
     ok = await registry.reload_single(module_name, bot_id, bot=bot)
     if not ok:
@@ -334,12 +322,10 @@ async def uninstall_module(
     module_name: str,
     request: Request,
     bot_id: int | None = Depends(parse_bot_id),
-):
+    registry=Depends(get_module_registry)):
     """软卸载模块：只写配置文件，不删除模块文件。"""
-    from app.plugin.registry import ModuleRegistry
 
-    container = get_container(request)
-    registry = container.get(ModuleRegistry)
+    registry = registry
     try:
         await registry.uninstall_module(module_name)
     except ValueError as e:
@@ -353,14 +339,11 @@ async def reinstall_module(
     module_name: str,
     request: Request,
     bot_id: int | None = Depends(parse_bot_id),
-):
+    bot_service=Depends(get_bot_service), registry=Depends(get_module_registry)):
     """清除软卸载记录并重新加载模块。"""
-    from app.plugin.registry import ModuleRegistry
-    from app.services.bot_service import BotService
 
-    container = get_container(request)
-    bot_service = container.get(BotService)
-    registry = container.get(ModuleRegistry)
+    bot_service = bot_service
+    registry = registry
     bot = bot_service.gateway.find_conn_by_bot_id(bot_id) if bot_id else None
     ok = await registry.reinstall_module(module_name, bot_id)
     if not ok:
@@ -370,12 +353,10 @@ async def reinstall_module(
 
 
 @router.post("/modules/install-zip")
-async def install_module_zip(request: Request, file: UploadFile = File(...)):
+async def install_module_zip(request: Request, file: UploadFile = File(...), registry=Depends(get_module_registry)):
     """上传 zip 插件并安装到 module/plugins。"""
-    from app.plugin.registry import ModuleRegistry
 
-    container = get_container(request)
-    registry = container.get(ModuleRegistry)
+    registry = registry
     fd, tmp_path = tempfile.mkstemp(suffix=".zip")
     os.close(fd)
     try:
@@ -395,21 +376,18 @@ async def install_module_zip(request: Request, file: UploadFile = File(...)):
 
 @router.get("/module/{module_name}/page", response_class=HTMLResponse)
 async def module_page(module_name: str, request: Request,
-                      bot_id: int | None = Depends(parse_bot_id)):
+                      bot_id: int | None = Depends(parse_bot_id), registry=Depends(get_module_registry), settings=Depends(get_settings)):
     """自定义配置页（仅模块目录 pages/index.html；框架级 Agent 已并入 schema 表单，无独立页）。"""
-    container = get_container(request)
-    from app.plugin.registry import ModuleRegistry
 
-    reg = container.get(ModuleRegistry)
+    reg = registry
     page_path = reg.module_page_path(module_name)
     if page_path is None:
         return _err(404, f"模块 {module_name} 无自定义页面")
     content = page_path.read_text(encoding="utf-8")
 
     # 注入模块名 / 当前选中账号 / WebUI 访问令牌，方便页面 JS 拼接配置 API 并携带鉴权
-    from app.core.settings import Settings
 
-    webui_token = container.get(Settings).webui_token or ""
+    webui_token = settings.webui_token or ""
     module_var = (
         f'<script>window.PLUGIN_MODULE = {json.dumps(module_name)};'
         f'window.PLUGIN_BOT_ID = {json.dumps(bot_id) if bot_id is not None else "null"};'
@@ -439,31 +417,27 @@ def _find_schema_field(module, field_type: str, endpoint: str) -> dict | None:
     return None
 
 
-def _resolve_bot(container, bot_id: int | None):
+def _resolve_bot(gateway, bot_id: int | None):
     if not bot_id:
         return None
-    from app.infrastructure.onebot.gateway import OneBotGateway
 
-    return container.get(OneBotGateway).find_conn_by_bot_id(bot_id)
+    return gateway.find_conn_by_bot_id(bot_id)
 
 
 @router.get("/module/{module_name}/list/{endpoint}")
 async def module_list_data(module_name: str, endpoint: str, request: Request,
-                           bot_id: int | None = Depends(parse_bot_id)):
-    from app.plugin.registry import ModuleRegistry
-    from app.services.provider_service import ProviderRegistry
+                           bot_id: int | None = Depends(parse_bot_id), registry=Depends(get_module_registry), provider_registry=Depends(get_provider_registry), gateway=Depends(get_gateway)):
 
-    container = get_container(request)
-    module = container.get(ModuleRegistry).get(module_name, bot_id)
+    module = registry.get(module_name, bot_id)
     if not module:
         return _err(404, f"模块 {module_name} (Bot {bot_id}) 不存在")
     field = _find_schema_field(module, "list", endpoint)
     if field is None:
         return _err(404, f"模块 {module_name} 无 list 字段 endpoint={endpoint}")
 
-    bot = _resolve_bot(container, bot_id)
+    bot = _resolve_bot(gateway, bot_id)
     try:
-        data = await container.get(ProviderRegistry).call(
+        data = await provider_registry.call(
             module.module_name, endpoint, "list", module, bot, field
         )
     except Exception as e:
@@ -493,21 +467,18 @@ async def module_list_data(module_name: str, endpoint: str, request: Request,
 
 @router.get("/module/{module_name}/dynamic/{endpoint}")
 async def module_dynamic_options(module_name: str, endpoint: str, request: Request,
-                                 bot_id: int | None = Depends(parse_bot_id)):
-    from app.plugin.registry import ModuleRegistry
-    from app.services.provider_service import ProviderRegistry
+                                 bot_id: int | None = Depends(parse_bot_id), registry=Depends(get_module_registry), provider_registry=Depends(get_provider_registry), gateway=Depends(get_gateway)):
 
-    container = get_container(request)
-    module = container.get(ModuleRegistry).get(module_name, bot_id)
+    module = registry.get(module_name, bot_id)
     if not module:
         return _err(404, f"模块 {module_name} (Bot {bot_id}) 不存在")
     field = _find_schema_field(module, "dynamic", endpoint)
     if field is None:
         return _err(404, f"模块 {module_name} 无 dynamic 字段 endpoint={endpoint}")
 
-    bot = _resolve_bot(container, bot_id)
+    bot = _resolve_bot(gateway, bot_id)
     try:
-        data = await container.get(ProviderRegistry).call(
+        data = await provider_registry.call(
             module.module_name, endpoint, "dynamic", module, bot, field, value=None
         )
     except Exception as e:
@@ -517,21 +488,18 @@ async def module_dynamic_options(module_name: str, endpoint: str, request: Reque
 
 @router.get("/module/{module_name}/dynamic/{endpoint}/{value}")
 async def module_dynamic_fields(module_name: str, endpoint: str, value: str, request: Request,
-                                bot_id: int | None = Depends(parse_bot_id)):
-    from app.plugin.registry import ModuleRegistry
-    from app.services.provider_service import ProviderRegistry
+                                bot_id: int | None = Depends(parse_bot_id), registry=Depends(get_module_registry), provider_registry=Depends(get_provider_registry), gateway=Depends(get_gateway)):
 
-    container = get_container(request)
-    module = container.get(ModuleRegistry).get(module_name, bot_id)
+    module = registry.get(module_name, bot_id)
     if not module:
         return _err(404, f"模块 {module_name} (Bot {bot_id}) 不存在")
     field = _find_schema_field(module, "dynamic", endpoint)
     if field is None:
         return _err(404, f"模块 {module_name} 无 dynamic 字段 endpoint={endpoint}")
 
-    bot = _resolve_bot(container, bot_id)
+    bot = _resolve_bot(gateway, bot_id)
     try:
-        data = await container.get(ProviderRegistry).call(
+        data = await provider_registry.call(
             module.module_name, endpoint, "dynamic", module, bot, field, value=value
         )
     except Exception as e:

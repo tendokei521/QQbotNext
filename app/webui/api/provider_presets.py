@@ -8,12 +8,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
 from app.services.provider_model_service import ProviderModelService
 from app.services.provider_preset_service import ProviderPresetService
-from app.webui.api.deps import get_container
+from app.webui.api.deps import get_provider_model_service, get_provider_preset_service
 
 router = APIRouter(prefix="/provider-presets", tags=["provider-presets"])
 models_router = APIRouter(prefix="/provider-models", tags=["provider-models"])
@@ -29,11 +29,13 @@ def _err(status: int, message: str):
 
 
 def _service(request: Request) -> ProviderPresetService:
-    return get_container(request).get(ProviderPresetService)
+    """预设服务入口（`deps.py` 的具名依赖）。"""
+    return get_provider_preset_service(request)
 
 
 def _model_service(request: Request) -> ProviderModelService:
-    return get_container(request).get(ProviderModelService)
+    """模型服务入口（`deps.py` 的具名依赖）。"""
+    return get_provider_model_service(request)
 
 
 async def _json_body(request: Request) -> dict:
