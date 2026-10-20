@@ -172,7 +172,7 @@ class Module(BaseModule):
 ### resource / resources —— 直接引用系统资源（推荐替代「手抄 ID」）
 
 不用手抄 ID，也不用自己写 `dynamic` 数据源：框架已把「可被引用的资源」注册成统一目录
-（`app/services/resource_registry.py`，可用 `GET /api/resources` 查看全部种类）：
+（`app/application/resource_registry.py`，可用 `GET /api/resources` 查看全部种类）：
 
 ```python
 "persona_preset_id": {

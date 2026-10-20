@@ -90,7 +90,7 @@ async def main(db_file: str) -> None:
     from app.infrastructure.config.config_service import ConfigService
     from app.infrastructure.persistence.database import Database
     from app.plugin.dispatcher import ModuleDispatcher
-    from app.services.bot_service import BotService
+    from app.application.bot_service import BotService
 
     tmp = Path(tempfile.mkdtemp(prefix="qqbot-e2e-"))
     shutil.copy2(db_file, tmp / "app.db")

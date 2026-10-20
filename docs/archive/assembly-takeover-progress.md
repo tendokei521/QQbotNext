@@ -25,7 +25,7 @@
 | 2 | `runtime.assembler` 槽 + `feature_id="assembly"` 声明式接管/交棒/还原 | `d2addcb` | `app/modules/features.py` `app/llm/manager.py` | `test_features.py`（+5） |
 | 3 | `system_prompt_style`：多块 system 折成一整条（默认不变） | `a61df61` | `app/llm/assembly.py` `config.py` `config_schema.py` | `test_llm_assembly_fold.py`（8） |
 | 4 | `extra_user_content_parts`（user 侧额外文本块）+ `place_images` 保留 | `873a279` | `app/llm/assembly.py` | `test_llm_user_content_parts.py`（10） |
-| 5 | `ServiceAccess` 暴露 profile/role preset；RolePreset 扩 `begin_dialogs`/`tools`/`skills` | `6e0bd40` | `app/services/role_preset_service.py` `app/modules/base.py` | `test_role_preset_extended.py`（8） |
+| 5 | `ServiceAccess` 暴露 profile/role preset；RolePreset 扩 `begin_dialogs`/`tools`/`skills` | `6e0bd40` | `app/application/role_preset_service.py` `app/modules/base.py` | `test_role_preset_extended.py`（8） |
 | 6 | 请求 messages 落盘 + WebUI 查询端点（与第三方逐条 diff） | `26d5ff4` | `app/llm/prompt_dump.py` `app/webui/api/prompt_dump.py` | `test_llm_prompt_dump.py`（14） |
 | 7 | `runtime.invoker` 调用策略槽 + token 预算裁剪 | `98d7f7d` | `app/llm/providers/invoker.py` `app/llm/token_budget.py` | `test_llm_provider_invoker.py`（14）+ `test_llm_token_budget.py`（17） |
 | 8 | 历史契约（快照 / 外部历史导入） | `c5027f0` | `app/llm/session.py` | `test_llm_history_contract.py`（18） |
