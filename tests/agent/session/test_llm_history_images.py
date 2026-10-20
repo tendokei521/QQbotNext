@@ -201,7 +201,7 @@ def _text_event(t: int, mid: int, text: str) -> GroupMessageEvent:
 async def _two_turns(monkeypatch, tmp_path, *, modalities, session_id: str):
     from app.agent.loop import chat
     from app.agent.providers import PROVIDERS
-    from tests.test_llm_assembly_paths import (
+    from tests.agent.assembly.test_llm_assembly_paths import (
         CHAT_MESSAGES,
         _config_dict,
         _ctx,

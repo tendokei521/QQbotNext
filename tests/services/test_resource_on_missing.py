@@ -133,7 +133,7 @@ async def test_config_endpoint_reports_cleared_fields(container):
     from app.webui.app import create_app
 
     registry = container.get(ModuleRegistry)
-    registry.plugins_dir = Path(__file__).resolve().parent.parent / "app" / "plugins"
+    registry.plugins_dir = Path(__file__).resolve().parents[2] / "app" / "plugins"
     bot_id = 20251001
     assert await registry.load_single("astrbot_alignment", bot_id) is True
     try:

@@ -12,7 +12,7 @@ import sys
 
 import pytest
 
-_SCRIPT = pathlib.Path(__file__).resolve().parent.parent / "ci_check_pyproject.py"
+_SCRIPT = pathlib.Path(__file__).resolve().parents[2] / "ci_check_pyproject.py"
 
 
 def _load():

@@ -226,7 +226,7 @@ async def test_module_schema_reaches_api_with_resource_field(container):
     # BotService 持有的是容器里的注册表实例：把它的模块目录定向到仓库真实目录，
     # 这样加载出来的模块才会经过 bot_service 的 schema 归一化链路。
     registry = container.get(ModuleRegistry)
-    registry.plugins_dir = Path(__file__).resolve().parent.parent / "app" / "plugins"
+    registry.plugins_dir = Path(__file__).resolve().parents[2] / "app" / "plugins"
     bot_id = 20250930
     assert await registry.load_single("astrbot_alignment", bot_id) is True
     try:
@@ -293,7 +293,7 @@ def test_frontend_subscribes_to_resource_events():
     """
     from pathlib import Path
 
-    root = Path(__file__).resolve().parent.parent
+    root = Path(__file__).resolve().parents[2]
     vue = (root / "app" / "webui" / "dashboard" / "src" / "components" / "config" / "FieldControl.vue").read_text(encoding="utf-8")
     assert "onSocketMessage('resources_updated'" in vue and "onBeforeUnmount" in vue, "需订阅并在卸载时退订"
 

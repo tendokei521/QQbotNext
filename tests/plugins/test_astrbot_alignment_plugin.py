@@ -467,7 +467,7 @@ async def test_plugin_takes_over_in_real_registry(container):
     from app.plugin.registry import ModuleRegistry
     from app.services.module_install_service import ModuleInstallService
 
-    repo_root = Path(__file__).resolve().parent.parent
+    repo_root = Path(__file__).resolve().parents[2]
     registry = ModuleRegistry(
         plugins_dir=repo_root / "app" / "plugins",  # 业务插件代码
         zip_plugins_dir=repo_root / "module" / "plugins",  # 外部 zip 安装

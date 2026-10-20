@@ -33,7 +33,7 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 AGENT_PREFIXES = ("app.agent",)  # P2 后 agent 层只有这一个前缀（app.llm 已并入）
 

@@ -101,6 +101,12 @@ def _ctx(event, *, session_id: str | None = None):
 def setup_function(_fn):
     STREAM_MESSAGES.clear()
     CHAT_MESSAGES.clear()
+    # SessionManager._instances 是类级缓存（按 bot 复用实例）。不清掉的话，前一个用例
+    # 的会话历史会渗进后一个用例——表现就是「同一句话在历史里出现两次」。用例顺序
+    # 一变就会随机失败，所以这里必须清。
+    from app.agent.session.manager import SessionManager
+
+    SessionManager._instances.clear()
 
 
 def _register(monkeypatch, name: str) -> None:

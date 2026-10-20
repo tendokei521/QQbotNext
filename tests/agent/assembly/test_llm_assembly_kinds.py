@@ -12,7 +12,7 @@ import types
 from app.agent.assembly.assembler import BLOCKS, PromptRequest, describe
 from app.agent.assembly.prompt import LEGACY_MESSAGE_META_INSTRUCTION
 from app.agent.providers import PROVIDERS
-from tests.test_llm_assembly_paths import _ProbeProvider, setup_function  # noqa: F401
+from tests.agent.assembly.test_llm_assembly_paths import _ProbeProvider, setup_function  # noqa: F401
 
 EXPECTED_BLOCKS = [b.name for b in BLOCKS]
 

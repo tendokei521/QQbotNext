@@ -21,7 +21,7 @@ import pytest
 
 from app.agent.tools.onebot import manifest as manifest_module
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_JSON = REPO_ROOT / "app" / "agent" / "tools" / "onebot" / "manifest.json"
 MANIFEST_PY = REPO_ROOT / "app" / "agent" / "tools" / "onebot" / "manifest.py"
 

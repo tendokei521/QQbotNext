@@ -483,7 +483,7 @@ def test_module_manifest_matches_module_dir():
     import json
     from pathlib import Path
 
-    module_dir = Path(__file__).resolve().parent.parent / "app" / "plugins" / "douyin_parser"
+    module_dir = Path(__file__).resolve().parents[2] / "app" / "plugins" / "douyin_parser"
     manifest = json.loads((module_dir / "module.json").read_text(encoding="utf-8"))
     assert manifest["name"] == module_dir.name
     assert manifest["entry"] == "module.py"
@@ -508,7 +508,7 @@ async def test_plugin_loads_in_real_registry(container):
     from app.plugin.base import ServiceAccess
     from app.plugin.registry import ModuleRegistry
 
-    repo_root = Path(__file__).resolve().parent.parent
+    repo_root = Path(__file__).resolve().parents[2]
     registry = ModuleRegistry(
         plugins_dir=repo_root / "app" / "plugins",  # 业务插件代码
         zip_plugins_dir=repo_root / "module" / "plugins",  # 外部 zip 安装

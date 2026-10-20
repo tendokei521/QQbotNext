@@ -17,7 +17,7 @@ import pathlib
 import pytest
 
 # 仓库根目录（tests/ 的上一级）
-_ROOT = pathlib.Path(__file__).resolve().parent.parent
+_ROOT = pathlib.Path(__file__).resolve().parents[2]
 _SCAN_DIRS = ("app", "module")
 
 # 允许静默的位置白名单：文件相对路径 -> 行号集合

@@ -191,7 +191,7 @@ def test_module_schemas_normalize_without_issues(container):
     import importlib
     from pathlib import Path
 
-    repo_modules = Path(__file__).resolve().parent.parent / "app" / "plugins"
+    repo_modules = Path(__file__).resolve().parents[2] / "app" / "plugins"
     resource_registry = container.get(ResourceRegistry)
     problems: dict = {}
     for entry in sorted(p for p in repo_modules.iterdir() if p.is_dir()):

@@ -132,7 +132,7 @@ async def test_chat_writes_then_renders_structured_history(monkeypatch, tmp_path
     """端到端：第一轮写入结构化历史，第二轮请求里该历史按 base 重新渲染。"""
     from app.agent.loop import chat
     from app.agent.providers import PROVIDERS
-    from tests.test_llm_assembly_paths import (
+    from tests.agent.assembly.test_llm_assembly_paths import (
         CHAT_MESSAGES,
         _config_dict,
         _ctx,

@@ -10,7 +10,7 @@ import time
 
 from app.agent.group_log.events import KIND_EMOJI, KIND_MESSAGE, LogEvent
 from app.agent.group_log.store import GroupLogStore
-from tests.test_llm_assembly_paths import (  # noqa: F401 - setup_function 需被 pytest 发现
+from tests.agent.assembly.test_llm_assembly_paths import (  # noqa: F401 - setup_function 需被 pytest 发现
     CHAT_MESSAGES,
     _config_dict,
     _ctx,
@@ -87,6 +87,9 @@ async def test_trigger_message_is_not_duplicated(monkeypatch, tmp_path):
     ``user`` 消息承载），所以此时历史里没有它的 message_id —— 环境块就是它**唯一**
     的上下文位置，去重不会把它抹掉。若哪天历史去重口径变了，环境块再出现第二份就会
     在这里显形。
+
+    这里先跑一轮「预热」把触发消息真正写进会话历史，再跑第二轮的断言——否则本用例
+    会隐式依赖「上一个用例恰好留下了历史」，一旦用例顺序变化就会随机失败。
     """
     from app.agent.loop import chat
 
@@ -103,6 +106,10 @@ async def test_trigger_message_is_not_duplicated(monkeypatch, tmp_path):
 
     rt = _runtime(_config_dict(group_log_enable=True))
     rt.group_log = store
+
+    # 预热一轮：让会话历史里确实有这条触发消息（不依赖其它用例的副作用）
+    await chat.generate_response(rt, event, _ctx(event))
+    CHAT_MESSAGES.clear()
 
     await chat.generate_response(rt, event, _ctx(event))
     messages = CHAT_MESSAGES[0]

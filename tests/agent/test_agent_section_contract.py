@@ -21,7 +21,7 @@ from pathlib import Path
 from app.agent.config_schema import SCHEMA
 
 SECTIONS_PATH = (
-    Path(__file__).resolve().parents[1] / "app" / "webui" / "dashboard" / "src" / "agent" / "sections.json"
+    Path(__file__).resolve().parents[2] / "app" / "webui" / "dashboard" / "src" / "agent" / "sections.json"
 )
 
 # 单个分区承载的字段上限：超过就该再拆一页。

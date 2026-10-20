@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 
 # app/ 顶层允许的包目录（不含 __pycache__）。
 ALLOWED_APP_PACKAGES = {
@@ -120,6 +120,44 @@ def test_business_plugins_have_module_entry() -> None:
         if p.is_dir() and p.name != "__pycache__" and not (p / "module.py").is_file()
     ]
     assert not missing, f"这些插件目录缺 module.py: {missing}"
+
+
+def test_tests_are_partitioned_by_source_layer() -> None:
+    """`tests/` 必须按源码镜像分区：`tests/test_*.py` 不允许堆在根上。
+
+    「改哪个目录 → 跑哪些测试」应当由路径直接推出：
+    `app/agent/loop/chat.py` ↔ `tests/agent/...`，`app/webui/api/x.py` ↔ `tests/webui/`。
+    根上只允许放 `conftest.py`。
+    """
+    stray = sorted(p.name for p in (ROOT / "tests").glob("test_*.py"))
+    assert not stray, (
+        f"tests/ 根上还有 {len(stray)} 个测试文件没归位（应按源码镜像放进子目录）:\n  "
+        + "\n  ".join(stray[:20])
+    )
+
+
+def test_tests_subdirs_mirror_source_packages() -> None:
+    """`tests/<子目录>` 必须对应一个源码包；`tests/agent/<子目录>` 还要对应 agent 子包。"""
+    # 顶层：app/ 的包 + 业务插件 + architecture（跨层静态检查，无对应源码包）
+    allowed = set(ALLOWED_APP_PACKAGES) | {"plugins", "architecture"}
+    stray = sorted(
+        p.name
+        for p in (ROOT / "tests").iterdir()
+        if p.is_dir() and p.name != "__pycache__" and p.name not in allowed
+    )
+    assert not stray, f"tests/ 下有不对应任何源码包的目录: {stray}（允许: {sorted(allowed)}）"
+
+    # 第二层：tests/agent/* 必须对应 app/agent/* 的子包
+    agent_src = {p.name for p in (ROOT / "app" / "agent").iterdir() if p.is_dir() and p.name != "__pycache__"}
+    agent_tests_dir = ROOT / "tests" / "agent"
+    stray2 = sorted(
+        p.name
+        for p in agent_tests_dir.iterdir()
+        if p.is_dir() and p.name != "__pycache__" and p.name not in agent_src
+    )
+    assert not stray2, (
+        f"tests/agent/ 下有不对应 app/agent/ 子包的目录: {stray2}（允许: {sorted(agent_src)}）"
+    )
 
 
 def test_no_stale_pycache_only_directories() -> None:

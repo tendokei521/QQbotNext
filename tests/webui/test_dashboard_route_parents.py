@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 DASHBOARD_SRC = ROOT / "app" / "webui" / "dashboard" / "src"
 
 #: 允许有子路由的父级路由组件（新增父级路由时请在此登记）
