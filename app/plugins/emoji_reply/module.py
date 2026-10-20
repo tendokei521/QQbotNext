@@ -4,7 +4,7 @@
 - 监听群/私聊消息（message_group / message_private），按关键词给消息添加 Emoji 回应。
 """
 
-from app.modules import BaseModule, module_hook
+from app.plugin import BaseModule, module_hook
 
 from .config_schema import SCHEMA
 

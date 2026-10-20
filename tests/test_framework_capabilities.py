@@ -10,9 +10,9 @@
 
 from __future__ import annotations
 
-from app.modules.base import BaseModule, ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
-from app.modules.features import FeatureRegistry
-from app.modules.requirements import declared_requirements, missing_requirements
+from app.plugin.base import BaseModule, ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
+from app.plugin.features import FeatureRegistry
+from app.plugin.requirements import declared_requirements, missing_requirements
 from app.services.capabilities import collect_capabilities
 
 
@@ -110,7 +110,7 @@ def test_missing_requirements_satisfied_by_service():
 
 def test_missing_requirements_satisfied_by_feature():
     """能力既可声明服务（ctx.services.x），也可声明 feature_id（可被接管的框架能力）。"""
-    from app.modules.features import AssemblerFeatureController
+    from app.plugin.features import AssemblerFeatureController
 
     class _Manager:
         def get_runtime(self, bot_id):
@@ -133,7 +133,7 @@ async def test_registry_checks_requirements_on_load(container, monkeypatch):
     """加载模块时会跑一次自检（缺失只警告，不阻断加载）。"""
     from pathlib import Path
 
-    from app.modules.registry import ModuleRegistry
+    from app.plugin.registry import ModuleRegistry
 
     calls: list[tuple[str, list[str]]] = []
     original = BaseModule.missing_requirements

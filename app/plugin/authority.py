@@ -27,7 +27,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from app.domain.events import BaseEvent
-from app.modules.base import BaseModule, ModulePermission
+from app.plugin.base import BaseModule, ModulePermission
 
 PERMISSIONS = ("everyone", "member", "group_admin", "group_owner", "manager", "owner")
 

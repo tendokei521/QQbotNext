@@ -4,10 +4,10 @@ import sys
 
 import pytest
 
-from app.modules.registry import ModuleRegistry
+from app.plugin.registry import ModuleRegistry
 
 MODULE_SRC = '''
-from app.modules import BaseModule
+from app.plugin import BaseModule
 
 class Module(BaseModule):
     name = "页面测试"

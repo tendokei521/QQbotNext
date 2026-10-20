@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from app.agent.group_log.events import KIND_EMOJI, KIND_MESSAGE, KIND_MY_SEND, KIND_POKE, KIND_RECALL
-from app.modules.base import ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
+from app.plugin.base import ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
 from app.plugins.group_log.module import Module, strip_directives
 
 GROUP_SCOPE = "group:1001"

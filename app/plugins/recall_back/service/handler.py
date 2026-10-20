@@ -5,7 +5,7 @@
 """
 
 from app.core.logger import module_logger
-from app.modules import resolve_enabled_ids
+from app.plugin import resolve_enabled_ids
 
 from .cache import _get_db, _serialize_event
 from .forward import build_forward_msg_data

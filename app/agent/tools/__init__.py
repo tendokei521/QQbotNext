@@ -8,7 +8,7 @@
 ## 不负责
 
 - 何时调用、调用几次（`loop/tool_loop.py`）；
-- 工具权限的**用户配置**（`app/modules/` 与 `agent/config.py`）。
+- 工具权限的**用户配置**（`app/plugin/` 与 `agent/config.py`）。
 
 ## 文件地图
 

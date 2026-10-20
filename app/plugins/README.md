@@ -40,7 +40,7 @@ app/plugins/<name>/
 
 ## 边界
 
-- 插件**只通过** `app.modules`（插件 API）与 `app.agent`（`tool` / `skill`）使用框架，
+- 插件**只通过** `app.plugin`（插件 API）与 `app.agent`（`tool` / `skill`）使用框架，
   **不得** import `app.webui` 或 `app.bootstrap`。
 - 插件之间**不得**互相 import。要共享代码就抽到 `app/infrastructure/`（如
   `fs/media_cache.py` 就是从插件侧下沉的）。

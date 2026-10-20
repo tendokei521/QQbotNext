@@ -2,7 +2,7 @@
 
 from app.infrastructure.config.config_service import DEFAULT_WEBUI_CONFIG, ConfigService
 from app.infrastructure.persistence.database import Database
-from app.modules.base import ModuleConfig
+from app.plugin.base import ModuleConfig
 
 
 class _Svc:

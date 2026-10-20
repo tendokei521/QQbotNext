@@ -3,8 +3,8 @@
 import pytest
 
 from app.domain.events import GroupMessageEvent
-from app.modules.base import BaseModule, ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
-from app.modules.dispatcher import ModuleDispatcher
+from app.plugin.base import BaseModule, ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
+from app.plugin.dispatcher import ModuleDispatcher
 
 
 class FakeConfigService:

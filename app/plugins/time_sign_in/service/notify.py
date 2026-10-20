@@ -1,7 +1,7 @@
 """打卡成功通知。"""
 
 from app.core.logger import module_logger
-from app.modules import resolve_enabled_ids
+from app.plugin import resolve_enabled_ids
 
 
 async def _send_success_notify(module, success: int, fail: int):

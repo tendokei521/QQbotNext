@@ -10,7 +10,7 @@
 
 - 具体怎么拼 prompt（`assembly/`）；
 - 怎么发出去（`delivery/`）；
-- 谁有权触发（`app/modules/`）。
+- 谁有权触发（`app/plugin/`）。
 
 ## 文件地图
 

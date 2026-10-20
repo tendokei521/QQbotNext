@@ -1,6 +1,6 @@
 """模块声明：群打卡。"""
 
-from app.modules import BaseModule, module_hook
+from app.plugin import BaseModule, module_hook
 
 from .config_schema import SCHEMA
 

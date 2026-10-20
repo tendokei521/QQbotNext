@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.modules.base import ModulePermission
+from app.plugin.base import ModulePermission
 
 DEFAULT_LLM_CONFIG: dict = {
     # 连接参数已抽离到 Provider 预设，Agent 只保存引用；

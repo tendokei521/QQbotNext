@@ -17,7 +17,7 @@
 - **入站链**：消息进入插件前的处理（权限、限流…），末端由 `ModuleInvokeNode` 派发业务；
 - **出站链**：`bot.send_*` 之前的处理，末端是真正发出去的 `SendNode`。
 
-内置业务节点（router / permission / invoke）在 `app/modules/nodes.py`，不在这里。
+内置业务节点（router / permission / invoke）在 `app/plugin/nodes.py`，不在这里。
 
 ## 边界
 

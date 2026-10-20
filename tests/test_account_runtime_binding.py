@@ -15,8 +15,8 @@ from __future__ import annotations
 from app.agent.runtime import AgentManager
 from app.domain.events import PrivateMessageEvent
 from app.infrastructure.onebot.codec import decode
-from app.modules.base import ModulePermission
-from app.modules.nodes import AgentNode
+from app.plugin.base import ModulePermission
+from app.plugin.nodes import AgentNode
 from app.nodes.base import MessageContext
 
 # --------------------------------------------------------------- 测试替身

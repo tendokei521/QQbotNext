@@ -1,19 +1,19 @@
 """插件系统：BaseModule / 注册表 / 权限 / 事件分发 / 插件 API。"""
 
-from app.modules.api import (
+from app.plugin.api import (
     get_config_path,
     get_data_path,
     get_features,
     get_modules,
     register_daily_schedule,
 )
-from app.modules.authority import (
+from app.plugin.authority import (
     PERMISSIONS,
     check_module_enabled,
     check_module_permission,
     compute_event_permission,
 )
-from app.modules.base import (
+from app.plugin.base import (
     BaseModule,
     ModuleAuthority,
     ModuleConfig,
@@ -22,8 +22,8 @@ from app.modules.base import (
     ServiceAccess,
     resolve_enabled_ids,
 )
-from app.modules.dispatcher import ModuleDispatcher
-from app.modules.features import (
+from app.plugin.dispatcher import ModuleDispatcher
+from app.plugin.features import (
     AgentFeatureController,
     AssemblerFeatureController,
     ConfigToggleFeature,
@@ -38,7 +38,7 @@ from app.modules.features import (
     RuntimeSlotFeatureController,
     ScheduleFeatureController,
 )
-from app.modules.hooks import (
+from app.plugin.hooks import (
     ApiContext,
     ApiHookRegistry,
     BeforeSendContext,
@@ -58,8 +58,8 @@ from app.modules.hooks import (
     send_hook,
     tool_call_hook,
 )
-from app.modules.keyword import match_keywords
-from app.modules.registry import ModuleRegistry
+from app.plugin.keyword import match_keywords
+from app.plugin.registry import ModuleRegistry
 
 __all__ = [
     "BaseModule",

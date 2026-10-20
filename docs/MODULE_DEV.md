@@ -20,7 +20,7 @@ app/plugins/<name>/
 最简单的 `module.py`：
 
 ```python
-from app.modules import BaseModule
+from app.plugin import BaseModule
 
 class Module(BaseModule):
     name = "示例模块"
@@ -95,7 +95,7 @@ event.is_member
 在 `Module` 上声明 `supersedes`：
 
 ```python
-from app.modules import BaseModule
+from app.plugin import BaseModule
 
 class Module(BaseModule):
     name = "我的主动回复"
@@ -159,7 +159,7 @@ self.ctx.services.features.status(self.bot_id)
 ### 3.1 用法
 
 ```python
-from app.modules import BaseModule, module_hook
+from app.plugin import BaseModule, module_hook
 
 class Module(BaseModule):
     @module_hook("message_group", order=10)
@@ -228,7 +228,7 @@ async def on_message(self, event):
 ### 4.1 用法
 
 ```python
-from app.modules import BaseModule, llm_hook
+from app.plugin import BaseModule, llm_hook
 
 class Module(BaseModule):
     @llm_hook("pre_request", event_type="*", order=10)
@@ -266,7 +266,7 @@ class Module(BaseModule):
 ### 用法
 
 ```python
-from app.modules import BaseModule, send_hook
+from app.plugin import BaseModule, send_hook
 
 class Module(BaseModule):
     @send_hook(message_type="*", order=10)
@@ -308,7 +308,7 @@ class Module(BaseModule):
 ### 4.6.1 `@before_send_hook`：发送前钩子
 
 ```python
-from app.modules import BaseModule, before_send_hook
+from app.plugin import BaseModule, before_send_hook
 
 class Module(BaseModule):
     @before_send_hook(message_type="*", order=10)
@@ -325,7 +325,7 @@ class Module(BaseModule):
 ### 4.6.2 `@api_hook`：任意 OneBot API 调用后
 
 ```python
-from app.modules import BaseModule, api_hook
+from app.plugin import BaseModule, api_hook
 
 class Module(BaseModule):
     @api_hook(action="delete_msg", order=10)
@@ -344,7 +344,7 @@ class Module(BaseModule):
 ### 4.6.3 `@bot_lifecycle_hook`：Bot 生命周期
 
 ```python
-from app.modules import BaseModule, bot_lifecycle_hook
+from app.plugin import BaseModule, bot_lifecycle_hook
 
 class Module(BaseModule):
     @bot_lifecycle_hook(state="login", order=10)
@@ -361,7 +361,7 @@ class Module(BaseModule):
 ### 4.6.4 `@event_completed_hook`：事件处理完成
 
 ```python
-from app.modules import BaseModule, event_completed_hook
+from app.plugin import BaseModule, event_completed_hook
 
 class Module(BaseModule):
     @event_completed_hook(order=10)
@@ -375,7 +375,7 @@ class Module(BaseModule):
 ### 4.6.5 `@tool_call_hook`：LLM 工具调用后
 
 ```python
-from app.modules import BaseModule, tool_call_hook
+from app.plugin import BaseModule, tool_call_hook
 from app.agent import ToolCallContext
 
 class Module(BaseModule):
@@ -397,7 +397,7 @@ class Module(BaseModule):
 都在**单账号粒度**上生效（模块实例本就按 `(模块, bot_id)` 一份）：
 
 ```python
-from app.modules import BaseModule, llm_hook
+from app.plugin import BaseModule, llm_hook
 
 class Module(BaseModule):
     name = "AstrBot 组装复刻"
@@ -724,7 +724,7 @@ async def after_stream(self, ctx: LlmContext):
 ## 8. 完整示例
 
 ```python
-from app.modules import BaseModule, module_hook, llm_hook, send_hook
+from app.plugin import BaseModule, module_hook, llm_hook, send_hook
 
 class Module(BaseModule):
     permission = "member"

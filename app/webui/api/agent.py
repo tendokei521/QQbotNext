@@ -15,7 +15,7 @@ from app.agent.tools.onebot.security import resolve_tool_policy
 from app.agent.tools.system import list_system_tools
 from app.core.logger import logger
 from app.infrastructure.config.config_service import ConfigService
-from app.modules.schema_utils import webui_schema
+from app.plugin.schema_utils import webui_schema
 from app.services.bot_service import PASSWORD_MASK as _PASSWORD_MASK
 from app.services.provider_model_service import ProviderModelService
 from app.services.provider_preset_service import ProviderPresetService

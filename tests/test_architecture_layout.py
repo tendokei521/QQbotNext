@@ -21,14 +21,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# app/ 顶层允许的包目录（不含 __pycache__）。P5 计划把 modules→plugin、services→application。
+# app/ 顶层允许的包目录（不含 __pycache__）。
 ALLOWED_APP_PACKAGES = {
     "core",  # 内核：无业务依赖
     "domain",  # 领域模型与契约
     "infrastructure",  # 唯一 IO 出口
     "agent",  # 框架级 Agent（原 app/llm）
-    "modules",  # 插件框架（框架侧；业务插件在 app/plugins）
-    "plugins",  # 业务插件（13 个，原 module/modules）
+    "plugin",  # 插件**框架**（单数；原 app/modules）
+    "plugins",  # **业务插件**（13 个，原 module/modules）
     "nodes",  # 消息节点链
     "services",  # 应用服务（P5 → application）
     "webui",  # HTTP/WS 适配层

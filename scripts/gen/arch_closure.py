@@ -56,7 +56,7 @@ DEFAULT_ENTRIES = (
     "app.webui.app",
     "app.webui.api.agent",
     "app.webui.api.modules",
-    "app.modules.registry",
+    "app.plugin.registry",
     "app.infrastructure.onebot.gateway",
 )
 

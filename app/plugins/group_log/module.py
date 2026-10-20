@@ -50,7 +50,7 @@ from app.agent.group_log.store import (
     store_of,
 )
 from app.core.logger import logger
-from app.modules import BaseModule, module_hook, send_hook
+from app.plugin import BaseModule, module_hook, send_hook
 
 from .config_schema import SCHEMA
 

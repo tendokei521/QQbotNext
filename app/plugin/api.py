@@ -8,7 +8,7 @@
 ## 为什么这里用 `get_active()`
 
 前四个函数是**插件作者的无参便捷 API**（插件里直接
-`from app.modules.api import get_config_path`，不该被迫先拿到容器），
+`from app.plugin.api import get_config_path`，不该被迫先拿到容器），
 所以必然需要一个「当前容器」入口。
 
 它取自 `app.core.container` 而非 `app.bootstrap`：后者是装配根，从插件 API 反向
@@ -28,7 +28,7 @@ from typing import Any
 def get_modules() -> list[Any]:
     """获取已加载的模块对象列表（扁平，含全局与各 Bot 实例，排除子模块）。"""
     from app.core.container import get_active
-    from app.modules.registry import ModuleRegistry
+    from app.plugin.registry import ModuleRegistry
 
     container = get_active()
     return container.get(ModuleRegistry).loaded()
@@ -37,7 +37,7 @@ def get_modules() -> list[Any]:
 def get_features(bot_id: Any = None) -> list[dict]:
     """获取全局能力注册表状态（含接管者信息）。"""
     from app.core.container import get_active
-    from app.modules.features import FeatureRegistry
+    from app.plugin.features import FeatureRegistry
 
     container = get_active()
     return container.get(FeatureRegistry).status(bot_id)

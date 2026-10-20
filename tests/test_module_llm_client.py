@@ -16,7 +16,7 @@ import pytest
 
 from app.agent.client import ModuleLLMClient
 from app.agent.providers.base import LLMResponse, StreamEvent
-from app.modules.base import BaseModule, ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
+from app.plugin.base import BaseModule, ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
 
 
 class _RuntimeManager:

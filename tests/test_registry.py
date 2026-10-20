@@ -5,11 +5,11 @@ import sys
 import pytest
 
 from app.infrastructure.config.config_service import ConfigService
-from app.modules.base import ServiceAccess
-from app.modules.registry import ModuleRegistry
+from app.plugin.base import ServiceAccess
+from app.plugin.registry import ModuleRegistry
 
 TEST_MODULE = '''
-from app.modules import BaseModule
+from app.plugin import BaseModule
 
 class Module(BaseModule):
     name = "测试模块"

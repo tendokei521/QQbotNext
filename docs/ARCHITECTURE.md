@@ -66,7 +66,7 @@ app/
 ├── domain/          纯规则：无 IO、无网络、无 DB、全可单测（现状几乎为空，本方案把它长实）
 ├── infrastructure/  一切外部 IO：SQLite / 文件 / OneBot 网关 / HTTP / 配置落盘
 ├── agent/           LLM Agent 能力层（原 app/llm，内部按职责分包）
-├── plugin/          插件框架：BaseModule / 注册表 / 权限 / hook / 节点链（原 app/modules + app/nodes）
+├── plugin/          插件框架：BaseModule / 注册表 / 权限 / hook / 节点链（原 app/plugin + app/nodes）
 ├── application/     面向 WebUI 的能力编排（原 app/services）
 └── webui/           纯 HTTP 适配：api / schemas / ws / 唯一前端 dashboard
 
@@ -325,18 +325,18 @@ docs/                设计文档 + 本方案（见 §4）
 | `infrastructure/cache.py` | 91 | 保留 | |
 | `infrastructure/curl_cffi.py` | 148 | 保留 | |
 
-### 3.5 `app/modules/` + `app/nodes/` → `app/plugin/`（消除三重撞车）
+### 3.5 `app/plugin/` + `app/nodes/` → `app/plugin/`（消除三重撞车）
 
 **现状（P5 后）**：只剩两个 "module" 概念，且分工已清晰——
 
 | 目录 | 是什么 | 谁改 |
 |---|---|---|
-| `app/modules/` | 插件**框架**（加载/分发/权限/API） | 改框架才动 |
+| `app/plugin/` | 插件**框架**（加载/分发/权限/API） | 改框架才动 |
 | `app/plugins/` | 13 个**业务插件**代码 | 加/改业务功能动 |
 | `module/` | 插件**运行时数据**（configs / data / zip 安装） | 用户数据，不动 |
 
 原来的 `module/modules`（业务代码）已搬进 `app/plugins/`；`module/plugins`（zip 安装）
-保留原地。剩下仍值得做的：把 `app/modules/` 改名 `app/plugin/`（单数=框架），
+保留原地。剩下仍值得做的：把 `app/plugin/` 改名 `app/plugin/`（单数=框架），
 顺带把 `app/nodes/` 并进 `plugin/nodes/`，这样 `modules` 与 `module` 的字面混淆彻底消失。
 下表是这一步的逐文件去向（**尚未执行**）：
 
@@ -573,7 +573,7 @@ docs/
 | **P2** `app/llm`→`app/agent` 分包 | 91 文件按 §3.1 移入 11 个子包 | ✅ **已完成** | 758 处引用改写；全量 1646 passed |
 | **P3** 拆环（最关键） | 活动容器下沉 core；`media_cache` 下沉 infrastructure；工具注入策略拆出 `tools/policy.py` | ✅ **已完成** | 环 63 → **3** 模块；`chat.py` 闭包 46,305 → 25,342 |
 | **P4** 最后一个环 + 包职责文档 | 定时工具从定时引擎分离（`tools/schedule.py`）；22 份包 README + 闸三 | ✅ **已完成** | **0 个强连通块（278/278 无环）**；闸三 7 条落地 |
-| **P5** 目录归一 | `module/modules`→**`app/plugins`**（已完成）；`app/modules`→`app/plugin`、`nodes` 并入、`services`→`application`（未做） | 🟡 **部分完成** | 13 个插件全部从 `app/plugins` 加载成功 |
+| **P5** 目录归一 | `module/modules`→**`app/plugins`**（已完成）；`app/plugin`→`app/plugin`、`nodes` 并入、`services`→`application`（未做） | 🟡 **部分完成** | 13 个插件全部从 `app/plugins` 加载成功 |
 | **P6** 前端收敛 + 文档重排 | 删 `webui/static`（4,065 行）+ `templates/`（727 行）（✅ 已完成）；`dashboard/`→`webui/dashboard/`、`docs/` 重排（未做） | 🟡 **部分完成** | `/` 200；`/legacy` 404；测试全绿 |
 | **P4'** 切巨型文件 + 长实 domain | `chat.py` 2,192 行拆片；`domain/` 吸收纯规则 | ⬜ 待做 | 无函数 ≥80 行；`domain/` ≥1,500 行 |
 
@@ -583,8 +583,8 @@ docs/
    纯搬不改语义，`loop/` 里加子文件 + 在 `chat.py` 重导出即可保持 API 不变。
 2. **`domain/` 长实**（现 595 行 / 4 文件，全是 DTO）：把 `proactivity/time_parser.py`、
    `proactivity/trigger.py`、`delivery/splitter.py` 这类零内部依赖的纯规则搬进去。
-3. **`app/modules` → `app/plugin`**：纯 Python 包改名，能把「`modules` vs `module`」的
-   字面混淆彻底消掉；13 个插件需同步改 `from app.modules import ...`。
+3. **`app/plugin` → `app/plugin`**：纯 Python 包改名，能把「`modules` vs `module`」的
+   字面混淆彻底消掉；13 个插件需同步改 `from app.plugin import ...`。
 4. **`tests/` 142 文件分区**：`tests/app/<层>/<包>/` 与源码镜像，让「改哪个目录跑哪些测试」
    由路径直接推出。
 5. **`scripts/` 三分**（`gen/ experiments/ diag/ ops/ ci/`）。
@@ -613,7 +613,7 @@ docs/
 | `app.agent.providers` | 22 / 5,427 | 22 / 5,434 |
 | `app.agent.memory` | 30 / 7,507 | 30 / 7,514 |
 | `app.agent.knowledge` | 27 / 6,030 | 27 / 6,037 |
-| `app.modules.registry` | 8 / 2,400 | 8 / 2,400 |
+| `app.plugin.registry` | 8 / 2,400 | 8 / 2,400 |
 | `app.infrastructure.onebot.gateway` | 11 / 3,691 | 11 / 3,690 |
 | `app.bootstrap` | 158 / 41,717（**在环内**） | 158 / 41,545（**已出环**） |
 
@@ -740,7 +740,7 @@ venv\Scripts\python.exe scripts\gen\arch_closure.py --assert-max 20000          
 | `app.webui.api.agent` | 43,839 | **32,584** | ≤8,000 |
 | `app.agent.providers` | 1,122 | 22 文件 / 5,434 | ≤3,000 |
 | `app.infrastructure.onebot.gateway` | — | 11 文件 / 3,690 | 保持 |
-| `app.modules.registry` | — | 8 文件 / 2,400 | 保持 |
+| `app.plugin.registry` | — | 8 文件 / 2,400 | 保持 |
 
 ### 7.2 闸二：分层边界测试（已落地）
 

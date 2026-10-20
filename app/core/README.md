@@ -19,7 +19,7 @@
 - **不得** import 任何其它 `app.*` 子包。依赖方向永远是「上层 → core」。
 - **不得**出现业务概念：不认「消息、群、Bot、插件、LLM」。出现即说明它该搬家。
 - `container.get_active()` 是**唯一**允许的服务定位入口，且只给「插件无参便捷 API」
-  （`app/modules/api.py`）用。其余代码一律构造函数注入或 FastAPI `Depends`。
+  （`app/plugin/api.py`）用。其余代码一律构造函数注入或 FastAPI `Depends`。
 
 ## 想改这里之前
 

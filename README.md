@@ -142,7 +142,7 @@ python main.py
 
 ```python
 # module.py —— 声明
-from app.modules import BaseModule
+from app.plugin import BaseModule
 from .config_schema import SCHEMA
 
 class Module(BaseModule):
@@ -189,7 +189,7 @@ SCHEMA = {"greeting": {"type": "text", "label": "问候语", "default": "你好"
 
 ```python
 # module.py
-from app.modules import BaseModule, module_hook, llm_hook, send_hook
+from app.plugin import BaseModule, module_hook, llm_hook, send_hook
 
 class Module(BaseModule):
     # 模块流水线：按事件类型注册处理函数（subscribe 可自动推导）
@@ -450,7 +450,7 @@ Agent 配置已从通用表单升级为**专属领域页面**：
 - 工具调用通过流式 `tool_calls` 碎片累积解析，支持多轮工具循环；
 - 单句最大长度由 `stream_sentence_max_length` 控制。
 
-### 插件 API（`from app.modules import ...`）
+### 插件 API（`from app.plugin import ...`）
 
 | 函数 | 用途 |
 |---|---|

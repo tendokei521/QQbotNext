@@ -21,7 +21,7 @@ from app.agent.providers.invoker import (
     ProviderInvoker,
     resolve_invoker,
 )
-from app.modules.features import FeatureRegistry, ProviderInvokerFeatureController
+from app.plugin.features import FeatureRegistry, ProviderInvokerFeatureController
 
 
 class _Runtime:

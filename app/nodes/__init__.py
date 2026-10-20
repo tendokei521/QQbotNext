@@ -1,6 +1,6 @@
 """节点框架：MessageNode / MessageContext / NodeRunner / NodeRegistry / 出站管道。
 
-内置业务节点（Router/Permission/Invoke）见 app/modules/nodes.py。
+内置业务节点（Router/Permission/Invoke）见 app/plugin/nodes.py。
 """
 
 from app.nodes.base import MessageContext, MessageNode, NodeRunner

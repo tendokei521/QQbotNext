@@ -1,6 +1,6 @@
 """旧配置迁移（priority_groups → group_configs）。"""
 
-from app.modules.groups import migrate_group_list_config
+from app.plugin.groups import migrate_group_list_config
 
 
 def migrate_legacy_config(module) -> None:

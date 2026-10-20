@@ -46,7 +46,7 @@ app/plugins/<name>/
 - **定时任务**：`SCHEDULES = {"HH:MM[:SS]": "方法名"}`，方法在 Module 类上，内部调
   `service.xxx(module, self.ctx.bot)`；时间需可配置时改用动态注册（见 §六）。
 - **数据源**：`LIST_PROVIDERS` / `DYNAMIC_PROVIDERS`（见 §三）。
-- **共享逻辑**：跨模块通用处理（如关键词匹配 `app/modules/keyword.py::match_keywords`、
+- **共享逻辑**：跨模块通用处理（如关键词匹配 `app/plugin/keyword.py::match_keywords`、
   群模式判断）提取为共享库，模块各自调用，不复制。
 
 ### 子模块（父模块可拥有子模块）

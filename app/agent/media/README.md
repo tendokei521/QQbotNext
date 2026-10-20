@@ -13,7 +13,7 @@
 ## 注意
 
 缓存淘汰策略（TTL + 容量上限）在 `app/infrastructure/fs/media_cache.py`，
-与 bilibili/douyin 插件共用同一套（P3 从 `app/modules/` 下沉）。
+与 bilibili/douyin 插件共用同一套（P3 从 `app/plugin/` 下沉）。
 
 ## 边界
 

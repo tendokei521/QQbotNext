@@ -1,6 +1,6 @@
 """共享关键词匹配库测试（覆盖三模块原语义：and/or/text/at/selfid/userid）。"""
 
-from app.modules import match_keywords
+from app.plugin import match_keywords
 
 
 def test_text_match():

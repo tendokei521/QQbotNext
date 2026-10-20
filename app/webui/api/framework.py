@@ -9,8 +9,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from app.modules.base import ServiceAccess
-from app.modules.features import FeatureRegistry
+from app.plugin.base import ServiceAccess
+from app.plugin.features import FeatureRegistry
 from app.services.capabilities import collect_capabilities
 from app.services.resource_registry import ResourceRegistry
 from app.webui.api.deps import get_container

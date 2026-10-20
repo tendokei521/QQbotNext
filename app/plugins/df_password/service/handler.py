@@ -3,8 +3,8 @@
 from functools import partial
 
 from app.core.logger import module_logger
-from app.modules import register_daily_schedule
-from app.modules.groups import check_group_enabled
+from app.plugin import register_daily_schedule
+from app.plugin.groups import check_group_enabled
 
 from .essence import _set_essence
 from .fetch import _fetch_and_format

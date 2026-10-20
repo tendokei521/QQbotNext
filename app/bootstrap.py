@@ -20,9 +20,9 @@ from app.infrastructure.cache import Cache
 from app.infrastructure.config.config_service import ConfigService
 from app.infrastructure.onebot.gateway import OneBotGateway
 from app.infrastructure.persistence.database import Database
-from app.modules.base import ServiceAccess
-from app.modules.dispatcher import ModuleDispatcher
-from app.modules.features import (
+from app.plugin.base import ServiceAccess
+from app.plugin.dispatcher import ModuleDispatcher
+from app.plugin.features import (
     AgentFeatureController,
     AssemblerFeatureController,
     FeatureRegistry,
@@ -33,14 +33,14 @@ from app.modules.features import (
     ProviderInvokerFeatureController,
     ScheduleFeatureController,
 )
-from app.modules.hooks import (
+from app.plugin.hooks import (
     ApiHookRegistry,
     BeforeSendHookRegistry,
     EventCompletedHookRegistry,
     LifecycleHookRegistry,
     SendHookRegistry,
 )
-from app.modules.registry import ModuleRegistry
+from app.plugin.registry import ModuleRegistry
 from app.services.bot_service import BotService
 from app.services.config_profile_service import ConfigProfileService
 from app.services.log_service import LogService
@@ -302,7 +302,7 @@ def build_container(settings: Settings | None = None) -> Container:
     container.register_factory(OneBotGateway, lambda: gateway)
 
     # 节点注册表：内置入站链（路由 → 权限 → 派发 → Agent 兜底），框架/模块可插入/替换
-    from app.modules.nodes import AgentNode, ModuleInvokeNode, ModulePermissionNode, ModuleRouterNode
+    from app.plugin.nodes import AgentNode, ModuleInvokeNode, ModulePermissionNode, ModuleRouterNode
     from app.nodes import NodeRegistry
     from app.nodes.outbound import OutboundPipeline, SendNode
 

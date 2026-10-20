@@ -1,12 +1,12 @@
-> 本文只负责：说明 `app/modules/` 放什么、不放什么。业务插件本身在仓库根的 `module/`，见 `docs/MODULE_DEV.md`。
+> 本文只负责：说明 `app/plugin/` 放什么、不放什么。业务插件本身在仓库根的 `module/`，见 `docs/MODULE_DEV.md`。
 
-# `app/modules/` —— 插件框架
+# `app/plugin/` —— 插件框架
 
 **一句话：插件的运行时（加载、分发、权限、能力接管），不含任何具体插件。**
 
 ## 边界：这里 vs `module/`
 
-| | `app/modules/`（本目录） | `module/`（仓库根） |
+| | `app/plugin/`（本目录） | `module/`（仓库根） |
 |---|---|---|
 | 是什么 | 插件**框架** | 插件**本体**（bilibili_parser、douyin_parser …） |
 | 谁改 | 改框架才动这里 | 加/改业务功能动那里 |

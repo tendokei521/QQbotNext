@@ -1,4 +1,4 @@
-"""配置 schema 的归一化与校验（`app/modules/schema_utils.py`）。
+"""配置 schema 的归一化与校验（`app/plugin/schema_utils.py`）。
 
 背景：`_split_schema` 原先在两处各写一遍，且 schema 从不校验——未知 type 会被前端
 兜底成文本框、`type: "resource"` 的种类写错只表现为"空下拉"。这里锁住新口径：
@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from app.modules.schema_utils import (
+from app.plugin.schema_utils import (
     KNOWN_TYPES,
     normalize_field,
     normalize_schema,

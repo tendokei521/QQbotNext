@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from app.modules.resource_validation import apply_on_missing
+from app.plugin.resource_validation import apply_on_missing
 
 
 class _Registry:
@@ -129,7 +129,7 @@ async def test_config_endpoint_reports_cleared_fields(container):
 
     from starlette.testclient import TestClient
 
-    from app.modules.registry import ModuleRegistry
+    from app.plugin.registry import ModuleRegistry
     from app.webui.app import create_app
 
     registry = container.get(ModuleRegistry)

@@ -8,7 +8,7 @@ from __future__ import annotations
 from app.agent.config import LEGACY_LLM_CONNECTION_KEYS
 from app.core.logger import logger
 from app.domain.bot import IBot
-from app.modules.schema_utils import webui_schema
+from app.plugin.schema_utils import webui_schema
 
 
 class BotService:
@@ -173,7 +173,7 @@ class BotService:
         """框架级 LLM 模块条目：读 AgentRuntime（无运行时则用默认值）。"""
         from app.agent.config import DEFAULT_LLM_CONFIG
         from app.agent.config_schema import SCHEMA
-        from app.modules.base import ModulePermission
+        from app.plugin.base import ModulePermission
 
         runtime = self.agent_manager.get_runtime(bot_id) if self.agent_manager and bot_id else None
         if runtime is not None:
@@ -232,8 +232,8 @@ class BotService:
 
 
 def _split_schema(schema: dict) -> dict:
-    """兼容旧调用：schema 分区已迁到 `app.modules.schema_utils.split_schema`。"""
-    from app.modules.schema_utils import split_schema
+    """兼容旧调用：schema 分区已迁到 `app.plugin.schema_utils.split_schema`。"""
+    from app.plugin.schema_utils import split_schema
 
     return split_schema(schema)
 

@@ -6,7 +6,7 @@
 - ModuleInvokeNode     逐个调用业务模块 handle（1 级叶子）
 - AgentNode            模块链之后的 LLM 兜底（模块可 event.llm.stop() 跳过）
 
-这些节点依赖模块框架（app.modules），故放在此而非 app/nodes。
+这些节点依赖模块框架（app.plugin），故放在此而非 app/nodes。
 """
 
 from __future__ import annotations
@@ -15,15 +15,15 @@ from typing import Any
 
 from app.core.logger import logger
 from app.domain.events import BaseEvent
-from app.modules.authority import (
+from app.plugin.authority import (
     check_module_enabled,
     check_module_permission,
     compute_event_permission,
     is_single_service_skipped,
     roster_lists,
 )
-from app.modules.base import BaseModule
-from app.modules.registry import ModuleRegistry
+from app.plugin.base import BaseModule
+from app.plugin.registry import ModuleRegistry
 from app.nodes.base import MessageContext, MessageNode, Next
 
 

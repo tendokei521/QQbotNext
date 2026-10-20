@@ -10,7 +10,7 @@
 - **运行环境**：`venv/` 虚拟环境（**必须用它**，见 §12.1）
 - **三大常驻组件**：
   - OneBot 网关（`app/infrastructure/onebot/gateway.py`）—— 多账号 WebSocket 连接 / 断线重连
-  - 模块分发器（`app/modules/dispatcher.py`）—— 事件 → 权限过滤 → 模块
+  - 模块分发器（`app/plugin/dispatcher.py`）—— 事件 → 权限过滤 → 模块
   - WebUI（`app/webui/`）—— FastAPI 管理后台，默认 `http://127.0.0.1:9200`
 
 ## 2. 目录结构
@@ -330,8 +330,8 @@ push / PR 时自动执行三组校验，无需手动触发：
 - 模块配置 `list` 类型改名 `string_list`；新增 `list`（后端数据）/ `dynamic` / `repeater` / `showIf`
 - 前端账号选择持久化（localStorage）
 - **消息分发「一切皆节点」**：dispatcher 硬编码过滤 → `app/nodes` 入站节点链
-  （Router → Permission → Invoke），出站发送可拦截；`app/modules/nodes.py` 为内置节点，
-  `app/modules/keyword.py` 为共享关键词库；支持父模块递归子模块（`parent.child` 配置命名空间）。
+  （Router → Permission → Invoke），出站发送可拦截；`app/plugin/nodes.py` 为内置节点，
+  `app/plugin/keyword.py` 为共享关键词库；支持父模块递归子模块（`parent.child` 配置命名空间）。
 - **模块流水线 + LLM 流水线**：模块流水线在前（`@module_hook`），LLM 流水线在后
   （`@llm_hook`：pre_request / post_response / pre_send / post_send）；LLM 请求池
   `app/agent/pool.py` 支持同会话防抖合并；`event.llm.resume()` 手动放行。

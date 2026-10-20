@@ -4,7 +4,7 @@ import asyncio
 import os
 
 from app.core.logger import module_logger
-from app.modules import get_data_path
+from app.plugin import get_data_path
 
 
 def _serialize_event(event) -> dict:

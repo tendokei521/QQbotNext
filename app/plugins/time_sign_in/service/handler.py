@@ -1,7 +1,7 @@
 """指令分发：#打卡 / #全群打卡 / 自定义触发词；命中即接管，跳过 LLM。"""
 
 from app.core.logger import module_logger
-from app.modules.groups import check_group_enabled, resolve_group_ids
+from app.plugin.groups import check_group_enabled, resolve_group_ids
 
 from .signin import _execute_signin_for_groups
 

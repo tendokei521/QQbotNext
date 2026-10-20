@@ -105,7 +105,7 @@ def _resolve_module(container, module_name, bot_id):
         if runtime is None:
             return None
         return _AgentProxy(runtime)
-    from app.modules.registry import ModuleRegistry
+    from app.plugin.registry import ModuleRegistry
 
     return container.get(ModuleRegistry).get(module_name, bot_id)
 
@@ -189,7 +189,7 @@ async def list_uninstalled_modules(request: Request):
 
 @router.get("/modules/features")
 async def list_features(request: Request, bot_id: int | None = Depends(parse_bot_id)):
-    from app.modules.features import FeatureRegistry
+    from app.plugin.features import FeatureRegistry
 
     container = get_container(request)
     features = container.get(FeatureRegistry).status(bot_id)
@@ -272,7 +272,7 @@ async def update_config(module_name: str, request: Request, bot_id: int | None =
     for key in LEGACY_LLM_CONNECTION_KEYS:
         data.pop(key, None)
     # 资源字段的悬挂引用策略（on_missing）：声明 clear 的字段在引用失效时丢弃该值
-    from app.modules.resource_validation import apply_on_missing
+    from app.plugin.resource_validation import apply_on_missing
     from app.services.resource_registry import ResourceRegistry
 
     data, cleared_fields = await apply_on_missing(
@@ -315,7 +315,7 @@ async def reload_single_module(
     bot_id: int | None = Depends(parse_bot_id),
 ):
     """手动热重载单个模块。"""
-    from app.modules.registry import ModuleRegistry
+    from app.plugin.registry import ModuleRegistry
     from app.services.bot_service import BotService
 
     container = get_container(request)
@@ -336,7 +336,7 @@ async def uninstall_module(
     bot_id: int | None = Depends(parse_bot_id),
 ):
     """软卸载模块：只写配置文件，不删除模块文件。"""
-    from app.modules.registry import ModuleRegistry
+    from app.plugin.registry import ModuleRegistry
 
     container = get_container(request)
     registry = container.get(ModuleRegistry)
@@ -355,7 +355,7 @@ async def reinstall_module(
     bot_id: int | None = Depends(parse_bot_id),
 ):
     """清除软卸载记录并重新加载模块。"""
-    from app.modules.registry import ModuleRegistry
+    from app.plugin.registry import ModuleRegistry
     from app.services.bot_service import BotService
 
     container = get_container(request)
@@ -372,7 +372,7 @@ async def reinstall_module(
 @router.post("/modules/install-zip")
 async def install_module_zip(request: Request, file: UploadFile = File(...)):
     """上传 zip 插件并安装到 module/plugins。"""
-    from app.modules.registry import ModuleRegistry
+    from app.plugin.registry import ModuleRegistry
 
     container = get_container(request)
     registry = container.get(ModuleRegistry)
@@ -398,7 +398,7 @@ async def module_page(module_name: str, request: Request,
                       bot_id: int | None = Depends(parse_bot_id)):
     """自定义配置页（仅模块目录 pages/index.html；框架级 Agent 已并入 schema 表单，无独立页）。"""
     container = get_container(request)
-    from app.modules.registry import ModuleRegistry
+    from app.plugin.registry import ModuleRegistry
 
     reg = container.get(ModuleRegistry)
     page_path = reg.module_page_path(module_name)
@@ -450,7 +450,7 @@ def _resolve_bot(container, bot_id: int | None):
 @router.get("/module/{module_name}/list/{endpoint}")
 async def module_list_data(module_name: str, endpoint: str, request: Request,
                            bot_id: int | None = Depends(parse_bot_id)):
-    from app.modules.registry import ModuleRegistry
+    from app.plugin.registry import ModuleRegistry
     from app.services.provider_service import ProviderRegistry
 
     container = get_container(request)
@@ -494,7 +494,7 @@ async def module_list_data(module_name: str, endpoint: str, request: Request,
 @router.get("/module/{module_name}/dynamic/{endpoint}")
 async def module_dynamic_options(module_name: str, endpoint: str, request: Request,
                                  bot_id: int | None = Depends(parse_bot_id)):
-    from app.modules.registry import ModuleRegistry
+    from app.plugin.registry import ModuleRegistry
     from app.services.provider_service import ProviderRegistry
 
     container = get_container(request)
@@ -518,7 +518,7 @@ async def module_dynamic_options(module_name: str, endpoint: str, request: Reque
 @router.get("/module/{module_name}/dynamic/{endpoint}/{value}")
 async def module_dynamic_fields(module_name: str, endpoint: str, value: str, request: Request,
                                 bot_id: int | None = Depends(parse_bot_id)):
-    from app.modules.registry import ModuleRegistry
+    from app.plugin.registry import ModuleRegistry
     from app.services.provider_service import ProviderRegistry
 
     container = get_container(request)

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 
-from app.modules import BaseModule, llm_hook
+from app.plugin import BaseModule, llm_hook
 
 from .assembler import build as build_messages
 from .config_schema import SCHEMA

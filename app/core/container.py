@@ -20,12 +20,12 @@ core 不认识任何业务。历史上这里曾有 `service(type_)` 桥接函数
 
 ## 唯一允许的服务定位：`get_active()`
 
-模块（插件）的便捷 API `app/modules/api.py` 里有 `get_config_path(name)` 这类
+模块（插件）的便捷 API `app/plugin/api.py` 里有 `get_config_path(name)` 这类
 **无参函数**——插件作者不该被迫先拿到容器。它们需要一个「当前容器」入口。
 
 放在本模块而不是 `app/bootstrap.py`，是为了让这条依赖**向下**而不是向上：
-`app.modules.api → app.core.container` 是合法方向（上层依赖 core），
-而原来的 `app.modules.api → app.bootstrap` 是反向边，它把装配根拉进了强连通块
+`app.plugin.api → app.core.container` 是合法方向（上层依赖 core），
+而原来的 `app.plugin.api → app.bootstrap` 是反向边，它把装配根拉进了强连通块
 （实测环闭合在 `modules/api → bootstrap → webui/app → webui/api/agent → ...`）。
 
 `get_active()` 是**全库唯一**允许的服务定位写法，且只有模块便捷 API 用它；
@@ -120,7 +120,7 @@ def set_active(container: Container | None) -> None:
 def get_active() -> Container:
     """取当前进程的容器。
 
-    只给「插件无参便捷 API」用（`app/modules/api.py`）。其余代码请走构造函数注入
+    只给「插件无参便捷 API」用（`app/plugin/api.py`）。其余代码请走构造函数注入
     或 FastAPI `Depends`——服务定位会把调用方焊死在具体实现上，也让依赖图失真。
     """
     if _active is None:

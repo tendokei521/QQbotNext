@@ -18,7 +18,7 @@
 ## 边界（重要）
 
 - **不得有业务逻辑**。判断「该不该发这条消息」属于 `app/agent/`；判断「这次请求
-  合不合法」属于 `app/modules/authority.py`。路由只做搬运。
+  合不合法」属于 `app/plugin/authority.py`。路由只做搬运。
 - **不得 import `app.bootstrap`**（`bootstrap_imports=0` 守着）。容器从
   `request.app.state.container` 拿，见 `deps.py`。
 - 现状还有 13 处直接 `import app.agent.*`。P4 计划加一层 `app/services/` 门面后清零，

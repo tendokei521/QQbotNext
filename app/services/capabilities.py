@@ -60,7 +60,7 @@ def collect_capabilities(*, services: Any = None, features: Any = None, resource
         含 ``framework_version`` / ``schema_version`` / ``schema_types`` /
         ``resource_types`` / ``resources`` / ``services`` / ``features`` 的字典。
     """
-    from app.modules.schema_utils import KNOWN_TYPES, RESOURCE_TYPES, SCHEMA_VERSION
+    from app.plugin.schema_utils import KNOWN_TYPES, RESOURCE_TYPES, SCHEMA_VERSION
 
     feature_ids: list[str] = []
     if features is not None and callable(getattr(features, "list_features", None)):

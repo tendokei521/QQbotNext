@@ -1,7 +1,7 @@
 """语义化权限系统测试。"""
 
 from app.domain.events import GroupMessageEvent
-from app.modules.authority import (
+from app.plugin.authority import (
     PERMISSIONS,
     ROLE_RANK,
     check_module_enabled,
@@ -9,7 +9,7 @@ from app.modules.authority import (
     compute_event_permission,
     roster_lists,
 )
-from app.modules.base import (
+from app.plugin.base import (
     BaseModule,
     ModuleAuthority,
     ModuleConfig,

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.modules.base import ServiceAccess
+from app.plugin.base import ServiceAccess
 from app.services.config_profile_service import ConfigProfileService
 from app.services.role_preset_service import RolePresetService
 

@@ -4,11 +4,11 @@ import sys
 
 import pytest
 
-from app.modules import resolve_enabled_ids
+from app.plugin import resolve_enabled_ids
 from app.services.provider_service import ProviderRegistry
 
 MODULE_SRC = '''
-from app.modules import BaseModule
+from app.plugin import BaseModule
 
 class Module(BaseModule):
     name = "Provider测试"
@@ -127,7 +127,7 @@ async def api_env(settings, tmp_path):
     from app.infrastructure.config.config_service import ConfigService
     from app.infrastructure.onebot.gateway import OneBotGateway
     from app.infrastructure.persistence.database import Database
-    from app.modules.registry import ModuleRegistry
+    from app.plugin.registry import ModuleRegistry
     from app.webui.app import create_app
 
     for key in [k for k in sys.modules if k == "module" or k.startswith("module.")]:
@@ -155,7 +155,7 @@ async def api_env(settings, tmp_path):
 
 async def test_list_api_returns_items_with_saved_merge(api_env):
     client, c = api_env
-    from app.modules.registry import ModuleRegistry
+    from app.plugin.registry import ModuleRegistry
 
     # 先写入一条已存配置：g2 enabled=False
     module = c.get(ModuleRegistry).get("testmod", 123)

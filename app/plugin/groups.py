@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from app.modules.base import resolve_enabled_ids
+from app.plugin.base import resolve_enabled_ids
 
 
 def check_group_enabled(

@@ -4,8 +4,8 @@ import asyncio
 from functools import partial
 
 from app.core.logger import module_logger
-from app.modules import register_daily_schedule
-from app.modules.groups import resolve_group_ids
+from app.plugin import register_daily_schedule
+from app.plugin.groups import resolve_group_ids
 
 
 async def _execute_signin_for_groups(module, group_ids: list, batch: int = 4) -> tuple:

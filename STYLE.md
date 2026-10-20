@@ -96,7 +96,7 @@ async def add_bot(
   > 原文写"目录结构固定：`{module.py, service.py, config_schema.py}`"——实际 13 个插件有 7 个不符
   > （4 个没有 `service.py`，3 个用 `service/` 子包）。规范应向已存在的合理做法靠拢，而不是反过来。
 - **三个 "module" 概念不要混**（命名撞车的根源，动手前先确认自己在说哪一个）：
-  `app/modules/` = 插件**框架**（`BaseModule`/注册表/权限/hook）；
+  `app/plugin/` = 插件**框架**（`BaseModule`/注册表/权限/hook）；
   `app/plugins/` = 业务插件**实现**；
   `module/plugins/` = zip 安装的**外部**插件。
 
@@ -289,7 +289,7 @@ import 整个引擎，而引擎又要回头 import 主循环跑生成。
 `get_container()` 直调 **64 次 / 10 个文件**，全在 `app/webui/api/*`，且都已经是
 FastAPI 依赖（`request.app.state.container`，见 `deps.py`）——不再是"绕过容器直调"。
 
-- 已清零：`app/modules/api.py` 的 4 处（改用 `app.core.container.get_active()`）。
+- 已清零：`app/plugin/api.py` 的 4 处（改用 `app.core.container.get_active()`）。
 - 目标：端点改成 `Depends(具体服务)`，不再自己从容器里用 `type` 捞。
 - **`app.core.container.get_active()` 是全库唯一允许的服务定位**，且只给「插件无参
   便捷 API」用（插件不该被迫先拿容器）。新代码一律传参或 `Depends`。

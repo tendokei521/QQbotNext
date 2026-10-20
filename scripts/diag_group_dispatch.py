@@ -120,7 +120,7 @@ async def main(db_file: str) -> None:
     agent_manager: AgentManager = container.get(AgentManager)
 
     # 把网关的派发链路接到真实 dispatcher（与 bootstrap 一致）
-    from app.modules.dispatcher import ModuleDispatcher
+    from app.plugin.dispatcher import ModuleDispatcher
 
     dispatcher: ModuleDispatcher = container.get(ModuleDispatcher)
     gateway.dispatch_handler = dispatcher.dispatch

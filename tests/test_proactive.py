@@ -8,7 +8,7 @@ import pytest
 
 from app.agent.proactivity.manager import ProactiveManager
 from app.core.task_manager import TaskManager
-from app.modules.base import ModuleConfig
+from app.plugin.base import ModuleConfig
 
 BASE = {
     "proactive_friend_enable": False,

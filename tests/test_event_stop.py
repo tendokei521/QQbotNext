@@ -1,7 +1,7 @@
 """event.stop() 全链终止机制测试（对齐 astrbot stop_event）。"""
 
 from app.domain.events import PrivateMessageEvent
-from app.modules.nodes import AgentNode, ModuleInvokeNode
+from app.plugin.nodes import AgentNode, ModuleInvokeNode
 from app.nodes.base import MessageContext
 
 
@@ -95,7 +95,7 @@ async def test_invoke_node_runs_all_without_stop():
 
 async def test_agent_node_skips_when_event_stopped(monkeypatch):
     """event.stop() 后 LLM 兜底不执行。"""
-    from app.modules.base import ModulePermission
+    from app.plugin.base import ModulePermission
 
     called = []
 

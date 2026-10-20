@@ -419,7 +419,7 @@ class BaseModule(ABC):
         加载时框架会自动校验并 WARNING 列出缺失项；模块也可在 ``on_load``
         或业务入口据此降级（例如没有 ``llm`` 就关掉自己的模型相关功能）。
         """
-        from app.modules.requirements import missing_requirements
+        from app.plugin.requirements import missing_requirements
 
         return missing_requirements(self)
 

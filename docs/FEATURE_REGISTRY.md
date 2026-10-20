@@ -46,7 +46,7 @@
 
 ```python
 # module.py
-from app.modules import BaseModule
+from app.plugin import BaseModule
 
 class Module(BaseModule):
     name = "我的主动回复"
@@ -92,7 +92,7 @@ class Module(BaseModule):
 如果不想用声明式，也可以在 `on_load` / `on_unload` 里手动操作：
 
 ```python
-from app.modules import BaseModule
+from app.plugin import BaseModule
 
 class Module(BaseModule):
     async def on_load(self):
@@ -112,7 +112,7 @@ self.ctx.services.features.query("proactive", self.bot_id)
 self.ctx.services.features.status(self.bot_id)
 
 # 或使用插件 API
-from app.modules import get_features
+from app.plugin import get_features
 print(get_features(bot_id=self.bot_id))
 ```
 

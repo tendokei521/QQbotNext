@@ -21,7 +21,7 @@ from typing import Any
 
 from app.core.logger import logger
 from app.domain.bot import IBot
-from app.modules.base import BaseModule, ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
+from app.plugin.base import BaseModule, ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
 
 
 class ModuleRegistry:

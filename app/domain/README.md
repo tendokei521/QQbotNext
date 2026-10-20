@@ -15,7 +15,7 @@
 ## 边界（重要）
 
 - 允许 import：`app.core.*`、标准库、三方库。
-- **不得** import：`app.agent` `app.infrastructure` `app.modules` `app.services` `app.webui`。
+- **不得** import：`app.agent` `app.infrastructure` `app.plugin` `app.services` `app.webui`。
   `tests/test_architecture_boundaries.py` 会把这条闸死。
 - **不得**做 IO：这里只有类型和纯函数。读文件、连数据库、发网络请求都不属于这里。
 

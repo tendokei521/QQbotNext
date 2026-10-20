@@ -505,8 +505,8 @@ async def test_plugin_loads_in_real_registry(container):
     from pathlib import Path
 
     from app.infrastructure.config.config_service import ConfigService
-    from app.modules.base import ServiceAccess
-    from app.modules.registry import ModuleRegistry
+    from app.plugin.base import ServiceAccess
+    from app.plugin.registry import ModuleRegistry
 
     repo_root = Path(__file__).resolve().parent.parent
     registry = ModuleRegistry(

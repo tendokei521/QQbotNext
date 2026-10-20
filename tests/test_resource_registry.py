@@ -220,7 +220,7 @@ async def test_module_schema_reaches_api_with_resource_field(container):
     """
     from pathlib import Path
 
-    from app.modules.registry import ModuleRegistry
+    from app.plugin.registry import ModuleRegistry
     from app.services.bot_service import BotService
 
     # BotService 持有的是容器里的注册表实例：把它的模块目录定向到仓库真实目录，

@@ -10,8 +10,8 @@ import re
 from types import SimpleNamespace
 
 from app.agent.assembly.assembler import PromptRequest
-from app.modules.base import ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
-from app.modules.features import AssemblerFeatureController, FeatureRegistry
+from app.plugin.base import ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
+from app.plugin.features import AssemblerFeatureController, FeatureRegistry
 from app.plugins.astrbot_alignment import assembler
 from app.plugins.astrbot_alignment.astrbot_prompts import (
     GROUP_HISTORY_DIRECTED_AT_YOU,
@@ -463,8 +463,8 @@ async def test_plugin_takes_over_in_real_registry(container):
     from app.agent.assembly.assembler import build_for
     from app.agent.runtime import AgentManager
     from app.infrastructure.config.config_service import ConfigService
-    from app.modules.base import ServiceAccess
-    from app.modules.registry import ModuleRegistry
+    from app.plugin.base import ServiceAccess
+    from app.plugin.registry import ModuleRegistry
     from app.services.module_install_service import ModuleInstallService
 
     repo_root = Path(__file__).resolve().parent.parent

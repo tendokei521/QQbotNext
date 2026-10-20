@@ -18,8 +18,8 @@ import os
 
 from app.core.logger import module_logger
 from app.infrastructure.fs import media_cache
-from app.modules import get_data_path
-from app.modules.groups import check_group_enabled
+from app.plugin import get_data_path
+from app.plugin.groups import check_group_enabled
 
 from . import forward as fwd
 from . import media
