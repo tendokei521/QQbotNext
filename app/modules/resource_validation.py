@@ -8,7 +8,6 @@
 
 为什么放在**保存**路径而不是读取路径：读取路径（``get_modules_data``）是同步的，而候选
 拉取可能是异步的；而且改数据应当发生在明确的写操作里，不该在 GET 里产生副作用。
-这条 API 同时服务新版 Dashboard 与 /legacy，所以两套界面的行为天然一致。
 """
 
 from __future__ import annotations

@@ -1,6 +1,13 @@
 """WebUI 应用装配：FastAPI + 路由挂载 + 静态资源 + 配置变更广播。
 
 仅做组装；业务逻辑在 api/ 路由与 services/ 中。
+
+## 前端只有一个
+
+这里只服务 `dashboard/dist`（Vue3 + Vuetify 构建产物）。历史上还并存一套手写的
+`static/main.js` + `templates/index.html`（约 4,800 行），同一张 Agent 配置表单实现了
+两遍，**schema 每加一个字段要改两处、第二处极易漏且没有测试会红**。P6 已删除旧版，
+`/legacy` 与 `/static` 一并移除。
 """
 
 from __future__ import annotations
@@ -11,7 +18,6 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 
 from app.core.event_bus import BotAccountUpdatedEvent, BotLifecycleEvent, event_bus
 from app.core.logger import webui_logger
@@ -31,8 +37,21 @@ from app.webui.api import webui_cfg as webui_router
 from app.webui.ws import build_ws_router, manager
 
 _BASE_DIR = Path(__file__).resolve().parent
-# 新版 Dashboard（Vue3+Vuetify）构建产物目录：dashboard/dist
+# 前端构建产物目录：dashboard/dist
 _DASHBOARD_DIST = _BASE_DIR.parent.parent / "dashboard" / "dist"
+
+#: 构建产物缺失时的提示页（不用模板引擎，避免为一个提示页多养一套模板依赖）
+_MISSING_DIST_HTML = """<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>前端未构建</title></head>
+<body style="font-family:system-ui;max-width:44em;margin:4em auto;line-height:1.7">
+<h1>前端尚未构建</h1>
+<p>后端已启动，但没有找到 <code>dashboard/dist/index.html</code>。</p>
+<p>请在仓库根执行：</p>
+<pre style="background:#f4f4f4;padding:1em;border-radius:6px">cd dashboard
+pnpm install
+pnpm build</pre>
+<p>构建完成后刷新本页即可。</p>
+</body></html>"""
 
 #: 配置变更 scope → 受影响的资源种类（`resources_updated` 广播用；空元组 = 不影响任何资源）
 _CONFIG_SCOPE_RESOURCES: dict[str, tuple[str, ...]] = {
@@ -45,15 +64,14 @@ _CONFIG_SCOPE_RESOURCES: dict[str, tuple[str, ...]] = {
 }
 
 
-def _render_dashboard(request: Request, webui_token: str) -> HTMLResponse | None:
-    """渲染新版 Dashboard（存在构建产物时使用）。
+def _render_dashboard(request: Request, webui_token: str) -> HTMLResponse:
+    """渲染 Dashboard 首页：读取 dashboard/dist/index.html，注入 window.WEBUI_TOKEN。
 
-    - 读取 dashboard/dist/index.html，注入 window.WEBUI_TOKEN（鉴权引导）；
-    - 不存在产物时返回 None，由调用方回退旧版模板。
+    注入的是鉴权引导令牌（GET / 本身不鉴权，前端凭它调受保护的 /api 与 /ws）。
     """
     index = _DASHBOARD_DIST / "index.html"
     if not index.exists():
-        return None
+        return HTMLResponse(_MISSING_DIST_HTML, status_code=503)
     html = index.read_text(encoding="utf-8")
     token_script = f"<script>window.WEBUI_TOKEN={json.dumps(webui_token)};</script>"
     if "<head>" in html:
@@ -71,10 +89,6 @@ def create_app(container) -> FastAPI:
     """根据容器装配 FastAPI 应用。"""
     app = FastAPI(title="QQBot Next 管理后台", version="2.0.0")
     app.state.container = container
-
-    # 静态资源 / 模板
-    app.mount("/static", StaticFiles(directory=str(_BASE_DIR / "static")), name="static")
-    templates = Jinja2Templates(directory=str(_BASE_DIR / "templates"))
 
     # 路由
     app.include_router(bots_router.router, prefix="/api")
@@ -97,78 +111,16 @@ def create_app(container) -> FastAPI:
     # 可选鉴权（WEBUI_TOKEN 非空时生效）
     _install_auth_middleware(app, container)
 
-    # 新版 Dashboard 首页（构建产物存在时优先；JS 资源经根挂载提供）
+    # Dashboard 首页（构建产物缺失时给出「请先 pnpm build」的提示页）
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
         from app.core.settings import Settings
 
         webui_token = container.get(Settings).webui_token or ""
-        dashboard = _render_dashboard(request, webui_token)
-        if dashboard is not None:
-            return dashboard
+        return _render_dashboard(request, webui_token)
 
-        # ---- 旧版 UI 回退路径（dashboard/dist 不存在时） ----
-        from app.infrastructure.config.config_service import ConfigService
-        from app.services.bot_service import BotService
-        from app.services.log_service import LogService
-
-        bot_service = container.get(BotService)
-        config_service = container.get(ConfigService)
-        log_service = container.get(LogService)
-
-        webui_cfg = config_service.get_webui_config()
-        source = "user" if not webui_cfg.get("logs", {}).get("show_raw_logs", False) else "debug"
-        logs = log_service.get_recent_logs(
-            webui_cfg.get("logs", {}).get("max_lines", 50),
-            webui_cfg.get("logs", {}).get("visible_levels", ["info", "warning", "error"]),
-            source=source,
-        )
-        # 注入访问令牌：GET / 本身不鉴权，前端凭此 token 调用受保护的 /api 与 /ws/logs
-        return templates.TemplateResponse(
-            request, "index.html", {
-                "request": request,
-                "bots": bot_service.get_bots_data(),
-                "modules": bot_service.get_modules_data(),
-                "logs": logs,
-                "webui_config": webui_cfg,
-                "webui_token": webui_token,
-            }
-        )
-
-    # 旧版 UI 保留路径：/legacy（无论新版是否存在都可访问，作回退）
-    @app.get("/legacy", response_class=HTMLResponse)
-    async def legacy_index(request: Request):
-        from app.infrastructure.config.config_service import ConfigService
-        from app.services.bot_service import BotService
-        from app.services.log_service import LogService
-
-        bot_service = container.get(BotService)
-        config_service = container.get(ConfigService)
-        log_service = container.get(LogService)
-
-        webui_cfg = config_service.get_webui_config()
-        source = "user" if not webui_cfg.get("logs", {}).get("show_raw_logs", False) else "debug"
-        logs = log_service.get_recent_logs(
-            webui_cfg.get("logs", {}).get("max_lines", 50),
-            webui_cfg.get("logs", {}).get("visible_levels", ["info", "warning", "error"]),
-            source=source,
-        )
-        from app.core.settings import Settings
-
-        webui_token = container.get(Settings).webui_token or ""
-        return templates.TemplateResponse(
-            request, "index.html", {
-                "request": request,
-                "bots": bot_service.get_bots_data(),
-                "modules": bot_service.get_modules_data(),
-                "logs": logs,
-                "webui_config": webui_cfg,
-                "webui_token": webui_token,
-            }
-        )
-
-    # 新版 Dashboard 静态资源根挂载（放在所有路由之后，仅兜底未匹配路径：
-    # /assets/* 等由这里提供；/api、/static、/legacy 等已在上方注册，优先级更高）
+    # Dashboard 静态资源根挂载（放在所有路由之后，仅兜底未匹配路径：
+    # /assets/* 等由这里提供；/api 与 /ws 已在上方注册，优先级更高）
     if _DASHBOARD_DIST.exists():
         app.mount("/", StaticFiles(directory=str(_DASHBOARD_DIST), html=True), name="dashboard")
 
@@ -361,7 +313,7 @@ def _install_auth_middleware(app: FastAPI, container) -> None:
 
     @app.middleware("http")
     async def auth_middleware(request: Request, call_next):
-        # 所有 HTTP 路由（含首页/旧版 UI/模块自定义页/静态资源）都要求鉴权，
+        # 所有 HTTP 路由（含首页/模块自定义页/静态资源）都要求鉴权，
         # 避免 token 被未授权访问者从页面源码中取走。
         if _extract_token(request) != token:
             if request.url.path.startswith("/api"):

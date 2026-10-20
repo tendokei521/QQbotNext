@@ -240,39 +240,9 @@ async def test_module_schema_reaches_api_with_resource_field(container):
         await registry.unload_single("astrbot_alignment", bot_id)
 
 
-async def test_legacy_ui_renders_resource_widget(container):
-    """旧版 UI（/legacy）也要能渲染资源选择器，否则回退路径下资源字段会退化成文本框。"""
-    from pathlib import Path
-
-    from starlette.testclient import TestClient
-
-    from app.modules.registry import ModuleRegistry
-    from app.webui.app import create_app
-
-    registry = container.get(ModuleRegistry)
-    registry.modules_dir = Path(__file__).resolve().parent.parent / "module" / "modules"
-    assert await registry.load_single("astrbot_alignment", None) is True
-    try:
-        html = TestClient(create_app(container)).get("/legacy").text
-        assert 'data-widget-type="resource"' in html, "模板应输出资源组件占位"
-        assert 'data-resource="role_preset"' in html
-        assert 'data-multiple="0"' in html
-        assert "persona_preset_id" in html
-    finally:
-        await registry.unload_single("astrbot_alignment", None)
-
-
-def test_legacy_widget_script_implements_resource_picker():
-    """静态自检：旧版组件脚本确实实现了资源选择器（且带可读诊断）。"""
-    from pathlib import Path
-
-    js = (
-        Path(__file__).resolve().parent.parent / "app" / "webui" / "static" / "js" / "widgets.js"
-    ).read_text(encoding="utf-8")
-    assert "function initResourceWidget" in js
-    assert "encodeURIComponent(kind)" in js, "必须按种类拉候选"
-    assert "资源种类未注册" in js and "（已删除或未找到）" in js, "未注册/悬挂引用要有可读提示"
-    assert "initResourceWidget(moduleName, key, el)" in js, "必须在 initConfigWidgets 里注册"
+# 旧版 UI（/legacy）与 static/js/widgets.js 的两个用例已随 P6 删除：
+# 前端只剩 dashboard/dist 一套，资源选择器改由 Vue 的 ResourcePicker 组件实现，
+# 对应前端测试在 dashboard/ 内的构建期检查。
 
 
 # ==================== 资源变更 → WS 广播（前端据此局部刷新下拉） ====================
@@ -316,18 +286,16 @@ async def test_resources_updated_broadcast_only_for_resource_scopes(container, m
     assert resource_events() == []
 
 
-def test_both_uis_subscribe_to_resource_events():
-    """静态自检：两套前端都订阅了资源事件，否则只有刷新页面才看得到新候选。"""
+def test_frontend_subscribes_to_resource_events():
+    """静态自检：前端订阅了资源事件，否则只有刷新页面才看得到新候选。
+
+    （旧版 static/js 的手写实现已随 P6 删除，只剩 dashboard 一套。）
+    """
     from pathlib import Path
 
     root = Path(__file__).resolve().parent.parent
     vue = (root / "dashboard" / "src" / "components" / "config" / "FieldControl.vue").read_text(encoding="utf-8")
-    assert "onSocketMessage('resources_updated'" in vue and "onBeforeUnmount" in vue, "新版需订阅并在卸载时退订"
-
-    js = (root / "app" / "webui" / "static" / "js" / "widgets.js").read_text(encoding="utf-8")
-    main_js = (root / "app" / "webui" / "static" / "js" / "main.js").read_text(encoding="utf-8")
-    assert "function refreshResourceWidgets" in js and "resourceReloaders" in js
-    assert "case 'resources_updated':" in main_js, "旧版要在统一 WS 分派里接上"
+    assert "onSocketMessage('resources_updated'" in vue and "onBeforeUnmount" in vue, "需订阅并在卸载时退订"
 
 
 # ==================== bot / group 种类（按账号） ====================
