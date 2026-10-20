@@ -19,7 +19,8 @@ from typing import Any
 
 from app.core.logger import logger
 from app.domain.bot import IBot
-from app.plugin.base import BaseModule, ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
+from app.plugin import loader
+from app.plugin.base import BaseModule, ServiceAccess
 
 
 class ModuleRegistry:
@@ -144,6 +145,11 @@ class ModuleRegistry:
         bot: IBot | None = None,
         parent: BaseModule | None = None,
     ) -> bool:
+        """加载一个插件（含递归子模块）。
+
+        自己只做**编排**；每道工序在 `app/plugin/loader.py`：
+        装配 → 绑钩子 → 连数据源 → 激活。
+        """
         if self._is_uninstalled(module_name):
             return False
         source = self._module_source(module_name)
@@ -152,210 +158,29 @@ class ModuleRegistry:
             return False
 
         try:
-            self._purge_module_cache(module_name)
-            mod = self._import_plugin_module(module_name, module_path)
-            cls = getattr(mod, "Module", None)
-            if cls is None:
-                self.log.error(f"[Module] {module_name} 缺少 module.py 中的 Module 类")
-                return False
-            if not isinstance(cls, type) or not issubclass(cls, BaseModule):
-                self.log.error(f"[Module] {module_name} 的 Module 类未继承 BaseModule")
-                return False
-
-            config = ModuleConfig(module_name, bot_id, cls.default_config, self.config_service)
-            authority = ModuleAuthority(module_name, bot_id, self.config_service)
-            ctx = ModuleContext(
+            instance = loader.instantiate_module(
                 module_name=module_name,
+                module_path=module_path,
+                source=source,
                 bot_id=bot_id,
-                config=config,
-                authority=authority,
-                services=self.services,
                 bot=bot,
+                parent=parent,
+                config_service=self.config_service,
+                services=self.services,
+                read_manifest=self._read_manifest,
+                log=self.log,
             )
-            instance = cls(ctx)
-            instance.module_name = module_name
-            instance.bot_id = bot_id
-            instance.parent = parent          # 父模块引用（None = 顶层模块）
-            instance.children: dict = {}       # 子模块：{短名: 实例}
-            instance.source = source
-            instance.version = str(self._read_manifest(module_path).get("version", "") or "")
-            instance.plugin_dir = str(module_path)
-            instance.can_uninstall = True  # 本地/外部插件都允许软卸载（文件保留）
-            if not instance.version:
-                instance.version = "0.0.0"
+            if instance is None:
+                return False
+            cls = type(instance)
 
-            # 收集装饰器钩子并绑定到实例
-            module_hooks, llm_hooks = cls.collect_hooks()
-            instance._module_hooks = []
-            for hook in module_hooks:
-                handler = getattr(instance, hook["method"], None)
-                if handler is None:
-                    continue
-                instance._module_hooks.append({
-                    "event_type": hook.get("event_type", "*"),
-                    "order": hook.get("order", 100),
-                    "handler": handler,
-                })
-
-            # 未显式声明 subscribe 时，从 @module_hook 自动推导（"*" 表示全部）
-            if not getattr(cls, "subscribe", ()):
-                instance.subscribe = tuple({
-                    h["event_type"] for h in module_hooks
-                })
-
+            _module_hooks, llm_hooks = loader.bind_module_hooks(instance, cls)
             self._modules.setdefault(module_name, {})[bot_id] = instance
+            loader.register_hooks(instance, cls, llm_hooks, bot_id, self.services, self.log)
+            await loader.register_data_sources(instance, module_name, self.services, self.log)
+            await loader.activate(instance, module_name, self.services, self.log)
 
-            # 注册 LLM 流水线钩子到该 Bot 的 AgentRuntime
-            if llm_hooks and self.services and self.services.agent_manager:
-                runtime = self.services.agent_manager.get_runtime(bot_id)
-                if runtime is not None and hasattr(runtime, "llm_hooks"):
-                    for hook in llm_hooks:
-                        method = hook.get("method")
-                        handler = hook.get("handler")
-                        if method:
-                            handler = getattr(instance, method, None)
-                        elif isinstance(handler, str):
-                            handler = getattr(instance, handler, None)
-                        if handler is None or not callable(handler):
-                            continue
-                        runtime.llm_hooks.register(
-                            stage=hook.get("stage", ""),
-                            event_type=hook.get("event_type", "*"),
-                            order=hook.get("order", 100),
-                            handler=handler,
-                            module=instance,
-                        )
-            # 注册消息发送成功钩子（@send_hook）
-            send_hooks = cls.collect_send_hooks()
-            if send_hooks and self.services and self.services.send_hooks:
-                for hook in send_hooks:
-                    handler = getattr(instance, hook["method"], None)
-                    if handler is None:
-                        continue
-                    self.services.send_hooks.register(
-                        bot_id=bot_id,
-                        module=instance,
-                        handler=handler,
-                        message_type=hook.get("message_type", "*"),
-                        order=hook.get("order", 100),
-                    )
-
-            # 注册消息发送前钩子（@before_send_hook）
-            before_send_hooks = cls.collect_before_send_hooks()
-            if before_send_hooks and self.services and self.services.before_send_hooks:
-                for hook in before_send_hooks:
-                    handler = getattr(instance, hook["method"], None)
-                    if handler is None:
-                        continue
-                    self.services.before_send_hooks.register(
-                        bot_id=bot_id,
-                        module=instance,
-                        handler=handler,
-                        message_type=hook.get("message_type", "*"),
-                        order=hook.get("order", 100),
-                    )
-
-            # 注册任意 API 调用后钩子（@api_hook）
-            api_hooks = cls.collect_api_hooks()
-            if api_hooks and self.services and self.services.api_hooks:
-                for hook in api_hooks:
-                    handler = getattr(instance, hook["method"], None)
-                    if handler is None:
-                        continue
-                    self.services.api_hooks.register(
-                        bot_id=bot_id,
-                        module=instance,
-                        handler=handler,
-                        action=hook.get("action", "*"),
-                        order=hook.get("order", 100),
-                    )
-
-            # 注册 Bot 生命周期钩子（@bot_lifecycle_hook）
-            lifecycle_hooks = cls.collect_lifecycle_hooks()
-            if lifecycle_hooks and self.services and self.services.lifecycle_hooks:
-                for hook in lifecycle_hooks:
-                    handler = getattr(instance, hook["method"], None)
-                    if handler is None:
-                        continue
-                    self.services.lifecycle_hooks.register(
-                        bot_id=bot_id,
-                        module=instance,
-                        handler=handler,
-                        state=hook.get("state", "*"),
-                        order=hook.get("order", 100),
-                    )
-
-            # 注册事件处理完成钩子（@event_completed_hook）
-            event_completed_hooks = cls.collect_event_completed_hooks()
-            if event_completed_hooks and self.services and self.services.event_completed_hooks:
-                for hook in event_completed_hooks:
-                    handler = getattr(instance, hook["method"], None)
-                    if handler is None:
-                        continue
-                    self.services.event_completed_hooks.register(
-                        bot_id=bot_id,
-                        module=instance,
-                        handler=handler,
-                        order=hook.get("order", 100),
-                    )
-
-            # 注册模块工具（@tool / TOOLS）与技能（@skill / SKILLS）到该 Bot 的 AgentRuntime
-            if self.services and self.services.agent_manager:
-                runtime = self.services.agent_manager.get_runtime(bot_id)
-                if runtime is not None:
-                    runtime.llm_tools.register_module(instance)
-                    runtime.skills.register_module(instance)
-                    # 注册 LLM 工具调用后钩子（@tool_call_hook）
-                    tool_call_hooks = cls.collect_tool_call_hooks()
-                    if tool_call_hooks and hasattr(runtime, "llm_tool_call_hooks"):
-                        for hook in tool_call_hooks:
-                            handler = getattr(instance, hook["method"], None)
-                            if handler is None:
-                                continue
-                            runtime.llm_tool_call_hooks.register(
-                                event_type=hook.get("event_type", "*"),
-                                order=hook.get("order", 100),
-                                handler=handler,
-                                module=instance,
-                            )
-
-            # 自动注册模块声明的 list/dynamic 数据源
-            providers = self.services.providers if self.services else None
-            if providers is not None:
-                try:
-                    providers.register_module(instance)
-                except Exception as e:
-                    self.log.warning(f"[Module] {module_name} 数据源注册异常: {e}")
-            # 自动注册模块声明的定时任务（仅真实 Bot 实例）
-            scheduler = self.services.scheduler if self.services else None
-            if scheduler is not None:
-                try:
-                    await scheduler.register_module(instance)
-                except Exception as e:
-                    self.log.warning(f"[Module] {module_name} 定时任务注册异常: {e}")
-            # 依赖自检：requires 里声明的服务/能力缺失时只警告不阻断（模块可据此降级）
-            try:
-                missing = instance.missing_requirements()
-                if missing:
-                    self.log.warning(
-                        f"[Module] {module_name} 声明依赖缺失: {', '.join(missing)}（相关功能会降级）"
-                    )
-            except Exception as e:  # noqa: BLE001 —— 自检失败不该影响模块加载
-                self.log.debug(f"[Module] {module_name} 依赖自检失败（已忽略）: {e}")
-
-            try:
-                await instance.on_load()
-            except Exception as e:
-                self.log.warning(f"[Module] {module_name} on_load 异常: {e}")
-
-            # 插件声明 supersedes：加载后自动接管框架能力（已禁用模块不接管）
-            try:
-                if self.services and self.services.features and getattr(getattr(instance, "authority", None), "enabled", True):
-                    self.services.features.acquire_module(instance)
-            except Exception as e:
-                self.log.warning(f"[Module] {module_name} Feature 接管异常: {e}")
-
-            # 递归加载子模块：父模块目录下的子目录，且含 module.py（忽略 service/ 等普通目录）
+            # 递归加载子模块：父模块目录下、含 module.py 的子目录（忽略 service/ 等普通目录）
             for child_entry in sorted(module_path.iterdir()):
                 if not child_entry.is_dir() or child_entry.name.startswith(("_", ".")):
                     continue
@@ -366,9 +191,8 @@ class ModuleRegistry:
                     if await self.load_single(child_name, bot_id, bot, parent=instance):
                         instance.children[child_entry.name] = self._modules[child_name][bot_id]
 
-            #self.log.debug(f"[Module] 加载: {module_name} (bot {bot_id})")
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 —— 单个插件失败不能中断整体加载
             self.log.exception(f"[Module] {module_name} (bot {bot_id}) 加载失败: {e}")
             return False
 
