@@ -17,6 +17,8 @@ from datetime import datetime, timedelta
 from logging.handlers import BaseRotatingHandler
 from pathlib import Path
 
+from app.core import redact
+
 
 def setup_dir(folder_path: str | Path) -> None:
     Path(folder_path).mkdir(parents=True, exist_ok=True)
@@ -193,7 +195,13 @@ def _truncate_module(module: str) -> str:
 
 
 class CallerModuleFormatter(logging.Formatter):
-    """把记录名动态改为「调用者模块路径:行号」（替代固定的 [Service]），带方括号输出。"""
+    """把记录名动态改为「调用者模块路径:行号」（替代固定的 [Service]），带方括号输出。
+
+    同时是**日志脱敏的唯一出口**：内联图片的 base64 载荷在这里统一压成
+    ``[base64 4.9KB]``。挂 Formatter 而不是挂某个调用点，是因为写日志的地方太多
+    （调试 prompt、OneBot 工具调试、插件自打日志），逐个补必然漏；而且五个
+    handler 共用同一个 formatter 实例，改一处即全覆盖。
+    """
 
     def format(self, record: logging.LogRecord) -> str:
         caller = _find_caller_module()
@@ -203,7 +211,27 @@ class CallerModuleFormatter(logging.Formatter):
         else:
             # 边缘情况：找不到调用者 → 去掉原名的方括号，避免 [[Service]]
             record.name = record.name.strip("[]") or "?"
+        self._redact(record)
         return super().format(record)
+
+    @staticmethod
+    def _redact(record: logging.LogRecord) -> None:
+        """把 msg 提前渲染并脱敏，避免 base64 载荷进任何 handler。
+
+        先 ``getMessage()``（合并 args）再整体替换，这样 ``logger.info("%s", payload)``
+        这种写法也覆盖到；随后清空 args，免得 super().format 二次拼接。
+
+        这里**刻意不捕获异常**：格式化失败时让 logging 自己走既有的
+        "--- Logging error ---" 路径（与不脱敏时表现一致）。也不在此处打日志——
+        formatter 内部再写日志会递归回到 formatter。
+        """
+        message = record.getMessage()
+        if "base64" not in message:
+            return
+        redacted = redact.redact_payloads(message)
+        if redacted != message:
+            record.msg = redacted
+            record.args = None
 
 
 class UserLogFilter(logging.Filter):

@@ -341,5 +341,6 @@ def test_prompt_dump_redacts_base64_payloads():
 
     text = str(redacted)
     assert "A" * 100 not in text
-    assert "data:image/png;base64,<5000 chars>" in text
-    assert redacted[0]["content"][1]["image_url"]["url"].endswith("<5000 chars>")
+    # 占位符形状与日志出口一致（见 app/core/redact.py）
+    assert "data:image/png;base64,[base64 4.9KB]" in text
+    assert redacted[0]["content"][1]["image_url"]["url"].endswith("[base64 4.9KB]")

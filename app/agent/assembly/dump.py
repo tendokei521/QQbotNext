@@ -19,6 +19,7 @@ import time
 from typing import Any
 
 from app.agent import bot_data_dir, logger
+from app.core import redact
 
 FILE_NAME = "prompt_dump.jsonl"
 DEFAULT_MAX_ENTRIES = 20
@@ -79,12 +80,11 @@ def _write_all(path: str, entries: list[dict]) -> None:
 
 
 def _short_media_url(value: Any) -> str:
-    """把 base64 图片地址压成一行说明（保留前缀与长度，肉眼可核）。"""
+    """把 base64 图片地址压成占位符（与日志出口同一套规则，见 ``app/core/redact.py``）。"""
     text = str(value or "")
     if not text.startswith("data:"):
         return text
-    head, _, payload = text.partition(",")
-    return f"{head},<{len(payload)} chars>"
+    return str(redact.shorten_data_url(text))
 
 
 def _redact_media(value: Any) -> Any:
