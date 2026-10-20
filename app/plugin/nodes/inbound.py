@@ -23,7 +23,13 @@ from app.plugin.authority import (
     roster_lists,
 )
 from app.plugin.base import BaseModule
-from app.plugin.commands import best_match, iter_module_commands
+from app.plugin.commands import (
+    CommandArgsError,
+    best_match,
+    bind_arguments,
+    iter_module_commands,
+    usage_line,
+)
 from app.plugin.nodes.base import MessageContext, MessageNode, Next
 from app.plugin.registry import ModuleRegistry
 
@@ -311,8 +317,20 @@ class ModuleCommandNode(MessageNode):
         ctx.state["command"] = invocation
         self.log.debug(f"[Command] {invocation} → {match.module_name}")
 
+        # 按签名绑参（GreedyStr / 类型转换 / 默认值）；参数不合法就回用法提示并截断 LLM
         try:
-            await match.handler(event)
+            kwargs = bind_arguments(match.spec.params, match.args)
+        except CommandArgsError as e:
+            usage = usage_line(invocation.name, match.spec.params, prefix=invocation.prefix or "/")
+            self.log.debug(f"[Command] {match.module_name} {invocation.name} 参数不合法: {e}")
+            await self._reply(event, f"⚠️ {e}\n用法：{usage}")
+            event.llm.stop()
+            await next_()
+            return
+        invocation.params = kwargs
+
+        try:
+            await match.handler(event, **kwargs)
         except Exception as e:  # noqa: BLE001 —— 命令异常不能掀翻节点链
             self.log.exception(f"[Command] {match.module_name} 处理 {invocation.name} 异常: {e}")
             event.llm.stop()
@@ -322,6 +340,16 @@ class ModuleCommandNode(MessageNode):
         if invocation.skip_llm:
             event.llm.stop()
         await next_()
+
+    async def _reply(self, event, text: str) -> None:
+        """回一条提示；发送失败只留痕，不影响节点链。"""
+        reply = getattr(event, "reply", None)
+        if reply is None:
+            return
+        try:
+            await reply(text)
+        except Exception as e:  # noqa: BLE001
+            self.log.debug(f"[Command] 用法提示发送失败（忽略）: {e}")
 
 
 class ModuleInvokeNode(MessageNode):

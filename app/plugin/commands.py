@@ -57,9 +57,11 @@ class Module(BaseModule):
 
 from __future__ import annotations
 
+import inspect
 import re
-from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+import typing
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass, field
 from typing import Any
 
 #: 默认唤醒前缀：``/log``、``／log``（中文输入法下的全角斜杠）都算
@@ -67,8 +69,41 @@ DEFAULT_PREFIXES: tuple[str, ...] = ("/", "／")
 
 _WS_RE = re.compile(r"\s+")
 
+_TRUE_WORDS = frozenset({"true", "yes", "y", "on", "1", "真", "是"})
+_FALSE_WORDS = frozenset({"false", "no", "n", "off", "0", "假", "否"})
+
 
 # ==================== 声明 ====================
+
+
+class GreedyStr(str):
+    """参数标记：把命令名之后的**全部剩余文本**合成一个字符串。
+
+    必须声明在最后一个参数（对齐 AstrBot 的 ``GreedyStr``）：:
+
+        @command("echo")
+        async def echo(self, event, text: GreedyStr):
+            ...                      # "/echo 你 好 呀" → text == "你 好 呀"
+    """
+
+
+class CommandArgsError(ValueError):
+    """命令参数与处理器签名不匹配（参数不足 / 类型不对 / 声明写错）。
+
+    命令节点捕获它后回一条「用法」提示，并照常截断 LLM——命令没执行成功时，
+    不该让模型接着对着错误文本瞎编。
+    """
+
+
+@dataclass(frozen=True)
+class ParamSpec:
+    """处理器签名里的一个命令参数（``event`` 之后的那些）。"""
+
+    name: str
+    annotation: Any = None
+    default: Any = None
+    has_default: bool = False
+    greedy: bool = False
 
 
 @dataclass(frozen=True)
@@ -83,6 +118,8 @@ class CommandSpec:
     skip_llm: bool = True
     order: int = 100
     prefixes: tuple[str, ...] = DEFAULT_PREFIXES
+    #: 处理器签名里的参数（加载期解析，见 :func:`parse_signature`）
+    params: tuple[ParamSpec, ...] = ()
 
     @property
     def full_names(self) -> tuple[str, ...]:
@@ -101,6 +138,8 @@ class CommandInvocation:
     prefix: str
     module: str
     skip_llm: bool
+    #: 按签名绑定后的实参（在调用处理器之前填好，供观察者读）
+    params: dict = field(default_factory=dict)
 
     def __str__(self) -> str:  # 便于日志
         return f"{self.prefix}{self.name}" + (f" {' '.join(self.args)}" if self.args else "")
@@ -369,6 +408,156 @@ def best_match(
         if best is None or matched.score < best.score:
             best = matched
     return best
+
+
+# ==================== 签名绑参 ====================
+
+
+def _is_greedy(annotation: Any) -> bool:
+    if annotation is GreedyStr:
+        return True
+    return any(arg is GreedyStr for arg in typing.get_args(annotation) or ())
+
+
+def parse_signature(handler: Callable) -> tuple[ParamSpec, ...]:
+    """解析处理器签名里 ``event`` 之后的参数（加载期调用一次，结果存进 CommandSpec）。
+
+    与 AstrBot 一致：跳过 ``self``（绑定方法已自动去掉）与 ``event``，
+    其余位置/关键字参数就是命令参数。字符串注解（``from __future__ import
+    annotations``）会尝试求值，求不出来就当作「无注解」处理。
+    """
+    try:
+        try:
+            sig = inspect.signature(handler, eval_str=True)
+        except Exception:  # noqa: BLE001 - 注解求值失败不影响绑参，退回原样签名
+            sig = inspect.signature(handler)
+    except (TypeError, ValueError):
+        return ()
+
+    params = [
+        p for p in sig.parameters.values()
+        if p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    ]
+    for idx, param in enumerate(params):
+        if param.name == "event":
+            params = params[idx + 1 :]
+            break
+    else:
+        params = params[1:] if params else []
+
+    specs: list[ParamSpec] = []
+    for param in params:
+        has_default = param.default is not inspect.Parameter.empty
+        specs.append(
+            ParamSpec(
+                name=param.name,
+                annotation=None if param.annotation is inspect.Parameter.empty else param.annotation,
+                default=param.default if has_default else None,
+                has_default=has_default,
+                greedy=_is_greedy(param.annotation),
+            )
+        )
+    return tuple(specs)
+
+
+def _unwrap_optional(annotation: Any) -> tuple[Any, ...]:
+    """``T | None`` / ``Optional[T]`` 去掉 NoneType，返回候选类型元组。"""
+    args = tuple(a for a in typing.get_args(annotation) or () if a is not type(None))
+    return args or (annotation,)
+
+
+def _type_candidates(spec: ParamSpec) -> tuple[Any, ...]:
+    """该参数允许的目标类型（按优先级）。
+
+    口径（对齐 AstrBot）：默认值比注解更能表达"我要什么"——
+    有非 None 默认值时按默认值的类型转换；默认值是 None 或没有默认值时看注解。
+    """
+    if spec.has_default and spec.default is not None:
+        return (type(spec.default),)
+    if spec.annotation is None:
+        return ()
+    return _unwrap_optional(spec.annotation)
+
+
+def _convert(value: str, spec: ParamSpec) -> Any:
+    """把一段文本按参数类型转换；转不动就抛 :class:`CommandArgsError`。"""
+    candidates = _type_candidates(spec)
+    if not candidates:
+        # 无注解无默认值：数字就转 int，其余原样（AstrBot 的兜底口径）
+        return int(value) if value.isdigit() else value
+
+    errors: list[str] = []
+    for target in candidates:
+        try:
+            if target is str:
+                return value
+            if target is int:
+                return int(value)
+            if target is float:
+                return float(value)
+            if target is bool:
+                lowered = value.strip().lower()
+                if lowered in _TRUE_WORDS:
+                    return True
+                if lowered in _FALSE_WORDS:
+                    return False
+                raise ValueError("不是布尔值")
+            return target(value)  # 自定义类型 / Enum：交给它自己的构造器
+        except (TypeError, ValueError) as e:
+            errors.append(str(e))
+    raise CommandArgsError(f"{spec.name} 的类型不对（收到 {value!r}）")
+
+
+def bind_arguments(
+    params: Sequence[ParamSpec],
+    args: Sequence[str],
+) -> dict[str, Any]:
+    """把命令参数列表按签名绑成 kwargs；不满足签名时抛 :class:`CommandArgsError`。
+
+    - ``GreedyStr`` 参数吞掉全部剩余文本，且必须是最后一个；
+    - 参数不够且有默认值 → 用默认值；没有默认值 → 参数不足；
+    - 多余的参数忽略（和 AstrBot 一致，避免一个手滑就报错）。
+    """
+    values: dict[str, Any] = {}
+    tokens = list(args)
+    for index, spec in enumerate(params):
+        if spec.greedy:
+            if index != len(params) - 1:
+                raise CommandArgsError(f"{spec.name}（GreedyStr）必须是最后一个参数")
+            values[spec.name] = " ".join(tokens[index:])
+            break
+        if index >= len(tokens):
+            if not spec.has_default:
+                raise CommandArgsError(f"参数不足：缺少 {spec.name}")
+            values[spec.name] = spec.default
+            continue
+        values[spec.name] = _convert(tokens[index], spec)
+    return values
+
+
+def _type_label(spec: ParamSpec) -> str:
+    if spec.greedy:
+        return "文本…"
+    candidates = _type_candidates(spec)
+    if not candidates:
+        return "文本/数字"
+    target = candidates[0]
+    return {
+        str: "文本",
+        int: "整数",
+        float: "小数",
+        bool: "true/false",
+    }.get(target, getattr(target, "__name__", "值"))
+
+
+def usage_line(name: str, params: Sequence[ParamSpec], *, prefix: str = "/") -> str:
+    """渲染命令用法（参数错误时回给用户，也方便写帮助）。"""
+    parts: list[str] = []
+    for spec in params:
+        label = f"{spec.name}: {_type_label(spec)}"
+        parts.append(f"[{label} = {spec.default!r}]" if spec.has_default else f"<{label}>")
+    tail = " ".join(parts)
+    return f"{prefix}{name}" + (f" {tail}" if tail else "")
 
 
 # ==================== 帮助渲染 ====================

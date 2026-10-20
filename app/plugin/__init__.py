@@ -24,16 +24,22 @@ from app.plugin.base import (
 )
 from app.plugin.commands import (
     DEFAULT_PREFIXES,
+    CommandArgsError,
     CommandInvocation,
     CommandMatch,
     CommandSpec,
+    GreedyStr,
+    ParamSpec,
     best_match,
+    bind_arguments,
     command,
     command_group,
     iter_module_commands,
     match_spec,
+    parse_signature,
     render_group_help,
     strip_prefix,
+    usage_line,
 )
 from app.plugin.dispatcher import ModuleDispatcher
 from app.plugin.features import (
@@ -108,9 +114,15 @@ __all__ = [
     "CommandSpec",
     "CommandMatch",
     "CommandInvocation",
+    "CommandArgsError",
+    "ParamSpec",
+    "GreedyStr",
     "DEFAULT_PREFIXES",
     "best_match",
     "match_spec",
+    "bind_arguments",
+    "parse_signature",
+    "usage_line",
     "iter_module_commands",
     "strip_prefix",
     "render_group_help",

@@ -7,6 +7,7 @@ from app.plugin import loader
 from app.plugin.base import BaseModule, ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
 from app.plugin.commands import (
     DEFAULT_PREFIXES,
+    GreedyStr,
     best_match,
     command,
     command_group,
@@ -97,7 +98,22 @@ def make_module(bot_id=123, permission="member", calls=None, subs=("message_grou
     return instance, calls
 
 
-def event(text, *, user_id=100, role="member", self_id=123):
+class RecordingBot:
+    """记录发出的消息（命令节点回"用法提示"时用到）。"""
+
+    def __init__(self):
+        self.sent: list = []
+
+    async def send_group_msg(self, group_id, message, **kw):
+        self.sent.append(message)
+        return {"status": "ok", "data": {"message_id": 1}}
+
+    async def send_private_msg(self, user_id, message, **kw):
+        self.sent.append(message)
+        return {"status": "ok", "data": {"message_id": 1}}
+
+
+def event(text, *, user_id=100, role="member", self_id=123, bot=None):
     return GroupMessageEvent(
         event_type="message_group",
         message_type="group",
@@ -107,6 +123,7 @@ def event(text, *, user_id=100, role="member", self_id=123):
         bot_index=0,
         message_id=1,
         time=0,
+        bot=bot,
         user=SimpleNamespace(user_id=user_id, role=role),
         group=SimpleNamespace(group_id=1),
         message=[MessageSegment.text(text)],
@@ -309,3 +326,156 @@ async def test_module_hook_observer_still_runs_after_command():
     await dispatch([instance]).dispatch(event("/ping"))
 
     assert seen == ["command", "module_hook"]
+
+
+# ==================== 签名绑参 ====================
+
+
+def bind_module():
+    """声明一组带类型注解的命令，返回 (实例, 调用记录)。"""
+    calls = []
+
+    class M(BaseModule):
+        name = "bind"
+        sign = "Bind"
+        description = ""
+        subscribe = ("message_group",)
+
+        @command("count")
+        async def count(self, event, n: int):
+            calls.append(("count", n))
+
+        @command("scale")
+        async def scale(self, event, n: float, times: int = 2):
+            calls.append(("scale", n, times))
+
+        @command("toggle")
+        async def toggle(self, event, on: bool):
+            calls.append(("toggle", on))
+
+        @command("say")
+        async def say(self, event, text: GreedyStr):
+            calls.append(("say", text))
+
+        @command("note")
+        async def note(self, event, text: str, tag: str = "默认"):
+            calls.append(("note", text, tag))
+
+        @command("maybedigit")
+        async def maybedigit(self, event, value: int | str | None = None):
+            calls.append(("maybedigit", value))
+
+        @command("broken")
+        async def broken(self, event, text: GreedyStr, extra: str):
+            calls.append(("broken", text, extra))
+
+    s = _Svc()
+    ctx = ModuleContext(
+        module_name="bind",
+        bot_id=123,
+        config=ModuleConfig("bind", 123, {}, s),
+        authority=ModuleAuthority("bind", 123, s),
+        services=ServiceAccess(),
+    )
+    instance = M(ctx)
+    loader.bind_commands(instance, M)
+    return instance, calls
+
+
+def test_parse_signature_skips_event_and_marks_greedy():
+    instance, _calls = bind_module()
+    specs = {spec.name: spec for spec, _h in instance._commands}
+
+    assert [p.name for p in specs["count"].params] == ["n"]
+    assert specs["count"].params[0].annotation is int
+    assert specs["note"].params[1].has_default is True
+    assert specs["note"].params[1].default == "默认"
+    assert specs["say"].params[0].greedy is True
+
+
+async def test_signature_binds_int_float_default_and_bool():
+    module, calls = bind_module()
+
+    await dispatch([module]).dispatch(event("/count 42"))
+    await dispatch([module]).dispatch(event("/scale 1.5"))
+    await dispatch([module]).dispatch(event("/scale 1.5 3"))
+    await dispatch([module]).dispatch(event("/toggle yes"))
+    await dispatch([module]).dispatch(event("/toggle 假"))
+
+    assert calls == [
+        ("count", 42),
+        ("scale", 1.5, 2),
+        ("scale", 1.5, 3),
+        ("toggle", True),
+        ("toggle", False),
+    ]
+
+
+async def test_signature_binds_greedy_str_and_named_defaults():
+    module, calls = bind_module()
+
+    await dispatch([module]).dispatch(event("/say  你 好   呀 "))
+    await dispatch([module]).dispatch(event("/note 只有第一个"))
+
+    assert calls == [("say", "你 好 呀"), ("note", "只有第一个", "默认")]
+
+
+async def test_signature_optional_none_default_keeps_digit_as_int():
+    module, calls = bind_module()
+
+    await dispatch([module]).dispatch(event("/maybedigit 123"))
+    await dispatch([module]).dispatch(event("/maybedigit abc"))
+
+    assert calls == [("maybedigit", 123), ("maybedigit", "abc")]
+
+
+async def test_signature_type_error_replies_usage_and_stops_llm():
+    module, calls = bind_module()
+    bot = RecordingBot()
+    ev = event("/count abc", bot=bot)
+
+    await dispatch([module]).dispatch(ev)
+
+    assert calls == []
+    assert ev._llm_stop is True
+    assert "用法：/count <n: 整数>" in str(bot.sent[-1])
+
+
+async def test_signature_missing_required_arg_replies_usage():
+    module, calls = bind_module()
+    bot = RecordingBot()
+    ev = event("/scale 1.5 2 3", bot=bot)  # 多余参数被忽略，不算错
+
+    await dispatch([module]).dispatch(ev)
+    assert calls == [("scale", 1.5, 2)]
+
+    calls.clear()
+    bot2 = RecordingBot()
+    ev2 = event("/scale", bot=bot2)
+    await dispatch([module]).dispatch(ev2)
+
+    assert calls == []
+    assert ev2._llm_stop is True
+    assert "参数不足" in str(bot2.sent[-1])
+    assert "[times: 整数 = 2]" in str(bot2.sent[-1])
+
+
+async def test_signature_greedy_must_be_last():
+    module, calls = bind_module()
+    bot = RecordingBot()
+    ev = event("/broken 一段话 尾巴", bot=bot)
+
+    await dispatch([module]).dispatch(ev)
+
+    assert calls == []
+    assert ev._llm_stop is True
+    assert "必须是最后一个参数" in str(bot.sent[-1])
+
+
+async def test_signature_bound_params_visible_on_invocation():
+    module, _calls = bind_module()
+    ev = event("/count 7")
+
+    await dispatch([module]).dispatch(ev)
+
+    assert ev.command.params == {"n": 7}

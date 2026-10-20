@@ -208,7 +208,7 @@ class Module(BaseModule):
 | `aliases` | 别名（同样受前缀约束；组里会自动带上组名） |
 | `description` | 说明，供帮助清单渲染 |
 | `group` | 所属命令组（一般由 `@xxx.command` 自动填） |
-| `skip_llm` | **隐藏参数**，默认 `True`；见 2.7.3 |
+| `skip_llm` | **隐藏参数**，默认 `True`；见 2.7.4 |
 | `order` | 同分命中时的优先级（越小越先） |
 | `prefixes` | 唤醒前缀，默认 `("/", "／")`；传 `("", "/")` 可允许裸词 |
 
@@ -222,15 +222,47 @@ class Module(BaseModule):
 - 同一条消息命中多条时只跑**最具体**的一条：先比命令词数（`memory list` 胜过 `memory`），
   再比字符长度，然后比 `order`、模块名。
 
-### 2.7.3 隐藏参数 `skip_llm`：命中即截断 LLM
+### 2.7.3 命令参数：按签名自动绑定
+
+处理器 `event` 之后的参数就是命令参数，框架**按签名自动转换**（对齐 AstrBot 的
+`validate_and_convert_params`，加载期解析一次签名，运行期只做转换）：
+
+```python
+@command("ban")
+async def ban(self, event, qq: int, minutes: int = 10, reason: GreedyStr = ""):
+    ...                      # "/ban 12345 30 刷屏 广告" → qq=12345, minutes=30, reason="刷屏 广告"
+```
+
+| 写法 | 行为 |
+|---|---|
+| `n: int` / `x: float` | 转数字，转不动 → 类型错误提示 |
+| `on: bool` | `true/yes/y/on/1/真/是` → True，`false/no/n/off/0/假/否` → False |
+| `text: str` | 原样（单段） |
+| `text: GreedyStr` | **吞掉全部剩余文本**（含空格），必须声明在最后一个参数 |
+| `n: int = 10` | 没给就用默认值；默认值的类型优先于注解决定转换目标 |
+| `v: int \| str \| None = None` | 默认值/注解为 None 时按 AstrBot 口径：纯数字转 `int`，否则原样字符串 |
+| 无注解 | 纯数字转 `int`，否则原样字符串 |
+| 多余参数 | 忽略（不报错） |
+
+参数不合法（缺必填 / 类型不对 / `GreedyStr` 不在最后）时，框架会**回一条用法提示**并照常
+截断 LLM，不会再让模型对着错误文本瞎编：
+
+```
+⚠️ 参数不足：缺少 n
+用法：/scale <n: 小数> [times: 整数 = 2]
+```
+
+绑定后的实参同时写在 `event.command.params`（`{"n": 7}`），观察者/日志可直接读。
+
+### 2.7.4 隐藏参数 `skip_llm`：命中即截断 LLM
 
 `skip_llm` 默认 `True`：命令命中后框架替你 `event.llm.stop()`，本轮**不进 LLM**
 （不写就等于自动截断，不会再出现"命令回完模型又搭一句"）。
 
 确实想让模型接着说的场景，显式写 `skip_llm=False`；子命令缺省继承组上的设定。
-处理器抛异常时**同样截断** LLM（避免模型对着报错文本瞎编），并记 `exception` 日志。
+处理器抛异常、或参数不合法时**同样截断** LLM，并记日志。
 
-### 2.7.4 分发时机
+### 2.7.5 分发时机
 
 入站节点链：`router(100) → permission(110) → command(115) → invoke(120) → agent(130)`。
 
@@ -238,8 +270,8 @@ class Module(BaseModule):
 - 在**模块通用钩子之前**：命令先落定，`@module_hook` 观察者（如 group_log）仍照常收到事件；
 - 在 **LLM 之前**：所以命令能直接截断 LLM；
 - 命令模块**不需要**写 `subscribe`：只声明命令时框架自动补 `message_group` / `message_private`；
-- 解析结果挂在 `event.command` 上（`name` / `args` / `text` / `prefix` / `module` / `skip_llm`），
-  后续模块与处理器都可读。
+- 解析结果挂在 `event.command` 上（`name` / `args` / `text` / `prefix` / `module` /
+  `skip_llm` / `params`），后续模块与处理器都可读。
 
 > 与 `#llm` 指令的关系：`#llm xxx` 是 Agent 层的内置指令表（`app/agent/commands.py`），
 > 在 LLM 流水线**内部**分流；本节的命令是模块层、在 LLM **之前**分发。两者互不影响。

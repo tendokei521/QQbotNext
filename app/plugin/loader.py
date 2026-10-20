@@ -25,11 +25,13 @@ from __future__ import annotations
 
 import importlib
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from app.domain.bot import IBot
 from app.plugin.base import BaseModule, ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
+from app.plugin.commands import parse_signature
 
 #: (类上的收集方法, services 上的注册表字段, 分派键或 None, 日志用名称)
 #: 分派键为 None 表示该注册表的 `register()` 不接受额外维度。
@@ -121,7 +123,8 @@ def bind_commands(instance: BaseModule, cls: type, log=None) -> list[tuple[Any, 
         handler = getattr(instance, method, None)
         if handler is None or not callable(handler):
             continue
-        entries.append((spec, handler))
+        # 签名解析放在加载期：运行期只做类型转换，不重复走 inspect
+        entries.append((replace(spec, params=parse_signature(handler)), handler))
     instance._commands = entries
     if entries:
         _derive_subscribe_for_commands(instance, cls)
