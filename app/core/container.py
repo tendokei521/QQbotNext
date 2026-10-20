@@ -1,13 +1,29 @@
 """轻量依赖注入容器。
 
 不做运行时魔法：显式注册「工厂」或「单例实例」，显式解析。装配集中在
-app/bootstrap.py，循环依赖在装配期即被暴露。
+`app/bootstrap.py`，循环依赖在装配期即被暴露。
+
+## 本模块的边界（重要）
+
+**不得** import `app.bootstrap` 或任何上层模块。依赖方向永远是「上层依赖 core」，
+core 不认识任何业务。历史上这里曾有 `service(type_)` 桥接函数，内部
+`from app.bootstrap import get_container`，带来两个后果：
+
+1. 它让「服务定位器」成了合法写法，全库出现 71 处 `get_container()` 直调
+   （65 处在 `app/webui/api/*`），把 WebUI 焊死在 Agent 内部实现上；
+2. 它在 import 图上制造了 `core/container → bootstrap` 的反向边，
+   把 DI 容器本身拖进了 24 文件 / 12,112 行的强连通块。
+
+该函数与另外两个从未被引用的辅助函数（`as_factory` / `provide`）已删除。
+依赖请走**构造函数注入**或 FastAPI `Depends`（`app/webui/api/deps.py`）。
+见 `STYLE.md §8` 与 `STYLE.md §12.2`。
 """
 
 from __future__ import annotations
 
 import inspect
-from typing import Any, Callable, TypeVar, cast
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 T = TypeVar("T")
 
@@ -74,24 +90,3 @@ class Container:
                 resolved[name] = self.get(annotation)
         resolved.update(kwargs)
         return fn(*args, **resolved)
-
-
-def as_factory(type_: type, deps: list[type]) -> Callable[[], Any]:
-    """构造一个由容器注入依赖的工厂。"""
-
-    def factory() -> Any:
-        instance = type_.__new__(type_)
-        return instance
-
-    return factory
-
-
-def provide(container: Container, type_: type) -> Any:
-    return container.get(type_)
-
-
-def service(type_: type) -> Any:
-    """供 bootstrap 之外访问容器单例的桥接函数（仅限已解析注册的类型）。"""
-    from app.bootstrap import get_container
-
-    return cast(type_, get_container().get(type_))
