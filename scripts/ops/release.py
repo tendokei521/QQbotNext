@@ -25,7 +25,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 PYPROJECT = ROOT / "pyproject.toml"
 DASHBOARD_DIR = ROOT / "app" / "webui" / "dashboard"
 DASHBOARD_PKG = DASHBOARD_DIR / "package.json"

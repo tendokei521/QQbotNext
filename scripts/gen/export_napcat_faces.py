@@ -1,4 +1,4 @@
-"""从本机 NapCat 包导出 QQ 系统表情表 → ``app/llm/qq_faces.py``。
+"""从本机 NapCat 包导出 QQ 系统表情表 → ``app/agent/persona/data/qq_faces.py``。
 
 ## 为什么要"导出"而不是手抄
 
@@ -16,7 +16,7 @@ QQ 客户端下发的系统表情表（``face_config.sysface``）是表情 id �
 
 ```bash
 python scripts/export_napcat_faces.py            # 自动探测本机 NapCat，打印核对摘要
-python scripts/export_napcat_faces.py --write    # 重新生成 app/llm/qq_faces.py
+python scripts/export_napcat_faces.py --write    # 重新生成 app/agent/persona/data/qq_faces.py
 python scripts/export_napcat_faces.py --check    # 与仓库内的表比对（CI/升级后核对）
 python scripts/export_napcat_faces.py --mjs <napcat.mjs 路径>
 ```
@@ -42,8 +42,8 @@ _CANDIDATE_GLOBS = (
 #: 表情表在 bundle 里的锚点
 _ANCHOR = "const sysface"
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-TARGET = REPO_ROOT / "app" / "llm" / "qq_faces.py"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+TARGET = REPO_ROOT / "app" / "agent" / "persona" / "data" / "qq_faces.py"
 
 
 def find_mjs(explicit: str | None = None) -> Path:
@@ -189,7 +189,7 @@ def _load_repo_module() -> tuple[dict[str, str], frozenset[str]]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="导出 QQ 系统表情表")
     parser.add_argument("--mjs", default=None, help="napcat.mjs 路径（缺省自动探测）")
-    parser.add_argument("--write", action="store_true", help="写入 app/llm/qq_faces.py")
+    parser.add_argument("--write", action="store_true", help="写入 app/agent/persona/data/qq_faces.py")
     parser.add_argument("--check", action="store_true", help="与仓库内的表比对")
     args = parser.parse_args(argv)
 

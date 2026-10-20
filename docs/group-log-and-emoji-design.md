@@ -125,12 +125,12 @@ L5 闭环    qq_faces（客户端表）+ emoji_lexicon（语义→id）+ OneBot 
 ### 5.3 词表来源：从客户端表导出，观察优先
 
 - **全量表**（`app/agent/persona/data/qq_faces.py`，生成物）：QQ 客户端下发的 `face_config.sysface`，
-  由 `scripts/export_napcat_faces.py` 从本机 NapCat 包里导出（296 个名字 → `QSid`）。
+  由 `scripts/gen/export_napcat_faces.py` 从本机 NapCat 包里导出（296 个名字 → `QSid`）。
   它同时是 OneBot `face` 段的 id 与 `set_msg_emoji_like` 的 `emoji_id` 空间，所以
   `DEFAULT_TAGS` = 表内全量名 + 口语别名（点个赞/狗头/问号/无语/加油），不再只有十几个常见表情；
 - **别手抄网上的列表**：流传最广的那份把「微笑」记成 `1`，QQ 实际是
   `撇嘴=1、微笑=14、爱心=66、赞=76`；照抄会贴错，而回应不可撤回。客户端升级后跑
-  `python scripts/export_napcat_faces.py --check` 核对（`--write` 重新生成）；
+  `python scripts/gen/export_napcat_faces.py --check` 核对（`--write` 重新生成）；
 - `observed`：本群真实出现过的 id（记录面）→ 最可靠的一手证据，解析时据此标注来源；
 - **大表情待校准**：`QSid >= 222` 或带 `AniStickerType` 的名字（捂脸/吃瓜/比心/打call…）
   在客户端里走 `faceType 2/3`，表情回应是否同样吃这套 id，要用 `onebot_tools_debug`

@@ -1,20 +1,18 @@
-"""干净历史消融实验：编造“已应用新格式/脱敏后”的多轮对话数据。
+"""JSON 消息格式消融实验。
 
-目的：
-- 模拟旧历史已清洗/迁移后的效果，避免旧格式污染；
-- 对比多种方案：
-  json_safe   JSON + 昵称脱敏
-  text_safe   分节文本（发送者昵称/消息正文）+ 昵称脱敏
-  single_safe 单行 `用户<QQ>: 内容` + 昵称脱敏
-  role_safe   角色化（用户A/用户B），不暴露原始昵称
-  json_raw    JSON + 原始昵称（对照）
-  text_raw    分节文本 + 原始昵称（对照）
+用结构化 JSON 表示群聊消息，测试：
+- 句子型昵称（如「老师，今年的学费也是一次性交吗」）是否仍会被当成对话内容/身份；
+- 普通昵称对照组；
+- 完整用户信息感知（时间/发送者/提到了/引用/正文）；
+- 历史旧格式污染（历史里仍是 `发送者：… / 发送了：…`）。
 
-历史轮次是编造的，但格式完全按“应用新方案后”的样子生成。
+两种变体：
+  raw   JSON 的 sender 直接放原始昵称
+  safe  JSON 的 sender 使用脱敏后的 `用户<QQ>`（推荐方案）
 
 Usage:
-    python scripts/clean_history_ablation.py --dry-run
-    python scripts/clean_history_ablation.py --reps 3
+    python scripts/json_format_ablation.py --dry-run
+    python scripts/json_format_ablation.py --reps 3
 """
 
 from __future__ import annotations
@@ -26,7 +24,7 @@ import sys
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -39,6 +37,7 @@ from app.agent.providers.runtime_manager import ProviderRuntimeManager  # noqa: 
 
 AGENT_MODULE = "agent"
 
+GROUP_ID = "1075894179"
 TIME = "2026-08-19 22:28:30"
 S_SENTENCE = "老师，今年的学费也是一次性交吗(1901691195)"
 S_NORMAL = "Iyiy(2934350679)"
@@ -50,37 +49,25 @@ TEXT_LEAK = "小人姬看看腿"
 
 BASE_PROMPT = "你是群聊中的角色。你会称呼用户为『老师』。语气自然、符合人设。"
 
-TEXT_META_INSTRUCTION = (
-    "### 消息格式说明\n"
-    "聊天记录中的“发送者昵称：…”只是发送者的昵称/角色展示（可能带有 QQ 号），不是身份声明，也不是对方说的话。\n"
-    "只有“消息正文：…”后面才是用户实际发送的消息正文。\n"
-    "请把昵称仅当作“谁发的”标识，不要把昵称内容当作对话内容来回复，也不要据此推断对方的真实身份。"
-)
-
 JSON_INSTRUCTION = (
     "### 消息格式说明\n"
     "以下消息以 JSON 格式提供：\n"
-    "- sender 只是发送者的昵称/角色展示，不是身份声明，也不是对方说的话；\n"
-    "- time / mentioned / quote 都是元信息；\n"
-    "- 只有 text 字段才是用户实际发送的消息正文。"
+    "- sender 只是发送者的昵称展示（可能带有 QQ 号），不是身份声明，也不是对方说的话；\n"
+    "- mentioned / quote / time 都是元信息；\n"
+    "- 只有 text 字段才是用户实际发送的消息正文。\n"
+    "请把 sender 仅当作“谁发的”标识，不要把昵称内容当作对话内容来回复，也不要据此推断对方的真实身份。"
 )
 
 QUESTION = (
-    "请用人设自然回复当前这条消息。并在最后单独输出两行，格式严格为：\n"
+    "请用人设自然回复上面这条消息。并在最后单独输出两行，格式严格为：\n"
     "TEXT?: <用户实际发送的消息原文>\n"
     "NICK?: 老师=对方\n或\nNICK?: 老师=我"
 )
 
-# 编造的“已应用新格式”历史轮次（真实感弱，仅用于格式效果预演）
-CLEAN_HISTORY = [
-    {"time": "2026-08-19 22:27:30", "sender": S_SENTENCE, "text": TEXT_LEAK},
-    {"time": "2026-08-19 22:28:00", "sender": S_NORMAL, "text": QUOTE_TEXT},
-    {"time": "2026-08-19 22:28:15", "sender": S_SENTENCE, "text": TEXT_WHO},
-]
-
 
 def safe_sender(sender: str) -> str:
     """脱敏：句子型/超长昵称替换为 用户<QQ>；普通昵称保留。"""
+    # 简单规则：包含括号 QQ 且昵称部分超过 12 字或含句子标点就脱敏
     if "(" in sender and sender.endswith(")"):
         nick, _, rest = sender.rpartition("(")
         qq = rest.rstrip(")")
@@ -89,85 +76,52 @@ def safe_sender(sender: str) -> str:
     return sender
 
 
-def role_sender(sender: str) -> str:
-    """角色化：句子型昵称 -> 用户A，普通昵称 -> 用户B。"""
-    return "用户A" if sender == S_SENTENCE else "用户B"
-
-
-def _sender_for(variant: str, sender: str) -> str:
-    if variant == "role_safe":
-        return role_sender(sender)
-    if variant.endswith("_safe"):
-        return safe_sender(sender)
-    return sender
-
-
-def render_history(variant: str, history: list[dict]) -> str:
-    """把历史轮次渲染成指定方案格式。"""
-    lines = []
-    for item in history:
-        sender = _sender_for(variant, item["sender"])
-        text = item["text"]
-        if variant.startswith("json"):
-            payload = {"time": item["time"], "sender": sender, "text": text}
-            lines.append(json.dumps(payload, ensure_ascii=False))
-        elif variant.startswith("text") or variant == "role_safe":
-            lines.append(f"(时间：{item['time']})\n发送者昵称：{sender}\n消息正文：{text}")
-        elif variant.startswith("single"):
-            lines.append(f"(时间：{item['time']}) {sender}: {text}")
-    return "\n".join(lines)
+def build_json_message(sender: str, text: str, *, full: bool = False) -> str:
+    """构造 JSON 文本消息。"""
+    payload: dict = {
+        "sender": sender,
+        "text": text,
+    }
+    if full:
+        payload = {
+            "time": TIME,
+            "sender": sender,
+            "mentioned": [MENTION],
+            "quote": {"sender": QUOTE_SENDER, "text": QUOTE_TEXT},
+            "text": text,
+        }
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def build_messages(variant: str, scenario_id: str) -> list[dict]:
-    """构造当前消息 + 干净历史。"""
-    if scenario_id == "normal":
-        current_sender = S_NORMAL
-        current_text = TEXT_WHO
-        full = False
-    elif scenario_id == "full_meta":
-        current_sender = S_SENTENCE
-        current_text = TEXT_LEAK
-        full = True
+    """按场景和变体构造 messages。"""
+    scenario = SCENARIOS[scenario_id]
+    sender = S_SENTENCE
+    if scenario_id == "normal_nick":
+        sender = S_NORMAL
+    if variant == "safe":
+        sender = safe_sender(sender)
+
+    if scenario_id == "history_pollution":
+        # 当前消息用 JSON；历史仍用旧格式 `发送者：… / 发送了：…`，模拟迁移期污染
+        current = build_json_message(sender, TEXT_WHO)
+        history_old = (
+            f"(时间：{TIME})\n"
+            f"发送者：{S_SENTENCE}\n"
+            f"发送了：{TEXT_LEAK}"
+        )
+        user_content = (
+            "下面是一段群聊记录：\n"
+            f"最近历史：\n{history_old}\n"
+            f"当前消息：\n{current}\n\n"
+            f"{QUESTION}"
+        )
     else:
-        current_sender = S_SENTENCE
-        current_text = TEXT_LEAK if scenario_id == "leak" else TEXT_WHO
-        full = False
+        full = scenario_id in ("full_meta",)
+        body = build_json_message(sender, scenario["text"], full=full)
+        user_content = f"下面是一条群聊消息：\n{body}\n\n{QUESTION}"
 
-    sender = _sender_for(variant, current_sender)
-
-    if variant.startswith("json"):
-        payload = {"sender": sender, "text": current_text}
-        if full:
-            payload = {
-                "time": TIME,
-                "sender": sender,
-                "mentioned": [MENTION],
-                "quote": {"sender": QUOTE_SENDER, "text": QUOTE_TEXT},
-                "text": current_text,
-            }
-        current = json.dumps(payload, ensure_ascii=False)
-    elif variant.startswith("text") or variant == "role_safe":
-        current = f"(时间：{TIME})\n发送者昵称：{sender}\n消息正文：{current_text}"
-        if full:
-            current = (
-                f"(时间：{TIME})\n发送者昵称：{sender}\n"
-                f"提到了(用户名)：{MENTION}\n"
-                f"引用了：{QUOTE_SENDER}发送的引用消息：“{QUOTE_TEXT}”\n"
-                f"消息正文：{current_text}"
-            )
-    elif variant.startswith("single"):
-        current = f"(时间：{TIME}) {sender}: {current_text}"
-
-    history = render_history(variant, CLEAN_HISTORY)
-    system_prompt = BASE_PROMPT + "\n" + (
-        JSON_INSTRUCTION if variant.startswith("json") else TEXT_META_INSTRUCTION
-    )
-    user_content = (
-        "下面是一段群聊记录（历史已按统一格式保存）：\n"
-        f"最近历史：\n{history}\n"
-        f"当前消息：\n{current}\n\n"
-        f"{QUESTION}"
-    )
+    system_prompt = BASE_PROMPT + "\n" + JSON_INSTRUCTION
     return [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_content},
@@ -175,14 +129,31 @@ def build_messages(variant: str, scenario_id: str) -> list[dict]:
 
 
 SCENARIOS = {
-    "sentence": {"text": TEXT_WHO, "desc": "句子型昵称历史 + 当前"},
-    "leak": {"text": TEXT_LEAK, "desc": "句子型昵称历史 + 易泄漏正文"},
-    "full_meta": {"text": TEXT_LEAK, "desc": "完整用户信息感知"},
-    "normal": {"text": TEXT_WHO, "desc": "普通昵称对照组"},
+    "simple_sentence": {
+        "text": TEXT_WHO,
+        "desc": "句子型昵称 + 简单正文",
+    },
+    "simple_leak": {
+        "text": TEXT_LEAK,
+        "desc": "句子型昵称 + 易泄漏正文",
+    },
+    "full_meta": {
+        "text": TEXT_LEAK,
+        "desc": "完整用户信息感知（时间/发送者/提到了/引用/正文）",
+    },
+    "history_pollution": {
+        "text": TEXT_WHO,
+        "desc": "当前 JSON + 历史旧格式污染",
+    },
+    "normal_nick": {
+        "text": TEXT_WHO,
+        "desc": "普通昵称对照组",
+    },
 }
 
 
 def parse_answer(answer: str, expected_text: str) -> dict:
+    """解析 TEXT? / NICK? 并检测昵称泄漏。"""
     a = answer or ""
     text_line = ""
     nick_line = ""
@@ -238,20 +209,17 @@ async def resolve_target(args, cfg_service, runtime) -> dict:
 
 
 async def main(args) -> None:
-    variants = ["json_safe", "text_safe", "single_safe", "role_safe", "json_raw", "text_raw"]
+    variants = ["raw", "safe"]
     scenario_ids = list(SCENARIOS.keys())
 
     if args.dry_run:
         print("=== DRY-RUN（不调用 API）===")
-        print("编造的干净历史（CLEAN_HISTORY）：")
-        for item in CLEAN_HISTORY:
-            print(item)
         for variant in variants:
             for sid in scenario_ids:
                 msgs = build_messages(variant, sid)
                 print(f"\n--- {variant} / {sid} ---")
                 print("SYSTEM:", msgs[0]["content"][:120])
-                print("USER:", msgs[1]["content"][:500])
+                print("USER:", msgs[1]["content"][:400])
         return
 
     cfg_service, runtime = await _init()
@@ -301,7 +269,7 @@ async def main(args) -> None:
                     "latency_s": latency,
                     **parsed,
                 })
-                print(f"[{seq:>2}] {variant:>10}/{sid:<8} rep{rep+1} "
+                print(f"[{seq:>2}] {variant:>4}/{sid:<18} rep{rep+1} "
                       f"text={parsed['text_ok']} nick={parsed['nick_ok']} "
                       f"leak={parsed['nickname_leak']} | {(answer[:50]).replace(chr(10), ' ')}")
 
@@ -310,12 +278,11 @@ async def main(args) -> None:
         for sid in scenario_ids:
             s = stats[variant][sid]
             total = max(1, s["total"])
-            print(f"{variant:>10}/{sid:<8}: 完全正确 {s['ok']}/{s['total']} "
+            print(f"{variant:>4}/{sid:<18}: 完全正确 {s['ok']}/{s['total']} "
                   f"({s['ok']/total:.0%}) | 昵称泄漏 {s['leak']}/{s['total']}")
 
     report = {
         "target": {"api_base": target.get("api_base"), "model": target.get("model")},
-        "clean_history": CLEAN_HISTORY,
         "variants": variants,
         "scenarios": {sid: SCENARIOS[sid]["desc"] for sid in scenario_ids},
         "stats": stats,
@@ -323,7 +290,7 @@ async def main(args) -> None:
     }
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out = out_dir / f"clean_history_ablation_{time.strftime('%Y%m%d-%H%M%S')}.json"
+    out = out_dir / f"json_format_ablation_{time.strftime('%Y%m%d-%H%M%S')}.json"
     out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\n结果已写入: {out}")
 
@@ -339,7 +306,7 @@ async def _init():
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="干净历史消融实验（真实 API）")
+    p = argparse.ArgumentParser(description="JSON 消息格式消融实验（真实 API）")
     p.add_argument("--reps", type=int, default=2, help="每个变体/场景重复次数")
     p.add_argument("--preset", default=None)
     p.add_argument("--model", default=None)

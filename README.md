@@ -64,7 +64,7 @@ linux环境下需要执行 `dos2unix requirements.sh`进行换行符清洗
 
 ```bash
 # 1. 自动创建虚拟环境并安装依赖
-scripts\requirements.bat
+scripts\ops\requirements.bat
 
 # 2. 启动
 start.bat
@@ -72,7 +72,7 @@ start.bat
 
 之后每次启动只需要运行 `start.bat`。
 
-> Linux/macOS 可运行 `scripts/requirements.sh` 后执行 `start.sh`。
+> Linux/macOS 可运行 `scripts/ops/requirements.sh` 后执行 `start.sh`。
 
 ## WebUI（管理后台）
 

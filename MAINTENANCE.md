@@ -246,7 +246,7 @@ venv\Scripts\python.exe -c "import sqlite3; c=sqlite3.connect('data/app.db'); pr
 | 连接后立即报 `token验证失败` / `WebSocket失败响应` | OneBot 端 `access_token` 不匹配；现在会视为连接失败并断开，检查 token 后重连 |
 | Bot 连上了但群列表空 | 登录信息获取失败 → 查 `logs/errors.log` 的 `获取群聊列表失败` |
 | 重连太频繁 | 已是指数退避；若仍嫌吵，把该 Bot 的 auto_connect 关掉改手动 |
-| 机器人「莫名其妙」不干活，日志里**没有任何断线记录**，发送报 `received 1000 (OK) normal; then sent 1000 (OK) normal` | 旧版 bug：服务端以 **1000 正常关闭**时 `websockets` 的 `__aiter__` 会吞掉 `ConnectionClosedOK`、接收循环静默退出 → 状态仍 `connected`，监督循环永不重连（僵死到人工重启；线上案例远端只停了 7 秒，客户端僵了 6 小时+）。现已修复：正常关闭同样走掉线收尾（日志 `WebSocket 连接结束: 服务端关闭连接 (code=1000 …)`），另有 `_sweep_zombies()` 每 10s 兜底扫描僵尸连接。排查工具：`scripts/log_timeline.py`（时间线含 `[关]` 标记）与 `scripts/diag_disconnect_pairs.py` |
+| 机器人「莫名其妙」不干活，日志里**没有任何断线记录**，发送报 `received 1000 (OK) normal; then sent 1000 (OK) normal` | 旧版 bug：服务端以 **1000 正常关闭**时 `websockets` 的 `__aiter__` 会吞掉 `ConnectionClosedOK`、接收循环静默退出 → 状态仍 `connected`，监督循环永不重连（僵死到人工重启；线上案例远端只停了 7 秒，客户端僵了 6 小时+）。现已修复：正常关闭同样走掉线收尾（日志 `WebSocket 连接结束: 服务端关闭连接 (code=1000 …)`），另有 `_sweep_zombies()` 每 10s 兜底扫描僵尸连接。排查工具：`scripts/diag/log_timeline.py`（时间线含 `[关]` 标记）与 `scripts/diag/diag_disconnect_pairs.py` |
 | 点了「断开」，过一会儿又自己连上 | 旧版会这样：auto_connect 账号断开后被监督循环当掉线连回（现已修复，手动断开在本次运行期间生效） |
 | 断开后确实不再重连，但想让它在下面自己回来 | 点「连接 / 重连」，或重新打开该账号的「自动连接」开关，或重启进程 |
 

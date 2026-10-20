@@ -26,7 +26,7 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 #: 历史上被烘进去的默认值。只用于**标记**，不用自动清除。
 LEGACY_BAKED_DEFAULT = 1024

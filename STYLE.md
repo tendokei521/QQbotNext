@@ -319,7 +319,7 @@ FastAPI 依赖（`request.app.state.container`，见 `deps.py`）——不再是
 |---|---|---|
 | `app/agent/tools/onebot/manifest.py` | 4,789 行纯 `ONEBOT_TOOLS` 字面量 | **已外置 `manifest.json`**，加载器约 100 行；175 条由 `tests/test_onebot_manifest_data.py` 逐条校验 |
 | `app/agent/config_schema.py` | 1,072 行 | **保留不拆**：它是「数据 + `_gate`/`_on` DSL」，JSON 化会把条件可见性的可读意图摊成重复字面量 |
-| `app/agent/persona/data/qq_faces.py` | 127 行 | **保留不拆**：生成物，`scripts/export_napcat_faces.py --check` 依赖 Python 渲染 |
+| `app/agent/persona/data/qq_faces.py` | 127 行 | **保留不拆**：生成物，`scripts/gen/export_napcat_faces.py --check` 依赖 Python 渲染 |
 
 ### 12.6 领域层仍然空心
 

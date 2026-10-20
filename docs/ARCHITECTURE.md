@@ -182,7 +182,7 @@ docs/                设计文档 + 本方案（见 §4）
 | `llm/skills.py` | 141 | `agent/persona/skills.py` | 移动 | |
 | `llm/tags.py` | 70 | `agent/persona/tags.py` | 移动 | |
 | `llm/emoji_lexicon.py` | 207 | `agent/persona/emoji.py` | 移动 | 词表数据可外置 json |
-| `llm/qq_faces.py` | 127 | `agent/persona/data/qq_faces.py` | 移动 | **生成物**（`scripts/export_napcat_faces.py` 产出），加 `# generated` 头 |
+| `llm/qq_faces.py` | 127 | `agent/persona/data/qq_faces.py` | 移动 | **生成物**（`scripts/gen/export_napcat_faces.py` 产出），加 `# generated` 头 |
 | `llm/group_context.py` | 684 | `agent/context/group.py` | 移动 | |
 | `llm/referent.py` | 314 | `agent/context/referent.py` | 移动 | |
 | `llm/focus.py` | 248 | `agent/context/focus.py` | 移动 | |
@@ -256,7 +256,7 @@ docs/                设计文档 + 本方案（见 §4）
 |---|---|---|---|
 | `llm/onebot_tools/manifest.py` | 4,792 | `agent/tools/onebot/manifest.json` | `schemas/onebot_manifest.schema.json`（pydantic）+ `scripts/gen_onebot_manifest.py` 反向生成 |
 | `llm/config_schema.py` | 1,072 | `agent/config/schema.json` | `schemas/agent_config.schema.json` |
-| `llm/qq_faces.py` | 127 | `agent/persona/data/qq_faces.json` | `scripts/export_napcat_faces.py` 已能生成，改输出 json |
+| `llm/qq_faces.py` | 127 | `agent/persona/data/qq_faces.json` | `scripts/gen/export_napcat_faces.py` 已能生成，改输出 json |
 
 > 收益：改一条工具描述从"在 4,792 行 diff 里找"变成"改 json 一行"，
 > 而且**校验能在 CI 里跑**（现在纯字面量，字段漏了只有运行时才发现）。
@@ -445,7 +445,7 @@ docs/                设计文档 + 本方案（见 §4）
 | `time_sign_in` | ✅ `service/` 子包 |
 | `what_to_eat` | ✅ 97 行 module.py，可接受 |
 
-**仍受影响/待做**：`scripts/release.py` 的打包清单、`pyproject.toml` 的 `packages.find`
+**仍受影响/待做**：`scripts/ops/release.py` 的打包清单、`pyproject.toml` 的 `packages.find`
 需要覆盖 `app.plugins`；`group_log` 建议拆 `service.py`。
 
 ### 3.9 `tests/` 142 文件 → 按源码镜像分区
@@ -480,7 +480,7 @@ docs/                设计文档 + 本方案（见 §4）
 
 | 现文件 | 目标 | 动作 |
 |---|---|---|
-| `release.py` | `scripts/release.py` | 保留 |
+| `release.py` | `scripts/ops/release.py` | 保留 |
 | `requirements.bat` `requirements.sh` `venv.bat` `venv.sh` | `scripts/` | 保留 |
 | `export_napcat_faces.py` | `scripts/gen/` | 移动（**代码生成器**，与消融实验不同类） |
 | **新建** `scripts/gen/gen_onebot_manifest.py` | 从 `manifest.json` 生成校验器/反向生成 | 新建 |
@@ -635,7 +635,7 @@ docs/
    被 `media/store.py` 与 `session/manager.py` 使用。**保留并搬走**，未删除；
 2. `config_schema.py` 与 `qq_faces.py` **不**外置 JSON：前者是「数据 + `_gate`/
    `_on` DSL」，JSON 化会把条件可见性的可读意图摊成重复字面量；后者是生成物
-   （`scripts/export_napcat_faces.py --check` 依赖 Python 渲染），只有 127 行；
+   （`scripts/gen/export_napcat_faces.py --check` 依赖 Python 渲染），只有 127 行；
 3. `app/llm` 不留重导出 shim：一个概念只能有一个名字，shim 会让两套入口并存
    并重新制造环。全库引用一次改完，`test_old_llm_package_is_gone` 守门。
 

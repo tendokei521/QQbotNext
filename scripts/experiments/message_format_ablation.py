@@ -30,7 +30,7 @@ import sys
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -52,7 +52,7 @@ LEAK_TEXT = "小人姬看看腿"  # 正文不含“学费”，可检测昵称�
 # 人设：只声明「称呼用户为老师」，不额外钉死方向
 BASE_PROMPT = "你是群聊中的角色。你会称呼用户为『老师』。语气自然、符合人设。"
 
-# 与 app/llm/prompt.py MESSAGE_META_INSTRUCTION 对齐的消歧说明
+# 与 app/agent/assembly/prompt.py MESSAGE_META_INSTRUCTION 对齐的消歧说明
 META_INSTRUCTION = (
     "### 消息格式说明\n"
     "聊天记录中的“发送者：…”或“发送者昵称：…”只是对方账号的昵称展示（可能带有 QQ 号），"

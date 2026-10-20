@@ -14,7 +14,7 @@
 
 ## 注意
 
-`data/qq_faces.py` 是**生成物**，由 `scripts/export_napcat_faces.py` 从本机
+`data/qq_faces.py` 是**生成物**，由 `scripts/gen/export_napcat_faces.py` 从本机
 NapCat 包导出，`--check` 做升级后比对。**不要手改**。
 
 ## 边界
