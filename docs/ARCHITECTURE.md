@@ -576,7 +576,7 @@ docs/
 | **P5** 目录归一 | `module/modules`→`app/plugins`；`app/modules`→`app/plugin`；`tests/` 分区；`scripts/` 三分；`group_log` 拆 `service.py`；`domain/` 长实 | ✅ **已完成** | 13 插件全加载；1653+ passed |
 | **P6** 前端收敛 + 目录收口 | 删 `webui/static`+`templates`+`/legacy`；`dashboard/`→`app/webui/dashboard/` | ✅ **前端部分完成** | `/` 200；`/legacy` 404 |
 | **P7** `chat.py` 拆片 | 2,192 行按职责拆到 `loop/` 子文件（`chat.py` 保留重导出，API 不变） | ⬜ **待做** | 单文件 ≤800 行；无函数 ≥80 行 |
-| **P8** WebUI 依赖注入收尾 | `webui/api/*` 剩 63 处 `get_container()` / 53 处 `container.get(类型)` 改 `Depends(get_x_service)` | 🟡 **已开闸** | `deps.py` 具名依赖已备齐，`logs.py` 已清零 |
+| **P8** WebUI 依赖注入收尾 | `webui/api/*` 的 `get_container()` / `container.get(类型)` 全改 `Depends(get_x_service)` | ✅ **已完成** | **71 → 1**（只剩 `deps.py` 的实现本身），17 条具名依赖 |
 
 ### 5.1.1 还没做的（按性价比排序）
 

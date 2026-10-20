@@ -246,11 +246,11 @@ pytest -q --cov --cov-report=term-missing   # 需要覆盖率时
 
 | 指标 | 制定方案时 | 现在 |
 |---|---|---|
-| 最大强连通块 | 24 文件 / 12,112 行（仅模块层 import；含惰性 import 实测 27 文件 / 13,547 行） | **0 个 —— 全图无环（282/282）** |
+| 最大强连通块 | 24 文件 / 12,112 行（仅模块层 import；含惰性 import 实测 27 文件 / 13,547 行） | **0 个 —— 全图无环** |
 | `chat.py` 可达闭包 | 143 文件 / 42,082 行 | **87 文件 / 23,721 行** |
 | 生产代码 `from app.bootstrap import` | 4 | **0** |
-| `get_container()` 直调 | 71 次 / 14 文件 | **39 次 / 6 文件**（全在 `webui/api/*`） |
-| 端点里 `container.get(类型)` | — | **32 次**（新增闸二指标，只许降） |
+| `get_container()` 直调 | 71 次 / 14 文件 | **1 次**（只剩 `deps.py` 里的实现本身） |
+| 端点里 `container.get(类型)` | — | **2 次**（都在 `deps.get_service` 内部） |
 | 单文件最大 `manifest.py` | 4,789 行 | **已外置 JSON**（加载器 78 行） |
 | `app/agent/` 顶层平铺 | 55 文件 / 20,916 行 | **8 文件 / 2,939 行**（14 个职责子包） |
 | 单文件最大 `chat.py` | 2,192 行 | **1,668 行**（切出 turn_metrics/assistant_output/tool_source） |
