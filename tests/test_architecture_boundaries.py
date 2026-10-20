@@ -1,0 +1,281 @@
+"""架构边界测试（对应 `docs/ARCHITECTURE.md §7 闸二` 与 `STYLE.md §12`）。
+
+这不是风格检查，而是把架构决策变成 CI 能拦的红灯。它回答一个问题：
+**「这条依赖方向是被允许的吗？」**——而不是靠人记得。
+
+## 六条规则
+
+1. `domain/` 只准依赖 `core/` 与自身（纯规则层，可单测）；
+2. `infrastructure/` 不准依赖上层（agent / plugin / application / webui）；
+3. 生产代码不准 `from app.bootstrap import ...`（服务定位器的来源）；
+4. `get_container()` 直调是**存量债**，只许降不许升；
+5. `webui/` 不准直接 import agent 内部实现（应经 `application/` 门面）；
+6. `app/llm/__init__.py` 必须保持薄壳——不准重导出 Agent 主循环。
+
+## 预算制（棘轮）
+
+规则 3、4、5 有历史欠账，无法一次清零，所以用 `_BUDGET` 里的数字做棘轮：
+**修好一处就把预算调小一处**；调大必须在提交说明里写清理由。
+
+预算只统计"真实代码"，用 AST 解析——注释与文档字符串里提到 `get_container()`
+不算（否则本文件自己也会违规）。
+
+## 相关
+
+- 闭包与环的度量脚本：`scripts/gen/arch_closure.py --assert-max 8000`
+- 现状描述：`STYLE.md §12`；目标结构：`docs/ARCHITECTURE.md §2.2`
+"""
+
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+AGENT_PREFIXES = ("app.llm", "app.agent")  # P2 重命名前后都算 agent 层
+
+# 存量债预算：只许降，不许升。修好一处就把对应数字改小。
+_BUDGET = {
+    # app/modules/api.py 里 4 处函数级 `from app.bootstrap import get_container`
+    "bootstrap_imports": 4,
+    # webui/api 64 处 + app/modules/api.py 4 处
+    "get_container_calls": 68,
+    # app/webui/api/{agent,media,modules,prompt_dump}.py 直接 import app.llm.*
+    # 基数 13（含函数级）；P3 拆环后应降到 0
+    "webui_to_agent_imports": 13,
+}
+
+# `app/llm/__init__.py` 允许在模块层 import 的东西（全部廉价、无重依赖）
+_ALLOWED_LLM_PKG_IMPORTS = {
+    "app.core.logger",
+    "app.infrastructure.fs.paths",
+    "app.llm.context",
+    "app.llm.hooks",
+    "app.llm.skills",
+    "app.llm.tool",
+}
+
+
+# --------------------------------------------------------------------------- #
+# 扫描工具
+# --------------------------------------------------------------------------- #
+def _iter_py(*subdirs: str):
+    """遍历仓库内指定子目录下的所有 .py（跳过 __pycache__）。"""
+    for sub in subdirs:
+        base = REPO_ROOT / sub
+        if not base.exists():
+            continue
+        for path in sorted(base.rglob("*.py")):
+            if "__pycache__" in path.parts:
+                continue
+            yield path
+
+
+def _parse(path: Path) -> ast.Module | None:
+    try:
+        return ast.parse(path.read_text(encoding="utf-8"))
+    except (SyntaxError, OSError):  # pragma: no cover - 语法错误由别的测试负责
+        return None
+
+
+def _import_targets(path: Path, *, module_level_only: bool) -> list[str]:
+    """返回绝对 import 的模块名列表（相对 import 不跨层，忽略）。"""
+    tree = _parse(path)
+    if tree is None:
+        return []
+    targets: list[str] = []
+    stack: list[ast.AST] = [tree]
+    while stack:
+        node = stack.pop()
+        if module_level_only and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        stack.extend(ast.iter_child_nodes(node))
+        if isinstance(node, ast.ImportFrom):
+            if not node.level and node.module:
+                targets.append(node.module)
+        elif isinstance(node, ast.Import):
+            targets.extend(alias.name for alias in node.names)
+    return targets
+
+
+def _count_get_container_calls(path: Path) -> int:
+    """只数真实的 `get_container(...)` 调用，不算注释/文档字符串。"""
+    tree = _parse(path)
+    if tree is None:
+        return 0
+    total = 0
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        if isinstance(fn, ast.Name) and fn.id == "get_container":
+            total += 1
+        elif isinstance(fn, ast.Attribute) and fn.attr == "get_container":
+            total += 1
+    return total
+
+
+def _rel(path: Path) -> str:
+    return path.relative_to(REPO_ROOT).as_posix()
+
+
+def _report(hits: list[tuple[str, str]], budget_key: str, hint: str) -> None:
+    """命中数必须 ≤ 预算；打印可操作的失败信息。"""
+    budget = _BUDGET[budget_key]
+    if len(hits) <= budget:
+        return
+    detail = "\n".join(f"    {where}  ->  {what}" for where, what in sorted(hits)[:40])
+    pytest.fail(
+        f"边界违规 {len(hits)} 处，超过预算 {budget}（{budget_key}）。\n"
+        f"{detail}\n"
+        f"处理方式：{hint}\n"
+        f"若确实无法避免，请在提交说明里写明理由并上调 _BUDGET['{budget_key}']。"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# 规则 1：domain 纯规则层
+# --------------------------------------------------------------------------- #
+def test_domain_depends_only_on_core_and_itself():
+    """`domain/` 只能 import `app.core.*` 与 `app.domain.*`——否则它就不是纯规则层了。"""
+    offenders: list[tuple[str, str]] = []
+    for path in _iter_py("app/domain"):
+        for target in _import_targets(path, module_level_only=False):
+            if not target.startswith("app."):
+                continue
+            if target == "app.domain" or target.startswith("app.domain."):
+                continue
+            if target == "app.core" or target.startswith("app.core."):
+                continue
+            offenders.append((_rel(path), target))
+    if offenders:
+        detail = "\n".join(f"    {f}  ->  {m}" for f, m in sorted(offenders))
+        pytest.fail(
+            "domain/ 出现了越界依赖（domain 必须无 IO、无网络、无 DB，可纯单测）：\n"
+            f"{detail}\n"
+            "处理方式：把越界的部分留在 agent/ 或 infrastructure/，只把纯规则搬进 domain/。"
+        )
+
+
+# --------------------------------------------------------------------------- #
+# 规则 2：infrastructure 不依赖上层
+# --------------------------------------------------------------------------- #
+def test_infrastructure_does_not_import_upper_layers():
+    """`infrastructure/` 是最底层，只准 import core / domain / 自身。"""
+    upper = ("app.agent", "app.plugin", "app.application", "app.webui", "app.services", "app.modules")
+    offenders: list[tuple[str, str]] = []
+    for path in _iter_py("app/infrastructure"):
+        for target in _import_targets(path, module_level_only=False):
+            if target.startswith(AGENT_PREFIXES) or target.startswith(upper):
+                offenders.append((_rel(path), target))
+    if offenders:
+        detail = "\n".join(f"    {f}  ->  {m}" for f, m in sorted(offenders))
+        pytest.fail(
+            "infrastructure/ 反向依赖了上层：\n"
+            f"{detail}\n"
+            "处理方式：把需要的抽象（ABC / 数据结构）放到 domain/，由上层实现并注册进来。"
+        )
+
+
+# --------------------------------------------------------------------------- #
+# 规则 3：生产代码不准 from app.bootstrap import
+# --------------------------------------------------------------------------- #
+def test_no_production_imports_from_bootstrap():
+    """`app.bootstrap` 是装配根，谁都不准依赖它——否则装配顺序就成了隐式契约。"""
+    offenders: list[tuple[str, str]] = []
+    for path in _iter_py("app", "module"):
+        for target in _import_targets(path, module_level_only=False):
+            if target == "app.bootstrap":
+                offenders.append((_rel(path), "from app.bootstrap import ..."))
+    _report(
+        offenders,
+        "bootstrap_imports",
+        "改成构造函数注入，或 FastAPI Depends（app/webui/api/deps.py）。",
+    )
+
+
+# --------------------------------------------------------------------------- #
+# 规则 4：get_container() 直调只许降
+# --------------------------------------------------------------------------- #
+def test_get_container_calls_within_budget():
+    """服务定位器是债：每调一次，这个文件就焊进了整个 Agent 实现。"""
+    offenders: list[tuple[str, str]] = []
+    for path in _iter_py("app", "module"):
+        n = _count_get_container_calls(path)
+        if n:
+            offenders.extend([(_rel(path), f"get_container() ×{n}")] * n)
+    _report(
+        offenders,
+        "get_container_calls",
+        "把依赖改成函数参数或 FastAPI Depends；webui/api/deps.py 是落点。",
+    )
+
+
+# --------------------------------------------------------------------------- #
+# 规则 5：webui 不碰 agent 内部
+# --------------------------------------------------------------------------- #
+def test_webui_does_not_import_agent_internals():
+    """WebUI 是 HTTP 适配层，只该认识 `application/` 的门面。"""
+    offenders: list[tuple[str, str]] = []
+    for path in _iter_py("app/webui"):
+        for target in _import_targets(path, module_level_only=False):
+            if target.startswith(AGENT_PREFIXES):
+                offenders.append((_rel(path), target))
+    _report(
+        offenders,
+        "webui_to_agent_imports",
+        "在 application/ 加一个门面函数，webui 只调门面。",
+    )
+
+
+# --------------------------------------------------------------------------- #
+# 规则 6：app/llm/__init__.py 必须是薄壳
+# --------------------------------------------------------------------------- #
+def test_agent_package_init_does_not_import_the_loop():
+    """包 `__init__` 不准成为通往主循环的后门。
+
+    历史教训：`app/llm/__init__.py` 曾急切 import `chat`，于是全库 121 处
+    `from app.llm import logger` 都被拖去加载主循环，把每个入口的可达闭包
+    放大到 152 文件 / 46,243 行。这条测试守住那个修复。
+    """
+    init_path = REPO_ROOT / "app" / "llm" / "__init__.py"
+    assert init_path.exists(), "app/llm/__init__.py 不见了？"
+    offending = [
+        target
+        for target in _import_targets(init_path, module_level_only=False)
+        if target.startswith(AGENT_PREFIXES) and target not in _ALLOWED_LLM_PKG_IMPORTS
+    ]
+    # 相对 import（from .chat import handle）不在上面列表里，单独抓
+    tree = _parse(init_path)
+    assert tree is not None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.level and node.module:
+            absolute = f"app.llm.{node.module}"
+            if absolute not in _ALLOWED_LLM_PKG_IMPORTS:
+                offending.append(f".{node.module}")
+    assert not offending, (
+        f"app/llm/__init__.py 重新 import 了重模块：{sorted(set(offending))}。\n"
+        f"允许的只有 {sorted(_ALLOWED_LLM_PKG_IMPORTS)}。\n"
+        "需要 handle 的地方请直接 `from app.llm.chat import handle`——"
+        "包级重导出会在 import 图上形成 app.llm ⇄ app.llm.chat 的环。"
+    )
+
+
+def test_agent_package_public_symbols_are_objects_not_modules():
+    """`from app.llm import tool` 必须拿到函数，而不是同名的 `app.llm.tool` 模块。
+
+    这是 PEP 562 `__getattr__` 的经典陷阱：子模块一旦被 import 就成为包属性，
+    同名符号的 `__getattr__` 永远轮不到。曾因此静默返回模块对象。
+    """
+    import types
+
+    import app.llm as pkg
+
+    for name in pkg.__all__:
+        value = getattr(pkg, name)
+        assert not isinstance(value, types.ModuleType), (
+            f"app.llm.{name} 解析成了模块对象（{value!r}），应当是其内部的真实符号。"
+        )
