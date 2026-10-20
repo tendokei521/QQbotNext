@@ -1,0 +1,9 @@
+{
+  "name": "log_sender",
+  "display_name": "日志发送",
+  "sign": "LogSender",
+  "version": "1.0.0",
+  "description": "在聊天里用 /log 取回本轮次 user 日志、用 /logs 取回四个日志文件",
+  "entry": "module.py",
+  "api_version": 1
+}

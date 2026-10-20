@@ -1,0 +1,276 @@
+"""日志发送插件测试。
+
+覆盖：命令识别、本轮次文件挑选、尾部裁剪（行/字节）、群/私聊上传通道、
+上传失败降级 file 段、彻底失败回贴原文、非命令不响应。
+"""
+
+from types import SimpleNamespace
+
+from app.plugins.log_sender import service
+
+DEFAULTS = {
+    "enable": True,
+    "tail_lines": 2000,
+    "max_file_mb": 8,
+    "fallback_text_lines": 30,
+}
+
+
+class FakeConfig:
+    def __init__(self, data: dict) -> None:
+        self.data = data
+
+    def get(self, key: str, default=None):
+        return self.data.get(key, default)
+
+
+class FakeBot:
+    def __init__(self, ok: bool = True) -> None:
+        self.ok = ok
+        self.calls: list[tuple[str, dict]] = []
+
+    async def call_api(self, action: str, params: dict | None = None):
+        self.calls.append((action, dict(params or {})))
+        if self.ok:
+            return {"status": "ok", "retcode": 0}
+        return {"status": "failed", "retcode": 1200, "message": "不支持"}
+
+
+class FakeLLM:
+    def __init__(self) -> None:
+        self.stopped = False
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
+class FakeEvent:
+    def __init__(
+        self,
+        text: str,
+        *,
+        bot=None,
+        message_type: str = "group",
+        group_id: int | None = 10086,
+        user_id: int = 10001,
+        reply_ok: bool = True,
+    ) -> None:
+        self.text = text
+        self.bot = bot
+        self.message_type = message_type
+        self.group = SimpleNamespace(group_id=group_id) if group_id else None
+        self.group_id = group_id
+        self.user_id = user_id
+        self.llm = FakeLLM()
+        self.reply_ok = reply_ok
+        self.replies: list = []
+
+    async def reply(self, message, **kwargs):
+        self.replies.append(message)
+        return {"status": "ok"} if self.reply_ok else {"status": "failed", "retcode": 1404}
+
+
+def _make_module(tmp_path, **config):
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    settings = SimpleNamespace(log_dir=log_dir, module_data_dir=tmp_path / "data")
+    module = SimpleNamespace(
+        bot_id=1,
+        name="日志发送",
+        module_name="log_sender",
+        config=FakeConfig({**DEFAULTS, **config}),
+        ctx=SimpleNamespace(services=SimpleNamespace(settings=settings)),
+    )
+    return module, log_dir
+
+
+def _write_logs(log_dir, names=("debug.log", "warn.log", "errors.log", "user.log")):
+    for name in names:
+        (log_dir / name).write_text(f"{name} 内容\n", encoding="utf-8")
+
+
+# ==================== 命令 / 取文件 ====================
+
+
+def test_parse_command_accepts_variants():
+    assert service.parse_command("/log") == "log"
+    assert service.parse_command("  /LOGS  ") == "logs"
+    assert service.parse_command("／log") == "log"  # 全角斜杠
+    assert service.parse_command("/logs 详细") is None
+    assert service.parse_command("你好") is None
+    assert service.parse_command("") is None
+
+
+def test_select_log_files_skips_missing(tmp_path):
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    (log_dir / "user.log").write_text("u\n", encoding="utf-8")
+    (log_dir / "debug.log").write_text("d\n", encoding="utf-8")
+
+    assert [p.name for p in service.select_log_files(log_dir, "log")] == ["user.log"]
+    assert [p.name for p in service.select_log_files(log_dir, "logs")] == ["debug.log", "user.log"]
+
+
+# ==================== 副本裁剪 ====================
+
+
+def test_build_copy_tail_lines_keeps_tail_and_marks_header(tmp_path):
+    src = tmp_path / "debug.log"
+    src.write_text("\n".join(f"第{i}行" for i in range(100)) + "\n", encoding="utf-8")
+
+    snapshot = service.build_copy(src, tmp_path / "out", tail_lines=10)
+
+    assert snapshot.name == "debug.txt"
+    assert snapshot.truncated is True
+    assert snapshot.lines == 10
+    text = snapshot.path.read_text(encoding="utf-8")
+    assert text.startswith("# debug.log 已截断")
+    assert "第99行" in text
+    assert "第89行" not in text
+
+
+def test_build_copy_max_bytes_keeps_tail(tmp_path):
+    src = tmp_path / "user.log"
+    src.write_text("".join(f"{i:04d}\n" for i in range(1000)), encoding="utf-8")
+
+    snapshot = service.build_copy(src, tmp_path / "out", tail_lines=0, max_bytes=100)
+
+    assert snapshot.truncated is True
+    text = snapshot.path.read_text(encoding="utf-8")
+    assert "0999" in text
+    assert "0000" not in text
+
+
+def test_build_copy_full_file_has_no_header(tmp_path):
+    src = tmp_path / "user.log"
+    src.write_text("只有一行\n", encoding="utf-8")
+
+    snapshot = service.build_copy(src, tmp_path / "out", tail_lines=2000)
+
+    assert snapshot.truncated is False
+    assert snapshot.path.read_text(encoding="utf-8") == "只有一行\n"
+
+
+# ==================== 发送 ====================
+
+
+async def test_handle_log_sends_user_txt_via_group_upload(tmp_path):
+    module, log_dir = _make_module(tmp_path)
+    _write_logs(log_dir)
+    bot = FakeBot()
+    event = FakeEvent("/log", bot=bot)
+
+    await service.handle(module, event)
+
+    assert len(bot.calls) == 1
+    action, params = bot.calls[0]
+    assert action == "upload_group_file"
+    assert params["group_id"] == 10086
+    assert params["name"] == "user.txt"
+    assert params["file"].endswith("user.txt")
+    assert event.llm.stopped is True
+    summary = event.replies[-1]
+    assert "1/1" in summary and "user.txt" in summary
+
+
+async def test_handle_logs_sends_all_four_files(tmp_path):
+    module, log_dir = _make_module(tmp_path)
+    _write_logs(log_dir)
+    bot = FakeBot()
+    event = FakeEvent("/logs", bot=bot)
+
+    await service.handle(module, event)
+
+    names = [params["name"] for _action, params in bot.calls]
+    assert names == ["debug.txt", "warn.txt", "errors.txt", "user.txt"]
+    assert "4/4" in event.replies[-1]
+
+
+async def test_handle_private_uses_upload_private_file(tmp_path):
+    module, log_dir = _make_module(tmp_path)
+    _write_logs(log_dir, names=("user.log",))
+    bot = FakeBot()
+    event = FakeEvent("/log", bot=bot, message_type="private", group_id=None)
+
+    await service.handle(module, event)
+
+    action, params = bot.calls[0]
+    assert action == "upload_private_file"
+    assert params["user_id"] == 10001
+
+
+async def test_handle_falls_back_to_file_segment(tmp_path):
+    module, log_dir = _make_module(tmp_path)
+    _write_logs(log_dir)
+    bot = FakeBot(ok=False)
+    event = FakeEvent("/log", bot=bot)
+
+    await service.handle(module, event)
+
+    assert bot.calls[0][0] == "upload_group_file"
+    # 第 1 条回复是 file 段，第 2 条是汇总
+    first = event.replies[0]
+    assert isinstance(first, list) and first[0]["type"] == "file"
+    assert first[0]["data"]["name"] == "user.txt"
+    assert first[0]["data"]["file"].startswith("file:///")
+    assert "1/1" in event.replies[-1]
+
+
+async def test_handle_total_failure_attaches_preview(tmp_path):
+    module, log_dir = _make_module(tmp_path)
+    (log_dir / "user.log").write_text("唯一一行日志\n", encoding="utf-8")
+    bot = FakeBot(ok=False)
+    event = FakeEvent("/log", bot=bot, reply_ok=False)
+
+    await service.handle(module, event)
+
+    summary = event.replies[-1]
+    assert "0/1" in summary
+    assert "唯一一行日志" in summary
+
+
+async def test_handle_marks_truncated_file_in_summary(tmp_path):
+    module, log_dir = _make_module(tmp_path, tail_lines=5)
+    (log_dir / "user.log").write_text("\n".join(f"行{i}" for i in range(50)) + "\n", encoding="utf-8")
+    bot = FakeBot()
+    event = FakeEvent("/log", bot=bot)
+
+    await service.handle(module, event)
+
+    assert "已截断" in event.replies[-1]
+
+
+async def test_handle_ignores_other_text(tmp_path):
+    module, log_dir = _make_module(tmp_path)
+    _write_logs(log_dir)
+    bot = FakeBot()
+    event = FakeEvent("/logging", bot=bot)
+
+    await service.handle(module, event)
+
+    assert bot.calls == []
+    assert event.replies == []
+    assert event.llm.stopped is False
+
+
+async def test_handle_disabled_does_nothing(tmp_path):
+    module, log_dir = _make_module(tmp_path, enable=False)
+    _write_logs(log_dir)
+    bot = FakeBot()
+    event = FakeEvent("/log", bot=bot)
+
+    await service.handle(module, event)
+
+    assert bot.calls == []
+    assert event.replies == []
+
+
+async def test_handle_no_log_files_replies_warning(tmp_path):
+    module, log_dir = _make_module(tmp_path)
+    bot = FakeBot()
+    event = FakeEvent("/logs", bot=bot)
+
+    await service.handle(module, event)
+
+    assert bot.calls == []
+    assert "还没有日志文件" in event.replies[-1]

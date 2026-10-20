@@ -2,7 +2,7 @@
 
 # `app/plugins/` —— 业务插件
 
-**一句话：仓库自带的 13 个业务插件，每个子目录 = 一个插件。**
+**一句话：仓库自带的 14 个业务插件，每个子目录 = 一个插件。**
 
 > 这里原名 `module/modules/`（仓库根目录下），P5 搬进 `app/`，因为「代码」应该
 > 跟着代码树走，而 `module/` 现在只剩**运行时数据**（`configs/` `data/` `plugins/`
@@ -33,6 +33,7 @@ app/plugins/<name>/
 | `group_log` | 群消息记录 |
 | `group_request` | 入群申请处理 |
 | `llm_enhance` | 防抖合并 + 群聊用户信息感知 |
+| `log_sender` | 聊天里用 `/log`（user.log）/ `/logs`（四个日志文件）取回本轮次日志 |
 | `poke_reply` | 戳一戳回应 |
 | `recall_back` | 撤回回应（`service/` + `recall_db.py`） |
 | `time_sign_in` | 每日打卡（`service/` 子包） |

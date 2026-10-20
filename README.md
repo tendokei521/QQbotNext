@@ -41,7 +41,7 @@ app/
 │   ├── api.py                  插件 API（get_modules / get_config_path / get_data_path）
 │   └── dispatcher.py           事件分发（订阅匹配 + 启停 + 单一服务 + 权限）
 ├── services/                   应用服务（Bot 生命周期 / 调度器 / 日志）
-├── plugins/                    **业务插件**（13 个，每个子目录 = 一个插件）
+├── plugins/                    **业务插件**（14 个，每个子目录 = 一个插件）
 └── webui/                      WebUI（FastAPI 分层：api/ + schemas/；前端在 app/webui/dashboard/）
 module/                          插件**运行时数据**（不含代码）
 ├── configs/                     每模块配置（<name>/config.json + authority.json，迁移源）
