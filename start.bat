@@ -1,23 +1,56 @@
 @echo off
-chcp 65001 >nul
+rem ============================================================
+rem  QQBot Next - launcher
+rem    [1/3] bootstrap virtualenv
+rem    [2/3] verify dependencies   -> scripts\ops\check_deps.py
+rem    [3/3] hand control to the bot
+rem  Dependency logic lives in check_deps.py only: this shell is
+rem  a thin wrapper so bat/sh can never drift apart.
+rem ============================================================
+setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
-rem ===== 1) 虚拟环境：没有就建（首次运行即自举） =====
-if not exist "venv\Scripts\python.exe" (
-    echo [start] 未找到 venv，正在创建虚拟环境...
+echo.
+echo   QQBot Next  ::  launcher
+echo   ----------------------------------------------------------
+
+rem ---------- [1/3] interpreter ----------
+if exist "venv\Scripts\python.exe" (
+    call :stage 1 interpreter "venv\Scripts\python.exe"
+) else (
+    call :stage 1 interpreter "creating venv (first run)"
     python -m venv venv
     if errorlevel 1 (
-        echo [start] 创建 venv 失败：请确认已安装 Python 3.10+ 并已加入 PATH。
+        echo.
+        echo   [FAIL] could not create the virtualenv.
+        echo          Install Python 3.10+ and make sure it is on PATH.
+        endlocal
         exit /b 1
     )
 )
 
-rem ===== 2) 依赖自检：缺什么装什么（判定逻辑只在 check_deps.py 里） =====
-"venv\Scripts\python.exe" "scripts\ops\check_deps.py"
+rem ---------- [2/3] dependencies ----------
+"venv\Scripts\python.exe" "scripts\ops\check_deps.py" --quiet
 if errorlevel 1 (
-    echo [start] 依赖自检未通过，仍尝试启动。
-    echo [start] 若启动报 ModuleNotFoundError，请联网后运行 scripts\ops\requirements.bat
+    call :stage 2 dependencies "incomplete (see above)"
+    echo.
+    echo   Continuing anyway. If the bot exits with ModuleNotFoundError,
+    echo   go online and run:  scripts\ops\requirements.bat
+    echo.
+) else (
+    call :stage 2 dependencies "ok"
 )
 
-rem ===== 3) 启动 =====
+rem ---------- [3/3] launch ----------
+call :stage 3 launch "main.py"
+echo.
 cmd /k "venv\Scripts\python.exe main.py"
+
+endlocal
+exit /b 0
+
+rem ---------- helper: aligned status line ----------
+:stage
+set "qqn_label=%~2                "
+echo   [%~1/3] !qqn_label:~0,16!  %~3
+exit /b 0

@@ -1,27 +1,51 @@
 #!/usr/bin/env bash
-# 启动入口：自举 venv → 依赖自检（缺什么装什么）→ 跑主程序。
-# 依赖判定逻辑只在 scripts/ops/check_deps.py，这里保持薄壳，避免 bat/sh 各写一份漂移。
+# ============================================================
+#  QQBot Next - launcher
+#    [1/3] bootstrap virtualenv
+#    [2/3] verify dependencies   -> scripts/ops/check_deps.py
+#    [3/3] hand control to the bot
+#  Dependency logic lives in check_deps.py only: this shell is a
+#  thin wrapper so bat/sh can never drift apart.
+# ============================================================
 set -u
 cd "$(dirname "$0")"
 
+stage() {
+    printf '  [%s/3] %-16s %s\n' "$1" "$2" "$3"
+}
+
+echo
+echo "  QQBot Next  ::  launcher"
+echo "  ----------------------------------------------------------"
+
+# ---------- [1/3] interpreter ----------
 PY="venv/bin/python3"
 [ -x "$PY" ] || PY="venv/bin/python"
-
-# ===== 1) 虚拟环境：没有就建 =====
-if [ ! -x "$PY" ]; then
-    echo "[start] 未找到 venv，正在创建虚拟环境..."
-    python3 -m venv venv || {
-        echo "[start] 创建 venv 失败：请确认已安装 Python 3.10+"
+if [ -x "$PY" ]; then
+    stage 1 interpreter "$PY"
+else
+    stage 1 interpreter "creating venv (first run)"
+    if ! python3 -m venv venv; then
+        echo
+        echo "  [FAIL] could not create the virtualenv."
+        echo "         Install Python 3.10+ and make sure it is on PATH."
         exit 1
-    }
+    fi
     PY="venv/bin/python3"
     [ -x "$PY" ] || PY="venv/bin/python"
 fi
 
-# ===== 2) 启动前依赖自检（失败只提示，不阻塞启动） =====
-"$PY" scripts/ops/check_deps.py || \
-    echo "[start] 依赖自检未通过，仍尝试启动；若启动时报 ModuleNotFoundError，请联网后运行 scripts/ops/requirements.sh"
+# ---------- [2/3] dependencies ----------
+if "$PY" scripts/ops/check_deps.py --quiet; then
+    stage 2 dependencies "ok"
+else
+    stage 2 dependencies "incomplete (see above)"
+    echo
+    echo "  Continuing anyway. If the bot exits with ModuleNotFoundError,"
+    echo "  go online and run:  scripts/ops/requirements.sh"
+fi
 
-# ===== 3) 启动 =====
-echo "[start] 启动 QQBot Next ..."
+# ---------- [3/3] launch ----------
+stage 3 launch "main.py"
+echo
 exec "$PY" main.py
