@@ -8,15 +8,17 @@ from app.plugin.dispatcher import ModuleDispatcher
 
 
 class FakeConfigService:
-    def __init__(self, single_service=None, multi_group=None):
+    def __init__(self, single_service=None, multi_group=None, agent_config=None):
         self._single = single_service or {}
         self._multi = multi_group or {"groups": {}}
+        self._agent_config = agent_config or {}
 
     def get_webui_config(self):
         return {"single_service": self._single, "multi_group": self._multi}
 
-    def get_module_config(self, *a):
-        return {}
+    def get_module_config(self, module, bot_id=None):
+        # 只有 Agent 配置里带名册（agent_owner_list / agent_manager_list）
+        return self._agent_config if module == "agent" else {}
 
     def get_module_authority(self, module, bot_id):
         return {}
@@ -51,8 +53,6 @@ def make_module(subs, mname, bot_id, permission="member", calls=None, auth_data=
 
         async def handle(self, event):
             calls.append((mname, event.event_type, event.bot_id))
-
-    svc = FakeConfigService()
 
     class _S:
         def get_module_config(self, *a):
@@ -163,3 +163,56 @@ async def test_owner_only_module_blocked_for_member():
                          gateway=type("G", (), {"connections": {}})())
     await d.dispatch(_event())
     assert calls == []
+
+
+# ---------- 名册身份（拥有者 / 管理者）必须对模块生效 ----------
+# 起因：ModulePermissionNode 此前调 compute_event_permission(event) 时不传名册，
+# 而 AgentNode 传了 → permission="owner"/"manager" 的模块在本机（owner_id 未配置、
+# 只靠 agent_owner_list）永远被静默拦掉，表现为"模块不响应、LLM 却出来搭话"。
+
+async def test_owner_permission_passes_for_roster_owner():
+    calls = []
+    mod = make_module(("message_group",), "owner_m", 123, permission="owner", calls=calls)
+    cfg = FakeConfigService(agent_config={"agent_owner_list": ["100"]})
+    d = ModuleDispatcher(registry=FakeRegistry([mod]), config_service=cfg,
+                         gateway=type("G", (), {"connections": {}})())
+    await d.dispatch(_event())
+    assert calls == [("owner_m", "message_group", 123)]
+
+
+async def test_manager_permission_passes_for_roster_manager():
+    calls = []
+    mod = make_module(("message_group",), "mgr_m", 123, permission="manager", calls=calls)
+    cfg = FakeConfigService(agent_config={"agent_manager_list": ["100"]})
+    d = ModuleDispatcher(registry=FakeRegistry([mod]), config_service=cfg,
+                         gateway=type("G", (), {"connections": {}})())
+    await d.dispatch(_event())
+    assert calls == [("mgr_m", "message_group", 123)]
+
+
+async def test_owner_permission_ignores_other_users():
+    """名册里没有这个人 → 仍然拦住（不是"名册一配就全放行"）。"""
+    calls = []
+    mod = make_module(("message_group",), "owner_m", 123, permission="owner", calls=calls)
+    cfg = FakeConfigService(agent_config={"agent_owner_list": ["999"]})
+    d = ModuleDispatcher(registry=FakeRegistry([mod]), config_service=cfg,
+                         gateway=type("G", (), {"connections": {}})())
+    await d.dispatch(_event())
+    assert calls == []
+
+
+async def test_rosters_prefer_agent_manager_runtime():
+    """注入 agent_manager 时用运行时的配置（与 AgentNode 同源）。"""
+    from types import SimpleNamespace
+
+    calls = []
+    mod = make_module(("message_group",), "owner_m", 123, permission="owner", calls=calls)
+
+    class FakeManager:
+        def get_runtime(self, bot_id):
+            return SimpleNamespace(config={"agent_owner_list": ["100"]})
+
+    d = ModuleDispatcher(registry=FakeRegistry([mod]), config_service=FakeConfigService(),
+                         gateway=type("G", (), {"connections": {}})(), agent_manager=FakeManager())
+    await d.dispatch(_event())
+    assert calls == [("owner_m", "message_group", 123)]

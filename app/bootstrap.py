@@ -314,7 +314,7 @@ def build_container(settings: Settings | None = None) -> Container:
     node_registry = NodeRegistry()
     node_registry.register(AgentNode(agent_manager, config_service, gateway, logger))
     node_registry.register(ModuleRouterNode(registry, logger))
-    node_registry.register(ModulePermissionNode(config_service, gateway, logger))
+    node_registry.register(ModulePermissionNode(config_service, gateway, logger, agent_manager))
     node_registry.register(ModuleInvokeNode(logger))
     container.register_factory(NodeRegistry, lambda: node_registry)
 
@@ -327,7 +327,7 @@ def build_container(settings: Settings | None = None) -> Container:
     # 事件分发（走节点链）
     dispatcher = ModuleDispatcher(
         registry=registry, config_service=config_service, gateway=gateway, node_registry=node_registry,
-        event_completed_hooks=event_completed_hook_registry,
+        event_completed_hooks=event_completed_hook_registry, agent_manager=agent_manager,
     )
     container.register_factory(ModuleDispatcher, lambda: dispatcher)
 

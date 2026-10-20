@@ -27,6 +27,7 @@ class ModuleDispatcher:
         gateway: Any,
         node_registry: Any = None,
         event_completed_hooks: Any = None,
+        agent_manager: Any = None,
         log=None,
     ) -> None:
         self.registry = registry
@@ -38,7 +39,9 @@ class ModuleDispatcher:
         if node_registry is None:
             node_registry = NodeRegistry(log=self.log)
             node_registry.register(ModuleRouterNode(registry, self.log))
-            node_registry.register(ModulePermissionNode(config_service, gateway, self.log))
+            node_registry.register(
+                ModulePermissionNode(config_service, gateway, self.log, agent_manager)
+            )
             node_registry.register(ModuleInvokeNode(self.log))
         self.node_registry = node_registry
 

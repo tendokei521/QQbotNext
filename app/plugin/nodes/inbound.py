@@ -193,15 +193,57 @@ class ModulePermissionNode(MessageNode):
     name = "permission"
     order = 110
 
-    def __init__(self, config_service: Any, gateway: Any, log=None) -> None:
+    def __init__(self, config_service: Any, gateway: Any, log=None, agent_manager: Any = None) -> None:
         self.config_service = config_service
         self.gateway = gateway
         self.log = log or logger
+        self.agent_manager = agent_manager
+
+    # ---------- 名册身份 ----------
+
+    def _agent_config(self, account_id) -> dict:
+        """读该账号的 Agent 配置（``agent_owner_list`` / ``agent_manager_list`` 在里头）。
+
+        读不到就返回空 dict：名册缺席只意味着「谁都算不著名册身份」，
+        不该让权限判断抛异常。
+        """
+        if account_id is None:
+            return {}
+        try:
+            from app.agent.config import AGENT_CONFIG_MODULE
+        except Exception:  # noqa: BLE001 - 极端情况下退回字面量，行为不变
+            AGENT_CONFIG_MODULE = "agent"
+        try:
+            return self.config_service.get_module_config(AGENT_CONFIG_MODULE, account_id) or {}
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def _rosters(self, event) -> tuple[set[str], set[str]]:
+        """取本次事件的 (拥有者名册, 管理者名册)。
+
+        优先用 Agent 运行时的配置（已合并默认值、迁移过遗留配置），没有运行时
+        再直接读配置中心。**模块侧必须拿到它**：``permission = "manager"/"owner"``
+        的模块靠这份名册判定身份，缺了名册这两个档位永远不可能通过。
+        """
+        account_id = getattr(event, "account_id", None)
+        if self.agent_manager is not None and account_id is not None:
+            try:
+                runtime = self.agent_manager.get_runtime(account_id)
+            except Exception as e:  # noqa: BLE001
+                self.log.debug(f"[Dispatch] 取 Agent 运行时失败（名册降级为配置中心）: {e}")
+                runtime = None
+            if runtime is not None:
+                return roster_lists(getattr(runtime, "config", None))
+        return roster_lists(self._agent_config(account_id))
 
     async def process(self, ctx: MessageContext, next_: Next) -> None:
         event = ctx.event
-        # 先一次性计算事件角色，所有模块共用，避免重复计算
-        compute_event_permission(event)
+        # 先一次性计算事件角色，所有模块共用，避免重复计算。
+        # 名册身份（拥有者/管理者）必须一起算：它跨群生效，且与群角色一样是
+        # 「谁有资格」的一部分——此前这里没传名册，导致模块的 owner/manager 档
+        # 与 Agent 侧判定不一致（AgentNode 传了、模块侧没传），表现为"模块永远不响应"。
+        owner_list, manager_list = self._rosters(event)
+        compute_event_permission(event, owner_list=owner_list, manager_list=manager_list)
 
         allowed: list[BaseModule] = []
         for module in ctx.state.get("candidates", []) or []:

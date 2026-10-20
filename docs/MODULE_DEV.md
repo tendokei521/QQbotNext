@@ -81,6 +81,25 @@ event.is_member
 
 权限过滤由框架在 `ModulePermissionNode` 统一完成，**不要在业务代码里再判断 owner/admin**。
 
+### 名册身份（`manager` / `owner` 档从哪来）
+
+`permission_role` 取的是「名册身份 + 群角色」里的最高档，两条来源缺一不可：
+
+| 来源 | 配置位置 | 作用 |
+|---|---|---|
+| 群角色 | QQ 群给的 `owner` / `admin` | 只在本群有效 |
+| Bot 拥有者 | 账号的 `owner_id`（连接配置） | 命中即 `owner` 档 |
+| 拥有者名册 `agent_owner_list` | Agent 配置 | **跨群生效**，命中即 `owner` 档 |
+| 管理者名册 `agent_manager_list` | Agent 配置 | **跨群生效**，命中即 `manager` 档 |
+
+所以：**`permission = "owner"/"manager"` 的模块要有人能触发，就必须让某个来源成立**——
+给账号配 `owner_id`，或把人加进 Agent 配置的拥有者/管理者名册。
+
+> 排查提示：这两档不通过时框架**不写日志**（权限过滤整体是静默的），表现为
+> 「模块一声不响、LLM 反倒出来搭话」。`ModulePermissionNode` 与 `AgentNode` 用的是
+> 同一套 `compute_event_permission`，两边名册必须同源，否则会出现
+> 「Agent 认为你是 owner、模块认为你是 member」的错位（P2 修复：模块侧此前漏传名册）。
+
 ---
 
 ## 2.6 全局能力注册表（FeatureRegistry）
