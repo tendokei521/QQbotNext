@@ -1,0 +1,34 @@
+# ============================================================
+# 换行符规则：Windows 批处理必须 CRLF，shell 脚本必须 LF
+# ============================================================
+# 起因（实测）：cmd.exe 解析"含括号块的 LF-only .bat"时，
+# 整段 if ( ... ) 会被切碎成碎片命令，报出一堆
+#   'python.exe" (' 不是内部或外部命令
+#   'on' 不是内部或外部命令
+#   '?venv' 不是内部或外部命令
+# 之类的假错误（不是脚本逻辑错，是行尾错）。
+# 反过来，bash 遇到 CRLF 会报 "$'\r': command not found"，
+# 因为 shebang 会变成 "#!/usr/bin/env bash\r"。
+# 本仓库 core.autocrlf=true，若不在此固化，checkout 时 .sh 会被
+# 转成 CRLF、.bat 是否 CRLF 取决于检出环境，都是埋雷。
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.sh  text eol=lf
+
+# ============================================================
+# 文本文件统一归一化（保持既有行为，显式写出来免得依赖 autocrlf）
+# ============================================================
+*.py    text eol=lf
+*.md    text eol=lf
+*.toml  text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.json  text eol=lf
+
+# 图片 / 数据库等二进制，禁止任何换行转换
+*.png   binary
+*.jpg   binary
+*.gif   binary
+*.webp  binary
+*.db    binary
+*.sqlite binary

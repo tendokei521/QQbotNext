@@ -12,11 +12,11 @@ if not exist "venv\Scripts\python.exe" (
     )
 )
 
-rem ===== 2) 启动前依赖自检：缺什么装什么（判定逻辑只在 check_deps.py 里） =====
+rem ===== 2) 依赖自检：缺什么装什么（判定逻辑只在 check_deps.py 里） =====
 "venv\Scripts\python.exe" "scripts\ops\check_deps.py"
 if errorlevel 1 (
-    echo [start] 依赖自检未通过，仍尝试启动；若启动时报 ModuleNotFoundError，
-    echo [start] 请联网后手动运行 scripts\ops\requirements.bat
+    echo [start] 依赖自检未通过，仍尝试启动。
+    echo [start] 若启动报 ModuleNotFoundError，请联网后运行 scripts\ops\requirements.bat
 )
 
 rem ===== 3) 启动 =====
