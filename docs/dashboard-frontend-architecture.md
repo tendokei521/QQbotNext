@@ -145,7 +145,7 @@ export interface ReadinessStep {
 
 ### 3.2 配置分级 Progressive Disclosure —— 解决 130 个旋钮
 
-后端 `app/llm/config_schema.py:1015-1017` 已经给每个字段标了 `importance: basic|advanced`
+后端 `app/agent/config_schema.py:1015-1017` 已经给每个字段标了 `importance: basic|advanced`
 （basic ≈ 55 / advanced ≈ 105）。**前端现在完全没用**（只在 `agent/sections.ts:208` 的死函数里读过）。
 架构上把它做成三层：
 

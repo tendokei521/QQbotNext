@@ -376,7 +376,7 @@ class Module(BaseModule):
 
 ```python
 from app.modules import BaseModule, tool_call_hook
-from app.llm import ToolCallContext
+from app.agent import ToolCallContext
 
 class Module(BaseModule):
     @tool_call_hook(event_type="*", order=10)
@@ -446,7 +446,7 @@ class Module(BaseModule):
 
 历史侧配套：`SessionManager.history_snapshot()` 给未投影的原始条目（自带渲染器组装用），
 `import_history()` 把外部历史批量搬进来让框架既有组装器也能读到，二者详见
-`app/llm/session.py` 的模块 docstring（含存储契约字段表）。
+`app/agent/session/manager.py` 的模块 docstring（含存储契约字段表）。
 
 ---
 
@@ -533,7 +533,7 @@ class Module(BaseModule):
 模块可以把方法暴露给 LLM 作为 function calling 工具：
 
 ```python
-from app.llm import tool, ToolContext
+from app.agent import tool, ToolContext
 
 class Module(BaseModule):
     @tool(
@@ -578,7 +578,7 @@ async def admin_delete(self, ctx: ToolContext, args: dict) -> str:
 技能是写入 system prompt 的能力说明，让模型知道“何时用、怎么做”：
 
 ```python
-from app.llm import skill
+from app.agent import skill
 
 class Module(BaseModule):
     SKILLS = {
@@ -609,7 +609,7 @@ class Module(BaseModule):
 所有 LLM 钩子都会收到 `ctx: LlmContext`。
 
 ```python
-from app.llm import LlmContext
+from app.agent import LlmContext
 ```
 
 | 字段 | 类型 | 说明 |

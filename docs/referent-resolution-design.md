@@ -1,6 +1,6 @@
 # 指代消解（Referent Resolution）设计定稿
 
-> 状态：**P0~P4 已完成并测试通过**（`app/llm/focus.py` / `referent.py` / `context_tools.py`）。
+> 状态：**P0~P4 已完成并测试通过**（`app/agent/context/focus.py` / `referent.py` / `context_tools.py`）。
 > 触发案例：`group_466052056` 2026-09-18 21:37「那你能做到消息里的那个样子吗」——
 > 纯回指句，模型选了群里最新的转发（1000165352）而不是上一轮讨论过的那条（576048059）。
 
@@ -38,7 +38,7 @@ L3 取回层  fetch_entity + 状态三态迁移
 组装层     焦点行 + 已展开摘要 + 未展开标记（带权重，不平铺）
 ```
 
-### L0 会话焦点表（`app/llm/focus.py`）
+### L0 会话焦点表（`app/agent/context/focus.py`）
 
 形态照抄 `nicknames.py`（模块级有界字典 + TTL），写入点全部是确定性钩子：
 
@@ -67,7 +67,7 @@ class FocusItem:
 **焦点表存摘要，不存原文**——这样"上一轮讨论过的内容"能低成本随每轮注入一行，
 且不污染会话历史（比把工具结果写进历史干净）。
 
-### L1 指代判定表（`app/llm/referent.py`）
+### L1 指代判定表（`app/agent/context/referent.py`）
 
 规则保守（宁可多给候选），风格对齐 `_HISTORY_INTENT_RE` / `_ENV_INTENT_RE`：
 

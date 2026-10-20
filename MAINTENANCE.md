@@ -39,7 +39,7 @@ logs/                    debug.log / warn.log / errors.log / user.log + 归档�
 > `module/configs/<name>/config.json`、`authority.json`；模块主体代码在 `module/modules/<name>/`。
 > 首次启动若 DB 为空，自动从 `module/configs/*/` 迁移一次，之后以 SQLite 为准。
 
-> ⚠️ 上图的「分层」与实际依赖并不完全一致：`app/llm/` 被 24 个文件互为循环依赖（12,112 行），
+> ⚠️ 上图的「分层」与实际依赖并不完全一致：`app/agent/` 被 24 个文件互为循环依赖（12,112 行），
 > `app/webui/api/` 也在该环内。改动前请先读 **`STYLE.md §12 已知架构债`**。
 
 ## 3. 启动 / 停止
@@ -166,7 +166,7 @@ class Module(BaseModule):
 ### 7.3 注意
 
 - **模块权限由框架统一过滤**：`permission` 声明 everyone/member/group_admin/group_owner/owner，黑白名单仍作为前置过滤。
-- **LLM 是框架级能力**：WebUI 侧栏的「LLM服务」为虚拟模块卡（`app/llm/`），不依赖任何插件目录，
+- **LLM 是框架级能力**：WebUI 侧栏的「LLM服务」为虚拟模块卡（`app/agent/`），不依赖任何插件目录，
   删除全部插件后仍保留；其配置/定时/主动走框架运行时（`module_config("agent")`、`data/llm`）。
 - 模块卸载时框架会自动取消其后台任务（`TaskManager`）与定时任务（`SchedulerService`）。
 
@@ -334,6 +334,6 @@ push / PR 时自动执行三组校验，无需手动触发：
   `app/modules/keyword.py` 为共享关键词库；支持父模块递归子模块（`parent.child` 配置命名空间）。
 - **模块流水线 + LLM 流水线**：模块流水线在前（`@module_hook`），LLM 流水线在后
   （`@llm_hook`：pre_request / post_response / pre_send / post_send）；LLM 请求池
-  `app/llm/pool.py` 支持同会话防抖合并；`event.llm.resume()` 手动放行。
+  `app/agent/pool.py` 支持同会话防抖合并；`event.llm.resume()` 手动放行。
 - **日志双系统**：`debug.log` 保留原始完整日志，新增 `user.log` 简洁日志；
   `debug/warn/errors/user` 四文件同步 6h 轮转；WebUI“显示原始日志”开关与控制台输出同步。

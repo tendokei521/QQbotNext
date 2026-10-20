@@ -17,11 +17,23 @@ app/
 │   ├── bot.py                  IBot 抽象（模块只依赖它收发消息）
 │   ├── events.py               类型化事件（消息/通知/申请）
 │   └── message.py              消息段模型
-├── infrastructure/             基础设施（协议适配 / 持久化）
+├── infrastructure/             基础设施（协议适配 / 持久化 / 文件系统）
 │   ├── onebot/                 OneBot 实现：gateway(连接/去重) + client(API) + codec(编解码)
 │   ├── config/config_service.py 配置中心（SQLite + 内存缓存 + 变更广播）
+│   ├── fs/                     数据路径（paths / media_cache）——全库唯一的数据目录来源
 │   └── persistence/database.py SQLite（aiosqlite）
-├── llm/                        框架级 LLM Agent（provider/会话/定时/主动/工具）
+├── agent/                      框架级 Agent（11 个子包，每个子包一个职责）
+│   ├── loop/                   一轮对话的主流程（chat / pipeline / context / tool_loop）
+│   ├── assembly/               把上下文拼成 messages（assembler / inputs / prompt / 压缩）
+│   ├── session/                会话与历史（manager / history / model / enrich）
+│   ├── persona/                人格与表达（rules / skills / tags / emoji + QQ 表情数据）
+│   ├── context/                群语境与指代（group / referent / focus / nicknames）
+│   ├── tools/                  工具协议与内置工具（spec / policy / system / onebot / mcp）
+│   ├── delivery/               发送侧（speech / pool / pace / splitter / directives）
+│   ├── media/                  图片与媒体（image / store / animated）
+│   ├── proactivity/            主动消息与定时（manager / scheduler / stream / trigger）
+│   ├── providers/ LLM 供应商适配（全库最规范的部分，新代码的范本）
+│   └── memory/ knowledge/ group_log/   长期记忆 / 知识库 / 群聊日志
 ├── modules/                    插件框架 + 插件 API
 │   ├── base.py                 BaseModule / ModuleConfig / ModuleAuthority
 │   ├── registry.py             扫描 / 加载 / 热重载模块
@@ -29,12 +41,12 @@ app/
 │   ├── api.py                  插件 API（get_modules / get_config_path / get_data_path）
 │   └── dispatcher.py           事件分发（订阅匹配 + 启停 + 单一服务 + 权限）
 ├── services/                   应用服务（Bot 生命周期 / 调度器 / 日志）
-└── webui/                      WebUI（FastAPI 分层：api/ + schemas/ + templates/）
-module/                         插件目录（三级结构）
-├── modules/                    业务插件主体（每个子目录 = 一个插件）
-├── configs/                    每模块配置（<name>/config.json + authority.json，迁移源）
-└── data/                       每模块可选持久化数据（get_data_path 自动创建）
-data/                           SQLite（data/app.db）+ 框架级 LLM 数据（data/llm，含历史/记忆/知识库）
+└── webui/                       WebUI（FastAPI 分层：api/ + schemas/ + templates/）
+module/                          插件目录（三级结构）
+├── modules/                     业务插件主体（每个子目录 = 一个插件）
+├── configs/                     每模块配置（<name>/config.json + authority.json，迁移源）
+└── data/                        每模块可选持久化数据（get_data_path 自动创建）
+data/                            SQLite（data/app.db）+ 框架级 Agent 数据（data/llm，含历史/记忆/知识库）
 logs/                           日志目录
 ```
 
@@ -219,7 +231,7 @@ class Module(BaseModule):
 模块可以把能力暴露给 LLM：
 
 ```python
-from app.llm import tool, skill
+from app.agent import tool, skill
 
 class Module(BaseModule):
     @tool(description="查询天气", parameters={"type": "object", "properties": {"city": {"type": "string"}}})
@@ -255,7 +267,7 @@ class Module(BaseModule):
 
 - 指令回复统一以「# 」开头，便于与聊天内容区分；`#llm stop`、`#llm memory audit` 仅 Bot 拥有者可用；
 - `#llm help` 是**静态指令表**，不依赖模型：API 密钥没配好时也能查看；
-- 指令总表定义在 `app/llm/commands.py`（`COMMAND_GROUPS`），新增指令时表与
+- 指令总表定义在 `app/agent/commands.py`（`COMMAND_GROUPS`），新增指令时表与
   `chat.handle_commands` 两处必须同步——`tests/test_llm_help.py` 会逐条校验，防止帮助与实际行为漂移；
 - 合并转发不被实现支持时自动降级为分段纯文本。
 
@@ -263,7 +275,7 @@ class Module(BaseModule):
 
 聊天记录里常常只剩"骨架"（`@123`、`[引用]`），框架分三层把"血肉"补齐，让模型不必猜：
 
-1. **预展开**：渲染层把 `@123` 反查成 `@三哥(123)`（`app/llm/nicknames.py` 共享缓存，
+1. **预展开**：渲染层把 `@123` 反查成 `@三哥(123)`（`app/agent/context/nicknames.py` 共享缓存，
    与触发消息的 @ 解析共用，同一个人只查一次）；
 2. **缺口标记 + 摘要**：实在取不到才标 `【未展开:用户123】`，并在背景块 / `get_chat_history`
    头部给出 `【本段含 2 处未展开内容：…；可调用 expand_message 展开后再回答】`；
@@ -324,8 +336,8 @@ async def delete_message(self, ctx, args):
 | `gif_frame_max_edge` | 512 | 每帧长边上限（像素），调小可省 token |
 | `gif_probe_all_images` | 关 | OneBot 实现不给动图线索时，让每张图都探测一次 `n_frames` |
 
-实现分两层：`app/llm/image.py` 负责「段 → 图片/帧条目」（含动图线索判断、取字节、
-体积上限），`app/llm/animated.py` 是纯计算的拆帧逻辑（Pillow 解码 → 等间隔取帧 →
+实现分两层：`app/agent/media/image.py` 负责「段 → 图片/帧条目」（含动图线索判断、取字节、
+体积上限），`app/agent/media/animated.py` 是纯计算的拆帧逻辑（Pillow 解码 → 等间隔取帧 →
 白底合成 → JPEG）。历史消息里的动图同样能按需取回（`expand_image` 走同一条通路）。
 
 ### 模型 Provider

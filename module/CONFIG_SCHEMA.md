@@ -471,7 +471,7 @@ async for ev in self.llm_stream(messages, model_id=model_id):
   模块据此走降级分支（例如回一句固定文案）。
 
 > 旧的直连方式仍然可用、存量模块不受影响，但不再推荐：
-> `from app.llm.providers import get_provider` → `get_provider(dict(module.config.raw_config))`
+> `from app.agent.providers import get_provider` → `get_provider(dict(module.config.raw_config))`
 > —— 它要求模块自己保管 `api_key`，也没有回退与记账。
 
 ### 会话/对话与其它框架能力

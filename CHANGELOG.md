@@ -2,6 +2,39 @@
 
 ## [Unreleased]
 
+### 破坏性变更：`app.llm` 改名为 `app.agent`，并按职责拆成 11 个子包
+
+框架级 Agent 原先是一个 91 文件 / 32,900 行的平铺包（顶层 55 个文件挤在
+`app/llm/` 下），改任何一个功能都要在 50 多个同层文件里靠文件名猜。现在按职责分包：
+
+```
+app/agent/{loop,assembly,session,persona,context,tools,delivery,media,proactivity,
+           providers,memory,knowledge,group_log}
+```
+
+- **`app.llm` 不再存在，也没有保留兼容 shim**：一个概念只能有一个名字，shim 会让
+  两套导入路径长期并存并重新制造环。`tests/test_architecture_boundaries.py` 里
+  `test_old_llm_package_is_gone` 守门。
+- 插件侧唯一的破坏性写法变化：
+  `from app.llm import tool` → **`from app.agent import tool`**（`skill` / `ToolContext` /
+  `LlmContext` / `ToolCallContext` 同理）。其余插件 API（`app.modules.*`）未变。
+- `handle` 不再从包级导出（它会让 `app.agent` 反向依赖整个主循环）；需要请直接
+  `from app.agent.loop.chat import handle`。
+- `app.llm.storage` 仍在，只是搬到 `app/agent/storage/`。
+
+顺带的架构清理（详见 `docs/ARCHITECTURE.md §5.2`）：
+
+- `app/agent/tools/onebot/manifest.py` 的 4,789 行工具字面量外置为
+  `manifest.json`，加载器约 100 行；175 条工具由 `tests/test_onebot_manifest_data.py` 校验；
+- `app/modules/api.py` 不再从 `app.bootstrap` 取容器，改用
+  `app.core.container.get_active()`（全库唯一允许的服务定位）；
+- `app/modules/media_cache.py` 下沉到 `app/infrastructure/fs/media_cache.py`；
+- 工具注入策略从 `tools/system.py` 拆出到 `app/agent/tools/policy.py`。
+
+实测：最大强连通块从 27 文件 / 13,547 行降到 **3 文件 / 3,355 行**，
+`chat.py` 的可达闭包从 158 文件 / 41,717 行降到 **92 文件 / 25,342 行**
+（`venv\Scripts\python.exe scripts\gen\arch_closure.py`）。
+
 ### 修复：token 消耗那一行不再把回退模型记成主模型名
 
 `[Api] 本次请求消耗: ... | model=deepseek-chat | 流式` 此前固定取**回退链第一个配置**

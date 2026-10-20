@@ -1,7 +1,7 @@
 # QQBot Next WebUI 前后端契约文档
 
 > 用途：为使用 Vue3 重写前端提供精确的 API 文档。
-> 依据源码：`app/webui/**`、`app/services/bot_service.py`、`app/infrastructure/config/config_service.py`、`app/infrastructure/onebot/gateway.py`、`app/llm/{scheduler,proactive,config_schema}.py`、`app/services/log_service.py`。
+> 依据源码：`app/webui/**`、`app/services/bot_service.py`、`app/infrastructure/config/config_service.py`、`app/infrastructure/onebot/gateway.py`、`app/agent/{scheduler,proactive,config_schema}.py`、`app/services/log_service.py`。
 > 字段名与代码保持一致；所有旧版值类型/含义均按当前实现记录。
 
 ---
@@ -212,7 +212,7 @@
     "schema": { "groups": {...}, "items": {...} }  // 见 §3 / §4
   }
   ```
-- `schema` 由 `app/llm/config_schema.SCHEMA` 经 `_split_schema` 拆为 `{groups, items}`；`groups` 为 `type=="group"` 的字段，`items` 为其余字段。
+- `schema` 由 `app/agent/config_schema.SCHEMA` 经 `_split_schema` 拆为 `{groups, items}`；`groups` 为 `type=="group"` 的字段，`items` 为其余字段。
 
 #### POST /agent/config
 - 查询参数：`bot_id?: int|null`
@@ -517,7 +517,7 @@ widgets.js `renderSubField(schema, initial)` 复用给 dynamic / repeater，控�
 
 ### 7.1 /agent/config 的 config/schema
 
-- `config` 即框架 `AgentConfig.raw_config` 过滤 password 后（打码）输出。`schema.config`（未拆分前，即 `app/llm/config_schema.SCHEMA`）包含分组与实际配置项——见 config_schema.py 全量，归纳：
+- `config` 即框架 `AgentConfig.raw_config` 过滤 password 后（打码）输出。`schema.config`（未拆分前，即 `app/agent/config_schema.SCHEMA`）包含分组与实际配置项——见 config_schema.py 全量，归纳：
   - **分组（type:group）**：`group_api` API 设置 / `group_model` 模型参数 / `group_switch` 功能开关 / `group_session` 会话管理 / `group_trigger` 触发设置 / `group_stream` 流式回复 / `group_proactive` 主动消息 / `group_schedule` 定时任务 / `group_permission` 权限。均 `collapsible:true`。
   - **字段类型分布**：
     - `password`: `api_key`

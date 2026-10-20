@@ -1,7 +1,7 @@
 # 群聊记录（环境背景）与表情闭环 设计定稿
 
-> 状态：**A~G 已完成并测试通过**（记录面 `app/llm/group_log/`、模块 `module/modules/group_log/`、
-> 装配块 `assembly.build_group_log`、表情工具与词表 `app/llm/emoji_lexicon.py` + `app/llm/onebot_tools/tools.py`）。
+> 状态：**A~G 已完成并测试通过**（记录面 `app/agent/group_log/`、模块 `module/modules/group_log/`、
+> 装配块 `assembly.build_group_log`、表情工具与词表 `app/agent/persona/emoji.py` + `app/agent/tools/onebot/tools.py`）。
 > 起因：模型对"群里现在什么气氛、别人对哪条消息做了什么反应"没有持续来源——会话历史只在
 > 消息**触发机器人**时写入（`pipeline.check_trigger` 不通过直接 return），且完全不含互动；
 > 而贴表情的 `emoji_id` 是数字串，模型只能猜，贴错还**不可撤回**。
@@ -16,7 +16,7 @@
 | 写入时机 | 消息**触发**机器人时（`chat.prepare_prompt`） | **每条**群事件（模块 hook，不看 trigger） |
 | 形态 | 规范对话形态，正文**不截断** | 环境形态，可折叠、有预算 |
 | 内容 | user/assistant 对话 | 消息 + 表情 + 戳 + 撤回 + **我自己的发言** |
-| 存储 | `session.py`（会话级、SQLite 归档） | `app/llm/group_log/store.py`（按群分片、JSONL） |
+| 存储 | `session.py`（会话级、SQLite 归档） | `app/agent/group_log/store.py`（按群分片、JSONL） |
 | 生命周期 | 与会话同寿命 | 保留窗口（默认 2000 条 / 24h）滚动 |
 
 **两者都用 message_id 做锚点**：装配时会话历史已承载的正文不再进环境块，但它上面的
@@ -33,7 +33,7 @@ L4 装配    assembly.BLOCKS 的 group_log 块（背景之后、会话历史之�
 L5 闭环    qq_faces（客户端表）+ emoji_lexicon（语义→id）+ OneBot 工具的"贴前先读/成功记账" + emoji_reply 共用记录
 ```
 
-## 3. 记录面（`app/llm/group_log/`）
+## 3. 记录面（`app/agent/group_log/`）
 
 ### 3.1 事件契约（`events.py`）
 
@@ -124,7 +124,7 @@ L5 闭环    qq_faces（客户端表）+ emoji_lexicon（语义→id）+ OneBot 
 
 ### 5.3 词表来源：从客户端表导出，观察优先
 
-- **全量表**（`app/llm/qq_faces.py`，生成物）：QQ 客户端下发的 `face_config.sysface`，
+- **全量表**（`app/agent/persona/data/qq_faces.py`，生成物）：QQ 客户端下发的 `face_config.sysface`，
   由 `scripts/export_napcat_faces.py` 从本机 NapCat 包里导出（296 个名字 → `QSid`）。
   它同时是 OneBot `face` 段的 id 与 `set_msg_emoji_like` 的 `emoji_id` 空间，所以
   `DEFAULT_TAGS` = 表内全量名 + 口语别名（点个赞/狗头/问号/无语/加油），不再只有十几个常见表情；
@@ -155,13 +155,13 @@ L5 闭环    qq_faces（客户端表）+ emoji_lexicon（语义→id）+ OneBot 
 模块（`module/modules/group_log`）：`group_log_enable`（默认开，记录开关）、
 `retention_count`（2000）、`retention_hours`（24）、`strip_directives`（true）。
 
-Agent（`app/llm/config.py` + `config_schema.py`）：`group_log_enable`（默认开，注入开关）、
+Agent（`app/agent/config.py` + `config_schema.py`）：`group_log_enable`（默认开，注入开关）、
 `group_log_window_minutes`（60）、`group_log_window_limit`（50）、`group_log_max_chars`（4000）。
 
 **保留窗口与组装窗口独立**：本地能查多远（模块配置）≠ 一次请求塞多少（Agent 配置）。
 模块不在场 / 开关关闭 → 环境块为空，行为与改造前一致（可回滚）。
 
-## 8. 显示名映射：所有"人名"的唯一出口（`app/llm/display_names.py`）
+## 8. 显示名映射：所有"人名"的唯一出口（`app/agent/context/display_names.py`）
 
 ### 8.1 起因
 

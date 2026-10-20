@@ -78,7 +78,7 @@ async def add_bot(
 ## 6. 代码组织
 
 - **分层依赖只向下**：`core → domain → infrastructure → modules/services → webui`；装配只在 `app/bootstrap.py`。
-  > ⚠️ `app/llm/` **目前不在这条链上**：它被 `services`/`modules`/`webui` 依赖，又反过来依赖 `modules`，
+  > ⚠️ `app/agent/` **目前不在这条链上**：它被 `services`/`modules`/`webui` 依赖，又反过来依赖 `modules`，
   > 并与另外 23 个文件互为循环依赖（见 §12.1）。新增代码不要加深这个环。
 - **单文件单职责**：一个文件只做一件事。判据不是行数，而是"改它时你是否被迫同时读几个无关文件"。
 - **函数内惰性导入是最后手段，不是惯例**：仅当**确实无法**通过构造函数/参数注入解决时才用，
@@ -236,56 +236,86 @@ pytest -q --cov --cov-report=term-missing   # 需要覆盖率时
 > 本节数字为 **AST 解析全库 import 图实测**得出，不是估计。动手前先读这里：
 > **不要以现状为范例**。债还掉一部分后请把新数字更新回本节（这是唯一的进度记录）。
 >
-> 口径：行数=文件总行数（含空行与注释）；**数字会随代码变动漂移**，复核时请重算，不要照抄。
-> 重算方法：解析每个 `.py` 的 `Import`/`ImportFrom`（`ast.walk` 会连函数内惰性 import 一起覆盖），
-> 建图后求「前向可达 ∩ 反向可达」即得强连通块；闭包大小 = 前向可达集合的行数合计。
+> 口径：行数=文件总行数（含空行与注释）；扫描域 `app/` + `module/` + `scripts/`；
+> **数字会随代码变动漂移**，复核时请重算，不要照抄。
+> **重算方法（唯一来源）**：`venv\Scripts\python.exe scripts\gen\arch_closure.py`
+> ——`--scc` 看环、`--why <模块>` 看环的成因路径、`--assert-max N` 供 CI 断言。
+> 不要再手写脚本重算（口径会漂）。
 
-### 12.1 一个 24 文件 / 12,112 行的强连通块
+### 12.0 进度速览（P0–P3 已完成）
 
-`app/llm/chat.py` 所在的一块里有 24 个文件**互为递归依赖**，任何一处都无法单独理解：
-`chat`(2192) `context_tools`(1059) `scheduler`(967) `assembly`(790) `image`(623)
-`image_media`(617) `pipeline`(582) `session_history_service`(557) `webui/api/modules`(539)
-`features`(538) `proactive`(520) `webui/api/agent`(435) `manager`(433) `bootstrap`(416)
-`webui/api/sessions`(378) `webui/app`(375) `referent`(314) `initiative_stream`(196)
-`webui/api/media`(132) `system_tools`(126) `app/modules`(116) `core/container`(97)
-`modules/api`(81) `webui/api/framework`(29)。
+| 指标 | 制定方案时 | 现在 |
+|---|---|---|
+| 最大强连通块 | 24 文件 / 12,112 行（仅模块层 import；含惰性 import 实测 27 文件 / 13,547 行） | **3 文件 / 3,355 行** |
+| 无环模块占比 | — | **99%（274 / 277）** |
+| `chat.py` 可达闭包 | 143 文件 / 42,082 行 | **92 文件 / 25,342 行** |
+| 生产代码 `from app.bootstrap import` | 4 | **0** |
+| `get_container()` 直调 | 71 次 / 14 文件 | **64 次 / 10 文件**（全在 `webui/api/*`，且都是 FastAPI 依赖） |
+| 单文件最大 `manifest.py` | 4,789 行 | **已外置 JSON**（加载器约 100 行） |
+| `app/agent/` 顶层平铺 | 55 文件 / 20,916 行 | **8 文件 / 2,939 行**（11 个职责子包） |
 
-后果：只改 `chat.py` 一处，静态可达 **143 个文件 / 42,082 行**——而 `app/` 全部才 166 文件 /
-46,658 行（且这个闭包还包含部分 `module/` 下的文件）。等于改一行就要理解整个应用。
+改造过程与实测见 `docs/ARCHITECTURE.md §5.2`；剩余工作见同文件 §5.1 的 P4–P6。
 
-**验收指标：任何入口文件的可达闭包 ≤ 8,000 行。** 现状 chat.py = 42,000+。
-自检办法：对目标文件做一次函数级 import 闭包统计（含函数内 import），别只看文件顶部。
+### 12.1 剩下一个 3 文件 / 3,355 行的强连通块
 
-### 12.2 服务定位器 71 处
+`app/agent/loop/chat.py`(2,192) `app/agent/proactivity/scheduler.py`(967)
+`app/agent/proactivity/stream.py`(196) 三者为环：
 
-`get_container()` 被直调 **71 次 / 14 个文件**，其中 **65 次在 `app/webui/api/*`**——
-这是 webui 那 6 个文件被焊进 §12.1 循环的直接原因。
-目标：全部改为构造函数注入（`app/webui/api/deps.py` 已是 FastAPI 依赖注入入口，应统一走那里）。
+- 主循环要拿到 `schedule_task` 工具（`chat → scheduler`）；
+- 调度器到点要跑一轮生成（`scheduler → chat` 的 `build_initiative_tools` / `_max_tool_rounds`）。
+
+**改这三处任一个，另外两处都可能在你的变更里静默失效。** 拆法见 P4：把「定时工具」
+（`build_schedule_tool` / `handle_schedule_tool` / 意图检测）从「定时引擎」
+（`TaskScheduler`）里分离——工具属 `agent/tools/`，引擎属 `agent/proactivity/`。
+
+历史上这里还有 `app.core.container`、`app.bootstrap`、`app.webui.api.*`、`app.modules.*`、
+`app.agent.media.store` 六个文件，已通过「活动容器下沉 core」「`media_cache` 下沉
+infrastructure」「工具注入策略拆出 `tools/policy.py`」全部拉出环。
+
+**验收指标：任何入口文件的可达闭包 ≤ 8,000 行。**
+`app.bootstrap` / `app.webui.app` 两个装配根**豁免**（它们的闭包按定义就是全图）。
+自检：`arch_closure.py` 的入口闭包表。
+
+### 12.2 服务定位器剩 64 处（已收敛到一个入口）
+
+`get_container()` 直调 **64 次 / 10 个文件**，全在 `app/webui/api/*`，且都已经是
+FastAPI 依赖（`request.app.state.container`，见 `deps.py`）——不再是"绕过容器直调"。
+
+- 已清零：`app/modules/api.py` 的 4 处（改用 `app.core.container.get_active()`）。
+- 目标：端点改成 `Depends(具体服务)`，不再自己从容器里用 `type` 捞。
+- **`app.core.container.get_active()` 是全库唯一允许的服务定位**，且只给「插件无参
+  便捷 API」用（插件不该被迫先拿容器）。新代码一律传参或 `Depends`。
 
 ### 12.3 两套同名调度器
 
-`app/services/scheduler.py::SchedulerService`（203 行，模块 `SCHEDULES=` 声明式定点任务）
-与 `app/llm/scheduler.py::TaskScheduler`（834 行，LLM 语义定时，落盘 `tasks_data.json`）
+`app/services/scheduler.py::SchedulerService`（230 行，模块 `SCHEDULES=` 声明式定点任务）
+与 `app/agent/proactivity/scheduler.py::TaskScheduler`（967 行，LLM 语义定时，落盘 `tasks_data.json`）
 在时间解析、到点触发、取 bot 连接上**零复用**。改任一处前先确认改的是哪一个。
+（P5 把 `app/services/` 改名 `app/application/` 时，两者会分别落在
+`app/application/scheduler.py` 与 `app/agent/proactivity/scheduler.py`——名字仍撞，
+届时给前者改名为 `cron_service.py`。）
 
 ### 12.4 双前端
 
 `dashboard/`（Vue3 + Vuetify）与 `app/webui/static/`（手写 `main.js` 74KB + `widgets.js` 36KB +
 `index.html` 46KB + `style.css` 37KB ≈ 195KB）功能重叠：同一张 Agent 配置表单实现了两遍
 （`DynamicWidget.vue` vs `widgets.js`）。`app/webui/app.py` 保留 `/legacy` 回退。
-**schema 每加一个字段要改两处，第二处极易漏且没有测试会红。**
+**schema 每加一个字段要改两处，第二处极易漏且没有测试会红。** 删旧版属 P6。
 
-### 12.5 巨型数据伪装成代码
+### 12.5 巨型数据伪装成代码（已还一半）
 
-`app/llm/onebot_tools/manifest.py` **4,789 行**（纯 `ONEBOT_TOOLS` 字面量）、
-`app/llm/config_schema.py` **1,037 行**（纯 `SCHEMA` 字面量）。改一条工具描述会淹没在 4789 行的
-diff 里。目标：迁成 `data/schemas/*.json` + pydantic 校验 + 生成脚本。
+| 文件 | 原状 | 现状 |
+|---|---|---|
+| `app/agent/tools/onebot/manifest.py` | 4,789 行纯 `ONEBOT_TOOLS` 字面量 | **已外置 `manifest.json`**，加载器约 100 行；175 条由 `tests/test_onebot_manifest_data.py` 逐条校验 |
+| `app/agent/config_schema.py` | 1,072 行 | **保留不拆**：它是「数据 + `_gate`/`_on` DSL」，JSON 化会把条件可见性的可读意图摊成重复字面量 |
+| `app/agent/persona/data/qq_faces.py` | 127 行 | **保留不拆**：生成物，`scripts/export_napcat_faces.py --check` 依赖 Python 渲染 |
 
-### 12.6 领域层空心
+### 12.6 领域层仍然空心
 
-`app/domain/` 仅 **459 行 / 4 文件**，全是 DTO，没有业务规则。真正该属于领域的判断
-（"何时该主动说话""下次触发怎么算""人格规则怎么裁"）散在 `llm/proactive.py`、
-`llm/scheduler.py`、`llm/persona_rules.py` 里，与 LLM 调用、JSON 落盘混居。
+`app/domain/` 仅 **595 行 / 4 文件**，全是 DTO，没有业务规则。真正该属于领域的判断
+（"何时该主动说话""下次触发怎么算""人格规则怎么裁"）散在 `agent/proactivity/`、
+`agent/persona/` 里，与 LLM 调用、JSON 落盘混居。P4 要把「零内部依赖的纯规则模块」
+（`time_parser` / `trigger` / `splitter` 一类）搬进 `app/domain/`。
 同时 `BaseRepository` 零引用（见 §8 门面）。
 
 ---

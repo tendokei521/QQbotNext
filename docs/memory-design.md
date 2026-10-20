@@ -53,7 +53,7 @@ user 消息 → 会话历史 + ② 记忆注入(召回 owner=群公共+本人+�
 
 - **存储合同不变**：`memories` 表已预留 `embedding BLOB` 列，`MemoryStore` 仍是唯一事实源。
 - **召回只改 `recall.py`**：`rank()` 是纯函数。将来升级 = 写入时后台补 embedding → `rank()` 内先关键词预筛 top-K → 向量余弦精排 → 与重要度/新度加权融合。上层（工具/注入/命令/审计）零改动。
-- **RAG（文档/知识库）**：另建独立模块（如 `app/llm/knowledge/`），挂同一 `ToolContext`/ToolSpec 工具体系（`knowledge_search`），**不要**耦合进 memory。
+- **RAG（文档/知识库）**：另建独立模块（如 `app/agent/knowledge/`），挂同一 `ToolContext`/ToolSpec 工具体系（`knowledge_search`），**不要**耦合进 memory。
 - 触发时机：当记忆量上万条或出现真实“想不起来”反馈且关键词召回假阴性高时，再引入 embedding；在此之前不上，避免依赖/成本/调优开支。
 
 ## 6. 回滚与安全

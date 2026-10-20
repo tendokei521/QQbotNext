@@ -191,7 +191,7 @@
 
 ## 5. 改动清单（文件级）
 
-### 5.1 新增 `app/llm/persona_rules.py`
+### 5.1 新增 `app/agent/persona/rules.py`
 
 ```python
 def detect_caps(available_tools: set[str] | None, config, modalities=None) -> dict
@@ -216,7 +216,7 @@ def report_ban() -> str
 def render(runtime, available_tools=None, config=None) -> str   # 固定顺序拼接，空段跳过
 ```
 
-### 5.2 `app/llm/assembly.py`
+### 5.2 `app/agent/assembly/assembler.py`
 
 ```python
 def build_behavior(req: PromptRequest) -> list[dict]:
@@ -237,19 +237,19 @@ BLOCKS = (
 )
 ```
 
-### 5.3 `app/llm/prompt.py`（收敛，不新增段落）
+### 5.3 `app/agent/assembly/prompt.py`（收敛，不新增段落）
 
 - `build_proactive_instruction(...)` 增加 `dedupe: bool` 参数：`dedupe=True` 时只输出
   「意图补强行 + 未展开标记语义 + 指代解析行」，与 behavior 段重复的引用/@/拍一拍/工具用法行不再输出。
 - 新增 `build_guide_block(caps)` → 【引导说明】4 条（稳定文本，进 user 段序）。
 - 删除/停用 `LEGACY_MESSAGE_META_INSTRUCTION` 的注入路径（`meta_instruction_mode` 默认改 `off`）。
 
-### 5.4 `app/llm/enhance.py`
+### 5.4 `app/agent/assembly/enhance.py`
 
 - `format_user_context` 增加 `qq_agent` 分支：不再把时间/群号/发送者/正文拼成六行块，
   改为 `history_model._single_line(...)` 形态；环境行（群名/群号/QQ）由装配层放到稳定位置。
 
-### 5.5 `app/llm/history_model.py`
+### 5.5 `app/agent/session/model.py`
 
 - 无需改渲染逻辑（已有单行 `MM-DD HH:MM 昵称(QQ): 正文`），只新增一个
   `render_line_with_labels(entry, labels)` 用于给行尾追加 `（@我/提问）`。
@@ -326,7 +326,7 @@ BLOCKS = (
 
 ## 9. 落地记录（P2 发言通道，2026-XX）
 
-提交：`22415da` 记账本（`app/llm/speech.py`）+ 工具/出口支持、`19c8db6` 接进流式主循环。
+提交：`22415da` 记账本（`app/agent/delivery/speech.py`）+ 工具/出口支持、`19c8db6` 接进流式主循环。
 
 ### 9.1 到底改了什么
 

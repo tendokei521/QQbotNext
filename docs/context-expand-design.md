@@ -34,11 +34,11 @@ QQ 消息进入 LLM 时经常只剩"骨架"：`@123`、`[引用]`、`消息 id`�
 
 | 层 | 实现 | 作用 |
 |---|---|---|
-| 反查层 | `app/llm/nicknames.py` | id → 昵称（群名片优先），共享缓存 + 批量并发；`enhance` 与渲染层共用 |
+| 反查层 | `app/agent/context/nicknames.py` | id → 昵称（群名片优先），共享缓存 + 批量并发；`enhance` 与渲染层共用 |
 | 渲染层 | `group_context._segment_text / extract_msg_text / format_online_history / fetch_group_online_history` | 预展开 `@123`；展不开才落 `【未展开:…】`；已取回的落 `【已展开:… → 摘要】`；末尾追加缺口摘要 |
 | 摘要层 | `group_context.unresolved_items / unresolved_summary` | `【本段含 N 处未展开内容（M 类）：…；可调用 expand_message 展开后再回答】` |
-| 工具层 | `app/llm/context_tools.py` | 三个意图工具：`expand_recent`（按位置）/ `expand_message`（按 id）/ `expand_user`（按 QQ）；公共取回 API `fetch_entities` / `fetch_recent` |
-| 指代层 | `app/llm/focus.py` + `referent.py` | 会话焦点表 + 指代判定 + 确定性预取（见 [referent-resolution-design.md](referent-resolution-design.md)） |
+| 工具层 | `app/agent/tools/context_tools.py` | 三个意图工具：`expand_recent`（按位置）/ `expand_message`（按 id）/ `expand_user`（按 QQ）；公共取回 API `fetch_entities` / `fetch_recent` |
+| 指代层 | `app/agent/context/focus.py` + `referent.py` | 会话焦点表 + 指代判定 + 确定性预取（见 [referent-resolution-design.md](referent-resolution-design.md)） |
 | 提示词层 | `prompt.build_proactive_instruction` | 环境行 + 未展开标记语义 + 指代解析三条 + footer 例外条款；按本轮实际可用工具裁剪 |
 | 机制层 | `tool_loop`（并发执行、参数失败不静默、结果尾附回应要求）、`max_tool_rounds`、`chat.build_initiative_tools` | 让"一次展开多个 id"不会超时、不被静默降级、不写成长串汇报；主动消息/定时任务路径也有工具 |
 
@@ -64,7 +64,7 @@ QQ 消息进入 LLM 时经常只剩"骨架"：`@123`、`[引用]`、`消息 id`�
 
 - 三条路径都在**切换会话配置档案之后**收集工具（与 `chat.handle` 顺序一致）。
 - 主动/定时路径的 `ToolContext` 没有 `event`，会话目标由 `bot` / `user_id` / `group_id` 显式给出。
-- 块顺序与清洗统一由 `app/llm/assembly.py` 的块表决定（见该模块文档）。
+- 块顺序与清洗统一由 `app/agent/assembly/assembler.py` 的块表决定（见该模块文档）。
 
 ## 5. 配置项
 
