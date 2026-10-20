@@ -253,7 +253,7 @@ pytest -q --cov --cov-report=term-missing   # 需要覆盖率时
 | 端点里 `container.get(类型)` | — | **2 次**（都在 `deps.get_service` 内部） |
 | 单文件最大 `manifest.py` | 4,789 行 | **已外置 JSON**（加载器 78 行） |
 | `app/agent/` 顶层平铺 | 55 文件 / 20,916 行 | **8 文件 / 2,939 行**（14 个职责子包） |
-| 单文件最大 `chat.py` | 2,192 行 | **1,668 行**（切出 turn_metrics/assistant_output/tool_source） |
+| 单文件最大 `chat.py` | 2,192 行 | **1,176 行**（切出 command_dispatch / context_blocks / turn_metrics / assistant_output / tool_source） |
 | `app/domain/` | 4 文件 / 595 行（全是 DTO） | **10 文件 / 1,288 行**（时间解析/触发/分条/节奏/标签/能力判定） |
 | 包职责说明 README | 0 份 | **27 份**，且由 `tests/architecture/test_architecture_layout.py` 强制 |
 | 前端套数 | 2 套（Vue + 手写 JS，约 4,800 行重复） | **1 套**（`app/webui/dashboard/dist`；旧版与 `/legacy` 已删） |
@@ -267,6 +267,9 @@ pytest -q --cov --cov-report=term-missing   # 需要覆盖率时
 | 前端源码位置 | 仓库根 `dashboard/` | **`app/webui/dashboard/`** |
 
 改造过程与实测见 `docs/ARCHITECTURE.md §5.2`；剩余工作见同文件 §5.1.1。
+
+> **单文件长度有闸**：`tests/architecture/test_architecture_layout.py::test_no_file_grows_beyond_allowlist`
+> 要求 `app/**/*.py` ≤ 800 行，豁免名单（6 个）只许缩小。
 
 ### 12.1 强连通块已清零（保留本节作为「怎么做到」的记录）
 

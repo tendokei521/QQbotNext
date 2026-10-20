@@ -575,7 +575,7 @@ docs/
 | **P4** 最后一个环 + 包职责文档 | 定时工具从定时引擎分离（`tools/schedule.py`）；22 份包 README + 闸三 | ✅ **已完成** | **0 个强连通块**；闸三落地 |
 | **P5** 目录归一 | `module/modules`→`app/plugins`；`app/modules`→`app/plugin`；`tests/` 分区；`scripts/` 三分；`group_log` 拆 `service.py`；`domain/` 长实 | ✅ **已完成** | 13 插件全加载；1653+ passed |
 | **P6** 前端收敛 + 目录收口 | 删 `webui/static`+`templates`+`/legacy`；`dashboard/`→`app/webui/dashboard/` | ✅ **前端部分完成** | `/` 200；`/legacy` 404 |
-| **P7** `chat.py` 拆片 | 2,192 行按职责拆到 `loop/` 子文件（`chat.py` 保留重导出，API 不变） | 🟡 **第一轮完成** | 2,192 → **1,668 行**（切出 turn_metrics / assistant_output / tool_source）；三个长函数仍待按段落拆 |
+| **P7** `chat.py` 拆片 | 2,192 行按职责拆到 `loop/` 子文件（`chat.py` 保留重导出，API 不变） | ✅ **已完成两轮** | 2,192 → **1,176 行**；切出 5 个子模块（见 §3.1.3） |
 | **P9** 目录收口 | `app/nodes` 并入 `app/plugin/nodes`（✅）；`app/services` → `app/application`（✅） | ✅ **已完成** | **`app/` 顶层 8 个目录，即 §2.1 的最终形态** |
 | **P8** WebUI 依赖注入收尾 | `webui/api/*` 的 `get_container()` / `container.get(类型)` 全改 `Depends(get_x_service)` | ✅ **已完成** | **71 → 1**（只剩 `deps.py` 的实现本身），17 条具名依赖 |
 

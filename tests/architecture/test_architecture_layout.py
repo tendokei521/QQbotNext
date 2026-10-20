@@ -176,3 +176,38 @@ def test_no_stale_pycache_only_directories() -> None:
         if not entries:
             stale.append(rel)
     assert not stale, f"这些目录只剩 __pycache__，应删除: {stale}"
+
+
+# --------------------------------------------------------------------------- #
+# 源文件长度：只许降的棘轮
+# --------------------------------------------------------------------------- #
+#: 允许超长的文件（豁免名单只能缩小）。每修完一个文件就把它从这里删掉。
+_LONG_FILE_ALLOWLIST = {
+    "app/plugin/registry.py": 681,  # load_single 234 行，待按「扫描/加载/热重载」拆
+    "app/plugin/features.py": 538,  # 14 个 *FeatureController 挤在一个文件
+    "app/agent/tools/context_tools.py": 1059,  # 上下文展开类工具，待按工具拆
+    "app/agent/config_schema.py": 1072,  # 数据 + _gate/_on DSL，刻意不拆
+    "app/agent/proactivity/scheduler.py": 850,  # 定时引擎
+    "app/agent/loop/chat.py": 1176,  # 已从 2,192 拆到 1,176；三个长函数仍待按段落抽
+    "app/infrastructure/config/config_service.py": 823,  # 配置中心（SQLite + 缓存 + 广播）
+    "app/infrastructure/onebot/gateway.py": 817,  # 连接/去重/重连/僵尸扫描
+}
+MAX_FILE_LINES = 800
+
+
+def test_no_file_grows_beyond_allowlist() -> None:
+    """`app/**/*.py` 单个文件 ≤ 800 行；豁免名单里的文件只许变短。
+
+    `chat.py` 曾是 2,192 行——改一句话要在一屏外的上下文里找。这条闸把「又长回去了」
+    变成 CI 会红的事，而不是靠记性。
+    """
+    offenders: list[str] = []
+    for path in (ROOT / "app").rglob("*.py"):
+        rel = path.relative_to(ROOT).as_posix()
+        if "__pycache__" in rel or "dashboard" in rel:
+            continue
+        lines = path.read_bytes().count(b"\n")
+        limit = _LONG_FILE_ALLOWLIST.get(rel, MAX_FILE_LINES)
+        if lines > limit:
+            offenders.append(f"{rel}: {lines} 行 > 上限 {limit}")
+    assert not offenders, "这些文件超长（拆完记得同步缩小豁免名单）:\n  " + "\n  ".join(offenders)
