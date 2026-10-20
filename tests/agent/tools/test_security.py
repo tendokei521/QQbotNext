@@ -2,8 +2,8 @@
 
 import pytest
 
-from app.infrastructure.config.config_service import mask_ws_url, restore_ws_url
 from app.application.bot_service import PASSWORD_MASK, _mask_password_config
+from app.infrastructure.config.config_service import mask_ws_url, restore_ws_url
 
 
 def test_password_fields_are_masked():

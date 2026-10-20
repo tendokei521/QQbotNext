@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+from app.application.resource_registry import ResourceRegistry
 from app.plugin.schema_utils import (
     KNOWN_TYPES,
     normalize_field,
@@ -21,7 +22,6 @@ from app.plugin.schema_utils import (
     split_schema,
     webui_schema,
 )
-from app.application.resource_registry import ResourceRegistry
 
 
 class _FakeRegistry:

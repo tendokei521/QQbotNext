@@ -23,10 +23,12 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 from app.agent import logger
 from app.agent.tools.spec import ToolSpec
+from app.domain.time_parser import parse_schedule
 
 SCHEDULE_TASK_SCHEMA: dict = {
     "type": "object",
@@ -141,3 +143,49 @@ def build_schedule_tool(module, session_id: str, is_private: bool) -> ToolSpec:
         source="system",
         category="定时任务",
     )
+
+
+# ==================== 定时意图检测（确定性兜底） ====================
+
+_SCHEDULE_VERBS = ("提醒", "定时", "记得", "叫我", "叫醒", "通知", "别忘了", "别忘", "到点")
+
+
+_NOTE_STRIP_RES = (
+    re.compile(r"大后天|后天|明天|今天|今晚|今日|每日|每天|每周|每月|每\s*\d+\s*[分钟小时天]"),
+    re.compile(r"凌晨|清晨|早上|上午|中午|下午|傍晚|晚上|夜里|夜间|半夜"),
+    re.compile(r"\d{1,2}\s*[:：]\s*\d{1,2}(?:\s*[:：]\s*\d{1,2})?"),
+    re.compile(r"\d{1,2}\s*点\s*(?:\d{1,2}\s*分|\s*半)?"),
+    re.compile(r"[一二两三四五六七八九十半]+\s*(?:个)?\s*[分钟小时天钟头]+\s*(?:之)?后"),
+    re.compile(r"每\s*(?:隔)?\s*\d+\s*[分钟小时天]"),
+)
+
+
+def has_schedule_intent(text: str) -> bool:
+    """判定用户消息是否含「定时提醒」意图：有提醒动词 + 时间可解析。
+
+    用作兜底：LLM 未调用工具但用户确实提了定时请求时，由框架确定性排程。
+    """
+    text = (text or "").strip()
+    if not text:
+        return False
+    if not any(v in text for v in _SCHEDULE_VERBS):
+        return False
+    return parse_schedule(text) is not None
+
+
+def extract_reminder_note(text: str) -> str:
+    """从请求里提取「到点要做的事」（去掉时间表达与客套）。"""
+    cleaned = text or ""
+    for pat in _NOTE_STRIP_RES:
+        cleaned = pat.sub("", cleaned)
+    for kw in ("提醒", "定时", "记得", "通知", "别忘了", "别忘", "叫醒"):
+        idx = cleaned.find(kw)
+        if idx >= 0:
+            cleaned = cleaned[idx + len(kw):]
+            break
+    for pre in ("我", "你", "你帮", "帮我"):
+        if cleaned.startswith(pre):
+            cleaned = cleaned[len(pre):]
+            break
+    cleaned = cleaned.strip(" ，,。？?！!、的").strip()
+    return cleaned or (text or "").strip()

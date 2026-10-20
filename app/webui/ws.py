@@ -55,9 +55,9 @@ def build_ws_router():
 
     @router.websocket("/ws/logs")
     async def websocket_logs(websocket: WebSocket):
+        from app.application.log_service import LogService
         from app.core.settings import Settings
         from app.infrastructure.config.config_service import ConfigService
-        from app.application.log_service import LogService
 
         container = websocket.app.state.container
         settings = container.get(Settings)

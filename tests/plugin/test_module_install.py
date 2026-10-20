@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
+from app.application.module_install_service import ModuleInstallService
 from app.infrastructure.config.config_service import ConfigService
 from app.plugin.base import ServiceAccess
 from app.plugin.registry import ModuleRegistry
-from app.application.module_install_service import ModuleInstallService
 
 LOCAL_MODULE = '''
 from app.plugin import BaseModule

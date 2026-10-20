@@ -441,7 +441,7 @@ def test_schedule_tool_openai_definition():
 # ==================== 兜底：定时意图检测 ====================
 
 def test_has_schedule_intent():
-    from app.agent.proactivity.scheduler import has_schedule_intent
+    from app.agent.tools.schedule import has_schedule_intent
 
     assert has_schedule_intent("能在今天晚上11点提醒我睡觉吗") is True
     assert has_schedule_intent("明天早上8点记得提醒我吃药") is True
@@ -455,7 +455,7 @@ def test_has_schedule_intent():
 
 
 def test_extract_reminder_note():
-    from app.agent.proactivity.scheduler import extract_reminder_note
+    from app.agent.tools.schedule import extract_reminder_note
 
     assert "睡觉" in extract_reminder_note("能在今天晚上11点提醒我睡觉吗")
     assert "吃药" in extract_reminder_note("明天早上8点记得提醒我吃药")

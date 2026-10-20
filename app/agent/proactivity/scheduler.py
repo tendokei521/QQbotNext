@@ -25,6 +25,7 @@ from app.agent.context.group import (
     fetch_group_name,
     fetch_group_online_history,
 )
+from app.agent.proactivity.entry import TaskEntry
 from app.agent.providers import get_provider
 from app.agent.session.manager import SessionManager
 from app.domain.tags import strip_all_tags
@@ -44,80 +45,6 @@ DEFAULT_SCHEDULE_PROMPT = (
 #: ``_generate_reply`` 的「本轮不请求」哨兵：post_assemble 钩子要求跳过时返回它，
 #: 与"LLM 调用失败（resp=None → 回落固定内容）"区分开，避免把中止误当失败。
 _ABORTED = object()
-
-
-class TaskEntry:
-    """单个定时任务。"""
-
-    def __init__(
-        self,
-        *,
-        task_id: str,
-        session_id: str,
-        is_group: bool,
-        target: str,
-        trigger_expr: str,
-        content: str,
-        repeat: str = "once",
-        next_at: datetime,
-        weekday: int | None = None,
-        dom: int | None = None,
-        interval_seconds: int | None = None,
-        created_at: int | None = None,
-        fired_count: int = 0,
-        active: bool = True,
-    ) -> None:
-        self.id = task_id
-        self.session_id = session_id
-        self.is_group = is_group
-        self.target = target
-        self.trigger_expr = trigger_expr
-        self.content = content
-        self.repeat = repeat
-        self.next_at = next_at
-        self.weekday = weekday
-        self.dom = dom
-        self.interval_seconds = interval_seconds
-        self.created_at = created_at or int(time.time())
-        self.fired_count = fired_count
-        self.active = active
-
-    def to_dict(self) -> dict:
-        return {
-            "id": self.id,
-            "session_id": self.session_id,
-            "is_group": self.is_group,
-            "target": self.target,
-            "trigger_expr": self.trigger_expr,
-            "content": self.content,
-            "repeat": self.repeat,
-            "next_at": int(self.next_at.timestamp()),
-            "weekday": self.weekday,
-            "dom": self.dom,
-            "interval_seconds": self.interval_seconds,
-            "created_at": self.created_at,
-            "fired_count": self.fired_count,
-            "active": self.active,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "TaskEntry":
-        return cls(
-            task_id=data["id"],
-            session_id=data["session_id"],
-            is_group=bool(data.get("is_group", False)),
-            target=str(data.get("target", "")),
-            trigger_expr=data.get("trigger_expr", ""),
-            content=data.get("content", ""),
-            repeat=data.get("repeat", "once"),
-            next_at=datetime.fromtimestamp(float(data.get("next_at", 0))),
-            weekday=data.get("weekday"),
-            dom=data.get("dom"),
-            interval_seconds=data.get("interval_seconds"),
-            created_at=data.get("created_at"),
-            fired_count=data.get("fired_count", 0),
-            active=bool(data.get("active", True)),
-        )
 
 
 class TaskScheduler:
@@ -807,44 +734,4 @@ class TaskScheduler:
 
 # ==================== 定时意图检测（确定性兜底） ====================
 
-_SCHEDULE_VERBS = ("提醒", "定时", "记得", "叫我", "叫醒", "通知", "别忘了", "别忘", "到点")
 
-_NOTE_STRIP_RES = (
-    re.compile(r"大后天|后天|明天|今天|今晚|今日|每日|每天|每周|每月|每\s*\d+\s*[分钟小时天]"),
-    re.compile(r"凌晨|清晨|早上|上午|中午|下午|傍晚|晚上|夜里|夜间|半夜"),
-    re.compile(r"\d{1,2}\s*[:：]\s*\d{1,2}(?:\s*[:：]\s*\d{1,2})?"),
-    re.compile(r"\d{1,2}\s*点\s*(?:\d{1,2}\s*分|\s*半)?"),
-    re.compile(r"[一二两三四五六七八九十半]+\s*(?:个)?\s*[分钟小时天钟头]+\s*(?:之)?后"),
-    re.compile(r"每\s*(?:隔)?\s*\d+\s*[分钟小时天]"),
-)
-
-
-def has_schedule_intent(text: str) -> bool:
-    """判定用户消息是否含「定时提醒」意图：有提醒动词 + 时间可解析。
-
-    用作兜底：LLM 未调用工具但用户确实提了定时请求时，由框架确定性排程。
-    """
-    text = (text or "").strip()
-    if not text:
-        return False
-    if not any(v in text for v in _SCHEDULE_VERBS):
-        return False
-    return parse_schedule(text) is not None
-
-
-def extract_reminder_note(text: str) -> str:
-    """从请求里提取「到点要做的事」（去掉时间表达与客套）。"""
-    cleaned = text or ""
-    for pat in _NOTE_STRIP_RES:
-        cleaned = pat.sub("", cleaned)
-    for kw in ("提醒", "定时", "记得", "通知", "别忘了", "别忘", "叫醒"):
-        idx = cleaned.find(kw)
-        if idx >= 0:
-            cleaned = cleaned[idx + len(kw):]
-            break
-    for pre in ("我", "你", "你帮", "帮我"):
-        if cleaned.startswith(pre):
-            cleaned = cleaned[len(pre):]
-            break
-    cleaned = cleaned.strip(" ，,。？?！!、的").strip()
-    return cleaned or (text or "").strip()

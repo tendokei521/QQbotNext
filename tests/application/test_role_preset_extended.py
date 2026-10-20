@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import pytest
 
-from app.plugin.base import ServiceAccess
 from app.application.config_profile_service import ConfigProfileService
 from app.application.role_preset_service import RolePresetService
+from app.plugin.base import ServiceAccess
 
 
 @pytest.fixture

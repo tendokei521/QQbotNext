@@ -4,8 +4,8 @@ import sys
 
 import pytest
 
-from app.plugin import resolve_enabled_ids
 from app.application.provider_service import ProviderRegistry
+from app.plugin import resolve_enabled_ids
 
 MODULE_SRC = '''
 from app.plugin import BaseModule

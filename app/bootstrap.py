@@ -7,11 +7,20 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 
 from app.agent.client import ModuleLLMClient
 from app.agent.providers.runtime_manager import ProviderRuntimeManager
 from app.agent.runtime import AgentManager
+from app.application.bot_service import BotService
+from app.application.config_profile_service import ConfigProfileService
+from app.application.cron_service import SchedulerService
+from app.application.log_service import LogService
+from app.application.module_install_service import ModuleInstallService
+from app.application.provider_model_service import ProviderModelService
+from app.application.provider_preset_service import ProviderPresetService
+from app.application.provider_service import ProviderRegistry
+from app.application.resource_registry import ResourceRegistry
+from app.application.role_preset_service import RolePresetService
 from app.core.container import Container, get_active, set_active
 from app.core.logger import logger, set_console_mode, setup_logging
 from app.core.settings import Settings, load_settings
@@ -41,16 +50,6 @@ from app.plugin.hooks import (
     SendHookRegistry,
 )
 from app.plugin.registry import ModuleRegistry
-from app.application.bot_service import BotService
-from app.application.config_profile_service import ConfigProfileService
-from app.application.log_service import LogService
-from app.application.module_install_service import ModuleInstallService
-from app.application.provider_model_service import ProviderModelService
-from app.application.provider_preset_service import ProviderPresetService
-from app.application.provider_service import ProviderRegistry
-from app.application.resource_registry import ResourceRegistry
-from app.application.role_preset_service import RolePresetService
-from app.application.cron_service import SchedulerService
 
 _container: Container | None = None
 
