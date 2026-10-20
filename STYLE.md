@@ -242,22 +242,28 @@ pytest -q --cov --cov-report=term-missing   # 需要覆盖率时
 > ——`--scc` 看环、`--why <模块>` 看环的成因路径、`--assert-max N` 供 CI 断言。
 > 不要再手写脚本重算（口径会漂）。
 
-### 12.0 进度速览（P0–P4 已完成，P5/P6 大部分完成）
+### 12.0 进度速览（P0–P6 主体已完成）
 
 | 指标 | 制定方案时 | 现在 |
 |---|---|---|
-| 最大强连通块 | 24 文件 / 12,112 行（仅模块层 import；含惰性 import 实测 27 文件 / 13,547 行） | **0 个 —— 全图无环（278/278）** |
+| 最大强连通块 | 24 文件 / 12,112 行（仅模块层 import；含惰性 import 实测 27 文件 / 13,547 行） | **0 个 —— 全图无环（279/279）** |
 | `chat.py` 可达闭包 | 143 文件 / 42,082 行 | **87 文件 / 23,721 行** |
 | 生产代码 `from app.bootstrap import` | 4 | **0** |
-| `get_container()` 直调 | 71 次 / 14 文件 | **64 次 / 10 文件**（全在 `webui/api/*`，且都是 FastAPI 依赖） |
+| `get_container()` 直调 | 71 次 / 14 文件 | **63 次 / 9 文件**（全在 `webui/api/*`，`logs.py` 已清零） |
+| 端点里 `container.get(类型)` | — | **53 次**（新增闸二指标，只许降） |
 | 单文件最大 `manifest.py` | 4,789 行 | **已外置 JSON**（加载器 78 行） |
 | `app/agent/` 顶层平铺 | 55 文件 / 20,916 行 | **8 文件 / 2,939 行**（14 个职责子包） |
-| 包职责说明 README | 0 份 | **23 份**，且由 `tests/test_architecture_layout.py` 强制 |
-| 前端套数 | 2 套（Vue + 手写 JS，约 4,800 行重复） | **1 套**（`dashboard/dist`；旧版与 `/legacy` 已删） |
+| `app/domain/` | 4 文件 / 595 行（全是 DTO） | **10 文件 / 1,288 行**（时间解析/触发/分条/节奏/标签/能力判定） |
+| 包职责说明 README | 0 份 | **27 份**，且由 `tests/architecture/test_architecture_layout.py` 强制 |
+| 前端套数 | 2 套（Vue + 手写 JS，约 4,800 行重复） | **1 套**（`app/webui/dashboard/dist`；旧版与 `/legacy` 已删） |
 | 业务插件位置 | `module/modules/`（仓库根） | **`app/plugins/`**（`module/` 只剩运行时数据） |
+| 插件框架名 | `app/modules/`（与 `module/` 字面混淆） | **`app/plugin/`**（单数=框架，复数=业务插件） |
 | 插件加载方式 | 硬编码包名 `module.modules.<name>` | **按文件路径加载**（合成包名，位置与 import 名解耦） |
+| `tests/` 组织 | 142 文件全平铺 | **按源码镜像分区**（`tests/agent/...`、`tests/webui/...`） |
+| `scripts/` 组织 | 25 文件全平铺 | **`gen/ experiments/ diag/ ops/`** |
+| 前端源码位置 | 仓库根 `dashboard/` | **`app/webui/dashboard/`** |
 
-改造过程与实测见 `docs/ARCHITECTURE.md §5.2`；剩余工作见同文件 §5.1。
+改造过程与实测见 `docs/ARCHITECTURE.md §5.2`；剩余工作见同文件 §5.1.1。
 
 ### 12.1 强连通块已清零（保留本节作为「怎么做到」的记录）
 

@@ -572,37 +572,40 @@ docs/
 | **P1** 数据外置 | `onebot_tools/manifest.py` → `manifest.json` | ✅ **已完成（缩小范围）** | 4,792 行字面量 → 100 行加载器；175 条逐条对账 |
 | **P2** `app/llm`→`app/agent` 分包 | 91 文件按 §3.1 移入 11 个子包 | ✅ **已完成** | 758 处引用改写；全量 1646 passed |
 | **P3** 拆环（最关键） | 活动容器下沉 core；`media_cache` 下沉 infrastructure；工具注入策略拆出 `tools/policy.py` | ✅ **已完成** | 环 63 → **3** 模块；`chat.py` 闭包 46,305 → 25,342 |
-| **P4** 最后一个环 + 包职责文档 | 定时工具从定时引擎分离（`tools/schedule.py`）；22 份包 README + 闸三 | ✅ **已完成** | **0 个强连通块（278/278 无环）**；闸三 7 条落地 |
-| **P5** 目录归一 | `module/modules`→**`app/plugins`**（已完成）；`app/plugin`→`app/plugin`、`nodes` 并入、`services`→`application`（未做） | 🟡 **部分完成** | 13 个插件全部从 `app/plugins` 加载成功 |
-| **P6** 前端收敛 + 文档重排 | 删 `webui/static`（4,065 行）+ `templates/`（727 行）（✅ 已完成）；`app/webui/dashboard/`→`webui/dashboard/`、`docs/` 重排（未做） | 🟡 **部分完成** | `/` 200；`/legacy` 404；测试全绿 |
-| **P4'** 切巨型文件 + 长实 domain | `chat.py` 2,192 行拆片；`domain/` 吸收纯规则 | ⬜ 待做 | 无函数 ≥80 行；`domain/` ≥1,500 行 |
+| **P4** 最后一个环 + 包职责文档 | 定时工具从定时引擎分离（`tools/schedule.py`）；22 份包 README + 闸三 | ✅ **已完成** | **0 个强连通块**；闸三落地 |
+| **P5** 目录归一 | `module/modules`→`app/plugins`；`app/modules`→`app/plugin`；`tests/` 分区；`scripts/` 三分；`group_log` 拆 `service.py`；`domain/` 长实 | ✅ **已完成** | 13 插件全加载；1653+ passed |
+| **P6** 前端收敛 + 目录收口 | 删 `webui/static`+`templates`+`/legacy`；`dashboard/`→`app/webui/dashboard/` | ✅ **前端部分完成** | `/` 200；`/legacy` 404 |
+| **P7** `chat.py` 拆片 | 2,192 行按职责拆到 `loop/` 子文件（`chat.py` 保留重导出，API 不变） | ⬜ **待做** | 单文件 ≤800 行；无函数 ≥80 行 |
+| **P8** WebUI 依赖注入收尾 | `webui/api/*` 剩 63 处 `get_container()` / 53 处 `container.get(类型)` 改 `Depends(get_x_service)` | 🟡 **已开闸** | `deps.py` 具名依赖已备齐，`logs.py` 已清零 |
 
 ### 5.1.1 还没做的（按性价比排序）
 
-1. **`chat.py` 拆片**（2,192 行，最大函数 `stream_response` 378 行）——可读性收益最大；
-   纯搬不改语义，`loop/` 里加子文件 + 在 `chat.py` 重导出即可保持 API 不变。
-2. **`domain/` 长实**（现 595 行 / 4 文件，全是 DTO）：把 `proactivity/time_parser.py`、
-   `proactivity/trigger.py`、`delivery/splitter.py` 这类零内部依赖的纯规则搬进去。
-3. **`app/plugin` → `app/plugin`**：纯 Python 包改名，能把「`modules` vs `module`」的
-   字面混淆彻底消掉；13 个插件需同步改 `from app.plugin import ...`。
-4. **`tests/` 142 文件分区**：`tests/app/<层>/<包>/` 与源码镜像，让「改哪个目录跑哪些测试」
-   由路径直接推出。
-5. **`scripts/` 三分**（`gen/ experiments/ diag/ ops/ ci/`）。
-6. **`app/webui/dashboard/` → `webui/dashboard/`**：前端源码与构建产物收进 webui。
-7. **`webui/api/*` 的 64 处 `get_container()`**：改成 `Depends(具体服务)` 注入。
-8. **`group_log` 插件拆 `service.py`**（现 345 行全在 `module.py`）。
+1. **`chat.py` 拆片**（2,192 行；最大函数 `stream_response` 378 行）——可读性收益最大。
+   做法：按 `_collect_llm_ext`（工具来源）、发言通道（`_build_speech` 一族）、
+   用量与预算（`_usage_*` / `_turn_budget` / `_effective_max_tokens`）三块搬到
+   `loop/tool_source.py` / `loop/speech_channel.py` / `loop/turn_metrics.py`，
+   在 `chat.py` 顶部 `from .xxx import ...` 重导出，**对外零 API 变化**。
+   注意 `chat.py` 里 `DEFAULT_MAX_TOOL_ROUNDS` 等模块级常量要一起搬或改指向。
+2. **`webui/api/*` 剩余依赖注入**：`deps.py` 已备好 `get_bot_service` /
+   `get_module_registry` / `get_provider_preset_service` 等 15 个具名依赖，
+   剩下是把端点里的 `container = get_container(request)` + `container.get(X)`
+   改成参数注入。闸二 `webui_container_get_calls` 会盯着这个数字只降不升。
+3. **`apps/services` → `app/application` 改名** + `SchedulerService` → `cron_service.py`
+   （消掉与 `TaskScheduler` 的同名混淆）。
+4. **`app/nodes/` 并入 `app/plugin/nodes/`**（它服务于插件派发）。
+5. **`docs/` 按 §4 重排**（`docs/{architecture,agent,plugins,frontend,ops,research}/`）。
 
-### 5.2 P0–P4 的实测结果
+### 5.2 P0–P6 的实测结果
 
 口径：`scripts/gen/arch_closure.py`，扫描域 `app/` + `module/` + `scripts/`，
 行数按 `.count("\n")`，**含函数内惰性 import**。复核就重跑脚本，不要抄这里的数字。
 
 ```
-                         P2 之后           P4 之后
-模块数 / 总行数          276 / 55,039      278 / 55,167
+                         P2 之后           P6 之后
+模块数 / 总行数          276 / 55,039      279 / 55,339
 强连通块                2 个              **0 个**
   其中最大              27 文件 / 13,547  —
-无环模块占比            91%               **100%（278/278）**
+无环模块占比            91%               **100%（279/279）**
 ```
 
 | 入口 | P2 之后闭包 | P4 之后闭包 |
@@ -615,7 +618,7 @@ docs/
 | `app.agent.knowledge` | 27 / 6,030 | 27 / 6,037 |
 | `app.plugin.registry` | 8 / 2,400 | 8 / 2,400 |
 | `app.infrastructure.onebot.gateway` | 11 / 3,691 | 11 / 3,690 |
-| `app.bootstrap` | 158 / 41,717（**在环内**） | 158 / 41,545（**已出环**） |
+| `app.bootstrap` | 158 / 41,717（**在环内**） | 158 / 41,644（**已出环**） |
 
 **拆掉的七条反向边**（每条都只改一处，收益却覆盖整个图）：
 
@@ -807,22 +810,22 @@ venv\Scripts\python.exe scripts\gen\arch_closure.py --assert-max 20000          
 | `__init__.py` 里重复定义的 `_ok/_err` | **9 个** api 文件各一份 |
 | 单文件行数 Top3 | `manifest.py` 4,792 · `chat.py` 2,192 · `config_schema.py` 1,072 |
 
-### A.2 现状（P0–P4 之后，`arch_closure.py` 实测）
+### A.2 现状（P0–P6 之后，`arch_closure.py` 实测）
 
 | 指标 | 数值 | 变化（对比 P2 之后） |
 |---|---|---|
-| 模块数 / 总行数 | 278 / 55,167 | — |
-| 依赖边数 | 766 | — |
+| 模块数 / 总行数 | 279 / 55,339 | — |
+| 依赖边数 | 781 | — |
 | 强连通块 | **0 个（全图无环）** | 从 27 文件 / 13,547 行 |
-| 无环模块 | **278 / 278（100%）** | 从 91% |
+| 无环模块 | **279 / 279（100%）** | 从 91% |
 | `chat.py` 闭包 | **87 文件 / 23,721 行** | 从 158 / 41,717 |
 | `assembler` 闭包 | 36 文件 / 9,406 行 | 从 158 / 41,717 |
 | `providers` 闭包 | 22 文件 / 5,434 行 | 持平 |
 | `bootstrap` 是否在环内 | 否 | 原本在 |
-| `get_container()` 直调 | 64 次 / 10 文件（全在 `webui/api/*`） | 从 68 |
+| `get_container()` 直调 | 63 次 / 9 文件（全在 `webui/api/*`） | 从 71 |
 | 生产代码 `from app.bootstrap import` | **0** | 从 4 |
 | `app/agent/` 顶层平铺 | **8 文件 / 2,939 行** | 从 55 文件 / 20,916 行 |
-| `app/` 顶层目录数 | 8 | 与白名单一致（`app/client` 空壳已删） |
+| `app/` 顶层目录数 | 9（`agent core domain infrastructure nodes plugin plugins services webui`） | 白名单一致 |
 | 包职责 README | **22 份** | 从 0 |
 
 > 数字是**快照**。复核时重算：`venv\Scripts\python.exe scripts\gen\arch_closure.py`
