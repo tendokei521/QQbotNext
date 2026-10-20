@@ -242,35 +242,40 @@ pytest -q --cov --cov-report=term-missing   # 需要覆盖率时
 > ——`--scc` 看环、`--why <模块>` 看环的成因路径、`--assert-max N` 供 CI 断言。
 > 不要再手写脚本重算（口径会漂）。
 
-### 12.0 进度速览（P0–P3 已完成）
+### 12.0 进度速览（P0–P4 已完成）
 
 | 指标 | 制定方案时 | 现在 |
 |---|---|---|
-| 最大强连通块 | 24 文件 / 12,112 行（仅模块层 import；含惰性 import 实测 27 文件 / 13,547 行） | **3 文件 / 3,355 行** |
-| 无环模块占比 | — | **99%（274 / 277）** |
-| `chat.py` 可达闭包 | 143 文件 / 42,082 行 | **92 文件 / 25,342 行** |
+| 最大强连通块 | 24 文件 / 12,112 行（仅模块层 import；含惰性 import 实测 27 文件 / 13,547 行） | **0 个 —— 全图无环（278/278）** |
+| `chat.py` 可达闭包 | 143 文件 / 42,082 行 | **87 文件 / 23,721 行** |
 | 生产代码 `from app.bootstrap import` | 4 | **0** |
 | `get_container()` 直调 | 71 次 / 14 文件 | **64 次 / 10 文件**（全在 `webui/api/*`，且都是 FastAPI 依赖） |
-| 单文件最大 `manifest.py` | 4,789 行 | **已外置 JSON**（加载器约 100 行） |
-| `app/agent/` 顶层平铺 | 55 文件 / 20,916 行 | **8 文件 / 2,939 行**（11 个职责子包） |
+| 单文件最大 `manifest.py` | 4,789 行 | **已外置 JSON**（加载器 78 行） |
+| `app/agent/` 顶层平铺 | 55 文件 / 20,916 行 | **8 文件 / 2,939 行**（14 个职责子包） |
+| 包职责说明 README | 0 份 | **22 份**，且由 `tests/test_architecture_layout.py` 强制 |
 
-改造过程与实测见 `docs/ARCHITECTURE.md §5.2`；剩余工作见同文件 §5.1 的 P4–P6。
+改造过程与实测见 `docs/ARCHITECTURE.md §5.2`；剩余工作见同文件 §5.1 的 P5–P6。
 
-### 12.1 剩下一个 3 文件 / 3,355 行的强连通块
+### 12.1 强连通块已清零（保留本节作为「怎么做到」的记录）
 
-`app/agent/loop/chat.py`(2,192) `app/agent/proactivity/scheduler.py`(967)
-`app/agent/proactivity/stream.py`(196) 三者为环：
+**现状：278 个模块、0 个强连通块。** 任何入口的可达闭包都是真正的 DAG 下游，
+改一个文件不会再静默影响它的上游。
 
-- 主循环要拿到 `schedule_task` 工具（`chat → scheduler`）；
-- 调度器到点要跑一轮生成（`scheduler → chat` 的 `build_initiative_tools` / `_max_tool_rounds`）。
+清零靠拆掉七条**方向错了**的边，每条都只改一处：
 
-**改这三处任一个，另外两处都可能在你的变更里静默失效。** 拆法见 P4：把「定时工具」
-（`build_schedule_tool` / `handle_schedule_tool` / 意图检测）从「定时引擎」
-（`TaskScheduler`）里分离——工具属 `agent/tools/`，引擎属 `agent/proactivity/`。
+| 反向边 | 原来为什么存在 | 修法 |
+|---|---|---|
+| `core/container → bootstrap` | `service(type_)` 桥接函数 | 删除该函数；依赖走构造函数或 `Depends` |
+| `agent/__init__ → loop/chat` | 包级重导出 `handle` | 不再导出 `handle`；顺带砍掉 46k 行闭包 |
+| `modules/api → bootstrap` | 插件无参便捷 API 要拿容器 | `app.core.container.get_active()`（唯一允许的服务定位） |
+| `agent/media/store → modules` | 只为用 `media_cache` | 下沉到 `app/infrastructure/fs/media_cache.py` |
+| `agent/loop/chat → agent/tools/system` | 只为 `is_system_tool_enabled` | 拆出 `app/agent/tools/policy.py`（策略 vs 展示） |
+| `agent/memory/manager → agent.memory`（包属性） | `from app.agent.memory import extract` | `import app.agent.memory.extract`，不经包属性 |
+| `agent/loop/chat → proactivity/scheduler` | `build_schedule_tool` 与引擎同文件 | 工具移到 `app/agent/tools/schedule.py`，引擎留原地 |
 
-历史上这里还有 `app.core.container`、`app.bootstrap`、`app.webui.api.*`、`app.modules.*`、
-`app.agent.media.store` 六个文件，已通过「活动容器下沉 core」「`media_cache` 下沉
-infrastructure」「工具注入策略拆出 `tools/policy.py`」全部拉出环。
+最后一处（P4）是最典型的「锅不在依赖，在心里放错了文件」：`build_schedule_tool`
+只是 17 行的工具包装，却和 830 行的时间轮住在一起，导致主循环为了拿它必须
+import 整个引擎，而引擎又要回头 import 主循环跑生成。
 
 **验收指标：任何入口文件的可达闭包 ≤ 8,000 行。**
 `app.bootstrap` / `app.webui.app` 两个装配根**豁免**（它们的闭包按定义就是全图）。

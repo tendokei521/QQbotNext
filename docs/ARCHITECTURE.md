@@ -42,9 +42,9 @@ AST 实测（含函数内惰性 import）求强连通分量。只统计模块层
 
 **这个环是唯一必须动手术的地方，其他都是搬运。**
 
-> **已修（P0 + P3）**：环从 27 文件 / 13,547 行 降到 **3 文件 / 3,355 行**，
-> `app.bootstrap` 已出环，`chat.py` 可达闭包从 158 文件 / 41,717 行 减半到
-> **92 文件 / 25,342 行**。成因、修法与实测见 §5.2。
+> **已修（P0–P4）**：**全库 import 图现在是 DAG，0 个强连通块（278/278 无环）**。
+> `app.bootstrap` 已出环，`chat.py` 可达闭包从 158 文件 / 41,717 行 降到
+> **87 文件 / 23,721 行**。七条反向边的成因与修法见 §5.2。
 
 ### 结论三：文档跑在了代码前面，对 Agent 比对人更危险
 
@@ -551,47 +551,47 @@ docs/
 | **P1** 数据外置 | `onebot_tools/manifest.py` → `manifest.json` | ✅ **已完成（缩小范围）** | 4,792 行字面量 → 100 行加载器；175 条逐条对账 |
 | **P2** `app/llm`→`app/agent` 分包 | 91 文件按 §3.1 移入 11 个子包 | ✅ **已完成** | 758 处引用改写；全量 1646 passed |
 | **P3** 拆环（最关键） | 活动容器下沉 core；`media_cache` 下沉 infrastructure；工具注入策略拆出 `tools/policy.py` | ✅ **已完成** | 环 63 → **3** 模块；`chat.py` 闭包 46,305 → 25,342 |
-| **P4** 切巨型文件 + 长实 domain | `chat.py` 2,192 行拆片；`domain/` 吸收纯规则 | ⬜ 待做 | 无函数 ≥80 行；`domain/` ≥1,500 行 |
-| **P5** 目录归一 | `app/modules`→`app/plugin`；`module/`→`plugins/`；`tests/` 分区；`scripts/` 三分 | ⬜ 待做 | 13 个插件全可加载 |
-| **P6** 前端收敛 + 文档重排 | 删 `webui/static`；`dashboard/`→`webui/dashboard/`；`docs/` 重排 + "本文只负责"头 | ⬜ 待做 | 无 404；文档链接全通 |
+| **P4** 最后一个环 + 包职责文档 | 定时工具从定时引擎分离（`tools/schedule.py`）；22 份包 README + 闸三 | ✅ **已完成** | **0 个强连通块（278/278 无环）**；闸三 7 条落地 |
+| **P5** 目录归一 | `app/modules`→`app/plugin`；`module/`→`plugins/`；`tests/` 分区；`scripts/` 三分；`services`→`application`；`nodes` 并入 `plugin` | ⬜ 待做 | 13 个插件全可加载 |
+| **P6** 前端收敛 + 文档重排 | 删 `webui/static`（4,065 行）+ `templates/`（727 行）；`dashboard/`→`webui/dashboard/`；`docs/` 重排 | ⬜ 待做 | 无 404；文档链接全通 |
+| **P4'** 切巨型文件 + 长实 domain | `chat.py` 2,192 行拆片；`domain/` 吸收纯规则 | ⬜ 待做 | 无函数 ≥80 行；`domain/` ≥1,500 行 |
 
-### 5.2 P0–P3 的实测结果
+### 5.2 P0–P4 的实测结果
 
 口径：`scripts/gen/arch_closure.py`，扫描域 `app/` + `module/` + `scripts/`，
 行数按 `.count("\n")`，**含函数内惰性 import**。复核就重跑脚本，不要抄这里的数字。
 
 ```
-                         P2 之后           P3 之后
-模块数 / 总行数          276 / 55,039      277 / 55,105
-强连通块                2 个              1 个
-  其中最大              27 文件 / 13,547  3 文件 / 3,355
-无环模块占比            91%               99%（274/277）
+                         P2 之后           P4 之后
+模块数 / 总行数          276 / 55,039      278 / 55,167
+强连通块                2 个              **0 个**
+  其中最大              27 文件 / 13,547  —
+无环模块占比            91%               **100%（278/278）**
 ```
 
-| 入口 | P2 之后闭包 | P3 之后闭包 |
+| 入口 | P2 之后闭包 | P4 之后闭包 |
 |---|---|---|
-| `app.agent.loop.chat` | 158 文件 / 41,717 行 | **92 文件 / 25,342 行** |
+| `app.agent.loop.chat` | 158 文件 / 41,717 行 | **87 文件 / 23,721 行** |
 | `app.agent.assembly.assembler` | 158 / 41,717 | **36 / 9,406** |
+| `app.agent.proactivity.scheduler` | 158 / 41,717 | **93 / 25,369** |
 | `app.agent.providers` | 22 / 5,427 | 22 / 5,434 |
 | `app.agent.memory` | 30 / 7,507 | 30 / 7,514 |
 | `app.agent.knowledge` | 27 / 6,030 | 27 / 6,037 |
 | `app.modules.registry` | 8 / 2,400 | 8 / 2,400 |
 | `app.infrastructure.onebot.gateway` | 11 / 3,691 | 11 / 3,690 |
-| `app.bootstrap` | 158 / 41,717（**在环内**） | 157 / 41,518（**已出环**） |
+| `app.bootstrap` | 158 / 41,717（**在环内**） | 158 / 41,545（**已出环**） |
 
-**P3 拆掉的四条反向边**（每条都只改一行到十几行，收益却覆盖整个图）：
+**拆掉的七条反向边**（每条都只改一处，收益却覆盖整个图）：
 
 | 反向边 | 原来为什么存在 | 现在怎么走 |
 |---|---|---|
-| `modules/api → bootstrap` | 插件无参便捷 API 要拿容器 | `app.core.container.get_active()`（唯一允许的服务定位，方向向下） |
-| `agent/media/store → modules` | 只为用 `media_cache` | `app/infrastructure/fs/media_cache.py`（纯缓存策略本就属基础设施） |
-| `agent/loop/chat → agent/tools/system` | 只为 `is_system_tool_enabled` | 拆出 `app/agent/tools/policy.py`（策略与展示分离） |
-| `agent/memory/manager → agent.memory`（走包属性） | `from app.agent.memory import extract` | `import app.agent.memory.extract`，不经包属性 |
-
-剩余 3 模块的环：`loop/chat ⇄ proactivity/scheduler ⇄ proactivity/stream`
-（调度器要跑一轮生成、主循环要拿到 `schedule_task` 工具）。彻底拆开需要把「定时
-工具」（`build_schedule_tool` / `handle_schedule_tool` / 意图检测）从「定时引擎」
-（`TaskScheduler`）里分离，属于 P4。
+| `core/container → bootstrap` | `service(type_)` 桥接函数 | 删函数；依赖走构造函数或 `Depends` |
+| `agent/__init__ → loop/chat` | 包级重导出 `handle` | 不再导出 `handle` |
+| `modules/api → bootstrap` | 插件无参便捷 API 要拿容器 | `app.core.container.get_active()`（唯一允许的服务定位） |
+| `agent/media/store → modules` | 只为用 `media_cache` | `app/infrastructure/fs/media_cache.py` |
+| `agent/loop/chat → agent/tools/system` | 只为 `is_system_tool_enabled` | 拆出 `app/agent/tools/policy.py` |
+| `agent/memory/manager → agent.memory`（包属性） | `from app.agent.memory import extract` | `import app.agent.memory.extract` |
+| `agent/loop/chat → proactivity/scheduler` | `build_schedule_tool` 与引擎同文件 | 工具移到 `app/agent/tools/schedule.py` |
 
 **执行中修正的三处方案错误**（都以实测为准，本文档已按实际改写）：
 
@@ -771,22 +771,23 @@ venv\Scripts\python.exe scripts\gen\arch_closure.py --assert-max 20000          
 | `__init__.py` 里重复定义的 `_ok/_err` | **9 个** api 文件各一份 |
 | 单文件行数 Top3 | `manifest.py` 4,792 · `chat.py` 2,192 · `config_schema.py` 1,072 |
 
-### A.2 现状（P0–P3 之后，`arch_closure.py` 实测）
+### A.2 现状（P0–P4 之后，`arch_closure.py` 实测）
 
 | 指标 | 数值 | 变化（对比 P2 之后） |
 |---|---|---|
-| 模块数 / 总行数 | 277 / 55,105 | — |
-| 依赖边数 | 758 | — |
-| 最大强连通块 | **3 文件 / 3,355 行** | 从 27 文件 / 13,547 行 |
-| 无环模块 | **274 / 277（99%）** | 从 91% |
-| `chat.py` 闭包 | **92 文件 / 25,342 行** | 从 158 / 41,717 |
+| 模块数 / 总行数 | 278 / 55,167 | — |
+| 依赖边数 | 766 | — |
+| 强连通块 | **0 个（全图无环）** | 从 27 文件 / 13,547 行 |
+| 无环模块 | **278 / 278（100%）** | 从 91% |
+| `chat.py` 闭包 | **87 文件 / 23,721 行** | 从 158 / 41,717 |
 | `assembler` 闭包 | 36 文件 / 9,406 行 | 从 158 / 41,717 |
 | `providers` 闭包 | 22 文件 / 5,434 行 | 持平 |
 | `bootstrap` 是否在环内 | 否 | 原本在 |
 | `get_container()` 直调 | 64 次 / 10 文件（全在 `webui/api/*`） | 从 68 |
 | 生产代码 `from app.bootstrap import` | **0** | 从 4 |
 | `app/agent/` 顶层平铺 | **8 文件 / 2,939 行** | 从 55 文件 / 20,916 行 |
-| `app/` 顶层目录数 | 9（`agent client core domain infrastructure modules nodes services webui`） | 目标 8，见 P5 |
+| `app/` 顶层目录数 | 8 | 与白名单一致（`app/client` 空壳已删） |
+| 包职责 README | **22 份** | 从 0 |
 
 > 数字是**快照**。复核时重算：`venv\Scripts\python.exe scripts\gen\arch_closure.py`
 > （口径与算法见脚本 docstring 与 `STYLE.md §12`）。
