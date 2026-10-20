@@ -11,8 +11,8 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from app.core.logger import logger
 from app.agent.config import LEGACY_LLM_CONNECTION_KEYS
+from app.core.logger import logger
 from app.services.bot_service import PASSWORD_MASK as _PASSWORD_MASK
 from app.services.bot_service import _mask_password_config
 from app.services.module_install_service import ModuleInstallService

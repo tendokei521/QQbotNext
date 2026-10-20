@@ -11,10 +11,10 @@ import time
 import uuid
 from typing import Any
 
-from app.infrastructure.config.config_service import ConfigService
 from app.agent.providers import get_provider
 from app.agent.providers.base import format_llm_error
 from app.core.logger import logger
+from app.infrastructure.config.config_service import ConfigService
 
 PASSWORD_MASK = "••••••••"
 

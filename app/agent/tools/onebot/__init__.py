@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.agent.tools.onebot.manifest import ONEBOT_TOOLS
 from app.agent.tools.onebot.executor import build_onebot_tools
+from app.agent.tools.onebot.manifest import ONEBOT_TOOLS
 
 __all__ = ["ONEBOT_TOOLS", "build_onebot_tools"]

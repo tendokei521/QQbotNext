@@ -9,6 +9,11 @@ from __future__ import annotations
 import asyncio
 import inspect
 
+from app.agent.providers.anthropic import AnthropicProvider
+from app.agent.providers.base import BaseProvider, LLMResponse, StreamEvent, format_usage, has_token_usage, merge_usage
+from app.agent.providers.embedding import OpenAIEmbeddingProvider
+from app.agent.providers.gemini import GeminiProvider
+from app.agent.providers.openai_compat import OpenAICompatProvider
 from app.agent.providers.policy import (
     Failure,
     FailureKind,
@@ -17,12 +22,6 @@ from app.agent.providers.policy import (
     classify_exception,
     classify_response,
 )
-
-from app.agent.providers.base import BaseProvider, LLMResponse, StreamEvent, format_usage, has_token_usage, merge_usage
-from app.agent.providers.embedding import OpenAIEmbeddingProvider
-from app.agent.providers.openai_compat import OpenAICompatProvider
-from app.agent.providers.anthropic import AnthropicProvider
-from app.agent.providers.gemini import GeminiProvider
 from app.agent.providers.rerank import get_rerank_provider
 from app.agent.providers.stt import OpenAIWhisperSTTProvider
 from app.agent.providers.tts import OpenAITTSProvider

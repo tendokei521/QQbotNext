@@ -88,12 +88,12 @@ def make_payload(conn: FakeConn, *, text: str, at: int, message_id: int, t: int)
 
 
 async def main(db_file: str) -> None:
+    from app.agent.runtime import AgentManager
     from app.bootstrap import build_container
     from app.core.settings import Settings
     from app.infrastructure.config.config_service import ConfigService
     from app.infrastructure.onebot.codec import decode
     from app.infrastructure.persistence.database import Database
-    from app.agent.runtime import AgentManager
     from app.services.bot_service import BotService
 
     tmp = Path(tempfile.mkdtemp(prefix="qqbot-grp-"))

@@ -54,7 +54,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from app.core.logger import logger
 from app.agent.assembly.prompt import (
     LEGACY_MESSAGE_META_INSTRUCTION,
     MESSAGE_META_INSTRUCTION,
@@ -65,6 +64,7 @@ from app.agent.assembly.prompt import (
     emoji_hint_line,
     user_message_format,
 )
+from app.core.logger import logger
 
 
 @dataclass
@@ -751,8 +751,8 @@ async def apply_post_assemble(
     - ``ctx`` 为 None（无流水线的直调场景）时构造合成上下文，钩子仍能拿到 messages；
     - ``req`` 给出时用于落盘归类（``prompt_dump_enable`` 开启才写，见 ``prompt_dump``）。
     """
-    from app.agent.loop.context import LlmContext
     from app.agent.hooks import run_stage
+    from app.agent.loop.context import LlmContext
 
     if ctx is None:
         ctx = LlmContext(event=None, runtime=runtime, bot=None, session_id="", user_text="")

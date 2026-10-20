@@ -175,8 +175,8 @@ def _runtime(bot_id: int, chain: list[dict]):
 
 
 def _event_and_ctx():
-    from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
     from app.agent.loop.context import LlmContext
+    from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
 
     event = GroupMessageEvent(
         event_type="message_group",

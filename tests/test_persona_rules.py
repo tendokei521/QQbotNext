@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import re
 
-from app.agent.persona import rules as persona_rules
 from app.agent.assembly.assembler import PromptRequest, assembly_profile
+from app.agent.persona import rules as persona_rules
 
 #: 工具名形态：小写字母开头、至少含一个下划线（``memory_save`` / ``expand_message`` …）。
 #: 正文里的英文单词（Markdown / QQ / AI）不含下划线，因此不会被误抓。

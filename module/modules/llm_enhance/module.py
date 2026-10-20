@@ -6,6 +6,7 @@
 
 from app.agent import LlmContext, logger
 from app.modules import BaseModule, llm_hook
+
 from .config_schema import SCHEMA
 
 

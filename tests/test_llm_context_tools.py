@@ -14,8 +14,8 @@ from types import SimpleNamespace
 import pytest
 
 from app.agent.context import focus, nicknames
-from app.agent.media import store as image_media
 from app.agent.media import image as image_mod
+from app.agent.media import store as image_media
 from app.agent.tools.context_tools import build_context_tools, derive_targets
 from app.agent.tools.spec import ToolContext
 

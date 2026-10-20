@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import asyncio
 
-from app.domain.message import Message
 from app.agent.delivery.pool import StreamSendPool
+from app.domain.message import Message
 
 
 def _slow_policy_config() -> dict:

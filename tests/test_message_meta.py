@@ -1,5 +1,6 @@
 """消息元信息格式消歧测试：单行脱敏格式与旧格式归一化。"""
 
+from app.agent.assembly.prompt import MESSAGE_META_INSTRUCTION, build_messages
 from app.agent.context.group import (
     _is_enhanced_context,
     _mask_enhanced_content,
@@ -8,7 +9,6 @@ from app.agent.context.group import (
     safe_nickname,
     safe_sender_label,
 )
-from app.agent.assembly.prompt import MESSAGE_META_INSTRUCTION, build_messages
 
 
 def test_is_enhanced_context_old_format():

@@ -22,6 +22,22 @@ from app.modules.base import (
     ServiceAccess,
     resolve_enabled_ids,
 )
+from app.modules.dispatcher import ModuleDispatcher
+from app.modules.features import (
+    AgentFeatureController,
+    AssemblerFeatureController,
+    ConfigToggleFeature,
+    FeatureController,
+    FeatureLease,
+    FeatureRegistry,
+    KnowledgeFeatureController,
+    MemoryFeatureController,
+    OneBotToolsFeatureController,
+    ProactiveFeatureController,
+    ProviderInvokerFeatureController,
+    RuntimeSlotFeatureController,
+    ScheduleFeatureController,
+)
 from app.modules.hooks import (
     ApiContext,
     ApiHookRegistry,
@@ -41,22 +57,6 @@ from app.modules.hooks import (
     module_hook,
     send_hook,
     tool_call_hook,
-)
-from app.modules.dispatcher import ModuleDispatcher
-from app.modules.features import (
-    AgentFeatureController,
-    AssemblerFeatureController,
-    ConfigToggleFeature,
-    FeatureController,
-    FeatureLease,
-    FeatureRegistry,
-    KnowledgeFeatureController,
-    MemoryFeatureController,
-    OneBotToolsFeatureController,
-    ProactiveFeatureController,
-    ProviderInvokerFeatureController,
-    RuntimeSlotFeatureController,
-    ScheduleFeatureController,
 )
 from app.modules.keyword import match_keywords
 from app.modules.registry import ModuleRegistry

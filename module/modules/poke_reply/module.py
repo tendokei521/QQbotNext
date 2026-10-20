@@ -10,6 +10,7 @@ import random
 import time
 
 from app.modules import BaseModule, module_hook
+
 from .config_schema import SCHEMA
 
 

@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-
 from app.core.logger import logger
 from app.nodes.base import MessageNode
 

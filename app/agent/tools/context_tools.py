@@ -26,7 +26,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.core.logger import logger
 from app.agent.context import display_names, focus, nicknames
 from app.agent.context.group import (
     _NON_TEXT_SEGMENTS,
@@ -36,6 +35,7 @@ from app.agent.context.group import (
     has_real_content,
 )
 from app.agent.tools.spec import ToolSpec
+from app.core.logger import logger
 
 # 内容截断策略：**默认不截断**（0 = 不限制）。
 # 这些工具的目的就是"把骨架补成血肉"，截断等于把血肉又削掉一块（实测出现过

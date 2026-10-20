@@ -12,8 +12,6 @@ from __future__ import annotations
 
 import types
 
-from app.domain.events import MessageSegment
-from app.agent.loop import chat
 from app.agent.commands import (
     COMMAND_GROUPS,
     PREFIX,
@@ -25,7 +23,8 @@ from app.agent.commands import (
     iter_commands,
     parse_action,
 )
-
+from app.agent.loop import chat
+from app.domain.events import MessageSegment
 
 # ---------- 桩件 ----------
 

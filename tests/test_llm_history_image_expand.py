@@ -16,11 +16,11 @@ import types
 
 import pytest
 
-from app.agent.session import enrich as history_enrich
-from app.agent.media import store as image_media
-from app.agent.media import image as image_mod
-from app.agent.tools.context_tools import _handle_expand_image, drain_round_images
 from app.agent.context.group import format_online_history
+from app.agent.media import image as image_mod
+from app.agent.media import store as image_media
+from app.agent.session import enrich as history_enrich
+from app.agent.tools.context_tools import _handle_expand_image, drain_round_images
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 32
 PNG_B64 = base64.b64encode(PNG_BYTES).decode()

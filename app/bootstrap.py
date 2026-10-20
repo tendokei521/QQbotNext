@@ -9,6 +9,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 
+from app.agent.client import ModuleLLMClient
+from app.agent.providers.runtime_manager import ProviderRuntimeManager
+from app.agent.runtime import AgentManager
 from app.core.container import Container
 from app.core.logger import logger, set_console_mode, setup_logging
 from app.core.settings import Settings, load_settings
@@ -17,8 +20,6 @@ from app.infrastructure.cache import Cache
 from app.infrastructure.config.config_service import ConfigService
 from app.infrastructure.onebot.gateway import OneBotGateway
 from app.infrastructure.persistence.database import Database
-from app.agent.runtime import AgentManager
-from app.agent.client import ModuleLLMClient
 from app.modules.base import ServiceAccess
 from app.modules.dispatcher import ModuleDispatcher
 from app.modules.features import (
@@ -41,7 +42,6 @@ from app.modules.hooks import (
 )
 from app.modules.registry import ModuleRegistry
 from app.services.bot_service import BotService
-from app.agent.providers.runtime_manager import ProviderRuntimeManager
 from app.services.config_profile_service import ConfigProfileService
 from app.services.log_service import LogService
 from app.services.module_install_service import ModuleInstallService
@@ -374,8 +374,9 @@ async def run(settings: Settings | None = None) -> None:
     # 定时任务在模块加载时自动注册并启动，无需手动 start
 
     # 启动 WebUI
-    from app.webui.app import create_app
     import uvicorn
+
+    from app.webui.app import create_app
 
     _silence_websocket_logs()
 

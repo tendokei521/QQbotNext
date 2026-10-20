@@ -5,9 +5,9 @@
 
 from __future__ import annotations
 
+from app.agent.config import LEGACY_LLM_CONNECTION_KEYS
 from app.core.logger import logger
 from app.domain.bot import IBot
-from app.agent.config import LEGACY_LLM_CONNECTION_KEYS
 from app.modules.schema_utils import webui_schema
 
 

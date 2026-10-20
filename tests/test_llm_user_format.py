@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import types
 
-from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
 from app.agent.assembly.assembler import PromptRequest, message_meta_instruction
 from app.agent.assembly.enhance import format_user_context
 from app.agent.assembly.prompt import (
@@ -20,6 +19,7 @@ from app.agent.assembly.prompt import (
     emoji_hint_line,
     user_message_format,
 )
+from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
 
 NL = chr(10)
 

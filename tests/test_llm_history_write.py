@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import types
 
-from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
-from app.agent.session.model import HistoryEntry, split_user_context
 from app.agent.session.manager import SessionManager
+from app.agent.session.model import HistoryEntry, split_user_context
+from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
 
 NL = chr(10)  # 显式换行，避免测试源码里被转义处理
 
@@ -134,9 +134,9 @@ async def test_chat_writes_then_renders_structured_history(monkeypatch, tmp_path
     from app.agent.providers import PROVIDERS
     from tests.test_llm_assembly_paths import (
         CHAT_MESSAGES,
-        _ProbeProvider,
         _config_dict,
         _ctx,
+        _ProbeProvider,
         _runtime,
         setup_function,  # noqa: F401
     )

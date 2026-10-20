@@ -11,8 +11,8 @@ import os
 import re
 from typing import Any
 
-from app.core.logger import logger
 from app.agent.tools.spec import ToolSpec
+from app.core.logger import logger
 
 _MCP_ID_RE = re.compile(r"[^0-9a-zA-Z_\-]+")
 

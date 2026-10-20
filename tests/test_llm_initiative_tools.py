@@ -17,8 +17,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.agent.proactivity import stream as initiative_stream
 from app.agent.loop.chat import build_initiative_tools
+from app.agent.proactivity import stream as initiative_stream
 from app.agent.providers.base import StreamEvent
 
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from app.agent.session import enrich as history_enrich
 from app.agent.assembly.assembler import PromptRequest, build_background
 from app.agent.assembly.prompt import (
     EXPANDED_MARKER_NOTE,
@@ -12,7 +11,7 @@ from app.agent.assembly.prompt import (
 from app.agent.config import DEFAULT_LLM_CONFIG
 from app.agent.config_schema import SCHEMA
 from app.agent.context.group import format_history_for_llm
-
+from app.agent.session import enrich as history_enrich
 
 # ---------- 提示词：已展开标记的语义 ----------
 

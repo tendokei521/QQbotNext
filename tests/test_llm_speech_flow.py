@@ -324,8 +324,8 @@ async def test_pipeline_sends_bubbles_and_backfills_history_id(monkeypatch, tmp_
     group_log 的「我的发言」入账、发送间隔策略都挂在 ``_send`` 上，
     任何自建发送实现都会漏掉其中一半。
     """
-    from app.domain.message import Message
     from app.agent.loop.pipeline import LlmPipeline
+    from app.domain.message import Message
 
     _register(monkeypatch)
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))

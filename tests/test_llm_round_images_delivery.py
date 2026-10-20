@@ -20,8 +20,8 @@ import types
 import pytest
 
 from app.agent.loop import chat
-from app.agent.media import store as image_media
 from app.agent.media import image as image_mod
+from app.agent.media import store as image_media
 from app.agent.providers import PROVIDERS
 from app.agent.providers.base import BaseProvider, LLMResponse, StreamEvent
 

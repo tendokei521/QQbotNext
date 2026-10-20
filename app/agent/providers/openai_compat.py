@@ -17,7 +17,15 @@ import aiohttp
 
 from app.agent import logger
 from app.agent.loop.tool_loop import normalize_and_execute_tool_calls
-from app.agent.providers.base import BaseProvider, LLMResponse, StreamEvent, build_extra_body, build_extra_headers, format_llm_error, merge_usage
+from app.agent.providers.base import (
+    BaseProvider,
+    LLMResponse,
+    StreamEvent,
+    build_extra_body,
+    build_extra_headers,
+    format_llm_error,
+    merge_usage,
+)
 
 RETRYABLE_STATUS = {408, 409, 429, 500, 502, 503, 504, 529}
 

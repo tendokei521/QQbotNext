@@ -19,7 +19,6 @@ from app.core.logger import api_logger
 from app.domain.bot import IBot
 from app.domain.message import Message, MessageSegment, SegmentLike
 
-
 # ==================== API 超时分级 ====================
 # 历史问题：所有 API 共用固定 10s。合并转发（视频/多节点）在 OneBot 侧要先上传再组装，
 # 实测 720P 单节点转发需要 10s 以上，于是「发送成功但调用方收到超时」，

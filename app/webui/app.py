@@ -13,8 +13,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app.core.logger import webui_logger
 from app.core.event_bus import BotAccountUpdatedEvent, BotLifecycleEvent, event_bus
+from app.core.logger import webui_logger
 from app.webui.api import agent as agent_router
 from app.webui.api import bots as bots_router
 from app.webui.api import config_profiles as config_profiles_router
@@ -22,8 +22,8 @@ from app.webui.api import framework as framework_router
 from app.webui.api import logs as logs_router
 from app.webui.api import media as media_router
 from app.webui.api import modules as modules_router
-from app.webui.api import provider_presets as provider_presets_router
 from app.webui.api import prompt_dump as prompt_dump_router
+from app.webui.api import provider_presets as provider_presets_router
 from app.webui.api import resources as resources_router
 from app.webui.api import role_presets as role_presets_router
 from app.webui.api import sessions as sessions_router

@@ -1,6 +1,6 @@
 """配置中心测试：legacy JSON 迁移 + 读写 + ModuleConfig 深合并。"""
 
-from app.infrastructure.config.config_service import ConfigService, DEFAULT_WEBUI_CONFIG
+from app.infrastructure.config.config_service import DEFAULT_WEBUI_CONFIG, ConfigService
 from app.infrastructure.persistence.database import Database
 from app.modules.base import ModuleConfig
 

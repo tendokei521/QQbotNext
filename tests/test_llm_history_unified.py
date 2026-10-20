@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import types
 
-from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
 from app.agent.assembly.enhance import collect_user_context, format_user_context
 from app.agent.context.group import format_history_for_llm, format_online_history
 from app.agent.session.model import build_current_turn_text
+from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
 
 NL = chr(10)
 

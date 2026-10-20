@@ -3,8 +3,7 @@
 唯一入口链不变：module.py → service.handle(module, event)。
 """
 
-from .handler import daily_push, handle
+from .handler import daily_push, handle, register_schedule
 from .migrate import migrate_legacy_config
-from .handler import register_schedule
 
 __all__ = ["handle", "daily_push", "register_schedule", "migrate_legacy_config"]

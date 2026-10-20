@@ -32,7 +32,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-from app.core.logger import logger
 from app.agent.group_log.events import (
     KIND_EMOJI,
     KIND_MESSAGE,
@@ -50,6 +49,7 @@ from app.agent.group_log.store import (
     detach,
     store_of,
 )
+from app.core.logger import logger
 from app.modules import BaseModule, module_hook, send_hook
 
 from .config_schema import SCHEMA

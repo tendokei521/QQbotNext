@@ -15,7 +15,6 @@ from app.agent.loop.chat import _max_tool_rounds
 from app.agent.providers import PROVIDERS, _accepts_kwarg, chat_with_fallback
 from app.agent.providers.base import BaseProvider, LLMResponse
 
-
 # ---------- 配置解析 ----------
 
 

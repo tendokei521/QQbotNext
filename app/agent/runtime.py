@@ -15,20 +15,20 @@ from typing import Any
 
 from app.agent import logger
 from app.agent.assembly.assembler import PromptAssembler
-from app.agent.config import DEFAULT_LLM_CONFIG, AgentConfig
 from app.agent.assembly.enhance import install_framework_hooks
+from app.agent.config import DEFAULT_LLM_CONFIG, AgentConfig
 from app.agent.hooks import LlmHookRegistry, ToolCallHookRegistry
 from app.agent.knowledge import KnowledgeManager
-from app.agent.tools.mcp import MCPManager
-from app.agent.memory import MemoryManager
 from app.agent.loop.pipeline import LlmPipeline
+from app.agent.memory import MemoryManager
+from app.agent.persona.skills import SkillRegistry
 from app.agent.proactivity.manager import ProactiveManager
+from app.agent.proactivity.scheduler import TaskScheduler
 from app.agent.providers.invoker import ProviderInvoker
 from app.agent.providers.policy import TRACKED_KEYS, merge_config_layers
-from app.agent.proactivity.scheduler import TaskScheduler
 from app.agent.session.manager import SessionManager
-from app.agent.persona.skills import SkillRegistry
 from app.agent.telemetry import TelemetryRecorder
+from app.agent.tools.mcp import MCPManager
 from app.agent.tools.spec import ModuleToolRegistry
 
 

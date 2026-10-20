@@ -22,10 +22,10 @@ import types
 
 import pytest
 
-from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
 from app.agent.media import image as image_mod
 from app.agent.media import store as image_media
 from app.agent.media.image import history_image_parts, history_image_segments
+from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
 
 URL = "https://multimedia.nt.qq.com.cn/download?fileid=abc&rkey=xyz"
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 32

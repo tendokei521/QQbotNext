@@ -10,11 +10,10 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from app.agent.providers import get_provider, get_provider_class
+from app.agent.providers.policy import merge_config_layers
 from app.core.logger import logger
 from app.infrastructure.config.config_service import ConfigService
-from app.agent.providers.policy import merge_config_layers
-
-from app.agent.providers import get_provider, get_provider_class
 
 
 def _resolve_env_keys(config: dict) -> dict:

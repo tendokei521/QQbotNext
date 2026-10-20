@@ -23,7 +23,6 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from app.core.logger import logger
 from app.agent.context.group import (
     fetch_group_name,
     fetch_group_online_history,
@@ -33,6 +32,7 @@ from app.agent.context.group import (
 )
 from app.agent.session.manager import SessionManager
 from app.agent.tools.spec import ToolSpec
+from app.core.logger import logger
 
 DEFAULT_LIMIT = 30
 DEFAULT_AUTO_QQ_MIN_LOCAL = 4

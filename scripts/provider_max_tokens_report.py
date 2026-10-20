@@ -40,10 +40,10 @@ def main() -> int:
 
     import asyncio
 
+    from app.agent.providers.policy import LAYER_MODEL, is_reasoning_model, plan_max_tokens
     from app.core.settings import Settings
     from app.infrastructure.config.config_service import ConfigService
     from app.infrastructure.persistence.database import Database
-    from app.agent.providers.policy import LAYER_MODEL, is_reasoning_model, plan_max_tokens
 
     settings = Settings()
     db_path = Path(args.db) if args.db else settings.db_path

@@ -16,7 +16,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from app.core.logger import logger
 from app.agent.session import model as _hm
 from app.agent.session.model import (
     online_message_to_entry,
@@ -24,6 +23,7 @@ from app.agent.session.model import (
     sender_label,
     time_prefix,
 )
+from app.core.logger import logger
 
 # 非文本消息段的展示名，避免模型完全看不到非文本消息
 _NON_TEXT_SEGMENTS = {

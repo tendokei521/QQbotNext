@@ -22,8 +22,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.core.logger import logger
 from app.agent.context import focus
+from app.core.logger import logger
 
 # 按位置指代："上一条/刚才那条/消息里的那个"
 _RELATIVE_RE = re.compile(

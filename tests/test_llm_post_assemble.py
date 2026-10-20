@@ -18,8 +18,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from app.agent.assembly.assembler import PromptAssembler, PromptRequest, apply_post_assemble, build_for
-from app.agent.loop.context import LlmContext, LlmJob
 from app.agent.hooks import LlmHookRegistry, run_stage
+from app.agent.loop.context import LlmContext, LlmJob
 
 
 class _Runtime:

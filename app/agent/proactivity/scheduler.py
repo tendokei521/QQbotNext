@@ -25,10 +25,10 @@ from app.agent.context.group import (
     fetch_group_name,
     fetch_group_online_history,
 )
-from app.agent.providers import get_provider
-from app.agent.session.manager import SessionManager
 from app.agent.persona.tags import strip_all_tags
 from app.agent.proactivity.time_parser import advance_repeat, parse_schedule
+from app.agent.providers import get_provider
+from app.agent.session.manager import SessionManager
 from app.agent.tools.spec import ToolSpec
 
 # 定时触发（cron-wake）默认提示词：对齐 AstrBot PROACTIVE_AGENT_CRON_WOKE_SYSTEM_PROMPT 的轻量版

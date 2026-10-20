@@ -5,7 +5,6 @@ from app.agent.providers import get_provider
 from app.agent.providers.openai_compat import _split_keys
 from app.agent.session import manager as session_mod
 
-
 # ---------- prompt ----------
 
 def test_build_messages_structure():

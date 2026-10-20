@@ -1,6 +1,6 @@
 """AgentNode 框架级默认响应测试。"""
 
-from app.domain.events import PrivateMessageEvent, NoticeEvent
+from app.domain.events import NoticeEvent, PrivateMessageEvent
 from app.modules.base import ModulePermission
 from app.modules.nodes import AgentNode
 from app.nodes.base import MessageContext

@@ -3,11 +3,11 @@
 import pytest
 
 from app.agent.knowledge.store import KnowledgeStore, cosine
+from app.agent.providers import get_provider
 from app.agent.providers.embedding import OpenAIEmbeddingProvider
 from app.agent.providers.rerank import CohereRerankProvider, JinaRerankProvider
 from app.agent.providers.stt import OpenAIWhisperSTTProvider
 from app.agent.providers.tts import OpenAITTSProvider
-from app.agent.providers import get_provider
 
 
 def test_get_provider_dispatches_by_provider_type():

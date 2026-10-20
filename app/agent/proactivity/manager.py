@@ -22,8 +22,8 @@ from app.agent.context.group import (
     fetch_group_name,
     fetch_group_online_history,
 )
-from app.agent.session.manager import SessionManager
 from app.agent.persona.tags import strip_all_tags
+from app.agent.session.manager import SessionManager
 
 DEFAULT_PROACTIVE_PROMPT = (
     "你现在要发起一次主动消息，像真人一样自然开口。\n"

@@ -1,6 +1,7 @@
 """模块声明：标准演示模块。"""
 
 from app.modules import BaseModule, module_hook
+
 from .config_schema import SCHEMA
 
 

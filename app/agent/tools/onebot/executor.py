@@ -201,8 +201,8 @@ def _emoji_like_prepare(ctx: ToolContext | None, args: dict) -> tuple[dict, str]
 
     ``params`` 为空且 ``error`` 为空 = "无需重复贴"，由调用方解释为已满足。
     """
-    from app.agent.persona import emoji as emoji_lexicon
     from app.agent.group_log.context import scope_for_tool_ctx
+    from app.agent.persona import emoji as emoji_lexicon
 
     args = args or {}
     message_id, error = _current_message_id(ctx, args)

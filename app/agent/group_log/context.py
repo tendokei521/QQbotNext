@@ -16,7 +16,6 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from app.core.logger import logger
 from app.agent.group_log.events import make_scope
 from app.agent.group_log.render import (
     DEFAULT_MAX_CHARS,
@@ -26,6 +25,7 @@ from app.agent.group_log.render import (
     render_environment,
 )
 from app.agent.group_log.store import store_of
+from app.core.logger import logger
 
 
 def _cfg(config: Any, key: str, default: Any = None) -> Any:

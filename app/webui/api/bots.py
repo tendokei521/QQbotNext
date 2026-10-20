@@ -29,8 +29,8 @@ async def api_bots(request: Request):
 
 @router.post("/bots/{index}/connect")
 async def connect_bot(index: int, request: Request):
-    from app.services.bot_service import BotService
     from app.infrastructure.config.config_service import ConfigService
+    from app.services.bot_service import BotService
 
     container = get_container(request)
     bot_service = container.get(BotService)
@@ -119,8 +119,8 @@ async def api_bots_config_add(request: Request):
 
 @router.post("/bots/config/delete/{index}")
 async def api_bots_config_delete(index: int, request: Request):
-    from app.services.bot_service import BotService
     from app.infrastructure.config.config_service import ConfigService
+    from app.services.bot_service import BotService
 
     container = get_container(request)
     bot_service = container.get(BotService)

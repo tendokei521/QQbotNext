@@ -8,7 +8,6 @@ from app.agent.providers.base import BaseProvider
 from app.agent.telemetry import LLMCallRecord, TelemetryRecorder, ToolCallRecord
 from app.agent.tools.spec import ToolContext, ToolSpec
 
-
 # ---------- LLM 遥测 ----------
 
 def test_telemetry_recorder_stats_and_reset():

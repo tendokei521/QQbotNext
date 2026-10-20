@@ -21,10 +21,9 @@ import base64
 
 import pytest
 
-from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
+from app.agent.assembly.assembler import PromptRequest, place_images
 from app.agent.media import image as image_mod
 from app.agent.media import store as image_media
-from app.agent.assembly.assembler import PromptRequest, place_images
 from app.agent.media.image import (
     build_user_content,
     collect_image_segments,
@@ -36,6 +35,7 @@ from app.agent.media.image import (
 )
 from app.agent.providers.anthropic import _normalize_messages as anthropic_normalize
 from app.agent.providers.gemini import _normalize_messages as gemini_normalize
+from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 32
 PNG_B64 = base64.b64encode(PNG_BYTES).decode()

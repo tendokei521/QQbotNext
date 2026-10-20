@@ -29,7 +29,6 @@ import re
 from collections.abc import Iterable
 from typing import Any
 
-from app.core.logger import logger
 from app.agent.media import store as image_media
 from app.agent.media.animated import DEFAULT_FRAME_MAX_EDGE
 from app.agent.media.animated import DEFAULT_MAX_FRAMES as DEFAULT_GIF_MAX_FRAMES
@@ -51,6 +50,7 @@ from app.agent.media.store import (
 from app.agent.media.store import (
     sniff_mime as _sniff_mime,
 )
+from app.core.logger import logger
 
 # 单张图片字节上限：base64 后约 1.33 倍，10MB 原图 ≈ 13MB 请求体，多数网关会直接拒
 DEFAULT_MAX_IMAGE_BYTES = 10 * 1024 * 1024

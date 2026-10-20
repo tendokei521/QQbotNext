@@ -18,6 +18,10 @@ import time
 from typing import Any
 
 from app.agent import logger
+from app.agent.assembly import assembler as assembly
+from app.agent.assembly.assembler import PromptRequest
+from app.agent.assembly.compress import maybe_compress_context
+from app.agent.assembly.token_budget import estimate_tokens
 from app.agent.commands import (
     build_help_nodes,
     build_help_text,
@@ -25,16 +29,14 @@ from app.agent.commands import (
     is_help_action,
     parse_action,
 )
-from app.agent.assembly.compress import maybe_compress_context
 from app.agent.context.group import (
     build_group_env_text,
     fetch_group_online_history,
     fetch_private_online_history,
     format_history_for_llm,
 )
-from app.agent.session.manager import SessionManager
-from app.agent.assembly import assembler as assembly
-from app.agent.assembly.assembler import PromptRequest
+from app.agent.delivery.splitter import split_sentences, strip_stream_artifacts
+from app.agent.loop.tool_loop import normalize_and_execute_tool_calls
 from app.agent.media.image import (
     IMAGE_LIKE_SEGMENTS,
     backfill_history_media,
@@ -44,16 +46,14 @@ from app.agent.media.image import (
     max_image_bytes,
     persist_images,
 )
+from app.agent.persona.tags import maybe_strip_parentheses, strip_all_tags
+from app.agent.proactivity.trigger import extract_text
 from app.agent.providers import SERVED_MODEL_KEY, log_token_usage
 from app.agent.providers.invoker import resolve_invoker
 from app.agent.providers.modalities import normalize_modalities, supports_image, supports_tool_use
-from app.agent.persona.tags import maybe_strip_parentheses, strip_all_tags
-from app.agent.delivery.splitter import split_sentences, strip_stream_artifacts
-from app.agent.assembly.token_budget import estimate_tokens
-from app.agent.tools.spec import ToolContext, build_tools, make_executor
-from app.agent.loop.tool_loop import normalize_and_execute_tool_calls
-from app.agent.proactivity.trigger import extract_text
 from app.agent.providers.policy import TurnBudget, retry_profile_of
+from app.agent.session.manager import SessionManager
+from app.agent.tools.spec import ToolContext, build_tools, make_executor
 
 
 def _event_nickname(event) -> str:

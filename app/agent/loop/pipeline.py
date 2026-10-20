@@ -13,13 +13,13 @@ import asyncio
 import uuid
 from typing import Any
 
-from app.domain.message import Message
-from app.agent.delivery.directives import build_outbound_builder
 from app.agent.commands import is_command
-from app.agent.loop.context import LlmContext, LlmJob
+from app.agent.delivery.directives import build_outbound_builder
 from app.agent.hooks import run_stage
+from app.agent.loop.context import LlmContext, LlmJob
 from app.agent.loop.locks import SessionLockManager
 from app.agent.loop.pool import LlmPool, merge_debounced_texts
+from app.domain.message import Message
 
 
 class LlmPipeline:

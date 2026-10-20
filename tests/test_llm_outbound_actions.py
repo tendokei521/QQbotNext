@@ -6,7 +6,6 @@
 
 from types import SimpleNamespace
 
-from app.domain.message import Message
 from app.agent.delivery.directives import (
     OutboundBuilder,
     OutboundDirectives,
@@ -14,6 +13,7 @@ from app.agent.delivery.directives import (
     parse_outbound_directives,
     strip_outbound_directives,
 )
+from app.domain.message import Message
 
 GROUP_EVENT = SimpleNamespace(
     event_type="message_group",

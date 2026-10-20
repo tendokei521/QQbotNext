@@ -20,9 +20,8 @@ import io
 import pytest
 from PIL import Image as PILImage
 
-from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
-from app.agent.media.animated import extract_frames, frame_indices, is_animated
 from app.agent.assembly.assembler import PromptRequest, place_images
+from app.agent.media.animated import extract_frames, frame_indices, is_animated
 from app.agent.media.image import (
     _animated_hint,
     build_user_content,
@@ -30,6 +29,7 @@ from app.agent.media.image import (
     count_images,
     resolve_images,
 )
+from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
 
 
 def _gif_bytes(frames: int = 5, size: tuple[int, int] = (64, 64)) -> bytes:

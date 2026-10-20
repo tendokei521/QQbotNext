@@ -460,9 +460,9 @@ async def test_plugin_takes_over_in_real_registry(container):
     """走真实链路：把注册表指向仓库真实模块目录 → 加载 → 接管 → 组装 → 卸载还原。"""
     from pathlib import Path
 
-    from app.infrastructure.config.config_service import ConfigService
     from app.agent.assembly.assembler import build_for
     from app.agent.runtime import AgentManager
+    from app.infrastructure.config.config_service import ConfigService
     from app.modules.base import ServiceAccess
     from app.modules.registry import ModuleRegistry
     from app.services.module_install_service import ModuleInstallService

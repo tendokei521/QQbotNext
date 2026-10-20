@@ -40,8 +40,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from app.core.logger import logger
 from app.agent.session.model import sender_label
+from app.core.logger import logger
 
 #: 灰区上界：超过这个长度已属"明显是句子"，不必花调用
 #: （真实昵称中文一般 ≤16 字；15 字的完整问句要靠句末标点判出来，不能靠长度）

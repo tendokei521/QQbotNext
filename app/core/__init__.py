@@ -18,8 +18,8 @@ from app.core.logger import (
     set_console_mode,
     setup_logging,
     task_logger,
-    webui_logger,
     websocket_logger,
+    webui_logger,
 )
 from app.core.settings import Settings, get_settings, load_settings
 from app.core.task_manager import TaskManager, get_task_manager

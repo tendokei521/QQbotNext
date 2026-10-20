@@ -36,8 +36,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from app.core.logger import logger
 from app.agent.group_log.events import KIND_EMOJI, LogEvent
+from app.core.logger import logger
 
 DEFAULT_RETENTION_COUNT = 2000
 DEFAULT_RETENTION_HOURS = 24

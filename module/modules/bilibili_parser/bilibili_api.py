@@ -17,6 +17,7 @@ import urllib.parse
 
 from app.core.logger import module_logger
 from app.infrastructure.curl_cffi import CurlCffiClient
+
 from . import wbi
 from .video import DEFAULT_QN, HEIGHT_TO_QN, QUALITY_NAMES  # noqa: F401（对插件内部复用）
 

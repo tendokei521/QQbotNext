@@ -1,11 +1,11 @@
 """P1 注入链路测试：build_messages 记忆块 / 召回评分 / manager 注入 / #llm memory 命令。"""
 
+from app.agent.assembly.prompt import build_messages
 from app.agent.config import DEFAULT_LLM_CONFIG
 from app.agent.memory.commands import handle_memory_command
 from app.agent.memory.manager import MemoryManager, scope_owners
 from app.agent.memory.recall import rank, render_block
 from app.agent.memory.store import MemoryStore, owner_group, owner_group_member, owner_private
-from app.agent.assembly.prompt import build_messages
 
 
 class FakeConfig:
