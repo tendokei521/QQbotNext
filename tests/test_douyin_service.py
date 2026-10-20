@@ -9,8 +9,8 @@ from types import SimpleNamespace
 import pytest
 
 from app.domain.message import MessageSegment
-from module.modules.douyin_parser import douyin_api as api_mod
-from module.modules.douyin_parser import service
+from app.plugins.douyin_parser import douyin_api as api_mod
+from app.plugins.douyin_parser import service
 
 
 @pytest.fixture(autouse=True)
@@ -155,7 +155,7 @@ class FakeAPI:
     async def resolve_aweme_id(self, link, timeout=10):
         if link in self._resolve_map:
             return self._resolve_map[link]
-        from module.modules.douyin_parser import media
+        from app.plugins.douyin_parser import media
 
         return media.aweme_id_from_url(link)
 
@@ -466,8 +466,8 @@ async def test_handle_at_me_keeps_llm_running(monkeypatch, tmp_path):
 
 def test_config_defaults_match_schema():
     """代码默认与 WebUI schema 默认必须一致，否则「界面显示开、实际关」。"""
-    from module.modules.douyin_parser.config_schema import SCHEMA
-    from module.modules.douyin_parser.module import Module
+    from app.plugins.douyin_parser.config_schema import SCHEMA
+    from app.plugins.douyin_parser.module import Module
 
     for key, default in Module.default_config.items():
         assert key in SCHEMA, f"{key} 缺少 WebUI schema"
@@ -483,7 +483,7 @@ def test_module_manifest_matches_module_dir():
     import json
     from pathlib import Path
 
-    module_dir = Path(__file__).resolve().parent.parent / "module" / "modules" / "douyin_parser"
+    module_dir = Path(__file__).resolve().parent.parent / "app" / "plugins" / "douyin_parser"
     manifest = json.loads((module_dir / "module.json").read_text(encoding="utf-8"))
     assert manifest["name"] == module_dir.name
     assert manifest["entry"] == "module.py"
@@ -491,7 +491,7 @@ def test_module_manifest_matches_module_dir():
 
 
 def test_module_declares_group_and_private_hooks():
-    from module.modules.douyin_parser.module import Module
+    from app.plugins.douyin_parser.module import Module
 
     hooks, _llm_hooks = Module.collect_hooks()
     assert sorted(h["event_type"] for h in hooks) == ["message_group", "message_private"]
@@ -508,10 +508,10 @@ async def test_plugin_loads_in_real_registry(container):
     from app.modules.base import ServiceAccess
     from app.modules.registry import ModuleRegistry
 
-    repo_module_dir = Path(__file__).resolve().parent.parent / "module"
+    repo_root = Path(__file__).resolve().parent.parent
     registry = ModuleRegistry(
-        modules_dir=repo_module_dir / "modules",
-        plugins_dir=repo_module_dir / "plugins",
+        plugins_dir=repo_root / "app" / "plugins",  # 业务插件代码
+        zip_plugins_dir=repo_root / "module" / "plugins",  # 外部 zip 安装
         config_service=container.get(ConfigService),
         services=container.get(ServiceAccess),
     )

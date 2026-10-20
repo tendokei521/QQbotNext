@@ -226,7 +226,7 @@ async def test_module_schema_reaches_api_with_resource_field(container):
     # BotService 持有的是容器里的注册表实例：把它的模块目录定向到仓库真实目录，
     # 这样加载出来的模块才会经过 bot_service 的 schema 归一化链路。
     registry = container.get(ModuleRegistry)
-    registry.modules_dir = Path(__file__).resolve().parent.parent / "module" / "modules"
+    registry.plugins_dir = Path(__file__).resolve().parent.parent / "app" / "plugins"
     bot_id = 20250930
     assert await registry.load_single("astrbot_alignment", bot_id) is True
     try:

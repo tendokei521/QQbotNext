@@ -1,6 +1,6 @@
 """douyin_parser 合并转发节点构建单测（全离线）。"""
 
-from module.modules.douyin_parser import forward as fwd
+from app.plugins.douyin_parser import forward as fwd
 
 VIDEO_META = {
     "aweme_id": "7534291258635816251",

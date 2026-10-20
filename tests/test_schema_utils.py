@@ -191,14 +191,14 @@ def test_module_schemas_normalize_without_issues(container):
     import importlib
     from pathlib import Path
 
-    repo_modules = Path(__file__).resolve().parent.parent / "module" / "modules"
+    repo_modules = Path(__file__).resolve().parent.parent / "app" / "plugins"
     resource_registry = container.get(ResourceRegistry)
     problems: dict = {}
     for entry in sorted(p for p in repo_modules.iterdir() if p.is_dir()):
         if not (entry / "module.py").exists():
             continue
         try:
-            schema_mod = importlib.import_module(f"module.modules.{entry.name}.config_schema")
+            schema_mod = importlib.import_module(f"app.plugins.{entry.name}.config_schema")
         except Exception:  # noqa: BLE001 —— 没写/导入不了的模块跳过
             continue
         schema = getattr(schema_mod, "SCHEMA", None)

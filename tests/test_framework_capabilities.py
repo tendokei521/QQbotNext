@@ -146,7 +146,7 @@ async def test_registry_checks_requirements_on_load(container, monkeypatch):
     monkeypatch.setattr(BaseModule, "missing_requirements", spy)
 
     registry = container.get(ModuleRegistry)
-    registry.modules_dir = Path(__file__).resolve().parent.parent / "module" / "modules"
+    registry.plugins_dir = Path(__file__).resolve().parent.parent / "app" / "plugins"
     try:
         assert await registry.load_single("astrbot_alignment", None) is True
         assert any(name == "astrbot_alignment" for name, _missing in calls), "加载时应做过依赖自检"

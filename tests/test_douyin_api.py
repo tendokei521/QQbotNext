@@ -7,8 +7,8 @@
 import os
 from urllib.parse import parse_qsl, urlparse
 
-from module.modules.douyin_parser import douyin_api as api_mod
-from module.modules.douyin_parser.douyin_api import DouyinAPI
+from app.plugins.douyin_parser import douyin_api as api_mod
+from app.plugins.douyin_parser.douyin_api import DouyinAPI
 
 DETAIL_OK = {
     "status_code": 0,

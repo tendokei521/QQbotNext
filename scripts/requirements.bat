@@ -8,5 +8,5 @@ if exist "venv\" (
     call venv\Scripts\activate.bat
 )
 
-pip install -r requirements.txt
+pip install -e .
 cmd /k

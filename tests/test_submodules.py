@@ -62,29 +62,20 @@ class _Svc:
 
 @pytest.fixture
 async def parent_registry(settings, container, tmp_path):
-    parent_dir = tmp_path / "module" / "modules" / "parent"
+    parent_dir = tmp_path / "plugins" / "parent"
     child_dir = parent_dir / "child"
     child_dir.mkdir(parents=True)
     for d in (parent_dir, child_dir):
         (d / "__init__.py").write_text("", encoding="utf-8")
     (parent_dir / "module.py").write_text(PARENT, encoding="utf-8")
     (child_dir / "module.py").write_text(CHILD, encoding="utf-8")
-    (tmp_path / "module" / "modules" / "__init__.py").write_text("", encoding="utf-8")
-    (tmp_path / "module" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "plugins" / "__init__.py").write_text("", encoding="utf-8")
 
-    # 清理可能残留的 module 包（其它测试可能导入了真实 module.modules），再插入临时路径
-    for key in [k for k in sys.modules if k == "module" or k.startswith("module.")]:
-        del sys.modules[key]
-    sys.path.insert(0, str(tmp_path))
-    try:
-        cfg = container.get(ConfigService)
-        svc = ServiceAccess(cache=None, config_service=cfg, task_manager=_StubTM(), settings=settings)
-        reg = ModuleRegistry(modules_dir=tmp_path / "module" / "modules", config_service=cfg, services=svc, log=None)
-        yield reg
-    finally:
-        sys.path.remove(str(tmp_path))
-        for key in [k for k in sys.modules if k == "module" or k.startswith("module.")]:
-            del sys.modules[key]
+    # 按路径加载，无需动 sys.path、也不会遮蔽项目的任何包
+    cfg = container.get(ConfigService)
+    svc = ServiceAccess(cache=None, config_service=cfg, task_manager=_StubTM(), settings=settings)
+    reg = ModuleRegistry(plugins_dir=tmp_path / "plugins", config_service=cfg, services=svc, log=None)
+    yield reg
 
 
 class _StubTM:

@@ -12,8 +12,8 @@ from types import SimpleNamespace
 from app.agent.assembly.assembler import PromptRequest
 from app.modules.base import ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
 from app.modules.features import AssemblerFeatureController, FeatureRegistry
-from module.modules.astrbot_alignment import assembler
-from module.modules.astrbot_alignment.astrbot_prompts import (
+from app.plugins.astrbot_alignment import assembler
+from app.plugins.astrbot_alignment.astrbot_prompts import (
     GROUP_HISTORY_DIRECTED_AT_YOU,
     GROUP_HISTORY_FOOTER,
     GROUP_HISTORY_HEADER,
@@ -22,8 +22,8 @@ from module.modules.astrbot_alignment.astrbot_prompts import (
     TOOL_CALL_PROMPT,
     TOOL_CALL_PROMPT_SKILLS_LIKE_MODE,
 )
-from module.modules.astrbot_alignment.config_schema import SCHEMA
-from module.modules.astrbot_alignment.module import DEFAULT_CONFIG, Module
+from app.plugins.astrbot_alignment.config_schema import SCHEMA
+from app.plugins.astrbot_alignment.module import DEFAULT_CONFIG, Module
 
 # ==================== 夹具 ====================
 
@@ -467,10 +467,10 @@ async def test_plugin_takes_over_in_real_registry(container):
     from app.modules.registry import ModuleRegistry
     from app.services.module_install_service import ModuleInstallService
 
-    repo_module_dir = Path(__file__).resolve().parent.parent / "module"
+    repo_root = Path(__file__).resolve().parent.parent
     registry = ModuleRegistry(
-        modules_dir=repo_module_dir / "modules",
-        plugins_dir=repo_module_dir / "plugins",
+        plugins_dir=repo_root / "app" / "plugins",  # 业务插件代码
+        zip_plugins_dir=repo_root / "module" / "plugins",  # 外部 zip 安装
         config_service=container.get(ConfigService),
         services=container.get(ServiceAccess),
         install_service=container.get(ModuleInstallService),

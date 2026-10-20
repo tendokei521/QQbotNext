@@ -8,7 +8,7 @@
 ## 〇、模块结构约定（所有模块统一）
 
 ```
-module/modules/<name>/
+app/plugins/<name>/
 ├── __init__.py        # 一句话说明
 ├── module.py          # Module(BaseModule)：声明元数据 + handle 薄入口（只路由，不写业务）
 ├── config_schema.py   # SCHEMA 字典
@@ -54,7 +54,7 @@ module/modules/<name>/
 父模块目录下的子目录（**含 `module.py`**）即为子模块，子模块名为 `parent.child`：
 
 ```
-module/modules/<parent>/
+app/plugins/<parent>/
 ├── module.py              # 父模块（1级，handle 只做路由）
 ├── child_a/module.py      # 子模块（2级）
 └── child_b/module.py
@@ -70,7 +70,7 @@ module/modules/<parent>/
 模块可自带 `pages/index.html`，WebUI 中该模块卡片**只保留黑白名单（权限）部分**，配置表单区域改为 iframe 渲染自定义页：
 
 ```
-module/modules/<name>/
+app/plugins/<name>/
 ├── module.py / config_schema.py / service.py
 └── pages/
     └── index.html          # 自定义配置页（可附带 app.js / style.css）
@@ -80,7 +80,7 @@ module/modules/<name>/
 - **读写配置**：页面用
   `fetch('/api/module/<name>/config' + '?bot_id=<id>')` GET 读取、POST 保存（body 为配置 JSON，与 schema 表单同一契约）；
 - 页面也可用 `/api/module/<name>/list/*`、`/dynamic/*` 数据源端点；
-- 参考：`module/modules/example/pages/index.html`（完整读写示例）。
+- 参考：`app/plugins/example/pages/index.html`（完整读写示例）。
 
 ---
 
@@ -410,7 +410,7 @@ class Module(BaseModule):
 
 - 支持 5 字段 cron（`分 时 日 月 周`，`*` / `*/n` / `a-b` / `a,b,c`）与每日 `HH:MM[:SS]` 简写；
 - 仅对**真实 Bot 实例**注册；模块加载自动注册、卸载/重载自动注销；
-- 参考实现：`module/modules/msg_df_password`（定时推密码）、`module/modules/time_sign_in`（每日打卡）。
+- 参考实现：`app/plugins/msg_df_password`（定时推密码）、`app/plugins/time_sign_in`（每日打卡）。
 
 ### 定时任务动态注册（时间可配置时）
 

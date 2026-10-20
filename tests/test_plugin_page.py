@@ -27,22 +27,19 @@ PAGE_HTML = "<html><head><title>P</title></head><body>hello</body></html>"
 
 @pytest.fixture
 async def page_env(settings, tmp_path):
-    mod_dir = tmp_path / "module" / "modules" / "pagemod"
+    mod_dir = tmp_path / "plugins" / "pagemod"
     (mod_dir / "pages").mkdir(parents=True)
     (mod_dir / "__init__.py").write_text("", encoding="utf-8")
     (mod_dir / "module.py").write_text(MODULE_SRC, encoding="utf-8")
     (mod_dir / "pages" / "index.html").write_text(PAGE_HTML, encoding="utf-8")
-    (tmp_path / "module" / "modules" / "__init__.py").write_text("", encoding="utf-8")
-    (tmp_path / "module" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "plugins" / "__init__.py").write_text("", encoding="utf-8")
 
     from app.bootstrap import build_container
     from app.infrastructure.config.config_service import ConfigService
     from app.infrastructure.persistence.database import Database
     from app.webui.app import create_app
 
-    for key in [k for k in sys.modules if k == "module" or k.startswith("module.")]:
-        del sys.modules[key]
-    sys.path.insert(0, str(tmp_path))
+    settings.plugins_dir = tmp_path / "plugins"
     try:
         c = build_container(settings)
         db = c.get(Database)
@@ -55,7 +52,7 @@ async def page_env(settings, tmp_path):
         yield TestClient(app), c
         await db.close()
     finally:
-        sys.path.remove(str(tmp_path))
+        pass
         for key in [k for k in sys.modules if k == "module" or k.startswith("module.")]:
             del sys.modules[key]
 

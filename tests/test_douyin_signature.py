@@ -11,9 +11,9 @@ import hashlib
 
 import pytest
 
-from module.modules.douyin_parser import abogus, sm3
-from module.modules.douyin_parser.abogus import ABogus
-from module.modules.douyin_parser.xbogus import XBogus
+from app.plugins.douyin_parser import abogus, sm3
+from app.plugins.douyin_parser.abogus import ABogus
+from app.plugins.douyin_parser.xbogus import XBogus
 
 # 与 douyin_api.BASE_PARAMS 同形的真实参数集（含 aweme_id）
 PARAMS = {
@@ -143,7 +143,7 @@ def test_build_signed_url_encodes_signature_once():
 
 def test_xbogus_fixed_vector(monkeypatch):
     """冻结时间后比对固定向量。"""
-    from module.modules.douyin_parser import xbogus as xb
+    from app.plugins.douyin_parser import xbogus as xb
 
     monkeypatch.setattr(xb.time, "time", lambda: 1700000000)
     result, value, ua = XBogus(XBOGUS_UA).get_xbogus(XBOGUS_PATH)
@@ -153,7 +153,7 @@ def test_xbogus_fixed_vector(monkeypatch):
 
 
 def test_xbogus_default_ua_and_structure(monkeypatch):
-    from module.modules.douyin_parser import xbogus as xb
+    from app.plugins.douyin_parser import xbogus as xb
 
     monkeypatch.setattr(xb.time, "time", lambda: 1700000000)
     value = XBogus().get_xbogus("https://www.douyin.com/x?a=1")[1]

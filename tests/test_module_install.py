@@ -39,34 +39,26 @@ class _TaskStub:
         return 0
 
 
-def _cleanup_module_tree():
-    for key in [k for k in sys.modules if k == "module" or k.startswith("module.")]:
-        del sys.modules[key]
-
-
 def _make_module_root(tmp_path: Path) -> Path:
-    root = tmp_path / "module"
-    (root / "modules" / "testmod").mkdir(parents=True)
-    (root / "modules" / "__init__.py").write_text("", encoding="utf-8")
-    (root / "plugins").mkdir(parents=True)
-    (root / "plugins" / "__init__.py").write_text("", encoding="utf-8")
-    (root / "__init__.py").write_text("", encoding="utf-8")
-    (root / "modules" / "testmod" / "__init__.py").write_text("", encoding="utf-8")
-    (root / "modules" / "testmod" / "module.py").write_text(LOCAL_MODULE, encoding="utf-8")
+    """搭一个插件根：`local/` 放本地插件，`plugins/` 是 zip 安装目录。"""
+    root = tmp_path / "plugin_root"
+    (root / "local" / "testmod").mkdir(parents=True)
+    (root / "local" / "__init__.py").write_text("", encoding="utf-8")
+    (root / "local" / "testmod" / "__init__.py").write_text("", encoding="utf-8")
+    (root / "local" / "testmod" / "module.py").write_text(LOCAL_MODULE, encoding="utf-8")
+    (root / "plugins").mkdir(parents=True, exist_ok=True)
     return root
 
 
 def _make_registry(tmp_path, container):
     root = _make_module_root(tmp_path)
-    sys.path.insert(0, str(tmp_path))
-    _cleanup_module_tree()
 
     cfg = container.get(ConfigService)
     svc = ServiceAccess(cache=None, config_service=cfg, task_manager=_TaskStub(), settings=None)
     install_service = ModuleInstallService(root / "uninstalled_modules.json")
     reg = ModuleRegistry(
-        modules_dir=root / "modules",
-        plugins_dir=root / "plugins",
+        plugins_dir=root / "local",
+        zip_plugins_dir=root / "plugins",
         config_service=cfg,
         services=svc,
         install_service=install_service,
@@ -78,11 +70,7 @@ def _make_registry(tmp_path, container):
 @pytest.fixture
 def setup_registry(container, tmp_path):
     root, reg, install_service = _make_registry(tmp_path, container)
-    try:
-        yield root, reg, install_service
-    finally:
-        sys.path.remove(str(tmp_path))
-        _cleanup_module_tree()
+    yield root, reg, install_service
 
 
 def test_module_install_service_roundtrip(tmp_path):
@@ -111,7 +99,7 @@ async def test_local_module_soft_uninstall_keeps_files(setup_registry):
 
     await reg.uninstall_module("testmod")
     assert reg.get("testmod", 123) is None
-    assert (root / "modules" / "testmod" / "module.py").exists()
+    assert (root / "local" / "testmod" / "module.py").exists()
     assert install_service.is_uninstalled("testmod") is True
 
     ok = await reg.reinstall_module("testmod", 123)

@@ -99,11 +99,11 @@ async def main(db_file: str) -> None:
     tmp = Path(tempfile.mkdtemp(prefix="qqbot-grp-"))
     shutil.copy2(db_file, tmp / "app.db")
     os.environ["QQBOT_LLM_DATA_DIR"] = str(tmp / "llm")
-    (tmp / "module" / "modules").mkdir(parents=True, exist_ok=True)
+    (tmp / "plugins").mkdir(parents=True, exist_ok=True)
 
     settings = Settings(
         project_root=tmp, db_path=tmp / "app.db",
-        modules_dir=tmp / "module" / "modules", plugins_dir=tmp / "module" / "plugins",
+        plugins_dir=tmp / "plugins", zip_plugins_dir=tmp / "module" / "plugins",
         log_dir=tmp / "logs", uninstalled_modules_file=tmp / "module" / "uninstalled.json",
     )
     container = build_container(settings)

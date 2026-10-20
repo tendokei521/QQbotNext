@@ -1,7 +1,7 @@
 """模块注册表：扫描 / 加载 / 热重载 / 卸载业务模块。
 
 替代原 modules/__init__.py 中的 ModuleManager：
-- 模块必须位于 <modules_dir>/<name>/module.py，导出 `Module(BaseModule)`；
+- 插件必须位于 <plugins_dir>/<name>/module.py，导出 `Module(BaseModule)`；
 - 每个模块按 (module_name, bot_id) 实例化，配置/权限来自 ConfigService；
 - 热重载时彻底卸载旧实例（含其名下后台任务），再重新导入。
 """
@@ -28,15 +28,17 @@ class ModuleRegistry:
     def __init__(
         self,
         *,
-        modules_dir: Path | str,
+        plugins_dir: Path | str,
         config_service: Any,
         services: ServiceAccess,
         log=None,
-        plugins_dir: Path | str | None = None,
+        zip_plugins_dir: Path | str | None = None,
         install_service: Any = None,
     ) -> None:
-        self.modules_dir = Path(modules_dir)
-        self.plugins_dir = Path(plugins_dir) if plugins_dir else None
+        #: 业务插件代码目录（默认 `app/plugins`，随仓库走）
+        self.plugins_dir = Path(plugins_dir)
+        #: 外部 zip 插件安装目录（`module/plugins`，用户安装、不进仓库）
+        self.zip_plugins_dir = Path(zip_plugins_dir) if zip_plugins_dir else None
         self.config_service = config_service
         self.services = services
         self.install_service = install_service
@@ -114,14 +116,14 @@ class ModuleRegistry:
     def _resolve_module_dir(self, module_name: str, source: str | None = None) -> Path:
         """解析模块目录路径。
 
-        优先 module/modules/<name>，其次 module/plugins/<name>。
-        source 可强制指定 local 或 zip。
+        优先本地插件目录（默认 `app/plugins/<name>`），其次外部 zip 安装目录
+        （`module/plugins/<name>`）。source 可强制指定 local 或 zip。
         """
         parts = module_name.split(".")
-        if source == "zip" and self.plugins_dir is not None:
-            path = self.plugins_dir
+        if source == "zip" and self.zip_plugins_dir is not None:
+            path = self.zip_plugins_dir
         else:
-            path = self.modules_dir
+            path = self.plugins_dir
         for p in parts:
             path = path / p
         return path
@@ -132,9 +134,9 @@ class ModuleRegistry:
 
     def _iter_module_roots(self):
         """返回 [(dir, source)]：本地模块目录 + 外部插件目录。"""
-        roots = [(self.modules_dir, "local")]
-        if self.plugins_dir is not None:
-            roots.append((self.plugins_dir, "zip"))
+        roots = [(self.plugins_dir, "local")]
+        if self.zip_plugins_dir is not None:
+            roots.append((self.zip_plugins_dir, "zip"))
         return roots
 
     async def load_single(
@@ -153,12 +155,7 @@ class ModuleRegistry:
 
         try:
             self._purge_module_cache(module_name)
-            import_path = (
-                f"module.modules.{module_name}.module"
-                if source == "local"
-                else f"module.plugins.{module_name}.module"
-            )
-            mod = importlib.import_module(import_path)
+            mod = self._import_plugin_module(module_name, module_path)
             cls = getattr(mod, "Module", None)
             if cls is None:
                 self.log.error(f"[Module] {module_name} 缺少 module.py 中的 Module 类")
@@ -466,20 +463,20 @@ class ModuleRegistry:
 
     # ---------- zip 安装 / 软卸载 / 恢复安装 ----------
     async def install_from_zip(self, zip_path: str | Path) -> dict:
-        """安装 zip 插件到 module/plugins/<name>，然后加载全局实例。
+        """安装 zip 插件到 zip_plugins_dir（默认 module/plugins/<name>），然后加载全局实例。
 
         不删除已有文件：若目标已存在且处于软卸载状态，则只清除卸载记录并重新加载。
         """
-        if self.plugins_dir is None:
-            raise ValueError("未配置外部插件目录 plugins_dir")
+        if self.zip_plugins_dir is None:
+            raise ValueError("未配置外部插件目录 zip_plugins_dir")
         if self.install_service is None:
             raise ValueError("未配置安装状态服务 install_service")
         zip_path = Path(zip_path)
         if not zip_path.is_file():
             raise ValueError(f"插件压缩包不存在: {zip_path}")
 
-        self.plugins_dir.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=self.plugins_dir, prefix=".zip-") as tmp:
+        self.zip_plugins_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=self.zip_plugins_dir, prefix=".zip-") as tmp:
             tmp_dir = Path(tmp)
             self._extract_zip_plugin(zip_path, tmp_dir)
             manifest = self._find_manifest(tmp_dir)
@@ -496,7 +493,7 @@ class ModuleRegistry:
                     tmp_dir / name
                 ).is_dir():
                     root = tmp_dir / name
-            final_dir = self.plugins_dir / name
+            final_dir = self.zip_plugins_dir / name
             if final_dir.exists():
                 if not self.install_service.is_uninstalled(name):
                     raise ValueError(f"插件 {name} 已安装，请先卸载或使用覆盖安装")
@@ -646,11 +643,41 @@ class ModuleRegistry:
             runtime.llm_pipeline.cancel_for_module(instance)
 
     @staticmethod
+    def _import_plugin_module(module_name: str, module_path: Path):
+        """按**文件路径**加载插件包，返回它的 `module.py`。
+
+        为什么不用 `importlib.import_module("app.plugins.X.module")`：
+        那要求插件必须是某个固定包名的子包（历史上是 `module.modules`），于是
+        插件放哪儿、测试夹具放哪儿都被这个字符串焊死。改成按路径加载后，插件的
+        物理位置与 import 名解耦，写进 `sys.modules` 的是合成包名
+        `qqbot_plugin_<name>`。
+
+        仍以「包」的形式加载（`submodule_search_locations` 指向插件目录），因为插件
+        内部一律用相对导入（`from .service import ...`），必须让它们能解析。
+
+        兼容两种布局：包内有 `__init__.py`（正常情况）与没有（极简插件目录）。
+        """
+        pkg_name = f"qqbot_plugin_{module_name.replace('.', '_')}"
+        init_file = module_path / "__init__.py"
+        if init_file.is_file():
+            spec = importlib.util.spec_from_file_location(
+                pkg_name, init_file, submodule_search_locations=[str(module_path)]
+            )
+        else:
+            spec = importlib.util.spec_from_file_location(
+                pkg_name, module_path / "module.py", submodule_search_locations=[str(module_path)]
+            )
+        if spec is None or spec.loader is None:
+            raise ImportError(f"无法为插件 {module_name} 构造加载器：{module_path}")
+        pkg = importlib.util.module_from_spec(spec)
+        sys.modules[pkg_name] = pkg
+        spec.loader.exec_module(pkg)
+        if init_file.is_file():
+            return importlib.import_module(f"{pkg_name}.module")
+        return pkg
+
+    @staticmethod
     def _purge_module_cache(module_name: str) -> None:
-        prefixes = (
-            f"module.modules.{module_name}",
-            f"module.plugins.{module_name}",
-        )
-        for prefix in prefixes:
-            for key in [k for k in sys.modules if k == prefix or k.startswith(prefix + ".")]:
-                del sys.modules[key]
+        pkg_name = f"qqbot_plugin_{module_name.replace('.', '_')}"
+        for key in [k for k in sys.modules if k == pkg_name or k.startswith(pkg_name + ".")]:
+            del sys.modules[key]

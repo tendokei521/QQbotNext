@@ -5,7 +5,7 @@
 
 ## 安装与启用
 
-插件在 `module/modules/astrbot_alignment/`，框架启动即加载（无需安装步骤）。
+插件在 `app/plugins/astrbot_alignment/`，框架启动即加载（无需安装步骤）。
 在 WebUI 的模块页：
 
 1. **按账号启用**（模块启停是按 `(模块, 账号)` 的，只对该账号生效）；

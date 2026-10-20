@@ -2,9 +2,9 @@
 
 import os
 
-from module.modules.bilibili_parser import bilibili_api as bapi
-from module.modules.bilibili_parser import video
-from module.modules.bilibili_parser.bilibili_api import BilibiliAPI
+from app.plugins.bilibili_parser import bilibili_api as bapi
+from app.plugins.bilibili_parser import video
+from app.plugins.bilibili_parser.bilibili_api import BilibiliAPI
 
 # ==================== 纯逻辑：取流整理 / 缓存命名 ====================
 

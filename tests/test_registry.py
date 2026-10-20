@@ -31,25 +31,17 @@ class _TaskStub:
 
 @pytest.fixture
 async def registry(settings, container, tmp_path):
-    mod_dir = tmp_path / "module" / "modules" / "testmod"
+    mod_dir = tmp_path / "plugins" / "testmod"
     mod_dir.mkdir(parents=True)
     (mod_dir / "__init__.py").write_text("", encoding="utf-8")
     (mod_dir / "module.py").write_text(TEST_MODULE, encoding="utf-8")
-    (tmp_path / "module" / "modules" / "__init__.py").write_text("", encoding="utf-8")
-    (tmp_path / "module" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "plugins" / "__init__.py").write_text("", encoding="utf-8")
 
-    # 让临时 module 包优先于项目 module 包（先清可能残留的 module.* 子树）
-    for key in [k for k in sys.modules if k == "module" or k.startswith("module.")]:
-        del sys.modules[key]
-    sys.path.insert(0, str(tmp_path))
+    # 按路径加载，无需动 sys.path、也不会遮蔽项目的任何包
     cfg = container.get(ConfigService)
     svc = ServiceAccess(cache=None, config_service=cfg, task_manager=_TaskStub(), settings=settings)
-    reg = ModuleRegistry(modules_dir=tmp_path / "module" / "modules", config_service=cfg, services=svc, log=None)
+    reg = ModuleRegistry(plugins_dir=tmp_path / "plugins", config_service=cfg, services=svc, log=None)
     yield reg
-    sys.path.remove(str(tmp_path))
-    # 清理临时 module 包（含顶层），避免遮蔽项目的 module
-    for key in [k for k in sys.modules if k == "module" or k.startswith("module.")]:
-        del sys.modules[key]
 
 
 async def test_load_single(registry):
@@ -83,16 +75,16 @@ async def test_reload_reimports(registry):
 
 
 async def test_bad_module_is_skipped(settings, container, tmp_path):
-    bad_dir = tmp_path / "modules" / "badmod"
+    bad_dir = tmp_path / "plugins" / "badmod"
     bad_dir.mkdir(parents=True)
     (bad_dir / "__init__.py").write_text("", encoding="utf-8")
     (bad_dir / "module.py").write_text("raise RuntimeError('boom')\n", encoding="utf-8")
-    (tmp_path / "modules" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "plugins" / "__init__.py").write_text("", encoding="utf-8")
     sys.path.insert(0, str(tmp_path))
     sys.modules.pop("modules", None)
     try:
         cfg = container.get(ConfigService)
-        reg = ModuleRegistry(modules_dir=tmp_path / "modules", config_service=cfg,
+        reg = ModuleRegistry(plugins_dir=tmp_path / "plugins", config_service=cfg,
                              services=ServiceAccess(), log=None)
         ok = await reg.load_single("badmod", 123)
         assert ok is False

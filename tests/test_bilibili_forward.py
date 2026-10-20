@@ -1,6 +1,6 @@
 """bilibili_parser 合并转发节点构建单测（全离线）。"""
 
-from module.modules.bilibili_parser import forward as fwd
+from app.plugins.bilibili_parser import forward as fwd
 
 INFO = {
     "bvid": "BV1zq836rEbk",

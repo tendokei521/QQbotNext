@@ -40,17 +40,16 @@ class Settings(BaseSettings):
     # 调度器
     scheduler_interval: int = 30
 
-    # 模块根目录（module/modules + module/configs + module/data）
+    # 插件**运行时数据**根目录（configs / data / plugins(zip) / uninstalled_modules.json）。
+    # 业务插件的**代码**不在这里，见下面的 `plugins_dir`（默认 app/plugins）。
     module_dir: Path = Field(default=ROOT_DIR / "module")
 
-    @property
-    def modules_dir(self) -> Path:
-        """业务模块主体目录（module/modules）。"""
-        return self.module_dir / "modules"
+    #: 业务插件代码目录。默认随仓库走（`app/plugins`）；测试与特殊部署可覆盖。
+    plugins_dir: Path = Field(default=ROOT_DIR / "app" / "plugins")
 
     @property
-    def plugins_dir(self) -> Path:
-        """外部 zip 插件安装目录（module/plugins）。"""
+    def zip_plugins_dir(self) -> Path:
+        """外部 zip 插件安装目录（`<module_dir>/plugins`，用户安装的，不进仓库）。"""
         return self.module_dir / "plugins"
 
     @property

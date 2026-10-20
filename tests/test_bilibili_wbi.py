@@ -7,8 +7,8 @@
 import json
 import urllib.parse
 
-from module.modules.bilibili_parser import bilibili_api as bapi
-from module.modules.bilibili_parser import wbi
+from app.plugins.bilibili_parser import bilibili_api as bapi
+from app.plugins.bilibili_parser import wbi
 
 KEY = "0123456789abcdef0123456789abcdef"
 
@@ -122,7 +122,7 @@ def _fake_api(calls: list, responses: list):
 
 async def test_get_mixin_key_tolerates_not_logged_in_and_caches():
     """nav 返回 -101 也要能拿到密钥；第二次调用走缓存不再请求。"""
-    from module.modules.bilibili_parser.bilibili_api import BilibiliAPI
+    from app.plugins.bilibili_parser.bilibili_api import BilibiliAPI
 
     BilibiliAPI._wbi_cache = {}
     calls: list = []
@@ -136,7 +136,7 @@ async def test_get_mixin_key_tolerates_not_logged_in_and_caches():
 
 
 async def test_get_playurl_single_signs_query_and_returns_data():
-    from module.modules.bilibili_parser.bilibili_api import BilibiliAPI
+    from app.plugins.bilibili_parser.bilibili_api import BilibiliAPI
 
     BilibiliAPI._wbi_cache = {}
     calls: list = []
@@ -158,7 +158,7 @@ async def test_get_playurl_single_signs_query_and_returns_data():
 
 async def test_get_playurl_single_refreshes_wbi_key_on_403():
     """-403 视为密钥轮换：刷新密钥后重试一次并成功。"""
-    from module.modules.bilibili_parser.bilibili_api import BilibiliAPI
+    from app.plugins.bilibili_parser.bilibili_api import BilibiliAPI
 
     BilibiliAPI._wbi_cache = {}
     calls: list = []
@@ -174,7 +174,7 @@ async def test_get_playurl_single_refreshes_wbi_key_on_403():
 
 async def test_get_playurl_single_retries_on_risk_control(monkeypatch):
     """风控返回 v_voucher（code=0 无 durl）→ 退避后重试成功。"""
-    from module.modules.bilibili_parser.bilibili_api import BilibiliAPI
+    from app.plugins.bilibili_parser.bilibili_api import BilibiliAPI
 
     BilibiliAPI._wbi_cache = {}
     sleeps: list = []
@@ -198,7 +198,7 @@ async def test_get_playurl_single_retries_on_risk_control(monkeypatch):
 
 async def test_get_playurl_single_gives_up_after_retries(monkeypatch):
     """连续风控 → 重试耗尽后返回 None（不抛异常）。"""
-    from module.modules.bilibili_parser.bilibili_api import BilibiliAPI
+    from app.plugins.bilibili_parser.bilibili_api import BilibiliAPI
 
     BilibiliAPI._wbi_cache = {}
     sleeps: list = []
@@ -216,7 +216,7 @@ async def test_get_playurl_single_gives_up_after_retries(monkeypatch):
 
 
 async def test_get_playurl_single_returns_none_on_business_error():
-    from module.modules.bilibili_parser.bilibili_api import BilibiliAPI
+    from app.plugins.bilibili_parser.bilibili_api import BilibiliAPI
 
     BilibiliAPI._wbi_cache = {}
     calls: list = []

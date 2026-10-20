@@ -6,7 +6,7 @@
 from types import SimpleNamespace
 
 from app.infrastructure.cache import Cache
-from module.modules.emoji_reply.service import (
+from app.plugins.emoji_reply.service import (
     clean_symbols,
     handle_emoji_notice,
     handle_message,

@@ -27,7 +27,8 @@ ALLOWED_APP_PACKAGES = {
     "domain",  # 领域模型与契约
     "infrastructure",  # 唯一 IO 出口
     "agent",  # 框架级 Agent（原 app/llm）
-    "modules",  # 插件框架（P5 → plugin）
+    "modules",  # 插件框架（框架侧；业务插件在 app/plugins）
+    "plugins",  # 业务插件（13 个，原 module/modules）
     "nodes",  # 消息节点链
     "services",  # 应用服务（P5 → application）
     "webui",  # HTTP/WS 适配层
@@ -110,7 +111,7 @@ def test_agent_top_level_stays_flat_but_small() -> None:
 
 def test_business_plugins_have_module_entry() -> None:
     """每个业务插件目录必须至少有 module.py（框架靠它作为加载入口）。"""
-    plugins_dir = ROOT / "module" / "modules"
+    plugins_dir = ROOT / "app" / "plugins"
     if not plugins_dir.is_dir():
         return
     missing = [

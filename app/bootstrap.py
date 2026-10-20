@@ -238,10 +238,10 @@ def build_container(settings: Settings | None = None) -> Container:
     install_service = ModuleInstallService(settings.uninstalled_modules_file)
     container.register_factory(ModuleInstallService, lambda: install_service)
 
-    # 模块系统
+    # 插件系统
     registry = ModuleRegistry(
-        modules_dir=settings.modules_dir,
-        plugins_dir=settings.plugins_dir,
+        plugins_dir=settings.plugins_dir,  # app/plugins（随仓库走）
+        zip_plugins_dir=settings.zip_plugins_dir,  # module/plugins（用户 zip 安装）
         config_service=config_service,
         services=services,
         install_service=install_service,

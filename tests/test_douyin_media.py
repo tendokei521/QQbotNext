@@ -5,7 +5,7 @@
 元信息与缓存命名。
 """
 
-from module.modules.douyin_parser import media
+from app.plugins.douyin_parser import media
 
 # ---------------- 夹具：贴近真实接口返回结构 ----------------
 

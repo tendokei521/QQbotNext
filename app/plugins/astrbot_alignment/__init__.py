@@ -1,4 +1,4 @@
-"""AstrBot 组装对齐插件（`module/modules/astrbot_alignment`）。
+"""AstrBot 组装对齐插件（`app/plugins/astrbot_alignment`）。
 
 在**单个账号**下接管消息组装，把 `1/AstrBot-master`（4.27.2）的 system prompt 与
 请求形态 1:1 复刻过来，用于迁移对账。

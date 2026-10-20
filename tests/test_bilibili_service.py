@@ -7,8 +7,8 @@
 from types import SimpleNamespace
 
 from app.domain.message import MessageSegment
-from module.modules.bilibili_parser import bilibili_api as bapi
-from module.modules.bilibili_parser import service
+from app.plugins.bilibili_parser import bilibili_api as bapi
+from app.plugins.bilibili_parser import service
 
 INFO = {
     "bvid": "BV1zq836rEbk",
