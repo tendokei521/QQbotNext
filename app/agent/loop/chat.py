@@ -607,7 +607,9 @@ async def stream_response(runtime, event, ctx=None):
         chars=len("".join(full_text_parts)),
         stream=True,
     )
-    logger.add_info(f"#{runtime.bot_id}").info(
+    # 预算总账只留在 debug.log：逐请求打这个数字对用户没有信息量（见 turn_metrics
+    # 里请求行的说明），而每轮都进 user.log 只会把用户日志刷成内部字段清单。
+    logger.add_info(f"#{runtime.bot_id}").debug(
         f"[Budget] 本轮 {turn_budget.describe()}"
         f"，max_tokens={eff_max_tokens}（来自{max_tokens_src}）-> {session_id}"
     )

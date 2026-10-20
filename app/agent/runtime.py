@@ -52,8 +52,12 @@ def _apply_max_tokens_plan(effective) -> dict:
     老配置（页面上没重存过）也可能低于思考下限，而"预算全花在 reasoning 里"的
     空回复不该留到运行时才发现。
 
-    落盘形状：``max_tokens`` = 生效值，``_max_tokens_origin`` = 带抬升/封顶说明的
-    来源串（chat 的日志与 ``[Budget]`` 行直接用这个串）。
+    落盘形状：``max_tokens`` = 生效值，``_max_tokens_origin`` = **纯来源名**（如
+    ``provider 模型+思考下限``），``_max_tokens_notes`` = 抬升/封顶的补充说明。
+
+    ``_max_tokens_origin`` 刻意不存 ``plan.describe()`` 的成品句子：下游日志全都要
+    自己拼 ``max_tokens={值}（来自{来源}）``，存成品会被再套一层——线上因此出现过
+    ``max_tokens=1024（来自max_tokens=1024（来自provider 模型））``。
     """
     from app.agent.providers.policy import plan_max_tokens
 
@@ -65,7 +69,9 @@ def _apply_max_tokens_plan(effective) -> dict:
         return cfg
     if plan.value and plan.value != cfg.get("max_tokens"):
         cfg["max_tokens"] = plan.value
-    cfg["_max_tokens_origin"] = plan.describe()
+    cfg["_max_tokens_origin"] = plan.origin
+    if plan.notes:
+        cfg["_max_tokens_notes"] = "；".join(plan.notes)
     return cfg
 
 

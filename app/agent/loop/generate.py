@@ -160,7 +160,8 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
         error="" if response.ok else "未产出可用响应",
         budget=turn_budget,
     )
-    logger.add_info(f"#{runtime.bot_id}").info(
+    # 与流式路径一致：预算总账只进 debug.log（见 turn_metrics 请求行的说明）
+    logger.add_info(f"#{runtime.bot_id}").debug(
         f"[Budget] 本轮 {turn_budget.describe()}"
         f"，max_tokens={eff_max_tokens}（来自{max_tokens_src}）-> {session_id}"
     )

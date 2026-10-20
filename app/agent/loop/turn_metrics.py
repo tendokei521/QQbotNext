@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Any
 
@@ -111,6 +112,10 @@ def _log_request_line(
         model= in= out= max_tokens=(来源) finish= text= reasoning= tools= retry=n/m
 
     上游没回报 token 时写 ``in=?`` ``out=?`` 而不是 0 —— 0 会被误读成"没花 token"。
+
+    **打 DEBUG 而不是 INFO**：这是逐请求的内部遥测，一轮对话里会出现好几次，
+    对"机器人回了什么"没有信息量，却会把 user.log（用户简洁日志）刷成一屏内部字段。
+    排查时打开 debug.log 就能看到完整字段，一行都不少。
     """
     from app.agent.providers.base import has_token_usage
 
@@ -135,10 +140,11 @@ def _log_request_line(
     parts.append(f"budget={budget.requests}/{budget.max_requests}")
     log = logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}")
     if error:
+        # 出错才升级到 WARNING：这时的字段是排查入口，不能只留在 debug.log
         parts.append(f"error={error}")
         log.warning("[LLM] 请求 " + " ".join(parts) + f" -> {session_id}")
     else:
-        log.info("[LLM] 请求 " + " ".join(parts) + f" -> {session_id}")
+        log.debug("[LLM] 请求 " + " ".join(parts) + f" -> {session_id}")
 
 
 def _turn_budget(config) -> TurnBudget:
@@ -204,7 +210,8 @@ def _effective_max_tokens(provider_chain, fallback) -> tuple[int, str]:
     **链上配置赢**，Agent 页那个数字只在链上没写时才生效。
 
     来源由 ``_config_for_model_id`` 写进 ``_max_tokens_origin``（合并后的 cfg 恒带该键，
-    光看值是分辨不出三层的）；拿不到标记时才退回「链上 = provider、否则 agent」的粗判。
+    光看值是分辨不出三层的）；它是**纯来源名**，调用方自己拼 "来自{来源}"。
+    拿不到标记时才退回「链上 = provider、否则 agent」的粗判。
     """
     for cfg in provider_chain or []:
         value = (cfg or {}).get("max_tokens")
