@@ -36,8 +36,9 @@ from app.core.logger import module_logger
 LOG_FILENAMES = ("debug.log", "warn.log", "errors.log", "user.log")
 USER_LOG_FILENAME = "user.log"
 
-COMMAND_LOG = "/log"
-COMMAND_LOGS = "/logs"
+#: 两条命令的业务取值（解析由框架的命令节点完成，这里只是"要哪几个文件"的开关）
+COMMAND_USER_LOG = "log"
+COMMAND_ALL_LOGS = "logs"
 
 #: 默认只发末尾 2000 行（0 = 全量，全量仍受 max_file_mb 约束）
 DEFAULT_TAIL_LINES = 2000
@@ -69,25 +70,12 @@ class SendResult:
     detail: str
 
 
-# ==================== 命令与取文件 ====================
-
-
-def parse_command(text: str) -> str | None:
-    """识别 ``/log`` / ``/logs``，返回 ``"log"`` / ``"logs"`` / ``None``。
-
-    容忍首尾空白、大小写、全角斜杠（``／log``）；只要命令本身，后面带参数不认。
-    """
-    token = (text or "").strip().replace("／", "/").lower()
-    if token == COMMAND_LOG:
-        return "log"
-    if token == COMMAND_LOGS:
-        return "logs"
-    return None
+# ==================== 取文件 ====================
 
 
 def select_log_files(log_dir: Path, command: str) -> list[Path]:
     """按命令挑出本轮次已有的日志文件（不存在的跳过）。"""
-    names = (USER_LOG_FILENAME,) if command == "log" else LOG_FILENAMES
+    names = (USER_LOG_FILENAME,) if command == COMMAND_USER_LOG else LOG_FILENAMES
     existing: list[Path] = []
     for name in names:
         path = Path(log_dir) / name
@@ -266,19 +254,15 @@ def _human_size(size: int) -> str:
     return f"{value:.1f} MB"
 
 
-# ==================== 入口 ====================
+# ==================== 入口（由 @command 调用） ====================
 
 
-async def handle(module, event) -> None:
-    """命令入口：解析 → 生成副本 → 发送 → 回一条汇总。"""
-    command = parse_command(getattr(event, "text", "") or "")
-    if command is None:
-        return
+async def send_logs(module, event, *, command: str = "log") -> None:
+    """命令入口：生成副本 → 发送 → 回一条汇总。
 
-    llm = getattr(event, "llm", None)
-    if llm is not None:
-        llm.stop()  # 命中命令即接管，不让 LLM 再跟着回一句
-
+    解析（``/log`` 前缀、大小写、别名）与「命中即截断 LLM」都由框架的命令节点负责，
+    这里只管业务。``command`` 取 ``"log"``（只发 user）或 ``"logs"``（四个都发）。
+    """
     logger = module_logger.add_info(f"#{getattr(module, 'bot_id', '')}").add_info(
         getattr(module, "name", "日志发送")
     )

@@ -5,9 +5,9 @@
 - ``/log``  → ``user.log``（作为 ``user.txt`` 发出去）
 - ``/logs`` → debug / warn / errors / user 四个文件
 
-「本轮次」= ``logs/`` 根目录下正在写的那四个文件（6 小时轮转，旧段进
-``logs/YYYY-MM-DD-HH/``）。取文件的细节、裁剪与发送降级全在 `service.py`，
-本文件只负责声明与接线。
+命令用的是框架的统一命令系统（`app.plugin.command`）：解析、别名、参数切分、
+以及**命中即截断 LLM** 都由框架负责，这里只写业务。取文件、裁剪与发送降级在
+`service.py`。
 
 ## 为什么要 ``permission = "owner"``
 
@@ -22,7 +22,7 @@
 
 from __future__ import annotations
 
-from app.plugin import BaseModule, module_hook
+from app.plugin import BaseModule, command
 
 from .config_schema import SCHEMA
 
@@ -42,9 +42,15 @@ class Module(BaseModule):
     }
     config_schema = SCHEMA
 
-    @module_hook("message_group", order=5)
-    @module_hook("message_private", order=5)
-    async def handle_command(self, event):
-        from .service import handle
+    # 两条命令都默认 skip_llm=True（隐藏参数默认值）：回完文件不再让模型搭话。
+    @command("log", description="发送本轮次 user 日志（user.txt）")
+    async def send_user_log(self, event):
+        from .service import send_logs
 
-        await handle(self, event)
+        await send_logs(self, event, command="log")
+
+    @command("logs", description="发送本轮次四个日志文件（debug/warn/errors/user）")
+    async def send_all_logs(self, event):
+        from .service import send_logs
+
+        await send_logs(self, event, command="logs")
