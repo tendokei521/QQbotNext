@@ -35,13 +35,13 @@ if str(ROOT) not in sys.path:
 from app.agent.assembly.prompt import LEGACY_MESSAGE_META_INSTRUCTION, build_messages  # noqa: E402
 from app.agent.config import DEFAULT_LLM_CONFIG  # noqa: E402
 from app.agent.proactivity.scheduler import TaskScheduler  # noqa: E402
-from app.agent.proactivity.time_parser import parse_schedule  # noqa: E402
 from app.agent.providers import get_provider  # noqa: E402
 from app.agent.providers.openai_compat import OpenAICompatProvider  # noqa: E402
 from app.agent.providers.runtime_manager import ProviderRuntimeManager  # noqa: E402
 from app.agent.tools.schedule import build_schedule_tool  # noqa: E402
 from app.agent.tools.spec import make_executor  # noqa: E402
 from app.core.settings import Settings  # noqa: E402
+from app.domain.time_parser import parse_schedule  # noqa: E402
 from app.infrastructure.config.config_service import ConfigService  # noqa: E402
 from app.infrastructure.persistence.database import Database  # noqa: E402
 
