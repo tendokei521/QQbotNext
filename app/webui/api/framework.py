@@ -6,24 +6,24 @@ schema 版本与字段类型清单 —— 模块可据此自检并给出可读�
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-from app.plugin.base import ServiceAccess
-from app.plugin.features import FeatureRegistry
 from app.services.capabilities import collect_capabilities
-from app.services.resource_registry import ResourceRegistry
-from app.webui.api.deps import get_container
+from app.webui.api.deps import get_feature_registry, get_resource_registry, get_service_access
 
 router = APIRouter(prefix="/framework", tags=["framework"])
 
 
 @router.get("/capabilities")
-async def framework_capabilities(request: Request):
-    container = get_container(request)
+async def framework_capabilities(
+    services=Depends(get_service_access),
+    features=Depends(get_feature_registry),
+    resources=Depends(get_resource_registry),
+):
     capabilities = collect_capabilities(
-        services=container.get(ServiceAccess),
-        features=container.get(FeatureRegistry),
-        resources=container.get(ResourceRegistry),
+        services=services,
+        features=features,
+        resources=resources,
     )
     return JSONResponse(content={"ok": True, "capabilities": capabilities})

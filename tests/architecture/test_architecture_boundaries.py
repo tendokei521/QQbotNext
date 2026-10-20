@@ -43,10 +43,11 @@ _BUDGET = {
     "bootstrap_imports": 0,
     # 剩下的都在 app/webui/api/*。`deps.py` 已经给每个服务备了具名依赖
     # （get_bot_service 等），把端点改成 `Depends(get_xxx_service)` 就能继续降。
-    # logs.py 已清零（含 3 条 HTTP 用例守住）。
-    "get_container_calls": 63,
+    # 已清零：logs.py（4 端点，3 条 HTTP 用例守住）、framework.py、resources.py、
+    # webui_cfg.py（12 端点）。剩下 agent.py / bots.py / modules.py 三个大文件。
+    "get_container_calls": 51,
     # 端点里自己 `container.get(类型)` 的次数（服务定位的味道）。目标 0。
-    "webui_container_get_calls": 53,
+    "webui_container_get_calls": 44,
     # app/webui/api/{agent,media,modules,prompt_dump}.py 直接 import app.agent.*
     "webui_to_agent_imports": 13,
 }

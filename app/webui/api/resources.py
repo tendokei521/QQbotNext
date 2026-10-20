@@ -9,11 +9,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from app.services.resource_registry import ResourceRegistry
-from app.webui.api.deps import get_container
+from app.webui.api.deps import get_resource_registry
 
 router = APIRouter(prefix="/resources", tags=["resources"])
 
@@ -22,14 +21,12 @@ _RESERVED_PARAMS = ("bot_id", "token")
 
 
 @router.get("")
-async def list_resource_kinds(request: Request):
-    registry: ResourceRegistry = get_container(request).get(ResourceRegistry)
+async def list_resource_kinds(registry=Depends(get_resource_registry)):
     return JSONResponse(content={"ok": True, "kinds": registry.kinds()})
 
 
 @router.get("/{kind}")
-async def list_resource_options(kind: str, request: Request):
-    registry: ResourceRegistry = get_container(request).get(ResourceRegistry)
+async def list_resource_options(kind: str, request: Request, registry=Depends(get_resource_registry)):
     if not registry.has(kind):
         return JSONResponse(
             status_code=404,

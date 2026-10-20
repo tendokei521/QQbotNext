@@ -1,11 +1,15 @@
-"""WebUI 自身配置 API（日志展示、单一服务、多群管理）。"""
+"""WebUI 自身配置 API（日志展示、单一服务、多群管理）。
+
+依赖 `ConfigService` 一律通过 `Depends(get_config_service)` 注入——读一个路由就能看出
+它依赖谁，不必追到装配根。
+"""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from app.webui.api.deps import get_container
+from app.webui.api.deps import get_config_service
 
 router = APIRouter(tags=["webui"])
 
@@ -19,18 +23,12 @@ def _err(status: int, message: str):
 
 
 @router.get("/webui/config")
-async def get_webui_config(request: Request):
-    from app.infrastructure.config.config_service import ConfigService
-
-    return JSONResponse(content=get_container(request).get(ConfigService).get_webui_config())
+async def get_webui_config(cfg_service=Depends(get_config_service)):
+    return JSONResponse(content=cfg_service.get_webui_config())
 
 
 @router.post("/webui/config")
-async def save_webui_config(request: Request):
-    from app.infrastructure.config.config_service import ConfigService
-
-    container = get_container(request)
-    cfg_service = container.get(ConfigService)
+async def save_webui_config(request: Request, cfg_service=Depends(get_config_service)):
     try:
         data = await request.json()
     except Exception:
@@ -47,11 +45,7 @@ async def save_webui_config(request: Request):
 
 
 @router.post("/webui/config/logs")
-async def save_logs_config(request: Request):
-    from app.infrastructure.config.config_service import ConfigService
-
-    container = get_container(request)
-    cfg_service = container.get(ConfigService)
+async def save_logs_config(request: Request, cfg_service=Depends(get_config_service)):
     try:
         data = await request.json()
     except Exception:
@@ -66,19 +60,13 @@ async def save_logs_config(request: Request):
 
 
 @router.get("/webui/config/experimental")
-async def get_experimental_config(request: Request):
-    from app.infrastructure.config.config_service import ConfigService
-
-    cfg = get_container(request).get(ConfigService).get_webui_config()
+async def get_experimental_config(cfg_service=Depends(get_config_service)):
+    cfg = cfg_service.get_webui_config()
     return JSONResponse(content=cfg.get("experimental", {"show_experimental": False}))
 
 
 @router.post("/webui/config/experimental")
-async def save_experimental_config(request: Request):
-    from app.infrastructure.config.config_service import ConfigService
-
-    container = get_container(request)
-    cfg_service = container.get(ConfigService)
+async def save_experimental_config(request: Request, cfg_service=Depends(get_config_service)):
     try:
         data = await request.json()
     except Exception:
@@ -92,19 +80,13 @@ async def save_experimental_config(request: Request):
 
 
 @router.get("/webui/module-preferences")
-async def get_module_preferences(request: Request):
-    from app.infrastructure.config.config_service import ConfigService
-
-    cfg = get_container(request).get(ConfigService).get_webui_config()
+async def get_module_preferences(cfg_service=Depends(get_config_service)):
+    cfg = cfg_service.get_webui_config()
     return JSONResponse(content=cfg.get("module_preferences", {}))
 
 
 @router.post("/webui/module-preferences")
-async def save_module_preferences(request: Request):
-    from app.infrastructure.config.config_service import ConfigService
-
-    container = get_container(request)
-    cfg_service = container.get(ConfigService)
+async def save_module_preferences(request: Request, cfg_service=Depends(get_config_service)):
     try:
         data = await request.json()
     except Exception:
@@ -116,19 +98,13 @@ async def save_module_preferences(request: Request):
 
 
 @router.get("/webui/single-service")
-async def get_single_service(request: Request):
-    from app.infrastructure.config.config_service import ConfigService
-
-    cfg = get_container(request).get(ConfigService).get_webui_config()
+async def get_single_service(cfg_service=Depends(get_config_service)):
+    cfg = cfg_service.get_webui_config()
     return JSONResponse(content={"single_service": cfg.get("single_service", {})})
 
 
 @router.post("/webui/single-service")
-async def save_single_service(request: Request):
-    from app.infrastructure.config.config_service import ConfigService
-
-    container = get_container(request)
-    cfg_service = container.get(ConfigService)
+async def save_single_service(request: Request, cfg_service=Depends(get_config_service)):
     try:
         data = await request.json()
     except Exception:
@@ -140,19 +116,13 @@ async def save_single_service(request: Request):
 
 
 @router.get("/webui/multi-group")
-async def get_multi_group(request: Request):
-    from app.infrastructure.config.config_service import ConfigService
-
-    cfg = get_container(request).get(ConfigService).get_webui_config()
+async def get_multi_group(cfg_service=Depends(get_config_service)):
+    cfg = cfg_service.get_webui_config()
     return JSONResponse(content={"multi_group": cfg.get("multi_group", {"show_all": False, "groups": {}})})
 
 
 @router.post("/webui/multi-group")
-async def save_multi_group(request: Request):
-    from app.infrastructure.config.config_service import ConfigService
-
-    container = get_container(request)
-    cfg_service = container.get(ConfigService)
+async def save_multi_group(request: Request, cfg_service=Depends(get_config_service)):
     try:
         data = await request.json()
     except Exception:
