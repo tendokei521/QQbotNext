@@ -21,7 +21,10 @@
 
 1. ``upload_group_file`` / ``upload_private_file``：正常文件消息（NapCat 等实现都认）；
 2. 失败 → ``file`` 消息段（部分 OneBot 实现只认这个）；
-3. 再失败 → 在汇总回复里贴上该文件的末尾若干行，至少让 owner 有东西看，并留痕。
+3. 还有文件没发出去 → **合并转发**（``send_forward_msg``）：一个结果清单节点 + 每个失败
+   文件末尾若干行的正文节点（超长按行拆节点）。纯文本兜底改走这里——一张卡片带过去，
+   比在聊天里糊一大坨文本好读，也不刷屏；
+4. 合并转发也失败 → 极端兜底：纯文本贴末尾几行（保证「至少能看到东西」）。
 """
 
 from __future__ import annotations
@@ -43,7 +46,9 @@ COMMAND_ALL_LOGS = "logs"
 #: 默认只发末尾 2000 行（0 = 全量，全量仍受 max_file_mb 约束）
 DEFAULT_TAIL_LINES = 2000
 DEFAULT_MAX_FILE_MB = 8.0
-#: 发送彻底失败时，在回复里贴多少行原文
+#: 文件消息发不出去时，合并转发里每个文件带多少行正文
+DEFAULT_FORWARD_LINES = 200
+#: 合并转发也失败时的极端兜底：在纯文本里贴多少行
 DEFAULT_FALLBACK_TEXT_LINES = 30
 #: 落盘副本的存活时间：留一点余量给 OneBot 侧读文件，别边发边删
 OUTBOX_MAX_AGE_SECONDS = 600
@@ -215,6 +220,106 @@ async def send_log_file(event, path: Path, name: str) -> tuple[bool, str]:
     return False, detail
 
 
+# ==================== 合并转发（纯文本兜底改走这里） ====================
+
+#: 合并转发卡片上显示的发送者名
+FORWARD_NAME = "日志发送"
+#: 无可用 uin 时的兜底（OneBot 要求节点带 uin）
+FORWARD_FALLBACK_UIN = "10000"
+#: 单个转发节点正文的软上限：超了就拆成多条节点（卡片不会糊成一屏）
+FORWARD_NODE_CHARS = 1200
+
+
+def _text_node(name: str, text: str, uin=None) -> dict:
+    """一个文本节点（格式与 bilibili_parser / recall_back 一致）。"""
+    return {
+        "type": "node",
+        "data": {
+            "name": name or FORWARD_NAME,
+            "uin": str(uin or FORWARD_FALLBACK_UIN),
+            "content": [{"type": "text", "data": {"text": text}}],
+        },
+    }
+
+
+def _chunk_lines(text: str, limit: int = FORWARD_NODE_CHARS) -> list[str]:
+    """按行把正文切成不超过 ``limit`` 的若干段（不切断行）。"""
+    chunks: list[str] = []
+    current: list[str] = []
+    size = 0
+    for line in (text or "").splitlines():
+        line_len = len(line) + 1
+        if current and size + line_len > max(int(limit), 1):
+            chunks.append("\n".join(current))
+            current, size = [], 0
+        current.append(line)
+        size += line_len
+    if current:
+        chunks.append("\n".join(current))
+    return chunks or [""]
+
+
+def build_forward_nodes(
+    results: list[SendResult],
+    *,
+    uin=None,
+    tail_lines: int = 200,
+) -> list[dict]:
+    """把「发送结果 + 没发出去的文件正文」拼成合并转发节点。
+
+    第 0 个节点是结果清单（谁成功、谁失败、失败原因），其后每个失败文件按
+    ``tail_lines`` 取末尾若干行作为正文节点（超长按行拆节点）。文件消息发不出去时，
+    日志正文就靠这张合并转发卡片带过去——比在聊天里贴一大坨纯文本好读，也不刷屏。
+    """
+    nodes = [_text_node(FORWARD_NAME, _summary(results, preview_lines=0), uin)]
+    for item in results:
+        if item.ok:
+            continue
+        text = _preview_lines(item.snapshot, tail_lines)
+        if not text:
+            continue
+        chunks = _chunk_lines(text)
+        for index, chunk in enumerate(chunks, start=1):
+            name = item.snapshot.name if len(chunks) == 1 else f"{item.snapshot.name} ({index}/{len(chunks)})"
+            nodes.append(_text_node(name, chunk, uin))
+    return nodes
+
+
+async def send_forward(event, nodes: list[dict]) -> tuple[bool, str]:
+    """发一条合并转发：先走 ``send_forward_msg``，再试 node 消息段。返回 (成功, 说明)。"""
+    if not nodes:
+        return False, "没有可发送的内容"
+
+    bot = getattr(event, "bot", None)
+    group = getattr(event, "group", None)
+    group_id = getattr(group, "group_id", None) or getattr(event, "group_id", None)
+    user_id = getattr(event, "user_id", None)
+    detail = "未找到可用的转发通道"
+
+    sender = getattr(bot, "send_forward_msg", None)
+    if callable(sender) and (group_id or user_id):
+        try:
+            if getattr(event, "message_type", "") == "private" or not group_id:
+                response = await sender(user_id=user_id or 0, msgdata=nodes)
+            else:
+                response = await sender(group_id=group_id or 0, msgdata=nodes)
+        except Exception as e:  # noqa: BLE001
+            detail = f"send_forward_msg 异常: {e}"
+        else:
+            if _is_ok(response):
+                return True, "合并转发"
+            detail = "send_forward_msg 未成功"
+
+    # 部分实现只认「node 消息段」形式
+    try:
+        response = await event.reply(nodes)
+    except Exception as e:  # noqa: BLE001
+        return False, f"{detail}；node 段异常: {e}"
+    if _is_ok(response):
+        return True, "合并转发（node 段）"
+    return False, detail
+
+
 # ==================== 配置读取 ====================
 
 
@@ -234,7 +339,7 @@ def _num_cfg(module, key: str, default: float) -> float:
 
 
 def _preview_lines(snapshot: LogSnapshot, limit: int) -> str:
-    """读副本末尾若干行，用于发送彻底失败时的兜底展示。"""
+    """读副本末尾若干行（合并转发正文 / 极端兜底纯文本共用）。"""
     if limit <= 0:
         return ""
     try:
@@ -305,10 +410,28 @@ async def send_logs(module, event, *, command: str = "log") -> None:
         await event.reply("⚠️ 日志文件读取失败（详见 errors.log）")
         return
 
+    if all(r.ok for r in results):
+        # 全部走文件消息成功：只回一条简短清单，不必再发卡片
+        await event.reply(_summary(results))
+        return
+
+    # 有文件没发出去 → 正文改走**合并转发**（结果清单 + 各失败文件末尾若干行）
+    nodes = build_forward_nodes(
+        results,
+        uin=getattr(event, "self_id", None) or getattr(module, "bot_id", None),
+        tail_lines=int(_num_cfg(module, "fallback_forward_lines", DEFAULT_FORWARD_LINES)),
+    )
+    forwarded, forward_detail = await send_forward(event, nodes)
+    if forwarded:
+        logger.info(f"日志文件未全部发出，正文已合并转发（{forward_detail}）")
+        return
+
+    # 合并转发也不行 → 极端兜底：纯文本贴末尾几行
+    logger.warning(f"日志合并转发也失败（{forward_detail}），降级为纯文本")
     await event.reply(_summary(results, int(_num_cfg(module, "fallback_text_lines", DEFAULT_FALLBACK_TEXT_LINES))))
 
 
-def _summary(results: list[SendResult], preview_lines: int) -> str:
+def _summary(results: list[SendResult], preview_lines: int = 0) -> str:
     """汇总一条：发了哪些、各自多大、失败原因，失败时附原文末尾几行。"""
     sent = sum(1 for r in results if r.ok)
     head = f"本轮次日志已发送 {sent}/{len(results)} 个："

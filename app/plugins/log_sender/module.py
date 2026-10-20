@@ -7,7 +7,7 @@
 
 命令用的是框架的统一命令系统（`app.plugin.command`）：解析、别名、参数切分、
 以及**命中即截断 LLM** 都由框架负责，这里只写业务。取文件、裁剪与发送降级在
-`service.py`。
+`service.py`（文件消息发不出去时，日志正文改走**合并转发**）。
 
 ## 为什么要 ``permission = "owner"``
 
@@ -38,6 +38,7 @@ class Module(BaseModule):
         "enable": True,
         "tail_lines": 2000,
         "max_file_mb": 8,
+        "fallback_forward_lines": 200,
         "fallback_text_lines": 30,
     }
     config_schema = SCHEMA

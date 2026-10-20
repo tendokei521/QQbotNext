@@ -28,15 +28,23 @@ class FakeConfig:
 
 
 class FakeBot:
-    def __init__(self, ok: bool = True) -> None:
+    def __init__(self, ok: bool = True, forward_ok: bool = True) -> None:
         self.ok = ok
+        self.forward_ok = forward_ok
         self.calls: list[tuple[str, dict]] = []
+        self.forwards: list[dict] = []
 
     async def call_api(self, action: str, params: dict | None = None):
         self.calls.append((action, dict(params or {})))
         if self.ok:
             return {"status": "ok", "retcode": 0}
         return {"status": "failed", "retcode": 1200, "message": "不支持"}
+
+    async def send_forward_msg(self, group_id: int = 0, user_id: int = 0, msgdata=None, **kw):
+        self.forwards.append({"group_id": group_id, "user_id": user_id, "nodes": msgdata})
+        if self.forward_ok:
+            return {"status": "ok", "retcode": 0, "data": {"message_id": 9}}
+        return {"status": "failed", "retcode": 1200}
 
 
 class FakeEvent:
@@ -227,17 +235,67 @@ async def test_send_falls_back_to_file_segment(tmp_path):
     assert "1/1" in event.replies[-1]
 
 
-async def test_send_total_failure_attaches_preview(tmp_path):
+async def test_send_total_failure_uses_merged_forward(tmp_path):
+    """文件消息发不出去（上传与 file 段都失败）→ 正文改走合并转发。"""
     module, log_dir = _make_module(tmp_path)
     (log_dir / "user.log").write_text("唯一一行日志\n", encoding="utf-8")
+    bot = FakeBot(ok=False)
+    event = FakeEvent("/log", bot=bot, reply_ok=False)  # file 段也发不出去
+
+    await service.send_logs(module, event, command="log")
+
+    assert len(bot.forwards) == 1
+    nodes = bot.forwards[0]["nodes"]
+    assert nodes[0]["type"] == "node"
+    assert nodes[0]["data"]["uin"] == "1"  # 用 bot 自己的 uin
+    assert "0/1" in nodes[0]["data"]["content"][0]["data"]["text"]  # 结果清单节点
+    assert nodes[1]["data"]["name"] == "user.txt"
+    assert "唯一一行日志" in nodes[1]["data"]["content"][0]["data"]["text"]
+    # 合并转发成功时不再补发纯文本
+    assert not any(isinstance(r, str) for r in event.replies)
+
+
+async def test_send_all_failed_forwards_every_file(tmp_path):
+    module, log_dir = _make_module(tmp_path)
+    _write_logs(log_dir)
+    bot = FakeBot(ok=False)
+    event = FakeEvent("/logs", bot=bot, reply_ok=False)
+
+    await service.send_logs(module, event, command="logs")
+
+    names = [n["data"]["name"] for n in bot.forwards[0]["nodes"][1:]]
+    assert names == ["debug.txt", "warn.txt", "errors.txt", "user.txt"]
+
+
+async def test_send_forward_also_fails_falls_back_to_plain_text(tmp_path):
+    """合并转发也失败 → 极端兜底：纯文本里贴末尾几行。"""
+    module, log_dir = _make_module(tmp_path)
+    (log_dir / "user.log").write_text("唯一一行日志\n", encoding="utf-8")
+    bot = FakeBot(ok=False, forward_ok=False)
+    event = FakeEvent("/log", bot=bot, reply_ok=False)
+
+    await service.send_logs(module, event, command="log")
+
+    assert len(bot.forwards) == 1
+    summary = event.replies[-1]
+    assert "0/1" in summary
+    assert "唯一一行日志" in summary
+
+
+async def test_forward_nodes_chunked_by_lines(tmp_path):
+    module, log_dir = _make_module(tmp_path)
+    (log_dir / "user.log").write_text(
+        "\n".join(f"第{i}行" + "x" * 50 for i in range(200)) + "\n", encoding="utf-8"
+    )
     bot = FakeBot(ok=False)
     event = FakeEvent("/log", bot=bot, reply_ok=False)
 
     await service.send_logs(module, event, command="log")
 
-    summary = event.replies[-1]
-    assert "0/1" in summary
-    assert "唯一一行日志" in summary
+    body = bot.forwards[0]["nodes"][1:]
+    assert len(body) > 1  # 正文超长 → 按行拆成多个节点
+    assert body[0]["data"]["name"].startswith("user.txt (1/")
+    assert body[-1]["data"]["name"].startswith(f"user.txt ({len(body)}/")
 
 
 async def test_send_marks_truncated_file_in_summary(tmp_path):
