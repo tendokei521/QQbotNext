@@ -1,11 +1,15 @@
-"""Bot 连接与账号配置 API。"""
+"""Bot 连接与账号配置 API。
+
+依赖一律通过 `Depends(get_bot_service)` / `Depends(get_config_service)` 注入——
+读一个路由就能看出它依赖谁，不必追到装配根。
+"""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from app.webui.api.deps import get_container
+from app.webui.api.deps import get_bot_service, get_config_service
 
 router = APIRouter(tags=["bots"])
 
@@ -19,23 +23,16 @@ def _err(status: int, message: str):
 
 
 @router.get("/bots")
-async def api_bots(request: Request):
-    from app.services.bot_service import BotService
-
-    container = get_container(request)
-    bot_service = container.get(BotService)
+async def api_bots(bot_service=Depends(get_bot_service)):
     return JSONResponse(content={"bots": bot_service.get_bots_data()})
 
 
 @router.post("/bots/{index}/connect")
-async def connect_bot(index: int, request: Request):
-    from app.infrastructure.config.config_service import ConfigService
-    from app.services.bot_service import BotService
-
-    container = get_container(request)
-    bot_service = container.get(BotService)
-    config_service = container.get(ConfigService)
-
+async def connect_bot(
+    index: int,
+    bot_service=Depends(get_bot_service),
+    config_service=Depends(get_config_service),
+):
     bots_config = config_service.get_bots()
     if index < 0 or index >= len(bots_config):
         return _err(404, f"Bot at index {index} not in config")
@@ -55,20 +52,13 @@ async def connect_bot(index: int, request: Request):
 
 
 @router.post("/bots/{index}/disconnect")
-async def disconnect_bot(index: int, request: Request):
-    from app.services.bot_service import BotService
-
-    container = get_container(request)
-    await container.get(BotService).disconnect(index)
+async def disconnect_bot(index: int, bot_service=Depends(get_bot_service)):
+    await bot_service.disconnect(index)
     return _ok(f"Bot at index {index} disconnected")
 
 
 @router.post("/bots/{index}/reconnect")
-async def reconnect_bot(index: int, request: Request):
-    from app.services.bot_service import BotService
-
-    container = get_container(request)
-    bot_service = container.get(BotService)
+async def reconnect_bot(index: int, bot_service=Depends(get_bot_service)):
     success = await bot_service.reconnect(index)
     if success:
         bot_id = await bot_service.get_bot_id(index) or index
@@ -77,19 +67,13 @@ async def reconnect_bot(index: int, request: Request):
 
 
 @router.get("/bots/config")
-async def api_bots_config(request: Request):
-    from app.infrastructure.config.config_service import ConfigService
-
-    container = get_container(request)
+async def api_bots_config(config_service=Depends(get_config_service)):
     # 对外打码 access_token
-    return JSONResponse(content={"bots": container.get(ConfigService).get_bots_public()})
+    return JSONResponse(content={"bots": config_service.get_bots_public()})
 
 
 @router.post("/bots/config/save")
-async def api_bots_config_save(request: Request):
-    from app.infrastructure.config.config_service import ConfigService
-
-    container = get_container(request)
+async def api_bots_config_save(request: Request, config_service=Depends(get_config_service)):
     try:
         data = await request.json()
     except Exception as e:
@@ -101,31 +85,25 @@ async def api_bots_config_save(request: Request):
     if not isinstance(bots, list):
         # 空数组合法（= 用户主动删光所有账号），但**缺字段**和**类型错误**必须拒绝
         return _err(400, "请求体缺少 bots 数组，未改动任何账号配置")
-    await container.get(ConfigService).save_bots(bots)
+    await config_service.save_bots(bots)
     return _ok("配置已保存")
 
 
 @router.post("/bots/config/add")
-async def api_bots_config_add(request: Request):
-    from app.services.bot_service import BotService
-
-    container = get_container(request)
+async def api_bots_config_add(bot_service=Depends(get_bot_service)):
     # Reuse BotService.add_bot: persist the config AND register a gateway connection
     # (status "disconnected") at once, so /api/bots (status list) includes the new
     # account immediately and the cards / account selector refresh right away.
-    index = await container.get(BotService).add_bot("", None, False)
+    index = await bot_service.add_bot("", None, False)
     return _ok("已添加新账号配置", index=index)
 
 
 @router.post("/bots/config/delete/{index}")
-async def api_bots_config_delete(index: int, request: Request):
-    from app.infrastructure.config.config_service import ConfigService
-    from app.services.bot_service import BotService
-
-    container = get_container(request)
-    bot_service = container.get(BotService)
-    cfg_service = container.get(ConfigService)
-
+async def api_bots_config_delete(
+    index: int,
+    bot_service=Depends(get_bot_service),
+    cfg_service=Depends(get_config_service),
+):
     await bot_service.gateway.del_bot(index)
     ok = await cfg_service.delete_bot(index)
     if not ok:
@@ -136,19 +114,13 @@ async def api_bots_config_delete(index: int, request: Request):
 
 
 @router.get("/bots/groups")
-async def get_all_bots_groups(request: Request):
-    from app.services.bot_service import BotService
-
-    container = get_container(request)
-    return JSONResponse(content={"bots_groups": container.get(BotService).get_bots_groups()})
+async def get_all_bots_groups(bot_service=Depends(get_bot_service)):
+    return JSONResponse(content={"bots_groups": bot_service.get_bots_groups()})
 
 
 @router.get("/bots/{index}")
-async def api_bot(index: int, request: Request):
-    from app.services.bot_service import BotService
-
-    container = get_container(request)
-    info = container.get(BotService).gateway.get_bot_info_by_index(index)
+async def api_bot(index: int, bot_service=Depends(get_bot_service)):
+    info = bot_service.gateway.get_bot_info_by_index(index)
     if info:
         return JSONResponse(content=info)
     return _err(404, f"Bot at index {index} not found")
