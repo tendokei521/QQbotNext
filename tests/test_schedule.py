@@ -378,7 +378,7 @@ async def test_scheduler_disabled(tmp_path):
 
 async def test_schedule_tool_handler(tmp_path):
     """schedule_task 工具：create / list / delete / 归属过滤 / 错误时间。"""
-    from app.agent.proactivity.scheduler import handle_schedule_tool
+    from app.agent.tools.schedule import handle_schedule_tool
 
     module = _FakeModule()
     sched = TaskScheduler(module, data_dir=str(tmp_path))
@@ -428,7 +428,7 @@ async def test_schedule_tool_handler(tmp_path):
 
 def test_schedule_tool_openai_definition():
     """工具定义可转成 OpenAI 原生 function 格式。"""
-    from app.agent.proactivity.scheduler import SCHEDULE_TASK_SCHEMA
+    from app.agent.tools.schedule import SCHEDULE_TASK_SCHEMA
     from app.agent.tools.spec import ToolSpec
 
     spec = ToolSpec(name="schedule_task", description="管理定时任务",

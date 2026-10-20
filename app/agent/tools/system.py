@@ -37,7 +37,7 @@ def _build_specs(runtime: Any) -> list[ToolSpec]:
     """构造全部内置系统工具的 ToolSpec（仅用于元数据/列表展示）。"""
     specs: list[ToolSpec] = []
 
-    from app.agent.proactivity.scheduler import build_schedule_tool
+    from app.agent.tools.schedule import build_schedule_tool
 
     specs.append(build_schedule_tool(runtime, "group_0", False))
 

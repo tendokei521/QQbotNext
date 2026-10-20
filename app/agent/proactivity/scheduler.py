@@ -29,7 +29,6 @@ from app.agent.persona.tags import strip_all_tags
 from app.agent.proactivity.time_parser import advance_repeat, parse_schedule
 from app.agent.providers import get_provider
 from app.agent.session.manager import SessionManager
-from app.agent.tools.spec import ToolSpec
 
 # 定时触发（cron-wake）默认提示词：对齐 AstrBot PROACTIVE_AGENT_CRON_WOKE_SYSTEM_PROMPT 的轻量版
 DEFAULT_SCHEDULE_PROMPT = (
@@ -804,122 +803,6 @@ class TaskScheduler:
             logger.add_info(f"#{self.bot_id}").info(
                 f"[定时任务] 启动恢复: 移除过期 {removed} 个，周期任务推进 {advanced} 个，武装 {armed} 个"
             )
-
-
-# ==================== schedule_task 工具（原生 function calling） ====================
-
-SCHEDULE_TASK_SCHEMA: dict = {
-    "type": "object",
-    "properties": {
-        "action": {
-            "type": "string",
-            "enum": ["create", "list", "delete"],
-            "description": "create 安排定时提醒；list 查看本会话已有任务；delete 按 job_id 删除任务。",
-        },
-        "trigger": {
-            "type": "string",
-            "description": "create 时的时间表达式（自然语言）。支持：明天早上8点 / 今晚10点 / 每天早上8点 / 每周五下午6点 / 每月1号上午9点 / 5分钟后 / 半小时后 / 每30分钟 / 08:30。",
-        },
-        "note": {
-            "type": "string",
-            "description": "create 时到点要做的内容 / 要说的话。",
-        },
-        "job_id": {
-            "type": "string",
-            "description": "delete 时的任务 id（来自 list 结果）。",
-        },
-    },
-    "required": ["action"],
-}
-
-
-async def handle_schedule_tool(module, session_id: str, is_private: bool, args: dict) -> str:
-    """schedule_task 工具处理器：create / list / delete。返回给 LLM 的结果文本。"""
-    scheduler = getattr(module, "scheduler", None)
-    if scheduler is None:
-        return "error: 定时任务服务不可用"
-    action = str(args.get("action") or "").strip().lower()
-    bot_id = getattr(module, "bot_id", "?")
-
-    if action == "create":
-        trigger = str(args.get("trigger") or "").strip()
-        note = str(args.get("note") or "").strip()
-        if not trigger or not note:
-            return "error: create 需要同时提供 trigger 与 note"
-        existing = scheduler.find_similar(session_id, trigger)
-        if existing is not None:
-            logger.add_info(f"#{bot_id}").info(
-                f"[定时任务] 工具 create 跳过重复 -> {session_id}: {trigger}"
-            )
-            return (
-                f"success: 本会话已存在相同定时任务，id={existing.id}，重复方式={existing.repeat}，"
-                f"下次触发时间={existing.next_at:%Y-%m-%d %H:%M:%S}，未重复创建。"
-            )
-        entry = await scheduler.schedule(session_id, {"trigger": trigger, "content": note})
-        if entry is None:
-            logger.add_info(f"#{bot_id}").warning(f"[定时任务] 工具 create 失败: trigger={trigger}")
-            return (
-                f"error: 无法解析时间表达式 {trigger!r}。支持格式：明天早上8点 / 今晚10点 / "
-                "每天早上8点 / 每周五下午6点 / 每月1号上午9点 / 5分钟后 / 半小时后 / 每30分钟 / 08:30。"
-                "请用这些格式重新尝试。"
-            )
-        logger.add_info(f"#{bot_id}").info(
-            f"[定时任务] 工具 create -> {session_id}: {trigger} @ {entry.next_at:%Y-%m-%d %H:%M} ({entry.repeat})"
-        )
-        return (
-            f"success: 已创建定时任务，id={entry.id}，重复方式={entry.repeat}，"
-            f"下次触发时间={entry.next_at:%Y-%m-%d %H:%M:%S}。"
-        )
-
-    if action == "list":
-        rows = [t for t in scheduler.status() if t["session_id"] == session_id]
-        if not rows:
-            return "当前会话没有定时任务"
-        lines = []
-        for t in rows:
-            next_s = datetime.fromtimestamp(t["next_trigger_time"]).strftime("%Y-%m-%d %H:%M")
-            lines.append(f"id={t['task_id']} | {t['repeat']} | 下次 {next_s} | {t['content'][:30]}")
-        return "本会话定时任务:\n" + "\n".join(lines)
-
-    if action == "delete":
-        job_id = str(args.get("job_id") or "").strip()
-        if not job_id:
-            return "error: delete 需要提供 job_id"
-        matches = [
-            t for t in scheduler.status()
-            if t["session_id"] == session_id
-            and (t["task_id"] == job_id or t["task_id"].startswith(job_id))
-        ]
-        if not matches:
-            return f"error: 未找到本会话的任务 {job_id}（用 list 查看）"
-        if len(matches) > 1:
-            ids = ", ".join(t["task_id"] for t in matches)
-            return f"error: 任务 id {job_id} 前缀不唯一（{ids}），请使用完整 id 重试"
-        task = matches[0]
-        if scheduler.cancel(task["task_id"]):
-            return f"success: 已删除定时任务 {task['task_id']}"
-        return f"error: 删除任务 {task['task_id']} 失败"
-
-    return "error: action 必须是 create / list / delete 之一"
-
-
-def build_schedule_tool(module, session_id: str, is_private: bool) -> ToolSpec:
-    """构造绑定到当前会话的 schedule_task 工具。"""
-    async def _handler(ctx, args: dict) -> str:
-        return await handle_schedule_tool(module, session_id, is_private, args)
-
-    return ToolSpec(
-        name="schedule_task",
-        description=(
-            "管理本会话的定时提醒/定时回复。当用户请求在特定时间做某事时（如"
-            "\"明天早上8点提醒我\"、\"每周五发周报\"、\"5分钟后叫我\"），调用本工具安排；"
-            "用户查询/取消已有提醒时也可调用（list/delete）。"
-        ),
-        parameters=SCHEDULE_TASK_SCHEMA,
-        handler=_handler,
-        source="system",
-        category="定时任务",
-    )
 
 
 # ==================== 定时意图检测（确定性兜底） ====================

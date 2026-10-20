@@ -315,7 +315,8 @@ async def _collect_llm_ext(
 
     specs = []
     if schedule_enable:
-        from app.agent.proactivity.scheduler import build_schedule_tool
+        # 工具在 tools/schedule.py，引擎在 proactivity/scheduler.py——分开是为了不造环
+        from app.agent.tools.schedule import build_schedule_tool
 
         specs.append(build_schedule_tool(runtime, session_id, is_private))
 
