@@ -35,8 +35,41 @@ from app.agent.context.group import (
     fetch_private_online_history,
     format_history_for_llm,
 )
-from app.domain.splitter import split_sentences, strip_stream_artifacts
+from app.agent.loop.assistant_output import (  # noqa: F401 - 重导出保持 chat.* API
+    _WARNED_SPEECH_INTENT,
+    _build_speech,
+    _clean_output_for_history,
+    _flush_speech,
+    _force_speak_round,
+    _should_force_speak,
+    _speech_fallback_enabled,
+    _speech_intent,
+)
 from app.agent.loop.tool_loop import normalize_and_execute_tool_calls
+from app.agent.loop.tool_source import (  # noqa: F401 - 重导出保持 chat.* API
+    _collect_llm_ext,
+    _context_expand_flags,
+    _images_enabled,
+)
+from app.agent.loop.turn_metrics import (  # noqa: F401 - 重导出保持 chat.* API
+    _MAX_TOKENS_WARNED,
+    DEFAULT_EMPTY_REPLY_RETRIES,
+    DEFAULT_MAX_TOOL_ROUNDS,
+    DEFAULT_REASONING_OVERFLOW_RETRIES,
+    REASONING_OVERFLOW_NUDGE,
+    _effective_max_tokens,
+    _input_tokens_estimate,
+    _log_request_line,
+    _max_empty_retries,
+    _max_tokens_override_note,
+    _max_tool_rounds,
+    _reasoning_overflow_retries,
+    _record_stream_telemetry,
+    _served_model_label,
+    _turn_budget,
+    _usage_delta,
+    _usage_snapshot,
+)
 from app.agent.media.image import (
     IMAGE_LIKE_SEGMENTS,
     backfill_history_media,
@@ -46,14 +79,15 @@ from app.agent.media.image import (
     max_image_bytes,
     persist_images,
 )
-from app.domain.tags import maybe_strip_parentheses, strip_all_tags
-from app.domain.trigger import extract_text
 from app.agent.providers import SERVED_MODEL_KEY, log_token_usage
 from app.agent.providers.invoker import resolve_invoker
-from app.domain.modalities import normalize_modalities, supports_image, supports_tool_use
 from app.agent.providers.policy import TurnBudget, retry_profile_of
 from app.agent.session.manager import SessionManager
 from app.agent.tools.spec import ToolContext, build_tools, make_executor
+from app.domain.modalities import normalize_modalities, supports_image, supports_tool_use
+from app.domain.splitter import split_sentences, strip_stream_artifacts
+from app.domain.tags import maybe_strip_parentheses, strip_all_tags
+from app.domain.trigger import extract_text
 
 
 def _event_nickname(event) -> str:
@@ -62,15 +96,6 @@ def _event_nickname(event) -> str:
     if user is None:
         return ""
     return getattr(user, "card", "") or getattr(user, "nickname", "") or ""
-
-
-def _served_model_label(usage_sink: dict | None, fallback: Any) -> str:
-    """本次请求实际服务的模型名（回退后由 provider 层写进 usage_sink）。
-
-    取不到（调用方被插件整体替换、没走 provider 层）时退回配置里的主模型名。
-    """
-    served = str((usage_sink or {}).get(SERVED_MODEL_KEY) or "").strip()
-    return served or str(fallback or "").strip()
 
 
 def _segments_as_dicts(message: Any) -> list[dict]:
@@ -84,14 +109,6 @@ def _segments_as_dicts(message: Any) -> list[dict]:
         if stype:
             segments.append({"type": str(stype), "data": dict(getattr(seg, "data", {}) or {})})
     return segments
-
-
-def _images_enabled(config) -> bool:
-    """图片是否随请求传给模型（默认开；仅对声明了 image 模态的模型生效）。"""
-    try:
-        return bool(config.get("image_understanding_enable", True))
-    except Exception:  # noqa: BLE001
-        return True
 
 
 def _commit_history_enrichment(runtime, session_id: str, ctx=None) -> int:
@@ -269,154 +286,6 @@ async def _referent_block(runtime, session_id: str, user_text: str, ctx) -> str:
         return ""
 
 
-def _context_expand_flags(config) -> dict:
-    """渲染层「骨架预展开」开关。
-
-    - ``resolve_at``：复用既有的 ``fetch_at_nickname``（@ 昵称反查总开关）；
-    - ``mark_unresolved``：``context_expand_enable``，控制 ``【未展开:...】`` 标记
-      （与按需展开能力同开同关：标记必须可被解决，否则只会诱导模型空转）。
-    """
-    flags = {"resolve_at": True, "mark_unresolved": True}
-    for key, name in (("fetch_at_nickname", "resolve_at"), ("context_expand_enable", "mark_unresolved")):
-        try:
-            flags[name] = bool(config.get(key, True))
-        except Exception as e:
-            # 配置读取异常不能影响回复主流程，退回默认（开启）并留痕
-            logger.add_info("Chat").debug(f"[Context] 读取配置 {key} 失败，按默认开启处理: {e}")
-    return flags
-
-
-async def _collect_llm_ext(
-    runtime,
-    event,
-    session_id: str,
-    is_private: bool,
-    schedule_enable: bool,
-    *,
-    bot=None,
-    user_id=None,
-    group_id=None,
-):
-    """收集本次请求的模块工具 + 技能 + 知识库 + MCP + ToolContext。
-
-    返回 (specs, skill_blocks, ctx)；specs 已包含内置 schedule_task。
-
-    ``event`` 允许为 None（主动消息 / 定时任务路径没有触发事件）。此时会话目标必须由调用方
-    用 ``bot`` / ``user_id`` / ``group_id`` 显式给出——会话类工具（get_current_session /
-    get_chat_history / expand_context）本来就是从 ToolContext 推导当前会话，不依赖事件。
-    """
-    if bot is None and event is not None:
-        bot = getattr(event, "bot", None)
-    if user_id is None and event is not None:
-        user_id = getattr(event, "user_id", None)
-    if group_id is None and event is not None:
-        group = getattr(event, "group", None)
-        group_id = getattr(group, "group_id", None) if group is not None else None
-
-    specs = []
-    if schedule_enable:
-        # 工具在 tools/schedule.py，引擎在 proactivity/scheduler.py——分开是为了不造环
-        from app.agent.tools.schedule import build_schedule_tool
-
-        specs.append(build_schedule_tool(runtime, session_id, is_private))
-
-    # 进入新一轮：焦点表按轮次衰减显著性（见 docs/referent-resolution-design.md）
-    from app.agent.context import focus
-
-    focus.begin_turn(getattr(runtime, "bot_id", ""), session_id)
-
-    if getattr(runtime, "llm_tools", None) is not None:
-        specs.extend(runtime.llm_tools.enabled_specs())
-
-    skill_blocks = []
-    if getattr(runtime, "skills", None) is not None:
-        skill_blocks = runtime.skills.prompt_blocks()
-
-    ctx = ToolContext(
-        module=runtime,
-        bot=bot,
-        session_id=session_id,
-        event=event,
-        runtime=runtime,
-        user_id=user_id,
-        group_id=group_id,
-    )
-
-    # 系统级会话上下文工具（不展示在 OneBot 前端清单）
-    from app.agent.tools.session_tools import build_session_tools
-
-    specs.extend(build_session_tools(runtime, ctx))
-
-    # 按需展开上下文（@ 对象 / 被引用消息 / 合并转发）——与渲染层的未展开标记同开同关：
-    # 标记必须可被解决，否则只会诱导模型空转或谎称无法回答。
-    if bool(runtime.config.get("context_expand_enable", True)):
-        from app.agent.tools.context_tools import build_context_tools
-
-        specs.extend(build_context_tools(runtime, ctx))
-
-    # Tavily 联网搜索（系统级工具，不进入 OneBot 前端清单）
-    if bool(runtime.config.get("tavily_enable", False)):
-        tavily_api_key = str(runtime.config.get("tavily_api_key", "") or "").strip()
-        if tavily_api_key:
-            from app.agent.tools.web_search import build_tavily_tool
-
-            specs.append(build_tavily_tool(runtime))
-
-    # 长期记忆原生工具：memory_save / recall / delete / correct / deny
-    memory = getattr(runtime, "memory", None)
-    if memory is not None and memory.enabled():
-        from app.agent.memory import build_memory_tools
-
-        memory_user_id = str(user_id or "")
-        specs.extend(build_memory_tools(runtime, session_id, memory_user_id, is_private))
-
-    # 知识库原生工具
-    knowledge = getattr(runtime, "knowledge", None)
-    if knowledge is not None and knowledge.enabled():
-        from app.agent.knowledge import build_knowledge_tools
-
-        specs.extend(build_knowledge_tools(runtime))
-
-    # MCP 工具（异步连接后暴露）
-    mcp = getattr(runtime, "mcp_manager", None)
-    if mcp is not None and mcp.enabled():
-        await mcp.ensure_ready()
-        specs.extend(mcp.build_tools())
-
-    # OneBot 通用工具（数据驱动清单，按当前会话作用域过滤）
-    if bool(runtime.config.get("onebot_tools_enable", False)):
-        from app.agent.tools.onebot import build_onebot_tools
-
-        specs.extend(build_onebot_tools(runtime, ctx))
-
-    # 统一按四类工具的用户开关过滤：
-    # - 系统工具由 system_tools_enabled + 前置功能开关共同决定
-    # - 模块工具 / MCP 工具由各自 enabled map 单独控制
-    # - OneBot 工具已在上方由 security.resolve_tool_policy 过滤，这里直接放行
-    from app.agent.tools.policy import is_system_tool_enabled
-
-    system_enabled = runtime.config.get("system_tools_enabled", {}) or {}
-    module_enabled = runtime.config.get("module_tools_enabled", {}) or {}
-    mcp_enabled = runtime.config.get("mcp_tools_enabled", {}) or {}
-    filtered: list = []
-    for spec in specs:
-        if spec.source == "onebot":
-            filtered.append(spec)
-        elif spec.source == "mcp":
-            if not (isinstance(mcp_enabled, dict) and not mcp_enabled.get(spec.name, True)):
-                filtered.append(spec)
-        elif spec.source == "module":
-            if not (isinstance(module_enabled, dict) and not module_enabled.get(spec.name, True)):
-                filtered.append(spec)
-        elif spec.source == "system":
-            if is_system_tool_enabled(runtime, spec):
-                filtered.append(spec)
-        else:
-            filtered.append(spec)
-
-    return filtered, skill_blocks, ctx
-
-
 async def _memory_block(runtime, session_id: str, user_id: Any, user_text: str, bot) -> str:
     """召回长期记忆块；未启用或异常时返回空串。"""
     memory = getattr(runtime, "memory", None)
@@ -453,230 +322,10 @@ def _memory_consolidate(runtime, session_id: str, is_private: bool, session_mgr)
         logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(f"[Memory] 隐式蒸馏触发失败（已忽略）: {e}")
 
 
-
-
-
-DEFAULT_MAX_TOOL_ROUNDS = 5
-
-
-def _max_tool_rounds(config, default: int = DEFAULT_MAX_TOOL_ROUNDS) -> int:
-    """工具循环轮数上限（配置 ``max_tool_rounds``），流式与非流式共用同一值。
-
-    以前非流式走 Provider 默认值、流式在 ``stream_response`` 里硬编码 ``range(5)``，
-    两处不一致且不可配置。而“展开缺失的聊天环境 → 再判断是否还缺 → 再展开”本身就是
-    多段链条，轮数被硬切就表现为模型“半途而废”直接作答。
-    """
-    try:
-        value = int(config.get("max_tool_rounds", default) or default)
-    except (TypeError, ValueError):
-        return default
-    return max(1, min(value, 20))
-
-
-DEFAULT_EMPTY_REPLY_RETRIES = 1
-
-
-def _max_empty_retries(config, default: int = DEFAULT_EMPTY_REPLY_RETRIES) -> int:
-    """空回复重试次数（配置 ``empty_reply_retries``），流式与非流式共用。
-
-    偶现问题：请求成功结束却既无文本也无工具调用（网关提前断流 / 只回思考内容），
-    表现就是用户收到兜底文本「抱歉，我暂时无法回答」。这里给一次确定性重试的机会，
-    上限 3 次，避免真正故障时空跑 LLM 请求。0 = 关闭。
-    """
-    try:
-        value = int(config.get("empty_reply_retries", default))
-    except (TypeError, ValueError):
-        return default
-    return max(0, min(value, 3))
-
-
-def _usage_snapshot(usage: dict | None) -> dict:
-    """usage 累计快照（用来算"这一轮请求自己花了多少"）。"""
-    if not usage:
-        return {}
-    return {k: v for k, v in usage.items() if isinstance(v, (int, float))}
-
-
-def _usage_delta(usage: dict | None, before: dict, key: str) -> int:
-    """本次请求的单项 token 增量（上游没报就返回 0，绝不编）。"""
-    if not usage:
-        return 0
-    try:
-        return max(0, int(usage.get(key, 0) or 0) - int(before.get(key, 0) or 0))
-    except (TypeError, ValueError):
-        return 0
-
-
-def _log_request_line(
-    runtime,
-    *,
-    session_id: str,
-    round_index: int,
-    served_model: str,
-    max_tokens: int,
-    max_tokens_src: str,
-    input_tokens: int,
-    output_tokens: int,
-    input_estimate: int,
-    finish_reason: str,
-    text_chars: int,
-    reasoning_chars: int,
-    tools: int,
-    error: str,
-    budget: TurnBudget,
-) -> None:
-    """**每一次**真实请求打一行结构化记录（流式路径）。
-
-    为什么值得单独一行：出问题时大家看的就是日志，而此前一次请求的信息散在四五处
-    （模型名在一行、token 在另一行、max_tokens 只在开头可能出现、重试次数只体现在
-    多条"重试"警告里）。这里一行给全，并且用固定字段名 ``key=value`` 便于 grep：
-
-        model= in= out= max_tokens=(来源) finish= text= reasoning= tools= retry=n/m
-
-    上游没回报 token 时写 ``in=?`` ``out=?`` 而不是 0 —— 0 会被误读成"没花 token"。
-    """
-    from app.agent.providers.base import has_token_usage
-
-    reported = has_token_usage(
-        {"prompt_tokens": input_tokens, "completion_tokens": output_tokens}
-    )
-    in_txt = str(input_tokens) if reported else f"?≈{input_estimate}"
-    out_txt = str(output_tokens) if reported else "?"
-    parts = [
-        f"model={served_model or '?'}",
-        f"round={round_index + 1}",
-        f"in={in_txt}",
-        f"out={out_txt}",
-        f"max_tokens={max_tokens}({max_tokens_src})",
-        f"finish={finish_reason or '-'}",
-        f"text={text_chars}字",
-    ]
-    if reasoning_chars:
-        parts.append(f"reasoning={reasoning_chars}字")
-    if tools:
-        parts.append(f"tools={tools}")
-    parts.append(f"budget={budget.requests}/{budget.max_requests}")
-    log = logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}")
-    if error:
-        parts.append(f"error={error}")
-        log.warning("[LLM] 请求 " + " ".join(parts) + f" -> {session_id}")
-    else:
-        log.info("[LLM] 请求 " + " ".join(parts) + f" -> {session_id}")
-
-
-def _turn_budget(config) -> TurnBudget:
-    """本轮请求的总预算闸门（请求次数 + 累计输入 token）。
-
-    为什么需要它：重试散在三层（HTTP 适配器 ``retry_attempts``、回退层空回复重试、
-    调用方收敛重试），每层单独看都"只多一次"，乘起来却是十几次，而且**每次都重发
-    全量上下文**（线上为此把 16.7 万 token 发了三遍还没出头）。这里把总账收在一处：
-    档位决定最多几次请求、累计输入 token 到线就停，停了如实写日志。
-
-    注意它只是**闸门**，不改变重试策略本身（谁该重试仍由失败分类决定）。
-    """
-    try:
-        return TurnBudget.from_config(config)
-    except Exception as e:  # noqa: BLE001 —— 预算读不出来不该拖垮整轮回复
-        logger.add_info("LLM").warning(f"[Budget] 预算配置解析失败，改用默认档位: {e}")
-        return TurnBudget(profile=retry_profile_of(None))
-
-
-def _input_tokens_estimate(messages: list[dict]) -> int:
-    """这份上下文大概多少输入 token（用于预算累计；上游回了真实 usage 就以真实值为准）。"""
-    try:
-        return int(estimate_tokens(messages))
-    except Exception:  # noqa: BLE001 —— 估算失败就当 0，闸门退化为只按次数算
-        return 0
-
-
-DEFAULT_REASONING_OVERFLOW_RETRIES = 1
-
 #: 思考吃满预算后追加的收敛提示（只在本轮确实想过、却一个正文字都没有时追加一次）。
-REASONING_OVERFLOW_NUDGE = (
-    "【系统提醒】上一轮你的思考把输出预算用满了，正文还没开始就被截断，"
-    "对方什么都没收到。这一轮不要复述思考过程，直接给最终回答；"
-    "如果要看图，就只说你看到的关键内容，别长篇推理。"
-)
-
-
-def _reasoning_overflow_retries(config, default: int = DEFAULT_REASONING_OVERFLOW_RETRIES) -> int:
-    """思考吃满 ``max_tokens`` 时的收敛重试次数（配置 ``reasoning_overflow_retries``）。
-
-    思考模型（deepseek-v4-flash / reasoner 系）把全部输出预算花在 ``reasoning_content``
-    里时，正文一个字节都没有。同一条 prompt 原样重试必然同样打满（纯烧钱），所以改成
-    追加一次「直接作答」提醒再要一枪。0 = 关闭。
-    """
-    try:
-        value = int(config.get("reasoning_overflow_retries", default))
-    except (TypeError, ValueError):
-        return default
-    return max(0, min(value, 2))
-
-
-def _effective_max_tokens(provider_chain, fallback) -> tuple[int, str]:
-    """本次请求**真正生效**的 ``max_tokens``，以及它来自哪一层配置。
-
-    取值优先级（高 → 低）：
-
-    1. ``provider_models.<id>.config_json.max_tokens``（模型实例，WebUI「Provider 预设 → 模型」页）
-    2. ``provider_presets.<id>.config_json.max_tokens``（连接预设，同一页的预设表单）
-    3. Agent 配置 ``max_tokens``（WebUI「Agent → 最大输出 Tokens」）
-
-    前两层在 ``AgentRuntime._config_for_model_id`` 里合并进链上每个 cfg，而
-    ``chat_with_fallback`` 用 ``cfg.get("max_tokens", max_tokens)`` 取值 —— 所以
-    **链上配置赢**，Agent 页那个数字只在链上没写时才生效。
-
-    来源由 ``_config_for_model_id`` 写进 ``_max_tokens_origin``（合并后的 cfg 恒带该键，
-    光看值是分辨不出三层的）；拿不到标记时才退回「链上 = provider、否则 agent」的粗判。
-    """
-    for cfg in provider_chain or []:
-        value = (cfg or {}).get("max_tokens")
-        if value in (None, ""):
-            continue
-        try:
-            origin = str((cfg or {}).get("_max_tokens_origin") or "provider 模型/预设")
-            return int(value), origin
-        except (TypeError, ValueError):
-            break
-    try:
-        return int(fallback or 0), "agent 配置"
-    except (TypeError, ValueError):
-        return 0, "agent 配置"
 
 
 #: 已经提醒过的 (bot_id, agent 值, 生效值)，避免每条消息刷同一条告警
-_MAX_TOKENS_WARNED: set[tuple] = set()
-
-
-def _max_tokens_override_note(runtime, effective: int, origin: str) -> str:
-    """Agent 页显式设了 max_tokens 却被 provider 层覆盖时，给一句可操作的提示。
-
-    这是「配置假象」的显式化：用户以为改的是 Agent 页，实际生效的是「Provider 预设 →
-    模型」里那个值，而此前没有任何地方告诉他。只在**用户显式设过**且值确实不同时提示，
-    否则只是默认值差异，属于噪音。
-    """
-    if origin == "agent 配置":
-        return ""
-    config = getattr(runtime, "config", None)
-    checker = getattr(config, "has_explicit", None)
-    if not callable(checker):
-        return ""
-    try:
-        if not checker("max_tokens"):
-            return ""
-        agent_value = int(config.get("max_tokens", 0) or 0)
-    except Exception:  # noqa: BLE001 —— 诊断辅助，失败不影响主流程
-        return ""
-    if not agent_value or agent_value == effective:
-        return ""
-    marker = (getattr(runtime, "bot_id", ""), agent_value, effective, origin)
-    if marker in _MAX_TOKENS_WARNED:
-        return ""
-    _MAX_TOKENS_WARNED.add(marker)
-    return (
-        f"Agent 页的 max_tokens={agent_value} 未生效，本次实际用 {effective}"
-        f"（来自{origin}）—— 要改「Provider 预设 → 模型」里该模型的「最大输出 Tokens」"
-    )
 
 
 def _proactive_instruction(config, all_specs, user_text: str, ctx=None) -> str | None:
@@ -741,183 +390,9 @@ def _modalities_for_chain(provider_chain: list[dict]) -> list[str] | None:
     return normalize_modalities((provider_chain[0] or {}).get("modalities"))
 
 
-def _clean_output_for_history(config, text: str) -> str:
-    """写入会话历史前的守卫：按开关清洗助手输出中的（…）/(…)，阻止括号风格自我强化。
-
-    只影响「历史」，不影响本次对用户展示的原文。
-    """
-    if not text:
-        return text
-    try:
-        enabled = bool(config.get("clean_output_parentheses", True)) if config is not None else True
-    except Exception:
-        enabled = True
-    if not enabled:
-        return text
-    return maybe_strip_parentheses(text, True)
-
-
 # ==================== 发言通道（文本=思考，发言=send_message） ====================
 
 #: 「配置想开发言通道但没生效」的告警去重（bot_id 集合）：持久性配置矛盾不该每条刷日志
-_WARNED_SPEECH_INTENT: set = set()
-
-
-def _build_speech(config):
-    """按配置构造本轮发言记账本；不该启用时返回 None（= 旧的文本即发言）。"""
-    from app.agent.delivery.speech import (
-        DEFAULT_MAX_BUBBLE_CHARS,
-        DEFAULT_MAX_BUBBLES,
-        SpeechOutbox,
-        speech_via_tool,
-    )
-
-    if not speech_via_tool(config):
-        return None
-    try:
-        max_bubbles = int(config.get("speech_max_bubbles", DEFAULT_MAX_BUBBLES) or DEFAULT_MAX_BUBBLES)
-        max_chars = int(
-            config.get("speech_max_bubble_chars", DEFAULT_MAX_BUBBLE_CHARS) or DEFAULT_MAX_BUBBLE_CHARS
-        )
-    except Exception:  # noqa: BLE001 —— 配置异常时用默认值，不要因此关掉发言通道
-        max_bubbles, max_chars = DEFAULT_MAX_BUBBLES, DEFAULT_MAX_BUBBLE_CHARS
-    return SpeechOutbox(max_bubbles=max_bubbles, max_chars=max_chars)
-
-
-def _speech_intent(config) -> bool:
-    """配置**想**开发言通道吗（不看流式这一条）——用于"配置了但没生效"的告警。"""
-    from app.agent.assembly.prompt import is_qq_agent
-
-    try:
-        return bool(config.get("speech_via_tool", False)) and is_qq_agent(config)
-    except Exception:  # noqa: BLE001
-        return False
-
-
-def _speech_fallback_enabled(config) -> bool:
-    """静默时是否仍要补一句兜底话术（本档位默认关闭：静默比"抱歉我无法回答"更拟人）。"""
-    try:
-        return bool(config.get("speech_fallback_enable", False))
-    except Exception:  # noqa: BLE001
-        return False
-
-
-def _should_force_speak(config, ctx, is_private: bool) -> bool:
-    """是否属于"被直接点名，必须回应"的场景（@ / 私聊 / 拍一拍）。
-
-    这类场景一句话不说会被当成掉线，因此允许额外补一轮把话说出来；
-    群里没被点名的闲聊则不该强制——那正是静默要保护的部分。
-    """
-    try:
-        if not bool(config.get("speech_force_reply_on_call", True)):
-            return False
-    except Exception:  # noqa: BLE001
-        return False
-    if is_private:
-        return True
-    return bool(ctx is not None and ctx.state.get("is_at"))
-
-
-async def _flush_speech(speech, session_mgr, session_id: str, config, event):
-    """把 outbox 里的气泡变成待发送消息，并在发送前写好这一条的历史。
-
-    **顺序是有意的**：先写 assistant 历史、再 yield 给 pipeline 发送。pipeline 发送成功后
-    会调 ``mark_last_assistant_message_id``，它认"最近一条 assistant"——此时那条必须
-    正好是刚发出去的这个气泡，否则 message_id 会落到别的历史上（旧流式路径就是这个顺序
-    反了：先发后写，句柄永远补在上一条上）。
-    """
-    from app.agent.delivery.directives import OutboundDirectives, assemble_message
-
-    is_group = (
-        getattr(event, "event_type", "") == "message_group"
-        or getattr(event, "group", None) is not None
-    )
-    for bubble in speech.take():
-        text = strip_stream_artifacts(strip_all_tags(bubble.text)).strip()
-        if not text:
-            continue
-        directives = OutboundDirectives(reply=bool(bubble.reply_to), ats=list(bubble.at))
-        message = assemble_message(
-            text,
-            directives,
-            event,
-            is_group=is_group,
-            reply_message_id=bubble.reply_to or None,
-        )
-        session_mgr.add_message(session_id, "assistant", _clean_output_for_history(config, text))
-        yield message
-
-
-async def _force_speak_round(
-    runtime, speech, messages, provider_chain, meta, tools, tool_executor
-) -> None:
-    """被点名却没开口时的补救：非流式再要一次（只关心会不会调 send_message）。
-
-    用非流式而不是再来一轮流式：这里不需要把文本流给用户，只需要一次工具调用。
-    轮数上限刻意压到 2（一次展开 + 一次发言），失败也只是回到静默，不会拖住会话。
-    """
-    from app.agent.delivery.speech import FORCE_SPEAK_REMINDER
-
-    messages.append({"role": "user", "content": FORCE_SPEAK_REMINDER})
-    try:
-        await resolve_invoker(runtime).chat(
-            runtime=runtime,
-            chain=provider_chain,
-            messages=messages,
-            params={
-                "model": meta["model"],
-                "temperature": meta["temperature"],
-                "max_tokens": meta["max_tokens"],
-                "tools": tools,
-                "tool_executor": tool_executor,
-                "max_tool_rounds": 2,
-                "max_empty_retries": 0,
-            },
-        )
-    except Exception as e:  # noqa: BLE001 —— 补救轮失败就回到静默，不能让整轮炸掉
-        logger.add_info(f"#{runtime.bot_id}").warning(f"[LLM] 强制发言补救轮失败（按静默处理）: {e}")
-    if speech.spoken == 0 and speech.queued == 0:
-        logger.add_info(f"#{runtime.bot_id}").warning(
-            "[LLM] 被直接点名但补一轮后仍未开口（模型可能没调用 send_message）"
-        )
-
-
-def _record_stream_telemetry(
-    runtime,
-    session_id: str,
-    provider_chain: list[dict],
-    model: str,
-    messages: list[dict],
-    full_text_parts: list[str],
-    tool_results: list[dict],
-    stream_start: float,
-    success: bool,
-    error_text: str = "",
-    usage: dict | None = None,
-) -> None:
-    """流式生成的统一遥测落点。"""
-    telemetry = getattr(runtime, "telemetry", None)
-    if telemetry is None:
-        return
-    full_text = "".join(full_text_parts)
-    first_cfg = provider_chain[0] if provider_chain else {}
-    tokens = usage or {}
-    telemetry.record_call_simple(
-        bot_id=runtime.bot_id,
-        session_id=session_id,
-        provider=str(first_cfg.get("provider", "openai") or "openai"),
-        # 实际服务者（回退后不是 chain[0]）：与 token 消耗那一行同源，避免遥测也记错模型
-        model=_served_model_label(tokens, first_cfg.get("model", model)),
-        stream=True,
-        success=success,
-        latency_ms=(time.monotonic() - stream_start) * 1000,
-        input_tokens=int(tokens.get("prompt_tokens") or tokens.get("input_tokens") or 0),
-        output_tokens=int(tokens.get("completion_tokens") or tokens.get("output_tokens") or 0),
-        message_count=len(messages),
-        tool_calls=len(tool_results),
-        characters=len(full_text),
-        error=error_text,
-    )
 
 
 async def handle(module, event):
@@ -2188,6 +1663,5 @@ async def _send_help(module, event, bot, *, is_private, group_id, user_id, send)
 
     for chunk in chunk_text(build_help_text(available=available)):
         await send(chunk)
-
 
 
