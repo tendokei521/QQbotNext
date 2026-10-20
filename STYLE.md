@@ -246,13 +246,14 @@ pytest -q --cov --cov-report=term-missing   # 需要覆盖率时
 
 | 指标 | 制定方案时 | 现在 |
 |---|---|---|
-| 最大强连通块 | 24 文件 / 12,112 行（仅模块层 import；含惰性 import 实测 27 文件 / 13,547 行） | **0 个 —— 全图无环（279/279）** |
+| 最大强连通块 | 24 文件 / 12,112 行（仅模块层 import；含惰性 import 实测 27 文件 / 13,547 行） | **0 个 —— 全图无环（282/282）** |
 | `chat.py` 可达闭包 | 143 文件 / 42,082 行 | **87 文件 / 23,721 行** |
 | 生产代码 `from app.bootstrap import` | 4 | **0** |
-| `get_container()` 直调 | 71 次 / 14 文件 | **63 次 / 9 文件**（全在 `webui/api/*`，`logs.py` 已清零） |
-| 端点里 `container.get(类型)` | — | **53 次**（新增闸二指标，只许降） |
+| `get_container()` 直调 | 71 次 / 14 文件 | **39 次 / 6 文件**（全在 `webui/api/*`） |
+| 端点里 `container.get(类型)` | — | **32 次**（新增闸二指标，只许降） |
 | 单文件最大 `manifest.py` | 4,789 行 | **已外置 JSON**（加载器 78 行） |
 | `app/agent/` 顶层平铺 | 55 文件 / 20,916 行 | **8 文件 / 2,939 行**（14 个职责子包） |
+| 单文件最大 `chat.py` | 2,192 行 | **1,668 行**（切出 turn_metrics/assistant_output/tool_source） |
 | `app/domain/` | 4 文件 / 595 行（全是 DTO） | **10 文件 / 1,288 行**（时间解析/触发/分条/节奏/标签/能力判定） |
 | 包职责说明 README | 0 份 | **27 份**，且由 `tests/architecture/test_architecture_layout.py` 强制 |
 | 前端套数 | 2 套（Vue + 手写 JS，约 4,800 行重复） | **1 套**（`app/webui/dashboard/dist`；旧版与 `/legacy` 已删） |
