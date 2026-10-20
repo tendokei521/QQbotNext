@@ -23,6 +23,9 @@
 
 from __future__ import annotations
 
+import importlib
+import sys
+from pathlib import Path
 from typing import Any
 
 from app.domain.bot import IBot
@@ -53,10 +56,8 @@ def instantiate_module(
     log,
 ) -> BaseModule | None:
     """导入插件模块并实例化；类不合格时记日志并返回 None（不抛）。"""
-    from app.plugin.registry import ModuleRegistry
-
-    ModuleRegistry._purge_module_cache(module_name)
-    mod = ModuleRegistry._import_plugin_module(module_name, module_path)
+    purge_module_cache(module_name)
+    mod = import_plugin_module(module_name, module_path)
     cls = getattr(mod, "Module", None)
     if cls is None:
         log.error(f"[Module] {module_name} 缺少 module.py 中的 Module 类")
@@ -224,3 +225,43 @@ async def activate(instance: BaseModule, module_name: str, services: ServiceAcce
             services.features.acquire_module(instance)
     except Exception as e:  # noqa: BLE001
         log.warning(f"[Module] {module_name} Feature 接管异常: {e}")
+
+
+def import_plugin_module(module_name: str, module_path: Path):
+    """按**文件路径**加载插件包，返回它的 `module.py`。
+
+    为什么不用 `importlib.import_module("app.plugins.X.module")`：
+    那要求插件必须是某个固定包名的子包（历史上是 `module.modules`），于是
+    插件放哪儿、测试夹具放哪儿都被这个字符串焊死。改成按路径加载后，插件的
+    物理位置与 import 名解耦，写进 `sys.modules` 的是合成包名
+    `qqbot_plugin_<name>`。
+
+    仍以「包」的形式加载（`submodule_search_locations` 指向插件目录），因为插件
+    内部一律用相对导入（`from .service import ...`），必须让它们能解析。
+
+    兼容两种布局：包内有 `__init__.py`（正常情况）与没有（极简插件目录）。
+    """
+    pkg_name = f"qqbot_plugin_{module_name.replace('.', '_')}"
+    init_file = module_path / "__init__.py"
+    if init_file.is_file():
+        spec = importlib.util.spec_from_file_location(
+            pkg_name, init_file, submodule_search_locations=[str(module_path)]
+        )
+    else:
+        spec = importlib.util.spec_from_file_location(
+            pkg_name, module_path / "module.py", submodule_search_locations=[str(module_path)]
+        )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"无法为插件 {module_name} 构造加载器：{module_path}")
+    pkg = importlib.util.module_from_spec(spec)
+    sys.modules[pkg_name] = pkg
+    spec.loader.exec_module(pkg)
+    if init_file.is_file():
+        return importlib.import_module(f"{pkg_name}.module")
+    return pkg
+
+
+def purge_module_cache(module_name: str) -> None:
+    pkg_name = f"qqbot_plugin_{module_name.replace('.', '_')}"
+    for key in [k for k in sys.modules if k == pkg_name or k.startswith(pkg_name + ".")]:
+        del sys.modules[key]
