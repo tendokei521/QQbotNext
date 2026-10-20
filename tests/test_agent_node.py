@@ -50,7 +50,7 @@ async def test_agent_node_runs_agent(monkeypatch):
     async def fake_handle(module, event):
         called.append(event)
 
-    monkeypatch.setattr("app.llm.handle", fake_handle)
+    monkeypatch.setattr("app.llm.chat.handle", fake_handle)
     node = AgentNode(_AM(_FakeRuntime()), _Cfg(), _Gw())
 
     ctx = MessageContext(event=_priv_msg(), bot=None, state={})
@@ -70,7 +70,7 @@ async def test_agent_node_skips_when_disabled(monkeypatch):
     async def fake_handle(module, event):
         called.append(event)
 
-    monkeypatch.setattr("app.llm.handle", fake_handle)
+    monkeypatch.setattr("app.llm.chat.handle", fake_handle)
     node = AgentNode(_AM(_FakeRuntime(enabled=False)), _Cfg(), _Gw())
 
     ctx = MessageContext(event=_priv_msg(), bot=None, state={})
@@ -90,7 +90,7 @@ async def test_agent_node_skips_no_runtime(monkeypatch):
     async def fake_handle(module, event):
         called.append(event)
 
-    monkeypatch.setattr("app.llm.handle", fake_handle)
+    monkeypatch.setattr("app.llm.chat.handle", fake_handle)
     node = AgentNode(_AM(None), _Cfg(), _Gw())  # 无运行时
 
     ctx = MessageContext(event=_priv_msg(), bot=None, state={})
@@ -110,7 +110,7 @@ async def test_agent_node_skips_non_chat_event(monkeypatch):
     async def fake_handle(module, event):
         called.append(event)
 
-    monkeypatch.setattr("app.llm.handle", fake_handle)
+    monkeypatch.setattr("app.llm.chat.handle", fake_handle)
     node = AgentNode(_AM(_FakeRuntime()), _Cfg(), _Gw())
 
     notice = NoticeEvent(
@@ -135,7 +135,7 @@ async def test_agent_node_skips_when_module_stopped(monkeypatch):
     async def fake_handle(module, event):
         called.append(event)
 
-    monkeypatch.setattr("app.llm.handle", fake_handle)
+    monkeypatch.setattr("app.llm.chat.handle", fake_handle)
     node = AgentNode(_AM(_FakeRuntime()), _Cfg(), _Gw())
 
     event = _priv_msg()

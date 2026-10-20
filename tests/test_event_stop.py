@@ -102,7 +102,7 @@ async def test_agent_node_skips_when_event_stopped(monkeypatch):
     async def fake_handle(module, event):
         called.append(event)
 
-    monkeypatch.setattr("app.llm.handle", fake_handle)
+    monkeypatch.setattr("app.llm.chat.handle", fake_handle)
 
     class _FakeConfig:
         def __init__(self):

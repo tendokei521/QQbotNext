@@ -131,7 +131,7 @@ class AgentNode(MessageNode):
         if pipeline is not None:
             pipeline.submit(event)
         else:
-            from app.llm import handle as agent_handle
+            from app.llm.chat import handle as agent_handle
 
             await agent_handle(runtime, event)
         await next_()

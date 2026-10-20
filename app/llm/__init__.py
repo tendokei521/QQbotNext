@@ -2,152 +2,56 @@
 
 原 llm_chat_v2 的能力上提至此：Agent 循环 + Tool 注册表 + 会话/历史 +
 定时任务(CronManager) + 主动消息 + 状态标签协议。
+
+## 本文件为什么这么薄（重要，别把 `from .chat import handle` 加回顶层）
+
+这里曾经在末尾急切 import 并重导出 `chat` / `context` / `hooks` / `skills` / `tool`。
+后果：全库 **121 处** `from app.llm import logger / llm_data_dir / safe_bot_id`
+（共 73 个文件）全部被拖去加载 `chat.py`，实测把**每个入口**的可达闭包放大到
+152 文件 / 46,243 行——「取一个日志器」需要加载整个 Agent 主循环。
+
+现在按代价分成两类：
+
+- **廉价工具**（`logger` 与路径函数）：直接 import；
+- **廉价的公开 API**（`ToolContext` / `tool` / `skill` / `ToolCallContext` /
+  `LlmContext` / `LlmJob`）：仍然急切重导出。它们分别只依赖 `hooks` / `telemetry` /
+  `tool_loop` / `domain`，合计约 1,150 行且无重依赖——必须急切，因为
+  `from app.llm import tool` 是插件作者的标准写法，而 `tool` 与子模块
+  `app.llm.tool` **同名**，若走 `__getattr__` 会被子模块属性抢先命中，静默拿到模块对象。
+
+## `handle` 为什么不再从包里重导出
+
+`handle` 是唯一的重符号（`app/llm/chat.py`，2,192 行 + 整条依赖链）。曾尝试用
+PEP 562 `__getattr__` 惰性提供，但那是**假解决**：`__getattr__` 里的
+`from .chat import handle` 在 import 图上仍是一条 `app.llm → app.llm.chat` 的边，
+而 `chat.py` 里有 `from app.llm import logger`——两跳成环。于是所有 import
+`app.llm` 的模块又通过 `chat` 被兜回环内（实测 27 → 63 个模块）。
+
+正确做法是**让包 `__init__` 不成为通往主循环的后门**：需要 `handle` 的地方
+直接 `from app.llm.chat import handle`（具名、可 grep、依赖图上诚实）。
+路径工具已下沉到 `app.infrastructure.fs.paths`（见 `docs/ARCHITECTURE.md §3.4`），
+这里只是为兼容保留重导出。
 """
 
 from __future__ import annotations
 
-import json
-import os
-import re
-import shutil
-
 from app.core.logger import get_logger
+from app.infrastructure.fs.paths import (
+    bot_data_dir,
+    llm_data_dir,
+    migrate_legacy_data,
+    safe_bot_id,
+)
 
-logger = get_logger("LLM")
-
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-# 旧模块数据目录（迁移源；llm_chat_v2 已删，幂等跳过）
-_LEGACY_DATA_DIR = os.path.join(_PROJECT_ROOT, "module", "modules", "llm_chat_v2")
-
-# bot_id 目录名白名单（数字/字母/下划线/连字符），防路径穿越
-_BOT_ID_RE = re.compile(r"^[0-9a-zA-Z_\-]+$")
-
-
-def llm_data_dir() -> str:
-    """LLM 数据目录（历史 / 定时任务 / 主动消息状态）。
-
-    默认 data/llm；可用环境变量 QQBOT_LLM_DATA_DIR 覆盖（测试隔离 / 自定义部署）。
-    """
-    override = os.environ.get("QQBOT_LLM_DATA_DIR", "").strip()
-    if override:
-        return override
-    return os.path.join(_PROJECT_ROOT, "data", "llm")
-
-
-def safe_bot_id(bot_id) -> str:
-    """把 bot_id 规整为安全的目录名，防路径穿越/非法目录名。
-
-    仅允许 [0-9a-zA-Z_-]；其余字符替换为下划线，空值回退为 unknown。
-    """
-    s = str(bot_id or "").strip()
-    if not _BOT_ID_RE.match(s):
-        s = re.sub(r"[^0-9a-zA-Z_\-]", "_", s) or "unknown"
-    return s
-
-
-def bot_data_dir(bot_id) -> str:
-    """每个账号一个目录：data/llm/<bot_id>/（不存在则创建）。
-
-    历史 / 定时任务 / 主动消息 全部收纳进对应账号目录，实现磁盘级账号隔离。
-    """
-    d = os.path.join(llm_data_dir(), safe_bot_id(bot_id))
-    os.makedirs(d, exist_ok=True)
-    return d
-
-
-def migrate_legacy_data() -> None:
-    """把旧模块目录的历史/定时/主动数据搬到 data/llm（幂等，目标已存在则跳过）。"""
-    dst = llm_data_dir()
-    os.makedirs(dst, exist_ok=True)
-    moved = []
-
-    # history/ 目录
-    src_history = os.path.join(_LEGACY_DATA_DIR, "history")
-    dst_history = os.path.join(dst, "history")
-    if os.path.isdir(src_history) and not os.path.isdir(dst_history):
-        shutil.move(src_history, dst_history)
-        moved.append("history")
-
-    # tasks_data_*.json
-    if os.path.isdir(_LEGACY_DATA_DIR):
-        for name in os.listdir(_LEGACY_DATA_DIR):
-            if name.startswith("tasks_data_") and name.endswith(".json"):
-                src = os.path.join(_LEGACY_DATA_DIR, name)
-                target = os.path.join(dst, name)
-                if not os.path.exists(target):
-                    shutil.move(src, target)
-                    moved.append(name)
-
-    # proactive_data.json
-    src_proactive = os.path.join(_LEGACY_DATA_DIR, "proactive_data.json")
-    dst_proactive = os.path.join(dst, "proactive_data.json")
-    if os.path.exists(src_proactive) and not os.path.exists(dst_proactive):
-        shutil.move(src_proactive, dst_proactive)
-        moved.append("proactive_data.json")
-
-    if moved:
-        logger.info(f"已迁移数据文件到 data/llm: {', '.join(moved)}")
-
-    _migrate_bot_dirs()
-
-
-def _migrate_bot_dirs() -> None:
-    """把位于根目录（共享）的 legacy 数据按 bot_id 归位到各自目录，幂等。
-
-    - history/history_*.json：按文件内嵌的 bot_id 字段 → data/llm/<bot>/history/；
-    - tasks_data_<bot>.json：→ data/llm/<bot>/tasks_data.json；
-    - proactive_data.json：无 bot_id 归属，保留在根目录作兼容回退（各 bot 加载时优先用自家文件）。
-    """
-    base = llm_data_dir()
-    moved = []
-
-    # 历史文件（用内嵌 bot_id 归属）
-    src_history = os.path.join(base, "history")
-    if os.path.isdir(src_history):
-        for name in os.listdir(src_history):
-            if not (name.startswith("history_") and name.endswith(".json")):
-                continue
-            src = os.path.join(src_history, name)
-            bot_id = "unknown"
-            try:
-                with open(src, "r", encoding="utf-8") as f:
-                    bot_id = safe_bot_id((json.load(f) or {}).get("bot_id") or "unknown")
-            except Exception as e:
-                # 读不出 bot_id 会把该历史归到 unknown 目录：迁移只跑一次，必须留痕便于人工纠正
-                logger.warning(f"[LLM] 读取历史文件 bot_id 失败，归入 unknown（{name}）: {e}")
-            dst_dir = os.path.join(bot_data_dir(bot_id), "history")
-            os.makedirs(dst_dir, exist_ok=True)
-            dst = os.path.join(dst_dir, name)
-            if not os.path.exists(dst):
-                shutil.move(src, dst)
-                moved.append(f"{bot_id}/{name}")
-
-    # 定时任务文件（按文件名后缀早前的 bot_id）
-    for name in os.listdir(base):
-        if not (name.startswith("tasks_data_") and name.endswith(".json")):
-            continue
-        bot_id = safe_bot_id(name[len("tasks_data_"):-len(".json")])
-        dst = os.path.join(bot_data_dir(bot_id), "tasks_data.json")
-        if os.path.exists(dst):
-            # 已归位则清理旧扁平文件
-            os.remove(os.path.join(base, name))
-            continue
-        shutil.move(os.path.join(base, name), dst)
-        moved.append(f"{bot_id}/tasks_data.json")
-
-    if moved:
-        logger.info(f"已按 bot_id 归位 LLM 数据: {', '.join(moved)}")
-
-
-
-from .chat import handle  # noqa: E402
+# 廉价的公开 API：必须急切，否则 `tool` 会被同名的 `app.llm.tool` 子模块遮蔽
 from .context import LlmContext, LlmJob  # noqa: E402
 from .hooks import ToolCallContext  # noqa: E402
 from .skills import skill  # noqa: E402
 from .tool import ToolContext, tool  # noqa: E402
 
+logger = get_logger("LLM")
+
 __all__ = [
-    "handle",
     "LlmContext",
     "LlmJob",
     "ToolContext",

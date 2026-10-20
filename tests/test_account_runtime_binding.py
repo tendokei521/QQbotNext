@@ -158,14 +158,14 @@ async def test_agent_node_resolves_runtime_by_payload_account_not_stale_conn_id(
     async def fake_handle(module, event):
         called.append(module)
 
-    import app.llm as llm_pkg
+    import app.llm.chat as llm_chat
 
-    original = llm_pkg.handle
-    llm_pkg.handle = fake_handle
+    original = llm_chat.handle
+    llm_chat.handle = fake_handle
     try:
         await _run_node(node, _priv(bot_id=3437542570, self_id=3569937952))
     finally:
-        llm_pkg.handle = original
+        llm_chat.handle = original
 
     assert mgr.queried == [3569937952], "应按权威账号查询运行时"
     assert called == [real], "应把事件交给该账号的运行时"
