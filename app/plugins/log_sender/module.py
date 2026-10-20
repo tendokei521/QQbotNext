@@ -14,6 +14,10 @@
 日志里可能有 ws 地址、access_token、群号与聊天片段。这些只该给 Bot 拥有者看，
 所以权限定在 owner 档（群里是群主不顶用，看的是拥有者名册）。想让群管理员也能取，
 改这一行的 ``permission`` 即可。
+
+**注意 owner 档从哪来**：账号的 ``owner_id``，或 Agent 配置里的 ``agent_owner_list``
+名册（跨群生效）。两者都没配时「谁都不是 owner」——本模块会一声不响地不响应
+（框架权限过滤静默），而 LLM 会照常出来搭话。排查口径见 ``docs/MODULE_DEV.md §2.5``。
 """
 
 from __future__ import annotations
