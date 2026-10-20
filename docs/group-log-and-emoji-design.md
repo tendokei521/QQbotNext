@@ -1,6 +1,6 @@
 # 群聊记录（环境背景）与表情闭环 设计定稿
 
-> 状态：**A~G 已完成并测试通过**（记录面 `app/agent/group_log/`、模块 `module/modules/group_log/`、
+> 状态：**A~G 已完成并测试通过**（记录面 `app/agent/group_log/`、模块 `app/plugins/group_log/`、
 > 装配块 `assembly.build_group_log`、表情工具与词表 `app/agent/persona/emoji.py` + `app/agent/tools/onebot/tools.py`）。
 > 起因：模型对"群里现在什么气氛、别人对哪条消息做了什么反应"没有持续来源——会话历史只在
 > 消息**触发机器人**时写入（`pipeline.check_trigger` 不通过直接 return），且完全不含互动；
@@ -26,7 +26,7 @@
 
 ```
 L0 记录面  events.LogEvent（契约） + store.GroupLogStore（幂等 / 保留 / 落盘 / 恢复）
-L1 接入    module/modules/group_log：群消息 / 表情 / 戳 / 撤回 / send_hook（我的发言）
+L1 接入    app/plugins/group_log：群消息 / 表情 / 戳 / 撤回 / send_hook（我的发言）
 L2 渲染    group_log/render.py：聚合、去重、预算、区块包裹（纯函数）
 L3 取值    group_log/context.py：build_context_text（四个装配路径唯一口径）
 L4 装配    assembly.BLOCKS 的 group_log 块（背景之后、会话历史之前）
@@ -152,7 +152,7 @@ L5 闭环    qq_faces（客户端表）+ emoji_lexicon（语义→id）+ OneBot 
 
 ## 7. 配置
 
-模块（`module/modules/group_log`）：`group_log_enable`（默认开，记录开关）、
+模块（`app/plugins/group_log`）：`group_log_enable`（默认开，记录开关）、
 `retention_count`（2000）、`retention_hours`（24）、`strip_directives`（true）。
 
 Agent（`app/agent/config.py` + `config_schema.py`）：`group_log_enable`（默认开，注入开关）、

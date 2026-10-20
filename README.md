@@ -41,11 +41,12 @@ app/
 │   ├── api.py                  插件 API（get_modules / get_config_path / get_data_path）
 │   └── dispatcher.py           事件分发（订阅匹配 + 启停 + 单一服务 + 权限）
 ├── services/                   应用服务（Bot 生命周期 / 调度器 / 日志）
-└── webui/                       WebUI（FastAPI 分层：api/ + schemas/ + templates/）
-module/                          插件目录（三级结构）
-├── modules/                     业务插件主体（每个子目录 = 一个插件）
+├── plugins/                    **业务插件**（13 个，每个子目录 = 一个插件）
+└── webui/                      WebUI（FastAPI 分层：api/ + schemas/；前端在 dashboard/）
+module/                          插件**运行时数据**（不含代码）
 ├── configs/                     每模块配置（<name>/config.json + authority.json，迁移源）
-└── data/                        每模块可选持久化数据（get_data_path 自动创建）
+├── data/                        每模块可选持久化数据（get_data_path 自动创建）
+└── plugins/                     外部 zip 安装的插件（用户安装，不进仓库）
 data/                            SQLite（data/app.db）+ 框架级 Agent 数据（data/llm，含历史/记忆/知识库）
 logs/                           日志目录
 ```
@@ -75,12 +76,14 @@ start.bat
 
 ## WebUI（管理后台）
 
-内置两套前端：
+内置一套前端：
 
 | 入口 | 说明 |
 |------|------|
-| `/` | **新版 Dashboard（Vue 3 + Vuetify 3）**，`dashboard/dist` 存在时自动启用 |
-| `/legacy` | 旧版 UI（原生 HTML/JS），始终可访问，作回退 |
+| `/` | **Dashboard（Vue 3 + Vuetify 3）**，由 `dashboard/dist` 提供；未构建时给出「请先 pnpm build」提示页 |
+
+> 旧版手写 UI（`/legacy`）已在 P6 移除——同一张配置表单曾实现两遍，schema 每加一个
+> 字段要改两处且没有测试守卫。
 
 新版 Dashboard 源码在 [`dashboard/`](dashboard/)，风格对齐 AstrBot dashboard（浅/暗双主题、卡片化布局、实时日志控制台、模块配置 schema 表单等）。构建方法：
 
@@ -135,7 +138,7 @@ python main.py
 
 > 完整模块开发文档见 [`docs/MODULE_DEV.md`](docs/MODULE_DEV.md)，包含每个钩子的参数与用法。
 
-在 `module/modules/<name>/` 下新建文件（模块内部一律用**相对导入**，与目录位置解耦）：
+在 `app/plugins/<name>/` 下新建文件（模块内部一律用**相对导入**，与目录位置解耦）：
 
 ```python
 # module.py —— 声明
@@ -410,7 +413,7 @@ DELETE /agent/prompt-dumps?bot_id=<qq>
 历史侧配套：`SessionManager.history_snapshot()` 给**未投影的原始条目**（自带渲染器组装用），
 `import_history()` 把外部历史批量搬进来让框架既有组装器也能读到。
 
-> **参考实现**：[`module/modules/astrbot_alignment/`](module/modules/astrbot_alignment/README.md)
+> **参考实现**：[`app/plugins/astrbot_alignment/`](app/plugins/astrbot_alignment/README.md)
 > —— 在单账号下接管组装，把 AstrBot 的 system prompt 段落顺序与用户消息块顺序 1:1 复刻，
 > 可直接作为迁移对账的起点；改造成别的第三方框架照抄它即可。
 

@@ -36,7 +36,7 @@ logs/                    debug.log / warn.log / errors.log / user.log + 归档�
 ```
 
 > **注意**：模块配置迁移源从旧的 `modules/<name>/configs.json`、`authority.json` 迁到
-> `module/configs/<name>/config.json`、`authority.json`；模块主体代码在 `module/modules/<name>/`。
+> `module/configs/<name>/config.json`、`authority.json`；模块主体代码在 `app/plugins/<name>/`。
 > 首次启动若 DB 为空，自动从 `module/configs/*/` 迁移一次，之后以 SQLite 为准。
 
 > ⚠️ 上图的「分层」与实际依赖并不完全一致：`app/agent/` 被 24 个文件互为循环依赖（12,112 行），
@@ -122,10 +122,10 @@ python main.py
 
 ### 7.1 模块结构
 
-每个插件 = `module/modules/<name>/`（模块内部用相对导入）＋ `module/configs/<name>/`（配置迁移源）：
+每个插件 = `app/plugins/<name>/`（模块内部用相对导入）＋ `module/configs/<name>/`（配置迁移源）：
 
 ```
-module/modules/<name>/
+app/plugins/<name>/
   module.py              必须：插件声明（Module(BaseModule)）
   config_schema.py       可选：WebUI 表单定义
   service.py             可选：业务逻辑（业务一多就升级成 service/ 子包）
@@ -158,7 +158,7 @@ class Module(BaseModule):
 
 | 操作 | 方式 |
 |---|---|
-| 新增模块 | 在 `module/modules/` 建目录写文件，重启；或 WebUI「刷新模块」 |
+| 新增模块 | 在 `app/plugins/` 建目录写文件，重启；或 WebUI「刷新模块」 |
 | 启停 / 权限 | WebUI 模块卡片开关 + 群/用户黑白名单 |
 | 热重载 | WebUI「刷新模块」按钮（彻底卸载→重新导入，清空后台任务与定时器） |
 | 删除模块 | 删目录 + 重启 |

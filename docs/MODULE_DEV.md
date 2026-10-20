@@ -6,10 +6,10 @@
 
 ## 1. 模块目录结构
 
-一个模块是一个目录，放在 `module/modules/<name>/` 下：
+一个模块是一个目录，放在 `app/plugins/<name>/` 下：
 
 ```text
-module/modules/<name>/
+app/plugins/<name>/
   __init__.py
   module.py           # 必须：定义 Module(BaseModule)
   config_schema.py    # 可选：WebUI 配置表单

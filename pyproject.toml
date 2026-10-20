@@ -44,11 +44,15 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["app*"]
+# `app*` 覆盖 app/plugins/<name>（13 个业务插件）；`module*` 保留是因为
+# module/plugins 仍是一个包（外部 zip 插件安装位置）。
+include = ["app*", "module*"]
 
 [tool.setuptools.package-data]
 # OneBot 工具清单是数据文件，必须随包一起分发（`app/agent/tools/onebot/manifest.py` 加载它）
 "app.agent.tools.onebot" = ["*.json"]
+# 插件自带页面与 manifest
+"app.plugins.*" = ["module.json", "pages/*.html"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

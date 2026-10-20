@@ -327,30 +327,41 @@ docs/                设计文档 + 本方案（见 §4）
 
 ### 3.5 `app/modules/` + `app/nodes/` → `app/plugin/`（消除三重撞车）
 
-现状有三个 "module" 概念（`app/modules` 框架 / `module/modules` 业务 / `module/plugins` 外部）
-和两个 "node" 概念（`app/nodes` 消息节点 / `app/modules/nodes.py` 插件节点）。合并为一张图：
+**现状（P5 后）**：只剩两个 "module" 概念，且分工已清晰——
+
+| 目录 | 是什么 | 谁改 |
+|---|---|---|
+| `app/modules/` | 插件**框架**（加载/分发/权限/API） | 改框架才动 |
+| `app/plugins/` | 13 个**业务插件**代码 | 加/改业务功能动 |
+| `module/` | 插件**运行时数据**（configs / data / zip 安装） | 用户数据，不动 |
+
+原来的 `module/modules`（业务代码）已搬进 `app/plugins/`；`module/plugins`（zip 安装）
+保留原地。剩下仍值得做的：把 `app/modules/` 改名 `app/plugin/`（单数=框架），
+顺带把 `app/nodes/` 并进 `plugin/nodes/`，这样 `modules` 与 `module` 的字面混淆彻底消失。
+下表是这一步的逐文件去向（**尚未执行**）：
 
 | 现文件 | 行 | 目标 | 动作 |
 |---|---|---|---|
 | `modules/__init__.py` | 116 | `plugin/__init__.py` | 精简：只导出 `BaseModule`/`ModuleRegistry`/hook 装饰器 |
 | `modules/base.py` | 468 | `plugin/base.py` + `plugin/context.py` | **拆分**：`ModuleConfig`/`ServiceAccess`/`ModuleContext` 移 `context.py` |
-| `modules/registry.py` | 656 | `plugin/registry/{scan,load,reload}.py` | **拆分**：扫描/加载/热重载三段，`load_single()` 238 行必须拆 |
+| `modules/registry.py` | 683 | `plugin/registry/{scan,load,reload}.py` | **拆分**：扫描/加载/热重载三段，`load_single()` 仍是长函数 |
 | `modules/authority.py` | 200 | `plugin/authority.py` | 移动 |
 | `modules/dispatcher.py` | 61 | `plugin/dispatcher.py` | 移动 |
-| `modules/features.py` | 538 | `plugin/features/{registry,controllers/*}.py` | **拆分**：14 个 `*FeatureController` 挤在一个文件，每个一个文件；并切断对 `agent/` 的反向 import（改由装配期注入） |
+| `modules/features.py` | 538 | `plugin/features/{registry,controllers/*}.py` | **拆分**：14 个 `*FeatureController` 挤在一个文件，每个一个文件 |
 | `modules/hooks.py` | 558 | `plugin/hooks/{registry,decorators,contexts}.py` | **拆分** |
-| `modules/api.py` | 81 | `plugin/api.py` | 移动 |
+| `modules/api.py` | 96 | `plugin/api.py` | 移动 |
 | `modules/nodes.py` | 248 | `plugin/nodes/inbound.py` | 移动 |
 | `modules/groups.py` | 110 | `plugin/helpers/groups.py` | 移动 |
 | `modules/keyword.py` | 87 | `plugin/helpers/keyword.py` | 移动 |
-| `modules/media_cache.py` | 104 | `infrastructure/fs/media_cache.py` | **移动**（它是文件缓存，不属插件框架） |
 | `modules/requirements.py` | 48 | `plugin/requirements.py` | 移动 |
-| `modules/resource_validation.py` | 81 | `plugin/resource_validation.py` | 移动 |
+| `modules/resource_validation.py` | 80 | `plugin/resource_validation.py` | 移动 |
 | `modules/schema_utils.py` | 119 | `plugin/schema_utils.py` | 移动 |
 | `nodes/base.py` | 72 | `plugin/nodes/base.py` | 移动 |
 | `nodes/registry.py` | 57 | `plugin/nodes/registry.py` | 移动 |
 | `nodes/outbound.py` | 46 | `plugin/nodes/outbound.py` | 移动 |
 | `nodes/__init__.py` | 9 | — | **删除**（并入 `plugin/nodes/__init__.py`） |
+
+> `modules/media_cache.py` 已在 P3 下沉到 `app/infrastructure/fs/media_cache.py`（✅ 完成）。
 
 ### 3.6 `app/services/` → `app/application/`（顺带解两处撞名）
 
@@ -395,37 +406,47 @@ docs/                设计文档 + 本方案（见 §4）
 
 **前端收敛的依据**（不是拍脑袋删）：
 `dashboard/dist` 已存在并且优先渲染；`/legacy` 只是回退；模块自带页面走的是
-`GET /api/module/{name}/page` 独立通道（只有 `module/modules/example/pages/` 一个用户），
+`GET /api/module/{name}/page` 独立通道（只有 `app/plugins/example/pages/` 一个用户），
 **不依赖 `main.js`/`widgets.js`**。删掉旧版是净收益：**消掉 ~195 KB 与"同一张表单写两遍"的长期税**。
 
-### 3.8 `module/` → `plugins/`（业务插件，13 个）
+### 3.8 `module/modules/` → `app/plugins/`（业务插件，13 个）—— ✅ 已执行（P5）
 
-先给结论：**这 13 个插件的内部结构总体是对的，不需要重构**，只需统一命名与位置。
+先给结论：**这 13 个插件的内部结构总体是对的，不需要重构**，只需统一位置。
 
-| 现路径 | 目标 | 动作 | 内部是否有问题 |
-|---|---|---|---|
-| `module/__init__.py` | `plugins/__init__.py` | 移动 | — |
-| `module/modules/astrbot_alignment/` | `plugins/builtin/astrbot_alignment/` | 移动 | ✅ 5 文件（module/config_schema/assembler/astrbot_prompts）结构合理 |
-| `module/modules/bilibili_parser/` | `plugins/builtin/bilibili_parser/` | 移动 | ✅ 9 文件，`bilibili_api`+`video`+`forward`+`wbi` 分层清楚 |
-| `module/modules/df_password/` | `plugins/builtin/df_password/` | 移动 | ✅ `service/` 子包（handler/fetch/essence/migrate）是**范本** |
-| `module/modules/douyin_parser/` | `plugins/builtin/douyin_parser/` | 移动 | ✅ 11 文件，签名算法单独成文件 |
-| `module/modules/emoji_reply/` | `plugins/builtin/emoji_reply/` | 移动 | ✅ |
-| `module/modules/example/` | `plugins/builtin/example/` | 移动 | ✅ 含 `pages/` 示例 |
-| `module/modules/group_log/` | `plugins/builtin/group_log/` | 移动 | ⚠️ **13.7 KB 全在 `module.py`**（345 行），无 `service.py` → 建议拆出 `service.py` |
-| `module/modules/group_request/` | `plugins/builtin/group_request/` | 移动 | ✅ |
-| `module/modules/llm_enhance/` | `plugins/builtin/llm_enhance/` | 移动 | ✅ 33 行 module.py，逻辑在框架侧 |
-| `module/modules/poke_reply/` | `plugins/builtin/poke_reply/` | 移动 | ✅ 90 行 module.py，可接受 |
-| `module/modules/recall_back/` | `plugins/builtin/recall_back/` | 移动 | ✅ `service/` 子包 + `recall_db.py` |
-| `module/modules/time_sign_in/` | `plugins/builtin/time_sign_in/` | 移动 | ✅ `service/` 子包 |
-| `module/modules/what_to_eat/` | `plugins/builtin/what_to_eat/` | 移动 | ✅ 97 行 module.py，可接受 |
-| `module/plugins/__init__.py` | `plugins/installed/__init__.py` | 移动 | 外部 zip 插件 |
-| `module/configs/` | `data/plugins/configs/` | 移动 | 配置迁移源 |
-| `module/data/` | `data/plugins/` | 移动 | 运行时数据（含 4 个 `message_db_*.json` **测试残留**，顺手清） |
-| `module/CONFIG_SCHEMA.md` | `docs/CONFIG_SCHEMA.md` | 移动 | 文档混在代码目录 |
+已落地：`module/modules/*` → `app/plugins/*`（代码跟着代码树走），
+`module/` 只留运行时数据（`configs/` `data/` `plugins/` `uninstalled_modules.json`），
+**用户数据零迁移**。
 
-**受影响的代码**：`ModuleRegistry` 的扫描路径、`get_config_path()` / `get_data_path()`、
-`scripts/release.py` 的打包清单、`pyproject.toml` 的 `packages.find`。
-**必须同步**：`docs/MODULE_DEV.md`、`MAINTENANCE.md §2`、`README.md` 的目录树。
+配套的关键改造：插件加载器从「硬编码包名 `module.modules.<name>`」改为**按文件路径加载**
+（合成包名 `qqbot_plugin_<name>`），插件位置不再被字符串焊死。
+
+| 曾计划 | 实际 | 说明 |
+|---|---|---|
+| `plugins/builtin/<name>/` | **`app/plugins/<name>/`** | 比"仓库根 plugins/"更符合「代码在 app 下」 |
+| `module/configs/` → `data/plugins/configs/` | **不动** | 迁移会让已部署配置失效，收益不抵风险 |
+| `module/data/` → `data/plugins/` | **不动** | 同上 |
+| `module/CONFIG_SCHEMA.md` → `docs/` | **仍留在 `module/`** | 待办：文档混在数据目录里，后续可挪 |
+
+各插件内部评估（未变）：
+
+| 插件 | 内部是否有问题 |
+|---|---|
+| `astrbot_alignment` | ✅ 5 文件（module/config_schema/assembler/astrbot_prompts）结构合理 |
+| `bilibili_parser` | ✅ 9 文件，`bilibili_api`+`video`+`forward`+`wbi` 分层清楚 |
+| `df_password` | ✅ `service/` 子包（handler/fetch/essence/migrate）是**范本** |
+| `douyin_parser` | ✅ 11 文件，签名算法单独成文件 |
+| `emoji_reply` | ✅ |
+| `example` | ✅ 含 `pages/` 示例 |
+| `group_log` | ⚠️ **13.7 KB 全在 `module.py`**（345 行），无 `service.py` → 建议拆出 `service.py` |
+| `group_request` | ✅ |
+| `llm_enhance` | ✅ 33 行 module.py，逻辑在框架侧 |
+| `poke_reply` | ✅ 90 行 module.py，可接受 |
+| `recall_back` | ✅ `service/` 子包 + `recall_db.py` |
+| `time_sign_in` | ✅ `service/` 子包 |
+| `what_to_eat` | ✅ 97 行 module.py，可接受 |
+
+**仍受影响/待做**：`scripts/release.py` 的打包清单、`pyproject.toml` 的 `packages.find`
+需要覆盖 `app.plugins`；`group_log` 建议拆 `service.py`。
 
 ### 3.9 `tests/` 142 文件 → 按源码镜像分区
 
@@ -552,9 +573,24 @@ docs/
 | **P2** `app/llm`→`app/agent` 分包 | 91 文件按 §3.1 移入 11 个子包 | ✅ **已完成** | 758 处引用改写；全量 1646 passed |
 | **P3** 拆环（最关键） | 活动容器下沉 core；`media_cache` 下沉 infrastructure；工具注入策略拆出 `tools/policy.py` | ✅ **已完成** | 环 63 → **3** 模块；`chat.py` 闭包 46,305 → 25,342 |
 | **P4** 最后一个环 + 包职责文档 | 定时工具从定时引擎分离（`tools/schedule.py`）；22 份包 README + 闸三 | ✅ **已完成** | **0 个强连通块（278/278 无环）**；闸三 7 条落地 |
-| **P5** 目录归一 | `app/modules`→`app/plugin`；`module/`→`plugins/`；`tests/` 分区；`scripts/` 三分；`services`→`application`；`nodes` 并入 `plugin` | ⬜ 待做 | 13 个插件全可加载 |
-| **P6** 前端收敛 + 文档重排 | 删 `webui/static`（4,065 行）+ `templates/`（727 行）；`dashboard/`→`webui/dashboard/`；`docs/` 重排 | ⬜ 待做 | 无 404；文档链接全通 |
+| **P5** 目录归一 | `module/modules`→**`app/plugins`**（已完成）；`app/modules`→`app/plugin`、`nodes` 并入、`services`→`application`（未做） | 🟡 **部分完成** | 13 个插件全部从 `app/plugins` 加载成功 |
+| **P6** 前端收敛 + 文档重排 | 删 `webui/static`（4,065 行）+ `templates/`（727 行）（✅ 已完成）；`dashboard/`→`webui/dashboard/`、`docs/` 重排（未做） | 🟡 **部分完成** | `/` 200；`/legacy` 404；测试全绿 |
 | **P4'** 切巨型文件 + 长实 domain | `chat.py` 2,192 行拆片；`domain/` 吸收纯规则 | ⬜ 待做 | 无函数 ≥80 行；`domain/` ≥1,500 行 |
+
+### 5.1.1 还没做的（按性价比排序）
+
+1. **`chat.py` 拆片**（2,192 行，最大函数 `stream_response` 378 行）——可读性收益最大；
+   纯搬不改语义，`loop/` 里加子文件 + 在 `chat.py` 重导出即可保持 API 不变。
+2. **`domain/` 长实**（现 595 行 / 4 文件，全是 DTO）：把 `proactivity/time_parser.py`、
+   `proactivity/trigger.py`、`delivery/splitter.py` 这类零内部依赖的纯规则搬进去。
+3. **`app/modules` → `app/plugin`**：纯 Python 包改名，能把「`modules` vs `module`」的
+   字面混淆彻底消掉；13 个插件需同步改 `from app.modules import ...`。
+4. **`tests/` 142 文件分区**：`tests/app/<层>/<包>/` 与源码镜像，让「改哪个目录跑哪些测试」
+   由路径直接推出。
+5. **`scripts/` 三分**（`gen/ experiments/ diag/ ops/ ci/`）。
+6. **`dashboard/` → `webui/dashboard/`**：前端源码与构建产物收进 webui。
+7. **`webui/api/*` 的 64 处 `get_container()`**：改成 `Depends(具体服务)` 注入。
+8. **`group_log` 插件拆 `service.py`**（现 345 行全在 `module.py`）。
 
 ### 5.2 P0–P4 的实测结果
 

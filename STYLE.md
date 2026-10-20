@@ -97,7 +97,7 @@ async def add_bot(
   > （4 个没有 `service.py`，3 个用 `service/` 子包）。规范应向已存在的合理做法靠拢，而不是反过来。
 - **三个 "module" 概念不要混**（命名撞车的根源，动手前先确认自己在说哪一个）：
   `app/modules/` = 插件**框架**（`BaseModule`/注册表/权限/hook）；
-  `module/modules/` = 业务插件**实现**；
+  `app/plugins/` = 业务插件**实现**；
   `module/plugins/` = zip 安装的**外部**插件。
 
 ## 7. 错误处理与日志
@@ -242,7 +242,7 @@ pytest -q --cov --cov-report=term-missing   # 需要覆盖率时
 > ——`--scc` 看环、`--why <模块>` 看环的成因路径、`--assert-max N` 供 CI 断言。
 > 不要再手写脚本重算（口径会漂）。
 
-### 12.0 进度速览（P0–P4 已完成）
+### 12.0 进度速览（P0–P4 已完成，P5/P6 大部分完成）
 
 | 指标 | 制定方案时 | 现在 |
 |---|---|---|
@@ -252,9 +252,12 @@ pytest -q --cov --cov-report=term-missing   # 需要覆盖率时
 | `get_container()` 直调 | 71 次 / 14 文件 | **64 次 / 10 文件**（全在 `webui/api/*`，且都是 FastAPI 依赖） |
 | 单文件最大 `manifest.py` | 4,789 行 | **已外置 JSON**（加载器 78 行） |
 | `app/agent/` 顶层平铺 | 55 文件 / 20,916 行 | **8 文件 / 2,939 行**（14 个职责子包） |
-| 包职责说明 README | 0 份 | **22 份**，且由 `tests/test_architecture_layout.py` 强制 |
+| 包职责说明 README | 0 份 | **23 份**，且由 `tests/test_architecture_layout.py` 强制 |
+| 前端套数 | 2 套（Vue + 手写 JS，约 4,800 行重复） | **1 套**（`dashboard/dist`；旧版与 `/legacy` 已删） |
+| 业务插件位置 | `module/modules/`（仓库根） | **`app/plugins/`**（`module/` 只剩运行时数据） |
+| 插件加载方式 | 硬编码包名 `module.modules.<name>` | **按文件路径加载**（合成包名，位置与 import 名解耦） |
 
-改造过程与实测见 `docs/ARCHITECTURE.md §5.2`；剩余工作见同文件 §5.1 的 P5–P6。
+改造过程与实测见 `docs/ARCHITECTURE.md §5.2`；剩余工作见同文件 §5.1。
 
 ### 12.1 强连通块已清零（保留本节作为「怎么做到」的记录）
 
@@ -300,12 +303,15 @@ FastAPI 依赖（`request.app.state.container`，见 `deps.py`）——不再是
 `app/application/scheduler.py` 与 `app/agent/proactivity/scheduler.py`——名字仍撞，
 届时给前者改名为 `cron_service.py`。）
 
-### 12.4 双前端
+### 12.4 双前端 → 已收敛为一套（P6）
 
-`dashboard/`（Vue3 + Vuetify）与 `app/webui/static/`（手写 `main.js` 74KB + `widgets.js` 36KB +
-`index.html` 46KB + `style.css` 37KB ≈ 195KB）功能重叠：同一张 Agent 配置表单实现了两遍
-（`DynamicWidget.vue` vs `widgets.js`）。`app/webui/app.py` 保留 `/legacy` 回退。
-**schema 每加一个字段要改两处，第二处极易漏且没有测试会红。** 删旧版属 P6。
+现在只有 `dashboard/`（Vue3 + Vuetify）一套前端，由 `dashboard/dist` 提供。
+手写的 `app/webui/static/`（4,065 行）+ `templates/index.html`（727 行）与 `/legacy`
+回退路由**已删除**——那套实现让同一张 Agent 配置表单存在两遍（`DynamicWidget.vue` vs
+`widgets.js`），schema 每加一个字段要改两处、第二处极易漏且没有测试会红。
+
+构建产物缺失时 `/` 返回 503 + 一段「请先 `cd dashboard && pnpm install && pnpm build`」
+的提示页（内联 HTML，不引模板依赖）。`jinja2` 依赖已从 `pyproject.toml` 移除。
 
 ### 12.5 巨型数据伪装成代码（已还一半）
 
