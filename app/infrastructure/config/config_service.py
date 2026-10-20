@@ -14,6 +14,24 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from app.core.logger import logger
+from app.infrastructure.config.ws_url import (
+    ACCESS_TOKEN_MASK,
+    join_ws_url,
+    mask_ws_url,
+    restore_ws_url,
+    split_ws_url,
+)
+
+#: 这四个名字历史上就在这里定义，外部（gateway / webui）从本模块导入。
+#: 现在实现搬到了 `ws_url.py`，这里保留重导出；`__all__` 让 linter 知道它们是公共 API。
+__all__ = [
+    "ACCESS_TOKEN_MASK",
+    "ConfigService",
+    "mask_ws_url",
+    "join_ws_url",
+    "restore_ws_url",
+    "split_ws_url",
+]
 from app.infrastructure.persistence.database import Database
 
 Listener = Callable[[str, Any], Awaitable[None]]
@@ -33,57 +51,6 @@ DEFAULT_PROVIDER_SETTINGS: dict = {
 }
 
 # OneBot ws_url 中 access_token 的对外打码哨兵（WebUI/页面不泄露真实令牌）
-ACCESS_TOKEN_MASK = "****"
-
-
-def mask_ws_url(url: str) -> str:
-    """把 ws_url 中的 access_token 打码，避免 WebUI / 页面 HTML 泄露令牌。"""
-    if not url or "access_token=" not in url:
-        return url
-    import re
-
-    return re.sub(r"(access_token=)[^&]*", r"\g<1>" + ACCESS_TOKEN_MASK, url)
-
-
-def split_ws_url(url: str) -> tuple[str, str]:
-    """把完整 ws_url 拆成 (基础地址, access_token)。
-
-    仅拆出 access_token 参数，query 中其余参数保留在基础地址里。
-    """
-    if not url or "?" not in url:
-        return (url or ""), ""
-    base, query = url.split("?", 1)
-    token = ""
-    kept = []
-    for param in query.split("&"):
-        if param.startswith("access_token="):
-            token = param[len("access_token="):]
-        elif param:
-            kept.append(param)
-    if kept:
-        return f"{base}?{'&'.join(kept)}", token
-    return base, token
-
-
-def join_ws_url(base: str, token: str) -> str:
-    """把基础地址与 access_token 拼回完整 ws_url（无 token 时原样返回）。"""
-    base = (base or "").strip()
-    if not token:
-        return base
-    sep = "&" if "?" in base else "?"
-    return f"{base}{sep}access_token={token}"
-
-
-def restore_ws_url(masked: str, original: str) -> str:
-    """保存时：提交的是打码 URL → 用原 URL 的真实 access_token 回填。"""
-    if not masked or ACCESS_TOKEN_MASK not in masked or not original:
-        return masked
-    import re
-
-    match = re.search(r"access_token=([^&]*)", original)
-    if not match:
-        return masked
-    return re.sub(r"access_token=" + re.escape(ACCESS_TOKEN_MASK), f"access_token={match.group(1)}", masked)
 
 
 class ConfigService:

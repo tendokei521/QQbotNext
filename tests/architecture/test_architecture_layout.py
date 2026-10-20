@@ -185,8 +185,6 @@ def test_no_stale_pycache_only_directories() -> None:
 _LONG_FILE_ALLOWLIST = {
     "app/agent/config_schema.py": 1072,  # 数据 + _gate/_on DSL，刻意不拆
     "app/agent/loop/chat.py": 1176,  # 已从 2,192 拆到 1,176；三个长函数仍待按段落抽
-    "app/infrastructure/config/config_service.py": 823,  # 配置中心（SQLite + 缓存 + 广播）
-    "app/infrastructure/onebot/gateway.py": 817,  # 连接/去重/重连/僵尸扫描
 }
 MAX_FILE_LINES = 800
 
