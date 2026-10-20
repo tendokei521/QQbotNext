@@ -173,6 +173,79 @@ self.ctx.services.features.status(self.bot_id)
 
 ---
 
+## 2.7 统一命令：`@command` / `@command_group`
+
+「输入某个词就干某件事」不必再自己写 `@module_hook` + 文本匹配 + `event.llm.stop()`。
+框架有一套统一的命令解析与分发（`app/plugin/commands.py`），口径对齐 AstrBot 的
+`filter.command` / `filter.command_group`：
+
+```python
+from app.plugin import BaseModule, command, command_group
+
+class Module(BaseModule):
+    @command("log", description="发送本轮次 user 日志")
+    async def log(self, event):
+        ...                                   # 默认已截断 LLM
+
+    @command("poke", aliases=("戳",), skip_llm=False)
+    async def poke(self, event):
+        ...                                   # 回一条后，本轮照常交给 LLM
+
+    @command_group("memory", description="长期记忆")
+    async def memory(self, event):             # 只发 "/memory" 时走这里
+        await event.reply(render_group_help(iter_module_commands([self]), "memory"))
+
+    @memory.command("list", description="列出记忆")
+    async def memory_list(self, event):
+        args = event.command.args               # "/memory list a b" → ["a", "b"]
+```
+
+### 2.7.1 参数
+
+| 参数 | 含义 |
+|---|---|
+| `name` | 命令词；命令组自动拼成 `"<组> <子命令>"`（可多词） |
+| `aliases` | 别名（同样受前缀约束；组里会自动带上组名） |
+| `description` | 说明，供帮助清单渲染 |
+| `group` | 所属命令组（一般由 `@xxx.command` 自动填） |
+| `skip_llm` | **隐藏参数**，默认 `True`；见 2.7.3 |
+| `order` | 同分命中时的优先级（越小越先） |
+| `prefixes` | 唤醒前缀，默认 `("/", "／")`；传 `("", "/")` 可允许裸词 |
+
+命令组可以级联：`@grp.group("sub")` 再 `.command(...)`，名字会拼成 `"grp sub xxx"`。
+
+### 2.7.2 解析口径
+
+- 前缀：默认 `/log`、`／log`（全角斜杠）都认；**不带前缀默认不算命令**（避免自然语言误触）；
+- 空白归一（`\s+` → 单空格）、命令名大小写不敏感、按**词边界**匹配（`/opened` 不会命中 `open`）；
+- 命令名**允许含空格**（命令组），剩余部分按空格切成 `event.command.args`；
+- 同一条消息命中多条时只跑**最具体**的一条：先比命令词数（`memory list` 胜过 `memory`），
+  再比字符长度，然后比 `order`、模块名。
+
+### 2.7.3 隐藏参数 `skip_llm`：命中即截断 LLM
+
+`skip_llm` 默认 `True`：命令命中后框架替你 `event.llm.stop()`，本轮**不进 LLM**
+（不写就等于自动截断，不会再出现"命令回完模型又搭一句"）。
+
+确实想让模型接着说的场景，显式写 `skip_llm=False`；子命令缺省继承组上的设定。
+处理器抛异常时**同样截断** LLM（避免模型对着报错文本瞎编），并记 `exception` 日志。
+
+### 2.7.4 分发时机
+
+入站节点链：`router(100) → permission(110) → command(115) → invoke(120) → agent(130)`。
+
+- 在**权限之后**：`permission="owner"` 的模块，命令一样受权限约束；
+- 在**模块通用钩子之前**：命令先落定，`@module_hook` 观察者（如 group_log）仍照常收到事件；
+- 在 **LLM 之前**：所以命令能直接截断 LLM；
+- 命令模块**不需要**写 `subscribe`：只声明命令时框架自动补 `message_group` / `message_private`；
+- 解析结果挂在 `event.command` 上（`name` / `args` / `text` / `prefix` / `module` / `skip_llm`），
+  后续模块与处理器都可读。
+
+> 与 `#llm` 指令的关系：`#llm xxx` 是 Agent 层的内置指令表（`app/agent/commands.py`），
+> 在 LLM 流水线**内部**分流；本节的命令是模块层、在 LLM **之前**分发。两者互不影响。
+
+---
+
 ## 3. 模块流水线钩子：`@module_hook`
 
 ### 3.1 用法

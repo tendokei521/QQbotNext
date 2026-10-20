@@ -14,7 +14,12 @@ from typing import Any
 from app.core.logger import logger
 from app.domain.events import BaseEvent
 from app.plugin.nodes.base import MessageContext, NodeRunner
-from app.plugin.nodes.inbound import ModuleInvokeNode, ModulePermissionNode, ModuleRouterNode
+from app.plugin.nodes.inbound import (
+    ModuleCommandNode,
+    ModuleInvokeNode,
+    ModulePermissionNode,
+    ModuleRouterNode,
+)
 from app.plugin.nodes.registry import NodeRegistry
 
 
@@ -42,6 +47,7 @@ class ModuleDispatcher:
             node_registry.register(
                 ModulePermissionNode(config_service, gateway, self.log, agent_manager)
             )
+            node_registry.register(ModuleCommandNode(self.log))
             node_registry.register(ModuleInvokeNode(self.log))
         self.node_registry = node_registry
 

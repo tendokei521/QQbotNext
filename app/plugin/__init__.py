@@ -22,6 +22,19 @@ from app.plugin.base import (
     ServiceAccess,
     resolve_enabled_ids,
 )
+from app.plugin.commands import (
+    DEFAULT_PREFIXES,
+    CommandInvocation,
+    CommandMatch,
+    CommandSpec,
+    best_match,
+    command,
+    command_group,
+    iter_module_commands,
+    match_spec,
+    render_group_help,
+    strip_prefix,
+)
 from app.plugin.dispatcher import ModuleDispatcher
 from app.plugin.features import (
     AgentFeatureController,
@@ -90,6 +103,17 @@ __all__ = [
     "AgentFeatureController",
     "AssemblerFeatureController",
     "module_hook",
+    "command",
+    "command_group",
+    "CommandSpec",
+    "CommandMatch",
+    "CommandInvocation",
+    "DEFAULT_PREFIXES",
+    "best_match",
+    "match_spec",
+    "iter_module_commands",
+    "strip_prefix",
+    "render_group_help",
     "llm_hook",
     "send_hook",
     "SendContext",

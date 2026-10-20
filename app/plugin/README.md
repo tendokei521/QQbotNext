@@ -26,6 +26,7 @@
 | `features.py` | 能力注册表（谁接管了「LLM 回复」这类能力） |
 | `authority.py` | 权限系统（黑白名单 + 等级） |
 | `hooks.py` | `@module_hook` / `@llm_hook` / `@send_hook` / `@tool_call_hook` |
+| `commands.py` | 统一命令解析与分发：`@command` / `@command_group`（隐藏参数 `skip_llm` 默认命中即截断 LLM） |
 | `keyword.py` | 关键词匹配原语 |
 | `nodes.py` | 消息节点（合并转发）辅助 |
 | `groups.py` | 群开关检查 |

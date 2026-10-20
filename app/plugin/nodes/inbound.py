@@ -23,6 +23,7 @@ from app.plugin.authority import (
     roster_lists,
 )
 from app.plugin.base import BaseModule
+from app.plugin.commands import best_match, iter_module_commands
 from app.plugin.nodes.base import MessageContext, MessageNode, Next
 from app.plugin.registry import ModuleRegistry
 
@@ -261,6 +262,66 @@ class ModulePermissionNode(MessageNode):
 
     def _is_single_service_skipped(self, module: BaseModule, event: BaseEvent) -> bool:
         return is_single_service_skipped(module, event, self.config_service, self.gateway)
+
+
+class ModuleCommandNode(MessageNode):
+    """统一命令解析与分发（模块层）。
+
+    链序：``router(100) → permission(110) → command(115) → invoke(120) → agent(130)``。
+    位置是有讲究的：
+
+    - 在**权限过滤之后**：``permission="owner"`` 的模块，命令一样受权限约束
+      （不会出现"权限拦住了模块钩子，命令却照跑"）；
+    - 在**模块通用钩子之前**：命令先落定，``@module_hook`` 的观察者（如 group_log）仍会收到事件；
+    - 在**LLM 兜底之前**：所以命中命令能直接截断 LLM。
+
+    **隐藏参数 ``skip_llm`` 默认 True**：命中命令就 ``event.llm.stop()``，本轮不进 LLM；
+    命令处理器确实想再让模型说点什么时，声明时显式写 ``skip_llm=False``。
+    处理器抛异常时同样截断 LLM（否则模型会对着报错文本瞎编）。
+    """
+
+    name = "command"
+    order = 115
+
+    def __init__(self, log=None) -> None:
+        self.log = log or logger
+
+    async def process(self, ctx: MessageContext, next_: Next) -> None:
+        event = ctx.event
+        if event.event_type not in ("message_group", "message_private"):
+            await next_()
+            return
+        text = getattr(event, "text", "") or ""
+        if not text.strip():
+            await next_()
+            return
+
+        entries = iter_module_commands(ctx.state.get("allowed") or [])
+        if not entries:
+            await next_()
+            return
+
+        match = best_match(text, entries)
+        if match is None:
+            await next_()
+            return
+
+        invocation = match.as_invocation()
+        event.command = invocation
+        ctx.state["command"] = invocation
+        self.log.debug(f"[Command] {invocation} → {match.module_name}")
+
+        try:
+            await match.handler(event)
+        except Exception as e:  # noqa: BLE001 —— 命令异常不能掀翻节点链
+            self.log.exception(f"[Command] {match.module_name} 处理 {invocation.name} 异常: {e}")
+            event.llm.stop()
+            await next_()
+            return
+
+        if invocation.skip_llm:
+            event.llm.stop()
+        await next_()
 
 
 class ModuleInvokeNode(MessageNode):

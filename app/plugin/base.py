@@ -300,6 +300,8 @@ class BaseModule(ABC):
         self.bot_id = ctx.bot_id
         # 装饰器收集到的模块流水线钩子（由 ModuleRegistry 填充）
         self._module_hooks: list[dict] = []
+        # 装饰器收集到的命令：(CommandSpec, 绑定后的处理器)（由 loader 填充）
+        self._commands: list[tuple[Any, Any]] = []
         # 事件运行期属性（dispatcher 每事件更新）
         self.permission_granted = False
 
@@ -323,6 +325,19 @@ class BaseModule(ABC):
                 llm_hooks.append(dict(item))
 
         return module_hooks, llm_hooks
+
+    @classmethod
+    def collect_commands(cls) -> list[tuple[Any, str]]:
+        """收集类中所有 @command / @command_group 声明的命令：``[(spec, 方法名)]``。
+
+        顺序 = 类体定义顺序（``vars`` 保序），同一方法可叠多个 ``@command``。
+        """
+        found: list[tuple[Any, str]] = []
+        for klass in reversed(cls.__mro__):
+            for name, attr in vars(klass).items():
+                for spec in getattr(attr, "__command_meta__", []) or []:
+                    found.append((spec, name))
+        return found
 
     @classmethod
     def collect_send_hooks(cls) -> list[dict]:

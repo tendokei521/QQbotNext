@@ -173,6 +173,7 @@ class ModuleRegistry:
             cls = type(instance)
 
             _module_hooks, llm_hooks = loader.bind_module_hooks(instance, cls)
+            loader.bind_commands(instance, cls, self.log)
             self._modules.setdefault(module_name, {})[bot_id] = instance
             loader.register_hooks(instance, cls, llm_hooks, bot_id, self.services, self.log)
             await loader.register_data_sources(instance, module_name, self.services, self.log)

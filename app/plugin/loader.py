@@ -109,6 +109,44 @@ def bind_module_hooks(instance: BaseModule, cls: type) -> tuple[list[dict], list
     return module_hooks, llm_hooks
 
 
+def bind_commands(instance: BaseModule, cls: type, log=None) -> list[tuple[Any, Any]]:
+    """把 `@command` / `@command_group` 声明的命令绑到实例上。
+
+    返回 ``[(CommandSpec, 处理器), ...]``，同时写进 ``instance._commands``。
+    命令节点只遍历「本轮被权限放行」的模块的这份清单——不建全局注册表，
+    热重载/卸载天然跟着实例走。
+    """
+    entries: list[tuple[Any, Any]] = []
+    for spec, method in cls.collect_commands():
+        handler = getattr(instance, method, None)
+        if handler is None or not callable(handler):
+            continue
+        entries.append((spec, handler))
+    instance._commands = entries
+    if entries:
+        _derive_subscribe_for_commands(instance, cls)
+    if entries and log is not None:
+        # 命令是对外契约：加载时登记一条（debug 级，便于核对"这个 bot 有哪些命令"）
+        names = ", ".join(sorted({spec.name for spec, _ in entries}))
+        log.debug(f"[Module] {getattr(instance, 'module_name', '?')} 命令: {names}")
+    return entries
+
+
+def _derive_subscribe_for_commands(instance: BaseModule, cls: type) -> None:
+    """仅靠 ``@command`` 声明能力的模块也要被路由到。
+
+    ``ModuleRouterNode`` 按 ``module.subscribe`` 过滤；``bind_module_hooks`` 只从
+    ``@module_hook`` 推导事件类型。命令天然只作用于消息事件，这里补上两个消息类型
+    ——否则「只声明了命令、没写 @module_hook」的模块永远收不到事件（命令永不触发）。
+    显式写了 ``subscribe`` 的模块以作者声明为准。
+    """
+    if getattr(cls, "subscribe", ()):
+        return
+    types = set(getattr(instance, "subscribe", ()) or ())
+    types.update({"message_group", "message_private"})
+    instance.subscribe = tuple(sorted(types))
+
+
 def _register_service_hooks(instance: BaseModule, cls: type, bot_id: Any, services: ServiceAccess, log) -> None:
     """表驱动：把 5 类服务钩子登记到各自的注册表（加新类只需在 `_SERVICE_HOOKS` 加一行）。"""
     for collector, registry_attr, dispatch_key, label in _SERVICE_HOOKS:

@@ -303,6 +303,7 @@ def build_container(settings: Settings | None = None) -> Container:
     # 节点注册表：内置入站链（路由 → 权限 → 派发 → Agent 兜底），框架/模块可插入/替换
     from app.plugin.nodes import (
         AgentNode,
+        ModuleCommandNode,
         ModuleInvokeNode,
         ModulePermissionNode,
         ModuleRouterNode,
@@ -315,6 +316,7 @@ def build_container(settings: Settings | None = None) -> Container:
     node_registry.register(AgentNode(agent_manager, config_service, gateway, logger))
     node_registry.register(ModuleRouterNode(registry, logger))
     node_registry.register(ModulePermissionNode(config_service, gateway, logger, agent_manager))
+    node_registry.register(ModuleCommandNode(logger))
     node_registry.register(ModuleInvokeNode(logger))
     container.register_factory(NodeRegistry, lambda: node_registry)
 
