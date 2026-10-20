@@ -291,3 +291,25 @@ def _record_stream_telemetry(
         characters=len(full_text),
         error=error_text,
     )
+
+
+def _log_debug_prompt(runtime, session_id: str, messages: list[dict], debug_enabled: bool = False) -> None:
+    """调试开关开启时，打印本轮完整 prompt。"""
+    if not debug_enabled:
+        return
+    try:
+        text = json.dumps(messages, ensure_ascii=False, indent=2)
+    except Exception:
+        text = str(messages)
+    logger.add_info(f"#{runtime.bot_id}").info(f"[Prompt] {session_id}\n{text}")
+
+
+def _history_meta_flags(runtime) -> dict:
+    """计算历史渲染标志：是否归一化单行、是否脱敏昵称。
+
+    mask_nickname 恒为 True：句子型/超长昵称一律脱敏，避免昵称内容泄漏进 LLM 上下文。
+    """
+    return {
+        "normalize_enhanced": bool(runtime.config.get("experimental_long_term_memory", False)),
+        "mask_nickname": True,
+    }
