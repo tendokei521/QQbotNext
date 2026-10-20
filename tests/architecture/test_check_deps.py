@@ -19,7 +19,20 @@ from pathlib import Path
 
 import pytest
 
-MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "ops" / "check_deps.py"
+
+def _repo_root() -> Path:
+    """向上找含 ``pyproject.toml`` 的目录。
+
+    不写死 ``parents[N]``：本文件最初在 ``tests/``、后被移到 ``tests/architecture/``，
+    层级一变 ``parents[1]`` 就指向 ``tests/scripts/...``（实测直接报文件不存在）。
+    """
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "pyproject.toml").is_file():
+            return parent
+    raise RuntimeError("找不到仓库根（pyproject.toml）")
+
+
+MODULE_PATH = _repo_root() / "scripts" / "ops" / "check_deps.py"
 
 
 def _load_module():
