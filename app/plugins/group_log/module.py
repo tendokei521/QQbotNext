@@ -2,45 +2,36 @@
 
 ## 它解决什么
 
-会话历史只在消息**触发**机器人时写入（``pipeline.check_trigger`` 不通过就直接 return），
+会话历史只在消息**触发**机器人时写入（`pipeline.check_trigger` 不通过就直接 return），
 且完全不含互动（谁给谁贴了表情、谁戳了谁、谁撤回了什么）。于是模型对"群里现在什么
 气氛"没有任何持续来源。本模块在**事件接收时**记账：
 
-- ``message_group``：所有群消息（不依赖是否 @ 我、不依赖 trigger 是否通过）；
-- ``notice_group_emoji`` / ``notice_poke`` / ``notice_group_recall``：互动与撤回；
-- ``@send_hook``：机器人自己发出的群消息（带 message_id，供去重与"我干过什么"）。
+- `message_group`：所有群消息（不依赖是否 @ 我、不依赖 trigger 是否通过）；
+- `notice_group_emoji` / `notice_poke` / `notice_group_recall`：互动与撤回；
+- `@send_hook`：机器人自己发出的群消息（带 message_id，供去重与"我干过什么"）。
 
 **私聊只记戳一戳**（其余私聊内容不入账）。
 
 ## 与"对话记录"的边界
 
-会话历史（``app/llm/session.py``）是规范对话形态，本模块**不写、不改**它；
+会话历史（`app/agent/session/`）是规范对话形态，本模块**不写、不改**它；
 两者是独立的两套内容，装配时由渲染层按 message_id 去重（会话历史优先）。
 
-## 写入口径
+## 分工
 
-- 幂等、保留窗口、淘汰、落盘全在 ``app/llm/group_log/store.py``（记录面）；
-- 本模块只负责"事件 → LogEvent"的翻译与脱敏；
-- ``append_many`` 只入队，不阻塞事件分发；异常一律吞掉并留痕，
-  记录失败绝不影响聊天。
+- **本文件**：插件骨架——配置、生命周期、`@module_hook` 接线、存储挂载。
+- `service.py`：事件 → `LogEvent` 的翻译口径（脱敏 / 剥控制标记 / 字段映射）。
+  那里是纯函数，可单独测；改「记录什么」去那边，改「接哪些事件」改这里。
+- `app/agent/group_log/store.py`：记录面（幂等、保留窗口、淘汰、落盘）。
+
+`append_many` 只入队，不阻塞事件分发；异常一律吞掉并留痕，**记录失败绝不影响聊天**。
 """
 
 from __future__ import annotations
 
-import re
-import time
 from pathlib import Path
 from typing import Any
 
-from app.agent.group_log.events import (
-    KIND_EMOJI,
-    KIND_MESSAGE,
-    KIND_MY_SEND,
-    KIND_POKE,
-    KIND_RECALL,
-    LogEvent,
-    make_scope,
-)
 from app.agent.group_log.store import (
     DEFAULT_RETENTION_COUNT,
     DEFAULT_RETENTION_HOURS,
@@ -52,19 +43,9 @@ from app.agent.group_log.store import (
 from app.core.logger import logger
 from app.plugin import BaseModule, module_hook, send_hook
 
+from . import service
 from .config_schema import SCHEMA
-
-#: 控制标记剥离：群里有人发 ``[reply]`` / ``<type=...>`` 时，
-#: 这些词进环境块会与"输出侧指令"或既有标签语法撞车，甚至变成伪指令
-_DIRECTIVE_RE = re.compile(
-    r"<type=[^>]{0,32}>|\[reply\]|\[@\s*\d{1,15}\s*\]|\[id\s*\d{1,20}\]|\[↩[^\]]{0,64}\]|\[♡[^\]]{0,32}\]",
-    re.IGNORECASE,
-)
-
-
-def strip_directives(text: str) -> str:
-    """剥掉会与指令/标签撞车的控制形态，保留正常聊天内容。"""
-    return _DIRECTIVE_RE.sub("", str(text or "")).strip()
+from .service import strip_directives  # noqa: F401 - 对外保持 module.strip_directives 可用
 
 
 class Module(BaseModule):
@@ -156,7 +137,7 @@ class Module(BaseModule):
         runtime = self._runtime()
         return store_of(runtime) if runtime is not None else None
 
-    def _record(self, events: list[LogEvent]) -> None:
+    def _record(self, events) -> None:
         """写入记录面：任何异常都吞掉（记录失败不能影响聊天）。"""
         if not events:
             return
@@ -168,178 +149,45 @@ class Module(BaseModule):
         except Exception as e:  # noqa: BLE001
             logger.add_info(f"#{self.bot_id}").debug(f"[GroupLog] 记录失败（忽略）: {e}")
 
-    def _text_of(self, event: Any) -> str:
-        """事件 → 可读正文（复用既有段渲染器：图片/表情/语音都是占位符）。"""
-        from app.agent.context.group import extract_msg_text
+    def _enabled(self) -> bool:
+        return bool(self._cfg("group_log_enable", True))
 
-        try:
-            text = extract_msg_text(
-                getattr(event, "message", None),
-                None,
-                False,
-                str(getattr(event, "message_id", "") or ""),
-                None,
-            )
-        except Exception as e:  # noqa: BLE001 - 渲染失败退化为空文本，仍记录事件
-            logger.add_info(f"#{self.bot_id}").debug(f"[GroupLog] 正文渲染失败: {e}")
-            text = ""
-        text = text or str(getattr(event, "raw_message", "") or "")
-        if bool(self._cfg("strip_directives", True)):
-            text = strip_directives(text)
-        return text
-
-    def _sender_label(self, event: Any, user_id: Any) -> str:
-        """昵称（写入即脱敏，与会话历史的 mask_nickname 同口径）。"""
-        from app.agent.context.group import safe_sender_label
-
-        user = getattr(event, "user", None)
-        raw = getattr(user, "card", "") or getattr(user, "nickname", "") or ""
-        return safe_sender_label(str(raw or "")) if raw else ""
-
-    @staticmethod
-    def _reply_to(event: Any) -> str:
-        for seg in getattr(event, "message", None) or []:
-            stype = seg.get("type") if isinstance(seg, dict) else getattr(seg, "type", "")
-            data = (seg.get("data") if isinstance(seg, dict) else getattr(seg, "data", {})) or {}
-            if stype == "reply":
-                return str(data.get("id", "") or data.get("message_id", "") or "")
-        return ""
-
-    # ==================== 事件接入 ====================
+    # ==================== 事件接入（翻译口径见 service.py） ====================
 
     @module_hook("message_group", order=10)
     async def _on_group_message(self, event) -> None:
-        if not bool(self._cfg("group_log_enable", True)):
+        if not self._enabled():
             return
-        group = getattr(event, "group", None)
-        group_id = str(getattr(group, "group_id", "") or getattr(event, "group_id", "") or "")
-        scope = make_scope(True, group_id=group_id)
-        if not scope:
-            return
-        user_id = str(getattr(event, "user_id", "") or "")
-        self._record([LogEvent(
-            ts=int(getattr(event, "time", 0) or 0),
-            kind=KIND_MESSAGE,
-            scope=scope,
-            group_id=group_id,
-            message_id=str(getattr(event, "message_id", "") or ""),
-            user_id=user_id,
-            nickname=self._sender_label(event, user_id),
-            text=self._text_of(event),
-            reply_to=self._reply_to(event),
-            by_me=bool(user_id and user_id == str(getattr(event, "self_id", "") or "")),
-        )])
+        self._record(service.group_message_event(
+            event, strip=bool(self._cfg("strip_directives", True))
+        ))
 
     @module_hook("notice_group_emoji", order=10)
     async def _on_emoji(self, event) -> None:
-        if not bool(self._cfg("group_log_enable", True)):
+        if not self._enabled():
             return
-        group_id = str(getattr(event, "group_id", "") or "")
-        scope = make_scope(True, group_id=group_id)
-        if not scope:
-            return
-        user_id = str(getattr(event, "user_id", "") or "")
-        likes = getattr(event, "emoji_likes", None) or []
-        if not likes:
-            # 没有表情明细时仍记一条"有人做了回应"，避免整段互动丢失
-            likes = [{"emoji_id": ""}]
-        events = []
-        for item in likes:
-            emoji_id = str((item or {}).get("emoji_id", "") or "") if isinstance(item, dict) else ""
-            events.append(LogEvent(
-                ts=int(getattr(event, "time", 0) or 0),
-                kind=KIND_EMOJI,
-                scope=scope,
-                group_id=group_id,
-                message_id=str(getattr(event, "message_id", "") or ""),
-                user_id=user_id,
-                nickname=self._sender_label(event, user_id),
-                payload={
-                    "emoji_id": emoji_id,
-                    "is_add": bool(getattr(event, "emoji_is_add", True)),
-                    "count": (item or {}).get("count", 1) if isinstance(item, dict) else 1,
-                },
-                by_me=bool(user_id and user_id == str(getattr(event, "self_id", "") or "")),
-            ))
-        self._record(events)
+        self._record(service.emoji_event(event))
 
     @module_hook("notice_poke", order=10)
     async def _on_poke(self, event) -> None:
         """戳一戳：**群聊与私聊都记**（私聊唯一入账的互动）。"""
-        if not bool(self._cfg("group_log_enable", True)):
+        if not self._enabled():
             return
-        group_id = str(getattr(event, "group_id", "") or "")
-        is_group = bool(group_id)
-        operator = str(getattr(event, "operator_id", "") or getattr(event, "user_id", "") or "")
-        target = str(getattr(event, "target_id", "") or "")
-        scope = make_scope(
-            is_group,
-            group_id=group_id,
-            user_id=operator if not is_group else None,
-        )
-        if not scope:
-            return
-        self._record([LogEvent(
-            ts=int(getattr(event, "time", 0) or 0),
-            kind=KIND_POKE,
-            scope=scope,
-            group_id=group_id,
-            user_id=operator,
-            nickname=self._sender_label(event, operator),
-            payload={"target_id": target},
-            by_me=bool(operator and operator == str(getattr(event, "self_id", "") or "")),
-        )])
+        self._record(service.poke_event(event))
 
     @module_hook("notice_group_recall", order=10)
     async def _on_recall(self, event) -> None:
-        if not bool(self._cfg("group_log_enable", True)):
+        if not self._enabled():
             return
-        group_id = str(getattr(event, "group_id", "") or "")
-        scope = make_scope(True, group_id=group_id)
-        if not scope:
-            return
-        operator = str(getattr(event, "operator_id", "") or getattr(event, "user_id", "") or "")
-        self._record([LogEvent(
-            ts=int(getattr(event, "time", 0) or 0),
-            kind=KIND_RECALL,
-            scope=scope,
-            group_id=group_id,
-            message_id=str(getattr(event, "message_id", "") or ""),
-            user_id=operator,
-            nickname=self._sender_label(event, operator),
-            by_me=bool(operator and operator == str(getattr(event, "self_id", "") or "")),
-        )])
+        self._record(service.recall_event(event))
 
     @send_hook(message_type="group", order=10)
     async def _on_my_send(self, ctx) -> None:
         """机器人自己发出的群消息：记下来才能做"我做过什么"的反馈与去重。"""
-        if not bool(self._cfg("group_log_enable", True)):
+        if not self._enabled():
             return
-        group_id = str(getattr(ctx, "group_id", "") or "")
-        scope = make_scope(True, group_id=group_id)
-        if not scope:
-            return
-        text = self._outbound_text(getattr(ctx, "params", {}) or {})
-        if bool(self._cfg("strip_directives", True)):
-            text = strip_directives(text)
-        self._record([LogEvent(
-            ts=int(time.time()),
-            kind=KIND_MY_SEND,
-            scope=scope,
-            group_id=group_id,
-            message_id=str(getattr(ctx, "message_id", "") or ""),
-            user_id=str(self.bot_id or ""),
-            nickname="我",
-            text=text,
-            by_me=True,
-        )])
-
-    @staticmethod
-    def _outbound_text(params: dict) -> str:
-        """发送参数 → 可读文本（兼容 str / 段列表 / Message 对象）。"""
-        from app.infrastructure.onebot.client import _message_preview
-
-        try:
-            return str(_message_preview(params.get("message")) or "")
-        except Exception:  # noqa: BLE001
-            return str(params.get("message") or "")
+        self._record(service.my_send_event(
+            ctx,
+            bot_id=self.bot_id,
+            strip=bool(self._cfg("strip_directives", True)),
+        ))
