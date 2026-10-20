@@ -44,12 +44,15 @@ _BUDGET = {
     # 剩下的都在 app/webui/api/*。`deps.py` 已经给每个服务备了具名依赖
     # （get_bot_service 等），把端点改成 `Depends(get_xxx_service)` 就能继续降。
     # 已清零：logs.py（4 端点，3 条 HTTP 用例守住）、framework.py、resources.py、
-    # webui_cfg.py（12 端点）、bots.py（10 端点）。剩下 agent.py / modules.py 两个大文件。
-    "get_container_calls": 39,
+    # webui_cfg.py（12 端点）、bots.py（10 端点）、agent.py（17 端点）。
+    # 只剩 modules.py（它把 container 传进 3 个 helper，需要连着改 helper 签名）。
+    "get_container_calls": 22,
     # 端点里自己 `container.get(类型)` 的次数（服务定位的味道）。目标 0。
-    "webui_container_get_calls": 32,
+    "webui_container_get_calls": 26,
     # app/webui/api/{agent,media,modules,prompt_dump}.py 直接 import app.agent.*
-    "webui_to_agent_imports": 13,
+    # 14 而不是 13：deps.py 多了一条 `app.agent.runtime`（按 bot 取 runtime 的
+    # `get_agent_manager` 依赖）——那是 DI 缝本身该干的活，不算泄漏。
+    "webui_to_agent_imports": 14,
 }
 
 # `app/agent/__init__.py` 允许在模块层 import 的东西（全部廉价、无重依赖）

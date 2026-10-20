@@ -14,14 +14,17 @@ from app.agent.tools.onebot.manifest import ONEBOT_TOOLS
 from app.agent.tools.onebot.security import resolve_tool_policy
 from app.agent.tools.system import list_system_tools
 from app.core.logger import logger
-from app.infrastructure.config.config_service import ConfigService
 from app.plugin.schema_utils import webui_schema
 from app.services.bot_service import PASSWORD_MASK as _PASSWORD_MASK
-from app.services.provider_model_service import ProviderModelService
-from app.services.provider_preset_service import ProviderPresetService
-from app.services.resource_registry import ResourceRegistry
-from app.services.role_preset_service import RolePresetService
-from app.webui.api.deps import get_container, parse_bot_id
+from app.webui.api.deps import (
+    get_agent_manager,
+    get_config_service,
+    get_provider_model_service,
+    get_provider_preset_service,
+    get_resource_registry,
+    get_role_preset_service,
+    parse_bot_id,
+)
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -34,16 +37,15 @@ def _err(status: int, message: str):
     return JSONResponse(status_code=status, content={"status": "error", "message": message})
 
 
-def _runtime(container, bot_id):
-    """取指定 bot 的 Agent 运行时；无则返回 (None, None)。"""
-    if bot_id is None:
-        return None, None
-    from app.agent.runtime import AgentManager
+def _runtime(agent_manager, bot_id):
+    """取指定 bot 的 Agent 运行时；无则返回 (None, None)。
 
-    manager = container.get(AgentManager)
-    if manager is None:
+    `agent_manager` 由 `Depends(get_agent_manager)` 注入（见 deps.py），
+    端点里不再自己从容器按类型捞。
+    """
+    if bot_id is None or agent_manager is None:
         return None, None
-    return manager.get_runtime(bot_id), manager
+    return agent_manager.get_runtime(bot_id), agent_manager
 
 
 def _mask_password_config(config: dict, schema: dict) -> dict:
@@ -58,26 +60,32 @@ def _mask_password_config(config: dict, schema: dict) -> dict:
 # ==================== 配置 / 权限 ====================
 
 @router.get("/config")
-async def agent_config(request: Request, bot_id: int | None = Depends(parse_bot_id)):
+async def agent_config(
+    request: Request,
+    bot_id: int | None = Depends(parse_bot_id),
+    agent_manager=Depends(get_agent_manager),
+    config_service=Depends(get_config_service),
+    role_preset_service=Depends(get_role_preset_service),
+    resource_registry=Depends(get_resource_registry),
+    provider_preset_service=Depends(get_provider_preset_service),
+    provider_model_service=Depends(get_provider_model_service),
+):
     from app.agent.config_schema import SCHEMA
 
-    container = get_container(request)
-    runtime, _ = _runtime(container, bot_id)
+    runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
     # 兼容旧格式：若 agent 配置里保存了旧 system_prompt，自动转为角色预设
-    config_service = container.get(ConfigService)
     stored_config = config_service.get_module_config("agent", bot_id) or {}
-    role_preset_service = container.get(RolePresetService)
     await role_preset_service.ensure_legacy_prompt(bot_id, stored_config.get("system_prompt"))
     perm = runtime.config.permission
     raw_config = dict(runtime.config.raw_config)
     for key in LEGACY_LLM_CONNECTION_KEYS:
         raw_config.pop(key, None)
-    schema = webui_schema(SCHEMA, registry=container.get(ResourceRegistry), source_module="agent")
-    presets = container.get(ProviderPresetService).list_presets()
+    schema = webui_schema(SCHEMA, registry=resource_registry, source_module="agent")
+    presets = provider_preset_service.list_presets()
     preset_name_map = {p["id"]: p["name"] for p in presets}
-    provider_models = container.get(ProviderModelService).list_models()
+    provider_models = provider_model_service.list_models()
     for m in provider_models:
         m["preset_name"] = preset_name_map.get(m.get("preset_id", ""), m.get("preset_id", ""))
     return JSONResponse(content={
@@ -100,11 +108,10 @@ async def agent_config(request: Request, bot_id: int | None = Depends(parse_bot_
 
 
 @router.post("/config")
-async def agent_config_update(request: Request, bot_id: int | None = Depends(parse_bot_id)):
+async def agent_config_update(request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
     from app.agent.config_schema import SCHEMA
 
-    container = get_container(request)
-    runtime, _ = _runtime(container, bot_id)
+    runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
     try:
@@ -143,9 +150,9 @@ async def agent_telemetry(
     request: Request,
     bot_id: int | None = Depends(parse_bot_id),
     limit: int = 30,
+    agent_manager=Depends(get_agent_manager),
 ):
-    container = get_container(request)
-    runtime, _ = _runtime(container, bot_id)
+    runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
     telemetry = getattr(runtime, "telemetry", None)
@@ -160,9 +167,8 @@ async def agent_telemetry(
 
 
 @router.post("/telemetry/reset")
-async def agent_telemetry_reset(request: Request, bot_id: int | None = Depends(parse_bot_id)):
-    container = get_container(request)
-    runtime, _ = _runtime(container, bot_id)
+async def agent_telemetry_reset(request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+    runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
     telemetry = getattr(runtime, "telemetry", None)
@@ -175,9 +181,8 @@ async def agent_telemetry_reset(request: Request, bot_id: int | None = Depends(p
 # ==================== 知识库管理 ====================
 
 @router.get("/knowledge/items")
-async def agent_knowledge_items(request: Request, bot_id: int | None = Depends(parse_bot_id), limit: int = 100):
-    container = get_container(request)
-    runtime, _ = _runtime(container, bot_id)
+async def agent_knowledge_items(request: Request, bot_id: int | None = Depends(parse_bot_id), limit: int = 100, agent_manager=Depends(get_agent_manager)):
+    runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
     try:
@@ -188,9 +193,8 @@ async def agent_knowledge_items(request: Request, bot_id: int | None = Depends(p
 
 
 @router.post("/knowledge/items")
-async def agent_knowledge_add(request: Request, bot_id: int | None = Depends(parse_bot_id)):
-    container = get_container(request)
-    runtime, _ = _runtime(container, bot_id)
+async def agent_knowledge_add(request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+    runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
     try:
@@ -209,9 +213,8 @@ async def agent_knowledge_add(request: Request, bot_id: int | None = Depends(par
 
 
 @router.delete("/knowledge/items/{cid}")
-async def agent_knowledge_delete(cid: str, request: Request, bot_id: int | None = Depends(parse_bot_id)):
-    container = get_container(request)
-    runtime, _ = _runtime(container, bot_id)
+async def agent_knowledge_delete(cid: str, request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+    runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
     try:
@@ -226,9 +229,8 @@ async def agent_knowledge_delete(cid: str, request: Request, bot_id: int | None 
 # ==================== OneBot 工具清单 ====================
 
 @router.get("/onebot/tools")
-async def agent_onebot_tools(request: Request, bot_id: int | None = Depends(parse_bot_id)):
-    container = get_container(request)
-    runtime, _ = _runtime(container, bot_id)
+async def agent_onebot_tools(request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+    runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
     tools = []
@@ -247,9 +249,8 @@ async def agent_onebot_tools(request: Request, bot_id: int | None = Depends(pars
 # ==================== 统一 Tool 管理：系统 / 模块 / MCP 工具清单 ====================
 
 @router.get("/system/tools")
-async def agent_system_tools(request: Request, bot_id: int | None = Depends(parse_bot_id)):
-    container = get_container(request)
-    runtime, _ = _runtime(container, bot_id)
+async def agent_system_tools(request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+    runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
     return JSONResponse(content={
@@ -260,9 +261,8 @@ async def agent_system_tools(request: Request, bot_id: int | None = Depends(pars
 
 
 @router.get("/module/tools")
-async def agent_module_tools(request: Request, bot_id: int | None = Depends(parse_bot_id)):
-    container = get_container(request)
-    runtime, _ = _runtime(container, bot_id)
+async def agent_module_tools(request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+    runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
     module_map = runtime.config.get("module_tools_enabled", {}) or {}
@@ -306,9 +306,8 @@ async def agent_module_tools(request: Request, bot_id: int | None = Depends(pars
 
 
 @router.get("/mcp/tools")
-async def agent_mcp_tools(request: Request, bot_id: int | None = Depends(parse_bot_id)):
-    container = get_container(request)
-    runtime, _ = _runtime(container, bot_id)
+async def agent_mcp_tools(request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+    runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
     await runtime.mcp_manager.ensure_ready()
@@ -337,18 +336,16 @@ async def agent_mcp_tools(request: Request, bot_id: int | None = Depends(parse_b
 # ==================== 定时任务 ====================
 
 @router.get("/tasks")
-async def agent_tasks(request: Request, bot_id: int | None = Depends(parse_bot_id)):
-    container = get_container(request)
-    runtime, _ = _runtime(container, bot_id)
+async def agent_tasks(request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+    runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
     return JSONResponse(content={"ok": True, "tasks": runtime.scheduler.status()})
 
 
 @router.post("/tasks")
-async def agent_task_add(request: Request, bot_id: int | None = Depends(parse_bot_id)):
-    container = get_container(request)
-    runtime, _ = _runtime(container, bot_id)
+async def agent_task_add(request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+    runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
     if not runtime.config.get("schedule_enable", True):
@@ -382,9 +379,8 @@ async def agent_task_add(request: Request, bot_id: int | None = Depends(parse_bo
 
 
 @router.post("/tasks/{task_id}/trigger")
-async def agent_task_trigger(task_id: str, request: Request, bot_id: int | None = Depends(parse_bot_id)):
-    container = get_container(request)
-    runtime, _ = _runtime(container, bot_id)
+async def agent_task_trigger(task_id: str, request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+    runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
     ok = await runtime.scheduler.trigger_now(task_id)
@@ -394,9 +390,8 @@ async def agent_task_trigger(task_id: str, request: Request, bot_id: int | None 
 
 
 @router.post("/tasks/{task_id}/cancel")
-async def agent_task_cancel(task_id: str, request: Request, bot_id: int | None = Depends(parse_bot_id)):
-    container = get_container(request)
-    runtime, _ = _runtime(container, bot_id)
+async def agent_task_cancel(task_id: str, request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+    runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
     ok = runtime.scheduler.cancel(task_id)
@@ -408,18 +403,16 @@ async def agent_task_cancel(task_id: str, request: Request, bot_id: int | None =
 # ==================== 主动消息 ====================
 
 @router.get("/proactive/status")
-async def agent_proactive_status(request: Request, bot_id: int | None = Depends(parse_bot_id)):
-    container = get_container(request)
-    runtime, _ = _runtime(container, bot_id)
+async def agent_proactive_status(request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+    runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
     return JSONResponse(content={"ok": True, "sessions": runtime.proactive.status()})
 
 
 @router.post("/proactive/trigger")
-async def agent_proactive_trigger(request: Request, bot_id: int | None = Depends(parse_bot_id)):
-    container = get_container(request)
-    runtime, _ = _runtime(container, bot_id)
+async def agent_proactive_trigger(request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+    runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
     try:

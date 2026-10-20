@@ -125,6 +125,12 @@ def get_session_history_service(request: Request):
     return get_service(request, SessionHistoryService)
 
 
+def get_agent_manager(request: Request):
+    from app.agent.runtime import AgentManager
+
+    return get_service(request, AgentManager)
+
+
 def get_settings(request: Request):
     from app.core.settings import Settings
 
