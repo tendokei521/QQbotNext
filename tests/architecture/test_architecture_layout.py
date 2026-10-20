@@ -184,7 +184,6 @@ def test_no_stale_pycache_only_directories() -> None:
 #: 允许超长的文件（豁免名单只能缩小）。每修完一个文件就把它从这里删掉。
 _LONG_FILE_ALLOWLIST = {
     "app/plugin/registry.py": 681,  # load_single 234 行，待按「扫描/加载/热重载」拆
-    "app/plugin/features.py": 538,  # 14 个 *FeatureController 挤在一个文件
     "app/agent/tools/context_tools.py": 1059,  # 上下文展开类工具，待按工具拆
     "app/agent/config_schema.py": 1072,  # 数据 + _gate/_on DSL，刻意不拆
     "app/agent/proactivity/scheduler.py": 850,  # 定时引擎
