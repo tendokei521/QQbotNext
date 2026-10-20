@@ -14,7 +14,7 @@ async def test_log_export_endpoints_resolve_log_dir(container, tmp_path):
     """三个导出端点都能拿到日志目录（缺依赖会在调用时抛 TypeError）。"""
     from starlette.testclient import TestClient
 
-    from app.services.log_service import LogService
+    from app.application.log_service import LogService
     from app.webui.app import create_app
 
     log_service = container.get(LogService)

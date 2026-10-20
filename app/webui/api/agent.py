@@ -15,7 +15,7 @@ from app.agent.tools.onebot.security import resolve_tool_policy
 from app.agent.tools.system import list_system_tools
 from app.core.logger import logger
 from app.plugin.schema_utils import webui_schema
-from app.services.bot_service import PASSWORD_MASK as _PASSWORD_MASK
+from app.application.bot_service import PASSWORD_MASK as _PASSWORD_MASK
 from app.webui.api.deps import (
     get_agent_manager,
     get_config_service,

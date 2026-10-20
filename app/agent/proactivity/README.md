@@ -14,7 +14,7 @@
 
 ## 注意
 
-⚠️ 别和 `app/services/scheduler.py::SchedulerService`（230 行的声明式定点任务）
+⚠️ 别和 `app/application/scheduler.py::SchedulerService`（230 行的声明式定点任务）
 搞混，两者零复用（`STYLE.md §12.3`）。
 `scheduler.py` 与 `loop/chat.py` 目前互为依赖，P4 要把「定时工具」
 （`build_schedule_tool` / `handle_schedule_tool` / 意图检测）拆到 `tools/`。

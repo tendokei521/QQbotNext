@@ -1,6 +1,6 @@
 """模块配置 schema 的归一化与校验（单一事实源）。
 
-此前 ``_split_schema`` 在 `app/services/bot_service.py` 与 `app/webui/api/agent.py` 各写一遍，
+此前 ``_split_schema`` 在 `app/application/bot_service.py` 与 `app/webui/api/agent.py` 各写一遍，
 且 schema **从不校验**：未知 ``type`` 会被前端兜底成文本框、``type: "resource"`` 的
 ``resource`` 种类写错只表现为"空下拉"——这类问题极难排查。
 

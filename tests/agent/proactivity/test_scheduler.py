@@ -3,7 +3,7 @@
 import asyncio
 from datetime import datetime, timedelta
 
-from app.services.scheduler import SchedulerService
+from app.application.cron_service import SchedulerService
 
 
 class _FakeModule:
@@ -63,7 +63,7 @@ async def test_multiple_bots_same_module_independent():
 
 
 def test_cron_field_matching():
-    from app.services.scheduler import ScheduledTask
+    from app.application.cron_service import ScheduledTask
 
     assert ScheduledTask._match_cron_field("*", 30) is True
     assert ScheduledTask._match_cron_field("*/10", 30) is True
@@ -78,7 +78,7 @@ def test_cron_field_matching():
 def test_cron_next_time():
     from datetime import datetime
 
-    from app.services.scheduler import ScheduledTask
+    from app.application.cron_service import ScheduledTask
 
     # 目标分钟取"当前分钟 + 2"：_next_cron() 内部会**再读一次** now，而测试的 now 被截断到整分，
     # 因此内部 now 的分钟最多比它大 1（跨过分钟边界时）。取 +2 才能保证目标分钟一定"还没到"，

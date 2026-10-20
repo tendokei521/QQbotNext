@@ -9,7 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-from app.services.capabilities import collect_capabilities
+from app.application.capabilities import collect_capabilities
 from app.webui.api.deps import get_feature_registry, get_resource_registry, get_service_access
 
 router = APIRouter(prefix="/framework", tags=["framework"])

@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from app.services.config_profile_service import ConfigProfileService
+from app.application.config_profile_service import ConfigProfileService
 from app.webui.api.deps import get_config_profile_service
 
 router = APIRouter(prefix="/config-profiles", tags=["config-profiles"])

@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from app.services.role_preset_service import RolePresetService
+from app.application.role_preset_service import RolePresetService
 from app.webui.api.deps import get_role_preset_service
 
 router = APIRouter(prefix="/role-presets", tags=["role-presets"])

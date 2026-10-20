@@ -21,7 +21,7 @@
 ## 边界（重要）
 
 - 允许 import：`app.core.*`、`app.domain.*`、标准库、三方库。
-- **不得** import：`app.agent` `app.infrastructure` `app.plugin` `app.services` `app.webui`。
+- **不得** import：`app.agent` `app.infrastructure` `app.plugin` `app.application` `app.webui`。
   `tests/architecture/test_architecture_boundaries.py` 会闸死。
 - **不得做 IO**：读文件、连库、发网络请求都不属于这里。需要 IO 就说明它该去
   `infrastructure/`（例如 `media_cache` 就落在 `app/infrastructure/fs/`）。

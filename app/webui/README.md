@@ -21,12 +21,12 @@
   合不合法」属于 `app/plugin/authority.py`。路由只做搬运。
 - **不得 import `app.bootstrap`**（`bootstrap_imports=0` 守着）。容器从
   `request.app.state.container` 拿，见 `deps.py`。
-- 现状还有 13 处直接 `import app.agent.*`。P4 计划加一层 `app/services/` 门面后清零，
+- 现状还有 13 处直接 `import app.agent.*`。P4 计划加一层 `app/application/` 门面后清零，
   这样 WebUI 就不再被 Agent 的内部实现焊死（`test_architecture_boundaries.py` 记账）。
 
 ## 加一个接口的顺序
 
-1. 先确认「这个动作」是否已有 `app/services/*.py` 里的函数；没有就先加服务；
+1. 先确认「这个动作」是否已有 `app/application/*.py` 里的函数；没有就先加服务；
 2. 在 `api/<域>.py` 加路由，用 `Depends(get_service)` 注入，不要自己 `container.get(type)`；
 3. 在 `schemas.py` 定请求/响应模型；
 4. 补 `tests/` 用例（HTTP 层用 `TestClient`，纯逻辑测服务层）。

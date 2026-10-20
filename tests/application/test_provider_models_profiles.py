@@ -4,9 +4,9 @@ import pytest
 
 from app.agent.providers.base import LLMResponse
 from app.agent.providers.runtime_manager import ProviderRuntimeManager
-from app.services.config_profile_service import ConfigProfileService
-from app.services.provider_model_service import ProviderModelService
-from app.services.provider_preset_service import ProviderPresetService
+from app.application.config_profile_service import ConfigProfileService
+from app.application.provider_model_service import ProviderModelService
+from app.application.provider_preset_service import ProviderPresetService
 
 
 class _FakeModelListProvider:
@@ -148,7 +148,7 @@ async def test_preset_test_prefers_models(monkeypatch, preset_service):
         "config": {"api_base": "https://api.deepseek.com", "api_key": "sk-test"},
     })
     monkeypatch.setattr(
-        "app.services.provider_preset_service.get_provider",
+        "app.application.provider_preset_service.get_provider",
         lambda cfg: _FakeModelListProvider(cfg),
     )
     result = await preset_service.test_preset(preset["id"])
@@ -163,7 +163,7 @@ async def test_preset_test_fallback_success_on_raw(monkeypatch, preset_service):
         "config": {"api_base": "https://api.deepseek.com", "api_key": "sk-test"},
     })
     monkeypatch.setattr(
-        "app.services.provider_preset_service.get_provider",
+        "app.application.provider_preset_service.get_provider",
         lambda cfg: _FakeChatFallbackProvider(cfg),
     )
     result = await preset_service.test_preset(preset["id"])

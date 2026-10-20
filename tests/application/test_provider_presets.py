@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.services.provider_preset_service import PASSWORD_MASK, ProviderPresetService
+from app.application.provider_preset_service import PASSWORD_MASK, ProviderPresetService
 
 
 @pytest.fixture

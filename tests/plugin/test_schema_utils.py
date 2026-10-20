@@ -21,7 +21,7 @@ from app.plugin.schema_utils import (
     split_schema,
     webui_schema,
 )
-from app.services.resource_registry import ResourceRegistry
+from app.application.resource_registry import ResourceRegistry
 
 
 class _FakeRegistry:

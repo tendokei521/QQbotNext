@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.resource_registry import ResourceQuery, ResourceRegistry
+from app.application.resource_registry import ResourceQuery, ResourceRegistry
 
 
 def _registry():
@@ -135,7 +135,7 @@ def test_builtin_kinds_are_registered_in_container(container):
 
 async def test_role_preset_options_come_from_the_real_service(container):
     """真实链路：注册表 → RolePresetService → 候选列表。"""
-    from app.services.role_preset_service import RolePresetService
+    from app.application.role_preset_service import RolePresetService
 
     await container.get(RolePresetService).create_preset("迁移人设", "", "你是迁移过来的人设。")
     options = await container.get(ResourceRegistry).options("role_preset")
@@ -151,8 +151,8 @@ async def test_module_resource_lists_loaded_modules(container):
 
 async def test_provider_model_filter_by_type(container):
     """provider_model 支持 provider_type 过滤（embedding 场景用它）。"""
-    from app.services.provider_model_service import ProviderModelService
-    from app.services.provider_preset_service import ProviderPresetService
+    from app.application.provider_model_service import ProviderModelService
+    from app.application.provider_preset_service import ProviderPresetService
 
     preset = await container.get(ProviderPresetService).create_preset(
         {"name": "测试预设", "provider": "openai", "config": {"api_base": "http://x", "api_key": "sk-test"}}
@@ -221,7 +221,7 @@ async def test_module_schema_reaches_api_with_resource_field(container):
     from pathlib import Path
 
     from app.plugin.registry import ModuleRegistry
-    from app.services.bot_service import BotService
+    from app.application.bot_service import BotService
 
     # BotService 持有的是容器里的注册表实例：把它的模块目录定向到仓库真实目录，
     # 这样加载出来的模块才会经过 bot_service 的 schema 归一化链路。

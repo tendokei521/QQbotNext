@@ -13,7 +13,7 @@ from __future__ import annotations
 from app.plugin.base import BaseModule, ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
 from app.plugin.features import FeatureRegistry
 from app.plugin.requirements import declared_requirements, missing_requirements
-from app.services.capabilities import collect_capabilities
+from app.application.capabilities import collect_capabilities
 
 
 class _Svc:

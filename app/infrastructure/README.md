@@ -18,7 +18,7 @@
 ## 边界（重要）
 
 - 允许 import：`app.core.*` `app.domain.*`、标准库、三方库。
-- **不得** import：`app.agent` `app.plugin` `app.services` `app.webui`。
+- **不得** import：`app.agent` `app.plugin` `app.application` `app.webui`。
   `tests/test_architecture_boundaries.py` 闸死。
 - 这里**只做 IO，不做判断**。「该不该发这条消息」「该用哪个模型」属于 `domain/` 或
   `agent/`，不属于这里。

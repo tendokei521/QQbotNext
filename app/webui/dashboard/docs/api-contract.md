@@ -1,7 +1,7 @@
 # QQBot Next WebUI 前后端契约文档
 
 > 用途：为使用 Vue3 重写前端提供精确的 API 文档。
-> 依据源码：`app/webui/**`、`app/services/bot_service.py`、`app/infrastructure/config/config_service.py`、`app/infrastructure/onebot/gateway.py`、`app/agent/{scheduler,proactive,config_schema}.py`、`app/services/log_service.py`。
+> 依据源码：`app/webui/**`、`app/application/bot_service.py`、`app/infrastructure/config/config_service.py`、`app/infrastructure/onebot/gateway.py`、`app/agent/{scheduler,proactive,config_schema}.py`、`app/application/log_service.py`。
 > 字段名与代码保持一致；所有旧版值类型/含义均按当前实现记录。
 
 ---
@@ -598,5 +598,5 @@ widgets.js `renderSubField(schema, initial)` 复用给 dynamic / repeater，控�
 
 ## 附：打码哨兵常量
 
-- 模块/Agent 配置 password：`PASSWORD_MASK = "••••••••"`（`app/services/bot_service.py`）
+- 模块/Agent 配置 password：`PASSWORD_MASK = "••••••••"`（`app/application/bot_service.py`）
 - Bot access_token：`ACCESS_TOKEN_MASK`（`config_service`）；`/bots/config` 回显真实值，`/bots`(get_bots_info) 不含 token。

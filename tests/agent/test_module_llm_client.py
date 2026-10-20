@@ -278,9 +278,9 @@ async def test_module_stream_helper(captured):
 
 def test_container_wires_module_llm_and_provider_services(container):
     from app.agent.client import ModuleLLMClient as Client
-    from app.services.provider_model_service import ProviderModelService
-    from app.services.provider_preset_service import ProviderPresetService
-    from app.services.provider_service import ProviderRegistry
+    from app.application.provider_model_service import ProviderModelService
+    from app.application.provider_preset_service import ProviderPresetService
+    from app.application.provider_service import ProviderRegistry
 
     services = container.get(ServiceAccess)
     assert isinstance(services.llm, Client)
@@ -294,8 +294,8 @@ def test_container_wires_module_llm_and_provider_services(container):
 
 async def test_container_llm_uses_real_model_config(container):
     """端到端：注册表里的模型 → 客户端解析出的链（脱敏摘要可核对）。"""
-    from app.services.provider_model_service import ProviderModelService
-    from app.services.provider_preset_service import ProviderPresetService
+    from app.application.provider_model_service import ProviderModelService
+    from app.application.provider_preset_service import ProviderPresetService
 
     preset = await container.get(ProviderPresetService).create_preset(
         {"name": "模块用预设", "provider": "openai", "config": {"api_base": "http://mod", "api_key": "sk-mod"}}

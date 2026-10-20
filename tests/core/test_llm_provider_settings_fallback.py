@@ -1,4 +1,4 @@
-﻿"""「Provider 全局设置」必须真的生效（此前是纯装饰）。
+"""「Provider 全局设置」必须真的生效（此前是纯装饰）。
 
 审查发现：``DEFAULT_PROVIDER_SETTINGS`` 里的 ``default_model_id`` / ``fallback_model_ids`` /
 ``provider_pool`` 有完整 UI（ProviderPresetsPage「全局设置」弹窗）、独立 API
@@ -20,8 +20,8 @@ import pytest
 
 from app.agent.providers.runtime_manager import ProviderRuntimeManager
 from app.agent.runtime import AgentRuntime
-from app.services.provider_model_service import ProviderModelService
-from app.services.provider_preset_service import ProviderPresetService
+from app.application.provider_model_service import ProviderModelService
+from app.application.provider_preset_service import ProviderPresetService
 
 
 class _TM:

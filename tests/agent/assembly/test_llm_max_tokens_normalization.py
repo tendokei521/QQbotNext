@@ -17,12 +17,12 @@ import pytest
 
 from app.agent.providers.policy import REASONING_FLOOR
 from app.agent.providers.runtime_manager import ProviderRuntimeManager
-from app.services.provider_model_service import (
+from app.application.provider_model_service import (
     ProviderModelService,
     normalize_model_config,
     validate_model_config,
 )
-from app.services.provider_preset_service import ProviderPresetService
+from app.application.provider_preset_service import ProviderPresetService
 
 
 @pytest.fixture

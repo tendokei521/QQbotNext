@@ -14,8 +14,8 @@ from __future__ import annotations
 import pytest
 
 from app.plugin.base import ServiceAccess
-from app.services.config_profile_service import ConfigProfileService
-from app.services.role_preset_service import RolePresetService
+from app.application.config_profile_service import ConfigProfileService
+from app.application.role_preset_service import RolePresetService
 
 
 @pytest.fixture
@@ -79,7 +79,7 @@ async def test_begin_dialogs_normalized(role_service):
 
 def test_name_list_semantics():
     """None=不限制；[]=显式禁用；字符串按单元素；去重保序。"""
-    from app.services.role_preset_service import normalize_name_list
+    from app.application.role_preset_service import normalize_name_list
 
     assert normalize_name_list(None) is None
     assert normalize_name_list([]) == []

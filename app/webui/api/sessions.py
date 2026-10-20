@@ -10,7 +10,7 @@ import json
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 
-from app.services.session_history_service import SessionHistoryService
+from app.application.session_history_service import SessionHistoryService
 from app.webui.api.deps import parse_bot_id
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])

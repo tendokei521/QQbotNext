@@ -24,7 +24,7 @@ import pytest
 from app.agent.loop import chat
 from app.agent.providers.runtime_manager import ProviderRuntimeManager
 from app.agent.runtime import _origin_of
-from app.services.provider_model_service import ProviderModelService
+from app.application.provider_model_service import ProviderModelService
 
 # ==================== 1. 来源判定（纯函数） ====================
 
@@ -149,7 +149,7 @@ def test_override_note_is_deduplicated():
 @pytest.fixture
 async def services(config_service):
     presets = ProviderModelService(config_service, ProviderRuntimeManager(config_service))
-    from app.services.provider_preset_service import ProviderPresetService
+    from app.application.provider_preset_service import ProviderPresetService
 
     return ProviderPresetService(config_service), presets
 

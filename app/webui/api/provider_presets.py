@@ -11,8 +11,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
-from app.services.provider_model_service import ProviderModelService
-from app.services.provider_preset_service import ProviderPresetService
+from app.application.provider_model_service import ProviderModelService
+from app.application.provider_preset_service import ProviderPresetService
 from app.webui.api.deps import get_provider_model_service, get_provider_preset_service
 
 router = APIRouter(prefix="/provider-presets", tags=["provider-presets"])

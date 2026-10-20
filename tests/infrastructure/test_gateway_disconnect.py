@@ -19,7 +19,7 @@ import contextlib
 from app.infrastructure.cache import Cache
 from app.infrastructure.onebot.client import BotConnection
 from app.infrastructure.onebot.gateway import OneBotGateway
-from app.services.bot_service import BotService
+from app.application.bot_service import BotService
 
 WS_URL = "ws://127.0.0.1:1"
 

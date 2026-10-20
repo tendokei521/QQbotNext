@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse, JSONResponse
 
 from app.agent.media import store as image_media
-from app.services.session_history_service import SessionHistoryService
+from app.application.session_history_service import SessionHistoryService
 from app.webui.api.deps import parse_bot_id
 
 router = APIRouter(prefix="/media", tags=["media"])

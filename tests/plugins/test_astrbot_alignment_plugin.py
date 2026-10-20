@@ -465,7 +465,7 @@ async def test_plugin_takes_over_in_real_registry(container):
     from app.infrastructure.config.config_service import ConfigService
     from app.plugin.base import ServiceAccess
     from app.plugin.registry import ModuleRegistry
-    from app.services.module_install_service import ModuleInstallService
+    from app.application.module_install_service import ModuleInstallService
 
     repo_root = Path(__file__).resolve().parents[2]
     registry = ModuleRegistry(

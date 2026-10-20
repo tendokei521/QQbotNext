@@ -48,7 +48,7 @@ def parse_bot_id(bot_id: str | None = Query(None)) -> int | None:
 # 具名服务依赖（每个都从容器解析同一类型；名字让签名自解释）
 # --------------------------------------------------------------------------- #
 def get_bot_service(request: Request):
-    from app.services.bot_service import BotService
+    from app.application.bot_service import BotService
 
     return get_service(request, BotService)
 
@@ -60,7 +60,7 @@ def get_config_service(request: Request):
 
 
 def get_log_service(request: Request):
-    from app.services.log_service import LogService
+    from app.application.log_service import LogService
 
     return get_service(request, LogService)
 
@@ -78,49 +78,49 @@ def get_feature_registry(request: Request):
 
 
 def get_resource_registry(request: Request):
-    from app.services.resource_registry import ResourceRegistry
+    from app.application.resource_registry import ResourceRegistry
 
     return get_service(request, ResourceRegistry)
 
 
 def get_provider_registry(request: Request):
-    from app.services.provider_service import ProviderRegistry
+    from app.application.provider_service import ProviderRegistry
 
     return get_service(request, ProviderRegistry)
 
 
 def get_provider_preset_service(request: Request):
-    from app.services.provider_preset_service import ProviderPresetService
+    from app.application.provider_preset_service import ProviderPresetService
 
     return get_service(request, ProviderPresetService)
 
 
 def get_provider_model_service(request: Request):
-    from app.services.provider_model_service import ProviderModelService
+    from app.application.provider_model_service import ProviderModelService
 
     return get_service(request, ProviderModelService)
 
 
 def get_config_profile_service(request: Request):
-    from app.services.config_profile_service import ConfigProfileService
+    from app.application.config_profile_service import ConfigProfileService
 
     return get_service(request, ConfigProfileService)
 
 
 def get_role_preset_service(request: Request):
-    from app.services.role_preset_service import RolePresetService
+    from app.application.role_preset_service import RolePresetService
 
     return get_service(request, RolePresetService)
 
 
 def get_module_install_service(request: Request):
-    from app.services.module_install_service import ModuleInstallService
+    from app.application.module_install_service import ModuleInstallService
 
     return get_service(request, ModuleInstallService)
 
 
 def get_session_history_service(request: Request):
-    from app.services.session_history_service import SessionHistoryService
+    from app.application.session_history_service import SessionHistoryService
 
     return get_service(request, SessionHistoryService)
 

@@ -174,7 +174,7 @@ def test_domain_depends_only_on_core_and_itself():
 # --------------------------------------------------------------------------- #
 def test_infrastructure_does_not_import_upper_layers():
     """`infrastructure/` 是最底层，只准 import core / domain / 自身。"""
-    upper = ("app.agent", "app.plugin", "app.application", "app.webui", "app.services", "app.plugin")
+    upper = ("app.agent", "app.plugin", "app.application", "app.webui", "app.application", "app.plugin")
     offenders: list[tuple[str, str]] = []
     for path in _iter_py("app/infrastructure"):
         for target in _import_targets(path, module_level_only=False):
