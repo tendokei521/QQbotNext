@@ -314,7 +314,7 @@ const { state, lastSavedAt, dirtyCount, saveNow, reset } = useAutoSave(draft, {
 ## 5. 目录结构（新增部分）
 
 ```
-dashboard/src/
+app/webui/dashboard/src/
 ├─ composables/
 │  ├─ useReadiness.ts          # 就绪检查（§3.1）
 │  ├─ useAutoSave.ts           # 统一保存语义（§3.3）

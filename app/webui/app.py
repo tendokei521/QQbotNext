@@ -4,7 +4,7 @@
 
 ## 前端只有一个
 
-这里只服务 `dashboard/dist`（Vue3 + Vuetify 构建产物）。历史上还并存一套手写的
+这里只服务 `app/webui/dashboard/dist`（Vue3 + Vuetify 构建产物）。历史上还并存一套手写的
 `static/main.js` + `templates/index.html`（约 4,800 行），同一张 Agent 配置表单实现了
 两遍，**schema 每加一个字段要改两处、第二处极易漏且没有测试会红**。P6 已删除旧版，
 `/legacy` 与 `/static` 一并移除。
@@ -37,17 +37,17 @@ from app.webui.api import webui_cfg as webui_router
 from app.webui.ws import build_ws_router, manager
 
 _BASE_DIR = Path(__file__).resolve().parent
-# 前端构建产物目录：dashboard/dist
-_DASHBOARD_DIST = _BASE_DIR.parent.parent / "dashboard" / "dist"
+# 前端构建产物目录：app/webui/dashboard/dist
+_DASHBOARD_DIST = _BASE_DIR / "dashboard" / "dist"
 
 #: 构建产物缺失时的提示页（不用模板引擎，避免为一个提示页多养一套模板依赖）
 _MISSING_DIST_HTML = """<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><title>前端未构建</title></head>
 <body style="font-family:system-ui;max-width:44em;margin:4em auto;line-height:1.7">
 <h1>前端尚未构建</h1>
-<p>后端已启动，但没有找到 <code>dashboard/dist/index.html</code>。</p>
+<p>后端已启动，但没有找到 <code>app/webui/dashboard/dist/index.html</code>。</p>
 <p>请在仓库根执行：</p>
-<pre style="background:#f4f4f4;padding:1em;border-radius:6px">cd dashboard
+<pre style="background:#f4f4f4;padding:1em;border-radius:6px">cd app/webui/dashboard
 pnpm install
 pnpm build</pre>
 <p>构建完成后刷新本页即可。</p>
@@ -65,7 +65,7 @@ _CONFIG_SCOPE_RESOURCES: dict[str, tuple[str, ...]] = {
 
 
 def _render_dashboard(request: Request, webui_token: str) -> HTMLResponse:
-    """渲染 Dashboard 首页：读取 dashboard/dist/index.html，注入 window.WEBUI_TOKEN。
+    """渲染 Dashboard 首页：读取 app/webui/dashboard/dist/index.html，注入 window.WEBUI_TOKEN。
 
     注入的是鉴权引导令牌（GET / 本身不鉴权，前端凭它调受保护的 /api 与 /ws）。
     """

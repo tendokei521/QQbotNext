@@ -241,8 +241,8 @@ async def test_module_schema_reaches_api_with_resource_field(container):
 
 
 # 旧版 UI（/legacy）与 static/js/widgets.js 的两个用例已随 P6 删除：
-# 前端只剩 dashboard/dist 一套，资源选择器改由 Vue 的 ResourcePicker 组件实现，
-# 对应前端测试在 dashboard/ 内的构建期检查。
+# 前端只剩 app/webui/dashboard/dist 一套，资源选择器改由 Vue 的 ResourcePicker 组件实现，
+# 对应前端测试在 app/webui/dashboard/ 内的构建期检查。
 
 
 # ==================== 资源变更 → WS 广播（前端据此局部刷新下拉） ====================
@@ -294,7 +294,7 @@ def test_frontend_subscribes_to_resource_events():
     from pathlib import Path
 
     root = Path(__file__).resolve().parent.parent
-    vue = (root / "dashboard" / "src" / "components" / "config" / "FieldControl.vue").read_text(encoding="utf-8")
+    vue = (root / "app" / "webui" / "dashboard" / "src" / "components" / "config" / "FieldControl.vue").read_text(encoding="utf-8")
     assert "onSocketMessage('resources_updated'" in vue and "onBeforeUnmount" in vue, "需订阅并在卸载时退订"
 
 

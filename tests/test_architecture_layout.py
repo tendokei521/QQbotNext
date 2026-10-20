@@ -123,12 +123,19 @@ def test_business_plugins_have_module_entry() -> None:
 
 
 def test_no_stale_pycache_only_directories() -> None:
-    """不允许只有 __pycache__、没有任何源文件的「空壳目录」（app/client 曾是这样）。"""
+    """不允许只有 __pycache__、没有任何源文件的「空壳目录」（app/client 曾是这样）。
+
+    跳过前端目录：`app/webui/dashboard/` 下的 node_modules 有自己的空目录语义
+    （pnpm 的 `.pnpm`、缓存占位），不属于 Python 侧的结构问题。
+    """
     stale: list[str] = []
     for path in (ROOT / "app").rglob("*"):
         if not path.is_dir() or path.name == "__pycache__":
             continue
+        rel = path.relative_to(ROOT).as_posix()
+        if rel.startswith("app/webui/dashboard") or "node_modules" in rel:
+            continue
         entries = [e for e in path.iterdir() if e.name != "__pycache__"]
         if not entries:
-            stale.append(path.relative_to(ROOT).as_posix())
+            stale.append(rel)
     assert not stale, f"这些目录只剩 __pycache__，应删除: {stale}"

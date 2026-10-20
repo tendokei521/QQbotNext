@@ -21,9 +21,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+DASHBOARD_DIR = ROOT / "app" / "webui" / "dashboard"
 VUETIFY_SKELETON_SRC = (
-    ROOT
-    / "dashboard"
+    DASHBOARD_DIR
     / "node_modules"
     / "vuetify"
     / "lib"
@@ -31,7 +31,7 @@ VUETIFY_SKELETON_SRC = (
     / "VSkeletonLoader"
     / "VSkeletonLoader.mjs"
 )
-SRC_DIR = ROOT / "dashboard" / "src"
+SRC_DIR = DASHBOARD_DIR / "src"
 
 # <v-skeleton-loader ... type="a, b, c" ...>（含跨行属性，但不含 :type 绑定）
 _STATIC_TYPE_ATTR = re.compile(r"<v-skeleton-loader\b[^>]*?\btype=\"([^\"]*)\"", re.S)
@@ -72,7 +72,7 @@ def _static_skeleton_types() -> list[tuple[str, str, str]]:
 def test_vuetify_skeleton_source_available():
     assert VUETIFY_SKELETON_SRC.is_file(), (
         f"未找到 Vuetify 源码，无法校验 skeleton 类型名: {VUETIFY_SKELETON_SRC}\n"
-        "若依赖未安装，请先在 dashboard/ 下执行 pnpm install"
+        "若依赖未安装，请先在 app/webui/dashboard/ 下执行 pnpm install"
     )
 
 

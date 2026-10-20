@@ -42,7 +42,7 @@ app/
 │   └── dispatcher.py           事件分发（订阅匹配 + 启停 + 单一服务 + 权限）
 ├── services/                   应用服务（Bot 生命周期 / 调度器 / 日志）
 ├── plugins/                    **业务插件**（13 个，每个子目录 = 一个插件）
-└── webui/                      WebUI（FastAPI 分层：api/ + schemas/；前端在 dashboard/）
+└── webui/                      WebUI（FastAPI 分层：api/ + schemas/；前端在 app/webui/dashboard/）
 module/                          插件**运行时数据**（不含代码）
 ├── configs/                     每模块配置（<name>/config.json + authority.json，迁移源）
 ├── data/                        每模块可选持久化数据（get_data_path 自动创建）
@@ -80,20 +80,20 @@ start.bat
 
 | 入口 | 说明 |
 |------|------|
-| `/` | **Dashboard（Vue 3 + Vuetify 3）**，由 `dashboard/dist` 提供；未构建时给出「请先 pnpm build」提示页 |
+| `/` | **Dashboard（Vue 3 + Vuetify 3）**，由 `app/webui/dashboard/dist` 提供；未构建时给出「请先 pnpm build」提示页 |
 
 > 旧版手写 UI（`/legacy`）已在 P6 移除——同一张配置表单曾实现两遍，schema 每加一个
 > 字段要改两处且没有测试守卫。
 
-新版 Dashboard 源码在 [`dashboard/`](dashboard/)，风格对齐 AstrBot dashboard（浅/暗双主题、卡片化布局、实时日志控制台、模块配置 schema 表单等）。构建方法：
+新版 Dashboard 源码在 [`app/webui/dashboard/`](app/webui/dashboard/)，风格对齐 AstrBot dashboard（浅/暗双主题、卡片化布局、实时日志控制台、模块配置 schema 表单等）。构建方法：
 
 ```bash
 cd dashboard
 pnpm install          # 首次
-pnpm build            # 产物输出到 dashboard/dist，浏览器刷新即可生效
+pnpm build            # 产物输出到 app/webui/dashboard/dist，浏览器刷新即可生效
 ```
 
-> 未构建（或 `dashboard/dist` 不存在）时服务自动回退到旧版 UI，互不影响。
+> 未构建（或 `app/webui/dashboard/dist` 不存在）时服务自动回退到旧版 UI，互不影响。
 > `dist` 已纳入版本库，克隆后无需 Node 环境即可直接使用新版 UI。
 
 ### 手动启动

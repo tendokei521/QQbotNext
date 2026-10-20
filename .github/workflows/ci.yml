@@ -143,12 +143,12 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          cache-dependency-path: dashboard/pnpm-lock.yaml
+          cache-dependency-path: app/webui/dashboard/pnpm-lock.yaml
 
       - name: Install dashboard dependencies
-        working-directory: dashboard
+        working-directory: app/webui/dashboard
         run: pnpm install --frozen-lockfile
 
       - name: Build dashboard
-        working-directory: dashboard
+        working-directory: app/webui/dashboard
         run: pnpm build

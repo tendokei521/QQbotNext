@@ -883,7 +883,7 @@ SCHEMA = {
 # 未列出的字段一律常显示。
 
 # 「哪个字段出现在哪个前端分区」不在这里：唯一权威是
-# dashboard/src/agent/sections.json；tests/test_agent_section_contract.py 校验覆盖一致性。
+# app/webui/dashboard/src/agent/sections.json；tests/test_agent_section_contract.py 校验覆盖一致性。
 
 
 def _on(key: str) -> dict:

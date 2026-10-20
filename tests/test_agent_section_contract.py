@@ -1,6 +1,6 @@
 """Agent / 高级设置分区 registry 与后端配置 schema 的跨语言契约测试。
 
-前端 ``dashboard/src/agent/sections.json`` 是「哪个字段出现在哪一页的哪个分组」的唯一权威：
+前端 ``app/webui/dashboard/src/agent/sections.json`` 是「哪个字段出现在哪一页的哪个分组」的唯一权威：
 路由、侧边栏二级菜单、段内导航、概览卡片都由它派生。本文件把这层关系钉住，
 防止出现「配置项在 UI 里没有入口」「同一个配置项被两页重复渲染」这类漂移。
 
@@ -21,7 +21,7 @@ from pathlib import Path
 from app.agent.config_schema import SCHEMA
 
 SECTIONS_PATH = (
-    Path(__file__).resolve().parents[1] / "dashboard" / "src" / "agent" / "sections.json"
+    Path(__file__).resolve().parents[1] / "app" / "webui" / "dashboard" / "src" / "agent" / "sections.json"
 )
 
 # 单个分区承载的字段上限：超过就该再拆一页。

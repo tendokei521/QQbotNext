@@ -5,7 +5,7 @@
     python scripts/release.py --version v2.0.1 --skip-dashboard --skip-tests
 
 功能：
-- 自动同步 pyproject.toml 与 dashboard/package.json 的版本号；
+- 自动同步 pyproject.toml 与 app/webui/dashboard/package.json 的版本号；
 - 运行 pytest 与 Dashboard 构建作为发布前门禁；
 - 提交发布改动、打 annotated tag 并推送 main + tag；
 - 默认把 GitHub Release 交给 .github/workflows/release.yml 创建；
@@ -27,7 +27,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT = ROOT / "pyproject.toml"
-DASHBOARD_PKG = ROOT / "dashboard" / "package.json"
+DASHBOARD_DIR = ROOT / "app" / "webui" / "dashboard"
+DASHBOARD_PKG = DASHBOARD_DIR / "package.json"
 CHANGELOG = ROOT / "CHANGELOG.md"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 DEFAULT_REPO = "tendokei521/QQbotNext"
@@ -68,15 +69,15 @@ def write_pyproject_version(version: str) -> None:
 
 def write_dashboard_version(version: str) -> None:
     if not DASHBOARD_PKG.exists():
-        log("dashboard/package.json 不存在，跳过 Dashboard 版本同步")
+        log("app/webui/dashboard/package.json 不存在，跳过 Dashboard 版本同步")
         return
     data = json.loads(DASHBOARD_PKG.read_text(encoding="utf-8"))
     if data.get("version") == version:
-        log("dashboard/package.json 版本已是目标版本，跳过")
+        log("app/webui/dashboard/package.json 版本已是目标版本，跳过")
         return
     data["version"] = version
     DASHBOARD_PKG.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    log(f"dashboard/package.json 版本已更新为 {version}")
+    log(f"app/webui/dashboard/package.json 版本已更新为 {version}")
 
 
 def check_clean(allow_dirty: bool) -> None:
@@ -115,7 +116,7 @@ def run_dashboard_build() -> None:
     if not pnpm:
         log("未找到 pnpm，跳过 Dashboard 构建（可用 --skip-dashboard 显式跳过）")
         return
-    run([pnpm, "build"], cwd=ROOT / "dashboard")
+    run([pnpm, "build"], cwd=DASHBOARD_DIR)
 
 
 def git(*args: str) -> None:

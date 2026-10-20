@@ -2,7 +2,7 @@
 
 > **状态**：方案稿，**未执行**。代码一行未改。
 > **基线**：全库盘点于 2026-10-20（app/ 166 文件 46,681 行 · module/ 76 文件 6,759 行 ·
-> tests/ 142 文件 · dashboard/ 40+ 组件）。数字口径与 `STYLE.md §12` 一致（文件总行数含空行）。
+> tests/ 142 文件 · app/webui/dashboard/ 40+ 组件）。数字口径与 `STYLE.md §12` 一致（文件总行数含空行）。
 > **配套**：`STYLE.md §12 已知架构债` 是"现状"，本文是"去处"；`AGENTS.md` 是"怎么提交"。
 
 ---
@@ -402,10 +402,10 @@ docs/                设计文档 + 本方案（见 §4）
 | `webui/static/js/widgets.js` | 36 KB | — | **删除** |
 | `webui/static/css/style.css` | 37 KB | — | **删除** |
 | `webui/templates/index.html` | 46 KB | — | **删除** |
-| `dashboard/` → `webui/dashboard/` | 40+ 组件 | 移动 | 前端源码与构建产物收进 webui，`dist/` 同目录；`app.py` 里 `_render_dashboard` 的路径同步 |
+| `app/webui/dashboard/` → `webui/dashboard/` | 40+ 组件 | 移动 | 前端源码与构建产物收进 webui，`dist/` 同目录；`app.py` 里 `_render_dashboard` 的路径同步 |
 
 **前端收敛的依据**（不是拍脑袋删）：
-`dashboard/dist` 已存在并且优先渲染；`/legacy` 只是回退；模块自带页面走的是
+`app/webui/dashboard/dist` 已存在并且优先渲染；`/legacy` 只是回退；模块自带页面走的是
 `GET /api/module/{name}/page` 独立通道（只有 `app/plugins/example/pages/` 一个用户），
 **不依赖 `main.js`/`widgets.js`**。删掉旧版是净收益：**消掉 ~195 KB 与"同一张表单写两遍"的长期税**。
 
@@ -574,7 +574,7 @@ docs/
 | **P3** 拆环（最关键） | 活动容器下沉 core；`media_cache` 下沉 infrastructure；工具注入策略拆出 `tools/policy.py` | ✅ **已完成** | 环 63 → **3** 模块；`chat.py` 闭包 46,305 → 25,342 |
 | **P4** 最后一个环 + 包职责文档 | 定时工具从定时引擎分离（`tools/schedule.py`）；22 份包 README + 闸三 | ✅ **已完成** | **0 个强连通块（278/278 无环）**；闸三 7 条落地 |
 | **P5** 目录归一 | `module/modules`→**`app/plugins`**（已完成）；`app/plugin`→`app/plugin`、`nodes` 并入、`services`→`application`（未做） | 🟡 **部分完成** | 13 个插件全部从 `app/plugins` 加载成功 |
-| **P6** 前端收敛 + 文档重排 | 删 `webui/static`（4,065 行）+ `templates/`（727 行）（✅ 已完成）；`dashboard/`→`webui/dashboard/`、`docs/` 重排（未做） | 🟡 **部分完成** | `/` 200；`/legacy` 404；测试全绿 |
+| **P6** 前端收敛 + 文档重排 | 删 `webui/static`（4,065 行）+ `templates/`（727 行）（✅ 已完成）；`app/webui/dashboard/`→`webui/dashboard/`、`docs/` 重排（未做） | 🟡 **部分完成** | `/` 200；`/legacy` 404；测试全绿 |
 | **P4'** 切巨型文件 + 长实 domain | `chat.py` 2,192 行拆片；`domain/` 吸收纯规则 | ⬜ 待做 | 无函数 ≥80 行；`domain/` ≥1,500 行 |
 
 ### 5.1.1 还没做的（按性价比排序）
@@ -588,7 +588,7 @@ docs/
 4. **`tests/` 142 文件分区**：`tests/app/<层>/<包>/` 与源码镜像，让「改哪个目录跑哪些测试」
    由路径直接推出。
 5. **`scripts/` 三分**（`gen/ experiments/ diag/ ops/ ci/`）。
-6. **`dashboard/` → `webui/dashboard/`**：前端源码与构建产物收进 webui。
+6. **`app/webui/dashboard/` → `webui/dashboard/`**：前端源码与构建产物收进 webui。
 7. **`webui/api/*` 的 64 处 `get_container()`**：改成 `Depends(具体服务)` 注入。
 8. **`group_log` 插件拆 `service.py`**（现 345 行全在 `module.py`）。
 

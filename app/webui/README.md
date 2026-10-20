@@ -1,4 +1,4 @@
-> 本文只负责：说明 `app/webui/` 放什么、不放什么。前端源码在仓库根 `dashboard/`，见 `docs/dashboard-frontend-architecture.md`。
+> 本文只负责：说明 `app/webui/` 放什么、不放什么。前端源码在 `app/webui/dashboard/`，见 `docs/dashboard-frontend-architecture.md`。
 
 # `app/webui/` —— WebUI 后端
 
