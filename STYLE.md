@@ -256,6 +256,7 @@ pytest -q --cov --cov-report=term-missing   # 需要覆盖率时
 | 单文件最大 `chat.py` | 2,192 行 | **1,176 行**（切出 command_dispatch / context_blocks / turn_metrics / assistant_output / tool_source） |
 | `app/domain/` | 4 文件 / 595 行（全是 DTO） | **10 文件 / 1,288 行**（时间解析/触发/分条/节奏/标签/能力判定） |
 | 包职责说明 README | 0 份 | **27 份**，且由 `tests/architecture/test_architecture_layout.py` 强制 |
+| 超 800 行的源文件 | — | **6 个**（豁免名单只许缩小，闸三盯死） |
 | 前端套数 | 2 套（Vue + 手写 JS，约 4,800 行重复） | **1 套**（`app/webui/dashboard/dist`；旧版与 `/legacy` 已删） |
 | 业务插件位置 | `module/modules/`（仓库根） | **`app/plugins/`**（`module/` 只剩运行时数据） |
 | `app/` 顶层目录 | 10 个（含 `nodes` / `services`） | **8 个**（agent application core domain infrastructure plugin plugins webui） |
