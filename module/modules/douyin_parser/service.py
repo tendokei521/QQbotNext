@@ -17,7 +17,8 @@ from __future__ import annotations
 import os
 
 from app.core.logger import module_logger
-from app.modules import get_data_path, media_cache
+from app.infrastructure.fs import media_cache
+from app.modules import get_data_path
 from app.modules.groups import check_group_enabled
 
 from . import forward as fwd
@@ -268,7 +269,7 @@ async def _fetch_album(module, api, meta: dict, *, cache_dir: str, logger):
 
 
 def _sweep_cache(module, cache_dir: str, ttl_minutes: int, logger) -> None:
-    """按 TTL + 容量上限清理本地媒体缓存（通用策略见 ``app/modules/media_cache.py``）。"""
+    """按 TTL + 容量上限清理本地媒体缓存（通用策略见 ``app/infrastructure/fs/media_cache.py``）。"""
     media_cache.sweep(cache_dir, ttl_minutes, int(module.config.get("video_cache_max_mb", 1024) or 0), logger)
 
 

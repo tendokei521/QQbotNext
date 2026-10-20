@@ -20,7 +20,7 @@ from urllib.parse import urlencode
 
 from app.core.logger import module_logger
 from app.infrastructure.curl_cffi import CurlCffiClient
-from app.modules.media_cache import PART_SUFFIX
+from app.infrastructure.fs.media_cache import PART_SUFFIX
 
 from . import media
 from .abogus import ABogus

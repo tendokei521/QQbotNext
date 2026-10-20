@@ -2,7 +2,7 @@
 
 - ``pick_single``：把 playurl ``fnval=0`` 的返回整理成可下载的分片列表；
 - ``cache_path``：本地缓存命名；
-- 缓存淘汰策略（TTL + 容量上限）已提取为共享库 ``app/modules/media_cache.py``。
+- 缓存淘汰策略（TTL + 容量上限）已提取为共享库 ``app/infrastructure/fs/media_cache.py``。
 """
 
 from __future__ import annotations

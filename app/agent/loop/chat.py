@@ -392,7 +392,7 @@ async def _collect_llm_ext(
     # - 系统工具由 system_tools_enabled + 前置功能开关共同决定
     # - 模块工具 / MCP 工具由各自 enabled map 单独控制
     # - OneBot 工具已在上方由 security.resolve_tool_policy 过滤，这里直接放行
-    from app.agent.tools.system import is_system_tool_enabled
+    from app.agent.tools.policy import is_system_tool_enabled
 
     system_enabled = runtime.config.get("system_tools_enabled", {}) or {}
     module_enabled = runtime.config.get("module_tools_enabled", {}) or {}

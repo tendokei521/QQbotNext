@@ -15,7 +15,7 @@ from collections import OrderedDict
 from typing import Any
 
 from app.agent import logger
-from app.agent.memory import extract as extract_mod
+import app.agent.memory.extract as extract_mod
 from app.agent.memory.detect import autosave_clause
 from app.agent.memory.recall import rank, render_block
 from app.agent.memory.store import (

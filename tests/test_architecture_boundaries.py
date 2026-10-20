@@ -39,12 +39,13 @@ AGENT_PREFIXES = ("app.agent",)  # P2 后 agent 层只有这一个前缀（app.l
 
 # 存量债预算：只许降，不许升。修好一处就把对应数字改小。
 _BUDGET = {
-    # app/modules/api.py 里 4 处函数级 `from app.bootstrap import get_container`
-    "bootstrap_imports": 4,
-    # webui/api 64 处 + app/modules/api.py 4 处
-    "get_container_calls": 68,
+    # P3 已清零：生产代码不再从装配根取容器（改用 app.core.container.get_active）
+    "bootstrap_imports": 0,
+    # 剩下 64 处全在 app/webui/api/*，且都是 FastAPI 依赖（request.app.state.container）。
+    # 下一步：把每个端点改成 Depends 注入具体服务，而不是自己从容器里捞。
+    "get_container_calls": 64,
     # app/webui/api/{agent,media,modules,prompt_dump}.py 直接 import app.agent.*
-    # 基数 13（含函数级）；P3 拆环后应降到 0
+    # P4 引入 application/ 门面后应降到 0
     "webui_to_agent_imports": 13,
 }
 

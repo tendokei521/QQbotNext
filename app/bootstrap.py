@@ -12,7 +12,7 @@ import contextlib
 from app.agent.client import ModuleLLMClient
 from app.agent.providers.runtime_manager import ProviderRuntimeManager
 from app.agent.runtime import AgentManager
-from app.core.container import Container
+from app.core.container import Container, get_active, set_active
 from app.core.logger import logger, set_console_mode, setup_logging
 from app.core.settings import Settings, load_settings
 from app.core.task_manager import TaskManager
@@ -346,6 +346,7 @@ async def run(settings: Settings | None = None) -> None:
     settings = settings or load_settings()
     setup_logging(settings.log_dir)
     _container = build_container(settings)
+    set_active(_container)
     db = _container.get(Database)
     await db.connect()
     config_service = _container.get(ConfigService)
@@ -408,9 +409,12 @@ def main() -> None:
 
 
 def get_container() -> Container:
-    if _container is None:
-        raise RuntimeError("容器尚未初始化，请先调用 app.bootstrap.run()")
-    return _container
+    """兼容别名：真正的持有者在 `app.core.container.get_active()`。
+
+    保留它是因为测试与少量调用方仍从 `app.bootstrap` 取；生产代码**不准** import
+    `app.bootstrap`（`tests/test_architecture_boundaries.py` 有预算把关）。
+    """
+    return get_active()
 
 
 if __name__ == "__main__":

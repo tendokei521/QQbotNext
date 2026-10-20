@@ -1,4 +1,4 @@
-"""共享媒体缓存策略单测（``app/modules/media_cache.py``，全离线）。
+"""共享媒体缓存策略单测（``app/infrastructure/fs/media_cache.py``，全离线）。
 
 bilibili_parser / douyin_parser 都依赖这套「只下载一次 + TTL/容量淘汰」策略，
 因此这里覆盖纯函数（含 sweep 的实际删除行为）。
@@ -6,7 +6,7 @@ bilibili_parser / douyin_parser 都依赖这套「只下载一次 + TTL/容量�
 
 import os
 
-from app.modules import media_cache
+from app.infrastructure.fs import media_cache
 
 
 def test_human_size_and_duration():

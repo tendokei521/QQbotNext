@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 
-from app.modules.media_cache import format_duration
+from app.infrastructure.fs.media_cache import format_duration
 
 #: 合并转发卡片上显示的发送者名
 FORWARD_NAME = "抖音解析"

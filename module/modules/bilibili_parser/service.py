@@ -18,7 +18,8 @@ from __future__ import annotations
 import os
 
 from app.core.logger import module_logger
-from app.modules import get_data_path, media_cache
+from app.infrastructure.fs import media_cache
+from app.modules import get_data_path
 from app.modules.groups import check_group_enabled
 
 from . import bilibili_api as bapi
@@ -230,7 +231,7 @@ async def _fetch_video(module, api, info: dict, *, page: int = 1, qn: int, logge
 
 
 def _sweep_cache(cache_dir: str, ttl_minutes: int, max_mb: int, logger) -> None:
-    """按 TTL + 容量上限清理本地视频缓存（通用策略见 ``app/modules/media_cache.py``）。"""
+    """按 TTL + 容量上限清理本地视频缓存（通用策略见 ``app/infrastructure/fs/media_cache.py``）。"""
     media_cache.sweep(cache_dir, ttl_minutes, max_mb, logger)
 
 

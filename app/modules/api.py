@@ -1,8 +1,23 @@
 """插件开发 API：暴露给业务模块使用的框架能力。
 
 - get_modules():     获取已加载模块对象列表
+- get_features():    获取能力注册表状态
 - get_config_path(): module/configs/<name>/（模块配置目录）
 - get_data_path():   module/data/<name>/（模块自定义持久化数据目录，自动创建）
+
+## 为什么这里用 `get_active()`
+
+前四个函数是**插件作者的无参便捷 API**（插件里直接
+`from app.modules.api import get_config_path`，不该被迫先拿到容器），
+所以必然需要一个「当前容器」入口。
+
+它取自 `app.core.container` 而非 `app.bootstrap`：后者是装配根，从插件 API 反向
+import 它会在 import 图上把 `modules/api` 与 `bootstrap` 焊成环——实测环闭合在
+`modules/api → bootstrap → webui/app → webui/api/agent → ... → media/store →
+modules → modules/api`。
+
+`app.core.container.get_active()` 是全库唯一允许的服务定位，且方向向下（上层依赖
+core）。写新代码请优先传参或走 FastAPI `Depends`（`app/webui/api/deps.py`）。
 """
 
 from __future__ import annotations
@@ -12,28 +27,28 @@ from typing import Any
 
 def get_modules() -> list[Any]:
     """获取已加载的模块对象列表（扁平，含全局与各 Bot 实例，排除子模块）。"""
-    from app.bootstrap import get_container
+    from app.core.container import get_active
     from app.modules.registry import ModuleRegistry
 
-    container = get_container()
+    container = get_active()
     return container.get(ModuleRegistry).loaded()
 
 
 def get_features(bot_id: Any = None) -> list[dict]:
     """获取全局能力注册表状态（含接管者信息）。"""
-    from app.bootstrap import get_container
+    from app.core.container import get_active
     from app.modules.features import FeatureRegistry
 
-    container = get_container()
+    container = get_active()
     return container.get(FeatureRegistry).status(bot_id)
 
 
 def get_config_path(module_name: str, create: bool = True) -> str:
     """获取模块配置目录（module/configs/<name>/）。"""
-    from app.bootstrap import get_container
+    from app.core.container import get_active
     from app.core.settings import Settings
 
-    container = get_container()
+    container = get_active()
     path = container.get(Settings).module_configs_dir / module_name
     if create:
         path.mkdir(parents=True, exist_ok=True)
@@ -42,10 +57,10 @@ def get_config_path(module_name: str, create: bool = True) -> str:
 
 def get_data_path(module_name: str, create: bool = True) -> str:
     """获取模块数据目录（module/data/<name>/），供插件持久化自定义数据。"""
-    from app.bootstrap import get_container
+    from app.core.container import get_active
     from app.core.settings import Settings
 
-    container = get_container()
+    container = get_active()
     path = container.get(Settings).module_data_dir / module_name
     if create:
         path.mkdir(parents=True, exist_ok=True)
