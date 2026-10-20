@@ -679,7 +679,7 @@ P0 ──► P1 ──► P2 ──► P4 ──► P5
 |---|---|---|
 | 闸一：可达闭包可度量 | `scripts/gen/arch_closure.py` | ✅ 已落地 |
 | 闸二：分层边界测试 | `tests/test_architecture_boundaries.py` | ✅ 已落地（8 条） |
-| 闸三：目录完整性 | `tests/test_architecture_layout.py` | ⬜ P4/P5 落地 |
+| 闸三：目录完整性 | `tests/test_architecture_layout.py` | ✅ 已落地（7 条） |
 
 ### 7.1 闸一：可达闭包（`scripts/gen/arch_closure.py`，已落地）
 
@@ -717,18 +717,20 @@ venv\Scripts\python.exe scripts\gen\arch_closure.py --assert-max 20000          
 - 全库 **不得**出现 `from app.bootstrap import` / `get_container(`
 - 新增函数内惰性 import 必须带 `# lazy:` 注释（白名单机制同 `test_no_silent_except`）
 
-### 7.3 闸三：目录完整性（P4/P5 落地）
+### 7.3 闸三：目录完整性（已落地）
 
-`tests/test_architecture_layout.py`（待建）：
+`tests/test_architecture_layout.py`，7 条：
 
-- `app/` 顶层只允许 8 个目录（`bootstrap core domain infrastructure agent plugin application webui`）
-- 每个 `app/*/` 必须有 `README.md`，且首行是 `> 本文只负责：<一句话>`
-- `app/agent/` 下每个包的文件数 ≤ 12（超过说明又该拆了）
-- 业务插件只有 `module.py` 必须存在
+- `app/` 顶层只允许白名单里的 8 个目录（`agent core domain infrastructure modules nodes services webui`）；
+- **每个包必须有 `README.md`，首行是 `> 本文只负责：…`**——一句话说不清这个包负责什么，
+  就说明它该拆了（已有 22 份：8 个顶层包 + 14 个 agent 子包）；
+- `app/agent/` 每个子包 `.py` ≤ 12（超过说明又长成平铺包了）；
+- `app/agent/` 顶层 `.py` ≤ 10（当前 8）；
+- 每个业务插件目录必须有 `module.py`；
+- 不允许只剩 `__pycache__` 的空壳目录（`app/client` 曾是这样，已删）。
 
-现状（P3 后）：`app/` 有 9 个目录，比目标多的三个是 `client`（应并入
-`infrastructure/`）、`nodes`（应并入 `plugin/`）、`services`（应改名为
-`application/`）；`modules/` 待改名为 `plugin/`。
+白名单与上限都是**棘轮**：只能收紧，不能放宽。P5 会把 `modules`→`plugin`、
+`services`→`application`、`nodes` 并入 `plugin`，届时改白名单并同步目录。
 
 ---
 
