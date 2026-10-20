@@ -93,7 +93,7 @@ async def main(db_file: str) -> None:
     from app.infrastructure.config.config_service import ConfigService
     from app.infrastructure.onebot.codec import decode
     from app.infrastructure.persistence.database import Database
-    from app.llm.manager import AgentManager
+    from app.agent.runtime import AgentManager
     from app.services.bot_service import BotService
 
     tmp = Path(tempfile.mkdtemp(prefix="qqbot-grp-"))
@@ -125,7 +125,7 @@ async def main(db_file: str) -> None:
     dispatcher: ModuleDispatcher = container.get(ModuleDispatcher)
     gateway.dispatch_handler = dispatcher.dispatch
 
-    import app.llm.providers as providers_pkg
+    import app.agent.providers as providers_pkg
 
     calls: list[str] = []
 
@@ -134,7 +134,7 @@ async def main(db_file: str) -> None:
         yield type("Ev", (), {"type": "text", "text": "模拟回复", "tool_call": None})()
 
     providers_pkg.iter_stream_with_fallback = patched_iter
-    import app.llm.chat as chat_mod
+    import app.agent.loop.chat as chat_mod
 
     chat_mod.iter_stream_with_fallback = patched_iter
 

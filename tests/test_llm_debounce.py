@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import asyncio
 
-from app.llm.config_schema import SCHEMA
-from app.llm.context import LlmContext, LlmJob
-from app.llm.pool import LlmPool, merge_debounced_texts
+from app.agent.config_schema import SCHEMA
+from app.agent.loop.context import LlmContext, LlmJob
+from app.agent.loop.pool import LlmPool, merge_debounced_texts
 
 
 class _Event:

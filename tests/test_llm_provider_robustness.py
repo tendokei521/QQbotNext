@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.llm.providers.gemini import GeminiProvider
+from app.agent.providers.gemini import GeminiProvider
 
 # ==================== 1. Gemini URL 拼装 ====================
 
@@ -152,7 +152,7 @@ async def test_anthropic_non_stream_thinking_block_is_reasoning(monkeypatch, api
         ],
         "usage": {"input_tokens": 10, "output_tokens": 5},
     }, seen)
-    from app.llm.providers.anthropic import AnthropicProvider
+    from app.agent.providers.anthropic import AnthropicProvider
 
     provider = AnthropicProvider({"api_key": "K", "api_base": api_base})
 
@@ -164,7 +164,7 @@ async def test_anthropic_non_stream_thinking_block_is_reasoning(monkeypatch, api
 
 def test_openai_compat_non_stream_accepts_reasoning_alias():
     """中转商把思考写在 message.reasoning（流式早已两种都认，非流式此前只认一个）。"""
-    from app.llm.providers.openai_compat import OpenAICompatProvider
+    from app.agent.providers.openai_compat import OpenAICompatProvider
 
     provider = OpenAICompatProvider({"api_key": "K"})
     resp = provider._to_response({"choices": [{"message": {"content": "", "reasoning": "想过"}}]})
@@ -174,7 +174,7 @@ def test_openai_compat_non_stream_accepts_reasoning_alias():
 
 
 def test_openai_compat_non_stream_still_accepts_reasoning_content():
-    from app.llm.providers.openai_compat import OpenAICompatProvider
+    from app.agent.providers.openai_compat import OpenAICompatProvider
 
     provider = OpenAICompatProvider({"api_key": "K"})
     resp = provider._to_response(
@@ -194,7 +194,7 @@ def test_error_chunk_becomes_error_event():
     同 prompt 原样重试（确定性必失败）→ 再换 provider → 兜底话术，
     而真因（upstream timeout / 配额）从没进过日志。
     """
-    from app.llm.providers.openai_compat import events_from_chunk
+    from app.agent.providers.openai_compat import events_from_chunk
 
     events = events_from_chunk({"error": {"message": "upstream timeout", "type": "server_error"}})
 
@@ -203,7 +203,7 @@ def test_error_chunk_becomes_error_event():
 
 
 def test_flat_error_chunk_becomes_error_event():
-    from app.llm.providers.openai_compat import events_from_chunk
+    from app.agent.providers.openai_compat import events_from_chunk
 
     events = events_from_chunk({"type": "error", "message": "quota exceeded"})
 
@@ -212,7 +212,7 @@ def test_flat_error_chunk_becomes_error_event():
 
 
 def test_error_chunk_with_null_choices_is_not_swallowed():
-    from app.llm.providers.openai_compat import events_from_chunk
+    from app.agent.providers.openai_compat import events_from_chunk
 
     events = events_from_chunk({"choices": None, "error": {"message": "boom"}})
 
@@ -221,7 +221,7 @@ def test_error_chunk_with_null_choices_is_not_swallowed():
 
 def test_usage_only_chunk_still_works():
     """修 error 报文不能误伤「只有 usage 没有 choices」的合法收尾块。"""
-    from app.llm.providers.openai_compat import events_from_chunk
+    from app.agent.providers.openai_compat import events_from_chunk
 
     events = events_from_chunk({"choices": [], "usage": {"prompt_tokens": 5}})
 
@@ -229,7 +229,7 @@ def test_usage_only_chunk_still_works():
 
 
 def test_normal_chunk_has_no_error_event():
-    from app.llm.providers.openai_compat import events_from_chunk
+    from app.agent.providers.openai_compat import events_from_chunk
 
     events = events_from_chunk({"choices": [{"delta": {"content": "hi"}}]})
 

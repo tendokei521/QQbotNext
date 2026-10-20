@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from app.llm import history_enrich
-from app.llm.assembly import PromptRequest, build_background
-from app.llm.prompt import (
+from app.agent.session import enrich as history_enrich
+from app.agent.assembly.assembler import PromptRequest, build_background
+from app.agent.assembly.prompt import (
     EXPANDED_MARKER_NOTE,
     LEGACY_MESSAGE_META_INSTRUCTION,
     MESSAGE_META_INSTRUCTION,
 )
-from app.llm.config import DEFAULT_LLM_CONFIG
-from app.llm.config_schema import SCHEMA
-from app.llm.group_context import format_history_for_llm
+from app.agent.config import DEFAULT_LLM_CONFIG
+from app.agent.config_schema import SCHEMA
+from app.agent.context.group import format_history_for_llm
 
 
 # ---------- 提示词：已展开标记的语义 ----------

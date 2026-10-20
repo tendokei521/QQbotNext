@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.llm.memory.store import (
+from app.agent.memory.store import (
     MemoryStore,
     has_negation_conflict,
     owner_private,

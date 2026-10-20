@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.llm.config_schema import SCHEMA
+from app.agent.config_schema import SCHEMA
 
 SECTIONS_PATH = (
     Path(__file__).resolve().parents[1] / "dashboard" / "src" / "agent" / "sections.json"
@@ -243,7 +243,7 @@ def test_stream_presets_are_renderable_and_target_the_stream_section():
 
     否则「点预设」会静默改掉用户看不见的配置项。
     """
-    from app.llm.config_schema import STREAM_PRESETS
+    from app.agent.config_schema import STREAM_PRESETS
 
     assert STREAM_PRESETS, "STREAM_PRESETS 不能为空，否则前端预设区退化成空壳"
 

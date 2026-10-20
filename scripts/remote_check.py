@@ -18,8 +18,8 @@ async def main(db_file: str) -> None:
     from app.core.task_manager import TaskManager
     from app.infrastructure.config.config_service import ConfigService
     from app.infrastructure.persistence.database import Database
-    from app.llm.config import AGENT_CONFIG_MODULE
-    from app.llm.manager import AgentManager
+    from app.agent.config import AGENT_CONFIG_MODULE
+    from app.agent.runtime import AgentManager
 
     db = Database(db_file)
     await db.connect()

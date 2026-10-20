@@ -8,7 +8,7 @@
 
 from types import SimpleNamespace
 
-from app.llm.group_context import (
+from app.agent.context.group import (
     extract_history_messages,
     fetch_group_online_history,
     fetch_private_online_history,
@@ -88,7 +88,7 @@ async def test_fetch_online_history_tolerates_unwrapped_and_failed_responses():
 
 async def test_group_pre_history_block_reaches_prompt():
     """回归：群聊环境背景块必须真的产出内容（此前恒为空串）。"""
-    from app.llm.chat import _build_group_pre_history
+    from app.agent.loop.chat import _build_group_pre_history
 
     event = SimpleNamespace(
         bot=_FakeBot(_envelope(MESSAGES)),

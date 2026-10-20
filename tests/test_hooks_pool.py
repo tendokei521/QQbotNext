@@ -3,9 +3,9 @@
 import asyncio
 
 from app.infrastructure.onebot.client import BotConnection
-from app.llm.context import LlmContext, LlmJob
-from app.llm.hooks import ToolCallContext, ToolCallHookRegistry
-from app.llm.pool import LlmPool
+from app.agent.loop.context import LlmContext, LlmJob
+from app.agent.hooks import ToolCallContext, ToolCallHookRegistry
+from app.agent.loop.pool import LlmPool
 from app.modules.base import BaseModule
 from app.modules.hooks import (
     ApiHookRegistry,

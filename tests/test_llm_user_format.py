@@ -13,9 +13,9 @@ from __future__ import annotations
 import types
 
 from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
-from app.llm.assembly import PromptRequest, message_meta_instruction
-from app.llm.enhance import format_user_context
-from app.llm.prompt import (
+from app.agent.assembly.assembler import PromptRequest, message_meta_instruction
+from app.agent.assembly.enhance import format_user_context
+from app.agent.assembly.prompt import (
     SINGLE_LINE_MESSAGE_META_INSTRUCTION,
     emoji_hint_line,
     user_message_format,
@@ -38,7 +38,7 @@ def _group_event() -> GroupMessageEvent:
 
 
 def _ctx(config: dict | None):
-    from app.llm.context import LlmContext
+    from app.agent.loop.context import LlmContext
 
     runtime = types.SimpleNamespace(config=config or {}, bot_id=3437542570)
     ctx = LlmContext(event=_group_event(), runtime=runtime, bot=None, session_id="group_1")
@@ -126,7 +126,7 @@ def test_message_meta_off_wins_over_profile():
 
 
 def test_emoji_hint_line_is_stable_and_names_tags():
-    from app.llm.emoji_lexicon import available_tags
+    from app.agent.persona.emoji import available_tags
 
     tags = available_tags(20)
     line = emoji_hint_line(tags)

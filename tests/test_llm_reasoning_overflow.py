@@ -20,9 +20,9 @@ import types
 
 import pytest
 
-from app.llm import chat
-from app.llm.providers import PROVIDERS
-from app.llm.providers.base import BaseProvider, LLMResponse, StreamEvent
+from app.agent.loop import chat
+from app.agent.providers import PROVIDERS
+from app.agent.providers.base import BaseProvider, LLMResponse, StreamEvent
 
 # ==================== 1. max_tokens 来源 ====================
 
@@ -106,7 +106,7 @@ def _reset():
 
 
 def _runtime(bot_id: int, config: dict):
-    from app.llm.session import SessionManager
+    from app.agent.session.manager import SessionManager
 
     rt = types.SimpleNamespace()
     rt.bot_id = bot_id
@@ -137,7 +137,7 @@ def _event():
 
 
 def _ctx():
-    from app.llm.context import LlmContext
+    from app.agent.loop.context import LlmContext
 
     event = _event()
     ctx = LlmContext(event=event, runtime=None, bot=None, session_id="group_466052056")
@@ -274,7 +274,7 @@ async def test_stream_response_request_log_reports_max_tokens_source(monkeypatch
         def debug(self, msg):
             pass
 
-    import app.llm.chat as chat_mod
+    import app.agent.loop.chat as chat_mod
 
     monkeypatch.setattr(chat_mod, "logger", _Rec(), raising=False)
 

@@ -4,7 +4,7 @@
 本模块保留「调试 Prompt」配置。
 """
 
-from app.llm import LlmContext, logger
+from app.agent import LlmContext, logger
 from app.modules import BaseModule, llm_hook
 from .config_schema import SCHEMA
 

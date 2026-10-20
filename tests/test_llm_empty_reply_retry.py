@@ -17,9 +17,9 @@
 
 from __future__ import annotations
 
-from app.llm.chat import DEFAULT_EMPTY_REPLY_RETRIES, _max_empty_retries
-from app.llm.providers import PROVIDERS, chat_with_fallback, iter_stream_with_fallback
-from app.llm.providers.base import BaseProvider, LLMResponse, StreamEvent
+from app.agent.loop.chat import DEFAULT_EMPTY_REPLY_RETRIES, _max_empty_retries
+from app.agent.providers import PROVIDERS, chat_with_fallback, iter_stream_with_fallback
+from app.agent.providers.base import BaseProvider, LLMResponse, StreamEvent
 
 # monkeypatch.setitem(PROVIDERS, name, cls) 后 get_provider(cfg) 会 cls(cfg) 实例化，
 # 因此桩类必须在类级别记录调用次数（每个用例各注册一个唯一的 provider 名）。

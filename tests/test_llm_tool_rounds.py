@@ -11,9 +11,9 @@
 
 from __future__ import annotations
 
-from app.llm.chat import _max_tool_rounds
-from app.llm.providers import PROVIDERS, _accepts_kwarg, chat_with_fallback
-from app.llm.providers.base import BaseProvider, LLMResponse
+from app.agent.loop.chat import _max_tool_rounds
+from app.agent.providers import PROVIDERS, _accepts_kwarg, chat_with_fallback
+from app.agent.providers.base import BaseProvider, LLMResponse
 
 
 # ---------- 配置解析 ----------
@@ -96,9 +96,9 @@ async def test_base_provider_declares_the_kwarg():
 
 async def test_rounds_passed_to_native_providers():
     """三家原生适配器都接受该参数（否则会退回内省分支而丢失配置）。"""
-    from app.llm.providers.anthropic import AnthropicProvider
-    from app.llm.providers.gemini import GeminiProvider
-    from app.llm.providers.openai_compat import OpenAICompatProvider
+    from app.agent.providers.anthropic import AnthropicProvider
+    from app.agent.providers.gemini import GeminiProvider
+    from app.agent.providers.openai_compat import OpenAICompatProvider
 
     for cls in (OpenAICompatProvider, AnthropicProvider, GeminiProvider):
         assert _accepts_kwarg(cls.chat, "max_tool_rounds") is True

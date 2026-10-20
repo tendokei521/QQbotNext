@@ -343,7 +343,7 @@ class AssemblerFeatureController(RuntimeSlotFeatureController):
 
     def default_value(self) -> Any:
         # 局部 import：modules 层不在模块级依赖 llm 层（装配根才允许知道全部组件）
-        from app.llm.assembly import PromptAssembler
+        from app.agent.assembly.assembler import PromptAssembler
 
         return PromptAssembler()
 
@@ -362,7 +362,7 @@ class ProviderInvokerFeatureController(RuntimeSlotFeatureController):
     require_methods = ("chat", "stream")
 
     def default_value(self) -> Any:
-        from app.llm.providers.invoker import ProviderInvoker
+        from app.agent.providers.invoker import ProviderInvoker
 
         return ProviderInvoker()
 

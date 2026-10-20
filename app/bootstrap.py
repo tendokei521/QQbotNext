@@ -17,8 +17,8 @@ from app.infrastructure.cache import Cache
 from app.infrastructure.config.config_service import ConfigService
 from app.infrastructure.onebot.gateway import OneBotGateway
 from app.infrastructure.persistence.database import Database
-from app.llm.manager import AgentManager
-from app.llm.module_client import ModuleLLMClient
+from app.agent.runtime import AgentManager
+from app.agent.client import ModuleLLMClient
 from app.modules.base import ServiceAccess
 from app.modules.dispatcher import ModuleDispatcher
 from app.modules.features import (
@@ -41,7 +41,7 @@ from app.modules.hooks import (
 )
 from app.modules.registry import ModuleRegistry
 from app.services.bot_service import BotService
-from app.llm.providers.runtime_manager import ProviderRuntimeManager
+from app.agent.providers.runtime_manager import ProviderRuntimeManager
 from app.services.config_profile_service import ConfigProfileService
 from app.services.log_service import LogService
 from app.services.module_install_service import ModuleInstallService
@@ -359,7 +359,7 @@ async def run(settings: Settings | None = None) -> None:
     await provider_model_service.migrate_legacy_models()
 
     # 迁移旧 LLM 数据文件（历史模块目录 → data/llm），幂等，仅在启动时执行
-    from app.llm import migrate_legacy_data
+    from app.agent import migrate_legacy_data
 
     migrate_legacy_data()
 

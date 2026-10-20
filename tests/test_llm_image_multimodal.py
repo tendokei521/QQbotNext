@@ -22,10 +22,10 @@ import base64
 import pytest
 
 from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
-from app.llm import image as image_mod
-from app.llm import image_media
-from app.llm.assembly import PromptRequest, place_images
-from app.llm.image import (
+from app.agent.media import image as image_mod
+from app.agent.media import store as image_media
+from app.agent.assembly.assembler import PromptRequest, place_images
+from app.agent.media.image import (
     build_user_content,
     collect_image_segments,
     count_images,
@@ -34,8 +34,8 @@ from app.llm.image import (
     persist_images,
     resolve_images,
 )
-from app.llm.providers.anthropic import _normalize_messages as anthropic_normalize
-from app.llm.providers.gemini import _normalize_messages as gemini_normalize
+from app.agent.providers.anthropic import _normalize_messages as anthropic_normalize
+from app.agent.providers.gemini import _normalize_messages as gemini_normalize
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 32
 PNG_B64 = base64.b64encode(PNG_BYTES).decode()
@@ -370,7 +370,7 @@ def test_sanitize_is_the_last_line_of_defense_for_unsupported_models():
 
     ``place_images`` 已有模态门控（文本模型根本不加图块），这里验证兜底仍然有效。
     """
-    from app.llm.assembly import sanitize
+    from app.agent.assembly.assembler import sanitize
 
     req = _req_with_images(modalities=["text"], text="看看")
     messages = [{
@@ -389,7 +389,7 @@ def test_sanitize_is_the_last_line_of_defense_for_unsupported_models():
 
 def test_build_messages_keeps_images_for_image_capable_model():
     """声明了 image 模态的模型拿到的是真图块（不是 [Image] 占位）。"""
-    from app.llm.assembly import build_messages
+    from app.agent.assembly.assembler import build_messages
 
     req = _req_with_images(modalities=["text", "image"], text="看看")
     messages = build_messages(req)
@@ -435,8 +435,8 @@ class _BoomLocks:
 
 async def test_pipeline_lets_image_only_at_message_through(monkeypatch, offline_download):
     """回归：此前 ``if not ctx.user_text: return`` 会把「@我 + 只发图」整轮丢掉。"""
-    from app.llm.context import LlmContext, LlmJob
-    from app.llm.pipeline import LlmPipeline
+    from app.agent.loop.context import LlmContext, LlmJob
+    from app.agent.loop.pipeline import LlmPipeline
 
     runtime = _FakeRuntime()
     pipeline = LlmPipeline(runtime)
@@ -468,8 +468,8 @@ async def test_pipeline_lets_image_only_at_message_through(monkeypatch, offline_
 
 
 async def test_pipeline_resolve_images_skips_text_only_model(monkeypatch):
-    from app.llm.context import LlmContext
-    from app.llm.pipeline import LlmPipeline
+    from app.agent.loop.context import LlmContext
+    from app.agent.loop.pipeline import LlmPipeline
 
     runtime = _FakeRuntime(chain=[{"provider": "openai", "modalities": ["text", "tool_use"]}])
     pipeline = LlmPipeline(runtime)
@@ -480,8 +480,8 @@ async def test_pipeline_resolve_images_skips_text_only_model(monkeypatch):
 
 
 async def test_pipeline_resolve_images_disabled_by_config():
-    from app.llm.context import LlmContext
-    from app.llm.pipeline import LlmPipeline
+    from app.agent.loop.context import LlmContext
+    from app.agent.loop.pipeline import LlmPipeline
 
     runtime = _FakeRuntime(config={"image_understanding_enable": False})
     pipeline = LlmPipeline(runtime)

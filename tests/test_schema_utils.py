@@ -180,7 +180,7 @@ def test_schema_issues_summary():
 
 def test_agent_schema_normalizes_without_issues(container):
     """框架自带 Agent schema 应当零 issue（否则是它自己写错了类型）。"""
-    from app.llm.config_schema import SCHEMA
+    from app.agent.config_schema import SCHEMA
 
     normalized = normalize_schema(SCHEMA, registry=container.get(ResourceRegistry), source_module="agent")
     assert schema_issues(normalized) == []

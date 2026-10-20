@@ -14,7 +14,7 @@ import importlib
 
 import pytest
 
-from app.llm import history_enrich
+from app.agent.session import enrich as history_enrich
 
 
 @pytest.fixture(autouse=True)
@@ -147,7 +147,7 @@ def _structured_entry(text: str, message_id: str = "1001") -> dict:
 
 
 def test_format_history_for_llm_applies_registry():
-    from app.llm.group_context import format_history_for_llm
+    from app.agent.context.group import format_history_for_llm
 
     history_enrich.remember("group_1", 778, items=[
         {"kind": "reply", "ref": "456", "summary": "学费那题"},
@@ -165,7 +165,7 @@ def test_format_history_for_llm_applies_registry():
 
 
 def test_format_history_for_llm_without_registry_unchanged():
-    from app.llm.group_context import format_history_for_llm
+    from app.agent.context.group import format_history_for_llm
 
     rendered = format_history_for_llm([_structured_entry("[引用456] 这个怎么弄")])
     assert rendered[0]["content"].endswith(": [引用456] 这个怎么弄")
@@ -196,7 +196,7 @@ def test_ledger_ignores_empty_records():
 
 def test_expansion_ledger_records_from_tool_context():
     """工具侧只依赖 ToolContext.extra 里的记账本，不直接碰存储。"""
-    from app.llm.context_tools import _record_expansion
+    from app.agent.tools.context_tools import _record_expansion
 
     class _Ctx:
         def __init__(self):
@@ -208,7 +208,7 @@ def test_expansion_ledger_records_from_tool_context():
 
 
 def test_record_expansion_without_ledger_is_silent():
-    from app.llm.context_tools import _record_expansion
+    from app.agent.tools.context_tools import _record_expansion
 
     class _Ctx:
         extra: dict = {}

@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from app.llm.history_model import (
+from app.agent.session.model import (
     BaseInfo,
     HistoryEntry,
     TurnInfo,

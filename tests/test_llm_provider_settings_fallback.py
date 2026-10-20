@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.llm.manager import AgentRuntime
-from app.llm.providers.runtime_manager import ProviderRuntimeManager
+from app.agent.runtime import AgentRuntime
+from app.agent.providers.runtime_manager import ProviderRuntimeManager
 from app.services.provider_model_service import ProviderModelService
 from app.services.provider_preset_service import ProviderPresetService
 

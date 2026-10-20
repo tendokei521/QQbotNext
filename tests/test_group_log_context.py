@@ -5,9 +5,9 @@ from __future__ import annotations
 import time
 from types import SimpleNamespace
 
-from app.llm.group_log.context import build_context_text
-from app.llm.group_log.events import KIND_EMOJI, KIND_MESSAGE, LogEvent
-from app.llm.group_log.store import GroupLogStore
+from app.agent.group_log.context import build_context_text
+from app.agent.group_log.events import KIND_EMOJI, KIND_MESSAGE, LogEvent
+from app.agent.group_log.store import GroupLogStore
 
 SCOPE = "group:1001"
 NOW = int(time.time())

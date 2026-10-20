@@ -1,10 +1,10 @@
 """P2 工具与确定性兜底测试：detect / manager.autosave / build_memory_tools 工具。"""
 
-from app.llm.config import DEFAULT_LLM_CONFIG
-from app.llm.memory.detect import autosave_clause, wants_autosave
-from app.llm.memory.manager import MemoryManager
-from app.llm.memory.store import owner_group, owner_private
-from app.llm.memory.tool import build_memory_tools
+from app.agent.config import DEFAULT_LLM_CONFIG
+from app.agent.memory.detect import autosave_clause, wants_autosave
+from app.agent.memory.manager import MemoryManager
+from app.agent.memory.store import owner_group, owner_private
+from app.agent.memory.tool import build_memory_tools
 
 
 class FakeConfig:

@@ -5,14 +5,14 @@ from __future__ import annotations
 import time
 from types import SimpleNamespace
 
-from app.llm.group_log.events import (
+from app.agent.group_log.events import (
     KIND_EMOJI,
     KIND_MESSAGE,
     KIND_POKE,
     LogEvent,
     make_scope,
 )
-from app.llm.group_log.store import GroupLogStore, attach, detach, store_of
+from app.agent.group_log.store import GroupLogStore, attach, detach, store_of
 
 GROUP = make_scope(True, group_id=1001)
 

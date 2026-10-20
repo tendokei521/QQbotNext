@@ -13,8 +13,8 @@ from __future__ import annotations
 import types
 
 from app.domain.events import MessageSegment
-from app.llm import chat
-from app.llm.commands import (
+from app.agent.loop import chat
+from app.agent.commands import (
     COMMAND_GROUPS,
     PREFIX,
     build_help_nodes,
@@ -294,15 +294,15 @@ async def test_handle_respects_scene_switch(monkeypatch):
 
 async def test_pipeline_routes_llm_commands_without_at(monkeypatch):
     """流水线必须把 `#llm ...` 分流给 chat.handle（群聊里不需要 @）。"""
-    from app.llm.context import LlmContext, LlmJob
-    from app.llm.pipeline import LlmPipeline
+    from app.agent.loop.context import LlmContext, LlmJob
+    from app.agent.loop.pipeline import LlmPipeline
 
     seen: list = []
 
     async def fake_handle(module, event):
         seen.append((module, event))
 
-    monkeypatch.setattr("app.llm.chat.handle", fake_handle)
+    monkeypatch.setattr("app.agent.loop.chat.handle", fake_handle)
 
     runtime = _PipelineRuntime()
     pipeline = LlmPipeline(runtime)

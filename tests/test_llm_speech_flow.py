@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import types
 
-from app.llm.providers import PROVIDERS
-from app.llm.providers.base import BaseProvider, LLMResponse, StreamEvent
+from app.agent.providers import PROVIDERS
+from app.agent.providers.base import BaseProvider, LLMResponse, StreamEvent
 
 STREAM_MESSAGES: list[list[dict]] = []
 CHAT_MESSAGES: list[list[dict]] = []
@@ -95,7 +95,7 @@ def _config(**over):
 
 
 def _runtime(bot_id: int, config: dict):
-    from app.llm.session import SessionManager
+    from app.agent.session.manager import SessionManager
 
     rt = types.SimpleNamespace()
     rt.bot_id = bot_id
@@ -127,7 +127,7 @@ def _event():
 
 
 def _ctx(event, *, is_at: bool = True):
-    from app.llm.context import LlmContext
+    from app.agent.loop.context import LlmContext
 
     ctx = LlmContext(event=event, runtime=None, bot=None, session_id="group_466052056")
     ctx.user_text = "在吗"
@@ -137,7 +137,7 @@ def _ctx(event, *, is_at: bool = True):
 
 
 def _assistant_history(bot_id: int) -> list[str]:
-    from app.llm.session import SessionManager
+    from app.agent.session.manager import SessionManager
 
     mgr = SessionManager(str(bot_id))
     return [
@@ -162,7 +162,7 @@ def _register(monkeypatch):
 
 async def _run_stream(rt, ctx) -> list[str]:
     """跑一轮 stream_response，返回真正被交给"发送"的正文。"""
-    from app.llm import chat
+    from app.agent.loop import chat
 
     sent: list[str] = []
     async for item in chat.stream_response(rt, ctx.event, ctx):
@@ -279,7 +279,7 @@ async def test_speech_tools_are_injected_into_request(monkeypatch, tmp_path):
 
     await _run_stream(rt, ctx)
 
-    from app.llm.chat import prepare_prompt
+    from app.agent.loop.chat import prepare_prompt
 
     req, _session, meta = await prepare_prompt(rt, ctx.event, ctx)
     names = {spec.name for spec in meta["all_specs"]}
@@ -325,7 +325,7 @@ async def test_pipeline_sends_bubbles_and_backfills_history_id(monkeypatch, tmp_
     任何自建发送实现都会漏掉其中一半。
     """
     from app.domain.message import Message
-    from app.llm.pipeline import LlmPipeline
+    from app.agent.loop.pipeline import LlmPipeline
 
     _register(monkeypatch)
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
@@ -350,7 +350,7 @@ async def test_pipeline_sends_bubbles_and_backfills_history_id(monkeypatch, tmp_
     assert bot.sent[0].segments[0].data["id"] == "22350"
     assert [m.text for m in bot.sent] == ["第一句", "第二句"]
 
-    from app.llm.session import SessionManager
+    from app.agent.session.manager import SessionManager
 
     entries = [
         item

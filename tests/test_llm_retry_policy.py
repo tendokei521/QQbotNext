@@ -21,9 +21,9 @@ from __future__ import annotations
 
 import asyncio
 
-from app.llm.providers import PROVIDERS, chat_with_fallback, iter_stream_with_fallback
-from app.llm.providers.base import BaseProvider, LLMResponse, StreamEvent
-from app.llm.request_policy import TurnBudget, classify_error_text, classify_response
+from app.agent.providers import PROVIDERS, chat_with_fallback, iter_stream_with_fallback
+from app.agent.providers.base import BaseProvider, LLMResponse, StreamEvent
+from app.agent.providers.policy import TurnBudget, classify_error_text, classify_response
 
 CALLS: dict[str, int] = {}
 BEHAVIOR: dict[str, dict] = {}
@@ -171,7 +171,7 @@ async def test_budget_charges_real_usage_when_available(monkeypatch):
 
 async def test_retry_after_header_is_honoured(monkeypatch):
     """上游让等多久就等多久，别用 1s/2s/4s 去撞同一道限流墙。"""
-    from app.llm.providers import openai_compat
+    from app.agent.providers import openai_compat
 
     sleeps: list[float] = []
 
@@ -213,7 +213,7 @@ async def test_retry_after_header_is_honoured(monkeypatch):
 
 async def test_retry_attempts_defaults_to_two():
     """默认 2 次（不是 3）：每一层都重发全量上下文，省一次就是省一倍输入 token。"""
-    from app.llm.providers import openai_compat
+    from app.agent.providers import openai_compat
 
     assert openai_compat.OpenAICompatProvider({"api_key": "k"}).max_retries == 2
     assert openai_compat.OpenAICompatProvider({"api_key": "k", "retry_attempts": 5}).max_retries == 5
@@ -221,7 +221,7 @@ async def test_retry_attempts_defaults_to_two():
 
 async def test_backoff_falls_back_to_exponential_without_header(monkeypatch):
     """没有 Retry-After 才用指数退避。"""
-    from app.llm.providers import openai_compat
+    from app.agent.providers import openai_compat
 
     sleeps: list[float] = []
 
@@ -307,7 +307,7 @@ def test_asyncio_sleep_is_the_only_timer_used():
     """退避一律走 asyncio.sleep（可被 monkeypatch 替换），不允许 time.sleep 阻塞事件循环。"""
     import inspect
 
-    from app.llm.providers import openai_compat
+    from app.agent.providers import openai_compat
 
     source = inspect.getsource(openai_compat)
     assert "time.sleep" not in source

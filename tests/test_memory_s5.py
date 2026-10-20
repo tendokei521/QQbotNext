@@ -1,10 +1,10 @@
 """S5 纠错闭环测试：命令 correct/deny/confirm/list --all + 工具 memory_correct/memory_deny。"""
 
-from app.llm.config import DEFAULT_LLM_CONFIG
-from app.llm.memory.commands import handle_memory_command
-from app.llm.memory.manager import MemoryManager
-from app.llm.memory.store import owner_private
-from app.llm.memory.tool import build_memory_tools
+from app.agent.config import DEFAULT_LLM_CONFIG
+from app.agent.memory.commands import handle_memory_command
+from app.agent.memory.manager import MemoryManager
+from app.agent.memory.store import owner_private
+from app.agent.memory.tool import build_memory_tools
 
 
 class FakeConfig:

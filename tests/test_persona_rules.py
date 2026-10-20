@@ -1,4 +1,4 @@
-"""行为规则段（``app.llm.persona_rules``）与组装接线（``assembly.build_behavior``）的护栏测试。
+"""行为规则段（``app.agent.persona.rules``）与组装接线（``assembly.build_behavior``）的护栏测试。
 
 这批测试守的是三条**会直接让拟人化反噬**的红线：
 
@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import re
 
-from app.llm import persona_rules
-from app.llm.assembly import PromptRequest, assembly_profile
+from app.agent.persona import rules as persona_rules
+from app.agent.assembly.assembler import PromptRequest, assembly_profile
 
 #: 工具名形态：小写字母开头、至少含一个下划线（``memory_save`` / ``expand_message`` …）。
 #: 正文里的英文单词（Markdown / QQ / AI）不含下划线，因此不会被误抓。
@@ -230,7 +230,7 @@ def test_legacy_profile_injects_no_behavior_block():
 
 def _block_names(req):
     """只返回**实际产出内容**的块名（``build_all_blocks`` 会把空块也列出来）。"""
-    from app.llm.assembly import build_all_blocks
+    from app.agent.assembly.assembler import build_all_blocks
 
     return [(block.name, messages) for block, messages in build_all_blocks(req) if messages]
 
@@ -262,7 +262,7 @@ def test_behavior_block_can_be_disabled():
 
 def test_proactive_block_dedupes_in_qq_agent_profile():
     """行为段已讲通用用法：``qq_agent`` 档下「主动性」块不再重复引用/戳一戳的用法。"""
-    from app.llm.prompt import build_proactive_instruction
+    from app.agent.assembly.prompt import build_proactive_instruction
 
     tools = ALL_TOOLS
     legacy = build_proactive_instruction({"proactive_prompt_enable": True}, "", available_tools=tools)

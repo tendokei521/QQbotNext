@@ -31,9 +31,9 @@ if str(ROOT) not in sys.path:
 from app.core.settings import Settings  # noqa: E402
 from app.infrastructure.config.config_service import ConfigService  # noqa: E402
 from app.infrastructure.persistence.database import Database  # noqa: E402
-from app.llm.config import DEFAULT_LLM_CONFIG  # noqa: E402
-from app.llm.providers import get_provider  # noqa: E402
-from app.llm.providers.runtime_manager import ProviderRuntimeManager  # noqa: E402
+from app.agent.config import DEFAULT_LLM_CONFIG  # noqa: E402
+from app.agent.providers import get_provider  # noqa: E402
+from app.agent.providers.runtime_manager import ProviderRuntimeManager  # noqa: E402
 
 AGENT_MODULE = "agent"
 

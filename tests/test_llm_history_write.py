@@ -12,8 +12,8 @@ from __future__ import annotations
 import types
 
 from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
-from app.llm.history_model import HistoryEntry, split_user_context
-from app.llm.session import SessionManager
+from app.agent.session.model import HistoryEntry, split_user_context
+from app.agent.session.manager import SessionManager
 
 NL = chr(10)  # 显式换行，避免测试源码里被转义处理
 
@@ -73,7 +73,7 @@ def test_get_history_preserves_turn_and_base_for_enrichment(tmp_path):
 
 def test_structured_entry_renders_from_base_not_content(tmp_path):
     """渲染走 base：换行/发送者标签变化时不需要重写历史。"""
-    from app.llm.group_context import format_history_for_llm
+    from app.agent.context.group import format_history_for_llm
 
     mgr = _mgr(tmp_path)
     mgr.create_session("group_1", "group", 60)
@@ -111,7 +111,7 @@ def test_split_user_context_handles_plain_and_new_style():
 
 
 def test_rendered_entry_replays_meta_lines_after_body():
-    from app.llm.history_model import BaseInfo, render_history_entry
+    from app.agent.session.model import BaseInfo, render_history_entry
 
     entry = HistoryEntry(
         role="user",
@@ -130,8 +130,8 @@ def test_rendered_entry_replays_meta_lines_after_body():
 
 async def test_chat_writes_then_renders_structured_history(monkeypatch, tmp_path):
     """端到端：第一轮写入结构化历史，第二轮请求里该历史按 base 重新渲染。"""
-    from app.llm import chat
-    from app.llm.providers import PROVIDERS
+    from app.agent.loop import chat
+    from app.agent.providers import PROVIDERS
     from tests.test_llm_assembly_paths import (
         CHAT_MESSAGES,
         _ProbeProvider,

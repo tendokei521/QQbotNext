@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import itertools
 
-from app.llm.session import (
+from app.agent.session.manager import (
     HISTORY_ENTRY_FIELDS,
     HISTORY_ROLES,
     SessionManager,

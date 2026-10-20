@@ -454,7 +454,7 @@ class BaseModule(ABC):
     def _llm_unavailable(self, where: str):
         """框架没注入 LLM 客户端时的兜底：留痕并返回空响应（不抛，避免模块直接崩）。"""
         from app.core.logger import module_logger
-        from app.llm.providers.base import LLMResponse
+        from app.agent.providers.base import LLMResponse
 
         module_logger.add_info(f"#{self.bot_id}").warning(
             f"[{self.module_name}] ctx.services.llm 不可用（{where}）："

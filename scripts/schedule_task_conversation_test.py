@@ -35,18 +35,18 @@ if str(ROOT) not in sys.path:
 from app.core.settings import Settings  # noqa: E402
 from app.infrastructure.config.config_service import ConfigService  # noqa: E402
 from app.infrastructure.persistence.database import Database  # noqa: E402
-from app.llm.config import DEFAULT_LLM_CONFIG  # noqa: E402
-from app.llm.prompt import LEGACY_MESSAGE_META_INSTRUCTION, build_messages  # noqa: E402
-from app.llm.providers import get_provider  # noqa: E402
-from app.llm.providers.openai_compat import OpenAICompatProvider  # noqa: E402
-from app.llm.providers.runtime_manager import ProviderRuntimeManager  # noqa: E402
-from app.llm.scheduler import (  # noqa: E402
+from app.agent.config import DEFAULT_LLM_CONFIG  # noqa: E402
+from app.agent.assembly.prompt import LEGACY_MESSAGE_META_INSTRUCTION, build_messages  # noqa: E402
+from app.agent.providers import get_provider  # noqa: E402
+from app.agent.providers.openai_compat import OpenAICompatProvider  # noqa: E402
+from app.agent.providers.runtime_manager import ProviderRuntimeManager  # noqa: E402
+from app.agent.proactivity.scheduler import (  # noqa: E402
     TaskScheduler,
     build_schedule_tool,
     handle_schedule_tool,
 )
-from app.llm.tool import make_executor  # noqa: E402
-from app.llm.time_parser import parse_schedule  # noqa: E402
+from app.agent.tools.spec import make_executor  # noqa: E402
+from app.agent.proactivity.time_parser import parse_schedule  # noqa: E402
 
 AGENT_MODULE = "agent"
 BOT_ID = "3569937952"

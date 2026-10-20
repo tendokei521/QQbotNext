@@ -2,10 +2,10 @@
 
 import time
 
-from app.llm.config import DEFAULT_LLM_CONFIG
-from app.llm.memory.commands import handle_memory_command
-from app.llm.memory.manager import MemoryManager
-from app.llm.memory.store import owner_private
+from app.agent.config import DEFAULT_LLM_CONFIG
+from app.agent.memory.commands import handle_memory_command
+from app.agent.memory.manager import MemoryManager
+from app.agent.memory.store import owner_private
 
 
 class FakeConfig:

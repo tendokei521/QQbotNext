@@ -6,7 +6,7 @@
 
 from types import SimpleNamespace
 
-from app.llm.prompt import (
+from app.agent.assembly.prompt import (
     PROACTIVE_ENV_LINE,
     PROACTIVE_ENV_NUDGE,
     PROACTIVE_FOOTER_LINE,
@@ -261,7 +261,7 @@ def test_nudge_not_added_without_intent_or_when_disabled():
 
 
 def test_chat_helper_uses_raw_user_text_and_available_tools():
-    from app.llm.chat import _proactive_instruction
+    from app.agent.loop.chat import _proactive_instruction
 
     ctx = SimpleNamespace(state={"user_context": {"sent_text": "刚才我说了什么"}})
     specs = [SimpleNamespace(name="get_chat_history"), SimpleNamespace(name="send_poke")]

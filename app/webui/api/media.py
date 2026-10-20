@@ -21,7 +21,7 @@ import os
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse, JSONResponse
 
-from app.llm import image_media
+from app.agent.media import store as image_media
 from app.services.session_history_service import SessionHistoryService
 from app.webui.api.deps import parse_bot_id
 

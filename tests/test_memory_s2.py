@@ -2,10 +2,10 @@
 
 import time
 
-from app.llm.config import DEFAULT_LLM_CONFIG
-from app.llm.memory.manager import MemoryManager
-from app.llm.memory.recall import effective_confidence, rank, render_block, score_row
-from app.llm.memory.store import MemoryStore, owner_private
+from app.agent.config import DEFAULT_LLM_CONFIG
+from app.agent.memory.manager import MemoryManager
+from app.agent.memory.recall import effective_confidence, rank, render_block, score_row
+from app.agent.memory.store import MemoryStore, owner_private
 
 
 def _store(bot_id="bots2"):

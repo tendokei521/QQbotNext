@@ -10,11 +10,11 @@ from fastapi.responses import JSONResponse
 
 from app.core.logger import logger
 from app.infrastructure.config.config_service import ConfigService
-from app.llm.config import LEGACY_LLM_CONNECTION_KEYS
-from app.llm.config_schema import STREAM_PRESETS
-from app.llm.onebot_tools.manifest import ONEBOT_TOOLS
-from app.llm.onebot_tools.security import resolve_tool_policy
-from app.llm.system_tools import list_system_tools
+from app.agent.config import LEGACY_LLM_CONNECTION_KEYS
+from app.agent.config_schema import STREAM_PRESETS
+from app.agent.tools.onebot.manifest import ONEBOT_TOOLS
+from app.agent.tools.onebot.security import resolve_tool_policy
+from app.agent.tools.system import list_system_tools
 from app.modules.schema_utils import webui_schema
 from app.services.bot_service import PASSWORD_MASK as _PASSWORD_MASK
 from app.services.provider_model_service import ProviderModelService
@@ -38,7 +38,7 @@ def _runtime(container, bot_id):
     """取指定 bot 的 Agent 运行时；无则返回 (None, None)。"""
     if bot_id is None:
         return None, None
-    from app.llm.manager import AgentManager
+    from app.agent.runtime import AgentManager
 
     manager = container.get(AgentManager)
     if manager is None:
@@ -59,7 +59,7 @@ def _mask_password_config(config: dict, schema: dict) -> dict:
 
 @router.get("/config")
 async def agent_config(request: Request, bot_id: int | None = Depends(parse_bot_id)):
-    from app.llm.config_schema import SCHEMA
+    from app.agent.config_schema import SCHEMA
 
     container = get_container(request)
     runtime, _ = _runtime(container, bot_id)
@@ -101,7 +101,7 @@ async def agent_config(request: Request, bot_id: int | None = Depends(parse_bot_
 
 @router.post("/config")
 async def agent_config_update(request: Request, bot_id: int | None = Depends(parse_bot_id)):
-    from app.llm.config_schema import SCHEMA
+    from app.agent.config_schema import SCHEMA
 
     container = get_container(request)
     runtime, _ = _runtime(container, bot_id)

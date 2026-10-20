@@ -2,12 +2,12 @@
 
 import pytest
 
-from app.llm.knowledge.store import KnowledgeStore, cosine
-from app.llm.providers.embedding import OpenAIEmbeddingProvider
-from app.llm.providers.rerank import CohereRerankProvider, JinaRerankProvider
-from app.llm.providers.stt import OpenAIWhisperSTTProvider
-from app.llm.providers.tts import OpenAITTSProvider
-from app.llm.providers import get_provider
+from app.agent.knowledge.store import KnowledgeStore, cosine
+from app.agent.providers.embedding import OpenAIEmbeddingProvider
+from app.agent.providers.rerank import CohereRerankProvider, JinaRerankProvider
+from app.agent.providers.stt import OpenAIWhisperSTTProvider
+from app.agent.providers.tts import OpenAITTSProvider
+from app.agent.providers import get_provider
 
 
 def test_get_provider_dispatches_by_provider_type():
@@ -34,7 +34,7 @@ def test_get_provider_dispatches_by_provider_type():
 
 
 def test_knowledge_store_cosine_and_crud(tmp_path, monkeypatch):
-    # KnowledgeStore 使用 app.llm.llm_data_dir；测试隔离到临时目录
+    # KnowledgeStore 使用 app.agent.llm_data_dir；测试隔离到临时目录
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
     store = KnowledgeStore("bot1")
     try:

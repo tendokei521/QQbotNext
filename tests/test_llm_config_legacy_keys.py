@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from app.llm.config import (
+from app.agent.config import (
     AGENT_CONFIG_MODULE,
     DEFAULT_LLM_CONFIG,
     AgentConfig,

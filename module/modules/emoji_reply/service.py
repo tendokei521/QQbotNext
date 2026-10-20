@@ -39,14 +39,14 @@ def _group_log(module):
     except Exception as e:  # noqa: BLE001 - 记录面不可用不能影响表情回应
         _logger(module).debug(f"[Emoji] 取 runtime 失败（忽略）: {e}")
         return None
-    from app.llm.group_log.store import store_of
+    from app.agent.group_log.store import store_of
 
     return store_of(runtime)
 
 
 def _scope_of(event) -> str:
     """记录面分片键：群聊按群；私聊不在本模块记录范围内（返回空串）。"""
-    from app.llm.group_log.events import make_scope
+    from app.agent.group_log.events import make_scope
 
     group = getattr(event, "group", None)
     group_id = getattr(group, "group_id", None) or getattr(event, "group_id", None)
@@ -82,7 +82,7 @@ def _record_mine(module, event, emoji_id: str, *, reason: str) -> None:
     try:
         import time as _time
 
-        from app.llm.group_log.events import KIND_EMOJI, LogEvent
+        from app.agent.group_log.events import KIND_EMOJI, LogEvent
 
         group = getattr(event, "group", None)
         store.append_many([LogEvent(

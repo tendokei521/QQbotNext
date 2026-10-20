@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import types
 
-from app.llm.assembly import BLOCKS, PromptRequest, describe
-from app.llm.prompt import LEGACY_MESSAGE_META_INSTRUCTION
-from app.llm.providers import PROVIDERS
+from app.agent.assembly.assembler import BLOCKS, PromptRequest, describe
+from app.agent.assembly.prompt import LEGACY_MESSAGE_META_INSTRUCTION
+from app.agent.providers import PROVIDERS
 from tests.test_llm_assembly_paths import _ProbeProvider, setup_function  # noqa: F401
 
 EXPECTED_BLOCKS = [b.name for b in BLOCKS]
@@ -41,7 +41,7 @@ def test_declared_block_order_covers_all_kinds():
 
 def test_proactive_prompt_has_same_block_structure_as_chat():
     """主动消息的块序列与 chat 一致（含此前缺失的格式说明块）。"""
-    from app.llm.assembly import PromptRequest
+    from app.agent.assembly.assembler import PromptRequest
 
     req = PromptRequest(
         config={"system_prompt": "人设", "meta_sender_style": "legacy"},
@@ -66,7 +66,7 @@ def test_proactive_prompt_has_same_block_structure_as_chat():
 
 def test_schedule_prompt_has_same_block_structure_as_chat():
     """定时任务的块序列与 chat 一致，且本轮 user 是任务模板内容。"""
-    from app.llm.assembly import PromptRequest
+    from app.agent.assembly.assembler import PromptRequest
 
     req = PromptRequest(
         config={"system_prompt": "人设", "meta_sender_style": "legacy"},
@@ -93,7 +93,7 @@ def test_schedule_prompt_has_same_block_structure_as_chat():
 
 async def test_scheduler_build_messages_uses_assembler(monkeypatch, tmp_path):
     """scheduler._build_messages 真的走装配器：块序列与 chat 一致，且含格式说明。"""
-    from app.llm.scheduler import DEFAULT_SCHEDULE_PROMPT, TaskScheduler
+    from app.agent.proactivity.scheduler import DEFAULT_SCHEDULE_PROMPT, TaskScheduler
 
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
 

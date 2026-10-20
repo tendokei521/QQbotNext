@@ -13,10 +13,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.llm import focus, image_media, nicknames
-from app.llm import image as image_mod
-from app.llm.context_tools import build_context_tools, derive_targets
-from app.llm.tool import ToolContext
+from app.agent.context import focus, nicknames
+from app.agent.media import store as image_media
+from app.agent.media import image as image_mod
+from app.agent.tools.context_tools import build_context_tools, derive_targets
+from app.agent.tools.spec import ToolContext
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 32
 
@@ -235,7 +236,7 @@ async def test_expand_message_does_not_truncate_by_default():
 
 async def test_summary_is_not_clipped():
     """登记摘要不截断：它是"已看过"时复用给模型的正文，砍了模型就更瞎。"""
-    from app.llm.context_tools import summarize_message
+    from app.agent.tools.context_tools import summarize_message
 
     long_forward = "转发内容 —— " + " ｜ ".join(f"某人{i}: 第{i}条内容" for i in range(20))
     text = f"（我翻到了这条消息）三哥(123)：{long_forward} [id 999] [关系：指定展开的消息]"
@@ -495,7 +496,7 @@ async def test_expand_recent_falls_back_to_inner_forward_id():
 
 
 async def test_expand_recent_count_is_clamped():
-    from app.llm.context_tools import MAX_RECENT
+    from app.agent.tools.context_tools import MAX_RECENT
 
     bot = _Bot(history=[_history_msg(1000 + i, "n", f"m{i}") for i in range(10)])
 
@@ -535,7 +536,7 @@ SENTENCE_NICK = "老师，今年的学费也是一次性交吗"
 
 async def test_expand_image_masks_sentence_like_sender(monkeypatch):
     """用户报的那条：expand_image 的返回里不能出现整句话当人名。"""
-    from app.llm import display_names
+    from app.agent.context import display_names
 
     display_names.clear_cache()
     monkeypatch.setattr(display_names, "HOURLY_CALL_LIMIT", 0)  # 判定不可用 → 必须安全名
@@ -554,7 +555,7 @@ async def test_expand_image_masks_sentence_like_sender(monkeypatch):
 
 
 async def test_expand_recent_masks_sentence_like_sender(monkeypatch):
-    from app.llm import display_names
+    from app.agent.context import display_names
 
     display_names.clear_cache()
     monkeypatch.setattr(display_names, "HOURLY_CALL_LIMIT", 0)
@@ -569,7 +570,7 @@ async def test_expand_recent_masks_sentence_like_sender(monkeypatch):
 
 
 async def test_expand_message_masks_sentence_like_sender(monkeypatch):
-    from app.llm import display_names
+    from app.agent.context import display_names
 
     display_names.clear_cache()
     monkeypatch.setattr(display_names, "HOURLY_CALL_LIMIT", 0)
@@ -588,7 +589,7 @@ async def test_expand_message_masks_sentence_like_sender(monkeypatch):
 
 async def test_expand_user_masks_sentence_like_nickname(monkeypatch):
     """展开"这个人是谁"时，昵称/群名片同样要过映射。"""
-    from app.llm import display_names
+    from app.agent.context import display_names
 
     display_names.clear_cache()
     monkeypatch.setattr(display_names, "HOURLY_CALL_LIMIT", 0)
@@ -603,7 +604,7 @@ async def test_expand_user_masks_sentence_like_nickname(monkeypatch):
 
 async def test_forward_nodes_mask_sentence_like_sender(monkeypatch):
     """合并转发节点里的昵称也要映射（否则转发整段都是句子型"人名"）。"""
-    from app.llm import display_names
+    from app.agent.context import display_names
 
     display_names.clear_cache()
     monkeypatch.setattr(display_names, "HOURLY_CALL_LIMIT", 0)
@@ -625,7 +626,7 @@ async def test_forward_nodes_mask_sentence_like_sender(monkeypatch):
 
 async def test_normal_nickname_is_kept(monkeypatch):
     """普通昵称不受影响：仍是 昵称(QQ) 形态（不能因为加映射把正常人名也改掉）。"""
-    from app.llm import display_names
+    from app.agent.context import display_names
 
     display_names.clear_cache()
     bot = _Bot(history=[_history_msg(1007, "三哥", "在吗", user_id=30003)])
@@ -637,7 +638,7 @@ async def test_normal_nickname_is_kept(monkeypatch):
 
 async def test_expand_image_uses_verdict_when_name_approved(monkeypatch):
     """灰区长昵称被判定为真名后，显示名应还原（而不是永远脱敏）。"""
-    from app.llm import display_names
+    from app.agent.context import display_names
 
     display_names.clear_cache()
     gray = "夜风里的旅人甲乙丙丁戊己庚辛壬癸子"  # 17 字：落在灰区
@@ -645,7 +646,7 @@ async def test_expand_image_uses_verdict_when_name_approved(monkeypatch):
     async def fake_chat(chain, messages, **kwargs):
         return SimpleNamespace(ok=True, text="1")
 
-    monkeypatch.setattr("app.llm.providers.chat_with_fallback", fake_chat)
+    monkeypatch.setattr("app.agent.providers.chat_with_fallback", fake_chat)
     runtime_cfg = {"model": "probe", "api_key": "sk-test"}
     bot = _Bot(messages={"2002": {
         "sender": {"user_id": 50005, "nickname": gray, "card": ""},
@@ -674,7 +675,7 @@ async def test_expand_image_uses_verdict_when_name_approved(monkeypatch):
 
 
 def test_summaries_extract_clean_sentence():
-    from app.llm.context_tools import summarize_message, summarize_user
+    from app.agent.tools.context_tools import summarize_message, summarize_user
 
     assert summarize_user("（我看了下这个人）昵称：三哥；群名片：三哥 [QQ 123] [关系：指定展开的用户]") == "三哥"
     assert summarize_user("（我看了下这个人）昵称：小红 [QQ 9] [关系：指定展开的用户]") == "小红"
@@ -689,7 +690,7 @@ def test_summaries_extract_clean_sentence():
 
 def test_cache_hit_summary_has_no_stale_head():
     """第二次取回用登记摘要时，不该把旧的"（我翻到了…）"头一起带出来。"""
-    from app.llm.context_tools import summarize_message
+    from app.agent.tools.context_tools import summarize_message
 
     first = "（我翻到了这条消息）三哥(123)：早 [id 999] [关系：指定展开的消息]"
 
@@ -832,7 +833,7 @@ async def test_fetch_recent_without_history_is_actionable():
 
 async def test_fetch_entities_from_event_derives_relations():
     """零参数取回（预取路径）从本轮触发消息推导目标，并标注 relation。"""
-    from app.llm.context_tools import fetch_entities
+    from app.agent.tools.context_tools import fetch_entities
 
     bot = _Bot(messages={"999": {
         "sender": {"user_id": 123, "nickname": "张三"},
@@ -900,7 +901,7 @@ def test_tool_specs_are_split_by_intent():
 
 
 def test_tool_is_listed_as_system_tool_and_gated_by_config():
-    from app.llm.system_tools import list_system_tools
+    from app.agent.tools.system import list_system_tools
 
     names = {"expand_recent", "expand_message", "expand_user"}
     runtime = SimpleNamespace(bot_id="1", config={})
@@ -916,7 +917,7 @@ def test_tool_is_listed_as_system_tool_and_gated_by_config():
 
 
 async def test_collect_llm_ext_registers_tool_unless_disabled():
-    from app.llm.chat import _collect_llm_ext
+    from app.agent.loop.chat import _collect_llm_ext
 
     event = _event([{"type": "text", "data": {"text": "hi"}}])
     event.bot = _Bot()

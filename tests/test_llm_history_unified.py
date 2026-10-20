@@ -12,9 +12,9 @@ from __future__ import annotations
 import types
 
 from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
-from app.llm.enhance import collect_user_context, format_user_context
-from app.llm.group_context import format_history_for_llm, format_online_history
-from app.llm.history_model import build_current_turn_text
+from app.agent.assembly.enhance import collect_user_context, format_user_context
+from app.agent.context.group import format_history_for_llm, format_online_history
+from app.agent.session.model import build_current_turn_text
 
 NL = chr(10)
 
@@ -66,7 +66,7 @@ def test_current_turn_new_styles_and_empty_body():
 
 
 def _ctx(event, user_text="", **state):
-    from app.llm.context import LlmContext
+    from app.agent.loop.context import LlmContext
 
     ctx = LlmContext(event=event, runtime=None, bot=None, session_id="group_1")
     ctx.user_text = user_text
@@ -140,7 +140,7 @@ async def test_collect_then_format_matches_history_semantics():
 
 def test_online_and_session_history_agree_on_single_line_shape():
     """同一句话：在线（OneBot 段）与会话（结构化 base）渲染出的形态一致。"""
-    from app.llm.history_model import BaseInfo, HistoryEntry, render_history_entry
+    from app.agent.session.model import BaseInfo, HistoryEntry, render_history_entry
 
     entry = HistoryEntry(
         role="user",

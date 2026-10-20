@@ -19,7 +19,7 @@
 
     python scripts/gen/arch_closure.py                    # 总览：SCC 排名 + 默认入口闭包
     python scripts/gen/arch_closure.py --scc              # 只列强连通块
-    python scripts/gen/arch_closure.py --entry app.llm.chat --entry app.webui.api.agent
+    python scripts/gen/arch_closure.py --entry app.agent.loop.chat --entry app.webui.api.agent
     python scripts/gen/arch_closure.py --json out.json    # 机器可读
     python scripts/gen/arch_closure.py --assert-max 8000  # 任一入口闭包超阈值则退出码 1
 
@@ -47,12 +47,12 @@ SCAN_ROOTS = ("app", "module", "scripts")
 # 默认入口：改这些文件时你最想知道"会牵动多少代码"
 DEFAULT_ENTRIES = (
     "app.bootstrap",
-    "app.llm.chat",
-    "app.llm.assembly",
-    "app.llm.providers",
-    "app.llm.scheduler",
-    "app.llm.memory",
-    "app.llm.knowledge",
+    "app.agent.loop.chat",
+    "app.agent.assembly.assembler",
+    "app.agent.providers",
+    "app.agent.proactivity.scheduler",
+    "app.agent.memory",
+    "app.agent.knowledge",
     "app.webui.app",
     "app.webui.api.agent",
     "app.webui.api.modules",
@@ -65,7 +65,7 @@ DEFAULT_ENTRIES = (
 # 模块发现
 # --------------------------------------------------------------------------- #
 def module_name_for(path: Path) -> str:
-    """``app/llm/chat.py`` -> ``app.llm.chat``；``app/llm/__init__.py`` -> ``app.llm``。"""
+    """``app/llm/chat.py`` -> ``app.agent.loop.chat``；``app/llm/__init__.py`` -> ``app.agent``。"""
     rel = path.relative_to(REPO_ROOT).with_suffix("")
     parts = list(rel.parts)
     if parts and parts[-1] == "__init__":

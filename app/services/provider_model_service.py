@@ -14,9 +14,9 @@ from typing import Any
 
 from app.core.logger import logger
 from app.infrastructure.config.config_service import ConfigService
-from app.llm.providers.modalities import default_modalities_for, normalize_modalities
-from app.llm.providers.runtime_manager import ProviderRuntimeManager
-from app.llm.request_policy import (
+from app.agent.providers.modalities import default_modalities_for, normalize_modalities
+from app.agent.providers.runtime_manager import ProviderRuntimeManager
+from app.agent.providers.policy import (
     REASONING_FLOOR,
     is_reasoning_model,
     merge_config_layers,

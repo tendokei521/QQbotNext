@@ -11,8 +11,8 @@
 
 from types import SimpleNamespace
 
-from app.llm.hooks import ToolCallHookRegistry
-from app.llm.tool import ToolContext, ToolSpec, is_error_result, make_executor
+from app.agent.hooks import ToolCallHookRegistry
+from app.agent.tools.spec import ToolContext, ToolSpec, is_error_result, make_executor
 
 
 async def _run(handler, *, name="tool_under_test") -> tuple[str, list]:
@@ -93,7 +93,7 @@ def test_is_error_result_only_matches_error_prefix():
 
 def test_result_budget_can_be_disabled_per_tool():
     """工具可声明"结果不截断"（max_result=0），不被全局 TOOL_RESULT_MAX 砍掉。"""
-    from app.llm.tool import _truncate_result
+    from app.agent.tools.spec import _truncate_result
 
     long_text = "x" * 5000
 
@@ -107,7 +107,7 @@ async def test_executor_honours_tool_budget():
     """执行器按工具自身预算回传（context_tools 的展开工具即用 0=不截断）。"""
     from types import SimpleNamespace
 
-    from app.llm.tool import ToolContext, ToolSpec, make_executor
+    from app.agent.tools.spec import ToolContext, ToolSpec, make_executor
 
     payload = "正文内容" * 1000
 

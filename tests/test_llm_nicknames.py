@@ -1,4 +1,4 @@
-"""昵称反查共享实现（app.llm.nicknames）测试。
+"""昵称反查共享实现（app.agent.context.nicknames）测试。
 
 目的：把"骨架"（``@123``）补成"血肉"（``@三哥(123)``）的反查管道必须**共享缓存**，
 否则同一轮里"触发消息展开 → 背景块再展开"会对同一个人重复请求 OneBot。
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 
-from app.llm import nicknames
+from app.agent.context import nicknames
 
 
 class _Bot:

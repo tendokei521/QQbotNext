@@ -19,11 +19,11 @@ from pathlib import Path
 
 import pytest
 
-from app.llm.onebot_tools import manifest as manifest_module
+from app.agent.tools.onebot import manifest as manifest_module
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-MANIFEST_JSON = REPO_ROOT / "app" / "llm" / "onebot_tools" / "manifest.json"
-MANIFEST_PY = REPO_ROOT / "app" / "llm" / "onebot_tools" / "manifest.py"
+MANIFEST_JSON = REPO_ROOT / "app" / "agent" / "tools" / "onebot" / "manifest.json"
+MANIFEST_PY = REPO_ROOT / "app" / "agent" / "tools" / "onebot" / "manifest.py"
 
 REQUIRED_FIELDS = {
     "name": str,
@@ -145,6 +145,6 @@ def test_json_ships_with_the_package():
     """数据文件必须被声明为 package-data，否则 `pip install` 后加载即崩。"""
     pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert "[tool.setuptools.package-data]" in pyproject, "缺少 package-data 配置"
-    assert "app.llm.onebot_tools" in pyproject and "*.json" in pyproject, (
-        "package-data 必须声明 app.llm.onebot_tools = [\"*.json\"]，否则打包后 manifest.json 不会被分发"
+    assert "app.agent.tools.onebot" in pyproject and "*.json" in pyproject, (
+        "package-data 必须声明 app.agent.tools.onebot = [\"*.json\"]，否则打包后 manifest.json 不会被分发"
     )

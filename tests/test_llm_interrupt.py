@@ -27,8 +27,8 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from app.llm.context import LlmContext, LlmJob
-from app.llm.pipeline import LlmPipeline
+from app.agent.loop.context import LlmContext, LlmJob
+from app.agent.loop.pipeline import LlmPipeline
 
 
 class _HooksStub:
@@ -193,7 +193,7 @@ async def test_inflight_stream_is_cut_off_by_new_message(monkeypatch):
                 pipeline.submit(_private_event(event.user_id, "新消息"))
             yield f"第{i + 1}句。"
 
-    monkeypatch.setattr("app.llm.chat.stream_response", fake_stream)
+    monkeypatch.setattr("app.agent.loop.chat.stream_response", fake_stream)
 
     sent: list[str] = []
 
@@ -234,7 +234,7 @@ async def test_command_job_is_not_dropped_by_generation_gate(monkeypatch):
     async def fake_handle(runtime, event):
         seen.append(event)
 
-    monkeypatch.setattr("app.llm.chat.handle", fake_handle)
+    monkeypatch.setattr("app.agent.loop.chat.handle", fake_handle)
 
     event = _private_event(3688513383, "#llm help")
     job = LlmJob(id="cmd", group_key="private_3688513383", generation=0)
@@ -282,7 +282,7 @@ async def test_stream_not_cut_off_when_interrupt_disabled(monkeypatch):
                 pipeline.submit(_private_event(event.user_id, "新消息"))
             yield f"第{i + 1}句。"
 
-    monkeypatch.setattr("app.llm.chat.stream_response", fake_stream)
+    monkeypatch.setattr("app.agent.loop.chat.stream_response", fake_stream)
 
     sent: list[str] = []
 

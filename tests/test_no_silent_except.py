@@ -21,10 +21,10 @@ _ROOT = pathlib.Path(__file__).resolve().parent.parent
 _SCAN_DIRS = ("app", "module")
 
 # 允许静默的位置白名单：文件相对路径 -> 行号集合
-# 说明：app/llm/knowledge/vector.py 的 _log_debug 是"日志失败的兜底"，
+# 说明：app/agent/knowledge/vector.py 的 _log_debug 是"日志失败的兜底"，
 # 不能因为日志写不出去而中断向量检索主流程。
 _ALLOWED_SILENT = {
-    "app/llm/knowledge/vector.py": {25},
+    "app/agent/knowledge/vector.py": {25},
 }
 
 

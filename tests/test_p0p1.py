@@ -2,11 +2,11 @@
 
 import asyncio
 
-from app.llm.locks import SessionLockManager
-from app.llm.providers import AnthropicProvider, GeminiProvider, get_provider_class, provider_supports
-from app.llm.providers.base import BaseProvider
-from app.llm.telemetry import LLMCallRecord, TelemetryRecorder, ToolCallRecord
-from app.llm.tool import ToolContext, ToolSpec
+from app.agent.loop.locks import SessionLockManager
+from app.agent.providers import AnthropicProvider, GeminiProvider, get_provider_class, provider_supports
+from app.agent.providers.base import BaseProvider
+from app.agent.telemetry import LLMCallRecord, TelemetryRecorder, ToolCallRecord
+from app.agent.tools.spec import ToolContext, ToolSpec
 
 
 # ---------- LLM 遥测 ----------
@@ -166,7 +166,7 @@ def test_tool_scope_private_only():
 
 
 def test_tool_spec_sanitizes_invalid_openai_name():
-    from app.llm.tool import ToolSpec, sanitize_tool_name
+    from app.agent.tools.spec import ToolSpec, sanitize_tool_name
 
     assert sanitize_tool_name(".ocr_image") == "_ocr_image"
     assert sanitize_tool_name(".handle_quick_operation") == "_handle_quick_operation"
@@ -181,7 +181,7 @@ def test_tool_spec_sanitizes_invalid_openai_name():
 # ---------- 知识库向量后端回退 ----------
 
 def test_knowledge_store_vector_backend_fallback(tmp_path):
-    from app.llm.knowledge.store import KnowledgeStore
+    from app.agent.knowledge.store import KnowledgeStore
 
     store = KnowledgeStore("kb_test", db_path=str(tmp_path / "kb.db"))
     try:

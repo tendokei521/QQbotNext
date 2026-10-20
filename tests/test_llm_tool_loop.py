@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 
-from app.llm.tool_loop import normalize_and_execute_tool_calls
+from app.agent.loop.tool_loop import normalize_and_execute_tool_calls
 
 
 def _call(name: str, arguments, call_id: str | None = "call_1") -> dict:
@@ -217,7 +217,7 @@ class _BadCfg(dict):
 
 
 def test_reply_directive_default_and_switch():
-    from app.llm.tool_loop import DEFAULT_REPLY_DIRECTIVE, reply_directive
+    from app.agent.loop.tool_loop import DEFAULT_REPLY_DIRECTIVE, reply_directive
 
     assert reply_directive(None) == ""
     assert reply_directive({}) == DEFAULT_REPLY_DIRECTIVE          # 空=用内置默认
@@ -227,7 +227,7 @@ def test_reply_directive_default_and_switch():
 
 
 def test_default_directive_says_short_and_no_report():
-    from app.llm.tool_loop import DEFAULT_REPLY_DIRECTIVE
+    from app.agent.loop.tool_loop import DEFAULT_REPLY_DIRECTIVE
 
     assert "不要复述" in DEFAULT_REPLY_DIRECTIVE
     assert "一两句就够" in DEFAULT_REPLY_DIRECTIVE
@@ -235,7 +235,7 @@ def test_default_directive_says_short_and_no_report():
 
 
 def test_append_reply_directive_skips_errors_and_empty():
-    from app.llm.tool_loop import append_reply_directive
+    from app.agent.loop.tool_loop import append_reply_directive
 
     assert append_reply_directive("内容", "") == "内容"
     assert append_reply_directive("内容", "【要求】") == "内容\n\n【要求】"
@@ -247,7 +247,7 @@ async def test_executor_appends_directive_to_successful_result():
     """工具结果末尾必须带上回应要求（抑制"工具返回后写长串汇报"的落点）。"""
     from types import SimpleNamespace
 
-    from app.llm.tool import ToolContext, ToolSpec, make_executor
+    from app.agent.tools.spec import ToolContext, ToolSpec, make_executor
 
     async def _handler(_ctx, _args):
         return "（我翻到了这条消息）三哥(123)：早"
@@ -266,7 +266,7 @@ async def test_executor_appends_directive_to_successful_result():
 async def test_executor_respects_disabled_directive():
     from types import SimpleNamespace
 
-    from app.llm.tool import ToolContext, ToolSpec, make_executor
+    from app.agent.tools.spec import ToolContext, ToolSpec, make_executor
 
     async def _handler(_ctx, _args):
         return "结果"

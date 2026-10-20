@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.llm.assembly import (
+from app.agent.assembly.assembler import (
     PromptAssembler,
     PromptRequest,
     build_history,
@@ -175,7 +175,7 @@ def test_single_style_folds_preset_prompt_into_one_system():
 
 
 def test_describe_reports_persona_block():
-    from app.llm.assembly import describe
+    from app.agent.assembly.assembler import describe
 
     req = _req(config_service=_ConfigService({"p1": PRESET}), config={"persona_preset_id": "p1"})
     rows = describe(req)
@@ -185,8 +185,8 @@ def test_describe_reports_persona_block():
 
 def test_agent_schema_exposes_persona_as_resource_field():
     """配置键与它在前端的可选项必须成对出现（否则用户没法选，只能手抄 ID）。"""
-    from app.llm.config import DEFAULT_LLM_CONFIG
-    from app.llm.config_schema import SCHEMA
+    from app.agent.config import DEFAULT_LLM_CONFIG
+    from app.agent.config_schema import SCHEMA
 
     assert DEFAULT_LLM_CONFIG["persona_preset_id"] == ""
     field = SCHEMA["persona_preset_id"]

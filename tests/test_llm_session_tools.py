@@ -8,8 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.llm.session import SessionManager
-from app.llm.session_tools import build_session_tools
+from app.agent.session.manager import SessionManager
+from app.agent.tools.session_tools import build_session_tools
 
 
 @pytest.fixture

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import time
 
-from app.llm.group_log.events import KIND_EMOJI, KIND_MESSAGE, LogEvent
-from app.llm.group_log.store import GroupLogStore
+from app.agent.group_log.events import KIND_EMOJI, KIND_MESSAGE, LogEvent
+from app.agent.group_log.store import GroupLogStore
 from tests.test_llm_assembly_paths import (  # noqa: F401 - setup_function 需被 pytest 发现
     CHAT_MESSAGES,
     _config_dict,
@@ -54,7 +54,7 @@ def _systems(messages: list[dict]) -> list[str]:
 
 async def test_group_log_block_reaches_prompt(monkeypatch, tmp_path):
     """环境块真的进了 prompt，且带上别人的表情与我做过的动作。"""
-    from app.llm import chat
+    from app.agent.loop import chat
 
     _register(monkeypatch, "probe_model")
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
@@ -88,7 +88,7 @@ async def test_trigger_message_is_not_duplicated(monkeypatch, tmp_path):
     的上下文位置，去重不会把它抹掉。若哪天历史去重口径变了，环境块再出现第二份就会
     在这里显形。
     """
-    from app.llm import chat
+    from app.agent.loop import chat
 
     _register(monkeypatch, "probe_model")
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
@@ -120,7 +120,7 @@ async def test_trigger_message_is_not_duplicated(monkeypatch, tmp_path):
 
 async def test_history_written_message_is_deduped_from_environment(monkeypatch, tmp_path):
     """已写进会话历史的消息：环境块不再重复它的正文（这是双源去重的验收点）。"""
-    from app.llm import chat
+    from app.agent.loop import chat
 
     _register(monkeypatch, "probe_model")
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
@@ -164,7 +164,7 @@ async def test_history_written_message_is_deduped_from_environment(monkeypatch, 
 
 async def test_disabled_group_log_matches_today(monkeypatch, tmp_path):
     """关掉开关 → 不注入环境块（与今天的行为一致，可回滚）。"""
-    from app.llm import chat
+    from app.agent.loop import chat
 
     _register(monkeypatch, "probe_model")
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
@@ -184,7 +184,7 @@ async def test_disabled_group_log_matches_today(monkeypatch, tmp_path):
 
 async def test_missing_module_matches_today(monkeypatch, tmp_path):
     """群聊记录模块不在场（runtime 无挂载点）→ 空块降级，不报错。"""
-    from app.llm import chat
+    from app.agent.loop import chat
 
     _register(monkeypatch, "probe_model")
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
@@ -200,8 +200,8 @@ async def test_missing_module_matches_today(monkeypatch, tmp_path):
 
 def test_config_defaults_align_with_schema():
     """默认值口径一致：代码默认与 WebUI schema 默认必须相同，否则"界面显示开、实际关"。"""
-    from app.llm.config import DEFAULT_LLM_CONFIG
-    from app.llm.config_schema import SCHEMA
+    from app.agent.config import DEFAULT_LLM_CONFIG
+    from app.agent.config_schema import SCHEMA
 
     for key in ("group_log_enable", "group_log_window_minutes",
                 "group_log_window_limit", "group_log_max_chars"):

@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import json
 
-from app.llm import prompt_dump
-from app.llm.assembly import PromptRequest, apply_post_assemble
-from app.llm.hooks import LlmHookRegistry
+from app.agent.assembly import dump as prompt_dump
+from app.agent.assembly.assembler import PromptRequest, apply_post_assemble
+from app.agent.hooks import LlmHookRegistry
 
 
 class _Config:

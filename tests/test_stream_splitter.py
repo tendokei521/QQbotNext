@@ -1,6 +1,6 @@
 """流式句子切分器测试。"""
 
-from app.llm.splitter import split_sentences, strip_stream_artifacts
+from app.agent.delivery.splitter import split_sentences, strip_stream_artifacts
 
 
 def test_split_sentences_basic():

@@ -7,7 +7,7 @@
 from types import SimpleNamespace
 
 from app.domain.message import Message
-from app.llm.actions import (
+from app.agent.delivery.directives import (
     OutboundBuilder,
     OutboundDirectives,
     build_outbound_builder,
@@ -189,14 +189,14 @@ class _RuntimeStub:
 
 
 async def test_pipeline_stream_attaches_reply_to_first_sentence_only(monkeypatch):
-    from app.llm.context import LlmContext, LlmJob
-    from app.llm.pipeline import LlmPipeline
+    from app.agent.loop.context import LlmContext, LlmJob
+    from app.agent.loop.pipeline import LlmPipeline
 
     async def fake_stream(runtime, event, ctx):
         for sentence in ["[reply] 你好。", "第二句。"]:
             yield sentence
 
-    monkeypatch.setattr("app.llm.chat.stream_response", fake_stream)
+    monkeypatch.setattr("app.agent.loop.chat.stream_response", fake_stream)
 
     pipeline = LlmPipeline(_RuntimeStub())
     sent: list[Message] = []

@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 
 from app.domain.message import Message
-from app.llm.send_pool import StreamSendPool
+from app.agent.delivery.pool import StreamSendPool
 
 
 def _slow_policy_config() -> dict:

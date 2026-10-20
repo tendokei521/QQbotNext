@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.llm.context import LlmContext, LlmJob
-from app.llm.pipeline import LlmPipeline
-from app.llm.session import SessionManager
+from app.agent.loop.context import LlmContext, LlmJob
+from app.agent.loop.pipeline import LlmPipeline
+from app.agent.session.manager import SessionManager
 
 
 def _manager(bot_id: int = 91001) -> SessionManager:

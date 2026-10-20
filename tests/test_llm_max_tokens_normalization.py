@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.llm.providers.runtime_manager import ProviderRuntimeManager
-from app.llm.request_policy import REASONING_FLOOR
+from app.agent.providers.runtime_manager import ProviderRuntimeManager
+from app.agent.providers.policy import REASONING_FLOOR
 from app.services.provider_model_service import (
     ProviderModelService,
     normalize_model_config,

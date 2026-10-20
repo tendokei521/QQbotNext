@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.llm.module_client import ModuleLLMClient
-from app.llm.providers.base import LLMResponse, StreamEvent
+from app.agent.client import ModuleLLMClient
+from app.agent.providers.base import LLMResponse, StreamEvent
 from app.modules.base import BaseModule, ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
 
 
@@ -88,8 +88,8 @@ def captured(monkeypatch):
         seen["kwargs"] = kwargs
         yield StreamEvent(type="text", text="流式片段")
 
-    monkeypatch.setattr("app.llm.providers.chat_with_fallback", fake_chat)
-    monkeypatch.setattr("app.llm.providers.iter_stream_with_fallback", fake_stream)
+    monkeypatch.setattr("app.agent.providers.chat_with_fallback", fake_chat)
+    monkeypatch.setattr("app.agent.providers.iter_stream_with_fallback", fake_stream)
     return seen
 
 
@@ -277,7 +277,7 @@ async def test_module_stream_helper(captured):
 
 
 def test_container_wires_module_llm_and_provider_services(container):
-    from app.llm.module_client import ModuleLLMClient as Client
+    from app.agent.client import ModuleLLMClient as Client
     from app.services.provider_model_service import ProviderModelService
     from app.services.provider_preset_service import ProviderPresetService
     from app.services.provider_service import ProviderRegistry

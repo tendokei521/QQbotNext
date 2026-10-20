@@ -4,7 +4,7 @@
 
 它们原本定义在 `app/llm/__init__.py`。那个文件的末尾急切 import 了
 `chat` / `context` / `hooks` / `skills` / `tool`，于是全库 **121 处**
-`from app.llm import llm_data_dir / logger / safe_bot_id` 都会把 `chat.py`
+`from app.agent import llm_data_dir / logger / safe_bot_id` 都会把 `chat.py`
 及其整条依赖链一起加载——实测把每个入口的可达闭包放大到 152 文件 / 46,243 行。
 
 「拿一个数据目录路径」不应该需要加载整个 Agent 主循环。所以路径工具下沉到

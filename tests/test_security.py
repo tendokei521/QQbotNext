@@ -98,7 +98,7 @@ def test_split_join_ws_url():
 
 
 def test_llm_history_task_id_path_traversal_rejected():
-    from app.llm.history import HistoryManager
+    from app.agent.session.history import HistoryManager
 
     hm = HistoryManager("testbot")
     # 合法 task_id（uuid4 hex）通过

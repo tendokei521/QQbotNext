@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import base64
 
-from app.llm.assembly import PromptAssembler, PromptRequest
+from app.agent.assembly.assembler import PromptAssembler, PromptRequest
 
 BASE_CONFIG = {"system_prompt": "你是助手", "outbound_directive_enable": False}
 

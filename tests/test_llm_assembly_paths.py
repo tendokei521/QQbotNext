@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import types
 
-from app.llm.providers import PROVIDERS
-from app.llm.providers.base import BaseProvider, LLMResponse, StreamEvent
+from app.agent.providers import PROVIDERS
+from app.agent.providers.base import BaseProvider, LLMResponse, StreamEvent
 
 STREAM_MESSAGES: list[list[dict]] = []
 CHAT_MESSAGES: list[list[dict]] = []
@@ -88,7 +88,7 @@ def _event(time: int = 1788342260):
 
 
 def _ctx(event, *, session_id: str | None = None):
-    from app.llm.context import LlmContext
+    from app.agent.loop.context import LlmContext
 
     ctx = LlmContext(event=event, runtime=None, bot=None, session_id=session_id or "group_466052056")
     ctx.user_text = "现在几点"
@@ -113,7 +113,7 @@ async def test_stream_and_generate_send_identical_prompt(monkeypatch, tmp_path):
     两条路径各自独立会话（生产环境由 ``stream_output`` 二选一，不会同时跑），
     但事件、配置、模型完全相同 → 装配结果必须逐字一致。
     """
-    from app.llm import chat
+    from app.agent.loop import chat
 
     _register(monkeypatch, "probe_model")
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
@@ -148,7 +148,7 @@ async def test_stream_and_generate_send_identical_prompt(monkeypatch, tmp_path):
 
 async def test_both_paths_share_deduplicated_history(monkeypatch, tmp_path):
     """同一会话第二轮：历史里不应出现重复的本轮用户消息（两条路径同一口径）。"""
-    from app.llm import chat
+    from app.agent.loop import chat
 
     _register(monkeypatch, "probe_model")
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
@@ -180,7 +180,7 @@ async def test_handle_dispatches_chat_commands(monkeypatch):
     回归：``handle`` 曾经同时承担"旧版自己发消息"的完整回复路径，
     非指令消息会被重复回复。现在它只做指令分发。
     """
-    from app.llm import chat
+    from app.agent.loop import chat
 
     seen: list[tuple] = []
 

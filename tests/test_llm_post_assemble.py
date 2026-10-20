@@ -17,9 +17,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.llm.assembly import PromptAssembler, PromptRequest, apply_post_assemble, build_for
-from app.llm.context import LlmContext, LlmJob
-from app.llm.hooks import LlmHookRegistry, run_stage
+from app.agent.assembly.assembler import PromptAssembler, PromptRequest, apply_post_assemble, build_for
+from app.agent.loop.context import LlmContext, LlmJob
+from app.agent.hooks import LlmHookRegistry, run_stage
 
 
 class _Runtime:
@@ -206,7 +206,7 @@ async def test_run_stage_filters_by_event_type():
 
 async def test_pipeline_run_stage_delegates_to_shared_runner():
     """流水线阶段也走同一实现：插件在一个地方注册，四条路径语义一致。"""
-    from app.llm.pipeline import LlmPipeline
+    from app.agent.loop.pipeline import LlmPipeline
 
     runtime = _Runtime()
     calls = []

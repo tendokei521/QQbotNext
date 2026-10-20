@@ -12,7 +12,7 @@ prompt（``req.system_prompt`` 就地拼接）。要 1:1 对比迁移，得能�
 
 from __future__ import annotations
 
-from app.llm.assembly import (
+from app.agent.assembly.assembler import (
     SYSTEM_STYLE_BLOCKS,
     SYSTEM_STYLE_SINGLE,
     PromptAssembler,
@@ -104,7 +104,7 @@ def test_single_style_drops_empty_system_text():
 
 def test_fold_system_blocks_noop_without_system():
     """没有任何 system 块时原样返回（例如自定义块表只产出历史）。"""
-    from app.llm.assembly import Block
+    from app.agent.assembly.assembler import Block
 
     built = [(Block("history", lambda req: [{"role": "user", "content": "x"}]), [{"role": "user", "content": "x"}])]
     assert fold_system_blocks(built) == built
@@ -112,7 +112,7 @@ def test_fold_system_blocks_noop_without_system():
 
 def test_fold_system_blocks_keeps_multimodal_content():
     """content 不是字符串的消息（多模态块）不参与折叠，避免被拼成字符串。"""
-    from app.llm.assembly import Block
+    from app.agent.assembly.assembler import Block
 
     media = {"role": "system", "content": [{"type": "text", "text": "x"}]}
     built = [(Block("persona", lambda req: [{"role": "system", "content": "文本"}]), [{"role": "system", "content": "文本"}]), (Block("m", lambda req: [media]), [media])]

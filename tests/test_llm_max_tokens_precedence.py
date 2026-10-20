@@ -21,9 +21,9 @@ from __future__ import annotations
 
 import pytest
 
-from app.llm import chat
-from app.llm.manager import _origin_of
-from app.llm.providers.runtime_manager import ProviderRuntimeManager
+from app.agent.loop import chat
+from app.agent.runtime import _origin_of
+from app.agent.providers.runtime_manager import ProviderRuntimeManager
 from app.services.provider_model_service import ProviderModelService
 
 # ==================== 1. 来源判定（纯函数） ====================

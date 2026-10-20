@@ -11,7 +11,7 @@ import types
 
 import pytest
 
-from app.llm import display_names as dn
+from app.agent.context import display_names as dn
 
 # 灰区样例：17 字、无句读也无广告词（明显名字与明显句子都不命中，才会走判定）
 GRAY_NAME = "夜风里的旅人甲乙丙丁戊己庚辛壬癸子"
@@ -59,7 +59,7 @@ def _stub_chat(monkeypatch, reply, *, exc=None):
             raise exc
         return _Resp(reply)
 
-    monkeypatch.setattr("app.llm.providers.chat_with_fallback", fake)
+    monkeypatch.setattr("app.agent.providers.chat_with_fallback", fake)
     return calls
 
 

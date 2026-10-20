@@ -88,7 +88,7 @@ async def main(db_file: str) -> None:
     from app.core.settings import Settings
     from app.infrastructure.config.config_service import ConfigService
     from app.infrastructure.persistence.database import Database
-    from app.llm.manager import AgentManager
+    from app.agent.runtime import AgentManager
     from app.modules.dispatcher import ModuleDispatcher
     from app.services.bot_service import BotService
 
@@ -119,14 +119,14 @@ async def main(db_file: str) -> None:
 
     calls: list[str] = []
 
-    import app.llm.providers as providers_pkg
+    import app.agent.providers as providers_pkg
 
     async def patched_iter(chain, messages, **kwargs):
         calls.append("llm-call")
         yield type("Ev", (), {"type": "text", "text": "模拟回复", "tool_call": None})()
 
     providers_pkg.iter_stream_with_fallback = patched_iter
-    import app.llm.chat as chat_mod
+    import app.agent.loop.chat as chat_mod
 
     chat_mod.iter_stream_with_fallback = patched_iter
 

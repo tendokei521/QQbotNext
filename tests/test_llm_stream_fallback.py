@@ -22,9 +22,9 @@ import types
 
 import pytest
 
-import app.llm
-from app.llm.providers import PROVIDERS, iter_stream_with_fallback
-from app.llm.providers.base import BaseProvider, StreamEvent
+import app.agent
+from app.agent.providers import PROVIDERS, iter_stream_with_fallback
+from app.agent.providers.base import BaseProvider, StreamEvent
 
 CALLS: dict[str, int] = {}
 
@@ -62,7 +62,7 @@ class _TextThenErrorProvider(BaseProvider):
 
 @pytest.fixture(autouse=True)
 def _reset(monkeypatch):
-    monkeypatch.setattr(app.llm, "logger", _Quiet(), raising=False)
+    monkeypatch.setattr(app.agent, "logger", _Quiet(), raising=False)
     monkeypatch.setitem(PROVIDERS, "err_probe", _ErrorProvider)
     monkeypatch.setitem(PROVIDERS, "ok_probe", _OkProvider)
     monkeypatch.setitem(PROVIDERS, "text_err_probe", _TextThenErrorProvider)
@@ -149,7 +149,7 @@ class _Telemetry:
 
 
 def _runtime(bot_id: int, chain: list[dict]):
-    from app.llm.session import SessionManager
+    from app.agent.session.manager import SessionManager
 
     rt = types.SimpleNamespace()
     rt.bot_id = bot_id
@@ -176,7 +176,7 @@ def _runtime(bot_id: int, chain: list[dict]):
 
 def _event_and_ctx():
     from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
-    from app.llm.context import LlmContext
+    from app.agent.loop.context import LlmContext
 
     event = GroupMessageEvent(
         event_type="message_group",
@@ -198,7 +198,7 @@ def _event_and_ctx():
 async def test_chat_stream_uses_backup_provider_when_primary_errors(monkeypatch, tmp_path):
     """端到端：主模型 429，用户应当收到备用模型的回答，而不是「抱歉，我暂时无法回答」。"""
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
-    from app.llm import chat as chat_mod
+    from app.agent.loop import chat as chat_mod
 
     rt = _runtime(1301, _chain("err_probe", "ok_probe"))
     event, ctx = _event_and_ctx()

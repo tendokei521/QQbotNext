@@ -23,9 +23,9 @@ import types
 import pytest
 
 from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
-from app.llm import image as image_mod
-from app.llm import image_media
-from app.llm.image import history_image_parts, history_image_segments
+from app.agent.media import image as image_mod
+from app.agent.media import store as image_media
+from app.agent.media.image import history_image_parts, history_image_segments
 
 URL = "https://multimedia.nt.qq.com.cn/download?fileid=abc&rkey=xyz"
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 32
@@ -128,7 +128,7 @@ def test_history_image_parts_respects_max_images():
 
 
 def _hook(*, include_images: bool, entries: list, max_images: int = 4):
-    from app.llm.chat import _history_media_hook
+    from app.agent.loop.chat import _history_media_hook
 
     return _history_media_hook(
         entries, include_images=include_images, bot_id=BOT_ID, max_images=max_images
@@ -136,7 +136,7 @@ def _hook(*, include_images: bool, entries: list, max_images: int = 4):
 
 
 def test_image_only_entry_renders_placeholder_with_sender_prefix():
-    from app.llm.group_context import format_history_for_llm
+    from app.agent.context.group import format_history_for_llm
 
     entries = [_entry(text="")]
     rendered = format_history_for_llm(entries, is_private=True, entry_media=_hook(include_images=False, entries=entries))
@@ -145,7 +145,7 @@ def test_image_only_entry_renders_placeholder_with_sender_prefix():
 
 
 def test_vision_hook_inlines_local_image_into_history_message(media_ref):
-    from app.llm.group_context import format_history_for_llm
+    from app.agent.context.group import format_history_for_llm
 
     entries = [_entry_with_media(media_ref, text="")]
     rendered = format_history_for_llm(entries, is_private=True, entry_media=_hook(include_images=True, entries=entries))
@@ -158,7 +158,7 @@ def test_vision_hook_inlines_local_image_into_history_message(media_ref):
 
 
 def test_text_hook_keeps_history_text_only(media_ref):
-    from app.llm.group_context import format_history_for_llm
+    from app.agent.context.group import format_history_for_llm
 
     entries = [_entry_with_media(media_ref, text="你看看这个")]
     rendered = format_history_for_llm(entries, is_private=True, entry_media=_hook(include_images=False, entries=entries))
@@ -199,8 +199,8 @@ def _text_event(t: int, mid: int, text: str) -> GroupMessageEvent:
 
 
 async def _two_turns(monkeypatch, tmp_path, *, modalities, session_id: str):
-    from app.llm import chat
-    from app.llm.providers import PROVIDERS
+    from app.agent.loop import chat
+    from app.agent.providers import PROVIDERS
     from tests.test_llm_assembly_paths import (
         CHAT_MESSAGES,
         _config_dict,
@@ -311,7 +311,7 @@ async def test_current_turn_is_not_duplicated_in_history(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_history_backfill_turns_remote_url_into_local_ref(monkeypatch):
     """改造前的老条目只有直链：回填后要变成本地指向，且直链被抹掉。"""
-    from app.llm.image import backfill_history_media
+    from app.agent.media.image import backfill_history_media
 
     async def _download(url, *, max_bytes, timeout=0):
         return PNG_BYTES, image_media.sniff_mime(PNG_BYTES)

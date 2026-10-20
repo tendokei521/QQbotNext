@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from app.core.logger import logger
 from app.domain.bot import IBot
-from app.llm.config import LEGACY_LLM_CONNECTION_KEYS
+from app.agent.config import LEGACY_LLM_CONNECTION_KEYS
 from app.modules.schema_utils import webui_schema
 
 
@@ -171,8 +171,8 @@ class BotService:
 
     def _agent_module_data(self, bot_id: int | None) -> dict:
         """框架级 LLM 模块条目：读 AgentRuntime（无运行时则用默认值）。"""
-        from app.llm.config import DEFAULT_LLM_CONFIG
-        from app.llm.config_schema import SCHEMA
+        from app.agent.config import DEFAULT_LLM_CONFIG
+        from app.agent.config_schema import SCHEMA
         from app.modules.base import ModulePermission
 
         runtime = self.agent_manager.get_runtime(bot_id) if self.agent_manager and bot_id else None

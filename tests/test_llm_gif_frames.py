@@ -21,9 +21,9 @@ import pytest
 from PIL import Image as PILImage
 
 from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
-from app.llm.animated import extract_frames, frame_indices, is_animated
-from app.llm.assembly import PromptRequest, place_images
-from app.llm.image import (
+from app.agent.media.animated import extract_frames, frame_indices, is_animated
+from app.agent.assembly.assembler import PromptRequest, place_images
+from app.agent.media.image import (
     _animated_hint,
     build_user_content,
     collect_image_segments,

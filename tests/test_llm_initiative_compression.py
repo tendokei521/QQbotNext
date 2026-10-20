@@ -21,7 +21,7 @@ import types
 
 import pytest
 
-from app.llm import assembly_inputs, compress
+from app.agent.assembly import inputs as assembly_inputs, compress
 
 
 def _config(**over):

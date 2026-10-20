@@ -1,6 +1,6 @@
 """AgentManager / AgentRuntime 装配测试（框架级）。"""
 
-from app.llm.manager import AgentManager, AgentRuntime
+from app.agent.runtime import AgentManager, AgentRuntime
 
 
 class _CfgSvc:

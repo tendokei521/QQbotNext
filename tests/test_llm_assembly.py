@@ -14,15 +14,15 @@ from __future__ import annotations
 
 import base64
 
-from app.llm.assembly import BLOCKS, PromptAssembler, PromptRequest, describe
+from app.agent.assembly.assembler import BLOCKS, PromptAssembler, PromptRequest, describe
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 32
 PNG_B64 = base64.b64encode(PNG_BYTES).decode()
-from app.llm.prompt import (
+from app.agent.assembly.prompt import (
     LEGACY_MESSAGE_META_INSTRUCTION,
     SCHEDULE_INSTRUCTION,
 )
-from app.llm.prompt import (
+from app.agent.assembly.prompt import (
     build_messages as legacy_build_messages,
 )
 
@@ -64,7 +64,7 @@ def test_equivalent_to_legacy_minimal():
 
 def test_equivalent_with_all_blocks_present():
     """全块在场：人设/定时/主动性/格式说明/技能/记忆/背景/历史/user，且顺序逐字一致。"""
-    from app.llm.prompt import build_proactive_instruction
+    from app.agent.assembly.prompt import build_proactive_instruction
 
     cfg = {
         "system_prompt": "你是助手",

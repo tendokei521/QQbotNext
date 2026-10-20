@@ -3,11 +3,11 @@
 import asyncio
 import types
 
-from app.llm.chat import _clean_output_for_history, generate_response
-from app.llm.config import DEFAULT_LLM_CONFIG
-from app.llm.memory.manager import MemoryManager
-from app.llm.session import SessionManager
-from app.llm.tags import maybe_strip_parentheses, strip_parentheses
+from app.agent.loop.chat import _clean_output_for_history, generate_response
+from app.agent.config import DEFAULT_LLM_CONFIG
+from app.agent.memory.manager import MemoryManager
+from app.agent.session.manager import SessionManager
+from app.agent.persona.tags import maybe_strip_parentheses, strip_parentheses
 
 
 # ---- strip_parentheses ----
@@ -97,7 +97,7 @@ async def _run_once(rt, text, monkeypatch):
 
     async def fake_chat(chain, messages, **_kw):
         captured.append(messages)
-        from app.llm.providers.base import LLMResponse
+        from app.agent.providers.base import LLMResponse
 
         if any("记忆提取器" in (m.get("content", "") or "") for m in messages):
             return LLMResponse(text="无")
@@ -105,7 +105,7 @@ async def _run_once(rt, text, monkeypatch):
 
     # 请求出口已收口到 runtime.invoker（默认实现按属性查找转调 providers），
     # 因此这里只需要打 providers 这一层的补丁。
-    monkeypatch.setattr("app.llm.providers.chat_with_fallback", fake_chat)
+    monkeypatch.setattr("app.agent.providers.chat_with_fallback", fake_chat)
     ev = types.SimpleNamespace(message_type="private", user_id="5", group=None, bot=None, self_id="5")
     ctx = types.SimpleNamespace(session_id="", user_text=text, state={})
     out = await generate_response(rt, ev, ctx)

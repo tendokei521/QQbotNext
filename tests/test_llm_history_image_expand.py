@@ -16,10 +16,11 @@ import types
 
 import pytest
 
-from app.llm import history_enrich, image_media
-from app.llm import image as image_mod
-from app.llm.context_tools import _handle_expand_image, drain_round_images
-from app.llm.group_context import format_online_history
+from app.agent.session import enrich as history_enrich
+from app.agent.media import store as image_media
+from app.agent.media import image as image_mod
+from app.agent.tools.context_tools import _handle_expand_image, drain_round_images
+from app.agent.context.group import format_online_history
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 32
 PNG_B64 = base64.b64encode(PNG_BYTES).decode()
@@ -160,7 +161,7 @@ def _messages():
 
 
 def test_round_images_appended_for_vision_model():
-    from app.llm.chat import _append_round_images
+    from app.agent.loop.chat import _append_round_images
 
     ctx = _ctx(_Bot())
     ctx.extra["round_images"] = [dict(LOCAL_IMAGE)]
@@ -176,7 +177,7 @@ def test_round_images_appended_for_vision_model():
 
 
 def test_round_images_skipped_for_text_only_model():
-    from app.llm.chat import _append_round_images
+    from app.agent.loop.chat import _append_round_images
 
     ctx = _ctx(_Bot(), modalities=("text",))
     ctx.extra["round_images"] = [dict(LOCAL_IMAGE)]
@@ -192,7 +193,7 @@ def test_round_images_skipped_for_text_only_model():
 
 def test_round_images_appended_returns_true_when_queued():
     """返回值供非流式路径判断「要不要补问一轮」。"""
-    from app.llm.context_tools import append_round_images
+    from app.agent.tools.context_tools import append_round_images
 
     ctx = _ctx(_Bot())
     ctx.extra["round_images"] = [dict(LOCAL_IMAGE)]
@@ -203,7 +204,7 @@ def test_round_images_appended_returns_true_when_queued():
 
 def test_round_images_drained_only_once():
     """补图轮不能反复追加同一张图（否则补问轮无终止条件）。"""
-    from app.llm.context_tools import append_round_images, drain_round_images
+    from app.agent.tools.context_tools import append_round_images, drain_round_images
 
     ctx = _ctx(_Bot())
     ctx.extra["round_images"] = [dict(LOCAL_IMAGE)]

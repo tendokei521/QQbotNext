@@ -9,7 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from app.llm import prompt_dump
+from app.agent.assembly import dump as prompt_dump
 
 router = APIRouter(prefix="/agent/prompt-dumps", tags=["agent"])
 

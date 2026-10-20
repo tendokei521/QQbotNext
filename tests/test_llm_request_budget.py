@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from app.llm.token_budget import (
+from app.agent.assembly.token_budget import (
     MIN_INPUT_FLOOR,
     WINDOW_SAFETY_RATIO,
     apply_request_policy,

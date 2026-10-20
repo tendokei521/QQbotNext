@@ -48,8 +48,8 @@ build-backend = "setuptools.build_meta"
 include = ["app*"]
 
 [tool.setuptools.package-data]
-# OneBot 工具清单是数据文件，必须随包一起分发（`app/llm/onebot_tools/manifest.py` 加载它）
-"app.llm.onebot_tools" = ["*.json"]
+# OneBot 工具清单是数据文件，必须随包一起分发（`app/agent/tools/onebot/manifest.py` 加载它）
+"app.agent.tools.onebot" = ["*.json"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

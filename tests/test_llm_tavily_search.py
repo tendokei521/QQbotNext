@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.llm import tavily_search as tavily_mod
-from app.llm.tavily_search import _format_result, build_tavily_tool
+from app.agent.tools import web_search as tavily_mod
+from app.agent.tools.web_search import _format_result, build_tavily_tool
 
 
 def test_format_result_with_answer_and_results():

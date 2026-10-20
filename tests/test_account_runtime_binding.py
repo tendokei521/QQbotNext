@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from app.domain.events import PrivateMessageEvent
 from app.infrastructure.onebot.codec import decode
-from app.llm.manager import AgentManager
+from app.agent.runtime import AgentManager
 from app.modules.base import ModulePermission
 from app.modules.nodes import AgentNode
 from app.nodes.base import MessageContext
@@ -158,7 +158,7 @@ async def test_agent_node_resolves_runtime_by_payload_account_not_stale_conn_id(
     async def fake_handle(module, event):
         called.append(module)
 
-    import app.llm.chat as llm_chat
+    import app.agent.loop.chat as llm_chat
 
     original = llm_chat.handle
     llm_chat.handle = fake_handle

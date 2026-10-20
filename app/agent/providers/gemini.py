@@ -1,0 +1,373 @@
+"""Google Gemini Provider（Generative Language API 兼容层）。
+
+覆盖：
+- generateContent 非流式
+- streamGenerateContent 流式
+- 基础 tools 声明（functionDeclarations）
+
+API 形态说明：Gemini 的流式默认按 `alt=sse` 返回，可被本适配器解析。
+"""
+
+from __future__ import annotations
+
+import json
+import re
+
+import aiohttp
+
+from app.agent import logger
+from app.agent.providers.base import BaseProvider, LLMResponse, StreamEvent, format_llm_error, merge_usage
+
+_DEFAULT_BASE = "https://generativelanguage.googleapis.com/v1beta"
+_DATA_URL_RE = re.compile(r"^data:image/([a-z0-9.+-]+);base64,(.+)$", re.IGNORECASE | re.DOTALL)
+
+
+def _normalize_usage(usage: dict) -> dict:
+    """Gemini ``usageMetadata`` → 统一的 prompt/completion 字段（含缓存命中）。"""
+    normalized = {
+        "prompt_tokens": usage.get("promptTokenCount", 0),
+        "completion_tokens": usage.get("candidatesTokenCount", 0),
+    }
+    cached = usage.get("cachedContentTokenCount")
+    if cached is not None:
+        normalized["prompt_cache_hit_tokens"] = cached
+    return normalized
+
+
+def _parse_data_url(url: str) -> tuple[str, str] | None:
+    """``data:image/png;base64,xxxx`` → (mime, base64 数据)。"""
+    match = _DATA_URL_RE.match(str(url or "").strip())
+    if not match:
+        return None
+    return f"image/{match.group(1).lower()}", match.group(2)
+
+
+def _to_gemini_parts(content: Any) -> list[dict]:
+    """把统一的 content（字符串 / OpenAI 风格块数组）转成 Gemini parts。"""
+    if not isinstance(content, list):
+        return [{"text": str(content or "")}]
+    parts: list[dict] = []
+    for part in content:
+        if not isinstance(part, dict):
+            parts.append({"text": str(part)})
+            continue
+        part_type = str(part.get("type", "")).lower()
+        if part_type in ("text", "input_text"):
+            parts.append({"text": str(part.get("text", ""))})
+        elif part_type == "tool_result":
+            parts.append({"text": f"[工具结果] {str(part.get('content', ''))}"})
+        elif part_type in ("image_url", "image"):
+            image_url = part.get("image_url", part)
+            url = ""
+            if isinstance(image_url, dict):
+                url = str(image_url.get("url", "") or "")
+            elif isinstance(image_url, str):
+                url = image_url
+            parsed = _parse_data_url(url)
+            if parsed:
+                parts.append({"inlineData": {"mimeType": parsed[0], "data": parsed[1]}})
+            elif url.lower().startswith(("http://", "https://")):
+                parts.append({"fileData": {"fileUri": url}})
+            else:
+                parts.append({"text": "[Image]"})
+        else:
+            parts.append({"text": str(part)})
+    return parts or [{"text": ""}]
+
+
+def _normalize_messages(messages: list[dict]) -> tuple[list[dict], str | None]:
+    system_parts: list[str] = []
+    contents: list[dict] = []
+    for raw in messages or []:
+        role = str(raw.get("role", "") or "")
+        content = raw.get("content", "")
+        text = ""
+        if isinstance(content, list):
+            parts = []
+            for part in content:
+                if isinstance(part, dict):
+                    if part.get("type") in ("text", "input_text"):
+                        parts.append(str(part.get("text", "")))
+                    elif part.get("type") == "tool_result":
+                        parts.append(f"[工具结果] {str(part.get('content', ''))}")
+                    else:
+                        parts.append(str(part))
+                else:
+                    parts.append(str(part))
+            text = "\n".join(p for p in parts if p)
+        else:
+            text = str(content or "")
+        if role == "system":
+            system_parts.append(text)
+            continue
+        if role == "tool":
+            contents.append({"role": "user", "parts": [{"text": f"[工具结果] {text}"}]})
+            continue
+        gemini_role = "model" if role == "assistant" else "user"
+        contents.append({"role": gemini_role, "parts": _to_gemini_parts(content)})
+    system = "\n".join(p for p in system_parts if p) or None
+    return contents, system
+
+
+def _to_gemini_tools(tools: list[dict] | None) -> list[dict]:
+    if not tools:
+        return []
+    declarations = []
+    for tool in tools:
+        fn = tool.get("function", {}) or {}
+        declarations.append({
+            "name": str(fn.get("name", "")),
+            "description": str(fn.get("description", "") or ""),
+            "parameters": fn.get("parameters") or {"type": "object", "properties": {}},
+        })
+    return [{"functionDeclarations": declarations}] if declarations else []
+
+
+def _function_calls(parts: list[dict]) -> list[dict]:
+    result = []
+    for p in parts or []:
+        if isinstance(p, dict) and p.get("functionCall"):
+            fc = p["functionCall"] or {}
+            result.append({
+                "id": "",  # Gemini 无客户端 tool_call_id，由共享 helper 自动补全
+                "name": str(fc.get("name", "")),
+                "args": fc.get("args", {}) or {},
+            })
+    return result
+
+
+class GeminiProvider(BaseProvider):
+    name = "gemini"
+    alias_names = ("gemini", "google")
+    capabilities = ("chat", "stream")
+
+    def __init__(self, config: dict) -> None:
+        super().__init__(config)
+        self.api_key = str(config.get("api_key", "") or "").strip()
+        self.api_base = (config.get("api_base", "") or _DEFAULT_BASE).rstrip("/")
+
+    def _base(self) -> str:
+        """归一到 ``.../v1beta``：``api_base`` 可能带也可能不带这个后缀。"""
+        if self.api_base.endswith("/v1beta"):
+            return self.api_base
+        return self.api_base.rstrip("/") + "/v1beta"
+
+    def _url(self, model: str, stream: bool = False) -> str:
+        base = self._base()
+        if stream:
+            return f"{base}/models/{model}:streamGenerateContent?alt=sse&key={self.api_key}"
+        # 非流式**必须自己起 query**。此前复用 ``action`` 里的 ``?alt=sse`` 再拼
+        # ``&key=``，非流式就变成 ``...:generateContent&key=KEY``——key 落在 path 里，
+        # 从不上到 query，也没发 ``x-goog-api-key`` 头，于是每一轮都 401/404，
+        # 被下面降级成空回复（用户只看到兜底话术）。
+        return f"{base}/models/{model}:generateContent?key={self.api_key}"
+
+    async def get_models(self) -> list[str]:
+        if not self.api_key:
+            return []
+        url = f"{self._base()}/models?key={self.api_key}"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                    if resp.status != 200:
+                        return []
+                    data = await resp.json()
+            return [str(m.get("name", "")).split("/")[-1] for m in data.get("models", []) if isinstance(m, dict)]
+        except Exception:
+            return []
+
+    async def chat(
+        self,
+        messages: list[dict],
+        *,
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 1024,
+        timeout: int = 30,
+        tools: list[dict] | None = None,
+        tool_executor=None,
+        max_tool_rounds: int = 5,
+    ) -> LLMResponse:
+        from app.agent.loop.tool_loop import normalize_and_execute_tool_calls
+
+        model = model or self.config.get("model", "gemini-2.0-flash")
+        contents, system = _normalize_messages(messages)
+        gemini_tools = _to_gemini_tools(tools)
+        tool_results: list[dict] = []
+        total_usage: dict = {}  # 工具多轮的 token 消耗累计（本次请求结束后统一记一次）
+
+        if not self.api_key:
+            return LLMResponse(text="", raw=None)
+
+        for _round in range(max_tool_rounds):
+            payload: dict = {
+                "contents": contents,
+                "generationConfig": {
+                    "temperature": temperature,
+                    "maxOutputTokens": max_tokens,
+                },
+            }
+            if system:
+                payload["systemInstruction"] = {"parts": [{"text": system}]}
+            if gemini_tools:
+                payload["tools"] = gemini_tools
+
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        self._url(model, stream=False),
+                        headers={"Content-Type": "application/json"},
+                        json=payload,
+                        timeout=aiohttp.ClientTimeout(total=timeout),
+                    ) as resp:
+                        if resp.status != 200:
+                            body = await resp.text()
+                            logger.add_info("Gemini").error(
+                                f"Gemini 请求失败 HTTP {resp.status}: {body}"
+                            )
+                            return LLMResponse(text="", raw=None, usage=total_usage)
+                        data = await resp.json()
+            except Exception as e:
+                logger.add_info("Gemini").error(f"Gemini 请求异常: {format_llm_error(e)}")
+                return LLMResponse(text="", raw=None, usage=total_usage)
+
+            merge_usage(total_usage, _normalize_usage(data.get("usageMetadata", {}) or {}))
+            candidates = data.get("candidates", []) or []
+            parts = []
+            if candidates:
+                content = (candidates[0].get("content", {}) or {})
+                parts = content.get("parts", []) or []
+            # Gemini 的思考片段带 ``thought: true``：必须与正文分开。流式分支早已区分，
+            # 非流式此前把两者一起拼进 text —— 用户的回复里会直接出现模型的内心独白；
+            # 思考吃满 maxOutputTokens 时更糟：text 非空 ⇒ 上层不判空、不触发收敛轮，
+            # 用户收到的"整条回复"全是思考碎片。
+            text = "".join(
+                str(p.get("text", ""))
+                for p in parts
+                if isinstance(p, dict) and p.get("text") and not p.get("thought")
+            ).strip()
+            reasoning = "".join(
+                str(p.get("text", ""))
+                for p in parts
+                if isinstance(p, dict) and p.get("text") and p.get("thought")
+            )
+
+            calls = _function_calls(parts)
+            if not calls or tool_executor is None:
+                return LLMResponse(
+                    text=text, reasoning=reasoning, usage=total_usage, raw=data,
+                    tool_results=tool_results,
+                )
+
+            tool_calls = [{
+                "id": c["id"],
+                "type": "function",
+                "function": {
+                    "name": c["name"],
+                    "arguments": json.dumps(c["args"], ensure_ascii=False),
+                },
+            } for c in calls]
+            normalized, result_messages = await normalize_and_execute_tool_calls(
+                tool_calls, tool_executor, tool_results
+            )
+
+            # Gemini 角色：assistant 对应 model，工具结果通过 user 的 functionResponse 回传
+            assistant_parts = []
+            if text:
+                assistant_parts.append({"text": text})
+            for c in calls:
+                assistant_parts.append({
+                    "functionCall": {"name": c["name"], "args": c["args"]},
+                })
+            contents.append({"role": "model", "parts": assistant_parts})
+
+            user_parts = []
+            for idx, msg in enumerate(result_messages):
+                user_parts.append({
+                    "functionResponse": {
+                        "name": calls[idx]["name"] if idx < len(calls) else "",
+                        "response": {"result": msg.get("content", "")},
+                    },
+                })
+            contents.append({"role": "user", "parts": user_parts})
+
+        logger.add_info("Gemini").warning(f"工具循环超过 {max_tool_rounds} 轮，强制结束")
+        return LLMResponse(
+            text=text, reasoning=reasoning, usage=total_usage, raw=data,
+            tool_results=tool_results,
+        )
+
+    async def chat_stream(
+        self,
+        messages: list[dict],
+        *,
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 1024,
+        timeout: int = 30,
+        tools: list[dict] | None = None,
+        tool_executor=None,
+    ):
+        model = model or self.config.get("model", "gemini-2.0-flash")
+        contents, system = _normalize_messages(messages)
+        payload: dict = {
+            "contents": contents,
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens,
+            },
+        }
+        if system:
+            payload["systemInstruction"] = {"parts": [{"text": system}]}
+        gemini_tools = _to_gemini_tools(tools)
+        if gemini_tools:
+            payload["tools"] = gemini_tools
+
+        if not self.api_key:
+            yield StreamEvent(type="error", text="API 密钥未配置")
+            return
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self._url(model, stream=True),
+                    headers={"Content-Type": "application/json"},
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=timeout),
+                ) as resp:
+                    if resp.status != 200:
+                        body = await resp.text()
+                        logger.add_info("Gemini").error(
+                            f"Gemini 流式请求失败 HTTP {resp.status}: {body}"
+                        )
+                        yield StreamEvent(type="error", text=f"HTTP {resp.status}: {body}")
+                        return
+                    async for line in resp.content:
+                        line_text = line.decode("utf-8", errors="ignore").strip()
+                        if not line_text.startswith("data:"):
+                            continue
+                        raw = line_text[5:].strip()
+                        if not raw or raw == "[DONE]":
+                            continue
+                        try:
+                            data = json.loads(raw)
+                        except json.JSONDecodeError:
+                            continue
+                        # usageMetadata 通常只出现在最后一个 chunk（含缓存命中数）
+                        if data.get("usageMetadata"):
+                            yield StreamEvent(
+                                type="usage",
+                                usage=_normalize_usage(data.get("usageMetadata", {}) or {}),
+                            )
+                        candidates = data.get("candidates", []) or []
+                        if candidates:
+                            content = (candidates[0].get("content", {}) or {})
+                            parts = content.get("parts", []) or []
+                            for p in parts:
+                                if isinstance(p, dict) and p.get("text"):
+                                    # thought=True 是 Gemini 的思考片段：单独成事件（不算正文）
+                                    kind = "reasoning" if p.get("thought") else "text"
+                                    yield StreamEvent(type=kind, text=str(p["text"]))
+        except Exception as e:
+            logger.add_info("Gemini").error(f"Gemini 流式请求异常: {format_llm_error(e)}")
+            yield StreamEvent(type="error", text=format_llm_error(e))

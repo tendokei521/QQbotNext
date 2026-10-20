@@ -18,9 +18,9 @@ import types
 
 import pytest
 
-from app.llm import chat
-from app.llm.providers import PROVIDERS
-from app.llm.providers.base import BaseProvider, StreamEvent
+from app.agent.loop import chat
+from app.agent.providers import PROVIDERS
+from app.agent.providers.base import BaseProvider, StreamEvent
 
 
 class _Scripted(BaseProvider):
@@ -49,7 +49,7 @@ def probe(monkeypatch, tmp_path):
 
 
 def _runtime(bot_id: int):
-    from app.llm.session import SessionManager
+    from app.agent.session.manager import SessionManager
 
     rt = types.SimpleNamespace()
     rt.bot_id = bot_id
@@ -92,7 +92,7 @@ def _event():
 
 
 def _ctx():
-    from app.llm.context import LlmContext
+    from app.agent.loop.context import LlmContext
 
     event = _event()
     event.bot = None
@@ -151,7 +151,7 @@ async def test_streaming_history_is_single_entry_for_whole_turn(probe):
 
 async def test_upsert_appends_once_then_updates(probe):
     """upsert 语义：第一次插入，之后只更新同一条（不产生重复条目）。"""
-    from app.llm.session import SessionManager
+    from app.agent.session.manager import SessionManager
 
     mgr = SessionManager("7703")
     session_id = "group_upsert"
@@ -171,7 +171,7 @@ async def test_upsert_appends_once_then_updates(probe):
 
 
 async def test_upsert_skips_junk_and_empty(probe):
-    from app.llm.session import SessionManager
+    from app.agent.session.manager import SessionManager
 
     mgr = SessionManager("7704")
     session_id = "group_junk"

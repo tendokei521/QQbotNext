@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from types import SimpleNamespace
 
-from app.llm.assembly import PromptRequest
+from app.agent.assembly.assembler import PromptRequest
 from app.modules.base import ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
 from app.modules.features import AssemblerFeatureController, FeatureRegistry
 from module.modules.astrbot_alignment import assembler
@@ -404,7 +404,7 @@ def test_group_history_block_absent_for_private_or_disabled():
 
 def test_framework_only_blocks_are_absent():
     """框架默认装配器会加的定时协议 / 消息格式说明 / 主动性块，这里一个都不该有。"""
-    from app.llm.prompt import LEGACY_MESSAGE_META_INSTRUCTION, SCHEDULE_INSTRUCTION
+    from app.agent.assembly.prompt import LEGACY_MESSAGE_META_INSTRUCTION, SCHEDULE_INSTRUCTION
 
     module = _make()
     system = _system(module.build(_req(module, available_tools={"get_chat_history", "expand_recent"})))
@@ -461,8 +461,8 @@ async def test_plugin_takes_over_in_real_registry(container):
     from pathlib import Path
 
     from app.infrastructure.config.config_service import ConfigService
-    from app.llm.assembly import build_for
-    from app.llm.manager import AgentManager
+    from app.agent.assembly.assembler import build_for
+    from app.agent.runtime import AgentManager
     from app.modules.base import ServiceAccess
     from app.modules.registry import ModuleRegistry
     from app.services.module_install_service import ModuleInstallService

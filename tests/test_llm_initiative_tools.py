@@ -17,9 +17,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.llm import initiative_stream
-from app.llm.chat import build_initiative_tools
-from app.llm.providers.base import StreamEvent
+from app.agent.proactivity import stream as initiative_stream
+from app.agent.loop.chat import build_initiative_tools
+from app.agent.providers.base import StreamEvent
 
 
 class _Bot:
@@ -140,7 +140,7 @@ async def test_stream_initiative_runs_tool_loop(monkeypatch):
         [StreamEvent(type="text", text="大家好呀。")],
     ]
     seen: dict = {}
-    monkeypatch.setattr("app.llm.providers.iter_stream_with_fallback", _stream_stub(rounds, seen))
+    monkeypatch.setattr("app.agent.providers.iter_stream_with_fallback", _stream_stub(rounds, seen))
 
     messages = [{"role": "system", "content": "你是助手"}, {"role": "user", "content": "开口"}]
     full = await initiative_stream.stream_send_initiative(
@@ -169,7 +169,7 @@ async def test_stream_initiative_without_tools_single_round(monkeypatch):
     runtime = _runtime(provider_chain=lambda: [{"provider": "openai"}])
     rounds = [[StreamEvent(type="text", text="在吗？")]]
     seen: dict = {}
-    monkeypatch.setattr("app.llm.providers.iter_stream_with_fallback", _stream_stub(rounds, seen))
+    monkeypatch.setattr("app.agent.providers.iter_stream_with_fallback", _stream_stub(rounds, seen))
 
     full = await initiative_stream.stream_send_initiative(
         runtime, bot, "private_20002", False, 20002, [{"role": "user", "content": "开口"}]
@@ -188,7 +188,7 @@ async def test_stream_initiative_stops_at_round_limit(monkeypatch):
         "index": 0, "id": "c", "function": {"name": "expand_context", "arguments": "{}"},
     })]
     seen: dict = {}
-    monkeypatch.setattr("app.llm.providers.iter_stream_with_fallback", _stream_stub([tool_round], seen))
+    monkeypatch.setattr("app.agent.providers.iter_stream_with_fallback", _stream_stub([tool_round], seen))
 
     async def _executor(name, args):
         return "ok"
@@ -251,7 +251,7 @@ class _FakeModule:
 
 
 async def test_scheduled_message_gets_proactive_block_and_tools(tmp_path, monkeypatch):
-    from app.llm import scheduler as ts_mod
+    from app.agent.proactivity import scheduler as ts_mod
 
     module = _FakeModule()
     sched = ts_mod.TaskScheduler(module, data_dir=str(tmp_path))
@@ -285,7 +285,7 @@ async def test_scheduled_message_gets_proactive_block_and_tools(tmp_path, monkey
 
 
 async def test_scheduled_message_skips_tools_when_disabled(tmp_path, monkeypatch):
-    from app.llm import scheduler as ts_mod
+    from app.agent.proactivity import scheduler as ts_mod
 
     module = _FakeModule()
     module.config = _FakeConfig({"schedule_enable": True, "context_expand_enable": False})
@@ -316,7 +316,7 @@ async def test_scheduled_message_skips_tools_when_disabled(tmp_path, monkeypatch
 
 @pytest.mark.parametrize("is_group", [True, False])
 async def test_collect_tools_maps_session_targets(tmp_path, is_group):
-    from app.llm import scheduler as ts_mod
+    from app.agent.proactivity import scheduler as ts_mod
 
     module = _FakeModule()
     sched = ts_mod.TaskScheduler(module, data_dir=str(tmp_path))

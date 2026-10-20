@@ -1,6 +1,6 @@
 """上下文压缩策略测试：只压缩超出 history_rounds 的部分。"""
 
-from app.llm.compress import (
+from app.agent.assembly.compress import (
     build_summary_messages,
     should_compress,
     split_history,

@@ -2,11 +2,11 @@
 
 import asyncio
 
-from app.llm.config import DEFAULT_LLM_CONFIG
-from app.llm.memory.extract import parse_facts, render_extract_prompt
-from app.llm.memory.manager import MemoryManager
-from app.llm.memory.store import owner_private
-from app.llm.session import SessionManager
+from app.agent.config import DEFAULT_LLM_CONFIG
+from app.agent.memory.extract import parse_facts, render_extract_prompt
+from app.agent.memory.manager import MemoryManager
+from app.agent.memory.store import owner_private
+from app.agent.session.manager import SessionManager
 
 
 class FakeConfig:
@@ -69,9 +69,9 @@ async def test_extract_facts_for_user_async(monkeypatch):
     async def fake(chain, messages, **_kw):
         return Resp()
 
-    import app.llm.memory.extract as em
+    import app.agent.memory.extract as em
 
-    monkeypatch.setattr("app.llm.providers.chat_with_fallback", fake)
+    monkeypatch.setattr("app.agent.providers.chat_with_fallback", fake)
 
     rt = FakeRuntime()
     facts = await em.extract_facts_for_user_async(rt, "5", ["我喜欢喝美式"], is_group=False)
@@ -87,7 +87,7 @@ async def test_consolidate_throttle_and_force(monkeypatch):
         calls.append(uid)
         return [{"content": "我喜欢喝美式", "importance": 0.9}]
 
-    monkeypatch.setattr("app.llm.memory.extract.extract_facts_for_user_async", fake)
+    monkeypatch.setattr("app.agent.memory.extract.extract_facts_for_user_async", fake)
 
     rt = FakeRuntime()
     mgr = rt.memory
@@ -118,7 +118,7 @@ async def test_consolidate_ignores_empty_or_nouser(monkeypatch):
         calls.append(uid)
         return [{"content": "不应出现", "importance": 0.9}]
 
-    monkeypatch.setattr("app.llm.memory.extract.extract_facts_for_user_async", fake)
+    monkeypatch.setattr("app.agent.memory.extract.extract_facts_for_user_async", fake)
 
     rt = FakeRuntime()
     mgr = rt.memory
@@ -139,7 +139,7 @@ async def test_extract_enabled_false_skips(monkeypatch):
     async def fake(runtime, uid, texts, **kw):
         calls.append(uid)
 
-    monkeypatch.setattr("app.llm.memory.extract.extract_facts_for_user_async", fake)
+    monkeypatch.setattr("app.agent.memory.extract.extract_facts_for_user_async", fake)
     rt = FakeRuntime(data={"memory_extract_enable": False})
     rt.memory.maybe_consolidate(
         "private_5", False, [{"role": "user", "content": "x", "user_id": "5"}]

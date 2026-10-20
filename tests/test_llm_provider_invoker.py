@@ -5,8 +5,8 @@
 所以这里开一个更外层的缝 ``runtime.invoker``。
 
 端到端接线由既有用例反向证明：``tests/test_strip_parentheses.py`` 只打
-``app.llm.providers.chat_with_fallback`` 的补丁、``tests/test_llm_initiative_tools.py``
-只打 ``app.llm.providers.iter_stream_with_fallback`` 的补丁 —— 这些补丁**只有**在请求
+``app.agent.providers.chat_with_fallback`` 的补丁、``tests/test_llm_initiative_tools.py``
+只打 ``app.agent.providers.iter_stream_with_fallback`` 的补丁 —— 这些补丁**只有**在请求
 真的经 ``resolve_invoker(...)`` 转发到 providers 层时才生效。
 """
 
@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.llm.providers.base import LLMResponse
-from app.llm.providers.invoker import (
+from app.agent.providers.base import LLMResponse
+from app.agent.providers.invoker import (
     CHAT_PARAMS,
     STREAM_PARAMS,
     ProviderInvoker,
@@ -70,7 +70,7 @@ async def test_default_chat_delegates_to_providers(monkeypatch):
         seen["kwargs"] = kwargs
         return LLMResponse(text="ok")
 
-    monkeypatch.setattr("app.llm.providers.chat_with_fallback", fake_chat)
+    monkeypatch.setattr("app.agent.providers.chat_with_fallback", fake_chat)
 
     resp = await ProviderInvoker().chat(
         runtime=_Runtime(),
@@ -86,12 +86,12 @@ async def test_default_chat_delegates_to_providers(monkeypatch):
 
 
 async def test_default_stream_delegates_to_providers(monkeypatch):
-    from app.llm.providers.base import StreamEvent
+    from app.agent.providers.base import StreamEvent
 
     async def fake_stream(chain, messages, **kwargs):
         yield StreamEvent(type="text", text="第一句")
 
-    monkeypatch.setattr("app.llm.providers.iter_stream_with_fallback", fake_stream)
+    monkeypatch.setattr("app.agent.providers.iter_stream_with_fallback", fake_stream)
 
     events = [
         ev

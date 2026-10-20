@@ -7,7 +7,7 @@ import types
 
 import pytest
 
-from app.llm.request_policy import (
+from app.agent.providers.policy import (
     DEFAULT_RETRY_PROFILE,
     LAYER_AGENT,
     LAYER_DEFAULT,

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.llm import emoji_lexicon, qq_faces
-from app.llm.group_log.store import GroupLogStore
-from app.llm.onebot_tools.manifest import ONEBOT_TOOLS
-from app.llm.onebot_tools.tools import _handler
-from app.llm.tool import ToolContext
+from app.agent.persona import emoji as emoji_lexicon
+from app.agent.persona.data import qq_faces
+from app.agent.group_log.store import GroupLogStore
+from app.agent.tools.onebot.manifest import ONEBOT_TOOLS
+from app.agent.tools.onebot.executor import _handler
+from app.agent.tools.spec import ToolContext
 
 ACTION = "set_msg_emoji_like"
 GROUP_SCOPE = "group:1001"
@@ -216,7 +217,7 @@ async def test_missing_reaction_returns_correctable_error():
 
 async def test_existing_reaction_is_not_duplicated():
     """贴前先读：这条消息上已经有同一个表情 → 不重复贴，也不下行。"""
-    from app.llm.group_log.events import KIND_EMOJI, LogEvent
+    from app.agent.group_log.events import KIND_EMOJI, LogEvent
 
     tag_id = emoji_lexicon.DEFAULT_TAGS["赞"]
     store = GroupLogStore(bot_id=1, retention_hours=0)

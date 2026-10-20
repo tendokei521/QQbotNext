@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from app.llm.group_context import (
+from app.agent.context.group import (
     EXPANDED_REPLY,
     UNRESOLVED_FORWARD_ID,
     UNRESOLVED_REPLY,

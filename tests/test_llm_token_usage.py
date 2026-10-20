@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-import app.llm
-from app.llm.providers import (
+import app.agent
+from app.agent.providers import (
     PROVIDERS,
     SERVED_MODEL_KEY,
     LLMResponse,
@@ -18,13 +18,13 @@ from app.llm.providers import (
     iter_stream_with_fallback,
     log_token_usage,
 )
-from app.llm.providers.base import (
+from app.agent.providers.base import (
     cache_hit_miss,
     format_usage,
     has_token_usage,
     merge_usage,
 )
-from app.llm.providers.openai_compat import OpenAICompatProvider, events_from_chunk
+from app.agent.providers.openai_compat import OpenAICompatProvider, events_from_chunk
 
 
 class _FakeLogger:
@@ -49,7 +49,7 @@ class _FakeLogger:
 @pytest.fixture
 def fake_logger(monkeypatch) -> _FakeLogger:
     fake = _FakeLogger()
-    monkeypatch.setattr(app.llm, "logger", fake, raising=False)
+    monkeypatch.setattr(app.agent, "logger", fake, raising=False)
     return fake
 
 

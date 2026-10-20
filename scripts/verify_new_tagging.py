@@ -28,14 +28,14 @@ if str(ROOT) not in sys.path:
 from app.core.settings import Settings  # noqa: E402
 from app.infrastructure.config.config_service import ConfigService  # noqa: E402
 from app.infrastructure.persistence.database import Database  # noqa: E402
-from app.llm.group_context import (  # noqa: E402
+from app.agent.context.group import (  # noqa: E402
     SELF_TAG,
     PRIVATE_OTHER_TAG,
     format_history_for_llm,
     format_online_history,
 )
-from app.llm.providers import get_provider  # noqa: E402
-from app.llm.providers.runtime_manager import ProviderRuntimeManager  # noqa: E402
+from app.agent.providers import get_provider  # noqa: E402
+from app.agent.providers.runtime_manager import ProviderRuntimeManager  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -74,7 +74,7 @@ def pick_window(msgs: list[dict], size: int) -> list[dict]:
 
 
 def human_text(msg: dict) -> str:
-    from app.llm.group_context import extract_msg_text
+    from app.agent.context.group import extract_msg_text
 
     return extract_msg_text(msg.get("message") or [])
 

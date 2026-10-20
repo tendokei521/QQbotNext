@@ -4,7 +4,7 @@
 会同步修改 SessionManager 里的 Conversation，避免 UI 修改被下一次保存覆盖。
 
 图片（2026-10 起）：会话里的图片存成**本地文件 + 一个指向**（``data.media`` 的 sha，
-见 :mod:`app.llm.image_media`）。模型请求与前端界面读的是同一个指向，所以界面上的
+见 :mod:`app.agent.media.store`）。模型请求与前端界面读的是同一个指向，所以界面上的
 "看 / 换 / 删"就是对同一份字节动手；删文件必须先把引用删掉（先移除/替换那张图）。
 """
 
@@ -17,8 +17,8 @@ import uuid
 import zipfile
 from typing import Any
 
-from app.llm import image_media
-from app.llm.session import SessionManager
+from app.agent.media import store as image_media
+from app.agent.session.manager import SessionManager
 
 
 class SessionHistoryService:

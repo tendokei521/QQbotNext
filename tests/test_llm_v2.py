@@ -1,9 +1,9 @@
 """llm_chat_v2 重构测试：prompt / provider / 会话-对话分离。"""
 
-from app.llm.prompt import build_messages
-from app.llm.providers import get_provider
-from app.llm.providers.openai_compat import _split_keys
-from app.llm import session as session_mod
+from app.agent.assembly.prompt import build_messages
+from app.agent.providers import get_provider
+from app.agent.providers.openai_compat import _split_keys
+from app.agent.session import manager as session_mod
 
 
 # ---------- prompt ----------
@@ -30,7 +30,7 @@ def test_build_messages_no_tags_no_history():
 
 def test_strip_all_tags():
     """防御性标签剥离：任意 <type=xxx>（含 mood/action/中文）均剥离，不留空行。"""
-    from app.llm.tags import strip_all_tags
+    from app.agent.persona.tags import strip_all_tags
 
     assert strip_all_tags("<type=mood>平静中带点无奈</type>\n<type=action>抬头看向来人</type>\n在啊") == "在啊"
     assert strip_all_tags("<type=posture>坐着</type>你好") == "你好"
@@ -49,7 +49,7 @@ def test_split_keys():
 
 def test_get_provider_unknown_type_falls_back():
     p = get_provider({"provider": "nonexistent", "api_key": "k"})
-    from app.llm.providers.base import BaseProvider
+    from app.agent.providers.base import BaseProvider
 
     assert isinstance(p, BaseProvider)
 
@@ -62,7 +62,7 @@ async def test_provider_chat_without_key_returns_empty():
 
 async def test_provider_tool_loop():
     """原生 function calling 工具循环：tool_calls → 执行 → 回传 → 最终回复。"""
-    from app.llm.providers.openai_compat import OpenAICompatProvider
+    from app.agent.providers.openai_compat import OpenAICompatProvider
 
     provider = OpenAICompatProvider({"api_key": "sk-test"})
     calls = []
@@ -186,7 +186,7 @@ def test_session_manager_stats(tmp_path):
 
 def test_provider_endpoint_normalization():
     """api_base 支持默认端点、v1 端点、完整 chat/completions 端点。"""
-    from app.llm.providers.openai_compat import OpenAICompatProvider
+    from app.agent.providers.openai_compat import OpenAICompatProvider
 
     p1 = OpenAICompatProvider({"api_key": "k", "api_base": "https://api.example.com"})
     assert p1._endpoint() == "https://api.example.com/v1/chat/completions"

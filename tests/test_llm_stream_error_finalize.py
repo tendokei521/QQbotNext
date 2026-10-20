@@ -21,9 +21,9 @@ import types
 
 import pytest
 
-from app.llm import chat
-from app.llm.providers import PROVIDERS
-from app.llm.providers.base import BaseProvider, StreamEvent
+from app.agent.loop import chat
+from app.agent.providers import PROVIDERS
+from app.agent.providers.base import BaseProvider, StreamEvent
 
 STREAMS: list[list[StreamEvent]] = []
 
@@ -65,7 +65,7 @@ def probe(monkeypatch, tmp_path):
 
 
 def _runtime(bot_id: int, config: dict):
-    from app.llm.session import SessionManager
+    from app.agent.session.manager import SessionManager
 
     rt = types.SimpleNamespace()
     rt.bot_id = bot_id
@@ -98,7 +98,7 @@ def _event():
 
 
 def _ctx():
-    from app.llm.context import LlmContext
+    from app.agent.loop.context import LlmContext
 
     event = _event()
     ctx = LlmContext(event=event, runtime=None, bot=None, session_id="group_466052056")
@@ -196,7 +196,7 @@ async def test_error_does_not_force_speak_again(probe):
     async def _no_force(*args, **kwargs):
         forced["n"] += 1
 
-    import app.llm.chat as chat_mod
+    import app.agent.loop.chat as chat_mod
 
     original = chat_mod._force_speak_round
     chat_mod._force_speak_round = _no_force

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from app.llm.group_log.events import (
+from app.agent.group_log.events import (
     KIND_EMOJI,
     KIND_MESSAGE,
     KIND_MY_SEND,
@@ -12,7 +12,7 @@ from app.llm.group_log.events import (
     KIND_RECALL,
     LogEvent,
 )
-from app.llm.group_log.render import FOOTER, HEADER, render_environment
+from app.agent.group_log.render import FOOTER, HEADER, render_environment
 
 SCOPE = "group:1001"
 #: 固定时间，保证黄金快照稳定（本地时区 → 05:33:20）

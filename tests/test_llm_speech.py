@@ -1,4 +1,4 @@
-"""发言通道（``app.llm.speech``）的护栏测试。
+"""发言通道（``app.agent.delivery.speech``）的护栏测试。
 
 这一层要守住四条**会直接毁掉拟人化**的红线：
 
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.llm.speech import (
+from app.agent.delivery.speech import (
     DEFAULT_MAX_BUBBLES,
     FORCE_SPEAK_REMINDER,
     QUEUE_DUP,
@@ -150,7 +150,7 @@ def test_speech_protocol_is_injected_into_the_user_turn():
     或作为尾部 system 追加时，模型依然只输出文本（整轮静默）；
     贴到 user 消息里才稳定调用 send_message。这条用例把这个位置钉死。
     """
-    from app.llm.assembly import PromptRequest, apply_speech_protocol
+    from app.agent.assembly.assembler import PromptRequest, apply_speech_protocol
 
     req = PromptRequest(config=SPEECH_CONFIG)
     messages = [
@@ -170,7 +170,7 @@ def test_speech_protocol_is_injected_into_the_user_turn():
 
 def test_speech_protocol_respects_multimodal_user_content():
     """多模态 user 消息（content 是块数组）时把协议作为 text 块追加，不破坏结构。"""
-    from app.llm.assembly import PromptRequest, apply_speech_protocol
+    from app.agent.assembly.assembler import PromptRequest, apply_speech_protocol
 
     req = PromptRequest(config=SPEECH_CONFIG)
     messages = [
@@ -198,7 +198,7 @@ def test_speech_protocol_respects_multimodal_user_content():
 )
 def test_speech_protocol_absent_when_channel_off(config):
     """文本即发言的档位贴这句就是假话——必须一个字都不加。"""
-    from app.llm.assembly import PromptRequest, apply_speech_protocol
+    from app.agent.assembly.assembler import PromptRequest, apply_speech_protocol
 
     messages = [{"role": "user", "content": "在吗"}]
     out = apply_speech_protocol(messages, PromptRequest(config=config))
@@ -206,7 +206,7 @@ def test_speech_protocol_absent_when_channel_off(config):
 
 
 def test_bubble_becomes_message_with_reply_at_text_order():
-    from app.llm.actions import OutboundDirectives, assemble_message
+    from app.agent.delivery.directives import OutboundDirectives, assemble_message
 
     message = assemble_message(
         "那我先睡了",
@@ -223,7 +223,7 @@ def test_bubble_becomes_message_with_reply_at_text_order():
 
 def test_bubble_without_targets_is_plain_text():
     """没有引用/@ 的气泡就是一条纯文本消息（不要凭空造段）。"""
-    from app.llm.actions import OutboundDirectives, assemble_message
+    from app.agent.delivery.directives import OutboundDirectives, assemble_message
 
     message = assemble_message("嗯", OutboundDirectives(), object(), is_group=True)
     assert [seg.type for seg in message.segments] == ["text"]

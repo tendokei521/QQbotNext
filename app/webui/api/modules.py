@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.core.logger import logger
-from app.llm.config import LEGACY_LLM_CONNECTION_KEYS
+from app.agent.config import LEGACY_LLM_CONNECTION_KEYS
 from app.services.bot_service import PASSWORD_MASK as _PASSWORD_MASK
 from app.services.bot_service import _mask_password_config
 from app.services.module_install_service import ModuleInstallService
@@ -52,7 +52,7 @@ VIRTUAL_AGENT_MODULE = "agent"
 
 
 def _get_agent_runtime(container, bot_id):
-    from app.llm.manager import AgentManager
+    from app.agent.runtime import AgentManager
 
     manager = container.get(AgentManager)
     if manager is None or bot_id is None:
@@ -89,7 +89,7 @@ class _AgentProxy:
     module_name = VIRTUAL_AGENT_MODULE
 
     def __init__(self, runtime):
-        from app.llm.config_schema import SCHEMA
+        from app.agent.config_schema import SCHEMA
 
         self.bot_id = runtime.bot_id
         self.config = runtime.config

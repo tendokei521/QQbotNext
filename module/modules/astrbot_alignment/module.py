@@ -82,7 +82,7 @@ class Module(BaseModule):
         if cached and (time.time() - cached[1]) < 1800:
             return
         try:
-            from app.llm.group_context import fetch_group_name
+            from app.agent.context.group import fetch_group_name
 
             name = await fetch_group_name(getattr(ctx.event, "bot", None), group_id)
         except Exception as e:  # noqa: BLE001 —— 群名只是提醒段的一部分，失败不该阻断请求

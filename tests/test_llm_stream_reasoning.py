@@ -26,9 +26,9 @@ from __future__ import annotations
 
 import pytest
 
-from app.llm.providers import PROVIDERS, iter_stream_with_fallback
-from app.llm.providers.base import BaseProvider, StreamEvent
-from app.llm.providers.openai_compat import events_from_chunk
+from app.agent.providers import PROVIDERS, iter_stream_with_fallback
+from app.agent.providers.base import BaseProvider, StreamEvent
+from app.agent.providers.openai_compat import events_from_chunk
 
 # ==================== 1. 流式解析：思考流不能丢 ====================
 
@@ -101,10 +101,10 @@ class _FakeLogger:
 
 @pytest.fixture
 def fake_logger(monkeypatch) -> _FakeLogger:
-    import app.llm
+    import app.agent
 
     fake = _FakeLogger()
-    monkeypatch.setattr(app.llm, "logger", fake, raising=False)
+    monkeypatch.setattr(app.agent, "logger", fake, raising=False)
     return fake
 
 

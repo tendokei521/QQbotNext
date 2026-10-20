@@ -16,8 +16,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.llm import nicknames
-from app.llm.group_context import (
+from app.agent.context import nicknames
+from app.agent.context.group import (
     UNRESOLVED_AT,
     UNRESOLVED_FORWARD,
     UNRESOLVED_FORWARD_ID,
@@ -87,7 +87,7 @@ def _envelope(messages):
 
 
 def setup_function(_fn):
-    from app.llm import focus as _focus
+    from app.agent.context import focus as _focus
 
     nicknames.clear_cache()
     _focus.clear_all()
@@ -245,7 +245,7 @@ async def test_fetch_failure_returns_empty_and_logs():
 
 
 def test_context_expand_flags_default_on():
-    from app.llm.chat import _context_expand_flags
+    from app.agent.loop.chat import _context_expand_flags
 
     assert _context_expand_flags({}) == {"resolve_at": True, "mark_unresolved": True}
     assert _context_expand_flags({"fetch_at_nickname": False})["resolve_at"] is False
@@ -258,13 +258,13 @@ class _BadCfg(dict):
 
 
 def test_context_expand_flags_tolerates_broken_config():
-    from app.llm.chat import _context_expand_flags
+    from app.agent.loop.chat import _context_expand_flags
 
     assert _context_expand_flags(_BadCfg()) == {"resolve_at": True, "mark_unresolved": True}
 
 
 async def test_pre_history_block_honours_flags():
-    from app.llm.chat import _build_group_pre_history
+    from app.agent.loop.chat import _build_group_pre_history
 
     event = SimpleNamespace(
         bot=_FakeBot(_envelope(AT_MESSAGES), {123: {"nickname": "张三", "card": "三哥"}}),
@@ -284,7 +284,7 @@ async def test_pre_history_block_honours_flags():
 
 
 def test_unresolved_items_dedupes_and_preserves_order():
-    from app.llm.group_context import unresolved_items
+    from app.agent.context.group import unresolved_items
 
     text = "a 【未展开:用户123】 b 【未展开:引用456】 c 【未展开:用户123】"
 
@@ -294,7 +294,7 @@ def test_unresolved_items_dedupes_and_preserves_order():
 
 
 def test_unresolved_summary_counts_occurrences():
-    from app.llm.group_context import unresolved_summary
+    from app.agent.context.group import unresolved_summary
 
     summary = unresolved_summary("【未展开:用户123】【未展开:用户123】【未展开:引用456】")
 
@@ -305,7 +305,7 @@ def test_unresolved_summary_counts_occurrences():
 
 
 async def test_env_block_appends_gap_summary_only_when_needed():
-    from app.llm.group_context import build_group_env_text
+    from app.agent.context.group import build_group_env_text
 
     dirty = build_group_env_text(
         group_id=778,
@@ -325,7 +325,7 @@ async def test_env_block_appends_gap_summary_only_when_needed():
 
 
 async def test_env_block_summary_appears_in_pre_history():
-    from app.llm.chat import _build_group_pre_history
+    from app.agent.loop.chat import _build_group_pre_history
 
     event = SimpleNamespace(
         bot=_FakeBot(_envelope(AT_MESSAGES), member_fail=True),
@@ -342,7 +342,7 @@ async def test_env_block_summary_appears_in_pre_history():
 
 async def test_chat_history_tool_reports_unresolved_head():
     """get_chat_history 的头部要给出缺口清单，模型无需逐行扫描。"""
-    from app.llm.session_tools import build_session_tools
+    from app.agent.tools.session_tools import build_session_tools
 
     runtime = SimpleNamespace(bot_id="10001", config={"history_auto_qq_min_local": 0})
     ctx = SimpleNamespace(
@@ -394,7 +394,7 @@ class _QuoteBot:
 async def test_quoted_forward_becomes_actionable_marker():
     """回归（真实日志）：被引用的是一条合并转发时，此前只渲染成 "[forward]"，
     模型既不知道那是什么、也拿不到 id，只能干瞪眼。现在必须给出可解决的标记 + id。"""
-    from app.llm.enhance import _collect_quote_info
+    from app.agent.assembly.enhance import _collect_quote_info
 
     ctx = _quote_ctx(_QuoteBot([{"type": "forward", "data": {"id": "7686537322889496857"}}]),
                      [{"type": "reply", "data": {"id": "576048059"}}])
@@ -406,7 +406,7 @@ async def test_quoted_forward_becomes_actionable_marker():
 
 
 async def test_quoted_text_still_wins_over_marker():
-    from app.llm.enhance import _collect_quote_info
+    from app.agent.assembly.enhance import _collect_quote_info
 
     ctx = _quote_ctx(_QuoteBot([{"type": "text", "data": {"text": "晚上一起打游戏吗"}}]),
                      [{"type": "reply", "data": {"id": "576048059"}}])
@@ -418,7 +418,7 @@ async def test_quoted_text_still_wins_over_marker():
 
 async def test_quoted_lookup_failure_yields_marker_not_silence():
     """取引用内容失败时也要把 id 交给模型（而不是整段引用信息消失）。"""
-    from app.llm.enhance import _collect_quote_info
+    from app.agent.assembly.enhance import _collect_quote_info
 
     class _BrokenBot:
         async def get_msg(self, message_id):
@@ -432,7 +432,7 @@ async def test_quoted_lookup_failure_yields_marker_not_silence():
 
 
 def test_segments_to_text_renders_forward_marker_with_id():
-    from app.llm.enhance import _segments_to_text
+    from app.agent.assembly.enhance import _segments_to_text
 
     assert _segments_to_text([{"type": "forward", "data": {"id": "7686537322889496857"}}]) == (
         UNRESOLVED_FORWARD_ID.format(id="7686537322889496857")
@@ -442,7 +442,7 @@ def test_segments_to_text_renders_forward_marker_with_id():
 
 def test_segments_to_text_prefers_containing_message_id():
     """合并转发标记要用"承载转发的那条消息 id"（展开入口要的是它）。"""
-    from app.llm.enhance import _segments_to_text
+    from app.agent.assembly.enhance import _segments_to_text
 
     assert _segments_to_text(
         [{"type": "forward", "data": {"id": "7686537322889496857"}}], message_id="576048059"
@@ -486,7 +486,7 @@ def test_forward_row_renders_expanded_state_when_registered():
 
 
 def test_reply_row_renders_expanded_state():
-    from app.llm.group_context import extract_msg_text
+    from app.agent.context.group import extract_msg_text
 
     reply = [{"type": "reply", "data": {"id": "456"}}]
     expanded = ExpandedRefs(messages={"456": "成人向对话记录"})
@@ -503,7 +503,7 @@ def test_at_renders_known_name_from_registry():
 
 
 def test_expanded_marker_is_not_counted_as_unresolved():
-    from app.llm.group_context import unresolved_items, unresolved_summary
+    from app.agent.context.group import unresolved_items, unresolved_summary
 
     text = "【已展开:合并转发576048059 → B站视频】"
 
@@ -528,8 +528,8 @@ def test_expanded_summary_is_clipped():
 
 async def test_lookup_expanded_bridges_focus_registry():
     """渲染层按 bot_id/session_id 自动查焦点表（无需调用方手动传 expanded）。"""
-    from app.llm import focus
-    from app.llm.group_context import lookup_expanded
+    from app.agent.context import focus
+    from app.agent.context.group import lookup_expanded
 
     focus.clear_all()
     focus.note("b1", "group_778", "576048059", kind="message", summary="B站视频", source="expand")

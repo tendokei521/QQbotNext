@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.logger import logger
-from app.llm.group_log.events import (
+from app.agent.group_log.events import (
     KIND_EMOJI,
     KIND_MESSAGE,
     KIND_MY_SEND,
@@ -42,7 +42,7 @@ from app.llm.group_log.events import (
     LogEvent,
     make_scope,
 )
-from app.llm.group_log.store import (
+from app.agent.group_log.store import (
     DEFAULT_RETENTION_COUNT,
     DEFAULT_RETENTION_HOURS,
     GroupLogStore,
@@ -170,7 +170,7 @@ class Module(BaseModule):
 
     def _text_of(self, event: Any) -> str:
         """事件 → 可读正文（复用既有段渲染器：图片/表情/语音都是占位符）。"""
-        from app.llm.group_context import extract_msg_text
+        from app.agent.context.group import extract_msg_text
 
         try:
             text = extract_msg_text(
@@ -190,7 +190,7 @@ class Module(BaseModule):
 
     def _sender_label(self, event: Any, user_id: Any) -> str:
         """昵称（写入即脱敏，与会话历史的 mask_nickname 同口径）。"""
-        from app.llm.group_context import safe_sender_label
+        from app.agent.context.group import safe_sender_label
 
         user = getattr(event, "user", None)
         raw = getattr(user, "card", "") or getattr(user, "nickname", "") or ""

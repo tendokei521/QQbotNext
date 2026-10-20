@@ -21,7 +21,7 @@ import time
 
 import pytest
 
-from app.llm import image_media
+from app.agent.media import store as image_media
 
 BOT = 778
 OTHER_BOT = 779
@@ -189,7 +189,7 @@ def test_downscale_returns_none_for_garbage():
 
 def _archive(payload: dict) -> None:
     """把一条对话写进归档（走存储层公开接口，SQLite / JSON 后端都支持）。"""
-    from app.llm.storage import create_history_store
+    from app.agent.storage import create_history_store
 
     store = create_history_store(BOT)
     try:
@@ -260,7 +260,7 @@ def test_delete_media_refuses_while_referenced():
 
 
 def test_delete_media_succeeds_after_reference_removed():
-    from app.llm.storage import create_history_store
+    from app.agent.storage import create_history_store
 
     saved = image_media.save_bytes(BOT, PNG_BYTES)
     _archive(_conversation_with_ref("abc12345", saved))
@@ -326,7 +326,7 @@ def test_stats_counts_files_and_references():
 
 
 def test_prompt_dump_redacts_base64_payloads():
-    from app.llm.prompt_dump import _redact_media
+    from app.agent.assembly.dump import _redact_media
 
     payload = "data:image/png;base64," + "A" * 5000
     messages = [{

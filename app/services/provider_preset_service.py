@@ -12,8 +12,8 @@ import uuid
 from typing import Any
 
 from app.infrastructure.config.config_service import ConfigService
-from app.llm.providers import get_provider
-from app.llm.providers.base import format_llm_error
+from app.agent.providers import get_provider
+from app.agent.providers.base import format_llm_error
 from app.core.logger import logger
 
 PASSWORD_MASK = "••••••••"

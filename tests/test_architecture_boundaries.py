@@ -35,7 +35,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-AGENT_PREFIXES = ("app.llm", "app.agent")  # P2 重命名前后都算 agent 层
+AGENT_PREFIXES = ("app.agent",)  # P2 后 agent 层只有这一个前缀（app.llm 已并入）
 
 # 存量债预算：只许降，不许升。修好一处就把对应数字改小。
 _BUDGET = {
@@ -43,19 +43,19 @@ _BUDGET = {
     "bootstrap_imports": 4,
     # webui/api 64 处 + app/modules/api.py 4 处
     "get_container_calls": 68,
-    # app/webui/api/{agent,media,modules,prompt_dump}.py 直接 import app.llm.*
+    # app/webui/api/{agent,media,modules,prompt_dump}.py 直接 import app.agent.*
     # 基数 13（含函数级）；P3 拆环后应降到 0
     "webui_to_agent_imports": 13,
 }
 
-# `app/llm/__init__.py` 允许在模块层 import 的东西（全部廉价、无重依赖）
-_ALLOWED_LLM_PKG_IMPORTS = {
+# `app/agent/__init__.py` 允许在模块层 import 的东西（全部廉价、无重依赖）
+_ALLOWED_AGENT_PKG_IMPORTS = {
     "app.core.logger",
     "app.infrastructure.fs.paths",
-    "app.llm.context",
-    "app.llm.hooks",
-    "app.llm.skills",
-    "app.llm.tool",
+    "app.agent.hooks",
+    "app.agent.loop.context",
+    "app.agent.persona.skills",
+    "app.agent.tools.spec",
 }
 
 
@@ -75,8 +75,10 @@ def _iter_py(*subdirs: str):
 
 
 def _parse(path: Path) -> ast.Module | None:
+    # utf-8-sig：仓库里有几个文件带 BOM，用 utf-8 解出来的 \ufeff 会让 ast 报错，
+    # 导致这些文件被静默跳过（曾因此漏查）。
     try:
-        return ast.parse(path.read_text(encoding="utf-8"))
+        return ast.parse(path.read_text(encoding="utf-8-sig"))
     except (SyntaxError, OSError):  # pragma: no cover - 语法错误由别的测试负责
         return None
 
@@ -232,50 +234,62 @@ def test_webui_does_not_import_agent_internals():
 
 
 # --------------------------------------------------------------------------- #
-# 规则 6：app/llm/__init__.py 必须是薄壳
+# 规则 6：app/agent/__init__.py 必须是薄壳
 # --------------------------------------------------------------------------- #
 def test_agent_package_init_does_not_import_the_loop():
     """包 `__init__` 不准成为通往主循环的后门。
 
-    历史教训：`app/llm/__init__.py` 曾急切 import `chat`，于是全库 121 处
-    `from app.llm import logger` 都被拖去加载主循环，把每个入口的可达闭包
-    放大到 152 文件 / 46,243 行。这条测试守住那个修复。
+    历史教训：`app/llm/__init__.py`（P2 后即 `app/agent/__init__.py`）曾急切
+    import `chat`，于是全库 121 处 `from app.llm import logger` 都被拖去加载主
+    循环，把每个入口的可达闭包放大到 152 文件 / 46,243 行。这条测试守住那个修复。
     """
-    init_path = REPO_ROOT / "app" / "llm" / "__init__.py"
-    assert init_path.exists(), "app/llm/__init__.py 不见了？"
+    init_path = REPO_ROOT / "app" / "agent" / "__init__.py"
+    assert init_path.exists(), "app/agent/__init__.py 不见了？"
     offending = [
         target
         for target in _import_targets(init_path, module_level_only=False)
-        if target.startswith(AGENT_PREFIXES) and target not in _ALLOWED_LLM_PKG_IMPORTS
+        if target.startswith(AGENT_PREFIXES) and target not in _ALLOWED_AGENT_PKG_IMPORTS
     ]
-    # 相对 import（from .chat import handle）不在上面列表里，单独抓
+    # 相对 import（from .loop.chat import handle）不在上面列表里，单独抓
     tree = _parse(init_path)
     assert tree is not None
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.level and node.module:
-            absolute = f"app.llm.{node.module}"
-            if absolute not in _ALLOWED_LLM_PKG_IMPORTS:
+            absolute = f"app.agent.{node.module}"
+            if absolute not in _ALLOWED_AGENT_PKG_IMPORTS:
                 offending.append(f".{node.module}")
     assert not offending, (
-        f"app/llm/__init__.py 重新 import 了重模块：{sorted(set(offending))}。\n"
-        f"允许的只有 {sorted(_ALLOWED_LLM_PKG_IMPORTS)}。\n"
-        "需要 handle 的地方请直接 `from app.llm.chat import handle`——"
-        "包级重导出会在 import 图上形成 app.llm ⇄ app.llm.chat 的环。"
+        f"app/agent/__init__.py 重新 import 了重模块：{sorted(set(offending))}。\n"
+        f"允许的只有 {sorted(_ALLOWED_AGENT_PKG_IMPORTS)}。\n"
+        "需要 handle 的地方请直接 `from app.agent.loop.chat import handle`——"
+        "包级重导出会在 import 图上形成 app.agent ⇄ app.agent.loop.chat 的环。"
     )
 
 
 def test_agent_package_public_symbols_are_objects_not_modules():
-    """`from app.llm import tool` 必须拿到函数，而不是同名的 `app.llm.tool` 模块。
+    """`from app.agent import tool` 必须拿到函数，而不是同名的 `app.agent.tools` 模块。
 
     这是 PEP 562 `__getattr__` 的经典陷阱：子模块一旦被 import 就成为包属性，
     同名符号的 `__getattr__` 永远轮不到。曾因此静默返回模块对象。
     """
     import types
 
-    import app.llm as pkg
+    import app.agent as pkg
 
     for name in pkg.__all__:
         value = getattr(pkg, name)
         assert not isinstance(value, types.ModuleType), (
-            f"app.llm.{name} 解析成了模块对象（{value!r}），应当是其内部的真实符号。"
+            f"app.agent.{name} 解析成了模块对象（{value!r}），应当是其内部的真实符号。"
         )
+
+
+def test_old_llm_package_is_gone():
+    """`app/llm/` 不得复活——一个概念只能有一个名字。
+
+    P2 把 91 个文件全部并入 `app/agent/`。若有人再建 `app/llm/`（哪怕是重导出
+    门面），`from app.llm import ...` 与 `from app.agent import ...` 就会成为两套
+    并存的入口，职责又变模糊，且门面的 import 会在依赖图上重新制造 app 层内部环。
+    """
+    assert not (REPO_ROOT / "app" / "llm").exists(), (
+        "app/llm/ 又出现了。实现只在 app/agent/，请直接 import app.agent.*"
+    )

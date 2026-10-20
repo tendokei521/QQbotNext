@@ -8,7 +8,7 @@ import pytest
 
 from app.core.task_manager import TaskManager
 from app.modules.base import ModuleConfig
-from app.llm.proactive import ProactiveManager
+from app.agent.proactivity.manager import ProactiveManager
 
 BASE = {
     "proactive_friend_enable": False,
@@ -206,12 +206,12 @@ async def test_check_and_chat_reaches_provider_call(tmp_path, monkeypatch):
     async def fake_chat(*args, **kwargs):
         raise _Boom("已到达 provider 调用")
 
-    monkeypatch.setattr("app.llm.chat.build_initiative_tools", fake_tools)
-    monkeypatch.setattr("app.llm.assembly_inputs.collect_history_materials", fake_materials)
-    monkeypatch.setattr("app.llm.referent.focus_only_block", fake_focus)
-    monkeypatch.setattr("app.llm.group_log.context.build_context_text", fake_group_log)
+    monkeypatch.setattr("app.agent.loop.chat.build_initiative_tools", fake_tools)
+    monkeypatch.setattr("app.agent.assembly.inputs.collect_history_materials", fake_materials)
+    monkeypatch.setattr("app.agent.context.referent.focus_only_block", fake_focus)
+    monkeypatch.setattr("app.agent.group_log.context.build_context_text", fake_group_log)
     # 请求出口已收口到 runtime.invoker（默认实现按属性查找转调 providers）
-    monkeypatch.setattr("app.llm.providers.chat_with_fallback", fake_chat)
+    monkeypatch.setattr("app.agent.providers.chat_with_fallback", fake_chat)
 
     with pytest.raises(_Boom):
         await pm.manual_trigger("private_10001")

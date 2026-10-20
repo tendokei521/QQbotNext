@@ -21,9 +21,9 @@ import zipfile
 import pytest
 from starlette.testclient import TestClient
 
-from app.llm import image_media
-from app.llm.session import SessionManager
-from app.llm.storage import create_history_store
+from app.agent.media import store as image_media
+from app.agent.session.manager import SessionManager
+from app.agent.storage import create_history_store
 from app.webui.app import create_app
 
 BOT = 778
@@ -42,7 +42,7 @@ def _fresh_session_manager(monkeypatch):
     """``SessionManager`` 是**进程内单例**（按 bot_id），它的 history store 绑在创建时的
     数据目录上。测试进程里每个用例的数据目录都不同，不清掉单例就会读到上一个用例的库。
     生产环境数据目录不变，不受影响。"""
-    from app.llm.session import SessionManager
+    from app.agent.session.manager import SessionManager
 
     monkeypatch.setattr(SessionManager, "_instances", {}, raising=False)
 
