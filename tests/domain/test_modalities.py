@@ -1,6 +1,6 @@
 """模态能力工具测试。"""
 
-from app.agent.providers.modalities import (
+from app.domain.modalities import (
     default_modalities_for,
     normalize_modalities,
     sanitize_contexts_by_modalities,

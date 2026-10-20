@@ -97,7 +97,7 @@ def detect_caps(
 
     # 视觉：模型声明的模态说了算；未声明（None=旧行为）时看总开关
     try:
-        from app.agent.providers.modalities import supports_image
+        from app.domain.modalities import supports_image
 
         vision = supports_image(modalities) if modalities is not None else bool(
             _cfg(config, "image_understanding_enable", True)

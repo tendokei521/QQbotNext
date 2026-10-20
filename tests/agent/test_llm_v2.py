@@ -29,7 +29,7 @@ def test_build_messages_no_tags_no_history():
 
 def test_strip_all_tags():
     """防御性标签剥离：任意 <type=xxx>（含 mood/action/中文）均剥离，不留空行。"""
-    from app.agent.persona.tags import strip_all_tags
+    from app.domain.tags import strip_all_tags
 
     assert strip_all_tags("<type=mood>平静中带点无奈</type>\n<type=action>抬头看向来人</type>\n在啊") == "在啊"
     assert strip_all_tags("<type=posture>坐着</type>你好") == "你好"

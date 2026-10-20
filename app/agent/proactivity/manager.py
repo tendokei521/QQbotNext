@@ -22,7 +22,7 @@ from app.agent.context.group import (
     fetch_group_name,
     fetch_group_online_history,
 )
-from app.agent.persona.tags import strip_all_tags
+from app.domain.tags import strip_all_tags
 from app.agent.session.manager import SessionManager
 
 DEFAULT_PROACTIVE_PROMPT = (
@@ -223,7 +223,7 @@ class ProactiveManager:
         # 注意：函数内 import 是局部绑定，必须排在下面调用 _max_tool_rounds 之前；
         # 否则整段主动消息会在发起前抛 UnboundLocalError（#llm proactive 同样失效）。
         from app.agent.loop.chat import _max_tool_rounds, build_initiative_tools
-        from app.agent.providers.modalities import normalize_modalities, supports_tool_use
+        from app.domain.modalities import normalize_modalities, supports_tool_use
         from app.agent.tools.spec import build_tools, make_executor
 
         # 会话配置档案先切换：工具集与提示块读取的都是会话级配置

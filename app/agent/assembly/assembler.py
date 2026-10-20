@@ -634,7 +634,7 @@ def place_images(messages: list[dict], req: PromptRequest) -> list[dict]:
     """
     if not req.with_images or not _images_enabled(req):
         return messages
-    from app.agent.providers.modalities import supports_image
+    from app.domain.modalities import supports_image
 
     if not supports_image(req.modalities):
         return messages
@@ -663,7 +663,7 @@ def _images_enabled(req: PromptRequest) -> bool:
 
 def sanitize(messages: list[dict], req: PromptRequest) -> list[dict]:
     """按模型模态清洗（最后一道兜底：即使某条路径漏了门控，不支持的能力也会被替换）。"""
-    from app.agent.providers.modalities import sanitize_contexts_by_modalities
+    from app.domain.modalities import sanitize_contexts_by_modalities
 
     return sanitize_contexts_by_modalities(messages, req.modalities)
 

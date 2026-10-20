@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.agent.delivery.pool import StreamSendPool
-from app.agent.delivery.splitter import split_sentences, strip_stream_artifacts
+from app.domain.splitter import split_sentences, strip_stream_artifacts
 from app.agent.loop.tool_loop import normalize_and_execute_tool_calls
 from app.agent.providers import SERVED_MODEL_KEY, log_token_usage
 from app.agent.providers.invoker import resolve_invoker

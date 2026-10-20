@@ -5,7 +5,7 @@ import time
 from datetime import datetime, timedelta
 
 from app.agent.proactivity.scheduler import TaskScheduler
-from app.agent.proactivity.time_parser import advance_repeat, parse_schedule
+from app.domain.time_parser import advance_repeat, parse_schedule
 
 
 def _now():

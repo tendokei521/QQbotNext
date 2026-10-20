@@ -35,7 +35,7 @@ from app.agent.context.group import (
     fetch_private_online_history,
     format_history_for_llm,
 )
-from app.agent.delivery.splitter import split_sentences, strip_stream_artifacts
+from app.domain.splitter import split_sentences, strip_stream_artifacts
 from app.agent.loop.tool_loop import normalize_and_execute_tool_calls
 from app.agent.media.image import (
     IMAGE_LIKE_SEGMENTS,
@@ -46,11 +46,11 @@ from app.agent.media.image import (
     max_image_bytes,
     persist_images,
 )
-from app.agent.persona.tags import maybe_strip_parentheses, strip_all_tags
-from app.agent.proactivity.trigger import extract_text
+from app.domain.tags import maybe_strip_parentheses, strip_all_tags
+from app.domain.trigger import extract_text
 from app.agent.providers import SERVED_MODEL_KEY, log_token_usage
 from app.agent.providers.invoker import resolve_invoker
-from app.agent.providers.modalities import normalize_modalities, supports_image, supports_tool_use
+from app.domain.modalities import normalize_modalities, supports_image, supports_tool_use
 from app.agent.providers.policy import TurnBudget, retry_profile_of
 from app.agent.session.manager import SessionManager
 from app.agent.tools.spec import ToolContext, build_tools, make_executor

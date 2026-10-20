@@ -459,7 +459,7 @@ def _image_blocks(req: Any) -> list[dict]:
 
 
 def _images_supported(req: Any) -> bool:
-    from app.agent.providers.modalities import supports_image
+    from app.domain.modalities import supports_image
 
     return supports_image(getattr(req, "modalities", None))
 

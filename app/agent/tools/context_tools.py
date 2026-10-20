@@ -861,7 +861,7 @@ def append_round_images(messages: list[dict], tool_ctx, modalities) -> bool:
         return False
     try:
         from app.agent.media.image import build_user_content
-        from app.agent.providers.modalities import supports_image
+        from app.domain.modalities import supports_image
 
         images = drain_round_images(tool_ctx)
     except Exception as e:  # noqa: BLE001 —— 补图是增强，失败不该影响主流程

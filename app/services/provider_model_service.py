@@ -12,7 +12,7 @@ import time
 import uuid
 from typing import Any
 
-from app.agent.providers.modalities import default_modalities_for, normalize_modalities
+from app.domain.modalities import default_modalities_for, normalize_modalities
 from app.agent.providers.policy import (
     REASONING_FLOOR,
     is_reasoning_model,

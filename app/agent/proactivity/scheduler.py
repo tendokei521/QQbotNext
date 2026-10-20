@@ -25,8 +25,8 @@ from app.agent.context.group import (
     fetch_group_name,
     fetch_group_online_history,
 )
-from app.agent.persona.tags import strip_all_tags
-from app.agent.proactivity.time_parser import advance_repeat, parse_schedule
+from app.domain.tags import strip_all_tags
+from app.domain.time_parser import advance_repeat, parse_schedule
 from app.agent.providers import get_provider
 from app.agent.session.manager import SessionManager
 
@@ -390,7 +390,7 @@ class TaskScheduler:
                 return
 
             from app.agent.loop.chat import _max_tool_rounds
-            from app.agent.providers.modalities import normalize_modalities, supports_tool_use
+            from app.domain.modalities import normalize_modalities, supports_tool_use
             from app.agent.tools.spec import build_tools, make_executor
 
             chain_probe = self.module.provider_chain() if hasattr(self.module, "provider_chain") else []
@@ -648,7 +648,7 @@ class TaskScheduler:
             return _ABORTED
 
         from app.agent.loop.chat import _max_tool_rounds
-        from app.agent.providers.modalities import normalize_modalities, supports_tool_use
+        from app.domain.modalities import normalize_modalities, supports_tool_use
         from app.agent.tools.spec import build_tools, make_executor
 
         chain_probe = self.module.provider_chain() if hasattr(self.module, "provider_chain") else []

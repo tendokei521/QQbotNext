@@ -122,7 +122,7 @@ class LlmPipeline:
                 return False
 
         config = self.runtime.config
-        from app.agent.proactivity.trigger import check_trigger
+        from app.domain.trigger import check_trigger
 
         try:
             triggered, _is_at, text = check_trigger(
@@ -148,7 +148,7 @@ class LlmPipeline:
         if not self.runtime.config.get("image_understanding_enable", True):
             return []
         try:
-            from app.agent.providers.modalities import normalize_modalities, supports_image
+            from app.domain.modalities import normalize_modalities, supports_image
 
             chain = self.runtime.provider_chain() if callable(
                 getattr(self.runtime, "provider_chain", None)
@@ -214,7 +214,7 @@ class LlmPipeline:
             # 群聊必须满足触发条件（@ 或关键词），否则不进入 LLM 流水线
             if ctx.event.event_type == "message_group":
                 config = self.runtime.config
-                from app.agent.proactivity.trigger import check_trigger
+                from app.domain.trigger import check_trigger
 
                 triggered, is_at, user_text = check_trigger(
                     ctx.event.message,
@@ -504,7 +504,7 @@ class LlmPipeline:
                 enabled = bool(cfg.get("clean_output_parentheses", True))
             except Exception:
                 enabled = True
-        from app.agent.persona.tags import maybe_strip_parentheses
+        from app.domain.tags import maybe_strip_parentheses
 
         session_mgr.add_message(ctx.session_id, "assistant", maybe_strip_parentheses(text, enabled))
         await asyncio.to_thread(session_mgr.history.save_session, session)
