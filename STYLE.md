@@ -242,7 +242,7 @@ pytest -q --cov --cov-report=term-missing   # 需要覆盖率时
 > ——`--scc` 看环、`--why <模块>` 看环的成因路径、`--assert-max N` 供 CI 断言。
 > 不要再手写脚本重算（口径会漂）。
 
-### 12.0 进度速览（P0–P6 主体已完成）
+### 12.0 进度速览（P0–P9 已完成，收尾见 §12.1 末尾）
 
 | 指标 | 制定方案时 | 现在 |
 |---|---|---|
@@ -258,10 +258,12 @@ pytest -q --cov --cov-report=term-missing   # 需要覆盖率时
 | 包职责说明 README | 0 份 | **27 份**，且由 `tests/architecture/test_architecture_layout.py` 强制 |
 | 前端套数 | 2 套（Vue + 手写 JS，约 4,800 行重复） | **1 套**（`app/webui/dashboard/dist`；旧版与 `/legacy` 已删） |
 | 业务插件位置 | `module/modules/`（仓库根） | **`app/plugins/`**（`module/` 只剩运行时数据） |
+| `app/` 顶层目录 | 10 个（含 `nodes` / `services`） | **8 个**（agent application core domain infrastructure plugin plugins webui） |
 | 插件框架名 | `app/modules/`（与 `module/` 字面混淆） | **`app/plugin/`**（单数=框架，复数=业务插件） |
 | 插件加载方式 | 硬编码包名 `module.modules.<name>` | **按文件路径加载**（合成包名，位置与 import 名解耦） |
 | `tests/` 组织 | 142 文件全平铺 | **按源码镜像分区**（`tests/agent/...`、`tests/webui/...`） |
 | `scripts/` 组织 | 25 文件全平铺 | **`gen/ experiments/ diag/ ops/`** |
+| `tests/` 目录 | 142 文件平铺 | **9 个目录**，与源码一一对应 |
 | 前端源码位置 | 仓库根 `dashboard/` | **`app/webui/dashboard/`** |
 
 改造过程与实测见 `docs/ARCHITECTURE.md §5.2`；剩余工作见同文件 §5.1.1。
@@ -303,10 +305,10 @@ FastAPI 依赖（`request.app.state.container`，见 `deps.py`）——不再是
 
 ### 12.3 两套同名调度器
 
-`app/services/scheduler.py::SchedulerService`（230 行，模块 `SCHEDULES=` 声明式定点任务）
+`app/application/scheduler.py::SchedulerService`（230 行，模块 `SCHEDULES=` 声明式定点任务）
 与 `app/agent/proactivity/scheduler.py::TaskScheduler`（967 行，LLM 语义定时，落盘 `tasks_data.json`）
 在时间解析、到点触发、取 bot 连接上**零复用**。改任一处前先确认改的是哪一个。
-（P5 把 `app/services/` 改名 `app/application/` 时，两者会分别落在
+（P5 把 `app/application/` 改名 `app/application/` 时，两者会分别落在
 `app/application/scheduler.py` 与 `app/agent/proactivity/scheduler.py`——名字仍撞，
 届时给前者改名为 `cron_service.py`。）
 

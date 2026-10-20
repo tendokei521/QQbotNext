@@ -67,7 +67,7 @@ app/
 ├── infrastructure/  一切外部 IO：SQLite / 文件 / OneBot 网关 / HTTP / 配置落盘
 ├── agent/           LLM Agent 能力层（原 app/llm，内部按职责分包）
 ├── plugin/          插件框架：BaseModule / 注册表 / 权限 / hook / 节点链（原 app/plugin + app/nodes）
-├── application/     面向 WebUI 的能力编排（原 app/services）
+├── application/     面向 WebUI 的能力编排（原 app/application）
 └── webui/           纯 HTTP 适配：api / schemas / ws / 唯一前端 dashboard
 
 plugins/             业务插件（原 module/）：builtin/ 内置 + installed/ 外部 zip 安装
@@ -363,7 +363,7 @@ docs/                设计文档 + 本方案（见 §4）
 
 > `modules/media_cache.py` 已在 P3 下沉到 `app/infrastructure/fs/media_cache.py`（✅ 完成）。
 
-### 3.6 `app/services/` → `app/application/`（顺带解两处撞名）
+### 3.6 `app/application/` → `app/application/`（顺带解两处撞名）
 
 | 现文件 | 行 | 目标 | 动作 | 说明 |
 |---|---|---|---|---|
@@ -575,7 +575,8 @@ docs/
 | **P4** 最后一个环 + 包职责文档 | 定时工具从定时引擎分离（`tools/schedule.py`）；22 份包 README + 闸三 | ✅ **已完成** | **0 个强连通块**；闸三落地 |
 | **P5** 目录归一 | `module/modules`→`app/plugins`；`app/modules`→`app/plugin`；`tests/` 分区；`scripts/` 三分；`group_log` 拆 `service.py`；`domain/` 长实 | ✅ **已完成** | 13 插件全加载；1653+ passed |
 | **P6** 前端收敛 + 目录收口 | 删 `webui/static`+`templates`+`/legacy`；`dashboard/`→`app/webui/dashboard/` | ✅ **前端部分完成** | `/` 200；`/legacy` 404 |
-| **P7** `chat.py` 拆片 | 2,192 行按职责拆到 `loop/` 子文件（`chat.py` 保留重导出，API 不变） | ⬜ **待做** | 单文件 ≤800 行；无函数 ≥80 行 |
+| **P7** `chat.py` 拆片 | 2,192 行按职责拆到 `loop/` 子文件（`chat.py` 保留重导出，API 不变） | 🟡 **第一轮完成** | 2,192 → **1,668 行**（切出 turn_metrics / assistant_output / tool_source）；三个长函数仍待按段落拆 |
+| **P9** 目录收口 | `app/nodes` 并入 `app/plugin/nodes`（✅）；`app/services` → `app/application`（✅） | ✅ **已完成** | **`app/` 顶层 8 个目录，即 §2.1 的最终形态** |
 | **P8** WebUI 依赖注入收尾 | `webui/api/*` 的 `get_container()` / `container.get(类型)` 全改 `Depends(get_x_service)` | ✅ **已完成** | **71 → 1**（只剩 `deps.py` 的实现本身），17 条具名依赖 |
 
 ### 5.1.1 还没做的（按性价比排序）
