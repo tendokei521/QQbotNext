@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 import re
 import time
-from typing import Any, Iterable
+from typing import Iterable
 
 from app.agent.memory.store import _tokenize
 

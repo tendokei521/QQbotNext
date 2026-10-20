@@ -13,9 +13,9 @@ from __future__ import annotations
 import asyncio
 from typing import Awaitable, Callable
 
-from app.domain.pace import SendPolicy
 from app.core.logger import logger
 from app.domain.message import Message
+from app.domain.pace import SendPolicy
 
 
 class StreamSendPool:

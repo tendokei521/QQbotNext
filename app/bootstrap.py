@@ -302,9 +302,15 @@ def build_container(settings: Settings | None = None) -> Container:
     container.register_factory(OneBotGateway, lambda: gateway)
 
     # 节点注册表：内置入站链（路由 → 权限 → 派发 → Agent 兜底），框架/模块可插入/替换
-    from app.plugin.nodes import AgentNode, ModuleInvokeNode, ModulePermissionNode, ModuleRouterNode
-    from app.nodes import NodeRegistry
-    from app.nodes.outbound import OutboundPipeline, SendNode
+    from app.plugin.nodes import (
+        AgentNode,
+        ModuleInvokeNode,
+        ModulePermissionNode,
+        ModuleRouterNode,
+        NodeRegistry,
+        OutboundPipeline,
+        SendNode,
+    )
 
     node_registry = NodeRegistry()
     node_registry.register(AgentNode(agent_manager, config_service, gateway, logger))

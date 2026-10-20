@@ -7,7 +7,6 @@
 """
 
 import random
-import time
 
 from app.plugin import BaseModule, module_hook
 

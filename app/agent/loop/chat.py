@@ -21,7 +21,6 @@ from app.agent import logger
 from app.agent.assembly import assembler as assembly
 from app.agent.assembly.assembler import PromptRequest
 from app.agent.assembly.compress import maybe_compress_context
-from app.agent.assembly.token_budget import estimate_tokens
 from app.agent.commands import (
     build_help_nodes,
     build_help_text,
@@ -79,14 +78,13 @@ from app.agent.media.image import (
     max_image_bytes,
     persist_images,
 )
-from app.agent.providers import SERVED_MODEL_KEY, log_token_usage
+from app.agent.providers import log_token_usage
 from app.agent.providers.invoker import resolve_invoker
-from app.agent.providers.policy import TurnBudget, retry_profile_of
 from app.agent.session.manager import SessionManager
-from app.agent.tools.spec import ToolContext, build_tools, make_executor
+from app.agent.tools.spec import build_tools, make_executor
 from app.domain.modalities import normalize_modalities, supports_image, supports_tool_use
 from app.domain.splitter import split_sentences, strip_stream_artifacts
-from app.domain.tags import maybe_strip_parentheses, strip_all_tags
+from app.domain.tags import strip_all_tags
 from app.domain.trigger import extract_text
 
 

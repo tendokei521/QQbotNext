@@ -4,7 +4,6 @@ import os
 
 import pytest
 
-from app.agent import llm_data_dir
 from app.agent.memory.store import (
     MemoryStore,
     owner_group,

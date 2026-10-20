@@ -5,8 +5,6 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from app.domain.message import Message
-
 
 class SendPolicy:
     def __init__(self, config: dict | None = None) -> None:

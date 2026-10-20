@@ -17,11 +17,11 @@ from __future__ import annotations
 from typing import Any
 
 from app.agent.delivery.pool import StreamSendPool
-from app.domain.splitter import split_sentences, strip_stream_artifacts
 from app.agent.loop.tool_loop import normalize_and_execute_tool_calls
 from app.agent.providers import SERVED_MODEL_KEY, log_token_usage
 from app.agent.providers.invoker import resolve_invoker
 from app.domain.message import Message
+from app.domain.splitter import split_sentences, strip_stream_artifacts
 
 # 与 chat.DEFAULT_MAX_TOOL_ROUNDS 保持一致（调用方通常会显式传配置值）
 DEFAULT_MAX_TOOL_ROUNDS = 5

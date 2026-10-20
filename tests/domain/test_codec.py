@@ -1,6 +1,6 @@
 """领域层与 OneBot 编解码测试。"""
 
-from app.domain.events import GroupMessageEvent, MessageEvent, NoticeEvent, PrivateMessageEvent, RequestEvent
+from app.domain.events import GroupMessageEvent, NoticeEvent, PrivateMessageEvent, RequestEvent
 from app.domain.message import Message, MessageSegment
 from app.infrastructure.onebot.codec import decode
 

@@ -1,6 +1,5 @@
 """主动消息测试：启用判断 / 免打扰 / 私聊调度 / 停止 / 启动恢复。"""
 
-import asyncio
 import time
 from datetime import datetime
 

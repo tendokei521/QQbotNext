@@ -2,8 +2,8 @@
 
 from app.domain.events import NoticeEvent, PrivateMessageEvent
 from app.plugin.base import ModulePermission
-from app.plugin.nodes import AgentNode
-from app.nodes.base import MessageContext
+from app.plugin.nodes.base import MessageContext
+from app.plugin.nodes.inbound import AgentNode
 
 
 class _FakeConfig:
@@ -153,7 +153,7 @@ async def test_agent_node_skips_when_module_stopped(monkeypatch):
 
 async def test_agent_node_order_after_modules():
     """AgentNode 应排在模块链（Router/Permission/Invoke）之后。"""
-    from app.plugin.nodes import ModuleInvokeNode, ModulePermissionNode, ModuleRouterNode
+    from app.plugin.nodes.inbound import ModuleInvokeNode, ModulePermissionNode, ModuleRouterNode
 
     nodes = sorted(
         [AgentNode(None, None, None), ModuleRouterNode(None), ModulePermissionNode(None, None),

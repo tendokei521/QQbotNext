@@ -25,10 +25,10 @@ from app.agent.context.group import (
     fetch_group_name,
     fetch_group_online_history,
 )
-from app.domain.tags import strip_all_tags
-from app.domain.time_parser import advance_repeat, parse_schedule
 from app.agent.providers import get_provider
 from app.agent.session.manager import SessionManager
+from app.domain.tags import strip_all_tags
+from app.domain.time_parser import advance_repeat, parse_schedule
 
 # 定时触发（cron-wake）默认提示词：对齐 AstrBot PROACTIVE_AGENT_CRON_WOKE_SYSTEM_PROMPT 的轻量版
 DEFAULT_SCHEDULE_PROMPT = (
@@ -390,8 +390,8 @@ class TaskScheduler:
                 return
 
             from app.agent.loop.chat import _max_tool_rounds
-            from app.domain.modalities import normalize_modalities, supports_tool_use
             from app.agent.tools.spec import build_tools, make_executor
+            from app.domain.modalities import normalize_modalities, supports_tool_use
 
             chain_probe = self.module.provider_chain() if hasattr(self.module, "provider_chain") else []
             modalities = normalize_modalities((chain_probe[0] or {}).get("modalities") if chain_probe else None)
@@ -648,8 +648,8 @@ class TaskScheduler:
             return _ABORTED
 
         from app.agent.loop.chat import _max_tool_rounds
-        from app.domain.modalities import normalize_modalities, supports_tool_use
         from app.agent.tools.spec import build_tools, make_executor
+        from app.domain.modalities import normalize_modalities, supports_tool_use
 
         chain_probe = self.module.provider_chain() if hasattr(self.module, "provider_chain") else []
         modalities = normalize_modalities((chain_probe[0] or {}).get("modalities") if chain_probe else None)

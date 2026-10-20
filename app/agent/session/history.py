@@ -11,7 +11,6 @@ import re
 import sqlite3
 import threading
 import time
-from pathlib import Path
 from typing import Any
 
 from app.agent import llm_data_dir, logger, safe_bot_id

@@ -1,8 +1,8 @@
 """节点框架测试：NodeRunner / NodeRegistry / 出站管道（拦截、顺序、替换）。"""
 
-from app.nodes.base import MessageContext, MessageNode, NodeRunner
-from app.nodes.outbound import OutboundPipeline, SendNode
-from app.nodes.registry import NodeRegistry
+from app.plugin.nodes.base import MessageContext, MessageNode, NodeRunner
+from app.plugin.nodes.outbound import OutboundPipeline, SendNode
+from app.plugin.nodes.registry import NodeRegistry
 
 
 class _Probe(MessageNode):

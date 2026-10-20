@@ -1,6 +1,5 @@
 """递归子模块容器测试：parent.children / 配置命名空间 / 生命周期级联 / 不参与全局分发。"""
 
-import sys
 
 import pytest
 

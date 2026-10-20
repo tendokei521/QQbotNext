@@ -12,7 +12,6 @@ import time
 import uuid
 from typing import Any
 
-from app.domain.modalities import default_modalities_for, normalize_modalities
 from app.agent.providers.policy import (
     REASONING_FLOOR,
     is_reasoning_model,
@@ -21,6 +20,7 @@ from app.agent.providers.policy import (
 )
 from app.agent.providers.runtime_manager import ProviderRuntimeManager
 from app.core.logger import logger
+from app.domain.modalities import default_modalities_for, normalize_modalities
 from app.infrastructure.config.config_service import ConfigService
 
 PASSWORD_MASK = "••••••••"

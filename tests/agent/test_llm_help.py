@@ -14,7 +14,6 @@ import types
 
 from app.agent.commands import (
     COMMAND_GROUPS,
-    PREFIX,
     build_help_nodes,
     build_help_text,
     chunk_text,

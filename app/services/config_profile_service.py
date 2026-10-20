@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any
 
 from app.core.logger import logger
 from app.infrastructure.config.config_service import ConfigService

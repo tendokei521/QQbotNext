@@ -6,8 +6,8 @@ import types
 from app.agent.config import DEFAULT_LLM_CONFIG
 from app.agent.loop.chat import _clean_output_for_history, generate_response
 from app.agent.memory.manager import MemoryManager
-from app.domain.tags import maybe_strip_parentheses, strip_parentheses
 from app.agent.session.manager import SessionManager
+from app.domain.tags import maybe_strip_parentheses, strip_parentheses
 
 
 # ---- strip_parentheses ----

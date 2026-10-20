@@ -4,7 +4,6 @@ import pytest
 
 from app.agent.providers.base import LLMResponse
 from app.agent.providers.runtime_manager import ProviderRuntimeManager
-from app.infrastructure.config.config_service import ConfigService
 from app.services.config_profile_service import ConfigProfileService
 from app.services.provider_model_service import ProviderModelService
 from app.services.provider_preset_service import ProviderPresetService

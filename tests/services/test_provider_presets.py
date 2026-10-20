@@ -2,7 +2,6 @@
 
 import pytest
 
-from app.infrastructure.config.config_service import ConfigService
 from app.services.provider_preset_service import PASSWORD_MASK, ProviderPresetService
 
 

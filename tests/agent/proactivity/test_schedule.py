@@ -1,6 +1,5 @@
 """定时任务功能测试：时间解析 / 调度服务。"""
 
-import asyncio
 import time
 from datetime import datetime, timedelta
 

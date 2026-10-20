@@ -50,7 +50,6 @@ def strip_directives(text: str) -> str:
 def text_of(event: Any, *, strip: bool = True) -> str:
     """事件 → 可读正文（复用既有段渲染器：图片/表情/语音都是占位符）。"""
     from app.agent.context.group import extract_msg_text
-
     from app.core.logger import logger
 
     try:

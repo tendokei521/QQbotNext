@@ -22,7 +22,7 @@ from app.infrastructure.onebot.client import (
     _callable_accepts_timeout,
     resolve_api_timeout,
 )
-from app.nodes.outbound import OutboundPipeline, SendNode
+from app.plugin.nodes.outbound import OutboundPipeline, SendNode
 
 
 class _SilentWS:

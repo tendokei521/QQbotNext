@@ -29,7 +29,6 @@ ALLOWED_APP_PACKAGES = {
     "agent",  # 框架级 Agent（原 app/llm）
     "plugin",  # 插件**框架**（单数；原 app/modules）
     "plugins",  # **业务插件**（13 个，原 module/modules）
-    "nodes",  # 消息节点链
     "services",  # 应用服务（P5 → application）
     "webui",  # HTTP/WS 适配层
 }

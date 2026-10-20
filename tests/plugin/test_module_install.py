@@ -1,6 +1,5 @@
 """插件软卸载 / zip 安装 / 恢复安装测试。"""
 
-import sys
 import zipfile
 from pathlib import Path
 

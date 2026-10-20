@@ -23,8 +23,8 @@ from app.plugin.authority import (
     roster_lists,
 )
 from app.plugin.base import BaseModule
+from app.plugin.nodes.base import MessageContext, MessageNode, Next
 from app.plugin.registry import ModuleRegistry
-from app.nodes.base import MessageContext, MessageNode, Next
 
 
 class _AgentGate:

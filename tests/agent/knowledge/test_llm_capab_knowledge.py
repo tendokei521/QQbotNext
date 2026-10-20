@@ -1,6 +1,5 @@
 """Provider 能力分发 / 知识库存储基础测试。"""
 
-import pytest
 
 from app.agent.knowledge.store import KnowledgeStore, cosine
 from app.agent.providers import get_provider

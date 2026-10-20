@@ -1,6 +1,6 @@
 """FeatureRegistry 测试：能力接管、多租约、恢复、插件声明式 supersedes。"""
 
-from app.plugin.base import BaseModule, ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
+from app.plugin.base import BaseModule, ModuleAuthority, ModuleContext, ServiceAccess
 from app.plugin.features import (
     AssemblerFeatureController,
     ConfigToggleFeature,

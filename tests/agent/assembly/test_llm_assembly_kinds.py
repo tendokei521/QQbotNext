@@ -93,7 +93,7 @@ def test_schedule_prompt_has_same_block_structure_as_chat():
 
 async def test_scheduler_build_messages_uses_assembler(monkeypatch, tmp_path):
     """scheduler._build_messages 真的走装配器：块序列与 chat 一致，且含格式说明。"""
-    from app.agent.proactivity.scheduler import DEFAULT_SCHEDULE_PROMPT, TaskScheduler
+    from app.agent.proactivity.scheduler import TaskScheduler
 
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
 

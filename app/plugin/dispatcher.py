@@ -13,9 +13,9 @@ from typing import Any
 
 from app.core.logger import logger
 from app.domain.events import BaseEvent
-from app.plugin.nodes import ModuleInvokeNode, ModulePermissionNode, ModuleRouterNode
-from app.nodes.base import MessageContext, NodeRunner
-from app.nodes.registry import NodeRegistry
+from app.plugin.nodes.base import MessageContext, NodeRunner
+from app.plugin.nodes.inbound import ModuleInvokeNode, ModulePermissionNode, ModuleRouterNode
+from app.plugin.nodes.registry import NodeRegistry
 
 
 class ModuleDispatcher:

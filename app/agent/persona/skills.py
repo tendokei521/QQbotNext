@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Callable
 
 from app.core.logger import logger
 

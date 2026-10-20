@@ -1,8 +1,5 @@
 """测试公共夹具：临时目录 / 容器 / SQLite。"""
 
-import asyncio
-import os
-from pathlib import Path
 
 import pytest
 

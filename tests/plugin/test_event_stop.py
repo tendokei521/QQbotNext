@@ -1,8 +1,8 @@
 """event.stop() 全链终止机制测试（对齐 astrbot stop_event）。"""
 
 from app.domain.events import PrivateMessageEvent
-from app.plugin.nodes import AgentNode, ModuleInvokeNode
-from app.nodes.base import MessageContext
+from app.plugin.nodes.base import MessageContext
+from app.plugin.nodes.inbound import AgentNode, ModuleInvokeNode
 
 
 def _priv_msg():

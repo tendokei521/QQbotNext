@@ -16,8 +16,8 @@ from app.agent.runtime import AgentManager
 from app.domain.events import PrivateMessageEvent
 from app.infrastructure.onebot.codec import decode
 from app.plugin.base import ModulePermission
-from app.plugin.nodes import AgentNode
-from app.nodes.base import MessageContext
+from app.plugin.nodes.base import MessageContext
+from app.plugin.nodes.inbound import AgentNode
 
 # --------------------------------------------------------------- 测试替身
 

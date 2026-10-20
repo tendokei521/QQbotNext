@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from app.nodes.base import MessageContext, MessageNode, Next, NodeRunner
+from app.plugin.nodes.base import MessageContext, MessageNode, Next, NodeRunner
 
 
 class SendNode(MessageNode):

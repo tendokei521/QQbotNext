@@ -7,7 +7,6 @@
 from types import SimpleNamespace
 
 from app.agent.assembly.prompt import (
-    PROACTIVE_ENV_LINE,
     PROACTIVE_ENV_NUDGE,
     PROACTIVE_FOOTER_LINE,
     PROACTIVE_FOOTER_UNRESOLVED_LINE,

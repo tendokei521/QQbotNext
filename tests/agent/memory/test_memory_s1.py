@@ -1,6 +1,5 @@
 """S1 存储层 v2 测试：状态/置信度/矛盾检测/近义合并/correct/deny/confirm/reset。"""
 
-import pytest
 
 from app.agent.memory.store import (
     MemoryStore,
