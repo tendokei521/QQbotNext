@@ -81,8 +81,11 @@ async def stream_send_initiative(
         chain = runtime.provider_chain()
     else:
         chain = [dict(config.raw_config)]
+    from app.agent.policy import policy_view
+
+    policy_cfg = policy_view(runtime) or config
     max_len = int(
-        config.get("stream_sentence_max_length")
+        policy_cfg.get("stream_sentence_max_length")
         or config.get("max_message_length", 200)
         or 200
     )

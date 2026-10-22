@@ -219,8 +219,11 @@ async def _run_inner(
     result.messages = list(messages)
 
     use_tools = bool(all_specs) and supports_tool_use(modalities)
+    from app.agent.policy import policy_view
+
+    policy_cfg = policy_view(runtime) or config
     stream = (
-        bool(config.get("stream_output", False)) if req.stream is None else bool(req.stream)
+        bool(policy_cfg.get("stream_output", False)) if req.stream is None else bool(req.stream)
     )
     started = time.monotonic()
     sink: dict = {}
@@ -364,8 +367,11 @@ async def _stream_once(
     params = _call_params(meta, all_specs, tool_ctx, use_tools, config)
     params["usage_sink"] = usage_sink
     params["input_tokens_estimate"] = _input_tokens_estimate(messages)
+    from app.agent.policy import policy_view
+
+    policy_cfg = policy_view(runtime) or config
     max_msg_len = int(
-        config.get("stream_sentence_max_length")
+        policy_cfg.get("stream_sentence_max_length")
         or config.get("max_message_length", 200)
         or 200
     )

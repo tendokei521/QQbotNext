@@ -258,8 +258,11 @@ async def stream_response(runtime, event, ctx=None):
     is_private = meta["is_private"]
     user_id = meta["user_id"]
     model = meta["model"]
+    from app.agent.policy import policy_view
+
+    policy_cfg = policy_view(runtime) or config
     max_msg_len = int(
-        config.get("stream_sentence_max_length")
+        policy_cfg.get("stream_sentence_max_length")
         or config.get("max_message_length", 200)
         or 200
     )
@@ -270,7 +273,7 @@ async def stream_response(runtime, event, ctx=None):
 
     speech = meta.get("speech")
     speech_by_tool = speech is not None
-    reminder_rounds = int(config.get("speech_reminder_rounds", DEFAULT_REMINDER_ROUNDS) or 0)
+    reminder_rounds = int(policy_cfg.get("speech_reminder_rounds", DEFAULT_REMINDER_ROUNDS) or 0)
     spoken_parts: list[str] = []
 
     messages = assembly.build_for(runtime, req)

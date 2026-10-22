@@ -215,7 +215,9 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
         provider_chain, config, session_history, history_rounds
     )
 
-    schedule_enable = config.get("schedule_enable", True)
+    from app.agent.policy import policy_get as _policy_get
+
+    schedule_enable = bool(_policy_get(runtime, "schedule", "schedule_enable", True))
     all_specs, skill_blocks, tool_ctx = await _collect_llm_ext(
         runtime, event, session_id, is_private, schedule_enable
     )
@@ -224,7 +226,11 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
     # `speech_via_tool` 与 `assembly_profile` 归模块所有：
     # `llm_output` 接管输出槽时把视图挂 `runtime.output`，`llm_assembly` 挂
     # `runtime.assembly_options`；未接管时回退 agent 配置，行为不变。
-    policy_cfg = getattr(runtime, "assembly_options", None) or config
+    # 发言通道跨模块读键（assembly_profile 归 llm_assembly、speech_via_tool 归 llm_output），
+    # 所以用链式视图；未接管任何模块时等价于 agent 配置。
+    from app.agent.policy import policy_view
+
+    policy_cfg = policy_view(runtime) or config
     speech = _build_speech(policy_cfg)
     if speech is not None:
         from app.agent.delivery.speech import build_speech_tools, persona_output_conflicts

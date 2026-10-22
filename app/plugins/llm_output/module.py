@@ -107,6 +107,12 @@ class Module(BaseModule):
         runtime = self.ctx.services.runtime(self.bot_id) if self.ctx.services else None
         if runtime is None:
             return
+        from app.agent.delivery.output import ConfigView
+
+        # 策略视图：让**其它机制**（如 prompt_prep 的发言通道门控）也能读到这些键
+        runtime.output_options = ConfigView(
+            getattr(runtime, "config", None), self.config, OWNED_KEYS
+        )
         runtime.output = OutputStrategyAdapter(runtime, self.config, OWNED_KEYS)
 
     async def on_unload(self) -> None:
@@ -120,6 +126,7 @@ class Module(BaseModule):
             return
         if isinstance(getattr(runtime, "output", None), OutputStrategyAdapter):
             runtime.output = None
+        runtime.output_options = None
 
     # ── 供测试/诊断：当前生效的模式 ──
     @property
