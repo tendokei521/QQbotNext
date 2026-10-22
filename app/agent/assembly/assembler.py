@@ -108,6 +108,10 @@ class PromptRequest:
     #: 与 ``pre_history_text``（在线历史拉取）是**两个来源**：前者含互动（表情/戳/撤回）
     #: 与"我做过什么"，后者只有消息正文。两者正文按 message_id 去重，不会重复出现。
     group_log_text: str = ""
+    #: 模块贡献的额外 system 块 ``[(块名, 文本)]``（由 `runtime.context_providers` 收集）。
+    #: 装配器只负责按顺序渲染，来源与内容都在模块侧 —— 这是「记忆 / 知识库 / 群记录
+    #: 做成模块」时**不必接管整个装配器**的接入点。
+    extra_blocks: list[tuple[str, str]] = field(default_factory=list)
 
     # 能力与模态
     available_tools: set[str] | None = None
@@ -382,6 +386,19 @@ def build_group_log(req: PromptRequest) -> list[dict]:
     return [{"role": "system", "content": text}] if text else []
 
 
+def build_extra_blocks(req: PromptRequest) -> list[dict]:
+    """模块贡献的额外 system 块（按收集顺序，空块已在收集侧丢弃）。
+
+    位置固定在 ``group_log`` 之后、``history`` 之前：既在"环境信息"之后，
+    又贴着历史之前 —— 模型读到的顺序是"我是谁 → 现在什么情况 → 之前聊了什么 → 本轮"。
+    """
+    return [
+        {"role": "system", "content": str(text).strip()}
+        for _name, text in (req.extra_blocks or [])
+        if str(text or "").strip()
+    ]
+
+
 def _extra_text_parts(req: PromptRequest) -> list[dict]:
     """把 ``extra_user_content_parts`` 转成多模态 text 块；空白项丢弃。"""
     return [
@@ -488,6 +505,8 @@ BLOCKS: tuple[Block, ...] = (
     Block("memory", build_memory),
     Block("background", build_background),
     Block("group_log", build_group_log),
+    # 模块贡献的额外块（`runtime.context_providers`）：贴着历史之前
+    Block("extra", build_extra_blocks),
     Block("history", build_history),
     Block("user", build_user),
 )

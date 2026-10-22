@@ -269,6 +269,18 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
     # 指代消解：焦点行 + 明确指向时的确定性预取（放在背景块之前，信息密度更高）
     referent_text = await _referent_block(tool_ctx.runtime, session_id, user_text, tool_ctx)
 
+    # 模块贡献的额外上下文块（记忆/知识库/群记录等做成模块时的接入点）：
+    # 按 order 收集，装配器把它们渲染在 group_log 之后、history 之前。
+    extra_blocks = await _collect_extra_blocks(
+        runtime,
+        session_id=session_id,
+        is_private=is_private,
+        user_id=user_id,
+        group_id=group_id,
+        user_text=user_text,
+        history=session_history,
+    )
+
     # 图片：复用上面**已经落盘**的那批段（一张图只下载一次），渲染成 base64 块；
     # 是否真正传给模型由 assembly 的模态门控决定。
     # 无事件路径没有"本轮图片段"，跳过（等价于"没有图片"分支）。
@@ -317,6 +329,7 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
         modalities=modalities,
         schedule_enable=schedule_enable,
         user_images=user_images,
+        extra_blocks=extra_blocks,
     )
     meta = {
         "model": config.get("model", "deepseek-chat"),
@@ -337,6 +350,31 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
         "bot": bot,
     }
     return req, session, meta
+
+
+async def _collect_extra_blocks(
+    runtime, *, session_id, is_private, user_id, group_id, user_text, history
+) -> list[tuple[str, str]]:
+    """收集模块注册的额外上下文块；没有注册者时返回空列表（零开销）。"""
+    try:
+        from app.agent.loop.providers import TurnScope, collect_context_blocks
+
+        scope = TurnScope(
+            runtime=runtime,
+            config=getattr(runtime, "config", None),
+            session_id=session_id,
+            is_private=is_private,
+            user_id=str(user_id or ""),
+            group_id=group_id,
+            user_text=user_text,
+            history=tuple(history or ()),
+        )
+        return await collect_context_blocks(runtime, scope)
+    except Exception as e:  # noqa: BLE001 —— 贡献者收集失败不该毁掉整轮
+        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(
+            f"[Provider] 额外上下文块收集失败（已忽略）: {e}"
+        )
+        return []
 
 
 async def _fetch_pre_history(

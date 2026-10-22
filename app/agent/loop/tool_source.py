@@ -145,6 +145,21 @@ async def _collect_llm_ext(
 
         specs.extend(build_onebot_tools(runtime, ctx))
 
+    # 模块注册的工具源（OneBot / MCP / 记忆 / 知识库做成模块时的接入点）。
+    # 放在过滤之前：它们产出的工具与框架工具走同一套四类开关过滤。
+    if getattr(runtime, "tool_sources", None):
+        from app.agent.loop.providers import TurnScope, collect_tool_specs
+
+        scope = TurnScope(
+            runtime=runtime,
+            config=getattr(runtime, "config", None),
+            session_id=session_id,
+            is_private=is_private,
+            user_id=str(user_id or ""),
+            group_id=group_id,
+        )
+        specs.extend(await collect_tool_specs(runtime, scope))
+
     # 统一按四类工具的用户开关过滤：
     # - 系统工具由 system_tools_enabled + 前置功能开关共同决定
     # - 模块工具 / MCP 工具由各自 enabled map 单独控制

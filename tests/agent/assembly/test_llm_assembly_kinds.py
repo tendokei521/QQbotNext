@@ -34,6 +34,8 @@ def test_declared_block_order_covers_all_kinds():
         "memory",
         "background",
         "group_log",
+        # 模块贡献的额外 system 块（`runtime.context_providers`），位置贴着历史之前
+        "extra",
         "history",
         "user",
     ]

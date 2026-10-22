@@ -1,4 +1,4 @@
-﻿"""装配器等价性 + 块序列黄金快照（重构的安全网）。
+"""装配器等价性 + 块序列黄金快照（重构的安全网）。
 
 背景：同一类请求此前在四个地方各自组装 messages（chat.generate_response /
 chat.stream_response / scheduler._build_messages / proactive 内联），
@@ -158,6 +158,7 @@ def test_block_order_is_declared_and_stable():
         "memory",
         "background",
         "group_log",
+        "extra",
         "history",
         "user",
     ]
@@ -191,6 +192,7 @@ def test_describe_snapshot_typical_group_chat():
         {"block": "memory", "role": "-", "chars": 0, "messages": 0},
         {"block": "background", "role": "system", "chars": len("焦点\n\n环境"), "messages": 1},
         {"block": "group_log", "role": "-", "chars": 0, "messages": 0},
+        {"block": "extra", "role": "-", "chars": 0, "messages": 0},
         {"block": "history", "role": "user", "chars": len("上一句"), "messages": 1},
         {"block": "user", "role": "user", "chars": len("现在的消息"), "messages": 1},
     ]

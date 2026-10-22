@@ -122,6 +122,12 @@ class AgentRuntime:
         self.assembler = PromptAssembler()
         # provider 调用策略：插件可声明 supersedes=("provider_invoker",) 整体替换
         self.invoker = ProviderInvoker()
+        # 输出策略：None = 按配置自动选择（stream_output）。
+        # 插件可声明 supersedes=("output",) 整体替换；置 None 即回到框架默认。
+        self.output = None
+        # 上下文贡献者与工具源（注册制、可组合；模块 on_load 里 register）
+        self.context_providers: list = []
+        self.tool_sources: list = []
         # 模块扩展：@tool 工具 + 技能
         self.llm_tools = ModuleToolRegistry(logger)
         self.skills = SkillRegistry(logger)

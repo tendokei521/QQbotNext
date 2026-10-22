@@ -14,7 +14,7 @@ import uuid
 from typing import Any
 
 from app.agent.commands import is_command
-from app.agent.delivery.directives import build_outbound_builder
+from app.agent.delivery.output import resolve_output
 from app.agent.hooks import run_stage
 from app.agent.loop.context import LlmContext, LlmJob
 from app.agent.loop.locks import SessionLockManager
@@ -306,52 +306,8 @@ class LlmPipeline:
             # 只有真正进入 LLM 请求前才更新主动消息状态（群聊普通消息不重置沉默计时器）
             await self._observe(ctx)
 
-            # 2. 实际 LLM 请求
-            if self.runtime.config.get("stream_output", False):
-                await self._run_stream(ctx)
-                return
-
-            from app.agent.loop.chat import generate_response
-
-            response_text = await generate_response(self.runtime, ctx.event, ctx)
-            if response_text is None:
-                return
-            if job.skip or job.superseded:
-                return
-
-            ctx.response_text = response_text
-            # 输出侧动作通道：把 [reply]/[@QQ] 指令转成真正的消息段（无指令时等价纯文本）
-            outbound = build_outbound_builder(ctx.event, config).build(response_text)
-            if outbound is None:
-                # 只有指令、没有正文：不发空消息
-                return
-            ctx.response_messages = [outbound]
-
-            # 3. 请求后钩子（可拆分/改写）
-            if not await self._run_stage("post_response", ctx):
-                return
-            if job.skip or job.superseded:
-                return
-            if not ctx.response_messages:
-                ctx.response_messages = [Message.from_text(ctx.response_text)]
-            # 统一为 Message，方便 pre_send / post_send 钩子安全读写
-            ctx.response_messages = [
-                m if isinstance(m, Message) else Message.from_text(str(m))
-                for m in ctx.response_messages
-            ]
-
-            # 4. 发送阶段
-            for msg in list(ctx.response_messages):
-                if getattr(msg, "skip", False):
-                    continue
-                if not await self._run_stage("pre_send", ctx, msg):
-                    return
-                if getattr(msg, "skip", False):
-                    continue
-
-                await self._send(ctx, msg)
-
-                await self._run_stage("post_send", ctx, msg)
+            # 2. 实际 LLM 请求 —— 交给输出策略（`runtime.output`，模块可整体接管）
+            await self._drive(ctx, resolve_output(self.runtime))
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -367,104 +323,45 @@ class LlmPipeline:
             self.runtime.config.clear_session()
             self.pool.finish(job)
 
-    async def _run_stream(self, ctx: LlmContext) -> None:
-        """流式路径：按句子发送，并触发 pre_send / post_send / post_stream 钩子。"""
-        from app.agent.loop.chat import stream_response
+    async def _drive(self, ctx: LlmContext, strategy: Any) -> None:
+        """驱动输出策略：逐条消息走 ``pre_send`` → 发送 → ``post_send``。
 
-        config = self.runtime.config
-        pool_enabled = config.get("stream_send_pool_enabled", False)
-        # 输出侧动作通道：只有本轮首片能带 [reply]/[@QQ]，后续片仅剥离标记
-        outbound = build_outbound_builder(ctx.event, config)
+        输出形态（一次性 / 逐句流式 / 发言通道）全在策略里，这里只负责
+        "拿到消息就发"和发送前后的钩子 —— 于是「流式输出」可以整块被模块接管。
+        """
+        sent_parts: list[str] = []
+        async for msg in strategy.respond(
+            ctx, should_stop=lambda: self._should_break_stream(ctx)
+        ):
+            job = ctx.job
+            if job is not None and (job.skip or job.superseded):
+                return
+            if msg is None or getattr(msg, "skip", False):
+                continue
+            if not await self._run_stage("pre_send", ctx, msg):
+                return
+            if getattr(msg, "skip", False):
+                continue
 
-        if not pool_enabled:
-            sent_parts: list[str] = []
-            interrupted = False
-
-            async for item in stream_response(self.runtime, ctx.event, ctx):
-                if self._should_break_stream(ctx):
-                    interrupted = True
-                    break
-
-                msg = self._as_message(item, outbound)
-                if msg is None:
-                    continue
-
-                if not await self._run_stage("pre_send", ctx, msg):
-                    return
-                if getattr(msg, "skip", False):
-                    continue
-
-                await self._send(ctx, msg)
-                sent_parts.append(msg.text)
-
-                await self._run_stage("post_send", ctx, msg)
-
-            if interrupted:
-                await self._save_sent_history(ctx, sent_parts)
-                ctx.state["interrupted"] = True
-
-            await self._run_stage("post_stream", ctx)
-            return
-
-        from app.agent.delivery.pool import StreamSendPool
-
-        sent_parts = []
-        interrupted = False
-
-        async def send_message(msg: Message) -> None:
             await self._send(ctx, msg)
             sent_parts.append(msg.text)
 
-        async def pre_send_hook(msg: Message) -> bool:
-            if not await self._run_stage("pre_send", ctx, msg):
-                return True
-            return getattr(msg, "skip", False)
-
-        async def post_send_hook(msg: Message) -> None:
             await self._run_stage("post_send", ctx, msg)
 
-        pool = StreamSendPool(
-            config,
-            send_message=send_message,
-            pre_send=pre_send_hook,
-            post_send=post_send_hook,
-            should_cancel=lambda: self._should_break_stream(ctx),
-        )
-        try:
-            async for item in stream_response(self.runtime, ctx.event, ctx):
-                if self._should_break_stream(ctx):
-                    interrupted = True
-                    break
-                msg = self._as_message(item, outbound)
-                if msg is not None:
-                    await pool.put(msg)
+        if getattr(strategy, "streams", False):
+            # 流式收尾：整体结束后触发 post_stream；被打断则把已发内容写进历史
+            if ctx.state.get("interrupted"):
+                await self._save_sent_history(ctx, sent_parts)
+            await self._run_stage("post_stream", ctx)
 
-            if not interrupted:
-                await pool.finish()
-                await pool.wait_drained()
-        finally:
-            await pool.shutdown()
+    async def _run_stream(self, ctx: LlmContext) -> None:
+        """显式走流式策略（内部/测试入口；等价于 ``_drive`` + 流式策略）。"""
+        from app.agent.delivery.output import StreamOutput
 
-        if interrupted:
-            await self._save_sent_history(ctx, sent_parts)
-            ctx.state["interrupted"] = True
-
-        await self._run_stage("post_stream", ctx)
-
-    def _as_message(self, item: Any, outbound) -> Message | None:
-        """把流式产出物统一成待发送的 ``Message``。
-
-        两条流式语义并存：
-
-        - **文本即发言**（旧）：``stream_response`` 逐句 yield 字符串，由 ``outbound``
-          解析首片的 ``[reply]``/``[@QQ]`` 指令；
-        - **发言通道**（``speech_via_tool``）：``stream_response`` yield 的已经是构造好的
-          ``Message``（气泡自带引用/@ 段），不能再过一遍指令解析——
-          否则正文里的 ``[...]`` 会二次剥离。
-        """
-        if isinstance(item, Message):
-            return item if item.segments else None
-        return outbound.build(str(item or ""))
+        strategy = getattr(self.runtime, "output", None)
+        if not getattr(strategy, "streams", False):
+            strategy = StreamOutput(self.runtime)
+        await self._drive(ctx, strategy)
 
     def _should_break_stream(self, ctx: LlmContext) -> bool:
         """流式发送中途是否应当停止继续发剩余句子。

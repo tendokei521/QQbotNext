@@ -40,9 +40,10 @@ RATINGS = (FULL, HALF, UNWIRED)
 #: 接缝总数下限（棘轮：只许增，不许减）
 BASELINE_TOTAL = 55
 #: 完全可扩展接缝数下限（棘轮：只许增，不许减）
-BASELINE_FULL = 10
+#: W0-W2 完成后从 10 提到 16（出站链、入站链、输出策略、输出指令、发送通道、run_turn）
+BASELINE_FULL = 16
 #: 半通下限（防止把 half 悄悄改成 full 而不补证据）
-BASELINE_HALF = 23
+BASELINE_HALF = 24
 
 #: LLM 流水线合法的钩子阶段（新增阶段必须同时改这里与 docs）
 DECLARED_STAGES = frozenset(
@@ -85,11 +86,16 @@ SEAMS: tuple[Seam, ...] = (
          gap="R1：`EVENT_NAMES` 为固定 dict，新增事件类型需改源码"),
     Seam("S4", "传输", "连接去重/生命周期", UNWIRED, "app/infrastructure/onebot/gateway.py",
          gap="R1/R2：去重与心跳在网关内部，无钩子无开关"),
-    Seam("S5", "传输", "入站节点链", HALF, "app/plugin/dispatcher.py:61",
-         gap="R1 打折：`NodeRegistry` 不在 `ServiceAccess`，模块拿不到；R4 缺：无 `remove_owner` 按归属清理",
-         evidence=("tests/plugin/test_dispatcher.py::test_subscribed_module_only",)),
-    Seam("S6", "传输", "出站节点链", UNWIRED, "app/bootstrap.py:324",
-         gap="R1/R4：`OutboundPipeline([SendNode()])` 是字面量快照，`register_outbound` 无人读取"),
+    Seam("S5", "传输", "入站节点链", FULL, "app/plugin/dispatcher.py:61",
+         evidence=(
+             "tests/plugin/test_dispatcher.py::test_subscribed_module_only",
+             "tests/plugin/test_nodes.py::test_outbound_pipeline_reads_registry_live",
+         )),
+    Seam("S6", "传输", "出站节点链", FULL, "app/plugin/nodes/outbound.py",
+         evidence=(
+             "tests/plugin/test_nodes.py::test_outbound_pipeline_reads_registry_live",
+             "tests/plugin/test_nodes.py::test_outbound_pipeline_always_has_a_send_terminal",
+         )),
 
     # ── 触发与准入 ──────────────────────────────────────────────
     Seam("S7", "触发", "触发判定（@/关键词）", UNWIRED, "app/agent/loop/pipeline.py:217",
@@ -110,7 +116,8 @@ SEAMS: tuple[Seam, ...] = (
     Seam("S13", "取值", "群聊在线历史 pre_history", UNWIRED, "app/agent/loop/prompt_prep.py:155",
          gap="R1/R2：硬编码调用，无 provider 注册"),
     Seam("S14", "取值", "群聊环境记录 group_log", HALF, "app/agent/loop/context_blocks.py:233",
-         gap="R1：模块产出文本，但框架侧硬编码调用位置"),
+         gap="R1：模块可通过 `context_providers` 追加块（R3 成立），但框架自身的 group_log 调用位置仍硬编码",
+         evidence=("tests/agent/loop/test_providers.py::test_extra_blocks_render_between_group_log_and_history",)),
     Seam("S15", "取值", "指代/焦点", UNWIRED, "app/agent/loop/context_blocks.py:130",
          gap="R1：只有 `referent_*` 配置簇"),
     Seam("S16", "取值", "记忆召回", HALF, "app/agent/loop/context_blocks.py:199",
@@ -119,8 +126,9 @@ SEAMS: tuple[Seam, ...] = (
          gap="R1：直调 `runtime.knowledge`，仅能整体 disable"),
     Seam("S18", "取值", "技能注入", FULL, "app/agent/persona/skills.py:74",
          evidence=("tests/agent/assembly/test_llm_assembly.py::test_equivalent_with_all_blocks_present",)),
-    Seam("S19", "取值", "工具收集（8 段 if）", UNWIRED, "app/agent/loop/tool_source.py:72",
-         gap="R1/R2/R3：8 段 `if config.get(...)`，模块只能加自己的，不能裁剪或替换"),
+    Seam("S19", "取值", "工具收集（8 段 if）", HALF, "app/agent/loop/tool_source.py:72",
+         gap="R1 打折：`tool_sources` 注册表已可追加工具（R3 成立），但框架自身的 8 段 if 仍是硬编码",
+         evidence=("tests/agent/loop/test_providers.py::test_tool_sources_contribute_specs",)),
     Seam("S20", "取值", "图片解析", HALF, "app/agent/loop/pipeline.py:138",
          gap="R1：只读 `image_understanding_enable` 等配置"),
     Seam("S21", "组装", "块表（12 块）", HALF, "app/agent/assembly/assembler.py:496",
@@ -154,28 +162,38 @@ SEAMS: tuple[Seam, ...] = (
          gap="R1：`empty_reply_retries`/`retry_profile` 等只读配置"),
 
     # ── 输出 ────────────────────────────────────────────────────
-    Seam("S31", "输出", "流式 vs 非流式", UNWIRED, "app/agent/loop/pipeline.py:310",
-         gap="R1：三处各判一次 `stream_output` 配置（pipeline:310 / manager:318 / scheduler:286）"),
-    Seam("S32", "输出", "切句", UNWIRED, "app/domain/splitter.py:22",
-         gap="R1：`split_sentences` 固定实现"),
-    Seam("S33", "输出", "输出指令 `[reply]`/`[@qq]`", HALF, "app/agent/delivery/directives.py",
-         gap="R1 打折：只读配置且**主动/定时路径完全不生效**"),
+    Seam("S31", "输出", "流式 vs 非流式", FULL, "app/agent/delivery/output.py",
+         evidence=(
+             "tests/agent/delivery/test_output_slot.py::test_custom_output_strategy_drives_sending",
+             "tests/agent/delivery/test_output_slot.py::test_output_feature_swaps_and_restores",
+         )),
+    Seam("S32", "输出", "切句", HALF, "app/domain/splitter.py:22",
+         gap="R1：`split_sentences` 是纯函数，只能整体替换调用方（经 output 槽），不能单独注册切句策略",
+         evidence=("tests/domain/test_stream_splitter.py::test_split_sentences_basic",)),
+    Seam("S33", "输出", "输出指令 `[reply]`/`[@qq]`", FULL, "app/agent/delivery/channel.py",
+         evidence=(
+             "tests/agent/delivery/test_channel_send_item.py::test_send_item_parses_reply_directive",
+             "tests/agent/delivery/test_channel_send_item.py::test_send_item_parses_at_directive_only_in_group",
+         )),
     Seam("S34", "输出", "发送节奏", HALF, "app/domain/pace.py:9",
-         gap="R1：`SendPolicy` 只读 `stream_send_*` 配置"),
-    Seam("S35", "输出", "消息池", UNWIRED, "app/agent/loop/pipeline.py:375",
-         gap="R1：`StreamSendPool` 在 pipeline 内部 new，模块拿不到也换不掉"),
+         gap="R1：`SendPolicy` 只读 `stream_send_*` 配置；节奏在 output 槽内部，未单独成接缝"),
+    Seam("S35", "输出", "消息池", HALF, "app/agent/delivery/pool.py:21",
+         gap="R1：`StreamSendPool` 由 `StreamOutput` 内部创建，模块换掉 output 槽即可绕过（R1 打折：不能只换池）"),
     Seam("S36", "输出", "发言通道（文本=思考）", HALF, "app/agent/delivery/speech.py:312",
-         gap="R1：`speech_via_tool` 三条件耦合（档位 + 开关 + 流式），模块无法声明"),
-    Seam("S37", "输出", "发送通道", HALF, "app/infrastructure/onebot/client.py:246",
-         gap="R1 打折：`bot.send_*` 存在但出站链失效（见 S6）；无会话级统一入口"),
+         gap="R1：`speech_via_tool` 三条件耦合仍在；随 `llm_output` 模块落地时改为 `mode=speech`"),
+    Seam("S37", "输出", "发送通道", FULL, "app/agent/delivery/channel.py:send_item",
+         evidence=(
+             "tests/agent/delivery/test_channel_send_item.py::test_send_item_fires_pre_send_and_post_send_hooks",
+             "tests/agent/delivery/test_channel_send_item.py::test_send_item_survives_bot_exception",
+         )),
     Seam("S38", "输出", "发送前/后 + api/生命周期/事件完成钩子", FULL,
          "app/infrastructure/onebot/client.py:254",
          evidence=(
              "tests/plugin/test_hooks_pool.py::test_bot_connection_send_triggers_registry",
              "tests/plugin/test_hooks_pool.py::test_bot_connection_before_send_and_api_hooks",
          )),
-    Seam("S39", "输出", "历史写入", UNWIRED, "app/agent/loop/generate.py:215",
-         gap="R1/R3：四套口径（generate:215 / chat:570 / manager:344 / scheduler:404）"),
+    Seam("S39", "输出", "历史写入", HALF, "app/agent/loop/turn.py:_write_history",
+         gap="R3：统一入口已有（`run_turn` 内一处），但 chat 流式路径仍走 `stream_response` 自己的 upsert"),
     Seam("S40", "输出", "遥测", HALF, "app/agent/telemetry.py",
          gap="R1：只能读，不能接自定义记录器"),
 
@@ -187,8 +205,12 @@ SEAMS: tuple[Seam, ...] = (
     Seam("S43", "驱动", "定时任务", HALF, "app/application/cron_service.py:167",
          gap="R1：`SCHEDULES` + `register` 可加，但无 update/list/按 owner 查（对比 AstrBot `cron_manager`）",
          evidence=("tests/agent/proactivity/test_scheduler.py::test_schedule_fires_at_time",)),
-    Seam("S44", "驱动", "模块发起一轮对话", UNWIRED, "app/agent/loop/generate.py:48",
-         gap="R1/R2：`generate_response`/`stream_response`/`prepare_prompt` 三个入口全部硬绑 `event`"),
+    Seam("S44", "驱动", "模块发起一轮对话", FULL, "app/agent/loop/turn.py:run_turn",
+         evidence=(
+             "tests/agent/loop/test_run_turn.py::test_run_turn_non_stream_returns_text_without_event",
+             "tests/agent/loop/test_run_turn.py::test_run_turn_stream_calls_on_sentence_in_order",
+             "tests/plugin/test_module_raw_interfaces.py::test_llm_turn_delegates_to_run_turn",
+         )),
     Seam("S45", "驱动", "外部事件注入（emit）", UNWIRED, "app/core/event_bus.py",
          gap="R1：`event_bus`/`ModuleDispatcher` 都不在 `ServiceAccess`"),
 
@@ -366,6 +388,8 @@ def test_every_feature_id_has_a_seam():
         "agent": "模块发起一轮对话",
         "assembly": "块表",
         "provider_invoker": "调用策略",
+        # v3 新增：输出策略槽（流式/非流式/发言通可整体替换）
+        "output": "流式 vs 非流式",
     }
     missing = [fid for fid in feature_ids if fid not in expected]
     assert not missing, f"新 feature 未在 expected 映射里登记: {missing}"

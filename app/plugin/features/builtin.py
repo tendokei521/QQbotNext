@@ -17,6 +17,7 @@ from app.plugin.features.controllers import (
     KnowledgeFeatureController,
     MemoryFeatureController,
     OneBotToolsFeatureController,
+    OutputFeatureController,
     ProactiveFeatureController,
     ProviderInvokerFeatureController,
     RuntimeSlotFeatureController,
@@ -36,6 +37,7 @@ BUILTIN_CONTROLLERS: tuple[ControllerFactory, ...] = (
     AgentFeatureController,
     AssemblerFeatureController,
     ProviderInvokerFeatureController,
+    OutputFeatureController,
 )
 
 

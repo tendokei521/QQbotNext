@@ -324,3 +324,22 @@ class ProviderInvokerFeatureController(RuntimeSlotFeatureController):
         from app.agent.providers.invoker import ProviderInvoker
 
         return ProviderInvoker()
+
+
+class OutputFeatureController(RuntimeSlotFeatureController):
+    """输出策略接管：把 ``runtime.output`` 换成插件自己的回复产出策略。
+
+    插件声明 ``supersedes = ("output",)`` 并实现
+    ``respond(ctx, *, should_stop=None)``（异步产出 ``Message``），即可整体替换
+    "一轮回复怎么产出来"——流式、非流式、发言通道、或自定义形态。
+    卸载/禁用时还原成 ``None``（= 框架按 ``stream_output`` 自动选择，行为不变）。
+    """
+
+    feature_id = "output"
+    label = "输出策略"
+    attr = "output"
+    require_methods = ("respond",)
+
+    def default_value(self) -> Any:
+        # None = 交给 select_default_output() 按配置决定，保持既有行为
+        return None
