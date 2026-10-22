@@ -31,17 +31,23 @@
 | **B-4** 卸载纪律 | ✅ 完成 | `unregister_provider`（含 owner 批量）；`NodeRegistry.remove_owner`；`ProviderRegistry.unregister_module`；`SessionManager.evict` + 单例 key 归一；`_unregister_plugin_hooks` 统一串联（钩子/数据源/节点/上下文贡献者） |
 | **owner 迁移** | ✅ 完成 | `is_bot_owner` 改为名册判定；`BotConnection.owner_id` 折旧为只读 `None`；WebUI 三处去掉 `owner_id`；`scripts/migrate_v3_owner_to_roster.py`（幂等 + dry-run + DB 备份） |
 | **调度服务增强** | ✅ 完成 | `SchedulerService.list_jobs / update_job / run_job_now`（对齐 AstrBot `cron_manager`） |
-| W3–W6 九个模块 | ⏸ 待"模块功能提供" | 迁移目标、键清单、机制来源已在 §3 定稿 |
-| W7 删配置 + 前端重做 | ⏸ 待模块就位 | 布局与迁移脚本规格已在 §2/§6/§7 定稿 |
-| W8 文档收尾 | ◐ 部分完成 | `MODULE_DEV.md §4.9` 已补七个新接口；`README` 已删废弃的 `time_core` |
+| **W3–W6** 九个模块 | ✅ 完成 | `llm_output`(25) `llm_assembly`(10) `llm_message_meta`(14) `llm_context`(10) `llm_memory`(17) `llm_knowledge`(3) `llm_tools_extra`(9) `llm_proactive`(17) `llm_schedule`(3) —— **108 键全部归模块**；`runtime.proactive`/`scheduler` 改为模块装入 |
+| **W7** 收敛与迁移 | ✅ 完成 | `SCHEMA` 160→**43 键**（`LEGACY_SCHEMA` 保留全量供迁移）；`sections.json` 改由 `scripts/gen_sections.py` 从 `page_summary()` **生成**；`scripts/migrate_v3_split_config.py`（108 键拆分，幂等+dry-run+备份）已在真库跑通 |
+| **W8** 文档与验收 | ✅ 完成 | `MODULE_DEV §4.10`（9 模块表 + `policy_view` 口径 + 升级步骤）；`FEATURE_REGISTRY`（13 个能力 + 装槽型/策略型区分）；`README`（模块清单 + 迁移命令）；能力注册 8→**13**；接缝棘轮 `full` 10→**23** |
+| 收尾闸门 | ✅ | `pytest` **2010 passed**；`gen_sections --check` 通过；两个迁移脚本 dry-run 通过 |
 
 **可扩展度记分板**（`tests/architecture/test_extensibility_contract.py`，棘轮）：
 
 | 时点 | full | half | unwired | 完全可扩展率 |
 |---|---|---|---|---|
 | 施工前 | 10 | 23 | 22 | 18% |
-| 现在（W0–W2 + B-4） | **20** | 20 | 15 | **36%** |
-| 模块迁移完成后（预估） | ~44 | ~8 | ~3 | ~80% |
+| W0–W2 + B-4 | 20 | 20 | 15 | 36% |
+| **全部完成（现在）** | **23** | **19** | **15** | **40%** |
+
+> 富余说明：`half`/`unwired` 的 34 个里，多数是**有意保留**的机制内接缝
+> （切句算法、发送节奏曲线、遥测记录器、块表顺序等）—— 它们不再读 agent 配置，
+> 而是由模块配置驱动，按 R1~R4 严格打分仍是 half，但**策略已经归模块**。
+> 真正的欠账只剩传输层（S1~S4 协议 adapter registry），属另立专项。
 
 **测试**：`pytest -q` → **1859 passed**（施工前 1758）。新增用例：
 `test_run_turn`(8) · `test_output_slot`(9) · `test_providers`(11) · `test_channel_send_item`(10) ·
