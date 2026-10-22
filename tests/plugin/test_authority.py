@@ -131,12 +131,22 @@ def test_group_owner_allows_owner():
     assert check_module_permission(mod, _perm_event(role="owner")) is True
 
 
-def test_owner_only_requires_bot_owner():
+def test_owner_only_requires_roster_entry():
+    """``owner`` 档的唯一来源是「权限管理 → 拥有者名册」（v3 起无账号级 owner_id）。"""
     mod = _make_module("owner")
-    # 群主但不是 Bot 拥有者 → 拒绝
+    # 群主但没有名册身份 → 拒绝
     assert check_module_permission(mod, _perm_event(role="owner")) is False
-    # Bot 拥有者 → 通过
-    assert check_module_permission(mod, _perm_event(role="member", owner_id=100)) is True
+    # 名册里有他 → 通过
+    event = _event(role="member")
+    compute_event_permission(event, owner_list={"100"}, manager_list=set())
+    assert check_module_permission(mod, event) is True
+
+
+def test_owner_id_is_ignored_after_v3():
+    """``event.owner_id`` 已废弃：即便填了也不该再让人拿到 owner 档。"""
+    event = _event(role="member", owner_id=100)
+    assert compute_event_permission(event, owner_list=set(), manager_list=set()) == "member"
+    assert event.is_bot_owner is False
 
 
 def test_everyone_allows_all():
@@ -173,9 +183,15 @@ def test_owner_roster_beats_manager_roster():
     assert role == "owner"
 
 
-def test_bot_owner_still_wins_with_empty_rosters():
+def test_empty_rosters_mean_nobody_is_owner():
+    """名册为空时谁都不是 owner（v3：账号级 owner_id 不再是身份来源）。
+
+    这条是升级行为变化的核心断言：老配置里只有 ``bots.owner_id`` 的用户，
+    升级后必须把 QQ 加进「权限管理 → 拥有者」名册，否则 owner 档模块不会响应。
+    """
     event = _event(role="member", owner_id=100)
-    assert compute_event_permission(event, owner_list=set(), manager_list=set()) == "owner"
+    assert compute_event_permission(event, owner_list=set(), manager_list=set()) != "owner"
+    assert event.is_bot_owner is False
 
 
 def test_unlisted_user_keeps_group_role():

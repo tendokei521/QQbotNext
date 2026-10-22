@@ -88,15 +88,17 @@ def compute_event_permission(
     event.is_admin = role in ("group_admin", "group_owner")
     event.is_member = True
 
-    owner_id = getattr(event, "owner_id", None)
-    event.is_bot_owner = bool(event.user_id) and owner_id is not None and event.user_id == owner_id
-
     # 名册身份（Agent 自己的 owner/manager）优先于群角色：群主不等于有资格改配置
     user_key = str(getattr(event, "user_id", "") or "")
     in_owner_roster = bool(user_key) and user_key in _as_id_set(owner_list)
     in_manager_roster = bool(user_key) and user_key in _as_id_set(manager_list)
     event.is_agent_owner = in_owner_roster
     event.is_agent_manager = in_manager_roster
+
+    # ``is_bot_owner`` 曾来自「账号级 owner_id」，v3 起**拥有者身份只有名册一个来源**
+    # （原 ``bots.owner_id`` 已废弃，迁移脚本把它并进 ``agent_owner_list``）。
+    # 字段名保留以免第三方插件读崩，语义与 ``is_agent_owner`` 一致。
+    event.is_bot_owner = in_owner_roster
 
     if event.is_bot_owner or in_owner_roster:
         event.permission_role = "owner"

@@ -169,7 +169,8 @@ def _install_bot_lifecycle_listener(container) -> None:
             "account": stat.get("account"),
             "reconnect_attempts": stat.get("reconnect_attempts"),
             "ws_url": stat.get("ws_url"),
-            "owner_id": stat.get("owner_id"),
+            # v3：账号级 owner QQ 已取消，拥有者身份改由「权限管理 → 拥有者名册」提供
+            "owner_id": None,
             "auto_connect": stat.get("auto_connect"),
             **overrides,
         }

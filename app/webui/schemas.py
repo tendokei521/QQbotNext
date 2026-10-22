@@ -8,8 +8,13 @@ from pydantic import BaseModel, Field
 
 
 class BotConfigItem(BaseModel):
+    """账号连接配置。
+
+    v3 起**不再有账号级 owner QQ**：拥有者身份只来自
+    「权限管理 → 拥有者名册」（``agent_owner_list``）。
+    """
+
     ws_url: str = ""
-    owner_id: int | None = None
     auto_connect: bool = False
 
 

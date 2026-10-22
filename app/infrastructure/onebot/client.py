@@ -204,7 +204,6 @@ class BotConnection(IBot):
     ) -> None:
         self.websocket = websocket
         self.bot_id = bot_id
-        self.owner_id = owner_id
         self.ws_url = ws_url
         self.auto_connect = auto_connect
         self.status = "disconnected"
@@ -214,8 +213,7 @@ class BotConnection(IBot):
         self.all_group_list: list = []
         self.all_group_list_info: list = []
         self.index: int | None = None
-        self._pending: dict[str, asyncio.Future] = {}
-        # 超时后被回收的 echo：迟到响应落这里（只留痕，不复用）
+        self._pending: dict[str, asyncio.Future] = {}        # 超时后被回收的 echo：迟到响应落这里（只留痕，不复用）
         self._orphan_echoes: deque[str] = deque(maxlen=ORPHAN_ECHO_LIMIT)
         self._lock = asyncio.Lock()
         self._last_connect_attempt: float = 0.0
@@ -231,6 +229,29 @@ class BotConnection(IBot):
         self.send_hook_registry = None
         self.before_send_hook_registry = None
         self.api_hook_registry = None
+
+    # ---------- 已废弃：账号级 owner_id ----------
+    @property
+    def owner_id(self) -> None:
+        """已废弃：拥有者身份只来自 Agent 配置的 ``agent_owner_list``（权限管理页）。
+
+        v3 起不再有"账号级 owner QQ"：那份配置已由迁移脚本并入名册。
+        这里保留属性是为了让仍在读 ``conn.owner_id`` 的第三方插件不崩——
+        永远返回 ``None``，写入被忽略并留痕一次。
+        """
+        return None
+
+    @owner_id.setter
+    def owner_id(self, value) -> None:
+        if value in (None, "", 0):
+            return
+        if not getattr(self, "_owner_id_warned", False):
+            self._owner_id_warned = True
+            from app.core.logger import logger as _logger
+
+            _logger.add_info(f"#{getattr(self, 'index', '?')}").warning(
+                "[Bot] 账号级 owner_id 已废弃并被忽略：请在「权限管理 → 拥有者」名册里配置"
+            )
 
     # ---------- 出站链 hook（装配期设置，签名内省一次） ----------
     @property
