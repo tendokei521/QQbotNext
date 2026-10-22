@@ -11,7 +11,7 @@
  *
  * 数据契约见 docs/DATA_STATS_DESIGN.md；默认 `skip_empty=1` 省略无数据时段（不画 0 灰条）。
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { http } from '@/api/http'
 
 type Kind = 'llm' | 'msg_in' | 'msg_out'
@@ -140,6 +140,10 @@ const outcome = ref<string | null>(null)
 
 const loading = ref(false)
 const error = ref('')
+const autoRefresh = ref(true)
+const lastUpdated = ref<Date | null>(null)
+const REFRESH_MS = 10_000
+let refreshTimer: number | undefined
 const data = ref<QueryResp | null>(null)
 const facets = ref<Record<string, { value: string; events: number }[]>>({})
 
@@ -264,7 +268,6 @@ const chartPoints = computed(() =>
 )
 /** 表格用：只保留"有数据"的时段（表格里一排 0 很难看）。 */
 const tableBuckets = computed(() => buckets.value.filter((b) => Object.keys(b.series).length > 0))
-const emptyBucketCount = computed(() => buckets.value.length - tableBuckets.value.length)
 const chartMax = computed(() => Math.max(1, ...chartPoints.value.map((p) => p.value)))
 /** y 轴三档刻度（0 / 50% / 100%），对齐截图里克制的网格线。 */
 const yTicks = computed(() => [chartMax.value, chartMax.value / 2, 0])
@@ -335,8 +338,8 @@ function exportCsv() {
   URL.revokeObjectURL(url)
 }
 
-async function load() {
-  loading.value = true
+async function load(opts: { quiet?: boolean } = {}) {
+  if (!opts.quiet) loading.value = true
   error.value = ''
   try {
     const params: Record<string, unknown> = {
@@ -355,13 +358,38 @@ async function load() {
     if (outcome.value) params.outcome = outcome.value
     const resp = await http.get<QueryResp>('/api/stats/query', { params })
     data.value = resp.data
+    lastUpdated.value = new Date()
   } catch (e: any) {
     error.value = e?.message ?? String(e)
     data.value = null
   } finally {
-    loading.value = false
+    if (!opts.quiet) loading.value = false
   }
 }
+
+function stopAutoRefresh() {
+  if (refreshTimer !== undefined) {
+    window.clearInterval(refreshTimer)
+    refreshTimer = undefined
+  }
+}
+
+function startAutoRefresh() {
+  stopAutoRefresh()
+  if (!autoRefresh.value) return
+  refreshTimer = window.setInterval(() => {
+    // 页面在后台时不打扰（省流量、省服务端），回到前台会立刻补一次
+    if (document.visibilityState === 'visible') load({ quiet: true })
+  }, REFRESH_MS)
+}
+
+/** 更新于 HH:MM:SS */
+const updatedAt = computed(() => {
+  const d = lastUpdated.value
+  if (!d) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+})
 
 async function loadFacets() {
   try {
@@ -382,10 +410,26 @@ watch([kind], () => {
   loadFacets()
   load()
 })
-watch([metric, granularity, breakdown, rangeDays, api, botId, source, model, sessionId, outcome], load)
+watch(
+  [metric, granularity, breakdown, rangeDays, api, botId, source, model, sessionId, outcome],
+  () => load(),
+)
+function onVisibilityChange() {
+  if (document.visibilityState === 'visible') load({ quiet: true })
+}
+
+watch(autoRefresh, (on) => (on ? startAutoRefresh() : stopAutoRefresh()))
+
 onMounted(() => {
   loadFacets()
   load()
+  startAutoRefresh()
+  document.addEventListener('visibilitychange', onVisibilityChange)
+})
+
+onUnmounted(() => {
+  stopAutoRefresh()
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 </script>
 
@@ -430,6 +474,11 @@ onMounted(() => {
                 class="pill" style="max-width: 140px" placeholder="全部" />
       <button class="link-btn" @click="clearFilters">清除筛选条件</button>
       <v-spacer />
+      <label class="live">
+        <input v-model="autoRefresh" type="checkbox" />
+        <span>自动刷新</span>
+        <span v-if="autoRefresh && updatedAt" class="live-time">{{ updatedAt }}</span>
+      </label>
       <button class="dark-btn" @click="exportCsv">导出</button>
     </div>
 
@@ -532,7 +581,6 @@ onMounted(() => {
       </template>
 
       <div class="chart-foot">
-        <span class="hint">无数据的时段只占位、不画柱</span>
         <span v-if="data.meta.truncated" class="hint">已合并 {{ data.meta.truncated }} 个较小序列</span>
         <span v-if="breakdown !== 'none'" class="legend">
           <span v-for="name in seriesNames" :key="name" class="legend-item">
@@ -545,10 +593,7 @@ onMounted(() => {
     <!-- ⑤ 用量表 -->
     <div v-if="data" class="table-card">
       <div class="chart-head">
-        <span class="chart-title">
-          用量明细
-          <span v-if="emptyBucketCount" class="hint">（已略过 {{ emptyBucketCount }} 个空时段）</span>
-        </span>
+        <span class="chart-title">用量明细</span>
         <div class="seg">
           <button :class="{ on: pivot === 'metric' }" @click="pivot = 'metric'">按指标</button>
           <button :class="{ on: pivot === 'series' }" @click="pivot = 'series'">按维度</button>
@@ -634,6 +679,10 @@ onMounted(() => {
 .link-btn { background: none; border: none; color: var(--muted); font-size: 12px;
             cursor: pointer; padding: 4px 6px; }
 .link-btn:hover { color: rgb(var(--v-theme-primary)); text-decoration: underline; }
+.live { display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
+        color: var(--muted); cursor: pointer; user-select: none; }
+.live input { width: 13px; height: 13px; accent-color: var(--accent); cursor: pointer; }
+.live-time { font-variant-numeric: tabular-nums; opacity: 0.75; }
 .dark-btn { background: #1f2328; color: #fff; border: none; border-radius: 999px;
             padding: 7px 18px; font-size: 12px; cursor: pointer; }
 .dark-btn:hover { background: #33383f; }
