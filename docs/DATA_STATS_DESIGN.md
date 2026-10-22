@@ -29,23 +29,60 @@ v2 相对 v1 的变化：
 
 已实现：`app/agent/providers/openai_compat.py:442`（含"上游不认就降级重试"）。
 
-### 0.2 上游是否返回缓存命中数？
+### 0.2 上游是否返回缓存命中数？——**已实测，会返回**
 
-**主流四家都返回，字段不同；不保证每家都有。**
+用仓库里现成的两个 provider 配置（`provider_presets` 表）真实请求验证：
 
-| 上游 | 命中 | 未命中 | 备注 |
+**① DeepSeek 官方（`https://api.deepseek.com`，`deepseek-v4-flash`）**
+
+```json
+// 首次（无缓存）
+{"prompt_tokens":653,"completion_tokens":8,"total_tokens":661,
+ "prompt_tokens_details":{"cached_tokens":0},
+ "completion_tokens_details":{"reasoning_tokens":8},
+ "prompt_cache_hit_tokens":0,"prompt_cache_miss_tokens":653}
+
+// 第二次同样 prompt（命中）
+{"prompt_tokens":653,"completion_tokens":2,
+ "prompt_tokens_details":{"cached_tokens":512},
+ "prompt_cache_hit_tokens":512,"prompt_cache_miss_tokens":141}
+```
+
+**② opencode（`https://opencode.ai/zen/go/v1`，同一模型）**
+
+```json
+// 首次
+{"prompt_tokens":653,"completion_tokens":8,
+ "prompt_tokens_details":{"cached_tokens":0,"cache_write_tokens":null}}
+// 第二次（命中）
+{"prompt_tokens":653,"completion_tokens":8,
+ "prompt_tokens_details":{"cached_tokens":640,"cache_write_tokens":null}}
+```
+
+**③ 流式（`stream_options.include_usage=true`）**：两家**末帧都带完整 usage**（含缓存命中）。
+
+#### 结论
+
+| 事实 | 结果 |
+|---|---|
+| 是否返回 usage | ✅ 两家**都返回**（流式也有，需 `include_usage`） |
+| 是否返回缓存命中 | ✅ 两家**都返回** |
+| 字段差异 | DeepSeek 直接给 `prompt_cache_hit_tokens` + `prompt_cache_miss_tokens`；opencode 只给 `prompt_tokens_details.cached_tokens`（**miss 要自己减**） |
+| 缓存粒度不同 | 同一 prompt：DeepSeek 命中 512、opencode 命中 640 → **各家缓存策略不一样，别互相比较** |
+| 额外字段 | 两家都有 `completion_tokens_details.reasoning_tokens` → **值得单独统计** |
+
+用现有 `cache_hit_miss()` 跑这 4 份真实 payload：
+
+| 场景 | hit | miss | 命中率 |
 |---|---|---|---|
-| DeepSeek | `prompt_cache_hit_tokens` | `prompt_cache_miss_tokens` | 两值都直接给 |
-| OpenAI 系 | `prompt_tokens_details.cached_tokens` | 自己减 | 2024-10 后才有 |
-| Gemini | `usageMetadata.cachedContentTokenCount` | 不单独给 | |
-| Anthropic | `cache_read_input_tokens` | `cache_creation_input_tokens`（写入量） | |
-| 中转 / 自建 | ❌ | ❌ | 只能说"未知" |
+| DeepSeek 首次 | 0 | 653 | 0.0% |
+| DeepSeek 二次 | 512 | 141 | 78.4% |
+| opencode 首次 | 0 | 653 | 0.0% |
+| opencode 二次 | 640 | 13 | 98.0% |
+| 模拟"不返回缓存字段的中转" | NULL | NULL | 显示 `—` |
 
-统一口径已实现：`app/agent/providers/base.py::cache_hit_miss()`，原则是
-
-> **不自己估算：上游没报 = `None`（未知），不是 0。**
-
-因此 `cache_hit` / `cache_miss` 列**必须可空**（NULL ≠ 0）。
+**所以：不需要 unknown 兜底，主流路径都能拿到缓存数据。**
+只有第三方中转/自建时才可能是 `NULL`，因此 `cache_hit` / `cache_miss` 仍**必须可空**（NULL = 上游没报 ≠ 0）。
 
 ---
 
@@ -137,11 +174,13 @@ CREATE TABLE stat_event (
     api         TEXT NOT NULL DEFAULT '',  -- provider（deepseek / openai / gemini …）
     model       TEXT NOT NULL DEFAULT '',  -- 实际服务模型（SERVED_MODEL_KEY）
     session_id  TEXT NOT NULL DEFAULT '',  -- group_123 / private_456
-    session_label TEXT NOT NULL DEFAULT '',-- 展示用快照：「群名(group_123)」/「昵称(1901691195)」
+    session_label TEXT NOT NULL DEFAULT '',-- 展示快照：'名字前5字…' + group/private + id
     group_id    TEXT NOT NULL DEFAULT '',
     user_id     TEXT NOT NULL DEFAULT '',
     event_type  TEXT NOT NULL DEFAULT '',  -- message_group / message_private / notice / request
     direction   TEXT NOT NULL DEFAULT '',  -- in | out
+    outcome     TEXT NOT NULL DEFAULT '',  -- msg_in 专用：ignored | command | module | llm
+                                           --   指令响应 / 模块普通响应 / LLM 响应 / 纯围观
 
     -- 度量（全部可 SUM）
     -- llm：
@@ -151,9 +190,9 @@ CREATE TABLE stat_event (
     cache_hit     INTEGER,                 -- NULL = 上游未报（≠ 0）
     cache_miss    INTEGER,
     tokens_total  INTEGER NOT NULL DEFAULT 0,
+    reasoning_tokens INTEGER NOT NULL DEFAULT 0,  -- 思考 token（reasoning_tokens）
     -- msg_in / msg_out：
     messages      INTEGER NOT NULL DEFAULT 0,   -- 收到/发出的消息条数
-    triggered     INTEGER NOT NULL DEFAULT 0,   -- 其中「需要响应」的条数（msg_in 专用）
     segments      INTEGER NOT NULL DEFAULT 0,   -- 消息段数
     bytes         INTEGER NOT NULL DEFAULT 0,   -- 文本字节数
 
@@ -172,30 +211,52 @@ CREATE INDEX idx_stat_day_session    ON stat_event(day_local, session_id);
 CREATE INDEX idx_stat_ts             ON stat_event(ts);
 ```
 
-### 2.1 `msg_in` 两个维度就在一行里
+### 2.1 `msg_in`：一行一条入站消息，`outcome` 分四种结局
 
-| 度量 | 含义 | 怎么算 |
+| `outcome` | 含义 | 例子 |
 |---|---|---|
-| `messages` | **收到的消息总数** | 每条入站消息 +1 |
-| `triggered` | **其中需要响应的** | 触发/私聊/指令 +1，纯围观的 +0 |
+| `ignored` | 收到但**不需要响应** | 群里的围观聊天（没 @、没关键词） |
+| `command` | **指令响应** | `#llm schedule list`、`#help` |
+| `module` | **模块普通响应**（不走 LLM） | bilibili/douyin 解析、签到、撤回通知 |
+| `llm` | **LLM 响应**（进入流水线并回复） | 正常对话 |
 
-于是同一个筛选框下：
+于是这四种视角都是同一个筛选下的纯 SQL：
 
 ```sql
-SUM(messages)   -- 收到了多少
-SUM(triggered)  -- 其中多少需要回
-SUM(triggered) * 1.0 / SUM(messages)  -- 响应率（很有用的指标）
+SUM(messages)                                            -- 收到总数
+SUM(CASE WHEN outcome <> 'ignored' THEN messages END)    -- 需响应总量
+SUM(CASE WHEN outcome = 'command'  THEN messages END)    -- 指令响应
+SUM(CASE WHEN outcome = 'module'   THEN messages END)    -- 模块普通响应
+SUM(CASE WHEN outcome = 'llm'      THEN messages END)    -- LLM 响应
 ```
 
-不需要第二张表，也不需要第二次请求。
+不需要第二张表、不需要第二次请求，`breakdown=outcome` 还能直接画堆叠饼图。
+
+**写入时机**：在触发/路由判定**之后**一次成型（此时结局已知），一次 INSERT。
 
 ### 2.2 会话展示用全名（按你的要求）
 
-写入时存快照 `session_label`：
+写入时存快照 `session_label`，格式（按你的要求）：
 
 ```
-群聊： 「测试群(group_466052056)」
-私聊： 「小明(1901691195)」
+{名字前 5 字}{超过 5 字则 '…'}{group|private}{id}
+```
+
+例子：
+
+```
+才羽 ミド…group466052056        ← 群聊（名字取群名）
+小明…private1901691195          ← 私聊（名字取昵称）
+测试群group466052056            ← 名字不超过 5 字，不省略
+```
+
+实现：
+
+```python
+def session_label(name: str, kind: str, ident: Any) -> str:
+    name = str(name or "").strip()
+    short = name[:5] + ("…" if len(name) > 5 else "")
+    return f"{short}{kind}{ident}"        # kind = 'group' | 'private'
 ```
 
 - **写入时定快照**，历史数据保持当时的名字（否则群改名后历史全变）
@@ -338,8 +399,10 @@ ORDER BY bucket
 | `output` | `SUM(output_tokens)` | k/M | llm |
 | `cache_hit` | `SUM(cache_hit)` | k/M | llm |
 | `requests` | `SUM(requests)` | 次 | llm |
+| `reasoning` | `SUM(reasoning_tokens)` | k/M | llm |
 | `messages` | `SUM(messages)` | 条 | msg_in / msg_out |
-| `triggered` | `SUM(triggered)` | 条 | msg_in |
+| `triggered` | `SUM(CASE WHEN outcome<>'ignored' THEN messages END)` | 条 | msg_in |
+| `by_outcome` | `SUM(CASE WHEN outcome=:o THEN messages END)` | 条 | msg_in |
 | `bytes` | `SUM(bytes)` | KB/MB | msg_in / msg_out |
 | `events` | `COUNT(*)` | 次 | 全部 |
 
@@ -487,6 +550,6 @@ POST /api/stats/purge  {"bot_id":"...", "before":"..."}
 | 金额 | ❌ 不做，只看 token |
 | 表数量 | 一张 `stat_event`，三类统计同级 |
 | `source` 粒度 | **模块名** |
-| `msg_in` | 两个维度都要：收到总量 + 需响应量 |
-| 会话展示 | **全名**：`群名(group_id)` / `昵称(QQ)` |
+| `msg_in` | 收到总量 + 需响应量，且需响应再分 **指令 / 模块 / LLM** 三种（`outcome`） |
+| 会话展示 | **全名**：`名字前5字…group123456` / `名字前5字…private123456` |
 | 保留 | **永久**，用户可手动清理 |
