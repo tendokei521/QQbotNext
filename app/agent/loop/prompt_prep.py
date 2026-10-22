@@ -356,6 +356,13 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
     return req, session, meta
 
 
+def _context_policy(runtime):
+    """上下文增强策略配置（`llm_context` 模块接管时用它的视图）。"""
+    from app.agent.policy import policy_config
+
+    return policy_config(runtime, "context")
+
+
 async def _collect_extra_blocks(
     runtime, *, session_id, is_private, user_id, group_id, user_text, history
 ) -> list[tuple[str, str]]:
@@ -396,7 +403,7 @@ async def _fetch_pre_history(
             return ""
         return await _build_group_pre_history(
             event, group_id, count=history_rounds, **meta_flags,
-            **_context_expand_flags(runtime.config),
+            **_context_expand_flags(_context_policy(runtime)),
             bot_id=getattr(event, "bot_id", "") or getattr(bot, "bot_id", "") or "",
             session_id=session_id,
             bot=bot,

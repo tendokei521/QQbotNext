@@ -32,7 +32,6 @@ from app.agent.context.group import (
 )
 from app.agent.session.manager import SessionManager
 from app.agent.tools.spec import ToolSpec
-from app.core.logger import logger
 
 DEFAULT_LIMIT = 30
 DEFAULT_AUTO_QQ_MIN_LOCAL = 4
@@ -53,14 +52,10 @@ def _parse_limit(args: dict, default: int = 20, maximum: int = 100) -> int:
 
 
 def _cfg(ctx, key: str, default: Any):
-    cfg = getattr(getattr(ctx, "runtime", None), "config", None)
-    if cfg is not None and hasattr(cfg, "get"):
-        try:
-            return cfg.get(key, default)
-        except Exception as e:
-            # 配置读取失败退回默认值：工具仍可工作，但需留痕便于排查配置异常
-            logger.debug(f"[SessionTools] 读取配置 {key} 失败，使用默认值 {default!r}: {e}")
-    return default
+    # 历史查询权限/阈值归 `llm_context` 模块所有（未接管时回退 agent 配置）
+    from app.agent.policy import policy_get
+
+    return policy_get(getattr(ctx, "runtime", None), "context", key, default)
 
 
 def _session_manager(runtime):

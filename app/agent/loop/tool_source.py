@@ -105,7 +105,9 @@ async def _collect_llm_ext(
 
     # 按需展开上下文（@ 对象 / 被引用消息 / 合并转发）——与渲染层的未展开标记同开同关：
     # 标记必须可被解决，否则只会诱导模型空转或谎称无法回答。
-    if bool(runtime.config.get("context_expand_enable", True)):
+    from app.agent.policy import policy_get
+
+    if bool(policy_get(runtime, "context", "context_expand_enable", True)):
         from app.agent.tools.context_tools import build_context_tools
 
         specs.extend(build_context_tools(runtime, ctx))

@@ -177,12 +177,11 @@ def resolve(
 
 
 def _cfg(runtime: Any, key: str, default: Any) -> Any:
-    config = getattr(runtime, "config", None)
-    try:
-        return config.get(key, default) if config is not None else default
-    except Exception as e:
-        logger.debug(f"[Referent] 读取配置 {key} 失败，使用默认值 {default!r}: {e}")
-        return default
+    # 指代/预取相关键归 `llm_context` 模块所有：接管时视图挂在
+    # `runtime.context_options`，未接管时回退 agent 配置（行为不变）。
+    from app.agent.policy import policy_get
+
+    return policy_get(runtime, "context", key, default)
 
 
 def _register_explicit(runtime, event, session_id: str, plan: ReferentPlan, *, ttl: float, max_items: int) -> None:
