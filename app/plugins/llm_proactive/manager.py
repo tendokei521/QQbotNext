@@ -353,20 +353,26 @@ class ProactiveManager:
         else:
             chain = [dict(config.raw_config)]
         from app.agent.providers.invoker import resolve_invoker
+        from app.agent.usage.context import usage_scope
 
-        resp = await resolve_invoker(self.module).chat(
-            runtime=self.module,
-            chain=chain,
-            messages=messages,
-            params={
-                "model": self.module.config.get("model", "deepseek-chat"),
-                "temperature": self.module.config.get("temperature", 0.7),
-                "max_tokens": self.module.config.get("max_tokens", 1024),
-                "tools": build_tools(all_specs) if use_tools else None,
-                "tool_executor": make_executor(all_specs, tool_ctx) if use_tools else None,
-                "max_tool_rounds": max_tool_rounds,
-            },
-        )
+        with usage_scope(
+            bot_id=getattr(self.module, "bot_id", ""),
+            source=getattr(self.module, "module_name", "llm_proactive"),
+            session_id=session_id,
+        ):
+            resp = await resolve_invoker(self.module).chat(
+                runtime=self.module,
+                chain=chain,
+                messages=messages,
+                params={
+                    "model": self.module.config.get("model", "deepseek-chat"),
+                    "temperature": self.module.config.get("temperature", 0.7),
+                    "max_tokens": self.module.config.get("max_tokens", 1024),
+                    "tools": build_tools(all_specs) if use_tools else None,
+                    "tool_executor": make_executor(all_specs, tool_ctx) if use_tools else None,
+                    "max_tool_rounds": max_tool_rounds,
+                },
+            )
         if self._data.get(session_id, {}).get("last_user_time", 0) != start_last:
             logger.add_info(f"#{self.module.bot_id}").info(f"[主动消息] {session_id} 生成期间用户来消息，丢弃本次")
             return

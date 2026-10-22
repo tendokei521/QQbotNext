@@ -578,20 +578,26 @@ class TaskScheduler:
             chain = self.module.provider_chain()
             if chain:
                 from app.agent.providers.invoker import resolve_invoker
+                from app.agent.usage.context import usage_scope
 
-                return await resolve_invoker(self.module).chat(
-                    runtime=self.module,
-                    chain=chain,
-                    messages=messages,
-                    params={
-                        "model": self.module.config.get("model", "deepseek-chat"),
-                        "temperature": self.module.config.get("temperature", 0.7),
-                        "max_tokens": self.module.config.get("max_tokens", 1024),
-                        "tools": tools,
-                        "tool_executor": tool_executor,
-                        "max_tool_rounds": max_tool_rounds,
-                    },
-                )
+                with usage_scope(
+                    bot_id=getattr(self.module, "bot_id", ""),
+                    source=getattr(self.module, "module_name", "llm_schedule"),
+                    session_id=getattr(self, "_current_session", "") or "",
+                ):
+                    return await resolve_invoker(self.module).chat(
+                        runtime=self.module,
+                        chain=chain,
+                        messages=messages,
+                        params={
+                            "model": self.module.config.get("model", "deepseek-chat"),
+                            "temperature": self.module.config.get("temperature", 0.7),
+                            "max_tokens": self.module.config.get("max_tokens", 1024),
+                            "tools": tools,
+                            "tool_executor": tool_executor,
+                            "max_tool_rounds": max_tool_rounds,
+                        },
+                    )
         # 兼容旧模块/测试：直接走模块自己的 get_provider
         provider = get_provider(dict(self.module.config.raw_config))
         legacy_kwargs: dict = {}

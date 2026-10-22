@@ -55,6 +55,15 @@ class KnowledgeManager:
             return None
 
     async def add_text(self, content: str, *, title: str = "", source: str = "manual") -> tuple[str | None, str]:
+        # 归属：embedding 也烧 token，记账时要能看出是知识库花的
+        from app.agent.usage.context import usage_scope
+
+        with usage_scope(bot_id=self.bot_id, source="llm_knowledge"):
+            return await self._add_text_inner(content, title=title, source=source)
+
+    async def _add_text_inner(
+        self, content: str, *, title: str = "", source: str = "manual"
+    ) -> tuple[str | None, str]:
         provider = await self._embedding_provider()
         if provider is None:
             return None, "未配置 embedding 模型（请在 Provider 预设中创建能力类型为 Embedding 的模型）"

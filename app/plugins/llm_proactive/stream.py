@@ -53,7 +53,26 @@ def _accumulate_tool_call(slot_map: dict, tc: dict) -> None:
     slot["function"]["arguments"] += frag.get("arguments") or ""
 
 
-async def stream_send_initiative(
+async def stream_send_initiative(*args, **kwargs):
+    """主动消息流式生成（公开入口，返回累计文本）。
+
+    包一层 `usage_scope`：让 provider 层的统计把这次消耗记到 `llm_proactive` 名下，
+    而不是 `unknown`。内层函数体保持原样（重排缩进风险太大）。
+    """
+    from app.agent.usage.context import usage_scope
+
+    runtime = args[0] if args else kwargs.get("runtime")
+    session_id = args[2] if len(args) > 2 else kwargs.get("session_id", "")
+    with usage_scope(
+        bot_id=getattr(runtime, "bot_id", ""),
+        source="llm_proactive",
+        session_id=str(session_id or ""),
+    ):
+        return await _stream_send_initiative_inner(*args, **kwargs)
+
+
+
+async def _stream_send_initiative_inner(
     runtime: Any,
     bot: Any,
     session_id: str,
