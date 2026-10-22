@@ -1,89 +1,181 @@
-"""agent 配置键的**命运分区表**（v2 破坏性改造的唯一真相）。
+"""agent 配置的**最终布局**（v3）与每个键的命运 —— 全仓库唯一真相。
 
-破坏性 v2 的判定标准：每个配置键只有三种命运 ——
+## 三条硬性事实
 
-1. ``CORE_KEYS``   —— 留在框架核心（无法归属任何模块的物理层参数）；
-2. ``DELETED_KEYS``—— 删除（能力随框架一并移除，或改为非用户的开发者参数）；
-3. ``MODULE_KEYS`` —— 迁移到对应模块，成为该模块的 ``default_config``。
+1. **本体界面只保留 5 页**（顺序即展示顺序）：
+   基础配置 → 权限管理 → 对话行为 → 会话管理 → 高级功能。
+   本文件里的 ``UI_PAGES`` 就是这 5 页的字段归属，前端 `sections.json` 应**由它生成**，
+   不再手写。
+2. **其余全部迁移为模块**（9 个），成为该模块的 ``default_config``。
+3. **剩余少量键删除**（能力被别处取代，或改为框架内硬编码的安全默认）。
 
-## 为什么必须做成代码常量
+## 一次边界变更：``owner_id`` 并入权限管理
 
-同一份分区要同时被三处使用：
+旧模型：``bots.owner_id``（每个连接一个）→ ``BotConnection.owner_id`` → ``event.owner_id``
+→ ``authority.compute_event_permission`` 里 ``is_bot_owner``。
 
-- `scripts/migrate_v2_split_config.py`（把老配置行拆到模块行）；
-- `tests/architecture/test_config_partition.py`（守护"没有键没有归宿"）；
-- `docs/PIPELINE_INTERFACE_PLAN.md`（人读的账本）。
+新模型：**不再有账号级 owner_id**，拥有者身份只来自 Agent 配置的 ``agent_owner_list``
+（本来就有、且按 bot_id 存，层级与旧 owner_id 等价）。迁移脚本把旧值并进名册。
 
-三处各写一份必然漂移，所以真相只在这里，文档从这张表生成/核对。
-
-## 判定口径（新增键时必须先归类）
+## 判定口径（新增键必须先归类）
 
 | 归宿 | 判据 |
 |---|---|
-| CORE | 它是**准入闸门 / 权限 / provider / 会话物理边界 / 循环安全阀**之一，没有模块可归属 |
-| DELETE | 它的能力被别处取代，或它只是开发者调参（不该出现在用户配置里） |
-| MODULE | 它是一条**策略**（"要不要/怎么做"），对应模块可以自己决定 |
-
-反例（正确归 MODULE）：`stream_output` 是策略；`max_tool_rounds` 是安全阀（CORE）。
+| UI | 用户"开箱就要能调"的东西：场景开关 / 权限 / 触发与抖动 / 会话窗口 / 图片与联网 |
+| MODULE | 一条**策略**（"要不要/怎么做"），归某个能力模块自己决定 |
+| DELETE | 能力被别处取代，或只是开发者调参，或改为硬编码安全默认 |
 """
 
 from __future__ import annotations
 
-# ── 1. 保留在框架核心（目标 20 键）──────────────────────────────
-CORE_KEYS: tuple[str, ...] = (
-    # 准入闸门
-    "group_enable",
-    "private_enable",
-    "reply_cooldown",
-    "trigger_at",
-    "trigger_keyword",
-    # 权限名册（模块权限与 Agent 权限同源）
-    "permission",
-    "agent_owner_list",
-    "agent_manager_list",
-    # provider 兜底（llm_chat / run_turn 的入参缺省值）
-    "model",
-    "temperature",
-    "max_tokens",
-    # 人设基线（没有它机器人无法开口）
-    "system_prompt",
-    "persona_preset_id",
-    # 会话存储的物理契约
-    "session_timeout",
-    "history_rounds",
-    "max_message_length",
-    # 循环安全阀（防止烧穿用户额度）
-    "max_tool_rounds",
-    "empty_reply_retries",
-    "reasoning_overflow_retries",
-    # 写进历史的清洗规则（历史由框架拥有）
-    "clean_output_parentheses",
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class UIGroup:
+    """本体界面里的一页内的一个分组。"""
+
+    id: str
+    label: str
+    fields: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class UIPage:
+    """本体界面的一个页签。``order`` 即页面顺序。"""
+
+    id: str
+    label: str
+    groups: tuple[UIGroup, ...]
+    order: int = 0
+    subtitle: str = ""
+
+    @property
+    def fields(self) -> tuple[str, ...]:
+        return tuple(f for g in self.groups for f in g.fields)
+
+
+# ==================== 1. 本体界面（5 页 / 43 键）====================
+UI_PAGES: tuple[UIPage, ...] = (
+    UIPage(
+        id="basic",
+        label="基础配置",
+        order=10,
+        subtitle="响应场景、模型参数与人格设定",
+        groups=(
+            UIGroup("basic_switch", "响应场景", ("group_enable", "private_enable")),
+            UIGroup("basic_model", "模型参数", ("model", "temperature", "max_tokens")),
+            UIGroup("basic_persona", "人格设定", ("persona_preset_id", "system_prompt")),
+        ),
+    ),
+    UIPage(
+        id="permission",
+        label="权限管理",
+        order=20,
+        subtitle="响应权限档位、拥有者与管理者名册（原账号级 owner QQ 已并入此处）",
+        groups=(
+            UIGroup("permission_role", "响应权限", ("permission",)),
+            UIGroup(
+                "permission_roster",
+                "拥有者与管理者",
+                ("agent_owner_list", "agent_manager_list"),
+            ),
+        ),
+    ),
+    UIPage(
+        id="behavior",
+        label="对话行为",
+        order=30,
+        subtitle="触发设置、消息抖动与回复打断",
+        groups=(
+            UIGroup("behavior_trigger", "触发设置", ("trigger_at", "trigger_keyword")),
+            UIGroup(
+                "behavior_debounce",
+                "消息抖动",
+                ("message_debounce_seconds", "message_debounce_max_wait", "reply_cooldown"),
+            ),
+            UIGroup(
+                "behavior_interrupt",
+                "回复打断",
+                ("interrupt_enable", "interrupt_save_sent", "interrupt_debug"),
+            ),
+        ),
+    ),
+    UIPage(
+        id="session",
+        label="会话管理",
+        order=40,
+        subtitle="会话窗口、群聊历史注入与上下文压缩",
+        groups=(
+            UIGroup(
+                "session_window",
+                "会话窗口",
+                ("session_timeout", "history_rounds", "max_message_length"),
+            ),
+            UIGroup(
+                "session_history",
+                "群聊历史",
+                (
+                    "include_pre_history",
+                    "include_private_pre_history",
+                    "group_log_enable",
+                    "group_log_window_minutes",
+                    "group_log_window_limit",
+                    "group_log_max_chars",
+                ),
+            ),
+            UIGroup(
+                "session_compress",
+                "上下文压缩",
+                (
+                    "context_compress_enable",
+                    "context_compress_prompt",
+                    "context_token_budget",
+                    "context_token_chars_per_token",
+                ),
+            ),
+        ),
+    ),
+    UIPage(
+        id="advanced",
+        label="高级功能",
+        order=50,
+        subtitle="图片与动图理解、联网搜索",
+        groups=(
+            UIGroup(
+                "adv_media",
+                "图片与动图",
+                (
+                    "image_understanding_enable",
+                    "image_max_count",
+                    "image_max_mb",
+                    "gif_understanding_enable",
+                    "gif_max_frames",
+                    "gif_frame_max_edge",
+                    "gif_probe_all_images",
+                ),
+            ),
+            UIGroup(
+                "adv_web_search",
+                "联网搜索",
+                (
+                    "tavily_enable",
+                    "tavily_api_key",
+                    "tavily_max_results",
+                    "tavily_search_depth",
+                    "tavily_max_content_chars",
+                ),
+            ),
+        ),
+    ),
 )
 
-# ── 2. 删除（目标 11 键）────────────────────────────────────────
-DELETED_KEYS: tuple[str, ...] = (
-    # 迁移对账临时开关，v2 只保留 blocks 一种形态
-    "system_prompt_style",
-    # 诊断开关 → 改为 run_turn(dump=True) 开发者参数
-    "prompt_dump_enable",
-    "prompt_dump_max_entries",
-    # 改为按模型窗口自动算（token_budget.request_limit 已有能力）
-    "context_token_budget",
-    "context_token_chars_per_token",
-    # 与 empty_reply_retries / max_tool_rounds 语义重叠
-    "retry_profile",
-    "turn_token_budget",
-    # 记忆模块化后无意义
-    "experimental_long_term_memory",
-    # 与 include_pre_history 重复
-    "history_background_enable",
-    # 输出指令改为交付层无条件解析
-    "outbound_directive_enable",
-    "outbound_directive_max_at",
-)
+#: 本体界面保留的全部键（由 UI_PAGES 派生，避免两处漂移）
+CORE_KEYS: tuple[str, ...] = tuple(f for page in UI_PAGES for f in page.fields)
 
-# ── 3. 迁移到模块（目标 129 键 / 13 个模块）──────────────────────
+# ==================== 2. 迁移为模块（9 个 / 108 键）====================
 MODULE_KEYS: dict[str, tuple[str, ...]] = {
+    # 输出策略：流式 / 发言通道（共用 output 槽，故同一模块用 mode 三选一）
     "llm_output": (
         "stream_output",
         "stream_send_pool_enabled",
@@ -104,7 +196,6 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
         "stream_queue_full_policy",
         "stream_flush_on_finish",
         "stream_keep_order",
-        # 发言通道（与流式共用一个 output 槽，故合并进同一模块，见 PLAN §7 W3）
         "speech_via_tool",
         "speech_max_bubbles",
         "speech_max_bubble_chars",
@@ -112,20 +203,8 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
         "speech_force_reply_on_call",
         "speech_fallback_enable",
     ),
-    "llm_reply_policy": (
-        "message_debounce_seconds",
-        "message_debounce_max_wait",
-        "interrupt_enable",
-        "interrupt_save_sent",
-        "interrupt_debug",
-    ),
+    # 上下文增强：指代消解 / 按需展开 / 历史查询权限
     "llm_context": (
-        "include_pre_history",
-        "include_private_pre_history",
-        "group_log_enable",
-        "group_log_window_minutes",
-        "group_log_window_limit",
-        "group_log_max_chars",
         "context_expand_enable",
         "referent_resolve_enable",
         "referent_prefetch_enable",
@@ -137,19 +216,7 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
         "history_auto_qq_min_local",
         "history_cross_query_enable",
     ),
-    "llm_compress": (
-        "context_compress_enable",
-        "context_compress_prompt",
-    ),
-    "llm_media": (
-        "image_understanding_enable",
-        "image_max_count",
-        "image_max_mb",
-        "gif_understanding_enable",
-        "gif_max_frames",
-        "gif_frame_max_edge",
-        "gif_probe_all_images",
-    ),
+    # 消息元信息渲染（含历史清洗）
     "llm_message_meta": (
         "include_time",
         "include_private_qq",
@@ -164,6 +231,7 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
         "meta_sent_style",
         "meta_instruction_mode",
         "meta_mask_nickname",
+        "clean_output_parentheses",
     ),
     "llm_memory": (
         "memory_enable",
@@ -189,6 +257,7 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
         "knowledge_embedding_model_id",
         "knowledge_recall_limit",
     ),
+    # 工具扩展：OneBot 工具 / MCP / 工具结果回应要求（联网搜索留在本体高级功能）
     "llm_tools_extra": (
         "onebot_tools_enable",
         "onebot_tools_allowed",
@@ -197,17 +266,13 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
         "onebot_tools_debug",
         "poke_cooldown_seconds",
         "mcp_servers",
-        "tavily_enable",
-        "tavily_api_key",
-        "tavily_max_results",
-        "tavily_search_depth",
-        "tavily_max_content_chars",
         "tool_result_directive_enable",
         "tool_result_directive",
     ),
     "llm_proactive": (
         "proactive_friend_enable",
         "proactive_group_enable",
+        "stream_proactive_enabled",
         "proactive_friend_sessions",
         "proactive_group_sessions",
         "proactive_min_interval_minutes",
@@ -222,13 +287,13 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
         "proactive_env_prompt_enable",
         "proactive_unresolved_prompt_enable",
         "proactive_env_intent_nudge",
-        "stream_proactive_enabled",
     ),
     "llm_schedule": (
         "schedule_enable",
         "schedule_prompt",
         "stream_scheduled_enabled",
     ),
+    # 组装档位 / 行为规则 / 组装对账诊断
     "llm_assembly": (
         "assembly_profile",
         "behavior_rules_enable",
@@ -237,15 +302,57 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
         "emoji_react_level",
         "user_message_format",
         "prompt_time_position",
+        "system_prompt_style",
+        "prompt_dump_enable",
+        "prompt_dump_max_entries",
     ),
 }
 
-#: 迁移完成后的目标键数（W7 的验收线）
-TARGET_CORE_KEY_COUNT = len(CORE_KEYS)  # 20
+# ==================== 3. 删除（9 键）====================
+DELETED_KEYS: tuple[str, ...] = (
+    # 循环安全阀：改为框架内硬编码安全默认（5 轮 / 1 次空回复重试 / 1 次收敛）
+    # —— 它们不是"功能开关"，暴露给用户只会让用户把钱烧在不理解的地方
+    "max_tool_rounds",
+    "empty_reply_retries",
+    "reasoning_overflow_retries",
+    # 与上面三个语义重叠的旧键
+    "retry_profile",
+    "turn_token_budget",
+    # 记忆模块化后无意义（模块自己的 memory_enable 即开关）
+    "experimental_long_term_memory",
+    # 与 include_pre_history 重复
+    "history_background_enable",
+    # 输出指令改为交付层无条件解析，不再需要开关
+    "outbound_directive_enable",
+    "outbound_directive_max_at",
+)
+
+#: 迁移完成后的目标键数（W7 验收线）
+TARGET_CORE_KEY_COUNT = len(CORE_KEYS)
+
+#: 拥有者身份的**唯一来源**（原账号级 owner_id 已并入此名册）
+OWNER_SOURCE_KEY = "agent_owner_list"
+
+
+# ==================== 查询助手 ====================
+def ui_page_of(key: str) -> str | None:
+    """键属于本体界面的哪一页；不在本体返回 None。"""
+    for page in UI_PAGES:
+        if key in page.fields:
+            return page.id
+    return None
+
+
+def ui_group_of(key: str) -> str | None:
+    """键属于本体界面的哪个分组。"""
+    for page in UI_PAGES:
+        for group in page.groups:
+            if key in group.fields:
+                return group.id
+    return None
 
 
 def module_of(key: str) -> str | None:
-    """某键迁往哪个模块；未迁移返回 None。"""
     for module_name, keys in MODULE_KEYS.items():
         if key in keys:
             return module_name
@@ -253,9 +360,10 @@ def module_of(key: str) -> str | None:
 
 
 def fate_of(key: str) -> str:
-    """某键的归宿：``core`` / ``deleted`` / ``module:<name>`` / ``unknown``。"""
-    if key in CORE_KEYS:
-        return "core"
+    """``ui:<page>`` / ``deleted`` / ``module:<name>`` / ``unknown``。"""
+    page = ui_page_of(key)
+    if page:
+        return f"ui:{page}"
     if key in DELETED_KEYS:
         return "deleted"
     module_name = module_of(key)
@@ -263,7 +371,6 @@ def fate_of(key: str) -> str:
 
 
 def all_partitioned_keys() -> tuple[str, ...]:
-    """分区表覆盖的全部键（应为 scheme 键集的超集或等集）。"""
     flat: list[str] = list(CORE_KEYS) + list(DELETED_KEYS)
     for keys in MODULE_KEYS.values():
         flat.extend(keys)
@@ -271,13 +378,12 @@ def all_partitioned_keys() -> tuple[str, ...]:
 
 
 def unknown_keys(schema_keys) -> list[str]:
-    """schema 里存在、但分区表没给它归宿的键（破坏性 v2 的硬性遗漏）。"""
-    partitioned = set(all_partitioned_keys())
-    return sorted(set(schema_keys) - partitioned)
+    """schema 里存在、但布局表没给它归宿的键（v3 的硬性遗漏）。"""
+    return sorted(set(schema_keys) - set(all_partitioned_keys()))
 
 
 def duplicate_keys() -> list[str]:
-    """在多个归宿里重复出现的键（会导致迁移写两遍）。"""
+    """在多个归宿里重复出现的键（迁移会写两遍 / UI 会渲染两次）。"""
     seen: dict[str, int] = {}
     for key in all_partitioned_keys():
         seen[key] = seen.get(key, 0) + 1
@@ -285,5 +391,19 @@ def duplicate_keys() -> list[str]:
 
 
 def stale_keys(schema_keys) -> list[str]:
-    """分区表里有、schema 里已不存在的键（迁移脚本会写到不存在的字段）。"""
+    """布局表里有、schema 里已不存在的键。"""
     return sorted(set(all_partitioned_keys()) - set(schema_keys))
+
+
+def page_summary() -> list[dict]:
+    """本体界面摘要（供前端生成 sections.json 与文档核对）。"""
+    return [
+        {
+            "id": page.id,
+            "label": page.label,
+            "order": page.order,
+            "fields": len(page.fields),
+            "groups": [{"id": g.id, "label": g.label, "fields": list(g.fields)} for g in page.groups],
+        }
+        for page in sorted(UI_PAGES, key=lambda p: p.order)
+    ]

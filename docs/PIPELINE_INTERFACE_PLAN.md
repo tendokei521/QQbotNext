@@ -1,381 +1,396 @@
-# 流水线接口化施工清单 v2（破坏性全量改造）
+# 流水线接口化施工方案 v3（最终定稿 · 破坏性全量改造）
 
-> **v1 作废**。v1 的口径是"配置保留 + 标注可被谁接管"，属于渐进路线。
-> v2 口径（用户 2026-02 定）：**配置只有三种命运 —— 保留在框架核心 / 迁移到对应模块 / 删除。不做"保留 + 标注"。**
+> **v1 / v2 已作废**（v1 = 保守渐进；v2 = 12 模块 + 20 键核心）。
+> v3 定稿口径（用户确认）：
 >
-> 配套：`docs/research/pipeline-interface-audit.md`（55 个接缝的评级与证据）、
-> `tests/architecture/test_extensibility_contract.py`（可执行的接缝契约与棘轮）。
+> 1. **开箱功能全部由模块提供**（完全迁移，不留"框架自带的半成品"）；
+> 2. **本体界面只保留 5 页**，顺序与内容逐项指定；
+> 3. **账号级 `owner_id` 取消**，拥有者身份统一到权限管理的名册。
+>
+> 真相文件（代码即契约）：
+> - `app/agent/config_partition.py` —— 5 页布局 + 9 模块 + 9 删除的逐键归属
+> - `tests/architecture/test_config_partition.py` —— 15 条断言守着它（页面顺序/字段数/43+108+9/模块清单/棘轮）
+> - `tests/architecture/test_extensibility_contract.py` —— 55 个接缝的评级与接管证据
+> - 审计依据：`docs/research/pipeline-interface-audit.md`
 
 ---
 
-## 0. 核心原则（一句话）
+## 0. 一句话原则
 
 > **机制留在框架且不再读配置；策略搬到模块并读自己的配置；槽把两者连起来。**
 
-推论：
+---
 
-1. 框架里每一个 `config.get("xxx_策略")` 都是待迁移项 —— 它证明"这个决策不该由框架做"。
-2. 机制函数搬家后**删掉一切配置读取**，改为**显式入参**（由调用方=模块/run_turn 传入）。
-3. 迁移完，`app/agent/config_schema.py` 从 **160 键 → 20 键**。
+## 1. 本体界面最终形态（5 页 / 43 键）
+
+顺序即左侧导航顺序（**对话行为在会话管理之前**）。
+
+### 1.1 基础配置（7 键）
+
+| 分组 | 字段 |
+|---|---|
+| 响应场景 | `group_enable` `private_enable` |
+| 模型参数 | `model` `temperature` `max_tokens` |
+| 人格设定 | `persona_preset_id` `system_prompt` |
+
+### 1.2 权限管理（3 键 + 原 `owner_id` 并入）
+
+| 分组 | 字段 |
+|---|---|
+| 响应权限 | `permission` |
+| 拥有者与管理者 | `agent_owner_list`（**原账号级 owner QQ 并入此名册**） `agent_manager_list` |
+
+### 1.3 对话行为（8 键）
+
+| 分组 | 字段 |
+|---|---|
+| 触发设置 | `trigger_at` `trigger_keyword` |
+| 消息抖动 | `message_debounce_seconds` `message_debounce_max_wait` `reply_cooldown` |
+| 回复打断 | `interrupt_enable` `interrupt_save_sent` `interrupt_debug` |
+
+### 1.4 会话管理（13 键）
+
+| 分组 | 字段 |
+|---|---|
+| 会话窗口 | `session_timeout` `history_rounds` `max_message_length` |
+| 群聊历史 | `include_pre_history`（包含群聊环境背景）`include_private_pre_history` `group_log_enable`（注入群聊环境记录）`group_log_window_minutes`（窗口）`group_log_window_limit`（上限）`group_log_max_chars`（预算） |
+| 上下文压缩 | `context_compress_enable` `context_compress_prompt` `context_token_budget` `context_token_chars_per_token` |
+
+### 1.5 高级功能（12 键，从原「高级」区部分迁移）
+
+| 分组 | 字段 |
+|---|---|
+| 图片与动图 | `image_understanding_enable` `image_max_count` `image_max_mb` `gif_understanding_enable` `gif_max_frames` `gif_frame_max_edge` `gif_probe_all_images` |
+| 联网搜索 | `tavily_enable` `tavily_api_key` `tavily_max_results` `tavily_search_depth` `tavily_max_content_chars` |
+
+> 合计 **43 键**。`CORE_KEYS` 由 `UI_PAGES` 派生（`config_partition.py`），不手写第二份。
 
 ---
 
-## 1. 目标形态
+## 2. 配置总账：160 = 43 + 108 + 9
 
-```
-框架核心（不可下沉的物理层）
-├── 连接与协议      onebot gateway / codec / 去重
-├── 配置与权限      ConfigService / authority / owner+manager 名册
-├── 会话存储        SessionManager（不加策略，只存取）
-├── 事件分发        NodeRegistry 入站链 + dispatcher
-├── provider        PROVIDERS / 预设 / 模型池 / 回退链 / 单次 HTTP
-├── Agent 骨架      一轮对话的**机制**：取值→组装→请求→（可选）发送
-└── 模块运行时      loader / registry / features 租约 / 钩子注册表
-
-模块（12 个，全部读自己的 default_config + config_schema）
-├── llm_output            输出策略（三形态 text/stream/speech）  supersedes=("output","output_style")
-├── llm_reply_policy      触发/防抖/打断       supersedes=("trigger","debounce","interrupt")
-├── llm_context          指代/展开/群记录/预历史 supersedes=("context",)
-├── llm_message_meta     消息元信息渲染       supersedes=("message_meta",)
-├── llm_compress         上下文压缩          supersedes=("compress",)
-├── llm_media            图片/动图理解        supersedes=("media",)
-├── llm_memory           长期记忆            supersedes=("memory",)
-├── llm_knowledge        知识库              supersedes=("knowledge",)
-├── llm_tools_extra      OneBot+Tavily+MCP   supersedes=("onebot_tools","web_search","mcp")
-├── llm_assembly         组装档位/行为规则    supersedes=("assembly",)
-├── llm_proactive        主动消息（纯业务）    supersedes=("proactive",)
-└── llm_schedule         定时任务（纯业务）    supersedes=("schedule",)
-```
-
-> **为什么 `stream` 与 `speech` 合一个模块**：二者都在同一时刻争夺同一个 `output` 槽，
-> 拆成两个模块会让行为依赖加载顺序。合成一个模块、用 `mode` 三选一（`text` / `stream` / `speech`）
-> 语义更硬，也顺手消掉了 `speech_via_tool` 那个"三条件耦合"的老坑。详见 §7 W3。
-> 分区表 `app/agent/config_partition.py::MODULE_KEYS["llm_output"]` 里 25 个键 = 19 流式 + 6 发言通道。
-
-**`feature_id` 从 8 → 20**：`output` `output_style` `trigger` `debounce` `interrupt` `context`
-`message_meta` `compress` `media` `memory` `knowledge` `onebot_tools` `web_search` `mcp`
-`assembly` `provider_invoker` `agent` `proactive` `schedule` `turn_kernel`
-
-> 最后两个是"纯业务型"能力（模块自建，不需要框架槽）与"一轮对话内核"（`run_turn` 本身可被整体接管）。
-
----
-
-## 2. 配置总账：160 键的完整命运
-
-**分区已用脚本校验：20 + 11 + 129 = 160，无重复、无遗漏。**
-
-### 2.1 保留在框架核心（20 键）
-
-| 键 | 为什么框架必须自己决定 |
-|---|---|
-| `group_enable` / `private_enable` | Agent 是否参与的总闸门。模块权限过滤共用同一套，闸门下放会让模块互相打架 |
-| `reply_cooldown` | 与会话冷却强耦合（`Session.can_reply()` 是框架机制） |
-| `permission` / `agent_owner_list` / `agent_manager_list` | 权限名册，模块权限与 Agent 权限同源 |
-| `model` / `temperature` / `max_tokens` | provider 兜底层（`llm_chat`/`run_turn` 的入参缺省值） |
-| `system_prompt` / `persona_preset_id` | 人设是内容基线；没有它机器人无法开口（迁走等于开箱即死） |
-| `session_timeout` / `history_rounds` / `max_message_length` | 会话存储的物理契约（`SessionManager`/`add_message` 的边界） |
-| `trigger_at` / `trigger_keyword` | **判断"这条消息算不算对 Bot 说话"是准入闸门**，与权限同级；且是 `_would_trigger_llm` 的共用判据 |
-| `max_tool_rounds` / `empty_reply_retries` / `reasoning_overflow_retries` | 循环的**安全阀**（防止烧穿用户的额度），不是功能开关 |
-| `clean_output_parentheses` | 写进历史的清洗规则 —— 历史由框架拥有，清洗必须同源 |
-
-### 2.2 删除（11 键，功能随框架一并移除）
-
-| 键 | 删除理由 |
-|---|---|
-| `system_prompt_style` | 迁移对账用的临时开关，v2 只保留 `blocks` 一种形态 |
-| `prompt_dump_enable` / `prompt_dump_max_entries` | 诊断开关 → 改为开发者手调的 `run_turn(dump=True)` 参数，不进用户配置 |
-| `context_token_budget` / `context_token_chars_per_token` | 改用"按模型窗口自动算"（`token_budget.request_limit` 已有能力），不再暴露 |
-| `retry_profile` / `turn_token_budget` | 与 `empty_reply_retries`/`max_tool_rounds` 语义重叠，收敛为 3 个核心键 |
-| `experimental_long_term_memory` | 记忆模块化后无意义（模块自身的 `memory_enable` 即开关） |
-| `history_background_enable` | 与 `include_pre_history` 重复 |
-| `outbound_directive_enable` / `outbound_directive_max_at` | 输出指令改为**框架交付层无条件解析**（`send_item` 内建），不再需要开关 |
-
-### 2.3 迁移到 12 个模块（129 键）
-
-> 权威表是 `app/agent/config_partition.py::MODULE_KEYS`（`tests/architecture/test_config_partition.py` 守着它与 schema 的一致性）。
-> 下表与它逐键一致，键数之和 129 = 160 − 20 − 11。
-
-| 模块 | 键数 | 迁入的键（**全量列出，逐个可查**） |
+| 归宿 | 键数 | 去向 |
 |---|---|---|
-| `llm_output` | 25 | **流式 19**：`stream_output` `stream_send_pool_enabled` `stream_send_by_sentence` `stream_sentence_max_length` `stream_send_interval_mode` `stream_send_interval_base_ms` `stream_send_interval_min_ms` `stream_send_interval_max_ms` `stream_send_curve` `stream_send_curve_k` `stream_short_message_length` `stream_short_message_delay_ms` `stream_long_message_delay_ms` `stream_send_prefix` `stream_send_suffix` `stream_send_max_queue` `stream_queue_full_policy` `stream_flush_on_finish` `stream_keep_order`<br>**发言通道 6**：`speech_via_tool` `speech_max_bubbles` `speech_max_bubble_chars` `speech_reminder_rounds` `speech_force_reply_on_call` `speech_fallback_enable` |
-| `llm_reply_policy` | 5 | `message_debounce_seconds` `message_debounce_max_wait` `interrupt_enable` `interrupt_save_sent` `interrupt_debug` |
-| `llm_context` | 16 | `include_pre_history` `include_private_pre_history` `group_log_enable` `group_log_window_minutes` `group_log_window_limit` `group_log_max_chars` `context_expand_enable` `referent_resolve_enable` `referent_prefetch_enable` `referent_ambiguous_policy` `referent_prefetch_max` `referent_focus_ttl` `referent_focus_max` `referent_prompt_enable` `history_auto_qq_min_local` `history_cross_query_enable` |
-| `llm_compress` | 2 | `context_compress_enable` `context_compress_prompt` |
-| `llm_media` | 7 | `image_understanding_enable` `image_max_count` `image_max_mb` `gif_understanding_enable` `gif_max_frames` `gif_frame_max_edge` `gif_probe_all_images` |
-| `llm_message_meta` | 13 | `include_time` `include_private_qq` `include_sender` `include_mentioned` `include_quote` `include_quote_sender` `include_sent` `fetch_at_nickname` `fetch_quote_content` `meta_sender_style` `meta_sent_style` `meta_instruction_mode` `meta_mask_nickname` |
-| `llm_memory` | 17 | `memory_enable` `memory_private_enable` `memory_group_enable` `memory_recall_max` `memory_recall_max_chars` `memory_save_deterministic` `memory_extract_enable` `memory_extract_interval_min` `memory_max_per_owner` `memory_user_cross_group` `memory_audit_enable` `memory_audit_inject` `memory_min_confidence` `memory_inject_hedge` `memory_max_age_days` `memory_on_reset` `memory_upgrade_saved_only` |
-| `llm_knowledge` | 3 | `knowledge_enable` `knowledge_embedding_model_id` `knowledge_recall_limit` |
-| `llm_tools_extra` | 14 | `onebot_tools_enable` `onebot_tools_allowed` `onebot_tools_denied` `onebot_tools_max_result` `onebot_tools_debug` `poke_cooldown_seconds` `mcp_servers` `tavily_enable` `tavily_api_key` `tavily_max_results` `tavily_search_depth` `tavily_max_content_chars` `tool_result_directive_enable` `tool_result_directive` |
-| `llm_proactive` | 17 | `proactive_friend_enable` `proactive_group_enable` `proactive_friend_sessions` `proactive_group_sessions` `proactive_min_interval_minutes` `proactive_max_interval_minutes` `proactive_max_unanswered` `proactive_quiet_hours_start` `proactive_quiet_hours_end` `proactive_group_idle_minutes` `proactive_prompt` `proactive_prompt_enable` `proactive_history_intent_nudge` `proactive_env_prompt_enable` `proactive_unresolved_prompt_enable` `proactive_env_intent_nudge` `stream_proactive_enabled` |
-| `llm_schedule` | 3 | `schedule_enable` `schedule_prompt` `stream_scheduled_enabled` |
-| `llm_assembly` | 7 | `assembly_profile` `behavior_rules_enable` `behavior_rules_override` `participation` `emoji_react_level` `user_message_format` `prompt_time_position` |
+| 本体界面 | **43** | 上面 5 页 |
+| 迁移为模块 | **108** | 9 个模块（§3） |
+| 删除 | **9** | 见下 |
 
-> 校验脚本产物留在 `logs/_cfg_disp.json`（可直接 `python -c` 复核 20/11/129 的分区）。
+**删除的 9 键及理由**
+
+| 键 | 理由 |
+|---|---|
+| `max_tool_rounds` `empty_reply_retries` `reasoning_overflow_retries` | **改为框架内硬编码安全默认**（5 轮 / 1 次空回复重试 / 1 次收敛）。它们不是功能开关，暴露给用户只会让人把钱烧在不理解的地方 |
+| `retry_profile` `turn_token_budget` | 与上面三个语义重叠 |
+| `experimental_long_term_memory` | 记忆模块化后无意义（模块自己的 `memory_enable` 即开关） |
+| `history_background_enable` | 与 `include_pre_history` 重复 |
+| `outbound_directive_enable` `outbound_directive_max_at` | 输出指令改为**交付层无条件解析**（`send_item` 内建） |
+
+**校验方式**（任何时刻可复核）：
+```powershell
+python -c "from app.agent.config_partition import *; print(len(CORE_KEYS), sum(len(v) for v in MODULE_KEYS.values()), len(DELETED_KEYS))"
+# → 43 108 9
+pytest tests/architecture/test_config_partition.py -q   # 15 passed
+```
 
 ---
 
-## 3. 模块清单与实现要点
+## 3. 九个模块（迁移目标的完整清单）
 
-> 每个模块 = `app/plugins/<dir>/` 下 `module.py` + `config_schema.py` + `service/`。
-> 共同约定：`permission = "everyone"`、`subscribe = ("message_group","message_private")`（若需观察）、
-> `category = "LLM"`、读配置一律 `self.config.get(...)`。
+> 共同约定：目录 `app/plugins/<name>/`，`module.py` + `config_schema.py` + `service/`；
+> `category = "LLM"`（前端自动聚合到「LLM 扩展」）；配置一律 `self.config.get(...)`。
 
-### 3.1 `llm_output`（输出策略）★ 需要新的 `output` 槽
+| # | 模块 | 键数 | 迁移代码量 | 需要的槽 | supersedes |
+|---|---|---|---|---|---|
+| 1 | `llm_output` | 25 | ~648 + chat 流式段 | **`output`（新）** | `("output","output_style")` |
+| 2 | `llm_context` | 10 | ~2,900 | **`context_providers`（新）** | `("context",)` |
+| 3 | `llm_message_meta` | 14 | 315 | 无需（`pre_request` 钩子） | `("message_meta",)` |
+| 4 | `llm_memory` | 17 | ~2,080 | `context_providers` + `tool_sources` | `("memory",)` |
+| 5 | `llm_knowledge` | 3 | 602 | `context_providers` + `tool_sources` | `("knowledge",)` |
+| 6 | `llm_tools_extra` | 9 | ~898 | **`tool_sources`（新）** | `("onebot_tools","mcp")` |
+| 7 | `llm_proactive` | 17 | 817 | 无需（`spawn`+`send_to`+`llm_turn`） | `("proactive",)` |
+| 8 | `llm_schedule` | 3 | 1,240 | 无需（`SCHEDULES`/`spawn`） | `("schedule",)` |
+| 9 | `llm_assembly` | 10 | 707 | `assembly`（已有） | `("assembly",)` |
 
-一个模块，三种 `mode`：`text`（框架默认的非流式一次出）/ `stream`（按句流式）/ `speech`（文本=思考，发言走工具）。
+**合计迁移 108 键 / 约 10,200 行代码。**
 
-| 项 | 内容 |
-|---|---|
-| 接管 | `supersedes = ("output", "output_style")`；实现 `respond(ctx, req) -> AsyncIterator[OutboundItem]` |
-| 机制来源 | **stream**：`loop/pipeline.py:370-452`（`_run_stream`）+ `loop/chat.py:220-620` 的切句/发送段<br>**speech**：`delivery/speech.py`（`SpeechOutbox`/`build_speech_tools`）+ `loop/assistant_output.py` 的 `_flush_speech`/`_force_speak_round` |
-| 策略来源 | 25 键（流式 19 + 发言通道 6），见 `config_partition.MODULE_KEYS["llm_output"]` |
-| 框架侧保留 | `domain/splitter.split_sentences`、`delivery/pool.StreamSendPool`、`domain/pace.SendPolicy` —— **全部改为显式入参，不再读 config** |
-| 关键改动 | `StreamSendPool(config)` → `StreamSendPool(max_queue=, full_policy=, flush_on_finish=, policy=)`；`SendPolicy(config)` → `SendPolicy(mode=, base_ms=, ...)`；删掉 `speech_via_tool(config)` 的三条件耦合（档位 + 开关 + 流式），改由 `mode="speech"` 直接表达 |
-| 测试 | `tests/plugins/test_llm_output.py`：三种 `mode` 下同一输入的**发送序列**不同；`pre_send`/`post_send` 三种模式都触发；卸载后回 `text` 默认 |
-
-> **为什么三分支合成一个模块**：三种形态争夺的是同一个 `output` 槽。拆成三个模块会让行为依赖
-> 加载顺序（先到先得 + 交棒语义虽然支持，但对用户是隐形的坑）。一个模块 + `mode` 配置，
-> 语义硬、可测、且顺手消掉 `speech_via_tool` 那个"三条件耦合"的老坑。
-> 若将来真需要"多输出策略并存"，再拆开并显式接受顺序敏感性。
-
-### 3.2 `llm_reply_policy`（触发/防抖/打断）
+### 3.1 `llm_output`（输出策略：`text` / `stream` / `speech`）
 
 | 项 | 内容 |
 |---|---|
-| 接管 | `supersedes = ("trigger","debounce","interrupt")` —— 三个 feature 都指向"是否把这条消息交给 LLM" |
-| **不需要新槽** | 全部用现成钩子：`@llm_hook("pre_request", order=-50)` 里 `ctx.job.skip = True`（拦截/冷却/打断），`ctx.runtime.interrupt_enabled = ...`（打断开关） |
-| 机制来源 | `loop/pool.py`（`LlmPool` 防抖 + `merge_debounced_texts`）、`pipeline.py:54-100`（代际/`_would_trigger_llm`） |
-| 策略来源 | 5 键 |
-| 关键改动 | 框架删掉 `_run` 里的 `debounce = config.get(...)`/`interrupt_enable` 读取（`pipeline.py:270-278`、`:483`、`:489`），改为读 `runtime.<policy>`（由模块设置的属性）；`LlmPool` 改为模块持有的实例 |
-| 测试 | `tests/plugins/test_llm_reply_policy.py`：连续三条消息合并成一请求；打断开启/关闭的差异；卸载后回框架默认（立即请求、不打断） |
+| 迁入键 | 流式 19 + 发言通道 6 = 25 |
+| 机制来源 | `delivery/speech.py`、`loop/assistant_output.py`、`domain/pace.py` + `loop/chat.py:220-620` 的切句/发送段 + `loop/pipeline.py:370-452`（`_run_stream`） |
+| 契约 | `respond(ctx, req) -> AsyncIterator[OutboundItem]` |
+| 框架保留 | `domain/splitter.split_sentences`、`delivery/pool.StreamSendPool`、`domain/pace.SendPolicy` —— **全部改为显式入参，不再读 config** |
+| 为何三形态合一 | 三者抢同一个 `output` 槽，拆开会让行为依赖加载顺序；`mode` 配置语义更硬，并顺手消掉 `speech_via_tool` 的"档位+开关+流式"三条件耦合 |
+| 验收 | 三种 `mode` 下同一输入的发送序列不同；`pre_send`/`post_send` 三种都触发；卸载后回 `text` |
 
-### 3.3 `llm_context`（指代/展开/群记录/预历史）★ 需要 context provider 注册表
-
-| 项 | 内容 |
-|---|---|
-| 接管 | `supersedes = ("context",)`；实现 `collect(req) -> str \| None` 注册进 `runtime.context_providers` |
-| 机制来源 | `loop/context_blocks.py`（`_build_group_pre_history`/`_referent_block`/`_format_session_history`）、`context/*`（`group.py`/`referent.py`/`focus.py`/`nicknames.py`/`display_names.py`）、`tools/context_tools.py`、`group_log/*` |
-| 策略来源 | 16 键 |
-| 框架侧保留 | `PromptRequest.pre_history_text`/`referent_text`/`group_log_text` 三个槽位字段（**装配器只管顺序，不管来源**） |
-| 关键改动 | `prompt_prep.py:155-274` 的 5 段硬调 → 遍历 `runtime.context_providers`；`tool_source.py:108-111` 的 `context_expand_enable` → 由本模块注册工具源 |
-| 测试 | `tests/plugins/test_llm_context.py`：装模块后 `background`/`group_log` 块出现；卸载后消失；`describe(req)` 块行数变化可断言 |
-
-### 3.4 `llm_message_meta`（消息元信息）
+### 3.2 `llm_context`（指代 / 按需展开 / 历史查询权限）
 
 | 项 | 内容 |
 |---|---|
-| 接管 | `supersedes = ("message_meta",)` |
-| **不需要新槽** | 用现成 `@llm_hook("pre_request", order=20)` 改写 `ctx.user_text`（框架 `assembly/enhance.py:72 format_user_context` 就是这么做的，整套逻辑连同 13 键直接搬走） |
-| 机制来源 | `assembly/enhance.py` 全部（`collect_user_context`/`format_user_context`/`_collect_at_info`/`_collect_quote_info`/`_display_sender`，共 240 行） |
-| 关键改动 | **删掉 `install_framework_hooks` 里的 3 个注册**（`enhance.py:313-315`），框架不再自带任何 `pre_request` 钩子 |
-| 测试 | 搬移后 `tests/agent/assembly/test_llm_user_format.py` 改为"装模块后"的用例；卸载后 `user_text` 等于原始正文 |
+| 迁入键 | `context_expand_enable` `referent_resolve_enable` `referent_prefetch_enable` `referent_ambiguous_policy` `referent_prefetch_max` `referent_focus_ttl` `referent_focus_max` `referent_prompt_enable` `history_auto_qq_min_local` `history_cross_query_enable` |
+| 机制来源 | `context/*`（1,374 行）+ `tools/context_tools.py`（511）+ `tools/context_summary.py`（343）+ `loop/context_blocks.py` 的 `_referent_block` |
+| 契约 | 注册 `context_providers`：`name` / `order` / `collect(req) -> str \| None`（贡献 background / referent 块）+ 注册 `tool_sources`（`expand_*` 系列工具） |
+| 框架保留 | `PromptRequest.referent_text` / `pre_history_text` 两个**入参槽**；`group_log` 相关（因"注入群聊环境记录"留在会话管理页） |
+| 验收 | 装模块 → `describe(req)` 出现 `background` 块与 `expand_*` 工具；卸载 → 两者消失 |
 
-### 3.5 `llm_compress`（上下文压缩）
-
-| 项 | 内容 |
-|---|---|
-| 接管 | `supersedes = ("compress",)` |
-| **不需要新槽** | `@llm_hook("post_assemble", order=10)` 里裁历史（`ctx.messages` 可整体改写） |
-| 机制来源 | `assembly/compress.py`（92 行）+ `assembly/token_budget.py`（184 行） |
-| 策略来源 | 2 键（`context_token_budget` 已删，改为模块内按模型窗口自动算） |
-| 关键改动 | `assembler.apply_post_assemble` 删掉 `apply_request_policy` 调用（`:768-779`）与 `_request_limits`（`:707-733`） |
-| 测试 | 长历史在装模块后被压缩成摘要块；卸载后恢复原始长历史 |
-
-### 3.6 `llm_media`（图片/动图理解）★ 需要 context provider + 请求前置钩子
+### 3.3 `llm_message_meta`（消息元信息渲染）
 
 | 项 | 内容 |
 |---|---|
-| 接管 | `supersedes = ("media",)` |
-| 机制来源 | `media/image.py`（495 行）、`media/animated.py`（拆帧）、`media/store.py`（落盘/GC） |
-| 策略来源 | 7 键 |
-| 关键改动 | `pipeline._resolve_images`（`:138-191`）整体搬走；框架只保留 `PromptRequest.user_images` 这个**入参槽**，装配器按模态门控（`place_images` 不动） |
-| 测试 | `tests/agent/media/*`（5 个文件）改为装模块后跑；卸载后图片不随请求发送 |
+| 迁入键 | 13 个元信息键 + `clean_output_parentheses` |
+| 机制来源 | `assembly/enhance.py` 整份（315 行，含 `_collect_at_info` / `_collect_quote_info` / `_display_sender`） |
+| 契约 | **无需新槽**：`@llm_hook("pre_request", order=20)` 改写 `ctx.user_text`（框架原本也是这么干的） |
+| 关键删除 | 删掉 `assembly/enhance.py:308-315` 的 `install_framework_hooks` —— **框架不再自带任何 `pre_request` 钩子** |
+| 验收 | 装模块后 `user_text` 带「发送者/时间/引用」；卸载后等于原始正文 |
 
-### 3.7 `llm_memory` + `llm_knowledge`（记忆 / 知识库）★ 需要 context provider + tool source
-
-| 项 | 内容 |
-|---|---|
-| 接管 | `supersedes = ("memory",)` / `("knowledge",)` |
-| 机制来源 | `memory/*`（manager/store/recall/extract/detect/tool/commands，约 1400 行）、`knowledge/*`（约 400 行） |
-| 策略来源 | 17 键 / 3 键 |
-| 关键改动 | 框架删 `runtime.memory`/`runtime.knowledge` 属性与 `context_blocks._memory_block/_memory_autosave/_memory_consolidate`、`tool_source.py:122-134`；`SessionManager.on_archive` 回调改由模块在 `on_load` 里注册 |
-| 迁移注意 | `memory.store` 的数据文件在 `data/llm/<bot>/`，模块化后**数据位置不变**（只挪代码），避免用户数据丢失 |
-| 测试 | `tests/agent/memory/*`（10 个文件）与 `tests/agent/knowledge/*` 改为模块用例；新增"卸载后不再召回"用例 |
-
-### 3.8 `llm_tools_extra`（OneBot + Tavily + MCP）★ 需要 tool source 注册表
+### 3.4 `llm_memory` / 3.5 `llm_knowledge`
 
 | 项 | 内容 |
 |---|---|
-| 接管 | `supersedes = ("onebot_tools","web_search","mcp")` |
-| 机制来源 | `tools/onebot/*`（executor/manifest/security，约 380 行）、`tools/web_search.py`、`tools/mcp.py`、`tools/policy.py` |
-| 策略来源 | 14 键 |
-| 关键改动 | `tool_source.py:114-146` 三段 if 删除；框架只保留"工具源注册表遍历 + 四类开关过滤"的骨架（且开关过滤也交给模块自己的 `enabled` map） |
-| 测试 | `tests/infrastructure/test_llm_onebot_tools.py`、`tests/agent/tools/test_llm_tavily_search.py` 改为模块用例 |
+| 迁入键 | 17 / 3 |
+| 机制来源 | `memory/*`（2,080 行）/ `knowledge/*`（602 行） |
+| 契约 | `context_providers` 贡献记忆/知识块 + `tool_sources` 贡献 `memory_*` / `knowledge_search` 工具 |
+| 关键删除 | 框架删 `runtime.memory` / `runtime.knowledge` 属性、`context_blocks._memory_block/_memory_autosave/_memory_consolidate`、`tool_source.py:122-134`；`SessionManager.on_archive` 回调改由模块在 `on_load` 里注册 |
+| 数据位置 | **不变**（`data/llm/<bot>/` 原地），只挪代码，用户数据零迁移 |
+| 验收 | 装模块 → 记忆块出现、工具可调；卸载 → 不再召回且不报错 |
 
-### 3.9 `llm_assembly`（组装档位/行为规则）
-
-| 项 | 内容 |
-|---|---|
-| 接管 | `supersedes = ("assembly",)`；实现 `build(req) -> list[dict]` |
-| 机制来源 | `assembly/assembler.py` 的 `build_behavior`/`build_emoji_hint`/`message_meta_instruction`/`user_message_format` + `persona/rules.py`（409 行）+ `persona/emoji.py` |
-| 策略来源 | 7 键 |
-| 关键改动 | 框架 `BLOCKS` 从 12 块缩到 **6 块**：`persona` / `skills` / `context`(占位，由 provider 填) / `history` / `user`。其余 6 块随本模块走（它在 `build()` 里自己拼） |
-| 测试 | 装模块后 `describe(req)` 出现 behavior/emoji/meta 行；卸载后只剩 6 块 |
-
-### 3.10 `llm_proactive`（主动消息，纯业务）
+### 3.6 `llm_tools_extra`（OneBot 工具 + MCP）
 
 | 项 | 内容 |
 |---|---|
-| 接管 | `supersedes = ("proactive",)`；**不需要框架槽** —— 自己 `spawn` + `send_to` + `llm_turn` |
-| 机制来源 | `proactivity/manager.py`（520 行）整份搬走；`proactivity/entry.py`（TaskEntry）一并 |
-| 策略来源 | 17 键 |
-| 关键改动 | 删 `runtime.py:106 self.proactive = ProactiveManager(self)`；删 `pipeline.py:527-538`(`on_bot_sent`) 与 `:562-571`(`_observe`) 两处硬调 —— 改为**框架派发事件**：`@llm_hook("pre_request", order=90)` 里模块自己记"用户说话了"，`@send_hook` 里记"Bot 说话了"。框架零耦合 |
-| 测试 | `tests/agent/proactivity/test_proactive.py`（10 例）改为模块用例 |
+| 迁入键 | OneBot 6 + `mcp_servers` + 工具结果回应要求 2 = 9（**联网搜索留在本体高级功能**） |
+| 机制来源 | `tools/onebot/*`（378）+ `tools/mcp.py`（227）+ `tools/policy.py` + `tools/system.py` |
+| 契约 | `tool_sources` 注册 |
+| 关键删除 | `tool_source.py:137-146` 两段 if |
+| 验收 | 工具清单随模块装卸增减 |
 
-### 3.11 `llm_schedule`（定时任务，纯业务）
+### 3.7 `llm_proactive`（主动消息，纯业务）
 
 | 项 | 内容 |
 |---|---|
-| 接管 | `supersedes = ("schedule",)`；用 `ctx.services.scheduler`（`SCHEDULES` + `register`）或 `spawn` |
-| 机制来源 | `proactivity/scheduler.py`（737 行）+ `tools/schedule.py`（155 行）+ `domain/time_parser.py`（292 行） |
-| 策略来源 | 3 键 |
-| 关键改动 | 删 `runtime.py:105 self.scheduler`；`claude_tools`/`tool_source.py:73-77` 的 `schedule_enable` 判据消失；`SchedulerService`（`application/cron_service.py`）**保留为框架基础服务**（`SCHEDULES` 是模块声明面），但增强为 `update_job`/`list_jobs`/`run_job_now`（对齐 AstrBot `cron_manager`） |
-| 测试 | `tests/agent/proactivity/test_scheduler.py`（6 例）+ `test_schedule.py` 改为模块用例 |
+| 迁入键 | 17（含 `stream_proactive_enabled`） |
+| 机制来源 | `proactivity/manager.py`(520) + `entry.py`(101) + `stream.py`(196) |
+| 契约 | **不需要槽**：`spawn` 自己的循环 + `llm_turn` 跑一轮 + `send_to` 发出 |
+| 关键删除 | `runtime.py:106 self.proactive = ...`；`pipeline.py:527-538`(`on_bot_sent`) 与 `:562-571`(`_observe`) 两处硬调 |
+| 观察方式 | 模块用 `@llm_hook("pre_request", order=90)` 记"用户说话了"、`@send_hook` 记"Bot 说话了" |
+| 验收 | 删掉 `runtime.proactive` 后 `tests/agent/proactivity/test_proactive.py` 全绿 |
+
+### 3.8 `llm_schedule`（定时任务，纯业务）
+
+| 项 | 内容 |
+|---|---|
+| 迁入键 | 3（含 `stream_scheduled_enabled`） |
+| 机制来源 | `proactivity/scheduler.py`(737) + `tools/schedule.py`(155) + `domain/time_parser.py`(292) |
+| 契约 | 用 `ctx.services.scheduler`（`SCHEDULES` 声明式 + `register` 动态）或 `spawn` |
+| 框架保留并增强 | `application/cron_service.py::SchedulerService` 作为**基础服务**，补 `update_job` / `list_jobs` / `run_job_now`（对齐 AstrBot `cron_manager`） |
+| 关键删除 | `runtime.py:105 self.scheduler`；`tool_source.py:73-77` 的 `schedule_enable` 判据 |
+| 验收 | `tests/agent/proactivity/test_scheduler.py`(6) + `test_schedule.py` 改为模块用例全绿 |
+
+### 3.9 `llm_assembly`（组装档位 / 行为规则 / 组装对账）
+
+| 项 | 内容 |
+|---|---|
+| 迁入键 | `assembly_profile` `behavior_rules_enable` `behavior_rules_override` `participation` `emoji_react_level` `user_message_format` `prompt_time_position` `system_prompt_style` `prompt_dump_enable` `prompt_dump_max_entries` |
+| 机制来源 | `persona/rules.py`(409) + `persona/emoji.py`(139) + `assembly/assembler.py` 的 6 个块函数 |
+| 契约 | 已有 `assembly` 槽：`build(req) -> list[dict]` |
+| 框架保留 | `BLOCKS` 从 12 块缩到 **6 块**：`persona` / `skills` / `context`（由 provider 填）/ `history` / `user` |
+| 验收 | 装模块 → `describe(req)` 出现 behavior/emoji/meta 行；卸载 → 只剩 6 块 |
 
 ---
 
-## 4. 框架必须先补的 3 个槽 + 6 个原料接口
+## 4. 专项：`owner_id` 迁到权限管理
 
-> 顺序上这一节**必须在 §3 之前完成**，否则模块无处可接管。
+### 4.1 现状链路（已逐处查实）
 
-### 4.1 三个新槽（全部复用 `RuntimeSlotFeatureController`）
+```
+bots 表 owner_id 列       database.py:42
+  ↓ config_service 读写    config_service.py:101-102 / 175-183 / 339-340
+BotConnection.owner_id     client.py:201-207（gateway.py:179-205 / 666-673 写入）
+  ↓ codec._base            codec.py:82   → event.owner_id
+authority 判定             authority.py:91-92  event.is_bot_owner = (user_id == owner_id)
+  ↓ 影响 permission_role   authority.py:107-108  → "owner"
+WebUI 传递                 bots.py:42/45、schemas.py:12、app.py:172
+```
+
+### 4.2 目标模型
+
+**取消账号级 `owner_id`**；拥有者身份的唯一来源 = Agent 配置的 `agent_owner_list`（已有键，按 `bot_id` 存，层级与旧 `owner_id` 等价，且天然支持多人）。
+
+### 4.3 改动清单（7 处）
+
+| # | 文件 | 改动 |
+|---|---|---|
+| 4.3.1 | `app/infrastructure/persistence/database.py:42` | `bots.owner_id` 列**保留但弃用**（不 DROP，SQLite DROP COLUMN 在旧版本不可用；改为永不读、迁移后写 NULL） |
+| 4.3.2 | `app/infrastructure/config/config_service.py:175-183` | 读 `bots` 时不再返回 `owner_id`；`set_bots` 忽略该字段并留痕 |
+| 4.3.3 | `app/infrastructure/onebot/client.py:201-207` | `BotConnection.owner_id` 改为 `@property` 恒返回 `None` + 弃用告警（第三方插件读它不崩） |
+| 4.3.4 | `app/infrastructure/onebot/codec.py:82` | `event.owner_id` 恒为 `None`（字段保留一版） |
+| 4.3.5 | `app/plugin/authority.py:91-92` | `is_bot_owner` 改为**名册判定**：`is_bot_owner = in_owner_roster`（字段名保留，语义统一到名册；`is_agent_owner` 同时为 True） |
+| 4.3.6 | `app/webui/api/bots.py:42/45`、`schemas.py:12`、`app.py:172` | 移除 `owner_id` 入参与出参 |
+| 4.3.7 | 前端账号表单（`dashboard/src/.../bots*`） | 删除「拥有者 QQ」输入；权限管理页的 `agent_owner_list` 字段说明改为「拥有者 QQ（原账号级 owner 已并入此名册）」 |
+
+### 4.4 数据迁移（与 §6 同一脚本）
+
+```python
+# scripts/migrate_v3_owner_and_config.py
+for bot in config_service.get_bots():
+    old_owner = bot.get("owner_id")
+    if not old_owner:
+        continue
+    cfg = config_service.get_module_config("agent", bot_id=bot["user_id"]) or {}
+    roster = list(cfg.get("agent_owner_list") or [])
+    if str(old_owner) not in [str(x) for x in roster]:
+        roster.append(str(old_owner))
+        cfg["agent_owner_list"] = roster
+        config_service.set_module_config("agent", bot_id=bot["user_id"], cfg)
+```
+
+### 4.5 测试
+
+`tests/plugin/test_owner_roster_migration.py`：
+① 旧配置 `bots.owner_id=123` + 空名册 → 迁移后名册含 `"123"`，`bots.owner_id` 为 NULL；
+② `compute_event_permission` 在该用户发消息时给出 `permission_role="owner"`、`is_bot_owner=True`；
+③ 迁移前已有多人名册 → 只追加不覆盖、不重复（幂等）；
+④ `BotConnection.owner_id` 返回 None 且不抛。
+
+---
+
+## 5. 框架必须先补的槽与接口
+
+### 5.1 三个新槽（v3 只需三个）
 
 | 槽 | feature_id | runtime 属性 | 契约 | 默认实现 |
 |---|---|---|---|---|
-| 输出策略 | `output` | `runtime.output` | `respond(ctx, req) -> AsyncIterator[OutboundItem]` | `BlockingOutput`（一次性出整段） |
-| 上下文提供者注册表 | `context` | `runtime.context_providers: list` | `name` / `order` / `collect(req) -> str \| None`（**注册制，非排他**） | 空列表 |
-| 工具源注册表 | `tools` | `runtime.tool_sources: list` | `name` / `collect(req) -> list[ToolSpec]`（注册制） | 只有模块 `@tool` 与系统会话工具 |
+| 输出策略 | `output` | `runtime.output` | `respond(ctx, req) -> AsyncIterator[OutboundItem]` | `BlockingOutput`（一次性整段） |
+| 上下文提供者 | `context` | `runtime.context_providers: list` | `name` / `order` / `collect(req) -> str \| None`（**注册制，可组合**） | 空 |
+| 工具源 | `tools` | `runtime.tool_sources: list` | `name` / `collect(req) -> list[ToolSpec]`（注册制） | 仅模块 `@tool` + 会话基础工具 |
 
-装槽型两个已有（`assembly` / `provider_invoker`）；新增 `output` 是第三个装槽型。
-`context`/`tools` 是**注册表**（R3 可组合），不需要租约。
+`output` 复用 `RuntimeSlotFeatureController`（第三个装槽型能力）；`context` / `tools` 是**注册表**（R3 可组合，无需租约）。
 
-### 4.2 六个原料接口
+### 5.2 六个原料接口
 
-| 接口 | 形态 | 用途 |
+| 接口 | 位置（新） | 作用 |
 |---|---|---|
-| `run_turn(runtime, TurnRequest, *, ctx, on_sentence)` | 函数（`loop/turn.py` 新） | 无事件的完整一轮（B-1） |
-| `BaseModule.llm_turn(...)` | 模块方法 | 同上，模块侧入口 |
-| `BaseModule.send_to(session_id, message)` | 模块方法 | 按会话发消息（消 5 处重复） |
-| `BaseModule.spawn(coro)` | 模块方法 | 带 owner 的后台任务 |
-| `delivery.send_item(...)` | 函数（`delivery/channel.py` 新） | 唯一发送出口 + 内建 `[reply]`/`[@qq]` 解析 + `pre_send/post_send` |
-| `framework_tools(runtime, ...)` | 函数（`tools/catalog.py` 新） | 让模块拿到框架工具集 |
+| `run_turn(runtime, TurnRequest, *, ctx, on_sentence)` | `loop/turn.py` | 无事件的完整一轮（取值→组装→请求→可选写历史） |
+| `BaseModule.llm_turn(...)` | `plugin/base.py` | 模块侧入口 |
+| `BaseModule.send_to(session_id, message)` | `plugin/base.py` | 按会话发消息（消 5 处重复） |
+| `BaseModule.spawn(coro)` | `plugin/base.py` | 带 owner 的后台任务（热重载级联取消） |
+| `delivery.send_item(...)` | `delivery/channel.py` | 唯一发送出口 + 内建 `[reply]`/`[@qq]` + `pre_send`/`post_send` |
+| `framework_tools(runtime, ...)` | `tools/catalog.py` | 让模块拿到框架工具集 |
 
-### 4.3 机制去配置化（逐处清单）
-
-迁移的**实质**是把这些读配置的行改成入参：
+### 5.3 机制去配置化（逐处）
 
 | 文件:行 | 现在 | 改成 |
 |---|---|---|
-| `loop/pipeline.py:310` | `config.get("stream_output")` | `runtime.output` 槽（模块决定） |
-| `loop/pipeline.py:270-278` | `message_debounce_*` | 模块决定的 `pool.wait_for_continue(...)` |
-| `loop/pipeline.py:483` | `interrupt_enable` | `getattr(runtime, "interrupt_enabled", False)`（模块设置） |
+| `loop/pipeline.py:310` | `config.get("stream_output")` | `runtime.output` 槽 |
+| `loop/pipeline.py:270-278` | `message_debounce_*` | 模块决定的 `pool.wait_for_continue(...)`（键留在本体，读取方换模块/框架策略对象） |
+| `loop/pipeline.py:483` | `interrupt_enable` | `getattr(runtime,"interrupt_enabled",False)`（由策略模块/框架设置） |
 | `loop/pipeline.py:324` | `build_outbound_builder(event, config)` | `send_item(..., directives=True)` 无条件 |
 | `loop/pipeline.py:375/409` | `stream_send_pool_enabled` | `runtime.output` 槽内部 |
-| `loop/chat.py:257-261` | `stream_sentence_max_length` | `run_turn(sentence_max_length=...)` |
-| `loop/prompt_prep.py:198` | `schedule_enable` | 工具源注册表 |
 | `loop/prompt_prep.py:204` | `_build_speech(config)` | `runtime.output` 槽 |
-| `loop/prompt_prep.py:255-274` | `image_understanding_enable` | 媒体模块的 context provider |
+| `loop/prompt_prep.py:198` | `schedule_enable` | 工具源注册表 |
 | `loop/tool_source.py:73-146` | 5 段 if | 工具源注册表 |
-| `loop/context_blocks.py:199-246` | `runtime.memory` 直调 | context provider |
-| `assembly/assembler.py:529-568` | `speech_via_tool(config)` | 删（`output_style` 由槽表达） |
-| `assembly/assembler.py:768-779` | `apply_request_policy` | 压缩模块的 `post_assemble` |
+| `loop/context_blocks.py:130/199` | 指代/记忆硬调 | `context_providers` |
+| `assembly/assembler.py:529-568` | `speech_via_tool(config)` | 删（由 `output` 槽表达） |
 | `assembly/enhance.py:308-315` | 框架注册 3 个钩子 | 删（`llm_message_meta` 模块） |
-| `proactivity/*` 全部 | — | 迁移为模块 |
+| `proactivity/*` | 全部 | 迁移为模块 |
+
+> **媒体与联网搜索不在本表**：它们留在框架（本体「高级功能」页），按配置工作 —— 这是 v3 与 v2 的重要差别。
 
 ---
 
-## 5. 数据迁移（破坏性，但不清空用户配置）
+## 6. 数据迁移脚本
 
-**新文件**：`scripts/migrate_v2_split_config.py`
+**新文件**：`scripts/migrate_v3_split_config.py`
 
 ```python
-"""把 agent 配置行按 §2 的分区表拆到各模块配置行。
+"""v3 迁移：agent 配置 160 键 → 43 留本体 / 108 拆到 9 个模块 / 9 丢弃；并把 owner_id 并入名册。
 
-- 幂等：跑多次结果一致（模块行已存在则合并，不覆盖已有值）
-- dry-run：`--dry-run` 只打印将要写入的内容
 - 备份：先把 data/app.db 复制到 data/backups/app.<ts>.db
-- 未知键：写到 logs/migrate_v2_dropped_keys.json 供人工确认，不静默丢
+- dry-run：--dry-run 只打印将写入的内容
+- 幂等：模块行已存在则合并，不覆盖已有非默认值
+- 未知键：写到 logs/migrate_v3_dropped_keys.json（不静默丢）
+- 校验：跑完断言 len(agent_cfg) == 43
 """
-CORE, DELETE, MODULES = ...   # 从 app/agent/config_schema.py 的分区常量 import
+from app.agent.config_partition import (
+    CORE_KEYS, DELETED_KEYS, MODULE_KEYS, OWNER_SOURCE_KEY,
+)
 ```
 
-配套：把分区表提升为**代码常量** `app/agent/config_partition.py`（`CORE_KEYS` / `DELETED_KEYS` / `MODULE_KEYS`），
-migration 脚本、schema 生成、`test_extensibility_contract` 三处共用同一份真相。
-
-**测试**：`tests/infrastructure/test_migrate_v2_config.py`
-① 造一份旧格式配置（160 键全填非默认值）→ 跑迁移 → 断言 20 键留在 agent 行、129 键按表落到 13 个模块行、11 键被记录进 dropped 清单；
-② 再跑一次 → 断言无变化（幂等）；
-③ 模块行已有自定义值时 → 断言不被旧值覆盖。
+**测试**：`tests/infrastructure/test_migrate_v3_config.py`
+① 造 160 键全非默认的旧配置 + `bots.owner_id` → 迁移 → 断言 43 留本体、9 模块行按表落值、9 键进 dropped 清单、owner 进名册；
+② 再跑一次 → 无变化（幂等）；
+③ 模块行已有自定义值 → 不被旧值覆盖；
+④ `--dry-run` 不写库。
 
 ---
 
-## 6. 前端重做
+## 7. 前端重做
 
-| 现状 | v2 |
+| 项 | 做法 |
 |---|---|
-| `sections.json` 有 9 个 section（4 个 agent + 5 个 advanced），承载 160 字段的显式归属 | 只剩 **2 个 section**：`/agent/basic`（20 键）+ `/agent/permission`（3 键，含在 basic? 保留独立） |
-| `advanced/*` 三个页 | **整个删除** |
-| 模块配置 | 既有 `/modules/<name>/config` 通用表单（由模块 `config_schema` 自动渲染）—— 13 个新模块天然接入 |
-| `test_agent_section_contract.py`（20 例） | 重写为：只剩 2 个 section、字段覆盖必须等于 `CORE_KEYS`、不得出现已迁移/已删键 |
-| 模块页导航 | 新增「LLM 扩展」分类（13 个模块 `category="LLM"` 自动聚合） |
+| `sections.json` | **不再手写**：由 `config_partition.page_summary()` 生成（5 页 / 13 分组 / 43 字段），`scripts/gen_sections.py` 产出，CI 校验 `git diff --exit-code` |
+| 页面 | `basic` `permission` `behavior` `session` `advanced` 五页，顺序由 `order` 决定 |
+| 「LLM 扩展」分类 | 9 个模块 `category="LLM"` 自动聚合，每张卡片 = 模块自身 `config_schema` 表单 |
+| 账号表单 | 删除「拥有者 QQ」输入 |
+| `test_agent_section_contract.py` | 重写：断言 `sections.json` 与 `page_summary()` 完全一致；字段覆盖 == `CORE_KEYS`；不得出现模块键/删除键 |
 
 ---
 
-## 7. 施工波次
+## 8. 施工波次
 
-> 每波独立可合并；**W0-W2 不改变任何用户可见行为**，W3 起才是破坏性。
-
-| 波 | 目标 | 产出 | 验收 | 可回滚 |
+| 波 | 目标 | 关键产出 | 闸门 | 可回滚 |
 |---|---|---|---|---|
-| **W0** | 接线与机制去配置化准备 | 出站链按注册表、`ServiceAccess` 补 4 字段、`BUILTIN_CONTROLLERS` 表、`config_partition.py` | `test_extensibility_contract` 绿；`full` ≥10 | 纯新增 |
-| **W1** | 六个原料接口 | `run_turn` / `llm_turn` / `send_to` / `spawn` / `send_item` / `framework_tools` | `test_run_turn_parity` 绿（与 `generate_response` messages 逐字相同） | 纯新增 |
-| **W2** | 三个新槽 | `output` / `context_providers` / `tool_sources` + 机制去配置化（§4.3 全表） | 框架侧所有 `config.get("策略")` 消失（可用 grep 断言） | 每个槽独立 revert |
-| **W3** | 迁移"输出侧"模块 | `llm_output`（合并 stream+speech，`mode=text\|stream\|speech`）+ `llm_assembly` | 开关模块 → 三种输出形态；卸载 → 回非流式 | 保留旧分支一版 |
-| **W4** | 迁移"上下文侧"模块 | `llm_context` / `llm_message_meta` / `llm_compress` / `llm_media` / `llm_memory` / `llm_knowledge` | `describe(req)` 块行随模块增减；卸载即消失 | 一模块一提交 |
-| **W5** | 迁移"工具侧" + "策略侧"模块 | `llm_tools_extra` / `llm_reply_policy` | 工具清单随模块增减；防抖/打断由模块掌控 | 一模块一提交 |
-| **W6** | 迁移"业务侧"模块 | `llm_proactive` / `llm_schedule` | 删除 `runtime.proactive`/`runtime.scheduler` 后功能不变 | 保留旧类一版 |
-| **W7** | **删配置 + 数据迁移 + 前端重做** | `config_schema.py` 160→20；`sections.json` 9→2；migration 脚本 | 迁移幂等测试绿；前端只剩 2 页 | DB 备份 |
-| **W8** | 收尾 | 文档（MODULE_DEV 重写）、`capabilities()` 20 feature、contract 棘轮上调 | `full` ≥40；`pytest -q` 全绿 | — |
-
-**W3 的合并决策**：`llm_output_stream` 与 `llm_speech` 抢同一个 `output` 槽会让行为依赖加载顺序，
-所以 **W3 合并为一个 `llm_output` 模块**，用 `mode` 配置三选一（`text` / `stream` / `speech`）。
-若将来需要"多个输出策略并存"，再拆开并依赖租约的"先到先得 + 交棒"语义（已有实现）。
+| **W0** | 接线与契约就位 | 出站链按注册表；`ServiceAccess` 补 `node_registry`/`sessions`/`tools`/`runtime`；`BUILTIN_CONTROLLERS` 表；`config_partition.py`(已完成) | 两个契约测试绿 | 纯新增 |
+| **W1** | 六个原料接口 | `run_turn` / `llm_turn` / `send_to` / `spawn` / `send_item` / `framework_tools` | `test_run_turn_parity` 绿 | 纯新增 |
+| **W2** | 三个新槽 + 机制去配置化 | `output` / `context_providers` / `tool_sources`；§5.3 全表 | grep `config.get("stream_output"\|speech_via_tool\|context_expand_enable")` 为空 | 每槽独立 revert |
+| **W3** | 输出侧模块 | `llm_output`（三 mode）+ `llm_assembly` | 三形态可切换；`pre_send/post_send` 三种都触发 | 保留旧分支一版 |
+| **W4** | 上下文侧模块 | `llm_context` / `llm_message_meta` / `llm_memory` / `llm_knowledge` | `describe(req)` 块行随模块增减 | 一模块一提交 |
+| **W5** | 工具侧模块 | `llm_tools_extra` | 工具清单随模块装卸 | 一模块一提交 |
+| **W6** | 业务侧模块 | `llm_proactive` / `llm_schedule` | 删 `runtime.proactive/scheduler` 后 proactivity 测试全绿 | 保留旧类一版 |
+| **W7** | **删配置 + owner 迁移 + 前端重做** | `config_schema.py` 160→43；`bots.owner_id` 废弃；`sections.json` 生成；migration 脚本 | 迁移幂等 + 键数 == 43 + section == 5 | DB 备份 |
+| **W8** | 收尾 | `MODULE_DEV.md` 重写；`capabilities()` 20 feature；接缝棘轮上调 | `full` ≥40/55；`pytest -q` 全绿 | — |
 
 ---
 
-## 8. 测试与闸门
+## 9. 测试与闸门
 
 | 闸门 | 条件 |
 |---|---|
-| G-W0 | `test_extensibility_contract` 绿；`ServiceAccess` 新字段已进 capabilities |
-| G-W1 | 新增 6 个接口各有用例；`test_run_turn_parity` 绿；既有 1758 例全绿 |
-| G-W2 | `grep -rn 'config.get("stream_output"\|speech_via_tool\|context_expand_enable\|interrupt_enable\|message_debounce' app/agent/loop app/agent/assembly` 为空 |
-| G-W3 | 输出三形态可切换；`pre_send/post_send` 在三种形态下都触发 |
-| G-W4 | 每个模块：装→块出现、卸→块消失（`describe(req)` 断言） |
-| G-W5 | 工具清单与防抖/打断行为由模块决定 |
-| G-W6 | 删 `runtime.proactive`/`runtime.scheduler` 后 `tests/agent/proactivity/*` 全绿 |
-| G-W7 | `config_schema` 键数 == 20；migration 幂等；`sections.json` section 数 == 2 |
-| G-W8 | `tests/architecture/test_extensibility_contract.py` 的 `BASELINE_FULL` 上调到 40+ 且绿；`pytest -q` 全绿；`ruff check .` 无**新增** |
+| G-W0 | `test_config_partition`(15) + `test_extensibility_contract`(13) 绿 |
+| G-W1 | 6 接口各有用例；`test_run_turn_parity` 绿；既有 1767 例全绿 |
+| G-W2 | §5.3 的 `grep` 为空 |
+| G-W3 | 输出三形态切换 + 钩子对齐 |
+| G-W4 | 每模块"装→块出现 / 卸→块消失"（`describe(req)` 断言） |
+| G-W5 | 工具清单随装卸增减 |
+| G-W6 | 删除 `runtime.proactive`/`scheduler` 后 `tests/agent/proactivity/*` 全绿 |
+| G-W7 | `len(SCHEMA_KEYS)==43`；`sections.json` 与 `page_summary()` 一致；迁移幂等；owner 迁移 4 例绿 |
+| G-W8 | `BASELINE_FULL` 上调至 40+；`pytest -q` 全绿；`ruff check .` 无新增 |
 
 ---
 
-## 9. 风险登记
+## 10. 风险登记
 
 | 风险 | 影响 | 缓解 |
 |---|---|---|
-| 用户升级后配置"消失" | 高 | migration 脚本 + DB 备份 + `dropped_keys.json` + 升级日志说明 |
-| 13 个模块的加载顺序敏感（模块越少越稳） | 中 | W3 合并输出模块；其余用注册表（R3 可组合，与顺序无关） |
-| 删除 `runtime.proactive/scheduler` 后旧插件崩 | 中 | 保留一版 shim（`AgentRuntime.proactive` 返回模块代理对象，`__getattr__` 转发 + 弃用告警） |
-| `prompt_prep` 拆成 provider 拉取后性能回退 | 低 | provider 之间并行 `gather`，并加"本轮块耗时"到 telemetry |
-| `sections.json` 重写破坏前端 | 中 | `test_agent_section_contract.py` 改写并保留"每个字段恰好归属一次"的核心断言 |
-| 迁移 129 键时改错归属 | 高 | 分区表做成代码常量 + 迁移测试造全量旧配置做断言 |
+| 用户升级后配置"消失" | **高** | 迁移脚本 + DB 备份 + `dropped_keys.json` + 发版说明逐键列出新位置 |
+| 破坏性改造后"开箱是个哑巴" | **高** | 9 个模块**随仓库发布、首次启动自动装配并默认 enabled**（"开箱功能全由模块提供"≠"默认不装"）；用户体感与今天一致，只是入口从「Agent 配置」移到「LLM 扩展」 |
+| `owner_id` 取消导致第三方插件读 `conn.owner_id` 崩 | 中 | `BotConnection.owner_id` 保留为 `@property` 返回 None + 弃用告警一版 |
+| 删除 `runtime.proactive/scheduler/memory/knowledge` 崩旧插件 | 中 | 保留一版 shim：`__getattr__` 转发到接管模块 + 弃用日志 |
+| 9 个模块加载顺序敏感 | 低 | 除 `output` 外全是注册表（与顺序无关）；`llm_output` 三 mode 合一，避免争槽 |
+| `prompt_prep` 改 provider 拉取后变慢 | 低 | providers 并行 `gather` + 每块耗时进 telemetry |
+| 迁移 108 键时归属写错 | **高** | 归属表是代码常量 + 迁移测试造全量旧配置断言（§6） |
+
+---
+
+## 11. 完成判据（做完这一轮能看到什么）
+
+| # | 判据 | 验证方式 |
+|---|---|---|
+| 1 | 本体界面正好 5 页、43 键、顺序为 基础→权限→对话行为→会话→高级 | `pytest tests/architecture/test_config_partition.py` |
+| 2 | 9 个模块各自带自己的配置，装/卸即显/隐 | 装 `llm_memory` → 记忆块出现；卸载 → 消失 |
+| 3 | 框架里不再有"替模块做策略决定"的读配置 | §5.3 的 grep 为空 |
+| 4 | 拥有者身份只有一个来源（权限页名册），账号页不再有 owner QQ | 迁移 4 例 + 前端账号表单无该字段 |
+| 5 | 写一个"主动回复"模块只需 `spawn` + `llm_turn` + `send_to`（~40 行） | 示例模块即 `llm_proactive` 本身（817 行的旧实现被它自己替代） |
+| 6 | 一条回复无论走 普通/主动/定时，发出的 `messages`、触发的钩子、落库文本都一致 | `test_initiative_output_parity` 绿 |
+| 7 | 接缝记分板 `full` 从 10/55 升到 ≥40/55 | `test_extensibility_contract` 棘轮 |
