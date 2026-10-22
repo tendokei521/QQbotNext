@@ -96,7 +96,54 @@ CREATE TABLE IF NOT EXISTS role_presets (
     created_at    INTEGER NOT NULL,
     updated_at    INTEGER NOT NULL
 );
+
+-- ==================== 数据统计（单表，kind 区分三类同级统计）====================
+-- 设计见 docs/DATA_STATS_DESIGN.md
+CREATE TABLE IF NOT EXISTS stat_event (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    ts              INTEGER NOT NULL,          -- UTC 秒
+    day_local       TEXT    NOT NULL,          -- 'YYYY-MM-DD'（本地日，进索引）
+    kind            TEXT    NOT NULL,          -- llm | msg_in | msg_out
+
+    bot_id          TEXT NOT NULL DEFAULT '',
+    source          TEXT NOT NULL DEFAULT '',  -- 模块名；绕过总线的为 'unknown'
+    api             TEXT NOT NULL DEFAULT '',  -- provider 名
+    model           TEXT NOT NULL DEFAULT '',  -- 实际服务模型
+    session_id      TEXT NOT NULL DEFAULT '',
+    session_label   TEXT NOT NULL DEFAULT '',  -- '名字前5字…group123456'
+    group_id        TEXT NOT NULL DEFAULT '',
+    user_id         TEXT NOT NULL DEFAULT '',
+    event_type      TEXT NOT NULL DEFAULT '',
+    direction       TEXT NOT NULL DEFAULT '',  -- in | out
+    outcome         TEXT NOT NULL DEFAULT '',  -- msg_in: ignored|command|module|llm
+
+    requests        INTEGER NOT NULL DEFAULT 0,
+    input_tokens    INTEGER NOT NULL DEFAULT 0,
+    output_tokens   INTEGER NOT NULL DEFAULT 0,
+    cache_hit       INTEGER,                   -- NULL = 上游未报（≠ 0）
+    cache_miss      INTEGER,                   -- NULL = 上游未报（≠ 0）
+    tokens_total    INTEGER NOT NULL DEFAULT 0,
+    reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+    messages        INTEGER NOT NULL DEFAULT 0,
+    segments        INTEGER NOT NULL DEFAULT 0,
+    bytes           INTEGER NOT NULL DEFAULT 0,
+
+    ok              INTEGER NOT NULL DEFAULT 1,
+    estimated       INTEGER NOT NULL DEFAULT 0,
+    err_kind        TEXT    NOT NULL DEFAULT '',
+    latency_ms      INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_stat_day_kind       ON stat_event(day_local, kind);
+CREATE INDEX IF NOT EXISTS idx_stat_day_kind_model ON stat_event(day_local, kind, model);
+CREATE INDEX IF NOT EXISTS idx_stat_day_kind_src   ON stat_event(day_local, kind, source);
+CREATE INDEX IF NOT EXISTS idx_stat_day_kind_api   ON stat_event(day_local, kind, api);
+CREATE INDEX IF NOT EXISTS idx_stat_day_session    ON stat_event(day_local, session_id);
+CREATE INDEX IF NOT EXISTS idx_stat_ts             ON stat_event(ts);
 """
+
+
 
 
 class Database:

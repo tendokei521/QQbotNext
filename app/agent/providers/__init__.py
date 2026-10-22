@@ -137,7 +137,12 @@ def provider_supports(config: dict, capability: str) -> bool:
 
 
 def get_provider(config: dict) -> BaseProvider:
-    """按 config.provider_type + config.provider 返回对应能力 Provider。"""
+    """按 config.provider_type + config.provider 返回对应能力 Provider。
+
+    **对话 provider 会被套一层计量代理**（`app/agent/usage/metered.py`）：
+    这里是所有 provider 实例的工厂，模块的四条 LLM 调用路径最终都经过它，
+    因此统计只需在这里收口一次（详见 docs/DATA_STATS_DESIGN.md §1.1）。
+    """
     provider_type = str((config or {}).get("provider_type", "chat")).lower()
     if provider_type == "embedding":
         return OpenAIEmbeddingProvider(config)
@@ -149,7 +154,13 @@ def get_provider(config: dict) -> BaseProvider:
         return OpenAIWhisperSTTProvider(config)
     provider_name = (config or {}).get("provider", "openai")
     cls = get_provider_class(provider_name)
-    return cls(config)
+    instance = cls(config)
+    try:
+        from app.agent.usage.metered import wrap_metered
+
+        return wrap_metered(instance)
+    except Exception:  # noqa: BLE001 —— 计量是旁路，绝不能因为它装不上而拿不到 provider
+        return instance
 
 
 def _accepts_kwarg(fn, name: str) -> bool:
