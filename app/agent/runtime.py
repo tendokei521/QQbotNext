@@ -22,8 +22,6 @@ from app.agent.knowledge import KnowledgeManager
 from app.agent.loop.pipeline import LlmPipeline
 from app.agent.memory import MemoryManager
 from app.agent.persona.skills import SkillRegistry
-from app.agent.proactivity.manager import ProactiveManager
-from app.agent.proactivity.scheduler import TaskScheduler
 from app.agent.providers.invoker import ProviderInvoker
 from app.agent.providers.policy import TRACKED_KEYS, merge_config_layers
 from app.agent.session.manager import SessionManager
@@ -102,11 +100,24 @@ class AgentRuntime:
         self.ctx = _Ctx(bot, task_manager)
 
         self.session_mgr = SessionManager(str(bot_id))
-        self.scheduler = TaskScheduler(self)
-        self.proactive = ProactiveManager(self)
+        # 主动消息与定时任务是**业务**：由 `llm_proactive` / `llm_schedule` 模块在
+        # `on_load` 时把各自的实现装进来（框架只提供 `send_to`/`llm_turn`/`spawn` 等原料）。
+        # 未装模块时这里保持 None，流水线侧的调用点全部做了 getattr 保护。
+        self.scheduler: Any = None
+        self.proactive: Any = None
+        # 记忆/知识库/工具策略的机制仍在框架，但配置由模块提供（policy_config）
         self.memory = MemoryManager(self)
         self.knowledge = KnowledgeManager(self)
         self.mcp_manager = MCPManager(self)
+        # 策略配置视图（模块接管时挂载；None = 回退 agent 配置）
+        self.assembly_options: Any = None
+        self.meta_options: Any = None
+        self.context_options: Any = None
+        self.memory_options: Any = None
+        self.knowledge_options: Any = None
+        self.tools_options: Any = None
+        self.proactive_options: Any = None
+        self.schedule_options: Any = None
         try:
             self._loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -343,8 +354,9 @@ class AgentRuntime:
         只有真正退出（AgentManager.shutdown）才连会话一起关。
         """
         components = [
-            ("scheduler", self.scheduler.stop),
-            ("proactive", self.proactive.stop),
+            # 主动消息/定时任务由模块提供，未装模块时为 None
+            ("scheduler", getattr(self.scheduler, "stop", None)),
+            ("proactive", getattr(self.proactive, "stop", None)),
             ("llm_pipeline", self.llm_pipeline.shutdown),
             ("memory", self.memory.stop),
             ("knowledge", self.knowledge.stop),
@@ -353,6 +365,8 @@ class AgentRuntime:
         if close_session:
             components.append(("session_mgr", self.session_mgr.close))
         for name, stop in components:
+            if not callable(stop):
+                continue
             try:
                 stop()
             except Exception as e:

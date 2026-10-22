@@ -54,4 +54,33 @@ def policy_get(runtime: Any, kind: str, key: str, default: Any = None) -> Any:
         return default
 
 
-__all__ = ["policy_config", "policy_get"]
+class RuntimeFacade:
+    """把运行时包装成"带着模块配置的 module 对象"。
+
+    框架里 `ProactiveManager` / `TaskScheduler` 这类实现构造时接收一个"module"，
+    从中读 `config` / `bot_id` / `ctx.services.task_manager` / `provider_chain()`。
+    本门面把 ``config`` 换成模块配置视图，其余属性透传给真实运行时 ——
+    于是业务键彻底离开 agent 配置，而计时/状态机等机制一行不改。
+    """
+
+    def __init__(self, runtime: Any, config: Any) -> None:
+        self._runtime = runtime
+        self.config = config
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._runtime, name)
+
+    @property
+    def runtime(self) -> Any:
+        return self._runtime
+
+
+def facade_for(runtime: Any, kind: str, module_config: Any, owned_keys: Any) -> RuntimeFacade:
+    """构造"带模块配置视图"的运行时门面。"""
+    from app.agent.delivery.output import ConfigView
+
+    view = ConfigView(getattr(runtime, "config", None), module_config, owned_keys)
+    return RuntimeFacade(runtime, view)
+
+
+__all__ = ["policy_config", "policy_get", "RuntimeFacade", "facade_for"]

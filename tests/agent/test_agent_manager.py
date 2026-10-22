@@ -52,9 +52,14 @@ def test_agent_runtime_config_and_components():
         assert rt.config.get("api_key", "") == ""
         assert rt.config.get("system_prompt", "") == "你是一个友好的助手。"
         # 组件已装配
-        assert rt.scheduler is not None
-        assert rt.proactive is not None
+        # 主动消息 / 定时任务是业务：由 `llm_proactive` / `llm_schedule` 模块在 on_load
+        # 时装进运行时；未装模块时为 None（流水线侧的调用点都有 getattr 保护）。
+        assert rt.scheduler is None
+        assert rt.proactive is None
         assert rt.session_mgr is not None
+        # 策略配置视图默认未接管（= 回退 agent 配置）
+        assert rt.assembly_options is None
+        assert rt.tools_options is None
         # 配置写入与读取
         rt.config.set("api_key", "sk-test")
         assert rt.config.get("api_key") == "sk-test"
