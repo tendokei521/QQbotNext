@@ -124,7 +124,9 @@ def record(
     绝不向上抛 —— 这条通道是排查辅助，不能反过来影响对话。
     """
     try:
-        config = getattr(runtime, "config", None)
+        # `prompt_dump_*` 归 `llm_assembly` 模块所有：接管时视图挂在
+        # `runtime.assembly_options`，未接管时回退 agent 配置（行为不变）。
+        config = getattr(runtime, "assembly_options", None) or getattr(runtime, "config", None)
         if not enabled(config):
             return False
         bot = bot_id if bot_id is not None else getattr(runtime, "bot_id", None)

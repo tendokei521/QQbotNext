@@ -221,7 +221,11 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
     )
     # 发言通道（P2）：文本只当思考，真正的发言走 send_message / finish。
     # 只在「拟人化档位 + speech_via_tool + 流式」三者齐备时挂上；否则保持旧的文本即发言。
-    speech = _build_speech(config)
+    # `speech_via_tool` 与 `assembly_profile` 归模块所有：
+    # `llm_output` 接管输出槽时把视图挂 `runtime.output`，`llm_assembly` 挂
+    # `runtime.assembly_options`；未接管时回退 agent 配置，行为不变。
+    policy_cfg = getattr(runtime, "assembly_options", None) or config
+    speech = _build_speech(policy_cfg)
     if speech is not None:
         from app.agent.delivery.speech import build_speech_tools, persona_output_conflicts
 
@@ -237,7 +241,7 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
                 "[LLM] 人格卡里有「输出格式」条款，会与发言通道（文本=思考）冲突，"
                 f"建议移到行为层或删掉：{conflicts}"
             )
-    elif _speech_intent(config):
+    elif _speech_intent(policy_cfg):
         # 只在第一次告警：配置矛盾是持久状态，每条消息刷一遍日志没有信息量
         warn_key = (getattr(runtime, "bot_id", 0), "speech_intent")
         if warn_key not in _WARNED_SPEECH_INTENT:
