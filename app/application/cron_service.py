@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import time as _time
 from datetime import datetime, timedelta
 from typing import Any, Awaitable, Callable
@@ -220,6 +221,55 @@ class SchedulerService:
 
     async def unload_module(self, module_name: str, bot_id: Any) -> None:
         await self.unload(module_name, bot_id)
+
+    # ── 查询 / 改期 / 立即执行（对齐 AstrBot 的 cron_manager）──────────
+
+    def list_jobs(self, prefix: str | None = None) -> list[dict]:
+        """列出定时任务（可按 ``<module>:<bot_id>`` 前缀过滤）。
+
+        给 WebUI 与模块自检用：此前只有 ``count()``，谁都不知道"到底有哪些任务在跑"。
+        """
+        rows: list[dict] = []
+        for key, task in sorted(self._tasks.items()):
+            if prefix and not key.startswith(prefix):
+                continue
+            rows.append(
+                {
+                    "key": key,
+                    "time": getattr(task, "time_str", ""),
+                    "handler": getattr(getattr(task, "handler", None), "__qualname__", ""),
+                    "next_run": getattr(task, "next_run", None),
+                }
+            )
+        return rows
+
+    async def update_job(self, key: str, time_str: str) -> bool:
+        """改期：用新时间重建同名任务（保留原 handler）。返回是否更新成功。"""
+        old = self._tasks.get(key)
+        if old is None:
+            return False
+        handler = getattr(old, "handler", None)
+        if handler is None:
+            return False
+        await self.register(key, time_str, handler)
+        return True
+
+    async def run_job_now(self, key: str) -> bool:
+        """立即执行一次（不改变既有排期）。返回是否找到并执行。"""
+        task = self._tasks.get(key)
+        if task is None:
+            return False
+        handler = getattr(task, "handler", None)
+        if handler is None:
+            return False
+        try:
+            result = handler()
+            if inspect.isawaitable(result):
+                await result
+        except Exception as e:  # noqa: BLE001 —— 手动触发失败只留痕，不影响排期
+            self.log.error(f"[Scheduler] 立即执行 {key} 失败: {e}")
+            return False
+        return True
 
     def count(self) -> int:
         return len(self._tasks)
