@@ -543,6 +543,57 @@ POST /api/stats/purge  {"bot_id":"...", "before":"..."}
 
 ---
 
+## 9. 施工状态：**S1–S9 全部完成**
+
+| 步 | 内容 | 落地位置 | 提交 |
+|---|---|---|---|
+| S1 | `stat_event` 单表（29 列，5 个索引） | `infrastructure/persistence/database.py` | `236cd80` |
+| S1 | `StatRecorder`（攒批 20 条 / 2 秒、退出强制 flush、分批 purge） | `agent/usage/recorder.py` | `236cd80` |
+| S2 | `usage_scope` contextvar + `MeteredProvider` 挂 `get_provider()` | `agent/usage/{context,metered}.py`、`providers/__init__.py` | `236cd80` |
+| S2 | bootstrap 装配 + `run_turn` / `llm_chat` / `llm_stream` 归属 | `bootstrap.py`、`loop/turn.py`、`plugin/base.py` | `ea20df7` |
+| S3 | `msg_in` 记账（`outcome` 四分类，判定在路由之后一次成型） | `plugin/nodes/inbound.py` | `775d2a1` |
+| S4 | `msg_out` 记账（`send_item` 唯一出口，失败也记） | `agent/delivery/channel.py` | `775d2a1` |
+| S5 | `GET /api/stats/query`（9 facet + 桶 + 补零 + top-N + summary） | `agent/usage/query.py`、`webui/api/stats.py` | `6b6b696` |
+| S6 | `GET /api/stats/facets`（只列出现过的值，自身筛选不约束自身） | 同上 | `6b6b696` |
+| S7 | `POST /api/stats/purge`（分批删，无参数拒绝防误清） | 同上 | `6b6b696` |
+| S8 | 前端「数据统计」页（筛选行 + 概览卡 + 堆叠柱 + 明细表，K/M 单位） | `dashboard/src/views/StatsPage.vue` + 路由 + 侧边栏 | `45c3b21` |
+| S9 | 模块直连 provider 的 4 处补归属（`llm_proactive` ×2、`llm_schedule`、`llm_knowledge`） | 各模块 | `957bb9d` |
+
+测试：`tests/agent/usage/*`（37 例）+ `tests/webui/test_stats_api.py`（17 例），全仓 **2102 passed**。
+
+### 9.1 端到端验收（真实跑通）
+
+```
+LLM 用量（按模块）
+  总 token     1983
+  输入/输出    1959 / 24
+  缓存命中     1536（未命中 423，命中率 78.4%）   ← 与实测 DeepSeek 返回值一致
+  思考 token   24
+  请求次数     3   未知缓存 0
+  2026-10-22  chat             tokens=   661
+  2026-10-22  llm_proactive    tokens=   661
+  2026-10-22  llm_schedule     tokens=   661
+
+入站消息（按结局）
+  收到 4 条，需响应 3 条
+  指令 1 / 模块 1 / LLM 1
+
+出站消息
+  发出 1 条，48 字节
+
+facets（只列出现过的值）
+  source       ['llm_schedule', 'llm_proactive', 'chat']
+  api          ['deepseek']
+  model        ['deepseek-v4-flash']
+  session_id   ['private_1901691195', 'group_466052056', 'group_1080000001']
+```
+
+### 9.2 使用入口
+
+- 页面：WebUI 侧边栏「**数据统计**」（`/#/stats`）
+- 接口：`/api/stats/query` · `/api/stats/facets` · `/api/stats/purge`
+- 清理：`POST /api/stats/purge?before_ts=...` 或 `?bot_id=...`（数据永久保留，手动清）
+
 ## 9. 已确认的决策
 
 | 项 | 决策 |
