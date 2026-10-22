@@ -80,6 +80,9 @@ async def maybe_compress_context(
     config: dict,
     history: list[dict],
     history_rounds: int,
+    *,
+    bot_id: str = "",
+    session_id: str = "",
 ) -> list[dict]:
     """如果历史超过 history_rounds，把超出的旧段压缩成摘要，保留最近 history_rounds 条原文。
 
@@ -101,14 +104,19 @@ async def maybe_compress_context(
     timeout = int(config.get("timeout", 60))
 
     try:
-        resp = await chat_with_fallback(
-            provider_chain,
-            summary_messages,
-            model=model,
-            temperature=min(temperature, 0.5),
-            max_tokens=max(512, max_tokens),
-            timeout=timeout,
-        )
+        from app.agent.usage.context import usage_scope
+
+        # 压缩摘要是**内部维护调用**：单独记 source=compress，
+        # 否则会被算进"对话用量"，让 chat 的 token 虚高。
+        with usage_scope(bot_id=bot_id, source="compress", session_id=session_id):
+            resp = await chat_with_fallback(
+                provider_chain,
+                summary_messages,
+                model=model,
+                temperature=min(temperature, 0.5),
+                max_tokens=max(512, max_tokens),
+                timeout=timeout,
+            )
         summary = (resp.text or "").strip()
     except Exception as e:  # noqa: BLE001
         logger.add_info("LLM").warning(f"上下文压缩调用失败，跳过压缩: {e}")

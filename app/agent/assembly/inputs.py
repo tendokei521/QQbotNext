@@ -45,7 +45,14 @@ async def collect_history_materials(
     )
     if compress:
         chain = runtime.provider_chain() if callable(getattr(runtime, "provider_chain", None)) else []
-        history = await maybe_compress_context(chain, config, history, rounds)
+        history = await maybe_compress_context(
+            chain,
+            config,
+            history,
+            rounds,
+            bot_id=str(getattr(runtime, "bot_id", "") or ""),
+            session_id=str(session_id or ""),
+        )
 
     memory_text = ""
     # 记忆归 `llm_memory` 模块：它把管理器挂在文档化句柄上（框架已无 memory 字段）

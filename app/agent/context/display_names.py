@@ -262,7 +262,10 @@ async def judge(runtime: Any, bot_id: Any, qq: Any, name: str) -> NameVerdict:
 
     model = str(cfg.get("model", "") or "") if cfg is not None else ""
     try:
-        resp = await chat_with_fallback(
+        from app.agent.usage.context import usage_scope
+
+        with usage_scope(bot_id=getattr(runtime, "bot_id", ""), source="nickname"):
+            resp = await chat_with_fallback(
             chain,
             [{"role": "user", "content": classify_prompt(name)}],
             model=model or None,

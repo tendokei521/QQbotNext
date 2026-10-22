@@ -29,12 +29,47 @@ from app.agent.usage.labels import label_from_session_id
 from app.agent.usage.recorder import get_recorder
 
 
+#: 常见 `api_base` 主机 → 服务商短名（用于面板显示，不必穷举）
+_API_HOST_ALIAS = {
+    "deepseek": "deepseek",
+    "openai": "openai",
+    "opencode": "opencode",
+    "anthropic": "anthropic",
+    "gemini": "gemini",
+    "googleapis": "gemini",
+    "moonshot": "moonshot",
+    "dashscope": "qwen",
+    "bigmodel": "zhipu",
+    "siliconflow": "siliconflow",
+    "openrouter": "openrouter",
+    "localhost": "local",
+    "127.0.0.1": "local",
+}
+
+
+def _api_label(config: dict) -> str:
+    """推断"这是哪家的 API"：优先 api_base 主机名，其次显式标签，最后适配器名。
+
+    为什么不能直接用 `config["provider"]`：那是**适配器名**（openai / gemini），
+    用户接 DeepSeek 时它也叫 openai，面板上看着就错了。
+    """
+    cfg = config or {}
+    explicit = str(cfg.get("api_name") or cfg.get("preset_name") or "").strip()
+    if explicit:
+        return explicit
+    base = str(cfg.get("api_base") or "").lower()
+    if base:
+        for host, alias in _API_HOST_ALIAS.items():
+            if host in base:
+                return alias
+    return str(cfg.get("provider") or cfg.get("provider_type") or "")
+
+
 def _api_model(config: dict, model: Any = None) -> tuple[str, str]:
     """从 provider 配置里取 `(api, model)`。"""
     cfg = config or {}
-    api = str(cfg.get("provider") or cfg.get("provider_type") or "")
     mdl = str(model or cfg.get("model") or "")
-    return api, mdl
+    return _api_label(cfg), mdl
 
 
 def _record(

@@ -208,7 +208,9 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
         ),
     )
     session_history = await maybe_compress_context(
-        provider_chain, config, session_history, history_rounds
+        provider_chain, config, session_history, history_rounds,
+        bot_id=str(getattr(runtime, "bot_id", "") or ""),
+        session_id=str(session_id or ""),
     )
 
     from app.agent.policy import policy_get as _policy_get

@@ -65,7 +65,7 @@ async def test_history_is_fetched_beyond_rounds_so_compression_can_trigger(monke
     """取数上限必须大于 history_rounds，否则压缩判据永远不成立。"""
     seen: dict = {}
 
-    async def _fake_compress(chain, config, history, rounds):
+    async def _fake_compress(chain, config, history, rounds, **kwargs):
         seen["len"] = len(history)
         seen["rounds"] = rounds
         return history
