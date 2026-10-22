@@ -1,13 +1,15 @@
 """v3 迁移：账号级 owner_id → 拥有者名册（`scripts/migrate_v3_owner_to_roster.py`）。
 
-这条迁移直接决定"升级后 owner 档模块还响不响应"，所以测试要覆盖：
-追加、去重、幂等、无 owner 跳过、账号未知跳过、清空账号级字段。
+这条迁移直接决定"升级后 owner 档模块还响不响应"，所以测试覆盖：
+追加、去重、幂等、无 owner 跳过、账号未知跳过、手动模式、清空账号级字段。
 """
 
 from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 _SPEC = importlib.util.spec_from_file_location(
@@ -32,6 +34,16 @@ def test_plan_appends_owner_to_empty_roster():
     assert plan[0]["before"] == []
     assert plan[0]["after"] == ["123"]
     assert plan[0]["changed"] is True
+
+
+def test_plan_accepts_list_of_bots():
+    """真实 `get_bots()` 返回的是 list，不是 dict。"""
+    plan = migration.plan_migration(
+        [{"ws_url": "ws://x", "owner_id": 123}],
+        lambda account_id: {},
+        lambda index, cfg: "10001",
+    )
+    assert plan and plan[0]["account_id"] == "10001"
 
 
 def test_plan_keeps_existing_roster_and_appends():
@@ -83,6 +95,21 @@ def test_plan_normalises_string_roster():
     assert plan[0]["after"] == ["999", "888", "123"]
 
 
+def test_manual_plan_works_without_account_snapshot():
+    """快照缺失时的手动路径（`--bot-id` + `--owner-id`）。"""
+    plan = migration.build_manual_plan("3437542570", "10001", lambda account_id: {})
+    assert plan[0]["account_id"] == "3437542570"
+    assert plan[0]["after"] == ["10001"]
+    assert plan[0]["index"] is None
+
+
+def test_manual_plan_requires_both_ids():
+    with pytest.raises(ValueError):
+        migration.build_manual_plan("", "10001", lambda account_id: {})
+    with pytest.raises(ValueError):
+        migration.build_manual_plan("3437542570", "", lambda account_id: {})
+
+
 def test_apply_plan_writes_roster_and_clears_owner(capsys):
     stored: dict = {}
     cleared: list[int] = []
@@ -107,6 +134,22 @@ def test_apply_plan_writes_roster_and_clears_owner(capsys):
     assert cleared == ["a"]
 
 
+def test_apply_manual_plan_does_not_clear_any_bot():
+    """手动模式没有 index，不该去动 bots 表。"""
+    stored: dict = {}
+    cleared: list[int] = []
+    plan = migration.build_manual_plan("3437542570", "10001", lambda account_id: {})
+    migration.apply_plan(
+        plan,
+        lambda account_id: dict(stored.get(account_id) or {}),
+        lambda account_id, cfg: stored.setdefault(account_id, cfg),
+        cleared.append,
+        dry_run=False,
+    )
+    assert stored["3437542570"]["agent_owner_list"] == ["10001"]
+    assert cleared == []
+
+
 def test_apply_plan_dry_run_writes_nothing(capsys):
     stored: dict = {}
     cleared: list[int] = []
@@ -125,3 +168,17 @@ def test_apply_plan_dry_run_writes_nothing(capsys):
     assert stored == {}
     assert cleared == []
     assert "[dry-run]" in capsys.readouterr().out
+
+
+def test_explain_empty_says_why(capsys):
+    """一条都没迁到时必须说清原因，不能静默"成功"。"""
+    migration._explain_empty([{"ws_url": "ws://x", "owner_id": 123}], {})
+    out = capsys.readouterr().out
+    assert "[skip]" in out
+    assert "--owner-id" in out  # 给出可执行的下一步
+
+    migration._explain_empty([], {})
+    assert "还没有任何账号" in capsys.readouterr().out
+
+    migration._explain_empty([{"ws_url": "ws://x"}], {})
+    assert "已经是 v3 形态" in capsys.readouterr().out

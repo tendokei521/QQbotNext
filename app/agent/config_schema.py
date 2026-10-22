@@ -473,7 +473,7 @@ SCHEMA = {
     },
     "agent_owner_list": {
         "type": "string_list", "label": "拥有者（QQ号）",
-        "description": "每行一个 QQ 号。拥有者享有最高权限，可越过任何档位限制。留空时回退为「Bot 拥有者」（即账号本身的主人）",
+        "description": "每行一个 QQ 号。拥有者享有最高权限，可越过任何档位限制。v3 起这是拥有者身份的唯一来源（原「账号级 owner_id」已迁入此处；留空则谁都不是拥有者，owner 档模块与 #llm 管理指令都不会响应）",
         "default": [], "placeholder": "每行一个 QQ 号", "group": "group_permission",
     },
     "agent_manager_list": {
