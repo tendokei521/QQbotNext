@@ -263,7 +263,7 @@ async def _run_inner(
     )
 
     if req.record_history and text.strip() and session is not None:
-        _write_history(runtime, session_mgr, session, session_id, text, is_private)
+        await _write_history(runtime, session_mgr, session, session_id, text, is_private, ctx)
     _commit_history_enrichment(runtime, session_id, ctx)
     # 一轮结束：广播给订阅者（记忆蒸馏、统计、审计等业务自己接）
     from app.agent.hooks import run_stage
@@ -319,6 +319,19 @@ async def _chat_once(
     ):
         overflow_used += 1
         messages.append({"role": "user", "content": REASONING_OVERFLOW_NUDGE})
+        response = await resolve_invoker(runtime).chat(
+            runtime=runtime, chain=provider_chain, messages=messages, params=params
+        )
+        _merge_usage(usage_sink, getattr(response, "usage", None))
+
+    # expand_image 补图轮：非流式工具循环在 provider 内部，中途拿不到 messages，
+    # 工具轮取回的图片会留在 `tool_ctx.extra["round_images"]` 里没人追加。
+    # 这里补问一轮（上限 1 次，防模型反复取图死循环）。
+    if _append_round_images(messages, tool_ctx, meta.get("modalities")):
+        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").info(
+            f"[ExpandImage] 工具轮取回的图片已追加为补全材料，补问一轮 -> {meta.get('session_id', '')}"
+        )
+        params["input_tokens_estimate"] = _input_tokens_estimate(messages)
         response = await resolve_invoker(runtime).chat(
             runtime=runtime, chain=provider_chain, messages=messages, params=params
         )
@@ -524,16 +537,19 @@ def _record_telemetry(
         )
 
 
-def _write_history(
+async def _write_history(
     runtime: Any,
     session_mgr: Any,
     session: Any,
     session_id: str,
     text: str,
     is_private: bool,
+    ctx: Any = None,
 ) -> None:
     """把本轮回复写进会话历史（清洗口径与主路径一致）。"""
     try:
+        import asyncio
+
         from app.agent.policy import policy_config
 
         session_mgr.add_message(
@@ -541,7 +557,11 @@ def _write_history(
         )
         if not is_private:
             session.mark_replied()
-        session_mgr.history.save_session(session)
+        await asyncio.to_thread(session_mgr.history.save_session, session)
+        # 本轮工具取回的内容登记进「补全登记」，否则历史里的图片/展开引用会丢
+        from app.agent.loop.context_blocks import _commit_history_enrichment
+
+        _commit_history_enrichment(runtime, session_id, ctx)
     except Exception as e:  # noqa: BLE001 —— 写历史失败不该丢掉已生成的回复
         logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").warning(
             f"[Turn] 写历史失败（已忽略）: {e}"
