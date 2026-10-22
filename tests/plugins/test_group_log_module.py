@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from app.agent.group_log.events import KIND_EMOJI, KIND_MESSAGE, KIND_MY_SEND, KIND_POKE, KIND_RECALL
 from app.plugin.base import ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
-from app.plugins.group_log.module import Module, strip_directives
+from app.plugins.group_log.main import Module, strip_directives
 
 GROUP_SCOPE = "group:1001"
 PRIVATE_SCOPE = "private:30003"

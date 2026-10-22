@@ -96,7 +96,7 @@ def test_body_schema_has_no_module_keys():
 def test_module_directory_is_importable(module_name):
     import importlib
 
-    mod = importlib.import_module(f"app.plugins.{module_name}.module")
+    mod = importlib.import_module(f"app.plugins.{module_name}.main")
     assert hasattr(mod, "Module")
     assert getattr(mod.Module, "category", "") == "LLM"
     keys = getattr(mod, "OWNED_KEYS")

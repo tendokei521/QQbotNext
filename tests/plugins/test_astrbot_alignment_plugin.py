@@ -23,7 +23,7 @@ from app.plugins.astrbot_alignment.astrbot_prompts import (
     TOOL_CALL_PROMPT_SKILLS_LIKE_MODE,
 )
 from app.plugins.astrbot_alignment.config_schema import SCHEMA
-from app.plugins.astrbot_alignment.module import DEFAULT_CONFIG, Module
+from app.plugins.astrbot_alignment.main import DEFAULT_CONFIG, Module
 
 # ==================== 夹具 ====================
 

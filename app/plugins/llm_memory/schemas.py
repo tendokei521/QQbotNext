@@ -1,7 +1,7 @@
 """记忆与知识库模块的配置 Schema 常量。
 
 这两个模块覆盖的键分别来自 agent 的「长期记忆」组（17）与「知识库」组（3）。
-放在 service 层是为了让 module.py 保持"只写声明"。
+放在 service 层是为了让 main.py 保持"只写声明"。
 """
 
 MEMORY_SCHEMA = {

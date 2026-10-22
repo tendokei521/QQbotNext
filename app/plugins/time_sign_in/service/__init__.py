@@ -1,6 +1,6 @@
 """群打卡业务入口（service 包拆分：handler/signin/permission/notify/migrate）。
 
-唯一入口链不变：module.py → service.handle(module, event)。
+唯一入口链不变：main.py → service.handle(module, event)。
 """
 
 from .handler import handle

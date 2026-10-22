@@ -220,7 +220,7 @@ Agent（`app/agent/config.py` + `config_schema.py`）：`group_log_enable`（默
 ## 9. 验证
 
 ```bash
-venv\Scripts\python.exe -m pytest tests/test_group_log_store.py tests/test_group_log_module.py \
+venv\Scripts\python.exe -m pytest tests/test_group_log_store.py tests/test_group_log_main.py \
     tests/test_group_log_render.py tests/test_group_log_context.py tests/test_group_log_integration.py \
     tests/test_group_log_handles.py tests/test_onebot_emoji_like.py tests/test_display_names.py -q
 ```

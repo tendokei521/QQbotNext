@@ -4,6 +4,6 @@
   "sign": "BilibiliParser",
   "version": "1.1.0",
   "description": "自动解析B站视频链接，合并转发视频简介 + 720P 视频",
-  "entry": "module.py",
+  "entry": "main.py",
   "api_version": 1
 }

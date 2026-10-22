@@ -49,7 +49,7 @@ AST 实测（含函数内惰性 import）求强连通分量。只统计模块层
 ### 结论三：文档跑在了代码前面，对 Agent 比对人更危险
 
 `STYLE.md` 曾写着「函数尽量 ≤ 50 行」（实际 41 个函数 ≥ 80 行，最大 378）、
-「插件目录结构固定 `{module.py, service.py, config_schema.py}`」（13 个插件 7 个不符）、
+「插件目录结构固定 `{main.py, service.py, config_schema.py}`」（13 个插件 7 个不符）、
 「函数内惰性导入**允许且鼓励**」（全库 315 处，是环的直接成因）。
 人读到会怀疑并偏离；**AI 会严格执行**。已在 `STYLE.md` 修正（见 §4）。
 
@@ -437,13 +437,13 @@ docs/                设计文档 + 本方案（见 §4）
 | `douyin_parser` | ✅ 11 文件，签名算法单独成文件 |
 | `emoji_reply` | ✅ |
 | `example` | ✅ 含 `pages/` 示例 |
-| `group_log` | ⚠️ **13.7 KB 全在 `module.py`**（345 行），无 `service.py` → 建议拆出 `service.py` |
+| `group_log` | ⚠️ **13.7 KB 全在 `main.py`**（345 行），无 `service.py` → 建议拆出 `service.py` |
 | `group_request` | ✅ |
-| `llm_enhance` | ✅ 33 行 module.py，逻辑在框架侧 |
-| `poke_reply` | ✅ 90 行 module.py，可接受 |
+| `llm_enhance` | ✅ 33 行 main.py，逻辑在框架侧 |
+| `poke_reply` | ✅ 90 行 main.py，可接受 |
 | `recall_back` | ✅ `service/` 子包 + `recall_db.py` |
 | `time_sign_in` | ✅ `service/` 子包 |
-| `what_to_eat` | ✅ 97 行 module.py，可接受 |
+| `what_to_eat` | ✅ 97 行 main.py，可接受 |
 
 **仍受影响/待做**：`scripts/ops/release.py` 的打包清单、`pyproject.toml` 的 `packages.find`
 需要覆盖 `app.plugins`；`group_log` 建议拆 `service.py`。
@@ -766,7 +766,7 @@ venv\Scripts\python.exe scripts\gen\arch_closure.py --assert-max 20000          
   就说明它该拆了（已有 22 份：8 个顶层包 + 14 个 agent 子包）；
 - `app/agent/` 每个子包 `.py` ≤ 12（超过说明又长成平铺包了）；
 - `app/agent/` 顶层 `.py` ≤ 10（当前 8）；
-- 每个业务插件目录必须有 `module.py`；
+- 每个业务插件目录必须有 `main.py`；
 - 不允许只剩 `__pycache__` 的空壳目录（`app/client` 曾是这样，已删）。
 
 白名单与上限都是**棘轮**：只能收紧，不能放宽。P5 会把 `modules`→`plugin`、

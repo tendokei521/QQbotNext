@@ -13,7 +13,7 @@
 ```
 app/plugins/<name>/
 ├── __init__.py         包标记（插件内部一律用相对导入：from .service import ...）
-├── module.py           **唯一必需**：导出 class Module(BaseModule)
+├── main.py           **唯一必需**：导出 class Module(BaseModule)
 ├── config_schema.py    配置 schema（WebUI 表单由此渲染）
 ├── service/            业务逻辑（推荐；df_password / time_sign_in / recall_back 是范本）
 ├── pages/index.html    可选：插件自带页面（GET /api/module/<name>/page）
@@ -50,5 +50,5 @@ app/plugins/<name>/
 
 ## 加一个插件
 
-`docs/MODULE_DEV.md` 有完整步骤。最短路径：建目录 → 写 `module.py` 导出 `Module` →
+`docs/MODULE_DEV.md` 有完整步骤。最短路径：建目录 → 写 `main.py` 导出 `Module` →
 重启或点 WebUI 的「刷新模块」。

@@ -197,7 +197,7 @@ SEAMS: tuple[Seam, ...] = (
          gap="R1：`SendPolicy` 只读 `stream_send_*` 配置；节奏在 output 槽内部，未单独成接缝"),
     Seam("S35", "输出", "消息池", HALF, "app/agent/delivery/pool.py:21",
          gap="R1：`StreamSendPool` 由 `StreamOutput` 内部创建，模块换掉 output 槽即可绕过（R1 打折：不能只换池）"),
-    Seam("S36", "输出", "发言通道（文本=思考）", FULL, "app/plugins/llm_output/module.py",
+    Seam("S36", "输出", "发言通道（文本=思考）", FULL, "app/plugins/llm_output/main.py",
          evidence=(
              "tests/plugins/test_llm_output.py::test_config_view_prefers_module_then_falls_back",
              "tests/plugins/test_llm_output.py::test_mode_selects_matching_framework_strategy",
@@ -262,13 +262,13 @@ SEAMS: tuple[Seam, ...] = (
          gap="R2 打折：清单不含 node/delivery 类服务，模块自检看不全",
          evidence=("tests/plugin/test_framework_capabilities.py::test_capabilities_with_real_container",)),
     # ── v3 新增：策略型能力（配置归模块，机制留框架）────────────────
-    Seam("S56", "取值", "消息元信息渲染", FULL, "app/plugins/llm_message_meta/module.py",
+    Seam("S56", "取值", "消息元信息渲染", FULL, "app/plugins/llm_message_meta/main.py",
          evidence=(
              "tests/plugins/test_llm_message_meta.py::test_enhance_reads_module_meta_config",
              "tests/plugins/test_llm_message_meta.py::test_history_cleaner_uses_module_config",
          )),
     Seam("S57", "取值", "上下文增强（指代/展开/历史查询）", FULL,
-         "app/plugins/llm_context/module.py",
+         "app/plugins/llm_context/main.py",
          evidence=(
              "tests/plugins/test_llm_context.py::test_referent_reads_module_config",
              "tests/plugins/test_llm_context.py::test_tool_source_expand_gate_follows_module",

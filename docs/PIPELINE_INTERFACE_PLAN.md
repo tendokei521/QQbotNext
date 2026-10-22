@@ -131,7 +131,7 @@ pytest tests/architecture/test_config_partition.py -q   # 15 passed
 
 ## 3. 九个模块（迁移目标的完整清单）
 
-> 共同约定：目录 `app/plugins/<name>/`，`module.py` + `config_schema.py` + `service/`；
+> 共同约定：目录 `app/plugins/<name>/`，`main.py` + `config_schema.py` + `service/`；
 > `category = "LLM"`（前端自动聚合到「LLM 扩展」）；配置一律 `self.config.get(...)`。
 
 | # | 模块 | 键数 | 迁移代码量 | 需要的槽 | supersedes |

@@ -44,7 +44,7 @@ def _make_module_root(tmp_path: Path) -> Path:
     (root / "local" / "testmod").mkdir(parents=True)
     (root / "local" / "__init__.py").write_text("", encoding="utf-8")
     (root / "local" / "testmod" / "__init__.py").write_text("", encoding="utf-8")
-    (root / "local" / "testmod" / "module.py").write_text(LOCAL_MODULE, encoding="utf-8")
+    (root / "local" / "testmod" / "main.py").write_text(LOCAL_MODULE, encoding="utf-8")
     (root / "plugins").mkdir(parents=True, exist_ok=True)
     return root
 
@@ -98,7 +98,7 @@ async def test_local_module_soft_uninstall_keeps_files(setup_registry):
 
     await reg.uninstall_module("testmod")
     assert reg.get("testmod", 123) is None
-    assert (root / "local" / "testmod" / "module.py").exists()
+    assert (root / "local" / "testmod" / "main.py").exists()
     assert install_service.is_uninstalled("testmod") is True
 
     ok = await reg.reinstall_module("testmod", 123)
@@ -115,7 +115,7 @@ async def test_install_from_zip_and_soft_uninstall(setup_registry):
         '{"name": "demo", "display_name": "Zip 插件", "version": "1.2.3"}',
         encoding="utf-8",
     )
-    (plugin_dir / "module.py").write_text(ZIP_PLUGIN, encoding="utf-8")
+    (plugin_dir / "main.py").write_text(ZIP_PLUGIN, encoding="utf-8")
     zip_path = root / "demo.zip"
     with zipfile.ZipFile(zip_path, "w") as z:
         for file in plugin_dir.rglob("*"):
@@ -133,7 +133,7 @@ async def test_install_from_zip_and_soft_uninstall(setup_registry):
 
     await reg.uninstall_module("demo")
     assert reg.get("demo", None) is None
-    assert (root / "plugins" / "demo" / "module.py").exists()
+    assert (root / "plugins" / "demo" / "main.py").exists()
     assert install_service.is_uninstalled("demo") is True
 
     ok = await reg.reinstall_module("demo", None)

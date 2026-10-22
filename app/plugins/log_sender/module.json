@@ -4,6 +4,6 @@
   "sign": "LogSender",
   "version": "1.0.0",
   "description": "在聊天里用 /log 取回本轮次 user 日志、用 /logs 取回四个日志文件",
-  "entry": "module.py",
+  "entry": "main.py",
   "api_version": 1
 }

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from app.plugin import loader
 from app.plugin.base import ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
 from app.plugins.log_sender import service
-from app.plugins.log_sender.module import Module
+from app.plugins.log_sender.main import Module
 
 DEFAULTS = {
     "enable": True,

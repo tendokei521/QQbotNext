@@ -2,7 +2,7 @@
 
 为 WebUI 的 list / dynamic 字段提供后端数据：
 - 内置数据源：groups（群列表）、friends（好友列表）—— 直接基于 Bot 连接获取；
-- 模块可通过在 module.py 声明 LIST_PROVIDERS / DYNAMIC_PROVIDERS 注册自定义数据源。
+- 模块可通过在 main.py 声明 LIST_PROVIDERS / DYNAMIC_PROVIDERS 注册自定义数据源。
 
 数据源方法（定义在 Module 类上，注册表在模块加载时自动绑定）：
 

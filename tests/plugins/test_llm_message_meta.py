@@ -8,7 +8,7 @@ import pytest
 
 from app.agent.config_partition import MODULE_KEYS
 from app.agent.policy import policy_config, policy_get
-from app.plugins.llm_message_meta.module import OWNED_KEYS, Module, owned_keys
+from app.plugins.llm_message_meta.main import OWNED_KEYS, Module, owned_keys
 
 
 def test_owned_keys_match_partition():

@@ -195,7 +195,7 @@ def test_module_schemas_normalize_without_issues(container):
     resource_registry = container.get(ResourceRegistry)
     problems: dict = {}
     for entry in sorted(p for p in repo_modules.iterdir() if p.is_dir()):
-        if not (entry / "module.py").exists():
+        if not (entry / "main.py").exists():
             continue
         try:
             schema_mod = importlib.import_module(f"app.plugins.{entry.name}.config_schema")

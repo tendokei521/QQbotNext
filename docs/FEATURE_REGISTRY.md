@@ -72,7 +72,7 @@
 ## 3. 插件声明式接管（推荐）
 
 ```python
-# module.py
+# main.py
 from app.plugin import BaseModule
 
 class Module(BaseModule):

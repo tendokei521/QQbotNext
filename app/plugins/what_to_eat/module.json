@@ -4,6 +4,6 @@
   "sign": "WhatToEat",
   "version": "1.0.0",
   "description": "遇到“吃什么”时随机推荐食物",
-  "entry": "module.py",
+  "entry": "main.py",
   "api_version": 1
 }

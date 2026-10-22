@@ -1,6 +1,6 @@
 """AstrBot 组装对齐插件的配置表单（WebUI）。
 
-默认值必须与 `module.py` 的 `DEFAULT_CONFIG` 一致（有测试卡这条）。
+默认值必须与 `main.py` 的 `DEFAULT_CONFIG` 一致（有测试卡这条）。
 """
 
 from __future__ import annotations

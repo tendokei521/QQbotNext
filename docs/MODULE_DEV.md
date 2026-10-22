@@ -11,13 +11,13 @@
 ```text
 app/plugins/<name>/
   __init__.py
-  module.py           # 必须：定义 Module(BaseModule)
+  main.py           # 必须：定义 Module(BaseModule)
   config_schema.py    # 可选：WebUI 配置表单
   service.py          # 可选：业务逻辑
   pages/index.html    # 可选：自定义配置页
 ```
 
-最简单的 `module.py`：
+最简单的 `main.py`：
 
 ```python
 from app.plugin import BaseModule

@@ -17,10 +17,10 @@ import pytest
 
 from app.agent.config_partition import MODULE_KEYS
 from app.agent.policy import RuntimeFacade, facade_for, policy_get
-from app.plugins.llm_proactive.module import OWNED_KEYS as PROACTIVE_KEYS
-from app.plugins.llm_proactive.module import Module as ProactiveModule
-from app.plugins.llm_schedule.module import OWNED_KEYS as SCHEDULE_KEYS
-from app.plugins.llm_schedule.module import Module as ScheduleModule
+from app.plugins.llm_proactive.main import OWNED_KEYS as PROACTIVE_KEYS
+from app.plugins.llm_proactive.main import Module as ProactiveModule
+from app.plugins.llm_schedule.main import OWNED_KEYS as SCHEDULE_KEYS
+from app.plugins.llm_schedule.main import Module as ScheduleModule
 
 
 def test_keys_match_partition():

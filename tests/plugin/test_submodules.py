@@ -66,8 +66,8 @@ async def parent_registry(settings, container, tmp_path):
     child_dir.mkdir(parents=True)
     for d in (parent_dir, child_dir):
         (d / "__init__.py").write_text("", encoding="utf-8")
-    (parent_dir / "module.py").write_text(PARENT, encoding="utf-8")
-    (child_dir / "module.py").write_text(CHILD, encoding="utf-8")
+    (parent_dir / "main.py").write_text(PARENT, encoding="utf-8")
+    (child_dir / "main.py").write_text(CHILD, encoding="utf-8")
     (tmp_path / "plugins" / "__init__.py").write_text("", encoding="utf-8")
 
     # 按路径加载，无需动 sys.path、也不会遮蔽项目的任何包

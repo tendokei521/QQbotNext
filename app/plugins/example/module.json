@@ -4,6 +4,6 @@
   "sign": "Example",
   "version": "1.0.0",
   "description": "这是一个标准演示模块",
-  "entry": "module.py",
+  "entry": "main.py",
   "api_version": 1
 }

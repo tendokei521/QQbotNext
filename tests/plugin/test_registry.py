@@ -34,7 +34,7 @@ async def registry(settings, container, tmp_path):
     mod_dir = tmp_path / "plugins" / "testmod"
     mod_dir.mkdir(parents=True)
     (mod_dir / "__init__.py").write_text("", encoding="utf-8")
-    (mod_dir / "module.py").write_text(TEST_MODULE, encoding="utf-8")
+    (mod_dir / "main.py").write_text(TEST_MODULE, encoding="utf-8")
     (tmp_path / "plugins" / "__init__.py").write_text("", encoding="utf-8")
 
     # 按路径加载，无需动 sys.path、也不会遮蔽项目的任何包
@@ -78,7 +78,7 @@ async def test_bad_module_is_skipped(settings, container, tmp_path):
     bad_dir = tmp_path / "plugins" / "badmod"
     bad_dir.mkdir(parents=True)
     (bad_dir / "__init__.py").write_text("", encoding="utf-8")
-    (bad_dir / "module.py").write_text("raise RuntimeError('boom')\n", encoding="utf-8")
+    (bad_dir / "main.py").write_text("raise RuntimeError('boom')\n", encoding="utf-8")
     (tmp_path / "plugins" / "__init__.py").write_text("", encoding="utf-8")
     sys.path.insert(0, str(tmp_path))
     sys.modules.pop("modules", None)

@@ -30,8 +30,29 @@ from pathlib import Path
 from typing import Any
 
 from app.domain.bot import IBot
-from app.plugin.base import BaseModule, ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
+from app.plugin.base import (
+    BaseModule,
+    ModuleAuthority,
+    ModuleConfig,
+    ModuleContext,
+    ServiceAccess,
+)
 from app.plugin.commands import parse_signature
+
+#: 插件入口文件名（v3.1 起统一为 `main.py`）
+ENTRY_FILE = "main.py"
+#: 旧入口名，仍兼容：外部 zip 插件可能还是 `module.py`
+LEGACY_ENTRY_FILE = "module.py"
+
+
+def resolve_entry_file(module_path: Path) -> Path | None:
+    """返回插件入口文件：优先 `main.py`，回退 `module.py`（兼容旧插件）。"""
+    for name in (ENTRY_FILE, LEGACY_ENTRY_FILE):
+        candidate = module_path / name
+        if candidate.is_file():
+            return candidate
+    return None
+
 
 #: (类上的收集方法, services 上的注册表字段, 分派键或 None, 日志用名称)
 #: 分派键为 None 表示该注册表的 `register()` 不接受额外维度。
@@ -62,7 +83,7 @@ def instantiate_module(
     mod = import_plugin_module(module_name, module_path)
     cls = getattr(mod, "Module", None)
     if cls is None:
-        log.error(f"[Module] {module_name} 缺少 module.py 中的 Module 类")
+        log.error(f"[Module] {module_name} 的入口文件里缺少 Module 类（应为 main.py）")
         return None
     if not isinstance(cls, type) or not issubclass(cls, BaseModule):
         log.error(f"[Module] {module_name} 的 Module 类未继承 BaseModule")
@@ -269,7 +290,7 @@ async def activate(instance: BaseModule, module_name: str, services: ServiceAcce
 
 
 def import_plugin_module(module_name: str, module_path: Path):
-    """按**文件路径**加载插件包，返回它的 `module.py`。
+    """按**文件路径**加载插件包，返回它的入口模块（`main.py`，兼容旧 `module.py`）。
 
     为什么不用 `importlib.import_module("app.plugins.X.module")`：
     那要求插件必须是某个固定包名的子包（历史上是 `module.modules`），于是
@@ -289,8 +310,11 @@ def import_plugin_module(module_name: str, module_path: Path):
             pkg_name, init_file, submodule_search_locations=[str(module_path)]
         )
     else:
+        entry = resolve_entry_file(module_path)
+        if entry is None:
+            raise ImportError(f"插件 {module_name} 缺少入口文件（{ENTRY_FILE}）: {module_path}")
         spec = importlib.util.spec_from_file_location(
-            pkg_name, module_path / "module.py", submodule_search_locations=[str(module_path)]
+            pkg_name, entry, submodule_search_locations=[str(module_path)]
         )
     if spec is None or spec.loader is None:
         raise ImportError(f"无法为插件 {module_name} 构造加载器：{module_path}")
@@ -298,7 +322,9 @@ def import_plugin_module(module_name: str, module_path: Path):
     sys.modules[pkg_name] = pkg
     spec.loader.exec_module(pkg)
     if init_file.is_file():
-        return importlib.import_module(f"{pkg_name}.module")
+        entry = resolve_entry_file(module_path)
+        entry_name = entry.stem if entry is not None else Path(ENTRY_FILE).stem
+        return importlib.import_module(f"{pkg_name}.{entry_name}")
     return pkg
 
 

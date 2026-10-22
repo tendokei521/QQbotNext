@@ -16,7 +16,7 @@ import pytest
 
 from app.agent.assembly.assembler import PromptAssembler, PromptRequest
 from app.agent.config_partition import MODULE_KEYS
-from app.plugins.llm_assembly.module import OWNED_KEYS, Module, owned_keys
+from app.plugins.llm_assembly.main import OWNED_KEYS, Module, owned_keys
 from app.plugins.llm_assembly.service import AssemblyAdapter
 
 

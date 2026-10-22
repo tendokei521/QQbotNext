@@ -16,7 +16,7 @@ import pytest
 
 from app.agent.config_partition import MODULE_KEYS
 from app.agent.delivery.output import BlockingOutput, ConfigView, StreamOutput
-from app.plugins.llm_output.module import OWNED_KEYS, Module, adapter_for, owned_keys
+from app.plugins.llm_output.main import OWNED_KEYS, Module, adapter_for, owned_keys
 from app.plugins.llm_output.service import OutputStrategyAdapter
 
 

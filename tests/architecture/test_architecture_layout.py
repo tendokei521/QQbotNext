@@ -10,7 +10,7 @@ CI 能拦的东西，而不是靠自觉。
 2. **每个包必须有 `README.md`，且第一行是 `> 本文只负责：…`**——一句话说不清
    这个包负责什么，说明它该拆了；
 3. `app/agent/` 每个子包文件数 ≤ 12——超过说明它又长成了一个平铺包；
-4. 业务插件目录必须至少有一个 `module.py`。
+4. 业务插件目录必须至少有一个 `main.py`。
 
 这些是**棘轮**：白名单和上限只能收紧，不能放宽。真需要放宽时，改这里并写清理由。
 """
@@ -113,16 +113,16 @@ def test_agent_top_level_stays_flat_but_small() -> None:
 
 
 def test_business_plugins_have_module_entry() -> None:
-    """每个业务插件目录必须至少有 module.py（框架靠它作为加载入口）。"""
+    """每个业务插件目录必须至少有 main.py（框架靠它作为加载入口）。"""
     plugins_dir = ROOT / "app" / "plugins"
     if not plugins_dir.is_dir():
         return
     missing = [
         p.name
         for p in plugins_dir.iterdir()
-        if p.is_dir() and p.name != "__pycache__" and not (p / "module.py").is_file()
+        if p.is_dir() and p.name != "__pycache__" and not (p / "main.py").is_file()
     ]
-    assert not missing, f"这些插件目录缺 module.py: {missing}"
+    assert not missing, f"这些插件目录缺 main.py: {missing}"
 
 
 def test_tests_are_partitioned_by_source_layer() -> None:

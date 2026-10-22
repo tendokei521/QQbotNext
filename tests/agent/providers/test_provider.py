@@ -118,7 +118,7 @@ async def api_env(settings, tmp_path):
     mod_dir = tmp_path / "plugins" / "testmod"
     mod_dir.mkdir(parents=True)
     (mod_dir / "__init__.py").write_text("", encoding="utf-8")
-    (mod_dir / "module.py").write_text(MODULE_SRC, encoding="utf-8")
+    (mod_dir / "main.py").write_text(MODULE_SRC, encoding="utf-8")
     (tmp_path / "plugins" / "__init__.py").write_text("", encoding="utf-8")
 
     settings.plugins_dir = tmp_path / "plugins"

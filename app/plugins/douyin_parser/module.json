@@ -4,6 +4,6 @@
   "sign": "DouyinParser",
   "version": "1.0.0",
   "description": "自动解析抖音分享链接，合并转发文案 + 无水印视频/图集",
-  "entry": "module.py",
+  "entry": "main.py",
   "api_version": 1
 }

@@ -4,6 +4,6 @@
   "sign": "PokeReply",
   "version": "1.0.0",
   "description": "跟随戳一戳、被戳反戳、被戳概率回复",
-  "entry": "module.py",
+  "entry": "main.py",
   "api_version": 1
 }

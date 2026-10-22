@@ -4,6 +4,6 @@
   "sign": "Delta_Password",
   "version": "1.0.0",
   "description": "三角洲行动今日密码",
-  "entry": "module.py",
+  "entry": "main.py",
   "api_version": 1
 }

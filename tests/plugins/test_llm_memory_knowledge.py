@@ -12,10 +12,10 @@ import pytest
 
 from app.agent.config_partition import MODULE_KEYS
 from app.agent.policy import policy_get
-from app.plugins.llm_knowledge.module import OWNED_KEYS as KNOWLEDGE_KEYS
-from app.plugins.llm_knowledge.module import Module as KnowledgeModule
-from app.plugins.llm_memory.module import OWNED_KEYS as MEMORY_KEYS
-from app.plugins.llm_memory.module import Module as MemoryModule
+from app.plugins.llm_knowledge.main import OWNED_KEYS as KNOWLEDGE_KEYS
+from app.plugins.llm_knowledge.main import Module as KnowledgeModule
+from app.plugins.llm_memory.main import OWNED_KEYS as MEMORY_KEYS
+from app.plugins.llm_memory.main import Module as MemoryModule
 
 
 def test_memory_keys_match_partition():

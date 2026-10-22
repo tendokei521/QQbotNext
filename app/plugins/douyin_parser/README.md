@@ -80,7 +80,7 @@ use_forward_msg=false → 旧版单条引用回复（不下载媒体）
 
 ```
 douyin_parser/
-├── module.py          # 元数据 + module_hook（薄入口）
+├── main.py          # 元数据 + module_hook（薄入口）
 ├── service.py         # 业务编排：提取/归一/去重/下载/发送
 ├── douyin_api.py      # 网络层：短链、详情、主页作品、流式下载、去重
 ├── media.py           # 纯逻辑：链接提取、无水印地址、图集整理、缓存命名

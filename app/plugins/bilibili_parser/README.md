@@ -70,7 +70,7 @@ use_forward_msg=false → 旧版单条引用回复
 
 ```
 bilibili_parser/
-├── module.py          # 元数据 + module_hook（薄入口）
+├── main.py          # 元数据 + module_hook（薄入口）
 ├── service.py         # 业务编排：提取/去重/取流/下载/发送
 ├── bilibili_api.py    # 网络层：短链、view、nav(密钥)、playurl、流式下载
 ├── wbi.py             # WBI 签名纯函数

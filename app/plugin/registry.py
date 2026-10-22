@@ -1,7 +1,7 @@
 """模块注册表：扫描 / 加载 / 热重载 / 卸载业务模块。
 
 替代原 modules/__init__.py 中的 ModuleManager：
-- 插件必须位于 <plugins_dir>/<name>/module.py，导出 `Module(BaseModule)`；
+- 插件必须位于 <plugins_dir>/<name>/main.py，导出 `Module(BaseModule)`；
 - 每个模块按 (module_name, bot_id) 实例化，配置/权限来自 ConfigService；
 - 热重载时彻底卸载旧实例（含其名下后台任务），再重新导入。
 """
@@ -190,11 +190,11 @@ class ModuleRegistry:
             await loader.register_data_sources(instance, module_name, self.services, self.log)
             await loader.activate(instance, module_name, self.services, self.log)
 
-            # 递归加载子模块：父模块目录下、含 module.py 的子目录（忽略 service/ 等普通目录）
+            # 递归加载子模块：父模块目录下、含 main.py 的子目录（忽略 service/ 等普通目录）
             for child_entry in sorted(module_path.iterdir()):
                 if not child_entry.is_dir() or child_entry.name.startswith(("_", ".")):
                     continue
-                if not (child_entry / "module.py").exists():
+                if not (child_entry / "main.py").exists():
                     continue
                 child_name = f"{module_name}.{child_entry.name}"
                 if bot_id not in self._modules.setdefault(child_name, {}):

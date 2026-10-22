@@ -36,7 +36,7 @@
 ## 2. 插件侧用法
 
 ```python
-# module/modules/my_astrbot_assembly/module.py
+# module/modules/my_astrbot_assembly/main.py
 from app.modules import BaseModule, llm_hook
 
 class Module(BaseModule):

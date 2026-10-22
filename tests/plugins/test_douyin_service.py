@@ -467,7 +467,7 @@ async def test_handle_at_me_keeps_llm_running(monkeypatch, tmp_path):
 def test_config_defaults_match_schema():
     """代码默认与 WebUI schema 默认必须一致，否则「界面显示开、实际关」。"""
     from app.plugins.douyin_parser.config_schema import SCHEMA
-    from app.plugins.douyin_parser.module import Module
+    from app.plugins.douyin_parser.main import Module
 
     for key, default in Module.default_config.items():
         assert key in SCHEMA, f"{key} 缺少 WebUI schema"
@@ -486,12 +486,12 @@ def test_module_manifest_matches_module_dir():
     module_dir = Path(__file__).resolve().parents[2] / "app" / "plugins" / "douyin_parser"
     manifest = json.loads((module_dir / "module.json").read_text(encoding="utf-8"))
     assert manifest["name"] == module_dir.name
-    assert manifest["entry"] == "module.py"
+    assert manifest["entry"] == "main.py"
     assert (module_dir / manifest["entry"]).is_file()
 
 
 def test_module_declares_group_and_private_hooks():
-    from app.plugins.douyin_parser.module import Module
+    from app.plugins.douyin_parser.main import Module
 
     hooks, _llm_hooks = Module.collect_hooks()
     assert sorted(h["event_type"] for h in hooks) == ["message_group", "message_private"]

@@ -344,7 +344,7 @@ def label_of(entry, ctx) -> list[str]      # @我/提到我/提到我(备注名)
 改动：
 - 新增 `app/llm/wake.py`（档位 + 标签 + 水位线）
 - `pipeline.py`：准入改为 `resolve_wake`
-- `module/modules/group_log/module.py`：增加 `message_private` 记录
+- `module/modules/group_log/main.py`：增加 `message_private` 记录
 - `assembly.py`：`read` / `unread` 块；`qq_agent` 下关掉 `background`/`history` 块
 - `prepare_prompt`：改为从 group_log 取已读窗口
 - `enhance.py`：`qq_agent` 下改用单行格式化 + 标签
