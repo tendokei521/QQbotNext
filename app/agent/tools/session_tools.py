@@ -20,6 +20,8 @@
 
 from __future__ import annotations
 
+from app.core.logger import logger
+
 from datetime import datetime
 from typing import Any
 

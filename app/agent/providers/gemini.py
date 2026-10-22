@@ -9,6 +9,7 @@ API 形态说明：Gemini 的流式默认按 `alt=sse` 返回，可被本适配�
 """
 
 from __future__ import annotations
+from typing import Any
 
 import json
 import re

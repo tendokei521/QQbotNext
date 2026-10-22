@@ -12,7 +12,7 @@ import asyncio
 import inspect
 import time as _time
 from datetime import datetime, timedelta
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Optional
 
 from app.core.logger import logger
 

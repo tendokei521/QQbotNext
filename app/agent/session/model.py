@@ -34,6 +34,8 @@ HistoryEntry
 
 from __future__ import annotations
 
+from app.core.logger import logger
+
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -641,8 +643,7 @@ def render_history(
                 # 兼容只接受一个参数的媒体回调
                 media = entry_media(entry)
             except Exception as e:  # noqa: BLE001 —— 媒体渲染失败只降级为纯文本
-                from app.core.logger import logger
-
+    
                 logger.debug(f"[HistoryModel] 历史媒体渲染失败（已忽略）: {e}")
                 media = None
             if media:
@@ -669,7 +670,6 @@ def render_history(
             # 兼容只接受一个参数的附加块回调
             extra = entry_blocks(entry)
         except Exception as e:  # noqa: BLE001 —— 附加块失败不应影响历史渲染
-            from app.core.logger import logger
 
             logger.debug(f"[HistoryModel] 附加块渲染失败（已忽略）: {e}")
             continue

@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+from app.core.logger import logger
+
 import json
 from pathlib import Path
 
