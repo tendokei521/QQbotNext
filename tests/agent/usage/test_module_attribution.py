@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 
 from app.agent.usage import context as usage_context
-from app.agent.usage.recorder import StatRecorder, set_recorder
 from app.agent.usage.metered import MeteredProvider
+from app.agent.usage.recorder import StatRecorder, set_recorder
 from app.infrastructure.persistence.database import Database
 
 

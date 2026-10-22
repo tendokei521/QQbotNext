@@ -11,7 +11,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -72,7 +71,6 @@ async def test_pipeline_owned_event_is_not_double_counted(env):
 
     # 入站节点的记账函数看到归属标记就直接返回
     from app.plugin.nodes.inbound import AgentNode
-    from app.plugin.nodes.base import MessageContext
 
     node = AgentNode(agent_manager=None, config_service=None, gateway=None)
     node._record_inbound(SimpleNamespace(event=ev))

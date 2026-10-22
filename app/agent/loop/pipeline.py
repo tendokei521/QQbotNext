@@ -73,13 +73,15 @@ class LlmPipeline:
 
             setattr(event, STAT_OWNER_ATTR, "pipeline")
         except Exception as e:  # noqa: BLE001 —— 标记失败不影响主流程
+            from app.core.logger import logger
+
             logger.debug(f"[LLM] 统计归属标记失败（已忽略）: {e}")
         task = asyncio.create_task(self._run(job), name=f"llm_pipeline:{job.id[:8]}")
         self._tasks.add(task)
         task.add_done_callback(lambda t: self._on_task_done(t, job))
         return task
 
-    def _on_task_done(self, task: "asyncio.Task", job: LlmJob) -> None:
+    def _on_task_done(self, task: asyncio.Task, job: LlmJob) -> None:
         """任务收尾：**取走异常**并落日志。
 
         `create_task` 的异常如果没人 `task.exception()`，asyncio 只会打印
@@ -368,6 +370,8 @@ class LlmPipeline:
 
                 record_inbound(ctx.event, outcome)
             except Exception as e:  # noqa: BLE001 —— 统计是旁路
+                from app.core.logger import logger
+
                 logger.debug(f"[LLM] 入站统计记录失败（已忽略）: {e}")
 
     async def _drive(self, ctx: LlmContext, strategy: Any) -> None:
