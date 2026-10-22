@@ -1,6 +1,8 @@
 # QQBot Next WebUI 前后端契约文档
 
-> 用途：为使用 Vue3 重写前端提供精确的 API 文档。
+> 用途：前后端字段级契约（端点、schema 形态、字段类型语义）。Vue3 重写已完成，
+> 本文档描述的是**当前唯一一套前端**（`app/webui/dashboard`）所消费的接口；
+> 手写的 index.html / widgets.js 前端已随 P6 删除（见 `STYLE.md` §12.4）。
 > 依据源码：`app/webui/**`、`app/application/bot_service.py`、`app/infrastructure/config/config_service.py`、`app/infrastructure/onebot/gateway.py`、`app/agent/{scheduler,proactive,config_schema}.py`、`app/application/log_service.py`。
 > 字段名与代码保持一致；所有旧版值类型/含义均按当前实现记录。
 
@@ -8,7 +10,7 @@
 
 ## 0. 总体约定
 
-- **基础路径**：所有 HTTP API 挂在 `/api` 前缀下。首页 `GET /` 渲染 `index.html`（Jinja2 服务端渲染，内联数据），静态资源在 `/static`。
+- **基础路径**：所有 HTTP API 挂在 `/api` 前缀下。首页 `GET /` 渲染 `dashboard/dist/index.html`（仅注入 `window.WEBUI_TOKEN`，数据全走 API），静态资源在 `/assets`。
 - **通用响应形态**：业务端点大多返回 **对象**（非统一 `{status,message,data}` 外壳）。仅少数端点用 `{status,message,...}`，详见逐端点标注。
 - **错误响应**（`_err` 统一结构，HTTP 状态码 400/404/500/502/401）：
   ```json
@@ -36,7 +38,7 @@
   - 连接头 `Authorization: Bearer <token>`
   - 查询参数 `?token=<token>`
   - 校验失败：`websocket.close(code=4401, reason="未授权")`。
-- 前端统一封装（旧版 `main.js`）：`apiFetch()` 自动附 `Authorization: Bearer`；`apiWsUrl(path)` 在无可用 header 场景把 token 拼进 url 查询串（`path + (?或&) + token=...`）。
+- 前端统一封装：`api/http.ts` 的 axios 实例自动附 `Authorization: Bearer`；`api/socket.ts` 在无可用 header 场景把 token 拼进 url 查询串。
 
 ---
 
@@ -187,7 +189,7 @@
 #### GET /module/{module_name}/dynamic/{endpoint}/{value}
 - 查询参数：`bot_id?: int|null`；`value: string`（URL 编码）
 - 响应：`{ "ok": true, "fields": FieldSchema[] }`（**直接对象**）
-  - `FieldSchema`：同 `renderSubField` 支持的子字段 schema（`key/label/type/default/min/max/step/placeholder/rows/options/hint`）。`type in {boolean, select, textarea, time, number, password, ...}`（见 §6）。
+  - `FieldSchema`：子字段 schema（`key/label/type/default/min/max/step/placeholder/rows/options/hint`）。`type in {boolean, select, textarea, time, number, password, ...}`（渲染规则见 §5.4）。
 - 上游失败（502）同上。
 
 ### 2.3 agent（文件 `api/agent.py`，tags: agent）
@@ -352,7 +354,7 @@ WS 通道会混合推送两类内容：
 **(a) 纯日志快照**：对象顶层为 **JSON 数组**（`LogItem[]`），即 `get_recent_logs` 的返回。前端以此为准渲染控制台。
 - `LogItem`：`{ "timestamp": string, "level": string, "message": string }`
   - `level` 枚举：`debug` / `info` / `warning` / `error`（`get_recent_logs` 按 `" - "` 拆分，`parts[1].strip().lower()`；`mode=simple` 读 `user.log`，`mode=raw` 读 `debug.log`）。
-  - 渲染方式（旧前端 `_buildLogItem`）：`<span class="log-time">timestamp</span>` + `<span class="log-level {level}">LEVEL.toUpperCase()</span>` + `<span class="log-message">message</span>`；用 `textContent` 防 XSS。
+  - 渲染方式（`components/LogConsole.vue`）：`<span class="log-time">timestamp</span>` + `<span class="log-level {level}">LEVEL.toUpperCase()</span>` + `<span class="log-message">message</span>`；用 `textContent` 防 XSS。
   - 增量 diff：按 `timestamp|level|message` 键从尾部对齐新旧数组，只追加新增行（`updateLogsDisplay`）。
 
 **(b) 事件消息**：顶层为 `{ "type": <string>, ... }` 对象。全部可推送到此通道的 type 与 payload：
@@ -361,15 +363,15 @@ WS 通道会混合推送两类内容：
 |---|---|
 | `log_item` | **注意：本实现中不存在该 type**。当前实现仅推数组快照与下列事件；旧版本代码不再生成 `log_item`。 |
 | `bot_status_updated` | `{ "bot": { "index": int, "bot_id": int\|null, "status": string, "last_error": string\|null, "login_info": object\|null } }`。来源：`BotLifecycleEvent` 监听（`app.py:_install_bot_lifecycle_listener`）。`status` 枚举同 §2.1。 |
-| `modules_reloaded` | `{ "bot_id": int\|null }`。来源：`@ /modules/reload`、Bot 生命周期 `state=="connected"` 且 `bot_id` 存在时。前端收到即静默 `refreshAllModulesData(true)`。 |
+| `modules_reloaded` | `{ "bot_id": int\|null }`。来源：`@ /modules/reload`、Bot 生命周期 `state=="connected"` 且 `bot_id` 存在时。前端收到即静默重拉（`stores/modules.ts` 的 `load()`）。 |
 | `webui_config_updated` | `{ "config": <整个 webui_config 对象> }`。来源：ConfigService `webui` scope（`save_webui_config`）。 |
 | `single_service_updated` | `{ "single_service": { "<module>": bool } }`。随 `webui` scope 一并追加广播。 |
 | `multi_group_updated` | `{ "multi_group": { "show_all": bool, "groups": {...} } }`。随 `webui` scope 一并追加广播。 |
 | `module_config_updated` | `{ "module": string, "bot_id": int\|null, "config": <脱敏后配置> }`。来源：`@ POST /module/{name}/config`；亦有 ConfigService `module_config` scope。 |
 | `module_authority_updated` | `{ "module": string, "bot_id": int\|null, "enabled": bool, "permission": { "group_mode", "group_list", "user_mode", "user_list" } }`。来源：`@ toggle`、`@ permission`、ConfigService `authority` scope。 |
-| `permission_updated` | 旧版遗留 type；当前实现 `app.py` 的 `_install_config_listener` 中已**不再生成**它（旧前端 `handleConfigUpdate` 仍保留分支，作为兼容）。 |
+| `permission_updated` | 遗留 type；`app.py` 的 `_install_config_listener` 已不再生成，前端无订阅。 |
 
-> 旧前端处理入口 `handleConfigUpdate(data)` 依据 `data.type` 分发：`webui_config_updated`/`module_config_updated`/`module_authority_updated`（过滤 `data.bot_id === currentBotId || null`）/`permission_updated`/`modules_reloaded`/`single_service_updated`/`multi_group_updated`/`bot_status_updated`。
+> 前端处理入口是 `api/socket.ts` 的 `onSocketMessage(type, handler)`：各 store 自己订阅所需 type，`module_config_updated`/`module_authority_updated` 只在 `msg.bot_id === null || msg.bot_id === 当前 bot_id` 时生效，`socket_open`（重连成功）触发重拉状态与模块数据以弥补断线期间丢失的更新。
 
 ---
 
@@ -410,9 +412,9 @@ WS 通道会混合推送两类内容：
    - 若无 `group` → 逐字段平铺渲染（`config-item-flat`）。
    - 若 raw_items 根本不是 mapping（值非 dict）→ 完全退化为按 `config` 值类型渲染（boolean→switch，number→number，其余→text）。
 
-> 对 Vue3 重写：**只面向 `config_schema.groups` + `config_schema.items` 双结构**即可；但需兼容旧前端从 server-rendered HTML 的两种退化形态。建议新版直接消费 `config_schema` 对象，不再依赖服务端 HTML。
+> 前端只消费 `config_schema` 对象本身：`utils/schema.ts::splitSchema()` 同时接受`{groups, items}` 新式与扁平旧式两种形态，并统一收窄成 `{groups, items}` 供 `ConfigForm` 渲染。
 
-### 4.3 字段级常用 schema 约定（index.html + widgets.js）
+### 4.3 字段级常用 schema 约定（消费方：`components/config/`）
 
 每个配置字段 schema 支持以下键（除 `type` 外均可选）：
 
@@ -425,8 +427,8 @@ WS 通道会混合推送两类内容：
 - `step`: number 的步进（float/number 表单用 `step="0.01"`；widget subfield 用 `schema.step`）
 - `rows`: textarea 行数
 - `options`: select 选项。**两种形态都要兼容**：
-  - 旧版 Jinja：`schema.options.items()` 期望 **dict** `{value: label}`；
-  - widgets.js `renderSubField`：`iterable` of `{value,label}` **或** 字符串数组。
+  - 后端既可能给 dict `{value: label}`，也可能给 `{value,label}` 对象数组或字符串数组；
+    前端 `FieldControl.vue` / `DynamicWidget.vue` 对三种形态都做了归一化。
 - `showIf`: `{ "key": <依赖字段>, "value": <目标值> }`（元素上 `data-showif-key`/`data-showif-value`；当前值 == 目标值时显示，否则 `display:none`）
 - `group`: 归属分组 id（字符串）
 - `collapsible`: bool（group 表头是否可折叠，缺省 `true`）
@@ -442,7 +444,8 @@ WS 通道会混合推送两类内容：
 
 ## 5. 配置表单字段类型全集：渲染 / 取值 / 保存规则
 
-来源：index.html `render_config_input` + main.js `saveConfig` + widgets.js。
+来源：`components/config/ConfigForm.vue`（分发）+ `FieldControl.vue`（标量控件）+
+`StringListWidget.vue` / `ListWidget.vue` / `DynamicWidget.vue` / `RepeaterWidget.vue`。
 
 | type | 渲染控件 | 取值 | 保存到 config 的形式 |
 |---|---|---|---|
@@ -453,13 +456,13 @@ WS 通道会混合推送两类内容：
 | `select` | `<select>`（options: dict value→label） | `el.value` | string |
 | `textarea` | `<textarea class="form-control auto-resize">`（rows） | `el.value` | string（含换行） |
 | `time` | `<input type="time">`（缺省 `00:00`） | `el.value` | string `HH:MM` |
-| `string_list` | widgets.js `initStringListWidget`：动态行 input，底部「+ 添加」/「✕ 删除」 | `items.map(s=>s.trim()).filter(Boolean)` | `string[]` |
-| `list` | widgets.js `initListWidget`：后端数据列表（可拖拽/复选框/mode_select） | 见下 | `object`（id→`{enabled,index}`）+ 可选 `{key}_mode` |
-| `dynamic` | widgets.js `initDynamicWidget`：选项选择 + 动态子字段 | 见下 | `object`（selected→字段值映射）+ `{key}_selected` |
-| `repeater` | widgets.js `initRepeaterWidget`：可增删的分组卡片，每卡片按 `template` 渲染子字段 | `items`数组 | `Array` of objects |
+| `string_list` | `StringListWidget.vue`：动态行 input，底部「+ 添加」/「✕ 删除」 | `items.map(s=>s.trim()).filter(Boolean)` | `string[]` |
+| `list` | `ListWidget.vue`：后端数据列表（可拖拽/复选框/mode_select） | 见下 | `object`（id→`{enabled,index}`）+ 可选 `{key}_mode` |
+| `dynamic` | `DynamicWidget.vue`：选项选择 + 动态子字段 | 见下 | `object`（selected→字段值映射）+ `{key}_selected` |
+| `repeater` | `RepeaterWidget.vue`：可增删的分组卡片，每卡片按 `template` 渲染子字段 | `items`数组 | `Array` of objects |
 | `text` / `string`（默认分支） | `<input type="text">` | `el.value` | string |
 
-### 5.1 list 字段（widget）
+### 5.1 list 字段（`ListWidget.vue`）
 
 - **加载端点**：`GET /api/module/{mod}/list/{endpoint}?bot_id=<currentBotId>`（须先连接 Bot，无 bot_id 只提示不请求）。
 - 响应 `{ok, items:[ListItem], mode}` → 渲染每行：序号、`name`、`meta`（拼接 `meta_fields[i]: value`），按 `sortable` 可拖拽、按 `checkboxes` 有复选框、按 `mode_select` 有顶部模式下拉（all=全部 enabled、partial=仅勾选、none=全部 disabled）。
@@ -467,22 +470,22 @@ WS 通道会混合推送两类内容：
 - **保存取值**（widget.get）：`out[key] = { "<id>": {"enabled": bool, "index": int}, ... }`；若 `mode_select` 另加 `out[key + "_mode"] = mode`。随整体 config 一起 POST 到 `/module/{name}/config`。
 - 后端把 `module.config.get(key)` 作为已存字典来合并回填 enabled/index（`saved[iid]`），并排序。
 
-### 5.2 dynamic 字段（widget）
+### 5.2 dynamic 字段（`DynamicWidget.vue`）
 
 - **加载/刷新选项**：`GET /api/module/{mod}/dynamic/{endpoint}?bot_id=<id>` → `{ok, options:[{value,label}]}`。
-- **选择某 option 后加载子字段**：`GET /api/module/{mod}/dynamic/{endpoint}/{value}?bot_id=<id>` → `{ok, fields:[FieldSchema]}`。每个 `FieldSchema` 经 `renderSubField` 渲染（支持 boolean/select/textarea/time/number/password/string 等，见 §5 子字段渲染规则）。
+- **选择某 option 后加载子字段**：`GET /api/module/{mod}/dynamic/{endpoint}/{value}?bot_id=<id>` → `{ok, fields:[FieldSchema]}`。每个 `FieldSchema` 经子字段渲染规则渲染（支持 boolean/select/textarea/time/number/password/string 等，见 §5.4）。
 - 存值：`store[selected]` 累积子字段值；`set(): saved[selected]=store[selected]`。
 - **保存取值**（widget.get）：`out[key] = saved`（selected→值映射 object）；`out[key + "_selected"] = selected`。随 config POST。
 
-### 5.3 repeater 字段（widget）
+### 5.3 repeater 字段（`RepeaterWidget.vue`）
 
 - 模板：`data-template` 即 `schema.template`（子字段 schema 对象）；每项为独立卡片「分组 N」+ 删除按钮 +「+ 新增分组」。
 - 取值：卡片内子字段输入时写回 `itemData[subKey]`（监听 `input`/`change`）。
 - **保存取值**：`out[key] = items`（对象数组）。Array 类型直接保存。
 
-### 5.4 子字段渲染（renderSubField）统一规则
+### 5.4 子字段渲染统一规则
 
-widgets.js `renderSubField(schema, initial)` 复用给 dynamic / repeater，控件与取值：
+dynamic / repeater 的子字段共用同一套渲染规则，控件与取值：
 - `boolean`: switch checkbox，`getValue=cb.checked`，`setValue=!!v`
 - `select`: `<select class="form-control mode-select">`，options 支持 `{value,label}` 对象数组或字符串数组；`getValue=sel.value`
 - `textarea`: rows=`schema.rows||3`，`auto-resize`；`getValue=ta.value`
@@ -490,7 +493,7 @@ widgets.js `renderSubField(schema, initial)` 复用给 dynamic / repeater，控�
 - `number`: `<input type="number">` + min/max/step；`getValue=parseFloat`，NaN→null，`setValue`
 - 其他(含 password/string/text): `<input type="text|password">` + placeholder。
 
-### 5.5 读取时回填（refreshAllModulesData）
+### 5.5 读取时回填（模块数据 → 表单）
 
 前端把服务端返回的 `moduleData.config` 逐键回填：
 - 存在 widget（string_list/list/dynamic/repeater）→ `w.set(value)`（list 只合并 enabled/index；dynamic 只覆盖 `saved`；string_list/repeater 整体替换）。
@@ -499,15 +502,15 @@ widgets.js `renderSubField(schema, initial)` 复用给 dynamic / repeater，控�
 
 ---
 
-## 6. 插件自定义配置页 iframe 与 resizePluginPage
+## 6. 插件自定义配置页 iframe（`ModuleConfigPage.vue`）
 
-- 当模块 `has_page` 为真，Jinja 渲染 `<iframe id="plugin-page-{name}" data-page="/api/module/{name}/page">`（src 在 `initPluginPages` 里动态补 `?bot_id=`）。
+- 当模块 `has_page` 为真，`ModuleConfigPage.vue` 渲染 `<iframe>`，`src` 为 `/api/module/{name}/page?bot_id=<currentBotId>`。
 - 页面对应 `@ GET /module/{name}/page`，注入 `window.PLUGIN_MODULE` / `window.PLUGIN_BOT_ID` / `window.WEBUI_TOKEN`，页面 JS 用它们拼接配置 API（如 `GET/POST /module/{name}/config?bot_id=`）并携带鉴权。
-- **切换到不同账号**时 `switchBot()` 调 `initPluginPages()` 重设每个 iframe 的 `src`（`base + '?bot_id=' + botId` 或 `base`）。
-- **高度自适应** `resizePluginPage(el)`：
+- **切换到不同账号**时重算 iframe 的 `src`（带新的 `bot_id`），确保插件页读到的是当前账号配置。
+- **高度自适应**：
   - 取 `el.contentDocument` 的 `documentElement.scrollHeight` 与 `body.scrollHeight` 的较大者，若 `>40` 设 `el.style.height=px`；跨域 try/catch 忽略。
-  - iframe `load` 时 resize，并用 `ResizeObserver` 观察 `doc.body` 动态跟随（记录在 `el.__pluginPageInit` / `el.__pluginPageRO`）。
-- 显示隐藏的 iframe 时（切到某配置卡片）会先 `resizePluginPage`，再延时 100ms 再测一次。
+  - iframe `load` 时 resize，并用 `ResizeObserver` 观察 `doc.body` 动态跟随。
+- 显示隐藏的 iframe 时（切到某配置卡片）先测一次高度，再延时 100ms 再测一次。
 
 ---
 
@@ -557,42 +560,7 @@ widgets.js `renderSubField(schema, initial)` 复用给 dynamic / repeater，控�
 - **logs**：过滤控制台级别（`debug/info/warning/error`）、显示行数、控制台高度。保存走 `POST /webui/config/logs`（只更新出现键）。
 - **single_service**：`{ "<module>": bool }`。启用后该模块群消息仅由「指定服务账号」处理；前端据此显示黄色警告条（见 §9）。保存 `POST /webui/single-service`（整值替换）。
 - **multi_group**：`{ "show_all": bool, "groups": { "<group_id>": { "service_bot_index": int } } }`。`groups[gid]` 无 `service_bot_index` 视为未指定；空选择即删除该 gid 条目。保存 `POST /webui/multi-group`（整值替换）。`show_all` 控制前端是否展示仅单账号在的群。
-- **module_preferences**：`get_webui_config()` 中不存在默认值；由 `POST /webui/config` 或 `POST/GET /webui/module-preferences` 读写。用途：模块/用户的本地 UI 偏好（如排序、固定、隐藏、折叠），**前端自行约定 key 结构**，后端仅原样存取一个 dict。旧前端在 `index.html`/`main.js` 中对此字段没有实际消费（后端已保留该接口；重做时可自由设计结构，例如 `{ pinned:[], hidden:[], collapsed:{} }`）。
-
----
-
-## 9. 旧前端需在新版复刻的细节行为清单
-
-1. **账号切换与持久化**（`main.js switchBot` / `restoreBotSelection`）：
-   - `localStorage['qqbot_current_bot_index']` 记住当前账号 index，刷新恢复；失效回退第一个。
-   - 切换后：更新顶栏状态、`loadModulesForBot`、`refreshAllModulesData`、`reloadDataWidgets()`（重拉 list/dynamic）、`initPluginPages()`（iframes 换 bot_id）、`updateAllSingleServiceWarnings()`。
-2. **统一鉴权封装**：`apiFetch`（Bearer Header）+ `apiWsUrl`（token 进查询串）。所有 fetch 走这俩。
-3. **配置自动保存**（`main.js` §自动保存）：
-   - 配置/权限输入后 2s（`AUTOSAVE_DELAY=2000`）防抖自动保存；`markModuleDirty`→定时 `doAutoSave`→`saveConfig/savePermission(silent)`。
-   - 卡片标题显示 `save-status-*` 徽标：`dirty`/`saving`/`saved(时间)`/`error`。
-   - 手动「保存配置」按钮 = `forceSave`（立即保存兜底）；`markAllModulesClean` 在数据回填同步后清掉未保存标记。
-   - widgets 的 change/input 也会 `markModuleDirty`。
-4. **config-updated 高亮**：`updateInputValue` 在回填/同步时给输入加 1s `config-updated` 类。
-5. **单服务警告条**（`updateSingleServiceWarning`）：
-   - 模块卡顶部 `single-service-switch-*` 开关（全部账号共有）。
-   - 黄色警告 `single-service-warning-{mod}`：启用单服务且当前账号不是群指定 `service_bot_index`、且群内在线 Bot≥2 时显示，文案列出受影响群号（对齐后端 `is_single_service_skipped` 逻辑）。数据源 `GET /webui/multi-group` + `GET /bots/groups`。
-6. **多群管理弹窗**（`renderMultiGroupList`）：
-   - `show_all` 勾选时展示所有群，否则只展示 ≥2 账号的群；按群内账号数降序。
-   - 每行 `<select>` 设置群的服务账号 `service_bot_index`；单账号群 disabled 但默认选唯一账号。变更即 `POST /webui/multi-group`。
-7. **模块搜索过滤**（`renderModuleList`）：输入框匹配 `data-name`/`data-sign`/`data-tags`（全小写）。
-8. **模块分组/折叠**：无搜索词时按 `module.category`（`data-category`，缺省「未分类」）分组，`localStorage['qqbot_module_collapsed']` 记录各分组折叠态。`toggleModuleView` 切换网格/列表（`module-grid` class）。
-9. **快捷定位**：快捷键 `/` 聚焦模块搜索框（避开 INPUT/TEXTAREA）。
-10. **日志控制台**：
-    - WS 每秒快照数组增量渲染；`logCache` 尾部 diff；`logFilterText` 关键字过滤匹配 message/level/timestamp；`logPaused` 暂停时累积 `pendingLogCount`，继续时全量重绘。
-    - 服务端初始日志（Jinja 渲染）在 WS 首包后 `firstBatch` 清空避免重复。
-    - `console_height` 拖动存 `localStorage`（min100/max600）。
-    - 清空 = 本地 `logCache=[]` 清 DOM（不调后端）。
-11. **WS 事件分发与去重**：`handleConfigUpdate` 按 `type` 分发；`module_config_updated`/`module_authority_updated`/`permission_updated` 只有在匹配当前 bot（`data.bot_id===currentBotId||null`）时才处理；模块开关/权限操作后 `isRecentOperation`（2s 内）抑制重复 toast。
-12. **Bot 状态实时**：`handleBotStatusUpdate` 合并 `botsData`、更新顶栏与账号卡片状态徽标、状态变化 toast（error 带 `last_error`）。
-13. **模块数据刷新**（`refreshAllModulesData`）：每次拉 `GET /modules?bot_id=`，回填开关（`switch-{name}`）、权限控件、config 输入与 widgets，最后 `markAllModulesClean`。自动保存触发/WS `modules_reloaded` 均走它。
-14. **Agent 面板**：切到 `agent` 模块卡片时加载 tasks/proactive 两个表格；空态显示 `—`；操作后重新拉取。
-15. **无 Bot 容忍**：模块 list/dynamic 在无当前 Bot 时不请求、提示「连接 Bot 后获取数据」；`refreshAllModulesData`/`loadModulesForBot` 在无 bot_id 时静默返回。
-16. **密码脱敏哨兵**：渲染 config（`password` 打码 `••••••••`）；保存时后端识别哨兵保留旧值；切换账号/刷新以服务端最新值作准。Bot access_token 同理（`/bots/config` 回显真实 token，`/bots/get_bots_info` 不回显）。
+- **module_preferences**：`get_webui_config()` 中不存在默认值；由 `POST /webui/config` 或 `POST/GET /webui/module-preferences` 读写。用途：模块/用户的本地 UI 偏好（如排序、固定、隐藏、折叠），**前端自行约定 key 结构**，后端仅原样存取一个 dict。前端 `stores/webui.ts` 原样存取；key 结构由前端约定（如 `{ collapsed:{} }`）。
 
 ---
 

@@ -1,5 +1,21 @@
 # Dashboard 前端界面架构（可动工版）
 
+> ## ⚠️ 状态：**提案，尚未实施**
+>
+> 本文是一份**设计方案**，不是现状描述。写作时（改动前基线）的界面是 11 个一级导航 /
+> 23 个可达页面；本文提出把它收敛成 5 个区、引入 `composables/`（`useReadiness` /
+> `useAutoSave` / `useUiPrefs`）、新增 `SetupWizardPage` 与 `DiagnosticsPage`。
+>
+> **截至当前版本这些基本没有落地**：一级导航仍是最初那套（`DefaultLayout.vue`），
+> 仓库里**没有** `composables/` 目录，也没有向导页/诊断页。落地过的只有 §2.3 的一部分
+> ——v4 把进阶调参拆成了功能模块，`/advanced` 区随之整体删除。
+>
+> 读本文前请先看实际代码：`app/webui/dashboard/src/{router,agent,layouts}` 与
+> `docs/api-contract.md`。不要把它当成"照着做就对了"的规范；其中若干细节已与代码不一致
+> （例如 §10「retired 名单已存在」——`sections.json` v5 里已无 `retired` 键）。
+>
+> 若要推进其中某一项，请先确认它是否仍然有价值，再按 AGENTS.md 一步一提交落地。
+
 > 目标：一个从没接触过 QQ 机器人的用户，**4 个页面、5 个必填输入**之内让机器人在 QQ 里回第一句话；
 > 同时不牺牲现有的 160 个 Agent 配置项，重度用户一个都不少。
 >
@@ -477,5 +493,7 @@ app/webui/dashboard/src/
 - **不做多语言**：当前全中文单语，引入 i18n 只会让 160 个字段的中文说明多一份维护负担。
 - **不重写 schema 渲染器的类型体系**：`Record<string, any>` 虽然不严谨，但重写它的收益
   低于本次 IA 重构；仅在新增组件上用局部强类型。
-- **不删除任何配置字段**：`retired` 名单已经存在（`sections.json:4-38`），退役决策继续走那个流程，
-  本次架构只改"怎么展示"，不改"有哪些"。
+- **不删除任何配置字段**：退役决策统一走 `app/agent/config_partition.py`——键的归宿只有三种
+  （`UI_PAGES` 本体页 / `MODULE_KEYS` 模块 / `DELETED_KEYS` 删除），新增键不归类会被
+  `tests/architecture/test_config_partition.py` 判红。（原先这里说的 `sections.json` 里的
+  `retired` 名单在 v5 已不存在。）本架构只改"怎么展示"，不改"有哪些"。

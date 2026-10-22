@@ -22,11 +22,6 @@ def role_service(config_service):
     return RolePresetService(config_service)
 
 
-@pytest.fixture
-def profile_service(config_service):
-    return ConfigProfileService(config_service)
-
-
 # ==================== 扩展字段 ====================
 
 
