@@ -75,6 +75,7 @@ const router = createRouter({
         // 「配置档案」(/config-profiles) 已移除：它是实验性功能，且整套能力（前端页 +
         // 后端 API + 服务 + DB 表 + 运行时按 UMO 覆盖）随之下线。实验性开关框架仍在。
         { path: 'config-profiles', redirect: '/settings' },
+        { path: 'stats', name: 'stats', component: () => import('@/views/StatsPage.vue'), meta: { title: '数据统计' } },
         { path: 'logs', name: 'logs', component: () => import('@/views/LogsPage.vue'), meta: { title: '日志' } },
         { path: 'settings', name: 'settings', component: () => import('@/views/SettingsPage.vue'), meta: { title: '设置' } },
       ],

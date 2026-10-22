@@ -72,6 +72,7 @@ const navItems = computed<NavItem[]>(() => {
     { to: '/sessions', title: '会话数据', icon: 'mdi-chat-outline' },
     { title: 'Agent 面板', icon: 'mdi-creation-outline', children: agentChildren },
     { title: 'Tool 管理', icon: 'mdi-toolbox-outline', children: toolChildren },
+    { to: '/stats', title: '数据统计', icon: 'mdi-chart-bar' },
     { to: '/logs', title: '日志', icon: 'mdi-console' },
     { to: '/settings', title: '设置', icon: 'mdi-cog-outline' },
   ]
