@@ -49,7 +49,18 @@ BASELINE_HALF = 19
 
 #: LLM 流水线合法的钩子阶段（新增阶段必须同时改这里与 docs）
 DECLARED_STAGES = frozenset(
-    {"pre_request", "post_assemble", "post_response", "pre_send", "post_send", "post_stream"}
+    {
+        "pre_request",
+        "post_assemble",
+        "post_response",
+        "pre_send",
+        "post_send",
+        "post_stream",
+        # v3：广播型阶段（流水线只报事实，业务自己订阅）
+        "message_observed",
+        "bot_sent",
+        "turn_completed",
+    }
 )
 
 #: `ServiceAccess` 上不算"服务"的字段（不进 capabilities 清单是合理的）

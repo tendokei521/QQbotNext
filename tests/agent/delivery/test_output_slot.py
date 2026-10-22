@@ -136,7 +136,8 @@ async def test_custom_output_strategy_drives_sending(monkeypatch):
     assert events == [
         "pre_send", "post_send",
         "pre_send", "post_send",
-        "post_stream",  # streams=True → 整体结束钩子
+        "post_stream",      # streams=True → 整体结束钩子
+        "turn_completed",   # v3：一轮结束广播（业务自己订阅）
     ]
 
 

@@ -2,6 +2,26 @@
 
 按 ``stage + event_type`` 保存模块注册的钩子，执行时按 ``order`` 排序。
 同时提供 LLM 工具调用后钩子（``ToolCallHookRegistry``）。
+
+## 阶段清单（v3）
+
+流水线只广播**事实**，不认识任何业务：
+
+| 阶段 | 时机 | 典型订阅者 |
+|---|---|---|
+| `pre_request` | 请求前（组装之前） | 防抖/拦截、元信息渲染、指代预取 |
+| `post_assemble` | messages 组装完成、发出前 | 改本轮请求体（迁移/复刻第三方） |
+| `post_response` | 非流式回复生成后 | 拆分/改写 |
+| `pre_send` | 每条消息发送前 | 拦截/改写单条 |
+| `post_send` | 每条消息发送后 | 记账 |
+| `post_stream` | 流式整体结束 | 收尾 |
+| `message_observed` | **用户说话了**（进入 LLM 前） | 主动消息类业务：重置沉默、安排下次 |
+| `bot_sent` | **Bot 发出一条消息后** | 主动消息类业务：重置计时 |
+| `turn_completed` | **一轮处理结束**（含工具轮/重试） | 记忆蒸馏、统计、审计 |
+
+> 后三个是 v3 新增。此前框架用 `runtime.proactive.on_message()` /
+> `_memory_consolidate()` 这类**硬调用**替业务做事 —— 等于流水线知道
+> "主动消息"和"长期记忆"的存在。现在改成广播，谁要做事谁订阅。
 """
 
 from __future__ import annotations

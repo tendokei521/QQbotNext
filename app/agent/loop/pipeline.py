@@ -354,6 +354,9 @@ class LlmPipeline:
                 await self._save_sent_history(ctx, sent_parts)
             await self._run_stage("post_stream", ctx)
 
+        # 一轮结束：广播给订阅者（记忆蒸馏、统计、审计等业务自己接）
+        await self._run_stage("turn_completed", ctx)
+
     async def _run_stream(self, ctx: LlmContext) -> None:
         """显式走流式策略（内部/测试入口；等价于 ``_drive`` + 流式策略）。"""
         from app.agent.delivery.output import StreamOutput
@@ -422,18 +425,9 @@ class LlmPipeline:
         else:
             response = await ctx.bot.send_group_msg(ctx.event.group.group_id, msg)
         self._mark_sent_message_id(ctx, response)
-
-        pm = getattr(self.runtime, "proactive", None)
-        if pm is not None:
-            try:
-                await pm.on_bot_sent(ctx.session_id, ctx.event.message_type != "private")
-            except Exception as e:
-                # 主动消息状态更新失败不影响本条消息发送，但会导致沉默计时不准，需留痕
-                from app.core.logger import logger
-
-                logger.add_info(f"#{self.runtime.bot_id}").debug(
-                    f"[LLM Pipeline] 更新主动消息发送状态失败（已忽略）: {e}"
-                )
+        # Bot 发过话这件事由 `bot_sent` 钩子广播（主动消息类业务自己观察）——
+        # 框架不该知道"主动消息"这个概念。
+        await self._run_stage("bot_sent", ctx, msg)
 
     def _mark_sent_message_id(self, ctx: LlmContext, response: Any) -> None:
         """把发送响应里的 message_id 补到刚写入的 assistant 历史条目上。
@@ -459,15 +453,12 @@ class LlmPipeline:
             )
 
     async def _observe(self, ctx: LlmContext) -> None:
-        pm = getattr(self.runtime, "proactive", None)
-        if pm is None:
-            return
-        is_group = ctx.event.event_type == "message_group"
-        await pm.on_message(
-            ctx.session_id,
-            is_group,
-            is_self=(ctx.event.user_id == ctx.event.self_id),
-        )
+        """广播「用户说话了」——由 `message_observed` 钩子的订阅者自行处理。
+
+        框架不认识"主动消息"这类业务：它只负责把"有人说话了 / Bot 发过话了"
+        这两个事实广播出去，谁要据此做事谁自己订阅。
+        """
+        await self._run_stage("message_observed", ctx)
 
     def cancel_for_module(self, module: Any) -> None:
         """取消该模块提交/关联的未完成任务（当前按模块钩子来源粗略处理）。"""

@@ -274,6 +274,10 @@ async def _run_inner(
         _write_history(runtime, session_mgr, session, session_id, text, is_private)
     _commit_history_enrichment(runtime, session_id, ctx)
     _memory_consolidate(runtime, session_id, is_private, session_mgr)
+    # 一轮结束：广播给订阅者（记忆蒸馏、统计、审计等业务自己接）
+    from app.agent.hooks import run_stage
+
+    await run_stage(runtime, "turn_completed", ctx)
     return result
 
 
