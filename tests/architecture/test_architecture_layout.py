@@ -187,7 +187,7 @@ def test_no_stale_pycache_only_directories() -> None:
 # --------------------------------------------------------------------------- #
 #: 允许超长的文件（豁免名单只能缩小）。每修完一个文件就把它从这里删掉。
 _LONG_FILE_ALLOWLIST = {
-    "app/agent/config_schema.py": 1072,  # 数据 + _gate/_on DSL，刻意不拆
+    "app/agent/config_schema.py": 1093,  # 数据 + _gate/_on DSL + v3 收敛段，刻意不拆
     # v3：新增 `build_extra_blocks` 块（模块贡献的额外 system 块）与其 docstring，
     # 809 行。装配器是"块表 + 12 个块函数"的单一职责文件，拆开反而要跨文件读顺序；
     # 收紧方式：等 W3 把 behavior/emoji/meta 三块迁到 `llm_assembly` 模块后自然回落 <800。

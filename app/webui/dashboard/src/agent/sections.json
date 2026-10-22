@@ -1,59 +1,36 @@
 {
-  "version": 3,
-  "note": "分区与段内分组的唯一权威。groups 里每一项是本页自己的子分组：用 fields 显式列字段（顺序即展示顺序），或用 source 收整组后端 group。retired 里的字段前端不再提供任何入口（被别的计划接管），后端字段保留。",
-  "retired": {
-    "note": "组装标准化由并行计划接管：信息感知成为固定流程（消息组装全面化 + 固定上传 tool），这些开关不再暴露给用户。后端字段与默认值保留，等那个计划落地后再一并退役。另：max_tokens（最大输出 Tokens）也在此退役——它只是「模型链全空时」的最后一层兜底，真正该改的地方是「Provider 预设 → 模型」页该模型的「最大输出 Token」（跟着模型走、带思考下限、日志写来源）。后端字段保留，供旧配置读取。",
-    "fields": [
-      "max_tokens",
-      "include_time",
-      "include_private_qq",
-      "include_sender",
-      "include_mentioned",
-      "include_quote",
-      "include_quote_sender",
-      "include_sent",
-      "fetch_at_nickname",
-      "fetch_quote_content",
-      "meta_sender_style",
-      "meta_sent_style",
-      "meta_instruction_mode",
-      "meta_mask_nickname",
-      "system_prompt_style",
-      "proactive_prompt_enable",
-      "proactive_history_intent_nudge",
-      "proactive_env_prompt_enable",
-      "proactive_unresolved_prompt_enable",
-      "proactive_env_intent_nudge",
-      "referent_prompt_enable",
-      "context_expand_enable",
-      "referent_resolve_enable",
-      "referent_prefetch_enable",
-      "referent_ambiguous_policy",
-      "referent_prefetch_max",
-      "referent_focus_ttl",
-      "referent_focus_max",
-      "tool_result_directive_enable",
-      "tool_result_directive"
-    ]
-  },
+  "version": 4,
+  "note": "本文件由 scripts/gen_sections.py 从 app/agent/config_partition.py 生成，请勿手改。要加字段/换分组请改 config_partition.py 里的 UI_PAGES。v4：模块能力（流式/记忆/主动消息/工具/联网等）已迁到各自模块的配置页，本体只剩 5 页 43 键。",
+  "generatedFrom": "app/agent/config_partition.py::page_summary()",
   "sections": [
     {
       "id": "basic",
       "path": "/agent/basic",
       "title": "基础配置",
-      "subtitle": "总开关、Provider 模型、模型参数与人格设定",
+      "subtitle": "响应场景、模型参数与人格设定",
       "icon": "mdi-tune-variant",
       "color": "primary",
       "area": "agent",
       "order": 10,
-      "customFirst": true,
-      "customFields": ["persona_preset_id"],
       "groups": [
         {
           "id": "basic_switch",
           "label": "响应场景",
           "icon": "mdi-toggle-switch-outline",
-          "fields": ["group_enable", "private_enable"]
+          "fields": [
+            "group_enable",
+            "private_enable"
+          ]
+        },
+        {
+          "id": "basic_model",
+          "label": "模型参数",
+          "icon": "mdi-api",
+          "fields": [
+            "model",
+            "temperature",
+            "max_tokens"
+          ]
         },
         {
           "id": "basic_persona",
@@ -61,19 +38,8 @@
           "icon": "mdi-account-voice",
           "fields": [
             "persona_preset_id",
-            "system_prompt",
-            "assembly_profile",
-            "behavior_rules_enable",
-            "behavior_rules_override",
-            "participation",
-            "emoji_react_level"
+            "system_prompt"
           ]
-        },
-        {
-          "id": "basic_model",
-          "label": "模型参数",
-          "icon": "mdi-api",
-          "fields": ["model", "temperature"]
         }
       ]
     },
@@ -81,18 +47,69 @@
       "id": "permission",
       "path": "/agent/permission",
       "title": "权限管理",
-      "subtitle": "拥有者与管理者名册、群聊/私信黑白名单",
+      "subtitle": "响应权限档位、拥有者与管理者名册",
       "icon": "mdi-shield-account-outline",
       "color": "success",
       "area": "agent",
       "order": 20,
-      "customFirst": false,
       "groups": [
         {
           "id": "permission_role",
           "label": "响应权限",
           "icon": "mdi-account-key-outline",
-          "fields": ["permission", "agent_owner_list", "agent_manager_list"]
+          "fields": [
+            "permission"
+          ]
+        },
+        {
+          "id": "permission_roster",
+          "label": "拥有者与管理者",
+          "icon": "mdi-account-star-outline",
+          "fields": [
+            "agent_owner_list",
+            "agent_manager_list"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "behavior",
+      "path": "/agent/behavior",
+      "title": "对话行为",
+      "subtitle": "触发设置、消息抖动与回复打断",
+      "icon": "mdi-call-split",
+      "color": "secondary",
+      "area": "agent",
+      "order": 30,
+      "groups": [
+        {
+          "id": "behavior_trigger",
+          "label": "触发设置",
+          "icon": "mdi-at",
+          "fields": [
+            "trigger_at",
+            "trigger_keyword"
+          ]
+        },
+        {
+          "id": "behavior_debounce",
+          "label": "消息抖动",
+          "icon": "mdi-timer-outline",
+          "fields": [
+            "message_debounce_seconds",
+            "message_debounce_max_wait",
+            "reply_cooldown"
+          ]
+        },
+        {
+          "id": "behavior_interrupt",
+          "label": "回复打断",
+          "icon": "mdi-hand-back-right-outline",
+          "fields": [
+            "interrupt_enable",
+            "interrupt_save_sent",
+            "interrupt_debug"
+          ]
         }
       ]
     },
@@ -104,13 +121,17 @@
       "icon": "mdi-chat-processing-outline",
       "color": "info",
       "area": "agent",
-      "order": 30,
+      "order": 40,
       "groups": [
         {
           "id": "session_window",
           "label": "会话窗口",
           "icon": "mdi-timer-sand",
-          "fields": ["session_timeout", "history_rounds", "max_message_length"]
+          "fields": [
+            "session_timeout",
+            "history_rounds",
+            "max_message_length"
+          ]
         },
         {
           "id": "session_history",
@@ -122,10 +143,7 @@
             "group_log_enable",
             "group_log_window_minutes",
             "group_log_window_limit",
-            "group_log_max_chars",
-            "history_background_enable",
-            "history_auto_qq_min_local",
-            "history_cross_query_enable"
+            "group_log_max_chars"
           ]
         },
         {
@@ -142,173 +160,15 @@
       ]
     },
     {
-      "id": "behavior",
-      "path": "/agent/behavior",
-      "title": "对话行为",
-      "subtitle": "触发设置、消息抖动与回复打断",
-      "icon": "mdi-call-split",
-      "color": "secondary",
-      "area": "agent",
-      "order": 40,
-      "groups": [
-        {
-          "id": "behavior_trigger",
-          "label": "触发设置",
-          "icon": "mdi-at",
-          "fields": ["trigger_at", "trigger_keyword"]
-        },
-        {
-          "id": "behavior_debounce",
-          "label": "消息抖动",
-          "icon": "mdi-timer-outline",
-          "fields": [
-            "message_debounce_seconds",
-            "message_debounce_max_wait",
-            "reply_cooldown"
-          ]
-        },
-        {
-          "id": "behavior_interrupt",
-          "label": "回复打断",
-          "icon": "mdi-hand-back-right-outline",
-          "fields": ["interrupt_enable", "interrupt_save_sent", "interrupt_debug"]
-        }
-      ]
-    },
-    {
-      "id": "stream",
-      "path": "/agent/stream",
-      "title": "流式输出",
-      "subtitle": "是否流式、切句与发送节奏",
-      "icon": "mdi-wave",
-      "color": "purple",
-      "area": "agent",
-      "order": 50,
-      "customFirst": true,
-      "groups": [
-        {
-          "id": "stream_switch",
-          "label": "流式开关",
-          "icon": "mdi-toggle-switch-outline",
-          "fields": [
-            "stream_output",
-            "stream_send_by_sentence",
-            "stream_sentence_max_length",
-            "stream_keep_order"
-          ]
-        },
-        {
-          "id": "stream_rhythm",
-          "label": "发送节奏",
-          "icon": "mdi-metronome",
-          "fields": [
-            "stream_send_interval_mode",
-            "stream_send_interval_base_ms",
-            "stream_send_interval_min_ms",
-            "stream_send_interval_max_ms",
-            "stream_send_curve",
-            "stream_send_curve_k",
-            "stream_short_message_length",
-            "stream_short_message_delay_ms",
-            "stream_long_message_delay_ms"
-          ]
-        },
-        {
-          "id": "stream_pool",
-          "label": "消息池",
-          "icon": "mdi-tray-full",
-          "fields": [
-            "stream_send_pool_enabled",
-            "stream_send_max_queue",
-            "stream_queue_full_policy",
-            "stream_flush_on_finish"
-          ]
-        },
-        {
-          "id": "stream_affix",
-          "label": "前后缀",
-          "icon": "mdi-format-text",
-          "fields": ["stream_send_prefix", "stream_send_suffix"]
-        },
-        {
-          "id": "stream_reuse",
-          "label": "复用流式",
-          "icon": "mdi-content-duplicate",
-          "fields": ["stream_proactive_enabled", "stream_scheduled_enabled"]
-        }
-      ]
-    },
-    {
-      "id": "memory",
-      "path": "/agent/memory",
-      "title": "长期记忆",
-      "subtitle": "记忆开关、注入策略与蒸馏成本",
-      "icon": "mdi-brain",
+      "id": "advanced",
+      "path": "/agent/advanced",
+      "title": "高级功能",
+      "subtitle": "图片与动图理解、联网搜索",
+      "icon": "mdi-wrench-cog-outline",
       "color": "warning",
       "area": "agent",
-      "order": 60,
+      "order": 50,
       "groups": [
-        {
-          "id": "memory_switch",
-          "label": "记忆开关",
-          "icon": "mdi-toggle-switch-outline",
-          "fields": [
-            "experimental_long_term_memory",
-            "memory_enable",
-            "memory_private_enable",
-            "memory_group_enable"
-          ]
-        },
-        {
-          "id": "memory_recall",
-          "label": "记忆内容",
-          "icon": "mdi-text-box-search-outline",
-          "fields": [
-            "memory_recall_max",
-            "memory_recall_max_chars",
-            "memory_save_deterministic",
-            "memory_max_per_owner",
-            "memory_user_cross_group",
-            "memory_min_confidence",
-            "memory_inject_hedge",
-            "memory_max_age_days"
-          ]
-        },
-        {
-          "id": "memory_extract",
-          "label": "蒸馏成本",
-          "icon": "mdi-rotate-3d-variant",
-          "fields": ["memory_extract_enable", "memory_extract_interval_min"]
-        },
-        {
-          "id": "memory_reset",
-          "label": "重置与审计",
-          "icon": "mdi-history",
-          "fields": [
-            "memory_on_reset",
-            "memory_upgrade_saved_only",
-            "memory_audit_enable",
-            "memory_audit_inject"
-          ]
-        }
-      ]
-    },
-    {
-      "id": "adv_tools",
-      "path": "/advanced/tools",
-      "title": "工具与能力",
-      "subtitle": "工具循环、图片动图、OneBot、联网搜索、知识库与 MCP",
-      "icon": "mdi-toolbox-outline",
-      "color": "info",
-      "area": "advanced",
-      "order": 10,
-      "groups": [
-        {
-          "id": "adv_tool_loop",
-          "label": "工具循环",
-          "icon": "mdi-sync",
-          "fields": ["max_tool_rounds", "empty_reply_retries", "reasoning_overflow_retries", "retry_profile", "turn_token_budget"]
-        },
         {
           "id": "adv_media",
           "label": "图片与动图",
@@ -324,20 +184,7 @@
           ]
         },
         {
-          "id": "adv_onebot",
-          "label": "OneBot 工具",
-          "icon": "mdi-robot-industrial",
-          "fields": [
-            "onebot_tools_enable",
-            "onebot_tools_allowed",
-            "onebot_tools_denied",
-            "onebot_tools_max_result",
-            "onebot_tools_debug",
-            "poke_cooldown_seconds"
-          ]
-        },
-        {
-          "id": "adv_tavily",
+          "id": "adv_web_search",
           "label": "联网搜索",
           "icon": "mdi-web",
           "fields": [
@@ -347,115 +194,8 @@
             "tavily_search_depth",
             "tavily_max_content_chars"
           ]
-        },
-        {
-          "id": "adv_knowledge",
-          "label": "知识库",
-          "icon": "mdi-book-open-variant",
-          "fields": [
-            "knowledge_enable",
-            "knowledge_embedding_model_id",
-            "knowledge_recall_limit"
-          ]
-        },
-        {
-          "id": "adv_mcp",
-          "label": "MCP",
-          "icon": "mdi-server-network",
-          "fields": ["mcp_servers"]
-        }
-      ]
-    },
-    {
-      "id": "adv_proactive",
-      "path": "/advanced/proactive",
-      "title": "主动消息与定时",
-      "subtitle": "私聊/群聊主动发言与定时任务",
-      "icon": "mdi-bell-ring-outline",
-      "color": "warning",
-      "area": "advanced",
-      "order": 20,
-      "groups": [
-        {
-          "id": "adv_proactive_friend",
-          "label": "私聊主动",
-          "icon": "mdi-account-voice",
-          "fields": [
-            "proactive_friend_enable",
-            "proactive_friend_sessions",
-            "proactive_min_interval_minutes",
-            "proactive_max_interval_minutes",
-            "proactive_max_unanswered",
-            "proactive_quiet_hours_start",
-            "proactive_quiet_hours_end",
-            "proactive_prompt"
-          ]
-        },
-        {
-          "id": "adv_proactive_group",
-          "label": "群聊主动",
-          "icon": "mdi-account-group-outline",
-          "fields": [
-            "proactive_group_enable",
-            "proactive_group_sessions",
-            "proactive_group_idle_minutes"
-          ]
-        },
-        {
-          "id": "adv_schedule",
-          "label": "定时任务",
-          "icon": "mdi-clock-outline",
-          "fields": ["schedule_enable", "schedule_prompt"]
-        }
-      ]
-    },
-    {
-      "id": "adv_output",
-      "path": "/advanced/output",
-      "title": "消息与输出",
-      "subtitle": "消息格式、语音气泡、输出通道与落盘诊断",
-      "icon": "mdi-comment-quote-outline",
-      "color": "secondary",
-      "area": "advanced",
-      "order": 30,
-      "groups": [
-        {
-          "id": "adv_msg_format",
-          "label": "消息格式",
-          "icon": "mdi-format-align-left",
-          "fields": ["user_message_format", "prompt_time_position"]
-        },
-        {
-          "id": "adv_speech",
-          "label": "语音气泡",
-          "icon": "mdi-message-processing-outline",
-          "fields": [
-            "speech_via_tool",
-            "speech_max_bubbles",
-            "speech_max_bubble_chars",
-            "speech_reminder_rounds",
-            "speech_force_reply_on_call",
-            "speech_fallback_enable"
-          ]
-        },
-        {
-          "id": "adv_outbound",
-          "label": "输出通道",
-          "icon": "mdi-call-made",
-          "fields": [
-            "outbound_directive_enable",
-            "outbound_directive_max_at",
-            "clean_output_parentheses"
-          ]
-        },
-        {
-          "id": "adv_diagnostics",
-          "label": "落盘诊断",
-          "icon": "mdi-file-eye-outline",
-          "fields": ["prompt_dump_enable", "prompt_dump_max_entries"]
         }
       ]
     }
   ]
 }
-

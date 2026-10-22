@@ -1070,3 +1070,24 @@ STREAM_PRESETS: dict[str, dict] = {
         },
     },
 }
+
+
+# ==================== v3 收敛：本体只剩 5 页 / 43 键 ====================
+# 上面 160 个键里有 108 个已迁到 9 个功能模块（见 app/agent/config_partition.py
+# 的 `MODULE_KEYS`），另有 9 个废弃键。**导出的 `SCHEMA` 只保留本体 5 页的 43 键**，
+# 于是：
+#   - Agent 配置页不再出现任何"其实归模块管"的开关；
+#   - `LEGACY_SCHEMA` 保留完整旧定义，供迁移脚本按旧键取类型/标签/默认值；
+#   - `DEFAULT_LLM_CONFIG`（app/agent/config.py）仍保留这些键的兜底默认值，
+#     模块未安装时框架回退到默认值，行为可预期。
+from app.agent.config_partition import CORE_KEYS as _CORE_KEYS  # noqa: E402
+
+#: 迁移脚本与对账用：完整的旧 schema（含已迁移/已废弃的键）
+LEGACY_SCHEMA: dict = dict(SCHEMA)
+
+#: 模块接管后**不再属于 agent 配置**的键（迁移 + 废弃）
+MIGRATED_OR_RETIRED_KEYS: tuple = tuple(
+    key for key in LEGACY_SCHEMA if key not in set(_CORE_KEYS)
+)
+
+SCHEMA = {key: value for key, value in SCHEMA.items() if key in set(_CORE_KEYS)}
