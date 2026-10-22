@@ -15,6 +15,21 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace as _SN  # noqa: E402
+
+
+def _install_context_tools(runtime):
+    """模拟「llm_context 模块已安装」：把它提供的工具源挂到运行时。
+
+    v3 起 `expand_*` 由模块的 tool_source 提供，框架不再注入。
+    """
+    from app.agent.loop.providers import register_tool_source
+    from app.plugins.llm_context.service import ContextToolSource
+
+    runtime.tool_sources = []
+    register_tool_source(runtime, ContextToolSource(_SN(module_name="llm_context")))
+    return runtime
+
 import types
 
 import pytest
@@ -138,6 +153,8 @@ def _runtime(bot_id: int, config: dict):
     rt.provider_chain = lambda: [{
         "provider": "img_probe", "model": "img_probe", "modalities": ["text", "image", "tool_use"],
     }]
+    # v3：`expand_image` 归 llm_context 模块（框架不再注入），装上它的工具源
+    _install_context_tools(rt)
     return rt
 
 

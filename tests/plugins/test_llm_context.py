@@ -25,8 +25,14 @@ def test_default_config_and_schema_cover_owned_keys():
     assert not [k for k in OWNED_KEYS if k not in Module.config_schema]
 
 
-def test_module_declares_context_capability():
-    assert "context" in Module.supersedes
+def test_module_is_pure_business():
+    """v3：上下文增强是**业务**，不声明 supersedes。
+
+    实现（referent/focus/context_tools/context_summary）整个人在本模块，
+    框架只提供 `context_providers` / `tool_sources` / `pre_request` 三个基础接口。
+    """
+    assert not getattr(Module, "supersedes", ())
+    assert not getattr(Module, "provides", ())
     assert Module.category == "LLM"
 
 
@@ -34,7 +40,7 @@ def test_module_declares_context_capability():
 
 
 def test_referent_reads_module_config():
-    from app.agent.context.referent import _cfg
+    from app.plugins.llm_context.referent import _cfg
 
     runtime = SimpleNamespace(
         config={"referent_prefetch_max": 9},
@@ -46,7 +52,7 @@ def test_referent_reads_module_config():
 
 
 def test_referent_falls_back_without_module():
-    from app.agent.context.referent import _cfg
+    from app.plugins.llm_context.referent import _cfg
 
     runtime = SimpleNamespace(config={"referent_prefetch_max": 9})
     assert _cfg(runtime, "referent_prefetch_max", 2) == 9
@@ -93,7 +99,8 @@ async def test_tool_source_expand_gate_follows_module():
     assert not {"expand_recent", "expand_message", "expand_user"} & names
 
 
-async def test_tool_source_expand_gate_default_on():
+async def test_framework_no_longer_injects_expand_tools():
+    """框架不再注入 `expand_*` —— 它们由 llm_context 模块的 tool_source 提供。"""
     from app.agent.loop.tool_source import _collect_llm_ext
 
     runtime = SimpleNamespace(
@@ -107,10 +114,18 @@ async def test_tool_source_expand_gate_default_on():
     )
     specs, _skills, _ctx = await _collect_llm_ext(runtime, None, "group_1", False, False)
     names = {s.name for s in specs}
-    assert {"expand_recent", "expand_message", "expand_user"} <= names
+    assert not {"expand_recent", "expand_message", "expand_user"} & names
 
 
 # ---------- 装/卸 ----------
+
+
+class _Hooks:
+    def __init__(self):
+        self.registered: list[dict] = []
+
+    def register(self, **kwargs):
+        self.registered.append(kwargs)
 
 
 class _Runtime:
@@ -118,6 +133,9 @@ class _Runtime:
         self.bot_id = "12345"
         self.config = {"context_expand_enable": True}
         self.context_options = None
+        self.context_providers: list = []
+        self.tool_sources: list = []
+        self.llm_hooks = _Hooks()
 
 
 class _CfgService:
@@ -157,6 +175,8 @@ async def test_on_load_installs_view_and_unload_clears():
 
     await module.on_load()
     assert policy_get(runtime, "context", "context_expand_enable") is False
+    assert [p.name for p in runtime.context_providers] == ["referent"]
+    assert [s.name for s in runtime.tool_sources] == ["context_expand"]
 
     await module.on_unload()
     assert runtime.context_options is None

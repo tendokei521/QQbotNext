@@ -48,6 +48,11 @@ class TurnScope:
     user_text: str = ""
     #: 已渲染的会话历史（只读快照，供"基于历史"的贡献者使用）
     history: tuple = field(default_factory=tuple)
+    #: 本轮请求的 `ToolContext`（工具源**必须**复用它：`extra["round_images"]`
+    #: 这类队列是本轮共享的，另建一个实例会把图片塞进没人读的上下文）
+    tool_ctx: Any = None
+    #: 触发事件（无事件路径为 None）
+    event: Any = None
 
 
 @runtime_checkable

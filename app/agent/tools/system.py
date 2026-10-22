@@ -45,7 +45,7 @@ def _build_specs(runtime: Any) -> list[ToolSpec]:
 
     specs.extend(build_session_tools(runtime, None))
 
-    from app.agent.tools.context_tools import build_context_tools
+    from app.plugins.llm_context.context_tools import build_context_tools
 
     specs.extend(build_context_tools(runtime, None))
 

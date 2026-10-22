@@ -62,7 +62,6 @@ from app.agent.loop.context_blocks import (  # noqa: F401 - 重导出保持 chat
     _memory_autosave,
     _memory_block,
     _memory_consolidate,
-    _referent_block,
     _segments_as_dicts,
 )
 from app.agent.loop.provider_view import _modalities_for_chain, _provider_chain_for
@@ -277,7 +276,7 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
     _memory_autosave(runtime, session_id, user_id, raw_user_text or user_text)
     memory_text = await _memory_block(runtime, session_id, user_id, raw_user_text or user_text, bot)
     # 指代消解：焦点行 + 明确指向时的确定性预取（放在背景块之前，信息密度更高）
-    referent_text = await _referent_block(tool_ctx.runtime, session_id, user_text, tool_ctx)
+    referent_text = ""  # 指代块由 `llm_context` 模块通过 context_providers 贡献
 
     # 模块贡献的额外上下文块（记忆/知识库/群记录等做成模块时的接入点）：
     # 按 order 收集，装配器把它们渲染在 group_log 之后、history 之前。

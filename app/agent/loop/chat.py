@@ -46,7 +46,6 @@ from app.agent.loop.context_blocks import (  # noqa: F401 - 重导出保持 chat
     _memory_autosave,
     _memory_block,
     _memory_consolidate,
-    _referent_block,
     _segments_as_dicts,
 )
 from app.agent.loop.generate import generate_response  # noqa: F401 - 保持 chat.* API

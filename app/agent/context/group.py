@@ -109,7 +109,7 @@ def lookup_expanded(bot_id: Any, session_id: Any) -> ExpandedRefs:
     if bot_id in (None, "") or session_id in (None, ""):
         return ExpandedRefs()
     try:
-        from app.agent.context import focus as _focus
+        from app.plugins.llm_context import focus as _focus
 
         data = _focus.expanded_refs(bot_id, session_id)
     except Exception as e:

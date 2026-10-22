@@ -5,7 +5,7 @@
 `prepare_prompt` 装配 messages 时要去各处取料，这里的每个函数就是一路来源：
 
 - 群侧：`_build_group_pre_history`（群里刚才在聊什么）；
-- 指代：`_referent_block`（「他/那个」落到具体的人或消息）；
+- 指代：**已搬进 `llm_context` 模块**（通过 `context_providers` 贡献块）；
 - 记忆：`_memory_block` / `_memory_autosave` / `_memory_consolidate`；
 - 会话历史：`_format_session_history` / `_history_media_hook` /
   `_commit_history_enrichment` / `_append_round_images`；
@@ -134,33 +134,6 @@ async def _build_group_pre_history(
     )
 
 
-async def _referent_block(runtime, session_id: str, user_text: str, ctx) -> str:
-    """指代消解块：「当前对话焦点 + 指代解析 + 已预取内容」（见 referent.py）。
-
-    **用用户原始文本判定**（不含 ``发送者：``/``引用了：`` 之类的元信息前缀）——否则
-    元信息里的 QQ 号会被误当成用户给出的消息 id。失败不影响回复主流程。
-
-    有 event 时**只认原始文本**（哪怕为空）：图片/语音/表情这类没有文字的回合，
-    原始文本就是空串，此时**不能**回退到带 ``(QQ: …)`` 的 ``user_text``——那串数字会被
-    指代判定当成"用户给出的消息 id"，进而 ``get_msg(QQ号)`` 空转一次（真实日志
-    private_1901691195 / 2026-10-18 22:49：``get_msg 未取到消息 1901691195: 100 None``）。
-    没有正文就没有可判定的指代；焦点行仍由 ``build_block`` 给出。
-    """
-    try:
-        from app.domain.trigger import raw_user_text as _raw_user_text
-        from app.agent.context.referent import build_block
-
-        event = getattr(ctx, "event", None)
-        if event is not None:
-            return await build_block(runtime, session_id, _raw_user_text(event), ctx)
-        return await build_block(runtime, session_id, user_text, ctx)
-    except Exception as e:
-        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(
-            f"[Referent] 构建指代块失败（已忽略）: {e}"
-        )
-        return ""
-
-
 def _format_session_history(
     history: list[dict],
     is_private: bool,
@@ -258,7 +231,7 @@ def _append_round_images(messages: list[dict], tool_ctx, modalities) -> bool:
     实现在 ``context_tools.append_round_images``（主动消息/定时任务的工具轮也要用，
     而它们不能 import 本模块）。见该函数的说明与时机问题。
     """
-    from app.agent.tools.context_tools import append_round_images
+    from app.plugins.llm_context.context_tools import append_round_images
 
     return append_round_images(messages, tool_ctx, modalities)
 

@@ -13,6 +13,21 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace as _SN  # noqa: E402
+
+
+def _install_context_tools(runtime):
+    """模拟「llm_context 模块已安装」：把它提供的工具源挂到运行时。
+
+    v3 起 `expand_*` 由模块的 tool_source 提供，框架不再注入。
+    """
+    from app.agent.loop.providers import register_tool_source
+    from app.plugins.llm_context.service import ContextToolSource
+
+    runtime.tool_sources = []
+    register_tool_source(runtime, ContextToolSource(_SN(module_name="llm_context")))
+    return runtime
+
 from types import SimpleNamespace
 
 import pytest
@@ -60,7 +75,8 @@ async def test_initiative_tools_include_context_tools_without_event():
     names = {s.name for s in specs}
 
     assert {"get_current_session", "get_chat_history"} <= names
-    assert {"expand_recent", "expand_message", "expand_user"} <= names
+    # v3：`expand_*` 归 llm_context 模块（框架不再注入）
+    assert not {"expand_recent", "expand_message", "expand_user"} & names
     # 主动消息/定时任务自身不需要再创建定时任务
     assert "schedule_task" not in names
     assert ctx.event is None
@@ -248,6 +264,11 @@ class _FakeModule:
         self.module_name = "llm_chat_v2"
         self.ctx = _FakeCtx()
         self.config = _FakeConfig({"schedule_enable": True, "context_expand_enable": True})
+        # v3：`expand_*` 由 llm_context 模块的 tool_source 提供（框架不再注入）
+        from app.plugins.llm_context.service import ContextToolSource
+
+        self.tool_sources = [ContextToolSource(self)]
+        self.context_providers = []
 
 
 async def test_scheduled_message_gets_proactive_block_and_tools(tmp_path, monkeypatch):

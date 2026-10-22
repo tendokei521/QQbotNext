@@ -252,7 +252,7 @@ class ProactiveManager:
 
         # 焦点行（主动消息没有用户提问 → 不做预取）：让模型知道"群里刚才在聊什么"。
         # 作为装配器的 referent 块（与 chat 的背景块同一位置），不再手工拼接。
-        from app.agent.context.referent import focus_only_block
+        from app.plugins.llm_context.referent import focus_only_block
 
         focus_text = await focus_only_block(self.module, session_id) or ""
 

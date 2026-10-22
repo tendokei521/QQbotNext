@@ -13,10 +13,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.agent.context import focus, nicknames
+from app.agent.context import nicknames
+from app.plugins.llm_context import focus
 from app.agent.media import image as image_mod
 from app.agent.media import store as image_media
-from app.agent.tools.context_tools import build_context_tools, derive_targets
+from app.plugins.llm_context.context_tools import build_context_tools, derive_targets
 from app.agent.tools.spec import ToolContext
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 32
@@ -236,7 +237,7 @@ async def test_expand_message_does_not_truncate_by_default():
 
 async def test_summary_is_not_clipped():
     """登记摘要不截断：它是"已看过"时复用给模型的正文，砍了模型就更瞎。"""
-    from app.agent.tools.context_tools import summarize_message
+    from app.plugins.llm_context.context_tools import summarize_message
 
     long_forward = "转发内容 —— " + " ｜ ".join(f"某人{i}: 第{i}条内容" for i in range(20))
     text = f"（我翻到了这条消息）三哥(123)：{long_forward} [id 999] [关系：指定展开的消息]"
@@ -496,7 +497,7 @@ async def test_expand_recent_falls_back_to_inner_forward_id():
 
 
 async def test_expand_recent_count_is_clamped():
-    from app.agent.tools.context_tools import MAX_RECENT
+    from app.plugins.llm_context.context_tools import MAX_RECENT
 
     bot = _Bot(history=[_history_msg(1000 + i, "n", f"m{i}") for i in range(10)])
 
@@ -675,7 +676,7 @@ async def test_expand_image_uses_verdict_when_name_approved(monkeypatch):
 
 
 def test_summaries_extract_clean_sentence():
-    from app.agent.tools.context_tools import summarize_message, summarize_user
+    from app.plugins.llm_context.context_tools import summarize_message, summarize_user
 
     assert summarize_user("（我看了下这个人）昵称：三哥；群名片：三哥 [QQ 123] [关系：指定展开的用户]") == "三哥"
     assert summarize_user("（我看了下这个人）昵称：小红 [QQ 9] [关系：指定展开的用户]") == "小红"
@@ -690,7 +691,7 @@ def test_summaries_extract_clean_sentence():
 
 def test_cache_hit_summary_has_no_stale_head():
     """第二次取回用登记摘要时，不该把旧的"（我翻到了…）"头一起带出来。"""
-    from app.agent.tools.context_tools import summarize_message
+    from app.plugins.llm_context.context_tools import summarize_message
 
     first = "（我翻到了这条消息）三哥(123)：早 [id 999] [关系：指定展开的消息]"
 
@@ -833,7 +834,7 @@ async def test_fetch_recent_without_history_is_actionable():
 
 async def test_fetch_entities_from_event_derives_relations():
     """零参数取回（预取路径）从本轮触发消息推导目标，并标注 relation。"""
-    from app.agent.tools.context_tools import fetch_entities
+    from app.plugins.llm_context.context_tools import fetch_entities
 
     bot = _Bot(messages={"999": {
         "sender": {"user_id": 123, "nickname": "张三"},
@@ -929,7 +930,8 @@ async def test_collect_llm_ext_registers_tool_unless_disabled():
     on = SimpleNamespace(bot_id="1", config={}, llm_tools=None, skills=None, memory=None,
                          knowledge=None, mcp_manager=None)
     specs, _skills, _ctx2 = await _collect_llm_ext(on, event, "group_778", False, False)
-    assert names <= {s.name for s in specs}
+    # v3：框架不再注入 `expand_*` —— 它们由 llm_context 模块的 tool_source 提供
+    assert not names & {s.name for s in specs}
 
     off = SimpleNamespace(bot_id="1", config={"context_expand_enable": False}, llm_tools=None,
                           skills=None, memory=None, knowledge=None, mcp_manager=None)

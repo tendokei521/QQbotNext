@@ -301,7 +301,7 @@ class TaskScheduler:
             all_specs, skill_blocks, tool_ctx, instruction = await self._collect_tools(entry)
 
             # 焦点行（定时任务没有用户提问 → 不做预取）：随其他块一起进装配
-            from app.agent.context.referent import focus_only_block
+            from app.plugins.llm_context.referent import focus_only_block
 
             focus_text = await focus_only_block(self.module, entry.session_id) or ""
             messages = await self._build_messages(
@@ -564,7 +564,7 @@ class TaskScheduler:
         all_specs, skill_blocks, tool_ctx, instruction = await self._collect_tools(entry)
 
         # 焦点行（定时任务没有用户提问 → 不做预取）：随其他块一起进装配
-        from app.agent.context.referent import focus_only_block
+        from app.plugins.llm_context.referent import focus_only_block
 
         focus_text = await focus_only_block(self.module, entry.session_id) or ""
         messages = await self._build_messages(

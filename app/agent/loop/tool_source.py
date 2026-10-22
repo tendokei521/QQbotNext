@@ -76,11 +76,6 @@ async def _collect_llm_ext(
 
         specs.append(build_schedule_tool(runtime, session_id, is_private))
 
-    # 进入新一轮：焦点表按轮次衰减显著性（见 docs/referent-resolution-design.md）
-    from app.agent.context import focus
-
-    focus.begin_turn(getattr(runtime, "bot_id", ""), session_id)
-
     if getattr(runtime, "llm_tools", None) is not None:
         specs.extend(runtime.llm_tools.enabled_specs())
 
@@ -103,14 +98,6 @@ async def _collect_llm_ext(
 
     specs.extend(build_session_tools(runtime, ctx))
 
-    # 按需展开上下文（@ 对象 / 被引用消息 / 合并转发）——与渲染层的未展开标记同开同关：
-    # 标记必须可被解决，否则只会诱导模型空转或谎称无法回答。
-    from app.agent.policy import policy_get
-
-    if bool(policy_get(runtime, "context", "context_expand_enable", True)):
-        from app.agent.tools.context_tools import build_context_tools
-
-        specs.extend(build_context_tools(runtime, ctx))
 
     # Tavily 联网搜索（系统级工具，不进入 OneBot 前端清单）
     if bool(runtime.config.get("tavily_enable", False)):
@@ -159,6 +146,9 @@ async def _collect_llm_ext(
             is_private=is_private,
             user_id=str(user_id or ""),
             group_id=group_id,
+            # 关键：复用本轮的 ToolContext（round_images 等队列是本轮共享的）
+            tool_ctx=ctx,
+            event=event,
         )
         specs.extend(await collect_tool_specs(runtime, scope))
 

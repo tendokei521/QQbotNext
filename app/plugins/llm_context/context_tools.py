@@ -24,14 +24,15 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.agent.context import display_names, focus
+from app.agent.context import display_names
+from app.plugins.llm_context import focus
 from app.agent.context.group import (
     collect_at_ids,
     extract_history_messages,
     extract_msg_text,
     has_real_content,
 )
-from app.agent.tools.context_summary import (  # noqa: F401 - 重导出保持原路径可用
+from app.plugins.llm_context.context_summary import (  # noqa: F401 - 重导出保持原路径可用
     DEFAULT_ITEM_CHARS,
     MAX_FORWARD_DEPTH,
     MAX_FORWARD_NODES,

@@ -1,4 +1,4 @@
-"""会话焦点表（app.agent.context.focus）与"已展开"状态迁移测试。
+"""会话焦点表（app.plugins.llm_context.focus）与"已展开"状态迁移测试。
 
 设计基准：docs/referent-resolution-design.md。
 
@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from app.agent.context import focus
+from app.plugins.llm_context import focus
 
 
 def setup_function(_fn):

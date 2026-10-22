@@ -87,7 +87,7 @@ def _envelope(messages):
 
 
 def setup_function(_fn):
-    from app.agent.context import focus as _focus
+    from app.plugins.llm_context import focus as _focus
 
     nicknames.clear_cache()
     _focus.clear_all()
@@ -528,7 +528,7 @@ def test_expanded_summary_is_clipped():
 
 async def test_lookup_expanded_bridges_focus_registry():
     """渲染层按 bot_id/session_id 自动查焦点表（无需调用方手动传 expanded）。"""
-    from app.agent.context import focus
+    from app.plugins.llm_context import focus
     from app.agent.context.group import lookup_expanded
 
     focus.clear_all()
