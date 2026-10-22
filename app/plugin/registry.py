@@ -130,10 +130,21 @@ class ModuleRegistry:
         return self._resolve_module_dir(module_name)
 
     def _iter_module_roots(self):
-        """返回 [(dir, source)]：本地模块目录 + 外部插件目录。"""
+        """返回 [(dir, source)]：本地模块目录 + 外部插件目录。
+
+        `zip` 目录（用户装的 zip 插件）**按需创建**：新建环境 / 用户从不装外部插件时
+        它本来就不存在，那不是异常，不该刷 WARNING（v3 起 `module/` 可整体删除，
+        启动时重建空目录即可）。
+        """
         roots = [(self.plugins_dir, "local")]
-        if self.zip_plugins_dir is not None:
-            roots.append((self.zip_plugins_dir, "zip"))
+        zip_dir = self.zip_plugins_dir
+        if zip_dir is not None:
+            try:
+                zip_dir.mkdir(parents=True, exist_ok=True)
+            except OSError as e:  # noqa: BLE001 —— 无权创建时降级为"没有外部插件"
+                self.log.debug(f"[Module] 无法创建外部插件目录 {zip_dir}（已跳过）: {e}")
+                return roots
+            roots.append((zip_dir, "zip"))
         return roots
 
     async def load_single(
@@ -201,7 +212,11 @@ class ModuleRegistry:
         seen: set[str] = set()
         for root, source in self._iter_module_roots():
             if not root.exists():
-                self.log.warning(f"[Module] {source} 模块目录不存在: {root}")
+                # 本地模块目录缺失才是问题；外部插件目录缺失属正常（按需创建）
+                if source == "local":
+                    self.log.warning(f"[Module] {source} 模块目录不存在: {root}")
+                else:
+                    self.log.debug(f"[Module] {source} 模块目录为空: {root}")
                 continue
             for entry in sorted(root.iterdir()):
                 if not entry.is_dir() or entry.name.startswith(("_", ".")):
