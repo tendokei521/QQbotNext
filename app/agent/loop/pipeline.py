@@ -394,7 +394,9 @@ class LlmPipeline:
         session = session_mgr.get_session(ctx.session_id)
         if session is None:
             return
-        cfg = getattr(self.runtime, "config", None)
+        from app.agent.policy import policy_config
+
+        cfg = policy_config(self.runtime, "meta")
         enabled = True
         if cfg is not None:
             try:

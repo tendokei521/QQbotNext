@@ -212,7 +212,13 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
             error="" if response.ok else "empty_response",
         )
 
-    session_mgr.add_message(session_id, "assistant", _clean_output_for_history(config, clean_response))
+    from app.agent.policy import policy_config
+
+    session_mgr.add_message(
+        session_id,
+        "assistant",
+        _clean_output_for_history(policy_config(runtime, "meta"), clean_response),
+    )
     if not is_private:
         session.mark_replied()
     await asyncio.to_thread(session_mgr.history.save_session, session)

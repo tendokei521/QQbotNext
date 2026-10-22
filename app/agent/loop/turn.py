@@ -533,9 +533,10 @@ def _write_history(
 ) -> None:
     """把本轮回复写进会话历史（清洗口径与主路径一致）。"""
     try:
-        config = getattr(runtime, "config", None)
+        from app.agent.policy import policy_config
+
         session_mgr.add_message(
-            session_id, "assistant", _clean_output_for_history(config, text)
+            session_id, "assistant", _clean_output_for_history(policy_config(runtime, "meta"), text)
         )
         if not is_private:
             session.mark_replied()

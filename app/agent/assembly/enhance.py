@@ -13,7 +13,11 @@ from app.agent.context.group import UNRESOLVED_REPLY, extract_msg_text, has_real
 
 
 def _ctx_cfg(ctx, key: str, default: Any):
-    cfg = getattr(getattr(ctx, "runtime", None), "config", None)
+    # 元信息相关键归 `llm_message_meta` 模块所有：接管时视图挂在
+    # `runtime.meta_options`，未接管时回退 agent 配置（行为不变）。
+    from app.agent.policy import policy_config
+
+    cfg = policy_config(getattr(ctx, "runtime", None), "meta")
     if cfg is not None and hasattr(cfg, "get"):
         try:
             return cfg.get(key, default)

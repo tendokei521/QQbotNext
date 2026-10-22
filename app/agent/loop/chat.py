@@ -251,6 +251,10 @@ async def stream_response(runtime, event, ctx=None):
     all_specs = meta["all_specs"]
     tool_ctx = meta["tool_ctx"]
     session_mgr = meta["session_mgr"]
+    # 历史清洗开关归 `llm_message_meta` 模块所有（未接管时回退 agent 配置）
+    from app.agent.policy import policy_config
+
+    meta_cfg = policy_config(runtime, "meta")
     is_private = meta["is_private"]
     user_id = meta["user_id"]
     model = meta["model"]
@@ -487,7 +491,7 @@ async def stream_response(runtime, event, ctx=None):
             # round 边界 flush：模型一旦调 send_message，本轮工具执行完就真发出去，
             # 它随后还能继续"想下一句"。体感接近真人"想一句说一句"，
             # 也不至于因为工具循环很久而让群友干等。
-            async for message in _flush_speech(speech, session_mgr, session_id, config, event):
+            async for message in _flush_speech(speech, session_mgr, session_id, meta_cfg, event):
                 spoken_parts.append(message.text)
                 yield message
             rounds_left = max_tool_rounds - (_round + 1)
@@ -514,7 +518,7 @@ async def stream_response(runtime, event, ctx=None):
             await _force_speak_round(
                 runtime, speech, messages, provider_chain, meta, tools, tool_executor
             )
-            async for message in _flush_speech(speech, session_mgr, session_id, config, event):
+            async for message in _flush_speech(speech, session_mgr, session_id, meta_cfg, event):
                 spoken_parts.append(message.text)
                 yield message
 
@@ -540,7 +544,7 @@ async def stream_response(runtime, event, ctx=None):
                 yield fallback
                 # 兜底话术**已经发给用户**了 → 必须进历史，否则下一轮"我没说过"
                 session_mgr.add_message(
-                    session_id, "assistant", _clean_output_for_history(config, fallback)
+                    session_id, "assistant", _clean_output_for_history(meta_cfg, fallback)
                 )
                 if not is_private:
                     session.mark_replied()
@@ -567,7 +571,7 @@ async def stream_response(runtime, event, ctx=None):
 
         # 收尾把正文定稿到**同一条**历史（分片发送期间已 upsert 过）。stub/旧
         # session_mgr 没有 upsert 时才退回 add_message，保证行为不回退。
-        _cleaned = _clean_output_for_history(config, full_text)
+        _cleaned = _clean_output_for_history(meta_cfg, full_text)
         if not _write_partial_history(_cleaned):
             session_mgr.add_message(session_id, "assistant", _cleaned)
         if hasattr(session_mgr, "end_streaming_assistant"):
