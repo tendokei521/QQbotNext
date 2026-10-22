@@ -27,6 +27,8 @@ persona 的 `begin_dialogs` 前插到历史最前（`astr_main_agent.py:536`）�
 
 from __future__ import annotations
 
+from app.core.logger import logger
+
 import time
 from datetime import datetime
 from typing import Any
@@ -160,7 +162,8 @@ def _begin_dialogs(module: Any, req: Any) -> list[dict]:
         return []
     try:
         preset = service.get_preset(preset_id)
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"[assembler] 163: 已忽略异常: {e}")
         return []
     dialogs = (preset or {}).get("begin_dialogs") or []
     result: list[dict] = []
@@ -256,7 +259,8 @@ def _raw_history(module: Any, req: Any) -> list[dict]:
         return []
     try:
         entries = snapshot(getattr(req, "session_id", ""))
-    except Exception:  # noqa: BLE001 —— 取不到历史就当作没有，不阻断本轮
+    except Exception as e:  # noqa: BLE001 —— 取不到历史就当作没有，不阻断本轮
+        logger.debug(f"[assembler] 259: 已忽略异常: {e}")
         return []
     result: list[dict] = []
     for entry in entries or []:
@@ -427,7 +431,9 @@ def _group_history_block(module: Any, req: Any) -> str:
         return ""
     try:
         entries = snapshot(getattr(req, "session_id", ""))
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
+        from app.core.logger import logger
+        logger.debug(f"[assembler] 430: 已忽略异常: {e}")
         return ""
     limit = _int_cfg(module, "group_history_max_messages", 50)
     lines = [

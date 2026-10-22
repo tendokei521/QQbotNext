@@ -70,7 +70,8 @@ def _render_local_lines(runtime, session_id: str, is_private: bool, limit: int) 
     """本地会话记录 → 单行文本列表（不含头部）。"""
     try:
         history = _session_manager(runtime).get_history(session_id, limit=limit)
-    except Exception:
+    except Exception as e:
+        logger.debug(f"[session_tools] 73: 已忽略异常: {e}")
         return []
     if not history:
         return []
@@ -131,7 +132,9 @@ async def _fetch_qq_history(ctx, bot, runtime, group_id: str, user_id: str, limi
                 bot_id=getattr(runtime, "bot_id", "") or "",
                 session_id=getattr(ctx, "session_id", "") or "",
             )
-    except Exception:
+    except Exception as e:
+        from app.core.logger import logger
+        logger.debug(f"[session_tools] 134: 已忽略异常: {e}")
         return ""
     return ""
 

@@ -15,7 +15,9 @@ def _overrides(runtime) -> dict:
         config = policy_config(runtime, "tools")
         raw = config.get("onebot_tool_overrides", {}) if config is not None else {}
         return dict(raw or {})
-    except Exception:
+    except Exception as e:
+        from app.core.logger import logger
+        logger.debug(f"[security] 18: 已忽略异常: {e}")
         return {}
 
 

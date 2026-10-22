@@ -118,7 +118,8 @@ def time_prefix(ts: Any) -> str:
         return ""
     try:
         return datetime.fromtimestamp(int(ts)).strftime("%m-%d %H:%M ")
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"[model] 121: 已忽略异常: {e}")
         return ""
 
 

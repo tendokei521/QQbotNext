@@ -173,7 +173,8 @@ class GeminiProvider(BaseProvider):
                         return []
                     data = await resp.json()
             return [str(m.get("name", "")).split("/")[-1] for m in data.get("models", []) if isinstance(m, dict)]
-        except Exception:
+        except Exception as e:
+            logger.debug(f"[gemini] 176: 已忽略异常: {e}")
             return []
 
     async def chat(

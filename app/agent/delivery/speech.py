@@ -257,7 +257,9 @@ def persona_output_conflicts(config: Any) -> list[str]:
     """
     try:
         prompt = str(config.get("system_prompt") or "")
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
+        from app.core.logger import logger
+        logger.debug(f"[speech] 260: 已忽略异常: {e}")
         return []
     if not prompt:
         return []

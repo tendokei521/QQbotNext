@@ -65,7 +65,8 @@ class ModuleLLMClient:
             return None
         try:
             return self.agent_manager.get_runtime(bot_id)
-        except Exception:  # noqa: BLE001 —— 运行时取不到按"没有 provider"处理
+        except Exception as e:  # noqa: BLE001 —— 运行时取不到按"没有 provider"处理
+            logger.debug(f"[client] 68: 已忽略异常: {e}")
             return None
 
     def _account_log(self, bot_id: Any):

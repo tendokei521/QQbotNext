@@ -586,7 +586,8 @@ async def fetch_group_name(bot: Any, group_id: Any) -> str:
         result = await bot.get_group_info(group_id=int(group_id))
         data = (result or {}).get("data", {}) or {}
         return str(data.get("group_name", "") or "")
-    except Exception:
+    except Exception as e:
+        logger.debug(f"[group] 589: 已忽略异常: {e}")
         return ""
 
 

@@ -56,7 +56,8 @@ class OpenAIEmbeddingProvider(BaseProvider):
                         return []
                     data = await resp.json()
             return [str(item.get("id")) for item in (data.get("data") or []) if item.get("id")]
-        except Exception:
+        except Exception as e:
+            logger.debug(f"[embedding] 59: 已忽略异常: {e}")
             return []
 
     async def embed(self, texts: list[str], model: str | None = None) -> list[list[float]]:

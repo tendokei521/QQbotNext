@@ -186,7 +186,8 @@ def _mutable_data(seg: Any) -> dict | None:
     try:
         seg.data = {}
         return seg.data
-    except Exception:  # noqa: BLE001 —— 只读段对象写不了，放弃（调用方按未落盘处理）
+    except Exception as e:  # noqa: BLE001 —— 只读段对象写不了，放弃（调用方按未落盘处理）
+        logger.debug(f"[image] 189: 已忽略异常: {e}")
         return None
 
 

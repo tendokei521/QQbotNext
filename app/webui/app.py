@@ -294,7 +294,8 @@ def _install_auth_middleware(app: FastAPI, container) -> None:
                 decoded = base64.b64decode(auth[6:]).decode("utf-8", errors="ignore")
                 # Basic 格式为 username:password，这里把 password 当作 WebUI token
                 return decoded.split(":", 1)[1] if ":" in decoded else ""
-            except Exception:
+            except Exception as e:
+                logger.debug(f"[app] 297: 已忽略异常: {e}")
                 return ""
         return request.query_params.get("token", "").strip()
 

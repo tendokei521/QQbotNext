@@ -185,7 +185,9 @@ def format_usage(usage: dict | None) -> str:
 def _safe_str(e: Exception) -> str:
     try:
         return (str(e) or "").strip()
-    except Exception:
+    except Exception as e:
+        from app.core.logger import logger
+        logger.debug(f"[base] 188: 已忽略异常: {e}")
         return ""
 
 

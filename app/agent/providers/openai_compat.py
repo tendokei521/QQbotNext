@@ -66,7 +66,8 @@ def _retry_after_of(resp) -> float | None:
     raw = ""
     try:
         raw = str(resp.headers.get("Retry-After") or resp.headers.get("retry-after") or "").strip()
-    except Exception:  # noqa: BLE001 —— 头读不到就当没有
+    except Exception as e:  # noqa: BLE001 —— 头读不到就当没有
+        logger.debug(f"[openai_compat] 69: 已忽略异常: {e}")
         return None
     if not raw:
         return None

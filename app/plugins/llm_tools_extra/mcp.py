@@ -163,7 +163,8 @@ def _decode_servers(raw):
         try:
             parsed = json.loads(raw or '[]')
             return parsed if isinstance(parsed, list) else []
-        except Exception:  # noqa: BLE001 —— 配置写坏了按「无 server」处理
+        except Exception as e:  # noqa: BLE001 —— 配置写坏了按「无 server」处理
+            logger.debug(f"[mcp] 166: 已忽略异常: {e}")
             return []
     return list(raw or [])
 

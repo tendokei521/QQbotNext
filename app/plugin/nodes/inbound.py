@@ -222,7 +222,8 @@ class ModulePermissionNode(MessageNode):
             AGENT_CONFIG_MODULE = "agent"
         try:
             return self.config_service.get_module_config(AGENT_CONFIG_MODULE, account_id) or {}
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[inbound] 225: 已忽略异常: {e}")
             return {}
 
     def _rosters(self, event) -> tuple[set[str], set[str]]:

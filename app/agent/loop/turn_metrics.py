@@ -248,7 +248,8 @@ def _max_tokens_override_note(runtime, effective: int, origin: str) -> str:
         if not checker("max_tokens"):
             return ""
         agent_value = int(config.get("max_tokens", 0) or 0)
-    except Exception:  # noqa: BLE001 —— 诊断辅助，失败不影响主流程
+    except Exception as e:  # noqa: BLE001 —— 诊断辅助，失败不影响主流程
+        logger.debug(f"[turn_metrics] 251: 已忽略异常: {e}")
         return ""
     if not agent_value or agent_value == effective:
         return ""
