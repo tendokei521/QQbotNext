@@ -434,7 +434,7 @@ class ModuleRegistry:
         raise ValueError("未找到 module.json")
 
     def _unregister_plugin_hooks(self, instance) -> None:
-        """卸载模块实例时注销其全部插件钩子。"""
+        """卸载模块实例时注销其全部插件钩子与全局注册（钩子 / 数据源 / 节点）。"""
         if self.services is None:
             return
         for attr in ("send_hooks", "before_send_hooks", "api_hooks", "lifecycle_hooks", "event_completed_hooks"):
@@ -446,6 +446,39 @@ class ModuleRegistry:
                 reg = getattr(runtime, "llm_tool_call_hooks", None)
                 if reg is not None:
                     reg.unregister_module(instance)
+        # 数据源（list/dynamic）：此前只有注册没有反注册，卸载后条目仍指向死实例
+        data_sources = getattr(self.services, "data_sources", None) or getattr(
+            self.services, "providers", None
+        )
+        unregister_ds = getattr(data_sources, "unregister_module", None)
+        if callable(unregister_ds):
+            try:
+                unregister_ds(instance)
+            except Exception as e:  # noqa: BLE001 —— 清理失败不该阻断卸载
+                self.log.debug(f"[Module] 注销数据源失败（已忽略）: {e}")
+        # 入站/出站节点：按归属批量移除
+        nodes = getattr(self.services, "node_registry", None)
+        remove_owner = getattr(nodes, "remove_owner", None)
+        if callable(remove_owner):
+            try:
+                remove_owner(instance)
+            except Exception as e:  # noqa: BLE001
+                self.log.debug(f"[Module] 清理节点失败（已忽略）: {e}")
+        # 上下文贡献者 / 工具源（runtime 级注册表）
+        self._unregister_runtime_providers(instance)
+
+    def _unregister_runtime_providers(self, instance) -> None:
+        """移除模块登记的上下文贡献者与工具源（跨所有运行时）。"""
+        manager = getattr(self.services, "agent_manager", None) if self.services else None
+        if manager is None:
+            return
+        try:
+            from app.agent.loop.providers import unregister_owner
+
+            for runtime in manager.runtimes().values():
+                unregister_owner(runtime, instance)
+        except Exception as e:  # noqa: BLE001
+            self.log.debug(f"[Module] 清理上下文/工具贡献者失败（已忽略）: {e}")
 
     def _unregister_llm_hooks(self, instance, bot_id) -> None:
         """卸载模块实例时注销其注册的 LLM 钩子 / 工具 / 技能。"""

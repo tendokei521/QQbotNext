@@ -67,12 +67,26 @@ def get_provider_class(provider: str) -> type[BaseProvider]:
     return PROVIDERS.get(normalize_provider_type(provider), OpenAICompatProvider)
 
 
+#: 运行期注册的适配器归属表：``{name: owner}``（模块卸载时按 owner 清理）
+_REGISTERED_BY: dict[str, object] = {}
+
+
 def register_provider(
     name: str,
     cls: type[BaseProvider],
     aliases: tuple[str, ...] = (),
+    *,
+    owner: object | None = None,
 ) -> None:
-    """运行期注册一个新的 Provider 适配器，供第三方模块/插件调用。"""
+    """运行期注册一个新的 Provider 适配器，供第三方模块/插件调用。
+
+    Args:
+        name: 适配器类型名（小写，会被 ``config.provider`` 命中）。
+        cls: 适配器类。
+        aliases: 额外别名。
+        owner: 归属者（模块实例）。给出时可用 `unregister_provider(owner=...)`
+            或 `unregister_provider_owner(owner)` 在卸载时清理。
+    """
     name = (name or "").strip().lower()
     if not name or not cls:
         raise ValueError("register_provider 需要 name 和 provider class")
@@ -81,6 +95,36 @@ def register_provider(
         alias = (alias or "").strip().lower()
         if alias:
             PROVIDER_ALIASES[alias] = name
+    if owner is not None:
+        _REGISTERED_BY[name] = owner
+
+
+def unregister_provider(name: str | None = None, *, owner: object | None = None) -> int:
+    """反注册 provider 适配器。返回移除数量。
+
+    - ``name``：移除指定的那一个（同时清掉指向它的别名）；
+    - ``owner``：移除该归属者注册的全部（模块卸载用）。
+
+    Raises:
+        KeyError: 既没给 ``name`` 也没给 ``owner``。
+    """
+    if name is None and owner is None:
+        raise KeyError("unregister_provider 需要 name 或 owner")
+    targets: list[str]
+    if name is not None:
+        targets = [str(name).strip().lower()]
+    else:
+        targets = [n for n, o in _REGISTERED_BY.items() if o is owner]
+
+    removed = 0
+    for target in targets:
+        if PROVIDERS.pop(target, None) is not None:
+            removed += 1
+        _REGISTERED_BY.pop(target, None)
+        for alias, real in list(PROVIDER_ALIASES.items()):
+            if real == target:
+                PROVIDER_ALIASES.pop(alias, None)
+    return removed
 
 
 def provider_supports(config: dict, capability: str) -> bool:
@@ -628,6 +672,7 @@ __all__ = [
     "get_provider_class",
     "normalize_provider_type",
     "register_provider",
+    "unregister_provider",
     "provider_supports",
     "chat_with_fallback",
     "iter_stream_with_fallback",

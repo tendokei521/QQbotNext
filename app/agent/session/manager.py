@@ -263,13 +263,35 @@ class SessionManager:
     _lock = threading.Lock()
 
     def __new__(cls, bot_id: str):
-        if bot_id not in cls._instances:
+        # 键必须归一成字符串：`AgentRuntime` 传 str(bot_id)，而 `module.bot_id` 是 int。
+        # 不归一的话模块写 `SessionManager(123)` 会拿到**另一个实例**（"123" vs 123），
+        # 它写进历史的内容框架读不到 —— 表现为"模块说写了，模型说没看见"。
+        key = str(bot_id)
+        if key not in cls._instances:
             with cls._lock:
-                if bot_id not in cls._instances:
+                if key not in cls._instances:
                     instance = super().__new__(cls)
-                    instance._init(bot_id)
-                    cls._instances[bot_id] = instance
-        return cls._instances[bot_id]
+                    instance._init(key)
+                    cls._instances[key] = instance
+        return cls._instances[key]
+
+    @classmethod
+    def evict(cls, bot_id: str) -> bool:
+        """关闭并移除某账号的单例（换号/幽灵运行时回收时用）。返回是否移除。
+
+        此前只有 `close()` 没有 eviction：连接换号后旧实例一直挂在 ``_instances`` 里，
+        新运行时拿到的是**旧连接的历史库句柄**（"Cannot operate on a closed database"
+        或写到上一个账号的历史里）。
+        """
+        key = str(bot_id)
+        instance = cls._instances.pop(key, None)
+        if instance is None:
+            return False
+        try:
+            instance.close()
+        except Exception as e:  # noqa: BLE001 —— 回收失败只留痕，不阻断调用方
+            logger.debug(f"[Session] 回收 {key} 时关闭失败（已忽略）: {e}")
+        return True
 
     def _init(self, bot_id: str):
         self.bot_id = bot_id

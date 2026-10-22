@@ -99,6 +99,22 @@ class ProviderRegistry:
             self.log.debug(f"[Provider] 模块 {module_name} 已注册 {count} 个数据源")
         return count
 
+    def unregister_module(self, module) -> int:
+        """注销某模块登记的全部数据源（模块卸载/热重载用）。返回移除数量。
+
+        此前只有 register 没有 unregister：模块卸载后 list/dynamic 条目仍指向
+        已销毁的实例方法，表现为"前端下拉框还能选、点了报错"。
+        """
+        module_name = getattr(module, "module_name", module)
+        removed = 0
+        for bucket in (self._list, self._dynamic):
+            for key in [k for k in bucket if k[0] == module_name]:
+                bucket.pop(key, None)
+                removed += 1
+        if removed:
+            self.log.debug(f"[Provider] 模块 {module_name} 已注销 {removed} 个数据源")
+        return removed
+
     # ── 查询 / 调用 ───────────────────────────────────────
 
     def get(self, module_name: str, endpoint: str, kind: str = "list") -> Callable | None:
