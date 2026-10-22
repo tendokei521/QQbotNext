@@ -359,3 +359,145 @@ P4  A7/A8         可选扩展
 **① 按会话发消息（`send_to`）；② 无事件的完整一轮 LLM（`run_turn`/`llm_turn`）；③ 带 owner 的后台任务（`spawn`）。**
 加上两个"已经写了但没接线"的（出站链、`NodeRegistry`）和一个"文档说有其实没有"的（`time_core`）。
 补齐这五处，主动回复模块就能**只用公开接口**写出来，框架也不必再替它抄 4 遍生成/发送代码。
+
+---
+
+## 9. 可扩展度度量（对标"完全可扩展"）
+
+> 本节不掺业务判断、不掺迁移诉求，只回答一个问题：**距离"完全可扩展"还差多少。**
+
+### 9.1 判据：一个接缝算"完全可扩展"必须同时满足 4 条
+
+框架流水线上，凡"框架替你做决定"的地方都算一个**接缝（seam）**。接缝要算完全可扩展，四条必须全中：
+
+| 代号 | 要求 | 反例 |
+|---|---|---|
+| **R1 可替换** | 模块能提供替代实现（槽 / 注册表 / 覆盖） | 只有 `if config.get(...)` 开关 → 只能关掉，不能替代 |
+| **R2 可观测** | 不改框架代码就能看到接缝的输入/输出 | 内部函数算完就丢，无钩子也无 dump |
+| **R3 可组合** | 多方能同时参与（注册表 + 顺序），不是排他 | 整体替换型槽（`assembly`）：谁接管谁独占 |
+| **R4 生命周期闭环** | 卸载/禁用自动还原或反注册 | `register_provider` 只能注册，没有 `unregister` |
+
+**评级**：`■` = 4/4；`◧` = 只满足 1~3 条；`✗` = 一条都不满足（只能改配置或改源码）。
+
+### 9.2 逐缝评级（55 个）
+
+| # | 阶段 | 接缝 | 评级 | 依据（file:line） |
+|---|---|---|---|---|
+| S1 | 传输 | 协议接入（连接/换号） | ✗ | 只有 OneBot 一种实现，无 adapter registry |
+| S2 | 传输 | 上报解码 | ✗ | `codec.py:178` 硬 if 链 |
+| S3 | 传输 | 事件类型与显示名 | ✗ | `codec.py:193` 固定 dict |
+| S4 | 传输 | 连接去重/生命周期 | ✗ | `gateway.py` 内部 |
+| S5 | 传输 | **入站节点链** | ◧ | `dispatcher.py:61` 读注册表（R1/R2/R3 有），但 `NodeRegistry` 不在 `ServiceAccess`、无卸载（R4） |
+| S6 | 传输 | **出站节点链** | ✗ | `bootstrap.py:324` 字面量快照；`register_outbound` 无人读 |
+| S7 | 触发 | 触发判定（@/关键词） | ✗ | `pipeline.py:217-224`、`_would_trigger_llm:124-136` |
+| S8 | 触发 | 场景开关/冷却 | ◧ | 配置 `group_enable` / `reply_cooldown` |
+| S9 | 触发 | 防抖合并 | ◧ | `pool.py` 只读配置 |
+| S10 | 触发 | 回复打断（代际） | ◧ | `pipeline.py:74-100` 只读配置 |
+| S11 | 触发 | `#llm` 指令表 | ✗ | `agent/commands.py` 静态 `COMMAND_GROUPS`（有测试锁，仍不可扩展） |
+| S12 | 取值 | 会话/历史存储 | ◧ | `SessionManager` 单例事实上可用（R1），但无门面、无 R4 |
+| S13 | 取值 | 群聊在线历史 pre_history | ✗ | `prompt_prep.py:155` 硬调 |
+| S14 | 取值 | 群聊环境记录 group_log | ◧ | 模块产出文本，框架硬编码调用（`context_blocks.py:233`） |
+| S15 | 取值 | 指代/焦点 | ✗ | `context_blocks.py:130` + 配置 |
+| S16 | 取值 | 记忆召回 | ◧ | `context_blocks.py:199` 直调 `runtime.memory` |
+| S17 | 取值 | 知识库 | ◧ | `tool_source.py:130` 直调 |
+| S18 | 取值 | **技能注入** | ■ | 注册表 + `SKILLS`/`@skill` + `skills_enabled` |
+| S19 | 取值 | 工具收集（8 段 if） | ✗ | `tool_source.py:72-171` |
+| S20 | 取值 | 图片解析 | ◧ | `pipeline.py:138-191` 只读配置 |
+| S21 | 组装 | 块表（12 块） | ◧ | `assembler.py:496` 可整体替换（R1）但排他（无 R3），块不可单独注册 |
+| S22 | 组装 | **post_assemble** | ■ | `assembler.py:736` 钩子可增删改 + 多插件按 order（R3） |
+| S23 | 组装 | token 预算裁剪 | ✗ | `token_budget.apply_request_policy` 只读配置 |
+| S24 | 组装 | 请求落盘 dump | ◧ | `dump.py` 只能看，不能改 |
+| S25 | 请求 | provider 链解析 | ✗ | `runtime.py:227-290` 无钩子 |
+| S26 | 请求 | 参数规划（max_tokens 三源合并） | ✗ | `providers/policy.py` 无钩子 |
+| S27 | 请求 | provider 适配器类 | ◧ | `providers/__init__.py:70` 可注册（R1/R3），无 `unregister`（R4） |
+| S28 | 请求 | **调用策略** | ■ | `invoker.py` 槽 + 交棒 + 不合格回退 |
+| S29 | 请求 | 工具循环实现 | ✗ | **双实现**：`openai_compat.chat()` 内 + `stream_response` 内 |
+| S30 | 请求 | 重试/空回复策略 | ◧ | 配置 |
+| S31 | 输出 | 流式 vs 非流式 | ✗ | `pipeline.py:310`、`manager.py:318`、`scheduler.py:286` 三处各判一次配置 |
+| S32 | 输出 | 切句 | ✗ | `domain/splitter.py` 固定 |
+| S33 | 输出 | 输出指令 `[reply]/[@qq]` | ◧ | `directives.py` 只读配置，且 initiative 路径不生效 |
+| S34 | 输出 | 发送节奏 | ◧ | `domain/pace.py` 只读配置 |
+| S35 | 输出 | 消息池 | ✗ | `pipeline.py:375/409` 内部 new |
+| S36 | 输出 | 发言通道（文本=思考） | ◧ | `speech.py:312` 三条件耦合 |
+| S37 | 输出 | **发送通道** | ◧ | 存在（`bot.send_*`），但出站链失效（S6） |
+| S38 | 输出 | **发送前/后 + api/生命周期/事件完成钩子** | ■ | `client.py:254-304` 全链路触发 |
+| S39 | 输出 | 历史写入 | ✗ | 四套口径：`generate.py:215` / `chat.py:570` / `manager.py:344` / `scheduler.py:404` |
+| S40 | 输出 | 遥测 | ◧ | `telemetry.py` 只能读 |
+| S41 | 驱动 | **消息触发** | ■ | 事件订阅 + `subscribe` 自动推导 |
+| S42 | 驱动 | 主动消息 | ✗ | `runtime.py:106` 硬 new + `pipeline.py:567` 硬调 |
+| S43 | 驱动 | 定时任务 | ◧ | `SCHEDULES` + `scheduler.register`，无 update/list（对比 AstrBot `cron_manager`） |
+| S44 | 驱动 | **模块发起一轮对话** | ✗ | `generate_response`/`stream_response`/`prepare_prompt` 硬绑 `event` |
+| S45 | 驱动 | 外部事件注入（emit 自定义事件） | ✗ | `event_bus` / `ModuleDispatcher` 都不在 `ServiceAccess` |
+| S46 | 模块 | **加载/热重载** | ■ | `registry.load_all/reload_single` |
+| S47 | 模块 | **权限/启停/单一服务** | ■ | `authority.py` + `nodes/inbound.py` |
+| S48 | 模块 | **配置 schema + WebUI 表单** | ■ | `schema_utils.py` + `sections.json` |
+| S49 | 模块 | **资源引用（resource）** | ■ | `ResourceRegistry` + 7 种内置种类 |
+| S50 | 模块 | **数据源 list/dynamic** | ■ | `ProviderRegistry` |
+| S51 | 模块 | 模块自建 HTTP 路由 | ✗ | 只有静态 `pages/index.html`（对比 AstrBot `register_web_api`） |
+| S52 | 模块 | 模块自定义页面 | ◧ | 静态 html，无法带自己的 API |
+| S53 | 模块 | **状态持久化** | ■ | `get_data_path` + `ctx.services.cache` |
+| S54 | 模块 | 能力接管（8 feature） | ◧ | 租约/交棒完备（R4✓），但 5/8 只是配置 toggle（R1 弱） |
+| S55 | 模块 | capabilities 自检 | ◧ | 清单不含 node/delivery 类服务 |
+
+### 9.3 结果
+
+| 评级 | 数量 | 占比 |
+|---|---|---|
+| ■ 完全可扩展（4/4） | **11** | 20% |
+| ◧ 半通（1~3 条） | **22** | 40% |
+| ✗ 未通（0 条） | **22** | 40% |
+| 合计 | 55 | 100% |
+
+**关键分布**：11 个 ■ 里有 **7 个在"模块系统本身"**（S46-S50/S53），只有 **4 个在 agent 内部流水线**（S18/S22/S28/S38）。
+→ **模块系统已经达标，欠账全部集中在 agent 内部流水线上。**
+
+### 9.4 五个结构性阻塞（不修，加再多接口也没用）
+
+这五个不是"缺一个接缝"，而是"结构导致接缝无法存在"：
+
+| # | 阻塞 | 为什么加了接口也没用 | 连带影响 |
+|---|---|---|---|
+| **B-1** | **事件是生成的前置条件** | `prepare_prompt` / `generate_response` / `stream_response` 三个入口全部硬绑 `event`。模块只要手里没有真实事件（主动/定时/外部触发），就只能抄一份。 | 挡住 S44，连带 S42/S43/S16/S17 |
+| **B-2** | **工具循环双实现** | 非流式循环在 `openai_compat.chat()` 内部，流式循环在 `stream_response` 里。改一处必漏一处；任何"接管一轮"的模块都要面对两个不同位置。 | 挡住 S29，连带 S31/S39 |
+| **B-3** | **四路生成 + 五处发送** | chat 非流式 / chat 流式 / 主动消息 / 定时任务 各一套生成；发送散落 5 处。模块只能一次接四路，否则行为不一致。 | 挡住 S39/S33/S37 |
+| **B-4** | **无卸载路径的全局注册** | `PROVIDERS`（无 unregister）、`NodeRegistry`（无 unregister）、`SessionManager._instances`（无 evict）、`ModuleLLMClient`（单例）。R4 不满足，热重载会积幽灵。 | 挡住 S27/S5/S12 |
+| **B-5** | **配置即接口** | 181 个 agent 配置键里，估 ~40 个本质是"因为没接缝，所以只能做成开关"（`stream_output`、`speech_via_tool`、`referent_*`、`context_expand_enable`、`stream_proactive_enabled`、`stream_scheduled_enabled` …）。它们同时是"功能"与"不可扩展"的证据。 | 冻结 S8/S9/S10/S15/S20/S23/S30/S31/S34/S36 |
+
+### 9.5 "完全可扩展"的可执行判据
+
+光靠数数说不清，所以定义成可跑的测试：
+
+> **门槛**：对任意接缝 Sx，存在一个测试能做到三件事：
+> ① 装一个只实现最小契约的替身 → ② 断言行为确实被替身接管（可观测差异）→
+> ③ 卸下替身 → 断言框架自动回到装配前状态。
+
+新增 `tests/architecture/test_extensibility_contract.py`：把上面 55 行的清单**写进测试**（作为声明），
+每个标 `■` 的接缝必须有对应的"接管+还原"用例名（无用例则 fail）。于是：
+
+- **"完全可扩展" = 清单 55 行全部 `■` 且每行有对应用例**；
+- 任何新功能只要进了流水线，就**必须**在清单里登记一行，否则测试 fail —— 从制度上防住"先硬编码，以后再说"。
+
+### 9.6 距离与工量
+
+| 批次 | 解锁接缝 | 动作 | 工量 |
+|---|---|---|---|
+| B-1 事件解耦（`prepare_turn` + `run_turn`） | S44 → 连带 S42/S43/S16/S17 | 新增 1 文件 + 改 1 文件 | 3d |
+| B-2 工具循环收口（统一到 `tool_loop.py`） | S29 → S31/S39 | 改 2 处 | 2d |
+| B-3 四路收敛 | S39/S33/S37 | 改 4 文件 | 2d |
+| B-4 四个全局注册补卸载 | S27/S5/S12 | 改 5 文件 | 1.5d |
+| S1-S4 传输层 adapter registry | S1/S2/S3/S4 | 新增 2 文件 | 3d |
+| S7/S19/S25/S26/S35 零散接缝 | 5 个 | 改 5 文件 | 3d |
+| S45 事件注入 | 1 个 | 新增 1 文件 | 1d |
+| S51 模块路由 | 1 个 | 改 2 文件 | 1d |
+| 判据测试 | — | 新增 1 测试文件 | 1d |
+| **合计** | **~24 个接缝**（22 个 ✗ + ◧ 里最关键的 2 个） | | **~18 人日** |
+
+**换算**：把 ■ 视为"已完成" → 现在 **20%**；做完这批 → 55 个接缝里约 44 个 ■ ≈ **80%**。
+剩下 20% 是**排他型接缝**（S21 块表、S54 能力接管语义、S24 dump）需要"注册表化"才能到 R3，
+属于二次改造，优先级最低。
+
+### 9.7 一句话
+
+> **距离完全可扩展还差 44 个接缝（约 80%），但真正的阻力不是数量，是 5 个结构性阻塞。**
+> **B-1（事件解耦）一个就挡住 4 个接缝，B-3（四路生成）挡住 3 个，B-5（配置即接口）冻结 10 个。**
+> 而模块系统本身（S46/S47/S48/S49/S50/S53 六连）已经完全达标 —— **欠账 100% 集中在 agent 内部流水线。**
