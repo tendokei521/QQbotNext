@@ -15,7 +15,7 @@ from typing import Any
 
 from app.agent import logger
 from app.agent.assembly.assembler import PromptAssembler
-from app.agent.assembly.enhance import install_framework_hooks
+from app.agent.assembly.interrupt import interrupt_config_hook
 from app.agent.config import DEFAULT_LLM_CONFIG, AgentConfig
 from app.agent.hooks import LlmHookRegistry, ToolCallHookRegistry
 from app.agent.knowledge import KnowledgeManager
@@ -126,7 +126,12 @@ class AgentRuntime:
 
         # LLM 流水线：模块可在任意阶段注册钩子
         self.llm_hooks = LlmHookRegistry()
-        install_framework_hooks(self)
+        # 框架只装**本体行为**的钩子（回复打断开关来自「对话行为」页）；
+        # 消息元信息渲染等业务由 `llm_message_meta` 模块自己注册。
+        self.llm_hooks.register(
+            stage="pre_request", event_type="*", order=25,
+            handler=interrupt_config_hook, module=None,
+        )
         self.llm_tool_call_hooks = ToolCallHookRegistry(logger)
         self.llm_pipeline = LlmPipeline(self, task_manager=task_manager)
         # 消息组装器：插件可声明 supersedes=("assembly",) 整体替换（FeatureRegistry 自动还原）

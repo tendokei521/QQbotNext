@@ -147,7 +147,7 @@ async def _referent_block(runtime, session_id: str, user_text: str, ctx) -> str:
     没有正文就没有可判定的指代；焦点行仍由 ``build_block`` 给出。
     """
     try:
-        from app.agent.assembly.enhance import _raw_user_text
+        from app.domain.trigger import raw_user_text as _raw_user_text
         from app.agent.context.referent import build_block
 
         event = getattr(ctx, "event", None)

@@ -51,8 +51,6 @@ class Module(BaseModule):
     subscribe = ()
     category = "LLM"
     order = 30
-    provides = ("message_meta",)
-    supersedes = ("message_meta",)
     default_config = {
         "include_time": True,
         "include_private_qq": False,
@@ -78,11 +76,30 @@ class Module(BaseModule):
         from app.agent.delivery.output import ConfigView
 
         runtime.meta_options = ConfigView(getattr(runtime, "config", None), self.config, OWNED_KEYS)
+        # 业务钩子由本模块自己注册（框架不认识"消息元信息"这个概念）
+        for stage, order, handler in (
+            ("pre_request", -100, self._collect_user_context),
+            ("pre_request", 20, self._format_user_context),
+        ):
+            runtime.llm_hooks.register(
+                stage=stage, event_type="*", order=order, handler=handler, module=self
+            )
+
+    async def _collect_user_context(self, ctx) -> None:
+        from .service import collect_user_context
+
+        await collect_user_context(ctx)
+
+    async def _format_user_context(self, ctx) -> None:
+        from .service import format_user_context
+
+        await format_user_context(ctx)
 
     async def on_unload(self) -> None:
         runtime = self._runtime()
         if runtime is None:
             return
+        # 钩子在模块卸载时由 loader 统一注销（`llm_hooks.unregister_module(self)`）
         runtime.meta_options = None
 
     def _runtime(self) -> Any:

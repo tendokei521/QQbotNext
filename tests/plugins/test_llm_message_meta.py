@@ -21,8 +21,14 @@ def test_default_config_and_schema_cover_owned_keys():
     assert not [k for k in OWNED_KEYS if k not in Module.config_schema]
 
 
-def test_module_declares_message_meta_capability():
-    assert "message_meta" in Module.supersedes
+def test_module_is_pure_business():
+    """v3：消息元信息是**业务**，不声明任何 supersedes（不是接管）。
+
+    框架里已没有任何"元信息机制"可被接管 —— 渲染规则整个人在本模块
+    （`service.py`），框架只提供 `pre_request` 钩子与 `raw_user_text` 原语。
+    """
+    assert not getattr(Module, "supersedes", ())
+    assert not getattr(Module, "provides", ())
     assert Module.category == "LLM"
 
 
@@ -66,7 +72,7 @@ def test_policy_config_kinds_are_independent():
 
 def test_enhance_reads_module_meta_config():
     """`_ctx_cfg` 必须读 `runtime.meta_options`（这是"策略搬进模块"的实证）。"""
-    from app.agent.assembly.enhance import _ctx_cfg
+    from app.plugins.llm_message_meta.service import _ctx_cfg
 
     base = {"include_time": False, "include_sender": False}
     view = SimpleNamespace(
@@ -80,7 +86,7 @@ def test_enhance_reads_module_meta_config():
 
 
 def test_enhance_falls_back_without_module():
-    from app.agent.assembly.enhance import _ctx_cfg
+    from app.plugins.llm_message_meta.service import _ctx_cfg
 
     runtime = SimpleNamespace(config={"include_time": True})
     assert _ctx_cfg(SimpleNamespace(runtime=runtime), "include_time", False) is True
@@ -102,11 +108,22 @@ def test_history_cleaner_uses_module_config():
 # ---------- 装/卸 ----------
 
 
+class _Hooks:
+    """最小钩子注册表：记录模块注册了什么。"""
+
+    def __init__(self):
+        self.registered: list[dict] = []
+
+    def register(self, **kwargs):
+        self.registered.append(kwargs)
+
+
 class _Runtime:
     def __init__(self):
         self.bot_id = "12345"
         self.config = {"include_time": False}
         self.meta_options = None
+        self.llm_hooks = _Hooks()
 
 
 class _CfgService:
@@ -147,6 +164,9 @@ async def test_on_load_installs_view_and_unload_clears():
     await module.on_load()
     assert runtime.meta_options is not None
     assert policy_get(runtime, "meta", "include_time") is True
+    # 钩子是模块自己注册的（框架不再 install 元信息钩子）
+    stages = {(h["stage"], h["order"]) for h in runtime.llm_hooks.registered}
+    assert ("pre_request", -100) in stages and ("pre_request", 20) in stages
 
     await module.on_unload()
     assert runtime.meta_options is None

@@ -1,6 +1,7 @@
-"""框架级 LLM 上下文增强：用户信息感知 / 私信 QQ / 时间 / 回复打断 / 调试。
+"""消息元信息渲染（原 `app/agent/assembly/enhance.py`，v3 搬进本模块）。
 
-从 module/llm_enhance 迁移到框架层，直接挂在 AgentRuntime 的 LlmHookRegistry 上。
+它把「这条消息是谁说的、什么时候、回了谁、@了谁」渲染进本轮 user 文本。
+框架只提供 `pre_request` 钩子与 `raw_user_text` 领域原语，渲染规则归本模块。
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from typing import Any
 
 from app.agent import logger
 from app.agent.context.group import UNRESOLVED_REPLY, extract_msg_text, has_real_content
+from app.domain.trigger import raw_user_text as _raw_user_text
 
 
 def _ctx_cfg(ctx, key: str, default: Any):
@@ -30,19 +32,6 @@ def _ctx_cfg(ctx, key: str, default: Any):
 def _ctx_enabled(ctx, key: str, default: bool) -> bool:
     return bool(_ctx_cfg(ctx, key, default))
 
-
-def _raw_user_text(event) -> str:
-    parts: list[str] = []
-    for seg in getattr(event, "message", []) or []:
-        if isinstance(seg, dict):
-            if seg.get("type") == "text":
-                data = seg.get("data", {}) or {}
-                parts.append(data.get("text", ""))
-        else:
-            if getattr(seg, "type", "") == "text":
-                data = getattr(seg, "data", {}) or {}
-                parts.append(data.get("text", ""))
-    return "".join(parts).strip()
 
 
 async def collect_user_context(ctx):
@@ -177,14 +166,6 @@ async def format_user_context(ctx):
         ctx.state["message_meta_injected"] = True
 
 
-async def interrupt_config_hook(ctx):
-    ctx.runtime.interrupt_enabled = _ctx_enabled(ctx, "interrupt_enable", False)
-    ctx.runtime.interrupt_save_sent = _ctx_enabled(ctx, "interrupt_save_sent", True)
-    if _ctx_enabled(ctx, "interrupt_debug", False):
-        logger.add_info(f"#{ctx.runtime.bot_id}").info(
-            f"[打断] {ctx.session_id} interrupt_enabled={ctx.runtime.interrupt_enabled}"
-        )
-
 
 # ---------- 群成员昵称 / 引用辅助 ----------
 
@@ -307,13 +288,3 @@ def _segments_to_text(message, message_id: Any = None) -> str:
     msg = Message.from_onebot(message)
     fallback = "[" + ",".join(s.type for s in msg.segments) + "]" if msg.segments else ""
     return rendered or fallback
-
-
-def install_framework_hooks(runtime) -> None:
-    """在 AgentRuntime 上注册框架级 LLM 钩子。"""
-    registry = getattr(runtime, "llm_hooks", None)
-    if registry is None:
-        return
-    registry.register(stage="pre_request", event_type="*", order=-100, handler=collect_user_context)
-    registry.register(stage="pre_request", event_type="*", order=20, handler=format_user_context)
-    registry.register(stage="pre_request", event_type="*", order=25, handler=interrupt_config_hook)

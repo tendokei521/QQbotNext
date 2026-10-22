@@ -129,7 +129,7 @@ def normalize_event(config, event, ctx=None) -> TurnInput | None:
 
     # 用户原始正文（未包裹元信息）：记忆检索与意图判定都用它，避免元信息里的
     # QQ 号被当成消息 id、昵称污染检索。事件可能没有 message（主动/测试替身）。
-    from app.agent.assembly.enhance import _raw_user_text
+    from app.domain.trigger import raw_user_text as _raw_user_text
 
     segment_text = _raw_user_text(event).strip()
     raw_user_text = ""

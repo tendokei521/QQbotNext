@@ -47,3 +47,17 @@ def check_trigger(message_data, self_id: str, trigger_at: bool, trigger_keyword)
                 keyword_triggered = True
 
     return at_triggered or keyword_triggered, at_triggered, text
+
+
+def raw_user_text(event) -> str:
+    parts: list[str] = []
+    for seg in getattr(event, "message", []) or []:
+        if isinstance(seg, dict):
+            if seg.get("type") == "text":
+                data = seg.get("data", {}) or {}
+                parts.append(data.get("text", ""))
+        else:
+            if getattr(seg, "type", "") == "text":
+                data = getattr(seg, "data", {}) or {}
+                parts.append(data.get("text", ""))
+    return "".join(parts).strip()
