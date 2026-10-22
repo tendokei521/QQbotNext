@@ -21,10 +21,11 @@ class KnowledgeManager:
         self.store = KnowledgeStore(self.bot_id)
 
     def _get(self, key: str, default: Any = None) -> Any:
-        try:
-            return self.runtime.config.get(key, default)
-        except Exception:
-            return default
+        # 知识库策略键归 `llm_knowledge` 模块所有：接管时视图挂在
+        # `runtime.knowledge_options`，未接管时回退 agent 配置（行为不变）。
+        from app.agent.policy import policy_get
+
+        return policy_get(self.runtime, "knowledge", key, default)
 
     def enabled(self) -> bool:
         return bool(self._get("knowledge_enable", False))

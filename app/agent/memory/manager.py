@@ -76,13 +76,11 @@ class MemoryManager:
 
     # ── 配置 ─────────────────────────────────────────────
     def _get(self, key: str, default: Any = None) -> Any:
-        cfg = getattr(self.runtime, "config", None)
-        if cfg is None:
-            return default
-        try:
-            return cfg.get(key, default)
-        except Exception:
-            return default
+        # 记忆策略键归 `llm_memory` 模块所有：接管时视图挂在 `runtime.memory_options`，
+        # 未接管时回退 agent 配置（行为不变）。
+        from app.agent.policy import policy_get
+
+        return policy_get(self.runtime, "memory", key, default)
 
     def enabled(self) -> bool:
         if not bool(self._get("memory_enable", True)):
