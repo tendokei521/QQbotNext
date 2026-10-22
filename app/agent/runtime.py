@@ -24,7 +24,6 @@ from app.agent.providers.invoker import ProviderInvoker
 from app.agent.providers.policy import TRACKED_KEYS, merge_config_layers
 from app.agent.session.manager import SessionManager
 from app.agent.telemetry import TelemetryRecorder
-from app.agent.tools.mcp import MCPManager
 from app.agent.tools.spec import ModuleToolRegistry
 
 
@@ -103,9 +102,8 @@ class AgentRuntime:
         # 未装模块时这里保持 None，流水线侧的调用点全部做了 getattr 保护。
         self.scheduler: Any = None
         self.proactive: Any = None
-        # 记忆 / 知识库 / MCP 都是**业务**：实现已被搬进对应模块，
-        # 框架不再持有它们的实例（模块通过 context_providers / tool_sources 接入）。
-        self.mcp_manager = MCPManager(self)
+        # 记忆 / 知识库 / MCP / OneBot 工具都是**业务**：实现已搬进对应模块，
+        # 框架不再持有它们的实例（模块通过 tool_sources 接入）。
         # 策略配置视图（模块接管时挂载；None = 回退 agent 配置）
         self.assembly_options: Any = None
         self.meta_options: Any = None
@@ -360,7 +358,6 @@ class AgentRuntime:
             ("scheduler", getattr(self.scheduler, "stop", None)),
             ("proactive", getattr(self.proactive, "stop", None)),
             ("llm_pipeline", self.llm_pipeline.shutdown),
-            ("mcp_manager", self.mcp_manager.close),
         ]
         if close_session:
             components.append(("session_mgr", self.session_mgr.close))

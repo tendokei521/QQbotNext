@@ -25,9 +25,9 @@ def test_default_config_and_schema_cover_owned_keys():
     assert not [k for k in OWNED_KEYS if k not in Module.config_schema]
 
 
-def test_module_declares_capabilities():
-    assert "onebot_tools" in Module.supersedes
-    assert "mcp" in Module.supersedes
+def test_module_is_pure_business():
+    """v3：OneBot 工具与 MCP 是**业务**，通过 `tool_sources` 注册，不声明 supersedes。"""
+    assert not getattr(Module, "supersedes", ())
     assert Module.category == "LLM"
 
 
@@ -35,7 +35,7 @@ def test_module_declares_capabilities():
 
 
 def test_onebot_policy_reads_module_config():
-    from app.agent.tools.onebot.security import resolve_tool_policy
+    from app.plugins.llm_tools_extra.onebot.security import resolve_tool_policy
 
     runtime = SimpleNamespace(
         config={"onebot_tools_enable": False},
@@ -53,7 +53,7 @@ def test_onebot_policy_reads_module_config():
 
 
 def test_onebot_policy_falls_back_without_module():
-    from app.agent.tools.onebot.security import resolve_tool_policy
+    from app.plugins.llm_tools_extra.onebot.security import resolve_tool_policy
 
     runtime = SimpleNamespace(config={"onebot_tools_enable": False})
     policy = resolve_tool_policy(runtime, {"name": "send_group_msg", "permission": "member"})
@@ -61,7 +61,7 @@ def test_onebot_policy_falls_back_without_module():
 
 
 def test_poke_cooldown_reads_module_config():
-    from app.agent.tools.onebot.executor import _poke_cooldown
+    from app.plugins.llm_tools_extra.onebot.executor import _poke_cooldown
 
     runtime = SimpleNamespace(
         config={"poke_cooldown_seconds": 99},
@@ -71,7 +71,7 @@ def test_poke_cooldown_reads_module_config():
 
 
 def test_poke_cooldown_falls_back_without_module():
-    from app.agent.tools.onebot.executor import _poke_cooldown
+    from app.plugins.llm_tools_extra.onebot.executor import _poke_cooldown
 
     runtime = SimpleNamespace(config={"poke_cooldown_seconds": 42})
     assert _poke_cooldown(runtime) == 42.0
@@ -101,7 +101,7 @@ async def test_onebot_gate_follows_module():
 
 
 def test_mcp_reads_module_config():
-    from app.agent.tools.mcp import MCPManager
+    from app.plugins.llm_tools_extra.mcp import MCPManager
 
     runtime = SimpleNamespace(
         bot_id="1",
@@ -115,7 +115,7 @@ def test_mcp_reads_module_config():
 
 
 def test_mcp_falls_back_without_module():
-    from app.agent.tools.mcp import MCPManager
+    from app.plugins.llm_tools_extra.mcp import MCPManager
 
     runtime = SimpleNamespace(bot_id="2", config={"mcp_servers": []})
     assert MCPManager(runtime).enabled() is False
@@ -158,6 +158,7 @@ class _Runtime:
         self.bot_id = "12345"
         self.config = {"onebot_tools_enable": True}
         self.tools_options = None
+        self.tool_sources: list = []
 
 
 class _CfgService:
@@ -198,6 +199,7 @@ async def test_on_load_installs_view_and_unload_clears():
     await module.on_load()
     assert policy_get(runtime, "tools", "onebot_tools_enable") is False
     assert module.onebot_enabled is False
+    assert {s.name for s in runtime.tool_sources} == {"onebot", "mcp"}
 
     await module.on_unload()
     assert runtime.tools_options is None

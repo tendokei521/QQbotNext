@@ -1,8 +1,3 @@
-"""OneBot 通用工具包：数据驱动地把 OneBot API 暴露给 LLM。"""
+"""（v3 已清空）OneBot 工具已搬进 app/plugins/llm_tools_extra/onebot。"""
 
-from __future__ import annotations
-
-from app.agent.tools.onebot.executor import build_onebot_tools
-from app.agent.tools.onebot.manifest import ONEBOT_TOOLS
-
-__all__ = ["ONEBOT_TOOLS", "build_onebot_tools"]
+__all__: list[str] = []

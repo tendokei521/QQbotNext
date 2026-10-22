@@ -49,8 +49,8 @@ build-backend = "setuptools.build_meta"
 include = ["app*", "module*"]
 
 [tool.setuptools.package-data]
-# OneBot 工具清单是数据文件，必须随包一起分发（`app/agent/tools/onebot/manifest.py` 加载它）
-"app.agent.tools.onebot" = ["*.json"]
+# OneBot 工具清单是数据文件，必须随包一起分发（v3：已搬进 llm_tools_extra 模块）
+"app.plugins.llm_tools_extra.onebot" = ["*.json"]
 # 插件自带页面与 manifest
 "app.plugins.*" = ["module.json", "pages/*.html"]
 

@@ -109,17 +109,7 @@ async def _collect_llm_ext(
 
 
 
-    # MCP 工具（异步连接后暴露）
-    mcp = getattr(runtime, "mcp_manager", None)
-    if mcp is not None and mcp.enabled():
-        await mcp.ensure_ready()
-        specs.extend(mcp.build_tools())
 
-    # OneBot 通用工具（数据驱动清单，按当前会话作用域过滤）
-    if bool(runtime.config.get("onebot_tools_enable", False)):
-        from app.agent.tools.onebot import build_onebot_tools
-
-        specs.extend(build_onebot_tools(runtime, ctx))
 
     # 模块注册的工具源（OneBot / MCP / 记忆 / 知识库做成模块时的接入点）。
     # 放在过滤之前：它们产出的工具与框架工具走同一套四类开关过滤。

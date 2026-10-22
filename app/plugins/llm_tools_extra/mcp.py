@@ -157,6 +157,17 @@ class MCPClient:
             self._reader_task.cancel()
 
 
+def _decode_servers(raw):
+    """模块配置里 `mcp_servers` 是 textarea（JSON 字符串），统一成 list。"""
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw or '[]')
+            return parsed if isinstance(parsed, list) else []
+        except Exception:  # noqa: BLE001 —— 配置写坏了按「无 server」处理
+            return []
+    return list(raw or [])
+
+
 class MCPManager:
     """按 AgentRuntime 管理多个 MCP server，并把远端工具转成 ToolSpec。"""
 
@@ -170,7 +181,7 @@ class MCPManager:
         try:
             from app.agent.policy import policy_get
 
-            raw = policy_get(self.runtime, "tools", "mcp_servers", []) or []
+            raw = _decode_servers(policy_get(self.runtime, "tools", "mcp_servers", []) or [])
         except Exception:
             raw = []
         if isinstance(raw, str):

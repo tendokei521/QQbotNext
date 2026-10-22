@@ -45,8 +45,6 @@ class Module(BaseModule):
     subscribe = ()
     category = "LLM"
     order = 70
-    provides = ("onebot_tools", "mcp")
-    supersedes = ("onebot_tools", "mcp")
     default_config = {
         "onebot_tools_enable": False,
         "onebot_tools_allowed": [],
@@ -65,15 +63,34 @@ class Module(BaseModule):
         if runtime is None:
             return
         from app.agent.delivery.output import ConfigView
+        from app.agent.loop.providers import register_tool_source
+        from app.plugins.llm_tools_extra.mcp import MCPManager
+        from app.plugins.llm_tools_extra.service import MCPToolSource, OneBotToolSource
 
         runtime.tools_options = ConfigView(
             getattr(runtime, "config", None), self.config, OWNED_KEYS
         )
+        register_tool_source(runtime, OneBotToolSource(self))
+        # MCP 需要连接状态：管理器由模块自己持有（框架不再有 mcp_manager 字段）
+        self._mcp = MCPManager(runtime)
+        register_tool_source(runtime, MCPToolSource(self))
 
     async def on_unload(self) -> None:
         runtime = self._runtime()
         if runtime is None:
             return
+        from app.agent.loop.providers import unregister_owner
+
+        unregister_owner(runtime, self)
+        mcp = getattr(self, "_mcp", None)
+        if mcp is not None:
+            try:
+                mcp.close()
+            except Exception as e:  # noqa: BLE001 —— 关闭失败不该阻断卸载
+                from app.core.logger import logger
+
+                logger.debug(f"[llm_tools_extra] 关闭 MCP 失败（已忽略）: {e}")
+            self._mcp = None
         runtime.tools_options = None
 
     def _runtime(self) -> Any:

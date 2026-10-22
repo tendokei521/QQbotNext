@@ -7,8 +7,8 @@ from types import SimpleNamespace
 from app.agent.group_log.store import GroupLogStore
 from app.agent.persona import emoji as emoji_lexicon
 from app.agent.persona.data import qq_faces
-from app.agent.tools.onebot.executor import _handler
-from app.agent.tools.onebot.manifest import ONEBOT_TOOLS
+from app.plugins.llm_tools_extra.onebot.executor import _handler
+from app.plugins.llm_tools_extra.onebot.manifest import ONEBOT_TOOLS
 from app.agent.tools.spec import ToolContext
 
 ACTION = "set_msg_emoji_like"
