@@ -9,8 +9,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.agent.usage.recorder import StatRecorder, set_recorder
 from app.agent.usage import query as stat_query
+from app.agent.usage.recorder import StatRecorder, set_recorder
 from app.infrastructure.persistence.database import Database
 from app.webui.api import stats as stats_router
 
