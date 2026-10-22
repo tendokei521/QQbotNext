@@ -65,7 +65,8 @@ def prereq_state(runtime: Any, name: str) -> tuple[bool, str]:
     if not key:
         return True, ""
     if name.startswith("memory_"):
-        memory = getattr(runtime, "memory", None)
+        # 记忆归 `llm_memory` 模块：它把管理器挂在 `runtime.memory_service`（框架已无 memory 字段）
+        memory = getattr(runtime, "memory_service", None)
         if memory is not None and hasattr(memory, "enabled"):
             return bool(memory.enabled()), label
     return bool(cfg_get(runtime, key, default)), label
