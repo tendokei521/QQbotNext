@@ -35,7 +35,6 @@ PAGE_VIEW = {
         "icon": "mdi-tune-variant",
         "color": "primary",
         "path": "/agent/basic",
-        "area": "agent",
     },
     "permission": {
         "title": "权限管理",
@@ -43,7 +42,6 @@ PAGE_VIEW = {
         "icon": "mdi-shield-account-outline",
         "color": "success",
         "path": "/agent/permission",
-        "area": "agent",
     },
     "behavior": {
         "title": "对话行为",
@@ -51,7 +49,6 @@ PAGE_VIEW = {
         "icon": "mdi-call-split",
         "color": "secondary",
         "path": "/agent/behavior",
-        "area": "agent",
     },
     "session": {
         "title": "会话管理",
@@ -59,7 +56,6 @@ PAGE_VIEW = {
         "icon": "mdi-chat-processing-outline",
         "color": "info",
         "path": "/agent/session",
-        "area": "agent",
     },
     "advanced": {
         "title": "高级功能",
@@ -67,7 +63,6 @@ PAGE_VIEW = {
         "icon": "mdi-wrench-cog-outline",
         "color": "warning",
         "path": "/agent/advanced",
-        "area": "agent",
     },
 }
 
@@ -104,7 +99,6 @@ def build_manifest() -> dict:
                 "subtitle": view["subtitle"],
                 "icon": view["icon"],
                 "color": view["color"],
-                "area": view["area"],
                 "order": page["order"],
                 "groups": [
                     {
@@ -118,12 +112,13 @@ def build_manifest() -> dict:
             }
         )
     return {
-        "version": 4,
+        "version": 5,
         "note": (
             "本文件由 scripts/gen_sections.py 从 app/agent/config_partition.py 生成，"
             "请勿手改。要加字段/换分组请改 config_partition.py 里的 UI_PAGES。"
             "v4：模块能力（流式/记忆/主动消息/工具/联网等）已迁到各自模块的配置页，"
-            "本体只剩 5 页 43 键。"
+            "本体只剩 5 页 43 键。v5：移除 area 字段——v4 之后只剩单一区域，"
+            "单值枚举无信息量，且会让 /advanced 这类已删区域在代码里阴魂不散。"
         ),
         "generatedFrom": "app/agent/config_partition.py::page_summary()",
         "sections": sections,

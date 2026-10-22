@@ -64,8 +64,14 @@ def test_manifest_is_generated_not_handwritten():
 
 def test_manifest_declares_its_source():
     manifest = _load()
-    assert manifest.get("version") == 4
+    assert manifest.get("version") == 5
     assert "config_partition" in manifest.get("generatedFrom", "")
+
+
+def test_manifest_has_no_area_field():
+    """v5 起只有单一区域；`area` 会让已删的 /advanced 在代码里残留脚手架。"""
+    for section in _sections():
+        assert "area" not in section, f"{section['id']} 仍带 area 字段"
 
 
 # ---------- 页面结构 ----------

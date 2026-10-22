@@ -16,9 +16,6 @@ import { defineAsyncComponent, type Component } from 'vue'
 const CUSTOM_SECTION_LOADERS: Record<string, () => Promise<unknown>> = {
   basic: () => import('@/components/agent/sections/AgentBasicSection.vue'),
   permission: () => import('@/components/agent/sections/AgentPermissionSection.vue'),
-  stream: () => import('@/components/agent/sections/AgentStreamPresets.vue'),
-  adv_tools: () => import('@/components/agent/sections/AgentAdvancedToolsSection.vue'),
-  adv_proactive: () => import('@/components/agent/sections/AgentPanelsSection.vue'),
 }
 
 // defineAsyncComponent 会创建新的组件包装，缓存避免每次渲染重建（导致重复请求）

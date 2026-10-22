@@ -10,13 +10,14 @@
  * v3 起 registry 自己拥有**页内分组**：一个页面可以横跨多个后端 group，也可以只取某
  * 后端 group 的两三个字段。后端 group 是模块划分（group_session / group_tools …），
  * 用户心智是任务划分，两者不再强行对齐。
+ *
+ * v4 起只有**一个区域**（``/agent``）。曾并存的 ``/advanced``「进阶调参」区在内容
+ * 拆成功能模块后只剩空概览页，连同 ``area`` 字段一并移除——单值的枚举没有信息量，
+ * 留着只会让人以为还有第二个区域。
  */
 
 import manifest from './sections.json'
-import { buildSectionSchema, splitSchema, type VirtualGroupSpec } from '@/utils/schema'
-
-/** 归属区域：agent 走 /agent/*；advanced 走 /advanced/*（进阶调参）。 */
-export type AgentSectionArea = 'agent' | 'advanced'
+import { buildSectionSchema, type VirtualGroupSpec } from '@/utils/schema'
 
 export interface AgentSection {
   id: string
@@ -25,7 +26,6 @@ export interface AgentSection {
   subtitle: string
   icon: string
   color: string
-  area: AgentSectionArea
   /** 侧边栏/概览内的排序权重 */
   order: number
   /** 页内子分组：决定段内导航、分组标题与字段归属 */
@@ -48,17 +48,13 @@ interface RawSection {
   subtitle: string
   icon: string
   color: string
-  area?: AgentSectionArea
   order?: number
   customFirst?: boolean
   customFields?: string[]
   groups: VirtualGroupSpec[]
 }
 
-const RAW = manifest as unknown as {
-  sections: RawSection[]
-  retired?: { note?: string; fields?: string[] }
-}
+const RAW = manifest as unknown as { sections: RawSection[] }
 
 export const AGENT_SECTIONS: AgentSection[] = RAW.sections
   .map((s) => ({
@@ -68,7 +64,6 @@ export const AGENT_SECTIONS: AgentSection[] = RAW.sections
     subtitle: s.subtitle,
     icon: s.icon,
     color: s.color,
-    area: s.area ?? 'agent',
     order: s.order ?? 100,
     groups: s.groups,
     customFields: s.customFields ?? [],
@@ -76,16 +71,7 @@ export const AGENT_SECTIONS: AgentSection[] = RAW.sections
   }))
   .sort((a, b) => a.order - b.order)
 
-/**
- * 前端不再提供任何入口的字段（后端字段与默认值仍在）。
- *
- * 组装标准化由并行计划接管：信息感知成了固定流程（组装全面化 + 固定上传 tool），
- * 这些「要不要感知/用哪种格式」的开关对用户已经没有意义。
- */
-export const RETIRED_FIELDS: string[] = RAW.retired?.fields ?? []
-
 export const AGENT_INDEX_PATH = '/agent'
-export const ADVANCED_INDEX_PATH = '/advanced'
 
 export function agentSectionById(id: string): AgentSection | undefined {
   return AGENT_SECTIONS.find((s) => s.id === id)
@@ -95,23 +81,11 @@ export function agentSectionByPath(path: string): AgentSection | undefined {
   return AGENT_SECTIONS.find((s) => s.path === path)
 }
 
-export function sectionsOfArea(area: AgentSectionArea): AgentSection[] {
-  return AGENT_SECTIONS.filter((s) => s.area === area)
-}
-
-/** 侧边栏「Agent 面板」二级菜单：概览 + 归属 agent 区域的分区。 */
+/** 侧边栏「Agent 面板」二级菜单：概览 + 全部分区。 */
 export function agentSidebarEntries(): { to: string; title: string }[] {
   return [
     { to: AGENT_INDEX_PATH, title: '概览' },
-    ...sectionsOfArea('agent').map((s) => ({ to: s.path, title: s.title })),
-  ]
-}
-
-/** 侧边栏「高级设置」二级菜单：概览 + 归属 advanced 区域的分区。 */
-export function advancedSidebarEntries(): { to: string; title: string }[] {
-  return [
-    { to: ADVANCED_INDEX_PATH, title: '概览' },
-    ...sectionsOfArea('advanced').map((s) => ({ to: s.path, title: s.title })),
+    ...AGENT_SECTIONS.map((s) => ({ to: s.path, title: s.title })),
   ]
 }
 
@@ -168,49 +142,15 @@ export function agentSectionBadge(id: string, input: AgentBadgeInput): string {
       if (debounce > 0) parts.unshift(`抖动 ${debounce}s`)
       return parts.join(' · ')
     }
-    case 'stream':
-      return draft.stream_output ? '开启' : '关闭'
-    case 'memory':
-      return draft.memory_enable ? '开启' : '关闭'
-    case 'adv_tools': {
+    case 'advanced': {
       const on = [
-        draft.onebot_tools_enable && 'OneBot',
+        draft.image_understanding_enable && '图片',
+        draft.gif_understanding_enable && '动图',
         draft.tavily_enable && '联网',
-        draft.knowledge_enable && '知识库',
-        draft.mcp_servers && 'MCP',
       ].filter(Boolean)
-      return on.length ? on.join(' · ') : '未配置'
+      return on.length ? on.join(' · ') : '未开启'
     }
-    case 'adv_proactive': {
-      const on = [
-        draft.proactive_friend_enable && '私聊',
-        draft.proactive_group_enable && '群聊',
-        draft.schedule_enable && '定时',
-      ].filter(Boolean)
-      return on.length ? on.join(' + ') : '未开启'
-    }
-    case 'adv_output':
-      return draft.speech_via_tool ? '语音气泡' : '纯文本'
     default:
       return ''
   }
-}
-
-export type AgentSectionImportance = 'basic' | 'advanced'
-
-/**
- * 分区内是否全部为 basic 档字段。
- *
- * 注意：**不要**再用它给概览卡片打「高级」徽标。importance 是字段级之后，几乎每个
- * 分区都至少有一个进阶字段，这个判定会把 6 张常用卡里的 5 张都标成高级（实测如此）。
- * 「常用 / 进阶」的划分已经由 area 表达。保留此函数仅用于「分区自查」类工具。
- */
-export function agentSectionImportance(
-  section: AgentSection,
-  schema: Record<string, any>,
-): AgentSectionImportance {
-  const { items } = splitSchema(agentSectionSchema(section, schema))
-  const values = Object.values(items).map((def: any) => def?.importance || 'basic')
-  if (!values.length) return 'basic'
-  return values.every((v) => v === 'basic') ? 'basic' : 'advanced'
 }

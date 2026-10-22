@@ -8,7 +8,7 @@ import { useNotifyStore } from '@/stores/notify'
 import { connectSocket } from '@/api/socket'
 import { errorMessage } from '@/api/http'
 import MultiGroupDialog from '@/components/MultiGroupDialog.vue'
-import { advancedSidebarEntries, agentSidebarEntries } from '@/agent/sections'
+import { agentSidebarEntries } from '@/agent/sections'
 
 const themeStore = useThemeStore()
 const bots = useBotsStore()
@@ -53,17 +53,17 @@ interface NavItem {
 }
 
 const navItems = computed<NavItem[]>(() => {
-  const showExperimental = !!webui.config.experimental?.show_experimental
   // Agent 二级菜单由 @/agent/sections 派生，避免与路由/概览卡片各抄一份
   const agentChildren: NavChild[] = agentSidebarEntries()
-  const advancedChildren: NavChild[] = advancedSidebarEntries()
   const toolChildren: NavChild[] = [
     { to: '/tools/system', title: 'System Tools' },
     { to: '/tools/onebot', title: 'OneBot Tools' },
     { to: '/tools/mcp', title: 'MCP Tools' },
     { to: '/tools/module', title: '模块 Tools' },
   ]
-  const items: NavItem[] = [
+  // 历史：曾有「高级设置」独立区（内容拆成模块后只剩空概览页，已移除），
+  // 以及实验性「配置档案」入口（整套能力已下线）。实验性开关框架仍在设置页保留。
+  return [
     { to: '/', title: '总览', icon: 'mdi-view-dashboard-outline' },
     { to: '/bots', title: '账号管理', icon: 'mdi-robot-outline' },
     { to: '/modules', title: '功能模块', icon: 'mdi-cube-outline' },
@@ -71,15 +71,10 @@ const navItems = computed<NavItem[]>(() => {
     { to: '/personas', title: '人格设定', icon: 'mdi-account-heart-outline' },
     { to: '/sessions', title: '会话数据', icon: 'mdi-chat-outline' },
     { title: 'Agent 面板', icon: 'mdi-creation-outline', children: agentChildren },
-    { title: '高级设置', icon: 'mdi-tune', children: advancedChildren },
     { title: 'Tool 管理', icon: 'mdi-toolbox-outline', children: toolChildren },
     { to: '/logs', title: '日志', icon: 'mdi-console' },
     { to: '/settings', title: '设置', icon: 'mdi-cog-outline' },
   ]
-  if (showExperimental) {
-    items.splice(6, 0, { to: '/config-profiles', title: '配置档案', icon: 'mdi-book-multiple' })
-  }
-  return items
 })
 
 const openedGroups = ref<string[]>([])

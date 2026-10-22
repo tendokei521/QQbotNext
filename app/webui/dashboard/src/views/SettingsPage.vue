@@ -147,7 +147,8 @@ onMounted(() => {
               hide-details
             />
             <div class="text-caption mt-2" style="color: rgba(var(--v-theme-on-surface), 0.55)">
-              开启后，导航中会显示「配置档案」，并在 Agent 面板显示「知识库 / MCP」等实验性配置入口
+              开关与配置结构保留给后续的实验性入口使用。当前版本没有注册任何实验性入口，
+              因此开启后界面不会发生变化（此前的「配置档案」已随能力下线移除）。
             </div>
           </v-card-text>
         </v-card>

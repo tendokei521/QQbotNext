@@ -9,12 +9,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import EmptyState from '@/components/EmptyState.vue'
-import {
-  ADVANCED_INDEX_PATH,
-  AGENT_INDEX_PATH,
-  agentSectionByPath,
-  type AgentSectionArea,
-} from '@/agent/sections'
+import { AGENT_INDEX_PATH, agentSectionByPath } from '@/agent/sections'
 import { useAgentConfigStore } from '@/stores/agentConfig'
 import { useBotsStore } from '@/stores/bots'
 
@@ -25,20 +20,7 @@ const agent = useAgentConfigStore()
 
 // 当前路由对应的分区（index 路由没有分区）
 const section = computed(() => agentSectionByPath(route.path))
-/**
- * 当前所在的配置区：agent（常用）或 advanced（进阶调参）。
- * 两个区共用这个外壳（bot 守卫 / 加载 / 保存状态完全一致），只有标题与返回目标不同。
- */
-const area = computed<AgentSectionArea>(() =>
-  section.value ? section.value.area : route.path.startsWith('/advanced') ? 'advanced' : 'agent',
-)
-const indexPath = computed(() => (area.value === 'advanced' ? ADVANCED_INDEX_PATH : AGENT_INDEX_PATH))
-const panelTitle = computed(() => (area.value === 'advanced' ? '高级设置' : 'Agent 面板'))
-const panelSubtitle = computed(() =>
-  area.value === 'advanced'
-    ? '进阶调参：工具能力、主动消息、消息与输出通道'
-    : '框架级 LLM Agent：配置、权限、会话与对话行为',
-)
+const panelTitle = 'Agent 面板'
 const botId = computed(() => bots.currentBot?.bot_id ?? null)
 const booting = ref(false)
 
@@ -69,7 +51,7 @@ watch(
           variant="text"
           prepend-icon="mdi-arrow-left"
           class="mr-1"
-          @click="router.push(indexPath)"
+          @click="router.push(AGENT_INDEX_PATH)"
         >
           返回{{ panelTitle }}
         </v-btn>
@@ -77,9 +59,7 @@ watch(
           <v-icon v-if="section" :icon="section.icon" size="28" class="mr-1" :color="section.color" />
           {{ section ? section.title : panelTitle }}
         </h1>
-        <v-chip v-if="!section" size="small" variant="tonal" color="primary">
-          {{ area === 'advanced' ? '进阶调参' : 'LLM · 框架级' }}
-        </v-chip>
+        <v-chip v-if="!section" size="small" variant="tonal" color="primary">LLM · 框架级</v-chip>
         <v-chip v-if="agent.saveStatus === 'saving'" size="small" color="primary" variant="flat">
           <v-progress-circular size="12" indeterminate class="mr-1" /> 保存中…
         </v-chip>
@@ -113,7 +93,7 @@ watch(
       </div>
     </div>
     <div class="app-page-subtitle">
-      {{ section ? section.subtitle : panelSubtitle }}
+      {{ section ? section.subtitle : '框架级 LLM Agent：配置、权限、会话与对话行为' }}
     </div>
 
     <v-progress-linear v-if="agent.loading || booting" indeterminate color="primary" class="mb-3" />
