@@ -21,6 +21,35 @@
 
 ---
 
+## 0.1 施工进度（2026-02 当前）
+
+| 波 | 状态 | 产出 |
+|---|---|---|
+| **W0** 接线与契约 | ✅ 完成 | 出站链按注册表现取（插件注册即生效）；`ServiceAccess` 补 `node_registry`/`sessions`/`runtime`/`tools`/`outbound`；`capabilities()` 同步；`BUILTIN_CONTROLLERS` 单一真相表；`config_partition.py` 布局契约 |
+| **W1** 六个原料接口 | ✅ 完成 | `run_turn` / `TurnRequest` / `TurnResult`；`BaseModule.llm_turn` / `send_to` / `spawn` / `sessions` / `framework_tools`；`delivery.channel.send_item`；`tools.catalog.framework_tools`；`domain.session` 统一 session 解析；`prepare_prompt` 解除事件耦合（`turn=` 参数） |
+| **W2** 三个槽 + 注册表 | ✅ 完成 | `output` 槽（`BlockingOutput`/`StreamOutput`/`select_default_output` + `OutputFeatureController`）；`context_providers` + `tool_sources` 注册表（`TurnScope`/`SimpleContextProvider`/`SimpleToolSource`）；装配器新增 `extra` 块（位于 `group_log` 与 `history` 之间） |
+| **B-4** 卸载纪律 | ✅ 完成 | `unregister_provider`（含 owner 批量）；`NodeRegistry.remove_owner`；`ProviderRegistry.unregister_module`；`SessionManager.evict` + 单例 key 归一；`_unregister_plugin_hooks` 统一串联（钩子/数据源/节点/上下文贡献者） |
+| **owner 迁移** | ✅ 完成 | `is_bot_owner` 改为名册判定；`BotConnection.owner_id` 折旧为只读 `None`；WebUI 三处去掉 `owner_id`；`scripts/migrate_v3_owner_to_roster.py`（幂等 + dry-run + DB 备份） |
+| **调度服务增强** | ✅ 完成 | `SchedulerService.list_jobs / update_job / run_job_now`（对齐 AstrBot `cron_manager`） |
+| W3–W6 九个模块 | ⏸ 待"模块功能提供" | 迁移目标、键清单、机制来源已在 §3 定稿 |
+| W7 删配置 + 前端重做 | ⏸ 待模块就位 | 布局与迁移脚本规格已在 §2/§6/§7 定稿 |
+| W8 文档收尾 | ◐ 部分完成 | `MODULE_DEV.md §4.9` 已补七个新接口；`README` 已删废弃的 `time_core` |
+
+**可扩展度记分板**（`tests/architecture/test_extensibility_contract.py`，棘轮）：
+
+| 时点 | full | half | unwired | 完全可扩展率 |
+|---|---|---|---|---|
+| 施工前 | 10 | 23 | 22 | 18% |
+| 现在（W0–W2 + B-4） | **20** | 20 | 15 | **36%** |
+| 模块迁移完成后（预估） | ~44 | ~8 | ~3 | ~80% |
+
+**测试**：`pytest -q` → **1859 passed**（施工前 1758）。新增用例：
+`test_run_turn`(8) · `test_output_slot`(9) · `test_providers`(11) · `test_channel_send_item`(10) ·
+`test_module_raw_interfaces`(10) · `test_unregister_discipline`(9) · `test_scheduler_service_jobs`(8) ·
+`test_migrate_v3_owner_to_roster`(8) · `test_session_id`(7) · `test_config_partition`(15)。
+
+---
+
 ## 1. 本体界面最终形态（5 页 / 43 键）
 
 顺序即左侧导航顺序（**对话行为在会话管理之前**）。
