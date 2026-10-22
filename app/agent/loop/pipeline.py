@@ -66,6 +66,14 @@ class LlmPipeline:
         ctx.job = job
         event._llm_job = job
 
+        # 记账归属：真实结局（指令 / 未触发 / 进了 LLM）只有流水线知道，
+        # 所以由 `_run` 负责写 msg_in，入站节点不再重复记。
+        try:
+            from app.agent.usage.messages import STAT_OWNER_ATTR
+
+            setattr(event, STAT_OWNER_ATTR, "pipeline")
+        except Exception as e:  # noqa: BLE001 —— 标记失败不影响主流程
+            logger.debug(f"[LLM] 统计归属标记失败（已忽略）: {e}")
         task = asyncio.create_task(self._run(job), name=f"llm_pipeline:{job.id[:8]}")
         self._tasks.add(task)
         task.add_done_callback(lambda t: self._on_task_done(t, job))
@@ -221,12 +229,15 @@ class LlmPipeline:
         session_lock: asyncio.Lock | None = None
         lock_acquired = False
         ctx = job.ctx
+        # 本轮结局：默认「收到但不需要响应」，后续按真实分支升级
+        outcome = "ignored"
         try:
             # 注意：`ctx = job.ctx` 保留在 try 外只为 finally 里能用；
             # 任何可能抛的取属性都放在 try 内（此前 prologue 在 try 外，
             # 一处 AttributeError 就能让整轮静默消失）。
             # #llm 指令仍然走原 chat.handle（它会自己发送回复）
             if is_command(ctx.user_text):
+                outcome = "command"
                 from app.agent.loop.chat import handle as agent_handle
 
                 await agent_handle(self.runtime, ctx.event)
@@ -331,6 +342,8 @@ class LlmPipeline:
             if not self._adopt_generation_if_latest(ctx.job):
                 return
 
+            # 走到这里 = 触发通过 + 门控通过，真的会请求 LLM
+            outcome = "llm"
             # 只有真正进入 LLM 请求前才更新主动消息状态（群聊普通消息不重置沉默计时器）
             await self._observe(ctx)
 
@@ -349,6 +362,13 @@ class LlmPipeline:
                 if session_lock.locked():
                     session_lock.release()
             self.pool.finish(job)
+            # 入站结局记账：只有这里知道「指令 / 未触发 / 真的进 LLM」
+            try:
+                from app.agent.usage.messages import record_inbound
+
+                record_inbound(ctx.event, outcome)
+            except Exception as e:  # noqa: BLE001 —— 统计是旁路
+                logger.debug(f"[LLM] 入站统计记录失败（已忽略）: {e}")
 
     async def _drive(self, ctx: LlmContext, strategy: Any) -> None:
         """驱动输出策略：逐条消息走 ``pre_send`` → 发送 → ``post_send``。

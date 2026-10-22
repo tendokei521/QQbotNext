@@ -151,47 +151,33 @@ class AgentNode(MessageNode):
         await next_()
 
     def _record_inbound(self, ctx: MessageContext) -> None:
-        """记一条 `msg_in`（结局由事件最终状态决定）。"""
+        """记一条 `msg_in` —— 仅当消息没交给流水线时。
+
+        交给流水线的那些由 `pipeline._run` 记账（那里才知道真实结局：
+        指令 / 触发未通过 / 真的进了 LLM）。这里只负责模块拦下 / 门控拦下的。
+
+        历史 bug：曾用 `event._llm_job` 判结局，而 `submit()` 在触发判定之前
+        就把它挂上了 —— 于是每条群消息都被算成「需响应」。
+        """
         try:
-            from app.agent.usage import get_recorder
-            from app.agent.usage.labels import session_label
+            from app.agent.usage.messages import STAT_OWNER_ATTR, record_inbound
 
-            recorder = get_recorder()
-            if recorder is None:
-                return
             event = ctx.event
-            if getattr(event, "event_type", "") not in ("message_group", "message_private"):
+            if getattr(event, STAT_OWNER_ATTR, "") == "pipeline":
                 return
-
-            is_private = event.event_type == "message_private"
-            if is_private:
-                ident = str(getattr(event, "user_id", "") or "")
-                session_id = f"private_{ident}"
-                name = getattr(getattr(event, "user", None), "nickname", "") or ""
-                label = session_label(name, "private", ident)
-                group_id = ""
-            else:
-                group = getattr(event, "group", None)
-                ident = str(getattr(group, "group_id", "") or "")
-                session_id = f"group_{ident}"
-                name = getattr(group, "group_name", "") or ""
-                label = session_label(name, "group", ident)
-                group_id = ident
-
-            recorder.record_msg_in(
-                outcome=self._outcome_of(event),
-                bot_id=str(getattr(event, "account_id", "") or getattr(event, "bot_id", "") or ""),
-                source="inbound",
-                session_id=session_id,
-                session_label=label,
-                group_id=group_id,
-                user_id=str(getattr(event, "user_id", "") or ""),
-                event_type=event.event_type,
-                bytes=len(str(getattr(event, "message", "") or "")),
-            )
+            record_inbound(event, self._outcome_of(event))
         except Exception as e:  # noqa: BLE001 —— 统计是旁路，绝不阻断消息处理
             self.log.debug(f"[Stats] 入站记账失败（已忽略）: {e}")
 
+    @staticmethod
+    def _outcome_of(event) -> str:
+        """入站节点能同步判定的结局：module（模块拦下）或 ignored（门控拦下）。
+
+        指令与「真正进 LLM」的判定在 `pipeline._run` 里做。
+        """
+        if getattr(event, "_stopped", False) or getattr(event, "_llm_stop", False):
+            return "module"
+        return "ignored"
     @staticmethod
     def _outcome_of(event) -> str:
         """判定这条入站消息的结局。"""

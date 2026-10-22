@@ -176,4 +176,5 @@ def test_run_prologue_is_inside_try():
     try_at = body.index("try:")
     prologue = body[:try_at]
     assert "job.ctx" in prologue  # 只允许这一句（finally 需要）
-    assert prologue.count("=") <= 3, f"prologue 太多逻辑，应移进 try: {prologue!r}"
+    # 允许：session_lock / lock_acquired / ctx / outcome 四个必要初值
+    assert prologue.count("=") <= 4, f"prologue 太多逻辑，应移进 try: {prologue!r}"
