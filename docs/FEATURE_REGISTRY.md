@@ -18,7 +18,7 @@
 - 消息组装：`assembly`（装槽型）
 - provider 调用策略：`provider_invoker`（装槽型）
 - 输出策略：`output`（装槽型，v3 新增）
-- 消息元信息 / 上下文增强 / MCP：`message_meta` / `context` / `mcp`（策略型，v3 新增）
+
 
 当第三方插件也实现同类能力时（例如“新的主动回复插件”），需要有一个统一机制让插件：
 
@@ -45,26 +45,27 @@
 | 装槽型能力 | `assembly` / `provider_invoker` / `output`：接管 = 把运行时属性指向插件对象，交棒 = 指回仍在场者，释放 = 还原 |
 | 策略型能力 | `memory` / `knowledge` / `context` / `message_meta` / `mcp`：只有一组配置键，接管 = 让对方的配置视图失效（框架回退默认） |
 
-### 2.1 已注册能力清单（v3：13 个）
+### 2.1 已注册能力清单（v3：**4 个**，全部是「高级接口」）
 
 | feature_id | 类型 | 说明 | 内置提供者 |
 |---|---|---|---|
-| `proactive` | 开关型 | 框架主动消息 | `llm_proactive` |
-| `schedule` | 开关型 | 框架定时任务开关 | `llm_schedule` |
-| `schedule_driver` | 策略型 | 定时任务驱动（`runtime.scheduler`） | `llm_schedule` |
-| `memory` | 开关型 | 长期记忆 | `llm_memory` |
-| `knowledge` | 开关型 | 知识库 | `llm_knowledge` |
-| `onebot_tools` | 开关型 | OneBot 工具 | `llm_tools_extra` |
 | `agent` | 开关型 | 框架级 Agent 整体启停 | — |
 | `assembly` | 装槽型 | 消息组装（`build(req)`） | `llm_assembly` |
 | `provider_invoker` | 装槽型 | provider 调用约定（`chat`/`stream`） | — |
 | `output` | 装槽型 | 一轮回复怎么产出（`respond(ctx)`） | `llm_output` |
-| `message_meta` | 策略型 | 消息元信息渲染 | `llm_message_meta` |
-| `context` | 策略型 | 指代/展开/历史查询权限 | `llm_context` |
-| `mcp` | 策略型 | MCP 工具 | `llm_tools_extra` |
 
-> 装槽型与策略型的区别：前者**替换对象**（一个槽只能有一个生效者，先到先得 + 交棒），
-> 后者**替换配置**（视图挂到 `runtime.<kind>_options`，释放即回到默认）。
+> **只有"更换机制 / 接管行为"才算能力。** 记忆、知识库、主动消息、定时任务、
+> OneBot 工具、MCP、元信息渲染、指代消解都是**业务** —— 它们由各自模块用
+> 基础接口实现（`context_providers` / `tool_sources` / LLM 钩子 / `llm_turn` /
+> `send_to` / `spawn`），**框架不知道它们存在**，因此不在本表里。
+
+### 2.2 三层边界
+
+| 层 | 内容 | 归属 |
+|---|---|---|
+| **基础功能** | 收发消息、事件分发、会话历史、toolcall 注册与执行、**单次** LLM 请求、组装后发送、定时服务、后台任务、数据目录 | 框架（稳定 API，不可替换） |
+| **高级接口** | 上表 4 个 | 框架开槽，**模块声明 `supersedes` 接管** |
+| **业务** | 记忆/知识库/主动消息/定时任务/OneBot/MCP/元信息/指代 | **模块自己实现**，不声明任何 `supersedes` |
 
 ---
 

@@ -822,17 +822,19 @@ class Module(BaseModule):
 v3 把「高级功能」从 agent 配置页整体搬进了模块。**这 9 个模块随仓库发布、随账号自动装配**，
 每个模块自己持有配置（`config_schema`），框架侧机制只认 `policy_view`。
 
-| 模块 | 目录 | 键数 | 接管什么 | 配置在哪 |
+| 模块 | 目录 | 键数 | 性质 | 用哪些基础接口 |
 |---|---|---|---|---|
-| 输出策略 | `llm_output` | 25 | `output` 槽（`mode=text/stream/speech`） | 模块页 |
-| 组装策略 | `llm_assembly` | 10 | `assembly` 槽（档位/行为规则/请求对账） | 模块页 |
-| 消息元信息 | `llm_message_meta` | 14 | 元信息渲染 + 历史清洗 | 模块页 |
-| 上下文增强 | `llm_context` | 10 | 指代消解 / 按需展开 / 历史查询权限 | 模块页 |
-| 长期记忆 | `llm_memory` | 17 | 记忆召回策略（机制在框架） | 模块页 |
-| 知识库 | `llm_knowledge` | 3 | 知识库检索策略（机制在框架） | 模块页 |
-| 工具扩展 | `llm_tools_extra` | 9 | OneBot 工具 / MCP / 工具结果回应要求 | 模块页 |
-| 主动消息 | `llm_proactive` | 17 | `runtime.proactive`（纯业务，自建计时器） | 模块页 |
-| 定时任务 | `llm_schedule` | 3 | `runtime.scheduler`（纯业务，自建调度） | 模块页 |
+| 输出策略 | `llm_output` | 25 | **高级接口**（`supersedes=("output",)`） | `output` 槽（`mode=text/stream/speech`） |
+| 组装策略 | `llm_assembly` | 10 | **高级接口**（`supersedes=("assembly",)`） | `assembly` 槽（`build(req)`） |
+| 消息元信息 | `llm_message_meta` | 14 | 业务 | `@llm_hook("pre_request")` + `raw_user_text` |
+| 上下文增强 | `llm_context` | 10 | 业务 | `context_providers` + `tool_sources` + `pre_request` |
+| 长期记忆 | `llm_memory` | 17 | 业务 | `context_providers` + `tool_sources` + `pre_request`/`turn_completed` + `@command` |
+| 知识库 | `llm_knowledge` | 3 | 业务 | `tool_sources` |
+| 工具扩展 | `llm_tools_extra` | 9 | 业务 | `tool_sources`（OneBot + MCP） |
+| 主动消息 | `llm_proactive` | 17 | 业务 | `message_observed`/`bot_sent` 订阅 + `spawn` + `llm_turn` + `send_to` |
+| 定时任务 | `llm_schedule` | 3 | 业务 | 自建 `TaskScheduler` + `tool_sources` + `llm_turn` + `send_to` |
+
+> **业务模块一律不声明 `supersedes`。** 只有"更换机制 / 接管行为"的模块才声明。
 
 ### 4.10.1 配置取用口径（写框架代码时唯一允许的读法）
 
@@ -842,6 +844,17 @@ from app.agent.policy import policy_config, policy_get, policy_view
 policy_get(runtime, "memory", "memory_enable", False)   # 只关心一个模块的键
 policy_view(runtime).get("assembly_profile")            # 机制跨模块读键时用这条链
 ```
+
+### 4.10.1b 广播型钩子（业务订阅"事实"）
+
+流水线不认识业务，只广播事实；业务自己订阅：
+
+| 阶段 | 时机 | 典型用途 |
+|---|---|---|
+| `message_observed` | 用户说话了（进入 LLM 前） | 主动消息：重置沉默、安排下次 |
+| `bot_sent` | Bot 发出一条消息后 | 主动消息：重置计时 |
+| `turn_completed` | 一轮处理结束 | 记忆蒸馏、统计、审计 |
+| `session_reset` | `#llm exit` 会话重置 | 记忆：清理会话态 |
 
 > **不要**在新代码里写 `runtime.config.get("memory_enable")` —— 那个键已经不在 agent 配置里了。
 > `tests/plugins/test_module_config_integration.py` 会一次装齐 9 个模块，
