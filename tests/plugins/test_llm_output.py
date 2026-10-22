@@ -134,8 +134,6 @@ def test_config_view_falls_back_when_module_has_no_value():
 
 
 def test_config_view_passes_through_other_attributes():
-    base = SimpleNamespace(raw_config={"a": 1})
-
     class _Base:
         raw_config = {"a": 1}
 
@@ -182,7 +180,6 @@ class _Services:
 
 def _make_module(runtime, values=None):
     from app.plugin.base import (
-        BaseModule,
         ModuleAuthority,
         ModuleConfig,
         ModuleContext,
@@ -231,7 +228,6 @@ async def test_on_load_installs_adapter_and_unload_restores():
 
 async def test_on_load_without_runtime_is_safe():
     from app.plugin.base import (
-        BaseModule,
         ModuleAuthority,
         ModuleConfig,
         ModuleContext,

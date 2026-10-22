@@ -61,7 +61,7 @@ class OutputStrategyAdapter:
         value = getter(key, default) if callable(getter) else default
         if value is not None:
             return value
-        return getattr(self._view, "get")(key, default)
+        return self._view.get(key, default)
 
     # ── 契约实现 ────────────────────────────────────────────
     async def respond(
