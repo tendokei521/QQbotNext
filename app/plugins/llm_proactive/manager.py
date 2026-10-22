@@ -230,8 +230,6 @@ class ProactiveManager:
         # （与 chat.handle 的顺序一致，否则会话档案里的开关会被默认档案覆盖）
         start_last = self._data.get(session_id, {}).get("last_user_time", 0)
         config = self.module.config
-        if hasattr(config, "set_session"):
-            config.set_session(session_id)
         max_tool_rounds = _max_tool_rounds(config)
 
         all_specs, skill_blocks, tool_ctx, instruction = await build_initiative_tools(
@@ -333,8 +331,6 @@ class ProactiveManager:
                 tool_ctx=tool_ctx,
                 max_tool_rounds=max_tool_rounds,
             )
-            if hasattr(config, "clear_session"):
-                config.clear_session()
             clean = strip_all_tags(full_text).strip()
             if not clean:
                 if not is_group:
@@ -371,8 +367,6 @@ class ProactiveManager:
                 "max_tool_rounds": max_tool_rounds,
             },
         )
-        if hasattr(config, "clear_session"):
-            config.clear_session()
         if self._data.get(session_id, {}).get("last_user_time", 0) != start_last:
             logger.add_info(f"#{self.module.bot_id}").info(f"[主动消息] {session_id} 生成期间用户来消息，丢弃本次")
             return

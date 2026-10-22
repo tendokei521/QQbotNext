@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import pytest
 
-from app.application.config_profile_service import ConfigProfileService
 from app.application.role_preset_service import RolePresetService
 from app.plugin.base import ServiceAccess
 
@@ -131,23 +130,18 @@ async def test_update_can_clear_extended_fields(role_service):
 # ==================== 插件 API 暴露 ====================
 
 
-def test_service_access_exposes_preset_and_profile_services(container):
+def test_service_access_exposes_preset_services(container):
     """插件通过 ctx.services 就能拿到，不必再从 bootstrap 取容器。"""
     services = container.get(ServiceAccess)
     assert isinstance(services.role_presets, RolePresetService)
-    assert isinstance(services.config_profiles, ConfigProfileService)
     assert services.role_presets is container.get(RolePresetService)
-    assert services.config_profiles is container.get(ConfigProfileService)
 
 
 async def test_plugin_can_build_persona_through_service_access(container):
-    """端到端：插件侧拿 services.role_presets 建人设 + 用档案路由绑定会话。"""
+    """端到端：插件侧拿 services.role_presets 建人设。"""
     services = container.get(ServiceAccess)
     preset = await services.role_presets.create_preset(
         "迁移人设", "", "你是迁移过来的人设。", begin_dialogs=[{"role": "user", "content": "你好"}]
     )
-    profile = await services.config_profiles.create_profile("迁移档案", {"temperature": 0.9})
-    await services.config_profiles.set_route("group_123", profile["id"])
 
     assert services.role_presets.get_preset(preset["id"])["begin_dialogs"] == [{"role": "user", "content": "你好"}]
-    assert services.config_profiles.get_route("group_123") == profile["id"]

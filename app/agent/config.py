@@ -320,38 +320,15 @@ class AgentConfig:
         self._service = config_service
         self._bot = bot_id
         self._migrated = False
-        self._current_umo: str | None = None
-
-    # ── 会话配置档案（对齐 AstrBot UMO 路由） ───────────────
-    def set_session(self, umo: str | None) -> None:
-        """设置当前会话的 UMO；存在路由时后续 get/raw_config 会合并对应档案。"""
-        self._current_umo = str(umo) if umo else None
-
-    def clear_session(self) -> None:
-        self._current_umo = None
-
-    def _profile_config(self) -> dict:
-        if not self._current_umo:
-            return {}
-        routes = self._service.get_config_routes()
-        profile_id = routes.get(self._current_umo)
-        if not profile_id:
-            return {}
-        profile = self._service.get_config_profile(profile_id)
-        if not profile:
-            return {}
-        config = profile.get("config", {}) or {}
-        return config if isinstance(config, dict) else {}
 
     # ── 配置读写 ─────────────────────────────────────────
     def get(self, key: str, default: Any = None) -> Any:
         self._ensure_migrated()
         data = self._service.get_module_config(AGENT_CONFIG_MODULE, self._bot) or {}
-        profile = self._profile_config()
         legacy = legacy_key_of(key)
-        candidates = [(data, key), (profile, key)]
+        candidates = [(data, key)]
         if legacy:
-            candidates += [(data, legacy), (profile, legacy)]
+            candidates.append((data, legacy))
         value = _pick(candidates, None)
         if value is not None:
             return value
@@ -400,22 +377,16 @@ class AgentConfig:
         """
         keys = list(keys) if keys is not None else list(DEFAULT_LLM_CONFIG)
         stored = self._adapted_stored()
-        profile = self._profile_config()
         result: dict = {}
         for key in keys:
             if key in stored and stored[key] is not None:
                 result[key] = stored[key]
-                continue
-            if key in profile and profile[key] is not None:
-                result[key] = profile[key]
                 continue
             legacy = legacy_key_of(key)
             if not legacy:
                 continue
             if legacy in stored and stored[legacy] is not None:
                 result[key] = stored[legacy]
-            elif legacy in profile and profile[legacy] is not None:
-                result[key] = profile[legacy]
         return result
 
     def has_explicit(self, key: str) -> bool:
@@ -427,22 +398,14 @@ class AgentConfig:
         stored = self._adapted_stored()
         if key in stored and stored[key] is not None:
             return True
-        profile = self._profile_config()
-        if key in profile and profile[key] is not None:
-            return True
         legacy = legacy_key_of(key)
-        if legacy:
-            if legacy in stored and stored[legacy] is not None:
-                return True
-            if legacy in profile and profile[legacy] is not None:
-                return True
+        if legacy and legacy in stored and stored[legacy] is not None:
+            return True
         return False
 
     @property
     def raw_config(self) -> dict:
-        result = self._base_raw_config()
-        result.update(self._profile_config())
-        return result
+        return self._base_raw_config()
 
     def set(self, key: str, value: Any, auto_save: bool = True) -> None:
         self._ensure_migrated()

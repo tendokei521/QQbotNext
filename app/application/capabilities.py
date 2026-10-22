@@ -25,7 +25,6 @@ SERVICE_FIELDS = (
     "llm",
     "provider_presets",
     "provider_models",
-    "config_profiles",
     "role_presets",
     "resources",
     "features",

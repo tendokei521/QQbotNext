@@ -144,10 +144,6 @@ async def run_turn(
         result.error = "no_runtime"
         return result
 
-    set_session = getattr(config, "set_session", None)
-    clear_session = getattr(config, "clear_session", None)
-    if callable(set_session):
-        set_session(req.session_id)
     try:
         return await _run_inner(runtime, req, result, ctx=ctx, on_sentence=on_sentence)
     except asyncio.CancelledError:
@@ -158,9 +154,6 @@ async def run_turn(
         )
         result.error = str(e)
         return result
-    finally:
-        if callable(clear_session):
-            clear_session()
 
 
 async def _run_inner(

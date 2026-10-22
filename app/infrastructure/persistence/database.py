@@ -88,18 +88,6 @@ CREATE TABLE IF NOT EXISTS provider_settings (
     value_json TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS config_profiles (
-    id          TEXT PRIMARY KEY,
-    name        TEXT NOT NULL,
-    config_json TEXT NOT NULL,
-    updated_at  INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS config_routes (
-    umo        TEXT PRIMARY KEY,
-    profile_id TEXT NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS role_presets (
     id            TEXT PRIMARY KEY,
     name          TEXT NOT NULL,

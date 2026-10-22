@@ -130,7 +130,7 @@ def test_builtin_kinds_are_registered_in_container(container):
     """框架自带资源种类：不依赖任何模块就应可用。"""
     reg = container.get(ResourceRegistry)
     kinds = {k["kind"] for k in reg.kinds()}
-    assert {"role_preset", "config_profile", "provider_preset", "provider_model", "bot", "module"} <= kinds
+    assert {"role_preset", "provider_preset", "provider_model", "bot", "module"} <= kinds
 
 
 async def test_role_preset_options_come_from_the_real_service(container):
@@ -278,7 +278,6 @@ async def test_resources_updated_broadcast_only_for_resource_scopes(container, m
     assert any("provider_model" in p for p in resource_events())
 
     sent.clear()
-    await on_change("config_routes", {})  # 映射为空元组 → 不影响任何资源
     assert resource_events() == []
 
     sent.clear()

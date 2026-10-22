@@ -23,7 +23,6 @@ from app.core.event_bus import BotAccountUpdatedEvent, BotLifecycleEvent, event_
 from app.core.logger import webui_logger
 from app.webui.api import agent as agent_router
 from app.webui.api import bots as bots_router
-from app.webui.api import config_profiles as config_profiles_router
 from app.webui.api import framework as framework_router
 from app.webui.api import logs as logs_router
 from app.webui.api import media as media_router
@@ -56,11 +55,9 @@ pnpm build</pre>
 #: 配置变更 scope → 受影响的资源种类（`resources_updated` 广播用；空元组 = 不影响任何资源）
 _CONFIG_SCOPE_RESOURCES: dict[str, tuple[str, ...]] = {
     "role_presets": ("role_preset",),
-    "config_profiles": ("config_profile",),
     "provider_presets": ("provider_preset",),
     "provider_models": ("provider_model",),
     "provider_settings": ("provider_model",),
-    "config_routes": (),
 }
 
 
@@ -100,7 +97,6 @@ def create_app(container) -> FastAPI:
     app.include_router(provider_presets_router.settings_router, prefix="/api")
     app.include_router(sessions_router.router, prefix="/api")
     app.include_router(media_router.router, prefix="/api")
-    app.include_router(config_profiles_router.router, prefix="/api")
     app.include_router(role_presets_router.router, prefix="/api")
     app.include_router(prompt_dump_router.router, prefix="/api")
     app.include_router(framework_router.router, prefix="/api")
@@ -257,16 +253,6 @@ def _install_config_listener(container) -> None:
             await manager.broadcast(json.dumps({
                 "type": "provider_settings_updated",
                 "settings": payload,
-            }))
-        elif scope == "config_profiles":
-            await manager.broadcast(json.dumps({
-                "type": "config_profiles_updated",
-                "profiles": payload,
-            }))
-        elif scope == "config_routes":
-            await manager.broadcast(json.dumps({
-                "type": "config_routes_updated",
-                "routes": payload,
             }))
         elif scope == "role_presets":
             await manager.broadcast(json.dumps({

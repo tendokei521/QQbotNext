@@ -192,8 +192,6 @@ class LlmPipeline:
 
     async def _run(self, job: LlmJob) -> None:
         ctx = job.ctx
-        # 按会话切换配置档案（对齐 AstrBot UMO 路由）
-        self.runtime.config.set_session(ctx.session_id)
         session_lock: asyncio.Lock | None = None
         lock_acquired = False
         try:
@@ -320,7 +318,6 @@ class LlmPipeline:
             if lock_acquired and session_lock is not None:
                 if session_lock.locked():
                     session_lock.release()
-            self.runtime.config.clear_session()
             self.pool.finish(job)
 
     async def _drive(self, ctx: LlmContext, strategy: Any) -> None:

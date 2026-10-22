@@ -181,22 +181,7 @@ class ProviderPresetService:
             if new_config != config:
                 await self.config_service.save_module_config("agent", bot_id, new_config)
 
-        # 2. 清理配置档案引用
-        for profile in self.config_service.list_config_profiles():
-            profile_config = profile.get("config", {}) or {}
-            if not isinstance(profile_config, dict):
-                continue
-            new_profile_config = dict(profile_config)
-            if str(new_profile_config.get("provider_preset_id", "")) == preset_id:
-                new_profile_config.pop("provider_preset_id", None)
-            if str(new_profile_config.get("provider_model_id", "")) in model_ids:
-                new_profile_config.pop("provider_model_id", None)
-            if new_profile_config != profile_config:
-                profile["config"] = new_profile_config
-                profile["updated_at"] = int(time.time())
-                await self.config_service.save_config_profile(profile["id"], profile)
-
-        # 3. 清理全局默认设置引用
+        # 2. 清理全局默认设置引用
         settings = self.config_service.get_provider_settings()
         new_settings = dict(settings)
         if str(new_settings.get("default_preset_id", "")) == preset_id:

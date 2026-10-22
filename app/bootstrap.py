@@ -12,7 +12,6 @@ from app.agent.client import ModuleLLMClient
 from app.agent.providers.runtime_manager import ProviderRuntimeManager
 from app.agent.runtime import AgentManager
 from app.application.bot_service import BotService
-from app.application.config_profile_service import ConfigProfileService
 from app.application.cron_service import SchedulerService
 from app.application.log_service import LogService
 from app.application.module_install_service import ModuleInstallService
@@ -102,8 +101,6 @@ def build_container(settings: Settings | None = None) -> Container:
     provider_model_service = ProviderModelService(config_service, provider_runtime_manager)
     container.register_factory(ProviderModelService, lambda: provider_model_service)
     # 配置档案 / 路由服务
-    config_profile_service = ConfigProfileService(config_service)
-    container.register_factory(ConfigProfileService, lambda: config_profile_service)
     # 角色预设服务
     role_preset_service = RolePresetService(config_service)
     container.register_factory(RolePresetService, lambda: role_preset_service)
@@ -140,10 +137,6 @@ def build_container(settings: Settings | None = None) -> Container:
     resource_registry.register(
         "role_preset", lambda q: role_preset_service.list_presets(),
         label="角色预设", desc="可复用的角色设定（system_prompt / 预设对话 / 工具 / 技能）",
-    )
-    resource_registry.register(
-        "config_profile", lambda q: config_profile_service.list_profiles(),
-        label="配置档案", desc="一套可复用的 Agent 配置快照（可经路由绑定会话）",
     )
     resource_registry.register(
         "provider_preset", lambda q: provider_preset_service.list_presets(),
@@ -233,7 +226,7 @@ def build_container(settings: Settings | None = None) -> Container:
         before_send_hooks=before_send_hook_registry, api_hooks=api_hook_registry,
         lifecycle_hooks=lifecycle_hook_registry, event_completed_hooks=event_completed_hook_registry,
         features=feature_registry,
-        config_profiles=config_profile_service, role_presets=role_preset_service,
+        role_presets=role_preset_service,
         resources=resource_registry, capabilities=_capabilities,
         sessions=_sessions, runtime=_runtime, tools=_tools,
     )

@@ -101,12 +101,6 @@ def get_provider_model_service(request: Request):
     return get_service(request, ProviderModelService)
 
 
-def get_config_profile_service(request: Request):
-    from app.application.config_profile_service import ConfigProfileService
-
-    return get_service(request, ConfigProfileService)
-
-
 def get_role_preset_service(request: Request):
     from app.application.role_preset_service import RolePresetService
 

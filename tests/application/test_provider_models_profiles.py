@@ -1,10 +1,9 @@
-"""Provider 模型实例 / 全局设置 / 配置档案路由测试。"""
+"""Provider 模型实例与全局设置测试。"""
 
 import pytest
 
 from app.agent.providers.base import LLMResponse
 from app.agent.providers.runtime_manager import ProviderRuntimeManager
-from app.application.config_profile_service import ConfigProfileService
 from app.application.provider_model_service import ProviderModelService
 from app.application.provider_preset_service import ProviderPresetService
 
@@ -43,11 +42,6 @@ async def preset_service(config_service):
 @pytest.fixture
 async def model_service(config_service):
     return ProviderModelService(config_service, ProviderRuntimeManager(config_service))
-
-
-@pytest.fixture
-async def profile_service(config_service):
-    return ConfigProfileService(config_service)
 
 
 async def test_provider_model_crud_and_delete_ref(preset_service, model_service, config_service):
@@ -117,28 +111,6 @@ async def test_provider_settings_save(model_service):
     })
     assert settings["default_preset_id"] == "p1"
     assert settings["fallback_model_ids"] == ["m2"]
-
-
-async def test_config_profile_and_route(profile_service, config_service):
-    profile = await profile_service.create_profile("群A配置", {
-        "provider_model_id": "m1",
-        "system_prompt": "你是群A助手",
-    })
-    assert profile["config"]["system_prompt"] == "你是群A助手"
-
-    await profile_service.set_route("group_123", profile["id"])
-    routes = profile_service.list_routes()
-    assert routes.get("group_123") == profile["id"]
-
-    # 读取 profile 通过 ConfigService 可直接被 AgentConfig 合并
-    loaded = config_service.get_config_profile(profile["id"])
-    assert loaded["config"]["provider_model_id"] == "m1"
-
-    await profile_service.delete_route("group_123")
-    assert profile_service.list_routes() == {}
-
-    await profile_service.delete_profile(profile["id"])
-    assert profile_service.get_profile(profile["id"]) is None
 
 
 async def test_preset_test_prefers_models(monkeypatch, preset_service):

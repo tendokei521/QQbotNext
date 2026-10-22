@@ -15,7 +15,6 @@
 | `provider_service.py` | 配置动态数据源（Provider）注册表 |
 | `provider_preset_service.py` | Provider 预设（把「连哪里」从 Agent 配置里独立出来） |
 | `provider_model_service.py` | Provider 模型实例 / 全局设置 |
-| `config_profile_service.py` | 配置档案与路由（UMO → 档案） |
 | `role_preset_service.py` | 角色预设（可复用的系统提示词） |
 | `module_install_service.py` | 插件软卸载状态（只写配置，不删目录） |
 | `resource_registry.py` | 系统资源注册表（「可被引用的资源」统一成 kind → 候选列表） |

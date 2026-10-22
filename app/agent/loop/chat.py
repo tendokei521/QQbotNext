@@ -129,10 +129,6 @@ async def handle(module, event):
     message_type = event.message_type
     if message_type not in ("group", "private"):
         return
-    if message_type == "private":
-        session_id = f"private_{event.user_id}"
-    else:
-        session_id = f"group_{event.group.group_id}"
 
     raw_text = extract_text(event.message).strip()
     action = parse_action(raw_text)
@@ -141,25 +137,21 @@ async def handle(module, event):
         return
 
     config = module.config
-    config.set_session(session_id)
-    try:
-        if message_type == "private":
-            if not config.get("private_enable", True):
-                return
-        else:
-            if not config.get("group_enable", False):
-                return
+    if message_type == "private":
+        if not config.get("private_enable", True):
+            return
+    else:
+        if not config.get("group_enable", False):
+            return
 
-        if not is_help_action(action):
-            api_key = _provider_config_for(module).get("api_key", "")
-            if not api_key:
-                logger.add_info(f"#{module.bot_id}").error(
-                    f"[{module.name}] API 密钥未配置，请先在 Provider 预设中选择连接配置"
-                )
-                return
-        await _handle_command_event(module, event, config)
-    finally:
-        config.clear_session()
+    if not is_help_action(action):
+        api_key = _provider_config_for(module).get("api_key", "")
+        if not api_key:
+            logger.add_info(f"#{module.bot_id}").error(
+                f"[{module.name}] API 密钥未配置，请先在 Provider 预设中选择连接配置"
+            )
+            return
+    await _handle_command_event(module, event, config)
 
 
 async def _handle_command_event(module, event, config) -> None:

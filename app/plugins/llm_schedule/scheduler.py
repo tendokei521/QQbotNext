@@ -295,9 +295,6 @@ class TaskScheduler:
 
             from app.plugins.llm_proactive.stream import stream_send_initiative
 
-            # 会话配置档案先切换：工具集与提示块读取的是会话级配置
-            if hasattr(config, "set_session"):
-                config.set_session(entry.session_id)
             all_specs, skill_blocks, tool_ctx, instruction = await self._collect_tools(entry)
 
             # 焦点行（定时任务没有用户提问 → 不做预取）：随其他块一起进装配
@@ -308,9 +305,7 @@ class TaskScheduler:
                 entry, instruction=instruction, skill_blocks=skill_blocks, focus_text=focus_text
             )
             if messages is None:
-                # post_assemble 要求本轮不请求：会话档案已切换，先清掉再返回
-                if hasattr(config, "clear_session"):
-                    config.clear_session()
+                # post_assemble 要求本轮不请求：直接放弃本次发送
                 logger.add_info(f"#{self.bot_id}").info(
                     f"[定时任务] post_assemble 要求跳过 {entry.id} -> {entry.session_id}"
                 )
@@ -342,9 +337,6 @@ class TaskScheduler:
             except Exception as e:
                 logger.add_info(f"#{self.bot_id}").error(f"[定时任务] 流式生成异常，改用固定内容: {e}")
                 full_text = ""
-            finally:
-                if hasattr(config, "clear_session"):
-                    config.clear_session()
 
             clean = strip_all_tags(full_text).strip()
             if not clean:
@@ -558,9 +550,6 @@ class TaskScheduler:
             )
             await asyncio.to_thread(self.session_mgr.restore_session_from_archive, session, entry.session_id)
 
-        # 会话配置档案先切换：工具集与提示块读取的是会话级配置（与 chat.handle 的顺序一致）
-        if hasattr(self.module.config, "set_session"):
-            self.module.config.set_session(entry.session_id)
         all_specs, skill_blocks, tool_ctx, instruction = await self._collect_tools(entry)
 
         # 焦点行（定时任务没有用户提问 → 不做预取）：随其他块一起进装配
@@ -585,47 +574,43 @@ class TaskScheduler:
         tool_executor = make_executor(all_specs, tool_ctx) if use_tools else None
         max_tool_rounds = _max_tool_rounds(self.module.config)
 
-        try:
-            if hasattr(self.module, "provider_chain"):
-                chain = self.module.provider_chain()
-                if chain:
-                    from app.agent.providers.invoker import resolve_invoker
+        if hasattr(self.module, "provider_chain"):
+            chain = self.module.provider_chain()
+            if chain:
+                from app.agent.providers.invoker import resolve_invoker
 
-                    return await resolve_invoker(self.module).chat(
-                        runtime=self.module,
-                        chain=chain,
-                        messages=messages,
-                        params={
-                            "model": self.module.config.get("model", "deepseek-chat"),
-                            "temperature": self.module.config.get("temperature", 0.7),
-                            "max_tokens": self.module.config.get("max_tokens", 1024),
-                            "tools": tools,
-                            "tool_executor": tool_executor,
-                            "max_tool_rounds": max_tool_rounds,
-                        },
-                    )
-            # 兼容旧模块/测试：直接走模块自己的 get_provider
-            provider = get_provider(dict(self.module.config.raw_config))
-            legacy_kwargs: dict = {}
-            if tools is not None:
-                from app.agent.providers import _accepts_kwarg
-
-                if _accepts_kwarg(provider.chat, "tools"):
-                    legacy_kwargs = {
+                return await resolve_invoker(self.module).chat(
+                    runtime=self.module,
+                    chain=chain,
+                    messages=messages,
+                    params={
+                        "model": self.module.config.get("model", "deepseek-chat"),
+                        "temperature": self.module.config.get("temperature", 0.7),
+                        "max_tokens": self.module.config.get("max_tokens", 1024),
                         "tools": tools,
                         "tool_executor": tool_executor,
                         "max_tool_rounds": max_tool_rounds,
-                    }
-            return await provider.chat(
-                messages,
-                model=self.module.config.get("model", "deepseek-chat"),
-                temperature=self.module.config.get("temperature", 0.7),
-                max_tokens=self.module.config.get("max_tokens", 1024),
-                **legacy_kwargs,
-            )
-        finally:
-            if hasattr(self.module.config, "clear_session"):
-                self.module.config.clear_session()
+                    },
+                )
+        # 兼容旧模块/测试：直接走模块自己的 get_provider
+        provider = get_provider(dict(self.module.config.raw_config))
+        legacy_kwargs: dict = {}
+        if tools is not None:
+            from app.agent.providers import _accepts_kwarg
+
+            if _accepts_kwarg(provider.chat, "tools"):
+                legacy_kwargs = {
+                    "tools": tools,
+                    "tool_executor": tool_executor,
+                    "max_tool_rounds": max_tool_rounds,
+                }
+        return await provider.chat(
+            messages,
+            model=self.module.config.get("model", "deepseek-chat"),
+            temperature=self.module.config.get("temperature", 0.7),
+            max_tokens=self.module.config.get("max_tokens", 1024),
+            **legacy_kwargs,
+        )
 
     def _complete(self, entry: TaskEntry) -> None:
         self._tasks.pop(entry.id, None)

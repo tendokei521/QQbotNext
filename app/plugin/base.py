@@ -222,7 +222,6 @@ class ServiceAccess:
     llm: Any = None            # 模块用 LLM 客户端（ModuleLLMClient）：chat/stream/models/resolve
     provider_presets: Any = None  # Provider 预设服务（ProviderPresetService）：连接配置（含密钥，只读列表用）
     provider_models: Any = None   # Provider 模型服务（ProviderModelService）：模型实例 CRUD/清单
-    config_profiles: Any = None  # 配置档案与路由（ConfigProfileService）：按会话 UMO 换整套配置
     role_presets: Any = None     # 角色预设（RolePresetService）：可复用人设（含预设对话/工具/技能）
     resources: Any = None        # 系统资源注册表（ResourceRegistry）：schema resource 字段的候选来源
     send_hooks: Any = None     # 消息发送成功钩子注册表 SendHookRegistry
