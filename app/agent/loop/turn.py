@@ -144,8 +144,27 @@ async def run_turn(
         result.error = "no_runtime"
         return result
 
+    # 归属上下文：provider 层记账时据此写 source / session（拿不到就是 unknown）
+    from app.agent.usage.context import usage_scope
+    from app.agent.usage.labels import label_from_session_id
+
+    label = ""
+    if ctx is not None:
+        label = str(getattr(ctx, "session_label", "") or "")
+    if not label:
+        label = label_from_session_id(req.session_id)
+    scope = usage_scope(
+        bot_id=getattr(runtime, "bot_id", ""),
+        source=req.kind or "module",
+        session_id=req.session_id,
+        session_label=label,
+        group_id=req.group_id or "",
+        user_id=req.user_id or "",
+    )
+
     try:
-        return await _run_inner(runtime, req, result, ctx=ctx, on_sentence=on_sentence)
+        with scope:
+            return await _run_inner(runtime, req, result, ctx=ctx, on_sentence=on_sentence)
     except asyncio.CancelledError:
         raise
     except Exception as e:  # noqa: BLE001 —— 模块调用不该因为一轮失败而炸掉

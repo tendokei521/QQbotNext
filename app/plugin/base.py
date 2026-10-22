@@ -448,6 +448,18 @@ class BaseModule(ABC):
         return missing_requirements(self)
 
     # ---------- 调系统 LLM（模块自己的模型请求） ----------
+    def _usage_scope(self):
+        """统计归属作用域：`source` = 本模块名，`session_id` 由调用方按需覆盖。"""
+        from app.agent.usage.context import usage_scope
+
+        return usage_scope(
+            bot_id=self.bot_id,
+            source=self.module_name,
+            session_id=getattr(self, "_usage_session_id", "") or "",
+            session_label=getattr(self, "_usage_session_label", "") or "",
+            group_id=getattr(self, "_usage_group_id", "") or "",
+        )
+
     async def llm_chat(self, messages: list[dict], **kwargs):
         """用系统 provider 做一次 LLM 请求（密钥 / 回退链 / 记账都留在框架）。
 
@@ -462,7 +474,9 @@ class BaseModule(ABC):
         if client is None:
             return self._llm_unavailable("llm_chat")
         kwargs.setdefault("bot_id", self.bot_id)
-        return await client.chat(messages, **kwargs)
+        # 归属上下文：让 provider 层的统计知道"这笔是本模块花的"
+        with self._usage_scope():
+            return await client.chat(messages, **kwargs)
 
     async def llm_stream(self, messages: list[dict], **kwargs):
         """流式版 ``llm_chat``（逐个事件产出）；没有可用配置时不产出任何事件。"""
@@ -472,8 +486,9 @@ class BaseModule(ABC):
             self._llm_unavailable("llm_stream")
             return
         kwargs.setdefault("bot_id", self.bot_id)
-        async for event in client.stream(messages, **kwargs):
-            yield event
+        with self._usage_scope():
+            async for event in client.stream(messages, **kwargs):
+                yield event
 
     # ---------- 无事件的完整一轮对话 ----------
     async def llm_turn(

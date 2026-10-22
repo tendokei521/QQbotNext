@@ -10,6 +10,19 @@ from app.infrastructure.persistence.database import Database
 
 
 @pytest.fixture(autouse=True)
+def _isolate_stat_recorder():
+    """每个用例前后都还原全局统计记录器（bootstrap 会把它装进全局）。"""
+    from app.agent.usage.recorder import get_recorder, set_recorder
+
+    previous = get_recorder()
+    set_recorder(None)
+    try:
+        yield
+    finally:
+        set_recorder(previous)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_llm_data(tmp_path, monkeypatch):
     """把 LLM 数据目录（定时任务/历史/主动状态）隔离到临时目录。
 

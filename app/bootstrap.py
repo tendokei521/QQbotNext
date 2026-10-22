@@ -27,6 +27,7 @@ from app.core.task_manager import TaskManager
 from app.infrastructure.cache import Cache
 from app.infrastructure.config.config_service import ConfigService
 from app.infrastructure.onebot.gateway import OneBotGateway
+from app.agent.usage.recorder import StatRecorder, set_recorder
 from app.infrastructure.persistence.database import Database
 from app.plugin.base import ServiceAccess
 from app.plugin.dispatcher import ModuleDispatcher
@@ -88,6 +89,11 @@ def build_container(settings: Settings | None = None) -> Container:
     container.register_factory(Database, lambda: db)
     task_manager = TaskManager()
     container.register_factory(TaskManager, lambda: task_manager)
+
+    # 数据统计记录器（攒批写入；查询走 /api/stats/*）
+    stat_recorder = StatRecorder(db)
+    set_recorder(stat_recorder)
+    container.register_factory(StatRecorder, lambda: stat_recorder)
 
     # 配置中心
     config_service = ConfigService(db, settings.project_root)
@@ -405,6 +411,11 @@ async def run(settings: Settings | None = None) -> None:
         _container.get(AgentManager).shutdown()
         task_manager = _container.get(TaskManager)
         task_manager.cancel_all()
+        # 统计记录器：退出前强制落库（禁止 fire-and-forget，否则丢最后一批）
+        try:
+            await _container.get(StatRecorder).close()
+        except Exception as e:  # noqa: BLE001 —— 统计收尾失败不该阻断进程退出
+            logger.debug(f"[Stats] 关闭统计记录器失败（已忽略）: {e}")
         await db.close()
         logger.info("已关闭")
 
