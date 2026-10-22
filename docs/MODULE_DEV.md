@@ -652,6 +652,171 @@ class Module(BaseModule):
 
 ---
 
+## 4.9 基础接口：模块写业务所需的全部原料
+
+> 这一节是「**业务逻辑请自己写，但原料由框架给足**」的落地清单。
+> 有了这五件，主动回复 / 定时播报 / 群总结这类模块**不需要抄框架**。
+
+### 4.9.1 `self.send_to(session_id, message)` —— 按会话发消息
+
+唯一发送出口：自动分流群聊/私聊，正文开头的 `[reply]` / `[@qq]` 会解析成真正的消息段，
+并且一定经过出站节点链 + `before_send` / `send` / `api` 钩子。
+
+```python
+await self.send_to("group_123", "晚上好")
+await self.send_to("private_456", "[reply]好的")     # 引用触发本轮的消息
+resp = await self.send_to("group_123", "带图...")     # 返回 OneBot 响应（拿 message_id）
+```
+
+```python
+# 前端 channel.py 的等价签名（也是唯一发送出口）
+from app.agent.delivery.channel import send_item
+await send_item(bot, "group_123", "hi", runtime=self.ctx.services.runtime(self.bot_id))
+```
+
+### 4.9.2 `self.spawn(coro)` —— 带归属的后台任务
+
+**不要直接用** `ctx.services.task_manager.create_task`：它的 owner 默认 `"system"`，
+模块卸载时不会被清理（热重载会留下孤儿任务）。`spawn` 自动带上
+`module:<模块名>:<bot_id>`，卸载/重载级联取消。
+
+```python
+async def on_load(self):
+    self.spawn(self._loop(), name="demo-loop")
+
+async def _loop(self):
+    while True:
+        await asyncio.sleep(600)
+        ...
+```
+
+### 4.9.3 `self.llm_turn(...)` —— 无事件的完整一轮对话
+
+和 `self.llm_chat()` 的区别：那个只发**一次裸请求**（没有历史/组装/工具/记忆）；
+`llm_turn` 吃框架的全部上下文能力，而且**不需要真实事件对象**。
+
+```python
+result = await self.llm_turn(
+    "总结一下今天群里聊了什么",
+    session_id="group_123",
+    record_history=False,     # 默认 False：模块自己决定要不要污染会话
+)
+if result.text:
+    await self.send_to("group_123", result.text)
+
+# 碰流式：逐句回调，边产边发
+await self.llm_turn("讲个故事", session_id="private_456", stream=True, send=True)
+
+# 失败不抛：result.error 非空 / result.blocked 表示被钩子拦下
+```
+
+`TurnResult` 字段：`text` / `messages`（本轮最终请求体，对账用）/ `tool_results` /
+`usage` / `blocked` / `error` / `session_id`。
+
+服务侧等价入口：`ctx.services.llm.turn(...)`。
+
+### 4.9.4 `self.sessions` —— 会话历史读写
+
+```python
+mgr = self.sessions                       # → SessionManager（按 bot_id 的进程级单例）
+mgr.add_message("group_123", "assistant", "我说的话")
+history = mgr.get_history("group_123", limit=20)
+raw = mgr.history_snapshot("group_123")   # 未投影的原始条目（自带渲染器时用）
+```
+
+> 单例 key 已归一成字符串，所以传 `self.bot_id`（int）或 `"123"` 拿到的是同一个实例。
+
+### 4.9.5 `self.framework_tools(session_id)` —— 框架工具集只读视图
+
+```python
+specs, tool_ctx = await self.framework_tools("group_123")
+from app.agent import build_tools, make_executor          # 与框架同一套执行器
+resp = await self.llm_chat(
+    messages,
+    tools=build_tools(specs),
+    tool_executor=make_executor(specs, tool_ctx),
+)
+```
+
+拿到的就是框架这一轮会给模型的那批工具（会话查询 / 上下文展开 / OneBot 等），
+所以模块自建的 agent loop 与主链路能力一致。
+
+### 4.9.6 定时任务：`SCHEDULES` + 运行时增删改查
+
+```python
+class Module(BaseModule):
+    SCHEDULES = {
+        "0 9 * * 1-5": "weekday_job",   # cron 写法
+        "23:30:00": "nightly",          # 或 HH:MM[:SS]
+    }
+
+    async def weekday_job(self):
+        ...
+```
+
+配置驱动（时间来自模块配置）时用 `register_daily_schedule` 或直接操作调度服务：
+
+```python
+scheduler = self.ctx.services.scheduler
+await scheduler.register("demo:12345:daily", "08:00", self.daily_push)   # 注册/改期
+scheduler.list_jobs(prefix=f"demo:{self.bot_id}")                        # 查（含下次触发时间）
+await scheduler.update_job(key, "09:30")                                 # 改期（保留 handler）
+await scheduler.run_job_now(key)                                         # 立即跑一次
+await scheduler.unload_module("demo", self.bot_id)                        # 卸载时统一清理
+```
+
+> `SCHEDULES` 是**编译期声明**（时间固定）；时间要由配置决定时用动态注册。
+> 两者**二选一**，同时用会双注册。
+
+### 4.9.7 贡献上下文块与工具（注册制，可组合）
+
+不想整体接管装配器、只想"加一块"时，注册贡献者即可：
+
+```python
+from app.agent.loop.providers import (
+    SimpleContextProvider, SimpleToolSource,
+    register_context_provider, register_tool_source,
+)
+
+async def on_load(self):
+    rt = self.ctx.services.runtime(self.bot_id)
+    register_context_provider(rt, SimpleContextProvider(
+        "my_memory", lambda scope: "这是我要注入的一段背景", order=50, owner=self,
+    ))
+    register_tool_source(rt, SimpleToolSource(
+        "my_tools", lambda scope: [my_tool_spec], order=50, owner=self,
+    ))
+
+async def on_unload(self):
+    from app.agent.loop.providers import unregister_owner
+    unregister_owner(self.ctx.services.runtime(self.bot_id), self)
+```
+
+- 上下文块渲染在 `group_log` 之后、`history` 之前（块名 `extra`，`describe(req)` 可见）；
+- 工具源产出的工具与框架工具走同一套四类开关过滤；
+- **按 order 收集、互相不排他**（与 `assembly` 那种整体接管不同）。
+
+### 4.9.8 接管"一轮回复怎么产出"（`output` 槽）
+
+```python
+from app.domain.message import Message
+
+class Module(BaseModule):
+    supersedes = ("output",)          # 启用即接管，禁用/卸载自动还原
+
+    async def respond(self, ctx, *, should_stop=None):
+        # 自己决定怎么产：一次拿全 / 逐句流式 / 走工具 / 别的形态
+        yield Message.from_text("你好")
+```
+
+- 契约：`respond(ctx, *, should_stop=None)` 异步产出 `Message`，**不发送**；
+  发送与 `pre_send`/`post_send` 由流水线统一做（模块不必操心）。
+- 卸载/释放后回到 `None`（框架按 `stream_output` 自动选择，行为不变）。
+- 现有的 `BlockingOutput` / `StreamOutput` 就是它的两个默认实现，
+  可参考 `app/agent/delivery/output.py`。
+
+---
+
 ## 4.3 模块给 LLM 提供工具（`@tool`）
 
 模块可以把方法暴露给 LLM 作为 function calling 工具：

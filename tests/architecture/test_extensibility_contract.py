@@ -40,10 +40,11 @@ RATINGS = (FULL, HALF, UNWIRED)
 #: 接缝总数下限（棘轮：只许增，不许减）
 BASELINE_TOTAL = 55
 #: 完全可扩展接缝数下限（棘轮：只许增，不许减）
-#: W0-W2 完成后从 10 提到 16（出站链、入站链、输出策略、输出指令、发送通道、run_turn）
-BASELINE_FULL = 16
+#: 从 10 起步：W0-W2 提到 16（出站/入站链、输出策略、输出指令、发送通道、run_turn），
+#: B-4 再提到 20（provider 适配器、数据源、会话存储、定时任务服务）。
+BASELINE_FULL = 20
 #: 半通下限（防止把 half 悄悄改成 full 而不补证据）
-BASELINE_HALF = 24
+BASELINE_HALF = 20
 
 #: LLM 流水线合法的钩子阶段（新增阶段必须同时改这里与 docs）
 DECLARED_STAGES = frozenset(
@@ -110,9 +111,11 @@ SEAMS: tuple[Seam, ...] = (
          gap="R1：`COMMAND_GROUPS` 静态表（有测试锁，但仍不可扩展）"),
 
     # ── 上下文取值 ──────────────────────────────────────────────
-    Seam("S12", "取值", "会话/历史存储", HALF, "app/agent/session/manager.py:259",
-         gap="R4：单例无 evict；R1 事实上可用（`SessionManager(str(bot_id))`）但无门面承诺",
-         evidence=("tests/agent/session/test_llm_history_contract.py::test_snapshot_keeps_raw_shape_that_get_history_projects_away",)),
+    Seam("S12", "取值", "会话/历史存储", FULL, "app/agent/session/manager.py:SessionManager",
+         evidence=(
+             "tests/plugin/test_unregister_discipline.py::test_session_manager_singleton_normalises_bot_id_type",
+             "tests/plugin/test_unregister_discipline.py::test_session_manager_evict_removes_instance",
+         )),
     Seam("S13", "取值", "群聊在线历史 pre_history", UNWIRED, "app/agent/loop/prompt_prep.py:155",
          gap="R1/R2：硬编码调用，无 provider 注册"),
     Seam("S14", "取值", "群聊环境记录 group_log", HALF, "app/agent/loop/context_blocks.py:233",
@@ -148,9 +151,11 @@ SEAMS: tuple[Seam, ...] = (
          gap="R1/R2：`provider_chain()` 无钩子，模型选择不可介入"),
     Seam("S26", "请求", "参数规划（max_tokens 三源合并）", UNWIRED, "app/agent/providers/policy.py",
          gap="R1：`merge_config_layers`/`plan_max_tokens` 是硬编码管线"),
-    Seam("S27", "请求", "provider 适配器类", HALF, "app/agent/providers/__init__.py:70",
-         gap="R4：`register_provider` 只能注册，无 unregister",
-         evidence=("tests/agent/providers/test_provider.py::test_register_and_call_module_provider",)),
+    Seam("S27", "请求", "provider 适配器类", FULL, "app/agent/providers/__init__.py:register_provider",
+         evidence=(
+             "tests/plugin/test_unregister_discipline.py::test_register_and_unregister_provider_roundtrip",
+             "tests/plugin/test_unregister_discipline.py::test_unregister_provider_by_owner",
+         )),
     Seam("S28", "请求", "调用策略", FULL, "app/agent/providers/invoker.py:57",
          evidence=(
              "tests/agent/providers/test_llm_provider_invoker.py::test_invoker_feature_swaps_and_restores",
@@ -202,9 +207,12 @@ SEAMS: tuple[Seam, ...] = (
          evidence=("tests/plugin/test_dispatcher.py::test_bot_id_filter",)),
     Seam("S42", "驱动", "主动消息", UNWIRED, "app/agent/runtime.py:106",
          gap="R1/R2：`runtime.proactive` 在 `__init__` 硬 new，`pipeline.py:567` 硬调"),
-    Seam("S43", "驱动", "定时任务", HALF, "app/application/cron_service.py:167",
-         gap="R1：`SCHEDULES` + `register` 可加，但无 update/list/按 owner 查（对比 AstrBot `cron_manager`）",
-         evidence=("tests/agent/proactivity/test_scheduler.py::test_schedule_fires_at_time",)),
+    Seam("S43", "驱动", "定时任务（框架服务）", FULL, "app/application/cron_service.py:SchedulerService",
+         evidence=(
+             "tests/application/test_scheduler_service_jobs.py::test_list_jobs_filters_by_prefix",
+             "tests/application/test_scheduler_service_jobs.py::test_update_job_reschedules_and_keeps_handler",
+             "tests/application/test_scheduler_service_jobs.py::test_run_job_now_does_not_remove_schedule",
+         )),
     Seam("S44", "驱动", "模块发起一轮对话", FULL, "app/agent/loop/turn.py:run_turn",
          evidence=(
              "tests/agent/loop/test_run_turn.py::test_run_turn_non_stream_returns_text_without_event",
@@ -223,8 +231,8 @@ SEAMS: tuple[Seam, ...] = (
          evidence=("tests/plugin/test_schema_utils.py::test_known_types_have_no_issues",)),
     Seam("S49", "模块", "资源引用（resource）", FULL, "app/plugin/features/registry.py:43",
          evidence=("tests/plugin/test_resource_registry.py::test_register_overrides_and_unregister",)),
-    Seam("S50", "模块", "数据源 list/dynamic", HALF, "app/application/provider_service.py:71",
-         gap="R4：`ProviderRegistry.register_module` 有、**无 unregister**，卸载后条目仍在"),
+    Seam("S50", "模块", "数据源 list/dynamic", FULL, "app/application/provider_service.py:ProviderRegistry",
+         evidence=("tests/plugin/test_unregister_discipline.py::test_data_source_registry_unregister_module",)),
     Seam("S51", "模块", "模块自建 HTTP 路由", UNWIRED, "app/webui/api/modules.py:377",
          gap="R1：只有静态 `pages/index.html`（对比 AstrBot `Context.register_web_api`）"),
     Seam("S52", "模块", "模块自定义页面", HALF, "app/webui/api/modules.py:377",

@@ -471,7 +471,10 @@ Agent 配置已从通用表单升级为**专属领域页面**：
 | `notice_group_recall` / `notice_private_recall` | 撤回 |
 | `notice_group_increase` / `notice_group_decrease` | 入群/退群 |
 | `request_group` / `request_private` | 加群/加好友申请 |
-| `time_core` | 定时调度（整分钟触发，可判断 `event.hour/minute`） |
+
+> **定时不要用事件**：`time_core` 轮询广播已废弃（见 `app/application/cron_service.py`）。
+> 需要"到点做事"请用模块的 `SCHEDULES` 声明或运行时注册，
+> 见 [`docs/MODULE_DEV.md` §4.9.6](docs/MODULE_DEV.md)。
 
 ## 与旧版（v1）的差异
 
