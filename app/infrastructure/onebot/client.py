@@ -202,6 +202,8 @@ class BotConnection(IBot):
         ws_url: str = "",
         auto_connect: bool = False,
     ) -> None:
+        # ``owner_id`` 仅为兼容旧调用方保留：v3 起账号级 owner QQ 已废弃
+        # （拥有者身份只来自「权限管理 → 拥有者名册」），这里的值不会被保存。
         self.websocket = websocket
         self.bot_id = bot_id
         self.ws_url = ws_url

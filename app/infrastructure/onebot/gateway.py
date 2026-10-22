@@ -178,16 +178,19 @@ class OneBotGateway:
     async def add_bot(
         self, ws_url: str, owner_id: int | None, auto_connect: bool = False, index: int | None = None
     ) -> int:
-        """新增（或按显式 index 更新）一个 Bot 连接。index 缺省取最大索引 + 1（避免删除中间账号后撞已有连接）。"""
+        """新增（或按显式 index 更新）一个 Bot 连接。index 缺省取最大索引 + 1（避免删除中间账号后撞已有连接）。
+
+        ``owner_id`` 参数**仅为兼容旧调用方保留**：v3 起账号级 owner QQ 已废弃
+        （拥有者身份只来自「权限管理 → 拥有者名册」），传进来的值会被忽略。
+        """
         if index is None:
             index = max(self.connections, default=-1) + 1
         conn = self.connections.get(index)
         if conn is not None:  # 已存在 → 仅更新配置字段，不重建连接
             conn.ws_url = ws_url
-            conn.owner_id = owner_id
             conn.auto_connect = auto_connect
             return index
-        conn = BotConnection(owner_id=owner_id, ws_url=ws_url, auto_connect=auto_connect)
+        conn = BotConnection(ws_url=ws_url, auto_connect=auto_connect)
         conn.status = "disconnected"
         conn.index = index
         if self.outbound_hook_factory:
@@ -199,10 +202,10 @@ class OneBotGateway:
         return index
 
     async def readd_bot(self, ws_url: str, owner_id: int | None, index: int) -> int:
+        """更新已有连接的地址（``owner_id`` 同上：兼容保留，已忽略）。"""
         conn = self.connections.get(index)
         if conn:
             conn.ws_url = ws_url
-            conn.owner_id = owner_id
         return index
     async def del_bot(self, index: int) -> None:
         await self.disconnect_bot(index)
@@ -663,15 +666,16 @@ class OneBotGateway:
             ws_url = cfg.get("ws_url", "")
             conn = self.connections.get(index)
             if conn is None:
-                await self.add_bot(ws_url, cfg.get("owner_id"), cfg.get("auto_connect", False), index=index)
+                await self.add_bot(ws_url, None, cfg.get("auto_connect", False), index=index)
                 continue
             changed = False
             if cfg.get("ws_url") != conn.ws_url:
                 conn.ws_url = ws_url
                 changed = True
-            if cfg.get("owner_id") != conn.owner_id:
-                conn.owner_id = cfg.get("owner_id")
-                changed = True
+            # 注意：**不要**再比较 owner_id。
+            # v3 起账号级 owner_id 已废弃（拥有者身份只来自「权限管理 → 名册」），
+            # `conn.owner_id` 恒为 None；若仍拿配置里的旧值去比，会永远"不相等"，
+            # 于是每 10 秒的监督轮询都判定"配置已更新"→ 断开重连，形成死循环。
             if bool(cfg.get("auto_connect", False)) != conn.auto_connect:
                 # 重新打开「自动连接」开关 = 明确要它在线 → 解除手动断开的抑制
                 if cfg.get("auto_connect") and not conn.auto_connect:
