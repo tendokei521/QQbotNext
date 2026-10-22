@@ -10,11 +10,15 @@
 框架内置了一些“同类能力”，例如：
 
 - 框架主动消息：`proactive`
-- 框架定时任务：`schedule`
+- 框架定时任务：`schedule`（+ 驱动 `schedule_driver`）
 - 长期记忆：`memory`
 - 知识库：`knowledge`
 - OneBot Tools：`onebot_tools`
 - 框架级 Agent 整体启停：`agent`
+- 消息组装：`assembly`（装槽型）
+- provider 调用策略：`provider_invoker`（装槽型）
+- 输出策略：`output`（装槽型，v3 新增）
+- 消息元信息 / 上下文增强 / MCP：`message_meta` / `context` / `mcp`（策略型，v3 新增）
 
 当第三方插件也实现同类能力时（例如“新的主动回复插件”），需要有一个统一机制让插件：
 
@@ -38,7 +42,29 @@
 | 租约（Lease） | 一个插件对某能力在某 Bot 实例上的接管记录 |
 | `suppress_with_owner()` | （可选覆盖）带租约占有者的接管入口：需要知道「谁在接管」的能力用它装上接管者对象，默认转调 `suppress()` |
 | `on_owner_changed()` | （可选覆盖）交棒钩子：租约集合变化后把生效者切给当前持有者，默认不处理 |
-| 装槽型能力 | `assembly` / `provider_invoker`：接管 = 把运行时属性指向插件对象，交棒 = 指回仍在场者，释放 = 还原 |
+| 装槽型能力 | `assembly` / `provider_invoker` / `output`：接管 = 把运行时属性指向插件对象，交棒 = 指回仍在场者，释放 = 还原 |
+| 策略型能力 | `memory` / `knowledge` / `context` / `message_meta` / `mcp`：只有一组配置键，接管 = 让对方的配置视图失效（框架回退默认） |
+
+### 2.1 已注册能力清单（v3：13 个）
+
+| feature_id | 类型 | 说明 | 内置提供者 |
+|---|---|---|---|
+| `proactive` | 开关型 | 框架主动消息 | `llm_proactive` |
+| `schedule` | 开关型 | 框架定时任务开关 | `llm_schedule` |
+| `schedule_driver` | 策略型 | 定时任务驱动（`runtime.scheduler`） | `llm_schedule` |
+| `memory` | 开关型 | 长期记忆 | `llm_memory` |
+| `knowledge` | 开关型 | 知识库 | `llm_knowledge` |
+| `onebot_tools` | 开关型 | OneBot 工具 | `llm_tools_extra` |
+| `agent` | 开关型 | 框架级 Agent 整体启停 | — |
+| `assembly` | 装槽型 | 消息组装（`build(req)`） | `llm_assembly` |
+| `provider_invoker` | 装槽型 | provider 调用约定（`chat`/`stream`） | — |
+| `output` | 装槽型 | 一轮回复怎么产出（`respond(ctx)`） | `llm_output` |
+| `message_meta` | 策略型 | 消息元信息渲染 | `llm_message_meta` |
+| `context` | 策略型 | 指代/展开/历史查询权限 | `llm_context` |
+| `mcp` | 策略型 | MCP 工具 | `llm_tools_extra` |
+
+> 装槽型与策略型的区别：前者**替换对象**（一个槽只能有一个生效者，先到先得 + 交棒），
+> 后者**替换配置**（视图挂到 `runtime.<kind>_options`，释放即回到默认）。
 
 ---
 

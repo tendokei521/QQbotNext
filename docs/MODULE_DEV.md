@@ -817,6 +817,68 @@ class Module(BaseModule):
 
 ---
 
+## 4.10 v3 内置的 9 个功能模块（配置归属的既定事实）
+
+v3 把「高级功能」从 agent 配置页整体搬进了模块。**这 9 个模块随仓库发布、随账号自动装配**，
+每个模块自己持有配置（`config_schema`），框架侧机制只认 `policy_view`。
+
+| 模块 | 目录 | 键数 | 接管什么 | 配置在哪 |
+|---|---|---|---|---|
+| 输出策略 | `llm_output` | 25 | `output` 槽（`mode=text/stream/speech`） | 模块页 |
+| 组装策略 | `llm_assembly` | 10 | `assembly` 槽（档位/行为规则/请求对账） | 模块页 |
+| 消息元信息 | `llm_message_meta` | 14 | 元信息渲染 + 历史清洗 | 模块页 |
+| 上下文增强 | `llm_context` | 10 | 指代消解 / 按需展开 / 历史查询权限 | 模块页 |
+| 长期记忆 | `llm_memory` | 17 | 记忆召回策略（机制在框架） | 模块页 |
+| 知识库 | `llm_knowledge` | 3 | 知识库检索策略（机制在框架） | 模块页 |
+| 工具扩展 | `llm_tools_extra` | 9 | OneBot 工具 / MCP / 工具结果回应要求 | 模块页 |
+| 主动消息 | `llm_proactive` | 17 | `runtime.proactive`（纯业务，自建计时器） | 模块页 |
+| 定时任务 | `llm_schedule` | 3 | `runtime.scheduler`（纯业务，自建调度） | 模块页 |
+
+### 4.10.1 配置取用口径（写框架代码时唯一允许的读法）
+
+```python
+from app.agent.policy import policy_config, policy_get, policy_view
+
+policy_get(runtime, "memory", "memory_enable", False)   # 只关心一个模块的键
+policy_view(runtime).get("assembly_profile")            # 机制跨模块读键时用这条链
+```
+
+> **不要**在新代码里写 `runtime.config.get("memory_enable")` —— 那个键已经不在 agent 配置里了。
+> `tests/plugins/test_module_config_integration.py` 会一次装齐 9 个模块，
+> 断言 108 个迁走的键都从模块值读到。
+
+### 4.10.2 你自己的模块怎么接管同款能力
+
+```python
+class Module(BaseModule):
+    # 排他槽（谁接管谁独占）：output / assembly / provider_invoker
+    supersedes = ("output",)
+    async def respond(self, ctx, *, should_stop=None): ...
+
+    # 或策略型（只有一组配置键）：memory / knowledge / context / message_meta / mcp …
+    # 接管 = 把 runtime.<kind>_options 换成你的配置视图，框架自然读你的值
+    async def on_load(self):
+        from app.agent.delivery.output import ConfigView
+        runtime = self.ctx.services.runtime(self.bot_id)
+        runtime.memory_options = ConfigView(runtime.config, self.config, MY_KEYS)
+```
+
+### 4.10.3 前端分区与升级
+
+- `app/webui/dashboard/src/agent/sections.json` **由代码生成**，不要手改：
+  ```bash
+  python scripts/gen_sections.py          # 改完 config_partition.py 后重新生成
+  python scripts/gen_sections.py --check  # CI 校验
+  ```
+- 本体界面只剩 5 页 / 43 键；模块能力在「LLM 扩展」分类下按模块渲染。
+- 从 v2 升级务必跑两个迁移（都支持 `--dry-run`、自动备份 DB）：
+  ```bash
+  python scripts/migrate_v3_owner_to_roster.py   # 账号级 owner_id → 拥有者名册
+  python scripts/migrate_v3_split_config.py      # agent 配置 108 键 → 9 个模块行
+  ```
+
+---
+
 ## 4.3 模块给 LLM 提供工具（`@tool`）
 
 模块可以把方法暴露给 LLM 作为 function calling 工具：

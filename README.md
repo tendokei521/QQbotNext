@@ -134,6 +134,36 @@ python main.py
 | `DB_PATH` | `data/app.db` | SQLite 路径 |
 | `WS_CONNECT_TIMEOUT` | `30` | WebSocket 连接超时 |
 
+## 内置功能模块（v3：高级功能全部模块化）
+
+流式输出、长期记忆、主动消息、定时任务、OneBot/MCP 工具、指代消解、组装档位等
+**全部由模块提供**，随仓库发布、随账号自动装配，各自持有自己的配置页。
+
+| 模块 | 键数 | 负责 |
+|---|---|---|
+| `llm_output` | 25 | 输出策略：`text` / `stream` / `speech`（发言通道） |
+| `llm_assembly` | 10 | 组装档位、行为规则段、请求落盘对账 |
+| `llm_message_meta` | 14 | 消息元信息渲染（时间/发送者/引用/@）与历史清洗 |
+| `llm_context` | 10 | 指代消解、上下文按需展开、历史查询权限 |
+| `llm_memory` | 17 | 长期记忆召回策略 |
+| `llm_knowledge` | 3 | 知识库检索 |
+| `llm_tools_extra` | 9 | OneBot 工具、MCP、工具结果回应要求 |
+| `llm_proactive` | 17 | 主动消息（私聊随机间隔 / 群聊沉默后开口） |
+| `llm_schedule` | 3 | 定时任务 |
+
+**本体（Agent）配置页只剩 5 页 43 键**：基础配置 / 权限管理 / 对话行为 / 会话管理 / 高级功能
+（图片与动图、联网搜索）。其余都在各自模块的配置页里。
+
+> **从 v2 升级**：务必跑两个迁移脚本（都支持 `--dry-run`，自动备份 DB）：
+>
+> ```bash
+> python scripts/migrate_v3_owner_to_roster.py   # 账号级 owner QQ → 权限管理的拥有者名册
+> python scripts/migrate_v3_split_config.py      # agent 配置 108 键 → 9 个模块行
+> ```
+>
+> 前端分区清单 `app/webui/dashboard/src/agent/sections.json` 由
+> `python scripts/gen_sections.py` 从代码生成，不要手改。
+
 ## 开发一个插件
 
 > 完整模块开发文档见 [`docs/MODULE_DEV.md`](docs/MODULE_DEV.md)，包含每个钩子的参数与用法。
