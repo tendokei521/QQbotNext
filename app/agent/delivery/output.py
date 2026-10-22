@@ -57,8 +57,11 @@ class BlockingOutput:
 
     streams = False
 
-    def __init__(self, runtime: Any = None) -> None:
+    def __init__(self, runtime: Any = None, config: Any = None) -> None:
         self.runtime = runtime
+        #: 可选配置视图。模块接管输出时把自己模块的配置传进来，
+        #: 于是这些策略"读的是模块配置"，框架自身不再需要持有那些键。
+        self.config = config
 
     async def respond(
         self, ctx: Any, *, should_stop: Callable[[], bool] | None = None
@@ -68,7 +71,7 @@ class BlockingOutput:
         from app.agent.loop.generate import generate_response
 
         runtime = self.runtime or getattr(ctx, "runtime", None)
-        config = getattr(runtime, "config", None)
+        config = self.config if self.config is not None else getattr(runtime, "config", None)
 
         response_text = await generate_response(runtime, ctx.event, ctx)
         if response_text is None:
@@ -108,14 +111,21 @@ class StreamOutput:
 
     streams = True
 
-    def __init__(self, runtime: Any = None) -> None:
+    def __init__(self, runtime: Any = None, config: Any = None) -> None:
         self.runtime = runtime
+        #: 可选配置视图（模块接管时传自己模块的配置，见 BlockingOutput）
+        self.config = config
+
+    def _cfg(self, ctx: Any) -> Any:
+        if self.config is not None:
+            return self.config
+        runtime = self.runtime or getattr(ctx, "runtime", None)
+        return getattr(runtime, "config", None)
 
     async def respond(
         self, ctx: Any, *, should_stop: Callable[[], bool] | None = None
     ) -> AsyncIterator[Message]:
-        runtime = self.runtime or getattr(ctx, "runtime", None)
-        config = getattr(runtime, "config", None)
+        config = self._cfg(ctx)
         pool_enabled = bool(
             config.get("stream_send_pool_enabled", False) if _has_get(config) else False
         )
@@ -132,7 +142,7 @@ class StreamOutput:
         from app.agent.loop.chat import stream_response
 
         runtime = self.runtime or getattr(ctx, "runtime", None)
-        config = getattr(runtime, "config", None)
+        config = self._cfg(ctx)
         outbound = build_outbound_builder(ctx.event, config)
         async for item in stream_response(runtime, ctx.event, ctx):
             if should_stop is not None and should_stop():
@@ -150,7 +160,7 @@ class StreamOutput:
         from app.agent.loop.chat import stream_response
 
         runtime = self.runtime or getattr(ctx, "runtime", None)
-        config = getattr(runtime, "config", None)
+        config = self._cfg(ctx)
         outbound = build_outbound_builder(ctx.event, config)
         queue: asyncio.Queue[Message | None] = asyncio.Queue()
         done = asyncio.Event()
@@ -227,15 +237,57 @@ def _has_get(config: Any) -> bool:
     return callable(getattr(config, "get", None))
 
 
-def select_default_output(config: Any = None) -> OutputStrategy:
-    """框架默认输出策略：按 ``stream_output`` 选择（模块接管前的既有行为）。"""
+def select_default_output(config: Any = None, runtime: Any = None) -> OutputStrategy:
+    """框架默认输出策略：按 ``stream_output`` 选择（模块接管前的既有行为）。
+
+    ``config`` 可以是一个**配置视图**（模块接管时传入自己的配置），
+    这样同一套策略实现既能服务框架默认路径，也能服务模块路径。
+    """
     stream = False
     if _has_get(config):
         try:
             stream = bool(config.get("stream_output", False))
         except Exception:  # noqa: BLE001 —— 配置异常按非流式处理（保守）
             stream = False
-    return StreamOutput() if stream else BlockingOutput()
+    return StreamOutput(runtime, config) if stream else BlockingOutput(runtime, config)
+
+
+class ConfigView:
+    """把「模块配置」包成框架策略认识的配置对象。
+
+    框架的流式/非流式/发言通道实现读的是"某个配置对象"。把模块自己的配置包一层
+    交给它，**机制完全不用改**，而那些 ``stream_*`` / ``speech_*`` 键就从
+    agent 配置搬到了模块配置里。
+
+    未在 ``owned_keys`` 里的键回退到 ``base``（agent 配置）—— 这样迁移期间
+    框架仍能读到尚未迁走的键，行为不变。
+    """
+
+    def __init__(self, base: Any, module_config: Any, owned_keys: Any) -> None:
+        self._base = base
+        self._module = module_config
+        self._owned = frozenset(owned_keys or ())
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if key in self._owned:
+            value = _safe_get(self._module, key, None)
+            if value is not None:
+                return value
+            # 模块侧没给（旧配置/未迁移）→ 退回 agent 配置，保持升级平滑
+        return _safe_get(self._base, key, default)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._base, name)
+
+
+def _safe_get(config: Any, key: str, default: Any) -> Any:
+    getter = getattr(config, "get", None)
+    if not callable(getter):
+        return default
+    try:
+        return getter(key, default)
+    except Exception:  # noqa: BLE001
+        return default
 
 
 def resolve_output(runtime: Any) -> OutputStrategy:
@@ -251,4 +303,4 @@ def resolve_output(runtime: Any) -> OutputStrategy:
         logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").warning(
             f"[Output] runtime.output 不可用（{type(strategy).__name__}），已回退默认输出策略"
         )
-    return select_default_output(getattr(runtime, "config", None))
+    return select_default_output(getattr(runtime, "config", None), runtime)
