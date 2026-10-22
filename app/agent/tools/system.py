@@ -37,31 +37,17 @@ def _build_specs(runtime: Any) -> list[ToolSpec]:
     """构造全部内置系统工具的 ToolSpec（仅用于元数据/列表展示）。"""
     specs: list[ToolSpec] = []
 
-    from app.plugins.llm_schedule.schedule_tool import build_schedule_tool
-
-    specs.append(build_schedule_tool(runtime, "group_0", False))
 
     from app.agent.tools.session_tools import build_session_tools
 
     specs.extend(build_session_tools(runtime, None))
 
-    from app.plugins.llm_context.context_tools import build_context_tools
-
-    specs.extend(build_context_tools(runtime, None))
 
     from app.agent.tools.web_search import build_tavily_tool
 
     specs.append(build_tavily_tool(runtime))
 
-    if getattr(runtime, "memory", None) is not None:
-        from app.plugins.llm_memory import build_memory_tools
 
-        specs.extend(build_memory_tools(runtime, "group_0", "", False))
-
-    if getattr(runtime, "knowledge", None) is not None:
-        from app.plugins.llm_knowledge import build_knowledge_tools
-
-        specs.extend(build_knowledge_tools(runtime))
 
     return specs
 

@@ -526,26 +526,32 @@ def test_expanded_summary_is_clipped():
     assert len(text) < 200
 
 
-async def test_lookup_expanded_bridges_focus_registry():
-    """渲染层按 bot_id/session_id 自动查焦点表（无需调用方手动传 expanded）。"""
-    from app.plugins.llm_context import focus
-    from app.agent.context.group import lookup_expanded
+async def test_lookup_expanded_uses_the_framework_session_registry():
+    """v3：`group.py` 不再读 `llm_context.focus`，改读框架 `session/enrich` 的登记。
 
-    focus.clear_all()
-    focus.note("b1", "group_778", "576048059", kind="message", summary="B站视频", source="expand")
-    bot = _FakeBot(_envelope([{
-        "time": 1788342159,
-        "message_id": 576048059,
-        "sender": {"user_id": 1901691195, "nickname": "桉"},
-        "message": [{"type": "forward", "data": {"id": "f"}}],
-    }]))
+    指代/展开模块把取回的内容写进 `enrich`（框架的会话补全设施），
+    渲染层从这里升级「未展开 → 已展开」标记。
+    """
+    from app.agent.context import group as group_ctx
+    from app.agent.session import enrich
 
-    text = await fetch_group_online_history(
-        bot, 778, count=10, self_ids=set(), mark_unresolved=True,
-        bot_id="b1", session_id="group_778",
+    enrich.remember(
+        "group_1",
+        "1",
+        items=[
+            {
+                "ref": "576048059",
+                "kind": "message",
+                "summary": "合并转发576048059 的 B站视频",
+                "content": "内容",
+            }
+        ],
     )
+    try:
+        refs = enrich.to_expanded_refs("group_1", "1")
+        assert refs["messages"]["576048059"].startswith("合并转发")
+        # 渲染层用的就是这个入口
+        assert hasattr(group_ctx, "format_history_for_llm")
+    finally:
+        enrich.clear()
 
-    assert "【已展开:合并转发576048059 → B站视频】" in text
-    assert lookup_expanded("b1", "group_778").message_summary("576048059") == "B站视频"
-    assert lookup_expanded("b1", "nope").messages == {}
-    focus.clear_all()

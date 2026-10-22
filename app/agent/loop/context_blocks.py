@@ -195,7 +195,7 @@ def _append_round_images(messages: list[dict], tool_ctx, modalities) -> bool:
     实现在 ``context_tools.append_round_images``（主动消息/定时任务的工具轮也要用，
     而它们不能 import 本模块）。见该函数的说明与时机问题。
     """
-    from app.plugins.llm_context.context_tools import append_round_images
+    from app.agent.tools.round_images import append_round_images
 
     return append_round_images(messages, tool_ctx, modalities)
 

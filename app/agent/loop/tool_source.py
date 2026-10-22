@@ -70,11 +70,7 @@ async def _collect_llm_ext(
         group_id = getattr(group, "group_id", None) if group is not None else None
 
     specs = []
-    if schedule_enable:
-        # 工具在 tools/schedule.py，引擎在 proactivity/scheduler.py——分开是为了不造环
-        from app.plugins.llm_schedule.schedule_tool import build_schedule_tool
-
-        specs.append(build_schedule_tool(runtime, session_id, is_private))
+    # 定时任务工具由 `llm_schedule` 模块的 tool_source 提供（框架不认识"定时任务"）
 
     if getattr(runtime, "llm_tools", None) is not None:
         specs.extend(runtime.llm_tools.enabled_specs())

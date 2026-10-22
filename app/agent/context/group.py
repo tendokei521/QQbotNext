@@ -109,9 +109,11 @@ def lookup_expanded(bot_id: Any, session_id: Any) -> ExpandedRefs:
     if bot_id in (None, "") or session_id in (None, ""):
         return ExpandedRefs()
     try:
-        from app.plugins.llm_context import focus as _focus
+        from app.agent.session import enrich
 
-        data = _focus.expanded_refs(bot_id, session_id)
+        # 「已展开」登记是框架的会话补全设施（`session/enrich.py`），
+        # 指代/展开模块只是往里写，渲染层从这里读——框架不认识该模块。
+        data = enrich.to_expanded_refs(session_id, bot_id)
     except Exception as e:
         # 登记表读取失败不影响渲染主流程，按"都还没展开"处理并留痕
         logger.debug(f"[GroupContext] 读取已展开登记失败（按未展开处理）: {e}")

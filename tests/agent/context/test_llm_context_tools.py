@@ -1,4 +1,4 @@
-﻿"""上下文按需展开工具（expand_context）测试。
+"""上下文按需展开工具（expand_context）测试。
 
 它补的是渲染层展不开的那部分：更早/被引用的消息正文、合并转发内容、某个 QQ 是谁。
 要求：零参数可用（从本轮触发消息推导）、支持批量且并发、返回自解释（带 relation）、
@@ -901,20 +901,17 @@ def test_tool_specs_are_split_by_intent():
     assert "[图片#" in specs["expand_image"].description
 
 
-def test_tool_is_listed_as_system_tool_and_gated_by_config():
+def test_module_tools_are_not_in_the_framework_system_tool_list():
+    """v3：`expand_*` 归 llm_context 模块，不再出现在框架「系统工具」清单里。
+
+    模块工具的展示走模块自己的配置页（`/modules/llm_context`），
+    框架清单只回答"框架自带哪些工具"。
+    """
     from app.agent.tools.system import list_system_tools
 
-    names = {"expand_recent", "expand_message", "expand_user"}
     runtime = SimpleNamespace(bot_id="1", config={})
-    listed = {i["name"]: i for i in list_system_tools(runtime)}
-    for name in names:
-        assert listed[name]["effective"] is True
-
-    off = SimpleNamespace(bot_id="1", config={"context_expand_enable": False})
-    listed_off = {i["name"]: i for i in list_system_tools(off)}
-    for name in names:
-        assert listed_off[name]["effective"] is False
-        assert listed_off[name]["prerequisite"] == "上下文按需展开未启用"
+    listed = {i["name"] for i in list_system_tools(runtime)}
+    assert not {"expand_recent", "expand_message", "expand_user"} & listed
 
 
 async def test_collect_llm_ext_registers_tool_unless_disabled():

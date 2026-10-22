@@ -207,18 +207,22 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
         return True
 
     elif action.startswith("memory"):
-        from app.plugins.llm_memory import handle_memory_command
-
-        return await handle_memory_command(module, session_id, user_id, is_admin, is_private, action, send)
+        # v3：长期记忆是 `llm_memory` 模块的业务，指令由它自己用 @command 声明。
+        # 走到这里说明该模块未安装或被禁用。
+        await send("长期记忆未启用（安装并启用「长期记忆」模块后可用）")
+        return True
 
     elif action == "exit":
-        memory = getattr(module, "memory", None)
-        if memory is not None:
+        # 会话重置通知走钩子（记忆模块自己订阅），框架不再直呼业务对象
+        hooks = getattr(module, "llm_hooks", None)
+        if hooks is not None:
+            from app.agent.hooks import run_stage
+
             try:
-                memory.on_session_reset(session_id, user_id)
-            except Exception as e:
+                await run_stage(module, "session_reset", None)
+            except Exception as e:  # noqa: BLE001 —— 重置通知失败不该阻断退出
                 logger.add_info(f"#{getattr(module, 'bot_id', '?')}").debug(
-                    f"[Memory] 会话重置钩子失败（已忽略）: {e}"
+                    f"[LLM] 会话重置通知失败（已忽略）: {e}"
                 )
         if session:
             session_mgr.add_message(session_id, "assistant", "#llm exit")

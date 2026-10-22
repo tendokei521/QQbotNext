@@ -60,6 +60,7 @@ DECLARED_STAGES = frozenset(
         "message_observed",
         "bot_sent",
         "turn_completed",
+        "session_reset",
     }
 )
 

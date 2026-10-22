@@ -23,8 +23,7 @@ def create_memory_store(bot_id: Any, backend: str = "sqlite", db_path: str | Non
     """创建长期记忆存储实例。"""
     if backend != "sqlite":
         raise ValueError(f"不支持的记忆存储后端: {backend}")
-    from app.plugins.llm_memory.store import MemoryStore as SQLiteMemoryStore
-
+    
     return SQLiteMemoryStore(bot_id, db_path=db_path)
 
 
@@ -32,8 +31,7 @@ def create_knowledge_store(bot_id: Any, backend: str = "sqlite", db_path: str | 
     """创建知识库存储实例。"""
     if backend != "sqlite":
         raise ValueError(f"不支持的知识库存储后端: {backend}")
-    from app.plugins.llm_knowledge.store import KnowledgeStore
-
+    
     return KnowledgeStore(bot_id, db_path=db_path)
 
 

@@ -58,6 +58,10 @@ class Module(BaseModule):
             getattr(runtime, "config", None), self.config, OWNED_KEYS
         )
         self._scheduler = build_scheduler(self)
+        from app.agent.loop.providers import register_tool_source
+        from app.plugins.llm_schedule.service import ScheduleToolSource
+
+        register_tool_source(runtime, ScheduleToolSource(self))
         runtime.scheduler = self._scheduler
 
     async def on_unload(self) -> None:

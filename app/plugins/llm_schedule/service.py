@@ -14,3 +14,27 @@ def build_scheduler(module: Any) -> Any:
     from app.plugins.llm_schedule.scheduler import TaskScheduler
 
     return TaskScheduler(module)
+
+
+class ScheduleToolSource:
+    """工具源：`schedule` 工具（到点让 Bot 自然开口）。"""
+
+    def __init__(self, module: Any) -> None:
+        self.module = module
+        self.name = "schedule"
+        self.order = 70
+        self.owner = module
+
+    async def collect(self, scope: Any) -> list:
+        runtime = getattr(scope, "runtime", None)
+        if runtime is None or not getattr(self.module, "enabled", False):
+            return []
+        from app.plugins.llm_schedule.schedule_tool import build_schedule_tool
+
+        return [
+            build_schedule_tool(
+                runtime,
+                getattr(scope, "session_id", ""),
+                bool(getattr(scope, "is_private", False)),
+            )
+        ]
