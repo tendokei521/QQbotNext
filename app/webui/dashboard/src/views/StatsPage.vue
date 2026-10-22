@@ -59,6 +59,7 @@ interface QueryResp {
     unit: string
     series_order: string[]
     truncated: number
+    hidden_buckets: number
   }
   buckets: Bucket[]
   summary: Summary
@@ -122,8 +123,11 @@ const RANGES = [
   { value: 365, title: '近一年' },
 ]
 
+type Pivot = 'metric' | 'series'
+
 const kind = ref<Kind>('llm')
 const metric = ref('tokens')
+const pivot = ref<Pivot>('metric')
 const granularity = ref<Granularity>('day')
 const breakdown = ref('model')
 const rangeDays = ref(30)
@@ -167,17 +171,94 @@ function pct(value: number | null): string {
 }
 
 const seriesNames = computed(() => data.value?.meta.series_order ?? [])
-const maxTotal = computed(() => Math.max(1, ...(data.value?.buckets ?? []).map((b) => b.total)))
+const buckets = computed(() => data.value?.buckets ?? [])
+const unit = computed(() => data.value?.meta.unit ?? 'tokens')
 
-function barWidth(total: number): string {
-  return `${Math.max(2, (total / maxTotal.value) * 100)}%`
+/** 指标行的键（同时用于取值与表头文案）。 */
+interface MetricRow {
+  key: keyof SeriesItem
+  label: string
 }
-function segmentWidth(value: number): string {
-  return `${Math.max(1, (value / maxTotal.value) * 100)}%`
+
+/** 透视模式=metric 时展示哪些指标行（跟 kind 走）。 */
+const metricRows = computed<MetricRow[]>(() => {
+  if (kind.value === 'llm') {
+    return [
+      { key: 'tokens', label: '总 token' },
+      { key: 'input', label: '输入' },
+      { key: 'output', label: '输出' },
+      { key: 'cache_hit', label: '缓存命中' },
+      { key: 'requests', label: '请求次数' },
+    ]
+  }
+  if (kind.value === 'msg_in') {
+    return [
+      { key: 'messages', label: '消息条数' },
+      { key: 'events', label: '事件数' },
+      { key: 'bytes', label: '字节数' },
+    ]
+  }
+  return [
+    { key: 'messages', label: '消息条数' },
+    { key: 'bytes', label: '字节数' },
+  ]
+})
+
+/** 某桶某指标的值（跨序列求和）。 */
+function bucketValue(bucket: Bucket, key: keyof SeriesItem): number {
+  let sum = 0
+  for (const item of Object.values(bucket.series)) sum += Number(item[key] ?? 0)
+  return sum
 }
-const SERIES_COLORS = ['#4F8EF7', '#22C55E', '#F59E0B', '#EF4444', '#A855F7', '#14B8A6', '#94A3B8']
-function seriesColor(index: number): string {
-  return SERIES_COLORS[index % SERIES_COLORS.length]
+
+/** 某序列某指标的值。 */
+function seriesValue(bucket: Bucket, series: string, key: keyof SeriesItem): number {
+  return Number(bucket.series[series]?.[key] ?? 0)
+}
+
+/** 合计：整段区间的总量（来自 summary，不受截断影响）。 */
+function metricTotal(key: keyof SeriesItem): number {
+  const s = data.value?.summary
+  if (!s) return 0
+  if (key === 'requests') return s.requests
+  if (key === 'messages') return s.messages
+  if (key === 'bytes') return s.bytes
+  if (key === 'tokens') return s.tokens
+  if (key === 'input') return s.input
+  if (key === 'output') return s.output
+  if (key === 'cache_hit') return s.cache_hit
+  if (key === 'reasoning') return s.reasoning
+  if (key === 'events') return s.events
+  return 0
+}
+
+/** 当前 `metric` 映射到 SeriesItem 的键（用于"按序列"透视的取值列）。 */
+const metricKey = computed<keyof SeriesItem>(() => {
+  const m = data.value?.meta.metric ?? 'tokens'
+  const map: Record<string, keyof SeriesItem> = {
+    tokens: 'tokens',
+    input: 'input',
+    output: 'output',
+    cache_hit: 'cache_hit',
+    reasoning: 'reasoning',
+    requests: 'requests',
+    messages: 'messages',
+    bytes: 'bytes',
+    events: 'events',
+  }
+  return map[m] ?? 'tokens'
+})
+
+function seriesTotal(series: string, key: keyof SeriesItem): number {
+  return buckets.value.reduce((acc, b) => acc + seriesValue(b, series, key), 0)
+}
+
+/** 显示：真 0 显示 `0`；缓存命中列在"上游未报"时显示 `—`。 */
+function cell(value: number, key: keyof SeriesItem): string {
+  if (key === 'cache_hit' && value === 0 && (data.value?.summary.unknown_cache ?? 0) > 0) {
+    return '—'
+  }
+  return value === 0 ? '0' : fmt(value, key === 'requests' || key === 'messages' || key === 'events' ? 'count' : unit.value)
 }
 
 async function load() {
@@ -189,6 +270,7 @@ async function load() {
       metric: metric.value,
       granularity: granularity.value,
       breakdown: breakdown.value,
+      skip_empty: 1,
       ...rangeParams(),
     }
     if (botId.value) params.bot_id = botId.value
@@ -316,58 +398,71 @@ onMounted(() => {
       </template>
     </div>
 
-    <!-- 堆叠柱状趋势 -->
-    <v-card v-if="data" class="chart mt-4" variant="outlined">
+    <!-- 用量表（日期做列、指标做行，参照 DeepSeek 用量页）-->
+    <v-card v-if="data" class="mt-4" variant="outlined">
       <div class="chart-head">
-        <span>{{ data.meta.granularity === 'hour' ? '按小时' : data.meta.granularity === 'day' ? '按天'
-                : data.meta.granularity === 'week' ? '按周' : '按月' }} · {{ data.meta.metric }}</span>
-        <span v-if="data.meta.truncated" class="hint">
-          已合并 {{ data.meta.truncated }} 个较小序列为 other
+        <span>
+          {{ data.meta.granularity === 'hour' ? '按小时' : data.meta.granularity === 'day' ? '按天'
+             : data.meta.granularity === 'week' ? '按周' : '按月' }}
+          · {{ data.meta.metric }}
+        </span>
+        <span class="hint">
+          <template v-if="data.meta.hidden_buckets">已省略 {{ data.meta.hidden_buckets }} 个无数据时段 · </template>
+          <template v-if="data.meta.truncated">已合并 {{ data.meta.truncated }} 个较小序列 · </template>
+          <span class="pivot-toggle">
+            <button :class="{ on: pivot === 'metric' }" @click="pivot = 'metric'">按指标</button>
+            <button :class="{ on: pivot === 'series' }" @click="pivot = 'series'">按{{ breakdown === 'none' ? '序列' : '维度' }}</button>
+          </span>
         </span>
       </div>
-      <div class="legend">
-        <span v-for="(name, i) in seriesNames" :key="name" class="legend-item">
-          <i :style="{ background: seriesColor(i) }" />{{ name || '（未指定）' }}
-        </span>
+
+      <div v-if="!buckets.length" class="empty-hint">该范围内没有数据</div>
+
+      <!-- 透视 A：行 = 指标，列 = 日期 -->
+      <div v-else-if="pivot === 'metric'" class="table-wrap">
+        <table class="usage-table">
+          <thead>
+            <tr>
+              <th class="sticky-col">指标</th>
+              <th v-for="b in buckets" :key="b.bucket" class="num">{{ b.bucket }}</th>
+              <th class="num total-col">合计</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in metricRows" :key="row.key">
+              <td class="sticky-col">{{ row.label }}</td>
+              <td v-for="b in buckets" :key="b.bucket" class="num">
+                {{ cell(bucketValue(b, row.key), row.key) }}
+              </td>
+              <td class="num total-col">{{ cell(metricTotal(row.key), row.key) }}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
-      <div class="bars">
-        <div v-for="b in data.buckets" :key="b.bucket" class="bar-row">
-          <span class="bar-label">{{ b.bucket }}</span>
-          <div class="bar-track">
-            <div class="bar-stack" :style="{ width: barWidth(b.total) }">
-              <span v-for="(name, i) in seriesNames" :key="name"
-                    v-show="b.series[name]"
-                    class="bar-seg"
-                    :style="{ width: segmentWidth(b.series[name]?.value ?? 0), background: seriesColor(i) }"
-                    :title="`${name}: ${fmt(b.series[name]?.value ?? 0, data.meta.unit)}`" />
-            </div>
-          </div>
-          <span class="bar-value">{{ fmt(b.total, data.meta.unit) }}</span>
-        </div>
+
+      <!-- 透视 B：行 = 拆维序列，列 = 日期 -->
+      <div v-else class="table-wrap">
+        <table class="usage-table">
+          <thead>
+            <tr>
+              <th class="sticky-col">{{ breakdown === 'none' ? '序列' : breakdown }}</th>
+              <th v-for="b in buckets" :key="b.bucket" class="num">{{ b.bucket }}</th>
+              <th class="num total-col">合计</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="name in seriesNames" :key="name">
+              <td class="sticky-col">{{ name || '（未指定）' }}</td>
+              <td v-for="b in buckets" :key="b.bucket" class="num">
+                {{ cell(seriesValue(b, name, metricKey), metricKey) }}
+              </td>
+              <td class="num total-col">{{ cell(seriesTotal(name, metricKey), metricKey) }}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </v-card>
 
-    <!-- 明细表 -->
-    <v-card v-if="data" class="mt-4" variant="outlined">
-      <v-table density="compact">
-        <thead>
-          <tr>
-            <th>时间</th>
-            <th v-for="name in seriesNames" :key="name">{{ name || '（未指定）' }}</th>
-            <th class="num">合计</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="b in data.buckets" :key="b.bucket">
-            <td>{{ b.bucket }}</td>
-            <td v-for="name in seriesNames" :key="name" class="num">
-              {{ b.series[name] ? fmt(b.series[name].value, data.meta.unit) : '—' }}
-            </td>
-            <td class="num"><strong>{{ fmt(b.total, data.meta.unit) }}</strong></td>
-          </tr>
-        </tbody>
-      </v-table>
-    </v-card>
 
     <div v-if="loading" class="loading">加载中…</div>
   </div>
@@ -386,19 +481,23 @@ onMounted(() => {
 .card-label { font-size: 12px; color: rgba(var(--v-theme-on-surface), 0.6); }
 .card-value { font-size: 22px; font-weight: 600; }
 .card-sub { font-size: 11px; color: rgba(var(--v-theme-on-surface), 0.55); }
-.chart { padding: 12px 16px; }
-.chart-head { display: flex; justify-content: space-between; font-weight: 600; margin-bottom: 8px; }
-.legend { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 10px; font-size: 12px; }
-.legend-item { display: inline-flex; align-items: center; gap: 4px; }
-.legend-item i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
-.bars { display: flex; flex-direction: column; gap: 4px; max-height: 420px; overflow-y: auto; }
-.bar-row { display: grid; grid-template-columns: 96px 1fr 72px; align-items: center; gap: 8px;
-           font-size: 12px; }
-.bar-label { color: rgba(var(--v-theme-on-surface), 0.65); }
-.bar-track { background: rgba(var(--v-theme-surface-variant), 0.3); border-radius: 4px; height: 14px; }
-.bar-stack { display: flex; height: 100%; border-radius: 4px; overflow: hidden; }
-.bar-seg { height: 100%; display: block; }
-.bar-value { text-align: right; font-variant-numeric: tabular-nums; }
-.num { text-align: right; font-variant-numeric: tabular-nums; }
+.chart-head { display: flex; justify-content: space-between; align-items: center;
+              font-weight: 600; padding: 10px 14px 6px; gap: 8px; flex-wrap: wrap; }
+.pivot-toggle { display: inline-flex; gap: 4px; margin-left: 6px; }
+.pivot-toggle button { border: 1px solid rgba(var(--v-theme-on-surface), 0.2); background: transparent;
+                       color: inherit; font-size: 11px; padding: 1px 8px; border-radius: 10px; cursor: pointer; }
+.pivot-toggle button.on { background: rgb(var(--v-theme-primary)); color: #fff; border-color: transparent; }
+.table-wrap { overflow-x: auto; }
+.usage-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.usage-table th, .usage-table td { padding: 5px 10px; border-bottom: 1px solid
+                                   rgba(var(--v-theme-on-surface), 0.08); white-space: nowrap; }
+.usage-table thead th { font-weight: 600; color: rgba(var(--v-theme-on-surface), 0.7);
+                        position: sticky; top: 0; background: rgb(var(--v-theme-surface)); }
+.usage-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.usage-table .sticky-col { position: sticky; left: 0; background: rgb(var(--v-theme-surface));
+                           text-align: left; font-weight: 500; }
+.usage-table .total-col { font-weight: 700; border-left: 1px solid rgba(var(--v-theme-on-surface), 0.14); }
+.usage-table tbody tr:hover { background: rgba(var(--v-theme-surface-variant), 0.25); }
+.empty-hint { padding: 18px 14px; font-size: 12px; color: rgba(var(--v-theme-on-surface), 0.55); }
 .loading { margin-top: 12px; font-size: 12px; color: rgba(var(--v-theme-on-surface), 0.6); }
 </style>

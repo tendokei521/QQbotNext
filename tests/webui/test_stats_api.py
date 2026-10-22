@@ -64,16 +64,29 @@ async def env(tmp_path):
 # ==================== 查询 ====================
 
 
-async def test_query_returns_full_axis_with_zero_filled_buckets(env):
+async def test_query_skips_empty_buckets_by_default(env):
+    """用量表形态（日期做列）：默认必须省略全零时段，否则表格被 0 撑满。"""
     _rec, db = env
     data = await stat_query.query(
         db, kind="llm", metric="tokens", granularity="day", breakdown="model",
         from_ts=_day(3), to_ts=_day(0) + 86400,
     )
     buckets = [b["bucket"] for b in data["buckets"]]
-    assert len(buckets) == 4, f"应补满 4 个自然日（含空桶），实际 {buckets}"
-    totals = {b["bucket"]: b["total"] for b in data["buckets"]}
-    assert any(v == 0 for v in totals.values()), "空桶必须补 0 而不是缺行"
+    assert len(buckets) == 3, f"只有 3 天有数据，不该出现空桶：{buckets}"
+    assert data["meta"]["hidden_buckets"] == 1
+    assert all(b["total"] > 0 for b in data["buckets"])
+
+
+async def test_query_can_keep_full_axis_for_trends(env):
+    """画连续趋势时传 skip_empty=False，保留完整时间轴（空桶补 0）。"""
+    _rec, db = env
+    data = await stat_query.query(
+        db, kind="llm", metric="tokens", granularity="day", breakdown="model",
+        from_ts=_day(3), to_ts=_day(0) + 86400, skip_empty=False,
+    )
+    assert len(data["buckets"]) == 4
+    assert data["meta"]["hidden_buckets"] == 0
+    assert any(b["total"] == 0 for b in data["buckets"])
 
 
 async def test_query_summary_is_independent_of_top_n(env):

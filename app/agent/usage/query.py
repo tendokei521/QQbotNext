@@ -122,8 +122,14 @@ async def query(
     filters: dict[str, Any] | None = None,
     ok_only: bool = False,
     include_estimated: bool = True,
+    skip_empty: bool = True,
 ) -> dict:
-    """按时间桶 + 堆叠维度聚合。返回 `{meta, buckets, summary}`。"""
+    """按时间桶 + 堆叠维度聚合。返回 `{meta, buckets, summary}`。
+
+    Args:
+        skip_empty: 是否省略"全零"时间桶。用量表形态（日期做列）默认省略，
+            否则整张表会被无数据的 0 撑满；画连续趋势时传 False 保留完整时间轴。
+    """
     metric = metric if metric in METRIC_EXPR else "tokens"
     granularity = granularity if granularity in BUCKET_EXPR else "day"
     breakdown = breakdown if breakdown in BREAKDOWN_COL else "model"
@@ -210,9 +216,13 @@ async def query(
         item["events"] += row["events"] or 0
 
     buckets = []
+    hidden = 0
     for bucket in axis:
         series = by_bucket.get(bucket, {})
         total = sum((s.get("value") or 0) for s in series.values())
+        if skip_empty and not series:
+            hidden += 1
+            continue
         buckets.append({"bucket": bucket, "series": series, "total": total})
 
     # ---- summary：独立聚合（不受 top-N 截断影响）----
@@ -275,6 +285,7 @@ async def query(
             "to_ts": int(to_ts),
             "series_order": keep + (["other"] if truncated else []),
             "truncated": truncated,
+            "hidden_buckets": hidden,
         },
         "buckets": buckets,
         "summary": summary,

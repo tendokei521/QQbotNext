@@ -74,6 +74,7 @@ async def query_stats(
     outcome: str | None = None,
     ok_only: bool = False,
     include_estimated: bool = True,
+    skip_empty: bool = True,
 ):
     recorder = _recorder(request)
     db = getattr(recorder, "_db", None)
@@ -100,6 +101,7 @@ async def query_stats(
             ),
             ok_only=ok_only,
             include_estimated=include_estimated,
+            skip_empty=skip_empty,
         )
     except Exception as e:  # noqa: BLE001 —— 查询失败返回 500，附原因便于排查
         return JSONResponse(status_code=500, content={"status": "error", "message": f"查询失败: {e}"})
