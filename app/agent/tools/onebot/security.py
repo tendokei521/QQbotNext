@@ -9,7 +9,10 @@ def _overrides(runtime) -> dict:
     if runtime is None:
         return {}
     try:
-        config = getattr(runtime, "config", None)
+        from app.agent.policy import policy_config
+
+        # OneBot 工具策略归 `llm_tools_extra` 模块所有（未接管时回退 agent 配置）
+        config = policy_config(runtime, "tools")
         raw = config.get("onebot_tool_overrides", {}) if config is not None else {}
         return dict(raw or {})
     except Exception:
@@ -25,7 +28,9 @@ def resolve_tool_policy(runtime, tool: dict) -> dict:
     risk = str(tool.get("risk", "normal") or "normal")
 
     try:
-        config = getattr(runtime, "config", None)
+        from app.agent.policy import policy_config
+
+        config = policy_config(runtime, "tools")
         enabled = bool(config.get("onebot_tools_enable", False)) if config is not None else False
         denied = list(config.get("onebot_tools_denied", []) or []) if config is not None else []
         allowed = list(config.get("onebot_tools_allowed", []) or []) if config is not None else []

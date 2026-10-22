@@ -62,9 +62,10 @@ def _poke_key(runtime, ctx: ToolContext | None, args: dict) -> str:
 
 def _poke_cooldown(runtime) -> float:
     try:
-        value = getattr(runtime, "config", None).get(
-            "poke_cooldown_seconds", DEFAULT_POKE_COOLDOWN_SECONDS
-        )
+        from app.agent.policy import policy_get
+
+        # OneBot 工具的冷却/调试开关归 `llm_tools_extra` 模块所有
+        value = policy_get(runtime, "tools", "poke_cooldown_seconds", DEFAULT_POKE_COOLDOWN_SECONDS)
         return max(0.0, float(value))
     except Exception:
         return float(DEFAULT_POKE_COOLDOWN_SECONDS)
@@ -118,7 +119,8 @@ async def _handler(runtime, tool: dict, ctx: ToolContext | None, args: dict) -> 
         args = params
     debug = False
     try:
-        debug = bool(getattr(runtime, "config", None).get("onebot_tools_debug", False))
+        from app.agent.policy import policy_get as _pg
+        debug = bool(_pg(runtime, "tools", "onebot_tools_debug", False))
     except Exception as e:
         logger.add_info("OneBotTool").debug(f"[OneBotTool] 读取 debug 开关失败，按关闭处理: {e}")
     if debug:

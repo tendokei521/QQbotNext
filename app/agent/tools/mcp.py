@@ -168,7 +168,9 @@ class MCPManager:
 
     def _servers(self) -> list[dict]:
         try:
-            raw = self.runtime.config.get("mcp_servers", []) or []
+            from app.agent.policy import policy_get
+
+            raw = policy_get(self.runtime, "tools", "mcp_servers", []) or []
         except Exception:
             raw = []
         if isinstance(raw, str):

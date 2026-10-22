@@ -11,8 +11,9 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from app.agent.hooks import ToolCallContext
 from app.agent.telemetry import ToolCallRecord
@@ -244,9 +245,11 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
             final = _truncate_result(result, spec.max_result)
             if runtime is not None and spec.source != "speech":
                 from app.agent.loop.tool_loop import append_reply_directive, reply_directive
+                from app.agent.policy import policy_config
 
+                # 回应要求文案归 `llm_tools_extra` 模块所有（未接管时回退 agent 配置）
                 final = append_reply_directive(
-                    final, reply_directive(getattr(runtime, "config", None))
+                    final, reply_directive(policy_config(runtime, "tools"))
                 )
             return final
         return f"error: 未知工具 {name}"
@@ -326,7 +329,7 @@ def tool(
             "permission": permission,
             "scopes": list(scopes) if scopes else None,
         })
-        setattr(fn, "__tool_meta__", metas)
+        fn.__tool_meta__ = metas
         return fn
 
     return decorator
