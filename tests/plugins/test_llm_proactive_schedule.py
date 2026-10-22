@@ -35,9 +35,14 @@ def test_default_config_and_schema_cover_keys():
     assert not [k for k in SCHEDULE_KEYS if k not in ScheduleModule.config_schema]
 
 
-def test_modules_declare_capabilities():
-    assert "proactive" in ProactiveModule.supersedes
-    assert "schedule" in ScheduleModule.supersedes
+def test_modules_are_pure_business():
+    """v3：主动消息与定时任务是**业务**，不声明 supersedes。
+
+    它们用基础接口工作：订阅 `message_observed`/`bot_sent` 事实，用
+    `spawn` 起计时、`llm_turn` 跑一轮、`send_to` 发出去。
+    """
+    assert not getattr(ProactiveModule, "supersedes", ())
+    assert not getattr(ScheduleModule, "supersedes", ())
 
 
 # ---------- 门面 ----------
@@ -70,9 +75,18 @@ class _TaskManager:
         return task
 
 
+class _Hooks:
+    def __init__(self):
+        self.registered: list[dict] = []
+
+    def register(self, **kwargs):
+        self.registered.append(kwargs)
+
+
 class _Runtime:
     def __init__(self, tmp_path):
         self.bot_id = "12345"
+        self.llm_hooks = _Hooks()
         self.config = {"proactive_max_unanswered": 3}
         self.proactive = None
         self.scheduler = None
@@ -126,14 +140,15 @@ async def test_proactive_module_installs_and_removes(tmp_path, monkeypatch):
     module = _make(ProactiveModule, "llm_proactive", runtime, {"proactive_max_unanswered": 9})
 
     await module.on_load()
-    assert runtime.proactive is not None, "装模块后运行时应拿到实现"
     assert runtime.proactive_options is not None
+    # 订阅了两个广播事实（框架不再调 runtime.proactive）
+    stages = {(h["stage"], h["order"]) for h in runtime.llm_hooks.registered}
+    assert ("message_observed", 80) in stages and ("bot_sent", 80) in stages
     # 管理器读的是**模块配置**（不是 agent 配置）
     assert runtime.proactive_options.get("proactive_max_unanswered") == 9
-    assert module.manager is runtime.proactive
+    assert module.manager is not None  # 管理器由模块自己持有（不再塞进运行时）
 
     await module.on_unload()
-    assert runtime.proactive is None
     assert runtime.proactive_options is None
     assert module.manager is None
 

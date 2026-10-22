@@ -37,8 +37,6 @@ class Module(BaseModule):
     subscribe = ()
     category = "LLM"
     order = 90
-    provides = ("schedule",)
-    supersedes = ("schedule",)
     default_config = {
         "schedule_enable": True,
         "schedule_prompt": "",
@@ -59,7 +57,7 @@ class Module(BaseModule):
         runtime.schedule_options = ConfigView(
             getattr(runtime, "config", None), self.config, OWNED_KEYS
         )
-        self._scheduler = build_scheduler(runtime, self.config, OWNED_KEYS)
+        self._scheduler = build_scheduler(self)
         runtime.scheduler = self._scheduler
 
     async def on_unload(self) -> None:

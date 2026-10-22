@@ -3,7 +3,7 @@
 import time
 from datetime import datetime, timedelta
 
-from app.agent.proactivity.scheduler import TaskScheduler
+from app.plugins.llm_schedule.scheduler import TaskScheduler
 from app.domain.time_parser import advance_repeat, parse_schedule
 
 
@@ -201,7 +201,7 @@ async def test_scheduler_schedule_and_trigger(tmp_path):
 
 async def test_scheduler_fire_uses_llm_reply(tmp_path, monkeypatch):
     """触发时应做一次带系统提示词的 LLM 请求：回复来自 LLM、状态标签被剥离。"""
-    from app.agent.proactivity import scheduler as ts_mod
+    from app.plugins.llm_schedule import scheduler as ts_mod
 
     module = _FakeModule()
     sched = ts_mod.TaskScheduler(module, data_dir=str(tmp_path))
@@ -301,7 +301,7 @@ async def test_scheduler_heals_wrong_is_group(tmp_path):
     import json
     from datetime import datetime, timedelta
 
-    from app.agent.proactivity.scheduler import TaskEntry
+    from app.plugins.llm_schedule.scheduler import TaskEntry
 
     module = _FakeModule()
     data_file = str(tmp_path) + f"/tasks_data_{module.bot_id}.json"
@@ -328,7 +328,7 @@ async def test_scheduler_restore_removes_expired_once(tmp_path):
     import json
     from datetime import datetime, timedelta
 
-    from app.agent.proactivity.scheduler import TaskEntry
+    from app.plugins.llm_schedule.scheduler import TaskEntry
 
     module = _FakeModule()
     data_file = str(tmp_path) + f"/tasks_data_{module.bot_id}.json"
@@ -377,7 +377,7 @@ async def test_scheduler_disabled(tmp_path):
 
 async def test_schedule_tool_handler(tmp_path):
     """schedule_task 工具：create / list / delete / 归属过滤 / 错误时间。"""
-    from app.agent.tools.schedule import handle_schedule_tool
+    from app.plugins.llm_schedule.schedule_tool import handle_schedule_tool
 
     module = _FakeModule()
     sched = TaskScheduler(module, data_dir=str(tmp_path))
@@ -427,7 +427,7 @@ async def test_schedule_tool_handler(tmp_path):
 
 def test_schedule_tool_openai_definition():
     """工具定义可转成 OpenAI 原生 function 格式。"""
-    from app.agent.tools.schedule import SCHEDULE_TASK_SCHEMA
+    from app.plugins.llm_schedule.schedule_tool import SCHEDULE_TASK_SCHEMA
     from app.agent.tools.spec import ToolSpec
 
     spec = ToolSpec(name="schedule_task", description="管理定时任务",
@@ -441,7 +441,7 @@ def test_schedule_tool_openai_definition():
 # ==================== 兜底：定时意图检测 ====================
 
 def test_has_schedule_intent():
-    from app.agent.tools.schedule import has_schedule_intent
+    from app.plugins.llm_schedule.schedule_tool import has_schedule_intent
 
     assert has_schedule_intent("能在今天晚上11点提醒我睡觉吗") is True
     assert has_schedule_intent("明天早上8点记得提醒我吃药") is True
@@ -455,7 +455,7 @@ def test_has_schedule_intent():
 
 
 def test_extract_reminder_note():
-    from app.agent.tools.schedule import extract_reminder_note
+    from app.plugins.llm_schedule.schedule_tool import extract_reminder_note
 
     assert "睡觉" in extract_reminder_note("能在今天晚上11点提醒我睡觉吗")
     assert "吃药" in extract_reminder_note("明天早上8点记得提醒我吃药")

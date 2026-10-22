@@ -1,17 +1,20 @@
-"""主动消息模块的服务层：用框架实现 + 本模块配置组装管理器。"""
+"""llm_proactive 的服务层：主动消息 = 订阅事实 + 用基础接口干活。
+
+框架在 R0 之后只广播三件事：`message_observed` / `bot_sent` / `turn_completed`。
+本模块订阅前两个，用 `spawn` 起计时器、`llm_turn` 跑一轮、`send_to` 发出去。
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
-from app.agent.policy import RuntimeFacade, facade_for
 
+def build_manager(module: Any) -> Any:
+    """构造主动消息管理器。
 
-def build_manager(runtime: Any, module_config: Any, owned_keys: Any) -> Any:
-    """构造主动消息管理器（`ProactiveManager` 是机制，配置来自本模块）。"""
-    from app.agent.proactivity.manager import ProactiveManager
+    `module` 就是**插件模块实例**（`BaseModule`）：它有 `config`（本模块配置）、
+    `bot_id`、`llm_turn` / `send_to` / `spawn` 等基础接口，以及 `ctx.services`。
+    """
+    from app.plugins.llm_proactive.manager import ProactiveManager
 
-    return ProactiveManager(facade_for(runtime, "proactive", module_config, owned_keys))
-
-
-__all__ = ["RuntimeFacade", "build_manager"]
+    return ProactiveManager(module)

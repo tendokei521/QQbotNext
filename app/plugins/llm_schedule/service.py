@@ -1,17 +1,16 @@
-"""定时任务模块的服务层：用框架实现 + 本模块配置组装调度器。"""
+"""llm_schedule 的服务层：定时任务 = 用基础接口跑一轮并发出。
+
+`TaskScheduler` 的计时与持久化是机制（已搬进本模块），
+真正"说话"的动作走模块的 `llm_turn` + `send_to`。
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
-from app.agent.policy import facade_for
 
+def build_scheduler(module: Any) -> Any:
+    """构造定时任务调度器；`module` 是插件模块实例（带基础接口）。"""
+    from app.plugins.llm_schedule.scheduler import TaskScheduler
 
-def build_scheduler(runtime: Any, module_config: Any, owned_keys: Any) -> Any:
-    """构造定时任务调度器（`TaskScheduler` 是机制，配置来自本模块）。"""
-    from app.agent.proactivity.scheduler import TaskScheduler
-
-    return TaskScheduler(facade_for(runtime, "schedule", module_config, owned_keys))
-
-
-__all__ = ["build_scheduler"]
+    return TaskScheduler(module)

@@ -5,7 +5,7 @@ from datetime import datetime
 
 import pytest
 
-from app.agent.proactivity.manager import ProactiveManager
+from app.plugins.llm_proactive.manager import ProactiveManager
 from app.core.task_manager import TaskManager
 from app.plugin.base import ModuleConfig
 

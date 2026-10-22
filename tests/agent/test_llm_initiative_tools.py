@@ -33,7 +33,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.agent.loop.chat import build_initiative_tools
-from app.agent.proactivity import stream as initiative_stream
+from app.plugins.llm_proactive import stream as initiative_stream
 from app.agent.providers.base import StreamEvent
 
 
@@ -272,7 +272,7 @@ class _FakeModule:
 
 
 async def test_scheduled_message_gets_proactive_block_and_tools(tmp_path, monkeypatch):
-    from app.agent.proactivity import scheduler as ts_mod
+    from app.plugins.llm_schedule import scheduler as ts_mod
 
     module = _FakeModule()
     sched = ts_mod.TaskScheduler(module, data_dir=str(tmp_path))
@@ -306,7 +306,7 @@ async def test_scheduled_message_gets_proactive_block_and_tools(tmp_path, monkey
 
 
 async def test_scheduled_message_skips_tools_when_disabled(tmp_path, monkeypatch):
-    from app.agent.proactivity import scheduler as ts_mod
+    from app.plugins.llm_schedule import scheduler as ts_mod
 
     module = _FakeModule()
     module.config = _FakeConfig({"schedule_enable": True, "context_expand_enable": False})
@@ -337,7 +337,7 @@ async def test_scheduled_message_skips_tools_when_disabled(tmp_path, monkeypatch
 
 @pytest.mark.parametrize("is_group", [True, False])
 async def test_collect_tools_maps_session_targets(tmp_path, is_group):
-    from app.agent.proactivity import scheduler as ts_mod
+    from app.plugins.llm_schedule import scheduler as ts_mod
 
     module = _FakeModule()
     sched = ts_mod.TaskScheduler(module, data_dir=str(tmp_path))

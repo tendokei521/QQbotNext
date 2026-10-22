@@ -49,8 +49,10 @@ async def test_all_nine_modules_load_and_install_into_runtime(container):
     # 装槽型能力：对象已被模块替换
     assert runtime.output is not None, "llm_output 应装上输出策略"
     assert runtime.assembler is not None
-    assert runtime.proactive is not None, "llm_proactive 应装上主动消息实现"
-    assert runtime.scheduler is not None, "llm_schedule 应装上定时任务实现"
+    # v3 重写后：主动消息/定时任务是业务，通过钩子与基础接口工作，
+    # 不再往运行时塞 `proactive`；调度器仍挂在 `runtime.scheduler`
+    # （`#llm schedule` 指令要读它，但指令只做"是谁"的查询，不含业务逻辑）。
+    assert runtime.scheduler is not None
 
     # 策略视图：9 个槽都应挂上
     for attr in (
@@ -69,7 +71,6 @@ async def test_all_nine_modules_load_and_install_into_runtime(container):
     # 卸载后全部回到 None（干净可逆）
     await registry.unload(bot_id)
     assert runtime.output is None
-    assert runtime.proactive is None
     assert runtime.scheduler is None
     assert runtime.meta_options is None
 

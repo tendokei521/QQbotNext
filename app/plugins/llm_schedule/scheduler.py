@@ -25,7 +25,7 @@ from app.agent.context.group import (
     fetch_group_name,
     fetch_group_online_history,
 )
-from app.agent.proactivity.entry import TaskEntry
+from app.plugins.llm_proactive.entry import TaskEntry
 from app.agent.providers import get_provider
 from app.agent.session.manager import SessionManager
 from app.domain.tags import strip_all_tags
@@ -293,7 +293,7 @@ class TaskScheduler:
                 )
                 await asyncio.to_thread(self.session_mgr.restore_session_from_archive, session, entry.session_id)
 
-            from app.agent.proactivity.stream import stream_send_initiative
+            from app.plugins.llm_proactive.stream import stream_send_initiative
 
             # 会话配置档案先切换：工具集与提示块读取的是会话级配置
             if hasattr(config, "set_session"):

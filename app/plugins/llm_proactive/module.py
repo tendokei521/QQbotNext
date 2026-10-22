@@ -59,8 +59,6 @@ class Module(BaseModule):
     subscribe = ()
     category = "LLM"
     order = 80
-    provides = ("proactive",)
-    supersedes = ("proactive",)
     default_config = {
         "proactive_friend_enable": False,
         "proactive_group_enable": False,
@@ -95,9 +93,50 @@ class Module(BaseModule):
         runtime.proactive_options = ConfigView(
             getattr(runtime, "config", None), self.config, OWNED_KEYS
         )
-        self._manager = build_manager(runtime, self.config, OWNED_KEYS)
-        # 框架侧只认"谁在这里"，不关心它是什么实现
-        runtime.proactive = self._manager
+        self._manager = build_manager(self)
+        # **订阅**框架广播的两个事实（框架不认识"主动消息"）：
+        runtime.llm_hooks.register(
+            stage="message_observed", event_type="*", order=80,
+            handler=self._on_message_observed, module=self,
+        )
+        runtime.llm_hooks.register(
+            stage="bot_sent", event_type="*", order=80,
+            handler=self._on_bot_sent, module=self,
+        )
+
+    async def _on_message_observed(self, ctx, msg=None) -> None:
+        """有人说话了：重置沉默计时 / 安排下次主动发言。"""
+        if self._manager is None:
+            return
+        event = getattr(ctx, "event", None)
+        if event is None:
+            return
+        try:
+            await self._manager.on_message(
+                ctx.session_id,
+                getattr(event, "event_type", "") == "message_group",
+                is_self=(getattr(event, "user_id", None) == getattr(event, "self_id", None)),
+            )
+        except Exception as e:  # noqa: BLE001 —— 业务异常不该毁掉整轮
+            from app.core.logger import logger
+
+            logger.add_info(f"#{self.bot_id}").debug(f"[主动消息] 观察消息失败（已忽略）: {e}")
+
+    async def _on_bot_sent(self, ctx, msg=None) -> None:
+        """Bot 发过话了：重置计时。"""
+        if self._manager is None:
+            return
+        event = getattr(ctx, "event", None)
+        if event is None:
+            return
+        try:
+            await self._manager.on_bot_sent(
+                ctx.session_id, getattr(event, "message_type", "") != "private"
+            )
+        except Exception as e:  # noqa: BLE001
+            from app.core.logger import logger
+
+            logger.add_info(f"#{self.bot_id}").debug(f"[主动消息] 更新发送状态失败（已忽略）: {e}")
 
     async def on_unload(self) -> None:
         runtime = self._runtime()
@@ -111,7 +150,6 @@ class Module(BaseModule):
             self._manager = None
         if runtime is None:
             return
-        runtime.proactive = None
         runtime.proactive_options = None
 
     def _runtime(self) -> Any:
