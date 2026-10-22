@@ -94,6 +94,7 @@ async def _build_group_pre_history(
     mark_unresolved: bool = False,
     bot_id: Any = "",
     session_id: Any = "",
+    bot: Any = None,
 ) -> str:
     """根据 include_pre_history 配置，拉取并组装群聊环境背景块。
 
@@ -105,12 +106,18 @@ async def _build_group_pre_history(
     此前这里只有裸 ``@123``，模型既不知道是谁、也没有"这里缺东西"的感知。
     ``bot_id``/``session_id`` 用于查"已展开"登记：本会话取回过的 id 渲染成
     ``【已展开:... → 摘要】``，不再重复标记为缺失。
+
+    ``bot`` 供无事件路径（主动消息 / 定时任务）显式传入连接；``event`` 为 None 时用它。
     """
+    bot = bot if bot is not None else getattr(event, "bot", None)
     history_text = await fetch_group_online_history(
-        event.bot,
+        bot,
         group_id,
         count=count,
-        self_ids={str(event.self_id), str(getattr(event, "bot_id", "") or "")},
+        self_ids={
+            str(getattr(event, "self_id", "") or ""),
+            str(getattr(event, "bot_id", "") or getattr(bot, "bot_id", "") or ""),
+        },
         normalize_enhanced=normalize_enhanced,
         mask_nickname=mask_nickname,
         resolve_at=resolve_at,
@@ -122,7 +129,7 @@ async def _build_group_pre_history(
         return ""
     return build_group_env_text(
         group_id=group_id,
-        group_name=getattr(event.group, "group_name", "") or "",
+        group_name=getattr(getattr(event, "group", None), "group_name", "") or "",
         history_text=history_text,
     )
 

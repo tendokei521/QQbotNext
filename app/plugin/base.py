@@ -476,6 +476,153 @@ class BaseModule(ABC):
         async for event in client.stream(messages, **kwargs):
             yield event
 
+    # ---------- 无事件的完整一轮对话 ----------
+    async def llm_turn(
+        self,
+        user_text: str,
+        *,
+        session_id: str,
+        is_private: bool | None = None,
+        user_id: str = "",
+        group_id: str | None = None,
+        kind: str = "module",
+        stream: bool | None = None,
+        on_sentence=None,
+        record_history: bool = False,
+        send: bool = False,
+        event=None,
+        system_prompt: str | None = None,
+        **turn_kwargs,
+    ):
+        """用框架跑一轮**完整对话**（取值 + 组装 + 工具循环 + 记忆 + 可选写历史）。
+
+        与 ``llm_chat`` 的区别：那个只发一次裸请求；这个吃框架的全部上下文能力，
+        且**不需要真实事件对象**——主动消息、定时任务、模块自建循环都用它。
+
+        Args:
+            user_text: 本轮用户内容（可空：纯图片/纯指令场景）。
+            session_id: ``group_x`` / ``private_y``。
+            is_private: 缺省按 ``session_id`` 前缀推断。
+            user_id / group_id: 触发者与群（无事件场景显式给出）。
+            kind: 请求性质（写进 PromptRequest.kind）。
+            stream: ``True`` 流式逐句回调；``None`` 按配置。
+            on_sentence: 流式回调 ``async (text) -> None``。
+            record_history: 是否写进会话历史（默认 False：模块自己决定要不要污染会话）。
+            send: ``True`` 时边产边用 ``send_to`` 发出去（与 ``on_sentence`` 二选一）。
+            event: 可选真实事件（图片/引用指令需要）。
+            system_prompt: 覆盖本轮人设。
+            **turn_kwargs: 透传给 ``run_turn``。
+
+        Returns:
+            ``TurnResult``；运行时不可用时返回 ``error="no_runtime"`` 的空结果（不抛）。
+        """
+        from app.agent.loop.turn import TurnRequest, TurnResult, run_turn
+        from app.domain.session import try_parse_session_id
+
+        runtime = self._runtime()
+        if runtime is None:
+            return TurnResult(session_id=session_id, error="no_runtime")
+
+        if is_private is None:
+            parsed = try_parse_session_id(session_id)
+            is_private = not parsed[0] if parsed else False
+
+        if send:
+            async def _sender(text: str) -> None:
+                await self.send_to(session_id, text)
+
+            on_sentence = _sender
+            stream = True if stream is None else stream
+
+        request = TurnRequest(
+            session_id=session_id,
+            is_private=bool(is_private),
+            user_text=user_text,
+            user_id=str(user_id or ""),
+            group_id=group_id,
+            kind=kind,
+            event=event if event is not None else self.ctx.event if hasattr(self.ctx, "event") else None,
+            bot=self._bot(),
+            stream=stream,
+            record_history=record_history,
+            system_prompt=system_prompt,
+        )
+        return await run_turn(runtime, request, on_sentence=on_sentence, **turn_kwargs)
+
+    # ---------- 发消息 / 后台任务 / 工具集 ----------
+    async def send_to(self, session_id: str, message, **kwargs):
+        """按会话发一条消息（唯一发送出口：走出站链 + 全部发送钩子）。
+
+        群聊 ``group_<id>`` / 私聊 ``private_<id>`` 自动分流；正文开头的
+        ``[reply]`` / ``[@qq]`` 会被解析成真正的消息段。
+
+        例：``await self.send_to("group_123", "晚上好")``
+        """
+        from app.agent.delivery.channel import send_item
+
+        kwargs.setdefault("runtime", self._runtime())
+        return await send_item(self._bot(), session_id, message, **kwargs)
+
+    def spawn(self, coro, *, name: str | None = None):
+        """把协程作为本模块的后台任务托管（热重载/卸载自动取消）。
+
+        不要直接用 ``ctx.services.task_manager.create_task``：它的 owner 默认
+        ``"system"``，模块卸载时不会被清理，热重载会留下孤儿任务。
+        """
+        manager = getattr(getattr(self, "ctx", None), "services", None)
+        manager = getattr(manager, "task_manager", None)
+        if manager is None:
+            raise RuntimeError("task_manager 不可用，无法托管后台任务")
+        return manager.create_task(coro, name=name, owner=self.task_owner)
+
+    @property
+    def task_owner(self) -> str:
+        """本模块后台任务的归属标识（与 ModuleRegistry 的清理口径一致）。"""
+        return f"module:{self.module_name}:{self.bot_id}"
+
+    @property
+    def sessions(self):
+        """本账号的会话历史门面（`SessionManager` 进程级单例）。"""
+        getter = getattr(getattr(self, "ctx", None), "services", None)
+        getter = getattr(getter, "sessions", None)
+        return getter(self.bot_id) if callable(getter) else None
+
+    async def framework_tools(self, session_id: str, **kwargs):
+        """框架工具集只读视图 ``(specs, ToolContext)``。
+
+        拿到的工具可以直接喂给 ``self.llm_chat(msgs, tools=build_tools(specs),
+        tool_executor=make_executor(specs, ctx))``。
+        """
+        from app.agent.tools.catalog import framework_tools
+        from app.domain.session import try_parse_session_id
+
+        runtime = self._runtime()
+        if runtime is None:
+            return [], None
+        parsed = try_parse_session_id(session_id) or (False, session_id)
+        kwargs.setdefault("is_private", not parsed[0])
+        kwargs.setdefault("group_id", parsed[1] if parsed[0] else None)
+        kwargs.setdefault("bot", self._bot())
+        return await framework_tools(runtime, session_id=session_id, **kwargs)
+
+    # ---------- 内部：运行时 / 连接 ----------
+    def _runtime(self):
+        """本账号的 AgentRuntime（取不到返回 None）。"""
+        services = getattr(getattr(self, "ctx", None), "services", None)
+        getter = getattr(services, "runtime", None)
+        if callable(getter):
+            return getter(self.bot_id)
+        manager = getattr(services, "agent_manager", None)
+        if manager is None or self.bot_id is None:
+            return None
+        return manager.get_runtime(self.bot_id)
+
+    def _bot(self):
+        """当前连接：优先运行时实时绑定（换号后自动跟随），退化到构造期快照。"""
+        runtime = self._runtime()
+        live = getattr(runtime, "bot", None) if runtime is not None else None
+        return live or getattr(getattr(self, "ctx", None), "bot", None)
+
     def _llm_unavailable(self, where: str):
         """框架没注入 LLM 客户端时的兜底：留痕并返回空响应（不抛，避免模块直接崩）。"""
         from app.agent.providers.base import LLMResponse

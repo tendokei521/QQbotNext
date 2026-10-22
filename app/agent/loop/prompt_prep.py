@@ -95,22 +95,36 @@ from app.domain.modalities import supports_image
 #: 已经提醒过的 (bot_id, agent 值, 生效值)，避免每条消息刷同一条告警
 
 
-async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
-    """把一个事件（或定时/主动请求）归一化成 ``assembly.PromptRequest``。
+async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, turn=None, bot=None):
+    """把一次请求归一化成 ``assembly.PromptRequest``。
 
     这是**唯一**的"取值"入口：模型参数、前置背景、去重、渲染、压缩、技能与工具、
     记忆检索、指代块、图片解析都在这里完成，之后的装配（顺序/清洗）交给
     ``assembly.PromptAssembler``。此前这些步骤在 4 条路径里各写一遍，导致
     "记忆检索用什么文本""去重比哪个字符串"这类分歧。
 
-    返回 ``(req, session, meta)``；``meta`` 供调用方取模型参数与工具集
-    （``model`` / ``max_tokens`` / ``temperature`` / ``modalities`` /
-    ``all_specs`` / ``tool_ctx`` / ``provider_chain``）。
+    Args:
+        runtime: AgentRuntime。
+        event: 触发事件。**可为 None**（主动消息 / 定时任务 / 模块自建循环）——
+            此时必须显式给出 ``turn`` 与 ``bot``。
+        ctx: ``LlmContext``（钩子状态与 ``ctx.user_text`` 的来源）。
+        session_mgr: 会话管理器（缺省按 bot_id 取单例）。
+        turn: 已归一化的 ``TurnInput``（给了就跳过事件解析）。
+        bot: 无事件时的连接（前置背景与图片解析需要它）。
+
+    Returns:
+        ``(req, session, meta)``；``meta`` 供调用方取模型参数与工具集
+        （``model`` / ``max_tokens`` / ``temperature`` / ``modalities`` /
+        ``all_specs`` / ``tool_ctx`` / ``provider_chain``）。无法请求时全为 None。
     """
     config = runtime.config
-    turn = normalize_event(config, event, ctx)
     if turn is None:
-        return None, None, None
+        turn = normalize_event(config, event, ctx)
+        if turn is None:
+            return None, None, None
+    else:
+        # 无事件路径：event 只能从 ctx 里取（可能仍为 None）
+        event = event if event is not None else getattr(ctx, "event", None)
     is_private = turn.is_private
     session_id = turn.session_id
     user_id = turn.user_id
@@ -118,13 +132,19 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
     user_text = turn.user_text
     raw_user_text = turn.raw_user_text
     include_pre_history = turn.include_pre_history
+    if bot is None:
+        bot = getattr(event, "bot", None)
 
     session_mgr = session_mgr or SessionManager(str(runtime.bot_id))
     session = await get_or_create_session(session_mgr, turn, config, ctx)
     if session is None:
         return None, None, None
 
-    await record_user_turn(runtime, event, turn, config, session_mgr, nickname=_event_nickname(event))
+    # 用户发言入历史：只有真实事件才写（无事件路径没有"用户发言"这件事）
+    if event is not None:
+        await record_user_turn(
+            runtime, event, turn, config, session_mgr, nickname=_event_nickname(event)
+        )
 
 
     provider_chain = _provider_chain_for(runtime)
@@ -145,7 +165,7 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
                 await backfill_history_media(
                     live_entries,
                     bot_id=getattr(runtime, "bot_id", ""),
-                    bot=getattr(event, "bot", None),
+                    bot=bot,
                     max_bytes=max_image_bytes(config),
                     max_entries=int(config.get("image_max_count", 4) or 4),
                 )
@@ -155,7 +175,7 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
     pre_history_text = await _fetch_pre_history(
         runtime, event, is_private=is_private, group_id=group_id, user_id=user_id,
         include_pre_history=include_pre_history, history_rounds=history_rounds,
-        session_id=session_id, meta_flags=_meta_flags,
+        session_id=session_id, meta_flags=_meta_flags, bot=bot,
     )
 
     session_history_raw = session_mgr.get_history(session_id, limit=session_mgr.MAX_HISTORY_MESSAGES)
@@ -245,14 +265,15 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
     tool_ctx.extra["trigger_message_id"] = str(getattr(event, "message_id", "") or "")
 
     _memory_autosave(runtime, session_id, user_id, raw_user_text or user_text)
-    memory_text = await _memory_block(runtime, session_id, user_id, raw_user_text or user_text, event.bot)
+    memory_text = await _memory_block(runtime, session_id, user_id, raw_user_text or user_text, bot)
     # 指代消解：焦点行 + 明确指向时的确定性预取（放在背景块之前，信息密度更高）
     referent_text = await _referent_block(tool_ctx.runtime, session_id, user_text, tool_ctx)
 
     # 图片：复用上面**已经落盘**的那批段（一张图只下载一次），渲染成 base64 块；
     # 是否真正传给模型由 assembly 的模态门控决定。
+    # 无事件路径没有"本轮图片段"，跳过（等价于"没有图片"分支）。
     user_images: list[dict] = []
-    if _images_enabled(config):
+    if _images_enabled(config) and event is not None:
         try:
             from app.agent.media.image import resolve_images
 
@@ -263,7 +284,7 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
             if image_segments:
                 user_images = await resolve_images(
                     event,
-                    bot=getattr(event, "bot", None),
+                    bot=bot,
                     bot_id=getattr(runtime, "bot_id", ""),
                     max_images=int(config.get("image_max_count", 4) or 4),
                     max_bytes=max_image_bytes(config),
@@ -313,31 +334,41 @@ async def prepare_prompt(runtime, event, ctx=None, *, session_mgr=None):
         "user_id": user_id,
         "group_id": group_id,
         "session_id": session_id,
+        "bot": bot,
     }
     return req, session, meta
 
 
 async def _fetch_pre_history(
     runtime, event, *, is_private, group_id, user_id, include_pre_history,
-    history_rounds, session_id, meta_flags,
+    history_rounds, session_id, meta_flags, bot=None,
 ) -> str:
-    """前置背景：群聊在线记录 / 私聊近期记录（与既有触发条件完全一致）。"""
+    """前置背景：群聊在线记录 / 私聊近期记录（与既有触发条件完全一致）。
+
+    ``event`` 可以为 None（主动消息 / 定时任务）：此时用 ``bot`` 代替 ``event.bot``，
+    群号/QQ 由调用方显式给出，取不到连接就直接返回空串（不发请求）。
+    """
+    bot = bot if bot is not None else getattr(event, "bot", None)
     if group_id:
-        if not include_pre_history:
+        if not include_pre_history or bot is None:
             return ""
         return await _build_group_pre_history(
             event, group_id, count=history_rounds, **meta_flags,
             **_context_expand_flags(runtime.config),
-            bot_id=getattr(event, "bot_id", "") or "",
+            bot_id=getattr(event, "bot_id", "") or getattr(bot, "bot_id", "") or "",
             session_id=session_id,
+            bot=bot,
         )
-    if is_private and include_pre_history in ("history", "load"):
+    if is_private and include_pre_history in ("history", "load") and bot is not None:
         text = await fetch_private_online_history(
-            event.bot,
+            bot,
             user_id,
             count=history_rounds,
-            self_ids={str(event.self_id), str(getattr(event, "bot_id", "") or "")},
-            bot_id=getattr(event, "bot_id", "") or "",
+            self_ids={
+                str(getattr(event, "self_id", "") or ""),
+                str(getattr(event, "bot_id", "") or getattr(bot, "bot_id", "") or ""),
+            },
+            bot_id=getattr(event, "bot_id", "") or getattr(bot, "bot_id", "") or "",
             session_id=session_id,
         )
         if text and include_pre_history == "history":

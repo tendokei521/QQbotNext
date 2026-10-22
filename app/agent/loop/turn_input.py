@@ -54,6 +54,57 @@ class TurnInput:
     include_pre_history: object
 
 
+def from_request(
+    config,
+    *,
+    session_id: str,
+    is_private: bool,
+    user_text: str = "",
+    user_id: str = "",
+    group_id: str | None = None,
+    include_pre_history: object = None,
+    raw_user_text: str | None = None,
+) -> TurnInput | None:
+    """把**外部请求参数**（无事件）归一化成 ``TurnInput``。
+
+    与 `normalize_event` 的分工：那个从事件里"读"，这个从参数里"收"。
+    两者产出同一个 dataclass，因此下游取值逻辑只认 ``TurnInput``，
+    主动消息 / 定时任务 / 模块自建循环都不再需要伪造事件对象。
+
+    Args:
+        config: Agent 配置门面（读 ``max_message_length`` 等口径）。
+        session_id: ``group_x`` / ``private_y``。
+        is_private: 是否私聊。
+        user_text: 本轮用户内容（可为空：纯图片/纯指令场景）。
+        user_id / group_id: 触发者/群（主动消息可为空）。
+        include_pre_history: 不传则按配置取（私聊走 ``include_private_pre_history``）。
+        raw_user_text: 未包裹元信息的原始正文；缺省等于 ``user_text``。
+
+    Returns:
+        ``TurnInput``；正文与目标都为空时返回 None（无可请求的内容）。
+    """
+    text = str(user_text or "")
+    raw = str(raw_user_text if raw_user_text is not None else text)
+    if not text.strip() and not raw.strip():
+        return None
+
+    if include_pre_history is None:
+        key = "include_private_pre_history" if is_private else "include_pre_history"
+        include_pre_history = config.get(key, "default" if is_private else False)
+
+    max_msg_len = int(config.get("max_message_length", 200) or 200)
+    return TurnInput(
+        is_private=bool(is_private),
+        session_id=str(session_id),
+        user_id=str(user_id or ""),
+        group_id=None if is_private else (str(group_id) if group_id else None),
+        user_text=text[:max_msg_len],
+        raw_user_text=raw[:max_msg_len],
+        segment_text=raw,
+        include_pre_history=include_pre_history,
+    )
+
+
 def normalize_event(config, event, ctx=None) -> TurnInput | None:
     """事件 → 本轮入口取值；非群聊/私聊事件直接返回 None。"""
     message_type = getattr(event, "message_type", "")

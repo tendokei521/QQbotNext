@@ -37,7 +37,11 @@ ALLOWED_APP_PACKAGES = {
 README_HEADER = "> 本文只负责："
 
 # 每个 agent 子包允许的最大 .py 文件数（不含 __init__.py 与 README）。
-AGENT_PKG_MAX_FILES = 15
+# 15 → 16（v3）：`loop/turn.py` 是「无事件的完整一轮对话」的**公开入口**
+# （`run_turn` / `TurnRequest` / `TurnResult`），模块侧 `llm_turn` 直接调它。
+# 它是 loop 层的编排职责，不该塞进 generate/chat/prompt_prep 任一个里；
+# 其余子包仍保持 15 上限。
+AGENT_PKG_MAX_FILES = 16
 
 
 def _py_files(directory: Path) -> list[Path]:

@@ -139,6 +139,60 @@ class ModuleLLMClient:
             })
         return out
 
+    # ── 完整一轮对话 ────────────────────────────────────────────
+    async def turn(
+        self,
+        user_text: str,
+        *,
+        session_id: str,
+        bot_id: Any = None,
+        is_private: bool | None = None,
+        record_history: bool = False,
+        stream: bool | None = None,
+        on_sentence: Any = None,
+        **kwargs: Any,
+    ):
+        """跑一轮**完整对话**（取值 + 组装 + 工具循环 + 记忆），返回 ``TurnResult``。
+
+        与 ``chat`` 的区别：``chat`` 只发一次裸请求；``turn`` 吃框架的全部上下文能力，
+        且**不需要真实事件对象** —— 主动消息 / 定时任务 / 模块自建循环都用它。
+
+        Args:
+            user_text: 本轮用户内容（可空）。
+            session_id: ``group_x`` / ``private_y``。
+            bot_id: 账号；缺省 None（取不到运行时时返回 error 结果，不抛）。
+            is_private: 缺省按 ``session_id`` 前缀推断。
+            record_history: 是否写进会话历史（默认 False）。
+            stream / on_sentence: 流式与逐句回调。
+            **kwargs: 透传给 ``TurnRequest``（如 ``user_id`` / ``group_id`` / ``kind``）。
+
+        Returns:
+            ``TurnResult``；无运行时返回 ``error="no_runtime"`` 且留痕。
+        """
+        from app.agent.loop.turn import TurnRequest, TurnResult, run_turn
+        from app.domain.session import try_parse_session_id
+
+        runtime = self._runtime(bot_id)
+        if runtime is None:
+            self._account_log(bot_id).warning(
+                f"[ModuleLLM] 没有可用运行时，turn 已跳过（{session_id}）"
+            )
+            return TurnResult(session_id=session_id, error="no_runtime")
+
+        if is_private is None:
+            parsed = try_parse_session_id(session_id)
+            is_private = not parsed[0] if parsed else False
+
+        request = TurnRequest(
+            session_id=session_id,
+            is_private=bool(is_private),
+            user_text=user_text,
+            record_history=record_history,
+            stream=stream,
+            **kwargs,
+        )
+        return await run_turn(runtime, request, on_sentence=on_sentence)
+
     # ── 调用 ────────────────────────────────────────────────────
     @staticmethod
     def _prepare(messages: list[dict], system: str) -> list[dict]:
