@@ -59,9 +59,6 @@ from app.agent.loop.context_blocks import (  # noqa: F401 - 重导出保持 chat
     _event_nickname,
     _format_session_history,
     _history_media_hook,
-    _memory_autosave,
-    _memory_block,
-    _memory_consolidate,
     _segments_as_dicts,
 )
 from app.agent.loop.provider_view import _modalities_for_chain, _provider_chain_for
@@ -273,8 +270,7 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
     tool_ctx.extra["expansion_ledger"] = ledger_for(getattr(runtime, "bot_id", ""), session_id)
     tool_ctx.extra["trigger_message_id"] = str(getattr(event, "message_id", "") or "")
 
-    _memory_autosave(runtime, session_id, user_id, raw_user_text or user_text)
-    memory_text = await _memory_block(runtime, session_id, user_id, raw_user_text or user_text, bot)
+    memory_text = ""  # 记忆块由 `llm_memory` 模块通过 context_providers 贡献
     # 指代消解：焦点行 + 明确指向时的确定性预取（放在背景块之前，信息密度更高）
     referent_text = ""  # 指代块由 `llm_context` 模块通过 context_providers 贡献
 

@@ -29,8 +29,6 @@ class Module(BaseModule):
     subscribe = ()
     category = "LLM"
     order = 60
-    provides = ("knowledge",)
-    supersedes = ("knowledge",)
     default_config = {
         "knowledge_enable": False,
         "knowledge_embedding_model_id": "",
@@ -43,15 +41,22 @@ class Module(BaseModule):
         if runtime is None:
             return
         from app.agent.delivery.output import ConfigView
+        from app.agent.loop.providers import register_tool_source
+        from app.plugins.llm_knowledge.service import KnowledgeToolSource
 
         runtime.knowledge_options = ConfigView(
             getattr(runtime, "config", None), self.config, OWNED_KEYS
         )
+        register_tool_source(runtime, KnowledgeToolSource(self))
 
     async def on_unload(self) -> None:
         runtime = self._runtime()
         if runtime is None:
             return
+        from app.agent.loop.providers import unregister_owner
+
+        unregister_owner(runtime, self)
+        self._manager = None
         runtime.knowledge_options = None
 
     def _runtime(self) -> Any:

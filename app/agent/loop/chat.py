@@ -43,9 +43,6 @@ from app.agent.loop.context_blocks import (  # noqa: F401 - 重导出保持 chat
     _event_nickname,
     _format_session_history,
     _history_media_hook,
-    _memory_autosave,
-    _memory_block,
-    _memory_consolidate,
     _segments_as_dicts,
 )
 from app.agent.loop.generate import generate_response  # noqa: F401 - 保持 chat.* API
@@ -583,7 +580,6 @@ async def stream_response(runtime, event, ctx=None):
         await asyncio.to_thread(session_mgr.history.save_session, session)
 
     _commit_history_enrichment(runtime, session_id, ctx)
-    _memory_consolidate(runtime, session_id, is_private, session_mgr)
 
     # 成功判定：旧路径看"有没有产出文本"；发言通道下"看过但没说话"同样是成功，
     # 用它去记失败会让"哑火"与"故障"混在一起。

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.agent.knowledge.store import KnowledgeStore
+from app.plugins.llm_knowledge.store import KnowledgeStore
 from app.agent.providers import get_provider
 from app.core.logger import logger
 

@@ -36,9 +36,10 @@ def test_knowledge_default_config_and_schema_cover_owned_keys():
     assert not [k for k in KNOWLEDGE_KEYS if k not in KnowledgeModule.config_schema]
 
 
-def test_modules_declare_capabilities():
-    assert "memory" in MemoryModule.supersedes
-    assert "knowledge" in KnowledgeModule.supersedes
+def test_modules_are_pure_business():
+    """v3：记忆与知识库是**业务**，不声明 supersedes（不是接管）。"""
+    assert not getattr(MemoryModule, "supersedes", ())
+    assert not getattr(KnowledgeModule, "supersedes", ())
     assert MemoryModule.category == KnowledgeModule.category == "LLM"
 
 
@@ -46,7 +47,7 @@ def test_modules_declare_capabilities():
 
 
 def test_memory_manager_reads_module_config(tmp_path, monkeypatch):
-    from app.agent.memory.manager import MemoryManager
+    from app.plugins.llm_memory.manager import MemoryManager
 
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
     runtime = SimpleNamespace(
@@ -59,7 +60,7 @@ def test_memory_manager_reads_module_config(tmp_path, monkeypatch):
 
 
 def test_memory_manager_falls_back_without_module(tmp_path, monkeypatch):
-    from app.agent.memory.manager import MemoryManager
+    from app.plugins.llm_memory.manager import MemoryManager
 
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
     runtime = SimpleNamespace(bot_id="101", config={"memory_enable": True})
@@ -67,7 +68,7 @@ def test_memory_manager_falls_back_without_module(tmp_path, monkeypatch):
 
 
 def test_knowledge_manager_reads_module_config(tmp_path, monkeypatch):
-    from app.agent.knowledge.manager import KnowledgeManager
+    from app.plugins.llm_knowledge.manager import KnowledgeManager
 
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
     runtime = SimpleNamespace(
@@ -81,7 +82,7 @@ def test_knowledge_manager_reads_module_config(tmp_path, monkeypatch):
 
 
 def test_knowledge_manager_falls_back_without_module(tmp_path, monkeypatch):
-    from app.agent.knowledge.manager import KnowledgeManager
+    from app.plugins.llm_knowledge.manager import KnowledgeManager
 
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
     runtime = SimpleNamespace(bot_id="201", config={"knowledge_enable": False})
@@ -91,12 +92,23 @@ def test_knowledge_manager_falls_back_without_module(tmp_path, monkeypatch):
 # ---------- 装/卸 ----------
 
 
+class _Hooks:
+    def __init__(self):
+        self.registered: list[dict] = []
+
+    def register(self, **kwargs):
+        self.registered.append(kwargs)
+
+
 class _Runtime:
     def __init__(self, **over):
         self.bot_id = "12345"
         self.config = {}
         self.memory_options = None
         self.knowledge_options = None
+        self.context_providers: list = []
+        self.tool_sources: list = []
+        self.llm_hooks = _Hooks()
         for key, value in over.items():
             setattr(self, key, value)
 
@@ -141,6 +153,11 @@ async def test_memory_module_installs_and_clears_view():
     assert runtime.memory_options is not None
     assert policy_get(runtime, "memory", "memory_enable") is False
     assert module.enabled is False
+    # 三个接入点都挂上了（上下文块 / 工具源 / 两个钩子）
+    assert [p.name for p in runtime.context_providers] == ["memory"]
+    assert [s.name for s in runtime.tool_sources] == ["memory_tools"]
+    stages = {(h["stage"], h["order"]) for h in runtime.llm_hooks.registered}
+    assert ("pre_request", 60) in stages and ("turn_completed", 60) in stages
 
     await module.on_unload()
     assert runtime.memory_options is None

@@ -18,9 +18,7 @@ from app.agent.assembly.assembler import PromptAssembler
 from app.agent.assembly.interrupt import interrupt_config_hook
 from app.agent.config import DEFAULT_LLM_CONFIG, AgentConfig
 from app.agent.hooks import LlmHookRegistry, ToolCallHookRegistry
-from app.agent.knowledge import KnowledgeManager
 from app.agent.loop.pipeline import LlmPipeline
-from app.agent.memory import MemoryManager
 from app.agent.persona.skills import SkillRegistry
 from app.agent.providers.invoker import ProviderInvoker
 from app.agent.providers.policy import TRACKED_KEYS, merge_config_layers
@@ -105,9 +103,8 @@ class AgentRuntime:
         # 未装模块时这里保持 None，流水线侧的调用点全部做了 getattr 保护。
         self.scheduler: Any = None
         self.proactive: Any = None
-        # 记忆/知识库/工具策略的机制仍在框架，但配置由模块提供（policy_config）
-        self.memory = MemoryManager(self)
-        self.knowledge = KnowledgeManager(self)
+        # 记忆 / 知识库 / MCP 都是**业务**：实现已被搬进对应模块，
+        # 框架不再持有它们的实例（模块通过 context_providers / tool_sources 接入）。
         self.mcp_manager = MCPManager(self)
         # 策略配置视图（模块接管时挂载；None = 回退 agent 配置）
         self.assembly_options: Any = None
@@ -363,8 +360,6 @@ class AgentRuntime:
             ("scheduler", getattr(self.scheduler, "stop", None)),
             ("proactive", getattr(self.proactive, "stop", None)),
             ("llm_pipeline", self.llm_pipeline.shutdown),
-            ("memory", self.memory.stop),
-            ("knowledge", self.knowledge.stop),
             ("mcp_manager", self.mcp_manager.close),
         ]
         if close_session:

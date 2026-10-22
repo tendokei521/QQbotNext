@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from app.agent import llm_data_dir, safe_bot_id
-from app.agent.knowledge.vector import SQLiteVecVectorStore
+from app.plugins.llm_knowledge.vector import SQLiteVecVectorStore
 from app.core.logger import logger
 
 _SCHEMA = """

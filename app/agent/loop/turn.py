@@ -45,7 +45,6 @@ from app.agent.loop.assistant_output import _clean_output_for_history
 from app.agent.loop.context_blocks import (
     _append_round_images,
     _commit_history_enrichment,
-    _memory_consolidate,
 )
 from app.agent.loop.prompt_prep import prepare_prompt
 from app.agent.loop.turn_input import from_request
@@ -273,7 +272,6 @@ async def _run_inner(
     if req.record_history and text.strip() and session is not None:
         _write_history(runtime, session_mgr, session, session_id, text, is_private)
     _commit_history_enrichment(runtime, session_id, ctx)
-    _memory_consolidate(runtime, session_id, is_private, session_mgr)
     # 一轮结束：广播给订阅者（记忆蒸馏、统计、审计等业务自己接）
     from app.agent.hooks import run_stage
 

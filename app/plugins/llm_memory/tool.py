@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.agent.memory.store import owner_group, owner_private
+from app.plugins.llm_memory.store import owner_group, owner_private
 from app.agent.tools.spec import ToolSpec
 
 

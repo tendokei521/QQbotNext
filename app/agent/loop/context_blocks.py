@@ -6,7 +6,7 @@
 
 - 群侧：`_build_group_pre_history`（群里刚才在聊什么）；
 - 指代：**已搬进 `llm_context` 模块**（通过 `context_providers` 贡献块）；
-- 记忆：`_memory_block` / `_memory_autosave` / `_memory_consolidate`；
+- 记忆：**已搬进 `llm_memory` 模块**（context_providers + turn_completed 钩子）；
 - 会话历史：`_format_session_history` / `_history_media_hook` /
   `_commit_history_enrichment` / `_append_round_images`；
 - 小工具：`_event_nickname` / `_segments_as_dicts`。
@@ -176,31 +176,6 @@ def _commit_history_enrichment(runtime, session_id: str, ctx=None) -> int:
         return 0
 
 
-async def _memory_block(runtime, session_id: str, user_id: Any, user_text: str, bot) -> str:
-    """召回长期记忆块；未启用或异常时返回空串。"""
-    memory = getattr(runtime, "memory", None)
-    if memory is None or not memory.enabled():
-        return ""
-    try:
-        return await memory.recall_block_async(session_id, user_id, user_text, bot=bot)
-    except Exception as e:
-        # 记忆召回属增强能力：失败不阻断回复，但需留痕，否则表现为"记忆突然失效"
-        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(f"[Memory] 召回失败（已忽略）: {e}")
-        return ""
-
-
-def _memory_consolidate(runtime, session_id: str, is_private: bool, session_mgr) -> None:
-    """回复后触发限频隐式蒸馏；未启用或异常时静默跳过。"""
-    memory = getattr(runtime, "memory", None)
-    if memory is None or not memory.enabled():
-        return
-    try:
-        history = session_mgr.get_history(session_id, limit=20)
-        memory.maybe_consolidate(session_id, not is_private, history, source="chat")
-    except Exception as e:
-        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(f"[Memory] 隐式蒸馏触发失败（已忽略）: {e}")
-
-
 def _segments_as_dicts(message: Any) -> list[dict]:
     """把事件里的消息段统一成 ``[{"type": ..., "data": {...}}]``（存历史用）。"""
     segments: list[dict] = []
@@ -212,17 +187,6 @@ def _segments_as_dicts(message: Any) -> list[dict]:
         if stype:
             segments.append({"type": str(stype), "data": dict(getattr(seg, "data", {}) or {})})
     return segments
-
-
-def _memory_autosave(runtime, session_id: str, user_id: Any, text: str) -> None:
-    """确定性“记住…”兜底写入；未启用或异常时静默跳过。"""
-    memory = getattr(runtime, "memory", None)
-    if memory is None or not memory.enabled():
-        return
-    try:
-        memory.autosave(session_id, user_id, text)
-    except Exception as e:
-        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(f"[Memory] 兜底写入失败（已忽略）: {e}")
 
 
 def _append_round_images(messages: list[dict], tool_ctx, modalities) -> bool:

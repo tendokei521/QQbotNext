@@ -107,20 +107,7 @@ async def _collect_llm_ext(
 
             specs.append(build_tavily_tool(runtime))
 
-    # 长期记忆原生工具：memory_save / recall / delete / correct / deny
-    memory = getattr(runtime, "memory", None)
-    if memory is not None and memory.enabled():
-        from app.agent.memory import build_memory_tools
 
-        memory_user_id = str(user_id or "")
-        specs.extend(build_memory_tools(runtime, session_id, memory_user_id, is_private))
-
-    # 知识库原生工具
-    knowledge = getattr(runtime, "knowledge", None)
-    if knowledge is not None and knowledge.enabled():
-        from app.agent.knowledge import build_knowledge_tools
-
-        specs.extend(build_knowledge_tools(runtime))
 
     # MCP 工具（异步连接后暴露）
     mcp = getattr(runtime, "mcp_manager", None)

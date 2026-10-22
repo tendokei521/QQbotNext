@@ -3,9 +3,9 @@
 import asyncio
 
 from app.agent.config import DEFAULT_LLM_CONFIG
-from app.agent.memory.extract import parse_facts, render_extract_prompt
-from app.agent.memory.manager import MemoryManager
-from app.agent.memory.store import owner_private
+from app.plugins.llm_memory.extract import parse_facts, render_extract_prompt
+from app.plugins.llm_memory.manager import MemoryManager
+from app.plugins.llm_memory.store import owner_private
 
 
 class FakeConfig:
@@ -76,7 +76,7 @@ async def test_extract_facts_for_user_async_keeps_confidence(monkeypatch):
     async def fake(chain, messages, **_kw):
         return Resp()
 
-    import app.agent.memory.extract as em
+    import app.plugins.llm_memory.extract as em
 
     monkeypatch.setattr("app.agent.providers.chat_with_fallback", fake)
     rt = FakeRuntime()
@@ -90,7 +90,7 @@ async def test_distill_saves_confidence_into_store(monkeypatch):
     async def fake(runtime, uid, texts, **kw):
         return [{"content": "用户说过喜欢喝美式", "importance": 0.9, "confidence": 0.65}]
 
-    monkeypatch.setattr("app.agent.memory.extract.extract_facts_for_user_async", fake)
+    monkeypatch.setattr("app.plugins.llm_memory.extract.extract_facts_for_user_async", fake)
     rt = FakeRuntime(bot_id="bots3a")
     rt.memory.maybe_consolidate(
         "private_5", False,

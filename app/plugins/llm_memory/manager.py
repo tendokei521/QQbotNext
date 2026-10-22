@@ -14,11 +14,11 @@ import time
 from collections import OrderedDict
 from typing import Any
 
-import app.agent.memory.extract as extract_mod
+import app.plugins.llm_memory.extract as extract_mod
 from app.agent import logger
-from app.agent.memory.detect import autosave_clause
-from app.agent.memory.recall import rank, render_block
-from app.agent.memory.store import (
+from app.plugins.llm_memory.detect import autosave_clause
+from app.plugins.llm_memory.recall import rank, render_block
+from app.plugins.llm_memory.store import (
     MemoryStore,
     owner_group,
     owner_group_member,

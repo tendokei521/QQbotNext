@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from app.agent.memory.store import (
+from app.plugins.llm_memory.store import (
     MemoryStore,
     owner_group,
     owner_group_member,

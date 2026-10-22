@@ -207,7 +207,7 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
         return True
 
     elif action.startswith("memory"):
-        from app.agent.memory import handle_memory_command
+        from app.plugins.llm_memory import handle_memory_command
 
         return await handle_memory_command(module, session_id, user_id, is_admin, is_private, action, send)
 

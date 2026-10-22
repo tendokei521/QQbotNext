@@ -1,7 +1,7 @@
 """S1 存储层 v2 测试：状态/置信度/矛盾检测/近义合并/correct/deny/confirm/reset。"""
 
 
-from app.agent.memory.store import (
+from app.plugins.llm_memory.store import (
     MemoryStore,
     has_negation_conflict,
     owner_private,

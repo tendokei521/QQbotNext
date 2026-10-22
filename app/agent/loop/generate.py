@@ -23,7 +23,6 @@ from app.agent.loop.assistant_output import _clean_output_for_history
 from app.agent.loop.context_blocks import (
     _append_round_images,
     _commit_history_enrichment,
-    _memory_consolidate,
 )
 from app.agent.loop.prompt_prep import prepare_prompt
 from app.agent.loop.turn_metrics import (
@@ -224,7 +223,6 @@ async def generate_response(runtime, event, ctx=None) -> str | None:
     await asyncio.to_thread(session_mgr.history.save_session, session)
 
     _commit_history_enrichment(runtime, session_id, ctx)
-    _memory_consolidate(runtime, session_id, is_private, session_mgr)
     return clean_response
 
 

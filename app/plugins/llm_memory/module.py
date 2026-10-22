@@ -59,8 +59,6 @@ class Module(BaseModule):
     subscribe = ()
     category = "LLM"
     order = 50
-    provides = ("memory",)
-    supersedes = ("memory",)
     default_config = {
         "memory_enable": False,
         "memory_private_enable": True,
@@ -87,15 +85,44 @@ class Module(BaseModule):
         if runtime is None:
             return
         from app.agent.delivery.output import ConfigView
+        from app.agent.loop.providers import register_context_provider, register_tool_source
+        from app.plugins.llm_memory.service import (
+            MemoryLifecycle,
+            MemoryProvider,
+            MemoryToolSource,
+        )
 
         runtime.memory_options = ConfigView(
             getattr(runtime, "config", None), self.config, OWNED_KEYS
+        )
+        register_context_provider(runtime, MemoryProvider(self))
+        register_tool_source(runtime, MemoryToolSource(self))
+        lifecycle = MemoryLifecycle(self)
+        runtime.llm_hooks.register(
+            stage="pre_request", event_type="*", order=60,
+            handler=lifecycle.on_pre_request, module=self,
+        )
+        runtime.llm_hooks.register(
+            stage="turn_completed", event_type="*", order=60,
+            handler=lifecycle.on_turn_completed, module=self,
         )
 
     async def on_unload(self) -> None:
         runtime = self._runtime()
         if runtime is None:
             return
+        from app.agent.loop.providers import unregister_owner
+
+        unregister_owner(runtime, self)
+        mgr = getattr(self, "_manager", None)
+        if mgr is not None:
+            try:
+                mgr.stop()
+            except Exception as e:  # noqa: BLE001 —— 停止失败不该阻断卸载，但要留痕
+                from app.core.logger import logger
+
+                logger.debug(f"[llm_memory] 停止记忆管理器失败（已忽略）: {e}")
+            self._manager = None
         runtime.memory_options = None
 
     def _runtime(self) -> Any:

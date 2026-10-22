@@ -1,29 +1,6 @@
-"""长期记忆（Memory）模块：SQLite 存储 + 召回 + 工具 + 隐式蒸馏。
+"""（v3 已清空）长期记忆/知识库已搬进对应模块：app/plugins/llm_memory / llm_knowledge。
 
-阶段：P0~P5 已完成。
-- 存储：``MemoryStore``（SQLite，按 bot 隔离，owner 路由，audit）；
-- 召回注入：``MemoryManager.recall_block(_async)``（含群聊提及扩展）；
-- 原生工具：``build_memory_tools``（memory_save / memory_recall / memory_delete）；
-- 确定性兜底：``detect.autosave_clause / wants_autosave``；
-- 隐式蒸馏：``extract`` + ``MemoryManager.maybe_consolidate``（回复后限频 + 归档 force）；
-- 管理命令：``commands.handle_memory_command``（#llm memory ...）。
+本目录保留为空包，仅用于兼容历史 import 路径；新代码不要在这里放业务。
 """
 
-from __future__ import annotations
-
-from app.agent.memory.commands import handle_memory_command
-from app.agent.memory.manager import MemoryManager, scope_owners
-from app.agent.memory.recall import rank, render_block
-from app.agent.memory.store import MemoryStore, session_owner
-from app.agent.memory.tool import build_memory_tools
-
-__all__ = [
-    "MemoryStore",
-    "MemoryManager",
-    "scope_owners",
-    "session_owner",
-    "rank",
-    "render_block",
-    "build_memory_tools",
-    "handle_memory_command",
-]
+__all__: list[str] = []

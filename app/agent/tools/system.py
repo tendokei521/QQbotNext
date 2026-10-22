@@ -54,12 +54,12 @@ def _build_specs(runtime: Any) -> list[ToolSpec]:
     specs.append(build_tavily_tool(runtime))
 
     if getattr(runtime, "memory", None) is not None:
-        from app.agent.memory import build_memory_tools
+        from app.plugins.llm_memory import build_memory_tools
 
         specs.extend(build_memory_tools(runtime, "group_0", "", False))
 
     if getattr(runtime, "knowledge", None) is not None:
-        from app.agent.knowledge import build_knowledge_tools
+        from app.plugins.llm_knowledge import build_knowledge_tools
 
         specs.extend(build_knowledge_tools(runtime))
 
