@@ -68,8 +68,35 @@ class LlmPipeline:
 
         task = asyncio.create_task(self._run(job), name=f"llm_pipeline:{job.id[:8]}")
         self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        task.add_done_callback(lambda t: self._on_task_done(t, job))
         return task
+
+    def _on_task_done(self, task: "asyncio.Task", job: LlmJob) -> None:
+        """任务收尾：**取走异常**并落日志。
+
+        `create_task` 的异常如果没人 `task.exception()`，asyncio 只会打印
+        `Task exception was never retrieved`，而业务侧表现为"这轮消息没回、日志里也没有" ——
+        这是最难排查的一类故障，所以这里必须把它抓出来。
+        """
+        from app.core.logger import logger
+
+        self._tasks.discard(task)
+        if task.cancelled():
+            return
+        try:
+            exc = task.exception()
+        except Exception as e:  # noqa: BLE001 —— 连取异常都失败时只留痕，不再抛
+            logger.add_info(f"#{getattr(self.runtime, 'bot_id', '?')}").warning(
+                f"[LLM Pipeline] 读取任务异常失败: {e}"
+            )
+            return
+        if exc is None:
+            return
+        session_id = getattr(getattr(job, "ctx", None), "session_id", "?")
+        logger.add_info(f"#{getattr(self.runtime, 'bot_id', '?')}").error(
+            f"[LLM Pipeline] 任务异常终止（会话 {session_id}, job {job.id[:8]}）: {exc!r}",
+            exc_info=exc,
+        )
 
     def interrupt_session(self, session_id: str) -> None:
         """使某会话的旧任务过期（代际单调递增）。"""
@@ -191,10 +218,13 @@ class LlmPipeline:
             return []
 
     async def _run(self, job: LlmJob) -> None:
-        ctx = job.ctx
         session_lock: asyncio.Lock | None = None
         lock_acquired = False
+        ctx = job.ctx
         try:
+            # 注意：`ctx = job.ctx` 保留在 try 外只为 finally 里能用；
+            # 任何可能抛的取属性都放在 try 内（此前 prologue 在 try 外，
+            # 一处 AttributeError 就能让整轮静默消失）。
             # #llm 指令仍然走原 chat.handle（它会自己发送回复）
             if is_command(ctx.user_text):
                 from app.agent.loop.chat import handle as agent_handle
