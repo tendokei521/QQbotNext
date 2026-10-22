@@ -38,13 +38,14 @@ UNWIRED = "unwired"
 RATINGS = (FULL, HALF, UNWIRED)
 
 #: 接缝总数下限（棘轮：只许增，不许减）
-BASELINE_TOTAL = 55
+BASELINE_TOTAL = 57
 #: 完全可扩展接缝数下限（棘轮：只许增，不许减）
 #: 从 10 起步：W0-W2 提到 16（出站/入站链、输出策略、输出指令、发送通道、run_turn），
-#: B-4 再提到 20（provider 适配器、数据源、会话存储、定时任务服务）。
-BASELINE_FULL = 20
+#: B-4 再提到 20（provider 适配器、数据源、会话存储、定时任务服务），
+#: W3–W6 模块落地后提到 23（新增 2 个策略型接缝 + 发言通道转 full）。
+BASELINE_FULL = 23
 #: 半通下限（防止把 half 悄悄改成 full 而不补证据）
-BASELINE_HALF = 20
+BASELINE_HALF = 19
 
 #: LLM 流水线合法的钩子阶段（新增阶段必须同时改这里与 docs）
 DECLARED_STAGES = frozenset(
@@ -184,8 +185,11 @@ SEAMS: tuple[Seam, ...] = (
          gap="R1：`SendPolicy` 只读 `stream_send_*` 配置；节奏在 output 槽内部，未单独成接缝"),
     Seam("S35", "输出", "消息池", HALF, "app/agent/delivery/pool.py:21",
          gap="R1：`StreamSendPool` 由 `StreamOutput` 内部创建，模块换掉 output 槽即可绕过（R1 打折：不能只换池）"),
-    Seam("S36", "输出", "发言通道（文本=思考）", HALF, "app/agent/delivery/speech.py:312",
-         gap="R1：`speech_via_tool` 三条件耦合仍在；随 `llm_output` 模块落地时改为 `mode=speech`"),
+    Seam("S36", "输出", "发言通道（文本=思考）", FULL, "app/plugins/llm_output/module.py",
+         evidence=(
+             "tests/plugins/test_llm_output.py::test_config_view_prefers_module_then_falls_back",
+             "tests/plugins/test_llm_output.py::test_mode_selects_matching_framework_strategy",
+         )),
     Seam("S37", "输出", "发送通道", FULL, "app/agent/delivery/channel.py:send_item",
          evidence=(
              "tests/agent/delivery/test_channel_send_item.py::test_send_item_fires_pre_send_and_post_send_hooks",
@@ -245,6 +249,18 @@ SEAMS: tuple[Seam, ...] = (
     Seam("S55", "模块", "capabilities 自检", HALF, "app/application/capabilities.py:18",
          gap="R2 打折：清单不含 node/delivery 类服务，模块自检看不全",
          evidence=("tests/plugin/test_framework_capabilities.py::test_capabilities_with_real_container",)),
+    # ── v3 新增：策略型能力（配置归模块，机制留框架）────────────────
+    Seam("S56", "取值", "消息元信息渲染", FULL, "app/plugins/llm_message_meta/module.py",
+         evidence=(
+             "tests/plugins/test_llm_message_meta.py::test_enhance_reads_module_meta_config",
+             "tests/plugins/test_llm_message_meta.py::test_history_cleaner_uses_module_config",
+         )),
+    Seam("S57", "取值", "上下文增强（指代/展开/历史查询）", FULL,
+         "app/plugins/llm_context/module.py",
+         evidence=(
+             "tests/plugins/test_llm_context.py::test_referent_reads_module_config",
+             "tests/plugins/test_llm_context.py::test_tool_source_expand_gate_follows_module",
+         )),
 )
 
 
@@ -396,8 +412,13 @@ def test_every_feature_id_has_a_seam():
         "agent": "模块发起一轮对话",
         "assembly": "块表",
         "provider_invoker": "调用策略",
-        # v3 新增：输出策略槽（流式/非流式/发言通可整体替换）
+        # v3 新增：输出策略槽（流式/非流式/发言通道可整体替换）
         "output": "流式 vs 非流式",
+        # v3 新增：策略型能力（只有一组配置键，接管 = 策略归模块）
+        "message_meta": "消息元信息",
+        "context": "上下文增强",
+        "mcp": "工具收集",
+        "schedule_driver": "定时任务",
     }
     missing = [fid for fid in feature_ids if fid not in expected]
     assert not missing, f"新 feature 未在 expected 映射里登记: {missing}"

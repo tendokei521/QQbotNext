@@ -343,3 +343,82 @@ class OutputFeatureController(RuntimeSlotFeatureController):
     def default_value(self) -> Any:
         # None = 交给 select_default_output() 按配置决定，保持既有行为
         return None
+
+
+class PassiveFeatureController(_RuntimeAccess, FeatureController):
+    """「只声明占用」的能力：接管时把配置视图清空，让框架回到默认行为。
+
+    用于那些**没有可替换对象**、只有一组策略键的能力（元信息渲染、上下文增强、
+    MCP 工具）。接管 = 让被接管方的视图失效（框架回退到默认值）；
+    释放 = 什么也不用做（对方模块下次 on_load 会重新挂上视图）。
+
+    它存在的实际意义是**登记**：让 `#llm` 与 WebUI 能看到"这个能力当前被谁接管"，
+    并且保证 `supersedes` 声明不会因为"能力未注册"而在日志里刷警告。
+    """
+
+    def __init__(self, agent_manager: Any, *, feature_id: str, label: str,
+                 slot: str = "") -> None:
+        _RuntimeAccess.__init__(self, agent_manager)
+        self.feature_id = feature_id
+        self.label = label
+        #: 要清空的运行时属性（空 = 纯登记，不动运行时）
+        self.slot = slot
+
+    def status(self, bot_id: Any) -> dict:
+        runtime = self.runtime(bot_id)
+        holder = getattr(runtime, self.slot, None) if (runtime and self.slot) else None
+        return {
+            "feature_id": self.feature_id,
+            "label": self.label,
+            "enabled": bool(holder is not None) if self.slot else True,
+        }
+
+    def suppress(self, bot_id: Any) -> dict:
+        runtime = self.runtime(bot_id)
+        if runtime is None or not self.slot:
+            return {}
+        snapshot = {self.slot: getattr(runtime, self.slot, None)}
+        setattr(runtime, self.slot, None)
+        logger.info(f"[Feature] {self.label} 已由插件接管并暂停 ({bot_id})")
+        return snapshot
+
+    def restore(self, bot_id: Any, snapshot: dict) -> None:
+        runtime = self.runtime(bot_id)
+        if runtime is None or not snapshot or not self.slot:
+            return
+        setattr(runtime, self.slot, snapshot.get(self.slot))
+        logger.info(f"[Feature] {self.label} 已恢复 ({bot_id})")
+
+
+class MessageMetaFeatureController(PassiveFeatureController):
+    """消息元信息渲染（`llm_message_meta` 模块提供）。"""
+
+    def __init__(self, agent_manager: Any) -> None:
+        super().__init__(
+            agent_manager, feature_id="message_meta", label="消息元信息", slot="meta_options"
+        )
+
+
+class ContextFeatureController(PassiveFeatureController):
+    """上下文增强（指代/展开/历史查询权限，`llm_context` 模块提供）。"""
+
+    def __init__(self, agent_manager: Any) -> None:
+        super().__init__(
+            agent_manager, feature_id="context", label="上下文增强", slot="context_options"
+        )
+
+
+class MCPFeatureController(PassiveFeatureController):
+    """MCP 工具（`llm_tools_extra` 模块提供其一）。"""
+
+    def __init__(self, agent_manager: Any) -> None:
+        super().__init__(agent_manager, feature_id="mcp", label="MCP 工具", slot="")
+
+
+class ScheduleDriverFeatureController(PassiveFeatureController):
+    """定时任务驱动（`llm_schedule` 模块提供；`schedule` 开关型能力已存在）。"""
+
+    def __init__(self, agent_manager: Any) -> None:
+        super().__init__(
+            agent_manager, feature_id="schedule_driver", label="定时任务驱动", slot="scheduler"
+        )

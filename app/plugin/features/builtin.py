@@ -14,13 +14,17 @@ from typing import Any
 from app.plugin.features.controllers import (
     AgentFeatureController,
     AssemblerFeatureController,
+    ContextFeatureController,
     KnowledgeFeatureController,
+    MCPFeatureController,
     MemoryFeatureController,
+    MessageMetaFeatureController,
     OneBotToolsFeatureController,
     OutputFeatureController,
     ProactiveFeatureController,
     ProviderInvokerFeatureController,
     RuntimeSlotFeatureController,
+    ScheduleDriverFeatureController,
     ScheduleFeatureController,
 )
 
@@ -38,6 +42,11 @@ BUILTIN_CONTROLLERS: tuple[ControllerFactory, ...] = (
     AssemblerFeatureController,
     ProviderInvokerFeatureController,
     OutputFeatureController,
+    # v3：策略型能力（只有一组配置键，无可替换对象）—— 登记用，保证 supersedes 不刷警告
+    MessageMetaFeatureController,
+    ContextFeatureController,
+    MCPFeatureController,
+    ScheduleDriverFeatureController,
 )
 
 
