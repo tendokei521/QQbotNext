@@ -443,13 +443,23 @@ P4  A7/A8         可选扩展
 
 | 评级 | 数量 | 占比 |
 |---|---|---|
-| ■ 完全可扩展（4/4） | **11** | 20% |
-| ◧ 半通（1~3 条） | **22** | 40% |
+| ■ 完全可扩展（4/4） | **10** | 18% |
+| ◧ 半通（1~3 条） | **23** | 42% |
 | ✗ 未通（0 条） | **22** | 40% |
 | 合计 | 55 | 100% |
 
-**关键分布**：11 个 ■ 里有 **7 个在"模块系统本身"**（S46-S50/S53），只有 **4 个在 agent 内部流水线**（S18/S22/S28/S38）。
+> **口径修正记录**：初版把「S50 数据源 list/dynamic」标为 ■。复核 `application/provider_service.py:71-104`
+> 发现 `ProviderRegistry` **只有 `register_list`/`register_dynamic`/`register_module`，没有反注册**，
+> 而 `registry._unregister_plugin_hooks`（:436-448）也不清理它 → R4 不成立，已降为 ◧（■ 11→10）。
+> 同时确认 `FeatureRegistry` 租约在卸载时确实释放（`registry.py:238/272`），S54 的 R4 成立。
+
+**关键分布**：10 个 ■ 里有 **6 个在"模块系统本身"**（S46/S47/S48/S49/S53 等），只有 **4 个在 agent 内部流水线**（S18/S22/S28/S38）。
 → **模块系统已经达标，欠账全部集中在 agent 内部流水线上。**
+
+**已固化为可执行契约**：`tests/architecture/test_extensibility_contract.py` —— 上面 55 行清单现在是
+一个测试文件里的 `SEAMS` 常量，配套 13 条断言（`full` 必须引用真实可跑的"接管+还原"用例、
+`half`/`unwired` 必须点名缺哪条 R、接缝数与 `full` 数只许增不许减、`ServiceAccess` 新字段必须同步进
+`capabilities`、代码里的钩子阶段必须在 `DECLARED_STAGES` 登记）。
 
 ### 9.4 五个结构性阻塞（不修，加再多接口也没用）
 
