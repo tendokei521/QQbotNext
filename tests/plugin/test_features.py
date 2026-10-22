@@ -1,288 +1,189 @@
-"""FeatureRegistry 测试：能力接管、多租约、恢复、插件声明式 supersedes。"""
+"""FeatureRegistry 测试（v3：只剩 4 个**高级接口**能力）。
 
-from app.plugin.base import BaseModule, ModuleAuthority, ModuleContext, ServiceAccess
-from app.plugin.features import (
-    AssemblerFeatureController,
-    ConfigToggleFeature,
-    FeatureRegistry,
-    ProactiveFeatureController,
-)
+v3 口径：
+- 能力 = 可被接管的**机制**（`assembly` / `provider_invoker` / `output` / `agent`）；
+- 业务（记忆/知识库/主动消息/定时任务/工具/元信息/指代）不是能力，由模块用
+  基础接口自己实现，因此**不再出现在注册表里**。
+"""
 
+from __future__ import annotations
 
-class _FakeProactive:
-    def __init__(self) -> None:
-        self.stopped = 0
-        self.resumed = 0
+from types import SimpleNamespace
 
-    def stop(self) -> None:
-        self.stopped += 1
+import pytest
 
-    def resume(self) -> None:
-        self.resumed += 1
+from app.plugin.features import FeatureRegistry
+from app.plugin.features.builtin import BUILTIN_CONTROLLERS, register_builtin_controllers
 
 
-class _FakeScheduler:
-    def __init__(self) -> None:
-        self.stopped = 0
-        self.resumed = 0
-
-    def stop(self) -> None:
-        self.stopped += 1
-
-    def resume(self) -> None:
-        self.resumed += 1
+class _Owner:
+    def __init__(self, name: str, **attrs):
+        self.name = name
+        for key, value in attrs.items():
+            setattr(self, key, value)
 
 
-class _FakeConfig:
-    def __init__(self, data=None, enabled=True) -> None:
-        self._data = dict(data or {})
-        self.enabled = enabled
-
-    def get(self, key, default=None):
-        return self._data.get(key, default)
-
-    def set(self, key, value, auto_save=True) -> None:
-        self._data[key] = value
-
-    def set_enabled(self, value) -> None:
-        self.enabled = bool(value)
-
-
-class _FakeRuntime:
-    def __init__(self, data=None, enabled=True) -> None:
-        self.config = _FakeConfig(data, enabled)
-        self.proactive = _FakeProactive()
-        self.scheduler = _FakeScheduler()
-
-
-class _FakeAgentManager:
-    def __init__(self, runtime) -> None:
+class _AgentManager:
+    def __init__(self, runtime=None):
         self._runtime = runtime
 
     def get_runtime(self, bot_id):
         return self._runtime
 
 
-class _DummyModule(BaseModule):
-    name = "Dummy"
-    sign = "Dummy"
-    subscribe = ()
-    supersedes = ("proactive",)
+def _rt(**attrs):
+    """最小可用运行时：够 4 个高级接口的 status()/suppress() 跑。"""
+    base = {"bot_id": "1", "config": SimpleNamespace(enabled=True)}
+    base.update(attrs)
+    return SimpleNamespace(**base)
 
 
-class _FakeAuthorityService:
-    def get_module_authority(self, module, bot_id):
-        return {}
+def _registry(runtime=None) -> FeatureRegistry:
+    registry = FeatureRegistry()
+    register_builtin_controllers(registry, _AgentManager(runtime))
+    return registry
 
-    def set_module_authority(self, module, bot_id, authority):
+
+# ---------- 清单 ----------
+
+
+def test_feature_list_is_exactly_the_four_advanced_interfaces():
+    ids = sorted(c["feature_id"] for c in _registry().list_features())
+    assert ids == ["agent", "assembly", "output", "provider_invoker"]
+
+
+def test_business_capabilities_are_not_features():
+    """业务能力不该出现在能力注册表里（v3 的核心不变量）。"""
+    ids = {c["feature_id"] for c in _registry().list_features()}
+    forbidden = {
+        "memory", "knowledge", "proactive", "schedule", "schedule_driver",
+        "onebot_tools", "mcp", "message_meta", "context",
+    }
+    assert not (ids & forbidden), f"这些业务能力不该是 feature: {sorted(ids & forbidden)}"
+
+
+def test_builtin_controllers_count():
+    assert len(BUILTIN_CONTROLLERS) == 4
+
+
+# ---------- 装槽型：接管 / 交棒 / 还原 ----------
+
+
+def test_output_feature_swaps_and_restores():
+    runtime = SimpleNamespace(bot_id="1", output=None)
+    registry = _registry(runtime)
+
+    async def _respond(ctx, should_stop=None):
+        pass
+
+    owner = _Owner("自定义输出", respond=_respond)
+
+    registry.suppress("output", owner, "1")
+    assert runtime.output is owner
+
+    registry.release("output", owner, "1")
+    assert runtime.output is None, "释放后回到 None（框架按配置自动选择）"
+
+
+def test_output_feature_rejects_owner_without_respond():
+    runtime = SimpleNamespace(bot_id="1", output=None)
+    registry = _registry(runtime)
+    registry.suppress("output", _Owner("坏的"), "1")
+    assert runtime.output is None
+
+
+def test_assembly_feature_swaps_and_restores():
+    runtime = SimpleNamespace(bot_id="1", assembler="default")
+    registry = _registry(runtime)
+
+    class _Assembler:
+        def build(self, req):
+            return []
+
+    owner = _Owner("我的组装", build=lambda req: [])
+    registry.suppress("assembly", owner, "1")
+    assert runtime.assembler is owner
+
+    registry.release("assembly", owner, "1")
+    assert runtime.assembler is not owner
+
+
+def test_provider_invoker_feature_swaps_and_restores():
+    from app.agent.providers.invoker import ProviderInvoker
+
+    runtime = SimpleNamespace(bot_id="1", invoker=ProviderInvoker())
+    registry = _registry(runtime)
+
+    async def _chat(**kw):
         return None
 
+    async def _stream(**kw):
+        return
+        yield  # pragma: no cover
 
-def _make_module(registry=None, features=None, cls=_DummyModule):
-    cfg = _FakeConfig({"x": 1})
-    auth = ModuleAuthority("dummy", 123, _FakeAuthorityService())
-    services = ServiceAccess(features=features)
-    ctx = ModuleContext(module_name="dummy", bot_id=123, config=cfg, authority=auth, services=services)
-    return cls(ctx)
+    owner = _Owner("我的调用策略", chat=_chat, stream=_stream)
+    registry.suppress("provider_invoker", owner, "1")
+    assert runtime.invoker is owner
 
-
-def test_suppress_release_restores():
-    runtime = _FakeRuntime({"proactive_friend_enable": True, "proactive_group_enable": False})
-    reg = FeatureRegistry()
-    reg.register(ProactiveFeatureController(_FakeAgentManager(runtime)))
-
-    owner = _make_module()
-    reg.suppress("proactive", owner, 123)
-    assert runtime.config.get("proactive_friend_enable") is False
-    assert runtime.config.get("proactive_group_enable") is False
-    assert runtime.proactive.stopped == 1
-    assert reg.is_suppressed("proactive", 123)
-
-    reg.release("proactive", owner, 123)
-    assert runtime.config.get("proactive_friend_enable") is True
-    assert runtime.config.get("proactive_group_enable") is False
-    assert runtime.proactive.resumed == 1
-    assert reg.is_suppressed("proactive", 123) is False
+    registry.release("provider_invoker", owner, "1")
+    assert isinstance(runtime.invoker, ProviderInvoker)
 
 
-def test_multiple_owners_last_release_restores_once():
-    runtime = _FakeRuntime({"proactive_friend_enable": True, "proactive_group_enable": True})
-    reg = FeatureRegistry()
-    reg.register(ProactiveFeatureController(_FakeAgentManager(runtime)))
-    owner_a = _make_module()
-    owner_b = _make_module()
-
-    reg.suppress("proactive", owner_a, 123)
-    reg.suppress("proactive", owner_b, 123)
-    assert runtime.config.get("proactive_friend_enable") is False
-
-    # A 释放后 B 仍持有租约，不应恢复
-    reg.release("proactive", owner_a, 123)
-    assert runtime.config.get("proactive_friend_enable") is False
-    assert runtime.proactive.resumed == 0
-
-    # B 释放后最后一个租约离开，恢复
-    reg.release("proactive", owner_b, 123)
-    assert runtime.config.get("proactive_friend_enable") is True
-    assert runtime.config.get("proactive_group_enable") is True
-    assert runtime.proactive.resumed == 1
+# ---------- 多租约 ----------
 
 
-def test_acquire_module_declares_supersedes():
-    runtime = _FakeRuntime({"proactive_friend_enable": True, "proactive_group_enable": False})
-    reg = FeatureRegistry()
-    reg.register(ProactiveFeatureController(_FakeAgentManager(runtime)))
-    module = _make_module(features=reg)
+def test_multiple_owners_first_wins_and_last_release_restores():
+    runtime = SimpleNamespace(bot_id="1", output=None)
+    registry = _registry(runtime)
 
-    assert reg.acquire_module(module) == 1
-    assert runtime.config.get("proactive_friend_enable") is False
-    assert reg.is_suppressed("proactive", 123)
+    async def _respond(ctx, should_stop=None):
+        pass
 
-    assert reg.release_module(module) == 1
-    assert runtime.config.get("proactive_friend_enable") is True
+    first = _Owner("先来", respond=_respond)
+    second = _Owner("后到", respond=_respond)
 
+    registry.suppress("output", first, "1")
+    registry.suppress("output", second, "1")
+    assert runtime.output is first, "多租约「先到先得」"
 
-def test_acquire_module_skips_disabled_module():
-    runtime = _FakeRuntime({"proactive_friend_enable": True, "proactive_group_enable": False})
-    reg = FeatureRegistry()
-    reg.register(ProactiveFeatureController(_FakeAgentManager(runtime)))
-    module = _make_module(features=reg)
-    module.authority.set_enabled(False)
+    registry.release("output", second, "1")
+    assert runtime.output is first, "只释放后到者不该还原"
 
-    assert reg.acquire_module(module) == 0
-    assert runtime.config.get("proactive_friend_enable") is True
-    assert reg.is_suppressed("proactive", 123) is False
+    registry.release("output", first, "1")
+    assert runtime.output is None
 
 
-def test_release_owner_releases_all_features():
-    runtime = _FakeRuntime({"some_enable": True, "other_enable": True})
-    am = _FakeAgentManager(runtime)
-    reg = FeatureRegistry()
-    reg.register(ConfigToggleFeature(am, feature_id="some", label="Some", keys=("some_enable",)))
-    reg.register(ConfigToggleFeature(am, feature_id="other", label="Other", keys=("other_enable",)))
-    module = _make_module(features=reg)
+def test_status_reports_owners():
+    runtime = SimpleNamespace(bot_id="1", output=None)
+    registry = _registry(runtime)
 
-    reg.suppress("some", module, 123)
-    reg.suppress("other", module, 123)
-    assert reg.release_owner(module) == 2
-    assert runtime.config.get("some_enable") is True
-    assert runtime.config.get("other_enable") is True
+    async def _respond(ctx, should_stop=None):
+        pass
 
+    owner = _Owner("我的输出", respond=_respond)
+    registry.suppress("output", owner, "1")
 
-def test_status_contains_owners():
-    runtime = _FakeRuntime({"some_enable": True})
-    reg = FeatureRegistry()
-    reg.register(ConfigToggleFeature(_FakeAgentManager(runtime), feature_id="some", label="Some", keys=("some_enable",)))
-    module = _make_module(features=reg)
-    reg.suppress("some", module, 123)
-
-    status = reg.query("some", 123)
+    status = registry.query("output", "1")
+    assert status["registered"] is True
     assert status["suppressed"] is True
-    assert status["owners"][0]["module"] == "dummy"
-    assert len(reg.status(123)) == 1
+    assert status["owners"][0]["name"] == "我的输出"
 
 
-# ==================== assembly：消息组装器接管 ====================
+def test_unknown_feature_is_ignored():
+    registry = _registry(SimpleNamespace(bot_id="1"))
+    assert registry.suppress("memory", _Owner("x"), "1") == {}
+    assert registry.suppress("不存在的能力", _Owner("y"), "1") == {}
 
 
-class _FakeAssembler:
-    """默认装配器替身：用身份比较验证「装上/还原」。"""
-
-    def build(self, req):
-        return [{"role": "system", "content": "framework"}]
+def test_global_instance_cannot_take_over_bot_feature():
+    registry = _registry(SimpleNamespace(bot_id=None))
+    assert registry.suppress("output", _Owner("x"), None) == {}
 
 
-class _AssemblyModule(_DummyModule):
-    """声明接管消息组装的插件替身（实现 build(req)）。"""
-
-    name = "AssemblyPlugin"
-    sign = "AssemblyPlugin"
-    supersedes = ("assembly",)
-
-    def build(self, req):
-        return [{"role": "system", "content": "plugin"}]
-
-
-class _AssemblyModuleNoBuild(_DummyModule):
-    """声明接管消息组装但没实现 build(req) 的插件替身。"""
-
-    name = "AssemblyNoBuild"
-    sign = "AssemblyNoBuild"
-    supersedes = ("assembly",)
-
-
-def _assembly_registry(runtime):
-    reg = FeatureRegistry()
-    reg.register(AssemblerFeatureController(_FakeAgentManager(runtime)))
-    return reg
-
-
-def test_assembly_feature_swaps_and_restores_runtime_assembler():
-    runtime = _FakeRuntime()
-    original = _FakeAssembler()
-    runtime.assembler = original
-    reg = _assembly_registry(runtime)
-    module = _make_module(features=reg, cls=_AssemblyModule)
-
-    assert reg.acquire_module(module) == 1
-    assert runtime.assembler is module, "启用后 runtime.assembler 应换成插件装配器"
-
-    assert reg.release_module(module) == 1
-    assert runtime.assembler is original, "卸载后应还原接管前的装配器"
-
-
-def test_assembly_feature_ignores_owner_without_build():
-    """声明接管但没有 build(req) 的插件不生效（避免装个坏对象进去每轮都炸）。"""
-    runtime = _FakeRuntime()
-    original = _FakeAssembler()
-    runtime.assembler = original
-    reg = _assembly_registry(runtime)
-    module = _make_module(features=reg, cls=_AssemblyModuleNoBuild)
-
-    reg.acquire_module(module)
-    assert runtime.assembler is original
-
-    reg.release_module(module)
-    assert runtime.assembler is original
-
-
-def test_assembly_feature_multi_lease_handover():
-    """多租约：先到先得；先到者退出后交棒给仍在场者，最后一个释放才还原。"""
-    runtime = _FakeRuntime()
-    original = _FakeAssembler()
-    runtime.assembler = original
-    reg = _assembly_registry(runtime)
-    first = _make_module(features=reg, cls=_AssemblyModule)
-    second = _make_module(features=reg, cls=_AssemblyModule)
-
-    reg.acquire_module(first)
-    reg.acquire_module(second)
-    assert runtime.assembler is first, "第二个接管者只加租约，不抢占已生效的装配器"
-
-    reg.release_module(first)
-    assert runtime.assembler is second, "先到者退出后应把装配器交给仍在场的租约持有者"
-
-    reg.release_module(second)
-    assert runtime.assembler is original, "最后一个租约释放后还原到接管前的装配器"
-
-
-def test_assembler_controller_status_reports_current_assembler():
-    runtime = _FakeRuntime()
-    runtime.assembler = _FakeAssembler()
-    reg = _assembly_registry(runtime)
-    module = _make_module(features=reg, cls=_AssemblyModule)
-
-    assert reg.query("assembly", 123)["assembler"] == "_FakeAssembler"
-    reg.acquire_module(module)
-    assert reg.query("assembly", 123)["assembler"] == "_AssemblyModule"
-
-
-def test_base_controller_suppress_with_owner_defaults_to_suppress():
-    """兼容性：没覆盖 suppress_with_owner 的控制器（既有/第三方）行为不变。"""
-    runtime = _FakeRuntime({"some_enable": True})
-    reg = FeatureRegistry()
-    reg.register(ConfigToggleFeature(_FakeAgentManager(runtime), feature_id="some", label="Some", keys=("some_enable",)))
-    module = _make_module(features=reg)
-
-    reg.suppress("some", module, 123)
-    assert runtime.config.get("some_enable") is False
+@pytest.mark.parametrize("feature_id", ["agent", "assembly", "output", "provider_invoker"])
+def test_every_feature_reports_status(feature_id):
+    runtime = _rt()
+    registry = _registry(runtime)
+    status = registry.status("1")
+    ids = [item["feature_id"] for item in status]
+    assert feature_id in ids, f"缺 {feature_id}；实际 {ids}"

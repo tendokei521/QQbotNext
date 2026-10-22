@@ -14,15 +14,17 @@ from __future__ import annotations
 - 接管是「租约」：多个插件同时接管同一能力时，只要还有租约持有者，能力就保持禁用；
   最后一个租约释放时自动恢复被接管前的状态。
 
-当前注册的框架能力：
-- ``proactive``：框架主动消息
-- ``schedule``：框架定时任务
-- ``memory``：长期记忆总开关
-- ``knowledge``：知识库总开关
-- ``onebot_tools``：OneBot 工具总开关
-- ``agent``：框架级 Agent 整体启停
-- ``assembly``：消息组装器（插件可整体替换本轮 messages 的组装）
-- ``provider_invoker``：provider 调用策略（插件可整体替换调用约定/工具循环位置）
+## v3：只保留**高级接口**（更换机制 / 接管行为）
+
+| feature_id | 类型 | 说明 |
+|---|---|---|
+| `assembly` | 装槽型 | 本轮 messages 怎么组装（`build(req)`） |
+| `provider_invoker` | 装槽型 | LLM 请求怎么发（`chat` / `stream`） |
+| `output` | 装槽型 | 一轮回复怎么产出（`respond(ctx)`） |
+| `agent` | 开关型 | 整体停用框架 Agent |
+
+**业务能力（记忆/知识库/主动消息/定时任务/OneBot/MCP/元信息/指代）不再是 feature**：
+它们由各自模块用基础接口实现，框架不认识它们的存在。
 """
 
 
@@ -86,96 +88,6 @@ class ConfigToggleFeature(_RuntimeAccess, FeatureController):
         for key, value in snapshot.items():
             runtime.config.set(key, value)
         logger.info(f"[Feature] {self.label} 已恢复 ({bot_id})")
-
-
-class ProactiveFeatureController(ConfigToggleFeature):
-    """框架主动消息：同时暂停运行中的计时器，恢复时重新武装。"""
-
-    def __init__(self, agent_manager: Any) -> None:
-        super().__init__(
-            agent_manager,
-            feature_id="proactive",
-            label="主动消息",
-            keys=("proactive_friend_enable", "proactive_group_enable"),
-        )
-
-    def suppress(self, bot_id: Any) -> dict:
-        runtime = self.runtime(bot_id)
-        if runtime is None:
-            return {}
-        snapshot = super().suppress(bot_id)
-        self._call_quietly("暂停", runtime.proactive.stop)
-        return snapshot
-
-    def restore(self, bot_id: Any, snapshot: dict) -> None:
-        runtime = self.runtime(bot_id)
-        if runtime is None or not snapshot:
-            return
-        super().restore(bot_id, snapshot)
-        self._call_quietly("恢复", runtime.proactive.resume)
-
-
-class ScheduleFeatureController(ConfigToggleFeature):
-    """框架定时任务：暂停运行中的定时器，恢复时重新武装。"""
-
-    def __init__(self, agent_manager: Any) -> None:
-        super().__init__(
-            agent_manager,
-            feature_id="schedule",
-            label="定时任务",
-            keys=("schedule_enable",),
-        )
-
-    def suppress(self, bot_id: Any) -> dict:
-        runtime = self.runtime(bot_id)
-        if runtime is None:
-            return {}
-        snapshot = super().suppress(bot_id)
-        self._call_quietly("暂停", runtime.scheduler.stop)
-        return snapshot
-
-    def restore(self, bot_id: Any, snapshot: dict) -> None:
-        runtime = self.runtime(bot_id)
-        if runtime is None or not snapshot:
-            return
-        super().restore(bot_id, snapshot)
-        self._call_quietly("恢复", runtime.scheduler.resume)
-
-
-class MemoryFeatureController(ConfigToggleFeature):
-    """长期记忆总开关。"""
-
-    def __init__(self, agent_manager: Any) -> None:
-        super().__init__(
-            agent_manager,
-            feature_id="memory",
-            label="长期记忆",
-            keys=("memory_enable",),
-        )
-
-
-class KnowledgeFeatureController(ConfigToggleFeature):
-    """知识库总开关。"""
-
-    def __init__(self, agent_manager: Any) -> None:
-        super().__init__(
-            agent_manager,
-            feature_id="knowledge",
-            label="知识库",
-            keys=("knowledge_enable",),
-        )
-
-
-class OneBotToolsFeatureController(ConfigToggleFeature):
-    """OneBot 工具总开关。"""
-
-    def __init__(self, agent_manager: Any) -> None:
-        super().__init__(
-            agent_manager,
-            feature_id="onebot_tools",
-            label="OneBot Tools",
-            keys=("onebot_tools_enable",),
-        )
 
 
 class AgentFeatureController(_RuntimeAccess, FeatureController):
@@ -345,76 +257,3 @@ class OutputFeatureController(RuntimeSlotFeatureController):
         return None
 
 
-class PassiveFeatureController(_RuntimeAccess, FeatureController):
-    """「只登记」的策略型能力：接管不动运行时，只有状态可查。
-
-    用于那些**没有可替换对象**、只有一组策略键的能力（元信息渲染、上下文增强、
-    MCP 工具、定时任务驱动）。
-
-    为什么接管不做事：策略型能力的"接管"本来就是**提供方自己挂上配置视图**
-    （`runtime.<kind>_options`）。如果控制器在 `suppress` 里把槽清空，
-    就会把提供方刚挂好的视图打掉 —— 实测 `llm_message_meta` 的
-    `meta_options` 因此变成 None，元信息渲染静默失效。
-
-    所以这里的 `suppress` 只返回空快照（= 不改变运行时），
-    `status` 报告槽上是否有视图，供 WebUI/`#llm` 查看。
-    """
-
-    def __init__(self, agent_manager: Any, *, feature_id: str, label: str,
-                 slot: str = "") -> None:
-        _RuntimeAccess.__init__(self, agent_manager)
-        self.feature_id = feature_id
-        self.label = label
-        #: 只用于**观测**的运行时属性（不写入）
-        self.slot = slot
-
-    def status(self, bot_id: Any) -> dict:
-        runtime = self.runtime(bot_id)
-        holder = getattr(runtime, self.slot, None) if (runtime and self.slot) else None
-        return {
-            "feature_id": self.feature_id,
-            "label": self.label,
-            "enabled": bool(holder is not None) if self.slot else True,
-        }
-
-    def suppress(self, bot_id: Any) -> dict:
-        # 策略型能力无可替换对象：接管 = 由提供方挂视图，控制器不干预
-        logger.info(f"[Feature] {self.label} 已被插件声明接管 ({bot_id})")
-        return {}
-
-    def restore(self, bot_id: Any, snapshot: dict) -> None:
-        return None
-
-
-class MessageMetaFeatureController(PassiveFeatureController):
-    """消息元信息渲染（`llm_message_meta` 模块提供）。"""
-
-    def __init__(self, agent_manager: Any) -> None:
-        super().__init__(
-            agent_manager, feature_id="message_meta", label="消息元信息", slot="meta_options"
-        )
-
-
-class ContextFeatureController(PassiveFeatureController):
-    """上下文增强（指代/展开/历史查询权限，`llm_context` 模块提供）。"""
-
-    def __init__(self, agent_manager: Any) -> None:
-        super().__init__(
-            agent_manager, feature_id="context", label="上下文增强", slot="context_options"
-        )
-
-
-class MCPFeatureController(PassiveFeatureController):
-    """MCP 工具（`llm_tools_extra` 模块提供其一）。"""
-
-    def __init__(self, agent_manager: Any) -> None:
-        super().__init__(agent_manager, feature_id="mcp", label="MCP 工具", slot="")
-
-
-class ScheduleDriverFeatureController(PassiveFeatureController):
-    """定时任务驱动（`llm_schedule` 模块提供；`schedule` 开关型能力已存在）。"""
-
-    def __init__(self, agent_manager: Any) -> None:
-        super().__init__(
-            agent_manager, feature_id="schedule_driver", label="定时任务驱动", slot="scheduler"
-        )

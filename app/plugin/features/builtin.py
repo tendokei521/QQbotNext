@@ -1,9 +1,8 @@
-"""框架内置能力的**唯一登记表**。
+"""框架内置能力的**唯一登记表**（v3：只剩高级接口）。
 
-历史问题：8 个控制器原本在 `bootstrap.py` 里逐个手写 `feature_registry.register(...)`，
-于是"新增一个能力"要改三处（控制器类、bootstrap、测试里的清单），三处必然漂移。
-
-现在只在这张表里加一行，`bootstrap` 与测试都从它取值。
+只登记"更换机制 / 接管行为"的 4 个能力。业务能力（记忆、知识库、主动消息、
+定时任务、OneBot 工具、MCP、元信息渲染、指代消解）由各模块用基础接口实现，
+**不在这里登记** —— 框架不该知道它们存在。
 """
 
 from __future__ import annotations
@@ -14,39 +13,20 @@ from typing import Any
 from app.plugin.features.controllers import (
     AgentFeatureController,
     AssemblerFeatureController,
-    ContextFeatureController,
-    KnowledgeFeatureController,
-    MCPFeatureController,
-    MemoryFeatureController,
-    MessageMetaFeatureController,
-    OneBotToolsFeatureController,
     OutputFeatureController,
-    ProactiveFeatureController,
     ProviderInvokerFeatureController,
     RuntimeSlotFeatureController,
-    ScheduleDriverFeatureController,
-    ScheduleFeatureController,
 )
 
 #: 控制器工厂：(agent_manager) -> FeatureController
 ControllerFactory = Callable[[Any], Any]
 
-#: 内置能力清单：顺序即注册顺序（同名会抛错，所以保持唯一）
+#: 内置能力清单（顺序即注册顺序）
 BUILTIN_CONTROLLERS: tuple[ControllerFactory, ...] = (
-    ProactiveFeatureController,
-    ScheduleFeatureController,
-    MemoryFeatureController,
-    KnowledgeFeatureController,
-    OneBotToolsFeatureController,
     AgentFeatureController,
     AssemblerFeatureController,
     ProviderInvokerFeatureController,
     OutputFeatureController,
-    # v3：策略型能力（只有一组配置键，无可替换对象）—— 登记用，保证 supersedes 不刷警告
-    MessageMetaFeatureController,
-    ContextFeatureController,
-    MCPFeatureController,
-    ScheduleDriverFeatureController,
 )
 
 

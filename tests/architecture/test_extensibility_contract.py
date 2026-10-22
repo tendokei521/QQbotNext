@@ -256,7 +256,7 @@ SEAMS: tuple[Seam, ...] = (
          evidence=("tests/plugin/test_registry.py::test_load_single",)),
     Seam("S54", "模块", "能力接管（8 feature）", HALF, "app/plugin/features/controllers.py:216",
          gap="R1 打折：租约/交棒/还原完备（R4 成立），但 8 个里 5 个只是配置 toggle",
-         evidence=("tests/plugin/test_features.py::test_suppress_release_restores",)),
+         evidence=("tests/plugin/test_features.py::test_multiple_owners_first_wins_and_last_release_restores",)),
     Seam("S55", "模块", "capabilities 自检", HALF, "app/application/capabilities.py:18",
          gap="R2 打折：清单不含 node/delivery 类服务，模块自检看不全",
          evidence=("tests/plugin/test_framework_capabilities.py::test_capabilities_with_real_container",)),
