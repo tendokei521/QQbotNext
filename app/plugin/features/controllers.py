@@ -346,14 +346,18 @@ class OutputFeatureController(RuntimeSlotFeatureController):
 
 
 class PassiveFeatureController(_RuntimeAccess, FeatureController):
-    """「只声明占用」的能力：接管时把配置视图清空，让框架回到默认行为。
+    """「只登记」的策略型能力：接管不动运行时，只有状态可查。
 
     用于那些**没有可替换对象**、只有一组策略键的能力（元信息渲染、上下文增强、
-    MCP 工具）。接管 = 让被接管方的视图失效（框架回退到默认值）；
-    释放 = 什么也不用做（对方模块下次 on_load 会重新挂上视图）。
+    MCP 工具、定时任务驱动）。
 
-    它存在的实际意义是**登记**：让 `#llm` 与 WebUI 能看到"这个能力当前被谁接管"，
-    并且保证 `supersedes` 声明不会因为"能力未注册"而在日志里刷警告。
+    为什么接管不做事：策略型能力的"接管"本来就是**提供方自己挂上配置视图**
+    （`runtime.<kind>_options`）。如果控制器在 `suppress` 里把槽清空，
+    就会把提供方刚挂好的视图打掉 —— 实测 `llm_message_meta` 的
+    `meta_options` 因此变成 None，元信息渲染静默失效。
+
+    所以这里的 `suppress` 只返回空快照（= 不改变运行时），
+    `status` 报告槽上是否有视图，供 WebUI/`#llm` 查看。
     """
 
     def __init__(self, agent_manager: Any, *, feature_id: str, label: str,
@@ -361,7 +365,7 @@ class PassiveFeatureController(_RuntimeAccess, FeatureController):
         _RuntimeAccess.__init__(self, agent_manager)
         self.feature_id = feature_id
         self.label = label
-        #: 要清空的运行时属性（空 = 纯登记，不动运行时）
+        #: 只用于**观测**的运行时属性（不写入）
         self.slot = slot
 
     def status(self, bot_id: Any) -> dict:
@@ -374,20 +378,12 @@ class PassiveFeatureController(_RuntimeAccess, FeatureController):
         }
 
     def suppress(self, bot_id: Any) -> dict:
-        runtime = self.runtime(bot_id)
-        if runtime is None or not self.slot:
-            return {}
-        snapshot = {self.slot: getattr(runtime, self.slot, None)}
-        setattr(runtime, self.slot, None)
-        logger.info(f"[Feature] {self.label} 已由插件接管并暂停 ({bot_id})")
-        return snapshot
+        # 策略型能力无可替换对象：接管 = 由提供方挂视图，控制器不干预
+        logger.info(f"[Feature] {self.label} 已被插件声明接管 ({bot_id})")
+        return {}
 
     def restore(self, bot_id: Any, snapshot: dict) -> None:
-        runtime = self.runtime(bot_id)
-        if runtime is None or not snapshot or not self.slot:
-            return
-        setattr(runtime, self.slot, snapshot.get(self.slot))
-        logger.info(f"[Feature] {self.label} 已恢复 ({bot_id})")
+        return None
 
 
 class MessageMetaFeatureController(PassiveFeatureController):

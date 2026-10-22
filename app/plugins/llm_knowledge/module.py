@@ -11,7 +11,7 @@ from typing import Any
 
 from app.plugin import BaseModule
 
-from ..llm_memory.schemas import KNOWLEDGE_SCHEMA
+from .config_schema import SCHEMA as KNOWLEDGE_SCHEMA
 
 #: 本模块持有的键（与 `config_partition.MODULE_KEYS["llm_knowledge"]` 一致）
 OWNED_KEYS: tuple[str, ...] = (
