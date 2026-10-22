@@ -262,6 +262,9 @@ const chartPoints = computed(() =>
     bucketRef: b,
   })),
 )
+/** 表格用：只保留"有数据"的时段（表格里一排 0 很难看）。 */
+const tableBuckets = computed(() => buckets.value.filter((b) => Object.keys(b.series).length > 0))
+const emptyBucketCount = computed(() => buckets.value.length - tableBuckets.value.length)
 const chartMax = computed(() => Math.max(1, ...chartPoints.value.map((p) => p.value)))
 /** y 轴三档刻度（0 / 50% / 100%），对齐截图里克制的网格线。 */
 const yTicks = computed(() => [chartMax.value, chartMax.value / 2, 0])
@@ -341,7 +344,7 @@ async function load() {
       metric: metric.value,
       granularity: granularity.value,
       breakdown: breakdown.value,
-      skip_empty: 1,
+      skip_empty: 0,   // 图表要保留所有时段的位置（不画柱但占位）
       ...rangeParams(),
     }
     if (api.value) params.api = api.value
@@ -507,7 +510,8 @@ onMounted(() => {
               <div v-for="p in chartPoints" :key="p.bucket" class="bar-slot"
                    :title="`${p.bucket}: ${fmt(p.value, unit)}`">
                 <template v-if="breakdown === 'none'">
-                  <div class="bar single" :style="{ height: `${barHeight(p.value)}px` }" />
+                  <div v-if="p.value > 0" class="bar single"
+                       :style="{ height: `${barHeight(p.value)}px` }" />
                 </template>
                 <template v-else>
                   <div v-for="name in seriesNames" :key="name"
@@ -528,9 +532,7 @@ onMounted(() => {
       </template>
 
       <div class="chart-foot">
-        <span v-if="data.meta.hidden_buckets" class="hint">
-          已省略 {{ data.meta.hidden_buckets }} 个无数据时段
-        </span>
+        <span class="hint">无数据的时段只占位、不画柱</span>
         <span v-if="data.meta.truncated" class="hint">已合并 {{ data.meta.truncated }} 个较小序列</span>
         <span v-if="breakdown !== 'none'" class="legend">
           <span v-for="name in seriesNames" :key="name" class="legend-item">
@@ -543,28 +545,31 @@ onMounted(() => {
     <!-- ⑤ 用量表 -->
     <div v-if="data" class="table-card">
       <div class="chart-head">
-        <span class="chart-title">用量明细</span>
+        <span class="chart-title">
+          用量明细
+          <span v-if="emptyBucketCount" class="hint">（已略过 {{ emptyBucketCount }} 个空时段）</span>
+        </span>
         <div class="seg">
           <button :class="{ on: pivot === 'metric' }" @click="pivot = 'metric'">按指标</button>
           <button :class="{ on: pivot === 'series' }" @click="pivot = 'series'">按维度</button>
         </div>
       </div>
 
-      <div v-if="!buckets.length" class="empty-hint">该范围内没有数据</div>
+      <div v-if="!tableBuckets.length" class="empty-hint">该范围内没有数据</div>
 
       <div v-else-if="pivot === 'metric'" class="table-wrap">
         <table class="usage-table">
           <thead>
             <tr>
               <th class="sticky-col">指标</th>
-              <th v-for="b in buckets" :key="b.bucket" class="num">{{ b.bucket }}</th>
+              <th v-for="b in tableBuckets" :key="b.bucket" class="num">{{ b.bucket }}</th>
               <th class="num total-col">合计</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="row in metricRows" :key="row.key">
               <td class="sticky-col">{{ row.label }}</td>
-              <td v-for="b in buckets" :key="b.bucket" class="num">
+              <td v-for="b in tableBuckets" :key="b.bucket" class="num">
                 {{ cell(bucketValue(b, row.key), row.key) }}
               </td>
               <td class="num total-col">{{ cell(metricTotal(row.key), row.key) }}</td>
@@ -578,14 +583,14 @@ onMounted(() => {
           <thead>
             <tr>
               <th class="sticky-col">{{ breakdown === 'none' ? '序列' : breakdown }}</th>
-              <th v-for="b in buckets" :key="b.bucket" class="num">{{ b.bucket }}</th>
+              <th v-for="b in tableBuckets" :key="b.bucket" class="num">{{ b.bucket }}</th>
               <th class="num total-col">合计</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="name in seriesNames" :key="name">
               <td class="sticky-col">{{ name || '（未指定）' }}</td>
-              <td v-for="b in buckets" :key="b.bucket" class="num">
+              <td v-for="b in tableBuckets" :key="b.bucket" class="num">
                 {{ cell(seriesValue(b, name, metricKey), metricKey) }}
               </td>
               <td class="num total-col">{{ cell(seriesTotal(name, metricKey), metricKey) }}</td>
@@ -602,7 +607,8 @@ onMounted(() => {
 <style scoped>
 .stats-page {
   padding: 4px 2px 40px;
-  --card-bg: rgba(var(--v-theme-surface-variant), 0.28);
+  --card-bg: rgb(var(--v-theme-surface));
+  --card-border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
   --line: rgba(var(--v-theme-on-surface), 0.08);
   --muted: rgba(var(--v-theme-on-surface), 0.55);
   --accent: #ff6b35;
@@ -610,7 +616,8 @@ onMounted(() => {
 
 /* ① 大 KPI */
 .hero { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.hero-card { background: var(--card-bg); border-radius: 12px; padding: 16px 22px; }
+.hero-card { background: var(--card-bg); border: var(--card-border); border-radius: 10px;
+             padding: 16px 22px; }
 .hero-label { font-size: 13px; color: var(--muted); }
 .hero-value { font-size: 32px; font-weight: 700; line-height: 1.25; margin-top: 4px;
               font-variant-numeric: tabular-nums; }
@@ -620,7 +627,8 @@ onMounted(() => {
 .filter-bar { display: flex; align-items: center; gap: 8px; margin: 16px 0 14px;
               flex-wrap: wrap; }
 .fb-label { font-size: 12px; color: var(--muted); }
-.pill :deep(.v-field) { border-radius: 999px; background: var(--card-bg); box-shadow: none; }
+.pill :deep(.v-field) { border-radius: 999px; background: var(--card-bg);
+                       box-shadow: none; border: var(--card-border); }
 .pill :deep(.v-field__input) { min-height: 30px; padding-top: 0; padding-bottom: 0;
                                font-size: 12px; }
 .link-btn { background: none; border: none; color: var(--muted); font-size: 12px;
@@ -632,7 +640,8 @@ onMounted(() => {
 
 /* ③ 小 KPI */
 .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-.kpi { background: var(--card-bg); border-radius: 12px; padding: 14px 18px; }
+.kpi { background: var(--card-bg); border: var(--card-border); border-radius: 10px;
+       padding: 14px 18px; }
 .kpi-label { font-size: 12px; color: var(--muted); }
 .kpi-value { font-size: 24px; font-weight: 600; margin-top: 4px;
              font-variant-numeric: tabular-nums; }
@@ -640,16 +649,17 @@ onMounted(() => {
 
 /* ④ 图表 */
 .chart-card, .table-card { margin-top: 16px; background: var(--card-bg);
-                           border-radius: 12px; padding: 14px 16px 12px; }
+                           border: var(--card-border); border-radius: 10px;
+                           padding: 14px 16px 12px; }
 .chart-head { display: flex; align-items: center; justify-content: space-between;
               gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
 .chart-title { font-size: 13px; font-weight: 600; }
-.seg { display: inline-flex; background: rgba(var(--v-theme-surface), 0.75);
+.seg { display: inline-flex; background: transparent; border: var(--card-border);
        border-radius: 999px; padding: 2px; gap: 2px; }
 .seg button { border: none; background: transparent; color: var(--muted); font-size: 11px;
               padding: 3px 10px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
-.seg button.on { background: rgb(var(--v-theme-surface)); color: rgb(var(--v-theme-on-surface));
-                 box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
+.seg button.on { background: rgba(var(--v-theme-on-surface), 0.08);
+                 color: rgb(var(--v-theme-on-surface)); }
 
 .chart-body { display: flex; gap: 8px; }
 .y-axis { display: flex; flex-direction: column; justify-content: space-between;
@@ -662,7 +672,7 @@ onMounted(() => {
 .bars { position: absolute; inset: 0; display: flex; align-items: flex-end;
         gap: 2px; padding: 0 2px; }
 .bar-slot { flex: 1; display: flex; align-items: flex-end; gap: 1px; height: 100%; }
-.bar { flex: 1; border-radius: 2px 2px 0 0; min-width: 2px; }
+.bar { flex: 1; border-radius: 2px 2px 0 0; }
 .bar.single { background: var(--accent); }
 .x-axis { display: flex; justify-content: space-between; font-size: 10px;
           color: var(--muted); margin: 6px 0 0 54px; }
@@ -679,9 +689,9 @@ onMounted(() => {
 .usage-table th, .usage-table td { padding: 6px 10px; border-bottom: 1px solid var(--line);
                                    white-space: nowrap; }
 .usage-table thead th { font-weight: 600; color: var(--muted); position: sticky; top: 0;
-                        background: rgb(var(--v-theme-surface)); }
+                        background: var(--card-bg); }
 .usage-table .num { text-align: right; font-variant-numeric: tabular-nums; }
-.usage-table .sticky-col { position: sticky; left: 0; background: rgb(var(--v-theme-surface));
+.usage-table .sticky-col { position: sticky; left: 0; background: var(--card-bg);
                            text-align: left; font-weight: 500; }
 .usage-table .total-col { font-weight: 700;
                           border-left: 1px solid rgba(var(--v-theme-on-surface), 0.14); }
