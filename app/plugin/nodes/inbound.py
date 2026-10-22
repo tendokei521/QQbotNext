@@ -78,6 +78,13 @@ class AgentNode(MessageNode):
         return self.log.add_info(f"#{getattr(event, 'bot_index', '?')}")
 
     async def process(self, ctx: MessageContext, next_: Next) -> None:
+        """路由入口。外面包一层统计：**一次入站消息一条 `msg_in`**。"""
+        try:
+            await self._route(ctx, next_)
+        finally:
+            self._record_inbound(ctx)
+
+    async def _route(self, ctx: MessageContext, next_: Next) -> None:
         event = ctx.event
         if event.event_type not in ("message_group", "message_private"):
             await next_()
@@ -142,6 +149,69 @@ class AgentNode(MessageNode):
 
             await agent_handle(runtime, event)
         await next_()
+
+    def _record_inbound(self, ctx: MessageContext) -> None:
+        """记一条 `msg_in`（结局由事件最终状态决定）。"""
+        try:
+            from app.agent.usage import get_recorder
+            from app.agent.usage.labels import session_label
+
+            recorder = get_recorder()
+            if recorder is None:
+                return
+            event = ctx.event
+            if getattr(event, "event_type", "") not in ("message_group", "message_private"):
+                return
+
+            is_private = event.event_type == "message_private"
+            if is_private:
+                ident = str(getattr(event, "user_id", "") or "")
+                session_id = f"private_{ident}"
+                name = getattr(getattr(event, "user", None), "nickname", "") or ""
+                label = session_label(name, "private", ident)
+                group_id = ""
+            else:
+                group = getattr(event, "group", None)
+                ident = str(getattr(group, "group_id", "") or "")
+                session_id = f"group_{ident}"
+                name = getattr(group, "group_name", "") or ""
+                label = session_label(name, "group", ident)
+                group_id = ident
+
+            recorder.record_msg_in(
+                outcome=self._outcome_of(event),
+                bot_id=str(getattr(event, "account_id", "") or getattr(event, "bot_id", "") or ""),
+                source="inbound",
+                session_id=session_id,
+                session_label=label,
+                group_id=group_id,
+                user_id=str(getattr(event, "user_id", "") or ""),
+                event_type=event.event_type,
+                bytes=len(str(getattr(event, "message", "") or "")),
+            )
+        except Exception as e:  # noqa: BLE001 —— 统计是旁路，绝不阻断消息处理
+            self.log.debug(f"[Stats] 入站记账失败（已忽略）: {e}")
+
+    @staticmethod
+    def _outcome_of(event) -> str:
+        """判定这条入站消息的结局。"""
+        from app.agent.commands import is_command
+
+        try:
+            text = str(getattr(event, "raw_text", "") or "")
+            if not text:
+                from app.domain.trigger import raw_user_text
+
+                text = raw_user_text(event)
+        except Exception:  # noqa: BLE001 —— 取不到正文就当没有
+            text = ""
+        if text and is_command(text):
+            return "command"
+        if getattr(event, "_llm_job", None) is not None:
+            return "llm"
+        if getattr(event, "_stopped", False) or getattr(event, "_llm_stop", False):
+            return "module"
+        return "ignored"
 
     def _single_service_index(self, event) -> Any:
         try:

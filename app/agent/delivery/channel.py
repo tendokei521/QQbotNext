@@ -93,10 +93,27 @@ async def send_item(
             response = await bot.send_private_msg(int(target), outgoing)
     except Exception as e:  # noqa: BLE001 —— 发送失败应当回传为 None，不炸调用方
         logger.add_info("Delivery").error(f"[Send] 发送失败 {session_id}: {e}")
+        _record_outbound(
+            session_id=session_id,
+            outgoing=outgoing,
+            runtime=runtime,
+            bot=bot,
+            ctx=ctx,
+            ok=False,
+            err_kind=type(e).__name__,
+        )
         return None
 
     if hooks and runtime is not None:
         await _run_hook(runtime, "post_send", ctx, outgoing)
+    _record_outbound(
+        session_id=session_id,
+        outgoing=outgoing,
+        runtime=runtime,
+        bot=bot,
+        ctx=ctx,
+        ok=True,
+    )
     return response
 
 
@@ -156,3 +173,43 @@ async def _run_hook(runtime: Any, stage: str, ctx: Any, msg: Message) -> bool:
             f"[Send] {stage} 钩子执行异常（已忽略）: {e}"
         )
         return True
+
+
+def _record_outbound(
+    *,
+    session_id: str,
+    outgoing: Any,
+    runtime: Any,
+    bot: Any,
+    ctx: Any,
+    ok: bool = True,
+    err_kind: str = "",
+) -> None:
+    """记一条 `msg_out`（统计是旁路，任何异常都不影响发送结果）。"""
+    try:
+        from app.agent.usage import get_recorder
+        from app.agent.usage.labels import label_from_session_id
+
+        recorder = get_recorder()
+        if recorder is None:
+            return
+        segments = len(getattr(outgoing, "segments", []) or [])
+        try:
+            text_body = str(outgoing or "")
+        except Exception:  # noqa: BLE001 —— 取不到正文就不计字节
+            text_body = ""
+        label = ""
+        if ctx is not None:
+            label = str(getattr(ctx, "session_label", "") or "")
+        recorder.record_msg_out(
+            segments=max(1, segments),
+            nbytes=len(text_body.encode("utf-8")),
+            ok=1 if ok else 0,
+            err_kind=err_kind,
+            bot_id=str(getattr(runtime, "bot_id", "") or getattr(bot, "bot_id", "") or ""),
+            source="delivery",
+            session_id=session_id,
+            session_label=label or label_from_session_id(session_id),
+        )
+    except Exception as e:  # noqa: BLE001 —— 统计失败绝不影响发送
+        logger.add_info("Delivery").debug(f"[Stats] 出站记账失败（已忽略）: {e}")
