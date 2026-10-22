@@ -36,6 +36,12 @@ SERVICE_FIELDS = (
     "api_hooks",
     "lifecycle_hooks",
     "event_completed_hooks",
+    # 模块侧的原料接口（v3 新增）：节点注册表 / 会话 / 运行时只读 / 框架工具集 / 出站管道
+    "node_registry",
+    "sessions",
+    "runtime",
+    "tools",
+    "outbound",
 )
 
 

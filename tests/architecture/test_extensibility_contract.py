@@ -343,19 +343,16 @@ def test_every_service_access_field_is_declared_in_capabilities():
 
 
 def test_every_feature_id_has_a_seam():
-    """每个可接管能力都必须在清单里能找到对应接缝（否则"能接管"是口头承诺）。"""
-    from app.plugin.features import controllers as C
+    """每个可接管能力都必须在清单里能找到对应接缝（否则"能接管"是口头承诺）。
 
-    feature_ids = [
-        C.ProactiveFeatureController(None).feature_id,
-        C.ScheduleFeatureController(None).feature_id,
-        C.MemoryFeatureController(None).feature_id,
-        C.KnowledgeFeatureController(None).feature_id,
-        C.OneBotToolsFeatureController(None).feature_id,
-        C.AgentFeatureController(None).feature_id,
-        C.AssemblerFeatureController(None).feature_id,
-        C.ProviderInvokerFeatureController(None).feature_id,
-    ]
+    feature 清单来自 `BUILTIN_CONTROLLERS` 单一真相表，新增能力只需在
+    `expected` 里补一行映射；漏了会在这里立刻失败。
+    """
+    from app.plugin.features import FeatureRegistry
+    from app.plugin.features.builtin import register_builtin_controllers
+
+    registry = FeatureRegistry()
+    feature_ids = register_builtin_controllers(registry, None)
     seam_text = " ".join(
         f"{s.id} {s.stage} {s.seam} {s.ref} {s.gap}" for s in SEAMS
     ).lower()

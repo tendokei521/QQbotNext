@@ -31,17 +31,8 @@ from app.infrastructure.onebot.gateway import OneBotGateway
 from app.infrastructure.persistence.database import Database
 from app.plugin.base import ServiceAccess
 from app.plugin.dispatcher import ModuleDispatcher
-from app.plugin.features import (
-    AgentFeatureController,
-    AssemblerFeatureController,
-    FeatureRegistry,
-    KnowledgeFeatureController,
-    MemoryFeatureController,
-    OneBotToolsFeatureController,
-    ProactiveFeatureController,
-    ProviderInvokerFeatureController,
-    ScheduleFeatureController,
-)
+from app.plugin.features import FeatureRegistry
+from app.plugin.features.builtin import register_builtin_controllers
 from app.plugin.hooks import (
     ApiHookRegistry,
     BeforeSendHookRegistry,
@@ -129,16 +120,9 @@ def build_container(settings: Settings | None = None) -> Container:
         provider_runtime_manager=provider_runtime_manager,
     )
     container.register_factory(AgentManager, lambda: agent_manager)
-    # 全局功能/能力注册表：框架内置能力可被插件自动接管、恢复
+    # 全局功能/能力注册表：内置能力清单只有一处真相（app/plugin/features/builtin.py）
     feature_registry = FeatureRegistry()
-    feature_registry.register(ProactiveFeatureController(agent_manager))
-    feature_registry.register(ScheduleFeatureController(agent_manager))
-    feature_registry.register(MemoryFeatureController(agent_manager))
-    feature_registry.register(KnowledgeFeatureController(agent_manager))
-    feature_registry.register(OneBotToolsFeatureController(agent_manager))
-    feature_registry.register(AgentFeatureController(agent_manager))
-    feature_registry.register(AssemblerFeatureController(agent_manager))
-    feature_registry.register(ProviderInvokerFeatureController(agent_manager))
+    register_builtin_controllers(feature_registry, agent_manager)
     container.register_factory(FeatureRegistry, lambda: feature_registry)
     # 插件钩子注册表（模块按 bot 注册）
     send_hook_registry = SendHookRegistry()
@@ -219,6 +203,27 @@ def build_container(settings: Settings | None = None) -> Container:
             services=services, features=feature_registry, resources=resource_registry
         )
 
+    def _sessions(bot_id):
+        """模块侧的会话历史门面：按 bot_id 拿进程级单例（键统一成字符串）。"""
+        from app.agent.session.manager import SessionManager
+
+        return SessionManager(str(bot_id)) if bot_id is not None else None
+
+    def _runtime(bot_id):
+        """模块侧的运行时只读访问（替代 `get_active().get(AgentManager)` 偷容器）。"""
+        if agent_manager is None or bot_id is None:
+            return None
+        return agent_manager.get_runtime(bot_id)
+
+    async def _tools(bot_id, **kwargs):
+        """模块侧的框架工具集视图（(specs, ToolContext)）；延迟 import 避免装配期依赖。"""
+        runtime = _runtime(bot_id)
+        if runtime is None:
+            return [], None
+        from app.agent.tools.catalog import framework_tools
+
+        return await framework_tools(runtime, **kwargs)
+
     services = ServiceAccess(
         cache=cache, config_service=config_service, task_manager=task_manager,
         settings=settings, providers=providers, data_sources=providers, scheduler=scheduler,
@@ -230,6 +235,7 @@ def build_container(settings: Settings | None = None) -> Container:
         features=feature_registry,
         config_profiles=config_profile_service, role_presets=role_preset_service,
         resources=resource_registry, capabilities=_capabilities,
+        sessions=_sessions, runtime=_runtime, tools=_tools,
     )
     container.register_factory(ServiceAccess, lambda: services)
 
@@ -309,7 +315,6 @@ def build_container(settings: Settings | None = None) -> Container:
         ModuleRouterNode,
         NodeRegistry,
         OutboundPipeline,
-        SendNode,
     )
 
     node_registry = NodeRegistry()
@@ -320,11 +325,15 @@ def build_container(settings: Settings | None = None) -> Container:
     node_registry.register(ModuleInvokeNode(logger))
     container.register_factory(NodeRegistry, lambda: node_registry)
 
-    # 出站链：默认仅终端 SendNode（发送前可插节点拦截/改写）
-    outbound_pipeline = OutboundPipeline([SendNode()])
+    # 出站链：终端 SendNode，其余节点来自 NodeRegistry（插件注册即生效，用 provider 现取）
+    outbound_pipeline = OutboundPipeline(provider=node_registry.outbound_nodes)
     gateway.outbound_hook_factory = lambda conn: (
         lambda action, params, timeout=None: outbound_pipeline.run(conn, action, params, timeout)
     )
+    container.register_factory(OutboundPipeline, lambda: outbound_pipeline)
+    # 节点注册表与出站管道回填到 ServiceAccess（它们在本文件更晚才创建，故此处赋值）
+    services.node_registry = node_registry
+    services.outbound = outbound_pipeline
 
     # 事件分发（走节点链）
     dispatcher = ModuleDispatcher(

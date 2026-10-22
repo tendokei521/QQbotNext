@@ -232,6 +232,16 @@ class ServiceAccess:
     event_completed_hooks: Any = None  # 事件处理完成钩子注册表
     features: Any = None            # 全局 FeatureRegistry（能力接管/恢复）
     capabilities: Any = None        # 能力清单（callable() -> dict）：模块自检框架有什么
+    #: 入站/出站节点注册表（NodeRegistry）：模块可注册/替换节点，出站链按它即时生效
+    node_registry: Any = None
+    #: callable(bot_id) -> SessionManager（会话历史读写；按 bot_id 的进程级单例）
+    sessions: Any = None
+    #: callable(bot_id) -> AgentRuntime | None（只读访问运行时，替代"偷容器"）
+    runtime: Any = None
+    #: callable(bot_id, **kw) -> (list[ToolSpec], ToolContext)（框架工具集只读视图）
+    tools: Any = None
+    #: 出站管道（OutboundPipeline）：诊断/自检用
+    outbound: Any = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     def __getitem__(self, key: str) -> Any:

@@ -111,3 +111,42 @@ async def test_outbound_pipeline_rewrite_params():
     pipe = OutboundPipeline([Rewrite(), SendNode()])
     await pipe.run(bot, "send_private_msg", {"user_id": 1, "message": "hi"})
     assert bot.sent == [("send_private_msg", {"user_id": 1, "message": "[改写]hi"})]
+
+
+async def test_outbound_pipeline_reads_registry_live():
+    """生产装配用 provider 现取节点：插件注册出站节点后**下一条消息即刻生效**。
+
+    历史缺陷：生产处是 `OutboundPipeline([SendNode()])` 的字面量快照，
+    `NodeRegistry.register_outbound()` 写了却没人读 —— 插件注册静默无效。
+    """
+    bot = _FakeBot({"status": "ok"})
+
+    class Mark(MessageNode):
+        name = "mark"
+        order = 10
+
+        async def process(self, ctx, next_):
+            ctx.params["message"] = "[拦截]" + ctx.params.get("message", "")
+            await next_()
+
+    registry = NodeRegistry()
+    pipe = OutboundPipeline(provider=registry.outbound_nodes)
+
+    # ① 注册前：纯透传
+    await pipe.run(bot, "send_group_msg", {"group_id": 1, "message": "hi"})
+    assert bot.sent[-1] == ("send_group_msg", {"group_id": 1, "message": "hi"})
+
+    # ② 注册后不重建管道：立刻被拦截改写
+    registry.register_outbound(Mark())
+    await pipe.run(bot, "send_group_msg", {"group_id": 2, "message": "hi"})
+    assert bot.sent[-1] == ("send_group_msg", {"group_id": 2, "message": "[拦截]hi"})
+
+
+async def test_outbound_pipeline_always_has_a_send_terminal():
+    """registry 里没有 SendNode 时也必须补终端，否则整条链等于永远吞消息。"""
+    bot = _FakeBot({"status": "ok"})
+    registry = NodeRegistry()  # 空注册表
+    pipe = OutboundPipeline(provider=registry.outbound_nodes)
+    resp = await pipe.run(bot, "send_group_msg", {"group_id": 1, "message": "hi"})
+    assert resp == {"status": "ok"}
+    assert len(bot.sent) == 1
