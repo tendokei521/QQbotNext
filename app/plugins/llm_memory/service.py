@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 
-def _manager(module: Any):
+def memory_manager(module: Any):
     """惰性构造 MemoryManager（首次用到时才连库，避免加载期 IO）。"""
     mgr = getattr(module, "_manager", None)
     if mgr is None:
@@ -35,7 +35,7 @@ class MemoryProvider:
         self.owner = module
 
     async def collect(self, scope: Any) -> str | None:
-        mgr = _manager(self.module)
+        mgr = memory_manager(self.module)
         if mgr is None or not mgr.enabled():
             return None
         runtime = getattr(scope, "runtime", None)
@@ -65,7 +65,7 @@ class MemoryToolSource:
         self.owner = module
 
     async def collect(self, scope: Any) -> list:
-        mgr = _manager(self.module)
+        mgr = memory_manager(self.module)
         if mgr is None or not mgr.enabled():
             return []
         from app.agent.tools.spec import ToolContext
@@ -99,7 +99,7 @@ class MemoryLifecycle:
         self.module = module
 
     async def on_pre_request(self, ctx: Any) -> None:
-        mgr = _manager(self.module)
+        mgr = memory_manager(self.module)
         if mgr is None or not mgr.enabled():
             return
         event = getattr(ctx, "event", None)
@@ -120,7 +120,7 @@ class MemoryLifecycle:
             )
 
     async def on_turn_completed(self, ctx: Any) -> None:
-        mgr = _manager(self.module)
+        mgr = memory_manager(self.module)
         if mgr is None or not mgr.enabled():
             return
         runtime = getattr(ctx, "runtime", None)

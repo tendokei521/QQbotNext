@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 
-def _manager(module: Any):
+def knowledge_manager(module: Any):
     mgr = getattr(module, "_manager", None)
     if mgr is None:
         from app.plugins.llm_knowledge.manager import KnowledgeManager
@@ -31,7 +31,7 @@ class KnowledgeToolSource:
         self.owner = module
 
     async def collect(self, scope: Any) -> list:
-        mgr = _manager(self.module)
+        mgr = knowledge_manager(self.module)
         if mgr is None or not mgr.enabled():
             return []
         from app.plugins.llm_knowledge.tool import build_knowledge_tools

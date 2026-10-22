@@ -12,6 +12,18 @@ from app.plugins.llm_memory.store import owner_group, owner_private
 from app.agent.tools.spec import ToolSpec
 
 
+def _resolve_memory(runtime: Any):
+    """拿记忆管理器：优先模块挂的 `runtime.memory_service`。
+
+    框架里已经没有 `runtime.memory` 字段（v3 把它搬进本模块），
+    这里保留旧属性读取只是为了兼容测试替身。
+    """
+    service = getattr(runtime, "memory_service", None)
+    if service is not None:
+        return service
+    return getattr(runtime, "memory", None)
+
+
 def _group_id(session_id: str) -> str:
     if str(session_id or "").startswith("group_"):
         return str(session_id)[len("group_"):]
@@ -19,7 +31,7 @@ def _group_id(session_id: str) -> str:
 
 
 async def _handle_save(runtime, session_id, user_id, args) -> str:
-    memory = getattr(runtime, "memory", None)
+    memory = _resolve_memory(runtime)
     if memory is None:
         return "error: 记忆服务不可用"
     content = str(args.get("content") or "").strip()
@@ -54,7 +66,7 @@ async def _handle_save(runtime, session_id, user_id, args) -> str:
 
 
 async def _handle_recall(runtime, session_id, user_id, bot, args) -> str:
-    memory = getattr(runtime, "memory", None)
+    memory = _resolve_memory(runtime)
     if memory is None:
         return "error: 记忆服务不可用"
     query = str(args.get("query") or "").strip()
@@ -72,7 +84,7 @@ async def _handle_recall(runtime, session_id, user_id, bot, args) -> str:
 
 
 async def _handle_delete(runtime, session_id, user_id, args) -> str:
-    memory = getattr(runtime, "memory", None)
+    memory = _resolve_memory(runtime)
     if memory is None:
         return "error: 记忆服务不可用"
     target = str(args.get("id") or args.get("query") or "").strip()
@@ -85,7 +97,7 @@ async def _handle_delete(runtime, session_id, user_id, args) -> str:
 
 
 async def _handle_correct(runtime, session_id, user_id, args) -> str:
-    memory = getattr(runtime, "memory", None)
+    memory = _resolve_memory(runtime)
     if memory is None:
         return "error: 记忆服务不可用"
     old = str(args.get("old") or "").strip()
@@ -99,7 +111,7 @@ async def _handle_correct(runtime, session_id, user_id, args) -> str:
 
 
 async def _handle_deny(runtime, session_id, user_id, args) -> str:
-    memory = getattr(runtime, "memory", None)
+    memory = _resolve_memory(runtime)
     if memory is None:
         return "error: 记忆服务不可用"
     target = str(args.get("id") or args.get("query") or "").strip()

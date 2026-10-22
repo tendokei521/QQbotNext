@@ -48,7 +48,8 @@ async def collect_history_materials(
         history = await maybe_compress_context(chain, config, history, rounds)
 
     memory_text = ""
-    memory = getattr(runtime, "memory", None)
+    # 记忆归 `llm_memory` 模块：它把管理器挂在文档化句柄上（框架已无 memory 字段）
+    memory = getattr(runtime, "memory_service", None)
     if memory is not None and memory.enabled():
         try:
             memory_text = await memory.recall_block_async(

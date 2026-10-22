@@ -36,7 +36,9 @@ async def handle_memory_command(
     action: str,
     send: Callable[[str], Awaitable[None]],
 ) -> bool:
-    memory = getattr(module, "memory", None)
+    # 管理器归模块自己（`module.memory_manager()`）；旧属性读取仅兼容测试替身
+    getter = getattr(module, "memory_manager", None)
+    memory = getter() if callable(getter) else getattr(module, "memory", None)
     if memory is None or not memory.enabled():
         await send("长期记忆未启用（配置 memory_enable=false）")
         return True

@@ -95,6 +95,8 @@ class Module(BaseModule):
         runtime.memory_options = ConfigView(
             getattr(runtime, "config", None), self.config, OWNED_KEYS
         )
+        # 文档化句柄：框架（assembly/inputs.py）与记忆工具都按鸭子类型用它
+        runtime.memory_service = self.memory_manager()
         register_context_provider(runtime, MemoryProvider(self))
         register_tool_source(runtime, MemoryToolSource(self))
         lifecycle = MemoryLifecycle(self)
@@ -123,7 +125,14 @@ class Module(BaseModule):
 
                 logger.debug(f"[llm_memory] 停止记忆管理器失败（已忽略）: {e}")
             self._manager = None
+        runtime.memory_service = None
         runtime.memory_options = None
+
+    def memory_manager(self) -> Any:
+        """本模块的记忆管理器（`#llm memory` 指令、记忆工具共用同一实例）。"""
+        from app.plugins.llm_memory.service import memory_manager
+
+        return memory_manager(self)
 
     def _runtime(self) -> Any:
         services = getattr(getattr(self, "ctx", None), "services", None)

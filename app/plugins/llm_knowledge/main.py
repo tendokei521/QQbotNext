@@ -47,6 +47,8 @@ class Module(BaseModule):
         runtime.knowledge_options = ConfigView(
             getattr(runtime, "config", None), self.config, OWNED_KEYS
         )
+        # 文档化句柄：知识库工具按鸭子类型用它（框架已无 knowledge 字段）
+        runtime.knowledge_service = self.knowledge_manager()
         register_tool_source(runtime, KnowledgeToolSource(self))
 
     async def on_unload(self) -> None:
@@ -57,7 +59,14 @@ class Module(BaseModule):
 
         unregister_owner(runtime, self)
         self._manager = None
+        runtime.knowledge_service = None
         runtime.knowledge_options = None
+
+    def knowledge_manager(self) -> Any:
+        """本模块的知识库管理器（工具与指令共用同一实例）。"""
+        from app.plugins.llm_knowledge.service import knowledge_manager
+
+        return knowledge_manager(self)
 
     def _runtime(self) -> Any:
         services = getattr(getattr(self, "ctx", None), "services", None)

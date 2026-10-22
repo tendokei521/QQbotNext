@@ -8,6 +8,10 @@ from app.agent.tools.spec import ToolSpec
 
 
 def _kb(runtime: Any):
+    """知识库管理器：优先模块挂的 `runtime.knowledge_service`（框架已无 `runtime.knowledge`）。"""
+    service = getattr(runtime, "knowledge_service", None)
+    if service is not None:
+        return service
     return getattr(runtime, "knowledge", None)
 
 
