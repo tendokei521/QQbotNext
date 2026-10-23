@@ -50,7 +50,7 @@ const pages = computed(() =>
  */
 const warnings = computed(() => {
   const list: string[] = []
-  if (!agent.enabled) list.push('Agent 总开关已关闭，不会响应任何消息')
+  if (!agent.enabled) list.push('Agent 已关闭，不会兜底回复消息（模块回复不受影响）')
   if (!agent.poolModelIds.length) list.push('尚未配置 Provider 模型，Agent 无法回复')
   if (agent.draft.tavily_enable && !agent.draft.tavily_api_key) {
     list.push('联网搜索已开启，但未填写 Tavily API Key')

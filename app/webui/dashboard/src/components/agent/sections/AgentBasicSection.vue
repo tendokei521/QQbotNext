@@ -34,7 +34,7 @@ const agent = useAgentConfigStore()
         />
       </v-card-title>
       <v-card-text class="text-body-2" style="opacity: 0.8">
-        关闭后 Agent 不再回复任何消息，定时任务与主动消息同时停止。
+        关闭后不再由 Agent 兜底回复；模块回复与定时、主动消息各自独立启停。
       </v-card-text>
     </v-card>
 

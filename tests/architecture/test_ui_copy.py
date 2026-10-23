@@ -135,3 +135,67 @@ def test_zero_semantics_notation_is_consistent():
             if not m.group(2):
                 bad.append(f"{key}: 0 = 后面没写含义")
     assert not bad, "0 值写法不统一：\n  " + "\n  ".join(bad)
+
+
+# ==================== 前端定制卡片 ====================
+
+
+def _strip_markup(html: str) -> str:
+    """去掉标签与 Vue 插值，只留人读到的那点文字。"""
+    text = re.sub(r"\{\{.*?\}\}", " ", html, flags=re.S)
+    text = re.sub(r"<[^>]+>", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+#: 需要检查的定制卡片（用户直接读到的说明文字）
+CARD_DIR = ROOT / "app" / "webui" / "dashboard" / "src" / "components" / "agent" / "sections"
+
+#: 卡片说明里不该出现的说法（v3 后这些功能已剥离成独立模块）
+STALE_CLAIMS = (
+    "定时任务与主动消息同时停止",
+    "定时任务和主动消息同时停止",
+    "定时任务也会停止",
+    "主动消息也会停止",
+)
+
+
+def _card_texts() -> list[tuple[str, str]]:
+    """抽取卡片里 `v-card-text` 的中文段落。"""
+    out: list[tuple[str, str]] = []
+    if not CARD_DIR.is_dir():
+        return out
+    for path in CARD_DIR.glob("*.vue"):
+        text = path.read_text(encoding="utf-8")
+        for m in re.finditer(r"<v-card-text[^>]*>(.*?)</v-card-text>", text, re.S):
+            body = _strip_markup(m.group(1))
+            if _chinese(body) >= 4:
+                out.append((path.name, body))
+    return out
+
+
+def test_frontend_card_copy_is_compliant():
+    """卡片说明也要短、说人话，且不写跨控件指路。"""
+    bad = []
+    for name, body in _card_texts():
+        if _chinese(body) > MAX_CHINESE:
+            bad.append(f"{name}: {_chinese(body)} 字过长 —— {body[:40]}…")
+        for word in COLLOQUIAL:
+            if word in body:
+                bad.append(f"{name}: 含口语/指路「{word}」")
+        for word in JARGON:
+            if word in body:
+                bad.append(f"{name}: 含内部黑话「{word}」")
+    assert not bad, "卡片文案不合规：\n  " + "\n  ".join(bad)
+
+
+def test_card_copy_has_no_stale_module_claims():
+    """定时任务 / 主动消息是独立模块，不能被描述成"跟着 Agent 一起停"。"""
+    bad = []
+    for name, body in _card_texts():
+        for claim in STALE_CLAIMS:
+            if claim in body:
+                bad.append(f"{name}: 错误联动「{claim}」")
+    assert not bad, (
+        "这些说法与实现不符（定时任务/主动消息已剥离为独立模块，各自启停）：\n  "
+        + "\n  ".join(bad)
+    )
