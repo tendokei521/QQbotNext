@@ -437,14 +437,14 @@ onUnmounted(() => {
   <div class="stats-page">
     <!-- ① 大 KPI 卡 -->
     <div class="hero">
-      <div class="hero-card">
+      <div class="hero-card tip" data-tip="当前筛选范围内所有 LLM 请求的 token 总数（输入 + 输出）">
         <span class="hero-label">累计 Tokens</span>
         <div class="hero-value">
           {{ summary ? fmt(summary.tokens, 'tokens') : '—' }}
           <span class="hero-unit">tokens</span>
         </div>
       </div>
-      <div class="hero-card">
+      <div class="hero-card tip" data-tip="实际上游请求次数（含重试与回退，不含未触发的消息）">
         <span class="hero-label">API 请求次数</span>
         <div class="hero-value">
           {{ summary ? summary.requests : '—' }}
@@ -487,25 +487,25 @@ onUnmounted(() => {
     <!-- ③ 小 KPI 卡 -->
     <div v-if="summary" class="kpis">
       <template v-if="kind === 'llm'">
-        <div class="kpi">
+        <div class="kpi tip" data-tip="送给模型的输入 token（含系统提示、历史、工具结果）">
           <span class="kpi-label">输入 Tokens</span>
           <div class="kpi-value">{{ fmt(summary.input, 'tokens') }}</div>
         </div>
-        <div class="kpi">
+        <div class="kpi tip" data-tip="模型生成的输出 token（含思考 token）">
           <span class="kpi-label">输出 Tokens</span>
           <div class="kpi-value">{{ fmt(summary.output, 'tokens') }}</div>
         </div>
-        <div class="kpi">
+        <div class="kpi tip" data-tip="命中 /（命中 + 未命中）。上游不回报缓存时显示 —">
           <span class="kpi-label">缓存命中率</span>
           <div class="kpi-value">{{ pct(summary.cache_rate) }}</div>
         </div>
       </template>
       <template v-else-if="kind === 'msg_in'">
-        <div class="kpi">
+        <div class="kpi tip" data-tip="该范围内所有收到的群聊/私聊消息条数">
           <span class="kpi-label">收到消息</span>
           <div class="kpi-value">{{ summary.messages }}</div>
         </div>
-        <div class="kpi">
+        <div class="kpi tip" data-tip="其中真正需要回应的：指令 + 模块响应 + LLM 响应">
           <span class="kpi-label">需响应</span>
           <div class="kpi-value">{{ summary.triggered }}</div>
         </div>
@@ -517,7 +517,7 @@ onUnmounted(() => {
         </div>
       </template>
       <template v-else>
-        <div class="kpi">
+        <div class="kpi tip" data-tip="Bot 主动发出的消息条数">
           <span class="kpi-label">发出消息</span>
           <div class="kpi-value">{{ summary.messages }}</div>
         </div>
@@ -538,6 +538,7 @@ onUnmounted(() => {
         <span class="chart-title">{{ chartTitle }}</span>
         <div class="seg">
           <button v-for="opt in breakdownOptions" :key="opt.value"
+                  class="tip" :data-tip="opt.value === 'none' ? '所有调用合计成一根柱' : `按 ${opt.title.replace('按 ', '')} 拆成多段堆叠`"
                   :class="{ on: breakdown === opt.value }" @click="breakdown = opt.value">
             {{ opt.title }}
           </button>
@@ -556,8 +557,8 @@ onUnmounted(() => {
               <span v-for="(_tick, i) in yTicks" :key="i" />
             </div>
             <div class="bars">
-              <div v-for="p in chartPoints" :key="p.bucket" class="bar-slot"
-                   :title="`${p.bucket}: ${fmt(p.value, unit)}`">
+              <div v-for="p in chartPoints" :key="p.bucket" class="bar-slot tip"
+                   :data-tip="`${p.bucket}　${fmt(p.value, unit)}`">
                 <template v-if="breakdown === 'none'">
                   <div v-if="p.value > 0" class="bar single"
                        :style="{ height: `${barHeight(p.value)}px` }" />
@@ -595,8 +596,10 @@ onUnmounted(() => {
       <div class="chart-head">
         <span class="chart-title">用量明细</span>
         <div class="seg">
-          <button :class="{ on: pivot === 'metric' }" @click="pivot = 'metric'">按指标</button>
-          <button :class="{ on: pivot === 'series' }" @click="pivot = 'series'">按维度</button>
+          <button class="tip" data-tip="行=指标（输入/输出/缓存…），列=时间"
+                  :class="{ on: pivot === 'metric' }" @click="pivot = 'metric'">按指标</button>
+          <button class="tip" data-tip="行=拆维序列（模型/模块/会话），列=时间"
+                  :class="{ on: pivot === 'series' }" @click="pivot = 'series'">按维度</button>
         </div>
       </div>
 
@@ -606,9 +609,9 @@ onUnmounted(() => {
         <table class="usage-table">
           <thead>
             <tr>
-              <th class="sticky-col">指标</th>
+              <th class="sticky-col tip" data-tip="每一行是一类用量口径">指标</th>
               <th v-for="b in tableBuckets" :key="b.bucket" class="num">{{ b.bucket }}</th>
-              <th class="num total-col">合计</th>
+              <th class="num total-col tip" data-tip="整段范围的汇总（不受表格空列省略影响）">合计</th>
             </tr>
           </thead>
           <tbody>
@@ -629,7 +632,7 @@ onUnmounted(() => {
             <tr>
               <th class="sticky-col">{{ breakdown === 'none' ? '序列' : breakdown }}</th>
               <th v-for="b in tableBuckets" :key="b.bucket" class="num">{{ b.bucket }}</th>
-              <th class="num total-col">合计</th>
+              <th class="num total-col tip" data-tip="整段范围的汇总（不受表格空列省略影响）">合计</th>
             </tr>
           </thead>
           <tbody>
@@ -683,6 +686,29 @@ onUnmounted(() => {
         color: var(--muted); cursor: pointer; user-select: none; }
 .live input { width: 13px; height: 13px; accent-color: var(--accent); cursor: pointer; }
 .live-time { font-variant-numeric: tabular-nums; opacity: 0.75; }
+
+/* 即时悬浮提示：CSS 自绘，零延迟（原生 title 要等约 1 秒） */
+.tip { position: relative; }
+.tip:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 6px);
+  transform: translateX(-50%);
+  background: rgba(20, 22, 26, 0.94);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+  padding: 5px 9px;
+  border-radius: 6px;
+  white-space: nowrap;
+  z-index: 50;
+  pointer-events: none;
+  opacity: 1;
+  transition: none;          /* ★ 关键：不做淡入，放上去立刻显示 */
+}
+.tip:hover { z-index: 51; }
 .dark-btn { background: #1f2328; color: #fff; border: none; border-radius: 999px;
             padding: 7px 18px; font-size: 12px; cursor: pointer; }
 .dark-btn:hover { background: #33383f; }
