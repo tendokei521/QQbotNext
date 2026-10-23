@@ -92,6 +92,10 @@ def build_container(settings: Settings | None = None) -> Container:
 
     # 数据统计记录器（攒批写入；查询走 /api/stats/*）
     stat_recorder = StatRecorder(db)
+    # 后端主动推送：落库后广播 stats_updated，前端即时重查（不再轮询）
+    from app.webui.stats_notify import notify_stats_updated
+
+    stat_recorder.on_written = notify_stats_updated
     set_recorder(stat_recorder)
     container.register_factory(StatRecorder, lambda: stat_recorder)
 

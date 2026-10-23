@@ -13,6 +13,7 @@
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { http } from '@/api/http'
+import { connectSocket, onSocketMessage } from '@/api/socket'
 
 type Kind = 'llm' | 'msg_in' | 'msg_out'
 type Granularity = 'hour' | 'day' | 'week' | 'month'
@@ -140,10 +141,11 @@ const outcome = ref<string | null>(null)
 
 const loading = ref(false)
 const error = ref('')
-const autoRefresh = ref(true)
+const liveConnected = ref(false)
 const lastUpdated = ref<Date | null>(null)
-const REFRESH_MS = 10_000
-let refreshTimer: number | undefined
+let pushTimer: number | undefined
+let offStats: (() => void) | undefined
+let offOpen: (() => void) | undefined
 const data = ref<QueryResp | null>(null)
 const facets = ref<Record<string, { value: string; events: number }[]>>({})
 
@@ -367,20 +369,34 @@ async function load(opts: { quiet?: boolean } = {}) {
   }
 }
 
-function stopAutoRefresh() {
-  if (refreshTimer !== undefined) {
-    window.clearInterval(refreshTimer)
-    refreshTimer = undefined
+function stopLive() {
+  offStats?.()
+  offOpen?.()
+  offStats = undefined
+  offOpen = undefined
+  if (pushTimer !== undefined) {
+    window.clearTimeout(pushTimer)
+    pushTimer = undefined
   }
+  liveConnected.value = false
 }
 
-function startAutoRefresh() {
-  stopAutoRefresh()
-  if (!autoRefresh.value) return
-  refreshTimer = window.setInterval(() => {
-    // 页面在后台时不打扰（省流量、省服务端），回到前台会立刻补一次
-    if (document.visibilityState === 'visible') load({ quiet: true })
-  }, REFRESH_MS)
+/** 订阅后端推送：一批落库可能连着推几条，去抖 400ms 只查一次。 */
+function startLive() {
+  stopLive()
+  offOpen = onSocketMessage('socket_open', () => {
+    liveConnected.value = true
+    load({ quiet: true })          // 断线重连后补一次
+  })
+  offStats = onSocketMessage('stats_updated', () => {
+    if (document.visibilityState !== 'visible') return
+    if (pushTimer !== undefined) window.clearTimeout(pushTimer)
+    pushTimer = window.setTimeout(() => {
+      pushTimer = undefined
+      load({ quiet: true })
+    }, 400)
+  })
+  connectSocket()
 }
 
 /** 更新于 HH:MM:SS */
@@ -418,17 +434,15 @@ function onVisibilityChange() {
   if (document.visibilityState === 'visible') load({ quiet: true })
 }
 
-watch(autoRefresh, (on) => (on ? startAutoRefresh() : stopAutoRefresh()))
-
 onMounted(() => {
   loadFacets()
   load()
-  startAutoRefresh()
+  startLive()
   document.addEventListener('visibilitychange', onVisibilityChange)
 })
 
 onUnmounted(() => {
-  stopAutoRefresh()
+  stopLive()
   document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 </script>
@@ -474,11 +488,12 @@ onUnmounted(() => {
                 class="pill" style="max-width: 140px" placeholder="全部" />
       <button class="link-btn" @click="clearFilters">清除筛选条件</button>
       <v-spacer />
-      <label class="live">
-        <input v-model="autoRefresh" type="checkbox" />
-        <span>自动刷新</span>
-        <span v-if="autoRefresh && updatedAt" class="live-time">{{ updatedAt }}</span>
-      </label>
+      <span class="live" :title="liveConnected ? '已连接，数据变化会自动推送' : '未连接（会自动重连）'">
+        <i class="dot" :class="{ on: liveConnected }" />
+        <span>{{ liveConnected ? '实时' : '重连中' }}</span>
+        <span v-if="updatedAt" class="live-time">{{ updatedAt }}</span>
+      </span>
+      <button class="link-btn" @click="load()">刷新</button>
       <button class="dark-btn" @click="exportCsv">导出</button>
     </div>
 
@@ -683,8 +698,9 @@ onUnmounted(() => {
             cursor: pointer; padding: 4px 6px; }
 .link-btn:hover { color: rgb(var(--v-theme-primary)); text-decoration: underline; }
 .live { display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
-        color: var(--muted); cursor: pointer; user-select: none; }
-.live input { width: 13px; height: 13px; accent-color: var(--accent); cursor: pointer; }
+        color: var(--muted); user-select: none; }
+.live .dot { width: 7px; height: 7px; border-radius: 50%; background: #c9ced6; display: inline-block; }
+.live .dot.on { background: #22c55e; box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.15); }
 .live-time { font-variant-numeric: tabular-nums; opacity: 0.75; }
 
 /* 即时悬浮提示：CSS 自绘，零延迟（原生 title 要等约 1 秒） */

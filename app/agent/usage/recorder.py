@@ -25,8 +25,8 @@ from app.core.logger import logger
 
 #: 攒到多少条就落库
 FLUSH_MAX_ROWS = 20
-#: 距上次落库超过多少秒就落库
-FLUSH_INTERVAL_SECONDS = 2.0
+#: 距上次落库超过多少秒就落库（1 秒：配合后端推送，让页面接近实时）
+FLUSH_INTERVAL_SECONDS = 1.0
 
 #: 可写入的列（顺序即 INSERT 的列顺序）
 COLUMNS: tuple[str, ...] = (
@@ -130,6 +130,8 @@ class StatRecorder:
         self._lock = asyncio.Lock()
         self._task: asyncio.Task | None = None
         self._closed = False
+        #: 落库成功后的回调（bootstrap 装配成"推送 stats_updated"）；可为 None
+        self.on_written: Any = None
         #: 落库计数（测试与诊断用）
         self.written = 0
         #: 丢弃计数（写失败时不清缓冲，只记数）
@@ -251,6 +253,12 @@ class StatRecorder:
                 return 0
             self.written += len(batch)
             self._last_flush = time.monotonic()
+            # 通知订阅者（WebUI 后端推送）；回调失败不影响记账
+            if self.on_written is not None:
+                try:
+                    self.on_written(len(batch))
+                except Exception as e:  # noqa: BLE001 —— 推送是旁路
+                    logger.debug(f"[Stats] on_written 回调失败（已忽略）: {e}")
             return len(batch)
 
     async def start(self, task_manager: Any = None) -> None:
