@@ -5,6 +5,9 @@ import { onSocketMessage } from '@/api/socket'
 
 export type BotStatus = 'connected' | 'disconnected' | 'connecting' | 'reconnecting' | 'error'
 
+/** 连接方向：forward = 正向 WS（框架连出）/ reverse = 反向 WS（框架监听，OneBot 实现连入） */
+export type BotConnMode = 'forward' | 'reverse'
+
 /** 账号身份信息：登录返回的 login_info 与「上次登录账号」快照同构 */
 export interface BotAccount {
   user_id?: number | string | null
@@ -21,6 +24,9 @@ export interface BotData {
   access_token?: string
   owner_id?: number | null
   auto_connect?: boolean
+  conn_mode?: BotConnMode
+  /** 反向模式：监听是否就绪（用在等对端接入的过渡态） */
+  listening?: boolean
   login_info?: BotAccount | null
   /** 上一次成功登录的账号快照（后端落盘）：断开后用于回退展示 */
   last_account?: BotAccount | null
@@ -36,6 +42,7 @@ export interface BotConfig {
   access_token: string
   owner_id: number | null
   auto_connect: boolean
+  conn_mode: BotConnMode
 }
 
 const CURRENT_BOT_KEY = 'qqbot_current_bot_index'

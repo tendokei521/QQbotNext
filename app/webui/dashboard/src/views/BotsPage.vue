@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, reactive, ref } from 'vue'
-import { useBotsStore, resolveAccount, resolvedBotId, type BotConfig, type BotStatus } from '@/stores/bots'
+import { useBotsStore, resolveAccount, resolvedBotId, type BotConfig, type BotConnMode, type BotStatus } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
@@ -19,8 +19,22 @@ const STATUS_TEXT: Record<BotStatus, string> = {
 const statusColor = (s: BotStatus) =>
   s === 'connected' ? 'success' : s === 'connecting' || s === 'reconnecting' ? 'warning' : 'error'
 
+/** 连接方向选项：正向 = 框架连出去；反向 = 框架监听、OneBot 实现连进来 */
+const MODE_ITEMS: { title: string; value: BotConnMode }[] = [
+  { title: '正向 WebSocket（连出去）', value: 'forward' },
+  { title: '反向 WebSocket（本机监听）', value: 'reverse' },
+]
+
+interface Draft {
+  ws_url: string
+  access_token: string
+  owner_id: string
+  auto_connect: boolean
+  conn_mode: BotConnMode
+}
+
 // 编辑草稿：index -> 表单字段
-const drafts = reactive<Record<number, { ws_url: string; access_token: string; owner_id: string; auto_connect: boolean }>>({})
+const drafts = reactive<Record<number, Draft>>({})
 const saving = ref(false)
 const loadingCards = ref(false)
 const deleteTarget = ref<number | null>(null)
@@ -29,9 +43,20 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null
 
 function draftOf(index: number) {
   if (!drafts[index]) {
-    drafts[index] = { ws_url: '', access_token: '', owner_id: '', auto_connect: false }
+    drafts[index] = { ws_url: '', access_token: '', owner_id: '', auto_connect: false, conn_mode: 'forward' }
   }
   return drafts[index]
+}
+
+/** 反向账号的状态文案：监听就绪但还没对端接入时叫「监听中」，别让人以为连错了 */
+function statusText(b: { status: BotStatus; conn_mode?: BotConnMode; listening?: boolean }) {
+  if (b.conn_mode === 'reverse' && b.status !== 'connected' && b.listening) return '监听中…'
+  return STATUS_TEXT[b.status] ?? b.status
+}
+
+/** 草稿里的连接方向（改完立即影响按钮文案，不必等保存/重连） */
+function isReverseDraft(index: number): boolean {
+  return draftOf(index).conn_mode === 'reverse'
 }
 
 async function loadCards() {
@@ -49,6 +74,7 @@ async function loadCards() {
         access_token: cfg.access_token ?? '',
         owner_id: cfg.owner_id !== undefined && cfg.owner_id !== null ? String(cfg.owner_id) : (b?.owner_id !== undefined && b.owner_id !== null ? String(b.owner_id) : ''),
         auto_connect: cfg.auto_connect ?? b?.auto_connect ?? false,
+        conn_mode: (cfg.conn_mode ?? b?.conn_mode ?? 'forward') === 'reverse' ? 'reverse' : 'forward',
       }
     })
     // 清理已删除/失效的草稿，避免残留旧索引被再次全量保存而“复活”账号
@@ -73,6 +99,7 @@ function buildPayload(): BotConfig[] {
       // 非法数字不静默存 NaN：统一按 null 处理
       owner_id: owner !== null && Number.isInteger(owner) && owner >= 0 ? owner : null,
       auto_connect: d.auto_connect,
+      conn_mode: d.conn_mode,
     }
   })
 }
@@ -209,7 +236,10 @@ onUnmounted(() => {
             </v-card-title>
             <v-card-subtitle class="d-flex align-center gap-2">
               <v-chip size="x-small" :color="statusColor(b.status)" variant="tonal">
-                <v-icon start size="x-small" icon="mdi-circle" /> {{ STATUS_TEXT[b.status] }}
+                <v-icon start size="x-small" icon="mdi-circle" /> {{ statusText(b) }}
+              </v-chip>
+              <v-chip v-if="draftOf(b.index).conn_mode === 'reverse'" size="x-small" variant="outlined">
+                反向
               </v-chip>
               <span v-if="resolveAccount(b)?.nickname" class="text-caption app-line-clamp-1">
                 {{ resolveAccount(b)!.nickname }}<template v-if="Number(resolveAccount(b)!.user_id) > 0"> ({{ resolveAccount(b)!.user_id }})</template>
@@ -221,12 +251,23 @@ onUnmounted(() => {
           </v-card-item>
 
           <v-card-text>
-            <v-text-field
-              :model-value="draftOf(b.index).ws_url"
-              label="WebSocket 地址"
-              placeholder="ws://…"
+            <v-select
+              :model-value="draftOf(b.index).conn_mode"
+              :items="MODE_ITEMS"
+              label="连接方式"
               density="comfortable"
               hide-details
+              class="mb-3"
+              @update:model-value="(v: BotConnMode) => { draftOf(b.index).conn_mode = v === 'reverse' ? 'reverse' : 'forward'; scheduleSave() }"
+            />
+            <v-text-field
+              :model-value="draftOf(b.index).ws_url"
+              :label="draftOf(b.index).conn_mode === 'reverse' ? '反向监听地址' : 'WebSocket 地址'"
+              :placeholder="draftOf(b.index).conn_mode === 'reverse' ? 'ws://0.0.0.0:3001/onebot/v11/ws' : 'ws://127.0.0.1:3001/'"
+              :hint="draftOf(b.index).conn_mode === 'reverse' ? '在 OneBot 实现里把反向 WebSocket 指向这个地址' : ''"
+              :persistent-hint="draftOf(b.index).conn_mode === 'reverse'"
+              density="comfortable"
+              hide-details="auto"
               class="mb-3"
               @update:model-value="(v: string) => { draftOf(b.index).ws_url = v }"
               @blur="scheduleSave()"
@@ -275,6 +316,10 @@ onUnmounted(() => {
                 <div class="info-label">索引</div>
                 <div class="info-value">#{{ b.index }}</div>
               </div>
+              <div v-if="draftOf(b.index).conn_mode === 'reverse'">
+                <div class="info-label">监听</div>
+                <div class="info-value">{{ b.listening ? '监听中' : '未监听' }}</div>
+              </div>
               <div v-if="b.reconnect_attempts !== undefined">
                 <div class="info-label">重连次数</div>
                 <div class="info-value">{{ b.reconnect_attempts }}</div>
@@ -286,9 +331,9 @@ onUnmounted(() => {
           </v-card-text>
 
           <v-card-actions>
-            <v-btn color="success" variant="tonal" size="small" prepend-icon="mdi-plug" :loading="acting[b.index]" :disabled="b.status === 'connected' || acting[b.index]" @click="act(b.index, 'connect')">连接</v-btn>
-            <v-btn color="error" variant="tonal" size="small" prepend-icon="mdi-unlink" :disabled="b.status !== 'connected' || acting[b.index]" @click="act(b.index, 'disconnect')">断开</v-btn>
-            <v-btn color="warning" variant="tonal" size="small" prepend-icon="mdi-restart" :disabled="acting[b.index]" @click="act(b.index, 'reconnect')">重连</v-btn>
+            <v-btn color="success" variant="tonal" size="small" prepend-icon="mdi-plug" :loading="acting[b.index]" :disabled="acting[b.index] || b.status === 'connected' || (isReverseDraft(b.index) && !!b.listening)" @click="act(b.index, 'connect')">{{ isReverseDraft(b.index) ? '开始监听' : '连接' }}</v-btn>
+            <v-btn color="error" variant="tonal" size="small" prepend-icon="mdi-unlink" :disabled="acting[b.index] || (b.status !== 'connected' && !(isReverseDraft(b.index) && b.listening))" @click="act(b.index, 'disconnect')">{{ isReverseDraft(b.index) ? '停止监听' : '断开' }}</v-btn>
+            <v-btn color="warning" variant="tonal" size="small" prepend-icon="mdi-restart" :disabled="acting[b.index]" @click="act(b.index, 'reconnect')">{{ isReverseDraft(b.index) ? '重启监听' : '重连' }}</v-btn>
           </v-card-actions>
         </v-card>
       </v-col>
