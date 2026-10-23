@@ -73,6 +73,8 @@ class Module(BaseModule):
         register_tool_source(runtime, OneBotToolSource(self))
         # MCP 需要连接状态：管理器由模块自己持有（框架不再有 mcp_manager 字段）
         self._mcp = MCPManager(runtime)
+        # 文档化句柄：WebUI「MCP Tools」页按鸭子类型读它
+        runtime.mcp_service = self._mcp
         register_tool_source(runtime, MCPToolSource(self))
 
     async def on_unload(self) -> None:
@@ -91,6 +93,7 @@ class Module(BaseModule):
 
                 logger.debug(f"[llm_tools_extra] 关闭 MCP 失败（已忽略）: {e}")
             self._mcp = None
+        runtime.mcp_service = None
         runtime.tools_options = None
 
     def _runtime(self) -> Any:

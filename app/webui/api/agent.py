@@ -178,6 +178,28 @@ async def agent_telemetry_reset(request: Request, bot_id: int | None = Depends(p
     return _ok(f"Bot {bot_id} LLM 遥测已重置", **result)
 
 
+# ==================== 服务句柄（v3：业务实现归模块，框架只持句柄）====================
+
+def _service(runtime, name: str):
+    """读模块挂载的服务句柄；未装模块/未就绪时返回 None（调用方负责降级）。"""
+    return getattr(runtime, name, None) if runtime is not None else None
+
+
+def _missing(service_label: str):
+    """统一的服务缺失响应（200 + 空数据，避免前端 500 弹错）。"""
+    return JSONResponse(
+        content={
+            "ok": True,
+            "available": False,
+            "message": f"{service_label}未启用（请安装并启用对应功能模块）",
+            "tools": [],
+            "items": [],
+            "tasks": [],
+            "sessions": [],
+        }
+    )
+
+
 # ==================== 知识库管理 ====================
 
 @router.get("/knowledge/items")
@@ -185,8 +207,11 @@ async def agent_knowledge_items(request: Request, bot_id: int | None = Depends(p
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+    kb = _service(runtime, "knowledge_service")
+    if kb is None:
+        return _missing("知识库")
     try:
-        items = runtime.knowledge.list(limit=max(1, min(limit, 500)))
+        items = kb.list(limit=max(1, min(limit, 500)))
     except Exception as e:
         return _err(500, f"读取知识库失败: {e}")
     return JSONResponse(content={"ok": True, "items": items})
@@ -206,7 +231,10 @@ async def agent_knowledge_add(request: Request, bot_id: int | None = Depends(par
     source = str((body or {}).get("source", "manual") or "manual").strip()
     if not content:
         return _err(400, "内容不能为空")
-    cid, message = await runtime.knowledge.add_text(content, title=title, source=source)
+    kb = _service(runtime, "knowledge_service")
+    if kb is None:
+        return _err(400, "知识库未启用（请安装并启用「知识库」模块）")
+    cid, message = await kb.add_text(content, title=title, source=source)
     if cid is None:
         return _err(400, message)
     return _ok("知识库条目已添加", cid=cid)
@@ -217,8 +245,11 @@ async def agent_knowledge_delete(cid: str, request: Request, bot_id: int | None 
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+    kb = _service(runtime, "knowledge_service")
+    if kb is None:
+        return _err(400, "知识库未启用（请安装并启用「知识库」模块）")
     try:
-        ok = runtime.knowledge.delete(cid)
+        ok = kb.delete(cid)
     except Exception as e:
         return _err(500, f"删除知识库失败: {e}")
     if not ok:
@@ -267,7 +298,9 @@ async def agent_module_tools(request: Request, bot_id: int | None = Depends(pars
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
     module_map = runtime.config.get("module_tools_enabled", {}) or {}
     tools = []
-    for spec in runtime.llm_tools.all_specs():
+    registry = getattr(runtime, "llm_tools", None)
+    specs = registry.all_specs() if registry is not None else []
+    for spec in specs:
         module = spec.module
         ready = True
         module_name = getattr(module, "module_name", "模块")
@@ -310,10 +343,23 @@ async def agent_mcp_tools(request: Request, bot_id: int | None = Depends(parse_b
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
-    await runtime.mcp_manager.ensure_ready()
+    mcp = _service(runtime, "mcp_service")
+    if mcp is None:
+        return _missing("MCP 工具")
+    try:
+        await mcp.ensure_ready()
+    except Exception as e:  # noqa: BLE001 —— MCP 连不上不该让页面 500
+        return JSONResponse(
+            content={
+                "ok": True,
+                "available": False,
+                "message": f"MCP 服务不可用: {e}",
+                "tools": [],
+            }
+        )
     mcp_map = runtime.config.get("mcp_tools_enabled", {}) or {}
     tools = []
-    for spec in runtime.mcp_manager.build_tools():
+    for spec in mcp.build_tools():
         user_enabled = mcp_map.get(spec.name, True) if isinstance(mcp_map, dict) else True
         tools.append({
             "name": spec.name,
@@ -340,7 +386,10 @@ async def agent_tasks(request: Request, bot_id: int | None = Depends(parse_bot_i
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
-    return JSONResponse(content={"ok": True, "tasks": runtime.scheduler.status()})
+    scheduler = _service(runtime, "scheduler")
+    if scheduler is None:
+        return _missing("定时任务")
+    return JSONResponse(content={"ok": True, "available": True, "tasks": scheduler.status()})
 
 
 @router.post("/tasks")
@@ -348,8 +397,9 @@ async def agent_task_add(request: Request, bot_id: int | None = Depends(parse_bo
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
-    if not runtime.config.get("schedule_enable", True):
-        return _err(400, "定时任务未启用，请在配置中开启")
+    scheduler = _service(runtime, "scheduler")
+    if scheduler is None:
+        return _err(400, "定时任务未启用（请安装并启用「定时任务」模块）")
     try:
         data = await request.json()
     except Exception:
@@ -363,7 +413,7 @@ async def agent_task_add(request: Request, bot_id: int | None = Depends(parse_bo
     if not target:
         return _err(400, "缺少 target（群号或QQ号）")
     session_id = f"group_{target}" if is_group else f"private_{target}"
-    entry = await runtime.scheduler.schedule(session_id, {
+    entry = await scheduler.schedule(session_id, {
         "trigger": trigger,
         "content": content,
         "repeat": (data or {}).get("repeat", "") or "",
@@ -383,7 +433,10 @@ async def agent_task_trigger(task_id: str, request: Request, bot_id: int | None 
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
-    ok = await runtime.scheduler.trigger_now(task_id)
+    scheduler = _service(runtime, "scheduler")
+    if scheduler is None:
+        return _err(400, "定时任务未启用（请安装并启用「定时任务」模块）")
+    ok = await scheduler.trigger_now(task_id)
     if not ok:
         return _err(400, f"任务 {task_id} 不存在或已结束")
     return _ok(f"已立即触发任务 {task_id}")
@@ -394,7 +447,10 @@ async def agent_task_cancel(task_id: str, request: Request, bot_id: int | None =
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
-    ok = runtime.scheduler.cancel(task_id)
+    scheduler = _service(runtime, "scheduler")
+    if scheduler is None:
+        return _err(400, "定时任务未启用（请安装并启用「定时任务」模块）")
+    ok = scheduler.cancel(task_id)
     if not ok:
         return _err(400, f"任务 {task_id} 不存在")
     return _ok(f"已取消任务 {task_id}")
@@ -407,7 +463,10 @@ async def agent_proactive_status(request: Request, bot_id: int | None = Depends(
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
-    return JSONResponse(content={"ok": True, "sessions": runtime.proactive.status()})
+    proactive = _service(runtime, "proactive_service")
+    if proactive is None:
+        return _missing("主动消息")
+    return JSONResponse(content={"ok": True, "available": True, "sessions": proactive.status()})
 
 
 @router.post("/proactive/trigger")
@@ -422,7 +481,10 @@ async def agent_proactive_trigger(request: Request, bot_id: int | None = Depends
     session_id = (data or {}).get("session_id", "")
     if not session_id:
         return _err(400, "缺少 session_id")
-    ok = await runtime.proactive.manual_trigger(session_id)
+    proactive = _service(runtime, "proactive_service")
+    if proactive is None:
+        return _err(400, "主动消息未启用（请安装并启用「主动消息」模块）")
+    ok = await proactive.manual_trigger(session_id)
     if not ok:
         return _err(400, f"会话 {session_id} 未启用或不在主动列表")
     return _ok(f"已触发 {session_id} 主动发言")

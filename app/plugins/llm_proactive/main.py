@@ -94,6 +94,8 @@ class Module(BaseModule):
             getattr(runtime, "config", None), self.config, OWNED_KEYS
         )
         self._manager = build_manager(self)
+        # 文档化句柄：WebUI「主动消息」状态页按鸭子类型读它（不再塞 runtime.proactive）
+        runtime.proactive_service = self._manager
         # **订阅**框架广播的两个事实（框架不认识"主动消息"）：
         runtime.llm_hooks.register(
             stage="message_observed", event_type="*", order=80,
@@ -150,6 +152,7 @@ class Module(BaseModule):
             self._manager = None
         if runtime is None:
             return
+        runtime.proactive_service = None
         runtime.proactive_options = None
 
     def _runtime(self) -> Any:
