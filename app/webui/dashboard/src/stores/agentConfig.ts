@@ -15,6 +15,19 @@ export interface StreamPreset {
 /** 自动保存去抖时长（毫秒） */
 const AUTOSAVE_DEBOUNCE_MS = 2000
 
+/** 模块拥有的配置键 → 归属模块名。与后端 `MODULE_KEYS` 对应，
+ * 仅用于把保存请求分流到对应模块的配置接口。 */
+const MODULE_OWNED_FIELDS: Record<string, string> = {
+  onebot_tools_enable: 'llm_tools_extra',
+  onebot_tools_allowed: 'llm_tools_extra',
+  onebot_tools_denied: 'llm_tools_extra',
+  onebot_tool_overrides: 'llm_tools_extra',
+  onebot_tools_max_result: 'llm_tools_extra',
+  onebot_tools_debug: 'llm_tools_extra',
+  tool_result_directive_enable: 'llm_tools_extra',
+  tool_result_directive: 'llm_tools_extra',
+}
+
 export const useAgentConfigStore = defineStore('agentConfig', {
   state: () => ({
     botId: null as number | null,
@@ -179,9 +192,28 @@ export const useAgentConfigStore = defineStore('agentConfig', {
       this.pendingBotId = null
       this.saveStatus = 'saving'
       try {
+        // 拆分：模块拥有的键走模块配置，其余走 agent 配置（写读必须同一个抽屉）
+        const moduleBuckets: Record<string, Record<string, unknown>> = {}
+        const agentDraft: Record<string, unknown> = {}
+        for (const [key, value] of Object.entries(this.draft)) {
+          const owner = MODULE_OWNED_FIELDS[key]
+          if (owner) {
+            moduleBuckets[owner] = moduleBuckets[owner] || {}
+            moduleBuckets[owner][key] = value
+          } else {
+            agentDraft[key] = value
+          }
+        }
+        for (const [owner, config] of Object.entries(moduleBuckets)) {
+          await http.post(
+            `/api/module/${owner}/config`,
+            { config },
+            { params: { bot_id: targetBotId } },
+          )
+        }
         await http.post(
           '/api/agent/config',
-          { config: { ...this.draft }, permission: this.permission, enabled: this.enabled },
+          { config: agentDraft, permission: this.permission, enabled: this.enabled },
           { params: { bot_id: targetBotId } },
         )
         // 保存期间用户又改了：保持 dirty，等下一轮

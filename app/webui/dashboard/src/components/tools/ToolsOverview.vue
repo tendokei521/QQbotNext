@@ -153,6 +153,16 @@ onMounted(load)
               </span>
               <span v-else class="state-off">
                 <v-icon icon="mdi-minus-circle-outline" size="14" class="mr-1" />{{ tool.reason_text }}
+                <v-chip
+                  v-if="tool.reason === 'module_disabled'"
+                  size="x-small"
+                  variant="text"
+                  color="primary"
+                  class="ml-2"
+                  to="/modules"
+                >
+                  去模块页启用
+                </v-chip>
               </span>
             </td>
             <td class="text-right">
