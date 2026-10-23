@@ -25,14 +25,14 @@ SCHEMA = {
     "keyword_emoji_list": {
         "type": "string_list",
         "label": "关键词Emoji列表",
-        "description": "每行一个，格式：关键词:emoji_id，例如 哈哈哈:123",
+        "description": "每行一条，格式 `关键词:表情ID`，例如 `哈哈哈:123`。",
         "default": [],
         "placeholder": "关键词:emoji_id",
     },
     "keyword_symbol_clean": {
         "type": "boolean",
         "label": "符号清洗",
-        "description": "开启后判断关键词前先移除消息中的标点、符号与空白，用于命中带符号分隔的关键词（如“哈-哈-哈”可命中“哈哈哈”）",
+        "description": "匹配前忽略标点与空白，`哈-哈-哈` 也能命中关键词。",
         "default": False,
     },
     "keyword_follow_prob": {

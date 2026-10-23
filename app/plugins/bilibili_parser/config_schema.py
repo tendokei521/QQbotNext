@@ -118,7 +118,7 @@ SCHEMA = {
     "video_cache_enabled": {
         "type": "boolean",
         "label": "复用本地视频缓存",
-        "description": "同一视频只下载一次；缓存目录 module/data/bilibili_parser/video_cache",
+        "description": "同一视频只下载一次，避免重复拉流。",
         "default": True,
         "showIf": {"key": "enable_video_download", "value": True},
     },

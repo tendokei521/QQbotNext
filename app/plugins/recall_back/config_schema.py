@@ -56,7 +56,7 @@ SCHEMA = {
     "db_enable": {
         "type": "boolean",
         "label": "启用持久化缓存",
-        "description": "撤回消息落盘保存（module/data/notice_recall_back/），重启后仍可恢复",
+        "description": "撤回的消息落盘保存，重启后仍可恢复。",
         "default": True,
     },
     "db_max_messages": {

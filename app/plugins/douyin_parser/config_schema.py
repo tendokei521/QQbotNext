@@ -50,7 +50,7 @@ SCHEMA = {
     "user_agent": {
         "type": "string",
         "label": "User-Agent（高级）",
-        "description": "留空则沿用 curl_cffi 指纹自带的 UA；填 Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 可逐字复刻上游环境",
+        "description": "留空使用内置标识；填写则覆盖请求标识。",
         "default": "",
     },
     "group_mode": {
@@ -146,7 +146,7 @@ SCHEMA = {
     "video_cache_enabled": {
         "type": "boolean",
         "label": "复用本地缓存",
-        "description": "同一作品只下载一次；缓存目录 module/data/douyin_parser/media_cache",
+        "description": "同一作品只下载一次，避免重复拉取。",
         "default": True,
         "showIf": {"key": "use_forward_msg", "value": True},
     },

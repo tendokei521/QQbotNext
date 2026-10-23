@@ -19,6 +19,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMA = ROOT / "app" / "agent" / "config_schema.py"
+MODULE_SCHEMAS = ROOT / "app" / "plugins"
 
 #: 说明长度上限（汉字数）
 MAX_CHINESE = 40
@@ -67,6 +68,44 @@ def _chinese(text: str) -> int:
     return len(re.findall(r"[\u4e00-\u9fff]", text))
 
 
+def _module_descriptions() -> list[tuple[str, str]]:
+    """模块配置页渲染的是模块自己那份 schema（`app/plugins/*/config_schema.py`）。"""
+    out: list[tuple[str, str]] = []
+    for path in sorted(MODULE_SCHEMAS.glob("*/config_schema.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Dict):
+                continue
+            for key, value in zip(node.keys, node.values):
+                if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+                    continue
+                if not isinstance(value, ast.Dict):
+                    continue
+                for k, v in zip(value.keys, value.values):
+                    if (
+                        isinstance(k, ast.Constant)
+                        and k.value == "description"
+                        and isinstance(v, ast.Constant)
+                        and isinstance(v.value, str)
+                    ):
+                        out.append((f"{path.parent.name}.{key.value}", v.value))
+    return out
+
+
+def _all_descriptions() -> list[tuple[str, str]]:
+    return _descriptions() + _module_descriptions()
+
+
+def _snake_hits(text: str) -> list[str]:
+    """只禁"正文里蹦出来的标识符"；`反引号` 与 {{占位符}} 属用户语法。"""
+    cleaned = re.sub(r"`[^`]*`", " ", text)
+    cleaned = re.sub(r"\{\{.*?\}\}", " ", cleaned)
+    return _SNAKE.findall(cleaned)
+
+
 def _descriptions() -> list[tuple[str, str]]:
     tree = ast.parse(SCHEMA.read_text(encoding="utf-8"))
     out: list[tuple[str, str]] = []
@@ -91,14 +130,16 @@ def _descriptions() -> list[tuple[str, str]]:
 
 def test_descriptions_are_short_enough():
     too_long = [
-        f"{key}（{_chinese(desc)} 字）" for key, desc in _descriptions() if _chinese(desc) > MAX_CHINESE
+        f"{key}（{_chinese(desc)} 字）"
+        for key, desc in _all_descriptions()
+        if _chinese(desc) > MAX_CHINESE
     ]
     assert not too_long, "这些说明超过 40 汉字，请精简：\n  " + "\n  ".join(too_long)
 
 
 def test_descriptions_have_no_internal_jargon():
     bad = []
-    for key, desc in _descriptions():
+    for key, desc in _all_descriptions():
         for word in JARGON:
             if word in desc:
                 bad.append(f"{key}: 含「{word}」")
@@ -107,8 +148,8 @@ def test_descriptions_have_no_internal_jargon():
 
 def test_descriptions_have_no_bare_identifiers():
     bad = []
-    for key, desc in _descriptions():
-        hits = _SNAKE.findall(desc)
+    for key, desc in _all_descriptions():
+        hits = _snake_hits(desc)
         if hits:
             bad.append(f"{key}: 裸变量名 {sorted(set(hits))}")
     assert not bad, "说明里出现了变量名/协议字段：\n  " + "\n  ".join(bad)
@@ -116,7 +157,7 @@ def test_descriptions_have_no_bare_identifiers():
 
 def test_descriptions_have_no_colloquial_phrases():
     bad = []
-    for key, desc in _descriptions():
+    for key, desc in _all_descriptions():
         for word in COLLOQUIAL:
             if word in desc:
                 bad.append(f"{key}: 含口语/指路「{word}」")
@@ -126,7 +167,7 @@ def test_descriptions_have_no_colloquial_phrases():
 def test_zero_semantics_notation_is_consistent():
     """`0` 的含义必须显式写出，且写法统一为 `0 = X`（允许「0–23 时」这类数值区间）。"""
     bad = []
-    for key, desc in _descriptions():
+    for key, desc in _all_descriptions():
         if "0=" in desc:
             bad.append(f"{key}: 写成 0= ，应为 0 = ")
             continue

@@ -10,12 +10,12 @@ SCHEMA: dict = {
     "persona_preset_id": {
         "type": "resource", "resource": "role_preset",
         "label": "角色预设（可选）",
-        "description": "下拉直接选系统里的角色预设；留空则用 Agent 配置里的系统提示词。改预设名/提示词即时生效，不用重新“应用”",
+        "description": "选系统角色预设；留空则用 Agent 页的系统提示词。",
         "default": "",
     },
     "persona_begin_dialogs": {
         "type": "boolean", "label": "把预设对话前插到历史最前",
-        "description": "对齐 AstrBot persona._begin_dialogs_processed（astr_main_agent.py:536）",
+        "description": "角色预设的开场白，按顺序注入。",
         "default": True,
     },
     # ── system prompt 各段（顺序即 AstrBot 的拼接顺序） ─────
@@ -31,18 +31,18 @@ SCHEMA: dict = {
     },
     "tool_call_prompt_mode": {
         "type": "select", "label": "工具调用段",
-        "description": "仅本轮挂了工具时注入；full/skills_like 分别是 AstrBot 的两份原文常量",
+        "description": "只在挂载工具时注入；可选完整版或精简版。",
         "default": "full",
         "options": {"full": "完整版（full）", "skills_like": "skills-like 版", "off": "不注入"},
     },
     "router_system_prompt": {
         "type": "string", "label": "Subagent router 段（可选）",
-        "description": "对齐 AstrBot subagent_orchestrator.router_system_prompt（astr_main_agent.py:656）",
+        "description": "子任务分派时使用的系统提示词。",
         "default": "",
     },
     "extra_prompt_text": {
         "type": "textarea", "label": "Workspace Extra Prompt（可选）",
-        "description": "对齐 AstrBot 的 EXTRA_PROMPT.md 段；本框架无 workspace，直接把文本填这里",
+        "description": "追加在工作区说明之后的补充提示，直接写正文即可。",
         "default": "",
     },
     "extra_prompt_path": {
@@ -52,7 +52,7 @@ SCHEMA: dict = {
     },
     "local_mode_prompt": {
         "type": "textarea", "label": "local/沙箱模式段（可选）",
-        "description": "对齐 AstrBot computer_use_runtime=local 时追加的段；本框架默认留空",
+        "description": "本地执行模式追加的说明，默认留空。",
         "default": "",
     },
     "live_mode": {
@@ -62,38 +62,38 @@ SCHEMA: dict = {
     },
     "web_search_citation_prompt": {
         "type": "textarea", "label": "联网引用段（可选）",
-        "description": "对齐 AstrBot WEB_SEARCH_CITATION_PROMPT 的位置；本框架默认留空",
+        "description": "联网搜索结果的引用说明，留空使用内置文案。",
         "default": "",
     },
     # ── 用户消息 ──────────────────────────────────────────
     "prompt_prefix": {
         "type": "string", "label": "用户消息前缀模板",
-        "description": '对齐 AstrBot provider_settings.prompt_prefix：含 {{prompt}} 时替换，否则当前缀拼接；默认 "{{prompt}}" 即原样',
+        "description": "最终提示的前缀模板，`{{prompt}}` 指代原提示。",
         "default": "{{prompt}}",
     },
     "identifier": {
         "type": "boolean", "label": "提醒：User ID / Nickname",
-        "description": "对齐 AstrBot provider_settings.identifier（`<system_reminder>` 首行）",
+        "description": "注入的身份标识首行文本。",
         "default": False,
     },
     "group_name_display": {
         "type": "boolean", "label": "提醒：群名",
-        "description": "对齐 AstrBot provider_settings.group_name_display（群名由 pre_request 钩子预取并缓存 30 分钟）",
+        "description": "在提示中显示群名，预取后缓存 30 分钟。",
         "default": False,
     },
     "datetime_system_prompt": {
         "type": "boolean", "label": "提醒：当前时间 / 星期",
-        "description": "对齐 AstrBot provider_settings.datetime_system_prompt",
+        "description": "在提示中注入当前时间。",
         "default": True,
     },
     "include_quoted_message": {
         "type": "boolean", "label": "引用消息块",
-        "description": "对齐 AstrBot 的 `<Quoted Message>` 块（取框架 enhance 预取的 quote 信息）",
+        "description": "把被引用的原消息作为独立块注入。",
         "default": True,
     },
     "include_group_history": {
         "type": "boolean", "label": "群聊上下文块",
-        "description": "对齐 AstrBot builtin star 的 group_chat_context 块（含原文头尾与 `[昵称/时间]: ` 行格式）",
+        "description": "把最近群聊记录作为背景块注入。",
         "default": True,
     },
     "group_history_max_messages": {
@@ -102,7 +102,7 @@ SCHEMA: dict = {
     },
     "media_placeholder": {
         "type": "boolean", "label": "媒体文本占位",
-        "description": "对齐 AstrBot 的 `[Image Attachment: path ...]` / `[File Attachment: ...]`",
+        "description": "图片与文件的占位标记文本。",
         "default": True,
     },
     # ── 历史 ──────────────────────────────────────────────

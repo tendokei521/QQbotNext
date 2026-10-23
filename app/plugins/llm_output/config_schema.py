@@ -41,7 +41,7 @@ SCHEMA = {
     "stream_send_interval_mode": {
         "type": "select",
         "label": "发送间隔模式",
-        "description": "none=不等待；fixed=固定间隔；length_curve=按字数曲线",
+        "description": "固定间隔 = 恒定节奏；按字数曲线 = 长句多等；不等待 = 连续发送。",
         "default": "none",
         "options": {"none": "不等待", "fixed": "固定间隔", "length_curve": "按字数曲线"},
     },
@@ -84,19 +84,19 @@ SCHEMA = {
     "stream_short_message_length": {
         "type": "number",
         "label": "短句阈值(字)",
-        "description": "short_long 曲线中判断短句的长度阈值",
+        "description": "按字数曲线模式下判定短句的阈值。",
         "default": 10,
     },
     "stream_short_message_delay_ms": {
         "type": "number",
         "label": "短句发送延迟(ms)",
-        "description": "short_long 曲线中短句的延迟",
+        "description": "按字数曲线模式下短句的延迟。",
         "default": 300,
     },
     "stream_long_message_delay_ms": {
         "type": "number",
         "label": "长句发送延迟(ms)",
-        "description": "short_long 曲线中长句的延迟",
+        "description": "按字数曲线模式下长句的延迟。",
         "default": 1200,
     },
     "stream_send_prefix": {
@@ -137,7 +137,7 @@ SCHEMA = {
     "speech_via_tool": {
         "type": "boolean",
         "label": "发言走工具（文本=思考）",
-        "description": "开启后模型输出的文本不会直接发出，需调用 send_message 才算发言",
+        "description": "开启后模型输出只作思考，发言必须调用工具；需同时开启流式输出。",
         "default": False,
     },
     "speech_max_bubbles": {

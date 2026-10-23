@@ -40,7 +40,7 @@ SCHEMA = {
     "proactive_max_unanswered": {
         "type": "number",
         "label": "最多追问次数",
-        "description": "连续没人接话达到该次数就停；0=不限",
+        "description": "连续无人接话达到此数即停止主动发言。0 = 不限。",
         "default": 3,
     },
     "proactive_quiet_hours_start": {
@@ -64,7 +64,7 @@ SCHEMA = {
     "proactive_prompt": {
         "type": "textarea",
         "label": "主动发言提示词",
-        "description": "留空用内置模板，可用 {{current_time}} / {{unanswered_count}} 变量",
+        "description": "留空用内置模板；支持 `{{current_time}}`、`{{unanswered_count}}` 占位。",
         "default": "",
     },
     "proactive_prompt_enable": {

@@ -57,7 +57,7 @@ SCHEMA = {
     "history_auto_qq_min_local": {
         "type": "number",
         "label": "聊天记录工具补拉阈值",
-        "description": "get_chat_history 在本地记录少于该条数时自动补拉 QQ 记录；0=总是补拉",
+        "description": "本地记录少于该条数时自动补拉聊天记录。0 = 总是补拉。",
         "default": 4,
     },
     "history_cross_query_enable": {

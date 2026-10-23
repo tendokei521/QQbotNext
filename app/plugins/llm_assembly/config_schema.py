@@ -4,14 +4,14 @@ SCHEMA = {
     "assembly_profile": {
         "type": "select",
         "label": "组装档位",
-        "description": "blocks=分块（默认）；qq_agent=复合人格/行为/表情段；legacy=仅旧格式说明",
+        "description": "标准 = 分块注入；人格 = 复合行为段；旧版 = 仅基础格式。",
         "default": "blocks",
         "options": {"blocks": "分块（推荐）", "qq_agent": "QQ Agent 复合档", "legacy": "旧格式"},
     },
     "behavior_rules_enable": {
         "type": "boolean",
         "label": "注入行为规则段",
-        "description": "只在 qq_agent 档生效：给出「在这个群里怎么说话」的行为约束",
+        "description": "在「人格」档下注入行为约束段。",
         "default": False,
     },
     "behavior_rules_override": {
@@ -30,7 +30,7 @@ SCHEMA = {
     "emoji_react_level": {
         "type": "number",
         "label": "贴表情活跃度",
-        "description": "0=不贴；越大越频繁（会注入表情词表提示）",
+        "description": "0 = 几乎不贴；数值越大越爱贴（1 每 3~5 轮、2 优先、3 能贴就贴）。",
         "default": 0,
     },
     "user_message_format": {
@@ -61,7 +61,7 @@ SCHEMA = {
     "prompt_dump_enable": {
         "type": "boolean",
         "label": "请求落盘（对账）",
-        "description": "每轮最终 messages 落盘到 data/llm/<账号>/prompt_dump.jsonl",
+        "description": "把每轮最终请求写入文件，便于比对。默认关闭。",
         "default": False,
     },
     "prompt_dump_max_entries": {

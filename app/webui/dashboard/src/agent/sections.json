@@ -180,6 +180,17 @@
             "tavily_search_depth",
             "tavily_max_content_chars"
           ]
+        },
+        {
+          "id": "adv_tool_logs",
+          "label": "工具日志",
+          "icon": "mdi-folder-outline",
+          "fields": [
+            "system_tools_log_enabled",
+            "module_tools_log_enabled",
+            "mcp_tools_log_enabled",
+            "onebot_tools_log_enabled"
+          ]
         }
       ]
     }

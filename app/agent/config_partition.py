@@ -165,6 +165,16 @@ UI_PAGES: tuple[UIPage, ...] = (
                     "tavily_max_content_chars",
                 ),
             ),
+            UIGroup(
+                "adv_tool_logs",
+                "工具日志",
+                (
+                    "system_tools_log_enabled",
+                    "module_tools_log_enabled",
+                    "mcp_tools_log_enabled",
+                    "onebot_tools_log_enabled",
+                ),
+            ),
         ),
     ),
 )
@@ -328,6 +338,10 @@ DELETED_KEYS: tuple[str, ...] = (
     "model",
     "temperature",
     "max_tokens",
+    # v3.3：三套 per-tool map 收敛为一份 `tools_disabled` 名单
+    "system_tools_enabled",
+    "module_tools_enabled",
+    "mcp_tools_enabled",
 )
 
 #: 迁移完成后的目标键数（W7 验收线）

@@ -60,6 +60,10 @@ def plan_split(agent_config: dict) -> dict:
     dropped: dict = {}
     unknown: list[str] = []
 
+    # 三套旧 per-tool map 收敛成一份名单（删键前先把"关掉的那些"搬进 tools_disabled）
+    LEGACY_TOOL_MAPS = ("system_tools_enabled", "module_tools_enabled", "mcp_tools_enabled")
+    disabled_tools: list[str] = list((agent_config or {}).get("tools_disabled") or [])
+
     for key, value in (agent_config or {}).items():
         if key in core:
             remaining[key] = value
@@ -71,6 +75,9 @@ def plan_split(agent_config: dict) -> dict:
             # 不在分区表里：可能是第三方插件写的键，留在 agent 行
             remaining[key] = value
             unknown.append(key)
+
+    if disabled_tools:
+        remaining["tools_disabled"] = sorted(set(str(n) for n in disabled_tools))
 
     return {
         "agent_remaining": remaining,

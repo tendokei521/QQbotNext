@@ -4,14 +4,14 @@ SCHEMA = {
     "group_log_enable": {
         "type": "boolean",
         "label": "启用群聊记录",
-        "description": "持续记录群聊可见事件（消息/表情/戳/撤回/我的发言），供 LLM 作为环境背景。"
+        "description": "记录群聊可见内容（消息、表情、戳一戳）作为背景。"
                        "关闭后不再记录新事件，已有的记录仍留在本地。",
         "default": True,
     },
     "retention_count": {
         "type": "number",
         "label": "单群保留条数",
-        "description": "每个群本地最多保留多少条记录（超出后从最旧的开始丢弃）。这是保留口径，"
+        "description": "每个群保留的最大条数，超出从最旧开始丢弃。"
                        "一次请求实际携带多少由 Agent 配置里的组装窗口决定。",
         "default": 2000,
         "min": 100,

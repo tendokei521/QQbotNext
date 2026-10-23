@@ -663,7 +663,36 @@ SCHEMA = {
     },
 
     # ==================== Tavily 联网搜索 ====================
-    "tavily_enable": {
+            # 已废弃：三套 per-tool map 收敛为 tools_disabled（迁移脚本会合并后删除）
+    "system_tools_enabled": {
+        "type": "object", "label": "（已废弃）系统工具开关", "default": {},
+        "description": "已废弃，请改用工具总览页统一关闭。",
+    },
+    "module_tools_enabled": {
+        "type": "object", "label": "（已废弃）模块工具开关", "default": {},
+        "description": "已废弃，请改用工具总览页统一关闭。",
+    },
+    "mcp_tools_enabled": {
+        "type": "object", "label": "（已废弃）MCP 工具开关", "default": {},
+        "description": "已废弃，请改用工具总览页统一关闭。",
+    },
+"system_tools_log_enabled": {
+        "type": "boolean", "label": "记录系统工具调用", "default": True,
+        "description": "在日志里记录系统工具的调用与结果。",
+    },
+    "module_tools_log_enabled": {
+        "type": "boolean", "label": "记录模块工具调用", "default": True,
+        "description": "在日志里记录模块工具的调用与结果。",
+    },
+    "mcp_tools_log_enabled": {
+        "type": "boolean", "label": "记录 MCP 工具调用", "default": True,
+        "description": "在日志里记录 MCP 工具的调用与结果。",
+    },
+    "onebot_tools_log_enabled": {
+        "type": "boolean", "label": "记录 OneBot 工具调用", "default": True,
+        "description": "在日志里记录 OneBot 工具的调用与结果。",
+    },
+"tavily_enable": {
         "type": "boolean", "label": "启用 Tavily 搜索", "description": "开启后模型可联网搜索。",
         "default": False, "group": "group_tavily",
     },
