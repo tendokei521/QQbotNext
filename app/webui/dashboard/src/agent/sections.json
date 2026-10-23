@@ -7,10 +7,11 @@
       "id": "basic",
       "path": "/agent/basic",
       "title": "基础配置",
-      "subtitle": "响应场景、模型参数与人格设定",
+      "subtitle": "启用 Agent、Provider 模型与人格预设",
       "icon": "mdi-tune-variant",
       "color": "primary",
       "order": 10,
+      "customFirst": true,
       "groups": [
         {
           "id": "basic_switch",
@@ -19,16 +20,6 @@
           "fields": [
             "group_enable",
             "private_enable"
-          ]
-        },
-        {
-          "id": "basic_model",
-          "label": "模型参数",
-          "icon": "mdi-api",
-          "fields": [
-            "model",
-            "temperature",
-            "max_tokens"
           ]
         },
         {

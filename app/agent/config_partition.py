@@ -61,10 +61,9 @@ UI_PAGES: tuple[UIPage, ...] = (
         id="basic",
         label="基础配置",
         order=10,
-        subtitle="响应场景、模型参数与人格设定",
+        subtitle="响应场景与人格设定（模型参数在「Provider 预设 → 模型」里配）",
         groups=(
             UIGroup("basic_switch", "响应场景", ("group_enable", "private_enable")),
-            UIGroup("basic_model", "模型参数", ("model", "temperature", "max_tokens")),
             UIGroup("basic_persona", "人格设定", ("persona_preset_id", "system_prompt")),
         ),
     ),
@@ -325,6 +324,10 @@ DELETED_KEYS: tuple[str, ...] = (
     # 输出指令改为交付层无条件解析，不再需要开关
     "outbound_directive_enable",
     "outbound_directive_max_at",
+    # v3.2：模型参数归「Provider 预设 → 模型」，agent 页不再重复提供
+    "model",
+    "temperature",
+    "max_tokens",
 )
 
 #: 迁移完成后的目标键数（W7 验收线）

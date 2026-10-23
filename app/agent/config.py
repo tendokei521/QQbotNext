@@ -24,7 +24,6 @@ DEFAULT_LLM_CONFIG: dict = {
     # HTTP 层瞬态重试（429/5xx/超时）次数。默认 2：这一层每次都会重发全量上下文，
     # 配合 retry_profile 的总次数闸门一起控制一轮的真实成本。
     "retry_attempts": 2,
-    "model": "deepseek-chat",
     "system_prompt": "你是一个友好的助手。",
     # 角色预设**活引用**：填预设 ID 时，每轮组装都按 ID 实时解析预设的提示词与预设对话，
     # 因此改预设名/改提示词立刻生效（不需要"应用一次"把内容拷进 system_prompt）；
@@ -60,8 +59,6 @@ DEFAULT_LLM_CONFIG: dict = {
     "speech_force_reply_on_call": True,
     # 静默时是否仍补一句"抱歉我暂时无法回答"（本档位默认关闭：静默更拟人）
     "speech_fallback_enable": False,
-    "max_tokens": 1024,
-    "temperature": 0.7,
     # 记录历史时强制清洗助手输出里的（…）/(…) 内容，避免后续回复模仿括号风格
     "clean_output_parentheses": True,
     "group_enable": False,

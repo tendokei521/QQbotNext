@@ -73,7 +73,6 @@ from app.agent.loop.turn_metrics import (  # noqa: F401 - 重导出保持 chat.*
     _log_debug_prompt,
     _log_request_line,
     _max_empty_retries,
-    _max_tokens_override_note,
     _max_tool_rounds,
     _reasoning_overflow_retries,
     _record_stream_telemetry,
@@ -276,9 +275,6 @@ async def stream_response(runtime, event, ctx=None):
     # 本次请求真正生效的 max_tokens（链上 provider 配置赢过 Agent 配置）：打出来，
     # 免得再出现「8192 到底哪设的」这种排查——见 _effective_max_tokens。
     eff_max_tokens, max_tokens_src = _effective_max_tokens(provider_chain, meta["max_tokens"])
-    _mt_note = _max_tokens_override_note(runtime, eff_max_tokens, max_tokens_src)
-    if _mt_note:
-        logger.add_info(f"#{runtime.bot_id}").warning(f"[LLM] {_mt_note}")
 
     logger.add_info(f"#{runtime.bot_id}").info(
         f"流式 API 请求 -> {session_id} (task: {session.task_id}), 消息数: {len(messages)}, "

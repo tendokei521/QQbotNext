@@ -338,10 +338,13 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
         user_images=user_images,
         extra_blocks=extra_blocks,
     )
+    # 模型参数**只认 provider chain**（用户在「Provider 预设 → 模型」里配）。
+    # agent 配置里不再有 model / max_tokens / temperature（v3.2 删除）。
+    _served = provider_chain[0] if provider_chain else {}
     meta = {
-        "model": config.get("model", "deepseek-chat"),
-        "max_tokens": config.get("max_tokens", 1024),
-        "temperature": config.get("temperature", 0.7),
+        "model": str(_served.get("model") or "deepseek-chat"),
+        "max_tokens": int(_served.get("max_tokens") or 1024),
+        "temperature": float(_served.get("temperature") or 0.7),
         "history_rounds": history_rounds,
         "provider_chain": provider_chain,
         "modalities": modalities,

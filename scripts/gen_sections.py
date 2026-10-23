@@ -31,10 +31,13 @@ TARGET = ROOT / "app" / "webui" / "dashboard" / "src" / "agent" / "sections.json
 PAGE_VIEW = {
     "basic": {
         "title": "基础配置",
-        "subtitle": "响应场景、模型参数与人格设定",
+        "subtitle": "启用 Agent、Provider 模型与人格预设",
         "icon": "mdi-tune-variant",
         "color": "primary",
         "path": "/agent/basic",
+        # 定制卡片（启用 Agent / Provider 模型池 / 人格预设）排在表单之前：
+        # 用户配 Agent 的动作顺序就是「开 → 给模型 → 给人格」
+        "customFirst": True,
     },
     "permission": {
         "title": "权限管理",
@@ -100,6 +103,7 @@ def build_manifest() -> dict:
                 "icon": view["icon"],
                 "color": view["color"],
                 "order": page["order"],
+                **({"customFirst": True} if view.get("customFirst") else {}),
                 "groups": [
                     {
                         "id": group["id"],

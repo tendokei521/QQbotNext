@@ -96,7 +96,7 @@ def test_page_titles_match_the_agreed_layout():
 @pytest.mark.parametrize(
     ("section_id", "expected"),
     [
-        ("basic", 7),
+        ("basic", 4),
         ("permission", 3),
         ("behavior", 8),
         ("session", 13),

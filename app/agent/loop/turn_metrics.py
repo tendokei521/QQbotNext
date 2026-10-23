@@ -229,8 +229,6 @@ def _effective_max_tokens(provider_chain, fallback) -> tuple[int, str]:
 
 
 _MAX_TOKENS_WARNED: set[tuple] = set()
-
-
 def _max_tokens_override_note(runtime, effective: int, origin: str) -> str:
     """Agent 页显式设了 max_tokens 却被 provider 层覆盖时，给一句可操作的提示。
 

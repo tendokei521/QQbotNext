@@ -98,10 +98,12 @@ async def maybe_compress_context(
     prompt = str(config.get("context_compress_prompt") or DEFAULT_COMPRESS_PROMPT).strip()
     summary_messages = build_summary_messages(old_history, prompt)
 
-    model = config.get("model")
-    temperature = float(config.get("temperature", 0.7))
-    max_tokens = int(config.get("max_tokens", 1024))
-    timeout = int(config.get("timeout", 60))
+    # 模型参数只认 provider chain（agent 配置已无这三个键）
+    _served = provider_chain[0] if provider_chain else {}
+    model = _served.get("model")
+    temperature = float(_served.get("temperature") or 0.7)
+    max_tokens = int(_served.get("max_tokens") or 1024)
+    timeout = int(_served.get("timeout") or 60)
 
     try:
         from app.agent.usage.context import usage_scope

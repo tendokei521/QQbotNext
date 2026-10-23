@@ -61,10 +61,10 @@ EXPECTED_MODULES = {
 # ==================== 收敛结果 ====================
 
 
-def test_exported_schema_is_exactly_the_43_core_keys():
+def test_exported_schema_is_exactly_the_40_core_keys():
     """本体 schema 必须正好等于分区表里的 43 键（多一个都是没搬干净）。"""
     assert set(SCHEMA_KEYS) == set(CORE_KEYS)
-    assert len(SCHEMA_KEYS) == TARGET_CORE_KEY_COUNT == 43
+    assert len(SCHEMA_KEYS) == TARGET_CORE_KEY_COUNT == 40
 
 
 def test_legacy_schema_still_has_all_160_keys():
@@ -85,7 +85,7 @@ def test_ui_has_exactly_five_pages_in_order():
 def test_ui_page_field_counts_match_the_agreed_layout():
     counts = {row["id"]: row["fields"] for row in page_summary()}
     assert counts == {
-        "basic": 7,
+        "basic": 4,
         "permission": 3,
         "behavior": 8,
         "session": 13,
@@ -142,12 +142,12 @@ def test_partition_covers_every_legacy_key_exactly_once():
 # ==================== 数量与棘轮 ====================
 
 
-def test_agreed_split_is_43_plus_108_plus_9():
-    """用户定稿的数字：本体 43 / 迁移 108 / 删除 9 = 160。"""
+def test_agreed_split_is_40_plus_108_plus_12():
+    """数字：本体 40 / 迁移 108 / 删除 12 = 160（v3.2 把模型三键也迁到 Provider 预设）。"""
     migrated = sum(len(keys) for keys in MODULE_KEYS.values())
-    assert len(CORE_KEYS) == 43, f"本体键数 {len(CORE_KEYS)} ≠ 43"
+    assert len(CORE_KEYS) == 40, f"本体键数 {len(CORE_KEYS)} ≠ 40"
     assert migrated == 108, f"迁移键数 {migrated} ≠ 108"
-    assert len(DELETED_KEYS) == 9, f"删除键数 {len(DELETED_KEYS)} ≠ 9"
+    assert len(DELETED_KEYS) == 12, f"删除键数 {len(DELETED_KEYS)} ≠ 12"
     assert len(CORE_KEYS) + migrated + len(DELETED_KEYS) == len(LEGACY_KEYS)
 
 
