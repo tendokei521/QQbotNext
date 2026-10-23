@@ -62,6 +62,22 @@ resolve_tool_state(runtime, spec | name+source, session_scope=..., event=...)
 前端保存时按归属分流（`stores/agentConfig.ts::MODULE_OWNED_FIELDS`）：
 模块键 → 模块配置接口，其余 → agent 配置接口。
 
+### 回声 vs 真写入（踩过的坑）
+
+前端保存是把**整份配置**原样提交的，而库里（`module_config.module_name='agent'`）
+还躺着 108 个迁移残渣式的模块键，值一直没变。如果只看"提交里含模块键"就 400，
+界面任何保存都会失败。
+
+所以按**意图**判断：
+
+| 情况 | 处理 |
+|---|---|
+| 提交里的模块键 = 库里的值 | 视为回声，静默丢弃（不改任何东西） |
+| 提交里的模块键 ≠ 库里的值 | 视为真想写模块键 → 400，指出是哪些键 |
+| `GET /api/agent/config` | 干脆不回传模块键，从源头消除回声 |
+
+回归测试：`tests/webui/test_agent_config_save_guard.py`（4 条）
+
 ---
 
 ## 4. 三条注入/执行路径都用它
