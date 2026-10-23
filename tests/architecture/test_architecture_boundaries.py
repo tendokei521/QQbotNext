@@ -50,9 +50,11 @@ _BUDGET = {
     # 端点里自己 `container.get(类型)` 的次数（服务定位的味道）。目标 0。
     "webui_container_get_calls": 2,
     # app/webui/api/{agent,media,modules,prompt_dump}.py 直接 import app.agent.*
-    # 14 而不是 13：deps.py 多了一条 `app.agent.runtime`（按 bot 取 runtime 的
-    # `get_agent_manager` 依赖）——那是 DI 缝本身该干的活，不算泄漏。
-    "webui_to_agent_imports": 14,
+    # 14 → 16：
+    #   +1 `app.agent.tools.state` —— 统一工具状态判定点（WebUI 靠它"显示即真相"）
+    #   +1 `app.agent.config`      —— `module_owned_keys()`，用于拒写模块拥有的键
+    # 两者都是 WebUI 必需的读/校验缝，不是把业务逻辑搬进 webui。
+    "webui_to_agent_imports": 16,
 }
 
 # `app/agent/__init__.py` 允许在模块层 import 的东西（全部廉价、无重依赖）
