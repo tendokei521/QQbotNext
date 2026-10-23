@@ -12,13 +12,13 @@
 
 from __future__ import annotations
 
-from app.core.logger import logger
-
 import json
+from html import escape as html_escape
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.core.event_bus import BotAccountUpdatedEvent, BotLifecycleEvent, event_bus
@@ -36,11 +36,22 @@ from app.webui.api import role_presets as role_presets_router
 from app.webui.api import sessions as sessions_router
 from app.webui.api import stats as stats_router
 from app.webui.api import webui_cfg as webui_router
+from app.webui.auth import (
+    SESSION_COOKIE,
+    SESSION_TTL_SECONDS,
+    is_authenticated,
+    issue_session,
+    login_rate_limiter,
+    safe_next_path,
+    tokens_match,
+)
 from app.webui.ws import build_ws_router, manager
 
 _BASE_DIR = Path(__file__).resolve().parent
 # 前端构建产物目录：app/webui/dashboard/dist
 _DASHBOARD_DIST = _BASE_DIR / "dashboard" / "dist"
+# 独立登录页模板（后端直出，不需要前端构建）
+_LOGIN_TEMPLATE = _BASE_DIR / "templates" / "login.html"
 
 #: 构建产物缺失时的提示页（不用模板引擎，避免为一个提示页多养一套模板依赖）
 _MISSING_DIST_HTML = """<!doctype html>
@@ -64,25 +75,56 @@ _CONFIG_SCOPE_RESOURCES: dict[str, tuple[str, ...]] = {
 }
 
 
-def _render_dashboard(request: Request, webui_token: str) -> HTMLResponse:
-    """渲染 Dashboard 首页：读取 app/webui/dashboard/dist/index.html，注入 window.WEBUI_TOKEN。
+def _render_dashboard(request: Request) -> HTMLResponse:
+    """渲染 Dashboard 首页：读取 app/webui/dashboard/dist/index.html。
 
-    注入的是鉴权引导令牌（GET / 本身不鉴权，前端凭它调受保护的 /api 与 /ws）。
+    首页**不再注入令牌**：鉴权改由 HttpOnly 会话 cookie 承担，令牌对页面 JS 不可见
+    （从前注入 `window.WEBUI_TOKEN` 等于把令牌暴露给任何 XSS）。
+    插件自定义页（`/module/{name}/page`）仍注入，那是既有的第三方页面契约。
     """
     index = _DASHBOARD_DIST / "index.html"
     if not index.exists():
         return HTMLResponse(_MISSING_DIST_HTML, status_code=503)
-    html = index.read_text(encoding="utf-8")
-    token_script = f"<script>window.WEBUI_TOKEN={json.dumps(webui_token)};</script>"
-    if "<head>" in html:
-        html = html.replace("<head>", f"<head>{token_script}", 1)
-    else:
-        html = token_script + html
-    response = HTMLResponse(html)
+    response = HTMLResponse(index.read_text(encoding="utf-8"))
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     return response
+
+
+def _render_login_page(next_path: str, error: str = "") -> HTMLResponse:
+    """渲染独立登录页（后端直出，不依赖 dashboard 构建产物）。"""
+    error_block = ""
+    if error:
+        safe_error = html_escape(error)
+        error_block = (
+            '<div class="error" role="alert">'
+            f"<span>⚠️</span><span>{safe_error}</span>"
+            "</div>"
+        )
+    page = (
+        _LOGIN_TEMPLATE.read_text(encoding="utf-8")
+        .replace("{error_block}", error_block)
+        .replace("{next_path}", html_escape(next_path))
+    )
+    response = HTMLResponse(page)
+    # 登录页本身绝不能被缓存：否则登出后点「后退」还能看到
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def _is_secure_request(request: Request) -> bool:
+    """HTTPS（含反向代理转发的 https）才给 cookie 加 Secure 标记。"""
+    forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    return request.url.scheme == "https" or forwarded == "https"
+
+
+def _client_address(request: Request) -> str:
+    """登录限流用的来源标识；反代后取 X-Forwarded-For 首个地址。"""
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
 
 
 def create_app(container) -> FastAPI:
@@ -114,10 +156,9 @@ def create_app(container) -> FastAPI:
     # Dashboard 首页（构建产物缺失时给出「请先 pnpm build」的提示页）
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
-        from app.core.settings import Settings
+        return _render_dashboard(request)
 
-        webui_token = container.get(Settings).webui_token or ""
-        return _render_dashboard(request, webui_token)
+    _install_login_routes(app, container)
 
     # Dashboard 静态资源根挂载（放在所有路由之后，仅兜底未匹配路径：
     # /assets/* 等由这里提供；/api 与 /ws 已在上方注册，优先级更高）
@@ -133,6 +174,93 @@ def create_app(container) -> FastAPI:
 
 
 _bot_lifecycle_subscribed = False
+
+
+def _install_login_routes(app: FastAPI, container) -> None:
+    """注册独立登录页与登出（`/login` GET/POST、`/logout`）。
+
+    登录成功后下发 HttpOnly 会话 cookie，之后浏览器自动携带，页面 JS 不再接触令牌。
+    """
+    from app.core.settings import Settings
+
+    def _expected_token() -> str:
+        return (container.get(Settings).webui_token or "").strip()
+
+    def _set_session(response, token: str, request: Request):
+        response.set_cookie(
+            SESSION_COOKIE,
+            issue_session(token),
+            max_age=SESSION_TTL_SECONDS,
+            httponly=True,          # JS 读不到，XSS 偷不走
+            samesite="lax",         # 挡住跨站 POST 携带（CSRF 基本面）
+            secure=_is_secure_request(request),
+            path="/",
+        )
+        return response
+
+    @app.get("/login", response_class=HTMLResponse)
+    async def login_page(request: Request, next: str = "/"):
+        token = _expected_token()
+        target = safe_next_path(next)
+        # 未启用鉴权时登录页没有意义，直接放行到首页
+        if not token:
+            return RedirectResponse(target, status_code=302)
+        # 已登录用户访问 /login 直接送回目标页，避免重复登录
+        if is_authenticated(
+            expected_token=token,
+            session_cookie=request.cookies.get(SESSION_COOKIE),
+        ):
+            return RedirectResponse(target, status_code=302)
+        return _render_login_page(target)
+
+    @app.post("/login")
+    async def login_submit(request: Request):
+        token = _expected_token()
+        if not token:
+            return RedirectResponse("/", status_code=302)
+
+        source = _client_address(request)
+        if login_rate_limiter.is_blocked(source):
+            retry = login_rate_limiter.retry_after(source)
+            response = _render_login_page("/", error=f"尝试次数过多，请 {retry} 秒后再试。")
+            response.status_code = 429
+            response.headers["Retry-After"] = str(retry)
+            return response
+
+        form = await request.form()
+        submitted = str(form.get("token", "") or "").strip()
+        target = safe_next_path(str(form.get("next", "/") or "/"))
+
+        if not tokens_match(submitted, token):
+            login_rate_limiter.record_failure(source)
+            webui_logger.warning(f"[WebUI] 登录失败，来源 {source}")
+            response = _render_login_page(target, error="令牌不正确，请检查后重试。")
+            response.status_code = 401
+            return response
+
+        login_rate_limiter.reset(source)
+        webui_logger.info(f"[WebUI] 登录成功，来源 {source}")
+        return _set_session(RedirectResponse(target, status_code=303), token, request)
+
+    @app.api_route("/logout", methods=["GET", "POST"])
+    async def logout(request: Request):
+        response = RedirectResponse("/login", status_code=303)
+        response.delete_cookie(SESSION_COOKIE, path="/")
+        return response
+
+    @app.get("/api/auth/session")
+    async def auth_session(request: Request):
+        """前端启动时探测登录态（返回是否已鉴权，不返回令牌本身）。"""
+        token = _expected_token()
+        return JSONResponse(content={
+            "authenticated": is_authenticated(
+                expected_token=token,
+                authorization=request.headers.get("authorization", ""),
+                query_token=request.query_params.get("token", ""),
+                session_cookie=request.cookies.get(SESSION_COOKIE),
+            ),
+            "auth_enabled": bool(token),
+        })
 
 
 def _install_bot_lifecycle_listener(container) -> None:
@@ -277,43 +405,59 @@ def _install_config_listener(container) -> None:
     logger.debug("[WebUI] 配置变更监听已注册")
 
 
-def _install_auth_middleware(app: FastAPI, container) -> None:
-    import base64
+#: 无需鉴权即可访问的路径（登录页本身、登录提交、登出、静态资源探测）
+_PUBLIC_PATHS = ("/login", "/logout", "/favicon.ico")
 
+
+def _install_auth_middleware(app: FastAPI, container) -> None:
+    """安装鉴权：会话 cookie 优先，静态令牌（Bearer/Basic/query）并存。
+
+    未认证时的行为按路径分流，而不是一律 401：
+
+    - `/api/*` → 401 JSON（前端 axios 需要明确的错误码，不能用 302 骗它）
+    - 页面请求（Accept 含 text/html）→ 302 到 `/login?next=<原路径>`，这就是「独立登录页」
+    - 其它（静态资源等）→ 401，避免把 JS/CSS 请求重定向成 HTML 让浏览器报 MIME 错
+    """
     from app.core.settings import Settings
 
     settings = container.get(Settings)
-    token = (settings.webui_token or "").strip()
-    if not token:
+    if not (settings.webui_token or "").strip():
+        # 令牌为空 = 不启用鉴权（测试与纯本机调试走这条路，保持历史行为）
         return
-    webui_logger.info("[WebUI] 已启用访问令牌鉴权")
+    webui_logger.info("[WebUI] 已启用访问令牌鉴权（登录页 + Bearer/Basic/query 并存）")
 
-    def _extract_token(request: Request) -> str:
-        """从 Authorization(Bearer/Basic) 或 query token 中提取令牌。"""
-        auth = request.headers.get("authorization", "")
-        if auth.lower().startswith("bearer "):
-            return auth[7:].strip()
-        if auth.lower().startswith("basic "):
-            try:
-                decoded = base64.b64decode(auth[6:]).decode("utf-8", errors="ignore")
-                # Basic 格式为 username:password，这里把 password 当作 WebUI token
-                return decoded.split(":", 1)[1] if ":" in decoded else ""
-            except Exception as e:
-                logger.debug(f"[app] 297: 已忽略异常: {e}")
-                return ""
-        return request.query_params.get("token", "").strip()
+    def _expected_token() -> str:
+        # 每次请求现取：令牌可能被 ensure_webui_token 在运行期写入
+        return (container.get(Settings).webui_token or "").strip()
 
     @app.middleware("http")
     async def auth_middleware(request: Request, call_next):
-        # 所有 HTTP 路由（含首页/模块自定义页/静态资源）都要求鉴权，
-        # 避免 token 被未授权访问者从页面源码中取走。
-        if _extract_token(request) != token:
-            if request.url.path.startswith("/api"):
-                return JSONResponse(status_code=401, content={"status": "error", "message": "未授权"})
-            # 非 API 页面返回 Basic 质询，浏览器会弹出登录框；用户以 token 作为密码即可。
-            return JSONResponse(
-                status_code=401,
-                content={"status": "error", "message": "未授权"},
-                headers={"WWW-Authenticate": 'Basic realm="QQBotNext WebUI"'},
-            )
-        return await call_next(request)
+        path = request.url.path
+        if path in _PUBLIC_PATHS or path.startswith("/api/auth/"):
+            return await call_next(request)
+
+        token = _expected_token()
+        if not token:
+            return await call_next(request)
+
+        authenticated = is_authenticated(
+            expected_token=token,
+            authorization=request.headers.get("authorization", ""),
+            query_token=request.query_params.get("token", ""),
+            session_cookie=request.cookies.get(SESSION_COOKIE),
+        )
+        if authenticated:
+            return await call_next(request)
+
+        if path.startswith("/api"):
+            return JSONResponse(status_code=401, content={"status": "error", "message": "未授权"})
+
+        accepts_html = "text/html" in request.headers.get("accept", "")
+        if accepts_html or path == "/":
+            # 带上原目标，登录后直接回到用户想去的页面
+            target = path
+            if request.url.query:
+                target = f"{target}?{request.url.query}"
+            return RedirectResponse(f"/login?next={quote(target, safe='')}", status_code=302)
+
+        return JSONResponse(status_code=401, content={"status": "error", "message": "未授权"})

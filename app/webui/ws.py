@@ -58,19 +58,23 @@ def build_ws_router():
         from app.application.log_service import LogService
         from app.core.settings import Settings
         from app.infrastructure.config.config_service import ConfigService
+        from app.webui.auth import SESSION_COOKIE, is_authenticated
 
         container = websocket.app.state.container
         settings = container.get(Settings)
 
-        # 鉴权：HTTP 中间件对 websocket scope 不生效，须在端点内显式校验
+        # 鉴权：HTTP 中间件对 websocket scope 不生效，须在端点内显式校验。
+        # 浏览器登录后靠会话 cookie 通过（同源 WS 握手浏览器会自动带 cookie）；
+        # 脚本/插件页仍可用 Bearer 头或 ?token=，三条通道并存。
         token = (settings.webui_token or "").strip()
-        if token:
-            auth = websocket.headers.get("authorization", "")
-            query_token = websocket.query_params.get("token", "")
-            provided = auth[7:] if auth.lower().startswith("bearer ") else query_token
-            if provided != token:
-                await websocket.close(code=4401, reason="未授权")
-                return
+        if token and not is_authenticated(
+            expected_token=token,
+            authorization=websocket.headers.get("authorization", ""),
+            query_token=websocket.query_params.get("token", ""),
+            session_cookie=websocket.cookies.get(SESSION_COOKIE),
+        ):
+            await websocket.close(code=4401, reason="未授权")
+            return
 
         config_service = container.get(ConfigService)
         log_service = container.get(LogService)
