@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### 新增：账号可正反向连接 OneBot（正向 / 反向 WebSocket 都支持）
+
+此前账号只能填一个 ws 地址，框架只能**连出去**——OneBot 实现（NapCat 等）与框架不在
+同一台机器、或只允许出站连接的部署里就用不了。现在每个账号可选连接方式：
+
+- **正向 WebSocket**（默认，存量账号行为不变）：框架连出到 OneBot 实现的 ws 地址；
+- **反向 WebSocket**：框架在配置的地址上监听，OneBot 实现连进来。路径与 `access_token`
+  双向校验（`Authorization: Bearer` 或 URL 参数；不匹配关闭码 4401），接入后与正向走
+  同一套消息循环、登录快照、监督重连。
+
+配置层：`bots` 表新增 `conn_mode` 列（老库启动时自动补列，缺字段一律按正向处理）。
+实现分层：`forward.py` / `reverse.py` 是两个方向的传输，`reverse_link.py` 管反向监听
+生命周期，`introspect.py` 出账号对外视图（`gateway.py` 因此守在 800 行闸门内）。
+
 ### 破坏性变更：`app.llm` 改名为 `app.agent`，并按职责拆成 11 个子包
 
 框架级 Agent 原先是一个 91 文件 / 32,900 行的平铺包（顶层 55 个文件挤在

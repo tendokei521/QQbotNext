@@ -26,7 +26,8 @@ import asyncio
 import contextlib
 import json
 import time
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from app.core.event_bus import BotLifecycleEvent, event_bus
 from app.core.logger import logger

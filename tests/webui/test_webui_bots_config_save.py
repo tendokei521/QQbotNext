@@ -98,3 +98,32 @@ async def test_valid_payload_still_saves(client, config_service):
 
     assert resp.status_code == 200
     assert [b["ws_url"] for b in config_service.get_bots_public()] == ["ws://127.0.0.1:4001"]
+
+
+# ==================== 连接方向（正向 / 反向 WS）====================
+
+
+async def test_conn_mode_saved_through_api(client, config_service):
+    """配置页保存的连接方式必须一路落到 get_bots_public（前端重新加载要读到它）。"""
+    resp = client.post("/api/bots/config/save", json={"bots": [
+        {"ws_url": "ws://127.0.0.1:3001/onebot/v11/ws", "conn_mode": "reverse",
+         "access_token": "tk", "auto_connect": True},
+        {"ws_url": "ws://127.0.0.1:3002/", "conn_mode": "forward", "auto_connect": False},
+    ]})
+
+    assert resp.status_code == 200
+    public = config_service.get_bots_public()
+    assert [b["conn_mode"] for b in public] == ["reverse", "forward"]
+    assert public[0]["access_token"] == "tk"
+
+
+async def test_legacy_client_without_conn_mode_keeps_direction(client, config_service):
+    """老前端/旧脚本全量保存时不带 conn_mode：已存的反向账号不能被改回正向。"""
+    client.post("/api/bots/config/save", json={"bots": [
+        {"ws_url": "ws://127.0.0.1:3001/onebot/v11/ws", "conn_mode": "reverse"},
+    ]})
+    # 只改 auto_connect，payload 里没有 conn_mode
+    client.post("/api/bots/config/save", json={"bots": [
+        {"ws_url": "ws://127.0.0.1:3001/onebot/v11/ws", "auto_connect": True},
+    ]})
+    assert config_service.get_bots_public()[0]["conn_mode"] == "reverse"

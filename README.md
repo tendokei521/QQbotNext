@@ -134,6 +134,21 @@ python main.py
 | `DB_PATH` | `data/app.db` | SQLite 路径 |
 | `WS_CONNECT_TIMEOUT` | `30` | WebSocket 连接超时 |
 
+### 账号连接方式（正向 / 反向 WebSocket）
+
+每个账号在「账号管理」里单独选连接方式，两种都是 OneBot v11 的 WebSocket：
+
+| 方式 | 谁发起连接 | 地址填什么 |
+|---|---|---|
+| **正向 WebSocket** | 框架连出去 | OneBot 实现（NapCat / Lagrange / LLOneBot）暴露的 ws 地址，如 `ws://127.0.0.1:3001/` |
+| **反向 WebSocket** | 框架本机监听，OneBot 实现连进来 | 本机监听地址，如 `ws://0.0.0.0:3001/onebot/v11/ws`；把这个地址原样填进 NapCat 的「反向 WebSocket」 |
+
+- 两种方式共用同一套能力：收发消息、API 调用、登录信息、断线重连、按账号隔离；
+- `access_token` 两条路都支持：正向放在 URL 的 `?access_token=`，反向由框架校验对端
+  `Authorization: Bearer` 头或 URL 参数，不匹配直接拒绝（关闭码 4401）；
+- 反向监听只在本机进程内占用指定端口，端口需自行保证未被占用；对端重启时会话会自动
+  重新接入，不需要手动点连接。
+
 ## 内置功能模块（v3：高级功能全部模块化）
 
 流式输出、长期记忆、主动消息、定时任务、OneBot/MCP 工具、指代消解、组装档位等

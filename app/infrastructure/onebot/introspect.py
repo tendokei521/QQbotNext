@@ -10,7 +10,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Iterable
+from collections.abc import Callable, Iterable
+from typing import Any
 
 from app.infrastructure.config.ws_url import split_ws_url
 from app.infrastructure.onebot.endpoint import FORWARD, normalize_mode
