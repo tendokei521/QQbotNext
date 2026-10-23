@@ -219,6 +219,7 @@ async def test_reconcile_switches_between_forward_and_reverse():
 
 async def test_peer_close_keeps_listener_and_waits_again():
     """对端掉线（NapCat 重启）：监听不关，状态回「等待接入」而不是红色错误。"""
+
     port = _free_port()
     gw = _gateway()
     await gw.add_bot(f"ws://127.0.0.1:{port}/onebot/v11/ws", None, index=0, conn_mode="reverse")
@@ -237,5 +238,38 @@ async def test_peer_close_keeps_listener_and_waits_again():
             "对端断开后监听仍在 → 状态应回到等待接入"
         info = gw.get_bots_info()[0]
         assert info["listening"] is True
+    finally:
+        await gw.shutdown()
+
+
+async def test_start_all_listens_for_reverse_auto_connect_accounts():
+    """开机自启：auto_connect 的反向账号由 start_all 直接起监听，不必人工点连接。"""
+    port = _free_port()
+    gw = _gateway()
+    await gw.start_all([{
+        "ws_url": f"ws://127.0.0.1:{port}/onebot/v11/ws",
+        "auto_connect": True,
+        "conn_mode": "reverse",
+    }])
+    try:
+        assert await _wait(lambda: gw.get_bots_info()[0]["listening"] is True)
+        assert gw.get_bots_info()[0]["status"] == "connecting"
+    finally:
+        await gw.shutdown()
+    assert gw.get_bots_info()[0]["listening"] is False, "shutdown 必须释放监听端口"
+
+
+async def test_forward_account_never_opens_listener():
+    """正向账号不该顺手起监听：模式分流不能把两种连接混在一起。"""
+    gw = _gateway()
+    await gw.add_bot("ws://127.0.0.1:1/", None, index=0, conn_mode="forward")
+    try:
+        # 连不上（端口 1 无人监听）→ 走正向失败路径，不产生监听器
+        assert await gw.connect_bot(0) is False
+        info = gw.get_bots_info()[0]
+        assert info["conn_mode"] == "forward"
+        assert info["listening"] is False
+        assert info["status"] == "error"
+        assert gw.reverse_servers == {}
     finally:
         await gw.shutdown()
