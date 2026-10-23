@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.agent.config import LEGACY_LLM_CONNECTION_KEYS
 from app.agent.config_schema import STREAM_PRESETS
+from app.agent.config import module_owned_keys
 from app.plugins.llm_tools_extra.onebot.manifest import ONEBOT_TOOLS
 from app.plugins.llm_tools_extra.onebot.security import resolve_tool_policy
 from app.agent.tools.system import list_system_tools
@@ -82,6 +83,10 @@ async def agent_config(
     raw_config = dict(runtime.config.raw_config)
     for key in LEGACY_LLM_CONNECTION_KEYS:
         raw_config.pop(key, None)
+    # 模块拥有的键不出现在 agent 配置视图里：它们由各自模块的配置页管，
+    # 回传只会让前端把旧值原样 echo 回来，进而被写入校验误判。
+    for key in module_owned_keys():
+        raw_config.pop(key, None)
     schema = webui_schema(SCHEMA, registry=resource_registry, source_module="agent")
     presets = provider_preset_service.list_presets()
     preset_name_map = {p["id"]: p["name"] for p in presets}
@@ -123,16 +128,22 @@ async def agent_config_update(request: Request, bot_id: int | None = Depends(par
     incoming_config = data.get("config", {}) or {}
     for key in LEGACY_LLM_CONNECTION_KEYS:
         incoming_config.pop(key, None)
-    # 模块拥有的键不许写进 agent 配置（否则界面写一处、策略读另一处 → 关了还能用）
-    from app.agent.config import module_owned_keys
-
+    # 模块拥有的键不许**写**进 agent 配置（界面写一处、策略读另一处 → 关了还能用）。
+    # 但前端会把整份配置原样提交，里面常带着值没变的旧键——那些是回声，直接丢掉；
+    # 只有"值真的变了"才算真的要写模块键，这才是需要拦下来的错误。
     owned = module_owned_keys()
-    rejected = sorted(k for k in incoming_config if k in owned)
+    rejected: list[str] = []
+    for key in [k for k in incoming_config if k in owned]:
+        incoming = incoming_config.get(key)
+        current = runtime.config.get(key)
+        if incoming == current:
+            incoming_config.pop(key, None)   # 回声，忽略
+        else:
+            rejected.append(key)
     if rejected:
         return _err(
             400,
-            "这些配置已归属模块，请到对应模块的配置页修改："
-            + "、".join(rejected),
+            "这些配置已归属模块，请到对应模块的配置页修改：" + "、".join(sorted(rejected)),
         )
     for key, value in incoming_config.items():
         field = SCHEMA.get(key)
