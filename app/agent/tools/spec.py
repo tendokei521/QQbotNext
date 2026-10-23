@@ -197,7 +197,14 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
 
             if _log_enabled():
                 logger.add_info("Tool").info(f"[ToolCall]调用工具：{name}")
-            if not spec.allows(ctx):
+            # 执行前复核：清单是在本轮开始时组的，此刻开关可能已经变了
+            # （模块被关掉、工具在总表里被关掉）。这里再问一次唯一判定点。
+            gate_reason = _execution_gate(ctx, spec)
+            if gate_reason:
+                error = "unavailable"
+                success = False
+                result = f"error: 工具 {name} 当前不可用（{gate_reason}）"
+            elif not spec.allows(ctx):
                 error = "forbidden"
                 success = False
                 result = f"error: 无权限调用工具 {name}"
@@ -255,6 +262,28 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
         return f"error: 未知工具 {name}"
 
     return _executor
+
+
+def _execution_gate(ctx: Any, spec: ToolSpec) -> str:
+    """执行前的可用性复核；返回空串表示可以执行。
+
+    与注入期用的是**同一个** `resolve_tool_state`，所以两侧不会打架。
+    """
+    runtime = getattr(ctx, "runtime", None) if ctx is not None else None
+    if runtime is None:
+        return ""
+    try:
+        from app.agent.tools.state import resolve_tool_state
+
+        event = getattr(ctx, "event", None)
+        scope = "private" if getattr(event, "message_type", "") == "private" else "group"
+        state = resolve_tool_state(runtime, spec, session_scope=scope)
+        if state.available:
+            return ""
+        return state.reason_text
+    except Exception as e:  # noqa: BLE001 —— 复核失败按可用处理（不因统计问题拦工具）
+        logger.debug(f"[Tool] 执行前复核失败（{getattr(spec, 'name', '?')}），按可用处理: {e}")
+        return ""
 
 
 async def _run_tool_call_hooks(
