@@ -34,8 +34,7 @@ const agent = useAgentConfigStore()
         />
       </v-card-title>
       <v-card-text class="text-body-2" style="opacity: 0.8">
-        关闭后这个 Bot 完全不再响应消息（定时任务与主动消息同样停止）。
-        下面「响应场景」再决定群聊/私聊是否回复。
+        关闭后 Agent 不再回复任何消息，定时任务与主动消息同时停止。
       </v-card-text>
     </v-card>
 

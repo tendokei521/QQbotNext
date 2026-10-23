@@ -66,6 +66,9 @@ function movePoolModel(index: number, delta: number) {
       <v-spacer />
       <v-btn size="small" variant="tonal" prepend-icon="mdi-plus" @click="poolDialog = true">添加模型</v-btn>
     </v-card-title>
+    <v-card-text class="text-body-2 pt-0" style="opacity: 0.8">
+      按顺序依次尝试，前一个失败时自动切换到下一个。
+    </v-card-text>
     <v-card-text>
       <v-list v-if="agent.poolModelIds.length" density="compact">
         <v-list-item v-for="(id, i) in agent.poolModelIds" :key="id">

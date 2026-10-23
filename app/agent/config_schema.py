@@ -45,10 +45,7 @@ SCHEMA = {
     },
     "max_tokens": {
         "type": "number", "label": "最大输出 Tokens（兜底）",
-        "description": "**只在整条模型链上都没有设置时才生效**（最后一层兜底）。"
-                       "真正该改的地方是「Provider 预设 → 模型」页该模型的「最大输出 Token」："
-                       "那里的值优先，且能跟着模型走（思考模型还有 2048 的下限）。"
-                       "日志会写明本次生效的值来自哪一层。",
+        "description": "整条模型链都未设置时使用的兜底上限。通常应在 Provider 模型的「最大输出 Token」中配置。",
         "default": 1024, "min": 1, "max": 1000000, "group": "group_model",
     },
     "stream_output": {
@@ -67,7 +64,7 @@ SCHEMA = {
         "default": 200, "min": 10, "max": 500, "group": "group_stream",
     },
     "stream_send_interval_mode": {
-        "type": "select", "label": "发送间隔模式", "description": "none=不等待；fixed=固定间隔；length_curve=按字数曲线",
+        "type": "select", "label": "发送间隔模式", "description": "固定间隔 = 恒定节奏；按字数曲线 = 长句多等；不等待 = 连续发送。",
         "default": "none", "group": "group_stream",
         "options": {
             "none": "不等待",
@@ -103,15 +100,15 @@ SCHEMA = {
         "default": 200, "min": 0, "max": 5000, "group": "group_stream",
     },
     "stream_short_message_length": {
-        "type": "number", "label": "短句阈值(字)", "description": "short_long 曲线中判断短句的长度阈值",
+        "type": "number", "label": "短句阈值(字)", "description": "按字数曲线模式下，判定为短句的长度阈值。",
         "default": 10, "min": 1, "max": 100, "group": "group_stream",
     },
     "stream_short_message_delay_ms": {
-        "type": "number", "label": "短句发送延迟(ms)", "description": "short_long 曲线中短句的延迟",
+        "type": "number", "label": "短句发送延迟(ms)", "description": "按字数曲线模式下，短句的发送延迟。",
         "default": 1200, "min": 0, "max": 10000, "group": "group_stream",
     },
     "stream_long_message_delay_ms": {
-        "type": "number", "label": "长句发送延迟(ms)", "description": "short_long 曲线中长句的延迟",
+        "type": "number", "label": "长句发送延迟(ms)", "description": "按字数曲线模式下，长句的发送延迟。",
         "default": 400, "min": 0, "max": 10000, "group": "group_stream",
     },
     "stream_send_prefix": {
@@ -151,12 +148,12 @@ SCHEMA = {
     "persona_preset_id": {
         "type": "resource", "resource": "role_preset",
         "label": "角色预设（活引用）",
-        "description": "选预设后，每轮组装按 ID 实时解析提示词与预设对话（改预设名/改提示词即时生效，无需重新“应用”）；留空则用上面的系统提示词",
+        "description": "选择预设后每轮实时解析提示词，改动立即生效；留空则用自定义系统提示词。",
         "default": "", "group": "group_session",
     },
     "system_prompt_style": {
         "type": "select", "label": "消息组装风格",
-        "description": "分块=人设/定时协议/技能/记忆/背景各一条 system（默认）；单条=把所有 system 块折成一条（对齐 AstrBot 的组装形态，便于迁移比对）",
+        "description": "分块 = 人设、技能、记忆各一条系统消息（默认）；单条 = 合并为一条。",
         "default": "blocks", "group": "group_session",
         "options": {
             "blocks": "分块：每类一块 system（默认）",
@@ -165,7 +162,7 @@ SCHEMA = {
     },
     "assembly_profile": {
         "type": "select", "label": "组装档位",
-        "description": "legacy=改造前的旧行为（逐字不变）；qq_agent=注入独立的行为规则段（安全/工作方式/反AI味/主体性/该说不该说/群聊节奏…），拟人化效果更好",
+        "description": "标准 = 注入行为规则段，拟人化效果更好；旧版 = 保持原有组装行为。",
         "default": "legacy", "group": "group_behavior",
         "options": {
             "legacy": "旧版：只有人格设定（默认）",
@@ -179,7 +176,7 @@ SCHEMA = {
     },
     "behavior_rules_override": {
         "type": "textarea", "label": "覆盖行为规则",
-        "description": "留空=用内置行为规则；填写后整体替换行为段，但【安全规则】与【工作方式】仍强制追加（防一次误配置删掉底线）",
+        "description": "留空使用内置行为规则；填写后整体替换，安全规则与工作方式仍强制保留。",
         "default": "", "rows": 8, "group": "group_behavior",
     },
     "participation": {
@@ -194,12 +191,12 @@ SCHEMA = {
     },
     "emoji_react_level": {
         "type": "number", "label": "贴表情活跃度",
-        "description": "0=几乎不贴；1=每 3~5 轮一次（默认）；2=优先考虑贴；3=能贴就贴",
+        "description": "0 = 几乎不贴；1 = 每 3~5 轮一次（默认）；2 = 优先贴；3 = 能贴就贴。",
         "default": 1, "min": 0, "max": 3, "group": "group_behavior",
     },
     "user_message_format": {
         "type": "select", "label": "本轮消息格式",
-        "description": "单行=与历史条目同一形态「昵称(QQ): 正文」（默认，拟人化档位下生效）；多行=旧版时间/群号/发送者/发送了 六行元信息块",
+        "description": "单行 = 「昵称(QQ): 正文」；多行 = 时间、群号、发送者分行列出。",
         "default": "single_line", "group": "group_behavior",
         "options": {
             "single_line": "单行：昵称(QQ): 正文（默认）",
@@ -217,7 +214,7 @@ SCHEMA = {
     },
     "speech_via_tool": {
         "type": "boolean", "label": "发言走工具（文本=思考）",
-        "description": "开启后模型输出的文本只是思考，发言必须调用 send_message；不调用就是这一轮不接话（静默）。需要流式输出开启，否则自动回落到「文本即发言」",
+        "description": "开启后模型输出只作思考，发言必须调用工具；需同时开启流式输出。",
         "default": False, "group": "group_behavior",
     },
     "speech_max_bubbles": {
@@ -232,7 +229,7 @@ SCHEMA = {
     },
     "speech_reminder_rounds": {
         "type": "number", "label": "催发言提醒轮次",
-        "description": "工具轮次剩这么多还没开口时，注入一条【系统提醒】催促发言（0=不提醒）",
+        "description": "工具轮次只剩这么多仍没开口时提醒一次。0 = 不提醒。",
         "default": 3, "min": 0, "max": 10, "group": "group_behavior",
     },
     "speech_force_reply_on_call": {
@@ -254,7 +251,7 @@ SCHEMA = {
         "default": 50, "min": 5, "max": 100, "group": "group_session",
     },
     "context_compress_enable": {
-        "type": "boolean", "label": "启用上下文压缩", "description": "历史超过 history_rounds 时，只把超出的部分压缩成摘要，保留最近 history_rounds 条原文（仿 AstrBot）",
+        "type": "boolean", "label": "启用上下文压缩", "description": "历史超过轮数上限时，把较早部分压缩成摘要，保留最近若干条原文。",
         "default": True, "group": "group_compress",
     },
     "context_compress_prompt": {
@@ -268,7 +265,7 @@ SCHEMA = {
     },
     "prompt_dump_enable": {
         "type": "boolean", "label": "请求落盘（迁移对账）",
-        "description": "开启后把每轮最终请求 messages 原样写到 data/llm/<账号>/prompt_dump.jsonl，供与第三方框架的组装结果逐条 diff；默认关闭（正常运行时零 IO）",
+        "description": "把每轮最终请求写入文件，便于逐条比对。默认关闭。",
         "default": False, "group": "group_session",
     },
     "prompt_dump_max_entries": {
@@ -277,7 +274,7 @@ SCHEMA = {
     },
     "context_token_budget": {
         "type": "number", "label": "上下文 token 预算",
-        "description": "0=关闭（默认）。开启后超预算就从最旧的历史消息丢起（system 与人设、本轮提问永不丢），避免长会话把请求顶到上游 context length 上限",
+        "description": "上下文 token 上限，超出时从最旧的历史开始丢弃。0 = 不限制。",
         "default": 0, "min": 0, "max": 200000, "group": "group_compress",
     },
     "context_token_chars_per_token": {
@@ -286,15 +283,12 @@ SCHEMA = {
         "default": 2.0, "min": 0.5, "max": 8, "group": "group_compress",
     },
     "include_pre_history": {
-        "type": "boolean", "label": "包含群聊环境背景", "description": "开启时拉取群聊最近消息，并附上群名/群号/当前时间作为 LLM 背景信息（不计入会话历史；未开启则完全不拉取在线历史）",
+        "type": "boolean", "label": "包含群聊环境背景", "description": "请求前拉取群聊最近消息作为背景，不计入会话历史。",
         "default": False, "group": "group_session",
     },
     "group_log_enable": {
         "type": "boolean", "label": "注入群聊环境记录",
-        "description": "把「群聊记录」模块持续记录的内容（群消息 + 表情回应 + 戳一戳 + 撤回 + 我的发言）"
-                       "作为环境块注入上下文。它与上面的「包含群聊环境背景」是两个来源："
-                       "本项是持续记录（含互动），上面是每次请求临时拉取的在线历史；"
-                       "两者正文按 message_id 去重，不会重复出现。模块未安装/未启用时本项自动为空",
+        "description": "注入群聊记录（消息、表情回应、戳一戳、撤回）作为环境块，与在线历史不会重复。",
         "default": True, "group": "group_session",
     },
     "group_log_window_minutes": {
@@ -309,8 +303,7 @@ SCHEMA = {
     },
     "group_log_max_chars": {
         "type": "number", "label": "群聊环境块字符预算",
-        "description": "环境块的字符上限；超出时从最旧的记录开始丢弃并写日志。0 表示不限制（"
-                       "注意：长消息本身不截断，不限制预算会显著增加 token 消耗）",
+        "description": "环境块的字符上限，超出时从最旧记录开始丢弃。0 = 不限制，会显著增加消耗。",
         "default": 4000, "min": 0, "max": 20000, "group": "group_session",
     },
     "include_private_pre_history": {
@@ -320,29 +313,26 @@ SCHEMA = {
         "group": "group_session",
     },
     "history_auto_qq_min_local": {
-        "type": "number", "label": "聊天记录工具补拉阈值", "description": "get_chat_history 默认（scope=auto）在本地会话记录少于该条数时自动补拉 QQ 聊天记录；0=总是补拉",
+        "type": "number", "label": "聊天记录工具补拉阈值", "description": "本地记录少于该条数时自动补拉聊天记录。0 = 总是补拉。",
         "default": 4, "min": 0, "max": 50, "group": "group_session",
     },
     "history_cross_query_enable": {
-        "type": "boolean", "label": "允许私聊跨会话查群记录", "description": "私聊里允许用 get_chat_history 查询“发起人自己也是成员”的群历史（结果只回给发起人）；群聊里查别的群、以及查别人的私聊始终被拒绝",
+        "type": "boolean", "label": "允许私聊跨会话查群记录", "description": "私聊中允许查询本人所在的群历史；查询他人私聊始终拒绝。",
         "default": True, "group": "group_session",
     },
     "context_expand_enable": {
         "type": "boolean", "label": "未展开内容标记与按需展开",
-        "description": "聊天记录里展不开的内容（未取到昵称的 @、被引用的消息等）渲染成【未展开:...】标记，"
-                       "并允许模型用 expand_* 工具按需展开；关闭后恢复为裸 @123 之类的旧渲染且不暴露展开工具",
+        "description": "把展不开的内容标为【未展开】，并允许模型按需展开。",
         "default": True, "group": "group_session",
     },
     "referent_resolve_enable": {
         "type": "boolean", "label": "指代消解",
-        "description": "维护会话焦点表，并在每轮请求注入「当前对话焦点」，让模型知道用户回指的“那条/刚才的”是哪一条；"
-                       "同时把本会话已取回过的内容渲染为「已展开」，避免重复读取",
+        "description": "注入当前对话焦点，让模型知道「那条」「刚才的」指什么。",
         "default": True, "group": "group_session",
     },
     "referent_prefetch_enable": {
         "type": "boolean", "label": "指代预取",
-        "description": "判定出明确指向（回复某条、提到“上一条/那个消息”）时，框架在请求前直接把内容取回并放进上下文，"
-                       "不依赖模型自己决定要不要调工具（更快、命中率更高）",
+        "description": "判定出明确指向时提前取回内容，不必等模型调工具。",
         "default": True, "group": "group_session",
     },
     "referent_ambiguous_policy": {
@@ -379,17 +369,14 @@ SCHEMA = {
     "message_debounce_seconds": {
         "type": "number", "label": "消息抖动(秒)",
         "description": (
-            "收到能触发 LLM 的消息后先等这么久；期间又来新消息则重新计时，"
-            "并把这几条消息合并成同一轮请求（避免连发四条消息变成四次请求、四次回复）。"
-            "0 = 关闭（立即请求，保持旧行为）"
+            "触发后先等这么久，期间的新消息合并进同一轮。0 = 立即请求。"
         ),
         "default": 0, "min": 0, "max": 30, "group": "group_debounce",
     },
     "message_debounce_max_wait": {
         "type": "number", "label": "抖动最长等待(秒)",
         "description": (
-            "持续刷屏时每来一条消息都会重置计时，这个上限保证到点强制放行，"
-            "避免一直等不到静默、永远不响应。应明显大于「消息抖动」"
+            "连续刷屏时的强制放行上限，应明显大于消息抖动秒数。"
         ),
         "default": 15, "min": 1, "max": 120, "group": "group_debounce",
     },
@@ -397,7 +384,7 @@ SCHEMA = {
     # ==================== 用户信息感知（LLM 增强注入；无总开关，按子项生效） ====================
     "include_time": {
         "type": "boolean", "label": "包含当前时间",
-        "description": "在最新一轮用户消息开头插入当前时间，例如 (时间：2026-08-17 10:00:00)",
+        "description": "在本轮用户消息开头插入当前时间。",
         "default": True, "group": "group_context",
     },
     "include_private_qq": {
@@ -473,7 +460,7 @@ SCHEMA = {
     },
     "agent_owner_list": {
         "type": "string_list", "label": "拥有者（QQ号）",
-        "description": "每行一个 QQ 号。拥有者享有最高权限，可越过任何档位限制。v3 起这是拥有者身份的唯一来源（原「账号级 owner_id」已迁入此处；留空则谁都不是拥有者，owner 档模块与 #llm 管理指令都不会响应）",
+        "description": "每行一个 QQ 号，享有最高权限。留空则没有人拥有该权限。",
         "default": [], "placeholder": "每行一个 QQ 号", "group": "group_permission",
     },
     "agent_manager_list": {
@@ -512,15 +499,15 @@ SCHEMA = {
         "default": 900, "min": 1, "max": 2880, "group": "group_proactive",
     },
     "proactive_max_unanswered": {
-        "type": "number", "label": "未回复上限", "description": "连续无人回复达到此数即停止主动发言（0=不限）",
+        "type": "number", "label": "未回复上限", "description": "连续无人回应达到此数即停止主动发言。0 = 不限。",
         "default": 3, "min": 0, "max": 20, "group": "group_proactive",
     },
     "proactive_quiet_hours_start": {
-        "type": "number", "label": "免打扰开始(时)", "description": "免打扰时段开始小时（0-23）",
+        "type": "number", "label": "免打扰开始(时)", "description": "免打扰开始时刻，取值 0–23 时。",
         "default": 1, "min": 0, "max": 23, "group": "group_proactive",
     },
     "proactive_quiet_hours_end": {
-        "type": "number", "label": "免打扰结束(时)", "description": "免打扰时段结束小时（0-23）",
+        "type": "number", "label": "免打扰结束(时)", "description": "免打扰结束时刻，取值 0–23 时，可跨天。",
         "default": 7, "min": 0, "max": 23, "group": "group_proactive",
     },
     "proactive_group_idle_minutes": {
@@ -528,24 +515,24 @@ SCHEMA = {
         "default": 10, "min": 1, "max": 1440, "group": "group_proactive",
     },
     "proactive_prompt": {
-        "type": "textarea", "label": "主动发言提示词", "description": "可用 {{unanswered_count}} / {{current_time}} 占位",
+        "type": "textarea", "label": "主动发言提示词", "description": "可插入占位符：未回复次数、当前时间（写法见文档）。",
         "default": "你在群聊/私聊中发起主动消息，像真人一样自然开口。当前时间：{{current_time}}；之前已主动发言但无人接话的次数：{{unanswered_count}}。结合最近对话，自然地说一句适合此刻的话。",
         "rows": 5, "group": "group_proactive",
     },
     "proactive_prompt_enable": {
-        "type": "boolean", "label": "工具主动性提示", "description": "注入一块「主动性」system 提示：教模型何时该查聊天记录/取环境信息/戳一戳（只讲时机，不讲参数；没有对应工具时自动不注入）",
+        "type": "boolean", "label": "工具主动性提示", "description": "注入主动性提示，说明何时该查记录、取环境信息。",
         "default": True, "group": "group_proactive",
     },
     "proactive_history_intent_nudge": {
-        "type": "boolean", "label": "历史意图补强", "description": "用户追问历史（刚才/之前/说过什么/哪条）时，在同一块里补一句「必须调用 get_chat_history 核实」",
+        "type": "boolean", "label": "历史意图补强", "description": "用户追问旧话题时，提示模型先核实聊天记录。",
         "default": True, "group": "group_proactive",
     },
     "proactive_env_prompt_enable": {
-        "type": "boolean", "label": "环境感知提示", "description": "在同一块里教模型何时该自己取聊天环境信息（群名群号/群里谁在说/某人是谁/被@/这条回的哪条），而非凭昵称或 ID 猜",
+        "type": "boolean", "label": "环境感知提示", "description": "提示模型何时该主动获取群名、成员等环境信息。",
         "default": True, "group": "group_proactive",
     },
     "proactive_unresolved_prompt_enable": {
-        "type": "boolean", "label": "未展开标记说明", "description": "解释【未展开:...】标记的含义并说明必须先 expand_context 展开；expand_context 不可用时自动不注入",
+        "type": "boolean", "label": "未展开标记说明", "description": "解释【未展开】标记，并提示先展开再回答。",
         "default": True, "group": "group_proactive",
     },
     "proactive_env_intent_nudge": {
@@ -554,8 +541,7 @@ SCHEMA = {
     },
     "referent_prompt_enable": {
         "type": "boolean", "label": "指代解析提示",
-        "description": "在同一块里说明如何读「当前对话焦点」、回指（那条/刚才的/那个样子）该指向谁、候选不明时怎么办、"
-                       "已展开的内容不必重复取；无对应工具时自动不注入",
+        "description": "说明如何读对话焦点、回指该指向谁、已展开内容不必重复取。",
         "default": True, "group": "group_proactive",
     },
     "outbound_directive_enable": {
@@ -577,14 +563,14 @@ SCHEMA = {
         "default": False, "group": "group_schedule",
     },
     "schedule_prompt": {
-        "type": "textarea", "label": "定时触发提示词", "description": "定时任务触发时给 LLM 的指令，可用 {{content}} / {{current_time}} / {{job_json}} 占位",
+        "type": "textarea", "label": "定时触发提示词", "description": "定时触发时给模型的指令，可插入触发内容与当前时间。",
         "default": "你被一个定时任务唤醒，这不是一次用户对话。\n规则：\n1. 这不是聊天轮次：不要打招呼，不要反问用户。\n2. 结合最近的历史对话理解与用户的关系和上下文，用符合你人设的语气自然开口。\n3. 自然地说明你联系的原因，参考任务内容即可，不要提及\"定时任务\"\"工具\"等技术细节。\n4. 当前时间：{{current_time}}；需要完成的事情：{{content}}。\n任务信息：{{job_json}}",
         "rows": 7, "group": "group_schedule",
     },
 
     # ==================== 长期记忆（实验性） ====================
     "experimental_long_term_memory": {
-        "type": "boolean", "label": "启用长期记忆实验方案", "description": "开启后才启用长期记忆，并同步使用新版单行脱敏提示词；关闭时保持默认无记忆 + 旧版感知增强格式",
+        "type": "boolean", "label": "启用长期记忆实验方案", "description": "已废弃，请改用长期记忆模块。",
         "default": False, "group": "group_memory",
     },
     "memory_enable": {
@@ -608,11 +594,11 @@ SCHEMA = {
         "default": 600, "min": 100, "max": 3000, "group": "group_memory",
     },
     "memory_save_deterministic": {
-        "type": "boolean", "label": "“记住…”确定性兜底", "description": "检测到“记住/我喜欢/我叫…”等指令时直接入库，不依赖模型调工具",
+        "type": "boolean", "label": "“记住…”确定性兜底", "description": "检测到「记住…」类指令时直接入库，不依赖模型调工具。",
         "default": True, "group": "group_memory",
     },
     "memory_extract_enable": {
-        "type": "boolean", "label": "自动蒸馏", "description": "对话后自动提炼值得记住的事实（额外少量 LLM 调用）",
+        "type": "boolean", "label": "自动蒸馏", "description": "对话结束后自动提炼值得记住的事实，会带来少量额外调用。",
         "default": True, "group": "group_memory",
     },
     "memory_extract_interval_min": {
@@ -644,7 +630,7 @@ SCHEMA = {
         "default": True, "group": "group_memory",
     },
     "memory_max_age_days": {
-        "type": "number", "label": "记忆最大龄(天)", "description": "超过此龄不再注入（数据保留，可 #llm memory list --all 查看）；0=不限",
+        "type": "number", "label": "记忆最大龄(天)", "description": "超过该天数的记忆不再注入。0 = 不限。",
         "default": 180, "min": 0, "max": 3650, "group": "group_memory",
     },
     "memory_on_reset": {
@@ -663,7 +649,7 @@ SCHEMA = {
 
     # ==================== 知识库 ====================
     "knowledge_enable": {
-        "type": "boolean", "label": "启用知识库", "description": "开启后 LLM 可使用 knowledge_search / knowledge_add / knowledge_delete 工具",
+        "type": "boolean", "label": "启用知识库", "description": "开启后模型可调用知识库的检索与写入工具。",
         "default": False, "group": "group_knowledge",
     },
     "knowledge_embedding_model_id": {
@@ -672,13 +658,13 @@ SCHEMA = {
         "default": "", "group": "group_knowledge",
     },
     "knowledge_recall_limit": {
-        "type": "number", "label": "默认检索条数", "description": "knowledge_search 默认返回的片段数量",
+        "type": "number", "label": "默认检索条数", "description": "检索工具默认返回的片段数量。",
         "default": 5, "min": 1, "max": 20, "group": "group_knowledge",
     },
 
     # ==================== Tavily 联网搜索 ====================
     "tavily_enable": {
-        "type": "boolean", "label": "启用 Tavily 搜索", "description": "开启后 LLM 可使用 tavily_search 工具进行联网搜索",
+        "type": "boolean", "label": "启用 Tavily 搜索", "description": "开启后模型可联网搜索。",
         "default": False, "group": "group_tavily",
     },
     "tavily_api_key": {
@@ -686,7 +672,7 @@ SCHEMA = {
         "default": "", "group": "group_tavily",
     },
     "tavily_max_results": {
-        "type": "number", "label": "默认搜索条数", "description": "tavily_search 默认返回的结果数量",
+        "type": "number", "label": "默认搜索条数", "description": "搜索工具默认返回的结果数量。",
         "default": 5, "min": 1, "max": 20, "group": "group_tavily",
     },
     "tavily_search_depth": {
@@ -704,40 +690,29 @@ SCHEMA = {
 
     # ==================== MCP ====================
     "mcp_servers": {
-        "type": "textarea", "label": "MCP Servers (JSON 数组)", "description": "每个元素：{\"name\":\"...\",\"command\":\"...\",\"args\":[...],\"env\":{},\"cwd\":\"...\",\"timeout\":30}",
+        "type": "textarea", "label": "MCP Servers (JSON 数组)", "description": "MCP 服务列表（JSON 数组），每项含名称、启动命令、参数与环境变量。",
         "default": "[]", "rows": 5, "group": "group_mcp",
     },
 
     # ==================== 工具调用 ====================
     "max_tool_rounds": {
         "type": "number", "label": "工具调用轮数上限",
-        "description": "一次回复里允许的「模型→调工具→回填→再判断」循环轮数（流式与非流式共用）。"
-                       "调大后多段式任务（如逐个展开引用的消息/@ 对象再作答）不会中途被截断，代价是极端情况下耗时与 token 增加",
+        "description": "一轮回复中「调工具、回填、再判断」的最大轮数。",
         "default": 5, "min": 1, "max": 20, "group": "group_tools",
     },
     "empty_reply_retries": {
         "type": "number", "label": "空回复重试次数",
-        "description": "请求成功结束却既无文本也无工具调用时，同一模型再试的次数（流式与非流式共用）。"
-                       "偶现的空回复多半是网关提前断流或只回了思考内容，重试一次即可避免把「暂时无法回答」发给用户；"
-                       "0 = 关闭重试（故障时会快一些失败）",
+        "description": "模型返回空内容时的重试次数。0 = 不重试。",
         "default": 1, "min": 0, "max": 3, "group": "group_tools",
     },
     "reasoning_overflow_retries": {
         "type": "number", "label": "思考吃满预算的收敛重试",
-        "description": "思考模型把 max_tokens 全花在 reasoning 里、正文一个字都没写出来时，"
-                       "追加一次「不要复述思考、直接给最终回答」的提醒再要一枪的次数（流式与非流式共用）。"
-                       "同样的 prompt 原样重试必然同样打满，所以这里换的是问法而不是重复；"
-                       "注意它只是尽力而为——预算真的不够时仍会失败，根治办法是把「模型」页的 max_tokens 调大"
-                       "或缩短上下文。0 = 关闭（只记日志、直接走兜底）",
+        "description": "思考占满输出、正文为空时的收敛重试次数。0 = 不重试。",
         "default": 1, "min": 0, "max": 2, "group": "group_tools",
     },
     "retry_profile": {
         "type": "select", "label": "重试档位",
-        "description": "一整轮对话最多能发几次请求、累计烧多少输入 token 的总闸门。"
-                       "节流：最多 2 次请求、不重试；均衡：4 次请求、同模型最多重试 1 次；"
-                       "抗压：6 次请求、同模型最多重试 3 次。"
-                       "闸门管的是**总账**——没有它，「HTTP 重试 × 空回复重试 × 收敛重试 × 回退模型数」"
-                       "会相乘成十几次请求，每次都带着全量上下文",
+        "description": "一轮对话的请求次数与输入 token 上限。抗压档更耐故障，消耗也更大。",
         "default": "balanced", "group": "group_tools",
         "options": {
             "thrifty": "节流（省钱优先）",
@@ -747,14 +722,12 @@ SCHEMA = {
     },
     "turn_token_budget": {
         "type": "number", "label": "单轮输入 Token 上限",
-        "description": "一轮对话（含所有重试与回退）累计输入 token 的上限，0 = 不设上限（只用档位的次数闸门）。"
-                       "超过就停止重试并如实写日志，而不是继续把同一份上下文重发一遍",
+        "description": "一轮对话累计输入 token 上限。0 = 不限制。",
         "default": 0, "min": 0, "max": 2000000, "group": "group_tools",
     },
     "image_understanding_enable": {
         "type": "boolean", "label": "图片理解（多模态同传）",
-        "description": "把本轮消息里的图片直接传给模型。仅对「模型」页勾选了 image 模态的模型生效；"
-                       "文本模型不受影响，仍显示 [图片] 占位",
+        "description": "把本轮图片直接传给模型，仅对支持图片的模型生效。",
         "default": True, "group": "group_tools",
     },
     "image_max_count": {
@@ -769,15 +742,12 @@ SCHEMA = {
     },
     "gif_understanding_enable": {
         "type": "boolean", "label": "动图/表情包拆帧理解",
-        "description": "把 GIF、动态 WebP、QQ 表情包拆成若干张静态帧一起传给模型。"
-                       "多数模型对 image/gif 只读第一帧，拆帧后才看得到整段表情变化。"
-                       "同样只对勾选了 image 模态的模型生效",
+        "description": "把动图拆成多帧一起传给模型，否则只能看到第一帧。",
         "default": True, "group": "group_tools",
     },
     "gif_max_frames": {
         "type": "number", "label": "动图最多拆几帧",
-        "description": "单条消息里所有动图共享这份帧数预算（等间隔采样，必含首尾帧）。"
-                       "帧数直接换算成 token，表情变化简单时 3~4 帧通常就够",
+        "description": "单条消息内所有动图共享的拆帧数，帧数越多消耗越大。",
         "default": 6, "min": 1, "max": 16, "group": "group_tools",
     },
     "gif_frame_max_edge": {
@@ -788,21 +758,17 @@ SCHEMA = {
     },
     "gif_probe_all_images": {
         "type": "boolean", "label": "所有图片都探测动图",
-        "description": "默认只对「.gif/.webp 后缀、[动画表情] 标注、sub_type=1、商城表情」这些线索命中的图片"
-                       "才下载确认；若你的 OneBot 实现不提供这些线索、动图识别不到，"
-                       "可打开本项让每张图都探测一次（代价：每张图多一次下载）",
+        "description": "对每张图都探测是否为动图。动图识别不到时可开启，代价是多一次下载。",
         "default": False, "group": "group_tools",
     },
     "history_background_enable": {
         "type": "boolean", "label": "注入在线聊天环境背景",
-        "description": "开启时额外注入「最近群聊记录」背景块（指代焦点行不受影响）。"
-                       "会话历史已是主来源；若发现同一批消息在两处重复出现，可关掉本项",
+        "description": "额外注入最近群聊记录作为背景。",
         "default": True, "group": "group_tools",
     },
     "tool_result_directive_enable": {
         "type": "boolean", "label": "工具结果附带回应要求",
-        "description": "在工具结果末尾拼一句「用你自己的口吻回应，不要复述/不要列条目」。"
-                       "工具结果之后没有新的用户发言，模型容易写成长串汇报；这句要求放在离生成最近的位置来压住它",
+        "description": "在工具结果后追加一句回应要求，避免模型写成长篇汇报。",
         "default": True, "group": "group_tools",
     },
     "tool_result_directive": {
@@ -833,7 +799,7 @@ SCHEMA = {
         "default": False, "group": "group_onebot",
     },
     "poke_cooldown_seconds": {
-        "type": "number", "label": "戳一戳节流(秒)", "description": "同一会话里对同一个人，该秒数内不重复戳一戳（0=不节流）；失败不占用冷却",
+        "type": "number", "label": "戳一戳节流(秒)", "description": "同一会话对同一人的戳一戳冷却。0 = 不节流。",
         "default": 20, "min": 0, "max": 600, "group": "group_onebot",
     },
 
@@ -865,7 +831,7 @@ SCHEMA = {
         },
     },
     "meta_mask_nickname": {
-        "type": "boolean", "label": "句子型昵称脱敏", "description": "开启后把像句子/超长的昵称替换为 用户<QQ>，避免昵称内容被当作对话内容；普通短昵称保留（默认开启）",
+        "type": "boolean", "label": "句子型昵称脱敏", "description": "把像句子或超长的昵称替换为「用户+QQ号」。",
         "default": True, "group": "group_memory",
     },
 }
