@@ -1,40 +1,45 @@
 @echo off
 rem ============================================================
-rem  QQBot Next - launcher（薄壳）
-rem  真正的逻辑全在 start.py：建 venv → 升 pip/setuptools →
-rem  查/装依赖 → 启动 main.py。这里只负责找到解释器并转交，
-rem  所以 bat / sh 不可能再各写一套而漂移。
+rem  QQBot Next - launcher (thin shell)
+rem  All real logic lives in start.py: create venv -> upgrade pip
+rem  and setuptools -> check/install deps -> launch main.py.
+rem  This file only locates an interpreter and hands over, so the
+rem  bat and sh wrappers can never drift apart.
 rem
-rem  用系统 Python 跑 start.py（而不是 venv 里的）：venv 还没建、
-rem  或者已经坏掉时，venv 解释器根本起不来，而 start.py 恰恰要负责
-rem  把它重建出来。start.py 内部会自动切到 venv 解释器装依赖和启动。
+rem  KEEP THIS FILE ASCII-ONLY WITH CRLF LINE ENDINGS.
+rem  cmd.exe reads .bat in the console codepage (cp936 on Chinese
+rem  Windows): UTF-8 Chinese here becomes garbage commands, and an
+rem  LF-only .bat breaks parsing of parenthesised blocks.
 rem ============================================================
 setlocal EnableExtensions
 cd /d "%~dp0"
 
 set "LAUNCHER="
-where py >nul 2>&1 && set "LAUNCHER=py -3"
-if not defined LAUNCHER where python >nul 2>&1 && set "LAUNCHER=python"
+where py >nul 2>&1
+if not errorlevel 1 set "LAUNCHER=py -3"
+if not defined LAUNCHER where python >nul 2>&1
+if not defined LAUNCHER if not errorlevel 1 set "LAUNCHER=python"
 if not defined LAUNCHER if exist "venv\Scripts\python.exe" set "LAUNCHER=venv\Scripts\python.exe"
-
-if not defined LAUNCHER (
-    echo.
-    echo   [FAIL] 找不到 Python 3.10+。
-    echo          安装时请勾选 "Add python.exe to PATH"，然后重跑 start.bat。
-    pause
-    exit /b 1
-)
+if not defined LAUNCHER goto :no_python
 
 %LAUNCHER% start.py %*
 set "RC=%errorlevel%"
 
-rem 用户按 Ctrl+C 是正常退出方式（框架会自己顺序关闭），不该再要一次回车。
+rem Ctrl+C is a normal way to stop the bot: do not ask for another key.
 if "%RC%"=="3221225786" exit /b 0
 if "%RC%"=="130" exit /b 0
-if not "%RC%"=="0" (
-    echo.
-    echo   start.py 退出码 %RC%
-    pause
-)
+if not "%RC%"=="0" goto :failed
+exit /b %RC%
+
+:failed
+echo.
+echo   start.py exited with code %RC%
 pause
 exit /b %RC%
+
+:no_python
+echo.
+echo   [FAIL] Python 3.10+ not found.
+echo          Install it with "Add python.exe to PATH" ticked, then rerun start.bat.
+pause
+exit /b 1

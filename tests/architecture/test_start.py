@@ -331,3 +331,31 @@ def test_main_reports_missing_check_deps_script(tmp_path, monkeypatch):
 )
 def test_parse_args_toggles(argv, expected):
     assert start.parse_args(argv).check is expected
+
+
+# ==================== 批处理壳的编码守卫 ====================
+
+
+def test_windows_wrappers_are_ascii_and_crlf():
+    """``.bat`` 必须纯 ASCII + CRLF，否则 cmd.exe 直接报"不是内部或外部命令"。
+
+    实测踩过：把 ``start.bat`` 写成 UTF-8（含中文注释）+ LF 换行后，双击运行得到
+
+        '氦锛?rem' 不是内部或外部命令
+        'em' 不是内部或外部命令
+        此时不应有 &&。
+
+    ——cmd.exe 按控制台代码页（中文系统 cp936）读 .bat，UTF-8 中文变成乱码**命令**，
+    LF-only 又把 ``rem`` 行和括号块拆断。``.gitattributes`` 已固化
+    ``*.bat text eol=crlf``，这里再加一层内容守卫，防止有人只改文件不管编码。
+    面向用户的中文提示一律留在 ``start.py``（Python 自己处理编码）。
+    """
+    root = _repo_root()
+    bats = sorted(root.glob("*.bat"))
+    assert bats, "根目录应当有批处理启动壳"
+
+    for path in bats:
+        raw = path.read_bytes()
+        assert all(byte < 128 for byte in raw), f"{path.name} 必须纯 ASCII（cmd.exe 按控制台代码页读 .bat）"
+        assert b"\r\n" in raw, f"{path.name} 必须使用 CRLF 换行"
+        assert b"\n" not in raw.replace(b"\r\n", b""), f"{path.name} 存在裸 LF 换行"
