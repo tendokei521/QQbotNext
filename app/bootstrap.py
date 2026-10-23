@@ -364,6 +364,13 @@ async def run(settings: Settings | None = None) -> None:
     global _container
     settings = settings or load_settings()
     setup_logging(settings.log_dir)
+
+    # 令牌为空则自动生成并写回 .env（只在此处调用：测试直接 create_app，不该被鉴权拦）。
+    # 就地更新 settings，后续 build_container 注册的就是这个已带令牌的实例。
+    from app.core.webui_token import ensure_webui_token, print_webui_token_banner
+
+    token_state = ensure_webui_token(settings)
+
     _container = build_container(settings)
     set_active(_container)
     db = _container.get(Database)
@@ -402,7 +409,9 @@ async def run(settings: Settings | None = None) -> None:
 
     app = create_app(_container)
     host, port = settings.webui_host, settings.webui_port
-    logger.info(f"WebUI 启动中: http://{host}:{port}" + (f"（token: {'已设置' if settings.webui_token else '未设置'}）"))
+    logger.info(f"WebUI 启动中: http://{host}:{port}（token: 已设置）")
+    # 令牌明文只上控制台，刻意走 print 不落 logs/*.log
+    print_webui_token_banner(token_state, host, port)
     server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="info", access_log=False))
 
     try:
