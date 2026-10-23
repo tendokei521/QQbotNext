@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import socket
 import time
@@ -272,4 +273,59 @@ async def test_forward_account_never_opens_listener():
         assert info["status"] == "error"
         assert gw.reverse_servers == {}
     finally:
+        await gw.shutdown()
+
+
+async def test_second_client_replaces_first_without_duplicate_dispatch():
+    """对端重启时旧连接可能还没超时：新接入必须接管，事件不能派发两次。
+
+    回归点：两条读循环并存时，群里每条消息都会被处理两遍（重复回复）；且旧循环
+    收尾时若拿 ``conn.websocket`` 当自己，会把刚接上的新连接关掉。
+    """
+    port = _free_port()
+    gw = _gateway()
+    dispatched: list = []
+
+    async def handler(event):
+        dispatched.append(event)
+
+    gw.dispatch_handler = handler
+    await gw.add_bot(f"ws://127.0.0.1:{port}/onebot/v11/ws", None, index=0, conn_mode="reverse")
+    assert await gw.connect_bot(0) is True
+
+    def _msg(text: str) -> str:
+        return json.dumps({
+            "post_type": "message", "message_type": "private",
+            "user_id": 100, "self_id": 10001, "time": int(time.time()),
+            "message": [{"type": "text", "data": {"text": text}}],
+        })
+
+    first_stop = asyncio.Event()
+    first = asyncio.create_task(_FakeOneBot(
+        f"ws://127.0.0.1:{port}/onebot/v11/ws").run(stop=first_stop))
+    try:
+        assert await _wait(lambda: gw.connections[0].status == "connected")
+        old_ws = gw.connections[0].websocket
+
+        # 第二条连接（模拟 NapCat 重启时的短暂双连）
+        async with websockets.connect(
+            f"ws://127.0.0.1:{port}/onebot/v11/ws",
+            additional_headers={"X-Self-ID": "10001", "X-Client-Role": "Universal"},
+        ) as second:
+            assert await _wait(lambda: gw.connections[0].websocket not in (None, old_ws)), \
+                "新接入必须接管该账号的连接"
+            # 旧连接已被关掉：它的读循环随之结束，不会与新连接并存
+            assert await _wait(lambda: old_ws.close_code is not None)
+
+            await second.send(_msg("once"))
+            assert await _wait(lambda: len(dispatched) == 1)
+            await asyncio.sleep(0.2)
+            assert len(dispatched) == 1, f"同一条消息只能派发一次，实际 {len(dispatched)}"
+            assert gw.connections[0].status == "connected"
+            assert gw.get_bots_info()[0]["listening"] is True
+    finally:
+        first_stop.set()
+        first.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await first
         await gw.shutdown()

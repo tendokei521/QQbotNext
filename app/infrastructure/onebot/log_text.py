@@ -2,20 +2,22 @@
 
 ## 为什么单独成文件
 
-`gateway.py` 的主类是连接管理（715 行：连接、去重、重连、僵尸扫描），末尾这三个函数
-只负责「把一条消息/事件渲染成一行日志」。日志格式会反复调（截断长度、敏感字段过滤），
+`gateway.py` 的主类是连接管理（连接、重连、僵尸扫描），末尾这几个函数只负责
+「把一条消息/事件渲染成一行日志」。日志格式会反复调（截断长度、敏感字段过滤），
 混在连接管理里每次都要拉到文件底部。
 
 ## 渲染口径
 
 - `_message_log_text`：群/私聊消息一行（发送者 + 正文，超长截断）；
 - `_raw_payload_text`：原始 payload 的去敏感摘要（debug 视图用）；
-- `_event_text`：通知 / 申请 / 其它事件的通用一行。
+- `_event_text`：通知 / 申请 / 其它事件的通用一行；
+- `received_log_lines`：把上面三者拼成「前缀 + 正文」，网关只管发出去。
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 
 from app.domain.events import BaseEvent, MessageEvent, NoticeEvent, RequestEvent
 from app.infrastructure.onebot.codec import event_name
@@ -50,6 +52,51 @@ def _raw_payload_text(event: BaseEvent, limit: int = 500) -> str:
     if len(text) > limit:
         return f"{text[:limit]}…(共 {len(text)} 字符)"
     return text
+
+
+def received_log_lines(
+    conn,
+    event: BaseEvent,
+    group_name_of: Callable[[int], str] | None = None,
+) -> list[tuple[str, str]]:
+    """把一条事件渲染成待输出的 (日志前缀, 正文) 列表；空列表 = 这条不用打日志。
+
+    前缀里带 ``[#索引]`` 与目标 id（群名 + 群号 / 私聊无群名），正文里带发送者。
+    渲染与写出分开：网关只管循环 ``recv_logger.prefix(prefix).info(text)``，
+    格式改动（加时间、改缩略规则）只动这里。
+    """
+    if isinstance(event, MessageEvent) and event.event_type in ("message_group", "message_private"):
+        text = _message_log_text(event).strip()
+        if not text:
+            return []
+        name = event.user.card or event.user.nickname or ""
+        prefix = f"接收<-] [#{conn.index}"
+        if event.event_type == "message_group":
+            group_name = group_name_of(event.group.group_id) if group_name_of else ""
+            prefix += (f"] [{group_name}({event.group.group_id})" if group_name
+                       else f"[{event.group.group_id}]")
+        name_info = f"{name}({event.user_id})" if name else f"{event.user_id}"
+        return [(prefix, f"{name_info}: {text}")]
+
+    if isinstance(event, MessageEvent):
+        # 机器人自己发的消息不进入 recv：已由 API 发送侧 [发送->] 覆盖
+        return []
+
+    if event.event_type == "bot_heartbeat":
+        return []
+    text = _event_text(event)
+    if not text:
+        return []
+    if event_name(event.event_type) == "未知类型":
+        # 未收录的类型只打得出「未知类型 <uid>」这种没信息量的文本；端侧排查
+        # （线上那条「未知类型 3437542570」实为端重启前推的 session-closed 通知）
+        # 必须能看到原始 payload，否则只能靠时间猜。
+        text = f"{text} | raw={_raw_payload_text(event)}"
+    prefix = f"通知<-] [#{conn.index}"
+    group_id = getattr(event, "group_id", 0) or 0
+    if group_id:
+        prefix += f"] [{group_id}"
+    return [(prefix, text)]
 
 
 def _event_text(event: BaseEvent) -> str:

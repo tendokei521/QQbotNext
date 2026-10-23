@@ -35,11 +35,16 @@ from app.domain.events import BaseEvent, MessageEvent
 from app.infrastructure.cache import Cache
 from app.infrastructure.config.config_service import mask_ws_url
 from app.infrastructure.onebot.client import BotConnection
-from app.infrastructure.onebot.codec import decode, event_name
+from app.infrastructure.onebot.codec import decode
 from app.infrastructure.onebot.endpoint import FORWARD, is_reverse, normalize_mode
 from app.infrastructure.onebot.forward import connect_forward
 from app.infrastructure.onebot.introspect import bot_info, bots_info, conn_mode, effective_bot_id
-from app.infrastructure.onebot.log_text import _event_text, _message_log_text, _raw_payload_text  # noqa: F401 - 重导出保持原路径可用
+from app.infrastructure.onebot.log_text import (  # noqa: F401 - 原路径重导出，第三方插件仍在 import
+    _event_text,
+    _message_log_text,
+    _raw_payload_text,
+    received_log_lines,
+)
 from app.infrastructure.onebot.reverse_link import ReverseLink
 
 LoginHandler = Callable[[BotConnection], Awaitable[None]]
@@ -402,13 +407,15 @@ class OneBotGateway:
         conn = self.connections.get(index)
         if not conn or not conn.websocket:
             return
+        # 本循环只读这一条连接：反向账号可能被「新接入」替换，收尾靠 identity 判断
+        ws = conn.websocket
+        me = asyncio.current_task()
         bot_logger = self.log.add_info(f"#{index}")
         conn.bot_id = 0
         start_type = False
         login_tasks: list[asyncio.Task] = []
         if login_immediately:
-            # 反向连接：OneBot 实现可能十几秒才推第一个事件（心跳/消息），
-            # 一直不登录就会让 WebUI 长时间显示「未登录」。握手成功即主动拉一次。
+            # 反向连接：OneBot 实现可能十几秒才推第一个事件，握手成功即主动拉一次
             start_type = True
             login_tasks = [
                 asyncio.create_task(self._get_login_info(conn)),
@@ -427,7 +434,7 @@ class OneBotGateway:
         connection_ended = False
 
         try:
-            async for message in conn.websocket:
+            async for message in ws:
                 try:
                     msg_dict = json.loads(message)
                 except json.JSONDecodeError:
@@ -465,17 +472,17 @@ class OneBotGateway:
                         conn.status = "error"
                         conn.last_error = reason
                         await self._notify_status(conn, "error", reason)
-                        if conn.websocket:
-                            try:
-                                await conn.websocket.close()
-                            except Exception as e:
-                                # 关闭失败仅记 debug：连接随后会被置空并由监督循环重建，
-                                # 但留痕便于排查"连接未真正释放"类问题
-                                logger.add_info(f"#{conn.index}").debug(
-                                    f"[Gateway] 关闭异常连接失败（已忽略）: {e}"
-                                )
+                        try:
+                            await ws.close()
+                        except Exception as e:
+                            # 关闭失败仅记 debug：连接随后会被置空并由监督循环重建，
+                            # 但留痕便于排查"连接未真正释放"类问题
+                            logger.add_info(f"#{conn.index}").debug(
+                                f"[Gateway] 关闭异常连接失败（已忽略）: {e}"
+                            )
+                        if conn.websocket is ws:
                             conn.websocket = None
-                        self._reset_conn_state(conn)
+                            self._reset_conn_state(conn)
                         connection_ended = True
                         break
 
@@ -490,7 +497,7 @@ class OneBotGateway:
             raise
         except Exception as e:
             connection_ended = True
-            await self._handle_connection_end(conn, index, f"{e}", bot_logger, abnormal=True)
+            await self._handle_connection_end(conn, index, f"{e}", bot_logger, abnormal=True, ws=ws)
         else:
             if not connection_ended:
                 # 关键：websockets 的 Connection.__aiter__ 会把「正常关闭（1000）」的
@@ -500,7 +507,7 @@ class OneBotGateway:
                 # 立即失败。真实案例：远端只重启约 7 秒，客户端僵死 6 小时以上，
                 # 而且日志里连一条断线记录都没有。
                 await self._handle_connection_end(
-                    conn, index, self._close_reason(conn), bot_logger, abnormal=False
+                    conn, index, self._close_reason(ws), bot_logger, abnormal=False, ws=ws
                 )
         finally:
             worker.cancel()
@@ -509,17 +516,25 @@ class OneBotGateway:
             for t in login_tasks:
                 if not t.done():
                     t.cancel()
-            self.bot_server_tasks.pop(f"{index}", None)
+            # 只清理自己的登记项：被新连接替换后，这一格已经是新任务
+            if self.bot_server_tasks.get(f"{index}") is me:
+                self.bot_server_tasks.pop(f"{index}", None)
 
     async def _handle_connection_end(
-        self, conn, index: int, reason: str, bot_logger, *, abnormal: bool
+        self, conn, index: int, reason: str, bot_logger, *, abnormal: bool, ws: Any = None
     ) -> None:
         """连接结束的统一收尾：留痕 → 置掉线态 → 广播 → 清 ws → 在途请求立即失败。
 
         异常断线（ConnectionClosedError 等）与正常关闭（1000）**必须**走同一套收尾：
         前者由 ``except`` 分支触发，后者由 ``async for`` 正常退出的 ``else`` 分支触发。
         少了后者就是「僵尸连接」——状态仍 connected，监督循环永远不重连。
+
+        ``ws`` 是**本次**结束的连接：反向模式下同一账号可能已被新连接接管，
+        此时这条旧连接的收尾不得再改状态、更不得关闭新连接（否则新连接刚接上就被掐死）。
         """
+        if ws is not None and conn.websocket is not None and conn.websocket is not ws:
+            bot_logger.info("旧连接已结束（当前已有新连接接管），跳过状态收敛")
+            return
         text = f"WebSocket 连接结束: {reason}"
         if abnormal:
             bot_logger.error(text)
@@ -528,13 +543,15 @@ class OneBotGateway:
             # 但用 WARNING，不必惊动 errors.log
             bot_logger.warning(text)
         await self._mark_offline(conn, reason)
-        if conn.websocket:
+        target = conn.websocket if ws is None else ws
+        if target is not None:
             try:
-                await conn.websocket.close()
+                await target.close()
             except Exception as e:
                 # 关闭失败仅记 debug：连接随后会被置空并由监督循环重建，但留痕便于排查
                 bot_logger.debug(f"[Gateway] 关闭已结束的连接失败（已忽略）: {e}")
-            conn.websocket = None
+            if conn.websocket is target:
+                conn.websocket = None
         # 清空登录态 + 让在途 API 请求立即失败（与 disconnect_bot 一致）
         self._reset_conn_state(conn)
 
@@ -552,10 +569,10 @@ class OneBotGateway:
         await self._notify_status(conn, "error", reason)
 
     @staticmethod
-    def _close_reason(conn) -> str:
+    def _close_reason(ws) -> str:
         """正常关闭的可读原因：带上 close_code/close_reason，便于定位是哪一端关的。"""
-        code = getattr(conn.websocket, "close_code", None)
-        reason = getattr(conn.websocket, "close_reason", None)
+        code = getattr(ws, "close_code", None)
+        reason = getattr(ws, "close_reason", None)
         if code is None:
             return "连接已结束（未收到关闭帧）"
         suffix = f" {reason}" if reason else ""
@@ -592,34 +609,11 @@ class OneBotGateway:
         # 转发消息拉取
         if isinstance(event, MessageEvent) and event.event_type in ("message_group", "message_private"):
             event = await self._attach_forward_msg(event, conn)
-            # 日志：[接收<-][#idx][群名] 名字:内容（私信无群名）
-            text = _message_log_text(event).strip()
-            if text:
-                name = event.user.card or event.user.nickname or ""
-                prefix = f"接收<-] [#{conn.index}"
-                if event.event_type == "message_group":
-                    group_name = self._lookup_group_name(conn, event.group.group_id)
-                    prefix += f"] [{group_name}({event.group.group_id})" if group_name else f"[{event.group.group_id}]"
-                name_info = f"{name}({event.user_id})" if name else f"{event.user_id}"
-                recv_logger.prefix(prefix).info(f"{name_info}: {text}")
-        elif isinstance(event, MessageEvent) and event.event_type == "bot_send_msg":
-            # 机器人自己发送的消息不进入 recv，已由 API 发送侧 [发送->] 覆盖
-            pass
-        elif isinstance(event, BaseEvent):
-            if event.event_type not in ("bot_heartbeat",):
-                text = _event_text(event)
-                if text:
-                    # 与消息一致：群事件前缀拼 [群id]（notice 无群名，仅 id）
-                    prefix = f"通知<-] [#{conn.index}"
-                    group_id = getattr(event, "group_id", 0) or 0
-                    if group_id:
-                        prefix += f"] [{group_id}"
-                    if event_name(event.event_type) == "未知类型":
-                        # 未收录的类型只打得出「未知类型 <uid>」这种没信息量的文本。
-                        # 端侧排查（线上那条「未知类型 3437542570」实为 SnowLuma 重启前
-                        # 推的 session-closed 通知）必须能看到原始 payload，否则只能靠时间猜。
-                        text = f"{text} | raw={_raw_payload_text(event)}"
-                    recv_logger.prefix(prefix).info(text)
+        # 日志：[接收<-][#idx][群名] 名字:内容（渲染口径见 log_text.received_log_lines）
+        for prefix, text in received_log_lines(
+            conn, event, lambda gid: self._lookup_group_name(conn, gid)
+        ):
+            recv_logger.prefix(prefix).info(text)
 
         # 忽略标记检查
         if self._is_ignore(event):

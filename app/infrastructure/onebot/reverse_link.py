@@ -23,7 +23,7 @@ import time
 from typing import Any
 
 from app.infrastructure.config.config_service import mask_ws_url
-from app.infrastructure.onebot.reverse import ReverseClient, ReverseWsServer
+from app.infrastructure.onebot.reverse import CLOSE_REPLACED, ReverseClient, ReverseWsServer
 
 
 class ReverseLink:
@@ -134,7 +134,16 @@ class ReverseLink:
                 await websocket.close(code=4001, reason="账号不存在")
             return
 
+        # 同一账号只允许一条反向连接。OneBot 实现重启时常见「旧连接尚未超时、
+        # 新连接已到」，两条读循环并存会把每条事件派发两次（群里会看到重复回复）。
+        # 新连接优先：先接管，再关旧连接——旧循环的收尾会因 identity 不匹配而跳过。
+        previous = conn.websocket
         conn.websocket = websocket
+        if previous is not None and previous is not websocket:
+            host.log.info(f"机器人索引: {index} 旧反向连接已被新接入替换，正在关闭旧连接")
+            with contextlib.suppress(Exception):
+                await previous.close(code=CLOSE_REPLACED, reason="被新连接替换")
+
         conn.status = "connected"
         conn.reconnect_attempts = 0
         conn.last_error = None
@@ -154,7 +163,9 @@ class ReverseLink:
         except asyncio.CancelledError:
             raise
         finally:
-            host.bot_server_tasks.pop(f"{index}", None)
+            # 只清理自己的登记项：被替换后这一格已经是别的任务
+            if host.bot_server_tasks.get(f"{index}") is task:
+                host.bot_server_tasks.pop(f"{index}", None)
 
 
 def _scoped_log(host: Any, index: int):
