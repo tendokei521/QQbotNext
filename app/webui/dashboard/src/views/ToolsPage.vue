@@ -8,6 +8,7 @@ const router = useRouter()
 const tools = useToolsStore()
 
 const TABS: { value: ToolTab; to: string; label: string; icon: string }[] = [
+  { value: 'overview', to: '/tools/overview', label: '总览', icon: 'mdi-format-list-bulleted-triangle' },
   { value: 'system', to: '/tools/system', label: 'System Tools', icon: 'mdi-cog-outline' },
   { value: 'onebot', to: '/tools/onebot', label: 'OneBot Tools', icon: 'mdi-robot-industrial' },
   { value: 'mcp', to: '/tools/mcp', label: 'MCP Tools', icon: 'mdi-server-network' },
@@ -15,6 +16,7 @@ const TABS: { value: ToolTab; to: string; label: string; icon: string }[] = [
 ]
 
 const activeTab = computed<ToolTab>(() => {
+  if (route.path.startsWith('/tools/overview')) return 'overview'
   if (route.path.startsWith('/tools/onebot')) return 'onebot'
   if (route.path.startsWith('/tools/mcp')) return 'mcp'
   if (route.path.startsWith('/tools/module')) return 'module'

@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 
 const STORAGE_KEY = 'qqbot_tool_page_state'
 
-export type ToolTab = 'system' | 'onebot' | 'mcp' | 'module'
+export type ToolTab = 'overview' | 'system' | 'onebot' | 'mcp' | 'module'
 
 interface ToolsPageState {
   activeTab: ToolTab
@@ -15,7 +15,7 @@ interface ToolsPageState {
 
 function readState(): ToolsPageState {
   const fallback: ToolsPageState = {
-    activeTab: 'system',
+    activeTab: 'overview',
     systemCollapsed: {},
     onebotCollapsed: {},
     mcpCollapsed: {},
@@ -50,6 +50,7 @@ export const useToolsStore = defineStore('tools', {
       this.persist()
     },
     setCollapsed(kind: ToolTab, collapsed: Record<string, boolean>) {
+      if (kind === 'overview') return
       if (kind === 'system') this.systemCollapsed = collapsed
       else if (kind === 'onebot') this.onebotCollapsed = collapsed
       else if (kind === 'mcp') this.mcpCollapsed = collapsed
@@ -57,6 +58,7 @@ export const useToolsStore = defineStore('tools', {
       this.persist()
     },
     collapsedOf(kind: ToolTab): Record<string, boolean> {
+      if (kind === 'overview') return {}
       if (kind === 'system') return this.systemCollapsed
       if (kind === 'onebot') return this.onebotCollapsed
       if (kind === 'mcp') return this.mcpCollapsed

@@ -63,7 +63,13 @@ const router = createRouter({
           component: () => import('@/views/ToolsPage.vue'),
           meta: { title: 'Tool 管理' },
           children: [
-            { path: 'system', name: 'tools-system', component: () => import('@/views/SystemToolsPage.vue'), meta: { title: 'System Tools' } },
+            {
+        path: 'overview',
+        name: 'tools-overview',
+        component: () => import('@/components/tools/ToolsOverview.vue'),
+        meta: { title: '工具总览' },
+      },
+      { path: 'system', name: 'tools-system', component: () => import('@/views/SystemToolsPage.vue'), meta: { title: 'System Tools' } },
             { path: 'onebot', name: 'tools-onebot', component: () => import('@/views/OnebotToolsPage.vue'), meta: { title: 'OneBot Tools' } },
             { path: 'mcp', name: 'tools-mcp', component: () => import('@/views/McpToolsPage.vue'), meta: { title: 'MCP Tools' } },
             { path: 'module', name: 'tools-module', component: () => import('@/views/ModuleToolsPage.vue'), meta: { title: '模块 Tools' } },
