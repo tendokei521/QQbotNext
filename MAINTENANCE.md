@@ -271,8 +271,14 @@ venv\Scripts\python.exe -c "import sqlite3; c=sqlite3.connect('data/app.db'); pr
 
 ## 13. 安全建议
 
-- **默认只绑 `127.0.0.1`**；需要远程管理时，用反向代理（Nginx/Caddy）+ HTTPS，并设置 `WEBUI_TOKEN`。
-- **token 鉴权**：设置 `WEBUI_TOKEN` 后，所有 `/api/*` 与 `/ws/logs` 需携带 `Authorization: Bearer <token>`（前端页面本身无需 token）。
+- **默认只绑 `127.0.0.1`**；需要远程管理时，用反向代理（Nginx/Caddy）+ HTTPS。
+- **登录页鉴权**：`WEBUI_TOKEN` 为空时首次启动自动生成并写回 `.env`（令牌只打印到**控制台**，
+  不写 `logs/*.log`）。浏览器访问 `/` 会 302 到独立登录页 `/login`，粘贴令牌即登录；
+  登录后靠 **HttpOnly 签名 cookie** 鉴权，令牌对页面 JS 不可见（从前的 `window.WEBUI_TOKEN`
+  注入已移除）。有效期 7 天，`/logout` 可退出；同一来源 5 分钟内失败 10 次会被限流（429）。
+- **脚本 / 第三方调用**：`Authorization: Bearer <token>`、Basic（password 位放令牌）、
+  `?token=<token>` 三种通道仍并存；`/api/*` 与 `/ws/logs` 均校验。
+- 换掉 `WEBUI_TOKEN` 会立即让所有已登录会话失效（cookie 签名密钥由令牌派生）。
 - 不要在群里转发 `.env` / `data/app.db`；`data/`、`logs/` 已在 `.gitignore`。
 
 ## 14. 测试

@@ -26,19 +26,33 @@
 
 ## 1. 认证方式
 
-集成于 `app/webui/app.py` 的 `_install_auth_middleware`（HTTP）与 `app/webui/ws.py`。
+集成于 `app/webui/app.py` 的 `_install_auth_middleware`（HTTP）、`_install_login_routes`（登录页）
+与 `app/webui/ws.py`；签名/校验逻辑集中在 `app/webui/auth.py`。
 
-- **令牌来源**：`WEBUI_TOKEN`（配置 `core.settings.webui_token`）。**为空则不启用鉴权**；非空时所有 `/api/*` 与 `/ws/logs` 强制校验。
-- **令牌下发**：`GET /` 不鉴权，服务端将令牌经 Jinja 注入 `window.WEBUI_TOKEN = {{ webui_token | tojson }}`，由前端持有。
-- **HTTP 携带方式**：两种皆可，二选一：
+- **令牌来源**：`WEBUI_TOKEN`（配置 `core.settings.webui_token`）。**为空则不启用鉴权**（测试与纯本机调试）；
+  真实启动时 `bootstrap.run` 会在为空时**自动生成并写回 `.env`**（见 `app/core/webui_token.py`）。
+- **独立登录页**：`GET /login` 由后端直接输出独立 HTML（不依赖 dashboard 构建产物），
+  提交后 `POST /login` 校验令牌并下发 **HttpOnly 签名会话 cookie**（`qqbot_webui_session`，
+  `SameSite=Lax`，7 天有效）。**令牌对页面 JS 不可见**，首页不再注入 `window.WEBUI_TOKEN`。
+- **HTTP 凭据通道（并存，任一有效即可）**：
+  - 会话 cookie（浏览器登录后自动携带）
   - `Authorization: Bearer <token>`
-  - 查询参数 `?token=<token>`（适用于无法改 header 的场景）
-- **鉴权失败**：HTTP 中间件返回 `401 {"status":"error","message":"未授权"}`。鉴权中间件只拦截以 `/api` 开头或恰为 `/ws/logs` 的路径；`/`,`/static/*` 不鉴权。
-- **WebSocket 携带方式**：HTTP 中间件对 WS scope 不生效，故在 `ws.py` 端点内**自行校验**，同样两种：
+  - `Authorization: Basic base64(任意用户名:<token>)`（password 位放令牌）
+  - 查询参数 `?token=<token>`（适用于 `<img>`、无法改 header 的场景）
+- **鉴权失败分流**（未认证时按路径决定，不再弹浏览器原生 Basic 框）：
+  - `/api/*` → `401 {"status":"error","message":"未授权"}`（前端 axios 依赖明确错误码）
+  - 页面请求（Accept 含 `text/html`）→ `302 /login?next=<原路径>`
+  - 静态资源等 → `401`（不能 302 成 HTML，否则浏览器报 MIME 错误）
+- **登出**：`GET|POST /logout` → 清 cookie 并 `303 /login`。
+- **登录态探测**：`GET /api/auth/session` → `{"authenticated": bool, "auth_enabled": bool}`，不返回令牌。
+- **登录限流**：同一来源 5 分钟内失败 10 次后返回 `429` + `Retry-After`（进程内计数）。
+- **WebSocket 携带方式**：HTTP 中间件对 WS scope 不生效，故在 `ws.py` 端点内**自行校验**：
+  - 会话 cookie（浏览器登录后同源握手自动携带）
   - 连接头 `Authorization: Bearer <token>`
   - 查询参数 `?token=<token>`
   - 校验失败：`websocket.close(code=4401, reason="未授权")`。
-- 前端统一封装：`api/http.ts` 的 axios 实例自动附 `Authorization: Bearer`；`api/socket.ts` 在无可用 header 场景把 token 拼进 url 查询串。
+- 前端统一封装：`api/http.ts` 的 axios 实例自动附 `Authorization: Bearer`（有令牌时）
+  并在收到 401 时整页跳登录页；`api/socket.ts` 在无可用 header 场景把 token 拼进 url 查询串。
 
 ---
 

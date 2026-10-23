@@ -30,7 +30,8 @@ pnpm build      # 产物输出 dist/，FastAPI 挂载后访问 /
 
 构建产物由 `app/webui/app.py` 自动挂载：
 
-- `dashboard/dist/index.html` 存在时 `/` 渲染新版 Dashboard（注入 `window.WEBUI_TOKEN`）
+- `dashboard/dist/index.html` 存在时 `/` 渲染新版 Dashboard（**不再注入 `window.WEBUI_TOKEN`**，
+  鉴权改由登录页签发的 HttpOnly 会话 cookie 承担）
 - `dist` 缺失时 `/` 返回 503 + 一段「请先 `cd dashboard && pnpm install && pnpm build`」的提示页
 - 静态资源经根挂载提供（`/assets/*`）
 
