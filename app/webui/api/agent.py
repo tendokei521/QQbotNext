@@ -123,6 +123,17 @@ async def agent_config_update(request: Request, bot_id: int | None = Depends(par
     incoming_config = data.get("config", {}) or {}
     for key in LEGACY_LLM_CONNECTION_KEYS:
         incoming_config.pop(key, None)
+    # 模块拥有的键不许写进 agent 配置（否则界面写一处、策略读另一处 → 关了还能用）
+    from app.agent.config import module_owned_keys
+
+    owned = module_owned_keys()
+    rejected = sorted(k for k in incoming_config if k in owned)
+    if rejected:
+        return _err(
+            400,
+            "这些配置已归属模块，请到对应模块的配置页修改："
+            + "、".join(rejected),
+        )
     for key, value in incoming_config.items():
         field = SCHEMA.get(key)
         if isinstance(field, dict) and field.get("type") == "password" and value == _PASSWORD_MASK:
@@ -277,7 +288,73 @@ async def agent_onebot_tools(request: Request, bot_id: int | None = Depends(pars
     })
 
 
-# ==================== 统一 Tool 管理：系统 / 模块 / MCP 工具清单 ====================
+# ==================== 统一 Tool 管理：系统 / 模块 / OneBot / MCP 工具清单 ====================
+
+@router.get("/tools")
+async def agent_tools_all(
+    request: Request,
+    bot_id: int | None = Depends(parse_bot_id),
+    agent_manager=Depends(get_agent_manager),
+):
+    """**所有来源**的工具及其状态（显示即真相）。
+
+    每项都带 `reason` / `reason_text`，所以页面不必再自己推断"为什么不可用"。
+    """
+    runtime, _ = _runtime(agent_manager, bot_id)
+    if runtime is None:
+        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+
+    from app.agent.tools.state import resolve_all_tool_states
+
+    states = [s.to_dict() for s in resolve_all_tool_states(runtime)]
+    summary: dict[str, int] = {}
+    for item in states:
+        summary[item["source"]] = summary.get(item["source"], 0) + 1
+    return JSONResponse(
+        content={
+            "ok": True,
+            "total": len(states),
+            "available": sum(1 for s in states if s["available"]),
+            "by_source": summary,
+            "tools": states,
+        }
+    )
+
+
+@router.post("/tools/toggle")
+async def agent_tool_toggle(
+    request: Request,
+    bot_id: int | None = Depends(parse_bot_id),
+    agent_manager=Depends(get_agent_manager),
+):
+    """唯一的 per-tool 开关写入口（写进用户总表 `tools_disabled`）。"""
+    runtime, _ = _runtime(agent_manager, bot_id)
+    if runtime is None:
+        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    name = str((data or {}).get("name", "") or "").strip()
+    if not name:
+        return _err(400, "缺少工具名 name")
+    enabled = bool((data or {}).get("enabled", True))
+
+    from app.agent.tools.state import resolve_tool_state, set_tool_disabled
+
+    set_tool_disabled(runtime, name, disabled=not enabled)
+    state = resolve_tool_state(runtime, name=name, source=str((data or {}).get("source", "") or ""))
+    return JSONResponse(
+        content={
+            "ok": True,
+            "status": "success",
+            "message": f"工具 {name} 已{'启用' if enabled else '关闭'}",
+            "state": state.to_dict(),
+        }
+    )
+
+
+
 
 @router.get("/system/tools")
 async def agent_system_tools(request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):

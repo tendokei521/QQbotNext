@@ -306,6 +306,22 @@ def _pick(candidates: list[tuple[dict, str]], fallback: Any) -> Any:
     return fallback
 
 
+def module_owned_keys() -> frozenset[str]:
+    """所有已被模块接管的配置键（写进 agent 配置无效，必须写模块配置）。"""
+    try:
+        from app.agent.config_partition import MODULE_KEYS
+
+        keys: set[str] = set()
+        for owned in MODULE_KEYS.values():
+            keys.update(owned)
+        return frozenset(keys)
+    except Exception as e:  # noqa: BLE001 —— 分区表读不到就不拦（保持可用）
+        from app.core.logger import logger
+
+        logger.debug(f"[Config] 读取模块键清单失败（不做拦截）: {e}")
+        return frozenset()
+
+
 class AgentConfig:
     """框架级 Agent 配置门面：深合并默认值 + 已存配置，读写走 ConfigService。
 
