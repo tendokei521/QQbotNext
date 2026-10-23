@@ -66,7 +66,7 @@ python main.py
 |---|---|---|
 | `WEBUI_HOST` | `127.0.0.1` | WebUI 监听地址（外网访问请配反向代理，勿直接 0.0.0.0 裸奔） |
 | `WEBUI_PORT` | `9200` | WebUI 端口 |
-| `WEBUI_TOKEN` | 空 | 非空则 API 需 `Authorization: Bearer <token>` |
+| `WEBUI_TOKEN` | 空（首次启动自动生成） | 鉴权令牌；**留空启动时会自动生成并写回 `.env`**，令牌见控制台横幅。注意环境变量若已设置则以环境变量为准，此时不会写盘 |
 | `DB_PATH` | `data/app.db` | SQLite 路径 |
 | `LOG_DIR` | `logs` | 日志目录 |
 | `WS_CONNECT_TIMEOUT` | `30` | 连接超时（秒） |
