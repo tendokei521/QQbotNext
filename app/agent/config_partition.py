@@ -273,6 +273,7 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
         "onebot_tools_denied",
         "onebot_tools_max_result",
         "onebot_tools_debug",
+        "onebot_tool_overrides",
         "poke_cooldown_seconds",
         "mcp_servers",
         "tool_result_directive_enable",
@@ -342,6 +343,28 @@ DELETED_KEYS: tuple[str, ...] = (
     "system_tools_enabled",
     "module_tools_enabled",
     "mcp_tools_enabled",
+    # v3.3：Provider 预设接管连接配置，agent 行的旧连接字段作废
+    "api_base",
+    "api_key",
+    "provider",
+    "retry_attempts",
+    "fallback_model_ids",
+    "provider_model_id",
+    "provider_model_pool",
+    "provider_preset_id",
+    # 旧命名（onebot_* 的前身），无人引用
+    "napcat_tools_enable",
+    "napcat_tools_allowed",
+    "napcat_tools_denied",
+    "napcat_tools_debug",
+    "napcat_tools_max_result",
+    "napcat_tools_log_enabled",
+    "napcat_tool_overrides",
+    # 无人读取、无处渲染的僵尸键
+    "knowledge_recall_max_chars",
+    "debug_prompt",
+    "authority_type",
+    "stream_proactive_scheduled_enabled",
 )
 
 #: 迁移完成后的目标键数（W7 验收线）

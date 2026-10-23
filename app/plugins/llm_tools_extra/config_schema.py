@@ -25,7 +25,11 @@ SCHEMA = {
         "description": "单个 OneBot 工具返回给模型的字符上限",
         "default": 2000,
     },
-    "onebot_tools_debug": {
+        "onebot_tool_overrides": {
+        "type": "dynamic", "label": "工具权限覆盖", "default": {},
+        "description": "按工具名覆盖权限与适用范围。",
+    },
+"onebot_tools_debug": {
         "type": "boolean",
         "label": "调试日志",
         "description": "记录每次 OneBot 工具调用的 action 与参数",

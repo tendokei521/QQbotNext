@@ -3,8 +3,8 @@
 ## 现状（W7 完成后）
 
 - `config_schema.SCHEMA` 已经是**收敛后的 43 键**（本体 5 页）；
-- `config_schema.LEGACY_SCHEMA` 保留完整 167 键，供迁移脚本按旧键取类型/标签；
-- 本文件同时校验"分区覆盖 167 键（无遗漏/无重复）"与"导出 SCHEMA 恰为 44 键"。
+- `config_schema.LEGACY_SCHEMA` 保留完整 187 键，供迁移脚本按旧键取类型/标签；
+- 本文件同时校验"分区覆盖 187 键（无遗漏/无重复）"与"导出 SCHEMA 恰为 44 键"。
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from app.agent.config_partition import (
 )
 from app.agent.config_schema import LEGACY_SCHEMA, SCHEMA
 
-#: 迁移前的完整键集（167）
+#: 迁移前的完整键集（185）
 LEGACY_KEYS: tuple[str, ...] = tuple(
     key
     for key, value in LEGACY_SCHEMA.items()
@@ -69,7 +69,7 @@ def test_exported_schema_is_exactly_the_44_core_keys():
 
 def test_legacy_schema_still_has_all_160_keys():
     """旧 schema 必须完整保留（迁移脚本靠它取旧键的类型与标签）。"""
-    assert len(LEGACY_KEYS) == 167
+    assert len(LEGACY_KEYS) == 187
 
 
 # ==================== 布局本身 ====================
@@ -142,12 +142,12 @@ def test_partition_covers_every_legacy_key_exactly_once():
 # ==================== 数量与棘轮 ====================
 
 
-def test_agreed_split_is_44_plus_108_plus_15():
+def test_agreed_split_is_44_plus_109_plus_34():
     """数字：本体 44 / 迁移 108 / 删除 15（v3.3 收编 4 个工具日志开关 + 3 套 map 并入名单）。"""
     migrated = sum(len(keys) for keys in MODULE_KEYS.values())
     assert len(CORE_KEYS) == 44, f"本体键数 {len(CORE_KEYS)} ≠ 44"
-    assert migrated == 108, f"迁移键数 {migrated} ≠ 108"
-    assert len(DELETED_KEYS) == 15, f"删除键数 {len(DELETED_KEYS)} ≠ 15"
+    assert migrated == 109, f"迁移键数 {migrated} ≠ 109"
+    assert len(DELETED_KEYS) == 34, f"删除键数 {len(DELETED_KEYS)} ≠ 34"
     assert len(CORE_KEYS) + migrated + len(DELETED_KEYS) == len(LEGACY_KEYS)
 
 

@@ -21,6 +21,9 @@ _SPEC.loader.exec_module(migration)
 
 from app.agent.config_partition import CORE_KEYS, DELETED_KEYS, MODULE_KEYS  # noqa: E402
 
+#: 所有模块键（跟着分区表走，加键不用改测试）
+MODULE_KEY_SET = {k for keys in MODULE_KEYS.values() for k in keys}
+
 
 def _full_legacy_config() -> dict:
     """造一份"160 键全填"的旧配置（每个键给一个可辨识的值）。"""
@@ -47,7 +50,7 @@ def test_plan_keeps_core_keys_in_agent_row():
 def test_plan_moves_all_module_keys_to_the_right_module():
     plan = migration.plan_split(_full_legacy_config())
     total = sum(len(v) for v in plan["modules"].values())
-    assert total == 108
+    assert total == len(MODULE_KEY_SET)
     for module_name, moved in plan["modules"].items():
         assert set(moved) == set(MODULE_KEYS[module_name]), module_name
         for key in moved:
@@ -57,7 +60,7 @@ def test_plan_moves_all_module_keys_to_the_right_module():
 def test_plan_records_deleted_keys():
     plan = migration.plan_split(_full_legacy_config())
     assert set(plan["dropped"]) == set(DELETED_KEYS)
-    assert len(plan["dropped"]) == len(DELETED_KEYS) == 15
+    assert len(plan["dropped"]) == len(DELETED_KEYS) == 34
 
 
 def test_plan_keeps_unknown_keys_in_agent_row():
@@ -110,7 +113,7 @@ async def test_apply_split_writes_modules_and_trims_agent_row():
     )
 
     assert stats["agent_keys"] == len(CORE_KEYS) == 44
-    assert sum(stats["modules"].values()) == 108
+    assert sum(stats["modules"].values()) == len(MODULE_KEY_SET)
     # agent 行只剩本体键
     assert set(service.get_module_config("agent", "12345")) == set(CORE_KEYS)
     # 每个模块行都拿到了自己的键
@@ -138,7 +141,7 @@ async def test_apply_split_dry_run_writes_nothing():
     stats = await migration.apply_split(service, "1", plan, dry_run=True)
 
     assert service.data == {}
-    assert sum(stats["modules"].values()) == 108
+    assert sum(stats["modules"].values()) == len(MODULE_KEY_SET)
 
 
 async def test_apply_split_is_idempotent():

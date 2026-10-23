@@ -1,4 +1,4 @@
-"""v3 集成验证：9 个模块全部装上后，108 个迁走的键都必须"读得到、且读的是模块值"。
+"""v3 集成验证：9 个模块全部装上后，全部迁走的键都必须"读得到、且读的是模块值"。
 
 这条测试代替"逐处 grep 框架是否还直接读 agent 配置"——那个静态检查分不清
 "读入参 config"和"读 runtime.config"。真正的判据是**行为**：
@@ -16,6 +16,8 @@ from types import SimpleNamespace
 import pytest
 
 from app.agent.config_partition import MODULE_KEYS
+
+MODULE_KEY_SET = {k for keys in MODULE_KEYS.values() for k in keys}
 from app.agent.policy import ChainedConfig, policy_get, policy_view
 
 ALL_MODULES = sorted(MODULE_KEYS)
@@ -62,7 +64,7 @@ def test_every_module_has_a_view_slot():
     assert set(VIEW_ATTR) == set(ALL_MODULES)
 
 
-def test_all_108_migrated_keys_resolve_to_module_values():
+def test_all_migrated_keys_resolve_to_module_values():
     """一次装齐 9 个模块：每个迁走的键都必须从模块值读出来。"""
     views = {}
     module_values = {}
@@ -80,7 +82,7 @@ def test_all_108_migrated_keys_resolve_to_module_values():
             got = policy_get(runtime, VIEW_ATTR[module_name], key)
             assert got == f"{module_name}:{key}", (module_name, key, got)
             checked += 1
-    assert checked == 108
+    assert checked == len(MODULE_KEY_SET)
 
 
 def test_chained_view_handles_cross_module_keys():

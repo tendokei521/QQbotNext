@@ -664,16 +664,97 @@ SCHEMA = {
 
     # ==================== Tavily 联网搜索 ====================
             # 已废弃：三套 per-tool map 收敛为 tools_disabled（迁移脚本会合并后删除）
-    "system_tools_enabled": {
-        "type": "object", "label": "（已废弃）系统工具开关", "default": {},
+        # 已废弃 / 归模块：仅保留定义供迁移脚本取类型，界面不渲染
+    "onebot_tool_overrides": {
+        "type": "dynamic", "label": "OneBot 工具权限覆盖", "default": {},
+        "description": "按工具名覆盖权限与适用范围。",
+    },
+        "authority_type": {
+        "type": "string", "label": "（已废弃）权限类型", "default": "",
+        "description": "已废弃。",
+    },
+    "stream_proactive_scheduled_enabled": {
+        "type": "boolean", "label": "（已废弃）主动与定时共用流式", "default": False,
+        "description": "已废弃，拆分为两项独立开关。",
+    },
+"knowledge_recall_max_chars": {
+        "type": "integer", "label": "（已废弃）检索字符上限", "default": 2000,
+        "description": "已废弃。",
+    },
+    "debug_prompt": {
+        "type": "boolean", "label": "（已废弃）提示词调试", "default": False,
+        "description": "已废弃，调试开关在增强模块里。",
+    },
+    "api_base": {
+        "type": "string", "label": "（已废弃）api_base", "default": "",
+        "description": "已废弃。",
+    },
+    "api_key": {
+        "type": "string", "label": "（已废弃）api_key", "default": "",
+        "description": "已废弃。",
+    },
+    "provider": {
+        "type": "string", "label": "（已废弃）provider", "default": "",
+        "description": "已废弃。",
+    },
+    "retry_attempts": {
+        "type": "string", "label": "（已废弃）retry_attempts", "default": "",
+        "description": "已废弃。",
+    },
+    "fallback_model_ids": {
+        "type": "string", "label": "（已废弃）fallback_model_ids", "default": "",
+        "description": "已废弃。",
+    },
+    "provider_model_id": {
+        "type": "string", "label": "（已废弃）provider_model_id", "default": "",
+        "description": "已废弃。",
+    },
+    "provider_model_pool": {
+        "type": "string", "label": "（已废弃）provider_model_pool", "default": "",
+        "description": "已废弃。",
+    },
+    "provider_preset_id": {
+        "type": "string", "label": "（已废弃）provider_preset_id", "default": "",
+        "description": "已废弃。",
+    },
+    "napcat_tools_enable": {
+        "type": "string", "label": "（已废弃）napcat_tools_enable", "default": "",
+        "description": "已废弃。",
+    },
+    "napcat_tools_allowed": {
+        "type": "string", "label": "（已废弃）napcat_tools_allowed", "default": "",
+        "description": "已废弃。",
+    },
+    "napcat_tools_denied": {
+        "type": "string", "label": "（已废弃）napcat_tools_denied", "default": "",
+        "description": "已废弃。",
+    },
+    "napcat_tools_debug": {
+        "type": "string", "label": "（已废弃）napcat_tools_debug", "default": "",
+        "description": "已废弃。",
+    },
+    "napcat_tools_max_result": {
+        "type": "string", "label": "（已废弃）napcat_tools_max_result", "default": "",
+        "description": "已废弃。",
+    },
+    "napcat_tools_log_enabled": {
+        "type": "string", "label": "（已废弃）napcat_tools_log_enabled", "default": "",
+        "description": "已废弃。",
+    },
+    "napcat_tool_overrides": {
+        "type": "string", "label": "（已废弃）napcat_tool_overrides", "default": "",
+        "description": "已废弃。",
+    },
+"system_tools_enabled": {
+        "type": "dynamic", "label": "（已废弃）系统工具开关", "default": {},
         "description": "已废弃，请改用工具总览页统一关闭。",
     },
     "module_tools_enabled": {
-        "type": "object", "label": "（已废弃）模块工具开关", "default": {},
+        "type": "dynamic", "label": "（已废弃）模块工具开关", "default": {},
         "description": "已废弃，请改用工具总览页统一关闭。",
     },
     "mcp_tools_enabled": {
-        "type": "object", "label": "（已废弃）MCP 工具开关", "default": {},
+        "type": "dynamic", "label": "（已废弃）MCP 工具开关", "default": {},
         "description": "已废弃，请改用工具总览页统一关闭。",
     },
 "system_tools_log_enabled": {
