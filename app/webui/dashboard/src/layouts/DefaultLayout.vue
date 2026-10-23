@@ -82,6 +82,11 @@ const openedGroups = ref<string[]>([])
 const isAgentActive = computed(() => route.path.startsWith('/agent'))
 const isToolsActive = computed(() => route.path.startsWith('/tools'))
 
+/** 退出登录：会话 cookie 由服务端清除，随后 303 回独立登录页。 */
+function logout() {
+  window.location.href = '/logout'
+}
+
 watch(
   () => route.path,
   () => {
@@ -349,6 +354,14 @@ onUnmounted(() => {
           :icon="themeStore.isDark ? 'mdi-weather-night' : 'mdi-white-balance-sunny'"
           :title="themeStore.isDark ? '切换到浅色模式' : '切换到暗色模式'"
           @click="themeStore.toggle()"
+        />
+        <!-- 登出：清会话 cookie 后回独立登录页（服务端 303 重定向，无需前端处理） -->
+        <v-btn
+          size="small"
+          variant="tonal"
+          icon="mdi-logout-variant"
+          title="退出登录"
+          @click="logout"
         />
       </div>
     </v-app-bar>
