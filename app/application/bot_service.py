@@ -8,6 +8,7 @@ from __future__ import annotations
 from app.agent.config import LEGACY_LLM_CONNECTION_KEYS
 from app.core.logger import logger
 from app.domain.bot import IBot
+from app.infrastructure.onebot.endpoint import FORWARD
 from app.plugin.schema_utils import webui_schema
 
 
@@ -86,11 +87,14 @@ class BotService:
     async def reconnect(self, index: int) -> bool:
         return await self.gateway.reconnect_bot(index)
 
-    async def add_bot(self, ws_url: str, owner_id: int | None, auto_connect: bool = False) -> int:
+    async def add_bot(
+        self, ws_url: str, owner_id: int | None, auto_connect: bool = False, conn_mode: str = FORWARD
+    ) -> int:
         index = await self.config_service.add_bot(
-            {"ws_url": ws_url, "owner_id": owner_id, "auto_connect": auto_connect}
+            {"ws_url": ws_url, "owner_id": owner_id, "auto_connect": auto_connect,
+             "conn_mode": conn_mode}
         )
-        await self.gateway.add_bot(ws_url, owner_id, auto_connect, index=index)
+        await self.gateway.add_bot(ws_url, owner_id, auto_connect, index=index, conn_mode=conn_mode)
         return index
 
     async def delete_bot(self, index: int) -> bool:

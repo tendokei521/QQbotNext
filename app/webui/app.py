@@ -297,6 +297,9 @@ def _install_bot_lifecycle_listener(container) -> None:
             "account": stat.get("account"),
             "reconnect_attempts": stat.get("reconnect_attempts"),
             "ws_url": stat.get("ws_url"),
+            # 连接方向与反向监听状态：前端据此显示「正向地址 / 反向监听地址 / 监听中」
+            "conn_mode": stat.get("conn_mode"),
+            "listening": stat.get("listening"),
             # v3：账号级 owner QQ 已取消，拥有者身份改由「权限管理 → 拥有者名册」提供
             "owner_id": None,
             "auto_connect": stat.get("auto_connect"),

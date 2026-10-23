@@ -18,6 +18,7 @@ from typing import Any
 from app.core.logger import api_logger
 from app.domain.bot import IBot
 from app.domain.message import Message, MessageSegment, SegmentLike
+from app.infrastructure.onebot.endpoint import FORWARD
 
 # ==================== API 超时分级 ====================
 # 历史问题：所有 API 共用固定 10s。合并转发（视频/多节点）在 OneBot 侧要先上传再组装，
@@ -201,6 +202,7 @@ class BotConnection(IBot):
         owner_id: int | None = None,
         ws_url: str = "",
         auto_connect: bool = False,
+        conn_mode: str = FORWARD,
     ) -> None:
         # ``owner_id`` 仅为兼容旧调用方保留：v3 起账号级 owner QQ 已废弃
         # （拥有者身份只来自「权限管理 → 拥有者名册」），这里的值不会被保存。
@@ -208,6 +210,8 @@ class BotConnection(IBot):
         self.bot_id = bot_id
         self.ws_url = ws_url
         self.auto_connect = auto_connect
+        # 连接方向：forward = 框架连出（正向 WS）/ reverse = 框架监听（反向 WS）
+        self.conn_mode = conn_mode
         self.status = "disconnected"
         self.login_info: dict = {}
         self.reconnect_attempts = 0

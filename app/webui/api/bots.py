@@ -37,12 +37,15 @@ async def connect_bot(
     if index < 0 or index >= len(bots_config):
         return _err(404, f"Bot at index {index} not in config")
     bot_cfg = bots_config[index]
+    conn_mode = bot_cfg.get("conn_mode")
     if index not in bot_service.gateway.connections:
         # 显式传 index，避免 add_bot 缺省索引（max+1）与配置索引脱节
         await bot_service.gateway.add_bot(bot_cfg.get("ws_url", ""), None,
-                                          bot_cfg.get("auto_connect", False), index=index)
+                                          bot_cfg.get("auto_connect", False), index=index,
+                                          conn_mode=conn_mode or "")
     else:
-        await bot_service.gateway.readd_bot(bot_cfg.get("ws_url", ""), None, index)
+        await bot_service.gateway.readd_bot(bot_cfg.get("ws_url", ""), None, index,
+                                            conn_mode=conn_mode)
 
     success = await bot_service.connect(index)
     if success:

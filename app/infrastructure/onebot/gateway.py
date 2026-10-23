@@ -5,6 +5,16 @@
 - 消息循环：API 响应消费 → payload 解码 → 转发消息拉取 → 日志 → 派发；
 - 登录后通过注入的 login_handler 触发模块加载（解耦 infrastructure 与 modules）。
 
+## 两种连接方向
+
+账号配置里的 ``conn_mode`` 决定本网关对该账号做什么：
+
+- ``forward``（正向 WS）：**框架连出去**——``connect_bot`` 打开到 ``ws_url`` 的客户端连接；
+- ``reverse``（反向 WS）：**框架监听**——``connect_bot`` 在该地址起监听，等 OneBot
+  实现连入（见 ``reverse.py``）。接入后走同一套 ``_bot_server`` 消息循环。
+
+两种模式的差别只在「谁发起 TCP 连接」，账号状态、登录快照、监督重连、API 收发完全共用。
+
 账号隔离：每个账号独立处理自己收到的每条消息，不做跨账号"同群去重"。
 LLM 运行时按 ``event.account_id`` 取用，触发规则（@ / 关键词）由各账号自行判定；
 确需"同群只由一个账号响应"时用 WebUI 的单一服务（single_service）显式声明。
@@ -18,16 +28,18 @@ import json
 import time
 from typing import Any, Awaitable, Callable
 
-import websockets
-
 from app.core.event_bus import BotLifecycleEvent, event_bus
 from app.core.logger import logger
 from app.domain.events import BaseEvent, MessageEvent
 from app.infrastructure.cache import Cache
-from app.infrastructure.config.config_service import mask_ws_url, split_ws_url
+from app.infrastructure.config.config_service import mask_ws_url
 from app.infrastructure.onebot.client import BotConnection
 from app.infrastructure.onebot.codec import decode, event_name
+from app.infrastructure.onebot.endpoint import FORWARD, is_reverse, normalize_mode
+from app.infrastructure.onebot.forward import connect_forward
+from app.infrastructure.onebot.introspect import bot_info, bots_info, conn_mode, effective_bot_id
 from app.infrastructure.onebot.log_text import _event_text, _message_log_text, _raw_payload_text  # noqa: F401 - 重导出保持原路径可用
+from app.infrastructure.onebot.reverse_link import ReverseLink
 
 LoginHandler = Callable[[BotConnection], Awaitable[None]]
 # 登录成功后记录账号快照（index, user_id, nickname）→ 返回是否发生变化
@@ -50,6 +62,8 @@ class OneBotGateway:
 
         self.connections: dict[int, BotConnection] = {}
         self.bot_server_tasks: dict[int, asyncio.Task] = {}
+        # 反向 WS 监听器管理（正向账号不进这里）。对外仍暴露 reverse_servers 只读视图。
+        self.reverse_link = ReverseLink(self)
         self.connect_type = False
         self._supervise_task: asyncio.Task | None = None
         self._connect_locks: dict[int, asyncio.Lock] = {}  # 防止监督循环与 WebUI 并发双开
@@ -74,59 +88,38 @@ class OneBotGateway:
         return self.account_lookup().get(index)
 
     def get_bots_info(self) -> list[dict]:
-        result: list[dict] = []
-        for index, conn in sorted(self.connections.items()):
-            base, _ = split_ws_url(conn.ws_url)
-            last_account = self.get_last_account(conn.index)
-            result.append({
-                "index": conn.index,
-                "bot_id": self._effective_bot_id(conn, last_account),
-                "owner_id": conn.owner_id,
-                "status": conn.status,
-                "ws_url": base,  # 对外只暴露基础地址（access_token 独立字段，不回显）
-                "login_info": conn.login_info,
-                # 上次登录账号快照 + 统一字段：连接中/已连接用实时，否则回退快照
-                "last_account": last_account,
-                "account": conn.login_info or last_account,
-                "reconnect_attempts": conn.reconnect_attempts,
-                "last_error": conn.last_error,
-                "auto_connect": conn.auto_connect,
-                # 本次运行期间是否被用户手动断开（为 True 时监督循环不会自动重连）
-                "suppress_auto_reconnect": bool(getattr(conn, "suppress_auto_reconnect", False)),
-            })
-        return result
+        return bots_info(
+            self.connections.values(), self.account_lookup, self.reverse_link.listening
+        )
+
+    @staticmethod
+    def _conn_mode(conn) -> str:
+        """连接方向（缺字段的老连接对象按正向处理）。"""
+        return conn_mode(conn)
+
+    def _reverse_listening(self, index: int | None) -> bool:
+        """该索引的反向监听器是否正在监听（正向账号恒为 False）。"""
+        return self.reverse_link.listening(index)
+
+    @property
+    def reverse_servers(self) -> dict:
+        """反向监听器表（排查/测试用；生命周期由 ReverseLink 负责）。"""
+        return self.reverse_link.servers
 
     @staticmethod
     def _effective_bot_id(conn, last_account: dict | None) -> int | None:
-        """对外公布的账号：实时 bot_id 优先，缺失时回退「上次登录账号」快照。
-
-        WebUI 用这个值当 ``?bot_id=`` 去读写 agent 配置。若在重连窗口里直接吐
-        ``conn.bot_id``（此时可能已被重置为 0），前端就会把账号判成 null / 用错
-        账号，于是「配置看着一样却存到了另一个账号上、当前账号不生效」。
-        """
-        if conn.bot_id:
-            return conn.bot_id
-        try:
-            fallback = int((last_account or {}).get("user_id") or 0)
-        except (TypeError, ValueError):
-            return None
-        return fallback or None
+        """对外公布的账号（详见 ``introspect.effective_bot_id``）。"""
+        return effective_bot_id(conn, last_account)
 
     def get_bot_info_by_index(self, index: int) -> dict | None:
         conn = self.connections.get(index)
         if not conn:
             return None
-        base, _ = split_ws_url(conn.ws_url)
-        last_account = self.get_last_account(conn.index)
-        return {
-            "bot_id": self._effective_bot_id(conn, last_account),
-            "owner_id": conn.owner_id,
-            "status": conn.status,
-            "login_info": conn.login_info,
-            "last_account": last_account,
-            "account": conn.login_info or last_account,
-            "ws_url": base,
-        }
+        return bot_info(
+            conn,
+            last_account=self.get_last_account(conn.index),
+            listening=self.reverse_link.listening(index),
+        )
 
     async def get_bot_id(self, index: int) -> int | None:
         conn = self.connections.get(index)
@@ -176,21 +169,30 @@ class OneBotGateway:
 
     # ==================== 连接管理 ====================
     async def add_bot(
-        self, ws_url: str, owner_id: int | None, auto_connect: bool = False, index: int | None = None
+        self,
+        ws_url: str,
+        owner_id: int | None,
+        auto_connect: bool = False,
+        index: int | None = None,
+        conn_mode: str = FORWARD,
     ) -> int:
         """新增（或按显式 index 更新）一个 Bot 连接。index 缺省取最大索引 + 1（避免删除中间账号后撞已有连接）。
 
         ``owner_id`` 参数**仅为兼容旧调用方保留**：v3 起账号级 owner QQ 已废弃
         （拥有者身份只来自「权限管理 → 拥有者名册」），传进来的值会被忽略。
+
+        ``conn_mode``：``forward`` = 正向 WS（连出去）/ ``reverse`` = 反向 WS（本地监听）。
         """
         if index is None:
             index = max(self.connections, default=-1) + 1
+        mode = normalize_mode(conn_mode)
         conn = self.connections.get(index)
         if conn is not None:  # 已存在 → 仅更新配置字段，不重建连接
             conn.ws_url = ws_url
             conn.auto_connect = auto_connect
+            conn.conn_mode = mode
             return index
-        conn = BotConnection(ws_url=ws_url, auto_connect=auto_connect)
+        conn = BotConnection(ws_url=ws_url, auto_connect=auto_connect, conn_mode=mode)
         conn.status = "disconnected"
         conn.index = index
         if self.outbound_hook_factory:
@@ -201,11 +203,15 @@ class OneBotGateway:
         self.connections[index] = conn
         return index
 
-    async def readd_bot(self, ws_url: str, owner_id: int | None, index: int) -> int:
+    async def readd_bot(
+        self, ws_url: str, owner_id: int | None, index: int, conn_mode: str | None = None
+    ) -> int:
         """更新已有连接的地址（``owner_id`` 同上：兼容保留，已忽略）。"""
         conn = self.connections.get(index)
         if conn:
             conn.ws_url = ws_url
+            if conn_mode is not None:
+                conn.conn_mode = normalize_mode(conn_mode)
         return index
     async def del_bot(self, index: int) -> None:
         await self.disconnect_bot(index)
@@ -228,6 +234,10 @@ class OneBotGateway:
             # 走到这里 = 显式连接请求（WebUI 连接/重连，或监督循环的掉线恢复）：
             # 解除「用户手动断开」的抑制，让该账号重新参与自动重连。
             conn.suppress_auto_reconnect = False
+            if is_reverse(self._conn_mode(conn)):
+                # 反向：起监听等 OneBot 实现连入（成败不依赖对端是否已在线）
+                return await self._listen_reverse(index, conn)
+
             epoch = getattr(conn, "connect_epoch", 0)
             websocket = await self._connect_websocket(conn.ws_url)
             if getattr(conn, "connect_epoch", 0) != epoch:
@@ -255,6 +265,12 @@ class OneBotGateway:
             await self._notify_status(conn, "error", conn.last_error)
             return False
 
+    # ==================== 反向 WS（框架监听） ====================
+    # 监听器、接入、等待接入的状态收敛都在 ReverseLink 里（见 reverse_link.py）；
+    # 这里只留模式分支，让「正向连出」这条主线仍然一眼读完。
+    async def _listen_reverse(self, index: int, conn) -> bool:
+        return await self.reverse_link.ensure_listening(index, conn)
+
     async def disconnect_bot(self, index: int, *, manual: bool = False) -> None:
         """断开连接。
 
@@ -274,6 +290,9 @@ class OneBotGateway:
             # 作废正在握手的 connect_bot（见 connect_bot 的 epoch 校验），
             # 否则握手成功会把刚置好的断开状态覆盖回 connected。
             conn.connect_epoch = getattr(conn, "connect_epoch", 0) + 1
+
+        # 反向监听器随「断开」一并停掉：用户的断开语义包含「不再占端口等人接入」
+        await self.reverse_link.stop(index)
 
         task_key = f"{index}"
         task = self.bot_server_tasks.pop(task_key, None)
@@ -315,22 +334,8 @@ class OneBotGateway:
         return await self.connect_bot(index)
 
     async def _connect_websocket(self, url: str):
-        try:
-            return await asyncio.wait_for(
-                websockets.connect(
-                    url,
-                    ping_interval=self.settings.ws_ping_interval,
-                    ping_timeout=self.settings.ws_ping_timeout,
-                ),
-                timeout=self.settings.ws_connect_timeout,
-            )
-        except asyncio.TimeoutError:
-            self.log.error(f"WebSocket连接超时（{self.settings.ws_connect_timeout}秒）: {mask_ws_url(url)}")
-        except ConnectionRefusedError:
-            self.log.error(f"WebSocket连接被拒绝（服务未启动或地址错误）: {mask_ws_url(url)}")
-        except Exception as e:
-            self.log.error(f"WebSocket连接失败: {mask_ws_url(url)} {e}")
-        return None
+        """正向连接（传输细节见 ``forward.py``）。"""
+        return await connect_forward(url, settings=self.settings, log=self.log)
 
     # ==================== 登录信息 ====================
     async def _record_login_account(self, conn: BotConnection) -> None:
@@ -392,7 +397,7 @@ class OneBotGateway:
         return ""
 
     # ==================== 消息循环 ====================
-    async def _bot_server(self, index: int) -> None:
+    async def _bot_server(self, index: int, *, login_immediately: bool = False) -> None:
         conn = self.connections.get(index)
         if not conn or not conn.websocket:
             return
@@ -400,6 +405,15 @@ class OneBotGateway:
         conn.bot_id = 0
         start_type = False
         login_tasks: list[asyncio.Task] = []
+        if login_immediately:
+            # 反向连接：OneBot 实现可能十几秒才推第一个事件（心跳/消息），
+            # 一直不登录就会让 WebUI 长时间显示「未登录」。握手成功即主动拉一次。
+            start_type = True
+            login_tasks = [
+                asyncio.create_task(self._get_login_info(conn)),
+                asyncio.create_task(self._get_login_groups(conn)),
+            ]
+            bot_logger.info("反向连接已接入，正在获取登录信息")
         # 事件处理 worker：接收循环只负责「解析 + API 响应匹配 + 入队」，
         # 耗时处理（模块调用 / 转发拉取 / LLM 触发）在 worker 串行执行。
         # 若不这样拆分，模块内 await API 响应（如 send_private_msg 等 echo）时，
@@ -512,9 +526,7 @@ class OneBotGateway:
             # 正常关闭是服务端主动行为（重启/下线）：必须留痕（否则无从发现），
             # 但用 WARNING，不必惊动 errors.log
             bot_logger.warning(text)
-        conn.status = "error"
-        conn.last_error = reason
-        await self._notify_status(conn, "error", reason)
+        await self._mark_offline(conn, reason)
         if conn.websocket:
             try:
                 await conn.websocket.close()
@@ -524,6 +536,19 @@ class OneBotGateway:
             conn.websocket = None
         # 清空登录态 + 让在途 API 请求立即失败（与 disconnect_bot 一致）
         self._reset_conn_state(conn)
+
+    async def _mark_offline(self, conn, reason: str) -> None:
+        """把账号置为「掉线」态并广播。
+
+        反向模式且监听器仍在监听时状态是 ``connecting``（等 OneBot 实现重新接入）：
+        对端重启属于常态，显示成红色错误会让人以为配置坏了；``last_error`` 仍保留
+        原因，排查信息不丢。其余情况（正向掉线 / 反向监听已停）按 ``error`` 处理。
+        """
+        if is_reverse(self._conn_mode(conn)) and await self.reverse_link.mark_waiting(conn, reason):
+            return
+        conn.status = "error"
+        conn.last_error = reason
+        await self._notify_status(conn, "error", reason)
 
     @staticmethod
     def _close_reason(conn) -> str:
@@ -666,11 +691,20 @@ class OneBotGateway:
             ws_url = cfg.get("ws_url", "")
             conn = self.connections.get(index)
             if conn is None:
-                await self.add_bot(ws_url, None, cfg.get("auto_connect", False), index=index)
+                await self.add_bot(
+                    ws_url, None, cfg.get("auto_connect", False), index=index,
+                    conn_mode=cfg.get("conn_mode", FORWARD),
+                )
                 continue
             changed = False
             if cfg.get("ws_url") != conn.ws_url:
                 conn.ws_url = ws_url
+                changed = True
+            # 连接方向变更（正向 ⇄ 反向）必须断开重建：正向是「连出去」，反向是「起监听」，
+            # 不复位就会出现「改了模式但旧监听还在跑、新地址没人听」。
+            mode = normalize_mode(cfg.get("conn_mode", self._conn_mode(conn)))
+            if mode != self._conn_mode(conn):
+                conn.conn_mode = mode
                 changed = True
             # 注意：**不要**再比较 owner_id。
             # v3 起账号级 owner_id 已废弃（拥有者身份只来自「权限管理 → 名册」），
@@ -684,8 +718,8 @@ class OneBotGateway:
                 changed = True
             if changed:
                 self.log.info(f"机器人索引: {index} 配置已更新: {mask_ws_url(conn.ws_url)}")
-                if conn.status in ("connected", "connecting"):
-                    await self.disconnect_bot(index)  # url 变更 → 断开待重连
+                if conn.status in ("connected", "connecting") or self._reverse_listening(index):
+                    await self.disconnect_bot(index)  # url/方向变更 → 断开待重连(或待重新监听)
 
     async def _supervise(self) -> None:
         """定期收敛连接映射，并以指数退避重连掉线的 auto_connect 账号。"""
@@ -703,6 +737,11 @@ class OneBotGateway:
                             continue
                         if getattr(conn, "suppress_auto_reconnect", False):
                             # 用户主动断开：只保留「意外掉线」的自动恢复语义，不把它的断开连回来
+                            continue
+                        if is_reverse(self._conn_mode(conn)) and self._reverse_listening(index):
+                            # 反向：监听还在，只是暂时没有对端接入。**不要**重开端口
+                            # （会踢掉正在重连的 OneBot 实现），把状态纠正为「等待接入」即可。
+                            await self._mark_offline(conn, conn.last_error or "等待 OneBot 实现接入")
                             continue
                         # 指数退避：10s → 20s → 40s → 80s → 160s → 300s 封顶
                         backoff = min(10 * (2 ** min(conn.reconnect_attempts, 4)), 300)
@@ -725,9 +764,7 @@ class OneBotGateway:
             if conn.status != "connected" or not self._connection_gone(index, conn):
                 continue
             self.log.warning(f"机器人索引: {index} 连接已不存在但状态仍是 connected，按掉线处理")
-            conn.status = "error"
-            conn.last_error = "连接已不存在（僵尸连接，已按掉线处理）"
-            await self._notify_status(conn, "error", conn.last_error)
+            await self._mark_offline(conn, "连接已不存在（僵尸连接，已按掉线处理）")
             if conn.websocket is not None:
                 with contextlib.suppress(Exception):
                     await conn.websocket.close()
