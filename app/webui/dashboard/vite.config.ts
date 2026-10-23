@@ -16,6 +16,9 @@ export default defineConfig({
     outDir: 'dist',
     assetsDir: 'assets',
     chunkSizeWarningLimit: 1500,
+    // 不在每次构建时清空 dist：旧 chunk 留着，正在使用的页面不会因为
+    // 哈希失配而 import() 404。累积的旧文件用 scripts/prune_dist.py 清理。
+    emptyOutDir: false,
   },
   server: {
     port: 3000,

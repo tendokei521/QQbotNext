@@ -153,6 +153,7 @@ async def query(
                {series_sql} AS series,
                {expr}       AS value,
                SUM(messages)        AS messages,
+               SUM(CASE WHEN outcome <> 'ignored' THEN messages ELSE 0 END) AS triggered,
                SUM(requests)        AS requests,
                SUM(input_tokens)    AS input_tokens,
                SUM(output_tokens)   AS output_tokens,
@@ -192,6 +193,7 @@ async def query(
             {
                 "value": 0,
                 "messages": 0,
+                "triggered": 0,
                 "requests": 0,
                 "input": 0,
                 "output": 0,
@@ -205,6 +207,7 @@ async def query(
         )
         item["value"] += row["value"] or 0
         item["messages"] += row["messages"] or 0
+        item["triggered"] += row["triggered"] or 0
         item["requests"] += row["requests"] or 0
         item["input"] += row["input_tokens"] or 0
         item["output"] += row["output_tokens"] or 0

@@ -20,8 +20,10 @@ type Granularity = 'hour' | 'day' | 'week' | 'month'
 type Pivot = 'metric' | 'series'
 
 interface SeriesItem {
+  /** 后端按当前 metric 算好的值（图表与"按维度"表都用它） */
   value: number
   messages: number
+  triggered: number
   requests: number
   input: number
   output: number
@@ -87,7 +89,7 @@ const METRIC_BY_KIND: Record<Kind, { value: string; title: string }[]> = {
   ],
   msg_in: [
     { value: 'messages', title: '消息条数' },
-    { value: 'triggered', title: '需响应条数' },
+    { value: 'triggered', title: '响应条数' },
     { value: 'bytes', title: '字节数' },
   ],
   msg_out: [
@@ -197,7 +199,8 @@ const metricRows = computed<MetricRow[]>(() => {
   }
   if (kind.value === 'msg_in') {
     return [
-      { key: 'messages', label: '消息条数' },
+      { key: 'messages', label: '收到条数' },
+      { key: 'triggered', label: '响应条数' },
       { key: 'events', label: '事件数' },
       { key: 'bytes', label: '字节数' },
     ]
@@ -207,28 +210,26 @@ const metricRows = computed<MetricRow[]>(() => {
     { key: 'bytes', label: '字节数' },
   ]
 })
-const metricKey = computed<keyof SeriesItem>(() => {
-  const map: Record<string, keyof SeriesItem> = {
-    tokens: 'tokens',
-    input: 'input',
-    output: 'output',
-    cache_hit: 'cache_hit',
-    reasoning: 'reasoning',
-    requests: 'requests',
-    messages: 'messages',
-    triggered: 'messages',
-    bytes: 'bytes',
-    events: 'events',
-  }
-  return map[data.value?.meta.metric ?? 'tokens'] ?? 'tokens'
-})
+/** 序列值：**直接用后端按 metric 算好的 `value`**。
+ *
+ * 历史 bug：曾经用 metric→字段 的映射（把 `triggered` 映射成 `messages`），
+ * 于是"响应条数"图画成了"收到总数"。后端已经按 metric 聚合，不需要再映射。
+ */
+function seriesMetricValue(b: Bucket, series: string): number {
+  return Number(b.series[series]?.value ?? 0)
+}
+/** 某桶的度量值（跨序列求和；后端已按 metric 算好，直接加）。 */
+function bucketMetricValue(b: Bucket): number {
+  let sum = 0
+  for (const item of Object.values(b.series)) sum += Number(item.value ?? 0)
+  return sum
+}
+
+/** 指定字段的跨序列求和（"按指标"表用）。 */
 function bucketValue(b: Bucket, key: keyof SeriesItem): number {
   let sum = 0
   for (const item of Object.values(b.series)) sum += Number(item[key] ?? 0)
   return sum
-}
-function seriesValue(b: Bucket, series: string, key: keyof SeriesItem): number {
-  return Number(b.series[series]?.[key] ?? 0)
 }
 function metricTotal(key: keyof SeriesItem): number {
   const s = summary.value
@@ -241,13 +242,21 @@ function metricTotal(key: keyof SeriesItem): number {
     reasoning: s.reasoning,
     requests: s.requests,
     messages: s.messages,
+    triggered: s.triggered,
     bytes: s.bytes,
     events: s.events,
   }
   return map[key as string] ?? 0
 }
-function seriesTotal(series: string, key: keyof SeriesItem): number {
-  return buckets.value.reduce((acc, b) => acc + seriesValue(b, series, key), 0)
+function seriesTotal(series: string): number {
+  return buckets.value.reduce((acc, b) => acc + seriesMetricValue(b, series), 0)
+}
+
+/** 序列值格式化（按当前度量单位）。 */
+function fmtSeries(value: number): string {
+  const m = data.value?.meta.metric ?? 'tokens'
+  const count = m === 'requests' || m === 'messages' || m === 'triggered' || m === 'events'
+  return fmt(value, count ? 'count' : unit.value)
 }
 /** 真 0 显示 `0`；缓存命中列在"上游未报"时显示 `—`。 */
 function cell(value: number, key: keyof SeriesItem): string {
@@ -264,7 +273,7 @@ const PALETTE = ['#ff6b35', '#4f8ef7', '#22c55e', '#a855f7', '#f59e0b', '#14b8a6
 const chartPoints = computed(() =>
   buckets.value.map((b) => ({
     bucket: b.bucket,
-    value: bucketValue(b, metricKey.value),
+    value: bucketMetricValue(b),
     bucketRef: b,
   })),
 )
@@ -324,7 +333,7 @@ function exportCsv() {
   for (const b of buckets.value) {
     rows.push([
       b.bucket,
-      ...seriesNames.value.map((n) => String(seriesValue(b, n, metricKey.value))),
+      ...seriesNames.value.map((n) => String(seriesMetricValue(b, n))),
       String(b.total),
     ])
   }
@@ -520,8 +529,8 @@ onUnmounted(() => {
           <span class="kpi-label">收到消息</span>
           <div class="kpi-value">{{ summary.messages }}</div>
         </div>
-        <div class="kpi tip" data-tip="其中真正需要回应的：指令 + 模块响应 + LLM 响应">
-          <span class="kpi-label">需响应</span>
+        <div class="kpi tip" data-tip="其中真的响应了：指令 + 模块响应 + LLM 响应">
+          <span class="kpi-label">响应条数</span>
           <div class="kpi-value">{{ summary.triggered }}</div>
         </div>
         <div class="kpi">
@@ -580,10 +589,10 @@ onUnmounted(() => {
                 </template>
                 <template v-else>
                   <div v-for="name in seriesNames" :key="name"
-                       v-show="seriesValue(p.bucketRef, name, metricKey) > 0"
+                       v-show="seriesMetricValue(p.bucketRef, name) > 0"
                        class="bar"
                        :style="{
-                         height: `${barHeight(seriesValue(p.bucketRef, name, metricKey))}px`,
+                         height: `${barHeight(seriesMetricValue(p.bucketRef, name))}px`,
                          background: seriesColors[name],
                        }" />
                 </template>
@@ -654,9 +663,9 @@ onUnmounted(() => {
             <tr v-for="name in seriesNames" :key="name">
               <td class="sticky-col">{{ name || '（未指定）' }}</td>
               <td v-for="b in tableBuckets" :key="b.bucket" class="num">
-                {{ cell(seriesValue(b, name, metricKey), metricKey) }}
+                {{ fmtSeries(seriesMetricValue(b, name)) }}
               </td>
-              <td class="num total-col">{{ cell(seriesTotal(name, metricKey), metricKey) }}</td>
+              <td class="num total-col">{{ fmtSeries(seriesTotal(name)) }}</td>
             </tr>
           </tbody>
         </table>
