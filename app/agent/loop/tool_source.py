@@ -125,29 +125,23 @@ async def _collect_llm_ext(
         )
         specs.extend(await collect_tool_specs(runtime, scope))
 
-    # 统一按四类工具的用户开关过滤：
-    # - 系统工具由 system_tools_enabled + 前置功能开关共同决定
-    # - 模块工具 / MCP 工具由各自 enabled map 单独控制
-    # - OneBot 工具已在上方由 security.resolve_tool_policy 过滤，这里直接放行
-    from app.agent.tools.policy import is_system_tool_enabled
+    # 统一按**唯一判定点**过滤：每个来源都问 `resolve_tool_state`，
+    # 不再有"OneBot 直接放行"这种特权通道（历史上正是它让关掉的工具还能调）。
+    from app.agent.tools.state import resolve_tool_state
 
-    system_enabled = runtime.config.get("system_tools_enabled", {}) or {}
-    module_enabled = runtime.config.get("module_tools_enabled", {}) or {}
-    mcp_enabled = runtime.config.get("mcp_tools_enabled", {}) or {}
+    scope_name = "private" if is_private else "group"
     filtered: list = []
+    dropped: list[tuple[str, str]] = []
     for spec in specs:
-        if spec.source == "onebot":
+        state = resolve_tool_state(runtime, spec, session_scope=scope_name)
+        if state.available:
             filtered.append(spec)
-        elif spec.source == "mcp":
-            if not (isinstance(mcp_enabled, dict) and not mcp_enabled.get(spec.name, True)):
-                filtered.append(spec)
-        elif spec.source == "module":
-            if not (isinstance(module_enabled, dict) and not module_enabled.get(spec.name, True)):
-                filtered.append(spec)
-        elif spec.source == "system":
-            if is_system_tool_enabled(runtime, spec):
-                filtered.append(spec)
         else:
-            filtered.append(spec)
+            dropped.append((spec.name, state.reason_text))
+    if dropped:
+        logger.add_info("Tool").debug(
+            f"[Tool] 本轮剔除 {len(dropped)} 个不可用工具："
+            + "、".join(f"{name}({why})" for name, why in dropped[:6])
+        )
 
     return filtered, skill_blocks, ctx
