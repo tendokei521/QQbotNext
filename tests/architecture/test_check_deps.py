@@ -1,4 +1,4 @@
-"""启动前依赖自检（``scripts/ops/check_deps.py``）测试。
+"""启动前依赖自检（根目录 ``check_deps.py``）测试。
 
 盯住六件事：
 
@@ -32,7 +32,7 @@ def _repo_root() -> Path:
     raise RuntimeError("找不到仓库根（pyproject.toml）")
 
 
-MODULE_PATH = _repo_root() / "scripts" / "ops" / "check_deps.py"
+MODULE_PATH = _repo_root() / "check_deps.py"
 
 
 def _load_module():

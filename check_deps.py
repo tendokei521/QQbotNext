@@ -5,23 +5,26 @@
 - PEP 508 约束解析（``uvicorn[standard]>=0.23``）、版本比对、``requires-python``
   门槛，用 shell 写必然两边各维护一份，而 ``requirements.txt`` 的历史注释已经吃过
   一次"bat 与 sh 清单漂移"的亏；
-- ``start.bat`` / ``start.sh`` 只做薄壳：找到解释器 → 调本脚本 → 按退出码提示。
+- ``start.py`` 只做编排：建 venv → 升 pip/setuptools → 调本脚本 → 启动 ``main.py``，
+  依赖判定一律留在这里，bat / sh 不再各写一套。
 
 用法::
 
-    python scripts/ops/check_deps.py                 # 检查 + 缺失即装（默认）
-    python scripts/ops/check_deps.py --check         # 只查不装，有缺失时退出码 1
-    python scripts/ops/check_deps.py --dev           # 连 [dev] 组一起（pytest / ruff ...）
-    python scripts/ops/check_deps.py --vector        # 连 [vector] 组一起（sqlite-vec）
-    python scripts/ops/check_deps.py --json          # 机器可读报告（运维 / diag 脚本消费）
+    python check_deps.py                 # 检查 + 缺失即装（默认）
+    python check_deps.py --check         # 只查不装，有缺失时退出码 1
+    python check_deps.py --dev           # 连 [dev] 组一起（pytest / ruff ...）
+    python check_deps.py --vector        # 连 [vector] 组一起（sqlite-vec）
+    python check_deps.py --json          # 机器可读报告（运维 / diag 脚本消费）
 
-退出码：``0`` 齐全、``1`` 仍有缺失或不符、``2`` 找不到 pyproject.toml、
-``3`` Python 版本不满足 ``requires-python``（这种情况不尝试装包，装了也跑不起来）。
+退出码：``0`` 齐全、``1`` 仍有缺失或不符（含"本机连 packaging 都找不到、无从判定"）、
+``2`` 找不到 pyproject.toml、``3`` Python 版本不满足 ``requires-python``
+（这种情况不尝试装包，装了也跑不起来）。
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import re
 import subprocess
@@ -32,23 +35,81 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
-from packaging.requirements import InvalidRequirement, Requirement
-from packaging.specifiers import InvalidSpecifier, SpecifierSet
-from packaging.version import InvalidVersion, Version
 
-try:  # Python 3.11+
-    import tomllib as _toml
-except ImportError:  # pragma: no cover —— 3.10 走 tomli，两者都没有才走正则兜底
-    try:
-        import tomli as _toml  # type: ignore[no-redef]
-    except ImportError:
-        _toml = None  # type: ignore[assignment]
+def _load_packaging() -> tuple[Any, ...]:
+    """找一份能用的 ``packaging``：返回 ``(六个符号..., 来源模块名)``。
 
-#: 仓库根目录（本文件在 ``scripts/ops/`` 下）
-DEFAULT_PYPROJECT = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    为什么不能裸 ``from packaging... import ...``：**本脚本的职责就是"把缺的包装上"，
+    它自己不能被"缺包"打死**。全新 venv（Python 3.10 + pip 21.2.3 + setuptools
+    57.4.0）的 site-packages 里没有独立 ``packaging``，裸导入会让自检直接崩在
+    ImportError 上，永远走不到装包那一步——一键启动报的
+    ``No module named 'packaging'``、紧接着 ``No module named 'pydantic'``
+    就是这么来的（自检没跑成 → 依赖没装 → 真正跑 main.py 时才炸）。
 
-#: 没有 tomllib / tomli 时的兜底：只抠 ``dependencies = [...]`` 与 requires-python
-_DEP_ARRAY_RE = re.compile(r"^[ \t]*dependencies[ \t]*=[ \t]*\[(.*?)\]", re.S | re.M)
+    查找顺序（venv 里 pip / setuptools 必然在，所以几乎总能命中后两项）：
+    独立安装的 ``packaging`` → ``pip._vendor.packaging`` → ``setuptools._vendor.packaging``。
+    """
+    errors: list[str] = []
+    for name in ("packaging", "pip._vendor.packaging", "setuptools._vendor.packaging"):
+        try:
+            req_mod = importlib.import_module(f"{name}.requirements")
+            spec_mod = importlib.import_module(f"{name}.specifiers")
+            ver_mod = importlib.import_module(f"{name}.version")
+        except (ImportError, AttributeError) as e:  # 老版本 vendored 副本可能缺符号
+            errors.append(f"{name}: {e}")
+            continue
+        return (
+            req_mod.InvalidRequirement,
+            req_mod.Requirement,
+            spec_mod.InvalidSpecifier,
+            spec_mod.SpecifierSet,
+            ver_mod.InvalidVersion,
+            ver_mod.Version,
+            name,
+        )
+    raise ImportError("no usable packaging library (" + "; ".join(errors) + ")")
+
+
+try:
+    (
+        InvalidRequirement,
+        Requirement,
+        InvalidSpecifier,
+        SpecifierSet,
+        InvalidVersion,
+        Version,
+        PACKAGING_SOURCE,
+    ) = _load_packaging()
+    PACKAGING_ERROR: str | None = None
+except ImportError as _exc:  # pragma: no cover —— venv 里有 pip 就命中不到
+    InvalidRequirement = Requirement = InvalidSpecifier = SpecifierSet = None  # type: ignore[assignment]
+    InvalidVersion = Version = None  # type: ignore[assignment]
+    PACKAGING_SOURCE = ""
+    PACKAGING_ERROR = str(_exc)
+
+def _load_toml() -> Any:
+    """找一份能用的 TOML 解析器；找不到返回 None（交给正则兜底）。
+
+    加 ``pip._vendor.tomli`` 是为了 Python 3.10 的全新 venv：那里既没有内置
+    ``tomllib``（3.11+ 才有），也没有人装过 ``tomli``，但 pip 自己必然带着一份
+    vendored tomli。少了这一项，3.10 首启就只能走正则兜底（那个兜底有已知缺陷，
+    见 ``_fallback_pyproject``）。
+    """
+    for name in ("tomllib", "tomli", "pip._vendor.tomli"):
+        try:
+            return importlib.import_module(name)
+        except ImportError:
+            continue
+    return None
+
+
+_toml = _load_toml()
+
+#: 仓库根目录（本文件就在根目录，与 ``pyproject.toml`` 同级）
+DEFAULT_PYPROJECT = Path(__file__).resolve().parent / "pyproject.toml"
+
+#: 没有 TOML 解析器时的兜底：只抠依赖数组与 requires-python。
+#: 数组体用"括号配对扫描"取，不能靠正则一把梭（原因见 ``_extract_array``）。
 _REQUIRES_PYTHON_RE = re.compile(r"""^[ \t]*requires-python[ \t]*=[ \t]*["']([^"']+)["']""", re.M)
 _QUOTED_RE = re.compile(r"""["']([^"']+)["']""")
 
@@ -56,10 +117,41 @@ _QUOTED_RE = re.compile(r"""["']([^"']+)["']""")
 # ==================== pyproject 读取 ====================
 
 
+def _extract_array(text: str, key: str) -> str:
+    """抠出 ``key = [ ... ]`` 的数组体；引号感知 + 方括号配对。
+
+    为什么不用一条正则：依赖里带 extras 的 ``uvicorn[standard]>=0.23`` 自身含
+    ``]``，非贪婪的 ``\\[(.*?)\\]`` 会在第一条 extras 处就"收尾"，把整个清单截成
+    一条（实测 Python 3.10 全新 venv 里只剩 ``fastapi>=0.115`` → pydantic 等 11 条
+    全漏装，启动依旧 ModuleNotFoundError）。改用最小扫描：跳过引号内字符，
+    数方括号深度，深度归零才算数组结束。
+    """
+    start = re.search(rf"^[ \t]*{re.escape(key)}[ \t]*=[ \t]*\[", text, re.M)
+    if not start:
+        return ""
+    depth = 1
+    quote = ""
+    body_start = start.end()
+    for index in range(body_start, len(text)):
+        ch = text[index]
+        if quote:
+            if ch == quote:
+                quote = ""
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+        elif ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                return text[body_start:index]
+    return ""
+
+
 def _fallback_pyproject(text: str) -> dict[str, Any]:
     """没有 TOML 解析器时的极简兜底（够读运行时依赖即可，别指望通用）。"""
-    block = _DEP_ARRAY_RE.search(text)
-    deps = _QUOTED_RE.findall(block.group(1)) if block else []
+    deps = _QUOTED_RE.findall(_extract_array(text, "dependencies"))
     requires = _REQUIRES_PYTHON_RE.search(text)
     project: dict[str, Any] = {"dependencies": deps}
     if requires:
@@ -136,6 +228,8 @@ def check_python(requires: str, version: str | None = None) -> str | None:
     """``requires-python`` 满足返回 None，否则返回一句人话原因。"""
     if not requires:
         return None
+    if SpecifierSet is None:  # pragma: no cover —— 无 packaging 时无从判定，不拦
+        return None
     try:
         spec = SpecifierSet(str(requires))
     except InvalidSpecifier:
@@ -150,7 +244,14 @@ def check_requirements(
     specs: Sequence[str],
     version_of: Callable[[str], str | None] = installed_version,
 ) -> list[Problem]:
-    """逐条比对：缺包 → missing，版本不符 → mismatch，声明非法 → invalid。"""
+    """逐条比对：缺包 → missing，版本不符 → mismatch，声明非法 → invalid。
+
+    ``Requirement`` 为 None（连 pip/setuptools 的 vendored 副本都没有，理论不可达）
+    时不做判定、直接当作"无条件可装"返回空列表：宁可让 pip 去撞真实错误，也不要
+    留下一个静默的假"依赖齐全"。
+    """
+    if Requirement is None:  # pragma: no cover
+        return []
     problems: list[Problem] = []
     for raw in specs:
         try:
@@ -223,6 +324,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", help="emit a machine-readable JSON report")
     parser.add_argument("--quiet", action="store_true", help="stay silent unless something is wrong")
     args = parser.parse_args(argv)
+
+    if PACKAGING_ERROR is not None:  # pragma: no cover —— 只在"连 pip 都没有"的畸形环境
+        print(f"[deps] cannot verify dependencies: {PACKAGING_ERROR}", file=sys.stderr, flush=True)
+        print("[deps] the venv looks broken; recreate it: python -m venv venv", file=sys.stderr, flush=True)
+        return 1
 
     try:
         pyproject = load_pyproject(args.pyproject)

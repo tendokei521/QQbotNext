@@ -1,51 +1,27 @@
 #!/usr/bin/env bash
 # ============================================================
-#  QQBot Next - launcher
-#    [1/3] bootstrap virtualenv
-#    [2/3] verify dependencies   -> scripts/ops/check_deps.py
-#    [3/3] hand control to the bot
-#  Dependency logic lives in check_deps.py only: this shell is a
-#  thin wrapper so bat/sh can never drift apart.
+#  QQBot Next - launcher（薄壳）
+#  真正的逻辑全在 start.py：建 venv → 升 pip/setuptools →
+#  查/装依赖 → 启动 main.py。本脚本只负责找到解释器并转交，
+#  所以 bat / sh 不可能再各写一套而漂移。
+#
+#  用系统 Python 跑 start.py（而不是 venv 里的）：venv 还没建或
+#  已经坏掉时，venv 解释器根本起不来，而 start.py 恰恰要负责重建。
 # ============================================================
 set -u
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || exit 1
 
-stage() {
-    printf '  [%s/3] %-16s %s\n' "$1" "$2" "$3"
-}
-
-echo
-echo "  QQBot Next  ::  launcher"
-echo "  ----------------------------------------------------------"
-
-# ---------- [1/3] interpreter ----------
-PY="venv/bin/python3"
-[ -x "$PY" ] || PY="venv/bin/python"
-if [ -x "$PY" ]; then
-    stage 1 interpreter "$PY"
+if command -v python3 >/dev/null 2>&1; then
+    PY=python3
+elif command -v python >/dev/null 2>&1; then
+    PY=python
+elif [ -x venv/bin/python3 ]; then
+    PY=venv/bin/python3
+elif [ -x venv/bin/python ]; then
+    PY=venv/bin/python
 else
-    stage 1 interpreter "creating venv (first run)"
-    if ! python3 -m venv venv; then
-        echo
-        echo "  [FAIL] could not create the virtualenv."
-        echo "         Install Python 3.10+ and make sure it is on PATH."
-        exit 1
-    fi
-    PY="venv/bin/python3"
-    [ -x "$PY" ] || PY="venv/bin/python"
+    echo "  [FAIL] 找不到 Python 3.10+，请先安装后再运行 start.sh。" >&2
+    exit 1
 fi
 
-# ---------- [2/3] dependencies ----------
-if "$PY" scripts/ops/check_deps.py --quiet; then
-    stage 2 dependencies "ok"
-else
-    stage 2 dependencies "incomplete (see above)"
-    echo
-    echo "  Continuing anyway. If the bot exits with ModuleNotFoundError,"
-    echo "  go online and run:  scripts/ops/requirements.sh"
-fi
-
-# ---------- [3/3] launch ----------
-stage 3 launch "main.py"
-echo
-exec "$PY" main.py
+exec "$PY" start.py "$@"

@@ -1,56 +1,40 @@
 @echo off
 rem ============================================================
-rem  QQBot Next - launcher
-rem    [1/3] bootstrap virtualenv
-rem    [2/3] verify dependencies   -> scripts\ops\check_deps.py
-rem    [3/3] hand control to the bot
-rem  Dependency logic lives in check_deps.py only: this shell is
-rem  a thin wrapper so bat/sh can never drift apart.
+rem  QQBot Next - launcher（薄壳）
+rem  真正的逻辑全在 start.py：建 venv → 升 pip/setuptools →
+rem  查/装依赖 → 启动 main.py。这里只负责找到解释器并转交，
+rem  所以 bat / sh 不可能再各写一套而漂移。
+rem
+rem  用系统 Python 跑 start.py（而不是 venv 里的）：venv 还没建、
+rem  或者已经坏掉时，venv 解释器根本起不来，而 start.py 恰恰要负责
+rem  把它重建出来。start.py 内部会自动切到 venv 解释器装依赖和启动。
 rem ============================================================
-setlocal EnableExtensions EnableDelayedExpansion
+setlocal EnableExtensions
 cd /d "%~dp0"
 
-echo.
-echo   QQBot Next  ::  launcher
-echo   ----------------------------------------------------------
+set "LAUNCHER="
+where py >nul 2>&1 && set "LAUNCHER=py -3"
+if not defined LAUNCHER where python >nul 2>&1 && set "LAUNCHER=python"
+if not defined LAUNCHER if exist "venv\Scripts\python.exe" set "LAUNCHER=venv\Scripts\python.exe"
 
-rem ---------- [1/3] interpreter ----------
-if exist "venv\Scripts\python.exe" (
-    call :stage 1 interpreter "venv\Scripts\python.exe"
-) else (
-    call :stage 1 interpreter "creating venv (first run)"
-    python -m venv venv
-    if errorlevel 1 (
-        echo.
-        echo   [FAIL] could not create the virtualenv.
-        echo          Install Python 3.10+ and make sure it is on PATH.
-        endlocal
-        exit /b 1
-    )
+if not defined LAUNCHER (
+    echo.
+    echo   [FAIL] 找不到 Python 3.10+。
+    echo          安装时请勾选 "Add python.exe to PATH"，然后重跑 start.bat。
+    pause
+    exit /b 1
 )
 
-rem ---------- [2/3] dependencies ----------
-"venv\Scripts\python.exe" "scripts\ops\check_deps.py" --quiet
-if errorlevel 1 (
-    call :stage 2 dependencies "incomplete (see above)"
+%LAUNCHER% start.py %*
+set "RC=%errorlevel%"
+
+rem 用户按 Ctrl+C 是正常退出方式（框架会自己顺序关闭），不该再要一次回车。
+if "%RC%"=="3221225786" exit /b 0
+if "%RC%"=="130" exit /b 0
+if not "%RC%"=="0" (
     echo.
-    echo   Continuing anyway. If the bot exits with ModuleNotFoundError,
-    echo   go online and run:  scripts\ops\requirements.bat
-    echo.
-) else (
-    call :stage 2 dependencies "ok"
+    echo   start.py 退出码 %RC%
+    pause
 )
-
-rem ---------- [3/3] launch ----------
-call :stage 3 launch "main.py"
-echo.
-cmd /k "venv\Scripts\python.exe main.py"
-
-endlocal
-exit /b 0
-
-rem ---------- helper: aligned status line ----------
-:stage
-set "qqn_label=%~2                "
-echo   [%~1/3] !qqn_label:~0,16!  %~3
-exit /b 0
+pause
+exit /b %RC%

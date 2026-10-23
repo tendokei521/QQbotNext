@@ -58,21 +58,32 @@ logs/                           日志目录
 
 ## 快速开始
 
-### 简单开始（推荐）
-
-linux环境下需要执行 `dos2unix requirements.sh`进行换行符清洗
+### 一条命令（推荐）
 
 ```bash
-# 1. 自动创建虚拟环境并安装依赖
-scripts\ops\requirements.bat
-
-# 2. 启动
-start.bat
+python start.py
 ```
 
-之后每次启动只需要运行 `start.bat`。
+`start.py` 是唯一的一键入口，四步全包：**建 venv → 升 pip/setuptools → 查/装依赖 → 启动**。
+依赖不齐时它不会硬着头皮启动（旧版那样只会换来一屏 `ModuleNotFoundError`），而是明确报错
+并告诉你下一步。之后每次启动也只需要 `python start.py`（Windows 可双击 `start.bat`，
+Linux/macOS 可跑 `./start.sh`，两者都只是转交给 `start.py` 的薄壳）。
 
-> Linux/macOS 可运行 `scripts/ops/requirements.sh` 后执行 `start.sh`。
+常用开关：
+
+| 命令 | 说明 |
+|------|------|
+| `python start.py` | 一键：缺什么补什么，然后启动 |
+| `python start.py --check` | 只做只读检查（不联网、不装包、不启动），退出码 1 = 依赖不齐 |
+| `python start.py --no-launch` | 环境备齐但不起进程 |
+| `python start.py --recreate` | 删掉重建 `venv`（venv 坏掉时的自救入口） |
+| `python start.py --dev` | 连带 `[dev]` 组（pytest / ruff） |
+| `python start.py --pause` | 结束前等回车，方便双击运行时看输出 |
+
+用手动方式也行，根目录 `requirements.bat` / `requirements.sh` 是兜底入口
+（等价于 `pip install -r requirements.txt`，其中 `requirements.txt` 只是指向 `pyproject.toml` 的指针）。
+
+> Linux/macOS 首次使用若脚本报换行符错误，先跑 `dos2unix start.sh requirements.sh`。
 
 ## WebUI（管理后台）
 

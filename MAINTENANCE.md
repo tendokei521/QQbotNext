@@ -45,12 +45,18 @@ logs/                    debug.log / warn.log / errors.log / user.log + 归档�
 ## 3. 启动 / 停止
 
 ```bash
-# 启动（推荐）
+# 启动（推荐）：建 venv → 查/装依赖 → 启动，一条命令搞定
+python start.py
+
+# 或双击 start.bat（Windows）/ ./start.sh（Linux/macOS），二者都转交给 start.py
+
+# 已经进了 venv 的话，也可以直接跑主程序
 venv\Scripts\activate.bat
 python main.py
-
-# 或双击 start.bat
 ```
+
+> 只想确认"这台机器现在能不能跑"：`python start.py --check`（只读，不联网不装包）。
+> venv 坏了（重装过 Python、删过解释器）：`python start.py --recreate`。
 
 - **停止**：`Ctrl+C`。框架会顺序关闭：定时任务 → 网关(断开所有 Bot) → SQLite → 后台任务。
 - **确认是否在跑**：WebUI 端口（默认 9200）有进程监听即运行中。

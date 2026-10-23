@@ -2,7 +2,7 @@
 
 背景（真实故障）：`requirements.txt` 曾与 `pyproject.toml` 平行手工维护，导致两边漂移，
 有人把 starlette 弃用文案里的 "httpx2" 抄进了 `requirements.txt`——而该包在 PyPI 上并不存在，
-使首次安装（scripts/requirements.bat / .sh）必然失败。本脚本在 CI 中前置拦截这类回归。
+使首次安装（根目录 requirements.bat / .sh）必然失败。本脚本在 CI 中前置拦截这类回归。
 
 校验项：
 1. requirements.txt 必须是且只能是指向 pyproject.toml 的指针（有效行恰为 `.[dev]`）；
