@@ -75,9 +75,12 @@ async def test_migrate_from_legacy(project_root, settings):
     cfg = ConfigService(db, project_root)
     await cfg.init()
 
-    # bots 迁移
+    # bots 迁移（旧 JSON 没有连接方向 → 默认正向，行为与升级前一致）
     bots = cfg.get_bots()
-    assert bots == [{"ws_url": "ws://127.0.0.1:1", "owner_id": 10001, "auto_connect": False}]
+    assert bots == [{
+        "ws_url": "ws://127.0.0.1:1", "owner_id": 10001,
+        "auto_connect": False, "conn_mode": "forward",
+    }]
 
     # webui 配置迁移
     webui = cfg.get_webui_config()
@@ -207,3 +210,83 @@ async def test_default_webui_config_shape(config_service):
     assert "logs" in cfg
     assert "single_service" in cfg
     assert "multi_group" in cfg
+
+
+# ==================== 连接方向（正向 / 反向 WS）====================
+
+
+async def test_bots_conn_mode_roundtrip(tmp_path):
+    """连接方向要落库：反向账号保存后重启仍读回 reverse（否则重启变正向去连）。
+
+    用独立空根目录建库：`project_root` 夹具带 legacy JSON，会在二次启动时再迁移
+    一批 bots 覆盖回默认值，掩盖「conn_mode 有没有真的落盘」这个断言。
+    """
+    empty_root = tmp_path / "empty_root"
+    empty_root.mkdir()
+    db = Database(tmp_path / "roundtrip.db")
+    await db.connect()
+    try:
+        cfg = ConfigService(db, empty_root)
+        await cfg.init()
+        await cfg.save_bots([
+            {"ws_url": "ws://127.0.0.1:3001/onebot/v11/ws", "conn_mode": "reverse", "auto_connect": True},
+            {"ws_url": "ws://127.0.0.1:3002/", "conn_mode": "forward", "auto_connect": False},
+        ])
+        assert [b["conn_mode"] for b in cfg.get_bots()] == ["reverse", "forward"]
+        # 对外接口也要带上（前端据此渲染反向监听字段）
+        assert [b["conn_mode"] for b in cfg.get_bots_public()] == ["reverse", "forward"]
+
+        # 重启：同一份 SQLite 重新加载
+        cfg2 = ConfigService(db, empty_root)
+        await cfg2.init()
+        assert [b["conn_mode"] for b in cfg2.get_bots()] == ["reverse", "forward"]
+    finally:
+        await db.close()
+
+
+async def test_bots_conn_mode_defaults_to_forward(config_service):
+    """未提交连接方向：新账号默认正向，已有账号沿用旧值（不能被静默改成正向）。"""
+    await config_service.save_bots([{"ws_url": "ws://a"}]),
+    assert config_service.get_bots()[0]["conn_mode"] == "forward"
+
+    await config_service.save_bots([{"ws_url": "ws://a", "conn_mode": "reverse"}])
+    # 模拟老前端全量保存：payload 里没有 conn_mode
+    await config_service.save_bots([{"ws_url": "ws://a"}])
+    assert config_service.get_bots()[0]["conn_mode"] == "reverse"
+
+
+async def test_bots_conn_mode_normalizes_unknown_values(config_service):
+    """非法/别名写法统一归一，避免前后端各认一套（server / ws_reverse / 空串等）。"""
+    await config_service.save_bots([
+        {"ws_url": "ws://a", "conn_mode": "server"},
+        {"ws_url": "ws://b", "conn_mode": "ws_reverse"},
+        {"ws_url": "ws://c", "conn_mode": ""},
+        {"ws_url": "ws://d", "conn_mode": None},
+        {"ws_url": "ws://e", "conn_mode": "garbage"},
+    ])
+    assert [b["conn_mode"] for b in config_service.get_bots()] == [
+        "reverse", "reverse", "forward", "forward", "forward",
+    ]
+
+
+async def test_legacy_bots_table_gets_conn_mode_column(tmp_path, project_root):
+    """老库（bots 表无 conn_mode 列）启动时补列，并按正向读取存量账号。"""
+    db = Database(tmp_path / "old.db")
+    await db.connect()
+    try:
+        await db.execute("DROP TABLE bots")
+        await db.execute(
+            "CREATE TABLE bots (bot_index INTEGER PRIMARY KEY, ws_url TEXT NOT NULL DEFAULT '', "
+            "owner_id TEXT, auto_connect INTEGER NOT NULL DEFAULT 0)"
+        )
+        await db.execute(
+            "INSERT INTO bots (bot_index, ws_url, auto_connect) VALUES (0, 'ws://old', 1)"
+        )
+        cfg = ConfigService(db, project_root)
+        await cfg.init()
+        assert "conn_mode" in await db.table_columns("bots")
+        assert cfg.get_bots()[0]["conn_mode"] == "forward"
+    finally:
+        await db.close()
+
+

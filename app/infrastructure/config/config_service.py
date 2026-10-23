@@ -21,6 +21,7 @@ from app.infrastructure.config.ws_url import (
     restore_ws_url,
     split_ws_url,
 )
+from app.infrastructure.onebot.endpoint import FORWARD, normalize_mode
 
 #: 这四个名字历史上就在这里定义，外部（gateway / webui）从本模块导入。
 #: 现在实现搬到了 `ws_url.py`，这里保留重导出；`__all__` 让 linter 知道它们是公共 API。
@@ -75,8 +76,18 @@ class ConfigService:
 
     # ==================== 生命周期 ====================
     async def init(self) -> None:
+        await self._ensure_schema()
         await self._migrate_legacy_if_needed()
         await self._load_all()
+
+    async def _ensure_schema(self) -> None:
+        """老库补列：`conn_mode`（连接方向）晚于 `bots` 表引入。
+
+        存量库的 `bots` 表只有 ws_url/owner_id/auto_connect；不补列会让
+        `SELECT *` 之后所有读取都拿不到连接模式，反向账号被静默当成正向去连。
+        默认值 `forward` 保证升级后存量账号行为不变。
+        """
+        await self.db.ensure_columns("bots", {"conn_mode": "TEXT NOT NULL DEFAULT 'forward'"})
 
     async def _migrate_legacy_if_needed(self) -> None:
         count = await self.db.fetchone("SELECT COUNT(*) AS c FROM module_config")
@@ -180,6 +191,7 @@ class ConfigService:
                 "ws_url": r["ws_url"],
                 "owner_id": owner_id,
                 "auto_connect": bool(r["auto_connect"]),
+                "conn_mode": normalize_mode(r.get("conn_mode")),
             })
 
         # 上次登录账号快照（老库无此表时由 SCHEMA 的 CREATE TABLE IF NOT EXISTS 补建）
@@ -301,7 +313,8 @@ class ConfigService:
 
         - access_token 字段缺失 或 值为打码哨兵 → 保留旧 token（位置优先、基础地址匹配兜底）；
         - access_token 为显式值（含空串）→ 直接采用（空串 = 清除 token）；
-        - 兼容旧前端：ws_url 本身携带打码 access_token 时同样回填。
+        - 兼容旧前端：ws_url 本身携带打码 access_token 时同样回填；
+        - conn_mode 缺字段/非法值 → 归一为 forward（存量账号行为不变）。
         """
         old = self._bots
         normalized = []
@@ -313,14 +326,22 @@ class ConfigService:
                 token = self._find_old_token(old, i, base) or inline_token
             else:
                 token = str(token).strip()
-            clean = {**cfg, "ws_url": join_ws_url(base, token)}
+            prev_mode = old[i].get("conn_mode") if i < len(old) else None
+            clean = {
+                **cfg,
+                "ws_url": join_ws_url(base, token),
+                # 未提交 conn_mode 时沿用旧值（老前端/旧脚本不会因为缺字段把反向账号改回正向）
+                "conn_mode": normalize_mode(cfg["conn_mode"] if "conn_mode" in cfg else prev_mode),
+            }
             clean.pop("access_token", None)  # 独立字段不落库（存储仍为单字段 ws_url）
             normalized.append(clean)
         sqls = [("DELETE FROM bots", ())]
         for i, cfg in enumerate(normalized):
             sqls.append((
-                "INSERT OR REPLACE INTO bots (bot_index, ws_url, owner_id, auto_connect) VALUES (?,?,?,?)",
-                (i, cfg.get("ws_url", ""), cfg.get("owner_id"), 1 if cfg.get("auto_connect") else 0),
+                "INSERT OR REPLACE INTO bots (bot_index, ws_url, owner_id, auto_connect, conn_mode) "
+                "VALUES (?,?,?,?,?)",
+                (i, cfg.get("ws_url", ""), cfg.get("owner_id"), 1 if cfg.get("auto_connect") else 0,
+                 cfg.get("conn_mode", FORWARD)),
             ))
         await self.db.run_in_transaction(sqls)   # 先落库，成功后再更新内存缓存
         self._bots = normalized
@@ -343,7 +364,9 @@ class ConfigService:
         return ""
 
     async def add_bot(self, cfg: dict) -> int:
-        self._bots.append(dict(cfg))
+        # 新增账号默认正向：`conn_mode` 未指定时不能写成空值，否则 save_bots 的归一
+        # 只能靠「缺字段沿用旧值」兜底，而新账号没有旧值。
+        self._bots.append({**cfg, "conn_mode": normalize_mode(cfg.get("conn_mode"))})
         await self.save_bots(self._bots)
         return len(self._bots) - 1
 

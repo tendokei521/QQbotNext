@@ -40,7 +40,9 @@ CREATE TABLE IF NOT EXISTS bots (
     bot_index   INTEGER PRIMARY KEY,
     ws_url      TEXT NOT NULL DEFAULT '',
     owner_id    TEXT,
-    auto_connect INTEGER NOT NULL DEFAULT 0
+    auto_connect INTEGER NOT NULL DEFAULT 0,
+    -- 连接方向：forward=正向 WS（框架连出）/ reverse=反向 WS（框架监听、OneBot 实现连入）
+    conn_mode   TEXT NOT NULL DEFAULT 'forward'
 );
 
 -- 每个连接（index）上一次成功登录的账号快照：

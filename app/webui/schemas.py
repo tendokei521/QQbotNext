@@ -12,10 +12,14 @@ class BotConfigItem(BaseModel):
 
     v3 起**不再有账号级 owner QQ**：拥有者身份只来自
     「权限管理 → 拥有者名册」（``agent_owner_list``）。
+
+    ``conn_mode``：``forward`` = 正向 WebSocket（框架连出，默认）/ ``reverse`` =
+    反向 WebSocket（框架监听、OneBot 实现连入），见 ``app/infrastructure/onebot/endpoint.py``。
     """
 
     ws_url: str = ""
     auto_connect: bool = False
+    conn_mode: str = "forward"
 
 
 class BotsConfigUpdate(BaseModel):
