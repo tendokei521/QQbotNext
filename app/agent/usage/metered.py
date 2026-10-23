@@ -147,7 +147,12 @@ class MeteredProvider:
         )
         return response
 
-    async def stream(self, messages: list[dict], **kwargs: Any) -> Any:
+    async def _recorded_stream(self, stream_fn: Any, messages: list[dict], **kwargs: Any) -> Any:
+        """把一次（流式）调用的 usage 收集起来，结束后记一条。
+
+        `chat_stream` 与 `stream` 共用这段：上游 usage 通常在**最后一帧**，
+        中途 break 时可能拿不到 —— 那种情况记 `estimated=1`，不假装精确。
+        """
         from app.agent.providers.base import merge_usage
 
         started = time.monotonic()
@@ -156,7 +161,7 @@ class MeteredProvider:
         ok = True
         err_kind = ""
         try:
-            async for event in self._inner.stream(messages, **kwargs):
+            async for event in stream_fn(messages, **kwargs):
                 event_usage = getattr(event, "usage", None)
                 if event_usage:
                     merge_usage(usage, event_usage)
@@ -173,9 +178,18 @@ class MeteredProvider:
                 latency_ms=int((time.monotonic() - started) * 1000),
                 ok=ok,
                 err_kind=err_kind,
-                # 流式没拿到 usage → 标 estimated（上游没回，值不可信）
                 estimated=not usage,
             )
+
+    async def chat_stream(self, messages: list[dict], **kwargs: Any) -> Any:
+        """流式对话入口（`iter_stream_with_fallback` 用的就是这个方法名）。"""
+        async for event in self._recorded_stream(self._inner.chat_stream, messages, **kwargs):
+            yield event
+
+    async def stream(self, messages: list[dict], **kwargs: Any) -> Any:
+        """另一套流式入口（部分调用方用 `stream`）。"""
+        async for event in self._recorded_stream(self._inner.stream, messages, **kwargs):
+            yield event
 
 
 def wrap_metered(provider: Any) -> Any:

@@ -130,7 +130,12 @@ class MemoryLifecycle:
             session_mgr = SessionManager(str(getattr(runtime, "bot_id", "")))
             event = getattr(ctx, "event", None)
             is_private = getattr(event, "message_type", "") == "private"
-            mgr.maybe_consolidate(ctx.session_id, not is_private, session_mgr.sessions, source="chat")
+            # 注意：`maybe_consolidate` 要的是**消息列表**，不是会话表。
+            # 传 `session_mgr.sessions`（dict）会让它遍历到字符串键 →
+            # `'str' object has no attribute 'get'`（历史 bug）。
+            messages = session_mgr.history_snapshot(ctx.session_id)
+            if messages:
+                mgr.maybe_consolidate(ctx.session_id, not is_private, messages, source="chat")
         except Exception as e:  # noqa: BLE001
             from app.core.logger import logger
 
