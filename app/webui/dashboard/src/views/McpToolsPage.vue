@@ -1,4 +1,18 @@
-<script setup lang="ts">
+async function toggleTool(tool: any) {
+  // 统一写入口：后端把它记进 `tools_disabled`（唯一总表），不再各写一套 map
+  const next = !tool.enabled
+  try {
+    await http.post('/api/agent/tools/toggle', {
+      name: tool.name,
+      source: 'mcp',
+      enabled: next,
+    })
+    tool.enabled = next
+    tool.effective = next && (tool.ready ?? true)
+  } catch (err) {
+    useNotifyStore().push(errorMessage(err), 'error')
+  }
+}<script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import http, { errorMessage } from '@/api/http'
 import { useAgentConfigStore } from '@/stores/agentConfig'
@@ -26,7 +40,7 @@ const notify = useNotifyStore()
 const tools = ref<McpTool[]>([])
 const loading = ref(false)
 
-const enabledMap = computed<Record<string, boolean>>(() => agent.draft.mcp_tools_enabled || {})
+// 工具开关状态来自后端统一判定（/api/agent/tools），前端不再自算
 
 const logEnabled = computed<boolean>({
   get: () => !!agent.draft.mcp_tools_log_enabled,
@@ -43,11 +57,20 @@ const groups = computed(() => {
   return Array.from(map.entries()).map(([category, items]) => ({ category, items }))
 })
 
-function toggleTool(tool: McpTool) {
-  const next = { ...enabledMap.value, [tool.name]: !tool.enabled }
-  agent.onChange('mcp_tools_enabled', next)
-  tool.enabled = !tool.enabled
-  tool.effective = tool.enabled && tool.ready
+async function toggleTool(tool: any) {
+  // 统一写入口：后端记进 `tools_disabled`（唯一总表），不再各写一套 map
+  const next = !tool.enabled
+  try {
+    await http.post('/api/agent/tools/toggle', {
+      name: tool.name,
+      source: 'mcp',
+      enabled: next,
+    })
+    tool.enabled = next
+    tool.effective = next && (tool.ready ?? true)
+  } catch (err) {
+    useNotifyStore().push(errorMessage(err), 'error')
+  }
 }
 
 async function loadTools() {
