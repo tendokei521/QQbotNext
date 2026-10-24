@@ -8,7 +8,6 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import EmptyState from '@/components/EmptyState.vue'
 import { AGENT_INDEX_PATH, agentSectionByPath } from '@/agent/sections'
 import { useAgentConfigStore } from '@/stores/agentConfig'
 import { useBotsStore } from '@/stores/bots'
@@ -68,6 +67,7 @@ watch(
         </v-chip>
         <v-chip v-else-if="agent.saveStatus === 'error'" size="small" color="error" variant="flat">保存失败</v-chip>
         <v-chip v-else-if="agent.saveStatus === 'dirty'" size="small" color="warning" variant="flat">未保存</v-chip>
+        <v-chip v-else-if="agent.saveStatus === 'blocked'" size="small" color="grey" variant="flat">无账号·不保存</v-chip>
       </div>
       <div class="d-flex align-center gap-2">
         <!--
@@ -129,17 +129,24 @@ watch(
       </div>
     </v-alert>
 
-    <!-- 一个账号都没有：这才是真正需要先添加账号的情况 -->
-    <EmptyState
-      v-if="!hasAccount && !booting"
-      icon="mdi-robot-off-outline"
-      title="请先在「账号管理」添加账号"
-      description="Agent 配置按账号独立保存；账号一创建就能编辑，不需要先连上 QQ。"
-    >
-      <v-btn variant="tonal" prepend-icon="mdi-plus" @click="router.push('/bots')">去添加账号</v-btn>
-      <v-btn variant="text" prepend-icon="mdi-refresh" @click="ensureLoaded">重试</v-btn>
-    </EmptyState>
+    <!--
+      一个账号都没有：**不再整页挡住**。
+      人格是全局资产（预设库），没有账号也该能编辑；只有"按账号保存"的字段没法落库，
+      所以这里给警告 + 保留编辑能力，而不是把整个人格设定区块锁死。
+    -->
+    <v-alert v-if="!hasAccount" type="warning" variant="tonal" density="compact" class="mb-3">
+      <div class="d-flex align-center flex-wrap gap-2">
+        <span class="text-caption">
+          未添加账号：<strong>人格预设可以照常编辑</strong>（存在全局预设库里，与账号无关）；
+          其余按账号保存的 Agent 配置改完<strong>不会落库</strong>——先在「账号管理」添加账号即可保存。
+        </span>
+        <v-btn size="small" variant="text" prepend-icon="mdi-plus" @click="router.push('/bots')">去添加账号</v-btn>
+        <v-btn size="small" variant="text" prepend-icon="mdi-account-heart-outline" @click="router.push('/personas')">
+          编辑人格预设
+        </v-btn>
+      </div>
+    </v-alert>
 
-    <router-view v-else-if="hasAccount" />
+    <router-view />
   </div>
 </template>

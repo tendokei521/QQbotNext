@@ -47,7 +47,7 @@ export const useAgentConfigStore = defineStore('agentConfig', {
     providerPresets: [] as { id: string; name: string }[],
     streamPresets: {} as Record<string, StreamPreset>,
     poolModelIds: [] as string[],
-    saveStatus: 'clean' as 'clean' | 'dirty' | 'saving' | 'error',
+    saveStatus: 'clean' as 'clean' | 'dirty' | 'saving' | 'error' | 'blocked',
     /** 配置加载失败原因（空串 = 正常）。离线/账号缺失时页面靠它显示提示，而不是弹红条 */
     loadError: '',
 
@@ -172,18 +172,33 @@ export const useAgentConfigStore = defineStore('agentConfig', {
       }, AUTOSAVE_DEBOUNCE_MS)
     },
 
+    /**
+     * 没有选定账号时：只保留页面上的草稿并标「blocked」，不排自动保存。
+     *
+     * 账号是配置的落库归属（v4：账号一创建就有 id，与是否连接无关），一个账号都没有时
+     * 改动无处可存——页面上必须如实说"不保存"，而不是静默丢掉或假装已保存。
+     */
+    markBlockedIfNoAccount(): boolean {
+      if (this.botId !== null) return false
+      this.saveStatus = 'blocked'
+      return true
+    },
+
     onChange(key: string, value: any) {
       this.draft[key] = value
+      if (this.markBlockedIfNoAccount()) return
       this.scheduleSave()
     },
 
     onPermissionChange(v: AgentPermission) {
       this.permission = v
+      if (this.markBlockedIfNoAccount()) return
       this.scheduleSave()
     },
 
     onEnabledChange(v: boolean | null) {
       this.enabled = !!v
+      if (this.markBlockedIfNoAccount()) return
       this.scheduleSave()
     },
 
