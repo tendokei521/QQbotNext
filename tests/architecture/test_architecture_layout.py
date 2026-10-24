@@ -191,7 +191,9 @@ _LONG_FILE_ALLOWLIST = {
     # v3：新增 `build_extra_blocks` 块（模块贡献的额外 system 块）与其 docstring，
     # 809 行。装配器是"块表 + 12 个块函数"的单一职责文件，拆开反而要跨文件读顺序；
     # 收紧方式：等 W3 把 behavior/emoji/meta 三块迁到 `llm_assembly` 模块后自然回落 <800。
-    "app/agent/assembly/assembler.py": 813,
+    # 提示词方案（prompt_preset）：块 2~6 的正文改由 `assembly.presets` 提供，装配器只多出
+    # "选中方案则走方案"的分支（约 +35 行），文案本体全在新文件里，故不拆本文件。
+    "app/agent/assembly/assembler.py": 850,
 }
 MAX_FILE_LINES = 800
 

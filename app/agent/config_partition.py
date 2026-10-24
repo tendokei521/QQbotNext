@@ -64,7 +64,11 @@ UI_PAGES: tuple[UIPage, ...] = (
         subtitle="响应场景与人格设定（模型参数在「Provider 预设 → 模型」里配）",
         groups=(
             UIGroup("basic_switch", "响应场景", ("group_enable", "private_enable")),
-            UIGroup("basic_persona", "人格设定", ("persona_preset_id", "system_prompt")),
+            UIGroup(
+                "basic_persona",
+                "人格设定",
+                ("prompt_preset", "persona_preset_id", "system_prompt"),
+            ),
         ),
     ),
     UIPage(

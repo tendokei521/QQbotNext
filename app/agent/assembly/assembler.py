@@ -47,6 +47,8 @@ messages（OpenAI 风格）
 注意：块 8 在块 9 之前是历史既有行为；块 9 内部"指代在前、环境在后"用 ``\n\n`` 连接。
 块 10 与块 9 是两个**不同来源**（持续记录 vs 按需拉取），正文按 message_id 去重。
 块 2/3 只在 ``assembly_profile=qq_agent`` 档出现，``legacy`` 档恒为空（见 ``persona_rules``）。
+提示词方案（``prompt_preset``）改的是**文案不是块**：块 2~6 位置与顺序不变，正文换成
+该方案的版本（见 ``assembly.presets``）；块 1 人格永远不受影响。
 """
 
 from __future__ import annotations
@@ -201,6 +203,13 @@ def build_persona(req: PromptRequest) -> list[dict]:
     return [{"role": "system", "content": system_prompt}]
 
 
+def prompt_preset(req: PromptRequest):
+    """本轮选中的「提示词方案」（见 ``assembly.presets``）；未选/未知值返回 ``None``。"""
+    from app.agent.assembly import presets
+
+    return presets.resolve(req.config)
+
+
 def persona_begin_dialogs(req: PromptRequest) -> list[dict]:
     """角色预设的预设对话（前插到历史最前，对齐 AstrBot 的 ``begin_dialogs``）。
 
@@ -227,7 +236,9 @@ def build_schedule_instruction(req: PromptRequest) -> list[dict]:
     """定时任务协议（主动消息/定时任务自身不需要再建任务，故关闭）。"""
     if not req.schedule_enable:
         return []
-    return [{"role": "system", "content": SCHEDULE_INSTRUCTION}]
+    preset = prompt_preset(req)
+    text = preset.schedule_instruction if preset is not None else SCHEDULE_INSTRUCTION
+    return [{"role": "system", "content": text}] if text else []
 
 
 def assembly_profile(req: PromptRequest) -> str:
@@ -242,24 +253,36 @@ def assembly_profile(req: PromptRequest) -> str:
 def build_behavior(req: PromptRequest) -> list[dict]:
     """行为规则块：拟人化的主来源（独立成段，不塞进人格正文）。
 
-    三条纪律：
+    四条纪律：
 
-    1. **只在 ``qq_agent`` 档注入**——``legacy`` 下整块消失，改造前的提示词逐字不变；
-    2. **段落里点名的工具按本轮能力裁剪**（见 ``persona_rules.detect_caps``）：
-       工具没开就整句消失，否则模型会去调不存在的工具；
-    3. **``behavior_rules_override`` 可整体替换**，但安全规则与工作方式强制追加——
+    1. **选中提示词方案时无条件注入**——方案本身就是一套行为文案（差异主要在这里），
+       不再看 ``assembly_profile``；否则用户选了方案却因模块默认档位而拿不到行为段，
+       等于点了没反应。方案的开关就是它自己：清空 ``prompt_preset`` 即回退。
+    2. **未选方案时只在 ``qq_agent`` 档注入**——``legacy`` 下整块消失，改造前逐字不变；
+    3. **段落里点名的工具按本轮能力裁剪**（见 ``persona_rules.detect_caps``）；
+    4. **``behavior_rules_override`` 可整体替换**，但安全规则与工作方式强制追加——
        一次误配置不该能把"不越权 / 不泄露 / 怎么发言"整套删掉。
     """
-    if assembly_profile(req) != "qq_agent":
-        return []
-    if not bool(req.cfg("behavior_rules_enable", True)):
-        return []
-
+    from app.agent.assembly import presets as prompt_presets
     from app.agent.persona import rules as persona_rules
 
-    caps = persona_rules.detect_caps(req.available_tools, req.config, req.modalities)
+    preset = prompt_preset(req)
+    if preset is None and (
+        assembly_profile(req) != "qq_agent" or not bool(req.cfg("behavior_rules_enable", True))
+    ):
+        return []
     override = str(req.cfg("behavior_rules_override", "") or "").strip()
-    if override:
+    if preset is not None:
+        text = prompt_presets.render(
+            preset,
+            runtime=req.runtime,
+            available_tools=req.available_tools,
+            config=req.config,
+            modalities=req.modalities,
+            override=override,
+        )
+    elif override:
+        caps = persona_rules.detect_caps(req.available_tools, req.config, req.modalities)
         text = persona_rules.override_with_safety(override, caps)
     else:
         text = persona_rules.render(req.runtime, req.available_tools, req.config, req.modalities)
@@ -271,8 +294,10 @@ def build_emoji_hint(req: PromptRequest) -> list[dict]:
 
     三条注入条件（任一不满足就整块不出现）：本轮真的能贴表情、活跃度 > 0、
     词典里确实有标签。标签表是静态的，所以这段在会话内逐字稳定，不破坏前缀缓存。
+    选中提示词方案时不再要求 ``qq_agent`` 档（方案自带这套文案的口径）。
     """
-    if assembly_profile(req) != PROFILE_QQ_AGENT:
+    preset = prompt_preset(req)
+    if preset is None and assembly_profile(req) != PROFILE_QQ_AGENT:
         return []
     tools = req.available_tools
     if tools is not None and "set_msg_emoji_like" not in tools:
@@ -292,7 +317,8 @@ def build_emoji_hint(req: PromptRequest) -> list[dict]:
             f"[Assembly] 读取表情词典失败（已跳过表情提示）: {e}"
         )
         return []
-    text = emoji_hint_line(tags)
+    render_hint = preset.emoji_hint if preset is not None else emoji_hint_line
+    text = render_hint(tags)
     return [{"role": "system", "content": text}] if text else []
 
 
@@ -300,13 +326,16 @@ def build_proactive(req: PromptRequest) -> list[dict]:
     """「主动性」协议块：按本轮实际可用工具裁剪，没有可用能力时整块不注入。
 
     意图判定用**原始正文**（``req.intent_text``），避免元信息前缀干扰。
-    ``qq_agent`` 档下去重：通用用法归行为段，这里只留本轮的意图补强与标记语义。
+    ``qq_agent`` 档或选中提示词方案时去重：通用用法归行为段，这里只留本轮的意图补强
+    与标记语义。方案的措辞只覆盖 ``PROACTIVE_LINES`` 里若干行，能力裁剪不变。
     """
+    preset = prompt_preset(req)
     text = build_proactive_instruction(
         req.config,
         req.intent_text,
         available_tools=req.available_tools,
-        dedupe=assembly_profile(req) == "qq_agent",
+        dedupe=preset is not None or assembly_profile(req) == "qq_agent",
+        lines=preset.proactive_lines if preset is not None else None,
     )
     return [{"role": "system", "content": text}] if text else []
 
@@ -321,6 +350,7 @@ def message_meta_instruction(req: PromptRequest) -> str | None:
 
     ``qq_agent`` 档 + 单行格式时改用**单行格式图例**：老说明讲的是"发送者：/发送了："
     那一套，格式已经变了却还在解释旧格式，等于给模型一本错的手册。
+    选中提示词方案时用**方案自己的两份说明**（同样是"单行讲单行、多行讲多行"）。
     """
     ctx = req.ctx
     if ctx is not None and not ctx.state.get("message_meta_injected"):
@@ -331,6 +361,11 @@ def message_meta_instruction(req: PromptRequest) -> str | None:
     mode = str(mode or "legacy").lower()
     if mode == "off":
         return None
+    preset = prompt_preset(req)
+    if preset is not None:
+        # 方案自己保证"单行讲单行、多行讲多行"：直接读配置原值，不经过 qq_agent 档门控
+        fmt = str(req.cfg("user_message_format", "single_line") or "").strip().lower()
+        return preset.message_meta_single_line if fmt != "legacy" else preset.message_meta_legacy
     if assembly_profile(req) == PROFILE_QQ_AGENT and user_message_format(req.config) == "single_line":
         return SINGLE_LINE_MESSAGE_META_INSTRUCTION
     if mode == "new":

@@ -469,15 +469,18 @@ def render(
     available_tools: set[str] | None = None,
     config: Any = None,
     modalities: list[str] | None = None,
+    segments: tuple[tuple[str, Any], ...] | None = None,
 ) -> str:
     """渲染整段行为规则（一条 system 的正文）。
 
     参数 ``runtime`` 只在 ``config`` 缺省时用来取配置，其余不读运行时状态。
+    ``segments`` 给提示词方案（``assembly.presets``）替换段落表用；缺省即 ``SEGMENTS``
+    —— 每个段落函数都只读 ``caps``，所以换表不会让能力裁剪失效。
     """
     cfg = config if config is not None else getattr(runtime, "config", None)
     caps = detect_caps(available_tools, cfg, modalities)
     parts: list[str] = []
-    for name, fn in SEGMENTS:
+    for name, fn in (segments if segments is not None else SEGMENTS):
         try:
             text = fn(caps)
         except Exception as e:  # noqa: BLE001 —— 单段失败不能拖垮整份提示词

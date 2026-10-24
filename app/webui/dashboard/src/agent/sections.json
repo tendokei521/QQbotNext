@@ -12,6 +12,9 @@
       "color": "primary",
       "order": 10,
       "customFirst": true,
+      "customFields": [
+        "prompt_preset"
+      ],
       "groups": [
         {
           "id": "basic_switch",
@@ -27,6 +30,7 @@
           "label": "人格设定",
           "icon": "mdi-account-voice",
           "fields": [
+            "prompt_preset",
             "persona_preset_id",
             "system_prompt"
           ]

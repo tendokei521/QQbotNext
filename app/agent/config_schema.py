@@ -145,6 +145,17 @@ SCHEMA = {
         "type": "textarea", "label": "系统提示词", "description": "设定AI角色的系统提示词",
         "default": "你是一个友好的助手。", "placeholder": "你是一个友好的助手...", "group": "group_session",
     },
+    "prompt_preset": {
+        "type": "select", "label": "提示词方案",
+        "description": "替换框架生成的系统提示词，人格设定不受影响；留空沿用内置文案。",
+        "default": "", "group": "group_session",
+        "options": {
+            "": "未选择（沿用内置文案）",
+            "chat": "聊天：普通群友口吻，短句、选择性接话",
+            "roleplay": "角色扮演：以人设身份持续扮演，不跳出",
+            "assistant": "助手：有求必应、先给结论、结构化",
+        },
+    },
     "persona_preset_id": {
         "type": "resource", "resource": "role_preset",
         "label": "角色预设（活引用）",

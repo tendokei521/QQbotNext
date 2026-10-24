@@ -79,6 +79,22 @@ PROACTIVE_ENV_NUDGE = (
     "不要凭昵称、ID 或印象作答。"
 )
 
+#: 「主动性」块的各行文案 —— 提示词方案（``assembly.presets``）可按需覆盖其中几行。
+#: 键名是**语义**而不是段落位置，方案侧只写它想改的那几行（其余自动沿用这里）。
+PROACTIVE_LINES: dict[str, str] = {
+    "intro": "你可以像人一样主动使用能力，而不是只被动回答。",
+    "history": PROACTIVE_HISTORY_LINE,
+    "poke": PROACTIVE_POKE_LINE,
+    "env": PROACTIVE_ENV_LINE,
+    "unresolved": PROACTIVE_UNRESOLVED_LINE,
+    "quote": PROACTIVE_QUOTE_LINE,
+    "footer": PROACTIVE_FOOTER_LINE,
+    "footer_unresolved": PROACTIVE_FOOTER_UNRESOLVED_LINE,
+    "referent": PROACTIVE_REFERENT_LINE,
+    "history_nudge": PROACTIVE_HISTORY_NUDGE,
+    "env_nudge": PROACTIVE_ENV_NUDGE,
+}
+
 # 历史意图识别：保守匹配，避免把“帮我记录一下”之类误判成查记录
 _HISTORY_INTENT_RE = re.compile(
     r"(聊天记录|聊天历史|历史消息|"
@@ -177,11 +193,17 @@ def env_intent(text: str) -> bool:
     return bool(_ENV_INTENT_RE.search(str(text or "")))
 
 
-def env_line(has_expand: bool) -> str:
-    """环境行文本：按本轮实际可用工具填入工具名（不教它调不存在的工具）。"""
+def env_line(has_expand: bool, template: str | None = None) -> str:
+    """环境行文本：按本轮实际可用工具填入工具名（不教它调不存在的工具）。
+
+    ``template`` 给提示词方案覆盖用（必须含 ``{tools}`` 占位）；缺省用内置原文。
+    """
+    pattern = template or PROACTIVE_ENV_LINE
+    if "{tools}" not in pattern:
+        return pattern
     if has_expand:
-        return PROACTIVE_ENV_LINE.format(tools="expand_recent / expand_message / expand_user / get_current_session")
-    return PROACTIVE_ENV_LINE.format(tools="get_current_session")
+        return pattern.format(tools="expand_recent / expand_message / expand_user / get_current_session")
+    return pattern.format(tools="get_current_session")
 
 
 def has_any_expand(tools: set[str] | None) -> bool:
@@ -197,6 +219,7 @@ def build_proactive_instruction(
     *,
     available_tools=None,
     dedupe: bool = False,
+    lines: dict[str, str] | None = None,
 ) -> str | None:
     """组装唯一的「主动性」system 块；没有可用能力时返回 None。
 
@@ -210,7 +233,10 @@ def build_proactive_instruction(
         dedupe: 与行为规则块（``persona_rules``）去重。行为段已经讲了"引用/@ 怎么用、
             戳一戳怎么用、什么该说什么不该说、怎么翻记录"，这里只保留**每轮变化**的行
             （意图补强、指代解析、未展开标记语义）——同一主题两处引导会让模型左右脑互搏。
+        lines: 覆盖 ``PROACTIVE_LINES`` 里的若干行（提示词方案用）。只写想改的键，
+            其余沿用内置文案；能力裁剪逻辑不受影响。
     """
+    L = {**PROACTIVE_LINES, **(lines or {})}
     if not _cfg_flag(config, "proactive_prompt_enable", True):
         return None
 
@@ -253,30 +279,30 @@ def build_proactive_instruction(
         return None
 
     if dedupe:
-        lines = ["### 上下文补全（本轮的可用手段）"]
+        out = ["### 上下文补全（本轮的可用手段）"]
     else:
-        lines = ["### 主动性", "你可以像人一样主动使用能力，而不是只被动回答。"]
+        out = ["### 主动性", L["intro"]]
     if has_history:
-        lines.append(PROACTIVE_HISTORY_LINE)
+        out.append(L["history"])
     if history_nudge:
-        lines.append(PROACTIVE_HISTORY_NUDGE)
+        out.append(L["history_nudge"])
     if show_referent:
-        lines.append(PROACTIVE_REFERENT_LINE)
+        out.append(L["referent"])
     if show_env:
-        lines.append(env_line(has_expand))
+        out.append(env_line(has_expand, L["env"]))
     if show_unresolved and marker_semantics:
-        lines.append(PROACTIVE_UNRESOLVED_LINE)
+        out.append(L["unresolved"])
     if show_env and _cfg_flag(config, "proactive_env_intent_nudge", True) and env_intent(user_text):
-        lines.append(PROACTIVE_ENV_NUDGE)
+        out.append(L["env_nudge"])
     if has_poke:
-        lines.append(PROACTIVE_POKE_LINE)
+        out.append(L["poke"])
     if has_quote:
-        lines.append(PROACTIVE_QUOTE_LINE)
+        out.append(L["quote"])
     if not dedupe:
-        lines.append(PROACTIVE_FOOTER_LINE)
+        out.append(L["footer"])
     if show_unresolved:
-        lines.append(PROACTIVE_FOOTER_UNRESOLVED_LINE)
-    return "\n".join(lines)
+        out.append(L["footer_unresolved"])
+    return "\n".join(out)
 
 
 # 紧贴用户消息的系统提醒：抑制角色"口头答应"倾向，提高工具调用率

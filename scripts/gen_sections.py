@@ -87,6 +87,13 @@ GROUP_ICONS = {
 }
 
 
+#: 由**定制卡片**渲染、不在 schema 表单里重复出现的字段（展示层决定，故放在生成器里）。
+#: 字段的**归属**仍由分组声明——契约测试照样校验覆盖率，只是表单不再渲染第二遍。
+CUSTOM_FIELDS = {
+    "basic": ["prompt_preset"],
+}
+
+
 def build_manifest() -> dict:
     """按 `config_partition.page_summary()` 组装前端清单。"""
     from app.agent.config_partition import page_summary
@@ -104,6 +111,11 @@ def build_manifest() -> dict:
                 "color": view["color"],
                 "order": page["order"],
                 **({"customFirst": True} if view.get("customFirst") else {}),
+                **(
+                    {"customFields": CUSTOM_FIELDS[page["id"]]}
+                    if page["id"] in CUSTOM_FIELDS
+                    else {}
+                ),
                 "groups": [
                     {
                         "id": group["id"],

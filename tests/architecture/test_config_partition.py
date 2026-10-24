@@ -61,15 +61,15 @@ EXPECTED_MODULES = {
 # ==================== 收敛结果 ====================
 
 
-def test_exported_schema_is_exactly_the_44_core_keys():
-    """本体 schema 必须正好等于分区表里的 43 键（多一个都是没搬干净）。"""
+def test_exported_schema_is_exactly_the_45_core_keys():
+    """本体 schema 必须正好等于分区表里的 45 键（多一个都是没搬干净）。"""
     assert set(SCHEMA_KEYS) == set(CORE_KEYS)
-    assert len(SCHEMA_KEYS) == TARGET_CORE_KEY_COUNT == 44
+    assert len(SCHEMA_KEYS) == TARGET_CORE_KEY_COUNT == 45
 
 
-def test_legacy_schema_still_has_all_160_keys():
+def test_legacy_schema_still_has_all_legacy_keys():
     """旧 schema 必须完整保留（迁移脚本靠它取旧键的类型与标签）。"""
-    assert len(LEGACY_KEYS) == 187
+    assert len(LEGACY_KEYS) == 188
 
 
 # ==================== 布局本身 ====================
@@ -85,7 +85,7 @@ def test_ui_has_exactly_five_pages_in_order():
 def test_ui_page_field_counts_match_the_agreed_layout():
     counts = {row["id"]: row["fields"] for row in page_summary()}
     assert counts == {
-        "basic": 4,
+        "basic": 5,
         "permission": 3,
         "behavior": 8,
         "session": 13,
@@ -142,10 +142,10 @@ def test_partition_covers_every_legacy_key_exactly_once():
 # ==================== 数量与棘轮 ====================
 
 
-def test_agreed_split_is_44_plus_109_plus_34():
-    """数字：本体 44 / 迁移 108 / 删除 15（v3.3 收编 4 个工具日志开关 + 3 套 map 并入名单）。"""
+def test_agreed_split_is_45_plus_109_plus_34():
+    """数字：本体 45 / 迁移 109 / 删除 34（v3.3 收编后；prompt_preset 新增 1 个本体键）。"""
     migrated = sum(len(keys) for keys in MODULE_KEYS.values())
-    assert len(CORE_KEYS) == 44, f"本体键数 {len(CORE_KEYS)} ≠ 44"
+    assert len(CORE_KEYS) == 45, f"本体键数 {len(CORE_KEYS)} ≠ 45"
     assert migrated == 109, f"迁移键数 {migrated} ≠ 109"
     assert len(DELETED_KEYS) == 34, f"删除键数 {len(DELETED_KEYS)} ≠ 34"
     assert len(CORE_KEYS) + migrated + len(DELETED_KEYS) == len(LEGACY_KEYS)
