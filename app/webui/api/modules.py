@@ -61,11 +61,26 @@ VIRTUAL_AGENT_MODULE = "agent"
 
 
 def _get_agent_runtime(agent_manager, bot_id):
+    """取该账号的 Agent 运行时；**账号存在但还没连上时按需装配**。
 
+    配置类接口不该要求连接：账号 id 在创建时就有（v4），装配出来的运行时 ``online=False``，
+    只提供配置读写能力。账号真的不存在时才返回 None（调用方回 404）。
+    """
     manager = agent_manager
     if manager is None or bot_id is None:
         return None
-    return manager.get_runtime(bot_id)
+    runtime = manager.get_runtime(bot_id)
+    if runtime is not None:
+        return runtime
+    config_service = getattr(manager, "config_service", None)
+    if config_service is not None:
+        try:
+            if not any(str(b.get("id")) == str(bot_id) for b in config_service.get_bots()):
+                return None
+        except Exception:  # noqa: BLE001 —— 配置读失败按不存在处理
+            return None
+    ensure = getattr(manager, "ensure_runtime", None) or getattr(manager, "bind_account", None)
+    return ensure(bot_id) if callable(ensure) else None
 
 
 class _AgentAuthority:

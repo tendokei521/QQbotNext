@@ -38,15 +38,32 @@ def _err(status: int, message: str):
     return JSONResponse(status_code=status, content={"status": "error", "message": message})
 
 
+def _account_exists(config_service, account_id) -> bool:
+    try:
+        return any(str(b.get("id")) == str(account_id) for b in config_service.get_bots())
+    except Exception:  # noqa: BLE001 —— 配置读失败按不存在处理（调用方回 404）
+        return False
+
+
 def _runtime(agent_manager, bot_id):
-    """取指定 bot 的 Agent 运行时；无则返回 (None, None)。
+    """取**或装配**该账号的 Agent 运行时；账号不存在时返回 (None, manager)。
+
+    v4 起账号 id 在「添加账号」时就确定，配置归属不再依赖登录成功，所以这里对"账号存在
+    但还没连上"的情况直接 ``ensure_runtime`` 装配一个 ``online=False`` 的运行时——
+    配置读写立刻可用，但定时任务/主动消息不会启动（见 `app/agent/runtime.py`）。
 
     `agent_manager` 由 `Depends(get_agent_manager)` 注入（见 deps.py），
     端点里不再自己从容器按类型捞。
     """
     if bot_id is None or agent_manager is None:
-        return None, None
-    return agent_manager.get_runtime(bot_id), agent_manager
+        return None, agent_manager
+    config_service = getattr(agent_manager, "config_service", None)
+    if config_service is not None and not _account_exists(config_service, bot_id):
+        return None, agent_manager
+    runtime = agent_manager.get_runtime(bot_id)
+    if runtime is None:
+        runtime = agent_manager.ensure_runtime(bot_id)
+    return runtime, agent_manager
 
 
 def _mask_password_config(config: dict, schema: dict) -> dict:
@@ -75,7 +92,7 @@ async def agent_config(
 
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
-        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
     # 兼容旧格式：若 agent 配置里保存了旧 system_prompt，自动转为角色预设
     stored_config = config_service.get_module_config("agent", bot_id) or {}
     await role_preset_service.ensure_legacy_prompt(bot_id, stored_config.get("system_prompt"))
@@ -118,7 +135,7 @@ async def agent_config_update(request: Request, bot_id: str | None = Depends(par
 
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
-        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
     try:
         data = await request.json()
     except Exception:
@@ -176,7 +193,7 @@ async def agent_telemetry(
 ):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
-        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
     telemetry = getattr(runtime, "telemetry", None)
     if telemetry is None:
         return JSONResponse(content={"ok": True, "stats": {}, "recent": [], "recent_tools": []})
@@ -192,7 +209,7 @@ async def agent_telemetry(
 async def agent_telemetry_reset(request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
-        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
     telemetry = getattr(runtime, "telemetry", None)
     if telemetry is None:
         return _ok("该 Bot 无遥测数据")
@@ -228,7 +245,7 @@ def _missing(service_label: str):
 async def agent_knowledge_items(request: Request, bot_id: str | None = Depends(parse_account_id), limit: int = 100, agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
-        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
     kb = _service(runtime, "knowledge_service")
     if kb is None:
         return _missing("知识库")
@@ -243,7 +260,7 @@ async def agent_knowledge_items(request: Request, bot_id: str | None = Depends(p
 async def agent_knowledge_add(request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
-        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
     try:
         body = await request.json()
     except Exception:
@@ -266,7 +283,7 @@ async def agent_knowledge_add(request: Request, bot_id: str | None = Depends(par
 async def agent_knowledge_delete(cid: str, request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
-        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
     kb = _service(runtime, "knowledge_service")
     if kb is None:
         return _err(400, "知识库未启用（请安装并启用「知识库」模块）")
@@ -285,7 +302,7 @@ async def agent_knowledge_delete(cid: str, request: Request, bot_id: str | None 
 async def agent_onebot_tools(request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
-        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
     tools = []
     for tool in ONEBOT_TOOLS:
         policy = resolve_tool_policy(runtime, tool)
@@ -313,7 +330,7 @@ async def agent_tools_all(
     """
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
-        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
 
     from app.agent.tools.state import resolve_all_tool_states
 
@@ -341,7 +358,7 @@ async def agent_tool_toggle(
     """唯一的 per-tool 开关写入口（写进用户总表 `tools_disabled`）。"""
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
-        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
     try:
         data = await request.json()
     except Exception:
@@ -371,7 +388,7 @@ async def agent_tool_toggle(
 async def agent_system_tools(request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
-        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
     return JSONResponse(content={
         "ok": True,
         "log_enabled": bool(runtime.config.get("system_tools_log_enabled", True)),
@@ -383,7 +400,7 @@ async def agent_system_tools(request: Request, bot_id: str | None = Depends(pars
 async def agent_module_tools(request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
-        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
     module_map = runtime.config.get("module_tools_enabled", {}) or {}
     tools = []
     registry = getattr(runtime, "llm_tools", None)
@@ -430,7 +447,7 @@ async def agent_module_tools(request: Request, bot_id: str | None = Depends(pars
 async def agent_mcp_tools(request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
-        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
     mcp = _service(runtime, "mcp_service")
     if mcp is None:
         return _missing("MCP 工具")
@@ -473,7 +490,7 @@ async def agent_mcp_tools(request: Request, bot_id: str | None = Depends(parse_a
 async def agent_tasks(request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
-        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
     scheduler = _service(runtime, "scheduler")
     if scheduler is None:
         return _missing("定时任务")
@@ -484,7 +501,7 @@ async def agent_tasks(request: Request, bot_id: str | None = Depends(parse_accou
 async def agent_task_add(request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
-        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
     scheduler = _service(runtime, "scheduler")
     if scheduler is None:
         return _err(400, "定时任务未启用（请安装并启用「定时任务」模块）")
@@ -520,7 +537,7 @@ async def agent_task_add(request: Request, bot_id: str | None = Depends(parse_ac
 async def agent_task_trigger(task_id: str, request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
-        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
     scheduler = _service(runtime, "scheduler")
     if scheduler is None:
         return _err(400, "定时任务未启用（请安装并启用「定时任务」模块）")
@@ -534,7 +551,7 @@ async def agent_task_trigger(task_id: str, request: Request, bot_id: str | None 
 async def agent_task_cancel(task_id: str, request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
-        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
     scheduler = _service(runtime, "scheduler")
     if scheduler is None:
         return _err(400, "定时任务未启用（请安装并启用「定时任务」模块）")
@@ -550,7 +567,7 @@ async def agent_task_cancel(task_id: str, request: Request, bot_id: str | None =
 async def agent_proactive_status(request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
-        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
     proactive = _service(runtime, "proactive_service")
     if proactive is None:
         return _missing("主动消息")
@@ -561,7 +578,7 @@ async def agent_proactive_status(request: Request, bot_id: str | None = Depends(
 async def agent_proactive_trigger(request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
-        return _err(404, f"Bot {bot_id} 无 Agent 运行时")
+        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
     try:
         data = await request.json()
     except Exception:
