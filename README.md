@@ -120,7 +120,8 @@ python main.py
 > 依赖版本一律以 `pyproject.toml` 为准，不要在 `requirements.txt` 里重复维护依赖。
 
 首次启动会：
-1. 读取 `.env`（缺省用默认值，参考 `.env.example`）；
+1. **没有 `.env` 就生成一份完整的**（所有配置键 + 注释 + 随机令牌，可事后直接改）；
+   已存在则只补空令牌，不覆盖你写的内容；
 2. 初始化 `data/app.db`；
 3. **自动从旧 JSON 文件迁移配置**（`webserver/webconfig.json`、`webui/webui_config.json`、
    `module/configs/*/config.json`、`module/configs/*/authority.json`）——首次运行后以 SQLite 为准；
@@ -137,6 +138,9 @@ python main.py
 
 ### 关键配置（.env）
 
+**首次启动会自动生成一份完整的 `.env`**（所有键 + 注释 + 随机令牌），想改哪项直接改，
+不用先去对照 `.env.example` 抄键名。`.env` 已存在时程序**只补空令牌**，其余内容一字不动。
+
 | 变量 | 默认 | 说明 |
 |------|------|------|
 | `WEBUI_HOST` | `127.0.0.1` | WebUI 监听地址（外网访问请配合反向代理） |
@@ -144,7 +148,16 @@ python main.py
 | `WEBUI_TOKEN` | 空（首次启动自动生成） | 登录 WebUI 的令牌；留空则自动生成并写回 `.env`，登录页粘贴该值 |
 | `WEBUI_AUTO_OPEN` | `false` | 启动后用浏览器打开带 `?accesstoken=` 的一键登录链接（本地 start 脚本默认开启，`--no-open` 关闭） |
 | `DB_PATH` | `data/app.db` | SQLite 路径 |
-| `WS_CONNECT_TIMEOUT` | `30` | WebSocket 连接超时 |
+| `LOG_DIR` | `logs` | 日志目录（日志面板与 `/log` 指令都读它） |
+| `WS_CONNECT_TIMEOUT` | `30` | WebSocket 连接超时（秒） |
+| `WS_PING_INTERVAL` / `WS_PING_TIMEOUT` | `30` / `10` | WebSocket 心跳间隔 / 超时（秒） |
+| `MODULE_DIR` | `module` | 插件运行时数据根目录（configs / data / plugins(zip) / uninstalled_modules.json） |
+| `PLUGINS_DIR` | `app/plugins` | 业务插件**代码**目录（可指向别处换一套插件集） |
+
+> 变量名 = `app/core/settings.py` 的字段名大写，**环境变量优先于 `.env`**。键清单的唯一来源是
+> `app/core/env_template.py`（加字段不登记会被 `tests/core/test_env_template.py` 拦下）。
+> 注意 `QQBOT_LLM_DATA_DIR` 这类在 `os.environ` 里直接读的开关**不属于 `.env`**，只能作为
+> shell 环境变量使用。
 
 ### 账号连接方式（正向 / 反向 WebSocket）
 

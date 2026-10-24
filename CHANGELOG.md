@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+### 新增：首次启动生成**完整** `.env`
+
+此前只有 `WEBUI_TOKEN` 会被自动写进 `.env`（文件不存在时就只写这一行），其余键全走
+`Settings` 默认值——用户想调端口/路径得自己去 `.env.example` 对照抄，容易抄漏或抄错。
+
+现在 `.env` 不存在时，启动会按 `app/core/env_template.py` 渲染一份**带注释的完整配置**
+（所有被读取的键 + 当前生效值 + 随机令牌）落盘。`.env` 已存在时行为不变：**只补空令牌**，
+其余键、注释、换行风格一字不动。
+
+配套改动：
+
+- 键清单收敛到 `app/core/env_template.py` 一处，`.env.example` 由它渲染
+  （`python -m app.core.env_template`）；`tests/core/test_env_template.py` 双向守门
+  "字段 ↔ 键"严格一一对应，不会再有登记了却没人读的摆设；
+- 删掉两个**从未被任何代码读取**的配置项 `DEBUG` / `SCHEDULER_INTERVAL`
+  （日志级别写死在 `app/core/logger.py`，定时任务按 job 自己的时间点 sleep）；
+- `ensure_env_file()` 取代启动路径上的 `ensure_webui_token()`（后者保留给"只补令牌"场景）；
+- 补齐文档：`README` / `MAINTENANCE` 的变量表补上 `WEBUI_AUTO_OPEN` / `LOG_DIR` /
+  `MODULE_DIR` / `PLUGINS_DIR`，并说明 `.env` 不会进入 `os.environ`
+  （`QQBOT_LLM_DATA_DIR` 这类只能作为 shell 环境变量）。
+
 ### 变更：单一服务模式改为「声明制」能力
 
 此前「单一服务模式」是全局开关：任意模块都能在 WebUI 上勾选，但绝大多数勾了也没用——

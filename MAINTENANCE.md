@@ -68,15 +68,26 @@ python main.py
 
 ### 4.1 环境变量（.env，变量名 = 字段名大写，无前缀）
 
+**首次启动自动生成完整 `.env`**（键 + 注释 + 随机令牌）；文件已存在时只补空 `WEBUI_TOKEN`，
+其余内容不改。键清单唯一来源是 `app/core/env_template.py`，`.env.example` 由它渲染
+（`python -m app.core.env_template` 重新生成，`tests/core/test_env_template.py` 保证不漂移）。
+
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `WEBUI_HOST` | `127.0.0.1` | WebUI 监听地址（外网访问请配反向代理，勿直接 0.0.0.0 裸奔） |
 | `WEBUI_PORT` | `9200` | WebUI 端口 |
 | `WEBUI_TOKEN` | 空（首次启动自动生成） | 鉴权令牌；**留空启动时会自动生成并写回 `.env`**，令牌见控制台横幅。注意环境变量若已设置则以环境变量为准，此时不会写盘 |
+| `WEBUI_AUTO_OPEN` | `false` | 启动后自动打开带令牌的一键登录链接（start 脚本默认开，`--no-open` 关） |
 | `DB_PATH` | `data/app.db` | SQLite 路径 |
 | `LOG_DIR` | `logs` | 日志目录 |
 | `WS_CONNECT_TIMEOUT` | `30` | 连接超时（秒） |
 | `WS_PING_INTERVAL` / `WS_PING_TIMEOUT` | `30`/`10` | WebSocket 心跳 |
+| `MODULE_DIR` | `module` | 插件运行时数据根目录（configs / data / plugins(zip)） |
+| `PLUGINS_DIR` | `app/plugins` | 业务插件代码目录 |
+
+> `.env` 只喂 `pydantic-settings`，**不会**进入 `os.environ`。像 `QQBOT_LLM_DATA_DIR`
+> 这种在代码里直接 `os.environ.get()` 的开关只能作为 shell 环境变量，写进 `.env` 无效。
+> 旧的 `DEBUG` / `SCHEDULER_INTERVAL` 两个键从未被任何代码读取，已删除。
 
 参考 `pyproject.toml` 与 `app/core/settings.py`。改完 `.env` 需重启生效。
 
