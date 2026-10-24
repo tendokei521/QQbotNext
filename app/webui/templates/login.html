@@ -6,166 +6,194 @@
 <meta name="robots" content="noindex, nofollow">
 <title>登录 · QQBot Next</title>
 <style>
+  /* 设计语言对齐 AstrBot dashboard（见 dashboard/src/plugins/vuetify.ts）：
+     主色 #3c96ca / #5ba4d4，surface #fff / #242424，containerBg #fffffff4 / #1a1a1a */
   :root {
-    --bg: #0f1117;
-    --card: #171a23;
-    --border: #262b38;
-    --text: #e6e8ee;
-    --muted: #8b93a7;
-    --accent: #5b8cff;
-    --accent-hover: #6f9bff;
-    --danger: #ff6b6b;
-    --ok: #3ddc97;
+    --bg: #f6f9fc;
+    --surface: #ffffff;
+    --border: #e3e8ee;
+    --text: #1b1c1d;
+    --muted: #0000008a;
+    --primary: #3c96ca;
+    --secondary: #2f86bd;
+    --error: #f44336;
+    --ring: rgba(60, 150, 202, 0.18);
   }
-  @media (prefers-color-scheme: light) {
+  @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #f4f6fa;
-      --card: #ffffff;
-      --border: #e2e6ee;
-      --text: #1a1f2b;
-      --muted: #6b7385;
+      --bg: #1a1a1a;
+      --surface: #242424;
+      --border: #333333;
+      --text: #e8eaed;
+      --muted: #ffffffa6;
+      --primary: #5ba4d4;
+      --secondary: #4a95c4;
+      --error: #ff4d4f;
+      --ring: rgba(91, 164, 212, 0.22);
     }
   }
   * { box-sizing: border-box; }
-  html, body {
-    margin: 0;
-    min-height: 100%;
-  }
+  html, body { margin: 0; min-height: 100%; }
   body {
     min-height: 100vh;
     display: grid;
     place-items: center;
     padding: 24px;
-    background: radial-gradient(1200px 600px at 50% -10%, rgba(91,140,255,.16), transparent 60%), var(--bg);
+    background: var(--bg);
     color: var(--text);
     font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
     -webkit-font-smoothing: antialiased;
   }
+
   .card {
     width: 100%;
-    max-width: 384px;
-    padding: 32px 28px 26px;
-    background: var(--card);
+    max-width: 400px;
+    padding: 32px 32px 24px;
+    background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 16px;
-    box-shadow: 0 18px 50px rgba(0,0,0,.28);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .06), 0 12px 32px rgba(0, 0, 0, .06);
+    animation: card-in .22s ease-out both;
   }
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 22px;
+  @keyframes card-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: none; }
   }
+  /* 尊重「减少动态效果」偏好 */
+  @media (prefers-reduced-motion: reduce) {
+    .card { animation: none; }
+  }
+
+  .head { display: flex; align-items: center; gap: 14px; margin-bottom: 28px; }
   .logo {
-    width: 42px; height: 42px;
+    width: 44px; height: 44px;
+    flex: 0 0 auto;
     display: grid; place-items: center;
     border-radius: 12px;
-    background: linear-gradient(135deg, var(--accent), #8a5bff);
-    font-size: 21px;
-    flex: 0 0 auto;
+    color: #fff;
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
   }
-  .brand-name { font-size: 17px; font-weight: 600; letter-spacing: .2px; }
-  .brand-sub { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
-  h1 { font-size: 15px; font-weight: 600; margin: 0 0 6px; }
-  .hint { font-size: 12.5px; color: var(--muted); line-height: 1.6; margin: 0 0 18px; }
-  label { display: block; font-size: 12.5px; font-weight: 500; color: var(--muted); margin-bottom: 7px; }
-  input[type=password] {
-    width: 100%;
+  .titles h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: .2px; }
+  .titles p  { margin: 3px 0 0; font-size: 13px; color: var(--muted); }
+
+  /* 错误提示：对齐 AstrBot 的 tonal 警告（底色 + 左侧色条） */
+  .alert {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-bottom: 20px;
     padding: 11px 13px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--error);
+    background: rgba(244, 67, 54, .1);
+    border-left: 4px solid var(--error);
+    border-radius: 6px;
+  }
+  .alert svg { flex: 0 0 auto; }
+
+  .field { position: relative; }
+  .field > svg {
+    position: absolute;
+    left: 14px; top: 50%;
+    transform: translateY(-50%);
+    color: var(--muted);
+    pointer-events: none;
+  }
+  .field input {
+    width: 100%;
+    height: 48px;
+    padding: 0 14px 0 42px;
     font-size: 14.5px;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     color: var(--text);
-    background: var(--bg);
+    background: transparent;
     border: 1px solid var(--border);
-    border-radius: 9px;
+    border-radius: 8px;
     outline: none;
     transition: border-color .15s, box-shadow .15s;
   }
-  input[type=password]:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(91,140,255,.18);
-  }
-  button {
+  .field input::placeholder { color: var(--muted); font-family: inherit; }
+  .field input:hover { border-color: var(--muted); }
+  .field input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--ring); }
+
+  .submit {
     width: 100%;
-    margin-top: 16px;
-    padding: 11px 14px;
-    font-size: 14.5px;
-    font-weight: 600;
-    color: #fff;
-    background: var(--accent);
-    border: 0;
-    border-radius: 9px;
-    cursor: pointer;
-    transition: background .15s, transform .06s;
-  }
-  button:hover { background: var(--accent-hover); }
-  button:active { transform: translateY(1px); }
-  button:disabled { opacity: .6; cursor: not-allowed; transform: none; }
-  .error {
-    display: flex;
-    gap: 8px;
-    align-items: flex-start;
-    margin-bottom: 16px;
-    padding: 10px 12px;
-    font-size: 12.5px;
-    line-height: 1.55;
-    color: var(--danger);
-    background: rgba(255,107,107,.1);
-    border: 1px solid rgba(255,107,107,.28);
-    border-radius: 9px;
-  }
-  .foot {
+    height: 48px;
     margin-top: 20px;
-    padding-top: 16px;
-    border-top: 1px solid var(--border);
-    font-size: 11.5px;
-    color: var(--muted);
-    line-height: 1.6;
+    font-size: 15px;
+    font-weight: 500;
+    letter-spacing: .3px;
+    color: #fff;
+    background: var(--secondary);
+    border: 0;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: transform .15s, box-shadow .15s, background .15s;
   }
-  code {
-    padding: 1px 5px;
-    font-size: 11px;
-    background: rgba(127,127,127,.14);
-    border-radius: 4px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  .submit:hover {
+    background: var(--primary);
+    transform: translateY(-1px);
+    box-shadow: 0 5px 15px rgba(60, 150, 202, .28);
+  }
+  .submit:active { transform: none; box-shadow: none; }
+  .submit:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+  .foot {
+    margin: 20px 0 0;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--muted);
+    text-align: center;
   }
 </style>
 </head>
 <body>
   <main class="card">
-    <div class="brand">
-      <div class="logo">🤖</div>
-      <div>
-        <div class="brand-name">QQBot Next</div>
-        <div class="brand-sub">管理后台</div>
+    <div class="head">
+      <span class="logo" aria-hidden="true">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3.8" y="8.2" width="16.4" height="11" rx="3.4"/>
+          <circle cx="12" cy="4.7" r="1.5" fill="currentColor" stroke="none"/>
+          <path d="M12 6.2v2"/>
+          <circle cx="9" cy="13.4" r="1.5" fill="currentColor" stroke="none"/>
+          <circle cx="15" cy="13.4" r="1.5" fill="currentColor" stroke="none"/>
+          <path d="M9.9 16.6h4.2"/>
+        </svg>
+      </span>
+      <div class="titles">
+        <h1>QQBot Next</h1>
+        <p>管理后台</p>
       </div>
     </div>
-
-    <h1>请输入访问令牌</h1>
-    <p class="hint">令牌在首次启动时自动生成，已写入项目根目录的 <code>.env</code>，<br>也会打印在启动控制台的横幅里。</p>
 
     {error_block}
 
     <form method="post" action="/login">
       <input type="hidden" name="next" value="{next_path}">
-      <label for="token">访问令牌</label>
-      <input
-        id="token"
-        name="token"
-        type="password"
-        autocomplete="current-password"
-        placeholder="粘贴启动控制台里的令牌"
-        required
-        autofocus
-        spellcheck="false"
-      >
-      <button type="submit">登录</button>
+      <div class="field">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/>
+          <path d="M8 10.5V7.8a4 4 0 0 1 8 0v2.7"/>
+        </svg>
+        <input
+          id="token"
+          name="token"
+          type="password"
+          autocomplete="current-password"
+          placeholder="访问令牌"
+          aria-label="访问令牌"
+          required
+          autofocus
+          spellcheck="false"
+        >
+      </div>
+      <button type="submit" class="submit">登录</button>
     </form>
 
-    <div class="foot">
-      登录状态会保存在浏览器中，有效期 7 天。<br>
-      忘记令牌？查看 <code>.env</code> 中的 <code>WEBUI_TOKEN</code>。
-    </div>
+    <p class="foot">令牌见启动控制台或项目根目录 .env</p>
   </main>
 </body>
 </html>

@@ -92,14 +92,24 @@ def _render_dashboard(request: Request) -> HTMLResponse:
     return response
 
 
+#: 登录页错误提示的内联图标（不放外部字体：登录页零依赖，未认证时也不加载任何资源）
+_LOGIN_ALERT_ICON = (
+    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    'stroke-width="2" stroke-linecap="round" aria-hidden="true">'
+    '<circle cx="12" cy="12" r="9"/>'
+    '<path d="M12 7.6v5.4"/>'
+    '<circle cx="12" cy="16.6" r="0.95" fill="currentColor" stroke="none"/>'
+    "</svg>"
+)
+
+
 def _render_login_page(next_path: str, error: str = "") -> HTMLResponse:
     """渲染独立登录页（后端直出，不依赖 dashboard 构建产物）。"""
     error_block = ""
     if error:
-        safe_error = html_escape(error)
         error_block = (
-            '<div class="error" role="alert">'
-            f"<span>⚠️</span><span>{safe_error}</span>"
+            '<div class="alert" role="alert">'
+            f"{_LOGIN_ALERT_ICON}<span>{html_escape(error)}</span>"
             "</div>"
         )
     page = (
