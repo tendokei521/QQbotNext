@@ -99,8 +99,8 @@ async def main(db_file: str) -> None:
 
     settings = Settings(
         project_root=tmp, db_path=tmp / "app.db",
-        plugins_dir=tmp / "plugins", zip_plugins_dir=tmp / "module" / "plugins",
-        log_dir=tmp / "logs", uninstalled_modules_file=tmp / "module" / "uninstalled.json",
+        plugins_dir=tmp / "plugins", zip_plugins_dir=tmp / "data" / "module" / "plugins",
+        log_dir=tmp / "logs", uninstalled_modules_file=tmp / "data" / "module" / "uninstalled.json",
     )
     container = build_container(settings)
     import app.bootstrap as bs

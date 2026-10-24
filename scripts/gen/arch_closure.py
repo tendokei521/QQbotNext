@@ -42,7 +42,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # 扫描这些顶层包（相对仓库根）
-SCAN_ROOTS = ("app", "module", "scripts")
+SCAN_ROOTS = ("app", "scripts")
 
 # 默认入口：改这些文件时你最想知道"会牵动多少代码"
 DEFAULT_ENTRIES = (
