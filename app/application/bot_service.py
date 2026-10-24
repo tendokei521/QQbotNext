@@ -9,6 +9,7 @@ from app.agent.config import LEGACY_LLM_CONNECTION_KEYS
 from app.core.logger import logger
 from app.domain.bot import IBot
 from app.infrastructure.onebot.endpoint import FORWARD
+from app.plugin.authority import declares_single_service
 from app.plugin.schema_utils import webui_schema
 
 
@@ -184,6 +185,8 @@ class BotService:
                 "can_uninstall": True,
                 "provides": list(getattr(mod, "provides", ()) or ()),
                 "supersedes": list(getattr(mod, "supersedes", ()) or ()),
+                # 单一服务是声明制能力：未声明的模块，WebUI 不给开关
+                "single_service": declares_single_service(mod),
             }
         # 虚拟 Agent 模块（框架级注入，不依赖模块目录）：即使所有模块被删也保留 LLM 界面
         data["agent"] = self._agent_module_data(account_id)
@@ -234,6 +237,8 @@ class BotService:
             "has_page": False,
             "provides": [],
             "supersedes": [],
+            # 框架级 Agent 恒支持单一服务（与 inbound.py 的 _AgentGate 声明一致）
+            "single_service": True,
         }
 
     def get_module_data(self, module_name: str, account_id: str | None = None) -> dict | None:

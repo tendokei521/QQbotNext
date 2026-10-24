@@ -95,6 +95,9 @@ class _AgentProxy:
     name = "LLM服务"
     sign = "Agent"
     module_name = VIRTUAL_AGENT_MODULE
+    #: 框架级 Agent 恒声明支持单一服务；配置键就是 WebUI 存的 "agent"
+    supports_single_service = True
+    single_service_key = VIRTUAL_AGENT_MODULE
 
     def __init__(self, runtime):
         from app.agent.config_schema import SCHEMA
