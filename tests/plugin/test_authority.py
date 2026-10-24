@@ -7,7 +7,10 @@ from app.plugin.authority import (
     check_module_enabled,
     check_module_permission,
     compute_event_permission,
+    declares_single_service,
+    is_single_service_skipped,
     roster_lists,
+    single_service_key,
 )
 from app.plugin.base import (
     BaseModule,
@@ -242,3 +245,71 @@ def test_every_permission_policy_has_rank():
         if policy == "everyone":
             continue
         assert policy in ROLE_RANK, f"权限档位 {policy} 没有 ROLE_RANK"
+
+
+# ==================== 单一服务：声明制能力 ====================
+
+class _WebuiCfg:
+    def __init__(self, single_service=None, multi_group=None):
+        self._single = single_service or {}
+        self._multi = multi_group or {"groups": {}}
+
+    def get_webui_config(self):
+        return {"single_service": self._single, "multi_group": self._multi}
+
+
+class _Conn:
+    def __init__(self, account_id):
+        self.account_id = account_id
+        self.status = "connected"
+        self.all_group_list = [10]
+
+
+def _gateway(*account_ids):
+    return type("G", (), {"connections": {a: _Conn(a) for a in account_ids}})()
+
+
+def _ss_module(declared=True, key=""):
+    mod = _make_module("everyone")
+    mod.module_name = "ss"
+    mod.supports_single_service = declared
+    mod.single_service_key = key
+    return mod
+
+
+def _ss_event(account_id="acc0"):
+    return GroupMessageEvent(
+        event_type="message_group", post_type="message", message_type="group",
+        user_id=100, self_id=1, message_id=1, time=0, account_id=account_id,
+        user=type("U", (), {"user_id": 100, "role": "member"})(),
+        group=type("G", (), {"group_id": 10})(),
+        raw={"sender": {"role": "member"}},
+    )
+
+
+def test_single_service_declaration_defaults_off():
+    """默认不声明：既有模块不会因为本次改动突然获得单一服务开关。"""
+    mod = _make_module("everyone")
+    assert declares_single_service(mod) is False
+    assert single_service_key(mod) == "test"  # = module_name
+
+
+def test_single_service_only_skips_declared_module():
+    """同群双账号 + 指定别的服务账号：声明者被跳过，未声明者照常响应。"""
+    cfg = _WebuiCfg({"ss": True}, {"groups": {"10": {"service_bot_id": "acc9"}}})
+    gw = _gateway("acc0", "acc9")
+    event = _ss_event("acc0")
+
+    assert is_single_service_skipped(_ss_module(True), event, cfg, gw) is True
+    assert is_single_service_skipped(_ss_module(False), event, cfg, gw) is False
+
+
+def test_single_service_key_override():
+    """single_service_key 决定读哪个配置键（虚拟模块靠它对齐 WebUI 的键）。"""
+    cfg = _WebuiCfg({"agent": True}, {"groups": {"10": {"service_bot_id": "acc9"}}})
+    gw = _gateway("acc0", "acc9")
+    event = _ss_event("acc0")
+
+    assert is_single_service_skipped(_ss_module(True, key="agent"), event, cfg, gw) is True
+    # 没覆写时读的是 module_name="ss"，配置里的 "agent" 不该命中
+    assert is_single_service_skipped(_ss_module(True), event, cfg, gw) is False

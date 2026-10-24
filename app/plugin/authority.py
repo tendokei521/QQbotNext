@@ -122,12 +122,33 @@ def check_module_enabled(module: BaseModule) -> bool:
     return True
 
 
+def single_service_key(module) -> str:
+    """模块在 `webui.single_service` 配置里使用的键。
+
+    缺省是 ``module.module_name``；虚拟模块（框架级 Agent）用 ``single_service_key``
+    覆写成 WebUI 存的 ``"agent"``——否则 UI 开着、运行时不生效。
+    """
+    key = str(getattr(module, "single_service_key", "") or "")
+    return key or str(getattr(module, "module_name", "") or "")
+
+
+def declares_single_service(module) -> bool:
+    """模块是否**声明**支持单一服务模式（``BaseModule.supports_single_service``）。
+
+    单一服务是声明制能力：未声明者一律不参与该功能——WebUI 不给开关，配置写不进去，
+    运行时也不会因为配置里残留的 true 而被跳过。判定只看类属性，不做任何配置推断。
+    """
+    return bool(getattr(module, "supports_single_service", False))
+
+
 def is_single_service_skipped(module: BaseModule, event: BaseEvent, config_service, gateway) -> bool:
     """单一服务模式：仅当同群有 ≥2 个在线 Bot 时，把响应权交给多群管理中指定的服务账号。"""
     try:
+        if not declares_single_service(module):
+            return False  # 未声明：配置残留也不生效
         webui = config_service.get_webui_config()
         single_service = webui.get("single_service", {}) or {}
-        if not single_service.get(module.module_name):
+        if not single_service.get(single_service_key(module)):
             return False
         group_id = getattr(getattr(event, "group", None), "group_id", None)
         if not group_id:

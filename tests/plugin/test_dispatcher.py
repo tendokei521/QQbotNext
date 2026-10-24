@@ -51,8 +51,16 @@ class FakeConn:
         self.all_group_list = [1]  # 默认在群 1
 
 
-def make_module(subs, mname, account_id, permission="member", calls=None, auth_data=None):
+def make_module(subs, mname, account_id, permission="member", calls=None, auth_data=None,
+                single_service=True):
+    """造一个分发用模块实例。
+
+    ``single_service`` 对应 ``BaseModule.supports_single_service``：单一服务是声明制
+    能力，默认 True 让既有的 single-service 用例断言「生效」路径，另有专门用例断言
+    未声明者不受影响。
+    """
     _permission = permission
+    _single_service = single_service
 
     class M(BaseModule):
         name = mname
@@ -60,6 +68,7 @@ def make_module(subs, mname, account_id, permission="member", calls=None, auth_d
         description = ""
         permission = _permission
         subscribe = subs
+        supports_single_service = _single_service
 
         async def handle(self, event):
             calls.append((mname, event.event_type, event.account_id))
@@ -165,6 +174,34 @@ async def test_single_service_unconfigured_group(dispatcher):
     ev = _event()
     await dispatcher.dispatch(ev)
     assert dispatcher._calls == [("a", "message_group", ACC)]
+
+
+async def test_single_service_ignored_for_undeclared_module():
+    """未声明 supports_single_service 的模块：配置里残留 true 也不得被跳过。"""
+    calls = []
+    mod = make_module(("message_group",), "plain", ACC, calls=calls, single_service=False)
+    registry = FakeRegistry([mod])
+    cfg = FakeConfigService(single_service={"plain": True},
+                            multi_group={"groups": {"1": {"service_bot_id": ACC2}}})
+    gateway = type("G", (), {"connections": {ACC: FakeConn(ACC, 123), ACC2: FakeConn(ACC2, 999)}})()
+    d = ModuleDispatcher(registry=registry, config_service=cfg, gateway=gateway, log=None)
+    await d.dispatch(_event())
+    assert calls == [("plain", "message_group", ACC)]
+
+
+async def test_single_service_key_override():
+    """single_service_key 覆写配置键（虚拟模块用它对齐 WebUI 存的键）。"""
+    calls = []
+    mod = make_module(("message_group",), "engine", ACC, calls=calls)
+    mod.module_name = "engine_internal"
+    mod.single_service_key = "engine"
+    registry = FakeRegistry([mod])
+    cfg = FakeConfigService(single_service={"engine": True},
+                            multi_group={"groups": {"1": {"service_bot_id": ACC2}}})
+    gateway = type("G", (), {"connections": {ACC: FakeConn(ACC, 123), ACC2: FakeConn(ACC2, 999)}})()
+    d = ModuleDispatcher(registry=registry, config_service=cfg, gateway=gateway, log=None)
+    await d.dispatch(_event())
+    assert calls == []
 
 
 async def test_owner_only_module_blocked_for_member():

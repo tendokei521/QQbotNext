@@ -33,6 +33,11 @@ from app.plugin.commands import (
 from app.plugin.nodes.base import MessageContext, MessageNode, Next
 from app.plugin.registry import ModuleRegistry
 
+try:  # 框架级 Agent 配置命名空间（"agent"）；极端情况下退回字面量，行为不变
+    from app.agent.config import AGENT_CONFIG_MODULE
+except Exception:  # noqa: BLE001
+    AGENT_CONFIG_MODULE = "agent"
+
 
 class _AgentGate:
     """Agent 权限门控对象（对齐模块 authority 接口，供 check_* 复用）。
@@ -45,6 +50,10 @@ class _AgentGate:
         self.permission = runtime.config.get("permission", "member")
         self.sign = "LLM Agent"
         self.module_name = "llm_chat_v2"
+        # 单一服务：框架级 Agent 恒声明支持；配置键必须对齐 WebUI 存的 "agent"
+        # （module_name 是 llm_chat_v2 时代的遗留值，直接用它查配置会永远查不到）
+        self.supports_single_service = True
+        self.single_service_key = AGENT_CONFIG_MODULE
         self.authority = type("_A", (), {
             "enabled": runtime.config.enabled,
             "permission": runtime.config.permission,
@@ -271,10 +280,6 @@ class ModulePermissionNode(MessageNode):
         """
         if account_id is None:
             return {}
-        try:
-            from app.agent.config import AGENT_CONFIG_MODULE
-        except Exception:  # noqa: BLE001 - 极端情况下退回字面量，行为不变
-            AGENT_CONFIG_MODULE = "agent"
         try:
             return self.config_service.get_module_config(AGENT_CONFIG_MODULE, account_id) or {}
         except Exception as e:  # noqa: BLE001

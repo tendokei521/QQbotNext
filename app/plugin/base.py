@@ -302,6 +302,18 @@ class BaseModule(ABC):
     #: 声明的框架依赖（服务名或 feature_id，如 ("llm", "role_presets")）：
     #: 加载时自动校验，缺失只 WARNING 不阻断；模块可用 self.missing_requirements() 据此降级
     requires: tuple = ()
+    #: 是否声明支持「单一服务模式」（默认 False = 不支持）。
+    #:
+    #: 单一服务是**声明制**能力：只有声明为 True 的模块，WebUI 才显示该开关、
+    #: 写入配置才被接受、框架运行时才会按「多群管理 → 指定服务账号」过滤群消息。
+    #: 未声明的模块即使配置里残留 true 也完全不受影响（绝不因误配而静默失联）。
+    #: 只有真正「按群响应」的模块才该声明；纯 LLM 策略模块（subscribe=()）不需要。
+    supports_single_service: bool = False
+    #: 本模块在 `webui.single_service` 配置里使用的键（缺省 = module_name）。
+    #:
+    #: 虚拟模块用它对齐 UI 的键：框架级 Agent 的内部 module_name 是 `llm_chat_v2`
+    #: 时代遗留值，而 WebUI 存的是 `"agent"`，两者必须显式钉在一起。
+    single_service_key: str = ""
 
     def __init__(self, ctx: ModuleContext) -> None:
         self.ctx = ctx
