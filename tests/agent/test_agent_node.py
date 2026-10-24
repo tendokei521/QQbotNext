@@ -24,7 +24,7 @@ class _AM:
     def __init__(self, rt):
         self.rt = rt
 
-    def get_runtime(self, bot_id):
+    def get_runtime(self, account_id):
         return self.rt
 
 
@@ -40,7 +40,7 @@ class _Gw:
 def _priv_msg():
     return PrivateMessageEvent(
         event_type="message_private", message_type="private", time=1,
-        user_id=100, self_id=1, message=[], bot=None, bot_id=123,
+        user_id=100, self_id=1, message=[], bot=None, bot_id=123, account_id="main",
     )
 
 
@@ -115,7 +115,7 @@ async def test_agent_node_skips_non_chat_event(monkeypatch):
 
     notice = NoticeEvent(
         event_type="notice_poke", post_type="notice", time=1,
-        user_id=100, self_id=1, bot=None, bot_id=123,
+        user_id=100, self_id=1, bot=None, bot_id=123, account_id="main",
     )
     ctx = MessageContext(event=notice, bot=None, state={})
     ran_next = []

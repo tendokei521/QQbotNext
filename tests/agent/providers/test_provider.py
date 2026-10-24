@@ -138,8 +138,8 @@ async def api_env(settings, tmp_path):
         db = c.get(Database)
         await db.connect()
         await c.get(ConfigService).init()
-        c.get(OneBotGateway).connections = {0: FakeBot()}
-        await c.get(ModuleRegistry).load_all(bot_id=123)
+        c.get(OneBotGateway).connections = {"acc1": FakeBot()}
+        await c.get(ModuleRegistry).load_all(bot_id="acc1")
         app = create_app(c)
         from starlette.testclient import TestClient
 
@@ -158,10 +158,10 @@ async def test_list_api_returns_items_with_saved_merge(api_env):
     from app.plugin.registry import ModuleRegistry
 
     # 先写入一条已存配置：g2 enabled=False
-    module = c.get(ModuleRegistry).get("testmod", 123)
+    module = c.get(ModuleRegistry).get("testmod", "acc1")
     module.config.set("group_list", {"g2": {"enabled": False, "index": 0}}, auto_save=True)
 
-    resp = client.get("/api/module/testmod/list/groups?bot_id=123")
+    resp = client.get("/api/module/testmod/list/groups?account_id=acc1")
     assert resp.status_code == 200
     data = resp.json()
     assert data["ok"] is True
@@ -174,13 +174,13 @@ async def test_list_api_returns_items_with_saved_merge(api_env):
 
 async def test_dynamic_api_options_and_fields(api_env):
     client, c = api_env
-    resp = client.get("/api/module/testmod/dynamic/providers?bot_id=123")
+    resp = client.get("/api/module/testmod/dynamic/providers?account_id=acc1")
     assert resp.status_code == 200
     opts = resp.json()
     assert opts["ok"] is True
     assert [o["value"] for o in opts["options"]] == ["a", "b"]
 
-    resp2 = client.get("/api/module/testmod/dynamic/providers/a?bot_id=123")
+    resp2 = client.get("/api/module/testmod/dynamic/providers/a?account_id=acc1")
     fields = resp2.json()
     assert fields["ok"] is True
     assert fields["fields"][0]["key"] == "k1"

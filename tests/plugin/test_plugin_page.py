@@ -45,7 +45,7 @@ async def page_env(settings, tmp_path):
         db = c.get(Database)
         await db.connect()
         await c.get(ConfigService).init()
-        await c.get(ModuleRegistry).load_all(bot_id=123)
+        await c.get(ModuleRegistry).load_all(bot_id="acc1")
         app = create_app(c)
         from starlette.testclient import TestClient
 
@@ -74,11 +74,19 @@ async def test_page_endpoint_returns_html(page_env):
     body = resp.text
     assert "hello" in body
     assert 'PLUGIN_MODULE' in body and 'pagemod' in body  # 注入模块名
-    assert "PLUGIN_BOT_ID = null" in body  # 未带 bot_id → null
+    # 未带账号 → null。PLUGIN_ACCOUNT_ID 是正式名（账号 id），
+    # PLUGIN_BOT_ID 保留给既有插件页，两者同一个值。
+    assert "PLUGIN_ACCOUNT_ID = null" in body
+    assert "PLUGIN_BOT_ID = null" in body
 
-    # 带 bot_id → 注入账号（int，无引号）
-    resp2 = client.get("/api/module/pagemod/page?bot_id=123")
-    assert "PLUGIN_BOT_ID = 123;" in resp2.text
+    # 带 account_id → 注入账号 id（字符串，带引号）
+    resp2 = client.get("/api/module/pagemod/page?account_id=acc1")
+    assert 'PLUGIN_ACCOUNT_ID = "acc1";' in resp2.text
+    assert 'PLUGIN_BOT_ID = "acc1";' in resp2.text
+
+    # 老插件页仍用 ?bot_id= → 兼容别名，语义同样是账号 id
+    resp3 = client.get("/api/module/pagemod/page?bot_id=acc9")
+    assert 'PLUGIN_ACCOUNT_ID = "acc9";' in resp3.text
 
 
 async def test_page_endpoint_404_without_page(page_env):
@@ -89,7 +97,7 @@ async def test_page_endpoint_404_without_page(page_env):
 
 async def test_config_get_endpoint(page_env):
     client, c = page_env
-    resp = client.get("/api/module/pagemod/config?bot_id=123")
+    resp = client.get("/api/module/pagemod/config?account_id=acc1")
     assert resp.status_code == 200
     data = resp.json()
     assert data["ok"] is True

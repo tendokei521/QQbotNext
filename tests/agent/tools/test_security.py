@@ -40,11 +40,13 @@ def test_ws_url_token_restored_on_save():
 
 async def test_save_bots_restores_masked_token(config_service):
     await config_service.save_bots([
-        {"ws_url": "ws://h/?access_token=realtoken", "owner_id": 1, "auto_connect": True},
+        {"id": "main", "name": "主号", "ws_url": "ws://h/?access_token=realtoken",
+         "owner_id": 1, "auto_connect": True},
     ])
     # WebUI 提交打码 URL → 保存后还原
     await config_service.save_bots([
-        {"ws_url": "ws://h/?access_token=****", "owner_id": 1, "auto_connect": True},
+        {"id": "main", "name": "主号", "ws_url": "ws://h/?access_token=****",
+         "owner_id": 1, "auto_connect": True},
     ])
     assert config_service.get_bots()[0]["ws_url"] == "ws://h/?access_token=realtoken"
     # 对外接口拆分：ws_url 为纯地址，access_token 独立字段回显真实值（供配置页编辑）
@@ -56,26 +58,26 @@ async def test_save_bots_restores_masked_token(config_service):
 async def test_save_bots_independent_token_field(config_service):
     """独立 access_token 字段：未提交/打码 → 保留旧值；新值 → 采用；空串 → 清除。"""
     await config_service.save_bots([
-        {"ws_url": "ws://h/?access_token=realtoken", "owner_id": 1},
+        {"id": "main", "name": "主号", "ws_url": "ws://h/?access_token=realtoken", "owner_id": 1},
     ])
     # 1) 未提交 token 字段（改 URL 其他部分）→ 保留旧 token
     await config_service.save_bots([
-        {"ws_url": "ws://h/", "owner_id": 1},
+        {"id": "main", "name": "主号", "ws_url": "ws://h/", "owner_id": 1},
     ])
     assert config_service.get_bots()[0]["ws_url"] == "ws://h/?access_token=realtoken"
     # 2) 提交打码哨兵 → 保留旧 token
     await config_service.save_bots([
-        {"ws_url": "ws://h/", "access_token": "****", "owner_id": 1},
+        {"id": "main", "name": "主号", "ws_url": "ws://h/", "access_token": "****", "owner_id": 1},
     ])
     assert config_service.get_bots()[0]["ws_url"] == "ws://h/?access_token=realtoken"
     # 3) 提交新值 → 采用新 token
     await config_service.save_bots([
-        {"ws_url": "ws://h/", "access_token": "newtoken", "owner_id": 1},
+        {"id": "main", "name": "主号", "ws_url": "ws://h/", "access_token": "newtoken", "owner_id": 1},
     ])
     assert config_service.get_bots()[0]["ws_url"] == "ws://h/?access_token=newtoken"
     # 4) 提交空串（显式清除）→ 删除 token
     await config_service.save_bots([
-        {"ws_url": "ws://h/", "access_token": "", "owner_id": 1},
+        {"id": "main", "name": "主号", "ws_url": "ws://h/", "access_token": "", "owner_id": 1},
     ])
     assert config_service.get_bots()[0]["ws_url"] == "ws://h/"
     assert config_service.get_bots_public()[0]["access_token"] == ""

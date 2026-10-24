@@ -9,13 +9,11 @@
     await container.get(ConfigService).save_bots(data.get("bots", []))
     return _ok("配置已保存")
 
-而 ``save_bots`` 的第一条 SQL 就是 ``DELETE FROM bots``，随后按 payload 重建，
-末尾还会 ``drop_bot_accounts_from(len(normalized))`` 清掉上次登录快照。
-于是：body 被代理截断 / 非法 JSON / 前端字段名漂移 → 全部账号配置被清空、
-接口回「配置已保存」、重启后无号可连。
+而 ``save_bots`` 会删掉 payload 里没有的账号，于是：body 被代理截断 / 非法 JSON /
+前端字段名漂移 → 全部账号配置被清空、接口回「配置已保存」、重启后无号可连。
 
-同仓库其他写接口缺字段一律 400（sessions / agent），
-只有这里把"缺省值"写进了破坏性事务。
+同仓库其他写接口缺字段一律 400（sessions / agent），只有这里曾把"缺省值"
+写进了破坏性事务。v4 起还多了一条：**账号 id 非法/重复 → 400，且不改动任何账号**。
 """
 
 from __future__ import annotations
@@ -33,8 +31,10 @@ async def client(container):
 
 async def _seed(config_service):
     await config_service.save_bots([
-        {"ws_url": "ws://127.0.0.1:3001", "owner_id": 10001, "auto_connect": True},
-        {"ws_url": "ws://127.0.0.1:3002", "owner_id": 10002, "auto_connect": False},
+        {"id": "a", "name": "甲", "ws_url": "ws://127.0.0.1:3001", "owner_id": 10001,
+         "auto_connect": True},
+        {"id": "b", "name": "乙", "ws_url": "ws://127.0.0.1:3002", "owner_id": 10002,
+         "auto_connect": False},
     ])
     return [b["ws_url"] for b in config_service.get_bots_public()]
 
@@ -89,15 +89,60 @@ async def test_explicit_empty_list_still_deletes_all(client, config_service):
     assert config_service.get_bots_public() == []
 
 
+async def test_invalid_account_id_keeps_accounts(client, config_service):
+    """id 非法 → 400，且一个账号都不能动（不能"改一半"）。"""
+    before = await _seed(config_service)
+
+    resp = client.post("/api/bots/config/save", json={
+        "bots": [{"id": "../evil", "ws_url": "ws://127.0.0.1:4001"}],
+    })
+
+    assert resp.status_code == 400
+    assert [b["ws_url"] for b in config_service.get_bots_public()] == before
+
+
+async def test_duplicate_account_id_keeps_accounts(client, config_service):
+    before = await _seed(config_service)
+
+    resp = client.post("/api/bots/config/save", json={
+        "bots": [
+            {"id": "dup", "ws_url": "ws://127.0.0.1:4001"},
+            {"id": "dup", "ws_url": "ws://127.0.0.1:4002"},
+        ],
+    })
+
+    assert resp.status_code == 400
+    assert [b["ws_url"] for b in config_service.get_bots_public()] == before
+
+
 async def test_valid_payload_still_saves(client, config_service):
     await _seed(config_service)
 
     resp = client.post("/api/bots/config/save", json={
-        "bots": [{"ws_url": "ws://127.0.0.1:4001", "owner_id": 20002, "auto_connect": True}],
+        "bots": [{"id": "a", "name": "甲", "ws_url": "ws://127.0.0.1:4001",
+                  "owner_id": 20002, "auto_connect": True}],
     })
 
     assert resp.status_code == 200
-    assert [b["ws_url"] for b in config_service.get_bots_public()] == ["ws://127.0.0.1:4001"]
+    public = config_service.get_bots_public()
+    assert [b["ws_url"] for b in public] == ["ws://127.0.0.1:4001"]
+    # id 稳定的好处：删掉 b 不会影响 a 的身份
+    assert [b["id"] for b in public] == ["a"]
+
+
+async def test_rename_through_api_keeps_id(client, config_service):
+    await _seed(config_service)
+
+    resp = client.post("/api/bots/config/save", json={
+        "bots": [
+            {"id": "a", "name": "甲改名", "ws_url": "ws://127.0.0.1:3001"},
+            {"id": "b", "name": "乙", "ws_url": "ws://127.0.0.1:3002"},
+        ],
+    })
+
+    assert resp.status_code == 200
+    public = config_service.get_bots_public()
+    assert [(b["id"], b["name"]) for b in public] == [("a", "甲改名"), ("b", "乙")]
 
 
 # ==================== 连接方向（正向 / 反向 WS）====================
@@ -106,9 +151,10 @@ async def test_valid_payload_still_saves(client, config_service):
 async def test_conn_mode_saved_through_api(client, config_service):
     """配置页保存的连接方式必须一路落到 get_bots_public（前端重新加载要读到它）。"""
     resp = client.post("/api/bots/config/save", json={"bots": [
-        {"ws_url": "ws://127.0.0.1:3001/onebot/v11/ws", "conn_mode": "reverse",
-         "access_token": "tk", "auto_connect": True},
-        {"ws_url": "ws://127.0.0.1:3002/", "conn_mode": "forward", "auto_connect": False},
+        {"id": "rev", "name": "反向号", "ws_url": "ws://127.0.0.1:3001/onebot/v11/ws",
+         "conn_mode": "reverse", "access_token": "tk", "auto_connect": True},
+        {"id": "fwd", "name": "正向号", "ws_url": "ws://127.0.0.1:3002/",
+         "conn_mode": "forward", "auto_connect": False},
     ]})
 
     assert resp.status_code == 200
@@ -120,10 +166,12 @@ async def test_conn_mode_saved_through_api(client, config_service):
 async def test_legacy_client_without_conn_mode_keeps_direction(client, config_service):
     """老前端/旧脚本全量保存时不带 conn_mode：已存的反向账号不能被改回正向。"""
     client.post("/api/bots/config/save", json={"bots": [
-        {"ws_url": "ws://127.0.0.1:3001/onebot/v11/ws", "conn_mode": "reverse"},
+        {"id": "rev", "name": "反向号", "ws_url": "ws://127.0.0.1:3001/onebot/v11/ws",
+         "conn_mode": "reverse"},
     ]})
     # 只改 auto_connect，payload 里没有 conn_mode
     client.post("/api/bots/config/save", json={"bots": [
-        {"ws_url": "ws://127.0.0.1:3001/onebot/v11/ws", "auto_connect": True},
+        {"id": "rev", "name": "反向号", "ws_url": "ws://127.0.0.1:3001/onebot/v11/ws",
+         "auto_connect": True},
     ]})
     assert config_service.get_bots_public()[0]["conn_mode"] == "reverse"

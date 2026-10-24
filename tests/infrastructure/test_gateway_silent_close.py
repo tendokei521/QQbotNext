@@ -51,17 +51,20 @@ def _gateway(url: str):
     """单账号网关：connection 0 + 同一份配置的 provider（auto_connect=True）。"""
     gw = OneBotGateway(settings=_Settings(), cache=Cache())
     conn = BotConnection(ws_url=url, auto_connect=True)
-    conn.index = 0
-    gw.connections = {0: conn}
-    gw.bots_provider = lambda: [{"ws_url": url, "owner_id": None, "auto_connect": True}]
+    conn.account_id = "main"
+    conn.account_name = "主号"
+    gw.connections = {"main": conn}
+    gw.bots_provider = lambda: [
+        {"id": "main", "name": "主号", "ws_url": url, "owner_id": None, "auto_connect": True},
+    ]
     return gw, conn
 
 
 def _fake_connect_recorder(gw, conn, calls: list):
     """替换 connect_bot：只记录被调用，不做真实握手。"""
 
-    async def fake_connect(index: int) -> bool:
-        calls.append(index)
+    async def fake_connect(account_id: str) -> bool:
+        calls.append(account_id)
         conn.status = "connected"
         return True
 
@@ -100,8 +103,8 @@ async def test_normal_close_marks_offline_and_reconnects(monkeypatch):
     url, server = await _serve(handler)
     try:
         gw, conn = _gateway(url)
-        assert await gw.connect_bot(0) is True
-        task = gw.bot_server_tasks["0"]  # 连接还活着 → 收尾逻辑必须留下可查痕迹
+        assert await gw.connect_bot("main") is True
+        task = gw.bot_server_tasks["main"]  # 连接还活着 → 收尾逻辑必须留下可查痕迹
 
         released.set()
         for _ in range(100):
@@ -120,7 +123,7 @@ async def test_normal_close_marks_offline_and_reconnects(monkeypatch):
         calls: list[int] = []
         _fake_connect_recorder(gw, conn, calls)
         await _supervise_ticks(gw, 2, monkeypatch)
-        assert calls == [0], f"掉线的 auto_connect 账号必须被自动重连，实际 {calls}"
+        assert calls == ["main"], f"掉线的 auto_connect 账号必须被自动重连，实际 {calls}"
     finally:
         released.set()
         await _close_server(server)
@@ -137,7 +140,7 @@ async def test_normal_close_fails_inflight_request_fast():
     gw = None
     try:
         gw, conn = _gateway(url)
-        assert await gw.connect_bot(0) is True
+        assert await gw.connect_bot("main") is True
 
         t0 = time.perf_counter()
         resp = await asyncio.wait_for(
@@ -191,17 +194,17 @@ async def test_connection_gone_detection():
         await asyncio.Event().wait()
 
     task = asyncio.create_task(_forever())
-    gw.bot_server_tasks = {"0": task}  # 生产代码统一用 str(index) 作键
+    gw.bot_server_tasks = {"main": task}  # 生产代码统一用 account_id 作键
     conn.websocket = _OpenWs()
     try:
-        assert gw._connection_gone(0, conn) is False, "ws 未关 + 任务在跑 = 健康，不得误判"
+        assert gw._connection_gone("main", conn) is False, "ws 未关 + 任务在跑 = 健康，不得误判"
         conn.websocket = _ClosedWs()
-        assert gw._connection_gone(0, conn) is True, "已带 close_code 的连接必须判为已消失"
+        assert gw._connection_gone("main", conn) is True, "已带 close_code 的连接必须判为已消失"
         conn.websocket = _OpenWs()
         gw.bot_server_tasks.clear()
-        assert gw._connection_gone(0, conn) is True, "接收任务已亡必须判为已消失"
+        assert gw._connection_gone("main", conn) is True, "接收任务已亡必须判为已消失"
         conn.websocket = None
-        assert gw._connection_gone(0, conn) is True, "ws 缺失必须判为已消失"
+        assert gw._connection_gone("main", conn) is True, "ws 缺失必须判为已消失"
     finally:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -218,6 +221,6 @@ async def test_supervise_sweeps_zombie_connection(monkeypatch):
     _fake_connect_recorder(gw, conn, calls)
     await _supervise_ticks(gw, 1, monkeypatch)
 
-    assert calls == [0], f"僵尸连接必须被识别为掉线并自动重连，实际 {calls}"
+    assert calls == ["main"], f"僵尸连接必须被识别为掉线并自动重连，实际 {calls}"
     assert conn.last_error, "必须留下掉线原因，便于排查"
     assert conn.websocket is None

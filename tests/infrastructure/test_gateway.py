@@ -22,8 +22,9 @@ class _Settings:
 
 
 class _Conn:
-    def __init__(self, index, groups):
-        self.index = index
+    def __init__(self, account_id, groups):
+        self.account_id = account_id
+        self.account_name = f"账号{account_id}"
         self.all_group_list = groups
         self.auto_connect = False
 
@@ -64,23 +65,23 @@ async def test_each_account_dispatches_group_message_independently():
     回不回由各账号 Agent 的触发规则决定。
     """
     gw = OneBotGateway(settings=_Settings(), cache=Cache())
-    conn0, conn1 = _Conn(0, [999]), _Conn(1, [999])
-    gw.connections = {0: conn0, 1: conn1}
+    conn0, conn1 = _Conn("a", [999]), _Conn("b", [999])
+    gw.connections = {"a": conn0, "b": conn1}
 
     seen: list[tuple] = []
 
     async def handler(event):
-        seen.append((event.bot_index, event.self_id))
+        seen.append((event.account_id, event.self_id))
 
     gw.dispatch_handler = handler
 
-    for conn in (conn0, conn1):
+    for offset, conn in enumerate((conn0, conn1)):
         event = _event(1)
-        event.bot_index = conn.index
-        event.self_id = 1000 + conn.index
+        event.account_id = conn.account_id
+        event.self_id = 1000 + offset
         await gw._process_event(event, conn, _NullLogger(), _NullLogger())
 
-    assert seen == [(0, 1000), (1, 1001)], f"同群两个账号都必须各自派发 → {seen}"
+    assert seen == [("a", 1000), ("b", 1001)], f"同群两个账号都必须各自派发 → {seen}"
 
 
 async def test_process_event_has_no_cross_account_dedup_api():
@@ -151,8 +152,9 @@ async def test_dispatch_does_not_block_api_response():
 
     ws = _ScriptedWs()
     conn = BotConnection(websocket=ws, bot_id=123)
-    conn.index = 1
-    gw.connections = {1: conn}
+    conn.account_id = "main"
+    conn.account_name = "主号"
+    gw.connections = {"main": conn}
 
     reply_ok = asyncio.Event()
 
@@ -162,7 +164,7 @@ async def test_dispatch_does_not_block_api_response():
             reply_ok.set()
 
     gw.dispatch_handler = handler
-    task = asyncio.create_task(gw._bot_server(1))
+    task = asyncio.create_task(gw._bot_server("main"))
     try:
         await asyncio.wait_for(reply_ok.wait(), 2)
     finally:
@@ -228,8 +230,9 @@ async def test_failed_api_response_consumed_not_timeout():
 
     ws = _FailedRespWs()
     conn = BotConnection(websocket=ws, bot_id=123)
-    conn.index = 1
-    gw.connections = {1: conn}
+    conn.account_id = "main"
+    conn.account_name = "主号"
+    gw.connections = {"main": conn}
 
     got = asyncio.Event()
     result = {}
@@ -240,7 +243,7 @@ async def test_failed_api_response_consumed_not_timeout():
         got.set()
 
     gw.dispatch_handler = handler
-    task = asyncio.create_task(gw._bot_server(1))
+    task = asyncio.create_task(gw._bot_server("main"))
     try:
         await asyncio.wait_for(got.wait(), 2)
     finally:
@@ -291,8 +294,9 @@ def test_message_log_text_other_types_default_to_abbrev():
 class _AccountConn:
     """最小 Bot 桩：只提供登录信息 + 账号快照所需字段。"""
 
-    def __init__(self, index: int):
-        self.index = index
+    def __init__(self, account_id: str):
+        self.account_id = account_id
+        self.account_name = "主号"
         self.bot_id = 0
         self.login_info = {}
         self.status = "connecting"
@@ -309,22 +313,23 @@ class _AccountConn:
 async def test_login_records_last_account_snapshot():
     """登录成功 → 写入账号快照；断开后 last_account / account 仍可回退展示。"""
     gw = OneBotGateway(settings=_Settings(), cache=Cache())
-    conn = _AccountConn(0)
-    gw.connections = {0: conn}
+    conn = _AccountConn("main")
+    gw.connections = {"main": conn}
 
     saved: dict = {}
 
-    async def _saver(index, user_id, nickname):
-        saved.update(index=index, user_id=user_id, nickname=nickname)
+    async def _saver(account_id, user_id, nickname):
+        saved.update(account_id=account_id, user_id=user_id, nickname=nickname)
         return True
 
     gw.account_saver = _saver
     gw.account_lookup = lambda: {
-        0: {"user_id": str(saved.get("user_id")), "nickname": saved.get("nickname", ""), "last_login_at": 1}
+        "main": {"user_id": str(saved.get("user_id")), "nickname": saved.get("nickname", ""),
+                 "last_login_at": 1}
     }
 
     assert await gw._get_login_info(conn) is True
-    assert (saved["index"], saved["user_id"], saved["nickname"]) == (0, 987654, "小明")
+    assert (saved["account_id"], saved["user_id"], saved["nickname"]) == ("main", 987654, "小明")
 
     info = gw.get_bots_info()[0]
     assert info["login_info"]["nickname"] == "小明"
@@ -343,10 +348,10 @@ async def test_login_records_last_account_snapshot():
 async def test_login_account_saver_failure_does_not_break_login():
     """快照写入失败不得影响登录主流程（登录回调照常执行）。"""
     gw = OneBotGateway(settings=_Settings(), cache=Cache())
-    conn = _AccountConn(0)
-    gw.connections = {0: conn}
+    conn = _AccountConn("main")
+    gw.connections = {"main": conn}
 
-    async def _boom(index, user_id, nickname):  # noqa: ARG001
+    async def _boom(account_id, user_id, nickname):  # noqa: ARG001
         raise RuntimeError("db down")
 
     gw.account_saver = _boom

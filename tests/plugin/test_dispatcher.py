@@ -1,10 +1,19 @@
-"""事件分发测试：订阅路由 / bot 过滤 / 单一服务 / 权限 / time_core 广播。"""
+"""事件分发测试：订阅路由 / 账号过滤 / 单一服务 / 权限 / time_core 广播。
+
+账号身份自 v4 起是 **account_id**（字符串，用户设定）：
+- 事件用 `event.account_id` 定位账号；
+- 模块实例按 `module.bot_id`（值即 account_id）归属；
+- 单一服务用 `service_bot_id`（account_id），不再是数组下标。
+"""
 
 import pytest
 
 from app.domain.events import GroupMessageEvent
 from app.plugin.base import BaseModule, ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
 from app.plugin.dispatcher import ModuleDispatcher
+
+ACC = "acc0"
+ACC2 = "acc5"
 
 
 class FakeConfigService:
@@ -33,15 +42,16 @@ class FakeRegistry:
 
 
 class FakeConn:
-    def __init__(self, index, bot_id):
-        self.index = index
+    def __init__(self, account_id, bot_id):
+        self.account_id = account_id
+        self.account_name = f"账号{account_id}"
         self.bot_id = bot_id
         self.owner_id = None
         self.status = "connected"
         self.all_group_list = [1]  # 默认在群 1
 
 
-def make_module(subs, mname, bot_id, permission="member", calls=None, auth_data=None):
+def make_module(subs, mname, account_id, permission="member", calls=None, auth_data=None):
     _permission = permission
 
     class M(BaseModule):
@@ -52,7 +62,7 @@ def make_module(subs, mname, bot_id, permission="member", calls=None, auth_data=
         subscribe = subs
 
         async def handle(self, event):
-            calls.append((mname, event.event_type, event.bot_id))
+            calls.append((mname, event.event_type, event.account_id))
 
     class _S:
         def get_module_config(self, *a):
@@ -62,16 +72,17 @@ def make_module(subs, mname, bot_id, permission="member", calls=None, auth_data=
             return auth_data or {}
 
     s = _S()
-    auth = ModuleAuthority(mname, bot_id, s)
-    config = ModuleConfig(mname, bot_id, {}, s)
-    ctx = ModuleContext(module_name=mname, bot_id=bot_id, config=config, authority=auth, services=ServiceAccess())
+    auth = ModuleAuthority(mname, account_id, s)
+    config = ModuleConfig(mname, account_id, {}, s)
+    ctx = ModuleContext(module_name=mname, bot_id=account_id, config=config, authority=auth,
+                        services=ServiceAccess())
     return M(ctx)
 
 
 def _event(**kw):
     defaults = dict(
         event_type="message_group", message_type="group",
-        user_id=100, self_id=123, bot_id=123, bot_index=0, time=0,
+        user_id=100, self_id=123, bot_id=123, account_id=ACC, time=0,
         user=type("U", (), {"user_id": 100, "role": "member"})(),
         group=type("G", (), {"group_id": 1})(),
         message=[{"type": "text", "data": {"text": "hi"}}],
@@ -84,11 +95,11 @@ def _event(**kw):
 @pytest.fixture
 def dispatcher():
     calls = []
-    a = make_module(("message_group",), "a", 123, calls=calls)
-    b = make_module(("notice_poke",), "b", 123, calls=calls)
+    a = make_module(("message_group",), "a", ACC, calls=calls)
+    b = make_module(("notice_poke",), "b", ACC, calls=calls)
     registry = FakeRegistry([a, b])
     cfg = FakeConfigService()
-    gateway = type("G", (), {"connections": {0: FakeConn(0, 123)}})()
+    gateway = type("G", (), {"connections": {ACC: FakeConn(ACC, 123)}})()
     d = ModuleDispatcher(registry=registry, config_service=cfg, gateway=gateway, log=None)
     d._calls = calls
     return d
@@ -97,67 +108,68 @@ def dispatcher():
 async def test_subscribed_module_only(dispatcher):
     ev = _event()
     await dispatcher.dispatch(ev)
-    assert dispatcher._calls == [("a", "message_group", 123)]
+    assert dispatcher._calls == [("a", "message_group", ACC)]
 
 
-async def test_bot_id_filter(dispatcher):
-    ev = _event(bot_id=999, bot_index=0)
+async def test_account_id_filter(dispatcher):
+    """事件来自别的账号 → 不属于该模块实例，不得派发。"""
+    ev = _event(account_id="other")
     await dispatcher.dispatch(ev)
     assert dispatcher._calls == []
 
 
 async def test_single_service_skip(dispatcher):
-    """双账号同群，服务账号为另一账号（index=5）→ 当前 bot(index 0) 跳过。"""
+    """双账号同群，服务账号为另一账号 → 当前账号跳过。"""
     dispatcher.config_service._single = {"a": True}
-    dispatcher.config_service._multi = {"groups": {"1": {"service_bot_index": 5}}}
-    dispatcher.gateway.connections = {0: FakeConn(0, 123), 5: FakeConn(5, 999)}
+    dispatcher.config_service._multi = {"groups": {"1": {"service_bot_id": ACC2}}}
+    dispatcher.gateway.connections = {ACC: FakeConn(ACC, 123), ACC2: FakeConn(ACC2, 999)}
     ev = _event()
     await dispatcher.dispatch(ev)
     assert dispatcher._calls == []
 
 
 async def test_single_service_allow_when_service_account(dispatcher):
-    """双账号同群，服务账号为当前 bot（index=0）→ 响应。"""
+    """双账号同群，服务账号为当前账号 → 响应。"""
     dispatcher.config_service._single = {"a": True}
-    dispatcher.config_service._multi = {"groups": {"1": {"service_bot_index": 0}}}
-    dispatcher.gateway.connections = {0: FakeConn(0, 123), 5: FakeConn(5, 999)}
+    dispatcher.config_service._multi = {"groups": {"1": {"service_bot_id": ACC}}}
+    dispatcher.gateway.connections = {ACC: FakeConn(ACC, 123), ACC2: FakeConn(ACC2, 999)}
     ev = _event()
     await dispatcher.dispatch(ev)
-    assert dispatcher._calls == [("a", "message_group", 123)]
+    assert dispatcher._calls == [("a", "message_group", ACC)]
 
 
 async def test_single_service_not_triggered_single_bot(dispatcher):
     """单账号群：即使配置了不存在的服务账号也不触发，正常响应。"""
     dispatcher.config_service._single = {"a": True}
-    dispatcher.config_service._multi = {"groups": {"1": {"service_bot_index": 5}}}  # 指向不存在的 index
+    dispatcher.config_service._multi = {"groups": {"1": {"service_bot_id": "ghost"}}}
     ev = _event()
     await dispatcher.dispatch(ev)
-    assert dispatcher._calls == [("a", "message_group", 123)]
+    assert dispatcher._calls == [("a", "message_group", ACC)]
 
 
 async def test_single_service_no_service_account(dispatcher):
     """双账号但群未配置服务账号 → 不限制，所有账号均可响应。"""
     dispatcher.config_service._single = {"a": True}
-    dispatcher.config_service._multi = {"groups": {"1": {}}}  # 未配置 service_bot_index
-    dispatcher.gateway.connections = {0: FakeConn(0, 123), 5: FakeConn(5, 999)}
+    dispatcher.config_service._multi = {"groups": {"1": {}}}  # 未配置 service_bot_id
+    dispatcher.gateway.connections = {ACC: FakeConn(ACC, 123), ACC2: FakeConn(ACC2, 999)}
     ev = _event()
     await dispatcher.dispatch(ev)
-    assert dispatcher._calls == [("a", "message_group", 123)]
+    assert dispatcher._calls == [("a", "message_group", ACC)]
 
 
 async def test_single_service_unconfigured_group(dispatcher):
     """双账号但群不在多群管理配置中 → 不触发，正常响应。"""
     dispatcher.config_service._single = {"a": True}
     dispatcher.config_service._multi = {"groups": {}}  # 群 1 未配置
-    dispatcher.gateway.connections = {0: FakeConn(0, 123), 5: FakeConn(5, 999)}
+    dispatcher.gateway.connections = {ACC: FakeConn(ACC, 123), ACC2: FakeConn(ACC2, 999)}
     ev = _event()
     await dispatcher.dispatch(ev)
-    assert dispatcher._calls == [("a", "message_group", 123)]
+    assert dispatcher._calls == [("a", "message_group", ACC)]
 
 
 async def test_owner_only_module_blocked_for_member():
     calls = []
-    refuse = make_module(("message_group",), "owner_m", 123, permission="owner", calls=calls)
+    refuse = make_module(("message_group",), "owner_m", ACC, permission="owner", calls=calls)
     registry = FakeRegistry([refuse])
     d = ModuleDispatcher(registry=registry, config_service=FakeConfigService(),
                          gateway=type("G", (), {"connections": {}})())
@@ -172,28 +184,28 @@ async def test_owner_only_module_blocked_for_member():
 
 async def test_owner_permission_passes_for_roster_owner():
     calls = []
-    mod = make_module(("message_group",), "owner_m", 123, permission="owner", calls=calls)
+    mod = make_module(("message_group",), "owner_m", ACC, permission="owner", calls=calls)
     cfg = FakeConfigService(agent_config={"agent_owner_list": ["100"]})
     d = ModuleDispatcher(registry=FakeRegistry([mod]), config_service=cfg,
                          gateway=type("G", (), {"connections": {}})())
     await d.dispatch(_event())
-    assert calls == [("owner_m", "message_group", 123)]
+    assert calls == [("owner_m", "message_group", ACC)]
 
 
 async def test_manager_permission_passes_for_roster_manager():
     calls = []
-    mod = make_module(("message_group",), "mgr_m", 123, permission="manager", calls=calls)
+    mod = make_module(("message_group",), "mgr_m", ACC, permission="manager", calls=calls)
     cfg = FakeConfigService(agent_config={"agent_manager_list": ["100"]})
     d = ModuleDispatcher(registry=FakeRegistry([mod]), config_service=cfg,
                          gateway=type("G", (), {"connections": {}})())
     await d.dispatch(_event())
-    assert calls == [("mgr_m", "message_group", 123)]
+    assert calls == [("mgr_m", "message_group", ACC)]
 
 
 async def test_owner_permission_ignores_other_users():
     """名册里没有这个人 → 仍然拦住（不是"名册一配就全放行"）。"""
     calls = []
-    mod = make_module(("message_group",), "owner_m", 123, permission="owner", calls=calls)
+    mod = make_module(("message_group",), "owner_m", ACC, permission="owner", calls=calls)
     cfg = FakeConfigService(agent_config={"agent_owner_list": ["999"]})
     d = ModuleDispatcher(registry=FakeRegistry([mod]), config_service=cfg,
                          gateway=type("G", (), {"connections": {}})())
@@ -206,13 +218,13 @@ async def test_rosters_prefer_agent_manager_runtime():
     from types import SimpleNamespace
 
     calls = []
-    mod = make_module(("message_group",), "owner_m", 123, permission="owner", calls=calls)
+    mod = make_module(("message_group",), "owner_m", ACC, permission="owner", calls=calls)
 
     class FakeManager:
-        def get_runtime(self, bot_id):
+        def get_runtime(self, account_id):
             return SimpleNamespace(config={"agent_owner_list": ["100"]})
 
     d = ModuleDispatcher(registry=FakeRegistry([mod]), config_service=FakeConfigService(),
                          gateway=type("G", (), {"connections": {}})(), agent_manager=FakeManager())
     await d.dispatch(_event())
-    assert calls == [("owner_m", "message_group", 123)]
+    assert calls == [("owner_m", "message_group", ACC)]

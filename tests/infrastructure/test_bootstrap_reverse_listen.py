@@ -26,6 +26,8 @@ async def test_bootstrap_starts_reverse_listener_from_saved_config(container):
     port = _free_port()
     config_service = container.get(ConfigService)
     await config_service.save_bots([{
+        "id": "rev",
+        "name": "反向号",
         "ws_url": f"ws://127.0.0.1:{port}/onebot/v11/ws",
         "auto_connect": True,
         "conn_mode": "reverse",

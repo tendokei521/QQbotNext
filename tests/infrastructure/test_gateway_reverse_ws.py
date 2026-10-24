@@ -92,9 +92,9 @@ async def test_reverse_connect_starts_listener_not_outbound():
     gw = _gateway()
     await gw.add_bot(
         f"ws://127.0.0.1:{port}/onebot/v11/ws", None, auto_connect=False,
-        index=0, conn_mode="reverse",
+        account_id="acc0", conn_mode="reverse",
     )
-    assert await gw.connect_bot(0) is True
+    assert await gw.connect_bot("acc0") is True
     try:
         info = gw.get_bots_info()[0]
         assert info["conn_mode"] == "reverse"
@@ -118,14 +118,14 @@ async def test_reverse_client_attaches_and_dispatches_message():
         seen.append(event)
 
     gw.dispatch_handler = handler
-    await gw.add_bot(f"ws://127.0.0.1:{port}/onebot/v11/ws", None, index=0, conn_mode="reverse")
-    assert await gw.connect_bot(0) is True
+    await gw.add_bot(f"ws://127.0.0.1:{port}/onebot/v11/ws", None, account_id="acc0", conn_mode="reverse")
+    assert await gw.connect_bot("acc0") is True
 
     client = _FakeOneBot(f"ws://127.0.0.1:{port}/onebot/v11/ws")
     task = asyncio.create_task(client.run(send_message=True))
     try:
         assert await _wait(lambda: seen), "反向连接接入后必须能派发事件"
-        assert await _wait(lambda: gw.connections[0].status == "connected")
+        assert await _wait(lambda: gw.connections["acc0"].status == "connected")
         info = gw.get_bots_info()[0]
         assert info["status"] == "connected"
         assert info["bot_id"] == 10001, "接入后应主动拉一次登录信息"
@@ -140,8 +140,8 @@ async def test_reverse_api_request_reaches_client_and_response_returns():
     """反向连接同样是「双向」的：框架发出的 API 请求走同一条 socket 并拿到响应。"""
     port = _free_port()
     gw = _gateway()
-    await gw.add_bot(f"ws://127.0.0.1:{port}/onebot/v11/ws", None, index=0, conn_mode="reverse")
-    assert await gw.connect_bot(0) is True
+    await gw.add_bot(f"ws://127.0.0.1:{port}/onebot/v11/ws", None, account_id="acc0", conn_mode="reverse")
+    assert await gw.connect_bot("acc0") is True
 
     received: list[dict] = []
 
@@ -160,7 +160,7 @@ async def test_reverse_api_request_reaches_client_and_response_returns():
 
     api_task = asyncio.create_task(serve_api())
     try:
-        conn = gw.connections[0]
+        conn = gw.connections["acc0"]
         assert await _wait(lambda: conn.websocket is not None)
         resp = await conn.send_private_msg(100, "hi")
         assert resp and resp.get("status") == "ok"
@@ -175,14 +175,14 @@ async def test_reverse_disconnect_stops_listener():
     """用户断开反向账号 → 监听停止（端口释放），状态 disconnected。"""
     port = _free_port()
     gw = _gateway()
-    await gw.add_bot(f"ws://127.0.0.1:{port}/onebot/v11/ws", None, index=0, conn_mode="reverse")
-    assert await gw.connect_bot(0) is True
-    await gw.disconnect_bot(0, manual=True)
+    await gw.add_bot(f"ws://127.0.0.1:{port}/onebot/v11/ws", None, account_id="acc0", conn_mode="reverse")
+    assert await gw.connect_bot("acc0") is True
+    await gw.disconnect_bot("acc0", manual=True)
     info = gw.get_bots_info()[0]
     assert info["listening"] is False
     assert info["status"] == "disconnected"
     # 端口已释放：同地址可以再次监听
-    assert await gw.connect_bot(0) is True
+    assert await gw.connect_bot("acc0") is True
     assert gw.get_bots_info()[0]["listening"] is True
     await gw.shutdown()
 
@@ -190,8 +190,8 @@ async def test_reverse_disconnect_stops_listener():
 async def test_invalid_reverse_address_surfaces_error():
     """反向地址缺端口 → 立刻报错（不让用户对着"没有监听"干等）。"""
     gw = _gateway()
-    await gw.add_bot("ws://127.0.0.1/onebot/v11/ws", None, index=0, conn_mode="reverse")
-    assert await gw.connect_bot(0) is False
+    await gw.add_bot("ws://127.0.0.1/onebot/v11/ws", None, account_id="acc0", conn_mode="reverse")
+    assert await gw.connect_bot("acc0") is False
     info = gw.get_bots_info()[0]
     assert info["status"] == "error"
     assert "反向监听失败" in (info["last_error"] or "")
@@ -202,12 +202,14 @@ async def test_reconcile_switches_between_forward_and_reverse():
     """配置里改连接方向 → 网关按新模式重建（旧监听必须停掉）。"""
     port = _free_port()
     gw = _gateway()
-    await gw.add_bot(f"ws://127.0.0.1:{port}/onebot/v11/ws", None, index=0, conn_mode="reverse")
-    assert await gw.connect_bot(0) is True
+    await gw.add_bot(f"ws://127.0.0.1:{port}/onebot/v11/ws", None, account_id="acc0", conn_mode="reverse")
+    assert await gw.connect_bot("acc0") is True
     assert gw.get_bots_info()[0]["listening"] is True
 
     # 切到正向：监听器应被停掉、状态回到断开（等待连出）
     await gw._reconcile([{
+        "id": "acc0",
+        "name": "主号",
         "ws_url": f"ws://127.0.0.1:{port}/onebot/v11/ws",
         "auto_connect": False,
         "conn_mode": "forward",
@@ -223,19 +225,19 @@ async def test_peer_close_keeps_listener_and_waits_again():
 
     port = _free_port()
     gw = _gateway()
-    await gw.add_bot(f"ws://127.0.0.1:{port}/onebot/v11/ws", None, index=0, conn_mode="reverse")
-    assert await gw.connect_bot(0) is True
+    await gw.add_bot(f"ws://127.0.0.1:{port}/onebot/v11/ws", None, account_id="acc0", conn_mode="reverse")
+    assert await gw.connect_bot("acc0") is True
 
     stop = asyncio.Event()
     client = _FakeOneBot(f"ws://127.0.0.1:{port}/onebot/v11/ws")
     task = asyncio.create_task(client.run(stop=stop))
     try:
-        assert await _wait(lambda: gw.connections[0].status == "connected")
+        assert await _wait(lambda: gw.connections["acc0"].status == "connected")
         stop.set()
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
-        assert await _wait(lambda: gw.connections[0].status == "connecting"), \
+        assert await _wait(lambda: gw.connections["acc0"].status == "connecting"), \
             "对端断开后监听仍在 → 状态应回到等待接入"
         info = gw.get_bots_info()[0]
         assert info["listening"] is True
@@ -248,6 +250,8 @@ async def test_start_all_listens_for_reverse_auto_connect_accounts():
     port = _free_port()
     gw = _gateway()
     await gw.start_all([{
+        "id": "acc0",
+        "name": "主号",
         "ws_url": f"ws://127.0.0.1:{port}/onebot/v11/ws",
         "auto_connect": True,
         "conn_mode": "reverse",
@@ -263,10 +267,10 @@ async def test_start_all_listens_for_reverse_auto_connect_accounts():
 async def test_forward_account_never_opens_listener():
     """正向账号不该顺手起监听：模式分流不能把两种连接混在一起。"""
     gw = _gateway()
-    await gw.add_bot("ws://127.0.0.1:1/", None, index=0, conn_mode="forward")
+    await gw.add_bot("ws://127.0.0.1:1/", None, account_id="acc0", conn_mode="forward")
     try:
         # 连不上（端口 1 无人监听）→ 走正向失败路径，不产生监听器
-        assert await gw.connect_bot(0) is False
+        assert await gw.connect_bot("acc0") is False
         info = gw.get_bots_info()[0]
         assert info["conn_mode"] == "forward"
         assert info["listening"] is False
@@ -290,8 +294,8 @@ async def test_second_client_replaces_first_without_duplicate_dispatch():
         dispatched.append(event)
 
     gw.dispatch_handler = handler
-    await gw.add_bot(f"ws://127.0.0.1:{port}/onebot/v11/ws", None, index=0, conn_mode="reverse")
-    assert await gw.connect_bot(0) is True
+    await gw.add_bot(f"ws://127.0.0.1:{port}/onebot/v11/ws", None, account_id="acc0", conn_mode="reverse")
+    assert await gw.connect_bot("acc0") is True
 
     def _msg(text: str) -> str:
         return json.dumps({
@@ -304,15 +308,15 @@ async def test_second_client_replaces_first_without_duplicate_dispatch():
     first = asyncio.create_task(_FakeOneBot(
         f"ws://127.0.0.1:{port}/onebot/v11/ws").run(stop=first_stop))
     try:
-        assert await _wait(lambda: gw.connections[0].status == "connected")
-        old_ws = gw.connections[0].websocket
+        assert await _wait(lambda: gw.connections["acc0"].status == "connected")
+        old_ws = gw.connections["acc0"].websocket
 
         # 第二条连接（模拟 NapCat 重启时的短暂双连）
         async with websockets.connect(
             f"ws://127.0.0.1:{port}/onebot/v11/ws",
             additional_headers={"X-Self-ID": "10001", "X-Client-Role": "Universal"},
         ) as second:
-            assert await _wait(lambda: gw.connections[0].websocket not in (None, old_ws)), \
+            assert await _wait(lambda: gw.connections["acc0"].websocket not in (None, old_ws)), \
                 "新接入必须接管该账号的连接"
             # 旧连接已被关掉：它的读循环随之结束，不会与新连接并存
             assert await _wait(lambda: old_ws.close_code is not None)
@@ -321,7 +325,7 @@ async def test_second_client_replaces_first_without_duplicate_dispatch():
             assert await _wait(lambda: len(dispatched) == 1)
             await asyncio.sleep(0.2)
             assert len(dispatched) == 1, f"同一条消息只能派发一次，实际 {len(dispatched)}"
-            assert gw.connections[0].status == "connected"
+            assert gw.connections["acc0"].status == "connected"
             assert gw.get_bots_info()[0]["listening"] is True
     finally:
         first_stop.set()

@@ -50,7 +50,7 @@ class _Svc:
         return {}
 
 
-def make_module(bot_id=123, permission="member", calls=None, subs=("message_group",)):
+def make_module(bot_id="acc0", permission="member", calls=None, subs=("message_group",)):
     calls = calls if calls is not None else []
 
     class M(BaseModule):
@@ -120,7 +120,7 @@ def event(text, *, user_id=100, role="member", self_id=123, bot=None):
         user_id=user_id,
         self_id=self_id,
         bot_id=self_id,
-        bot_index=0,
+        account_id="acc0",
         message_id=1,
         time=0,
         bot=bot,
@@ -312,7 +312,7 @@ async def test_module_hook_observer_still_runs_after_command():
     s = _Svc()
     ctx = ModuleContext(
         module_name="obs",
-        bot_id=123,
+        bot_id="acc0",
         config=ModuleConfig("obs", 123, {}, s),
         authority=ModuleAuthority("obs", 123, s),
         services=ServiceAccess(),
@@ -372,7 +372,7 @@ def bind_module():
     s = _Svc()
     ctx = ModuleContext(
         module_name="bind",
-        bot_id=123,
+        bot_id="acc0",
         config=ModuleConfig("bind", 123, {}, s),
         authority=ModuleAuthority("bind", 123, s),
         services=ServiceAccess(),

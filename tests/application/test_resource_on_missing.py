@@ -134,16 +134,16 @@ async def test_config_endpoint_reports_cleared_fields(container):
 
     registry = container.get(ModuleRegistry)
     registry.plugins_dir = Path(__file__).resolve().parents[2] / "app" / "plugins"
-    bot_id = 20251001
-    assert await registry.load_single("astrbot_alignment", bot_id) is True
+    account_id = "acc_t1"
+    assert await registry.load_single("astrbot_alignment", account_id) is True
     try:
         client = TestClient(create_app(container))
         # 该插件的 persona_preset_id 未声明 on_missing（默认 keep）→ 悬挂值原样保留
         resp = client.post(
-            f"/api/module/astrbot_alignment/config?bot_id={bot_id}",
+            f"/api/module/astrbot_alignment/config?account_id={account_id}",
             json={"persona_preset_id": "不存在的预设"},
         )
         assert resp.status_code == 200
         assert "cleared" not in resp.json(), "默认 keep 不该清空"
     finally:
-        await registry.unload_single("astrbot_alignment", bot_id)
+        await registry.unload_single("astrbot_alignment", account_id)

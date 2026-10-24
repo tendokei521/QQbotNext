@@ -69,8 +69,9 @@ def _gateway(bots: list[dict]):
     gw = OneBotGateway(settings=_Settings(), cache=Cache())
     cfg = bots[0]
     conn = BotConnection(ws_url=cfg["ws_url"], auto_connect=cfg["auto_connect"])
-    conn.index = 0
-    gw.connections = {0: conn}
+    conn.account_id = "main"
+    conn.account_name = "主号"
+    gw.connections = {"main": conn}
     gw.bots_provider = lambda: [dict(b) for b in bots]
     return gw, conn
 
@@ -108,8 +109,8 @@ async def _supervise_ticks(gw, ticks: int, monkeypatch) -> None:
 def _fake_connect_recorder(gw, conn, calls: list):
     """替换 connect_bot：只记录被调用，不做真实握手。"""
 
-    async def fake_connect(index: int) -> bool:
-        calls.append(index)
+    async def fake_connect(account_id: str) -> bool:
+        calls.append(account_id)
         conn.status = "connected"
         return True
 
@@ -119,13 +120,13 @@ def _fake_connect_recorder(gw, conn, calls: list):
 
 async def test_manual_disconnect_survives_supervise(monkeypatch):
     """回归：WebUI 点「断开」后，监督循环不得把这个 auto_connect 账号连回来。"""
-    bots = [{"ws_url": WS_URL, "owner_id": None, "auto_connect": True}]
+    bots = [{"id": "main", "name": "主号", "ws_url": WS_URL, "owner_id": None, "auto_connect": True}]
     gw, conn = _gateway(bots)
     svc = _service(gw, bots)
-    connects: list[int] = []
+    connects: list[str] = []
     _fake_connect_recorder(gw, conn, connects)
 
-    await svc.disconnect(0)  # = POST /api/bots/0/disconnect
+    await svc.disconnect("main")  # = POST /api/bots/0/disconnect
     assert conn.status == "disconnected"
     assert conn.suppress_auto_reconnect is True, "手动断开应置位抑制标志"
 
@@ -135,19 +136,19 @@ async def test_manual_disconnect_survives_supervise(monkeypatch):
 
 async def test_unexpected_drop_still_auto_reconnects(monkeypatch):
     """反例保护：非手动（意外掉线）的连接仍必须被监督循环自动恢复。"""
-    bots = [{"ws_url": WS_URL, "owner_id": None, "auto_connect": True}]
+    bots = [{"id": "main", "name": "主号", "ws_url": WS_URL, "owner_id": None, "auto_connect": True}]
     gw, conn = _gateway(bots)
-    connects: list[int] = []
+    connects: list[str] = []
     _fake_connect_recorder(gw, conn, connects)
 
     conn.status = "error"  # _bot_server 异常路径，不经过 disconnect_bot
     await _supervise_ticks(gw, 1, monkeypatch)
-    assert connects == [0], "意外掉线的 auto_connect 账号应被自动重连"
+    assert connects == ["main"], "意外掉线的 auto_connect 账号应被自动重连"
 
 
 async def test_explicit_connect_clears_manual_disconnect(monkeypatch):
     """用户点「连接」后恢复自动重连语义（抑制只在手动断开到显式连接之间有效）。"""
-    bots = [{"ws_url": WS_URL, "owner_id": None, "auto_connect": True}]
+    bots = [{"id": "main", "name": "主号", "ws_url": WS_URL, "owner_id": None, "auto_connect": True}]
     gw, conn = _gateway(bots)
     svc = _service(gw, bots)
     ws = _StubWs()
@@ -157,14 +158,14 @@ async def test_explicit_connect_clears_manual_disconnect(monkeypatch):
 
     monkeypatch.setattr(gw, "_connect_websocket", fake_connect_ws)
 
-    await svc.disconnect(0)
+    await svc.disconnect("main")
     assert conn.suppress_auto_reconnect is True
 
-    assert await svc.connect(0) is True
+    assert await svc.connect("main") is True
     assert conn.status == "connected"
     assert conn.suppress_auto_reconnect is False, "显式连接应解除手动断开抑制"
 
-    await gw.disconnect_bot(0)
+    await gw.disconnect_bot("main")
     for task in list(gw.bot_server_tasks.values()):
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -173,11 +174,11 @@ async def test_explicit_connect_clears_manual_disconnect(monkeypatch):
 
 async def test_reopen_auto_connect_switch_clears_suppression():
     """配置页把「自动连接」从关注到开 → 视为明确要它在线，解除抑制。"""
-    bots = [{"ws_url": WS_URL, "owner_id": None, "auto_connect": True}]
+    bots = [{"id": "main", "name": "主号", "ws_url": WS_URL, "owner_id": None, "auto_connect": True}]
     gw, conn = _gateway(bots)
     svc = _service(gw, bots)
 
-    await svc.disconnect(0)
+    await svc.disconnect("main")
     assert conn.suppress_auto_reconnect is True
 
     bots[0]["auto_connect"] = False  # 关掉开关：只改配置，不解除抑制
@@ -193,7 +194,7 @@ async def test_reopen_auto_connect_switch_clears_suppression():
 
 async def test_disconnect_cancels_inflight_connect(monkeypatch):
     """回归：握手期间点「断开」，在途连接必须被取消，不得覆盖断开状态。"""
-    bots = [{"ws_url": WS_URL, "owner_id": None, "auto_connect": False}]
+    bots = [{"id": "main", "name": "主号", "ws_url": WS_URL, "owner_id": None, "auto_connect": False}]
     gw, conn = _gateway(bots)
     started = asyncio.Event()
     release = asyncio.Event()
@@ -206,12 +207,12 @@ async def test_disconnect_cancels_inflight_connect(monkeypatch):
 
     monkeypatch.setattr(gw, "_connect_websocket", slow_connect)
 
-    task = asyncio.create_task(gw.connect_bot(0))
+    task = asyncio.create_task(gw.connect_bot("main"))
     try:
         await asyncio.wait_for(started.wait(), 2)
         assert conn.status == "connecting"
 
-        await gw.disconnect_bot(0)  # 正在握手时点「断开」
+        await gw.disconnect_bot("main")  # 正在握手时点「断开」
         assert conn.status == "disconnected"
 
         release.set()

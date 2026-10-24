@@ -220,7 +220,7 @@ SEAMS: tuple[Seam, ...] = (
 
     # ── 驱动 ────────────────────────────────────────────────────
     Seam("S41", "驱动", "消息触发", FULL, "app/plugin/nodes/inbound.py:169",
-         evidence=("tests/plugin/test_dispatcher.py::test_bot_id_filter",)),
+         evidence=("tests/plugin/test_dispatcher.py::test_account_id_filter",)),
     Seam("S42", "驱动", "主动消息", UNWIRED, "app/agent/runtime.py:106",
          gap="R1/R2：`runtime.proactive` 在 `__init__` 硬 new，`pipeline.py:567` 硬调"),
     Seam("S43", "驱动", "定时任务（框架服务）", FULL, "app/application/cron_service.py:SchedulerService",
