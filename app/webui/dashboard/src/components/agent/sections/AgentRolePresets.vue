@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 「角色设定」分区的定制 UI：从人格预设中挑选并应用。
+ * 「人格设定」分区的定制 UI：提示词方案三选一 + 从人格预设中挑选并应用。
  * system_prompt / persona_preset_id 等字段由 AgentConfigSection 渲染。
  */
 import { computed, onMounted, ref } from 'vue'
@@ -18,6 +18,36 @@ interface RolePreset {
   updated_at: number
 }
 
+/**
+ * 提示词方案（三选一）。
+ *
+ * 唯一真相是后端 `app/agent/assembly/presets.py::PRESETS`（那里有全文），这里只放
+ * 展示用的标签与图标——`key` 必须与后端逐字一致，否则选了等于没选（后端按未知值忽略）。
+ */
+const PROMPT_PRESETS = [
+  {
+    key: 'chat',
+    label: '聊天',
+    icon: 'mdi-chat-outline',
+    color: 'info',
+    desc: '混在群里的普通群友：短句、选择性接话、不端着',
+  },
+  {
+    key: 'roleplay',
+    label: '角色扮演',
+    icon: 'mdi-drama-masks',
+    color: 'purple',
+    desc: '以人格设定里的身份持续扮演：有人物感、不跳出',
+  },
+  {
+    key: 'assistant',
+    label: '助手',
+    icon: 'mdi-robot-outline',
+    color: 'success',
+    desc: '服务型助手：有求必应、先给结论、结构化',
+  },
+]
+
 const agent = useAgentConfigStore()
 const notify = useNotifyStore()
 const router = useRouter()
@@ -26,6 +56,13 @@ const presets = ref<RolePreset[]>([])
 const loading = ref(false)
 const search = ref('')
 const selectedId = ref('')
+
+const currentPromptPreset = computed(() => String(agent.draft.prompt_preset || ''))
+
+function selectPromptPreset(key: string) {
+  // 再点一次同一张卡片 = 取消（回到"沿用内置文案"），省一个额外的取消按钮
+  agent.onChange('prompt_preset', currentPromptPreset.value === key ? '' : key)
+}
 
 const filteredPresets = computed(() => {
   const q = search.value.trim().toLowerCase()
@@ -77,6 +114,43 @@ onMounted(() => {
 </script>
 
 <template>
+  <v-card variant="outlined" class="mb-4">
+    <v-card-title class="d-flex align-center">
+      <v-icon icon="mdi-text-box-check-outline" class="mr-2" color="primary" /> 提示词方案
+      <v-spacer />
+      <v-chip v-if="currentPromptPreset" size="small" color="primary" variant="tonal">
+        {{ PROMPT_PRESETS.find((p) => p.key === currentPromptPreset)?.label || currentPromptPreset }}
+      </v-chip>
+      <v-chip v-else size="small" variant="tonal">沿用内置文案</v-chip>
+    </v-card-title>
+    <v-card-text class="pb-0 text-caption" style="opacity: 0.7">
+      只替换框架生成的系统提示词，人格设定不受影响；再点一次已选卡片可取消。
+    </v-card-text>
+    <!-- 三张卡片放在 v-card-text 之外：卡片文案闸门限制 v-card-text 内不超过 40 汉字，
+         而三张卡片的说明要各自完整，不能被拼成一段一起算长度。 -->
+    <v-row dense class="pa-4 pt-2">
+      <v-col v-for="p in PROMPT_PRESETS" :key="p.key" cols="12" md="4">
+        <v-card
+          :variant="currentPromptPreset === p.key ? 'tonal' : 'outlined'"
+          :color="currentPromptPreset === p.key ? p.color : undefined"
+          class="h-100 preset-card"
+          @click="selectPromptPreset(p.key)"
+        >
+          <v-card-item>
+            <template #prepend>
+              <v-icon :icon="p.icon" :color="currentPromptPreset === p.key ? p.color : undefined" />
+            </template>
+            <v-card-title class="text-body-1">{{ p.label }}</v-card-title>
+            <v-card-subtitle class="text-caption">{{ p.desc }}</v-card-subtitle>
+            <template #append>
+              <v-icon v-if="currentPromptPreset === p.key" icon="mdi-check-circle" :color="p.color" />
+            </template>
+          </v-card-item>
+        </v-card>
+      </v-col>
+    </v-row>
+  </v-card>
+
   <v-row class="mt-2">
     <v-col cols="12" md="4">
       <v-card variant="outlined" class="h-full">
@@ -184,6 +258,13 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.preset-card {
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+.preset-card:hover {
+  transform: translateY(-1px);
+}
 .prompt-preview {
   white-space: pre-wrap;
   font-size: 13px;
