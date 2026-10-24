@@ -302,9 +302,15 @@ def cache_key(
     }
 
 
+def cache_path() -> Path:
+    """缓存文件位置：默认 `data/.launcher-cache.json`，可用环境变量覆盖（测试用）。"""
+    override = os.environ.get("QQBOT_LAUNCHER_CACHE", "").strip()
+    return Path(override) if override else CACHE_PATH
+
+
 def load_cache(path: Path | None = None) -> dict | None:
     """读缓存；格式不对/不存在返回 None。"""
-    target = path or CACHE_PATH
+    target = path or cache_path()
     try:
         data = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -314,7 +320,7 @@ def load_cache(path: Path | None = None) -> dict | None:
 
 def save_cache(record: dict, path: Path | None = None) -> bool:
     """写缓存（失败不致命：下次全量检查而已）。"""
-    target = path or CACHE_PATH
+    target = path or cache_path()
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         payload = {**record, "checked_at": time.time()}
@@ -327,7 +333,7 @@ def save_cache(record: dict, path: Path | None = None) -> bool:
 def clear_cache(path: Path | None = None) -> None:
     """删缓存（--recreate / 环境不可用时用）。"""
     try:
-        (path or CACHE_PATH).unlink()
+        (path or cache_path()).unlink()
     except OSError:
         pass
 

@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     webui_host: str = "127.0.0.1"
     webui_port: int = 9200
     webui_token: str = ""
+    #: 启动后自动用浏览器打开 WebUI（本地启动脚本把它置 true）。
+    #: 打开的是带 `?accesstoken=` 的一键登录链接，进入后立刻换成会话 cookie。
+    webui_auto_open: bool = False
 
     # 数据 / 日志
     db_path: Path = Field(default=ROOT_DIR / "data" / "app.db")

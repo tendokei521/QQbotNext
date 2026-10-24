@@ -272,7 +272,7 @@ def _install_login_routes(app: FastAPI, container) -> None:
 
         login_rate_limiter.reset(source)
         webui_logger.info(f"[WebUI] 登录成功，来源 {source}")
-        return _set_session(RedirectResponse(target, status_code=303), token, request)
+        return _set_session_cookie(RedirectResponse(target, status_code=303), token, request)
 
     @app.api_route("/logout", methods=["GET", "POST"])
     async def logout(request: Request):
@@ -288,7 +288,7 @@ def _install_login_routes(app: FastAPI, container) -> None:
             "authenticated": is_authenticated(
                 expected_token=token,
                 authorization=request.headers.get("authorization", ""),
-                query_token=request.query_params.get("token", ""),
+                query_token=query_token_from(request.query_params),
                 session_cookie=request.cookies.get(SESSION_COOKIE),
             ),
             "auth_enabled": bool(token),

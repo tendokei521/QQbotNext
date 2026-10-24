@@ -27,6 +27,7 @@ import re
 import secrets
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import quote
 
 from app.core.settings import ROOT_DIR, Settings
 
@@ -130,10 +131,24 @@ def ensure_webui_token(settings: Settings, env_path: Path | None = None) -> Toke
     return TokenState(token=token, generated=True, persisted=persisted, env_path=target)
 
 
+def local_url(host: str, port: int) -> str:
+    """给用户点/打开的地址：`0.0.0.0`、`::` 这类监听地址无法直接访问，回落到回环地址。"""
+    shown_host = "127.0.0.1" if host in ("", "0.0.0.0", "::") else host
+    return f"http://{shown_host}:{port}"
+
+
+def access_url(host: str, port: int, token: str) -> str:
+    """带令牌的一键登录地址。
+
+    服务端收到 `?accesstoken=` 且校验通过后，会换成 HttpOnly 会话 cookie 并
+    303 重定向到不含令牌的干净地址（见 `webui/auth.py` 与 `webui/app.py`），
+    所以令牌不会留在地址栏里。
+    """
+    return f"{local_url(host, port)}/?accesstoken={quote(token, safe='')}"
+
+
 def print_webui_token_banner(state: TokenState, host: str, port: int) -> None:
     """把访问令牌打到**控制台**（stdout），刻意不走 logger、不落日志文件。"""
-    # 0.0.0.0 / :: 无法用来访问，给出本机回环地址更实用
-    shown_host = "127.0.0.1" if host in ("", "0.0.0.0", "::") else host
     bar = "=" * 68
     lines = ["", bar]
     if state.generated:
@@ -144,8 +159,8 @@ def print_webui_token_banner(state: TokenState, host: str, port: int) -> None:
         "",
         f"    {state.token}",
         "",
-        f"    地址: http://{shown_host}:{port}/",
-        "    登录: 浏览器弹出登录框时，用户名随意填、密码填上面这串令牌",
+        f"    地址: {local_url(host, port)}/",
+        f"    一键登录: {access_url(host, port, state.token)}",
     ]
     if state.generated:
         if state.persisted:

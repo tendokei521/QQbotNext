@@ -414,6 +414,10 @@ async def run(settings: Settings | None = None) -> None:
     print_webui_token_banner(token_state, host, port)
     server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="info", access_log=False))
 
+    if settings.webui_auto_open:
+        # 等 uvicorn 真正开始监听再开浏览器，否则会撞上「连接被拒绝」
+        asyncio.create_task(_open_browser_when_ready(server, access_url(host, port, token_state.token)))
+
     try:
         await server.serve()
     finally:
