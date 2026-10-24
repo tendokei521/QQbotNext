@@ -54,6 +54,19 @@ def test_ws_accepts_query_token(client):
         assert ws.receive_text() is not None
 
 
+def test_ws_accepts_accesstoken_query(client):
+    """`?accesstoken=` 是 `?token=` 的等价别名。"""
+    with client.websocket_connect(f"/ws/logs?accesstoken={TOKEN}") as ws:
+        assert ws.receive_text() is not None
+
+
+def test_ws_rejects_wrong_accesstoken(client):
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with client.websocket_connect("/ws/logs?accesstoken=nope") as ws:
+            ws.receive_text()
+    assert exc.value.code == 4401
+
+
 def test_ws_rejects_wrong_cookie(client):
     client.cookies.set(SESSION_COOKIE, issue_session("other-token"))
     with pytest.raises(WebSocketDisconnect) as exc:

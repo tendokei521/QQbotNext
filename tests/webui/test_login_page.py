@@ -261,6 +261,74 @@ def test_login_rate_limit_blocks_bruteforce(client):
         login_rate_limiter.clear()
 
 
+# --------------------------------------------------------------------------- #
+# 4b. `?accesstoken=` 一键登录（与 `?token=` 等价）
+# --------------------------------------------------------------------------- #
+def test_accesstoken_grants_api_access(client):
+    assert client.get(f"/api/bots?accesstoken={TOKEN}").status_code == 200
+
+
+def test_accesstoken_rejected_when_wrong(client):
+    assert client.get("/api/bots?accesstoken=nope").status_code == 401
+
+
+def test_page_with_accesstoken_sets_cookie_and_strips_token(client):
+    """一键登录：换成会话 cookie，并 303 到不含令牌的干净地址。"""
+    resp = client.get(f"/?accesstoken={TOKEN}", headers={"accept": "text/html"})
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/", "令牌必须从地址栏摘掉"
+    assert SESSION_COOKIE in resp.headers.get("set-cookie", "")
+    # 之后靠 cookie 直接可用
+    assert client.get("/", headers={"accept": "text/html"}).status_code == 200
+
+
+def test_accesstoken_redirect_keeps_other_query_params(client):
+    """摘令牌只摘令牌键，其它参数（如 ws 模式）要原样保留。"""
+    resp = client.get(f"/?accesstoken={TOKEN}&mode=raw", headers={"accept": "text/html"})
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/?mode=raw"
+
+
+def test_wrong_accesstoken_on_page_falls_back_to_login(client):
+    resp = client.get("/?accesstoken=wrong", headers={"accept": "text/html"})
+    assert resp.status_code == 302
+    assert resp.headers["location"].startswith("/login?next=")
+    # 不能因为给了个错令牌就下发会话
+    assert SESSION_COOKIE not in resp.headers.get("set-cookie", "")
+    # next 里也不该回显那个错令牌
+    assert "wrong" not in resp.headers["location"]
+
+
+def test_login_page_accepts_accesstoken_query(client):
+    """/login?accesstoken=… 直接登录（登录页是公开路径，中间件不会替它换 cookie）。"""
+    resp = client.get(f"/login?accesstoken={TOKEN}&next=%2Fbots")
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/bots"
+    assert SESSION_COOKIE in resp.headers.get("set-cookie", "")
+
+
+def test_stale_accesstoken_does_not_refresh_session(client):
+    """已登录用户带着写错的令牌访问页面：只摘令牌，不重发 cookie。"""
+    client.get(f"/?accesstoken={TOKEN}", headers={"accept": "text/html"})
+    resp = client.get("/?accesstoken=wrong", headers={"accept": "text/html"})
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/"
+    assert SESSION_COOKIE not in resp.headers.get("set-cookie", "")
+
+
+def test_api_with_accesstoken_is_never_redirected(client):
+    """XHR 拿到 303 会被当成「成功」，所以 API 请求绝不能走一键登录跳转。"""
+    resp = client.get(f"/api/bots?accesstoken={TOKEN}")
+    assert resp.status_code == 200
+    assert "location" not in resp.headers
+
+
+def test_img_like_request_with_accesstoken_not_redirected(client):
+    """<img> 之类非 HTML 请求不能被 303 成 JSON/页面。"""
+    resp = client.get(f"/api/media/none?accesstoken={TOKEN}", headers={"accept": "image/*"})
+    assert resp.status_code != 303
+
+
 def test_legacy_bearer_and_query_still_work(client):
     assert client.get("/api/bots", headers={"Authorization": f"Bearer {TOKEN}"}).status_code == 200
     assert client.get(f"/api/bots?token={TOKEN}").status_code == 200

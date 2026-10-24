@@ -490,9 +490,12 @@ def _install_auth_middleware(app: FastAPI, container) -> None:
             if query_token and request.method == "GET" and _wants_html(request):
                 clean = _url_without_token_query(request)
                 if clean != f"{request.url.path}?{request.url.query}":
-                    return _set_session_cookie(
-                        RedirectResponse(clean, status_code=303), token, request
-                    )
+                    response = RedirectResponse(clean, status_code=303)
+                    # 只有「查询令牌本身有效」才刷新会话；已登录用户带着一个
+                    # 过期/写错的令牌访问页面时，只把令牌从地址栏摘掉即可。
+                    if tokens_match(query_token, token):
+                        _set_session_cookie(response, token, request)
+                    return response
             return await call_next(request)
 
         if path.startswith("/api"):
