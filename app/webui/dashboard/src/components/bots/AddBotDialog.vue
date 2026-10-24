@@ -7,12 +7,16 @@ import { errorMessage } from '@/api/http'
 /**
  * 新增账号：先选连接方式，再创建。
  *
- * 文案一律用大白话：用户脑子里想的是「让我的机器人接进来」还是「我去连它」，
- * 不是「正向/反向 WebSocket」「OneBot 实现」这些词。产品名（NapCat / Lagrange）
- * 保留，因为那正是用户手上那个东西的名字。
+ * 文案只描述**本程序**做什么，不提具体对端产品（NapCat / Lagrange / OneBot 实现）：
+ * 那是用户自己的另一端，本程序不该假设它是什么。
+ *
+ * - 选项名 = 本程序在这个模式下扮演的角色（WS服务端 / WS客户端）；
+ * - 一行说明 = 本程序实际行为，括号里附 OneBot 的官方方向名（reverse-ws / forward-ws），
+ *   方便用户对照别人的教程；
+ * - 细节（地址该填什么形）折叠在 `?` tooltip 里，不占版面。
  *
  * 为什么不直接插一张空卡片：空卡片的地址是空的，用户点「连接」才看到「连接失败」，
- * 而且等待对方连进来的账号还需要用户自己知道要填端口和 `/onebot/v11/ws` 路径。
+ * 而且监听那一侧还需要用户自己知道要填端口和 `/onebot/v11/ws` 路径。
  * 先把两条路摆出来选一次，创建时后端按模式给好默认地址，新卡片一出生就能用。
  */
 const props = defineProps<{ modelValue: boolean }>()
@@ -34,27 +38,27 @@ interface ModeOption {
   recommended?: boolean
 }
 
-// 名称沿用 NapCat 配置页的叫法（WS客户端 / WS服务端），括号里附 OneBot 的官方方向名，
-// 这样用户拿着别人的教程能对上号。卡片只放短名 + 一行说明，细节进 ? tooltip。
+// 名字 = 本程序在这个模式下扮演的角色；文案 = 本程序实际干什么。
+// 括号里是 OneBot 的官方方向名，方便对照别人的教程。
 const OPTIONS: ModeOption[] = [
   {
     value: 'reverse',
     icon: 'mdi-call-received',
-    title: 'WS客户端',
-    desc: '主动连接到外部 WebSocket 服务器（reverse-ws）',
+    title: 'WS服务端',
+    desc: '本地监听 WebSocket 端口，客户端建立持久连接',
     tip:
-      '本程序在本地开一个监听端口；把账号卡片上的地址填进 NapCat 的「WebSocket 客户端」，' +
-      '它就会主动连过来（OneBot 里叫 reverse-ws）。两边在同一台电脑上时最省事。',
+      '本程序在本地监听一个端口，等对端作为客户端连进来（OneBot 里叫 reverse-ws）。' +
+      '地址填本机的监听地址，形如 ws://0.0.0.0:3001/onebot/v11/ws。',
     recommended: true,
   },
   {
     value: 'forward',
     icon: 'mdi-call-made',
-    title: 'WS服务端',
-    desc: '本地监听 WebSocket 端口，客户端建立持久连接',
+    title: 'WS客户端',
+    desc: '主动连接到外部 WebSocket 服务器（forward-ws）',
     tip:
-      '先在 NapCat 里开「WebSocket 服务端」，把它的监听地址（形如 ws://127.0.0.1:3001/）' +
-      '填进账号卡片，本程序作为客户端主动连过去（OneBot 里叫 forward-ws）。',
+      '本程序作为客户端主动连出去（OneBot 里叫 forward-ws）。需要先有一个 WebSocket 服务端，' +
+      '把它的地址填进来，形如 ws://127.0.0.1:3001/。',
   },
 ]
 

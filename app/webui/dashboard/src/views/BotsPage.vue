@@ -240,7 +240,7 @@ onUnmounted(() => {
                 <v-icon start size="x-small" icon="mdi-circle" /> {{ statusText(b) }}
               </v-chip>
               <v-chip v-if="draftOf(b.id).conn_mode === 'reverse'" size="x-small" variant="outlined">
-                反向
+                WS服务端
               </v-chip>
               <span v-if="resolveAccount(b)?.nickname" class="text-caption app-line-clamp-1">
                 {{ resolveAccount(b)!.nickname }}<template v-if="Number(resolveAccount(b)!.user_id) > 0"> ({{ resolveAccount(b)!.user_id }})</template>
@@ -264,7 +264,7 @@ onUnmounted(() => {
             />
             <v-text-field
               :model-value="draftOf(b.id).ws_url"
-              :label="draftOf(b.id).conn_mode === 'reverse' ? '反向监听地址' : 'WebSocket 地址'"
+              :label="draftOf(b.id).conn_mode === 'reverse' ? '监听地址' : 'WebSocket 地址'"
               :placeholder="draftOf(b.id).conn_mode === 'reverse' ? 'ws://0.0.0.0:3001/onebot/v11/ws' : 'ws://127.0.0.1:3001/'"
               density="comfortable"
               hide-details="auto"
