@@ -12,6 +12,20 @@ from abc import ABC, abstractmethod
 from app.domain.message import SegmentLike
 
 
+def bot_label(bot: object, fallback: str = "?") -> str:
+    """鸭子类型安全的**展示名**（日志前缀/提示文案用）。
+
+    网关与日志层不该假设拿到的一定是 ``BotConnection``：第三方适配器、测试替身
+    都可能只实现 ``IBot`` 的一部分。所以这里逐级回退：``label`` → ``account_name``
+    → ``account_id`` → fallback。
+    """
+    for attr in ("label", "account_name", "account_id"):
+        value = getattr(bot, attr, None)
+        if value:
+            return str(value)
+    return fallback
+
+
 class IBot(ABC):
     """一个已连接的机器人账号。"""
 
@@ -25,6 +39,15 @@ class IBot(ABC):
     #: 本账号当前登录的 QQ 号：**运行时信息**，登录后才有，不是身份、不当 key。
     bot_id: int | None = None
     owner_id: int | None = None
+
+    @property
+    def label(self) -> str:
+        """日志前缀用的展示名：账号名优先，退回账号 id。
+
+        放在基类上是为了让**任何** IBot 实现（含测试替身、第三方适配器）都能被
+        网关/日志层安全地拿来当人类可读标识，而不必各自实现一遍。
+        """
+        return self.account_name or self.account_id or "?"
     ws_url: str = ""
     status: str = "disconnected"
     auto_connect: bool = False

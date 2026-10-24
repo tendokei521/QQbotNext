@@ -27,13 +27,14 @@ import functools
 import time
 from typing import Any
 
+from app.domain.bot import bot_label
 from app.infrastructure.config.config_service import mask_ws_url
 from app.infrastructure.onebot.reverse import CLOSE_REPLACED, ReverseClient, ReverseWsServer
 
 
 def _label(conn: Any) -> str:
     """账号展示名（日志用）。"""
-    return getattr(conn, "label", None) or getattr(conn, "account_name", "") or "?"
+    return bot_label(conn)
 
 
 class ReverseLink:

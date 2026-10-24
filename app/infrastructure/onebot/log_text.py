@@ -25,7 +25,9 @@ from app.infrastructure.onebot.codec import event_name
 
 def _conn_label(conn) -> str:
     """日志里用的账号名（id 只做判断，日志一律打名字）。"""
-    return getattr(conn, "label", None) or getattr(conn, "account_name", "") or "?"
+    from app.domain.bot import bot_label
+
+    return bot_label(conn)
 
 
 def _message_log_text(event: MessageEvent) -> str:

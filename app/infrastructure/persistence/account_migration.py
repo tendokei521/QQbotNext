@@ -170,7 +170,8 @@ async def migrate_account_identity(db) -> None:
     for table in ("module_config", "module_authority"):
         try:
             keys = await db.fetchall(f"SELECT DISTINCT bot_id FROM {table} WHERE bot_id IS NOT NULL")
-        except Exception:
+        except Exception as e:  # noqa: BLE001 —— 极老的库可能缺这张表，跳过但必须留痕
+            logger.warning(f"[DB] 迁移时读取 {table} 失败，该表 key 未改写（不影响账号本身）: {e}")
             continue
         for row in keys:
             old_key = str(row["bot_id"])
