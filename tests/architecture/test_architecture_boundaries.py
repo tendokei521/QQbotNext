@@ -197,7 +197,7 @@ def test_infrastructure_does_not_import_upper_layers():
 def test_no_production_imports_from_bootstrap():
     """`app.bootstrap` 是装配根，谁都不准依赖它——否则装配顺序就成了隐式契约。"""
     offenders: list[tuple[str, str]] = []
-    for path in _iter_py("app", "module"):
+    for path in _iter_py("app"):
         for target in _import_targets(path, module_level_only=False):
             if target == "app.bootstrap":
                 offenders.append((_rel(path), "from app.bootstrap import ..."))
@@ -214,7 +214,7 @@ def test_no_production_imports_from_bootstrap():
 def test_get_container_calls_within_budget():
     """服务定位器是债：每调一次，这个文件就焊进了整个 Agent 实现。"""
     offenders: list[tuple[str, str]] = []
-    for path in _iter_py("app", "module"):
+    for path in _iter_py("app"):
         n = _count_get_container_calls(path)
         if n:
             offenders.extend([(_rel(path), f"get_container() ×{n}")] * n)

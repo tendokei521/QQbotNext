@@ -91,7 +91,7 @@ def test_module_dir_pointing_at_legacy_dir_is_skipped(tmp_path):
 
 def test_merge_does_not_duplicate_existing_dirs(tmp_path):
     """目标已有同名目录：往里合并，而不是整目录顶掉。"""
-    legacy = _legacy_tree(tmp_path)
+    _legacy_tree(tmp_path)
     target = tmp_path / "data" / "module"
     (target / "data" / "group_log" / "9").mkdir(parents=True)
     (target / "data" / "group_log" / "9" / "keep.jsonl").write_text("x\n", encoding="utf-8")

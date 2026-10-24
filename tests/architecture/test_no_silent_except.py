@@ -18,7 +18,7 @@ import pytest
 
 # 仓库根目录（tests/ 的上一级）
 _ROOT = pathlib.Path(__file__).resolve().parents[2]
-_SCAN_DIRS = ("app", "module")
+_SCAN_DIRS = ("app",)
 
 # 允许静默的位置白名单：文件相对路径 -> 行号集合
 # 说明：app/plugins/llm_knowledge/vector.py 的 _log_debug 是"日志失败的兜底"，

@@ -112,6 +112,24 @@ async def test_migrate_from_legacy(project_root, settings):
     await db.close()
 
 
+async def test_migrate_from_legacy_module_layout(tmp_path, settings):
+    """老布局 `<root>/module/configs/` 仍要能导入（升级用户第一次启动时可能还没搬完）。"""
+    root = tmp_path / "old_layout"
+    (root / "module" / "configs" / "demo").mkdir(parents=True)
+    (root / "module" / "configs" / "demo" / "config.json").write_text(
+        '{"12345": {"key1": "old"}}', encoding="utf-8"
+    )
+
+    db = Database(settings.db_path)
+    await db.connect()
+    cfg = ConfigService(db, root)
+    await cfg.init()
+
+    assert cfg.get_module_config("demo", 12345) == {"key1": "old"}
+
+    await db.close()
+
+
 async def test_save_and_load_bots(config_service):
     """保存按 id upsert；顺序由 payload 决定（id 不可变，不能靠下标表达顺序）。"""
     await config_service.save_bots([

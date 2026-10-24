@@ -23,7 +23,7 @@ from app.core.webui_token import ensure_env_file, ensure_webui_token
 def _settings(tmp_path: Path, token: str = "") -> Settings:
     return Settings(
         db_path=str(tmp_path / "test.db"),
-        module_dir=str(tmp_path / "module"),
+        module_dir=str(tmp_path / "data" / "module"),
         log_dir=str(tmp_path / "logs"),
         webui_token=token,
     )

@@ -37,7 +37,7 @@ def _isolate_llm_data(tmp_path, monkeypatch):
 def settings(tmp_path):
     return Settings(
         db_path=str(tmp_path / "test.db"),
-        module_dir=str(tmp_path / "module"),
+        module_dir=str(tmp_path / "data" / "module"),
         log_dir=str(tmp_path / "logs"),
         webui_port=19999,
         # 显式清空鉴权 token：覆盖 .env/环境变量，保证测试不因用户本地配置 401
@@ -47,11 +47,15 @@ def settings(tmp_path):
 
 @pytest.fixture
 def project_root(tmp_path):
-    """构造一个带 legacy JSON 配置的临时项目根目录。"""
+    """构造一个带 legacy JSON 配置的临时项目根目录。
+
+    模块配置放在**当前**布局 `data/module/configs/` 下（旧布局 `module/configs/`
+    的兼容读取由 `test_config_service.py` 单独守）。
+    """
     root = tmp_path / "project"
     (root / "webserver").mkdir(parents=True)
     (root / "webui").mkdir(parents=True)
-    (root / "module" / "configs" / "demo").mkdir(parents=True)
+    (root / "data" / "module" / "configs" / "demo").mkdir(parents=True)
     (root / "webserver" / "webconfig.json").write_text(
         '{"bots": [{"ws_url": "ws://127.0.0.1:1", "owner_id": 10001, "auto_connect": false}]}',
         encoding="utf-8",
@@ -60,10 +64,10 @@ def project_root(tmp_path):
         '{"logs": {"visible_levels": ["info"], "max_lines": 10}, "single_service": {}}',
         encoding="utf-8",
     )
-    (root / "module" / "configs" / "demo" / "config.json").write_text(
+    (root / "data" / "module" / "configs" / "demo" / "config.json").write_text(
         '{"12345": {"key1": "v1", "num": 42}}', encoding="utf-8"
     )
-    (root / "module" / "configs" / "demo" / "authority.json").write_text(
+    (root / "data" / "module" / "configs" / "demo" / "authority.json").write_text(
         '{"12345": {"enabled": true, "group_mode": "whitelist", "group_list": ["1"], '
         '"user_mode": "blacklist", "user_list": []}}',
         encoding="utf-8",

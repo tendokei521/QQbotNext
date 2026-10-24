@@ -511,7 +511,7 @@ async def test_plugin_loads_in_real_registry(container):
     repo_root = Path(__file__).resolve().parents[2]
     registry = ModuleRegistry(
         plugins_dir=repo_root / "app" / "plugins",  # 业务插件代码
-        zip_plugins_dir=repo_root / "module" / "plugins",  # 外部 zip 安装
+        zip_plugins_dir=repo_root / "data" / "module" / "plugins",  # 外部 zip 安装
         config_service=container.get(ConfigService),
         services=container.get(ServiceAccess),
     )
