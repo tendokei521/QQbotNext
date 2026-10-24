@@ -146,7 +146,6 @@ def test_rate_limiter_window_expires():
 @pytest.fixture
 def client(tmp_path):
     settings = Settings(
-        debug=True,
         db_path=str(tmp_path / "t.db"),
         module_dir=str(tmp_path / "module"),
         log_dir=str(tmp_path / "logs"),
@@ -365,7 +364,6 @@ def test_static_asset_401_not_redirected(client):
 # --------------------------------------------------------------------------- #
 def test_no_token_means_no_auth(tmp_path):
     settings = Settings(
-        debug=True,
         db_path=str(tmp_path / "t2.db"),
         module_dir=str(tmp_path / "module2"),
         log_dir=str(tmp_path / "logs2"),

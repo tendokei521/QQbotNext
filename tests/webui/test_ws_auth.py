@@ -19,7 +19,6 @@ TOKEN = "ws-test-token-abcdef"
 @pytest.fixture
 def client(tmp_path):
     settings = Settings(
-        debug=True,
         db_path=str(tmp_path / "t.db"),
         module_dir=str(tmp_path / "module"),
         log_dir=str(tmp_path / "logs"),
@@ -77,7 +76,6 @@ def test_ws_rejects_wrong_cookie(client):
 
 def test_ws_open_when_auth_disabled(tmp_path):
     settings = Settings(
-        debug=True,
         db_path=str(tmp_path / "t2.db"),
         module_dir=str(tmp_path / "module2"),
         log_dir=str(tmp_path / "logs2"),

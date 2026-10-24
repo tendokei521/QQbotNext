@@ -12,16 +12,21 @@ ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 
 
 class Settings(BaseSettings):
-    """应用全局配置。从 .env / 环境变量读取（变量名 = 字段名大写，如 WEBUI_HOST，见 .env.example）。"""
+    """应用全局配置。从 .env / 环境变量读取（变量名 = 字段名大写，如 WEBUI_HOST，见 `.env.example`）。
+
+    字段清单与 `.env` 键一一对应，唯一来源是 `app/core/env_template.py`：
+    加字段必须同时在那张表里登记，否则 `tests/core/test_env_template.py` 会红。
+
+    历史包袱：`debug` / `scheduler_interval` 两个字段**从未被任何代码读取**
+    （日志级别写死在 `app/core/logger.py`，定时任务按 job 自己的时间点 sleep），
+    已随"首启生成完整 .env"一并删除，避免 `.env` 里堆着写了没用的开关。
+    """
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
-
-    # 运行模式
-    debug: bool = False
 
     # WebUI
     webui_host: str = "127.0.0.1"
@@ -39,9 +44,6 @@ class Settings(BaseSettings):
     ws_connect_timeout: int = 30
     ws_ping_interval: int = 30
     ws_ping_timeout: int = 10
-
-    # 调度器
-    scheduler_interval: int = 30
 
     # 插件**运行时数据**根目录（configs / data / plugins(zip) / uninstalled_modules.json）。
     # 业务插件的**代码**不在这里，见下面的 `plugins_dir`（默认 app/plugins）。

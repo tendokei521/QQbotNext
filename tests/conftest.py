@@ -36,7 +36,6 @@ def _isolate_llm_data(tmp_path, monkeypatch):
 @pytest.fixture
 def settings(tmp_path):
     return Settings(
-        debug=True,
         db_path=str(tmp_path / "test.db"),
         module_dir=str(tmp_path / "module"),
         log_dir=str(tmp_path / "logs"),

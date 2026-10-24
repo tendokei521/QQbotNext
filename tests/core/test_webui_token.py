@@ -20,7 +20,6 @@ from app.core.webui_token import (
 
 def _settings(tmp_path, token: str = "") -> Settings:
     return Settings(
-        debug=True,
         db_path=str(tmp_path / "test.db"),
         module_dir=str(tmp_path / "module"),
         log_dir=str(tmp_path / "logs"),

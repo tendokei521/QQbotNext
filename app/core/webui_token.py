@@ -1,4 +1,4 @@
-"""WebUI 访问令牌的自动生成与持久化。
+"""`.env` 的首次生成 + WebUI 访问令牌的自动生成与持久化。
 
 ## 为什么改成「空则自动生成」
 
@@ -9,6 +9,13 @@ OneBot 账号的 `access_token` 明文，以及能直接下发插件安装。
 
 现在改为「空则自动生成」：首次启动生成一个随机令牌写回 `.env`，重启后保持不变
 （写回文件而不是只放内存，否则每次重启都换新令牌，等于每次都要重新登录）。
+
+## 两个入口
+
+- `ensure_env_file`：启动时调用。**没有 `.env`** → 按 `app/core/env_template.py`
+  生成一份完整配置（所有键 + 注释 + 随机令牌）；**已有 `.env`** → 只补空令牌，
+  其余内容一字不动。
+- `ensure_webui_token`：只管令牌（`.env` 已存在时的补写路径，也被上面的入口复用）。
 
 ## 两个硬性边界
 
@@ -29,6 +36,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
 
+from app.core.env_template import render_env
 from app.core.settings import ROOT_DIR, Settings
 
 #: 令牌熵字节数（`token_urlsafe(32)` → 43 个 URL 安全字符，约 256 bit）
@@ -51,6 +59,18 @@ class TokenState:
     env_path: Path
 
 
+@dataclass(frozen=True)
+class EnvState:
+    """一次「确保 `.env` 可用」的结果（`TokenState` + 是否新建了整个文件）。"""
+
+    token: str
+    generated: bool
+    persisted: bool
+    env_path: Path
+    #: 本次是否**新建**了完整 `.env`（首次启动）
+    created: bool = False
+
+
 def resolve_env_path(env_path: Path | None = None) -> Path:
     """定位 `.env`：优先当前工作目录（与 pydantic-settings 的 `env_file=".env"` 一致），
     回退到仓库根目录。
@@ -64,6 +84,22 @@ def resolve_env_path(env_path: Path | None = None) -> Path:
     if cwd_env.is_file():
         return cwd_env
     return ROOT_DIR / ".env"
+
+
+def _atomic_write(env_path: Path, text: str) -> None:
+    """先写同目录临时文件再 `os.replace`，避免写一半导致 `.env` 损坏。"""
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = env_path.parent / (env_path.name + ".tmp")
+    try:
+        tmp_path.write_bytes(text.encode("utf-8"))
+        os.replace(tmp_path, env_path)
+    finally:
+        # os.replace 成功后 tmp 已不存在；失败时清理残留，别把 .tmp 留在仓库里
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
 
 
 def _write_token(env_path: Path, token: str) -> None:
@@ -86,18 +122,52 @@ def _write_token(env_path: Path, token: str) -> None:
             raw += newline
         text = f"{raw}WEBUI_TOKEN={token}{newline}"
 
-    env_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = env_path.parent / (env_path.name + ".tmp")
+    _atomic_write(env_path, text)
+
+
+def ensure_env_file(settings: Settings, env_path: Path | None = None) -> EnvState:
+    """确保 `.env` 存在且令牌可用。
+
+    - **`.env` 不存在（首次启动）**：按 `app/core/env_template.py` 生成一份**完整**配置
+      ——所有被读取的键连同注释一起写进去，用户想调什么就直接改，不必再去对照
+      `.env.example` 一个个补；
+    - **`.env` 已存在**：只补空的 `WEBUI_TOKEN`，其余键与注释一律不动
+      （绝不覆盖用户手改过的值，也不擅自追加新键）。
+
+    写盘失败不抛异常（仓库目录只读等场景）：降级为「仅本进程内存生效」，由调用方提示。
+    """
+    target = resolve_env_path(env_path)
+    if target.is_file():
+        state = ensure_webui_token(settings, env_path=target)
+        return EnvState(
+            token=state.token,
+            generated=state.generated,
+            persisted=state.persisted,
+            env_path=state.env_path,
+            created=False,
+        )
+
+    token = (settings.webui_token or "").strip()
+    generated = False
+    if not token:
+        token = secrets.token_urlsafe(TOKEN_BYTES)
+        generated = True
+    # 环境变量优先于 .env：此时令牌不落盘（写进去也读不到），文件里该行留空
+    env_override = "WEBUI_TOKEN" in os.environ
     try:
-        tmp_path.write_bytes(text.encode("utf-8"))
-        os.replace(tmp_path, env_path)
-    finally:
-        # os.replace 成功后 tmp 已不存在；失败时清理残留，别把 .tmp 留在仓库里
-        if tmp_path.exists():
-            try:
-                tmp_path.unlink()
-            except OSError:
-                pass
+        _atomic_write(target, render_env(settings, token="" if env_override else token))
+        created = True
+    except OSError:
+        created = False
+    settings.webui_token = token
+    return EnvState(
+        token=token,
+        generated=generated,
+        # 「已固定」= 文件确实写成了、且令牌不是被环境变量覆盖的空串
+        persisted=created and not env_override,
+        env_path=target,
+        created=created,
+    )
 
 
 def ensure_webui_token(settings: Settings, env_path: Path | None = None) -> TokenState:
@@ -147,7 +217,7 @@ def access_url(host: str, port: int, token: str) -> str:
     return f"{local_url(host, port)}/?accesstoken={quote(token, safe='')}"
 
 
-def print_webui_token_banner(state: TokenState, host: str, port: int) -> None:
+def print_webui_token_banner(state: TokenState | EnvState, host: str, port: int) -> None:
     """把访问令牌打到**控制台**（stdout），刻意不走 logger、不落日志文件。"""
     bar = "=" * 68
     lines = ["", bar]
@@ -162,7 +232,9 @@ def print_webui_token_banner(state: TokenState, host: str, port: int) -> None:
         f"    地址: {local_url(host, port)}/",
         f"    一键登录: {access_url(host, port, state.token)}",
     ]
-    if state.generated:
+    if getattr(state, "created", False):
+        lines.append(f"    已生成配置: {state.env_path}（完整配置都在里面，改完重启生效）")
+    elif state.generated:
         if state.persisted:
             lines.append(f"    已写入: {state.env_path}（想换令牌就改这里，然后重启）")
         elif "WEBUI_TOKEN" in os.environ:

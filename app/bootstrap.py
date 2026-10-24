@@ -389,15 +389,16 @@ async def run(settings: Settings | None = None) -> None:
     settings = settings or load_settings()
     setup_logging(settings.log_dir)
 
-    # 令牌为空则自动生成并写回 .env（只在此处调用：测试直接 create_app，不该被鉴权拦）。
+    # `.env` 不存在则生成一份完整配置；存在则只补空令牌。只在此处调用：
+    # 测试直接 create_app，不该在测试里造出 .env / 被鉴权拦。
     # 就地更新 settings，后续 build_container 注册的就是这个已带令牌的实例。
     from app.core.webui_token import (
         access_url,
-        ensure_webui_token,
+        ensure_env_file,
         print_webui_token_banner,
     )
 
-    token_state = ensure_webui_token(settings)
+    token_state = ensure_env_file(settings)
 
     _container = build_container(settings)
     set_active(_container)
