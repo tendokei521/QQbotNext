@@ -209,6 +209,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                   <v-chip v-if="m.supersedes?.length" size="x-small" class="ml-1" color="warning" variant="tonal">
                     接管: {{ m.supersedes.join(', ') }}
                   </v-chip>
+                  <v-chip v-if="m.single_service" size="x-small" class="ml-1" color="purple" variant="tonal">
+                    单一服务
+                  </v-chip>
                 </v-card-title>
                 <v-card-subtitle class="app-line-clamp-2">{{ m.description }}</v-card-subtitle>
                 <template #append>
@@ -267,6 +270,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                   </v-chip>
                   <v-chip v-if="m.supersedes?.length" size="x-small" class="ml-1" color="warning" variant="tonal">
                     接管: {{ m.supersedes.join(', ') }}
+                  </v-chip>
+                  <v-chip v-if="m.single_service" size="x-small" class="ml-1" color="purple" variant="tonal">
+                    单一服务
                   </v-chip>
                 </v-card-title>
                 <v-card-subtitle class="app-line-clamp-2">{{ m.description }}</v-card-subtitle>

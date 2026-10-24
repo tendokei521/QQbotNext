@@ -73,7 +73,9 @@ export const useWebuiStore = defineStore('webui', () => {
 
   async function saveSingleService(single_service: Record<string, boolean>) {
     const res = await http.post('/api/webui/single-service', { single_service })
-    return unwrap(res.data)
+    // 后端只接受「声明支持单一服务」的模块，其余回在 rejected 里（前端据此提示）
+    const body = unwrap<{ message?: string; rejected?: string[] }>(res.data)
+    return { message: body?.message || '', rejected: body?.rejected || [] }
   }
 
   async function saveMultiGroup(multi_group: WebuiConfig['multi_group']) {

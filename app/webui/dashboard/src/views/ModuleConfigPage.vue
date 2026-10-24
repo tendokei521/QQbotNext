@@ -153,11 +153,14 @@ async function onToggleEnabled(v: boolean | null) {
 }
 
 // ---------- 单一服务 ----------
-const ssOn = computed(() => !!webui.config.single_service[name])
+// 声明制能力：只有后端回报 single_service=true 的模块才显示开关并请求相关数据
+const supportsSingleService = computed(() => !!mod.value?.single_service)
+const ssOn = computed(() => supportsSingleService.value && !!webui.config.single_service[name])
 const affectedGroups = ref<{ gid: string; name: string }[]>([])
 const groupsLoaded = ref(false)
 
 async function loadGroups() {
+  if (!supportsSingleService.value) return
   try {
     const res = await http.get<{
       bots_groups: Record<string, { account_id: string; name: string; bot_id: number | null; groups: number[]; groups_info: { group_id?: number; group_name?: string }[] }>
@@ -189,7 +192,11 @@ async function loadGroups() {
 
 async function onToggleSingleService(v: boolean | null) {
   try {
-    await webui.saveSingleService({ ...webui.config.single_service, [name]: !!v })
+    const res = await webui.saveSingleService({ ...webui.config.single_service, [name]: !!v })
+    if (res.rejected?.length) {
+      notify.push(`该模块未声明支持单一服务，已忽略：${res.rejected.join('、')}`, 'warning')
+      return
+    }
     notify.push(`单一服务模式已${v ? '启用' : '关闭'}`, 'success')
     if (v) loadGroups()
   } catch (err) {
@@ -198,7 +205,11 @@ async function onToggleSingleService(v: boolean | null) {
 }
 
 const showSingleServiceWarning = computed(
-  () => ssOn.value && groupsLoaded.value && affectedGroups.value.length > 0,
+  () =>
+    supportsSingleService.value &&
+    ssOn.value &&
+    groupsLoaded.value &&
+    affectedGroups.value.length > 0,
 )
 
 // ---------- 插件自定义页 ----------
@@ -303,8 +314,8 @@ onUnmounted(() => {
     </div>
     <div class="app-page-subtitle" style="padding-left: 44px">{{ mod.description }}</div>
 
-    <!-- 单一服务模式 -->
-    <v-card variant="outlined" class="mb-4">
+    <!-- 单一服务模式（仅声明支持该能力的模块显示） -->
+    <v-card v-if="supportsSingleService" variant="outlined" class="mb-4">
       <v-card-text class="d-flex align-center justify-space-between flex-wrap gap-2 py-3">
         <div class="d-flex align-center gap-2">
           <v-icon icon="mdi-server" color="purple" />

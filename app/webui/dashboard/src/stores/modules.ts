@@ -37,6 +37,8 @@ export interface ModuleData {
   can_uninstall: boolean
   provides?: string[]
   supersedes?: string[]
+  /** 是否声明支持单一服务模式（声明制能力：未声明则无开关、后端拒收） */
+  single_service?: boolean
 }
 
 export interface UninstalledModuleData {
