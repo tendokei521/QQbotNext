@@ -29,25 +29,32 @@ interface ModeOption {
   icon: string
   title: string
   desc: string
-  tips: string[]
+  /** tooltip 里的完整解释：说清「谁建立连接」，照着做就能连上 */
+  tip: string
   recommended?: boolean
 }
 
+// 文案刻意对齐 NapCat 客户端的说法：决定性的区别是「谁建立连接」。
+// 卡片上只放短名 + 一行说明，长解释进 tooltip —— 否则一个对话框里同一件事要说三遍。
 const OPTIONS: ModeOption[] = [
   {
     value: 'reverse',
-    icon: 'mdi-lan-connect',
-    title: '让机器人程序连过来',
-    desc: '本程序开一个入口，等 QQ 机器人程序连进来。',
-    tips: ['NapCat / Lagrange 等程序都支持', '两个程序装在同一台电脑上时最省事'],
+    icon: 'mdi-call-received',
+    title: '等它连进来',
+    desc: '本程序开端口，NapCat 连进来',
+    tip:
+      '「由本程序建立」一个监听端口。创建后把账号卡片上的地址填进 NapCat 的「WebSocket 客户端」，' +
+      'NapCat 就会主动连过来。两边在同一台电脑上时最省事。',
     recommended: true,
   },
   {
     value: 'forward',
-    icon: 'mdi-lan',
-    title: '本程序主动连过去',
-    desc: '你提供 QQ 机器人程序的地址，本程序自己连上去。',
-    tips: ['需要先在对方程序里打开 WebSocket 服务', '地址一般长这样：ws://127.0.0.1:3001/'],
+    icon: 'mdi-call-made',
+    title: '主动连过去',
+    desc: '先开 NapCat，本程序连过去',
+    tip:
+      '「由 NapCat 建立」一个 WebSocket 服务端。需要先在 NapCat 里开好服务端，' +
+      '再把它的地址（形如 ws://127.0.0.1:3001/）填进账号卡片。',
   },
 ]
 
@@ -59,7 +66,6 @@ const name = ref('')
 const accountId = ref('')
 
 const ACCOUNT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/
-const nameError = computed(() => '')
 const idError = computed(() => {
   const v = accountId.value.trim()
   if (!v) return '请填写账号 ID'
@@ -107,79 +113,85 @@ async function create() {
 </script>
 
 <template>
-  <v-dialog :model-value="props.modelValue" max-width="600" @update:model-value="(v: boolean) => emit('update:modelValue', v)">
+  <v-dialog
+    :model-value="props.modelValue"
+    max-width="560"
+    @update:model-value="(v: boolean) => emit('update:modelValue', v)"
+  >
     <v-card>
-      <v-card-title class="d-flex align-center">
-        <v-icon icon="mdi-plus-box-outline" class="mr-2" color="primary" /> 添加账号
-        <v-spacer />
-        <v-btn variant="text" icon="mdi-close" size="small" :disabled="creating" @click="close" />
-      </v-card-title>
-      <v-card-text>
-        <div class="text-body-2 mb-4">你想怎么把它接进来？选一种就行。</div>
-        <v-row dense>
-          <v-col v-for="opt in OPTIONS" :key="opt.value" cols="12" sm="6">
-            <v-card
-              :variant="selected === opt.value ? 'tonal' : 'outlined'"
-              :color="selected === opt.value ? 'primary' : undefined"
-              class="mode-card h-100"
-              @click="selected = opt.value"
-            >
-              <v-card-item>
-                <template #prepend>
-                  <v-icon :icon="opt.icon" size="26" />
-                </template>
-                <v-card-title class="text-body-1 font-weight-bold d-flex align-center gap-2">
-                  {{ opt.title }}
-                  <v-chip v-if="opt.recommended" size="x-small" variant="flat" color="primary">推荐</v-chip>
-                </v-card-title>
-              </v-card-item>
-              <v-card-text class="pt-0">
-                <div class="text-body-2">{{ opt.desc }}</div>
-                <ul class="mode-tips">
-                  <li v-for="tip in opt.tips" :key="tip">{{ tip }}</li>
-                </ul>
-              </v-card-text>
-            </v-card>
+      <v-card-title class="text-h5 pa-4 pb-0 pl-6">添加账号</v-card-title>
+      <v-card-text class="pa-4 pl-6">
+        <div class="text-body-2 text-medium-emphasis mb-3">选一种连接方式，创建后不能改。</div>
+
+        <div class="mode-list">
+          <v-card
+            v-for="opt in OPTIONS"
+            :key="opt.value"
+            variant="outlined"
+            hover
+            class="mode-card"
+            :class="{ 'mode-card--active': selected === opt.value }"
+            @click="selected = opt.value"
+          >
+            <v-icon :icon="opt.icon" size="22" class="mode-card__icon" />
+            <div class="mode-card__text">
+              <div class="mode-card__title">
+                {{ opt.title }}
+                <v-chip v-if="opt.recommended" size="x-small" variant="tonal" color="primary">推荐</v-chip>
+                <v-tooltip :text="opt.tip" location="bottom" max-width="320">
+                  <template #activator="{ props: tipProps }">
+                    <v-icon
+                      v-bind="tipProps"
+                      icon="mdi-help-circle-outline"
+                      size="15"
+                      class="mode-card__help"
+                      @click.stop
+                    />
+                  </template>
+                </v-tooltip>
+              </div>
+              <div class="mode-card__desc">{{ opt.desc }}</div>
+            </div>
+            <v-icon
+              v-if="selected === opt.value"
+              icon="mdi-check-circle"
+              color="primary"
+              size="18"
+              class="mode-card__check"
+            />
+          </v-card>
+        </div>
+
+        <v-row dense class="mt-2">
+          <v-col cols="12" sm="6">
+            <v-text-field
+              v-model="name"
+              label="名称"
+              placeholder="如：主号"
+              hint="随便起，只影响显示"
+              persistent-hint
+              density="comfortable"
+              hide-details="auto"
+              maxlength="32"
+            />
+          </v-col>
+          <v-col cols="12" sm="6">
+            <v-text-field
+              v-model="accountId"
+              label="账号 ID"
+              placeholder="bot1"
+              :error-messages="accountId ? idError : ''"
+              :hint="accountId ? '程序内部用它区分账号，创建后不能改' : ''"
+              persistent-hint
+              density="comfortable"
+              hide-details="auto"
+              autocomplete="off"
+              spellcheck="false"
+            />
           </v-col>
         </v-row>
-        <v-alert
-          v-if="selected === 'reverse'"
-          type="info"
-          variant="tonal"
-          density="compact"
-          class="mt-4"
-        >
-          创建后，把账号卡片上显示的地址原样填进 NapCat / Lagrange 的「反向 WebSocket」里，它就会连进来。
-        </v-alert>
-
-        <v-divider class="my-4" />
-        <v-text-field
-          v-model="name"
-          label="名称"
-          placeholder="给这个账号起个名字，比如「主号」"
-          density="comfortable"
-          hide-details="auto"
-          class="mb-3"
-          maxlength="32"
-          autofocus
-        />
-        <v-text-field
-          v-model="accountId"
-          label="账号 ID"
-          placeholder="bot1"
-          :error-messages="accountId ? idError : ''"
-          :hint="nameError || '程序内部用它区分账号，创建后不能修改'"
-          persistent-hint
-          density="comfortable"
-          hide-details="auto"
-          autocomplete="off"
-          spellcheck="false"
-        />
-        <div class="text-caption mt-3" style="opacity: .7">
-          连接方式创建后也不能再改，选错了删掉重加即可。
-        </div>
       </v-card-text>
-      <v-card-actions>
+      <v-card-actions class="px-4 pb-4">
         <v-spacer />
         <v-btn variant="text" :disabled="creating" @click="close">取消</v-btn>
         <v-btn
@@ -198,17 +210,82 @@ async function create() {
 </template>
 
 <style scoped>
-.mode-card {
-  cursor: pointer;
-  border-radius: 14px;
-  height: 100%;
+/* 选择器：两个窄卡片并排，一行说明 + ? tooltip。
+   选中不填充（填充块会和「推荐」chip 抢注意力），只加主色描边、浅底与右上角对勾。 */
+.mode-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
 }
 
-.mode-tips {
-  margin: 8px 0 0;
-  padding-left: 18px;
+@media (max-width: 460px) {
+  .mode-list { grid-template-columns: 1fr; }
+}
+
+.mode-card {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color .15s, box-shadow .15s, background-color .15s;
+}
+
+.mode-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .06);
+}
+
+.mode-card--active {
+  border-color: rgb(var(--v-theme-primary)) !important;
+  background: rgba(var(--v-theme-primary), .06);
+}
+
+.mode-card__icon {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  opacity: .55;
+}
+
+.mode-card--active .mode-card__icon {
+  opacity: 1;
+  color: rgb(var(--v-theme-primary));
+}
+
+.mode-card__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.mode-card__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.mode-card__help {
+  opacity: .45;
+  cursor: help;
+}
+
+.mode-card__help:hover {
+  opacity: .9;
+}
+
+.mode-card__desc {
+  margin-top: 2px;
   font-size: 12px;
-  line-height: 1.6;
-  opacity: 0.75;
+  line-height: 1.45;
+  color: rgba(var(--v-theme-on-surface), .6);
+}
+
+.mode-card__check {
+  position: absolute;
+  top: 8px;
+  right: 8px;
 }
 </style>
