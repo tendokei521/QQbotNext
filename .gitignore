@@ -2,6 +2,9 @@
 linux_main.py
 test.py
 .env
+# .env 的备份/本地变体（含真实令牌，绝不入库）；.env.example 模板仍在版本库内
+.env.bak
+.env.*.bak
 __pycache__/
 *.pyc
 *.pyo
