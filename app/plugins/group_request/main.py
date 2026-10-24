@@ -17,6 +17,8 @@ class Module(BaseModule):
     description = "按群独立配置入群申请自动审核（关键词 / QQ等级 / 黑名单）"
     permission = "owner"
     category = "请求"
+    # 按群响应的模块：同群多账号时可由「单一服务模式」指定唯一负责账号
+    supports_single_service = True
     tags = ["入群", "审核"]
     order = 10
     default_config = {

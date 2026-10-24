@@ -48,6 +48,8 @@ class Module(BaseModule):
     permission = "everyone"
     category = "消息"
     subscribe = ("message_group", "message_private")
+    # 按群响应的模块：同群多账号时可由「单一服务模式」指定唯一负责账号
+    supports_single_service = True
     default_config = {
         "enable": True,
         "scope": "all",

@@ -12,6 +12,8 @@ class Module(BaseModule):
     # 框架级权限过滤：仅 Bot 拥有者可执行
     permission = "owner"
     category = "消息"
+    # 按群响应的模块：同群多账号时可由「单一服务模式」指定唯一负责账号
+    supports_single_service = True
     default_config = {
         "enable_signin_command": True,
         "enable_all_signin_command": True,

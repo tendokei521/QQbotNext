@@ -54,6 +54,8 @@ class Module(BaseModule):
     description = "持续记录群聊最近可见事件（消息/表情/戳/撤回/我的发言），作为模型的环境背景"
     permission = "everyone"
     category = "消息"
+    # 按群响应的模块：同群多账号时可由「单一服务模式」指定唯一负责账号
+    supports_single_service = True
     order = 60
     default_config = {
         "group_log_enable": True,

@@ -11,6 +11,8 @@ class Module(BaseModule):
     description = "自动解析B站视频链接，合并转发视频简介 + 720P 视频"
     permission = "member"
     category = "消息"
+    # 按群响应的模块：同群多账号时可由「单一服务模式」指定唯一负责账号
+    supports_single_service = True
     default_config = {
         "enable_auto_parse": True,
         "enable_json_video": True,

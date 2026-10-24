@@ -21,6 +21,8 @@ class Module(BaseModule):
     permission = "everyone"
     subscribe = ("notice_poke",)
     category = "通知"
+    # 按群响应的模块：同群多账号时可由「单一服务模式」指定唯一负责账号
+    supports_single_service = True
     default_config = {
         "enable_follow_poke": True,
         "follow_poke_probability": 0.3,

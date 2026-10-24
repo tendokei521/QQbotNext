@@ -11,6 +11,8 @@ class Module(BaseModule):
     description = "自动解析抖音分享链接，合并转发文案 + 无水印视频/图集"
     permission = "member"
     category = "消息"
+    # 按群响应的模块：同群多账号时可由「单一服务模式」指定唯一负责账号
+    supports_single_service = True
     default_config = {
         "enable_auto_parse": True,
         "enable_link_parse": True,

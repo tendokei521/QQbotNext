@@ -15,6 +15,8 @@ class Module(BaseModule):
     description = "根据消息关键词发送 Emoji 回应，并跟随群消息附加的 Emoji"
     permission = "everyone"
     category = "通知"
+    # 按群响应的模块：同群多账号时可由「单一服务模式」指定唯一负责账号
+    supports_single_service = True
     default_config = {
         "follow_emoji": True,
         "follow_emoji_prob": 0.5,
