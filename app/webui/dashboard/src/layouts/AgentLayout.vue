@@ -21,14 +21,14 @@ const agent = useAgentConfigStore()
 // 当前路由对应的分区（index 路由没有分区）
 const section = computed(() => agentSectionByPath(route.path))
 const panelTitle = 'Agent 面板'
-const botId = computed(() => bots.currentBot?.bot_id ?? null)
+const botId = computed(() => bots.currentAccountId)
 const booting = ref(false)
 
 async function ensureLoaded() {
   if (botId.value === null) {
     booting.value = true
     await bots.fetchBots()
-    if (bots.currentIndex === null && bots.bots.length) bots.restoreSelection()
+    if (bots.currentId === null && bots.bots.length) bots.restoreSelection()
     booting.value = false
   }
   await agent.load()
@@ -36,7 +36,7 @@ async function ensureLoaded() {
 
 onMounted(ensureLoaded)
 watch(
-  () => bots.currentBot?.bot_id,
+  () => bots.currentAccountId,
   () => agent.load(true),
 )
 </script>

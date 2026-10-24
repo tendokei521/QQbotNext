@@ -6,7 +6,7 @@ import { useNotifyStore } from '@/stores/notify'
 import { useAgentConfigStore } from '@/stores/agentConfig'
 
 interface BotOption {
-  bot_id: number | null
+  accountId: string
   title: string
 }
 
@@ -24,10 +24,10 @@ const applying = ref(false)
 
 const botOptions = computed<BotOption[]>(() =>
   bots.bots
-    .filter((b) => b.bot_id != null && b.bot_id !== agent.botId)
+    .filter((b) => b.id && b.id !== agent.botId)
     .map((b) => ({
-      bot_id: b.bot_id ?? null,
-      title: b.bot_id ? `Bot ${b.bot_id}` : `Bot #${b.index}`,
+      accountId: b.id,
+      title: b.name || b.id,
     })),
 )
 
@@ -42,7 +42,7 @@ async function loadTarget(botId: number | null) {
   loading.value = true
   try {
     const res = await http.get<{ ok: boolean; config: Record<string, any> }>('/api/agent/config', {
-      params: { bot_id: botId },
+      params: { account_id: botId },
     })
     targetConfig.value = res.data.config || {}
   } catch (err) {
@@ -94,7 +94,7 @@ watch(
       <v-card-text>
         <v-select
           v-model="selectedBotId"
-          :items="botOptions.map((b) => ({ title: b.title, value: b.bot_id }))"
+          :items="botOptions.map((b) => ({ title: b.title, value: b.accountId }))"
           label="选择源 Bot"
           density="comfortable"
           variant="outlined"

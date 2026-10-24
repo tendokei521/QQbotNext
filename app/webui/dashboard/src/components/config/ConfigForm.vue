@@ -10,7 +10,7 @@ const props = defineProps<{
   moduleName: string
   schema: Record<string, any>
   config: Record<string, any>
-  botId: number | null
+  botId: string | null
   activeGroup?: string | null
 }>()
 

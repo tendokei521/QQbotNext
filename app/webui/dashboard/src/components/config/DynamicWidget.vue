@@ -14,7 +14,7 @@ const props = defineProps<{
   schema: Record<string, any>
   modelValue: Record<string, Record<string, any>>
   selectedValue: string
-  botId: number | null
+  botId: string | null
 }>()
 
 const emit = defineEmits<{
@@ -50,7 +50,7 @@ async function loadOptions() {
   error.value = ''
   try {
     const res = await http.get(`/api/module/${props.moduleName}/dynamic/${props.schema.endpoint}`, {
-      params: { bot_id: props.botId },
+      params: { account_id: props.botId },
     })
     const data = res.data
     if (!data?.ok) throw new Error(data?.message || '加载失败')
@@ -72,7 +72,7 @@ async function loadFields() {
   try {
     const res = await http.get(
       `/api/module/${props.moduleName}/dynamic/${props.schema.endpoint}/${encodeURIComponent(selected.value)}`,
-      { params: { bot_id: props.botId } },
+      { params: { account_id: props.botId } },
     )
     const data = res.data
     if (!data?.ok) throw new Error(data?.message || '加载失败')

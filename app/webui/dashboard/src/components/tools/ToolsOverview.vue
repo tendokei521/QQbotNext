@@ -60,7 +60,7 @@ async function load() {
   error.value = ''
   try {
     const resp = await http.get<{ tools: ToolState[] }>('/api/agent/tools', {
-      params: { bot_id: agent.botId ?? undefined },
+      params: { account_id: agent.botId ?? undefined },
     })
     tools.value = resp.data.tools ?? []
   } catch (e: any) {

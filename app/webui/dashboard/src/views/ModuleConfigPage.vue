@@ -160,15 +160,15 @@ const groupsLoaded = ref(false)
 async function loadGroups() {
   try {
     const res = await http.get<{
-      bots_groups: Record<string, { bot_id: number | null; index: number; groups: number[]; groups_info: { group_id?: number; group_name?: string }[] }>
+      bots_groups: Record<string, { account_id: string; name: string; bot_id: number | null; groups: number[]; groups_info: { group_id?: number; group_name?: string }[] }>
     }>('/api/bots/groups')
-    const map = new Map<string, { name: string; botIndexes: number[] }>()
+    const map = new Map<string, { name: string; botIndexes: string[] }>()
     Object.values(res.data?.bots_groups || {}).forEach((bg) => {
       const infos = bg.groups_info || []
       bg.groups.forEach((gid, i) => {
         const key = String(gid)
         const row = map.get(key) || { name: String(infos[i]?.group_name ?? gid), botIndexes: [] }
-        row.botIndexes.push(bg.index)
+        row.botIndexes.push(bg.account_id)
         map.set(key, row)
       })
     })
@@ -177,9 +177,9 @@ async function loadGroups() {
     affectedGroups.value = [...map.entries()]
       .filter(([gid]) => {
         const cfg = svc[gid]
-        if (!cfg || cfg.service_bot_index === undefined) return false
+        if (!cfg || cfg.service_bot_id === undefined) return false
         const row = map.get(gid)!
-        return cfg.service_bot_index !== bots.currentIndex && row.botIndexes.length >= 2
+        return cfg.service_bot_id !== bots.currentAccountId && row.botIndexes.length >= 2
       })
       .map(([gid, row]) => ({ gid, name: row.name }))
   } catch {
@@ -204,8 +204,8 @@ const showSingleServiceWarning = computed(
 // ---------- 插件自定义页 ----------
 const pluginSrc = computed(() => {
   const base = `/api/module/${name}/page`
-  const botId = bots.currentBot?.bot_id ?? null
-  return botId !== null ? `${base}?bot_id=${botId}` : base
+  const botId = bots.currentAccountId
+  return botId !== null ? `${base}?account_id=${botId}` : base
 })
 
 function resizePluginFrame(el: HTMLIFrameElement | null) {
@@ -237,7 +237,7 @@ function onPluginLoad(e: Event) {
 }
 
 watch(
-  () => bots.currentIndex,
+  () => bots.currentId,
   () => {
     loadGroups()
     // 切换账号后重拉模块配置
@@ -289,7 +289,7 @@ onUnmounted(() => {
         <v-chip size="small" variant="tonal" :color="PERMISSION_LABEL[mod.permission] ? 'info' : 'default'">
           {{ PERMISSION_LABEL[mod.permission] || mod.permission }}
         </v-chip>
-        <v-chip v-if="mod.bot_id" size="small" variant="tonal">Bot {{ mod.bot_id }}</v-chip>
+        <v-chip v-if="mod.account_id" size="small" variant="tonal">{{ bots.currentBot?.name ?? mod.account_id }}</v-chip>
         <v-chip v-if="saveStatus === 'saving'" size="small" color="primary" variant="flat" class="ml-2">
           <v-progress-circular size="12" indeterminate class="mr-1" /> 保存中…
         </v-chip>
@@ -362,7 +362,7 @@ onUnmounted(() => {
           :module-name="name"
           :schema="mod.config_schema || {}"
           :config="draft"
-          :bot-id="bots.currentBot?.bot_id ?? null"
+          :bot-id="bots.currentAccountId"
           @change="onChange"
         />
       </v-card-text>

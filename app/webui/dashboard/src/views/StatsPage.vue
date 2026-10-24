@@ -362,7 +362,7 @@ async function load(opts: { quiet?: boolean } = {}) {
       ...rangeParams(),
     }
     if (api.value) params.api = api.value
-    if (botId.value) params.bot_id = botId.value
+    if (botId.value) params.account_id = botId.value
     if (source.value) params.source = source.value
     if (model.value) params.model = model.value
     if (sessionId.value) params.session_id = sessionId.value

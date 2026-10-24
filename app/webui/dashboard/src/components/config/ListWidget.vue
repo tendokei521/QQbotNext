@@ -15,7 +15,7 @@ const props = defineProps<{
   schema: Record<string, any>
   modelValue: Record<string, { enabled: boolean; index: number }>
   modeValue?: string
-  botId: number | null
+  botId: string | null
 }>()
 
 const emit = defineEmits<{
@@ -57,7 +57,7 @@ async function load() {
   error.value = ''
   try {
     const res = await http.get(`/api/module/${props.moduleName}/list/${props.schema.endpoint}`, {
-      params: { bot_id: props.botId },
+      params: { account_id: props.botId },
     })
     const data = res.data
     if (!data?.ok) throw new Error(data?.message || '加载失败')

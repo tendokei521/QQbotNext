@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useBotsStore, type BotConnMode } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
@@ -18,7 +18,7 @@ import { errorMessage } from '@/api/http'
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
-  (e: 'created', index: number): void
+  (e: 'created', accountId: string): void
 }>()
 
 const bots = useBotsStore()
@@ -53,10 +53,32 @@ const OPTIONS: ModeOption[] = [
 
 const selected = ref<BotConnMode>('reverse')
 const creating = ref(false)
+/** 展示名（随便改） */
+const name = ref('')
+/** 账号 id（唯一凭据，创建后不可改）：只允许字母/数字/下划线/连字符 */
+const accountId = ref('')
+
+const ACCOUNT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/
+const nameError = computed(() => '')
+const idError = computed(() => {
+  const v = accountId.value.trim()
+  if (!v) return '请填写账号 ID'
+  if (!ACCOUNT_ID_RE.test(v)) return '只能用字母、数字、下划线、连字符，最多 32 个字符'
+  if (['none', 'null', 'global', '_global'].includes(v.toLowerCase())) return '该 ID 被系统保留，请换一个'
+  return ''
+})
+const canCreate = computed(() => !creating.value && !idError.value)
 
 watch(() => props.modelValue, (open) => {
+  if (!open) return
   // 每次打开都回到默认推荐项：上次的选择没有记忆价值
-  if (open) selected.value = 'reverse'
+  selected.value = 'reverse'
+  name.value = ''
+  // 给一个不冲突的默认 id（形如 bot1），用户可以改；id 创建后不可变
+  const taken = new Set(bots.bots.map((b) => b.id))
+  let n = 1
+  while (taken.has(`bot${n}`)) n += 1
+  accountId.value = `bot${n}`
 })
 
 function close() {
@@ -68,11 +90,14 @@ async function create() {
   if (creating.value) return
   creating.value = true
   try {
-    const result = await bots.addBotConfig({ conn_mode: selected.value })
-    const index = Number(result?.index ?? -1)
+    const result = await bots.addBotConfig({
+      id: accountId.value.trim(),
+      name: name.value.trim(),
+      conn_mode: selected.value,
+    })
     notify.push('账号已添加', 'success')
     emit('update:modelValue', false)
-    if (index >= 0) emit('created', index)
+    if (result?.id) emit('created', result.id)
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   } finally {
@@ -126,14 +151,45 @@ async function create() {
         >
           创建后，把账号卡片上显示的地址原样填进 NapCat / Lagrange 的「反向 WebSocket」里，它就会连进来。
         </v-alert>
+
+        <v-divider class="my-4" />
+        <v-text-field
+          v-model="name"
+          label="名称"
+          placeholder="给这个账号起个名字，比如「主号」"
+          density="comfortable"
+          hide-details="auto"
+          class="mb-3"
+          maxlength="32"
+          autofocus
+        />
+        <v-text-field
+          v-model="accountId"
+          label="账号 ID"
+          placeholder="bot1"
+          :error-messages="accountId ? idError : ''"
+          :hint="nameError || '程序内部用它区分账号，创建后不能修改'"
+          persistent-hint
+          density="comfortable"
+          hide-details="auto"
+          autocomplete="off"
+          spellcheck="false"
+        />
         <div class="text-caption mt-3" style="opacity: .7">
-          连接方式创建后不能再改，选错了删掉重加即可。
+          连接方式创建后也不能再改，选错了删掉重加即可。
         </div>
       </v-card-text>
       <v-card-actions>
         <v-spacer />
         <v-btn variant="text" :disabled="creating" @click="close">取消</v-btn>
-        <v-btn color="primary" variant="tonal" :loading="creating" prepend-icon="mdi-check" @click="create">
+        <v-btn
+          color="primary"
+          variant="tonal"
+          :loading="creating"
+          :disabled="!canCreate"
+          prepend-icon="mdi-check"
+          @click="create"
+        >
           创建账号
         </v-btn>
       </v-card-actions>

@@ -96,7 +96,7 @@ const previewImage = ref<HistoryImage | null>(null)
 const imageBusy = ref('')
 const pendingImageTarget = ref<{ index: number; image: HistoryImage } | null>(null)
 
-const botId = computed(() => bots.currentBot?.bot_id ?? null)
+const botId = computed(() => bots.currentAccountId)
 
 function isNotFoundError(err: unknown): boolean {
   return err instanceof AxiosError && err.response?.status === 404
@@ -111,12 +111,12 @@ function fmtBytes(bytes?: number): string {
 }
 
 /**
- * 图片地址要带上 bot_id 与 token：`<img>` 发不了 Authorization 头，
+ * 图片地址要带上 account_id 与 token：`<img>` 发不了 Authorization 头，
  * 所以走 `?token=`（服务端鉴权中间件认这个参数）。
  */
 function imageSrc(image: HistoryImage): string {
   if (!image?.url || botId.value == null) return ''
-  const params = new URLSearchParams({ bot_id: String(botId.value) })
+  const params = new URLSearchParams({ account_id: String(botId.value) })
   const t = token.get()
   if (t) params.set('token', t)
   return `${image.url}?${params.toString()}`
@@ -164,7 +164,7 @@ async function loadSessions() {
   loadingSessions.value = true
   try {
     const res = await http.get<{ ok: boolean; sessions: SessionSummary[] }>('/api/sessions', {
-      params: { bot_id: botId.value },
+      params: { account_id: botId.value },
     })
     sessions.value = res.data?.sessions || []
     if (!selectedSessionId.value || !sessions.value.some((s) => s.session_id === selectedSessionId.value)) {
@@ -204,7 +204,7 @@ async function loadConversations(autoOpen = true) {
   try {
     const res = await http.get<{ ok: boolean; session: { conversations: ConversationSummary[]; empty?: boolean } }>(
       `/api/sessions/${encodeURIComponent(selectedSessionId.value)}`,
-      { params: { bot_id: botId.value } },
+      { params: { account_id: botId.value } },
     )
     conversations.value = res.data?.session?.conversations || []
     selectedTaskIds.value = selectedTaskIds.value.filter((id) =>
@@ -243,7 +243,7 @@ async function loadMediaStats() {
   loadingMedia.value = true
   try {
     const res = await http.get<MediaStats & { ok: boolean }>('/api/media', {
-      params: { bot_id: botId.value },
+      params: { account_id: botId.value },
     })
     mediaStats.value = res.data || null
   } catch (err) {
@@ -260,7 +260,7 @@ async function openConversation(taskId: string) {
   try {
     const res = await http.get<{ ok: boolean; conversation: ConversationDetail }>(
       `/api/sessions/${encodeURIComponent(selectedSessionId.value)}/conversations/${taskId}`,
-      { params: { bot_id: botId.value } },
+      { params: { account_id: botId.value } },
     )
     conversation.value = res.data?.conversation || null
   } catch (err) {
@@ -304,7 +304,7 @@ async function renameConversation(target: ConversationSummary) {
     const res = await http.put<{ ok: boolean; conversation: ConversationDetail }>(
       `/api/sessions/${encodeURIComponent(selectedSessionId.value)}/conversations/${target.task_id}/rename`,
       { title: title.trim() },
-      { params: { bot_id: botId.value } },
+      { params: { account_id: botId.value } },
     )
     target.title = res.data?.conversation?.title || title.trim()
     if (conversation.value?.task_id === target.task_id) {
@@ -323,7 +323,7 @@ async function deleteConversation(target: ConversationSummary) {
   try {
     const res = await http.delete<{ ok: boolean; mode?: string; message?: string }>(
       `/api/sessions/${encodeURIComponent(selectedSessionId.value)}/conversations/${target.task_id}`,
-      { params: { bot_id: botId.value } },
+      { params: { account_id: botId.value } },
     )
     notify.push(res.data?.message || '对话已删除', 'success')
     if (selectedTaskId.value === target.task_id) {
@@ -362,7 +362,7 @@ async function bulkDeleteConversations() {
     const res = await http.post<{ ok: boolean; deleted?: string[]; failed?: { task_id: string; error: string }[] }>(
       '/api/sessions/bulk-delete',
       { session_id: selectedSessionId.value, task_ids: selectedTaskIds.value },
-      { params: { bot_id: botId.value } },
+      { params: { account_id: botId.value } },
     )
     const failed = res.data?.failed || []
     if (failed.length) {
@@ -388,7 +388,7 @@ async function deleteSession() {
   if (!window.confirm(`确认删除整个会话 ${selectedSessionId.value}？该操作不可恢复。`)) return
   try {
     await http.delete(`/api/sessions/${encodeURIComponent(selectedSessionId.value)}`, {
-      params: { bot_id: botId.value },
+      params: { account_id: botId.value },
     })
     notify.push('会话已删除', 'success')
     selectedSessionId.value = ''
@@ -406,7 +406,7 @@ async function exportSession() {
   if (!selectedSessionId.value || botId.value == null) return
   try {
     const res = await http.get(`/api/sessions/${encodeURIComponent(selectedSessionId.value)}/export`, {
-      params: { bot_id: botId.value },
+      params: { account_id: botId.value },
       responseType: 'blob',
     })
     const blob = res.data instanceof Blob ? res.data : new Blob([res.data])
@@ -440,7 +440,7 @@ function onRestoreFile(event: Event) {
         const res = await http.post<{ ok: boolean; restored?: number; session_id?: string }>(
           '/api/sessions/restore',
           payload,
-          { params: { bot_id: botId.value } },
+          { params: { account_id: botId.value } },
         )
         notify.push(`恢复完成，导入 ${res.data?.restored ?? '?'} 个对话`, 'success')
         selectedSessionId.value = res.data?.session_id || selectedSessionId.value
@@ -464,7 +464,7 @@ function onRestoreFile(event: Event) {
         '/api/sessions/restore-bundle',
         buffer,
         {
-          params: { bot_id: botId.value },
+          params: { account_id: botId.value },
           headers: { 'Content-Type': 'application/zip' },
         },
       ),
@@ -509,7 +509,7 @@ async function onReplacementPicked(event: Event) {
       `/api/sessions/${encodeURIComponent(selectedSessionId.value)}/conversations/${conversation.value.task_id}/messages/${target.index}/media/${target.image.seg}`,
       file,
       {
-        params: { bot_id: botId.value, mime: file.type || '' },
+        params: { account_id: botId.value, mime: file.type || '' },
         headers: { 'Content-Type': file.type || 'application/octet-stream' },
       },
     )
@@ -531,7 +531,7 @@ async function removeImage(index: number, image: HistoryImage) {
   try {
     const res = await http.delete<{ ok: boolean; conversation: ConversationDetail }>(
       `/api/sessions/${encodeURIComponent(selectedSessionId.value)}/conversations/${conversation.value.task_id}/messages/${index}/media/${image.seg}`,
-      { params: { bot_id: botId.value } },
+      { params: { account_id: botId.value } },
     )
     conversation.value = res.data?.conversation || conversation.value
     notify.push('图片已移除', 'success')
@@ -551,7 +551,7 @@ async function purgeMedia() {
     const res = await http.post<{ ok: boolean; removed?: number; kept_referenced?: number; message?: string }>(
       '/api/media/purge',
       {},
-      { params: { bot_id: botId.value } },
+      { params: { account_id: botId.value } },
     )
     notify.push(res.data?.message || `已清理 ${res.data?.removed ?? 0} 张图片`, 'success')
     await loadMediaStats()
@@ -575,7 +575,7 @@ async function saveEditMessage() {
     const res = await http.put<{ ok: boolean; conversation: ConversationDetail }>(
       `/api/sessions/${encodeURIComponent(selectedSessionId.value)}/conversations/${conversation.value.task_id}/messages/${editingIndex.value}`,
       { content: editContent.value },
-      { params: { bot_id: botId.value } },
+      { params: { account_id: botId.value } },
     )
     conversation.value = res.data?.conversation || conversation.value
     editDialog.value = false
@@ -591,7 +591,7 @@ async function addMessage() {
     const res = await http.post<{ ok: boolean; conversation: ConversationDetail }>(
       `/api/sessions/${encodeURIComponent(selectedSessionId.value)}/conversations/${conversation.value.task_id}/messages`,
       { role: newMessageRole.value, content: newMessageContent.value.trim() },
-      { params: { bot_id: botId.value } },
+      { params: { account_id: botId.value } },
     )
     conversation.value = res.data?.conversation || conversation.value
     newMessageContent.value = ''
@@ -609,7 +609,7 @@ async function deleteMessage(index: number) {
   try {
     const res = await http.delete<{ ok: boolean; conversation: ConversationDetail }>(
       `/api/sessions/${encodeURIComponent(selectedSessionId.value)}/conversations/${conversation.value.task_id}/messages/${index}`,
-      { params: { bot_id: botId.value } },
+      { params: { account_id: botId.value } },
     )
     conversation.value = res.data?.conversation || conversation.value
     notify.push('消息已删除', 'success')
@@ -623,7 +623,7 @@ async function exportConversation(format: 'text' | 'json') {
   try {
     const res = await http.get(
       `/api/sessions/${encodeURIComponent(selectedSessionId.value)}/conversations/${conversation.value.task_id}/export`,
-      { params: { bot_id: botId.value, format }, responseType: 'blob' },
+      { params: { account_id: botId.value, format }, responseType: 'blob' },
     )
     const blob = res.data instanceof Blob ? res.data : new Blob([res.data])
     const filename = format === 'json'
@@ -704,7 +704,7 @@ onMounted(() => {
           <v-card-text class="pa-2">
             <v-progress-linear v-if="loadingSessions" indeterminate color="primary" />
             <template v-else-if="botId == null">
-              <div class="text-caption text-center pa-4">请先连接账号以获取 bot_id</div>
+              <div class="text-caption text-center pa-4">请先选择一个账号</div>
             </template>
             <template v-else-if="sessions.length === 0">
               <div class="text-caption text-center pa-4">暂无会话数据</div>

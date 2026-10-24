@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, reactive, ref } from 'vue'
-import { useBotsStore, resolveAccount, resolvedBotId, type BotConfig, type BotConnMode, type BotStatus } from '@/stores/bots'
+import { useBotsStore, displayName, resolveAccount, resolvedBotId, type BotConfig, type BotConnMode, type BotStatus } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
@@ -21,6 +21,8 @@ const statusColor = (s: BotStatus) =>
   s === 'connected' ? 'success' : s === 'connecting' || s === 'reconnecting' ? 'warning' : 'error'
 
 interface Draft {
+  /** 展示名：可随时改；id 不可改，二者不是一个东西 */
+  name: string
   ws_url: string
   access_token: string
   owner_id: string
@@ -29,20 +31,20 @@ interface Draft {
   conn_mode: BotConnMode
 }
 
-// 编辑草稿：index -> 表单字段
-const drafts = reactive<Record<number, Draft>>({})
+// 编辑草稿：account_id -> 表单字段（id 不可变，所以用它当 key 而不是数组下标）
+const drafts = reactive<Record<string, Draft>>({})
 const saving = ref(false)
 const loadingCards = ref(false)
-const deleteTarget = ref<number | null>(null)
+const deleteTarget = ref<string | null>(null)
 const addDialog = ref(false)
-const acting = reactive<Record<number, boolean>>({})
+const acting = reactive<Record<string, boolean>>({})
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
-function draftOf(index: number) {
-  if (!drafts[index]) {
-    drafts[index] = { ws_url: '', access_token: '', owner_id: '', auto_connect: false, conn_mode: 'forward' }
+function draftOf(id: string) {
+  if (!drafts[id]) {
+    drafts[id] = { name: '', ws_url: '', access_token: '', owner_id: '', auto_connect: false, conn_mode: 'forward' }
   }
-  return drafts[index]
+  return drafts[id]
 }
 
 /** 反向账号的状态文案：监听就绪但还没对端接入时叫「监听中」，别让人以为连错了 */
@@ -52,21 +54,23 @@ function statusText(b: { status: BotStatus; conn_mode?: BotConnMode; listening?:
 }
 
 /** 连接方向自创建时固定，卡片据此调整文案（反向是「监听」，正向是「连接」） */
-function isReverseDraft(index: number): boolean {
-  return draftOf(index).conn_mode === 'reverse'
+function isReverseDraft(id: string): boolean {
+  return draftOf(id).conn_mode === 'reverse'
 }
 
 async function loadCards() {
   loadingCards.value = true
   try {
     const [configs, statuses] = await Promise.all([bots.fetchBotConfig(), bots.fetchBots()])
-    // 以配置列表为主填充草稿：/api/bots/config 返回的 index 缺失时按列表位置兜底
-    const seen = new Set<number>()
-    configs.forEach((cfg, pos) => {
-      const index = Number(cfg.index ?? pos)
-      seen.add(index)
-      const b = statuses.find((s) => s.index === index)
-      drafts[index] = {
+    // 以配置列表为主填充草稿：两者都按 account id 对齐（id 就是身份，没有下标兜底）
+    const seen = new Set<string>()
+    configs.forEach((cfg) => {
+      const id = cfg.id
+      if (!id) return
+      seen.add(id)
+      const b = statuses.find((s) => s.id === id)
+      drafts[id] = {
+        name: cfg.name ?? '',
         ws_url: cfg.ws_url ?? b?.ws_url ?? '',
         access_token: cfg.access_token ?? '',
         owner_id: cfg.owner_id !== undefined && cfg.owner_id !== null ? String(cfg.owner_id) : (b?.owner_id !== undefined && b.owner_id !== null ? String(b.owner_id) : ''),
@@ -74,9 +78,9 @@ async function loadCards() {
         conn_mode: (cfg.conn_mode ?? b?.conn_mode ?? 'forward') === 'reverse' ? 'reverse' : 'forward',
       }
     })
-    // 清理已删除/失效的草稿，避免残留旧索引被再次全量保存而“复活”账号
+    // 清理已删除/失效的草稿，避免残留旧条目被再次全量保存而“复活”账号
     for (const key of Object.keys(drafts)) {
-      if (!seen.has(Number(key))) delete drafts[Number(key)]
+      if (!seen.has(key)) delete drafts[key]
     }
   } catch (err) {
     notify.push(errorMessage(err), 'error')
@@ -86,11 +90,12 @@ async function loadCards() {
 }
 
 function buildPayload(): BotConfig[] {
-  return Object.entries(drafts).map(([index, d]) => {
+  return Object.entries(drafts).map(([id, d]) => {
     const ownerRaw = d.owner_id.trim()
     const owner = ownerRaw ? Number(ownerRaw) : null
     return {
-      index: parseInt(index, 10),
+      id,
+      name: d.name.trim() || id,
       ws_url: d.ws_url.trim(),
       access_token: d.access_token,
       // 非法数字不静默存 NaN：统一按 null 处理
@@ -142,9 +147,9 @@ function addBot() {
 }
 
 /** 新账号已创建：刷新卡片并选中它，方便直接填 Token / 地址 */
-async function onBotCreated(index: number) {
+async function onBotCreated(accountId: string) {
   await loadCards()
-  bots.selectBot(index)
+  bots.selectBot(accountId)
 }
 
 async function doDelete() {
@@ -156,7 +161,7 @@ async function doDelete() {
   }
   try {
     await bots.deleteBotConfig(deleteTarget.value)
-    notify.push('已删除账号配置', 'success')
+    notify.push('账号已删除', 'success')
     deleteTarget.value = null
     // loadCards 已同时拉取配置与状态，无需再单独 fetchBots
     await loadCards()
@@ -165,19 +170,19 @@ async function doDelete() {
   }
 }
 
-async function act(index: number, kind: 'connect' | 'disconnect' | 'reconnect') {
-  if (acting[index]) return
-  acting[index] = true
+async function act(accountId: string, kind: 'connect' | 'disconnect' | 'reconnect') {
+  if (acting[accountId]) return
+  acting[accountId] = true
   try {
-    if (kind === 'connect') await bots.connect(index)
-    else if (kind === 'disconnect') await bots.disconnect(index)
-    else await bots.reconnect(index)
+    if (kind === 'connect') await bots.connect(accountId)
+    else if (kind === 'disconnect') await bots.disconnect(accountId)
+    else await bots.reconnect(accountId)
     notify.push(kind === 'connect' ? '已连接' : kind === 'disconnect' ? '已断开' : '已重连', 'success')
     await bots.fetchBots()
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   } finally {
-    acting[index] = false
+    acting[accountId] = false
   }
 }
 
@@ -219,7 +224,7 @@ onUnmounted(() => {
     </v-card>
 
     <v-row v-else>
-      <v-col v-for="b in bots.bots" :key="b.index" cols="12" md="6" xl="4">
+      <v-col v-for="b in bots.bots" :key="b.id" cols="12" md="6" xl="4">
         <v-card variant="outlined" class="bot-card app-card-fill">
           <v-card-item>
             <template #prepend>
@@ -227,14 +232,14 @@ onUnmounted(() => {
                 <v-icon icon="mdi-robot" color="primary" />
               </v-avatar>
             </template>
-            <v-card-title class="text-body-1 font-weight-bold">
-              账号 #{{ b.index }}<template v-if="resolvedBotId(b)"> · Bot {{ resolvedBotId(b) }}</template>
+            <v-card-title class="text-body-1 font-weight-bold app-line-clamp-1">
+              {{ displayName(b) }}<template v-if="resolvedBotId(b)"> · QQ {{ resolvedBotId(b) }}</template>
             </v-card-title>
             <v-card-subtitle class="d-flex align-center gap-2">
               <v-chip size="x-small" :color="statusColor(b.status)" variant="tonal">
                 <v-icon start size="x-small" icon="mdi-circle" /> {{ statusText(b) }}
               </v-chip>
-              <v-chip v-if="draftOf(b.index).conn_mode === 'reverse'" size="x-small" variant="outlined">
+              <v-chip v-if="draftOf(b.id).conn_mode === 'reverse'" size="x-small" variant="outlined">
                 反向
               </v-chip>
               <span v-if="resolveAccount(b)?.nickname" class="text-caption app-line-clamp-1">
@@ -242,57 +247,67 @@ onUnmounted(() => {
               </span>
             </v-card-subtitle>
             <template #append>
-              <v-btn variant="text" icon="mdi-delete-outline" color="error" size="small" title="删除此账号配置" @click="deleteTarget = b.index" />
+              <v-btn variant="text" icon="mdi-delete-outline" color="error" size="small" title="删除此账号配置" @click="deleteTarget = b.id" />
             </template>
           </v-card-item>
 
           <v-card-text>
             <v-text-field
-              :model-value="draftOf(b.index).ws_url"
-              :label="draftOf(b.index).conn_mode === 'reverse' ? '反向监听地址' : 'WebSocket 地址'"
-              :placeholder="draftOf(b.index).conn_mode === 'reverse' ? 'ws://0.0.0.0:3001/onebot/v11/ws' : 'ws://127.0.0.1:3001/'"
-              :hint="draftOf(b.index).conn_mode === 'reverse' ? '在 OneBot 实现里把反向 WebSocket 指向这个地址' : ''"
-              :persistent-hint="draftOf(b.index).conn_mode === 'reverse'"
+              :model-value="draftOf(b.id).name"
+              label="名称"
+              placeholder="给这个账号起个名字"
               density="comfortable"
-              hide-details="auto"
+              hide-details
               class="mb-3"
-              @update:model-value="(v: string) => { draftOf(b.index).ws_url = v }"
+              @update:model-value="(v: string) => { draftOf(b.id).name = v }"
               @blur="scheduleSave()"
             />
             <v-text-field
-              :model-value="draftOf(b.index).access_token"
+              :model-value="draftOf(b.id).ws_url"
+              :label="draftOf(b.id).conn_mode === 'reverse' ? '反向监听地址' : 'WebSocket 地址'"
+              :placeholder="draftOf(b.id).conn_mode === 'reverse' ? 'ws://0.0.0.0:3001/onebot/v11/ws' : 'ws://127.0.0.1:3001/'"
+              :hint="draftOf(b.id).conn_mode === 'reverse' ? '在 OneBot 实现里把反向 WebSocket 指向这个地址' : ''"
+              :persistent-hint="draftOf(b.id).conn_mode === 'reverse'"
+              density="comfortable"
+              hide-details="auto"
+              class="mb-3"
+              @update:model-value="(v: string) => { draftOf(b.id).ws_url = v }"
+              @blur="scheduleSave()"
+            />
+            <v-text-field
+              :model-value="draftOf(b.id).access_token"
               label="Access Token"
               placeholder="无 Token"
               density="comfortable"
               hide-details
               autocomplete="off"
               class="mb-3"
-              @update:model-value="(v: string) => { draftOf(b.index).access_token = v }"
+              @update:model-value="(v: string) => { draftOf(b.id).access_token = v }"
               @blur="scheduleSave()"
             />
             <v-text-field
-              :model-value="draftOf(b.index).owner_id"
+              :model-value="draftOf(b.id).owner_id"
               label="Owner ID"
               placeholder="管理员QQ号"
               density="comfortable"
               hide-details
               class="mb-3"
-              @update:model-value="(v: string) => { draftOf(b.index).owner_id = v }"
+              @update:model-value="(v: string) => { draftOf(b.id).owner_id = v }"
               @blur="scheduleSave()"
             />
             <v-switch
-              :model-value="draftOf(b.index).auto_connect"
+              :model-value="draftOf(b.id).auto_connect"
               label="启动时自动连接"
               color="primary"
               density="compact"
               hide-details
-              @update:model-value="(v: boolean | null) => { draftOf(b.index).auto_connect = !!v }"
+              @update:model-value="(v: boolean | null) => { draftOf(b.id).auto_connect = !!v }"
               @change="scheduleSave()"
             />
             <v-divider class="my-3" />
             <div class="info-grid">
               <div>
-                <div class="info-label">Bot ID</div>
+                <div class="info-label">当前 QQ</div>
                 <div class="info-value">
                   <template v-if="resolvedBotId(b)">Bot {{ resolvedBotId(b) }}</template>
                   <template v-else>未连接</template>
@@ -300,10 +315,10 @@ onUnmounted(() => {
                 </div>
               </div>
               <div>
-                <div class="info-label">索引</div>
-                <div class="info-value">#{{ b.index }}</div>
+                <div class="info-label">账号 ID</div>
+                <div class="info-value">{{ b.id }}</div>
               </div>
-              <div v-if="draftOf(b.index).conn_mode === 'reverse'">
+              <div v-if="draftOf(b.id).conn_mode === 'reverse'">
                 <div class="info-label">监听</div>
                 <div class="info-value">{{ b.listening ? '监听中' : '未监听' }}</div>
               </div>
@@ -318,9 +333,9 @@ onUnmounted(() => {
           </v-card-text>
 
           <v-card-actions>
-            <v-btn color="success" variant="tonal" size="small" prepend-icon="mdi-plug" :loading="acting[b.index]" :disabled="acting[b.index] || b.status === 'connected' || (isReverseDraft(b.index) && !!b.listening)" @click="act(b.index, 'connect')">{{ isReverseDraft(b.index) ? '开始监听' : '连接' }}</v-btn>
-            <v-btn color="error" variant="tonal" size="small" prepend-icon="mdi-unlink" :disabled="acting[b.index] || (b.status !== 'connected' && !(isReverseDraft(b.index) && b.listening))" @click="act(b.index, 'disconnect')">{{ isReverseDraft(b.index) ? '停止监听' : '断开' }}</v-btn>
-            <v-btn color="warning" variant="tonal" size="small" prepend-icon="mdi-restart" :disabled="acting[b.index]" @click="act(b.index, 'reconnect')">{{ isReverseDraft(b.index) ? '重启监听' : '重连' }}</v-btn>
+            <v-btn color="success" variant="tonal" size="small" prepend-icon="mdi-plug" :loading="acting[b.id]" :disabled="acting[b.id] || b.status === 'connected' || (isReverseDraft(b.id) && !!b.listening)" @click="act(b.id, 'connect')">{{ isReverseDraft(b.id) ? '开始监听' : '连接' }}</v-btn>
+            <v-btn color="error" variant="tonal" size="small" prepend-icon="mdi-unlink" :disabled="acting[b.id] || (b.status !== 'connected' && !(isReverseDraft(b.id) && b.listening))" @click="act(b.id, 'disconnect')">{{ isReverseDraft(b.id) ? '停止监听' : '断开' }}</v-btn>
+            <v-btn color="warning" variant="tonal" size="small" prepend-icon="mdi-restart" :disabled="acting[b.id]" @click="act(b.id, 'reconnect')">{{ isReverseDraft(b.id) ? '重启监听' : '重连' }}</v-btn>
           </v-card-actions>
         </v-card>
       </v-col>
@@ -329,7 +344,7 @@ onUnmounted(() => {
     <v-dialog :model-value="deleteTarget !== null" max-width="400" @update:model-value="(v: boolean) => { if (!v) deleteTarget = null }">
       <v-card>
         <v-card-title>删除账号配置</v-card-title>
-        <v-card-text>确定删除账号 #{{ deleteTarget }} 的配置吗？此操作不可撤销。</v-card-text>
+        <v-card-text>确定删除该账号的配置吗？此操作不可撤销。</v-card-text>
         <v-card-actions>
           <v-spacer />
           <v-btn variant="text" @click="deleteTarget = null">取消</v-btn>

@@ -3,11 +3,13 @@ import { computed, ref, watch } from 'vue'
 import http, { errorMessage } from '@/api/http'
 import { useWebuiStore } from '@/stores/webui'
 import { useNotifyStore } from '@/stores/notify'
+import { useBotsStore, displayName } from '@/stores/bots'
 
 interface GroupRow {
   gid: string
   name: string
-  botIndexes: number[]
+  /** 该群里有几个账号在线：存账号 id（不是下标） */
+  botIndexes: string[]
 }
 
 const props = defineProps<{ modelValue: boolean }>()
@@ -15,6 +17,13 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: boolean): void }>()
 
 const webui = useWebuiStore()
 const notify = useNotifyStore()
+const bots = useBotsStore()
+
+/** 账号 id → 展示名（下拉里给用户看名字，别给 id） */
+function accountName(id: string): string {
+  const bot = bots.bots.find((b) => b.id === id)
+  return bot ? displayName(bot) : id
+}
 
 const rows = ref<GroupRow[]>([])
 const serviceMap = ref<Record<string, string>>({})
@@ -33,7 +42,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const res = await http.get<{ bots_groups: Record<string, { bot_id: number | null; index: number; groups: number[]; groups_info: { group_id?: number; group_name?: string }[] }> }>('/api/bots/groups')
+    const res = await http.get<{ bots_groups: Record<string, { account_id: string; name: string; bot_id: number | null; groups: number[]; groups_info: { group_id?: number; group_name?: string }[] }> }>('/api/bots/groups')
     const botsGroups = res.data?.bots_groups || {}
 
     // 汇总所有群：gid -> 出现过的 bot index 列表 + 群名
@@ -46,7 +55,7 @@ async function load() {
         // 优先填真实群名；后到的 bot 也可补填，避免某个 bot 无 group_name 时永远显示裸 gid
         if (infos[i]?.group_name) row.name = String(infos[i].group_name)
         if (!row.name) row.name = key
-        row.botIndexes.push(bg.index)
+        row.botIndexes.push(bg.account_id)
         map.set(key, row)
       })
     })
@@ -55,7 +64,7 @@ async function load() {
     // 回填已存服务账号
     serviceMap.value = {}
     Object.entries(webui.config.multi_group.groups || {}).forEach(([gid, cfg]) => {
-      if (cfg.service_bot_index !== undefined) serviceMap.value[gid] = String(cfg.service_bot_index)
+      if (cfg.service_bot_id !== undefined) serviceMap.value[gid] = String(cfg.service_bot_id)
     })
   } catch (err) {
     error.value = errorMessage(err)
@@ -68,7 +77,7 @@ async function onServiceChange(gid: string) {
   const groups = { ...webui.config.multi_group.groups }
   const v = serviceMap.value[gid]
   if (v !== undefined && v !== '') {
-    groups[gid] = { service_bot_index: parseInt(v, 10) }
+    groups[gid] = { service_bot_id: String(v) }
   } else {
     delete groups[gid]
   }
@@ -124,7 +133,7 @@ watch(
               :model-value="serviceMap[row.gid] ?? ''"
               :items="[
                 { title: '未指定', value: '' },
-                ...row.botIndexes.map((idx) => ({ title: `Bot #${idx}`, value: String(idx) })),
+                ...row.botIndexes.map((aid) => ({ title: accountName(aid), value: aid })),
               ]"
               :disabled="row.botIndexes.length < 2"
               density="compact"

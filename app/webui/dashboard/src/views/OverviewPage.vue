@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useBotsStore, resolveAccount, resolvedBotId, type BotStatus } from '@/stores/bots'
+import { useBotsStore, displayName, resolveAccount, resolvedBotId, type BotStatus } from '@/stores/bots'
 import { useModulesStore } from '@/stores/modules'
 import { useLogsStore } from '@/stores/logs'
 import { useWebuiStore } from '@/stores/webui'
@@ -73,13 +73,13 @@ async function refreshAll() {
 
 async function connectCurrent() {
   if (connecting.value) return
-  if (bots.currentIndex === null) {
+  if (bots.currentId === null) {
     notify.push('请先选择账号', 'warning')
     return
   }
   connecting.value = true
   try {
-    await bots.connect(bots.currentIndex)
+    await bots.connect(bots.currentId)
     notify.push('已发送连接请求', 'success')
     await bots.fetchBots()
   } catch (err) {
@@ -147,12 +147,12 @@ onMounted(() => {
                 <v-btn size="small" color="primary" variant="tonal" to="/bots">去添加账号</v-btn>
               </EmptyState>
               <v-list v-else density="compact" class="bg-transparent">
-                <v-list-item v-for="b in bots.bots" :key="b.index" class="bot-row">
+                <v-list-item v-for="b in bots.bots" :key="b.id" class="bot-row">
                   <template #prepend>
                     <v-icon :icon="b.status === 'connected' ? 'mdi-check-circle' : 'mdi-alert-circle'" :color="statusColor(b.status)" size="small" />
                   </template>
                   <v-list-item-title>
-                    {{ resolvedBotId(b) ? `Bot ${resolvedBotId(b)}` : `Bot #${b.index}` }}
+                    {{ displayName(b) }}{{ resolvedBotId(b) ? ` · QQ ${resolvedBotId(b)}` : '' }}
                   </v-list-item-title>
                   <v-list-item-subtitle>
                     {{ STATUS_TEXT[b.status] }}{{ resolveAccount(b)?.nickname ? ` · ${resolveAccount(b)!.nickname}` : '' }}{{ b.last_error ? ` · ${b.last_error}` : '' }}
@@ -164,7 +164,7 @@ onMounted(() => {
               </v-list>
             </v-card-text>
             <v-card-actions>
-              <v-btn v-if="bots.currentIndex !== null && bots.currentBot?.status !== 'connected'" color="primary" variant="tonal" prepend-icon="mdi-plug" size="small" :loading="connecting" :disabled="connecting" @click="connectCurrent">
+              <v-btn v-if="bots.currentId !== null && bots.currentBot?.status !== 'connected'" color="primary" variant="tonal" prepend-icon="mdi-plug" size="small" :loading="connecting" :disabled="connecting" @click="connectCurrent">
                 连接当前账号
               </v-btn>
               <v-btn variant="text" size="small" to="/bots">管理账号 →</v-btn>

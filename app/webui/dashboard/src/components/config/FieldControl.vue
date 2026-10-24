@@ -7,8 +7,8 @@ const props = defineProps<{
   fieldKey: string
   schema: Record<string, any>
   value: any
-  /** 资源引用字段需要（bot_id 只对"某账号下的资源"有意义，可选） */
-  botId?: number | null
+  /** 资源引用字段需要（account_id 只对"某账号下的资源"有意义，可选） */
+  botId?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -36,7 +36,7 @@ const resourceParams = computed(() => {
   const params: Record<string, any> = {}
   const filters = props.schema.filters
   if (filters && typeof filters === 'object' && !Array.isArray(filters)) Object.assign(params, filters)
-  if (props.botId !== undefined && props.botId !== null) params.bot_id = props.botId
+  if (props.botId !== undefined && props.botId !== null) params.account_id = props.botId
   return params
 })
 

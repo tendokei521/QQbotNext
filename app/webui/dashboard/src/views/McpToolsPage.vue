@@ -78,7 +78,7 @@ async function loadTools() {
   loading.value = true
   try {
     const res = await http.get<{ ok: boolean; log_enabled: boolean; tools: McpTool[] }>('/api/agent/mcp/tools', {
-      params: { bot_id: agent.botId },
+      params: { account_id: agent.botId },
     })
     tools.value = res.data.tools || []
   } catch (err) {
@@ -110,7 +110,7 @@ onUnmounted(() => {
 })
 
 watch(
-  () => bots.currentBot?.bot_id,
+  () => bots.currentAccountId,
   async () => {
     await agent.load(true)
     loadTools()

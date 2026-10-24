@@ -19,7 +19,7 @@ export interface ModuleData {
   description: string
   enabled: boolean
   permission: string
-  bot_id: number | null
+  account_id: string | null
   category: string
   tags: string[]
   order: number
@@ -55,7 +55,7 @@ export const useModulesStore = defineStore('modules', () => {
   const modules = ref<Record<string, ModuleData>>({})
   const loading = ref(false)
   const reloading = ref(false)
-  const botId = ref<number | null>(null)
+  const botId = ref<string | null>(null)
   const uninstalledModules = ref<UninstalledModuleData[]>([])
 
   const list = computed(() =>
@@ -73,7 +73,7 @@ export const useModulesStore = defineStore('modules', () => {
 
   /** 同步到当前选中账号的作用域 */
   function syncBotScope() {
-    botId.value = bots.currentBot?.bot_id ?? null
+    botId.value = bots.currentAccountId
   }
 
   async function load(): Promise<void> {
@@ -82,7 +82,7 @@ export const useModulesStore = defineStore('modules', () => {
     try {
       syncBotScope()
       const res = await http.get<Record<string, ModuleData>>('/api/modules', {
-        params: { bot_id: botId.value },
+        params: { account_id: botId.value },
       })
       if (seq !== loadSeq) return
       modules.value = res.data || {}
@@ -95,7 +95,7 @@ export const useModulesStore = defineStore('modules', () => {
     reloading.value = true
     try {
       syncBotScope()
-      const res = await http.post('/api/modules/reload', null, { params: { bot_id: botId.value } })
+      const res = await http.post('/api/modules/reload', null, { params: { account_id: botId.value } })
       unwrap(res.data)
       await load()
     } finally {
@@ -119,7 +119,7 @@ export const useModulesStore = defineStore('modules', () => {
   async function uninstall(name: string): Promise<void> {
     syncBotScope()
     const res = await http.post(`/api/modules/${name}/uninstall`, null, {
-      params: { bot_id: botId.value },
+      params: { account_id: botId.value },
     })
     unwrap(res.data)
     await Promise.all([load(), loadUninstalled()])
@@ -128,7 +128,7 @@ export const useModulesStore = defineStore('modules', () => {
   async function install(name: string): Promise<void> {
     syncBotScope()
     const res = await http.post(`/api/modules/${name}/install`, null, {
-      params: { bot_id: botId.value },
+      params: { account_id: botId.value },
     })
     unwrap(res.data)
     await Promise.all([load(), loadUninstalled()])
@@ -137,7 +137,7 @@ export const useModulesStore = defineStore('modules', () => {
   async function reloadSingle(name: string): Promise<void> {
     syncBotScope()
     const res = await http.post(`/api/modules/${name}/reload`, null, {
-      params: { bot_id: botId.value },
+      params: { account_id: botId.value },
     })
     unwrap(res.data)
     await load()
@@ -148,7 +148,7 @@ export const useModulesStore = defineStore('modules', () => {
     const form = new FormData()
     form.append('enabled', String(enabled))
     const res = await http.post(`/api/module/${name}/toggle`, form, {
-      params: { bot_id: botId.value },
+      params: { account_id: botId.value },
     })
     unwrap(res.data)
     const mod = modules.value[name]
@@ -158,7 +158,7 @@ export const useModulesStore = defineStore('modules', () => {
   async function saveConfig(name: string, config: Record<string, any>): Promise<void> {
     syncBotScope()
     const res = await http.post(`/api/module/${name}/config`, config, {
-      params: { bot_id: botId.value },
+      params: { account_id: botId.value },
     })
     unwrap(res.data)
   }
@@ -171,7 +171,7 @@ export const useModulesStore = defineStore('modules', () => {
     form.append('user_mode', permission.user_mode)
     form.append('user_list', permission.user_list.join('\n'))
     const res = await http.post(`/api/module/${name}/permission`, form, {
-      params: { bot_id: botId.value },
+      params: { account_id: botId.value },
     })
     unwrap(res.data)
   }
@@ -185,13 +185,13 @@ export const useModulesStore = defineStore('modules', () => {
 
   // WS 同步：模块配置/权限变更（仅当前 bot 生效）
   onSocketMessage('module_config_updated', (msg) => {
-    if (msg.module && (msg.bot_id === null || msg.bot_id === botId.value)) {
+    if (msg.module && (!msg.account_id || msg.account_id === botId.value)) {
       const mod = modules.value[msg.module]
       if (mod && msg.config) mod.config = msg.config
     }
   })
   onSocketMessage('module_authority_updated', (msg) => {
-    if (msg.module && (msg.bot_id === null || msg.bot_id === botId.value)) {
+    if (msg.module && (!msg.account_id || msg.account_id === botId.value)) {
       const mod = modules.value[msg.module]
       if (!mod) return
       if (typeof msg.enabled === 'boolean') mod.enabled = msg.enabled

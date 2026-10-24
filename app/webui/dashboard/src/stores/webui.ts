@@ -13,7 +13,7 @@ export interface WebuiConfig {
   single_service: Record<string, boolean>
   multi_group: {
     show_all: boolean
-    groups: Record<string, { service_bot_index: number }>
+    groups: Record<string, { service_bot_id: string }>
   }
   experimental: {
     show_experimental: boolean

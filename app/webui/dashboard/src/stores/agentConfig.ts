@@ -30,8 +30,8 @@ const MODULE_OWNED_FIELDS: Record<string, string> = {
 
 export const useAgentConfigStore = defineStore('agentConfig', {
   state: () => ({
-    botId: null as number | null,
-    loadedFor: null as number | null,
+    botId: null as string | null,
+    loadedFor: null as string | null,
     loading: false,
     enabled: false,
     schema: {} as Record<string, any>,
@@ -53,7 +53,7 @@ export const useAgentConfigStore = defineStore('agentConfig', {
     //   editSeq / dirtyFlag），等同于全局单例：不进 devtools、无法随 store 重置，
     //   并且在 store 重建（HMR / 测试）后仍残留上一轮的值。
     autosaveTimer: null as number | null,
-    pendingBotId: null as number | null,
+    pendingBotId: null as string | null,
     editSeq: 0,
     dirty: false,
   }),
@@ -97,10 +97,10 @@ export const useAgentConfigStore = defineStore('agentConfig', {
           /* 列表加载失败时由页面显示空态 */
         }
       }
-      if (bots.currentIndex === null && bots.bots.length) {
+      if (bots.currentId === null && bots.bots.length) {
         bots.restoreSelection()
       }
-      const botId = bots.currentBot?.bot_id ?? null
+      const botId = bots.currentAccountId
 
       // 先把旧 Bot 的改动落盘，再切换/重载，避免静默丢失编辑
       await this.flush()
@@ -117,7 +117,7 @@ export const useAgentConfigStore = defineStore('agentConfig', {
       try {
         const res = await http.get<{
           ok: boolean
-          bot_id: number | null
+          account_id: string | null
           enabled: boolean
           permission: AgentPermission
           config: Record<string, any>
@@ -125,7 +125,7 @@ export const useAgentConfigStore = defineStore('agentConfig', {
           provider_presets: { id: string; name: string }[]
           provider_models: { id: string; preset_id: string; preset_name?: string; model: string }[]
           stream_presets?: Record<string, StreamPreset>
-        }>('/api/agent/config', { params: { bot_id: botId } })
+        }>('/api/agent/config', { params: { account_id: botId } })
         const data = res.data
         this.enabled = !!data.enabled
         this.schema = data.schema || {}
@@ -208,13 +208,13 @@ export const useAgentConfigStore = defineStore('agentConfig', {
           await http.post(
             `/api/module/${owner}/config`,
             { config },
-            { params: { bot_id: targetBotId } },
+            { params: { account_id: targetBotId } },
           )
         }
         await http.post(
           '/api/agent/config',
           { config: agentDraft, permission: this.permission, enabled: this.enabled },
-          { params: { bot_id: targetBotId } },
+          { params: { account_id: targetBotId } },
         )
         // 保存期间用户又改了：保持 dirty，等下一轮
         if (this.editSeq !== snapshotSeq) return

@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useThemeStore } from '@/stores/theme'
-import { useBotsStore, resolveAccount, resolvedBotId, type BotStatus } from '@/stores/bots'
+import { useBotsStore, displayName, resolveAccount, resolvedBotId, type BotStatus } from '@/stores/bots'
 import { useWebuiStore } from '@/stores/webui'
 import { useNotifyStore } from '@/stores/notify'
 import { connectSocket } from '@/api/socket'
@@ -108,24 +108,26 @@ const botOptions = computed(() =>
   bots.bots.map((b) => {
     const acc = resolveAccount(b)
     const botId = resolvedBotId(b)
-    // 未连接但有上次账号快照时，用快照显示「昵称 + 未连接」，而不是退化成 Bot #index
-    const title = botId ? `Bot ${botId}` : `Bot #${b.index}`
-    const subtitle = acc?.nickname
-      ? `${acc.nickname}${b.status === 'connected' ? '' : ' · 未连接'}`
-      : STATUS_TEXT[b.status]
+    // 标题一律用账号名（id 只做内部判断，不展示）；
+    // 副标题补一句当前登录的 QQ，方便确认连的是哪个号
+    const title = displayName(b)
+    const qq = botId ? `QQ ${botId}` : ''
+    const subtitle = `${
+      acc?.nickname ? `${acc.nickname}${b.status === 'connected' ? '' : ' · 未连接'}` : STATUS_TEXT[b.status]
+    }${qq ? ` · ${qq}` : ''}`
     return {
       title,
       subtitle,
-      value: b.index,
+      value: b.id,
       status: b.status,
       bot_id: b.bot_id,
     }
   }),
 )
 
-function botStatusOf(index: number | null): BotStatus {
-  if (index === null) return 'disconnected'
-  return bots.bots.find((b) => b.index === index)?.status ?? 'disconnected'
+function botStatusOf(accountId: string | null): BotStatus {
+  if (accountId === null) return 'disconnected'
+  return bots.bots.find((b) => b.id === accountId)?.status ?? 'disconnected'
 }
 
 function botStatusColor(status: BotStatus): string {
@@ -138,10 +140,10 @@ function botStatusText(status: BotStatus): string {
 
 const currentStatusText = computed(() => (bots.currentBot ? STATUS_TEXT[bots.currentBot.status] : '离线'))
 const isConnected = computed(() => bots.currentBot?.status === 'connected')
-const hasCurrentBot = computed(() => bots.currentIndex !== null)
+const hasCurrentBot = computed(() => bots.currentId !== null)
 
 async function onBotSelect() {
-  bots.selectBot(bots.currentIndex!)
+  bots.selectBot(bots.currentId!)
   try {
     await refreshScopedData()
   } catch (err) {
@@ -150,7 +152,7 @@ async function onBotSelect() {
 }
 
 async function refreshScopedData() {
-  // 账号切换后：模块数据随 bot_id 刷新（各页面按需再拉）
+  // 账号切换后：模块数据按当前账号 id 重新拉（各页面按需再拉）
   const { useModulesStore } = await import('@/stores/modules')
   await useModulesStore().load()
 }
@@ -257,7 +259,7 @@ onUnmounted(() => {
 
       <div class="topbar-account">
         <v-select
-          :model-value="bots.currentIndex"
+          :model-value="bots.currentId"
           :items="botOptions"
           label="当前账号"
           density="compact"
@@ -266,7 +268,7 @@ onUnmounted(() => {
           class="bot-select"
           menu-icon="mdi-chevron-down"
           :menu-props="{ contentClass: 'bot-select-menu', offset: 10 }"
-          @update:model-value="(v: number) => { bots.selectBot(v); onBotSelect() }"
+          @update:model-value="(v: string) => { bots.selectBot(v); onBotSelect() }"
         >
           <template #selection="{ item }">
             <div class="bot-select-value">
@@ -318,7 +320,7 @@ onUnmounted(() => {
             prepend-icon="mdi-plug"
             :disabled="isConnected || !hasCurrentBot || busyAction"
             title="连接当前账号"
-            @click="act(() => bots.connect(bots.currentIndex!), '已发送连接请求')"
+            @click="act(() => bots.connect(bots.currentId!), '已发送连接请求')"
           >
             <span class="btn-label">连接</span>
           </v-btn>
@@ -328,7 +330,7 @@ onUnmounted(() => {
             prepend-icon="mdi-unlink"
             :disabled="!isConnected || busyAction"
             title="断开当前账号"
-            @click="act(() => bots.disconnect(bots.currentIndex!), '已断开')"
+            @click="act(() => bots.disconnect(bots.currentId!), '已断开')"
           >
             <span class="btn-label">断开</span>
           </v-btn>
@@ -338,7 +340,7 @@ onUnmounted(() => {
             prepend-icon="mdi-restart"
             :disabled="!hasCurrentBot || busyAction"
             title="重连当前账号"
-            @click="act(() => bots.reconnect(bots.currentIndex!), '已发送重连请求')"
+            @click="act(() => bots.reconnect(bots.currentId!), '已发送重连请求')"
           >
             <span class="btn-label">重连</span>
           </v-btn>

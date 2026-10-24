@@ -16,8 +16,17 @@ export interface BotAccount {
   [key: string]: any
 }
 
+/**
+ * 账号数据。
+ *
+ * - `id`：账号唯一凭据（用户在「添加账号」时设定、创建后不可变）。**只用于前后端判断**，
+ *   不直接展示给用户；
+ * - `name`：展示名，卡片标题/顶栏选择器都用它；
+ * - `bot_id`：当前登录的 QQ 号，纯运行时信息（登录后才有，断线时前端回退快照展示）。
+ */
 export interface BotData {
-  index: number
+  id: string
+  name: string
   status: BotStatus
   bot_id?: number | null
   ws_url?: string
@@ -37,7 +46,8 @@ export interface BotData {
 }
 
 export interface BotConfig {
-  index: number
+  id: string
+  name: string
   ws_url: string
   access_token: string
   owner_id: number | null
@@ -45,19 +55,24 @@ export interface BotConfig {
   conn_mode: BotConnMode
 }
 
-/** 新增账号的请求体：先给连接方式，地址留空则由后端按模式补默认值 */
+/** 新增账号的请求体：id/name 由用户填，地址留空则由后端按模式补默认值 */
 export interface BotAddPayload {
+  id?: string
+  name?: string
   conn_mode: BotConnMode
   ws_url?: string
 }
 
 export interface BotAddResult {
-  index: number
+  id: string
+  name: string
   conn_mode: BotConnMode
   ws_url: string
 }
 
-const CURRENT_BOT_KEY = 'qqbot_current_bot_index'
+const CURRENT_BOT_KEY = 'qqbot_current_account_id'
+/** 旧版按数组下标记忆当前账号；升级后把它清掉，避免把下标当成 id 用 */
+const LEGACY_INDEX_KEY = 'qqbot_current_bot_index'
 
 /** 账号身份是否有效（user_id/bot_id 为 0 或空视为无账号） */
 function hasAccount(acc?: BotAccount | null): boolean {
@@ -76,39 +91,50 @@ export function resolveAccount(bot: BotData): BotAccount | null {
   return live ?? bot.login_info ?? bot.account ?? bot.last_account ?? null
 }
 
-/** 标题用 bot_id：离线时回退到上次登录账号的 user_id，保证「显示上一次连接的账号」 */
+/** 当前登录的 QQ 号（运行时信息，只用于展示；离线回退上次登录快照） */
 export function resolvedBotId(bot: BotData): number | null {
   if (bot.bot_id) return bot.bot_id
   const id = Number(resolveAccount(bot)?.user_id)
   return Number.isNaN(id) || id <= 0 ? null : id
 }
 
+/** 卡片/下拉里显示的名字（id 不给用户看） */
+export function displayName(bot: BotData): string {
+  return bot.name || bot.id
+}
+
 /** 账号（Bot）状态中心：列表 / 当前选中 / 连接控制 / WS 实时状态同步 */
 export const useBotsStore = defineStore('bots', () => {
   const bots = ref<BotData[]>([])
   const loading = ref(false)
-  const currentIndex = ref<number | null>(null)
+  /** 当前选中账号的 id（不是下标：id 不可变，删除别的账号不会让它指向别处） */
+  const currentId = ref<string | null>(null)
 
-  const currentBot = computed(() => bots.value.find((b) => b.index === currentIndex.value) ?? null)
+  const currentBot = computed(() => bots.value.find((b) => b.id === currentId.value) ?? null)
   const connectedCount = computed(() => bots.value.filter((b) => b.status === 'connected').length)
   const botCount = computed(() => bots.value.length)
 
+  /** 当前账号 id（组件里拼 API 参数用；没有选中账号时为 null） */
+  const currentAccountId = computed<string | null>(() => currentId.value)
+
   function restoreSelection() {
-    const stored = parseInt(localStorage.getItem(CURRENT_BOT_KEY) ?? '', 10)
-    if (!Number.isNaN(stored) && bots.value.some((b) => b.index === stored)) {
-      currentIndex.value = stored
+    localStorage.removeItem(LEGACY_INDEX_KEY)
+    const stored = localStorage.getItem(CURRENT_BOT_KEY) ?? ''
+    if (stored && bots.value.some((b) => b.id === stored)) {
+      currentId.value = stored
     } else if (bots.value.length) {
-      currentIndex.value = bots.value[0].index
+      currentId.value = bots.value[0].id
+      localStorage.setItem(CURRENT_BOT_KEY, currentId.value)
     } else {
-      currentIndex.value = null
+      currentId.value = null
     }
   }
 
-  function selectBot(index: number) {
-    // 只在状态列表已包含该索引时才选中，避免指向尚未同步的连接条目
-    if (!bots.value.some((b) => b.index === index)) return
-    currentIndex.value = index
-    localStorage.setItem(CURRENT_BOT_KEY, String(index))
+  function selectBot(id: string) {
+    // 只在状态列表已包含该 id 时才选中，避免指向尚未同步的连接条目
+    if (!bots.value.some((b) => b.id === id)) return
+    currentId.value = id
+    localStorage.setItem(CURRENT_BOT_KEY, id)
   }
 
   async function fetchBots(): Promise<BotData[]> {
@@ -116,7 +142,7 @@ export const useBotsStore = defineStore('bots', () => {
     try {
       const data = await http.get<{ bots: BotData[] }>('/api/bots')
       bots.value = data.data.bots || []
-      if (currentIndex.value === null || !bots.value.some((b) => b.index === currentIndex.value)) {
+      if (currentId.value === null || !bots.value.some((b) => b.id === currentId.value)) {
         restoreSelection()
       }
       return bots.value
@@ -140,29 +166,30 @@ export const useBotsStore = defineStore('bots', () => {
     return unwrap(data.data) as BotAddResult
   }
 
-  async function deleteBotConfig(index: number) {
-    const data = await http.post(`/api/bots/config/delete/${index}`)
+  async function deleteBotConfig(id: string) {
+    const data = await http.post(`/api/bots/config/delete/${encodeURIComponent(id)}`)
     return unwrap(data.data)
   }
 
-  async function connect(index: number) {
-    const data = await http.post(`/api/bots/${index}/connect`)
+  async function connect(id: string) {
+    const data = await http.post(`/api/bots/${encodeURIComponent(id)}/connect`)
     return unwrap(data.data)
   }
 
-  async function disconnect(index: number) {
-    const data = await http.post(`/api/bots/${index}/disconnect`)
+  async function disconnect(id: string) {
+    const data = await http.post(`/api/bots/${encodeURIComponent(id)}/disconnect`)
     return unwrap(data.data)
   }
 
-  async function reconnect(index: number) {
-    const data = await http.post(`/api/bots/${index}/reconnect`)
+  async function reconnect(id: string) {
+    const data = await http.post(`/api/bots/${encodeURIComponent(id)}/reconnect`)
     return unwrap(data.data)
   }
 
-  function patchStatus(bot: Partial<BotData>) {
-    const idx = bot.index
-    const target = bots.value.find((b) => b.index === idx)
+  function patchStatus(bot: Partial<BotData> & { id?: string }) {
+    const id = bot.id
+    if (!id) return
+    const target = bots.value.find((b) => b.id === id)
     if (target) {
       Object.assign(target, bot)
     } else {
@@ -183,7 +210,8 @@ export const useBotsStore = defineStore('bots', () => {
   return {
     bots,
     loading,
-    currentIndex,
+    currentId,
+    currentAccountId,
     currentBot,
     connectedCount,
     botCount,
