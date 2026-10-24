@@ -33,7 +33,7 @@ _parse_and_send（慢，仅第一个视频）
 | 密钥缓存 | 类级缓存 6 小时；遇 `-403` 视为密钥轮换，强刷后重试 |
 | 风控 | **不要在 `BILI_HEADERS` 里覆盖 `User-Agent`**：`impersonate="chrome"` 提供的是版本自洽指纹（TLS JA3/JA4 + h2 帧 + 自带 UA），写死旧 UA 就形成「指纹新、UA 旧」的矛盾 → 实测单次请求 10 次里 5 次被风控（`code=0` 但 `data` 只有 `v_voucher`）；**去掉 UA 覆盖后 0 次**（8 个视频 7 OK / 1 个受限稿件）。退避 2s/5s/10s ×4 次仅作 IP 限速兜底 |
 | 下载中断 | CDN 偶发 `curl: (92) HTTP/2 stream not closed cleanly`；实测 h2 与 v1.1 各 3 次均全量成功（31.7MB），与协议无关 |
-| 本地缓存 | 同一视频只下载一次：`module/data/bilibili_parser/video_cache/<bvid>_p1.mp4`，按 TTL + 容量上限淘汰 |
+| 本地缓存 | 同一视频只下载一次：`data/module/data/bilibili_parser/video_cache/<bvid>_p1.mp4`，按 TTL + 容量上限淘汰 |
 | 只下一个 | 一条消息命中多个视频时，只有**第一个**下载视频，其余只发简介节点 |
 
 ## 配置项

@@ -98,7 +98,7 @@ async def add_bot(
 - **三个 "module" 概念不要混**（命名撞车的根源，动手前先确认自己在说哪一个）：
   `app/plugin/` = 插件**框架**（`BaseModule`/注册表/权限/hook）；
   `app/plugins/` = 业务插件**实现**；
-  `module/plugins/` = zip 安装的**外部**插件。
+  `data/module/plugins/` = zip 安装的**外部**插件（运行时数据，不是代码）。
 
 ## 7. 错误处理与日志
 
@@ -259,7 +259,7 @@ pytest -q --cov --cov-report=term-missing   # 需要覆盖率时
 | 包职责说明 README | 0 份 | **27 份**，且由 `tests/architecture/test_architecture_layout.py` 强制 |
 | 超 800 行的源文件 | — | **1 个**（`config_schema.py`，数据 + DSL，刻意不拆） |
 | 前端套数 | 2 套（Vue + 手写 JS，约 4,800 行重复） | **1 套**（`app/webui/dashboard/dist`；旧版与 `/legacy` 已删） |
-| 业务插件位置 | `module/modules/`（仓库根） | **`app/plugins/`**（`module/` 只剩运行时数据） |
+| 业务插件位置 | `module/modules/`（仓库根） | **`app/plugins/`**（运行时数据在 `data/module/`） |
 | `app/` 顶层目录 | 10 个（含 `nodes` / `services`） | **8 个**（agent application core domain infrastructure plugin plugins webui） |
 | 插件框架名 | `app/modules/`（与 `module/` 字面混淆） | **`app/plugin/`**（单数=框架，复数=业务插件） |
 | 插件加载方式 | 硬编码包名 `module.modules.<name>` | **按文件路径加载**（合成包名，位置与 import 名解耦） |

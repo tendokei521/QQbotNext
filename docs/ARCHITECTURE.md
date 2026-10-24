@@ -333,11 +333,13 @@ docs/                设计文档 + 本方案（见 §4）
 |---|---|---|
 | `app/plugin/` | 插件**框架**（加载/分发/权限/API） | 改框架才动 |
 | `app/plugins/` | 13 个**业务插件**代码 | 加/改业务功能动 |
-| `module/` | 插件**运行时数据**（configs / data / zip 安装） | 用户数据，不动 |
+| `data/module/` | 插件**运行时数据**（configs / data / zip 安装 / 软卸载状态） | 用户数据，不动 |
 
-原来的 `module/modules`（业务代码）已搬进 `app/plugins/`；`module/plugins`（zip 安装）
-保留原地。剩下仍值得做的：把 `app/plugin/` 改名 `app/plugin/`（单数=框架），
-顺带把 `app/nodes/` 并进 `plugin/nodes/`，这样 `modules` 与 `module` 的字面混淆彻底消失。
+原来的 `module/modules`（业务代码）已搬进 `app/plugins/`；运行时数据后来也从仓库根
+`module/` 搬进 `data/module/`（`app/infrastructure/fs/migrate.py`，启动时幂等迁移），
+仓库根不再有 `module/` 这个目录——三个 "module" 的字面混淆到此彻底消失。
+剩下仍值得做的：`app/plugin/`（单数=框架）与 `plugin/nodes/` 的归并
+（`app/nodes/` 并进 `plugin/nodes/`）。
 下表是这一步的逐文件去向（**尚未执行**）：
 
 | 现文件 | 行 | 目标 | 动作 |
@@ -420,12 +422,17 @@ docs/                设计文档 + 本方案（见 §4）
 配套的关键改造：插件加载器从「硬编码包名 `module.modules.<name>`」改为**按文件路径加载**
 （合成包名 `qqbot_plugin_<name>`），插件位置不再被字符串焊死。
 
+**后续（已执行）**：仓库根 `module/` 这个「只剩运行时数据却还叫 module」的目录也彻底去掉了，
+运行时数据统一进 `data/module/`（`MODULE_DIR` 默认值，`app/infrastructure/fs/migrate.py`
+在启动时幂等搬旧布局）。当时担心"迁移会让已部署配置失效"，实际做法是**移动而非改写**，
+文件名与结构保持不变，所以 `Settings.module_dir` 一改，已部署数据搬过去即继续可用。
+
 | 曾计划 | 实际 | 说明 |
 |---|---|---|
 | `plugins/builtin/<name>/` | **`app/plugins/<name>/`** | 比"仓库根 plugins/"更符合「代码在 app 下」 |
-| `module/configs/` → `data/plugins/configs/` | **不动** | 迁移会让已部署配置失效，收益不抵风险 |
-| `module/data/` → `data/plugins/` | **不动** | 同上 |
-| `module/CONFIG_SCHEMA.md` → `docs/` | **仍留在 `module/`** | 待办：文档混在数据目录里，后续可挪 |
+| `module/configs/` → `data/plugins/configs/` | **`data/module/configs/`** | 跟着 `MODULE_DIR` 走；启动时从旧位置幂等搬运 |
+| `module/data/` → `data/plugins/` | **`data/module/data/`** | 同上 |
+| `module/CONFIG_SCHEMA.md` → `docs/` | **已删**（`1f01ad3`） | 内容已并入 `docs/MODULE_DEV.md` |
 
 各插件内部评估（未变）：
 

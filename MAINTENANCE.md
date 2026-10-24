@@ -27,17 +27,15 @@ app/
 ├── nodes/               MessageNode 框架（base/registry/outbound）——消息分发「一切皆节点」
 ├── services/            bot_service / scheduler(定时) / log_service / provider(数据源)
 └── webui/               管理后台（api/ + schemas/ + templates/ + static/）
-module/                  ★ 插件目录（三级结构）
-├── modules/             业务插件主体（`<name>/module.py` 必须；`config_schema.py`/`service.py`/`pages/` 可选）
-├── configs/             每模块配置（<name>/config.json + authority.json，迁移源）
-└── data/                每模块可选持久化数据（get_data_path 自动创建）
-data/                    SQLite（app.db）+ 框架级 LLM 数据（data/llm）
+data/                    SQLite（app.db）+ LLM 数据（data/llm）+ 插件运行时数据（data/module/）
+├── module/              ★ 插件运行时数据根（MODULE_DIR）：configs/ + data/ + plugins(zip) + uninstalled_modules.json
 logs/                    debug.log / warn.log / errors.log / user.log + 归档目录
 ```
 
-> **注意**：模块配置迁移源从旧的 `modules/<name>/configs.json`、`authority.json` 迁到
-> `module/configs/<name>/config.json`、`authority.json`；模块主体代码在 `app/plugins/<name>/`。
-> 首次启动若 DB 为空，自动从 `module/configs/*/` 迁移一次，之后以 SQLite 为准。
+> **注意**：模块配置迁移源是 `data/module/configs/<name>/config.json`、`authority.json`
+> （老布局 `module/configs/` 仍会被读，启动时也会自动搬进 `data/module/`）；
+> 模块主体代码在 `app/plugins/<name>/`。首次启动若 DB 为空，自动从 `data/module/configs/*/` 迁移一次，
+> 之后以 SQLite 为准。
 
 > ⚠️ 上图的「分层」与实际依赖并不完全一致：`app/agent/` 被 24 个文件互为循环依赖（12,112 行），
 > `app/webui/api/` 也在该环内。改动前请先读 **`STYLE.md §12 已知架构债`**。
@@ -82,7 +80,7 @@ python main.py
 | `LOG_DIR` | `logs` | 日志目录 |
 | `WS_CONNECT_TIMEOUT` | `30` | 连接超时（秒） |
 | `WS_PING_INTERVAL` / `WS_PING_TIMEOUT` | `30`/`10` | WebSocket 心跳 |
-| `MODULE_DIR` | `module` | 插件运行时数据根目录（configs / data / plugins(zip)） |
+| `MODULE_DIR` | `data/module` | 插件运行时数据根目录（configs / data / plugins(zip) / 软卸载状态） |
 | `PLUGINS_DIR` | `app/plugins` | 业务插件代码目录 |
 
 > `.env` 只喂 `pydantic-settings`，**不会**进入 `os.environ`。像 `QQBOT_LLM_DATA_DIR`
@@ -98,7 +96,7 @@ python main.py
 - 模块配置 + 权限（启停 / 黑白名单）
 - WebUI 偏好（日志显示级别 / “显示原始日志”开关 / 单一服务 / 多群管理）
 
-> **旧 JSON 迁移**：首次启动若 DB 为空，会从 `webserver/webconfig.json`、`webui/webui_config.json`、`module/configs/*/config.json`、`module/configs/*/authority.json` 自动迁移一次。迁移后以 SQLite 为准，旧 JSON 仅作迁移源保留。
+> **旧 JSON 迁移**：首次启动若 DB 为空，会从 `webserver/webconfig.json`、`webui/webui_config.json`、`data/module/configs/*/config.json`、`data/module/configs/*/authority.json` 自动迁移一次。迁移后以 SQLite 为准，旧 JSON 仅作迁移源保留。
 
 ## 5. 日志
 
@@ -139,7 +137,7 @@ python main.py
 
 ### 7.1 模块结构
 
-每个插件 = `app/plugins/<name>/`（模块内部用相对导入）＋ `module/configs/<name>/`（配置迁移源）：
+每个插件 = `app/plugins/<name>/`（模块内部用相对导入）＋ `data/module/configs/<name>/`（配置迁移源）：
 
 ```
 app/plugins/<name>/
@@ -147,10 +145,10 @@ app/plugins/<name>/
   config_schema.py       可选：WebUI 表单定义
   service.py             可选：业务逻辑（业务一多就升级成 service/ 子包）
   pages/index.html       可选：自定义配置页
-module/configs/<name>/
+data/module/configs/<name>/
   config.json            配置迁移源（首次启动迁入 SQLite，之后以 SQLite 为准）
   authority.json         权限迁移源
-module/data/<name>/      可选持久化数据（get_data_path 自动创建）
+data/module/data/<name>/ 可选持久化数据（get_data_path 自动创建）
 ```
 
 > 只有 `module.py` 是必需的。现状里 13 个插件有 4 个没有 `service.py`（逻辑直接在 `module.py`），

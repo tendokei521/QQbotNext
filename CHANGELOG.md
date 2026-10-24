@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### 变更：插件运行时目录 `module/` 取消，统一到 `data/module/`
+
+仓库根的 `module/` 是「只剩运行时数据、却还叫 module」的历史遗留：它与 `data/`
+（SQLite / LLM 数据）并列成两套运行时目录，找数据要看两处，且和 `app/plugin/`（框架）、
+`app/plugins/`（业务插件）三个 "module" 概念持续撞车。现在彻底去掉：
+
+- `Settings.module_dir` 默认值 → `data/module`（`.env` 的 `MODULE_DIR` 同步为 `data/module`）；
+- 新增 `app/infrastructure/fs/migrate.py`：启动时幂等把旧 `<root>/module/` 整棵树搬进
+  `data/module/`（**只移动不改写**；目标已有同名文件时保留目标并日志点名冲突，不覆盖用户数据）；
+- 旧 JSON 配置迁移同时接受 `data/module/configs/`（新）与 `module/configs/`（老）；
+- `pyproject.toml` 去掉 `module*` 打包/覆盖率/ruff 路径，`.gitignore` 改为 `data/module/`；
+- `module/uninstalled_modules.json` 是**机器本地状态**，此前被误提交入库（`af3ed7e`），
+  现已 untrack 并忽略。
+
+升级说明：直接启动即可，无需手工搬文件；若你的 shell 里手工设过环境变量 `MODULE_DIR=module`，
+请删掉它（环境变量优先于 `.env`，否则数据会继续写进老目录）。
+
 ### 变更：账号「存在」即可编辑配置，不再要求连接成功
 
 历史前提是「`bot_id` 只有登录后才知道」，于是运行时与模块实例都挂在登录回调上，连带一堆

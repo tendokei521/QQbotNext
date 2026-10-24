@@ -124,7 +124,7 @@ python main.py
    已存在则只补空令牌，不覆盖你写的内容；
 2. 初始化 `data/app.db`；
 3. **自动从旧 JSON 文件迁移配置**（`webserver/webconfig.json`、`webui/webui_config.json`、
-   `module/configs/*/config.json`、`module/configs/*/authority.json`）——首次运行后以 SQLite 为准；
+   `data/module/configs/*/config.json`、`data/module/configs/*/authority.json`）——首次运行后以 SQLite 为准；
 4. 按配置自动连接 `auto_connect=true` 的账号，加载对应模块；
 5. 启动 WebUI（默认 `http://127.0.0.1:9200`）与定时调度器。
 
@@ -151,7 +151,7 @@ python main.py
 | `LOG_DIR` | `logs` | 日志目录（日志面板与 `/log` 指令都读它） |
 | `WS_CONNECT_TIMEOUT` | `30` | WebSocket 连接超时（秒） |
 | `WS_PING_INTERVAL` / `WS_PING_TIMEOUT` | `30` / `10` | WebSocket 心跳间隔 / 超时（秒） |
-| `MODULE_DIR` | `module` | 插件运行时数据根目录（configs / data / plugins(zip) / uninstalled_modules.json） |
+| `MODULE_DIR` | `data/module` | 插件运行时数据根目录（configs / data / plugins(zip) / uninstalled_modules.json）；老布局仓库根 `module/` 启动时自动搬过来 |
 | `PLUGINS_DIR` | `app/plugins` | 业务插件**代码**目录（可指向别处换一套插件集） |
 
 > 变量名 = `app/core/settings.py` 的字段名大写，**环境变量优先于 `.env`**。键清单的唯一来源是
@@ -531,10 +531,10 @@ Agent 配置已从通用表单升级为**专属领域页面**：
 |---|---|
 | `get_modules()` | 已加载模块对象列表 |
 | `get_features(bot_id=None)` | 全局能力注册表状态（含接管者） |
-| `get_config_path(name)` | 模块配置目录 `module/configs/<name>/` |
-| `get_data_path(name)` | 模块数据目录 `module/data/<name>/`（自动创建，供持久化自定义数据） |
+| `get_config_path(name)` | 模块配置目录 `data/module/configs/<name>/` |
+| `get_data_path(name)` | 模块数据目录 `data/module/data/<name>/`（自动创建，供持久化自定义数据） |
 
-配置/权限迁移源文件：`module/configs/<name>/config.json` + `authority.json`（首次启动迁移进 SQLite，之后以 SQLite 为准）。
+配置/权限迁移源文件：`data/module/configs/<name>/config.json` + `authority.json`（首次启动迁移进 SQLite，之后以 SQLite 为准）。
 
 ## 事件类型（subscribe 可用值）
 

@@ -36,7 +36,7 @@ _parse_and_send（慢，仅第一个作品）
 | 图集 / Live 图 | Live 图取 `images[].video.play_addr`（存 **mp4**）；静态图取 `url_list`；兜底 `download_url_list`；同图集按「去掉查询串」去重 |
 | 体积上限 | 抖音接口**不返回文件大小**，所以是「边下边卡」：超过 `video_max_mb` 立即中断，不再白下几百 MB |
 | 下载容错 | CDN 偶发中断 → 回滚到起始偏移再重试（不回滚会写进重复字节）；失败清理 `.part` 半成品 |
-| 本地缓存 | 同一作品只下载一次：`module/data/douyin_parser/media_cache/<aweme_id>.mp4`（图集 `<aweme_id>_001.jpg`），按 TTL + 容量上限淘汰 |
+| 本地缓存 | 同一作品只下载一次：`data/module/data/douyin_parser/media_cache/<aweme_id>.mp4`（图集 `<aweme_id>_001.jpg`），按 TTL + 容量上限淘汰 |
 | 只下一个 | 一条消息命中多个作品时，只有**第一个**下载媒体，其余只发文案节点 |
 | User-Agent | 默认沿用 curl_cffi 指纹自带的 UA（bilibili_parser 实测：写死旧 UA 会造成「指纹新、UA 旧」矛盾而被风控）；`user_agent` 配置可逐字复刻上游环境 |
 
