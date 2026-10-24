@@ -77,6 +77,10 @@ async def register_daily_schedule(
 ) -> bool:
     """按配置的每日时间动态注册定时任务；未启用则注销（模块 on_load 调用）。
 
+    **离线（账号未连接）时一律不注册**，返回 False：装配可以发生在建号时，但计时器只
+    能在连上 QQ 之后才开始跑。模块应在 ``on_online()`` 里再调一次本函数（上线补注册），
+    并在 ``on_offline()`` 里让框架注销（`ModuleRegistry.notify_offline` 会自动做）。
+
     Args:
         module: 模块实例（须有 ctx.services.scheduler）
         key_suffix: 任务 key 后缀（如 "daily" / "cron"），同模块同后缀互斥
@@ -87,6 +91,8 @@ async def register_daily_schedule(
     scheduler = module.ctx.services.scheduler
     if scheduler is None or module.bot_id is None:
         return False
+    if not _runtime_online(module):
+        return False
     if not module.config.get(enable_key, False):
         await scheduler.unload_module(module.module_name, module.bot_id)
         return False
@@ -94,3 +100,15 @@ async def register_daily_schedule(
     key = f"{module.module_name}:{module.bot_id}:{key_suffix}"
     await scheduler.register(key, time_str, handler_factory())
     return True
+
+
+def _runtime_online(module) -> bool:
+    """该模块所属账号是否已连上（运行时不存在或离线都算离线）。"""
+    runtime = getattr(module, "_runtime", None)
+    if not callable(runtime):
+        return False
+    try:
+        live = runtime()
+    except Exception:  # noqa: BLE001 —— 取运行时失败按离线处理，绝不因此注册计时器
+        return False
+    return bool(getattr(live, "online", False))

@@ -247,10 +247,15 @@ def register_hooks(
     _register_runtime_capabilities(instance, cls, bot_id, services)
 
 
-async def register_data_sources(instance: BaseModule, module_name: str, services: ServiceAccess, log) -> None:
+async def register_data_sources(
+    instance: BaseModule, module_name: str, services: ServiceAccess, log, *, online: bool = True,
+) -> None:
     """声明式数据源（list/dynamic）+ 定时任务 + `requires` 依赖自检。
 
     三者都是「声明即接入」，失败只警告不阻断——模块自行降级。
+
+    ``online=False``（账号还没连上）时**跳过定时任务注册**：装配可以离线发生，但计时器
+    不能。上线后由 ``ModuleRegistry.notify_online()`` 补注册，保证"离线不跑任务"。
     """
     providers = services.providers if services else None
     if providers is not None:
@@ -260,11 +265,13 @@ async def register_data_sources(instance: BaseModule, module_name: str, services
             log.warning(f"[Module] {module_name} 数据源注册异常: {e}")
 
     scheduler = services.scheduler if services else None
-    if scheduler is not None:
+    if scheduler is not None and online:
         try:
             await scheduler.register_module(instance)
         except Exception as e:  # noqa: BLE001
             log.warning(f"[Module] {module_name} 定时任务注册异常: {e}")
+    elif scheduler is not None:
+        log.debug(f"[Module] {module_name} 离线装配：定时任务待上线后注册")
 
     try:
         missing = instance.missing_requirements()

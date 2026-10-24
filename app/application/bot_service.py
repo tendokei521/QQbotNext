@@ -26,27 +26,99 @@ class BotService:
 
         # 网关回调注入：登录装配 / 事件派发 / 配置读取
         self.gateway.login_handler = self.on_bot_login
+        self.gateway.status_handler = self.on_bot_status
         self.gateway.dispatch_handler = self.dispatcher.dispatch
         self.gateway.bots_provider = self.config_service.get_bots
         # 上次登录账号快照：登录成功写入，查询时读取（断开后前端回退展示）
         self.gateway.account_saver = self.on_account_login
         self.gateway.account_lookup = self.config_service.get_bot_accounts
 
+    # ==================== 账号装配（不要求连接） ====================
+    async def ensure_account(self, account_id: str) -> bool:
+        """确保账号的运行时与模块实例已装配——**只要求账号存在，不要求连上**。
+
+        自 v4 起 ``account_id`` 在「添加账号」时就生成且不可变，配置归属不再依赖登录，
+        所以装配时机跟着提前：启动、建号都会走这里，Agent 配置页/模块配置页因此可以
+        「离线编辑」。真正的联网行为（定时任务、主动消息、收发）由 ``on_online`` 决定，
+        ``AgentRuntime.online`` 在登录前恒为 False，见 `app/agent/runtime.py`。
+        """
+        if not account_id:
+            return False
+        if not self._account_exists(account_id):
+            return False
+        if self.agent_manager is not None:
+            self.agent_manager.ensure_runtime(account_id)
+        await self.registry.load_all(account_id, bot=None)
+        return True
+
+    async def ensure_accounts(self) -> int:
+        """启动时按配置装配全部账号（运行时 + 模块实例），返回装配的账号数。
+
+        与 `ensure_account` 的区别只是批量；语义相同：**不要求连接**。
+        已删除账号（配置里没了）的运行时会被回收。
+        """
+        try:
+            account_ids = [str(b.get("id")) for b in self.config_service.get_bots() if b.get("id")]
+        except Exception as e:  # noqa: BLE001 —— 读配置失败不该让启动崩掉
+            logger.warning(f"[BotService] 启动装配读取账号失败: {e}")
+            return 0
+        if self.agent_manager is not None:
+            self.agent_manager.sync_accounts(account_ids)
+        count = 0
+        for account_id in account_ids:
+            if await self.ensure_account(account_id):
+                count += 1
+        if count:
+            logger.info(f"[BotService] 已按配置装配 {count} 个账号（未连接，仅配置可用）")
+        return count
+
+    def _account_exists(self, account_id: Any) -> bool:
+        if account_id in (None, ""):
+            return False
+        try:
+            return any(str(b.get("id")) == str(account_id) for b in self.config_service.get_bots())
+        except Exception as e:  # noqa: BLE001 —— 配置读失败按"不存在"处理，调用方会 404
+            logger.warning(f"[BotService] 读取账号清单失败: {e}")
+            return False
+
     # ==================== 登录装配 ====================
     async def on_bot_login(self, conn: IBot) -> None:
         # 先装配 Agent 运行时，再加载模块；这样模块的 @llm_hook 才能注册到 runtime.llm_hooks。
         # 键一律用 account_id（账号 id，用户设定且不可变）——不能再用 QQ 号：同一账号
         # 换个 QQ 登录时配置应当跟着账号走，而不是跟着 QQ 走。
+        runtime = None
         if self.agent_manager is not None:
             bind = getattr(self.agent_manager, "bind_account", None) or self.agent_manager.ensure_runtime
-            bind(conn.account_id, bot=conn)
+            runtime = bind(conn.account_id, bot=conn)
+        # 模块多半在"账号存在"时已装配（此时 bot=None）：登录只补齐缺的实例，并重绑连接
         await self.registry.load_all(conn.account_id, bot=conn)
+        self.registry.rebind_bot(conn.account_id, conn)
+        if runtime is not None:
+            runtime.set_online(True)
+        # 上线：模块在这里才允许启动计时器/主动消息（离线期间一律不跑）
+        await self.registry.notify_online(conn.account_id)
         logger.info(f"[BotService] 账号「{getattr(conn, 'label', '?')}」模块装配完成")
         if self.lifecycle_hooks is not None:
             try:
                 await self.lifecycle_hooks.run(conn, "login", "已登录")
             except Exception as e:
                 logger.warning(f"[BotService] 登录钩子执行异常: {e}")
+
+    async def on_bot_status(self, conn: IBot, state: str, detail: str = "") -> None:
+        """连接状态变化（网关在 ``_notify_status`` 里回调）。
+
+        断开/出错 → 立刻把运行时标为离线并让模块 ``on_offline()`` 停掉自己启动的东西。
+        此前断线只广播状态，定时任务/主动消息仍对着死连接继续跑，属于遗留缺陷。
+        """
+        if state not in ("disconnected", "error"):
+            return
+        account_id = getattr(conn, "account_id", None)
+        if not account_id:
+            return
+        runtime = self.agent_manager.get_runtime(account_id) if self.agent_manager else None
+        if runtime is not None and runtime.set_online(False):
+            logger.info(f"[BotService] 账号「{getattr(conn, 'label', '?')}」已离线：停掉定时任务与主动消息")
+        await self.registry.notify_offline(account_id)
 
     async def on_account_login(self, account_id: str, bot_id: int | None, nickname: str) -> bool:
         """登录成功 → 记录该账号本次登录的 QQ 快照。
@@ -111,11 +183,21 @@ class BotService:
             ws_url, owner_id, auto_connect, account_id=account_id,
             conn_mode=conn_mode, name=self.config_service.get_account_name(account_id),
         )
+        # 建号即装配：账号 id 此时已确定，配置页从这一刻起就能用（不必等连接）
+        await self.ensure_account(account_id)
         return account_id
 
     async def delete_bot(self, account_id: str) -> bool:
         await self.gateway.del_bot(account_id)
-        return await self.config_service.delete_bot(account_id)
+        deleted = await self.config_service.delete_bot(account_id)
+        # 回收运行时与模块实例：否则删掉的账号会留下幽灵运行时（内存/计时器/会话常驻）
+        if self.agent_manager is not None:
+            self.agent_manager.drop_runtime(account_id, f"账号 {account_id} 已删除")
+        try:
+            await self.registry.unload(account_id)
+        except Exception as e:  # noqa: BLE001 —— 卸载失败不该阻断删号
+            logger.warning(f"[BotService] 删除账号后卸载模块异常: {e}")
+        return deleted
 
     async def save_bots_config(self, bots: list[dict]) -> None:
         await self.config_service.save_bots(bots)

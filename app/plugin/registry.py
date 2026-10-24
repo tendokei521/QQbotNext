@@ -55,6 +55,67 @@ class ModuleRegistry:
     def loaded_map(self) -> dict[str, dict[Any, BaseModule]]:
         return {name: dict(bots) for name, bots in self._modules.items()}
 
+    def account_modules(self, bot_id: Any) -> list[BaseModule]:
+        """某个账号已装配的全部模块实例（不含全局 None 实例）。"""
+        if bot_id is None:
+            return []
+        result: list[BaseModule] = []
+        for bot_modules in self._modules.values():
+            instance = bot_modules.get(bot_id)
+            if instance is not None:
+                result.append(instance)
+        return result
+
+    async def notify_online(self, bot_id: Any) -> int:
+        """账号连上：逐个调用该账号模块的 ``on_online()``，并补注册模块级定时任务。
+
+        返回通知到的模块数。单个模块抛错只记日志——上线流程不能因为一个插件挂掉而中断。
+        """
+        instances = self.account_modules(bot_id)
+        scheduler = getattr(self.services, "scheduler", None) if self.services else None
+        for instance in instances:
+            if scheduler is not None:
+                try:
+                    await scheduler.register_module(instance)
+                except Exception as e:  # noqa: BLE001
+                    self.log.warning(f"[Module] {instance.module_name} 上线后定时任务注册异常: {e}")
+            try:
+                await instance.on_online()
+            except Exception as e:  # noqa: BLE001
+                self.log.warning(f"[Module] {instance.module_name} on_online 异常: {e}")
+        return len(instances)
+
+    async def notify_offline(self, bot_id: Any) -> int:
+        """账号断开：逐个调用 ``on_offline()`` 并注销模块级定时任务（防止对着死连接发消息）。"""
+        instances = self.account_modules(bot_id)
+        scheduler = getattr(self.services, "scheduler", None) if self.services else None
+        for instance in instances:
+            try:
+                await instance.on_offline()
+            except Exception as e:  # noqa: BLE001
+                self.log.warning(f"[Module] {instance.module_name} on_offline 异常: {e}")
+            if scheduler is not None:
+                try:
+                    await scheduler.unload_module(instance.module_name, bot_id)
+                except Exception as e:  # noqa: BLE001
+                    self.log.warning(f"[Module] {instance.module_name} 断线后定时任务注销异常: {e}")
+        return len(instances)
+
+    def rebind_bot(self, bot_id: Any, bot: IBot | None) -> int:
+        """把某个账号所有已装配模块的 ``ctx.bot`` 重绑到当前连接。
+
+        装配发生在建号时（那时还没有连接），登录时连接才出现；模块实例如果不重绑，
+        ``ctx.bot`` 会一直是 None，凡是直接读 ``self.ctx.bot`` 的插件都会失效。
+        """
+        count = 0
+        for instance in self.account_modules(bot_id):
+            try:
+                instance.ctx.bot = bot
+                count += 1
+            except Exception as e:  # noqa: BLE001
+                self.log.debug(f"[Module] {instance.module_name} 重绑连接失败（已忽略）: {e}")
+        return count
+
     def get(self, module_name: str, bot_id: Any = None) -> BaseModule | None:
         """取指定 bot 的模块实例；无 bot 专属实例时回退到全局(None)实例。"""
         if module_name not in self._modules:
@@ -187,7 +248,11 @@ class ModuleRegistry:
             loader.bind_commands(instance, cls, self.log)
             self._modules.setdefault(module_name, {})[bot_id] = instance
             loader.register_hooks(instance, cls, llm_hooks, bot_id, self.services, self.log)
-            await loader.register_data_sources(instance, module_name, self.services, self.log)
+            # 在线装配才注册模块级定时任务：离线装配不能武装任何计时器
+            # （上线后由 `notify_online()` 补注册，见 BotService）
+            await loader.register_data_sources(
+                instance, module_name, self.services, self.log, online=bot is not None,
+            )
             await loader.activate(instance, module_name, self.services, self.log)
 
             # 递归加载子模块：父模块目录下、含 main.py 的子目录（忽略 service/ 等普通目录）

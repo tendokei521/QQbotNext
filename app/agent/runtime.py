@@ -83,13 +83,28 @@ class _Ctx:
 
 
 class AgentRuntime:
-    """单个 Bot 的 Agent 运行时（模块兼容接口）。"""
+    """单个 Bot 的 Agent 运行时（模块兼容接口）。
+
+    ## 在线状态（``online``）与「装配 ≠ 可跑」
+
+    运行时的**存在**只表示「这个账号的配置有归属」（账号在创建时就有 id，不必等连接），
+    所以启动/建号时就会装配它——但**装配不等于可以跑任务**：
+
+    - ``online=False``（默认）：只能读写配置、列出会话；定时任务、主动消息、消息收发
+      一律不启动，模块里的计时器也不会武装；
+    - ``online=True``：由 ``BotService.on_bot_login`` 在真正登录成功后置位，并逐个
+      调用该账号模块的 ``on_online()``（见 `BaseModule`），此时才允许跑任务；
+    - 断线（``disconnected`` / ``error``）立即翻回 False，并调用模块 ``on_offline()``，
+      把计时器停掉——否则断线后定时任务还会对着死连接硬发（历史遗留缺陷）。
+    """
 
     name = "LLM Agent"
     module_name = "llm_chat_v2"
 
     def __init__(self, bot_id: Any, config_service, task_manager, bot=None, provider_runtime_manager=None) -> None:
         self.bot_id = bot_id
+        #: 是否已连上 QQ（只有连上才允许跑定时任务/主动消息/收发）
+        self.online = False
         self.config_service = config_service
         self.config = AgentConfig(config_service, bot_id)
         self.config.migrate_from_legacy()  # 首启从 llm_chat_v2 迁移配置与权限
@@ -312,6 +327,13 @@ class AgentRuntime:
         self._bot = bot
         self.ctx.bot = bot
 
+    def set_online(self, online: bool) -> bool:
+        """翻转「已连接」标志，返回是否真的发生变化（幂等，重复调用无副作用）。"""
+        online = bool(online)
+        changed = online != self.online
+        self.online = online
+        return changed
+
     def detach_bot(self) -> None:
         """解绑连接（换号路径用）：运行时保留但不再持有旧连接对象。
 
@@ -442,6 +464,33 @@ class AgentManager:
 
     def get_runtime(self, bot_id: Any) -> AgentRuntime | None:
         return self._runtimes.get(bot_id)
+
+    def drop_runtime(self, bot_id: Any, reason: str = "") -> None:
+        """停掉并移除某个账号的运行时（账号被删除 / 换号回收）。
+
+        没有这一步时，删掉的账号会留下"幽灵运行时"：会话管理器、telemetry、工具注册表
+        都还挂在内存里，且它的计时器仍可能继续跑。
+        """
+        if bot_id is None:
+            return
+        runtime = self._runtimes.pop(bot_id, None)
+        if runtime is None:
+            return
+        runtime.set_online(False)
+        self._evict_runtime(runtime, reason or f"账号 {bot_id} 已移除")
+
+    def sync_accounts(self, account_ids) -> None:
+        """按「当前配置里真实存在的账号」对齐运行时集合。
+
+        存在的补齐（**不要求连接**：账号一创建就有 id，配置就该能编辑），
+        已删除的回收。返回值为空——调用方通常紧接着按账号装配模块。
+        """
+        wanted = {str(a) for a in (account_ids or []) if a not in (None, "")}
+        for account_id in wanted:
+            self.ensure_runtime(account_id)
+        for key in list(self._runtimes.keys()):
+            if str(key) not in wanted:
+                self.drop_runtime(key, f"账号 {key} 已不在配置中")
 
     def runtimes(self) -> dict[Any, AgentRuntime]:
         return dict(self._runtimes)

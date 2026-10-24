@@ -426,8 +426,13 @@ async def run(settings: Settings | None = None) -> None:
     bot_service = _container.get(BotService)
     scheduler = _container.get(SchedulerService)
 
+    # 按「配置里存在的账号」装配运行时与模块实例 —— **不要求连接**。
+    # 账号 id 在创建时就确定（v4），所以配置类页面（Agent / 模块 / 人格）离线也要能用；
+    # 真正的联网行为由 runtime.online 控制，登录前恒为 False（见 app/agent/runtime.py）。
+    await bot_service.ensure_accounts()
+
     await bot_service.start()
-    # 定时任务在模块加载时自动注册并启动，无需手动 start
+    # 定时任务在「账号上线」时注册并启动（离线装配不会武装任何计时器）
 
     # 启动 WebUI
     import uvicorn

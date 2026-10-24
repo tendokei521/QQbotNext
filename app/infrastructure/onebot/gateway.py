@@ -96,6 +96,8 @@ class OneBotGateway(GatewayLifecycleMixin):
         self.before_send_hook_registry = None
         self.api_hook_registry = None
         self.lifecycle_hook_registry = None
+        # 状态变化回调（BotService 注入）：conn, state, detail → 离线时停任务
+        self.status_handler: Callable[[Any, str, str], Awaitable[None]] | None = None
 
     # ==================== 对外查询 ====================
     def get_last_account(self, account_id: str) -> dict | None:
@@ -193,6 +195,13 @@ class OneBotGateway(GatewayLifecycleMixin):
                 await self.lifecycle_hook_registry.run(conn, state, detail)
             except Exception as e:
                 self.log.warning(f"[Gateway] 生命周期钩子执行失败: {e}")
+
+        # 框架级状态回调（BotService）：断开/出错时把运行时标离线并停掉定时任务与主动消息
+        if self.status_handler is not None:
+            try:
+                await self.status_handler(conn, state, detail)
+            except Exception as e:
+                self.log.warning(f"[Gateway] 状态回调失败: {e}")
 
     # ==================== 连接管理 ====================
     async def add_bot(
