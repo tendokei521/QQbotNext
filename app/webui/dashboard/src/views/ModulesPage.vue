@@ -18,7 +18,7 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const installing = ref(false)
 
 const PERMISSION_LABEL: Record<string, string> = {
-  everyone: '所有人',
+  everyone: '不限制',
   member: '成员',
   group_admin: '管理员',
   group_owner: '群主',
@@ -26,7 +26,7 @@ const PERMISSION_LABEL: Record<string, string> = {
 }
 
 const PERMISSION_COLOR: Record<string, string> = {
-  everyone: 'success',
+  everyone: 'grey',
   member: 'primary',
   group_admin: 'info',
   group_owner: 'purple',
@@ -209,9 +209,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                   <v-chip v-if="m.supersedes?.length" size="x-small" class="ml-1" color="warning" variant="tonal">
                     接管: {{ m.supersedes.join(', ') }}
                   </v-chip>
-                  <v-chip v-if="m.single_service" size="x-small" class="ml-1" color="purple" variant="tonal">
-                    单一服务
-                  </v-chip>
                 </v-card-title>
                 <v-card-subtitle class="app-line-clamp-2">{{ m.description }}</v-card-subtitle>
                 <template #append>
@@ -270,9 +267,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                   </v-chip>
                   <v-chip v-if="m.supersedes?.length" size="x-small" class="ml-1" color="warning" variant="tonal">
                     接管: {{ m.supersedes.join(', ') }}
-                  </v-chip>
-                  <v-chip v-if="m.single_service" size="x-small" class="ml-1" color="purple" variant="tonal">
-                    单一服务
                   </v-chip>
                 </v-card-title>
                 <v-card-subtitle class="app-line-clamp-2">{{ m.description }}</v-card-subtitle>

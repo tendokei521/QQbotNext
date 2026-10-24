@@ -41,11 +41,19 @@ watch(mod, (m) => {
 })
 
 const PERMISSION_LABEL: Record<string, string> = {
-  everyone: '所有人',
+  everyone: '不限制',
   member: '成员',
   group_admin: '管理员',
   group_owner: '群主',
   owner: '所有者',
+}
+
+const PERMISSION_COLOR: Record<string, string> = {
+  everyone: 'grey',
+  member: 'primary',
+  group_admin: 'info',
+  group_owner: 'purple',
+  owner: 'error',
 }
 
 // ---------- 配置草稿 + 自动保存 ----------
@@ -297,7 +305,7 @@ onUnmounted(() => {
         <v-btn variant="text" icon="mdi-arrow-left" size="small" title="返回模块列表" @click="router.push('/modules')" />
         <h1 class="app-page-title">{{ mod.name }}</h1>
         <v-chip size="small" variant="tonal" color="primary">{{ mod.name_sign }}</v-chip>
-        <v-chip size="small" variant="tonal" :color="PERMISSION_LABEL[mod.permission] ? 'info' : 'default'">
+        <v-chip size="small" variant="tonal" :color="PERMISSION_COLOR[mod.permission] || 'default'">
           {{ PERMISSION_LABEL[mod.permission] || mod.permission }}
         </v-chip>
         <v-chip v-if="mod.account_id" size="small" variant="tonal">{{ bots.currentBot?.name ?? mod.account_id }}</v-chip>
