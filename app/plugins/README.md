@@ -22,22 +22,25 @@ app/plugins/<name>/
 
 ## 现有插件
 
-| 插件 | 干什么 |
-|---|---|
-| `astrbot_alignment` | 对齐 AstrBot 的组装方式（参考实现，带 `pages/`） |
-| `bilibili_parser` | 解析 B 站链接（视频/动态，含 wbi 签名） |
-| `douyin_parser` | 解析抖音链接（含 abogus/xbogus 签名） |
-| `df_password` | 定时推送密码（`service/` 子包，推荐范本） |
-| `emoji_reply` | 表情回应 |
-| `example` | 最小示例（含 `pages/` 读写示例） |
-| `group_log` | 群消息记录 |
-| `group_request` | 入群申请处理 |
-| `llm_enhance` | 防抖合并 + 群聊用户信息感知 |
-| `log_sender` | 聊天里用 `/log`（user.log）/ `/logs`（四个日志文件）取回本轮次日志 |
-| `poke_reply` | 戳一戳回应 |
-| `recall_back` | 撤回回应（`service/` + `recall_db.py`） |
-| `time_sign_in` | 每日打卡（`service/` 子包） |
-| `what_to_eat` | 吃什么 |
+`单一服务` 列 = 该插件声明了 `supports_single_service = True`（同群多账号时可指定唯一
+负责账号，见 `docs/MODULE_DEV.md` §2.5.1）。纯 LLM 策略插件（`subscribe = ()`）不声明。
+
+| 插件 | 干什么 | 单一服务 |
+|---|---|---|
+| `astrbot_alignment` | 对齐 AstrBot 的组装方式（参考实现，带 `pages/`） | — |
+| `bilibili_parser` | 解析 B 站链接（视频/动态，含 wbi 签名） | ✓ |
+| `douyin_parser` | 解析抖音链接（含 abogus/xbogus 签名） | ✓ |
+| `df_password` | 定时推送密码（`service/` 子包，推荐范本） | ✓ |
+| `emoji_reply` | 表情回应 | ✓ |
+| `example` | 最小示例（含 `pages/` 读写示例） | — |
+| `group_log` | 群消息记录 | ✓ |
+| `group_request` | 入群申请处理 | ✓ |
+| `llm_enhance` | 防抖合并 + 群聊用户信息感知 | — |
+| `log_sender` | 聊天里用 `/log`（user.log）/ `/logs`（四个日志文件）取回本轮次日志 | ✓ |
+| `poke_reply` | 戳一戳回应 | ✓ |
+| `recall_back` | 撤回回应（`service/` + `recall_db.py`） | ✓ |
+| `time_sign_in` | 每日打卡（`service/` 子包） | ✓ |
+| `what_to_eat` | 吃什么 | ✓ |
 
 ## 边界
 

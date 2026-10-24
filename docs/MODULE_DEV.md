@@ -102,6 +102,39 @@ event.is_member
 
 ---
 
+## 2.5.1 单一服务模式（声明制能力）
+
+「同一群里配了多个 Bot 账号，只想让其中一个账号响应某个模块」时用单一服务模式。
+它是**声明制**能力：**不声明就等于没有这个功能**。
+
+```python
+from app.plugin import BaseModule
+
+class Module(BaseModule):
+    name = "我的模块"
+    # 声明支持单一服务：声明后 WebUI 才会给开关，配置写入才会被接受
+    supports_single_service = True
+```
+
+三层门控，任一层都足以保证「未声明模块不会被误配影响」：
+
+| 层 | 行为 |
+|---|---|
+| WebUI | `/api/modules` 返回 `single_service` 字段；为 false 时**不显示**该开关 |
+| 写入 | `POST /api/webui/single-service` 只收声明模块，其余丢弃并在 `rejected` 里回报 |
+| 运行期 | `is_single_service_skipped()` 先查声明，未声明者直接放行（配置残留也不生效）|
+
+生效条件（全部满足才跳过本账号）：同群有 ≥2 个在线账号 → 「多群管理」里给该群指定了
+服务账号 → 当前账号不是它。配置键默认取 `module_name`；虚拟模块（框架级 Agent）用
+`single_service_key` 覆写成 WebUI 存的 `"agent"`。
+
+**该不该声明**：只有真正「按群收事件并响应」的模块才该声明（有 `@module_hook` /
+`@command` / 非空 `subscribe`）。纯 LLM 策略模块（`subscribe = ()`，如组装/输出/记忆）
+走不到权限节点，声明了也永远不生效——`tests/plugin/test_single_service_declaration.py`
+里有一条反向约束会拦住这种误声明。
+
+---
+
 ## 2.6 全局能力注册表（FeatureRegistry）
 
 框架提供统一的“能力接管”机制，插件可以声明自己接管/禁用某个框架内置能力，并在插件

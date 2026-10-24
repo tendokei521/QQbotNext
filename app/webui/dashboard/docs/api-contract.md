@@ -355,7 +355,9 @@
 
 #### POST /webui/single-service
 - 请求体 JSON：`{ "single_service": { "<module>": bool } }`
-- 成功：`{"status":"success","message":"单一服务配置已保存"}`
+- 单一服务是**声明制**能力：只有 `ModuleData.single_service === true` 的模块才被接受；
+  已加载但未声明的模块名被丢弃并回报在 `rejected`，未加载（注册表查不到）的模块原样保留。
+- 成功：`{"status":"success","message":"单一服务配置已保存","rejected":["<module>", ...]}`
 
 #### GET /webui/multi-group
 - 响应：`{ "multi_group": { "show_all": bool, "groups": { "<gid>": { "service_bot_index": int } } } }`（**直接对象**；缺省 `{"show_all":False,"groups":{}}`）
@@ -431,6 +433,7 @@ WS 通道会混合推送两类内容：
 | `config` | object | 脱敏后配置（password→哨兵），`_mask_password_config(raw_config, schema)` |
 | `config_schema` | object | `{ "groups": {...}, "items": {...} }`（`_split_schema`，见 §4.2/§6） |
 | `has_page` | bool | 是否有自定义配置页（`registry.module_has_page`） |
+| `single_service` | bool | 是否**声明**支持单一服务模式（`BaseModule.supports_single_service`）。false 时前端不显示该开关，后端也拒收写入；Agent 虚模块恒 `true` |
 
 ### 4.2 config_schema 的两种形态
 
@@ -591,7 +594,7 @@ dynamic / repeater 的子字段共用同一套渲染规则，控件与取值：
 
 - `get_webui_config()` 返回**深拷贝**；`save_webui_config` 以 `{**DEFAULT,**config}` 合并后整体落库并广播 `webui` scope。
 - **logs**：过滤控制台级别（`debug/info/warning/error`）、显示行数、控制台高度。保存走 `POST /webui/config/logs`（只更新出现键）。
-- **single_service**：`{ "<module>": bool }`。启用后该模块群消息仅由「指定服务账号」处理；前端据此显示黄色警告条（见 §9）。保存 `POST /webui/single-service`（整值替换）。
+- **single_service**：`{ "<module>": bool }`。启用后该模块群消息仅由「指定服务账号」处理；前端据此显示黄色警告条（见 §9）。保存 `POST /webui/single-service`（整值替换，只收声明支持该能力的模块）。
 - **multi_group**：`{ "show_all": bool, "groups": { "<group_id>": { "service_bot_index": int } } }`。`groups[gid]` 无 `service_bot_index` 视为未指定；空选择即删除该 gid 条目。保存 `POST /webui/multi-group`（整值替换）。`show_all` 控制前端是否展示仅单账号在的群。
 - **module_preferences**：`get_webui_config()` 中不存在默认值；由 `POST /webui/config` 或 `POST/GET /webui/module-preferences` 读写。用途：模块/用户的本地 UI 偏好（如排序、固定、隐藏、折叠），**前端自行约定 key 结构**，后端仅原样存取一个 dict。前端 `stores/webui.ts` 原样存取；key 结构由前端约定（如 `{ collapsed:{} }`）。
 

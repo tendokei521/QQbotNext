@@ -37,7 +37,7 @@ app/
 ├── modules/                    插件框架 + 插件 API
 │   ├── base.py                 BaseModule / ModuleConfig / ModuleAuthority
 │   ├── registry.py             扫描 / 加载 / 热重载模块
-│   ├── authority.py            权限系统（黑白名单 + 等级）
+│   ├── authority.py            权限系统（黑白名单 + 等级 + 单一服务门控）
 │   ├── api.py                  插件 API（get_modules / get_config_path / get_data_path）
 │   └── dispatcher.py           事件分发（订阅匹配 + 启停 + 单一服务 + 权限）
 ├── services/                   应用服务（Bot 生命周期 / 调度器 / 日志）

@@ -10,7 +10,7 @@ schema 每加一个字段要改两处，第二处极易漏且没有测试会红�
 
 - **总览首页**：Bot 状态 / 模块统计 / 最近日志
 - **账号管理**：WS 连接配置卡片（增删改查、输入框失焦自动保存）、连接/断开/重连、多群管理
-- **功能模块**：搜索、分类分组、启停、schema 配置表单（boolean/integer/float/password/select/textarea/time/string_list/list/dynamic/repeater + 分组折叠 + showIf）、权限黑白名单、单一服务模式、插件自定义页 iframe
+- **功能模块**：搜索、分类分组、启停、schema 配置表单（boolean/integer/float/password/select/textarea/time/string_list/list/dynamic/repeater + 分组折叠 + showIf）、权限黑白名单、单一服务模式（仅对**声明支持**的模块显示）、插件自定义页 iframe
 - **Agent 面板**：5 个配置分区（基础配置 / 权限管理 / 对话行为 / 会话管理 / 高级功能），分区由 `src/agent/sections.json` 驱动
 - **日志控制台**：WebSocket 实时流、过滤、暂停、级别设置、高度拖拽、“显示原始日志”切换（默认简洁日志）
 - **设置**：浅/暗双主题、日志偏好、实验性选项开关

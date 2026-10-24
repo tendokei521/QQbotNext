@@ -24,7 +24,7 @@
 | `dispatcher.py` | 事件分发（订阅匹配 + 启停 + 单一服务 + 权限） |
 | `api.py` | **插件开发 API**（`get_modules` / `get_config_path` / `get_data_path` / `get_features`） |
 | `features.py` | 能力注册表（谁接管了「LLM 回复」这类能力） |
-| `authority.py` | 权限系统（黑白名单 + 等级） |
+| `authority.py` | 权限系统（黑白名单 + 等级 + 单一服务门控） |
 | `hooks.py` | `@module_hook` / `@llm_hook` / `@send_hook` / `@tool_call_hook` |
 | `commands.py` | 统一命令解析与分发：`@command` / `@command_group`（隐藏参数 `skip_llm` 默认命中即截断 LLM） |
 | `keyword.py` | 关键词匹配原语 |

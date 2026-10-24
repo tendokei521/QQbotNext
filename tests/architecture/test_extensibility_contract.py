@@ -242,7 +242,12 @@ SEAMS: tuple[Seam, ...] = (
     Seam("S46", "模块", "加载/热重载", FULL, "app/plugin/registry.py:139",
          evidence=("tests/plugin/test_registry.py::test_reload_reimports",)),
     Seam("S47", "模块", "权限/启停/单一服务", FULL, "app/plugin/authority.py",
-         evidence=("tests/plugin/test_authority.py::test_group_admin_blocks_member",)),
+         evidence=(
+             "tests/plugin/test_authority.py::test_group_admin_blocks_member",
+             "tests/plugin/test_authority.py::test_single_service_only_skips_declared_module",
+             "tests/plugin/test_dispatcher.py::test_single_service_ignored_for_undeclared_module",
+             "tests/webui/test_webui_single_service_api.py::test_undeclared_module_rejected",
+         )),
     Seam("S48", "模块", "配置 schema + WebUI 表单", FULL, "app/plugin/schema_utils.py",
          evidence=("tests/plugin/test_schema_utils.py::test_known_types_have_no_issues",)),
     Seam("S49", "模块", "资源引用（resource）", FULL, "app/plugin/features/registry.py:43",

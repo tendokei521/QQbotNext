@@ -262,6 +262,8 @@ venv\Scripts\python.exe -c "import sqlite3; c=sqlite3.connect('data/app.db'); pr
 |---|---|
 | 模块不响应 | ①模块开关没开 ②权限黑白名单拦了 ③`permission` 角色不满足 ④`subscribe` 不含该事件 |
 | 单一服务模式下群消息不触发 | 该群未在「多群管理」指定服务账号，或当前账号非服务账号 |
+| 模块页看不到「单一服务模式」开关 | 正常：单一服务是**声明制**能力，该模块没声明 `supports_single_service = True`。要用就在模块 `main.py` 的 `Module` 上声明（见 `docs/MODULE_DEV.md` §2.5.1）；纯 LLM 策略模块即使声明也不生效 |
+| 单一服务开了但看起来没生效 | 未声明模块的配置会被忽略（后端 `POST /webui/single-service` 会在 `rejected` 里回报），另外生效还要求：同群 ≥2 个在线账号 + 「多群管理」给该群指定了服务账号 |
 | 消息处理慢（曾出现每条约 1.7s） | 已知旧 bug（`_eventable_sync` off-by-one）已修复；若仍慢查模块内是否调用网络 API |
 | 群消息被静默丢弃 | 旧 bug（多 Bot 去重 `_message_indexes` 为空时丢弃、等待超时无兜底）已修复：无跟踪直接放行、有界等待超时由等待方处理 |
 | LLM 不回复 | WebUI「LLM服务」卡（框架级 Agent）里检查 api_key 是否已填、群/私信开关是否开启 |

@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### 变更：单一服务模式改为「声明制」能力
+
+此前「单一服务模式」是全局开关：任意模块都能在 WebUI 上勾选，但绝大多数勾了也没用——
+纯 LLM 策略插件（`subscribe = ()`）根本走不到权限节点，开关只是误导；而未声明期间若库
+里残留 `true`，反而会让模块在同群多账号的群下被静默跳过。现在改成**声明制**：
+
+- 模块声明 `supports_single_service = True` 才有这个功能（默认 False）；
+- WebUI 只在声明模块上显示开关；`POST /webui/single-service` 拒收未声明模块并在
+  `rejected` 里回报；
+- 运行期 `is_single_service_skipped()` 先查声明，未声明者配置残留也不生效。
+
+顺带修掉一个静默缺陷：框架级 Agent 的单一服务此前永远不生效——UI 存的是 `"agent"`，
+而 `_AgentGate.module_name` 是遗留值 `llm_chat_v2`，两边对不上。现在用
+`single_service_key = "agent"` 显式钉住。
+
+本地插件里 11 个「按群响应」的模块已声明（`bilibili_parser` / `douyin_parser` /
+`df_password` / `emoji_reply` / `group_log` / `group_request` / `log_sender` /
+`poke_reply` / `recall_back` / `time_sign_in` / `what_to_eat`，另加框架级 `agent`）；
+纯 LLM 策略模块与 `example` 骨架不声明。
+
 ### 新增：账号可正反向连接 OneBot（正向 / 反向 WebSocket 都支持）
 
 此前账号只能填一个 ws 地址，框架只能**连出去**——OneBot 实现（NapCat 等）与框架不在
