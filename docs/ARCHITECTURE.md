@@ -481,7 +481,7 @@ docs/                设计文档 + 本方案（见 §4）
 | 现文件 | 目标 | 动作 |
 |---|---|---|
 | `release.py` | `scripts/ops/release.py` | 保留 |
-| `requirements.bat` `requirements.sh` `venv.bat` `venv.sh` | `scripts/` | 保留 |
+| `requirements.bat` `requirements.sh` | `scripts/` | 保留 |
 | `export_napcat_faces.py` | `scripts/gen/` | 移动（**代码生成器**，与消融实验不同类） |
 | **新建** `scripts/gen/gen_onebot_manifest.py` | 从 `manifest.json` 生成校验器/反向生成 | 新建 |
 | `clean_history_ablation.py` `dirty_info_ablation.py` `history_tagging_ablation.py` `injection_style_ablation.py` `json_format_ablation.py` `message_format_ablation.py` `prompt_context_ablation.py` `user_context_ablation.py` `verify_new_tagging.py` `teacher_direction_ab.py` | `scripts/experiments/` | **移动**（10 个消融/对照实验） |

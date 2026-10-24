@@ -27,7 +27,6 @@ echo.
 echo Other ways to do the same thing:
 echo   python start.py                (one-click: venv + deps + launch)
 echo   python check_deps.py --dev     (checks and installs only what is missing)
-echo   venv.bat                       (just open a shell inside the venv)
 pause
 exit /b 0
 
