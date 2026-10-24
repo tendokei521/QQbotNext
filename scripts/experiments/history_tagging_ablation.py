@@ -4,14 +4,14 @@ Uses the project's REAL agent LLM configuration (system_prompt / temperature /
 max_tokens from the stored "agent" module config) and the REAL provider chain
 (provider preset + model from data/app.db) from the existing agent pipeline.
 
-Test content is taken from REAL local chat history (module/data/*/message_db_*.json)
+Test content is taken from REAL local chat history (data/module/data/*/message_db_*.json)
 so it reflects actual usage. The only thing varied is how each message line is
 tagged (time / speaker / content), which lets us compare tagging styles.
 
 Call budget: 5 tagging formats x 2 questions = 10 real API calls.
 
 Usage:
-    python scripts/history_tagging_ablation.py --history module/data/notice_recall_back/message_db_3569937952.json
+    python scripts/history_tagging_ablation.py --history data/module/data/notice_recall_back/message_db_3569937952.json
     python scripts/history_tagging_ablation.py --history ... --window 48 --dry-run
 """
 

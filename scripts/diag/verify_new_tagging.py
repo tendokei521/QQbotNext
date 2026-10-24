@@ -7,7 +7,7 @@ requests to confirm the model can naturally tell WHO said WHAT and WHEN:
 - group chat:  ``MM-DD HH:MM 昵称(QQ): 内容``  (+ bot self = "我")
 - private chat: ``MM-DD HH:MM 我/对方: 内容``   (no nickname)
 
-Run: python scripts/verify_new_tagging.py --history module/data/notice_recall_back/message_db_3569937952.json
+Run: python scripts/verify_new_tagging.py --history data/module/data/notice_recall_back/message_db_3569937952.json
 Total real API calls: 10.
 """
 
