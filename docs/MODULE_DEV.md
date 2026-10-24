@@ -135,6 +135,40 @@ class Module(BaseModule):
 
 ---
 
+## 2.5.2 装配 ≠ 可跑：`on_online` / `on_offline`
+
+**账号一创建就会被装配**（`account_id` 在添加账号时就有，配置不依赖连接），所以
+`on_load()` 可能在**账号还没连上 QQ** 的时候执行。因此生命周期分成两段：
+
+| 钩子 | 何时调用 | 该做什么 |
+|---|---|---|
+| `on_load()` | 账号装配时（**不要求连接**） | 建实例、读配置、挂工具/配置视图；**不要**启动计时器 |
+| `on_online()` | 账号真的连上之后（可重复） | 武装定时器、启动轮询/订阅等需要真实连接的循环 |
+| `on_offline()` | 账号断开/出错（可重复） | 停掉 `on_online` 启动的一切 |
+| `on_unload()` | 模块卸载/热重载 | 释放资源（框架还会注销该模块的定时任务与后台任务）|
+
+```python
+class Module(BaseModule):
+    async def on_load(self):
+        self._timer = build_my_timer(self)      # 只装配，不启动
+
+    async def on_online(self):
+        self._timer.start()                     # 连上才开始跑
+
+    async def on_offline(self):
+        self._timer.stop()                      # 断开立刻停
+```
+
+规则（`tests/application/test_account_offline_assembly.py` 守门）：
+
+- **离线不跑任务**：账号未连接时，框架不会武装任何计时器，也不会注册模块级定时任务；
+  `register_daily_schedule(...)` 在离线时直接返回 `False`，上线后由 `on_online` 补注册。
+- 判断"是否在线"用 `self._runtime()` 的 `online` 属性，不要用 `bot_id` 是否存在
+  （账号一创建就有 id）；`bot` 值为 `None` 只说明还没连接。
+- 需要 QQ 平台数据的模块（群列表、好友、昵称）在离线时必须能降级到空列表，不要抛异常。
+
+---
+
 ## 2.6 全局能力注册表（FeatureRegistry）
 
 框架提供统一的“能力接管”机制，插件可以声明自己接管/禁用某个框架内置能力，并在插件

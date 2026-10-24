@@ -48,6 +48,8 @@ export const useAgentConfigStore = defineStore('agentConfig', {
     streamPresets: {} as Record<string, StreamPreset>,
     poolModelIds: [] as string[],
     saveStatus: 'clean' as 'clean' | 'dirty' | 'saving' | 'error',
+    /** 配置加载失败原因（空串 = 正常）。离线/账号缺失时页面靠它显示提示，而不是弹红条 */
+    loadError: '',
 
     // ↓ 自动保存的记账状态。此前是模块级可变变量（autosaveTimer / pendingBotId /
     //   editSeq / dirtyFlag），等同于全局单例：不进 devtools、无法随 store 重置，
@@ -107,7 +109,8 @@ export const useAgentConfigStore = defineStore('agentConfig', {
 
       this.botId = botId
       if (botId === null) {
-        // 没有可用 Bot：清空上一个 Bot 的配置，避免界面继续显示过期草稿
+        // 没有任何账号：清空上一个 Bot 的配置，避免界面继续显示过期草稿。
+        // 注意这不是「未连接」——账号存在但没连上时照常可编辑（配置不依赖连接）。
         this.reset()
         return
       }
@@ -148,9 +151,10 @@ export const useAgentConfigStore = defineStore('agentConfig', {
         this.dirty = false
         this.pendingBotId = null
         this.editSeq = 0
+        this.loadError = ''
       } catch (err) {
-        const notify = useNotifyStore()
-        notify.push(errorMessage(err), 'error')
+        // 加载失败**不弹红条**：未连接/账号刚建好都可能出现瞬时失败，页面用 loadError 提示即可
+        this.loadError = errorMessage(err)
       } finally {
         this.loading = false
       }

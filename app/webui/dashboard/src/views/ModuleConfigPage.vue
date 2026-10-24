@@ -322,6 +322,23 @@ onUnmounted(() => {
     </div>
     <div class="app-page-subtitle" style="padding-left: 44px">{{ mod.description }}</div>
 
+    <!--
+      该账号的模块实例尚未装配时，后端会回退到全局实例（account_id 为 null）。
+      这种条目的配置不是本账号的，改了也不算数——必须显式提示，别再让人静默写错抽屉。
+    -->
+    <v-alert
+      v-if="!mod.account_id && bots.currentAccountId"
+      type="warning"
+      variant="tonal"
+      density="compact"
+      class="mt-3 mb-3"
+    >
+      <div class="text-caption">
+        当前显示的是<strong>全局实例</strong>的配置，不是账号「{{ bots.currentBot?.name ?? bots.currentAccountId }}」
+        的配置。点「重新加载」装配该账号的模块实例后再编辑。
+      </div>
+    </v-alert>
+
     <!-- 单一服务模式（仅声明支持该能力的模块显示） -->
     <v-card v-if="supportsSingleService" variant="outlined" class="mb-4">
       <v-card-text class="d-flex align-center justify-space-between flex-wrap gap-2 py-3">

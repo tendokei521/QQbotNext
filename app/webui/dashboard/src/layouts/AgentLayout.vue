@@ -22,6 +22,9 @@ const agent = useAgentConfigStore()
 const section = computed(() => agentSectionByPath(route.path))
 const panelTitle = 'Agent 面板'
 const botId = computed(() => bots.currentAccountId)
+/** 是否已选定账号：有账号就够，**不要求连上**（配置按账号存，与连接无关） */
+const hasAccount = computed(() => botId.value !== null)
+const isConnected = computed(() => bots.currentBot?.status === 'connected')
 const booting = ref(false)
 
 async function ensureLoaded() {
@@ -98,15 +101,45 @@ watch(
 
     <v-progress-linear v-if="agent.loading || booting" indeterminate color="primary" class="mb-3" />
 
-    <EmptyState
-      v-if="botId === null"
-      icon="mdi-robot-off-outline"
-      title="请先选择并连接一个 Bot"
-      description="Agent 配置按 Bot 独立保存，需要先选定目标 Bot 才能编辑。"
+    <!-- 离线提示：账号存在（有 id）就能编辑配置，只是收发不了消息 -->
+    <v-alert
+      v-if="hasAccount && !isConnected"
+      type="info"
+      variant="tonal"
+      density="compact"
+      class="mb-3"
     >
-      <v-btn variant="tonal" prepend-icon="mdi-refresh" @click="ensureLoaded">重试</v-btn>
+      <div class="text-caption">
+        当前账号未连接：<strong>配置照常可编辑并保存</strong>，连接后才会收发消息、
+        运行定时任务与主动消息。
+      </div>
+    </v-alert>
+
+    <!-- 加载失败（不是"没账号"）：给原因 + 重试，而不是红条 toast -->
+    <v-alert
+      v-if="hasAccount && agent.loadError"
+      type="warning"
+      variant="tonal"
+      density="compact"
+      class="mb-3"
+    >
+      <div class="d-flex align-center flex-wrap gap-2">
+        <span class="text-caption">配置加载失败：{{ agent.loadError }}</span>
+        <v-btn size="small" variant="text" prepend-icon="mdi-refresh" @click="ensureLoaded">重试</v-btn>
+      </div>
+    </v-alert>
+
+    <!-- 一个账号都没有：这才是真正需要先添加账号的情况 -->
+    <EmptyState
+      v-if="!hasAccount && !booting"
+      icon="mdi-robot-off-outline"
+      title="请先在「账号管理」添加账号"
+      description="Agent 配置按账号独立保存；账号一创建就能编辑，不需要先连上 QQ。"
+    >
+      <v-btn variant="tonal" prepend-icon="mdi-plus" @click="router.push('/bots')">去添加账号</v-btn>
+      <v-btn variant="text" prepend-icon="mdi-refresh" @click="ensureLoaded">重试</v-btn>
     </EmptyState>
 
-    <router-view v-else />
+    <router-view v-else-if="hasAccount" />
   </div>
 </template>

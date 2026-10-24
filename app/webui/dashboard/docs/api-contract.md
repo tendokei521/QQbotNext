@@ -64,6 +64,11 @@
 ## 2. HTTP 端点总表
 
 > 所有路径均省略 `/api` 前缀。**账号定位参数统一为 `account_id: string`**（账号 id）；查询串首选 `?account_id=<id>`，`?bot_id=` 作为兼容别名仍被接受（`parse_account_id` 统一归 `None`）。GET 返回对象直接作为响应体（不再包 `{status,message,data}`），逐条已注明。
+>
+> **`account_id` 只要求「账号存在」，不要求「已连接」**：账号 id 在「添加账号」时即生成且不可变，
+> 配置类接口（Agent 配置 / 模块配置 / 权限 / 人格预设）在没有连上 QQ 时同样可用。
+> 账号不存在才 404（消息里会点名账号 id）。只有依赖 QQ 平台数据的能力（群列表、好友、
+> 真实收发、`/bots/groups`）才需要已连接。
 
 ### 2.1 bots（文件 `api/bots.py`，tags: bots）
 

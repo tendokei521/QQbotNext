@@ -59,7 +59,7 @@ async function loadPresets() {
 async function applyToAgent() {
   if (!selectedPreset.value) return
   if (agent.botId == null) {
-    notify.push('请先选择并连接一个 Bot', 'warning')
+    notify.push('请先在「账号管理」添加账号，再应用人格', 'warning')
     return
   }
   agent.onChange('system_prompt', selectedPreset.value.system_prompt)
@@ -157,6 +157,7 @@ onMounted(() => {
             variant="tonal"
             prepend-icon="mdi-arrow-right-bold-circle-outline"
             :disabled="!selectedPreset || agent.botId == null"
+            :title="agent.botId == null ? '需要先在「账号管理」添加账号' : '把该人格写入当前账号的 system_prompt'"
             @click="applyToAgent"
           >
             应用所选人格

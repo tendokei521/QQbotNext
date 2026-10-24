@@ -135,7 +135,7 @@ async function deletePreset(p: RolePreset) {
 async function applyToAgent() {
   if (!selectedPreset.value) return
   if (agent.botId == null) {
-    notify.push('请先选择并连接一个 Bot', 'warning')
+    notify.push('请先在「账号管理」添加账号，再应用到 Agent', 'warning')
     return
   }
   agent.onChange('system_prompt', selectedPreset.value.system_prompt)
@@ -145,7 +145,7 @@ async function applyToAgent() {
 
 function saveCurrentAsPreset() {
   if (agent.botId == null) {
-    notify.push('请先选择并连接一个 Bot', 'warning')
+    notify.push('请先在「账号管理」添加账号，才能从 Agent 另存', 'warning')
     return
   }
   if (!agent.draft.system_prompt?.trim()) {
@@ -177,6 +177,14 @@ onMounted(() => {
       <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="startNew">新建人格</v-btn>
       <v-btn variant="tonal" prepend-icon="mdi-refresh" @click="loadPresets">刷新</v-btn>
     </div>
+
+    <!-- 人格是全局资产：没有账号也能全部编辑；只有「应用」这类动作需要账号 -->
+    <v-alert v-if="agent.botId == null" type="info" variant="tonal" density="compact" class="mt-2 mb-3">
+      <div class="text-caption">
+        当前没有选定账号：人格可以照常<strong>新建、编辑、保存</strong>；
+        「应用到 Agent」与「从当前 Agent 另存」需要先在「账号管理」添加账号。
+      </div>
+    </v-alert>
 
     <v-row class="mt-2">
       <v-col cols="12" md="4">
