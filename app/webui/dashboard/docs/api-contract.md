@@ -63,93 +63,107 @@
 
 ## 2. HTTP 端点总表
 
-> 所有路径均省略 `/api` 前缀。`bot_id` 为**查询参数**，取值 `int | null`（可传 `null`/`'null'`/`'None'`/空串，`parse_bot_id` 统一归 `None`）。GET 返回对象直接作为响应体（不再包 `{status,message,data}`），逐条已注明。
+> 所有路径均省略 `/api` 前缀。**账号定位参数统一为 `account_id: string`**（账号 id）；查询串首选 `?account_id=<id>`，`?bot_id=` 作为兼容别名仍被接受（`parse_account_id` 统一归 `None`）。GET 返回对象直接作为响应体（不再包 `{status,message,data}`），逐条已注明。
 
 ### 2.1 bots（文件 `api/bots.py`，tags: bots）
+
+#### 账号身份（v4 起）
+
+- `id`：**账号唯一凭据**，用户在「添加账号」时设定（`[A-Za-z0-9][A-Za-z0-9_-]{0,31}`），
+  创建后不可变。路径/查询参数、模块配置、Agent 运行时、会话、统计、磁盘文件名全部用它。
+  **它是给程序判断的，不要拿去当展示文案。**
+- `name`：展示名，可随时改。**界面与日志一律用它**。
+- `bot_id`：本次登录的 QQ 号，纯**运行时信息**（登录后才有，断线用快照兜底）。
+- 数组下标（旧版 `index`）已彻底移除：删账号再也不会让别的账号"换个身份"。
 
 #### GET /bots
 - 查询参数：无
 - 响应：`{ "bots": BotInfo[] }`（**直接对象**）
 - `BotInfo`（来自 `get_bots_info()`）：
-  - `index`: `int` 账号索引
-  - `bot_id`: `int|null` 已连接的真实 bot id
+  - `id`: `string` 账号唯一凭据
+  - `name`: `string` 展示名
+  - `bot_id`: `int|null` 当前登录的 QQ 号（运行时信息）
   - `owner_id`: `int|null`
   - `status`: `string`，枚举 `connected` / `disconnected` / `connecting` / `reconnecting` / `error`
   - `ws_url`: `string` 仅基础地址（单独拆出、不含 access_token）
   - `login_info`: `object|null`（如含 `user_id`、`nickname`）
+  - `last_account` / `account`: `object|null` 上次登录快照/合并视图
+  - `conn_mode`: `forward|reverse`；`listening`: `bool`（反向监听是否就绪）
   - `reconnect_attempts`: `int`
   - `last_error`: `string|null`
   - `auto_connect`: `bool`
 
-#### POST /bots/{index}/connect
-- 路径参数：`index: int`
+#### POST /bots/{account_id}/connect
+- 路径参数：`account_id: string`
 - 请求体：无
-- 行为：若内存中无该索引连接则新建（显式 index），否则 `readd_bot`；随后 `connect(index)`。
-- 成功（200）：`{"status":"success","message":"Bot <id> connected"}`
-- 失败（404）：`{"status":"error","message":"Bot at index N not in config"}`；失败（500）：连接失败。
+- 行为：若内存中无该账号连接则新建，否则 `readd_bot`；随后 `connect(account_id)`。
+- 成功（200）：`{"status":"success","message":"账号「<name>」已连接"}`
+- 失败（404）：`{"status":"error","message":"账号 <id> 不存在"}`；失败（500）：连接失败。
 
-#### POST /bots/{index}/disconnect
-- 成功（200）：`{"status":"success","message":"Bot at index N disconnected"}`
+#### POST /bots/{account_id}/disconnect
+- 成功（200）：`{"status":"success","message":"账号「<name>」已断开"}`
 
-#### POST /bots/{index}/reconnect
-- 成功（200）：`{"status":"success","message":"Bot <id> reconnected"}`；失败（500）：`"…reconnection failed"`
+#### POST /bots/{account_id}/reconnect
+- 成功（200）：`{"status":"success","message":"账号「<name>」已重连"}`；失败（500）：`"账号「<name>」重连失败"`
 
 #### GET /bots/config
 - 响应：`{ "bots": BotConfigItem[] }`（**直接对象**）
 - `BotConfigItem`（来自 `get_bots_public()`）：
+  - `id`: `string`；`name`: `string`
   - `ws_url`: `string` 基础地址
   - `access_token`: `string` 独立回显的真实 token（**注意：此接口不回显打码，真实返回**）
-  - `owner_id`: `int|null`
-  - `auto_connect`: `bool`
+  - `owner_id`: `int|null`；`auto_connect`: `bool`；`conn_mode`: `forward|reverse`
 
 #### POST /bots/config/save
 - 请求体 JSON：`{ "bots": BotConfigSaveItem[] }`
-  - `BotConfigSaveItem`：`{ ws_url: string, access_token: string, owner_id: int|null, auto_connect: bool }`
+  - `BotConfigSaveItem`：`{ id: string, name?: string, ws_url: string, access_token: string, owner_id: int|null, auto_connect: bool, conn_mode?: string }`
+  - payload 里**没有出现的 id 视为删除**；`name` 省略则保留旧名。
   - `access_token` 语义（见 `config_service.save_bots`）：缺失或等于打码哨兵 → 保留旧 token；显式值（含空串）→ 直接采用（空串=清除）。
+  - `id` 非法或重复 → `400`，**不会改动任何账号**。
 - 成功（200）：`{"status":"success","message":"配置已保存"}`
 
 #### POST /bots/config/add
-- 请求体：无
-- 行为：追加空配置 `{ws_url:"", owner_id:None, auto_connect:False}`，返回新索引。
-- 成功（200）：`{"status":"success","message":"已添加新账号配置","index": <int>}`
+- 请求体：`{ id?: string, name?: string, conn_mode?: "forward"|"reverse", ws_url?: string }`（可全部省略）
+- 行为：`id` 省略时自动分配 `botN`；**填了但不合法 → 400**（绝不静默换成别的 id）。
+- 成功（200）：`{"status":"success","message":"已添加账号「<name>」","id": <string>, "name": <string>, "conn_mode": …, "ws_url": …}`
 
-#### POST /bots/config/delete/{index}
-- 路径参数：`index: int`
-- 行为：`gateway.del_bot(index)` + `delete_bot(index)`（删配置并整体保存）。
-- 成功（200）：`{"status":"success","message":"已删除账号配置"}`；失败（404）：`"索引 N 不存在"`
+#### POST /bots/config/delete/{account_id}
+- 路径参数：`account_id: string`
+- 行为：`gateway.del_bot(account_id)` + `delete_bot(account_id)`（删配置、连带清理该账号快照）。
+- 成功（200）：`{"status":"success","message":"已删除账号「<name>」"}`；失败（404）：`"账号 <id> 不存在"`
 
 #### GET /bots/groups
-- 响应：`{ "bots_groups": { "<index>": BotGroups } }`（**直接对象**）
-- `BotGroups`：`{ "bot_id": int|null, "index": int, "groups": int[] , "groups_info": object[] }`（`groups` 为群号数组，`groups_info[i]` 含 `group_name` 等）
+- 响应：`{ "bots_groups": { "<account_id>": BotGroups } }`（**直接对象**）
+- `BotGroups`：`{ "account_id": string, "name": string, "bot_id": int|null, "groups": int[] , "groups_info": object[] }`（`groups` 为群号数组，`groups_info[i]` 含 `group_name` 等）
 
-#### GET /bots/{index}
-- 路径参数：`index: int`
-- 响应（成功，200）：**直接返回 BotInfo 对象**（字段同 `/bots`，但**无 `reconnect_attempts`/`last_error`/`auto_connect`**，只有 `bot_id/owner_id/status/login_info/ws_url`，见 `get_bot_info_by_index`）
-- 失败（404）：`{"status":"error","message":"Bot at index N not found"}`
+#### GET /bots/{account_id}
+- 路径参数：`account_id: string`
+- 响应（成功，200）：**直接返回 BotInfo 对象**（字段同 `/bots`，但**无 `reconnect_attempts`/`last_error`/`auto_connect`**）
+- 失败（404）：`{"status":"error","message":"账号 <id> 不存在"}`
 
 ### 2.2 modules（文件 `api/modules.py`，tags: modules）
 
 > 含「虚拟 Agent 模块」：模块名 `agent`（`VIRTUAL_AGENT_MODULE="agent"`）不读模块目录，而是经由 `_AgentProxy`/`_AgentAuthority` 代理到框架 Agent 运行时。所有 `{module_name}` 为 `agent` 的端点都走此代理。
 
 #### GET /modules
-- 查询参数：`bot_id?: int|null`
+- 查询参数：`account_id?: string`（兼容 `bot_id=`）
 - 响应：`{ "<module_name>": ModuleData }`（**直接对象**，顶层为模块名→数据的映射）。详见第 4 节。
 - 无论有无模块，`agent` 键恒存在（框架级注入）。
 
 #### GET /modules/{module_name}
-- 查询参数：`bot_id?: int|null`
+- 查询参数：`account_id?: string`（兼容 `bot_id=`）
 - 响应：`{ "<module_name>": ModuleData }`（**直接对象**，单键）
 - 失败（404）：`{"status":"error","message":"Module X not found"}`
 
 #### POST /module/{module_name}/toggle
-- 查询参数：`bot_id?: int|null`
+- 查询参数：`account_id?: string`（兼容 `bot_id=`）
 - 请求体：**FormData** 字段 `enabled: bool`（`Form(...)`）
 - 成功（200）：`{"status":"success","message":"模块 <name> (Bot <id>) 已启用/已禁用"}`
 - 成功后通过 WS 广播 `module_authority_updated`（见 §3）。
 - 失败（404）：`{"status":"error","message":"模块 X (Bot <id>) 不存在"}`
 
 #### POST /module/{module_name}/permission
-- 查询参数：`bot_id?: int|null`（**必须存在**，否则 404 `"模块 X 无 Bot ID 实例"`）
+- 查询参数：`account_id?: string`（兼容 `bot_id=`）（**必须存在**，否则 404 `"模块 X 无 Bot ID 实例"`）
 - 请求体：**FormData** 字段：
   - `group_mode`: `string`（`whitelist` | `blacklist`）
   - `group_list`: `string`（每行一个群号，以 `\n` 拆分）
@@ -159,19 +173,19 @@
 - 成功后广播 `module_authority_updated`。
 
 #### GET /module/{module_name}/config
-- 查询参数：`bot_id?: int|null`
+- 查询参数：`account_id?: string`（兼容 `bot_id=`）
 - 响应：`{ "ok": true, "module": module_name, "bot_id": bot_id, "config": <脱敏后的 config> }`（**直接对象**）
 - 说明：给自定义配置页读取使用；password 字段已打码为哨兵。
 - 失败（404）：`{"status":"error","message":"模块 X 不存在"}`
 
 #### POST /module/{module_name}/config
-- 查询参数：`bot_id?: int|null`（**必须存在**，否则 404）
+- 查询参数：`account_id?: string`（兼容 `bot_id=`）（**必须存在**，否则 404）
 - 请求体 JSON：扁平键值对象 `{ "<config_key>": <value>, ... }`（**非 `{config:...}` 包裹**，即直接把各配置字段作为顶层键）。password 字段值为打码哨兵时保留旧值。
 - 成功（200）：`{"status":"success","message":"模块 <name> (Bot <id>) 配置已更新"}`
 - 成功后广播 `module_config_updated`（config 已脱敏打码）。
 
 #### POST /modules/reload
-- 查询参数：`bot_id?: int|null`
+- 查询参数：`account_id?: string`（兼容 `bot_id=`）
 - 请求体：无
 - 行为：`registry.reload_all(bot_id)`，随后广播 `modules_reloaded`。
 - 成功（200）：`{"status":"success","message":"模块已重新加载"}`
@@ -190,7 +204,7 @@
 - 前端加载：`<iframe src="/api/module/{module_name}/page?bot_id=<id>">`（见 §6）。
 
 #### GET /module/{module_name}/list/{endpoint}
-- 路径参数：`endpoint`；查询参数：`bot_id?: int|null`
+- 路径参数：`endpoint`；查询参数：`account_id?: string`（兼容 `bot_id=`）
 - 前置：查找该模块 `config_schema` 中 `type=="list"` 且 `endpoint` 匹配的字段；找不到 → 404。
 - 请求方：`ProviderRegistry.call(module.module_name, endpoint, "list", module, bot, field)`。
 - 响应：`{ "ok": true, "items": ListItem[], "mode": string }`（**直接对象**）
@@ -200,13 +214,13 @@
 - 上游失败（502）：`{"status":"error","message":"数据源请求失败: …"}`
 
 #### GET /module/{module_name}/dynamic/{endpoint}
-- 查询参数：`bot_id?: int|null`；`endpoint: string`
+- 查询参数：`account_id?: string`（兼容 `bot_id=`）；`endpoint: string`
 - 响应：`{ "ok": true, "options": Option[] }`（**直接对象**）
   - `Option`：`{ "value": string, "label": string }`
 - 上游失败（502）同上。无动态字段 → 404。
 
 #### GET /module/{module_name}/dynamic/{endpoint}/{value}
-- 查询参数：`bot_id?: int|null`；`value: string`（URL 编码）
+- 查询参数：`account_id?: string`（兼容 `bot_id=`）；`value: string`（URL 编码）
 - 响应：`{ "ok": true, "fields": FieldSchema[] }`（**直接对象**）
   - `FieldSchema`：子字段 schema（`key/label/type/default/min/max/step/placeholder/rows/options/hint`）。`type in {boolean, select, textarea, time, number, password, ...}`（渲染规则见 §5.4）。
 - 上游失败（502）同上。
@@ -216,7 +230,7 @@
 > 所有端点依赖 `bot_id`（查询参数）。若 `bot_id is None` 或无运行时 → 404 `{"status":"error","message":"Bot None 无 Agent 运行时"}`。
 
 #### GET /agent/config
-- 查询参数：`bot_id?: int|null`
+- 查询参数：`account_id?: string`（兼容 `bot_id=`）
 - 响应（**直接对象**）：
   ```json
   {
@@ -236,7 +250,7 @@
 - `schema` 由 `app/agent/config_schema.SCHEMA` 经 `_split_schema` 拆为 `{groups, items}`；`groups` 为 `type=="group"` 的字段，`items` 为其余字段。
 
 #### POST /agent/config
-- 查询参数：`bot_id?: int|null`
+- 查询参数：`account_id?: string`（兼容 `bot_id=`）
 - 请求体 JSON：
   ```json
   {
@@ -249,7 +263,7 @@
 - 成功（200）：`{"status":"success","message":"Bot <id> Agent 配置已更新"}`
 
 #### GET /agent/tasks
-- 查询参数：`bot_id?: int|null`
+- 查询参数：`account_id?: string`（兼容 `bot_id=`）
 - 响应：`{ "ok": true, "tasks": TaskItem[] }`（**直接对象**）
 - `TaskItem`（来自 `scheduler.status()`，按 next_trigger_time 升序）：
   - `task_id`: `string`
@@ -265,7 +279,7 @@
   - `created_at`: `int`（Unix 秒）
 
 #### POST /agent/tasks
-- 查询参数：`bot_id?: int|null`
+- 查询参数：`account_id?: string`（兼容 `bot_id=`）
 - 请求体 JSON：
   ```json
   {
@@ -281,7 +295,7 @@
 - 失败（400）：`{"status":"error","message":"缺少 trigger 或 content"}` 等。
 
 #### POST /agent/tasks/{task_id}/trigger
-- 路径参数：`task_id`；查询参数：`bot_id?: int|null`
+- 路径参数：`task_id`；查询参数：`account_id?: string`（兼容 `bot_id=`）
 - 行为：`scheduler.trigger_now(task_id)`。
 - 成功（200）：`{"status":"success","message":"已立即触发任务 <id>"}`；失败（400）：`"任务 <id> 不存在或已结束"`
 
@@ -289,7 +303,7 @@
 - 成功（200）：`{"status":"success","message":"已取消任务 <id>"}`；失败（400）：`"任务 <id> 不存在"`
 
 #### GET /agent/proactive/status
-- 查询参数：`bot_id?: int|null`
+- 查询参数：`account_id?: string`（兼容 `bot_id=`）
 - 响应：`{ "ok": true, "sessions": ProactiveSession[] }`（**直接对象**）
 - `ProactiveSession`（来自 `proactive.status()`）：
   - `session_id`: `string`
@@ -302,7 +316,7 @@
   - `timer`: `"" | "private" | "silence"`
 
 #### POST /agent/proactive/trigger
-- 查询参数：`bot_id?: int|null`
+- 查询参数：`account_id?: string`（兼容 `bot_id=`）
 - 请求体 JSON：`{ "session_id": "<必须>" }`
 - 行为：`proactive.manual_trigger(session_id)`。
 - 成功（200）：`{"status":"success","message":"已触发 <session_id> 主动发言"}`；失败（400）：`"会话 <session_id> 未启用或不在主动列表"` / 缺 `session_id`。
