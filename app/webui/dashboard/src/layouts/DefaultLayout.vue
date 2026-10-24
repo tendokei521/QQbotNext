@@ -21,6 +21,9 @@ const rail = ref(false)
 const multiGroupOpen = ref(false)
 const busyAction = ref(false)
 
+/** 前端构建戳（vite 注入）：界面上直接显示，用来判断"改了有没有生效" */
+const buildStamp = __BUILD_STAMP__
+
 // 桌面/移动断点：桌面永久展开侧边栏，移动端可收起（导航图标切换）
 const isDesktop = ref(window.innerWidth >= 768)
 function onResize() {
@@ -206,7 +209,9 @@ onUnmounted(() => {
           </div>
           <div v-if="!rail" class="brand-text">
             <div class="brand-name">QQBot Next</div>
-            <div class="brand-sub">管理后台</div>
+            <div class="brand-sub" :title="`前端构建：${buildStamp}（对不上仓库提交 = 缓存旧 JS 或没重建）`">
+              管理后台 · {{ buildStamp }}
+            </div>
           </div>
         </div>
       </template>
