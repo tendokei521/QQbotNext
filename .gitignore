@@ -10,13 +10,15 @@ __pycache__/
 *.pyo
 *.pyd
 
-# 运行时数据（SQLite / WAL 临时文件 / LLM 会话历史与状态 / 模块持久化数据）
+# 运行时数据（SQLite / WAL 临时文件 / LLM 会话历史与状态 / 插件运行时数据）
 data/app.db
 data/app.db-wal
 data/app.db-shm
 data/app.db-journal
 data/llm/
-module/data/
+data/module/
+# 旧布局：插件运行时数据曾放仓库根 module/，启动时自动搬进 data/module，残留也不入库
+module/
 
 # 前端 Dashboard（保留 dist 提交，使无 Node 环境也能直接运行新版 UI）
 app/webui/dashboard/node_modules/
