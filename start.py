@@ -39,10 +39,13 @@ site-packages 里没有独立的 ``packaging``，于是**自检脚本自己先�
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -52,6 +55,12 @@ ROOT = Path(__file__).resolve().parent
 DEFAULT_VENV = ROOT / "venv"
 MAIN_SCRIPT = ROOT / "main.py"
 DEPS_SCRIPT = ROOT / "check_deps.py"
+#: 启动检查通过后的缓存（删掉它等于强制下次全量检查）
+CACHE_PATH = ROOT / "data" / ".launcher-cache.json"
+#: 缓存格式版本：改了指纹算法就 +1，老缓存自动失效
+CACHE_VERSION = 1
+#: 缓存有效期上限（天）：环境可能被手工改动，定期强制复核一次
+CACHE_MAX_AGE_DAYS = 14.0
 
 IS_WINDOWS = os.name == "nt"
 
@@ -234,6 +243,151 @@ def check_dependencies(
     return EXIT_DEPS, f"仍有依赖没装齐（check_deps.py 退出码 {rc}）"
 
 
+# ==================== 检查结果缓存 ====================
+
+
+def _file_digest(path: Path) -> str:
+    """文件内容的 sha256 前 16 位；文件不存在给固定标记。"""
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+    except OSError:
+        return "missing"
+
+
+def _path_stamp(path: Path) -> str:
+    """路径的 mtime + size（解释器被替换时它会变）。"""
+    try:
+        st = path.stat()
+    except OSError:
+        return "missing"
+    return f"{int(st.st_mtime)}:{st.st_size}"
+
+
+def _dir_stamp(path: Path) -> str:
+    """目录 mtime（装/卸包会改它，读文件不会）。
+
+    用纳秒精度：同一秒内装包时秒级时间戳可能不变，缓存就会误判为"没变"。
+    """
+    try:
+        return str(path.stat().st_mtime_ns)
+    except OSError:
+        return "missing"
+
+
+def site_packages_dir(python: Path) -> Path:
+    """venv 的 site-packages 目录（用于感知手工装/卸包）。"""
+    return python.parent.parent / ("Lib/site-packages" if IS_WINDOWS else "lib/site-packages")
+
+
+def cache_key(
+    python: Path,
+    *,
+    dev: bool = False,
+    vector: bool = False,
+    groups: Sequence[str] = (),
+    python_version: str = "",
+) -> dict:
+    """算出本次环境指纹。任一项变化都会让旧缓存失效。"""
+    return {
+        "version": CACHE_VERSION,
+        "python": str(python),
+        "python_stamp": _path_stamp(python),
+        "python_version": python_version,
+        "site_packages": _dir_stamp(site_packages_dir(python)),
+        "pyproject": _file_digest(ROOT / "pyproject.toml"),
+        "requirements": _file_digest(ROOT / "requirements.txt"),
+        "deps_script": _file_digest(DEPS_SCRIPT),
+        "groups": sorted(["dev"] if dev else []) + sorted(["vector"] if vector else [])
+        + sorted(str(g) for g in groups if g),
+    }
+
+
+def load_cache(path: Path | None = None) -> dict | None:
+    """读缓存；格式不对/不存在返回 None。"""
+    target = path or CACHE_PATH
+    try:
+        data = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def save_cache(record: dict, path: Path | None = None) -> bool:
+    """写缓存（失败不致命：下次全量检查而已）。"""
+    target = path or CACHE_PATH
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        payload = {**record, "checked_at": time.time()}
+        target.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
+def clear_cache(path: Path | None = None) -> None:
+    """删缓存（--recreate / 环境不可用时用）。"""
+    try:
+        (path or CACHE_PATH).unlink()
+    except OSError:
+        pass
+
+
+def cache_matches(record: dict | None, key: dict) -> tuple[bool, str]:
+    """缓存是否仍然有效。返回 (有效, 人类可读的原因)。"""
+    if not record:
+        return False, "首次运行，需要完整检查"
+    if record.get("version") != key.get("version"):
+        return False, "缓存格式已更新"
+    for field, label in (
+        ("python", "解释器路径变了"),
+        ("python_stamp", "解释器被替换过"),
+        ("python_version", "Python 版本变了"),
+        ("site_packages", "依赖目录有变动（装/卸过包）"),
+        ("pyproject", "pyproject.toml 改了"),
+        ("requirements", "requirements.txt 改了"),
+        ("deps_script", "check_deps.py 改了"),
+        ("groups", "可选依赖组不同"),
+    ):
+        if record.get(field) != key.get(field):
+            return False, label
+    checked_at = float(record.get("checked_at") or 0)
+    age_days = (time.time() - checked_at) / 86400.0
+    if age_days > CACHE_MAX_AGE_DAYS:
+        return False, f"缓存已过期（{age_days:.0f} 天未复核）"
+    return True, ""
+
+
+def _human_age(record: dict | None) -> str:
+    if not record:
+        return "刚刚"
+    try:
+        age = time.time() - float(record.get("checked_at") or 0)
+    except (TypeError, ValueError):
+        return "刚刚"
+    if age < 90:
+        return f"{int(age)} 秒前"
+    if age < 5400:
+        return f"{int(age / 60)} 分钟前"
+    return f"{int(age / 3600)} 小时前"
+
+
+def venv_python_version(python: Path, *, runner: Runner | None = None) -> str:
+    """问一次 venv 解释器的版本（拿不到就返回空串 → 缓存必然不匹配）。"""
+    runner = runner or subprocess.run
+    try:
+        done = runner(
+            [str(python), "-c", "import sys;print('%d.%d.%d' % sys.version_info[:3])"],
+            capture_output=True,
+            timeout=PROBE_TIMEOUT,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if getattr(done, "returncode", 1) != 0:
+        return ""
+    out = getattr(done, "stdout", b"") or b""
+    return out.decode("utf-8", "replace").strip() if isinstance(out, bytes) else str(out).strip()
+
+
 # ==================== 启动 ====================
 
 
@@ -315,6 +469,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--venv", default=None, help="venv 目录（默认 ./venv）")
     parser.add_argument("--pause", action="store_true", help="结束前等待回车（双击运行时用）")
     parser.add_argument("--force-launch", action="store_true", help="依赖不齐也强行启动（不推荐）")
+    parser.add_argument(
+        "--recheck",
+        action="store_true",
+        help="忽略启动检查缓存，强制完整检查一遍（缓存可疑时用）",
+    )
     parser.add_argument("extra", nargs=argparse.REMAINDER, help="原样传给 main.py 的参数")
     return parser.parse_args(argv)
 
@@ -339,10 +498,41 @@ def main(
     print("  QQBot Next  ::  launcher")
     print("  " + "-" * 58)
 
-    # ---------- [1/4] 解释器 ----------
     python = venv_python_path(venv_dir)
+    extra = [item for item in args.extra if item != "--"]
+
+    # ---------- 缓存命中：环境没变就直接启动 ----------
+    # 只缓存"结论"，钥匙是环境指纹（见 cache_key）。变一项就退回完整检查。
+    key = cache_key(
+        python,
+        dev=args.dev,
+        vector=args.vector,
+        groups=args.group,
+        python_version=venv_python_version(python, runner=runner) if python.exists() else "",
+    )
+    cached = None if (args.recheck or args.recreate) else load_cache()
+    hit, why = cache_matches(cached, key)
+    if hit and not args.check:
+        print(f"  [cached] 环境已就绪（上次检查：{_human_age(cached)}）—— 跳过环境检查")
+        if not MAIN_SCRIPT.exists():
+            print()
+            print(f"  [FAIL] 缺少 {MAIN_SCRIPT.name}，仓库拷贝不完整")
+            return EXIT_ENTRY
+        if args.no_launch:
+            print()
+            print("  环境就绪。启动用：python start.py")
+            return EXIT_OK
+        print()
+        return launch(
+            python, extra=extra, runner=runner, execv=execv, pause=args.pause, in_process=in_process
+        )
+    if cached is not None and not hit and not args.check:
+        print(f"  [cache] 缓存失效：{why} —— 重新完整检查")
+
+    # ---------- [1/4] 解释器 ----------
     if args.recreate:
         _stage(1, total, "interpreter", f"删除 {venv_dir}（--recreate）")
+        clear_cache()
         ok, detail = remove_venv(venv_dir)
         if not ok:
             print(f"\n  [FAIL] {detail}")
@@ -357,6 +547,7 @@ def main(
             print(f"  [FAIL] 建不出可用的 venv：{detail or '解释器起不来'}")
             print("         请确认已安装 Python 3.10+ 且在 PATH 上，然后重跑 python start.py")
             print("         手动入口：python -m venv venv")
+            clear_cache()
             return EXIT_VENV
 
     # ---------- [2/4] 工具链 ----------
@@ -399,12 +590,28 @@ def main(
         print("  （--force-launch 已指定，继续尝试启动）")
 
     if args.check or args.no_launch:
+        # 检查通过 → 记进缓存，下次打开就不用再查
+        if rc == EXIT_OK:
+            save_cache(cache_key(
+                python,
+                dev=args.dev,
+                vector=args.vector,
+                groups=args.group,
+                python_version=venv_python_version(python, runner=runner),
+            ))
         print()
         print("  环境就绪。启动用：python start.py" if rc == EXIT_OK else "")
         return EXIT_OK if rc == EXIT_OK else EXIT_DEPS
 
     # ---------- [4/4] 启动 ----------
-    extra = [item for item in args.extra if item != "--"]
+    # 环境检查全过 → 缓存结论，下次直接启动
+    save_cache(cache_key(
+        python,
+        dev=args.dev,
+        vector=args.vector,
+        groups=args.group,
+        python_version=venv_python_version(python, runner=runner),
+    ))
     if not MAIN_SCRIPT.exists():
         print()
         print(f"  [FAIL] 缺少 {MAIN_SCRIPT.name}，仓库拷贝不完整")

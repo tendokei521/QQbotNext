@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 from html import escape as html_escape
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -37,11 +37,13 @@ from app.webui.api import sessions as sessions_router
 from app.webui.api import stats as stats_router
 from app.webui.api import webui_cfg as webui_router
 from app.webui.auth import (
+    QUERY_TOKEN_KEYS,
     SESSION_COOKIE,
     SESSION_TTL_SECONDS,
     is_authenticated,
     issue_session,
     login_rate_limiter,
+    query_token_from,
     safe_next_path,
     tokens_match,
 )
@@ -137,6 +139,32 @@ def _client_address(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def _set_session_cookie(response, token: str, request: Request):
+    """下发 HttpOnly 会话 cookie（登录成功与「URL 带令牌」两条路径共用）。"""
+    response.set_cookie(
+        SESSION_COOKIE,
+        issue_session(token),
+        max_age=SESSION_TTL_SECONDS,
+        httponly=True,          # JS 读不到，XSS 偷不走
+        samesite="lax",         # 挡住跨站 POST 携带（CSRF 基本面）
+        secure=_is_secure_request(request),
+        path="/",
+    )
+    return response
+
+
+def _url_without_token_query(request: Request) -> str:
+    """去掉查询串里的令牌键，其余参数原样保留（`?token=x&mode=raw` → `?mode=raw`）。"""
+    kept = [(k, v) for k, v in request.query_params.multi_items() if k not in QUERY_TOKEN_KEYS]
+    path = request.url.path or "/"
+    return f"{path}?{urlencode(kept)}" if kept else path
+
+
+def _wants_html(request: Request) -> bool:
+    """浏览器地址栏/页面导航（而非 XHR、图片、脚本）的请求。"""
+    return "text/html" in request.headers.get("accept", "")
+
+
 def create_app(container) -> FastAPI:
     """根据容器装配 FastAPI 应用。"""
     app = FastAPI(title="QQBot Next 管理后台", version="2.0.0")
@@ -196,18 +224,6 @@ def _install_login_routes(app: FastAPI, container) -> None:
     def _expected_token() -> str:
         return (container.get(Settings).webui_token or "").strip()
 
-    def _set_session(response, token: str, request: Request):
-        response.set_cookie(
-            SESSION_COOKIE,
-            issue_session(token),
-            max_age=SESSION_TTL_SECONDS,
-            httponly=True,          # JS 读不到，XSS 偷不走
-            samesite="lax",         # 挡住跨站 POST 携带（CSRF 基本面）
-            secure=_is_secure_request(request),
-            path="/",
-        )
-        return response
-
     @app.get("/login", response_class=HTMLResponse)
     async def login_page(request: Request, next: str = "/"):
         token = _expected_token()
@@ -215,6 +231,12 @@ def _install_login_routes(app: FastAPI, container) -> None:
         # 未启用鉴权时登录页没有意义，直接放行到首页
         if not token:
             return RedirectResponse(target, status_code=302)
+
+        # /login?accesstoken=<令牌> 同样支持一键登录（登录页是公开路径，
+        # 中间件不会替它换 cookie，所以这里显式处理）
+        if tokens_match(query_token_from(request.query_params), token):
+            return _set_session_cookie(RedirectResponse(target, status_code=303), token, request)
+
         # 已登录用户访问 /login 直接送回目标页，避免重复登录
         if is_authenticated(
             expected_token=token,
@@ -453,24 +475,32 @@ def _install_auth_middleware(app: FastAPI, container) -> None:
         if not token:
             return await call_next(request)
 
+        query_token = query_token_from(request.query_params)
         authenticated = is_authenticated(
             expected_token=token,
             authorization=request.headers.get("authorization", ""),
-            query_token=request.query_params.get("token", ""),
+            query_token=query_token,
             session_cookie=request.cookies.get(SESSION_COOKIE),
         )
         if authenticated:
+            # 「一键登录」：页面导航带了 ?accesstoken=/?token= 且校验通过时，
+            # 换成会话 cookie 并 303 到去掉令牌的干净 URL。
+            # 这样令牌不会留在地址栏、浏览历史与后续 Referer 里。
+            # 仅限 GET + HTML 文档请求：XHR、<img>、脚本仍走各自的原通道，不能被重定向。
+            if query_token and request.method == "GET" and _wants_html(request):
+                clean = _url_without_token_query(request)
+                if clean != f"{request.url.path}?{request.url.query}":
+                    return _set_session_cookie(
+                        RedirectResponse(clean, status_code=303), token, request
+                    )
             return await call_next(request)
 
         if path.startswith("/api"):
             return JSONResponse(status_code=401, content={"status": "error", "message": "未授权"})
 
-        accepts_html = "text/html" in request.headers.get("accept", "")
-        if accepts_html or path == "/":
-            # 带上原目标，登录后直接回到用户想去的页面
-            target = path
-            if request.url.query:
-                target = f"{target}?{request.url.query}"
+        if _wants_html(request) or path == "/":
+            # 带上原目标（已剔除令牌键，避免把错误令牌塞进 next 参数），登录后直接回去
+            target = _url_without_token_query(request)
             return RedirectResponse(f"/login?next={quote(target, safe='')}", status_code=302)
 
         return JSONResponse(status_code=401, content={"status": "error", "message": "未授权"})

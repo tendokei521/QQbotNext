@@ -106,6 +106,20 @@ def tokens_match(provided: str, expected: str) -> bool:
     return hmac.compare_digest(provided, expected)
 
 
+#: 查询参数里可携带令牌的键名。`token` 是历史名，`accesstoken` 与其等价
+#: （便于书签/启动脚本直接拼一条「一键登录」URL）。
+QUERY_TOKEN_KEYS = ("token", "accesstoken")
+
+
+def query_token_from(params) -> str:
+    """从查询参数取令牌，兼容 `token` 与 `accesstoken` 两个键名。"""
+    for key in QUERY_TOKEN_KEYS:
+        value = params.get(key)
+        if value:
+            return str(value).strip()
+    return ""
+
+
 # --------------------------------------------------------------------------- #
 # 凭据提取（HTTP 与 WebSocket 共用一套规则）
 # --------------------------------------------------------------------------- #

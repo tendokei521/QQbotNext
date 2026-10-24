@@ -41,3 +41,6 @@ deprecated/qq-client/
 
 # 本地临时参考目录（下载的第三方项目 / 实验素材，不属于本项目）
 1/
+
+# start.py 启动检查缓存（本机环境结论，不入库）
+data/.launcher-cache.json
