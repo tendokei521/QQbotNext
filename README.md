@@ -142,6 +142,7 @@ python main.py
 | `WEBUI_HOST` | `127.0.0.1` | WebUI 监听地址（外网访问请配合反向代理） |
 | `WEBUI_PORT` | `9200` | WebUI 端口 |
 | `WEBUI_TOKEN` | 空（首次启动自动生成） | 登录 WebUI 的令牌；留空则自动生成并写回 `.env`，登录页粘贴该值 |
+| `WEBUI_AUTO_OPEN` | `false` | 启动后用浏览器打开带 `?accesstoken=` 的一键登录链接（本地 start 脚本默认开启，`--no-open` 关闭） |
 | `DB_PATH` | `data/app.db` | SQLite 路径 |
 | `WS_CONNECT_TIMEOUT` | `30` | WebSocket 连接超时 |
 

@@ -45,6 +45,30 @@ from app.plugin.registry import ModuleRegistry
 _container: Container | None = None
 
 
+async def _open_browser_when_ready(server, url: str, timeout: float = 15.0) -> None:
+    """等 uvicorn 真正开始监听后再用默认浏览器打开 WebUI。
+
+    直接 `webbrowser.open` 抢在 listen 之前会得到「连接被拒绝」的白页，
+    所以轮询 `server.started`。超时或无法打开时静默放弃——控制台横幅里
+    本来就打印了同一个一键登录地址，用户照抄即可。
+    """
+    import webbrowser
+
+    waited = 0.0
+    while not getattr(server, "started", False):
+        if waited >= timeout:
+            logger.debug("[WebUI] 等待服务监听超时，跳过自动打开浏览器")
+            return
+        await asyncio.sleep(0.1)
+        waited += 0.1
+
+    try:
+        if not webbrowser.open(url):
+            logger.debug("[WebUI] 未找到可用浏览器，跳过自动打开")
+    except Exception as e:  # noqa: BLE001 —— 打不开浏览器不该影响服务运行
+        logger.debug(f"[WebUI] 自动打开浏览器失败（已忽略）: {e}")
+
+
 def _silence_websocket_logs() -> None:
     """抑制 WebSocket 连接级噪音日志，保留启动横幅与错误。
 
@@ -367,7 +391,11 @@ async def run(settings: Settings | None = None) -> None:
 
     # 令牌为空则自动生成并写回 .env（只在此处调用：测试直接 create_app，不该被鉴权拦）。
     # 就地更新 settings，后续 build_container 注册的就是这个已带令牌的实例。
-    from app.core.webui_token import ensure_webui_token, print_webui_token_banner
+    from app.core.webui_token import (
+        access_url,
+        ensure_webui_token,
+        print_webui_token_banner,
+    )
 
     token_state = ensure_webui_token(settings)
 

@@ -282,6 +282,10 @@ venv\Scripts\python.exe -c "import sqlite3; c=sqlite3.connect('data/app.db'); pr
   不写 `logs/*.log`）。浏览器访问 `/` 会 302 到独立登录页 `/login`，粘贴令牌即登录；
   登录后靠 **HttpOnly 签名 cookie** 鉴权，令牌对页面 JS 不可见（从前的 `window.WEBUI_TOKEN`
   注入已移除）。有效期 7 天，`/logout` 可退出；同一来源 5 分钟内失败 10 次会被限流（429）。
+- **一键登录链接**：`http://127.0.0.1:9200/?accesstoken=<令牌>`（`?token=` 等价）。
+  校验通过后服务端**换成会话 cookie 并 303 到去掉令牌的地址**，所以令牌不会留在地址栏、
+  浏览历史与后续 `Referer` 里。启动横幅会打印这条链接；本地 `start` 脚本还会用浏览器
+  直接打开它（`WEBUI_AUTO_OPEN` / `--no-open` 可关）。
 - **脚本 / 第三方调用**：`Authorization: Bearer <token>`、Basic（password 位放令牌）、
   `?token=<token>` 三种通道仍并存；`/api/*` 与 `/ws/logs` 均校验。
 - 换掉 `WEBUI_TOKEN` 会立即让所有已登录会话失效（cookie 签名密钥由令牌派生）。

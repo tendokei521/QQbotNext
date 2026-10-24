@@ -183,6 +183,37 @@ def test_launch_cmd_targets_main_py():
     assert cmd[2:] == ["--debug", "x"]
 
 
+def test_launch_enables_webui_auto_open_by_default(monkeypatch):
+    """本地启动脚本默认打开浏览器（main.py 读 WEBUI_AUTO_OPEN）。"""
+    monkeypatch.delenv("WEBUI_AUTO_OPEN", raising=False)
+    start.launch(Path("py"), execv=lambda prog, args: None)
+
+    assert start.os.environ["WEBUI_AUTO_OPEN"] == "1"
+
+
+def test_launch_no_open_turns_auto_open_off(monkeypatch):
+    monkeypatch.setenv("WEBUI_AUTO_OPEN", "1")
+    start.launch(Path("py"), execv=lambda prog, args: None, auto_open=False)
+
+    assert start.os.environ["WEBUI_AUTO_OPEN"] == "0"
+
+
+def test_no_open_flag_reaches_launch(tmp_path, monkeypatch):
+    """`--no-open` 必须真的传到 launch，否则用户关不掉自动打开。"""
+    venv, _python = _write_launcher_files(tmp_path, monkeypatch)
+    monkeypatch.delenv("WEBUI_AUTO_OPEN", raising=False)
+    calls, execd = [], []
+
+    code = start.main(
+        ["--venv", str(venv), "--no-open"],
+        runner=_runner(calls),
+        execv=lambda prog, args: execd.append((prog, args)),
+    )
+
+    assert code == start.EXIT_OK
+    assert start.os.environ["WEBUI_AUTO_OPEN"] == "0"
+
+
 # ==================== 主流程 ====================
 
 

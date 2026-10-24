@@ -10,6 +10,7 @@
     python start.py --dev           # 连带 [dev] 组（pytest / ruff ...）
     python start.py --venv PATH     # 用指定目录当 venv（默认 ./venv）
     python start.py --pause         # 结束前停一下，方便双击运行时看输出
+    python start.py --no-open       # 启动后不自动打开浏览器（默认会打开一键登录页）
 
 退出码：``0`` 已启动／检查通过、``1`` venv 建不出来或不可用、``2`` 依赖没齐（因此**不**启动）、
 ``3`` 缺少 ``main.py``。
@@ -410,13 +411,19 @@ def launch(
     execv: Execv | None = None,
     pause: bool = False,
     in_process: bool = False,
+    auto_open: bool = True,
 ) -> int:
     """把进程交给 ``main.py``。
 
     默认用 ``execv`` 直接换掉本进程——这样 Ctrl+C、退出码、终端窗口都跟旧版
     ``start.bat`` 一致，不会多留一层父进程；``--pause`` 或测试注入时改走子进程。
+
+    ``auto_open`` 通过环境变量 ``WEBUI_AUTO_OPEN`` 传给子进程：置 1 则 main.py 启动
+    WebUI 后用默认浏览器打开带 ``?accesstoken=`` 的一键登录链接（本地双击启动即用）。
+    该变量优先于 .env，``--no-open`` 显式置 0 可关掉。
     """
     runner = runner or subprocess.run
+    os.environ["WEBUI_AUTO_OPEN"] = "1" if auto_open else "0"
     cmd = launch_cmd(python, extra)
     if not (pause or in_process):
         execv = execv or os.execv
@@ -474,6 +481,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--group", action="append", default=[], help="额外可选组（可重复）")
     parser.add_argument("--venv", default=None, help="venv 目录（默认 ./venv）")
     parser.add_argument("--pause", action="store_true", help="结束前等待回车（双击运行时用）")
+    parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="启动后不用浏览器打开 WebUI（默认会打开带 accesstoken 的一键登录链接）",
+    )
     parser.add_argument("--force-launch", action="store_true", help="依赖不齐也强行启动（不推荐）")
     parser.add_argument(
         "--recheck",
@@ -530,7 +542,8 @@ def main(
             return EXIT_OK
         print()
         return launch(
-            python, extra=extra, runner=runner, execv=execv, pause=args.pause, in_process=in_process
+            python, extra=extra, runner=runner, execv=execv, pause=args.pause,
+            in_process=in_process, auto_open=not args.no_open,
         )
     if cached is not None and not hit and not args.check:
         print(f"  [cache] 缓存失效：{why} —— 重新完整检查")
@@ -624,7 +637,10 @@ def main(
         return EXIT_ENTRY
     _stage(4, total, "launch", "main.py")
     print()
-    return launch(python, extra=extra, runner=runner, execv=execv, pause=args.pause, in_process=in_process)
+    return launch(
+        python, extra=extra, runner=runner, execv=execv, pause=args.pause,
+        in_process=in_process, auto_open=not args.no_open,
+    )
 
 
 if __name__ == "__main__":

@@ -38,7 +38,12 @@
   - 会话 cookie（浏览器登录后自动携带）
   - `Authorization: Bearer <token>`
   - `Authorization: Basic base64(任意用户名:<token>)`（password 位放令牌）
-  - 查询参数 `?token=<token>`（适用于 `<img>`、无法改 header 的场景）
+  - 查询参数 `?token=<token>` 或 `?accesstoken=<token>`（两者等价；后者便于拼一键登录链接）
+- **一键登录（页面导航）**：`GET /?accesstoken=<token>` 校验通过后，服务端下发会话 cookie
+  并 **`303` 到去掉令牌键的干净 URL**（其余查询参数保留）。因此令牌不会留在地址栏、
+  浏览历史和后续 `Referer` 中。该行为**仅限 GET + `Accept` 含 `text/html` 的文档请求**——
+  `/api/*`、`<img>`、脚本请求一律不重定向，仍返回各自的状态码。
+  `GET /login?accesstoken=<token>&next=/bots` 同样可直接登录。
 - **鉴权失败分流**（未认证时按路径决定，不再弹浏览器原生 Basic 框）：
   - `/api/*` → `401 {"status":"error","message":"未授权"}`（前端 axios 依赖明确错误码）
   - 页面请求（Accept 含 `text/html`）→ `302 /login?next=<原路径>`

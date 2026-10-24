@@ -9,7 +9,13 @@
 import re
 
 from app.core.settings import Settings
-from app.core.webui_token import TOKEN_BYTES, ensure_webui_token, resolve_env_path
+from app.core.webui_token import (
+    TOKEN_BYTES,
+    access_url,
+    ensure_webui_token,
+    local_url,
+    resolve_env_path,
+)
 
 
 def _settings(tmp_path, token: str = "") -> Settings:
@@ -183,3 +189,24 @@ def test_env_override_reports_not_persisted(tmp_path, monkeypatch):
 def test_token_bytes_constant_sane():
     # 至少 128 bit：明文静态令牌不该太短
     assert TOKEN_BYTES * 8 >= 128
+
+
+def test_local_url_falls_back_to_loopback():
+    """0.0.0.0 / :: 是监听地址、无法直接访问，给出的链接必须是回环地址。"""
+    assert local_url("0.0.0.0", 9200) == "http://127.0.0.1:9200"
+    assert local_url("::", 9200) == "http://127.0.0.1:9200"
+    assert local_url("", 9200) == "http://127.0.0.1:9200"
+    assert local_url("192.168.1.5", 9200) == "http://192.168.1.5:9200"
+
+
+def test_access_url_carries_accesstoken():
+    assert access_url("127.0.0.1", 9200, "abc123") == "http://127.0.0.1:9200/?accesstoken=abc123"
+
+
+def test_access_url_encodes_unsafe_characters():
+    """用户手填的口令可能含 URL 特殊字符，必须转义，否则链接会被截断。"""
+    from urllib.parse import parse_qs, urlparse
+
+    url = access_url("127.0.0.1", 9200, "a b&c=d#e")
+    assert " " not in url and "#" not in url
+    assert parse_qs(urlparse(url).query)["accesstoken"] == ["a b&c=d#e"]
