@@ -142,3 +142,37 @@ def parse_endpoint(url: str, *, require_port: bool = False) -> Endpoint:
         token=token,
         query="&".join(kept),
     )
+
+
+# ==================== 新增账号的默认地址 ====================
+#: 新版账号默认从这个端口往上找一个没被占用的（OneBot 实现的常见默认就是 3001）
+FIRST_PORT = 3001
+#: 反向监听默认路径：OneBot v11 反向 WS 的通行约定
+REVERSE_PATH = "/onebot/v11/ws"
+#: 默认监听/连接主机：本机（跨机器或容器部署由用户自己改 0.0.0.0 / 局域网 IP）
+DEFAULT_HOST = "127.0.0.1"
+
+
+def suggest_address(conn_mode: object, existing: object = ()) -> str:
+    """给「新增账号」一个填好的默认地址，避免新卡片是空地址、点了连接才报错。
+
+    端口从 :data:`FIRST_PORT` 起取第一个**没被已有账号占用**的：
+    反向模式要独占端口，撞号会让第二个账号起监听时直接失败；正向撞号会连到同一
+    个 OneBot 实现上（两个账号抢一条连接），同样要避免。
+
+    ``existing`` 接受任意可迭代的已有 ws_url（读不懂的地址直接跳过，不影响建议）。
+    """
+    used: set[int] = set()
+    for url in existing or ():
+        try:
+            endpoint = parse_endpoint(str(url))
+        except EndpointError:
+            continue
+        if endpoint.port:
+            used.add(endpoint.port)
+    port = FIRST_PORT
+    while port in used and port < FIRST_PORT + 100:
+        port += 1
+    if is_reverse(conn_mode):
+        return f"ws://{DEFAULT_HOST}:{port}{REVERSE_PATH}"
+    return f"ws://{DEFAULT_HOST}:{port}/"

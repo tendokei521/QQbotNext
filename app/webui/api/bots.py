@@ -9,6 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
+from app.infrastructure.onebot.endpoint import normalize_mode, suggest_address
 from app.webui.api.deps import get_bot_service, get_config_service
 
 router = APIRouter(tags=["bots"])
@@ -93,12 +94,37 @@ async def api_bots_config_save(request: Request, config_service=Depends(get_conf
 
 
 @router.post("/bots/config/add")
-async def api_bots_config_add(bot_service=Depends(get_bot_service)):
+async def api_bots_config_add(
+    request: Request,
+    bot_service=Depends(get_bot_service),
+    cfg_service=Depends(get_config_service),
+):
+    """新增一个账号配置（先选连接方式，再创建）。
+
+    前端先让用户选正向 / 反向 WebSocket 再创建，故这里收
+    ``{"conn_mode": "forward" | "reverse", "ws_url": "可选"}``；缺省 = 正向，
+    兼容旧前端与外部脚本的无参 POST。
+
+    地址留空时按模式给一个默认建议（端口避开已有账号）——新卡片一出生就是可用
+    地址，不必等用户点连接才发现「反向地址必须写端口」。
+    """
+    body: dict = {}
+    try:
+        parsed = await request.json()
+        if isinstance(parsed, dict):
+            body = parsed
+    except Exception:
+        body = {}   # 无 body 是合法调用（旧前端就是无参 POST）
+
+    mode = normalize_mode(body.get("conn_mode"))
+    ws_url = str(body.get("ws_url") or "").strip()
+    if not ws_url:
+        ws_url = suggest_address(mode, [b.get("ws_url", "") for b in cfg_service.get_bots()])
     # Reuse BotService.add_bot: persist the config AND register a gateway connection
     # (status "disconnected") at once, so /api/bots (status list) includes the new
     # account immediately and the cards / account selector refresh right away.
-    index = await bot_service.add_bot("", None, False)
-    return _ok("已添加新账号配置", index=index)
+    index = await bot_service.add_bot(ws_url, None, False, conn_mode=mode)
+    return _ok("已添加新账号配置", index=index, conn_mode=mode, ws_url=ws_url)
 
 
 @router.post("/bots/config/delete/{index}")
