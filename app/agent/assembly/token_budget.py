@@ -14,6 +14,8 @@ system（人设/协议）与最后一条 user（本轮提问）永不丢。
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 from typing import Any
 
 from app.agent import logger
@@ -113,7 +115,7 @@ def truncate(
             None,
         )
         if victim is None:
-            logger.add_info(f"#{bot_id or '?'}").warning(
+            logger.add_info(account_label(bot_id or '?')).warning(
                 f"[Context] token 预算 {limit} 小于必留内容（system + 本轮提问），本轮到 "
                 f"{estimate_tokens(messages, per_token_chars=per_token_chars)} token 仍然超限"
             )
@@ -133,7 +135,7 @@ def apply_budget(messages: list[dict], config: Any, *, bot_id: Any = None) -> li
     if estimated <= limit:
         return messages
     trimmed, dropped = truncate(messages, limit, per_token_chars=ratio, bot_id=bot_id)
-    logger.add_info(f"#{bot_id or '?'}").info(
+    logger.add_info(account_label(bot_id or '?')).info(
         f"[Context] token 预算裁剪：估算 {estimated} > 上限 {limit}，丢弃最旧 {dropped} 条历史"
     )
     return trimmed

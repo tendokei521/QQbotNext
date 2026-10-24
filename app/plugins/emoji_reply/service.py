@@ -11,7 +11,7 @@ from __future__ import annotations
 import random
 import re
 
-from app.core.logger import module_logger
+from app.core.logger import module_logger, account_label
 
 # 冷却 key 前缀：只按“同一消息 + 同一 Emoji”做幂等，不阻塞同一消息上的其它 Emoji
 _COOLDOWN_EMOJI = "emoji_reply:emoji:{bot_id}:{message_id}:{emoji_id}"
@@ -21,7 +21,7 @@ _SYMBOL_RE = re.compile(r"[\W_]+")
 
 
 def _logger(module):
-    return module_logger.add_info(f"#{module.bot_id}").add_info(module.name)
+    return module_logger.add_info(account_label(module.bot_id)).add_info(module.name)
 
 
 def _group_log(module):

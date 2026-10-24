@@ -10,6 +10,8 @@ AgentRuntime 暴露与旧模块一致的接口（.config / .ctx / .bot_id / .sch
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 import asyncio
 from typing import Any
 
@@ -186,7 +188,7 @@ class AgentRuntime:
         try:
             return getter() or {}
         except Exception as e:  # noqa: BLE001 —— 设置读失败不该拖垮整条链
-            logger.add_info(f"#{self.bot_id}").warning(
+            logger.add_info(account_label(self.bot_id)).warning(
                 f"[Provider] 读取全局设置失败（已忽略）: {e}"
             )
             return {}
@@ -223,7 +225,7 @@ class AgentRuntime:
         chain: list[dict] = []
         for mid in ids:
             if allow is not None and mid not in allow:
-                logger.add_info(f"#{self.bot_id}").warning(
+                logger.add_info(account_label(self.bot_id)).warning(
                     f"[Provider] 全局设置里的模型 {mid} 不在 provider_pool 允许清单内，已跳过"
                 )
                 continue
@@ -231,12 +233,12 @@ class AgentRuntime:
             if cfg:
                 chain.append(cfg)
             else:
-                logger.add_info(f"#{self.bot_id}").warning(
+                logger.add_info(account_label(self.bot_id)).warning(
                     f"[Provider] 全局设置引用的模型不存在（可能已被删除）: {mid}"
                 )
         if chain:
             names = [str(c.get("provider_model_id") or c.get("model") or "") for c in chain]
-            logger.add_info(f"#{self.bot_id}").info(
+            logger.add_info(account_label(self.bot_id)).info(
                 f"[Provider] Agent 页未指定模型，改用「Provider 全局设置」的模型链: {names}"
             )
         return chain
@@ -300,7 +302,7 @@ class AgentRuntime:
             chain = self._chain_from_global_settings()
         if not chain:
             # 这条日志此前不存在：表现为 bot 一句话不回、日志里毫无线索
-            logger.add_info(f"#{self.bot_id}").error(
+            logger.add_info(account_label(self.bot_id)).error(
                 "[Provider] 没有可用模型：Agent 页未选择模型，且「Provider 全局设置」里也没有"
                 "默认模型——请在 Agent 页选择模型，或在 Provider 预设页设置全局默认模型"
             )
@@ -339,7 +341,7 @@ class AgentRuntime:
             asyncio.run_coroutine_threadsafe(coro, self._loop)
         except Exception as e:
             # 归档整理是后台增强，失败不应影响会话主流程，但需留痕以便排查
-            logger.add_info(f"#{self.bot_id}").debug(f"[Agent] 归档整理调度失败（已忽略）: {e}")
+            logger.add_info(account_label(self.bot_id)).debug(f"[Agent] 归档整理调度失败（已忽略）: {e}")
 
     def stop(self, close_session: bool = True) -> None:
         """停止定时任务与主动消息计时器（任务数据保留，重启恢复）。
@@ -367,8 +369,8 @@ class AgentRuntime:
             try:
                 stop()
             except Exception as e:
-                logger.add_info(f"#{self.bot_id}").debug(f"[Agent] 关闭 {name} 失败（已忽略）: {e}")
-        logger.add_info(f"#{self.bot_id}").info("[Agent] 运行时已停止")
+                logger.add_info(account_label(self.bot_id)).debug(f"[Agent] 关闭 {name} 失败（已忽略）: {e}")
+        logger.add_info(account_label(self.bot_id)).info("[Agent] 运行时已停止")
 
 
 class AgentManager:
@@ -394,7 +396,7 @@ class AgentManager:
                 provider_runtime_manager=self.provider_runtime_manager,
             )
             self._runtimes[bot_id] = runtime
-            logger.add_info(f"#{bot_id}").info("[Agent] 运行时已装配")
+            logger.add_info(account_label(bot_id)).info("[Agent] 运行时已装配")
         elif bot is not None:
             runtime.set_bot(bot)
         return runtime
@@ -435,8 +437,8 @@ class AgentManager:
             # 重建的运行时使用），只停本运行时自己的定时器与后台任务。
             runtime.stop(close_session=False)
         except Exception as e:
-            logger.add_info(f"#{bot_id}").warning(f"[Agent] 回收运行时时停止失败（已忽略）: {e}")
-        logger.add_info(f"#{bot_id}").info(f"[Agent] 运行时已回收：{reason}")
+            logger.add_info(account_label(bot_id)).warning(f"[Agent] 回收运行时时停止失败（已忽略）: {e}")
+        logger.add_info(account_label(bot_id)).info(f"[Agent] 运行时已回收：{reason}")
 
     def get_runtime(self, bot_id: Any) -> AgentRuntime | None:
         return self._runtimes.get(bot_id)
@@ -450,7 +452,7 @@ class AgentManager:
                 runtime.stop()
             except Exception as e:
                 # 单个运行时停止失败不应阻断其余运行时的关闭（best-effort）
-                logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(
+                logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).debug(
                     f"[Agent] 停止运行时失败（已忽略）: {e}"
                 )
         self._runtimes.clear()

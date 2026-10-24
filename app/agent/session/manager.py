@@ -40,6 +40,7 @@ import uuid
 from typing import Any
 
 from app.agent import logger
+from app.core.logger import account_label
 from app.agent.storage import create_history_store
 
 #: 存储层条目字段（读取侧可依赖的契约，见模块 docstring）
@@ -347,7 +348,7 @@ class SessionManager:
                 try:
                     self._cleanup_expired()
                 except Exception as e:
-                    logger.add_info(f"#{self.bot_id}").warning(f"清理过期会话异常: {e}")
+                    logger.add_info(account_label(self.bot_id)).warning(f"清理过期会话异常: {e}")
 
         self._cleanup_thread = threading.Thread(target=cleanup_task, daemon=True)
         self._cleanup_thread.start()
@@ -359,7 +360,7 @@ class SessionManager:
                 session = self.sessions.pop(sid)
                 self.history.save_session(session)
                 self._notify_archive(session)
-                logger.add_info(f"#{self.bot_id}").info(
+                logger.add_info(account_label(self.bot_id)).info(
                     f"会话过期已归档: {sid}"
                 )
         self._maybe_gc_media()
@@ -384,7 +385,7 @@ class SessionManager:
 
             image_media.gc(self.bot_id)
         except Exception as e:  # noqa: BLE001 —— 清理失败不影响会话与对话
-            logger.add_info(f"#{self.bot_id}").debug(f"本地图片清理失败（已忽略）: {e}")
+            logger.add_info(account_label(self.bot_id)).debug(f"本地图片清理失败（已忽略）: {e}")
 
     # ── 会话 CRUD ─────────────────────────────────────────
     def create_session(self, session_id: str, session_type: str, timeout: int = 60) -> Session:
@@ -392,7 +393,7 @@ class SessionManager:
         session = Session(session_id, session_type, timeout)
         with self.lock:
             self.sessions[session_id] = session
-        logger.add_info(f"#{self.bot_id}").info(f"创建会话: {session_id}")
+        logger.add_info(account_label(self.bot_id)).info(f"创建会话: {session_id}")
         return session
 
     def get_session(self, session_id: str) -> Session | None:
@@ -412,7 +413,7 @@ class SessionManager:
             if session:
                 self.history.save_session(session)
                 self._notify_archive(session)
-                logger.add_info(f"#{self.bot_id}").info(f"会话已结束: {session_id}")
+                logger.add_info(account_label(self.bot_id)).info(f"会话已结束: {session_id}")
 
     def forget_session(self, session_id: str) -> bool:
         """从内存中移除会话，但不写回归档。
@@ -424,7 +425,7 @@ class SessionManager:
             exist = session_id in self.sessions
             if exist:
                 self.sessions.pop(session_id, None)
-                logger.add_info(f"#{self.bot_id}").info(f"会话已从内存移除: {session_id}")
+                logger.add_info(account_label(self.bot_id)).info(f"会话已从内存移除: {session_id}")
             return exist
 
     # ── 消息 ──────────────────────────────────────────────
@@ -485,7 +486,7 @@ class SessionManager:
             if len(history) > self.MAX_HISTORY_MESSAGES:
                 dropped = len(history) - self.MAX_HISTORY_MESSAGES
                 del history[:dropped]
-                logger.add_info(f"#{self.bot_id}").debug(
+                logger.add_info(account_label(self.bot_id)).debug(
                     f"历史裁剪: {session_id} 丢弃最旧 {dropped} 条 (上限 {self.MAX_HISTORY_MESSAGES})"
                 )
             session.touch()
@@ -517,7 +518,7 @@ class SessionManager:
             if len(history) > self.MAX_HISTORY_MESSAGES:
                 dropped = len(history) - self.MAX_HISTORY_MESSAGES
                 del history[:dropped]
-                logger.add_info(f"#{self.bot_id}").debug(
+                logger.add_info(account_label(self.bot_id)).debug(
                     f"历史裁剪: {session_id} 丢弃最旧 {dropped} 条 (上限 {self.MAX_HISTORY_MESSAGES})"
                 )
         else:
@@ -650,7 +651,7 @@ class SessionManager:
 
         if persist:
             self.history.save_session(session)
-        logger.add_info(f"#{self.bot_id}").info(
+        logger.add_info(account_label(self.bot_id)).info(
             f"导入外部历史: {session_id} 写入 {len(normalized)} 条"
             f"（丢弃 {len(raw) - len(normalized)}，裁剪 {dropped}）"
         )
@@ -721,7 +722,7 @@ class SessionManager:
             session.conversations[conv.id] = conv
         latest = max(convs, key=lambda d: d.get("saved_at", 0))
         session.active_id = latest.get("conv_id") or latest.get("task_id")
-        logger.add_info(f"#{self.bot_id}").info(
+        logger.add_info(account_label(self.bot_id)).info(
             f"归档恢复: {session_id} ({len(session.conversations)} 个对话)"
         )
 

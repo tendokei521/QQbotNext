@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 from typing import Any
 
 from app.agent.delivery.pool import StreamSendPool
@@ -189,7 +191,7 @@ async def _stream_send_initiative_inner(
             if _append_round_images(messages, tool_ctx, _modalities_for_chain(chain)):
                 from app.agent import logger
 
-                logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").info(
+                logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).info(
                     "[ExpandImage] 主动/定时任务工具轮取回的图片已追加到下一轮请求"
                 )
 
@@ -197,7 +199,7 @@ async def _stream_send_initiative_inner(
         if reasoning_chars and not full_text_parts:
             from app.agent import logger
 
-            logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").warning(
+            logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).warning(
                 f"[LLM] 主动消息只产出思考、无正文（reasoning {reasoning_chars} 字符，"
                 f"多半是思考吃满 max_tokens={max_tokens}）：本轮静默"
             )

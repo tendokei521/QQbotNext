@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 import asyncio
 import uuid
 from typing import Any
@@ -96,14 +98,14 @@ class LlmPipeline:
         try:
             exc = task.exception()
         except Exception as e:  # noqa: BLE001 —— 连取异常都失败时只留痕，不再抛
-            logger.add_info(f"#{getattr(self.runtime, 'bot_id', '?')}").warning(
+            logger.add_info(account_label(getattr(self.runtime, 'bot_id', '?'))).warning(
                 f"[LLM Pipeline] 读取任务异常失败: {e}"
             )
             return
         if exc is None:
             return
         session_id = getattr(getattr(job, "ctx", None), "session_id", "?")
-        logger.add_info(f"#{getattr(self.runtime, 'bot_id', '?')}").error(
+        logger.add_info(account_label(getattr(self.runtime, 'bot_id', '?'))).error(
             f"[LLM Pipeline] 任务异常终止（会话 {session_id}, job {job.id[:8]}）: {exc!r}",
             exc_info=exc,
         )
@@ -224,7 +226,7 @@ class LlmPipeline:
         except Exception as e:  # noqa: BLE001 —— 图片解析失败必须降级为纯文本，不能阻断对话
             from app.core.logger import logger
 
-            logger.add_info(f"#{self.runtime.bot_id}").warning(f"图片解析失败，按纯文本处理: {e}")
+            logger.add_info(account_label(self.runtime.bot_id)).warning(f"图片解析失败，按纯文本处理: {e}")
             return []
 
     async def _run(self, job: LlmJob) -> None:
@@ -284,7 +286,7 @@ class LlmPipeline:
                 # 日志里连一行都没有。这里明确交代一句，并说清该去哪配。
                 from app.core.logger import logger
 
-                logger.add_info(f"#{getattr(self.runtime, 'bot_id', '?')}").warning(
+                logger.add_info(account_label(getattr(self.runtime, 'bot_id', '?'))).warning(
                     "[LLM] 未配置 API Key，本轮消息不进入 LLM（在「Provider 预设」页填写；"
                     "自建网关若靠额外请求头鉴权，请在预设里配 extra_headers）"
                 )
@@ -356,7 +358,7 @@ class LlmPipeline:
         except Exception as e:
             from app.core.logger import logger
 
-            logger.add_info(f"#{self.runtime.bot_id}").exception(
+            logger.add_info(account_label(self.runtime.bot_id)).exception(
                 f"[LLM Pipeline] 任务异常: {e}"
             )
         finally:
@@ -499,7 +501,7 @@ class LlmPipeline:
         except Exception as e:  # noqa: BLE001 - 句柄回填失败不影响发送结果
             from app.core.logger import logger
 
-            logger.add_info(f"#{self.runtime.bot_id}").debug(
+            logger.add_info(account_label(self.runtime.bot_id)).debug(
                 f"[LLM Pipeline] 回填 message_id 失败（已忽略）: {e}"
             )
 

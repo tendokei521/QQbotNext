@@ -19,6 +19,8 @@
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -101,7 +103,7 @@ def resolve_invoker(runtime: Any) -> ProviderInvoker:
     if invoker is not None:
         from app.agent import logger
 
-        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").warning(
+        logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).warning(
             f"[LLM] runtime.invoker 不可用（{type(invoker).__name__}），已回退默认调用策略"
         )
     return ProviderInvoker()

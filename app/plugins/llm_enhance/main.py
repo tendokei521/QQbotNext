@@ -5,6 +5,7 @@
 """
 
 from app.agent import LlmContext, logger
+from app.core.logger import account_label
 from app.plugin import BaseModule, llm_hook
 
 from .config_schema import SCHEMA
@@ -29,6 +30,6 @@ class Module(BaseModule):
         enabled = bool(self.config.get("debug_prompt", False))
         ctx.state["debug_prompt"] = enabled
         if enabled:
-            logger.add_info(f"#{self.bot_id}").info(
+            logger.add_info(account_label(self.bot_id)).info(
                 f"[Prompt] {ctx.session_id} user_text:\n{ctx.user_text}"
             )

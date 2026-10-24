@@ -33,6 +33,8 @@ print(result.text, len(result.tool_results))
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
@@ -168,7 +170,7 @@ async def run_turn(
     except asyncio.CancelledError:
         raise
     except Exception as e:  # noqa: BLE001 —— 模块调用不该因为一轮失败而炸掉
-        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").exception(
+        logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).exception(
             f"[Turn] run_turn 失败 ({req.session_id}): {e}"
         )
         result.error = str(e)
@@ -347,7 +349,7 @@ async def _chat_once(
     # 工具轮取回的图片会留在 `tool_ctx.extra["round_images"]` 里没人追加。
     # 这里补问一轮（上限 1 次，防模型反复取图死循环）。
     if _append_round_images(messages, tool_ctx, meta.get("modalities")):
-        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").info(
+        logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).info(
             f"[ExpandImage] 工具轮取回的图片已追加为补全材料，补问一轮 -> {meta.get('session_id', '')}"
         )
         params["input_tokens_estimate"] = _input_tokens_estimate(messages)
@@ -364,7 +366,7 @@ async def _chat_once(
         reasoning = len(getattr(response, "reasoning", "") or "")
         eff, src = _effective_max_tokens(provider_chain, meta["max_tokens"])
         hint = f"，思考 {reasoning} 字符但无正文（max_tokens={eff}，来自{src}）" if reasoning else ""
-        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").warning(
+        logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).warning(
             f"[Turn] 空回复，使用兜底文本{hint}"
         )
         return "抱歉，我暂时无法回答，请稍后再试。", tool_results
@@ -433,7 +435,7 @@ async def _stream_once(
                 slot["function"]["name"] += frag.get("name") or ""
                 slot["function"]["arguments"] += frag.get("arguments") or ""
             elif ev.type == "error":
-                logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").error(
+                logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).error(
                     f"[Turn] 流式请求失败: {ev.text}"
                 )
                 break
@@ -551,7 +553,7 @@ def _record_telemetry(
             error="" if text.strip() else "empty_response",
         )
     except Exception as e:  # noqa: BLE001 —— 遥测不该影响一轮结果
-        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(
+        logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).debug(
             f"[Turn] 遥测记录失败（已忽略）: {e}"
         )
 
@@ -582,6 +584,6 @@ async def _write_history(
 
         _commit_history_enrichment(runtime, session_id, ctx)
     except Exception as e:  # noqa: BLE001 —— 写历史失败不该丢掉已生成的回复
-        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").warning(
+        logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).warning(
             f"[Turn] 写历史失败（已忽略）: {e}"
         )

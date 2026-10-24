@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 import json
 import time
 from typing import Any
@@ -138,7 +140,7 @@ def _log_request_line(
     if tools:
         parts.append(f"tools={tools}")
     parts.append(f"budget={budget.requests}/{budget.max_requests}")
-    log = logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}")
+    log = logger.add_info(account_label(getattr(runtime, 'bot_id', '?')))
     if error:
         # 出错才升级到 WARNING：这时的字段是排查入口，不能只留在 debug.log
         parts.append(f"error={error}")
@@ -307,7 +309,7 @@ def _log_debug_prompt(runtime, session_id: str, messages: list[dict], debug_enab
         text = json.dumps(messages, ensure_ascii=False, indent=2)
     except Exception:
         text = str(messages)
-    logger.add_info(f"#{runtime.bot_id}").info(f"[Prompt] {session_id}\n{text}")
+    logger.add_info(account_label(runtime.bot_id)).info(f"[Prompt] {session_id}\n{text}")
 
 
 def _history_meta_flags(runtime) -> dict:

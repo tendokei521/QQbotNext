@@ -34,14 +34,27 @@ def get_service(request: Request, service_type):
     return request.app.state.container.get(service_type)
 
 
-def parse_bot_id(bot_id: str | None = Query(None)) -> int | None:
-    """把查询参数 bot_id 安全转为 int；前端可能传 null/'null'/'None'。"""
-    if not bot_id or bot_id in ("null", "None", ""):
-        return None
-    try:
-        return int(bot_id)
-    except (TypeError, ValueError):
-        return None
+def parse_account_id(
+    account_id: str | None = Query(None),
+    bot_id: str | None = Query(None),
+) -> str | None:
+    """取「当前操作的账号 id」。
+
+    **语义变更**：历史实现这里返回数组下标 ``int``，参数名 ``bot_id`` 实际指 QQ 号。
+    自 v4 起账号唯一凭据是用户在「添加账号」时设定的字符串 id，因此：
+
+    - 首选 ``?account_id=<id>``；``?bot_id=`` 仍被接受（老前端/脚本兼容期）；
+    - 返回 ``str | None``：调用方拿它当模块配置 / Agent 运行时 / 会话 / 统计的 key。
+    """
+    for raw in (account_id, bot_id):
+        value = (raw or "").strip()
+        if value and value not in ("null", "None"):
+            return value
+    return None
+
+
+#: 兼容旧导入名（大量路由仍写 `Depends(parse_account_id)`；语义已是账号 id）。
+parse_bot_id = parse_account_id
 
 
 # --------------------------------------------------------------------------- #

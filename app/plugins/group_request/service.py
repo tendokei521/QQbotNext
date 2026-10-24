@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import re
 
-from app.core.logger import module_logger
+from app.core.logger import module_logger, account_label
 
 
 async def dynamic_options(module, bot):
@@ -105,7 +105,7 @@ def _group_config(module, group_id: str) -> dict:
 
 
 async def handle_group_request(module, event):
-    logger = module_logger.add_info(f"#{module.bot_id}").add_info(module.name)
+    logger = module_logger.add_info(account_label(module.bot_id)).add_info(module.name)
 
     if event.bot is None:
         return

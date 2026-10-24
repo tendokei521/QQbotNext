@@ -218,7 +218,9 @@ class BotConnection(IBot):
         self.last_error: str | None = None
         self.all_group_list: list = []
         self.all_group_list_info: list = []
-        self.index: int | None = None
+        # 账号身份：account_id 是唯一凭据（判断/key 用），account_name 是展示名（日志用）
+        self.account_id: str | None = None
+        self.account_name: str = ""
         self._pending: dict[str, asyncio.Future] = {}        # 超时后被回收的 echo：迟到响应落这里（只留痕，不复用）
         self._orphan_echoes: deque[str] = deque(maxlen=ORPHAN_ECHO_LIMIT)
         self._lock = asyncio.Lock()
@@ -235,6 +237,12 @@ class BotConnection(IBot):
         self.send_hook_registry = None
         self.before_send_hook_registry = None
         self.api_hook_registry = None
+
+    # ---------- 展示名 ----------
+    @property
+    def label(self) -> str:
+        """日志前缀：**一律用账号名**（id 只用于判断，不给人看）。"""
+        return self.account_name or self.account_id or "?"
 
     # ---------- 已废弃：账号级 owner_id ----------
     @property
@@ -255,7 +263,7 @@ class BotConnection(IBot):
             self._owner_id_warned = True
             from app.core.logger import logger as _logger
 
-            _logger.add_info(f"#{getattr(self, 'index', '?')}").warning(
+            _logger.add_info(self.label).warning(
                 "[Bot] 账号级 owner_id 已废弃并被忽略：请在「权限管理 → 拥有者」名册里配置"
             )
 
@@ -285,7 +293,7 @@ class BotConnection(IBot):
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                api_logger.error(f"[#{self.index}] 发送前钩子执行异常 {action}: {e}")
+                api_logger.error(f"[{self.label}] 发送前钩子执行异常 {action}: {e}")
                 allowed = True
             if not allowed:
                 return None
@@ -297,7 +305,7 @@ class BotConnection(IBot):
                 else:
                     response = await self._outbound_hook(action, params)
             except Exception as e:
-                api_logger.error(f"[#{self.index}] 出站链异常 {action}: {e}")
+                api_logger.error(f"[{self.label}] 出站链异常 {action}: {e}")
                 response = None
         else:
             response = await self._direct_send(action, params, timeout_sec)
@@ -314,7 +322,7 @@ class BotConnection(IBot):
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            api_logger.error(f"[#{self.index}] 发送后钩子执行异常 {action}: {e}")
+            api_logger.error(f"[{self.label}] 发送后钩子执行异常 {action}: {e}")
 
     async def _run_api_hooks(self, action: str, params: dict, response: dict | None) -> None:
         """任意 OneBot API 调用后触发 @api_hook 注册的钩子。"""
@@ -328,7 +336,7 @@ class BotConnection(IBot):
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            api_logger.error(f"[#{self.index}] API 后钩子执行异常 {action}: {e}")
+            api_logger.error(f"[{self.label}] API 后钩子执行异常 {action}: {e}")
 
     async def _direct_send(
         self, action: str, params: dict | None = None, timeout_sec: float | int | None = None
@@ -338,7 +346,7 @@ class BotConnection(IBot):
         超时按 ``resolve_api_timeout`` 解析：显式值 > 分级表 > 默认 10s。
         """
         if not self.websocket:
-            api_logger.error(f"[#{self.index}] API 未连接，请求被拒: {action}")
+            api_logger.error(f"[{self.label}] API 未连接，请求被拒: {action}")
             _log_user_api(action, params, error="API 未连接")
             return None
         timeout = resolve_api_timeout(action, timeout_sec)
@@ -350,22 +358,22 @@ class BotConnection(IBot):
         try:
             async with self._lock:
                 await self.websocket.send(json.dumps(payload))
-            api_logger.debug(f"[#{self.index}] API(->) {action} | echo:{echo_id[:8]}")
+            api_logger.debug(f"[{self.label}] API(->) {action} | echo:{echo_id[:8]}")
             response = await asyncio.wait_for(future, timeout=timeout)
             if response.get("status") != "ok":
                 api_logger.warning(f"{action} 失败: {response.get('retcode')} {response.get('message')}")
             else:
-                api_logger.debug(f"[#{self.index}] API(<-) {action} | echo:{echo_id[:8]}")
+                api_logger.debug(f"[{self.label}] API(<-) {action} | echo:{echo_id[:8]}")
             _log_user_api(action, params, response=response)
             return response
         except asyncio.TimeoutError:
             # 服务端可能仍在处理：把 echo 记为「已超时」，迟到响应只留痕不复用
             self._orphan_echoes.append(echo_id)
-            api_logger.error(f"[#{self.index}] API 超时 {action} ({timeout:g}s)，响应未到")
+            api_logger.error(f"[{self.label}] API 超时 {action} ({timeout:g}s)，响应未到")
             _log_user_api(action, params, error=f"超时 ({timeout:g}s)")
             return None
         except Exception as e:
-            api_logger.error(f"[#{self.index}] API 异常 {action}: {e}")
+            api_logger.error(f"[{self.label}] API 异常 {action}: {e}")
             _log_user_api(action, params, error=str(e))
             return None
         finally:
@@ -381,11 +389,11 @@ class BotConnection(IBot):
             if echo_id in self._orphan_echoes:
                 # 超时后才回来的响应：请求方已放弃，这里只能留痕（服务端可能已执行）
                 api_logger.warning(
-                    f"[#{self.index}] 超时请求的迟到响应 action={message.get('action', '?')} "
+                    f"[{self.label}] 超时请求的迟到响应 action={message.get('action', '?')} "
                     f"echo={echo_id[:8]}（请求方已放弃，仅留痕）"
                 )
                 return False
-            api_logger.warning(f"[#{self.index}] 未找到对应请求 echo={echo_id[:8]}")
+            api_logger.warning(f"[{self.label}] 未找到对应请求 echo={echo_id[:8]}")
             return False
         if not future.done():
             future.set_result(message)
@@ -404,7 +412,7 @@ class BotConnection(IBot):
                 count += 1
         self._pending.clear()
         if count:
-            api_logger.warning(f"[#{self.index}] 连接断开，{count} 个在途请求已失败")
+            api_logger.warning(f"[{self.label}] 连接断开，{count} 个在途请求已失败")
         return count
 
     # ---------- 消息发送 ----------

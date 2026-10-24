@@ -78,7 +78,7 @@ def _base(payload: dict, bot: IBot, event_type: str) -> dict:
         self_id=self_id,
         bot=bot,
         bot_id=self_id or fallback or None,
-        bot_index=bot.index if bot else None,
+        account_id=getattr(bot, "account_id", None) if bot else None,
         owner_id=bot.owner_id if bot else None,
         raw=payload,
     )

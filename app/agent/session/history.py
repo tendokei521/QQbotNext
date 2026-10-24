@@ -14,6 +14,7 @@ import time
 from typing import Any
 
 from app.agent import llm_data_dir, logger, safe_bot_id
+from app.core.logger import account_label
 
 # task_id 由 uuid4().hex[:12] 生成，仅允许十六进制（防路径穿越）
 _TASK_ID_RE = re.compile(r"^[0-9a-f]{8,32}$")
@@ -57,11 +58,11 @@ class HistoryManager:
         try:
             with open(self._file_path(conv.task_id), "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            logger.add_info(f"#{self.bot_id}").debug(
+            logger.add_info(account_label(self.bot_id)).debug(
                 f"历史已保存: {session.id} / {conv.title} (task: {conv.task_id}, {len(data['messages'])} 条)"
             )
         except Exception as e:
-            logger.add_info(f"#{self.bot_id}").error(
+            logger.add_info(account_label(self.bot_id)).error(
                 f"保存历史失败 (task: {conv.task_id}): {e}"
             )
 
@@ -72,13 +73,13 @@ class HistoryManager:
         except ValueError:
             return None
         if not os.path.exists(file_path):
-            logger.add_info(f"#{self.bot_id}").warning(f"历史文件不存在: {task_id}")
+            logger.add_info(account_label(self.bot_id)).warning(f"历史文件不存在: {task_id}")
             return None
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
-            logger.add_info(f"#{self.bot_id}").error(f"读取历史失败 (task: {task_id}): {e}")
+            logger.add_info(account_label(self.bot_id)).error(f"读取历史失败 (task: {task_id}): {e}")
             return None
 
     def find_all_by_session(self, session_id: str) -> list[dict]:
@@ -170,9 +171,9 @@ class HistoryManager:
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            logger.add_info(f"#{self.bot_id}").error(f"更新历史失败 (task: {task_id}): {e}")
+            logger.add_info(account_label(self.bot_id)).error(f"更新历史失败 (task: {task_id}): {e}")
             raise
-        logger.add_info(f"#{self.bot_id}").debug(
+        logger.add_info(account_label(self.bot_id)).debug(
             f"历史已更新: {task_id} (title={data.get('title')!r}, messages={len(data.get('messages') or [])})"
         )
         return data
@@ -192,9 +193,9 @@ class HistoryManager:
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(conv, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            logger.add_info(f"#{self.bot_id}").error(f"导入历史失败 (task: {task_id}): {e}")
+            logger.add_info(account_label(self.bot_id)).error(f"导入历史失败 (task: {task_id}): {e}")
             raise
-        logger.add_info(f"#{self.bot_id}").debug(f"历史已导入: {task_id} (messages={len(conv.get('messages') or [])})")
+        logger.add_info(account_label(self.bot_id)).debug(f"历史已导入: {task_id} (messages={len(conv.get('messages') or [])})")
         return conv
 
     def delete_history(self, task_id: str) -> bool:
@@ -204,7 +205,7 @@ class HistoryManager:
             return False
         if os.path.exists(file_path):
             os.remove(file_path)
-            logger.add_info(f"#{self.bot_id}").info(f"历史已删除: {task_id}")
+            logger.add_info(account_label(self.bot_id)).info(f"历史已删除: {task_id}")
             return True
         return False
 
@@ -333,11 +334,11 @@ class SQLiteHistoryStore:
                 self._insert_conversation(data)
                 imported += 1
             except Exception as e:
-                logger.add_info(f"#{self.bot_id}").warning(
+                logger.add_info(account_label(self.bot_id)).warning(
                     f"[History] 旧 JSON 迁移失败 {name}: {e}"
                 )
         if imported:
-            logger.add_info(f"#{self.bot_id}").info(
+            logger.add_info(account_label(self.bot_id)).info(
                 f"[History] 已从旧 JSON 导入 {imported} 个对话到 SQLite"
             )
 
@@ -363,7 +364,7 @@ class SQLiteHistoryStore:
             "messages": conv.data.history.copy(),
         }
         self._insert_conversation(data)
-        logger.add_info(f"#{self.bot_id}").debug(
+        logger.add_info(account_label(self.bot_id)).debug(
             f"历史已保存(SQLite): {session.id} / {conv.title} "
             f"(task: {conv.task_id}, {len(data['messages'])} 条)"
         )
@@ -460,7 +461,7 @@ class SQLiteHistoryStore:
                 raise ValueError("messages 必须是数组")
             data["messages"] = messages
         self._insert_conversation(data)
-        logger.add_info(f"#{self.bot_id}").debug(
+        logger.add_info(account_label(self.bot_id)).debug(
             f"历史已更新(SQLite): {task_id} (title={data.get('title')!r}, messages={len(data.get('messages') or [])})"
         )
         return data
@@ -476,7 +477,7 @@ class SQLiteHistoryStore:
         conv.setdefault("saved_at", int(time.time()))
         conv.setdefault("messages", [])
         self._insert_conversation(conv)
-        logger.add_info(f"#{self.bot_id}").debug(
+        logger.add_info(account_label(self.bot_id)).debug(
             f"历史已导入(SQLite): {task_id} (messages={len(conv.get('messages') or [])})"
         )
         return conv
@@ -490,7 +491,7 @@ class SQLiteHistoryStore:
             self._conn.commit()
             deleted = cur.rowcount > 0
         if deleted:
-            logger.add_info(f"#{self.bot_id}").info(f"历史已删除(SQLite): {task_id}")
+            logger.add_info(account_label(self.bot_id)).info(f"历史已删除(SQLite): {task_id}")
         return deleted
 
     def close(self) -> None:

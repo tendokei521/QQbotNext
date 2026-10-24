@@ -1,6 +1,6 @@
 """指令分发：#打卡 / #全群打卡 / 自定义触发词；命中即接管，跳过 LLM。"""
 
-from app.core.logger import module_logger
+from app.core.logger import module_logger, account_label
 from app.plugin.groups import check_group_enabled, resolve_group_ids
 
 from .signin import _execute_signin_for_groups
@@ -10,7 +10,7 @@ async def handle(module, event):
     """指令入口：匹配 #打卡 / #全群打卡 / 自定义触发词；命中即接管，跳过 LLM。"""
     if event.event_type != "message_group":
         return
-    logger = module_logger.add_info(f"#{module.bot_id}").add_info(module.name)
+    logger = module_logger.add_info(account_label(module.bot_id)).add_info(module.name)
     config = module.config
     text = event.text.strip()
 

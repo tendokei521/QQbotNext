@@ -2,7 +2,7 @@
 
 from functools import partial
 
-from app.core.logger import module_logger
+from app.core.logger import module_logger, account_label
 from app.plugin import register_daily_schedule
 from app.plugin.groups import check_group_enabled
 
@@ -14,7 +14,7 @@ async def handle(module, event):
     """#今日密码 指令 → 获取密码并回复；命中即接管，跳过 LLM。"""
     if event.event_type != "message_group":
         return
-    logger = module_logger.add_info(f"#{module.bot_id}").add_info(module.name)
+    logger = module_logger.add_info(account_label(module.bot_id)).add_info(module.name)
     config = module.config
 
     if not config.get("enable_command", True):
@@ -41,7 +41,7 @@ async def handle(module, event):
 
 async def daily_push(module, bot):
     """定时任务：向启用的群推送今日密码（可选设置精华）。"""
-    logger = module_logger.add_info(f"#{module.bot_id}").add_info(module.name)
+    logger = module_logger.add_info(account_label(module.bot_id)).add_info(module.name)
     config = module.config
 
     if not config.get("enable_cron", False):

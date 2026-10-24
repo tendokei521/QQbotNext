@@ -9,7 +9,7 @@ from typing import Any
 
 from app.plugins.llm_knowledge.store import KnowledgeStore
 from app.agent.providers import get_provider
-from app.core.logger import logger
+from app.core.logger import logger, account_label
 
 
 class KnowledgeManager:
@@ -51,7 +51,7 @@ class KnowledgeManager:
         try:
             return get_provider(config)
         except Exception as e:
-            logger.add_info(f"#{self.bot_id}").warning(f"[知识库] 创建 Embedding Provider 失败: {e}")
+            logger.add_info(account_label(self.bot_id)).warning(f"[知识库] 创建 Embedding Provider 失败: {e}")
             return None
 
     async def add_text(self, content: str, *, title: str = "", source: str = "manual") -> tuple[str | None, str]:
@@ -89,7 +89,7 @@ class KnowledgeManager:
         try:
             vectors = await provider.embed([query])
         except Exception as e:
-            logger.add_info(f"#{self.bot_id}").warning(f"[知识库] 检索向量化失败: {e}")
+            logger.add_info(account_label(self.bot_id)).warning(f"[知识库] 检索向量化失败: {e}")
             return []
         if not vectors:
             return []

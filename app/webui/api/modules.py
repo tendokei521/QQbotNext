@@ -24,7 +24,7 @@ from app.webui.api.deps import (
     get_provider_registry,
     get_resource_registry,
     get_settings,
-    parse_bot_id,
+    parse_account_id,
 )
 from app.webui.ws import manager
 
@@ -178,7 +178,7 @@ async def _sync_module_runtime(module, enabled: bool) -> None:
 
 
 @router.get("/modules")
-async def api_modules(request: Request, bot_id: int | None = Depends(parse_bot_id), bot_service=Depends(get_bot_service)):
+async def api_modules(request: Request, bot_id: str | None = Depends(parse_account_id), bot_service=Depends(get_bot_service)):
 
     return JSONResponse(content=bot_service.get_modules_data(bot_id))
 
@@ -191,14 +191,14 @@ async def list_uninstalled_modules(request: Request, install_service=Depends(get
 
 
 @router.get("/modules/features")
-async def list_features(request: Request, bot_id: int | None = Depends(parse_bot_id), features=Depends(get_feature_registry)):
+async def list_features(request: Request, bot_id: str | None = Depends(parse_account_id), features=Depends(get_feature_registry)):
 
     features = features.status(bot_id)
     return JSONResponse(content={"ok": True, "features": features})
 
 
 @router.get("/modules/{module_name}")
-async def api_module(module_name: str, request: Request, bot_id: int | None = Depends(parse_bot_id), bot_service=Depends(get_bot_service)):
+async def api_module(module_name: str, request: Request, bot_id: str | None = Depends(parse_account_id), bot_service=Depends(get_bot_service)):
 
     data = bot_service.get_modules_data(bot_id).get(module_name)
     if data is None:
@@ -208,7 +208,7 @@ async def api_module(module_name: str, request: Request, bot_id: int | None = De
 
 @router.post("/module/{module_name}/toggle")
 async def toggle_module(module_name: str, request: Request,
-                        bot_id: int | None = Depends(parse_bot_id), enabled: bool = Form(...), agent_manager=Depends(get_agent_manager), registry=Depends(get_module_registry)):
+                        bot_id: str | None = Depends(parse_account_id), enabled: bool = Form(...), agent_manager=Depends(get_agent_manager), registry=Depends(get_module_registry)):
     module = _resolve_module(agent_manager, registry, module_name, bot_id)
     if not module:
         return _err(404, f"模块 {module_name} (Bot {bot_id}) 不存在")
@@ -221,7 +221,7 @@ async def toggle_module(module_name: str, request: Request,
 
 @router.post("/module/{module_name}/permission")
 async def update_permission(
-    module_name: str, request: Request, bot_id: int | None = Depends(parse_bot_id),
+    module_name: str, request: Request, bot_id: str | None = Depends(parse_account_id),
     group_mode: str = Form(...), group_list: str = Form(""),
     user_mode: str = Form(...), user_list: str = Form(""),
     agent_manager=Depends(get_agent_manager), registry=Depends(get_module_registry)):
@@ -241,7 +241,7 @@ async def update_permission(
 
 @router.get("/module/{module_name}/config")
 async def get_module_config(module_name: str, request: Request,
-                            bot_id: int | None = Depends(parse_bot_id), bot_service=Depends(get_bot_service)):
+                            bot_id: str | None = Depends(parse_account_id), bot_service=Depends(get_bot_service)):
     """读取模块配置（自定义配置页用）。返回已脱敏（password 打码）的配置。"""
 
     data = bot_service.get_modules_data(bot_id).get(module_name)
@@ -251,7 +251,7 @@ async def get_module_config(module_name: str, request: Request,
 
 
 @router.post("/module/{module_name}/config")
-async def update_config(module_name: str, request: Request, bot_id: int | None = Depends(parse_bot_id), resource_registry=Depends(get_resource_registry), agent_manager=Depends(get_agent_manager), registry=Depends(get_module_registry)):
+async def update_config(module_name: str, request: Request, bot_id: str | None = Depends(parse_account_id), resource_registry=Depends(get_resource_registry), agent_manager=Depends(get_agent_manager), registry=Depends(get_module_registry)):
     if not bot_id:
         return _err(404, f"模块 {module_name} 无 Bot ID 实例")
     module = _resolve_module(agent_manager, registry, module_name, bot_id)
@@ -290,7 +290,7 @@ async def update_config(module_name: str, request: Request, bot_id: int | None =
 
 
 @router.post("/modules/reload")
-async def reload_modules(request: Request, bot_id: int | None = Depends(parse_bot_id), bot_service=Depends(get_bot_service)):
+async def reload_modules(request: Request, bot_id: str | None = Depends(parse_account_id), bot_service=Depends(get_bot_service)):
 
     bot_service = bot_service
     bot = bot_service.gateway.find_conn_by_bot_id(bot_id) if bot_id else None
@@ -303,7 +303,7 @@ async def reload_modules(request: Request, bot_id: int | None = Depends(parse_bo
 async def reload_single_module(
     module_name: str,
     request: Request,
-    bot_id: int | None = Depends(parse_bot_id),
+    bot_id: str | None = Depends(parse_account_id),
     bot_service=Depends(get_bot_service), registry=Depends(get_module_registry)):
     """手动热重载单个模块。"""
 
@@ -321,7 +321,7 @@ async def reload_single_module(
 async def uninstall_module(
     module_name: str,
     request: Request,
-    bot_id: int | None = Depends(parse_bot_id),
+    bot_id: str | None = Depends(parse_account_id),
     registry=Depends(get_module_registry)):
     """软卸载模块：只写配置文件，不删除模块文件。"""
 
@@ -338,7 +338,7 @@ async def uninstall_module(
 async def reinstall_module(
     module_name: str,
     request: Request,
-    bot_id: int | None = Depends(parse_bot_id),
+    bot_id: str | None = Depends(parse_account_id),
     bot_service=Depends(get_bot_service), registry=Depends(get_module_registry)):
     """清除软卸载记录并重新加载模块。"""
 
@@ -376,7 +376,7 @@ async def install_module_zip(request: Request, file: UploadFile = File(...), reg
 
 @router.get("/module/{module_name}/page", response_class=HTMLResponse)
 async def module_page(module_name: str, request: Request,
-                      bot_id: int | None = Depends(parse_bot_id), registry=Depends(get_module_registry), settings=Depends(get_settings)):
+                      bot_id: str | None = Depends(parse_account_id), registry=Depends(get_module_registry), settings=Depends(get_settings)):
     """自定义配置页（仅模块目录 pages/index.html；框架级 Agent 已并入 schema 表单，无独立页）。"""
 
     reg = registry
@@ -390,6 +390,8 @@ async def module_page(module_name: str, request: Request,
     webui_token = settings.webui_token or ""
     module_var = (
         f'<script>window.PLUGIN_MODULE = {json.dumps(module_name)};'
+        # PLUGIN_ACCOUNT_ID 是正式名（账号 id）；PLUGIN_BOT_ID 保留给既有插件页
+        f'window.PLUGIN_ACCOUNT_ID = {json.dumps(bot_id) if bot_id is not None else "null"};'
         f'window.PLUGIN_BOT_ID = {json.dumps(bot_id) if bot_id is not None else "null"};'
         f'window.WEBUI_TOKEN = {json.dumps(webui_token)};</script>'
     )
@@ -417,7 +419,7 @@ def _find_schema_field(module, field_type: str, endpoint: str) -> dict | None:
     return None
 
 
-def _resolve_bot(gateway, bot_id: int | None):
+def _resolve_bot(gateway, bot_id: str | None):
     if not bot_id:
         return None
 
@@ -426,7 +428,7 @@ def _resolve_bot(gateway, bot_id: int | None):
 
 @router.get("/module/{module_name}/list/{endpoint}")
 async def module_list_data(module_name: str, endpoint: str, request: Request,
-                           bot_id: int | None = Depends(parse_bot_id), registry=Depends(get_module_registry), provider_registry=Depends(get_provider_registry), gateway=Depends(get_gateway)):
+                           bot_id: str | None = Depends(parse_account_id), registry=Depends(get_module_registry), provider_registry=Depends(get_provider_registry), gateway=Depends(get_gateway)):
 
     module = registry.get(module_name, bot_id)
     if not module:
@@ -467,7 +469,7 @@ async def module_list_data(module_name: str, endpoint: str, request: Request,
 
 @router.get("/module/{module_name}/dynamic/{endpoint}")
 async def module_dynamic_options(module_name: str, endpoint: str, request: Request,
-                                 bot_id: int | None = Depends(parse_bot_id), registry=Depends(get_module_registry), provider_registry=Depends(get_provider_registry), gateway=Depends(get_gateway)):
+                                 bot_id: str | None = Depends(parse_account_id), registry=Depends(get_module_registry), provider_registry=Depends(get_provider_registry), gateway=Depends(get_gateway)):
 
     module = registry.get(module_name, bot_id)
     if not module:
@@ -488,7 +490,7 @@ async def module_dynamic_options(module_name: str, endpoint: str, request: Reque
 
 @router.get("/module/{module_name}/dynamic/{endpoint}/{value}")
 async def module_dynamic_fields(module_name: str, endpoint: str, value: str, request: Request,
-                                bot_id: int | None = Depends(parse_bot_id), registry=Depends(get_module_registry), provider_registry=Depends(get_provider_registry), gateway=Depends(get_gateway)):
+                                bot_id: str | None = Depends(parse_account_id), registry=Depends(get_module_registry), provider_registry=Depends(get_provider_registry), gateway=Depends(get_gateway)):
 
     module = registry.get(module_name, bot_id)
     if not module:

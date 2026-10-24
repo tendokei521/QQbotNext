@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 from abc import ABC
 from dataclasses import dataclass, field
 from typing import Any
@@ -642,7 +644,7 @@ class BaseModule(ABC):
         from app.agent.providers.base import LLMResponse
         from app.core.logger import module_logger
 
-        module_logger.add_info(f"#{self.bot_id}").warning(
+        module_logger.add_info(account_label(self.bot_id)).warning(
             f"[{self.module_name}] ctx.services.llm 不可用（{where}）："
             "该框架版本未提供模块 LLM 客户端"
         )

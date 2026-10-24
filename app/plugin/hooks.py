@@ -20,7 +20,7 @@ import fnmatch
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from app.core.logger import logger
+from app.core.logger import logger, account_label
 
 
 @dataclass
@@ -92,8 +92,12 @@ class LifecycleContext:
 
     state: str = ""
     bot: Any = None
+    #: 本次登录的 QQ 号（运行时信息）
     bot_id: int | None = None
-    index: int | None = None
+    #: 账号唯一凭据（用户设定的 account id）
+    account_id: str | None = None
+    #: 账号展示名（写日志/给用户看都用它）
+    account_name: str = ""
     detail: str = ""
 
 
@@ -327,7 +331,7 @@ class SendHookRegistry(_HookRegistry):
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                self.log.add_info(f"#{ctx.bot_id}").exception(
+                self.log.add_info(account_label(ctx.bot_id)).exception(
                     f"[SendHook] {getattr(hook['module'], 'module_name', '?')} 处理异常: {e}"
                 )
 
@@ -380,7 +384,7 @@ class BeforeSendHookRegistry(_HookRegistry):
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                self.log.add_info(f"#{ctx.bot_id}").exception(
+                self.log.add_info(account_label(ctx.bot_id)).exception(
                     f"[BeforeSendHook] {getattr(hook['module'], 'module_name', '?')} 处理异常: {e}"
                 )
             if ctx.skip:
@@ -446,7 +450,7 @@ class ApiHookRegistry(_HookRegistry):
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                self.log.add_info(f"#{ctx.bot_id}").exception(
+                self.log.add_info(account_label(ctx.bot_id)).exception(
                     f"[ApiHook] {getattr(hook['module'], 'module_name', '?')} 处理异常: {e}"
                 )
 
@@ -488,7 +492,8 @@ class LifecycleHookRegistry(_HookRegistry):
             state=state,
             bot=bot,
             bot_id=getattr(bot, "bot_id", None),
-            index=getattr(bot, "index", None),
+            account_id=getattr(bot, "account_id", None),
+            account_name=getattr(bot, "label", "") or getattr(bot, "account_name", ""),
             detail=detail,
         )
         for hook in self.match(ctx.bot_id, state):
@@ -497,7 +502,7 @@ class LifecycleHookRegistry(_HookRegistry):
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                self.log.add_info(f"#{ctx.bot_id}").exception(
+                self.log.add_info(account_label(ctx.bot_id)).exception(
                     f"[LifecycleHook] {getattr(hook['module'], 'module_name', '?')} 处理异常: {e}"
                 )
 
@@ -543,7 +548,7 @@ class EventCompletedHookRegistry(_HookRegistry):
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                self.log.add_info(f"#{ctx.bot_id}").exception(
+                self.log.add_info(account_label(ctx.bot_id)).exception(
                     f"[EventCompletedHook] {getattr(hook['module'], 'module_name', '?')} 处理异常: {e}"
                 )
 

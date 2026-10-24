@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 from typing import Any
 
 
@@ -49,7 +51,7 @@ class MemoryProvider:
         except Exception as e:  # noqa: BLE001 —— 记忆召回失败不该毁掉整轮
             from app.core.logger import logger
 
-            logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(
+            logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).debug(
                 f"[llm_memory] 召回失败（已忽略）: {e}"
             )
             return None
@@ -115,7 +117,7 @@ class MemoryLifecycle:
         except Exception as e:  # noqa: BLE001
             from app.core.logger import logger
 
-            logger.add_info(f"#{getattr(getattr(ctx, 'runtime', None), 'bot_id', '?')}").debug(
+            logger.add_info(account_label(getattr(getattr(ctx, 'runtime', None), 'bot_id', '?'))).debug(
                 f"[llm_memory] 兜底写入失败（已忽略）: {e}"
             )
 
@@ -139,6 +141,6 @@ class MemoryLifecycle:
         except Exception as e:  # noqa: BLE001
             from app.core.logger import logger
 
-            logger.add_info(f"#{getattr(getattr(ctx, 'runtime', None), 'bot_id', '?')}").debug(
+            logger.add_info(account_label(getattr(getattr(ctx, 'runtime', None), 'bot_id', '?'))).debug(
                 f"[llm_memory] 蒸馏触发失败（已忽略）: {e}"
             )

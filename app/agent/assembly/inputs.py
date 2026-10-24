@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.core.logger import logger
+from app.core.logger import logger, account_label
 
 
 async def collect_history_materials(
@@ -63,7 +63,7 @@ async def collect_history_materials(
                 session_id, user_id if is_private else "", query_text, bot=bot
             )
         except Exception as e:  # noqa: BLE001 —— 记忆召回失败不应阻断本轮
-            logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(
+            logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).debug(
                 f"[Memory] 召回失败（已忽略）: {e}"
             )
             memory_text = ""

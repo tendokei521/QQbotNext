@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any
 
 from app.agent.group_log.events import KIND_EMOJI, LogEvent
-from app.core.logger import logger
+from app.core.logger import logger, account_label
 
 DEFAULT_RETENTION_COUNT = 2000
 DEFAULT_RETENTION_HOURS = 24
@@ -72,7 +72,7 @@ class GroupLogStore:
         self.retention_hours = float(retention_hours)
         self.flush_interval = max(0.05, float(flush_interval))
         self.flush_batch = max(1, int(flush_batch))
-        self.log = log or logger.add_info(f"#{self.bot_id}" if self.bot_id else "GroupLog")
+        self.log = log or logger.add_info(account_label(self.bot_id) if self.bot_id else "GroupLog")
 
         self._events: dict[str, deque] = {}
         self._stamps: dict[str, deque] = {}

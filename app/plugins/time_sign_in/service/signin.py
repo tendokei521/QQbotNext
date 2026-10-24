@@ -3,7 +3,7 @@
 import asyncio
 from functools import partial
 
-from app.core.logger import module_logger
+from app.core.logger import module_logger, account_label
 from app.plugin import register_daily_schedule
 from app.plugin.groups import resolve_group_ids
 
@@ -34,7 +34,7 @@ async def daily_sign_in(module, bot):
     if not getattr(getattr(module, "authority", None), "enabled", True):
         return
 
-    logger = module_logger.add_info(f"#{module.bot_id}").add_info(module.name)
+    logger = module_logger.add_info(account_label(module.bot_id)).add_info(module.name)
     config = module.config
     if not config.get("enable_daily_auto_signin", True):
         return

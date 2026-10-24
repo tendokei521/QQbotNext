@@ -22,6 +22,8 @@
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 from typing import Any
 
 from app.agent import logger
@@ -170,7 +172,7 @@ def _commit_history_enrichment(runtime, session_id: str, ctx=None) -> int:
             trigger = str(getattr(ctx.event, "message_id", "") or "")
         return commit(getattr(runtime, "bot_id", ""), session_id, trigger_message_id=trigger)
     except Exception as e:  # noqa: BLE001
-        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(
+        logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).debug(
             f"[HistoryEnrich] 回写失败（已忽略）: {e}"
         )
         return 0

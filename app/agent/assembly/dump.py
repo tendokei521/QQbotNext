@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 import json
 import os
 import time
@@ -145,7 +147,7 @@ def record(
         _write_all(path, entries)
         return True
     except Exception as e:  # noqa: BLE001 —— 落盘是辅助能力，失败不得影响请求
-        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(f"[PromptDump] 落盘失败（已忽略）: {e}")
+        logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).debug(f"[PromptDump] 落盘失败（已忽略）: {e}")
         return False
 
 
@@ -159,7 +161,7 @@ def load_recent(
     try:
         entries = _read_all(dump_path(bot_id))
     except Exception as e:  # noqa: BLE001 —— 读取失败按"没有记录"处理
-        logger.add_info(f"#{bot_id}").debug(f"[PromptDump] 读取失败（按空处理）: {e}")
+        logger.add_info(account_label(bot_id)).debug(f"[PromptDump] 读取失败（按空处理）: {e}")
         return []
     if session_id:
         entries = [e for e in entries if str(e.get("session_id", "")) == str(session_id)]
@@ -176,5 +178,5 @@ def clear(bot_id: Any) -> bool:
             os.remove(path)
             return True
     except OSError as e:
-        logger.add_info(f"#{bot_id}").debug(f"[PromptDump] 删除失败（已忽略）: {e}")
+        logger.add_info(account_label(bot_id)).debug(f"[PromptDump] 删除失败（已忽略）: {e}")
     return False

@@ -83,8 +83,11 @@ class BaseEvent:
     user_id: int = 0
     self_id: int = 0
     bot: IBot = None
+    #: 本条事件所属账号的**唯一凭据**（用户设定的 account id）。运行时/模块配置/
+    #: 会话/统计的 key 一律用它；它不随「换个 QQ 登录」而变化。
+    account_id: str | None = None
+    #: 本次登录的 QQ 号：**运行时信息**，只用于展示与 OneBot 协议语义，不是身份。
     bot_id: int | None = None
-    bot_index: int | None = None
     owner_id: int | None = None
     # 权限（由 dispatcher 计算后写入）
     role: str = "member"               # member / group_admin / group_owner
@@ -109,15 +112,18 @@ class BaseEvent:
         return LlmGate(self)
 
     @property
-    def account_id(self) -> int | None:
-        """本条事件所属的**权威账号**（QQ 号）。
+    def login_id(self) -> int | None:
+        """本条事件对应的 QQ 号（运行时信息，只用于展示/协议语义）。
 
-        优先取 payload 的 ``self_id``（OneBot 上报里它就是"哪个账号收到/发出这条消息"），
-        再回退到连接上的 ``bot_id``。连接是 index 级对象、会被复用于另一个账号，
-        而各类按账号隔离的资源（Agent 运行时 / 模块配置 / 会话历史）都必须用账号定位，
-        所以调用方一律用本属性，不要直接读 ``bot_id``。
+        优先取 payload 的 ``self_id``（OneBot 上报里它就是"哪个 QQ 收到/发出这条消息"），
+        再回退到连接上的 ``bot_id``。
         """
         return self.self_id or self.bot_id or None
+
+    @property
+    def account_name(self) -> str:
+        """账号展示名（日志/界面用；取不到就退回 account_id）。"""
+        return getattr(self.bot, "account_name", "") or self.account_id or ""
 
     def stop(self) -> None:
         """强制终止本事件在节点链中的继续传播（对齐 astrbot stop_event）。

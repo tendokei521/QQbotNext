@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 from typing import Any
 
 
@@ -71,7 +73,7 @@ class MCPToolSource:
         except Exception as e:  # noqa: BLE001 —— MCP 连不上不该毁掉整轮
             from app.core.logger import logger
 
-            logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").warning(
+            logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).warning(
                 f"[llm_tools_extra] MCP 工具不可用（已忽略）: {e}"
             )
             return []

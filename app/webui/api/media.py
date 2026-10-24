@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from app.agent.media import store as image_media
 from app.application.session_history_service import SessionHistoryService
-from app.webui.api.deps import parse_bot_id
+from app.webui.api.deps import parse_account_id
 
 router = APIRouter(prefix="/media", tags=["media"])
 
@@ -31,7 +31,7 @@ router = APIRouter(prefix="/media", tags=["media"])
 _IMMUTABLE = "public, max-age=31536000, immutable"
 
 
-def _service(bot_id: int | None) -> SessionHistoryService:
+def _service(bot_id: str | None) -> SessionHistoryService:
     if bot_id is None:
         raise ValueError("缺少 bot_id")
     return SessionHistoryService(bot_id)
@@ -46,7 +46,7 @@ def _ok(message: str, **extra):
 
 
 @router.get("")
-async def list_media(request: Request, bot_id: int | None = Depends(parse_bot_id)):
+async def list_media(request: Request, bot_id: str | None = Depends(parse_account_id)):
     """媒体仓概况：张数 / 占用 / 被引用数 / 可清理数 / 文件清单。"""
     try:
         data = _service(bot_id).media_stats()
@@ -58,7 +58,7 @@ async def list_media(request: Request, bot_id: int | None = Depends(parse_bot_id
 
 
 @router.post("/purge")
-async def purge_media(request: Request, bot_id: int | None = Depends(parse_bot_id)):
+async def purge_media(request: Request, bot_id: str | None = Depends(parse_account_id)):
     """清理所有"没有会话引用"的图片（被引用的永不删）。"""
     try:
         result = _service(bot_id).purge_media()
@@ -74,7 +74,7 @@ async def purge_media(request: Request, bot_id: int | None = Depends(parse_bot_i
 
 
 @router.post("/gc")
-async def gc_media(request: Request, bot_id: int | None = Depends(parse_bot_id)):
+async def gc_media(request: Request, bot_id: str | None = Depends(parse_account_id)):
     """按 TTL + 容量上限清理（同样只碰无人引用的文件）。"""
     try:
         result = _service(bot_id).gc_media()
@@ -86,7 +86,7 @@ async def gc_media(request: Request, bot_id: int | None = Depends(parse_bot_id))
 
 
 @router.delete("/{sha}")
-async def delete_media(sha: str, request: Request, bot_id: int | None = Depends(parse_bot_id)):
+async def delete_media(sha: str, request: Request, bot_id: str | None = Depends(parse_account_id)):
     """删除一张本地图片；**仍被引用时拒绝**并给出引用位置。"""
     try:
         result = _service(bot_id).delete_media(sha)
@@ -101,7 +101,7 @@ async def delete_media(sha: str, request: Request, bot_id: int | None = Depends(
 
 
 @router.get("/{name}")
-async def read_media(name: str, request: Request, bot_id: int | None = Depends(parse_bot_id)):
+async def read_media(name: str, request: Request, bot_id: str | None = Depends(parse_account_id)):
     """读取一张本地图片（``<sha>`` 或 ``<sha>.<ext>``，扩展名只影响 Content-Type）。"""
     if bot_id is None:
         return _err(400, "缺少 bot_id")

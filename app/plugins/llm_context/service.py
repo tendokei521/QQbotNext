@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 from typing import Any
 
 
@@ -34,7 +36,7 @@ async def referent_block(runtime: Any, session_id: str, user_text: str, ctx: Any
     except Exception as e:  # noqa: BLE001 —— 指代是增强，失败不该毁掉整轮
         from app.core.logger import logger
 
-        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(
+        logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).debug(
             f"[Referent] 构建指代块失败（已忽略）: {e}"
         )
         return ""

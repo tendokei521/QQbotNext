@@ -59,27 +59,41 @@ class ConfigChangedEvent:
 
 
 class BotLifecycleEvent:
-    """Bot 连接状态变化。state: 'connected' | 'disconnected' | 'error'"""
+    """Bot 连接状态变化。state: 'connected' | 'disconnected' | 'error'
 
-    def __init__(self, bot_id: int | None, bot_index: int, state: str, detail: str = "") -> None:
+    ``account_id`` 是账号唯一凭据（前端据此定位卡片），``bot_id`` 是本次登录的 QQ
+    （运行时信息，登录前为 None），``account_name`` 供日志/界面直接显示。
+    """
+
+    def __init__(
+        self,
+        bot_id: int | None,
+        state: str,
+        detail: str = "",
+        *,
+        account_id: str | None = None,
+        account_name: str = "",
+    ) -> None:
         self.bot_id = bot_id
-        self.bot_index = bot_index
+        self.account_id = account_id
+        self.account_name = account_name
         self.state = state
         self.detail = detail
 
 
 class ModulesReloadedEvent:
-    def __init__(self, bot_id: int | None) -> None:
+    def __init__(self, bot_id: int | None, account_id: str | None = None) -> None:
         self.bot_id = bot_id
+        self.account_id = account_id
 
 
 class BotAccountUpdatedEvent:
-    """某连接上次登录账号发生变化（换了账号登录）→ 通知 WebUI 刷新账号信息。
+    """某账号上次登录的 QQ 发生变化（换了账号登录）→ 通知 WebUI 刷新账号信息。
 
-    与 BotLifecycleEvent 分开：连接状态可能没变（同一连接、同一状态），
-    但账号身份变了，需要前端把「上次连接账号」换成新账号。
+    与 BotLifecycleEvent 分开：连接状态可能没变（同一条连接、同一状态），
+    但登录的 QQ 变了，需要前端把「上次连接账号」换成新账号。
     """
 
-    def __init__(self, bot_index: int, user_id: int | None = None) -> None:
-        self.bot_index = bot_index
+    def __init__(self, account_id: str, user_id: int | None = None) -> None:
+        self.account_id = account_id
         self.user_id = user_id

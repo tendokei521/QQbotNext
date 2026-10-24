@@ -34,7 +34,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.core.logger import logger
+from app.core.logger import logger, account_label
 from app.domain.message import Message
 from app.domain.session import parse_session_id
 
@@ -169,7 +169,7 @@ async def _run_hook(runtime: Any, stage: str, ctx: Any, msg: Message) -> bool:
             )
         return bool(await run_stage(runtime, stage, ctx, msg))
     except Exception as e:  # noqa: BLE001 —— 钩子异常不该让消息发不出去
-        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(
+        logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).debug(
             f"[Send] {stage} 钩子执行异常（已忽略）: {e}"
         )
         return True

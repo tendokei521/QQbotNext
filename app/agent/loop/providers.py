@@ -32,7 +32,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
-from app.core.logger import logger
+from app.core.logger import logger, account_label
 
 
 @dataclass(frozen=True)
@@ -137,7 +137,7 @@ async def collect_context_blocks(runtime: Any, scope: TurnScope) -> list[tuple[s
         try:
             text = await provider.collect(scope)
         except Exception as e:  # noqa: BLE001 —— 单个贡献者失败不该毁掉整轮
-            logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(
+            logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).debug(
                 f"[Provider] {name} 收集失败（已忽略）: {e}"
             )
             continue
@@ -154,7 +154,7 @@ async def collect_tool_specs(runtime: Any, scope: TurnScope) -> list[Any]:
         try:
             produced = await source.collect(scope)
         except Exception as e:  # noqa: BLE001
-            logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(
+            logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).debug(
                 f"[Provider] 工具源 {name} 收集失败（已忽略）: {e}"
             )
             continue

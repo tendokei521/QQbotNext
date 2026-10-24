@@ -31,7 +31,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from app.core.logger import logger
+from app.core.logger import logger, account_label
 
 
 @dataclass
@@ -146,7 +146,7 @@ class ToolCallHookRegistry:
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                self.log.add_info(f"#{ctx.bot_id}").exception(
+                self.log.add_info(account_label(ctx.bot_id)).exception(
                     f"[ToolCallHook] {getattr(hook.module, 'module_name', '?')} 处理异常: {e}"
                 )
 
@@ -178,7 +178,7 @@ async def run_stage(runtime: Any, stage: str, ctx: Any, msg: Any = None) -> bool
                 telemetry.record_hook(stage, (time.monotonic() - hook_start) * 1000)
             raise
         except Exception as e:
-            logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").exception(
+            logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).exception(
                 f"[LLM Hook] {stage} 处理异常: {e}"
             )
         finally:

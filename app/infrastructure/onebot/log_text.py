@@ -23,6 +23,11 @@ from app.domain.events import BaseEvent, MessageEvent, NoticeEvent, RequestEvent
 from app.infrastructure.onebot.codec import event_name
 
 
+def _conn_label(conn) -> str:
+    """日志里用的账号名（id 只做判断，日志一律打名字）。"""
+    return getattr(conn, "label", None) or getattr(conn, "account_name", "") or "?"
+
+
 def _message_log_text(event: MessageEvent) -> str:
     """消息的可读日志摘要（仅影响日志显示，不影响传输/派发）。
 
@@ -70,7 +75,7 @@ def received_log_lines(
         if not text:
             return []
         name = event.user.card or event.user.nickname or ""
-        prefix = f"接收<-] [#{conn.index}"
+        prefix = f"接收<-] [{_conn_label(conn)}"
         if event.event_type == "message_group":
             group_name = group_name_of(event.group.group_id) if group_name_of else ""
             prefix += (f"] [{group_name}({event.group.group_id})" if group_name
@@ -92,7 +97,7 @@ def received_log_lines(
         # （线上那条「未知类型 3437542570」实为端重启前推的 session-closed 通知）
         # 必须能看到原始 payload，否则只能靠时间猜。
         text = f"{text} | raw={_raw_payload_text(event)}"
-    prefix = f"通知<-] [#{conn.index}"
+    prefix = f"通知<-] [{_conn_label(conn)}"
     group_id = getattr(event, "group_id", 0) or 0
     if group_id:
         prefix += f"] [{group_id}"

@@ -23,6 +23,8 @@
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 import re
 from datetime import datetime
 
@@ -70,7 +72,7 @@ async def handle_schedule_tool(module, session_id: str, is_private: bool, args: 
             return "error: create 需要同时提供 trigger 与 note"
         existing = scheduler.find_similar(session_id, trigger)
         if existing is not None:
-            logger.add_info(f"#{bot_id}").info(
+            logger.add_info(account_label(bot_id)).info(
                 f"[定时任务] 工具 create 跳过重复 -> {session_id}: {trigger}"
             )
             return (
@@ -79,13 +81,13 @@ async def handle_schedule_tool(module, session_id: str, is_private: bool, args: 
             )
         entry = await scheduler.schedule(session_id, {"trigger": trigger, "content": note})
         if entry is None:
-            logger.add_info(f"#{bot_id}").warning(f"[定时任务] 工具 create 失败: trigger={trigger}")
+            logger.add_info(account_label(bot_id)).warning(f"[定时任务] 工具 create 失败: trigger={trigger}")
             return (
                 f"error: 无法解析时间表达式 {trigger!r}。支持格式：明天早上8点 / 今晚10点 / "
                 "每天早上8点 / 每周五下午6点 / 每月1号上午9点 / 5分钟后 / 半小时后 / 每30分钟 / 08:30。"
                 "请用这些格式重新尝试。"
             )
-        logger.add_info(f"#{bot_id}").info(
+        logger.add_info(account_label(bot_id)).info(
             f"[定时任务] 工具 create -> {session_id}: {trigger} @ {entry.next_at:%Y-%m-%d %H:%M} ({entry.repeat})"
         )
         return (

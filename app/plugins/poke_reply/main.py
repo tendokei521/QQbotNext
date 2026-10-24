@@ -8,6 +8,7 @@
 
 import random
 
+from app.core.logger import account_label
 from app.plugin import BaseModule, module_hook
 
 from .config_schema import SCHEMA
@@ -72,7 +73,7 @@ class Module(BaseModule):
         except Exception as e:
             from app.core.logger import module_logger
 
-            module_logger.add_info(f"#{self.bot_id}").error(f"[戳一戳] 发送失败: {e}")
+            module_logger.add_info(account_label(self.bot_id)).error(f"[戳一戳] 发送失败: {e}")
 
     def _hit(self, key: str, default: float) -> bool:
         probability = float(self.config.get(key, default) or 0)

@@ -4,7 +4,7 @@
 - 撤回事件 → 监听开关过滤 → 内存/磁盘查缓存 → 构建合并转发 → 按开关转发（单目标失败不影响其他）。
 """
 
-from app.core.logger import module_logger
+from app.core.logger import module_logger, account_label
 from app.plugin import resolve_enabled_ids
 
 from .cache import _get_db, _serialize_event
@@ -12,7 +12,7 @@ from .forward import build_forward_msg_data
 
 
 def _logger(module):
-    return module_logger.add_info(f"#{module.bot_id}").add_info(module.name)
+    return module_logger.add_info(account_label(module.bot_id)).add_info(module.name)
 
 
 async def handle_message(module, event):

@@ -11,9 +11,9 @@ import asyncio
 import json
 import time
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Sequence
 
-from app.core.logger import logger
+from app.core.logger import logger, set_account_labels
 from app.infrastructure.config.ws_url import (
     ACCESS_TOKEN_MASK,
     join_ws_url,
@@ -22,6 +22,12 @@ from app.infrastructure.config.ws_url import (
     split_ws_url,
 )
 from app.infrastructure.onebot.endpoint import FORWARD, normalize_mode
+from app.infrastructure.persistence.account_migration import (
+    migrate_account_identity,
+    normalize_account_id,
+    normalize_account_name,
+    suggest_account_id,
+)
 
 #: 这四个名字历史上就在这里定义，外部（gateway / webui）从本模块导入。
 #: 现在实现搬到了 `ws_url.py`，这里保留重导出；`__all__` 让 linter 知道它们是公共 API。
@@ -62,10 +68,12 @@ class ConfigService:
         self._listeners: list[Listener] = []
 
         # 内存缓存（source of truth for 读取）
-        self._bots: list[dict] = []
-        # 每个连接（index）上一次成功登录的账号快照：{"user_id": str, "nickname": str, "last_login_at": int}
+        # 账号：account_id -> {id, name, ws_url, owner_id, auto_connect, conn_mode}
+        # 用 dict 保序（Python 3.7+ 插入序 = 界面顺序），排序另存 sort_order 供重启后还原。
+        self._bots: dict[str, dict] = {}
+        # 每个账号上一次成功登录的账号快照：{"user_id": str, "nickname": str, "last_login_at": int}
         # 断开后运行时状态会清空，前端据此回退展示；连接成功时由 gateway 回调刷新。
-        self._bot_accounts: dict[int, dict] = {}
+        self._bot_accounts: dict[str, dict] = {}
         self._webui: dict = dict(DEFAULT_WEBUI_CONFIG)
         self._module_config: dict[str, dict[str, dict]] = {}      # module -> {bot_id: config}
         self._module_authority: dict[str, dict[str, dict]] = {}   # module -> {bot_id: authority}
@@ -76,6 +84,9 @@ class ConfigService:
 
     # ==================== 生命周期 ====================
     async def init(self) -> None:
+        # 账号身份迁移必须最先跑：把旧库的 bot_index 身份换成 account_id，
+        # 之后所有读取（_load_all / 网关 / API）才有一致的 id 可用。
+        await migrate_account_identity(self.db)
         await self._ensure_schema()
         await self._migrate_legacy_if_needed()
         await self._load_all()
@@ -106,9 +117,13 @@ class ConfigService:
                 data = json.loads(bots_file.read_text(encoding="utf-8"))
                 bots = data.get("bots", [])
                 for i, cfg in enumerate(bots):
+                    account_id = f"bot{i + 1}"
                     await self.db.execute(
-                        "INSERT OR REPLACE INTO bots (bot_index, ws_url, owner_id, auto_connect) VALUES (?,?,?,?)",
-                        (i, cfg.get("ws_url", ""), cfg.get("owner_id"), 1 if cfg.get("auto_connect") else 0),
+                        "INSERT OR REPLACE INTO bots "
+                        "(account_id, name, ws_url, owner_id, auto_connect, sort_order) "
+                        "VALUES (?,?,?,?,?,?)",
+                        (account_id, f"账号 {i + 1}", cfg.get("ws_url", ""), cfg.get("owner_id"),
+                         1 if cfg.get("auto_connect") else 0, i),
                     )
                 migrated.append(f"bots({len(bots)})")
             except Exception as e:
@@ -177,9 +192,9 @@ class ConfigService:
                     )
 
     async def _load_all(self) -> None:
-        # bots
-        rows = await self.db.fetchall("SELECT * FROM bots ORDER BY bot_index")
-        self._bots = []
+        # bots（按 sort_order 还原界面顺序；id 是唯一凭据，顺序只是展示）
+        rows = await self.db.fetchall("SELECT * FROM bots ORDER BY sort_order, account_id")
+        self._bots = {}
         for r in rows:
             owner_id = r["owner_id"]
             if owner_id is not None:
@@ -187,18 +202,21 @@ class ConfigService:
                     owner_id = int(owner_id)
                 except (TypeError, ValueError):
                     pass
-            self._bots.append({
+            account_id = str(r["account_id"])
+            self._bots[account_id] = {
+                "id": account_id,
+                "name": normalize_account_name(r["name"], account_id),
                 "ws_url": r["ws_url"],
                 "owner_id": owner_id,
                 "auto_connect": bool(r["auto_connect"]),
                 "conn_mode": normalize_mode(r.get("conn_mode")),
-            })
+            }
 
         # 上次登录账号快照（老库无此表时由 SCHEMA 的 CREATE TABLE IF NOT EXISTS 补建）
         rows = await self.db.fetchall("SELECT * FROM bot_accounts")
         self._bot_accounts = {}
         for r in rows:
-            self._bot_accounts[int(r["bot_index"])] = {
+            self._bot_accounts[str(r["account_id"])] = {
                 "user_id": r["user_id"],
                 "nickname": r["nickname"] or "",
                 "last_login_at": int(r["last_login_at"] or 0),
@@ -269,6 +287,7 @@ class ConfigService:
                 "updated_at": r["updated_at"],
             }
 
+        self._publish_account_labels()
         self.log.debug(
             f"[Config] 加载完成: bots={len(self._bots)} modules={len(self._module_config)} "
             f"presets={len(self._provider_presets)} models={len(self._provider_models)} roles={len(self._role_presets)}"
@@ -287,8 +306,27 @@ class ConfigService:
 
     # ==================== bots ====================
     def get_bots(self) -> list[dict]:
-        """内部使用：返回真实 ws_url（网关/连接）。"""
-        return [dict(b) for b in self._bots]
+        """内部使用：返回真实 ws_url（网关/连接），按界面顺序排列。"""
+        return [dict(b) for b in self._bots.values()]
+
+    def get_bot(self, account_id: str) -> dict | None:
+        """取单个账号配置（含 id/name/真实 ws_url）。"""
+        cfg = self._bots.get(str(account_id))
+        return dict(cfg) if cfg else None
+
+    def get_account_name(self, account_id: Any) -> str:
+        """账号展示名（日志与界面统一用它；查不到就退回 id 本身，绝不返回空串）。"""
+        cfg = self._bots.get(str(account_id))
+        if cfg and cfg.get("name"):
+            return str(cfg["name"])
+        return str(account_id) if account_id is not None else "全局"
+
+    def account_ids(self) -> list[str]:
+        return list(self._bots.keys())
+
+    def _publish_account_labels(self) -> None:
+        """把 id → 展示名映射交给日志层：日志前缀一律打名字，不打 id。"""
+        set_account_labels({aid: cfg.get("name") or aid for aid, cfg in self._bots.items()})
 
     def get_bots_public(self) -> list[dict]:
         """对外使用（WebUI 配置接口）：ws_url 拆出基础地址，access_token 独立字段回显真实值。
@@ -298,99 +336,162 @@ class ConfigService:
         gateway.get_bots_info()（纯地址，不含 token）。
         """
         result = []
-        for index, b in enumerate(self._bots):
+        for account_id, b in self._bots.items():
             base, token = split_ws_url(b.get("ws_url", ""))
             result.append({
-                **{k: v for k, v in dict(b).items() if k != "access_token"},
-                "index": index,
+                "id": account_id,
+                "name": b.get("name") or account_id,
+                "owner_id": b.get("owner_id"),
+                "auto_connect": bool(b.get("auto_connect")),
+                "conn_mode": normalize_mode(b.get("conn_mode")),
                 "ws_url": base,
                 "access_token": token,
             })
         return result
 
     async def save_bots(self, bots: list[dict]) -> None:
-        """保存账号配置。支持独立 access_token 字段（WebUI 独立输入框）：
+        """保存账号配置（按 id 全量 upsert；payload 里没有的 id 视为删除）。
 
-        - access_token 字段缺失 或 值为打码哨兵 → 保留旧 token（位置优先、基础地址匹配兜底）；
+        支持独立 access_token 字段（WebUI 独立输入框）：
+
+        - access_token 字段缺失 或 值为打码哨兵 → 保留旧 token（同 id 优先、基础地址匹配兜底）；
         - access_token 为显式值（含空串）→ 直接采用（空串 = 清除 token）；
         - 兼容旧前端：ws_url 本身携带打码 access_token 时同样回填；
-        - conn_mode 缺字段/非法值 → 归一为 forward（存量账号行为不变）。
+        - conn_mode 缺字段/非法值 → 沿用该 id 的旧值（新账号归一为 forward）；
+        - name 缺字段 → 沿用旧名；id 非法或重复 → 抛 ValueError（由 API 转 400）。
+
+        顺序即 payload 顺序（写进 sort_order），因为 id 不可变、不能靠下标表达顺序。
         """
         old = self._bots
-        normalized = []
-        for i, cfg in enumerate(bots):
+        normalized: dict[str, dict] = {}
+        for cfg in bots:
+            account_id = normalize_account_id(cfg.get("id"))
+            if not account_id:
+                raise ValueError(f"账号 id 非法：{cfg.get('id')!r}（只允许字母/数字/下划线/连字符）")
+            if account_id in normalized:
+                raise ValueError(f"账号 id 重复：{account_id}")
+
+            prev = old.get(account_id) or {}
             base, inline_token = split_ws_url(cfg.get("ws_url", ""))
             token = cfg.get("access_token")
             if token is None or token == ACCESS_TOKEN_MASK or ACCESS_TOKEN_MASK in str(token):
                 # 未提交 / 打码哨兵 → 保留旧值
-                token = self._find_old_token(old, i, base) or inline_token
+                token = self._find_old_token(old, account_id, base) or inline_token
             else:
                 token = str(token).strip()
-            prev_mode = old[i].get("conn_mode") if i < len(old) else None
-            clean = {
-                **cfg,
+
+            if "conn_mode" in cfg:
+                mode = normalize_mode(cfg["conn_mode"])
+            else:
+                mode = normalize_mode(prev.get("conn_mode"))
+
+            if "name" in cfg:
+                name = normalize_account_name(cfg.get("name"), account_id)
+            else:
+                name = prev.get("name") or account_id
+
+            normalized[account_id] = {
+                "id": account_id,
+                "name": name,
                 "ws_url": join_ws_url(base, token),
-                # 未提交 conn_mode 时沿用旧值（老前端/旧脚本不会因为缺字段把反向账号改回正向）
-                "conn_mode": normalize_mode(cfg["conn_mode"] if "conn_mode" in cfg else prev_mode),
+                "owner_id": cfg.get("owner_id", prev.get("owner_id")),
+                "auto_connect": bool(cfg.get("auto_connect", prev.get("auto_connect", False))),
+                "conn_mode": mode,
             }
-            clean.pop("access_token", None)  # 独立字段不落库（存储仍为单字段 ws_url）
-            normalized.append(clean)
-        sqls = [("DELETE FROM bots", ())]
-        for i, cfg in enumerate(normalized):
+
+        sqls: list[tuple[str, Sequence[Any]]] = []
+        # 只删「本次 payload 里没有的」id：id 稳定后不必像过去那样整体重建
+        for account_id in set(old) - set(normalized):
+            sqls.append(("DELETE FROM bots WHERE account_id = ?", (account_id,)))
+            sqls.append(("DELETE FROM bot_accounts WHERE account_id = ?", (account_id,)))
+        for order, (account_id, cfg) in enumerate(normalized.items()):
             sqls.append((
-                "INSERT OR REPLACE INTO bots (bot_index, ws_url, owner_id, auto_connect, conn_mode) "
-                "VALUES (?,?,?,?,?)",
-                (i, cfg.get("ws_url", ""), cfg.get("owner_id"), 1 if cfg.get("auto_connect") else 0,
-                 cfg.get("conn_mode", FORWARD)),
+                "INSERT OR REPLACE INTO bots "
+                "(account_id, name, ws_url, owner_id, auto_connect, conn_mode, sort_order) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (account_id, cfg["name"], cfg["ws_url"], cfg.get("owner_id"),
+                 1 if cfg.get("auto_connect") else 0, cfg.get("conn_mode", FORWARD), order),
             ))
         await self.db.run_in_transaction(sqls)   # 先落库，成功后再更新内存缓存
+        removed = set(old) - set(normalized)
+        for account_id in removed:
+            self._bot_accounts.pop(account_id, None)
         self._bots = normalized
-        await self._notify("bots", self._bots)
-        # 全量保存可能删掉末尾账号 → 清理越界快照，避免旧账号挂在被复用的 index 上
-        if any(i >= len(normalized) for i in self._bot_accounts):
-            await self.drop_bot_accounts_from(len(normalized))
+        self._publish_account_labels()
+        await self._notify("bots", self.get_bots())
 
     @staticmethod
-    def _find_old_token(old: list[dict], index: int, base: str) -> str:
-        """在旧配置中找应保留的 access_token：位置优先，其次按基础地址特征匹配。"""
-        if index < len(old):
-            _, token = split_ws_url(old[index].get("ws_url", ""))
+    def _find_old_token(old: dict[str, dict], account_id: str, base: str) -> str:
+        """在旧配置中找应保留的 access_token：同 id 优先，其次按基础地址匹配。"""
+        prev = old.get(account_id)
+        if prev:
+            _, token = split_ws_url(prev.get("ws_url", ""))
             if token:
                 return token
-        for item in old:
+        for item in old.values():
             old_base, token = split_ws_url(item.get("ws_url", ""))
             if old_base == base and token:
                 return token
         return ""
 
-    async def add_bot(self, cfg: dict) -> int:
-        # 新增账号默认正向：`conn_mode` 未指定时不能写成空值，否则 save_bots 的归一
-        # 只能靠「缺字段沿用旧值」兜底，而新账号没有旧值。
-        self._bots.append({**cfg, "conn_mode": normalize_mode(cfg.get("conn_mode"))})
-        await self.save_bots(self._bots)
-        return len(self._bots) - 1
+    async def add_bot(self, cfg: dict) -> str:
+        """新增账号，返回它的 id。
 
-    async def delete_bot(self, index: int) -> bool:
-        if index < 0 or index >= len(self._bots):
+        ``cfg`` 至少要带 ``id``（缺省则自动分配 ``botN``）与可选 ``name``。
+
+        「没填」与「填错了」必须分开处理：没填 → 自动分配；**填了但不合法 → 直接报错**。
+        否则用户手滑打成 ``bad id!`` 会被静默换成另一个 id，之后再也对不上自己的脚本。
+        id 已被占用时同样报错——id 是外部引用，绝不静默复用。
+        """
+        raw_id = cfg.get("id")
+        raw_id = "" if raw_id is None else str(raw_id).strip()
+        if raw_id:
+            account_id = normalize_account_id(raw_id)
+            if not account_id:
+                raise ValueError(
+                    f"账号 ID 不合法：{raw_id!r}"
+                    "（只能用字母、数字、下划线、连字符，以字母或数字开头，1-32 个字符）"
+                )
+        else:
+            account_id = suggest_account_id(self._bots)
+        if account_id in self._bots:
+            raise ValueError(f"账号 id 已存在：{account_id}")
+
+        name = normalize_account_name(cfg.get("name"), f"账号 {len(self._bots) + 1}")
+        bots = self.get_bots()
+        bots.append({
+            "id": account_id,
+            "name": name,
+            "ws_url": cfg.get("ws_url", ""),
+            "owner_id": cfg.get("owner_id"),
+            "auto_connect": bool(cfg.get("auto_connect", False)),
+            # 新增账号默认正向：`conn_mode` 未指定时不能写成空值，否则 save_bots 只能靠
+            # 「缺字段沿用旧值」兜底，而新账号没有旧值。
+            "conn_mode": normalize_mode(cfg.get("conn_mode")),
+        })
+        await self.save_bots(bots)
+        return account_id
+
+    async def delete_bot(self, account_id: str) -> bool:
+        if str(account_id) not in self._bots:
             return False
-        self._bots.pop(index)
-        await self.save_bots(self._bots)
-        await self.drop_bot_accounts_from(index)
+        bots = [b for b in self.get_bots() if str(b["id"]) != str(account_id)]
+        await self.save_bots(bots)   # 连带清掉 bot_accounts 快照
         return True
 
     # ==================== 上次登录账号快照 ====================
-    def get_bot_accounts(self) -> dict[int, dict]:
-        """返回全部连接的「上次登录账号」快照（深拷贝，读方安全）。"""
+    def get_bot_accounts(self) -> dict[str, dict]:
+        """返回全部账号的「上次登录账号」快照（深拷贝，读方安全）。"""
         import copy
 
-        return {idx: copy.deepcopy(info) for idx, info in self._bot_accounts.items()}
+        return {aid: copy.deepcopy(info) for aid, info in self._bot_accounts.items()}
 
-    def get_bot_account(self, index: int) -> dict | None:
-        info = self._bot_accounts.get(index)
+    def get_bot_account(self, account_id: str) -> dict | None:
+        info = self._bot_accounts.get(str(account_id))
         return dict(info) if info else None
 
-    async def save_bot_account(self, index: int, user_id: Any, nickname: str = "") -> bool:
-        """记录某连接本次成功登录的账号。
+    async def save_bot_account(self, account_id: str, user_id: Any, nickname: str = "") -> bool:
+        """记录某账号本次成功登录的 QQ。
 
         与库中快照相同（user_id 一致）时直接返回 False，不写库、不通知
         —— 满足「账号相同不变、不同才换」；返回 True 表示账号确实发生了变化。
@@ -402,7 +503,8 @@ class ConfigService:
         if not normalized or normalized == "0":
             return False
 
-        old = self._bot_accounts.get(index)
+        key = str(account_id)
+        old = self._bot_accounts.get(key)
         if old and str(old.get("user_id")) == normalized:
             return False
 
@@ -412,25 +514,13 @@ class ConfigService:
             "last_login_at": int(time.time()),
         }
         await self.db.execute(
-            "INSERT OR REPLACE INTO bot_accounts (bot_index, user_id, nickname, last_login_at) "
+            "INSERT OR REPLACE INTO bot_accounts (account_id, user_id, nickname, last_login_at) "
             "VALUES (?,?,?,?)",
-            (int(index), info["user_id"], info["nickname"], info["last_login_at"]),
+            (key, info["user_id"], info["nickname"], info["last_login_at"]),
         )
-        self._bot_accounts[int(index)] = info
-        await self._notify("bot_accounts", {"index": int(index), **info})
+        self._bot_accounts[key] = info
+        await self._notify("bot_accounts", {"account_id": key, **info})
         return True
-
-    async def drop_bot_accounts_from(self, index: int) -> None:
-        """账号被删除后清理快照：删除中间账号会使后续 index 前移，故 >= index 全部作废。"""
-        stale = [i for i in self._bot_accounts if i >= index]
-        if not stale:
-            return
-        for i in stale:
-            self._bot_accounts.pop(i, None)
-        await self.db.run_in_transaction(
-            [("DELETE FROM bot_accounts WHERE bot_index >= ?", (index,))]
-        )
-        await self._notify("bot_accounts", {"dropped_from": index})
 
     # ==================== webui ====================
     def get_webui_config(self) -> dict:
@@ -467,7 +557,7 @@ class ConfigService:
         key = str(bot_id) if bot_id is not None else None
         self._module_config.setdefault(module, {})[key] = dict(config)
         await self._persist_module_config(module, key)
-        await self._notify("module_config", {"module": module, "bot_id": bot_id, "config": dict(config)})
+        await self._notify("module_config", {"module": module, "account_id": bot_id, "config": dict(config)})
 
     async def _persist_module_config(self, module: str, key: Any) -> None:
         try:
@@ -502,7 +592,7 @@ class ConfigService:
         key = str(bot_id) if bot_id is not None else None
         self._module_authority.setdefault(module, {})[key] = dict(authority)
         await self._persist_module_authority(module, key)
-        await self._notify("authority", {"module": module, "bot_id": bot_id, "authority": dict(authority)})
+        await self._notify("authority", {"module": module, "account_id": bot_id, "authority": dict(authority)})
 
     async def _persist_module_authority(self, module: str, key: Any) -> None:
         try:

@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 from app.agent import logger
 
 
@@ -24,6 +26,6 @@ async def interrupt_config_hook(ctx):
     ctx.runtime.interrupt_enabled = _flag(ctx, "interrupt_enable", False)
     ctx.runtime.interrupt_save_sent = _flag(ctx, "interrupt_save_sent", True)
     if _flag(ctx, "interrupt_debug", False):
-        logger.add_info(f"#{ctx.runtime.bot_id}").info(
+        logger.add_info(account_label(ctx.runtime.bot_id)).info(
             f"[打断] {ctx.session_id} interrupt_enabled={ctx.runtime.interrupt_enabled}"
         )

@@ -64,7 +64,7 @@ from app.agent.assembly.prompt import (
     emoji_hint_line,
     user_message_format,
 )
-from app.core.logger import logger
+from app.core.logger import logger, account_label
 
 
 @dataclass
@@ -175,12 +175,12 @@ def resolve_persona_preset(req: PromptRequest) -> dict | None:
     try:
         preset = getter(preset_id)
     except Exception as e:  # noqa: BLE001 —— 预设读取失败不该让整轮请求炸掉
-        logger.add_info(f"#{getattr(req.runtime, 'bot_id', '?')}").warning(
+        logger.add_info(account_label(getattr(req.runtime, 'bot_id', '?'))).warning(
             f"[Assembly] 读取角色预设失败（已忽略）: {preset_id}: {e}"
         )
         return None
     if not isinstance(preset, dict):
-        logger.add_info(f"#{getattr(req.runtime, 'bot_id', '?')}").warning(
+        logger.add_info(account_label(getattr(req.runtime, 'bot_id', '?'))).warning(
             f"[Assembly] 角色预设不存在（悬挂引用）: {preset_id}，已回退 system_prompt"
         )
         return None
@@ -194,7 +194,7 @@ def build_persona(req: PromptRequest) -> list[dict]:
         text = str(preset.get("system_prompt") or "").strip()
         if text:
             return [{"role": "system", "content": text}]
-        logger.add_info(f"#{getattr(req.runtime, 'bot_id', '?')}").warning(
+        logger.add_info(account_label(getattr(req.runtime, 'bot_id', '?'))).warning(
             "[Assembly] 角色预设没有 system_prompt，已回退 system_prompt"
         )
     system_prompt = req.cfg("system_prompt", "你是一个友好的助手。")
@@ -288,7 +288,7 @@ def build_emoji_hint(req: PromptRequest) -> list[dict]:
 
         tags = available_tags(20)
     except Exception as e:  # noqa: BLE001 —— 词典不可用不该影响整轮组装
-        logger.add_info(f"#{getattr(req.runtime, 'bot_id', '?')}").warning(
+        logger.add_info(account_label(getattr(req.runtime, 'bot_id', '?'))).warning(
             f"[Assembly] 读取表情词典失败（已跳过表情提示）: {e}"
         )
         return []
@@ -438,7 +438,7 @@ def build_all_blocks(req: PromptRequest) -> list[tuple[Block, list[dict]]]:
                 continue
             built.append((block, block.build(req) or []))
         except Exception as e:  # noqa: BLE001 —— 单块失败不应炸掉整轮请求
-            logger.add_info(f"#{getattr(req.runtime, 'bot_id', '?')}").warning(
+            logger.add_info(account_label(getattr(req.runtime, 'bot_id', '?'))).warning(
                 f"[Assembly] 块 {block.name} 构建失败（已跳过）: {e}"
             )
             built.append((block, []))
@@ -716,7 +716,7 @@ def build_for(runtime: Any, req: PromptRequest) -> list[dict]:
     assembler = getattr(runtime, "assembler", None)
     if not callable(getattr(assembler, "build", None)):
         if assembler is not None:
-            logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").warning(
+            logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).warning(
                 f"[Assembly] runtime.assembler 不可用（{type(assembler).__name__}），已回退默认装配器"
             )
         assembler = PromptAssembler()

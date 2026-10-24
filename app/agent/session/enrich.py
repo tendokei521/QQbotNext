@@ -44,7 +44,7 @@ import threading
 import time
 from typing import Any, Iterable
 
-from app.core.logger import logger
+from app.core.logger import logger, account_label
 
 # 每会话登记的条数上限（超过后淘汰最旧，避免长会话无限增长）
 MAX_REFS_PER_SESSION = 40
@@ -391,5 +391,5 @@ def commit(bot_id: Any, session_id: Any, trigger_message_id: Any = None) -> int:
     items = ledger.drain()
     count = remember(session_id, bot_id, items=items, trigger_message_id=trigger_message_id)
     if count:
-        logger.add_info(f"#{bot_id}").debug(f"[HistoryEnrich] 补全登记 {count} 项 -> {session_id}")
+        logger.add_info(account_label(bot_id)).debug(f"[HistoryEnrich] 补全登记 {count} 项 -> {session_id}")
     return count

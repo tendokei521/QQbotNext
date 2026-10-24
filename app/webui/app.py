@@ -312,15 +312,16 @@ def _install_bot_lifecycle_listener(container) -> None:
 
     gateway = container.get(OneBotGateway)
 
-    def _status_payload(index: int, **overrides) -> dict:
-        """组装某 index 的最新账号/连接信息（含 last_account / account 回退字段）。"""
+    def _status_payload(account_id: str | None, **overrides) -> dict:
+        """组装某账号的最新账号/连接信息（含 last_account / account 回退字段）。"""
         stat = {}
         for s in gateway.get_bots_info():
-            if s["index"] == index:
+            if s["id"] == account_id:
                 stat = s
                 break
         return {
-            "index": index,
+            "id": account_id,
+            "name": stat.get("name") or account_id or "",
             "bot_id": stat.get("bot_id"),
             "status": stat.get("status"),
             "last_error": stat.get("last_error"),
@@ -343,23 +344,27 @@ def _install_bot_lifecycle_listener(container) -> None:
             "type": "bot_status_updated",
             # 状态是权威值：连接中/断开由事件给，避免读到竞态中的旧状态
             "bot": _status_payload(
-                event.bot_index,
+                event.account_id,
                 bot_id=event.bot_id,
                 status=event.state,
                 last_error=event.detail or None,
             ),
         }))
-        if event.state == "connected" and event.bot_id:
-            await manager.broadcast(json.dumps({"type": "modules_reloaded", "bot_id": event.bot_id}))
+        if event.state == "connected" and event.account_id:
+            await manager.broadcast(json.dumps({
+                "type": "modules_reloaded",
+                "account_id": event.account_id,
+                "bot_id": event.bot_id,
+            }))
 
     event_bus.subscribe(BotLifecycleEvent, on_bot_lifecycle)
     webui_logger.debug("[WebUI] Bot 生命周期监听已注册")
 
     async def on_bot_account_updated(event: BotAccountUpdatedEvent) -> None:
-        # 账号换了但状态可能没变（同一连接重登另一账号）→ 单独推一次账号信息
+        # 账号换了 QQ 但状态可能没变 → 单独推一次账号信息
         await manager.broadcast(json.dumps({
             "type": "bot_status_updated",
-            "bot": _status_payload(event.bot_index, bot_id=event.user_id),
+            "bot": _status_payload(event.account_id, bot_id=event.user_id),
         }))
 
     event_bus.subscribe(BotAccountUpdatedEvent, on_bot_account_updated)
@@ -389,7 +394,7 @@ def _install_config_listener(container) -> None:
             await manager.broadcast(json.dumps({
                 "type": "module_config_updated",
                 "module": payload["module"],
-                "bot_id": payload["bot_id"],
+                "account_id": payload.get("account_id", payload.get("bot_id")),
                 "config": payload["config"],
             }))
         elif scope == "authority":
@@ -397,7 +402,7 @@ def _install_config_listener(container) -> None:
             await manager.broadcast(json.dumps({
                 "type": "module_authority_updated",
                 "module": payload.get("module"),
-                "bot_id": payload.get("bot_id"),
+                "account_id": payload.get("account_id", payload.get("bot_id")),
                 "enabled": auth.get("enabled", True),
                 "permission": {
                     "group_mode": auth.get("group_mode", "blacklist"),

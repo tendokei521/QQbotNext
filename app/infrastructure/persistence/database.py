@@ -37,18 +37,24 @@ CREATE TABLE IF NOT EXISTS module_authority (
 );
 
 CREATE TABLE IF NOT EXISTS bots (
-    bot_index   INTEGER PRIMARY KEY,
+    -- account_id：用户「添加账号」时自己填的唯一 id；前后端判断与所有持久化 key 都用它。
+    -- 创建后不可改（改名只改 name），因此可以安全地当外部引用。
+    account_id   TEXT PRIMARY KEY,
+    -- name：纯展示名。日志、WebUI 一律显示它；id 只用于判断，不给用户看。
+    name         TEXT NOT NULL DEFAULT '',
     ws_url      TEXT NOT NULL DEFAULT '',
     owner_id    TEXT,
     auto_connect INTEGER NOT NULL DEFAULT 0,
     -- 连接方向：forward=正向 WS（框架连出）/ reverse=反向 WS（框架监听、OneBot 实现连入）
-    conn_mode   TEXT NOT NULL DEFAULT 'forward'
+    conn_mode   TEXT NOT NULL DEFAULT 'forward',
+    -- 仅用于界面排序：id 不可变，所以顺序必须单独存，不能靠数组下标
+    sort_order  INTEGER NOT NULL DEFAULT 0
 );
 
--- 每个连接（index）上一次成功登录的账号快照：
+-- 每个账号上一次成功登录的 QQ 快照：
 -- 断开后运行时状态会清空，前端据此回退展示「上次连接的账号」，连接成功时刷新。
 CREATE TABLE IF NOT EXISTS bot_accounts (
-    bot_index     INTEGER PRIMARY KEY,
+    account_id    TEXT PRIMARY KEY,
     user_id       TEXT,
     nickname      TEXT NOT NULL DEFAULT '',
     last_login_at INTEGER NOT NULL DEFAULT 0

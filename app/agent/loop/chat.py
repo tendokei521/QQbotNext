@@ -16,6 +16,7 @@ import asyncio
 import time
 
 from app.agent import logger
+from app.core.logger import account_label
 from app.agent.assembly import assembler as assembly
 from app.agent.commands import (
     is_help_action,
@@ -146,7 +147,7 @@ async def handle(module, event):
     if not is_help_action(action):
         api_key = _provider_config_for(module).get("api_key", "")
         if not api_key:
-            logger.add_info(f"#{module.bot_id}").error(
+            logger.add_info(account_label(module.bot_id)).error(
                 f"[{module.name}] API 密钥未配置，请先在 Provider 预设中选择连接配置"
             )
             return
@@ -212,7 +213,7 @@ async def stream_response(runtime, event, ctx=None):
     """
     config = runtime.config
     if not runtime.provider_config().get("api_key", ""):
-        logger.add_info(f"#{runtime.bot_id}").error("[LLM] API 密钥未配置，请在 Provider 预设中选择连接配置")
+        logger.add_info(account_label(runtime.bot_id)).error("[LLM] API 密钥未配置，请在 Provider 预设中选择连接配置")
         return
 
     message_type = getattr(event, "message_type", "")
@@ -276,7 +277,7 @@ async def stream_response(runtime, event, ctx=None):
     # 免得再出现「8192 到底哪设的」这种排查——见 _effective_max_tokens。
     eff_max_tokens, max_tokens_src = _effective_max_tokens(provider_chain, meta["max_tokens"])
 
-    logger.add_info(f"#{runtime.bot_id}").info(
+    logger.add_info(account_label(runtime.bot_id)).info(
         f"流式 API 请求 -> {session_id} (task: {session.task_id}), 消息数: {len(messages)}, "
         f"max_tokens={eff_max_tokens}（来自{max_tokens_src}）"
     )
@@ -316,7 +317,7 @@ async def stream_response(runtime, event, ctx=None):
         try:
             return bool(upsert(session_id, text))
         except Exception as e:  # noqa: BLE001 —— 句柄回填是增强信息，不该中断回复
-            logger.add_info(f"#{runtime.bot_id}").debug(
+            logger.add_info(account_label(runtime.bot_id)).debug(
                 f"[LLM] 流式历史预写失败（已忽略）: {e}"
             )
             return False
@@ -420,7 +421,7 @@ async def stream_response(runtime, event, ctx=None):
         if stream_error:
             # 记录失败详情，便于定位（error 事件文本通常含 API 返回的状态码与原因）
             stream_error_text = stream_error
-            logger.add_info(f"#{runtime.bot_id}").error(
+            logger.add_info(account_label(runtime.bot_id)).error(
                 f"[LLM] 流式请求失败 -> {session_id} (task: {session.task_id}), "
                 f"round={_round}, 已产文本={bool(full_text_parts)}, 工具数={len(tool_calls)}: {stream_error}"
             )
@@ -440,7 +441,7 @@ async def stream_response(runtime, event, ctx=None):
             and overflow_used < overflow_retries
         ):
             overflow_used += 1
-            logger.add_info(f"#{runtime.bot_id}").warning(
+            logger.add_info(account_label(runtime.bot_id)).warning(
                 f"[LLM] 思考吃满输出预算（reasoning {reasoning_chars} 字符, "
                 f"finish={finish_reason or '?'}, max_tokens={eff_max_tokens}"
                 f"（来自{max_tokens_src}）），追加一次收敛轮而非原样重试 -> {session_id}"
@@ -470,7 +471,7 @@ async def stream_response(runtime, event, ctx=None):
         # 抽一次 round_images，工具执行期间积攒的那些要等下一轮对话才被抽走，
         # 于是模型当轮只能凭工具回执里的文字描述瞎猜（还被告知"你会直接看到"）。
         if _append_round_images(messages, tool_ctx, modalities):
-            logger.add_info(f"#{runtime.bot_id}").info(
+            logger.add_info(account_label(runtime.bot_id)).info(
                 f"[ExpandImage] 工具轮取回的图片已追加到下一轮请求 -> {session_id}"
             )
 
@@ -489,7 +490,7 @@ async def stream_response(runtime, event, ctx=None):
                     "content": SPEAK_REMINDER.format(rounds=rounds_left),
                 })
     else:
-        logger.add_info(f"#{runtime.bot_id}").warning(
+        logger.add_info(account_label(runtime.bot_id)).warning(
             f"流式工具循环超过 {max_tool_rounds} 轮，强制结束（可调大 max_tool_rounds 配置）"
         )
 
@@ -513,7 +514,7 @@ async def stream_response(runtime, event, ctx=None):
         if speech.spoken == 0:
             # 静默：不发、不写 assistant 历史。这是正常结局，不是失败——但必须留痕，
             # 否则"哑火太多"会变成查不到原因的现象。流式失败要说失败，别说静默。
-            log = logger.add_info(f"#{runtime.bot_id}")
+            log = logger.add_info(account_label(runtime.bot_id))
             detail = (
                 f"{session_id} (task: {session.task_id}, finished={speech.finished}, "
                 f"reason={speech.finish_reason or '-'}"
@@ -549,7 +550,7 @@ async def stream_response(runtime, event, ctx=None):
                 if reasoning_total
                 else ""
             )
-            logger.add_info(f"#{runtime.bot_id}").warning(
+            logger.add_info(account_label(runtime.bot_id)).warning(
                 f"[LLM] 流式模型返回空回复，使用兜底文本 -> {session_id} "
                 f"(task: {session.task_id}, 已执行工具数={len(tool_results)}{reason})"
             )
@@ -599,7 +600,7 @@ async def stream_response(runtime, event, ctx=None):
     )
     # 预算总账只留在 debug.log：逐请求打这个数字对用户没有信息量（见 turn_metrics
     # 里请求行的说明），而每轮都进 user.log 只会把用户日志刷成内部字段清单。
-    logger.add_info(f"#{runtime.bot_id}").debug(
+    logger.add_info(account_label(runtime.bot_id)).debug(
         f"[Budget] 本轮 {turn_budget.describe()}"
         f"，max_tokens={eff_max_tokens}（来自{max_tokens_src}）-> {session_id}"
     )

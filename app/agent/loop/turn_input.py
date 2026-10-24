@@ -26,6 +26,8 @@
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 import asyncio
 from dataclasses import dataclass
 
@@ -205,7 +207,7 @@ async def record_user_turn(
                 max_bytes=max_image_bytes(config),
             )
         except Exception as e:  # noqa: BLE001 —— 落盘失败只降级为占位，不能拖垮本轮对话
-            logger.add_info(f"#{runtime.bot_id}").warning(f"图片落盘失败，按占位处理: {e}")
+            logger.add_info(account_label(runtime.bot_id)).warning(f"图片落盘失败，按占位处理: {e}")
 
     # 纯图片/表情消息没有正文：**不能**把元信息（"(QQ: …)"/时间行）冻成正文，
     # 否则历史里这条会显示成一串元信息，图片段（base.segments）反倒被无视。

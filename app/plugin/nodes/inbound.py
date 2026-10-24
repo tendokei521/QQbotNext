@@ -59,8 +59,8 @@ class AgentNode(MessageNode):
     未声明时 LLM 按触发规则（私聊全触发 / 群聊 @或关键词）决定是否回复。
     主动消息观察独立于回复，即使模块 stop 了 LLM 也照常维护。
 
-    账号解析：一律用 ``event.account_id``（payload.self_id 优先、连接 bot_id 兜底）。
-    连接是 index 级对象、可被换号复用，运行时的键必须跟账号走——否则换号后会
+    账号解析：一律用 ``event.account_id``（用户在添加账号时设定的 id，不随换 QQ 变化）。
+    运行时的键必须跟账号 id 走——否则换号后会
     出现"消息收到了但查不到运行时"（LLM 静默不回复）或"查到别的账号运行时"
     （用错人设/发错号）。每个门控分支都留 debug 日志，便于一句话定位被谁拦下。
     """
@@ -75,7 +75,7 @@ class AgentNode(MessageNode):
         self.log = log or logger
 
     def _account_logger(self, event):
-        return self.log.add_info(f"#{getattr(event, 'bot_index', '?')}")
+        return self.log.add_info(getattr(event, "account_name", "") or "?")
 
     async def process(self, ctx: MessageContext, next_: Next) -> None:
         """路由入口。外面包一层统计：**一次入站消息一条 `msg_in`**。"""
@@ -89,10 +89,10 @@ class AgentNode(MessageNode):
         if event.event_type not in ("message_group", "message_private"):
             await next_()
             return
-        account_id = getattr(event, "account_id", None) or event.bot_id
+        account_id = getattr(event, "account_id", None)
         if not account_id:
             self._account_logger(event).debug(
-                "[Agent] 跳过：事件无账号（self_id/bot_id 均为空），无法定位 Agent 运行时"
+                "[Agent] 跳过：事件未携带账号 id，无法定位 Agent 运行时"
             )
             await next_()
             return
@@ -102,8 +102,7 @@ class AgentNode(MessageNode):
             # 这里必须留痕，否则表现为"账号换了之后 agent 配置就不生效了"。
             self._account_logger(event).warning(
                 f"[Agent] 跳过：账号 {account_id} 无 Agent 运行时"
-                f"（self_id={event.self_id} conn.bot_id={event.bot_id} "
-                f"index={event.bot_index} 已装配账号={self._known_accounts()}）"
+                f"（QQ={event.self_id} 已装配账号={self._known_accounts()}）"
             )
             await next_()
             return
@@ -115,8 +114,8 @@ class AgentNode(MessageNode):
             return
         if is_single_service_skipped(gate, event, self.config_service, self.gateway):
             self._account_logger(event).debug(
-                f"[Agent] 跳过：单一服务模式把本群响应权交给了 index "
-                f"{self._single_service_index(event)}（当前 index={event.bot_index}）"
+                f"[Agent] 跳过：单一服务模式把本群响应权交给了账号 "
+                f"{self._single_service_index(event)}（当前账号={account_id}）"
             )
             await next_()
             return
@@ -204,7 +203,7 @@ class AgentNode(MessageNode):
             webui = self.config_service.get_webui_config() or {}
             group_id = str(getattr(getattr(event, "group", None), "group_id", "") or "")
             multi = (webui.get("multi_group", {}) or {}).get("groups", {}) or {}
-            return (multi.get(group_id) or {}).get("service_bot_index")
+            return (multi.get(group_id) or {}).get("service_bot_id")
         except Exception as e:
             # 仅用于把"被单一服务拦下"写进日志；读不到就把目标账号留空，不影响主流程
             self._account_logger(event).debug(f"[Agent] 读取单一服务配置失败（仅影响日志展示）: {e}")
@@ -238,9 +237,9 @@ class ModuleRouterNode(MessageNode):
         for module in self.registry.loaded():
             if "*" not in module.subscribe and event.event_type not in module.subscribe:
                 continue
-            # bot 归属：有明确 bot 只派发给该 bot 的实例；全局(None)实例不处理事件
-            if event.bot_id:
-                if not module.bot_id or module.bot_id != event.bot_id:
+            # 账号归属：有明确账号只派发给该账号的实例；全局(None)实例不处理事件
+            if event.account_id:
+                if not module.bot_id or module.bot_id != event.account_id:
                     continue
             else:
                 if module.bot_id:
@@ -431,6 +430,6 @@ class ModuleInvokeNode(MessageNode):
                     await module.handle(event)
             except Exception as e:
                 self.log.exception(
-                    f"[Dispatch] {module.module_name}(bot {module.bot_id}) 处理 {event.event_type} 异常: {e}"
+                    f"[Dispatch] {module.module_name}(账号 {event.account_name or module.bot_id}) 处理 {event.event_type} 异常: {e}"
                 )
         await next_()

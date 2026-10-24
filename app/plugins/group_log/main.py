@@ -40,7 +40,7 @@ from app.agent.group_log.store import (
     detach,
     store_of,
 )
-from app.core.logger import logger
+from app.core.logger import logger, account_label
 from app.plugin import BaseModule, module_hook, send_hook
 
 from . import service
@@ -70,11 +70,11 @@ class Module(BaseModule):
         try:
             await self._store.start()
         except Exception as e:  # noqa: BLE001 - 存储不可用不应拖垮模块加载
-            logger.add_info(f"#{self.bot_id}").warning(f"[GroupLog] 启动存储失败（降级为空）: {e}")
+            logger.add_info(account_label(self.bot_id)).warning(f"[GroupLog] 启动存储失败（降级为空）: {e}")
         runtime = self._runtime()
         if runtime is not None:
             attach(runtime, self._store)
-        logger.add_info(f"#{self.bot_id}").debug("[GroupLog] 群聊记录已就绪")
+        logger.add_info(account_label(self.bot_id)).debug("[GroupLog] 群聊记录已就绪")
 
     async def on_unload(self) -> None:
         runtime = self._runtime()
@@ -85,7 +85,7 @@ class Module(BaseModule):
             try:
                 await store.close()
             except Exception as e:  # noqa: BLE001
-                logger.add_info(f"#{self.bot_id}").debug(f"[GroupLog] 关闭存储异常（忽略）: {e}")
+                logger.add_info(account_label(self.bot_id)).debug(f"[GroupLog] 关闭存储异常（忽略）: {e}")
         self._store = None
 
     # ==================== 内部工具 ====================
@@ -98,7 +98,7 @@ class Module(BaseModule):
         try:
             return manager.get_runtime(self.bot_id)
         except Exception as e:  # noqa: BLE001
-            logger.add_info(f"#{self.bot_id}").debug(f"[GroupLog] 取 runtime 失败: {e}")
+            logger.add_info(account_label(self.bot_id)).debug(f"[GroupLog] 取 runtime 失败: {e}")
             return None
 
     def _data_dir(self) -> Path | None:
@@ -147,7 +147,7 @@ class Module(BaseModule):
         try:
             store.append_many(events)
         except Exception as e:  # noqa: BLE001
-            logger.add_info(f"#{self.bot_id}").debug(f"[GroupLog] 记录失败（忽略）: {e}")
+            logger.add_info(account_label(self.bot_id)).debug(f"[GroupLog] 记录失败（忽略）: {e}")
 
     def _enabled(self) -> bool:
         return bool(self._cfg("group_log_enable", True))

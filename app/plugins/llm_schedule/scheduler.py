@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 import asyncio
 import json
 import os
@@ -110,11 +112,11 @@ class TaskScheduler:
         trigger_expr = (spec.get("trigger") or "").strip()
         content = (spec.get("content") or "").strip()
         if not trigger_expr or not content:
-            logger.add_info(f"#{self.bot_id}").warning(f"[定时任务] 任务信息不完整: {spec}")
+            logger.add_info(account_label(self.bot_id)).warning(f"[定时任务] 任务信息不完整: {spec}")
             return None
         parsed = parse_schedule(trigger_expr)
         if parsed is None:
-            logger.add_info(f"#{self.bot_id}").warning(f"[定时任务] 无法解析时间表达式: {trigger_expr}")
+            logger.add_info(account_label(self.bot_id)).warning(f"[定时任务] 无法解析时间表达式: {trigger_expr}")
             return None
 
         repeat = parsed["repeat"]
@@ -148,7 +150,7 @@ class TaskScheduler:
             # 启动失败 → 回滚，避免留下孤儿任务
             self._tasks.pop(entry.id, None)
             raise
-        logger.add_info(f"#{self.bot_id}").info(
+        logger.add_info(account_label(self.bot_id)).info(
             f"[定时任务] 已创建 {entry.id} | {session_id} | {trigger_expr} -> "
             f"{entry.next_at:%Y-%m-%d %H:%M:%S} ({repeat}) | {content[:40]}"
         )
@@ -198,7 +200,7 @@ class TaskScheduler:
                         return e
                 except Exception as ex:
                     # 签名计算失败只是"这条不匹配"，继续比较其余任务即可
-                    logger.add_info(f"#{self.bot_id}").debug(f"[定时任务] 计算任务签名失败，跳过该条: {ex}")
+                    logger.add_info(account_label(self.bot_id)).debug(f"[定时任务] 计算任务签名失败，跳过该条: {ex}")
             elif norm and norm == re.sub(r"\s+", "", e.trigger_expr or "").lower():
                 return e
         return None
@@ -229,7 +231,7 @@ class TaskScheduler:
         entry.active = False
         self._cancel_timer(task_id)
         self._save()
-        logger.add_info(f"#{self.bot_id}").info(f"[定时任务] 已取消 {task_id} | {entry.session_id}")
+        logger.add_info(account_label(self.bot_id)).info(f"[定时任务] 已取消 {task_id} | {entry.session_id}")
         return True
 
     # ── 定时循环 ─────────────────────────────────────────
@@ -269,7 +271,7 @@ class TaskScheduler:
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.add_info(f"#{self.bot_id}").error(f"[定时任务] 任务 {entry.id} 循环异常: {e}")
+            logger.add_info(account_label(self.bot_id)).error(f"[定时任务] 任务 {entry.id} 循环异常: {e}")
 
     async def _fire(self, entry: TaskEntry) -> None:
         """定时触发：像主动消息一样做一次带系统提示词的 LLM 请求后自然发言。
@@ -278,7 +280,7 @@ class TaskScheduler:
         """
         entry.fired_count += 1
         if self.bot is None:
-            logger.add_info(f"#{self.bot_id}").warning(f"[定时任务] 无可用 Bot，跳过发送 {entry.id}")
+            logger.add_info(account_label(self.bot_id)).warning(f"[定时任务] 无可用 Bot，跳过发送 {entry.id}")
             return
 
         config = self.module.config
@@ -306,7 +308,7 @@ class TaskScheduler:
             )
             if messages is None:
                 # post_assemble 要求本轮不请求：直接放弃本次发送
-                logger.add_info(f"#{self.bot_id}").info(
+                logger.add_info(account_label(self.bot_id)).info(
                     f"[定时任务] post_assemble 要求跳过 {entry.id} -> {entry.session_id}"
                 )
                 return
@@ -335,7 +337,7 @@ class TaskScheduler:
                     max_tool_rounds=_max_tool_rounds(config),
                 )
             except Exception as e:
-                logger.add_info(f"#{self.bot_id}").error(f"[定时任务] 流式生成异常，改用固定内容: {e}")
+                logger.add_info(account_label(self.bot_id)).error(f"[定时任务] 流式生成异常，改用固定内容: {e}")
                 full_text = ""
 
             clean = strip_all_tags(full_text).strip()
@@ -347,9 +349,9 @@ class TaskScheduler:
                     else:
                         await self.bot.send_private_msg(user_id=int(entry.target), message=clean)
                 except Exception as e:
-                    logger.add_info(f"#{self.bot_id}").error(f"[定时任务] 发送失败 {entry.id} -> {entry.session_id}: {e}")
+                    logger.add_info(account_label(self.bot_id)).error(f"[定时任务] 发送失败 {entry.id} -> {entry.session_id}: {e}")
             else:
-                logger.add_info(f"#{self.bot_id}").info(
+                logger.add_info(account_label(self.bot_id)).info(
                     f"[定时任务] 流式触发 {entry.id} -> {entry.session_id}: {clean[:50]}"
                 )
 
@@ -362,11 +364,11 @@ class TaskScheduler:
         try:
             resp = await self._generate_reply(entry)
         except Exception as e:
-            logger.add_info(f"#{self.bot_id}").error(f"[定时任务] LLM 生成异常，改用固定内容: {e}")
+            logger.add_info(account_label(self.bot_id)).error(f"[定时任务] LLM 生成异常，改用固定内容: {e}")
             resp = None
 
         if resp is _ABORTED:
-            logger.add_info(f"#{self.bot_id}").info(
+            logger.add_info(account_label(self.bot_id)).info(
                 f"[定时任务] post_assemble 要求跳过 {entry.id} -> {entry.session_id}"
             )
             return
@@ -374,7 +376,7 @@ class TaskScheduler:
         if resp is not None and resp.ok:
             text = resp.text
         else:
-            logger.add_info(f"#{self.bot_id}").warning(f"[定时任务] LLM 生成失败，发送固定内容: {entry.content}")
+            logger.add_info(account_label(self.bot_id)).warning(f"[定时任务] LLM 生成失败，发送固定内容: {entry.content}")
             text = entry.content
 
         # 防御：剥离角色提示词可能输出的 <type=...> 标签
@@ -389,14 +391,14 @@ class TaskScheduler:
                 await self.bot.send_group_msg(group_id=int(entry.target), message=clean)
             else:
                 await self.bot.send_private_msg(user_id=int(entry.target), message=clean)
-            logger.add_info(f"#{self.bot_id}").info(
+            logger.add_info(account_label(self.bot_id)).info(
                 f"[定时任务] 触发 {entry.id} -> {entry.session_id}: {clean[:50]}"
             )
             if session:
                 self.session_mgr.add_message(entry.session_id, "assistant", clean)
                 await asyncio.to_thread(self.session_mgr.history.save_session, session)
         except Exception as e:
-            logger.add_info(f"#{self.bot_id}").error(f"[定时任务] 发送失败 {entry.id} -> {entry.session_id}: {e}")
+            logger.add_info(account_label(self.bot_id)).error(f"[定时任务] 发送失败 {entry.id} -> {entry.session_id}: {e}")
         self._save()
 
     async def _collect_tools(self, entry: TaskEntry):
@@ -677,10 +679,10 @@ class TaskScheduler:
                         self._tasks[entry.id] = entry
                 except Exception as ex:
                     # 单条任务数据损坏不应导致其余任务全部丢失，跳过并留痕
-                    logger.add_info(f"#{self.bot_id}").debug(f"[定时任务] 跳过无法解析的任务条目: {ex}")
+                    logger.add_info(account_label(self.bot_id)).debug(f"[定时任务] 跳过无法解析的任务条目: {ex}")
                     continue
         except Exception as e:
-            logger.add_info(f"#{self.bot_id}").warning(f"[定时任务] 加载状态失败: {e}")
+            logger.add_info(account_label(self.bot_id)).warning(f"[定时任务] 加载状态失败: {e}")
 
     def _save(self) -> None:
         try:
@@ -690,7 +692,7 @@ class TaskScheduler:
                     f, ensure_ascii=False, indent=2,
                 )
         except Exception as e:
-            logger.add_info(f"#{self.bot_id}").warning(f"[定时任务] 保存状态失败: {e}")
+            logger.add_info(account_label(self.bot_id)).warning(f"[定时任务] 保存状态失败: {e}")
 
     def _restore(self) -> None:
         """启动恢复：移除过期的一次性任务，周期任务推进到未来，重新武装计时器。"""
@@ -718,7 +720,7 @@ class TaskScheduler:
             armed += 1
         self._save()
         if removed or advanced:
-            logger.add_info(f"#{self.bot_id}").info(
+            logger.add_info(account_label(self.bot_id)).info(
                 f"[定时任务] 启动恢复: 移除过期 {removed} 个，周期任务推进 {advanced} 个，武装 {armed} 个"
             )
 

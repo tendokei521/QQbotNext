@@ -2,6 +2,16 @@
 
 依赖一律通过 `Depends(get_bot_service)` / `Depends(get_config_service)` 注入——
 读一个路由就能看出它依赖谁，不必追到装配根。
+
+## 身份：路径里放 account_id
+
+历史实现用数组下标 ``/api/bots/{index}/connect``。下标在删账号后会整体前移，
+同一个 URL 隔天可能指向另一个账号，因此改为**用户设定的账号 id**：
+
+    POST /api/bots/{account_id}/connect
+    POST /api/bots/config/delete/{account_id}
+
+返回文案与日志一律用**账号名**（``name``），id 只做寻址。
 """
 
 from __future__ import annotations
@@ -28,46 +38,53 @@ async def api_bots(bot_service=Depends(get_bot_service)):
     return JSONResponse(content={"bots": bot_service.get_bots_data()})
 
 
-@router.post("/bots/{index}/connect")
+@router.post("/bots/{account_id}/connect")
 async def connect_bot(
-    index: int,
+    account_id: str,
     bot_service=Depends(get_bot_service),
     config_service=Depends(get_config_service),
 ):
-    bots_config = config_service.get_bots()
-    if index < 0 or index >= len(bots_config):
-        return _err(404, f"Bot at index {index} not in config")
-    bot_cfg = bots_config[index]
+    bot_cfg = config_service.get_bot(account_id)
+    if bot_cfg is None:
+        return _err(404, f"账号 {account_id} 不存在")
+    name = bot_cfg.get("name") or account_id
     conn_mode = bot_cfg.get("conn_mode")
-    if index not in bot_service.gateway.connections:
-        # 显式传 index，避免 add_bot 缺省索引（max+1）与配置索引脱节
-        await bot_service.gateway.add_bot(bot_cfg.get("ws_url", ""), None,
-                                          bot_cfg.get("auto_connect", False), index=index,
-                                          conn_mode=conn_mode or "")
+    if account_id not in bot_service.gateway.connections:
+        await bot_service.gateway.add_bot(
+            bot_cfg.get("ws_url", ""), None, bot_cfg.get("auto_connect", False),
+            account_id=account_id, conn_mode=conn_mode or "", name=name,
+        )
     else:
-        await bot_service.gateway.readd_bot(bot_cfg.get("ws_url", ""), None, index,
-                                            conn_mode=conn_mode)
+        await bot_service.gateway.readd_bot(
+            bot_cfg.get("ws_url", ""), None, account_id, conn_mode=conn_mode
+        )
 
-    success = await bot_service.connect(index)
-    if success:
-        bot_id = await bot_service.get_bot_id(index) or index
-        return _ok(f"Bot {bot_id} connected")
-    return _err(500, f"Bot at index {index} connection failed")
-
-
-@router.post("/bots/{index}/disconnect")
-async def disconnect_bot(index: int, bot_service=Depends(get_bot_service)):
-    await bot_service.disconnect(index)
-    return _ok(f"Bot at index {index} disconnected")
+    if await bot_service.connect(account_id):
+        return _ok(f"账号「{name}」已连接")
+    return _err(500, f"账号「{name}」连接失败")
 
 
-@router.post("/bots/{index}/reconnect")
-async def reconnect_bot(index: int, bot_service=Depends(get_bot_service)):
-    success = await bot_service.reconnect(index)
-    if success:
-        bot_id = await bot_service.get_bot_id(index) or index
-        return _ok(f"Bot {bot_id} reconnected")
-    return _err(500, f"Bot at index {index} reconnection failed")
+@router.post("/bots/{account_id}/disconnect")
+async def disconnect_bot(
+    account_id: str,
+    bot_service=Depends(get_bot_service),
+    config_service=Depends(get_config_service),
+):
+    await bot_service.disconnect(account_id)
+    name = config_service.get_account_name(account_id)
+    return _ok(f"账号「{name}」已断开")
+
+
+@router.post("/bots/{account_id}/reconnect")
+async def reconnect_bot(
+    account_id: str,
+    bot_service=Depends(get_bot_service),
+    config_service=Depends(get_config_service),
+):
+    name = config_service.get_account_name(account_id)
+    if await bot_service.reconnect(account_id):
+        return _ok(f"账号「{name}」已重连")
+    return _err(500, f"账号「{name}」重连失败")
 
 
 @router.get("/bots/config")
@@ -81,15 +98,18 @@ async def api_bots_config_save(request: Request, config_service=Depends(get_conf
     try:
         data = await request.json()
     except Exception as e:
-        # 绝不能把解析失败折成空 dict 再往下走：save_bots 会先 **DELETE FROM bots**
-        # 再按 payload 重建，于是「body 被代理截断 / 非法 JSON / 前端字段名漂移」
-        # 会把全部账号配置清空，还回一句「配置已保存」。其他写接口缺字段一律 400。
+        # 绝不能把解析失败折成空 dict 再往下走：save_bots 会按 payload 删账号，
+        # 于是「body 被代理截断 / 非法 JSON / 前端字段名漂移」会把配置清空，
+        # 还回一句「配置已保存」。其他写接口缺字段一律 400。
         return _err(400, f"请求体不是合法 JSON，未改动任何账号配置: {e}")
     bots = data.get("bots") if isinstance(data, dict) else None
     if not isinstance(bots, list):
         # 空数组合法（= 用户主动删光所有账号），但**缺字段**和**类型错误**必须拒绝
         return _err(400, "请求体缺少 bots 数组，未改动任何账号配置")
-    await config_service.save_bots(bots)
+    try:
+        await config_service.save_bots(bots)
+    except ValueError as e:
+        return _err(400, str(e))
     return _ok("配置已保存")
 
 
@@ -99,14 +119,14 @@ async def api_bots_config_add(
     bot_service=Depends(get_bot_service),
     cfg_service=Depends(get_config_service),
 ):
-    """新增一个账号配置（先选连接方式，再创建）。
+    """新增一个账号配置。
 
-    前端先让用户选正向 / 反向 WebSocket 再创建，故这里收
-    ``{"conn_mode": "forward" | "reverse", "ws_url": "可选"}``；缺省 = 正向，
-    兼容旧前端与外部脚本的无参 POST。
+    收 ``{"id": 可选, "name": 可选, "conn_mode": "forward"|"reverse", "ws_url": 可选}``：
 
-    地址留空时按模式给一个默认建议（端口避开已有账号）——新卡片一出生就是可用
-    地址，不必等用户点连接才发现「反向地址必须写端口」。
+    - ``id`` 是账号唯一凭据（用户填；缺省自动分配 ``botN``，脚本调用友好）；
+    - ``name`` 是展示名（缺省「账号 N」）；
+    - ``ws_url`` 留空时按模式给默认建议（端口避开已有账号）——新卡片一出生就是
+      可用地址，不必等用户点连接才发现「反向地址必须写端口」。
     """
     body: dict = {}
     try:
@@ -114,32 +134,43 @@ async def api_bots_config_add(
         if isinstance(parsed, dict):
             body = parsed
     except Exception:
-        body = {}   # 无 body 是合法调用（旧前端就是无参 POST）
+        body = {}   # 无 body 是合法调用（脚本可以只 POST 一个连接方式）
 
     mode = normalize_mode(body.get("conn_mode"))
     ws_url = str(body.get("ws_url") or "").strip()
     if not ws_url:
         ws_url = suggest_address(mode, [b.get("ws_url", "") for b in cfg_service.get_bots()])
-    # Reuse BotService.add_bot: persist the config AND register a gateway connection
-    # (status "disconnected") at once, so /api/bots (status list) includes the new
-    # account immediately and the cards / account selector refresh right away.
-    index = await bot_service.add_bot(ws_url, None, False, conn_mode=mode)
-    return _ok("已添加新账号配置", index=index, conn_mode=mode, ws_url=ws_url)
+    try:
+        # Reuse BotService.add_bot: persist the config AND register a gateway connection
+        # (status "disconnected") at once, so /api/bots (status list) includes the new
+        # account immediately and the cards / account selector refresh right away.
+        account_id = await bot_service.add_bot(
+            ws_url, None, False, conn_mode=mode,
+            account_id=str(body.get("id") or "").strip() or None,
+            name=str(body.get("name") or "").strip(),
+        )
+    except ValueError as e:
+        return _err(400, str(e))
+    name = cfg_service.get_account_name(account_id)
+    return _ok(
+        f"已添加账号「{name}」",
+        id=account_id, name=name, conn_mode=mode, ws_url=ws_url,
+    )
 
 
-@router.post("/bots/config/delete/{index}")
+@router.post("/bots/config/delete/{account_id}")
 async def api_bots_config_delete(
-    index: int,
+    account_id: str,
     bot_service=Depends(get_bot_service),
     cfg_service=Depends(get_config_service),
 ):
-    await bot_service.gateway.del_bot(index)
-    ok = await cfg_service.delete_bot(index)
+    name = cfg_service.get_account_name(account_id)
+    ok = await bot_service.delete_bot(account_id)
     if not ok:
-        return _err(404, f"索引 {index} 不存在")
-    # 配置列表已压缩索引，立即对齐 gateway 连接映射，避免前端短暂错位
+        return _err(404, f"账号 {account_id} 不存在")
+    # 立即对齐 gateway 连接映射，避免前端短暂错位
     await bot_service.gateway.reconcile()
-    return _ok("已删除账号配置")
+    return _ok(f"已删除账号「{name}」")
 
 
 @router.get("/bots/groups")
@@ -147,9 +178,9 @@ async def get_all_bots_groups(bot_service=Depends(get_bot_service)):
     return JSONResponse(content={"bots_groups": bot_service.get_bots_groups()})
 
 
-@router.get("/bots/{index}")
-async def api_bot(index: int, bot_service=Depends(get_bot_service)):
-    info = bot_service.gateway.get_bot_info_by_index(index)
+@router.get("/bots/{account_id}")
+async def api_bot(account_id: str, bot_service=Depends(get_bot_service)):
+    info = bot_service.gateway.get_bot_info(account_id)
     if info:
         return JSONResponse(content=info)
-    return _err(404, f"Bot at index {index} not found")
+    return _err(404, f"账号 {account_id} 不存在")

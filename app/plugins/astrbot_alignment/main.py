@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 import time
 
 from app.plugin import BaseModule, llm_hook
@@ -88,7 +90,7 @@ class Module(BaseModule):
         except Exception as e:  # noqa: BLE001 —— 群名只是提醒段的一部分，失败不该阻断请求
             from app.core.logger import module_logger
 
-            module_logger.add_info(f"#{self.bot_id}").debug(f"[AstrBot对齐] 群名预取失败（已忽略）: {e}")
+            module_logger.add_info(account_label(self.bot_id)).debug(f"[AstrBot对齐] 群名预取失败（已忽略）: {e}")
             return
         if name:
             self._group_names[key] = (str(name), time.time())

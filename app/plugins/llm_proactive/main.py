@@ -22,6 +22,8 @@
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 from typing import Any
 
 from app.plugin import BaseModule
@@ -122,7 +124,7 @@ class Module(BaseModule):
         except Exception as e:  # noqa: BLE001 —— 业务异常不该毁掉整轮
             from app.core.logger import logger
 
-            logger.add_info(f"#{self.bot_id}").debug(f"[主动消息] 观察消息失败（已忽略）: {e}")
+            logger.add_info(account_label(self.bot_id)).debug(f"[主动消息] 观察消息失败（已忽略）: {e}")
 
     async def _on_bot_sent(self, ctx, msg=None) -> None:
         """Bot 发过话了：重置计时。"""
@@ -138,7 +140,7 @@ class Module(BaseModule):
         except Exception as e:  # noqa: BLE001
             from app.core.logger import logger
 
-            logger.add_info(f"#{self.bot_id}").debug(f"[主动消息] 更新发送状态失败（已忽略）: {e}")
+            logger.add_info(account_label(self.bot_id)).debug(f"[主动消息] 更新发送状态失败（已忽略）: {e}")
 
     async def on_unload(self) -> None:
         runtime = self._runtime()

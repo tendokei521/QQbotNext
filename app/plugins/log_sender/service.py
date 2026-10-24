@@ -33,7 +33,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.core.logger import module_logger
+from app.core.logger import module_logger, account_label
 
 #: 与 `app/webui/api/logs.py` 的 LOG_FILENAMES 保持一致（同一套轮转产物）
 LOG_FILENAMES = ("debug.log", "warn.log", "errors.log", "user.log")
@@ -368,7 +368,7 @@ async def send_logs(module, event, *, command: str = "log") -> None:
     解析（``/log`` 前缀、大小写、别名）与「命中即截断 LLM」都由框架的命令节点负责，
     这里只管业务。``command`` 取 ``"log"``（只发 user）或 ``"logs"``（四个都发）。
     """
-    logger = module_logger.add_info(f"#{getattr(module, 'bot_id', '')}").add_info(
+    logger = module_logger.add_info(account_label(getattr(module, 'bot_id', ''))).add_info(
         getattr(module, "name", "日志发送")
     )
 

@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 from app.agent import logger
 from app.agent.providers.invoker import resolve_invoker
 from app.domain.splitter import strip_stream_artifacts
@@ -152,8 +154,8 @@ async def _force_speak_round(
             },
         )
     except Exception as e:  # noqa: BLE001 —— 补救轮失败就回到静默，不能让整轮炸掉
-        logger.add_info(f"#{runtime.bot_id}").warning(f"[LLM] 强制发言补救轮失败（按静默处理）: {e}")
+        logger.add_info(account_label(runtime.bot_id)).warning(f"[LLM] 强制发言补救轮失败（按静默处理）: {e}")
     if speech.spoken == 0 and speech.queued == 0:
-        logger.add_info(f"#{runtime.bot_id}").warning(
+        logger.add_info(account_label(runtime.bot_id)).warning(
             "[LLM] 被直接点名但补一轮后仍未开口（模型可能没调用 send_message）"
         )

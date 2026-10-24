@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 import asyncio
 import re
 import time
@@ -155,7 +157,7 @@ class MemoryManager:
                 )
             return mid
         except Exception as e:
-            logger.add_info(f"#{self.bot_id}").warning(f"[记忆] 保存失败: {e}")
+            logger.add_info(account_label(self.bot_id)).warning(f"[记忆] 保存失败: {e}")
             return None
 
     def autosave(self, session_id: str, user_id: Any, text: str) -> str | None:
@@ -174,12 +176,12 @@ class MemoryManager:
                 importance=0.85, source="deterministic",
                 source_user=str(user_id or ""),
             )
-            logger.add_info(f"#{self.bot_id}").info(
+            logger.add_info(account_label(self.bot_id)).info(
                 f"[记忆] 确定性兜底写入 {owner}: {clause[:40]}"
             )
             return owner
         except Exception as e:
-            logger.add_info(f"#{self.bot_id}").warning(f"[记忆] 自动保存异常: {e}")
+            logger.add_info(account_label(self.bot_id)).warning(f"[记忆] 自动保存异常: {e}")
             return None
 
     def _recall_params(self, owners: list[str]) -> dict:
@@ -280,7 +282,7 @@ class MemoryManager:
                 return "已重置记忆上下文（旧记忆挂起）"
             return "记忆保持现状（keep）"
         except Exception as e:
-            logger.add_info(f"#{self.bot_id}").warning(f"[记忆] 会话重置处理异常: {e}")
+            logger.add_info(account_label(self.bot_id)).warning(f"[记忆] 会话重置处理异常: {e}")
             return "重置处理失败"
 
     # ── 纠错闭环（S5） ───────────────────────────────────
@@ -347,7 +349,7 @@ class MemoryManager:
                 )
             return block
         except Exception as e:
-            logger.add_info(f"#{self.bot_id}").warning(f"[记忆] 注入召回异常: {e}")
+            logger.add_info(account_label(self.bot_id)).warning(f"[记忆] 注入召回异常: {e}")
             return ""
 
     # ── 提及扩展（群聊“问某某”定向召回） ───────────────
@@ -381,7 +383,7 @@ class MemoryManager:
             self._member_cache[key] = (now, parsed)
             return parsed
         except Exception as e:
-            logger.add_info(f"#{self.bot_id}").warning(f"[记忆] 拉取群成员失败: {e}")
+            logger.add_info(account_label(self.bot_id)).warning(f"[记忆] 拉取群成员失败: {e}")
             return []
 
     async def mention_owners_for(
@@ -530,11 +532,11 @@ class MemoryManager:
                     if mid:
                         total += 1
             if total:
-                logger.add_info(f"#{self.bot_id}").info(
+                logger.add_info(account_label(self.bot_id)).info(
                     f"[记忆] 蒸馏沉淀 {total} 条 -> {session_id} ({source})"
                 )
         except Exception as e:
-            logger.add_info(f"#{self.bot_id}").warning(f"[记忆] 蒸馏失败（忽略）: {e}")
+            logger.add_info(account_label(self.bot_id)).warning(f"[记忆] 蒸馏失败（忽略）: {e}")
 
     async def consolidate_archived(
         self,

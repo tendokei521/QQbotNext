@@ -35,6 +35,8 @@ class OutputStrategy(Protocol):
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 import asyncio
 from collections.abc import AsyncIterator, Callable
 from typing import Any, Protocol, runtime_checkable
@@ -300,7 +302,7 @@ def resolve_output(runtime: Any) -> OutputStrategy:
     if strategy is not None:
         from app.core.logger import logger
 
-        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").warning(
+        logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).warning(
             f"[Output] runtime.output 不可用（{type(strategy).__name__}），已回退默认输出策略"
         )
     return select_default_output(getattr(runtime, "config", None), runtime)

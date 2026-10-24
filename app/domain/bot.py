@@ -17,8 +17,13 @@ class IBot(ABC):
 
     # ---------- 运行时状态 ----------
     # 仅作类型声明（mutable 默认值会跨实例共享，实例属性一律在 __init__ 初始化）
+    #: 账号唯一标识：用户在「添加账号」时自己填，创建后不可变。
+    #: 前后端判断、模块配置/会话/统计/磁盘文件名**一律用它**；不要拿它当展示文案。
+    account_id: str | None = None
+    #: 账号展示名：日志与界面显示都用它（可以随时改，id 不行）。
+    account_name: str = ""
+    #: 本账号当前登录的 QQ 号：**运行时信息**，登录后才有，不是身份、不当 key。
     bot_id: int | None = None
-    index: int | None = None
     owner_id: int | None = None
     ws_url: str = ""
     status: str = "disconnected"

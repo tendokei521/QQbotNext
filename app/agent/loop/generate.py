@@ -19,6 +19,8 @@ v3.1 起合并为**单一实现** `turn.run_turn`：
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 from typing import Any
 
 from app.agent import logger
@@ -73,7 +75,7 @@ async def generate_response(runtime: Any, event: Any, ctx: Any = None) -> str | 
     )
 
     if result.error:
-        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").warning(
+        logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).warning(
             f"[LLM] 非流式生成失败: {result.error}"
         )
         return None

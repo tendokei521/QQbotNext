@@ -21,6 +21,8 @@ resp = await module.llm_chat(messages, model_id=model_id, system="你是翻译�
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -70,7 +72,7 @@ class ModuleLLMClient:
             return None
 
     def _account_log(self, bot_id: Any):
-        return self.log.add_info(f"#{bot_id if bot_id is not None else '?'}")
+        return self.log.add_info(account_label(bot_id if bot_id is not None else '?'))
 
     # ── 解析 ────────────────────────────────────────────────────
     def _chain(self, *, bot_id: Any = None, model_id: str = "", preset_id: str = "") -> list[dict]:

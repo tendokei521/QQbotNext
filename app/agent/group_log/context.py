@@ -25,7 +25,7 @@ from app.agent.group_log.render import (
     render_environment,
 )
 from app.agent.group_log.store import store_of
-from app.core.logger import logger
+from app.core.logger import logger, account_label
 
 
 def _cfg(config: Any, key: str, default: Any = None) -> Any:
@@ -123,14 +123,14 @@ def build_context_text(
             window_limit=limit,
         )
     except Exception as e:  # noqa: BLE001 - 环境块失败不能影响回复主流程
-        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(
+        logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).debug(
             f"[GroupLog] 渲染环境块失败（按空处理）: {e}"
         )
         return ""
 
     stats = result.stats
     if stats.dropped_by_budget or stats.dropped_covered:
-        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(
+        logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).debug(
             f"[GroupLog] {session_id} 环境块：{stats.messages} 条消息 / "
             f"{stats.events} 事件，预算丢弃 {stats.dropped_by_budget} 行、"
             f"去重 {stats.dropped_covered} 条，{stats.chars} 字符"

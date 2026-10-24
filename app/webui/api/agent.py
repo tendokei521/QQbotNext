@@ -24,7 +24,7 @@ from app.webui.api.deps import (
     get_provider_preset_service,
     get_resource_registry,
     get_role_preset_service,
-    parse_bot_id,
+    parse_account_id,
 )
 
 router = APIRouter(prefix="/agent", tags=["agent"])
@@ -63,7 +63,7 @@ def _mask_password_config(config: dict, schema: dict) -> dict:
 @router.get("/config")
 async def agent_config(
     request: Request,
-    bot_id: int | None = Depends(parse_bot_id),
+    bot_id: str | None = Depends(parse_account_id),
     agent_manager=Depends(get_agent_manager),
     config_service=Depends(get_config_service),
     role_preset_service=Depends(get_role_preset_service),
@@ -113,7 +113,7 @@ async def agent_config(
 
 
 @router.post("/config")
-async def agent_config_update(request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+async def agent_config_update(request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     from app.agent.config_schema import SCHEMA
 
     runtime, _ = _runtime(agent_manager, bot_id)
@@ -170,7 +170,7 @@ async def agent_config_update(request: Request, bot_id: int | None = Depends(par
 @router.get("/telemetry")
 async def agent_telemetry(
     request: Request,
-    bot_id: int | None = Depends(parse_bot_id),
+    bot_id: str | None = Depends(parse_account_id),
     limit: int = 30,
     agent_manager=Depends(get_agent_manager),
 ):
@@ -189,7 +189,7 @@ async def agent_telemetry(
 
 
 @router.post("/telemetry/reset")
-async def agent_telemetry_reset(request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+async def agent_telemetry_reset(request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
@@ -225,7 +225,7 @@ def _missing(service_label: str):
 # ==================== 知识库管理 ====================
 
 @router.get("/knowledge/items")
-async def agent_knowledge_items(request: Request, bot_id: int | None = Depends(parse_bot_id), limit: int = 100, agent_manager=Depends(get_agent_manager)):
+async def agent_knowledge_items(request: Request, bot_id: str | None = Depends(parse_account_id), limit: int = 100, agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
@@ -240,7 +240,7 @@ async def agent_knowledge_items(request: Request, bot_id: int | None = Depends(p
 
 
 @router.post("/knowledge/items")
-async def agent_knowledge_add(request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+async def agent_knowledge_add(request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
@@ -263,7 +263,7 @@ async def agent_knowledge_add(request: Request, bot_id: int | None = Depends(par
 
 
 @router.delete("/knowledge/items/{cid}")
-async def agent_knowledge_delete(cid: str, request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+async def agent_knowledge_delete(cid: str, request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
@@ -282,7 +282,7 @@ async def agent_knowledge_delete(cid: str, request: Request, bot_id: int | None 
 # ==================== OneBot 工具清单 ====================
 
 @router.get("/onebot/tools")
-async def agent_onebot_tools(request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+async def agent_onebot_tools(request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
@@ -304,7 +304,7 @@ async def agent_onebot_tools(request: Request, bot_id: int | None = Depends(pars
 @router.get("/tools")
 async def agent_tools_all(
     request: Request,
-    bot_id: int | None = Depends(parse_bot_id),
+    bot_id: str | None = Depends(parse_account_id),
     agent_manager=Depends(get_agent_manager),
 ):
     """**所有来源**的工具及其状态（显示即真相）。
@@ -335,7 +335,7 @@ async def agent_tools_all(
 @router.post("/tools/toggle")
 async def agent_tool_toggle(
     request: Request,
-    bot_id: int | None = Depends(parse_bot_id),
+    bot_id: str | None = Depends(parse_account_id),
     agent_manager=Depends(get_agent_manager),
 ):
     """唯一的 per-tool 开关写入口（写进用户总表 `tools_disabled`）。"""
@@ -368,7 +368,7 @@ async def agent_tool_toggle(
 
 
 @router.get("/system/tools")
-async def agent_system_tools(request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+async def agent_system_tools(request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
@@ -380,7 +380,7 @@ async def agent_system_tools(request: Request, bot_id: int | None = Depends(pars
 
 
 @router.get("/module/tools")
-async def agent_module_tools(request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+async def agent_module_tools(request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
@@ -427,7 +427,7 @@ async def agent_module_tools(request: Request, bot_id: int | None = Depends(pars
 
 
 @router.get("/mcp/tools")
-async def agent_mcp_tools(request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+async def agent_mcp_tools(request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
@@ -470,7 +470,7 @@ async def agent_mcp_tools(request: Request, bot_id: int | None = Depends(parse_b
 # ==================== 定时任务 ====================
 
 @router.get("/tasks")
-async def agent_tasks(request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+async def agent_tasks(request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
@@ -481,7 +481,7 @@ async def agent_tasks(request: Request, bot_id: int | None = Depends(parse_bot_i
 
 
 @router.post("/tasks")
-async def agent_task_add(request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+async def agent_task_add(request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
@@ -517,7 +517,7 @@ async def agent_task_add(request: Request, bot_id: int | None = Depends(parse_bo
 
 
 @router.post("/tasks/{task_id}/trigger")
-async def agent_task_trigger(task_id: str, request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+async def agent_task_trigger(task_id: str, request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
@@ -531,7 +531,7 @@ async def agent_task_trigger(task_id: str, request: Request, bot_id: int | None 
 
 
 @router.post("/tasks/{task_id}/cancel")
-async def agent_task_cancel(task_id: str, request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+async def agent_task_cancel(task_id: str, request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
@@ -547,7 +547,7 @@ async def agent_task_cancel(task_id: str, request: Request, bot_id: int | None =
 # ==================== 主动消息 ====================
 
 @router.get("/proactive/status")
-async def agent_proactive_status(request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+async def agent_proactive_status(request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")
@@ -558,7 +558,7 @@ async def agent_proactive_status(request: Request, bot_id: int | None = Depends(
 
 
 @router.post("/proactive/trigger")
-async def agent_proactive_trigger(request: Request, bot_id: int | None = Depends(parse_bot_id), agent_manager=Depends(get_agent_manager)):
+async def agent_proactive_trigger(request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"Bot {bot_id} 无 Agent 运行时")

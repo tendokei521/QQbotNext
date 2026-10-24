@@ -142,10 +142,11 @@ def is_single_service_skipped(module: BaseModule, event: BaseEvent, config_servi
 
         multi_group = webui.get("multi_group", {}) or {}
         group_config = (multi_group.get("groups", {}) or {}).get(str(group_id)) or {}
-        service_bot_index = group_config.get("service_bot_index")
-        if service_bot_index is None:
+        # 单一服务指定的是"由哪个账号负责本群"，用的是账号 id（曾用数组下标，已废弃）
+        service_account = group_config.get("service_bot_id")
+        if service_account is None:
             return False
-        return event.bot_index != service_bot_index
+        return str(event.account_id) != str(service_account)
     except Exception as e:
         from app.core.logger import logger
 

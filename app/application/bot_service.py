@@ -34,72 +34,87 @@ class BotService:
     # ==================== 登录装配 ====================
     async def on_bot_login(self, conn: IBot) -> None:
         # 先装配 Agent 运行时，再加载模块；这样模块的 @llm_hook 才能注册到 runtime.llm_hooks。
-        # 用 bind_account 而非 ensure_runtime：连接是 index 级对象、可被换号复用，
-        # 它负责把「账号运行时 ↔ 当前持有该账号的连接」重新对齐并回收幽灵运行时。
+        # 键一律用 account_id（账号 id，用户设定且不可变）——不能再用 QQ 号：同一账号
+        # 换个 QQ 登录时配置应当跟着账号走，而不是跟着 QQ 走。
         if self.agent_manager is not None:
             bind = getattr(self.agent_manager, "bind_account", None) or self.agent_manager.ensure_runtime
-            bind(conn.bot_id, bot=conn)
-        await self.registry.load_all(conn.bot_id, bot=conn)
-        logger.info(f"[BotService] Bot {conn.bot_id} 模块装配完成")
+            bind(conn.account_id, bot=conn)
+        await self.registry.load_all(conn.account_id, bot=conn)
+        logger.info(f"[BotService] 账号「{getattr(conn, 'label', '?')}」模块装配完成")
         if self.lifecycle_hooks is not None:
             try:
                 await self.lifecycle_hooks.run(conn, "login", "已登录")
             except Exception as e:
                 logger.warning(f"[BotService] 登录钩子执行异常: {e}")
 
-    async def on_account_login(self, index: int, bot_id: int | None, nickname: str) -> bool:
-        """登录成功 → 记录该连接本次登录的账号快照。
+    async def on_account_login(self, account_id: str, bot_id: int | None, nickname: str) -> bool:
+        """登录成功 → 记录该账号本次登录的 QQ 快照。
 
         账号未变化时 ConfigService 内部为 no-op（不写库、不通知），
-        符合「账号相同不变、不同才换」：只有换了账号才广播刷新前端。
+        符合「账号相同不变、不同才换」：只有换了 QQ 才广播刷新前端。
         """
-        changed = await self.config_service.save_bot_account(index, bot_id, nickname)
+        changed = await self.config_service.save_bot_account(account_id, bot_id, nickname)
         if changed:
-            logger.info(f"[BotService] 连接 #{index} 的登录账号已更新: {bot_id} ({nickname})")
-            await self._notify_account_changed(index)
+            name = self.config_service.get_account_name(account_id)
+            logger.info(f"[BotService] 账号「{name}」的登录 QQ 已更新: {bot_id} ({nickname})")
+            await self._notify_account_changed(account_id)
         return changed
 
-    async def _notify_account_changed(self, index: int) -> None:
-        """广播「上次账号已更新」，让所有已打开的 WebUI 立即换成新账号。"""
+    async def _notify_account_changed(self, account_id: str) -> None:
+        """广播「登录 QQ 已更新」，让所有已打开的 WebUI 立即换成新账号信息。"""
         from app.core.event_bus import BotAccountUpdatedEvent, event_bus
 
-        conn = self.gateway.connections.get(index)
+        conn = self.gateway.connections.get(str(account_id))
         try:
             await event_bus.publish(BotAccountUpdatedEvent(
-                bot_index=index,
+                account_id=str(account_id),
                 user_id=conn.bot_id if conn else None,
             ))
         except Exception as e:
-            logger.warning(f"[BotService] 账号变更广播失败 (#{index}): {e}")
+            logger.warning(f"[BotService] 账号变更广播失败（{account_id}）: {e}")
 
     # ==================== 连接操作（WebUI 调用） ====================
     async def start(self) -> None:
         await self.gateway.start_all(self.config_service.get_bots())
 
-    async def connect(self, index: int) -> bool:
-        return await self.gateway.connect_bot(index)
+    async def connect(self, account_id: str) -> bool:
+        return await self.gateway.connect_bot(account_id)
 
-    async def disconnect(self, index: int) -> None:
+    async def disconnect(self, account_id: str) -> None:
         # manual=True：用户主动断开，监督循环不得把它自动连回来
         # （否则 auto_connect 账号最多 10s 后又连接，日志表现为「断开后又连上」）
-        await self.gateway.disconnect_bot(index, manual=True)
+        await self.gateway.disconnect_bot(account_id, manual=True)
 
-    async def reconnect(self, index: int) -> bool:
-        return await self.gateway.reconnect_bot(index)
+    async def reconnect(self, account_id: str) -> bool:
+        return await self.gateway.reconnect_bot(account_id)
 
     async def add_bot(
-        self, ws_url: str, owner_id: int | None, auto_connect: bool = False, conn_mode: str = FORWARD
-    ) -> int:
-        index = await self.config_service.add_bot(
-            {"ws_url": ws_url, "owner_id": owner_id, "auto_connect": auto_connect,
-             "conn_mode": conn_mode}
+        self,
+        ws_url: str,
+        owner_id: int | None,
+        auto_connect: bool = False,
+        conn_mode: str = FORWARD,
+        account_id: str | None = None,
+        name: str = "",
+    ) -> str:
+        """新增账号：先落配置（分配/校验 id），再建网关连接对象，返回账号 id。"""
+        account_id = await self.config_service.add_bot({
+            "id": account_id,
+            "name": name,
+            "ws_url": ws_url,
+            "owner_id": owner_id,
+            "auto_connect": auto_connect,
+            "conn_mode": conn_mode,
+        })
+        await self.gateway.add_bot(
+            ws_url, owner_id, auto_connect, account_id=account_id,
+            conn_mode=conn_mode, name=self.config_service.get_account_name(account_id),
         )
-        await self.gateway.add_bot(ws_url, owner_id, auto_connect, index=index, conn_mode=conn_mode)
-        return index
+        return account_id
 
-    async def delete_bot(self, index: int) -> bool:
-        await self.gateway.del_bot(index)
-        return await self.config_service.delete_bot(index)
+    async def delete_bot(self, account_id: str) -> bool:
+        await self.gateway.del_bot(account_id)
+        return await self.config_service.delete_bot(account_id)
 
     async def save_bots_config(self, bots: list[dict]) -> None:
         await self.config_service.save_bots(bots)
@@ -110,20 +125,21 @@ class BotService:
 
     def get_bots_groups(self) -> dict[str, dict]:
         result: dict = {}
-        for index, conn in self.gateway.connections.items():
+        for account_id, conn in self.gateway.connections.items():
             if conn.all_group_list:
-                result[str(index)] = {
+                result[str(account_id)] = {
+                    "account_id": account_id,
+                    "name": getattr(conn, "account_name", "") or account_id,
                     "bot_id": conn.bot_id,
-                    "index": index,
                     "groups": conn.all_group_list,
                     "groups_info": conn.all_group_list_info,
                 }
         return result
 
-    def get_modules_data(self, bot_id: int | None = None) -> dict[str, dict]:
+    def get_modules_data(self, account_id: str | None = None) -> dict[str, dict]:
         """模块数据（WebUI 渲染所需），返回格式与原实现一致。
 
-        bot_id 有指定时优先取该 bot 的实例；未加载则回退全局(None)实例，
+        account_id 有指定时优先取该账号的实例；未加载则回退全局(None)实例，
         保证页面在 Bot 未连接时也能渲染模块列表。
         """
         data: dict = {}
@@ -131,8 +147,8 @@ class BotService:
             if not bot_modules:
                 continue
             mod = None
-            if bot_id is not None:
-                mod = bot_modules.get(bot_id)
+            if account_id is not None:
+                mod = bot_modules.get(account_id)
                 if mod is None:
                     mod = bot_modules.get(None)
             else:
@@ -146,7 +162,7 @@ class BotService:
                 "description": mod.description,
                 "enabled": mod.authority.enabled,
                 "permission": mod.permission,
-                "bot_id": mod.bot_id,
+                "account_id": mod.bot_id,
                 "category": getattr(mod, "category", "未分类"),
                 "tags": list(getattr(mod, "tags", []) or []),
                 "order": int(getattr(mod, "order", 100) or 100),
@@ -170,16 +186,16 @@ class BotService:
                 "supersedes": list(getattr(mod, "supersedes", ()) or ()),
             }
         # 虚拟 Agent 模块（框架级注入，不依赖模块目录）：即使所有模块被删也保留 LLM 界面
-        data["agent"] = self._agent_module_data(bot_id)
+        data["agent"] = self._agent_module_data(account_id)
         return data
 
-    def _agent_module_data(self, bot_id: int | None) -> dict:
+    def _agent_module_data(self, account_id: str | None) -> dict:
         """框架级 LLM 模块条目：读 AgentRuntime（无运行时则用默认值）。"""
         from app.agent.config import DEFAULT_LLM_CONFIG
         from app.agent.config_schema import SCHEMA
         from app.plugin.base import ModulePermission
 
-        runtime = self.agent_manager.get_runtime(bot_id) if self.agent_manager and bot_id else None
+        runtime = self.agent_manager.get_runtime(account_id) if self.agent_manager and account_id else None
         if runtime is not None:
             config = dict(runtime.config.raw_config)
             enabled = runtime.config.enabled
@@ -199,7 +215,7 @@ class BotService:
             "description": "框架级 LLM 角色扮演对话",
             "enabled": enabled,
             "permission": permission,
-            "bot_id": bot_id,
+            "account_id": account_id,
             "category": "LLM",
             "tags": ["LLM", "Agent"],
             "order": 0,
@@ -220,15 +236,16 @@ class BotService:
             "supersedes": [],
         }
 
-    def get_module_data(self, module_name: str, bot_id: int | None = None) -> dict | None:
-        return self.get_modules_data(bot_id).get(module_name)
+    def get_module_data(self, module_name: str, account_id: str | None = None) -> dict | None:
+        return self.get_modules_data(account_id).get(module_name)
 
-    async def get_bot_id(self, index: int) -> int | None:
-        return await self.gateway.get_bot_id(index)
+    async def get_bot_id(self, account_id: str) -> int | None:
+        """该账号当前登录的 QQ 号（运行时信息，不是身份）。"""
+        return await self.gateway.get_bot_id(account_id)
 
     # ==================== 模块重载 ====================
-    async def reload_modules(self, bot_id: int | None = None) -> int:
-        await self.registry.reload_all(bot_id)
+    async def reload_modules(self, account_id: str | None = None) -> int:
+        await self.registry.reload_all(account_id)
         return len(self.registry.module_names())
 
     async def shutdown(self) -> None:

@@ -63,6 +63,8 @@ async def query_stats(
     breakdown: str = Query("model", description="none|model|api|source|bot|session|event|outcome"),
     from_ts: int | None = Query(None, description="起始时间（UTC 秒，含）"),
     to_ts: int | None = Query(None, description="结束时间（UTC 秒，含当天请传次日 0 点）"),
+    account_id: str | None = None,
+    #: 兼容别名：历史前端/脚本用 ?bot_id=，语义已改为账号 id
     bot_id: str | None = None,
     source: str | None = None,
     api: str | None = None,
@@ -97,7 +99,7 @@ async def query_stats(
             from_ts=from_ts,
             to_ts=to_ts,
             filters=_filters(
-                bot_id, source, api, model, session_id, group_id, user_id, event_type, outcome
+                account_id or bot_id, source, api, model, session_id, group_id, user_id, event_type, outcome
             ),
             ok_only=ok_only,
             include_estimated=include_estimated,
@@ -117,6 +119,7 @@ async def list_facets(
     api: str | None = None,
     source: str | None = None,
     model: str | None = None,
+    account_id: str | None = None,
     bot_id: str | None = None,
 ):
     recorder = _recorder(request)
@@ -133,7 +136,7 @@ async def list_facets(
             kind=kind,
             from_ts=from_ts,
             to_ts=to_ts,
-            filters={"api": api, "source": source, "model": model, "bot_id": bot_id},
+            filters={"api": api, "source": source, "model": model, "bot_id": account_id or bot_id},
         )
     except Exception as e:  # noqa: BLE001
         return JSONResponse(status_code=500, content={"status": "error", "message": f"读取筛选项失败: {e}"})
@@ -144,12 +147,14 @@ async def list_facets(
 async def purge_stats(
     request: Request,
     before_ts: int | None = None,
+    account_id: str | None = None,
     bot_id: str | None = None,
 ):
     """手动清理历史统计数据（默认永久保留）。"""
     recorder = _recorder(request)
     if recorder is None:
         return JSONResponse(status_code=503, content={"status": "error", "message": "统计未启用"})
+    bot_id = account_id or bot_id
     if before_ts is None and not bot_id:
         return JSONResponse(
             status_code=400,

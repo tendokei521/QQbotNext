@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 
-from app.core.logger import module_logger
+from app.core.logger import module_logger, account_label
 from app.infrastructure.fs import media_cache
 from app.plugin import get_data_path
 from app.plugin.groups import check_group_enabled
@@ -30,7 +30,7 @@ CACHE_SUBDIR = "media_cache"
 
 
 async def handle(module, event):
-    logger = module_logger.add_info(f"#{module.bot_id}").add_info(module.name)
+    logger = module_logger.add_info(account_label(module.bot_id)).add_info(module.name)
     config = module.config
 
     if not config.get("enable_auto_parse", True):
@@ -154,7 +154,7 @@ async def _send_legacy(module, event, results: list) -> None:
 
 async def _parse_and_send(module, bot, target: dict, results: list) -> None:
     """取流 → 下载 → 发送合并转发（一条作品一条转发）。"""
-    logger = module_logger.add_info(f"#{module.bot_id}").add_info(module.name)
+    logger = module_logger.add_info(account_label(module.bot_id)).add_info(module.name)
     config = module.config
     uin = str(target.get("self_id") or module.bot_id or fwd.FALLBACK_UIN)
     cache_dir = os.path.join(get_data_path(module.module_name), CACHE_SUBDIR)

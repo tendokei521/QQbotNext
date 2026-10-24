@@ -32,6 +32,7 @@
 
 
 from app.agent import logger
+from app.core.logger import account_label
 from app.agent.assembly.assembler import PromptRequest
 from app.agent.assembly.compress import maybe_compress_context
 from app.agent.context.group import (
@@ -166,7 +167,7 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
                     max_entries=int(config.get("image_max_count", 4) or 4),
                 )
             except Exception as e:  # noqa: BLE001 —— 回填是增强，失败只降级
-                logger.add_info(f"#{runtime.bot_id}").debug(f"历史图片回填失败（已忽略）: {e}")
+                logger.add_info(account_label(runtime.bot_id)).debug(f"历史图片回填失败（已忽略）: {e}")
 
     pre_history_text = await _fetch_pre_history(
         runtime, event, is_private=is_private, group_id=group_id, user_id=user_id,
@@ -241,7 +242,7 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
         warn_key = (getattr(runtime, "bot_id", 0), "persona_output")
         if conflicts and warn_key not in _WARNED_SPEECH_INTENT:
             _WARNED_SPEECH_INTENT.add(warn_key)
-            logger.add_info(f"#{runtime.bot_id}").warning(
+            logger.add_info(account_label(runtime.bot_id)).warning(
                 "[LLM] 人格卡里有「输出格式」条款，会与发言通道（文本=思考）冲突，"
                 f"建议移到行为层或删掉：{conflicts}"
             )
@@ -250,7 +251,7 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
         warn_key = (getattr(runtime, "bot_id", 0), "speech_intent")
         if warn_key not in _WARNED_SPEECH_INTENT:
             _WARNED_SPEECH_INTENT.add(warn_key)
-            logger.add_info(f"#{runtime.bot_id}").warning(
+            logger.add_info(account_label(runtime.bot_id)).warning(
                 "[LLM] 已开启 speech_via_tool 但当前不是拟人化档位或未开流式输出，"
                 "按「文本即发言」处理（发言通道需要轮次边界才能 flush）"
             )
@@ -311,7 +312,7 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
                     segments=image_segments,
                 )
         except Exception as e:  # noqa: BLE001 —— 图片解析失败必须降级为纯文本
-            logger.add_info(f"#{runtime.bot_id}").warning(f"图片解析失败，按纯文本处理: {e}")
+            logger.add_info(account_label(runtime.bot_id)).warning(f"图片解析失败，按纯文本处理: {e}")
 
     req = PromptRequest(
         runtime=runtime,
@@ -388,7 +389,7 @@ async def _collect_extra_blocks(
         )
         return await collect_context_blocks(runtime, scope)
     except Exception as e:  # noqa: BLE001 —— 贡献者收集失败不该毁掉整轮
-        logger.add_info(f"#{getattr(runtime, 'bot_id', '?')}").debug(
+        logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).debug(
             f"[Provider] 额外上下文块收集失败（已忽略）: {e}"
         )
         return []

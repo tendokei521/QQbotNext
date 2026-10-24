@@ -11,12 +11,12 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 
 from app.application.session_history_service import SessionHistoryService
-from app.webui.api.deps import parse_bot_id
+from app.webui.api.deps import parse_account_id
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
-def _service(bot_id: int | None) -> SessionHistoryService:
+def _service(bot_id: str | None) -> SessionHistoryService:
     if bot_id is None:
         raise ValueError("缺少 bot_id")
     return SessionHistoryService(bot_id)
@@ -31,7 +31,7 @@ def _ok(message: str, **extra):
 
 
 @router.get("")
-async def list_sessions(request: Request, bot_id: int | None = Depends(parse_bot_id)):
+async def list_sessions(request: Request, bot_id: str | None = Depends(parse_account_id)):
     try:
         sessions = _service(bot_id).list_sessions()
     except ValueError as e:
@@ -42,7 +42,7 @@ async def list_sessions(request: Request, bot_id: int | None = Depends(parse_bot
 
 
 @router.get("/{session_id}")
-async def get_session(session_id: str, request: Request, bot_id: int | None = Depends(parse_bot_id)):
+async def get_session(session_id: str, request: Request, bot_id: str | None = Depends(parse_account_id)):
     try:
         session = _service(bot_id).get_session(session_id)
     except ValueError as e:
@@ -59,7 +59,7 @@ async def get_conversation(
     session_id: str,
     task_id: str,
     request: Request,
-    bot_id: int | None = Depends(parse_bot_id),
+    bot_id: str | None = Depends(parse_account_id),
 ):
     try:
         conversation = _service(bot_id).get_conversation(task_id)
@@ -77,7 +77,7 @@ async def rename_conversation(
     session_id: str,
     task_id: str,
     request: Request,
-    bot_id: int | None = Depends(parse_bot_id),
+    bot_id: str | None = Depends(parse_account_id),
 ):
     try:
         body = await request.json()
@@ -101,7 +101,7 @@ async def edit_message(
     task_id: str,
     index: int,
     request: Request,
-    bot_id: int | None = Depends(parse_bot_id),
+    bot_id: str | None = Depends(parse_account_id),
 ):
     try:
         body = await request.json()
@@ -122,7 +122,7 @@ async def add_message(
     session_id: str,
     task_id: str,
     request: Request,
-    bot_id: int | None = Depends(parse_bot_id),
+    bot_id: str | None = Depends(parse_account_id),
 ):
     try:
         body = await request.json()
@@ -143,7 +143,7 @@ async def delete_message(
     task_id: str,
     index: int,
     request: Request,
-    bot_id: int | None = Depends(parse_bot_id),
+    bot_id: str | None = Depends(parse_account_id),
 ):
     try:
         conversation = _service(bot_id).delete_message(session_id, task_id, index)
@@ -161,7 +161,7 @@ async def replace_message_media(
     index: int,
     seg_index: int,
     request: Request,
-    bot_id: int | None = Depends(parse_bot_id),
+    bot_id: str | None = Depends(parse_account_id),
 ):
     """替换某条消息里的第 ``seg_index`` 张图（请求体直接是图片字节）。
 
@@ -189,7 +189,7 @@ async def remove_message_media(
     index: int,
     seg_index: int,
     request: Request,
-    bot_id: int | None = Depends(parse_bot_id),
+    bot_id: str | None = Depends(parse_account_id),
 ):
     """移除某条消息里的第 ``seg_index`` 张图（引用消失后那张本地图才能删）。"""
     try:
@@ -206,7 +206,7 @@ async def delete_conversation(
     session_id: str,
     task_id: str,
     request: Request,
-    bot_id: int | None = Depends(parse_bot_id),
+    bot_id: str | None = Depends(parse_account_id),
 ):
     try:
         outcome = _service(bot_id).delete_conversation(session_id, task_id)
@@ -225,7 +225,7 @@ async def delete_conversation(
 async def delete_session(
     session_id: str,
     request: Request,
-    bot_id: int | None = Depends(parse_bot_id),
+    bot_id: str | None = Depends(parse_account_id),
 ):
     try:
         deleted = _service(bot_id).delete_session(session_id)
@@ -242,7 +242,7 @@ async def delete_session(
 async def export_session(
     session_id: str,
     request: Request,
-    bot_id: int | None = Depends(parse_bot_id),
+    bot_id: str | None = Depends(parse_account_id),
     with_media: bool = Query(True, description="是否把图片一起打进 zip（默认打）"),
 ):
     """导出会话：默认返回**含图片的 zip 备份包**（``session.json`` + ``media/``）。
@@ -281,7 +281,7 @@ async def export_session(
 
 
 @router.post("/restore-bundle")
-async def restore_bundle(request: Request, bot_id: int | None = Depends(parse_bot_id)):
+async def restore_bundle(request: Request, bot_id: str | None = Depends(parse_account_id)):
     """从 zip 备份包恢复会话（图片先落盘，再导入历史，指向保持可用）。"""
     try:
         blob = await request.body()
@@ -302,7 +302,7 @@ async def restore_bundle(request: Request, bot_id: int | None = Depends(parse_bo
 
 
 @router.post("/bulk-delete")
-async def bulk_delete_sessions(request: Request, bot_id: int | None = Depends(parse_bot_id)):
+async def bulk_delete_sessions(request: Request, bot_id: str | None = Depends(parse_account_id)):
     try:
         body = await request.json()
     except Exception:
@@ -329,7 +329,7 @@ async def bulk_delete_sessions(request: Request, bot_id: int | None = Depends(pa
 
 
 @router.post("/restore")
-async def restore_sessions(request: Request, bot_id: int | None = Depends(parse_bot_id)):
+async def restore_sessions(request: Request, bot_id: str | None = Depends(parse_account_id)):
     try:
         body = await request.json()
     except Exception:
@@ -348,7 +348,7 @@ async def export_conversation(
     session_id: str,
     task_id: str,
     request: Request,
-    bot_id: int | None = Depends(parse_bot_id),
+    bot_id: str | None = Depends(parse_account_id),
     format: str = Query(default="text", pattern="^(text|json)$"),
 ):
     try:

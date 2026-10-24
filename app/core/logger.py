@@ -254,6 +254,32 @@ class UserLogFilter(logging.Filter):
 
 _user_log_filter = UserLogFilter()
 
+# ==================== 账号展示名解析 ====================
+# 日志前缀统一走 ``account_label()``：传进来的是账号 **id**（用户设定的唯一凭据，
+# 也可能是 None=全局），打出去的是**账号名**。id 只用于判断，不该出现在用户读的日志里。
+# 映射由 ConfigService 在加载/保存账号时写入（见 set_account_labels）。
+_account_labels: dict[str, str] = {}
+
+
+def set_account_labels(mapping: dict) -> None:
+    """更新 id → 展示名映射（ConfigService 在账号配置变更后调用）。"""
+    _account_labels.clear()
+    for key, value in (mapping or {}).items():
+        if key is None:
+            continue
+        name = str(value or "").strip()
+        if name:
+            _account_labels[str(key)] = name
+
+
+def account_label(account_id, fallback: str = "全局") -> str:
+    """把账号 id 换成日志里该显示的账号名；查不到就退回 id 本身。"""
+    if account_id is None or account_id == "":
+        return fallback
+    key = str(account_id)
+    return _account_labels.get(key) or key
+
+
 # 控制台是否打印原始日志；由 WebUI 配置 show_raw_logs 驱动
 _console_show_raw = False
 

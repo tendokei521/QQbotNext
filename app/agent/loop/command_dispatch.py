@@ -17,6 +17,8 @@ export / exit / stop / schedule / proactive / memory …）、`_send_help`（合
 
 from __future__ import annotations
 
+from app.core.logger import account_label
+
 import time
 from typing import Any
 
@@ -110,7 +112,7 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
                 try:
                     memory.on_session_reset(session_id, user_id)
                 except Exception as e:
-                    logger.add_info(f"#{getattr(module, 'bot_id', '?')}").debug(
+                    logger.add_info(account_label(getattr(module, 'bot_id', '?'))).debug(
                         f"[Memory] 会话重置钩子失败（已忽略）: {e}"
                     )
             await send(f"已开启新对话「{created['title']}」(task: {created['task_id']})")
@@ -221,7 +223,7 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
             try:
                 await run_stage(module, "session_reset", None)
             except Exception as e:  # noqa: BLE001 —— 重置通知失败不该阻断退出
-                logger.add_info(f"#{getattr(module, 'bot_id', '?')}").debug(
+                logger.add_info(account_label(getattr(module, 'bot_id', '?'))).debug(
                     f"[LLM] 会话重置通知失败（已忽略）: {e}"
                 )
         if session:
@@ -240,7 +242,7 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
             try:
                 memory.on_session_reset(session_id, user_id)
             except Exception as e:
-                logger.add_info(f"#{getattr(module, 'bot_id', '?')}").debug(
+                logger.add_info(account_label(getattr(module, 'bot_id', '?'))).debug(
                     f"[Memory] 会话重置钩子失败（已忽略）: {e}"
                 )
         if session:
@@ -261,7 +263,7 @@ async def _send_help(module, event, bot, *, is_private, group_id, user_id, send)
     合并转发把"说明 + 每个分组"拆成独立节点，长指令表在 QQ 里可展开阅读，
     不会像单条长文本那样被折叠成"[合并转发]"或被截断。
     """
-    log = logger.add_info(f"#{getattr(module, 'bot_id', '?')}")
+    log = logger.add_info(account_label(getattr(module, 'bot_id', '?')))
     available = _availability(module)
     self_id = getattr(event, "self_id", None) or getattr(module, "bot_id", None)
     nodes = build_help_nodes(uin=self_id, available=available)
@@ -291,7 +293,7 @@ def _availability(module) -> dict:
         try:
             memory_on = bool(memory.enabled())
         except Exception as e:  # noqa: BLE001 —— 帮助渲染不能因为探测失败而中断
-            logger.add_info(f"#{getattr(module, 'bot_id', '?')}").debug(
+            logger.add_info(account_label(getattr(module, 'bot_id', '?'))).debug(
                 f"[#llm help] 记忆启用状态探测失败（按未启用展示）: {e}"
             )
     return {
