@@ -9,9 +9,38 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from app.webui.api.deps import get_config_service
+from app.agent.config import AGENT_CONFIG_MODULE
+from app.plugin.authority import declares_single_service
+from app.webui.api.deps import get_config_service, get_module_registry
 
 router = APIRouter(tags=["webui"])
+
+
+class _VirtualAgentDeclaration:
+    """框架级虚拟模块（`agent`）的能力声明。
+
+    它没有真实 `BaseModule` 实例（走 `_AgentProxy`/`_AgentGate` 代理到运行时），
+    但它恒支持单一服务，故用一个最小声明体回答「是否声明支持」。
+    """
+
+    module_name = AGENT_CONFIG_MODULE
+    supports_single_service = True
+
+
+_VIRTUAL_MODULES = {AGENT_CONFIG_MODULE: _VirtualAgentDeclaration()}
+
+
+def _resolve_declaration(registry, module_name: str):
+    """取能回答「是否声明支持单一服务」的对象；取不到（模块未加载）返回 None。"""
+    virtual = _VIRTUAL_MODULES.get(module_name)
+    if virtual is not None:
+        return virtual
+    if registry is None:
+        return None
+    try:
+        return registry.get(module_name)
+    except Exception:  # noqa: BLE001 —— 配置写入不该因为注册表异常而失败
+        return None
 
 
 def _ok(message: str, **extra):
@@ -104,15 +133,37 @@ async def get_single_service(cfg_service=Depends(get_config_service)):
 
 
 @router.post("/webui/single-service")
-async def save_single_service(request: Request, cfg_service=Depends(get_config_service)):
+async def save_single_service(
+    request: Request,
+    cfg_service=Depends(get_config_service),
+    registry=Depends(get_module_registry),
+):
+    """保存单一服务开关（整值替换）。
+
+    单一服务是**声明制**能力：只有 `BaseModule.supports_single_service = True` 的模块
+    才接受写入，其余模块被丢弃并在 `rejected` 里回报（前端据此提示）。已加载但未声明
+    的模块若历史配置里残留 true，会在本次保存时被清掉；未加载（注册表里查不到）的模块
+    原样保留，避免热重载/加载失败时误删配置。
+    """
     try:
         data = await request.json()
     except Exception:
         data = {}
+    incoming = (data or {}).get("single_service", {}) or {}
+
     config = cfg_service.get_webui_config()
-    config["single_service"] = data.get("single_service", {})
+    accepted: dict[str, bool] = {}
+    rejected: list[str] = []
+    for module_name, enabled in incoming.items():
+        declaration = _resolve_declaration(registry, module_name)
+        if declaration is None or declares_single_service(declaration):
+            accepted[str(module_name)] = bool(enabled)
+        else:
+            rejected.append(str(module_name))
+
+    config["single_service"] = accepted
     await cfg_service.save_webui_config(config)
-    return _ok("单一服务配置已保存")
+    return _ok("单一服务配置已保存", rejected=rejected)
 
 
 @router.get("/webui/multi-group")
