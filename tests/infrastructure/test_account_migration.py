@@ -14,7 +14,6 @@ from app.infrastructure.persistence.account_migration import (
     suggest_account_id,
 )
 
-
 # ==================== id 规则 ====================
 
 @pytest.mark.parametrize("raw", ["main", "bot1", "a", "A_b-9", "x" * 32, "123"])

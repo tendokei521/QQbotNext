@@ -19,7 +19,8 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from app.core.logger import set_account_labels
 from app.infrastructure.config.ws_url import (
