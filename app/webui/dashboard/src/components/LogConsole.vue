@@ -120,7 +120,7 @@ onUnmounted(() => {
           density="compact"
           variant="outlined"
           hide-details
-          placeholder="过滤日志…（如 #0 / 关键字）"
+          placeholder="过滤日志…（如 账号名 / 关键字）"
           class="filter-input"
           clearable
           @update:model-value="onFilterInput"

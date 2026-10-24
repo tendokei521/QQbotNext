@@ -309,7 +309,7 @@ onUnmounted(() => {
               <div>
                 <div class="info-label">当前 QQ</div>
                 <div class="info-value">
-                  <template v-if="resolvedBotId(b)">Bot {{ resolvedBotId(b) }}</template>
+                  <template v-if="resolvedBotId(b)">{{ resolvedBotId(b) }}</template>
                   <template v-else>未连接</template>
                   <span v-if="!b.bot_id && resolvedBotId(b)" class="info-hint">上次连接</span>
                 </div>
