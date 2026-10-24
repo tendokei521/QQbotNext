@@ -20,17 +20,12 @@ const STATUS_TEXT: Record<BotStatus, string> = {
 const statusColor = (s: BotStatus) =>
   s === 'connected' ? 'success' : s === 'connecting' || s === 'reconnecting' ? 'warning' : 'error'
 
-/** 连接方向选项：正向 = 框架连出去；反向 = 框架监听、OneBot 实现连进来 */
-const MODE_ITEMS: { title: string; value: BotConnMode }[] = [
-  { title: '正向 WebSocket（连出去）', value: 'forward' },
-  { title: '反向 WebSocket（本机监听）', value: 'reverse' },
-]
-
 interface Draft {
   ws_url: string
   access_token: string
   owner_id: string
   auto_connect: boolean
+  /** 连接方向在「添加账号」时选定，卡片上只读展示、不提供切换 */
   conn_mode: BotConnMode
 }
 
@@ -56,7 +51,7 @@ function statusText(b: { status: BotStatus; conn_mode?: BotConnMode; listening?:
   return STATUS_TEXT[b.status] ?? b.status
 }
 
-/** 草稿里的连接方向（改完立即影响按钮文案，不必等保存/重连） */
+/** 连接方向自创建时固定，卡片据此调整文案（反向是「监听」，正向是「连接」） */
 function isReverseDraft(index: number): boolean {
   return draftOf(index).conn_mode === 'reverse'
 }
@@ -200,7 +195,7 @@ onUnmounted(() => {
     <div class="app-page-header">
       <div>
         <h1 class="app-page-title">账号管理</h1>
-        <div class="app-page-subtitle">WebSocket 连接配置与账号状态</div>
+        <div class="app-page-subtitle">添加并管理要接入的 QQ 账号</div>
       </div>
       <div class="d-flex gap-2">
         <v-btn variant="tonal" prepend-icon="mdi-refresh" :loading="loadingCards" @click="loadCards">刷新</v-btn>
@@ -218,7 +213,7 @@ onUnmounted(() => {
     </v-row>
 
     <v-card v-else-if="bots.bots.length === 0" variant="outlined">
-      <EmptyState icon="mdi-robot-off-outline" title="暂无账号配置" description="点击「新增账号」选择连接方式后创建">
+      <EmptyState icon="mdi-robot-off-outline" title="还没有账号" description="先添加一个 QQ 账号，再把它连起来">
         <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="addBot">新增账号</v-btn>
       </EmptyState>
     </v-card>
@@ -252,15 +247,6 @@ onUnmounted(() => {
           </v-card-item>
 
           <v-card-text>
-            <v-select
-              :model-value="draftOf(b.index).conn_mode"
-              :items="MODE_ITEMS"
-              label="连接方式"
-              density="comfortable"
-              hide-details
-              class="mb-3"
-              @update:model-value="(v: BotConnMode) => { draftOf(b.index).conn_mode = v === 'reverse' ? 'reverse' : 'forward'; scheduleSave() }"
-            />
             <v-text-field
               :model-value="draftOf(b.index).ws_url"
               :label="draftOf(b.index).conn_mode === 'reverse' ? '反向监听地址' : 'WebSocket 地址'"

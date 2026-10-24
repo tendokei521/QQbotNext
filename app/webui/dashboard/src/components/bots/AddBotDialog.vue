@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { useBotsStore, type BotConnMode } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
@@ -7,9 +7,13 @@ import { errorMessage } from '@/api/http'
 /**
  * 新增账号：先选连接方式，再创建。
  *
+ * 文案一律用大白话：用户脑子里想的是「让我的机器人接进来」还是「我去连它」，
+ * 不是「正向/反向 WebSocket」「OneBot 实现」这些词。产品名（NapCat / Lagrange）
+ * 保留，因为那正是用户手上那个东西的名字。
+ *
  * 为什么不直接插一张空卡片：空卡片的地址是空的，用户点「连接」才看到「连接失败」，
- * 而且反向账号还需要用户自己知道要填端口和 `/onebot/v11/ws` 路径。先把两条路摆出来
- * 选一次，创建时后端按模式给好默认地址，新卡片一出生就能用。
+ * 而且等待对方连进来的账号还需要用户自己知道要填端口和 `/onebot/v11/ws` 路径。
+ * 先把两条路摆出来选一次，创建时后端按模式给好默认地址，新卡片一出生就能用。
  */
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{
@@ -33,17 +37,17 @@ const OPTIONS: ModeOption[] = [
   {
     value: 'reverse',
     icon: 'mdi-lan-connect',
-    title: '反向 WebSocket',
-    desc: '本框架监听端口，由 OneBot 实现连进来',
-    tips: ['适合 NapCat / Lagrange / LLOneBot', '框架与 OneBot 实现分开部署时也能用'],
+    title: '让机器人程序连过来',
+    desc: '本程序开一个入口，等 QQ 机器人程序连进来。',
+    tips: ['NapCat / Lagrange 等程序都支持', '两个程序装在同一台电脑上时最省事'],
     recommended: true,
   },
   {
     value: 'forward',
     icon: 'mdi-lan',
-    title: '正向 WebSocket',
-    desc: '框架连到 OneBot 实现已开放的 ws 地址',
-    tips: ['OneBot 实现里已开好 ws 服务端', '地址形如 ws://127.0.0.1:3001/'],
+    title: '本程序主动连过去',
+    desc: '你提供 QQ 机器人程序的地址，本程序自己连上去。',
+    tips: ['需要先在对方程序里打开 WebSocket 服务', '地址一般长这样：ws://127.0.0.1:3001/'],
   },
 ]
 
@@ -54,8 +58,6 @@ watch(() => props.modelValue, (open) => {
   // 每次打开都回到默认推荐项：上次的选择没有记忆价值
   if (open) selected.value = 'reverse'
 })
-
-const current = computed(() => OPTIONS.find((o) => o.value === selected.value) ?? OPTIONS[0])
 
 function close() {
   if (creating.value) return
@@ -68,7 +70,7 @@ async function create() {
   try {
     const result = await bots.addBotConfig({ conn_mode: selected.value })
     const index = Number(result?.index ?? -1)
-    notify.push(index >= 0 ? `已添加账号 #${index}` : '已添加账号', 'success')
+    notify.push('账号已添加', 'success')
     emit('update:modelValue', false)
     if (index >= 0) emit('created', index)
   } catch (err) {
@@ -88,7 +90,7 @@ async function create() {
         <v-btn variant="text" icon="mdi-close" size="small" :disabled="creating" @click="close" />
       </v-card-title>
       <v-card-text>
-        <div class="text-body-2 mb-3">选择连接方式，创建后仍可在账号卡片上修改。</div>
+        <div class="text-body-2 mb-4">你想怎么把它接进来？选一种就行。</div>
         <v-row dense>
           <v-col v-for="opt in OPTIONS" :key="opt.value" cols="12" sm="6">
             <v-card
@@ -122,14 +124,17 @@ async function create() {
           density="compact"
           class="mt-4"
         >
-          创建后把卡片上的「反向监听地址」填进 OneBot 实现的反向 WebSocket 设置里，连接即建立。
+          创建后，把账号卡片上显示的地址原样填进 NapCat / Lagrange 的「反向 WebSocket」里，它就会连进来。
         </v-alert>
+        <div class="text-caption mt-3" style="opacity: .7">
+          连接方式创建后不能再改，选错了删掉重加即可。
+        </div>
       </v-card-text>
       <v-card-actions>
         <v-spacer />
         <v-btn variant="text" :disabled="creating" @click="close">取消</v-btn>
         <v-btn color="primary" variant="tonal" :loading="creating" prepend-icon="mdi-check" @click="create">
-          创建{{ current?.title ? `「${current.title}」账号` : '账号' }}
+          创建账号
         </v-btn>
       </v-card-actions>
     </v-card>
