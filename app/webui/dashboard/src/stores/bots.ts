@@ -45,6 +45,18 @@ export interface BotConfig {
   conn_mode: BotConnMode
 }
 
+/** 新增账号的请求体：先给连接方式，地址留空则由后端按模式补默认值 */
+export interface BotAddPayload {
+  conn_mode: BotConnMode
+  ws_url?: string
+}
+
+export interface BotAddResult {
+  index: number
+  conn_mode: BotConnMode
+  ws_url: string
+}
+
 const CURRENT_BOT_KEY = 'qqbot_current_bot_index'
 
 /** 账号身份是否有效（user_id/bot_id 为 0 或空视为无账号） */
@@ -123,9 +135,9 @@ export const useBotsStore = defineStore('bots', () => {
     return unwrap(data.data)
   }
 
-  async function addBotConfig(cfg: Partial<BotConfig>) {
-    const data = await http.post('/api/bots/config/add', cfg)
-    return unwrap(data.data)
+  async function addBotConfig(payload: BotAddPayload): Promise<BotAddResult> {
+    const data = await http.post('/api/bots/config/add', payload)
+    return unwrap(data.data) as BotAddResult
   }
 
   async function deleteBotConfig(index: number) {

@@ -4,6 +4,7 @@ import { useBotsStore, resolveAccount, resolvedBotId, type BotConfig, type BotCo
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
+import AddBotDialog from '@/components/bots/AddBotDialog.vue'
 
 const bots = useBotsStore()
 const notify = useNotifyStore()
@@ -38,6 +39,7 @@ const drafts = reactive<Record<number, Draft>>({})
 const saving = ref(false)
 const loadingCards = ref(false)
 const deleteTarget = ref<number | null>(null)
+const addDialog = ref(false)
 const acting = reactive<Record<number, boolean>>({})
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -139,16 +141,15 @@ function scheduleSave() {
   }, 400)
 }
 
-async function addBot() {
-  try {
-    const result: any = await bots.addBotConfig({})
-    notify.push('已添加新账号配置', 'success')
-    await loadCards()
-    // 选中新账号
-    if (result && result.index !== undefined) bots.selectBot(result.index)
-  } catch (err) {
-    notify.push(errorMessage(err), 'error')
-  }
+/** 「添加账号」先弹选类型（正向 / 反向），选定后才创建（见 AddBotDialog） */
+function addBot() {
+  addDialog.value = true
+}
+
+/** 新账号已创建：刷新卡片并选中它，方便直接填 Token / 地址 */
+async function onBotCreated(index: number) {
+  await loadCards()
+  bots.selectBot(index)
 }
 
 async function doDelete() {
@@ -217,7 +218,7 @@ onUnmounted(() => {
     </v-row>
 
     <v-card v-else-if="bots.bots.length === 0" variant="outlined">
-      <EmptyState icon="mdi-robot-off-outline" title="暂无账号配置" description="点击「新增账号」添加第一个 WebSocket 连接">
+      <EmptyState icon="mdi-robot-off-outline" title="暂无账号配置" description="点击「新增账号」选择连接方式后创建">
         <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="addBot">新增账号</v-btn>
       </EmptyState>
     </v-card>
@@ -350,6 +351,9 @@ onUnmounted(() => {
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- 新增账号：先选连接方式（正向 / 反向），选定后才创建 -->
+    <AddBotDialog v-model="addDialog" @created="onBotCreated" />
   </div>
 </template>
 
