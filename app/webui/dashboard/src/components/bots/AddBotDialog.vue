@@ -34,27 +34,27 @@ interface ModeOption {
   recommended?: boolean
 }
 
-// 文案刻意对齐 NapCat 客户端的说法：决定性的区别是「谁建立连接」。
-// 卡片上只放短名 + 一行说明，长解释进 tooltip —— 否则一个对话框里同一件事要说三遍。
+// 名称沿用 NapCat 配置页的叫法（WS客户端 / WS服务端），括号里附 OneBot 的官方方向名，
+// 这样用户拿着别人的教程能对上号。卡片只放短名 + 一行说明，细节进 ? tooltip。
 const OPTIONS: ModeOption[] = [
   {
     value: 'reverse',
     icon: 'mdi-call-received',
-    title: '等它连进来',
-    desc: '本程序开端口，NapCat 连进来',
+    title: 'WS客户端',
+    desc: '主动连接到外部 WebSocket 服务器（reverse-ws）',
     tip:
-      '「由本程序建立」一个监听端口。创建后把账号卡片上的地址填进 NapCat 的「WebSocket 客户端」，' +
-      'NapCat 就会主动连过来。两边在同一台电脑上时最省事。',
+      '本程序在本地开一个监听端口；把账号卡片上的地址填进 NapCat 的「WebSocket 客户端」，' +
+      '它就会主动连过来（OneBot 里叫 reverse-ws）。两边在同一台电脑上时最省事。',
     recommended: true,
   },
   {
     value: 'forward',
     icon: 'mdi-call-made',
-    title: '主动连过去',
-    desc: '先开 NapCat，本程序连过去',
+    title: 'WS服务端',
+    desc: '本地监听 WebSocket 端口，客户端建立持久连接',
     tip:
-      '「由 NapCat 建立」一个 WebSocket 服务端。需要先在 NapCat 里开好服务端，' +
-      '再把它的地址（形如 ws://127.0.0.1:3001/）填进账号卡片。',
+      '先在 NapCat 里开「WebSocket 服务端」，把它的监听地址（形如 ws://127.0.0.1:3001/）' +
+      '填进账号卡片，本程序作为客户端主动连过去（OneBot 里叫 forward-ws）。',
   },
 ]
 
@@ -137,7 +137,7 @@ async function create() {
             <div class="mode-card__text">
               <div class="mode-card__title">
                 {{ opt.title }}
-                <v-chip v-if="opt.recommended" size="x-small" variant="tonal" color="primary">推荐</v-chip>
+                <span v-if="opt.recommended" class="mode-card__rec">(推荐)</span>
                 <v-tooltip :text="opt.tip" location="bottom" max-width="320">
                   <template #activator="{ props: tipProps }">
                     <v-icon
@@ -212,14 +212,11 @@ async function create() {
 <style scoped>
 /* 选择器：两个窄卡片并排，一行说明 + ? tooltip。
    选中不填充（填充块会和「推荐」chip 抢注意力），只加主色描边、浅底与右上角对勾。 */
+/* 说明是整句，两列会挤成三行；单列让每条都读得顺，两个选项也都还在一屏内。 */
 .mode-list {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-
-@media (max-width: 460px) {
-  .mode-list { grid-template-columns: 1fr; }
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .mode-card {
@@ -265,6 +262,12 @@ async function create() {
   font-size: 14px;
   font-weight: 600;
   line-height: 1.4;
+}
+
+.mode-card__rec {
+  font-size: 12px;
+  font-weight: 400;
+  color: rgb(var(--v-theme-primary));
 }
 
 .mode-card__help {

@@ -266,8 +266,6 @@ onUnmounted(() => {
               :model-value="draftOf(b.id).ws_url"
               :label="draftOf(b.id).conn_mode === 'reverse' ? '反向监听地址' : 'WebSocket 地址'"
               :placeholder="draftOf(b.id).conn_mode === 'reverse' ? 'ws://0.0.0.0:3001/onebot/v11/ws' : 'ws://127.0.0.1:3001/'"
-              :hint="draftOf(b.id).conn_mode === 'reverse' ? '在 OneBot 实现里把反向 WebSocket 指向这个地址' : ''"
-              :persistent-hint="draftOf(b.id).conn_mode === 'reverse'"
               density="comfortable"
               hide-details="auto"
               class="mb-3"
