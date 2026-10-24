@@ -34,7 +34,7 @@ class ModuleRegistry:
     ) -> None:
         #: 业务插件代码目录（默认 `app/plugins`，随仓库走）
         self.plugins_dir = Path(plugins_dir)
-        #: 外部 zip 插件安装目录（`module/plugins`，用户安装、不进仓库）
+        #: 外部 zip 插件安装目录（`data/module/plugins`，用户安装、不进仓库）
         self.zip_plugins_dir = Path(zip_plugins_dir) if zip_plugins_dir else None
         self.config_service = config_service
         self.services = services
@@ -175,7 +175,7 @@ class ModuleRegistry:
         """解析模块目录路径。
 
         优先本地插件目录（默认 `app/plugins/<name>`），其次外部 zip 安装目录
-        （`module/plugins/<name>`）。source 可强制指定 local 或 zip。
+        （`data/module/plugins/<name>`）。source 可强制指定 local 或 zip。
         """
         parts = module_name.split(".")
         if source == "zip" and self.zip_plugins_dir is not None:
@@ -364,7 +364,7 @@ class ModuleRegistry:
 
     # ---------- zip 安装 / 软卸载 / 恢复安装 ----------
     async def install_from_zip(self, zip_path: str | Path) -> dict:
-        """安装 zip 插件到 zip_plugins_dir（默认 module/plugins/<name>），然后加载全局实例。
+        """安装 zip 插件到 zip_plugins_dir（默认 data/module/plugins/<name>），然后加载全局实例。
 
         不删除已有文件：若目标已存在且处于软卸载状态，则只清除卸载记录并重新加载。
         """

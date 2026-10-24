@@ -44,9 +44,8 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-# `app*` 覆盖 app/plugins/<name>（13 个业务插件）；`module*` 保留是因为
-# module/plugins 仍是一个包（外部 zip 插件安装位置）。
-include = ["app*", "module*"]
+# 只发布 `app*`：业务插件在 app/plugins/<name>，插件运行时数据（data/module/）不是包。
+include = ["app*"]
 
 [tool.setuptools.package-data]
 # OneBot 工具清单是数据文件，必须随包一起分发（v3：已搬进 llm_tools_extra 模块）
@@ -70,7 +69,7 @@ exclude = [
     "__pycache__",
     "deprecated",       # 旧版客户端存档，不参与检查
     "dashboard",        # 前端（Vue/Vite），非 Python
-    "module/plugins",   # 外部安装的 zip 插件
+    "data",             # 运行时数据（含 data/module/ 下外部安装的 zip 插件）
     "scripts/*_ablation.py",  # 一次性实验脚本，风格不统一
 ]
 
@@ -95,7 +94,7 @@ ignore = [
 
 [tool.coverage.run]
 # 覆盖率只统计业务代码，排除测试自身、脚本与存档
-source = ["app", "module"]
+source = ["app"]
 omit = [
     "tests/*",
     "scripts/*",

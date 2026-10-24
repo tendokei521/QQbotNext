@@ -1,6 +1,6 @@
 """防撤回持久化消息库（吸收自 astrbot OnebotPrerequisite message_db）。
 
-- 消息事件到达时异步落盘（JSON，module/data/notice_recall_back/message_db_<bot>.json）；
+- 消息事件到达时异步落盘（JSON，data/module/data/notice_recall_back/message_db_<bot>.json）；
 - 撤回时先查内存缓存、未命中查磁盘——重启后仍能恢复被撤回消息；
 - 支持按总量/时长自动清理（db_max_messages / db_retention_minutes）。
 """

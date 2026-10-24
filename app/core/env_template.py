@@ -72,7 +72,7 @@ ENV_SECTIONS: tuple[tuple[str, tuple[EnvKey, ...]], ...] = (
     )),
     ("插件 / 模块目录", (
         EnvKey(
-            "MODULE_DIR", "module",
+            "MODULE_DIR", "data/module",
             "插件运行时数据根目录（configs / data / plugins(zip) / uninstalled_modules.json）",
         ),
         EnvKey(

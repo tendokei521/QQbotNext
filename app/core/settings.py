@@ -47,7 +47,9 @@ class Settings(BaseSettings):
 
     # 插件**运行时数据**根目录（configs / data / plugins(zip) / uninstalled_modules.json）。
     # 业务插件的**代码**不在这里，见下面的 `plugins_dir`（默认 app/plugins）。
-    module_dir: Path = Field(default=ROOT_DIR / "module")
+    # 放在 data/ 下而不是仓库根的 module/：仓库根只留代码与入口，运行时产物统一进 data/。
+    # 旧布局（仓库根 module/）由 `app/infrastructure/fs/migrate.py` 在启动时搬过来。
+    module_dir: Path = Field(default=ROOT_DIR / "data" / "module")
 
     #: 业务插件代码目录。默认随仓库走（`app/plugins`）；测试与特殊部署可覆盖。
     plugins_dir: Path = Field(default=ROOT_DIR / "app" / "plugins")
@@ -59,17 +61,17 @@ class Settings(BaseSettings):
 
     @property
     def uninstalled_modules_file(self) -> Path:
-        """软卸载模块状态文件（module/uninstalled_modules.json）。"""
+        """软卸载模块状态文件（data/module/uninstalled_modules.json）。"""
         return self.module_dir / "uninstalled_modules.json"
 
     @property
     def module_configs_dir(self) -> Path:
-        """模块配置目录（module/configs）。"""
+        """模块配置目录（data/module/configs）。"""
         return self.module_dir / "configs"
 
     @property
     def module_data_dir(self) -> Path:
-        """模块数据目录（module/data）。"""
+        """模块数据目录（data/module/data）。"""
         return self.module_dir / "data"
 
     @property

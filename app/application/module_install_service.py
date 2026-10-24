@@ -1,7 +1,7 @@
 """插件软卸载状态服务。
 
 “卸载”只写配置文件，不删除插件目录/配置/数据，避免误删无备份。
-配置文件名：module/uninstalled_modules.json。
+配置文件名：data/module/uninstalled_modules.json。
 """
 
 from __future__ import annotations

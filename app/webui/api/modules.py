@@ -372,7 +372,7 @@ async def reinstall_module(
 
 @router.post("/modules/install-zip")
 async def install_module_zip(request: Request, file: UploadFile = File(...), registry=Depends(get_module_registry)):
-    """上传 zip 插件并安装到 module/plugins。"""
+    """上传 zip 插件并安装到 data/module/plugins。"""
 
     registry = registry
     fd, tmp_path = tempfile.mkstemp(suffix=".zip")

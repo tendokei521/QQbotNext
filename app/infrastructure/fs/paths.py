@@ -27,8 +27,13 @@ logger = get_logger("LLM")
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-# 旧模块数据目录（迁移源；llm_chat_v2 已删，幂等跳过）
-_LEGACY_DATA_DIR = os.path.join(_PROJECT_ROOT, "module", "modules", "llm_chat_v2")
+# 旧模块数据目录（迁移源；llm_chat_v2 已删，幂等跳过）。
+# 两个候选：仓库根 `module/`（老布局）与 `data/module/`（现在的位置）——
+# 前者可能已被启动迁移整体搬进后者，所以要两个都看，不依赖两者谁先跑。
+_LEGACY_DATA_DIRS = (
+    os.path.join(_PROJECT_ROOT, "module", "modules", "llm_chat_v2"),
+    os.path.join(_PROJECT_ROOT, "data", "module", "modules", "llm_chat_v2"),
+)
 
 # bot_id 目录名白名单（数字/字母/下划线/连字符），防路径穿越
 _BOT_ID_RE = re.compile(r"^[0-9a-zA-Z_\-]+$")
@@ -72,29 +77,30 @@ def migrate_legacy_data() -> None:
     os.makedirs(dst, exist_ok=True)
     moved = []
 
-    # history/ 目录
-    src_history = os.path.join(_LEGACY_DATA_DIR, "history")
-    dst_history = os.path.join(dst, "history")
-    if os.path.isdir(src_history) and not os.path.isdir(dst_history):
-        shutil.move(src_history, dst_history)
-        moved.append("history")
+    for legacy_dir in _LEGACY_DATA_DIRS:
+        # history/ 目录
+        src_history = os.path.join(legacy_dir, "history")
+        dst_history = os.path.join(dst, "history")
+        if os.path.isdir(src_history) and not os.path.isdir(dst_history):
+            shutil.move(src_history, dst_history)
+            moved.append("history")
 
-    # tasks_data_*.json
-    if os.path.isdir(_LEGACY_DATA_DIR):
-        for name in os.listdir(_LEGACY_DATA_DIR):
-            if name.startswith("tasks_data_") and name.endswith(".json"):
-                src = os.path.join(_LEGACY_DATA_DIR, name)
-                target = os.path.join(dst, name)
-                if not os.path.exists(target):
-                    shutil.move(src, target)
-                    moved.append(name)
+        # tasks_data_*.json
+        if os.path.isdir(legacy_dir):
+            for name in os.listdir(legacy_dir):
+                if name.startswith("tasks_data_") and name.endswith(".json"):
+                    src = os.path.join(legacy_dir, name)
+                    target = os.path.join(dst, name)
+                    if not os.path.exists(target):
+                        shutil.move(src, target)
+                        moved.append(name)
 
-    # proactive_data.json
-    src_proactive = os.path.join(_LEGACY_DATA_DIR, "proactive_data.json")
-    dst_proactive = os.path.join(dst, "proactive_data.json")
-    if os.path.exists(src_proactive) and not os.path.exists(dst_proactive):
-        shutil.move(src_proactive, dst_proactive)
-        moved.append("proactive_data.json")
+        # proactive_data.json
+        src_proactive = os.path.join(legacy_dir, "proactive_data.json")
+        dst_proactive = os.path.join(dst, "proactive_data.json")
+        if os.path.exists(src_proactive) and not os.path.exists(dst_proactive):
+            shutil.move(src_proactive, dst_proactive)
+            moved.append("proactive_data.json")
 
     if moved:
         logger.info(f"已迁移数据文件到 data/llm: {', '.join(moved)}")

@@ -266,14 +266,14 @@ def build_container(settings: Settings | None = None) -> Container:
     )
     container.register_factory(ServiceAccess, lambda: services)
 
-    # 插件软卸载状态服务（唯一真相：module/uninstalled_modules.json）
+    # 插件软卸载状态服务（唯一真相：data/module/uninstalled_modules.json）
     install_service = ModuleInstallService(settings.uninstalled_modules_file)
     container.register_factory(ModuleInstallService, lambda: install_service)
 
     # 插件系统
     registry = ModuleRegistry(
         plugins_dir=settings.plugins_dir,  # app/plugins（随仓库走）
-        zip_plugins_dir=settings.zip_plugins_dir,  # module/plugins（用户 zip 安装）
+        zip_plugins_dir=settings.zip_plugins_dir,  # data/module/plugins（用户 zip 安装）
         config_service=config_service,
         services=services,
         install_service=install_service,
@@ -399,6 +399,12 @@ async def run(settings: Settings | None = None) -> None:
     )
 
     token_state = ensure_env_file(settings)
+
+    # 把旧布局（仓库根 `module/`）的插件运行时数据搬进 `data/module/`（幂等）。
+    # 必须早于 build_container：注册表 / 软卸载服务都按 settings.module_dir 取路径。
+    from app.infrastructure.fs.migrate import migrate_legacy_module_dir
+
+    migrate_legacy_module_dir(settings.module_dir, settings.project_root)
 
     _container = build_container(settings)
     set_active(_container)

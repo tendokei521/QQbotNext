@@ -2,8 +2,8 @@
 
 - get_modules():     获取已加载模块对象列表
 - get_features():    获取能力注册表状态
-- get_config_path(): module/configs/<name>/（模块配置目录）
-- get_data_path():   module/data/<name>/（模块自定义持久化数据目录，自动创建）
+- get_config_path(): data/module/configs/<name>/（模块配置目录）
+- get_data_path():   data/module/data/<name>/（模块自定义持久化数据目录，自动创建）
 
 ## 为什么这里用 `get_active()`
 
@@ -44,7 +44,7 @@ def get_features(bot_id: Any = None) -> list[dict]:
 
 
 def get_config_path(module_name: str, create: bool = True) -> str:
-    """获取模块配置目录（module/configs/<name>/）。"""
+    """获取模块配置目录（data/module/configs/<name>/）。"""
     from app.core.container import get_active
     from app.core.settings import Settings
 
@@ -56,7 +56,7 @@ def get_config_path(module_name: str, create: bool = True) -> str:
 
 
 def get_data_path(module_name: str, create: bool = True) -> str:
-    """获取模块数据目录（module/data/<name>/），供插件持久化自定义数据。"""
+    """获取模块数据目录（data/module/data/<name>/），供插件持久化自定义数据。"""
     from app.core.container import get_active
     from app.core.settings import Settings
 

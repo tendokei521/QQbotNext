@@ -2,7 +2,7 @@
 
 - SQLite 落盘 + 内存缓存 + 变更通知（替代原 watchdog 文件监听）；
 - 首次启动自动从旧 JSON 文件（webserver/webconfig.json、webui/webui_config.json、
-  module/configs/*/config.json、module/configs/*/authority.json）迁移。
+  data/module/configs/*/config.json、data/module/configs/*/authority.json）迁移。
 """
 
 from __future__ import annotations
@@ -144,9 +144,12 @@ class ConfigService(AccountStoreMixin):
             except Exception as e:
                 self.log.error(f"[Config] 迁移 webui 配置失败: {e}")
 
-        # 3. 模块配置 / 权限（module/configs/<name>/{config.json,authority.json}）
-        configs_dir = self.root / "module" / "configs"
-        if configs_dir.exists():
+        # 3. 模块配置 / 权限（<module_dir>/configs/<name>/{config.json,authority.json}）
+        #    两个候选：`data/module/configs`（现在的位置）与 `module/configs`（老布局，
+        #    启动迁移会把前者搬过来，但 DB 导入早于/晚于迁移都不该丢数据）。
+        for configs_dir in (self.root / "data" / "module" / "configs", self.root / "module" / "configs"):
+            if not configs_dir.exists():
+                continue
             for cfg_dir in sorted(configs_dir.iterdir()):
                 if not cfg_dir.is_dir() or cfg_dir.name.startswith(("_", ".")):
                     continue
