@@ -180,9 +180,17 @@ class _FakeModule:
         self.config = _FakeConfig({"schedule_enable": True})
 
 
+
+
+def make_sched(module, tmp_path):
+    """构造 + 上线：装配本身不武装计时器，必须 start() 才算「账号已连上」。"""
+    sched = TaskScheduler(module, data_dir=str(tmp_path))
+    sched.start()
+    return sched
+
 async def test_scheduler_schedule_and_trigger(tmp_path):
     module = _FakeModule()
-    sched = TaskScheduler(module, data_dir=str(tmp_path))
+    sched = make_sched(module, tmp_path)
     try:
         entry = await sched.schedule("private_100", {"trigger": "明天早上8点", "content": "该起床啦"})
         assert entry is not None
@@ -201,10 +209,10 @@ async def test_scheduler_schedule_and_trigger(tmp_path):
 
 async def test_scheduler_fire_uses_llm_reply(tmp_path, monkeypatch):
     """触发时应做一次带系统提示词的 LLM 请求：回复来自 LLM、状态标签被剥离。"""
-    from app.plugins.llm_schedule import scheduler as ts_mod
+    from app.plugins.llm_schedule import scheduler as ts_mod  # noqa: F401 - 保留以固定导入路径
 
     module = _FakeModule()
-    sched = ts_mod.TaskScheduler(module, data_dir=str(tmp_path))
+    sched = make_sched(module, tmp_path)
 
     class _FakeResp:
         ok = True
@@ -230,7 +238,7 @@ async def test_scheduler_fire_uses_llm_reply(tmp_path, monkeypatch):
 
 async def test_scheduler_repeat_advance(tmp_path):
     module = _FakeModule()
-    sched = TaskScheduler(module, data_dir=str(tmp_path))
+    sched = make_sched(module, tmp_path)
     try:
         entry = await sched.schedule("group_500", {"trigger": "每天20:00", "content": "打卡"})
         assert entry.repeat == "daily"
@@ -249,7 +257,7 @@ async def test_scheduler_repeat_advance(tmp_path):
 
 async def test_scheduler_cancel(tmp_path):
     module = _FakeModule()
-    sched = TaskScheduler(module, data_dir=str(tmp_path))
+    sched = make_sched(module, tmp_path)
     try:
         entry = await sched.schedule("private_100", {"trigger": "明天早上8点", "content": "提醒"})
         assert sched.cancel(entry.id)
@@ -262,7 +270,7 @@ async def test_scheduler_cancel(tmp_path):
 async def test_scheduler_session_type_derived_from_id(tmp_path):
     """回归：由 session_id 推导私聊/群聊，杜绝 is_group/is_private 传反导致任务发错目标。"""
     module = _FakeModule()
-    sched = TaskScheduler(module, data_dir=str(tmp_path))
+    sched = make_sched(module, tmp_path)
     try:
         priv = await sched.schedule("private_100", {"trigger": "明天早上8点", "content": "私聊提醒"})
         grp = await sched.schedule("group_500", {"trigger": "明天早上9点", "content": "群聊提醒"})
@@ -280,14 +288,14 @@ async def test_scheduler_session_type_derived_from_id(tmp_path):
 
 async def test_scheduler_persistence(tmp_path):
     module = _FakeModule()
-    sched = TaskScheduler(module, data_dir=str(tmp_path))
+    sched = make_sched(module, tmp_path)
     try:
         await sched.schedule("private_100", {"trigger": "明天早上8点", "content": "持久化提醒"})
     finally:
         sched.stop()
 
     # 重启后恢复
-    sched2 = TaskScheduler(module, data_dir=str(tmp_path))
+    sched2 = make_sched(module, tmp_path)
     try:
         rows = sched2.status()
         assert len(rows) == 1
@@ -313,7 +321,7 @@ async def test_scheduler_heals_wrong_is_group(tmp_path):
     with open(data_file, "w", encoding="utf-8") as f:
         json.dump({"tasks": [bad.to_dict()]}, f, ensure_ascii=False)
 
-    sched = TaskScheduler(module, data_dir=str(tmp_path))
+    sched = make_sched(module, tmp_path)
     try:
         assert "abcd1234" in sched._tasks
         e = sched._tasks["abcd1234"]
@@ -342,7 +350,7 @@ async def test_scheduler_restore_removes_expired_once(tmp_path):
     with open(data_file, "w", encoding="utf-8") as f:
         json.dump({"tasks": [e.to_dict() for e in entries]}, f, ensure_ascii=False)
 
-    sched = TaskScheduler(module, data_dir=str(tmp_path))
+    sched = make_sched(module, tmp_path)
     try:
         assert "expired01" not in sched._tasks, "过期一次性任务应被移除"
         assert "daily01" in sched._tasks, "周期任务应保留"
@@ -354,7 +362,7 @@ async def test_scheduler_restore_removes_expired_once(tmp_path):
 
 async def test_scheduler_bad_trigger(tmp_path):
     module = _FakeModule()
-    sched = TaskScheduler(module, data_dir=str(tmp_path))
+    sched = make_sched(module, tmp_path)
     try:
         entry = await sched.schedule("private_100", {"trigger": "随便什么", "content": "提醒"})
         assert entry is None
@@ -365,7 +373,7 @@ async def test_scheduler_bad_trigger(tmp_path):
 async def test_scheduler_disabled(tmp_path):
     module = _FakeModule()
     module.config._cfg["schedule_enable"] = False
-    sched = TaskScheduler(module, data_dir=str(tmp_path))
+    sched = make_sched(module, tmp_path)
     try:
         entry = await sched.schedule("private_100", {"trigger": "明天早上8点", "content": "提醒"})
         assert entry is None
@@ -380,7 +388,7 @@ async def test_schedule_tool_handler(tmp_path):
     from app.plugins.llm_schedule.schedule_tool import handle_schedule_tool
 
     module = _FakeModule()
-    sched = TaskScheduler(module, data_dir=str(tmp_path))
+    sched = make_sched(module, tmp_path)
     module.scheduler = sched  # 真实 on_load 会挂载
     try:
         r = await handle_schedule_tool(module, "private_100", True,

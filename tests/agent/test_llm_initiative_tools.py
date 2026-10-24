@@ -271,11 +271,20 @@ class _FakeModule:
         self.context_providers = []
 
 
+def _started_sched(module, tmp_path):
+    """构造 + 上线：装配本身不武装计时器，测试要跑任务必须先 start()。"""
+    from app.plugins.llm_schedule import scheduler as ts_mod
+
+    sched = ts_mod.TaskScheduler(module, data_dir=str(tmp_path))
+    sched.start()
+    return sched
+
+
 async def test_scheduled_message_gets_proactive_block_and_tools(tmp_path, monkeypatch):
     from app.plugins.llm_schedule import scheduler as ts_mod
 
     module = _FakeModule()
-    sched = ts_mod.TaskScheduler(module, data_dir=str(tmp_path))
+    sched = _started_sched(module, tmp_path)
     captured: dict = {}
 
     class _FakeResp:
@@ -310,7 +319,7 @@ async def test_scheduled_message_skips_tools_when_disabled(tmp_path, monkeypatch
 
     module = _FakeModule()
     module.config = _FakeConfig({"schedule_enable": True, "context_expand_enable": False})
-    sched = ts_mod.TaskScheduler(module, data_dir=str(tmp_path))
+    sched = _started_sched(module, tmp_path)
     captured: dict = {}
 
     class _FakeResp:
@@ -337,10 +346,8 @@ async def test_scheduled_message_skips_tools_when_disabled(tmp_path, monkeypatch
 
 @pytest.mark.parametrize("is_group", [True, False])
 async def test_collect_tools_maps_session_targets(tmp_path, is_group):
-    from app.plugins.llm_schedule import scheduler as ts_mod
-
     module = _FakeModule()
-    sched = ts_mod.TaskScheduler(module, data_dir=str(tmp_path))
+    sched = _started_sched(module, tmp_path)
     session_id = "group_500" if is_group else "private_100"
 
     try:

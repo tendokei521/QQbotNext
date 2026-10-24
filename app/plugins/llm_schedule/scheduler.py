@@ -60,6 +60,9 @@ class TaskScheduler:
         self.session_mgr = SessionManager(str(module.bot_id))
         self._tasks: dict[str, TaskEntry] = {}
         self._timers: dict[str, asyncio.Task] = {}
+        #: 是否已"上线"：只有 start() 之后才武装计时器。构造发生在**账号装配**时
+        #: （账号一创建就装配，此时还没连上 QQ），因此这里绝不能自动 `_restore()`。
+        self._running = False
 
         if data_dir is None:
             data_dir = llm_data_dir()
@@ -70,7 +73,6 @@ class TaskScheduler:
         # 兼容：旧版扁平文件 data/llm/tasks_data_<bot>.json（迁移期回退读取）
         self._legacy_file = os.path.join(data_dir, f"tasks_data_{module.bot_id}.json")
         self._load()
-        self._restore()
 
     @property
     def bot(self):
@@ -108,6 +110,10 @@ class TaskScheduler:
         避免调用方传错 is_group/is_private 导致任务发错目标。
         """
         if not self._enabled():
+            return None
+        if not self._running:
+            # 离线装配期间不允许新建任务（面板仍可查看已存任务），上线后由 on_online 武装
+            logger.add_info(account_label(self.bot_id)).debug("[定时任务] 账号未上线，忽略新建任务请求")
             return None
         trigger_expr = (spec.get("trigger") or "").strip()
         content = (spec.get("content") or "").strip()
@@ -251,11 +257,11 @@ class TaskScheduler:
 
     async def _run(self, entry: TaskEntry) -> None:
         try:
-            while entry.active:
+            while entry.active and self._running:
                 delay = entry.next_at.timestamp() - time.time()
                 if delay > 0:
                     await asyncio.sleep(delay)
-                if not entry.active:
+                if not entry.active or not self._running:
                     return
                 await self._fire(entry)
                 if not entry.active:
@@ -648,13 +654,25 @@ class TaskScheduler:
     def count(self) -> int:
         return len(self._tasks)
 
+    def start(self) -> None:
+        """**上线后**武装计时器（离线装配时不会调用它 → 离线不跑任何任务）。
+
+        与 `resume()` 的区别：`start()` 是生命周期入口（框架在账号连上后调用），
+        `resume()` 是用户手动恢复暂停的任务。两者共用 `_restore()` 的重排逻辑。
+        """
+        self._running = True
+        self._restore()
+
     def stop(self) -> None:
         """取消全部定时器（任务数据保留在磁盘，下次加载恢复）。"""
+        self._running = False
         for task_id in list(self._timers.keys()):
             self._cancel_timer(task_id)
 
     def resume(self) -> None:
         """恢复被暂停的定时任务：按当前配置重新武装尚未过期的任务。"""
+        if not self._running:
+            return
         self._restore()
 
     # ── 持久化 ───────────────────────────────────────────

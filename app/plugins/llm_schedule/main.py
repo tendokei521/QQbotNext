@@ -49,6 +49,7 @@ class Module(BaseModule):
         self._scheduler: Any = None
 
     async def on_load(self) -> None:
+        """装配（账号一创建就会发生，此时还没连上 QQ）：只构建调度器，**不武装计时器**。"""
         runtime = self._runtime()
         if runtime is None:
             return
@@ -63,6 +64,16 @@ class Module(BaseModule):
 
         register_tool_source(runtime, ScheduleToolSource(self))
         runtime.scheduler = self._scheduler
+
+    async def on_online(self) -> None:
+        """账号连上：武装定时器。离线期间计时器一律不启动（`TaskScheduler.start`）。"""
+        if self._scheduler is not None:
+            self._scheduler.start()
+
+    async def on_offline(self) -> None:
+        """账号断开：停掉定时器——否则会对着死连接继续发消息。"""
+        if self._scheduler is not None:
+            self._scheduler.stop()
 
     async def on_unload(self) -> None:
         runtime = self._runtime()

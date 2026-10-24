@@ -38,10 +38,20 @@ class Module(BaseModule):
         await handle(self, event)
 
     async def on_load(self):
-        """旧配置迁移 + 按配置的 daily_signin_time 注册动态定时任务（时间可配置）。"""
+        """旧配置迁移 + 按配置的 daily_signin_time 注册动态定时任务（时间可配置）。
+
+        账号离线时 `register_daily_schedule` 会拒绝注册（离线不跑任务），
+        真正注册发生在 `on_online`。
+        """
         from .service import migrate_legacy_config, register_schedule
 
         migrate_legacy_config(self)
+        await register_schedule(self)
+
+    async def on_online(self):
+        """账号连上：补注册每日打卡任务。"""
+        from .service import register_schedule
+
         await register_schedule(self)
 
     async def on_unload(self):

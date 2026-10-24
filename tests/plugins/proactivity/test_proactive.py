@@ -68,6 +68,8 @@ def make_pm(tmp_path, config_overrides=None, _bid="bot_act"):
 
     pm = ProactiveManager(Mod())
     pm._file = str(tmp_path / "proactive_data.json")
+    # 装配 ≠ 可跑：构造后必须 start() 才算"账号已上线"，计时器才会武装
+    pm.start()
     return pm, Mod()
 
 

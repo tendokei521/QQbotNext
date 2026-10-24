@@ -53,6 +53,9 @@ class ProactiveManager:
         self.session_mgr = SessionManager(str(module.bot_id))
         self._timers: dict[str, asyncio.Task] = {}       # 私聊下次主动任务
         self._group_timers: dict[str, asyncio.Task] = {}  # 群聊沉默计时器
+        #: 是否已"上线"：只有 start() 之后才武装计时器。构造发生在**账号装配**时
+        #: （账号一创建就装配，此时还没连上 QQ），因此这里绝不能自动 `_restore()`。
+        self._running = False
         self._data: dict[str, dict] = {}
         # 每个账号一个目录：data/llm/<bot_id>/proactive_data.json
         # （旧版共用根目录一份，多账号会互相覆盖；此处按 bot 隔离）
@@ -60,7 +63,6 @@ class ProactiveManager:
         self._file = os.path.join(self._dir, "proactive_data.json")
         self._legacy_file = os.path.join(llm_data_dir(), "proactive_data.json")
         self._load()
-        self._restore()
 
     @property
     def bot(self):
@@ -107,6 +109,8 @@ class ProactiveManager:
     # ── 事件入口 ─────────────────────────────────────────
     async def on_message(self, session_id: str, is_group: bool, is_self: bool) -> None:
         """消息事件观察：记录活跃时间；非自身消息重置计数并重新调度。"""
+        if not self._running:
+            return  # 离线：不记录也不武装计时器（上线后由 start() 重新恢复）
         self._data.setdefault(session_id, {})["last_user_time"] = time.time()
         if is_self:
             return
@@ -121,6 +125,8 @@ class ProactiveManager:
 
     async def on_bot_sent(self, session_id: str, is_group: bool) -> None:
         """Bot 发言后重置群聊沉默计时器。"""
+        if not self._running:
+            return
         if is_group and self._session_enabled(session_id, is_group):
             self._reset_group_silence(session_id)
 
@@ -458,7 +464,13 @@ class ProactiveManager:
         except Exception as e:
             logger.add_info(account_label(self.module.bot_id)).warning(f"[主动消息] 保存状态失败: {e}")
 
+    def start(self) -> None:
+        """**上线后**武装计时器（离线装配时不会调用 → 离线不发任何主动消息）。"""
+        self._running = True
+        self._restore()
+
     def stop(self) -> None:
+        self._running = False
         for session_id in list(self._timers.keys()):
             self._cancel(self._timers, session_id)
         for session_id in list(self._group_timers.keys()):
@@ -466,6 +478,8 @@ class ProactiveManager:
 
     def resume(self) -> None:
         """恢复被暂停的主动消息：按当前配置重新武装可用的私聊/群聊计时器。"""
+        if not self._running:
+            return
         self._restore()
 
     # ── 管理接口 ─────────────────────────────────────────

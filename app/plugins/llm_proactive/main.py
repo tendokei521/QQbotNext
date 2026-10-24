@@ -87,6 +87,7 @@ class Module(BaseModule):
         self._manager: Any = None
 
     async def on_load(self) -> None:
+        """装配（账号一创建就会发生，此时还没连上 QQ）：只建管理器，**不武装计时器**。"""
         runtime = self._runtime()
         if runtime is None:
             return
@@ -107,6 +108,16 @@ class Module(BaseModule):
             stage="bot_sent", event_type="*", order=80,
             handler=self._on_bot_sent, module=self,
         )
+
+    async def on_online(self) -> None:
+        """账号连上：武装主动消息计时器（离线期间一条都不会发）。"""
+        if self._manager is not None:
+            self._manager.start()
+
+    async def on_offline(self) -> None:
+        """账号断开：停掉计时器，避免断线后继续"主动"发言。"""
+        if self._manager is not None:
+            self._manager.stop()
 
     async def _on_message_observed(self, ctx, msg=None) -> None:
         """有人说话了：重置沉默计时 / 安排下次主动发言。"""
