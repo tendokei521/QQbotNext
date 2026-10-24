@@ -450,7 +450,7 @@ class BaseModule(ABC):
 
     async def on_unload(self) -> None: ...
 
-    async def on_online(self) -> None:
+    async def on_online(self) -> None:  # noqa: B027 - 与 on_load/on_unload 一致的默认空实现
         """账号**连上 QQ** 之后调用（可重复）。
 
         与 ``on_load`` 的分工：``on_load`` 是"实例装配"（账号一创建就会发生，**不需要连接**），
@@ -460,7 +460,7 @@ class BaseModule(ABC):
         默认实现什么都不做，纯配置/纯响应的模块不必关心它。
         """
 
-    async def on_offline(self) -> None:
+    async def on_offline(self) -> None:  # noqa: B027 - 与 on_load/on_unload 一致的默认空实现
         """账号**断开**之后调用（可重复）。
 
         在这里停掉 ``on_online`` 启动的一切（计时器、后台任务、轮询），

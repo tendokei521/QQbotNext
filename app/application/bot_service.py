@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from app.agent.config import LEGACY_LLM_CONNECTION_KEYS
 from app.core.logger import logger
 from app.domain.bot import IBot
