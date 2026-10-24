@@ -9,9 +9,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from app.agent.config import AGENT_CONFIG_MODULE
 from app.plugin.authority import declares_single_service
 from app.webui.api.deps import get_config_service, get_module_registry
+from app.webui.api.modules import VIRTUAL_AGENT_MODULE
 
 router = APIRouter(tags=["webui"])
 
@@ -23,11 +23,11 @@ class _VirtualAgentDeclaration:
     但它恒支持单一服务，故用一个最小声明体回答「是否声明支持」。
     """
 
-    module_name = AGENT_CONFIG_MODULE
+    module_name = VIRTUAL_AGENT_MODULE
     supports_single_service = True
 
 
-_VIRTUAL_MODULES = {AGENT_CONFIG_MODULE: _VirtualAgentDeclaration()}
+_VIRTUAL_MODULES = {VIRTUAL_AGENT_MODULE: _VirtualAgentDeclaration()}
 
 
 def _resolve_declaration(registry, module_name: str):
