@@ -49,6 +49,7 @@ from app.agent.loop.context_blocks import (
     _commit_history_enrichment,
 )
 from app.agent.loop.prompt_prep import prepare_prompt
+from app.agent.loop.tool_step import KIND_ERROR, StepRequest, run_stream_step
 from app.agent.loop.turn_input import from_request
 from app.agent.loop.turn_metrics import (
     REASONING_OVERFLOW_NUDGE,
@@ -62,7 +63,7 @@ from app.agent.loop.turn_metrics import (
 from app.agent.providers.invoker import resolve_invoker
 from app.agent.tools.spec import build_tools, make_executor
 from app.domain.modalities import supports_tool_use
-from app.domain.splitter import split_sentences, strip_stream_artifacts
+from app.domain.splitter import strip_stream_artifacts
 from app.domain.tags import strip_all_tags
 
 
@@ -388,11 +389,10 @@ async def _stream_once(
 ) -> tuple[str, list[dict]]:
     """流式：逐句回调 ``on_sentence``，返回累计正文与工具结果。
 
-    工具循环由调用方（本函数）驱动，与 `chat.stream_response` 一致；
-    区别只在于产出物**不发送**，交给调用方决定。
+    循环控制（请求 → 工具批次 → 回填）由 `loop/tool_step.run_stream_step` 统一驱动；
+    本函数只剩两件事：把句子交给调用方、把结构化结局翻译成既有返回结构。
+    这样"补图轮 / 空回填 / id 自洽"这类细节不会再出现"只在这条路径上修过"。
     """
-    from app.agent.loop.tool_loop import normalize_and_execute_tool_calls
-
     params = _call_params(meta, all_specs, tool_ctx, use_tools, config)
     params["usage_sink"] = usage_sink
     params["input_tokens_estimate"] = _input_tokens_estimate(messages)
@@ -404,66 +404,33 @@ async def _stream_once(
         or config.get("max_message_length", 200)
         or 200
     )
-    max_rounds = _max_tool_rounds(config)
-    tool_results: list[dict] = []
-    full_parts: list[str] = []
 
-    for _round in range(max_rounds):
-        buffer = ""
-        tool_calls: dict[int, dict] = {}
-        async for ev in resolve_invoker(runtime).stream(
-            runtime=runtime, chain=provider_chain, messages=messages, params=params
-        ):
-            if ev.type == "text":
-                buffer += ev.text
-                sentences, buffer = split_sentences(buffer, max_length=max_msg_len)
-                for sentence in sentences:
-                    clean = strip_stream_artifacts(sentence)
-                    if clean:
-                        full_parts.append(clean)
-                        if on_sentence is not None:
-                            await on_sentence(clean)
-            elif ev.type == "tool_call":
-                tc = ev.tool_call or {}
-                index = int(tc.get("index", 0) or 0)
-                slot = tool_calls.setdefault(
-                    index,
-                    {"id": "", "type": "function", "function": {"name": "", "arguments": ""}},
-                )
-                frag = tc.get("function") or {}
-                slot["id"] += tc.get("id") or ""
-                slot["function"]["name"] += frag.get("name") or ""
-                slot["function"]["arguments"] += frag.get("arguments") or ""
-            elif ev.type == "error":
-                logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).error(
-                    f"[Turn] 流式请求失败: {ev.text}"
-                )
-                break
+    sentences: list[str] = []
 
-        tail = strip_stream_artifacts(buffer.strip())
-        if tail:
-            full_parts.append(tail)
-            if on_sentence is not None:
-                await on_sentence(tail)
-        if not tool_calls:
-            break
+    async def _emit(sentence: str) -> None:
+        sentences.append(sentence)
+        if on_sentence is not None:
+            await on_sentence(sentence)
 
-        tool_calls_list = [tool_calls[idx] for idx in sorted(tool_calls)]
-        normalized_calls, tool_messages = await normalize_and_execute_tool_calls(
-            tool_calls_list, params.get("tool_executor"), tool_results
+    step = await run_stream_step(
+        StepRequest(
+            runtime=runtime,
+            chain=provider_chain,
+            messages=messages,
+            params=params,
+            max_rounds=_max_tool_rounds(config),
+            tool_ctx=tool_ctx,
+            modalities=meta["modalities"],
+            on_text=_emit,
+            max_msg_len=max_msg_len,
         )
-        messages.append(
-            {
-                "role": "assistant",
-                "content": "".join(full_parts) or None,
-                "tool_calls": normalized_calls,
-            }
+    )
+    if step.kind == KIND_ERROR:
+        logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).error(
+            f"[Turn] 流式请求失败: {step.error}"
         )
-        messages.extend(tool_messages)
-        _append_round_images(messages, tool_ctx, meta["modalities"])
-
-    text = "\n".join(full_parts)
-    return text, tool_results
+    # 与收口前同口径：句子之间用换行连接（历史/遥测里看到的是同一段文本）
+    return "\n".join(sentences), step.tool_results
 
 
 # ==================== 收尾助手 ====================
