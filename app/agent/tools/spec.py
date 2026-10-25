@@ -298,7 +298,24 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
             return final
         return f"error: 未知工具 {name}"
 
+    # 让 `tool_loop.execute_tool_batch` 能按 spec 判定并发（fail-closed）与池大小。
+    # 挂在函数对象上而不是改签名：`make_executor` 的返回值是 `async (name, args)`，
+    # 第三方执行器也符合这个形状，没有属性时按独占 + 串行处理即可。
+    _executor.specs_by_name = {s.name: s for s in specs}
+    _executor.parallel_max = _parallel_max_of(ctx)
     return _executor
+
+
+def _parallel_max_of(ctx: Any, default: int = 8) -> int:
+    """并发池大小（配置 ``tool_parallel_max``）；读不到就回默认，永远 ≥1。"""
+    runtime = getattr(ctx, "runtime", None) if ctx is not None else None
+    config = getattr(runtime, "config", None) if runtime is not None else None
+    if config is None:
+        return default
+    try:
+        return max(1, min(int(config.get("tool_parallel_max", default) or default), 32))
+    except (TypeError, ValueError):
+        return default
 
 
 def _execution_gate(ctx: Any, spec: ToolSpec) -> str:

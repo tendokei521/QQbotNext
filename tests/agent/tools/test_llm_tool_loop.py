@@ -27,8 +27,14 @@ def _call(name: str, arguments, call_id: str | None = "call_1") -> dict:
 
 
 async def test_multiple_tool_calls_run_concurrently():
-    """三个工具必须**同时**处于执行中；串行执行时每个工具只能看到自己。"""
+    """三个声明为 parallel 的工具必须**同时**处于执行中（P3 有界池 + 分类之后）。
+
+    P3 起并发判定看 `ToolSpec.runs_parallel(args)`：没带 spec 的执行器一律独占，
+    所以这里显式挂上"三个都并行"的清单（生产路径由 `make_executor` 自动挂）。
+    """
     import asyncio
+
+    from app.agent.tools.spec import ToolSpec
 
     started: list[str] = []
 
@@ -40,6 +46,18 @@ async def test_multiple_tool_calls_run_concurrently():
                 break
             await asyncio.sleep(0.01)
         return f"{name}:{len(started)}"
+
+    async def _handler(ctx, args):
+        return ""
+
+    _executor.specs_by_name = {
+        name: ToolSpec(
+            name=name, description="", parameters={"type": "object", "properties": {}},
+            handler=_handler, scopes=("*",), concurrency="parallel",
+        )
+        for name in ("a", "b", "c")
+    }
+    _executor.parallel_max = 3
 
     tool_results: list[dict] = []
     normalized, messages = await normalize_and_execute_tool_calls(

@@ -156,8 +156,13 @@ async def normalize_and_execute_tool_calls(
             return f"error: 工具执行异常 {e}"
         return result if isinstance(result, str) else str(result)
 
-    # 并行执行：gather 保序，回填顺序与 tool_call 一一对应（见模块 docstring）。
-    exec_results = await asyncio.gather(*[_execute(item) for item in prepared])
+    # 执行：按并发分类走"有界滚动池 + 独占屏障"，结果**按模型给出顺序**提交。
+    exec_results = await execute_tool_batch(
+        prepared,
+        _execute,
+        specs_by_name=getattr(tool_executor, "specs_by_name", None),
+        parallel_max=int(getattr(tool_executor, "parallel_max", 1) or 1),
+    )
 
     normalized: list[dict] = []
     result_messages: list[dict] = []
@@ -171,6 +176,74 @@ async def normalize_and_execute_tool_calls(
         })
 
     return normalized, result_messages
+
+
+async def execute_tool_batch(
+    prepared: list[dict],
+    execute,
+    *,
+    specs_by_name: dict | None = None,
+    parallel_max: int = 1,
+) -> list[str]:
+    """按并发分类执行一批工具，返回**与 ``prepared`` 等长且同序**的结果。
+
+    规则（对应计划 P3 的目标不变量）：
+
+    1. 同一时刻在执行的工具数 ≤ ``parallel_max``（``1`` = 全串行）；
+    2. 独占工具是**屏障**：它开始前先等在跑的并行批次全部结束，它结束后才继续；
+    3. 回填顺序永远等于模型顺序 —— 结果按下标写回，与完成先后无关。
+
+    分类来源是 `ToolSpec.runs_parallel(args)`（fail-closed）。拿不到 spec
+    （自定义执行器）时一律按独占处理：串行只是慢，并发写错不可逆。
+    """
+    total = len(prepared)
+    results: list[str | None] = [None] * total
+    if total == 0:
+        return []
+
+    limit = max(1, int(parallel_max or 1))
+
+    def _parallel(item: dict) -> bool:
+        spec = (specs_by_name or {}).get(item["name"])
+        if spec is None:
+            return False
+        try:
+            return bool(spec.runs_parallel(item.get("args") or {}))
+        except Exception:  # noqa: BLE001 —— 判定失败按独占（保守）
+            return False
+
+    pending: dict[asyncio.Task, int] = {}
+
+    async def _drain_some() -> None:
+        """等**任意一个**在跑的工具结束，把结果按下标写回。"""
+        done, _ = await asyncio.wait(set(pending), return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            index = pending.pop(task)
+            try:
+                results[index] = task.result()
+            except Exception as e:  # noqa: BLE001 —— 工具异常以结果回传，不中断整批
+                results[index] = f"error: 工具执行异常 {e}"
+
+    async def _drain_all() -> None:
+        while pending:
+            await _drain_some()
+
+    try:
+        for index, item in enumerate(prepared):
+            if _parallel(item):
+                if len(pending) >= limit:
+                    await _drain_some()
+                pending[asyncio.create_task(execute(item))] = index
+                continue
+            # 独占：先清空在跑的并行批次（屏障），再单独执行
+            await _drain_all()
+            task = asyncio.create_task(execute(item))
+            pending[task] = index
+            await _drain_all()
+    finally:
+        await _drain_all()
+
+    return [r if r is not None else "" for r in results]
 
 def aborted_tool_messages(
     tool_calls: list[dict],
