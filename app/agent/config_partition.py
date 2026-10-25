@@ -170,6 +170,14 @@ UI_PAGES: tuple[UIPage, ...] = (
                 ),
             ),
             UIGroup(
+                "adv_tool_exec",
+                "工具执行",
+                (
+                    "tool_parallel_max",
+                    "tool_timeout_default_s",
+                ),
+            ),
+            UIGroup(
                 "adv_tool_logs",
                 "工具日志",
                 (

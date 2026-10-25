@@ -831,6 +831,18 @@ SCHEMA = {
         "description": "思考占满输出、正文为空时的收敛重试次数。0 = 不重试。",
         "default": 1, "min": 0, "max": 2, "group": "group_tools",
     },
+    # P3：工具执行契约（并发池大小与单次超时）。工具自己可以用 ToolSpec.timeout_s
+    # 声明更严/更宽的上限，这里给的是没声明时的全局默认。
+    "tool_parallel_max": {
+        "type": "number", "label": "工具并发上限",
+        "description": "同一时刻最多几个「可并行」工具一起跑。1 = 全串行；独占工具始终单独执行。",
+        "default": 8, "min": 1, "max": 32, "group": "group_tools",
+    },
+    "tool_timeout_default_s": {
+        "type": "number", "label": "工具默认超时（秒）",
+        "description": "工具没声明自己的超时就用这个值。超时只把结果换成失败回执，工具协程仍会跑完。",
+        "default": 20, "min": 1, "max": 600, "group": "group_tools",
+    },
     "retry_profile": {
         "type": "select", "label": "重试档位",
         "description": "一轮对话的请求次数与输入 token 上限。抗压档更耐故障，消耗也更大。",

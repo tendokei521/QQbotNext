@@ -186,6 +186,15 @@
           ]
         },
         {
+          "id": "adv_tool_exec",
+          "label": "工具执行",
+          "icon": "mdi-folder-outline",
+          "fields": [
+            "tool_parallel_max",
+            "tool_timeout_default_s"
+          ]
+        },
+        {
           "id": "adv_tool_logs",
           "label": "工具日志",
           "icon": "mdi-folder-outline",

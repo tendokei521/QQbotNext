@@ -189,6 +189,12 @@ DEFAULT_LLM_CONFIG: dict = {
     # 追加一次「不要复述思考、直接作答」的提醒再要一枪（换问法，不是重复同一 prompt——
     # 后者必然同样打满）。只是尽力而为，根治办法是调大「模型」页的 max_tokens 或缩短上下文。
     "reasoning_overflow_retries": 1,
+    # P3 工具执行契约：同一时刻最多几个「声明为可并行」的工具一起跑（1 = 全串行；
+    # 独占工具永远单独执行）。池子是有界的：批量工具不会再无上限地同时打出去。
+    "tool_parallel_max": 8,
+    # 工具没声明 ``ToolSpec.timeout_s`` 时的墙钟上限（秒）。超时只替换**结果**
+    # （TOOL_TIMEOUT），不 cancel 协程——否则会把"发了一半的消息/写了一半的文件"掐断。
+    "tool_timeout_default_s": 20,
     # 重试档位（thrifty / balanced / resilient）：决定**一整轮**最多能发几次请求、
     # 最多累计烧多少输入 token（见 request_policy.TurnBudget）。这是硬闸门——
     # 没有它，"HTTP 重试 × 空回复重试 × 收敛重试 × provider 数"会乘成十几次，
