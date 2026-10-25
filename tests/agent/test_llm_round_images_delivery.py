@@ -6,6 +6,7 @@
 
 - 流式：工具轮结束后进入第二轮请求，图片仍留在队列里，本轮模型只能凭回执文字瞎猜；
 - 非流式：工具循环整个跑在 provider 内部，chat.py 连中间态都拿不到，图片永远送不达；
+  （P1 把循环收口到 `loop/tool_step` 后，非流式与流式走同一处补图，适配器只发单次请求）
 - 而工具回执却写着「下一轮对话里你会直接看到它」→ 模型照着回执编造画面描述。
 
 本文件走**真实的** ``stream_response`` / ``generate_response`` 路径（真 ToolContext、
@@ -91,16 +92,16 @@ class _Probe(BaseProvider):
         yield StreamEvent(type="done")
 
     async def chat(self, messages, **kwargs):
-        """模拟 openai_compat 的非流式工具循环：内部执行工具，再给最终正文。"""
+        """非流式适配器只发一次请求：要工具就把 tool_calls 交出去（P1 收口后的契约）。
+
+        循环、执行与补图都在 `loop/tool_step.run_blocking_step` 里，适配器不再自己跑。
+        """
         CALLS.append([dict(m) for m in messages])
         if len(CALLS) == 1:
-            executor = kwargs.get("tool_executor")
-            result = await executor("expand_image", {"messages": ["1003"]})
-            # 与真实 provider 一致：工具跑完返回"最终回复"（这里先给一句过渡话）
             return LLMResponse(
-                text="让我看看这张图。",
+                text="",
                 raw={},
-                tool_results=[{"name": "expand_image", "result": result}]
+                tool_calls=[{k: v for k, v in TOOL_CALL.items() if k != "index"}],
             )
         return LLMResponse(text="图里是只猫。", raw={})
 
@@ -216,17 +217,17 @@ async def test_streaming_delivers_round_images_to_next_round(probe):
     assert _has_image_block(CALLS[1]), "第二轮请求里必须带图片块（修复前这里是 False）"
 
 
-async def test_non_stream_adds_one_image_round(probe):
-    """非流式：provider 内部工具循环结束后，补问一轮把图片递进去。"""
+async def test_non_stream_delivers_round_images_to_next_round(probe):
+    """非流式：工具轮取回的图片必须在**同一轮循环**里递给模型（不再靠补问一轮）。"""
     rt = _runtime(5502, _config(stream_output=False))
     ctx = _ctx()
 
     out = await chat.generate_response(rt, ctx.event, ctx)
 
     assert "猫" in str(out)
-    assert len(CALLS) == 2, f"应有 2 次请求（原始 + 补图轮），实际 {len(CALLS)}"
+    assert len(CALLS) == 2, f"应有 2 次请求（工具轮 + 回填轮），实际 {len(CALLS)}"
     assert not _has_image_block(CALLS[0])
-    assert _has_image_block(CALLS[1]), "补图轮请求里必须带图片块（修复前图片从未送达）"
+    assert _has_image_block(CALLS[1]), "回填轮请求里必须带图片块（P1 前图片从未送达）"
 
 
 async def test_no_image_round_when_queue_is_empty(probe):

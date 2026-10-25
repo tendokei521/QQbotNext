@@ -2,7 +2,7 @@
 
 ## 背景
 
-工具循环目前有 6 份实现（见 `docs/tool-loop-refactor-plan.md` P1）：
+工具循环原有 6 份实现（见 `docs/tool-loop-refactor-plan.md` P1）：
 3 处在调用方（`chat.stream_response` / `turn._stream_once` / `proactive.stream`），
 3 处**在 provider 适配器内部**（openai_compat / anthropic / gemini）。
 
@@ -27,18 +27,17 @@ APP = ROOT / "app"
 #: 否则"把上限改个名"就能绕过这条约束。
 _LOOP_PATTERN = "for _round in range("
 
-#: 已知的 6 处（P1 收口后应为空）。路径 → 归属说明
+#: 已知的循环副本（路径 → 归属说明）。P1 每收口一处就删一条，直到只剩共享 runner。
+#: 进度：turn 流式 / 主动消息流式已收口（`loop/tool_step.run_stream_step`）。
 KNOWN_LOOPS: dict[str, str] = {
     "app/agent/loop/chat.py": "流式主路径（含发言通道 flush / 收敛重试）",
-    "app/agent/loop/turn.py": "流式无发送版（on_sentence 回调）",
-    "app/plugins/llm_proactive/stream.py": "主动消息 / 定时任务流式",
     "app/agent/providers/openai_compat.py": "非流式（OpenAI 兼容）—— 应收口到 loop 层",
     "app/agent/providers/anthropic.py": "非流式（Claude）—— 应收口到 loop 层",
     "app/agent/providers/gemini.py": "非流式（Gemini）—— 应收口到 loop 层",
 }
 
 #: 副本数只许减少。P1 完成后改成 1（只剩共享 runner）。
-BASELINE_COUNT = 6
+BASELINE_COUNT = 4
 
 
 def _files_with_loop() -> dict[str, int]:

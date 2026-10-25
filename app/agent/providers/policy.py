@@ -429,6 +429,7 @@ def classify_response(
     text: str = "",
     reasoning: str = "",
     tool_results: Any = None,
+    tool_calls: Any = None,
     finish_reason: str = "",
     usage: dict | None = None,
     max_tokens: int = 0,
@@ -437,8 +438,12 @@ def classify_response(
 
     关键口径：**思考也算产出**（上游确实在跑，只是把预算花在 reasoning 里），
     但它**不值得同 prompt 重试**——同样的输入必然同样打满。
+
+    **模型要求的工具调用也算产出**：适配器只发一次请求后，``tool_calls`` 就是这一轮
+    的产出（此前它由适配器执行完落到 ``tool_results`` 上）；不看它会把"要调工具"
+    误判成空回复并原样重发，白白多打一次全量上下文。
     """
-    if (text or "").strip() or tool_results:
+    if (text or "").strip() or tool_results or tool_calls:
         return None
 
     usage = usage or {}

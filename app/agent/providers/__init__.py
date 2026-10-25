@@ -382,6 +382,7 @@ async def chat_with_fallback(
                     text=resp.text,
                     reasoning=getattr(resp, "reasoning", "") or "",
                     tool_results=resp.tool_results,
+                    tool_calls=getattr(resp, "tool_calls", None),
                     finish_reason=str((resp.raw or {}).get("finish_reason", "") or "")
                     if isinstance(resp.raw, dict) else "",
                     usage=resp.usage,
@@ -437,7 +438,8 @@ async def chat_with_fallback(
 def _response_is_empty(resp: LLMResponse | None) -> bool:
     """响应是否“成功但没有任何可展示内容”。
 
-    只有工具结果、没有文本的轮次不算空回复（那是正常的工具循环中间态）。
+    只有工具结果（或单次请求适配器报出的工具调用）、没有文本的轮次不算空回复
+    （那是正常的工具循环中间态）。
 
     判定口径已统一到 ``request_policy.classify_response``（它额外区分"被预算截断"
     "只有思考" "计费了却没产出"）；保留这个薄封装是因为"空/非空"这个二元问题在
@@ -448,6 +450,8 @@ def _response_is_empty(resp: LLMResponse | None) -> bool:
     if (resp.text or "").strip():
         return False
     if (getattr(resp, "reasoning", "") or "").strip():
+        return False
+    if getattr(resp, "tool_calls", None):
         return False
     return not resp.tool_results
 

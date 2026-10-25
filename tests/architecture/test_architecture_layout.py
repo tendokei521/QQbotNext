@@ -41,7 +41,9 @@ README_HEADER = "> 本文只负责："
 # （`run_turn` / `TurnRequest` / `TurnResult`），模块侧 `llm_turn` 直接调它；
 # `loop/providers.py` 是「上下文块 / 工具源」注册表的契约与收集实现。
 # 两者都是 loop 层的编排职责，不该塞进 generate/chat/prompt_prep 任一个里。
-AGENT_PKG_MAX_FILES = 17
+# 17 → 18：`loop/tool_step.py` 是工具循环**唯一**的循环体（P1 把 6 处收成 1 处），
+# 属于 loop 层的编排职责；它取代的是散落在 chat/turn/proactive/provider 里的副本。
+AGENT_PKG_MAX_FILES = 18
 
 
 def _py_files(directory: Path) -> list[Path]:

@@ -33,8 +33,6 @@ print(result.text, len(result.tool_results))
 
 from __future__ import annotations
 
-from app.core.logger import account_label
-
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
@@ -49,7 +47,13 @@ from app.agent.loop.context_blocks import (
     _commit_history_enrichment,
 )
 from app.agent.loop.prompt_prep import prepare_prompt
-from app.agent.loop.tool_step import KIND_ERROR, StepRequest, run_stream_step
+from app.agent.loop.tool_step import (
+    KIND_EMPTY,
+    KIND_ERROR,
+    StepRequest,
+    run_blocking_step,
+    run_stream_step,
+)
 from app.agent.loop.turn_input import from_request
 from app.agent.loop.turn_metrics import (
     REASONING_OVERFLOW_NUDGE,
@@ -60,8 +64,8 @@ from app.agent.loop.turn_metrics import (
     _reasoning_overflow_retries,
     _turn_budget,
 )
-from app.agent.providers.invoker import resolve_invoker
 from app.agent.tools.spec import build_tools, make_executor
+from app.core.logger import account_label
 from app.domain.modalities import supports_tool_use
 from app.domain.splitter import strip_stream_artifacts
 from app.domain.tags import strip_all_tags
@@ -324,47 +328,53 @@ async def _chat_once(
     config: Any,
     usage_sink: dict,
 ) -> tuple[str, list[dict]]:
-    """非流式：一次请求（工具循环在 invoker 内部完成）。"""
-    params = _call_params(meta, all_specs, tool_ctx, use_tools, config)
-    params["input_tokens_estimate"] = _input_tokens_estimate(messages)
-    response = await resolve_invoker(runtime).chat(
-        runtime=runtime, chain=provider_chain, messages=messages, params=params
-    )
-    _merge_usage(usage_sink, getattr(response, "usage", None))
+    """非流式：一次步骤（工具多轮由 `run_blocking_step` 驱动），返回正文与工具结果。
 
-    # 思考吃满预算：追加一次收敛提示再要一枪（与 generate_response 同口径）
+    适配器只发一次请求，工具执行/回填/补图都在共享运行器里——所以此前那条
+    "补图后再补问一轮"的特例（非流式循环藏在 provider 内部，中途拿不到 messages）
+    不再需要：图片由运行器在当轮就递给了模型。
+    """
+    params = _call_params(meta, all_specs, tool_ctx, use_tools, config)
+    max_rounds = _max_tool_rounds(config)
+    overflow_retries = _reasoning_overflow_retries(config)
     overflow_used = 0
-    while (
-        not response.ok
-        and (getattr(response, "reasoning", "") or "").strip()
-        and overflow_used < _reasoning_overflow_retries(config)
-    ):
+    session_id = str(meta.get("session_id", "") or "")
+
+    async def _on_round_end(summary) -> None:
+        if summary.images_appended:
+            logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).info(
+                f"[ExpandImage] 工具轮取回的图片已追加为补全材料 -> {session_id}"
+            )
+
+    async def _request_step():
+        return await run_blocking_step(
+            StepRequest(
+                runtime=runtime,
+                chain=provider_chain,
+                messages=messages,
+                params=params,
+                max_rounds=max_rounds,
+                tool_ctx=tool_ctx,
+                modalities=meta.get("modalities"),
+                on_round_end=_on_round_end,
+            )
+        )
+
+    step = await _request_step()
+    _merge_usage(usage_sink, step.usage)
+
+    # 思考吃满预算：追加一次收敛提示再要一枪（与 generate_response 同口径）。
+    # 这属于"改 prompt 再问"，不是循环控制，所以留在调用方（P1 只收口循环）。
+    while step.kind == KIND_EMPTY and step.reasoning_chars and overflow_used < overflow_retries:
         overflow_used += 1
         messages.append({"role": "user", "content": REASONING_OVERFLOW_NUDGE})
-        response = await resolve_invoker(runtime).chat(
-            runtime=runtime, chain=provider_chain, messages=messages, params=params
-        )
-        _merge_usage(usage_sink, getattr(response, "usage", None))
+        step = await _request_step()
+        _merge_usage(usage_sink, step.usage)
 
-    # expand_image 补图轮：非流式工具循环在 provider 内部，中途拿不到 messages，
-    # 工具轮取回的图片会留在 `tool_ctx.extra["round_images"]` 里没人追加。
-    # 这里补问一轮（上限 1 次，防模型反复取图死循环）。
-    if _append_round_images(messages, tool_ctx, meta.get("modalities")):
-        logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).info(
-            f"[ExpandImage] 工具轮取回的图片已追加为补全材料，补问一轮 -> {meta.get('session_id', '')}"
-        )
-        params["input_tokens_estimate"] = _input_tokens_estimate(messages)
-        response = await resolve_invoker(runtime).chat(
-            runtime=runtime, chain=provider_chain, messages=messages, params=params
-        )
-        _merge_usage(usage_sink, getattr(response, "usage", None))
-
-    tool_results = list(getattr(response, "tool_results", None) or [])
-    if not response.ok:
-        return "抱歉，我暂时无法回答，请稍后再试。", tool_results
-    text = strip_stream_artifacts(strip_all_tags(getattr(response, "text", "") or ""))
+    tool_results = list(step.tool_results)
+    text = strip_stream_artifacts(strip_all_tags(str(step.text or "")))
     if not text.strip():
-        reasoning = len(getattr(response, "reasoning", "") or "")
+        reasoning = step.reasoning_chars
         eff, src = _effective_max_tokens(provider_chain, meta["max_tokens"])
         hint = f"，思考 {reasoning} 字符但无正文（max_tokens={eff}，来自{src}）" if reasoning else ""
         logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).warning(
