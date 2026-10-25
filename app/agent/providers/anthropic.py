@@ -225,13 +225,7 @@ class AnthropicProvider(BaseProvider):
                 if isinstance(block, dict) and block.get("type") == "thinking"
             )
             tool_uses = _tool_use_blocks(content_blocks)
-            if not tool_uses or tool_executor is None:
-                return LLMResponse(
-                    text=text, reasoning=reasoning, usage=total_usage, raw=data,
-                    tool_results=tool_results,
-                )
-
-            # Anthropic tool_use → OpenAI-style tool_calls → 共享工具执行器
+            # Anthropic tool_use → OpenAI-style tool_calls（适配器只做翻译，不执行）
             tool_calls = [{
                 "id": tu["id"],
                 "type": "function",
@@ -240,6 +234,12 @@ class AnthropicProvider(BaseProvider):
                     "arguments": json.dumps(tu["input"], ensure_ascii=False),
                 },
             } for tu in tool_uses]
+            if not tool_uses or tool_executor is None:
+                return LLMResponse(
+                    text=text, reasoning=reasoning, usage=total_usage, raw=data,
+                    tool_results=tool_results, tool_calls=tool_calls,
+                )
+
             normalized, result_messages = await normalize_and_execute_tool_calls(
                 tool_calls, tool_executor, tool_results
             )

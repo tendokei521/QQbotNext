@@ -330,6 +330,7 @@ class OpenAICompatProvider(BaseProvider):
         choices = result.get("choices", []) or []
         content = ""
         reasoning = ""
+        tool_calls: list = []
         if choices:
             first = choices[0]
             message = first.get("message", {}) or {}
@@ -338,6 +339,8 @@ class OpenAICompatProvider(BaseProvider):
             # 写法（流式解析早已两种都认，这里此前只认前者，导致中转商用户的
             # 「思考吃满预算」诊断与收敛轮全部失效）
             reasoning = (message.get("reasoning_content") or message.get("reasoning") or "") or ""
+            # 模型要求调用的工具原样交出去（归一化/执行在 loop/tool_step，适配器不再自己循环）
+            tool_calls = list(message.get("tool_calls") or [])
             if first.get("finish_reason") == "length":
                 logger.add_info("Api").warning("回复因 max_tokens 限制被截断")
         # token 消耗不在这里打：本次请求（含工具轮）结束后由 chat_with_fallback 统一 info 一次
@@ -347,6 +350,7 @@ class OpenAICompatProvider(BaseProvider):
             usage=usage,
             raw=result,
             tool_results=list(tool_results or []),
+            tool_calls=tool_calls,
         )
 
     # ---------- 对话 + 工具循环 ----------

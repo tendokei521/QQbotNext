@@ -19,6 +19,10 @@ class LLMResponse:
     usage: dict = field(default_factory=dict)
     raw: Any = None
     tool_results: list = field(default_factory=list)  # 工具循环执行记录 [{name,args,result}]
+    #: 本次响应里模型**要求调用**的工具（OpenAI 形状：``{id, type, function:{name, arguments}}``）。
+    #: 单次请求的适配器必须把它报出来，工具循环才能由 ``loop/tool_step`` 统一驱动；
+    #: 适配器自己跑循环时（兼容旧调用方）这里只有最后一轮的值，通常为空。
+    tool_calls: list = field(default_factory=list)
 
     @property
     def ok(self) -> bool:

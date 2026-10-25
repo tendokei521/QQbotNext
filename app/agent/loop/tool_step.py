@@ -19,11 +19,16 @@
 - ``on_text``：一个完整句子（已切句、已去流式痕迹）；
 - ``on_round_end``：一轮工具执行完毕（拿得到轮次、剩余轮数、本轮文本、工具结果）。
 
+两个入口共用同一套语义：`run_stream_step`（`invoker.stream`）与
+`run_blocking_step`（`invoker.chat`，适配器只发一次请求）。
+
 ## 边界
 
 - **不负责取料**（组装 messages）、**不负责发送**（那是 `delivery/` 的事）、
   **不负责收尾记账**（调用方自己写历史/遥测）。
-- 只认两种正常结局：模型不再要工具（`assistant`），或轮数用尽（`max_rounds`）。
+- 只认三种结局：模型不再要工具（`assistant`）、轮数用尽（`max_rounds`）、
+  请求失败（`error`）。非流式另有一种"请求成功但没有正文"（`empty`），
+  空回复兜底与"思考吃满预算"的收敛重试都留给调用方（它们改的是 prompt/话术）。
   取消与中断由 P2 的 `AbortScope` 接管，本模块不提前引入。
 """
 
@@ -88,6 +93,8 @@ class StepResult:
     error: str = ""
     reasoning_chars: int = 0
     rounds: int = 0
+    #: 本次步骤的 token 用量（非流式路径跨轮累加；流式由调用方的 ``usage_sink`` 记账）
+    usage: dict = field(default_factory=dict)
 
 
 def accumulate_tool_call(slot_map: dict, tc: dict) -> None:
@@ -212,4 +219,81 @@ async def run_stream_step(req: StepRequest) -> StepResult:
         result.kind = KIND_MAX_ROUNDS
 
     result.text = "".join(text_parts)
+    return result
+
+
+async def run_blocking_step(req: StepRequest) -> StepResult:
+    """跑完一次非流式步骤（含工具多轮），返回结构化结局。
+
+    与 `run_stream_step` 是同一套循环语义，只把 `invoker.stream` 换成
+    `invoker.chat`：**适配器只发一次请求**（``tool_executor`` 到这里为止），
+    工具执行、回填、补图都在这里。
+
+    思考吃满预算的收敛重试与空回复兜底话术**不在这里**：它们改的是 prompt
+    （追加提醒）或对外话术，属于调用方的职责（与改动前同口径）。
+    """
+    from app.agent.loop.provider_view import _modalities_for_chain
+    from app.agent.loop.tool_loop import normalize_and_execute_tool_calls
+    from app.agent.loop.turn_metrics import _input_tokens_estimate
+    from app.agent.providers.base import merge_usage
+    from app.agent.providers.invoker import resolve_invoker
+    from app.agent.tools.round_images import append_round_images
+
+    result = StepResult()
+    if req.max_rounds <= 0:
+        return result
+
+    params = {k: v for k, v in req.params.items() if k != "tool_executor"}
+    executor = req.params.get("tool_executor")
+    invoker = resolve_invoker(req.runtime)
+    modalities = req.modalities
+    if modalities is None:
+        modalities = _modalities_for_chain(req.chain)
+
+    for round_index in range(req.max_rounds):
+        result.rounds = round_index + 1
+        # 每轮都重算上下文规模：工具回填让 messages 变长，预算闸门必须看见真实值
+        params["input_tokens_estimate"] = _input_tokens_estimate(req.messages)
+        response = await invoker.chat(
+            runtime=req.runtime, chain=req.chain, messages=req.messages, params=params
+        )
+
+        usage = getattr(response, "usage", None)
+        if isinstance(usage, dict):
+            merge_usage(result.usage, usage)
+        text = str(getattr(response, "text", "") or "")
+        reasoning = str(getattr(response, "reasoning", "") or "")
+        result.reasoning_chars += len(reasoning)
+        calls = list(getattr(response, "tool_calls", None) or [])
+
+        if not calls:
+            result.text = text
+            result.tool_calls = []
+            result.kind = KIND_ASSISTANT if text.strip() else KIND_EMPTY
+            break
+
+        normalized, tool_messages = await normalize_and_execute_tool_calls(
+            calls, executor, result.tool_results
+        )
+        result.tool_calls = normalized
+        req.messages.append({
+            "role": "assistant",
+            "content": text or None,
+            "tool_calls": normalized,
+        })
+        req.messages.extend(tool_messages)
+
+        images_appended = append_round_images(req.messages, req.tool_ctx, modalities)
+
+        if req.on_round_end is not None:
+            await req.on_round_end(RoundSummary(
+                index=round_index,
+                rounds_left=req.max_rounds - (round_index + 1),
+                round_text=text,
+                tool_results=list(result.tool_results),
+                images_appended=images_appended,
+            ))
+    else:
+        result.kind = KIND_MAX_ROUNDS
+
     return result

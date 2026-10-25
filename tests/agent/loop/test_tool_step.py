@@ -17,13 +17,15 @@ from types import SimpleNamespace
 
 from app.agent.loop.tool_step import (
     KIND_ASSISTANT,
+    KIND_EMPTY,
     KIND_ERROR,
     KIND_MAX_ROUNDS,
     StepRequest,
     accumulate_tool_call,
+    run_blocking_step,
     run_stream_step,
 )
-from app.agent.providers.base import StreamEvent
+from app.agent.providers.base import LLMResponse, StreamEvent
 
 
 class _Invoker:
@@ -223,3 +225,82 @@ def test_accumulate_tool_call_joins_fragments_and_tolerates_nulls():
     assert slots[0]["id"] == "c0"
     assert slots[0]["function"]["name"] == "probe_a"
     assert slots[0]["function"]["arguments"] == '{"a": 1}'
+
+
+# ==================== 非流式（run_blocking_step）====================
+
+
+class _ChatInvoker:
+    """按脚本回放"一次非流式响应"；``stream`` 只为满足鸭子类型存在。"""
+
+    def __init__(self, script: list[LLMResponse]):
+        self.script = list(script)
+        self.seen: list[list[dict]] = []
+        self.params: list[dict] = []
+
+    async def chat(self, *, runtime, chain, messages, params):
+        self.seen.append([dict(m) for m in messages])
+        self.params.append(dict(params))
+        return self.script.pop(0)
+
+    async def stream(self, *, runtime, chain, messages, params):  # pragma: no cover
+        raise AssertionError("本测试只应走非流式路径")
+        yield  # pragma: no cover - 让函数成为 async generator
+
+
+def _calls(*items: tuple[str, str, str]) -> list[dict]:
+    return [
+        {"id": call_id, "type": "function", "function": {"name": name, "arguments": args}}
+        for name, args, call_id in items
+    ]
+
+
+async def test_blocking_two_tool_rounds_then_answer():
+    executed: list[tuple[str, dict]] = []
+    executor = await _executor_factory(executed)
+    invoker = _ChatInvoker([
+        LLMResponse(text="", tool_calls=_calls(("probe_a", '{"x": 1}', "c0")), usage={"prompt_tokens": 10}),
+        LLMResponse(text="", tool_calls=_calls(("probe_b", '{"y": 2}', "c1")), usage={"prompt_tokens": 20}),
+        LLMResponse(text="查到了。", usage={"completion_tokens": 5}),
+    ])
+
+    result = await run_blocking_step(_request(invoker, executor))
+
+    assert result.kind == KIND_ASSISTANT
+    assert result.text == "查到了。"
+    assert result.rounds == 3
+    assert executed == [("probe_a", {"x": 1}), ("probe_b", {"y": 2})]
+    assert len(invoker.seen) == 3
+    assert invoker.seen[1][-1]["tool_call_id"] == "c0"
+    assert invoker.seen[2][-2]["tool_calls"][0]["id"] == "c1"
+    # 非流式同样不能把执行器继续传给适配器
+    assert "tool_executor" not in invoker.params[0]
+    # usage 跨轮累加（提示词 10+20、补全 5）
+    assert result.usage["prompt_tokens"] == 30
+    assert result.usage["completion_tokens"] == 5
+
+
+async def test_blocking_empty_answer_is_reported_with_reasoning():
+    invoker = _ChatInvoker([LLMResponse(text="", reasoning="想了很久")])
+
+    result = await run_blocking_step(_request(invoker, max_rounds=3))
+
+    assert result.kind == KIND_EMPTY
+    assert result.reasoning_chars == 4
+    assert result.rounds == 1, "没有工具调用就该结束，不该白跑后面的轮次"
+    assert len(invoker.seen) == 1
+
+
+async def test_blocking_max_rounds_is_reported_not_raised():
+    executed: list[tuple[str, dict]] = []
+    executor = await _executor_factory(executed)
+    invoker = _ChatInvoker([
+        LLMResponse(text="", tool_calls=_calls(("probe_a", "{}", "c0"))),
+        LLMResponse(text="", tool_calls=_calls(("probe_a", "{}", "c1"))),
+    ])
+
+    result = await run_blocking_step(_request(invoker, executor, max_rounds=2))
+
+    assert result.kind == KIND_MAX_ROUNDS
+    assert result.rounds == 2
+    assert len(result.tool_results) == 2, "已执行的工具结果不能丢"

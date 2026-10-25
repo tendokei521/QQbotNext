@@ -255,12 +255,7 @@ class GeminiProvider(BaseProvider):
             )
 
             calls = _function_calls(parts)
-            if not calls or tool_executor is None:
-                return LLMResponse(
-                    text=text, reasoning=reasoning, usage=total_usage, raw=data,
-                    tool_results=tool_results,
-                )
-
+            # Gemini functionCall → OpenAI-style tool_calls（适配器只做翻译，不执行）
             tool_calls = [{
                 "id": c["id"],
                 "type": "function",
@@ -269,6 +264,12 @@ class GeminiProvider(BaseProvider):
                     "arguments": json.dumps(c["args"], ensure_ascii=False),
                 },
             } for c in calls]
+            if not calls or tool_executor is None:
+                return LLMResponse(
+                    text=text, reasoning=reasoning, usage=total_usage, raw=data,
+                    tool_results=tool_results, tool_calls=tool_calls,
+                )
+
             normalized, result_messages = await normalize_and_execute_tool_calls(
                 tool_calls, tool_executor, tool_results
             )
