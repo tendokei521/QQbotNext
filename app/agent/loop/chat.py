@@ -69,6 +69,7 @@ from app.agent.loop.tool_step import (
     StepResult,
     iter_stream_step,
 )
+from app.agent.loop.turn_runner import TurnAborted
 from app.agent.loop.turn_metrics import (  # noqa: F401 - 重导出保持 chat.* API
     _MAX_TOKENS_WARNED,
     DEFAULT_EMPTY_REPLY_RETRIES,
@@ -341,6 +342,9 @@ async def stream_response(runtime, event, ctx=None):
     }
     # 最后一份轮次小结（收尾判断要看"本轮"而不是累计值）
     last_round_text = ""
+    # 协作式取消句柄（流水线在"新消息取代本轮"时取消它）；None = 本轮不可取消
+    abort = getattr(ctx, "abort", None) if ctx is not None else None
+    aborted = False
 
     while True:
         step = StepResult()
@@ -354,6 +358,7 @@ async def stream_response(runtime, event, ctx=None):
                 tool_ctx=tool_ctx,
                 modalities=modalities,
                 max_msg_len=max_msg_len,
+                abort=abort,
             ),
             step,
         )
@@ -414,12 +419,26 @@ async def stream_response(runtime, event, ctx=None):
                             "role": "user",
                             "content": SPEAK_REMINDER.format(rounds=rounds_left),
                         })
+        except TurnAborted as e:
+            # 只在边界被取消：已经 yield 出去的句子、已经 upsert 的历史前缀都算数。
+            # 这里**不能 raise**：收尾（历史定稿 / mark_replied / 遥测）必须照常走完，
+            # 否则下一轮上下文里"刚说过的话"不存在。
+            aborted = True
+            logger.add_info(account_label(runtime.bot_id)).info(
+                f"[LLM] 本轮被取消（{e.cause}）-> {session_id}，已产出 {len(full_text_parts)} 句"
+            )
+            if ctx is not None:
+                # 告诉流水线：把已经发出去的前缀写进历史（与 should_stop 打断同一口径）
+                ctx.state["interrupted"] = True
         finally:
             # 调用方可能在本步骤中途停下（句间打断）：确保事件流被关掉，已产出的事实留在 step 上
             await events.aclose()
 
         # 本轮步骤执行过的工具（跨收敛轮要合并，遥测与诊断日志都读它）
         tool_results.extend(step.tool_results)
+
+        if aborted:
+            break
 
         if step.kind == KIND_ERROR:
             # 这里**不能 return**：此前直接 return 跳过了写历史 / mark_replied /
@@ -534,6 +553,7 @@ async def stream_response(runtime, event, ctx=None):
     # 结构化结局：调用方（遥测/turn 事件/记忆蒸馏）据此判断"这轮到底怎么结束的"，
     # 不再从日志文案里猜——兜底话术与"想过但没写"在 text 上长得一样。
     turn_reason = _stream_turn_reason(
+        aborted=aborted,
         stream_error_text=stream_error_text,
         speech_by_tool=speech_by_tool,
         spoken=len(spoken_parts),
@@ -584,6 +604,7 @@ async def stream_response(runtime, event, ctx=None):
 
 def _stream_turn_reason(
     *,
+    aborted: bool = False,
     stream_error_text: str,
     speech_by_tool: bool,
     spoken: int,
@@ -592,6 +613,7 @@ def _stream_turn_reason(
 ):
     """流式路径的结局判定（与 `turn_runner.classify_step` 同一套口径）。
 
+    - 被取消 → `aborted`（优先级最高：用户看到的只是半句，不能记成完成）；
     - 失败 → `error`；
     - 发言通道：有入稿 = `completed`，没开口 = `silent`；
     - 纯文本：有正文 = `completed`；没正文但想过一大段 = `max_tokens`（思考吃满预算），
@@ -599,6 +621,8 @@ def _stream_turn_reason(
     """
     from app.agent.loop.turn_runner import TurnReason
 
+    if aborted:
+        return TurnReason.ABORTED
     if stream_error_text:
         return TurnReason.ERROR
     if speech_by_tool:

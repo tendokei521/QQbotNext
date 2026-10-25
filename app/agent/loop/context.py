@@ -30,6 +30,9 @@ class LlmContext:
     messages: list = field(default_factory=list)
     state: dict = field(default_factory=dict)
     job: "LlmJob | None" = None
+    #: 本轮协作式取消句柄（`turn_runner.AbortScope`）：流水线在"新消息取代旧任务"时
+    #: 调它的 `cancel()`，工具循环在每个 await 边界检查它。None = 本轮不可被取消。
+    abort: Any = None
 
     @property
     def llm(self):

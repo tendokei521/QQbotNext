@@ -32,6 +32,8 @@ class LlmPipeline:
         self.session_locks = SessionLockManager()
         self._tasks: set[asyncio.Task] = set()
         self._session_generation: dict[str, int] = {}
+        #: 会话 → 当前活跃一轮的取消句柄（`turn_runner.AbortScope`）
+        self._active_scopes: dict = {}
 
     def submit(self, event) -> asyncio.Task | None:
         """提交一个 LLM 处理任务（非阻塞）。"""
@@ -111,8 +113,20 @@ class LlmPipeline:
         )
 
     def interrupt_session(self, session_id: str) -> None:
-        """使某会话的旧任务过期（代际单调递增）。"""
+        """使某会话的旧任务过期（代际单调递增）**并**协作式取消它。
+
+        两条机制并存：代际（`is_stale`）负责"新消息进队列后不要再发请求/不要再发句子"，
+        `AbortScope` 负责"正在跑的循环在下一个边界停下"。只靠代际停不住工具轮——
+        它只有在流式句间才被检查，非流式的工具循环根本不会看它。
+        """
         self._session_generation[session_id] = self._session_generation.get(session_id, 0) + 1
+        scope = self._active_scopes.get(session_id)
+        if scope is not None and scope.cancel("新消息取代了本轮"):
+            from app.core.logger import logger
+
+            logger.add_info(account_label(getattr(self.runtime, "bot_id", "?"))).debug(
+                f"[LLM Pipeline] 协作式取消本轮 -> {session_id}"
+            )
 
     def is_stale(self, job: LlmJob) -> bool:
         """判断任务是否已被同一会话的新消息打断。
@@ -236,6 +250,14 @@ class LlmPipeline:
         # 本轮结局：默认「收到但不需要响应」，后续按真实分支升级
         outcome = "ignored"
         try:
+            # 本轮的取消句柄：注册到会话上，`interrupt_session` 才能停住**正在跑**的循环
+            # （代际只在新消息进来时抬高，它停不住一个非流式的工具轮）。
+            # 放在 try 内：prologue 里任何取属性抛异常都会让整轮静默消失。
+            if ctx is not None:
+                from app.agent.loop.turn_runner import AbortScope
+
+                ctx.abort = AbortScope()
+                self._active_scopes[job.group_key] = ctx.abort
             # 注意：`ctx = job.ctx` 保留在 try 外只为 finally 里能用；
             # 任何可能抛的取属性都放在 try 内（此前 prologue 在 try 外，
             # 一处 AttributeError 就能让整轮静默消失）。
@@ -362,6 +384,9 @@ class LlmPipeline:
                 f"[LLM Pipeline] 任务异常: {e}"
             )
         finally:
+            scope = getattr(ctx, "abort", None)
+            if scope is not None and self._active_scopes.get(job.group_key) is scope:
+                self._active_scopes.pop(job.group_key, None)
             if lock_acquired and session_lock is not None:
                 if session_lock.locked():
                     session_lock.release()

@@ -95,6 +95,8 @@ class StepRequest:
     on_round_end: Callable[[RoundSummary], Awaitable[None]] | None = None
     #: 单句最大长度（切句用）
     max_msg_len: int = 200
+    #: 协作式取消句柄（`turn_runner.AbortScope`）：每轮请求前与每次工具派发前检查
+    abort: Any = None
 
 
 @dataclass
@@ -188,6 +190,10 @@ async def _drive_stream_rounds(
     from app.agent.tools.round_images import append_round_images
 
     for round_index in range(req.max_rounds):
+        # 取消只在**边界**生效：上一轮已经发出去的句子、已经写进历史的前缀都算数，
+        # 所以检查点放在"要发下一个请求之前"，而不是流式产出的中途。
+        if req.abort is not None:
+            req.abort.throw_if_aborted()
         result.rounds = round_index + 1
         round_start = len(text_parts)      # 本轮新增文本从这一格开始
         buffer = ""
@@ -259,6 +265,10 @@ async def _drive_stream_rounds(
             break
 
         calls = [tool_calls[idx] for idx in sorted(tool_calls)]
+        # 派发前再查一次：模型刚给出的这批工具调用如果不再需要，就不该真的去执行
+        # （执行一个已经没人要的写操作是不可撤销的）。
+        if req.abort is not None:
+            req.abort.throw_if_aborted()
         normalized, tool_messages = await normalize_and_execute_tool_calls(
             calls, executor, result.tool_results
         )
@@ -340,6 +350,8 @@ async def run_blocking_step(req: StepRequest) -> StepResult:
         modalities = _modalities_for_chain(req.chain)
 
     for round_index in range(req.max_rounds):
+        if req.abort is not None:
+            req.abort.throw_if_aborted()
         result.rounds = round_index + 1
         # 每轮都重算上下文规模：工具回填让 messages 变长，预算闸门必须看见真实值
         params["input_tokens_estimate"] = _input_tokens_estimate(req.messages)

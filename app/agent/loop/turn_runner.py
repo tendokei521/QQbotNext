@@ -79,6 +79,63 @@ def classify_step(step) -> TurnReason:
     return TurnReason.COMPLETED
 
 
+class TurnAborted(Exception):
+    """本轮被协作式取消（由 `AbortScope.throw_if_aborted` 抛出）。
+
+    刻意不是 `asyncio.CancelledError`：取消只发生在**边界**（请求前 / 工具派发前），
+    已经发出去的消息与已经写进历史的前缀必须留下，所以不能用 task.cancel() 那种
+    "任意位置被打断"的语义。
+    """
+
+    def __init__(self, cause: str = "") -> None:
+        self.cause = cause or "turn aborted"
+        super().__init__(self.cause)
+
+
+class AbortScope:
+    """协作式取消：只置标志，在边界处抛 `TurnAborted`。
+
+    为什么不用 ``task.cancel()``：它会在任意 await 点打断，可能正好打断"发送成功
+    之后、写历史之前"，于是用户看到了消息但历史里没有（下一轮模型"失忆"），
+    或者反过来双写。这里只允许在**我们自己放的检查点**停，停之前发生的事都算数。
+
+    用法::
+
+        scope = AbortScope()
+        scope.throw_if_aborted()        # 边界处检查
+        scope.cancel("新消息取代")       # 任何一方都能取消（幂等）
+    """
+
+    __slots__ = ("_cause",)
+
+    def __init__(self) -> None:
+        self._cause = ""
+
+    @property
+    def aborted(self) -> bool:
+        return bool(self._cause)
+
+    @property
+    def cause(self) -> str:
+        return self._cause
+
+    def cancel(self, cause: str = "") -> bool:
+        """取消（幂等）。返回是否**首次**取消（便于日志只打一次）。"""
+        if self._cause:
+            return False
+        self._cause = cause or "aborted"
+        return True
+
+    def throw_if_aborted(self) -> None:
+        if self._cause:
+            raise TurnAborted(self._cause)
+
+
+def abort_scope_of(source) -> AbortScope | None:
+    """从 ``ctx`` / ``TurnRequest`` 之类的对象上取取消句柄（没有就是 None）。"""
+    return getattr(source, "abort", None)
+
+
 @dataclass
 class TurnState:
     """一轮的状态：``running → finished(reason)``。
