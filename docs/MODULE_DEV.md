@@ -619,6 +619,33 @@ class Module(BaseModule):
 | `runtime.assembler` | `PromptAssembler`（块表） | 人设/协议/技能/记忆/背景/群聊记录/历史/本轮 | `build(req) -> list[dict]` |
 | `runtime.invoker` | `ProviderInvoker` | 多 provider 回退链 + 空回复重试 + 参数白名单透传 | `chat(*, runtime, chain, messages, params)` / `stream(...)` |
 
+### 4.7.1 工具循环住在 `app/agent/loop/tool_step.py`（P1 起）
+
+一轮「请求 → 工具批次 → 回填」的循环**只有这一处**实现：
+
+```python
+from app.agent.loop.tool_step import StepRequest, run_blocking_step, run_stream_step
+
+step = await run_blocking_step(StepRequest(
+    runtime=runtime, chain=chain, messages=messages,
+    params={"model": ..., "tools": ..., "tool_executor": executor},
+    max_rounds=5, tool_ctx=tool_ctx, modalities=modalities,
+))
+# step.kind: assistant / max_rounds / error / empty
+# step.text / step.tool_results / step.tool_calls / step.usage
+```
+
+**provider 适配器只发一次请求**：它把这些工具调用报在 `LLMResponse.tool_calls`
+里，不执行、不再循环。因此：
+
+- 直接 `await provider.chat(..., tool_executor=...)` 的代码**拿不到工具循环**了
+  （这是 P1 的对外可见变化）。要么改用 `chat_with_fallback(..., tool_executor=...)`
+  （签名不变、内部转调上面的 runner），要么直接用 runner。
+- 接管 `runtime.invoker` 的插件要自己负责循环：`params` 里会带 `tool_executor`，
+  但框架不会再往下传——循环归调用策略那一层。
+- 流式侧同理：`chat.stream_response` 消费 `iter_stream_step` 的事件
+  （`("text", 句子)` / `("round_end", RoundSummary)`），所以它能在句间被打断。
+
 配套的三个开关（Agent 配置页「会话 / 压缩」组，**都默认关闭/保持原行为**）：
 
 | 配置键 | 默认 | 用途 |

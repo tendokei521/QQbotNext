@@ -62,13 +62,15 @@ def test_both_paths_run_post_assemble():
         assert "apply_post_assemble" in _text(path), f"{path.name} 漏了 post_assemble"
 
 
-def test_both_paths_append_round_images():
-    """工具轮取回的图片必须能被送到模型（历史上只有流式做过）。"""
-    for path in (TURN_PY, CHAT_PY):
-        text = _text(path)
-        assert "_append_round_images" in text or "append_round_images" in text, (
-            f"{path.name} 漏了 round images 追加"
-        )
+def test_round_images_are_appended_by_the_shared_runner():
+    """工具轮取回的图片必须能被送到模型（历史上只有流式做过）。
+
+    P1 收口后"每轮补图"只剩一个实现处（`loop/tool_step` 的两个 runner），
+    所以锁 runner 本身：调用方再抄一份就会被 `test_no_tool_loop_in_providers`
+    的收敛守卫和这里同时发现。
+    """
+    runner = ROOT / "app" / "agent" / "loop" / "tool_step.py"
+    assert "append_round_images" in _text(runner), "runner 漏了 round images 追加"
 
 
 def test_both_paths_commit_history_enrichment():

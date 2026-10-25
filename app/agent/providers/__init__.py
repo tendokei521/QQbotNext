@@ -268,6 +268,67 @@ def log_token_usage(
     logger.add_info("Api").info(text)
 
 
+async def _chat_with_tool_loop(
+    config_chain: list[dict],
+    messages: list[dict],
+    *,
+    model: str | None,
+    temperature: float,
+    max_tokens: int,
+    timeout: int,
+    tools: list[dict],
+    tool_executor,
+    max_tool_rounds: int,
+    max_empty_retries: int,
+    empty_retry_backoff: float,
+    budget,
+    input_tokens_estimate: int,
+) -> LLMResponse:
+    """``chat_with_fallback(tool_executor=…)`` 的兼容壳：循环交给共享运行器。
+
+    P1 之前这段循环在三个适配器里各有一份（改一处漏一处）。现在：
+    适配器只发**一次**请求并报出 ``tool_calls``，执行/回填/补图由
+    ``agent/loop/tool_step.run_blocking_step`` 负责；调用方拿到的仍是"整轮结果"，
+    所以模块的 ``llm_chat``、第三方插件里的旧用法都不需要改。
+
+    区别只体现在日志粒度：token 消耗从"整轮一行"变成"每次请求一行"
+    （与流式路径一致）。
+    """
+    from app.agent.loop.tool_step import KIND_ERROR, StepRequest, run_blocking_step
+
+    step = await run_blocking_step(
+        StepRequest(
+            runtime=None,
+            chain=list(config_chain or []),
+            messages=messages,
+            params={
+                "model": model,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "timeout": timeout,
+                "tools": tools,
+                "tool_executor": tool_executor,
+                "max_empty_retries": max_empty_retries,
+                "empty_retry_backoff": empty_retry_backoff,
+                "budget": budget,
+                "input_tokens_estimate": input_tokens_estimate,
+            },
+            max_rounds=max(1, int(max_tool_rounds or 5)),
+        )
+    )
+    if step.kind == KIND_ERROR:
+        from app.agent import logger
+
+        logger.add_info("LLM").warning(f"工具循环中断：{step.error}")
+    return LLMResponse(
+        text=step.text,
+        usage=dict(step.usage or {}),
+        raw=None,
+        tool_results=list(step.tool_results),
+        tool_calls=list(step.tool_calls),
+    )
+
+
 async def chat_with_fallback(
     config_chain: list[dict],
     messages: list[dict],
@@ -300,7 +361,28 @@ async def chat_with_fallback(
     每次都带着全量上下文（线上为此把 16.7 万 token 发了三遍）。
 
     全部软失败时返回最后一个响应（保留 raw），让调用方的兜底分支继续生效。
+
+    ``tool_executor`` 非空时**不再由适配器执行工具**（P1 收口）：这里转调
+    ``agent/loop/tool_step.run_blocking_step`` 驱动整轮循环，签名与旧行为保持一致——
+    经 ``client.llm_chat`` 或直接调本函数传执行器的第三方模块仍拿到完整工具循环。
     """
+    if tool_executor is not None and tools:
+        return await _chat_with_tool_loop(
+            config_chain,
+            messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            tools=tools,
+            tool_executor=tool_executor,
+            max_tool_rounds=max_tool_rounds,
+            max_empty_retries=max_empty_retries,
+            empty_retry_backoff=empty_retry_backoff,
+            budget=budget,
+            input_tokens_estimate=input_tokens_estimate,
+        )
+
     chain = list(config_chain or [])
     if not chain:
         return LLMResponse(text="", raw=None)

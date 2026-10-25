@@ -418,8 +418,12 @@ def test_events_from_chunk_text_and_done():
     assert events[2].finish_reason == "stop"
 
 
-async def test_openai_chat_aggregates_usage_across_tool_rounds(monkeypatch):
-    """非流式工具循环：多轮 usage 求和后再交给调用方（也修了遥测只记最后一轮的老问题）。"""
+async def test_chat_with_fallback_aggregates_usage_across_tool_rounds(monkeypatch):
+    """非流式工具循环：多轮 usage 求和后再交给调用方（也修了遥测只记最后一轮的老问题）。
+
+    P1 收口后适配器只发单次请求，循环在 ``providers.chat_with_fallback`` 的兼容壳里
+    （内部走 ``loop/tool_step.run_blocking_step``）——所以这里测的是那个公开入口。
+    """
     provider = OpenAICompatProvider({"model": "m", "api_key": "k"})
     rounds = [
         {
@@ -441,7 +445,11 @@ async def test_openai_chat_aggregates_usage_across_tool_rounds(monkeypatch):
         return "tool-result"
 
     monkeypatch.setattr(provider, "_request", _fake_request)
-    resp = await provider.chat(
+    from app.agent import providers as providers_module
+
+    monkeypatch.setattr(providers_module, "get_provider", lambda cfg: provider)
+    resp = await providers_module.chat_with_fallback(
+        [{"provider": "openai", "model": "m"}],
         [{"role": "user", "content": "hi"}],
         tools=[{"type": "function", "function": {"name": "t"}}],
         tool_executor=_executor,

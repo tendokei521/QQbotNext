@@ -59,8 +59,13 @@ async def test_provider_chat_without_key_returns_empty():
     assert resp.ok is False
 
 
-async def test_provider_tool_loop():
-    """原生 function calling 工具循环：tool_calls → 执行 → 回传 → 最终回复。"""
+async def test_provider_tool_loop(monkeypatch):
+    """原生 function calling 工具循环：tool_calls → 执行 → 回传 → 最终回复。
+
+    P1 收口后适配器只发单次请求，循环在 ``chat_with_fallback`` 的兼容壳里
+    （内部是 ``loop/tool_step.run_blocking_step``）——所以测这个公开入口。
+    """
+    from app.agent import providers as providers_module
     from app.agent.providers.openai_compat import OpenAICompatProvider
 
     provider = OpenAICompatProvider({"api_key": "sk-test"})
@@ -96,7 +101,9 @@ async def test_provider_tool_loop():
         executed.append((name, args))
         return "success: 已创建"
 
-    resp = await provider.chat(
+    monkeypatch.setattr(providers_module, "get_provider", lambda cfg: provider)
+    resp = await providers_module.chat_with_fallback(
+        [{"provider": "openai", "model": "m"}],
         [{"role": "user", "content": "明早8点提醒我"}],
         tools=[{"type": "function", "function": {"name": "schedule_task", "description": "t", "parameters": {}}}],
         tool_executor=_executor,

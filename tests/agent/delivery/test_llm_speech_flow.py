@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import json
 import types
 
 from app.agent.providers import PROVIDERS
@@ -40,14 +41,26 @@ def _tool_call(name: str, args: str, index: int = 0) -> StreamEvent:
 
 
 class _SpeechProbe(BaseProvider):
-    """按脚本产出流式事件；非流式只在补救轮里被调用。"""
+    """按脚本产出流式事件；非流式只在补救轮里被调用。
+
+    补救轮走的是 ``chat_with_fallback`` 的兼容壳：适配器只发单次请求、把
+    ``send_message`` 作为 ``tool_calls`` 交出去，由共享运行器执行（P1 收口）。
+    所以这里第二轮（messages 尾部已是 role=tool）要返回"无工具调用"来收尾。
+    """
 
     async def chat(self, messages, **kwargs):
         CHAT_MESSAGES.append([dict(m) for m in messages])
-        TIMELINE.append("force")
-        executor = kwargs.get("tool_executor")
-        if FORCE_SPEAK_TEXT and executor is not None:
-            await executor("send_message", {"messages": FORCE_SPEAK_TEXT})
+        called_tools = any(m.get("role") == "tool" for m in messages)
+        if FORCE_SPEAK_TEXT and not called_tools:
+            TIMELINE.append("force")
+            return LLMResponse(text="", raw={}, tool_calls=[{
+                "id": "c_force",
+                "type": "function",
+                "function": {
+                    "name": "send_message",
+                    "arguments": json.dumps({"messages": FORCE_SPEAK_TEXT}, ensure_ascii=False),
+                },
+            }])
         return LLMResponse(text="", raw={"choices": [{}]})
 
     async def chat_stream(self, messages, **kwargs):

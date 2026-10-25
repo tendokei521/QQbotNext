@@ -16,7 +16,6 @@ from typing import Callable
 import aiohttp
 
 from app.agent import logger
-from app.agent.loop.tool_loop import normalize_and_execute_tool_calls
 from app.agent.providers.base import (
     BaseProvider,
     LLMResponse,
@@ -24,7 +23,6 @@ from app.agent.providers.base import (
     build_extra_body,
     build_extra_headers,
     format_llm_error,
-    merge_usage,
 )
 
 RETRYABLE_STATUS = {408, 409, 429, 500, 502, 503, 504, 529}
@@ -353,7 +351,7 @@ class OpenAICompatProvider(BaseProvider):
             tool_calls=tool_calls,
         )
 
-    # ---------- 对话 + 工具循环 ----------
+    # ---------- 对话（单次请求） ----------
     async def chat(
         self,
         messages: list[dict],
@@ -366,9 +364,13 @@ class OpenAICompatProvider(BaseProvider):
         tool_executor: Callable | None = None,
         max_tool_rounds: int = 5,
     ) -> LLMResponse:
-        """对话请求。若提供 tools 且模型返回 tool_calls，则循环执行工具并回传结果。
+        """对话请求：**只发一次**，模型要的工具通过 ``LLMResponse.tool_calls`` 交出去。
 
-        tools: OpenAI function 定义列表；tool_executor: async (name, args) -> str。
+        工具执行循环自 P1 起统一在 ``agent/loop/tool_step.run_blocking_step``：
+        适配器不再自己跑循环（否则"改一处漏一处"永远治不好）。
+        ``tool_executor`` / ``max_tool_rounds`` 仍留在签名里只是为了不破坏既有调用方；
+        走 ``providers.chat_with_fallback(tool_executor=...)`` 的调用依旧会得到完整循环
+        （由它转调共享运行器）。
         """
         model = model or self.config.get("model", "deepseek-chat")
         payload: dict = {
@@ -382,39 +384,10 @@ class OpenAICompatProvider(BaseProvider):
             payload["tools"] = tools
         payload.update(self._extra_body())
 
-        tool_results: list[dict] = []
-        total_usage: dict = {}  # 工具多轮的 token 消耗累计（本次请求结束后统一记一次）
-        for _round in range(max_tool_rounds):
-            result = await self._request(payload, timeout)
-            if result is None:
-                return LLMResponse(text="", raw=None, usage=total_usage)
-            merge_usage(total_usage, result.get("usage", {}) or {})
-            choices = result.get("choices", []) or []
-            if not choices:
-                return LLMResponse(text="", raw=None, usage=total_usage)
-            message = choices[0].get("message", {}) or {}
-            tool_calls = message.get("tool_calls") or []
-            if not tool_calls or tool_executor is None:
-                return self._to_response(result, tool_results, usage=total_usage)
-
-            # 工具循环：保留 assistant tool_calls，追加各工具结果，重发。
-            # 复用共享 helper（与流式 stream_response 同一套逻辑）：
-            # id 自洽 + arguments 解析 + 执行 + 构造回传。
-            normalized_calls, tool_messages = await normalize_and_execute_tool_calls(
-                tool_calls, tool_executor, tool_results
-            )
-            payload["messages"].append({
-                "role": "assistant",
-                "content": message.get("content") or None,
-                "tool_calls": normalized_calls,
-            })
-            payload["messages"].extend(tool_messages)
-
-        logger.add_info("Api").warning(
-            f"工具循环超过 {max_tool_rounds} 轮，强制结束（可调大 max_tool_rounds 配置）"
-        )
-        # 保留已执行工具结果与最后一次响应，避免已完成的工具调用静默丢失
-        return self._to_response(result, tool_results, usage=total_usage)
+        result = await self._request(payload, timeout)
+        if result is None:
+            return LLMResponse(text="", raw=None)
+        return self._to_response(result)
 
     async def chat_stream(
         self,

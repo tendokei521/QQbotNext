@@ -17,7 +17,7 @@ import re
 import aiohttp
 
 from app.agent import logger
-from app.agent.providers.base import BaseProvider, LLMResponse, StreamEvent, format_llm_error, merge_usage
+from app.agent.providers.base import BaseProvider, LLMResponse, StreamEvent, format_llm_error
 
 _DEFAULT_BASE = "https://generativelanguage.googleapis.com/v1beta"
 _DATA_URL_RE = re.compile(r"^data:image/([a-z0-9.+-]+);base64,(.+)$", re.IGNORECASE | re.DOTALL)
@@ -190,114 +190,80 @@ class GeminiProvider(BaseProvider):
         tool_executor=None,
         max_tool_rounds: int = 5,
     ) -> LLMResponse:
-        from app.agent.loop.tool_loop import normalize_and_execute_tool_calls
+        """对话请求：**只发一次**，要调的函数通过 ``LLMResponse.tool_calls`` 交出去。
 
+        工具循环自 P1 起统一在 ``agent/loop/tool_step``；``tool_executor`` 仍在签名里
+        只为兼容既有调用方（经 ``chat_with_fallback`` 调用时循环照旧由它驱动）。
+        """
         model = model or self.config.get("model", "gemini-2.0-flash")
         contents, system = _normalize_messages(messages)
         gemini_tools = _to_gemini_tools(tools)
-        tool_results: list[dict] = []
-        total_usage: dict = {}  # 工具多轮的 token 消耗累计（本次请求结束后统一记一次）
 
         if not self.api_key:
             return LLMResponse(text="", raw=None)
 
-        for _round in range(max_tool_rounds):
-            payload: dict = {
-                "contents": contents,
-                "generationConfig": {
-                    "temperature": temperature,
-                    "maxOutputTokens": max_tokens,
-                },
-            }
-            if system:
-                payload["systemInstruction"] = {"parts": [{"text": system}]}
-            if gemini_tools:
-                payload["tools"] = gemini_tools
+        payload: dict = {
+            "contents": contents,
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens,
+            },
+        }
+        if system:
+            payload["systemInstruction"] = {"parts": [{"text": system}]}
+        if gemini_tools:
+            payload["tools"] = gemini_tools
 
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        self._url(model, stream=False),
-                        headers={"Content-Type": "application/json"},
-                        json=payload,
-                        timeout=aiohttp.ClientTimeout(total=timeout),
-                    ) as resp:
-                        if resp.status != 200:
-                            body = await resp.text()
-                            logger.add_info("Gemini").error(
-                                f"Gemini 请求失败 HTTP {resp.status}: {body}"
-                            )
-                            return LLMResponse(text="", raw=None, usage=total_usage)
-                        data = await resp.json()
-            except Exception as e:
-                logger.add_info("Gemini").error(f"Gemini 请求异常: {format_llm_error(e)}")
-                return LLMResponse(text="", raw=None, usage=total_usage)
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self._url(model, stream=False),
+                    headers={"Content-Type": "application/json"},
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=timeout),
+                ) as resp:
+                    if resp.status != 200:
+                        body = await resp.text()
+                        logger.add_info("Gemini").error(
+                            f"Gemini 请求失败 HTTP {resp.status}: {body}"
+                        )
+                        return LLMResponse(text="", raw=None)
+                    data = await resp.json()
+        except Exception as e:
+            logger.add_info("Gemini").error(f"Gemini 请求异常: {format_llm_error(e)}")
+            return LLMResponse(text="", raw=None)
 
-            merge_usage(total_usage, _normalize_usage(data.get("usageMetadata", {}) or {}))
-            candidates = data.get("candidates", []) or []
-            parts = []
-            if candidates:
-                content = (candidates[0].get("content", {}) or {})
-                parts = content.get("parts", []) or []
-            # Gemini 的思考片段带 ``thought: true``：必须与正文分开。流式分支早已区分，
-            # 非流式此前把两者一起拼进 text —— 用户的回复里会直接出现模型的内心独白；
-            # 思考吃满 maxOutputTokens 时更糟：text 非空 ⇒ 上层不判空、不触发收敛轮，
-            # 用户收到的"整条回复"全是思考碎片。
-            text = "".join(
-                str(p.get("text", ""))
-                for p in parts
-                if isinstance(p, dict) and p.get("text") and not p.get("thought")
-            ).strip()
-            reasoning = "".join(
-                str(p.get("text", ""))
-                for p in parts
-                if isinstance(p, dict) and p.get("text") and p.get("thought")
-            )
-
-            calls = _function_calls(parts)
-            # Gemini functionCall → OpenAI-style tool_calls（适配器只做翻译，不执行）
-            tool_calls = [{
-                "id": c["id"],
-                "type": "function",
-                "function": {
-                    "name": c["name"],
-                    "arguments": json.dumps(c["args"], ensure_ascii=False),
-                },
-            } for c in calls]
-            if not calls or tool_executor is None:
-                return LLMResponse(
-                    text=text, reasoning=reasoning, usage=total_usage, raw=data,
-                    tool_results=tool_results, tool_calls=tool_calls,
-                )
-
-            normalized, result_messages = await normalize_and_execute_tool_calls(
-                tool_calls, tool_executor, tool_results
-            )
-
-            # Gemini 角色：assistant 对应 model，工具结果通过 user 的 functionResponse 回传
-            assistant_parts = []
-            if text:
-                assistant_parts.append({"text": text})
-            for c in calls:
-                assistant_parts.append({
-                    "functionCall": {"name": c["name"], "args": c["args"]},
-                })
-            contents.append({"role": "model", "parts": assistant_parts})
-
-            user_parts = []
-            for idx, msg in enumerate(result_messages):
-                user_parts.append({
-                    "functionResponse": {
-                        "name": calls[idx]["name"] if idx < len(calls) else "",
-                        "response": {"result": msg.get("content", "")},
-                    },
-                })
-            contents.append({"role": "user", "parts": user_parts})
-
-        logger.add_info("Gemini").warning(f"工具循环超过 {max_tool_rounds} 轮，强制结束")
+        usage = _normalize_usage(data.get("usageMetadata", {}) or {})
+        candidates = data.get("candidates", []) or []
+        parts = []
+        if candidates:
+            content = (candidates[0].get("content", {}) or {})
+            parts = content.get("parts", []) or []
+        # Gemini 的思考片段带 ``thought: true``：必须与正文分开。流式分支早已区分，
+        # 非流式此前把两者一起拼进 text —— 用户的回复里会直接出现模型的内心独白；
+        # 思考吃满 maxOutputTokens 时更糟：text 非空 ⇒ 上层不判空、不触发收敛轮，
+        # 用户收到的"整条回复"全是思考碎片。
+        text = "".join(
+            str(p.get("text", ""))
+            for p in parts
+            if isinstance(p, dict) and p.get("text") and not p.get("thought")
+        ).strip()
+        reasoning = "".join(
+            str(p.get("text", ""))
+            for p in parts
+            if isinstance(p, dict) and p.get("text") and p.get("thought")
+        )
+        # Gemini functionCall → OpenAI-style tool_calls（适配器只做翻译，不执行）
+        tool_calls = [{
+            "id": c["id"],
+            "type": "function",
+            "function": {
+                "name": c["name"],
+                "arguments": json.dumps(c["args"], ensure_ascii=False),
+            },
+        } for c in _function_calls(parts)]
         return LLMResponse(
-            text=text, reasoning=reasoning, usage=total_usage, raw=data,
-            tool_results=tool_results,
+            text=text, reasoning=reasoning, usage=usage, raw=data, tool_calls=tool_calls,
         )
 
     async def chat_stream(
