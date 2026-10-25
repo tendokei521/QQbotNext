@@ -313,6 +313,7 @@ def build_onebot_tools(runtime: Any, ctx: ToolContext | None = None) -> list[Too
             source="onebot",
             category=str(tool.get("category", "onebot")),
             concurrency="parallel" if policy.get("risk") == "read" else "exclusive",
+            sensitivity=str(policy.get("sensitivity", "normal") or "normal"),
         )
         specs.append(spec)
     return specs

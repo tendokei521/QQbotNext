@@ -93,8 +93,12 @@ class ToolResult:
     ) -> "ToolResult":
         """失败结果。``message`` 是给人看的句子，``code`` 是给机器看的。"""
         body = str(message or "").strip()
-        text = f"error: {body}" if body else f"error: {code or '工具执行失败'}"
-        if body and not body.lower().startswith("error"):
+        if not body:
+            text = f"error: {code or '工具执行失败'}"
+        elif body.lower().startswith("error:"):
+            # 已经是错误文本（执行器把带前缀的正文原样传进来）：不要再加一次前缀
+            text = body
+        else:
             text = f"error: {body}"
         return cls(
             blocks=({"type": "text", "text": text},),

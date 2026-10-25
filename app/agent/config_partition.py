@@ -83,6 +83,8 @@ UI_PAGES: tuple[UIPage, ...] = (
                 "拥有者与管理者",
                 ("agent_owner_list", "agent_manager_list"),
             ),
+            # P6：高危工具审批（fail-closed：没有通道就拒绝）
+            UIGroup("permission_tool_approval", "高危工具审批", ("tool_approval_enable",)),
         ),
     ),
     UIPage(

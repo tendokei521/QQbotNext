@@ -106,6 +106,7 @@ class ToolSpec:
         concurrency: str = "exclusive",
         concurrency_safe: Callable[[dict], bool] | None = None,
         timeout_s: float | None = None,
+        sensitivity: str = "normal",
     ) -> None:
         raw_name = str(name or "")
         self.name = sanitize_tool_name(raw_name)
@@ -130,6 +131,8 @@ class ToolSpec:
         self.concurrency_safe = concurrency_safe
         # 单次执行的墙钟上限；None = 用全局默认（``tool_timeout_default_s``）
         self.timeout_s = timeout_s
+        # 敏感级别（normal/high/critical）：高危 + 开了审批开关时，执行前必须先问人
+        self.sensitivity = str(sensitivity or "normal").strip().lower()
 
     def runs_parallel(self, args: dict) -> bool:
         """这次调用能否与其他工具并发（**fail-closed**：拿不准就按独占）。
@@ -257,26 +260,48 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
                 success = False
                 result = f"error: 无权限调用工具 {name}"
             else:
-                timeout_s = _timeout_of(ctx, spec)
-                try:
-                    # 不用 wait_for：它超时会 **cancel** 工具协程，把"发了一半的消息 /
-                    # 写了一半的文件"掐在半路。这里只等，超时就把结果换成 TOOL_TIMEOUT，
-                    # 让协程自己收敛（DSH 同款语义）。
-                    task = asyncio.create_task(spec.handler(ctx, args))
-                    done, _ = await asyncio.wait({task}, timeout=timeout_s)
-                    if not done:
-                        _orphan(task, name)
-                        raise asyncio.TimeoutError
-                    result = task.result()
-                except asyncio.TimeoutError:
+                # P6 人工审批：高危 OneBot 工具在开关打开时必须先问人。
+                # fail-closed——没有通道就是拒绝，绝不存在"配了审批却悄悄放行"。
+                approval_denied = ""
+                runtime_for_approval = getattr(ctx, "runtime", None) if ctx is not None else None
+                if runtime_for_approval is not None:
+                    from app.agent.tools.approval import (
+                        needs_approval,
+                        rejection_message,
+                        request_approval,
+                    )
+
+                    if needs_approval(runtime_for_approval, spec):
+                        outcome = await request_approval(
+                            runtime_for_approval, tool=name, args=args, ctx=ctx
+                        )
+                        if not outcome.allowed:
+                            approval_denied = rejection_message(outcome)
+                if approval_denied:
                     success = False
-                    error = f"timeout({timeout_s}s)"
-                    result = f"error: TOOL_TIMEOUT 工具 {name} 执行超时（{timeout_s}s）"
-                except Exception as e:
-                    success = False
-                    error = str(e)
-                    logger.add_info("Tool").warning(f"[Tool] {name} 执行异常: {e}")
-                    result = f"error: 工具 {name} 执行异常: {e}"
+                    error = "approval_denied"
+                    result = f"error: 工具 {name} 未获批准（{approval_denied}）"
+                else:
+                    timeout_s = _timeout_of(ctx, spec)
+                    try:
+                        # 不用 wait_for：它超时会 **cancel** 工具协程，把"发了一半的消息 /
+                        # 写了一半的文件"掐在半路。这里只等，超时就把结果换成 TOOL_TIMEOUT，
+                        # 让协程自己收敛（DSH 同款语义）。
+                        task = asyncio.create_task(spec.handler(ctx, args))
+                        done, _ = await asyncio.wait({task}, timeout=timeout_s)
+                        if not done:
+                            _orphan(task, name)
+                            raise asyncio.TimeoutError
+                        result = task.result()
+                    except asyncio.TimeoutError:
+                        success = False
+                        error = f"timeout({timeout_s}s)"
+                        result = f"error: TOOL_TIMEOUT 工具 {name} 执行超时（{timeout_s}s）"
+                    except Exception as e:
+                        success = False
+                        error = str(e)
+                        logger.add_info("Tool").warning(f"[Tool] {name} 执行异常: {e}")
+                        result = f"error: 工具 {name} 执行异常: {e}"
             # 工具用 "error: ..." 文本报错（而非抛异常）时，此前会被记为 success=True，
             # 导致 1404/未连接之类的接口错误在日志与遥测里彻底不可见。
             if success and is_error_result(result):

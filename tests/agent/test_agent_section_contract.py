@@ -97,7 +97,7 @@ def test_page_titles_match_the_agreed_layout():
     ("section_id", "expected"),
     [
         ("basic", 5),
-        ("permission", 3),
+        ("permission", 4),
         ("behavior", 8),
         ("session", 14),
         ("advanced", 20),

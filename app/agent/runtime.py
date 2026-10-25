@@ -150,6 +150,9 @@ class AgentRuntime:
         self.assembler = PromptAssembler()
         # provider 调用策略：插件可声明 supersedes=("provider_invoker",) 整体替换
         self.invoker = ProviderInvoker()
+        # 高危工具审批通道（P6）：插件/业务提供 ``async ask(runtime, *, tool, args, ctx)``。
+        # None = 没有通道 → 需要审批的调用一律拒绝（fail-closed，见 tools/approval.py）。
+        self.approval_channel = None
         # 输出策略：None = 按配置自动选择（stream_output）。
         # 插件可声明 supersedes=("output",) 整体替换；置 None 即回到框架默认。
         self.output = None

@@ -200,6 +200,9 @@ DEFAULT_LLM_CONFIG: dict = {
     # 模型可用 recall_tool_result 取回。关掉 = 回到"直接截断"的老行为。
     "tool_spill_enable": True,
     "tool_spill_max_bytes": 50000,
+    # 高危工具人工审批（P6）：打开后，OneBot 里 sensitivity 为 high/critical 的工具
+    # 在执行前必须先问拥有者；**没有审批通道 → 拒绝**（fail-closed）。
+    "tool_approval_enable": False,
     # 重试档位（thrifty / balanced / resilient）：决定**一整轮**最多能发几次请求、
     # 最多累计烧多少输入 token（见 request_policy.TurnBudget）。这是硬闸门——
     # 没有它，"HTTP 重试 × 空回复重试 × 收敛重试 × provider 数"会乘成十几次，

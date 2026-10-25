@@ -62,6 +62,14 @@
             "agent_owner_list",
             "agent_manager_list"
           ]
+        },
+        {
+          "id": "permission_tool_approval",
+          "label": "高危工具审批",
+          "icon": "mdi-folder-outline",
+          "fields": [
+            "tool_approval_enable"
+          ]
         }
       ]
     },

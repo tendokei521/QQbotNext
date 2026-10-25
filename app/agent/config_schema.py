@@ -861,6 +861,12 @@ SCHEMA = {
         "description": "工具结果超过多少字符就落盘。默认 50000。",
         "default": 50000, "min": 1024, "max": 2000000, "group": "group_tools",
     },
+    # P6：高危工具人工审批（fail-closed）
+    "tool_approval_enable": {
+        "type": "boolean", "label": "高危工具需人工审批",
+        "description": "OneBot 的高风险工具执行前先请拥有者确认；没有可用审批通道时一律拒绝。",
+        "default": False, "group": "group_permission",
+    },
     "retry_profile": {
         "type": "select", "label": "重试档位",
         "description": "一轮对话的请求次数与输入 token 上限。抗压档更耐故障，消耗也更大。",
