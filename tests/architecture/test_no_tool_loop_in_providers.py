@@ -17,27 +17,32 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 APP = ROOT / "app"
 
-#: 循环体模式。各处的上限变量名不同（`max_tool_rounds` / `max_rounds` / `rounds`），
-#: 但**循环形状**一致：`for _round in range(...)`。认形状而不是认变量名，
-#: 否则"把上限改个名"就能绕过这条约束。
-_LOOP_PATTERN = "for _round in range("
+#: 循环体模式。各处的上限变量名不同（`max_tool_rounds` / `max_rounds` / `rounds` /
+#: `req.max_rounds`），但**循环形状**一致：计数器名字里带 round 的 `for ... in range(...)`。
+#: 认形状而不是认上限变量名，否则"把上限改个名"就能绕过这条约束。
+#:
+#: 为什么要求计数器带 round：`app/domain/tags.py` 里有个 `for _ in range(max_rounds)`
+#: 是标签剥离的嵌套上限，与工具轮无关；用计数器名把它排除掉，比维护忽略清单更稳。
+_LOOP_RE = re.compile(r"^\s*for\s+\w*round\w*\s+in\s+range\(", re.MULTILINE)
 
 #: 已知的循环副本（路径 → 归属说明）。P1 每收口一处就删一条，直到只剩共享 runner。
-#: 进度：turn 流式 / 主动消息流式已收口（`loop/tool_step.run_stream_step`）。
+#: 进度：turn 流式 / 主动消息流式 / 主聊天流式 已收口（`loop/tool_step`）。
 KNOWN_LOOPS: dict[str, str] = {
-    "app/agent/loop/chat.py": "流式主路径（含发言通道 flush / 收敛重试）",
+    #: 工具循环**唯一**的合法所在地（流式 + 非流式两个 runner）
+    "app/agent/loop/tool_step.py": "共享步骤运行器 —— 循环只许住在这里",
     "app/agent/providers/openai_compat.py": "非流式（OpenAI 兼容）—— 应收口到 loop 层",
     "app/agent/providers/anthropic.py": "非流式（Claude）—— 应收口到 loop 层",
     "app/agent/providers/gemini.py": "非流式（Gemini）—— 应收口到 loop 层",
 }
 
-#: 副本数只许减少。P1 完成后改成 1（只剩共享 runner）。
-BASELINE_COUNT = 4
+#: 副本数只许减少。P1 完成后只剩共享 runner（`loop/tool_step.py` 的流式 + 非流式两处）。
+BASELINE_COUNT = 5
 
 
 def _files_with_loop() -> dict[str, int]:
@@ -47,7 +52,7 @@ def _files_with_loop() -> dict[str, int]:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):  # pragma: no cover - 读不到就跳过
             continue
-        hits = text.count(_LOOP_PATTERN)
+        hits = len(_LOOP_RE.findall(text))
         if hits:
             found[path.relative_to(ROOT).as_posix()] = hits
     return found

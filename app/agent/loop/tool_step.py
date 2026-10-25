@@ -68,6 +68,8 @@ class RoundSummary:
     images_appended: bool = False
     finish_reason: str = ""
     reasoning_chars: int = 0
+    #: 本轮模型要求调用的工具数（0 = 收尾轮）
+    tool_calls: int = 0
     error: str = ""
     #: 本轮请求开始前的 usage 快照（累加器是调用方传进 params 的 ``usage_sink``）
     usage_before: dict = field(default_factory=dict)
@@ -280,6 +282,7 @@ async def _drive_stream_rounds(
             images_appended=images_appended,
             finish_reason=finish_reason,
             reasoning_chars=reasoning_chars,
+            tool_calls=len(calls),
             usage_before=usage_before,
         )
     else:

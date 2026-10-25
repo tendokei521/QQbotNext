@@ -56,11 +56,18 @@ from app.agent.loop.provider_view import (  # noqa: F401 - 保持 chat.* API
     _provider_chain_for,
     _provider_config_for,
 )
-from app.agent.loop.tool_loop import normalize_and_execute_tool_calls
 from app.agent.loop.tool_source import (  # noqa: F401 - 重导出保持 chat.* API
     _collect_llm_ext,
     _context_expand_flags,
     _images_enabled,
+)
+from app.agent.loop.tool_step import (
+    KIND_ERROR,
+    KIND_MAX_ROUNDS,
+    STEP_TEXT,
+    StepRequest,
+    StepResult,
+    iter_stream_step,
 )
 from app.agent.loop.turn_metrics import (  # noqa: F401 - 重导出保持 chat.* API
     _MAX_TOKENS_WARNED,
@@ -83,11 +90,9 @@ from app.agent.loop.turn_metrics import (  # noqa: F401 - 重导出保持 chat.*
     _usage_snapshot,
 )
 from app.agent.providers import log_token_usage
-from app.agent.providers.invoker import resolve_invoker
 from app.agent.session.manager import SessionManager
 from app.agent.tools.spec import build_tools, make_executor
 from app.domain.modalities import supports_tool_use
-from app.domain.splitter import split_sentences, strip_stream_artifacts
 from app.domain.trigger import extract_text
 
 #: 思考吃满预算后追加的收敛提示（只在本轮确实想过、却一个正文字都没有时追加一次）。
@@ -322,177 +327,132 @@ async def stream_response(runtime, event, ctx=None):
             )
             return False
 
-    for _round in range(max_tool_rounds):
-        round_text_parts: list[str] = []
-        buffer = ""
-        tool_calls: dict[int, dict] = {}
-        stream_error = ""
-        reasoning_chars = 0
-        finish_reason = ""
-        usage_before = _usage_snapshot(usage_sink)
+    # 一次请求的参数集合：工具执行器交给共享运行器（它会取走、绝不继续传给适配器）
+    params = {
+        "model": meta["model"],
+        "temperature": meta["temperature"],
+        "max_tokens": meta["max_tokens"],
+        "tools": tools,
+        "tool_executor": tool_executor,
+        "max_empty_retries": _max_empty_retries(config),
+        "usage_sink": usage_sink,
+        "budget": turn_budget,
+        "input_tokens_estimate": input_tokens_estimate,
+    }
+    # 最后一份轮次小结（收尾判断要看"本轮"而不是累计值）
+    last_round_text = ""
 
-        async for ev in resolve_invoker(runtime).stream(
-            runtime=runtime,
-            chain=provider_chain,
-            messages=messages,
-            params={
-                "model": meta["model"],
-                "temperature": meta["temperature"],
-                "max_tokens": meta["max_tokens"],
-                "tools": tools,
-                "tool_executor": tool_executor,
-                "max_empty_retries": _max_empty_retries(config),
-                "usage_sink": usage_sink,
-                "budget": turn_budget,
-                "input_tokens_estimate": input_tokens_estimate,
-            },
-        ):
-            if ev.type == "text":
-                buffer += ev.text
-                if speech_by_tool:
-                    # 思考：只累积不发送。切句也只在真正要发文本时才有意义。
-                    continue
-                sentences, buffer = split_sentences(buffer, max_length=max_msg_len)
-                for sentence in sentences:
-                    clean = strip_stream_artifacts(sentence)
-                    if clean:
-                        round_text_parts.append(clean)
-                        full_text_parts.append(clean)
-                        # 先写历史再发送（pipeline 发送成功后会回填 message_id）
-                        _write_partial_history("".join(full_text_parts))
-                        yield clean
-            elif ev.type == "tool_call":
-                tc = ev.tool_call or {}
-                index = int(tc.get("index", 0) or 0)
-                slot = tool_calls.setdefault(index, {
-                    "id": "",
-                    "type": "function",
-                    "function": {"name": "", "arguments": ""},
-                })
-                # 防御：部分模型/中转商的流式工具碎片里 id/name/arguments 可能为 null，
-                # 直接拼接会抛 "can only concatenate str (not NoneType) to str"。
-                frag = tc.get("function") or {}
-                slot["id"] += tc.get("id") or ""
-                slot["function"]["name"] += frag.get("name") or ""
-                slot["function"]["arguments"] += frag.get("arguments") or ""
-            elif ev.type == "error":
-                stream_error = ev.text
-                break
-            elif ev.type == "reasoning":
-                # 思考流只计数、绝不发给用户；留着是为了区分「想过但没正文」和真正的空回复
-                reasoning_chars += len(ev.text or "")
-            elif ev.type == "done":
-                finish_reason = ev.finish_reason or finish_reason
-
-        tail = strip_stream_artifacts(buffer.strip())
-        if tail:
-            if speech_by_tool:
-                # 思考尾段同样不发送（但要留在 full_text 里，供遥测/调试看模型想了什么）
-                round_text_parts.append(tail)
-                full_text_parts.append(tail)
-            else:
-                round_text_parts.append(tail)
-                full_text_parts.append(tail)
-                _write_partial_history("".join(full_text_parts))
-                yield tail
-        buffer = ""
-
-        round_text = "".join(round_text_parts)
-        reasoning_total += reasoning_chars
-        full_text = "".join(full_text_parts)
-        _log_request_line(
-            runtime,
-            session_id=session_id,
-            round_index=_round,
-            served_model=_served_model_label(usage_sink, meta["model"]),
-            max_tokens=eff_max_tokens,
-            max_tokens_src=max_tokens_src,
-            input_tokens=_usage_delta(usage_sink, usage_before, "prompt_tokens"),
-            output_tokens=_usage_delta(usage_sink, usage_before, "completion_tokens"),
-            input_estimate=input_tokens_estimate,
-            finish_reason=finish_reason,
-            text_chars=len(round_text),
-            reasoning_chars=reasoning_chars,
-            tools=len(tool_calls),
-            error=stream_error,
-            budget=turn_budget,
+    while True:
+        step = StepResult()
+        events = iter_stream_step(
+            StepRequest(
+                runtime=runtime,
+                chain=provider_chain,
+                messages=messages,
+                params=params,
+                max_rounds=max_tool_rounds,
+                tool_ctx=tool_ctx,
+                modalities=modalities,
+                max_msg_len=max_msg_len,
+            ),
+            step,
         )
+        try:
+            async for kind, payload in events:
+                if kind == STEP_TEXT:
+                    full_text_parts.append(payload)
+                    if speech_by_tool:
+                        # 思考：只累积不发送（发言靠 send_message）。切句只在真要发文本时才有意义。
+                        continue
+                    # 先写历史再发送（pipeline 发送成功后会回填 message_id）
+                    _write_partial_history("".join(full_text_parts))
+                    yield payload
+                    continue
 
-        if stream_error:
-            # 记录失败详情，便于定位（error 事件文本通常含 API 返回的状态码与原因）
-            stream_error_text = stream_error
-            logger.add_info(account_label(runtime.bot_id)).error(
-                f"[LLM] 流式请求失败 -> {session_id} (task: {session.task_id}), "
-                f"round={_round}, 已产文本={bool(full_text_parts)}, 工具数={len(tool_calls)}: {stream_error}"
-            )
+                # ---- 一轮结束：记账 + 发言通道 flush + 提醒注入 ----
+                summary = payload
+                last_round_text = summary.round_text
+                reasoning_total += summary.reasoning_chars
+                _log_request_line(
+                    runtime,
+                    session_id=session_id,
+                    round_index=summary.index,
+                    served_model=_served_model_label(usage_sink, meta["model"]),
+                    max_tokens=eff_max_tokens,
+                    max_tokens_src=max_tokens_src,
+                    input_tokens=_usage_delta(usage_sink, summary.usage_before, "prompt_tokens"),
+                    output_tokens=_usage_delta(usage_sink, summary.usage_before, "completion_tokens"),
+                    input_estimate=input_tokens_estimate,
+                    finish_reason=summary.finish_reason,
+                    text_chars=len(summary.round_text),
+                    reasoning_chars=summary.reasoning_chars,
+                    tools=summary.tool_calls,
+                    error=summary.error,
+                    budget=turn_budget,
+                )
+                if summary.error:
+                    # 记录失败详情，便于定位（error 事件文本通常含 API 返回的状态码与原因）
+                    stream_error_text = summary.error
+                    logger.add_info(account_label(runtime.bot_id)).error(
+                        f"[LLM] 流式请求失败 -> {session_id} (task: {session.task_id}), "
+                        f"round={summary.index}, 已产文本={bool(full_text_parts)}, "
+                        f"工具数={summary.tool_calls}: {summary.error}"
+                    )
+
+                if speech_by_tool:
+                    # round 边界 flush：模型一旦调 send_message，本轮工具执行完就真发出去，
+                    # 它随后还能继续"想下一句"。体感接近真人"想一句说一句"，
+                    # 也不至于因为工具循环很久而让群友干等。
+                    # 收尾轮也 flush：否则"最后一轮才调 send_message"的话永远不会发出去。
+                    async for message in _flush_speech(speech, session_mgr, session_id, meta_cfg, event):
+                        spoken_parts.append(message.text)
+                        yield message
+                    rounds_left = summary.rounds_left
+                    if rounds_left > 0 and speech.spoken == 0 and rounds_left <= reminder_rounds:
+                        # 剩的轮次不多了还没开口：用 user 角色提醒（中途 system 会被适配器上提到最前）
+                        messages.append({
+                            "role": "user",
+                            "content": SPEAK_REMINDER.format(rounds=rounds_left),
+                        })
+        finally:
+            # 调用方可能在本步骤中途停下（句间打断）：确保事件流被关掉，已产出的事实留在 step 上
+            await events.aclose()
+
+        # 本轮步骤执行过的工具（跨收敛轮要合并，遥测与诊断日志都读它）
+        tool_results.extend(step.tool_results)
+
+        if step.kind == KIND_ERROR:
             # 这里**不能 return**：此前直接 return 跳过了写历史 / mark_replied /
             # 记忆蒸馏 / 遥测落库，而用户那边其实已经收到正文（流式是边产边发的）。
             # 后果：下一轮上下文里"我刚说过的话"不存在，用户追问时模型一脸茫然；
             # 群里也因为没有 mark_replied 被当成"没回复过"。统一走下面的收尾逻辑。
             break
 
+        if step.kind == KIND_MAX_ROUNDS:
+            logger.add_info(account_label(runtime.bot_id)).warning(
+                f"流式工具循环超过 {max_tool_rounds} 轮，强制结束（可调大 max_tool_rounds 配置）"
+            )
+            break
+
         # 思考吃满输出预算：模型把 max_tokens 全花在 reasoning 里，正文还没开始就被截断
         # （线上表现：输出 8192 = 上限、回复 0 字符、用户收到兜底话术）。同一条 prompt
         # 原样重试必然再打满一次，所以改成追加一次「直接作答」提醒再要一枪。
+        # 这是"改 prompt 再问"，不是循环控制，所以留在调用方（P1 只收口循环）。
         if (
-            not round_text
-            and not tool_calls
-            and reasoning_chars
+            not last_round_text
+            and step.last_round_reasoning
             and overflow_used < overflow_retries
         ):
             overflow_used += 1
             logger.add_info(account_label(runtime.bot_id)).warning(
-                f"[LLM] 思考吃满输出预算（reasoning {reasoning_chars} 字符, "
-                f"finish={finish_reason or '?'}, max_tokens={eff_max_tokens}"
+                f"[LLM] 思考吃满输出预算（reasoning {step.last_round_reasoning} 字符, "
+                f"finish={step.finish_reason or '?'}, max_tokens={eff_max_tokens}"
                 f"（来自{max_tokens_src}）），追加一次收敛轮而非原样重试 -> {session_id}"
             )
             messages.append({"role": "user", "content": REASONING_OVERFLOW_NUDGE})
             continue
 
-        if not tool_calls:
-            break
-
-        # 组装完整 tool_calls（碎片按 index 有序）→ 复用共享 helper：
-        # id 自洽（缺 id 生成 call_{index}）+ arguments 解析 + 执行 + 构造回传，
-        # 与 openai_compat.chat() 的非流式工具循环共用同一套逻辑。
-        tool_calls_list = [tool_calls[idx] for idx in sorted(tool_calls)]
-        normalized_calls, tool_messages = await normalize_and_execute_tool_calls(
-            tool_calls_list, tool_executor, tool_results
-        )
-
-        messages.append({
-            "role": "assistant",
-            "content": round_text or None,
-            "tool_calls": normalized_calls,
-        })
-        messages.extend(tool_messages)
-
-        # 工具轮里 expand_image 取回的图片必须**在本轮**递给模型：此前只在请求开始时
-        # 抽一次 round_images，工具执行期间积攒的那些要等下一轮对话才被抽走，
-        # 于是模型当轮只能凭工具回执里的文字描述瞎猜（还被告知"你会直接看到"）。
-        if _append_round_images(messages, tool_ctx, modalities):
-            logger.add_info(account_label(runtime.bot_id)).info(
-                f"[ExpandImage] 工具轮取回的图片已追加到下一轮请求 -> {session_id}"
-            )
-
-        if speech_by_tool:
-            # round 边界 flush：模型一旦调 send_message，本轮工具执行完就真发出去，
-            # 它随后还能继续"想下一句"。体感接近真人"想一句说一句"，
-            # 也不至于因为工具循环很久而让群友干等。
-            async for message in _flush_speech(speech, session_mgr, session_id, meta_cfg, event):
-                spoken_parts.append(message.text)
-                yield message
-            rounds_left = max_tool_rounds - (_round + 1)
-            if rounds_left > 0 and speech.spoken == 0 and rounds_left <= reminder_rounds:
-                # 剩的轮次不多了还没开口：用 user 角色提醒（中途 system 会被适配器上提到最前）
-                messages.append({
-                    "role": "user",
-                    "content": SPEAK_REMINDER.format(rounds=rounds_left),
-                })
-    else:
-        logger.add_info(account_label(runtime.bot_id)).warning(
-            f"流式工具循环超过 {max_tool_rounds} 轮，强制结束（可调大 max_tool_rounds 配置）"
-        )
+        break
 
     if speech_by_tool:
         # 被直接点名（@ / 私聊）却一句话没说：再要一次，避免"叫了不理"。
@@ -540,6 +500,7 @@ async def stream_response(runtime, event, ctx=None):
             session.mark_replied()
         await asyncio.to_thread(session_mgr.history.save_session, session)
     else:
+        full_text = "".join(full_text_parts)
         # 兜底：流式响应为空时避免“不回复”，给用户一个可见的占位回复
         if not full_text.strip():
             # 若模型其实想过（只是没写出正文），把真实原因和预算来源一并留痕，
