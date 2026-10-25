@@ -355,6 +355,14 @@ async def run_blocking_step(req: StepRequest) -> StepResult:
         result.reasoning_chars += len(reasoning)
         calls = list(getattr(response, "tool_calls", None) or [])
 
+        # finish_reason 只有 raw 里有（OpenAI 形状）：结局判定要用它区分
+        # "被 max_tokens 截断"（MAX_TOKENS）和"模型就是没话说"（SILENT）。
+        raw = getattr(response, "raw", None)
+        if isinstance(raw, dict):
+            choices = raw.get("choices") or []
+            if choices and isinstance(choices[0], dict):
+                result.finish_reason = str(choices[0].get("finish_reason") or "")
+
         if not calls:
             result.text = text
             result.tool_calls = []

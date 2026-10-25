@@ -64,6 +64,7 @@ from app.agent.loop.turn_metrics import (
     _reasoning_overflow_retries,
     _turn_budget,
 )
+from app.agent.loop.turn_runner import TurnReason, TurnState
 from app.agent.tools.spec import build_tools, make_executor
 from app.core.logger import account_label
 from app.domain.modalities import supports_tool_use
@@ -114,6 +115,9 @@ class TurnResult:
         usage: token 用量（上游没报则为空 dict）。
         blocked: 本轮被钩子拦下（`post_assemble` 置空或 `job.skip`），没有请求模型。
         error: 失败原因（空串 = 正常）。
+        reason: 结构化结局（见 `TurnReason`）；调用方据此决定蒸馏/统计，不再猜文案。
+        rounds: 本轮实际跑了几个工具轮（含收敛重试的轮次）。
+        interrupted: 是否被取消（已产出的前缀仍会留在历史里）。
         session_id: 会话 id 回显。
     """
 
@@ -123,6 +127,9 @@ class TurnResult:
     usage: dict = field(default_factory=dict)
     blocked: bool = False
     error: str = ""
+    reason: TurnReason = TurnReason.SILENT
+    rounds: int = 0
+    interrupted: bool = False
     session_id: str = ""
 
 
@@ -179,6 +186,7 @@ async def run_turn(
             f"[Turn] run_turn 失败 ({req.session_id}): {e}"
         )
         result.error = str(e)
+        result.reason = TurnReason.ERROR
         return result
 
 
@@ -192,6 +200,7 @@ async def _run_inner(
 ) -> TurnResult:
     """``run_turn`` 的主体：取值 → 组装 → 请求 → 收尾。"""
     config = runtime.config
+    state = TurnState()
     turn = from_request(
         config,
         session_id=req.session_id,
@@ -202,6 +211,7 @@ async def _run_inner(
     )
     if turn is None:
         result.blocked = True
+        result.reason = state.finish(TurnReason.BLOCKED)
         return result
 
     ctx = ctx or _make_ctx(runtime, req)
@@ -210,6 +220,7 @@ async def _run_inner(
     )
     if prompt_req is None or meta is None:
         result.blocked = True
+        result.reason = state.finish(TurnReason.BLOCKED)
         return result
 
     # 覆盖人设 / 追加额外 user 内容块（只在调用方显式要求时）
@@ -233,6 +244,7 @@ async def _run_inner(
     messages = await assembly.apply_post_assemble(runtime, ctx, messages, req=prompt_req)
     if messages is None:
         result.blocked = True
+        result.reason = state.finish(TurnReason.BLOCKED)
         return result
     result.messages = list(messages)
 
@@ -258,6 +270,7 @@ async def _run_inner(
             config=config,
             on_sentence=on_sentence,
             usage_sink=sink,
+            state=state,
         )
     else:
         text, tool_results = await _chat_once(
@@ -270,11 +283,15 @@ async def _run_inner(
             use_tools=use_tools,
             config=config,
             usage_sink=sink,
+            state=state,
         )
 
     result.text = text
     result.tool_results = tool_results
     result.usage = dict(sink)
+    result.reason = state.finish()
+    result.rounds = state.rounds
+    result.interrupted = state.interrupted
     _record_telemetry(
         runtime,
         session_id=session_id,
@@ -286,6 +303,7 @@ async def _run_inner(
         started=started,
         usage=sink,
         stream=stream,
+        reason=result.reason,
     )
 
     if req.record_history and text.strip() and session is not None:
@@ -330,6 +348,7 @@ async def _chat_once(
     use_tools: bool,
     config: Any,
     usage_sink: dict,
+    state: TurnState | None = None,
 ) -> tuple[str, list[dict]]:
     """非流式：一次步骤（工具多轮由 `run_blocking_step` 驱动），返回正文与工具结果。
 
@@ -374,6 +393,9 @@ async def _chat_once(
         step = await _request_step()
         _merge_usage(usage_sink, step.usage)
 
+    if state is not None:
+        state.add_step(step)
+
     tool_results = list(step.tool_results)
     text = strip_stream_artifacts(strip_all_tags(str(step.text or "")))
     if not text.strip():
@@ -383,6 +405,7 @@ async def _chat_once(
         logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).warning(
             f"[Turn] 空回复，使用兜底文本{hint}"
         )
+        # 兜底话术**不是模型说的**：结局保持 silent/max_tokens，别让它冒充 completed
         return "抱歉，我暂时无法回答，请稍后再试。", tool_results
     return text, tool_results
 
@@ -399,6 +422,7 @@ async def _stream_once(
     config: Any,
     on_sentence: Callable[[str], Awaitable[None]] | None,
     usage_sink: dict,
+    state: TurnState | None = None,
 ) -> tuple[str, list[dict]]:
     """流式：逐句回调 ``on_sentence``，返回累计正文与工具结果。
 
@@ -442,6 +466,8 @@ async def _stream_once(
         logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).error(
             f"[Turn] 流式请求失败: {step.error}"
         )
+    if state is not None:
+        state.add_step(step)
     # 与收口前同口径：句子之间用换行连接（历史/遥测里看到的是同一段文本）
     return "\n".join(sentences), step.tool_results
 
@@ -510,6 +536,7 @@ def _record_telemetry(
     started: float,
     usage: dict,
     stream: bool,
+    reason: TurnReason | None = None,
 ) -> None:
     """写一条 LLM 调用遥测（失败只留痕）。"""
     telemetry = getattr(runtime, "telemetry", None)
@@ -531,6 +558,7 @@ def _record_telemetry(
             tool_calls=len(tool_results),
             characters=len(text),
             error="" if text.strip() else "empty_response",
+            reason=str(reason) if reason is not None else "",
         )
     except Exception as e:  # noqa: BLE001 —— 遥测不该影响一轮结果
         logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).debug(

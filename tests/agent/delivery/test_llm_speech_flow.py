@@ -210,6 +210,7 @@ async def test_flush_happens_at_round_boundary(monkeypatch, tmp_path):
     assert TIMELINE == ["round", "send:第一句", "send:第二句", "round"]
     # 每发一条气泡写一条 assistant 历史（不是整轮合并成一条）
     assert _assistant_history(991) == ["第一句", "第二句"]
+    assert ctx.state["turn_reason"] == "completed", "结构化结局要能被调用方读到"
 
 
 async def test_silence_sends_nothing_and_writes_no_history(monkeypatch, tmp_path):
@@ -224,6 +225,7 @@ async def test_silence_sends_nothing_and_writes_no_history(monkeypatch, tmp_path
 
     assert sent == []
     assert ctx.state.get("silent") is True
+    assert ctx.state["turn_reason"] == "silent"
     assert _assistant_history(992) == [], "静默不该留下 assistant 历史"
 
 

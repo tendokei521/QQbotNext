@@ -531,6 +531,16 @@ async def stream_response(runtime, event, ctx=None):
 
     _commit_history_enrichment(runtime, session_id, ctx)
 
+    # 结构化结局：调用方（遥测/turn 事件/记忆蒸馏）据此判断"这轮到底怎么结束的"，
+    # 不再从日志文案里猜——兜底话术与"想过但没写"在 text 上长得一样。
+    turn_reason = _stream_turn_reason(
+        stream_error_text=stream_error_text,
+        speech_by_tool=speech_by_tool,
+        spoken=len(spoken_parts),
+        model_text="".join(full_text_parts),
+        reasoning_chars=reasoning_total,
+    )
+
     # 成功判定：旧路径看"有没有产出文本"；发言通道下"看过但没说话"同样是成功，
     # 用它去记失败会让"哑火"与"故障"混在一起。
     if speech_by_tool:
@@ -550,6 +560,7 @@ async def stream_response(runtime, event, ctx=None):
         success=stream_success,
         error_text=stream_error_text,
         usage=usage_sink,
+        reason=str(turn_reason),
     )
 
     # 本次请求到此完全结束：info 一次 token 消耗（上游没报 usage 就不打）
@@ -568,5 +579,32 @@ async def stream_response(runtime, event, ctx=None):
 
     if ctx is not None:
         ctx.response_text = full_text
+        ctx.state["turn_reason"] = str(turn_reason)
+
+
+def _stream_turn_reason(
+    *,
+    stream_error_text: str,
+    speech_by_tool: bool,
+    spoken: int,
+    model_text: str,
+    reasoning_chars: int,
+):
+    """流式路径的结局判定（与 `turn_runner.classify_step` 同一套口径）。
+
+    - 失败 → `error`；
+    - 发言通道：有入稿 = `completed`，没开口 = `silent`；
+    - 纯文本：有正文 = `completed`；没正文但想过一大段 = `max_tokens`（思考吃满预算），
+      否则 `silent`。
+    """
+    from app.agent.loop.turn_runner import TurnReason
+
+    if stream_error_text:
+        return TurnReason.ERROR
+    if speech_by_tool:
+        return TurnReason.COMPLETED if spoken else TurnReason.SILENT
+    if model_text.strip():
+        return TurnReason.COMPLETED
+    return TurnReason.MAX_TOKENS if reasoning_chars else TurnReason.SILENT
 
 

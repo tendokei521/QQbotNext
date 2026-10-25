@@ -275,6 +275,7 @@ def _record_stream_telemetry(
     success: bool,
     error_text: str = "",
     usage: dict | None = None,
+    reason: str = "",
 ) -> None:
     """流式生成的统一遥测落点。"""
     telemetry = getattr(runtime, "telemetry", None)
@@ -298,6 +299,7 @@ def _record_stream_telemetry(
         tool_calls=len(tool_results),
         characters=len(full_text),
         error=error_text,
+        reason=reason,
     )
 
 
