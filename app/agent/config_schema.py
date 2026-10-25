@@ -283,6 +283,13 @@ SCHEMA = {
         "type": "number", "label": "请求落盘保留条数", "description": "滚动文件最多保留多少轮请求（从最旧开始丢）",
         "default": 20, "min": 1, "max": 500, "group": "group_session",
     },
+    # P4：在线不变式。开启后每次请求前核对「会话日志派生结果」与「内存历史」是否一致，
+    # 不等就落盘 diff。默认关：这是一条排查开关，每次请求都做投影比对有开销。
+    "prompt_dump_verify": {
+        "type": "boolean", "label": "历史一致性自检",
+        "description": "每次请求前核对会话日志与内存历史是否一致，不一致时落盘 diff。默认关闭。",
+        "default": False, "group": "group_session",
+    },
     "context_token_budget": {
         "type": "number", "label": "上下文 token 预算",
         "description": "上下文 token 上限，超出时从最旧的历史开始丢弃。0 = 不限制。",

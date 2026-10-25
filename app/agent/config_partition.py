@@ -135,6 +135,8 @@ UI_PAGES: tuple[UIPage, ...] = (
                     "context_compress_prompt",
                     "context_token_budget",
                     "context_token_chars_per_token",
+                    # P4：在线不变式（会话日志 ↔ 内存历史一致性自检）
+                    "prompt_dump_verify",
                 ),
             ),
         ),

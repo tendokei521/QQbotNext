@@ -247,6 +247,16 @@ async def _run_inner(
         return result
     result.messages = list(messages)
 
+    # P4 在线不变式（默认关）：核对"事件日志派生"与"内存历史"是否仍然一致
+    try:
+        from app.agent.session.verify import verify_history_projection
+
+        verify_history_projection(runtime, session_mgr, session, where="turn.run_turn")
+    except Exception as e:  # noqa: BLE001 —— 自检是旁路，绝不影响本轮
+        logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).debug(
+            f"[Invariant] 自检调用失败（已忽略）: {e}"
+        )
+
     use_tools = bool(all_specs) and supports_tool_use(modalities)
     from app.agent.policy import policy_view
 

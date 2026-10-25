@@ -279,6 +279,17 @@ async def stream_response(runtime, event, ctx=None):
 
     _log_debug_prompt(runtime, session_id, messages, debug_enabled=bool(ctx and ctx.state.get("debug_prompt", False)))
 
+    # P4 在线不变式（默认关）：核对"事件日志派生"与"内存历史"是否仍然一致
+    if ctx is not None and session is not None:
+        try:
+            from app.agent.session.verify import verify_history_projection
+
+            verify_history_projection(runtime, session_mgr, session, where="chat.stream_response")
+        except Exception as e:  # noqa: BLE001 —— 自检是旁路，绝不影响本轮
+            logger.add_info(account_label(runtime.bot_id)).debug(
+                f"[Invariant] 自检调用失败（已忽略）: {e}"
+            )
+
     # 本次请求真正生效的 max_tokens（链上 provider 配置赢过 Agent 配置）：打出来，
     # 免得再出现「8192 到底哪设的」这种排查——见 _effective_max_tokens。
     eff_max_tokens, max_tokens_src = _effective_max_tokens(provider_chain, meta["max_tokens"])

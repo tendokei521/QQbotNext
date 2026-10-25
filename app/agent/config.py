@@ -269,6 +269,9 @@ DEFAULT_LLM_CONFIG: dict = {
     # 滚动保留最近 prompt_dump_max_entries 条，供与第三方框架的组装结果逐条 diff
     "prompt_dump_enable": False,       # 默认关闭：正常运行时零 IO
     "prompt_dump_max_entries": 20,     # 滚动保留条数
+    # 在线不变式（P4）：每次请求前核对「事件日志派生结果」与「内存历史」是否一致，
+    # 不等就落 data/llm/<bot>/prompt_dump/desync-<ts>.json 并留痕。默认关闭（有开销）。
+    "prompt_dump_verify": False,
     # 上下文 token 预算（对齐 AstrBot ContextManager）：0 = 关闭（默认）。
     # 开启后超预算就从**最旧的历史消息**丢起，system 与最后一条 user 永不丢；
     # 估算按字符启发式（context_token_chars_per_token），只用于防爆、不用于计费。

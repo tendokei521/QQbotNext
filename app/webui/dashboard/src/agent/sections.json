@@ -145,7 +145,8 @@
             "context_compress_enable",
             "context_compress_prompt",
             "context_token_budget",
-            "context_token_chars_per_token"
+            "context_token_chars_per_token",
+            "prompt_dump_verify"
           ]
         }
       ]
