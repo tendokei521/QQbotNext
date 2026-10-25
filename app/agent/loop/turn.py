@@ -302,14 +302,17 @@ async def _run_inner(
 
 
 def _call_params(meta: dict, all_specs: Any, tool_ctx: Any, use_tools: bool, config: Any) -> dict:
-    """一次请求的参数集合（与 `loop/generate.py` 保持同一口径）。"""
+    """一次请求的参数集合（与 `loop/generate.py` 保持同一口径）。
+
+    刻意**不带** ``max_tool_rounds``：轮数上限是 `StepRequest.max_rounds`
+    （runner 的入参），放进 params 只会变成第二个真相。
+    """
     return {
         "model": meta["model"],
         "temperature": meta["temperature"],
         "max_tokens": meta["max_tokens"],
         "tools": build_tools(all_specs) if use_tools else None,
         "tool_executor": make_executor(all_specs, tool_ctx) if use_tools else None,
-        "max_tool_rounds": _max_tool_rounds(config),
         "max_empty_retries": _max_empty_retries(config),
         "budget": _turn_budget(config),
         "input_tokens_estimate": _input_tokens_estimate([]),

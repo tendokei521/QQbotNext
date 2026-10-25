@@ -19,6 +19,7 @@ from typing import Any
 from app.agent.delivery.pool import StreamSendPool
 from app.agent.loop.provider_view import _modalities_for_chain
 from app.agent.loop.tool_step import StepRequest, run_stream_step
+from app.agent.loop.turn_metrics import _turn_budget
 from app.agent.providers import SERVED_MODEL_KEY, log_token_usage
 from app.core.logger import account_label
 from app.domain.message import Message
@@ -147,6 +148,8 @@ async def _stream_send_initiative_inner(
                     "tool_executor": tool_executor if use_tools else None,
                     # 主动消息/定时任务同样吃「空回复重试」：零产出会让本轮静默不发
                     "max_empty_retries": _max_empty_retries(config),
+                    # 也吃整轮预算闸门：这条路径最长、最容易反复重试，此前完全没有上限
+                    "budget": _turn_budget(config),
                     "usage_sink": usage_sink,
                 },
                 max_rounds=rounds,
