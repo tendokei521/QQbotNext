@@ -1,4 +1,4 @@
-# Agent 工具循环专业化改造（对标 DSH）
+﻿# Agent 工具循环专业化改造（对标 DSH）
 
 > 状态：**方案稿**（P0 未开工）。
 > 基准实现：DeepSeek Harness（本地 `C:\Users\Admin\.dsh\profiles\node_modules\@deepseek-ai\*`，
@@ -18,10 +18,10 @@
   没有并发上限、没有结构化输出/错误码、超时靠强杀。
 - 真正的差距在**循环之外**：谁拥有循环、一次轮次的状态怎么表达、取消怎么传播、
   历史是"每次有人想起来就写一笔"还是"从一份日志派生"。
-- 具体表现：**6 处循环控制**、**10 处 assistant 历史写入点**、**0 个 `AbortSignal` 等价物**、
+- 具体表现：**6 处循环控制**、**12 处 assistant 历史写入点**、**0 个 `AbortSignal` 等价物**、
   **契约测试用源码字符串扫描**。
 
-改造后预计：循环控制 6→1、历史写入 10→1、工具结果从 `str` 升级为结构化结果、
+改造后预计：循环控制 6→1、历史写入 12→1、工具结果从 `str` 升级为结构化结果、
 新增 1 条可在生产期开启的在线不变式、新增 3 个入口 × 2 种流的矩阵回归。
 总工量约 **18 人日**，分 7 个可独立回滚的阶段（P0–P6），**每一阶段都能单独上线**。
 
@@ -178,7 +178,7 @@
 | # | 维度 | DSH | QQbotNext6 | 级别 |
 |---|---|---|---|---|
 | 1 | 循环归属 | 框架一处（loop-owned），适配器只流式 | 6 处，3 处在适配器内 | **A** |
-| 2 | 历史真相 | append-only 事件日志 + `deriveMessages()` | 10 处直写 + 轮内可变 list | **A** |
+| 2 | 历史真相 | append-only 事件日志 + `deriveMessages()` | 12 处直写 + 轮内可变 list | **A** |
 | 3 | 停止语义 | `turn/end.reason` 枚举 | 无，只有日志文案 | **A** |
 | 4 | 取消 | 每轮 AbortController，边界断言，中断锚点 | 只有开关标志位 | **A** |
 | 5 | 请求不可变/自检 | `deepFreeze` + 在线不变式 | dump 事后看 | **A** |
@@ -187,7 +187,7 @@
 | 8 | 工具并发 | 按**实参**分类 + 有界池 + 屏障 + 模型序提交 | 无界 `gather` | **B** |
 | 9 | 超时语义 | 工具声明 `timeoutMs`，独立策略强制，超时是"值"、不弃置 promise | 模块常量 20s + `wait_for` 强杀 | **B** |
 | 10 | 结果协议 | `additionalContexts` / `concludesTurn` / 结构化 error 码 | `extra["round_images"]` 特例 + 字符串约定 | **B** |
-| 11 | 压缩正确性 | 阈值 0.8 / 保留 0.16 + 工具配对不变量 + 检查点括号 | 按**条数**切，可能劈开 tool_call/result 对 | **B** |
+| 11 | 压缩正确性 | 阈值 0.8 / 保留 0.16 + 工具配对不变量 + 检查点括号 | 按**条数**切（今天切不到工具对，但 P4 后即成风险） | **B** |
 | 12 | 契约测试 | invariant 插件 + 官方 fixture + 穷尽断言 | 源码字符串扫描 | **B** |
 | 13 | 高危工具临门一脚 | `tools/pre-execute → ask` + 审批审计事件 + fail-closed | 只有静态权限等级 | **B**（可选） |
 
@@ -334,7 +334,7 @@ turn/end(reason=…)
 - **目标**：R2 + R6。这是最贵的一步，也是把前四步锁死的一步。
 - **改动**：
   - 新增 `session/session_log.py`：`append(type, **payload)` + `derive_messages()`，
-    先**包住**现有 `SessionManager.add_message`（不改存储格式），把 10 处写入口收成 1 个。
+    先**包住**现有 `SessionManager.add_message`（不改存储格式），把 12 处写入口收成 1 个。
   - 历史文件加事件类型字段（向后兼容读旧格式：无 type 的一律当 `assistant/message`）。
   - `prompt_dump` 升级为**在线不变式**：`prompt_dump_verify` 开启时，每次请求前断言
     `request.messages == log.derive_messages()`，不一致就 `logger.error` + 落盘 diff
@@ -343,7 +343,7 @@ turn/end(reason=…)
     不做 DSH 那种全量 `deepFreeze`（收益/成本比不划算）。
 - **验收**：`grep -rn "add_message(" app/ | wc -l` 从 10 降到 1（只剩 session_log 内部）；
   新增 `test_request_equals_log_derivation.py`；全部现有测试绿。
-- **风险**：高（动历史格式与 10 个写点）。**必须先做迁移脚本 + 备份**，
+- **风险**：高（动历史格式与 12 个写点）。**必须先做迁移脚本 + 备份**，
   并在 P4 之前把 P0 的契约测试跑成硬门禁。
 
 ### P5 工具输出契约 + spill + 压缩保配对（约 3 人日）
