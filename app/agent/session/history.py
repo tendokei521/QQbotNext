@@ -231,6 +231,17 @@ class SQLiteHistoryStore:
     );
     CREATE INDEX IF NOT EXISTS idx_conv_session ON conversations(bot_id, session_id);
     CREATE INDEX IF NOT EXISTS idx_conv_conv_id ON conversations(bot_id, conv_id);
+    -- P4：会话历史的**追加式事件日志**（唯一真相）。只增不改，seq 按 (bot_id, task_id)
+    -- 单调；conversations.messages 保留为它的派生缓存，所有既有读取方无需改动。
+    CREATE TABLE IF NOT EXISTS history_events (
+        bot_id  TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        seq     INTEGER NOT NULL,
+        type    TEXT NOT NULL,
+        payload TEXT NOT NULL DEFAULT '{}',
+        ts      INTEGER NOT NULL,
+        PRIMARY KEY (bot_id, task_id, seq)
+    );
     """
 
     def __init__(self, bot_id: Any, db_path: str | None = None) -> None:
@@ -288,6 +299,59 @@ class SQLiteHistoryStore:
             logger.debug(f"[History] 解析 messages 字段失败，降级为空列表: {e}")
             data["messages"] = []
         return data
+
+    # ── 事件日志（P4）──────────────────────────────────
+
+    def append_event(self, task_id: str, type_: str, payload: dict | None = None) -> dict:
+        """追加一条历史事件，返回 ``{seq, type, payload, ts}``。
+
+        seq 按 ``(bot_id, task_id)`` 单调递增（在同一个事务里取 MAX+1）；
+        **只追加不覆盖**——这正是"单一真相"的来源。payload 里通常带 ``entry``
+        （今天会写进 messages 的那个 dict）与 ``entry_id``。
+        """
+        task_id = str(task_id or "")
+        now = int(time.time())
+        blob = json.dumps(payload or {}, ensure_ascii=False)
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT COALESCE(MAX(seq), 0) + 1 FROM history_events WHERE bot_id=? AND task_id=?",
+                (self.bot_id, task_id),
+            )
+            seq = int(cur.fetchone()[0])
+            self._conn.execute(
+                """
+                INSERT INTO history_events (bot_id, task_id, seq, type, payload, ts)
+                VALUES (?,?,?,?,?,?)
+                """,
+                (self.bot_id, task_id, seq, str(type_ or ""), blob, now),
+            )
+            self._conn.commit()
+        return {"seq": seq, "type": str(type_ or ""), "payload": dict(payload or {}), "ts": now}
+
+    def load_events(self, task_id: str, since: int = 0) -> list[dict]:
+        """按 seq 升序读出事件（``since`` 之后的）。"""
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT seq, type, payload, ts FROM history_events
+                WHERE bot_id=? AND task_id=? AND seq>? ORDER BY seq
+                """,
+                (self.bot_id, str(task_id or ""), int(since or 0)),
+            ).fetchall()
+        events: list[dict] = []
+        for row in rows:
+            try:
+                payload = json.loads(row["payload"] or "{}")
+            except Exception as e:  # noqa: BLE001 —— 单行坏数据不拖垮整条日志
+                logger.debug(f"[History] 事件 payload 解析失败（按空处理）: {e}")
+                payload = {}
+            events.append({
+                "seq": int(row["seq"]),
+                "type": str(row["type"]),
+                "payload": payload if isinstance(payload, dict) else {},
+                "ts": int(row["ts"]),
+            })
+        return events
 
     def _insert_conversation(self, data: dict) -> None:
         with self._lock:
