@@ -807,3 +807,33 @@ surface-eligible（`user/assistant`）与 log-only（`tool/*`、`step/*`），
   提前删等于在动刀前先撤掉安全带。
 
 > 每完成一格就改这张表并提交，避免"做到哪了"靠回忆。
+
+---
+
+## 8. 收尾核对（P0–P6 全部落地后实测）
+
+| 验收项 | 命令 | 实测 | 结论 |
+|---|---|---|---|
+| 工具循环副本 | `grep "for *round* in range(" app/` | 2 处，均在 `app/agent/loop/tool_step.py`（流式 211 / 非流式 385） | ✅ 从 6 份收到 1 个文件 |
+| provider 内部循环 | `grep "range(max_tool_rounds)" app/` | 0 | ✅ 适配器只发单次请求 |
+| 全量测试 | `pytest -q` | **2546 passed**（改造前 2429 → 净增 117 条） | ✅ |
+| ruff（本轮改过的 70 个 py） | `ruff check <files>` | 13 个文件有告警，**逐条核对均为 P0 之前既有**（B023×3 / I001×1 / F841×1 / UP015×3 等）；新增文件 0 违规 | ✅ 无新增 |
+| 会话写入口 | `grep "add_message(" app/` | **13 处调用**，全部指向**同一个** `SessionManager.add_message`，其内部只做一次 `log.append` | ⚠️ 见下 |
+
+### 与计划的两处偏差（均已落库，此处汇总）
+
+1. **`add_message` 调用点仍是 13 处，不是 1 处**。计划的目标是"12 个写入口收成 1 个语义"，
+   我实现的是**语义**收口：所有调用点走同一个 `SessionManager.add_message`，它内部是唯一的
+   `log.append`。没有把调用点改成直接写日志，是因为每条调用要构造 `entry`（segments /
+   base / meta_lines / message_id …），那段构造逻辑属于 manager；搬到 13 个调用点等于复制
+   13 份、再也不可能保持一致。**结论：写路径唯一，形态不是字面上的 1 行 grep。**
+2. **三个 provider 的 `chat()` 仍接受 `tool_executor` 参数但不再使用**（签名兼容）。
+   计划说"适配器不再自己跑循环"，这是对的；但直接 `provider.chat(tool_executor=...)` 的
+   第三方代码会**静默失去循环**——已在 `MODULE_DEV §4.7.1` 与 P1 提交信息里写明，
+   受支持的入口（`chat_with_fallback` / `client.llm_chat`）行为不变。
+
+### 已知遗留（不属于 P0–P6 范围）
+
+- 全量测试存在**偶发挂起**（约 1/4 概率，位置不固定，栈始终在 TestClient/anyio 的
+  `run_until_complete`）。单跑 `tests/agent`、`tests/application` 或两者组合均正常；
+  重跑即过。未定位到与会话层/工具层的因果关系，留作独立排查项。
