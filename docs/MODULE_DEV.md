@@ -947,6 +947,9 @@ policy_view(runtime).get("assembly_profile")            # 机制跨模块读键�
 |---|---|---|
 | `message_observed` | 用户说话了（进入 LLM 前） | 主动消息：重置沉默、安排下次 |
 | `bot_sent` | Bot 发出一条消息后 | 主动消息：重置计时 |
+| `turn_started` | 一轮真正开始请求模型前（已完成组装） | 观测：记录本轮 model/tools 指纹 |
+| `step_completed` | 每跑完一个工具轮（一次请求） | 观测：逐轮耗时/token/工具数（`ctx.state["step"]` 里是 `RoundSummary`） |
+| `turn_stopping` | 一轮即将收尾（写历史/遥测之前） | 观测：拿到 `ctx.state["turn_reason"]` 做统计 |
 | `turn_completed` | 一轮处理结束 | 记忆蒸馏、统计、审计 |
 | `session_reset` | `#llm exit` 会话重置 | 记忆：清理会话态 |
 

@@ -17,6 +17,9 @@
 | `post_stream` | 流式整体结束 | 收尾 |
 | `message_observed` | **用户说话了**（进入 LLM 前） | 主动消息类业务：重置沉默、安排下次 |
 | `bot_sent` | **Bot 发出一条消息后** | 主动消息类业务：重置计时 |
+| `turn_started` | **一轮真正开始请求模型前**（组装已完成） | 观测：本轮 model/tools 指纹 |
+| `step_completed` | **每跑完一个工具轮**（一次请求） | 观测：逐轮耗时/token/工具数（`ctx.state["step"]` 是 `RoundSummary`） |
+| `turn_stopping` | **一轮即将收尾**（写历史/遥测之前） | 观测：读 `ctx.state["turn_reason"]` 统计结局 |
 | `turn_completed` | **一轮处理结束**（含工具轮/重试） | 记忆蒸馏、统计、审计 |
 
 > 后三个是 v3 新增。此前框架用 `runtime.proactive.on_message()` /

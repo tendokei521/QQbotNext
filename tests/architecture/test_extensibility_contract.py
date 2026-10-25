@@ -59,6 +59,10 @@ DECLARED_STAGES = frozenset(
         # v3：广播型阶段（流水线只报事实，业务自己订阅）
         "message_observed",
         "bot_sent",
+        # P2：轮次级观测——开始 / 逐轮 / 收尾
+        "turn_started",
+        "step_completed",
+        "turn_stopping",
         "turn_completed",
         "session_reset",
     }

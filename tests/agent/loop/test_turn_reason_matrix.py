@@ -236,6 +236,37 @@ async def test_reason_reaches_telemetry(monkeypatch):
     assert runtime.telemetry.calls[-1]["reason"] == "completed"
 
 
+async def test_turn_broadcasts_lifecycle_stages(monkeypatch):
+    """`turn_started` / `step_completed` / `turn_stopping` 三个观测阶段必须真的广播。"""
+    from app.agent.hooks import LlmHookRegistry
+
+    turn_module = _install(monkeypatch)
+    STREAM_SCRIPT.append([
+        _tool_call("probe_a", "{}", "c0"),
+        StreamEvent(type="done", finish_reason="tool_calls"),
+    ])
+    STREAM_SCRIPT.append([StreamEvent(type="text", text="查到了。"), StreamEvent(type="done")])
+
+    seen: list[str] = []
+    registry = LlmHookRegistry()
+    for stage in ("turn_started", "step_completed", "turn_stopping"):
+        async def _handler(ctx, _stage=stage):
+            seen.append(_stage)
+
+        registry.register(stage=stage, event_type="*", handler=_handler)
+
+    runtime = _runtime(_config())
+    runtime.llm_hooks = registry
+
+    await turn_module.run_turn(
+        runtime, turn_module.TurnRequest(session_id="group_1", is_private=False, user_text="查一下")
+    )
+
+    assert seen.count("turn_started") == 1
+    assert seen.count("step_completed") >= 2, "每个工具轮都要有一次逐轮广播"
+    assert seen.count("turn_stopping") == 1
+
+
 # ==================== 判定单元（不经过 run_turn）====================
 
 

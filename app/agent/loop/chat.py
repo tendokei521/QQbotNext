@@ -346,6 +346,12 @@ async def stream_response(runtime, event, ctx=None):
     abort = getattr(ctx, "abort", None) if ctx is not None else None
     aborted = False
 
+    # 轮次开始：广播事实（观测方拿得到本轮 model/tools 指纹）
+    from app.agent.hooks import run_stage
+
+    if ctx is not None:
+        await run_stage(runtime, "turn_started", ctx)
+
     while True:
         step = StepResult()
         events = iter_stream_step(
@@ -403,6 +409,11 @@ async def stream_response(runtime, event, ctx=None):
                         f"round={summary.index}, 已产文本={bool(full_text_parts)}, "
                         f"工具数={summary.tool_calls}: {summary.error}"
                     )
+
+                # 逐轮广播：观测方拿得到本轮耗时/token/工具数（`ctx.state["step"]`）
+                if ctx is not None:
+                    ctx.state["step"] = summary
+                    await run_stage(runtime, "step_completed", ctx)
 
                 if speech_by_tool:
                     # round 边界 flush：模型一旦调 send_message，本轮工具执行完就真发出去，
@@ -567,6 +578,11 @@ async def stream_response(runtime, event, ctx=None):
         stream_success = not stream_error_text
     else:
         stream_success = bool("".join(full_text_parts).strip()) and not stream_error_text
+
+    # 收尾广播（写历史/遥测之前）：结局已经定了，观测量能读到 reason
+    if ctx is not None:
+        ctx.state["turn_reason"] = str(turn_reason)
+        await run_stage(runtime, "turn_stopping", ctx)
 
     _record_stream_telemetry(
         runtime,

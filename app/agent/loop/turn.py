@@ -41,6 +41,7 @@ from typing import Any
 
 from app.agent import logger
 from app.agent.assembly import assembler as assembly
+from app.agent.hooks import run_stage
 from app.agent.loop.assistant_output import _clean_output_for_history
 from app.agent.loop.context_blocks import (
     _append_round_images,
@@ -258,6 +259,9 @@ async def _run_inner(
     started = time.monotonic()
     sink: dict = {}
 
+    # 轮次开始：广播事实（观测方拿得到本轮 model/tools 指纹）
+    await run_stage(runtime, "turn_started", ctx)
+
     if stream:
         text, tool_results = await _stream_once(
             runtime,
@@ -271,6 +275,7 @@ async def _run_inner(
             on_sentence=on_sentence,
             usage_sink=sink,
             state=state,
+            ctx=ctx,
         )
     else:
         text, tool_results = await _chat_once(
@@ -284,6 +289,7 @@ async def _run_inner(
             config=config,
             usage_sink=sink,
             state=state,
+            ctx=ctx,
         )
 
     result.text = text
@@ -292,6 +298,10 @@ async def _run_inner(
     result.reason = state.finish()
     result.rounds = state.rounds
     result.interrupted = state.interrupted
+    # 收尾广播（写历史/遥测之前）：结局已经定了
+    if ctx is not None:
+        ctx.state["turn_reason"] = str(result.reason)
+        await run_stage(runtime, "turn_stopping", ctx)
     _record_telemetry(
         runtime,
         session_id=session_id,
@@ -310,8 +320,6 @@ async def _run_inner(
         await _write_history(runtime, session_mgr, session, session_id, text, is_private, ctx)
     _commit_history_enrichment(runtime, session_id, ctx)
     # 一轮结束：广播给订阅者（记忆蒸馏、统计、审计等业务自己接）
-    from app.agent.hooks import run_stage
-
     await run_stage(runtime, "turn_completed", ctx)
     return result
 
@@ -349,6 +357,7 @@ async def _chat_once(
     config: Any,
     usage_sink: dict,
     state: TurnState | None = None,
+    ctx: Any = None,
 ) -> tuple[str, list[dict]]:
     """非流式：一次步骤（工具多轮由 `run_blocking_step` 驱动），返回正文与工具结果。
 
@@ -367,6 +376,10 @@ async def _chat_once(
             logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).info(
                 f"[ExpandImage] 工具轮取回的图片已追加为补全材料 -> {session_id}"
             )
+        if ctx is not None:
+            # 逐轮广播：观测方拿得到本轮耗时/token/工具数
+            ctx.state["step"] = summary
+            await run_stage(runtime, "step_completed", ctx)
 
     async def _request_step():
         return await run_blocking_step(
@@ -423,6 +436,7 @@ async def _stream_once(
     on_sentence: Callable[[str], Awaitable[None]] | None,
     usage_sink: dict,
     state: TurnState | None = None,
+    ctx: Any = None,
 ) -> tuple[str, list[dict]]:
     """流式：逐句回调 ``on_sentence``，返回累计正文与工具结果。
 
@@ -449,6 +463,12 @@ async def _stream_once(
         if on_sentence is not None:
             await on_sentence(sentence)
 
+    async def _on_round_end(summary) -> None:
+        if ctx is not None:
+            # 逐轮广播：观测方拿得到本轮耗时/token/工具数
+            ctx.state["step"] = summary
+            await run_stage(runtime, "step_completed", ctx)
+
     step = await run_stream_step(
         StepRequest(
             runtime=runtime,
@@ -459,6 +479,7 @@ async def _stream_once(
             tool_ctx=tool_ctx,
             modalities=meta["modalities"],
             on_text=_emit,
+            on_round_end=_on_round_end,
             max_msg_len=max_msg_len,
         )
     )
