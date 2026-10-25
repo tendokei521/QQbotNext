@@ -14,16 +14,14 @@
 
 from __future__ import annotations
 
-from app.core.logger import account_label
-
 from typing import Any
 
 from app.agent.delivery.pool import StreamSendPool
-from app.agent.loop.tool_loop import normalize_and_execute_tool_calls
+from app.agent.loop.provider_view import _modalities_for_chain
+from app.agent.loop.tool_step import StepRequest, run_stream_step
 from app.agent.providers import SERVED_MODEL_KEY, log_token_usage
-from app.agent.providers.invoker import resolve_invoker
+from app.core.logger import account_label
 from app.domain.message import Message
-from app.domain.splitter import split_sentences, strip_stream_artifacts
 
 # 与 chat.DEFAULT_MAX_TOOL_ROUNDS 保持一致（调用方通常会显式传配置值）
 DEFAULT_MAX_TOOL_ROUNDS = 5
@@ -41,18 +39,13 @@ def _max_empty_retries(config, default: int = DEFAULT_EMPTY_REPLY_RETRIES) -> in
 
 
 def _accumulate_tool_call(slot_map: dict, tc: dict) -> None:
-    """把流式工具调用碎片按 index 累积（与 chat.stream_response 同一处理）。"""
-    index = int(tc.get("index", 0) or 0)
-    slot = slot_map.setdefault(index, {
-        "id": "",
-        "type": "function",
-        "function": {"name": "", "arguments": ""},
-    })
-    frag = tc.get("function") or {}
-    # 防御：部分模型/中转商的流式碎片里 id/name/arguments 可能为 null
-    slot["id"] += tc.get("id") or ""
-    slot["function"]["name"] += frag.get("name") or ""
-    slot["function"]["arguments"] += frag.get("arguments") or ""
+    """已下沉到 ``loop/tool_step.accumulate_tool_call``。
+
+    保留这个名字只为外部脚本/插件的历史 import 不至于直接炸（没人调用它）。
+    """
+    from app.agent.loop.tool_step import accumulate_tool_call
+
+    accumulate_tool_call(slot_map, tc)
 
 
 async def stream_send_initiative(*args, **kwargs):
@@ -122,18 +115,25 @@ async def _stream_send_initiative_inner(
     pool = StreamSendPool(config, send_message=send_message)
 
     full_text_parts: list[str] = []
-    tool_results: list[dict] = []
     # 本次请求（含工具多轮/空回复重试）的 token 消耗：结束后 info 一次
     usage_sink: dict = {}
-    # 思考字符数：只用于诊断「想过但没正文」，绝不发给用户
-    reasoning_chars = 0
+
+    async def _emit(sentence: str) -> None:
+        """一句话产出的唯一出口：累积全文 + 进消息池（与普通消息流式同口径）。"""
+        full_text_parts.append(sentence)
+        await pool.put(Message.from_text(sentence))
+
+    async def _on_round_end(round_summary) -> None:
+        if round_summary.images_appended:
+            from app.agent import logger
+
+            logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).info(
+                "[ExpandImage] 主动/定时任务工具轮取回的图片已追加到下一轮请求"
+            )
 
     try:
-        for _round in range(rounds):
-            buffer = ""
-            tool_calls: dict[int, dict] = {}
-
-            async for ev in resolve_invoker(runtime).stream(
+        step = await run_stream_step(
+            StepRequest(
                 runtime=runtime,
                 chain=chain,
                 messages=messages,
@@ -142,65 +142,28 @@ async def _stream_send_initiative_inner(
                     "temperature": temperature,
                     "max_tokens": max_tokens,
                     "tools": tools if use_tools else None,
+                    # 执行器只给 runner 用：它会从 params 里取走、绝不继续传给 provider
+                    # （provider 一看到 tool_executor 就自己再跑一遍循环，P1 要消灭的正是这个）
                     "tool_executor": tool_executor if use_tools else None,
                     # 主动消息/定时任务同样吃「空回复重试」：零产出会让本轮静默不发
                     "max_empty_retries": _max_empty_retries(config),
                     "usage_sink": usage_sink,
                 },
-            ):
-                if ev.type == "text":
-                    buffer += ev.text
-                    sentences, buffer = split_sentences(buffer, max_length=max_len)
-                    for sentence in sentences:
-                        clean = strip_stream_artifacts(sentence)
-                        if clean:
-                            full_text_parts.append(clean)
-                            await pool.put(Message.from_text(clean))
-                elif ev.type == "tool_call":
-                    _accumulate_tool_call(tool_calls, ev.tool_call or {})
-                elif ev.type == "reasoning":
-                    # 思考只计数、不发送（否则内心独白会漏进群里）
-                    reasoning_chars += len(ev.text or "")
-                elif ev.type == "error":
-                    break
-
-            tail = strip_stream_artifacts(buffer.strip())
-            if tail:
-                full_text_parts.append(tail)
-                await pool.put(Message.from_text(tail))
-
-            if not tool_calls:
-                break
-
-            tool_calls_list = [tool_calls[idx] for idx in sorted(tool_calls)]
-            normalized_calls, tool_messages = await normalize_and_execute_tool_calls(
-                tool_calls_list, tool_executor, tool_results
+                max_rounds=rounds,
+                tool_ctx=tool_ctx,
+                modalities=_modalities_for_chain(chain),
+                on_text=_emit,
+                on_round_end=_on_round_end,
+                max_msg_len=max_len,
             )
-            messages.append({
-                "role": "assistant",
-                "content": None,
-                "tool_calls": normalized_calls,
-            })
-            messages.extend(tool_messages)
-
-            # 工具轮里 expand_image 取回的图片必须在本轮递给模型（否则模型只能凭
-            # 工具回执的文字描述瞎猜）。延迟 import：initiative_stream 不能顶层
-            # import chat（循环导入）。
-            from app.agent.loop.chat import _append_round_images, _modalities_for_chain
-
-            if _append_round_images(messages, tool_ctx, _modalities_for_chain(chain)):
-                from app.agent import logger
-
-                logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).info(
-                    "[ExpandImage] 主动/定时任务工具轮取回的图片已追加到下一轮请求"
-                )
+        )
 
         # 一句话没发不等于"模型没干活"：把思考字数留下来，避免日志里看不出真实原因
-        if reasoning_chars and not full_text_parts:
+        if step.reasoning_chars and not full_text_parts:
             from app.agent import logger
 
             logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).warning(
-                f"[LLM] 主动消息只产出思考、无正文（reasoning {reasoning_chars} 字符，"
+                f"[LLM] 主动消息只产出思考、无正文（reasoning {step.reasoning_chars} 字符，"
                 f"多半是思考吃满 max_tokens={max_tokens}）：本轮静默"
             )
 
