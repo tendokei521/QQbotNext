@@ -78,6 +78,11 @@ class Module(BaseModule):
         runtime.context_options = ConfigView(
             getattr(runtime, "config", None), self.config, OWNED_KEYS
         )
+        # P6 能力声明：本模块**提供**"上下文按需展开"这项能力。框架此后只问
+        # "有没有人提供"，不再靠读 `context_expand_enable` 猜（配置仍表达偏好）。
+        from app.agent.capabilities import CAP_CONTEXT_EXPAND, registry_of
+
+        registry_of(runtime).declare_tool(CAP_CONTEXT_EXPAND, source="llm_context")
         provider = ReferentProvider(self)
         source = ContextToolSource(self)
         register_context_provider(runtime, provider)
@@ -95,6 +100,10 @@ class Module(BaseModule):
             return
         from app.agent.loop.providers import unregister_owner
 
+        # 取消能力声明：框架立刻回到"没人提供"（配置兜底仍在，行为平滑）
+        from app.agent.capabilities import CAP_CONTEXT_EXPAND, registry_of
+
+        registry_of(runtime).revoke_tool(CAP_CONTEXT_EXPAND, source="llm_context")
         unregister_owner(runtime, self)
         self._providers = []
         runtime.context_options = None

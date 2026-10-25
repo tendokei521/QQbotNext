@@ -60,7 +60,12 @@ def cfg_get(runtime: Any, key: str, default: Any = None) -> Any:
 
 
 def prereq_state(runtime: Any, name: str) -> tuple[bool, str]:
-    """该工具的前置功能是否就绪，以及不可用时的说明文案。"""
+    """该工具的前置功能是否就绪，以及不可用时的说明文案。
+
+    能力声明优先（P6）：`context_expand_*` 这类"由某个模块提供"的能力，
+    先问 ``runtime.capabilities`` 有没有人声明；没人声明再回退到配置键，
+    保证没装模块/旧配置时行为与改造前一致。
+    """
     entry = _SYSTEM_TOOL_PREREQUISITES.get(name, ("", ""))
     key, label = entry[0], entry[1]
     default = entry[2] if len(entry) > 2 else False
@@ -71,6 +76,12 @@ def prereq_state(runtime: Any, name: str) -> tuple[bool, str]:
         memory = getattr(runtime, "memory_service", None)
         if memory is not None and hasattr(memory, "enabled"):
             return bool(memory.enabled()), label
+    if key == "context_expand_enable":
+        from app.agent.capabilities import CAP_CONTEXT_EXPAND, has_tool_capability
+
+        if has_tool_capability(runtime, CAP_CONTEXT_EXPAND, config_key=key):
+            return True, ""
+        return False, label
     return bool(cfg_get(runtime, key, default)), label
 
 

@@ -35,13 +35,12 @@ class OutputStrategy(Protocol):
 
 from __future__ import annotations
 
-from app.core.logger import account_label
-
 import asyncio
 from collections.abc import AsyncIterator, Callable
 from typing import Any, Protocol, runtime_checkable
 
 from app.agent.delivery.directives import build_outbound_builder
+from app.core.logger import account_label
 from app.domain.message import Message
 
 
@@ -240,18 +239,18 @@ def _has_get(config: Any) -> bool:
 
 
 def select_default_output(config: Any = None, runtime: Any = None) -> OutputStrategy:
-    """框架默认输出策略：按 ``stream_output`` 选择（模块接管前的既有行为）。
+    """框架默认输出策略（模块接管前的既有行为）。
 
     ``config`` 可以是一个**配置视图**（模块接管时传入自己的配置），
     这样同一套策略实现既能服务框架默认路径，也能服务模块路径。
+
+    P6：**能力声明优先**。有模块声明了输出能力（流式/阻塞/发言通道）就按它走；
+    没人声明时按配置推导——升级期间行为与改造前完全一致。
     """
-    stream = False
-    if _has_get(config):
-        try:
-            stream = bool(config.get("stream_output", False))
-        except Exception:  # noqa: BLE001 —— 配置异常按非流式处理（保守）
-            stream = False
-    return StreamOutput(runtime, config) if stream else BlockingOutput(runtime, config)
+    from app.agent.capabilities import output_capability
+
+    capability = output_capability(runtime, config)
+    return StreamOutput(runtime, config) if capability.streams else BlockingOutput(runtime, config)
 
 
 class ConfigView:

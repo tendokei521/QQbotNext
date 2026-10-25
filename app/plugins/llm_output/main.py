@@ -114,6 +114,23 @@ class Module(BaseModule):
             getattr(runtime, "config", None), self.config, OWNED_KEYS
         )
         runtime.output = OutputStrategyAdapter(runtime, self.config, OWNED_KEYS)
+        # P6 能力声明：本模块声明"这套运行时**能**怎么产出"（三选一）。框架此后按
+        # 声明选策略；`stream_output` / `speech_via_tool` 仍表达偏好，但"能力存亡"
+        # 由这里决定（卸载即撤销）。
+        from app.agent.capabilities import (
+            OUTPUT_BLOCKING,
+            OUTPUT_SPEECH,
+            OUTPUT_STREAM,
+            registry_of,
+        )
+
+        if self.config.get("speech_via_tool", False):
+            kind = OUTPUT_SPEECH
+        elif self.config.get("stream_output", False):
+            kind = OUTPUT_STREAM
+        else:
+            kind = OUTPUT_BLOCKING
+        registry_of(runtime).declare_output(kind, source="llm_output")
 
     async def on_unload(self) -> None:
         """卸载时把槽恢复成"按配置自动选择"（框架默认行为）。
@@ -127,6 +144,10 @@ class Module(BaseModule):
         if isinstance(getattr(runtime, "output", None), OutputStrategyAdapter):
             runtime.output = None
         runtime.output_options = None
+        # 同时撤销能力声明，否则框架会以为"还能流式"（配置兜底仍在，行为平滑）
+        from app.agent.capabilities import registry_of
+
+        registry_of(runtime).revoke_output(source="llm_output")
 
     # ── 供测试/诊断：当前生效的模式 ──
     @property

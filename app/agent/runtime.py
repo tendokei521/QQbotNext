@@ -10,8 +10,6 @@ AgentRuntime 暴露与旧模块一致的接口（.config / .ctx / .bot_id / .sch
 
 from __future__ import annotations
 
-from app.core.logger import account_label
-
 import asyncio
 from typing import Any
 
@@ -27,6 +25,7 @@ from app.agent.providers.policy import TRACKED_KEYS, merge_config_layers
 from app.agent.session.manager import SessionManager
 from app.agent.telemetry import TelemetryRecorder
 from app.agent.tools.spec import ModuleToolRegistry
+from app.core.logger import account_label
 
 
 def _origin_of(*layers: tuple[str, dict]) -> str:
@@ -150,6 +149,10 @@ class AgentRuntime:
         self.assembler = PromptAssembler()
         # provider 调用策略：插件可声明 supersedes=("provider_invoker",) 整体替换
         self.invoker = ProviderInvoker()
+        # 能力声明表（P6）：模块在 on_load 里声明"我提供什么能力"，框架只问不猜
+        from app.agent.capabilities import CapabilityRegistry
+
+        self.capabilities = CapabilityRegistry()
         # 高危工具审批通道（P6）：插件/业务提供 ``async ask(runtime, *, tool, args, ctx)``。
         # None = 没有通道 → 需要审批的调用一律拒绝（fail-closed，见 tools/approval.py）。
         self.approval_channel = None
