@@ -300,6 +300,8 @@ def build_onebot_tools(runtime: Any, ctx: ToolContext | None = None) -> list[Too
         async def _tool_handler(ctx: ToolContext, args: dict, _tool=tool):
             return await _handler(runtime, _tool, ctx, args)
 
+        # 并发分类：读类可与其他工具并行，发消息/管理类一律独占。
+        # 未知风险等级按独占处理（fail-closed）：多一次串行只是慢，并发写错不可逆。
         spec = ToolSpec(
             name=name,
             description=description,
@@ -310,6 +312,7 @@ def build_onebot_tools(runtime: Any, ctx: ToolContext | None = None) -> list[Too
             module=None,
             source="onebot",
             category=str(tool.get("category", "onebot")),
+            concurrency="parallel" if policy.get("risk") == "read" else "exclusive",
         )
         specs.append(spec)
     return specs

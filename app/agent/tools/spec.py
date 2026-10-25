@@ -92,6 +92,9 @@ class ToolSpec:
         source: str = "system",
         category: str = "",
         max_result: int | None = None,
+        concurrency: str = "exclusive",
+        concurrency_safe: Callable[[dict], bool] | None = None,
+        timeout_s: float | None = None,
     ) -> None:
         raw_name = str(name or "")
         self.name = sanitize_tool_name(raw_name)
@@ -109,6 +112,28 @@ class ToolSpec:
         self.category = category
         # 结果长度上限：None=用全局默认；0=不截断（"把正文给我"类工具用）
         self.max_result = max_result
+        # 并发分类：默认**独占**（fail-closed）。只有明确声明 parallel 才允许与其他工具
+        # 同时执行；同一个处理器既读又写的工具（如 OneBot 的 _handler）必须用
+        # ``concurrency_safe(args)`` 按**每次调用的实参**再判一次。
+        self.concurrency = (concurrency or "exclusive").strip().lower()
+        self.concurrency_safe = concurrency_safe
+        # 单次执行的墙钟上限；None = 用全局默认（``tool_timeout_default_s``）
+        self.timeout_s = timeout_s
+
+    def runs_parallel(self, args: dict) -> bool:
+        """这次调用能否与其他工具并发（**fail-closed**：拿不准就按独占）。
+
+        为什么必须按实参判：同一个 ToolSpec 可能既跑"查信息"也跑"发消息"
+        （OneBot 的 ``_handler`` 就是这么复用的），按工具名分类会放过写操作。
+        """
+        if self.concurrency != "parallel":
+            return False
+        if self.concurrency_safe is None:
+            return True
+        try:
+            return self.concurrency_safe(args or {}) is True
+        except Exception:  # noqa: BLE001 —— 判定本身失败就当独占（宁可串行）
+            return False
 
     def allows(self, ctx: ToolContext | None) -> bool:
         """工具级权限/作用域校验；主动/定时等无事件场景默认放行。"""
