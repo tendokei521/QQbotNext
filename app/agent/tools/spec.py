@@ -246,12 +246,21 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
                 success = False
                 result = f"error: 无权限调用工具 {name}"
             else:
+                timeout_s = _timeout_of(ctx, spec)
                 try:
-                    result = await asyncio.wait_for(spec.handler(ctx, args), timeout=TOOL_TIMEOUT)
+                    # 不用 wait_for：它超时会 **cancel** 工具协程，把"发了一半的消息 /
+                    # 写了一半的文件"掐在半路。这里只等，超时就把结果换成 TOOL_TIMEOUT，
+                    # 让协程自己收敛（DSH 同款语义）。
+                    task = asyncio.create_task(spec.handler(ctx, args))
+                    done, _ = await asyncio.wait({task}, timeout=timeout_s)
+                    if not done:
+                        _orphan(task, name)
+                        raise asyncio.TimeoutError
+                    result = task.result()
                 except asyncio.TimeoutError:
                     success = False
-                    error = f"timeout({TOOL_TIMEOUT}s)"
-                    result = f"error: 工具 {name} 执行超时（{TOOL_TIMEOUT}s）"
+                    error = f"timeout({timeout_s}s)"
+                    result = f"error: TOOL_TIMEOUT 工具 {name} 执行超时（{timeout_s}s）"
                 except Exception as e:
                     success = False
                     error = str(e)
@@ -500,3 +509,37 @@ class ModuleToolRegistry:
                 continue
             result.append(spec)
         return result
+
+def _timeout_of(ctx: Any, spec: ToolSpec) -> float:
+    """这次执行允许几秒：工具自己声明的优先，否则用全局默认（``tool_timeout_default_s``）。"""
+    declared = getattr(spec, "timeout_s", None)
+    if declared:
+        return float(declared)
+    runtime = getattr(ctx, "runtime", None) if ctx is not None else None
+    config = getattr(runtime, "config", None) if runtime is not None else None
+    if config is None:
+        return float(TOOL_TIMEOUT)
+    try:
+        return max(0.01, float(config.get("tool_timeout_default_s", TOOL_TIMEOUT) or TOOL_TIMEOUT))
+    except (TypeError, ValueError):
+        return float(TOOL_TIMEOUT)
+
+
+def _orphan(task: asyncio.Task, name: str) -> None:
+    """超时后**不取消**任务，只挂一个回调：结束（或失败）时留痕。
+
+    为什么必须留痕：结果已经按超时回给了模型，但这个工具还在后台跑。它最终成功
+    还是抛错，是排查"超时之后群里还是冒出一条消息"这类现象的唯一线索。
+    """
+
+    def _done(t: asyncio.Task) -> None:
+        if t.cancelled():
+            logger.info(f"[Tool] {name} 超时后被取消")
+            return
+        exc = t.exception()
+        if exc is not None:
+            logger.warning(f"[Tool] {name} 超时后仍抛错: {exc!r}")
+            return
+        logger.info(f"[Tool] {name} 超时后自行收敛（结果已按 TOOL_TIMEOUT 回给模型）")
+
+    task.add_done_callback(_done)
