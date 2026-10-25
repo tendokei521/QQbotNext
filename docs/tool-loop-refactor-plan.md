@@ -743,8 +743,8 @@ surface-eligible（`user/assistant`）与 log-only（`tool/*`、`step/*`），
 | 阶段 | 状态 | 提交 | 备注 |
 |---|---|---|---|
 | P0 契约测试 | ✅ **已完成** | `2a1c1ab` `46f0fb4` | 顺带修了两个静默 bug（权限两层）；契约测试变异验证通过；全量 2435 passed |
-| P1 循环收口 | 🔄 **进行中 4/5** | `20b0e40` `297859e` `86acb70` `1409ce4` `eee40e5` | 见下方「P1 实际进度」；剩 `chat.stream_response` 与三个适配器 |
-| P2 状态机+取消 | ☐ 未开工 | — | 依赖 P1 |
+| P1 循环收口 | ✅ **已完成** | `20b0e40` … `ba3f9cd` | 循环只剩 `loop/tool_step.py` 两处（流式 + 非流式）；适配器单次请求；全量 2447 passed |
+| P2 状态机+取消 | ⏭ 下一步 | — | 依赖 P1（已就绪） |
 | P3 并发+超时 | ☐ 未开工 | — | 只依赖 P1 |
 | P4 单一真相 | ☐ 未开工 | — | 依赖 P2 + P5 配对守卫；风险最高 |
 | P5 输出契约+spill | ☐ 未开工 | — | 依赖 P3 |
@@ -760,10 +760,27 @@ surface-eligible（`user/assistant`）与 log-only（`tool/*`、`step/*`），
 | `proactive.stream` 改走 runner | ✅ | `86acb70` | 句子逐句入池不变；工具轮上限不变 |
 | `run_blocking_step` + `LLMResponse.tool_calls` | ✅ | `1409ce4` | 适配器能报"我要调这些工具"，循环才能上移 |
 | `turn._chat_once` 改走 runner | ✅ | `eee40e5` | 顺带删掉"补图后再补问一轮"的特例；`classify_response` 认 `tool_calls` 为产出 |
-| `chat.stream_response` 改走 runner | ⏭ 下一步 | — | 难点：async generator + 发言通道 flush + 句间打断（见计划 §P1 第 3/4 条） |
-| 三个适配器改单次请求 + 兼容壳 | ☐ | — | `chat_with_fallback` 保持签名，内部用 `run_blocking_step` 驱动 |
-| 白名单清空（`KNOWN_LOOPS` → 只剩 runner） | ☐ | — | 与第 8 步同一提交或紧随其后 |
-| 删 `tests/architecture/test_turn_path_parity.py` 的源码扫描 | ☐ | — | 等 `chat.py` 搬完再删（那时它必假红） |
+| runner 改**事件流**（`iter_stream_step`） | ✅ | `cda21b5` | 回调里不能 yield：把产出变成事件，主路径才能边产边发且保住句间打断 |
+| `chat.stream_response` 改走 runner | ✅ | `6259e7c` | 见下方偏差说明（收尾轮也 flush 发言通道） |
+| 三个适配器改单次请求 + 兼容壳 | ✅ | `541eae5` | `chat_with_fallback` 签名不变，内部转调 `run_blocking_step` |
+| 白名单收敛（`KNOWN_LOOPS` → 只剩 runner） | ✅ | `541eae5` | `BASELINE_COUNT = 2`（流式 + 非流式各一处） |
+| `test_turn_path_parity.py` 的源码扫描 | ✅ 改为**改指向** | `541eae5` | 见下方偏差说明 |
+| params 键集清理（主动消息补预算闸门） | ✅ | `ba3f9cd` | 主动消息/定时任务此前完全没有 `TurnBudget` |
+
+#### P1 交付与计划的差异（都已落库）
+
+1. **多了一个 `iter_stream_step`**：计划里 `on_text` 回调 + "队列转 yield" 的方案能跑，但队列要么把句间打断延后，要么需要在
+   `GeneratorExit` 里等一个取消任务。改成**事件流**（`("text", 句子)` / `("round_end", RoundSummary)`）
+   后，`chat.stream_response` 直接在 `async for` 里 `yield`，语义零折损，也不用引入并发。
+2. **`test_turn_path_parity.py` 没删，改成指向 runner**：计划写"删掉源码扫描"，但那文件里还有
+   4 条与搬家无关的有效守卫（`post_assemble` 必经、补全登记、历史清洗口径、`turn_completed` 广播）。
+   只把"两条路径都要补图"那条改成锁 runner——删整文件等于顺手撤掉别的安全带。
+3. **`STREAM_PARAMS` 不加 `max_tool_rounds`**：计划想让它与 `CHAT_PARAMS` 对齐，但收口后流式 invoker
+   **不该**自己跑循环（否则又双循环一遍），这个值对它没有意义。非流式的 `max_tool_rounds` 仍走
+   `CHAT_PARAMS` → 兼容壳 → `StepRequest.max_rounds`，语义唯一。
+4. **两个真 bug 顺手修掉**（不修就是留隐患）：
+   `classify_response` 不认 `tool_calls` 会把"我要调工具"判成空回复并原样重发（适配器单次请求后必现）；
+   发言通道的**收尾轮**此前从不 flush，最后一轮才调 `send_message` 时那条消息会丢。
 
 ### P0 实际交付（与计划的差异）
 
