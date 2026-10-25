@@ -19,6 +19,7 @@ from typing import Any
 
 from app.agent.media import store as image_media
 from app.agent.session.manager import SessionManager
+from app.core.logger import logger
 
 
 class SessionHistoryService:
@@ -151,6 +152,32 @@ class SessionHistoryService:
             max_mb=image_media.DEFAULT_MAX_MB,
         )
 
+    # ---------- 事件日志（P4）----------
+
+    def _entry_id_of(self, task_id: str, index: int, message: dict) -> str:
+        """消息在事件日志里的稳定 id。
+
+        新写入的事件本来就带 ``entry_id``（`SessionManager` 写的）；老数据（直接从
+        `conversations.messages` 迁移来的）没有，就用 ``task:idx`` 兜底——迁移脚本
+        会按数组下标生成同样的 id，所以这里的引用不会失配。
+        """
+        existing = str((message or {}).get("entry_id") or "")
+        if existing:
+            return existing
+        return f"{task_id}:idx:{int(index)}"
+
+    def _log_event(self, task_id: str, type_: str, **kwargs) -> None:
+        """追加一条历史事件（失败只留痕：UI 编辑不该因为记账失败而失败）。"""
+        store = self.history
+        if not hasattr(store, "append_event"):
+            return
+        try:
+            from app.agent.session.session_log import SessionLog
+
+            SessionLog(store, task_id).append(type_, **kwargs)
+        except Exception as e:  # noqa: BLE001 —— 记账是旁路
+            logger.debug(f"[SessionHistory] 事件追加失败（已忽略）: {e}")
+
     def replace_message_media(
         self, session_id: str, task_id: str, index: int, seg_index: int, data: bytes, mime: str = ""
     ) -> dict:
@@ -171,6 +198,11 @@ class SessionHistoryService:
         seg_data = image_media.seg_data(seg)
         seg["data"] = {**seg_data, "media": dict(saved)}
         image_media.strip_remote_addresses(seg["data"])
+        # P4：媒体替换也是一条事实（记事件 + 刷缓存，读取方不动）
+        self._log_event(
+            task_id, "message/edited",
+            entry=dict(message), entry_id=self._entry_id_of(task_id, index, message),
+        )
         data_after = self.history.update_history(task_id, messages=messages)
         if data_after is None:
             raise ValueError("对话不存在")
@@ -191,6 +223,10 @@ class SessionHistoryService:
             base = message.get("base")
             if isinstance(base, dict):
                 base["text"] = "[图片已移除]"
+        self._log_event(
+            task_id, "message/edited",
+            entry=dict(message), entry_id=self._entry_id_of(task_id, index, message),
+        )
         data_after = self.history.update_history(task_id, messages=messages)
         if data_after is None:
             raise ValueError("对话不存在")
@@ -269,6 +305,11 @@ class SessionHistoryService:
         if index < 0 or index >= len(messages):
             raise ValueError(f"消息索引越界: {index}")
 
+        removed = messages[index]
+        self._log_event(
+            task_id, "message/deleted",
+            entry_id=self._entry_id_of(task_id, index, removed if isinstance(removed, dict) else {}),
+        )
         new_messages = [m for i, m in enumerate(messages) if i != index]
         data = self.history.update_history(task_id, messages=new_messages)
         if data is None:
@@ -290,6 +331,10 @@ class SessionHistoryService:
             raise ValueError(f"消息索引越界: {index}")
         messages = [dict(m) for m in messages]
         messages[index]["content"] = content
+        self._log_event(
+            task_id, "message/edited",
+            entry=dict(messages[index]), entry_id=self._entry_id_of(task_id, index, messages[index]),
+        )
         data = self.history.update_history(task_id, messages=messages)
         if data is None:
             raise ValueError("对话不存在")
@@ -313,6 +358,7 @@ class SessionHistoryService:
                 message[key] = value
         messages = list(data.get("messages", []) or [])
         messages.append(message)
+        self._log_event(task_id, f"{role}/message", entry=dict(message))
         data = self.history.update_history(task_id, messages=messages)
         if data is None:
             raise ValueError("对话不存在")

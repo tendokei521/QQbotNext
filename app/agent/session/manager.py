@@ -484,6 +484,10 @@ class SessionManager:
             if message_id not in (None, ""):
                 entry["message_id"] = str(message_id)
             history = session.data.history
+            # 稳定 entry_id：事件日志里"这条消息"的身份。跟着 entry 一起存，
+            # WebUI 按 id 编辑/删除时就能精确折叠到它（老数据没有，用 task:idx 兜底）。
+            entry_id = uuid.uuid4().hex
+            entry["entry_id"] = entry_id
             history.append(entry)
             # P4：先记账再进内存列表。事件日志是**唯一真相**，列表是它的活投影；
             # 这里双写而不是只写信日志，是为了让所有既有读取方（WebUI/统计/蒸馏）
@@ -492,6 +496,7 @@ class SessionManager:
                 session,
                 "assistant/message" if role == "assistant" else "user/message",
                 entry=entry,
+                entry_id=entry_id,
             )
             if len(history) > self.MAX_HISTORY_MESSAGES:
                 dropped = len(history) - self.MAX_HISTORY_MESSAGES
@@ -529,6 +534,8 @@ class SessionManager:
             # 同一条流式发言只有一个 entry_id：多次 delta 在投影里折叠成一条
             entry_id = f"{session.task_id}:stream:{len(history)}" if getattr(session, "task_id", "") else ""
             self._streaming_ids[session_id] = entry_id
+            if entry_id:
+                entry["entry_id"] = entry_id
             if len(history) > self.MAX_HISTORY_MESSAGES:
                 dropped = len(history) - self.MAX_HISTORY_MESSAGES
                 del history[:dropped]

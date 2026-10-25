@@ -95,7 +95,38 @@ def test_survives_a_history_store_without_event_support(tmp_path):
         def save_conversation(self, session, conv, saved_at=None):
             return None
 
+    original = mgr.history
     mgr.history = _Legacy()
+    try:
+        mgr.add_message("group_1", "user", "还能写")
+        assert [m["content"] for m in mgr.get_history("group_1")] == ["还能写"]
+    finally:
+        # SessionManager 按 bot_id 单例：替身必须还回去，否则同进程后续用例全被污染
+        mgr.history = original
 
-    mgr.add_message("group_1", "user", "还能写")
-    assert [m["content"] for m in mgr.get_history("group_1")] == ["还能写"]
+def test_webui_edit_and_delete_append_events(tmp_path):
+    """P4 第 3 步：WebUI 点"编辑/删除"也是追加事件，不是抹掉原数组。"""
+    from app.application.session_history_service import SessionHistoryService
+
+    mgr = _mgr(tmp_path)
+    mgr.create_session("group_1", "group", 60)
+    mgr.add_message("group_1", "user", "原话")
+    mgr.add_message("group_1", "assistant", "回复")
+    task_id = mgr.get_session("group_1").task_id
+    # WebUI 编辑作用于**归档行**：内存里刚写的两条要先落库（生产由收尾 save_session 完成）
+    mgr.history.save_session(mgr.get_session("group_1"))
+
+    svc = SessionHistoryService(mgr.bot_id)
+    svc.history = mgr.history          # 复用同一个临时库
+    svc.session_mgr = mgr
+
+    svc.edit_message("group_1", task_id, 0, "改过的话")
+    assert [m["content"] for m in mgr.get_history("group_1")] == ["改过的话", "回复"]
+
+    svc.delete_message("group_1", task_id, 0)
+    assert [m["content"] for m in mgr.get_history("group_1")] == ["回复"]
+
+    types = [e["type"] for e in _events(mgr, "group_1")]
+    assert types[-2:] == ["message/edited", "message/deleted"], types
+    # 事件没被抹掉：原始 user/message 仍在日志里（单一真相只追加）
+    assert "user/message" in types
