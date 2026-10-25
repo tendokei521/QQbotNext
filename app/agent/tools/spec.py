@@ -313,7 +313,24 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
             # 失败结果不追加（见 append_reply_directive）。
             # 发言通道工具（source="speech"）不追加：模型已经用 send_message 说过话了，
             # 再要求它"用自己口吻回应"只会让它把同一句再说一遍。
-            final = _truncate_result(result, spec.max_result)
+            # P5 spill：**先**看原文是否超阈值（砍过就取不回来了），超了落盘并把
+            # 正文换成"预览 + 路径"；落盘失败只 warn、保留原文（增强不是必需品）。
+            runtime_obj = getattr(ctx, "runtime", None) if ctx is not None else None
+            spilled_to = ""
+            if runtime_obj is not None:
+                from app.agent.tools.spill import apply_spill
+
+                result, spilled_to = apply_spill(
+                    result,
+                    runtime=runtime_obj,
+                    session_id=getattr(ctx, "session_id", "") if ctx is not None else "",
+                    tool_name=name,
+                    source=spec.source,
+                    preview_budget=min(int(spec.max_result or 4000), 4000),
+                )
+            # 已落盘时正文就是预览（自带取回方式与路径），不能再按 max_result 截断——
+            # 那会把末尾的路径和说明切掉，等于白存。
+            final = result if spilled_to else _truncate_result(result, spec.max_result)
             if runtime is not None and spec.source != "speech":
                 from app.agent.loop.tool_loop import append_reply_directive, reply_directive
                 from app.agent.policy import policy_config

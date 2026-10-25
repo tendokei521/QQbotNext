@@ -850,6 +850,17 @@ SCHEMA = {
         "description": "工具没声明自己的超时就用这个值。超时只把结果换成失败回执，工具协程仍会跑完。",
         "default": 20, "min": 1, "max": 600, "group": "group_tools",
     },
+    # P5：超大工具结果落盘（消息里只留预览 + 取回路径）
+    "tool_spill_enable": {
+        "type": "boolean", "label": "超大结果落盘",
+        "description": "工具结果超过阈值时把全文落盘、消息里只留预览与路径，模型可再调用取回工具读回全文。",
+        "default": True, "group": "group_tools",
+    },
+    "tool_spill_max_bytes": {
+        "type": "number", "label": "落盘阈值（字符）",
+        "description": "工具结果超过多少字符就落盘。默认 50000。",
+        "default": 50000, "min": 1024, "max": 2000000, "group": "group_tools",
+    },
     "retry_profile": {
         "type": "select", "label": "重试档位",
         "description": "一轮对话的请求次数与输入 token 上限。抗压档更耐故障，消耗也更大。",

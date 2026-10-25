@@ -177,6 +177,8 @@ UI_PAGES: tuple[UIPage, ...] = (
                 (
                     "tool_parallel_max",
                     "tool_timeout_default_s",
+                    "tool_spill_enable",
+                    "tool_spill_max_bytes",
                 ),
             ),
             UIGroup(

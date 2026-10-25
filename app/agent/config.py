@@ -195,6 +195,11 @@ DEFAULT_LLM_CONFIG: dict = {
     # 工具没声明 ``ToolSpec.timeout_s`` 时的墙钟上限（秒）。超时只替换**结果**
     # （TOOL_TIMEOUT），不 cancel 协程——否则会把"发了一半的消息/写了一半的文件"掐断。
     "tool_timeout_default_s": 20,
+    # 超大工具结果落盘（P5）：超过 tool_spill_max_bytes 就把全文写到
+    # data/llm/<bot>/spill/<session>/<sha16>.txt，消息里只留预览 + 路径，
+    # 模型可用 recall_tool_result 取回。关掉 = 回到"直接截断"的老行为。
+    "tool_spill_enable": True,
+    "tool_spill_max_bytes": 50000,
     # 重试档位（thrifty / balanced / resilient）：决定**一整轮**最多能发几次请求、
     # 最多累计烧多少输入 token（见 request_policy.TurnBudget）。这是硬闸门——
     # 没有它，"HTTP 重试 × 空回复重试 × 收敛重试 × provider 数"会乘成十几次，
