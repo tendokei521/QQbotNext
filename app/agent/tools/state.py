@@ -246,7 +246,7 @@ def resolve_tool_state(
     if event is not None and spec is not None:
         try:
             scope = session_scope or ("private" if getattr(event, "message_type", "") == "private" else "group")
-            if not spec.allowed_for(event, scope=scope):  # type: ignore[attr-defined]
+            if not spec.allowed_for_event(event, scope=scope):
                 return _state(False, REASON_PERMISSION_DENIED, "当前身份权限不足", extra)
         except Exception as e:  # noqa: BLE001 —— 判定不了就放行，交给执行期再判
             logger.debug(f"[Tool] 权限预判失败（{tool_name}），交由执行期判定: {e}")

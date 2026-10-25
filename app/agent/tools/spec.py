@@ -115,11 +115,26 @@ class ToolSpec:
         if ctx is None:
             # 不携带调用上下文时保留旧行为（框架内部工具）
             return True
-        event = getattr(ctx, "event", None)
-        scope = "*"
-        if event is not None:
+        return self.allowed_for_event(getattr(ctx, "event", None))
+
+    def allowed_for_event(self, event: Any, *, scope: str | None = None) -> bool:
+        """按**事件**判定权限与作用域（`allows()` 与 `resolve_tool_state` 共用同一份实现）。
+
+        修正记录：``event is None`` 的放行判断此前排在**作用域检查之后**，于是
+        没声明 ``scopes=("*",)`` 的工具（memory_* / knowledge_* / schedule_task…）
+        在主动消息与定时任务路径上被当成"当前会话类型不在适用范围"而静默失败，
+        与本文档字符串"无事件场景默认放行"自相矛盾。现在无事件一律在最前面放行：
+        那类触发不归属于任何普通群成员，权限判定没有主语。
+
+        ``scope`` 不传时按事件类型推断（群 / 私聊 / 通配）；传了就以调用方的判定为准
+        （`resolve_tool_state` 的 ⑤ 层会显式传入）。
+        """
+        if event is None:
+            return True
+        if scope is None:
+            scope = "*"
             event_type = getattr(event, "event_type", "") or ""
-            if event_type == "message_group" or (getattr(event, "group", None) is not None):
+            if event_type == "message_group" or getattr(event, "group", None) is not None:
                 scope = "group"
             elif event_type == "message_private" or getattr(event, "user_id", None):
                 scope = "private"
@@ -127,9 +142,6 @@ class ToolSpec:
             return False
 
         if self.permission == "everyone":
-            return True
-        if event is None:
-            # 主动/定时触发来源不归属于普通群成员，按最低权限放行（框架内部工具可另行控制）
             return True
 
         role = getattr(event, "permission_role", None) or getattr(event, "role", None) or "member"
@@ -268,6 +280,8 @@ def _execution_gate(ctx: Any, spec: ToolSpec) -> str:
     """执行前的可用性复核；返回空串表示可以执行。
 
     与注入期用的是**同一个** `resolve_tool_state`，所以两侧不会打架。
+    这里显式传 ``event``：判定链的第 ⑤ 层（权限/作用域）只有在拿到事件时才有主语，
+    此前不传事件导致该层在**任何**调用点都是死代码（详见 `tools/state.py` 顶部说明）。
     """
     runtime = getattr(ctx, "runtime", None) if ctx is not None else None
     if runtime is None:
@@ -277,7 +291,7 @@ def _execution_gate(ctx: Any, spec: ToolSpec) -> str:
 
         event = getattr(ctx, "event", None)
         scope = "private" if getattr(event, "message_type", "") == "private" else "group"
-        state = resolve_tool_state(runtime, spec, session_scope=scope)
+        state = resolve_tool_state(runtime, spec, session_scope=scope, event=event)
         if state.available:
             return ""
         return state.reason_text
