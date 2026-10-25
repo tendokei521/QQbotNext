@@ -75,7 +75,7 @@ class ToolResult:
     # ── 构造 ──────────────────────────────────────────
 
     @classmethod
-    def text(cls, text: str, *, meta: dict | None = None) -> "ToolResult":
+    def text(cls, text: str, *, meta: dict | None = None) -> ToolResult:
         """成功结果。文本本身带 ``error:`` 前缀时**也算错误**（双读过渡）。"""
         content = str(text if text is not None else "")
         if is_error_result(content):
@@ -90,7 +90,7 @@ class ToolResult:
     @classmethod
     def error(
         cls, code: str, message: str = "", *, meta: dict | None = None
-    ) -> "ToolResult":
+    ) -> ToolResult:
         """失败结果。``message`` 是给人看的句子，``code`` 是给机器看的。"""
         body = str(message or "").strip()
         if not body:

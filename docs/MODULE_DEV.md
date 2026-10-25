@@ -666,6 +666,56 @@ step = await run_blocking_step(StepRequest(
 `import_history()` 把外部历史批量搬进来让框架既有组装器也能读到，二者详见
 `app/agent/session/manager.py` 的模块 docstring（含存储契约字段表）。
 
+### 4.7.2 能力声明：`runtime.capabilities`（P6 起）
+
+有些键其实是**能力**而不是偏好——`stream_output` / `speech_via_tool` 描述"这套运行时
+能怎么产出"，`context_expand_enable` 其实是在问"有没有人提供上下文展开"。
+框架不再靠读配置猜谁装了，改成让提供方**声明**：
+
+```python
+from app.agent.capabilities import (
+    CAP_CONTEXT_EXPAND, OUTPUT_SPEECH, registry_of,
+)
+
+async def on_load(self) -> None:
+    runtime = self.ctx.services.runtime(self.bot_id)
+    registry_of(runtime).declare_output(OUTPUT_SPEECH, source="my_output_module")
+    registry_of(runtime).declare_tool(CAP_CONTEXT_EXPAND, source="my_context_module")
+
+async def on_unload(self) -> None:
+    registry_of(runtime).revoke_output(source="my_output_module")
+    registry_of(runtime).revoke_tool(CAP_CONTEXT_EXPAND, source="my_context_module")
+```
+
+规则：
+
+- **声明优先于配置**：声明了流式，即使 `stream_output=false` 也按流式跑；
+- **撤销只能撤自己声明的**（`source` 不匹配就不动），卸载即回到"没人提供"；
+- 没人声明时**回落到配置键**，所以没装模块的旧实例行为不变；
+- 输出能力三选一：`stream` / `blocking` / `speech`（发言通道也是边产边发）。
+
+### 4.7.3 高危工具审批通道：`runtime.approval_channel`（P6 起）
+
+`tool_approval_enable` 打开后，OneBot 里 `sensitivity` 为 `high`/`critical` 的工具在
+执行前必须获批。通道由业务/插件提供（框架不假设媒介是私聊还是 WebUI）：
+
+```python
+class MyApprovalChannel:
+    async def ask(self, runtime, *, tool, args, ctx):
+        from app.agent.tools.approval import ApprovalOutcome
+        ok = await my_ui_confirm(tool, args)      # 你自己的确认流程
+        return ApprovalOutcome.ALLOWED_ONCE if ok else ApprovalOutcome.REJECTED
+
+runtime.approval_channel = MyApprovalChannel()
+```
+
+**fail-closed**（这几个是硬规矩，不是建议）：
+
+- 没有通道 → `UNAVAILABLE` → **拒绝执行**；
+- 通道抛异常 / 返回不认识的值 → 同样按拒绝；
+- 只有 `ALLOWED_ONCE` 才执行，且只对**这一次**调用有效（不缓存、不升级）；
+- 拒绝话术按 `REJECTED` / `TIMEOUT` / `UNAVAILABLE` 区分，asked 与 decided 都留痕。
+
 ---
 
 ## 4.8 模块 ↔ 框架交互面（资源引用 / 系统 LLM / 依赖自检）
