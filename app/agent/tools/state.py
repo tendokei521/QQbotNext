@@ -275,6 +275,14 @@ def resolve_all_tool_states(runtime: Any, *, include_unavailable: bool = True) -
                 continue
             states.append(resolve_tool_state(runtime, spec))
             seen.add(spec.name)
+
+        # P5：spill 取回工具也是系统工具（漏登记 = 界面上看不到）
+        from app.agent.tools.recall import build_recall_tool
+
+        recall = build_recall_tool(runtime, None)
+        if recall.name not in seen:
+            states.append(resolve_tool_state(runtime, recall))
+            seen.add(recall.name)
     except Exception as e:  # noqa: BLE001 —— 组装失败不该拖垮清单
         logger.debug(f"[Tool] 系统工具清单组装失败（已忽略）: {e}")
 

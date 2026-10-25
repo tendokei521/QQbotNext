@@ -37,6 +37,8 @@ _SYSTEM_TOOL_PREREQUISITES: dict[str, tuple] = {
     "expand_message": ("context_expand_enable", "上下文按需展开未启用", True),
     "expand_user": ("context_expand_enable", "上下文按需展开未启用", True),
     "tavily_search": ("tavily_enable", "Tavily 联网搜索未启用"),
+    # P5：spill 取回工具（关掉落盘就没有可读的东西了）
+    "recall_tool_result": ("tool_spill_enable", "超大结果落盘未启用"),
     "memory_save": ("memory_enable", "长期记忆未启用"),
     "memory_recall": ("memory_enable", "长期记忆未启用"),
     "memory_delete": ("memory_enable", "长期记忆未启用"),

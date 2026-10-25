@@ -48,6 +48,12 @@ def _build_specs(runtime: Any) -> list[ToolSpec]:
     specs.append(build_tavily_tool(runtime))
 
 
+    # P5：spill 结果的取回工具（WebUI 清单要能看到它，否则"存在但界面没有"）
+    from app.agent.tools.recall import build_recall_tool
+
+    specs.append(build_recall_tool(runtime, None))
+
+
 
     return specs
 

@@ -94,6 +94,15 @@ async def _collect_llm_ext(
 
     specs.extend(build_session_tools(runtime, ctx))
 
+    # P5：取回落盘结果。只在开了 spill 时注入——没开的账号不该多一个用不上的工具。
+    try:
+        if bool(runtime.config.get("tool_spill_enable", True)):
+            from app.agent.tools.recall import build_recall_tool
+
+            specs.append(build_recall_tool(runtime, ctx))
+    except Exception as e:  # noqa: BLE001 —— 工具注入失败不该拖垮整轮
+        logger.debug(f"[Tool] recall_tool_result 注入失败（已忽略）: {e}")
+
 
     # Tavily 联网搜索（系统级工具，不进入 OneBot 前端清单）
     if bool(runtime.config.get("tavily_enable", False)):
