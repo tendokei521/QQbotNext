@@ -744,7 +744,7 @@ surface-eligible（`user/assistant`）与 log-only（`tool/*`、`step/*`），
 |---|---|---|---|
 | P0 契约测试 | ✅ **已完成** | `2a1c1ab` `46f0fb4` | 顺带修了两个静默 bug（权限两层）；契约测试变异验证通过；全量 2435 passed |
 | P1 循环收口 | ✅ **已完成** | `20b0e40` … `ba3f9cd` | 循环只剩 `loop/tool_step.py` 两处（流式 + 非流式）；适配器单次请求；全量 2447 passed |
-| P2 状态机+取消 | 🔄 **进行中 1/4** | `25a7cda` | `TurnReason` + `TurnState` 已落；取消/钩子/`TurnLimits` 待做 |
+| P2 状态机+取消 | 🔄 **进行中 2/4** | `25a7cda` `2969cf9` | `TurnReason`/`TurnState` + `AbortScope` 已落；中断锚点/钩子/`TurnLimits` 待做 |
 | P3 并发+超时 | ☐ 未开工 | — | 只依赖 P1（已就绪） |
 | P4 单一真相 | ☐ 未开工 | — | 依赖 P2 + P5 配对守卫；风险最高 |
 | P5 输出契约+spill | ☐ 未开工 | — | 依赖 P3 |
@@ -756,8 +756,8 @@ surface-eligible（`user/assistant`）与 log-only（`tool/*`、`step/*`），
 |---|---|---|---|
 | `TurnReason` 七值 + `classify_step` + `TurnState` | ✅ | `25a7cda` | 只认 `kind`/`finish_reason`/`text`，不看日志文案；兜底话术不再冒充 `completed` |
 | 两条入口都产出结构化结局 | ✅ | `25a7cda` | `TurnResult.reason` + `ctx.state["turn_reason"]` + 遥测 `reason` 字段 |
-| `AbortScope` 协作式取消 + 流水线接线 | ⏭ 下一步 | — | `interrupt_session` 从"标记 stale"升级为"取消活跃 turn" |
-| 中断锚点（已发前缀进历史 + 未派发工具补 `ABORTED_BEFORE_DISPATCH`） | ☐ | — | 依赖上一步 |
+| `AbortScope` 协作式取消 + 流水线接线 | ✅ | `2969cf9` | 只在两个边界检查（请求前/派发工具前）；`interrupt_session` 同时抬代际与取消 |
+| 中断锚点（已发前缀进历史 + 未派发工具补 `ABORTED_BEFORE_DISPATCH`） | ⏭ 下一步 | — | 前缀已由 `ctx.state["interrupted"]` 保留；还差"补配对结果" |
 | 新钩子阶段 `turn_started` / `step_completed` / `turn_stopping` | ☐ | — | 三处同步（hooks docstring / DECLARED_STAGES / MODULE_DEV） |
 | `TurnLimits` 收拢三个上限配置 | ☐ | — | 键名与行为不变 |
 
