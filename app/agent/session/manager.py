@@ -301,6 +301,8 @@ class SessionManager:
         self.history = create_history_store(bot_id)
         # 流式发言的"当前这条 assistant 历史"跟踪（见 upsert_streaming_assistant）
         self._streaming_entries: dict[str, dict] = {}
+        #: 流式条目的稳定 id（事件日志里靠它把多次 delta 折叠成一条）
+        self._streaming_ids: dict[str, str] = {}
         # 会话过期/归档时的可选回调（长期记忆归档蒸馏用）：callable(session)
         self.on_archive = None
         self._stop_event = threading.Event()
@@ -483,6 +485,14 @@ class SessionManager:
                 entry["message_id"] = str(message_id)
             history = session.data.history
             history.append(entry)
+            # P4：先记账再进内存列表。事件日志是**唯一真相**，列表是它的活投影；
+            # 这里双写而不是只写信日志，是为了让所有既有读取方（WebUI/统计/蒸馏）
+            # 这一版完全不动。追加失败只留痕，绝不影响一条回复。
+            self._log_event(
+                session,
+                "assistant/message" if role == "assistant" else "user/message",
+                entry=entry,
+            )
             if len(history) > self.MAX_HISTORY_MESSAGES:
                 dropped = len(history) - self.MAX_HISTORY_MESSAGES
                 del history[:dropped]
@@ -511,10 +521,14 @@ class SessionManager:
             return False
         history = session.data.history
         entry = self._streaming_entries.get(session_id)
+        entry_id = self._streaming_ids.get(session_id, "")
         if entry is None or not any(entry is e for e in history):
             entry = {"role": "assistant", "time": int(time.time()), "content": content}
             history.append(entry)
             self._streaming_entries[session_id] = entry
+            # 同一条流式发言只有一个 entry_id：多次 delta 在投影里折叠成一条
+            entry_id = f"{session.task_id}:stream:{len(history)}" if getattr(session, "task_id", "") else ""
+            self._streaming_ids[session_id] = entry_id
             if len(history) > self.MAX_HISTORY_MESSAGES:
                 dropped = len(history) - self.MAX_HISTORY_MESSAGES
                 del history[:dropped]
@@ -523,12 +537,17 @@ class SessionManager:
                 )
         else:
             entry["content"] = content
+        # P4：逐句更新记成 `assistant/delta`（同一 entry_id 折叠），不再"原地改一行"
+        self._log_event(
+            session, "assistant/delta", entry=dict(entry), entry_id=entry_id or ""
+        )
         session.touch()
         return True
 
     def end_streaming_assistant(self, session_id: str) -> None:
         """本轮流式发言结束：释放 upsert 的跟踪标记（下轮重新插入新条目）。"""
         self._streaming_entries.pop(session_id, None)
+        self._streaming_ids.pop(session_id, None)
 
     def mark_last_assistant_message_id(self, session_id: str, message_id: Any) -> bool:
         """把最近一条 assistant 历史补上 ``message_id``（发送成功后调用）。
@@ -550,9 +569,30 @@ class SessionManager:
             if str(entry.get("message_id") or "") == mid:
                 return False  # 已经打过同一个 id，不重复写
             entry["message_id"] = mid
+            # P4：句柄是"对已有发言的补充事实"，记成事件，不改写已写入的消息体
+            self._log_event(session, "assistant/message_id", message_id=mid)
             session.touch()
             return True
         return False
+
+    def _log_event(self, session, type_: str, **kwargs) -> None:
+        """把一条历史事件追加进事件日志（P4 单一真相）。
+
+        - 存储层没有 `append_event`（测试/旧 JSON 替身）时静默跳过，行为与改造前一致；
+        - 任何异常只留痕：记日志失败绝不能把一条回复搞没。
+        """
+        store = getattr(self, "history", None)
+        task_id = str(getattr(session, "task_id", "") or "")
+        if store is None or not task_id or not hasattr(store, "append_event"):
+            return
+        try:
+            from app.agent.session.session_log import SessionLog
+
+            SessionLog(store, task_id).append(type_, **kwargs)
+        except Exception as e:  # noqa: BLE001 —— 记账是旁路，失败不影响本轮
+            logger.add_info(account_label(self.bot_id)).debug(
+                f"[History] 事件追加失败（已忽略）: {e}"
+            )
 
     def get_history(self, session_id: str, limit: int = 10) -> list[dict]:
         session = self.get_session(session_id)
