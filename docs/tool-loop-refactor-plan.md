@@ -743,12 +743,27 @@ surface-eligible（`user/assistant`）与 log-only（`tool/*`、`step/*`），
 | 阶段 | 状态 | 提交 | 备注 |
 |---|---|---|---|
 | P0 契约测试 | ✅ **已完成** | `2a1c1ab` `46f0fb4` | 顺带修了两个静默 bug（权限两层）；契约测试变异验证通过；全量 2435 passed |
-| P1 循环收口 | ⏭ 下一步 | — | 依赖 P0（已就绪） |
+| P1 循环收口 | 🔄 **进行中 4/5** | `20b0e40` `297859e` `86acb70` `1409ce4` `eee40e5` | 见下方「P1 实际进度」；剩 `chat.stream_response` 与三个适配器 |
 | P2 状态机+取消 | ☐ 未开工 | — | 依赖 P1 |
 | P3 并发+超时 | ☐ 未开工 | — | 只依赖 P1 |
 | P4 单一真相 | ☐ 未开工 | — | 依赖 P2 + P5 配对守卫；风险最高 |
 | P5 输出契约+spill | ☐ 未开工 | — | 依赖 P3 |
 | P6 能力+审批 | ☐ 未开工 | — | 依赖 P3/P5 |
+
+### P1 实际进度（每个可提交步骤一条）
+
+| 步骤 | 状态 | 提交 | 说明 |
+|---|---|---|---|
+| 共享运行器 `loop/tool_step.py`（流式）+ 单测 | ✅ | `20b0e40` | 循环控制、碎片累积、工具执行、回填、补图收成一处 |
+| `turn._stream_once` 改走 runner | ✅ | `297859e` | 句子仍用 `\n` 连接；失败仍打一行 error |
+| runner 的 lint 清零 + `RoundSummary.images_appended` | ✅ | `e17dea2` | 补图留痕从各副本挪到共享层（可观测性不丢） |
+| `proactive.stream` 改走 runner | ✅ | `86acb70` | 句子逐句入池不变；工具轮上限不变 |
+| `run_blocking_step` + `LLMResponse.tool_calls` | ✅ | `1409ce4` | 适配器能报"我要调这些工具"，循环才能上移 |
+| `turn._chat_once` 改走 runner | ✅ | `eee40e5` | 顺带删掉"补图后再补问一轮"的特例；`classify_response` 认 `tool_calls` 为产出 |
+| `chat.stream_response` 改走 runner | ⏭ 下一步 | — | 难点：async generator + 发言通道 flush + 句间打断（见计划 §P1 第 3/4 条） |
+| 三个适配器改单次请求 + 兼容壳 | ☐ | — | `chat_with_fallback` 保持签名，内部用 `run_blocking_step` 驱动 |
+| 白名单清空（`KNOWN_LOOPS` → 只剩 runner） | ☐ | — | 与第 8 步同一提交或紧随其后 |
+| 删 `tests/architecture/test_turn_path_parity.py` 的源码扫描 | ☐ | — | 等 `chat.py` 搬完再删（那时它必假红） |
 
 ### P0 实际交付（与计划的差异）
 
