@@ -103,6 +103,38 @@ async def test_streaming_step_stops_before_dispatching_pending_tools():
     assert invoker.requests == 1, "取消后不得再发请求"
 
 
+async def test_abort_before_dispatch_records_a_paired_tool_result():
+    """取消时"模型要了但没派发"的工具必须补配对结果，否则 messages 不可回放。"""
+    from app.agent.loop.tool_step import ABORTED_BEFORE_DISPATCH
+
+    scope = AbortScope()
+
+    class _LateAbortInvoker(_Invoker):
+        async def stream(self, *, runtime, chain, messages, params):
+            self.requests += 1
+            yield StreamEvent(type="tool_call", tool_call={
+                "index": 0, "id": "c0", "function": {"name": "write_thing", "arguments": "{}"},
+            })
+            # 请求已返回、工具还没派发时被取消
+            scope.cancel("写操作不该再执行")
+
+    invoker = _LateAbortInvoker()
+    request = _request(invoker, abort=scope, executor=None)
+
+    with pytest.raises(TurnAborted):
+        await run_stream_step(request)
+
+    assert invoker.requests == 1
+    # 配对：assistant(tool_calls) → role:tool(ABORTED_BEFORE_DISPATCH)
+    assert request.messages[-2]["role"] == "assistant"
+    assert request.messages[-2]["tool_calls"][0]["id"] == "c0"
+    assert request.messages[-1] == {
+        "role": "tool",
+        "tool_call_id": "c0",
+        "content": ABORTED_BEFORE_DISPATCH,
+    }
+
+
 async def test_interrupt_session_cancels_the_running_scope():
     """流水线的 `interrupt_session` 要同时抬代际**和**取消正在跑的循环。"""
     from app.agent.loop.pipeline import LlmPipeline

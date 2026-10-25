@@ -50,6 +50,25 @@ KIND_EMPTY = "empty"              # 一轮请求都没有发生过（max_rounds 
 STEP_TEXT = "text"            # 一个完整句子
 STEP_ROUND_END = "round_end"  # 一轮结束（带 RoundSummary）
 
+#: 取消时给"模型要了但没派发"的工具补的结果（工具错误码之一，见计划 §1.2）
+ABORTED_BEFORE_DISPATCH = "error: ABORTED_BEFORE_DISPATCH 本轮已被取消，该工具未执行"
+
+
+class TurnAborted(Exception):
+    """本轮被协作式取消（由 `turn_runner.AbortScope.throw_if_aborted` 抛出）。
+
+    定义在**本模块**而不是 `turn_runner`：异常是在这里（边界处）抛出的，而
+    `turn_runner` 已经依赖本模块，反向 import 会成环。`turn_runner` 重新导出它。
+
+    刻意不是 `asyncio.CancelledError`：取消只发生在**边界**（请求前 / 工具派发前），
+    已经发出去的消息与已经写进历史的前缀必须留下，所以不能用 task.cancel() 那种
+    "任意位置被打断"的语义。
+    """
+
+    def __init__(self, cause: str = "") -> None:
+        self.cause = cause or "turn aborted"
+        super().__init__(self.cause)
+
 
 @dataclass
 class RoundSummary:
@@ -266,9 +285,23 @@ async def _drive_stream_rounds(
 
         calls = [tool_calls[idx] for idx in sorted(tool_calls)]
         # 派发前再查一次：模型刚给出的这批工具调用如果不再需要，就不该真的去执行
-        # （执行一个已经没人要的写操作是不可撤销的）。
+        # （执行一个已经没人要的写操作是不可撤销的）。补配对结果后再抛：assistant 里
+        # 带了 tool_calls 就必须有 role=tool 回执，否则这条 messages 下次回放会被 400。
         if req.abort is not None:
-            req.abort.throw_if_aborted()
+            try:
+                req.abort.throw_if_aborted()
+            except TurnAborted:
+                from app.agent.loop.tool_loop import aborted_tool_messages
+
+                normalized, aborted_messages = aborted_tool_messages(calls, result.tool_results)
+                result.tool_calls = normalized
+                req.messages.append({
+                    "role": "assistant",
+                    "content": round_text or None,
+                    "tool_calls": normalized,
+                })
+                req.messages.extend(aborted_messages)
+                raise
         normalized, tool_messages = await normalize_and_execute_tool_calls(
             calls, executor, result.tool_results
         )
@@ -380,6 +413,23 @@ async def run_blocking_step(req: StepRequest) -> StepResult:
             result.tool_calls = []
             result.kind = KIND_ASSISTANT if text.strip() else KIND_EMPTY
             break
+
+        # 与流式路径同一口径：取消时补配对结果，再往上抛。
+        if req.abort is not None:
+            try:
+                req.abort.throw_if_aborted()
+            except TurnAborted:
+                from app.agent.loop.tool_loop import aborted_tool_messages
+
+                normalized, aborted_messages = aborted_tool_messages(calls, result.tool_results)
+                result.tool_calls = normalized
+                req.messages.append({
+                    "role": "assistant",
+                    "content": text or None,
+                    "tool_calls": normalized,
+                })
+                req.messages.extend(aborted_messages)
+                raise
 
         normalized, tool_messages = await normalize_and_execute_tool_calls(
             calls, executor, result.tool_results

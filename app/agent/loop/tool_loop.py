@@ -35,6 +35,8 @@ import asyncio
 import json
 from typing import Any, Callable
 
+from app.agent.loop.tool_step import ABORTED_BEFORE_DISPATCH
+
 # 默认「回应要求」：只讲"用什么口吻回应"，不涉及具体内容
 DEFAULT_REPLY_DIRECTIVE = (
     "（上面这些是给你自己看的资料，不是要你转述的稿子：直接用你自己的口吻回应用户，"
@@ -168,4 +170,43 @@ async def normalize_and_execute_tool_calls(
             "content": exec_result,
         })
 
+    return normalized, result_messages
+
+def aborted_tool_messages(
+    tool_calls: list[dict],
+    tool_results: list[dict] | None = None,
+) -> tuple[list[dict], list[dict]]:
+    """取消时给"模型要了但**没派发**"的工具补配对结果（不执行）。
+
+    为什么必须补：assistant 消息里带了 ``tool_calls``，若没有紧随的 ``role=tool``
+    回执，下次回放这条 messages 会被上游 400 拒绝（tool_calls 必须成对）。取消是
+    正常结局，不能让一次取消把会话历史弄成不可回放的状态。
+
+    与 `normalize_and_execute_tool_calls` 用同一套 id 自洽规则，但**不执行**——
+    取消的语义就是"这些工具一个都没跑"。
+    """
+    normalized: list[dict] = []
+    result_messages: list[dict] = []
+    for index, raw in enumerate(tool_calls):
+        tc = dict(raw or {})
+        fn = dict(tc.get("function") or {})
+        tc_id = str(tc.get("id") or "").strip() or f"call_{index}"
+        tc["id"] = tc_id
+        wire_args = fn.get("arguments")
+        if not isinstance(wire_args, str):
+            wire_args = json.dumps(wire_args or {}, ensure_ascii=False)
+        fn["arguments"] = wire_args
+        tc["function"] = fn
+        normalized.append(tc)
+        result_messages.append({
+            "role": "tool",
+            "tool_call_id": tc_id,
+            "content": ABORTED_BEFORE_DISPATCH,
+        })
+        if tool_results is not None:
+            tool_results.append({
+                "name": fn.get("name") or "",
+                "args": {},
+                "result": ABORTED_BEFORE_DISPATCH,
+            })
     return normalized, result_messages

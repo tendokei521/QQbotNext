@@ -23,7 +23,21 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-from app.agent.loop.tool_step import KIND_EMPTY, KIND_ERROR, KIND_MAX_ROUNDS
+from app.agent.loop.tool_step import (
+    KIND_EMPTY,
+    KIND_ERROR,
+    KIND_MAX_ROUNDS,
+    TurnAborted,
+)
+
+__all__ = [
+    "AbortScope",
+    "TurnAborted",
+    "TurnReason",
+    "TurnState",
+    "abort_scope_of",
+    "classify_step",
+]
 
 
 class TurnReason(str, Enum):
@@ -77,19 +91,6 @@ def classify_step(step) -> TurnReason:
         return TurnReason.SILENT
     # 有正文：即便被截断，用户也已经看到了内容，算正常结束（截断由遥测记录）
     return TurnReason.COMPLETED
-
-
-class TurnAborted(Exception):
-    """本轮被协作式取消（由 `AbortScope.throw_if_aborted` 抛出）。
-
-    刻意不是 `asyncio.CancelledError`：取消只发生在**边界**（请求前 / 工具派发前），
-    已经发出去的消息与已经写进历史的前缀必须留下，所以不能用 task.cancel() 那种
-    "任意位置被打断"的语义。
-    """
-
-    def __init__(self, cause: str = "") -> None:
-        self.cause = cause or "turn aborted"
-        super().__init__(self.cause)
 
 
 class AbortScope:
