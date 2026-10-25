@@ -34,7 +34,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -46,10 +46,19 @@ KIND_MAX_ROUNDS = "max_rounds"    # 轮数用尽
 KIND_ERROR = "error"              # 请求失败
 KIND_EMPTY = "empty"              # 一轮请求都没有发生过（max_rounds <= 0）
 
+#: 事件类型（`iter_stream_step` 的产出）
+STEP_TEXT = "text"            # 一个完整句子
+STEP_ROUND_END = "round_end"  # 一轮结束（带 RoundSummary）
+
 
 @dataclass
 class RoundSummary:
-    """一轮工具执行完毕后交给调用方的事实（不含"要不要发"的判断）。"""
+    """一轮请求结束后交给调用方的事实（不含"要不要发"的判断）。
+
+    带齐调用方记账要用的数字：轮次 / 剩余轮数 / 本轮文本 / 工具结果 / 是否补图，
+    以及这一轮的 finish_reason、思考字符、错误、本轮开始前的 usage 快照
+    （请求行日志要据此算"这一轮花了多少"）。
+    """
 
     index: int
     rounds_left: int
@@ -57,6 +66,11 @@ class RoundSummary:
     tool_results: list[dict] = field(default_factory=list)
     #: 本轮是否有 ``expand_image`` 取回的图片被递给模型（调用方据此留痕）
     images_appended: bool = False
+    finish_reason: str = ""
+    reasoning_chars: int = 0
+    error: str = ""
+    #: 本轮请求开始前的 usage 快照（累加器是调用方传进 params 的 ``usage_sink``）
+    usage_before: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -92,6 +106,8 @@ class StepResult:
     finish_reason: str = ""
     error: str = ""
     reasoning_chars: int = 0
+    #: 最后一轮的思考字符数（"思考吃满预算"的收敛判断只看它，不看累计值）
+    last_round_reasoning: int = 0
     rounds: int = 0
     #: 本次步骤的 token 用量（非流式路径跨轮累加；流式由调用方的 ``usage_sink`` 记账）
     usage: dict = field(default_factory=dict)
@@ -116,30 +132,59 @@ def accumulate_tool_call(slot_map: dict, tc: dict) -> None:
     slot["function"]["arguments"] += frag.get("arguments") or ""
 
 
-async def run_stream_step(req: StepRequest) -> StepResult:
-    """跑完一次流式步骤（含工具多轮），返回结构化结局。
+async def iter_stream_step(req: StepRequest, result: StepResult) -> AsyncIterator[tuple[str, Any]]:
+    """流式步骤的**事件流**：``("text", 句子)`` 与 ``("round_end", RoundSummary)``。
 
-    调用方只需：拿到 ``StepResult`` 后决定发什么、记什么账。
+    为什么要有这一层：`chat.stream_response` 是 async generator（要 ``yield`` 句子和
+    发言通道的消息），而回调式 ``on_text`` 里不能 yield。把产出变成**事件**，调用方
+    就能在 ``async for`` 里直接 yield，不需要队列中转，也就不会把"句间打断"延后一整轮。
+
+    ``result`` 由本函数就地填好（结局/文本/工具结果/思考计数）；调用方提前
+    ``aclose()`` 时也能拿到已经发生的事实。
     """
     from app.agent.loop.provider_view import _modalities_for_chain
-    from app.agent.loop.tool_loop import normalize_and_execute_tool_calls
     from app.agent.providers.invoker import resolve_invoker
-    from app.agent.tools.round_images import append_round_images
 
-    result = StepResult()
     if req.max_rounds <= 0:
-        return result
+        return
 
     # provider 只负责"一次请求"：工具执行在这里，所以永远不要把执行器继续往下传，
     # 否则适配器会自己再跑一遍循环（P1 收口要消灭的正是这件事）。
     params = {k: v for k, v in req.params.items() if k != "tool_executor"}
     executor = req.params.get("tool_executor")
+    usage_sink = req.params.get("usage_sink")
     invoker = resolve_invoker(req.runtime)
     modalities = req.modalities
     if modalities is None:
         modalities = _modalities_for_chain(req.chain)
 
     text_parts: list[str] = []
+    try:
+        async for item in _drive_stream_rounds(
+            req, result, text_parts, params=params, executor=executor,
+            invoker=invoker, modalities=modalities, usage_sink=usage_sink,
+        ):
+            yield item
+    finally:
+        # 调用方提前 aclose（句间打断）时也要留下"已经产出到哪"的事实
+        result.text = "".join(text_parts)
+
+
+async def _drive_stream_rounds(
+    req: StepRequest,
+    result: StepResult,
+    text_parts: list[str],
+    *,
+    params: dict,
+    executor: Any,
+    invoker: Any,
+    modalities: Any,
+    usage_sink: Any,
+) -> AsyncIterator[tuple[str, Any]]:
+    """`iter_stream_step` 的轮次主体（拆出来只为让 ``text_parts`` 有明确的收尾）。"""
+    from app.agent.loop.tool_loop import normalize_and_execute_tool_calls
+    from app.agent.tools.round_images import append_round_images
+
     for round_index in range(req.max_rounds):
         result.rounds = round_index + 1
         round_start = len(text_parts)      # 本轮新增文本从这一格开始
@@ -148,6 +193,7 @@ async def run_stream_step(req: StepRequest) -> StepResult:
         finish_reason = ""
         round_error = ""
         reasoning_chars = 0
+        usage_before = dict(usage_sink) if isinstance(usage_sink, dict) else {}
 
         async for event in invoker.stream(
             runtime=req.runtime, chain=req.chain, messages=req.messages, params=params
@@ -159,8 +205,7 @@ async def run_stream_step(req: StepRequest) -> StepResult:
                     clean = strip_stream_artifacts(sentence)
                     if clean:
                         text_parts.append(clean)
-                        if req.on_text is not None:
-                            await req.on_text(clean)
+                        yield STEP_TEXT, clean
             elif event.type == "tool_call":
                 accumulate_tool_call(tool_calls, event.tool_call or {})
             elif event.type == "reasoning":
@@ -175,23 +220,43 @@ async def run_stream_step(req: StepRequest) -> StepResult:
         tail = strip_stream_artifacts(buffer.strip())
         if tail:
             text_parts.append(tail)
-            if req.on_text is not None:
-                await req.on_text(tail)
+            yield STEP_TEXT, tail
 
         result.reasoning_chars += reasoning_chars
+        result.last_round_reasoning = reasoning_chars
         result.finish_reason = finish_reason or result.finish_reason
+        round_text = "".join(text_parts[round_start:])
 
         if round_error:
             result.error = round_error
             result.kind = KIND_ERROR
+            # 失败轮也要交账（请求行日志里 error 字段就是靠它填的）
+            yield STEP_ROUND_END, RoundSummary(
+                index=round_index,
+                rounds_left=req.max_rounds - (round_index + 1),
+                round_text=round_text,
+                tool_results=list(result.tool_results),
+                finish_reason=finish_reason,
+                reasoning_chars=reasoning_chars,
+                error=round_error,
+                usage_before=usage_before,
+            )
             break
 
         if not tool_calls:
             result.kind = KIND_ASSISTANT
+            yield STEP_ROUND_END, RoundSummary(
+                index=round_index,
+                rounds_left=req.max_rounds - (round_index + 1),
+                round_text=round_text,
+                tool_results=list(result.tool_results),
+                finish_reason=finish_reason,
+                reasoning_chars=reasoning_chars,
+                usage_before=usage_before,
+            )
             break
 
         calls = [tool_calls[idx] for idx in sorted(tool_calls)]
-        round_text = "".join(text_parts[round_start:])
         normalized, tool_messages = await normalize_and_execute_tool_calls(
             calls, executor, result.tool_results
         )
@@ -207,18 +272,39 @@ async def run_stream_step(req: StepRequest) -> StepResult:
         # 否则模型当轮只能凭工具回执里的文字描述瞎猜（历史事故）。
         images_appended = append_round_images(req.messages, req.tool_ctx, modalities)
 
-        if req.on_round_end is not None:
-            await req.on_round_end(RoundSummary(
-                index=round_index,
-                rounds_left=req.max_rounds - (round_index + 1),
-                round_text=round_text,
-                tool_results=list(result.tool_results),
-                images_appended=images_appended,
-            ))
+        yield STEP_ROUND_END, RoundSummary(
+            index=round_index,
+            rounds_left=req.max_rounds - (round_index + 1),
+            round_text=round_text,
+            tool_results=list(result.tool_results),
+            images_appended=images_appended,
+            finish_reason=finish_reason,
+            reasoning_chars=reasoning_chars,
+            usage_before=usage_before,
+        )
     else:
         result.kind = KIND_MAX_ROUNDS
 
-    result.text = "".join(text_parts)
+
+async def run_stream_step(req: StepRequest) -> StepResult:
+    """跑完一次流式步骤（含工具多轮），返回结构化结局。
+
+    回调式封装：``on_text`` / ``on_round_end`` 逐个消费 ``iter_stream_step`` 的事件。
+    需要"边产边 yield"的调用方（`chat.stream_response`）直接用事件流本身。
+    """
+    result = StepResult()
+    events = iter_stream_step(req, result)
+    try:
+        async for kind, payload in events:
+            if kind == STEP_TEXT:
+                if req.on_text is not None:
+                    await req.on_text(payload)
+            elif req.on_round_end is not None:
+                await req.on_round_end(payload)
+    finally:
+        # 调用方可能在本步骤中途退出（提前 return / 异常）：确保事件生成器被关掉，
+        # 否则它会在事件循环的异步生成器终结器里被"稍后"回收。
+        await events.aclose()
     return result
 
 

@@ -20,8 +20,12 @@ from app.agent.loop.tool_step import (
     KIND_EMPTY,
     KIND_ERROR,
     KIND_MAX_ROUNDS,
+    STEP_ROUND_END,
+    STEP_TEXT,
     StepRequest,
+    StepResult,
     accumulate_tool_call,
+    iter_stream_step,
     run_blocking_step,
     run_stream_step,
 )
@@ -159,10 +163,58 @@ async def test_round_end_reports_round_text_and_remaining_rounds():
 
     await run_stream_step(_request(invoker, executor, max_rounds=5, on_round_end=_on_round_end))
 
+    # 收尾轮也要报：请求行日志与发言通道 flush 都挂在每轮结束时（漏掉最后一轮
+    # 就等于最后一句话没有 flush、最后一次请求没有记账）。
     assert rounds == [
         (0, 4, "第一轮。"),
         (1, 3, "第二轮。"),
+        (2, 2, "收尾。"),
     ], "round_text 必须只含本轮文本（提醒注入靠它判空）"
+
+
+# ---------- 事件流（async generator 版）----------
+
+
+async def test_event_stream_is_consumable_as_an_async_generator():
+    """`chat.stream_response` 要用它：文本与轮次边界都必须作为**事件**产出。"""
+    executed: list[tuple[str, dict]] = []
+    executor = await _executor_factory(executed)
+    invoker = _Invoker([
+        [_text("我先查一下。"), _tool("probe_a", "{}", "c0"), _done("tool_calls")],
+        [_text("查到了。"), _done()],
+    ])
+    result = StepResult()
+    seen: list[tuple[str, object]] = []
+
+    agen = iter_stream_step(_request(invoker, executor), result)
+    try:
+        async for kind, payload in agen:
+            seen.append((kind, payload if kind == STEP_TEXT else payload.index))
+    finally:
+        await agen.aclose()
+
+    assert seen == [
+        (STEP_TEXT, "我先查一下。"),
+        (STEP_ROUND_END, 0),
+        (STEP_TEXT, "查到了。"),
+        (STEP_ROUND_END, 1),
+    ]
+    assert result.kind == KIND_ASSISTANT
+    assert result.text == "我先查一下。查到了。"
+
+
+async def test_event_stream_can_be_closed_early_by_the_consumer():
+    """调用方随时可能停（句间打断）：提前 aclose 不许炸，已产出的事实要留下。"""
+    invoker = _Invoker([
+        [_text("第一句。"), _text("第二句。"), _done()],
+    ])
+    result = StepResult()
+    agen = iter_stream_step(_request(invoker), result)
+    first = await agen.__anext__()
+
+    assert first == (STEP_TEXT, "第一句。")
+    await agen.aclose()
+    assert result.text == "第一句。"
 
 
 # ---------- 结局 ----------
