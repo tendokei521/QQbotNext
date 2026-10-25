@@ -132,7 +132,7 @@
 |---|---|
 | `tests/agent/loop/conftest.py`（新） | 假 invoker / 假 runtime 两个 fixture（**直接复用** `tests/agent/loop/test_run_turn.py:96-136` 里已经被验证过的 `_Config`/`_Invoker`/`_Telemetry`/`_runtime` + `patched_prepare` 写法，不要另创一套） |
 | `tests/agent/loop/test_tool_loop_contract.py`（新） | 契约矩阵（下文） |
-| `tests/architecture/test_turn_path_parity.py` | **删除**源码扫描断言（它锁的是"某个函数名出现过"，P1 后函数搬家必假红）。P0 用行为测试替代它，并在提交信息里写明"由 test_tool_loop_contract 取代" |
+| `tests/architecture/test_turn_path_parity.py` | **P1 删除**源码扫描（它锁的是"某个函数名出现过"，函数搬家后必假红）。P0 先用行为测试取代它（本文件第 2 行），P1 搬函数时再删，避免提前失去守卫 |
 | `tests/architecture/test_no_tool_loop_in_providers.py`（新） | 白名单登记 3 个 provider 内的 `for _round`（现在 xfail），P1 完成后清空白名单转硬断言 |
 | `app/agent/tools/state.py:249` | **顺手修真 bug**：这里调 `spec.allowed_for(event, scope=...)`，而 `ToolSpec` 上只有 `allows()`（`spec.py:113`）；异常被 `:251-252` 吞掉，导致判定链第 ⑤ 层 `permission_denied` **从未生效**。改为 `spec.allows(ctx)` 的等价实现，并补一条测试 |
 
