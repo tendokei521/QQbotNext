@@ -37,13 +37,21 @@ def split_history(
     """切成「超出的旧段」和「保留原文的最近段」。
 
     只压缩超出 `history_rounds` 的部分；`history_rounds` 以内的消息全部保留。
+
+    **绝不切开工具配对**（P5）：切点若落在 `assistant(tool_calls)` 与紧随的
+    `role:tool` 之间，保留段就会以"没有调用方的工具结果"开头、摘要段以"没有结果的
+    工具调用"结尾，上游必然 400。这里用 `pairing.legal_cut` 在必要时把切点往前挪
+    （最多挪到 0 = 不压缩）——宁可少压一轮，也不发出非法请求。
     """
+    from app.agent.assembly.pairing import legal_cut
+
     keep_count = max(0, int(history_rounds))
     if keep_count <= 0:
         return history, []
     if keep_count >= len(history):
         return [], history
-    return history[:-keep_count], history[-keep_count:]
+    cut = legal_cut(history, keep_count)
+    return history[:cut], history[cut:]
 
 
 def _text_only(message: dict) -> dict:
