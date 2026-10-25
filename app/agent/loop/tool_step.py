@@ -29,8 +29,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from app.domain.splitter import split_sentences, strip_stream_artifacts
 
@@ -49,6 +50,8 @@ class RoundSummary:
     rounds_left: int
     round_text: str
     tool_results: list[dict] = field(default_factory=list)
+    #: 本轮是否有 ``expand_image`` 取回的图片被递给模型（调用方据此留痕）
+    images_appended: bool = False
 
 
 @dataclass
@@ -111,8 +114,8 @@ async def run_stream_step(req: StepRequest) -> StepResult:
 
     调用方只需：拿到 ``StepResult`` 后决定发什么、记什么账。
     """
-    from app.agent.loop.tool_loop import normalize_and_execute_tool_calls
     from app.agent.loop.provider_view import _modalities_for_chain
+    from app.agent.loop.tool_loop import normalize_and_execute_tool_calls
     from app.agent.providers.invoker import resolve_invoker
     from app.agent.tools.round_images import append_round_images
 
@@ -195,7 +198,7 @@ async def run_stream_step(req: StepRequest) -> StepResult:
 
         # 工具轮里 expand_image 取回的图片必须**在本轮**递给模型：
         # 否则模型当轮只能凭工具回执里的文字描述瞎猜（历史事故）。
-        append_round_images(req.messages, req.tool_ctx, modalities)
+        images_appended = append_round_images(req.messages, req.tool_ctx, modalities)
 
         if req.on_round_end is not None:
             await req.on_round_end(RoundSummary(
@@ -203,6 +206,7 @@ async def run_stream_step(req: StepRequest) -> StepResult:
                 rounds_left=req.max_rounds - (round_index + 1),
                 round_text=round_text,
                 tool_results=list(result.tool_results),
+                images_appended=images_appended,
             ))
     else:
         result.kind = KIND_MAX_ROUNDS
