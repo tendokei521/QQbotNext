@@ -17,6 +17,17 @@ from typing import Any
 
 from app.agent.hooks import ToolCallContext
 from app.agent.telemetry import ToolCallRecord
+from app.agent.tools.result import (  # noqa: F401 - 重导出，便于调用方统一从 spec 取
+    INVALID_ARGS,
+    OUTPUT_LIMIT,
+    PERMISSION_DENIED,
+    TOOL_EXCEPTION,
+    TOOL_TIMEOUT as TOOL_TIMEOUT_CODE,
+    TOOL_UNAVAILABLE,
+    UNKNOWN_TOOL,
+    ToolResult,
+    coerce,
+)
 from app.core.logger import logger
 
 # 单次工具执行超时（秒）
@@ -271,13 +282,20 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
             if success and is_error_result(result):
                 success = False
                 error = "error_result"
+            # P5：单一出口收敛成结构化结果（错误码由事实推导，不再靠前缀猜）。
+            # 上游拿到的仍是字符串（三个 provider 的插入点只读 msg["content"]），
+            # 所以这一版对 provider 零改动。
+            tr = _to_tool_result(result, success=success, error=error)
+            result = tr.plain()
             duration_ms = (time.monotonic() - started) * 1000
             if _log_enabled():
                 logger.add_info("Tool").info(
                     f"[ToolCall]返回：{name} success={success} duration={duration_ms:.0f}ms "
-                    f"error={error} result={str(result)[:200]}"
+                    f"error={error} code={tr.code} result={str(result)[:200]}"
                 )
-            await _run_tool_call_hooks(ctx, spec, name, args, result, success, error, duration_ms)
+            await _run_tool_call_hooks(
+                ctx, spec, name, args, result, success, error, duration_ms, code=tr.code
+            )
             runtime = getattr(ctx, "runtime", None) if ctx is not None else None
             telemetry = getattr(runtime, "telemetry", None) if runtime is not None else None
             if telemetry is not None:
@@ -360,6 +378,8 @@ async def _run_tool_call_hooks(
     success: bool,
     error: str,
     duration_ms: float,
+    *,
+    code: str = "",
 ) -> None:
     """执行 LLM 工具调用后钩子（runtime.llm_tool_call_hooks）。"""
     if tool_ctx is None:
@@ -374,6 +394,9 @@ async def _run_tool_call_hooks(
     if bot_id is None and tool_ctx.bot is not None:
         bot_id = getattr(tool_ctx.bot, "bot_id", None)
     extra = {"error": error} if error else {}
+    if code:
+        # 稳定错误码（P5）：观测方可以按码聚合，不用解析中文文案
+        extra["code"] = code
     call_ctx = ToolCallContext(
         name=name,
         args=dict(args or {}),
@@ -543,3 +566,27 @@ def _orphan(task: asyncio.Task, name: str) -> None:
         logger.info(f"[Tool] {name} 超时后自行收敛（结果已按 TOOL_TIMEOUT 回给模型）")
 
     task.add_done_callback(_done)
+
+def _to_tool_result(result: Any, *, success: bool, error: str) -> ToolResult:
+    """把执行器的 ``(result, success, error)`` 三元组收敛成结构化结果。
+
+    错误码从**事实**推导（哪条分支失败），不再从文案里猜：这样上游想按"是不是权限
+    问题"分支时，读的是稳定码而不是中文句子。老的 `"error:"` 前缀仍然双读
+    （`ToolResult.text` 内部会判），所以 60 个工具生产者一个都不用改。
+    """
+    text = str(result if result is not None else "")
+    if success:
+        return ToolResult.text(text)
+    lowered = str(error or "").lower()
+    if lowered == "unavailable":
+        return ToolResult.error(TOOL_UNAVAILABLE, text)
+    if lowered == "forbidden":
+        return ToolResult.error(PERMISSION_DENIED, text)
+    if lowered.startswith("timeout("):
+        return ToolResult.error(TOOL_TIMEOUT_CODE, text)
+    if lowered == "error_result":
+        # 工具自己用 "error: ..." 文本报的错：没有结构化码可依，保持空码
+        return ToolResult(blocks=({"type": "text", "text": text},), is_error=True)
+    if text:
+        return ToolResult.error(TOOL_EXCEPTION, text)
+    return ToolResult.error(TOOL_EXCEPTION, str(error or "工具执行失败"))
