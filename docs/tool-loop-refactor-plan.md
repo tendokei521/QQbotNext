@@ -746,7 +746,7 @@ surface-eligible（`user/assistant`）与 log-only（`tool/*`、`step/*`），
 | P1 循环收口 | ✅ **已完成** | `20b0e40` … `ba3f9cd` | 循环只剩 `loop/tool_step.py` 两处（流式 + 非流式）；适配器单次请求；全量 2447 passed |
 | P2 状态机+取消 | ✅ **已完成** | `25a7cda` `2969cf9` `1564770` `924c19a` `673d031` | `TurnReason`/`TurnState`/`AbortScope`/中断锚点/三个观测钩子/`TurnLimits` 全部落地；全量 2464 passed |
 | P3 并发+超时 | ✅ **已完成** | `c456185` `8cc3efa` `d868fbc` `eb44851` | 声明/有界池/独占屏障/超时策略 + 两个配置键已登记（本体键 45→47）；全量 2479 passed |
-| P4 单一真相 | ☐ 未开工 | — | 依赖 P2 + P5 配对守卫；风险最高 |
+| P4 单一真相 | 🔄 **进行中 1/5** | `98c01a7` | 只加表加类（`history_events` + `SessionLog`），写入口未动；全量 2485 passed |
 | P5 输出契约+spill | ☐ 未开工 | — | 依赖 P3 |
 | P6 能力+审批 | ☐ 未开工 | — | 依赖 P3/P5 |
 
