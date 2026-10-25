@@ -58,11 +58,9 @@ from app.agent.loop.tool_step import (
 from app.agent.loop.turn_input import from_request
 from app.agent.loop.turn_metrics import (
     REASONING_OVERFLOW_NUDGE,
+    TurnLimits,
     _effective_max_tokens,
     _input_tokens_estimate,
-    _max_empty_retries,
-    _max_tool_rounds,
-    _reasoning_overflow_retries,
     _turn_budget,
 )
 from app.agent.loop.turn_runner import TurnReason, TurnState
@@ -339,7 +337,7 @@ def _call_params(meta: dict, all_specs: Any, tool_ctx: Any, use_tools: bool, con
         "max_tokens": meta["max_tokens"],
         "tools": build_tools(all_specs) if use_tools else None,
         "tool_executor": make_executor(all_specs, tool_ctx) if use_tools else None,
-        "max_empty_retries": _max_empty_retries(config),
+        "max_empty_retries": TurnLimits.from_config(config).empty_reply_retries,
         "budget": _turn_budget(config),
         "input_tokens_estimate": _input_tokens_estimate([]),
     }
@@ -366,8 +364,9 @@ async def _chat_once(
     不再需要：图片由运行器在当轮就递给了模型。
     """
     params = _call_params(meta, all_specs, tool_ctx, use_tools, config)
-    max_rounds = _max_tool_rounds(config)
-    overflow_retries = _reasoning_overflow_retries(config)
+    limits = TurnLimits.from_config(config)
+    max_rounds = limits.max_tool_rounds
+    overflow_retries = limits.reasoning_overflow_retries
     overflow_used = 0
     session_id = str(meta.get("session_id", "") or "")
 
@@ -457,6 +456,7 @@ async def _stream_once(
     )
 
     sentences: list[str] = []
+    limits = TurnLimits.from_config(config)
 
     async def _emit(sentence: str) -> None:
         sentences.append(sentence)
@@ -475,7 +475,7 @@ async def _stream_once(
             chain=provider_chain,
             messages=messages,
             params=params,
-            max_rounds=_max_tool_rounds(config),
+            max_rounds=limits.max_tool_rounds,
             tool_ctx=tool_ctx,
             modalities=meta["modalities"],
             on_text=_emit,

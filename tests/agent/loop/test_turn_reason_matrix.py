@@ -299,3 +299,20 @@ def test_turn_state_reports_aborted_when_interrupted():
     state.add_step(_step(KIND_ASSISTANT, "说到一半"))
 
     assert state.finish() is TurnReason.ABORTED
+
+def test_turn_limits_reads_and_clamps_the_three_keys():
+    """`TurnLimits` 只是把三个键收进一个对象：取值口径必须与旧 helper 完全一致。"""
+    from app.agent.loop.turn_metrics import TurnLimits
+
+    limits = TurnLimits.from_config(
+        {"max_tool_rounds": 9, "empty_reply_retries": 9, "reasoning_overflow_retries": 0}
+    )
+    assert limits.max_tool_rounds == 9          # 1..20 内原样
+    assert limits.empty_reply_retries == 3      # 上限 3，与旧口径一致
+    assert limits.reasoning_overflow_retries == 0
+
+    default = TurnLimits.from_config({})
+    assert (default.max_tool_rounds, default.empty_reply_retries) == (5, 1)
+
+    broken = TurnLimits.from_config({"max_tool_rounds": "abc", "empty_reply_retries": None})
+    assert broken.max_tool_rounds >= 1, "读不出来就回默认，不能返回 0 轮"

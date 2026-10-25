@@ -15,16 +15,16 @@
 
 from __future__ import annotations
 
-from app.core.logger import account_label
-
 import json
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from app.agent import logger
 from app.agent.assembly.token_budget import estimate_tokens
 from app.agent.providers import SERVED_MODEL_KEY
 from app.agent.providers.policy import TurnBudget, retry_profile_of
+from app.core.logger import account_label
 
 
 def _served_model_label(usage_sink: dict | None, fallback: Any) -> str:
@@ -323,3 +323,24 @@ def _history_meta_flags(runtime) -> dict:
         "normalize_enhanced": bool(runtime.config.get("experimental_long_term_memory", False)),
         "mask_nickname": True,
     }
+
+@dataclass
+class TurnLimits:
+    """一轮对话的三个上限（收进一个对象，便于整体传递与测试）。
+
+    键名与取值口径**完全不变**（`max_tool_rounds` / `empty_reply_retries` /
+    `reasoning_overflow_retries`），行为也不变——只是此前每个调用点各自去读配置，
+    "这一轮到底允许几轮工具、几次重试"散在三四处的局部变量里。
+    """
+
+    max_tool_rounds: int = DEFAULT_MAX_TOOL_ROUNDS
+    empty_reply_retries: int = DEFAULT_EMPTY_REPLY_RETRIES
+    reasoning_overflow_retries: int = DEFAULT_REASONING_OVERFLOW_RETRIES
+
+    @classmethod
+    def from_config(cls, config) -> TurnLimits:
+        return cls(
+            max_tool_rounds=_max_tool_rounds(config),
+            empty_reply_retries=_max_empty_retries(config),
+            reasoning_overflow_retries=_reasoning_overflow_retries(config),
+        )
