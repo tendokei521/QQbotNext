@@ -365,9 +365,16 @@ async function importBuiltin(item: BuiltinPreset) {
       {},
     )
     const created = res.data?.created
-    notify.push(created ? `已添加「${item.name}」，填好 API Key 后拉取模型` : `「${item.name}」已存在`, created ? 'success' : 'info')
+    notify.push(created ? `已添加「${item.name}」，粘贴 API Key 后保存` : `「${item.name}」已存在`, created ? 'success' : 'info')
     if (res.data?.preset?.id) selectedPresetId.value = res.data.preset.id
-    await Promise.all([loadPresets(), loadBuiltins()])
+    await loadPresets()
+    if (created && res.data?.preset) {
+      // 新加的预设还没有 Key：直接弹编辑框，省一次点击
+      builtinDialog.value = false
+      openEditSource(res.data.preset)
+    } else {
+      await loadBuiltins()
+    }
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   } finally {
