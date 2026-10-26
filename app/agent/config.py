@@ -494,7 +494,18 @@ class AgentConfig:
         )
 
     def set_enabled(self, enabled: bool) -> None:
+        """开/关 Agent（WebUI 开关、`agent` 能力接管都走这里）。
+
+        只在**真的变化**时记一行：启动时按默认值装配不打日志（那不是用户操作），
+        否则每次重启都会刷出「运行时已装配」，把真正的开关动作淹掉。
+        """
+        changed = bool(self.enabled) != bool(enabled)
         self.enabled = enabled
+        if changed:
+            from app.core.logger import account_label, logger
+
+            state = "已启用" if enabled else "已停用"
+            logger.add_info(account_label(self._bot)).info(f"[Agent] {state}")
 
     def update_permission(self, group_mode: str, group_list, user_mode: str, user_list) -> None:
         auth = self._authority()

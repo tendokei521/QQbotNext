@@ -428,7 +428,8 @@ class AgentManager:
                 provider_runtime_manager=self.provider_runtime_manager,
             )
             self._runtimes[bot_id] = runtime
-            logger.add_info(account_label(bot_id)).info("[Agent] 运行时已装配")
+            # 启动时为每个账号预建运行时是**默认行为**，用户没做任何操作，不打印；
+            # 只有"开/关"这种由人触发的状态变化才值得一行日志（见 AgentConfig.set_enabled）。
         elif bot is not None:
             runtime.set_bot(bot)
         return runtime

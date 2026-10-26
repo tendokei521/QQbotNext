@@ -70,3 +70,32 @@ def test_agent_runtime_config_and_components():
         assert rt.ctx.services.task_manager is not None
     finally:
         rt.stop()
+
+
+def test_runtime_creation_is_silent_but_toggling_is_logged(caplog):
+    """启动装配是默认行为，不打日志；「开/关」是用户动作，必须留一行。"""
+    import logging
+
+    mgr = AgentManager(_CfgSvc(), _TM())
+    try:
+        with caplog.at_level(logging.INFO, logger="app.agent.runtim"):
+            runtime = mgr.ensure_runtime(1)
+        assert runtime is not None
+        assert "运行时已装配" not in caplog.text
+
+        caplog.clear()
+        with caplog.at_level(logging.INFO, logger="app.agent.config"):
+            runtime.config.set_enabled(False)
+        assert "已停用" in caplog.text
+
+        caplog.clear()
+        with caplog.at_level(logging.INFO, logger="app.agent.config"):
+            runtime.config.set_enabled(False)      # 同上，不算变化
+        assert "已停用" not in caplog.text
+
+        caplog.clear()
+        with caplog.at_level(logging.INFO, logger="app.agent.config"):
+            runtime.config.set_enabled(True)
+        assert "已启用" in caplog.text
+    finally:
+        mgr.shutdown()
