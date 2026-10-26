@@ -41,24 +41,41 @@ def _get_db(module):
 
 
 async def on_load(module) -> None:
-    """启动清理一次 + 运行中周期清理（吸收旧版 6 小时定时清理语义）。"""
+    """装配：只做启动清理，**不武装计时器**（那属于 on_online）。"""
     db = _get_db(module)
     if db is None:
         return
     await _cleanup_once(module, db)
 
-    # 周期清理任务：仅真实 Bot 实例启动；卸载时由 registry 按 owner 前缀取消
-    if module.bot_id is None:
+
+def _task_owner(module) -> str:
+    return f"module:{module.module_name}:{module.bot_id}"
+
+
+async def on_online(module) -> None:
+    """账号连上/模块启用：武装周期清理任务。"""
+    db = _get_db(module)
+    if db is None or module.bot_id is None:
         return
     interval = int(module.config.get("db_clean_interval_minutes", 60) or 60)
     task_manager = module.ctx.services.task_manager
     if task_manager is None:
         return
+    # 同 owner 的旧任务先取消，避免重复武装
+    task_manager.cancel_owner(_task_owner(module))
     task_manager.create_task(
         _cleanup_loop(module, db, interval),
         name="recall_cleanup",
-        owner=f"module:{module.module_name}:{module.bot_id}",
+        owner=_task_owner(module),
     )
+
+
+async def on_offline(module) -> None:
+    """账号断开/模块禁用：停掉周期清理（否则会对着已释放的实例继续跑）。"""
+    task_manager = getattr(getattr(module, "ctx", None), "services", None)
+    task_manager = getattr(task_manager, "task_manager", None)
+    if task_manager is not None and module.bot_id is not None:
+        task_manager.cancel_owner(_task_owner(module))
 
 
 async def _cleanup_once(module, db) -> None:

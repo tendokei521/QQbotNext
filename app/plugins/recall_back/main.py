@@ -46,8 +46,20 @@ class Module(BaseModule):
         await handle_recall(self, event)
 
     async def on_load(self):
-        """旧配置迁移 + 启动清理 + 运行中周期清理。"""
+        """旧配置迁移 + 启动清理（**不武装计时器**，见 on_online）。"""
         from .service import migrate_legacy_config, on_load
 
         migrate_legacy_config(self)
         await on_load(self)
+
+    async def on_online(self):
+        """账号连上/模块启用：开始周期清理（禁用/断开时由 on_offline 停掉）。"""
+        from .service import on_online
+
+        await on_online(self)
+
+    async def on_offline(self):
+        """账号断开/模块禁用：停掉周期清理任务。"""
+        from .service import on_offline
+
+        await on_offline(self)

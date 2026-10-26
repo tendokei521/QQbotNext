@@ -4,8 +4,15 @@
        / service.handle_recall(module, event)（撤回转发）。
 """
 
-from .cache import on_load
+from .cache import on_load, on_offline, on_online
 from .handler import handle_message, handle_recall
 from .migrate import migrate_legacy_config
 
-__all__ = ["handle_message", "handle_recall", "on_load", "migrate_legacy_config"]
+__all__ = [
+    "handle_message",
+    "handle_recall",
+    "on_load",
+    "on_online",
+    "on_offline",
+    "migrate_legacy_config",
+]
