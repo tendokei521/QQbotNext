@@ -421,3 +421,46 @@ def test_legacy_policy_store_keeps_old_no_filter_behavior():
     assert store.get("demo", "10") is None
     assert store.get("demo", "11") is None
     assert LegacyPolicyStore(_WebuiConfigService({"single_service": {}})).get("demo", "10") is None
+
+
+# ==================== 正式实现：channel_policies 表 ====================
+
+
+class _PolicyConfigService:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def get_channel_policy(self, capability_id, channel_id):
+        return self._rows.get((capability_id, str(channel_id)))
+
+    def list_channel_policies(self, capability_id):
+        return [row for (cap, _ch), row in self._rows.items() if cap == capability_id]
+
+
+def test_channel_policy_store_reads_and_normalizes_rows():
+    from app.application.policy_store import ChannelPolicyStore
+
+    store = ChannelPolicyStore(_PolicyConfigService({
+        ("demo", "10"): {
+            "capability_id": "demo", "channel_id": "10", "policy": "leader",
+            "primary_account_id": "acc1", "fallback": "closed",
+        },
+        ("demo", "11"): {
+            "capability_id": "demo", "channel_id": "11", "policy": "bogus",
+            "primary_account_id": None, "fallback": "bogus",
+        },
+    }))
+
+    policy = store.get("demo", "10")
+    assert policy.policy == "leader"
+    assert policy.primary_account_id == "acc1"
+    assert policy.fallback == "closed"
+
+    # 脏配置不抛错：非法策略/回退退化为 all/open
+    normalized = store.get("demo", "11")
+    assert normalized.policy == "all"
+    assert normalized.fallback == "open"
+
+    assert store.get("demo", None) is None
+    assert len(store.list_for("demo")) == 2
+

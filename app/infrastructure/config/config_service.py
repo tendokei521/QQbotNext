@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Sequence
+from typing import Any
 
-from app.core.logger import logger, set_account_labels
+from app.core.logger import logger
+from app.infrastructure.config.account_store import AccountStoreMixin
+from app.infrastructure.config.binding_store import BindingStoreMixin
 from app.infrastructure.config.ws_url import (
     ACCESS_TOKEN_MASK,
     join_ws_url,
@@ -21,14 +23,12 @@ from app.infrastructure.config.ws_url import (
     restore_ws_url,
     split_ws_url,
 )
-from app.infrastructure.onebot.endpoint import FORWARD, normalize_mode
-from app.infrastructure.config.account_store import AccountStoreMixin
+from app.infrastructure.onebot.endpoint import normalize_mode
 from app.infrastructure.persistence.account_migration import (
     migrate_account_identity,
-    normalize_account_id,
     normalize_account_name,
-    suggest_account_id,
 )
+from app.infrastructure.persistence.database import Database
 
 #: 这四个名字历史上就在这里定义，外部（gateway / webui）从本模块导入。
 #: 现在实现搬到了 `ws_url.py`，这里保留重导出；`__all__` 让 linter 知道它们是公共 API。
@@ -40,7 +40,6 @@ __all__ = [
     "restore_ws_url",
     "split_ws_url",
 ]
-from app.infrastructure.persistence.database import Database
 
 Listener = Callable[[str, Any], Awaitable[None]]
 
@@ -58,10 +57,8 @@ DEFAULT_PROVIDER_SETTINGS: dict = {
     "provider_pool": ["*"],
 }
 
-# OneBot ws_url 中 access_token 的对外打码哨兵（WebUI/页面不泄露真实令牌）
 
-
-class ConfigService(AccountStoreMixin):
+class ConfigService(AccountStoreMixin, BindingStoreMixin):
     def __init__(self, db: Database, project_root: Path, log=None) -> None:
         self.db = db
         self.root = project_root
@@ -76,8 +73,11 @@ class ConfigService(AccountStoreMixin):
         # 断开后运行时状态会清空，前端据此回退展示；连接成功时由 gateway 回调刷新。
         self._bot_accounts: dict[str, dict] = {}
         self._webui: dict = dict(DEFAULT_WEBUI_CONFIG)
-        self._module_config: dict[str, dict[str, dict]] = {}      # module -> {bot_id: config}
-        self._module_authority: dict[str, dict[str, dict]] = {}   # module -> {bot_id: authority}
+        # 作用域绑定：capability -> {(scope_type, scope_id): row}
+        # row = {"enabled": bool|None, "config": dict, "permission": dict, "priority": int}
+        self._bindings: dict[str, dict[tuple[str, str], dict]] = {}
+        # 群响应权策略：(capability_id, channel_id) -> row
+        self._channel_policies: dict[tuple[str, str], dict] = {}
         self._provider_presets: dict[str, dict] = {}              # preset_id -> preset
         self._provider_models: dict[str, dict] = {}               # model_id -> model
         self._provider_settings: dict = dict(DEFAULT_PROVIDER_SETTINGS)
@@ -85,12 +85,22 @@ class ConfigService(AccountStoreMixin):
 
     # ==================== 生命周期 ====================
     async def init(self) -> None:
+        """初始化：账号身份迁移 → 建表/补列 → 旧 JSON 导入 → 加载 → 绑定向迁移。
+
+        顺序有讲究（docs/multi-account-design.md §4）：
+        - ``bindings`` 迁移必须晚于 ``_load_all()``（旧 ``single_service/multi_group``
+          在 webui 配置里，要先读进内存）；
+        - 迁移本身幂等（``kv["bindings_migrated"]``），二次启动只做加载。
+        """
         # 账号身份迁移必须最先跑：把旧库的 bot_index 身份换成 account_id，
         # 之后所有读取（_load_all / 网关 / API）才有一致的 id 可用。
         await migrate_account_identity(self.db)
         await self._ensure_schema()
         await self._migrate_legacy_if_needed()
         await self._load_all()
+        await self._load_bindings()
+        await self._load_channel_policies()
+        await self._migrate_bindings_if_needed()
 
     async def _ensure_schema(self) -> None:
         """老库补列：`conn_mode`（连接方向）晚于 `bots` 表引入。
@@ -231,21 +241,8 @@ class ConfigService(AccountStoreMixin):
         for r in rows:
             self._webui[r["key"]] = self.db.loads(r["value_json"], {})
 
-        # module config
-        rows = await self.db.fetchall("SELECT * FROM module_config")
-        for r in rows:
-            self._module_config.setdefault(r["module_name"], {})[r["bot_id"]] = self.db.loads(r["config_json"], {})
-
-        # module authority
-        rows = await self.db.fetchall("SELECT * FROM module_authority")
-        for r in rows:
-            self._module_authority.setdefault(r["module_name"], {})[r["bot_id"]] = {
-                "enabled": bool(r["enabled"]),
-                "group_mode": r["group_mode"],
-                "group_list": self.db.loads(r["group_list"], []),
-                "user_mode": r["user_mode"],
-                "user_list": self.db.loads(r["user_list"], []),
-            }
+        # module config / authority：运行时已统一到 bindings（见 `_load_bindings`），
+        # 旧表只作为迁移源保留，这里不再加载（避免出现两套真相）。
 
         # provider presets
         rows = await self.db.fetchall("SELECT * FROM provider_presets")
@@ -293,7 +290,8 @@ class ConfigService(AccountStoreMixin):
 
         self._publish_account_labels()
         self.log.debug(
-            f"[Config] 加载完成: bots={len(self._bots)} modules={len(self._module_config)} "
+            f"[Config] 加载完成: bots={len(self._bots)} "
+            f"bindings={sum(len(rows) for rows in self._bindings.values())} "
             f"presets={len(self._provider_presets)} models={len(self._provider_models)} roles={len(self._role_presets)}"
         )
 
@@ -324,81 +322,6 @@ class ConfigService(AccountStoreMixin):
         await self.db.run_in_transaction(sqls)   # 先落库，成功后再更新内存缓存
         self._webui = merged
         await self._notify("webui", merged)
-
-    # ==================== 模块配置（同步读取，异步持久化） ====================
-    def get_module_config(self, module: str, bot_id: Any) -> dict:
-        data = self._module_config.get(module, {})
-        return dict(data.get(str(bot_id)) or data.get(bot_id) or {})
-
-    def get_all_module_configs(self, module: str) -> dict[str, dict]:
-        return dict(self._module_config.get(module, {}))
-
-    def set_module_config(self, module: str, bot_id: Any, config: dict, persist: bool = True) -> None:
-        key = str(bot_id) if bot_id is not None else None
-        self._module_config.setdefault(module, {})[key] = dict(config)
-        if persist:
-            self._schedule_persist(self._persist_module_config, module, key)
-
-    async def save_module_config(self, module: str, bot_id: Any, config: dict) -> None:
-        key = str(bot_id) if bot_id is not None else None
-        self._module_config.setdefault(module, {})[key] = dict(config)
-        await self._persist_module_config(module, key)
-        await self._notify("module_config", {"module": module, "account_id": bot_id, "config": dict(config)})
-
-    async def _persist_module_config(self, module: str, key: Any) -> None:
-        try:
-            config = self._module_config.get(module, {}).get(key, {})
-            await self.db.execute(
-                "INSERT OR REPLACE INTO module_config (module_name, bot_id, config_json, updated_at) VALUES (?,?,?,?)",
-                (module, key, self.db.dumps(config), int(asyncio.get_running_loop().time())),
-            )
-        except Exception as e:
-            self.log.error(f"[Config] 持久化模块配置失败 {module}/{key}: {e}")
-
-    # ==================== 模块权限 ====================
-    def get_module_authority(self, module: str, bot_id: Any) -> dict:
-        data = self._module_authority.get(module, {})
-        return dict(data.get(str(bot_id)) or data.get(bot_id) or {})
-
-    def get_default_authority(self, module: str) -> dict:
-        return dict(self._module_authority.get(module, {}).get(None, {
-            "enabled": True,
-            "group_mode": "blacklist",
-            "group_list": [],
-            "user_mode": "blacklist",
-            "user_list": [],
-        }))
-
-    def set_module_authority(self, module: str, bot_id: Any, authority: dict) -> None:
-        key = str(bot_id) if bot_id is not None else None
-        self._module_authority.setdefault(module, {})[key] = dict(authority)
-        self._schedule_persist(self._persist_module_authority, module, key)
-
-    async def save_module_authority(self, module: str, bot_id: Any, authority: dict) -> None:
-        key = str(bot_id) if bot_id is not None else None
-        self._module_authority.setdefault(module, {})[key] = dict(authority)
-        await self._persist_module_authority(module, key)
-        await self._notify("authority", {"module": module, "account_id": bot_id, "authority": dict(authority)})
-
-    async def _persist_module_authority(self, module: str, key: Any) -> None:
-        try:
-            auth = self._module_authority.get(module, {}).get(key, {})
-            await self.db.execute(
-                "INSERT OR REPLACE INTO module_authority "
-                "(module_name, bot_id, enabled, group_mode, group_list, user_mode, user_list, updated_at) "
-                "VALUES (?,?,?,?,?,?,?,?)",
-                (
-                    module, key,
-                    1 if auth.get("enabled", True) else 0,
-                    auth.get("group_mode", "blacklist"),
-                    self.db.dumps(auth.get("group_list", [])),
-                    auth.get("user_mode", "blacklist"),
-                    self.db.dumps(auth.get("user_list", [])),
-                    int(asyncio.get_running_loop().time()),
-                ),
-            )
-        except Exception as e:
-            self.log.error(f"[Config] 持久化权限失败 {module}/{key}: {e}")
 
     # ==================== Provider 预设（全局共享连接配置） ====================
     def list_provider_presets(self) -> list[dict]:

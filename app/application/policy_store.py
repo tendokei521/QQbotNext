@@ -1,10 +1,11 @@
-"""响应权策略（channel_policies）的读取接口与过渡实现。
+"""响应权策略（channel_policies）的读取接口与实现。
 
-- ``PolicyStore``：仲裁器依赖的只读协议（P1 会换成表存储 ``ChannelPolicyStore``）；
-- ``LegacyPolicyStore``：P0 过渡实现，从旧配置 ``webui.single_service`` +
-  ``multi_group.groups[*].service_bot_id`` 派生，行为与旧 ``is_single_service_skipped`` 对齐。
+- ``PolicyStore``：仲裁器依赖的只读协议；
+- ``ChannelPolicyStore``：正式实现，读 ``ConfigService`` 的 ``channel_policies`` 表；
+- ``LegacyPolicyStore``：过渡/回滚实现，从旧 ``webui.single_service`` +
+  ``multi_group.groups[*].service_bot_id`` 派生（与旧 ``is_single_service_skipped`` 行为一致）。
 
-这样「策略从哪来」与「怎么仲裁」解耦：迁移期换 store 即可，仲裁语义只有一份。
+这样「策略从哪来」与「怎么仲裁」解耦：换 store 只改 bootstrap 一行，仲裁语义只有一份。
 """
 
 from __future__ import annotations
@@ -17,6 +18,8 @@ from app.plugin.responder import (
     POLICY_ALL,
     POLICY_DELEGATE,
     ResponderPolicy,
+    normalize_fallback,
+    normalize_policy,
     policy_from_legacy,
 )
 
@@ -29,8 +32,45 @@ class PolicyStore(Protocol):
     def list_for(self, capability_id: str) -> list[ResponderPolicy]: ...
 
 
+def _policy_from_row(row: dict, capability_id: str, channel_id: str) -> ResponderPolicy:
+    """把存储行规整成策略值对象（脏配置不抛错：非法值退化为 all/open）。"""
+    primary = row.get("primary_account_id")
+    return ResponderPolicy(
+        capability_id=str(capability_id),
+        channel_id=str(channel_id),
+        policy=normalize_policy(row.get("policy")),
+        primary_account_id=None if primary in (None, "") else str(primary),
+        fallback=normalize_fallback(row.get("fallback")),
+    )
+
+
+class ChannelPolicyStore:
+    """正式实现：策略来自 ``ConfigService``（SQLite ``channel_policies`` 表）。"""
+
+    def __init__(self, config_service: Any) -> None:
+        self.config_service = config_service
+
+    def get(self, capability_id: str, channel_id: str | None) -> ResponderPolicy | None:
+        if not channel_id:
+            return None
+        try:
+            row = self.config_service.get_channel_policy(capability_id, channel_id)
+        except Exception:  # noqa: BLE001 —— 读策略失败按"无策略"处理，不影响消息主流程
+            return None
+        if not row:
+            return None
+        return _policy_from_row(row, capability_id, str(channel_id))
+
+    def list_for(self, capability_id: str) -> list[ResponderPolicy]:
+        try:
+            rows = self.config_service.list_channel_policies(capability_id)
+        except Exception:  # noqa: BLE001
+            return []
+        return [_policy_from_row(row, capability_id, row["channel_id"]) for row in rows]
+
+
 class LegacyPolicyStore:
-    """从旧配置派生策略（P0 过渡；P1 迁移完成后由表存储取代）。
+    """从旧配置派生策略（迁移期/回滚用）。
 
     旧行为不变式：
     - 全局开关关闭 → 无策略（不过滤）；
@@ -117,6 +157,7 @@ def policies_as_dicts(policies: Iterable[ResponderPolicy]) -> list[dict]:
 
 __all__ = [
     "PolicyStore",
+    "ChannelPolicyStore",
     "LegacyPolicyStore",
     "legacy_single_service_map",
     "policies_as_dicts",

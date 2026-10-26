@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from app.core.logger import account_label
+from app.core.logger import account_label, logger
 
 from abc import ABC
 from dataclasses import dataclass, field
@@ -137,16 +137,35 @@ class ModulePermission:
 
 
 class ModuleAuthority:
-    """模块权限门面：读写 ConfigService 中的 authority 数据。"""
+    """模块权限门面：读写 ConfigService 中的 authority 数据。
+
+    **不做构造期快照**：``enabled`` / ``permission`` 每次读取都重新解析
+    （bindings 是唯一真相，见 docs/multi-account-design.md §5）。否则 WebUI 或其它
+    账号的写入会被实例里的陈旧副本遮住，出现"界面关了、运行时还开着"。
+    """
 
     def __init__(self, module_name: str, bot_id: Any, service) -> None:
         self.module_name = module_name
         self.bot_id = bot_id
         self._service = service
-        self._data: dict = self._service.get_module_authority(module_name, bot_id) or {}
+        self._data: dict = {}
+        self.refresh()
+
+    def refresh(self) -> None:
+        """从配置中心重新读取权威配置（失败保留上一次已知值）。"""
+        try:
+            data = self._service.get_module_authority(self.module_name, self.bot_id)
+        except Exception as e:  # noqa: BLE001 —— 配置读失败不该让消息处理崩掉
+            logger.debug(
+                f"[Authority] 读取 {self.module_name}/{self.bot_id} 权限失败（沿用上次值）: {e}"
+            )
+            return
+        if isinstance(data, dict):
+            self._data = dict(data)
 
     @property
     def enabled(self) -> bool:
+        self.refresh()
         return bool(self._data.get("enabled", True))
 
     @enabled.setter
@@ -156,6 +175,7 @@ class ModuleAuthority:
 
     @property
     def permission(self) -> ModulePermission:
+        self.refresh()
         return ModulePermission(
             group_mode=self._data.get("group_mode", "blacklist"),
             group_list=list(self._data.get("group_list", []) or []),
@@ -168,6 +188,7 @@ class ModuleAuthority:
         return True
 
     def update_permission(self, group_mode: str, group_list, user_mode: str, user_list) -> None:
+        self.refresh()
         self._data["group_mode"] = group_mode
         self._data["group_list"] = list(group_list or [])
         self._data["user_mode"] = user_mode
@@ -179,6 +200,7 @@ class ModuleAuthority:
         return True
 
     def add_group(self, group_id: str, auto_save: bool = True) -> None:
+        self.refresh()
         groups = self._data.setdefault("group_list", [])
         if group_id not in groups:
             groups.append(group_id)
@@ -186,6 +208,7 @@ class ModuleAuthority:
                 self.save()
 
     def remove_group(self, group_id: str, auto_save: bool = True) -> None:
+        self.refresh()
         groups = self._data.get("group_list", [])
         if group_id in groups:
             groups.remove(group_id)
@@ -193,6 +216,7 @@ class ModuleAuthority:
                 self.save()
 
     def add_user(self, user_id: str, auto_save: bool = True) -> None:
+        self.refresh()
         users = self._data.setdefault("user_list", [])
         if user_id not in users:
             users.append(user_id)
@@ -200,6 +224,7 @@ class ModuleAuthority:
                 self.save()
 
     def remove_user(self, user_id: str, auto_save: bool = True) -> None:
+        self.refresh()
         users = self._data.get("user_list", [])
         if user_id in users:
             users.remove(user_id)

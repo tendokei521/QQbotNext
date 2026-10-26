@@ -335,7 +335,7 @@ def build_container(settings: Settings | None = None) -> Container:
 
     # 节点注册表：内置入站链（路由 → 权限 → 派发 → Agent 兜底），框架/模块可插入/替换
     # 响应权仲裁（多账号同群）：策略存储 + 仲裁服务，唯一允许同时看注册表/网关/策略的组件
-    from app.application.policy_store import LegacyPolicyStore
+    from app.application.policy_store import ChannelPolicyStore
     from app.application.responder_service import ResponderService
     from app.plugin.nodes import (
         AgentNode,
@@ -347,7 +347,7 @@ def build_container(settings: Settings | None = None) -> Container:
         OutboundPipeline,
     )
 
-    policy_store = LegacyPolicyStore(config_service)
+    policy_store = ChannelPolicyStore(config_service)
     responder_service = ResponderService(
         policy_store=policy_store,
         registry=registry,

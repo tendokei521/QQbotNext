@@ -36,6 +36,32 @@ CREATE TABLE IF NOT EXISTS module_authority (
     PRIMARY KEY (module_name, bot_id)
 );
 
+-- 作用域绑定：模块配置/权限/开关的统一存储（docs/multi-account-design.md §4）。
+-- scope_type: global（scope_id=''） / account（scope_id=account_id） / channel（scope_id=群号）；
+-- enabled 为 NULL 表示"本层不覆盖"，解析时沿用更宽作用域。
+CREATE TABLE IF NOT EXISTS bindings (
+    capability_id   TEXT NOT NULL,
+    scope_type      TEXT NOT NULL,
+    scope_id        TEXT NOT NULL DEFAULT '',
+    enabled         INTEGER,
+    config_json     TEXT NOT NULL DEFAULT '{}',
+    permission_json TEXT NOT NULL DEFAULT '{}',
+    priority        INTEGER NOT NULL DEFAULT 100,
+    updated_at      INTEGER NOT NULL,
+    PRIMARY KEY (capability_id, scope_type, scope_id)
+);
+
+-- 群响应权策略：同一群里由哪个账号响应某能力（docs/multi-account-design.md §6）。
+CREATE TABLE IF NOT EXISTS channel_policies (
+    capability_id      TEXT NOT NULL,
+    channel_id         TEXT NOT NULL,
+    policy             TEXT NOT NULL DEFAULT 'all',
+    primary_account_id TEXT,
+    fallback           TEXT NOT NULL DEFAULT 'open',
+    updated_at         INTEGER NOT NULL,
+    PRIMARY KEY (capability_id, channel_id)
+);
+
 CREATE TABLE IF NOT EXISTS bots (
     -- account_id：用户「添加账号」时自己填的唯一 id；前后端判断与所有持久化 key 都用它。
     -- 创建后不可改（改名只改 name），因此可以安全地当外部引用。
