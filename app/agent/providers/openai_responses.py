@@ -116,17 +116,34 @@ def _temperature_unsupported(error: Exception) -> bool:
     )
 
 
-def to_responses_input(messages: list[dict]) -> tuple[list[dict], str]:
+def _track_call_id(state: dict, call_id: str) -> None:
+    """流里按出现顺序收集工具调用 id（reasoning 回放缓存按这串 id 建索引）。"""
+    call_id = str(call_id or "")
+    if not call_id:
+        return
+    ids = state.setdefault("call_ids", [])
+    if call_id not in ids:
+        ids.append(call_id)
+
+
+def to_responses_input(
+    messages: list[dict],
+    reasoning_lookup=None,
+) -> tuple[list[dict], str]:
     """``messages[]`` → ``(input items, instructions)``。
 
     system / developer 消息折进顶层 ``instructions``（Responses 的惯用位置）；
     其余按角色转成 message item；工具调用/结果转成独立 item。
 
-    这里故意**不生成** ``reasoning`` item：本项目不把上一轮的思考内容回放给模型
-    （既省 token，也避免跨服务商的 reasoning 签名不兼容被 400）。
+    ``reasoning_lookup``：回放 assistant 工具调用时，查这一轮对应的 reasoning
+    item（带 ``encrypted_content``）。OpenAI 在 ``store:false`` 下要求
+    function_call 必须配着产生它的 reasoning item 一起回放，缺了会 400。
+    查不到（进程重启 / 回放旧历史）时**降级成文本形式**：把「调用了什么工具、
+    返回了什么」写成普通消息，模型照样能接上下文，总比整轮 400 好。
     """
     items: list[dict] = []
     system_parts: list[str] = []
+    tool_text_fallback = False
     for message in messages or []:
         if not isinstance(message, dict):
             continue
@@ -138,23 +155,51 @@ def to_responses_input(messages: list[dict]) -> tuple[list[dict], str]:
                 system_parts.append(text)
             continue
         if role in ("tool", "function"):
+            text = _content_text(content) or "(no output)"
+            if tool_text_fallback:
+                # 上一轮工具调用已经降级成文本，这里也必须用文本回执
+                name = str(message.get("name") or message.get("tool_name") or "").strip()
+                label = f"[工具 {name} 结果]" if name else "[工具结果]"
+                items.append({"role": "user", "content": f"{label}\n{text}"})
+                continue
             call_id = str(message.get("tool_call_id") or message.get("call_id") or message.get("id") or "")
             items.append({
                 "type": "function_call_output",
                 "call_id": call_id,
-                "output": _content_text(content) or "(no output)",
+                "output": text,
             })
             continue
         if role == "assistant":
             text = _content_text(content)
+            calls = [call for call in message.get("tool_calls") or [] if isinstance(call, dict)]
+            if calls:
+                call_ids = [str(call.get("id") or call.get("call_id") or "") for call in calls]
+                replayed = reasoning_lookup(call_ids) if callable(reasoning_lookup) else None
+                if replayed is None:
+                    # 没有可回放的 reasoning item：改成文本，避免 store:false 下的 400
+                    tool_text_fallback = True
+                    lines: list[str] = []
+                    if text.strip():
+                        lines.append(text)
+                    for call in calls:
+                        function = call.get("function") or {}
+                        lines.append(
+                            f"[调用工具] {function.get('name') or call.get('name') or ''}"
+                            f"({_tool_arguments(function.get('arguments', call.get('arguments')))})"
+                        )
+                    items.append({"role": "assistant", "content": [{"type": "output_text", "text": "\n".join(lines)}]})
+                    continue
+                tool_text_fallback = False
+                # reasoning item 必须排在它产生的 function_call 之前
+                items.extend(replayed)
+            else:
+                tool_text_fallback = False
             if text.strip():
                 items.append({
                     "role": "assistant",
                     "content": [{"type": "output_text", "text": text}],
                 })
-            for call in message.get("tool_calls") or []:
-                if not isinstance(call, dict):
-                    continue
+            for call in calls:
                 function = call.get("function") or {}
                 call_id = str(call.get("id") or call.get("call_id") or "")
                 items.append({
@@ -165,6 +210,7 @@ def to_responses_input(messages: list[dict]) -> tuple[list[dict], str]:
                 })
             continue
         # user 及其它角色按原样发（developer 已在上面拦截）
+        tool_text_fallback = False
         items.append({"role": role or "user", "content": _content_parts(content, role=role or "user")})
     return items, "\n\n".join(system_parts).strip()
 
@@ -245,6 +291,12 @@ def parse_responses_result(result: dict) -> LLMResponse:
                 },
             })
     text = "".join(text_parts).strip() or str(result.get("output_text") or "").strip()
+    if str(result.get("status", "") or "") == "incomplete":
+        reason = str((result.get("incomplete_details") or {}).get("reason", "") or "unknown")
+        # 回退层靠 raw.finish_reason 判断"被预算截断"：Responses 没有 finish_reason，
+        # 这里补一个（同时不改调用方传进来的原始 dict）
+        result = {**result, "finish_reason": "length"}
+        logger.add_info("Api").warning(f"Responses 回复未完成（{reason}），按截断处理")
     return LLMResponse(
         text=text,
         reasoning="".join(reasoning_parts).strip(),
@@ -268,6 +320,7 @@ def stream_events_from_responses(chunk: dict, state: dict) -> list[StreamEvent]:
     if kind == "response.output_text.delta" and chunk.get("delta"):
         item_id = str(chunk.get("item_id") or "")
         state.setdefault("text_delta_items", set()).add(item_id)
+        state["any_text_delta"] = True
         events.append(StreamEvent(type="text", text=str(chunk.get("delta"))))
     elif kind in ("response.reasoning_summary_text.delta", "response.reasoning_text.delta"):
         if chunk.get("delta"):
@@ -277,32 +330,55 @@ def stream_events_from_responses(chunk: dict, state: dict) -> list[StreamEvent]:
         if isinstance(item, dict) and item.get("type") == "function_call":
             index = state.setdefault("next_index", 0)
             state["next_index"] = index + 1
-            state.setdefault("item_index", {})[str(item.get("id") or chunk.get("item_id") or "")] = index
+            item_key = str(item.get("id") or chunk.get("item_id") or "")
+            state.setdefault("item_index", {})[item_key] = index
             state.setdefault("arg_delta_items", set())
+            arguments = str(item.get("arguments") or "")
+            if arguments:
+                # 少数上游在 added 里就给了完整参数：标记为"已给过"，done 不再补一遍
+                state["arg_delta_items"].add(item_key)
+                state["any_arg_delta"] = True
+            _track_call_id(state, str(item.get("call_id") or item.get("id") or ""))
             events.append(StreamEvent(type="tool_call", tool_call={
                 "index": index,
                 "id": str(item.get("call_id") or item.get("id") or ""),
                 "type": "function",
-                "function": {"name": str(item.get("name") or ""), "arguments": ""},
+                "function": {"name": str(item.get("name") or ""), "arguments": arguments},
             }))
+    elif kind == "response.refusal.delta" and chunk.get("delta"):
+        # 上游拒绝回答时正文在 refusal 里，别丢掉——用户至少该看到原因
+        events.append(StreamEvent(type="text", text=str(chunk.get("delta"))))
     elif kind == "response.function_call_arguments.delta":
         item_id = str(chunk.get("item_id") or "")
         index = state.setdefault("item_index", {}).get(item_id)
         if index is not None:
             state.setdefault("arg_delta_items", set()).add(item_id)
+            state["any_arg_delta"] = True
             events.append(StreamEvent(type="tool_call", tool_call={
                 "index": index,
                 "function": {"arguments": str(chunk.get("delta") or "")},
             }))
     elif kind == "response.output_text.done" and chunk.get("text"):
-        # 有的中转只给 done 不给 delta：这时把完整正文补出来，避免整轮被当成零产出
+        # 有的中转只给 done 不给 delta：把完整正文补出来，避免整轮被当成零产出。
+        # 补完要记进 text_delta_items，否则紧随其后的 output_item.done 会再补一遍，
+        # 正文就重复了。
         item_id = str(chunk.get("item_id") or "")
-        if item_id not in state.get("text_delta_items", set()):
+        if item_id not in state.get("text_delta_items", set()) and not state.get("any_text_delta"):
+            state.setdefault("text_delta_items", set()).add(item_id)
+            state["any_text_delta"] = True
             events.append(StreamEvent(type="text", text=str(chunk.get("text"))))
     elif kind == "response.function_call_arguments.done":
         item_id = str(chunk.get("item_id") or "")
         index = state.setdefault("item_index", {}).get(item_id)
-        if index is not None and item_id not in state.get("arg_delta_items", set()) and chunk.get("arguments"):
+        if (
+            index is not None
+            and item_id not in state.get("arg_delta_items", set())
+            and not state.get("any_arg_delta")
+            and chunk.get("arguments")
+        ):
+            # 同理：补完记为"已给过参数"，避免 output_item.done 再拼一遍导致 JSON 坏掉
+            state.setdefault("arg_delta_items", set()).add(item_id)
+            state["any_arg_delta"] = True
             events.append(StreamEvent(type="tool_call", tool_call={
                 "index": index,
                 "function": {"arguments": str(chunk.get("arguments"))},
@@ -312,17 +388,23 @@ def stream_events_from_responses(chunk: dict, state: dict) -> list[StreamEvent]:
         if not isinstance(item, dict):
             return events
         item_id = str(item.get("id") or chunk.get("item_id") or "")
+        if item.get("type") == "reasoning":
+            # 记下来给下一轮工具回放用（带 encrypted_content 才算数）
+            state.setdefault("reasoning_items", []).append(item)
+            return events
         if item.get("type") == "message":
-            # 上游没发 delta 时，正文只在 done 里出现
-            if item_id not in state.get("text_delta_items", set()):
+            # 上游没发 delta 时，正文只在 done 里出现（delta 已经给过就不能再补）
+            if item_id not in state.get("text_delta_items", set()) and not state.get("any_text_delta"):
                 text = "".join(
                     str(block.get("text", ""))
                     for block in item.get("content") or []
                     if isinstance(block, dict) and block.get("type") == "output_text"
                 )
                 if text:
+                    state["any_text_delta"] = True
                     events.append(StreamEvent(type="text", text=text))
         elif item.get("type") == "function_call":
+            _track_call_id(state, str(item.get("call_id") or item.get("id") or ""))
             index = state.setdefault("item_index", {}).get(item_id)
             if index is None:
                 index = state.setdefault("next_index", 0)
@@ -334,13 +416,41 @@ def stream_events_from_responses(chunk: dict, state: dict) -> list[StreamEvent]:
                     "type": "function",
                     "function": {"name": str(item.get("name") or ""), "arguments": ""},
                 }))
-            if item_id not in state.get("arg_delta_items", set()) and item.get("arguments"):
+            if (
+                item_id not in state.get("arg_delta_items", set())
+                and not state.get("any_arg_delta")
+                and item.get("arguments")
+            ):
+                state["any_arg_delta"] = True
                 events.append(StreamEvent(type="tool_call", tool_call={
                     "index": index,
                     "function": {"arguments": str(item.get("arguments"))},
                 }))
     elif kind in ("response.completed", "response.incomplete"):
         response = chunk.get("response") or {}
+        # 有的中转不发增量事件，只在 completed 里给完整 output：
+        # 这里按非流式补发，避免整条流看起来「成功但零产出」。
+        if not state.get("any_text_delta") or not state.get("next_index"):
+            parsed = parse_responses_result(response)
+            if not state.get("any_text_delta"):
+                if parsed.reasoning:
+                    events.append(StreamEvent(type="reasoning", text=parsed.reasoning))
+                if parsed.text:
+                    state["any_text_delta"] = True
+                    events.append(StreamEvent(type="text", text=parsed.text))
+            if not state.get("next_index"):
+                for index, call in enumerate(parsed.tool_calls):
+                    _track_call_id(state, call["id"])
+                    events.append(StreamEvent(type="tool_call", tool_call={
+                        "index": index,
+                        "id": call["id"],
+                        "type": "function",
+                        "function": call["function"],
+                    }))
+        # 完整 output 里也可能带 reasoning（completed-only 的中转），一并记下供回放
+        for item in response.get("output") or []:
+            if isinstance(item, dict) and item.get("type") == "reasoning":
+                state.setdefault("reasoning_items", []).append(item)
         usage = responses_usage(response)
         if usage:
             events.append(StreamEvent(type="usage", usage=usage))
@@ -364,6 +474,37 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
 
     name = "openai-responses"
     alias_names = ("openai-responses", "responses", "openai_responses", "openai-response")
+
+    #: 回放 reasoning item 的缓存条数：够覆盖一轮多工具调用的历史即可
+    _REASONING_CACHE_LIMIT = 32
+
+    def __init__(self, config: dict) -> None:
+        super().__init__(config)
+        #: ``{(call_id, ...): reasoning items}``；None = 这一轮有思考但拿不到密文
+        self._reasoning_cache: dict[tuple[str, ...], list[dict] | None] = {}
+
+    # ── reasoning 回放（store:false 下 function_call 必须配对 reasoning）──
+    def _remember_reasoning(self, call_ids: list[str], output: list[dict] | None) -> None:
+        """记住这一轮「工具调用 → 产生它的 reasoning item」，供下一轮回放。"""
+        key = tuple(str(call_id) for call_id in call_ids or [] if call_id)
+        if not key:
+            return
+        reasoning_items = [
+            item for item in (output or [])
+            if isinstance(item, dict) and item.get("type") == "reasoning"
+        ]
+        if reasoning_items and not any(item.get("encrypted_content") for item in reasoning_items):
+            cached: list[dict] | None = None  # 有思考但没有密文：不能回放，宁可走文本降级
+        else:
+            cached = [item for item in reasoning_items if item.get("encrypted_content")]
+        self._reasoning_cache.pop(key, None)
+        self._reasoning_cache[key] = cached
+        while len(self._reasoning_cache) > self._REASONING_CACHE_LIMIT:
+            self._reasoning_cache.pop(next(iter(self._reasoning_cache)), None)
+
+    def _lookup_reasoning(self, call_ids: list[str]) -> list[dict] | None:
+        """按工具调用 id 取回 reasoning item；``None`` = 不可回放（调用方降级文本）。"""
+        return self._reasoning_cache.get(tuple(str(call_id) for call_id in call_ids or []))
 
     # ── 端点 ───────────────────────────────────────────
     def _normalize_base(self) -> str:
@@ -390,7 +531,7 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
         tools: list[dict] | None,
         stream: bool,
     ) -> dict:
-        input_items, instructions = to_responses_input(messages)
+        input_items, instructions = to_responses_input(messages, reasoning_lookup=self._lookup_reasoning)
         payload: dict = {
             "model": model,
             "input": input_items,
@@ -398,6 +539,8 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
             "max_output_tokens": max(int(max_tokens or 0), _MIN_OUTPUT_TOKENS),
             "temperature": temperature,
             "store": False,
+            # 让上游把 reasoning 的加密串一起给回来，下一轮工具回放要用（store:false 必须带）
+            "include": ["reasoning.encrypted_content"],
         }
         if instructions:
             payload["instructions"] = instructions
@@ -442,7 +585,13 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
                 "上游不接受 temperature（Responses 推理模型常见），已去掉该参数重试"
             )
             result = await self._request(payload, timeout)
-        return parse_responses_result(result)
+        response = parse_responses_result(result)
+        # 记住这轮工具调用对应的 reasoning item，下一轮 tool result 回放时要用
+        self._remember_reasoning(
+            [call["id"] for call in response.tool_calls],
+            result.get("output") if isinstance(result, dict) else None,
+        )
+        return response
 
     # ── 流式 ───────────────────────────────────────────
     async def _stream_responses(self, api_key: str, payload: dict, timeout: int):
@@ -500,6 +649,8 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
                     logger.add_info("Api").warning(
                         f"Responses 流有 {dropped} 个 SSE 数据块无法解析（上游报错或连接被截断），已丢弃"
                     )
+        # 流式结束后把工具调用 ↔ reasoning 配对记下来，供下一轮工具回放
+        self._remember_reasoning(state.get("call_ids") or [], state.get("reasoning_items") or [])
 
     async def chat_stream(
         self,
