@@ -194,6 +194,23 @@ def _truncate_module(module: str) -> str:
     )
 
 
+# 控制字符（C0 + C1 + DEL）。这类字符进日志有两个实际危害：
+# 1) ``\x07``(BEL) 会让终端响铃——QQ 名片里带这个字符时，每收到一条消息就打一次
+#    「叮」，且完全看不出是谁干的（日志里只看到一行空白）；
+# 2) ``\x1b``(ESC) 能注入 ANSI 控制序列，把控制台颜色/光标弄乱，伪造日志行。
+# 所以统一在格式化出口转成可见转义（``\\x07``），保留换行（多行日志仍是多行）。
+_CONTROL_CHARS = {code: f"\\x{code:02x}" for code in (*range(0, 9), *range(11, 32), 127)}
+_CONTROL_CHARS.update({code: f"\\x{code:02x}" for code in range(0x80, 0xA0)})
+_CONTROL_TABLE = str.maketrans(_CONTROL_CHARS)
+
+
+def sanitize_control(text: str) -> str:
+    """把控制字符转成可见转义，避免终端响铃/ANSI 注入；``\n`` 与 ``\t`` 保留。"""
+    if not text:
+        return text
+    return str(text).translate(_CONTROL_TABLE)
+
+
 class CallerModuleFormatter(logging.Formatter):
     """把记录名动态改为「调用者模块路径:行号」（替代固定的 [Service]），带方括号输出。
 
@@ -226,11 +243,12 @@ class CallerModuleFormatter(logging.Formatter):
         formatter 内部再写日志会递归回到 formatter。
         """
         message = record.getMessage()
-        if "base64" not in message:
-            return
-        redacted = redact.redact_payloads(message)
-        if redacted != message:
-            record.msg = redacted
+        if "base64" in message:
+            message = redact.redact_payloads(message)
+        # 控制字符一律转义（终端响铃 / ANSI 注入的根因）；渲染一次后清空 args。
+        safe = sanitize_control(message)
+        if safe != record.getMessage():
+            record.msg = safe
             record.args = None
 
 

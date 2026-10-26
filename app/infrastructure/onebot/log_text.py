@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 
+from app.core.logger import sanitize_control
 from app.domain.events import BaseEvent, MessageEvent, NoticeEvent, RequestEvent
 from app.infrastructure.onebot.codec import event_name
 
@@ -28,6 +29,15 @@ def _conn_label(conn) -> str:
     from app.domain.bot import bot_label
 
     return bot_label(conn)
+
+
+def _one_line(text: str) -> str:
+    """把名字类字段压成一行并消毒。
+
+    群名片/昵称可以带换行、制表符和控制字符：换行会把一条日志拆成两行（后面那行
+    看起来像另一条日志），``\\x07`` 会让终端响铃。日志只做展示，压平不丢信息。
+    """
+    return sanitize_control(str(text or "").replace("\r", " ").replace("\n", " ")).strip()
 
 
 def _message_log_text(event: MessageEvent) -> str:
@@ -76,10 +86,10 @@ def received_log_lines(
         text = _message_log_text(event).strip()
         if not text:
             return []
-        name = event.user.card or event.user.nickname or ""
+        name = _one_line(event.user.card or event.user.nickname or "")
         prefix = f"接收<-] [{_conn_label(conn)}"
         if event.event_type == "message_group":
-            group_name = group_name_of(event.group.group_id) if group_name_of else ""
+            group_name = _one_line(group_name_of(event.group.group_id) if group_name_of else "")
             prefix += (f"] [{group_name}({event.group.group_id})" if group_name
                        else f"[{event.group.group_id}]")
         name_info = f"{name}({event.user_id})" if name else f"{event.user_id}"
