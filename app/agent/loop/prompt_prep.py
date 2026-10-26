@@ -208,10 +208,17 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
             **_meta_flags,
         ),
     )
+    # Q1：先看 token 压力（窗口未知或 trigger_ratio<=0 时 pressure 恒 False，回退按条数）
+    from app.agent.assembly.context_budget import should_compress_by_pressure
+    from app.agent.session.session_log import log_of
+
+    pressure = should_compress_by_pressure(session_history, config)
     session_history = await maybe_compress_context(
         provider_chain, config, session_history, history_rounds,
         bot_id=str(getattr(runtime, "bot_id", "") or ""),
         session_id=str(session_id or ""),
+        pressure=pressure,
+        log=log_of(session_mgr, session),
     )
 
     from app.agent.policy import policy_get as _policy_get

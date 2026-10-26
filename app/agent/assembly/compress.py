@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from app.agent import logger
 from app.agent.providers import chat_with_fallback
 
@@ -21,12 +23,25 @@ DEFAULT_COMPRESS_PROMPT = """请把上面的历史对话压缩成一份简洁但
 只输出摘要内容，不要输出额外解释。"""
 
 
-def should_compress(history: list[dict], history_rounds: int, config: dict) -> bool:
-    """历史是否超过了允许保留的轮数。"""
+def should_compress(
+    history: list[dict],
+    history_rounds: int,
+    config: dict,
+    *,
+    pressure: bool = False,
+) -> bool:
+    """是否该压缩。
+
+    两种触发（Q1）：``pressure=True`` 表示调用方按 token 压力判定已越线；
+    否则回退到"超出 history_rounds 条"的旧口径（``context_compress_trigger_ratio<=0``
+    时永远走这条，行为与改造前一致）。
+    """
     if not config.get("context_compress_enable", True):
         return False
     if not history:
         return False
+    if pressure:
+        return True
     return len(history) > int(history_rounds)
 
 
@@ -91,18 +106,80 @@ async def maybe_compress_context(
     *,
     bot_id: str = "",
     session_id: str = "",
+    pressure: bool = False,
+    log: Any = None,
 ) -> list[dict]:
-    """如果历史超过 history_rounds，把超出的旧段压缩成摘要，保留最近 history_rounds 条原文。
+    """按压力/条数决定是否压缩，并交给配置选定的后端处理。
+
+    - ``pressure=True``：调用方已按 token 压力判定越线（Q1）；
+    - ``log``：`session_log.SessionLog`，用来记 `compaction/start|summary|end` 三段事件
+      （崩溃时未闭合的 start 可被检出；summary 里带被替换条数与摘要文本）。
 
     返回可直接传给 build_messages 的 history 列表；未触发或失败时原样返回。
     """
-    if not should_compress(history, history_rounds, config):
+    from app.agent.assembly.compaction import CompactionPlan, choose_backend
+    from app.agent.assembly.context_budget import keep_count_for
+    from app.agent.session.session_log import (
+        EVENT_COMPACTION_END,
+        EVENT_COMPACTION_START,
+        EVENT_COMPACTION_SUMMARY,
+        safe_append,
+    )
+
+    if not should_compress(history, history_rounds, config, pressure=pressure):
         return history
 
-    old_history, recent_history = split_history(history, history_rounds)
+    keep_target = (
+        keep_count_for(history, config, history_rounds) if pressure else int(history_rounds)
+    )
+    old_history, recent_history = split_history(history, keep_target)
     if not old_history:
         return history
 
+    start_seq = safe_append(
+        log, EVENT_COMPACTION_START,
+        reason="pressure" if pressure else "count",
+        total=len(history), keep=len(recent_history), replaced=len(old_history),
+    )
+    backend = choose_backend(config)
+    plan = CompactionPlan(
+        trigger_ratio=float(config.get("context_compress_trigger_ratio", 0) or 0),
+        keep_ratio=float(config.get("context_compress_keep_ratio", 0) or 0),
+        keep_tail=keep_target,
+        reason="pressure" if pressure else "count",
+    )
+    result = await backend.compact(
+        old_history, recent_history,
+        plan=plan, provider_chain=provider_chain, config=config,
+    )
+    if result.compacted:
+        safe_append(
+            log, EVENT_COMPACTION_SUMMARY,
+            backend=backend.name, summary=result.summary,
+            pruned=result.pruned, replaced=result.replaced,
+            source_event_seqs=[start_seq] if start_seq else [],
+        )
+    safe_append(
+        log, EVENT_COMPACTION_END,
+        backend=backend.name, compacted=bool(result.compacted),
+        messages_before=len(history), messages_after=len(result.history),
+    )
+    logger.add_info("LLM").info(
+        f"上下文压缩({backend.name}): {len(old_history)} 条 -> "
+        f"{'摘要/裁剪' if result.compacted else '未压缩'}，保留最近 {len(recent_history)} 条原文"
+    )
+    return result.history
+
+
+async def compress_history(
+    provider_chain: list[dict],
+    config: dict,
+    old_history: list[dict],
+    *,
+    bot_id: str = "",
+    session_id: str = "",
+) -> str:
+    """把旧段交给摘要模型，返回摘要文本（失败/空返回空串，由后端回退）。"""
     prompt = str(config.get("context_compress_prompt") or DEFAULT_COMPRESS_PROMPT).strip()
     summary_messages = build_summary_messages(old_history, prompt)
 
@@ -127,17 +204,7 @@ async def maybe_compress_context(
                 max_tokens=max(512, max_tokens),
                 timeout=timeout,
             )
-        summary = (resp.text or "").strip()
+        return (resp.text or "").strip()
     except Exception as e:  # noqa: BLE001
         logger.add_info("LLM").warning(f"上下文压缩调用失败，跳过压缩: {e}")
-        return history
-
-    if not summary:
-        logger.add_info("LLM").warning("上下文压缩返回空摘要，跳过压缩")
-        return history
-
-    block = "【更早对话摘要】\n" + summary
-    logger.add_info("LLM").info(
-        f"上下文压缩: 超出部分 {len(old_history)} 条 -> 摘要，保留最近 {len(recent_history)} 条原文"
-    )
-    return [{"role": "system", "content": block}, *recent_history]
+        return ""

@@ -285,6 +285,13 @@ DEFAULT_LLM_CONFIG: dict = {
     # 估算按字符启发式（context_token_chars_per_token），只用于防爆、不用于计费。
     "context_token_budget": 0,
     "context_token_chars_per_token": 2.0,
+    # Q1 上下文预算：模型窗口（0 = 关闭压力触发，回退按 history_rounds 条数）。
+    # trigger_ratio：估算输入 / 窗口 的比例越过它才压缩；keep_ratio：保留最近多少比例原文；
+    # backend：summary（调模型摘要）/ prune（只剪旧工具结果，零成本）/ both。
+    "context_window": 0,
+    "context_compress_trigger_ratio": 0.8,
+    "context_compress_keep_ratio": 0.16,
+    "context_compress_backend": "summary",
 }
 
 # 框架级 Agent 配置/权限存储的 module_name

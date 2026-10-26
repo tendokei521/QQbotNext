@@ -43,6 +43,9 @@ EVENT_TURN_END = "turn/end"
 EVENT_TOOL_CALL = "tool/call"
 EVENT_TOOL_RESULT = "tool/result"
 EVENT_REQUEST_HEADER = "request/header"
+EVENT_COMPACTION_START = "compaction/start"
+EVENT_COMPACTION_SUMMARY = "compaction/summary"
+EVENT_COMPACTION_END = "compaction/end"
 EVENT_USAGE = "usage"
 
 #: log-only 事件（永远不进 messages）
@@ -52,6 +55,9 @@ LOG_ONLY = frozenset({
     EVENT_TOOL_CALL,
     EVENT_TOOL_RESULT,
     EVENT_REQUEST_HEADER,
+    EVENT_COMPACTION_START,
+    EVENT_COMPACTION_SUMMARY,
+    EVENT_COMPACTION_END,
     EVENT_USAGE,
 })
 

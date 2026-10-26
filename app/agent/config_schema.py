@@ -283,6 +283,28 @@ SCHEMA = {
         "type": "number", "label": "请求落盘保留条数", "description": "滚动文件最多保留多少轮请求（从最旧开始丢）",
         "default": 20, "min": 1, "max": 500, "group": "group_session",
     },
+    # Q1：上下文预算（按 token 压力触发压缩，而不是按条数）
+    "context_window": {
+        "type": "number", "label": "模型上下文窗口（token）",
+        "description": "用来判断是否该压缩历史。0 = 不启用压力触发（回退按「保留条数」那个配置）。",
+        "default": 0, "min": 0, "max": 2000000, "group": "group_compress",
+    },
+    "context_compress_trigger_ratio": {
+        "type": "number", "label": "压缩触发比例",
+        "description": "估算输入占窗口的比例超过它就压缩。0 = 不启用（按条数）。",
+        "default": 0.8, "min": 0, "max": 1, "group": "group_compress",
+    },
+    "context_compress_keep_ratio": {
+        "type": "number", "label": "压缩后保留比例",
+        "description": "压缩时保留最近多少比例的原文（不超过「保留条数」配置的上限）。",
+        "default": 0.16, "min": 0, "max": 0.9, "group": "group_compress",
+    },
+    "context_compress_backend": {
+        "type": "select", "label": "压缩方式",
+        "description": "summary = 调模型写摘要；prune = 只裁剪旧工具结果（零成本）；both = 先裁再摘要。",
+        "default": "summary", "group": "group_compress",
+        "options": {"summary": "模型摘要", "prune": "只裁剪工具结果", "both": "先裁再摘要"},
+    },
     # P4：在线不变式。开启后每次请求前核对「会话日志派生结果」与「内存历史」是否一致，
     # 不等就落盘 diff。默认关：这是一条排查开关，每次请求都做投影比对有开销。
     "prompt_dump_verify": {

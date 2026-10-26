@@ -137,6 +137,11 @@ UI_PAGES: tuple[UIPage, ...] = (
                     "context_compress_prompt",
                     "context_token_budget",
                     "context_token_chars_per_token",
+                    # Q1：上下文预算（token 压力触发 + 可插拔压缩后端）
+                    "context_window",
+                    "context_compress_trigger_ratio",
+                    "context_compress_keep_ratio",
+                    "context_compress_backend",
                     # P4：在线不变式（会话日志 ↔ 内存历史一致性自检）
                     "prompt_dump_verify",
                 ),

@@ -154,6 +154,10 @@
             "context_compress_prompt",
             "context_token_budget",
             "context_token_chars_per_token",
+            "context_window",
+            "context_compress_trigger_ratio",
+            "context_compress_keep_ratio",
+            "context_compress_backend",
             "prompt_dump_verify"
           ]
         }
