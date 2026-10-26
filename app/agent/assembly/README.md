@@ -10,7 +10,8 @@
 | `inputs.py` | 取料：群语境、历史、记忆、知识库、人格规则各取一份 |
 | `prompt.py` | 系统提示词的分段渲染 |
 | `token_budget.py` | token 预算分配与裁剪 |
-| `compress.py` | 超预算时的历史压缩 |
+| `compress.py` | 超预算时的历史压缩（切点由 `pairing.legal_cut` 保证不切开工具配对） |
+| `pairing.py` | 压缩切点校验：旧段里带 `tool_calls` 的 assistant 数 == `role:tool` 数，不合法就往前挪（最坏不压缩） |
 | `dump.py` | 把最终 messages 落盘（`/agent/prompt_dump` 用） |
 | `enhance.py` | 外部注入的增强块 |
 

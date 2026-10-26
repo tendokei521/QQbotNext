@@ -27,6 +27,10 @@
 | `storage/` | `HistoryStore`/`MemoryStore` 的接口与工厂 | `base.py` |
 | `providers/` | 各 LLM 供应商适配（**全库最规范的部分，新代码照这个写**） | `policy.py` |
 
+主链路的几个落点：工具轮循环只剩 `loop/tool_step.py` 一处（`turn_runner.py` 收结局与取消）；
+工具结果的结构化 / 落盘 / 取回 / 审批在 `tools/`（`result.py` `spill.py` `recall.py` `approval.py`）；
+历史的唯一真相是 `session/session_log.py` 的追加式事件日志（`messages` 只是派生缓存，`verify.py` 在线自检）。
+
 顶层 8 个文件：`runtime.py`（Runtime 聚合对象）、`client.py`（给插件用的门面）、
 `telemetry.py`、`hooks.py`、`commands.py`、`config.py`、`config_schema.py`、`__init__.py`。
 

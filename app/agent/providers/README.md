@@ -24,6 +24,10 @@
 **这是全库最规范的部分，是其它包的目标范本，不是改造对象。**
 新代码照它的样子写：一个能力一个文件、有抽象基类、策略与实现分离。
 
+适配器的 `chat()` 只发**一次**请求，模型要调的工具报在 `LLMResponse.tool_calls` 里，
+**不自己跑工具循环**；`chat_with_fallback(tool_executor=...)` 签名不变，内部转调
+`loop/tool_step.run_blocking_step` 驱动完整循环。空回复判定也把 `tool_calls` 算"有产出"。
+
 ## 边界
 
 - 允许 import：`app.core` `app.domain` `app.infrastructure` 与本包内文件。

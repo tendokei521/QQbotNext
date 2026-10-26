@@ -7,13 +7,19 @@
 | 文件 | 职责 |
 |---|---|
 | `manager.py` | `SessionManager`：会话生命周期、当前会话、落盘时机 |
-| `history.py` | 历史记录的读写与格式转换 |
+| `history.py` | 历史持久化：`history_events` 只追加表 + `conversations.messages` 派生缓存 |
+| `session_log.py` | `SessionLog`：`append` / `events` / `derive_messages`，投影规则只放 `user/message`、`assistant/message` 进 messages |
+| `verify.py` | 在线自检：日志投影与内存历史对账（`prompt_dump_verify` 默认关，不一致落 `desync-*.json`） |
 | `model.py` | 历史的数据模型（一条消息长什么样） |
 | `enrich.py` | 富化：给历史补上图片/昵称等引用信息 |
 
 ## 注意
 
 历史的**存储接口**在 `app/agent/storage/`，**数据目录**在 `app/infrastructure/fs/paths.py`。
+
+历史是**追加式事件日志**：写入口在 `manager.py`（`add_message` / `upsert_streaming_assistant` /
+`mark_last_assistant_message_id` 双写内存列表 + 事件），`messages` 只是派生缓存，读取方不变。
+老库用 `scripts/migrate_session_events.py` 迁移（`--dry-run` / 自动备份 / 幂等）。
 
 ## 边界
 
