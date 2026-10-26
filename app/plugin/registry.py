@@ -18,6 +18,7 @@ from typing import Any
 import app.plugin.loader as loader
 from app.core.logger import logger
 from app.domain.bot import IBot
+from app.plugin.authority import check_module_enabled
 from app.plugin.base import BaseModule, ServiceAccess
 
 
@@ -67,13 +68,22 @@ class ModuleRegistry:
         return result
 
     async def notify_online(self, bot_id: Any) -> int:
-        """账号连上：逐个调用该账号模块的 ``on_online()``，并补注册模块级定时任务。
+        """账号连上：对**已启用**的模块调用 ``on_online()`` 并补注册模块级定时任务。
 
-        返回通知到的模块数。单个模块抛错只记日志——上线流程不能因为一个插件挂掉而中断。
+        禁用模块不允许被武装（开关即契约，见 docs/multi-account-design.md §7）：
+        否则 WebUI 里关掉的自定义任务会在账号重连后重新跑起来。返回实际武装的模块数；
+        单个模块抛错只记日志——上线流程不能因为一个插件挂掉而中断。
         """
         instances = self.account_modules(bot_id)
         scheduler = getattr(self.services, "scheduler", None) if self.services else None
+        armed = 0
         for instance in instances:
+            if not check_module_enabled(instance):
+                self.log.debug(
+                    f"[Module] {instance.module_name}(bot {bot_id}) 已禁用：跳过上线武装"
+                )
+                continue
+            armed += 1
             if scheduler is not None:
                 try:
                     await scheduler.register_module(instance)
@@ -83,13 +93,21 @@ class ModuleRegistry:
                 await instance.on_online()
             except Exception as e:  # noqa: BLE001
                 self.log.warning(f"[Module] {instance.module_name} on_online 异常: {e}")
-        return len(instances)
+        return armed
 
     async def notify_offline(self, bot_id: Any) -> int:
-        """账号断开：逐个调用 ``on_offline()`` 并注销模块级定时任务（防止对着死连接发消息）。"""
+        """账号断开：对**已启用**的模块调用 ``on_offline()`` 并注销定时任务。
+
+        与 :meth:`notify_online` 对称：禁用模块从未被武装，也就不需要（也不应该）再收一次
+        ``on_offline``，避免向插件传递「你好像运行过」的错觉。
+        """
         instances = self.account_modules(bot_id)
         scheduler = getattr(self.services, "scheduler", None) if self.services else None
+        stopped = 0
         for instance in instances:
+            if not check_module_enabled(instance):
+                continue
+            stopped += 1
             try:
                 await instance.on_offline()
             except Exception as e:  # noqa: BLE001
@@ -99,7 +117,7 @@ class ModuleRegistry:
                     await scheduler.unload_module(instance.module_name, bot_id)
                 except Exception as e:  # noqa: BLE001
                     self.log.warning(f"[Module] {instance.module_name} 断线后定时任务注销异常: {e}")
-        return len(instances)
+        return stopped
 
     def rebind_bot(self, bot_id: Any, bot: IBot | None) -> int:
         """把某个账号所有已装配模块的 ``ctx.bot`` 重绑到当前连接。

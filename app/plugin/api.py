@@ -91,6 +91,10 @@ async def register_daily_schedule(
     scheduler = module.ctx.services.scheduler
     if scheduler is None or module.bot_id is None:
         return False
+    # 开关即契约：禁用模块不得因 on_online/on_load 再被调用而重新挂上计时器
+    if not bool(getattr(getattr(module, "authority", None), "enabled", True)):
+        await scheduler.unload_module(module.module_name, module.bot_id)
+        return False
     if not _runtime_online(module):
         return False
     if not module.config.get(enable_key, False):

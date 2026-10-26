@@ -173,8 +173,15 @@ class SchedulerService:
         self.log = log or logger
 
     async def register_module(self, module) -> int:
-        """从模块 SCHEDULES 声明注册定时任务。仅真实 Bot 实例生效。"""
+        """从模块 SCHEDULES 声明注册定时任务。仅真实 Bot 实例且**已启用**时生效。
+
+        开关即契约（docs/multi-account-design.md §7）：禁用模块不得注册计时器。
+        这里再做一次纵深防御——即使调用方漏判，也不会把禁用模块的任务挂起来。
+        """
         if getattr(module, "bot_id", None) is None:
+            return 0
+        if not bool(getattr(getattr(module, "authority", None), "enabled", True)):
+            self.log.debug(f"[Scheduler] 模块 {getattr(module, 'module_name', '?')} 已禁用：跳过定时任务注册")
             return 0
         schedules = getattr(module, "SCHEDULES", {}) or {}
         prefix = f"{module.module_name}:{module.bot_id}"

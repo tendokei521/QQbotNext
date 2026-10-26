@@ -265,11 +265,14 @@ async def register_data_sources(
             log.warning(f"[Module] {module_name} 数据源注册异常: {e}")
 
     scheduler = services.scheduler if services else None
-    if scheduler is not None and online:
+    module_enabled = bool(getattr(getattr(instance, "authority", None), "enabled", True))
+    if scheduler is not None and online and module_enabled:
         try:
             await scheduler.register_module(instance)
         except Exception as e:  # noqa: BLE001
             log.warning(f"[Module] {module_name} 定时任务注册异常: {e}")
+    elif scheduler is not None and online:
+        log.debug(f"[Module] {module_name} 已禁用：跳过定时任务注册")
     elif scheduler is not None:
         log.debug(f"[Module] {module_name} 离线装配：定时任务待上线后注册")
 

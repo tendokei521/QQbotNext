@@ -134,11 +134,25 @@ def _resolve_module(agent_manager, registry, module_name, bot_id):
     return registry.get(module_name, bot_id)
 
 
+def _account_online(module) -> bool:
+    """模块所属账号当前是否在线（取 AgentRuntime.online；取不到按离线处理）。"""
+    services = getattr(getattr(module, "ctx", None), "services", None)
+    getter = getattr(services, "runtime", None)
+    if not callable(getter):
+        return False
+    try:
+        runtime = getter(getattr(module, "bot_id", None))
+    except Exception:  # noqa: BLE001 —— 取运行时失败按离线处理，不影响配置保存
+        return False
+    return bool(getattr(runtime, "online", False))
+
+
 async def _sync_module_runtime(module, enabled: bool) -> None:
     """禁用/启用时联动模块生命周期，避免「关闭了但定时任务/后台任务还在跑」。
 
     - 禁用：执行 on_unload → 取消该模块后台任务（owner=module:<name>:<bot>）→ 注销其定时任务；
-    - 启用：重新注册模块定时任务并执行 on_load（恢复动态每日任务等）。
+    - 启用：重新注册模块定时任务并执行 on_load（恢复动态每日任务等）；
+      账号在线时补调 on_online（否则「在线启用」后计时器/主动消息要等下次重连才武装）。
     仅对真实模块实例生效（agent 等虚拟模块走运行时开关，不在此列）。
     """
     if module is None or getattr(module, "module_name", None) is None:
@@ -160,12 +174,27 @@ async def _sync_module_runtime(module, enabled: bool) -> None:
                 await on_load()
             except Exception as e:
                 logger.warning(f"[Module] {module_name} on_load 异常: {e}")
+        # 已在线时启用：补一次 on_online，与「账号上线」路径对齐
+        if _account_online(module):
+            on_online = getattr(module, "on_online", None)
+            if on_online is not None:
+                try:
+                    await on_online()
+                except Exception as e:
+                    logger.warning(f"[Module] {module_name} 启用后 on_online 异常: {e}")
         try:
             if services is not None and getattr(services, "features", None) is not None:
                 services.features.acquire_module(module)
         except Exception as e:
             logger.warning(f"[Module] {module_name} 启用后 Feature 接管异常: {e}")
         return
+
+    try:
+        on_offline = getattr(module, "on_offline", None)
+        if on_offline is not None:
+            await on_offline()
+    except Exception as e:
+        logger.warning(f"[Module] {module_name} 禁用时 on_offline 异常: {e}")
 
     try:
         on_unload = getattr(module, "on_unload", None)
