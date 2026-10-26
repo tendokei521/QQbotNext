@@ -120,3 +120,15 @@ def test_registry_is_idempotent_and_enumerable():
     caps = registry.tool_capabilities()
     assert list(caps) == [CAP_CONTEXT_EXPAND]
     assert caps[CAP_CONTEXT_EXPAND].source == "b", "后声明者覆盖（最后装的模块说话）"
+
+def test_missing_config_key_keeps_the_table_default():
+    """键缺失时按前置表的默认值（`expand_*` 默认可用），不能因为"没人声明 + 键不在"
+    就让工具静默消失——这是改造前 `cfg_get(runtime, key, default)` 的口径。"""
+    from app.agent.tools.policy import prereq_state
+
+    runtime = _runtime()          # 配置里没有 context_expand_enable
+
+    assert prereq_state(runtime, "expand_recent")[0] is True
+
+    other = _runtime()            # 反过来：默认不可用的键缺失时仍不可用
+    assert prereq_state(other, "tavily_search")[0] is False

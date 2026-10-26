@@ -79,7 +79,9 @@ def prereq_state(runtime: Any, name: str) -> tuple[bool, str]:
     if key == "context_expand_enable":
         from app.agent.capabilities import CAP_CONTEXT_EXPAND, has_tool_capability
 
-        if has_tool_capability(runtime, CAP_CONTEXT_EXPAND, config_key=key):
+        if has_tool_capability(
+            runtime, CAP_CONTEXT_EXPAND, config_key=key, config_default=default
+        ):
             return True, ""
         return False, label
     return bool(cfg_get(runtime, key, default)), label

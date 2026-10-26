@@ -164,8 +164,19 @@ def output_capability(runtime: Any, config: Any = None) -> OutputCapability:
     )
 
 
-def has_tool_capability(runtime: Any, name: str, config: Any = None, config_key: str = "") -> bool:
-    """工具能力是否可用：声明优先；没人声明时回退到（可选的）配置键。"""
+def has_tool_capability(
+    runtime: Any,
+    name: str,
+    config: Any = None,
+    config_key: str = "",
+    config_default: bool = False,
+) -> bool:
+    """工具能力是否可用：声明优先；没人声明时回退到（可选的）配置键。
+
+    ``config_default`` 必须由调用方给出**该键缺失时**的默认值——不能一律填 False：
+    `context_expand_enable` 这类默认开启的功能，键缺失当 False 会让工具静默消失
+    （与 `_SYSTEM_TOOL_PREREQUISITES` 表里的第三项保持一致）。
+    """
     registry = getattr(runtime, "capabilities", None)
     if isinstance(registry, CapabilityRegistry) and registry.has_tool(name):
         return True
@@ -173,7 +184,7 @@ def has_tool_capability(runtime: Any, name: str, config: Any = None, config_key:
         getter = getattr(config if config is not None else getattr(runtime, "config", None), "get", None)
         if callable(getter):
             try:
-                return bool(getter(config_key, False))
-            except Exception:  # noqa: BLE001 —— 配置异常按"没有"
-                return False
-    return False
+                return bool(getter(config_key, config_default))
+            except Exception:  # noqa: BLE001 —— 配置异常按调用方给的默认
+                return bool(config_default)
+    return bool(config_default)
