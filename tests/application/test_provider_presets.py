@@ -102,6 +102,17 @@ def test_builtin_catalog_only_lists_supported_adapters():
         seen_connections.add(connection)
 
 
+def test_builtin_catalog_uses_domestic_overseas_categories():
+    """内置预设只分「国内 / 国外」两档；OpenCode 这类境外订阅归「国外」。"""
+    from app.application.provider_preset_catalog import BUILTIN_PROVIDER_PRESETS
+
+    by_key = {entry["key"]: entry for entry in BUILTIN_PROVIDER_PRESETS}
+    assert {entry["category"] for entry in BUILTIN_PROVIDER_PRESETS} == {"国内", "国外"}
+    assert by_key["opencode-go"]["category"] == "国外"
+    assert by_key["opencode"]["category"] == "国外"
+    assert by_key["deepseek"]["category"] == "国内"
+
+
 def test_list_builtin_presets_marks_nothing_installed(preset_service):
     presets = preset_service.list_builtin_presets()
     assert presets
