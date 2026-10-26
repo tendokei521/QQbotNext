@@ -1,0 +1,10 @@
+{
+  "name": "llm_knowledge",
+  "display_name": "知识库",
+  "sign": "LlmKnowledge",
+  "version": "1.0.0",
+  "description": "把资料向量化后按需检索，作为回答的依据",
+  "author": "tendokei521",
+  "entry": "main.py",
+  "api_version": 1
+}

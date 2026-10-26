@@ -1,0 +1,10 @@
+{
+  "name": "llm_context",
+  "display_name": "上下文增强",
+  "sign": "LlmContext",
+  "version": "1.0.0",
+  "description": "指代消解、上下文按需展开、群聊/跨会话历史查询权限",
+  "author": "tendokei521",
+  "entry": "main.py",
+  "api_version": 1
+}

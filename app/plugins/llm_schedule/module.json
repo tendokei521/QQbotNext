@@ -1,0 +1,10 @@
+{
+  "name": "llm_schedule",
+  "display_name": "定时任务",
+  "sign": "LlmSchedule",
+  "version": "1.0.0",
+  "description": "到点让 Bot 自然开口（支持 once/daily/weekly/monthly/interval）",
+  "author": "tendokei521",
+  "entry": "main.py",
+  "api_version": 1
+}

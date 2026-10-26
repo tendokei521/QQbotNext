@@ -75,6 +75,16 @@ class Settings(BaseSettings):
         return self.module_dir / "data"
 
     @property
+    def module_staging_dir(self) -> Path:
+        """zip 安装临时目录（data/module/.staging）：解压/校验/试加载都在这里完成。"""
+        return self.module_dir / ".staging"
+
+    @property
+    def module_backup_dir(self) -> Path:
+        """覆盖安装备份目录（data/module/.backup）：保留最近 N 份旧版本。"""
+        return self.module_dir / ".backup"
+
+    @property
     def project_root(self) -> Path:
         return ROOT_DIR
 

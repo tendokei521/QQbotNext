@@ -22,7 +22,7 @@ def test_module_dir_defaults_under_data(tmp_path, monkeypatch):
 
 
 def test_module_paths_are_derived_from_module_dir(tmp_path):
-    """configs / data / plugins(zip) / 软卸载状态 全部挂在 `module_dir` 下。"""
+    """configs / data / plugins(zip) / 软卸载状态 / 安装 staging/backup 全部挂在 `module_dir` 下。"""
     base = tmp_path / "custom" / "runtime"
     s = Settings(
         _env_file=None,
@@ -35,6 +35,9 @@ def test_module_paths_are_derived_from_module_dir(tmp_path):
     assert s.module_data_dir == base / "data"
     assert s.zip_plugins_dir == base / "plugins"
     assert s.uninstalled_modules_file == base / "uninstalled_modules.json"
+    # 事务安装的工作目录：staging 用于解压/校验，backup 用于覆盖安装回滚
+    assert s.module_staging_dir == base / ".staging"
+    assert s.module_backup_dir == base / ".backup"
 
 
 def test_no_repo_root_module_data_path_is_used(tmp_path, monkeypatch):

@@ -1,0 +1,10 @@
+{
+  "name": "llm_assembly",
+  "display_name": "组装策略",
+  "sign": "LlmAssembly",
+  "version": "1.0.0",
+  "description": "组装档位、行为规则段、消息格式与请求落盘对账",
+  "author": "tendokei521",
+  "entry": "main.py",
+  "api_version": 1
+}

@@ -1,0 +1,10 @@
+{
+  "name": "llm_memory",
+  "display_name": "长期记忆",
+  "sign": "LlmMemory",
+  "version": "1.0.0",
+  "description": "跨会话记住用户偏好与事实，并在后续对话里按可信度召回",
+  "author": "tendokei521",
+  "entry": "main.py",
+  "api_version": 1
+}

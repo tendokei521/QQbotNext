@@ -1,0 +1,10 @@
+{
+  "name": "llm_proactive",
+  "display_name": "主动消息",
+  "sign": "LlmProactive",
+  "version": "1.0.0",
+  "description": "私聊按随机间隔、群聊按沉默时长主动开口（含免打扰与追问上限）",
+  "author": "tendokei521",
+  "entry": "main.py",
+  "api_version": 1
+}

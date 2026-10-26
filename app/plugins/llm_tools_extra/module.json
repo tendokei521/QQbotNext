@@ -1,0 +1,10 @@
+{
+  "name": "llm_tools_extra",
+  "display_name": "工具扩展",
+  "sign": "LlmToolsExtra",
+  "version": "1.0.0",
+  "description": "把 OneBot API 与 MCP server 暴露给模型，并控制工具结果的回应要求",
+  "author": "tendokei521",
+  "entry": "main.py",
+  "api_version": 1
+}

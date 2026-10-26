@@ -1,0 +1,10 @@
+{
+  "name": "llm_output",
+  "display_name": "输出策略",
+  "sign": "LlmOutput",
+  "version": "1.0.0",
+  "description": "流式输出与发言通道：决定一轮回复怎么产出来（一次性 / 逐句流式 / 文本即思考）",
+  "author": "tendokei521",
+  "entry": "main.py",
+  "api_version": 1
+}
