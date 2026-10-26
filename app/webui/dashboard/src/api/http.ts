@@ -71,7 +71,10 @@ export function unwrap<T = any>(payload: ApiEnvelope<T>): T {
 export function errorMessage(err: unknown): string {
   if (err instanceof AxiosError) {
     const body = err.response?.data as ApiEnvelope | undefined
-    return body?.message || err.message || '网络请求失败'
+    const message = body?.message || err.message || '网络请求失败'
+    // 安装/预检类错误后端会带 hint（可操作建议）；有就拼在消息后面
+    const hint = typeof body?.hint === 'string' ? body.hint.trim() : ''
+    return hint && !message.includes(hint) ? `${message}（${hint}）` : message
   }
   if (err instanceof Error) return err.message
   return String(err)

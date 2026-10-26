@@ -6,6 +6,8 @@ import json
 import os
 import shutil
 import tempfile
+from contextlib import contextmanager
+from zipfile import BadZipFile
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -35,8 +37,84 @@ def _ok(message: str, **extra):
     return JSONResponse(content={"status": "success", "message": message, **extra})
 
 
-def _err(status: int, message: str):
-    return JSONResponse(status_code=status, content={"status": "error", "message": message})
+def _err(status: int, message: str, hint: str = ""):
+    body = {"status": "error", "message": message}
+    if hint:
+        body["hint"] = hint
+    return JSONResponse(status_code=status, content=body)
+
+
+#: 安装/预检异常缺省的可操作建议（异常自带 hint 时优先用异常里的）
+_INSTALL_ERROR_HINT = (
+    "请检查压缩包结构：插件根目录（或唯一一层子目录）下需要直接包含 module.json 与 main.py；"
+    "可先用「预检」查看具体原因。"
+)
+
+
+def _install_error(exc: Exception) -> JSONResponse:
+    """安装链路已知异常统一映射为 400 + hint（修 P0-6：不再以 500 暴露给前端）。"""
+    hint = str(getattr(exc, "hint", "") or "").strip() or _INSTALL_ERROR_HINT
+    message = str(exc).strip() or exc.__class__.__name__
+    return JSONResponse(
+        status_code=400,
+        content={"status": "error", "message": message, "hint": hint},
+    )
+
+
+@contextmanager
+def _uploaded_zip(file: UploadFile):
+    """把上传文件落到临时 zip，结束后必删（安装/预检共用）。"""
+    fd, tmp_path = tempfile.mkstemp(suffix=".zip")
+    os.close(fd)
+    try:
+        with open(tmp_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        yield tmp_path
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+def _catalog_entry(registry, module_name: str):
+    """按名取编目条目；registry 尚未实现 catalog_entries() 时返回 None（向后兼容）。"""
+    lister = getattr(registry, "catalog_entries", None)
+    if not callable(lister):
+        return None
+    try:
+        for entry in lister() or []:
+            if getattr(entry, "name", None) == module_name:
+                return entry
+    except Exception as e:  # noqa: BLE001 —— 编目不可用不应让管理接口整体失败
+        logger.warning(f"[Module] 读取模块编目失败: {e}")
+    return None
+
+
+def _entry_is_builtin(entry) -> bool:
+    if entry is None:
+        return False
+    if bool(getattr(entry, "builtin", False)):
+        return True
+    return str(getattr(entry, "source", "") or "").lower() == "builtin"
+
+
+def _module_dir_exists(registry, module_name: str) -> bool:
+    """物理目录存在性兜底判断（编目不可用的旧实现下也能正确回 404）。"""
+    resolver = getattr(registry, "_resolve_module_dir", None)
+    if not callable(resolver):
+        return False
+    for source in ("local", "zip"):
+        try:
+            path = resolver(module_name, source)
+        except Exception as e:  # noqa: BLE001 —— 解析失败按不存在处理
+            logger.debug(f"[Module] 解析 {module_name} 目录失败（按不存在处理）: {e}")
+            continue
+        if path is not None and getattr(path, "is_dir", lambda: False)():
+            return True
+    return False
+
+
+def _module_exists(registry, module_name: str) -> bool:
+    return _catalog_entry(registry, module_name) is not None or _module_dir_exists(registry, module_name)
 
 
 def _authority_payload(module, bot_id, enabled):
@@ -44,7 +122,9 @@ def _authority_payload(module, bot_id, enabled):
     return {
         "type": "module_authority_updated",
         "module": module.module_name,
+        # bot_id 为历史字段，account_id 为正式名：同时下发，旧前端/新前端都能正确过滤
         "bot_id": bot_id,
+        "account_id": bot_id,
         "enabled": enabled,
         "permission": {
             "group_mode": perm.group_mode,
@@ -329,7 +409,9 @@ async def update_config(module_name: str, request: Request, bot_id: str | None =
     await manager.broadcast(json.dumps({
         "type": "module_config_updated",
         "module": module_name,
+        # bot_id 为历史字段，account_id 为正式名（兼容旧前端，见 🔗1）
         "bot_id": bot_id,
+        "account_id": bot_id,
         # 广播前脱敏：password 字段打码，避免明文密码经 WS 泄露（与读取接口一致）
         "config": _mask_password_config(module.config.raw_config, module.config_schema),
     }))
@@ -370,13 +452,16 @@ async def uninstall_module(
     request: Request,
     bot_id: str | None = Depends(parse_account_id),
     registry=Depends(get_module_registry)):
-    """软卸载模块：只写配置文件，不删除模块文件。"""
+    """软卸载模块：只写配置文件，不删除模块文件/配置/数据。"""
 
     registry = registry
+    # 校验存在性：此前任意拼错的名字也能写进 tombstone（P1-1）
+    if not _module_exists(registry, module_name):
+        return _err(404, f"模块 {module_name} 不存在")
     try:
         await registry.uninstall_module(module_name)
     except ValueError as e:
-        return _err(400, str(e))
+        return _err(404, str(e))
     await manager.broadcast(json.dumps({"type": "modules_reloaded", "bot_id": bot_id}))
     return _ok(f"模块 {module_name} 已软卸载（文件保留）")
 
@@ -387,34 +472,153 @@ async def reinstall_module(
     request: Request,
     bot_id: str | None = Depends(parse_account_id),
     bot_service=Depends(get_bot_service), registry=Depends(get_module_registry)):
-    """清除软卸载记录并重新加载模块。"""
+    """清除软卸载记录并重新加载模块，并为**所有已存在账号**补齐实例。
+
+    此前只恢复当前账号实例，其它账号会回退到别人的实例（P1-1 的多账号错位）。
+    """
 
     bot_service = bot_service
     registry = registry
-    bot = bot_service.gateway.find_conn_by_bot_id(bot_id) if bot_id else None
     ok = await registry.reinstall_module(module_name, bot_id)
     if not ok:
         return _err(404, f"模块 {module_name} 目录不存在或安装失败")
+    # 恢复后补实例：与 zip 安装后补装同一套 helper（幂等）
+    instances = 0
+    ensure = getattr(bot_service, "ensure_module_instances", None)
+    if callable(ensure):
+        try:
+            instances = await ensure(module_name)
+        except Exception as e:  # noqa: BLE001 —— 补实例失败不回滚恢复结果，只记日志
+            logger.warning(f"[Module] 恢复 {module_name} 后补齐账号实例失败: {e}")
     await manager.broadcast(json.dumps({"type": "modules_reloaded", "bot_id": bot_id}))
-    return _ok(f"模块 {module_name} 已恢复安装")
+    return _ok(f"模块 {module_name} 已恢复安装", instances=instances)
+
+
+@router.post("/modules/validate-zip")
+async def validate_module_zip(
+    request: Request,
+    file: UploadFile = File(...),
+    registry=Depends(get_module_registry)):
+    """dry-run 预检上传的 zip：返回名称/版本/目标目录/是否覆盖，供前端确认后再装。"""
+
+    registry = registry
+    try:
+        with _uploaded_zip(file) as tmp_path:
+            result = registry.validate_zip(tmp_path)
+    except (ValueError, BadZipFile, UnicodeDecodeError, OSError) as exc:
+        return _install_error(exc)
+    result = result or {}
+    if result.get("ok") is False:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "status": "error",
+                "message": result.get("message") or result.get("error") or "插件预检未通过",
+                "hint": result.get("hint") or _INSTALL_ERROR_HINT,
+            },
+        )
+    plugin = result.get("plugin")
+    if not isinstance(plugin, dict):
+        # 兼容后端直接返回扁平字段的写法
+        plugin = {k: v for k, v in result.items() if k not in ("ok", "hint")}
+    extra = {"hint": result["hint"]} if result.get("hint") else {}
+    return JSONResponse(content={"ok": True, "plugin": plugin, **extra})
+
+
+@router.post("/modules/{module_name}/update")
+async def update_module_zip(
+    module_name: str,
+    request: Request,
+    file: UploadFile = File(...),
+    bot_service=Depends(get_bot_service), registry=Depends(get_module_registry)):
+    """覆盖安装（更新）指定模块：等价 install-zip(force=True)，保留配置与数据。"""
+
+    registry = registry
+    bot_service = bot_service
+    try:
+        with _uploaded_zip(file) as tmp_path:
+            info = await registry.update_from_zip(tmp_path)
+    except (ValueError, BadZipFile, UnicodeDecodeError, OSError) as exc:
+        return _install_error(exc)
+    info = info or {}
+    installed_name = str(info.get("module_name") or info.get("name") or "")
+    if installed_name and installed_name != module_name:
+        # 上传包与目标不一致时如实告知（不谎报更新成功，避免"升级了另一个插件"）
+        message = (
+            f"上传包内的插件是「{installed_name}」，已按其自身名称安装；"
+            f"与要更新的 {module_name} 不是同一个模块"
+        )
+    else:
+        message = f"插件 {module_name} 已更新"
+    ensure = getattr(bot_service, "ensure_module_instances", None)
+    if installed_name and installed_name != module_name and callable(ensure):
+        try:
+            await ensure(installed_name)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[Module] 更新后补齐 {installed_name} 实例失败: {e}")
+    await manager.broadcast(json.dumps({"type": "modules_reloaded", "bot_id": None}))
+    return _ok(message, plugin=info)
+
+
+@router.delete("/modules/{module_name}")
+async def delete_module(
+    module_name: str,
+    request: Request,
+    purge_data: bool = False,
+    bot_id: str | None = Depends(parse_account_id),
+    registry=Depends(get_module_registry)):
+    """硬删除**第三方**模块（默认保留配置与数据，`purge_data=true` 才清理数据目录）。
+
+    内置模块不可删除（403）；不存在返回 404；成功广播 modules_reloaded。
+    """
+
+    registry = registry
+    entry = _catalog_entry(registry, module_name)
+    if _entry_is_builtin(entry):
+        return _err(403, f"内置模块 {module_name} 不可删除（可禁用或隐藏）")
+    if entry is None and not _module_dir_exists(registry, module_name):
+        return _err(404, f"模块 {module_name} 不存在")
+    try:
+        info = await registry.delete_module(module_name, purge_data=purge_data)
+    except (ValueError, OSError) as exc:
+        # 后端仍判定为内置/不可删时补一个明确提示（避免只有 "xxx" 的裸错误）
+        hint = str(getattr(exc, "hint", "") or "")
+        return _install_error(exc) if hint else _err(400, str(exc), _INSTALL_ERROR_HINT)
+    await manager.broadcast(json.dumps({"type": "modules_reloaded", "bot_id": bot_id}))
+    suffix = "（配置与数据已清理）" if purge_data else "（配置与数据已保留）"
+    return _ok(f"模块 {module_name} 已删除{suffix}", plugin=info)
 
 
 @router.post("/modules/install-zip")
-async def install_module_zip(request: Request, file: UploadFile = File(...), registry=Depends(get_module_registry)):
-    """上传 zip 插件并安装到 data/module/plugins。"""
+async def install_module_zip(
+    request: Request,
+    file: UploadFile = File(...),
+    force: bool = Form(False),
+    bot_service=Depends(get_bot_service),
+    registry=Depends(get_module_registry)):
+    """上传 zip 插件并安装到 data/module/plugins。
+
+    - 已有同名第三方插件时需 `force=true` 才覆盖（后端备份旧版本）；
+    - 与内置同名默认拒绝（第三方不可覆盖内置）；
+    - 所有已知异常统一 4xx + hint（不再 500）。
+    """
 
     registry = registry
-    fd, tmp_path = tempfile.mkstemp(suffix=".zip")
-    os.close(fd)
+    bot_service = bot_service
     try:
-        with open(tmp_path, "wb") as f:
-            shutil.copyfileobj(file.file, f)
-        info = await registry.install_from_zip(tmp_path)
-    except ValueError as e:
-        return _err(400, str(e))
-    finally:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+        with _uploaded_zip(file) as tmp_path:
+            info = await registry.install_from_zip(tmp_path, force=force)
+    except (ValueError, BadZipFile, UnicodeDecodeError, OSError) as exc:
+        return _install_error(exc)
+    info = info or {}
+    name = str(info.get("module_name") or info.get("name") or "")
+    # 安装后补实例：后端安装管道通常已补全所有账号，这里幂等兜底（修 P0-5）
+    ensure = getattr(bot_service, "ensure_module_instances", None)
+    if name and callable(ensure):
+        try:
+            await ensure(name)
+        except Exception as e:  # noqa: BLE001 —— 补实例失败不影响安装结果
+            logger.warning(f"[Module] 安装 {name} 后补齐账号实例失败: {e}")
     await manager.broadcast(json.dumps({"type": "modules_reloaded", "bot_id": None}))
     return _ok("插件安装成功", plugin=info)
 

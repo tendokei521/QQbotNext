@@ -12,6 +12,11 @@ const webui = useWebuiStore()
 const modules = useModulesStore()
 const notify = useNotifyStore()
 
+/** 已卸载记录的来源：新后端为 builtin/installed，旧记录仍是 local/zip。 */
+function isThirdParty(source?: string | null): boolean {
+  return source === 'installed' || source === 'zip'
+}
+
 const saving = ref(false)
 const exportDialog = ref(false)
 const uninstalledDialog = ref(false)
@@ -253,7 +258,7 @@ onMounted(() => {
             >
               <v-list-item-title>{{ item.display_name }}</v-list-item-title>
               <v-list-item-subtitle>
-                {{ item.module_name }} · {{ item.source === 'zip' ? 'zip 插件' : '本地模块' }} · v{{ item.version || '0.0.0' }}
+                {{ item.module_name }} · {{ isThirdParty(item.source) ? '第三方插件' : '内置模块' }} · v{{ item.version || '0.0.0' }}
               </v-list-item-subtitle>
               <template #append>
                 <v-btn size="small" variant="tonal" prepend-icon="mdi-arrow-up-bold-circle" @click="reinstallModule(item)">

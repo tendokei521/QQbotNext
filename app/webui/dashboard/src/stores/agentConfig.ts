@@ -260,9 +260,12 @@ export const useAgentConfigStore = defineStore('agentConfig', {
           }
         }
         for (const [owner, config] of Object.entries(moduleBuckets)) {
+          // 🔗2 修复：模块配置接口按**扁平**对象处理（modules.py update_config 直接
+          // 遍历 request.json()），不能再包一层 {config: {...}}，否则会往模块配置里
+          // 写进垃圾键 "config"。agent 自身的键仍走 /api/agent/config 的 {config:...}。
           await http.post(
             `/api/module/${owner}/config`,
-            { config },
+            config,
             { params: { account_id: targetBotId } },
           )
         }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useModulesStore, type PermissionConfig } from '@/stores/modules'
+import { useModulesStore, isBuiltinModule, type PermissionConfig } from '@/stores/modules'
 import { useResponderStore, type ResponderGroup } from '@/stores/responder'
 import { useBotsStore, displayName } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
@@ -353,6 +353,11 @@ onUnmounted(() => {
         <v-btn variant="text" icon="mdi-arrow-left" size="small" title="返回模块列表" @click="router.push('/modules')" />
         <h1 class="app-page-title">{{ mod.name }}</h1>
         <v-chip size="small" variant="tonal" color="primary">{{ mod.name_sign }}</v-chip>
+        <!-- 来源 / 版本：与模块卡片的编目信息一致 -->
+        <v-chip size="small" variant="tonal" :color="isBuiltinModule(mod) ? 'default' : 'teal'">
+          {{ isBuiltinModule(mod) ? '内置' : '第三方' }}
+        </v-chip>
+        <v-chip v-if="mod.version" size="small" variant="tonal">v{{ mod.version }}</v-chip>
         <v-chip size="small" variant="tonal" :color="PERMISSION_COLOR[mod.permission] || 'default'">
           {{ PERMISSION_LABEL[mod.permission] || mod.permission }}
         </v-chip>

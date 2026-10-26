@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useModulesStore, type ModuleData } from '@/stores/modules'
+import {
+  useModulesStore,
+  isBuiltinModule,
+  type InstallPreview,
+  type ModuleData,
+} from '@/stores/modules'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
@@ -14,8 +19,22 @@ const search = ref('')
 const collapsed = ref<Record<string, boolean>>({})
 const toggling = reactive<Record<string, boolean>>({})
 const searchRef = ref<HTMLInputElement | null>(null)
-const fileInput = ref<HTMLInputElement | null>(null)
-const installing = ref(false)
+
+// ---------- 安装 / 更新对话框 ----------
+type ZipDialogMode = 'install' | 'update'
+const zipDialog = ref(false)
+const zipDialogMode = ref<ZipDialogMode>('install')
+/** 更新模式下的目标模块名 */
+const zipTarget = ref<string | null>(null)
+const zipFile = ref<File | null>(null)
+const zipPreview = ref<InstallPreview | null>(null)
+const zipError = ref('')
+const zipValidating = ref(false)
+const zipInstalling = ref(false)
+const zipDragOver = ref(false)
+const zipFileInput = ref<HTMLInputElement | null>(null)
+/** 与内置模块同名：第三方不允许覆盖内置，确认按钮直接禁用 */
+const zipBlocked = computed(() => !!zipPreview.value?.builtin_conflict)
 
 const PERMISSION_LABEL: Record<string, string> = {
   everyone: '不限制',
@@ -33,6 +52,16 @@ const PERMISSION_COLOR: Record<string, string> = {
   owner: 'error',
 }
 
+/** 编目状态；缺省（旧后端）按 ok 处理 */
+function statusOf(m: ModuleData): string {
+  return m.status || 'ok'
+}
+
+/** 是否可交互（开关/配置）：只有已正常加载的模块可以 */
+function isUsable(m: ModuleData): boolean {
+  return statusOf(m) === 'ok'
+}
+
 const filtered = computed(() => {
   const kw = search.value.trim().toLowerCase()
   if (!kw) return modules.list
@@ -42,9 +71,9 @@ const filtered = computed(() => {
   })
 })
 
-const groups = computed(() => {
+/** 置顶 + 分类分组（统一成 sections，避免模板重复两份卡片） */
+const sections = computed(() => {
   const list = filtered.value
-  // 固定模块置顶，其余按 category 分组
   const pinned = list.filter((m) => m.pinned)
   const byCategory = new Map<string, ModuleData[]>()
   list
@@ -55,18 +84,38 @@ const groups = computed(() => {
       byCategory.get(cat)!.push(m)
     })
   const cats = [...byCategory.entries()].sort((a, b) => a[0].localeCompare(b[0], 'zh-CN'))
-  return { pinned, cats }
+  const out: { key: string; title: string; items: ModuleData[]; collapsible: boolean }[] = []
+  if (pinned.length) out.push({ key: '__pinned__', title: '置顶', items: pinned, collapsible: false })
+  for (const [cat, items] of cats) {
+    out.push({ key: cat, title: cat, items, collapsible: true })
+  }
+  return out
 })
 
-function isCollapsed(cat: string): boolean {
+/** 加载失败（装坏）的模块：顶部提示条用 */
+const errorModules = computed(() =>
+  modules.list.filter((m) => ['error', 'conflict'].includes(statusOf(m))),
+)
+/** 软卸载（文件保留，可恢复）的模块：来自 /api/modules/uninstalled */
+const uninstalledModules = computed(() => modules.uninstalledModules)
+const hasIssues = computed(() => errorModules.value.length > 0 || uninstalledModules.value.length > 0)
+
+function isCollapsed(key: string): boolean {
   // 搜索时强制展开所有分组，避免匹配结果被折叠隐藏
   if (search.value.trim()) return false
-  return !!collapsed.value[cat]
+  return !!collapsed.value[key]
 }
 
-function toggleCat(cat: string) {
-  collapsed.value[cat] = !collapsed.value[cat]
+function toggleCat(key: string) {
+  collapsed.value[key] = !collapsed.value[key]
   localStorage.setItem('qqbot_module_collapsed', JSON.stringify(collapsed.value))
+}
+
+function openModule(m: ModuleData) {
+  if (!isUsable(m)) {
+    notify.push(`模块 ${m.name} 当前不可用（${m.error || statusOf(m)}）`, 'warning')
+  }
+  router.push(`/modules/${m._key}`)
 }
 
 async function onToggle(m: ModuleData, v: boolean | null) {
@@ -85,22 +134,6 @@ async function onToggle(m: ModuleData, v: boolean | null) {
   }
 }
 
-async function onInstallFile(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  input.value = ''
-  if (!file) return
-  installing.value = true
-  try {
-    await modules.installZip(file)
-    notify.push(`插件 ${file.name} 安装成功`, 'success')
-  } catch (err) {
-    notify.push(errorMessage(err), 'error')
-  } finally {
-    installing.value = false
-  }
-}
-
 async function onReload(m: ModuleData) {
   try {
     await modules.reloadSingle(m._key)
@@ -110,16 +143,133 @@ async function onReload(m: ModuleData) {
   }
 }
 
-async function onUninstall(m: ModuleData) {
-  if (!window.confirm(`确认软卸载「${m.name}」？模块文件不会被删除，可在设置中恢复。`)) return
+/** 内置模块：禁用并隐藏（软卸载，文件/配置保留，可在设置页恢复） */
+async function onHideBuiltin(m: ModuleData) {
+  if (!window.confirm(`禁用并隐藏「${m.name}」？模块文件与配置保留，可在设置页恢复安装。`)) return
   try {
     await modules.uninstall(m._key)
-    notify.push(`模块 ${m.name} 已软卸载`, 'success')
+    notify.push(`模块 ${m.name} 已禁用并隐藏`, 'success')
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   }
 }
 
+/** 第三方模块：硬删除（配置与数据默认保留） */
+async function onDelete(m: ModuleData) {
+  const ok = window.confirm(
+    `删除插件「${m.name}」？\n\n` +
+      '将删除模块文件；配置与数据默认保留（不会清理 data/module/data 下的运行时数据）。\n' +
+      '删除后如需彻底清理，请手动删除对应数据目录。',
+  )
+  if (!ok) return
+  try {
+    await modules.deleteModule(m._key, false)
+    notify.push(`插件 ${m.name} 已删除`, 'success')
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  }
+}
+
+/** 软卸载模块恢复安装（对所有账号补实例由后端完成） */
+async function onRestore(name: string, displayName?: string) {
+  try {
+    await modules.install(name)
+    notify.push(`模块 ${displayName || name} 已恢复安装`, 'success')
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  }
+}
+
+// ---------- 安装 / 更新对话框逻辑 ----------
+function resetZipDialog() {
+  zipFile.value = null
+  zipPreview.value = null
+  zipError.value = ''
+  zipValidating.value = false
+  zipInstalling.value = false
+  zipDragOver.value = false
+  if (zipFileInput.value) zipFileInput.value.value = ''
+}
+
+function openInstallDialog() {
+  zipDialogMode.value = 'install'
+  zipTarget.value = null
+  resetZipDialog()
+  zipDialog.value = true
+}
+
+function openUpdateDialog(m: ModuleData) {
+  if (isBuiltinModule(m)) return
+  zipDialogMode.value = 'update'
+  zipTarget.value = m._key
+  resetZipDialog()
+  zipDialog.value = true
+}
+
+function closeZipDialog() {
+  if (zipInstalling.value) return
+  zipDialog.value = false
+  resetZipDialog()
+}
+
+function pickZipFile() {
+  zipFileInput.value?.click()
+}
+
+function onPickZipFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (file) void prepareZip(file)
+}
+
+function onDropZip(event: DragEvent) {
+  zipDragOver.value = false
+  const file = event.dataTransfer?.files?.[0]
+  if (!file) return
+  if (!file.name.toLowerCase().endsWith('.zip')) {
+    zipError.value = '仅支持 .zip 压缩包'
+    return
+  }
+  void prepareZip(file)
+}
+
+/** 选文件后先 dry-run 预检：展示名称/版本/目标目录/是否覆盖，确认后再真装 */
+async function prepareZip(file: File) {
+  zipFile.value = file
+  zipPreview.value = null
+  zipError.value = ''
+  zipValidating.value = true
+  try {
+    zipPreview.value = await modules.validateZip(file)
+  } catch (err) {
+    zipError.value = errorMessage(err)
+  } finally {
+    zipValidating.value = false
+  }
+}
+
+async function confirmZip() {
+  const file = zipFile.value
+  if (!file || !zipPreview.value) return
+  zipInstalling.value = true
+  try {
+    if (zipDialogMode.value === 'update' && zipTarget.value) {
+      await modules.updateZip(zipTarget.value, file)
+      notify.push(`插件 ${zipTarget.value} 已更新`, 'success')
+    } else {
+      await modules.installZip(file, !!zipPreview.value.conflict)
+      notify.push(`插件 ${zipPreview.value.display_name || zipPreview.value.name} 安装成功`, 'success')
+    }
+    closeZipDialog()
+  } catch (err) {
+    zipError.value = errorMessage(err)
+    notify.push(errorMessage(err), 'error')
+  } finally {
+    zipInstalling.value = false
+  }
+}
+
+// ---------- 键盘 / 生命周期 ----------
 function onKeydown(e: KeyboardEvent) {
   const tag = (e.target as HTMLElement)?.tagName
   if (e.key === '/' && tag !== 'INPUT' && tag !== 'TEXTAREA') {
@@ -135,6 +285,10 @@ onMounted(() => {
     collapsed.value = {}
   }
   if (!modules.list.length) modules.load()
+  // 顶部"已卸载"提示条的数据源（软卸载记录）
+  modules.loadUninstalled().catch(() => {
+    /* 恢复区加载失败不阻塞模块列表 */
+  })
   window.addEventListener('keydown', onKeydown)
 })
 
@@ -151,23 +305,48 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       <v-btn
         variant="tonal"
         prepend-icon="mdi-package-variant"
-        :loading="installing"
         class="mr-2"
-        @click="fileInput?.click()"
+        @click="openInstallDialog"
       >
         安装插件
       </v-btn>
-      <input
-        ref="fileInput"
-        type="file"
-        accept=".zip"
-        hidden
-        @change="onInstallFile"
-      />
       <v-btn variant="tonal" prepend-icon="mdi-refresh" :loading="modules.reloading" @click="modules.reloadAll().catch((e: unknown) => notify.push(errorMessage(e), 'error'))">
         刷新模块
       </v-btn>
     </div>
+
+    <!-- 顶部提示条：加载失败 / 已软卸载（可恢复） -->
+    <v-alert v-if="hasIssues" type="warning" variant="tonal" density="compact" class="mb-4">
+      <div class="font-weight-medium mb-1">模块状态提示</div>
+      <template v-if="errorModules.length">
+        <div class="text-caption mb-1">以下模块加载失败（不影响其它模块）：</div>
+        <div
+          v-for="m in errorModules"
+          :key="`err-${m._key}`"
+          class="issue-row text-caption"
+        >
+          <v-icon icon="mdi-alert-circle-outline" size="x-small" color="error" class="mr-1" />
+          <span class="font-weight-medium">{{ m.name }}</span>
+          <span class="issue-detail">{{ m.error || statusOf(m) }}</span>
+          <v-btn size="x-small" variant="text" prepend-icon="mdi-refresh" @click="onReload(m)">重试加载</v-btn>
+        </div>
+      </template>
+      <template v-if="uninstalledModules.length">
+        <div class="text-caption mb-1 mt-2">以下模块已软卸载（文件与配置保留）：</div>
+        <div
+          v-for="item in uninstalledModules"
+          :key="`off-${item.module_name}`"
+          class="issue-row text-caption"
+        >
+          <v-icon icon="mdi-package-variant-remove" size="x-small" class="mr-1" />
+          <span class="font-weight-medium">{{ item.display_name || item.module_name }}</span>
+          <span class="issue-detail">{{ item.module_name }} · v{{ item.version || '0.0.0' }}</span>
+          <v-btn size="x-small" variant="text" prepend-icon="mdi-restore" @click="onRestore(item.module_name, item.display_name)">
+            恢复安装
+          </v-btn>
+        </div>
+      </template>
+    </v-alert>
 
     <v-text-field
       ref="searchRef"
@@ -189,87 +368,85 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
     </v-row>
 
     <template v-else>
-      <!-- 固定模块 -->
-      <div v-if="groups.pinned.length" class="mb-4">
-        <div class="group-heading">置顶</div>
-        <v-row>
-          <v-col v-for="m in groups.pinned" :key="m._key" cols="12" md="6" xl="4">
-            <v-card variant="outlined" class="module-card app-card-hover" @click="router.push(`/modules/${m._key}`)">
-              <v-card-item>
-                <template #prepend>
-                  <v-avatar color="lightprimary" size="36" rounded="lg">
-                    <v-icon icon="mdi-pin" color="primary" size="small" />
-                  </v-avatar>
-                </template>
-                <v-card-title class="text-body-1">
-                  <span class="app-line-clamp-1">{{ m.name }}</span>
-                  <v-chip size="x-small" class="ml-1" :color="PERMISSION_COLOR[m.permission] || 'default'" variant="tonal">
-                    {{ PERMISSION_LABEL[m.permission] || m.permission }}
-                  </v-chip>
-                  <v-chip v-if="m.supersedes?.length" size="x-small" class="ml-1" color="warning" variant="tonal">
-                    接管: {{ m.supersedes.join(', ') }}
-                  </v-chip>
-                </v-card-title>
-                <v-card-subtitle class="app-line-clamp-2">{{ m.description }}</v-card-subtitle>
-                <template #append>
-                  <v-switch
-                    :model-value="m.enabled"
-                    color="primary"
-                    density="compact"
-                    hide-details
-                    :loading="toggling[m._key]"
-                    :disabled="toggling[m._key]"
-                    @click.stop
-                    @update:model-value="(v: boolean | null) => onToggle(m, v)"
-                  />
-                  <v-menu location="bottom end">
-                    <template #activator="{ props }">
-                      <v-btn
-                        v-bind="props"
-                        icon="mdi-dots-vertical"
-                        size="x-small"
-                        variant="text"
-                        @click.stop
-                      />
-                    </template>
-                    <v-list density="compact">
-                      <v-list-item @click="onReload(m)">重载</v-list-item>
-                      <v-list-item @click="onUninstall(m)">卸载</v-list-item>
-                    </v-list>
-                  </v-menu>
-                </template>
-              </v-card-item>
-            </v-card>
-          </v-col>
-        </v-row>
-      </div>
-
-      <!-- 分类分组 -->
-      <div v-for="[cat, items] in groups.cats" :key="cat" class="mb-3">
-        <div class="group-heading d-flex align-center" @click="toggleCat(cat)">
-          <v-icon :icon="isCollapsed(cat) ? 'mdi-chevron-right' : 'mdi-chevron-down'" size="small" class="mr-1" />
-          {{ cat }}
-          <v-chip size="x-small" variant="flat" class="ml-2">{{ items.length }}</v-chip>
+      <div v-for="section in sections" :key="section.key" class="mb-3">
+        <div
+          class="group-heading d-flex align-center"
+          :class="{ 'group-heading--static': !section.collapsible }"
+          @click="section.collapsible && toggleCat(section.key)"
+        >
+          <v-icon
+            v-if="section.collapsible"
+            :icon="isCollapsed(section.key) ? 'mdi-chevron-right' : 'mdi-chevron-down'"
+            size="small"
+            class="mr-1"
+          />
+          <v-icon v-else icon="mdi-pin" size="small" class="mr-1" />
+          {{ section.title }}
+          <v-chip size="x-small" variant="flat" class="ml-2">{{ section.items.length }}</v-chip>
         </div>
-        <v-row v-show="!isCollapsed(cat)">
-          <v-col v-for="m in items" :key="m._key" cols="12" md="6" xl="4">
-            <v-card variant="outlined" class="module-card app-card-hover" @click="router.push(`/modules/${m._key}`)">
+        <v-row v-show="!section.collapsible || !isCollapsed(section.key)">
+          <v-col v-for="m in section.items" :key="m._key" cols="12" md="6" xl="4">
+            <v-card variant="outlined" class="module-card app-card-hover" @click="openModule(m)">
               <v-card-item>
                 <template #prepend>
                   <v-avatar color="lightprimary" size="36" rounded="lg">
-                    <v-icon icon="mdi-cube-outline" color="primary" size="small" />
+                    <v-icon
+                      :icon="m.pinned ? 'mdi-pin' : isBuiltinModule(m) ? 'mdi-cube-outline' : 'mdi-package-variant-closed'"
+                      color="primary"
+                      size="small"
+                    />
                   </v-avatar>
                 </template>
                 <v-card-title class="text-body-1">
                   <span class="app-line-clamp-1">{{ m.name }}</span>
+                  <!-- 来源徽标：内置 / 第三方 -->
+                  <v-chip
+                    size="x-small"
+                    class="ml-1"
+                    :color="isBuiltinModule(m) ? 'default' : 'teal'"
+                    variant="tonal"
+                  >
+                    {{ isBuiltinModule(m) ? '内置' : '第三方' }}
+                  </v-chip>
+                  <v-chip v-if="m.version" size="x-small" class="ml-1" variant="text">v{{ m.version }}</v-chip>
                   <v-chip size="x-small" class="ml-1" :color="PERMISSION_COLOR[m.permission] || 'default'" variant="tonal">
                     {{ PERMISSION_LABEL[m.permission] || m.permission }}
                   </v-chip>
                   <v-chip v-if="m.supersedes?.length" size="x-small" class="ml-1" color="warning" variant="tonal">
                     接管: {{ m.supersedes.join(', ') }}
                   </v-chip>
+                  <!-- 装坏/卸载状态：红色小标 + 悬浮错误文本 -->
+                  <v-tooltip v-if="statusOf(m) === 'error'" location="top" max-width="420">
+                    <template #activator="{ props }">
+                      <v-chip v-bind="props" size="x-small" class="ml-1" color="error" variant="flat" prepend-icon="mdi-alert-circle">
+                        加载失败
+                      </v-chip>
+                    </template>
+                    <div class="text-caption">{{ m.error || '加载失败（无错误信息）' }}</div>
+                  </v-tooltip>
+                  <v-chip
+                    v-else-if="statusOf(m) === 'uninstalled'"
+                    size="x-small"
+                    class="ml-1"
+                    color="warning"
+                    variant="tonal"
+                  >
+                    已卸载
+                  </v-chip>
+                  <v-chip
+                    v-else-if="m.manifest_missing"
+                    size="x-small"
+                    class="ml-1"
+                    color="info"
+                    variant="tonal"
+                  >
+                    缺清单
+                  </v-chip>
                 </v-card-title>
-                <v-card-subtitle class="app-line-clamp-2">{{ m.description }}</v-card-subtitle>
+                <v-card-subtitle class="app-line-clamp-2">
+                  <span v-if="statusOf(m) === 'error'" class="text-error">{{ m.error || '加载失败' }}</span>
+                  <span v-else>{{ m.description }}</span>
+                </v-card-subtitle>
                 <template #append>
                   <v-switch
                     :model-value="m.enabled"
@@ -277,7 +454,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                     density="compact"
                     hide-details
                     :loading="toggling[m._key]"
-                    :disabled="toggling[m._key]"
+                    :disabled="toggling[m._key] || !isUsable(m)"
                     @click.stop
                     @update:model-value="(v: boolean | null) => onToggle(m, v)"
                   />
@@ -292,8 +469,38 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                       />
                     </template>
                     <v-list density="compact">
-                      <v-list-item @click="onReload(m)">重载</v-list-item>
-                      <v-list-item @click="onUninstall(m)">卸载</v-list-item>
+                      <v-list-item v-if="isUsable(m)" prepend-icon="mdi-refresh" @click="onReload(m)">重载</v-list-item>
+                      <!-- 内置：禁用并隐藏（软卸载）；已卸载的内置给"恢复安装" -->
+                      <template v-if="isBuiltinModule(m)">
+                        <v-list-item
+                          v-if="statusOf(m) === 'uninstalled'"
+                          prepend-icon="mdi-restore"
+                          @click="onRestore(m._key, m.name)"
+                        >
+                          恢复安装
+                        </v-list-item>
+                        <v-list-item v-else prepend-icon="mdi-eye-off-outline" @click="onHideBuiltin(m)">
+                          禁用并隐藏
+                        </v-list-item>
+                      </template>
+                      <!-- 第三方：重载 / 更新… / 删除… -->
+                      <template v-else>
+                        <v-list-item
+                          v-if="statusOf(m) === 'uninstalled'"
+                          prepend-icon="mdi-restore"
+                          @click="onRestore(m._key, m.name)"
+                        >
+                          恢复安装
+                        </v-list-item>
+                        <v-list-item prepend-icon="mdi-update" @click="openUpdateDialog(m)">更新…</v-list-item>
+                        <v-list-item
+                          prepend-icon="mdi-trash-can-outline"
+                          class="text-error"
+                          @click="onDelete(m)"
+                        >
+                          删除…
+                        </v-list-item>
+                      </template>
                     </v-list>
                   </v-menu>
                 </template>
@@ -313,6 +520,101 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         </EmptyState>
       </v-card>
     </template>
+
+    <!-- 安装 / 更新插件对话框：先预检确认，再真正安装 -->
+    <v-dialog v-model="zipDialog" max-width="640" :persistent="zipInstalling" @keydown.esc="closeZipDialog">
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon icon="mdi-package-variant" class="mr-2" color="primary" />
+          {{ zipDialogMode === 'update' ? `更新插件 ${zipTarget || ''}` : '安装插件' }}
+          <v-spacer />
+          <v-btn icon="mdi-close" variant="text" size="small" :disabled="zipInstalling" @click="closeZipDialog" />
+        </v-card-title>
+        <v-card-text>
+          <div
+            class="zip-drop"
+            :class="{ 'zip-drop--over': zipDragOver }"
+            @dragover.prevent="zipDragOver = true"
+            @dragleave.prevent="zipDragOver = false"
+            @drop.prevent="onDropZip"
+          >
+            <v-icon icon="mdi-cloud-upload-outline" size="36" color="primary" />
+            <div class="text-body-2 mt-1">拖拽 .zip 插件包到这里</div>
+            <v-btn size="small" variant="tonal" class="mt-2" @click="pickZipFile">选择文件</v-btn>
+            <div v-if="zipFile" class="text-caption mt-2">{{ zipFile.name }}</div>
+            <input ref="zipFileInput" type="file" accept=".zip" hidden @change="onPickZipFile" />
+          </div>
+
+          <v-progress-linear v-if="zipValidating" indeterminate color="primary" class="mt-3" />
+
+          <v-alert v-if="zipError" type="error" variant="tonal" density="compact" class="mt-3">
+            <div class="text-caption">{{ zipError }}</div>
+          </v-alert>
+
+          <!-- 预检结果：名称 / 版本 / 目标目录 / 是否覆盖 -->
+          <v-card v-if="zipPreview" variant="tonal" class="mt-3">
+            <v-card-text class="text-caption preview-grid">
+              <div class="preview-label">插件名称</div>
+              <div class="preview-value">{{ zipPreview.display_name || zipPreview.name }}（{{ zipPreview.name }}）</div>
+              <div class="preview-label">版本</div>
+              <div class="preview-value">v{{ zipPreview.version || '0.0.0' }}</div>
+              <div class="preview-label">安装目标</div>
+              <div class="preview-value preview-path">{{ zipPreview.target || '—' }}</div>
+              <div class="preview-label">文件数</div>
+              <div class="preview-value">{{ zipPreview.files ?? '—' }}</div>
+              <div class="preview-label">覆盖安装</div>
+              <div class="preview-value">
+                <template v-if="zipPreview.builtin_conflict">
+                  <span class="text-error">与内置模块同名（禁止覆盖）</span>
+                </template>
+                <template v-else-if="zipPreview.conflict">
+                  <span class="text-warning">是</span>
+                  <span v-if="zipPreview.existing_version">（已装 v{{ zipPreview.existing_version }}）</span>
+                </template>
+                <template v-else>否（全新安装）</template>
+              </div>
+            </v-card-text>
+          </v-card>
+
+          <v-alert v-if="zipPreview?.builtin_conflict" type="error" variant="tonal" density="compact" class="mt-3">
+            <div class="text-caption">
+              {{ zipPreview.conflict_reason || '该插件与内置模块同名，第三方插件不允许覆盖内置模块。' }}
+              请修改 module.json 的 name 后重新打包。
+            </div>
+          </v-alert>
+          <v-alert v-else-if="zipPreview?.conflict" type="warning" variant="tonal" density="compact" class="mt-3">
+            <div class="text-caption">
+              已存在同名第三方插件，确认后将<strong>覆盖安装</strong>：旧版本会备份到
+              data/module/.backup，配置与数据保留。
+            </div>
+          </v-alert>
+          <v-alert
+            v-else-if="zipDialogMode === 'update' && zipPreview && zipTarget && zipPreview.name !== zipTarget"
+            type="warning"
+            variant="tonal"
+            density="compact"
+            class="mt-3"
+          >
+            <div class="text-caption">
+              包内插件名是「{{ zipPreview.name }}」，与要更新的「{{ zipTarget }}」不一致；确认后将按包内名称安装。
+            </div>
+          </v-alert>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" :disabled="zipInstalling" @click="closeZipDialog">取消</v-btn>
+          <v-btn
+            color="primary"
+            variant="tonal"
+            :disabled="!zipFile || !zipPreview || zipValidating || zipBlocked"
+            :loading="zipInstalling"
+            @click="confirmZip"
+          >
+            {{ zipDialogMode === 'update' ? '确认更新' : zipPreview?.conflict ? '覆盖安装' : '确认安装' }}
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -326,6 +628,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   user-select: none;
 }
 
+.group-heading--static {
+  cursor: default;
+}
+
 .module-card {
   height: 100%;
   border-radius: 14px;
@@ -335,6 +641,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 .module-card :deep(.v-card-item__title) {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   min-width: 0;
   white-space: normal;
 }
@@ -342,5 +649,52 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 .module-card :deep(.v-card-item__subtitle) {
   min-height: 36px;
   line-height: 1.5;
+}
+
+.issue-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.issue-detail {
+  color: rgba(var(--v-theme-on-surface), 0.65);
+  overflow-wrap: anywhere;
+}
+
+.zip-drop {
+  border: 1px dashed rgba(var(--v-theme-on-surface), 0.25);
+  border-radius: 12px;
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.zip-drop--over {
+  border-color: rgb(var(--v-theme-primary));
+  background-color: rgba(var(--v-theme-primary), 0.06);
+}
+
+.preview-grid {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: 6px 12px;
+}
+
+.preview-label {
+  color: rgba(var(--v-theme-on-surface), 0.6);
+}
+
+.preview-value {
+  overflow-wrap: anywhere;
+}
+
+.preview-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
 }
 </style>

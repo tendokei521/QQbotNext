@@ -223,12 +223,21 @@ class BotService:
         return result
 
     def get_modules_data(self, account_id: str | None = None) -> dict[str, dict]:
-        """模块数据（WebUI 渲染所需），返回格式与原实现一致。
+        """模块数据（WebUI 渲染所需）= 已加载实例 + registry 编目条目合并。
 
-        account_id 有指定时优先取该账号的实例；未加载则回退全局(None)实例，
-        保证页面在 Bot 未连接时也能渲染模块列表。
+        - 已加载实例：沿用原字段（配置 / 权限 / schema 等）；
+        - 未加载 / 加载失败 / 软卸载的编目条目也会出现，并带
+          ``status/error/path/builtin/manifest_missing``，让前端看得见"装坏的模块"；
+        - 已加载条目 ``status="ok"``，``source`` 统一为 ``builtin|installed``；
+        - 虚拟 Agent 模块（``data["agent"]``）逻辑保持不变。
         """
         data: dict = {}
+        catalog = self._catalog_entries()
+        catalog_by_name = {
+            str(getattr(entry, "name", "")): entry
+            for entry in catalog
+            if getattr(entry, "name", None)
+        }
         for mod_name, bot_modules in self.registry.loaded_map().items():
             if not bot_modules:
                 continue
@@ -245,8 +254,16 @@ class BotService:
             if mod is None:
                 continue
 
+            entry = catalog_by_name.get(mod_name)
+            manifest = getattr(entry, "manifest", None) or {}
+            display_name = str(
+                getattr(entry, "display_name", "")
+                or manifest.get("display_name")
+                or ""
+            )
+            instance_source = getattr(mod, "source", "local")
             data[mod_name] = {
-                "name": mod.name,
+                "name": display_name or mod.name,
                 "name_sign": mod.sign,
                 "description": mod.description,
                 "enabled": mod.authority.enabled,
@@ -268,17 +285,111 @@ class BotService:
                     mod.config_schema, registry=self.resource_registry, source_module=mod_name
                 ),
                 "has_page": self.registry.module_has_page(mod_name),
-                "source": getattr(mod, "source", "local"),
-                "version": getattr(mod, "version", "") or "0.0.0",
+                # source 统一成 builtin|installed（实例旧值是 local|zip）
+                "source": _normalize_module_source(instance_source, entry),
+                "version": (
+                    str(getattr(entry, "version", "") or "")
+                    or getattr(mod, "version", "")
+                    or "0.0.0"
+                ),
                 "can_uninstall": True,
                 "provides": list(getattr(mod, "provides", ()) or ()),
                 "supersedes": list(getattr(mod, "supersedes", ()) or ()),
                 # 单一服务是声明制能力：未声明的模块，WebUI 不给开关
                 "single_service": declares_single_service(mod),
+                # ---- C3 新增：编目/加载状态（已加载通常为 ok，同名冲突要透出去） ----
+                "status": (
+                    "conflict"
+                    if str(getattr(entry, "status", "") or "") == "conflict"
+                    else "ok"
+                ),
+                "error": (
+                    str(getattr(entry, "error", "") or "")
+                    if str(getattr(entry, "status", "") or "") == "conflict"
+                    else ""
+                ),
+                "path": str(
+                    getattr(entry, "path", "")
+                    or getattr(mod, "plugin_dir", "")
+                    or ""
+                ),
+                "builtin": _entry_builtin(entry, instance_source),
+                "manifest_missing": bool(
+                    getattr(entry, "status", "") == "manifest_missing"
+                ),
             }
+        # 未加载 / 加载失败 / 软卸载的编目条目：没有实例也要出现在列表里
+        for entry in catalog:
+            entry_name = str(getattr(entry, "name", "") or "")
+            if not entry_name or entry_name in data:
+                continue
+            data[entry_name] = self._catalog_module_data(entry)
         # 虚拟 Agent 模块（框架级注入，不依赖模块目录）：即使所有模块被删也保留 LLM 界面
         data["agent"] = self._agent_module_data(account_id)
         return data
+
+    def _catalog_entries(self) -> list:
+        """读取模块编目（registry 未实现 catalog_entries() 时返回空列表）。"""
+        lister = getattr(self.registry, "catalog_entries", None)
+        if not callable(lister):
+            return []
+        try:
+            return list(lister() or [])
+        except Exception as e:  # noqa: BLE001 —— 编目失败降级为"只有已加载实例"
+            logger.warning(f"[BotService] 读取模块编目失败: {e}")
+            return []
+
+    @staticmethod
+    def _catalog_module_data(entry) -> dict:
+        """把一条未加载的编目条目渲染成前端可用的模块数据结构。"""
+        manifest = dict(getattr(entry, "manifest", None) or {})
+        entry_name = str(getattr(entry, "name", "") or "")
+        status = str(getattr(entry, "status", "ok") or "ok")
+        builtin = _entry_builtin(entry, "")
+        path = getattr(entry, "path", None)
+        return {
+            "name": str(
+                getattr(entry, "display_name", "")
+                or manifest.get("display_name")
+                or entry_name
+            ),
+            "name_sign": entry_name,
+            "description": str(manifest.get("description") or ""),
+            "enabled": False,
+            "permission": "member",
+            "account_id": None,
+            "category": str(manifest.get("category") or "未分类"),
+            "tags": [str(tag) for tag in (manifest.get("tags") or [])],
+            "order": int(manifest.get("order") or 100),
+            "hidden": bool(manifest.get("hidden", False)),
+            "pinned": bool(manifest.get("pinned", False)),
+            "permission_config": {
+                "group_mode": "blacklist",
+                "group_list": [],
+                "user_mode": "blacklist",
+                "user_list": [],
+            },
+            "config": {},
+            "config_schema": {},
+            "has_page": bool(getattr(entry, "has_page", False)),
+            "source": _normalize_module_source(
+                str(getattr(entry, "source", "") or ""), entry
+            ),
+            "version": str(
+                getattr(entry, "version", "") or manifest.get("version") or "0.0.0"
+            ),
+            "can_uninstall": not builtin,
+            "provides": [],
+            "supersedes": [],
+            "single_service": False,
+            # ---- C3 新增 ----
+            "status": status,
+            "error": str(getattr(entry, "error", "") or ""),
+            "path": str(path) if path is not None else "",
+            "builtin": builtin,
+            "manifest_missing": status == "manifest_missing",
+            "installed_at": getattr(entry, "installed_at", None),
+        }
 
     def _agent_module_data(self, account_id: str | None) -> dict:
         """框架级 LLM 模块条目：读 AgentRuntime（无运行时则用默认值）。"""
@@ -332,6 +443,55 @@ class BotService:
     def get_module_data(self, module_name: str, account_id: str | None = None) -> dict | None:
         return self.get_modules_data(account_id).get(module_name)
 
+    async def ensure_module_instances(self, module_name: str) -> int:
+        """为**所有已存在账号**补齐某模块实例，返回新增数。
+
+        用于「恢复安装」与 zip 安装后的多账号生效（修 P0-5 / P1-1）：此前恢复只加载
+        当前账号实例，其它账号会回退到别人的实例。单个账号异常只记日志，不影响其它账号。
+        """
+        try:
+            account_ids = [
+                str(b.get("id")) for b in self.config_service.get_bots() if b.get("id")
+            ]
+        except Exception as e:  # noqa: BLE001 —— 读配置失败按"无账号"处理
+            logger.warning(f"[BotService] 补齐模块 {module_name} 实例时读取账号失败: {e}")
+            return 0
+        added = 0
+        for account_id in account_ids:
+            try:
+                loaded = self.registry.loaded_map().get(module_name) or {}
+                if account_id in loaded or str(account_id) in loaded:
+                    continue
+                bot = self._find_conn(account_id)
+                if await self.registry.load_single(module_name, account_id, bot=bot):
+                    added += 1
+            except Exception as e:  # noqa: BLE001 —— 单账号失败继续处理其它账号
+                logger.warning(
+                    f"[BotService] 账号 {account_id} 补齐模块 {module_name} 实例失败: {e}"
+                )
+        if added:
+            logger.info(f"[BotService] 模块 {module_name} 已为 {added} 个账号补齐实例")
+        return added
+
+    def _find_conn(self, account_id: str):
+        """按账号 id 找连接：优先 ``gateway.get_bot``（v4 正式接口），兜底旧方法。"""
+        getter = getattr(self.gateway, "get_bot", None)
+        if callable(getter):
+            try:
+                conn = getter(account_id)
+                if conn is not None:
+                    return conn
+            except Exception as e:  # noqa: BLE001 —— 取连接失败按离线处理
+                logger.debug(f"[BotService] 账号 {account_id} 取连接失败（按离线处理）: {e}")
+        finder = getattr(self.gateway, "find_conn_by_bot_id", None)
+        if callable(finder):
+            try:
+                return finder(account_id)
+            except Exception as e:  # noqa: BLE001 —— 取连接失败按离线处理
+                logger.debug(f"[BotService] find_conn_by_bot_id({account_id}) 失败: {e}")
+                return None
+        return None
+
     async def get_bot_id(self, account_id: str) -> int | None:
         """该账号当前登录的 QQ 号（运行时信息，不是身份）。"""
         return await self.gateway.get_bot_id(account_id)
@@ -364,3 +524,31 @@ def _mask_password_config(config: dict, schema: dict) -> dict:
             if result.get(key):
                 result[key] = PASSWORD_MASK
     return result
+
+
+def _normalize_module_source(source: str, entry=None) -> str:
+    """把来源统一成前端契约的 ``builtin | installed``。
+
+    实例旧字段是 ``local | zip``；编目条目是 ``builtin | installed``。两者都兼容，
+    未知值回退到编目条目的 source（没有条目时按内置处理）。
+    """
+    raw = str(source or "").strip().lower()
+    if raw in ("builtin", "local"):
+        return "builtin"
+    if raw in ("installed", "zip"):
+        return "installed"
+    entry_source = str(getattr(entry, "source", "") or "").strip().lower()
+    if entry_source in ("builtin", "installed"):
+        return entry_source
+    return "builtin"
+
+
+def _entry_builtin(entry, instance_source: str = "") -> bool:
+    """判断模块是否为内置：编目条目优先，缺条目时按实例 source 兜底。"""
+    if entry is not None:
+        if bool(getattr(entry, "builtin", False)):
+            return True
+        entry_source = str(getattr(entry, "source", "") or "").strip().lower()
+        if entry_source:
+            return entry_source == "builtin"
+    return str(instance_source or "").strip().lower() in ("builtin", "local")
