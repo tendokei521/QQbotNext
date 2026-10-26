@@ -430,9 +430,12 @@ WS 通道会混合推送两类内容：
 | `responder_updated` | `{ "module": string, "policies": [ { "channel_id": string, "policy": string, "primary_account_id": string\|null, "fallback": string } ] }`。来源：`POST /modules/{module}/responder`。 |
 | `module_config_updated` | `{ "module": string, "bot_id": int\|null, "config": <脱敏后配置> }`。来源：`@ POST /module/{name}/config`；亦有 ConfigService `module_config` scope。 |
 | `module_authority_updated` | `{ "module": string, "bot_id": int\|null, "enabled": bool, "permission": { "group_mode", "group_list", "user_mode", "user_list" } }`。来源：`@ toggle`、`@ permission`、ConfigService `authority` scope。 |
+| `stats_updated` | `{ "count": int, "ts": int }`。来源：`StatRecorder` 落库成功 → `stats_notify.notify_stats_updated()`（推送侧 1 秒节流）。前端收到后去抖 400ms 重查 `/api/stats/query`（`views/StatsPage.vue`）。 |
 | `permission_updated` | 遗留 type；`app.py` 的 `_install_config_listener` 已不再生成，前端无订阅。 |
 
 > 前端处理入口是 `api/socket.ts` 的 `onSocketMessage(type, handler)`：各 store 自己订阅所需 type，`module_config_updated`/`module_authority_updated` 只在 `msg.bot_id === null || msg.bot_id === 当前 bot_id` 时生效，`socket_open`（重连成功）触发重拉状态与模块数据以弥补断线期间丢失的更新。
+>
+> **前端本地合成的 type**（后端不会推送）：`socket_open`（WS 打开/重连成功）、`socket_close`（WS 断开，含 `setLogMode` 主动换连接、`closeSocket` 主动关闭）。两者都不保证「晚订阅者」能收到——WS 是单例，通常由布局在应用启动时就建立，之后才挂载的页面用 `isSocketConnected()` 取当前状态做初值，再订阅上述事件跟踪后续变化（数据统计页的「实时/重连中」徽标即此用法）。
 
 ---
 

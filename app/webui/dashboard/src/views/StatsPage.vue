@@ -13,7 +13,7 @@
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { http } from '@/api/http'
-import { connectSocket, onSocketMessage } from '@/api/socket'
+import { connectSocket, isSocketConnected, onSocketMessage } from '@/api/socket'
 
 type Kind = 'llm' | 'msg_in' | 'msg_out'
 type Granularity = 'hour' | 'day' | 'week' | 'month'
@@ -148,6 +148,7 @@ const lastUpdated = ref<Date | null>(null)
 let pushTimer: number | undefined
 let offStats: (() => void) | undefined
 let offOpen: (() => void) | undefined
+let offClose: (() => void) | undefined
 const data = ref<QueryResp | null>(null)
 const facets = ref<Record<string, { value: string; events: number }[]>>({})
 
@@ -381,8 +382,10 @@ async function load(opts: { quiet?: boolean } = {}) {
 function stopLive() {
   offStats?.()
   offOpen?.()
+  offClose?.()
   offStats = undefined
   offOpen = undefined
+  offClose = undefined
   if (pushTimer !== undefined) {
     window.clearTimeout(pushTimer)
     pushTimer = undefined
@@ -393,9 +396,15 @@ function stopLive() {
 /** 订阅后端推送：一批落库可能连着推几条，去抖 400ms 只查一次。 */
 function startLive() {
   stopLive()
+  // 全局 WS 是单例，通常在布局挂载时就已连上；本页晚挂载时 socket_open 不会重放，
+  // 只监听该事件会让徽标永远停在「重连中」——先按当前连接状态同步一次。
+  liveConnected.value = isSocketConnected()
   offOpen = onSocketMessage('socket_open', () => {
     liveConnected.value = true
     load({ quiet: true })          // 断线重连后补一次
+  })
+  offClose = onSocketMessage('socket_close', () => {
+    liveConnected.value = false    // 断线：徽标回落「重连中」，交给自动重连
   })
   offStats = onSocketMessage('stats_updated', () => {
     if (document.visibilityState !== 'visible') return
