@@ -102,36 +102,45 @@ event.is_member
 
 ---
 
-## 2.5.1 单一服务模式（声明制能力）
+## 2.5.1 同群多账号：响应权策略（声明制能力）
 
-「同一群里配了多个 Bot 账号，只想让其中一个账号响应某个模块」时用单一服务模式。
-它是**声明制**能力：**不声明就等于没有这个功能**。
+同一群里配了多个 Bot 账号时，默认**每个账号各自响应**（账号级独立，互不干扰）。
+需要「同一个群里只让一个账号响应某个模块」时，用 WebUI 的**响应权策略**
+（设计见 [`multi-account-design.md`](multi-account-design.md) §6）：
 
 ```python
 from app.plugin import BaseModule
 
 class Module(BaseModule):
     name = "我的模块"
-    # 声明支持单一服务：声明后 WebUI 才会给开关，配置写入才会被接受
+    # 声明支持响应权策略（历史属性名，语义 = "参与跨账号仲裁"）
     supports_single_service = True
 ```
 
-三层门控，任一层都足以保证「未声明模块不会被误配影响」：
+四层门控（未声明模块完全不受影响）：
 
 | 层 | 行为 |
 |---|---|
-| WebUI | `/api/modules` 返回 `single_service` 字段；为 false 时**不显示**该开关 |
-| 写入 | `POST /api/webui/single-service` 只收声明模块，其余丢弃并在 `rejected` 里回报 |
-| 运行期 | `is_single_service_skipped()` 先查声明，未声明者直接放行（配置残留也不生效）|
+| WebUI | `/api/modules` 返回 `single_service` 字段；为 false 时**不显示**策略入口 |
+| 写入 | `POST /api/modules/{module}/responder` 只收声明模块，其余 403 |
+| 运行期 | 候选集合只含「该账号该模块启用 ∧ 在线 ∧ 在群 ∧ 权限通过」的账号 |
+| 迁移 | 旧 `single_service/multi_group` 自动迁成 `channel_policies`（`delegate/open`），旧行为不变 |
 
-生效条件（全部满足才跳过本账号）：同群有 ≥2 个在线账号 → 「多群管理」里给该群指定了
-服务账号 → 当前账号不是它。配置键默认取 `module_name`；虚拟模块（框架级 Agent）用
-`single_service_key` 覆写成 WebUI 存的 `"agent"`。
+策略语义（存储：`channel_policies`，按「模块 × 群」）：
 
-**该不该声明**：只有真正「按群收事件并响应」的模块才该声明（有 `@module_hook` /
-`@command` / 非空 `subscribe`）。纯 LLM 策略模块（`subscribe = ()`，如组装/输出/记忆）
-走不到权限节点，声明了也永远不生效——`tests/plugin/test_single_service_declaration.py`
-里有一条反向约束会拦住这种误声明。
+| policy | 行为 |
+|---|---|
+| `all`（默认） | 候选全部响应 |
+| `dedupe` | 候选 ≥2 时只选一个（稳定顺序：账号配置顺序） |
+| `delegate` | 固定主账号；主账号不可用时按 `fallback` 处理 |
+| `leader` | 主账号优先，掉线自动由次选接管 |
+
+`fallback=open`（默认）：主账号不可用时降级到其它候选并 WARNING 一次（功能不静默消失）；
+`fallback=closed`：本轮不响应（显式配置者的选择，UI 预览可查 `reason/degraded`）。
+
+**该不该声明**：只有真正「按群收事件并响应」的模块才该声明。纯 LLM 策略模块
+（`subscribe = ()`，如组装/输出/记忆）走不到权限节点，声明了也永远不生效——
+`tests/plugin/test_single_service_declaration.py` 里有反向约束会拦住这种误声明。
 
 ---
 

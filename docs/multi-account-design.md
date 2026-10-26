@@ -1,9 +1,15 @@
 # 多账号模块设计：作用域绑定 + 响应权仲裁
 
-> **状态**：P0/P1 实施中。本文是多账号模块层的**准一来源**（offering the target design），
+> **状态**：P0（语义闭环）+ P1-a/b（bindings 存储、channel_policies 迁移、WebUI API）已落地；
+> P1-c（前端策略卡片）进行中。本文是多账号模块层的**准一来源**（target design），
 > 与 `MODULE_DEV.md`（插件作者视角）、`ARCHITECTURE.md`（目录/分层）分工不同。
 > **范围**：账号 × 模块的配置/开关/权限归属、跨账号的群响应权仲裁、生命周期门控。
 > 不涉及：LLM Agent 内部、接入层协议、WebUI 视觉改版。
+>
+> **实现落点**（与下文对应）：纯解析 `app/domain/binding.py`；纯仲裁 `app/plugin/responder.py`；
+> 存储/迁移 `app/infrastructure/config/binding_store.py`（`ConfigService` mixin）；
+> 候选集合与决策 `app/application/responder_service.py`；策略适配 `app/application/policy_store.py`；
+> HTTP `app/webui/api/responder.py`。
 
 ---
 

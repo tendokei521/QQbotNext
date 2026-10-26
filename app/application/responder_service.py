@@ -86,6 +86,20 @@ class ResponderService:
         policy = self._policy(capability_id, channel_id)
         return elect(policy, candidates, capability_id=capability_id, channel_id=channel_id)
 
+    def preview_capability(
+        self, capability_id: str, channel_id: str | None
+    ) -> ResponderDecision:
+        """UI 预览：按当前启用/在线/在群状态算候选（不含事件级权限），返回决策。
+
+        与 :meth:`decide_module` 的区别是它没有事件，因此无法评估黑白名单/角色；
+        预览用途足够，且不允许把「预览」结果用于真实拦截。
+        """
+        if capability_id == self._agent_capability():
+            candidates = self._preview_agent_candidates(channel_id)
+        else:
+            candidates = self._preview_module_candidates(capability_id, channel_id)
+        return self.preview(capability_id, channel_id, candidates)
+
     def last_decision(self, capability_id: str, channel_id: str | None) -> dict | None:
         decision = self._last.get((capability_id, channel_id))
         return decision_as_dict(decision) if decision is not None else None
@@ -173,6 +187,42 @@ class ResponderService:
             return []
         for account_id, runtime in runtimes.items():
             if eligible(str(account_id), runtime):
+                candidates.append(str(account_id))
+        return candidates
+
+    # ---------- 预览候选（无事件，不看权限） ----------
+
+    def _preview_module_candidates(
+        self, capability_id: str, channel_id: str | None
+    ) -> list[str]:
+        if not channel_id:
+            return []
+        candidates: list[str] = []
+        for account_id in self._accounts():
+            instance = self.registry.get(capability_id, account_id)
+            if instance is None or not check_module_enabled(instance):
+                continue
+            if self._online_in_channel(account_id, channel_id):
+                candidates.append(account_id)
+        return candidates
+
+    def _preview_agent_candidates(self, channel_id: str | None) -> list[str]:
+        manager = self.agent_manager
+        if manager is None or not channel_id:
+            return []
+        try:
+            runtimes = manager.runtimes() or {}
+        except Exception as e:  # noqa: BLE001
+            self.log.debug(f"[Responder] 读取 Agent 运行时失败（预览按无候选处理）: {e}")
+            return []
+        candidates: list[str] = []
+        for account_id, runtime in runtimes.items():
+            config = getattr(runtime, "config", None)
+            if not bool(getattr(config, "enabled", True)):
+                continue
+            if not bool(getattr(runtime, "online", False)):
+                continue
+            if self._online_in_channel(str(account_id), channel_id):
                 candidates.append(str(account_id))
         return candidates
 

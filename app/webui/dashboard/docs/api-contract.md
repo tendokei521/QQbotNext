@@ -355,20 +355,40 @@
 - 请求体 JSON：`{ "module_preferences": {…} }`
 - 成功（200）：`{"status":"success","message":"模块偏好已保存"}`
 
-#### GET /webui/single-service
-- 响应：`{ "single_service": { "<module>": bool } }`（**直接对象**）
+#### GET /webui/single-service（已废弃，兼容期）
+- 响应：`{ "single_service": { "<module>": bool }, "deprecated": true }`；值由 `channel_policies` 派生（存在任一策略即为 true）。
+- 新代码请用 `GET /api/modules/{module}/responder`。
 
-#### POST /webui/single-service
+#### POST /webui/single-service（已废弃，兼容期）
 - 请求体 JSON：`{ "single_service": { "<module>": bool } }`
-- 单一服务是**声明制**能力：只有 `ModuleData.single_service === true` 的模块才被接受；
-  已加载但未声明的模块名被丢弃并回报在 `rejected`，未加载（注册表查不到）的模块原样保留。
-- 成功：`{"status":"success","message":"单一服务配置已保存","rejected":["<module>", ...]}`
+- 行为：把旧开关翻译成群响应权策略——打开时按 `multi_group.groups[*].service_bot_id` 生成
+  `delegate` 策略；关闭时清空该模块策略。仍写 `webui.single_service` 作为兼容标记，**运行时不再读它**。
+- 声明制：只有 `ModuleData.single_service === true` 的模块才被接受，其余回报在 `rejected`。
+- 成功：`{"status":"success","message":"…","rejected":[...],"deprecated":true}`
 
-#### GET /webui/multi-group
-- 响应：`{ "multi_group": { "show_all": bool, "groups": { "<gid>": { "service_bot_index": int } } } }`（**直接对象**；缺省 `{"show_all":False,"groups":{}}`）
+#### GET /modules/{module}/responder（响应权策略，正式接口）
+- 响应：`{ "module": string, "declared": bool, "groups": [ { "group_id": string, "name": string,
+  "accounts": string[], "policy": "all|dedupe|delegate|leader", "primary_account_id": string|null,
+  "fallback": "open|closed", "preview": { "candidates": string[], "responders": string[], "reason": string,
+  "degraded": bool } } ] }`
+- 未声明的模块返回 `declared:false`；模块不存在返回 404。
 
-#### POST /webui/multi-group
+#### POST /modules/{module}/responder
+- 请求体 JSON：`{ "policies": [ { "group_id": string, "policy": "all|dedupe|delegate|leader",
+  "primary_account_id": string|null, "fallback": "open|closed" } ] }`（**整值替换**该模块的全部群策略）
+- 校验：未声明模块 403；不存在的 `primary_account_id` 会被丢弃并在 `warnings` 里提示；
+  未声明的策略值退化为 `all`/`open`。
+- 成功：`{"status":"success","message":"响应权策略已保存","policies":[...],"warnings":[...]}`
+- 广播：`responder_updated`。
+
+#### GET /webui/multi-group（兼容期）
+- 响应：`{ "multi_group": { "show_all": bool, "groups": { "<gid>": { "service_bot_id": string } } } }`
+  （**直接对象**；缺省 `{"show_all":False,"groups":{}}`）
+- `service_bot_id` 是**旧字段**：仅用于兼容翻译；新策略请写 `POST /modules/{module}/responder`。
+
+#### POST /webui/multi-group（兼容期）
 - 请求体 JSON：`{ "multi_group": { "show_all": bool, "groups": {...} } }`
+- 行为：保存展示配置；对仍使用旧 `single_service` 标记的模块，顺带把 `service_bot_id` 同步成 `delegate` 策略。
 - 成功：`{"status":"success","message":"多群管理配置已保存"}`
 
 ---
@@ -405,8 +425,9 @@ WS 通道会混合推送两类内容：
 | `bot_status_updated` | `{ "bot": { "index": int, "bot_id": int\|null, "status": string, "last_error": string\|null, "login_info": object\|null } }`。来源：`BotLifecycleEvent` 监听（`app.py:_install_bot_lifecycle_listener`）。`status` 枚举同 §2.1。 |
 | `modules_reloaded` | `{ "bot_id": int\|null }`。来源：`@ /modules/reload`、Bot 生命周期 `state=="connected"` 且 `bot_id` 存在时。前端收到即静默重拉（`stores/modules.ts` 的 `load()`）。 |
 | `webui_config_updated` | `{ "config": <整个 webui_config 对象> }`。来源：ConfigService `webui` scope（`save_webui_config`）。 |
-| `single_service_updated` | `{ "single_service": { "<module>": bool } }`。随 `webui` scope 一并追加广播。 |
+| `single_service_updated` | `{ "single_service": { "<module>": bool } }`。旧兼容广播；值由 `channel_policies` 派生。 |
 | `multi_group_updated` | `{ "multi_group": { "show_all": bool, "groups": {...} } }`。随 `webui` scope 一并追加广播。 |
+| `responder_updated` | `{ "module": string, "policies": [ { "channel_id": string, "policy": string, "primary_account_id": string\|null, "fallback": string } ] }`。来源：`POST /modules/{module}/responder`。 |
 | `module_config_updated` | `{ "module": string, "bot_id": int\|null, "config": <脱敏后配置> }`。来源：`@ POST /module/{name}/config`；亦有 ConfigService `module_config` scope。 |
 | `module_authority_updated` | `{ "module": string, "bot_id": int\|null, "enabled": bool, "permission": { "group_mode", "group_list", "user_mode", "user_list" } }`。来源：`@ toggle`、`@ permission`、ConfigService `authority` scope。 |
 | `permission_updated` | 遗留 type；`app.py` 的 `_install_config_listener` 已不再生成，前端无订阅。 |

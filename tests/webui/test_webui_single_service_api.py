@@ -91,9 +91,10 @@ def test_unloaded_module_is_preserved(client, config_service):
 
 
 def test_off_switch_also_filtered(client, config_service):
-    """关掉也一样要过声明检查：未声明模块的键不该被写进配置。"""
+    """关掉也一样要过声明检查：未声明模块的键不该被写进配置（关 = 清空策略/标记）。"""
     resp = client.post("/api/webui/single-service",
                        json={"single_service": {"plain_mod": False, "declared_mod": False}})
 
     assert resp.json()["rejected"] == ["plain_mod"]
-    assert config_service.get_webui_config()["single_service"] == {"declared_mod": False}
+    assert config_service.get_webui_config()["single_service"] == {}
+    assert config_service.list_channel_policies("declared_mod") == []

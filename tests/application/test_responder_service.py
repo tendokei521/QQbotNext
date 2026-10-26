@@ -367,6 +367,24 @@ def test_preview_does_not_record_or_warn():
     assert service.last_decision("demo", "10") is None
 
 
+def test_preview_capability_computes_candidates_without_event():
+    service, _log = _service(
+        instances={
+            ("demo", "acc1"): _Module(),
+            ("demo", "acc2"): _Module(enabled=False),
+        },
+        conns={"acc1": _Conn(), "acc2": _Conn(), "acc3": _Conn()},
+        policies={("demo", "10"): _policy(POLICY_DELEGATE, primary="acc1")},
+    )
+    service.config_service = _ConfigService(["acc1", "acc2", "acc3"])
+
+    decision = service.preview_capability("demo", "10")
+
+    assert decision.candidates == ("acc1",)
+    assert decision.responders == ("acc1",)
+    assert decision.reason == "primary"
+
+
 def test_last_decision_exposes_reason():
     service, _log = _service(
         instances={("demo", "acc1"): _Module(), ("demo", "acc2"): _Module()},

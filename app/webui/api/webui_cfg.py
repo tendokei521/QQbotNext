@@ -126,10 +126,40 @@ async def save_module_preferences(request: Request, cfg_service=Depends(get_conf
     return _ok("模块偏好已保存")
 
 
+def _legacy_multi_group_policies(config: dict, capability_id: str) -> list[dict]:
+    """从旧 ``multi_group.groups[*].service_bot_id`` 生成 delegate 策略（兼容期）。"""
+    groups = ((config or {}).get("multi_group") or {}).get("groups") or {}
+    policies: list[dict] = []
+    for channel_id, group_config in groups.items():
+        primary = (group_config or {}).get("service_bot_id")
+        if primary in (None, ""):
+            continue
+        policies.append({
+            "group_id": str(channel_id),
+            "policy": "delegate",
+            "primary_account_id": str(primary),
+            "fallback": "open",
+        })
+    return policies
+
+
+def _declared_modules(config_service) -> set[str]:
+    """旧配置里开启过单一服务的模块（兼容期标记，真实策略在 channel_policies）。"""
+    try:
+        single = (config_service.get_webui_config().get("single_service") or {})
+    except Exception:  # noqa: BLE001
+        return set()
+    return {str(module) for module, enabled in single.items() if enabled}
+
+
 @router.get("/webui/single-service")
 async def get_single_service(cfg_service=Depends(get_config_service)):
-    cfg = cfg_service.get_webui_config()
-    return JSONResponse(content={"single_service": cfg.get("single_service", {})})
+    """已废弃：请用 ``/api/modules/{module}/responder``。返回值由 channel_policies 派生。"""
+    capabilities = {row["capability_id"] for row in cfg_service.list_channel_policies()}
+    return JSONResponse(content={
+        "single_service": {cap: True for cap in sorted(capabilities)},
+        "deprecated": True,
+    })
 
 
 @router.post("/webui/single-service")
@@ -138,20 +168,22 @@ async def save_single_service(
     cfg_service=Depends(get_config_service),
     registry=Depends(get_module_registry),
 ):
-    """保存单一服务开关（整值替换）。
+    """已废弃的兼容入口：把旧「单一服务开关」翻译成 channel_policies。
 
-    单一服务是**声明制**能力：只有 `BaseModule.supports_single_service = True` 的模块
-    才接受写入，其余模块被丢弃并在 `rejected` 里回报（前端据此提示）。已加载但未声明
-    的模块若历史配置里残留 true，会在本次保存时被清掉；未加载（注册表里查不到）的模块
-    原样保留，避免热重载/加载失败时误删配置。
+    - 打开：按当前「多群管理」里的服务账号生成 delegate 策略（旧 UI 的两步流程仍可用）；
+    - 关闭：清空该模块的群策略（回到 all）；
+    - 仍写入 ``webui.single_service`` 只作为**兼容标记**，运行时不再读它。
+
+    新代码请用 ``POST /api/modules/{module}/responder``。
     """
     try:
         data = await request.json()
-    except Exception:
+    except Exception:  # noqa: BLE001
         data = {}
     incoming = (data or {}).get("single_service", {}) or {}
 
-    config = cfg_service.get_webui_config()
+    current = cfg_service.get_webui_config()
+    legacy_marker = dict(current.get("single_service") or {})
     accepted: dict[str, bool] = {}
     rejected: list[str] = []
     for module_name, enabled in incoming.items():
@@ -160,10 +192,22 @@ async def save_single_service(
             accepted[str(module_name)] = bool(enabled)
         else:
             rejected.append(str(module_name))
+            continue
+        if enabled:
+            legacy_marker[str(module_name)] = True
+            policies = _legacy_multi_group_policies(current, str(module_name))
+        else:
+            legacy_marker.pop(str(module_name), None)
+            policies = []
+        await cfg_service.save_channel_policies(str(module_name), policies)
 
-    config["single_service"] = accepted
-    await cfg_service.save_webui_config(config)
-    return _ok("单一服务配置已保存", rejected=rejected)
+    current["single_service"] = legacy_marker
+    await cfg_service.save_webui_config(current)
+    return _ok(
+        "单一服务配置已保存（兼容入口，等价于群响应权策略）",
+        rejected=rejected,
+        deprecated=True,
+    )
 
 
 @router.get("/webui/multi-group")
@@ -176,9 +220,14 @@ async def get_multi_group(cfg_service=Depends(get_config_service)):
 async def save_multi_group(request: Request, cfg_service=Depends(get_config_service)):
     try:
         data = await request.json()
-    except Exception:
+    except Exception:  # noqa: BLE001
         data = {}
     config = cfg_service.get_webui_config()
     config["multi_group"] = data.get("multi_group", {"show_all": False, "groups": {}})
     await cfg_service.save_webui_config(config)
+    # 兼容期：旧 UI 通过这里修改服务账号；只同步「仍用旧开关」的模块，避免覆盖新策略
+    for capability_id in _declared_modules(cfg_service):
+        await cfg_service.save_channel_policies(
+            capability_id, _legacy_multi_group_policies(config, capability_id)
+        )
     return _ok("多群管理配置已保存")

@@ -154,3 +154,9 @@ def get_gateway(request: Request):
     from app.infrastructure.onebot.gateway import OneBotGateway
 
     return get_service(request, OneBotGateway)
+
+
+def get_responder_service(request: Request):
+    from app.application.responder_service import ResponderService
+
+    return get_service(request, ResponderService)
