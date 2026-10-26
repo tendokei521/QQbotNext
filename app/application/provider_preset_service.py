@@ -10,7 +10,7 @@ import copy
 import time
 import uuid
 
-from app.agent.providers import get_provider
+from app.agent.providers import get_provider, normalize_provider_type
 from app.agent.providers.base import format_llm_error
 from app.application import provider_preset_catalog
 from app.core.logger import logger
@@ -34,6 +34,16 @@ BASE_PROVIDER_TEMPLATE: dict = {
         "extra_body": {},
     },
 }
+
+#: 预设下还没有模型实例时，「测试连接」按 API 格式挑的兜底模型。
+#: 不能一律用 deepseek-chat：拿它去问 Anthropic / Gemini 只会得到 404，
+#: 明明 Key 是对的却报「连接失败」。
+_DEFAULT_TEST_MODELS = {
+    "anthropic": "claude-haiku-4-5",
+    "gemini": "gemini-2.5-flash",
+    "openai-responses": "gpt-5.2",
+}
+_DEFAULT_TEST_MODEL = "deepseek-chat"
 
 
 def _normalize_config(config: dict, old: dict | None = None) -> dict:
@@ -94,10 +104,16 @@ class ProviderPresetService:
     # ── 内置预设（模板，抄自 DSH 的 provider catalog）──────
     @staticmethod
     def _same_connection(preset: dict, provider: str, api_base: str) -> bool:
-        """判断已有预设是否就是「同一家服务商的同一个端点」。"""
+        """判断已有预设是否就是「同一家服务商的同一个端点」。
+
+        比较**归一化后**的 provider 类型：老预设里可能存着 ``deepseek`` /
+        ``ollama`` 这类别名（都落到 openai 兼容适配器），直接比字符串会把
+        「已经有一条同端点预设」误判成不存在，再导入就多出一条重复记录。
+        """
         config = preset.get("config", {}) or {}
         return (
-            str(preset.get("provider", "")) == str(provider)
+            normalize_provider_type(str(preset.get("provider", "")))
+            == normalize_provider_type(str(provider))
             and str(config.get("api_base", "") or "").rstrip("/") == api_base
         )
 
@@ -286,7 +302,11 @@ class ProviderPresetService:
         # 优先使用该预设下的第一个启用模型，避免测试时模型名不匹配
         models = self.config_service.list_provider_models(preset_id)
         first_model = next((m for m in models if m.get("enabled")), None)
-        model_name = model or (first_model.get("model") if first_model else "deepseek-chat")
+        provider_type = normalize_provider_type(str(preset.get("provider", "openai")))
+        # 预设下还没有模型实例时，兜底模型必须按 API 格式选：
+        # 拿 deepseek-chat 去问 Anthropic 只会得到 404，明明 Key 是对的却报"连接失败"。
+        fallback_model = _DEFAULT_TEST_MODELS.get(provider_type, _DEFAULT_TEST_MODEL)
+        model_name = model or (first_model.get("model") if first_model else "") or fallback_model
         if first_model:
             config.update(first_model.get("config", {}) or {})
         provider = get_provider(config)

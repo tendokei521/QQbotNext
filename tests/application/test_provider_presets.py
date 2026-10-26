@@ -119,6 +119,15 @@ def test_list_builtin_presets_marks_nothing_installed(preset_service):
     assert all(p["installed_preset_id"] == "" for p in presets)
 
 
+def test_list_builtin_presets_shows_domestic_first(preset_service):
+    """界面分组顺序：国内在前、国外在后（同一类内保持目录原始顺序）。"""
+    presets = preset_service.list_builtin_presets()
+    order = {"国内": 0, "国外": 1}
+    ranks = [order[p["category"]] for p in presets]
+    assert ranks == sorted(ranks)
+    assert presets[0]["category"] == "国内"
+
+
 async def test_import_builtin_preset_creates_then_dedupes(preset_service):
     first = await preset_service.import_builtin_preset("opencode-go")
     assert first["created"] is True
@@ -154,6 +163,20 @@ async def test_import_builtin_preset_matches_existing_manual_preset(preset_servi
     assert len(preset_service.list_presets()) == 1
 
 
+async def test_import_builtin_preset_matches_alias_provider(preset_service):
+    """老预设用 ``deepseek`` 这类别名时，也要认出「同端点已存在」。"""
+    manual = await preset_service.create_preset({
+        "name": "老写法 deepseek",
+        "provider": "deepseek",
+        "config": {"api_base": "https://api.deepseek.com", "api_key": "sk-test"},
+    })
+
+    result = await preset_service.import_builtin_preset("deepseek")
+    assert result["created"] is False
+    assert result["preset"]["id"] == manual["id"]
+    assert len(preset_service.list_presets()) == 1
+
+
 async def test_import_builtin_preset_accepts_key_and_custom_name(preset_service):
     result = await preset_service.import_builtin_preset(
         "deepseek", api_key="sk-new", name="DeepSeek 备用"
@@ -168,3 +191,43 @@ async def test_import_builtin_preset_accepts_key_and_custom_name(preset_service)
 async def test_import_unknown_builtin_preset_raises(preset_service):
     with pytest.raises(ValueError):
         await preset_service.import_builtin_preset("no-such-provider")
+
+
+@pytest.mark.parametrize(
+    ("provider", "expected_model"),
+    [
+        ("openai", "deepseek-chat"),
+        ("anthropic", "claude-haiku-4-5"),
+        ("gemini", "gemini-2.5-flash"),
+        ("openai-responses", "gpt-5.2"),
+    ],
+)
+async def test_preset_test_uses_format_aware_default_model(
+    monkeypatch, preset_service, provider, expected_model
+):
+    """预设下没有模型实例时，测连接不能拿 deepseek-chat 去问 Anthropic/Gemini。"""
+    from types import SimpleNamespace
+
+    created = await preset_service.create_preset({
+        "name": f"测试-{provider}",
+        "provider": provider,
+        "config": {"api_base": "https://example.com", "api_key": "k"},
+    })
+    seen: dict = {}
+
+    class _FakeProvider:
+        async def get_models(self):
+            return []
+
+        async def chat(self, messages, **kwargs):
+            seen["model"] = kwargs.get("model")
+            return SimpleNamespace(ok=True, raw={}, text="ok")
+
+    monkeypatch.setattr(
+        "app.application.provider_preset_service.get_provider",
+        lambda config: _FakeProvider(),
+    )
+
+    result = await preset_service.test_preset(created["id"])
+    assert result["ok"] is True
+    assert seen["model"] == expected_model

@@ -27,6 +27,9 @@ OPENAI = "openai"
 ANTHROPIC = "anthropic"
 GEMINI = "gemini"
 
+#: 目录分组的展示顺序：国内在前，国外在后（同类内保持目录里的原始顺序）
+CATEGORY_ORDER: tuple[str, ...] = ("国内", "国外")
+
 #: OpenCode 的 OpenAI 兼容端点要求带会话头；本项目没有请求级 session id，
 #: 用固定值让上游把请求归到同一个「会话」。
 _OPENCODE_HEADERS = {"x-opencode-session": "qqbotnext6"}
@@ -306,8 +309,15 @@ BUILTIN_PROVIDER_PRESETS: tuple[dict, ...] = (
 
 
 def list_builtin_presets() -> list[dict]:
-    """返回内置预设模板列表（深拷贝，调用方可随意改）。"""
-    return copy.deepcopy(list(BUILTIN_PROVIDER_PRESETS))
+    """返回内置预设模板列表（深拷贝，调用方可随意改）。
+
+    按 :data:`CATEGORY_ORDER` 排序后再给前端：源文件里 OpenCode 排在前面
+    （它当初独一档），但界面上「国内」应该先出现；``sorted`` 是稳定排序，
+    同一类里的先后顺序不变。
+    """
+    order = {name: index for index, name in enumerate(CATEGORY_ORDER)}
+    presets = copy.deepcopy(list(BUILTIN_PROVIDER_PRESETS))
+    return sorted(presets, key=lambda entry: order.get(entry.get("category", ""), len(order)))
 
 
 def get_builtin_preset(key: str) -> dict | None:
