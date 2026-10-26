@@ -92,6 +92,27 @@ def test_output_feature_rejects_owner_without_respond():
     assert runtime.output is None
 
 
+def test_rejected_takeover_does_not_leave_a_lease():
+    """接管被拒（缺方法）时不能记租约：否则状态页显示"已被接管"，运行时却没换。"""
+    runtime = SimpleNamespace(bot_id="1", output=None, assembler="default")
+    registry = _registry(runtime)
+
+    got = registry.suppress("output", _Owner("坏的"), "1")
+
+    assert got == {}
+    assert registry.is_suppressed("output", "1") is False
+    assert runtime.output is None
+
+
+def test_takeover_on_unassembled_runtime_is_refused():
+    registry = _registry(runtime=None)
+
+    got = registry.suppress("assembly", _Owner("插件"), "9")
+
+    assert got == {}
+    assert registry.is_suppressed("assembly", "9") is False
+
+
 def test_assembly_feature_swaps_and_restores():
     runtime = SimpleNamespace(bot_id="1", assembler="default")
     registry = _registry(runtime)

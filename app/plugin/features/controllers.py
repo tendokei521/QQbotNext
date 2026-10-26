@@ -168,16 +168,24 @@ class RuntimeSlotFeatureController(_RuntimeAccess, FeatureController):
         )
         return {}
 
-    def suppress_with_owner(self, bot_id: Any, owner: Any) -> dict:
+    def suppress_with_owner(self, bot_id: Any, owner: Any) -> dict | None:
+        """把槽位换成接管者；**拒绝接管时返回 None**（`{}` 是"接下了但没有快照"）。
+
+        拒绝的原因（没有运行时 / 接管者缺方法）必须让 `FeatureRegistry` 知道——
+        否则会记一条"已接管"的租约，但运行时属性根本没换，状态与实际不一致。
+        """
         runtime = self.runtime(bot_id)
         if runtime is None:
-            return {}
+            logger.warning(
+                f"[Feature] {self._owner_label(owner)} 声明接管{self.label}但运行时尚未装配，已忽略"
+            )
+            return None
         if not self._usable(owner):
             logger.warning(
                 f"[Feature] {self._owner_label(owner)} 声明接管{self.label}但缺少 "
                 f"{'/'.join(self.require_methods)}()，已忽略"
             )
-            return {}
+            return None
         snapshot = {self.attr: getattr(runtime, self.attr, None)}
         setattr(runtime, self.attr, owner)
         logger.info(f"[Feature] {self.label} 已由 {self._owner_label(owner)} 接管 ({bot_id})")

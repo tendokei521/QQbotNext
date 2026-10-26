@@ -82,6 +82,12 @@ class FeatureRegistry:
                   for lease in leases]
         if not leases:
             snapshot = controller.suppress_with_owner(bot_id, owner)
+            if snapshot is None:
+                # 控制器明确拒绝（缺方法 / 运行时没装配）：不记租约、不打印"已接管"，
+                # 否则状态显示与运行时截面会长期不一致。
+                owner_label = getattr(owner, "name", getattr(owner, "module_name", str(owner)))
+                logger.warning(f"[Feature] {controller.label} 接管被拒绝（{owner_label}），未建立租约")
+                return {}
         else:
             # 已处于被接管状态：新租约不需要再次 suppress，只需记录占有者；
             # 生效的仍是**第一个**租约持有者（多租约「先到先得」语义）。
