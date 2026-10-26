@@ -258,6 +258,20 @@ def format_llm_error(e: Exception, fallback: str = "请求失败") -> str:
     return f"[{code}] {msg}"
 
 
+class ProviderRequestError(Exception):
+    """Provider 请求失败（HTTP / 协议层）：**携带状态码**，供失败分类器精确定级。
+
+    适配器不得把这类错误吞成「空回复」：否则回退层只能看到零产出，会把
+    「400 余额不足 / 404 模型不存在」误判成 `transient 空回复（无计费）` 并原样重发一次，
+    既多烧一遍全量上下文，又把真因从重试日志里抹掉。
+    """
+
+    def __init__(self, message: str = "", *, status_code: int | None = None, code: str = "") -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.code = code or (f"HTTP {status_code}" if status_code else "ERR")
+
+
 def build_extra_headers(config: dict) -> dict:
     """从 Provider 预设配置中提取自定义请求头（headers / extra_headers）。"""
     raw = (config or {}).get("headers") or (config or {}).get("extra_headers") or {}

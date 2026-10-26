@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from app.agent.providers import PROVIDERS, chat_with_fallback, iter_stream_with_fallback
 from app.agent.providers.base import BaseProvider, LLMResponse, StreamEvent
 from app.agent.providers.policy import TurnBudget, classify_error_text, classify_response
@@ -198,7 +200,8 @@ async def test_retry_after_header_is_honoured(monkeypatch):
         {"api_key": "sk-x", "model": "m", "retry_attempts": 2}
     )
 
-    assert await provider._request({"model": "m"}, 10) is None
+    with pytest.raises(openai_compat._RetryableError):
+        await provider._request({"model": "m"}, 10)
     assert attempts["n"] == 2, "retry_attempts=2 表示最多 2 次请求"
     assert sleeps == [7.5], f"应按 Retry-After 退避，实际 {sleeps}"
 
@@ -235,7 +238,8 @@ async def test_backoff_falls_back_to_exponential_without_header(monkeypatch):
     monkeypatch.setattr(openai_compat.OpenAICompatProvider, "_post", _boom)
 
     provider = openai_compat.OpenAICompatProvider({"api_key": "k", "retry_attempts": 3})
-    assert await provider._request({"model": "m"}, 10) is None
+    with pytest.raises(openai_compat._RetryableError):
+        await provider._request({"model": "m"}, 10)
 
     assert sleeps == [1, 2], f"应指数退避 1s→2s，实际 {sleeps}"
 

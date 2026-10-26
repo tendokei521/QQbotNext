@@ -14,7 +14,14 @@ from typing import Any
 import aiohttp
 
 from app.agent import logger
-from app.agent.providers.base import BaseProvider, LLMResponse, StreamEvent, format_llm_error, merge_usage
+from app.agent.providers.base import (
+    BaseProvider,
+    LLMResponse,
+    ProviderRequestError,
+    StreamEvent,
+    format_llm_error,
+    merge_usage,
+)
 
 _DEFAULT_BASE = "https://api.anthropic.com"
 _API_VERSION = "2023-06-01"
@@ -177,7 +184,7 @@ class AnthropicProvider(BaseProvider):
         anth_tools = _to_anthropic_tools(tools)
 
         if not self.api_key:
-            return LLMResponse(text="", raw=None)
+            raise ProviderRequestError("API 密钥未配置", code="NO-API-KEY")
 
         payload: dict = {
             "model": model,
@@ -203,11 +210,15 @@ class AnthropicProvider(BaseProvider):
                         logger.add_info("Anthropic").error(
                             f"Anthropic 请求失败 HTTP {resp.status}: {body}"
                         )
-                        return LLMResponse(text="", raw=None)
+                        raise ProviderRequestError(
+                            f"HTTP {resp.status}: {body}", status_code=resp.status
+                        )
                     data = await resp.json()
+        except ProviderRequestError:
+            raise
         except Exception as e:
             logger.add_info("Anthropic").error(f"Anthropic 请求异常: {format_llm_error(e)}")
-            return LLMResponse(text="", raw=None)
+            raise
 
         usage: dict = {}
         merge_usage(usage, data.get("usage", {}) or {})

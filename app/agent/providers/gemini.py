@@ -17,7 +17,13 @@ import re
 import aiohttp
 
 from app.agent import logger
-from app.agent.providers.base import BaseProvider, LLMResponse, StreamEvent, format_llm_error
+from app.agent.providers.base import (
+    BaseProvider,
+    LLMResponse,
+    ProviderRequestError,
+    StreamEvent,
+    format_llm_error,
+)
 
 _DEFAULT_BASE = "https://generativelanguage.googleapis.com/v1beta"
 _DATA_URL_RE = re.compile(r"^data:image/([a-z0-9.+-]+);base64,(.+)$", re.IGNORECASE | re.DOTALL)
@@ -200,7 +206,7 @@ class GeminiProvider(BaseProvider):
         gemini_tools = _to_gemini_tools(tools)
 
         if not self.api_key:
-            return LLMResponse(text="", raw=None)
+            raise ProviderRequestError("API 密钥未配置", code="NO-API-KEY")
 
         payload: dict = {
             "contents": contents,
@@ -227,11 +233,15 @@ class GeminiProvider(BaseProvider):
                         logger.add_info("Gemini").error(
                             f"Gemini 请求失败 HTTP {resp.status}: {body}"
                         )
-                        return LLMResponse(text="", raw=None)
+                        raise ProviderRequestError(
+                            f"HTTP {resp.status}: {body}", status_code=resp.status
+                        )
                     data = await resp.json()
+        except ProviderRequestError:
+            raise
         except Exception as e:
             logger.add_info("Gemini").error(f"Gemini 请求异常: {format_llm_error(e)}")
-            return LLMResponse(text="", raw=None)
+            raise
 
         usage = _normalize_usage(data.get("usageMetadata", {}) or {})
         candidates = data.get("candidates", []) or []

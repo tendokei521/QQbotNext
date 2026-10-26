@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from typing import Callable
 
 import aiohttp
@@ -19,6 +20,7 @@ from app.agent import logger
 from app.agent.providers.base import (
     BaseProvider,
     LLMResponse,
+    ProviderRequestError,
     StreamEvent,
     build_extra_body,
     build_extra_headers,
@@ -27,16 +29,19 @@ from app.agent.providers.base import (
 
 RETRYABLE_STATUS = {408, 409, 429, 500, 502, 503, 504, 529}
 
+#: 已经是「版本化基地址」的路径后缀：``/v1``、``/v4``、``/v1beta`` 等。
+#: 这类地址（如 Z.AI 的 ``.../coding/paas/v4``）不该再补一层 ``/v1``，
+#: 否则会拼成 ``/v4/v1/chat/completions``。
+_VERSIONED_BASE_RE = re.compile(r"/v\d+[a-z]*$")
 
-class _LLMError(Exception):
-    """LLM 请求错误基类，携带错误码（写入日志 / StreamEvent.error）。"""
+
+class _LLMError(ProviderRequestError):
+    """LLM 请求错误基类，携带错误码与 HTTP 状态码（写入日志 / StreamEvent.error / 失败分类）。"""
 
     code = "ERR"
 
-    def __init__(self, message: str = "", code: str | None = None):
-        super().__init__(message)
-        if code:
-            self.code = code
+    def __init__(self, message: str = "", code: str | None = None, status_code: int | None = None):
+        super().__init__(message, status_code=status_code, code=code or "")
 
 
 class _FatalError(_LLMError):
@@ -54,8 +59,14 @@ class _RetryableError(_LLMError):
     用 1s/2s/4s 去撞同一道限流墙。
     """
 
-    def __init__(self, message: str = "", code: str | None = None, retry_after: float | None = None):
-        super().__init__(message, code)
+    def __init__(
+        self,
+        message: str = "",
+        code: str | None = None,
+        retry_after: float | None = None,
+        status_code: int | None = None,
+    ):
+        super().__init__(message, code, status_code)
         self.retry_after = retry_after
 
 
@@ -169,16 +180,17 @@ class OpenAICompatProvider(BaseProvider):
     def _normalize_base(self) -> str:
         """把 api_base 归一化为“可用于拼 /models 或 /chat/completions 的基地址”。
 
-        支持三种填法：
+        支持四种填法：
         - 默认端点：https://api.example.com           -> https://api.example.com/v1
         - v1 端点：  https://api.example.com/v1        -> https://api.example.com/v1
+        - 版本化端点：https://api.z.ai/.../v4          -> 原样保留（不再补 /v1）
         - 完整端点：https://api.example.com/v1/chat/completions
                                                     -> https://api.example.com/v1
         """
         base = self.api_base.rstrip("/")
         if base.endswith("/chat/completions"):
             base = base[: -len("/chat/completions")].rstrip("/")
-        if not base.endswith("/v1"):
+        if not _VERSIONED_BASE_RE.search(base):
             base += "/v1"
         return base
 
@@ -226,14 +238,23 @@ class OpenAICompatProvider(BaseProvider):
                 if resp.status != 200:
                     body = await resp.text()
                     if resp.status in (401, 403):
-                        raise _AuthError(f"HTTP {resp.status}: {body}", code=f"HTTP {resp.status}")
+                        raise _AuthError(
+                            f"HTTP {resp.status}: {body}",
+                            code=f"HTTP {resp.status}",
+                            status_code=resp.status,
+                        )
                     if resp.status in RETRYABLE_STATUS:
                         raise _RetryableError(
                             f"HTTP {resp.status}: {body}",
                             code=f"HTTP {resp.status}",
                             retry_after=_retry_after_of(resp),
+                            status_code=resp.status,
                         )
-                    raise _FatalError(f"HTTP {resp.status}: {body}", code=f"HTTP {resp.status}")
+                    raise _FatalError(
+                        f"HTTP {resp.status}: {body}",
+                        code=f"HTTP {resp.status}",
+                        status_code=resp.status,
+                    )
                 return await resp.json()
 
     async def _stream_once(self, api_key: str, payload: dict, timeout: int):
@@ -251,14 +272,23 @@ class OpenAICompatProvider(BaseProvider):
                 if resp.status != 200:
                     body = await resp.text()
                     if resp.status in (401, 403):
-                        raise _AuthError(f"HTTP {resp.status}: {body}", code=f"HTTP {resp.status}")
+                        raise _AuthError(
+                            f"HTTP {resp.status}: {body}",
+                            code=f"HTTP {resp.status}",
+                            status_code=resp.status,
+                        )
                     if resp.status in RETRYABLE_STATUS:
                         raise _RetryableError(
                             f"HTTP {resp.status}: {body}",
                             code=f"HTTP {resp.status}",
                             retry_after=_retry_after_of(resp),
+                            status_code=resp.status,
                         )
-                    raise _FatalError(f"HTTP {resp.status}: {body}", code=f"HTTP {resp.status}")
+                    raise _FatalError(
+                        f"HTTP {resp.status}: {body}",
+                        code=f"HTTP {resp.status}",
+                        status_code=resp.status,
+                    )
                 dropped = 0
                 while True:
                     raw_line = await resp.content.readline()
@@ -284,15 +314,23 @@ class OpenAICompatProvider(BaseProvider):
                         f"流式响应有 {dropped} 个 SSE 数据块无法解析（上游报错或连接被截断），已丢弃"
                     )
 
-    async def _request(self, payload: dict, timeout: int) -> dict | None:
-        """带重试的请求。认证失败自动轮换 key；最终失败返回 None。"""
+    async def _request(self, payload: dict, timeout: int) -> dict:
+        """带重试的请求。
+
+        失败时**抛出最后一个异常**（而不是返回 None）：回退层要靠它区分
+        「400 余额不足（确定性）」和「429 限流（瞬态）」。返回 None 会让错误在
+        适配器层消失，外层只看到"空回复"并原样重试一次（旧缺陷）。
+        认证失败自动轮换 key；重试耗尽后同样抛出。
+        """
         last_error = ""
+        last_exc: Exception | None = None
         for attempt in range(self.max_retries):
             key = self.api_keys[attempt % len(self.api_keys)]
             try:
                 return await self._post(key, payload, timeout)
             except _AuthError as e:
                 last_error = format_llm_error(e)
+                last_exc = e
                 if attempt < self.max_retries - 1:
                     logger.add_info("Api").warning(
                         f"API key {attempt % len(self.api_keys) + 1} 认证失败，轮换下一个: {last_error}"
@@ -300,12 +338,13 @@ class OpenAICompatProvider(BaseProvider):
                     await asyncio.sleep(0.5)
                 else:
                     logger.add_info("Api").error(f"所有 API key 认证均失败: {last_error}")
-                    return None
             except _FatalError as e:
+                # 确定性错误：不重试、不换 key，直接把真因交给回退层分类
                 logger.add_info("Api").error(f"API 不可恢复错误: {format_llm_error(e)}")
-                return None
+                raise
             except Exception as e:
                 last_error = format_llm_error(e)
+                last_exc = e
                 if attempt < self.max_retries - 1:
                     # 上游给了 Retry-After 就听它的；没有才用指数退避
                     delay = getattr(e, "retry_after", None) or (2 ** attempt)
@@ -314,7 +353,9 @@ class OpenAICompatProvider(BaseProvider):
                     )
                     await asyncio.sleep(delay)
         logger.add_info("Api").error(f"API 请求最终失败: {last_error}")
-        return None
+        if last_exc is not None:
+            raise last_exc
+        raise _LLMError(last_error or "API 请求最终失败")
 
     # ---------- 响应解析 ----------
     def _to_response(
@@ -385,8 +426,6 @@ class OpenAICompatProvider(BaseProvider):
         payload.update(self._extra_body())
 
         result = await self._request(payload, timeout)
-        if result is None:
-            return LLMResponse(text="", raw=None)
         return self._to_response(result)
 
     async def chat_stream(

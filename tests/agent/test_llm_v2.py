@@ -1,8 +1,12 @@
 """llm_chat_v2 重构测试：prompt / provider / 会话-对话分离。"""
 
+import pytest
+
 from app.agent.assembly.prompt import build_messages
 from app.agent.providers import get_provider
+from app.agent.providers.base import ProviderRequestError
 from app.agent.providers.openai_compat import _split_keys
+from app.agent.providers.policy import FailureKind, classify_exception
 from app.agent.session import manager as session_mod
 
 # ---------- prompt ----------
@@ -53,10 +57,15 @@ def test_get_provider_unknown_type_falls_back():
     assert isinstance(p, BaseProvider)
 
 
-async def test_provider_chat_without_key_returns_empty():
-    p = get_provider({})  # 无 key → 立即失败，返回空响应（不发网络请求）
-    resp = await p.chat([{"role": "user", "content": "hi"}])
-    assert resp.ok is False
+async def test_provider_chat_without_key_raises_deterministic_error():
+    """无 key = 确定性配置错误：必须抛给回退层，不能伪装成「空回复」触发重试。"""
+    p = get_provider({})
+    with pytest.raises(ProviderRequestError) as caught:
+        await p.chat([{"role": "user", "content": "hi"}])
+
+    failure = classify_exception(caught.value)
+    assert failure.kind == FailureKind.DETERMINISTIC
+    assert failure.retry_same is False
 
 
 async def test_provider_tool_loop(monkeypatch):
@@ -210,3 +219,15 @@ def test_provider_endpoint_normalization():
 
     p5 = OpenAICompatProvider({"api_key": "k", "api_base": "https://opencode.ai/zen/go/v1/chat/completions"})
     assert p5._endpoint() == "https://opencode.ai/zen/go/v1/chat/completions"
+
+    # 版本化基地址（Z.AI / bigmodel 的 .../paas/v4）不该再补一层 /v1
+    p6 = OpenAICompatProvider({"api_key": "k", "api_base": "https://api.z.ai/api/coding/paas/v4"})
+    assert p6._endpoint() == "https://api.z.ai/api/coding/paas/v4/chat/completions"
+    assert p6._normalize_base() == "https://api.z.ai/api/coding/paas/v4"
+
+    p7 = OpenAICompatProvider({
+        "api_key": "k",
+        "api_base": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+    })
+    assert p7._endpoint() == "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+    assert p7._normalize_base() == "https://open.bigmodel.cn/api/coding/paas/v4"

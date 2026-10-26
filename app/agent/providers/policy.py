@@ -299,6 +299,9 @@ _DETERMINISTIC_MARKERS = (
     "内容审核",
     "超长",
     "上下文",
+    # 框架内部（未配置密钥）与第三方适配器的错误码
+    "密钥未配置",
+    "no-api-key",
 )
 
 
@@ -408,6 +411,11 @@ def classify_exception(exc: BaseException, *, detail: str = "") -> Failure:
     retry_after = _retry_after_of(exc)
 
     status = _status_of(exc)
+    if status is None:
+        # 兼容第三方适配器：异常没带 status_code 属性，但文案里有 "HTTP 400"
+        status_match = _STATUS_RE.search(text)
+        if status_match:
+            status = int(status_match.group(1))
     if status is not None:
         if status in _TRANSIENT_STATUS:
             return Failure(FailureKind.TRANSIENT, f"HTTP {status}", retry_same=True, retry_after=retry_after)
