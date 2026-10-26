@@ -12,6 +12,7 @@ import uuid
 
 from app.agent.providers import get_provider
 from app.agent.providers.base import format_llm_error
+from app.application import provider_preset_catalog
 from app.core.logger import logger
 from app.infrastructure.config.config_service import ConfigService
 
@@ -89,6 +90,76 @@ class ProviderPresetService:
     def list_presets(self) -> list[dict]:
         """列出全部预设（对外脱敏）。"""
         return [_public_preset(p) for p in self.config_service.list_provider_presets()]
+
+    # ── 内置预设（模板，抄自 DSH 的 provider catalog）──────
+    @staticmethod
+    def _same_connection(preset: dict, provider: str, api_base: str) -> bool:
+        """判断已有预设是否就是「同一家服务商的同一个端点」。"""
+        config = preset.get("config", {}) or {}
+        return (
+            str(preset.get("provider", "")) == str(provider)
+            and str(config.get("api_base", "") or "").rstrip("/") == api_base
+        )
+
+    def list_builtin_presets(self) -> list[dict]:
+        """返回内置预设模板，并标出哪些已经落库成真实预设。
+
+        ``installed_preset_id`` 非空 = 同服务商、同端点已经有一条预设，前端
+        据此把「添加」置灰，避免重复创建。
+        """
+        installed = self.config_service.list_provider_presets()
+        result = []
+        for entry in provider_preset_catalog.list_builtin_presets():
+            api_base = str(entry.get("api_base", "") or "").rstrip("/")
+            match = next(
+                (
+                    p["id"]
+                    for p in installed
+                    if self._same_connection(p, entry["provider"], api_base)
+                ),
+                "",
+            )
+            result.append({**entry, "installed_preset_id": match})
+        return result
+
+    async def import_builtin_preset(
+        self,
+        key: str,
+        *,
+        api_key: str = "",
+        name: str = "",
+    ) -> dict:
+        """把一条内置预设模板落成真实预设（幂等）。
+
+        已经存在同服务商、同端点的预设时直接返回它（``created=False``），不会
+        建出第二条；真实可用模型不预置，交给「拉取模型」（``/models``）按账号
+        返回，避免抄一份可能过期的模型名。
+        """
+        entry = provider_preset_catalog.get_builtin_preset(key)
+        if entry is None:
+            raise ValueError(f"未知的内置预设: {key}")
+
+        api_base = str(entry.get("api_base", "") or "").rstrip("/")
+        for preset in self.config_service.list_provider_presets():
+            if self._same_connection(preset, entry["provider"], api_base):
+                return {"preset": _public_preset(preset), "created": False}
+
+        config: dict = {
+            "api_base": api_base,
+            "api_key": str(api_key or "").strip(),
+        }
+        if entry.get("headers"):
+            config["headers"] = dict(entry["headers"])
+        preset = await self.create_preset(
+            {
+                "name": str(name or "").strip() or entry["name"],
+                "provider": entry["provider"],
+                "config": config,
+                "enabled": True,
+            }
+        )
+        logger.info(f"[ProviderPreset] 从内置模板导入预设 {preset['name']}（{key}）")
+        return {"preset": preset, "created": True}
 
     def get_preset(self, preset_id: str, masked: bool = True) -> dict | None:
         """按 ID 获取预设；masked=True 时返回脱敏副本，否则返回含密钥的内部副本。"""
@@ -267,8 +338,8 @@ class ProviderPresetService:
             for preset in presets:
                 if (
                     preset.get("provider") == config.get("provider", "openai")
-                    and str(((preset.get("config") or {}).get("api_base", "") or "")).rstrip("/") == api_base
-                    and str(((preset.get("config") or {}).get("api_key", "") or "")) == api_key
+                    and str((preset.get("config") or {}).get("api_base", "") or "").rstrip("/") == api_base
+                    and str((preset.get("config") or {}).get("api_key", "") or "") == api_key
                 ):
                     match = preset
                     break

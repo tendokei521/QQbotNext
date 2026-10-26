@@ -68,6 +68,28 @@ async def get_provider_preset_template(request: Request):
     return JSONResponse(content={"ok": True, "template": _service(request).get_template()})
 
 
+@router.get("/builtin")
+async def list_builtin_provider_presets(request: Request):
+    """内置预设模板（抄自 DSH provider catalog）；只读，不落库。"""
+    return JSONResponse(content={"ok": True, "presets": _service(request).list_builtin_presets()})
+
+
+@router.post("/builtin/{key}/import")
+async def import_builtin_provider_preset(key: str, request: Request):
+    """把一条内置预设模板落成真实连接预设（幂等，重复导入返回已有那条）。"""
+    body = await _json_body(request)
+    try:
+        result = await _service(request).import_builtin_preset(
+            key,
+            api_key=body.get("api_key", ""),
+            name=body.get("name", ""),
+        )
+    except ValueError as e:
+        return _err(400, str(e))
+    message = "Provider 预设已添加" if result.get("created") else "该预设已存在，未重复创建"
+    return JSONResponse(content={"ok": True, "message": message, **result})
+
+
 @router.get("/{preset_id}")
 async def get_provider_preset(preset_id: str, request: Request):
     preset = _service(request).get_preset(preset_id)

@@ -74,3 +74,86 @@ async def test_migrate_legacy_agent_config(preset_service, config_service):
 
     # 幂等：再次迁移不应重复创建
     assert await preset_service.migrate_legacy_agent_configs() == 0
+
+
+# ── 内置预设（抄自 DSH 的 provider catalog）─────────────────────
+
+
+def test_builtin_catalog_only_lists_supported_adapters():
+    """内置模板必须只包含本项目真的注册了的适配器类型。"""
+    from app.agent.providers import PROVIDERS
+    from app.application.provider_preset_catalog import BUILTIN_PROVIDER_PRESETS
+
+    keys = [entry["key"] for entry in BUILTIN_PROVIDER_PRESETS]
+    assert len(keys) == len(set(keys)), "内置预设 key 不能重复"
+    # 用户点名要的、以及最常用的几家必须在
+    assert {"opencode-go", "opencode", "deepseek", "zai", "anthropic", "google"} <= set(keys)
+
+    seen_connections = set()
+    for entry in BUILTIN_PROVIDER_PRESETS:
+        assert entry["provider"] in PROVIDERS, entry["key"]
+        assert entry["api_base"].startswith("https://"), entry["key"]
+        assert not entry["api_base"].endswith("/"), entry["key"]
+        assert entry["env"], entry["key"]
+        assert entry["models"], entry["key"]
+        assert entry["name"] and entry["note"], entry["key"]
+        connection = (entry["provider"], entry["api_base"])
+        assert connection not in seen_connections, f"{entry['key']} 与其它条目端点重复"
+        seen_connections.add(connection)
+
+
+def test_list_builtin_presets_marks_nothing_installed(preset_service):
+    presets = preset_service.list_builtin_presets()
+    assert presets
+    assert all(p["installed_preset_id"] == "" for p in presets)
+
+
+async def test_import_builtin_preset_creates_then_dedupes(preset_service):
+    first = await preset_service.import_builtin_preset("opencode-go")
+    assert first["created"] is True
+    preset = first["preset"]
+    assert preset["name"] == "OpenCode Go"
+    assert preset["provider"] == "openai"
+    assert preset["config"]["api_base"] == "https://opencode.ai/zen/go/v1"
+    # OpenCode 兼容端点必须带会话头
+    assert preset["config"]["headers"] == {"x-opencode-session": "qqbotnext6"}
+    # 不预置模型实例：真实模型交给「拉取模型」按账号返回
+    assert preset_service.config_service.list_provider_models(preset["id"]) == []
+
+    again = await preset_service.import_builtin_preset("opencode-go")
+    assert again["created"] is False
+    assert again["preset"]["id"] == preset["id"]
+    assert len(preset_service.list_presets()) == 1
+
+    marked = {p["key"]: p["installed_preset_id"] for p in preset_service.list_builtin_presets()}
+    assert marked["opencode-go"] == preset["id"]
+
+
+async def test_import_builtin_preset_matches_existing_manual_preset(preset_service):
+    """用户手写过的同端点预设也算「已存在」，不会导出一条重复的。"""
+    manual = await preset_service.create_preset({
+        "name": "我的 OpenCode Go",
+        "provider": "openai",
+        "config": {"api_base": "https://opencode.ai/zen/go/v1/", "api_key": "oc_sk_test"},
+    })
+
+    result = await preset_service.import_builtin_preset("opencode-go")
+    assert result["created"] is False
+    assert result["preset"]["id"] == manual["id"]
+    assert len(preset_service.list_presets()) == 1
+
+
+async def test_import_builtin_preset_accepts_key_and_custom_name(preset_service):
+    result = await preset_service.import_builtin_preset(
+        "deepseek", api_key="sk-new", name="DeepSeek 备用"
+    )
+    assert result["created"] is True
+    preset = result["preset"]
+    assert preset["name"] == "DeepSeek 备用"
+    assert preset["config"]["api_key"] == "sk-new"
+    assert preset["config"]["api_base"] == "https://api.deepseek.com"
+
+
+async def test_import_unknown_builtin_preset_raises(preset_service):
+    with pytest.raises(ValueError):
+        await preset_service.import_builtin_preset("no-such-provider")
