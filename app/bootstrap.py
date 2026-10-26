@@ -444,9 +444,10 @@ async def run(settings: Settings | None = None) -> None:
 
     migrate_legacy_data()
 
-    # 加载全局模块实例：WebUI 无需等待 Bot 连接即可渲染模块列表/配置表单
+    # 模块"预加载" = 只发现不实例化：实例是按账号的，随后 ensure_accounts() 统一装配。
+    # 这样启动只会打一行"预加载完成"，不会先造一套 bot_id=None 的重复实例。
     registry = _container.get(ModuleRegistry)
-    await registry.load_all(bot_id=None)
+    registry.discover()
 
     bot_service = _container.get(BotService)
     scheduler = _container.get(SchedulerService)

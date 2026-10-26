@@ -92,14 +92,15 @@ class BotService:
         if self.agent_manager is not None:
             bind = getattr(self.agent_manager, "bind_account", None) or self.agent_manager.ensure_runtime
             runtime = bind(conn.account_id, bot=conn)
-        # 模块多半在"账号存在"时已装配（此时 bot=None）：登录只补齐缺的实例，并重绑连接
+        # 账号的模块实例在"账号存在"时就装配好了（启动 / 建号，不要求连接）；
+        # 登录只做三件事：补齐缺失实例（热加载场景）、重绑连接、放行联网行为。
         await self.registry.load_all(conn.account_id, bot=conn)
         self.registry.rebind_bot(conn.account_id, conn)
         if runtime is not None:
             runtime.set_online(True)
         # 上线：模块在这里才允许启动计时器/主动消息（离线期间一律不跑）
         await self.registry.notify_online(conn.account_id)
-        logger.info(f"[BotService] 账号「{getattr(conn, 'label', '?')}」模块装配完成")
+        logger.info(f"[BotService] 账号「{getattr(conn, 'label', '?')}」已上线")
         if self.lifecycle_hooks is not None:
             try:
                 await self.lifecycle_hooks.run(conn, "login", "已登录")
@@ -231,11 +232,14 @@ class BotService:
         for mod_name, bot_modules in self.registry.loaded_map().items():
             if not bot_modules:
                 continue
-            mod = None
+            # 实例是按账号的；某个账号刚建好还没装配时，用任一实例的元数据渲染
+            # 列表/表单（配置值仍按账号单独读），避免页面短暂空白。
             if account_id is not None:
-                mod = bot_modules.get(account_id)
-                if mod is None:
-                    mod = bot_modules.get(None)
+                mod = (
+                    bot_modules.get(account_id)
+                    or bot_modules.get(None)
+                    or next(iter(bot_modules.values()))
+                )
             else:
                 mod = bot_modules.get(None) or next(iter(bot_modules.values()))
             if mod is None:

@@ -59,6 +59,42 @@ async def test_load_all(registry):
     assert "testmod" in registry.module_names()
 
 
+def test_discover_only_counts_without_instantiating(registry, caplog):
+    """启动路径：只发现不实例化（实例按账号装配），且只打一行"预加载完成"。"""
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="app.plugin.registry"):
+        count = registry.discover()
+
+    assert count == 1
+    assert registry.loaded_map() == {}, "discover 不能创建任何实例"
+    assert "模块预加载完成: 1 个" in caplog.text
+
+
+async def test_per_account_load_is_quiet_when_nothing_is_added(registry, caplog):
+    """登录时补齐实例：没有新增就不该刷 INFO（旧实现每账号一行"0 个新增"）。"""
+    import logging
+
+    await registry.load_all(bot_id=123)
+    caplog.clear()
+
+    with caplog.at_level(logging.INFO, logger="app.plugin.registry"):
+        again = await registry.load_all(bot_id=123)
+
+    assert again == 0
+    assert "模块加载完成" not in caplog.text
+    assert "[Module] Bot" not in caplog.text
+
+
+async def test_boot_sequence_creates_one_instance_per_account(registry):
+    """discover + 按账号装配：不应该多出 bot_id=None 的重复实例。"""
+    registry.discover()
+    await registry.load_all(bot_id=123)
+    await registry.load_all(bot_id=456)
+
+    assert set(registry.loaded_map()["testmod"]) == {123, 456}
+
+
 async def test_unload(registry):
     await registry.load_single("testmod", 123)
     await registry.unload(123)

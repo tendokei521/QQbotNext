@@ -289,8 +289,36 @@ class ModuleRegistry:
             self.log.exception(f"[Module] {module_name} (bot {bot_id}) 加载失败: {e}")
             return False
 
+    def discover(self) -> int:
+        """**只发现、不实例化**：扫一遍模块目录，返回可加载模块数。
+
+        为什么需要它：模块实例是"按账号"的（配置/权限/开关都跟着账号走），
+        启动时 `ensure_accounts()` 已经把每个账号的实例装好；再按 `bot_id=None`
+        预加载一份"全局实例"只会多算一遍、多打一行日志，且让 WebUI/事件分发
+        看到两套实例。所以启动只需要"发现"，装配交给账号。
+        """
+        names: list[str] = []
+        seen: set[str] = set()
+        for root, _source in self._iter_module_roots():
+            if not root.exists():
+                continue
+            for entry in sorted(root.iterdir()):
+                if not entry.is_dir() or entry.name.startswith(("_", ".")):
+                    continue
+                if entry.name in seen or self._is_uninstalled(entry.name):
+                    continue
+                seen.add(entry.name)
+                names.append(entry.name)
+        self.log.info(f"[Module] 模块预加载完成: {len(names)} 个")
+        return len(names)
+
     async def load_all(self, bot_id: Any = None, bot: IBot | None = None) -> int:
-        """加载本地模块与外部插件到指定 bot_id。"""
+        """加载本地模块与外部插件到指定 bot_id。
+
+        启动路径请用 `discover()`：账号实例由 `BotService.ensure_accounts()` 装配，
+        这里只负责"补齐缺失实例"（登录时按需、热重载时），所以**只在真的补了东西时
+        记 debug**，不再每账号打一行 INFO。
+        """
         count = 0
         seen: set[str] = set()
         for root, source in self._iter_module_roots():
@@ -316,8 +344,8 @@ class ModuleRegistry:
                         count += 1
         if bot_id is None:
             self.log.info(f"[Module] 模块预加载完成: {count} 个新增")
-        else:
-            self.log.info(f"[Module] Bot {bot_id} 模块加载完成: {count} 个新增")
+        elif count:
+            self.log.debug(f"[Module] Bot {bot_id} 补齐模块实例: {count} 个")
         return count
 
     async def unload(self, bot_id: Any = None) -> None:
