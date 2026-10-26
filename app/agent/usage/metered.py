@@ -23,11 +23,11 @@ from __future__ import annotations
 
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 from app.agent.usage.context import current_usage_ctx
 from app.agent.usage.labels import label_from_session_id
 from app.agent.usage.recorder import get_recorder
-
 
 #: 常见 `api_base` 主机 → 服务商短名（用于面板显示，不必穷举）
 _API_HOST_ALIAS = {
@@ -38,13 +38,42 @@ _API_HOST_ALIAS = {
     "gemini": "gemini",
     "googleapis": "gemini",
     "moonshot": "moonshot",
+    "kimi": "moonshot",
     "dashscope": "qwen",
+    # 小米的 token plan 主机里也带 token-plan，必须排在它前面，否则会被认成 qwen
+    "xiaomimimo": "xiaomi",
+    "token-plan": "qwen",
     "bigmodel": "zhipu",
+    "z.ai": "zhipu",
     "siliconflow": "siliconflow",
     "openrouter": "openrouter",
+    "minimax": "minimax",
+    "groq": "groq",
+    "cerebras": "cerebras",
+    "together": "together",
+    "huggingface": "huggingface",
+    "fireworks": "fireworks",
+    "nvidia": "nvidia",
     "localhost": "local",
     "127.0.0.1": "local",
 }
+
+
+def _host_of(api_base: str) -> str:
+    """取 ``api_base`` 的主机名（小写）；解析失败就退回原串。
+
+    只认主机名是有原因的：协议名会出现在路径里（``api.groq.com/openai/v1``、
+    ``api.minimax.io/anthropic``）——拿整条 URL 做子串匹配会把它们认成
+    openai / anthropic。
+    """
+    base = str(api_base or "").strip()
+    if not base:
+        return ""
+    try:
+        host = urlparse(base).netloc
+    except ValueError:
+        host = ""
+    return (host or base).lower()
 
 
 def _api_label(config: dict) -> str:
@@ -57,10 +86,10 @@ def _api_label(config: dict) -> str:
     explicit = str(cfg.get("api_name") or cfg.get("preset_name") or "").strip()
     if explicit:
         return explicit
-    base = str(cfg.get("api_base") or "").lower()
-    if base:
-        for host, alias in _API_HOST_ALIAS.items():
-            if host in base:
+    host = _host_of(str(cfg.get("api_base") or ""))
+    if host:
+        for marker, alias in _API_HOST_ALIAS.items():
+            if marker in host:
                 return alias
     return str(cfg.get("provider") or cfg.get("provider_type") or "")
 
