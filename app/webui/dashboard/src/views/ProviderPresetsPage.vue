@@ -101,6 +101,18 @@ function normalizeApiFormat(provider: string): string {
   return 'openai'
 }
 
+const API_FORMAT_LABELS: Record<string, string> = {
+  anthropic: 'Anthropic Messages',
+  openai: 'OpenAI Chat Completions',
+  'openai-responses': 'OpenAI Responses',
+  gemini: 'Gemini Native',
+}
+
+function apiFormatLabel(provider: string): string {
+  const format = normalizeApiFormat(provider)
+  return API_FORMAT_LABELS[format] || format
+}
+
 const notify = useNotifyStore()
 const presets = ref<ProviderPreset[]>([])
 const models = ref<ProviderModel[]>([])
@@ -340,7 +352,13 @@ async function saveSource() {
   }
   savingSource.value = true
   try {
+    // 保留配置文件里那些这个表单没暴露的键（headers / extra_body / 自定义字段）：
+    // 全部重写会把 OpenCode 的 x-opencode-session 头之类整丢掉，保存一次就坏一次。
+    const existing = editingSourceId.value
+      ? presets.value.find((p) => p.id === editingSourceId.value)
+      : undefined
     const config: Record<string, any> = {
+      ...(existing?.config || {}),
       api_base: sourceForm.api_base.trim(),
       api_key: sourceForm.api_key.trim(),
       retry_attempts: Number(sourceForm.retry_attempts) || 3,
@@ -685,7 +703,7 @@ onMounted(() => {
           <v-card variant="outlined" class="mb-4">
             <v-card-title class="d-flex align-center">
               <v-icon icon="mdi-server" class="mr-2" color="primary" /> {{ selectedPreset.name }}
-              <v-chip size="small" variant="tonal" class="ml-2">{{ selectedPreset.provider }}</v-chip>
+              <v-chip size="small" variant="tonal" class="ml-2">{{ apiFormatLabel(selectedPreset.provider) }}</v-chip>
               <v-spacer />
               <v-btn size="small" variant="tonal" prepend-icon="mdi-pencil" @click="openEditSource(selectedPreset)">编辑连接</v-btn>
               <v-btn size="small" variant="tonal" prepend-icon="mdi-file-code-outline" class="ml-1" @click="openConfigEditor(selectedPreset)">编辑配置文件</v-btn>
