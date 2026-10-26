@@ -114,7 +114,12 @@ export const useAgentConfigStore = defineStore('agentConfig', {
         this.reset()
         return
       }
-      if (!force && this.loadedFor === botId && Object.keys(this.draft).length > 0) return
+      if (!force && this.loadedFor === botId && Object.keys(this.draft).length > 0) {
+        // 配置整份不重拉（会覆盖未保存的草稿），但 Provider 目录是跨页共享的只读数据，
+        // 可能刚在「Provider 预设」页加过模型 —— 不刷新的话模型池里要等整页刷新才看得到。
+        await this.refreshProviderCatalog()
+        return
+      }
 
       this.loading = true
       try {
@@ -157,6 +162,37 @@ export const useAgentConfigStore = defineStore('agentConfig', {
         this.loadError = errorMessage(err)
       } finally {
         this.loading = false
+      }
+    },
+
+    /**
+     * 只刷新 Provider 目录（连接预设 + 模型实例），不动配置草稿。
+     *
+     * 「添加模型」之类的入口在独立页面：改完回到 Agent 页时 `load()` 会命中
+     * 「同账号 + 已有草稿」缓存直接返回，于是模型池下拉一直拿着旧目录，
+     * 新模型要整页刷新（store 重建）才出现。目录与草稿互不相干，单独重拉即可。
+     */
+    async refreshProviderCatalog() {
+      try {
+        const [presetsRes, modelsRes] = await Promise.all([
+          http.get<{ ok: boolean; presets: { id: string; name: string }[] }>('/api/provider-presets'),
+          http.get<{ ok: boolean; models: { id: string; preset_id: string; model: string }[] }>(
+            '/api/provider-models',
+          ),
+        ])
+        const presets = presetsRes.data?.presets || []
+        const nameById = new Map(presets.map((p) => [p.id, p.name]))
+        this.providerPresets = presets.map((p) => ({ id: p.id, name: p.name }))
+        // 规则与后端 /api/agent/config 一致：模型列表本身不带 preset_name，这里按预设表补齐，
+        // 否则模型池会退化成只显示裸 id。
+        this.providerModels = (modelsRes.data?.models || []).map((m) => ({
+          id: m.id,
+          preset_id: m.preset_id,
+          preset_name: nameById.get(m.preset_id) || m.preset_id,
+          model: m.model,
+        }))
+      } catch {
+        // 目录刷新失败保留上一次结果：页面照常可用，加载错误由 load() 的 loadError 负责呈现
       }
     },
 
