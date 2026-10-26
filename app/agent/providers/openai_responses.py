@@ -108,6 +108,14 @@ def _tool_arguments(raw) -> str:
         return "{}"
 
 
+def _temperature_unsupported(error: Exception) -> bool:
+    """上游是否明确拒绝 ``temperature``（Responses 的推理模型常见：只收默认值）。"""
+    text = str(error).lower()
+    return "temperature" in text and (
+        "unsupported" in text or "not supported" in text or "does not support" in text
+    )
+
+
 def to_responses_input(messages: list[dict]) -> tuple[list[dict], str]:
     """``messages[]`` → ``(input items, instructions)``。
 
@@ -423,7 +431,17 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
             tools=tools,
             stream=False,
         )
-        result = await self._request(payload, timeout)
+        try:
+            result = await self._request(payload, timeout)
+        except _FatalError as e:
+            if "temperature" not in payload or not _temperature_unsupported(e):
+                raise
+            # 推理模型只收默认温度：去掉该参数重发一次
+            payload.pop("temperature", None)
+            logger.add_info("Api").warning(
+                "上游不接受 temperature（Responses 推理模型常见），已去掉该参数重试"
+            )
+            result = await self._request(payload, timeout)
         return parse_responses_result(result)
 
     # ── 流式 ───────────────────────────────────────────
@@ -504,7 +522,9 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
             tools=tools,
             stream=True,
         )
-        for attempt in range(self.max_retries):
+        attempt = 0
+        temperature_retried = False
+        while attempt < self.max_retries:
             key = self.api_keys[attempt % len(self.api_keys)]
             started = False
             try:
@@ -518,10 +538,19 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
                         f"API key {attempt % len(self.api_keys) + 1} 认证失败，轮换下一个: {format_llm_error(e)}"
                     )
                     await asyncio.sleep(0.5)
+                    attempt += 1
                     continue
                 yield StreamEvent(type="error", text=format_llm_error(e))
                 return
             except _FatalError as e:
+                if not temperature_retried and "temperature" in payload and _temperature_unsupported(e):
+                    # 推理模型只收默认温度：去掉该参数重发一次（不占重试额度）
+                    temperature_retried = True
+                    payload.pop("temperature", None)
+                    logger.add_info("Api").warning(
+                        "上游不接受 temperature（Responses 推理模型常见），已去掉该参数重试"
+                    )
+                    continue
                 yield StreamEvent(type="error", text=format_llm_error(e))
                 return
             except Exception as e:  # noqa: BLE001 —— 流式入口统一转事件，不把异常抛给消费端
@@ -533,6 +562,7 @@ class OpenAIResponsesProvider(OpenAICompatProvider):
                     f"Responses 流式请求失败，{delay}s 后重试 ({attempt + 1}/{self.max_retries}): {format_llm_error(e)}"
                 )
                 await asyncio.sleep(delay)
+                attempt += 1
 
         yield StreamEvent(type="error", text="Responses 流式请求最终失败")
 

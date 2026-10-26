@@ -268,3 +268,47 @@ async def test_chat_stream_passes_events_through(monkeypatch):
 
     assert [event.type for event in events] == ["text", "done"]
     assert captured["payload"]["stream"] is True
+
+
+async def test_chat_drops_temperature_when_upstream_rejects_it(monkeypatch):
+    """推理模型只收默认温度：去掉 temperature 后应自动重发，而不是整轮报错。"""
+    from app.agent.providers.openai_compat import _FatalError
+
+    provider = OpenAIResponsesProvider({"api_key": "k", "api_base": "https://api.openai.com/v1"})
+    payloads: list[dict] = []
+
+    async def fake_request(payload: dict, timeout: int) -> dict:
+        payloads.append(dict(payload))
+        if len(payloads) == 1:
+            raise _FatalError(
+                "HTTP 400: Unsupported parameter: 'temperature' is not supported with this model"
+            )
+        return {"output": [{"type": "message", "content": [{"type": "output_text", "text": "ok"}]}]}
+
+    monkeypatch.setattr(provider, "_request", fake_request)
+    response = await provider.chat([{"role": "user", "content": "hi"}])
+
+    assert response.text == "ok"
+    assert "temperature" in payloads[0]
+    assert "temperature" not in payloads[1]
+
+
+async def test_stream_drops_temperature_when_upstream_rejects_it(monkeypatch):
+    from app.agent.providers.openai_compat import _FatalError
+
+    provider = OpenAIResponsesProvider({"api_key": "k", "api_base": "https://api.openai.com/v1"})
+    payloads: list[dict] = []
+
+    async def fake_stream(api_key: str, payload: dict, timeout: int):
+        payloads.append(dict(payload))
+        if len(payloads) == 1:
+            raise _FatalError("HTTP 400: Unsupported parameter: temperature")
+        yield StreamEvent(type="text", text="hi")
+        yield StreamEvent(type="done", finish_reason="stop")
+
+    monkeypatch.setattr(provider, "_stream_responses", fake_stream)
+    events = [event async for event in provider.chat_stream([{"role": "user", "content": "hi"}])]
+
+    assert [event.type for event in events] == ["text", "done"]
+    assert "temperature" in payloads[0]
+    assert "temperature" not in payloads[1]
