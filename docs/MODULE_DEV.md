@@ -826,6 +826,63 @@ class Module(BaseModule):
 
 ---
 
+### 4.7.6 工具结果的表达力与实现要点（Q6）
+
+工具返回的不只是"一段文本"。`ToolResult`（`app/agent/tools/result.py`）现在可以表达：
+
+| 字段 | 含义 | 谁消费 |
+|---|---|---|
+| `blocks` | 内容块：`text` / `image`(`sha`/`mime`/`alt`) / `ref`(`label`/`target`) | `plain()` 渲染成模型可读文本 |
+| `is_error` + `code` | 结构化错误（`ERROR_CODES` 里的稳定码） | 遥测、`tool_call_hook` 的 `ctx.extra["code"]` |
+| `meta` | 观测信息（如落盘路径 `spill`） | 事件日志（`tool/result`）、压缩 pruner |
+| `additional_contexts` | 工具要**额外告诉模型**的上下文 | 循环体汇总成**一条** `[工具补充]` user 消息 |
+| `concludes_turn` | 工具要求**结束本轮**（`finish` 类语义） | 循环体停止下一次请求，结局记 `completed` |
+
+两类"副作用"的边界：
+
+- `additional_contexts` 是**给模型看的**，不是给用户看的；一次工具批次里多条会合成一条消息
+  （多条 user 消息会让"谁在说话"变模糊）。
+- `concludes_turn` 不会替你生成正文：工具那轮模型没写话，回复就是空，但轮次结局是
+  `completed`（工具明确表示办完），不是 `silent`。
+- 要让调用过程"给人看"，用 `ToolSpec.present_call` / `present_result`（默认 `None` = 标准日志行）。
+  呈现是日志/界面层，**不影响**执行与回给模型的文本。
+
+### 4.7.7 在"具体一步"插一脚：中间件（Q7）
+
+模块以前只能在固定钩子阶段（`pre_request` / `turn_completed` …）或整体接管（`supersedes`）
+之间二选一；中间件（`app/agent/loop/middleware.py`）补上中间那一档：
+
+```python
+from app.agent.loop.middleware import Middleware, register_middleware, unregister_middleware
+
+async def on_load(self) -> None:
+    runtime = self.ctx.services.runtime(self.bot_id)
+    register_middleware(runtime, Middleware(
+        point="tool_call.before", order=100, source="my_module", fail_closed=False,
+        handler=my_audit_handler,      # async (payload, *, runtime, ctx) -> dict | None
+    ))
+
+async def on_unload(self) -> None:
+    unregister_middleware(runtime, source="my_module")   # 不撤会一直生效
+```
+
+三个钩点与 payload：
+
+| 钩点 | payload（可改写） | 典型用途 |
+|---|---|---|
+| `tool_call.before` | `{name, args, call_id}` | 审计、脱敏、按策略拦截 |
+| `tool_result.after` | `{name, call_id, result_text, is_error, code}` | 统一裁剪/打码、给结果加提示 |
+| `messages.before_send` | `{messages}` | 注入一段上下文、按需要求终止 |
+
+语义要点：
+
+- 按 `order` 升序串行；返回 `None` = 不改，返回 dict = 合并替换；handler 拿到的是浅拷贝，
+  **原地改不生效**；
+- 返回 `{"abort": "原因"}` → 本步中断（工具调用不派发 / 本轮不请求 LLM）；
+- `fail_closed=True` 时 handler 抛异常也按中断处理；`False`（默认）只留痕并继续；
+- 没有注册任何中间件时**零开销**（不构造 payload、行为与改造前一致）。
+
+
 ## 4.8 模块 ↔ 框架交互面（资源引用 / 系统 LLM / 依赖自检）
 
 三件事一句话：**选系统资源用资源字段，发模型请求用 `self.llm_chat`，用之前先声明 `requires`。**
