@@ -725,6 +725,105 @@ runtime.approval_channel = MyApprovalChannel()
 - 只有 `ALLOWED_ONCE` 才执行，且只对**这一次**调用有效（不缓存、不升级）；
 - 拒绝话术按 `REJECTED` / `TIMEOUT` / `UNAVAILABLE` 区分，asked 与 decided 都留痕。
 
+### 4.7.4 注册一段提示词：`runtime.prompt_sections`（P1 起）
+
+默认提示词由 **12 个段**组成（人格 / 行为 / 表情 / 定时 / 主动性 / 元信息 / 技能 /
+记忆 / 背景 / 群聊记录 / 历史 / 本轮），顺序由每段的 `order` 决定，定义在
+`app/agent/assembly/builtin_sections.py`。模块只想**加一段**时不必接管整个装配器
+（`supersedes=("assembly",)` 仍可用于整体替换，但那是另一回事）：
+
+```python
+from app.agent.assembly.sections import Section, register_section, unregister_section
+
+
+def build_my_block(req):
+    """(PromptRequest) -> list[dict]；不适用时返回 []，不要返回空消息。"""
+    if not req.cfg("my_knowledge_enable", True):
+        return []
+    return [{"role": "system", "content": "### 我的知识\n…"}]
+
+
+class Module(BaseModule):
+    async def on_load(self) -> None:
+        runtime = self.ctx.services.runtime(self.bot_id)
+        register_section(runtime, Section(
+            name="my_knowledge",        # 稳定标识：同名同 scope 覆盖（幂等）
+            order=85,                   # 升序；取值见下表
+            builder=build_my_block,     # 只读 req、无副作用
+            source="my_module",         # 只用于日志/排查
+        ))
+
+    async def on_unload(self) -> None:
+        runtime = self.ctx.services.runtime(self.bot_id)
+        unregister_section(runtime, "my_knowledge")
+```
+
+要点：
+
+- 注册表按 **runtime 实例隔离**（`runtime.prompt_sections`），不同 bot、不同模块互不串；
+  12 个默认段在首次解析时自动注入，插件**不要**手动注册它们；
+- `builder(req)` 只读请求、不产生副作用；返回 `[]` 表示"这段本轮不适用"（不产生空消息）；
+  `describe()` 与装配各跑一次 builder，所以它必须幂等/无副作用（不要在里面发请求、写库）；
+- `scope="agent"`（默认）只影响本 runtime；同名 `scope="global"` 段会被 agent 段**遮蔽**
+  （适合"所有 bot 通用、个别 bot 想改"的注入）；
+- `complete=True` 表示该段声称产出**整条 system**：一次解析最多允许一个，两个以上会让
+  `resolve()` 抛 `ValueError`，装配器留 `error` 日志后中止本轮（绝不发畸形 prompt）；
+- 单段 builder 抛异常时装配器会**跳过该段**并记 `error` 日志（其余段照常），
+  不会因为记忆召回之类旁路故障让整轮没有回复；
+- `PromptRequest.extra_blocks` 是旧兼容通道（位置固定在群聊记录之后、历史之前）：
+  能改的用 section，只有"一次塞多块、且不挑位置"才用它。
+
+**order 取值约定**（内置段占 10 的倍数；插件从 **200 起**，避免与以后新增的内置段撞号）：
+
+| order | 段 | 含义 |
+|---|---|---|
+| 10 | `persona` | 人格 |
+| 20 | `behavior` | 行为规则 |
+| 30 | `emoji_hint` | 表情提示 |
+| 40 | `schedule` | 定时任务协议 |
+| 50 | `proactive` | 主动性协议 |
+| 60 | `message_meta` | 消息元信息说明 |
+| 70 | `skills` | 技能说明（可多块） |
+| 80 | `memory` | 记忆召回 |
+| 90 | `background` | 背景（指代 + 聊天环境） |
+| 100 | `group_log` | 群聊环境记录 |
+| 105 | `extra` | **兼容通道**：`req.extra_blocks`，插件不要占用这个段号 |
+| 110 | `history` | 会话历史 |
+| 120 | `user` | 本轮消息 |
+| 200+ | 插件段 | 想插进内置序列中间就取同区间的小数（如 85）；想排最后取 ≥200 |
+
+同 `order` 的段按 `name` 排序兜底（同一输入必然同一字节，便于快照/前缀缓存）。
+
+**卸载时必须自己撤**：注册表不跟模块生命周期自动清理。`on_unload` / `on_disable`
+里不调 `unregister_section`，同一 bot 热重载模块就会越积越多段（同名覆盖还能幂等，
+换名字就成了重复注入）。若注册的是对默认段的**同名覆盖**，撤销后会自动恢复内置版本。
+
+**排错**：`PromptAssembler().describe(req)` 返回 `[{block, role, chars, messages}]`，
+`block` 就是 section 名（空段也留一行 `role="-"`）；`prompt_dump_enable` 落盘的
+是最终发出的 messages，两者可对照定位"这段到底进没进 prompt"。
+
+### 4.7.5 提示词缓存与前缀稳定（Q5）
+
+上游的前缀缓存（OpenAI / DeepSeek 的自动缓存、Anthropic 的显式缓存）只认**逐字节
+相同**的开头：从第 1 条 system 的第一个字节起，命中多少算多少。所以改 prompt 时有
+三条硬约束：
+
+1. **system 前缀必须逐字节稳定**。同一会话、同一配置下反复请求，system 的拼接顺序、
+   分隔符、文案一个字都不能变；不要往 system 里塞时间戳、随机数、`set` 的遍历结果、
+   未排序的 `json.dumps`。需要"本轮不同"的内容放进 user 消息或工具结果，别动 system。
+2. **改 tool 定义会使缓存失效**。tools 数组在请求里排在 system 之前（Anthropic 把它
+   和 system 一起算进前缀），增删工具、改描述、改参数 schema 都会让整段缓存作废。
+   工具集变化本身是低频事件，但**不要每轮**根据会话状态动态裁剪工具。
+3. **`prompt_cache_enable`**（Agent 页「高级功能 → 模型缓存」，默认开）：给支持显式
+   缓存的 provider 在 system 末尾打缓存标记，命中后这部分输入按折扣计费、首字更快。
+   不支持的网关可能直接拒收该标记，关掉即回到"不带标记"的旧请求形态。
+
+组装层提供了三个纯函数用于回归/排错（`app/agent/assembly/prompt_cache.py`）：
+`system_prefix_fingerprint(messages)`（只看 system 段的短指纹）、
+`stable_messages_digest(messages)`（全量 messages 的稳定摘要）、
+`is_prefix_stable(prev, cur)`（`cur` 是否只是在 `prev` 尾部追加）。测试里拿它们锁
+"同一输入必然同一字节"，改组装顺序时会立刻变红。
+
 ---
 
 ## 4.8 模块 ↔ 框架交互面（资源引用 / 系统 LLM / 依赖自检）

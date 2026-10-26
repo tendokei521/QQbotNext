@@ -1,4 +1,4 @@
-"""LLM 消息组装：声明式块表 + 一次装配。
+"""LLM 消息组装：有序 section 注册表 + 一次装配。
 
 ## 为什么有这个模块
 
@@ -12,61 +12,99 @@ messages：``chat.generate_response``、``chat.stream_response``、``scheduler._
 ```
 PromptRequest（一次请求的全部归一化输入）
       ↓
-PromptAssembler.build()   ← 固定按 BLOCK_ORDER 生成命名块
+registry_of(runtime).resolve()   ← 12 个默认段（builtin_sections）+ 插件注册段，按 order 排序
+      ↓
+逐段 builder(req)                ← 段内自带适用条件，不适用返回 []
       ↓
 place_images → sanitize_contexts_by_modalities   ← 归位在前、清洗在最后（清洗是唯一兜底）
       ↓
 messages（OpenAI 风格）
 ```
 
-- **顺序只看 ``BLOCK_ORDER``**，不藏在函数体里；
-- **每个块是独立函数** ``build_xxx(req) -> list[dict]``，只读 req、不产生副作用，可单测；
-- **`describe(req)`** 返回 ``[{block, role, chars}]``，`[Prompt]` 调试日志与黄金快照测试都用它，
-  想回答"这次请求发了什么"不必再打印全文；
-- **组装风格可切**：``system_prompt_style="single"`` 时把所有 system 块折成一条
+- **顺序只看 section 的 ``order``**（10 的倍数给内置段，见 ``builtin_sections``），
+  不藏在函数体里；插件用 ``sections.register_section`` 加一段即可，不必接管装配器；
+- **每个段是独立函数**（``builtin_sections.build_xxx(req) -> list[dict]``），
+  只读 req、不产生副作用，可单测；
+- **注册表按 runtime 实例隔离**（``runtime.prompt_sections``）；没有 runtime 的直调/单测
+  用进程级默认表。默认段由 ``default_sections()`` 首次解析时注入，"默认段总是存在"；
+- **`describe(req)`** 返回 ``[{block, role, chars, messages}]``，`[Prompt]` 调试日志与
+  黄金快照测试都用它，想回答"这次请求发了什么"不必再打印全文；
+- **组装风格可切**：``system_prompt_style="single"`` 时把所有 system 段折成一条
   （``fold_system_blocks``），对齐第三方框架「一整条 system prompt」的形态；默认
-  ``blocks`` 保持上表的既有形态不变。
+  ``blocks`` 保持既有形态不变。
 
-## 块顺序（与重构前的既有顺序保持一致）
+## 段顺序（与改造前逐字一致；详见 ``builtin_sections`` 的表）
 
-| # | 块 | 角色 | 来源 | 条件 |
-|---|---|---|---|---|
-| 1 | persona | system | ``config.persona_preset_id``（活引用）或 ``config.system_prompt`` | 始终 |
-| 2 | behavior | system | ``persona_rules``（行为规则段） | ``assembly_profile=qq_agent`` 且未关 |
-| 3 | emoji_hint | system | ``emoji_lexicon.available_tags`` | 能贴表情且活跃度 > 0 |
-| 4 | schedule | system | ``prompt.SCHEDULE_INSTRUCTION`` | ``schedule_enable`` |
-| 5 | proactive | system | ``prompt.build_proactive_instruction`` | 有可用能力时 |
-| 6 | message_meta | system | ``LEGACY_/MESSAGE_META_/SINGLE_LINE_…`` | 消歧说明开启时 |
-| 7 | skills | system ×N | ``runtime.skills.prompt_blocks()`` | 有技能时 |
-| 8 | memory | system | ``memory.recall_block_async`` | 记忆有召回 |
-| 9 | background | system | 指代块 + 聊天环境背景（合并为一块） | 任一非空 |
-| 10 | group_log | system | 群聊环境记录（消息 + 互动 + 我的动作） | 群聊记录模块在场且有记录 |
-| 11 | history | 对话 | 会话历史（已渲染打标） | 非空 |
-| 12 | user | user | 本轮消息（可含额外内容块与图片块） | 始终 |
+| order | 段 | 角色 | 条件 |
+|---|---|---|---|
+| 10 | persona | system | 始终 |
+| 20 | behavior | system | 选中提示词方案，或 ``assembly_profile=qq_agent`` 且未关 |
+| 30 | emoji_hint | system | 能贴表情且活跃度 > 0 |
+| 40 | schedule | system | ``schedule_enable`` |
+| 50 | proactive | system | 有可用能力时 |
+| 60 | message_meta | system | 消歧说明开启且注入了元信息 |
+| 70 | skills | system ×N | 有技能时 |
+| 80 | memory | system | 记忆有召回 |
+| 90 | background | system | 指代块或聊天环境背景非空 |
+| 100 | group_log | system | 群聊记录模块在场且有记录 |
+| 105 | extra | system ×N | **兼容通道**：``req.extra_blocks`` 非空（不是默认段） |
+| 110 | history | 对话 | 非空 |
+| 120 | user | user | 始终 |
 
-注意：块 8 在块 9 之前是历史既有行为；块 9 内部"指代在前、环境在后"用 ``\n\n`` 连接。
-块 10 与块 9 是两个**不同来源**（持续记录 vs 按需拉取），正文按 message_id 去重。
-块 2/3 只在 ``assembly_profile=qq_agent`` 档出现，``legacy`` 档恒为空（见 ``persona_rules``）。
-提示词方案（``prompt_preset``）改的是**文案不是块**：块 2~6 位置与顺序不变，正文换成
-该方案的版本（见 ``assembly.presets``）；块 1 人格永远不受影响。
+``extra`` 是改造前就存在的模块额外块通道（``runtime.context_providers`` 收集），
+保留为注册表之外的兼容段：位置固定在群聊记录之后、历史之前，行为不变；
+新模块想加提示词请用 ``register_section``（见 ``docs/MODULE_DEV.md`` §4.7.4）。
+
+## 失败语义（绝不发畸形 prompt）
+
+- **注册表解析失败**（两个 ``complete`` 段抢整条 system 等）→ ``logger.error`` 留痕后
+  重新抛出，整轮不请求 LLM；
+- **单个段 builder 抛异常** → ``logger.error`` 留痕并**跳过该段**（不抛错）。理由：
+  段的失败是局部的（例如记忆召回异常），跳过后 prompt 只是少了这一段信息，
+  人格/历史/本轮仍在，模型仍能正常回答；若升级为整轮失败，一次可恢复的旁路
+  故障就会让用户完全收不到回复。这与改造前"单块失败已跳过"的行为一致，
+  只是日志从 warning 提升为 error 以便排查。
+
+提示词方案（``prompt_preset``）改的是**文案不是段**：段的位置与顺序不变，正文换成
+该方案的版本（见 ``assembly.presets``）；人格段永远不受影响。
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
-from app.agent.assembly.prompt import (
-    LEGACY_MESSAGE_META_INSTRUCTION,
-    MESSAGE_META_INSTRUCTION,
-    PROFILE_QQ_AGENT,
-    SCHEDULE_INSTRUCTION,
-    SINGLE_LINE_MESSAGE_META_INSTRUCTION,
-    build_proactive_instruction,
-    emoji_hint_line,
-    user_message_format,
+from app.agent.assembly.builtin_sections import (
+    EXTRA_SECTION,
+    _extra_text_parts,
+    assembly_profile,
+    build_background,
+    build_behavior,
+    build_emoji_hint,
+    build_extra_blocks,
+    build_group_log,
+    build_history,
+    build_memory,
+    build_message_meta,
+    build_persona,
+    build_proactive,
+    build_schedule_instruction,
+    build_skills,
+    build_user,
+    default_sections,
+    message_meta_instruction,
+    persona_begin_dialogs,
+    prompt_preset,
+    resolve_persona_preset,
 )
-from app.core.logger import logger, account_label
+from app.agent.assembly.sections import (
+    SCOPE_AGENT,
+    register_section,
+    registry_of,
+    unregister_section,
+)
+from app.core.logger import account_label, logger
 
 
 @dataclass
@@ -112,7 +150,7 @@ class PromptRequest:
     group_log_text: str = ""
     #: 模块贡献的额外 system 块 ``[(块名, 文本)]``（由 `runtime.context_providers` 收集）。
     #: 装配器只负责按顺序渲染，来源与内容都在模块侧 —— 这是「记忆 / 知识库 / 群记录
-    #: 做成模块」时**不必接管整个装配器**的接入点。
+    #: 做成模块」时**不必接管整个装配器**的接入点（新代码优先用 section 注册表）。
     extra_blocks: list[tuple[str, str]] = field(default_factory=list)
 
     # 能力与模态
@@ -151,329 +189,86 @@ class PromptRequest:
 
 @dataclass
 class Block:
-    """一个命名块：名称 + 适用条件 + 生成函数。"""
+    """（deprecated）旧的「命名块」接口：名称 + 生成函数 + 适用条件。
+
+    新代码请用 ``sections.Section`` + ``register_section(runtime, ...)``；本类只为
+    兼容既有外部引用（``fold_system_blocks`` 的测试替身、自定义块表）保留。
+    它没有 ``order``，只在 ``PromptAssembler(blocks=...)`` 的旧构造路径里使用。
+    """
 
     name: str
     build: Callable[[PromptRequest], list[dict]]
     applies: Callable[[PromptRequest], bool] = lambda req: True
 
 
-# ==================== 各块实现（只读 req，无副作用） ====================
+#: 装配产物：``(段, 消息列表)``，段只用 ``.name`` 归因（``Block`` / ``Section`` 都满足）
+BuiltBlocks = list[tuple[Any, list[dict]]]
 
 
-def resolve_persona_preset(req: PromptRequest) -> dict | None:
-    """按 ``persona_preset_id`` 解析角色预设（同步读配置中心，不阻塞）。
+# ==================== 解析与逐段生成 ====================
 
-    只认 ``req.cfg("persona_preset_id")`` 指向的预设；预设不存在（悬挂引用）或读不到时
-    返回 ``None`` 并留痕，由调用方回退到 ``system_prompt``。
+
+def resolve_blocks(req: PromptRequest) -> list[Any]:
+    """解析本轮要渲染的段：注册表结果 + 兼容的 ``extra`` 通道，按 order 排好。
+
+    ``extra`` 不是默认段（不参与 ``resolve()`` 的 12 段快照），但每次渲染都会插回
+    ``group_log`` 与 ``history`` 之间（``EXTRA_ORDER=105``），保持既有输出不变；
+    若插件已自行注册同名 ``extra`` 段，则以插件段为准（不重复插入）。
     """
-    preset_id = str(req.cfg("persona_preset_id", "") or "").strip()
-    if not preset_id:
-        return None
-    service = getattr(req.runtime, "config_service", None)
-    getter = getattr(service, "get_role_preset", None)
-    if not callable(getter):
-        return None
-    try:
-        preset = getter(preset_id)
-    except Exception as e:  # noqa: BLE001 —— 预设读取失败不该让整轮请求炸掉
-        logger.add_info(account_label(getattr(req.runtime, 'bot_id', '?'))).warning(
-            f"[Assembly] 读取角色预设失败（已忽略）: {preset_id}: {e}"
-        )
-        return None
-    if not isinstance(preset, dict):
-        logger.add_info(account_label(getattr(req.runtime, 'bot_id', '?'))).warning(
-            f"[Assembly] 角色预设不存在（悬挂引用）: {preset_id}，已回退 system_prompt"
-        )
-        return None
-    return preset
+    sections = list(registry_of(getattr(req, "runtime", None)).resolve(scope=SCOPE_AGENT))
+    if not any(section.name == EXTRA_SECTION.name for section in sections):
+        sections.append(EXTRA_SECTION)
+    sections.sort(key=lambda section: (section.order, section.name))
+    return sections
 
 
-def build_persona(req: PromptRequest) -> list[dict]:
-    """基础人设：优先 ``persona_preset_id``（活引用），否则用 ``system_prompt``。"""
-    preset = resolve_persona_preset(req)
-    if preset is not None:
-        text = str(preset.get("system_prompt") or "").strip()
-        if text:
-            return [{"role": "system", "content": text}]
-        logger.add_info(account_label(getattr(req.runtime, 'bot_id', '?'))).warning(
-            "[Assembly] 角色预设没有 system_prompt，已回退 system_prompt"
-        )
-    system_prompt = req.cfg("system_prompt", "你是一个友好的助手。")
-    return [{"role": "system", "content": system_prompt}]
+def build_all_blocks(req: PromptRequest, sections: list[Any] | None = None) -> BuiltBlocks:
+    """按顺序逐段生成，返回 ``(段定义, 消息)`` 以便 describe/调试归因。
 
+    - 段解析失败（``resolve()`` 抛错，如两个 ``complete`` 段）→ ``logger.error`` 后
+      **重新抛出**：两条"整条 system"同时进 messages 是畸形 prompt，宁可本轮不请求；
+    - 单个段 builder 抛异常 → ``logger.error`` 后**跳过该段**。段失败是局部的
+      （记忆召回超时之类），跳过后 prompt 少一段信息但仍可正常回答；若整轮失败，
+      一次旁路故障就会让用户完全收不到回复，代价远大于收益。该取舍与改造前
+      「单块失败已跳过」一致，只把日志级别从 warning 提到 error。
 
-def prompt_preset(req: PromptRequest):
-    """本轮选中的「提示词方案」（见 ``assembly.presets``）；未选/未知值返回 ``None``。"""
-    from app.agent.assembly import presets
-
-    return presets.resolve(req.config)
-
-
-def persona_begin_dialogs(req: PromptRequest) -> list[dict]:
-    """角色预设的预设对话（前插到历史最前，对齐 AstrBot 的 ``begin_dialogs``）。
-
-    只保留 ``{role: user|assistant, content: 非空}``，脏条目丢弃而不是抛错。
-    """
-    preset = resolve_persona_preset(req)
-    if preset is None:
-        return []
-    rows = preset.get("begin_dialogs")
-    if not isinstance(rows, list):
-        return []
-    result: list[dict] = []
-    for item in rows:
-        if not isinstance(item, dict):
-            continue
-        role = str(item.get("role") or "").lower()
-        content = str(item.get("content") or "").strip()
-        if role in ("user", "assistant") and content:
-            result.append({"role": role, "content": content})
-    return result
-
-
-def build_schedule_instruction(req: PromptRequest) -> list[dict]:
-    """定时任务协议（主动消息/定时任务自身不需要再建任务，故关闭）。"""
-    if not req.schedule_enable:
-        return []
-    preset = prompt_preset(req)
-    text = preset.schedule_instruction if preset is not None else SCHEDULE_INSTRUCTION
-    return [{"role": "system", "content": text}] if text else []
-
-
-def assembly_profile(req: PromptRequest) -> str:
-    """组装档位：``legacy``（默认，旧行为逐字不变）或 ``qq_agent``（对齐外部实现）。
-
-    用**一个总闸**而不是散落的开关，是为了能一键回退与 A/B：某次改动效果不好时，
-    把档位切回 ``legacy`` 就回到改造前，不必逐个关块。
-    """
-    return str(req.cfg("assembly_profile", "legacy") or "legacy").strip().lower()
-
-
-def build_behavior(req: PromptRequest) -> list[dict]:
-    """行为规则块：拟人化的主来源（独立成段，不塞进人格正文）。
-
-    四条纪律：
-
-    1. **选中提示词方案时无条件注入**——方案本身就是一套行为文案（差异主要在这里），
-       不再看 ``assembly_profile``；否则用户选了方案却因模块默认档位而拿不到行为段，
-       等于点了没反应。方案的开关就是它自己：清空 ``prompt_preset`` 即回退。
-    2. **未选方案时只在 ``qq_agent`` 档注入**——``legacy`` 下整块消失，改造前逐字不变；
-    3. **段落里点名的工具按本轮能力裁剪**（见 ``persona_rules.detect_caps``）；
-    4. **``behavior_rules_override`` 可整体替换**，但安全规则与工作方式强制追加——
-       一次误配置不该能把"不越权 / 不泄露 / 怎么发言"整套删掉。
-    """
-    from app.agent.assembly import presets as prompt_presets
-    from app.agent.persona import rules as persona_rules
-
-    preset = prompt_preset(req)
-    if preset is None and (
-        assembly_profile(req) != "qq_agent" or not bool(req.cfg("behavior_rules_enable", True))
-    ):
-        return []
-    override = str(req.cfg("behavior_rules_override", "") or "").strip()
-    if preset is not None:
-        text = prompt_presets.render(
-            preset,
-            runtime=req.runtime,
-            available_tools=req.available_tools,
-            config=req.config,
-            modalities=req.modalities,
-            override=override,
-        )
-    elif override:
-        caps = persona_rules.detect_caps(req.available_tools, req.config, req.modalities)
-        text = persona_rules.override_with_safety(override, caps)
-    else:
-        text = persona_rules.render(req.runtime, req.available_tools, req.config, req.modalities)
-    return [{"role": "system", "content": text}] if str(text).strip() else []
-
-
-def build_emoji_hint(req: PromptRequest) -> list[dict]:
-    """【可用表情】提示行：把可贴标签摆进 prompt，省得模型去翻工具文档。
-
-    三条注入条件（任一不满足就整块不出现）：本轮真的能贴表情、活跃度 > 0、
-    词典里确实有标签。标签表是静态的，所以这段在会话内逐字稳定，不破坏前缀缓存。
-    选中提示词方案时不再要求 ``qq_agent`` 档（方案自带这套文案的口径）。
-    """
-    preset = prompt_preset(req)
-    if preset is None and assembly_profile(req) != PROFILE_QQ_AGENT:
-        return []
-    tools = req.available_tools
-    if tools is not None and "set_msg_emoji_like" not in tools:
-        return []
-    try:
-        level = int(req.cfg("emoji_react_level", 1) or 0)
-    except (TypeError, ValueError):
-        level = 1
-    if level <= 0:
-        return []
-    try:
-        from app.agent.persona.emoji import available_tags
-
-        tags = available_tags(20)
-    except Exception as e:  # noqa: BLE001 —— 词典不可用不该影响整轮组装
-        logger.add_info(account_label(getattr(req.runtime, 'bot_id', '?'))).warning(
-            f"[Assembly] 读取表情词典失败（已跳过表情提示）: {e}"
-        )
-        return []
-    render_hint = preset.emoji_hint if preset is not None else emoji_hint_line
-    text = render_hint(tags)
-    return [{"role": "system", "content": text}] if text else []
-
-
-def build_proactive(req: PromptRequest) -> list[dict]:
-    """「主动性」协议块：按本轮实际可用工具裁剪，没有可用能力时整块不注入。
-
-    意图判定用**原始正文**（``req.intent_text``），避免元信息前缀干扰。
-    ``qq_agent`` 档或选中提示词方案时去重：通用用法归行为段，这里只留本轮的意图补强
-    与标记语义。方案的措辞只覆盖 ``PROACTIVE_LINES`` 里若干行，能力裁剪不变。
-    """
-    preset = prompt_preset(req)
-    text = build_proactive_instruction(
-        req.config,
-        req.intent_text,
-        available_tools=req.available_tools,
-        dedupe=preset is not None or assembly_profile(req) == "qq_agent",
-        lines=preset.proactive_lines if preset is not None else None,
-    )
-    return [{"role": "system", "content": text}] if text else []
-
-
-def message_meta_instruction(req: PromptRequest) -> str | None:
-    """消息格式说明：让模型知道"发送者：…"是元信息、只有正文才是用户说的话。
-
-    模式（``meta_instruction_mode`` 优先，兼容 ``meta_sender_style``）：
-    ``off`` 不注入；``new`` 用单行脱敏版；其余用默认真人感版。
-    此外，仅当本轮**真的注入了元信息**（``ctx.state["message_meta_injected"]``）时才注入说明——
-    否则说明本身就是噪音，会诱导模型去找并不存在的"发送者："前缀。
-
-    ``qq_agent`` 档 + 单行格式时改用**单行格式图例**：老说明讲的是"发送者：/发送了："
-    那一套，格式已经变了却还在解释旧格式，等于给模型一本错的手册。
-    选中提示词方案时用**方案自己的两份说明**（同样是"单行讲单行、多行讲多行"）。
-    """
-    ctx = req.ctx
-    if ctx is not None and not ctx.state.get("message_meta_injected"):
-        return None
-    mode = req.cfg("meta_instruction_mode")
-    if mode is None:
-        mode = req.cfg("meta_sender_style", "legacy")
-    mode = str(mode or "legacy").lower()
-    if mode == "off":
-        return None
-    preset = prompt_preset(req)
-    if preset is not None:
-        # 方案自己保证"单行讲单行、多行讲多行"：直接读配置原值，不经过 qq_agent 档门控
-        fmt = str(req.cfg("user_message_format", "single_line") or "").strip().lower()
-        return preset.message_meta_single_line if fmt != "legacy" else preset.message_meta_legacy
-    if assembly_profile(req) == PROFILE_QQ_AGENT and user_message_format(req.config) == "single_line":
-        return SINGLE_LINE_MESSAGE_META_INSTRUCTION
-    if mode == "new":
-        return MESSAGE_META_INSTRUCTION
-    if bool(req.cfg("experimental_long_term_memory", False)):
-        return MESSAGE_META_INSTRUCTION
-    return LEGACY_MESSAGE_META_INSTRUCTION
-
-
-def build_message_meta(req: PromptRequest) -> list[dict]:
-    text = message_meta_instruction(req)
-    return [{"role": "system", "content": text}] if text else []
-
-
-def build_skills(req: PromptRequest) -> list[dict]:
-    """技能块（可能多块，各自一条 system）。"""
-    return [{"role": "system", "content": block} for block in (req.skill_blocks or []) if block]
-
-
-def build_memory(req: PromptRequest) -> list[dict]:
-    """长期记忆召回块。"""
-    return [{"role": "system", "content": req.memory_text}] if req.memory_text else []
-
-
-def build_background(req: PromptRequest) -> list[dict]:
-    """背景块：指代消解行 + 聊天环境背景合并为一条 system（指代在前，信息密度更高）。
-
-    可用 ``history_background_enable`` 关掉"聊天环境背景"部分（指代行保留）——
-    目标是把会话历史作为唯一历史来源时，避免同一批消息在两处出现。
-    """
-    parts: list[str] = []
-    if req.referent_text and req.referent_text.strip():
-        parts.append(req.referent_text)
-    if req.cfg("history_background_enable", True) and req.pre_history_text and req.pre_history_text.strip():
-        parts.append(req.pre_history_text)
-    if not parts:
-        return []
-    return [{"role": "system", "content": "\n\n".join(parts)}]
-
-
-def build_history(req: PromptRequest) -> list[dict]:
-    """会话历史（调用方已渲染打标并压缩）；角色预设的预设对话前插到最前。"""
-    return list(persona_begin_dialogs(req)) + list(req.history or [])
-
-
-def build_group_log(req: PromptRequest) -> list[dict]:
-    """群聊环境记录块（消息 + 互动 + 我的动作）。
-
-    独立成块（而不是并进 ``background``）是为了让"这次请求为什么带了/没带群聊记录"
-    能从块表一眼看出：它是**另一个来源**，有自己的开关、窗口与预算。
-    """
-    text = str(req.group_log_text or "").strip()
-    return [{"role": "system", "content": text}] if text else []
-
-
-def build_extra_blocks(req: PromptRequest) -> list[dict]:
-    """模块贡献的额外 system 块（按收集顺序，空块已在收集侧丢弃）。
-
-    位置固定在 ``group_log`` 之后、``history`` 之前：既在"环境信息"之后，
-    又贴着历史之前 —— 模型读到的顺序是"我是谁 → 现在什么情况 → 之前聊了什么 → 本轮"。
-    """
-    return [
-        {"role": "system", "content": str(text).strip()}
-        for _name, text in (req.extra_blocks or [])
-        if str(text or "").strip()
-    ]
-
-
-def _extra_text_parts(req: PromptRequest) -> list[dict]:
-    """把 ``extra_user_content_parts`` 转成多模态 text 块；空白项丢弃。"""
-    return [
-        {"type": "text", "text": str(part)}
-        for part in (req.extra_user_content_parts or [])
-        if str(part or "").strip()
-    ]
-
-
-def build_user(req: PromptRequest) -> list[dict]:
-    """本轮消息。图片块由 ``place_images`` 在清洗前归位。
-
-    没有 ``extra_user_content_parts`` 时保持**纯字符串** content（与旧行为逐字一致）；
-    有值时改多块数组（正文 → 额外块），空正文只留额外块。
-    """
-    parts = _extra_text_parts(req)
-    if not parts:
-        return [{"role": "user", "content": req.user_text}]
-    content: list[dict] = []
-    if str(req.user_text or "").strip():
-        content.append({"type": "text", "text": req.user_text})
-    content.extend(parts)
-    return [{"role": "user", "content": content}]
-
-
-def build_all_blocks(req: PromptRequest) -> list[tuple[Block, list[dict]]]:
-    """按固定顺序生成所有块，返回 (块定义, 消息) 以便 describe/调试归因。
-
-    ``system_prompt_style == "single"`` 时把所有 system 块折成一条（见
+    ``system_prompt_style == "single"`` 时把所有 system 段折成一条（见
     ``fold_system_blocks``）；默认 ``blocks`` 保持既有形态不变。
     """
-    built: list[tuple[Block, list[dict]]] = []
-    for block in BLOCKS:
+    if sections is None:
+        try:
+            sections = resolve_blocks(req)
+        except Exception as e:  # noqa: BLE001 —— 留痕后中止本轮，绝不发畸形 prompt
+            logger.add_info(account_label(getattr(req.runtime, 'bot_id', '?'))).error(
+                f"[Assembly] 提示词段解析失败，已中止本轮组装: {e}"
+            )
+            raise
+    built: BuiltBlocks = []
+    for section in sections:
+        try:
+            messages = section.builder(req) or []
+        except Exception as e:  # noqa: BLE001 —— 单段失败不应炸掉整轮请求
+            logger.add_info(account_label(getattr(req.runtime, 'bot_id', '?'))).error(
+                f"[Assembly] 段 {section.name} 构建失败（已跳过该段）: {e}"
+            )
+            messages = []
+        built.append((section, list(messages)))
+    if system_style(req) == SYSTEM_STYLE_SINGLE:
+        built = fold_system_blocks(built)
+    return built
+
+
+def _build_legacy_blocks(req: PromptRequest, blocks: tuple[Block, ...]) -> BuiltBlocks:
+    """旧的自定义块表路径（``PromptAssembler(blocks=...)``）：行为与改造前一致。"""
+    built: BuiltBlocks = []
+    for block in blocks:
         try:
             if not block.applies(req):
                 built.append((block, []))
                 continue
             built.append((block, block.build(req) or []))
         except Exception as e:  # noqa: BLE001 —— 单块失败不应炸掉整轮请求
-            logger.add_info(account_label(getattr(req.runtime, 'bot_id', '?'))).warning(
+            logger.add_info(account_label(getattr(req.runtime, 'bot_id', '?'))).error(
                 f"[Assembly] 块 {block.name} 构建失败（已跳过）: {e}"
             )
             built.append((block, []))
@@ -482,9 +277,9 @@ def build_all_blocks(req: PromptRequest) -> list[tuple[Block, list[dict]]]:
     return built
 
 
-#: 组装风格：各块各自一条 system（默认，保持既有形态）
+#: 组装风格：各段各自一条 system（默认，保持既有形态）
 SYSTEM_STYLE_BLOCKS = "blocks"
-#: 组装风格：所有 system 块折成一条（对齐 AstrBot 「一整条 system prompt」的形态）
+#: 组装风格：所有 system 段折成一条（对齐 AstrBot 「一整条 system prompt」的形态）
 SYSTEM_STYLE_SINGLE = "single"
 
 
@@ -494,13 +289,13 @@ def system_style(req: PromptRequest) -> str:
     return SYSTEM_STYLE_SINGLE if style.strip().lower() == SYSTEM_STYLE_SINGLE else SYSTEM_STYLE_BLOCKS
 
 
-def fold_system_blocks(built: list[tuple[Block, list[dict]]]) -> list[tuple[Block, list[dict]]]:
-    """把各块的 system 消息折成一条，挂在**第一个**含 system 的块上。
+def fold_system_blocks(built: BuiltBlocks) -> BuiltBlocks:
+    """把各段的 system 消息折成一条，挂在**第一个**含 system 的段上。
 
-    - 只折叠 ``role == "system"`` 且 content 为字符串的消息，文本按块顺序用
+    - 只折叠 ``role == "system"`` 且 content 为字符串的消息，文本按段顺序用
       ``\\n\\n`` 连接（空内容丢弃）；其余角色（历史 / 本轮 user）与多模态块原样保留；
-    - 在**块结果**上折叠而不是在摊平后的消息列表上，是为了让 ``describe()`` 的
-      「块 ↔ 消息」对位继续成立：被折走消息的块显示为无消息，一眼能看出它去了哪。
+    - 在**段结果**上折叠而不是在摊平后的消息列表上，是为了让 ``describe()`` 的
+      「段 ↔ 消息」对位继续成立：被折走消息的段显示为无消息，一眼能看出它去了哪。
     """
     texts: list[str] = []
     target: int | None = None
@@ -519,64 +314,67 @@ def fold_system_blocks(built: list[tuple[Block, list[dict]]]) -> list[tuple[Bloc
         kept_blocks.append(kept)
 
     if target is None:
-        return built  # 没有任何 system 块 → 原样返回
+        return built  # 没有任何 system 段 → 原样返回
 
     kept_blocks[target].insert(0, {"role": "system", "content": "\n\n".join(texts)})
     return [(block, kept_blocks[index]) for index, (block, _msgs) in enumerate(built)]
 
 
-#: 块顺序 —— 想调整顺序/插块，只改这张表
-BLOCKS: tuple[Block, ...] = (
-    Block("persona", build_persona),
-    # 行为规则紧跟人格：人格讲"我是谁"，行为段讲"在这个群里怎么说话"，
-    # 越硬的约束越靠前（对齐 QQ-agent 的段落顺序，见 persona_rules 模块 docstring）
-    Block("behavior", build_behavior),
-    # 表情标签提示紧随行为段（行为段的【表情与拍一拍】指着它）
-    Block("emoji_hint", build_emoji_hint),
-    Block("schedule", build_schedule_instruction),
-    Block("proactive", build_proactive),
-    Block("message_meta", build_message_meta),
-    Block("skills", build_skills),
-    Block("memory", build_memory),
-    Block("background", build_background),
-    Block("group_log", build_group_log),
-    # 模块贡献的额外块（`runtime.context_providers`）：贴着历史之前
-    Block("extra", build_extra_blocks),
-    Block("history", build_history),
-    Block("user", build_user),
-)
+def default_blocks() -> tuple[Block, ...]:
+    """旧 ``Block`` 形态的默认块表（12 段 + ``extra``），按 order 排好。
+
+    deprecated：仅供既有测试/外部引用按名字查看顺序；装配走 ``SectionRegistry``。
+    """
+    pairs = [(section.order, Block(section.name, section.builder)) for section in default_sections()]
+    pairs.append((EXTRA_SECTION.order, Block(EXTRA_SECTION.name, EXTRA_SECTION.builder)))
+    pairs.sort(key=lambda item: (item[0], item[1].name))
+    return tuple(block for _order, block in pairs)
+
+
+#: 兼容常量（deprecated）：旧代码/测试用它看"默认块序列"；装配不再读它。
+BLOCKS: tuple[Block, ...] = default_blocks()
 
 
 class PromptAssembler:
-    """把 PromptRequest 装配成 final messages。"""
+    """把 PromptRequest 装配成 final messages。
 
-    def __init__(self, blocks: tuple[Block, ...] = BLOCKS) -> None:
+    默认（``blocks=None``）走 section 注册表：``registry_of(req.runtime).resolve()``；
+    传入 ``blocks`` 的旧构造路径保留一个版本，便于自定义块表逐字回退。
+    """
+
+    def __init__(self, blocks: tuple[Block, ...] | None = None) -> None:
+        #: 旧接口：自定义块表（None = 走 section 注册表）
         self.blocks = blocks
 
+    def _built(self, req: PromptRequest) -> BuiltBlocks:
+        if self.blocks is None:
+            return build_all_blocks(req)
+        return _build_legacy_blocks(req, self.blocks)
+
     def build(self, req: PromptRequest) -> list[dict]:
-        """装配 messages：生成块 → 归位 → 按模态清洗（唯一兜底）→ 贴发言协议。"""
-        built = build_all_blocks(req)
+        """装配 messages：解析段 → 逐段生成 → 归位 → 按模态清洗（唯一兜底）→ 贴发言协议。"""
+        built = self._built(req)
         messages = flatten(built)
         messages = place_images(messages, req)
         return apply_speech_protocol(sanitize(messages, req), req)
 
     def describe(self, req: PromptRequest) -> list[dict]:
-        """返回 ``[{block, role, chars}]``：不打印全文也能看清本轮发了什么。
+        """返回 ``[{block, role, chars, messages}]``：不打印全文也能看清本轮发了什么。
 
-        统计的是**最终发出**的形态：图片归位后的 user 块按 ``user+media`` 记，
-        被清洗掉的图片不会计入。块只生成一次（块函数允许有副作用，绝不能跑两遍）。
+        统计的是**最终发出**的形态：图片归位后的 user 段按 ``user+media`` 记，
+        被清洗掉的图片不会计入。段只生成一次（builder 允许有副作用，绝不能跑两遍）。
         """
-        built = build_all_blocks(req)
+        built = self._built(req)
         final = sanitize(place_images(flatten(built), req), req)
         return describe_blocks(built, final=final)
 
-    # 便于外部按名字取块（测试/调试）
+    # 便于外部按名字取段（测试/调试）
     def build_blocks(self, req: PromptRequest) -> list[dict]:
-        return flatten(build_all_blocks(req))
+        return flatten(self._built(req))
 
 
-def flatten(built: list[tuple[Block, list[dict]]]) -> list[dict]:
-    """把 ``(块, 消息)`` 摊平成最终消息列表。"""
+def flatten(built: BuiltBlocks) -> list[dict]:
+    """把 ``(段, 消息)`` 摊平成最终消息列表。"""
     return [msg for _block, messages in built for msg in messages]
 
 
@@ -623,14 +421,14 @@ def apply_speech_protocol(messages: list[dict], req: PromptRequest) -> list[dict
 
 
 def describe_blocks(
-    built: list[tuple[Block, list[dict]]],
+    built: BuiltBlocks,
     *,
     final: list[dict] | None = None,
 ) -> list[dict]:
-    """把 (块, 消息) 压成可读摘要。
+    """把 (段, 消息) 压成可读摘要。
 
-    每块一行：``{"block": 名字, "role": 角色, "chars": 文本长度, "messages": 条数}``；
-    空块也保留一行（``role="-"``、``chars=0``），便于"一眼看出本轮缺哪块"。
+    每段一行：``{"block": 名字, "role": 角色, "chars": 文本长度, "messages": 条数}``；
+    空段也保留一行（``role="-"``、``chars=0``），便于"一眼看出本轮缺哪块"。
     传入 ``final`` 时角色/长度以**最终发出**的消息为准（图片归位后为 ``user+media``）。
     """
     if final is None:
@@ -649,14 +447,14 @@ def describe_blocks(
                 })
         return rows
 
-    # 按最终消息对齐：块与消息顺序一致（块可产出 0/1/N 条）
+    # 按最终消息对齐：段与消息顺序一致（段可产出 0/1/N 条）
     cursor = 0
     rows = []
     for block, msgs in built:
         if not msgs:
             rows.append({"block": block.name, "role": "-", "chars": 0, "messages": 0})
             continue
-        for i in range(len(msgs)):
+        for _ in range(len(msgs)):
             role, chars = _summarize(final[cursor]) if cursor < len(final) else ("?", 0)
             rows.append({"block": block.name, "role": role, "chars": chars, "messages": 1})
             cursor += 1
@@ -746,8 +544,17 @@ def build_for(runtime: Any, req: PromptRequest) -> list[dict]:
     换成一个自带 ``build(req) -> list[dict]`` 的对象 —— 这是 1:1 复刻第三方组装
     格式（例如 AstrBot 的 ``build_main_agent``）的接入点。
 
+    另外把 ``runtime`` 回填到 ``req.runtime``（调用方没填时）：段注册表按 runtime
+    实例隔离，回填后 ``build_for(runtime, req)`` 与直接 ``PromptAssembler().build(req)``
+    取到的是同一张表，插件在这个 runtime 上注册的段不会被漏掉。
+
     装配器缺失或不合格时回退默认装配器并留痕，避免一个坏装配器让整轮请求炸掉。
     """
+    if getattr(req, "runtime", None) is None:
+        try:
+            req.runtime = runtime
+        except Exception as e:  # noqa: BLE001 —— 只读请求替身上回填失败就按无 runtime 处理
+            logger.debug(f"[Assembly] 回填 req.runtime 失败（按无运行时处理）: {e}")
     assembler = getattr(runtime, "assembler", None)
     if not callable(getattr(assembler, "build", None)):
         if assembler is not None:
@@ -858,3 +665,47 @@ async def apply_post_assemble(
         kind=getattr(req, "kind", ""),
     )
     return result
+
+
+__all__ = [
+    "BLOCKS",
+    "SYSTEM_STYLE_BLOCKS",
+    "SYSTEM_STYLE_SINGLE",
+    "Block",
+    "PromptAssembler",
+    "PromptRequest",
+    "apply_post_assemble",
+    "apply_speech_protocol",
+    "assembly_profile",
+    "build_all_blocks",
+    "build_background",
+    "build_behavior",
+    "build_emoji_hint",
+    "build_extra_blocks",
+    "build_for",
+    "build_group_log",
+    "build_history",
+    "build_memory",
+    "build_message_meta",
+    "build_messages",
+    "build_persona",
+    "build_proactive",
+    "build_schedule_instruction",
+    "build_skills",
+    "build_user",
+    "default_blocks",
+    "describe",
+    "describe_blocks",
+    "flatten",
+    "fold_system_blocks",
+    "message_meta_instruction",
+    "persona_begin_dialogs",
+    "place_images",
+    "prompt_preset",
+    "register_section",
+    "resolve_blocks",
+    "resolve_persona_preset",
+    "sanitize",
+    "system_style",
+    "unregister_section",
+]
