@@ -191,16 +191,11 @@ class AgentNode(MessageNode):
 
     @staticmethod
     def _outcome_of(event) -> str:
-        """入站节点能同步判定的结局：module（模块拦下）或 ignored（门控拦下）。
+        """判定这条入站消息的结局。
 
-        指令与「真正进 LLM」的判定在 `pipeline._run` 里做。
+        指令与「真正进 LLM」的判定在这里做（`record_inbound` 只在没交给流水线时调用）；
+        交给流水线的消息由 `pipeline._run` 记账（那里才知道真实结局）。
         """
-        if getattr(event, "_stopped", False) or getattr(event, "_llm_stop", False):
-            return "module"
-        return "ignored"
-    @staticmethod
-    def _outcome_of(event) -> str:
-        """判定这条入站消息的结局。"""
         from app.agent.commands import is_command
 
         try:
@@ -209,7 +204,8 @@ class AgentNode(MessageNode):
                 from app.domain.trigger import raw_user_text
 
                 text = raw_user_text(event)
-        except Exception:  # noqa: BLE001 —— 取不到正文就当没有
+        except Exception as e:  # noqa: BLE001 —— 取不到正文就当没有
+            logger.debug(f"[Stats] 读取消息正文失败（按空文本处理）: {e}")
             text = ""
         if text and is_command(text):
             return "command"
