@@ -357,6 +357,7 @@ async def run_scripted_turn(
     *,
     user_text: str,
     stream_script: Sequence[Any] = (),
+    abort: Any = None,
     chat_script: Sequence[Any] | None = None,
     config: dict | None = None,
     monkeypatch: pytest.MonkeyPatch | None = None,
@@ -454,6 +455,7 @@ async def run_scripted_turn(
                 kind=kind,
                 stream=stream,
                 record_history=record_history,
+                abort=abort,
             ),
         )
     finally:

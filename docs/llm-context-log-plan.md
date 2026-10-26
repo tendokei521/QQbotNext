@@ -383,7 +383,27 @@ Q1 压缩预算 ──▶ Q2 历史按需 ──▶ X1 评测集 ──▶ Q4 �
 3. **`concludes_turn` 的正文语义**：工具收尾时不臆造正文；`text` 为空则回复为空，但 `TurnReason`
    记 `completed`（工具明确表示办完），不记 `silent`。
 
-### 已知遗留
+### 收尾核对（Q0–Q7 全部落地后实测）
 
-- 全量 `pytest -q` 单进程仍偶发挂在 pytest-asyncio 的 loop finalizer（与本轮改动无关的
-  既有 flake）；分段跑各子目录全绿。定位结论见 `docs/tool-loop-refactor-plan.md` §8。
+| 验收项 | 命令 | 实测 | 结论 |
+|---|---|---|---|
+| 全量测试 | `python -m pytest -q` | **2765 passed, 17 skipped**（109s；skip 的是 eval，需 `-m eval`） | ✅ |
+| 评测集 | `python -m pytest tests/eval -q -m eval` | **18 passed**（17 + 取消场景） | ✅ |
+| ruff（本轮 133 个改过的 py） | 逐个比对 HEAD 基线 | 20 个文件有告警，**逐条均为既有**；`assembler.py` 因 Q4 反而从 3 条降到 0 | ✅ 零新增 |
+| 配置键 | `len(CORE_KEYS)` | **58**（Q1 +4、Q2 +2、Q5 +1，起点 51） | ✅ 三处登记 + 计数测试同步 |
+| 前端清单 | `python scripts/gen_sections.py --check` | 已是最新（新分组还补了图标） | ✅ |
+| 文档 | `docs/MODULE_DEV.md` §4.7.1–4.7.7 | 工具循环 / 能力 / 审批 / 提示词段 / 缓存 / 工具结果 / 中间件 | ✅ |
+
+### 关于"单进程偶发挂起"的更正
+
+上一轮把"全量偶发挂起"记成了**既有 flake**；本轮收尾时连跑多次全量均通过（含 109s 一次），
+且两次挂起都发生在**另一个并行工作者正在改文件**的时间窗内（14:18 / 14:43，其提交落在 15:01）。
+更准确的结论：**不是本仓库代码的稳定缺陷**，更像是"边改边跑"时读到了半成品模块。
+现在全量单进程稳定通过；若未来在 CI 上复现，再按 pytest-asyncio finalizer 方向排查。
+
+### 已知遗留（不影响本轮验收）
+
+- `X1` 未覆盖"压缩后历史"的黑盒场景（harness 仍 patch `prepare_prompt`，history 是字面量）。
+- Q5 未做 Gemini `cachedContents` 与"工具集变化通知"（前者网关差异大、后者改请求形态；评估后
+  收益/风险比不划算，已记录）。
+- `RoundSummary` 未带 `concluded_by`（`StepResult` 里有，调用方从那里取）。

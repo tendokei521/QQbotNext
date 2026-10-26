@@ -38,6 +38,9 @@ OUTPUT_KINDS = frozenset({OUTPUT_STREAM, OUTPUT_BLOCKING, OUTPUT_SPEECH})
 
 #: `llm_context` 模块声明的能力名
 CAP_CONTEXT_EXPAND = "context_expand"
+#: 提供"提示词段"的模块（Q4）：声明后可以往 `runtime.prompt_sections` 注册 Section。
+#: 框架自己的 12 段是内置的、不声明的——这里只用于"想接管/追加段"的第三方模块互查。
+CAP_PROMPT_SECTIONS = "prompt_sections"
 
 
 @dataclass(frozen=True)

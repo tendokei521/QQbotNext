@@ -834,6 +834,7 @@ surface-eligible（`user/assistant`）与 log-only（`tool/*`、`step/*`），
 
 ### 已知遗留（不属于 P0–P6 范围）
 
-- 全量测试存在**偶发挂起**（约 1/4 概率，位置不固定，栈始终在 TestClient/anyio 的
-  `run_until_complete`）。单跑 `tests/agent`、`tests/application` 或两者组合均正常；
-  重跑即过。未定位到与会话层/工具层的因果关系，留作独立排查项。
+- ~~全量测试存在偶发挂起~~ —— **已更正（2026-10-26 收尾）**：连跑多次全量单进程均通过
+  （`2765 passed, 17 skipped`，109s）。两次挂起都发生在另一个并行工作者正在改文件的时间窗内，
+  更像"边改边跑"读到了半成品模块，而不是本仓库代码的稳定缺陷。若 CI 复现，再从
+  pytest-asyncio finalizer（`backports.asyncio.runner` 的 `run_until_complete`）方向查。

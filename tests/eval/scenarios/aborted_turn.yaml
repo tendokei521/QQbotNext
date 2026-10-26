@@ -1,0 +1,11 @@
+name: aborted_turn
+description: 本轮在开始前就被取消——不请求模型、结局 ABORTED、interrupted 为真
+turns:
+  - user: "算了别查了"
+    abort: "被新消息取代"
+    provider_script: []
+    expect:
+      requests: 0
+      tools: []
+      contains: []
+      reason: aborted

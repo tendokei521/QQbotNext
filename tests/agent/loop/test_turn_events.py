@@ -177,3 +177,28 @@ async def test_tool_call_and_result_are_paired(harness):
     session = harness.holder["session"]
     derived = SessionLog(harness.mgr.history, session.task_id).derive_messages()
     assert all(str(m.get("role")) in ("user", "assistant") for m in derived)
+
+async def test_abort_scope_stops_the_turn_before_the_request(harness):
+    """Q2/P2：取消入口在 `TurnRequest.abort` 上——已取消的一轮不请求模型。"""
+    from app.agent.loop.turn_runner import AbortScope, TurnReason
+
+    scope = AbortScope()
+    scope.cancel("被新消息取代")
+    STREAM_SCRIPT.clear()
+
+    result = await harness.module.run_turn(
+        harness.runtime,
+        harness.module.TurnRequest(
+            session_id="group_1", is_private=False, user_text="查一下",
+            stream=True, abort=scope,
+        ),
+    )
+
+    assert result.reason is TurnReason.ABORTED
+    assert result.interrupted is True
+    assert result.text == ""
+    # 事件日志里也要能看到这一轮（start + end，reason=aborted）
+    events = _events(harness)
+    assert events[0]["type"] == EVENT_TURN_START
+    assert events[-1]["type"] == EVENT_TURN_END
+    assert events[-1]["payload"]["reason"] == "aborted"

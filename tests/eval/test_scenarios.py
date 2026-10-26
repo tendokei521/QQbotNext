@@ -169,9 +169,11 @@ def test_catalog_is_well_formed():
             assert "requests" in expect or "max_requests" in expect, (
                 f"{scenario['_file']}：expect 必须声明 requests 或 max_requests"
             )
-            assert bool(turn.get("provider_script")) or bool(scenario.get("provider_script")), (
-                f"{scenario['_file']}：缺少 provider_script"
-            )
+            # 取消场景本来就不该请求模型：允许"没有脚本"，但必须显式声明 abort
+            if not (bool(turn.get("provider_script")) or bool(scenario.get("provider_script"))):
+                assert turn.get("abort"), (
+                    f"{scenario['_file']}：缺少 provider_script（除非该轮声明 abort）"
+                )
 
 
 @pytest.mark.parametrize("scenario", SCENARIOS, ids=_ids())
@@ -186,6 +188,14 @@ async def test_scenario(scenario: dict, monkeypatch: pytest.MonkeyPatch):
     for turn in scenario["turns"]:
         plans, cursor = _plans_for_turn(scenario, turn, cursor)
         runtime = make_runtime(config)
+        abort_scope = None
+        if turn.get("abort"):
+            # 场景里写 ``abort: <原因>``：在本轮开始**之前**就取消，
+            # 锁住"取消入口 → 不请求模型 → 结局 ABORTED"这条链路。
+            from app.agent.loop.turn_runner import AbortScope
+
+            abort_scope = AbortScope()
+            abort_scope.cancel(str(turn["abort"]))
         result, requests = await run_scripted_turn(
             runtime,
             user_text=str(turn.get("user") or ""),
@@ -194,6 +204,7 @@ async def test_scenario(scenario: dict, monkeypatch: pytest.MonkeyPatch):
             stream=stream,
             kind=kind,
             history=history,
+            abort=abort_scope,
             monkeypatch=monkeypatch,
         )
         _assert_turn(scenario, turn, result, requests, runtime)

@@ -52,6 +52,7 @@ from app.agent.loop.tool_step import (
     KIND_EMPTY,
     KIND_ERROR,
     StepRequest,
+    TurnAborted,
     run_blocking_step,
     run_stream_step,
 )
@@ -101,6 +102,10 @@ class TurnRequest:
     record_history: bool = True
     system_prompt: str | None = None
     extra_user_content_parts: list[str] = field(default_factory=list)
+    #: 协作式取消句柄（`turn_runner.AbortScope`）。取消后本轮在"请求前/派发工具前"
+    #: 的检查点停下，已产出的前缀照常返回、历史照常落库，`TurnResult.interrupted=True`。
+    #: 与 `chat.stream_response` 走的是同一套 `AbortScope`，只是入口在参数上。
+    abort: Any = None
 
 
 @dataclass
@@ -302,37 +307,48 @@ async def _run_inner(
     # 轮次开始：广播事实（观测方拿得到本轮 model/tools 指纹）
     await run_stage(runtime, "turn_started", ctx)
 
-    if stream:
-        text, tool_results = await _stream_once(
-            runtime,
-            provider_chain=provider_chain,
-            messages=messages,
-            meta=meta,
-            all_specs=all_specs,
-            tool_ctx=tool_ctx,
-            use_tools=use_tools,
-            config=config,
-            on_sentence=on_sentence,
-            usage_sink=sink,
-            state=state,
-            ctx=ctx,
-            tool_log=turn_log,
+    try:
+        if stream:
+                text, tool_results = await _stream_once(
+                runtime,
+                provider_chain=provider_chain,
+                messages=messages,
+                meta=meta,
+                all_specs=all_specs,
+                tool_ctx=tool_ctx,
+                use_tools=use_tools,
+                config=config,
+                on_sentence=on_sentence,
+                usage_sink=sink,
+                state=state,
+                ctx=ctx,
+                tool_log=turn_log,
+                abort=req.abort,
+            )
+        else:
+            text, tool_results = await _chat_once(
+                runtime,
+                provider_chain=provider_chain,
+                messages=messages,
+                meta=meta,
+                all_specs=all_specs,
+                tool_ctx=tool_ctx,
+                use_tools=use_tools,
+                config=config,
+                usage_sink=sink,
+                state=state,
+                ctx=ctx,
+                tool_log=turn_log,
+                abort=req.abort,
+            )
+    except TurnAborted as e:
+        # 取消是**正常结局**：已产出的前缀照常返回、历史照常落库，
+        # 只是结局记 ABORTED（`interrupted` 由 AbortScope 置位，这里兜底置一次）。
+        state.interrupted = True
+        logger.add_info(account_label(getattr(runtime, "bot_id", "?"))).info(
+            f"[Turn] 本轮被取消（{e.cause}），已产出前缀继续返回"
         )
-    else:
-        text, tool_results = await _chat_once(
-            runtime,
-            provider_chain=provider_chain,
-            messages=messages,
-            meta=meta,
-            all_specs=all_specs,
-            tool_ctx=tool_ctx,
-            use_tools=use_tools,
-            config=config,
-            usage_sink=sink,
-            state=state,
-            ctx=ctx,
-            tool_log=turn_log,
-        )
+        text, tool_results = "", []
 
     result.text = text
     result.tool_results = tool_results
@@ -409,6 +425,7 @@ async def _chat_once(
     state: TurnState | None = None,
     ctx: Any = None,
     tool_log: Any = None,
+    abort: Any = None,
 ) -> tuple[str, list[dict]]:
     """非流式：一次步骤（工具多轮由 `run_blocking_step` 驱动），返回正文与工具结果。
 
@@ -445,6 +462,7 @@ async def _chat_once(
                 modalities=meta.get("modalities"),
                 on_round_end=_on_round_end,
                 tool_log=tool_log,
+                abort=abort,
             )
         )
 
@@ -491,6 +509,7 @@ async def _stream_once(
     state: TurnState | None = None,
     ctx: Any = None,
     tool_log: Any = None,
+    abort: Any = None,
 ) -> tuple[str, list[dict]]:
     """流式：逐句回调 ``on_sentence``，返回累计正文与工具结果。
 
@@ -537,6 +556,7 @@ async def _stream_once(
             on_round_end=_on_round_end,
             max_msg_len=max_msg_len,
             tool_log=tool_log,
+            abort=abort,
         )
     )
     if step.kind == KIND_ERROR:
