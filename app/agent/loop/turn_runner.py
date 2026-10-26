@@ -83,6 +83,10 @@ def classify_step(step) -> TurnReason:
         return TurnReason.ERROR
     if kind == KIND_MAX_ROUNDS:
         return TurnReason.MAX_ROUNDS
+    # Q6：工具自己要求收尾（finish 类）就是"这一轮办完了"。即便模型没写正文，
+    # 也不该记成 silent——silent 的产品含义是"它想了但没说"，而不是"任务已结束"。
+    if str(getattr(step, "concluded_by", "") or "").strip():
+        return TurnReason.COMPLETED
     if kind == KIND_EMPTY or not text.strip():
         # 被预算截断（正文还没开始就被砍）与"模型就是没话说"是两件事：
         # 前者要抬预算，后者是产品语义上的静默。
