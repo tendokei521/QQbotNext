@@ -55,7 +55,7 @@ class UIPage:
         return tuple(f for g in self.groups for f in g.fields)
 
 
-# ==================== 1. 本体界面（5 页 / 43 键）====================
+# ==================== 1. 本体界面（5 页 / 51 键）====================
 UI_PAGES: tuple[UIPage, ...] = (
     UIPage(
         id="basic",

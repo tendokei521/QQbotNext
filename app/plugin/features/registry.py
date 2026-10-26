@@ -2,29 +2,25 @@
 
 记录「哪个能力此刻被谁接管」，并发出 `FeatureLease` 凭证；`status()` 供 WebUI
 展示接管情况。
-"""
-
-from __future__ import annotations
-
-"""全局功能/能力注册表（FeatureRegistry）。
 
 插件扩展性核心：
-- 框架内置能力通过 FeatureController 注册为 feature_id；
+- 框架内置能力通过 FeatureController 注册为 feature_id（登记表：`builtin.py`）；
 - 插件声明 ``provides`` / ``supersedes`` 后，在加载/启用/卸载/禁用时自动接管或释放；
 - 接管是「租约」：多个插件同时接管同一能力时，只要还有租约持有者，能力就保持禁用；
   最后一个租约释放时自动恢复被接管前的状态。
 
-当前注册的框架能力：
-- ``proactive``：框架主动消息
-- ``schedule``：框架定时任务
-- ``memory``：长期记忆总开关
-- ``knowledge``：知识库总开关
-- ``onebot_tools``：OneBot 工具总开关
+当前注册的框架能力（v3 起只有 4 个）：
 - ``agent``：框架级 Agent 整体启停
 - ``assembly``：消息组装器（插件可整体替换本轮 messages 的组装）
-- ``provider_invoker``：provider 调用策略（插件可整体替换调用约定/工具循环位置）
+- ``provider_invoker``：provider 调用策略（插件负责回退链/重试；**工具循环**自 P1 起
+  只在 `app/agent/loop/tool_step.py`，接管者若自己跑循环要一并负责）
+- ``output``：输出策略（插件提供 `respond(ctx, *, should_stop=None)`）
+
+主动消息 / 定时任务 / 记忆 / 知识库 / OneBot 工具等是**业务**，由各自模块用基础接口
+实现，不是 feature（详见 `docs/FEATURE_REGISTRY.md`）。
 """
 
+from __future__ import annotations
 
 from typing import Any
 

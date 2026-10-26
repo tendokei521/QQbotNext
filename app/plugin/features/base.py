@@ -3,27 +3,10 @@
 - `FeatureController`：一个「能力接管者」的接口（谁接管了「LLM 回复」这类能力）；
 - `_RuntimeAccess`：统一从 services 里取 runtime 的小工具；
 - `FeatureLease`：登记凭证（dataclass），`release()` 归还能力。
-"""
 
-from __future__ import annotations
-
-"""全局功能/能力注册表（FeatureRegistry）。
-
-插件扩展性核心：
-- 框架内置能力通过 FeatureController 注册为 feature_id；
-- 插件声明 ``provides`` / ``supersedes`` 后，在加载/启用/卸载/禁用时自动接管或释放；
-- 接管是「租约」：多个插件同时接管同一能力时，只要还有租约持有者，能力就保持禁用；
-  最后一个租约释放时自动恢复被接管前的状态。
-
-当前注册的框架能力：
-- ``proactive``：框架主动消息
-- ``schedule``：框架定时任务
-- ``memory``：长期记忆总开关
-- ``knowledge``：知识库总开关
-- ``onebot_tools``：OneBot 工具总开关
-- ``agent``：框架级 Agent 整体启停
-- ``assembly``：消息组装器（插件可整体替换本轮 messages 的组装）
-- ``provider_invoker``：provider 调用策略（插件可整体替换调用约定/工具循环位置）
+注册的框架能力见 `app/plugin/features/builtin.py`（v3 起只有 4 个：`agent` /
+`assembly` / `provider_invoker` / `output`；主动消息、定时任务、记忆、知识库、
+OneBot 工具等是**业务**，由各自模块用基础接口实现，不是 feature）。
 """
 
 
