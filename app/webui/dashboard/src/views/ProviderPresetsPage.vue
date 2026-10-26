@@ -33,6 +33,23 @@ interface ProviderModel {
   updated_at: number
 }
 
+/** 内置预设模板（抄自 DSH 的 provider catalog，后端只读，不落库） */
+interface BuiltinPreset {
+  key: string
+  name: string
+  provider: string
+  protocol: string
+  category: string
+  api_base: string
+  env: string
+  models: string[]
+  note: string
+  docs: string
+  headers?: Record<string, string>
+  /** 已落库的同端点预设 id；非空 = 已添加 */
+  installed_preset_id: string
+}
+
 const MODALITY_OPTIONS = [
   { title: '文本', value: 'text' },
   { title: '图像', value: 'image' },
@@ -58,6 +75,10 @@ const fetchingModels = ref(false)
 const testingId = ref('')
 const savingSource = ref(false)
 const savingModel = ref(false)
+const builtinPresets = ref<BuiltinPreset[]>([])
+const builtinDialog = ref(false)
+const builtinLoading = ref(false)
+const importingBuiltinKey = ref('')
 // 请求序号：快速切换预设时丢弃过期响应，避免模型表显示别的预设的数据
 let modelsSeq = 0
 
@@ -106,6 +127,21 @@ const settingsForm = reactive({
 })
 
 const selectedPreset = computed(() => presets.value.find((p) => p.id === selectedPresetId.value))
+
+/** 内置预设按 category 分组，保持后端目录里的先后顺序 */
+const builtinCategories = computed(() => {
+  const groups: { title: string; items: BuiltinPreset[] }[] = []
+  for (const item of builtinPresets.value) {
+    const title = item.category || '其它'
+    let group = groups.find((g) => g.title === title)
+    if (!group) {
+      group = { title, items: [] }
+      groups.push(group)
+    }
+    group.items.push(item)
+  }
+  return groups
+})
 
 function defaultModalitiesFor(type: string): string[] {
   if (type === 'tts' || type === 'stt') return ['audio']
@@ -300,6 +336,42 @@ async function loadTemplate() {
     providerTemplate.value = res.data?.template || null
   } catch {
     providerTemplate.value = null
+  }
+}
+
+async function loadBuiltins() {
+  builtinLoading.value = true
+  try {
+    const res = await http.get<{ ok: boolean; presets: BuiltinPreset[] }>('/api/provider-presets/builtin')
+    builtinPresets.value = res.data?.presets || []
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  } finally {
+    builtinLoading.value = false
+  }
+}
+
+function openBuiltinDialog() {
+  loadBuiltins()
+  builtinDialog.value = true
+}
+
+async function importBuiltin(item: BuiltinPreset) {
+  if (importingBuiltinKey.value) return
+  importingBuiltinKey.value = item.key
+  try {
+    const res = await http.post<{ ok: boolean; created: boolean; preset: ProviderPreset }>(
+      `/api/provider-presets/builtin/${item.key}/import`,
+      {},
+    )
+    const created = res.data?.created
+    notify.push(created ? `已添加「${item.name}」，填好 API Key 后拉取模型` : `「${item.name}」已存在`, created ? 'success' : 'info')
+    if (res.data?.preset?.id) selectedPresetId.value = res.data.preset.id
+    await Promise.all([loadPresets(), loadBuiltins()])
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  } finally {
+    importingBuiltinKey.value = ''
   }
 }
 
@@ -525,6 +597,7 @@ onMounted(() => {
       </div>
       <v-spacer />
       <v-btn variant="tonal" prepend-icon="mdi-tune" class="mr-1" @click="openSettings">全局设置</v-btn>
+      <v-btn variant="tonal" prepend-icon="mdi-library-plus" class="mr-1" @click="openBuiltinDialog">内置预设</v-btn>
       <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="openCreateSource">新建连接预设</v-btn>
     </div>
 
@@ -674,6 +747,8 @@ onMounted(() => {
               { title: 'DeepSeek（兼容）', value: 'deepseek' },
               { title: 'OpenRouter（兼容）', value: 'openrouter' },
               { title: 'Ollama（兼容）', value: 'ollama' },
+              { title: 'Anthropic（Claude Messages）', value: 'anthropic' },
+              { title: 'Google Gemini', value: 'gemini' },
             ]"
             label="Provider 类型"
             density="comfortable"
@@ -704,6 +779,73 @@ onMounted(() => {
           <v-spacer />
           <v-btn variant="text" @click="sourceDialog = false">取消</v-btn>
           <v-btn color="primary" variant="tonal" :loading="savingSource" @click="saveSource">保存</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- 内置预设（抄自 DSH provider catalog） -->
+    <v-dialog v-model="builtinDialog" max-width="860" scrollable>
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon icon="mdi-library-plus" class="mr-2" color="primary" /> 内置预设
+          <v-spacer />
+          <v-btn size="small" variant="text" prepend-icon="mdi-refresh" :loading="builtinLoading" @click="loadBuiltins">刷新</v-btn>
+        </v-card-title>
+        <v-card-subtitle class="text-caption">
+          预设规则抄自 DSH 的 provider catalog。点「添加」只建连接预设；真实可用模型用「拉取模型」按账号获取。
+        </v-card-subtitle>
+        <v-divider />
+        <v-card-text>
+          <v-progress-linear v-if="builtinLoading && !builtinPresets.length" indeterminate color="primary" />
+          <template v-for="group in builtinCategories" :key="group.title">
+            <div class="text-subtitle-2 mt-3 mb-1">{{ group.title }}</div>
+            <v-list density="compact">
+              <v-list-item v-for="item in group.items" :key="item.key">
+                <template #prepend>
+                  <v-icon icon="mdi-server-network" color="primary" />
+                </template>
+                <v-list-item-title class="d-flex align-center flex-wrap">
+                  {{ item.name }}
+                  <v-chip size="x-small" variant="tonal" class="ml-2">{{ item.protocol }}</v-chip>
+                  <v-chip size="x-small" variant="text" class="ml-1">key: {{ item.env }}</v-chip>
+                </v-list-item-title>
+                <v-list-item-subtitle>
+                  <code class="text-caption">{{ item.api_base }}</code>
+                </v-list-item-subtitle>
+                <div class="text-caption mt-1">{{ item.note }}</div>
+                <div class="mt-1 d-flex flex-wrap">
+                  <v-chip v-for="m in item.models" :key="m" size="x-small" variant="tonal" class="mr-1 mb-1">{{ m }}</v-chip>
+                </div>
+                <template #append>
+                  <div class="d-flex flex-column align-end">
+                    <v-chip
+                      v-if="item.installed_preset_id"
+                      size="small"
+                      color="success"
+                      variant="tonal"
+                      prepend-icon="mdi-check"
+                    >已添加</v-chip>
+                    <v-btn
+                      v-else
+                      size="small"
+                      color="primary"
+                      variant="tonal"
+                      prepend-icon="mdi-plus"
+                      :loading="importingBuiltinKey === item.key"
+                      @click="importBuiltin(item)"
+                    >添加</v-btn>
+                    <a :href="item.docs" target="_blank" rel="noopener" class="text-caption mt-1">文档</a>
+                  </div>
+                </template>
+              </v-list-item>
+            </v-list>
+            <v-divider class="my-1" />
+          </template>
+          <div v-if="!builtinLoading && !builtinPresets.length" class="text-caption text-center py-6">暂无内置预设</div>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="builtinDialog = false">关闭</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
