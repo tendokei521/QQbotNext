@@ -63,6 +63,44 @@ const MODALITY_LABELS: Record<string, string> = {
   tool_use: '工具调用',
 }
 
+/**
+ * 「自定义预设」只让你选四种 API 格式——和成熟客户端的自定义 API 配置一致：
+ * 格式必须和端点实际支持的协议对得上，选错就是 404/400，而不是「玄学连不上」。
+ */
+const API_FORMAT_OPTIONS = [
+  {
+    title: 'Anthropic Messages（原生）',
+    value: 'anthropic',
+    props: { subtitle: 'Anthropic / MiniMax 等 Anthropic 兼容端点' },
+  },
+  {
+    title: 'OpenAI Chat Completions',
+    value: 'openai',
+    props: { subtitle: '最常见的 /v1/chat/completions，DeepSeek / 中转 / Ollama 也选它' },
+  },
+  {
+    title: 'OpenAI Responses API',
+    value: 'openai-responses',
+    props: { subtitle: 'OpenAI 新版 /v1/responses：部分新模型与中转只开这个端点' },
+  },
+  {
+    title: 'Gemini Native generateContent',
+    value: 'gemini',
+    props: { subtitle: 'Google Generative Language 原生端点' },
+  },
+]
+
+/** 老预设里可能存着 deepseek / ollama / claude 这类别名：编辑时归一到四种 API 格式 */
+function normalizeApiFormat(provider: string): string {
+  const raw = (provider || '').trim().toLowerCase()
+  if (raw === 'anthropic' || raw === 'claude') return 'anthropic'
+  if (raw === 'gemini' || raw === 'google') return 'gemini'
+  if (['openai-responses', 'openai_responses', 'openai-response', 'responses'].includes(raw)) {
+    return 'openai-responses'
+  }
+  return 'openai'
+}
+
 const notify = useNotifyStore()
 const presets = ref<ProviderPreset[]>([])
 const models = ref<ProviderModel[]>([])
@@ -285,7 +323,7 @@ function openEditSource(preset: ProviderPreset) {
   editingSourceId.value = preset.id
   Object.assign(sourceForm, {
     name: preset.name,
-    provider: preset.provider,
+    provider: normalizeApiFormat(preset.provider),
     api_base: preset.config.api_base || '',
     api_key: preset.config.api_key || '',
     retry_attempts: preset.config.retry_attempts || 3,
@@ -320,6 +358,7 @@ async function saveSource() {
     } else {
       const res = await http.post<{ preset: ProviderPreset }>('/api/provider-presets', payload)
       selectedPresetId.value = res.data?.preset?.id || ''
+      notify.push('自定义预设已创建', 'success')
     }
     sourceDialog.value = false
     await loadPresets()
@@ -604,8 +643,8 @@ onMounted(() => {
       </div>
       <v-spacer />
       <v-btn variant="tonal" prepend-icon="mdi-tune" class="mr-1" @click="openSettings">全局设置</v-btn>
-      <v-btn variant="tonal" prepend-icon="mdi-library-plus" class="mr-1" @click="openBuiltinDialog">内置预设</v-btn>
-      <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="openCreateSource">新建连接预设</v-btn>
+      <v-btn variant="tonal" prepend-icon="mdi-library-plus" class="mr-1" @click="openBuiltinDialog">添加内置预设</v-btn>
+      <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="openCreateSource">新建自定义预设</v-btn>
     </div>
 
     <v-row class="mt-2">
@@ -738,30 +777,30 @@ onMounted(() => {
       </v-col>
     </v-row>
 
-    <!-- 连接预设编辑 -->
+    <!-- 自定义预设编辑 -->
     <v-dialog v-model="sourceDialog" max-width="520">
       <v-card>
         <v-card-title class="d-flex align-center">
           <v-icon icon="mdi-api" class="mr-2" color="primary" />
-          {{ editingSourceId ? '编辑连接预设' : '新建连接预设' }}
+          {{ editingSourceId ? '编辑自定义预设' : '新建自定义预设' }}
         </v-card-title>
         <v-card-text>
           <v-text-field v-model="sourceForm.name" label="名称" placeholder="例如：DeepSeek 主账号" density="comfortable" hide-details class="mb-3" />
           <v-select
             v-model="sourceForm.provider"
-            :items="[
-              { title: 'OpenAI 兼容（DeepSeek/中转/Ollama 等）', value: 'openai' },
-              { title: 'DeepSeek（兼容）', value: 'deepseek' },
-              { title: 'OpenRouter（兼容）', value: 'openrouter' },
-              { title: 'Ollama（兼容）', value: 'ollama' },
-              { title: 'Anthropic（Claude Messages）', value: 'anthropic' },
-              { title: 'Google Gemini', value: 'gemini' },
-            ]"
-            label="Provider 类型"
+            :items="API_FORMAT_OPTIONS"
+            item-title="title"
+            item-value="value"
+            item-props
+            label="API 格式"
             density="comfortable"
             hide-details
-            class="mb-3"
+            class="mb-2"
           />
+          <div class="text-caption text-medium-emphasis mb-3">
+            格式要跟端点实际支持的协议一致，选错会直接 404/400。Responses API 是 OpenAI 新一代接口
+            （<code>/v1/responses</code>），部分新模型/中转只开这个端点，本项目已内置适配器。
+          </div>
           <v-text-field v-model="sourceForm.api_base" label="API 基础 URL" placeholder="https://api.deepseek.com" density="comfortable" hide-details class="mb-3" />
           <v-text-field
             v-model="sourceForm.api_key"
@@ -790,16 +829,16 @@ onMounted(() => {
       </v-card>
     </v-dialog>
 
-    <!-- 内置预设（抄自 DSH provider catalog） -->
-    <v-dialog v-model="builtinDialog" max-width="860" scrollable>
+    <!-- 添加内置预设（端点清单抄自 DSH provider catalog） -->
+    <v-dialog v-model="builtinDialog" max-width="760" scrollable>
       <v-card>
         <v-card-title class="d-flex align-center">
-          <v-icon icon="mdi-library-plus" class="mr-2" color="primary" /> 内置预设
+          <v-icon icon="mdi-library-plus" class="mr-2" color="primary" /> 添加内置预设
           <v-spacer />
           <v-btn size="small" variant="text" prepend-icon="mdi-refresh" :loading="builtinLoading" @click="loadBuiltins">刷新</v-btn>
         </v-card-title>
         <v-card-subtitle class="text-caption">
-          预设规则抄自 DSH 的 provider catalog。点「添加」只建连接预设；真实可用模型用「拉取模型」按账号获取。
+          常用服务商端点，点「添加」即可；API Key 与可用模型随后填。
         </v-card-subtitle>
         <v-divider />
         <v-card-text>
@@ -811,38 +850,27 @@ onMounted(() => {
                 <template #prepend>
                   <v-icon icon="mdi-server-network" color="primary" />
                 </template>
-                <v-list-item-title class="d-flex align-center flex-wrap">
-                  {{ item.name }}
-                  <v-chip size="x-small" variant="tonal" class="ml-2">{{ item.protocol }}</v-chip>
-                  <v-chip size="x-small" variant="text" class="ml-1">key: {{ item.env }}</v-chip>
-                </v-list-item-title>
+                <v-list-item-title>{{ item.name }}</v-list-item-title>
                 <v-list-item-subtitle>
                   <code class="text-caption">{{ item.api_base }}</code>
                 </v-list-item-subtitle>
-                <div class="text-caption mt-1">{{ item.note }}</div>
-                <div class="mt-1 d-flex flex-wrap">
-                  <v-chip v-for="m in item.models" :key="m" size="x-small" variant="tonal" class="mr-1 mb-1">{{ m }}</v-chip>
-                </div>
                 <template #append>
-                  <div class="d-flex flex-column align-end">
-                    <v-chip
-                      v-if="item.installed_preset_id"
-                      size="small"
-                      color="success"
-                      variant="tonal"
-                      prepend-icon="mdi-check"
-                    >已添加</v-chip>
-                    <v-btn
-                      v-else
-                      size="small"
-                      color="primary"
-                      variant="tonal"
-                      prepend-icon="mdi-plus"
-                      :loading="importingBuiltinKey === item.key"
-                      @click="importBuiltin(item)"
-                    >添加</v-btn>
-                    <a :href="item.docs" target="_blank" rel="noopener" class="text-caption mt-1">文档</a>
-                  </div>
+                  <v-chip
+                    v-if="item.installed_preset_id"
+                    size="small"
+                    color="success"
+                    variant="tonal"
+                    prepend-icon="mdi-check"
+                  >已添加</v-chip>
+                  <v-btn
+                    v-else
+                    size="small"
+                    color="primary"
+                    variant="tonal"
+                    prepend-icon="mdi-plus"
+                    :loading="importingBuiltinKey === item.key"
+                    @click="importBuiltin(item)"
+                  >添加</v-btn>
                 </template>
               </v-list-item>
             </v-list>
