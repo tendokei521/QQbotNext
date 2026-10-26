@@ -7,9 +7,10 @@
 
 收录口径：
 
-- 只收 QQbotNext6 适配器（``openai`` / ``anthropic`` / ``gemini``）能直接对话的
-  端点；DSH 里需要专用协议的服务（openai-responses、bedrock、mistral、pi-messages
-  等）不收，收进来也发不出去；
+- 只收 QQbotNext6 适配器（``openai`` / ``openai-responses`` / ``anthropic`` /
+  ``gemini``）能直接对话的端点；DSH 里需要专用协议的服务（bedrock、mistral、
+  pi-messages 等）不收，收进来也发不出去；
+- ``category`` 只有「国内 / 国外」两档，OpenCode 这类境外订阅也归「国外」；
 - ``api_base`` 按各家「真正拼出 /chat/completions、/v1/messages、:generateContent
   的基地址」写，别写完整端点（适配器会自己补路径）；
 - ``env`` 是 DSH / pi-ai 约定的环境变量名，方便用户照着自己设 key；
@@ -37,7 +38,7 @@ BUILTIN_PROVIDER_PRESETS: tuple[dict, ...] = (
         "name": "OpenCode Go",
         "provider": OPENAI,
         "protocol": "openai-completions",
-        "category": "OpenCode",
+        "category": "国外",
         "api_base": "https://opencode.ai/zen/go/v1",
         "env": "OPENCODE_API_KEY",
         "headers": dict(_OPENCODE_HEADERS),
@@ -50,7 +51,7 @@ BUILTIN_PROVIDER_PRESETS: tuple[dict, ...] = (
         "name": "OpenCode Zen",
         "provider": OPENAI,
         "protocol": "openai-completions",
-        "category": "OpenCode",
+        "category": "国外",
         "api_base": "https://opencode.ai/zen/v1",
         "env": "OPENCODE_API_KEY",
         "headers": dict(_OPENCODE_HEADERS),
@@ -173,7 +174,7 @@ BUILTIN_PROVIDER_PRESETS: tuple[dict, ...] = (
         "name": "Anthropic",
         "provider": ANTHROPIC,
         "protocol": "anthropic-messages",
-        "category": "国际",
+        "category": "国外",
         "api_base": "https://api.anthropic.com",
         "env": "ANTHROPIC_API_KEY",
         "models": ["claude-sonnet-5", "claude-haiku-5-5", "claude-opus-5"],
@@ -185,7 +186,7 @@ BUILTIN_PROVIDER_PRESETS: tuple[dict, ...] = (
         "name": "Google Gemini",
         "provider": GEMINI,
         "protocol": "google-generative-ai",
-        "category": "国际",
+        "category": "国外",
         "api_base": "https://generativelanguage.googleapis.com/v1beta",
         "env": "GEMINI_API_KEY",
         "models": ["gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-2.5-flash"],
@@ -197,7 +198,7 @@ BUILTIN_PROVIDER_PRESETS: tuple[dict, ...] = (
         "name": "OpenAI",
         "provider": OPENAI,
         "protocol": "openai-completions",
-        "category": "国际",
+        "category": "国外",
         "api_base": "https://api.openai.com/v1",
         "env": "OPENAI_API_KEY",
         "models": ["gpt-5.2", "gpt-5.4-mini", "gpt-4.1"],
@@ -209,7 +210,7 @@ BUILTIN_PROVIDER_PRESETS: tuple[dict, ...] = (
         "name": "OpenRouter",
         "provider": OPENAI,
         "protocol": "openai-completions",
-        "category": "国际",
+        "category": "国外",
         "api_base": "https://openrouter.ai/api/v1",
         "env": "OPENROUTER_API_KEY",
         "models": ["anthropic/claude-sonnet-4.5", "deepseek/deepseek-v4.1-flash", "z-ai/glm-5.3"],
@@ -221,7 +222,7 @@ BUILTIN_PROVIDER_PRESETS: tuple[dict, ...] = (
         "name": "MiniMax（国际）",
         "provider": ANTHROPIC,
         "protocol": "anthropic-messages",
-        "category": "国际",
+        "category": "国外",
         "api_base": "https://api.minimax.io/anthropic",
         "env": "MINIMAX_API_KEY",
         "models": ["MiniMax-M3", "MiniMax-M3.1-Flash"],
@@ -234,7 +235,7 @@ BUILTIN_PROVIDER_PRESETS: tuple[dict, ...] = (
         "name": "Groq",
         "provider": OPENAI,
         "protocol": "openai-completions",
-        "category": "国际",
+        "category": "国外",
         "api_base": "https://api.groq.com/openai/v1",
         "env": "GROQ_API_KEY",
         "models": ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "llama-3.3-70b-versatile"],
@@ -246,7 +247,7 @@ BUILTIN_PROVIDER_PRESETS: tuple[dict, ...] = (
         "name": "Cerebras",
         "provider": OPENAI,
         "protocol": "openai-completions",
-        "category": "国际",
+        "category": "国外",
         "api_base": "https://api.cerebras.ai/v1",
         "env": "CEREBRAS_API_KEY",
         "models": ["gpt-oss-120b", "qwen-3.8-27b"],
@@ -258,7 +259,7 @@ BUILTIN_PROVIDER_PRESETS: tuple[dict, ...] = (
         "name": "NVIDIA NIM",
         "provider": OPENAI,
         "protocol": "openai-completions",
-        "category": "国际",
+        "category": "国外",
         "api_base": "https://integrate.api.nvidia.com/v1",
         "env": "NVIDIA_API_KEY",
         "models": ["deepseek-ai/deepseek-v4.1-flash", "moonshotai/kimi-k2.6"],
@@ -270,7 +271,7 @@ BUILTIN_PROVIDER_PRESETS: tuple[dict, ...] = (
         "name": "Together AI",
         "provider": OPENAI,
         "protocol": "openai-completions",
-        "category": "国际",
+        "category": "国外",
         "api_base": "https://api.together.ai/v1",
         "env": "TOGETHER_API_KEY",
         "models": ["deepseek-ai/DeepSeek-V4.1-Flash", "moonshotai/Kimi-K3"],
@@ -282,7 +283,7 @@ BUILTIN_PROVIDER_PRESETS: tuple[dict, ...] = (
         "name": "Hugging Face Router",
         "provider": OPENAI,
         "protocol": "openai-completions",
-        "category": "国际",
+        "category": "国外",
         "api_base": "https://router.huggingface.co/v1",
         "env": "HF_TOKEN",
         "models": ["deepseek-ai/DeepSeek-V4.1-Flash", "moonshotai/Kimi-K3"],
@@ -294,7 +295,7 @@ BUILTIN_PROVIDER_PRESETS: tuple[dict, ...] = (
         "name": "Fireworks AI",
         "provider": OPENAI,
         "protocol": "openai-completions",
-        "category": "国际",
+        "category": "国外",
         "api_base": "https://api.fireworks.ai/inference/v1",
         "env": "FIREWORKS_API_KEY",
         "models": ["accounts/fireworks/models/glm-5p3", "accounts/fireworks/models/kimi-k3"],
