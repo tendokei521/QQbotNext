@@ -6,18 +6,59 @@
 
 ## 1. 模块目录结构
 
-一个模块是一个目录，放在 `app/plugins/<name>/` 下：
+一个模块是一个目录：
+
+- **内置模块**：`app/plugins/<name>/`（随 Python 包发布，只读语义；改它要改仓库）
+- **外部安装模块**：`data/module/plugins/<name>/`（用户在 WebUI 上传 zip 安装，可写语义）
+
+两种模块的**目录形态完全一致**——插件根下必须直接是 `main.py` + `module.json`：
 
 ```text
-app/plugins/<name>/
-  __init__.py
-  main.py           # 必须：定义 Module(BaseModule)
+<插件根>/<name>/
+  module.json         # 必须：清单（name/display_name/version/entry/api_version…）
+  __init__.py         # 可选（有则按包加载，支持相对导入）
+  main.py             # 必须：定义 Module(BaseModule)
   config_schema.py    # 可选：WebUI 配置表单
   service.py          # 可选：业务逻辑
   pages/index.html    # 可选：自定义配置页
+  requirements.txt    # 可选：第三方依赖清单（安装时只提示，不自动 pip 安装）
 ```
 
-最简单的 `main.py`：
+### 1.1 `module.json`（v2 清单）
+
+```jsonc
+{
+  "name": "bilibili_parser",     // 必填：全局唯一 id，须与目录名一致（[A-Za-z_][A-Za-z0-9_]*）
+  "display_name": "B站视频解析",   // 必填：UI 标题
+  "sign": "BilibiliParser",      // 可选：模块签名（命令/日志展示）
+  "version": "1.1.0",            // 必填：semver，用于 UI 展示与更新比较
+  "description": "……",           // 可选
+  "author": "tendokei521",       // 可选
+  "entry": "main.py",            // 可选，缺省 main.py
+  "api_version": 1,              // 必填：插件 API 版本；不兼容的模块拒绝加载
+  "requires": ["llm"],           // 可选：框架能力自检（缺失只 WARNING）
+  "requirements": "requirements.txt" // 可选：第三方依赖清单
+}
+```
+
+规则：
+
+- 内置模块缺清单 → 加载时 WARNING + 用类属性兜底（`version=0.0.0`），不阻断；
+- 外部模块缺清单 / `name` 非法 / `api_version` 不兼容 → **拒绝加载**，并在模块列表显示错误原因；
+- 清单 `display_name` 优先于类属性 `name` 用于 UI，类属性 `name` 只给代码内部引用；
+- 新增内置模块后跑 `python scripts/gen_module_manifests.py` 生成清单（`--check` 供 CI 校验）。
+
+### 1.2 安装 / 更新 / 删除（外部模块）
+
+- 安装：WebUI「功能模块 → 安装插件」上传 zip。服务端在 `data/module/.staging/` 解压并
+  **归一插件根**（自动剥掉 `repo-main/`、`__MACOSX/` 这类包装层），校验清单与入口后
+  原子换入 `data/module/plugins/<name>/`；失败不留半成品。
+- 更新：对已安装模块上传新版本 zip（覆盖安装），旧版本备份到 `data/module/.backup/`，
+  配置/权限/数据（`data/module/data/<name>/`）全部保留。
+- 删除：只删源码目录；配置与数据默认保留（可选清理）。内置模块**不可删除/不可覆盖**。
+- 历史嵌套坏装：`python scripts/fix_module_layout.py --yes` 一键上提（先备份，幂等）。
+
+最简单的 `main.py`：(清单仍必须存在)
 
 ```python
 from app.plugin import BaseModule

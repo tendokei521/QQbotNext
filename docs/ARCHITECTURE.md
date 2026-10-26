@@ -89,8 +89,8 @@ app/
 ├── application/     面向 WebUI 的能力编排（原 app/application）
 └── webui/           纯 HTTP 适配：api / schemas / ws / 唯一前端 dashboard
 
-plugins/             业务插件（原 module/）：builtin/ 内置 + installed/ 外部 zip 安装
-data/                运行时数据：app.db / llm/ / plugins/ / configs/（迁移源）
+app/plugins/         内置业务插件（随包发布、只读语义；每个目录含 module.json + main.py）
+data/module/         插件运行时数据：plugins/ 外部安装 + data/ 模块数据 + .staging/.backup + 软卸载状态
 tests/               按 app 的分区镜像（见 §3.7）
 scripts/             release.py + env 脚本 + experiments/（消融实验）
 docs/                设计文档 + 本方案（见 §4）
@@ -350,9 +350,19 @@ docs/                设计文档 + 本方案（见 §4）
 
 | 目录 | 是什么 | 谁改 |
 |---|---|---|
-| `app/plugin/` | 插件**框架**（加载/分发/权限/API） | 改框架才动 |
-| `app/plugins/` | 13 个**业务插件**代码 | 加/改业务功能动 |
-| `data/module/` | 插件**运行时数据**（configs / data / zip 安装 / 软卸载状态） | 用户数据，不动 |
+| `app/plugin/` | 插件**框架**（加载/分发/权限/API/编目/安装器） | 改框架才动 |
+| `app/plugins/` | **内置**业务插件代码（23 个，随包发布、只读语义） | 加/改内置功能动 |
+| `data/module/plugins/` | **外部安装**的第三方插件（用户 zip，可写语义） | 用户数据，不动 |
+| `data/module/` 其余 | 插件**运行时数据**（data/ 模块数据、.staging/.backup、软卸载状态） | 用户数据，不动 |
+
+**插件空间统一**（2026-10 重构，详见 [`module-management-redesign.md`](module-management-redesign.md)）：
+
+- 两个物理根（包内 `app/plugins/` + 运行时 `data/module/plugins/`）由 `app/plugin/catalog.py`
+  合成**一个逻辑编目**，`source` 区分 `builtin` / `installed`，同名冲突显式化而不是静默遮蔽；
+- `module.json` 是**所有**模块（含内置）的唯一清单；外部安装必须是"插件根直接含
+  `module.json` + `main.py`"，不再允许嵌套目录；
+- zip 安装走 `app/plugin/installer.py`：staging 解压 → 布局归一 → 清单校验 → 备份 →
+  原子换入 → 失败回滚；内置模块拒绝被第三方覆盖。
 
 原来的 `module/modules`（业务代码）已搬进 `app/plugins/`；运行时数据后来也从仓库根
 `module/` 搬进 `data/module/`（`app/infrastructure/fs/migrate.py`，启动时幂等迁移），
