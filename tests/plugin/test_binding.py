@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.plugin.binding import (
+from app.domain.binding import (
     SCOPE_ACCOUNT,
     SCOPE_CHANNEL,
     SCOPE_GLOBAL,

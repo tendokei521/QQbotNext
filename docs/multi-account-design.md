@@ -129,7 +129,7 @@ CREATE TABLE IF NOT EXISTS channel_policies (
 ## 5. 解析算法
 
 ```python
-# app/plugin/binding.py（纯函数，无 IO）
+# app/domain/binding.py（纯函数，无 IO）
 resolve(capability_id, account_id, channel_id) -> ResolvedBinding:
     candidates = [b for b in bindings(capability_id) if b.scope 匹配 (account_id, channel_id)]
     candidates.sort(key=scope_order)              # global < account < channel
