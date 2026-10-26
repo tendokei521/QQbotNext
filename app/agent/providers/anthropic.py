@@ -25,6 +25,10 @@ from app.agent.providers.base import (
 
 _DEFAULT_BASE = "https://api.anthropic.com"
 _API_VERSION = "2023-06-01"
+#: Anthropic 显式缓存标记（Messages API）：打在 system 最后一块上，让上游把
+#: 这段前缀缓存起来；不支持的网关/模型会因为多出这个字段直接 400，所以由
+#: ``prompt_cache_enable`` 控制，默认开启、可在 Agent 高级功能页关闭。
+_CACHE_CONTROL = {"type": "ephemeral"}
 _DATA_URL_RE = re.compile(r"^data:image/([a-z0-9.+-]+);base64,(.+)$", re.IGNORECASE | re.DOTALL)
 
 
@@ -151,6 +155,55 @@ class AnthropicProvider(BaseProvider):
     def _endpoint(self) -> str:
         return f"{self.api_base}/v1/messages"
 
+    def _prompt_cache_enabled(self) -> bool:
+        """是否给 system 打显式缓存标记（配置缺失按开启处理，与默认值一致）。"""
+        return bool(self.config.get("prompt_cache_enable", True))
+
+    def _system_payload(self, system: str | None) -> str | list[dict] | None:
+        """按开关决定 ``payload["system"]`` 的形态。
+
+        - 关闭 / 没有 system：保持改造前的纯字符串（或干脆不带 system 字段），
+          与既有请求逐字节一致；
+        - 开启：转成「一个 text 块 + ``cache_control``」，即 Messages API 的显式
+          缓存语法（system 只有一段，所以它同时是最后一块）。
+        """
+        if not system:
+            return None
+        if not self._prompt_cache_enabled():
+            return system
+        return [{"type": "text", "text": system, "cache_control": dict(_CACHE_CONTROL)}]
+
+    def _build_payload(
+        self,
+        messages: list[dict],
+        *,
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        tools: list[dict] | None = None,
+        stream: bool = False,
+    ) -> dict:
+        """构造 Messages API 请求体（``chat`` / ``chat_stream`` 共用）。
+
+        单独成方法是为了让「缓存标记是否打上」可被直接断言，而不必发真实请求。
+        """
+        system, chat_messages = _normalize_messages(messages)
+        payload: dict = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": chat_messages,
+        }
+        if stream:
+            payload["stream"] = True
+        system_payload = self._system_payload(system)
+        if system_payload is not None:
+            payload["system"] = system_payload
+        anth_tools = _to_anthropic_tools(tools)
+        if anth_tools:
+            payload["tools"] = anth_tools
+        return payload
+
     def _headers(self) -> dict:
         return {
             "x-api-key": self.api_key,
@@ -180,22 +233,16 @@ class AnthropicProvider(BaseProvider):
         只为兼容既有调用方（经 ``chat_with_fallback`` 调用时循环照旧由它驱动）。
         """
         model = model or self.config.get("model", "claude-3-5-sonnet-20241022")
-        system, chat_messages = _normalize_messages(messages)
-        anth_tools = _to_anthropic_tools(tools)
+        payload = self._build_payload(
+            messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            tools=tools,
+        )
 
         if not self.api_key:
             raise ProviderRequestError("API 密钥未配置", code="NO-API-KEY")
-
-        payload: dict = {
-            "model": model,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "messages": chat_messages,
-        }
-        if system:
-            payload["system"] = system
-        if anth_tools:
-            payload["tools"] = anth_tools
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -260,19 +307,14 @@ class AnthropicProvider(BaseProvider):
         tool_executor=None,
     ):
         model = model or self.config.get("model", "claude-3-5-sonnet-20241022")
-        system, chat_messages = _normalize_messages(messages)
-        payload: dict = {
-            "model": model,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "stream": True,
-            "messages": chat_messages,
-        }
-        if system:
-            payload["system"] = system
-        anth_tools = _to_anthropic_tools(tools)
-        if anth_tools:
-            payload["tools"] = anth_tools
+        payload = self._build_payload(
+            messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            tools=tools,
+            stream=True,
+        )
 
         if not self.api_key:
             yield StreamEvent(type="error", text="API 密钥未配置")

@@ -198,6 +198,8 @@ UI_PAGES: tuple[UIPage, ...] = (
                     "onebot_tools_log_enabled",
                 ),
             ),
+            # Q5：提示词缓存（显式缓存标记 + 前缀稳定）；不开也能跑，只是更贵
+            UIGroup("adv_model_cache", "模型缓存", ("prompt_cache_enable",)),
         ),
     ),
 )

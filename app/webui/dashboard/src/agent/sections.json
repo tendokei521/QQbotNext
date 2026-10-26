@@ -221,6 +221,14 @@
             "mcp_tools_log_enabled",
             "onebot_tools_log_enabled"
           ]
+        },
+        {
+          "id": "adv_model_cache",
+          "label": "模型缓存",
+          "icon": "mdi-cached",
+          "fields": [
+            "prompt_cache_enable"
+          ]
         }
       ]
     }

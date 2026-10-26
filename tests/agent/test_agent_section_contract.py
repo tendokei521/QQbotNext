@@ -100,7 +100,7 @@ def test_page_titles_match_the_agreed_layout():
         ("permission", 4),
         ("behavior", 8),
         ("session", 20),
-        ("advanced", 20),
+        ("advanced", 21),
     ],
 )
 def test_section_field_counts(section_id, expected):

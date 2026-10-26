@@ -296,6 +296,9 @@ DEFAULT_LLM_CONFIG: dict = {
     "context_compress_trigger_ratio": 0.8,
     "context_compress_keep_ratio": 0.16,
     "context_compress_backend": "summary",
+    # Q5 提示词缓存：给支持显式缓存的 provider（Anthropic）在 system 末尾打缓存标记，
+    # 让上游复用上一轮已读过的前缀；关掉 = 每次请求都按全价重算（不支持的网关可用它回退）。
+    "prompt_cache_enable": True,
 }
 
 # 框架级 Agent 配置/权限存储的 module_name

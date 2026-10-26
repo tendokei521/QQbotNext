@@ -21,6 +21,7 @@ SCHEMA = {
     "group_onebot": {"type": "group", "label": "OneBot 工具", "collapsible": True},
     "group_tools": {"type": "group", "label": "工具调用", "collapsible": True},
     "group_permission": {"type": "group", "label": "权限", "collapsible": True},
+    "group_model_cache": {"type": "group", "label": "模型缓存", "collapsible": True},
 
     # ==================== 配置项 ====================
     "group_enable": {
@@ -1023,6 +1024,13 @@ SCHEMA = {
     "meta_mask_nickname": {
         "type": "boolean", "label": "句子型昵称脱敏", "description": "把像句子或超长的昵称替换为「用户+QQ号」。",
         "default": True, "group": "group_memory",
+    },
+    # Q5 提示词缓存：部分模型支持复用上一轮读过的提示词前缀，命中后这部分输入
+    # 按折扣计费、首字更快。不支持的网关可能拒收缓存标记，可在此关闭。
+    "prompt_cache_enable": {
+        "type": "boolean", "label": "提示词缓存（省钱）",
+        "description": "让模型复用上一轮读过的提示词前缀，减少重复计费、加快首字。仅部分模型支持。",
+        "default": True, "group": "group_model_cache",
     },
 }
 

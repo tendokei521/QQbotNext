@@ -44,7 +44,7 @@ def _full_legacy_config() -> dict:
 def test_plan_keeps_core_keys_in_agent_row():
     plan = migration.plan_split(_full_legacy_config())
     assert set(plan["agent_remaining"]) == set(CORE_KEYS)
-    assert len(plan["agent_remaining"]) == len(CORE_KEYS) == 57
+    assert len(plan["agent_remaining"]) == len(CORE_KEYS) == 58
 
 
 def test_plan_moves_all_module_keys_to_the_right_module():
@@ -112,7 +112,7 @@ async def test_apply_split_writes_modules_and_trims_agent_row():
         service, "12345", plan, dry_run=False, dropped_sink=dropped
     )
 
-    assert stats["agent_keys"] == len(CORE_KEYS) == 57
+    assert stats["agent_keys"] == len(CORE_KEYS) == 58
     assert sum(stats["modules"].values()) == len(MODULE_KEY_SET)
     # agent 行只剩本体键
     assert set(service.get_module_config("agent", "12345")) == set(CORE_KEYS)
