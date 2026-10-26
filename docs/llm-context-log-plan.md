@@ -1,6 +1,6 @@
 # LLM 上下文与日志纵深改造方案（Q0–Q7）
 
-> 状态：**施工中**（Q3 / Q1 / Q2 / Q6 / Q7 / X1 已落地；Q4 / Q5 施工中）。上一轮
+> 状态：**全部落地**（Q1–Q7 + X1；收尾核对见 §7）。上一轮
 > `docs/tool-loop-refactor-plan.md` 的 P0–P6 已全部落地。进度看板见 §6。
 > 本文回答的是它**没覆盖**的那一半：**上下文工程**（提示词怎么长、历史怎么进、token 怎么管）
 > 与**日志纵深**（请求是否可复现、事件是否自洽、压缩是否可容错）。
@@ -370,8 +370,8 @@ Q1 压缩预算 ──▶ Q2 历史按需 ──▶ X1 评测集 ──▶ Q4 �
 | Q6 输出表达力 | ✅ 完成 | `b47a907` `76a3e52` | image/ref 块、`additional_contexts` 汇总成一条 `[工具补充]`、`concludes_turn`（两个 runner 同语义，收尾记 `completed`）、`present_call/present_result` |
 | Q7 中间件 | ✅ 完成 | `b47a907` | `app/agent/loop/middleware.py` 三个钩点、按 order、`abort` 拦截、`fail_closed` 可配、`runtime.middlewares` 注册/按 source 卸载 |
 | X1 评测集 | ✅ 完成 | `41d91f8` | `tests/eval/`（16 场景 + 17 用例，`-m eval` 才跑；默认收集为 skip） |
-| Q4 提示词注册表 | 🔄 施工中 | — | 12 块迁 `Section`、`register_section`、`complete` 冲突报错、字节级不变 |
-| Q5 KV cache | 🔄 施工中 | — | 前缀稳定指纹、Anthropic `cache_control`、`prompt_cache_enable` |
+| Q4 提示词注册表 | ✅ 完成 | `ca14d31` | 12 块迁 `Section`（order 10..120）、`register_section`、agent 遮蔽 global、`complete` 冲突报错、`extra_blocks` 占 105 保持逐字节一致；17 条测试含**字节级对比**（从 git 历史取改造前实现） |
+| Q5 KV cache | ✅ 完成 | `d757091` | `prompt_cache.py` 三个指纹函数、Anthropic `cache_control`（`prompt_cache_enable` 默认开、关掉即旧行为）、本体键 58 |
 
 ### 与方案的偏差（已落地，记录在此）
 
