@@ -1,0 +1,19 @@
+name: multi_turn_followup
+description: 同一会话连续两问（turns 多轮）——每问各一次请求、互不串脚本、都正常收尾
+turns:
+  - user: "第一问：今天几号"
+    provider_script:
+      - text: "今天 10 月 26 日。"
+    expect:
+      requests: 1
+      tools: []
+      contains: ["10 月 26"]
+      reason: completed
+  - user: "第二问：那明天呢"
+    provider_script:
+      - text: "明天 10 月 27 日。"
+    expect:
+      requests: 1
+      tools: []
+      contains: ["10 月 27"]
+      reason: completed

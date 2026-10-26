@@ -1,0 +1,13 @@
+name: empty_reply_silent
+description: 模型什么都没说（空回复）→ silent，空回复重试关掉时不得多发请求
+config:
+  empty_reply_retries: 0
+turns:
+  - user: "在吗"
+    provider_script:
+      - finish_reason: stop
+    expect:
+      requests: 1
+      tools: []
+      contains: []
+      reason: silent

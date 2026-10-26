@@ -1,0 +1,13 @@
+name: tool_error_result
+description: "工具以 error 文本失败 → 仍按工具结果回填给模型，循环继续到正常收尾（不整轮失败）"
+turns:
+  - user: "试试那个会报错的工具"
+    provider_script:
+      - tool_call: {name: probe_fail, arguments: {}, id: c0}
+      - text: "那个工具报错了，我换个办法。"
+    expect:
+      requests: 2
+      tools: [probe_fail]
+      contains: ["换个办法"]
+      reason: completed
+      tool_result_contains: ["error:"]

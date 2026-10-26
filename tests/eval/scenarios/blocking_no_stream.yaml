@@ -1,0 +1,12 @@
+name: blocking_no_stream
+description: 阻塞路径（stream=false）——走 provider.chat 单次请求，正文原样返回
+stream: false
+turns:
+  - user: "说一句话"
+    provider_script:
+      - text: "这是一句阻塞回复。"
+    expect:
+      requests: 1
+      tools: []
+      contains: ["阻塞回复"]
+      reason: completed

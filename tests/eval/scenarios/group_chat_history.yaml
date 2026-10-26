@@ -1,0 +1,20 @@
+name: group_chat_history
+description: 群聊多轮历史原样进第一条请求（历史条数可量化，老约定还在）
+history:
+  - {role: user, content: "（前情）昨天说好今天要发公告"}
+  - {role: assistant, content: "好，公告的事我记下了"}
+  - {role: user, content: "（前情）另外把报名表也带上"}
+  - {role: assistant, content: "报名表也记下了"}
+  - {role: user, content: "（前情）九点前到"}
+  - {role: assistant, content: "九点前到，没问题"}
+turns:
+  - user: "刚才说的公告发了吗"
+    provider_script:
+      - text: "还没发，我这就去发。"
+    expect:
+      requests: 1
+      tools: []
+      contains: ["这就去发"]
+      reason: completed
+      first_request_messages: 7
+      first_request_contains: ["昨天说好今天要发公告", "报名表也带上"]

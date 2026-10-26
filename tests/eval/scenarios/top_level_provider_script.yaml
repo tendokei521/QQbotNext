@@ -1,0 +1,18 @@
+name: top_level_provider_script
+description: 多轮共用一个顶层 provider_script（按每轮 expect.requests 切分）——脚本队列不串轮
+provider_script:
+  - text: "第一轮的回答。"
+  - text: "第二轮的回答。"
+turns:
+  - user: "第一轮问题"
+    expect:
+      requests: 1
+      tools: []
+      contains: ["第一轮的回答"]
+      reason: completed
+  - user: "第二轮问题"
+    expect:
+      requests: 1
+      tools: []
+      contains: ["第二轮的回答"]
+      reason: completed

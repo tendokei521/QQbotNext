@@ -1,0 +1,15 @@
+name: two_tool_rounds
+description: 两轮工具 → 恰好 3 次请求（原始 1 次 + 每次工具回填各 1 次），工具顺序 == 模型顺序
+turns:
+  - user: "帮我查两件事"
+    provider_script:
+      - tool_call: {name: probe_a, arguments: '{"x": 1}', id: c0}
+      - tool_call: {name: probe_b, arguments: '{"y": 2}', id: c1}
+      - text: "两件事都查好了。"
+    expect:
+      requests: 3
+      max_requests: 3
+      tools: [probe_a, probe_b]
+      contains: ["两件事都查好了"]
+      reason: completed
+      tool_result_contains: ["A 的结果", "B 的结果"]

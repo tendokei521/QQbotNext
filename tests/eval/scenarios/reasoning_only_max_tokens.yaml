@@ -1,0 +1,14 @@
+name: reasoning_only_max_tokens
+description: 只有思考没有正文且被 max_tokens 截断 → max_tokens（不是 silent），也不追加请求
+config:
+  reasoning_overflow_retries: 0
+turns:
+  - user: "这个问题很难，你慢慢想"
+    provider_script:
+      - reasoning: "先把条件列出来，再逐条推导……（思考把输出预算吃满）"
+        finish_reason: length
+    expect:
+      requests: 1
+      tools: []
+      contains: []
+      reason: max_tokens

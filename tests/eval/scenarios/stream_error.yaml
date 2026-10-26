@@ -1,0 +1,13 @@
+name: stream_error
+description: 流式请求报错（HTTP 429）→ error，且错误详情不被"空回复"吞掉
+config:
+  empty_reply_retries: 0
+turns:
+  - user: "帮我看看天气"
+    provider_script:
+      - error: "HTTP 429 上游限流"
+    expect:
+      requests: 1
+      tools: []
+      contains: []
+      reason: error

@@ -1,0 +1,14 @@
+name: two_tools_one_round
+description: 单轮内模型一次要两个工具——回填顺序必须等于模型顺序，共 2 次请求
+turns:
+  - user: "一次把两件事都办了"
+    provider_script:
+      - tool_calls:
+          - {name: probe_a, arguments: {x: 1}, id: c0}
+          - {name: probe_b, arguments: {y: 2}, id: c1}
+      - text: "顺序是 A 然后 B。"
+    expect:
+      requests: 2
+      tools: [probe_a, probe_b]
+      contains: ["A 然后 B"]
+      reason: completed

@@ -1,0 +1,13 @@
+name: blocking_max_tokens
+description: 阻塞路径被 max_tokens 截断且正文为空 → max_tokens，兜底话术仍交给用户（但结局不冒充 completed）
+stream: false
+turns:
+  - user: "想一想再回答"
+    provider_script:
+      - text: ""
+        finish_reason: length
+    expect:
+      requests: 1
+      tools: []
+      contains: ["抱歉"]
+      reason: max_tokens

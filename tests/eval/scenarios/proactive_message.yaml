@@ -1,0 +1,13 @@
+name: proactive_message
+description: 主动消息（kind=proactive）走同一套 run_turn——一次请求、completed、kind 真的写进了 PromptRequest
+kind: proactive
+turns:
+  - user: "（你已经很久没说话了，考虑开个话题）"
+    provider_script:
+      - text: "在的，刚看到群里有人问报名。"
+    expect:
+      requests: 1
+      tools: []
+      contains: ["刚看到群里有人问报名"]
+      reason: completed
+      prompt_kind: proactive

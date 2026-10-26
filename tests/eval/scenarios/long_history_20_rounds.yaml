@@ -1,0 +1,54 @@
+name: long_history_20_rounds
+description: 20 轮前说过的信息仍进第一条请求（41 条 messages）——压缩/裁剪改坏了会在这里立刻掉
+history:
+  - {role: user, content: "（20 轮前）周六上午十点在校门口集合，别迟到"}
+  - {role: assistant, content: "记下了：周六上午十点，校门口"}
+  - {role: user, content: "（前情 19）这次活动报名了 12 个人"}
+  - {role: assistant, content: "12 个人我记下来了"}
+  - {role: user, content: "（前情 18）名单里有两个新同学"}
+  - {role: assistant, content: "新同学的名字发我一下"}
+  - {role: user, content: "（前情 17）车已经订好了"}
+  - {role: assistant, content: "车订好就行"}
+  - {role: user, content: "（前情 16）预算还剩三百"}
+  - {role: assistant, content: "三百够用"}
+  - {role: user, content: "（前情 15）记得带充电宝"}
+  - {role: assistant, content: "充电宝已记"}
+  - {role: user, content: "（前情 14）天气可能下雨"}
+  - {role: assistant, content: "那就带把伞"}
+  - {role: user, content: "（前情 13）报名表在群文件里"}
+  - {role: assistant, content: "我去群文件找"}
+  - {role: user, content: "（前情 12）下午三点前截止"}
+  - {role: assistant, content: "三点前截止，明白"}
+  - {role: user, content: "（前情 11）老师也会来"}
+  - {role: assistant, content: "老师来我就多准备一份材料"}
+  - {role: user, content: "（前情 10）材料用 A4 纸"}
+  - {role: assistant, content: "A4 纸，记住了"}
+  - {role: user, content: "（前情 9）打印店在楼下"}
+  - {role: assistant, content: "楼下打印店方便"}
+  - {role: user, content: "（前情 8）钥匙在门卫那里"}
+  - {role: assistant, content: "钥匙找门卫拿"}
+  - {role: user, content: "（前情 7）桌子要摆成 U 形"}
+  - {role: assistant, content: "U 形桌，收到"}
+  - {role: user, content: "（前情 6）投影仪要提前试"}
+  - {role: assistant, content: "投影仪提前试好"}
+  - {role: user, content: "（前情 5）签到表打印二十份"}
+  - {role: assistant, content: "二十份签到表"}
+  - {role: user, content: "（前情 4）水买两箱"}
+  - {role: assistant, content: "两箱水"}
+  - {role: user, content: "（前情 3）垃圾袋也备一点"}
+  - {role: assistant, content: "垃圾袋也备"}
+  - {role: user, content: "（前情 2）结束后一起吃饭"}
+  - {role: assistant, content: "吃饭我来订位"}
+  - {role: user, content: "（前情 1）那就这么定了"}
+  - {role: assistant, content: "定了"}
+turns:
+  - user: "我们周六几点集合来着"
+    provider_script:
+      - text: "周六上午十点，校门口。"
+    expect:
+      requests: 1
+      tools: []
+      contains: ["周六上午十点"]
+      reason: completed
+      first_request_messages: 41
+      first_request_contains: ["周六上午十点在校门口集合"]

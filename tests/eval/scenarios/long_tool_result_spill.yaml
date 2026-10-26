@@ -1,0 +1,17 @@
+name: long_tool_result_spill
+description: 超长工具结果走 spill 落盘（消息里只剩预览 + 路径），循环不崩且能继续回答
+config:
+  tool_spill_enable: true
+  tool_spill_max_bytes: 50000
+turns:
+  - user: "把那段很长的日志读一下"
+    provider_script:
+      - tool_call: {name: probe_long, arguments: {size: 60000}, id: c0}
+      - text: "看完了，内容很长。"
+    expect:
+      requests: 2
+      tools: [probe_long]
+      contains: ["看完了"]
+      reason: completed
+      tool_result_contains: ["已落盘", "recall_tool_result"]
+      spill_files_min: 1

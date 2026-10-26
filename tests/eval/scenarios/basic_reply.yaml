@@ -1,0 +1,11 @@
+name: basic_reply
+description: 正常单轮回复——一次请求、completed、正文原样回到调用方
+turns:
+  - user: "你好"
+    provider_script:
+      - text: "你好呀，我在这里。"
+    expect:
+      requests: 1
+      tools: []
+      contains: ["你好呀"]
+      reason: completed

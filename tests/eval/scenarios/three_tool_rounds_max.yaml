@@ -1,0 +1,15 @@
+name: three_tool_rounds_max
+description: 三轮工具撞上 max_tool_rounds=3 → 恰好 3 次请求、结局 max_rounds、不再多请求一次
+config:
+  max_tool_rounds: 3
+turns:
+  - user: "连续查三次"
+    provider_script:
+      - tool_call: {name: probe_a, arguments: {step: 1}, id: c0}
+      - tool_call: {name: probe_a, arguments: {step: 2}, id: c1}
+      - tool_call: {name: probe_a, arguments: {step: 3}, id: c2}
+    expect:
+      requests: 3
+      tools: [probe_a, probe_a, probe_a]
+      contains: []
+      reason: max_rounds
