@@ -11,6 +11,7 @@ import asyncio
 from app.agent.client import ModuleLLMClient
 from app.agent.providers.runtime_manager import ProviderRuntimeManager
 from app.agent.runtime import AgentManager
+from app.agent.usage.recorder import StatRecorder, set_recorder
 from app.application.bot_service import BotService
 from app.application.cron_service import SchedulerService
 from app.application.log_service import LogService
@@ -27,7 +28,6 @@ from app.core.task_manager import TaskManager
 from app.infrastructure.cache import Cache
 from app.infrastructure.config.config_service import ConfigService
 from app.infrastructure.onebot.gateway import OneBotGateway
-from app.agent.usage.recorder import StatRecorder, set_recorder
 from app.infrastructure.persistence.database import Database
 from app.plugin.base import ServiceAccess
 from app.plugin.dispatcher import ModuleDispatcher
@@ -334,6 +334,9 @@ def build_container(settings: Settings | None = None) -> Container:
     container.register_factory(OneBotGateway, lambda: gateway)
 
     # 节点注册表：内置入站链（路由 → 权限 → 派发 → Agent 兜底），框架/模块可插入/替换
+    # 响应权仲裁（多账号同群）：策略存储 + 仲裁服务，唯一允许同时看注册表/网关/策略的组件
+    from app.application.policy_store import LegacyPolicyStore
+    from app.application.responder_service import ResponderService
     from app.plugin.nodes import (
         AgentNode,
         ModuleCommandNode,
@@ -344,10 +347,26 @@ def build_container(settings: Settings | None = None) -> Container:
         OutboundPipeline,
     )
 
+    policy_store = LegacyPolicyStore(config_service)
+    responder_service = ResponderService(
+        policy_store=policy_store,
+        registry=registry,
+        gateway=gateway,
+        config_service=config_service,
+        agent_manager=agent_manager,
+        log=logger,
+    )
+    container.register_factory(ResponderService, lambda: responder_service)
+
     node_registry = NodeRegistry()
-    node_registry.register(AgentNode(agent_manager, config_service, gateway, logger))
+    node_registry.register(AgentNode(agent_manager, config_service, gateway, logger, responder=responder_service))
     node_registry.register(ModuleRouterNode(registry, logger))
-    node_registry.register(ModulePermissionNode(config_service, gateway, logger, agent_manager))
+    node_registry.register(
+        ModulePermissionNode(
+            config_service, gateway, logger, agent_manager,
+            registry=registry, responder=responder_service,
+        )
+    )
     node_registry.register(ModuleCommandNode(logger))
     node_registry.register(ModuleInvokeNode(logger))
     container.register_factory(NodeRegistry, lambda: node_registry)

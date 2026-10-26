@@ -77,11 +77,13 @@ class AgentNode(MessageNode):
     name = "agent"
     order = 130  # 模块链（Router 100 / Permission 110 / Invoke 120）之后
 
-    def __init__(self, agent_manager: Any, config_service: Any, gateway: Any, log=None) -> None:
+    def __init__(self, agent_manager: Any, config_service: Any, gateway: Any, log=None, *, responder: Any = None) -> None:
         self.agent_manager = agent_manager
         self.config_service = config_service
         self.gateway = gateway
         self.log = log or logger
+        #: 响应权仲裁器（docs/multi-account-design.md §6）；为空时退回旧的单一服务判定
+        self.responder = responder
 
     def _account_logger(self, event):
         return self.log.add_info(getattr(event, "account_name", "") or "?")
@@ -121,7 +123,17 @@ class AgentNode(MessageNode):
             self._account_logger(event).debug(f"[Agent] 跳过：账号 {account_id} 的 Agent 已在配置中禁用")
             await next_()
             return
-        if is_single_service_skipped(gate, event, self.config_service, self.gateway):
+        if self.responder is not None:
+            decision = self.responder.decide_agent(event)
+            if not decision.allows(account_id):
+                self._account_logger(event).debug(
+                    f"[Responder] Agent 跳过：{decision.reason}"
+                    f"（候选={list(decision.candidates)}，响应={list(decision.responders)}，"
+                    f"当前账号={account_id}）"
+                )
+                await next_()
+                return
+        elif is_single_service_skipped(gate, event, self.config_service, self.gateway):
             self._account_logger(event).debug(
                 f"[Agent] 跳过：单一服务模式把本群响应权交给了账号 "
                 f"{self._single_service_index(event)}（当前账号={account_id}）"
@@ -259,16 +271,21 @@ class ModuleRouterNode(MessageNode):
 
 
 class ModulePermissionNode(MessageNode):
-    """启停 / 单一服务 / 权限等级过滤。可被替换以实现自定义权限策略。"""
+    """启停 / 响应权仲裁 / 权限等级过滤。可被替换以实现自定义权限策略。"""
 
     name = "permission"
     order = 110
 
-    def __init__(self, config_service: Any, gateway: Any, log=None, agent_manager: Any = None) -> None:
+    def __init__(self, config_service: Any, gateway: Any, log=None, agent_manager: Any = None,
+                 registry: Any = None, responder: Any = None) -> None:
         self.config_service = config_service
         self.gateway = gateway
         self.log = log or logger
         self.agent_manager = agent_manager
+        #: 模块实例来源（仲裁候选集合需要看其它账号的实例）；为空时退回旧判定
+        self.registry = registry
+        #: 响应权仲裁器（docs/multi-account-design.md §6）
+        self.responder = responder
 
     # ---------- 名册身份 ----------
 
@@ -317,7 +334,15 @@ class ModulePermissionNode(MessageNode):
         for module in ctx.state.get("candidates", []) or []:
             if not check_module_enabled(module):
                 continue
-            if self._is_single_service_skipped(module, event):
+            if self.responder is not None:
+                decision = self.responder.decide_module(module.module_name, event)
+                if not decision.allows(event.account_id):
+                    self.log.debug(
+                        f"[Responder] {module.module_name} 跳过账号 {event.account_id}："
+                        f"{decision.reason}（候选={list(decision.candidates)}）"
+                    )
+                    continue
+            elif self._is_single_service_skipped(module, event):
                 continue
             # 模块级权限过滤：黑白名单 + permission 角色
             if not check_module_permission(module, event):
