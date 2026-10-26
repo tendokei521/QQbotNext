@@ -244,20 +244,24 @@ pytest -q --cov --cov-report=term-missing   # 需要覆盖率时
 
 ### 12.0 进度速览（P0–P9 已完成，收尾见 §12.1 末尾）
 
+> **2026-10-26 复测**（工具循环 P0–P6 落地后）：本节数字用
+> `scripts/gen/arch_closure.py` 重算过一遍，只更新了能**直接测出来**的行；
+> 标「未复核」的仍是上一轮的数字，别当准数用。
+
 | 指标 | 制定方案时 | 现在 |
 |---|---|---|
-| 最大强连通块 | 24 文件 / 12,112 行（仅模块层 import；含惰性 import 实测 27 文件 / 13,547 行） | **0 个 —— 全图无环** |
-| `chat.py` 可达闭包 | 143 文件 / 42,082 行 | **87 文件 / 23,721 行** |
+| 最大强连通块 | 24 文件 / 12,112 行（仅模块层 import；含惰性 import 实测 27 文件 / 13,547 行） | 含惰性 import：**2 块 / 53 文件 / 17,418 行**；`--no-lazy`：**1 块 / 4 文件 / 661 行**（这是**既有欠账**：`git worktree` 回测 `2a1c1ab^` 时同样是 1/2 个块，不是这一轮引入的） |
+| `chat.py` 可达闭包 | 143 文件 / 42,082 行 | 未复核（重算见下方命令） |
 | 生产代码 `from app.bootstrap import` | 4 | **0** |
 | `get_container()` 直调 | 71 次 / 14 文件 | **1 次**（只剩 `deps.py` 里的实现本身） |
 | 端点里 `container.get(类型)` | — | **2 次**（都在 `deps.get_service` 内部） |
 | 单文件最大 `manifest.py` | 4,789 行 | **已外置 JSON**（加载器 78 行） |
-| `app/agent/` 顶层平铺 | 55 文件 / 20,916 行 | **8 文件 / 2,939 行**（14 个职责子包） |
-| 单文件最大 `chat.py` | 2,192 行 | **618 行**（拆成 `loop/` 下 10 个子模块） |
-| `registry.py` / `features.py` / `gateway.py` / `config_service.py` | 681 / 538 / 817 / 823 行 | **505 / 包（最大 326）/ 753 / 779 行** |
-| `app/domain/` | 4 文件 / 595 行（全是 DTO） | **10 文件 / 1,288 行**（时间解析/触发/分条/节奏/标签/能力判定） |
+| `app/agent/` 顶层平铺 | 55 文件 / 20,916 行 | **10 文件 / 3,856 行**（子包 14 个） |
+| 单文件最大 `chat.py` | 2,192 行 | **660 行**（循环已搬进 `loop/tool_step.py`；`loop/` 下 19 个子模块） |
+| `registry.py` / `features.py` / `gateway.py` / `config_service.py` | 681 / 538 / 817 / 823 行 | **505 / 包（最大 326）/ 753 / 779 行**（未复核） |
+| `app/domain/` | 4 文件 / 595 行（全是 DTO） | **10 文件 / 1,288 行**（未复核） |
 | 包职责说明 README | 0 份 | **27 份**，且由 `tests/architecture/test_architecture_layout.py` 强制 |
-| 超 800 行的源文件 | — | **1 个**（`config_schema.py`，数据 + DSL，刻意不拆） |
+| 超 800 行的源文件 | — | **1 个**（`config_schema.py`，1,195 行：数据 + DSL，刻意不拆） |
 | 前端套数 | 2 套（Vue + 手写 JS，约 4,800 行重复） | **1 套**（`app/webui/dashboard/dist`；旧版与 `/legacy` 已删） |
 | 业务插件位置 | `module/modules/`（仓库根） | **`app/plugins/`**（运行时数据在 `data/module/`） |
 | `app/` 顶层目录 | 10 个（含 `nodes` / `services`） | **8 个**（agent application core domain infrastructure plugin plugins webui） |
