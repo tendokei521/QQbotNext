@@ -855,7 +855,13 @@ await self.llm_turn("讲个故事", session_id="private_456", stream=True, send=
 ```
 
 `TurnResult` 字段：`text` / `messages`（本轮最终请求体，对账用）/ `tool_results` /
-`usage` / `blocked` / `error` / `session_id`。
+`usage` / `blocked` / `error` / `session_id`，以及 P2 起新增的
+`reason`（`TurnReason`，见下表）/ `rounds`（本轮实际跑了几轮）/ `interrupted`（是否被取消）。
+
+`reason` 取值：`completed` / `silent` / `blocked` / `max_rounds` / `max_tokens` /
+`error` / `aborted`。它由事实推导（轮数用尽、`finish_reason`、异常、取消），
+**不要**再从回复文本猜"这轮算不算成功"——兜底话术不会把空回答变成 `completed`。
+流式主路径（`chat.stream_response`）把同一结论写进 `ctx.state["turn_reason"]`。
 
 服务侧等价入口：`ctx.services.llm.turn(...)`。
 
@@ -869,6 +875,24 @@ raw = mgr.history_snapshot("group_123")   # 未投影的原始条目（自带渲
 ```
 
 > 单例 key 已归一成字符串，所以传 `self.bot_id`（int）或 `"123"` 拿到的是同一个实例。
+
+**P4 起：历史是"追加式事件日志"，`messages` 是派生缓存**。`add_message` /
+`upsert_streaming_assistant` / `mark_last_assistant_message_id` 的签名与行为不变
+（内部多写一条事件），`get_history` / `history_snapshot` 读到的仍是同一个视图，
+所以模块侧无需改动。想看"这一天到底发生了什么"（含工具调用、轮次结局）时，
+用 `SessionLog`：
+
+```python
+from app.agent.session.session_log import SessionLog
+
+log = SessionLog(mgr.history, mgr.get_session("group_123").task_id)
+events = log.events()              # 只追加的全量事件（turn/end 里带 reason）
+messages = log.derive_messages()   # 与 get_history 同形的投影
+```
+
+> 投影只取 `user/message` 与 `assistant/message`；工具调用/结果只入日志、**不进模型可见历史**
+> （工具结果要不要跨轮持久化是另一个产品决策）。存量库需要先跑
+> `python scripts/migrate_session_events.py` 才会有事件。
 
 ### 4.9.5 `self.framework_tools(session_id)` —— 框架工具集只读视图
 

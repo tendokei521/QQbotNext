@@ -1,6 +1,10 @@
-﻿# Agent 工具循环专业化改造（对标 DSH）
+# Agent 工具循环专业化改造（对标 DSH）
 
-> 状态：**方案稿**（P0 未开工）。
+> 状态：**方案稿（已被施工方案取代）**。本文只回答"差距在哪、为什么要改"；
+> **怎么改、改到哪一步了**见 [`docs/tool-loop-refactor-plan.md`](tool-loop-refactor-plan.md)
+> （P0–P6 已全部落地，看板与收尾核对在那一篇的 §7 / §8）。
+> 正文保留当时的判断与证据，其中"现状"类描述已不再代表当前代码——例如工具循环现在
+> 只剩 `app/agent/loop/tool_step.py` 一处、三个 provider 适配器只发单次请求。
 > 基准实现：DeepSeek Harness（本地 `C:\Users\Admin\.dsh\profiles\node_modules\@deepseek-ai\*`，
 > 下称 DSH）；引用格式 `包/lib/文件:行`。
 > 范围：`app/agent/loop/`、`app/agent/tools/`、`app/agent/providers/` 的**调用约定与生命周期**，

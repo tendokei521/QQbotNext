@@ -9,6 +9,25 @@
 
 ## 0. 怎么读这份文档
 
+> **这份文档是 v3「目录/分层重构」的施工方案与记录**，其中 §3 的逐文件去向、§5.2 的
+> "P0–P6 实测结果"、附录 A 的行数统计都指向**那一轮重构**（与本篇提到的"工具循环 P0–P6"
+> 不是同一组编号）。目录现状仍以它为准，但**调用约定与生命周期**在另一轮改造里已变化，
+> 当前事实见 [`docs/tool-loop-refactor-plan.md`](tool-loop-refactor-plan.md)：
+>
+> - 工具循环只剩 `app/agent/loop/tool_step.py` 一处；三个 provider 适配器只发单次请求，
+>   把要调的工具报在 `LLMResponse.tool_calls`（`chat_with_fallback(tool_executor=...)`
+>   作为兼容壳内部驱动循环）；
+> - 一轮的结局是 `TurnReason`（`loop/turn_runner.py`），取消是协作式 `AbortScope`
+>   （只在请求前/派发工具前检查）；
+> - 会话历史是**追加式事件日志**（`history_events` + `SessionLog`），
+>   `conversations.messages` 降级为派生缓存；
+> - `ToolSpec` 多了并发/超时/敏感级别，工具结果有结构化错误码与 spill；
+> - 输出形态与 `context_expand` 由 `runtime.capabilities` **声明**，
+>   高危工具走 `runtime.approval_channel`（fail-closed）。
+>
+> 因此下文出现的"`stream_response` 378 行含工具循环""provider 内部跑工具循环"
+> 等描述属于**改造前**，读代码时以源码与上述文档为准。
+
 | 你想干的事 | 读哪一节 |
 |---|---|
 | 判断这次改动会影响多大范围 | §2.3 一页表 |
@@ -530,13 +549,21 @@ docs/                设计文档 + 本方案（见 §4）
 | 代码风格 / 命名 / 类型注解 / 函数长度 | **`STYLE.md`** | 全部指向 |
 | 已知架构债 + 验收指标 | **`STYLE.md §12`** | 本文件 §7 只引用指标值 |
 | 插件开发契约（目录、钩子、`ctx` API） | **`docs/MODULE_DEV.md`** | `README`「写插件」只给一行 + 链接 |
-| 模块配置表单字段 | **`docs/CONFIG_SCHEMA.md`** | — |
+| 插件开发契约之**工具循环 / 能力声明 / 审批通道** | **`docs/MODULE_DEV.md` §4.7** | 只有那一处写细节 |
+| 工具循环的改造史（P0–P6 差距、方案、看板） | **`docs/tool-loop-refactor-plan.md`** | 其他文档一句话 + 链接 |
+| 模块配置表单字段 | **`app/agent/config_schema.py`**（生成 `app/webui/dashboard/src/agent/sections.json`） | 不要在文档里复述键表 |
 | 启动 / 运维 / 环境变量 / 备份 | **`MAINTENANCE.md`** | `README` 只放三行快速开始 |
 | 用户视角功能清单 | **`README.md`** | — |
 | 提交与验证分档 | **`AGENTS.md`** | `STYLE.md §11` 已改为指向 |
-| 设计原因（为什么这么设计） | **`docs/design/*.md`** | — |
-| 与外部实现的对齐分析 | **`docs/alignment/*.md`** | — |
+| 设计原因（为什么这么设计） | **`docs/*-design.md`**（见下） | — |
+| 与外部实现的对齐分析 | **`docs/qq-agent-*.md`** | — |
 | 版本变更 | **`CHANGELOG.md`** | — |
+
+> **现状说明（2026-10）**：下面的 `docs/` 重排方案**没有执行**——`docs/` 仍然是扁平命名
+> （`context-expand-design.md`、`FEATURE_REGISTRY.md`、`qq-agent-*.md` 直接放在 `docs/`
+> 根下，没有 `design/`、`alignment/`、`archive/` 子目录），也没有 `docs/CONFIG_SCHEMA.md`：
+> 配置表单字段的准一来源就是 `app/agent/config_schema.py`（前端清单由
+> `scripts/gen_sections.py` 生成）。引用路径时以实际文件为准。
 
 `docs/` 重排：
 

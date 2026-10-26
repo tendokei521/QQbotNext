@@ -120,6 +120,27 @@ v3.2 起彻底移除：**模型参数只认「Provider 预设 → 模型」**，
 
 ---
 
+## 工具执行与审批
+
+P3–P6 新增的 6 个键。前四个在「高级功能 → 工具执行」，`prompt_dump_verify` 在
+「会话管理 → 上下文压缩」，`tool_approval_enable` 在「权限管理 → 高危工具审批」
+（分组以 `config_partition.py` 的 `UIGroup` 为准，界面不另写一份）。
+
+| 键 | 默认 | 取值 | 设计意图 |
+|---|---|---|---|
+| `tool_parallel_max` | 8 | 1..32 | 同一时刻最多几个「声明可并行」的工具一起跑；1 = 全串行。独占工具始终是屏障，结果回填顺序恒等于模型顺序——并发只省时间，不改语义。 |
+| `tool_timeout_default_s` | 20 | 1..600 | 工具没声明 `timeout_s` 时的墙钟上限。超时**不 cancel** 协程（发了一半的消息、写了一半的文件比超时更糟），只把结果换成 `TOOL_TIMEOUT`，协程跑完再记一条 `_orphan` 日志。 |
+| `tool_spill_enable` | True | 开/关 | 超过阈值的工具结果落盘，消息里只留 head/tail 预览 + 路径 + 取回提示。关掉时连 `recall_tool_result` 都不注入——否则是一个永远读不到东西的工具。 |
+| `tool_spill_max_bytes` | 50000 | 1024..2000000 | 落盘阈值（字符）。落盘失败只 warn、保留原文：存储问题不该把一次成功调用变成失败。 |
+| `prompt_dump_verify` | False | 开/关 | 每轮对话开始时核对「会话日志投影」（`SessionLog.derive_messages()`）与内存历史是否一致，不一致时落盘 diff。在线不变式自检，默认关（多一次比较，排障时才开）。 |
+| `tool_approval_enable` | False | 开/关 | OneBot 来源且 `sensitivity in {high, critical}` 的工具执行前先问人。fail-closed：没有 `runtime.approval_channel` 就拒绝，只有 `ALLOWED_ONCE` 生效且仅本次。 |
+
+> `stream_output` / `speech_via_tool` / `context_expand_enable` 三个旧键仍是配置，
+> 但「有没有这项能力」改由提供方声明（`runtime.capabilities`）决定，声明优先于配置；
+> 判定链见 `docs/TOOL_STATE.md`。
+
+---
+
 ## 迁移史（仅存档）
 
 | 变更 | 说明 |
@@ -127,3 +148,4 @@ v3.2 起彻底移除：**模型参数只认「Provider 预设 → 模型」**，
 | `owner_id` → `agent_owner_list` | v3：身份从"按账号"改为"按名册"，`owner_id` 折旧为只读 `None` |
 | 108 个配置键 → 9 个模块 | v3：机制留框架，策略归模块；agent 配置 160 → 40 键 |
 | `model` / `temperature` / `max_tokens` 删除 | v3.2：只在 Provider 预设里配一次 |
+| 本体键 45 → 51 | P3–P6 新增：并发/超时 +2、历史自检 +1、落盘 +2、高危审批 +1（以 `config_partition.CORE_KEYS` 为准） |
