@@ -3,7 +3,6 @@ import { computed, ref, watch } from 'vue'
 import http, { errorMessage } from '@/api/http'
 import { useWebuiStore } from '@/stores/webui'
 import { useNotifyStore } from '@/stores/notify'
-import { useBotsStore, displayName } from '@/stores/bots'
 
 interface GroupRow {
   gid: string
@@ -17,16 +16,8 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: boolean): void }>()
 
 const webui = useWebuiStore()
 const notify = useNotifyStore()
-const bots = useBotsStore()
-
-/** 账号 id → 展示名（下拉里给用户看名字，别给 id） */
-function accountName(id: string): string {
-  const bot = bots.bots.find((b) => b.id === id)
-  return bot ? displayName(bot) : id
-}
 
 const rows = ref<GroupRow[]>([])
-const serviceMap = ref<Record<string, string>>({})
 const loading = ref(false)
 const error = ref('')
 
@@ -60,33 +51,10 @@ async function load() {
       })
     })
     rows.value = [...map.values()]
-
-    // 回填已存服务账号
-    serviceMap.value = {}
-    Object.entries(webui.config.multi_group.groups || {}).forEach(([gid, cfg]) => {
-      if (cfg.service_bot_id !== undefined) serviceMap.value[gid] = String(cfg.service_bot_id)
-    })
   } catch (err) {
     error.value = errorMessage(err)
   } finally {
     loading.value = false
-  }
-}
-
-async function onServiceChange(gid: string) {
-  const groups = { ...webui.config.multi_group.groups }
-  const v = serviceMap.value[gid]
-  if (v !== undefined && v !== '') {
-    groups[gid] = { service_bot_id: String(v) }
-  } else {
-    delete groups[gid]
-  }
-  webui.config.multi_group.groups = groups
-  try {
-    await webui.saveMultiGroup({ show_all: showAll.value, groups })
-    notify.push('多群管理配置已保存', 'success')
-  } catch (err) {
-    notify.push(errorMessage(err), 'error')
   }
 }
 
@@ -129,19 +97,9 @@ watch(
                 <v-chip size="x-small" variant="tonal" class="ml-1">{{ row.botIndexes.join(', ') }}</v-chip>
               </div>
             </div>
-            <v-select
-              :model-value="serviceMap[row.gid] ?? ''"
-              :items="[
-                { title: '未指定', value: '' },
-                ...row.botIndexes.map((aid) => ({ title: accountName(aid), value: aid })),
-              ]"
-              :disabled="row.botIndexes.length < 2"
-              density="compact"
-              variant="outlined"
-              hide-details
-              style="min-width: 140px; max-width: 200px"
-              @update:model-value="(v: string) => { serviceMap[row.gid] = v; onServiceChange(row.gid) }"
-            />
+            <div class="text-caption" style="max-width: 220px; color: rgba(var(--v-theme-on-surface), 0.55)">
+              响应权策略请到「功能模块 → 对应模块 → 响应权策略」按群配置
+            </div>
           </div>
         </div>
       </v-card-text>

@@ -2,18 +2,17 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useModulesStore, type PermissionConfig } from '@/stores/modules'
-import { useWebuiStore } from '@/stores/webui'
-import { useBotsStore } from '@/stores/bots'
+import { useResponderStore, type ResponderGroup } from '@/stores/responder'
+import { useBotsStore, displayName } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
-import http from '@/api/http'
 import ConfigForm from '@/components/config/ConfigForm.vue'
 import PermissionEditor from '@/components/config/PermissionEditor.vue'
 
 const route = useRoute()
 const router = useRouter()
 const modules = useModulesStore()
-const webui = useWebuiStore()
+const responder = useResponderStore()
 const bots = useBotsStore()
 const notify = useNotifyStore()
 
@@ -160,65 +159,114 @@ async function onToggleEnabled(v: boolean | null) {
   }
 }
 
-// ---------- 单一服务 ----------
-// 声明制能力：只有后端回报 single_service=true 的模块才显示开关并请求相关数据
-const supportsSingleService = computed(() => !!mod.value?.single_service)
-const ssOn = computed(() => supportsSingleService.value && !!webui.config.single_service[name])
-const affectedGroups = ref<{ gid: string; name: string }[]>([])
-const groupsLoaded = ref(false)
+// ---------- 响应权策略（同群多账号） ----------
+// 声明制能力：只有后端回报 single_service=true 的模块才显示策略卡片。
+const RESPONDER_POLICY_ITEMS = [
+  { title: '全部响应（默认）', value: 'all' },
+  { title: '去重：只一个响应', value: 'dedupe' },
+  { title: '固定账号响应', value: 'delegate' },
+  { title: '主备接管', value: 'leader' },
+]
+const responderData = computed(() => responder.data[name] ?? null)
+const responderDeclared = computed(() => !!mod.value?.single_service)
+const responderDraft = ref<Record<string, { policy: string; primary_account_id: string | null; fallback: string }>>({})
+const responderDirty = ref(false)
+const responderGroups = computed(() => (responderData.value?.groups || []).filter((g) => g.accounts.length > 0))
+const responderLoading = computed(() => !!responder.loading[name])
+const responderSaving = computed(() => !!responder.saving[name])
 
-async function loadGroups() {
-  if (!supportsSingleService.value) return
-  try {
-    const res = await http.get<{
-      bots_groups: Record<string, { account_id: string; name: string; bot_id: number | null; groups: number[]; groups_info: { group_id?: number; group_name?: string }[] }>
-    }>('/api/bots/groups')
-    const map = new Map<string, { name: string; botIndexes: string[] }>()
-    Object.values(res.data?.bots_groups || {}).forEach((bg) => {
-      const infos = bg.groups_info || []
-      bg.groups.forEach((gid, i) => {
-        const key = String(gid)
-        const row = map.get(key) || { name: String(infos[i]?.group_name ?? gid), botIndexes: [] }
-        row.botIndexes.push(bg.account_id)
-        map.set(key, row)
-      })
-    })
-    groupsLoaded.value = true
-    const svc = webui.config.multi_group.groups || {}
-    affectedGroups.value = [...map.entries()]
-      .filter(([gid]) => {
-        const cfg = svc[gid]
-        if (!cfg || cfg.service_bot_id === undefined) return false
-        const row = map.get(gid)!
-        return cfg.service_bot_id !== bots.currentAccountId && row.botIndexes.length >= 2
-      })
-      .map(([gid, row]) => ({ gid, name: row.name }))
-  } catch {
-    groupsLoaded.value = false
-  }
+function syncResponderDraft() {
+  const data = responderData.value
+  if (!data) return
+  const next: Record<string, { policy: string; primary_account_id: string | null; fallback: string }> = {}
+  data.groups.forEach((group) => {
+    next[group.group_id] = {
+      policy: group.policy || 'all',
+      primary_account_id: group.primary_account_id,
+      fallback: group.fallback || 'open',
+    }
+  })
+  responderDraft.value = next
+  responderDirty.value = false
 }
 
-async function onToggleSingleService(v: boolean | null) {
+async function loadResponder() {
+  if (!responderDeclared.value) return
   try {
-    const res = await webui.saveSingleService({ ...webui.config.single_service, [name]: !!v })
-    if (res.rejected?.length) {
-      notify.push(`该模块未声明支持单一服务，已忽略：${res.rejected.join('、')}`, 'warning')
-      return
-    }
-    notify.push(`单一服务模式已${v ? '启用' : '关闭'}`, 'success')
-    if (v) loadGroups()
+    await responder.load(name)
+    syncResponderDraft()
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   }
 }
 
-const showSingleServiceWarning = computed(
-  () =>
-    supportsSingleService.value &&
-    ssOn.value &&
-    groupsLoaded.value &&
-    affectedGroups.value.length > 0,
-)
+watch(responderData, syncResponderDraft)
+
+function accountName(accountId: string): string {
+  const bot = bots.bots.find((item) => item.id === accountId)
+  return bot ? displayName(bot) : accountId
+}
+
+function needsPrimary(policy: string | undefined): boolean {
+  return policy === 'delegate' || policy === 'leader'
+}
+
+function primaryItems(group: ResponderGroup) {
+  return [
+    { title: '未指定（按 fallback）', value: null },
+    ...group.accounts.map((accountId) => ({ title: accountName(accountId), value: accountId })),
+  ]
+}
+
+function onPolicyChange(groupId: string, policy: string) {
+  const draft = responderDraft.value[groupId]
+  if (!draft) return
+  draft.policy = policy
+  if (needsPrimary(policy) && !draft.primary_account_id) {
+    draft.primary_account_id = responderGroups.value.find((g) => g.group_id === groupId)?.accounts[0] ?? null
+  }
+  responderDirty.value = true
+}
+
+function onPrimaryChange(groupId: string, primary: string | null) {
+  const draft = responderDraft.value[groupId]
+  if (!draft) return
+  draft.primary_account_id = primary || null
+  responderDirty.value = true
+}
+
+function onFallbackChange(groupId: string, silent: boolean | null) {
+  const draft = responderDraft.value[groupId]
+  if (!draft) return
+  draft.fallback = silent ? 'closed' : 'open'
+  responderDirty.value = true
+}
+
+function respondersText(group: ResponderGroup): string {
+  const preview = group.preview
+  if (preview?.responders?.length) {
+    return `当前响应：${preview.responders.map(accountName).join('、')}（${preview.reason}）`
+  }
+  if (preview?.degraded) return `当前无人响应（${preview.reason}）`
+  return '当前无人响应'
+}
+
+async function onSaveResponder() {
+  const policies = Object.entries(responderDraft.value).map(([groupId, draft]) => ({
+    group_id: groupId,
+    policy: draft.policy,
+    primary_account_id: draft.primary_account_id,
+    fallback: draft.fallback,
+  }))
+  try {
+    const result = await responder.save(name, policies)
+    responderDirty.value = false
+    if (result.warnings.length) notify.push(result.warnings.join('；'), 'warning')
+    else notify.push(result.message, 'success')
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  }
+}
 
 // ---------- 插件自定义页 ----------
 const pluginSrc = computed(() => {
@@ -258,7 +306,7 @@ function onPluginLoad(e: Event) {
 watch(
   () => bots.currentId,
   () => {
-    loadGroups()
+    loadResponder()
     // 切换账号后重拉模块配置
     modules.load()
   },
@@ -283,7 +331,7 @@ onMounted(async () => {
     await modules.load()
   }
   initFromModule()
-  loadGroups()
+  loadResponder()
   await ensureModule()
   await nextTick()
 })
@@ -339,31 +387,70 @@ onUnmounted(() => {
       </div>
     </v-alert>
 
-    <!-- 单一服务模式（仅声明支持该能力的模块显示） -->
-    <v-card v-if="supportsSingleService" variant="outlined" class="mb-4">
-      <v-card-text class="d-flex align-center justify-space-between flex-wrap gap-2 py-3">
-        <div class="d-flex align-center gap-2">
-          <v-icon icon="mdi-server" color="purple" />
-          <div>
-            <div class="font-weight-medium">单一服务模式</div>
-            <div class="text-caption">启用后仅由指定账号处理本模块的群消息</div>
-          </div>
+    <!-- 响应权策略（同群多账号；仅声明支持该能力的模块显示） -->
+    <v-card v-if="responderDeclared" variant="outlined" class="mb-4">
+      <v-card-title class="d-flex align-center flex-wrap gap-2">
+        <v-icon icon="mdi-account-multiple-check" class="mr-2" color="primary" />
+        响应权策略
+        <v-chip size="x-small" variant="tonal">同群多账号 · 对所有账号生效</v-chip>
+        <v-spacer />
+        <v-btn
+          size="small"
+          color="primary"
+          variant="tonal"
+          prepend-icon="mdi-content-save"
+          :loading="responderSaving"
+          :disabled="!responderDirty"
+          @click="onSaveResponder"
+        >
+          保存策略
+        </v-btn>
+      </v-card-title>
+      <v-card-text>
+        <div class="text-caption mb-3">
+          默认每个账号各自响应；需要「同一个群只让一个账号处理这个功能」时再按群配置。
         </div>
-        <v-switch :model-value="ssOn" color="purple" density="compact" hide-details @update:model-value="onToggleSingleService" />
+        <div v-if="responderLoading" class="text-caption">加载中…</div>
+        <div v-else-if="!responderGroups.length" class="text-caption">
+          暂无可配置的群：需要至少一个账号在线并已拉取到群列表。
+        </div>
+        <div v-for="group in responderGroups" :key="group.group_id" class="responder-row">
+          <div class="responder-group-info">
+            <div class="font-weight-medium">{{ group.name }}</div>
+            <div class="text-caption">{{ group.group_id }} · {{ group.accounts.map(accountName).join('、') }}</div>
+          </div>
+          <v-select
+            :model-value="responderDraft[group.group_id]?.policy || 'all'"
+            :items="RESPONDER_POLICY_ITEMS"
+            density="compact"
+            variant="outlined"
+            hide-details
+            style="max-width: 170px"
+            @update:model-value="(v: string) => onPolicyChange(group.group_id, v)"
+          />
+          <v-select
+            :model-value="responderDraft[group.group_id]?.primary_account_id ?? null"
+            :items="primaryItems(group)"
+            :disabled="!needsPrimary(responderDraft[group.group_id]?.policy)"
+            density="compact"
+            variant="outlined"
+            hide-details
+            style="max-width: 170px"
+            @update:model-value="(v: string | null) => onPrimaryChange(group.group_id, v)"
+          />
+          <v-switch
+            :model-value="responderDraft[group.group_id]?.fallback === 'closed'"
+            label="无候选时静默"
+            density="compact"
+            hide-details
+            color="warning"
+            @update:model-value="(v: boolean | null) => onFallbackChange(group.group_id, v)"
+          />
+          <div class="responder-preview text-caption">{{ respondersText(group) }}</div>
+          <v-chip v-if="group.preview?.degraded" size="x-small" color="warning" variant="tonal">已降级</v-chip>
+        </div>
       </v-card-text>
     </v-card>
-
-    <v-alert
-      v-if="showSingleServiceWarning"
-      type="warning"
-      variant="tonal"
-      density="compact"
-      class="mb-4"
-    >
-      <div class="text-caption">
-        当前账号非本模块指定服务账号，该模块在部分群下不会触发：{{ affectedGroups.map((g) => g.name).join('、') }}
-      </div>
-    </v-alert>
 
     <!-- 插件自定义配置页 -->
     <v-card v-if="mod.has_page" variant="outlined" class="mb-4">
@@ -432,5 +519,24 @@ onUnmounted(() => {
   gap: 10px;
   padding: 60px 0;
   color: rgba(var(--v-theme-on-surface), 0.5);
+}
+
+.responder-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+}
+
+.responder-group-info {
+  min-width: 200px;
+  flex: 1 1 200px;
+}
+
+.responder-preview {
+  flex: 1 1 220px;
+  color: rgba(var(--v-theme-on-surface), 0.65);
 }
 </style>
