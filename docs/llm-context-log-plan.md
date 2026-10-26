@@ -1,6 +1,7 @@
 # LLM 上下文与日志纵深改造方案（Q0–Q7）
 
-> 状态：**方案稿**（未开工）。上一轮 `docs/tool-loop-refactor-plan.md` 的 P0–P6 已全部落地。
+> 状态：**施工中**（Q3 / Q1 / Q2 / Q6 / Q7 / X1 已落地；Q4 / Q5 施工中）。上一轮
+> `docs/tool-loop-refactor-plan.md` 的 P0–P6 已全部落地。进度看板见 §6。
 > 本文回答的是它**没覆盖**的那一半：**上下文工程**（提示词怎么长、历史怎么进、token 怎么管）
 > 与**日志纵深**（请求是否可复现、事件是否自洽、压缩是否可容错）。
 > 依据：`docs/tool-loop-professionalization.md`（DSH 对标）+ 本轮对 DSH 本地包与
@@ -356,3 +357,33 @@ Q1 压缩预算 ──▶ Q2 历史按需 ──▶ X1 评测集 ──▶ Q4 �
    `sections.json` 用 `scripts/gen_sections.py` 重生成；
 4. `MODULE_DEV.md` 有对应小节（插件作者不需要读源码）；
 5. 若改了默认值（如 Q2 的 `history_mode`），必须附 X1 前后对比结果。
+
+---
+
+## 6. 进度看板
+
+| 阶段 | 状态 | 提交 / 证据 | 备注 |
+|---|---|---|---|
+| Q3 事件纵深 | ✅ 完成 | `75a600c` `a6d0dbc` | `request/header`（system/工具指纹）+ `turn/start|end` + `tool/call|result`（`source_event_seqs` 回指）+ `verify` 新增"指纹可复现"三断言；事件表加 `(bot_id, task_id, type, seq)` 索引 |
+| Q1 压缩预算 | ✅ 完成 | `836b7ad` | 压力触发（`context_window` + `trigger_ratio`）、`keep_ratio` 保留量、`summary/prune/both` 三后端、`compaction/start|summary|end` 括号事件 |
+| Q2 历史按需 | ✅ 完成 | `4727241` | `history_mode=recent/full` + `history_recent_messages`、固定提示语（不含条数）、`search_history` 工具（只查本会话） |
+| Q6 输出表达力 | ✅ 完成 | `b47a907` `76a3e52` | image/ref 块、`additional_contexts` 汇总成一条 `[工具补充]`、`concludes_turn`（两个 runner 同语义，收尾记 `completed`）、`present_call/present_result` |
+| Q7 中间件 | ✅ 完成 | `b47a907` | `app/agent/loop/middleware.py` 三个钩点、按 order、`abort` 拦截、`fail_closed` 可配、`runtime.middlewares` 注册/按 source 卸载 |
+| X1 评测集 | ✅ 完成 | `41d91f8` | `tests/eval/`（16 场景 + 17 用例，`-m eval` 才跑；默认收集为 skip） |
+| Q4 提示词注册表 | 🔄 施工中 | — | 12 块迁 `Section`、`register_section`、`complete` 冲突报错、字节级不变 |
+| Q5 KV cache | 🔄 施工中 | — | 前缀稳定指纹、Anthropic `cache_control`、`prompt_cache_enable` |
+
+### 与方案的偏差（已落地，记录在此）
+
+1. **Q3 的 `tool/result` 没记错误码以外的结构化细节**：`code`/`spill` 已记（靠执行器 `sink=` 旁路），
+   但"工具输出块"（image/ref）要等到 Q6 之后才有；Q6 落地后 `sink` 里的 `ToolResult` 已带块信息，
+   后续可把块类型也写进事件，本次未做。
+2. **Q5 缩小范围**：只做"前缀稳定 + Anthropic 显式缓存标记 + 开关"，Gemini `cachedContents`
+   与"工具集变化通知"留作后续（前者网关差异大、后者要改请求形态，收益/风险比不划算）。
+3. **`concludes_turn` 的正文语义**：工具收尾时不臆造正文；`text` 为空则回复为空，但 `TurnReason`
+   记 `completed`（工具明确表示办完），不记 `silent`。
+
+### 已知遗留
+
+- 全量 `pytest -q` 单进程仍偶发挂在 pytest-asyncio 的 loop finalizer（与本轮改动无关的
+  既有 flake）；分段跑各子目录全绿。定位结论见 `docs/tool-loop-refactor-plan.md` §8。
