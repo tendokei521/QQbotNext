@@ -186,6 +186,11 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
         event_mid = str(getattr(event, "message_id", "") or "")
         if (event_mid and tail_mid == event_mid) or (not event_mid and tail.get("content") == user_text):
             session_history_raw = session_history_raw[:-1]
+    # Q2：只内联最近 N 条（更早的由 search_history 按需取回）。
+    # 提示语是固定文案（不随条数变化），避免每轮都改写 system 前缀。
+    from app.agent.assembly.history_window import apply_history_mode
+
+    session_history_raw, omitted_history = apply_history_mode(session_history_raw, config)
     # 渲染时把 message_id 贴回消息对象：群聊环境记录要靠它判断"这条已在会话历史里"，
     # 否则同一句话会在历史与背景里各出现一次（双源去重失效）。
     from app.agent.context.group import with_message_ids
@@ -213,6 +218,10 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
     from app.agent.session.session_log import log_of
 
     pressure = should_compress_by_pressure(session_history, config)
+    if omitted_history:
+        from app.agent.assembly.prompt import HISTORY_OMITTED_HINT
+
+        session_history = [{"role": "system", "content": HISTORY_OMITTED_HINT}, *session_history]
     session_history = await maybe_compress_context(
         provider_chain, config, session_history, history_rounds,
         bot_id=str(getattr(runtime, "bot_id", "") or ""),

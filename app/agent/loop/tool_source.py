@@ -100,6 +100,10 @@ async def _collect_llm_ext(
             from app.agent.tools.recall import build_recall_tool
 
             specs.append(build_recall_tool(runtime, ctx))
+            # Q2：只内联最近若干条历史时，模型需要按需取回更早的内容
+            from app.agent.tools.history_search import build_history_search_tool
+
+            specs.append(build_history_search_tool(runtime, ctx))
     except Exception as e:  # noqa: BLE001 —— 工具注入失败不该拖垮整轮
         logger.debug(f"[Tool] recall_tool_result 注入失败（已忽略）: {e}")
 

@@ -129,6 +129,8 @@
           "fields": [
             "session_timeout",
             "history_rounds",
+            "history_mode",
+            "history_recent_messages",
             "max_message_length"
           ]
         },

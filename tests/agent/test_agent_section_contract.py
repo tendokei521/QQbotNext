@@ -99,7 +99,7 @@ def test_page_titles_match_the_agreed_layout():
         ("basic", 5),
         ("permission", 4),
         ("behavior", 8),
-        ("session", 18),
+        ("session", 20),
         ("advanced", 20),
     ],
 )

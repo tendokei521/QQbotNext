@@ -49,9 +49,11 @@ def _build_specs(runtime: Any) -> list[ToolSpec]:
 
 
     # P5：spill 结果的取回工具（WebUI 清单要能看到它，否则"存在但界面没有"）
+    from app.agent.tools.history_search import build_history_search_tool
     from app.agent.tools.recall import build_recall_tool
 
     specs.append(build_recall_tool(runtime, None))
+    specs.append(build_history_search_tool(runtime, None))
 
 
 

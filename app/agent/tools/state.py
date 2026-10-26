@@ -277,8 +277,13 @@ def resolve_all_tool_states(runtime: Any, *, include_unavailable: bool = True) -
             seen.add(spec.name)
 
         # P5：spill 取回工具也是系统工具（漏登记 = 界面上看不到）
+        from app.agent.tools.history_search import build_history_search_tool
         from app.agent.tools.recall import build_recall_tool
 
+        search = build_history_search_tool(runtime, None)
+        if search.name not in seen:
+            states.append(resolve_tool_state(runtime, search))
+            seen.add(search.name)
         recall = build_recall_tool(runtime, None)
         if recall.name not in seen:
             states.append(resolve_tool_state(runtime, recall))

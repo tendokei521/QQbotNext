@@ -405,3 +405,10 @@ def build_messages(
 
     messages.append({"role": "user", "content": user_content or user_text})
     return messages
+
+#: Q2：`history_mode=recent` 时插在历史块前面的固定提示。
+#: 文案**不随条数变化**——它每轮都会出现，变数字等于每轮改写 system 前缀。
+HISTORY_OMITTED_HINT = (
+    "（更早的对话没有全部列出。如果用户提到很久以前说过的内容，"
+    "用 search_history 工具按关键词检索本会话历史；需要细节再用 expand_message 展开。）"
+)

@@ -70,6 +70,10 @@ DEFAULT_LLM_CONFIG: dict = {
     "private_enable": True,
     "session_timeout": 60,
     "history_rounds": 50,
+    # Q2 历史按需化：recent = 只内联最近 N 条（更早的用 search_history 取回）；
+    # full = 旧行为（最多 history_rounds 条全量内联）。
+    "history_mode": "recent",
+    "history_recent_messages": 12,
     # 上下文压缩（仿 AstrBot）：历史超过 history_rounds 时，只压缩超出的部分，保留最近 history_rounds 条原文
     "context_compress_enable": True,
     "context_compress_prompt": "请把上面的历史对话压缩成一份简洁但完整的摘要，用于后续对话无缝续接：\n1. 覆盖所有核心话题及最终结论/结果；\n2. 高亮最近的主要关注点；\n3. 如有工具调用、任务进度或待办，说明当前状态和下一步；\n4. 保留用户的重要个人信息、偏好、称呼等关键事实；\n5. 使用与对话相同的语言输出。\n只输出摘要内容，不要输出额外解释。",

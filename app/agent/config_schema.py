@@ -283,6 +283,17 @@ SCHEMA = {
         "type": "number", "label": "请求落盘保留条数", "description": "滚动文件最多保留多少轮请求（从最旧开始丢）",
         "default": 20, "min": 1, "max": 500, "group": "group_session",
     },
+    "history_mode": {
+        "type": "select", "label": "历史注入方式",
+        "description": "recent = 只注入最近若干条，更早的由「历史检索」工具按需取回；full = 全部注入（旧行为）。",
+        "default": "recent", "group": "session_window",
+        "options": {"recent": "最近若干条 + 按需检索", "full": "全部注入"},
+    },
+    "history_recent_messages": {
+        "type": "number", "label": "注入最近条数",
+        "description": "「最近若干条」模式下注入多少条历史；更早的内容仍可通过工具检索。",
+        "default": 12, "min": 2, "max": 200, "group": "session_window",
+    },
     # Q1：上下文预算（按 token 压力触发压缩，而不是按条数）
     "context_window": {
         "type": "number", "label": "模型上下文窗口（token）",

@@ -115,7 +115,7 @@ UI_PAGES: tuple[UIPage, ...] = (
             UIGroup(
                 "session_window",
                 "会话窗口",
-                ("session_timeout", "history_rounds", "max_message_length"),
+                ("session_timeout", "history_rounds", "history_mode", "history_recent_messages", "max_message_length"),
             ),
             UIGroup(
                 "session_history",
