@@ -35,6 +35,12 @@ import asyncio
 import json
 from typing import Any, Callable
 
+from app.agent.loop.middleware import (
+    POINT_TOOL_CALL_BEFORE,
+    POINT_TOOL_RESULT_AFTER,
+    has_middleware,
+    run_point,
+)
 from app.agent.loop.tool_step import ABORTED_BEFORE_DISPATCH
 
 # 默认「回应要求」：只讲"用什么口吻回应"，不涉及具体内容
@@ -97,12 +103,38 @@ def _parse_arguments(raw_args: Any) -> tuple[dict, str, str]:
     return {}, "{}", ""
 
 
+def _apply_tool_call_payload(item: dict, decided: dict) -> None:
+    """把 ``tool_call.before`` 的改写结果写回执行项与 assistant 消息。
+
+    - ``name`` / ``args`` / ``call_id`` 逐个生效，未给出的键保持原值；
+    - 改了参数时**同步重写** ``function.arguments``（线上 assistant 消息里它必须是
+      JSON 字符串），否则模型看到的历史与实际执行不一致；
+    - 中间件显式给出合法 ``args`` 时清掉解析错误（它替模型修好了参数）。
+    """
+    name = str(decided.get("name") or "").strip()
+    if name and name != item["name"]:
+        item["name"] = name
+        item["tc"]["function"]["name"] = name
+    call_id = str(decided.get("call_id") or "").strip()
+    if call_id and call_id != item["id"]:
+        item["id"] = call_id
+        item["tc"]["id"] = call_id
+    args = decided.get("args")
+    if isinstance(args, dict):
+        item["args"] = args
+        item["parse_error"] = ""
+        item["tc"]["function"]["arguments"] = json.dumps(args, ensure_ascii=False)
+
+
 async def normalize_and_execute_tool_calls(
     tool_calls: list[dict],
     tool_executor: Callable | None,
     tool_results: list[dict],
     *,
     on_tool_event: Callable[[str, dict], int] | None = None,
+    runtime: Any = None,
+    ctx: Any = None,
+    structured_results: list | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """标准化并执行一批工具调用，返回用于回传协同一对消息。
 
@@ -111,6 +143,14 @@ async def normalize_and_execute_tool_calls(
             ``function.arguments``（可为 None / 增量 JSON 字符串 / dict）。
         tool_executor: ``async (name, args) -> str`` 工具执行器；None 时返回占位结果。
         tool_results: 执行结果累积列表（就地 append，供调用方记录/兜底判断）。
+        on_tool_event: 会话事件日志回调（Q3）；返回事件序号。
+        runtime: AgentRuntime。给出时启用中间件（``tool_call.before`` /
+            ``tool_result.after``，见 ``app.agent.loop.middleware``）；None 时零开销。
+        ctx: 透传给中间件的上下文（通常是 ``ToolContext``）。
+        structured_results: 可选出参。给了就按**模型给出的顺序** append 每个调用的
+            `ToolResult`（执行器支持 ``sink`` 时才有值，否则是 None）。Q6 的
+            ``additional_contexts`` / ``concludes_turn`` 只能从这里读到——回传的
+            字符串必须原样给 provider，不能把这些语义混进正文。
 
     Returns:
         ``(normalized_tool_calls, tool_result_messages)``：
@@ -149,6 +189,23 @@ async def normalize_and_execute_tool_calls(
             "parse_error": parse_error,
         })
 
+    # Q7：tool_call.before —— **派发前**的最后一道改写/拦截。
+    # 放在这里而不是执行器内部：改后的 name 还要参与并发分类（`execute_tool_batch`），
+    # 改后的 args 要跟着进 assistant 消息的 arguments，两者必须同源。
+    if has_middleware(runtime, POINT_TOOL_CALL_BEFORE):
+        for item in prepared:
+            decided = await run_point(
+                runtime,
+                POINT_TOOL_CALL_BEFORE,
+                {"name": item["name"], "args": item["args"], "call_id": item["id"]},
+                ctx=ctx,
+            )
+            if decided is None:
+                # 被拦截：不派发，但仍要回一条 error 结果（assistant 的 tool_calls 必须配对）
+                item["blocked_reason"] = f"error: 工具 {item['name']} 调用被中间件拦截"
+            else:
+                _apply_tool_call_payload(item, decided)
+
     # P4/Q3：把"模型要调的这批工具"记进会话日志（给回放/审计一个锚点）
     for item in prepared:
         if on_tool_event is not None:
@@ -165,6 +222,9 @@ async def normalize_and_execute_tool_calls(
     _accepts_sink = _accepts_kwarg(tool_executor, "sink")
 
     async def _execute(item: dict) -> str:
+        if item.get("blocked_reason"):
+            # 中间件在派发前拦下了这次调用：不执行，但结果照常回传（配对不破）
+            return item["blocked_reason"]
         if item["parse_error"]:
             return (
                 f"error: 工具 {item['name']} 调用参数不合法：{item['parse_error']}。"
@@ -193,22 +253,55 @@ async def normalize_and_execute_tool_calls(
 
     normalized: list[dict] = []
     result_messages: list[dict] = []
+    _mw_result = has_middleware(runtime, POINT_TOOL_RESULT_AFTER)
     for item, exec_result in zip(prepared, exec_results):
+        structured = item.get("structured")
+        is_error = bool(getattr(structured, "is_error", False)) or is_error_result(exec_result)
+        code = str(getattr(structured, "code", "") or "")
+        # Q7：tool_result.after —— 结果回来之后、写进消息之前。
+        # 改后的 result_text 同时用于 tool 消息与 tool_results，is_error/code 一并带进
+        # 会话日志事件，保证"模型看到的"和"日志记的"是同一份。
+        if _mw_result:
+            decided = await run_point(
+                runtime,
+                POINT_TOOL_RESULT_AFTER,
+                {
+                    "name": item["name"],
+                    "call_id": item["id"],
+                    "result_text": exec_result,
+                    "is_error": is_error,
+                    "code": code,
+                },
+                ctx=ctx,
+            )
+            if decided is None:
+                exec_result = f"error: 工具 {item['name']} 结果被中间件拦截"
+                is_error = True
+            else:
+                text = decided.get("result_text")
+                if isinstance(text, str):
+                    exec_result = text
+                if "is_error" in decided:
+                    is_error = bool(decided.get("is_error"))
+                if "code" in decided:
+                    code = str(decided.get("code") or "")
         if on_tool_event is not None:
-            structured = item.get("structured")
-            is_error = bool(getattr(structured, "is_error", False)) or is_error_result(exec_result)
             meta = dict(getattr(structured, "meta", {}) or {})
             on_tool_event("result", {
                 "call_id": item["id"],
                 "name": item["name"],
                 "is_error": is_error,
-                "code": str(getattr(structured, "code", "") or ""),
+                "code": code,
                 "chars": len(exec_result),
                 "spilled_to": str(meta.get("spill") or ""),
                 "source_event_seqs": [item["call_seq"]] if item.get("call_seq") else [],
             })
         tool_results.append({"name": item["name"], "args": item["args"], "result": exec_result})
         normalized.append(item["tc"])
+        if structured_results is not None:
+            # 与 normalized / result_messages 同序同长（拿不到结构的项就是 None），
+            # 循环体据此下标回查"是哪个工具要求的收尾"。
+            structured_results.append(item.get("structured"))
         result_messages.append({
             "role": "tool",
             "tool_call_id": item["id"],

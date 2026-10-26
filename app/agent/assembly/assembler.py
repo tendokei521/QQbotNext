@@ -836,6 +836,18 @@ async def apply_post_assemble(
         bot_id=getattr(runtime, "bot_id", None),
     )
 
+    # Q7：messages.before_send —— 最终请求体**发出前**的最后一道改写（waterfall，
+    # 见 `app.agent.loop.middleware`）。与 `post_assemble` 钩子的区别是语义：这里的 handler
+    # 是"可读可替换的一步"，没有中间件时原样返回（零开销），拦截（abort/异常）即
+    # 本轮不请求 LLM（与上面钩子的中止语义一致）。放在 token 预算之后，
+    # 保证它看到的就是即将发出去的那份 messages。
+    from app.agent.loop.middleware import apply_messages_before_send
+
+    final_messages = await apply_messages_before_send(runtime, result, ctx=ctx)
+    if final_messages is None:
+        return None
+    result = final_messages
+
     # 请求落盘（默认关闭）：把「最终发出去的东西」留成可比对的证据
     from app.agent.assembly.dump import record as _record_dump
 

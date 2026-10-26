@@ -30,6 +30,17 @@
   请求失败（`error`）。非流式另有一种"请求成功但没有正文"（`empty`），
   空回复兜底与"思考吃满预算"的收敛重试都留给调用方（它们改的是 prompt/话术）。
   取消与中断由 P2 的 `AbortScope` 接管，本模块不提前引入。
+
+## Q6：工具结果的**副作用**也在这里收口
+
+工具结果不只是"回给模型的一段文本"，还可以要求两件循环级动作（`ToolResult` 的字段）：
+
+- ``additional_contexts``：本轮所有结果的追加上下文**汇总成一条** ``role:user`` 消息
+  （``[工具补充] ...``），插在 tool 回执之后、下一次请求之前。做成**一条**而不是每条
+  一处：多条 user 消息会让"谁在说话"更模糊，且部分适配器会把它们合并成一条。
+- ``concludes_turn``：任一结果要求收尾（`finish` 类工具）就不再发下一次请求，
+  结局记 ``KIND_ASSISTANT``，工具名写进 ``StepResult.concluded_by``。
+  **两个 runner（流式/非流式）语义完全一致**，否则又回到"修一处漏一处"。
 """
 
 from __future__ import annotations
@@ -52,6 +63,9 @@ STEP_ROUND_END = "round_end"  # 一轮结束（带 RoundSummary）
 
 #: 取消时给"模型要了但没派发"的工具补的结果（工具错误码之一，见计划 §1.2）
 ABORTED_BEFORE_DISPATCH = "error: ABORTED_BEFORE_DISPATCH 本轮已被取消，该工具未执行"
+
+#: 工具追加上下文的消息前缀（一眼区分"这不是用户新说的话"）
+CONTEXT_PREFIX = "[工具补充]"
 
 
 class TurnAborted(Exception):
@@ -136,6 +150,8 @@ class StepResult:
     rounds: int = 0
     #: 本次步骤的 token 用量（非流式路径跨轮累加；流式由调用方的 ``usage_sink`` 记账）
     usage: dict = field(default_factory=dict)
+    #: 让本轮提前收尾的工具名（``ToolResult.concludes_turn``；空串 = 没发生）
+    concluded_by: str = ""
 
 
 def accumulate_tool_call(slot_map: dict, tc: dict) -> None:
@@ -155,6 +171,54 @@ def accumulate_tool_call(slot_map: dict, tc: dict) -> None:
     slot["id"] += tc.get("id") or ""
     slot["function"]["name"] += frag.get("name") or ""
     slot["function"]["arguments"] += frag.get("arguments") or ""
+
+
+def collect_additional_contexts(structured: list | None) -> list[str]:
+    """汇总一批 `ToolResult` 的 ``additional_contexts``（按模型顺序、去重保序）。
+
+    空串不收集：工具常把"条件不满足"渲染成空上下文，那种项不该在消息里留个空行。
+    """
+    collected: list[str] = []
+    for item in structured or ():
+        for text in getattr(item, "additional_contexts", ()) or ():
+            clean = str(text or "").strip()
+            if clean and clean not in collected:
+                collected.append(clean)
+    return collected
+
+
+def append_additional_contexts(messages: list[dict], structured: list | None) -> int:
+    """把汇总结果作为**一条** user 消息追加到末尾；返回带上的上下文条数。
+
+    两个 runner 都在 ``req.messages.extend(tool_messages)`` 之后、补图之前调用：
+    先给"工具要说的话"，再给"补全材料"（图片），两条 user 消息的先后更自然。
+    """
+    contexts = collect_additional_contexts(structured)
+    if not contexts:
+        return 0
+    messages.append({
+        "role": "user",
+        "content": f"{CONTEXT_PREFIX} " + "\n".join(contexts),
+    })
+    return len(contexts)
+
+
+def concluding_tool(structured: list | None, normalized: list | None = None) -> str:
+    """第一个要求收尾的工具名（没有 → 空串）。
+
+    `ToolResult` 不带名字，所以从 ``normalized``（与 ``structured`` 同序同长，
+    见 `tool_loop.normalize_and_execute_tool_calls` 的 ``structured_results``）按下标取。
+    取不到名字时回 ``"tool"``：调用方至少能知道"有工具要求收尾"。
+    """
+    for index, item in enumerate(structured or ()):
+        if not getattr(item, "concludes_turn", False):
+            continue
+        name = ""
+        if normalized and index < len(normalized):
+            call = normalized[index] or {}
+            name = str((call.get("function") or {}).get("name") or "")
+        return name or "tool"
+    return ""
 
 
 async def iter_stream_step(req: StepRequest, result: StepResult) -> AsyncIterator[tuple[str, Any]]:
@@ -317,8 +381,12 @@ async def _drive_stream_rounds(
                 })
                 req.messages.extend(aborted_messages)
                 raise
+        structured: list = []
         normalized, tool_messages = await normalize_and_execute_tool_calls(
-            calls, executor, result.tool_results, on_tool_event=_on_tool_event
+            calls, executor, result.tool_results, on_tool_event=_on_tool_event,
+            structured_results=structured,
+            # Q7：中间件要拿得到 runtime（注册表在 runtime.middlewares 上）
+            runtime=req.runtime, ctx=req.tool_ctx,
         )
         result.tool_calls = normalized
         req.messages.append({
@@ -327,10 +395,20 @@ async def _drive_stream_rounds(
             "tool_calls": normalized,
         })
         req.messages.extend(tool_messages)
+        # Q6：工具追加上下文。位置在 tool 回执之后、下一次请求之前——模型下一轮
+        # 一睁眼就能看到，而不会混进 tool 正文（正文必须保持工具原文）。
+        append_additional_contexts(req.messages, structured)
 
         # 工具轮里 expand_image 取回的图片必须**在本轮**递给模型：
         # 否则模型当轮只能凭工具回执里的文字描述瞎猜（历史事故）。
         images_appended = append_round_images(req.messages, req.tool_ctx, modalities)
+
+        # Q6：有工具要求收尾（finish 类）就不再发下一次请求：继续请求等于把
+        # "已经可以结束"的一轮又拖长，且模型会开始复述。工具名留给调用方记账。
+        concluded_by = concluding_tool(structured, normalized)
+        if concluded_by:
+            result.kind = KIND_ASSISTANT
+            result.concluded_by = concluded_by
 
         yield STEP_ROUND_END, RoundSummary(
             index=round_index,
@@ -343,6 +421,8 @@ async def _drive_stream_rounds(
             tool_calls=len(calls),
             usage_before=usage_before,
         )
+        if concluded_by:
+            break
     else:
         result.kind = KIND_MAX_ROUNDS
 
@@ -459,8 +539,12 @@ async def run_blocking_step(req: StepRequest) -> StepResult:
                 req.messages.extend(aborted_messages)
                 raise
 
+        structured: list = []
         normalized, tool_messages = await normalize_and_execute_tool_calls(
-            calls, executor, result.tool_results, on_tool_event=_log_tool_event
+            calls, executor, result.tool_results, on_tool_event=_log_tool_event,
+            structured_results=structured,
+            # Q7：与流式路径同口径（tool_call.before / tool_result.after）
+            runtime=req.runtime, ctx=req.tool_ctx,
         )
         result.tool_calls = normalized
         req.messages.append({
@@ -469,8 +553,15 @@ async def run_blocking_step(req: StepRequest) -> StepResult:
             "tool_calls": normalized,
         })
         req.messages.extend(tool_messages)
+        # 与流式路径同一位置、同一文案：两个 runner 的语义必须逐字一致
+        append_additional_contexts(req.messages, structured)
 
         images_appended = append_round_images(req.messages, req.tool_ctx, modalities)
+
+        concluded_by = concluding_tool(structured, normalized)
+        if concluded_by:
+            result.kind = KIND_ASSISTANT
+            result.concluded_by = concluded_by
 
         if req.on_round_end is not None:
             await req.on_round_end(RoundSummary(
@@ -480,6 +571,8 @@ async def run_blocking_step(req: StepRequest) -> StepResult:
                 tool_results=list(result.tool_results),
                 images_appended=images_appended,
             ))
+        if concluded_by:
+            break
     else:
         result.kind = KIND_MAX_ROUNDS
 

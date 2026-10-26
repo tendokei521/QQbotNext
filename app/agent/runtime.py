@@ -18,6 +18,7 @@ from app.agent.assembly.assembler import PromptAssembler
 from app.agent.assembly.interrupt import interrupt_config_hook
 from app.agent.config import DEFAULT_LLM_CONFIG, AgentConfig
 from app.agent.hooks import LlmHookRegistry, ToolCallHookRegistry
+from app.agent.loop.middleware import MiddlewareRegistry
 from app.agent.loop.pipeline import LlmPipeline
 from app.agent.persona.skills import SkillRegistry
 from app.agent.providers.invoker import ProviderInvoker
@@ -162,6 +163,9 @@ class AgentRuntime:
         # 上下文贡献者与工具源（注册制、可组合；模块 on_load 里 register）
         self.context_providers: list = []
         self.tool_sources: list = []
+        # Q7 中间件 waterfall：插件在"具体一步"插入（tool_call.before /
+        # tool_result.after / messages.before_send），不必整体接管。见 app.agent.loop.middleware。
+        self.middlewares = MiddlewareRegistry()
         # 模块扩展：@tool 工具 + 技能
         self.llm_tools = ModuleToolRegistry(logger)
         self.skills = SkillRegistry(logger)

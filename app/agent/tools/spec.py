@@ -3,7 +3,9 @@
 原有 ToolSpec 只支持 `async (args) -> str`；生产化后：
 - 工具处理器统一接收 ``ToolContext``（模块/机器人/会话/事件/运行时/触发者）；
 - 模块通过 ``@tool`` 装饰器或 ``TOOLS`` 类属性声明工具；
-- 执行器带超时、异常兜底与结果截断，避免把异常/超大结果塞回 LLM 上下文。
+- 执行器带超时、异常兜底与结果截断，避免把异常/超大结果塞回 LLM 上下文；
+- 工具可声明**呈现层**（``present_call`` / ``present_result``）：只改日志文本，
+  不改返回给模型的字符串（Q6）。
 """
 
 from __future__ import annotations
@@ -107,6 +109,8 @@ class ToolSpec:
         concurrency_safe: Callable[[dict], bool] | None = None,
         timeout_s: float | None = None,
         sensitivity: str = "normal",
+        present_call: Callable[[dict], str] | None = None,
+        present_result: Callable[[ToolResult], str] | None = None,
     ) -> None:
         raw_name = str(name or "")
         self.name = sanitize_tool_name(raw_name)
@@ -133,6 +137,11 @@ class ToolSpec:
         self.timeout_s = timeout_s
         # 敏感级别（normal/high/critical）：高危 + 开了审批开关时，执行前必须先问人
         self.sensitivity = str(sensitivity or "normal").strip().lower()
+        # Q6 呈现层：日志里怎么把"这次调用 / 这个结果"讲清楚。
+        # None = 今天的日志行（``[ToolCall]调用工具：name`` / ``... result=<前200字>``）。
+        # 渲染器只影响**日志文本**，绝不改变返回给模型的字符串（那是协议面）。
+        self.present_call = present_call
+        self.present_result = present_result
 
     def runs_parallel(self, args: dict) -> bool:
         """这次调用能否与其他工具并发（**fail-closed**：拿不准就按独占）。
@@ -217,6 +226,21 @@ def _truncate_result(text: str, max_len: int | None = None) -> str:
     return text[:budget] + "\n…(结果过长已截断)"
 
 
+def _present(renderer: Callable[[Any], str] | None, value: Any, *, what: str) -> str:
+    """调用呈现层渲染器；没有渲染器 → 空串，渲染失败 → 空串。
+
+    呈现是**日志增强**：它坏了不该让一次工具调用失败（也不该把 traceback 带进
+    模型上下文），所以这里吞掉异常只留一条 debug。
+    """
+    if renderer is None:
+        return ""
+    try:
+        return str(renderer(value) or "").strip()
+    except Exception as e:  # noqa: BLE001 —— 呈现层失败按"没有呈现"处理
+        logger.debug(f"[Tool] 呈现层 {what} 渲染失败（已忽略）: {e}")
+        return ""
+
+
 def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> ToolHandler:
     """按工具名分发到对应处理器；带超时/异常兜底/结果截断。
 
@@ -247,7 +271,13 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
                 return bool(config.get("system_tools_log_enabled", True))
 
             if _log_enabled():
-                logger.add_info("Tool").info(f"[ToolCall]调用工具：{name}")
+                # Q6：有呈现层就把"调用了什么"渲染进日志行（默认行原样保留）
+                call_note = _present(
+                    spec.present_call, dict(args or {}), what=f"present_call({name})"
+                )
+                logger.add_info("Tool").info(
+                    f"[ToolCall]调用工具：{name}" + (f" | {call_note}" if call_note else "")
+                )
             # 执行前复核：清单是在本轮开始时组的，此刻开关可能已经变了
             # （模块被关掉、工具在总表里被关掉）。这里再问一次唯一判定点。
             gate_reason = _execution_gate(ctx, spec)
@@ -314,9 +344,14 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
             result = tr.plain()
             duration_ms = (time.monotonic() - started) * 1000
             if _log_enabled():
+                # Q6：结果呈现层（默认仍然只有 result=<前200字>）
+                result_note = _present(
+                    spec.present_result, tr, what=f"present_result({name})"
+                )
                 logger.add_info("Tool").info(
                     f"[ToolCall]返回：{name} success={success} duration={duration_ms:.0f}ms "
                     f"error={error} code={tr.code} result={str(result)[:200]}"
+                    + (f" | {result_note}" if result_note else "")
                 )
             await _run_tool_call_hooks(
                 ctx, spec, name, args, result, success, error, duration_ms, code=tr.code
