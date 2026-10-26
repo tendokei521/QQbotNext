@@ -271,17 +271,25 @@ async def _run_inner(
 
     turn_log = log_of(session_mgr, session)
     safe_append(turn_log, EVENT_TURN_START, kind=req.kind or "module", session_id=session_id, model=meta["model"])
+    tools_for_header = build_tools(all_specs) if use_tools else None
+    header_params = {"temperature": meta["temperature"], "max_tokens": meta["max_tokens"]}
     safe_append(
         turn_log,
         EVENT_REQUEST_HEADER,
-        **request_header(
-            messages,
-            build_tools(all_specs) if use_tools else None,
-            model=meta["model"],
-            chain=provider_chain,
-            params={"temperature": meta["temperature"], "max_tokens": meta["max_tokens"]},
-        ),
+        **request_header(messages, tools_for_header, model=meta["model"], chain=provider_chain, params=header_params),
     )
+    try:
+        from app.agent.session.verify import verify_request_reproducible
+
+        verify_request_reproducible(
+            runtime, session_mgr, session, messages, tools_for_header,
+            model=meta["model"], chain=provider_chain, params=header_params,
+            where="turn.run_turn",
+        )
+    except Exception as e:  # noqa: BLE001 —— 自检是旁路
+        logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).debug(
+            f"[Invariant] 请求指纹自检失败（已忽略）: {e}"
+        )
     from app.agent.policy import policy_view
 
     policy_cfg = policy_view(runtime) or config

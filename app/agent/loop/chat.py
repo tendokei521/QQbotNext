@@ -316,17 +316,25 @@ async def stream_response(runtime, event, ctx=None):
     tool_executor = make_executor(all_specs, tool_ctx) if use_tools else None
 
     # Q3：把这一轮**最终请求**的指纹记进日志（system hash / 工具定义 / 参数 / 链）
+    header_params = {"temperature": meta["temperature"], "max_tokens": meta["max_tokens"]}
     safe_append(
         turn_log,
         EVENT_REQUEST_HEADER,
-        **request_header(
-            messages,
-            tools,
-            model=meta["model"],
-            chain=provider_chain,
-            params={"temperature": meta["temperature"], "max_tokens": meta["max_tokens"]},
-        ),
+        **request_header(messages, tools, model=meta["model"], chain=provider_chain, params=header_params),
     )
+    # Q3：指纹自检（默认关）——同输入必须同指纹、且确实落进了日志
+    try:
+        from app.agent.session.verify import verify_request_reproducible
+
+        verify_request_reproducible(
+            runtime, session_mgr, session, messages, tools,
+            model=meta["model"], chain=provider_chain, params=header_params,
+            where="chat.stream_response",
+        )
+    except Exception as e:  # noqa: BLE001 —— 自检是旁路
+        logger.add_info(account_label(runtime.bot_id)).debug(
+            f"[Invariant] 请求指纹自检失败（已忽略）: {e}"
+        )
 
     full_text_parts: list[str] = []
     tool_results: list[dict] = []

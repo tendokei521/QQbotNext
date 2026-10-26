@@ -81,3 +81,49 @@ def test_legacy_history_without_events_is_not_a_drift(tmp_path):
     session.data.history.append({"role": "user", "content": "老数据"})
 
     assert verify_history_projection(_runtime(tmp_path, verify=True), mgr, session) is None
+
+def test_request_fingerprint_is_deterministic_and_logged(tmp_path):
+    """Q3：同输入必须同指纹；落库的 request/header 必须与它一致。"""
+    from app.agent.session.session_log import EVENT_REQUEST_HEADER, SessionLog, request_header, safe_append
+    from app.agent.session.verify import verify_request_reproducible
+
+    mgr = _mgr(tmp_path)
+    session = _session_with(mgr, ["你好"])
+    runtime = _runtime(tmp_path, verify=True)
+    SessionLog(mgr.history, session.task_id)  # 确保 schema 就绪
+    messages = [
+        {"role": "system", "content": "你是助手"},
+        {"role": "user", "content": "你好"},
+    ]
+    tools = [{"type": "function", "function": {"name": "probe", "description": "d", "parameters": {}}}]
+    params = {"temperature": 0.7, "max_tokens": 128}
+
+    # 一致：先落库，再自检
+    log = SessionLog(mgr.history, session.task_id)
+    safe_append(log, EVENT_REQUEST_HEADER, **request_header(messages, tools, model="m", chain=[], params=params))
+    assert verify_request_reproducible(
+        runtime, mgr, session, messages, tools, model="m", chain=[], params=params
+    ) is None
+
+    # 不一致：日志里是别的请求 → 必须报出来并落盘
+    safe_append(log, EVENT_REQUEST_HEADER, **request_header(messages[:-1], tools, model="m", chain=[], params=params))
+    report = verify_request_reproducible(
+        runtime, mgr, session, messages, tools, model="m", chain=[], params=params,
+        where="test",
+    )
+
+    assert report is not None
+    assert "request/header" in report["problem"]
+    assert report["path"] and __import__("pathlib").Path(report["path"]).is_file()
+
+
+def test_fingerprint_check_is_off_by_default(tmp_path):
+    from app.agent.session.verify import verify_request_reproducible
+
+    mgr = _mgr(tmp_path)
+    session = _session_with(mgr, ["你好"])
+    runtime = _runtime(tmp_path, verify=False)
+
+    assert verify_request_reproducible(
+        runtime, mgr, session, [{"role": "user", "content": "x"}], None
+    ) is None

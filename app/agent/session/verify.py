@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from typing import Any
 
 #: 比较时只看这两个字段
 FACT_KEYS = ("role", "content")
@@ -130,3 +131,98 @@ def _log(runtime):
     from app.core.logger import account_label
 
     return logger.add_info(account_label(getattr(runtime, "bot_id", "?")))
+
+def verify_request_reproducible(
+    runtime: Any,
+    session_mgr: Any,
+    session: Any,
+    messages: list,
+    tools: list | None = None,
+    *,
+    model: str = "",
+    chain: list | None = None,
+    params: dict | None = None,
+    where: str = "",
+) -> dict | None:
+    """核对"刚发出去的请求指纹"确实可复现、且真的落进了日志。
+
+    三条断言（全部只在 `prompt_dump_verify` 打开时跑）：
+
+    1. **确定性**：同一份 messages/tools 连续算两次指纹必须完全相同
+       （抓到"集合/时间戳混进指纹"这类会导致回放对不上的写法）；
+    2. **可落库**：指纹 JSON 往返一次后仍相等（抓到不可序列化的值）；
+    3. **已落库**：日志里最后一条 `request/header` 与本次算出的指纹一致
+       （抓到"写了 events 但写错对象/写进别的会话"）。
+
+    不一致时沿用 `desync-*.json` 落盘 + ERROR 日志，返回差异说明；一致/未开启返回 ``None``。
+    """
+    config = getattr(runtime, "config", None)
+    getter = getattr(config, "get", None)
+    if not callable(getter):
+        return None
+    try:
+        if not bool(getter("prompt_dump_verify", False)):
+            return None
+    except Exception:  # noqa: BLE001 —— 开关读不出来按关闭
+        return None
+
+    store = getattr(session_mgr, "history", None)
+    task_id = str(getattr(session, "task_id", "") or "")
+    if store is None or not task_id or not hasattr(store, "load_events"):
+        return None
+
+    from app.agent.session.session_log import EVENT_REQUEST_HEADER, request_header
+
+    try:
+        first = request_header(messages, tools, model=model, chain=chain, params=params)
+        second = request_header(messages, tools, model=model, chain=chain, params=params)
+    except Exception as e:  # noqa: BLE001 —— 指纹算不出来不算"不一致"，只留痕
+        _log(runtime).debug(f"[Invariant] 请求指纹计算失败（已忽略）: {e}")
+        return None
+
+    problem = ""
+    if first != second:
+        problem = "指纹不确定（同输入两次不同）"
+    else:
+        try:
+            import json as _json
+
+            if _json.loads(_json.dumps(first, ensure_ascii=False)) != first:
+                problem = "指纹 JSON 往返不相等"
+        except Exception as e:  # noqa: BLE001
+            problem = f"指纹不可 JSON 序列化: {e}"
+        if not problem:
+            try:
+                events = [e for e in store.load_events(task_id) if e["type"] == EVENT_REQUEST_HEADER]
+            except Exception as e:  # noqa: BLE001
+                _log(runtime).debug(f"[Invariant] 读取 request/header 失败（已忽略）: {e}")
+                return None
+            if events and events[-1]["payload"] != first:
+                problem = "日志里最后一条 request/header 与本次请求不一致"
+
+    if not problem:
+        return None
+
+    report = {
+        "where": where,
+        "task_id": task_id,
+        "problem": problem,
+        "expected": first,
+        "logged": (events[-1]["payload"] if "events" in dir() and events else {}),
+        "ts": int(time.time()),
+    }
+    path = ""
+    try:
+        target = _desync_dir(runtime)
+        target.mkdir(parents=True, exist_ok=True)
+        file = target / f"header-desync-{time.strftime('%Y%m%d-%H%M%S')}.json"
+        file.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        path = str(file)
+    except Exception as e:  # noqa: BLE001
+        _log(runtime).warning(f"[Invariant] 落盘 header-desync 失败（已忽略）: {e}")
+
+    _log(runtime).error(
+        f"[Invariant] 请求指纹不可复现 -> {getattr(session, 'id', '?')}"
+        f"（{where or '未知位置'}）：{problem}，dump={path or '未落盘'}"
+    )
+    return {"problem": problem, "path": path, "expected": first, "logged": report["logged"]}
