@@ -14,6 +14,7 @@ from app.agent.providers.base import BaseProvider, LLMResponse, StreamEvent, for
 from app.agent.providers.embedding import OpenAIEmbeddingProvider
 from app.agent.providers.gemini import GeminiProvider
 from app.agent.providers.openai_compat import OpenAICompatProvider
+from app.agent.providers.openai_responses import OpenAIResponsesProvider
 from app.agent.providers.policy import (
     Failure,
     FailureKind,
@@ -28,6 +29,7 @@ from app.agent.providers.tts import OpenAITTSProvider
 
 PROVIDERS: dict[str, type[BaseProvider]] = {
     "openai": OpenAICompatProvider,
+    "openai-responses": OpenAIResponsesProvider,
     "anthropic": AnthropicProvider,
     "gemini": GeminiProvider,
 }
@@ -51,6 +53,10 @@ PROVIDER_ALIASES: dict[str, str] = {
     "ppio": "openai",
     "tokenpony": "openai",
     "compshare": "openai",
+    # OpenAI 新版 Responses 协议（/v1/responses）的常见写法
+    "responses": "openai-responses",
+    "openai_responses": "openai-responses",
+    "openai-response": "openai-responses",
     "claude": "anthropic",
     "google": "gemini",
 }
@@ -765,6 +771,7 @@ __all__ = [
     "LLMResponse",
     "StreamEvent",
     "OpenAICompatProvider",
+    "OpenAIResponsesProvider",
     "get_provider",
     "get_provider_class",
     "normalize_provider_type",
