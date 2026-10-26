@@ -22,6 +22,33 @@
 
 ---
 
+## 实施状态（2026-10-26 完成）
+
+> 本方案已全部落地（C0 由 C1-C3 覆盖）。下方"现状审计"保留为**改造前**快照，供回溯；
+> "目标设计"与"分步方案"是实际实施依据。
+
+| 步骤 | 状态 | 落地要点 |
+|---|---|---|
+| C0 最小补丁 | ✅ 被 C1-C3 覆盖 | 路径解析、事务安装、装完补实例三件事都进了正式实现 |
+| C1 路径按来源解析 | ✅ | `app/plugin/catalog.py`（`ModuleEntry`/`ModuleCatalog`）+ `registry` 全量消费；zip 模块 `pages/index.html` 可访问（`test_plugin_page.py` 覆盖） |
+| C2 事务安装器 | ✅ | `app/plugin/installer.py`：staging → 布局归一（A-D/`__MACOSX`/多层）→ 清单+入口校验 → 备份（保留 3 份）→ `os.replace` → 失败回滚；zip-slip/盘符/符号链接/≤5000 文件/≤200MB/GBK 文件名回退 |
+| C3 统一编目 | ✅ | 同名冲突显式 `conflict`；加载失败进 `status=error`；幽灵条目/半装配已去掉 |
+| C4 清单 v2 | ✅ | `app/plugin/manifest.py`；23/23 内置模块有 `module.json`；`scripts/gen_module_manifests.py`（`--check` 已接入 CI） |
+| C5 管理 API | ✅ | `install-zip?force`、`validate-zip`、`{name}/update`、`DELETE {name}?purge_data`、uninstall 校验+级联、恢复对全部账号补实例 |
+| C6 前端 UX | ✅ | 来源徽标/版本/error 状态/按来源菜单/安装预览对话框/已卸载与装坏提示条；WS `bot_id`+`account_id` 双写修跨账号串台；dist 已重建提交 |
+| C7 文档 + 迁移 | ✅ | ARCHITECTURE/MODULE_DEV 对齐；`scripts/fix_module_layout.py` 旧坏装一键上提；本文档更新 |
+
+已知未覆盖（记录在案，非本轮范围）：
+
+- **旧坏装不自动迁移**：跑一次 `python scripts/fix_module_layout.py --yes` 即可（幂等、先备份）；
+- **catalog 每次请求重扫**：当前 23 份 `module.json` 毫秒级，后续量级变大再加 mtime 缓存；
+- **依赖自动安装**：`requirements.txt` 只提示不 pip 安装（避免供应链风险），需要时可加显式开关；
+- **沙箱环境的 pytest 环境差异**：`tests/core/test_env_template.py::test_creates_full_env_when_absent`
+  在"Python 子进程不可写系统临时目录"的受限环境会失败（tmp 退化为仓库根，期望绝对路径不成立），
+  CI/Linux 与正常 Windows 不受影响。
+
+---
+
 ## 1. 现状审计
 
 > 方法：逐文件只读审查（含前端）+ 运行时目录实测 + 本机探针（附录 A），**未修改代码**。

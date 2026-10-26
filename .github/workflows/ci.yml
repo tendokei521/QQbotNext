@@ -59,6 +59,10 @@ jobs:
       - name: Run backend tests
         run: python -m pytest -q
 
+      # 清单完整性：每个内置模块都必须有 module.json（v2 清单是模块唯一元数据来源）。
+      - name: Verify module manifests
+        run: python scripts/gen_module_manifests.py --check
+
       # 覆盖率：只在 3.10 上跑一次（避免多版本重复上传），且不设阈值（先拿基线）。
       - name: Run tests with coverage
         if: matrix.python-version == '3.10'
