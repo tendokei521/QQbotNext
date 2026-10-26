@@ -38,6 +38,7 @@ from app.plugin.base import (
     ServiceAccess,
 )
 from app.plugin.commands import parse_signature
+from app.plugin.manifest import Manifest, ManifestError, load_manifest
 
 #: 插件入口文件名（v3.1 起统一为 `main.py`）
 ENTRY_FILE = "main.py"
@@ -65,6 +66,36 @@ _SERVICE_HOOKS: tuple[tuple[str, str, str | None, str], ...] = (
 )
 
 
+def resolve_manifest(module_name: str, module_path: Path, source: str, log) -> Manifest | None:
+    """解析模块清单；返回 None 表示"该来源不允许继续加载"。
+
+    - 第三方（installed）：清单是安装/加载的硬门槛，缺了就没有 display_name/version，
+      装进来也是坏的 → 记 error 并拒绝加载（安装期已拦一道，这里防历史坏目录）；
+    - 内置（builtin）：清单只是元数据，缺了用类属性兜底（version=0.0.0），
+      否则一个 json 笔误就能把框架核心模块全部搞挂。
+    """
+    try:
+        return load_manifest(module_path)
+    except ManifestError as e:
+        detail = f"{e}（{e.hint}）" if e.hint else str(e)
+        if source == "installed":
+            log.error(f"[Module] {module_name} 清单无效，拒绝加载: {detail}")
+            return None
+        log.warning(f"[Module] {module_name} 内置清单缺失/无效，使用类属性兜底: {detail}")
+        return Manifest(
+            name=module_name,
+            display_name="",
+            version="0.0.0",
+            description="",
+            author="",
+            entry=ENTRY_FILE,
+            api_version=1,
+            requires=(),
+            requirements=None,
+            raw={},
+        )
+
+
 def instantiate_module(
     *,
     module_name: str,
@@ -75,10 +106,20 @@ def instantiate_module(
     parent: BaseModule | None,
     config_service,
     services: ServiceAccess,
-    read_manifest,
     log,
 ) -> BaseModule | None:
-    """导入插件模块并实例化；类不合格时记日志并返回 None（不抛）。"""
+    """导入插件模块并实例化；类不合格/清单不可用时记日志并返回 None（不抛）。"""
+    manifest = resolve_manifest(module_name, Path(module_path), source, log)
+    if manifest is None:
+        return None
+    # 第三方模块的身份 = 目录名 = 清单 name；不一致会让配置/数据按错名字寻址
+    if source == "installed" and manifest.name != module_name:
+        log.error(
+            f"[Module] {module_name} 的 module.json name={manifest.name!r} 与目录名不一致，拒绝加载"
+            "（配置/数据按模块名寻址，同名会串台）"
+        )
+        return None
+
     purge_module_cache(module_name)
     mod = import_plugin_module(module_name, module_path)
     cls = getattr(mod, "Module", None)
@@ -103,7 +144,11 @@ def instantiate_module(
     instance.parent = parent          # 父模块引用（None = 顶层模块）
     instance.children = {}            # 子模块：{短名: 实例}
     instance.source = source
-    instance.version = str(read_manifest(module_path).get("version", "") or "") or "0.0.0"
+    # 版本/显示名以清单为准（清单唯一）；display_name 只给 UI，类属性 name 保留代码内引用
+    instance.manifest = dict(manifest.raw)
+    instance.version = manifest.version or "0.0.0"
+    instance.display_name = manifest.display_name or getattr(cls, "name", "") or module_name
+    instance.api_version = manifest.api_version
     instance.plugin_dir = str(module_path)
     instance.can_uninstall = True     # 本地/外部插件都允许软卸载（文件保留）
     return instance
@@ -173,7 +218,7 @@ def _derive_subscribe_for_commands(instance: BaseModule, cls: type) -> None:
 
 def _register_service_hooks(instance: BaseModule, cls: type, bot_id: Any, services: ServiceAccess, log) -> None:
     """表驱动：把 5 类服务钩子登记到各自的注册表（加新类只需在 `_SERVICE_HOOKS` 加一行）。"""
-    for collector, registry_attr, dispatch_key, label in _SERVICE_HOOKS:
+    for collector, registry_attr, dispatch_key, _label in _SERVICE_HOOKS:
         hooks = getattr(cls, collector)()
         registry = getattr(services, registry_attr, None) if services else None
         if not hooks or registry is None:

@@ -3,6 +3,7 @@
 
 import pytest
 
+from app.application.module_install_service import ModuleInstallService
 from app.infrastructure.config.config_service import ConfigService
 from app.plugin.base import ServiceAccess
 from app.plugin.registry import ModuleRegistry
@@ -73,7 +74,14 @@ async def parent_registry(settings, container, tmp_path):
     # 按路径加载，无需动 sys.path、也不会遮蔽项目的任何包
     cfg = container.get(ConfigService)
     svc = ServiceAccess(cache=None, config_service=cfg, task_manager=_StubTM(), settings=settings)
-    reg = ModuleRegistry(plugins_dir=tmp_path / "plugins", config_service=cfg, services=svc, log=None)
+    install_service = ModuleInstallService(tmp_path / "uninstalled_modules.json")
+    reg = ModuleRegistry(
+        plugins_dir=tmp_path / "plugins",
+        config_service=cfg,
+        services=svc,
+        log=None,
+        install_service=install_service,
+    )
     yield reg
 
 
@@ -126,3 +134,24 @@ async def test_unload_cascades(parent_registry):
     assert parent_registry.get("parent", 123) is None
     assert parent_registry.get("parent.child", 123) is None
     assert getattr(child, "loaded_events", [])[-1] == "on_unload"  # 子模块 on_unload 被调用
+
+
+async def test_soft_uninstall_cascades_children(parent_registry):
+    """软卸载父模块必须连带卸载 parent.child（旧实现只 unload 精确名，子模块残留）。"""
+    await parent_registry.load_single("parent", 123)
+    child = parent_registry.get("parent", 123).children["child"]
+    assert parent_registry.get("parent.child", 123) is child
+
+    await parent_registry.uninstall_module("parent")
+
+    assert parent_registry.get("parent", 123) is None
+    assert parent_registry.get("parent.child", 123) is None
+    assert getattr(child, "loaded_events", [])[-1] == "on_unload"
+    assert parent_registry.install_service.is_uninstalled("parent") is True
+
+
+async def test_soft_uninstall_unknown_module_raises(parent_registry):
+    import pytest
+
+    with pytest.raises(ValueError):
+        await parent_registry.uninstall_module("ghost")

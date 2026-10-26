@@ -103,3 +103,43 @@ async def test_config_get_endpoint(page_env):
     assert data["ok"] is True
     assert data["module"] == "pagemod"
     assert data["config"]["greet"] == "hi"
+
+
+async def test_installed_module_page_is_served(page_env, tmp_path):
+    """修 P0-2：zip 安装的外部模块自定义页也必须可达（旧实现只查内置根）。"""
+    import json
+    import zipfile
+
+    client, c = page_env
+    from app.plugin.registry import ModuleRegistry
+
+    reg = c.get(ModuleRegistry)
+    src = tmp_path / "zip_page_src"
+    (src / "pages").mkdir(parents=True)
+    (src / "main.py").write_text(MODULE_SRC, encoding="utf-8")
+    (src / "__init__.py").write_text("", encoding="utf-8")
+    (src / "module.json").write_text(
+        json.dumps(
+            {"name": "zipmod", "display_name": "外部页模块", "version": "1.0.0", "api_version": 1},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (src / "pages" / "index.html").write_text(PAGE_HTML, encoding="utf-8")
+
+    zip_path = tmp_path / "zipmod.zip"
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        for file in src.rglob("*"):
+            if file.is_file():
+                archive.write(file, f"zipmod/{file.relative_to(src)}")
+
+    await reg.install_from_zip(zip_path)
+
+    assert reg.module_has_page("zipmod") is True
+    resp = client.get("/api/module/zipmod/page?account_id=acc1")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+    assert "hello" in resp.text
+    assert 'PLUGIN_MODULE = "zipmod"' in resp.text
+    assert 'PLUGIN_ACCOUNT_ID = "acc1";' in resp.text
+
