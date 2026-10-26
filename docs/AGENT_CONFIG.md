@@ -135,6 +135,21 @@ P3–P6 新增的 6 个键。前四个在「高级功能 → 工具执行」，`
 | `prompt_dump_verify` | False | 开/关 | 每轮对话开始时核对「会话日志投影」（`SessionLog.derive_messages()`）与内存历史是否一致，不一致时落盘 diff。在线不变式自检，默认关（多一次比较，排障时才开）。 |
 | `tool_approval_enable` | False | 开/关 | OneBot 来源且 `sensitivity in {high, critical}` 的工具执行前先问人。fail-closed：没有 `runtime.approval_channel` 就拒绝，只有 `ALLOWED_ONCE` 生效且仅本次。 |
 
+### 上下文与缓存（Q1/Q2/Q5）
+
+| 键 | 默认 | 取值 | 设计意图 |
+|---|---|---|---|
+| `context_window` | 0 | 0..2000000 | 模型窗口（token）。**0 = 不启用压力压缩**，回退到按 `history_rounds` 条数触发。 |
+| `context_compress_trigger_ratio` | 0.8 | 0..1 | 估算输入占窗口的比例越过它就压缩。0 = 不启用（按条数）。 |
+| `context_compress_keep_ratio` | 0.16 | 0..0.9 | 压缩时保留最近多少比例原文（仍受 `history_rounds` 上限约束）。 |
+| `context_compress_backend` | summary | summary / prune / both | `prune` 只裁剪旧工具结果、**不调模型**；`both` 先裁再摘要。 |
+| `history_mode` | recent | recent / full | `recent` 只内联最近若干条，更早的内容由 `search_history` 工具按需检索；`full` = 改造前的全量注入。 |
+| `history_recent_messages` | 12 | 2..200 | `recent` 模式下注入多少条历史。 |
+| `prompt_cache_enable` | True | 开/关 | 给支持显式缓存的 provider（Anthropic）在 system 末尾打缓存标记；网关不支持时关掉即回到旧请求形态。 |
+
+> 上线顺序建议：先观察 `history_mode=recent` 的回复质量（可用 `tests/eval` 的 `-m eval` 评测集），
+> 再按需打开 `context_window`。两者都可以单独回滚。
+
 > `stream_output` / `speech_via_tool` / `context_expand_enable` 三个旧键仍是配置，
 > 但「有没有这项能力」改由提供方声明（`runtime.capabilities`）决定，声明优先于配置；
 > 判定链见 `docs/TOOL_STATE.md`。

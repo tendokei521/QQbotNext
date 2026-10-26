@@ -57,6 +57,7 @@ resolve_tool_state(runtime, spec | name+source, session_scope=..., event=...)
 | `expand_recent` / `expand_message` / `expand_user` | `context_expand_enable`（能力声明优先） | 可用 |
 | `tavily_search` | `tavily_enable` | 不可用 |
 | `recall_tool_result` | `tool_spill_enable` | 不可用 |
+| `search_history` | —— | 始终可用（只在 `history_mode=recent` 时才有意义：更早的历史需要它取回） |
 | `memory_*` | `memory_enable`（有 `runtime.memory_service` 时问它） | 不可用 |
 | `knowledge_*` | `knowledge_enable` | 不可用 |
 
