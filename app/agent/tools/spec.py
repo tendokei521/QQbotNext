@@ -223,7 +223,7 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
     未来扩展：可在此处追加统一审计日志。
     """
 
-    async def _executor(name: str, args: dict) -> str:
+    async def _executor(name: str, args: dict, *, sink: dict | None = None) -> str:
         for spec in specs:
             if spec.name != name:
                 continue
@@ -356,6 +356,13 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
             # 已落盘时正文就是预览（自带取回方式与路径），不能再按 max_result 截断——
             # 那会把末尾的路径和说明切掉，等于白存。
             final = result if spilled_to else _truncate_result(result, spec.max_result)
+            if spilled_to:
+                # 结构化结果里也带上落盘位置：Q3 的 tool/result 事件与 pruner 要用
+                from dataclasses import replace as _replace
+
+                tr = _replace(tr, meta={**tr.meta, "spill": spilled_to})
+            if sink is not None:
+                sink["result"] = tr
             if runtime is not None and spec.source != "speech":
                 from app.agent.loop.tool_loop import append_reply_directive, reply_directive
                 from app.agent.policy import policy_config

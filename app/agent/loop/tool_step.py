@@ -116,6 +116,8 @@ class StepRequest:
     max_msg_len: int = 200
     #: 协作式取消句柄（`turn_runner.AbortScope`）：每轮请求前与每次工具派发前检查
     abort: Any = None
+    #: 会话事件日志（`session_log.SessionLog`）：记 tool/call 与 tool/result（Q3）
+    tool_log: Any = None
 
 
 @dataclass
@@ -206,7 +208,20 @@ async def _drive_stream_rounds(
 ) -> AsyncIterator[tuple[str, Any]]:
     """`iter_stream_step` 的轮次主体（拆出来只为让 ``text_parts`` 有明确的收尾）。"""
     from app.agent.loop.tool_loop import normalize_and_execute_tool_calls
+    from app.agent.session.session_log import (
+        EVENT_TOOL_CALL,
+        EVENT_TOOL_RESULT,
+        safe_append,
+    )
     from app.agent.tools.round_images import append_round_images
+
+    def _on_tool_event(kind: str, payload: dict) -> int:
+        """把一次工具调用/结果记进会话日志（Q3）；没有日志就返回 0。"""
+        if req.tool_log is None:
+            return 0
+        return safe_append(
+            req.tool_log, EVENT_TOOL_CALL if kind == "call" else EVENT_TOOL_RESULT, **payload
+        )
 
     for round_index in range(req.max_rounds):
         # 取消只在**边界**生效：上一轮已经发出去的句子、已经写进历史的前缀都算数，
@@ -303,7 +318,7 @@ async def _drive_stream_rounds(
                 req.messages.extend(aborted_messages)
                 raise
         normalized, tool_messages = await normalize_and_execute_tool_calls(
-            calls, executor, result.tool_results
+            calls, executor, result.tool_results, on_tool_event=_on_tool_event
         )
         result.tool_calls = normalized
         req.messages.append({
@@ -369,7 +384,20 @@ async def run_blocking_step(req: StepRequest) -> StepResult:
     from app.agent.loop.turn_metrics import _input_tokens_estimate
     from app.agent.providers.base import merge_usage
     from app.agent.providers.invoker import resolve_invoker
+    from app.agent.session.session_log import (
+        EVENT_TOOL_CALL,
+        EVENT_TOOL_RESULT,
+        safe_append,
+    )
     from app.agent.tools.round_images import append_round_images
+
+    def _log_tool_event(kind: str, payload: dict) -> int:
+        """非流式路径同样记 tool/call 与 tool/result（Q3）。"""
+        if req.tool_log is None:
+            return 0
+        return safe_append(
+            req.tool_log, EVENT_TOOL_CALL if kind == "call" else EVENT_TOOL_RESULT, **payload
+        )
 
     result = StepResult()
     if req.max_rounds <= 0:
@@ -432,7 +460,7 @@ async def run_blocking_step(req: StepRequest) -> StepResult:
                 raise
 
         normalized, tool_messages = await normalize_and_execute_tool_calls(
-            calls, executor, result.tool_results
+            calls, executor, result.tool_results, on_tool_event=_log_tool_event
         )
         result.tool_calls = normalized
         req.messages.append({

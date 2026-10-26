@@ -245,6 +245,18 @@ async def stream_response(runtime, event, ctx=None):
     all_specs = meta["all_specs"]
     tool_ctx = meta["tool_ctx"]
     session_mgr = meta["session_mgr"]
+    # Q3：本轮的会话事件日志（request/header / turn/* / tool/*）；拿不到就是 None（旁路）
+    from app.agent.session.session_log import (
+        EVENT_REQUEST_HEADER,
+        EVENT_TURN_END,
+        EVENT_TURN_START,
+        log_of,
+        request_header,
+        safe_append,
+    )
+
+    turn_log = log_of(session_mgr, session)
+    safe_append(turn_log, EVENT_TURN_START, kind="chat", session_id=session_id, model=meta["model"])
     # 历史清洗开关归 `llm_message_meta` 模块所有（未接管时回退 agent 配置）
     from app.agent.policy import policy_config
 
@@ -303,6 +315,19 @@ async def stream_response(runtime, event, ctx=None):
     tools = build_tools(all_specs) if use_tools else None
     tool_executor = make_executor(all_specs, tool_ctx) if use_tools else None
 
+    # Q3：把这一轮**最终请求**的指纹记进日志（system hash / 工具定义 / 参数 / 链）
+    safe_append(
+        turn_log,
+        EVENT_REQUEST_HEADER,
+        **request_header(
+            messages,
+            tools,
+            model=meta["model"],
+            chain=provider_chain,
+            params={"temperature": meta["temperature"], "max_tokens": meta["max_tokens"]},
+        ),
+    )
+
     full_text_parts: list[str] = []
     tool_results: list[dict] = []
     # 全程思考字符数（只在诊断日志里用：证明「想过但没正文」而不是空回复）
@@ -356,6 +381,7 @@ async def stream_response(runtime, event, ctx=None):
     # 协作式取消句柄（流水线在"新消息取代本轮"时取消它）；None = 本轮不可取消
     abort = getattr(ctx, "abort", None) if ctx is not None else None
     aborted = False
+    rounds_so_far = 0
 
     # 轮次开始：广播事实（观测方拿得到本轮 model/tools 指纹）
     from app.agent.hooks import run_stage
@@ -376,6 +402,7 @@ async def stream_response(runtime, event, ctx=None):
                 modalities=modalities,
                 max_msg_len=max_msg_len,
                 abort=abort,
+                tool_log=turn_log,
             ),
             step,
         )
@@ -393,6 +420,7 @@ async def stream_response(runtime, event, ctx=None):
 
                 # ---- 一轮结束：记账 + 发言通道 flush + 提醒注入 ----
                 summary = payload
+                rounds_so_far += 1
                 last_round_text = summary.round_text
                 reasoning_total += summary.reasoning_chars
                 _log_request_line(
@@ -591,6 +619,13 @@ async def stream_response(runtime, event, ctx=None):
         stream_success = bool("".join(full_text_parts).strip()) and not stream_error_text
 
     # 收尾广播（写历史/遥测之前）：结局已经定了，观测量能读到 reason
+    safe_append(
+        turn_log,
+        EVENT_TURN_END,
+        reason=str(turn_reason),
+        rounds=rounds_so_far,
+        interrupted=aborted,
+    )
     if ctx is not None:
         ctx.state["turn_reason"] = str(turn_reason)
         await run_stage(runtime, "turn_stopping", ctx)

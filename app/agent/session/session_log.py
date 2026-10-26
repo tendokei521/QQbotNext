@@ -157,6 +157,92 @@ class SessionLog:
         return derived
 
 
+def log_of(session_mgr: Any, session: Any = None, task_id: str = "") -> SessionLog | None:
+    """从 SessionManager（和 Session）取该会话的事件日志；拿不到就 None。
+
+    记账是旁路：没有 store（旧替身）、没有 task_id 都只是"记不了"，不影响一轮。
+    """
+    store = getattr(session_mgr, "history", None)
+    tid = str(task_id or getattr(session, "task_id", "") or "")
+    if store is None or not tid or not hasattr(store, "append_event"):
+        return None
+    try:
+        return SessionLog(store, tid)
+    except Exception:  # noqa: BLE001 —— 构造失败按"记不了"处理
+        return None
+
+
+def safe_append(log: SessionLog | None, type_: str, **payload: Any) -> int:
+    """向日志追加一条事件，返回 seq（失败返回 0）。记账失败绝不影响业务。"""
+    if log is None:
+        return 0
+    try:
+        return int(log.append(type_, **payload).get("seq") or 0)
+    except Exception:  # noqa: BLE001 —— 旁路
+        return 0
+
+
 def surface_eligible(type_: str) -> bool:
     """这个事件类型会不会进入模型可见的历史。"""
     return type_ in SURFACE_ELIGIBLE
+
+def request_header(
+    messages: list,
+    tools: list | None = None,
+    *,
+    model: str = "",
+    chain: list | None = None,
+    params: dict | None = None,
+) -> dict:
+    """把**最终请求体**算成一份可复现的指纹（写进 `request/header` 事件）。
+
+    - `system_hash`：所有 system 段按序拼接后的 sha256 前 16 位——system 改一个字就变；
+    - `tools`：工具名 + （描述+参数 schema）的 hash——工具定义漂移可检出；
+    - `params`：只记真正影响生成的键（temperature / max_tokens / tools 数量）；
+    - `chain`：provider 链（回退时实际用哪个，由 `usage`/遥测记）。
+
+    为什么不在事件里存整份 messages：messages 全量已在 `prompt_dump`（需要时开），
+    事件里只存**指纹 + 组装输入**，既能比对又不把库撑大。
+    """
+    import hashlib
+    import json as _json
+
+    def _digest(text: str) -> str:
+        return hashlib.sha256(str(text or "").encode("utf-8", "replace")).hexdigest()[:16]
+
+    system_text = "\n\n".join(
+        str(m.get("content") or "")
+        for m in (messages or [])
+        if isinstance(m, dict) and str(m.get("role") or "") == "system"
+    )
+    tool_fingerprints = []
+    for tool in tools or []:
+        if not isinstance(tool, dict):
+            continue
+        fn = tool.get("function") if isinstance(tool.get("function"), dict) else tool
+        tool_fingerprints.append({
+            "name": str(fn.get("name") or ""),
+            "hash": _digest(
+                _json.dumps(
+                    [fn.get("description") or "", fn.get("parameters") or {}],
+                    ensure_ascii=False, sort_keys=True,
+                )
+            ),
+        })
+    safe_params = {}
+    for key in ("temperature", "max_tokens", "max_tool_rounds"):
+        if isinstance(params, dict) and params.get(key) is not None:
+            safe_params[key] = params[key]
+    return {
+        "model": str(model or ""),
+        "system_hash": _digest(system_text),
+        "system_chars": len(system_text),
+        "messages": len(messages or []),
+        "tools": tool_fingerprints,
+        "params": safe_params,
+        "chain": [
+            str((cfg or {}).get("provider") or "") + "/" + str((cfg or {}).get("model") or "")
+            for cfg in (chain or [])
+            if isinstance(cfg, dict)
+        ],
+    }

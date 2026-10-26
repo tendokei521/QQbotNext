@@ -101,6 +101,8 @@ async def normalize_and_execute_tool_calls(
     tool_calls: list[dict],
     tool_executor: Callable | None,
     tool_results: list[dict],
+    *,
+    on_tool_event: Callable[[str, dict], int] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """标准化并执行一批工具调用，返回用于回传协同一对消息。
 
@@ -117,6 +119,9 @@ async def normalize_and_execute_tool_calls(
           保证与回传消息 id 一一对应；
         - ``tool_result_messages``：``role=tool`` 回传消息列表。
     """
+    from app.agent.providers import _accepts_kwarg
+    from app.agent.tools.spec import is_error_result
+
     prepared: list[dict] = []
     for index, raw in enumerate(tool_calls):
         tc = dict(raw or {})
@@ -144,6 +149,21 @@ async def normalize_and_execute_tool_calls(
             "parse_error": parse_error,
         })
 
+    # P4/Q3：把"模型要调的这批工具"记进会话日志（给回放/审计一个锚点）
+    for item in prepared:
+        if on_tool_event is not None:
+            seq = on_tool_event("call", {
+                "call_id": item["id"],
+                "name": item["name"],
+                "args_raw": str((item["tc"].get("function") or {}).get("arguments") or ""),
+            })
+            if seq:
+                item["call_seq"] = int(seq)
+
+    # 结构化结果旁路：make_executor 支持 ``sink=`` 时能拿到 ToolResult（含错误码/meta）。
+    # 第三方执行器没有这个参数就退回"从文本推断"，行为不变。
+    _accepts_sink = _accepts_kwarg(tool_executor, "sink")
+
     async def _execute(item: dict) -> str:
         if item["parse_error"]:
             return (
@@ -151,7 +171,14 @@ async def normalize_and_execute_tool_calls(
                 "请按该工具的 parameters schema 重新以合法 JSON 调用。"
             )
         try:
-            result = await tool_executor(item["name"], item["args"]) if tool_executor else "工具执行器不可用"
+            if tool_executor is None:
+                return "工具执行器不可用"
+            if _accepts_sink:
+                sink: dict = {}
+                result = await tool_executor(item["name"], item["args"], sink=sink)
+                item["structured"] = sink.get("result")
+            else:
+                result = await tool_executor(item["name"], item["args"])
         except Exception as e:  # noqa: BLE001 - 工具异常应以结果回传而非中断请求
             return f"error: 工具执行异常 {e}"
         return result if isinstance(result, str) else str(result)
@@ -167,6 +194,19 @@ async def normalize_and_execute_tool_calls(
     normalized: list[dict] = []
     result_messages: list[dict] = []
     for item, exec_result in zip(prepared, exec_results):
+        if on_tool_event is not None:
+            structured = item.get("structured")
+            is_error = bool(getattr(structured, "is_error", False)) or is_error_result(exec_result)
+            meta = dict(getattr(structured, "meta", {}) or {})
+            on_tool_event("result", {
+                "call_id": item["id"],
+                "name": item["name"],
+                "is_error": is_error,
+                "code": str(getattr(structured, "code", "") or ""),
+                "chars": len(exec_result),
+                "spilled_to": str(meta.get("spill") or ""),
+                "source_event_seqs": [item["call_seq"]] if item.get("call_seq") else [],
+            })
         tool_results.append({"name": item["name"], "args": item["args"], "result": exec_result})
         normalized.append(item["tc"])
         result_messages.append({

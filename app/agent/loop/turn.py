@@ -258,6 +258,30 @@ async def _run_inner(
         )
 
     use_tools = bool(all_specs) and supports_tool_use(modalities)
+
+    # Q3：本轮事件日志 + 请求指纹（拿不到 store 就是 None，旁路）
+    from app.agent.session.session_log import (
+        EVENT_REQUEST_HEADER,
+        EVENT_TURN_END,
+        EVENT_TURN_START,
+        log_of,
+        request_header,
+        safe_append,
+    )
+
+    turn_log = log_of(session_mgr, session)
+    safe_append(turn_log, EVENT_TURN_START, kind=req.kind or "module", session_id=session_id, model=meta["model"])
+    safe_append(
+        turn_log,
+        EVENT_REQUEST_HEADER,
+        **request_header(
+            messages,
+            build_tools(all_specs) if use_tools else None,
+            model=meta["model"],
+            chain=provider_chain,
+            params={"temperature": meta["temperature"], "max_tokens": meta["max_tokens"]},
+        ),
+    )
     from app.agent.policy import policy_view
 
     policy_cfg = policy_view(runtime) or config
@@ -284,6 +308,7 @@ async def _run_inner(
             usage_sink=sink,
             state=state,
             ctx=ctx,
+            tool_log=turn_log,
         )
     else:
         text, tool_results = await _chat_once(
@@ -298,6 +323,7 @@ async def _run_inner(
             usage_sink=sink,
             state=state,
             ctx=ctx,
+            tool_log=turn_log,
         )
 
     result.text = text
@@ -327,6 +353,14 @@ async def _run_inner(
     if req.record_history and text.strip() and session is not None:
         await _write_history(runtime, session_mgr, session, session_id, text, is_private, ctx)
     _commit_history_enrichment(runtime, session_id, ctx)
+    # Q3：日志里的 turn/end 放在**所有落库之后**——它必须是这一轮的最后一条事件
+    safe_append(
+        turn_log,
+        EVENT_TURN_END,
+        reason=str(result.reason),
+        rounds=result.rounds,
+        interrupted=result.interrupted,
+    )
     # 一轮结束：广播给订阅者（记忆蒸馏、统计、审计等业务自己接）
     await run_stage(runtime, "turn_completed", ctx)
     return result
@@ -366,6 +400,7 @@ async def _chat_once(
     usage_sink: dict,
     state: TurnState | None = None,
     ctx: Any = None,
+    tool_log: Any = None,
 ) -> tuple[str, list[dict]]:
     """非流式：一次步骤（工具多轮由 `run_blocking_step` 驱动），返回正文与工具结果。
 
@@ -401,6 +436,7 @@ async def _chat_once(
                 tool_ctx=tool_ctx,
                 modalities=meta.get("modalities"),
                 on_round_end=_on_round_end,
+                tool_log=tool_log,
             )
         )
 
@@ -446,6 +482,7 @@ async def _stream_once(
     usage_sink: dict,
     state: TurnState | None = None,
     ctx: Any = None,
+    tool_log: Any = None,
 ) -> tuple[str, list[dict]]:
     """流式：逐句回调 ``on_sentence``，返回累计正文与工具结果。
 
@@ -491,6 +528,7 @@ async def _stream_once(
             on_text=_emit,
             on_round_end=_on_round_end,
             max_msg_len=max_msg_len,
+            tool_log=tool_log,
         )
     )
     if step.kind == KIND_ERROR:
