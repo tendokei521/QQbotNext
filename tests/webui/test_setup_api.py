@@ -141,3 +141,25 @@ async def test_api_default_account_is_unique(container, config_service):
     assert listed.status_code == 200
     assert listed.json()["account"]["name"] == "改个名"
     assert listed.json()["default_address"] == "ws://127.0.0.1:4001/", "向导默认监听地址固定 4001"
+
+
+async def test_quick_model_rejects_non_url_api_base(container, config_service):
+    """基础 URL 写错（漏 http）会让模型永远连不上，保存时就要拦。"""
+    from starlette.testclient import TestClient
+
+    from app.webui.app import create_app
+
+    await config_service.save_bots([
+        {"id": "acc1", "name": "主号", "ws_url": "ws://127.0.0.1:4001/"},
+    ])
+    client = TestClient(create_app(container))
+
+    resp = client.post("/api/setup/quick-model", json={
+        "account_id": "acc1",
+        "api_base": "api.deepseek.com/v1",
+        "model": "deepseek-chat",
+    })
+
+    assert resp.status_code == 400, resp.text
+    assert "http" in resp.json()["message"]
+    assert config_service.list_provider_presets() == [], "非法 URL 不应留下预设"

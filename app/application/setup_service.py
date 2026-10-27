@@ -83,6 +83,8 @@ class SetupService:
         model = str(model or "").strip()
         if not api_base:
             raise SetupError("请填写 API 基础 URL")
+        if not api_base.startswith(("http://", "https://")):
+            raise SetupError("API 基础 URL 需要以 http:// 或 https:// 开头，例如 https://api.deepseek.com/v1")
         if not model:
             raise SetupError("请选择或填写模型名称")
 
