@@ -121,4 +121,6 @@ P0 里风险最低、收益最直接的三项（半小时级）：
 | P0-3 | `fix(webui): validate ws_url on account save` | 账号配错当场报错 |
 
 随后 P0-5/6（发行链路）需要真实构建验证，建议单独安排一个时段。
-| P4-1 | 值校验器接入人工保存（agent/module）+ 模块权限模式枚举拒绝 | `[~]` 1/5 |
+| P4-1 | `0b094b2` 值校验器接入人工保存（agent/module）+ 模块权限模式枚举拒绝 |
+| P4-2 | `3d07002` `provider_model_pool` schema 类型对齐运行时（string→string_list）+ 套装值校验 |
+| P4-5 | `9c2cb49` 删除预设时清理模型池 / 人格引用（`provider_model_pool` 死 id） |
