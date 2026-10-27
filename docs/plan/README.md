@@ -28,7 +28,7 @@
 | **P2** | 套装工件 v1（格式/校验/导出/预检） | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p2-套装工件-v1只导出导入预检) |
 | **P3** | 实例化 + 快照回滚 | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p3-实例化--快照回滚) |
 | **P4** | 更新/卸载/值校验器 | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p4-更新卸载值校验器) |
-| **P5** | 协议端托管 + 免安装发行包 | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p5-协议端托管--发行包) |
+| **P5** | 发行包（协议端托管已撤销） | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p5-发行包协议端托管已撤销) |
 | **R0** | 群列表（缓存 + 刷新） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r0-群列表) |
 | **R1** | 策略底座（群级覆盖 + 解析） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r1-策略底座) |
 | **R2** | 简单视图（群开关矩阵） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r2-简单视图) |
@@ -129,7 +129,10 @@ P0 里风险最低、收益最直接的三项（半小时级）：
 | P4-3 | `99bae98` 升级 diff：用户改过的键不被覆盖、未重填密钥复用旧值、旧激活标 superseded、无引用旧对象清理 |
 | P5-4 | `ee8abe5` + `87efd7e` 免安装包构建脚本（排除用户数据/venv/日志/密钥、`deploy.json` 逐文件 sha256、确定性 zip）+ Release 自动附产物 |
 | P5-5 | `676093c` + `14dd4fd` 可回滚更新器（版本比对/暂存校验/备份 data 与 .env/切换/回滚）+ `scripts/update.py` 命令行 |
-| P5-2 | `23ab4af` 协议端进程托管（启停/状态/日志尾/崩溃拉起上限/退出收子进程） |
-| P5-3 | `606509d` 扫码登录转发 + 登录后自动回填反向 WS（只允许本机协议端） |
-| P5-2 UI/API | `7d3c47e` + `2345c32` 协议端 API（列表/安装/启停/日志/扫码/登录回填）+ 「协议端」面板 |
-| P5-1 | `360043f` `app/application/protocol`：固定版本清单（内置无未验证版本）+ sha256/体积校验安装 + 回滚/卸载；清单非法/越权路径一律拒绝 |
+| P5-2 | `23ab4af` 协议端进程托管（启停/状态/日志尾/崩溃拉起上限/退出收子进程）**（已撤销 · 代码已删除）** |
+| P5-3 | `606509d` 扫码登录转发 + 登录后自动回填反向 WS（只允许本机协议端）**（已撤销 · 代码已删除）** |
+| P5-2 UI/API | `7d3c47e` + `2345c32` 协议端 API（列表/安装/启停/日志/扫码/登录回填）+ 「协议端」面板**（已撤销 · 代码已删除）** |
+| P5-1 | `360043f` `app/application/protocol`：固定版本清单（内置无未验证版本）+ sha256/体积校验安装 + 回滚/卸载；清单非法/越权路径一律拒绝**（已撤销 · 代码已删除）** |
+
+> **2026-10-27 范围撤销**：QQ 协议端是用户的外部依赖，本项目不托管（不装/不启停/不扫码/不维护清单）。
+> 相关代码与「协议端」页面已删除，UI/API/文档同步；依据见 [`../onebot-v11-connection-scope.md`](../onebot-v11-connection-scope.md)。

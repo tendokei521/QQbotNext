@@ -32,7 +32,7 @@
 **非目标**
 
 1. **不替代**现有 `-kit.zip` 免安装包与 wheel 发行（三条通道并存，见 §2）；
-2. **不内置 NapCat**：协议端仍是外部程序（`app/application/protocol/manifest.py:33-47` 的内置清单 `versions=[]`，禁用了指向第三方构建的下载地址）；
+2. **不内置 NapCat**：协议端是用户自备的外部程序，本项目不托管、不下载、不启停（见 [`onebot-v11-connection-scope.md`](onebot-v11-connection-scope.md)）；exe 只负责"程序本体"；
 3. 不做 macOS/Linux 二进制；
 4. 不保证插件可以访问 exe 内的只读资源（插件应只用 `services` 与可写数据目录）。
 
@@ -95,7 +95,6 @@
 | `app/infrastructure/fs/paths.py:28/50` | `_PROJECT_ROOT` 拼 `data/llm` | 改数据根 |
 | `app/agent/session/enrich.py:61` | 同上，拼 `data/llm` | 改数据根 |
 | `app/infrastructure/config/config_service.py:162/181/197` | 用 `root` 找旧布局配置（`webserver/webconfig.json` 等）读取迁移 | 传**包根**；frozen 下目录不存在 = 无可迁移，安全 |
-| `app/application/protocol/supervisor.py:121-136` | `Popen` 启动协议端、按其候选名找 `napcat.exe` | 保持外置；日志走数据根 |
 | `app/application/module_install_service.py` / `installer.py:184` | zip 插件写 `data/module/plugins`、比对 `builtin_dir` | 写数据根；`builtin_dir` = 包根 `app/plugins` |
 
 ### 3.4 一个容易被忽略的耦合：插件存在**双身份**
@@ -265,9 +264,10 @@ exe 里没有这些源文件，覆盖会写到解包目录且下次启动就没�
 建议先做绿色便携 + 启动时**探测写权限**，不可写就打印明确中文提示并退出，而不是抛 traceback。
 
 ### 6.5 协议端（NapCat）
-必须外置。exe 只解决"程序本体"，用户仍要下 NapCat 并在 WebUI 填 WS 地址。
+必须外置，且**不归本项目管理**。exe 只解决"程序本体"，用户仍要自己下 NapCat、起好服务，
+并在 WebUI「账号管理」里填 WS 地址（正向）或把 NapCat 的反向 WS 指向本程序监听地址。
 文档需在第一步就写清楚，否则"双击了但连不上 QQ"会被当成 exe 的锅。
-（`app/application/protocol/manifest.py:33-47` 内置清单刻意留空，不要为打包去填第三方下载地址。）
+（本项目不提供安装/启停/扫码，见 [`onebot-v11-connection-scope.md`](onebot-v11-connection-scope.md)。）
 
 ### 6.6 体积与启动
 `venv/Lib/site-packages` 约 70 MB，加 Pillow 14.8 MB / pydantic-core 5.7 MB / curl_cffi 原生件，预估 **90~150 MB**。
@@ -289,7 +289,7 @@ onedir 启动 2~5 秒（首轮 Windows Defender 扫描更慢）。可接受，�
 | 8 | 知识库（可选） | 若打包时装了 sqlite-vec：`enable_load_extension` 成功；未装：自动降级且不报错 |
 | 9 | 协议端 | 连真实 NapCat 收一条群消息并回复（人工） |
 | 10 | 更新入口 | frozen 下更新卡片隐藏/提示不支持，不出现"下载后覆盖源码"路径 |
-| 11 | 退出 | 关窗口后子进程（NapCat）被收掉、DB 正常关闭、`stat_recorder` 落库 |
+| 11 | 退出 | 关窗口后框架自身子进程无残留、DB 正常关闭、`stat_recorder` 落库 |
 | 12 | 体积/启动 | 记录 `du` 体积与冷启动耗时，写进 Release notes |
 
 **自动化底线**：打包改动属于「跨层重构」→ 按 AGENTS.md 大工程档位：全量 `pytest -q` 全绿 + `ruff check .` 无新增。

@@ -87,15 +87,20 @@ P2-4/5 `75f6b4c`）。**下一步：P3 实例化 + 快照回滚**（`apply_ops` 
 
 ---
 
-## P5 协议端托管 + 发行包
+## P5 发行包（协议端托管已撤销）
+
+> **2026-10-27 范围撤销**：QQ 协议端（NapCat / Lagrange 等）是用户的外部依赖，本项目不安装/不启停/不扫码、
+> 不维护版本清单。P5-1 / P5-2 / P5-3 的代码与「协议端」页面已删除，见
+> [`../onebot-v11-connection-scope.md`](../onebot-v11-connection-scope.md)。下表这三行仅保留历史记录；
+> **P5-4（Deploy Kit）/ P5-5（可回滚更新器）仍有效**。
 
 > 内容最多、外部依赖最重。**先确认长期维护意愿再做**。
 
 | 编号 | 提交信息 | 主要改动 | 验证 | 完成判据 |
 |---|---|---|---|---|
-| **P5-1** | `feat(protocol): add pinned napcat manifest and verified download` | `app/protocol/`（版本清单 JSON：version/url/sha256）、下载校验、`data/protocol/` 布局 | 单测 + 手动下载 | 固定版本、校验失败拒绝安装、可回滚上一版 |
-| **P5-2** | `feat(protocol): add supervisor for start/stop/status/logs` | 进程管理（启动/停止/重启/状态/日志尾）、崩溃重启策略、与账号绑定的生命周期 | 手动：杀掉进程观察重启 | 面板可启停并看到状态；框架退出时不留孤儿进程 |
-| **P5-3** | `feat(protocol): forward login qr and autofill reverse ws` | 二维码解析/转发（WS/HTTP）→ WebUI 展示；登录成功后自动写账号 `ws_url/token` | 手动：全新账号扫码 | 扫码 → 自动配置 → 账号连上，全程不打开 NapCat 面板 |
+| **P5-1** | `feat(protocol): add pinned napcat manifest and verified download` **（已撤销 · 代码已删除）** | `app/protocol/`（版本清单 JSON：version/url/sha256）、下载校验、`data/protocol/` 布局 | 单测 + 手动下载 | 固定版本、校验失败拒绝安装、可回滚上一版 |
+| **P5-2** | `feat(protocol): add supervisor for start/stop/status/logs` **（已撤销 · 代码已删除）** | 进程管理（启动/停止/重启/状态/日志尾）、崩溃重启策略、与账号绑定的生命周期 | 手动：杀掉进程观察重启 | 面板可启停并看到状态；框架退出时不留孤儿进程 |
+| **P5-3** | `feat(protocol): forward login qr and autofill reverse ws` **（已撤销 · 代码已删除）** | 二维码解析/转发（WS/HTTP）→ WebUI 展示；登录成功后自动写账号 `ws_url/token` | 手动：全新账号扫码 | 扫码 → 自动配置 → 账号连上，全程不打开 NapCat 面板 |
 | **P5-4** | `build: add deploy kit with embedded python and wheelhouse` | `scripts/build_deploy_kit.py`（内嵌 Python + wheelhouse + app + dist + 默认套装 + `start.bat`）、CI 产物 | 干净机器实测 | 解压双击 → 首启向导，无 Python 环境也能跑 |
 | **P5-5** | `feat(update): add version check and rollback-safe updater` | 版本比对（框架/模块/套装）、更新前备份、失败回滚 | 手动：模拟更新失败 | 更新失败自动回到上一版并给出原因 |
 
@@ -110,5 +115,5 @@ P2-4/5 `75f6b4c`）。**下一步：P3 实例化 + 快照回滚**（`apply_ops` 
 | P2 | 导出泄漏密钥 | 由 P2-2 的扫描测试兜底；导出前二次扫描 |
 | P3 | 半成品配置 | 快照 + 启动恢复；`kv.bundle_api_version` 可整体停用 |
 | P4 | 值校验误杀历史配置 | 校验失败仅对"新写入"生效；历史值读取不校验；提供 `--force` 过渡开关一版 |
-| P5 | 协议端长期维护 | 托管功能默认关闭，走"外部 NapCat"路径仍可用 |
-**进度（2026-10-27，最终）**：P0–P5 全部完成，逐项 commit 见 [`README.md`](README.md#进度与-commit-hash)。
+| P5 | 原「协议端托管」范围越界（2026-10-27 已撤销） | 直接删除托管代码；用户自备协议端的路径不变（见 [`../onebot-v11-connection-scope.md`](../onebot-v11-connection-scope.md)） |
+**进度（2026-10-27，最终）**：P0–P5 全部完成；其中 P5-1/2/3（协议端托管）已于 2026-10-27 撤销并删除代码，逐项 commit 见 [`README.md`](README.md#进度与-commit-hash)。
