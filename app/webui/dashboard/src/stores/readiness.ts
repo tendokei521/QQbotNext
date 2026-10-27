@@ -45,17 +45,55 @@ export const useReadinessStore = defineStore('readiness', () => {
     }
   }
 
-  function startPolling(intervalMs = 5000): void {
+  // 自适应轮询：未就绪时 5s 一次（用户正在等"差什么"），就绪后降到 30s；
+  // 页面不可见（切到后台标签页）时完全暂停，回来再刷一次。
+  const ACTIVE_INTERVAL_MS = 5000
+  const IDLE_INTERVAL_MS = 30000
+  let active = false
+
+  function schedule(): void {
+    if (!active) return
+    const delay = ready.value ? IDLE_INTERVAL_MS : ACTIVE_INTERVAL_MS
+    timer = window.setTimeout(async () => {
+      await load()
+      schedule()
+    }, delay)
+  }
+
+  function onVisibilityChange(): void {
+    if (document.hidden) {
+      if (timer !== null) {
+        window.clearTimeout(timer)
+        timer = null
+      }
+      return
+    }
+    if (active) {
+      void load().then(() => schedule())
+    }
+  }
+
+  function startPolling(intervalMs?: number): void {
     stopPolling()
-    void load()
-    timer = window.setInterval(() => void load(), intervalMs)
+    active = true
+    if (intervalMs) {
+      timer = window.setTimeout(async function tick() {
+        await load()
+        if (active) timer = window.setTimeout(tick, intervalMs)
+      }, 0)
+    } else {
+      void load().then(() => schedule())
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
   }
 
   function stopPolling(): void {
+    active = false
     if (timer !== null) {
-      window.clearInterval(timer)
+      window.clearTimeout(timer)
       timer = null
     }
+    document.removeEventListener('visibilitychange', onVisibilityChange)
   }
 
   return {
