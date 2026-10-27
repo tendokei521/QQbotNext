@@ -210,12 +210,14 @@ class ProtocolSupervisor:
 
     def stop_all(self) -> list[str]:
         """框架退出时调用：把所有子进程收掉，避免留孤儿进程。"""
+        import logging
+
         stopped: list[str] = []
         for protocol in list(self._state):
             try:
                 if self._alive((self._state[protocol] or {}).get("proc")):
                     self.stop(protocol)
                     stopped.append(protocol)
-            except Exception:  # noqa: BLE001 —— 退出路径上不允许抛错
-                continue
+            except Exception as e:  # noqa: BLE001 —— 退出路径上不允许抛错，但必须留痕
+                logging.getLogger(__name__).warning(f"[Protocol] 退出时停止 {protocol} 失败: {e}")
         return stopped
