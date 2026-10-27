@@ -426,3 +426,22 @@ def test_windows_wrappers_are_ascii_and_crlf():
         assert all(byte < 128 for byte in raw), f"{path.name} 必须纯 ASCII（cmd.exe 按控制台代码页读 .bat）"
         assert b"\r\n" in raw, f"{path.name} 必须使用 CRLF 换行"
         assert b"\n" not in raw.replace(b"\r\n", b""), f"{path.name} 存在裸 LF 换行"
+
+
+# ==================== --check 只读契约 ====================
+def test_check_does_not_create_venv(tmp_path, monkeypatch):
+    """``--check`` 承诺只读：venv 不存在时如实报错，不能替用户创建环境。"""
+    venv = tmp_path / "venv"
+    monkeypatch.setattr(start, "MAIN_SCRIPT", tmp_path / "main.py")
+    monkeypatch.setattr(start, "DEPS_SCRIPT", tmp_path / "check_deps.py")
+    monkeypatch.setattr(start, "ROOT", tmp_path)
+    monkeypatch.setattr(start.os, "chdir", lambda _path: None)
+
+    created: list[Path] = []
+    monkeypatch.setattr(start, "create_venv", lambda *a, **k: (created.append(venv), (False, ""))[1])
+
+    code = start.main(["--venv", str(venv), "--check"], runner=_runner([]), execv=lambda *_: None)
+
+    assert code == start.EXIT_VENV
+    assert created == [], "--check 不能创建 venv"
+    assert not venv.exists()

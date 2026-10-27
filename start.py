@@ -568,6 +568,13 @@ def main(
             return EXIT_VENV
     if interpreter_works(python, runner=runner):
         _stage(1, total, "interpreter", str(python))
+    elif args.check:
+        # --check 承诺只读：venv 不存在/坏了就如实报错，不替用户创建环境
+        _stage(1, total, "interpreter", "不可用（--check 不会创建 venv）")
+        print()
+        print(f"  [FAIL] 找不到可用的 venv：{venv_dir}")
+        print("         先跑一次 python start.py 建环境，再用 --check 复查")
+        return EXIT_VENV
     else:
         _stage(1, total, "interpreter", f"创建 venv（首次运行）：{venv_dir}")
         ok, detail = create_venv(venv_dir, runner=runner)
