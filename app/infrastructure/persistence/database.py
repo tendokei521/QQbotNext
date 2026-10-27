@@ -51,6 +51,21 @@ CREATE TABLE IF NOT EXISTS bindings (
     PRIMARY KEY (capability_id, scope_type, scope_id)
 );
 
+-- 群级覆盖（对话策略）：账号 × 能力 × 群。
+-- capability='agent' 或模块名；channel_id='' 表示该账号的默认层。
+-- enabled 为 NULL 表示"本层不覆盖"；config_json 只存白名单键（domain/dialogue_policy.py）。
+CREATE TABLE IF NOT EXISTS channel_overrides (
+    account_id      TEXT NOT NULL,
+    capability      TEXT NOT NULL DEFAULT 'agent',
+    channel_id      TEXT NOT NULL DEFAULT '',
+    enabled         INTEGER,
+    config_json     TEXT NOT NULL DEFAULT '{}',
+    permission_json TEXT NOT NULL DEFAULT '{}',
+    muted_until     INTEGER NOT NULL DEFAULT 0,
+    updated_at      INTEGER NOT NULL,
+    PRIMARY KEY (account_id, capability, channel_id)
+);
+
 -- 群列表缓存：get_group_list 的结果落库，离线也能看到"上次有哪些群"。
 -- in_group=0 表示"上次刷新时已不在该群"，保留行以便历史设置不丢。
 CREATE TABLE IF NOT EXISTS known_groups (
