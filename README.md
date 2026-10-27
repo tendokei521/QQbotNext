@@ -212,6 +212,24 @@ python main.py
 > 更省事的方式：访问 `/setup` 首启向导，第 1 步会创建账号并给出可直接复制的监听地址，
 > 连不上时逐步提示（对端未接入 / Token 不匹配 / 端口占用）。
 
+### 协议端托管（可选）
+
+WebUI 侧栏「协议端」可以直接：装清单里的固定版本（sha256 校验）→ 启动/停止/重启 →
+看日志尾 → 扫码登录，登录成功后自动把账号配成反向 WebSocket。不装托管也能用——
+手动起 NapCat、把监听地址填进账号即可。
+
+版本来源是 `data/protocol/manifest.json`（内置清单默认不含任何第三方链接，
+需要自己填入校验过的 `url` + `sha256`）；安装失败不会留半装目录，可回滚上一版。
+
+### 更新（可回滚）
+
+```bash
+python scripts/update.py status                  # 当前版本 / 待应用 / 可回滚
+python scripts/update.py stage --kit <kit.zip>   # 校验并暂存（不动线上）
+python scripts/update.py apply                   # 备份 data 与 .env 后切换
+python scripts/update.py rollback                # 退回上一版（含数据库备份）
+```
+
 ### 故障排查
 
 先看**总览页「运行状态」卡**或访问 `GET /api/readiness`：它会把"差什么、去哪修"逐条列出。

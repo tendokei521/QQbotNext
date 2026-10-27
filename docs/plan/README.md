@@ -26,8 +26,8 @@
 | **P1** | 首启向导 + 就绪诊断 | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p1-首启向导--就绪诊断1-周) |
 | **P2** | 套装工件 v1（格式/校验/导出/预检） | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p2-套装工件-v1只导出导入预检) |
 | **P3** | 实例化 + 快照回滚 | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p3-实例化--快照回滚) |
-| **P4** | 更新/卸载/值校验器 | `[ ]` | [`onboarding-bundle.md`](onboarding-bundle.md#p4-更新卸载值校验器) |
-| **P5** | 协议端托管 + 免安装发行包 | `[ ]` | [`onboarding-bundle.md`](onboarding-bundle.md#p5-协议端托管--发行包) |
+| **P4** | 更新/卸载/值校验器 | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p4-更新卸载值校验器) |
+| **P5** | 协议端托管 + 免安装发行包 | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p5-协议端托管--发行包) |
 | **R0** | 群列表（缓存 + 刷新） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r0-群列表) |
 | **R1** | 策略底座（群级覆盖 + 解析） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r1-策略底座) |
 | **R2** | 简单视图（群开关矩阵） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r2-简单视图) |
@@ -130,4 +130,5 @@ P0 里风险最低、收益最直接的三项（半小时级）：
 | P5-5 | `676093c` + `14dd4fd` 可回滚更新器（版本比对/暂存校验/备份 data 与 .env/切换/回滚）+ `scripts/update.py` 命令行 |
 | P5-2 | `23ab4af` 协议端进程托管（启停/状态/日志尾/崩溃拉起上限/退出收子进程） |
 | P5-3 | `606509d` 扫码登录转发 + 登录后自动回填反向 WS（只允许本机协议端） |
+| P5-2 UI/API | `7d3c47e` + `2345c32` 协议端 API（列表/安装/启停/日志/扫码/登录回填）+ 「协议端」面板 |
 | P5-1 | `360043f` `app/application/protocol`：固定版本清单（内置无未验证版本）+ sha256/体积校验安装 + 回滚/卸载；清单非法/越权路径一律拒绝 |
