@@ -448,6 +448,12 @@ def build_container(settings: Settings | None = None) -> Container:
         resource_registry=resource_registry,
     )
     container.register_factory(BotService, lambda: bot_service)
+
+    # 首启向导：唯一默认账号 + 后台 2s 连接重试（用户要求"不点按钮也能连上"）
+    from app.application.setup_account import SetupAccountService
+
+    setup_account_service = SetupAccountService(bot_service, config_service)
+    container.register(SetupAccountService, setup_account_service)
     log_service = LogService(settings.log_dir)
     container.register_factory(LogService, lambda: log_service)
 
@@ -554,6 +560,12 @@ async def run(settings: Settings | None = None) -> None:
     finally:
         logger.info("正在关闭…")
         await scheduler.shutdown()
+        try:
+            from app.application.setup_account import SetupAccountService
+
+            _container.get(SetupAccountService).stop_connecting()
+        except Exception as e:  # noqa: BLE001 —— 退出路径必须继续走完
+            logger.warning(f"[Setup] 退出时停止连接重试失败: {e}")
         try:
             from app.application.protocol.supervisor import ProtocolSupervisor
 

@@ -117,3 +117,27 @@ async def test_setup_api_rejects_bad_payload_without_writing(container, config_s
     assert bad.status_code == 400
     assert bad.json()["code"] == "SETUP_BAD_JSON"
     assert config_service.list_provider_presets() == []
+
+async def test_api_default_account_is_unique(container, config_service):
+    """API 层：连续保存两次，只应有一个账号。"""
+    from starlette.testclient import TestClient
+
+    from app.webui.app import create_app
+
+    client = TestClient(create_app(container))
+    first = client.post("/api/setup/default-account", json={
+        "id": "default", "name": "主号", "ws_url": "127.0.0.1:4001/ws",
+    })
+    assert first.status_code == 200, first.text
+    assert first.json()["account_id"] == "default"
+
+    second = client.post("/api/setup/default-account", json={
+        "id": "default", "name": "改个名", "ws_url": "127.0.0.1:4001/ws",
+    })
+    assert second.status_code == 200, second.text
+    assert len(config_service.get_bots()) == 1
+
+    listed = client.get("/api/setup/default-account")
+    assert listed.status_code == 200
+    assert listed.json()["account"]["name"] == "改个名"
+    assert listed.json()["default_address"] == "127.0.0.1:4001/ws"

@@ -190,6 +190,11 @@ class BotService:
         await self.ensure_account(account_id)
         return account_id
 
+    def is_connected(self, account_id: str) -> bool:
+        """该账号当前是否真的连着（向导里"只显示是否已有连接"用）。"""
+        conn = self.gateway.connections.get(str(account_id))
+        return bool(conn is not None and conn.status == "connected")
+
     async def delete_bot(self, account_id: str) -> bool:
         await self.gateway.del_bot(account_id)
         deleted = await self.config_service.delete_bot(account_id)
