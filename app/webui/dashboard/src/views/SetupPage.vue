@@ -11,11 +11,14 @@ import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import http, { errorMessage } from '@/api/http'
 import { useBotsStore } from '@/stores/bots'
+import { useBundlesStore } from '@/stores/bundles'
 import { useReadinessStore } from '@/stores/readiness'
 import { useNotifyStore } from '@/stores/notify'
+import BundleImportDialog from '@/components/bundles/BundleImportDialog.vue'
 
 const router = useRouter()
 const bots = useBotsStore()
+const bundles = useBundlesStore()
 const readiness = useReadinessStore()
 const notify = useNotifyStore()
 
@@ -55,6 +58,59 @@ const modelTestMessage = ref('')
 const personaMode = ref<'scratch' | 'bundle'>('scratch')
 const persona = reactive({ name: '群聊搭子', prompt: '' })
 const personaDone = ref(false)
+
+// 选预设：导入 + 应用到当前账号（会带上人格/模型池/Agent 配置/随包模块）
+const importDialog = ref(false)
+const selectedPresetId = ref('')
+const presetSecrets = reactive<Record<string, string>>({})
+const presetApplying = ref(false)
+const appliedPreset = ref<{ name: string; version: string } | null>(null)
+
+const selectedPreset = computed(
+  () => bundles.list.find((item) => item.id === selectedPresetId.value) || null,
+)
+
+function selectPreset(id: string) {
+  selectedPresetId.value = id
+  Object.keys(presetSecrets).forEach((key) => delete presetSecrets[key])
+  for (const secret of selectedPreset.value?.secrets || []) presetSecrets[secret.key] = ''
+}
+
+async function onPresetImported() {
+  await bundles.load()
+  const first = bundles.list[0]
+  if (!selectedPresetId.value && first) selectPreset(first.id)
+}
+
+async function applyPreset() {
+  if (!selectedPresetId.value) {
+    notify.push('先选一个预设', 'warning')
+    return
+  }
+  if (!currentAccountId.value) {
+    notify.push('请先在第一步连接账号', 'warning')
+    return
+  }
+  presetApplying.value = true
+  try {
+    await bundles.applyBundle(
+      selectedPresetId.value,
+      currentAccountId.value,
+      { ...presetSecrets },
+    )
+    const target = selectedPreset.value
+    appliedPreset.value = target
+      ? { name: target.name, version: target.version }
+      : { name: selectedPresetId.value, version: '' }
+    personaDone.value = true
+    await Promise.all([readiness.load(), bundles.loadActivations(currentAccountId.value)])
+    notify.push('预设已应用：人格 / 模型 / 模块已就位', 'success')
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  } finally {
+    presetApplying.value = false
+  }
+}
 
 const currentAccountId = computed(() => account.id.trim() || bots.currentAccountId)
 
@@ -232,7 +288,7 @@ onMounted(async () => {
   if (!bots.bots.length) await bots.fetchBots()
   await refreshAccount()
   startPolling()
-  await readiness.load()
+  await Promise.all([readiness.load(), bundles.load()])
 })
 
 onUnmounted(stopPolling)
@@ -405,7 +461,7 @@ onUnmounted(stopPolling)
         <v-card-text>
           <v-tabs v-model="personaMode" density="compact" class="mb-3">
             <v-tab value="scratch">从零写</v-tab>
-            <v-tab value="bundle">选预设（即将支持）</v-tab>
+            <v-tab value="bundle">选预设 / 导入预设包</v-tab>
           </v-tabs>
 
           <template v-if="personaMode === 'scratch'">
@@ -429,15 +485,90 @@ onUnmounted(stopPolling)
             </div>
           </template>
           <template v-else>
-            <v-alert type="info" variant="tonal" density="compact">
-              预设（整合包）功能在开发中；现在可以先用「从零写」或稍后在 Agent 面板配置。
+            <div class="text-caption mb-3" style="opacity: 0.7">
+              用别人分享的预设：导入 .zip 后一键应用人格 / 模型池 / Agent 配置 / 随包模块
+              （会以预设里的模型连接为准，覆盖第 2 步的设置）。
+            </div>
+            <div class="d-flex align-center flex-wrap gap-2 mb-3">
+              <v-btn
+                size="small"
+                color="primary"
+                variant="tonal"
+                prepend-icon="mdi-import"
+                @click="importDialog = true"
+              >
+                导入预设包
+              </v-btn>
+              <v-btn size="small" variant="text" :loading="bundles.loading" @click="bundles.load()">
+                刷新列表
+              </v-btn>
+            </div>
+
+            <v-alert v-if="!bundles.list.length && !bundles.loading" type="info" variant="tonal" density="compact">
+              还没有预设：导入一个 .zip 预设包，或先用「从零写」。
+            </v-alert>
+
+            <v-radio-group v-else v-model="selectedPresetId" hide-details class="mt-0">
+              <v-radio
+                v-for="item in bundles.list"
+                :key="item.id"
+                :value="item.id"
+                @click="selectPreset(item.id)"
+              >
+                <template #label>
+                  <div class="d-flex align-center flex-wrap gap-1">
+                    <span class="font-weight-medium">{{ item.name }}</span>
+                    <v-chip size="x-small" variant="tonal">v{{ item.version }}</v-chip>
+                    <v-chip v-if="item.modules?.length" size="x-small" variant="text">
+                      含模块 {{ item.modules.length }}
+                    </v-chip>
+                  </div>
+                </template>
+              </v-radio>
+            </v-radio-group>
+
+            <v-card v-if="selectedPreset" variant="tonal" class="mt-3">
+              <v-card-text>
+                <v-text-field
+                  v-for="secret in selectedPreset.secrets || []"
+                  :key="secret.key"
+                  v-model="presetSecrets[secret.key]"
+                  :label="secret.label"
+                  :placeholder="secret.required ? '必填（不随包分发）' : '可选'"
+                  type="password"
+                  density="comfortable"
+                  variant="outlined"
+                  autocomplete="off"
+                  hide-details
+                  class="mb-2"
+                />
+                <v-btn
+                  color="primary"
+                  variant="tonal"
+                  prepend-icon="mdi-play-circle-outline"
+                  :loading="presetApplying"
+                  @click="applyPreset"
+                >
+                  应用此预设到当前账号
+                </v-btn>
+              </v-card-text>
+            </v-card>
+
+            <v-alert v-if="appliedPreset" type="success" variant="tonal" density="compact" class="mt-3">
+              已应用「{{ appliedPreset.name }}」v{{ appliedPreset.version }}：人格、模型、模块已就位。
             </v-alert>
           </template>
         </v-card-text>
         <v-card-actions>
           <v-btn variant="text" @click="step = 2">上一步</v-btn>
           <v-spacer />
-          <v-btn color="primary" variant="tonal" :loading="busy === 'persona'" @click="savePersona">
+          <v-btn
+            v-if="personaMode === 'scratch'"
+            color="primary"
+            variant="tonal"
+            :loading="busy === 'persona'"
+            @click="savePersona"
+          >
             保存并应用
           </v-btn>
           <v-btn color="primary" @click="step = 4">下一步</v-btn>
@@ -472,6 +603,8 @@ onUnmounted(stopPolling)
         </v-card-actions>
       </v-card>
     </div>
+
+    <BundleImportDialog v-model="importDialog" @imported="onPresetImported" />
   </div>
 </template>
 
