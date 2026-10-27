@@ -49,3 +49,7 @@ deprecated/qq-client/
 
 # start.py å¯åŠ¨æ£€æŸ¥ç¼“å­˜ï¼ˆæœ¬æœºç¯å¢ƒç»“è®ºï¼Œä¸å…¥åº“ï¼‰
 data/.launcher-cache.json
+
+# Deploy Kit ¹¹½¨²úÎï£¨scripts/build_deploy_kit.py£»ÓÉ Release ¸½¼Óµ½ GitHub Release£¬²»Èë¿â£©
+dist/kit/
+dist/_wheelhouse/
