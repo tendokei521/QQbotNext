@@ -9,18 +9,30 @@
  * 三态而不是布尔，是为了让"继承账号默认"这件事可见：否则用户关掉一个群后
  * 看不出它是"显式关闭"还是"本来就没开"。
  */
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { displayName, useBotsStore } from '@/stores/bots'
 import { usePolicyStore, type PolicyMatrixRow, type SwitchValue } from '@/stores/policy'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
+import PolicyRulesDialog from '@/components/policy/PolicyRulesDialog.vue'
 
 const router = useRouter()
 const bots = useBotsStore()
 const policy = usePolicyStore()
 const notify = useNotifyStore()
+
+// 高级规则对话框：null = 账号默认层；否则是某个群
+const rulesDialog = ref(false)
+const rulesChannel = ref<string | null>(null)
+const rulesTitle = ref('')
+
+function openRules(channelId: string | null, title = '') {
+  rulesChannel.value = channelId
+  rulesTitle.value = title
+  rulesDialog.value = true
+}
 
 const SWITCH_ITEMS: { title: string; value: SwitchValue }[] = [
   { title: '允许', value: 'on' },
@@ -120,6 +132,14 @@ watch(
         </v-btn>
         <v-btn variant="text" prepend-icon="mdi-tune" @click="router.push('/agent/permission')">
           高级规则
+        </v-btn>
+        <v-btn
+          variant="tonal"
+          prepend-icon="mdi-cog-outline"
+          :disabled="!bots.currentAccountId"
+          @click="openRules(null, '账号默认规则')"
+        >
+          默认规则
         </v-btn>
       </div>
     </div>
@@ -274,8 +294,11 @@ watch(
                   <v-list-item prepend-icon="mdi-undo-variant" @click="onRestore(row)">
                     恢复继承
                   </v-list-item>
-                  <v-list-item prepend-icon="mdi-tune" @click="router.push('/agent/permission')">
-                    高级规则
+                  <v-list-item
+                    prepend-icon="mdi-tune"
+                    @click="openRules(row.group_id, `高级规则 · ${row.name}`)"
+                  >
+                    本群高级规则
                   </v-list-item>
                 </v-list>
               </v-menu>
@@ -284,6 +307,8 @@ watch(
         </v-list-item>
       </v-list>
     </v-card>
+
+    <PolicyRulesDialog v-model="rulesDialog" :channel-id="rulesChannel" :title="rulesTitle" />
 
     <div v-if="policy.rows.length" class="text-caption mt-3" style="opacity: 0.6">
       群列表来自账号在线时的一次拉取；离线时显示上次结果，可能不是最新。

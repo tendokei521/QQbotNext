@@ -21,6 +21,30 @@ export interface PolicyDefault {
   enabled_source: string
 }
 
+/** 某层（账号层/群层）当前的覆盖行；null 字段在 UI 里表示"继承" */
+export interface PolicyOverrideRow {
+  enabled?: boolean | null
+  config?: Record<string, any>
+  permission?: Record<string, any>
+  muted_until?: number
+}
+
+export interface PolicyDetail {
+  resolved: {
+    capability: string
+    account_id: string
+    channel_id: string | null
+    enabled: boolean
+    enabled_source: string
+    config: Record<string, any>
+    permission: Record<string, any>
+    sources: Record<string, string>
+  }
+  overrides: { account: PolicyOverrideRow | null; channel: PolicyOverrideRow | null }
+  overridable: string[]
+  permission_keys: string[]
+}
+
 /** 三态：继承账号级默认 / 允许 / 禁止 */
 export type SwitchValue = 'inherit' | 'on' | 'off'
 
@@ -151,6 +175,33 @@ export const usePolicyStore = defineStore('policy', () => {
     }
   }
 
+  /** 读某层（群/账号默认）的完整策略（含继承来源），供高级规则对话框使用 */
+  async function getPolicy(channelId: string | null): Promise<PolicyDetail | null> {
+    const aid = accountId.value
+    if (!aid) return null
+    const params: Record<string, string> = { account_id: aid }
+    if (channelId) params.channel_id = channelId
+    const res = await http.get('/api/policy', { params })
+    return res.data as PolicyDetail
+  }
+
+  /** 写某层覆盖；`clear` 里的键恢复继承 */
+  async function savePolicy(
+    channelId: string | null,
+    patch: Record<string, any>,
+    clear: string[] = [],
+  ): Promise<void> {
+    const aid = accountId.value
+    if (!aid) return
+    await http.post('/api/policy', {
+      account_id: aid,
+      channel_id: channelId || undefined,
+      patch,
+      clear,
+    })
+    await load()
+  }
+
   return {
     loading,
     refreshing,
@@ -172,5 +223,7 @@ export const usePolicyStore = defineStore('policy', () => {
     setSwitch,
     bulk,
     mute,
+    getPolicy,
+    savePolicy,
   }
 })
