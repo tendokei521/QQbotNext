@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import zipfile
+from pathlib import Path
 
 from starlette.testclient import TestClient
 
@@ -25,11 +26,11 @@ async def _seed_account(config_service, account_id="acc1"):
     await config_service.save_role_preset(role_id, {
         "id": role_id,
         "name": "群聊搭子",
-        "description": "",
+        "description": "简短自然",
         "system_prompt": "你是一个普通群友，说话简短。",
-        "begin_dialogs": [],
-        "tools": [],
-        "skills": [],
+        "begin_dialogs": [{"role": "user", "content": "在吗"}],
+        "tools": ["web_search"],
+        "skills": ["demo_skill"],
         "created_at": 1,
         "updated_at": 1,
     })
@@ -52,16 +53,28 @@ async def _seed_account(config_service, account_id="acc1"):
         "created_at": 1,
         "updated_at": 1,
     })
+    second_model_id = "model456"
+    await config_service.save_provider_model(second_model_id, {
+        "id": second_model_id,
+        "preset_id": preset_id,
+        "model": "deepseek-reasoner",
+        "enabled": True,
+        "created_at": 1,
+        "updated_at": 1,
+    })
     await config_service.save_module_config("agent", account_id, {
         "group_enable": True,
         "private_enable": True,
         "persona_preset_id": role_id,
         "provider_preset_id": preset_id,
         "provider_model_id": model_id,
-        "provider_model_pool": [model_id],
+        "provider_model_pool": [model_id, second_model_id],
         "api_key": "sk-agent-secret-777",
     })
-    return {"role_id": role_id, "preset_id": preset_id, "model_id": model_id}
+    return {
+        "role_id": role_id, "preset_id": preset_id,
+        "model_id": model_id, "second_model_id": second_model_id,
+    }
 
 
 async def test_export_account_produces_valid_bundle(container, config_service):
@@ -88,7 +101,16 @@ async def test_export_account_produces_valid_bundle(container, config_service):
     assert {"bundle.json", "README.md", "checksums.sha256", "configs/agent.json"} <= names
     assert "persona/default.md" in names
     assert manifest["components"]["personas"][0]["name"] == "群聊搭子"
-    assert manifest["components"]["providers"][0]["model"] == "deepseek-chat"
+    persona = manifest["components"]["personas"][0]
+    assert persona["tools"] == ["web_search"]
+    assert persona["skills"] == ["demo_skill"]
+    assert persona["begin_dialogs"] == [{"role": "user", "content": "在吗"}]
+    provider = manifest["components"]["providers"][0]
+    assert provider["model"] == "deepseek-chat"
+    assert [item["model"] for item in provider["models"]] == ["deepseek-chat", "deepseek-reasoner"]
+    # 内置模块只声明版本、不重复打包代码
+    assert not any(name.startswith("modules/") for name in names)
+    assert manifest["requires"]["modules"], "模块依赖应随包声明"
     # 活引用与密钥都不进包
     assert "persona_preset_id" not in agent
     assert "provider_preset_id" not in agent
@@ -251,4 +273,84 @@ async def test_uninstall_imported_only_deletes_artifact(container, config_servic
     assert resp.status_code == 200, resp.text
     assert resp.json()["deleted_artifact"] is True
     assert client.get("/api/bundles").json()["total"] == 0
+
+
+# ==================== 随包模块（应用时安装 / 回滚时卸载） ====================
+
+
+class _FakeRegistry:
+    """替身只记录调用：真实安装器会真的落盘+加载模块，端到端不进单测。"""
+
+    def __init__(self):
+        from types import SimpleNamespace
+
+        self.installed: dict[str, str] = {}
+        self.uninstalled: list[str] = []
+        self.catalog = SimpleNamespace(get=lambda name: None)
+
+    def catalog_entries(self):
+        return []
+
+    async def install_from_zip(self, path, *, force=False):
+        from app.application.bundle.module_packages import read_module_identity
+
+        identity = read_module_identity(Path(path).read_bytes())
+        self.installed[identity["name"]] = identity["version"]
+        return {"name": identity["name"], "version": identity["version"]}
+
+    async def delete_module(self, name, *, purge_data=False):
+        self.uninstalled.append(name)
+        self.installed.pop(name, None)
+        return {"name": name, "deleted": True}
+
+
+def _client_with_registry(container, registry) -> TestClient:
+    from app.webui.api.deps import get_module_registry
+
+    app = create_app(container)
+    app.dependency_overrides[get_module_registry] = lambda: registry
+    return TestClient(app)
+
+
+def _bundle_with_module(tmp_path) -> bytes:
+    from app.application.bundle.exporter import export_bundle
+    from app.application.bundle.module_packages import pack_module_dir
+
+    module_dir = tmp_path / "demo_mod"
+    module_dir.mkdir()
+    (module_dir / "module.json").write_text(
+        json.dumps({"name": "demo_mod", "display_name": "演示模块", "version": "1.2.0"}),
+        encoding="utf-8",
+    )
+    (module_dir / "main.py").write_text("class Module: pass\n", encoding="utf-8")
+    return export_bundle(
+        bundle_id="mod-pack",
+        name="带模块的套装",
+        agent_config={"group_enable": True},
+        module_configs={"demo_mod": {"enabled": True, "config": {"switch_on": True}}},
+        module_packages={"demo_mod": pack_module_dir(module_dir)},
+        module_meta={"demo_mod": {"version": "1.2.0", "builtin": False}},
+    )
+
+
+async def test_import_apply_bundle_with_module_package(container, config_service, tmp_path):
+    await _seed_account(config_service)
+    registry = _FakeRegistry()
+    client = _client_with_registry(container, registry)
+    data = _bundle_with_module(tmp_path)
+
+    imported = client.post("/api/bundles/import", files={"file": ("b.zip", data, "application/zip")})
+    assert imported.status_code == 200, imported.text
+
+    applied = client.post("/api/bundles/mod-pack/apply", json={"account_id": "acc1"})
+    assert applied.status_code == 200, applied.text
+    body = applied.json()
+    assert body["modules_installed"] == ["demo_mod"]
+    assert registry.installed == {"demo_mod": "1.2.0"}
+    assert config_service.get_module_config("demo_mod", "acc1")["switch_on"] is True
+
+    rolled = client.post(f"/api/activations/{body['activation_id']}/rollback")
+    assert rolled.status_code == 200, rolled.text
+    assert registry.uninstalled == ["demo_mod"]
+
 

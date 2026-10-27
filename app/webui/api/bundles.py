@@ -5,6 +5,8 @@ P2 的端点不改运行配置；P3 起新增 `apply` / `rollback`（写账号�
 
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 from urllib.parse import quote
 
@@ -14,10 +16,12 @@ from fastapi.responses import JSONResponse, Response
 from app.application.agent_metadata import agent_config_schema
 from app.application.bundle.errors import BundleError
 from app.application.bundle.service import BundleService
+from app.core.logger import logger
 from app.webui.api.deps import (
     get_agent_manager,
     get_bot_service,
     get_config_service,
+    get_module_registry,
     get_settings,
 )
 
@@ -38,20 +42,66 @@ def _err(status: int, message: str, code: str = "", hint: str = ""):
     return JSONResponse(status_code=status, content=body)
 
 
-def _installed_modules(bot_service) -> dict[str, str]:
-    registry = getattr(bot_service, "registry", None)
+def _module_catalog(registry) -> dict[str, dict]:
+    """模块编目 → ``{name: {version, builtin, path}}``（导出打包 + 依赖判定共用）。"""
     if registry is None:
         return {}
     try:
         entries = registry.catalog_entries()
-    except Exception:  # noqa: BLE001 —— 编目不可用不该让套装接口 500
+    except Exception as e:  # noqa: BLE001 —— 编目不可用不该让套装接口 500
+        logger.warning(f"[Bundle] 读取模块编目失败（按空目录处理）: {e}")
         return {}
-    modules: dict[str, str] = {}
+    catalog: dict[str, dict] = {}
     for entry in entries:
         name = str(getattr(entry, "name", "") or "")
-        if name:
-            modules[name] = str(getattr(entry, "version", "") or "0.0.0")
-    return modules
+        if not name:
+            continue
+        catalog[name] = {
+            "version": str(getattr(entry, "version", "") or "0.0.0"),
+            "builtin": bool(getattr(entry, "builtin", True)),
+            "path": str(getattr(entry, "path", "") or ""),
+        }
+    return catalog
+
+
+class _RegistryModuleInstaller:
+    """把随包模块接到**既有 zip 安装通道**（不新增执行面）。
+
+    安装/卸载都走 `ModuleRegistry`：成功后会为已存在账号补齐模块实例；
+    卸载只删外部插件目录（配置与数据保留），内置模块直接跳过。
+    """
+
+    def __init__(self, registry, bot_service) -> None:
+        self.registry = registry
+        self.bot_service = bot_service
+
+    async def install(self, name: str, data: bytes) -> dict:
+        fd, path = tempfile.mkstemp(suffix=".zip", prefix="bundle-module-")
+        os.close(fd)
+        try:
+            Path(path).write_bytes(data)
+            info = await self.registry.install_from_zip(path, force=True)
+        finally:
+            try:
+                Path(path).unlink()
+            except OSError as e:  # noqa: BLE001 —— 临时文件清理失败不影响安装结果
+                logger.debug(f"[Bundle] 清理临时模块包失败: {e}")
+        ensure = getattr(self.bot_service, "ensure_module_instances", None)
+        if callable(ensure):
+            try:
+                await ensure(name)
+            except Exception as e:  # noqa: BLE001 —— 补实例失败不影响安装结果
+                logger.warning(f"[Bundle] 模块 {name} 安装后补齐账号实例失败: {e}")
+        return info or {}
+
+    async def uninstall(self, name: str) -> None:
+        try:
+            entry = self.registry.catalog.get(name)
+        except Exception:  # noqa: BLE001 —— 编目不可用按"不存在"处理
+            entry = None
+        if entry is not None and getattr(entry, "builtin", False):
+            return
+        await self.registry.delete_module(name, purge_data=False)
 
 
 def _service(
@@ -59,14 +109,20 @@ def _service(
     agent_manager,
     bot_service,
     settings,
+    registry=None,
 ) -> BundleService:
     module_dir = Path(settings.module_dir)
     data_root = module_dir.resolve().parent if module_dir.name == "module" else module_dir
+    catalog = _module_catalog(registry)
     return BundleService(
         config_service,
         data_root=data_root,
         agent_manager=agent_manager,
-        installed_modules=_installed_modules(bot_service),
+        installed_modules={name: item["version"] for name, item in catalog.items()},
+        module_catalog=catalog,
+        module_installer=(
+            _RegistryModuleInstaller(registry, bot_service) if registry is not None else None
+        ),
         agent_schema=agent_config_schema(),
     )
 
@@ -85,13 +141,14 @@ async def api_bundles_validate(
     agent_manager=Depends(get_agent_manager),
     bot_service=Depends(get_bot_service),
     settings=Depends(get_settings),
+    registry=Depends(get_module_registry),
 ):
     try:
         data = await _read_upload(file)
     except BundleError as e:
         return _err(400, str(e), e.code, e.hint)
     try:
-        report = _service(config_service, agent_manager, bot_service, settings).validate(data)
+        report = _service(config_service, agent_manager, bot_service, settings, registry).validate(data)
     except BundleError as e:
         return _err(400, str(e), e.code, e.hint)
     return _ok("预检完成", **report)
@@ -104,11 +161,12 @@ async def api_bundles_import(
     agent_manager=Depends(get_agent_manager),
     bot_service=Depends(get_bot_service),
     settings=Depends(get_settings),
+    registry=Depends(get_module_registry),
 ):
     try:
         data = await _read_upload(file)
         result = await _service(
-            config_service, agent_manager, bot_service, settings
+            config_service, agent_manager, bot_service, settings, registry
         ).import_bundle(data)
     except BundleError as e:
         return _err(400, str(e), e.code, e.hint)
@@ -121,8 +179,9 @@ async def api_bundles_list(
     agent_manager=Depends(get_agent_manager),
     bot_service=Depends(get_bot_service),
     settings=Depends(get_settings),
+    registry=Depends(get_module_registry),
 ):
-    bundles = _service(config_service, agent_manager, bot_service, settings).list_installed()
+    bundles = _service(config_service, agent_manager, bot_service, settings, registry).list_installed()
     return _ok(bundles=bundles, total=len(bundles))
 
 
@@ -133,10 +192,11 @@ async def api_bundles_download(
     agent_manager=Depends(get_agent_manager),
     bot_service=Depends(get_bot_service),
     settings=Depends(get_settings),
+    registry=Depends(get_module_registry),
 ):
     try:
         path = _service(
-            config_service, agent_manager, bot_service, settings
+            config_service, agent_manager, bot_service, settings, registry
         ).bundle_file(bundle_id)
     except BundleError as e:
         return _err(400, str(e), e.code, e.hint)
@@ -160,12 +220,13 @@ async def api_bundles_export(
     agent_manager=Depends(get_agent_manager),
     bot_service=Depends(get_bot_service),
     settings=Depends(get_settings),
+    registry=Depends(get_module_registry),
 ):
     if not account_id:
         return _err(400, "缺少 account_id", "BUNDLE_ACCOUNT_REQUIRED")
     try:
         data = _service(
-            config_service, agent_manager, bot_service, settings
+            config_service, agent_manager, bot_service, settings, registry
         ).export_account(
             account_id,
             bundle_id=str(bundle_id or f"account-{account_id}"),
@@ -197,6 +258,7 @@ async def api_bundles_apply(
     agent_manager=Depends(get_agent_manager),
     bot_service=Depends(get_bot_service),
     settings=Depends(get_settings),
+    registry=Depends(get_module_registry),
 ):
     """把已导入的套装应用到某账号（事务写 + 快照；失败自动回滚不落半套）。"""
     try:
@@ -211,7 +273,7 @@ async def api_bundles_apply(
     secrets = body.get("secrets") if isinstance(body.get("secrets"), dict) else {}
     try:
         result = await _service(
-            config_service, agent_manager, bot_service, settings
+            config_service, agent_manager, bot_service, settings, registry
         ).apply(bundle_id, account_id, secrets=secrets)
     except BundleError as e:
         return _err(400, str(e), e.code, e.hint)
@@ -225,10 +287,11 @@ async def api_bundles_rollback(
     agent_manager=Depends(get_agent_manager),
     bot_service=Depends(get_bot_service),
     settings=Depends(get_settings),
+    registry=Depends(get_module_registry),
 ):
     try:
         result = await _service(
-            config_service, agent_manager, bot_service, settings
+            config_service, agent_manager, bot_service, settings, registry
         ).rollback(activation_id)
     except BundleError as e:
         return _err(400, str(e), e.code, e.hint)
@@ -242,6 +305,7 @@ async def api_bundles_activations(
     agent_manager=Depends(get_agent_manager),
     bot_service=Depends(get_bot_service),
     settings=Depends(get_settings),
+    registry=Depends(get_module_registry),
 ):
     activations = await _service(
         config_service, agent_manager, bot_service, settings
@@ -257,6 +321,7 @@ async def api_bundles_uninstall(
     agent_manager=Depends(get_agent_manager),
     bot_service=Depends(get_bot_service),
     settings=Depends(get_settings),
+    registry=Depends(get_module_registry),
 ):
     """卸载套装：回滚其激活 + 清理记账，无引用时删除工件文件。"""
     try:
@@ -266,7 +331,7 @@ async def api_bundles_uninstall(
     account_id = str((body or {}).get("account_id") or "").strip() or None
     try:
         result = await _service(
-            config_service, agent_manager, bot_service, settings
+            config_service, agent_manager, bot_service, settings, registry
         ).uninstall(bundle_id, account_id)
     except BundleError as e:
         return _err(400, str(e), e.code, e.hint)
