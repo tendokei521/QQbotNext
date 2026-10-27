@@ -14,6 +14,7 @@ import zipfile
 
 from app.application.bundle.errors import BundleError
 from app.application.bundle.manifest import parse_semver
+from app.application.bundle.module_packages import read_module_identity
 from app.domain.dialogue_policy import validate_override_values  # noqa: F401  (预留：P4 值校验复用)
 
 #: 解压上限（与插件安装器同量级；按"解压后真实大小"统计，不信任 zip 头）
@@ -174,12 +175,54 @@ def validate_bytes(
 
     # ---------- 模块依赖 ----------
     installed = {str(k): str(v or "0.0.0") for k, v in (installed_modules or {}).items()}
+    # 随包模块（zip 代码包）：先验包身份，再参与依赖判定（缺它不等于缺模块）
+    bundled: dict[str, dict] = {}
+    for required in manifest["requires"]["modules"]:
+        source = required["source"]
+        if not source:
+            continue
+        payload = files.get(source)
+        if payload is None:
+            issues.append(_issue(
+                "error", "BUNDLE_REF_MISSING", f"模块代码包不存在：{source}",
+                "", "重新导出或让提供方补上 modules/ 目录",
+            ))
+            continue
+        try:
+            identity = read_module_identity(payload)
+        except BundleError as e:
+            issues.append(_issue(
+                "error", "BUNDLE_MODULE_PACKAGE_INVALID",
+                f"模块代码包不可用：{source}", str(e), e.hint,
+            ))
+            continue
+        if identity["name"] != required["name"]:
+            issues.append(_issue(
+                "error", "BUNDLE_MODULE_PACKAGE_INVALID",
+                f"模块代码包与声明不一致：{source}",
+                f"包内是 {identity['name']}，清单声明 {required['name']}",
+                "检查导出时的模块打包逻辑",
+            ))
+            continue
+        if required["version"] and not _satisfies(identity["version"], required["version"]):
+            issues.append(_issue(
+                "error", "BUNDLE_MODULE_PACKAGE_INVALID",
+                f"模块代码包版本不满足：{source}",
+                f"包内 {identity['version'] or '(空)'}，要求 {required['version']}",
+            ))
+            continue
+        bundled[required["name"]] = identity
+
+    will_install: list[str] = []
     for required in manifest["requires"]["modules"]:
         name = required["name"]
         if name not in installed:
+            if name in bundled:
+                will_install.append(name)
+                continue
             if required["required"]:
                 issues.append(_issue(
-                    "error", "BUNDLE_MODULE_MISSING", f"缺少模块 {name}", "未安装", "先安装该模块再导入",
+                    "error", "BUNDLE_MODULE_MISSING", f"缺少模块 {name}", "未安装且未随包", "先安装该模块再导入",
                 ))
             else:
                 issues.append(_issue(
@@ -187,10 +230,18 @@ def validate_bytes(
                 ))
             continue
         if required["version"] and not _satisfies(installed[name], required["version"]):
-            issues.append(_issue(
-                "error", "BUNDLE_MODULE_VERSION", f"模块 {name} 版本不满足",
-                f"已装 {installed[name]}，要求 {required['version']}", "升级模块后再导入",
-            ))
+            if name in bundled:
+                will_install.append(name)
+                issues.append(_issue(
+                    "warn", "BUNDLE_MODULE_UPGRADE",
+                    f"模块 {name} 将随包升级",
+                    f"已装 {installed[name]}，包内 {bundled[name]['version']}",
+                ))
+            else:
+                issues.append(_issue(
+                    "error", "BUNDLE_MODULE_VERSION", f"模块 {name} 版本不满足",
+                    f"已装 {installed[name]}，要求 {required['version']}", "升级模块后再导入",
+                ))
 
     # ---------- 引用完整性 ----------
     for persona in manifest["components"]["personas"]:
@@ -262,6 +313,9 @@ def validate_bytes(
         "files": len(files),
         "size": len(data),
         "secrets_required": len(secrets_required),
+        # 随包模块：代码随包的模块数 / 应用时需要安装的模块数
+        "modules_bundled": len(bundled),
+        "modules_to_install": len(will_install),
     }
     errors = [issue for issue in issues if issue["level"] == "error"]
     return {

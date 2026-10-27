@@ -20,6 +20,78 @@ from app.application.bundle.module_packages import (
     pack_module_dir,
     read_module_identity,
 )
+from app.application.bundle.validator import validate_bytes
+
+
+def _bundle_with_package(tmp_path, *, declared_name="demo_mod", required=True):
+    package = pack_module_dir(_write_module(tmp_path))
+    return export_bundle(
+        bundle_id="acc1-pack",
+        name="主号配置",
+        module_configs={"demo_mod": {"enabled": True, "config": {"switch": True}}},
+        module_packages={"demo_mod": package},
+        module_meta={"demo_mod": {"version": "1.2.0", "builtin": False}},
+    ), package
+
+
+def test_validate_accepts_bundled_module_as_installable(tmp_path):
+    data, _package = _bundle_with_package(tmp_path)
+
+    report = validate_bytes(data, installed_modules={})
+
+    assert report["ok"] is True, report["issues"]
+    assert report["summary"]["modules_bundled"] == 1
+    assert report["summary"]["modules_to_install"] == 1
+    assert not any(issue["code"] == "BUNDLE_MODULE_MISSING" for issue in report["issues"])
+
+
+def test_validate_reports_package_name_mismatch(tmp_path):
+    data, package = _bundle_with_package(tmp_path)
+    # 把包内容换成另一个模块（保留原清单路径），清单声明与包内 name 不一致
+    other_root = tmp_path / "other"
+    other_root.mkdir()
+    other = _write_module(other_root, name="other_mod")
+    replacement = pack_module_dir(other)
+
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        files = {name: archive.read(name) for name in archive.namelist()}
+    files["modules/demo_mod-1.2.0.zip"] = replacement
+    files.pop("checksums.sha256", None)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name, payload in files.items():
+            archive.writestr(name, payload)
+
+    report = validate_bytes(buffer.getvalue(), installed_modules={})
+    assert report["ok"] is False
+    assert any(
+        issue["code"] == "BUNDLE_MODULE_PACKAGE_INVALID" for issue in report["issues"]
+    ), report["issues"]
+
+
+def test_validate_reports_missing_package_file(tmp_path):
+    data, _package = _bundle_with_package(tmp_path)
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        files = {name: archive.read(name) for name in archive.namelist()}
+    files.pop("modules/demo_mod-1.2.0.zip")
+    files.pop("checksums.sha256", None)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name, payload in files.items():
+            archive.writestr(name, payload)
+
+    report = validate_bytes(buffer.getvalue(), installed_modules={})
+    assert any(issue["code"] == "BUNDLE_REF_MISSING" for issue in report["issues"])
+
+
+def test_validate_marks_outdated_module_as_upgrade(tmp_path):
+    data, _package = _bundle_with_package(tmp_path)
+
+    report = validate_bytes(data, installed_modules={"demo_mod": "0.9.0"})
+
+    assert report["ok"] is True, report["issues"]
+    assert any(issue["code"] == "BUNDLE_MODULE_UPGRADE" for issue in report["issues"])
+    assert report["summary"]["modules_to_install"] == 1
 
 
 def _write_module(root, name="demo_mod", version="1.2.0", files=None):
