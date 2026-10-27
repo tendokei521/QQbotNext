@@ -80,7 +80,7 @@ def test_lists_blockers_with_where_to_fix(capsys):
 
 def test_prints_single_line_when_ready(capsys):
     container = _container(
-        bots=[{"id": "acc1"}],
+        bots=[{"id": "acc1", "ws_url": "ws://127.0.0.1:3001/"}],
         connections={"acc1": SimpleNamespace(status="connected", conn_mode="forward")},
         runtimes={"acc1": _runtime({
             "group_enable": True,
