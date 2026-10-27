@@ -38,6 +38,7 @@ from app.webui.api import responder as responder_router
 from app.webui.api import resources as resources_router
 from app.webui.api import role_presets as role_presets_router
 from app.webui.api import sessions as sessions_router
+from app.webui.api import setup as setup_router
 from app.webui.api import stats as stats_router
 from app.webui.api import webui_cfg as webui_router
 from app.webui.auth import (
@@ -179,6 +180,7 @@ def create_app(container) -> FastAPI:
     app.include_router(groups_router.router, prefix="/api")
     app.include_router(policy_router.router, prefix="/api")
     app.include_router(readiness_router.router, prefix="/api")
+    app.include_router(setup_router.router, prefix="/api")
     app.include_router(modules_router.router, prefix="/api")
     app.include_router(agent_router.router, prefix="/api")
     app.include_router(logs_router.router, prefix="/api")
