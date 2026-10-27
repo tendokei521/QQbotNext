@@ -70,7 +70,9 @@ const navItems = computed<NavItem[]>(() => {
     { to: '/tools/module', title: '模块 Tools' },
   ]
   // 历史：曾有「高级设置」独立区（内容拆成模块后只剩空概览页，已移除），
-  // 以及实验性「配置档案」入口（整套能力已下线）。实验性开关框架仍在设置页保留。
+  // 以及实验性「配置档案」入口（整套能力已下线）。
+  // 「Tool 管理」属于实验性入口：默认隐藏，设置里打开实验性选项后才出现。
+  const showExperimental = Boolean(webui.config.experimental?.show_experimental)
   return [
     { to: '/', title: '总览', icon: 'mdi-view-dashboard-outline' },
     { to: '/bots', title: '账号管理', icon: 'mdi-robot-outline' },
@@ -81,7 +83,9 @@ const navItems = computed<NavItem[]>(() => {
     { to: '/personas', title: '人格设定', icon: 'mdi-account-heart-outline' },
     { to: '/sessions', title: '会话数据', icon: 'mdi-chat-outline' },
     { title: 'Agent 面板', icon: 'mdi-creation-outline', children: agentChildren },
-    { title: 'Tool 管理', icon: 'mdi-toolbox-outline', children: toolChildren },
+    ...(showExperimental
+      ? [{ title: 'Tool 管理', icon: 'mdi-toolbox-outline', children: toolChildren }]
+      : []),
     { to: '/stats', title: '数据统计', icon: 'mdi-chart-bar' },
     { to: '/logs', title: '日志', icon: 'mdi-console' },
     { to: '/settings', title: '设置', icon: 'mdi-cog-outline' },
