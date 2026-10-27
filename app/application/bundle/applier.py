@@ -47,14 +47,24 @@ class BundleApplier:
         *,
         account_id: str,
         secrets: dict | None = None,
+        previous: dict | None = None,
     ) -> dict:
-        """把「清单 + 内容物 + 目标账号现状」算成幂等计划（含内部 ops）。"""
-        secrets = secrets or {}
+        """把「清单 + 内容物 + 目标账号现状」算成幂等计划（含内部 ops）。
+
+        ``previous`` = 上一次同等价应用于该账号时记录的 ``applied_json``
+        （``{"agent": {...}, "modules": {name: {...}}}``）。升级同 id 新版本时据此
+        **保留用户改动**：用户改过的键不再被新包覆盖；已填密钥缺省复用旧值。
+        """
+        secrets = dict(secrets or {})
+        previous = previous or {}
+        prev_agent = dict(previous.get("agent") or {})
+        prev_modules = dict(previous.get("modules") or {})
         account_id = str(account_id)
         agent_row = self.config_service.get_binding(AGENT_CAPABILITY, "account", account_id) or {}
         agent_config = dict(agent_row.get("config") or {})
         agent_permission = dict(agent_row.get("permission") or {})
         agent_enabled = agent_row.get("enabled")
+        preserved: list[str] = []
 
         agent_patch: dict[str, Any] = {}
         create_ops: list[ConfigOp] = []
@@ -87,6 +97,13 @@ class BundleApplier:
         provider = (manifest["components"]["providers"] or [None])[0]
         if provider:
             api_key = str(secrets.get("providers[0].api_key") or "")
+            if not api_key:
+                # 升级时用户没重填密钥 → 复用上一次创建的那个预设里的 key
+                for created in previous.get("created") or []:
+                    if created.get("kind") == "provider_preset":
+                        old_preset = self.config_service.get_provider_preset(created["id"]) or {}
+                        api_key = str((old_preset.get("config") or {}).get("api_key") or "")
+                        break
             preset_id = f"pp_{uuid.uuid4().hex[:10]}"
             preset = {
                 "id": preset_id,
@@ -125,6 +142,16 @@ class BundleApplier:
         for source in manifest["components"]["agent"]:
             agent_patch.update(_read_json(files, source["source"]))
 
+        # 用户改过的键（当前值 != 上次应用值）保留用户值，不被新包覆盖；
+        # 指向本套装新建对象的引用键总是覆盖（用户不直接编辑它们）。
+        for key in list(agent_patch.keys()):
+            if key in ("persona_preset_id", "provider_preset_id", "provider_model_id"):
+                continue
+            prev_value = prev_agent.get(key)
+            if prev_value is not None and agent_config.get(key) != prev_value:
+                agent_patch.pop(key)
+                preserved.append(f"agent.{key}")
+
         new_agent_config = {**agent_config, **agent_patch}
         ops: list[ConfigOp] = list(create_ops)
         bindings_snapshot = [
@@ -139,12 +166,19 @@ class BundleApplier:
         updates = [{"target": "agent", "keys": sorted(agent_patch)}]
 
         # 4) 模块：配置合并 + 启停
+        applied_modules: dict[str, dict] = {}
         for module in manifest["components"]["modules"]:
             capability = module["name"]
             row = self.config_service.get_binding(capability, "account", account_id) or {}
             merged = {**(row.get("config") or {})}
             if module.get("source"):
-                merged.update(_read_json(files, module["source"]))
+                incoming = _read_json(files, module["source"])
+                prev_module = prev_modules.get(capability) or {}
+                for key, value in incoming.items():
+                    if key in prev_module and (row.get("config") or {}).get(key) != prev_module[key]:
+                        preserved.append(f"module:{capability}.{key}")
+                        continue
+                    merged[key] = value
             ops.append(ConfigOp(
                 "binding", (capability, "account", account_id),
                 {"enabled": bool(module.get("enabled", True)), "config": merged,
@@ -155,6 +189,7 @@ class BundleApplier:
                 "capability": capability, "scope_type": "account", "scope_id": account_id,
                 "row": dict(row) if row else None,
             })
+            applied_modules[capability] = merged
             updates.append({"target": f"module:{capability}", "keys": sorted(merged)})
 
         return {
@@ -166,6 +201,8 @@ class BundleApplier:
                 secret for secret in manifest.get("secrets", []) if secret.get("required", True)
             ],
             "snapshot": {"bindings": bindings_snapshot, "created": creates_meta, "active_bundle": None},
+            "applied": {"agent": new_agent_config, "modules": applied_modules},
+            "preserved": preserved,
             "ops": ops,
         }
 
@@ -180,8 +217,26 @@ class BundleApplier:
         *,
         secrets: dict | None = None,
     ) -> dict:
-        plan = self.build_plan(manifest, files, account_id=account_id, secrets=secrets)
         db = self.config_service.db
+        # 升级 diff：取该 (bundle, account) 最近一次 active 的 applied 快照与记账对象
+        previous = None
+        prev_row = await db.fetchone(
+            "SELECT applied_json, snapshot_json FROM bundle_activations "
+            "WHERE bundle_id = ? AND account_id = ? AND status = ? ORDER BY started_at DESC LIMIT 1",
+            (bundle_id, str(account_id), "active"),
+        )
+        if prev_row is not None:
+            previous = db.loads(prev_row["applied_json"], {}) or {}
+            prev_objects = await db.fetchall(
+                "SELECT kind, object_id FROM bundle_objects WHERE bundle_id = ? AND account_id = ?",
+                (bundle_id, str(account_id)),
+            )
+            previous["created"] = [
+                {"kind": row["kind"], "id": row["object_id"]} for row in (prev_objects or [])
+            ]
+        plan = self.build_plan(
+            manifest, files, account_id=account_id, secrets=secrets, previous=previous
+        )
         activation_id = f"act_{uuid.uuid4().hex[:12]}"
         now = int(time.time())
         plan_public = {key: value for key, value in plan.items() if key not in ("ops",)}
@@ -207,9 +262,19 @@ class BundleApplier:
                 (account_id, bundle_id, activation_id, int(time.time())),
             )
             await db.execute(
-                "UPDATE bundle_activations SET status = ?, finished_at = ? WHERE id = ?",
-                ("active", int(time.time()), activation_id),
+                "UPDATE bundle_activations SET status = ?, finished_at = ?, applied_json = ? WHERE id = ?",
+                ("active", int(time.time()), db.dumps(plan["applied"]), activation_id),
             )
+            # 升级：旧激活标记为 superseded（不能再被回滚/卸载重复恢复），
+            # 再删除上一版本创建且已无人引用的对象
+            if previous is not None and prev_row is not None:
+                await db.execute(
+                    "UPDATE bundle_activations SET status = ? "
+                    "WHERE bundle_id = ? AND account_id = ? AND status = ? AND id != ?",
+                    ("superseded", bundle_id, str(account_id), "active", activation_id),
+                )
+            if previous and previous.get("created"):
+                await self._cleanup_superseded(previous["created"], plan["snapshot"]["created"])
         except Exception as e:  # noqa: BLE001 —— 失败要留痕并可回滚，不往上抛原始栈
             # apply_ops 自身是原子的：它抛错时内存/DB 已回到应用前，不必再"恢复"；
             # 只有"已写入但后续步骤失败（校验/记账）"才需要按快照回滚。
@@ -227,6 +292,42 @@ class BundleApplier:
             raise BundleError("BUNDLE_APPLY_FAILED", f"应用到账号失败（已回滚）：{e}") from e
 
         return {"activation_id": activation_id, "status": "active", "plan": plan_public}
+
+    async def _cleanup_superseded(self, previous: list[dict], current: list[dict]) -> list[str]:
+        """升级后清理上一版本创建、且不再被任何账号引用的对象（用户后建的不在此列）。"""
+        keep = {item["id"] for item in current}
+        removed: list[str] = []
+        agent_configs = self.config_service.get_all_module_configs("agent")
+        pool_ids = {
+            str(item)
+            for config in agent_configs.values()
+            for item in (config.get("provider_model_pool") or [])
+        }
+        preset_ids = {str(config.get("provider_preset_id", "")) for config in agent_configs.values()}
+        model_ids = {str(config.get("provider_model_id", "")) for config in agent_configs.values()}
+        persona_ids = {str(config.get("persona_preset_id", "")) for config in agent_configs.values()}
+        models = self.config_service.list_provider_models()
+        for item in previous:
+            kind, object_id = item["kind"], item["id"]
+            if object_id in keep:
+                continue
+            referenced = False
+            if kind == "role_preset":
+                referenced = object_id in persona_ids
+            elif kind == "provider_model":
+                referenced = object_id in model_ids or object_id in pool_ids
+            elif kind == "provider_preset":
+                referenced = object_id in preset_ids or any(
+                    str(model.get("preset_id", "")) == object_id for model in models
+                )
+            if referenced:
+                continue
+            await self.config_service.apply_ops([ConfigOp(kind, (object_id,), None)])
+            await self.config_service.db.execute(
+                "DELETE FROM bundle_objects WHERE kind = ? AND object_id = ?", (kind, object_id)
+            )
+            removed.append(f"{kind}:{object_id}")
+        return removed
 
     def _verify(self, account_id: str, manifest: dict, plan: dict) -> None:
         """回读校验：应用后的值必须等于计划（否则视为失败并回滚）。"""

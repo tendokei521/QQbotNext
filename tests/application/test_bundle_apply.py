@@ -154,3 +154,51 @@ async def test_recover_interrupted_rolls_back_applying(container, config_service
     row = await db.fetchone("SELECT status FROM bundle_activations WHERE id = ?", (result["activation_id"],))
     assert row["status"] == "rolled_back"
     assert config_service.get_module_config("agent", "acc1")["persona_preset_id"] == ""
+
+
+async def test_upgrade_preserves_user_edits_and_reuses_secret(container, config_service, db):
+    """P4-3：同 id 升版本 → 用户改过的键不被覆盖、未重填的密钥复用旧值、旧对象清理。"""
+    await _seed(container, config_service)
+    applier = BundleApplier(config_service)
+    first = await applier.apply(
+        "demo-pack", "acc1", normalize_manifest(MANIFEST), FILES,
+        secrets={"providers[0].api_key": "sk-old"},
+    )
+    agent = config_service.get_module_config("agent", "acc1")
+    old_model = agent["provider_model_id"]
+    old_role = agent["persona_preset_id"]
+
+    # 用户后来：关掉群聊，并换了 Key
+    await config_service.save_module_config("agent", "acc1", {**agent, "group_enable": False})
+    old_preset_id = config_service.get_provider_model(old_model)["preset_id"]
+    old_preset = config_service.get_provider_preset(old_preset_id)
+    await config_service.save_provider_preset(old_preset_id, {
+        **old_preset, "config": {**old_preset["config"], "api_key": "sk-user-new"},
+    })
+
+    # 新版本：想打开群聊 + 新增 temperature
+    files_v2 = dict(FILES)
+    files_v2["configs/agent.json"] = json.dumps(
+        {"group_enable": True, "temperature": 0.5}
+    ).encode()
+    manifest_v2 = normalize_manifest({**MANIFEST, "version": "2.0.0"})
+
+    second = await applier.apply("demo-pack", "acc1", manifest_v2, files_v2, secrets={})
+
+    agent2 = config_service.get_module_config("agent", "acc1")
+    assert agent2["group_enable"] is False, "用户改过的键不能被新包覆盖"
+    assert agent2["temperature"] == 0.5, "用户没改过的新键应生效"
+    assert agent2["provider_model_id"] != old_model, "应以新对象替换"
+    assert "agent.group_enable" in second["plan"]["preserved"]
+
+    new_preset = config_service.get_provider_preset(
+        config_service.get_provider_model(agent2["provider_model_id"])["preset_id"]
+    )
+    assert new_preset["config"]["api_key"] == "sk-user-new", "未重填密钥应复用旧值"
+    assert config_service.get_role_preset(old_role) is None, "旧人格已无人引用，应清理"
+
+    # 激活历史：两条记录，旧的仍可追溯
+    rows = await db.fetchall(
+        "SELECT status FROM bundle_activations WHERE bundle_id = ? ORDER BY started_at", ("demo-pack",)
+    )
+    assert [row["status"] for row in rows] == ["superseded", "active"], "旧激活应标记 superseded"
