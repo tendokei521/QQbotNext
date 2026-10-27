@@ -6,6 +6,7 @@ import { useModulesStore } from '@/stores/modules'
 import { useLogsStore } from '@/stores/logs'
 import { useWebuiStore } from '@/stores/webui'
 import { useNotifyStore } from '@/stores/notify'
+import { useReadinessStore } from '@/stores/readiness'
 import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
 import ReadinessCard from '@/components/readiness/ReadinessCard.vue'
@@ -15,6 +16,7 @@ const modules = useModulesStore()
 const logs = useLogsStore()
 const webui = useWebuiStore()
 const notify = useNotifyStore()
+const readiness = useReadinessStore()
 const router = useRouter()
 
 const refreshing = ref(false)
@@ -63,7 +65,8 @@ const isLoading = computed(() => bots.loading || modules.loading || refreshing.v
 async function refreshAll() {
   refreshing.value = true
   try {
-    await Promise.all([bots.fetchBots(), modules.load(), logs.refresh()])
+    // 「刷新状态」要连就绪卡一起刷：否则账号变了，横幅还停在旧结论
+    await Promise.all([bots.fetchBots(), modules.load(), logs.refresh(), readiness.load()])
     notify.push('状态已刷新', 'success')
   } catch (err) {
     notify.push(errorMessage(err), 'error')
@@ -82,7 +85,7 @@ async function connectCurrent() {
   try {
     await bots.connect(bots.currentId)
     notify.push('已发送连接请求', 'success')
-    await bots.fetchBots()
+    await Promise.all([bots.fetchBots(), readiness.load()])
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   } finally {
