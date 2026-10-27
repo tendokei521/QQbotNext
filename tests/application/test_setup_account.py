@@ -63,9 +63,13 @@ def service(container, config_service):
 
 
 def test_normalize_listen_address():
-    assert normalize_listen_address("") == "ws://" + DEFAULT_LISTEN_ADDRESS
-    assert normalize_listen_address("127.0.0.1:4001/ws") == "ws://127.0.0.1:4001/ws"
-    assert normalize_listen_address("ws://127.0.0.1:4001/ws") == "ws://127.0.0.1:4001/ws"
+    # 本地监听：留空 → 默认监听地址；省 scheme 也接受
+    assert normalize_listen_address("") == DEFAULT_LISTEN_ADDRESS
+    assert DEFAULT_LISTEN_ADDRESS == "ws://127.0.0.1:4001/"
+    assert normalize_listen_address("127.0.0.1:4001/") == "ws://127.0.0.1:4001/"
+    # 向外连接：留空保持空（不预填）
+    assert normalize_listen_address("", "forward") == ""
+    assert normalize_listen_address("127.0.0.1:3001/", "forward") == "ws://127.0.0.1:3001/"
 
 
 async def test_upsert_creates_exactly_one_account(service, config_service):
@@ -163,3 +167,35 @@ async def test_current_adopts_single_existing_account(service, config_service):
 
     assert current["account_id"] == "only"
     assert current["name"] == "唯一"
+
+
+async def test_forward_mode_without_address_skips_connect(service, config_service):
+    """向外连接默认不填地址：可以保存账号，但不该去连空地址。"""
+    svc, bots = service
+
+    result = await svc.upsert(name="主号", conn_mode="forward", ws_url="")
+
+    assert result["conn_mode"] == "forward"
+    assert result["ws_url"] == ""
+    assert result["connecting"] is False
+    assert bots.connect_calls == [], "没有地址时不应发起连接"
+    assert config_service.get_bots()[0]["conn_mode"] == "forward"
+
+
+async def test_mode_switch_keeps_single_account(service, config_service):
+    svc, bots = service
+    await svc.upsert(name="主号")  # 默认本地监听
+    await svc.upsert(name="主号", conn_mode="forward", ws_url="")
+    await svc.upsert(name="主号", conn_mode="reverse", ws_url="")
+
+    rows = config_service.get_bots()
+    assert len(rows) == 1, "切换连接方式不能多出账号"
+    assert rows[0]["conn_mode"] == "reverse"
+    assert rows[0]["ws_url"].startswith("ws://127.0.0.1:4001/")
+
+
+async def test_reverse_default_address_used_when_blank(service, config_service):
+    svc, _bots = service
+    result = await svc.upsert(name="主号", conn_mode="reverse", ws_url="")
+    assert result["ws_url"] == DEFAULT_LISTEN_ADDRESS
+    assert config_service.get_bots()[0]["ws_url"].startswith("ws://127.0.0.1:4001/")

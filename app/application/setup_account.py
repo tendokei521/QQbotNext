@@ -19,8 +19,10 @@ import logging
 from app.infrastructure.config.config_service import ConfigOp
 from app.infrastructure.onebot.endpoint import EndpointError, is_reverse, normalize_mode, parse_endpoint
 
-#: 向导监听地址的默认值（按要求固定为这个，不做"自动生成"）
-DEFAULT_LISTEN_ADDRESS = "127.0.0.1:4001/ws"
+#: 本地监听（反向 WebSocket）的默认地址：选「本地监听」就预填这个
+DEFAULT_LISTEN_ADDRESS = "ws://127.0.0.1:4001/"
+#: 向外连接（正向 WebSocket）默认不填地址，由用户填协议端暴露的地址
+DEFAULT_FORWARD_ADDRESS = ""
 #: 后台连接重试间隔（秒）
 DEFAULT_CONNECT_INTERVAL = 2.0
 #: kv 里记录"向导管理的那个账号"
@@ -33,12 +35,17 @@ class SetupAccountError(ValueError):
     """向导账号动作失败（消息可直接展示）。"""
 
 
-def normalize_listen_address(value: str) -> str:
-    """把用户填的地址补成 ws URL：``127.0.0.1:4001/ws`` → ``ws://127.0.0.1:4001/ws``。"""
+def normalize_listen_address(value: str, conn_mode: str = "reverse") -> str:
+    """按连接方向整理地址。
+
+    - 本地监听（反向）：留空 = 默认 ``ws://127.0.0.1:4001/``；
+    - 向外连接（正向）：**不预填**，留空就保持空（等用户填协议端地址）；
+    - 两种模式都接受省略 scheme 的写法（``127.0.0.1:4001/``）。
+    """
     text = str(value or "").strip()
     if not text:
-        text = DEFAULT_LISTEN_ADDRESS
-    if "://" not in text:
+        text = DEFAULT_LISTEN_ADDRESS if is_reverse(conn_mode) else DEFAULT_FORWARD_ADDRESS
+    if text and "://" not in text:
         text = "ws://" + text.lstrip("/")
     return text
 
@@ -135,12 +142,14 @@ class SetupAccountService:
     ) -> dict:
         """保存向导账号：没有就建一个，有就改它（**永远不新增第二个**）。"""
         requested_id = str(account_id or "").strip()
-        address = normalize_listen_address(ws_url)
         mode = normalize_mode(conn_mode)
-        try:
-            parse_endpoint(address, require_port=is_reverse(mode))
-        except EndpointError as e:
-            raise SetupAccountError(f"监听地址不可用：{e}") from e
+        address = normalize_listen_address(ws_url, mode)
+        if address:
+            try:
+                parse_endpoint(address, require_port=is_reverse(mode))
+            except EndpointError as e:
+                label = "监听地址" if is_reverse(mode) else "连接地址"
+                raise SetupAccountError(f"{label}不可用：{e}") from e
 
         bots = self.config_service.get_bots()
         current = await self.current()
@@ -155,14 +164,15 @@ class SetupAccountService:
                 name=str(name or "").strip(),
             )
             await self.config_service.set_kv(SETUP_ACCOUNT_KV, created_id)
-            self.connect_loop.ensure(created_id)
+            if address and not self.bot_service.is_connected(created_id):
+                self.connect_loop.ensure(created_id)
             return {
                 "account_id": created_id,
                 "name": self.config_service.get_account_name(created_id),
                 "ws_url": address,
                 "conn_mode": mode,
                 "connected": self.bot_service.is_connected(created_id),
-                "connecting": True,
+                "connecting": bool(address) and self.connect_loop.running(created_id),
                 "created": True,
             }
 
@@ -192,14 +202,15 @@ class SetupAccountService:
         await self.config_service.set_kv(SETUP_ACCOUNT_KV, target_id)
         await self.bot_service.gateway.reconcile()
         self.connect_loop.stop(old_id)
-        self.connect_loop.ensure(target_id)
+        if address and not self.bot_service.is_connected(target_id):
+            self.connect_loop.ensure(target_id)
         return {
             "account_id": target_id,
             "name": self.config_service.get_account_name(target_id),
             "ws_url": address,
             "conn_mode": mode,
             "connected": self.bot_service.is_connected(target_id),
-            "connecting": True,
+            "connecting": bool(address) and self.connect_loop.running(target_id),
             "created": False,
         }
 
