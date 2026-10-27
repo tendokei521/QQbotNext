@@ -117,4 +117,4 @@ R0–R4 上线后发现两个缺口，已补（均为额外提交）：
 | 缺口 | 表现 | 补法 |
 |---|---|---|
 | 「继承」值没有改的入口 | 群行选「继承」后，用户找不到"账号默认允许/不允许"在哪改；实际值来自 Agent 配置的 `group_enable`（迁移过的账号则被固化成场景层） | 简单视图顶部加「账号默认（群聊）」三态：允许 / **不允许** / 跟随 Agent 配置。前两者写场景层 `__group__`，后者删掉覆盖回落到 Agent 配置（`POST /api/policy/scene`） |
-| 改 id / 删号只动了 `bots` 表 | `channel_overrides` / `known_groups` / `channel_policies` / 套装激活 / 登录快照留在旧 id 下：新 id 页面全变「继承」，旧 id 数据成为孤儿 | `ConfigService.rename_account()` 一次搬全；`delete_bot()` 清干净（响应权只置空）；启动时清理历史孤儿并备份到 `data/orphan-account-data.json`（见 `docs/multi-account-design.md` §4.1） |
+| 改 id / 删号只动了 `bots` 表 | `channel_overrides` / `known_groups` / `channel_policies` / 预设激活 / 登录快照留在旧 id 下：新 id 页面全变「继承」，旧 id 数据成为孤儿 | `ConfigService.rename_account()` 一次搬全；`delete_bot()` 清干净（响应权只置空）；启动时清理历史孤儿并备份到 `data/orphan-account-data.json`（见 `docs/multi-account-design.md` §4.1） |

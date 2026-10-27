@@ -1,4 +1,4 @@
-# 计划 · 一键部署 / 首启向导 / 套装工件
+# 计划 · 一键部署 / 首启向导 / 预设工件
 
 > 设计依据：[`../oneclick-bundle-and-onboarding-design.md`](../oneclick-bundle-and-onboarding-design.md)
 > 状态图例与 DoD 见 [`README.md`](README.md)。
@@ -40,14 +40,14 @@ P2-4/5 `75f6b4c`）。**下一步：P3 实例化 + 快照回滚**（`apply_ops` 
 | **P1-3** | `feat(webui): add readiness card to overview` | `stores/readiness.ts`、`components/readiness/*`、`views/OverviewPage.vue`、`dist` 重建 | 前端 typecheck + 手动：断开账号看 blocker 跳转 | 总览顶部卡片能实时反映就绪状态，每条 blocker 可点去修 |
 | **P1-4** | `feat(setup): add wizard shell and connection step` | 路由 `/setup` + `views/SetupPage.vue` + `components/setup/SetupStepConnection.vue`；`GET /api/setup/state`、`POST /api/setup/test-connection` | 手动走 step1 | 未完成首启时进入即向导；可"稍后再配"；测试连接给明确结果 |
 | **P1-5** | `feat(setup): add model step that fetches and pools in one screen` | `components/setup/SetupStepModel.vue`；`POST /api/setup/quick-model`（建预设+模型+入池，事务） | `pytest tests/webui -q -k setup` + 手动 | 一步完成"填 Key → 拉模型 → 勾选 → 入池"，不回 Agent 页 |
-| **P1-6** | `feat(setup): add persona-or-bundle step and finish checklist` | `SetupStepPersona.vue`（套装 tab 先留空位，P2 接入）、`SetupStepDone.vue`（复用 ReadinessCheckList）、`POST /api/setup/complete` | 手动走完 4 步 | 全部检查通过才显示"完成"；`setup_completed_at` 落库后不再自动进入 |
+| **P1-6** | `feat(setup): add persona-or-bundle step and finish checklist` | `SetupStepPersona.vue`（预设 tab 先留空位，P2 接入）、`SetupStepDone.vue`（复用 ReadinessCheckList）、`POST /api/setup/complete` | 手动走完 4 步 | 全部检查通过才显示"完成"；`setup_completed_at` 落库后不再自动进入 |
 | **P1-7** | `feat(webui): surface module load failures with per-module reload` | `views/ModulesPage.vue`（已有 status=error 列表 → 加"重载"按钮）；复用 `POST /api/modules/{name}/reload` | 手动：破坏一个模块的 main.py 观察 | 装坏模块在列表与向导第 4 步可见，可单模块重载不重启 |
 
 **P1 收尾**：新机器验收清单（从零到群内回话 ≤5 步）写入 `docs/plan/acceptance/P1.md`（可选）。
 
 ---
 
-## P2 套装工件 v1（只导出/导入/预检）
+## P2 预设工件 v1（只导出/导入/预检）
 
 > 本阶段**不改运行时**、**不写账号配置**：只做"包进得来、看得懂、导得出"。
 
@@ -101,12 +101,12 @@ P2-4/5 `75f6b4c`）。**下一步：P3 实例化 + 快照回滚**（`apply_ops` 
 | **P5-1** | `feat(protocol): add pinned napcat manifest and verified download` **（已撤销 · 代码已删除）** | `app/protocol/`（版本清单 JSON：version/url/sha256）、下载校验、`data/protocol/` 布局 | 单测 + 手动下载 | 固定版本、校验失败拒绝安装、可回滚上一版 |
 | **P5-2** | `feat(protocol): add supervisor for start/stop/status/logs` **（已撤销 · 代码已删除）** | 进程管理（启动/停止/重启/状态/日志尾）、崩溃重启策略、与账号绑定的生命周期 | 手动：杀掉进程观察重启 | 面板可启停并看到状态；框架退出时不留孤儿进程 |
 | **P5-3** | `feat(protocol): forward login qr and autofill reverse ws` **（已撤销 · 代码已删除）** | 二维码解析/转发（WS/HTTP）→ WebUI 展示；登录成功后自动写账号 `ws_url/token` | 手动：全新账号扫码 | 扫码 → 自动配置 → 账号连上，全程不打开 NapCat 面板 |
-| **P5-4** | `build: add deploy kit with embedded python and wheelhouse` | `scripts/build_deploy_kit.py`（内嵌 Python + wheelhouse + app + dist + 默认套装 + `start.bat`）、CI 产物 | 干净机器实测 | 解压双击 → 首启向导，无 Python 环境也能跑 |
-| **P5-5** | `feat(update): add version check and rollback-safe updater` | 版本比对（框架/模块/套装）、更新前备份、失败回滚 | 手动：模拟更新失败 | 更新失败自动回到上一版并给出原因 |
+| **P5-4** | `build: add deploy kit with embedded python and wheelhouse` | `scripts/build_deploy_kit.py`（内嵌 Python + wheelhouse + app + dist + 默认预设 + `start.bat`）、CI 产物 | 干净机器实测 | 解压双击 → 首启向导，无 Python 环境也能跑 |
+| **P5-5** | `feat(update): add version check and rollback-safe updater` | 版本比对（框架/模块/预设）、更新前备份、失败回滚 | 手动：模拟更新失败 | 更新失败自动回到上一版并给出原因 |
 
 ---
 
-## P6 套装迁移补齐（2026-10-27 追加）
+## P6 预设迁移补齐（2026-10-27 追加）
 
 P2–P4 只迁"配置参数"：第三方模块换机后不会出现、人格只带 `system_prompt`、
 模型池只带第一个、非 provider 密钥只提示不回写。P6 补齐这四类，验收口径：

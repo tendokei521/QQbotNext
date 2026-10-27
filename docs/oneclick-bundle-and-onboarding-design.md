@@ -20,7 +20,7 @@
 | **整合包该长什么样？** | 不是"在配置项中间插一层运行时合并"，而是**一个可安装的配置工件（Bundle）**：导入 = 预检 → 事务化实例化 → 记录来源；回滚 = 恢复快照。**物化后它就是账号自己的配置**，运行时零改动。 |
 | **为什么不是"再做一个配置档案"？** | 你 5 天前删掉的「配置档案」（`b745b87`）是"按会话合并的覆盖层"，没有工件生命周期、不可导出、不可分享——失败原因不是分层，是**没有 artifact**。本文的 Bundle 与它语义相反。 |
 | **稳定的最低标准？** | 三条：①预检与应用共用同一个 plan；②任何失败都能回到应用前（快照 + journal + 启动恢复）；③所有"不生效"都能在界面上读到原因。缺一条就会重演"机器人不回话、日志干净"。 |
-| **好用的最低标准？** | 一条主路径：**双击 → 首启向导（4 步）→ 群里 @ 有回复**；一条复用路径：**导出/导入套装**；所有操作都有"下一步该点哪"。 |
+| **好用的最低标准？** | 一条主路径：**双击 → 首启向导（4 步）→ 群里 @ 有回复**；一条复用路径：**导出/导入预设**；所有操作都有"下一步该点哪"。 |
 | **先做什么？** | P0（本周，多数零代码）：就绪横幅 + 静默坑可见 + 发行链路修复；P1（1 周）：首启向导；P2–P4（2–4 周）：Bundle 预检/实例化/回滚/卸载；P5：~~协议端托管~~ + 免安装发行包（协议端托管已于 2026-10-27 撤销，见 [`onebot-v11-connection-scope.md`](onebot-v11-connection-scope.md)）。 |
 
 **本文最值钱的一句话**：把 Bundle 做成首启向导的最后一屏——它既解决"小白第一次配什么"，又天然是备份/换机/分享/发行包的通用容器。**一个工件格式，同时服务部署、分发、迁移**。
@@ -30,7 +30,7 @@
 | 你要的 | 本文的机制 | 怎么验收 |
 |---|---|---|
 | **易上手** | 首启向导 4 步 + 就绪卡 + 启动横幅；`group_enable` 等静默点全部补日志 | 新机器从零到"群里 @ 有回复"≤5 步；每一步都有"下一步点哪" |
-| **高拓展** | Bundle 工件（声明式 manifest + 内容物 + 引用重写）+ 模块 code 走既有 zip 通道 | 导出一个套装 → 另一台机器导入 → 行为一致；第三方能照规范做包 |
+| **高拓展** | Bundle 工件（声明式 manifest + 内容物 + 引用重写）+ 模块 code 走既有 zip 通道 | 导出一个预设 → 另一台机器导入 → 行为一致；第三方能照规范做包 |
 | **稳定** | 预检=应用（同一 plan）+ 事务 + 快照回滚 + 启动恢复 + 值校验器 | 8.1 六条不变式全部有测试；失败矩阵 12 种全部有确定表现 |
 | **好用** | 预检报告四块（将创建/将修改/依赖/需手填）+ 结果逐项 + 一键回滚 + 错误三类分流 | 用户不需要看日志就能知道"哪一步、为什么、怎么办" |
 
@@ -97,7 +97,7 @@
 
 | # | 公理 | 落地约束 |
 |---|---|---|
-| A1 | **一个事实一个来源** | 工件导入后**物化**为账号配置/全局预设；运行时不读"套装层"，不做合并覆盖（`b745b87` 的教训）。 |
+| A1 | **一个事实一个来源** | 工件导入后**物化**为账号配置/全局预设；运行时不读"预设层"，不做合并覆盖（`b745b87` 的教训）。 |
 | A2 | **预检先行，且预检=应用** | dry-run 产出的 `plan` 就是应用时执行的同一对象；预检结论与应用结果不一致 = 缺陷。 |
 | A3 | **全成或全退** | 快照 + journal + 启动恢复；任何一步失败都回到应用前，禁止半成品。 |
 | A4 | **静默失败是缺陷** | 所有"没反应"必须在 readiness/日志/UI 三处之一有可读原因（`group_enable` 这类必须补日志）。 |
@@ -167,7 +167,7 @@
 **抄**：**多入口但同一套检查**（脚本/安装器/Docker 最终都走同一个 preflight）；把"环境依赖清单"显式化（我们的 P0 README 前置条件）。
 **不抄**：把依赖安装交给用户自己 debug。
 
-### 3.8 非游戏套装（HA Blueprint / Docker Compose / 1Panel）
+### 3.8 非游戏预设（HA Blueprint / Docker Compose / 1Panel）
 
 - **HA Blueprint**：导入先 Preview 再 Import；重导入**直接覆盖**，官方 Caution 明说可能破坏已有自动化 → 正面印证我们"快照 + 冲突列表 + 回滚"的必要性。
 - **Docker Compose**：声明式、`up/pull`，但**无迁移与回滚语义** → 我们比它多一层事务。
@@ -203,7 +203,7 @@
 
 | 工件 | 消费者 | 内容 | 产出方式 |
 |---|---|---|---|
-| **Config Bundle（配置套装）** | 已有用户 / 换机 / 分享 | 人格 + Provider 连接形态 + Agent 配置 + 模块开关与参数 | WebUI 导出 / 手写 / 第三方制作 |
+| **Config Bundle（配置预设）** | 已有用户 / 换机 / 分享 | 人格 + Provider 连接形态 + Agent 配置 + 模块开关与参数 | WebUI 导出 / 手写 / 第三方制作 |
 | **Deploy Kit（发行包）** | 从零开始的小白 | 框架代码 + 内嵌 Python + wheelhouse + dashboard dist + 默认 Bundle | CI 构建（修复 release 链路后） |
 
 两者共用 `bundle.json` 的 `schema` 命名空间与校验器：Deploy Kit 里内嵌一个 `bundles/default.zip`。
@@ -235,7 +235,7 @@
 1. **对象级独立**：包内对象一律新建（新 id），不改任何既有对象；同名加后缀。
 2. **账号级独立**：应用只改目标账号的 bindings；其它账号不受影响。
 3. **卸载可逆**：删除本包创建的对象 + 恢复被覆盖对象的快照；用户后来新建的对象不动。
-4. **v1 明确不做**：同一账号同时激活多个套装、同账号不同群用不同套装（那是被删功能的路，见 §10）。
+4. **v1 明确不做**：同一账号同时激活多个预设、同账号不同群用不同预设（那是被删功能的路，见 §10）。
 
 ### 4.5 与「能力控制台」的关系（避免两套开关）
 
@@ -293,7 +293,7 @@
 | 人格提示词 | **全文**（`persona/*.md` 或内联） | 人格是内容，不是共享资产；跨机器必须自包含 |
 | Provider 连接 | **形态**：provider 类型 + api_base + 模型名 | 密钥不打包；api_base 可被用户改 |
 | Provider 模型 | 名称 + 参数（温度等非密钥项） | 同上 |
-| Agent 配置 | **子集**：人设选择、场景开关、行为参数、权限档位 | 只带"属于这个套装"的键；连接类/机器相关键走 `secrets` 或忽略 |
+| Agent 配置 | **子集**：人设选择、场景开关、行为参数、权限档位 | 只带"属于这个预设"的键；连接类/机器相关键走 `secrets` 或忽略 |
 | 模块 | **引用**（name + 版本约束）+ 可选 zip | 代码走既有安装通道；版本要能约束 |
 | 模块参数 | 该模块的 config 子集 | 与模块 schema 逐键校验 |
 | 模块开关 | `enabled` 布尔 | 与参数分离（Koishi 模型） |
@@ -398,7 +398,7 @@
 ### 6.1 数据模型（4 张新表 + 2 个 kv）
 
 ```sql
--- 已安装的套装（工件登记）
+-- 已安装的预设（工件登记）
 CREATE TABLE IF NOT EXISTS bundles (
     id              TEXT PRIMARY KEY,        -- bundle.json.id（稳定标识）
     name            TEXT NOT NULL,
@@ -441,7 +441,7 @@ CREATE TABLE IF NOT EXISTS bundle_objects (
     PRIMARY KEY (bundle_id, kind, object_id)
 );
 
--- 账号当前"来自哪个套装"（纯元数据：用于 UI 显示、升级检测、卸载前置检查）
+-- 账号当前"来自哪个预设"（纯元数据：用于 UI 显示、升级检测、卸载前置检查）
 CREATE TABLE IF NOT EXISTS account_active_bundle (
     account_id    TEXT PRIMARY KEY,
     bundle_id     TEXT NOT NULL,
@@ -455,7 +455,7 @@ CREATE TABLE IF NOT EXISTS account_active_bundle (
 > `account_active_bundle` **不参与运行时解析**（A1），只用于：详情页"已用于哪些账号"、卸载前"先用回滚清掉"、
 > 更新时"哪些账号需要重新应用"。
 
-> **为什么不给 bindings 加 `bundle` 作用域？** v1 不需要：导入即物化。等真要做"同账号多套装热切换"时再加（§10.1 给了精确改动点），避免现在就动运行时解析链。
+> **为什么不给 bindings 加 `bundle` 作用域？** v1 不需要：导入即物化。等真要做"同账号多预设热切换"时再加（§10.1 给了精确改动点），避免现在就动运行时解析链。
 
 ### 6.1.1 快照的确切范围（回滚可靠性的关键）
 
@@ -476,7 +476,7 @@ CREATE TABLE IF NOT EXISTS account_active_bundle (
 }
 ```
 
-- 只覆盖 `bindings` 的 **account 档**与本次涉及的 capability；global/channel 档不动（套装不写全局默认）。
+- 只覆盖 `bindings` 的 **account 档**与本次涉及的 capability；global/channel 档不动（预设不写全局默认）。
 - 回滚 = `bindings` 写回 + `created` 删除 + `account_active_bundle` 还原；**不触碰**用户在此之后新建的对象。
 
 ### 6.2 服务分层与职责
@@ -672,7 +672,7 @@ GET /api/readiness → {
 | 框架 `api_version` 不足 | 拒绝并给"需要 ≥x.y.z" |
 | 模块版本不满足 | required → 拒绝；optional → 跳过 + warning |
 | 已装同 id 不同版本 | 升级流程：先预检 diff（新增/删除的键），保留用户"改过的键"（见 §8.1 I5） |
-| 旧数据 | 无需迁移（新增表）；`bundles` 空即"没用过套装" |
+| 旧数据 | 无需迁移（新增表）；`bundles` 空即"没用过预设" |
 
 ### 6.9 安全
 
@@ -697,17 +697,17 @@ GET /api/readiness → {
 | 路由 | 页面 | 说明 |
 |---|---|---|
 | `/setup` | 首启向导（全屏，无侧栏） | 未完成时自动进入；可"稍后再配"跳过 |
-| `/bundles` | 套装中心 | 列表 + 导入/导出入口 |
-| `/bundles/:id` | 套装详情 | 清单/组件/激活账号/更新/卸载/下载 |
+| `/bundles` | 预设中心 | 列表 + 导入/导出入口 |
+| `/bundles/:id` | 预设详情 | 清单/组件/激活账号/更新/卸载/下载 |
 | `/` | 总览 | 顶部新增「就绪卡」，替换现有散落的空状态引导 |
 
-侧栏新增两项（放在"总览"之后）：**首次配置**（未完成时高亮 + 角标）、**套装中心**。
+侧栏新增两项（放在"总览"之后）：**首次配置**（未完成时高亮 + 角标）、**预设中心**。
 
 **两条用户旅程**（所有页面设计都要能回答"我在哪条上"）：
 
 | 旅程 | 用户 | 路径 | 成功标准 |
 |---|---|---|---|
-| **A 从零到回话** | 小白 | 双击 `start.bat` → `/setup` 4 步（第 3 步选一个内置套装）→ 就绪卡全绿 → 群里 @ 有回复 | ≤5 步、全程有"下一步" |
+| **A 从零到回话** | 小白 | 双击 `start.bat` → `/setup` 4 步（第 3 步选一个内置预设）→ 就绪卡全绿 → 群里 @ 有回复 | ≤5 步、全程有"下一步" |
 | **B 换机/分享/复用** | 老手 | `/bundles` → 导出当前账号（勾选部件）→ 另一台机器 `/bundles` → 导入 → 预检 → 填密钥 → 应用 → 结果 | 配置一致、失败可回滚、密钥只写不读回 |
 
 ### 7.2 首启向导（4 步，每步一个提交级功能）
@@ -733,7 +733,7 @@ GET /api/readiness → {
 |---|---|---|---|
 | 1 连接 | NapCat 三步指引 + 地址/Token 表单 + `测试连接`（**参考 NapCat 一键包：无需预装 QQ 也能先给出三条命令**） | 账号存在且 `connected` | 可跳过，总览显示 blocker |
 | 2 模型 | Provider 二选一（预设下拉 / 自定义 api_base）+ 填 Key + `拉取模型` + 勾选 → 自动入池 | `provider_model_pool` 非空且连通测试通过 | 可跳过（Agent 不会回复） |
-| 3 人格 / 套装 | 两个 tab：**选套装**（推荐，来自 `/api/bundles` 与内置默认套装）/ **从零写人格**（文本框 + 预设模板）；选套装时内嵌 §7.4 的预检 | `persona_preset_id` 或 `system_prompt` 非空 | 可跳过（用默认人设） |
+| 3 人格 / 预设 | 两个 tab：**选预设**（推荐，来自 `/api/bundles` 与内置默认预设）/ **从零写人格**（文本框 + 预设模板）；选预设时内嵌 §7.4 的预检 | `persona_preset_id` 或 `system_prompt` 非空 | 可跳过（用默认人设） |
 | 4 完成 | 就绪清单（全部 ✓）+ **模块加载失败列表（可单击重载，不重启）** + "在群里 @ 我试试" + 常见问题三条 | 用户点"完成" | 写 `setup_completed_at`，不再自动进入 |
 
 **两条来自成熟项目的硬规矩**（AstrBot/NapCat 的首启体验）：
@@ -763,19 +763,19 @@ GET /api/readiness → {
 - 每条 `blocker` 必须带按钮跳转（`action.route`）。
 - 点"为什么不回"跳到日志页并预置过滤条件 `tag=skip`（需要后端把 §1.3 的静默点都打成该 tag 的 WARN）。
 
-### 7.4 套装中心
+### 7.4 预设中心
 
 **列表页**
 
 ```
-┌ 套装中心 ────────────────────────────── [导入套装] [导出当前账号] ┐
+┌ 预设中心 ────────────────────────────── [导入预设] [导出当前账号] ┐
 │ ┌───────────────────────┐ ┌───────────────────────┐              │
 │ │ 群聊搭子        v1.2.0 │ │ 客服助手        v0.9.3 │              │
 │ │ 内置 · 2 模块 · 3 预设 │ │ 第三方 · 1 模块        │              │
 │ │ 已用于：主号 123456789 │ │ 未使用                 │              │
 │ │ [详情] [应用到账号…]   │ │ [详情] [应用到账号…]   │              │
 │ └───────────────────────┘ └───────────────────────┘              │
-│ 空态：还没有套装。从「导出当前账号」生成第一个，或导入别人分享的 .zip │
+│ 空态：还没有预设。从「导出当前账号」生成第一个，或导入别人分享的 .zip │
 └───────────────────────────────────────────────────────────────────┘
 ```
 
@@ -822,7 +822,7 @@ GET /api/readiness → {
 
 ### 7.5 导出流程
 
-入口三处：套装中心顶部、Agent 面板「导出为套装」、账号卡片「导出该账号配置」。对话框选项：
+入口三处：预设中心顶部、Agent 面板「导出为预设」、账号卡片「导出该账号配置」。对话框选项：
 
 | 选项 | 默认 | 说明 |
 |---|---|---|
@@ -850,12 +850,12 @@ GET /api/readiness → {
 ```
 views/
   SetupPage.vue                  # 向导外壳（stepper + 路由守卫）
-  BundlesPage.vue                # 套装列表
+  BundlesPage.vue                # 预设列表
   BundleDetailPage.vue           # 详情 + 激活/卸载
 components/
   setup/SetupStepConnection.vue
   setup/SetupStepModel.vue       # 含"拉取模型"与"入池"同屏
-  setup/SetupStepPersona.vue     # 套装 tab / 从零 tab
+  setup/SetupStepPersona.vue     # 预设 tab / 从零 tab
   setup/SetupStepDone.vue        # 复用 ReadinessCheckList
   readiness/ReadinessCard.vue
   readiness/ReadinessCheckList.vue
@@ -917,7 +917,7 @@ idle → validating → preview → needs_secrets → importing → applying →
 
 | 失败点 | 用户看到 | 系统状态 | 是否可重试 |
 |---|---|---|---|
-| zip 非法/超限 | 「不是有效的套装包」+ 原因 | 无变化 | 换包 |
+| zip 非法/超限 | 「不是有效的预设包」+ 原因 | 无变化 | 换包 |
 | 清单缺字段 | 逐条列出缺失项 | 无变化 | 改包 |
 | 框架版本过低 | 「需要 QQBot Next ≥ x.y.z」 | 无变化 | 升级框架 |
 | 模块缺失（required） | 列出模块 + 当前/要求版本 | 无变化 | 装模块 |
@@ -947,22 +947,22 @@ idle → validating → preview → needs_secrets → importing → applying →
 |---|---|---|---|
 | **P0 止漏**（本周） | ①`group_enable` 静默 return 补 WARN（按账号限流）+ 启动 readiness 横幅；②`start.py:241-244` 不再把退出码 3 折成 2，明确提示"Python 版本不符"；③保存账号校验 `ws_url`（复用 `parse_endpoint`）；④`agent.py` JSON 解析失败不再"返回成功"、非对象体不再 500；⑤修 `release.yml:55` 路径 + `pyproject` 打包 dist（或明确不含并给指引）+ **用干净构建替代 `prune_dist.py`**（`vite.config.ts` 关掉 `emptyOutDir` 会让旧 chunk 堆积；`prune_dist.py:42-55` 又会误删懒加载 chunk → 改为 build 到临时目录后整体替换）；⑥README 前置条件 + NapCat 三步 + 故障排查 | 1–1.5d | 群里不回时有日志可查；wheel 装出来能看到界面；release 能产出可下载包且前端完整 |
 | **P1 向导 + 诊断**（1 周） | `/api/readiness` + `/api/setup/*` + `SetupWizard` 4 步 + 总览就绪卡 + "拉取模型即入池" + **模块加载失败列表（可单插件重载）** + 首启令牌提示 | 3–5d | 新机器从零到"群里 @ 有回复"≤5 步、全程有下一步提示；任一红项都不能"完成" |
-| **P2 工件 v1（只导出/导入/预检）** | `bundle.json` 规范 + `BundleValidator` + `BundlePlanner`（仅计划）+ `BundleExporter` + `POST /validate|/import` + 套装中心列表/详情 + 导入预检 UI | 5–7d | 导出→删账号→导入→配置一致；预检四块信息完整；非法包全部被拒且原因可读 |
+| **P2 工件 v1（只导出/导入/预检）** | `bundle.json` 规范 + `BundleValidator` + `BundlePlanner`（仅计划）+ `BundleExporter` + `POST /validate|/import` + 预设中心列表/详情 + 导入预检 UI | 5–7d | 导出→删账号→导入→配置一致；预检四块信息完整；非法包全部被拒且原因可读 |
 | **P3 实例化 + 回滚** | `bundles`/`bundle_activations`/`bundle_objects`/`account_active_bundle` + `ConfigService.apply_ops` 事务 + `BundleApplier` 7 步 + 启动恢复 + `apply/rollback` UI + 应用结果 | 5–7d | 应用后行为改变；拔电式中断后重启自动回滚；回滚后逐字节还原 |
 | **P4 更新/卸载/校验器** | `ConfigValueValidator` 接入人工保存与导入 + 版本约束 + 升级 diff + 卸载清理 + 失败注入测试 | 4–6d | 用户改过的键在升级时被保留；卸载只删本包对象；非法值当场被拒 |
-| **P5 部署与分发**（协议端托管已撤销） | Deploy Kit（内嵌 Python + wheelhouse + 默认套装）+ 一键更新；~~NapCat 托管~~（锁定版本/拉起/二维码转发/自动写反连/健康检查/回滚）已于 2026-10-27 撤销：协议端是用户外部依赖，见 [`onebot-v11-connection-scope.md`](onebot-v11-connection-scope.md) | 2–3 周 | 双击 → 用户自备协议端并扫码 → 回话；更新失败可回滚到上一版 |
+| **P5 部署与分发**（协议端托管已撤销） | Deploy Kit（内嵌 Python + wheelhouse + 默认预设）+ 一键更新；~~NapCat 托管~~（锁定版本/拉起/二维码转发/自动写反连/健康检查/回滚）已于 2026-10-27 撤销：协议端是用户外部依赖，见 [`onebot-v11-connection-scope.md`](onebot-v11-connection-scope.md) | 2–3 周 | 双击 → 用户自备协议端并扫码 → 回话；更新失败可回滚到上一版 |
 
-**回滚策略**：P0/P1 纯增量；P2 只新增 API 不改现有写路径；P3 之后新增表，旧数据默认"无套装"，`kv.bundle_api_version` 控制开关，出问题可整体停用（读路径不依赖 bundle）。
+**回滚策略**：P0/P1 纯增量；P2 只新增 API 不改现有写路径；P3 之后新增表，旧数据默认"无预设"，`kv.bundle_api_version` 控制开关，出问题可整体停用（读路径不依赖 bundle）。
 
 ---
 
 ## 10. 明确不做（写进文档，防止第三次分叉）
 
-1. **不做运行时合并层**（`b745b87` 的路）：不在 `AgentConfig.get()`/`binding.resolve()` 里读"当前套装"。
+1. **不做运行时合并层**（`b745b87` 的路）：不在 `AgentConfig.get()`/`binding.resolve()` 里读"当前预设"。
 2. **不做包内可执行代码/脚本钩子**：供应链风险；模块代码只能走 zip 安装通道。
 3. **不把 `data/app.db`、`data/module/` 整体打包**：不可合并、带密钥、无法演进。
 4. **不打包密钥**：任何形式（含"加密后的"）都不进包。
-5. **v1 不支持"同账号不同群不同套装"**：若将来要做，精确改动点是 `domain/binding.py`：新增 `SCOPE_BUNDLE`，`SCOPES` 改为 `(global, bundle, account, channel)`，`_matches` 增分支，`resolve(bundle_id=...)` 传入账号的 active_bundle；存储加 `scope_type='bundle'` 行；`binding_store.list_bindings` 无需改（按 capability 全查）。**这是独立项目，不进 v1**。
+5. **v1 不支持"同账号不同群不同预设"**：若将来要做，精确改动点是 `domain/binding.py`：新增 `SCOPE_BUNDLE`，`SCOPES` 改为 `(global, bundle, account, channel)`，`_matches` 增分支，`resolve(bundle_id=...)` 传入账号的 active_bundle；存储加 `scope_type='bundle'` 行；`binding_store.list_bindings` 无需改（按 capability 全查）。**这是独立项目，不进 v1**。
 6. **不做云端市场/账号体系**：v1 只支持本地文件与 URL 导入；市场是生态问题，不是功能问题。
 
 ---
@@ -991,7 +991,7 @@ idle → validating → preview → needs_secrets → importing → applying →
 - Koishi：[安装和配置插件（市场/启用/依赖/删除）](https://koishi.chat/zh-CN/manual/usage/market)
 - TRSS-Yunzai：[README（四种装法与依赖）](https://github.com/TimeRainStarSky/Yunzai)
 
-**套装/模板产品**
+**预设/模板产品**
 
 - VS Code：[Profiles（导入导出/Preview）](https://code.visualstudio.com/docs/configure/profiles)、
   [Extension Pack](https://code.visualstudio.com/docs/configure/extensions/extension-marketplace)
