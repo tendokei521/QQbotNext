@@ -79,6 +79,16 @@ async function doApply() {
   }
 }
 
+async function onUninstall(bundleId: string) {
+  if (!window.confirm('卸载这个套装？会回滚它应用到当前账号的改动，并删除工件文件。')) return
+  try {
+    await bundles.uninstallBundle(bundleId)
+    notify.push('套装已卸载', 'success')
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  }
+}
+
 async function onRollback(activationId: string) {
   if (!window.confirm('回滚这次应用？应用时创建的对象会被删除，账号配置恢复到应用前。')) return
   try {
@@ -229,6 +239,9 @@ onMounted(async () => {
               下载
             </v-btn>
             <v-spacer />
+            <v-btn size="small" variant="text" color="error" prepend-icon="mdi-delete-outline" @click="onUninstall(item.id)">
+              卸载
+            </v-btn>
           </v-card-actions>
         </v-card>
       </v-col>

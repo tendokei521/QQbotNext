@@ -203,6 +203,16 @@ export const useBundlesStore = defineStore('bundles', () => {
     await loadActivations()
   }
 
+  /** 卸载套装：回滚本账号的激活 + 清理记账；无引用时后端删除工件文件 */
+  async function uninstallBundle(id: string): Promise<void> {
+    const accountId = bots.currentAccountId
+    await http.post(
+      `/api/bundles/${encodeURIComponent(id)}/uninstall`,
+      accountId ? { account_id: accountId } : {},
+    )
+    await Promise.all([load(), loadActivations(accountId)])
+  }
+
   return {
     list,
     activations,
@@ -217,6 +227,7 @@ export const useBundlesStore = defineStore('bundles', () => {
     importFile,
     applyBundle,
     rollbackActivation,
+    uninstallBundle,
     download,
     exportAccount,
   }
