@@ -8,15 +8,14 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from app.agent.config import LEGACY_LLM_CONNECTION_KEYS
+from app.agent.config import LEGACY_LLM_CONNECTION_KEYS, module_owned_keys
 from app.agent.config_schema import STREAM_PRESETS
-from app.agent.config import module_owned_keys
-from app.plugins.llm_tools_extra.onebot.manifest import ONEBOT_TOOLS
-from app.plugins.llm_tools_extra.onebot.security import resolve_tool_policy
 from app.agent.tools.system import list_system_tools
 from app.application.bot_service import PASSWORD_MASK as _PASSWORD_MASK
 from app.core.logger import logger
 from app.plugin.schema_utils import webui_schema
+from app.plugins.llm_tools_extra.onebot.manifest import ONEBOT_TOOLS
+from app.plugins.llm_tools_extra.onebot.security import resolve_tool_policy
 from app.webui.api.deps import (
     get_agent_manager,
     get_config_service,
@@ -170,6 +169,16 @@ async def agent_config_update(request: Request, bot_id: str | None = Depends(par
         return _err(
             400,
             "这些配置已归属模块，请到对应模块的配置页修改：" + "、".join(sorted(rejected)),
+        )
+    # 值校验：未知键 / 类型 / 范围 / 枚举（人工改错也当场报错，而不是静默写进库）
+    from app.plugin.value_validator import validate_config
+
+    value_issues = validate_config(SCHEMA, incoming_config, reject_unknown=True)
+    if value_issues:
+        return _err(
+            400,
+            "配置值不合法，未保存："
+            + "；".join(f"{issue['key']}: {issue['message']}" for issue in value_issues[:5]),
         )
     for key, value in incoming_config.items():
         field = SCHEMA.get(key)

@@ -212,3 +212,29 @@ def test_permission_must_be_object(client):
     )
     assert resp.status_code == 400
     assert runtime.config.saved == 0
+
+# ==================== P4-1：值校验（人工保存也当场报错） ====================
+
+
+def test_invalid_value_on_manual_save_is_rejected(client):
+    http, runtime = client
+    resp = http.post(
+        "/api/agent/config",
+        params={"bot_id": 3437542570},
+        json={"config": {"group_enable": "yes"}},
+    )
+    assert resp.status_code == 400
+    assert "group_enable" in resp.json()["message"]
+    assert runtime.config.saved == 0, "非法值不能落库"
+
+
+def test_unknown_key_on_manual_save_is_rejected(client):
+    http, runtime = client
+    resp = http.post(
+        "/api/agent/config",
+        params={"bot_id": 3437542570},
+        json={"config": {"not_a_real_key": 1}},
+    )
+    assert resp.status_code == 400
+    assert "not_a_real_key" in resp.json()["message"]
+    assert runtime.config.saved == 0

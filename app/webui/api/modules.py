@@ -360,6 +360,12 @@ async def update_permission(
 
     g_ids = [g.strip() for g in group_list.split("\n") if g.strip()]
     u_ids = [u.strip() for u in user_list.split("\n") if u.strip()]
+    # 非法模式在判定链里"两个分支都不进" = 放行所有人；保存时直接拒绝
+    from app.plugin.value_validator import validate_permission_modes
+
+    mode_issues = validate_permission_modes(group_mode, user_mode)
+    if mode_issues:
+        return _err(400, "；".join(issue["message"] for issue in mode_issues))
     module.authority.update_permission(group_mode, g_ids, user_mode, u_ids)
 
     await manager.broadcast(json.dumps(_authority_payload(module, bot_id, module.authority.enabled)))
@@ -398,6 +404,20 @@ async def update_config(module_name: str, request: Request, bot_id: str | None =
     data, cleared_fields = await apply_on_missing(
         module.config_schema, data, resource_registry
     )
+    # 值校验：类型/范围/枚举/数组项（导入的配置写错会变成静默垃圾数据）
+    from app.plugin.value_validator import validate_config
+
+    value_issues = validate_config(module.config_schema, data)
+    if value_issues:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "status": "error",
+                "message": "配置值不合法，未保存："
+                + "；".join(f"{issue['key']}: {issue['message']}" for issue in value_issues[:5]),
+                "details": value_issues,
+            },
+        )
     for key, value in data.items():
         # password 字段值为脱敏哨兵时保留旧值（用户未修改密码）
         field = module.config_schema.get(key)
