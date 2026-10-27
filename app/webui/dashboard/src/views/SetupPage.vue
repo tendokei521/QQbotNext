@@ -94,9 +94,14 @@ async function refreshAccount() {
     const current = res.data?.account
     accountConnected.value = Boolean(current?.connected)
     if (current && !accountSaved.value) {
+      const raw = String(current.ws_url || DEFAULT_ADDRESS).replace(/^ws:\/\//, '')
+      const [base, query] = raw.split('?')
       account.id = current.account_id
       account.name = current.name === current.account_id ? '' : current.name
-      account.ws_url = String(current.ws_url || DEFAULT_ADDRESS).replace(/^ws:\/\//, '')
+      account.ws_url = base || DEFAULT_ADDRESS
+      if (!account.access_token && query?.includes('access_token=')) {
+        account.access_token = query.split('access_token=')[1]?.split('&')[0] || ''
+      }
       accountSaved.value = true
     }
   } catch {

@@ -80,6 +80,9 @@ async def api_setup_default_account(
 
     service = request.app.state.container.get(SetupAccountService)
     current = await service.current()
+    if current and not current["connected"]:
+        # 已配置但还没连上 → 继续后台每 2s 重试（用户打开页面即可，不用点按钮）
+        service.connect_loop.ensure(current["account_id"])
     return _ok("ok", account=current, default_address=DEFAULT_LISTEN_ADDRESS)
 
 
