@@ -129,12 +129,14 @@ event.is_member
 | 来源 | 配置位置 | 作用 |
 |---|---|---|
 | 群角色 | QQ 群给的 `owner` / `admin` | 只在本群有效 |
-| Bot 拥有者 | 账号的 `owner_id`（连接配置） | 命中即 `owner` 档 |
 | 拥有者名册 `agent_owner_list` | Agent 配置 | **跨群生效**，命中即 `owner` 档 |
 | 管理者名册 `agent_manager_list` | Agent 配置 | **跨群生效**，命中即 `manager` 档 |
 
-所以：**`permission = "owner"/"manager"` 的模块要有人能触发，就必须让某个来源成立**——
-给账号配 `owner_id`，或把人加进 Agent 配置的拥有者/管理者名册。
+> 账号级 `owner_id`（连接配置）**已废弃且不参与判定**（v3 起 `event.is_bot_owner` 只由名册推出）；
+> 名册按账号各存一份的现状与改进方向见 [`identity-and-capability-console.md`](identity-and-capability-console.md)。
+
+所以：**`permission = "owner"/"manager"` 的模块要有人能触发，就必须让人出现在名册里**——
+把人加进 Agent 配置的拥有者/管理者名册（当前拥有者身份的**唯一**来源）。
 
 > 排查提示：这两档不通过时框架**不写日志**（权限过滤整体是静默的），表现为
 > 「模块一声不响、LLM 反倒出来搭话」。`ModulePermissionNode` 与 `AgentNode` 用的是
