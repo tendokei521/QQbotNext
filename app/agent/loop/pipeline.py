@@ -21,8 +21,8 @@ from app.agent.hooks import run_stage
 from app.agent.loop.context import LlmContext, LlmJob
 from app.agent.loop.locks import SessionLockManager
 from app.agent.loop.pool import LlmPool, merge_debounced_texts
-from app.agent.loop.skip_log import log_skip
 from app.application.dialogue_policy_service import DialoguePolicyService
+from app.core.skip_log import log_skip
 from app.domain.message import Message
 
 

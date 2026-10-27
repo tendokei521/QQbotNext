@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import app.agent.loop.skip_log as skip_log
+import app.core.skip_log as skip_log
 
 
 def _capture(monkeypatch) -> list[dict]:
@@ -86,7 +86,7 @@ def test_emit_goes_through_account_scoped_logger(monkeypatch):
 def test_pipeline_scene_switches_use_skip_log():
     """静态守卫：场景开关的 return 前必须走统一入口（防回退成静默 return）。"""
     src = Path("app/agent/loop/pipeline.py").read_text(encoding="utf-8")
-    assert "from app.agent.loop.skip_log import log_skip" in src
+    assert "from app.core.skip_log import log_skip" in src
     assert '"group_disabled"' in src
     assert '"private_disabled"' in src
     assert '"no_api_key"' in src
