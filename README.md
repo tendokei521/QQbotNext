@@ -66,7 +66,7 @@ logs/                           日志目录
 | 协议端 | NapCat / Lagrange / LLOneBot **任选其一** | 本程序通过 OneBot v11 WebSocket 收发消息，**不自带 QQ 客户端**；协议端负责登录 QQ |
 | 网络 | 能访问 PyPI（或已配镜像） | 首次运行要装依赖；离线环境可用 `--check` 先自检 |
 
-> 只想先看界面：`python start.py --check` 只做只读检查，不联网、不装包、不启动。
+> 只想先看界面：`python start.py --check` 只做只读检查，不联网、不装包、不启动（也不会替你建 venv，环境没准备好时会直接说明）。
 
 ### 两条路：免安装包 / 一条命令
 
@@ -101,7 +101,7 @@ python start.py
 | 命令 | 说明 |
 |------|------|
 | `python start.py` | 一键：缺什么补什么，然后启动 |
-| `python start.py --check` | 只做只读检查（不联网、不装包、不启动），退出码 1 = 依赖不齐 |
+| `python start.py --check` | 只做只读检查（不联网、不装包、不建 venv、不启动），退出码 1 = 依赖不齐 |
 | `python start.py --no-launch` | 环境备齐但不起进程 |
 | `python start.py --recreate` | 删掉重建 `venv`（venv 坏掉时的自救入口） |
 | `python start.py --dev` | 连带 `[dev]` 组（pytest / ruff） |
