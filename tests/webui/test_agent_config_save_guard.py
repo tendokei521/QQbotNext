@@ -228,13 +228,45 @@ def test_invalid_value_on_manual_save_is_rejected(client):
     assert runtime.config.saved == 0, "非法值不能落库"
 
 
-def test_unknown_key_on_manual_save_is_rejected(client):
+
+
+def test_legacy_migrated_keys_are_ignored_not_rejected(client):
+    """回归：旧页面整份回传「已迁移/已废弃」的键（provider_preset_id 等）。
+
+    它们不属于 Agent 配置了，保存时必须静默忽略；此前被当成"未知配置项"而整单 400，
+    用户看到红条「配置值不合法，未保存」。
+    """
     http, runtime = client
     resp = http.post(
         "/api/agent/config",
         params={"bot_id": 3437542570},
-        json={"config": {"not_a_real_key": 1}},
+        json={
+            "config": {
+                "group_enable": True,
+                "provider_preset_id": "pp1",
+                "provider_model_id": "pm1",
+                "provider_model_pool": ["pm1"],
+                "fallback_model_ids": ["pm1"],
+                "experimental_long_term_memory": False,
+            }
+        },
     )
-    assert resp.status_code == 400
-    assert "not_a_real_key" in resp.json()["message"]
-    assert runtime.config.saved == 0
+
+    assert resp.status_code == 200, resp.text
+    assert runtime.config.get("group_enable") is True
+    # 废弃键不能被写回 runtime（否则又会出现在下一次保存的 payload 里）
+    assert runtime.config.get("provider_preset_id") in (None, "")
+    assert runtime.config.get("fallback_model_ids") in (None, "", [])
+
+
+def test_unknown_typo_key_is_ignored_on_manual_save(client):
+    """人工保存路径不再因未知键整单失败（前端整份回传是常态），但也不能写进运行时。"""
+    http, runtime = client
+    resp = http.post(
+        "/api/agent/config",
+        params={"bot_id": 3437542570},
+        json={"config": {"group_enable": True, "not_a_real_key": 1}},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert runtime.config.get("not_a_real_key") is None

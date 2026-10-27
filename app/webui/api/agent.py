@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from app.agent.config import LEGACY_LLM_CONNECTION_KEYS, module_owned_keys
-from app.agent.config_schema import STREAM_PRESETS
+from app.agent.config_schema import MIGRATED_OR_RETIRED_KEYS, STREAM_PRESETS
 from app.agent.tools.system import list_system_tools
 from app.application.bot_service import PASSWORD_MASK as _PASSWORD_MASK
 from app.core.logger import logger
@@ -170,10 +170,17 @@ async def agent_config_update(request: Request, bot_id: str | None = Depends(par
             400,
             "这些配置已归属模块，请到对应模块的配置页修改：" + "、".join(sorted(rejected)),
         )
-    # 值校验：未知键 / 类型 / 范围 / 枚举（人工改错也当场报错，而不是静默写进库）
+    # 已迁移到模块 / 已废弃的旧键：旧页面（或第三方脚本）仍会把它们整份回传，
+    # 它们不属于 Agent 配置了，静默忽略即可——否则每次保存都会被判"未知配置项"。
+    retired = set(MIGRATED_OR_RETIRED_KEYS)
+    for key in [k for k in incoming_config if k in retired]:
+        incoming_config.pop(key, None)
+
+    # 值校验：只校验仍在 SCHEMA 里的键（类型/范围/枚举）；未知键在保存路径不拦，
+    # 因为前端整份回传历史键是常态，真正该拦的是"值不合法"（导入路径另行 reject_unknown）。
     from app.plugin.value_validator import validate_config
 
-    value_issues = validate_config(SCHEMA, incoming_config, reject_unknown=True)
+    value_issues = validate_config(SCHEMA, incoming_config)
     if value_issues:
         return _err(
             400,
@@ -182,6 +189,8 @@ async def agent_config_update(request: Request, bot_id: str | None = Depends(par
         )
     for key, value in incoming_config.items():
         field = SCHEMA.get(key)
+        if field is None:
+            continue  # 不在 Agent schema 里的键（已迁移/废弃）不写回
         if isinstance(field, dict) and field.get("type") == "password" and value == _PASSWORD_MASK:
             continue
         runtime.config.set(key, value, auto_save=False)
