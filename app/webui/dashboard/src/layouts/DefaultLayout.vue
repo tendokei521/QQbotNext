@@ -73,19 +73,22 @@ const navItems = computed<NavItem[]>(() => {
   // 以及实验性「配置档案」入口（整套能力已下线）。
   // 「Tool 管理」属于实验性入口：默认隐藏，设置里打开实验性选项后才出现。
   const showExperimental = Boolean(webui.config.experimental?.show_experimental)
+  // 顺序按「配好一个账号」的实际路径排：先连号（账号管理），再配模型（Provider 预设），
+  // 然后开能力（功能模块 / 人格设定 / 预设中心），最后才是 Agent 面板与数据类页面。
   return [
     { to: '/', title: '总览', icon: 'mdi-view-dashboard-outline' },
     { to: '/bots', title: '账号管理', icon: 'mdi-robot-outline' },
+    // 权限与回复紧贴账号管理：它管的就是"这个号在哪些群能说话"
     { to: '/policy', title: '权限与回复', icon: 'mdi-shield-account-outline' },
-    { to: '/modules', title: '功能模块', icon: 'mdi-cube-outline' },
-    { to: '/bundles', title: '预设中心', icon: 'mdi-package-variant-closed' },
     { to: '/provider-presets', title: 'Provider 预设', icon: 'mdi-api' },
+    { to: '/modules', title: '功能模块', icon: 'mdi-cube-outline' },
     { to: '/personas', title: '人格设定', icon: 'mdi-account-heart-outline' },
-    { to: '/sessions', title: '会话数据', icon: 'mdi-chat-outline' },
+    { to: '/bundles', title: '预设中心', icon: 'mdi-package-variant-closed' },
     { title: 'Agent 面板', icon: 'mdi-creation-outline', children: agentChildren },
     ...(showExperimental
       ? [{ title: 'Tool 管理', icon: 'mdi-toolbox-outline', children: toolChildren }]
       : []),
+    { to: '/sessions', title: '会话数据', icon: 'mdi-chat-outline' },
     { to: '/stats', title: '数据统计', icon: 'mdi-chart-bar' },
     { to: '/logs', title: '日志', icon: 'mdi-console' },
     { to: '/settings', title: '设置', icon: 'mdi-cog-outline' },
