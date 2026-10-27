@@ -53,3 +53,6 @@ data/.launcher-cache.json
 # Deploy Kit ¹¹½¨²úÎï£¨scripts/build_deploy_kit.py£»ÓÉ Release ¸½¼Óµ½ GitHub Release£¬²»Èë¿â£©
 dist/kit/
 dist/_wheelhouse/
+
+# è¿è¡Œæ—¥å¿—ï¼šç”¨æˆ·æ•°æ®ï¼Œä¸å…¥åº“ï¼ˆæ›¾è¢«è¯¯æäº¤ 7 ä¸‡è¡Œï¼Œ2026-10-27 èµ·åœæ­¢è·Ÿè¸ªï¼‰
+/logs/
