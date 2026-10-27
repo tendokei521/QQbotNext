@@ -52,7 +52,9 @@ jobs:
         run: pnpm build
 
       - name: Package dashboard dist
-        run: tar -czf qqbot-next-dashboard-${{ github.ref_name }}.tar.gz -C dashboard dist
+        # 真实产物在 app/webui/dashboard/dist（见 app/webui/app.py:53-55）；
+        # 此前写成 -C dashboard dist 会让该 step 直接失败。
+        run: tar -czf qqbot-next-dashboard-${{ github.ref_name }}.tar.gz -C app/webui/dashboard dist
 
       - name: Build Python distributions
         run: |
