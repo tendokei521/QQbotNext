@@ -4,6 +4,8 @@
 > 并给出**后端契约**与**前端形态**，目标只有两个：**稳定**（不出半成品、不回滚不了）、**好用**（小白能走完、老手能复用）。
 >
 > 基线：`main@d2a9d8b`。所有"现状"结论均带 `文件:行号`，可按行号复核。
+> **执行清单**（逐提交、含验证与验收）见 [`plan/onboarding-bundle.md`](plan/onboarding-bundle.md)，
+> 计划总览与 DoD 见 [`plan/README.md`](plan/README.md)。
 > 与其它文档的关系：身份/开关的信息架构见 [`identity-and-capability-console.md`](identity-and-capability-console.md)；
 > 作用域存储见 [`multi-account-design.md`](multi-account-design.md)；模块安装见 [`module-management-redesign.md`](module-management-redesign.md)。
 > 本文是**「工件（artifact）」与「就绪（readiness）」两个新概念**的准一来源。
