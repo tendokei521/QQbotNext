@@ -110,3 +110,22 @@ async def test_setup_complete_is_persisted(container, config_service):
     assert await config_service.get_kv("setup_completed_at", 0)
     body = client.get("/api/readiness").json()
     assert body["setup_completed"] is True
+
+
+async def test_setup_complete_stops_background_retry(container, config_service):
+    """"完成"之后不该再有后台重试在跑（用户之后可在账号管理里手动连）。"""
+    from starlette.testclient import TestClient
+
+    from app.application.setup_account import SetupAccountService
+    from app.webui.app import create_app
+
+    service = container.get(SetupAccountService)
+    await config_service.save_bots([
+        {"id": "acc1", "name": "主号", "ws_url": "ws://127.0.0.1:4001/"},
+    ])
+    service.connect_loop.ensure("acc1")
+
+    resp = TestClient(create_app(container)).post("/api/setup/complete")
+
+    assert resp.status_code == 200, resp.text
+    assert service.connect_loop.running("acc1") is False

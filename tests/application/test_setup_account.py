@@ -271,3 +271,22 @@ async def test_should_retry_respects_listening_connected_and_empty_address(servi
     bots.listening.discard(reverse["account_id"])
     bots.connected.add(reverse["account_id"])
     assert svc.should_retry(reverse["account_id"]) is False, "已连上不该再重试"
+
+
+async def test_forward_requires_explicit_port(service):
+    """正向写 ws://host（无端口）几乎必然是漏填：当场报错，而不是后台每 2s 连 80 端口。"""
+    svc, _bots = service
+    try:
+        await svc.upsert(name="主号", conn_mode="forward", ws_url="ws://127.0.0.1")
+        raise AssertionError("没有端口的正向地址应被拒绝")
+    except SetupAccountError as e:
+        assert "端口" in str(e)
+
+    # wss:// 可以省略端口（默认 443，常见于反代后的远端地址）
+    ok = await svc.upsert(name="主号", conn_mode="forward", ws_url="wss://example.com/cqhttp")
+    assert ok["ws_url"] == "wss://example.com/cqhttp"
+
+    ok2 = await svc.upsert(
+        name="主号", conn_mode="forward", ws_url="ws://127.0.0.1:3001/"
+    )
+    assert ok2["ws_url"] == "ws://127.0.0.1:3001/"

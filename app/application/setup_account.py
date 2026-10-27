@@ -185,11 +185,18 @@ class SetupAccountService:
         # - 正向留空 → 保持空，等用户填对端地址。
         address = normalize_listen_address(ws_url, mode)
         if address:
+            label = "监听地址" if is_reverse(mode) else "连接地址"
             try:
-                parse_endpoint(address, require_port=is_reverse(mode))
+                endpoint = parse_endpoint(address, require_port=is_reverse(mode))
             except EndpointError as e:
-                label = "监听地址" if is_reverse(mode) else "连接地址"
                 raise SetupAccountError(f"{label}不可用：{e}") from e
+            # 正向也要求显式端口：ws://host 会去连 80，几乎必然是用户漏填，
+            # 放过去的结果是"后台每 2s 连失败"，日志刷屏却没人知道错在哪。
+            if not is_reverse(mode) and endpoint.port is None and endpoint.scheme != "wss":
+                raise SetupAccountError(
+                    f"{label}需要端口，例如 ws://127.0.0.1:3001/"
+                    "（wss:// 可省略，默认 443）"
+                )
         if current is None:
             if len(bots) > 1:
                 raise SetupAccountError(
