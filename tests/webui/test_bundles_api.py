@@ -212,3 +212,43 @@ async def test_apply_unknown_bundle_returns_400(container, config_service):
     resp = _client(container).post("/api/bundles/nope/apply", json={"account_id": "acc1"})
     assert resp.status_code == 400
     assert resp.json()["code"] == "BUNDLE_NOT_FOUND"
+
+
+async def test_uninstall_rolls_back_and_removes_artifact(container, config_service):
+    await _seed_account(config_service)
+    client = _client(container)
+    data = client.get("/api/bundles/export", params={"account_id": "acc1", "bundle_id": "acc1-pack"}).content
+    assert client.post("/api/bundles/import", files={"file": ("b.zip", data, "application/zip")}).status_code == 200
+    applied = client.post("/api/bundles/acc1-pack/apply", json={
+        "account_id": "acc1", "secrets": {"providers[0].api_key": "sk-x"},
+    })
+    assert applied.status_code == 200, applied.text
+    created_persona = config_service.get_module_config("agent", "acc1")["persona_preset_id"]
+
+    resp = client.post("/api/bundles/acc1-pack/uninstall", json={"account_id": "acc1"})
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["rolled_back"], "应回滚激活记录"
+    assert body["deleted_artifact"] is True, "无引用时应删除工件"
+
+    agent = config_service.get_module_config("agent", "acc1")
+    assert agent["persona_preset_id"] == "role123", "卸载后应恢复应用前引用"
+    assert config_service.get_role_preset(created_persona) is None
+    assert client.get("/api/bundles").json()["total"] == 0, "工件应已删除"
+    activations = client.get("/api/bundles/activations", params={"account_id": "acc1"}).json()
+    assert activations["activations"][0]["status"] == "rolled_back"
+
+
+async def test_uninstall_imported_only_deletes_artifact(container, config_service):
+    await _seed_account(config_service)
+    client = _client(container)
+    data = client.get("/api/bundles/export", params={"account_id": "acc1", "bundle_id": "just-pack"}).content
+    assert client.post("/api/bundles/import", files={"file": ("b.zip", data, "application/zip")}).status_code == 200
+
+    resp = client.post("/api/bundles/just-pack/uninstall", json={})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["deleted_artifact"] is True
+    assert client.get("/api/bundles").json()["total"] == 0
+

@@ -247,3 +247,27 @@ async def api_bundles_activations(
         config_service, agent_manager, bot_service, settings
     ).list_activations(account_id)
     return _ok(activations=activations, total=len(activations))
+
+
+@router.post("/bundles/{bundle_id}/uninstall")
+async def api_bundles_uninstall(
+    bundle_id: str,
+    request: Request,
+    config_service=Depends(get_config_service),
+    agent_manager=Depends(get_agent_manager),
+    bot_service=Depends(get_bot_service),
+    settings=Depends(get_settings),
+):
+    """卸载套装：回滚其激活 + 清理记账，无引用时删除工件文件。"""
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001 —— 允许空 body（卸载全部账号的激活）
+        body = {}
+    account_id = str((body or {}).get("account_id") or "").strip() or None
+    try:
+        result = await _service(
+            config_service, agent_manager, bot_service, settings
+        ).uninstall(bundle_id, account_id)
+    except BundleError as e:
+        return _err(400, str(e), e.code, e.hint)
+    return _ok("套装已卸载", **result)

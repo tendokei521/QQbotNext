@@ -226,6 +226,59 @@ class BundleService:
     async def recover_interrupted(self) -> list[str]:
         return await self.applier.recover_interrupted()
 
+    async def uninstall(self, bundle_id: str, account_id: str | None = None) -> dict:
+        """卸载套装：先回滚其激活，再删记账与工件文件。
+
+        边界（P4-4）：
+        - 只回滚本套装的激活记录，**不动用户后建的对象**（`bundle_objects` 只记本套装创建的）；
+        - 若该账号还有其它套装处于 active，不在这里处理（各自独立回滚）；
+        - 工件文件只有在**没有任何激活记录再引用它**时才删除，避免误删仍在用的包。
+        """
+        db = self.config_service.db
+        bundle_id = self._safe_bundle_id(bundle_id)
+        params: list = [bundle_id]
+        sql = "SELECT id FROM bundle_activations WHERE bundle_id = ? AND status = ?"
+        params.append("active")
+        if account_id:
+            sql += " AND account_id = ?"
+            params.append(str(account_id))
+        rows = await db.fetchall(sql, tuple(params))
+
+        rolled_back: list[str] = []
+        for row in rows or []:
+            await self.applier.rollback(row["id"])
+            rolled_back.append(row["id"])
+
+        # 记账清理：仅清与本次卸载范围相关的行
+        if account_id:
+            await db.execute(
+                "DELETE FROM bundle_objects WHERE bundle_id = ? AND account_id = ?",
+                (bundle_id, str(account_id)),
+            )
+        else:
+            await db.execute("DELETE FROM bundle_objects WHERE bundle_id = ?", (bundle_id,))
+
+        # 仍有其它激活引用它 → 保留工件
+        remaining = await db.fetchone(
+            "SELECT COUNT(*) AS total FROM bundle_activations WHERE bundle_id = ? AND status = ?",
+            (bundle_id, "active"),
+        )
+        deleted_artifact = False
+        if not remaining or not int(remaining["total"] or 0):
+            directory = self._bundle_dir(bundle_id)
+            if directory.is_dir() and self.bundles_root in directory.parents:
+                for item in sorted(directory.iterdir()):
+                    if item.is_file():
+                        item.unlink()
+                directory.rmdir()
+                deleted_artifact = True
+
+        return {
+            "bundle_id": bundle_id,
+            "rolled_back": rolled_back,
+            "deleted_artifact": deleted_artifact,
+        }
+
     async def list_activations(self, account_id: str | None = None) -> list[dict]:
         """激活记录（按时间倒序）。"""
         db = self.config_service.db
