@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useRoute } from 'vue-router'
 import { useThemeStore } from '@/stores/theme'
 import { useBotsStore, displayName, resolveAccount, resolvedBotId, type BotStatus } from '@/stores/bots'
@@ -16,6 +17,10 @@ const webui = useWebuiStore()
 const notify = useNotifyStore()
 const route = useRoute()
 
+// 自动打开向导只做一次（用户关掉后不再反复弹）
+let setupAutoOpened = false
+
+const router = useRouter()
 const drawer = ref(false)
 const rail = ref(false)
 const multiGroupOpen = ref(false)
@@ -68,7 +73,6 @@ const navItems = computed<NavItem[]>(() => {
   // 以及实验性「配置档案」入口（整套能力已下线）。实验性开关框架仍在设置页保留。
   return [
     { to: '/', title: '总览', icon: 'mdi-view-dashboard-outline' },
-    { to: '/setup', title: '首次配置', icon: 'mdi-rocket-launch-outline' },
     { to: '/bots', title: '账号管理', icon: 'mdi-robot-outline' },
     { to: '/policy', title: '权限与回复', icon: 'mdi-shield-account-outline' },
     { to: '/modules', title: '功能模块', icon: 'mdi-cube-outline' },
@@ -186,6 +190,11 @@ onMounted(async () => {
     await Promise.all([bots.fetchBots(), webui.load()])
     bots.restoreSelection()
     if (bots.currentBot) await refreshScopedData()
+    // 首次打开（还没有任何账号）默认展示「首次配置」；之后入口在「设置」里
+    if (!bots.bots.length && !setupAutoOpened) {
+      setupAutoOpened = true
+      router.push('/setup')
+    }
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   }

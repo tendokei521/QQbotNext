@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useModulesStore, type UninstalledModuleData } from '@/stores/modules'
 import { useThemeStore } from '@/stores/theme'
 import { useWebuiStore } from '@/stores/webui'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import LogExportDialog from '@/components/log/LogExportDialog.vue'
+
+const router = useRouter()
 
 const themeStore = useThemeStore()
 const webui = useWebuiStore()
@@ -104,6 +107,21 @@ onMounted(() => {
 
     <v-row>
       <v-col cols="12" lg="6">
+        <v-card variant="outlined" class="mb-4">
+          <v-card-title class="d-flex align-center">
+            <v-icon icon="mdi-rocket-launch-outline" class="mr-2" color="primary" /> 首次配置
+          </v-card-title>
+          <v-card-text class="d-flex align-center flex-wrap gap-2">
+            <div class="text-caption" style="opacity: 0.7">
+              重新走一遍「连接账号 → 配置模型 → 人格设定」向导（随时可跳过某一步）。
+            </div>
+            <v-spacer />
+            <v-btn color="primary" variant="tonal" prepend-icon="mdi-open-in-new" @click="router.push('/setup')">
+              打开向导
+            </v-btn>
+          </v-card-text>
+        </v-card>
+
         <v-card variant="outlined" class="mb-4">
           <v-card-title class="d-flex align-center">
             <v-icon icon="mdi-theme-light-dark" class="mr-2" color="primary" /> 主题外观

@@ -7,7 +7,7 @@
  * - 「下一步」只在当前步真的完成时可用；可「稍后再配」但总览会给出 blocker；
  * - 第 4 步的清单与总览就绪卡、启动横幅同源（`/api/readiness`）。
  */
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import http, { errorMessage } from '@/api/http'
 import { useBotsStore } from '@/stores/bots'
@@ -23,17 +23,19 @@ const step = ref(1)
 const STEPS = ['连接账号', '配置模型', '人格设定', '完成']
 const busy = ref('')
 
-// ---------- 第 1 步：连接 ----------
+// ---------- 第 1 步：连接（向导只维护一个默认账号） ----------
+const DEFAULT_ADDRESS = '127.0.0.1:4001/ws'
 const account = reactive({
   id: '',
   name: '',
-  conn_mode: 'reverse' as 'forward' | 'reverse',
-  ws_url: '',
+  ws_url: DEFAULT_ADDRESS,
   access_token: '',
 })
-const createdAccount = ref<{ id: string; ws_url: string; conn_mode: string } | null>(null)
+// 后台每 2s 刷新一次「是否已连接」，前端不显示重试次数之类的过程状态
 const accountConnected = ref(false)
-const connectTries = ref(0)
+const accountSaved = ref(false)
+let saveTimer: number | null = null
+let pollTimer: number | null = null
 
 // ---------- 第 2 步：模型 ----------
 const model = reactive({
@@ -51,13 +53,8 @@ const personaMode = ref<'scratch' | 'bundle'>('scratch')
 const persona = reactive({ name: '群聊搭子', prompt: '' })
 const personaDone = ref(false)
 
-const currentAccountId = computed(() => createdAccount.value?.id || bots.currentAccountId)
+const currentAccountId = computed(() => account.id.trim() || bots.currentAccountId)
 
-function copy(text: string) {
-  if (!text) return
-  void navigator.clipboard?.writeText(text)
-  notify.push('已复制', 'success')
-}
 
 async function run(label: string, task: () => Promise<void>) {
   busy.value = label
@@ -71,37 +68,51 @@ async function run(label: string, task: () => Promise<void>) {
 }
 
 // ---------- 第 1 步动作 ----------
-async function createAndConnect() {
-  await run('account', async () => {
-    const result = await bots.addBotConfig({
-      id: account.id.trim() || undefined,
-      name: account.name.trim() || undefined,
-      conn_mode: account.conn_mode,
-      ws_url: account.ws_url.trim() || undefined,
-    })
-    createdAccount.value = {
-      id: result.id,
-      ws_url: result.ws_url,
-      conn_mode: result.conn_mode,
-    }
-    bots.selectBot(result.id)
-    await bots.connect(result.id)
-    await pollConnected()
+async function saveAccount(quiet = false) {
+  const res = await http.post('/api/setup/default-account', {
+    id: account.id.trim(),
+    name: account.name.trim(),
+    ws_url: account.ws_url.trim() || DEFAULT_ADDRESS,
+    access_token: account.access_token,
   })
+  account.id = res.data.account_id
+  accountSaved.value = true
+  accountConnected.value = Boolean(res.data.connected)
+  if (!quiet) notify.push('已保存，正在后台尝试连接', 'success')
 }
 
-async function pollConnected() {
-  accountConnected.value = false
-  for (let i = 0; i < 20; i += 1) {
-    connectTries.value = i + 1
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    const list = await bots.fetchBots()
-    const bot = list.find((item) => item.id === createdAccount.value?.id)
-    if (bot?.status === 'connected') {
-      accountConnected.value = true
-      notify.push('账号已连接', 'success')
-      return
+function scheduleSave() {
+  if (saveTimer !== null) window.clearTimeout(saveTimer)
+  saveTimer = window.setTimeout(() => {
+    void saveAccount(true).catch((err) => notify.push(errorMessage(err), 'error'))
+  }, 600)
+}
+
+async function refreshAccount() {
+  try {
+    const res = await http.get('/api/setup/default-account')
+    const current = res.data?.account
+    accountConnected.value = Boolean(current?.connected)
+    if (current && !accountSaved.value) {
+      account.id = current.account_id
+      account.name = current.name === current.account_id ? '' : current.name
+      account.ws_url = String(current.ws_url || DEFAULT_ADDRESS).replace(/^ws:\/\//, '')
+      accountSaved.value = true
     }
+  } catch {
+    // 刷新失败保留上一次状态，下一轮再试
+  }
+}
+
+function startPolling() {
+  stopPolling()
+  pollTimer = window.setInterval(() => void refreshAccount(), 2000)
+}
+
+function stopPolling() {
+  if (pollTimer !== null) {
+    window.clearInterval(pollTimer)
+    pollTimer = null
   }
 }
 
@@ -184,13 +195,12 @@ function skipAll() {
 
 onMounted(async () => {
   if (!bots.bots.length) await bots.fetchBots()
-  if (bots.currentAccountId) {
-    createdAccount.value = { id: bots.currentAccountId, ws_url: '', conn_mode: 'forward' }
-    const current = bots.bots.find((item) => item.id === bots.currentAccountId)
-    accountConnected.value = current?.status === 'connected'
-  }
+  await refreshAccount()
+  startPolling()
   await readiness.load()
 })
+
+onUnmounted(stopPolling)
 </script>
 
 <template>
@@ -220,47 +230,35 @@ onMounted(async () => {
       <v-card v-if="step === 1" variant="outlined">
         <v-card-title>把 QQ 号接进来</v-card-title>
         <v-card-text>
-          <v-alert type="info" variant="tonal" density="compact" class="mb-3">
-            <div class="text-caption">
-              需要先装好协议端（NapCat 等）。本程序只负责连接：填下面地址与 Token，
-              或在协议端里配置反向 WebSocket 连到本程序。
-            </div>
-          </v-alert>
-
           <v-row dense>
             <v-col cols="12" md="6">
-              <v-select
-                v-model="account.conn_mode"
-                :items="[
-                  { title: '反向 WebSocket（本程序监听，推荐）', value: 'reverse' },
-                  { title: '正向 WebSocket（本程序连出）', value: 'forward' },
-                ]"
-                label="连接方式"
+              <v-text-field
+                v-model="account.id"
+                label="账号 ID"
+                placeholder="例如：default"
                 density="comfortable"
                 variant="outlined"
+                @update:model-value="scheduleSave"
               />
             </v-col>
             <v-col cols="12" md="6">
               <v-text-field
                 v-model="account.name"
-                label="账号名称（可选）"
+                label="账号名称"
                 placeholder="例如：主号"
                 density="comfortable"
                 variant="outlined"
+                @update:model-value="scheduleSave"
               />
             </v-col>
           </v-row>
 
           <v-text-field
             v-model="account.ws_url"
-            :label="account.conn_mode === 'reverse' ? '监听地址（留空自动生成）' : 'WebSocket 地址'"
-            :placeholder="
-              account.conn_mode === 'reverse'
-                ? 'ws://0.0.0.0:3001/onebot/v11/ws'
-                : 'ws://127.0.0.1:3001/'
-            "
+            label="监听地址"
             density="comfortable"
             variant="outlined"
+            @update:model-value="scheduleSave"
           />
           <v-text-field
             v-model="account.access_token"
@@ -268,32 +266,21 @@ onMounted(async () => {
             density="comfortable"
             variant="outlined"
             autocomplete="off"
+            @update:model-value="scheduleSave"
           />
 
-          <div v-if="createdAccount" class="created-box">
-            <div class="text-caption mb-1" style="opacity: 0.7">把这个地址填到协议端（反向 WebSocket）：</div>
-            <div class="d-flex align-center flex-wrap gap-2">
-              <code class="mono">{{ createdAccount.ws_url || '（未返回地址）' }}</code>
-              <v-btn size="x-small" variant="text" prepend-icon="mdi-content-copy" @click="copy(createdAccount.ws_url)">
-                复制
-              </v-btn>
-            </div>
-            <div class="text-caption mt-2" style="opacity: 0.7">
-              状态：{{ accountConnected ? '✓ 已连接' : `等待对端接入…（第 ${connectTries} 次检查）` }}
-            </div>
+          <div class="d-flex align-center gap-2 mt-1">
+            <v-icon
+              size="small"
+              :icon="accountConnected ? 'mdi-check-circle-outline' : 'mdi-circle-outline'"
+              :color="accountConnected ? 'success' : 'grey'"
+            />
+            <span class="text-body-2">{{ accountConnected ? '已连接' : '未连接' }}</span>
           </div>
         </v-card-text>
         <v-card-actions>
           <v-spacer />
-          <v-btn
-            color="primary"
-            variant="tonal"
-            :loading="busy === 'account'"
-            @click="createAndConnect"
-          >
-            {{ createdAccount ? '重新检查连接' : '创建账号并连接' }}
-          </v-btn>
-          <v-btn color="primary" :disabled="!accountConnected" @click="step = 2">下一步</v-btn>
+          <v-btn color="primary" @click="step = 2">下一步</v-btn>
         </v-card-actions>
       </v-card>
 
@@ -362,7 +349,7 @@ onMounted(async () => {
           <v-btn color="primary" variant="tonal" :loading="busy === 'model'" @click="saveModel">
             保存并加入模型池
           </v-btn>
-          <v-btn color="primary" :disabled="!modelResult" @click="step = 3">下一步</v-btn>
+          <v-btn color="primary" @click="step = 3">下一步</v-btn>
         </v-card-actions>
       </v-card>
 
@@ -407,7 +394,7 @@ onMounted(async () => {
           <v-btn color="primary" variant="tonal" :loading="busy === 'persona'" @click="savePersona">
             保存并应用
           </v-btn>
-          <v-btn color="primary" :disabled="!personaDone" @click="step = 4">下一步</v-btn>
+          <v-btn color="primary" @click="step = 4">下一步</v-btn>
         </v-card-actions>
       </v-card>
 
