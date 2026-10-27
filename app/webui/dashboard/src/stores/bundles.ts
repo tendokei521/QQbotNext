@@ -28,6 +28,8 @@ export interface BundleModuleInfo {
   installed_version: string
   /** install=将安装 / upgrade=将升级 / skip=已满足 / missing=缺失 / config_only=只写配置 */
   action: 'install' | 'upgrade' | 'skip' | 'missing' | 'config_only' | string
+  /** 目标环境缺失的第三方依赖（框架不会自动 pip 安装） */
+  missing_requirements?: string[]
 }
 
 export interface BundleReport {
@@ -47,6 +49,8 @@ export interface BundleReport {
   }
   /** 预检的模块明细（逐条展示名称/版本/动作/体积） */
   modules?: BundleModuleInfo[]
+  /** 包内带可执行模块代码 → 导入方必须显式确认信任 */
+  requires_code_consent?: boolean
   issues: BundleIssue[]
   secrets: BundleSecret[]
   manifest?: Record<string, any>
@@ -162,11 +166,15 @@ export const useBundlesStore = defineStore('bundles', () => {
     }
   }
 
-  async function importFile(file: File): Promise<BundleReport & { path?: string; file?: string }> {
+  async function importFile(
+    file: File,
+    acceptCode = false,
+  ): Promise<BundleReport & { path?: string; file?: string }> {
     importing.value = true
     try {
       const form = new FormData()
       form.append('file', file)
+      form.append('accept_code', acceptCode ? 'true' : 'false')
       const res = await http.post('/api/bundles/import', form)
       await load()
       return res.data
@@ -180,6 +188,7 @@ export const useBundlesStore = defineStore('bundles', () => {
     file: File,
     accountId: string,
     secrets: Record<string, string>,
+    acceptCode = false,
   ): Promise<BundleReport & { apply?: ApplyResult }> {
     importing.value = true
     applying.value = true
@@ -188,6 +197,7 @@ export const useBundlesStore = defineStore('bundles', () => {
       form.append('file', file)
       form.append('account_id', accountId)
       form.append('secrets', JSON.stringify(secrets || {}))
+      form.append('accept_code', acceptCode ? 'true' : 'false')
       const res = await http.post('/api/bundles/import-apply', form)
       await Promise.all([load(), loadActivations(accountId)])
       return res.data

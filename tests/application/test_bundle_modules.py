@@ -101,12 +101,60 @@ def test_validate_marks_outdated_module_as_upgrade(tmp_path):
     assert report["summary"]["modules_to_install"] == 1
 
 
-def _write_module(root, name="demo_mod", version="1.2.0", files=None):
+def _bundle_with_requirements(tmp_path) -> bytes:
+    directory = _write_module(
+        tmp_path,
+        requirements="requirements.txt",
+        files={"requirements.txt": "definitely-not-installed-pkg==1.0\n"},
+    )
+    package = pack_module_dir(directory)
+    return export_bundle(
+        bundle_id="deps-pack",
+        name="带依赖的预设",
+        module_configs={"demo_mod": {"enabled": True, "config": {"switch_on": True}}},
+        module_packages={"demo_mod": package},
+        module_meta={"demo_mod": {"version": "1.2.0", "builtin": False}},
+    )
+
+
+def test_validate_blocks_missing_module_dependencies(tmp_path):
+    """P7-4：模块依赖缺包 → 预检拦截（框架不会自动 pip 安装）。"""
+    data = _bundle_with_requirements(tmp_path)
+
+    report = validate_bytes(data, installed_modules={}, installed_packages=set())
+
+    assert report["ok"] is False
+    assert any(issue["code"] == "BUNDLE_MODULE_DEP_MISSING" for issue in report["issues"])
+    detail = {item["name"]: item for item in report["modules"]}["demo_mod"]
+    assert detail["missing_requirements"] == ["definitely-not-installed-pkg==1.0"]
+
+    satisfied = validate_bytes(
+        data, installed_modules={},
+        installed_packages={"definitely-not-installed-pkg"},
+    )
+    assert satisfied["ok"] is True, satisfied["issues"]
+
+
+def test_validate_blocks_bundled_module_with_builtin_name(tmp_path):
+    """随包模块与内置同名 → 安装器必然拒绝，预检提前拦。"""
+    data, _package = _bundle_with_package(tmp_path)
+
+    report = validate_bytes(data, installed_modules={}, builtin_modules={"demo_mod"})
+
+    assert report["ok"] is False
+    assert any(
+        issue["code"] == "BUNDLE_MODULE_BUILTIN_CONFLICT" for issue in report["issues"]
+    ), report["issues"]
+
+
+def _write_module(root, name="demo_mod", version="1.2.0", files=None, requirements=None):
     directory = root / name
     directory.mkdir(parents=True)
+    manifest = {"name": name, "display_name": "演示模块", "version": version}
+    if requirements is not None:
+        manifest["requirements"] = requirements
     (directory / "module.json").write_text(
-        json.dumps({"name": name, "display_name": "演示模块", "version": version}),
-        encoding="utf-8",
+        json.dumps(manifest), encoding="utf-8"
     )
     (directory / "main.py").write_text("class Module: pass\n", encoding="utf-8")
     for relative, text in (files or {}).items():

@@ -165,6 +165,7 @@ async def api_bundles_validate(
 @router.post("/bundles/import")
 async def api_bundles_import(
     file: UploadFile = File(...),
+    accept_code: bool = Form(False),
     config_service=Depends(get_config_service),
     agent_manager=Depends(get_agent_manager),
     bot_service=Depends(get_bot_service),
@@ -175,7 +176,7 @@ async def api_bundles_import(
         data = await _read_upload(file)
         result = await _service(
             config_service, agent_manager, bot_service, settings, registry
-        ).import_bundle(data)
+        ).import_bundle(data, accept_code=accept_code)
     except BundleError as e:
         return _err(400, str(e), e.code, e.hint)
     return _ok("预设已导入（尚未应用到账号）", **result)
@@ -186,6 +187,7 @@ async def api_bundles_import_apply(
     file: UploadFile = File(...),
     account_id: str = Form(...),
     secrets: str = Form("{}"),
+    accept_code: bool = Form(False),
     config_service=Depends(get_config_service),
     agent_manager=Depends(get_agent_manager),
     bot_service=Depends(get_bot_service),
@@ -206,7 +208,7 @@ async def api_bundles_import_apply(
     service = _service(config_service, agent_manager, bot_service, settings, registry)
     try:
         data = await _read_upload(file)
-        result = await service.import_bundle(data)
+        result = await service.import_bundle(data, accept_code=accept_code)
     except BundleError as e:
         return _err(400, str(e), e.code, e.hint)
 

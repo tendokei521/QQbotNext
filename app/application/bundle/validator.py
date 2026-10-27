@@ -12,6 +12,8 @@ import io
 import re
 import zipfile
 
+from app.application.bundle.deps import installed_packages as detect_installed_packages
+from app.application.bundle.deps import missing_requirements
 from app.application.bundle.errors import BundleError
 from app.application.bundle.manifest import parse_semver, satisfies_version
 from app.application.bundle.module_packages import read_module_identity
@@ -116,13 +118,25 @@ def validate_bytes(
     framework_version: str = "2.0.0",
     installed_modules: dict[str, str] | None = None,
     agent_schema: dict | None = None,
+    builtin_modules: set[str] | None = None,
+    installed_packages: set[str] | None = None,
 ) -> dict:
-    """产出一份预检报告（结构性问题抛 BundleError，语义问题进 issues）。"""
+    """产出一份预检报告（结构性问题抛 BundleError，语义问题进 issues）。
+
+    ``builtin_modules``：本机内置模块名集合（随包模块与内置同名会被安装器拒绝，提前拦）；
+    ``installed_packages``：本机已安装发行包（归一化名），不传则实时探测环境。
+    """
     from app.application.bundle.manifest import normalize_manifest
 
     manifest_raw, files, _checksums = inspect_zip(data)
     manifest = normalize_manifest(manifest_raw)
     issues: list[dict] = []
+    builtin_names = {str(name) for name in (builtin_modules or set())}
+    known_packages = (
+        installed_packages
+        if installed_packages is not None
+        else detect_installed_packages()
+    )
 
     # ---------- 兼容性 ----------
     if manifest["framework"]["api_version"] > int(framework_api_version):
@@ -180,7 +194,25 @@ def validate_bytes(
                 f"包内 {identity['version'] or '(空)'}，要求 {required['version']}",
             ))
             continue
-        bundled[required["name"]] = identity
+        if identity["name"] in builtin_names:
+            issues.append(_issue(
+                "error", "BUNDLE_MODULE_BUILTIN_CONFLICT",
+                f"随包模块与内置同名：{identity['name']}",
+                "安装器禁止第三方覆盖内置模块，这个包装不上",
+                "让预设作者改名后重新导出",
+            ))
+            continue
+        missing_deps = missing_requirements(
+            identity.get("requirements") or [], known_packages
+        )
+        if missing_deps:
+            issues.append(_issue(
+                "error", "BUNDLE_MODULE_DEP_MISSING",
+                f"模块 {identity['name']} 的依赖未安装",
+                "、".join(missing_deps),
+                f"pip install {' '.join(missing_deps)}（框架不会自动安装模块依赖）",
+            ))
+        bundled[required["name"]] = {**identity, "missing_requirements": missing_deps}
 
     will_install: list[str] = []
     for required in manifest["requires"]["modules"]:
@@ -238,6 +270,7 @@ def validate_bytes(
             "package_size": package_size,
             "installed_version": installed.get(name, ""),
             "action": action,
+            "missing_requirements": list(identity.get("missing_requirements") or []) if identity else [],
         })
     declared = {item["name"] for item in manifest["requires"]["modules"]}
     for component in manifest["components"]["modules"]:
@@ -252,6 +285,7 @@ def validate_bytes(
             "package_size": 0,
             "installed_version": installed.get(component["name"], ""),
             "action": "config_only",
+            "missing_requirements": [],
         })
 
     # ---------- 引用完整性 ----------
@@ -327,6 +361,9 @@ def validate_bytes(
         # 随包模块：代码随包的模块数 / 应用时需要安装的模块数
         "modules_bundled": len(bundled),
         "modules_to_install": len(will_install),
+        "modules_missing_deps": len([
+            item for item in modules_detail if item.get("missing_requirements")
+        ]),
     }
     errors = [issue for issue in issues if issue["level"] == "error"]
     return {
@@ -340,6 +377,8 @@ def validate_bytes(
         },
         "summary": summary,
         "modules": modules_detail,
+        # 含可执行模块代码 → 导入方必须显式确认信任后才会安装
+        "requires_code_consent": bool(summary["modules_bundled"]),
         "issues": issues,
         "secrets": manifest["secrets"],
         "manifest": {key: value for key, value in manifest.items() if key != "raw"},

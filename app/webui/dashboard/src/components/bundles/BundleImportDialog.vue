@@ -28,11 +28,15 @@ const report = ref<BundleReport | null>(null)
 const result = ref<{ bundle: { name: string; version: string } } | null>(null)
 const applied = ref<ApplyResult | null>(null)
 const importedOnly = ref(false)
+const acceptCode = ref(false)
 const error = ref('')
 const dragOver = ref(false)
 const secretsForm = reactive<Record<string, string>>({})
 
 const targetAccountId = computed(() => bots.currentAccountId)
+/** 包含可执行模块代码 → 必须显式确认信任才允许导入/应用 */
+const needsConsent = computed(() => Boolean(report.value?.requires_code_consent))
+const consentBlocked = computed(() => needsConsent.value && !acceptCode.value)
 const accountLabel = computed(() => {
   const bot = bots.bots.find((item) => item.id === targetAccountId.value)
   return bot ? displayName(bot) : (targetAccountId.value || '未选择账号')
@@ -45,6 +49,7 @@ function reset() {
   result.value = null
   applied.value = null
   importedOnly.value = false
+  acceptCode.value = false
   error.value = ''
   dragOver.value = false
   Object.keys(secretsForm).forEach((key) => delete secretsForm[key])
@@ -62,6 +67,7 @@ async function prepare(picked: File) {
   }
   file.value = picked
   error.value = ''
+  acceptCode.value = false
   try {
     report.value = await bundles.validateFile(picked)
     Object.keys(secretsForm).forEach((key) => delete secretsForm[key])
@@ -86,7 +92,7 @@ async function onDrop(event: DragEvent) {
 async function confirmImport() {
   if (!file.value) return
   try {
-    const response = await bundles.importFile(file.value)
+    const response = await bundles.importFile(file.value, acceptCode.value)
     result.value = { bundle: response.bundle }
     applied.value = null
     importedOnly.value = true
@@ -107,6 +113,7 @@ async function confirmApply() {
       file.value,
       targetAccountId.value,
       { ...secretsForm },
+      acceptCode.value,
     )
     result.value = { bundle: response.bundle }
     applied.value = response.apply || null
@@ -263,7 +270,43 @@ function formatSize(bytes: number): string {
                 <v-chip size="x-small" :color="moduleActionColor(mod.action)" variant="tonal">
                   {{ moduleActionText(mod.action) }}
                 </v-chip>
+                <v-chip
+                  v-if="mod.missing_requirements?.length"
+                  size="x-small"
+                  color="error"
+                  variant="tonal"
+                >
+                  缺依赖 {{ mod.missing_requirements.length }}
+                </v-chip>
               </div>
+              <div
+                v-for="mod in report.modules"
+                :key="mod.name + '-deps'"
+              >
+                <div
+                  v-if="mod.missing_requirements?.length"
+                  class="text-caption text-error"
+                >
+                  {{ mod.name }} 缺少：{{ mod.missing_requirements.join('、') }}（框架不会自动 pip 安装）
+                </div>
+              </div>
+            </v-card-text>
+          </v-card>
+
+          <v-card v-if="needsConsent" variant="tonal" color="warning" class="mt-2">
+            <v-card-text class="text-caption">
+              <div class="font-weight-medium mb-1">此预设包含可执行的模块代码</div>
+              <div>
+                应用时会从包内安装并加载
+                {{ report.summary.modules_bundled }} 个第三方模块，请确认来源可信后再继续。
+              </div>
+              <v-checkbox
+                v-model="acceptCode"
+                density="compact"
+                hide-details
+                label="我信任此预设包含的模块代码"
+                class="mt-1"
+              />
             </v-card-text>
           </v-card>
 
@@ -329,7 +372,7 @@ function formatSize(bytes: number): string {
           <v-btn
             variant="text"
             :loading="bundles.importing && !bundles.applying"
-            :disabled="!report?.ok"
+            :disabled="!report?.ok || consentBlocked"
             @click="confirmImport"
           >
             仅导入
@@ -340,12 +383,18 @@ function formatSize(bytes: number): string {
             variant="tonal"
             prepend-icon="mdi-play-circle-outline"
             :loading="bundles.importing"
-            :disabled="!report?.ok"
+            :disabled="!report?.ok || consentBlocked"
             @click="confirmApply"
           >
             导入并应用到「{{ accountLabel }}」
           </v-btn>
-          <v-btn v-else color="primary" variant="tonal" :disabled="!report?.ok" @click="confirmImport">
+          <v-btn
+            v-else
+            color="primary"
+            variant="tonal"
+            :disabled="!report?.ok || consentBlocked"
+            @click="confirmImport"
+          >
             导入（暂不应用）
           </v-btn>
         </template>

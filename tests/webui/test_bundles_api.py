@@ -395,7 +395,11 @@ async def test_import_apply_bundle_with_module_package(container, config_service
     client = _client_with_registry(container, registry)
     data = _bundle_with_module(tmp_path)
 
-    imported = client.post("/api/bundles/import", files={"file": ("b.zip", data, "application/zip")})
+    imported = client.post(
+        "/api/bundles/import",
+        files={"file": ("b.zip", data, "application/zip")},
+        data={"accept_code": "true"},
+    )
     assert imported.status_code == 200, imported.text
 
     applied = client.post("/api/bundles/mod-pack/apply", json={"account_id": "acc1"})
@@ -408,5 +412,20 @@ async def test_import_apply_bundle_with_module_package(container, config_service
     rolled = client.post(f"/api/activations/{body['activation_id']}/rollback")
     assert rolled.status_code == 200, rolled.text
     assert registry.uninstalled == ["demo_mod"]
+
+
+async def test_import_requires_code_consent(container, config_service, tmp_path):
+    """P7-4：含可执行模块代码的预设，未勾选信任时拒绝导入。"""
+    await _seed_account(config_service)
+    registry = _FakeRegistry()
+    client = _client_with_registry(container, registry)
+    data = _bundle_with_module(tmp_path)
+
+    resp = client.post(
+        "/api/bundles/import", files={"file": ("b.zip", data, "application/zip")}
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "BUNDLE_CODE_CONSENT_REQUIRED"
 
 

@@ -16,6 +16,7 @@ import json
 import zipfile
 from pathlib import Path
 
+from app.application.bundle.deps import parse_requirements
 from app.application.bundle.errors import BundleError
 
 #: 模块清单文件名（安装器认它来定位插件根）
@@ -108,13 +109,19 @@ def pack_module_dir(root: Path | str) -> bytes:
 
 
 def read_module_identity(data: bytes) -> dict:
-    """从模块 zip 字节里读出 ``{name, version, display_name}``。
+    """从模块 zip 字节里读出身份与依赖：
+
+    ``{name, version, display_name, requirements_file, requirements[]}``。
 
     只认 zip 根或**单层包装目录**下的 `module.json`（与安装器布局容错口径一致：
     GitHub 的 `repo-main/` 这类包装是允许的）；找不到/不合法 → `BundleError`。
+    ``requirements`` 是 `module.json` 里 ``requirements`` 指向的清单解析出的包名行
+    （框架不自动 pip 安装，只用于预检）。
     """
     if not data:
         raise ModulePackageError("BUNDLE_MODULE_PACKAGE_INVALID", "模块包为空")
+    requirements_packages: list[str] = []
+    requirements_file = ""
     try:
         with zipfile.ZipFile(io.BytesIO(bytes(data))) as archive:
             candidates = []
@@ -132,14 +139,22 @@ def read_module_identity(data: bytes) -> dict:
             candidates.sort()
             _, manifest_name = candidates[0]
             raw = archive.read(manifest_name)
+            try:
+                manifest = json.loads(raw.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as e:
+                raise ModulePackageError(
+                    "BUNDLE_MODULE_PACKAGE_INVALID", f"模块包的 module.json 不是合法 JSON：{e}"
+                ) from e
+            declared = manifest.get("requirements") if isinstance(manifest, dict) else None
+            if isinstance(declared, str) and declared.strip():
+                requirements_file = declared.strip().replace("\\", "/")
+                prefix = manifest_name[: -len(MODULE_MANIFEST)]
+                target = f"{prefix}{requirements_file}"
+                if target in archive.namelist():
+                    text = archive.read(target).decode("utf-8", "replace")
+                    requirements_packages = parse_requirements(text)
     except zipfile.BadZipFile as e:
         raise ModulePackageError("BUNDLE_MODULE_PACKAGE_INVALID", f"模块包不是合法 zip：{e}") from e
-    try:
-        manifest = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as e:
-        raise ModulePackageError(
-            "BUNDLE_MODULE_PACKAGE_INVALID", f"模块包的 module.json 不是合法 JSON：{e}"
-        ) from e
     if not isinstance(manifest, dict):
         raise ModulePackageError("BUNDLE_MODULE_PACKAGE_INVALID", "模块包的 module.json 必须是对象")
     name = str(manifest.get("name") or "").strip()
@@ -150,6 +165,8 @@ def read_module_identity(data: bytes) -> dict:
         "name": name,
         "version": version,
         "display_name": str(manifest.get("display_name") or name).strip(),
+        "requirements_file": requirements_file,
+        "requirements": requirements_packages,
     }
 
 

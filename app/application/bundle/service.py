@@ -75,15 +75,28 @@ class BundleService:
             framework_version=self.framework_version,
             installed_modules=self.installed_modules,
             agent_schema=self.agent_schema,
+            builtin_modules={
+                name for name, item in self.module_catalog.items() if item.get("builtin")
+            },
         )
 
-    async def import_bundle(self, data: bytes) -> dict:
-        """校验通过后把包落盘登记（不应用）。返回报告 + 落盘路径。"""
+    async def import_bundle(self, data: bytes, *, accept_code: bool = True) -> dict:
+        """校验通过后把包落盘登记（不应用）。返回报告 + 落盘路径。
+
+        ``accept_code``：包内带可执行模块代码时必须由用户显式确认信任（API 默认 False，
+        WebUI 勾选后传 True）；内部调用/测试默认 True 保持旧行为。
+        """
         report = self.validate(data)
         if not report["ok"]:
             errors = [issue for issue in report["issues"] if issue["level"] == "error"]
             first = errors[0]["title"] if errors else "预检未通过"
             raise BundleError("BUNDLE_INVALID", f"预检未通过：{first}", "修正后再导入")
+        if report.get("requires_code_consent") and not accept_code:
+            raise BundleError(
+                "BUNDLE_CODE_CONSENT_REQUIRED",
+                "预设包含可执行的模块代码，需要确认信任后才能导入",
+                "勾选「我信任此预设包含的模块代码」后重试",
+            )
 
         bundle = report["bundle"]
         bundle_id = self._safe_bundle_id(bundle["id"])
