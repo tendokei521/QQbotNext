@@ -24,11 +24,13 @@ const STEPS = ['连接账号', '配置模型', '人格设定', '完成']
 const busy = ref('')
 
 // ---------- 第 1 步：连接（向导只维护一个默认账号） ----------
-const DEFAULT_ADDRESS = '127.0.0.1:4001/ws'
+// 本地监听（反向）= 预填监听地址；向外连接（正向）= 不填，等用户填协议端地址
+const DEFAULT_LISTEN_ADDRESS = 'ws://127.0.0.1:4001/'
 const account = reactive({
   id: '',
   name: '',
-  ws_url: DEFAULT_ADDRESS,
+  conn_mode: 'reverse' as 'reverse' | 'forward',
+  ws_url: DEFAULT_LISTEN_ADDRESS,
   access_token: '',
 })
 // 后台每 2s 刷新一次「是否已连接」，前端不显示重试次数之类的过程状态
@@ -72,8 +74,9 @@ async function saveAccount(quiet = false) {
   const res = await http.post('/api/setup/default-account', {
     id: account.id.trim(),
     name: account.name.trim(),
-    ws_url: account.ws_url.trim() || DEFAULT_ADDRESS,
+    ws_url: account.ws_url.trim(),
     access_token: account.access_token,
+    conn_mode: account.conn_mode,
   })
   account.id = res.data.account_id
   accountSaved.value = true
@@ -88,6 +91,12 @@ function scheduleSave() {
   saveTimer = window.setTimeout(() => {
     void saveAccount(true).catch((err) => notify.push(errorMessage(err), 'error'))
   }, 600)
+}
+
+function onModeChange(mode: 'reverse' | 'forward') {
+  account.conn_mode = mode
+  account.ws_url = mode === 'reverse' ? DEFAULT_LISTEN_ADDRESS : ''
+  scheduleSave()
 }
 
 async function nextFromAccount() {
@@ -106,11 +115,12 @@ async function refreshAccount() {
     const current = res.data?.account
     accountConnected.value = Boolean(current?.connected)
     if (current && !accountSaved.value) {
-      const raw = String(current.ws_url || DEFAULT_ADDRESS).replace(/^ws:\/\//, '')
+      const raw = String(current.ws_url || '')
       const [base, query] = raw.split('?')
       account.id = current.account_id
       account.name = current.name === current.account_id ? '' : current.name
-      account.ws_url = base || DEFAULT_ADDRESS
+      account.conn_mode = current.conn_mode === 'forward' ? 'forward' : 'reverse'
+      account.ws_url = base || (account.conn_mode === 'reverse' ? DEFAULT_LISTEN_ADDRESS : '')
       if (!account.access_token && query?.includes('access_token=')) {
         account.access_token = query.split('access_token=')[1]?.split('&')[0] || ''
       }
@@ -247,6 +257,17 @@ onUnmounted(stopPolling)
       <v-card v-if="step === 1" variant="outlined">
         <v-card-title>把 QQ 号接进来</v-card-title>
         <v-card-text>
+          <v-btn-toggle
+            :model-value="account.conn_mode"
+            mandatory
+            density="comfortable"
+            class="mb-3"
+            @update:model-value="(value: any) => onModeChange(value)"
+          >
+            <v-btn value="reverse" prepend-icon="mdi-lan-connect">本地监听（反向 WebSocket）</v-btn>
+            <v-btn value="forward" prepend-icon="mdi-lan-disconnect">向外连接（正向 WebSocket）</v-btn>
+          </v-btn-toggle>
+
           <v-row dense>
             <v-col cols="12" md="6">
               <v-text-field
@@ -272,7 +293,7 @@ onUnmounted(stopPolling)
 
           <v-text-field
             v-model="account.ws_url"
-            label="监听地址"
+            :label="account.conn_mode === 'reverse' ? '监听地址' : '协议端地址'"
             density="comfortable"
             variant="outlined"
             @update:model-value="scheduleSave"
