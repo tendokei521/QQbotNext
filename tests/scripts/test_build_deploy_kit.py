@@ -117,3 +117,19 @@ def test_kit_without_optional_payloads(tmp_path):
         names = archive.namelist()
     assert not any(name.startswith("QQBotNext/wheelhouse/") for name in names)
     assert "QQBotNext/deploy.json" in names
+
+
+def test_update_cli_status_runs():
+    """CLI 是用户唯一的安全更新入口：status 必须能跑通并输出 JSON。"""
+    import json as _json
+    import subprocess
+    import sys
+
+    root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [sys.executable, "scripts/update.py", "status"],
+        cwd=root, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    payload = _json.loads(result.stdout)
+    assert "current" in payload and "rollback_available" in payload
