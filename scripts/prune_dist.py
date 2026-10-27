@@ -1,18 +1,21 @@
-"""清理 `dist/assets` 里的**过期 chunk**（配合 `emptyOutDir: false`）。
+"""【已废弃】清理 `dist/assets` 里的过期 chunk。
 
-## 背景
+## 为什么废弃
 
-`vite.config.ts` 关掉了 `emptyOutDir`，这样重新构建时旧 chunk 会保留，
-正在使用的页面不会因为哈希失配而 `import()` 404。
+它存在的唯一理由是 `vite.config.ts` 曾关掉 `emptyOutDir`（保留旧 chunk，避免
+正在使用的页面 `import()` 404）。该策略的代价是 `dist/assets` 无限累积（实测
+1077 个文件 / 15 MB），而本脚本按"index.html 引用 + 最近 N 天"删除，**会误删
+Vue 懒加载 chunk**——它们不在 index.html 里，超过保留天数就被当成垃圾。
 
-代价是 `dist/assets` 会累积历史文件。本脚本按"**只保留 index.html 引用到的 +
-最近 N 天**"清理，既能修 404，又不会让目录无限膨胀。
+现在改为**干净构建**（`vite.config.ts` 的 `emptyOutDir: true`）：仓库里的 `dist`
+就是一次完整构建的结果，可复现、可审查，不需要事后清理。
 
 ```bash
-python scripts/prune_dist.py              # 预览要删的（dry-run）
-python scripts/prune_dist.py --apply      # 真删
-python scripts/prune_dist.py --keep-days 3 --apply
+cd app/webui/dashboard && pnpm build   # 干净重建（推荐）
+python scripts/prune_dist.py           # 仅在你仍有历史累积目录时兜底，先 dry-run
 ```
+
+保留脚本只为兼容"手上还有旧 dist"的用户；新流程不再需要它。
 """
 
 from __future__ import annotations
