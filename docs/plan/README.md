@@ -29,6 +29,7 @@
 | **P3** | 实例化 + 快照回滚 | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p3-实例化--快照回滚) |
 | **P4** | 更新/卸载/值校验器 | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p4-更新卸载值校验器) |
 | **P5** | 发行包（协议端托管已撤销） | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p5-发行包协议端托管已撤销) |
+| **P6** | 套装迁移补齐（随包模块 / 人格卡 / 模型池 / 密钥回写） | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p6-套装迁移补齐2026-10-27-追加) |
 | **R0** | 群列表（缓存 + 刷新） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r0-群列表) |
 | **R1** | 策略底座（群级覆盖 + 解析） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r1-策略底座) |
 | **R2** | 简单视图（群开关矩阵） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r2-简单视图) |
@@ -133,6 +134,12 @@ P0 里风险最低、收益最直接的三项（半小时级）：
 | P5-3 | `606509d` 扫码登录转发 + 登录后自动回填反向 WS（只允许本机协议端）**（已撤销 · 代码已删除）** |
 | P5-2 UI/API | `7d3c47e` + `2345c32` 协议端 API（列表/安装/启停/日志/扫码/登录回填）+ 「协议端」面板**（已撤销 · 代码已删除）** |
 | P5-1 | `360043f` `app/application/protocol`：固定版本清单（内置无未验证版本）+ sha256/体积校验安装 + 回滚/卸载；清单非法/越权路径一律拒绝**（已撤销 · 代码已删除）** |
+| P6-1 | `912f10f` 套装导出：第三方模块代码随包（确定性 zip）、人格卡字段、模型池全量、provider 连接配置 |
+| P6-2 | `1023905` 套装预检：随包模块身份校验（名称/版本/坏包），缺模块不再误报，旧版本标「将升级」 |
+| P6-3 | `939df5b` 套装应用：先装模块再写配置、回滚只卸新装、四类密钥键路径回写、必填密钥前置拒绝 |
+| P6-4 | `71a1605` 套装 API：registry 编目 + 安装器适配（走既有 zip 安装通道） |
+| P6-5 | `cae61cf` + `ab93f8e` 套装中心 UI：预检「随包模块/将安装」、应用结果「已安装/已升级」、过期文案修正、必填密钥交后端判定 + dist 重建 |
+| P6-6 | 本文档提交（见 `git log`） 文档：设计稿 §5.7 / CHANGELOG / P6 清单 |
 
 > **2026-10-27 范围撤销**：QQ 协议端是用户的外部依赖，本项目不托管（不装/不启停/不扫码/不维护清单）。
 > 相关代码与「协议端」页面已删除，UI/API/文档同步；依据见 [`../onebot-v11-connection-scope.md`](../onebot-v11-connection-scope.md)。

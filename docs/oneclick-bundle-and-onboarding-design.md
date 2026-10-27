@@ -261,7 +261,7 @@
 ├── configs/
 │   ├── agent.json            # Agent 配置子集（已脱敏）
 │   └── module-llm_memory.json
-└── modules/                  # 可选：随包模块（默认不打包，仅声明引用）
+└── modules/                  # 随包模块代码（仅第三方/zip 安装模块打包；内置随框架走）
     └── llm_memory-1.0.0.zip  # 走既有 zip 安装通道，不新增执行面
 ```
 
@@ -276,13 +276,13 @@
 | `framework.api_version` | ✅ | 该包依赖的框架 API 版本（整数） | `> 本机 API_VERSION` → 拒绝 |
 | `framework.min_version` | — | 框架最低版本（semver） | 不满足 → 拒绝并提示升级 |
 | `schema_versions` | — | 引用的配置 schema 版本（如 `{"agent":5,"module":2}`，对齐 `SCHEMA_VERSION`） | 高于本机 → 拒绝（避免"能装不能渲染"） |
-| `requires.modules[]` | — | `{name, version(约束), required}` | 缺失 required → 预检拦截；optional 缺失 → 警告并跳过 |
-| `requires.resources[]` | — | 需要的资源种类（`ResourceRegistry` kind） | 未知种类 → 警告 |
-| `components.personas[]` | — | `{source, name, apply_to, vars}`；`apply_to` 默认 `agent.persona_preset_id` | 文件必须存在 |
-| `components.providers[]` | — | `{provider, api_base, model, preset_name, apply_to}`；**不含密钥** | `api_base` 必须合法 URL；`apply_to` 默认 `agent.provider_model_pool` |
+| `requires.modules[]` | — | `{name, version(约束), required, source?}`；`source` = 随包 zip 路径 | 缺失 required → 预检拦截；optional 缺失 → 警告并跳过；`source` 存在则校验包身份（name/version）并按需安装 |
+| `requires.resources[]` | — | 需要的资源种类（`ResourceRegistry` kind） | 未知种类 → 警告 **（v1 未实现解析）** |
+| `components.personas[]` | — | `{source, name, apply_to, description?, begin_dialogs?, tools?, skills?}`；`apply_to` 默认 `agent.persona_preset_id` | 文件必须存在；角色卡字段原样迁移 |
+| `components.providers[]` | — | `{provider, api_base, model, preset_name, apply_to, config?, models[]}`；`models[]` 为池内全量模型；**不含密钥** | `api_base` 必须合法 URL；`apply_to` 默认 `agent.provider_model_pool` |
 | `components.agent[]` | — | `{source, merge:"keys"}` | 键必须在 `agent` schema 内（未知键拒绝） |
-| `components.modules[]` | — | `{name, enabled, source?}` | 模块必须存在；配置键必须在模块 schema 内 |
-| `secrets[]` | — | `{key, label, required, hint}`；key 用点路径指向上面组件里的密钥位 | 应用前必须全部满足（或组件跳过） |
+| `components.modules[]` | — | `{name, enabled, source?, version?}` | 模块必须存在；配置键必须在模块 schema 内 |
+| `secrets[]` | — | `{key, label, required, hint}`；key 用点路径指向上面组件里的密钥位 | 应用前必须全部满足（或组件跳过）；v1.1 起四类键都回写 |
 | `permissions` | — | 建议的响应权限（`member`/`manager`…），作为默认值 | 枚举 |
 | `notes` | — | `{intro, changelog, screenshots[]}` | 仅展示 |
 
@@ -369,6 +369,27 @@
 | 值 | 用 **配置值校验器**（§6.4）逐键校验（类型/范围/枚举/长度/密码位） | 422 + 逐键 `BUNDLE_VALUE_INVALID` |
 | 安全 | 密钥不得出现在任何内容物中（扫描 `api_key`/`sk-` 等高危模式）；不得含可执行脚本 | 422 + `BUNDLE_SECRET_LEAK` |
 | 完整性 | `checksums.sha256` 逐文件比对 | 422 + `BUNDLE_CHECKSUM_MISMATCH` |
+
+### 5.7 v1.1 实现补充：把"能迁的都迁走"（2026-10-27）
+
+§5 的格式在 P2–P4 落地时留了三处"只迁参数、不迁对象"的缺口，v1.1 补齐，
+**包格式仍为 `qqbotnext.bundle/1`（纯增量字段，旧包可继续导入）**：
+
+| 缺口 | v1.1 行为 | 代码 |
+|---|---|---|
+| 第三方模块只声明依赖，换机后模块不出现 | 导出打包 `modules/<name>-<version>.zip`（确定性 zip、剔除噪声）；应用时**先走既有 zip 安装通道**装/升级，再写配置；回滚只卸载"本次新装"的（升级的保留） | `app/application/bundle/module_packages.py`、`applier._install_modules` |
+| 人格只带 `system_prompt` | `description` / `begin_dialogs` / `tools` / `skills` 随包并重建；工具/技能按名引用，缺模块给 warning | `manifest.py`、`applier.build_plan` |
+| 模型池只带第一个模型 | `components.providers[].models[]` 带池内全量与各自参数（脱敏）；应用时逐个建模型并入池，主模型取第一个 | `exporter.py`、`applier.build_plan` |
+| 非 `providers[0].api_key` 的密钥被静默丢弃 | 四类键路径都回写：`providers[0].*`、`provider_models[i].*`、`agent.*`、`module:<name>.*`；必填密钥缺失在写库前拒绝（`BUNDLE_SECRET_MISSING`） | `applier.build_plan` / `_require_secrets` |
+
+新增错误码：`BUNDLE_MODULE_PACKAGE_INVALID`（随包模块坏/名字版本不符）、
+`BUNDLE_MODULE_INSTALL_FAILED`、`BUNDLE_MODULE_INSTALL_UNSUPPORTED`
+（实例没有安装器）、`BUNDLE_SECRET_MISSING`。预检新增
+`summary.modules_bundled` / `summary.modules_to_install`。
+
+**仍不迁（有意为之，不是缺口）**：账号接入信息（ws_url/token）、群级策略
+（`channel_overrides`）、global 默认层、模块运行时数据目录、知识库/记忆内容等资源文件、
+模块代码之外的依赖安装（pip 包由部署环境负责）。
 
 ---
 
