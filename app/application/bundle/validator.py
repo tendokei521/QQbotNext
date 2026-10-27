@@ -226,6 +226,14 @@ def validate_bytes(
                     f"{agent['source']} 含未知配置键", "、".join(unknown[:10]) + ("…" if len(unknown) > 10 else ""),
                     "检查包是否由匹配版本的框架导出",
                 ))
+            # 值校验（P4-2）：类型/范围/枚举写错，导入后同样会静默失效
+            from app.plugin.value_validator import validate_config
+
+            for problem in validate_config(agent_schema, data_obj):
+                issues.append(_issue(
+                    "error", "BUNDLE_VALUE_INVALID",
+                    f"{agent['source']} 的 {problem['key']} 不合法", problem["message"],
+                ))
 
     # ---------- 密钥泄漏扫描 ----------
     for path, payload in files.items():

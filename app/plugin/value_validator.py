@@ -27,7 +27,10 @@ def validate_field(key: str, field: dict, value: Any) -> list[dict]:
     """校验单个字段值；未知类型只做"非空对象"兜底，不误杀新类型。"""
     if not isinstance(field, dict):
         return []
-    ftype = str(field.get("type") or "text").strip().lower()
+    ftype = str(field.get("type") or "").strip().lower()
+    if not ftype:
+        # 未声明类型（如仅用于占位的 schema 键）→ 不做类型推断，避免误杀
+        return []
 
     if ftype in _SIMPLE_STR_TYPES:
         if not isinstance(value, str):

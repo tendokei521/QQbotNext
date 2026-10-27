@@ -762,8 +762,11 @@ SCHEMA = {
         "description": "已废弃。",
     },
     "provider_model_pool": {
-        "type": "string", "label": "（已废弃）provider_model_pool", "default": "",
-        "description": "已废弃。",
+        # 运行期消费的是「模型 id 数组」（runtime.provider_chain 读它）。
+        # 历史上这里误写成 string，导致 schema 与运行时矛盾、值校验误报；
+        # 现在按真实类型声明，由「模型池」卡片写入，不在普通表单里编辑。
+        "type": "string_list", "label": "模型池（内部字段）", "default": [],
+        "description": "每个条目是一个模型 id；由 Agent 面板的模型池卡片维护。",
     },
     "provider_preset_id": {
         "type": "string", "label": "（已废弃）provider_preset_id", "default": "",

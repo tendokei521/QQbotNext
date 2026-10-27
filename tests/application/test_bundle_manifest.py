@@ -196,3 +196,19 @@ def test_checksum_mismatch_is_rejected():
     with pytest.raises(BundleError) as exc:
         validate_bytes(data, installed_modules={})
     assert exc.value.code == "BUNDLE_CHECKSUM_MISMATCH"
+
+
+def test_invalid_value_is_reported_by_bundle_validator():
+    """P4-2：清单值类型写错 → 预检报 BUNDLE_VALUE_INVALID（不是装进去才失效）。"""
+    manifest = _base_manifest()
+    manifest["requires"]["modules"] = []
+    manifest["components"]["agent"] = [{"source": "configs/agent.json"}]
+    data = _manifest_zip(
+        manifest,
+        {"configs/agent.json": json.dumps({"group_enable": "yes"})},
+    )
+    report = validate_bytes(
+        data, installed_modules={}, agent_schema={"group_enable": {"type": "boolean"}}
+    )
+    assert report["ok"] is False
+    assert any(issue["code"] == "BUNDLE_VALUE_INVALID" for issue in report["issues"])
