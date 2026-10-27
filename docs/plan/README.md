@@ -25,7 +25,7 @@
 | **P0** | 止漏：静默、退出码、校验、发行链路 | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p0-止漏本周) |
 | **P1** | 首启向导 + 就绪诊断 | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p1-首启向导--就绪诊断1-周) |
 | **P2** | 套装工件 v1（格式/校验/导出/预检） | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p2-套装工件-v1只导出导入预检) |
-| **P3** | 实例化 + 快照回滚 | `[ ]` | [`onboarding-bundle.md`](onboarding-bundle.md#p3-实例化--快照回滚) |
+| **P3** | 实例化 + 快照回滚 | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p3-实例化--快照回滚) |
 | **P4** | 更新/卸载/值校验器 | `[ ]` | [`onboarding-bundle.md`](onboarding-bundle.md#p4-更新卸载值校验器) |
 | **P5** | 协议端托管 + 免安装发行包 | `[ ]` | [`onboarding-bundle.md`](onboarding-bundle.md#p5-协议端托管--发行包) |
 | **R0** | 群列表（缓存 + 刷新） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r0-群列表) |
@@ -62,6 +62,9 @@
 | P2-1/P2-2 | `8f6a237` | 清单解析 + 七层校验（结构/兼容/依赖/引用/未知键/密钥/校验和）+ 导出器（密钥剥离、确定性字节） |
 | P2-3 | `4b7c669` | `/api/bundles/validate|import|export|download|list`；agent schema 走 application 门面（守住 webui→agent 边界） |
 | P2-4/P2-5 | `75f6b4c` | 「套装中心」页 + 导入预检对话框（含需填密钥提示）+ 从账号导出 |
+| P3-1 | `a5ca2e8` | `ConfigService.apply_ops`：多对象配置单事务写（失败回滚内存） |
+| P3-2/3/4/6 | `ac31476` | 激活/对象/当前套装三表 + `BundleApplier`（计划→快照→事务→校验）+ 回滚 + 启动恢复 |
+| P3-5 | `20488d5` | 套装中心「应用到账号 / 应用记录 / 回滚」UI |
 | 修复 | `c93de4f` / `39b9e1e` | 架构守卫：静默异常补日志、skip_log 移出 agent/loop |
 
 ---
