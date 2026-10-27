@@ -31,8 +31,8 @@
 | **R0** | 群列表（缓存 + 刷新） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r0-群列表) |
 | **R1** | 策略底座（群级覆盖 + 解析） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r1-策略底座) |
 | **R2** | 简单视图（群开关矩阵） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r2-简单视图) |
-| **R3** | 高级视图（规则覆盖） | `[ ]` | [`permission-dialogue.md`](permission-dialogue.md#r3-高级视图) |
-| **R4** | 迁移收口 | `[ ]` | [`permission-dialogue.md`](permission-dialogue.md#r4-迁移收口) |
+| **R3** | 高级视图（规则覆盖） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r3-高级视图) |
+| **R4** | 迁移收口 | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r4-迁移收口) |
 
 ### 已完成进度（2026-10-27）
 
@@ -50,6 +50,11 @@
 | R1 | `b38a907` | `channel_overrides` + 纯函数解析 + `/api/policy*` |
 | R2-1 | `1a2f8c6` | 群级开关接入回复门控（日志带 source） |
 | R2-2/2-3 | `7252d47` | 「权限与回复」页（群矩阵 + 批量 + 静音 + 恢复继承） |
+| R3-1/2/5 | `323867f` | 群级触发方式 / 免打扰时段 / 用户例外接入流水线 |
+| R3-4 | `8d75ad0` | 群内指令 `#llm off/on/mute/status` |
+| R3-3 | `2e52585` | 高级规则对话框（继承可见、留空=继承） |
+| R4-1 | `ec26b82` | 旧账号级权限 → `channel_overrides` 迁移（场景层 + 群层） |
+| R4-2 | `24fae90` | Agent 权限页收敛为入口；`sections.json` 副标题改由 config_partition 生成 |
 | 修复 | `c93de4f` / `39b9e1e` | 架构守卫：静默异常补日志、skip_log 移出 agent/loop |
 
 ---
