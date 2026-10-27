@@ -45,6 +45,42 @@ from app.plugin.registry import ModuleRegistry
 _container: Container | None = None
 
 
+def print_readiness_checklist(container: Container) -> None:
+    """启动后打印一次"就绪清单"（与 WebUI 就绪卡、首启向导同一数据源）。
+
+    背景：群里 @ 机器人没反应时，用户看不到任何东西——而原因往往是
+    "没账号/没入池模型/群聊回复没开"。这里把差什么、去哪修直接打在控制台，
+    让"沉默"变成可执行的三行提示。
+    """
+    from app.application.readiness_service import ReadinessService
+
+    try:
+        service = ReadinessService(
+            config_service=container.get(ConfigService),
+            gateway=getattr(container.get(BotService), "gateway", None),
+            agent_manager=container.get(AgentManager),
+            module_registry=container.get(ModuleRegistry),
+        )
+        data = service.snapshot()
+    except Exception as e:  # noqa: BLE001 —— 诊断失败不能影响启动
+        logger.debug(f"[Readiness] 启动就绪检查失败（已忽略）: {e}")
+        return
+
+    checks = data.get("checks") or []
+    blockers = [c for c in checks if not c.get("ok") and c.get("level") == "blocker"]
+    warns = [c for c in checks if not c.get("ok") and c.get("level") == "warn"]
+    if not blockers and not warns:
+        print("  [就绪] 账号 / 模型 / 响应场景均已配置，可以去群里 @ 一次试试")
+        return
+    print("  [就绪] 以下配置还缺，补齐前机器人不会正常回话：")
+    for check in blockers + warns:
+        line = f"    · {check.get('title', check.get('id'))}"
+        action = check.get("action") or {}
+        if action.get("route"):
+            line += f"  → 打开 {action['route']}（{action.get('label') or '去配置'}）"
+        print(line)
+
+
 async def _open_browser_when_ready(server, url: str, timeout: float = 15.0) -> None:
     """等 uvicorn 真正开始监听后再用默认浏览器打开 WebUI。
 
@@ -459,6 +495,9 @@ async def run(settings: Settings | None = None) -> None:
 
     await bot_service.start()
     # 定时任务在「账号上线」时注册并启动（离线装配不会武装任何计时器）
+
+    # 就绪清单：把"能不能回话"一次说清（与 WebUI 就绪卡、首启向导同一数据源）
+    print_readiness_checklist(_container)
 
     # 启动 WebUI
     import uvicorn
