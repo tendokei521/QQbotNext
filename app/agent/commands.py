@@ -87,6 +87,17 @@ COMMAND_GROUPS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
             (f"{PREFIX} memory audit [owner|all]", "记忆事件审计（管理员）"),
         ),
     ),
+    (
+        "policy",
+        "本群开关",
+        (
+            (f"{PREFIX} status", "查看本群是否允许回复、按什么触发"),
+            (f"{PREFIX} off", "关闭本群回复（管理员）"),
+            (f"{PREFIX} on", "恢复本群回复（管理员）"),
+            (f"{PREFIX} mute 30m", "静音一段时间，到点自动恢复（管理员）"),
+            (f"{PREFIX} unmute", "取消静音（管理员）"),
+        ),
+    ),
 )
 
 # 分组 key → ``available`` 字典的键：值为假时标题标注「本 bot 未启用」

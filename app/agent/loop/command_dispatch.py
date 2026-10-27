@@ -56,6 +56,14 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
         )
         return True
 
+    # 本群开关 / 静音 / 状态：与 WebUI「权限与回复」写同一份 channel_overrides
+    if await _maybe_handle_policy_command(
+        module, action,
+        is_private=is_private, group_id=group_id,
+        event=event, send=send, is_admin=is_admin,
+    ):
+        return True
+
     session = session_mgr.get_session(session_id)
 
     if action == "task":
@@ -303,3 +311,95 @@ def _availability(module) -> dict:
     }
 
 
+
+
+# ==================== 本群开关 / 静音 / 状态（R3） ====================
+# 与 WebUI「权限与回复」写同一份 channel_overrides：面板能做的，群里也能做。
+
+_POLICY_ACTIONS = ("off", "on", "mute", "unmute", "status")
+
+
+def _parse_duration_minutes(token: str) -> int | None:
+    """``30m`` / ``2h`` / ``1d`` / ``45`` → 分钟数；非法返回 None。"""
+    text = str(token or "").strip().lower()
+    if not text:
+        return 60
+    unit = text[-1]
+    if unit in ("m", "h", "d"):
+        number_text = text[:-1]
+    else:
+        unit, number_text = "m", text
+    try:
+        value = int(number_text)
+    except ValueError:
+        return None
+    if value <= 0:
+        return None
+    return value * {"m": 1, "h": 60, "d": 1440}[unit]
+
+
+def _trigger_text(resolved) -> str:
+    at = bool(resolved.config.get("trigger_at", False))
+    keywords = [str(item) for item in (resolved.config.get("trigger_keyword") or []) if str(item).strip()]
+    if at and keywords:
+        return "@ 或关键词"
+    if at:
+        return "只回 @"
+    if keywords:
+        return "只回关键词：" + "、".join(keywords[:5])
+    return "未开启触发（群消息不会引起回复）"
+
+
+async def _maybe_handle_policy_command(
+    module, action, *, is_private, group_id, event, send, is_admin,
+) -> bool:
+    """处理 ``#llm off/on/mute/unmute/status``；返回 True 表示已消费。"""
+    from app.application.dialogue_policy_service import DialoguePolicyService, PolicyError
+
+    parts = str(action or "").split()
+    head = parts[0].lower() if parts else ""
+    if head not in _POLICY_ACTIONS:
+        return False
+
+    # 权限先于"场景"判断：管理员指令在私聊里也必须先回答"权限不足"，
+    # 否则"先把人拒掉"的语义会随场景漂移（帮助表守卫测试也依赖这个口径）。
+    role = str(getattr(event, "permission_role", "") or "")
+    allowed = bool(is_admin) or role in ("owner", "manager")
+    if head != "status" and not allowed:
+        await send("权限不足：需要管理者或群管理员")
+        return True
+    if is_private:
+        await send("本群开关请在群里发送；私聊开关在「Agent → 基础配置」里")
+        return True
+
+    services = getattr(getattr(module, "ctx", None), "services", None)
+    config_service = getattr(services, "config_service", None)
+    account_id = str(getattr(module, "bot_id", "") or "")
+    if config_service is None or not account_id:
+        await send("配置服务未就绪，稍后再试")
+        return True
+
+    service = DialoguePolicyService(config_service)
+    channel = str(group_id or "")
+
+    try:
+        if head == "status":
+            resolved = service.resolve(account_id, "agent", channel)
+            state = "静音中" if resolved.enabled_source == "muted" else ("允许回复" if resolved.enabled else "已关闭")
+            await send(f"本群状态：{state}（来源 {resolved.enabled_source}）\n触发：{_trigger_text(resolved)}")
+        elif head in ("off", "on"):
+            await service.update(account_id, "agent", channel, enabled=(head == "on"))
+            await send("本群已开启回复" if head == "on" else "本群已关闭回复（#llm on 恢复）")
+        elif head == "mute":
+            minutes = _parse_duration_minutes(parts[1] if len(parts) > 1 else "")
+            if minutes is None:
+                await send("用法：#llm mute 30m（也支持 2h / 1d）")
+                return True
+            await service.set_mute(account_id, "agent", channel, minutes)
+            await send(f"已静音 {minutes} 分钟，到点自动恢复")
+        else:  # unmute
+            await service.set_mute(account_id, "agent", channel, 0)
+            await send("已取消静音")
+    except PolicyError as e:
+        await send(str(e))
+    return True
