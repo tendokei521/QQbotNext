@@ -177,10 +177,11 @@ async def api_policy_matrix(
 ):
     if not account_id:
         return _err(400, "缺少 account_id", "POLICY_ACCOUNT_REQUIRED")
-    rows = _service(config_service, agent_manager).matrix(account_id, capability)
+    data = _service(config_service, agent_manager).matrix(account_id, capability)
     return _ok(
         account_id=account_id,
         capability=capability,
-        rows=rows,
+        default=data["default"],
+        rows=data["rows"],
         overridable=list(SCOPE_OVERRIDABLE.get(str(capability), ())),
     )

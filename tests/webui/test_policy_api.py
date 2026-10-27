@@ -101,7 +101,6 @@ async def test_bulk_toggle_and_matrix(container, config_service):
     assert by_group["111"]["enabled"] is True
     assert by_group["222"]["enabled"] is True
     assert by_group["111"]["enabled_source"] == "channel"
-
     # null = 恢复继承
     client.post("/api/policy/bulk", json={
         "account_id": "acc1",
@@ -139,6 +138,16 @@ async def test_mute_overrides_enabled_until_cancelled(container):
     got = client.get("/api/policy", params={"account_id": "acc1", "channel_id": "111"}).json()
     assert got["resolved"]["enabled"] is True, "取消静音后应回到原覆盖值"
     assert got["resolved"]["enabled_source"] == "channel"
+
+
+async def test_matrix_reports_account_default(container, config_service):
+    """矩阵要带回"账号级默认"，前端才能显示「默认允许/默认不允许」。"""
+    await _seed_groups(config_service)
+    body = _client(container).get("/api/policy/matrix", params={"account_id": "acc1"}).json()
+
+    assert body["default"]["enabled_source"] == "default"
+    assert body["default"]["enabled"] is False, "Agent 未装配运行时 → 群聊默认关（安全默认）"
+    assert len(body["rows"]) == 2
 
 
 async def test_bad_json_and_missing_account_are_rejected(container):

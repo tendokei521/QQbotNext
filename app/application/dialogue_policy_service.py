@@ -27,6 +27,10 @@ from app.domain.dialogue_policy import (
 DEFAULT_CAPABILITY = "agent"
 SOURCE_MUTED = "muted"
 
+#: 计算"账号级默认（群聊场景）"时的哨兵群号：数字群号不会与它冲突，
+#: 且它永远没有群级覆盖行，因此解析结果就是"没有覆盖时的群聊默认值"。
+_GROUP_SCENE_SENTINEL = "__default_group__"
+
 
 class PolicyError(ValueError):
     """策略写入被拒绝（带稳定错误码，供 API 直接回给前端）。"""
@@ -221,8 +225,12 @@ class DialoguePolicyService:
 
     # ==================== 矩阵（列表页） ====================
 
-    def matrix(self, account_id: object, capability: str = DEFAULT_CAPABILITY) -> list[dict]:
-        """群列表 + 每群生效状态（供「群聊开关」矩阵渲染）。"""
+    def matrix(self, account_id: object, capability: str = DEFAULT_CAPABILITY) -> dict:
+        """群列表 + 每群生效状态（供「群聊开关」矩阵渲染）。
+
+        返回 ``{"default": {...}, "rows": [...]}``：``default`` 是没有群级覆盖时的
+        账号级结果，前端据此显示"默认：允许/不允许"。
+        """
         aid = str(account_id)
         rows = self.config_service.list_known_groups(aid)
         existing = {
@@ -230,6 +238,8 @@ class DialoguePolicyService:
             for row in self.config_service.list_channel_overrides(aid, capability)
             if row["channel_id"]
         }
+        # 默认层取"群聊场景"的账号级结果（private_enable 与群聊无关，不能用它当默认）
+        default_policy = self.resolve(aid, capability, _GROUP_SCENE_SENTINEL)
         out: list[dict] = []
         for group in rows:
             channel = group["group_id"]
@@ -245,4 +255,10 @@ class DialoguePolicyService:
                 "muted_until": int(override.get("muted_until") or 0),
                 "overridden_keys": sorted(set(override.get("config") or {}) | set(override.get("permission") or {})),
             })
-        return out
+        return {
+            "default": {
+                "enabled": default_policy.enabled,
+                "enabled_source": default_policy.enabled_source,
+            },
+            "rows": out,
+        }

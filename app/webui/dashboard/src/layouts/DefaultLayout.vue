@@ -69,6 +69,7 @@ const navItems = computed<NavItem[]>(() => {
   return [
     { to: '/', title: '总览', icon: 'mdi-view-dashboard-outline' },
     { to: '/bots', title: '账号管理', icon: 'mdi-robot-outline' },
+    { to: '/policy', title: '权限与回复', icon: 'mdi-shield-account-outline' },
     { to: '/modules', title: '功能模块', icon: 'mdi-cube-outline' },
     { to: '/provider-presets', title: 'Provider 预设', icon: 'mdi-api' },
     { to: '/personas', title: '人格设定', icon: 'mdi-account-heart-outline' },
