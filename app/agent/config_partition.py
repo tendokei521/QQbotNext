@@ -75,7 +75,7 @@ UI_PAGES: tuple[UIPage, ...] = (
         id="permission",
         label="权限管理",
         order=20,
-        subtitle="响应权限档位、拥有者与管理者名册（原账号级 owner QQ 已并入此处）",
+        subtitle="响应权限档位、拥有者与管理者名册（群聊开关与回复规则在「权限与回复」）",
         groups=(
             UIGroup("permission_role", "响应权限", ("permission",)),
             UIGroup(
@@ -466,6 +466,7 @@ def page_summary() -> list[dict]:
         {
             "id": page.id,
             "label": page.label,
+            "subtitle": page.subtitle,
             "order": page.order,
             "fields": len(page.fields),
             "groups": [{"id": g.id, "label": g.label, "fields": list(g.fields)} for g in page.groups],

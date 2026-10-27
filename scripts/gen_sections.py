@@ -1,4 +1,4 @@
-"""从前端分区清单的唯一真相生成 `sections.json`。
+﻿"""从前端分区清单的唯一真相生成 `sections.json`。
 
 ## 为什么改成生成
 
@@ -31,7 +31,6 @@ TARGET = ROOT / "app" / "webui" / "dashboard" / "src" / "agent" / "sections.json
 PAGE_VIEW = {
     "basic": {
         "title": "基础配置",
-        "subtitle": "启用 Agent、Provider 模型与人格预设",
         "icon": "mdi-tune-variant",
         "color": "primary",
         "path": "/agent/basic",
@@ -41,28 +40,24 @@ PAGE_VIEW = {
     },
     "permission": {
         "title": "权限管理",
-        "subtitle": "响应权限档位、拥有者与管理者名册",
         "icon": "mdi-shield-account-outline",
         "color": "success",
         "path": "/agent/permission",
     },
     "behavior": {
         "title": "对话行为",
-        "subtitle": "触发设置、消息抖动与回复打断",
         "icon": "mdi-call-split",
         "color": "secondary",
         "path": "/agent/behavior",
     },
     "session": {
         "title": "会话管理",
-        "subtitle": "会话窗口、群聊历史注入与上下文压缩",
         "icon": "mdi-chat-processing-outline",
         "color": "info",
         "path": "/agent/session",
     },
     "advanced": {
         "title": "高级功能",
-        "subtitle": "图片与动图理解、联网搜索",
         "icon": "mdi-wrench-cog-outline",
         "color": "warning",
         "path": "/agent/advanced",
@@ -110,7 +105,9 @@ def build_manifest() -> dict:
                 "id": page["id"],
                 "path": view["path"],
                 "title": view["title"],
-                "subtitle": view["subtitle"],
+                # 副标题只认 config_partition（唯一真相）；生成器不再保留第二份，
+                # 否则改一处、另一处不改，就是又一次"文档分叉"。
+                "subtitle": page.get("subtitle", ""),
                 "icon": view["icon"],
                 "color": view["color"],
                 "order": page["order"],
