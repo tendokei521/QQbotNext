@@ -40,12 +40,38 @@ const SWITCH_ITEMS: { title: string; value: SwitchValue }[] = [
   { title: '继承', value: 'inherit' },
 ]
 
+/** 「账号默认（群聊）」三态：允许 / 不允许 / 跟随 Agent 配置 */
+type SceneValue = 'on' | 'off' | 'inherit'
+const SCENE_ITEMS: { title: string; value: SceneValue }[] = [
+  { title: '允许', value: 'on' },
+  { title: '不允许', value: 'off' },
+  { title: '跟随 Agent 配置', value: 'inherit' },
+]
+
 const accountName = computed(() => {
   const bot = bots.bots.find((item) => item.id === bots.currentAccountId)
   return bot ? displayName(bot) : bots.currentAccountId
 })
 
-const defaultText = computed(() => (policy.defaultPolicy.enabled ? '默认允许' : '默认不允许'))
+/** 群行选「继承」时用得就是这个值；null = 跟随 Agent 配置里的「群回复启用」 */
+const sceneDefault = computed<SceneValue>(() => {
+  const value = policy.defaultPolicy.scene_enabled
+  if (value === true) return 'on'
+  if (value === false) return 'off'
+  return 'inherit'
+})
+
+async function onSceneDefault(value: SceneValue) {
+  try {
+    await policy.setSceneEnabled(value === 'inherit' ? null : value === 'on')
+    notify.push(
+      value === 'inherit' ? '已改为跟随 Agent 配置' : `账号默认已设为「${value === 'on' ? '允许' : '不允许'}」`,
+      'success',
+    )
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  }
+}
 
 function isMuted(row: PolicyMatrixRow): boolean {
   return row.muted_until > Date.now() / 1000
@@ -184,10 +210,19 @@ watch(
           prepend-inner-icon="mdi-magnify"
           style="max-width: 320px"
         />
-        <v-chip size="small" variant="tonal">{{ defaultText }}</v-chip>
-        <v-chip size="small" variant="tonal" color="success">
-          允许 {{ policy.allowedCount }} 个
-        </v-chip>
+        <v-select
+          :model-value="sceneDefault"
+          :items="SCENE_ITEMS"
+          label="账号默认（群聊）"
+          density="compact"
+          variant="outlined"
+          hide-details
+          style="max-width: 200px"
+          :loading="policy.savingScene"
+          :disabled="!bots.currentAccountId || policy.savingScene"
+          @update:model-value="(v: SceneValue) => onSceneDefault(v)"
+        />
+        <v-chip size="small" variant="tonal">允许 {{ policy.allowedCount }} 个</v-chip>
         <v-chip v-if="policy.mutedCount" size="small" variant="tonal" color="warning">
           静音中 {{ policy.mutedCount }} 个
         </v-chip>

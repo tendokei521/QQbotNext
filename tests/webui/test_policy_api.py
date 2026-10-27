@@ -147,7 +147,64 @@ async def test_matrix_reports_account_default(container, config_service):
 
     assert body["default"]["enabled_source"] == "default"
     assert body["default"]["enabled"] is False, "Agent 未装配运行时 → 群聊默认关（安全默认）"
+    assert body["default"]["scene_enabled"] is None, "没设过场景层 → null（跟随 Agent 配置）"
     assert len(body["rows"]) == 2
+
+
+async def test_scene_default_sets_the_inherited_value(container, config_service):
+    """「账号默认（群聊）」：写场景层后，选「继承」的群都按它解析。"""
+    await _seed_groups(config_service)
+    client = _client(container)
+
+    resp = client.post("/api/policy/scene", json={
+        "account_id": "acc1", "scene": "group", "enabled": True,
+    })
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["scene"] == "group"
+
+    body = client.get("/api/policy/matrix", params={"account_id": "acc1"}).json()
+    assert body["default"]["enabled"] is True
+    assert body["default"]["enabled_source"] == "scene"
+    assert body["default"]["scene_enabled"] is True
+    assert {row["enabled_source"] for row in body["rows"]} == {"scene"}
+
+    # 群级覆盖仍然优先：只关一个群
+    client.post("/api/policy", json={
+        "account_id": "acc1", "channel_id": "111", "patch": {"enabled": False},
+    })
+    rows = {
+        row["group_id"]: row
+        for row in client.get("/api/policy/matrix", params={"account_id": "acc1"}).json()["rows"]
+    }
+    assert rows["111"]["enabled"] is False and rows["111"]["enabled_source"] == "channel"
+    assert rows["222"]["enabled"] is True and rows["222"]["enabled_source"] == "scene"
+
+    # null = 跟随 Agent 配置（清掉场景层覆盖）
+    cleared = client.post("/api/policy/scene", json={
+        "account_id": "acc1", "scene": "group", "enabled": None,
+    })
+    assert cleared.status_code == 200, cleared.text
+    body = client.get("/api/policy/matrix", params={"account_id": "acc1"}).json()
+    assert body["default"]["scene_enabled"] is None
+    assert body["default"]["enabled_source"] == "default"
+    assert body["default"]["enabled"] is False
+
+
+async def test_scene_default_rejects_bad_input(container):
+    client = _client(container)
+    bad_scene = client.post("/api/policy/scene", json={
+        "account_id": "acc1", "scene": "topic", "enabled": True,
+    })
+    assert bad_scene.status_code == 400
+    assert bad_scene.json()["code"] == "POLICY_BAD_SCENE"
+
+    missing = client.post("/api/policy/scene", json={"account_id": "acc1"})
+    assert missing.status_code == 400
+    assert missing.json()["code"] == "POLICY_BAD_BODY"
+
+    bad_type = client.post("/api/policy/scene", json={"account_id": "acc1", "enabled": "yes"})
+    assert bad_type.status_code == 400
+    assert bad_type.json()["code"] == "POLICY_BAD_BODY"
 
 
 async def test_invalid_override_value_is_rejected(container):

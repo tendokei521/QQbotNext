@@ -6,6 +6,7 @@
 - ``POST /api/policy``          写一层覆盖（账号层或群层），支持"恢复继承"；
 - ``POST /api/policy/bulk``     批量开关一批群（全部允许/全部关闭）；
 - ``POST /api/policy/mute``     临时静音（到点自动恢复）；
+- ``POST /api/policy/scene``    写「账号默认」（群聊/私聊场景层，群行"继承"时用它）；
 - ``GET  /api/policy/matrix``   群列表 × 生效状态（列表页一次拉全）。
 """
 
@@ -166,6 +167,44 @@ async def api_policy_mute(
     except PolicyError as e:
         return _err(400, str(e), e.code)
     return _ok("已静音" if minutes > 0 else "已取消静音", override=row)
+
+
+@router.post("/policy/scene")
+async def api_policy_scene(
+    request: Request,
+    config_service=Depends(get_config_service),
+    agent_manager=Depends(get_agent_manager),
+):
+    """写「账号默认」（场景层）。
+
+    ``enabled``：``true/false`` = 显式默认；``null`` = 删掉本层覆盖、跟随 Agent 配置。
+    """
+    try:
+        body = await request.json()
+    except Exception as e:  # noqa: BLE001
+        return _err(400, f"请求体不是合法 JSON: {e}", "POLICY_BAD_JSON")
+    if not isinstance(body, dict):
+        return _err(400, "请求体必须是 JSON 对象", "POLICY_BAD_BODY")
+    account_id = str(body.get("account_id") or "").strip()
+    if not account_id:
+        return _err(400, "缺少 account_id", "POLICY_ACCOUNT_REQUIRED")
+    if "enabled" not in body:
+        return _err(400, "缺少 enabled（true / false / null）", "POLICY_BAD_BODY")
+    enabled = body.get("enabled")
+    if enabled is not None and not isinstance(enabled, bool):
+        return _err(400, "enabled 只能是 true / false / null", "POLICY_BAD_BODY")
+
+    service = _service(config_service, agent_manager)
+    try:
+        result = await service.set_scene_enabled(
+            account_id,
+            str(body.get("scene") or "group"),
+            enabled,
+            str(body.get("capability") or DEFAULT_CAPABILITY),
+        )
+    except PolicyError as e:
+        return _err(400, str(e), e.code)
+    return _ok("账号默认已更新", **result)
 
 
 @router.get("/policy/matrix")

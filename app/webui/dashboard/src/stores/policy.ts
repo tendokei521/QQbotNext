@@ -19,6 +19,8 @@ export interface PolicyMatrixRow {
 export interface PolicyDefault {
   enabled: boolean
   enabled_source: string
+  /** 账号默认（群聊场景层）的显式值：null = 跟随 Agent 配置 */
+  scene_enabled?: boolean | null
 }
 
 /** 某层（账号层/群层）当前的覆盖行；null 字段在 UI 里表示"继承" */
@@ -60,12 +62,17 @@ export const usePolicyStore = defineStore('policy', () => {
   const refreshing = ref(false)
   const saving = ref<string | null>(null)
   const rows = ref<PolicyMatrixRow[]>([])
-  const defaultPolicy = ref<PolicyDefault>({ enabled: false, enabled_source: 'default' })
+  const defaultPolicy = ref<PolicyDefault>({
+    enabled: false,
+    enabled_source: 'default',
+    scene_enabled: null,
+  })
   const connected = ref(false)
   const stale = ref(true)
   const fetchedAt = ref(0)
   const error = ref('')
   const search = ref('')
+  const savingScene = ref(false)
 
   const accountId = computed(() => bots.currentAccountId)
   const filtered = computed(() => {
@@ -142,6 +149,23 @@ export const usePolicyStore = defineStore('policy', () => {
     }
   }
 
+  /** 写「账号默认（群聊）」：null = 跟随 Agent 配置（清掉场景层覆盖） */
+  async function setSceneEnabled(enabled: boolean | null): Promise<void> {
+    const aid = accountId.value
+    if (!aid) return
+    savingScene.value = true
+    try {
+      await http.post('/api/policy/scene', {
+        account_id: aid,
+        scene: 'group',
+        enabled,
+      })
+      await load()
+    } finally {
+      savingScene.value = false
+    }
+  }
+
   async function bulk(enabled: boolean | null): Promise<number> {
     const aid = accountId.value
     if (!aid || !rows.value.length) return 0
@@ -206,6 +230,7 @@ export const usePolicyStore = defineStore('policy', () => {
     loading,
     refreshing,
     saving,
+    savingScene,
     rows,
     defaultPolicy,
     connected,
@@ -221,6 +246,7 @@ export const usePolicyStore = defineStore('policy', () => {
     load,
     refreshGroups,
     setSwitch,
+    setSceneEnabled,
     bulk,
     mute,
     getPolicy,

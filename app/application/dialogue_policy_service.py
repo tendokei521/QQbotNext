@@ -31,6 +31,10 @@ from app.domain.dialogue_policy import (
 DEFAULT_CAPABILITY = "agent"
 SOURCE_MUTED = "muted"
 
+#: 场景层（群聊/私聊）的「账号默认」开关：群行选「继承」时用的就是它。
+#: 对应 ``channel_overrides.channel_id = '__group__' / '__private__'``。
+SCENE_NAMES: dict[str, str] = {"group": SCENE_GROUP, "private": SCENE_PRIVATE}
+
 
 class PolicyError(ValueError):
     """策略写入被拒绝（带稳定错误码，供 API 直接回给前端）。"""
@@ -246,6 +250,34 @@ class DialoguePolicyService:
             account_id, capability, channel, muted_until=until
         )
 
+    async def set_scene_enabled(
+        self,
+        account_id: object,
+        scene: str,
+        enabled: bool | None,
+        capability: str = DEFAULT_CAPABILITY,
+    ) -> dict:
+        """写「账号默认」（场景层开关）：群聊/私聊在账号上的默认值。
+
+        这是继承链里最靠近用户的一层：群行选「继承」时用它，群行选「允许/禁止」
+        时被群级覆盖压过。``enabled=None`` = 删掉本层覆盖，回到 Agent 配置的
+        ``group_enable`` / ``private_enable``（"跟随 Agent 配置"）。
+        """
+        name = str(scene or "").strip().lower()
+        if name not in SCENE_NAMES:
+            raise PolicyError("POLICY_BAD_SCENE", "scene 只能是 group 或 private")
+        if enabled is not None and not isinstance(enabled, bool):
+            raise PolicyError("POLICY_BAD_BODY", "enabled 只能是 true / false / null")
+        channel = SCENE_NAMES[name]
+        if enabled is None:
+            await self.config_service.delete_channel_override(account_id, capability, channel)
+            row = None
+        else:
+            row = await self.config_service.save_channel_override(
+                account_id, capability, channel, enabled=enabled
+            )
+        return {"scene": name, "override": row}
+
     # ==================== 矩阵（列表页） ====================
 
     def matrix(self, account_id: object, capability: str = DEFAULT_CAPABILITY) -> dict:
@@ -263,6 +295,9 @@ class DialoguePolicyService:
         }
         # 默认层取"群聊场景"的账号级结果（private_enable 与群聊无关，不能用它当默认）
         default_policy = self.resolve(aid, capability, None, scene="group")
+        # 场景层是否显式设过：null = 跟随 Agent 配置（前端据此渲染三态）
+        scene_row = self.config_service.get_channel_override(aid, capability, SCENE_GROUP) or {}
+        scene_enabled = scene_row.get("enabled")
         out: list[dict] = []
         for group in rows:
             channel = group["group_id"]
@@ -282,6 +317,8 @@ class DialoguePolicyService:
             "default": {
                 "enabled": default_policy.enabled,
                 "enabled_source": default_policy.enabled_source,
+                # 账号默认（群聊场景层）的显式值：null = 跟随 Agent 配置
+                "scene_enabled": None if scene_enabled is None else bool(scene_enabled),
             },
             "rows": out,
         }

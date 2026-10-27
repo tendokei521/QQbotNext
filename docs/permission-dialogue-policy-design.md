@@ -170,7 +170,7 @@ class ResolvedPolicy:
 
 | 语义 | 字段 | 默认 | 小白能看到吗 |
 |---|---|---|---|
-| 场所 | `enabled`（群/私聊） | 继承 `group_enable` / `private_enable` | ✅（开关） |
+| 场所 | `enabled`（群/私聊） | 继承 Agent 配置 `group_enable` / `private_enable`；账号默认可写场景层 `__group__` / `__private__` | ✅（开关 + 「账号默认」） |
 | 触发 | `trigger_at`、`trigger_keyword` | 账号级配置 | 高级 |
 | 回复 | `outbound_directive_enable`（引用/@）+ 模块输出键（v2） | 账号级配置 | 高级 |
 | 频控 | `reply_cooldown`、`message_debounce_*`、`quiet_hours`（新增，见下） | 账号级配置 | 高级 |
@@ -203,8 +203,9 @@ muted_until INTEGER   -- 0 = 未静音；时间戳 = 到点自动恢复
 | GET | `/api/policy?account_id=&capability=agent&channel_id=` | `{resolved, sources, overrides:{account, channel}}` |
 | POST | `/api/policy` | 写一层覆盖：`{account_id, capability, channel_id?, patch:{enabled?, config?, permission?}, clear:[keys]}`；`channel_id` 省略 = 账号层 |
 | POST | `/api/policy/bulk` | `{account_id, capability, channel_ids:[], enabled}`（全部开/关） |
+| POST | `/api/policy/scene` | `{account_id, capability?, scene:"group"\|"private", enabled:true\|false\|null}`：写「账号默认」（场景层 `__group__`/`__private__`）；`null` = 跟随 Agent 配置 |
 | POST | `/api/policy/mute` | `{account_id, capability, channel_id, minutes}`（0=取消） |
-| GET | `/api/policy/matrix?account_id=&capability=agent` | 列表页用：每群 `{group_id, name, member_count, enabled, muted_until, source, overridden_keys[]}` |
+| GET | `/api/policy/matrix?account_id=&capability=agent` | 列表页用：每群 `{group_id, name, member_count, enabled, muted_until, source, overridden_keys[]}`；`default` 额外带 `scene_enabled`（null = 跟随 Agent 配置） |
 | GET | `/api/permission/preview?account_id=&channel_id=&user_id=` | 复用统一判定器：`{allowed, role, role_source, reason}` |
 
 **错误语义**：写不可覆盖键 → 400 `POLICY_KEY_NOT_OVERRIDABLE`（附允许键列表）；写非法值 → 422 + 逐键原因；账号不在 → 404。
@@ -271,8 +272,7 @@ event → account_id
 │ [群聊开关]  回复规则                                          │
 │                                                              │
 │ 账号：主号 123456789 ▾        群列表：42 个 · 2 分钟前 [刷新] │
-│ 🔍 搜索群名/群号            [全部允许]  [全部关闭]            │
-│ ☑ 允许私聊                                                    │
+│ 🔍 搜索群名/群号   账号默认（群聊）[允许 ▾]  [全部允许] [全部关闭] │
 │                                                              │
 │ 允许聊天（默认：允许 / 已关闭 3 个）                          │
 │ ┌──────────────────────────────────────────────────────────┐ │
@@ -287,8 +287,11 @@ event → account_id
 ```
 
 - 行内开关三态：`开` / `关` / `继承（默认允许/不允许）`——用下拉而不是纯 switch，避免"看起来关不掉"。
-- 顶部显示"默认：允许/不允许"，并提供「新群默认」设置（写账号层 `enabled`）。
-- 批量操作前弹确认："将把 42 个群设为不允许，是否继续？"。
+- 顶部「账号默认（群聊）」三态：`允许` / `不允许` / `跟随 Agent 配置`。前两者写场景层
+  `__group__`（群行选「继承」时用的就是它）；「跟随 Agent 配置」= 删掉场景层覆盖，回落到
+  Agent 配置的「群回复启用」。
+- 私聊开关 v1 未单独做控件：仍由 Agent 配置的「私信回复启用」（`private_enable`）控制。
+- 批量操作前弹确认："将把 42 个群设为不允许，是否继续？"；批量写的是**群级**覆盖，不改账号默认。
 - 离线态：横幅「账号未连接，显示 10 分钟前的群列表 · [连接]」。
 
 ### 6.3 高级视图
