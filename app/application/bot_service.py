@@ -195,6 +195,19 @@ class BotService:
         conn = self.gateway.connections.get(str(account_id))
         return bool(conn is not None and conn.status == "connected")
 
+    def is_listening(self, account_id: str) -> bool:
+        """反向账号的监听是否已就绪。
+
+        反向模式下监听器一旦起来就常驻（对端断线不需要重开端口），
+        所以"已监听"对后台重试循环来说等同于"这一轮不用再试了"。
+        """
+        link = getattr(self.gateway, "reverse_link", None)
+        return bool(link is not None and link.listening(str(account_id)))
+
+    def account_exists(self, account_id: str) -> bool:
+        """账号是否还在配置里（向导重试循环用它避免给已删账号空转）。"""
+        return any(str(bot.get("id")) == str(account_id) for bot in self.config_service.get_bots())
+
     async def delete_bot(self, account_id: str) -> bool:
         await self.gateway.del_bot(account_id)
         deleted = await self.config_service.delete_bot(account_id)
