@@ -22,17 +22,35 @@
 
 | 阶段 | 主题 | 状态 | 清单 |
 |---|---|---|---|
-| **P0** | 止漏：静默、退出码、校验、发行链路 | `[ ]` | [`onboarding-bundle.md`](onboarding-bundle.md#p0-止漏本周) |
-| **P1** | 首启向导 + 就绪诊断 | `[ ]` | [`onboarding-bundle.md`](onboarding-bundle.md#p1-首启向导--就绪诊断1-周) |
+| **P0** | 止漏：静默、退出码、校验、发行链路 | `[~]` 6/8 | [`onboarding-bundle.md`](onboarding-bundle.md#p0-止漏本周) |
+| **P1** | 首启向导 + 就绪诊断 | `[~]` 1/7 | [`onboarding-bundle.md`](onboarding-bundle.md#p1-首启向导--就绪诊断1-周) |
 | **P2** | 套装工件 v1（格式/校验/导出/预检） | `[ ]` | [`onboarding-bundle.md`](onboarding-bundle.md#p2-套装工件-v1只导出导入预检) |
 | **P3** | 实例化 + 快照回滚 | `[ ]` | [`onboarding-bundle.md`](onboarding-bundle.md#p3-实例化--快照回滚) |
 | **P4** | 更新/卸载/值校验器 | `[ ]` | [`onboarding-bundle.md`](onboarding-bundle.md#p4-更新卸载值校验器) |
 | **P5** | 协议端托管 + 免安装发行包 | `[ ]` | [`onboarding-bundle.md`](onboarding-bundle.md#p5-协议端托管--发行包) |
-| **R0** | 群列表（缓存 + 刷新） | `[ ]` | [`permission-dialogue.md`](permission-dialogue.md#r0-群列表) |
-| **R1** | 策略底座（群级覆盖 + 解析） | `[ ]` | [`permission-dialogue.md`](permission-dialogue.md#r1-策略底座) |
-| **R2** | 简单视图（群开关矩阵） | `[ ]` | [`permission-dialogue.md`](permission-dialogue.md#r2-简单视图) |
+| **R0** | 群列表（缓存 + 刷新） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r0-群列表) |
+| **R1** | 策略底座（群级覆盖 + 解析） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r1-策略底座) |
+| **R2** | 简单视图（群开关矩阵） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r2-简单视图) |
 | **R3** | 高级视图（规则覆盖） | `[ ]` | [`permission-dialogue.md`](permission-dialogue.md#r3-高级视图) |
 | **R4** | 迁移收口 | `[ ]` | [`permission-dialogue.md`](permission-dialogue.md#r4-迁移收口) |
+
+### 已完成进度（2026-10-27）
+
+| 编号 | commit | 一句话 |
+|---|---|---|
+| P0-1 | `1a555dd` | 场景开关关闭时留限流日志（不再静默 return） |
+| P0-2 | `eeb8cf0` | 退出码 4 = Python 版本不符，不再误导去查镜像 |
+| P0-3 | `97c0841` | 保存账号校验 ws_url（反向必须带端口） |
+| P0-4 | `32aac8f` | Agent 配置坏请求体 400，不再"假成功"/500 |
+| P0-5 | `f7f5cd1` | release 打包路径修正 |
+| P0-6 | `53b3360` | wheel 打包 dashboard dist + 修 package-data 通配（实测：124 个 dist 文件进包） |
+| P0-7 | `e9f1553` / `bbd79b7` | 干净构建替代 prune（dist 1077→122 文件 / 15MB→5MB） |
+| P1-1 | `0ee9ada` | 就绪检查服务 + `GET /api/readiness` + `POST /api/setup/complete` |
+| R0-1 | `21bac9b` | 群列表落库 + `GET /api/groups` + `POST /api/groups/refresh` |
+| R1 | `b38a907` | `channel_overrides` + 纯函数解析 + `/api/policy*` |
+| R2-1 | `1a2f8c6` | 群级开关接入回复门控（日志带 source） |
+| R2-2/2-3 | `7252d47` | 「权限与回复」页（群矩阵 + 批量 + 静音 + 恢复继承） |
+| 修复 | `c93de4f` / `39b9e1e` | 架构守卫：静默异常补日志、skip_log 移出 agent/loop |
 
 ---
 
