@@ -65,7 +65,7 @@ ENV_SECTIONS: tuple[tuple[str, tuple[EnvKey, ...]], ...] = (
         ),
         EnvKey("LOG_DIR", "logs", "日志目录（WebUI 日志面板与 /log 指令都读它）"),
     )),
-    ("Bot 连接（OneBot / NapCat）", (
+    ("协议端心跳（连接地址在 WebUI 配）", (
         EnvKey("WS_CONNECT_TIMEOUT", "30", "首次连接超时（秒）"),
         EnvKey("WS_PING_INTERVAL", "30", "心跳间隔（秒）"),
         EnvKey("WS_PING_TIMEOUT", "10", "心跳超时（秒）"),
