@@ -21,6 +21,7 @@ from app.agent.hooks import run_stage
 from app.agent.loop.context import LlmContext, LlmJob
 from app.agent.loop.locks import SessionLockManager
 from app.agent.loop.pool import LlmPool, merge_debounced_texts
+from app.agent.loop.skip_log import log_skip
 from app.domain.message import Message
 
 
@@ -302,21 +303,32 @@ class LlmPipeline:
                     return
 
             config = self.runtime.config
-            # 没有 key 或对应场景未启用时，不视为“触发 LLM”，不重置主动消息状态
+            account_id = getattr(self.runtime, "bot_id", "?")
+            group_id = getattr(getattr(ctx.event, "group", None), "group_id", "?")
+            # 没有 key 或对应场景未启用时，不视为“触发 LLM”，不重置主动消息状态。
+            # 所有静默 return 都走 log_skip：用户可见、限流、格式统一（见 skip_log 模块）。
             if not self.runtime.provider_config().get("api_key", ""):
-                # 静默 return 是最难查的一类"机器人不回话"：用户看不到任何东西，
-                # 日志里连一行都没有。这里明确交代一句，并说清该去哪配。
-                from app.core.logger import logger
-
-                logger.add_info(account_label(getattr(self.runtime, 'bot_id', '?'))).warning(
-                    "[LLM] 未配置 API Key，本轮消息不进入 LLM（在「Provider 预设」页填写；"
-                    "自建网关若靠额外请求头鉴权，请在预设里配 extra_headers）"
+                log_skip(
+                    account_id,
+                    "no_api_key",
+                    hint="在「Provider 预设」页填写 API Key；自建网关若靠额外请求头鉴权，请配 extra_headers",
                 )
                 return
             if ctx.event.event_type == "message_group" and not config.get("group_enable", False):
+                log_skip(
+                    account_id,
+                    "group_disabled",
+                    f"group={group_id}",
+                    hint="在「Agent → 基础配置 → 响应场景」打开「群聊回复」",
+                )
                 return
             if ctx.event.event_type == "message_private":
                 if not config.get("private_enable", True):
+                    log_skip(
+                        account_id,
+                        "private_disabled",
+                        hint="在「Agent → 基础配置 → 响应场景」打开「私聊回复」",
+                    )
                     return
                 # 私聊纯图片同样放行（图片内容由多模态链路承载）
                 if not ctx.user_text.strip() and not has_image:
