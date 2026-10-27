@@ -257,6 +257,39 @@ def test_main_force_launch_overrides_incomplete_dependencies(tmp_path, monkeypat
     assert len(execd) == 1
 
 
+def test_main_reports_python_version_mismatch_distinctly(tmp_path, monkeypatch, capsys):
+    """check_deps 的退出码 3 = Python 版本不符，不能提示"查网络/配镜像"。"""
+    venv, _python = _write_launcher_files(tmp_path, monkeypatch)
+    execd = []
+
+    code = start.main(
+        ["--venv", str(venv)],
+        runner=_runner([], deps_rc=3),
+        execv=lambda prog, args: execd.append((prog, args)),
+    )
+
+    assert code == start.EXIT_PYTHON
+    assert execd == [], "版本不符时不该继续启动"
+    out = capsys.readouterr().out
+    assert "Python 不满足运行要求" in out
+    assert "没联网" not in out and "没配镜像" not in out
+
+
+def test_check_propagates_python_version_mismatch(tmp_path, monkeypatch):
+    """--check 也必须回传真实原因（4），不能折成 2。"""
+    venv, _python = _write_launcher_files(tmp_path, monkeypatch)
+
+    code = start.main(["--venv", str(venv), "--check"], runner=_runner([], deps_rc=3), execv=lambda *_: None)
+
+    assert code == start.EXIT_PYTHON
+
+
+def test_exit_codes_are_distinct():
+    """五个退出码语义不同，不许合并（合并会把用户引向错误修复动作）。"""
+    codes = {start.EXIT_OK, start.EXIT_VENV, start.EXIT_DEPS, start.EXIT_ENTRY, start.EXIT_PYTHON}
+    assert len(codes) == 5
+
+
 def test_main_check_is_read_only(tmp_path, monkeypatch):
     venv, _python = _write_launcher_files(tmp_path, monkeypatch)
     calls, execd = [], []

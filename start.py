@@ -13,7 +13,7 @@
     python start.py --no-open       # 启动后不自动打开浏览器（默认会打开一键登录页）
 
 退出码：``0`` 已启动／检查通过、``1`` venv 建不出来或不可用、``2`` 依赖没齐（因此**不**启动）、
-``3`` 缺少 ``main.py``。
+``3`` 缺少 ``main.py``、``4`` Python 版本不满足（见 ``EXIT_PYTHON``）。
 
 为什么本文件只准用标准库
 ------------------------
@@ -74,6 +74,13 @@ EXIT_OK = 0
 EXIT_VENV = 1
 EXIT_DEPS = 2
 EXIT_ENTRY = 3
+#: 运行环境不满足（目前只有一种：Python 版本不符）。
+#: 与 ``EXIT_DEPS`` 区分开，是因为两者的修复动作完全不同：
+#: 前者要换 Python，后者才需要联网/配镜像。合成一个码会把用户引向错误方向。
+EXIT_PYTHON = 4
+
+#: ``check_deps.py`` 用退出码 3 表示"Python 版本不符"（见 check_deps.py:340-344）。
+DEPS_RC_PYTHON = 3
 
 Runner = Callable[..., Any]
 Execv = Callable[[str, list[str]], None]
@@ -241,6 +248,9 @@ def check_dependencies(
     rc = getattr(done, "returncode", 1)
     if rc == 0:
         return EXIT_OK, "ok"
+    if rc == DEPS_RC_PYTHON:
+        # 版本不符不是"缺包"：继续走联网/镜像指引只会让用户白折腾。
+        return EXIT_PYTHON, f"Python 版本不符（check_deps.py 退出码 {rc}）"
     return EXIT_DEPS, f"仍有依赖没装齐（check_deps.py 退出码 {rc}）"
 
 
@@ -597,7 +607,19 @@ def main(
         groups=args.group,
     )
     _stage(3, total, "dependencies", detail)
-    if rc != EXIT_OK:
+    if rc == EXIT_PYTHON:
+        print()
+        print("  当前 Python 不满足运行要求，先不启动。")
+        print(f"  当前版本：{sys.version.split()[0]}；要求见 pyproject.toml 的 requires-python。")
+        print("  常见原因：机器上装了多个 Python，双击时用的是旧的那个。")
+        print("  可尝试：")
+        print("    py -3.12 start.py                  # 显式指定满足要求的解释器")
+        print(f"    python start.py --venv {venv_dir}  # 用指定解释器重建 venv")
+        print("    python check_deps.py               # 看具体版本要求")
+        if not args.force_launch:
+            return EXIT_PYTHON
+        print("  （--force-launch 已指定，继续尝试启动）")
+    elif rc != EXIT_OK:
         print()
         print("  依赖不齐，先不启动（旧版「继续 anyway」的后果是启动时一屏 traceback）。")
         print("  常见原因：没联网 / 没配镜像。可尝试：")
@@ -620,7 +642,8 @@ def main(
             ))
         print()
         print("  环境就绪。启动用：python start.py" if rc == EXIT_OK else "")
-        return EXIT_OK if rc == EXIT_OK else EXIT_DEPS
+        # 原样回传真实原因（2=缺依赖 / 4=Python 版本不符），不要再折成 2
+        return rc
 
     # ---------- [4/4] 启动 ----------
     # 环境检查全过 → 缓存结论，下次直接启动
