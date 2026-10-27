@@ -19,6 +19,8 @@ from typing import Any
 from app.core.logger import logger
 from app.domain.dialogue_policy import (
     PERMISSION_KEYS,
+    SCENE_GROUP,
+    SCENE_PRIVATE,
     SCOPE_OVERRIDABLE,
     ResolvedPolicy,
     is_overridable,
@@ -28,10 +30,6 @@ from app.domain.dialogue_policy import (
 
 DEFAULT_CAPABILITY = "agent"
 SOURCE_MUTED = "muted"
-
-#: 计算"账号级默认（群聊场景）"时的哨兵群号：数字群号不会与它冲突，
-#: 且它永远没有群级覆盖行，因此解析结果就是"没有覆盖时的群聊默认值"。
-_GROUP_SCENE_SENTINEL = "__default_group__"
 
 
 class PolicyError(ValueError):
@@ -51,7 +49,9 @@ class DialoguePolicyService:
 
     # ==================== 读 ====================
 
-    def _defaults(self, account_id: str, capability: str, channel_id: str | None) -> tuple[dict, bool]:
+    def _defaults(
+        self, account_id: str, capability: str, channel_id: str | None, scene: str | None = None,
+    ) -> tuple[dict, bool]:
         """(能力自身配置, 默认开关)。读不到就退回安全默认，绝不抛错。"""
         if capability == DEFAULT_CAPABILITY:
             runtime = self.runtime
@@ -63,7 +63,8 @@ class DialoguePolicyService:
                     runtime = None
             config_getter = getattr(getattr(runtime, "config", None), "raw_config", None)
             config = dict(config_getter) if isinstance(config_getter, dict) else {}
-            if channel_id:
+            is_group = channel_id is not None or scene in ("group", SCENE_GROUP)
+            if is_group:
                 return config, bool(config.get("group_enable", False))
             return config, bool(config.get("private_enable", True))
 
@@ -76,13 +77,27 @@ class DialoguePolicyService:
         account_id: object,
         capability: str = DEFAULT_CAPABILITY,
         channel_id: object | None = None,
+        *,
+        scene: str | None = None,
     ) -> ResolvedPolicy:
+        """解析生效策略。
+
+        ``scene`` 缺省按 channel 推断（有群号 = 群聊，否则私聊）；显式传入时用于
+        "算群聊默认值"（``scene="group"`` + 无 channel），而不误用私聊默认。
+        """
         aid = str(account_id)
         capability = str(capability or DEFAULT_CAPABILITY)
         channel = None if channel_id in (None, "") else str(channel_id)
-        defaults, default_enabled = self._defaults(aid, capability, channel)
+        scene_key = scene or (SCENE_GROUP if channel else SCENE_PRIVATE)
+        scene_norm = SCENE_GROUP if scene_key in ("group", SCENE_GROUP) else scene_key
+        defaults, default_enabled = self._defaults(aid, capability, channel, scene_norm)
         account_row = self.config_service.get_channel_override(aid, capability, "")
-        channel_row = self.config_service.get_channel_override(aid, capability, channel) if channel else None
+        scene_row = self.config_service.get_channel_override(aid, capability, scene_norm)
+        channel_row = (
+            self.config_service.get_channel_override(aid, capability, channel)
+            if channel and channel not in (SCENE_GROUP, SCENE_PRIVATE)
+            else None
+        )
 
         resolved = resolve_policy(
             capability,
@@ -91,6 +106,7 @@ class DialoguePolicyService:
             defaults=defaults,
             default_enabled=default_enabled,
             account_row=account_row,
+            scene_row=scene_row,
             channel_row=channel_row,
         )
 
@@ -246,7 +262,7 @@ class DialoguePolicyService:
             if row["channel_id"]
         }
         # 默认层取"群聊场景"的账号级结果（private_enable 与群聊无关，不能用它当默认）
-        default_policy = self.resolve(aid, capability, _GROUP_SCENE_SENTINEL)
+        default_policy = self.resolve(aid, capability, None, scene="group")
         out: list[dict] = []
         for group in rows:
             channel = group["group_id"]

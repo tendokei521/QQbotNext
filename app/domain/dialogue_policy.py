@@ -28,7 +28,14 @@ from typing import Any
 
 SOURCE_DEFAULT = "default"
 SOURCE_ACCOUNT = "account"
+SOURCE_SCENE = "scene"
 SOURCE_CHANNEL = "channel"
+
+#: 场景层（对应旧的 group_enable / private_enable）在 ``channel_overrides`` 里的 channel_id。
+#: 用无法与真实群号冲突的字符串占位，避免"账号默认"与"群聊默认"混在同一行。
+SCENE_GROUP = "__group__"
+SCENE_PRIVATE = "__private__"
+SCENES: tuple[str, ...] = (SCENE_GROUP, SCENE_PRIVATE)
 
 #: 账号层/群层可覆盖的配置键白名单（capability → keys）。
 #:
@@ -178,9 +185,10 @@ def resolve_policy(
     defaults: Mapping[str, Any] | None = None,
     default_enabled: bool = True,
     account_row: Mapping[str, Any] | None = None,
+    scene_row: Mapping[str, Any] | None = None,
     channel_row: Mapping[str, Any] | None = None,
 ) -> ResolvedPolicy:
-    """按「默认 → 账号 → 群」合并出生效策略。
+    """按「默认 → 账号 → 场景 → 群」合并出生效策略。
 
     Args:
         capability: ``agent`` 或模块名（决定白名单）。
@@ -188,8 +196,10 @@ def resolve_policy(
         channel_id: 群号；``None`` 表示私聊/默认层解析。
         defaults: 能力自身配置（agent: ``runtime.config``；模块: 模块配置）。
         default_enabled: 没有 enabled 覆盖时的默认开关。
-        account_row / channel_row: ``channel_overrides`` 的行
-            （``{"enabled": bool|None, "config": dict, "permission": dict}``）。
+        account_row: 账号层覆盖（对所有场景生效，含 ``user_mode/user_list``）。
+        scene_row: 场景层覆盖（群聊 / 私聊各一份；对应旧的
+            ``group_enable/private_enable``）。
+        channel_row: 群层覆盖。
     """
     config: dict[str, Any] = _filter_keys(capability, defaults)
     sources: dict[str, str] = {key: SOURCE_DEFAULT for key in config}
@@ -197,7 +207,12 @@ def resolve_policy(
     enabled = bool(default_enabled)
     enabled_source = SOURCE_DEFAULT
 
-    for row, source in ((account_row, SOURCE_ACCOUNT), (channel_row, SOURCE_CHANNEL)):
+    layers = (
+        (account_row, SOURCE_ACCOUNT),
+        (scene_row, SOURCE_SCENE),
+        (channel_row, SOURCE_CHANNEL),
+    )
+    for row, source in layers:
         if not isinstance(row, Mapping):
             continue
         if row.get("enabled") is not None:

@@ -467,6 +467,10 @@ async def run(settings: Settings | None = None) -> None:
     await db.connect()
     config_service = _container.get(ConfigService)
     await config_service.init()
+    # 旧账号级权限配置（场景开关/群名单/用户名单）→ 群级覆盖（幂等）
+    from app.application.dialogue_policy_migration import migrate_legacy_dialog_policies
+
+    await migrate_legacy_dialog_policies(config_service)
     set_console_mode(config_service.get_webui_config().get("logs", {}).get("show_raw_logs", False))
 
     # 迁移旧的 Agent 内联 API 配置到 Provider 预设（幂等，启动时执行）
