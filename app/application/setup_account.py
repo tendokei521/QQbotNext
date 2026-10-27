@@ -202,11 +202,15 @@ class SetupAccountService:
                 raise SetupAccountError(
                     "已经有多个账号，请到「账号管理」里编辑；首次配置只维护一个默认账号"
                 )
-            created_id = await self.bot_service.add_bot(
-                address, None, True, conn_mode=mode,
-                account_id=requested_id or None,
-                name=str(name or "").strip(),
-            )
+            try:
+                created_id = await self.bot_service.add_bot(
+                    address, None, True, conn_mode=mode,
+                    account_id=requested_id or None,
+                    name=str(name or "").strip(),
+                )
+            except ValueError as e:
+                # 账号 id 非法/重复等由配置层抛 ValueError：转成可展示错误（API 回 400）
+                raise SetupAccountError(str(e)) from e
             await self.config_service.set_kv(SETUP_ACCOUNT_KV, created_id)
             if address and not self.bot_service.is_connected(created_id):
                 self.connect_loop.ensure(created_id)
@@ -242,7 +246,10 @@ class SetupAccountService:
                 row["access_token"] = access_token
             updated.append(row)
 
-        await self.config_service.save_bots(updated)
+        try:
+            await self.config_service.save_bots(updated)
+        except ValueError as e:
+            raise SetupAccountError(str(e)) from e
         if target_id != old_id:
             await self._migrate_bindings(old_id, target_id)
             await self.config_service.set_modules_default_enabled(

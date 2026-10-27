@@ -34,3 +34,16 @@ async def test_switch_mode_via_api_keeps_single_account(container, config_servic
     assert switched.status_code == 200, switched.text
     assert len(config_service.get_bots()) == 1
     assert config_service.get_bots()[0]["conn_mode"] == "forward"
+
+
+async def test_invalid_account_id_returns_400_not_500(container, config_service):
+    """账号 ID 非法／重复时必须是可读的 400，不能 500。"""
+    from starlette.testclient import TestClient
+
+    from app.webui.app import create_app
+
+    client = TestClient(create_app(container))
+    resp = client.post("/api/setup/default-account", json={"id": "bad id!", "name": "x"})
+
+    assert resp.status_code == 400, resp.text
+    assert "ID" in resp.json()["message"] or "id" in resp.json()["message"]
