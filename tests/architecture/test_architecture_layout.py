@@ -146,7 +146,12 @@ def test_tests_are_partitioned_by_source_layer() -> None:
 def test_tests_subdirs_mirror_source_packages() -> None:
     """`tests/<子目录>` 必须对应一个源码包；`tests/agent/<子目录>` 还要对应 agent 子包。"""
     # 顶层：app/ 的包 + 业务插件 + architecture（跨层静态检查，无对应源码包）
-    allowed = set(ALLOWED_APP_PACKAGES) | {"plugins", "architecture", "eval"}  # eval = 跨包黑盒评测集
+    allowed = set(ALLOWED_APP_PACKAGES) | {
+        "plugins",
+        "architecture",
+        "eval",  # 跨包黑盒评测集
+        "scripts",  # 仓库脚本（构建/生成工具，不在 app/ 下）
+    }
     stray = sorted(
         p.name
         for p in (ROOT / "tests").iterdir()

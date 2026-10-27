@@ -68,6 +68,23 @@ logs/                           日志目录
 
 > 只想先看界面：`python start.py --check` 只做只读检查，不联网、不装包、不启动。
 
+### 两条路：免安装包 / 一条命令
+
+**免安装包（推荐给不想碰命令行的用户）**：从 Release 下载 `QQBotNext-*-kit.zip`，
+解压后双击 `start.bat`（macOS/Linux 用 `./start.sh`）。首次启动自动建环境、装依赖，
+然后打开浏览器进「首次配置」向导。包里带 `deploy.json`（逐文件 sha256）和
+`README-FIRST.txt`（三步上手）。
+
+想自己构建发行包（含离线依赖）：
+
+```bash
+python scripts/build_deploy_kit.py --version 2.0.0              # 产物到 dist/kit/
+python scripts/build_deploy_kit.py --with-wheelhouse            # 连离线依赖一起打（需联网）
+python scripts/build_deploy_kit.py --embed-python <python-embed.zip>   # 内嵌解释器
+```
+
+> 包内**不含** `venv/`、`data/`、`logs/`、`.env`：发出去的包不会带着别人的数据或 Key。
+
 ### 一条命令（推荐）
 
 ```bash
