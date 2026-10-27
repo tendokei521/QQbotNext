@@ -14,9 +14,7 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 
-from app.infrastructure.config.config_service import ConfigOp
 from app.infrastructure.onebot.endpoint import (
     EndpointError,
     is_reverse,
@@ -33,8 +31,6 @@ DEFAULT_LISTEN_ADDRESS = f"ws://127.0.0.1:{LISTEN_DEFAULT_PORT}{LISTEN_DEFAULT_P
 DEFAULT_CONNECT_INTERVAL = 2.0
 #: kv 里记录"向导管理的那个账号"
 SETUP_ACCOUNT_KV = "setup_default_account_id"
-
-AGENT_CAPABILITY = "agent"
 
 
 class SetupAccountError(ValueError):
@@ -228,8 +224,6 @@ class SetupAccountService:
         target_id = requested_id or old_id
         if target_id != old_id and any(str(bot.get("id")) == target_id for bot in bots):
             raise SetupAccountError(f"账号 ID「{target_id}」已被占用")
-        # 改名不是新账号：模块默认开关要跟着搬，否则升级前的老账号会被静默变成「默认关」
-        old_modules_default = self.config_service.get_modules_default_enabled(old_id)
 
         updated = []
         for bot in bots:
@@ -247,14 +241,13 @@ class SetupAccountService:
             updated.append(row)
 
         try:
+            # 改名不是新账号：账号名下的绑定/群级覆盖/群列表/响应权/套装激活一起搬
+            # （只改 bots 表会让旧设置变成读不到的孤儿）
+            if target_id != old_id:
+                await self.config_service.rename_account(old_id, target_id)
             await self.config_service.save_bots(updated)
         except ValueError as e:
             raise SetupAccountError(str(e)) from e
-        if target_id != old_id:
-            await self._migrate_bindings(old_id, target_id)
-            await self.config_service.set_modules_default_enabled(
-                target_id, old_modules_default
-            )
         await self.config_service.set_kv(SETUP_ACCOUNT_KV, target_id)
         await self.bot_service.gateway.reconcile()
         self.connect_loop.stop(old_id)
@@ -269,29 +262,6 @@ class SetupAccountService:
             "connecting": bool(address) and self.connect_loop.running(target_id),
             "created": False,
         }
-
-    async def _migrate_bindings(self, old_id: str, new_id: str) -> None:
-        """把账号级绑定（Agent + 模块）搬到新 id 下；首启阶段通常为空。"""
-        capabilities = {AGENT_CAPABILITY}
-        registry = getattr(self.bot_service, "registry", None)
-        catalog = getattr(registry, "catalog_entries", None)
-        if callable(catalog):
-            try:
-                for entry in catalog():
-                    module_name = str(getattr(entry, "name", "") or "")
-                    if module_name:
-                        capabilities.add(module_name)
-            except Exception as e:  # noqa: BLE001 —— 编目不可用不影响账号保存
-                logging.getLogger(__name__).debug(f"[Setup] 读取模块编目失败（仅影响迁移范围）: {e}")
-        ops: list[ConfigOp] = []
-        for capability in sorted(capabilities):
-            row = self.config_service.get_binding(capability, "account", old_id)
-            if not row:
-                continue
-            ops.append(ConfigOp("binding", (capability, "account", new_id), dict(row)))
-            ops.append(ConfigOp("binding", (capability, "account", old_id), None))
-        if ops:
-            await self.config_service.apply_ops(ops)
 
     def should_retry(self, account_id: str) -> bool:
         """是否还需要后台重试连接。

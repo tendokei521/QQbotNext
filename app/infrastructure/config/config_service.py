@@ -141,6 +141,9 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
         await self._load_known_groups()
         await self._load_channel_overrides()
         await self._migrate_bindings_if_needed()
+        # 历史遗留：改名/删号曾只动 bots 表，别的作用域表留下读不到的孤儿行。
+        # 启动时清一次（清理前备份到 data/orphan-account-data.json）。
+        await self.purge_orphan_account_data()
 
     async def _ensure_schema(self) -> None:
         """老库补列：`conn_mode`（连接方向）/ `modules_default_enabled`。

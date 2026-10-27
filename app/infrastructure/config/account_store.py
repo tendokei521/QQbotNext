@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Sequence
 from typing import Any
@@ -234,6 +235,8 @@ class AccountStoreMixin:
             return False
         bots = [b for b in self.get_bots() if str(b["id"]) != str(account_id)]
         await self.save_bots(bots)   # 连带清掉 bot_accounts 快照
+        # 账号 id 是这些表的主键：不清理会留下"幽灵配置"（新账号复用同一 id 时被串上）
+        await self._delete_account_scoped_data(account_id)
         return True
 
     # ==================== 模块默认开关 ====================
@@ -268,6 +271,193 @@ class AccountStoreMixin:
             self._modules_default_off.discard(key)
         else:
             self._modules_default_off.add(key)
+
+    # ==================== 账号作用域数据（改名 / 删号 / 孤儿） ====================
+    #
+    # 账号 id 是下面这些数据的主键：
+    #   bindings(account) / channel_overrides / known_groups /
+    #   channel_policies.primary_account_id / account_active_bundle / bot_accounts
+    #
+    # 历史坑：改名只搬 bindings、删号只删 bots 行，其余数据会变成"根不上的孤儿"——
+    # 新 id 看不到旧设置；以后复用同一个 id 时又会被幽灵配置串上。统一收口到这里。
+
+    async def rename_account(self, old_id: str, new_id: str) -> dict:
+        """账号 id 改名：bots 行与**该账号名下所有数据**一起搬。
+
+        供首启向导"改账号 ID"使用；WebUI 的账号 id 本身不可改，没有第二个调用点。
+        """
+        old = str(old_id)
+        new = str(new_id)
+        if old == new:
+            return {"moved": False}
+        if old not in self._bots:
+            raise ValueError(f"账号不存在：{old_id}")
+        if new in self._bots:
+            raise ValueError(f"账号 id 已存在：{new_id}")
+        if normalize_account_id(new) != new:
+            raise ValueError(
+                f"账号 ID 不合法：{new_id!r}"
+                "（只能用字母、数字、下划线、连字符，以字母或数字开头，1-32 个字符）"
+            )
+        modules_default = self.get_modules_default_enabled(old)
+        # 先搬数据再改 bots：这一步失败时账号 id 还没变，调用方按"改名失败"处理即可
+        await self._move_account_scoped_data(old, new)
+        bots = self.get_bots()
+        for row in bots:
+            if str(row.get("id")) == old:
+                row["id"] = new
+        await self.save_bots(bots)
+        # 改名不是新建：模块默认开关跟过来（save_bots 会把新 id 当新账号 → 默认关）
+        await self.set_modules_default_enabled(new, modules_default)
+        return {"moved": True}
+
+    async def _move_account_scoped_data(self, old_id: str, new_id: str) -> None:
+        """把某账号名下的行从旧 id 搬到新 id（一个事务），并刷新内存缓存。"""
+        old, new = str(old_id), str(new_id)
+        sqls: list[tuple[str, Sequence[Any]]] = [
+            # 目标 id 可能残留历史孤儿 → 先清掉，避免主键冲突（孤儿本来就不可达）
+            ("DELETE FROM bindings WHERE scope_type = 'account' AND scope_id = ?", (new,)),
+            ("DELETE FROM channel_overrides WHERE account_id = ?", (new,)),
+            ("DELETE FROM known_groups WHERE account_id = ?", (new,)),
+            ("DELETE FROM account_active_bundle WHERE account_id = ?", (new,)),
+            ("DELETE FROM bot_accounts WHERE account_id = ?", (new,)),
+            # 搬
+            (
+                "UPDATE bindings SET scope_id = ? WHERE scope_type = 'account' AND scope_id = ?",
+                (new, old),
+            ),
+            ("UPDATE channel_overrides SET account_id = ? WHERE account_id = ?", (new, old)),
+            ("UPDATE known_groups SET account_id = ? WHERE account_id = ?", (new, old)),
+            ("UPDATE account_active_bundle SET account_id = ? WHERE account_id = ?", (new, old)),
+            ("UPDATE bot_accounts SET account_id = ? WHERE account_id = ?", (new, old)),
+            (
+                "UPDATE channel_policies SET primary_account_id = ? "
+                "WHERE primary_account_id = ?",
+                (new, old),
+            ),
+        ]
+        await self.db.run_in_transaction(sqls)
+        await self._load_bindings()
+        await self._load_channel_overrides()
+        await self._load_known_groups()
+        await self._load_channel_policies()
+        self._bot_accounts.pop(new, None)
+        snapshot = self._bot_accounts.pop(old, None)
+        if snapshot is not None:
+            self._bot_accounts[new] = snapshot
+
+    async def _delete_account_scoped_data(self, account_id: str) -> None:
+        """删掉某账号名下的行（删号 / 孤儿清理共用），并同步内存缓存。
+
+        群响应权（``channel_policies``）是**群级**配置，不整行删：只把指向该账号的
+        ``primary_account_id`` 置空，让它回落到 fallback 策略。
+        """
+        aid = str(account_id)
+        sqls: list[tuple[str, Sequence[Any]]] = [
+            ("DELETE FROM bindings WHERE scope_type = 'account' AND scope_id = ?", (aid,)),
+            ("DELETE FROM channel_overrides WHERE account_id = ?", (aid,)),
+            ("DELETE FROM known_groups WHERE account_id = ?", (aid,)),
+            ("DELETE FROM account_active_bundle WHERE account_id = ?", (aid,)),
+            ("DELETE FROM bot_accounts WHERE account_id = ?", (aid,)),
+            (
+                "UPDATE channel_policies SET primary_account_id = NULL "
+                "WHERE primary_account_id = ?",
+                (aid,),
+            ),
+        ]
+        await self.db.run_in_transaction(sqls)
+        for capability in list(self._bindings):
+            self._bindings[capability].pop(("account", aid), None)
+        for key in [key for key in self._channel_overrides if key[0] == aid]:
+            self._channel_overrides.pop(key, None)
+        for key in [key for key in self._known_groups if key[0] == aid]:
+            self._known_groups.pop(key, None)
+        for row in self._channel_policies.values():
+            if row.get("primary_account_id") == aid:
+                row["primary_account_id"] = None
+        self._bot_accounts.pop(aid, None)
+
+    async def purge_orphan_account_data(self) -> dict:
+        """清理「账号已不存在」的孤儿数据（启动时调用一次）。
+
+        只清理账号作用域的表，且**清理前把原始行备份**到
+        ``data/orphan-account-data.json``——这些行读不到但不该无声消失。
+        返回 ``{accounts, backup}``（没有孤儿时 accounts 为空）。
+        """
+        orphan_ids = await self._orphan_account_ids()
+        if not orphan_ids:
+            return {"accounts": [], "backup": None}
+
+        snapshot = await self._orphan_rows_snapshot(orphan_ids)
+        backup = self._write_orphan_backup(snapshot)
+        for account_id in orphan_ids:
+            await self._delete_account_scoped_data(account_id)
+        # 响应权里指向不存在账号、但该账号本身没有其他数据的引用也要置空
+        rows = [row for row in self._channel_policies.values()
+                if row.get("primary_account_id") and row["primary_account_id"] not in self._bots]
+        if rows:
+            await self.db.execute(
+                "UPDATE channel_policies SET primary_account_id = NULL "
+                "WHERE primary_account_id IS NOT NULL "
+                "AND primary_account_id NOT IN (SELECT account_id FROM bots)"
+            )
+            for row in rows:
+                row["primary_account_id"] = None
+        self.log.info(
+            f"[Config] 已清理孤儿账号数据: accounts={sorted(orphan_ids)} backup={backup}"
+        )
+        return {"accounts": sorted(orphan_ids), "backup": backup}
+
+    async def _orphan_account_ids(self) -> list[str]:
+        """找出"出现在账号作用域表里、但 bots 表没有"的账号 id。
+
+        只认**确定随账号走**的三张表：``channel_overrides`` / ``known_groups`` /
+        ``account_active_bundle``。
+
+        故意不碰 ``bindings`` 与 ``bot_accounts``：
+        - 旧版模块配置以 **QQ 号**为 key，迁移后可能还没有对应账号 id（清掉=丢老配置）；
+        - 登录快照可能是"先有记录、后建账号"的历史顺序，宁可不删也不误删。
+        这两张表由「删号」路径（`_delete_account_scoped_data`）精确清理。
+        """
+        orphan: set[str] = set()
+        for table in ("channel_overrides", "known_groups", "account_active_bundle"):
+            for row in await self.db.fetchall(f"SELECT DISTINCT account_id AS id FROM {table}"):
+                account_id = str(row["id"])
+                if account_id and account_id not in self._bots:
+                    orphan.add(account_id)
+        return sorted(orphan)
+
+    async def _orphan_rows_snapshot(self, account_ids: list[str]) -> dict:
+        """把待清理的行原样取出来（备份用）。"""
+        placeholders = ",".join("?" for _ in account_ids)
+        params = tuple(account_ids)
+        snapshot: dict[str, Any] = {"removed_at": int(time.time()), "accounts": account_ids}
+        for table, where in (
+            ("bindings", "scope_type = 'account' AND scope_id IN"),
+            ("channel_overrides", "account_id IN"),
+            ("known_groups", "account_id IN"),
+            ("account_active_bundle", "account_id IN"),
+            ("bot_accounts", "account_id IN"),
+        ):
+            rows = await self.db.fetchall(
+                f"SELECT * FROM {table} WHERE {where} ({placeholders})", params
+            )
+            snapshot[table] = [dict(row) for row in rows]
+        return snapshot
+
+    def _write_orphan_backup(self, snapshot: dict) -> str | None:
+        """备份到 ``data/orphan-account-data.json``；写失败只告警，不阻断清理。"""
+        path = self.root / "data" / "orphan-account-data.json"
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(snapshot, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+            return str(path)
+        except Exception as e:  # noqa: BLE001 —— 备份失败不该让启动失败
+            self.log.warning(f"[Config] 孤儿账号数据备份失败（继续清理）: {e}")
+            return None
 
     # ==================== 上次登录账号快照 ====================
     def get_bot_accounts(self) -> dict[str, dict]:

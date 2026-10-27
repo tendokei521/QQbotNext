@@ -107,6 +107,10 @@ async def test_upsert_allows_changing_account_id(service, config_service):
     svc, bots = service
     first = await svc.upsert(account_id="default", name="主号", ws_url=LISTEN_ADDRESS)
     await config_service.save_module_config("agent", "default", {"group_enable": True})
+    await config_service.save_channel_override("default", "agent", "111", enabled=False)
+    await config_service.upsert_known_groups(
+        "default", [{"group_id": 111, "group_name": "前端交流群", "member_count": 24}]
+    )
 
     renamed = await svc.upsert(account_id="main", name="主号", ws_url=LISTEN_ADDRESS)
 
@@ -115,6 +119,10 @@ async def test_upsert_allows_changing_account_id(service, config_service):
     rows = config_service.get_bots()
     assert [row["id"] for row in rows] == ["main"], "改 ID 不应留下旧行"
     assert config_service.get_module_config("agent", "main")["group_enable"] is True, "配置要跟着搬"
+    # 账号作用域数据也要搬（群级覆盖 / 群列表），否则页面全变成「继承」
+    assert config_service.get_channel_override("main", "agent", "111")["enabled"] is False
+    assert [g["group_id"] for g in config_service.list_known_groups("main")] == ["111"]
+    assert config_service.get_channel_override("default", "agent", "111") is None
 
 
 async def test_rename_keeps_modules_default_flag(service, config_service):

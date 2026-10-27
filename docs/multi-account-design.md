@@ -130,6 +130,21 @@ CREATE TABLE IF NOT EXISTS channel_policies (
    - 无 `service_bot_id` 的群 → 不写（保持旧行为：不过滤 = `all`）。
 4. 迁移后 `single_service` / `multi_group` 键**保留但只读**（供回滚/兼容 API 查询），UI 不再写。
 
+### 4.1 账号作用域数据的生命周期（改名 / 删号 / 孤儿）
+
+账号 id 是 `bindings(account)` / `channel_overrides` / `known_groups` /
+`channel_policies.primary_account_id` / `account_active_bundle` / `bot_accounts` 的主键。
+**只改 `bots` 表是不够的**：
+
+| 操作 | 必须做什么 | 实现 |
+|---|---|---|
+| 账号 id 改名 | 上表全部行从旧 id 搬到新 id；`channel_policies.primary_account_id` 跟着改；`modules_default_enabled` 保留 | `ConfigService.rename_account()` |
+| 删号 | 上表行全删；`channel_policies.primary_account_id` 置空（群级策略保留，回落到 fallback） | `ConfigService.delete_bot()` |
+| 历史孤儿 | 启动时清理「`channel_overrides` / `known_groups` / `account_active_bundle` 里存在、`bots` 里没有」的 id；清理前备份到 `data/orphan-account-data.json` | `purge_orphan_account_data()`（`init()` 末尾） |
+
+> 孤儿清理**不动** `bindings` 与 `bot_accounts`：旧版模块配置以 QQ 号为 key，登录快照也可能
+> 先于账号存在——宁可少删，不误删。
+
 ---
 
 ## 5. 解析算法
