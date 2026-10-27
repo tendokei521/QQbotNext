@@ -19,7 +19,13 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from app.infrastructure.onebot.endpoint import normalize_mode, suggest_address
+from app.infrastructure.onebot.endpoint import (
+    EndpointError,
+    is_reverse,
+    normalize_mode,
+    parse_endpoint,
+    suggest_address,
+)
 from app.webui.api.deps import get_bot_service, get_config_service
 
 router = APIRouter(tags=["bots"])
@@ -31,6 +37,31 @@ def _ok(message: str, **extra):
 
 def _err(status: int, message: str):
     return JSONResponse(status_code=status, content={"status": "error", "message": message})
+
+
+def _validate_endpoints(bots: list) -> list[dict]:
+    """校验账号 ``ws_url`` 的形态，返回 ``[{id, error}]``（空列表 = 全部可用）。
+
+    为什么放在 API 层而不是 ``save_bots``：``save_bots`` 还服务脚本/测试等
+    程序化调用，那里塞入严格校验会误伤"先存配置、后填地址"的用法；而 WebUI
+    的保存/新增是用户输入的唯一入口，必须当场拦下。
+
+    空地址不算错误（新账号可能还没填）；**填了就必须能用**。反向模式额外要求
+    写明端口——监听地址没有端口，对端根本无从填写。
+    """
+    problems: list[dict] = []
+    for index, bot in enumerate(bots):
+        if not isinstance(bot, dict):
+            continue
+        raw = str(bot.get("ws_url") or "").strip()
+        if not raw:
+            continue
+        mode = normalize_mode(bot.get("conn_mode"))
+        try:
+            parse_endpoint(raw, require_port=is_reverse(mode))
+        except EndpointError as e:
+            problems.append({"id": str(bot.get("id") or f"#{index + 1}"), "error": str(e)})
+    return problems
 
 
 @router.get("/bots")
@@ -106,6 +137,11 @@ async def api_bots_config_save(request: Request, config_service=Depends(get_conf
     if not isinstance(bots, list):
         # 空数组合法（= 用户主动删光所有账号），但**缺字段**和**类型错误**必须拒绝
         return _err(400, "请求体缺少 bots 数组，未改动任何账号配置")
+    problems = _validate_endpoints(bots)
+    if problems:
+        detail = "；".join(f"{p['id']}: {p['error']}" for p in problems[:3])
+        more = f"（共 {len(problems)} 个）" if len(problems) > 3 else ""
+        return _err(400, f"连接地址不可用，未改动任何账号配置{more}：{detail}")
     try:
         await config_service.save_bots(bots)
     except ValueError as e:
@@ -140,6 +176,11 @@ async def api_bots_config_add(
     ws_url = str(body.get("ws_url") or "").strip()
     if not ws_url:
         ws_url = suggest_address(mode, [b.get("ws_url", "") for b in cfg_service.get_bots()])
+    # 用户显式给了地址就先校验：新建即报错，比"卡片存下了但连不上"好排查
+    try:
+        parse_endpoint(ws_url, require_port=is_reverse(mode))
+    except EndpointError as e:
+        return _err(400, f"连接地址不可用: {e}")
     try:
         # Reuse BotService.add_bot: persist the config AND register a gateway connection
         # (status "disconnected") at once, so /api/bots (status list) includes the new
