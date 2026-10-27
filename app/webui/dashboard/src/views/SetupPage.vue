@@ -24,13 +24,14 @@ const STEPS = ['连接账号', '配置模型', '人格设定', '完成']
 const busy = ref('')
 
 // ---------- 第 1 步：连接（向导只维护一个默认账号） ----------
-// 本地监听（反向）= 预填监听地址；向外连接（正向）= 不填，等用户填协议端地址
-const DEFAULT_LISTEN_ADDRESS = 'ws://127.0.0.1:4001/'
+// 默认监听地址由后端 /api/setup/default-account 统一给出（与账号管理同源）；
+// 向外连接（正向）不预填，等用户填协议端地址。
+const defaultListenAddress = ref('')
 const account = reactive({
   id: '',
   name: '',
   conn_mode: 'reverse' as 'reverse' | 'forward',
-  ws_url: DEFAULT_LISTEN_ADDRESS,
+  ws_url: '',
   access_token: '',
 })
 // 后台每 2s 刷新一次「是否已连接」，前端不显示重试次数之类的过程状态
@@ -81,6 +82,9 @@ async function saveAccount(quiet = false) {
   account.id = res.data.account_id
   accountSaved.value = true
   accountConnected.value = Boolean(res.data.connected)
+  // 让顶部账号选择器/后续页面拿到这个账号（否则向导走完仍是"未选账号"）
+  bots.selectBot(res.data.account_id)
+  await bots.fetchBots()
   if (!quiet) notify.push('已保存，正在后台尝试连接', 'success')
 }
 
@@ -95,7 +99,7 @@ function scheduleSave() {
 
 function onModeChange(mode: 'reverse' | 'forward') {
   account.conn_mode = mode
-  account.ws_url = mode === 'reverse' ? DEFAULT_LISTEN_ADDRESS : ''
+  account.ws_url = mode === 'reverse' ? defaultListenAddress.value : ''
   scheduleSave()
 }
 
@@ -113,6 +117,7 @@ async function refreshAccount() {
   try {
     const res = await http.get('/api/setup/default-account')
     const current = res.data?.account
+    defaultListenAddress.value = String(res.data?.default_address || '')
     accountConnected.value = Boolean(current?.connected)
     if (current && !accountSaved.value) {
       const raw = String(current.ws_url || '')
@@ -120,11 +125,14 @@ async function refreshAccount() {
       account.id = current.account_id
       account.name = current.name === current.account_id ? '' : current.name
       account.conn_mode = current.conn_mode === 'forward' ? 'forward' : 'reverse'
-      account.ws_url = base || (account.conn_mode === 'reverse' ? DEFAULT_LISTEN_ADDRESS : '')
+      account.ws_url = base || (account.conn_mode === 'reverse' ? defaultListenAddress.value : '')
       if (!account.access_token && query?.includes('access_token=')) {
         account.access_token = query.split('access_token=')[1]?.split('&')[0] || ''
       }
       accountSaved.value = true
+    } else if (!current && !accountSaved.value && account.conn_mode === 'reverse' && !account.ws_url) {
+      // 还没有账号：先把后端给的监听地址预填出来（不创建账号，用户填 ID/名称才保存）
+      account.ws_url = defaultListenAddress.value
     }
   } catch {
     // 刷新失败保留上一次状态，下一轮再试

@@ -76,14 +76,23 @@ async def api_setup_default_account(
     bot_service=Depends(get_bot_service),
 ):
     """向导第一步：读当前默认账号（没有则返回 null）+ 是否已连接。"""
-    from app.application.setup_account import DEFAULT_LISTEN_ADDRESS, SetupAccountService
+    from app.application.setup_account import SetupAccountService
+    from app.infrastructure.onebot.endpoint import suggest_address
 
     service = request.app.state.container.get(SetupAccountService)
     current = await service.current()
     if current and current.get("ws_url") and not current["connected"]:
         # 已配置且填了地址但还没连上 → 继续后台每 2s 重试（打开页面即可，不用点按钮）
         service.connect_loop.ensure(current["account_id"])
-    return _ok("ok", account=current, default_address=DEFAULT_LISTEN_ADDRESS)
+    # 默认监听地址与账号管理同源：按已有账号避让端口，不在这里维护第二份默认值
+    current_id = str(current["account_id"]) if current else ""
+    existing = [
+        str(bot.get("ws_url") or "")
+        for bot in config_service.get_bots()
+        if str(bot.get("id")) != current_id
+    ]
+    default_address = suggest_address("reverse", existing)
+    return _ok("ok", account=current, default_address=default_address)
 
 
 @router.post("/setup/default-account")

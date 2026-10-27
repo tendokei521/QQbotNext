@@ -17,12 +17,14 @@ import asyncio
 import logging
 
 from app.infrastructure.config.config_service import ConfigOp
-from app.infrastructure.onebot.endpoint import EndpointError, is_reverse, normalize_mode, parse_endpoint
+from app.infrastructure.onebot.endpoint import (
+    EndpointError,
+    is_reverse,
+    normalize_mode,
+    parse_endpoint,
+    suggest_address,
+)
 
-#: 本地监听（反向 WebSocket）的默认地址：选「本地监听」就预填这个
-DEFAULT_LISTEN_ADDRESS = "ws://127.0.0.1:4001/"
-#: 向外连接（正向 WebSocket）默认不填地址，由用户填协议端暴露的地址
-DEFAULT_FORWARD_ADDRESS = ""
 #: 后台连接重试间隔（秒）
 DEFAULT_CONNECT_INTERVAL = 2.0
 #: kv 里记录"向导管理的那个账号"
@@ -36,15 +38,15 @@ class SetupAccountError(ValueError):
 
 
 def normalize_listen_address(value: str, conn_mode: str = "reverse") -> str:
-    """按连接方向整理地址。
+    """把用户填的地址补成 ws URL。
 
-    - 本地监听（反向）：留空 = 默认 ``ws://127.0.0.1:4001/``；
-    - 向外连接（正向）：**不预填**，留空就保持空（等用户填协议端地址）；
-    - 两种模式都接受省略 scheme 的写法（``127.0.0.1:4001/``）。
+    默认地址不在这里维护：反向留空时由 ``upsert`` 调用
+    ``endpoint.suggest_address``（与账号管理同一来源）按已有账号避让端口自动分配；
+    正向留空表示"等用户填对端地址"，保持空串。
+
+    省略 scheme 的写法也接受：``127.0.0.1:3001/onebot/v11/ws``。
     """
     text = str(value or "").strip()
-    if not text:
-        text = DEFAULT_LISTEN_ADDRESS if is_reverse(conn_mode) else DEFAULT_FORWARD_ADDRESS
     if text and "://" not in text:
         text = "ws://" + text.lstrip("/")
     return text
@@ -73,7 +75,12 @@ class SetupConnectLoop:
     async def _run(self, account_id: str) -> None:
         try:
             while True:
+                if not self.bot_service.account_exists(account_id):
+                    return  # 账号已删除：别对着空账号每 2s 空转
                 if self.bot_service.is_connected(account_id):
+                    return
+                if self.bot_service.is_listening(account_id):
+                    # 反向监听已就绪：端口常驻，不需要继续"连接"（否则每 2s 重复广播状态）
                     return
                 await self.bot_service.connect(account_id)
                 await asyncio.sleep(self.interval)
@@ -143,16 +150,28 @@ class SetupAccountService:
         """保存向导账号：没有就建一个，有就改它（**永远不新增第二个**）。"""
         requested_id = str(account_id or "").strip()
         mode = normalize_mode(conn_mode)
+
+        bots = self.config_service.get_bots()
+        current = await self.current()
+        current_id = str(current["account_id"]) if current else ""
+
+        # 默认地址与账号管理同源（endpoint.suggest_address），这里不再维护第二份默认值：
+        # - 反向必须能监听 → 留空时按已有账号避让端口自动分配；
+        # - 正向留空 = 等用户填对端地址（不预填本地地址）。
         address = normalize_listen_address(ws_url, mode)
+        if not address and is_reverse(mode):
+            existing = [
+                str(bot.get("ws_url") or "")
+                for bot in bots
+                if str(bot.get("id")) != current_id
+            ]
+            address = suggest_address(mode, existing)
         if address:
             try:
                 parse_endpoint(address, require_port=is_reverse(mode))
             except EndpointError as e:
                 label = "监听地址" if is_reverse(mode) else "连接地址"
                 raise SetupAccountError(f"{label}不可用：{e}") from e
-
-        bots = self.config_service.get_bots()
-        current = await self.current()
         if current is None:
             if len(bots) > 1:
                 raise SetupAccountError(

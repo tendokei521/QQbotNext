@@ -126,13 +126,13 @@ async def test_api_default_account_is_unique(container, config_service):
 
     client = TestClient(create_app(container))
     first = client.post("/api/setup/default-account", json={
-        "id": "default", "name": "主号", "ws_url": "ws://127.0.0.1:4001/",
+        "id": "default", "name": "主号", "ws_url": "ws://127.0.0.1:3001/onebot/v11/ws",
     })
     assert first.status_code == 200, first.text
     assert first.json()["account_id"] == "default"
 
     second = client.post("/api/setup/default-account", json={
-        "id": "default", "name": "改个名", "ws_url": "ws://127.0.0.1:4001/",
+        "id": "default", "name": "改个名", "ws_url": "ws://127.0.0.1:3001/onebot/v11/ws",
     })
     assert second.status_code == 200, second.text
     assert len(config_service.get_bots()) == 1
@@ -140,4 +140,4 @@ async def test_api_default_account_is_unique(container, config_service):
     listed = client.get("/api/setup/default-account")
     assert listed.status_code == 200
     assert listed.json()["account"]["name"] == "改个名"
-    assert listed.json()["default_address"] == "ws://127.0.0.1:4001/"
+    assert listed.json()["default_address"] == "ws://127.0.0.1:3001/onebot/v11/ws"

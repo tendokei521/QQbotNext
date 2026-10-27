@@ -12,11 +12,13 @@ import asyncio
 import pytest
 
 from app.application.setup_account import (
-    DEFAULT_LISTEN_ADDRESS,
     SetupAccountError,
     SetupAccountService,
     normalize_listen_address,
 )
+
+#: 默认监听地址的唯一来源是 endpoint.suggest_address（3001 + OneBot v11 反向路径）
+LISTEN_ADDRESS = "ws://127.0.0.1:3001/onebot/v11/ws"
 
 
 class FakeBotService:
@@ -27,6 +29,7 @@ class FakeBotService:
         self.connects_needed = connects_needed
         self.connect_calls: list[str] = []
         self.connected: set[str] = set()
+        self.listening: set[str] = set()
         self.gateway = type("G", (), {"reconcile": self._reconcile})()
         self.registry = type("R", (), {"catalog_entries": staticmethod(lambda: [])})()
 
@@ -35,6 +38,12 @@ class FakeBotService:
 
     def is_connected(self, account_id: str) -> bool:
         return account_id in self.connected
+
+    def is_listening(self, account_id: str) -> bool:
+        return account_id in self.listening
+
+    def account_exists(self, account_id: str) -> bool:
+        return any(str(bot.get("id")) == str(account_id) for bot in self.config_service.get_bots())
 
     async def add_bot(self, ws_url, owner_id, auto_connect, conn_mode="forward",
                       account_id=None, name=""):
@@ -63,10 +72,10 @@ def service(container, config_service):
 
 
 def test_normalize_listen_address():
-    # 本地监听：留空 → 默认监听地址；省 scheme 也接受
-    assert normalize_listen_address("") == DEFAULT_LISTEN_ADDRESS
-    assert DEFAULT_LISTEN_ADDRESS == "ws://127.0.0.1:4001/"
-    assert normalize_listen_address("127.0.0.1:4001/") == "ws://127.0.0.1:4001/"
+    # 地址整理只补 scheme；默认地址由 endpoint.suggest_address 负责，不在这里复制
+    assert normalize_listen_address("") == ""
+    assert normalize_listen_address("ws://127.0.0.1:3001/onebot/v11/ws") == LISTEN_ADDRESS
+    assert normalize_listen_address("127.0.0.1:3001/onebot/v11/ws") == LISTEN_ADDRESS
     # 向外连接：留空保持空（不预填）
     assert normalize_listen_address("", "forward") == ""
     assert normalize_listen_address("127.0.0.1:3001/", "forward") == "ws://127.0.0.1:3001/"
@@ -75,7 +84,7 @@ def test_normalize_listen_address():
 async def test_upsert_creates_exactly_one_account(service, config_service):
     svc, _bots = service
 
-    first = await svc.upsert(name="主号", ws_url=DEFAULT_LISTEN_ADDRESS)
+    first = await svc.upsert(name="主号", ws_url=LISTEN_ADDRESS)
     second = await svc.upsert(name="改个名", ws_url="127.0.0.1:5001/ws")
     third = await svc.upsert(name="再改", ws_url="127.0.0.1:5001/ws")
 
@@ -91,10 +100,10 @@ async def test_upsert_creates_exactly_one_account(service, config_service):
 
 async def test_upsert_allows_changing_account_id(service, config_service):
     svc, bots = service
-    first = await svc.upsert(account_id="default", name="主号", ws_url=DEFAULT_LISTEN_ADDRESS)
+    first = await svc.upsert(account_id="default", name="主号", ws_url=LISTEN_ADDRESS)
     await config_service.save_module_config("agent", "default", {"group_enable": True})
 
-    renamed = await svc.upsert(account_id="main", name="主号", ws_url=DEFAULT_LISTEN_ADDRESS)
+    renamed = await svc.upsert(account_id="main", name="主号", ws_url=LISTEN_ADDRESS)
 
     assert first["account_id"] == "default"
     assert renamed["account_id"] == "main"
@@ -107,7 +116,7 @@ async def test_rename_keeps_modules_default_flag(service, config_service):
     """改 ID 不是新账号：模块默认开关要跟着搬（老账号不能被静默变成「默认关」）。"""
     svc, _bots = service
     await config_service.save_bots(
-        [{"id": "old", "name": "老号", "ws_url": DEFAULT_LISTEN_ADDRESS}]
+        [{"id": "old", "name": "老号", "ws_url": LISTEN_ADDRESS}]
     )
     # 模拟升级前的老账号：模块默认开
     await config_service.set_modules_default_enabled("old", True)
@@ -148,7 +157,7 @@ async def test_upsert_rejects_bad_address(service):
 
 async def test_connect_loop_retries_until_connected(service):
     svc, bots = service
-    result = await svc.upsert(name="主号", ws_url=DEFAULT_LISTEN_ADDRESS)
+    result = await svc.upsert(name="主号", ws_url=LISTEN_ADDRESS)
 
     for _ in range(50):
         if bots.is_connected(result["account_id"]):
@@ -206,11 +215,38 @@ async def test_mode_switch_keeps_single_account(service, config_service):
     rows = config_service.get_bots()
     assert len(rows) == 1, "切换连接方式不能多出账号"
     assert rows[0]["conn_mode"] == "reverse"
-    assert rows[0]["ws_url"].startswith("ws://127.0.0.1:4001/")
+    assert rows[0]["ws_url"].startswith("ws://127.0.0.1:3001/onebot/v11/ws")
 
 
 async def test_reverse_default_address_used_when_blank(service, config_service):
     svc, _bots = service
     result = await svc.upsert(name="主号", conn_mode="reverse", ws_url="")
-    assert result["ws_url"] == DEFAULT_LISTEN_ADDRESS
-    assert config_service.get_bots()[0]["ws_url"].startswith("ws://127.0.0.1:4001/")
+    assert result["ws_url"] == LISTEN_ADDRESS
+    assert config_service.get_bots()[0]["ws_url"].startswith("ws://127.0.0.1:3001/onebot/v11/ws")
+
+
+async def test_connect_loop_stops_once_reverse_listener_is_up(service):
+    """反向监听一起来就停：端口常驻，继续每 2s connect 只会重复广播状态。"""
+    svc, bots = service
+    result = await svc.upsert(name="主号", conn_mode="reverse")
+
+    bots.listening.add(result["account_id"])
+    calls_before = len(bots.connect_calls)
+    await asyncio.sleep(0.05)
+
+    assert len(bots.connect_calls) == calls_before, "监听就绪后不该再发起连接"
+    assert svc.connect_loop.running(result["account_id"]) is False
+
+
+async def test_connect_loop_stops_when_account_is_deleted(service, config_service):
+    """账号被删后循环要退出，不能对着不存在的账号每 2s 空转。"""
+    svc, bots = service
+    result = await svc.upsert(name="主号", conn_mode="forward", ws_url="ws://127.0.0.1:9/")
+    await config_service.save_bots([])
+
+    for _ in range(50):
+        if not svc.connect_loop.running(result["account_id"]):
+            break
+        await asyncio.sleep(0.01)
+
+    assert svc.connect_loop.running(result["account_id"]) is False
