@@ -116,6 +116,69 @@ def test_runtime_without_config_service_falls_back(monkeypatch):
     assert (enabled, source) == (True, "default")
 
 
+# ==================== R3：群级规则（触发方式 / 免打扰 / 用户例外）====================
+
+
+def test_effective_config_applies_channel_trigger_override():
+    runtime = _Runtime({"group_enable": True, "trigger_at": True, "trigger_keyword": []}, {
+        ("acc1", "agent", "111"): {
+            "enabled": None,
+            "config": {"trigger_at": False, "trigger_keyword": ["小助手"]},
+            "permission": {},
+        },
+    })
+    pipeline = LlmPipeline(runtime)
+
+    effective = pipeline._effective_config(_group_event(111), runtime.config)
+
+    assert effective["trigger_at"] is False
+    assert effective["trigger_keyword"] == ["小助手"]
+    # 未覆盖的群仍用账号级
+    untouched = pipeline._effective_config(_group_event(222), runtime.config)
+    assert untouched["trigger_at"] is True
+
+
+def test_effective_config_keeps_account_defaults_without_policy():
+    class _Bare:
+        bot_id = "acc1"
+        config = _Config({"group_enable": True, "trigger_at": True})
+
+    pipeline = LlmPipeline(_Bare())
+    effective = pipeline._effective_config(_group_event(111), pipeline.runtime.config)
+    assert effective["trigger_at"] is True
+
+
+def _policy(user_mode="", user_list=None):
+    from app.domain.dialogue_policy import resolve_policy
+
+    return resolve_policy(
+        "agent",
+        account_id="acc1",
+        channel_id="111",
+        defaults={},
+        account_row={"permission": {"user_mode": user_mode, "user_list": user_list or []}},
+    )
+
+
+def test_user_excluded_blacklist_and_whitelist():
+    blacklist = _policy("blacklist", ["42"])
+    event = SimpleNamespace(event_type="message_group", user_id=42)
+    assert LlmPipeline._user_excluded(blacklist, event) == (True, "blacklist")
+
+    other = SimpleNamespace(event_type="message_group", user_id=7)
+    assert LlmPipeline._user_excluded(blacklist, other) == (False, "")
+
+    whitelist = _policy("whitelist", ["7"])
+    assert LlmPipeline._user_excluded(whitelist, other) == (False, "")
+    assert LlmPipeline._user_excluded(whitelist, event) == (True, "not_in_whitelist")
+
+
+def test_user_excluded_ignores_empty_or_unknown_mode():
+    event = SimpleNamespace(event_type="message_group", user_id=42)
+    assert LlmPipeline._user_excluded(None, event) == (False, "")
+    assert LlmPipeline._user_excluded(_policy("", []), event) == (False, "")
+
+
 def test_pipeline_uses_scene_gate():
     """静态守卫：`_run` 的场景判定必须走 `_scene_enabled`（别再直读 group_enable）。"""
     src = Path("app/agent/loop/pipeline.py").read_text(encoding="utf-8")

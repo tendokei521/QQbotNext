@@ -42,7 +42,7 @@ SCOPE_OVERRIDABLE: dict[str, tuple[str, ...]] = {
         "message_debounce_seconds",   # 消息抖动窗口
         "message_debounce_max_wait",  # 抖动最长等待
         "interrupt_enable",       # 新消息是否打断旧回复
-        "outbound_directive_enable",  # 是否允许 [reply]/[@QQ]
+        "quiet_hours",            # 免打扰时段（"23:00-08:00"，空=不启用）
     ),
 }
 
@@ -57,6 +57,92 @@ def is_overridable(capability: str, key: str) -> bool:
 
 def overridable_keys(capability: str) -> tuple[str, ...]:
     return SCOPE_OVERRIDABLE.get(str(capability), ())
+
+
+# ==================== 免打扰时段（quiet_hours） ====================
+#
+# 格式：``"HH:MM-HH:MM"``（如 ``23:00-08:00``，允许跨零点）；空串 = 不启用。
+# 这里只做纯计算：解析/合法性/是否命中；时区一律用本机时间（与其它配置口径一致）。
+
+
+def _parse_hhmm(value: str) -> int | None:
+    """``"HH:MM"`` → 当日分钟数；格式不对返回 None。"""
+    text = str(value or "").strip()
+    if len(text) != 5 or text[2] != ":":
+        return None
+    try:
+        hour = int(text[:2])
+        minute = int(text[3:])
+    except ValueError:
+        return None
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None
+    return hour * 60 + minute
+
+
+def valid_quiet_hours(window: object) -> bool:
+    """免打扰时段是否合法（空串视为合法 = 不启用）。"""
+    text = str(window or "").strip()
+    if not text:
+        return True
+    parts = text.split("-")
+    if len(parts) != 2:
+        return False
+    return _parse_hhmm(parts[0]) is not None and _parse_hhmm(parts[1]) is not None
+
+
+def in_quiet_hours(window: object, now_minutes: int | None = None) -> bool:
+    """当前时刻是否落在免打扰时段内。
+
+    ``now_minutes`` 可注入（测试/预览用）；缺省取本机当前时间。
+    起止相同视为空窗口（不静默）；非法格式按"不静默"处理（否则写错一次就永久沉默）。
+    """
+    text = str(window or "").strip()
+    if not text or not valid_quiet_hours(text):
+        return False
+    if now_minutes is None:
+        from datetime import datetime
+
+        now = datetime.now()
+        now_minutes = now.hour * 60 + now.minute
+    start_text, end_text = text.split("-")
+    start = _parse_hhmm(start_text)
+    end = _parse_hhmm(end_text)
+    if start is None or end is None or start == end:
+        return False
+    current = int(now_minutes) % (24 * 60)
+    if start < end:
+        return start <= current < end
+    # 跨零点：23:00-08:00 = [23:00, 24:00) ∪ [00:00, 08:00)
+    return current >= start or current < end
+
+
+# ==================== 覆盖值校验 ====================
+
+
+def validate_override_values(config: Mapping[str, Any] | None) -> list[str]:
+    """校验一批覆盖值，返回人类可读错误（空列表 = 合法）。
+
+    白名单只解决"哪些键能覆盖"，不解决"值长什么样"；这里补上后者，
+    避免把 ``quiet_hours="晚上"`` 这类值写进库、运行时静默失效。
+    """
+    errors: list[str] = []
+    for key, value in (config or {}).items():
+        if key == "quiet_hours":
+            if not valid_quiet_hours(value):
+                errors.append("免打扰时段格式应为 HH:MM-HH:MM（如 23:00-08:00）")
+        elif key in ("trigger_at", "interrupt_enable"):
+            if not isinstance(value, bool):
+                errors.append(f"「{key}」应为 true/false")
+        elif key == "trigger_keyword":
+            if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+                errors.append("触发关键词应为字符串数组")
+            elif any(not item.strip() for item in value):
+                errors.append("触发关键词不能为空字符串")
+        elif key in ("reply_cooldown", "message_debounce_seconds", "message_debounce_max_wait"):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or float(value) < 0:
+                errors.append(f"「{key}」应为 ≥0 的数字")
+    return errors
 
 
 @dataclass(frozen=True)

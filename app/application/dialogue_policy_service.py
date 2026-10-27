@@ -23,6 +23,7 @@ from app.domain.dialogue_policy import (
     ResolvedPolicy,
     is_overridable,
     resolve_policy,
+    validate_override_values,
 )
 
 DEFAULT_CAPABILITY = "agent"
@@ -138,6 +139,10 @@ class DialoguePolicyService:
                     "POLICY_KEY_NOT_OVERRIDABLE",
                     f"「{key}」不是可覆盖的权限项。可覆盖项：{', '.join(PERMISSION_KEYS)}",
                 )
+        # 白名单只管"哪些键"，值合不合法要单独校验（否则会写进库、运行时静默失效）
+        value_errors = validate_override_values(config)
+        if value_errors:
+            raise PolicyError("POLICY_BAD_VALUE", "；".join(value_errors))
 
     async def update(
         self,

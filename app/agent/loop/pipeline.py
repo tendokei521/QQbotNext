@@ -23,7 +23,11 @@ from app.agent.loop.locks import SessionLockManager
 from app.agent.loop.pool import LlmPool, merge_debounced_texts
 from app.application.dialogue_policy_service import DialoguePolicyService
 from app.core.skip_log import log_skip
+from app.domain.dialogue_policy import in_quiet_hours
 from app.domain.message import Message
+
+#: 「配置里没有这个键」的哨兵（区分"没配"与"配了 None"）
+_MISSING = object()
 
 
 class LlmPipeline:
@@ -76,6 +80,44 @@ class LlmPipeline:
         if getattr(event, "event_type", "") == "message_group":
             return bool(config.get("group_enable", False)), "default"
         return bool(config.get("private_enable", True)), "default"
+
+    def _effective_config(self, event, config) -> dict:
+        """账号级配置 + 群级覆盖后的生效配置（只含可覆盖键）。
+
+        返回**普通 dict**（不假设 config 是 dict 还是 AgentConfig 这类映射对象），
+        且只收白名单键——调用方拿到的就是"本轮真正生效的那几个值"。
+        """
+        from app.domain.dialogue_policy import overridable_keys
+
+        base: dict = {}
+        getter = getattr(config, "get", None)
+        if callable(getter):
+            for key in overridable_keys("agent"):
+                value = getter(key, _MISSING)
+                if value is not _MISSING:
+                    base[key] = value
+        policy = self._resolved_policy(event)
+        if policy is not None and policy.config:
+            base.update(policy.config)
+        return base
+
+    @staticmethod
+    def _user_excluded(policy, event) -> tuple[bool, str]:
+        """群级用户例外：``user_mode/user_list``（黑名单命中 / 白名单未命中）。"""
+        if policy is None:
+            return False, ""
+        permission = getattr(policy, "permission", {}) or {}
+        mode = str(permission.get("user_mode") or "").strip()
+        values = permission.get("user_list")
+        if mode not in ("blacklist", "whitelist") or not isinstance(values, list):
+            return False, ""
+        user_id = str(getattr(event, "user_id", "") or "")
+        listed = bool(user_id) and user_id in {str(item).strip() for item in values}
+        if mode == "blacklist" and listed:
+            return True, "blacklist"
+        if mode == "whitelist" and not listed:
+            return True, "not_in_whitelist"
+        return False, ""
 
     def submit(self, event) -> asyncio.Task | None:
         """提交一个 LLM 处理任务（非阻塞）。"""
@@ -216,7 +258,7 @@ class LlmPipeline:
             except Exception:  # noqa: BLE001 —— 判定失败按"不打断"处理，保守优先
                 return False
 
-        config = self.runtime.config
+        config = self._effective_config(event, self.runtime.config)
         from app.domain.trigger import check_trigger
 
         try:
@@ -320,7 +362,8 @@ class LlmPipeline:
 
             # 群聊必须满足触发条件（@ 或关键词），否则不进入 LLM 流水线
             if ctx.event.event_type == "message_group":
-                config = self.runtime.config
+                # 触发方式可被群级覆盖（"群 A 只回 @、群 B 只认关键词"）
+                config = self._effective_config(ctx.event, self.runtime.config)
                 from app.domain.trigger import check_trigger
 
                 triggered, is_at, user_text = check_trigger(
@@ -374,6 +417,29 @@ class LlmPipeline:
                         hint="在「Agent → 基础配置 → 响应场景」打开「私聊回复」",
                     )
                     return
+
+            # 群级规则：触发方式之外的"什么时候不回 / 谁不能触发"
+            effective = self._effective_config(ctx.event, config)
+            quiet = str(effective.get("quiet_hours") or "").strip()
+            if in_quiet_hours(quiet):
+                log_skip(
+                    account_id,
+                    "quiet_hours",
+                    f"window={quiet} · group={group_id}",
+                    hint="在「权限与回复 → 高级规则」调整免打扰时段",
+                )
+                return
+            excluded, exclude_reason = self._user_excluded(
+                self._resolved_policy(ctx.event), ctx.event
+            )
+            if excluded:
+                log_skip(
+                    account_id,
+                    "user_excluded",
+                    f"user={getattr(ctx.event, 'user_id', '?')} · reason={exclude_reason}",
+                    hint="在「权限与回复 → 高级规则」调整用户例外名单",
+                )
+                return
                 # 私聊纯图片同样放行（图片内容由多模态链路承载）
                 if not ctx.user_text.strip() and not has_image:
                     return
@@ -388,8 +454,8 @@ class LlmPipeline:
             # 四次回复——观感就是「一条一条挨个回」。开启抖动后由 LlmPool 只放行最新
             # Job，被取代的 Job 在这里返回 False 直接退出，它们的文本已攒在
             # _pending_texts 里，由存活 Job 取出合并。
-            debounce = float(config.get("message_debounce_seconds", 0) or 0)
-            max_wait = float(config.get("message_debounce_max_wait", 0) or 0) if debounce > 0 else 0.0
+            debounce = float(effective.get("message_debounce_seconds", 0) or 0)
+            max_wait = float(effective.get("message_debounce_max_wait", 0) or 0) if debounce > 0 else 0.0
             if not await self.pool.wait_for_continue(ctx.job, debounce=debounce, max_wait=max_wait):
                 return
             if debounce > 0:
@@ -514,8 +580,12 @@ class LlmPipeline:
         if ctx.job is None or not self.is_stale(ctx.job):
             return False
         try:
-            return bool(self.runtime.config.get("interrupt_enable", False))
-        except Exception:  # noqa: BLE001 —— 配置读取失败按"不打断"处理，保守优先
+            config = self._effective_config(ctx.event, self.runtime.config)
+            return bool(config.get("interrupt_enable", False))
+        except Exception as e:  # noqa: BLE001 —— 配置读取失败按"不打断"处理，保守优先
+            from app.core.logger import logger
+
+            logger.add_info("LLM").debug(f"[Policy] 读打断开关失败，按不打断处理: {e}")
             return False
 
     async def _save_sent_history(self, ctx: LlmContext, sent_parts: list[str]) -> None:

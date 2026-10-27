@@ -150,6 +150,33 @@ async def test_matrix_reports_account_default(container, config_service):
     assert len(body["rows"]) == 2
 
 
+async def test_invalid_override_value_is_rejected(container):
+    """白名单只解决"哪些键"，值写错必须当场拒绝（否则运行期静默失效）。"""
+    client = _client(container)
+    resp = client.post("/api/policy", json={
+        "account_id": "acc1",
+        "channel_id": "111",
+        "patch": {"config": {"quiet_hours": "晚上"}},
+    })
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["code"] == "POLICY_BAD_VALUE"
+    assert "HH:MM" in body["message"]
+
+
+async def test_quiet_hours_override_is_accepted(container):
+    client = _client(container)
+    resp = client.post("/api/policy", json={
+        "account_id": "acc1",
+        "channel_id": "111",
+        "patch": {"config": {"quiet_hours": "23:00-08:00"}},
+    })
+    assert resp.status_code == 200, resp.text
+    got = client.get("/api/policy", params={"account_id": "acc1", "channel_id": "111"}).json()
+    assert got["resolved"]["config"]["quiet_hours"] == "23:00-08:00"
+    assert got["resolved"]["sources"]["quiet_hours"] == "channel"
+
+
 async def test_bad_json_and_missing_account_are_rejected(container):
     client = _client(container)
     bad = client.post(

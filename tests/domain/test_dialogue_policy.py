@@ -99,3 +99,54 @@ def test_overridable_whitelist_is_explicit():
 def test_empty_channel_id_is_treated_as_none():
     resolved = resolve_policy("agent", account_id="acc1", channel_id="", defaults={})
     assert resolved.channel_id is None
+
+
+# ==================== 免打扰时段 ====================
+
+
+def test_quiet_hours_validation():
+    from app.domain.dialogue_policy import valid_quiet_hours
+
+    assert valid_quiet_hours("") is True, "空串 = 不启用"
+    assert valid_quiet_hours("23:00-08:00") is True
+    assert valid_quiet_hours("00:00-23:59") is True
+    assert valid_quiet_hours("24:00-08:00") is False
+    assert valid_quiet_hours("23:60-08:00") is False
+    assert valid_quiet_hours("晚上-早上") is False
+    assert valid_quiet_hours("23:00~08:00") is False
+
+
+def test_quiet_hours_same_day_and_cross_midnight():
+    from app.domain.dialogue_policy import in_quiet_hours
+
+    # 同日窗口 09:00-12:00
+    assert in_quiet_hours("09:00-12:00", now_minutes=10 * 60) is True
+    assert in_quiet_hours("09:00-12:00", now_minutes=12 * 60) is False, "右开区间"
+    assert in_quiet_hours("09:00-12:00", now_minutes=8 * 60) is False
+
+    # 跨零点 23:00-08:00
+    assert in_quiet_hours("23:00-08:00", now_minutes=23 * 60) is True
+    assert in_quiet_hours("23:00-08:00", now_minutes=2 * 60) is True
+    assert in_quiet_hours("23:00-08:00", now_minutes=8 * 60) is False
+    assert in_quiet_hours("23:00-08:00", now_minutes=12 * 60) is False
+
+
+def test_quiet_hours_invalid_or_empty_never_silences():
+    from app.domain.dialogue_policy import in_quiet_hours
+
+    assert in_quiet_hours("", now_minutes=10 * 60) is False
+    assert in_quiet_hours("写错了", now_minutes=10 * 60) is False, "配置写错不该导致永久沉默"
+    assert in_quiet_hours("10:00-10:00", now_minutes=10 * 60) is False, "空窗口不静默"
+
+
+def test_validate_override_values_rejects_bad_values():
+    from app.domain.dialogue_policy import validate_override_values
+
+    assert validate_override_values({"trigger_at": True, "quiet_hours": "23:00-08:00"}) == []
+    errors = validate_override_values({
+        "trigger_at": "yes",
+        "trigger_keyword": [""],
+        "reply_cooldown": -1,
+        "quiet_hours": "晚上",
+    })
+    assert len(errors) == 4, errors
