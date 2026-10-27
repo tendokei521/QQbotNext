@@ -82,10 +82,22 @@ async function saveAccount(quiet = false) {
 }
 
 function scheduleSave() {
+  // 还没填任何内容时不建账号（默认地址不算"用户输入"）
+  if (!accountSaved.value && !account.id.trim() && !account.name.trim()) return
   if (saveTimer !== null) window.clearTimeout(saveTimer)
   saveTimer = window.setTimeout(() => {
     void saveAccount(true).catch((err) => notify.push(errorMessage(err), 'error'))
   }, 600)
+}
+
+async function nextFromAccount() {
+  try {
+    if (!accountSaved.value) await saveAccount(true)
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+    return
+  }
+  step.value = 2
 }
 
 async function refreshAccount() {
@@ -285,7 +297,7 @@ onUnmounted(stopPolling)
         </v-card-text>
         <v-card-actions>
           <v-spacer />
-          <v-btn color="primary" @click="step = 2">下一步</v-btn>
+          <v-btn color="primary" @click="nextFromAccount">下一步</v-btn>
         </v-card-actions>
       </v-card>
 
