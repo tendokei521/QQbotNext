@@ -39,12 +39,6 @@ const router = createRouter({
         { path: 'policy', name: 'policy', component: () => import('@/views/PolicyPage.vue'), meta: { title: '权限与回复' } },
         { path: 'modules', name: 'modules', component: () => import('@/views/ModulesPage.vue'), meta: { title: '功能模块' } },
         {
-          path: 'protocol',
-          name: 'protocol',
-          component: () => import('@/views/ProtocolPage.vue'),
-          meta: { title: '协议端' },
-        },
-        {
           path: 'bundles',
           name: 'bundles',
           component: () => import('@/views/BundlesPage.vue'),
