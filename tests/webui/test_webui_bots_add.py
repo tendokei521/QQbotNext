@@ -65,8 +65,14 @@ async def test_add_keeps_explicit_address(client, config_service):
 async def test_added_account_has_modules_off_by_default(client, config_service):
     """新增账号 = 模块默认关：「加个号」不能等于「整套功能悄悄上线」。
 
-    Agent 例外：它是框架自身的回复能力，关掉新账号就完全静默（P0 要消灭的"没反应"）。
+    例外只有两类：框架级 Agent（关掉就完全静默）与代码里显式声明默认启用的模块
+    （`DEFAULT_ENABLED_MODULES`，如 OneBot 工具）——判定与运行时同一份常量。
     """
+    from app.infrastructure.config.binding_store import (
+        CORE_CAPABILITIES,
+        DEFAULT_ENABLED_MODULES,
+    )
+
     resp = client.post("/api/bots/config/add", json={"conn_mode": "forward"})
     account_id = resp.json()["id"]
 
@@ -74,11 +80,15 @@ async def test_added_account_has_modules_off_by_default(client, config_service):
 
     modules = client.get("/api/modules", params={"account_id": account_id}).json()
     assert modules["agent"]["enabled"] is True, "Agent 必须保持默认开"
+    exempt = set(CORE_CAPABILITIES) | set(DEFAULT_ENABLED_MODULES) | {"agent"}
     plugins = {
         name: data for name, data in modules.items()
-        if name != "agent" and not data.get("hidden")
+        if name not in exempt and not data.get("hidden")
     }
     assert plugins, "容器里应加载出内置模块"
     assert all(data["enabled"] is False for data in plugins.values()), (
         "新账号的功能模块应全部默认关，直到用户显式打开"
     )
+    for name in set(DEFAULT_ENABLED_MODULES) - {"agent"}:
+        if name in modules:
+            assert modules[name]["enabled"] is True, f"{name} 是显式默认启用的模块"
