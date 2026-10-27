@@ -531,3 +531,17 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
             asyncio.get_running_loop().create_task(persist_fn(*args))
         except RuntimeError:
             pass  # 无运行中的事件循环（测试环境）：仅内存生效
+
+    # ==================== 通用键值（kv） ====================
+    # 迁移标记 / 首启完成标记这类"框架级小状态"统一走这里，不要再各自写 SQL。
+    async def get_kv(self, key: str, default: Any = None) -> Any:
+        row = await self.db.fetchone("SELECT value_json FROM kv WHERE key = ?", (str(key),))
+        if row is None:
+            return default
+        return self.db.loads(row["value_json"], default)
+
+    async def set_kv(self, key: str, value: Any) -> None:
+        await self.db.execute(
+            "INSERT OR REPLACE INTO kv (key, value_json) VALUES (?,?)",
+            (str(key), self.db.dumps(value)),
+        )
