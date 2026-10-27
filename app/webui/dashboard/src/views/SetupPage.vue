@@ -4,7 +4,7 @@
  *
  * 设计约束（docs/oneclick-bundle-and-onboarding-design.md §7.2）：
  * - 每一步都只有一个问题，且**同屏完成**（例如"拉模型"和"入池"不再分两页）；
- * - 「下一步」只在当前步真的完成时可用；可「稍后再配」但总览会给出 blocker；
+ * - 每一步都可以直接「下一步」（先跳过、稍后再回来补，总览会给 blocker 提示）；
  * - 第 4 步的清单与总览就绪卡、启动横幅同源（`/api/readiness`）。
  */
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
