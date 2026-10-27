@@ -19,6 +19,7 @@ from app.core.logger import logger
 from app.webui.api.deps import (
     get_agent_manager,
     get_bot_service,
+    get_config_service,
     get_feature_registry,
     get_gateway,
     get_module_install_service,
@@ -304,10 +305,33 @@ async def _sync_module_runtime(module, enabled: bool) -> None:
                 logger.warning(f"[Module] {module_name} 定时任务注销异常: {e}")
 
 
-@router.get("/modules")
-async def api_modules(request: Request, bot_id: str | None = Depends(parse_account_id), bot_service=Depends(get_bot_service)):
+async def _with_module_origins(data: dict, config_service) -> dict:
+    """给模块列表补「来自预设 xxx」来源（台账不可用时静默跳过，不影响模块页）。"""
+    if not data:
+        return data
+    try:
+        from app.application.bundle.origins import load_origins
 
-    return JSONResponse(content=bot_service.get_modules_data(bot_id))
+        origins = await load_origins(config_service.db)
+    except Exception as e:  # noqa: BLE001 —— 来源只是展示信息，不能拖垮模块页
+        logger.warning(f"[Module] 读取模块来源台账失败（已忽略）: {e}")
+        return data
+    for name, origin in origins.items():
+        if name in data:
+            data[name]["origin"] = origin
+    return data
+
+
+@router.get("/modules")
+async def api_modules(
+    request: Request,
+    bot_id: str | None = Depends(parse_account_id),
+    bot_service=Depends(get_bot_service),
+    config_service=Depends(get_config_service),
+):
+
+    data = await _with_module_origins(bot_service.get_modules_data(bot_id), config_service)
+    return JSONResponse(content=data)
 
 
 @router.get("/modules/uninstalled")
@@ -325,11 +349,18 @@ async def list_features(request: Request, bot_id: str | None = Depends(parse_acc
 
 
 @router.get("/modules/{module_name}")
-async def api_module(module_name: str, request: Request, bot_id: str | None = Depends(parse_account_id), bot_service=Depends(get_bot_service)):
+async def api_module(
+    module_name: str,
+    request: Request,
+    bot_id: str | None = Depends(parse_account_id),
+    bot_service=Depends(get_bot_service),
+    config_service=Depends(get_config_service),
+):
 
     data = bot_service.get_modules_data(bot_id).get(module_name)
     if data is None:
         return _err(404, f"Module {module_name} not found")
+    data = (await _with_module_origins({module_name: data}, config_service))[module_name]
     return JSONResponse(content={module_name: data})
 
 

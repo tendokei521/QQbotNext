@@ -137,6 +137,28 @@ async def test_manifest_missing_module_visible(webui_env):
     assert nodoc["status"] == "ok"
 
 
+async def test_modules_list_shows_preset_origin(webui_env):
+    """预设装的模块要能在模块页显示「来自预设 xxx」（来源台账）。"""
+    client, container = webui_env
+    from app.application.bundle.origins import record_origin
+
+    db = container.get(Database)
+    await record_origin(
+        db, "builtindemo", bundle_id="demo-pack", bundle_name="群聊搭子",
+        bundle_version="1.2.0", account_id="acc1", action="installed",
+    )
+
+    modules = client.get("/api/modules", params={"account_id": "acc1"}).json()
+
+    origin = modules["builtindemo"]["origin"]
+    assert origin["bundle_id"] == "demo-pack"
+    assert origin["bundle_name"] == "群聊搭子"
+    assert origin["bundle_version"] == "1.2.0"
+    assert origin["action"] == "installed"
+    # 没有来源的模块不应出现空 origin 字段
+    assert "origin" not in modules["brokenmod"]
+
+
 # ==================== validate-zip ====================
 
 

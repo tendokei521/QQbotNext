@@ -355,8 +355,15 @@ async def test_apply_installs_bundled_module_and_writes_module_secret(
     snapshot = json.loads(row["snapshot_json"])
     assert snapshot["modules_installed"] == ["demo_mod"]
 
+    origin = await db.fetchone("SELECT * FROM module_origins WHERE module_name = ?", ("demo_mod",))
+    assert origin is not None, "模块来源台账应记录「来自预设」"
+    assert origin["bundle_id"] == "demo-pack"
+    assert origin["bundle_name"] == "演示预设"
+    assert origin["bundle_version"] == "1.2.0"
+    assert origin["action"] == "installed"
 
-async def test_rollback_uninstalls_module_installed_by_bundle(container, config_service, tmp_path):
+
+async def test_rollback_uninstalls_module_installed_by_bundle(container, config_service, db, tmp_path):
     await _seed(container, config_service)
     installer = _FakeInstaller()
     applier = BundleApplier(config_service, installed_modules={}, module_installer=installer)
@@ -366,6 +373,10 @@ async def test_rollback_uninstalls_module_installed_by_bundle(container, config_
     )
 
     rolled = await applier.rollback(result["activation_id"])
+
+    assert await db.fetchone(
+        "SELECT module_name FROM module_origins WHERE module_name = ?", ("demo_mod",)
+    ) is None, "回滚卸载模块后来源台账应清掉"
 
     assert rolled["modules_uninstalled"] == ["demo_mod"]
     assert installer.uninstalled == ["demo_mod"]
@@ -415,7 +426,7 @@ async def test_apply_rejects_missing_required_secret(container, config_service, 
 
 
 async def test_apply_upgrades_installed_module_without_marking_uninstall(
-    container, config_service, tmp_path
+    container, config_service, db, tmp_path
 ):
     await _seed(container, config_service)
     installer = _FakeInstaller()
@@ -432,5 +443,10 @@ async def test_apply_upgrades_installed_module_without_marking_uninstall(
 
     assert result["modules_installed"] == []
     assert result["modules_upgraded"] == ["demo_mod"]
+    origin = await db.fetchone("SELECT action FROM module_origins WHERE module_name = ?", ("demo_mod",))
+    assert origin["action"] == "upgraded"
     await applier.rollback(result["activation_id"])
     assert installer.uninstalled == [], "升级的模块属于用户原有安装，回滚不能删"
+    assert await db.fetchone(
+        "SELECT module_name FROM module_origins WHERE module_name = ?", ("demo_mod",)
+    ) is not None, "升级的模块保留，来源也不该被清掉"

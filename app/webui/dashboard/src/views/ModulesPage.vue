@@ -15,6 +15,11 @@ const modules = useModulesStore()
 const notify = useNotifyStore()
 const router = useRouter()
 
+function formatOriginTime(ts: number): string {
+  if (!ts) return '—'
+  return new Date(ts * 1000).toLocaleString('zh-CN', { hour12: false })
+}
+
 const search = ref('')
 const collapsed = ref<Record<string, boolean>>({})
 const toggling = reactive<Record<string, boolean>>({})
@@ -399,7 +404,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                 </template>
                 <v-card-title class="text-body-1">
                   <span class="app-line-clamp-1">{{ m.name }}</span>
-                  <!-- 来源徽标：内置 / 第三方 -->
+                  <!-- 来源徽标：内置 / 第三方；预设装的模块再标「来自预设 xxx」 -->
                   <v-chip
                     size="x-small"
                     class="ml-1"
@@ -408,6 +413,29 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                   >
                     {{ isBuiltinModule(m) ? '内置' : '第三方' }}
                   </v-chip>
+                  <v-tooltip v-if="m.origin" location="top" max-width="380">
+                    <template #activator="{ props }">
+                      <v-chip
+                        v-bind="props"
+                        size="x-small"
+                        class="ml-1 origin-chip"
+                        color="primary"
+                        variant="tonal"
+                        prepend-icon="mdi-package-variant-closed"
+                        @click="router.push('/bundles')"
+                      >
+                        来自「{{ m.origin.bundle_name || m.origin.bundle_id }}」
+                      </v-chip>
+                    </template>
+                    <div class="text-caption">
+                      预设「{{ m.origin.bundle_name || m.origin.bundle_id }}」v{{ m.origin.bundle_version }}
+                    </div>
+                    <div class="text-caption">
+                      {{ m.origin.action === 'upgraded' ? '随预设升级' : '随预设安装' }} ·
+                      {{ formatOriginTime(m.origin.installed_at) }}
+                    </div>
+                    <div class="text-caption">点击去预设中心</div>
+                  </v-tooltip>
                   <v-chip v-if="m.version" size="x-small" class="ml-1" variant="text">v{{ m.version }}</v-chip>
                   <v-chip size="x-small" class="ml-1" :color="PERMISSION_COLOR[m.permission] || 'default'" variant="tonal">
                     {{ PERMISSION_LABEL[m.permission] || m.permission }}
@@ -696,5 +724,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 .preview-path {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
+}
+
+.origin-chip {
+  cursor: pointer;
 }
 </style>

@@ -20,6 +20,7 @@ from typing import Any
 
 from app.application.bundle.errors import BundleError
 from app.application.bundle.manifest import satisfies_version
+from app.application.bundle.origins import clear_origin, record_origin
 from app.infrastructure.config.config_service import ConfigOp
 
 AGENT_CAPABILITY = "agent"
@@ -362,9 +363,12 @@ class BundleApplier:
     # ==================== 模块安装 ====================
 
     async def _install_modules(
-        self, manifest: dict, files: dict[str, bytes]
+        self, manifest: dict, files: dict[str, bytes], account_id: str = ""
     ) -> tuple[list[str], list[str]]:
-        """安装随包模块 → ``(新装, 升级)``；不需要安装时返回空列表。"""
+        """安装随包模块 → ``(新装, 升级)``；不需要安装时返回空列表。
+
+        成功安装/升级后写「模块来源台账」（模块页显示"来自预设 xxx"）。
+        """
         targets = [
             module for module in manifest["requires"]["modules"] if module.get("source")
         ]
@@ -377,6 +381,7 @@ class BundleApplier:
                 f"当前实例不支持自动安装随包模块：{names}",
                 "先手动安装这些模块，或使用带模块安装能力的 WebUI",
             )
+        db = self.config_service.db
         installed: list[str] = []
         upgraded: list[str] = []
         for module in targets:
@@ -398,6 +403,14 @@ class BundleApplier:
             version = str((info or {}).get("version") or "")
             self.installed_modules[name] = version or self.installed_modules.get(name, "")
             (upgraded if current else installed).append(name)
+            await record_origin(
+                db, name,
+                bundle_id=str(manifest["id"]),
+                bundle_name=str(manifest.get("name") or ""),
+                bundle_version=str(manifest.get("version") or ""),
+                account_id=str(account_id or ""),
+                action="upgraded" if current else "installed",
+            )
         return installed, upgraded
 
     async def _uninstall_modules(self, names: list[str] | None) -> list[str]:
@@ -405,10 +418,12 @@ class BundleApplier:
         removed: list[str] = []
         if self.module_installer is None:
             return removed
+        db = self.config_service.db
         for name in names or []:
             try:
                 await self.module_installer.uninstall(name)
                 removed.append(name)
+                await clear_origin(db, name)
             except Exception as e:  # noqa: BLE001 —— 单人卸载失败不能盖住回滚结果
                 self.config_service.log.warning(f"[Bundle] 回滚时卸载模块 {name} 失败: {e}")
         return removed
@@ -464,7 +479,7 @@ class BundleApplier:
         upgraded: list[str] = []
         try:
             # 模块代码先落地：装不上就别写配置（避免"配置指向不存在的模块"）
-            installed, upgraded = await self._install_modules(manifest, files)
+            installed, upgraded = await self._install_modules(manifest, files, str(account_id))
             if installed or upgraded:
                 snapshot = dict(plan["snapshot"])
                 snapshot["modules_installed"] = list(installed)

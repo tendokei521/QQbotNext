@@ -86,6 +86,18 @@ CREATE TABLE IF NOT EXISTS account_active_bundle (
     updated_at    INTEGER NOT NULL
 );
 
+-- 模块安装来源台账：哪个预设装的模块（模块页「来自预设 xxx」/ 卸载联动都用它）。
+-- 模块是全局安装的（不分账号），所以按模块名记"最后一次安装来源"。
+CREATE TABLE IF NOT EXISTS module_origins (
+    module_name    TEXT PRIMARY KEY,
+    bundle_id      TEXT NOT NULL,
+    bundle_name    TEXT NOT NULL DEFAULT '',
+    bundle_version TEXT NOT NULL DEFAULT '',
+    account_id     TEXT NOT NULL DEFAULT '',
+    action         TEXT NOT NULL DEFAULT 'installed',  -- installed | upgraded
+    installed_at   INTEGER NOT NULL
+);
+
 -- 群级覆盖（对话策略）：账号 × 能力 × 群。
 -- capability='agent' 或模块名；channel_id='' 表示该账号的默认层。
 -- enabled 为 NULL 表示"本层不覆盖"；config_json 只存白名单键（domain/dialogue_policy.py）。

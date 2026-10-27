@@ -11,6 +11,16 @@ export interface PermissionConfig {
   user_list: string[]
 }
 
+/** 模块安装来源：哪个预设装的（后端 module_origins 台账；本地手装的模块没有这个字段） */
+export interface ModuleOrigin {
+  bundle_id: string
+  bundle_name: string
+  bundle_version: string
+  account_id: string
+  action: 'installed' | 'upgraded' | string
+  installed_at: number
+}
+
 export interface ModuleData {
   /** 注册 key（路由参数用；后端响应是 mod_name → data 映射，key 需前端注入） */
   _key: string
@@ -51,6 +61,8 @@ export interface ModuleData {
   /** 内置模块缺 module.json（仍可加载，但版本/显示名是兜底值） */
   manifest_missing?: boolean
   installed_at?: number | null
+  /** 安装来源（预设中心安装的模块才有） */
+  origin?: ModuleOrigin
 }
 
 /** validate-zip 的预检结果：确认安装前给用户看"装到哪、是否覆盖" */
