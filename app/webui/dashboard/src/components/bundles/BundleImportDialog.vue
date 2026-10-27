@@ -2,8 +2,8 @@
 /**
  * 导入套装：选文件 → 预检报告 → 确认导入。
  *
- * 预检是"信任界面"：把「包含什么 / 缺什么 / 需要你填什么」讲清楚再装。
- * P2 只登记工件（不应用到账号），所以确认按钮的文案是「导入（暂不应用）」。
+ * 预检是"信任界面"：把「包含什么 / 缺什么 / 需要你填什么 / 会安装什么」讲清楚再装。
+ * 导入只登记工件（不应用到账号），所以确认按钮的文案是「导入（暂不应用）」。
  */
 import { ref } from 'vue'
 import { useBundlesStore, type BundleReport } from '@/stores/bundles'
@@ -134,6 +134,22 @@ function formatSize(bytes: number): string {
 
           <div class="d-flex flex-wrap gap-2 mb-3">
             <v-chip size="small" variant="tonal">模块 {{ report.summary.modules }}</v-chip>
+            <v-chip
+              v-if="report.summary.modules_bundled"
+              size="small"
+              variant="tonal"
+              color="primary"
+            >
+              随包模块 {{ report.summary.modules_bundled }}
+            </v-chip>
+            <v-chip
+              v-if="report.summary.modules_to_install"
+              size="small"
+              variant="tonal"
+              color="info"
+            >
+              将安装 {{ report.summary.modules_to_install }}
+            </v-chip>
             <v-chip size="small" variant="tonal">预设 {{ report.summary.presets }}</v-chip>
             <v-chip size="small" variant="tonal">配置 {{ report.summary.agent_keys }}</v-chip>
             <v-chip size="small" variant="tonal" :color="report.summary.secrets_required ? 'warning' : undefined">
@@ -168,7 +184,7 @@ function formatSize(bytes: number): string {
         <template v-else-if="screen === 'result' && result">
           <v-alert type="success" variant="tonal" density="compact">
             已导入「{{ result.bundle.name }}」v{{ result.bundle.version }}。
-            本版本只登记工件，应用到账号在后续版本提供。
+            到列表里点「应用到账号」才会写入配置、创建人格/模型，并安装随包模块（可回滚）。
           </v-alert>
         </template>
       </v-card-text>

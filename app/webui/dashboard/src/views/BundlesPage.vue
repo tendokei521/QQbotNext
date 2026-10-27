@@ -1,9 +1,7 @@
 <script setup lang="ts">
 /**
- * 套装中心（P2：工件层）。
- *
- * 能做的：导入（预检后登记）、列出现有套装、下载、从当前账号导出。
- * 暂时不能做的：应用到账号/回滚（P3）——界面上明确写出来，避免"装了没生效"。
+ * 套装中心：导出一个账号的可迁移配置（人格卡 / 模型池 / Agent 配置 / 模块参数与启停 /
+ * 第三方模块代码），并把它应用到目标账号（事务写 + 快照，失败自动回滚）。
  */
 import { computed, onMounted, reactive, ref } from 'vue'
 import { displayName, useBotsStore } from '@/stores/bots'
@@ -31,7 +29,12 @@ const exportForm = reactive({
 const applyDialog = ref(false)
 const applyTarget = ref<{ id: string; name: string; version: string; secrets?: { key: string; label: string; required: boolean }[] } | null>(null)
 const applySecrets = reactive<Record<string, string>>({})
-const applyResult = ref<{ activation_id: string; plan: { creates: any[]; updates: any[] } } | null>(null)
+const applyResult = ref<{
+  activation_id: string
+  plan: { creates: any[]; updates: any[] }
+  modules_installed?: string[]
+  modules_upgraded?: string[]
+} | null>(null)
 
 function statusText(status: string): string {
   return {
@@ -186,8 +189,8 @@ onMounted(async () => {
 
     <v-alert type="info" variant="tonal" density="compact" class="mb-4">
       <div class="text-caption">
-        当前版本支持导入与导出：导入后会先做预检再登记工件；「应用到账号」在后续版本提供。
-        密钥不会随包分发，导入后需要你在模型配置里重新填写。
+        导入后先预检再登记工件；「应用到账号」会创建人格/模型、写入该账号配置，并自动安装随包模块，
+        失败自动回滚。密钥不会随包分发，导入后需要你重新填写。
       </div>
     </v-alert>
 
@@ -287,7 +290,8 @@ onMounted(async () => {
         </v-card-title>
         <v-card-text>
           <div class="text-caption mb-3" style="opacity: 0.7">
-            将从「{{ accountName }}」收集人格、模型连接（不含密钥）、Agent 配置与模块开关。
+            将从「{{ accountName }}」收集人格卡、模型池、Agent 配置与模块参数；第三方模块代码会随包，
+            内置模块只记录版本。密钥不包含在包内。
           </div>
           <v-text-field v-model="exportForm.id" label="套装 ID" density="comfortable" variant="outlined" />
           <v-text-field v-model="exportForm.name" label="名称" density="comfortable" variant="outlined" />
@@ -334,6 +338,12 @@ onMounted(async () => {
           <v-alert v-else type="success" variant="tonal" density="compact">
             已应用（激活 {{ applyResult.activation_id }}）：
             新建 {{ applyResult.plan.creates.length }} 项、更新 {{ applyResult.plan.updates.length }} 处。
+            <template v-if="applyResult.modules_installed?.length">
+              <div>已安装随包模块：{{ applyResult.modules_installed.join('、') }}</div>
+            </template>
+            <template v-if="applyResult.modules_upgraded?.length">
+              <div>已升级随包模块：{{ applyResult.modules_upgraded.join('、') }}</div>
+            </template>
           </v-alert>
         </v-card-text>
         <v-card-actions>

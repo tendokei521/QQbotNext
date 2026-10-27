@@ -28,6 +28,10 @@ export interface BundleReport {
     files: number
     size: number
     secrets_required: number
+    /** 代码随包的模块数（应用时自动安装） */
+    modules_bundled?: number
+    /** 应用时需要安装/升级的模块数 */
+    modules_to_install?: number
   }
   issues: BundleIssue[]
   secrets: BundleSecret[]
@@ -63,7 +67,12 @@ export interface ApplyResult {
     creates: { kind: string; name: string }[]
     updates: { target: string; keys: string[] }[]
     secrets_required: BundleSecret[]
+    /** 应用时需要安装/升级的随包模块 */
+    modules_to_install?: string[]
   }
+  /** 本次真正新装/升级的模块（回滚只卸载"新装"的） */
+  modules_installed?: string[]
+  modules_upgraded?: string[]
 }
 
 function _triggerDownload(blob: Blob, filename: string) {
@@ -83,9 +92,10 @@ function _filenameFrom(disposition: string | undefined, fallback: string): strin
 }
 
 /**
- * 套装中心：校验 / 导入登记 / 列表 / 下载 / 从账号导出。
+ * 套装中心：校验 / 导入登记 / 列表 / 下载 / 从账号导出 / 应用 / 回滚 / 卸载。
  *
- * P2 只做"工件"层——导入不会改账号配置（应用在 P3），store 也不假装它会。
+ * 导出会带：人格卡（含工具/技能/预设对话）、模型池全量、Agent 配置、模块参数与启停；
+ * 第三方模块代码随包（`modules/*.zip`），应用时走既有 zip 安装通道自动安装。
  */
 export const useBundlesStore = defineStore('bundles', () => {
   const bots = useBotsStore()
