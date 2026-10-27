@@ -24,7 +24,7 @@ collect_files = _module.collect_files
 validate_tree = _module.validate_tree
 
 
-def _fake_repo(tmp_path, *, dist=True) -> "object":
+def _fake_repo(tmp_path, *, dist: bool = True) -> Path:
     root = tmp_path / "repo"
     root.mkdir(parents=True)
     for name in ("start.bat", "start.sh", "start.py", "check_deps.py", "main.py", "pyproject.toml"):
