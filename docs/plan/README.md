@@ -22,9 +22,9 @@
 
 | 阶段 | 主题 | 状态 | 清单 |
 |---|---|---|---|
-| **P0** | 止漏：静默、退出码、校验、发行链路 | `[~]` 6/8 | [`onboarding-bundle.md`](onboarding-bundle.md#p0-止漏本周) |
-| **P1** | 首启向导 + 就绪诊断 | `[~]` 1/7 | [`onboarding-bundle.md`](onboarding-bundle.md#p1-首启向导--就绪诊断1-周) |
-| **P2** | 套装工件 v1（格式/校验/导出/预检） | `[ ]` | [`onboarding-bundle.md`](onboarding-bundle.md#p2-套装工件-v1只导出导入预检) |
+| **P0** | 止漏：静默、退出码、校验、发行链路 | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p0-止漏本周) |
+| **P1** | 首启向导 + 就绪诊断 | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p1-首启向导--就绪诊断1-周) |
+| **P2** | 套装工件 v1（格式/校验/导出/预检） | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p2-套装工件-v1只导出导入预检) |
 | **P3** | 实例化 + 快照回滚 | `[ ]` | [`onboarding-bundle.md`](onboarding-bundle.md#p3-实例化--快照回滚) |
 | **P4** | 更新/卸载/值校验器 | `[ ]` | [`onboarding-bundle.md`](onboarding-bundle.md#p4-更新卸载值校验器) |
 | **P5** | 协议端托管 + 免安装发行包 | `[ ]` | [`onboarding-bundle.md`](onboarding-bundle.md#p5-协议端托管--发行包) |
@@ -55,6 +55,13 @@
 | R3-3 | `2e52585` | 高级规则对话框（继承可见、留空=继承） |
 | R4-1 | `ec26b82` | 旧账号级权限 → `channel_overrides` 迁移（场景层 + 群层） |
 | R4-2 | `24fae90` | Agent 权限页收敛为入口；`sections.json` 副标题改由 config_partition 生成 |
+| P0-8 | `5b98d50` | README 前置条件 / NapCat 三步反连 / 故障排查表；`.env` 节标题改名 |
+| P1-3~P1-6 | `c0b99bd` | 首启向导（4 步）+ 总览就绪卡 + 侧栏入口 |
+| P1-5 后端 | `7e9e0b6` | `/api/setup/quick-model`：建预设+模型+入池一次完成（幂等） |
+| P1-7 | 已有 | 模块加载失败列表 + 单模块重载（`ModulesPage.vue`），就绪卡共用 |
+| P2-1/P2-2 | `8f6a237` | 清单解析 + 七层校验（结构/兼容/依赖/引用/未知键/密钥/校验和）+ 导出器（密钥剥离、确定性字节） |
+| P2-3 | `4b7c669` | `/api/bundles/validate|import|export|download|list`；agent schema 走 application 门面（守住 webui→agent 边界） |
+| P2-4/P2-5 | `75f6b4c` | 「套装中心」页 + 导入预检对话框（含需填密钥提示）+ 从账号导出 |
 | 修复 | `c93de4f` / `39b9e1e` | 架构守卫：静默异常补日志、skip_log 移出 agent/loop |
 
 ---
