@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import re
 
+from app.core.logger import logger
+
 #: PEP 503 归一化：大小写不敏感，``-``/``_``/``.`` 等价
 _NORMALIZE_RE = re.compile(r"[-_.]+")
 #: 从一行 requirement 里取包名（去掉 extras / 版本约束 / 环境标记 / 注释）
@@ -47,11 +49,13 @@ def installed_packages() -> set[str]:
         for dist in metadata.distributions():
             try:
                 name = dist.metadata["Name"]
-            except Exception:  # noqa: BLE001 —— 坏元数据跳过，不影响其它包
+            except Exception as e:  # noqa: BLE001 —— 坏元数据跳过，不影响其它包
+                logger.debug(f"[Bundle] 跳过元数据损坏的发行包: {e}")
                 continue
             if name:
                 names.add(normalize_package(name))
-    except Exception:  # noqa: BLE001 —— 环境不可探测时不要拖垮预检
+    except Exception as e:  # noqa: BLE001 —— 环境不可探测时不要拖垮预检
+        logger.warning(f"[Bundle] 读取已安装依赖清单失败（按空集处理）: {e}")
         return set()
     return names
 
