@@ -22,6 +22,7 @@ from app.agent.loop.context import LlmContext, LlmJob
 from app.agent.loop.locks import SessionLockManager
 from app.agent.loop.pool import LlmPool, merge_debounced_texts
 from app.agent.loop.skip_log import log_skip
+from app.application.dialogue_policy_service import DialoguePolicyService
 from app.domain.message import Message
 
 
@@ -35,6 +36,46 @@ class LlmPipeline:
         self._session_generation: dict[str, int] = {}
         #: 会话 → 当前活跃一轮的取消句柄（`turn_runner.AbortScope`）
         self._active_scopes: dict = {}
+        # 对话策略（群级覆盖）：运行时没有 config_service（测试替身）时退回旧读取。
+        # 解析是纯函数 + 内存字典，单事件开销可忽略；不缓存是为了"改完立刻生效"。
+        config_service = getattr(runtime, "config_service", None)
+        self.policy = (
+            DialoguePolicyService(config_service, runtime=runtime)
+            if config_service is not None
+            else None
+        )
+
+    # ---------- 场景开关（群级覆盖的唯一入口） ----------
+
+    @staticmethod
+    def _channel_id_of(event) -> str | None:
+        if getattr(event, "event_type", "") != "message_group":
+            return None
+        group_id = getattr(getattr(event, "group", None), "group_id", "")
+        return str(group_id or "") or None
+
+    def _resolved_policy(self, event):
+        """本轮的生效策略；解析失败或没有 config_service 时返回 None（调用方回落）。"""
+        if self.policy is None:
+            return None
+        try:
+            return self.policy.resolve(
+                getattr(self.runtime, "bot_id", "?"), "agent", self._channel_id_of(event)
+            )
+        except Exception as e:  # noqa: BLE001 —— 策略解析失败不能阻断对话
+            from app.core.logger import logger
+
+            logger.add_info("LLM").debug(f"[Policy] 解析失败，回落账号级配置: {e}")
+            return None
+
+    def _scene_enabled(self, event, config) -> tuple[bool, str]:
+        """(是否响应, 来源)。来源用于日志与排障（default/account/channel/muted）。"""
+        policy = self._resolved_policy(event)
+        if policy is not None:
+            return bool(policy.enabled), str(policy.enabled_source)
+        if getattr(event, "event_type", "") == "message_group":
+            return bool(config.get("group_enable", False)), "default"
+        return bool(config.get("private_enable", True)), "default"
 
     def submit(self, event) -> asyncio.Task | None:
         """提交一个 LLM 处理任务（非阻塞）。"""
@@ -305,6 +346,8 @@ class LlmPipeline:
             config = self.runtime.config
             account_id = getattr(self.runtime, "bot_id", "?")
             group_id = getattr(getattr(ctx.event, "group", None), "group_id", "?")
+            # 场景开关：账号级 group_enable/private_enable + 群级覆盖（channel_overrides）
+            scene_enabled, scene_source = self._scene_enabled(ctx.event, config)
             # 没有 key 或对应场景未启用时，不视为“触发 LLM”，不重置主动消息状态。
             # 所有静默 return 都走 log_skip：用户可见、限流、格式统一（见 skip_log 模块）。
             if not self.runtime.provider_config().get("api_key", ""):
@@ -314,19 +357,20 @@ class LlmPipeline:
                     hint="在「Provider 预设」页填写 API Key；自建网关若靠额外请求头鉴权，请配 extra_headers",
                 )
                 return
-            if ctx.event.event_type == "message_group" and not config.get("group_enable", False):
+            if ctx.event.event_type == "message_group" and not scene_enabled:
                 log_skip(
                     account_id,
                     "group_disabled",
-                    f"group={group_id}",
-                    hint="在「Agent → 基础配置 → 响应场景」打开「群聊回复」",
+                    f"group={group_id} · source={scene_source}",
+                    hint="在「权限与回复」页打开该群，或在「Agent → 基础配置 → 响应场景」打开「群聊回复」",
                 )
                 return
             if ctx.event.event_type == "message_private":
-                if not config.get("private_enable", True):
+                if not scene_enabled:
                     log_skip(
                         account_id,
                         "private_disabled",
+                        f"source={scene_source}",
                         hint="在「Agent → 基础配置 → 响应场景」打开「私聊回复」",
                     )
                     return
