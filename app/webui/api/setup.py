@@ -93,11 +93,7 @@ async def api_setup_default_account_save(
     bot_service=Depends(get_bot_service),
 ):
     """向导第一步：保存**唯一**默认账号（改它，不新增第二个），并启动后台连接重试。"""
-    from app.application.setup_account import (
-        DEFAULT_LISTEN_ADDRESS,
-        SetupAccountError,
-        SetupAccountService,
-    )
+    from app.application.setup_account import SetupAccountError, SetupAccountService
 
     try:
         body = await request.json()
@@ -111,7 +107,7 @@ async def api_setup_default_account_save(
         result = await service.upsert(
             account_id=str(body.get("id") or ""),
             name=str(body.get("name") or ""),
-            ws_url=str(body.get("ws_url") or DEFAULT_LISTEN_ADDRESS),
+            ws_url=str(body.get("ws_url") or ""),
             access_token=str(body.get("access_token") or ""),
             conn_mode=str(body.get("conn_mode") or "reverse"),
         )
