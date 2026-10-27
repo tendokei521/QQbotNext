@@ -215,7 +215,10 @@ class ProviderModelService:
     def list_references(self, model_id: str) -> list[tuple[str, str]]:
         refs = []
         for bot_id, config in self.config_service.get_all_module_configs("agent").items():
-            if str(config.get("provider_model_id", "")) == str(model_id):
+            pool = config.get("provider_model_pool") or []
+            if str(config.get("provider_model_id", "")) == str(model_id) or str(model_id) in {
+                str(item) for item in pool
+            }:
                 refs.append((str(bot_id), str(model_id)))
         return refs
 

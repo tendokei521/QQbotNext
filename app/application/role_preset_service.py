@@ -152,4 +152,11 @@ class RolePresetService:
         deleted = await self.config_service.delete_role_preset(role_id)
         if not deleted:
             raise ValueError(f"角色预设不存在: {role_id}")
+        # 清理 Agent 配置里的悬挂引用：否则组装时静默回退 system_prompt，
+        # 用户看到的是"人设没变"，却查不到原因（P4-5）。
+        for bot_id, config in list(self.config_service.get_all_module_configs("agent").items()):
+            if str(config.get("persona_preset_id", "")) == str(role_id):
+                new_config = dict(config)
+                new_config.pop("persona_preset_id", None)
+                await self.config_service.save_module_config("agent", bot_id, new_config)
         logger.info(f"[RolePreset] 删除角色 {role_id}")

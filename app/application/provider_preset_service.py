@@ -265,6 +265,11 @@ class ProviderPresetService:
                 new_config.pop("provider_preset_id", None)
             if str(new_config.get("provider_model_id", "")) in model_ids:
                 new_config.pop("provider_model_id", None)
+            pool = new_config.get("provider_model_pool")
+            if isinstance(pool, list):
+                kept = [item for item in pool if str(item) not in model_ids]
+                if kept != pool:
+                    new_config["provider_model_pool"] = kept
             if new_config != config:
                 await self.config_service.save_module_config("agent", bot_id, new_config)
 
