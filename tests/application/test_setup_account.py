@@ -255,3 +255,19 @@ async def test_connect_loop_stops_when_account_is_deleted(service, config_servic
         await asyncio.sleep(0.01)
 
     assert svc.connect_loop.running(result["account_id"]) is False
+
+
+async def test_should_retry_respects_listening_connected_and_empty_address(service, config_service):
+    svc, bots = service
+    forward = await svc.upsert(name="正向", conn_mode="forward", ws_url="")
+    assert svc.should_retry(forward["account_id"]) is False, "没有地址时不该重试"
+
+    reverse = await svc.upsert(name="反向", conn_mode="reverse")
+    assert svc.should_retry(reverse["account_id"]) is True, "反向还没监听时应重试"
+
+    bots.listening.add(reverse["account_id"])
+    assert svc.should_retry(reverse["account_id"]) is False, "监听就绪后不该再重试"
+
+    bots.listening.discard(reverse["account_id"])
+    bots.connected.add(reverse["account_id"])
+    assert svc.should_retry(reverse["account_id"]) is False, "已连上不该再重试"

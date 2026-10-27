@@ -287,6 +287,23 @@ class SetupAccountService:
         if ops:
             await self.config_service.apply_ops(ops)
 
+    def should_retry(self, account_id: str) -> bool:
+        """是否还需要后台重试连接。
+
+        已连上、反向监听已就绪、或地址还空着（正向等用户填）都不需要重试——
+        否则前端每 2s 轮询一次就会反复新建/唤醒连接循环，白耗 CPU 与日志。
+        """
+        key = str(account_id or "")
+        if not key:
+            return False
+        if self.bot_service.is_connected(key) or self.bot_service.is_listening(key):
+            return False
+        row = next(
+            (bot for bot in self.config_service.get_bots() if str(bot.get("id")) == key),
+            None,
+        )
+        return bool(row and str(row.get("ws_url") or "").strip())
+
     # ==================== 生命周期 ====================
 
     def stop_connecting(self, account_id: str | None = None) -> list[str]:

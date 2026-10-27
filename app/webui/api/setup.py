@@ -80,8 +80,8 @@ async def api_setup_default_account(
 
     service = request.app.state.container.get(SetupAccountService)
     current = await service.current()
-    if current and current.get("ws_url") and not current["connected"]:
-        # 已配置且填了地址但还没连上 → 继续后台每 2s 重试（打开页面即可，不用点按钮）
+    if current and service.should_retry(current["account_id"]):
+        # 已配置、填了地址、既没连上也没在监听 → 继续后台重试（打开页面即可，不用点按钮）
         service.connect_loop.ensure(current["account_id"])
     # 默认监听地址固定 ws://127.0.0.1:4001/（被其它账号占用时才顺延端口）
     current_id = str(current["account_id"]) if current else ""
