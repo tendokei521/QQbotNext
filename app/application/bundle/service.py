@@ -329,19 +329,26 @@ class BundleService:
             reuse_provider_preset_id=reuse_provider_preset_id,
         )
 
-    async def rollback(self, activation_id: str) -> dict:
-        return await self.applier.rollback(str(activation_id))
+    async def rollback(self, activation_id: str, *, keep_modules: bool = False) -> dict:
+        return await self.applier.rollback(str(activation_id), keep_modules=keep_modules)
 
     async def recover_interrupted(self) -> list[str]:
         return await self.applier.recover_interrupted()
 
-    async def uninstall(self, bundle_id: str, account_id: str | None = None) -> dict:
+    async def uninstall(
+        self,
+        bundle_id: str,
+        account_id: str | None = None,
+        *,
+        keep_modules: bool = False,
+    ) -> dict:
         """卸载预设：先回滚其激活，再删记账与工件文件。
 
         边界（P4-4）：
         - 只回滚本预设的激活记录，**不动用户后建的对象**（`bundle_objects` 只记本预设创建的）；
         - 若该账号还有其它预设处于 active，不在这里处理（各自独立回滚）；
-        - 工件文件只有在**没有任何激活记录再引用它**时才删除，避免误删仍在用的包。
+        - 工件文件只有在**没有任何激活记录再引用它**时才删除，避免误删仍在用的包；
+        - ``keep_modules=True``：只回滚配置，保留随包安装的模块（来源台账也保留）。
         """
         db = self.config_service.db
         bundle_id = self._safe_bundle_id(bundle_id)
@@ -354,9 +361,11 @@ class BundleService:
         rows = await db.fetchall(sql, tuple(params))
 
         rolled_back: list[str] = []
+        kept_modules: list[str] = []
         for row in rows or []:
-            await self.applier.rollback(row["id"])
+            result = await self.applier.rollback(row["id"], keep_modules=keep_modules)
             rolled_back.append(row["id"])
+            kept_modules.extend(result.get("modules_kept") or [])
 
         # 记账清理：仅清与本次卸载范围相关的行
         if account_id:
@@ -386,6 +395,7 @@ class BundleService:
             "bundle_id": bundle_id,
             "rolled_back": rolled_back,
             "deleted_artifact": deleted_artifact,
+            "modules_kept": kept_modules,
         }
 
     async def list_activations(self, account_id: str | None = None) -> list[dict]:

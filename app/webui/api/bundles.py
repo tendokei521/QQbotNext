@@ -142,6 +142,44 @@ async def _read_upload(file: UploadFile) -> bytes:
     return data
 
 
+async def _bundle_health(registry, config_service, bundle_id: str, account_id: str) -> dict:
+    """应用后自检：模块是否真的加载了、账号引用是否落位（只读，不阻断）。"""
+    from app.application.bundle.origins import load_origins
+
+    modules: list[dict] = []
+    try:
+        origins = await load_origins(config_service.db)
+    except Exception as e:  # noqa: BLE001 —— 自检失败降级成"未知"，不影响应用结果
+        logger.warning(f"[Bundle] 自检读取模块来源失败（已忽略）: {e}")
+        origins = {}
+    loaded_map = {}
+    try:
+        loaded_map = registry.loaded_map() if registry is not None else {}
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[Bundle] 自检读取模块加载状态失败（已忽略）: {e}")
+    for name, origin in origins.items():
+        if str(origin.get("bundle_id") or "") != str(bundle_id):
+            continue
+        instances = loaded_map.get(name) or {}
+        loaded = bool(instances)
+        error = ""
+        try:
+            error = str(registry.load_error(name) or "") if registry is not None else ""
+        except Exception:  # noqa: BLE001
+            error = ""
+        modules.append({"name": name, "loaded": loaded, "error": error})
+
+    row = config_service.get_binding("agent", "account", str(account_id)) or {}
+    config = row.get("config") or {}
+    agent = {
+        "persona": bool(config.get("persona_preset_id")),
+        "provider_preset": bool(config.get("provider_preset_id")),
+        "provider_model": bool(config.get("provider_model_id")),
+    }
+    ok = all(agent.values()) and all(item["loaded"] and not item["error"] for item in modules)
+    return {"ok": ok, "agent": agent, "modules": modules}
+
+
 @router.post("/bundles/validate")
 async def api_bundles_validate(
     file: UploadFile = File(...),
@@ -234,7 +272,10 @@ async def api_bundles_import_apply(
                 "bundle": bundle,
             },
         )
-    return _ok("预设已导入并应用到账号", **result, apply=applied)
+    health = await _bundle_health(
+        registry, config_service, str(bundle.get("id") or ""), account_id
+    )
+    return _ok("预设已导入并应用到账号", **result, apply=applied, health=health)
 
 
 @router.get("/bundles")
@@ -367,12 +408,14 @@ async def api_bundles_apply(
         )
     except BundleError as e:
         return _err(400, str(e), e.code, e.hint)
-    return _ok("已应用到账号", **result)
+    health = await _bundle_health(registry, config_service, bundle_id, account_id)
+    return _ok("已应用到账号", **result, health=health)
 
 
 @router.post("/activations/{activation_id}/rollback")
 async def api_bundles_rollback(
     activation_id: str,
+    request: Request,
     config_service=Depends(get_config_service),
     agent_manager=Depends(get_agent_manager),
     bot_service=Depends(get_bot_service),
@@ -380,9 +423,14 @@ async def api_bundles_rollback(
     registry=Depends(get_module_registry),
 ):
     try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001 —— 允许空 body（默认连模块一起回滚）
+        body = {}
+    keep_modules = bool((body or {}).get("keep_modules")) if isinstance(body, dict) else False
+    try:
         result = await _service(
             config_service, agent_manager, bot_service, settings, registry
-        ).rollback(activation_id)
+        ).rollback(activation_id, keep_modules=keep_modules)
     except BundleError as e:
         return _err(400, str(e), e.code, e.hint)
     return _ok("已回滚", **result)
@@ -419,10 +467,11 @@ async def api_bundles_uninstall(
     except Exception:  # noqa: BLE001 —— 允许空 body（卸载全部账号的激活）
         body = {}
     account_id = str((body or {}).get("account_id") or "").strip() or None
+    keep_modules = bool((body or {}).get("keep_modules")) if isinstance(body, dict) else False
     try:
         result = await _service(
             config_service, agent_manager, bot_service, settings, registry
-        ).uninstall(bundle_id, account_id)
+        ).uninstall(bundle_id, account_id, keep_modules=keep_modules)
     except BundleError as e:
         return _err(400, str(e), e.code, e.hint)
     return _ok("预设已卸载", **result)

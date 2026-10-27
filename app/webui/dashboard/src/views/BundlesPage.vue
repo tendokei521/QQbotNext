@@ -5,7 +5,7 @@
  */
 import { computed, onMounted, reactive, ref } from 'vue'
 import { displayName, useBotsStore } from '@/stores/bots'
-import { useBundlesStore, type ExportModuleOption, type ReusePreset } from '@/stores/bundles'
+import { useBundlesStore, type BundleHealth, type ExportModuleOption, type ReusePreset } from '@/stores/bundles'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
@@ -45,7 +45,14 @@ const applyResult = ref<{
   plan: { creates: any[]; updates: any[]; reused_provider_preset_id?: string }
   modules_installed?: string[]
   modules_upgraded?: string[]
+  health?: BundleHealth
 } | null>(null)
+
+// ---- 卸载（P7-6：可保留随包模块） ----
+const uninstallDialog = ref(false)
+const uninstallTarget = ref<{ id: string; name: string } | null>(null)
+const keepModules = ref(false)
+const uninstalling = ref(false)
 
 function statusText(status: string): string {
   return {
@@ -99,12 +106,26 @@ async function doApply() {
 }
 
 async function onUninstall(bundleId: string) {
-  if (!window.confirm('卸载这个预设？会回滚它应用到当前账号的改动，并删除工件文件。')) return
+  const target = bundles.list.find((item) => item.id === bundleId)
+  uninstallTarget.value = { id: bundleId, name: target?.name || bundleId }
+  keepModules.value = false
+  uninstallDialog.value = true
+}
+
+async function doUninstall() {
+  if (!uninstallTarget.value) return
+  uninstalling.value = true
   try {
-    await bundles.uninstallBundle(bundleId)
-    notify.push('预设已卸载', 'success')
+    await bundles.uninstallBundle(uninstallTarget.value.id, keepModules.value)
+    notify.push(
+      keepModules.value ? '预设已卸载（模块保留）' : '预设已卸载',
+      'success',
+    )
+    uninstallDialog.value = false
   } catch (err) {
     notify.push(errorMessage(err), 'error')
+  } finally {
+    uninstalling.value = false
   }
 }
 
@@ -452,6 +473,31 @@ onMounted(async () => {
             <template v-if="applyResult.modules_upgraded?.length">
               <div>已升级随包模块：{{ applyResult.modules_upgraded.join('、') }}</div>
             </template>
+            <template v-if="applyResult.health">
+              <div class="mt-1">
+                自检：
+                <v-chip
+                  size="x-small"
+                  :color="applyResult.health.ok ? 'success' : 'warning'"
+                  variant="tonal"
+                >
+                  {{ applyResult.health.ok ? '已就绪' : '有待确认项' }}
+                </v-chip>
+              </div>
+              <div
+                v-for="mod in applyResult.health.modules"
+                :key="mod.name"
+                class="text-caption"
+              >
+                模块 {{ mod.name }}：{{ mod.loaded && !mod.error ? '已加载' : (mod.error || '未加载') }}
+              </div>
+              <div
+                v-if="!applyResult.health.agent.persona || !applyResult.health.agent.provider_preset || !applyResult.health.agent.provider_model"
+                class="text-caption"
+              >
+                账号引用不完整（人格 / Provider / 模型），请检查后再使用。
+              </div>
+            </template>
           </v-alert>
         </v-card-text>
         <v-card-actions>
@@ -465,6 +511,32 @@ onMounted(async () => {
             @click="doApply"
           >
             确认应用
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="uninstallDialog" max-width="520">
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon icon="mdi-delete-outline" class="mr-2" color="error" />
+          卸载「{{ uninstallTarget?.name }}」
+        </v-card-title>
+        <v-card-text class="text-body-2">
+          会回滚它应用到当前账号的改动，并删除工件文件（其它账号仍在用的会保留）。
+          <v-checkbox
+            v-model="keepModules"
+            density="compact"
+            hide-details
+            class="mt-2"
+            label="保留随包安装的模块（只回滚配置，模块与来源标记都留下）"
+          />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="uninstallDialog = false">取消</v-btn>
+          <v-btn color="error" variant="tonal" :loading="uninstalling" @click="doUninstall">
+            确认卸载
           </v-btn>
         </v-card-actions>
       </v-card>

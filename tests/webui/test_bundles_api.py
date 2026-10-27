@@ -371,6 +371,12 @@ class _FakeRegistry:
     def catalog_entries(self):
         return []
 
+    def loaded_map(self):
+        return {}
+
+    def load_error(self, name):
+        return None
+
     async def install_from_zip(self, path, *, force=False):
         from app.application.bundle.module_packages import read_module_identity
 
@@ -451,5 +457,40 @@ async def test_import_requires_code_consent(container, config_service, tmp_path)
 
     assert resp.status_code == 400
     assert resp.json()["code"] == "BUNDLE_CODE_CONSENT_REQUIRED"
+
+
+async def test_apply_returns_health_and_can_keep_modules_on_uninstall(
+    container, config_service, tmp_path
+):
+    """P7-6：应用后自检 + 卸载时可选保留随包模块。"""
+    await _seed_account(config_service)
+    registry = _FakeRegistry()
+    client = _client_with_registry(container, registry)
+    data = _bundle_with_module(tmp_path)
+    assert client.post(
+        "/api/bundles/import",
+        files={"file": ("b.zip", data, "application/zip")},
+        data={"accept_code": "true"},
+    ).status_code == 200
+
+    applied = client.post("/api/bundles/mod-pack/apply", json={"account_id": "acc1"})
+    assert applied.status_code == 200, applied.text
+    body = applied.json()
+    health = body["health"]
+    assert health["agent"] == {
+        "persona": True, "provider_preset": True, "provider_model": True,
+    }
+    assert [item["name"] for item in health["modules"]] == ["demo_mod"]
+    assert health["modules"][0]["loaded"] is False  # 替身安装器不会真的加载
+
+    uninstalled = client.post(
+        "/api/bundles/mod-pack/uninstall",
+        json={"account_id": "acc1", "keep_modules": True},
+    )
+    assert uninstalled.status_code == 200, uninstalled.text
+    body = uninstalled.json()
+    assert body["modules_kept"] == ["demo_mod"]
+    assert registry.uninstalled == [], "keep_modules 时不能卸载模块"
+    assert body["deleted_artifact"] is True
 
 

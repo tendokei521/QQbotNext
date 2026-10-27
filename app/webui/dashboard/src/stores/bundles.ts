@@ -94,6 +94,13 @@ export interface ActivationRecord {
   error?: string
 }
 
+/** 应用后自检结果（模块是否真的加载、账号引用是否落位） */
+export interface BundleHealth {
+  ok: boolean
+  agent: { persona: boolean; provider_preset: boolean; provider_model: boolean }
+  modules: { name: string; loaded: boolean; error: string }[]
+}
+
 export interface ApplyResult {
   activation_id: string
   status: string
@@ -200,7 +207,7 @@ export const useBundlesStore = defineStore('bundles', () => {
     secrets: Record<string, string>,
     acceptCode = false,
     reusePresetId = '',
-  ): Promise<BundleReport & { apply?: ApplyResult }> {
+  ): Promise<BundleReport & { apply?: ApplyResult; health?: BundleHealth }> {
     importing.value = true
     applying.value = true
     try {
@@ -212,7 +219,7 @@ export const useBundlesStore = defineStore('bundles', () => {
       if (reusePresetId) form.append('reuse_provider_preset_id', reusePresetId)
       const res = await http.post('/api/bundles/import-apply', form)
       await Promise.all([load(), loadActivations(accountId)])
-      return res.data
+      return res.data as BundleReport & { apply?: ApplyResult; health?: BundleHealth }
     } finally {
       importing.value = false
       applying.value = false
@@ -284,7 +291,7 @@ export const useBundlesStore = defineStore('bundles', () => {
     accountId: string,
     secrets: Record<string, string>,
     reusePresetId = '',
-  ): Promise<ApplyResult> {
+  ): Promise<ApplyResult & { health?: BundleHealth }> {
     applying.value = true
     try {
       const res = await http.post(`/api/bundles/${encodeURIComponent(id)}/apply`, {
@@ -293,7 +300,7 @@ export const useBundlesStore = defineStore('bundles', () => {
         ...(reusePresetId ? { reuse_provider_preset_id: reusePresetId } : {}),
       })
       await Promise.all([load(), loadActivations(accountId)])
-      return res.data as ApplyResult
+      return res.data as ApplyResult & { health?: BundleHealth }
     } finally {
       applying.value = false
     }
@@ -310,12 +317,13 @@ export const useBundlesStore = defineStore('bundles', () => {
     await loadActivations()
   }
 
-  /** 卸载预设：回滚本账号的激活 + 清理记账；无引用时后端删除工件文件 */
-  async function uninstallBundle(id: string): Promise<void> {
+  /** 卸载预设：回滚本账号的激活 + 清理记账；无引用时后端删除工件文件。
+   *  ``keepModules=true``：只回滚配置，保留随包安装的模块。 */
+  async function uninstallBundle(id: string, keepModules = false): Promise<void> {
     const accountId = bots.currentAccountId
     await http.post(
       `/api/bundles/${encodeURIComponent(id)}/uninstall`,
-      accountId ? { account_id: accountId } : {},
+      { ...(accountId ? { account_id: accountId } : {}), keep_modules: keepModules },
     )
     await Promise.all([load(), loadActivations(accountId)])
   }

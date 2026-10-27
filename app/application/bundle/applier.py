@@ -621,7 +621,12 @@ class BundleApplier:
 
     # ==================== 回滚 ====================
 
-    async def rollback(self, activation_id: str) -> dict:
+    async def rollback(self, activation_id: str, *, keep_modules: bool = False) -> dict:
+        """回滚一次激活。
+
+        ``keep_modules=True``：只回滚配置、**保留**本次新装的模块（模块来源台账也保留），
+        用于"卸载预设但想继续用这些插件"的场景。
+        """
         db = self.config_service.db
         row = await db.fetchone("SELECT * FROM bundle_activations WHERE id = ?", (activation_id,))
         if row is None:
@@ -631,7 +636,11 @@ class BundleApplier:
             return {"activation_id": activation_id, "status": "rolled_back", "restored": []}
 
         restored = await self._restore(snapshot)
-        removed_modules = await self._uninstall_modules(snapshot.get("modules_installed") or [])
+        removed_modules = (
+            []
+            if keep_modules
+            else await self._uninstall_modules(snapshot.get("modules_installed") or [])
+        )
         await db.execute(
             "UPDATE bundle_activations SET status = ?, finished_at = ? WHERE id = ?",
             ("rolled_back", int(time.time()), activation_id),
@@ -645,6 +654,7 @@ class BundleApplier:
             "status": "rolled_back",
             "restored": restored,
             "modules_uninstalled": removed_modules,
+            "modules_kept": list(snapshot.get("modules_installed") or []) if keep_modules else [],
         }
 
     async def _restore(self, snapshot: dict) -> list[str]:

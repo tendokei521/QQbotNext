@@ -10,6 +10,7 @@ import { displayName, useBotsStore } from '@/stores/bots'
 import {
   useBundlesStore,
   type ApplyResult,
+  type BundleHealth,
   type BundleReport,
   type ReusePreset,
 } from '@/stores/bundles'
@@ -32,6 +33,7 @@ const file = ref<File | null>(null)
 const report = ref<BundleReport | null>(null)
 const result = ref<{ bundle: { name: string; version: string } } | null>(null)
 const applied = ref<ApplyResult | null>(null)
+const health = ref<BundleHealth | null>(null)
 const importedOnly = ref(false)
 const acceptCode = ref(false)
 const error = ref('')
@@ -61,6 +63,7 @@ function reset() {
   report.value = null
   result.value = null
   applied.value = null
+  health.value = null
   importedOnly.value = false
   acceptCode.value = false
   reusePresetId.value = null
@@ -140,6 +143,7 @@ async function confirmApply() {
     )
     result.value = { bundle: response.bundle }
     applied.value = response.apply || null
+    health.value = response.health || null
     importedOnly.value = false
     screen.value = 'result'
     notify.push('预设已导入并应用到账号', 'success')
@@ -397,6 +401,17 @@ function formatSize(bytes: number): string {
             </template>
             <template v-if="applied.modules_upgraded?.length">
               <div>已升级随包模块：{{ applied.modules_upgraded.join('、') }}</div>
+            </template>
+            <template v-if="health">
+              <div class="mt-1">
+                自检：
+                <v-chip size="x-small" :color="health.ok ? 'success' : 'warning'" variant="tonal">
+                  {{ health.ok ? '已就绪' : '有待确认项' }}
+                </v-chip>
+              </div>
+              <div v-for="mod in health.modules" :key="mod.name" class="text-caption">
+                模块 {{ mod.name }}：{{ mod.loaded && !mod.error ? '已加载' : (mod.error || '未加载') }}
+              </div>
             </template>
           </v-alert>
           <v-alert v-else type="warning" variant="tonal" density="compact">
