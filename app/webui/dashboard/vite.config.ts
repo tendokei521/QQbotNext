@@ -44,9 +44,17 @@ export default defineConfig({
     outDir: 'dist',
     assetsDir: 'assets',
     chunkSizeWarningLimit: 1500,
-    // 不在每次构建时清空 dist：旧 chunk 留着，正在使用的页面不会因为
-    // 哈希失配而 import() 404。累积的旧文件用 scripts/prune_dist.py 清理。
-    emptyOutDir: false,
+    // 每次构建清空 dist。
+    //
+    // 历史：这里曾是 `emptyOutDir: false`，理由是"旧 chunk 留着，正在使用的页面
+    // 不会因为哈希失配而 import() 404"。代价是构建产物无限累积（实测 1077 个文件 /
+    // 15 MB，其中绝大多数是无引用的历史 chunk），只能靠手动跑 `scripts/prune_dist.py`；
+    // 而那个脚本按"最近 7 天"删文件，会误删懒加载 chunk（它们不在 index.html 里）。
+    //
+    // 现在选择"干净构建"：仓库里的 dist 就是一次完整构建的结果，可复现、可审查。
+    // 升级到新版本时，已经打开的旧页面需要刷新——这是可接受的（后端 index.html 每次
+    // 都返回 no-cache，刷新即拿到新 chunk）。
+    emptyOutDir: true,
   },
   server: {
     port: 3000,
