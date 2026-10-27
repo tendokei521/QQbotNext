@@ -132,6 +132,37 @@ P2–P4 只迁"配置参数"：第三方模块换机后不会出现、人格只�
 
 ---
 
+## P7 预设一键化（2026-10-27 追加）
+
+目标：把 §7 设计的"一键导入就能用"在预设中心内落地（方案见
+[`../oneclick-bundle-and-onboarding-design.md`](../oneclick-bundle-and-onboarding-design.md) §5.8）。
+验收口径：
+
+1. 导入对话框能逐条看到**模块清单**（随包/将安装/将升级/缺依赖）；勾选「我信任模块代码」后**一次点击**完成「导入 + 应用」；
+2. 应用后模块页显示「来自预设「xxx」」，结果卡显示自检（agent 引用 + 模块加载状态）；
+3. 导出可勾选打包哪些模块（含体积预估），卡片显示「含模块 N（随包 M）」；
+4. 缺 pip 依赖 / 与内置同名在**预检**就被拦（附修复命令），不会"应用成功但模块起不来"；
+5. 应用可复用本机已有 Provider 密钥；卸载可选「保留随包模块」；
+6. 首启向导第 3 步可直接选已导入预设或**导入 .zip 预设包**并应用。
+
+| 编号 | commit | 一句话 | 验证 |
+|---|---|---|---|
+| P7-1 | `7630c66` | 模块来源台账 `module_origins` + 模块页「来自预设」徽标 | `pytest tests/application/test_bundle_modules.py tests/webui/test_module_api.py -q` |
+| P7-2 | `9369982` | 一键「导入并应用」`POST /api/bundles/import-apply` + 导入对话框内联填密钥 | `pytest tests/webui/test_bundles_api.py -q` |
+| P7-3 | `f4b162b` | 导出可选模块（`export-options` + `modules=`）+ 预检模块清单 + 卡片摘要 | 同上 |
+| P7-4 | `77d8e08` | 模块依赖预检（pip 缺包拦截）+ 内置同名拦截 + 模块代码信任勾选 | 同上 + `tests/application/test_bundle_modules.py` |
+| P7-5 | `523163d` | 应用时复用本机已有 Provider 预设密钥（`reuse_provider_preset_id`） | 同上 |
+| P7-6 | `bd6d9bb` | 应用后自检 `health` + 卸载/回滚 `keep_modules` 保留模块 | 同上 |
+| P7-7 | `1ce6852` | 首启向导第 3 步：选预设 / 导入预设包 / 一键应用 | `npm run build`（vue-tsc + vite） |
+| 修复 | `ebc78ea` | 依赖探测失败改为记日志（不再静默吞异常） | `pytest tests/architecture -q` |
+| P7-8 | 本条文档提交（见 `git log`） | 文档：设计稿 §5.8 / CHANGELOG / 本清单 | 纯文档 |
+
+**风险与回滚**：`import-apply` 失败时**保留已登记工件**并返回 `imported=true`（补密钥后可在列表重试）；
+模块安装仍在配置事务之前，失败路径与 P6 一致（先回滚配置、只卸本次新装模块）。
+自动 pip 安装不做（只预检），避免引入任意代码执行面。
+
+---
+
 ## 风险与回滚
 
 | 阶段 | 风险 | 回滚 |

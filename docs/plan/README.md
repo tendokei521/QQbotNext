@@ -30,6 +30,7 @@
 | **P4** | 更新/卸载/值校验器 | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p4-更新卸载值校验器) |
 | **P5** | 发行包（协议端托管已撤销） | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p5-发行包协议端托管已撤销) |
 | **P6** | 预设迁移补齐（随包模块 / 人格卡 / 模型池 / 密钥回写） | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p6-预设迁移补齐2026-10-27-追加) |
+| **P7** | 预设一键化（来源台账 / 导入并应用 / 依赖预检 / 密钥复用 / 向导接入） | `[x]` | [`onboarding-bundle.md`](onboarding-bundle.md#p7-预设一键化2026-10-27-追加) |
 | **R0** | 群列表（缓存 + 刷新） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r0-群列表) |
 | **R1** | 策略底座（群级覆盖 + 解析） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r1-策略底座) |
 | **R2** | 简单视图（群开关矩阵） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r2-简单视图) |
@@ -140,6 +141,14 @@ P0 里风险最低、收益最直接的三项（半小时级）：
 | P6-4 | `71a1605` 预设 API：registry 编目 + 安装器适配（走既有 zip 安装通道） |
 | P6-5 | `cae61cf` + `ab93f8e` 预设中心 UI：预检「随包模块/将安装」、应用结果「已安装/已升级」、过期文案修正、必填密钥交后端判定 + dist 重建 |
 | P6-6 | 本文档提交（见 `git log`） 文档：设计稿 §5.7 / CHANGELOG / P6 清单 |
+| P7-1 | `7630c66` 模块来源台账 `module_origins` + 模块页「来自预设」徽标 |
+| P7-2 | `9369982` 一键「导入并应用」+ 导入对话框内联填密钥 |
+| P7-3 | `f4b162b` 导出可选模块 + 预检模块清单 + 卡片「含模块 N（随包 M）」 |
+| P7-4 | `77d8e08` 模块依赖预检（pip 缺包/内置同名拦截）+ 模块代码信任勾选 |
+| P7-5 | `523163d` 应用复用本机已有 Provider 密钥 |
+| P7-6 | `bd6d9bb` 应用后自检 `health` + 卸载 `keep_modules` 保留模块 |
+| P7-7 | `1ce6852` 首启向导第 3 步选预设 / 导入预设包 / 一键应用 |
+| P7-8 | 本文档提交（见 `git log`） 文档：设计稿 §5.8 / CHANGELOG / P7 清单 |
 
 > **2026-10-27 范围撤销**：QQ 协议端是用户的外部依赖，本项目不托管（不装/不启停/不扫码/不维护清单）。
 > 相关代码与「协议端」页面已删除，UI/API/文档同步；依据见 [`../onebot-v11-connection-scope.md`](../onebot-v11-connection-scope.md)。

@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+### 新增：预设中心「一键化」——来源、依赖预检、密钥复用、向导接入
+
+目标是把"导入 → 应用 → 可用"压到两次点击，并让随包模块的来源/依赖/安全边界透明：
+
+- **模块来源台账**：新表 `module_origins`（按模块名记最后来源）。预设装/升级模块时写台账、
+  回滚卸载时清；`GET /api/modules` 合并 `origin`，模块页显示「来自预设「xxx」」徽标（可点回预设中心）。
+- **一键导入并应用**：新增 `POST /api/bundles/import-apply`（file + account_id + secrets +
+  accept_code + reuse_provider_preset_id）；导入对话框内联填密钥，预检通过后一次点击完成
+  导入 + 应用。应用失败保留已登记工件（`imported=true`），补密钥后可在列表重试。
+- **导出可选模块**：新增 `GET /api/bundles/export-options`（名称/版本/内置/体积/启停），
+  导出接受 `modules=a,b`；预设卡片显示「含模块 N（随包 M）」。
+- **预检模块清单**：报告新增 `modules[]`（随包/将安装/将升级/已满足/缺失 + 体积 + 缺失依赖），
+  导入对话框逐条渲染。
+- **依赖与信任前置**：解析模块 `module.json` 的 `requirements` 文件并比对当前环境，
+  缺包直接 `BUNDLE_MODULE_DEP_MISSING`（附 `pip install` 命令，框架不自动安装）；
+  随包模块与内置同名 → `BUNDLE_MODULE_BUILTIN_CONFLICT`；含模块代码的预设必须勾选
+  「我信任此预设的模块代码」，否则后端 `BUNDLE_CODE_CONSENT_REQUIRED`。
+- **密钥复用**：应用/一键导入可传 `reuse_provider_preset_id`，直接复用本机已连通的
+  Provider 预设密钥（手填 > 复用 > 上次创建）。
+- **应用后自检 + 卸载保留**：应用响应带 `health`（agent 引用是否落位、随包模块是否加载、
+  加载错误原因）；卸载/回滚支持 `keep_modules=true`（只回滚配置，模块与来源都保留）。
+- **首启向导接入**：向导第 3 步「选预设 / 导入预设包」：列出已导入预设、可直接导入 .zip、
+  内联填密钥并一键应用（以预设里的模型连接为准）。
+
+验证：`pytest tests/application/test_bundle_modules.py tests/webui/test_bundles_api.py
+tests/webui/test_module_api.py -q` + `npm run build`；逐项 commit 见
+[`docs/plan/onboarding-bundle.md#p7`](docs/plan/onboarding-bundle.md#p7-预设一键化2026-10-27-追加)。
+
 ### 新增：预设迁移补齐——随包模块 / 人格卡 / 模型池全量 / 密钥回写
 
 此前预设只迁"参数"：第三方模块只声明依赖（换机后模块不会出现）、人格只带

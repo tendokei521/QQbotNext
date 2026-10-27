@@ -391,6 +391,27 @@
 （`channel_overrides`）、global 默认层、模块运行时数据目录、知识库/记忆内容等资源文件、
 模块代码之外的依赖安装（pip 包由部署环境负责）。
 
+### 5.8 P7 一键化落地（2026-10-27）
+
+目标：**导入 → 应用 → 可用** 只点两次（选包 → 导入并应用）。在 §5.7 之上补了 7 件事：
+
+| 能力 | 落地方式 |
+|---|---|
+| 模块来源「来自预设 xxx」 | 新表 `module_origins`（module_name 主键）；装/升级时记台账、回滚卸载时清；`GET /api/modules` 合并 `origin`，模块页展示可点徽标 |
+| 一键导入并应用 | `POST /api/bundles/import-apply`（file + account_id + secrets + accept_code + reuse_provider_preset_id），应用失败返回 `imported=true` 保留工件可重试；导入对话框内联填密钥 |
+| 导出可选模块 | `GET /api/bundles/export-options` 输出模块名/版本/内置/体积；导出接受 `modules=a,b`；卡片显示「含模块 N（随包 M）」 |
+| 预检模块清单 | 报告新增 `modules[]`（name/version/bundled/action/package_size/missing_requirements），导入对话框逐条渲染 |
+| 依赖与信任 | 解析模块 `module.json` 的 `requirements` 文件 → 用 `importlib.metadata` 比对，缺包 `BUNDLE_MODULE_DEP_MISSING`（含 pip 命令）；随包模块与内置同名 → `BUNDLE_MODULE_BUILTIN_CONFLICT`；含代码包必须勾选「我信任此预设的模块代码」（后端 `BUNDLE_CODE_CONSENT_REQUIRED`） |
+| 密钥复用 | 应用可传 `reuse_provider_preset_id`，从本机已有 Provider 预设取 Key（优先级：手填 > 复用 > 上次创建）；前端应用/导入对话框都有「复用本机 Provider 密钥」下拉 |
+| 应用后自检 + 卸载保留 | 应用响应带 `health`（agent 引用 + 模块 loaded/error）；卸载/回滚支持 `keep_modules=true` 只回滚配置、保留模块与来源 |
+| 首启向导选预设 | 向导第 3 步「选预设 / 导入预设包」：列已导入预设、可再次导入 .zip、内联填密钥并应用（会覆盖第 2 步的模型连接） |
+
+新增错误码：`BUNDLE_CODE_CONSENT_REQUIRED`、`BUNDLE_MODULE_DEP_MISSING`、
+`BUNDLE_MODULE_BUILTIN_CONFLICT`、`BUNDLE_REUSE_PRESET_NOT_FOUND`、
+`BUNDLE_REUSE_PRESET_EMPTY`。
+
+**边界不变**：自动 pip 安装**不做**（只预检拦截）；模块运行时数据、账号接入、群策略仍不迁移。
+
 ---
 
 ## 6. 后端设计
