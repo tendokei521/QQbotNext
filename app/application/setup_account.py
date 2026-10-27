@@ -179,19 +179,11 @@ class SetupAccountService:
 
         bots = self.config_service.get_bots()
         current = await self.current()
-        current_id = str(current["account_id"]) if current else ""
 
-        # 默认地址与账号管理同源（endpoint.suggest_address），这里不再维护第二份默认值：
-        # - 反向必须能监听 → 留空时按已有账号避让端口自动分配；
-        # - 正向留空 = 等用户填对端地址（不预填本地地址）。
+        # 地址取值规则（都在 normalize_listen_address 里）：
+        # - 反向留空 → 默认 ws://127.0.0.1:4001/（见 default_listen_address）；
+        # - 正向留空 → 保持空，等用户填对端地址。
         address = normalize_listen_address(ws_url, mode)
-        if not address and is_reverse(mode):
-            existing = [
-                str(bot.get("ws_url") or "")
-                for bot in bots
-                if str(bot.get("id")) != current_id
-            ]
-            address = default_listen_address(existing)
         if address:
             try:
                 parse_endpoint(address, require_port=is_reverse(mode))
