@@ -129,9 +129,12 @@ event.is_member
 
 | 账号 | 默认 | 说明 |
 |---|---|---|
-| 新建账号 | **关** | 「加个号」不等于「整套功能上线」。用户显式打开某个模块才产生 account 层覆盖。 |
+| 新建账号 | **关**（例外见下） | 「加个号」不等于「整套功能上线」。用户显式打开某个模块才产生 account 层覆盖。 |
 | 升级前的存量账号 | 开 | 升级补列默认 1，行为不变；账号 id 改名时该值跟着搬（不会因改名变关）。 |
 | 框架级 Agent | 开 | Agent 不读这个默认值（关掉会让新账号完全静默）；要静默用 Agent 自己的开关。 |
+
+**例外（`DEFAULT_ENABLED_MODULES`）**：`llm_tools_extra`（OneBot 工具 / MCP）对新账号默认**开**——
+装好就能让模型用发送/查询类工具，不产生对外副作用；用户仍可在模块页显式关掉。
 
 - 群级开关走 `channel_overrides`（见 [`permission-dialogue-policy-design.md`](permission-dialogue-policy-design.md)），与本默认值正交。
 - 只改权限/名单不会把模块打开：开关状态随 `ModuleAuthority` 的当前值一起保存。
