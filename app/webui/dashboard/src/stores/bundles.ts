@@ -45,6 +45,27 @@ export interface InstalledBundle {
   secrets?: BundleSecret[]
 }
 
+export interface ActivationRecord {
+  id: string
+  bundle_id: string
+  account_id: string
+  status: 'applying' | 'active' | 'failed' | 'rolled_back' | string
+  started_at: number
+  finished_at: number
+  error?: string
+}
+
+export interface ApplyResult {
+  activation_id: string
+  status: string
+  plan: {
+    bundle: { id: string; name: string; version: string }
+    creates: { kind: string; name: string }[]
+    updates: { target: string; keys: string[] }[]
+    secrets_required: BundleSecret[]
+  }
+}
+
 function _triggerDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
@@ -69,9 +90,11 @@ function _filenameFrom(disposition: string | undefined, fallback: string): strin
 export const useBundlesStore = defineStore('bundles', () => {
   const bots = useBotsStore()
   const list = ref<InstalledBundle[]>([])
+  const activations = ref<ActivationRecord[]>([])
   const loading = ref(false)
   const validating = ref(false)
   const importing = ref(false)
+  const applying = ref(false)
   const error = ref('')
 
   async function load(): Promise<void> {
@@ -142,15 +165,58 @@ export const useBundlesStore = defineStore('bundles', () => {
     )
   }
 
+  async function loadActivations(accountId?: string | null): Promise<void> {
+    const aid = accountId || bots.currentAccountId
+    if (!aid) {
+      activations.value = []
+      return
+    }
+    try {
+      const res = await http.get('/api/bundles/activations', { params: { account_id: aid } })
+      activations.value = res.data?.activations || []
+    } catch (err) {
+      error.value = errorMessage(err)
+    }
+  }
+
+  /** 应用到账号：写账号配置（事务 + 快照；失败后端自动回滚） */
+  async function applyBundle(
+    id: string,
+    accountId: string,
+    secrets: Record<string, string>,
+  ): Promise<ApplyResult> {
+    applying.value = true
+    try {
+      const res = await http.post(`/api/bundles/${encodeURIComponent(id)}/apply`, {
+        account_id: accountId,
+        secrets,
+      })
+      await Promise.all([load(), loadActivations(accountId)])
+      return res.data as ApplyResult
+    } finally {
+      applying.value = false
+    }
+  }
+
+  async function rollbackActivation(activationId: string): Promise<void> {
+    await http.post(`/api/activations/${encodeURIComponent(activationId)}/rollback`)
+    await loadActivations()
+  }
+
   return {
     list,
+    activations,
     loading,
     validating,
     importing,
+    applying,
     error,
     load,
+    loadActivations,
     validateFile,
     importFile,
+    applyBundle,
+    rollbackActivation,
     download,
     exportAccount,
   }

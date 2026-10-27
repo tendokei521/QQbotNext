@@ -6,7 +6,6 @@
  * 暂时不能做的：应用到账号/回滚（P3）——界面上明确写出来，避免"装了没生效"。
  */
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { displayName, useBotsStore } from '@/stores/bots'
 import { useBundlesStore } from '@/stores/bundles'
 import { useNotifyStore } from '@/stores/notify'
@@ -14,7 +13,6 @@ import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
 import BundleImportDialog from '@/components/bundles/BundleImportDialog.vue'
 
-const router = useRouter()
 const bots = useBotsStore()
 const bundles = useBundlesStore()
 const notify = useNotifyStore()
@@ -28,6 +26,68 @@ const exportForm = reactive({
   version: '1.0.0',
   description: '',
 })
+
+// ---- 应用到账号（P3） ----
+const applyDialog = ref(false)
+const applyTarget = ref<{ id: string; name: string; version: string; secrets?: { key: string; label: string; required: boolean }[] } | null>(null)
+const applySecrets = reactive<Record<string, string>>({})
+const applyResult = ref<{ activation_id: string; plan: { creates: any[]; updates: any[] } } | null>(null)
+
+function statusText(status: string): string {
+  return {
+    active: '已应用',
+    failed: '失败（已回滚）',
+    rolled_back: '已回滚',
+    applying: '应用中…',
+  }[status] || status
+}
+
+function statusColor(status: string): string {
+  return status === 'active' ? 'success' : status === 'failed' ? 'error' : status === 'rolled_back' ? 'grey' : 'warning'
+}
+
+function openApply(item: { id: string; name: string; version: string; secrets?: { key: string; label: string; required: boolean }[] }) {
+  if (!exportEnabled.value) {
+    notify.push('先在顶部选择一个账号', 'warning')
+    return
+  }
+  applyTarget.value = item
+  applyResult.value = null
+  Object.keys(applySecrets).forEach((key) => delete applySecrets[key])
+  for (const secret of item.secrets || []) applySecrets[secret.key] = ''
+  applyDialog.value = true
+}
+
+async function doApply() {
+  if (!applyTarget.value || !bots.currentAccountId) return
+  const missing = (applyTarget.value.secrets || []).filter(
+    (secret) => secret.required && !applySecrets[secret.key]?.trim(),
+  )
+  if (missing.length) {
+    notify.push(`还需要填写：${missing.map((item) => item.label).join('、')}`, 'warning')
+    return
+  }
+  try {
+    applyResult.value = await bundles.applyBundle(
+      applyTarget.value.id,
+      bots.currentAccountId,
+      { ...applySecrets },
+    )
+    notify.push('已应用到当前账号', 'success')
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  }
+}
+
+async function onRollback(activationId: string) {
+  if (!window.confirm('回滚这次应用？应用时创建的对象会被删除，账号配置恢复到应用前。')) return
+  try {
+    await bundles.rollbackActivation(activationId)
+    notify.push('已回滚', 'success')
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  }
+}
 
 const accountName = computed(() => {
   const bot = bots.bots.find((item) => item.id === bots.currentAccountId)
@@ -92,6 +152,7 @@ async function doExport() {
 onMounted(async () => {
   if (!bots.bots.length) await bots.fetchBots()
   await bundles.load()
+  await bundles.loadActivations()
 })
 </script>
 
@@ -154,17 +215,55 @@ onMounted(async () => {
             <div>大小：{{ formatSize(item.size) }}</div>
           </v-card-text>
           <v-card-actions>
+            <v-btn
+              size="small"
+              color="primary"
+              variant="tonal"
+              prepend-icon="mdi-play-circle-outline"
+              :disabled="!exportEnabled"
+              @click="openApply(item)"
+            >
+              应用到账号
+            </v-btn>
             <v-btn size="small" variant="text" prepend-icon="mdi-download" @click="onDownload(item.id)">
               下载
             </v-btn>
             <v-spacer />
-            <v-btn size="small" variant="text" prepend-icon="mdi-tune" @click="router.push('/policy')">
-              相关配置
-            </v-btn>
           </v-card-actions>
         </v-card>
       </v-col>
     </v-row>
+
+    <v-card v-if="bundles.activations.length" variant="outlined" class="mt-4">
+      <v-card-title class="text-body-1">
+        <v-icon icon="mdi-history" class="mr-2" color="primary" /> 应用记录
+      </v-card-title>
+      <v-card-text>
+        <div
+          v-for="record in bundles.activations"
+          :key="record.id"
+          class="d-flex align-center flex-wrap gap-2 py-1"
+        >
+          <v-chip size="x-small" :color="statusColor(record.status)" variant="tonal">
+            {{ statusText(record.status) }}
+          </v-chip>
+          <span class="text-body-2">{{ record.bundle_id }}</span>
+          <span class="text-caption" style="opacity: 0.6">{{ formatTime(record.started_at) }}</span>
+          <span v-if="record.error" class="text-caption text-error">{{ record.error }}</span>
+          <v-spacer />
+          <v-btn
+            v-if="record.status === 'active'"
+            size="x-small"
+            variant="text"
+            color="warning"
+            prepend-icon="mdi-undo-variant"
+            @click="onRollback(record.id)"
+          >
+            回滚
+          </v-btn>
+        </div>
+      </v-card-text>
+    </v-card>
 
     <BundleImportDialog v-model="importDialog" @imported="bundles.load()" />
 
@@ -186,6 +285,56 @@ onMounted(async () => {
           <v-spacer />
           <v-btn variant="text" @click="exportDialog = false">取消</v-btn>
           <v-btn color="primary" variant="tonal" :loading="exporting" @click="doExport">导出</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="applyDialog" max-width="620">
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon icon="mdi-play-circle-outline" class="mr-2" color="primary" />
+          应用到「{{ accountName }}」
+        </v-card-title>
+        <v-card-text>
+          <template v-if="!applyResult">
+            <v-alert type="info" variant="tonal" density="compact" class="mb-3">
+              <div class="text-caption">
+                应用会创建人格/模型并写入该账号配置；失败会自动回滚，不留半套配置。
+                应用后可在「应用记录」里一键回滚。
+              </div>
+            </v-alert>
+            <div class="text-body-2 mb-2">
+              {{ applyTarget?.name }} <span style="opacity: 0.6">v{{ applyTarget?.version }}</span>
+            </div>
+            <v-text-field
+              v-for="secret in applyTarget?.secrets || []"
+              :key="secret.key"
+              v-model="applySecrets[secret.key]"
+              :label="secret.label"
+              :placeholder="secret.required ? '必填（不随包分发）' : '可选'"
+              type="password"
+              density="comfortable"
+              variant="outlined"
+              autocomplete="off"
+            />
+          </template>
+          <v-alert v-else type="success" variant="tonal" density="compact">
+            已应用（激活 {{ applyResult.activation_id }}）：
+            新建 {{ applyResult.plan.creates.length }} 项、更新 {{ applyResult.plan.updates.length }} 处。
+          </v-alert>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="applyDialog = false">关闭</v-btn>
+          <v-btn
+            v-if="!applyResult"
+            color="primary"
+            variant="tonal"
+            :loading="bundles.applying"
+            @click="doApply"
+          >
+            确认应用
+          </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
