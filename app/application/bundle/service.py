@@ -1,7 +1,7 @@
-"""套装服务：校验 / 导入登记 / 列表 / 从账号导出。
+"""套装服务：校验 / 导入登记 / 列表 / 导出 / 应用到账号 / 回滚。
 
-P2 阶段只做"工件进得来、看得懂、导得出"——**不写账号配置**；
-应用与回滚在 P3（``bundle_activations``）实现。
+P2 负责"工件进得来、看得懂、导得出"；P3 起增加 `apply` / `rollback`
+（写账号配置走 `ConfigService.apply_ops` 单事务，激活记录兼作 journal）。
 """
 
 from __future__ import annotations
@@ -11,9 +11,11 @@ import time
 from pathlib import Path
 from typing import Any
 
+from app.application.bundle.applier import BundleApplier
 from app.application.bundle.errors import BundleError
 from app.application.bundle.exporter import export_bundle
-from app.application.bundle.validator import validate_bytes
+from app.application.bundle.manifest import normalize_manifest
+from app.application.bundle.validator import inspect_zip, validate_bytes
 
 
 class BundleService:
@@ -35,6 +37,7 @@ class BundleService:
         self.agent_schema = agent_schema
         self.framework_api_version = framework_api_version
         self.framework_version = framework_version
+        self.applier = BundleApplier(config_service)
 
     # ==================== 路径 ====================
 
@@ -187,3 +190,61 @@ class BundleService:
             provider=provider,
             module_configs=module_configs,
         )
+
+
+    # ==================== 应用到账号 / 回滚（P3） ====================
+
+    def _load_parts(self, bundle_id: str) -> tuple[bytes, dict, dict]:
+        """读已登记套装 → (原始字节, 归一清单, 内容物)。"""
+        path = self.bundle_file(bundle_id)
+        if path is None:
+            raise BundleError("BUNDLE_NOT_FOUND", f"套装不存在：{bundle_id}", "先导入套装")
+        data = path.read_bytes()
+        report = self.validate(data)
+        if not report["ok"]:
+            first = next((i for i in report["issues"] if i["level"] == "error"), None)
+            raise BundleError("BUNDLE_INVALID", f"预检未通过：{first['title'] if first else '未知原因'}")
+        manifest_raw, files, _checksums = inspect_zip(data)
+        return data, normalize_manifest(manifest_raw), files
+
+    async def apply(
+        self,
+        bundle_id: str,
+        account_id: str,
+        *,
+        secrets: dict | None = None,
+    ) -> dict:
+        """把套装应用到某账号（事务写 + 快照，失败自动回滚）。"""
+        _, manifest, files = self._load_parts(bundle_id)
+        return await self.applier.apply(
+            bundle_id, str(account_id), manifest, files, secrets=secrets or {}
+        )
+
+    async def rollback(self, activation_id: str) -> dict:
+        return await self.applier.rollback(str(activation_id))
+
+    async def recover_interrupted(self) -> list[str]:
+        return await self.applier.recover_interrupted()
+
+    async def list_activations(self, account_id: str | None = None) -> list[dict]:
+        """激活记录（按时间倒序）。"""
+        db = self.config_service.db
+        if account_id:
+            rows = await db.fetchall(
+                "SELECT * FROM bundle_activations WHERE account_id = ? ORDER BY started_at DESC",
+                (str(account_id),),
+            )
+        else:
+            rows = await db.fetchall("SELECT * FROM bundle_activations ORDER BY started_at DESC")
+        return [
+            {
+                "id": row["id"],
+                "bundle_id": row["bundle_id"],
+                "account_id": row["account_id"],
+                "status": row["status"],
+                "started_at": row["started_at"],
+                "finished_at": row["finished_at"],
+                "error": row["error"],
+            }
+            for row in (rows or [])
+        ]

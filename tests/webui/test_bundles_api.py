@@ -169,3 +169,46 @@ async def test_export_requires_account(container):
     resp = _client(container).get("/api/bundles/export")
     assert resp.status_code == 400
     assert resp.json()["code"] == "BUNDLE_ACCOUNT_REQUIRED"
+
+
+# ==================== 应用 / 回滚（P3） ====================
+
+
+async def test_apply_then_rollback_through_api(container, config_service):
+    await _seed_account(config_service)
+    client = _client(container)
+    data = client.get("/api/bundles/export", params={"account_id": "acc1", "bundle_id": "acc1-pack"}).content
+    imported = client.post("/api/bundles/import", files={"file": ("b.zip", data, "application/zip")})
+    assert imported.status_code == 200, imported.text
+
+    applied = client.post("/api/bundles/acc1-pack/apply", json={
+        "account_id": "acc1",
+        "secrets": {"providers[0].api_key": "sk-imported"},
+    })
+    assert applied.status_code == 200, applied.text
+    body = applied.json()
+    activation_id = body["activation_id"]
+    assert body["status"] == "active"
+
+    agent = config_service.get_module_config("agent", "acc1")
+    assert agent["persona_preset_id"].startswith("role_")
+    assert agent["provider_model_pool"], "导入后模型应入池"
+
+    activations = client.get("/api/bundles/activations", params={"account_id": "acc1"}).json()
+    assert activations["total"] == 1
+
+    rolled = client.post(f"/api/activations/{activation_id}/rollback")
+    assert rolled.status_code == 200, rolled.text
+    assert rolled.json()["status"] == "rolled_back"
+
+    agent_after = config_service.get_module_config("agent", "acc1")
+    assert agent_after["persona_preset_id"] == "role123", "回滚应恢复导入前的引用"
+    activations = client.get("/api/bundles/activations", params={"account_id": "acc1"}).json()
+    assert activations["activations"][0]["status"] == "rolled_back"
+
+
+async def test_apply_unknown_bundle_returns_400(container, config_service):
+    await _seed_account(config_service)
+    resp = _client(container).post("/api/bundles/nope/apply", json={"account_id": "acc1"})
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "BUNDLE_NOT_FOUND"

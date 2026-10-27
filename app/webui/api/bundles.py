@@ -1,6 +1,6 @@
-"""套装 API（P2）：校验 / 导入登记 / 列表 / 下载 / 从账号导出。
+"""套装 API：校验 / 导入登记 / 列表 / 下载 / 从账号导出 / 应用 / 回滚。
 
-本阶段**不应用**到账号（应用与回滚在 P3），所以这些端点不会改任何运行配置。
+P2 的端点不改运行配置；P3 起新增 `apply` / `rollback`（写账号配置走单事务 + 快照）。
 """
 
 from __future__ import annotations
@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 
 from app.application.agent_metadata import agent_config_schema
@@ -184,3 +184,66 @@ async def api_bundles_export(
             "X-Bundle-Id": str(bundle_id or f"account-{account_id}"),
         },
     )
+
+
+# ==================== 应用 / 回滚（P3） ====================
+
+
+@router.post("/bundles/{bundle_id}/apply")
+async def api_bundles_apply(
+    bundle_id: str,
+    request: Request,
+    config_service=Depends(get_config_service),
+    agent_manager=Depends(get_agent_manager),
+    bot_service=Depends(get_bot_service),
+    settings=Depends(get_settings),
+):
+    """把已导入的套装应用到某账号（事务写 + 快照；失败自动回滚不落半套）。"""
+    try:
+        body = await request.json()
+    except Exception as e:  # noqa: BLE001
+        return _err(400, f"请求体不是合法 JSON: {e}", "BUNDLE_BAD_JSON")
+    if not isinstance(body, dict):
+        return _err(400, "请求体必须是 JSON 对象", "BUNDLE_BAD_BODY")
+    account_id = str(body.get("account_id") or "").strip()
+    if not account_id:
+        return _err(400, "缺少 account_id", "BUNDLE_ACCOUNT_REQUIRED")
+    secrets = body.get("secrets") if isinstance(body.get("secrets"), dict) else {}
+    try:
+        result = await _service(
+            config_service, agent_manager, bot_service, settings
+        ).apply(bundle_id, account_id, secrets=secrets)
+    except BundleError as e:
+        return _err(400, str(e), e.code, e.hint)
+    return _ok("已应用到账号", **result)
+
+
+@router.post("/activations/{activation_id}/rollback")
+async def api_bundles_rollback(
+    activation_id: str,
+    config_service=Depends(get_config_service),
+    agent_manager=Depends(get_agent_manager),
+    bot_service=Depends(get_bot_service),
+    settings=Depends(get_settings),
+):
+    try:
+        result = await _service(
+            config_service, agent_manager, bot_service, settings
+        ).rollback(activation_id)
+    except BundleError as e:
+        return _err(400, str(e), e.code, e.hint)
+    return _ok("已回滚", **result)
+
+
+@router.get("/bundles/activations")
+async def api_bundles_activations(
+    account_id: str | None = None,
+    config_service=Depends(get_config_service),
+    agent_manager=Depends(get_agent_manager),
+    bot_service=Depends(get_bot_service),
+    settings=Depends(get_settings),
+):
+    activations = await _service(
+        config_service, agent_manager, bot_service, settings
+    ).list_activations(account_id)
+    return _ok(activations=activations, total=len(activations))

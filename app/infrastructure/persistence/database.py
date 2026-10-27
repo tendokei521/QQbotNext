@@ -51,6 +51,41 @@ CREATE TABLE IF NOT EXISTS bindings (
     PRIMARY KEY (capability_id, scope_type, scope_id)
 );
 
+-- ==================== 套装应用（P3） ====================
+-- 一次「应用到账号」= 一条激活记录；快照用于回滚，状态机：
+-- applying → active / failed；active → rolled_back（手动回滚或卸载）
+CREATE TABLE IF NOT EXISTS bundle_activations (
+    id            TEXT PRIMARY KEY,
+    bundle_id     TEXT NOT NULL,
+    account_id    TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    plan_json     TEXT NOT NULL DEFAULT '{}',
+    snapshot_json TEXT NOT NULL DEFAULT '{}',
+    applied_json  TEXT NOT NULL DEFAULT '{}',
+    error         TEXT NOT NULL DEFAULT '',
+    started_at    INTEGER NOT NULL,
+    finished_at   INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_bundle_act_account ON bundle_activations(account_id, status);
+
+-- 本套装创建的对象（卸载/回滚时只删这些，用户后建的不动）
+CREATE TABLE IF NOT EXISTS bundle_objects (
+    bundle_id  TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    object_id  TEXT NOT NULL,
+    account_id TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (bundle_id, kind, object_id)
+);
+
+-- 账号当前激活的套装（纯元数据：UI 显示 / 卸载前置检查；不参与运行时解析）
+CREATE TABLE IF NOT EXISTS account_active_bundle (
+    account_id    TEXT PRIMARY KEY,
+    bundle_id     TEXT NOT NULL,
+    activation_id TEXT NOT NULL,
+    updated_at    INTEGER NOT NULL
+);
+
 -- 群级覆盖（对话策略）：账号 × 能力 × 群。
 -- capability='agent' 或模块名；channel_id='' 表示该账号的默认层。
 -- enabled 为 NULL 表示"本层不覆盖"；config_json 只存白名单键（domain/dialogue_policy.py）。

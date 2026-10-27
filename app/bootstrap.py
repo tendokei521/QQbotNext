@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from app.agent.client import ModuleLLMClient
 from app.agent.providers.runtime_manager import ProviderRuntimeManager
@@ -471,6 +472,18 @@ async def run(settings: Settings | None = None) -> None:
     from app.application.dialogue_policy_migration import migrate_legacy_dialog_policies
 
     await migrate_legacy_dialog_policies(config_service)
+
+    # 套装应用崩溃恢复：上次进程在"应用中途"退出 → 按快照回滚（幂等、best-effort）
+    try:
+        from app.application.bundle.service import BundleService
+
+        bundle_data_root = Path(settings.module_dir).resolve().parent
+        if Path(settings.module_dir).name != "module":
+            bundle_data_root = Path(settings.module_dir)
+        await BundleService(config_service, data_root=bundle_data_root).recover_interrupted()
+    except Exception as e:  # noqa: BLE001 —— 恢复失败不能阻断启动
+        logger.warning(f"[Bundle] 启动恢复失败（已忽略）: {e}")
+
     set_console_mode(config_service.get_webui_config().get("logs", {}).get("show_raw_logs", False))
 
     # 迁移旧的 Agent 内联 API 配置到 Provider 预设（幂等，启动时执行）
