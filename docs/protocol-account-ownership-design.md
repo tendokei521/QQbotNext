@@ -1,6 +1,8 @@
 # 协议端归属设计：让「与协议端交互」只由账号管理配置
 
 > **状态**：设计稿（只评审，未动代码）。
+> **现状基线**：`1362370`（2026-10-27 18:25，含向导「正/反向切换」那次提交）。
+> 若之后代码继续变动，以 §1 的行号为准重新核对，不要直接引用旧行号。
 > **目标一句话**：账号是唯一的配置面——协议端的数据面、控制面、进程面、登录态全部挂在账号上；
 > 程序级只保留「可用版本清单 + 安装缓存」这类与具体 QQ 登录无关的共享只读资源。
 > **验收口径**：除版本清单外，任何协议端地址 / 版本 / 启动参数都只能从「账号管理」写入。
@@ -43,7 +45,7 @@
 | 入口 | 代码位置 | 实际规则 |
 |---|---|---|
 | 账号管理 | `app/webui/dashboard/src/views/BotsPage.vue:254-337` → `app/webui/api/bots.py:127-149` | 多账号；正/反双向；`auto_connect`/`owner_id`；保存时 `parse_endpoint` 校验 |
-| 首启向导 | `app/webui/dashboard/src/views/SetupPage.vue:71-91` → `app/webui/api/setup.py:89-120` → `app/application/setup_account.py:127-204` | **只允许一个账号**（多于 1 个直接拒绝，:146-151）；强制 `reverse`（:134,:183）；强制 `auto_connect=True`（:184）；改 ID 会搬 bindings（:206-227） |
+| 首启向导 | `app/webui/dashboard/src/views/SetupPage.vue:71-100` → `app/webui/api/setup.py:89-120` → `app/application/setup_account.py:127-215` | **只允许一个账号**（多于 1 个直接拒绝，:156-160）；自己复制了一份默认地址（`setup_account.py:23`）；强制 `auto_connect=True`（:194）；改 ID 会搬 bindings（:217-238）；正向/反向逻辑与账号管理各写一遍（:38-50、:145-152） |
 | 协议端面板扫码后 | `app/webui/dashboard/src/views/ProtocolPage.vue:119-130` → `app/webui/api/protocol.py:148-167` → `app/application/protocol/login.py:137-177` | 强制 `reverse`（:169）；覆盖 `ws_url`/token；**不校验地址**；默认值硬编码 3001（`protocol.py:162`、`login.py:25`） |
 
 这直接违反本仓库自己的规则（`docs/plan/README.md` §3.6「不新增同一语义两处配置」）。
@@ -64,10 +66,11 @@
 
 - `3001` + `/onebot/v11/ws`：`app/infrastructure/onebot/endpoint.py:147-151`、`app/application/protocol/login.py:25`、
   `app/webui/api/protocol.py:162`、`BotsPage.vue:268` 占位符。
-- `4001/ws`：`app/application/setup_account.py:23`、`SetupPage.vue:27`。
+- `ws://127.0.0.1:4001/`：`app/application/setup_account.py:23`、`SetupPage.vue:28`。
 
-同一产品两条默认反连地址，且**向导那条缺 OneBot 约定路径 `/onebot/v11/ws`**：
-用户照向导填进 NapCat 的反向 WS 配置，大概率路径对不上。
+同一产品两条默认反连地址，且**向导那条端口不同（4001）、还缺 OneBot 约定路径 `/onebot/v11/ws`**：
+用户照向导填进 NapCat 的反向 WS 配置，大概率连不上或路径对不上。
+（该条已从 `4001/ws` 改成 `4001/`，只修了 scheme 拼接，端口/路径分叉仍在。）
 
 ### 1.4 协议端面板默认是空壳
 
@@ -191,7 +194,9 @@ def allocate_control_port(kind: str, taken: set[int]) -> int  # napcat 从 6099 
 - `ProtocolControlClient`（原 `ProtocolLoginService`）：构造从「全局 base_url」改为「per-call (control_url, token)」；
   `capabilities(kind)` 声明是否支持 HTTP 扫码（NapCat 支持；Lagrange 走文件/日志二维码，v1 可只支持 external）。
 - `SetupAccountService`：**删除**。向导第一步直接调 `ProtocolBindingService`（或账号管理同一个 `BotService.add_bot`），
-  不再有「唯一账号 / 强制反向 / 后台 2s 循环」特例；已有账号时向导跳转 `/bots`。
+  不再有「唯一账号 / 强制 `auto_connect` / 独立默认地址」特例。
+  它刚补上正/反向切换（`setup_account.py:38-50,145-152`），说明它已经在复刻账号管理——
+  两套同语义逻辑继续并行只会再次漂移；已有账号时向导应直接跳转 `/bots`。
 
 ### 3.5 API 形状（账号作用域）
 
