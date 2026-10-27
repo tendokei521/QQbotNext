@@ -60,6 +60,8 @@ def _module_catalog(registry) -> dict[str, dict]:
             "version": str(getattr(entry, "version", "") or "0.0.0"),
             "builtin": bool(getattr(entry, "builtin", True)),
             "path": str(getattr(entry, "path", "") or ""),
+            # 软卸载（tombstone）的模块视为"未安装"：随包安装会顺带清掉 tombstone
+            "status": str(getattr(entry, "status", "") or ""),
         }
     return catalog
 
@@ -118,7 +120,11 @@ def _service(
         config_service,
         data_root=data_root,
         agent_manager=agent_manager,
-        installed_modules={name: item["version"] for name, item in catalog.items()},
+        installed_modules={
+            name: item["version"]
+            for name, item in catalog.items()
+            if item.get("status") != "uninstalled"
+        },
         module_catalog=catalog,
         module_installer=(
             _RegistryModuleInstaller(registry, bot_service) if registry is not None else None
