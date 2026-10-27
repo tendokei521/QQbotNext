@@ -50,8 +50,14 @@ include = ["app*"]
 [tool.setuptools.package-data]
 # OneBot 工具清单是数据文件，必须随包一起分发（v3：已搬进 llm_tools_extra 模块）
 "app.plugins.llm_tools_extra.onebot" = ["*.json"]
-# 插件自带页面与 manifest
-"app.plugins.*" = ["module.json", "pages/*.html"]
+# 插件自带页面与 manifest。
+# 注意：setuptools 新版的 pyproject 校验器**不再接受中间带通配的模块名**
+# （旧的 "app.plugins.*" 会让 `python -m build` / `pip wheel` 直接失败），
+# 必须写成 "*"（所有包）或精确模块名；文件不存在时通配不产生副作用。
+"*" = ["module.json", "pages/*.html"]
+# WebUI 构建产物：不打进 wheel 的话，pip 安装后只能看到「前端尚未构建」503 页
+# （app/webui/app.py:88-90）。dist 与 app 包同目录，按包内相对路径声明即可。
+"app.webui" = ["dashboard/dist/index.html", "dashboard/dist/assets/*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
