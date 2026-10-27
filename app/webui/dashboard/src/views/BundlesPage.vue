@@ -63,13 +63,7 @@ function openApply(item: { id: string; name: string; version: string; secrets?: 
 
 async function doApply() {
   if (!applyTarget.value || !bots.currentAccountId) return
-  const missing = (applyTarget.value.secrets || []).filter(
-    (secret) => secret.required && !applySecrets[secret.key]?.trim(),
-  )
-  if (missing.length) {
-    notify.push(`还需要填写：${missing.map((item) => item.label).join('、')}`, 'warning')
-    return
-  }
+  // 必填校验交给后端：目标账号可能已填过同名密钥（升级场景会复用），前端不该先拦。
   try {
     applyResult.value = await bundles.applyBundle(
       applyTarget.value.id,
@@ -316,8 +310,9 @@ onMounted(async () => {
           <template v-if="!applyResult">
             <v-alert type="info" variant="tonal" density="compact" class="mb-3">
               <div class="text-caption">
-                应用会创建人格/模型并写入该账号配置；失败会自动回滚，不留半套配置。
-                应用后可在「应用记录」里一键回滚。
+                应用会创建人格/模型、写入该账号配置，并自动安装随包模块；失败自动回滚，不留半套配置。
+                应用后可在「应用记录」里一键回滚。密钥不随包分发：目标账号已填过的同名密钥会复用，
+                缺哪个由后端在应用前点名提示。
               </div>
             </v-alert>
             <div class="text-body-2 mb-2">
