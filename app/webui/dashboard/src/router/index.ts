@@ -22,6 +22,13 @@ const agentSectionRoutes = AGENT_SECTIONS.map((section) => ({
 const router = createRouter({
   history: createWebHashHistory(),
   routes: [
+    // 首启向导：全屏（不套侧栏），完成后回总览
+    {
+      path: '/setup',
+      name: 'setup',
+      component: () => import('@/views/SetupPage.vue'),
+      meta: { title: '首次配置' },
+    },
     {
       path: '/',
       component: () => import('@/layouts/DefaultLayout.vue'),

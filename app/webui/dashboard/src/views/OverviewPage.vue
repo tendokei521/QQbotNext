@@ -8,6 +8,7 @@ import { useWebuiStore } from '@/stores/webui'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
+import ReadinessCard from '@/components/readiness/ReadinessCard.vue'
 
 const bots = useBotsStore()
 const modules = useModulesStore()
@@ -104,6 +105,9 @@ onMounted(() => {
       </div>
       <v-btn variant="tonal" prepend-icon="mdi-refresh" :loading="refreshing" @click="refreshAll">刷新状态</v-btn>
     </div>
+
+    <!-- 运行状态：与启动横幅、首启向导共用 /api/readiness -->
+    <ReadinessCard />
 
     <!-- 统计卡 -->
     <v-row class="mt-1">

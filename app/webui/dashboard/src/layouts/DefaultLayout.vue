@@ -68,6 +68,7 @@ const navItems = computed<NavItem[]>(() => {
   // 以及实验性「配置档案」入口（整套能力已下线）。实验性开关框架仍在设置页保留。
   return [
     { to: '/', title: '总览', icon: 'mdi-view-dashboard-outline' },
+    { to: '/setup', title: '首次配置', icon: 'mdi-rocket-launch-outline' },
     { to: '/bots', title: '账号管理', icon: 'mdi-robot-outline' },
     { to: '/policy', title: '权限与回复', icon: 'mdi-shield-account-outline' },
     { to: '/modules', title: '功能模块', icon: 'mdi-cube-outline' },
