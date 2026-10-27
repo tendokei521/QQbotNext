@@ -38,6 +38,12 @@ const router = createRouter({
         // 「权限与回复」：简单视图（群开关矩阵）；高级规则暂仍在 Agent→权限管理
         { path: 'policy', name: 'policy', component: () => import('@/views/PolicyPage.vue'), meta: { title: '权限与回复' } },
         { path: 'modules', name: 'modules', component: () => import('@/views/ModulesPage.vue'), meta: { title: '功能模块' } },
+        {
+          path: 'bundles',
+          name: 'bundles',
+          component: () => import('@/views/BundlesPage.vue'),
+          meta: { title: '套装中心' },
+        },
         { path: 'modules/agent', redirect: '/agent' },
         { path: 'modules/:name', name: 'module-config', component: () => import('@/views/ModuleConfigPage.vue'), meta: { title: '模块配置' } },
         // Agent 配置区共享外壳：bot 守卫 / 头部 / 保存状态 / 段落导航都在 layout 里
