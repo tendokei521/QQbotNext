@@ -96,14 +96,26 @@ function onRestore(row: PolicyMatrixRow) {
   void onSwitch(row, 'inherit')
 }
 
-onMounted(() => {
-  if (!bots.bots.length) bots.fetchBots()
-  policy.load()
+// 进入本页就拉一次群列表：否则只显示"上次已知"的群，新建/新加入的群看不到
+async function loadWithGroups() {
+  try {
+    await policy.refreshGroups()
+  } catch {
+    // 账号未连接 / 协议端离线时刷新会失败：退回展示已缓存的群列表
+    await policy.load()
+  }
+}
+
+onMounted(async () => {
+  if (!bots.bots.length) await bots.fetchBots()
+  await loadWithGroups()
 })
 
 watch(
   () => bots.currentAccountId,
-  () => policy.load(),
+  () => {
+    void loadWithGroups()
+  },
 )
 </script>
 
