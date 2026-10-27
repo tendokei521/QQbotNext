@@ -140,4 +140,4 @@ async def test_api_default_account_is_unique(container, config_service):
     listed = client.get("/api/setup/default-account")
     assert listed.status_code == 200
     assert listed.json()["account"]["name"] == "改个名"
-    assert listed.json()["default_address"] == "ws://127.0.0.1:3001/onebot/v11/ws"
+    assert listed.json()["default_address"] == "ws://127.0.0.1:4001/", "向导默认监听地址固定 4001"

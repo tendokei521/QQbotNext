@@ -22,9 +22,13 @@ from app.infrastructure.onebot.endpoint import (
     is_reverse,
     normalize_mode,
     parse_endpoint,
-    suggest_address,
 )
 
+#: 本地监听（反向）默认端口与路径：首启向导的默认值固定为 ws://127.0.0.1:4001/
+LISTEN_DEFAULT_PORT = 4001
+LISTEN_DEFAULT_PATH = "/"
+#: 向导默认监听地址
+DEFAULT_LISTEN_ADDRESS = f"ws://127.0.0.1:{LISTEN_DEFAULT_PORT}{LISTEN_DEFAULT_PATH}"
 #: 后台连接重试间隔（秒）
 DEFAULT_CONNECT_INTERVAL = 2.0
 #: kv 里记录"向导管理的那个账号"
@@ -37,6 +41,26 @@ class SetupAccountError(ValueError):
     """向导账号动作失败（消息可直接展示）。"""
 
 
+def default_listen_address(existing: object = ()) -> str:
+    """向导默认监听地址：**固定从 4001 起**，被其它账号占用时才顺延端口。
+
+    与「账号管理」的自动建议（3001 起 + OneBot 反向路径）刻意不同：
+    首启向导要求的默认值就是 ``ws://127.0.0.1:4001/``，只有端口确实冲突才避让。
+    """
+    used: set[int] = set()
+    for url in existing or ():
+        try:
+            endpoint = parse_endpoint(str(url))
+        except EndpointError:
+            continue
+        if endpoint.port:
+            used.add(endpoint.port)
+    port = LISTEN_DEFAULT_PORT
+    while port in used and port < LISTEN_DEFAULT_PORT + 100:
+        port += 1
+    return f"ws://127.0.0.1:{port}{LISTEN_DEFAULT_PATH}"
+
+
 def normalize_listen_address(value: str, conn_mode: str = "reverse") -> str:
     """把用户填的地址补成 ws URL。
 
@@ -47,6 +71,8 @@ def normalize_listen_address(value: str, conn_mode: str = "reverse") -> str:
     省略 scheme 的写法也接受：``127.0.0.1:3001/onebot/v11/ws``。
     """
     text = str(value or "").strip()
+    if not text and is_reverse(conn_mode):
+        return DEFAULT_LISTEN_ADDRESS
     if text and "://" not in text:
         text = "ws://" + text.lstrip("/")
     return text
@@ -165,7 +191,7 @@ class SetupAccountService:
                 for bot in bots
                 if str(bot.get("id")) != current_id
             ]
-            address = suggest_address(mode, existing)
+            address = default_listen_address(existing)
         if address:
             try:
                 parse_endpoint(address, require_port=is_reverse(mode))

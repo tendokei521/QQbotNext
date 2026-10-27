@@ -17,8 +17,8 @@ from app.application.setup_account import (
     normalize_listen_address,
 )
 
-#: 默认监听地址的唯一来源是 endpoint.suggest_address（3001 + OneBot v11 反向路径）
-LISTEN_ADDRESS = "ws://127.0.0.1:3001/onebot/v11/ws"
+#: 首启向导的默认监听地址：固定 4001（端口冲突才顺延）
+LISTEN_ADDRESS = "ws://127.0.0.1:4001/"
 
 
 class FakeBotService:
@@ -72,10 +72,15 @@ def service(container, config_service):
 
 
 def test_normalize_listen_address():
-    # 地址整理只补 scheme；默认地址由 endpoint.suggest_address 负责，不在这里复制
-    assert normalize_listen_address("") == ""
-    assert normalize_listen_address("ws://127.0.0.1:3001/onebot/v11/ws") == LISTEN_ADDRESS
-    assert normalize_listen_address("127.0.0.1:3001/onebot/v11/ws") == LISTEN_ADDRESS
+    # 反向留空 → 固定 4001 默认；正向留空保持空
+    assert normalize_listen_address("") == LISTEN_ADDRESS
+    # 用户自己填的地址原样保留（只补 scheme）
+    assert normalize_listen_address("ws://127.0.0.1:3001/onebot/v11/ws") == (
+        "ws://127.0.0.1:3001/onebot/v11/ws"
+    )
+    assert normalize_listen_address("127.0.0.1:3001/onebot/v11/ws") == (
+        "ws://127.0.0.1:3001/onebot/v11/ws"
+    )
     # 向外连接：留空保持空（不预填）
     assert normalize_listen_address("", "forward") == ""
     assert normalize_listen_address("127.0.0.1:3001/", "forward") == "ws://127.0.0.1:3001/"
@@ -215,14 +220,14 @@ async def test_mode_switch_keeps_single_account(service, config_service):
     rows = config_service.get_bots()
     assert len(rows) == 1, "切换连接方式不能多出账号"
     assert rows[0]["conn_mode"] == "reverse"
-    assert rows[0]["ws_url"].startswith("ws://127.0.0.1:3001/onebot/v11/ws")
+    assert rows[0]["ws_url"].startswith("ws://127.0.0.1:4001/")
 
 
 async def test_reverse_default_address_used_when_blank(service, config_service):
     svc, _bots = service
     result = await svc.upsert(name="主号", conn_mode="reverse", ws_url="")
     assert result["ws_url"] == LISTEN_ADDRESS
-    assert config_service.get_bots()[0]["ws_url"].startswith("ws://127.0.0.1:3001/onebot/v11/ws")
+    assert config_service.get_bots()[0]["ws_url"].startswith("ws://127.0.0.1:4001/")
 
 
 async def test_connect_loop_stops_once_reverse_listener_is_up(service):
