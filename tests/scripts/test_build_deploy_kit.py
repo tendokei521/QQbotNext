@@ -27,7 +27,7 @@ validate_tree = _module.validate_tree
 def _fake_repo(tmp_path, *, dist: bool = True) -> Path:
     root = tmp_path / "repo"
     root.mkdir(parents=True)
-    for name in ("start.bat", "start.sh", "start.py", "check_deps.py", "main.py", "pyproject.toml"):
+    for name in ("start.sh", "start.py", "check_deps.py", "main.py", "pyproject.toml"):
         (root / name).write_text("# entry", encoding="utf-8")
     (root / "app" / "core").mkdir(parents=True)
     (root / "app" / "core" / "settings.py").write_text("X = 1\n", encoding="utf-8")
@@ -85,7 +85,6 @@ def test_build_kit_layout_and_manifest(tmp_path):
         names = set(archive.namelist())
         manifest = json.loads(archive.read("QQBotNext/deploy.json"))
         readme = archive.read("QQBotNext/README-FIRST.txt").decode("utf-8")
-        assert "QQBotNext/start.bat" in names
         assert "QQBotNext/start.sh" in names
         assert "QQBotNext/app/webui/dashboard/dist/index.html" in names
         assert "QQBotNext/bundles/starter.zip" in names

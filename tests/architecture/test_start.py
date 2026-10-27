@@ -416,7 +416,10 @@ def test_windows_wrappers_are_ascii_and_crlf():
     """
     root = _repo_root()
     bats = sorted(root.glob("*.bat"))
-    assert bats, "根目录应当有批处理启动壳"
+    if not bats:
+        # v3 起仓库不再提供 .bat 薄壳（Windows 用户直接 `python start.py`，
+        # 命令行参数与 Linux 完全一致）；没有 .bat 就无需守编码。
+        return
 
     for path in bats:
         raw = path.read_bytes()

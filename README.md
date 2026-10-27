@@ -71,7 +71,7 @@ logs/                           日志目录
 ### 两条路：免安装包 / 一条命令
 
 **免安装包（推荐给不想碰命令行的用户）**：从 Release 下载 `QQBotNext-*-kit.zip`，
-解压后双击 `start.bat`（macOS/Linux 用 `./start.sh`）。首次启动自动建环境、装依赖，
+解压后运行 `python start.py`（macOS/Linux 可用 `./start.sh`）。首次启动自动建环境、装依赖，
 然后打开浏览器进「首次配置」向导。包里带 `deploy.json`（逐文件 sha256）和
 `README-FIRST.txt`（三步上手）。
 
@@ -93,8 +93,8 @@ python start.py
 
 `start.py` 是唯一的一键入口，四步全包：**建 venv → 升 pip/setuptools → 查/装依赖 → 启动**。
 依赖不齐时它不会硬着头皮启动（旧版那样只会换来一屏 `ModuleNotFoundError`），而是明确报错
-并告诉你下一步。之后每次启动也只需要 `python start.py`（Windows 可双击 `start.bat`，
-Linux/macOS 可跑 `./start.sh`，两者都只是转交给 `start.py` 的薄壳）。
+并告诉你下一步。之后每次启动也只需要 `python start.py`（Windows 与 Linux/macOS 同一条命令；
+`./start.sh` 只是转交给 `start.py` 的薄壳）。
 
 常用开关：
 
@@ -107,7 +107,7 @@ Linux/macOS 可跑 `./start.sh`，两者都只是转交给 `start.py` 的薄壳�
 | `python start.py --dev` | 连带 `[dev]` 组（pytest / ruff） |
 | `python start.py --pause` | 结束前等回车，方便双击运行时看输出 |
 
-用手动方式也行，根目录 `requirements.bat` / `requirements.sh` 是兜底入口
+用手动方式也行，根目录 `requirements.sh` 是兜底入口
 （等价于 `pip install -r requirements.txt`，其中 `requirements.txt` 只是指向 `pyproject.toml` 的指针）。
 
 > Linux/macOS 首次使用若脚本报换行符错误，先跑 `dos2unix start.sh requirements.sh`。

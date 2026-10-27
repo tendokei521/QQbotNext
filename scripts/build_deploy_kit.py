@@ -5,7 +5,7 @@
 产物是一个 zip，里面固定有：
 
     QQBotNext/
-      start.bat / start.sh        双击入口（薄壳，逻辑在 start.py）
+      start.sh / start.py         启动入口（逻辑全在 start.py；Windows 用 python start.py）
       start.py / check_deps.py    一键启动与依赖自检
       main.py / pyproject.toml
       app/                        后端源码 + 已构建的 dashboard/dist
@@ -57,7 +57,7 @@ EXCLUDE_FILES = {
 EXCLUDE_SUFFIXES = (".pyc", ".pyo", ".log", ".db", ".db-wal", ".db-shm")
 
 #: 顶层必须存在的入口（缺任何一个，包都不可用 → 直接失败）
-REQUIRED_ENTRIES = ("start.bat", "start.sh", "start.py", "check_deps.py", "main.py", "pyproject.toml")
+REQUIRED_ENTRIES = ("start.sh", "start.py", "check_deps.py", "main.py", "pyproject.toml")
 REQUIRED_DIRS = ("app",)
 
 #: 前端必须已构建（未构建的包打开是"请先 pnpm build"提示页）
@@ -67,7 +67,7 @@ README_FIRST = """QQBot Next - 免安装发行包
 
 三步上手
 --------
-1. 双击 start.bat（macOS/Linux 执行 ./start.sh）。
+1. Windows 双击 `start.py`（或命令行 python start.py）；macOS/Linux 执行 ./start.sh。
    首次启动会自动建 venv、装依赖（离线包会直接用 wheelhouse/ 里的轮子）。
 2. 浏览器打开 http://127.0.0.1:8080 ，进入「首次配置」向导：
    连接账号 -> 配置模型 -> 写人设 -> 完成检查。
@@ -253,7 +253,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     size = out_path.stat().st_size
     print(f"[build_deploy_kit] 产物：{out_path}（{size / 1024 / 1024:.1f} MB）")
-    print("[build_deploy_kit] 解压后双击 start.bat 即可；deploy.json 内含逐文件 sha256。")
+    print("[build_deploy_kit] 解压后运行 start.py 即可；deploy.json 内含逐文件 sha256。")
     return 0
 
 

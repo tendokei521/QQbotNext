@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from app.infrastructure.config.config_service import ConfigOp
 from app.infrastructure.onebot.endpoint import EndpointError, is_reverse, normalize_mode, parse_endpoint
@@ -213,8 +214,8 @@ class SetupAccountService:
                     module_name = str(getattr(entry, "name", "") or "")
                     if module_name:
                         capabilities.add(module_name)
-            except Exception:  # noqa: BLE001 —— 编目不可用不影响账号保存
-                pass
+            except Exception as e:  # noqa: BLE001 —— 编目不可用不影响账号保存
+                logging.getLogger(__name__).debug(f"[Setup] 读取模块编目失败（仅影响迁移范围）: {e}")
         ops: list[ConfigOp] = []
         for capability in sorted(capabilities):
             row = self.config_service.get_binding(capability, "account", old_id)
