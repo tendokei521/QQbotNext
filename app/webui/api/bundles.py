@@ -61,6 +61,7 @@ def _module_catalog(registry) -> dict[str, dict]:
             "version": str(getattr(entry, "version", "") or "0.0.0"),
             "builtin": bool(getattr(entry, "builtin", True)),
             "path": str(getattr(entry, "path", "") or ""),
+            "display_name": str(getattr(entry, "display_name", "") or name),
             # 软卸载（tombstone）的模块视为"未安装"：随包安装会顺带清掉 tombstone
             "status": str(getattr(entry, "status", "") or ""),
         }
@@ -266,6 +267,24 @@ async def api_bundles_download(
     )
 
 
+@router.get("/bundles/export-options")
+async def api_bundles_export_options(
+    account_id: str | None = None,
+    config_service=Depends(get_config_service),
+    agent_manager=Depends(get_agent_manager),
+    bot_service=Depends(get_bot_service),
+    settings=Depends(get_settings),
+    registry=Depends(get_module_registry),
+):
+    """导出对话框的模块清单（名称/版本/内置/体积/启停），供勾选"打包哪些模块"。"""
+    if not account_id:
+        return _err(400, "缺少 account_id", "BUNDLE_ACCOUNT_REQUIRED")
+    options = _service(
+        config_service, agent_manager, bot_service, settings, registry
+    ).export_options(account_id)
+    return _ok(modules=options, total=len(options))
+
+
 @router.get("/bundles/export")
 async def api_bundles_export(
     account_id: str | None = None,
@@ -273,6 +292,7 @@ async def api_bundles_export(
     name: str | None = None,
     version: str = "1.0.0",
     description: str = "",
+    modules: str | None = None,
     config_service=Depends(get_config_service),
     agent_manager=Depends(get_agent_manager),
     bot_service=Depends(get_bot_service),
@@ -281,6 +301,9 @@ async def api_bundles_export(
 ):
     if not account_id:
         return _err(400, "缺少 account_id", "BUNDLE_ACCOUNT_REQUIRED")
+    module_filter = None
+    if modules is not None:
+        module_filter = [item.strip() for item in modules.split(",") if item.strip()]
     try:
         data = _service(
             config_service, agent_manager, bot_service, settings, registry
@@ -290,6 +313,7 @@ async def api_bundles_export(
             name=str(name or f"账号 {account_id} 的配置"),
             version=str(version or "1.0.0"),
             description=str(description or ""),
+            module_filter=module_filter,
         )
     except BundleError as e:
         return _err(400, str(e), e.code, e.hint)

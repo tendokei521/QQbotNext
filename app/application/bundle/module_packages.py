@@ -151,3 +151,18 @@ def read_module_identity(data: bytes) -> dict:
         "version": version,
         "display_name": str(manifest.get("display_name") or name).strip(),
     }
+
+
+def dir_size(root: Path | str) -> int:
+    """模块目录的资源占用（字节；读盘失败按 0 计——只用于导出界面的预估）。"""
+    total = 0
+    directory = Path(root)
+    if not directory.is_dir():
+        return 0
+    for path in directory.rglob("*"):
+        try:
+            if path.is_file() and not path.is_symlink():
+                total += path.stat().st_size
+        except OSError:
+            continue
+    return total

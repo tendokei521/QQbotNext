@@ -193,6 +193,33 @@ async def test_export_requires_account(container):
     assert resp.json()["code"] == "BUNDLE_ACCOUNT_REQUIRED"
 
 
+async def test_export_options_and_module_filter(container, config_service):
+    """P7-3：导出可勾选模块；只导出选中的模块，卡片/列表带模块摘要。"""
+    await _seed_account(config_service)
+    client = _client(container)
+
+    options = client.get("/api/bundles/export-options", params={"account_id": "acc1"})
+    assert options.status_code == 200, options.text
+    modules = options.json()["modules"]
+    assert modules, "至少列出内置模块"
+    assert any(item["builtin"] for item in modules)
+    picked = modules[0]["name"]
+
+    data = client.get(
+        "/api/bundles/export",
+        params={"account_id": "acc1", "bundle_id": "picked-pack", "modules": picked},
+    ).content
+    with zipfile.ZipFile(__import__("io").BytesIO(data)) as archive:
+        manifest = json.loads(archive.read("bundle.json"))
+    assert {item["name"] for item in manifest["components"]["modules"]} == {picked}
+
+    assert client.post(
+        "/api/bundles/import", files={"file": ("b.zip", data, "application/zip")}
+    ).status_code == 200
+    listed = client.get("/api/bundles").json()["bundles"][0]
+    assert listed["modules"] == [picked]
+
+
 # ==================== 应用 / 回滚（P3） ====================
 
 

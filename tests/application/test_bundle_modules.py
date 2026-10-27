@@ -45,6 +45,11 @@ def test_validate_accepts_bundled_module_as_installable(tmp_path):
     assert report["summary"]["modules_bundled"] == 1
     assert report["summary"]["modules_to_install"] == 1
     assert not any(issue["code"] == "BUNDLE_MODULE_MISSING" for issue in report["issues"])
+    detail = {item["name"]: item for item in report["modules"]}["demo_mod"]
+    assert detail["bundled"] is True
+    assert detail["action"] == "install"
+    assert detail["package_version"] == "1.2.0"
+    assert detail["package_size"] > 0
 
 
 def test_validate_reports_package_name_mismatch(tmp_path):

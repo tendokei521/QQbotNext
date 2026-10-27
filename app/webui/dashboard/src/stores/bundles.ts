@@ -18,6 +18,18 @@ export interface BundleSecret {
   hint?: string
 }
 
+export interface BundleModuleInfo {
+  name: string
+  version: string
+  required: boolean
+  bundled: boolean
+  package_version: string
+  package_size: number
+  installed_version: string
+  /** install=将安装 / upgrade=将升级 / skip=已满足 / missing=缺失 / config_only=只写配置 */
+  action: 'install' | 'upgrade' | 'skip' | 'missing' | 'config_only' | string
+}
+
 export interface BundleReport {
   ok: boolean
   bundle: { id: string; name: string; version: string; description?: string; author?: any }
@@ -33,9 +45,22 @@ export interface BundleReport {
     /** 应用时需要安装/升级的模块数 */
     modules_to_install?: number
   }
+  /** 预检的模块明细（逐条展示名称/版本/动作/体积） */
+  modules?: BundleModuleInfo[]
   issues: BundleIssue[]
   secrets: BundleSecret[]
   manifest?: Record<string, any>
+}
+
+/** 导出对话框的模块选项 */
+export interface ExportModuleOption {
+  name: string
+  display_name: string
+  version: string
+  builtin: boolean
+  enabled: boolean
+  has_config: boolean
+  size: number
 }
 
 export interface InstalledBundle {
@@ -47,6 +72,12 @@ export interface InstalledBundle {
   size: number
   file: string
   secrets?: BundleSecret[]
+  /** 包含的模块名（卡片展示"含模块 N"） */
+  modules?: string[]
+  modules_bundled?: number
+  modules_to_install?: number
+  /** 包内含可执行模块代码（导入需显式信任） */
+  has_code?: boolean
 }
 
 export interface ActivationRecord {
@@ -178,23 +209,37 @@ export const useBundlesStore = defineStore('bundles', () => {
     name: string
     version?: string
     description?: string
+    /** 只打包这些模块；不传 = 全部 */
+    modules?: string[]
   }): Promise<void> {
     const accountId = bots.currentAccountId
     if (!accountId) throw new Error('先选择一个账号')
+    const params: Record<string, any> = {
+      account_id: accountId,
+      bundle_id: options.id,
+      name: options.name,
+      version: options.version || '1.0.0',
+      description: options.description || '',
+    }
+    if (options.modules) params.modules = options.modules.join(',')
     const res = await http.get('/api/bundles/export', {
-      params: {
-        account_id: accountId,
-        bundle_id: options.id,
-        name: options.name,
-        version: options.version || '1.0.0',
-        description: options.description || '',
-      },
+      params,
       responseType: 'blob',
     })
     _triggerDownload(
       res.data as Blob,
       _filenameFrom(res.headers['content-disposition'], `${options.id}.zip`),
     )
+  }
+
+  /** 导出对话框：可选模块清单（含体积） */
+  async function loadExportOptions(): Promise<ExportModuleOption[]> {
+    const accountId = bots.currentAccountId
+    if (!accountId) return []
+    const res = await http.get('/api/bundles/export-options', {
+      params: { account_id: accountId },
+    })
+    return (res.data?.modules || []) as ExportModuleOption[]
   }
 
   async function loadActivations(accountId?: string | null): Promise<void> {
@@ -263,5 +308,6 @@ export const useBundlesStore = defineStore('bundles', () => {
     uninstallBundle,
     download,
     exportAccount,
+    loadExportOptions,
   }
 })

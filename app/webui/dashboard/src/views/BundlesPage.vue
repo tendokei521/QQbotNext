@@ -5,7 +5,7 @@
  */
 import { computed, onMounted, reactive, ref } from 'vue'
 import { displayName, useBotsStore } from '@/stores/bots'
-import { useBundlesStore } from '@/stores/bundles'
+import { useBundlesStore, type ExportModuleOption } from '@/stores/bundles'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
@@ -18,6 +18,8 @@ const notify = useNotifyStore()
 const importDialog = ref(false)
 const exportDialog = ref(false)
 const exporting = ref(false)
+const exportOptions = ref<ExportModuleOption[]>([])
+const exportSelected = reactive<Record<string, boolean>>({})
 const exportForm = reactive({
   id: '',
   name: '',
@@ -135,7 +137,32 @@ function openExport() {
   exportForm.name = `${accountName.value} 的配置`
   exportForm.version = '1.0.0'
   exportForm.description = ''
+  exportOptions.value = []
+  Object.keys(exportSelected).forEach((key) => delete exportSelected[key])
   exportDialog.value = true
+  void loadExportOptions()
+}
+
+async function loadExportOptions() {
+  try {
+    const options = await bundles.loadExportOptions()
+    exportOptions.value = options
+    for (const option of options) exportSelected[option.name] = true
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  }
+}
+
+const exportModules = computed(() =>
+  exportOptions.value.filter((option) => exportSelected[option.name]),
+)
+
+const exportModuleSize = computed(() =>
+  exportModules.value.reduce((total, option) => total + (option.size || 0), 0),
+)
+
+function toggleAllExportModules(value: boolean) {
+  for (const option of exportOptions.value) exportSelected[option.name] = value
 }
 
 async function doExport() {
@@ -146,6 +173,9 @@ async function doExport() {
       name: exportForm.name.trim() || '账号配置',
       version: exportForm.version.trim() || '1.0.0',
       description: exportForm.description.trim(),
+      modules: exportOptions.value.length
+        ? exportModules.value.map((option) => option.name)
+        : undefined,
     })
     notify.push('已导出预设（密钥未包含）', 'success')
     exportDialog.value = false
@@ -220,6 +250,10 @@ onMounted(async () => {
           <v-card-text class="text-caption" style="opacity: 0.7">
             <div>导入时间：{{ formatTime(item.imported_at) }}</div>
             <div>大小：{{ formatSize(item.size) }}</div>
+            <div v-if="item.modules?.length">
+              含模块 {{ item.modules.length }} 个
+              <span v-if="item.modules_bundled">（随包 {{ item.modules_bundled }}）</span>
+            </div>
           </v-card-text>
           <v-card-actions>
             <v-btn
@@ -277,7 +311,7 @@ onMounted(async () => {
 
     <BundleImportDialog v-model="importDialog" @imported="bundles.load()" />
 
-    <v-dialog v-model="exportDialog" max-width="520">
+    <v-dialog v-model="exportDialog" max-width="620">
       <v-card>
         <v-card-title class="d-flex align-center">
           <v-icon icon="mdi-export" class="mr-2" color="primary" /> 导出为预设
@@ -291,6 +325,42 @@ onMounted(async () => {
           <v-text-field v-model="exportForm.name" label="名称" density="comfortable" variant="outlined" />
           <v-text-field v-model="exportForm.version" label="版本" density="comfortable" variant="outlined" />
           <v-text-field v-model="exportForm.description" label="描述（可选）" density="comfortable" variant="outlined" />
+
+          <div class="d-flex align-center mt-2 mb-1">
+            <div class="text-body-2 font-weight-medium">打包哪些模块</div>
+            <v-spacer />
+            <v-btn size="x-small" variant="text" @click="toggleAllExportModules(true)">全选</v-btn>
+            <v-btn size="x-small" variant="text" @click="toggleAllExportModules(false)">全不选</v-btn>
+          </div>
+          <div class="text-caption mb-2" style="opacity: 0.65">
+            已选 {{ exportModules.length }} 个；第三方模块代码约 {{ formatSize(exportModuleSize) }}。
+            没选的模块不会进包（目标账号保持原状）。
+          </div>
+          <v-card variant="tonal" class="module-picker">
+            <v-card-text class="py-1">
+              <div v-if="!exportOptions.length" class="text-caption py-2">正在读取模块清单…</div>
+              <div
+                v-for="option in exportOptions"
+                :key="option.name"
+                class="d-flex align-center"
+              >
+                <v-checkbox
+                  v-model="exportSelected[option.name]"
+                  :label="option.display_name || option.name"
+                  density="compact"
+                  hide-details
+                  class="flex-grow-1"
+                />
+                <v-chip size="x-small" variant="text">v{{ option.version || '—' }}</v-chip>
+                <v-chip size="x-small" variant="text" class="ml-1">
+                  {{ option.builtin ? '内置' : '第三方' }}
+                </v-chip>
+                <span v-if="!option.builtin" class="text-caption ml-2" style="opacity: 0.65">
+                  {{ formatSize(option.size) }}
+                </span>
+              </div>
+            </v-card-text>
+          </v-card>
         </v-card-text>
         <v-card-actions>
           <v-spacer />
@@ -363,5 +433,10 @@ onMounted(async () => {
 .bundle-card {
   height: 100%;
   border-radius: 14px;
+}
+
+.module-picker {
+  max-height: 220px;
+  overflow-y: auto;
 }
 </style>

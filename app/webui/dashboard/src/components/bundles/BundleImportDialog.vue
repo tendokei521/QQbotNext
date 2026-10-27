@@ -129,6 +129,26 @@ async function confirmApply() {
   }
 }
 
+function moduleActionText(action: string): string {
+  return ({
+    install: '将安装',
+    upgrade: '将升级',
+    skip: '已满足',
+    missing: '缺失',
+    config_only: '只写配置',
+  } as Record<string, string>)[action] || action
+}
+
+function moduleActionColor(action: string): string {
+  return ({
+    install: 'info',
+    upgrade: 'warning',
+    skip: 'success',
+    missing: 'error',
+    config_only: 'default',
+  } as Record<string, string>)[action] || 'default'
+}
+
 function formatSize(bytes: number): string {
   if (!bytes) return '—'
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
@@ -217,6 +237,35 @@ function formatSize(bytes: number): string {
             <div v-if="issue.detail" class="text-caption">{{ issue.detail }}</div>
             <div v-if="issue.fix" class="text-caption" style="opacity: 0.7">建议：{{ issue.fix }}</div>
           </v-alert>
+
+          <v-card v-if="report.modules?.length" variant="tonal" class="mt-2">
+            <v-card-text>
+              <div class="text-caption font-weight-medium mb-1">模块清单</div>
+              <div
+                v-for="mod in report.modules"
+                :key="mod.name"
+                class="d-flex align-center flex-wrap gap-2 py-1 text-caption"
+              >
+                <span class="font-weight-medium">{{ mod.name }}</span>
+                <v-chip
+                  v-if="mod.bundled"
+                  size="x-small"
+                  color="primary"
+                  variant="tonal"
+                >
+                  随包 {{ mod.package_version || '' }}
+                  <template v-if="mod.package_size"> · {{ formatSize(mod.package_size) }}</template>
+                </v-chip>
+                <v-chip v-else-if="mod.installed_version" size="x-small" variant="text">
+                  已装 v{{ mod.installed_version }}
+                </v-chip>
+                <v-chip v-else size="x-small" variant="text">不随包</v-chip>
+                <v-chip size="x-small" :color="moduleActionColor(mod.action)" variant="tonal">
+                  {{ moduleActionText(mod.action) }}
+                </v-chip>
+              </div>
+            </v-card-text>
+          </v-card>
 
           <v-card v-if="report.secrets.length" variant="tonal" class="mt-2">
             <v-card-text>

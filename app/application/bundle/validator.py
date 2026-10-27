@@ -212,6 +212,48 @@ def validate_bytes(
                     f"已装 {installed[name]}，要求 {required['version']}", "升级模块后再导入",
                 ))
 
+    # 模块清单（预检页逐条展示：名称/版本/是否随包/动作/体积）
+    modules_detail: list[dict] = []
+    for required in manifest["requires"]["modules"]:
+        name = required["name"]
+        identity = bundled.get(name)
+        package_size = 0
+        source = required["source"]
+        if source and source in files:
+            package_size = len(files[source])
+        if name in will_install:
+            action = "upgrade" if name in installed else "install"
+        elif name in installed:
+            action = "skip"
+        elif identity is None:
+            action = "missing"
+        else:
+            action = "install"
+        modules_detail.append({
+            "name": name,
+            "version": required["version"],
+            "required": required["required"],
+            "bundled": identity is not None,
+            "package_version": identity["version"] if identity else "",
+            "package_size": package_size,
+            "installed_version": installed.get(name, ""),
+            "action": action,
+        })
+    declared = {item["name"] for item in manifest["requires"]["modules"]}
+    for component in manifest["components"]["modules"]:
+        if component["name"] in declared:
+            continue
+        modules_detail.append({
+            "name": component["name"],
+            "version": component.get("version") or "",
+            "required": False,
+            "bundled": False,
+            "package_version": "",
+            "package_size": 0,
+            "installed_version": installed.get(component["name"], ""),
+            "action": "config_only",
+        })
+
     # ---------- 引用完整性 ----------
     for persona in manifest["components"]["personas"]:
         if persona["source"] not in files:
@@ -297,6 +339,7 @@ def validate_bytes(
             "author": manifest["author"],
         },
         "summary": summary,
+        "modules": modules_detail,
         "issues": issues,
         "secrets": manifest["secrets"],
         "manifest": {key: value for key, value in manifest.items() if key != "raw"},

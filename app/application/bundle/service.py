@@ -15,7 +15,7 @@ from app.application.bundle.applier import BundleApplier
 from app.application.bundle.errors import BundleError
 from app.application.bundle.exporter import export_bundle
 from app.application.bundle.manifest import normalize_manifest
-from app.application.bundle.module_packages import ModulePackageError, pack_module_dir
+from app.application.bundle.module_packages import ModulePackageError, dir_size, pack_module_dir
 from app.application.bundle.validator import inspect_zip, validate_bytes
 
 
@@ -101,6 +101,11 @@ class BundleService:
             "size": len(data),
             "file": filename,
             "secrets": report.get("secrets", []),
+            # 卡片/详情展示用：包含哪些模块、有多少是随包代码
+            "modules": [item["name"] for item in report.get("modules", [])],
+            "modules_bundled": int(report["summary"].get("modules_bundled", 0)),
+            "modules_to_install": int(report["summary"].get("modules_to_install", 0)),
+            "has_code": bool(report["summary"].get("modules_bundled", 0)),
         }
         (target_dir / "meta.json").write_text(
             json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -151,9 +156,17 @@ class BundleService:
         version: str = "1.0.0",
         description: str = "",
         include_modules: bool = True,
+        module_filter: list[str] | None = None,
     ) -> bytes:
-        """把某账号的当前配置导出成预设 zip（密钥被剥离成 secrets 声明）。"""
+        """把某账号的当前配置导出成预设 zip（密钥被剥离成 secrets 声明）。
+
+        ``module_filter``：只导出这些模块（``None`` = 全部）。未列出的模块既不带配置
+        也不带代码，导入方保持原样。
+        """
         bundle_id = self._safe_bundle_id(bundle_id)
+        selected = None if module_filter is None else {
+            str(item) for item in module_filter if str(item or "").strip()
+        }
         agent_config = self.config_service.get_module_config("agent", account_id) or {}
 
         persona = None
@@ -209,6 +222,8 @@ class BundleService:
         module_meta: dict[str, dict] = {}
         if include_modules:
             for module_name in self.installed_modules:
+                if selected is not None and module_name not in selected:
+                    continue
                 config = self.config_service.get_module_config(module_name, account_id) or {}
                 authority = self.config_service.get_module_authority(module_name, account_id) or {}
                 if not config and not authority:
@@ -249,6 +264,27 @@ class BundleService:
             module_meta=module_meta,
         )
 
+    def export_options(self, account_id: str) -> list[dict]:
+        """导出对话框的模块清单：名称 / 版本 / 是否内置 / 体积 / 当前启停。"""
+        options: list[dict] = []
+        for module_name, version in self.installed_modules.items():
+            entry = self.module_catalog.get(module_name) or {}
+            builtin = bool(entry.get("builtin", True))
+            directory = entry.get("path")
+            authority = self.config_service.get_module_authority(module_name, account_id) or {}
+            options.append({
+                "name": module_name,
+                "display_name": str(entry.get("display_name") or module_name),
+                "version": str(entry.get("version") or version or ""),
+                "builtin": builtin,
+                "enabled": bool(authority.get("enabled", True)),
+                "has_config": bool(
+                    self.config_service.get_module_config(module_name, account_id) or {}
+                ),
+                "size": 0 if builtin or not directory else dir_size(directory),
+            })
+        options.sort(key=lambda item: (item["builtin"], item["name"]))
+        return options
 
     # ==================== 应用到账号 / 回滚（P3） ====================
 
