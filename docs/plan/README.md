@@ -6,6 +6,7 @@
 > - 一键部署 / 整合包 / 首启 → [`../oneclick-bundle-and-onboarding-design.md`](../oneclick-bundle-and-onboarding-design.md)
 > - 权限与回复（简单/高级双模） → [`../permission-dialogue-policy-design.md`](../permission-dialogue-policy-design.md)
 > - 身份与能力面板 → [`../identity-and-capability-console.md`](../identity-and-capability-console.md)
+> - EXE 打包（**提案，未立项**，只做可行性定论，不改代码） → [`../exe-packaging-design.md`](../exe-packaging-design.md)
 
 ---
 
