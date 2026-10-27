@@ -254,9 +254,12 @@ def test_legacy_migrated_keys_are_ignored_not_rejected(client):
 
     assert resp.status_code == 200, resp.text
     assert runtime.config.get("group_enable") is True
-    # 废弃键不能被写回 runtime（否则又会出现在下一次保存的 payload 里）
-    assert runtime.config.get("provider_preset_id") in (None, "")
-    assert runtime.config.get("fallback_model_ids") in (None, "", [])
+    # 运行时仍在消费的键必须写入（否则"保存成功但模型池为空"→ 就绪卡永远红）
+    assert runtime.config.get("provider_preset_id") == "pp1"
+    assert runtime.config.get("provider_model_pool") == ["pm1"]
+    assert runtime.config.get("fallback_model_ids") == ["pm1"]
+    # 真正已废弃、运行时也不读的键不写回
+    assert runtime.config.get("experimental_long_term_memory") is None
 
 
 def test_unknown_typo_key_is_ignored_on_manual_save(client):
@@ -270,3 +273,55 @@ def test_unknown_typo_key_is_ignored_on_manual_save(client):
 
     assert resp.status_code == 200, resp.text
     assert runtime.config.get("not_a_real_key") is None
+
+
+async def test_model_pool_saved_from_agent_page_makes_readiness_green(container, config_service):
+    """回归：Agent 页保存模型池 → 就绪检查的 model_pool 必须立刻变绿。
+
+    之前的 bug：保存路径把 provider_model_pool 当"废弃键"丢掉，
+    界面显示保存成功，但就绪卡永远报「Agent 未选择模型」。
+    """
+    from starlette.testclient import TestClient
+
+    from app.webui.app import create_app
+
+    await config_service.save_bots([
+        {"id": "acc1", "name": "主号", "ws_url": "ws://127.0.0.1:4001/", "conn_mode": "reverse"},
+    ])
+    client = TestClient(create_app(container))
+
+    before = client.get("/api/readiness").json()
+    model_check = next(c for c in before["checks"] if c["id"] == "model_pool")
+    assert model_check["ok"] is False
+
+    saved = client.post(
+        "/api/agent/config",
+        params={"account_id": "acc1"},
+        json={"config": {"provider_model_pool": ["pm1"], "provider_model_id": "pm1"}},
+    )
+    assert saved.status_code == 200, saved.text
+
+    after = client.get("/api/readiness").json()
+    model_check = next(c for c in after["checks"] if c["id"] == "model_pool")
+    assert model_check["ok"] is True, model_check
+
+
+async def test_invalid_runtime_key_type_is_rejected(container, config_service):
+    """模型池必须是字符串数组（写成字符串时当场 400，而不是静默存垃圾）。"""
+    from starlette.testclient import TestClient
+
+    from app.webui.app import create_app
+
+    await config_service.save_bots([
+        {"id": "acc1", "name": "主号", "ws_url": "ws://127.0.0.1:4001/", "conn_mode": "reverse"},
+    ])
+    client = TestClient(create_app(container))
+
+    resp = client.post(
+        "/api/agent/config",
+        params={"account_id": "acc1"},
+        json={"config": {"provider_model_pool": "pm1"}},
+    )
+
+    assert resp.status_code == 400
+    assert "provider_model_pool" in resp.json()["message"]

@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
@@ -27,6 +29,23 @@ from app.webui.api.deps import (
 )
 
 router = APIRouter(prefix="/agent", tags=["agent"])
+
+#: 仍被运行时消费、但已从 config_schema.SCHEMA 移出的键。
+#: Agent 页的「模型池」卡片写的就是这些键（runtime.py 的 provider_chain 读它们），
+#: 所以保存路径必须允许写入——丢掉的结果是"保存成功但模型池为空"。
+RUNTIME_ONLY_KEYS = frozenset({
+    "provider_model_pool",
+    "provider_model_id",
+    "provider_preset_id",
+    "fallback_model_ids",
+})
+
+
+def _runtime_key_ok(key: str, value: Any) -> bool:
+    """运行时键的轻量类型校验（它们不在 SCHEMA，值校验器覆盖不到）。"""
+    if key in ("provider_model_pool", "fallback_model_ids"):
+        return isinstance(value, list) and all(isinstance(item, str) for item in value)
+    return isinstance(value, str)
 
 
 def _ok(message: str, **extra):
@@ -170,9 +189,18 @@ async def agent_config_update(request: Request, bot_id: str | None = Depends(par
             400,
             "这些配置已归属模块，请到对应模块的配置页修改：" + "、".join(sorted(rejected)),
         )
-    # 已迁移到模块 / 已废弃的旧键：旧页面（或第三方脚本）仍会把它们整份回传，
-    # 它们不属于 Agent 配置了，静默忽略即可——否则每次保存都会被判"未知配置项"。
-    retired = set(MIGRATED_OR_RETIRED_KEYS)
+    # 仍被运行时消费的键（模型池等）不能被当成"废弃键"丢掉
+    bad_runtime_keys = [
+        key for key, value in incoming_config.items()
+        if key in RUNTIME_ONLY_KEYS and not _runtime_key_ok(key, value)
+    ]
+    if bad_runtime_keys:
+        return _err(
+            400,
+            "配置值不合法，未保存：" + "、".join(sorted(bad_runtime_keys)) + "（类型不对）",
+        )
+    # 其余已迁移 / 已废弃的旧键：旧页面（或第三方脚本）会整份回传，静默忽略。
+    retired = set(MIGRATED_OR_RETIRED_KEYS) - set(RUNTIME_ONLY_KEYS)
     for key in [k for k in incoming_config if k in retired]:
         incoming_config.pop(key, None)
 
@@ -189,8 +217,8 @@ async def agent_config_update(request: Request, bot_id: str | None = Depends(par
         )
     for key, value in incoming_config.items():
         field = SCHEMA.get(key)
-        if field is None:
-            continue  # 不在 Agent schema 里的键（已迁移/废弃）不写回
+        if field is None and key not in RUNTIME_ONLY_KEYS:
+            continue  # 既不在 schema、也不是运行时键（已迁移/废弃）→ 不写回
         if isinstance(field, dict) and field.get("type") == "password" and value == _PASSWORD_MASK:
             continue
         runtime.config.set(key, value, auto_save=False)
