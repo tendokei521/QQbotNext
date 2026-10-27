@@ -87,12 +87,16 @@ class BundleApplier:
         account_id: str,
         secrets: dict | None = None,
         previous: dict | None = None,
+        reuse_provider_preset_id: str | None = None,
     ) -> dict:
         """把「清单 + 内容物 + 目标账号现状」算成幂等计划（含内部 ops）。
 
         ``previous`` = 上一次同等价应用于该账号时记录的 ``applied_json``
         （``{"agent": {...}, "modules": {name: {...}}}``）。升级同 id 新版本时据此
         **保留用户改动**：用户改过的键不再被新包覆盖；已填密钥缺省复用旧值。
+
+        ``reuse_provider_preset_id``：复用本机已有 Provider 预设的密钥（"一键"场景，
+        用户不想重填 Key 时选一个已连通的连接）。
         """
         provided = {
             str(key): str(value)
@@ -136,14 +140,31 @@ class BundleApplier:
             creates.append({"kind": "role_preset", "name": persona["name"]})
             agent_patch["persona_preset_id"] = role_id
 
-        # 2) Provider 连接 + 模型池（密钥来自导入时手填；升级时缺省复用旧值）
+        # 2) Provider 连接 + 模型池（密钥来自导入时手填 / 复用本机已有预设；升级时缺省复用旧值）
         provider_config: dict[str, Any] = {}
         provider_models: list[dict] = []
+        reused_from = ""
         provider = (manifest["components"]["providers"] or [None])[0]
         if provider:
             provider_config = dict(provider.get("config") or {})
             provider_config["api_base"] = provider["api_base"]
             api_key = provided.get("providers[0].api_key", "")
+            if not api_key and reuse_provider_preset_id:
+                reused = self.config_service.get_provider_preset(reuse_provider_preset_id)
+                if not reused:
+                    raise BundleError(
+                        "BUNDLE_REUSE_PRESET_NOT_FOUND",
+                        f"要复用的 Provider 预设不存在：{reuse_provider_preset_id}",
+                        "刷新 Provider 预设列表后重选，或手填密钥",
+                    )
+                api_key = str((reused.get("config") or {}).get("api_key") or "")
+                if not api_key:
+                    raise BundleError(
+                        "BUNDLE_REUSE_PRESET_EMPTY",
+                        f"Provider 预设「{reused.get('name') or reuse_provider_preset_id}」没有可复用的密钥",
+                        "换一个预设，或手填密钥",
+                    )
+                reused_from = str(reuse_provider_preset_id)
             if not api_key:
                 for created in previous.get("created") or []:
                     if created.get("kind") == "provider_preset":
@@ -293,6 +314,7 @@ class BundleApplier:
                 secret for secret in manifest.get("secrets", []) if secret.get("required", True)
             ],
             "modules_to_install": self._pending_modules(manifest),
+            "reused_provider_preset_id": reused_from,
             "snapshot": {
                 "bindings": bindings_snapshot,
                 "created": creates_meta,
@@ -438,6 +460,7 @@ class BundleApplier:
         files: dict[str, bytes],
         *,
         secrets: dict | None = None,
+        reuse_provider_preset_id: str | None = None,
     ) -> dict:
         db = self.config_service.db
         # 升级 diff：取该 (bundle, account) 最近一次 active 的 applied 快照与记账对象
@@ -457,7 +480,8 @@ class BundleApplier:
                 {"kind": row["kind"], "id": row["object_id"]} for row in (prev_objects or [])
             ]
         plan = self.build_plan(
-            manifest, files, account_id=account_id, secrets=secrets, previous=previous
+            manifest, files, account_id=account_id, secrets=secrets, previous=previous,
+            reuse_provider_preset_id=reuse_provider_preset_id,
         )
         activation_id = f"act_{uuid.uuid4().hex[:12]}"
         now = int(time.time())

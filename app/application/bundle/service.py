@@ -320,11 +320,13 @@ class BundleService:
         account_id: str,
         *,
         secrets: dict | None = None,
+        reuse_provider_preset_id: str | None = None,
     ) -> dict:
         """把预设应用到某账号（事务写 + 快照，失败自动回滚）。"""
         _, manifest, files = self._load_parts(bundle_id)
         return await self.applier.apply(
-            bundle_id, str(account_id), manifest, files, secrets=secrets or {}
+            bundle_id, str(account_id), manifest, files, secrets=secrets or {},
+            reuse_provider_preset_id=reuse_provider_preset_id,
         )
 
     async def rollback(self, activation_id: str) -> dict:

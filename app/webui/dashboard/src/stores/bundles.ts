@@ -104,10 +104,20 @@ export interface ApplyResult {
     secrets_required: BundleSecret[]
     /** 应用时需要安装/升级的随包模块 */
     modules_to_install?: string[]
+    /** 本次复用了哪个本机 Provider 预设的密钥 */
+    reused_provider_preset_id?: string
   }
   /** 本次真正新装/升级的模块（回滚只卸载"新装"的） */
   modules_installed?: string[]
   modules_upgraded?: string[]
+}
+
+/** 可复用的本机 Provider 预设 */
+export interface ReusePreset {
+  id: string
+  name: string
+  provider?: string
+  config?: Record<string, any>
 }
 
 function _triggerDownload(blob: Blob, filename: string) {
@@ -189,6 +199,7 @@ export const useBundlesStore = defineStore('bundles', () => {
     accountId: string,
     secrets: Record<string, string>,
     acceptCode = false,
+    reusePresetId = '',
   ): Promise<BundleReport & { apply?: ApplyResult }> {
     importing.value = true
     applying.value = true
@@ -198,6 +209,7 @@ export const useBundlesStore = defineStore('bundles', () => {
       form.append('account_id', accountId)
       form.append('secrets', JSON.stringify(secrets || {}))
       form.append('accept_code', acceptCode ? 'true' : 'false')
+      if (reusePresetId) form.append('reuse_provider_preset_id', reusePresetId)
       const res = await http.post('/api/bundles/import-apply', form)
       await Promise.all([load(), loadActivations(accountId)])
       return res.data
@@ -271,18 +283,26 @@ export const useBundlesStore = defineStore('bundles', () => {
     id: string,
     accountId: string,
     secrets: Record<string, string>,
+    reusePresetId = '',
   ): Promise<ApplyResult> {
     applying.value = true
     try {
       const res = await http.post(`/api/bundles/${encodeURIComponent(id)}/apply`, {
         account_id: accountId,
         secrets,
+        ...(reusePresetId ? { reuse_provider_preset_id: reusePresetId } : {}),
       })
       await Promise.all([load(), loadActivations(accountId)])
       return res.data as ApplyResult
     } finally {
       applying.value = false
     }
+  }
+
+  /** 可复用的本机 Provider 预设（一键场景：不想重填 Key 时选一个已连通的） */
+  async function loadReusePresets(): Promise<ReusePreset[]> {
+    const res = await http.get('/api/provider-presets')
+    return (res.data?.presets || []) as ReusePreset[]
   }
 
   async function rollbackActivation(activationId: string): Promise<void> {
@@ -319,5 +339,6 @@ export const useBundlesStore = defineStore('bundles', () => {
     download,
     exportAccount,
     loadExportOptions,
+    loadReusePresets,
   }
 })

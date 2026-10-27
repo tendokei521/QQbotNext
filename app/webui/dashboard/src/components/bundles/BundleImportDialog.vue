@@ -7,7 +7,12 @@
  */
 import { computed, reactive, ref } from 'vue'
 import { displayName, useBotsStore } from '@/stores/bots'
-import { useBundlesStore, type ApplyResult, type BundleReport } from '@/stores/bundles'
+import {
+  useBundlesStore,
+  type ApplyResult,
+  type BundleReport,
+  type ReusePreset,
+} from '@/stores/bundles'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 
@@ -32,8 +37,16 @@ const acceptCode = ref(false)
 const error = ref('')
 const dragOver = ref(false)
 const secretsForm = reactive<Record<string, string>>({})
+const reusePresets = ref<ReusePreset[]>([])
+const reusePresetId = ref<string | null>(null)
 
 const targetAccountId = computed(() => bots.currentAccountId)
+const reusePresetOptions = computed(() =>
+  reusePresets.value.map((preset) => ({
+    id: preset.id,
+    label: `${preset.name}${preset.config?.api_base ? ` · ${preset.config.api_base}` : ''}`,
+  })),
+)
 /** 包含可执行模块代码 → 必须显式确认信任才允许导入/应用 */
 const needsConsent = computed(() => Boolean(report.value?.requires_code_consent))
 const consentBlocked = computed(() => needsConsent.value && !acceptCode.value)
@@ -50,6 +63,7 @@ function reset() {
   applied.value = null
   importedOnly.value = false
   acceptCode.value = false
+  reusePresetId.value = null
   error.value = ''
   dragOver.value = false
   Object.keys(secretsForm).forEach((key) => delete secretsForm[key])
@@ -72,6 +86,14 @@ async function prepare(picked: File) {
     report.value = await bundles.validateFile(picked)
     Object.keys(secretsForm).forEach((key) => delete secretsForm[key])
     for (const secret of report.value.secrets || []) secretsForm[secret.key] = ''
+    reusePresetId.value = null
+    if (targetAccountId.value) {
+      try {
+        reusePresets.value = await bundles.loadReusePresets()
+      } catch (err) {
+        reusePresets.value = []
+      }
+    }
     screen.value = 'preview'
   } catch (err) {
     error.value = errorMessage(err)
@@ -114,6 +136,7 @@ async function confirmApply() {
       targetAccountId.value,
       { ...secretsForm },
       acceptCode.value,
+      reusePresetId.value || '',
     )
     result.value = { bundle: response.bundle }
     applied.value = response.apply || null
@@ -310,6 +333,25 @@ function formatSize(bytes: number): string {
             </v-card-text>
           </v-card>
 
+          <v-card v-if="targetAccountId && reusePresetOptions.length" variant="tonal" class="mt-2">
+            <v-card-text>
+              <div class="text-caption font-weight-medium mb-1">复用本机 Provider 密钥（可选）</div>
+              <v-select
+                v-model="reusePresetId"
+                :items="reusePresetOptions"
+                item-title="label"
+                item-value="id"
+                clearable
+                density="comfortable"
+                variant="outlined"
+                hide-details
+              />
+              <div class="text-caption mt-1" style="opacity: 0.7">
+                选一个已连通的 Provider 预设：Provider Key 不用手填，也不会写进包。
+              </div>
+            </v-card-text>
+          </v-card>
+
           <v-card v-if="report.secrets.length" variant="tonal" class="mt-2">
             <v-card-text>
               <div class="text-caption font-weight-medium mb-2">
@@ -321,6 +363,7 @@ function formatSize(bytes: number): string {
                 v-model="secretsForm[secret.key]"
                 :label="secret.label + (secret.required ? ' *' : '')"
                 :placeholder="secret.required ? '必填（不随包分发）' : '可选'"
+                :disabled="Boolean(reusePresetId) && secret.key === 'providers[0].api_key'"
                 type="password"
                 density="comfortable"
                 variant="outlined"

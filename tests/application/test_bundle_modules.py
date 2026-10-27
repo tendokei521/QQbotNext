@@ -503,3 +503,52 @@ async def test_apply_upgrades_installed_module_without_marking_uninstall(
     assert await db.fetchone(
         "SELECT module_name FROM module_origins WHERE module_name = ?", ("demo_mod",)
     ) is not None, "升级的模块保留，来源也不该被清掉"
+
+
+async def test_apply_reuses_provider_secret_from_existing_preset(
+    container, config_service, tmp_path
+):
+    """P7-5：一键场景可复用本机已有 Provider 预设的密钥，不用重填 Provider Key。"""
+    await _seed(container, config_service)
+    await config_service.save_provider_preset("pp_existing", {
+        "id": "pp_existing",
+        "name": "本机 DeepSeek",
+        "provider": "openai",
+        "config": {"api_base": "https://api.deepseek.com/v1", "api_key": "sk-reused"},
+        "enabled": True,
+        "created_at": 1,
+        "updated_at": 1,
+    })
+    applier = BundleApplier(config_service, module_installer=_FakeInstaller())
+
+    result = await applier.apply(
+        "demo-pack", "acc1", normalize_manifest(_manifest_with_module()), _files(tmp_path),
+        secrets={
+            "agent.api_key": "sk-agent",
+            "module:demo_mod.api_key": "sk-module",
+        },
+        reuse_provider_preset_id="pp_existing",
+    )
+
+    agent = config_service.get_module_config("agent", "acc1")
+    model = config_service.get_provider_model(agent["provider_model_id"])
+    preset = config_service.get_provider_preset(model["preset_id"])
+    assert preset["config"]["api_key"] == "sk-reused"
+    assert result["plan"]["reused_provider_preset_id"] == "pp_existing"
+
+
+async def test_apply_rejects_unknown_reuse_preset(container, config_service, tmp_path):
+    await _seed(container, config_service)
+    applier = BundleApplier(config_service, module_installer=_FakeInstaller())
+
+    with pytest.raises(BundleError) as exc:
+        await applier.apply(
+            "demo-pack", "acc1", normalize_manifest(_manifest_with_module()), _files(tmp_path),
+            secrets={
+                "agent.api_key": "sk-agent",
+                "module:demo_mod.api_key": "sk-module",
+            },
+            reuse_provider_preset_id="pp_missing",
+        )
+
+    assert exc.value.code == "BUNDLE_REUSE_PRESET_NOT_FOUND"

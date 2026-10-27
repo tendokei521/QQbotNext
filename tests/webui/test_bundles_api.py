@@ -292,6 +292,30 @@ async def test_import_apply_in_one_call(container, config_service):
     assert activations["total"] == 1
 
 
+async def test_apply_reuses_existing_provider_secret(container, config_service):
+    """P7-5：应用时复用本机已有 Provider 预设的密钥。"""
+    await _seed_account(config_service)
+    client = _client(container)
+    data = client.get(
+        "/api/bundles/export", params={"account_id": "acc1", "bundle_id": "reuse-pack"}
+    ).content
+    assert client.post(
+        "/api/bundles/import", files={"file": ("b.zip", data, "application/zip")}
+    ).status_code == 200
+
+    applied = client.post("/api/bundles/reuse-pack/apply", json={
+        "account_id": "acc1",
+        "reuse_provider_preset_id": "preset123",
+    })
+
+    assert applied.status_code == 200, applied.text
+    agent = config_service.get_module_config("agent", "acc1")
+    model = config_service.get_provider_model(agent["provider_model_id"])
+    preset = config_service.get_provider_preset(model["preset_id"])
+    assert preset["config"]["api_key"] == "sk-provider-secret-999"
+    assert applied.json()["plan"]["reused_provider_preset_id"] == "preset123"
+
+
 async def test_uninstall_rolls_back_and_removes_artifact(container, config_service):
     await _seed_account(config_service)
     client = _client(container)

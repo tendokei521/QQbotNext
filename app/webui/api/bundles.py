@@ -188,6 +188,7 @@ async def api_bundles_import_apply(
     account_id: str = Form(...),
     secrets: str = Form("{}"),
     accept_code: bool = Form(False),
+    reuse_provider_preset_id: str = Form(""),
     config_service=Depends(get_config_service),
     agent_manager=Depends(get_agent_manager),
     bot_service=Depends(get_bot_service),
@@ -215,7 +216,10 @@ async def api_bundles_import_apply(
     bundle = result.get("bundle") or {}
     try:
         applied = await service.apply(
-            str(bundle.get("id") or ""), account_id, secrets=secrets_obj
+            str(bundle.get("id") or ""), account_id, secrets=secrets_obj,
+            reuse_provider_preset_id=(
+                str(reuse_provider_preset_id or "").strip() or None
+            ),
         )
     except BundleError as e:
         # 工件已登记：前端可以提示"已导入，应用失败"，让用户补密钥/修问题后重试
@@ -354,10 +358,13 @@ async def api_bundles_apply(
     if not account_id:
         return _err(400, "缺少 account_id", "BUNDLE_ACCOUNT_REQUIRED")
     secrets = body.get("secrets") if isinstance(body.get("secrets"), dict) else {}
+    reuse_id = str(body.get("reuse_provider_preset_id") or "").strip() or None
     try:
         result = await _service(
             config_service, agent_manager, bot_service, settings, registry
-        ).apply(bundle_id, account_id, secrets=secrets)
+        ).apply(
+            bundle_id, account_id, secrets=secrets, reuse_provider_preset_id=reuse_id
+        )
     except BundleError as e:
         return _err(400, str(e), e.code, e.hint)
     return _ok("已应用到账号", **result)

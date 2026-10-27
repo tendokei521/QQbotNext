@@ -5,7 +5,7 @@
  */
 import { computed, onMounted, reactive, ref } from 'vue'
 import { displayName, useBotsStore } from '@/stores/bots'
-import { useBundlesStore, type ExportModuleOption } from '@/stores/bundles'
+import { useBundlesStore, type ExportModuleOption, type ReusePreset } from '@/stores/bundles'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
@@ -20,6 +20,8 @@ const exportDialog = ref(false)
 const exporting = ref(false)
 const exportOptions = ref<ExportModuleOption[]>([])
 const exportSelected = reactive<Record<string, boolean>>({})
+const reusePresets = ref<ReusePreset[]>([])
+const reusePresetId = ref<string | null>(null)
 const exportForm = reactive({
   id: '',
   name: '',
@@ -27,13 +29,20 @@ const exportForm = reactive({
   description: '',
 })
 
+const reusePresetOptions = computed(() =>
+  reusePresets.value.map((preset) => ({
+    id: preset.id,
+    label: `${preset.name}${preset.config?.api_base ? ` · ${preset.config.api_base}` : ''}`,
+  })),
+)
+
 // ---- 应用到账号（P3） ----
 const applyDialog = ref(false)
 const applyTarget = ref<{ id: string; name: string; version: string; secrets?: { key: string; label: string; required: boolean }[] } | null>(null)
 const applySecrets = reactive<Record<string, string>>({})
 const applyResult = ref<{
   activation_id: string
-  plan: { creates: any[]; updates: any[] }
+  plan: { creates: any[]; updates: any[]; reused_provider_preset_id?: string }
   modules_installed?: string[]
   modules_upgraded?: string[]
 } | null>(null)
@@ -58,9 +67,19 @@ function openApply(item: { id: string; name: string; version: string; secrets?: 
   }
   applyTarget.value = item
   applyResult.value = null
+  reusePresetId.value = null
   Object.keys(applySecrets).forEach((key) => delete applySecrets[key])
   for (const secret of item.secrets || []) applySecrets[secret.key] = ''
   applyDialog.value = true
+  void loadReusePresets()
+}
+
+async function loadReusePresets() {
+  try {
+    reusePresets.value = await bundles.loadReusePresets()
+  } catch (err) {
+    reusePresets.value = []
+  }
 }
 
 async function doApply() {
@@ -71,6 +90,7 @@ async function doApply() {
       applyTarget.value.id,
       bots.currentAccountId,
       { ...applySecrets },
+      reusePresetId.value || '',
     )
     notify.push('已应用到当前账号', 'success')
   } catch (err) {
@@ -388,12 +408,32 @@ onMounted(async () => {
             <div class="text-body-2 mb-2">
               {{ applyTarget?.name }} <span style="opacity: 0.6">v{{ applyTarget?.version }}</span>
             </div>
+            <v-select
+              v-if="reusePresetOptions.length"
+              v-model="reusePresetId"
+              :items="reusePresetOptions"
+              item-title="label"
+              item-value="id"
+              label="复用本机 Provider 密钥（可选）"
+              clearable
+              density="comfortable"
+              variant="outlined"
+              class="mb-1"
+            />
+            <div
+              v-if="reusePresetId"
+              class="text-caption mb-2"
+              style="opacity: 0.7"
+            >
+              已选择复用：Provider Key 不再需要手填（不会再写进包）。
+            </div>
             <v-text-field
               v-for="secret in applyTarget?.secrets || []"
               :key="secret.key"
               v-model="applySecrets[secret.key]"
               :label="secret.label"
               :placeholder="secret.required ? '必填（不随包分发）' : '可选'"
+              :disabled="Boolean(reusePresetId) && secret.key === 'providers[0].api_key'"
               type="password"
               density="comfortable"
               variant="outlined"
@@ -403,6 +443,9 @@ onMounted(async () => {
           <v-alert v-else type="success" variant="tonal" density="compact">
             已应用（激活 {{ applyResult.activation_id }}）：
             新建 {{ applyResult.plan.creates.length }} 项、更新 {{ applyResult.plan.updates.length }} 处。
+            <div v-if="applyResult.plan.reused_provider_preset_id">
+              密钥复用自本机 Provider 预设 {{ applyResult.plan.reused_provider_preset_id }}
+            </div>
             <template v-if="applyResult.modules_installed?.length">
               <div>已安装随包模块：{{ applyResult.modules_installed.join('、') }}</div>
             </template>
