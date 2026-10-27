@@ -61,6 +61,10 @@ jobs:
           python -m pip install --upgrade build
           python -m build
 
+      - name: Build deploy kit
+        # 免安装包：解压双击 start.bat 即可（前端产物必须已在前面构建好）
+        run: python scripts/build_deploy_kit.py --version "${GITHUB_REF_NAME#v}"
+
       - name: Create GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -71,4 +75,5 @@ jobs:
             --notes-file CHANGELOG.md \
             dist/*.whl \
             dist/*.tar.gz \
+            dist/kit/QQBotNext-*-kit.zip \
             qqbot-next-dashboard-${{ github.ref_name }}.tar.gz
