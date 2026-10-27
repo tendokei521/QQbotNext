@@ -13,6 +13,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from app.core.logger import logger
+
 
 class GroupService:
     def __init__(self, bot_service: Any, config_service: Any) -> None:
@@ -30,7 +32,8 @@ class GroupService:
             return None
         try:
             return gateway.connections.get(str(account_id))
-        except Exception:  # noqa: BLE001 —— 网关未就绪时按"没有连接"处理
+        except Exception as e:  # noqa: BLE001 —— 网关未就绪时按"没有连接"处理
+            logger.add_info("Groups").debug(f"[Groups] 读连接表失败 {account_id}: {e}")
             return None
 
     @staticmethod

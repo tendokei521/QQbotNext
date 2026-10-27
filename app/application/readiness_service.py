@@ -20,6 +20,8 @@ from __future__ import annotations
 import sys
 from typing import Any
 
+from app.core.logger import logger
+
 #: 检查项严重级别：blocker 会让 ready=False；warn 只提示；info 仅展示
 LEVEL_BLOCKER = "blocker"
 LEVEL_WARN = "warn"
@@ -66,19 +68,22 @@ class ReadinessService:
     def _accounts(self) -> list[dict]:
         try:
             return list(self.config_service.get_bots() or [])
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001 —— 诊断接口不能因一个状态读失败而整体 500
+            logger.add_info("Readiness").debug(f"[Readiness] 读账号失败: {e}")
             return []
 
     def _connections(self) -> dict:
         try:
             return dict(getattr(self.gateway, "connections", {}) or {})
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            logger.add_info("Readiness").debug(f"[Readiness] 读连接表失败: {e}")
             return {}
 
     def _runtimes(self) -> dict:
         try:
             return dict(self.agent_manager.runtimes() or {})
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            logger.add_info("Readiness").debug(f"[Readiness] 读运行时失败: {e}")
             return {}
 
     @staticmethod
@@ -100,7 +105,8 @@ class ReadinessService:
             return []
         try:
             entries = registry.catalog_entries() if hasattr(registry, "catalog_entries") else []
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            logger.add_info("Readiness").debug(f"[Readiness] 读模块编目失败: {e}")
             return []
         errors: list[str] = []
         for entry in entries:
@@ -177,7 +183,8 @@ class ReadinessService:
             try:
                 if getattr(conn, "conn_mode", "") == "reverse" and self.gateway.reverse_link.listening(aid):
                     listening.append(str(aid))
-            except Exception:  # noqa: BLE001
+            except Exception as e:  # noqa: BLE001
+                logger.add_info("Readiness").debug(f"[Readiness] 读监听状态失败 {aid}: {e}")
                 continue
         if listening:
             checks.append(_check(
@@ -215,7 +222,8 @@ class ReadinessService:
         if self.config_service is not None:
             try:
                 completed = bool(await self.config_service.get_kv("setup_completed_at", 0))
-            except Exception:  # noqa: BLE001
+            except Exception as e:  # noqa: BLE001 —— 读不到按"未完成"，不影响其它检查
+                logger.add_info("Readiness").debug(f"[Readiness] 读首启标记失败: {e}")
                 completed = False
         data["setup_completed"] = completed
         return data

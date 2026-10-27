@@ -16,6 +16,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from app.core.logger import logger
 from app.domain.dialogue_policy import (
     PERMISSION_KEYS,
     SCOPE_OVERRIDABLE,
@@ -56,7 +57,8 @@ class DialoguePolicyService:
             if runtime is None and self.agent_manager is not None:
                 try:
                     runtime = self.agent_manager.get_runtime(account_id)
-                except Exception:  # noqa: BLE001 —— 运行时未装配按"没有配置"处理
+                except Exception as e:  # noqa: BLE001 —— 运行时未装配按"没有配置"处理
+                    logger.add_info("Policy").debug(f"[Policy] 取运行时失败 {account_id}: {e}")
                     runtime = None
             config_getter = getattr(getattr(runtime, "config", None), "raw_config", None)
             config = dict(config_getter) if isinstance(config_getter, dict) else {}
