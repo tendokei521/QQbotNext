@@ -10,7 +10,7 @@ export interface ReadinessCheck {
   level: 'blocker' | 'warn' | 'info' | string
   title: string
   detail?: string
-  action?: { route?: string; label?: string } | null
+  action?: { route?: string; label?: string; account_id?: string } | null
 }
 
 /**

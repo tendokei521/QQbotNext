@@ -37,14 +37,21 @@ def _check(
     detail: str = "",
     route: str = "",
     label: str = "",
+    account_id: str = "",
 ) -> dict:
+    action = None
+    if route:
+        action = {"route": route, "label": label}
+        if account_id:
+            # 前端据此先切换到该账号再跳转：否则跳到的是"当前选中账号"，可能不是要修的那个
+            action["account_id"] = str(account_id)
     return {
         "id": check_id,
         "ok": bool(ok),
         "level": level,
         "title": title,
         "detail": detail,
-        "action": {"route": route, "label": label} if route else None,
+        "action": action,
     }
 
 
@@ -85,6 +92,15 @@ class ReadinessService:
         except Exception as e:  # noqa: BLE001
             logger.add_info("Readiness").debug(f"[Readiness] 读运行时失败: {e}")
             return {}
+
+    def _account_names(self) -> dict[str, str]:
+        """账号 id → 展示名（就绪文案只写名字，id 是给程序判断用的）。"""
+        names: dict[str, str] = {}
+        for account in self._accounts():
+            account_id = str(account.get("id") or "")
+            if account_id:
+                names[account_id] = str(account.get("name") or account_id)
+        return names
 
     @staticmethod
     def _config_of(runtime) -> dict:
@@ -134,6 +150,7 @@ class ReadinessService:
             label="添加账号",
         ))
 
+        names = self._account_names()
         missing_address = [
             str(account.get("id"))
             for account in accounts
@@ -147,9 +164,10 @@ class ReadinessService:
                 False,
                 "账号还没填连接地址",
                 level=LEVEL_WARN,
-                detail="、".join(missing_address),
+                detail="、".join(names.get(aid, aid) for aid in missing_address),
                 route="/bots",
                 label="去填写",
+                account_id=missing_address[0],
             ))
 
         connections = self._connections()
@@ -157,13 +175,21 @@ class ReadinessService:
             aid for aid, conn in connections.items()
             if getattr(conn, "status", "") == "connected"
         ]
+        disconnected = [
+            str(account.get("id")) for account in accounts
+            if str(account.get("id")) not in {str(x) for x in connected}
+        ]
         checks.append(_check(
             "connected",
             bool(connected),
             "账号已连接" if connected else "账号未连接",
-            detail="、".join(str(x) for x in connected) if connected else "连接成功后才能收发消息",
+            detail=(
+                "未连接：" + "、".join(names.get(aid, aid) for aid in disconnected)
+                if disconnected else "连接成功后才能收发消息"
+            ),
             route="/bots",
             label="去连接",
+            account_id=disconnected[0] if disconnected else "",
         ))
 
         runtimes = self._runtimes()
@@ -171,28 +197,38 @@ class ReadinessService:
             str(aid): self._pool_of(self._config_of(runtime))
             for aid, runtime in runtimes.items()
         }
-        any_pool = any(pools.values())
+        missing_pool = [aid for aid, pool in pools.items() if not pool]
+        pool_ok = bool(pools) and not missing_pool
         checks.append(_check(
             "model_pool",
-            any_pool,
-            "Agent 已选择模型" if any_pool else "Agent 未选择模型",
-            detail="" if any_pool else "在 Agent → 基础配置里选择模型并加入模型池",
+            pool_ok,
+            "Agent 已选择模型" if pool_ok else "Agent 未选择模型",
+            detail=(
+                ("未选模型：" + "、".join(names.get(aid, aid) for aid in missing_pool))
+                if missing_pool else "在 Agent → 基础配置里选择模型并加入模型池"
+            ),
             route="/agent/basic",
             label="选择模型",
+            account_id=missing_pool[0] if missing_pool else "",
         ))
 
         scenes = {
             str(aid): bool(cfg.get("group_enable") or cfg.get("private_enable"))
             for aid, cfg in ((str(aid), self._config_of(rt)) for aid, rt in runtimes.items())
         }
-        any_scene = any(scenes.values())
+        missing_scene = [aid for aid, enabled in scenes.items() if not enabled]
+        scene_ok = bool(scenes) and not missing_scene
         checks.append(_check(
             "scene_enabled",
-            any_scene,
-            "已开启响应场景" if any_scene else "群聊与私聊都未开启",
-            detail="" if any_scene else "群聊回复关闭时，群里 @ 机器人不会有任何回应",
+            scene_ok,
+            "已开启响应场景" if scene_ok else "群聊与私聊都未开启",
+            detail=(
+                ("未开启：" + "、".join(names.get(aid, aid) for aid in missing_scene))
+                if missing_scene else "群聊回复关闭时，群里 @ 机器人不会有任何回应"
+            ),
             route="/agent/basic",
             label="开启群聊回复",
+            account_id=missing_scene[0] if missing_scene else "",
         ))
 
         # 协议端监听/连接：反向账号看 listening，正向账号已被 connected 覆盖

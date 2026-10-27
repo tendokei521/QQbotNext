@@ -7,13 +7,20 @@
  */
 import { onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { useBotsStore } from '@/stores/bots'
 import { useReadinessStore } from '@/stores/readiness'
 
 const readiness = useReadinessStore()
+const bots = useBotsStore()
 const router = useRouter()
 
-function go(check: { action?: { route?: string } | null }) {
+/** 点"去修"：先切到该检查指向的账号，再跳转（否则修的是当前选中号，可能不是要修的那个）。 */
+function go(check: { action?: { route?: string; account_id?: string } | null }) {
   const route = check.action?.route
+  const accountId = check.action?.account_id
+  if (accountId && accountId !== bots.currentAccountId) {
+    bots.selectBot(accountId)
+  }
   if (route) router.push(route)
 }
 

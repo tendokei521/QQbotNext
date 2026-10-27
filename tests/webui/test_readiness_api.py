@@ -146,7 +146,8 @@ async def test_readiness_warns_when_account_has_no_address(container, config_ser
     assert "account_address" in by_id
     assert by_id["account_address"]["ok"] is False
     assert by_id["account_address"]["level"] == "warn"
-    assert "acc1" in by_id["account_address"]["detail"]
+    assert "主号" in by_id["account_address"]["detail"], "文案应给账号名而不是 id"
+    assert by_id["account_address"]["action"]["account_id"] == "acc1"
 
 
 async def test_readiness_has_no_address_warning_when_filled(container, config_service):
@@ -160,3 +161,27 @@ async def test_readiness_has_no_address_warning_when_filled(container, config_se
     body = TestClient(create_app(container)).get("/api/readiness").json()
 
     assert "account_address" not in {check["id"] for check in body["checks"]}
+
+
+async def test_model_pool_reports_which_accounts_are_missing(container, config_service):
+    """多账号时要说清"哪个号没选模型"，并把跳转目标指向那个号。"""
+    from starlette.testclient import TestClient
+
+    from app.agent.runtime import AgentManager
+    from app.webui.app import create_app
+
+    await config_service.save_bots([
+        {"id": "good", "name": "配好的号", "ws_url": "ws://127.0.0.1:4001/"},
+        {"id": "bad", "name": "没配的号", "ws_url": "ws://127.0.0.1:4002/"},
+    ])
+    manager = container.get(AgentManager)
+    manager.ensure_runtime("good").config.set("provider_model_pool", ["pm1"], auto_save=False)
+    manager.ensure_runtime("bad")
+
+    body = TestClient(create_app(container)).get("/api/readiness").json()
+    check = next(c for c in body["checks"] if c["id"] == "model_pool")
+
+    assert check["ok"] is False
+    assert "没配的号" in check["detail"] and "配好的号" not in check["detail"]
+    assert check["action"]["account_id"] == "bad"
+    assert check["action"]["route"] == "/agent/basic"
