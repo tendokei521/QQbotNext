@@ -1,4 +1,4 @@
-"""套装校验器：结构 → 清单 → 兼容 → 依赖 → 引用 → 安全。
+"""预设校验器：结构 → 清单 → 兼容 → 依赖 → 引用 → 安全。
 
 输出「预检报告」而不是只抛异常：前端要展示"将创建什么 / 缺什么 / 需手填什么"。
 结构性问题（不是 zip / 路径穿越 / 清单缺失）仍然抛 :class:`BundleError`（400），
@@ -52,9 +52,9 @@ def inspect_zip(data: bytes) -> tuple[dict, dict, dict]:
     - ``bundle.json`` 必须在根；``checksums.sha256`` 可选，存在则逐文件校验。
     """
     if not isinstance(data, (bytes, bytearray)) or not data:
-        raise BundleError("BUNDLE_ZIP_INVALID", "空文件不是有效的套装包")
+        raise BundleError("BUNDLE_ZIP_INVALID", "空文件不是有效的预设包")
     if len(data) > MAX_TOTAL_BYTES:
-        raise BundleError("BUNDLE_ZIP_TOO_LARGE", "套装包超过 200 MB")
+        raise BundleError("BUNDLE_ZIP_TOO_LARGE", "预设包超过 200 MB")
 
     files: dict[str, bytes] = {}
     total = 0
@@ -84,7 +84,7 @@ def inspect_zip(data: bytes) -> tuple[dict, dict, dict]:
         raise BundleError("BUNDLE_ZIP_INVALID", f"不是有效的 zip：{e}") from e
 
     if "bundle.json" not in files:
-        raise BundleError("BUNDLE_MANIFEST_MISSING", "套装包根目录缺少 bundle.json", "请确认打包时把清单放在根目录")
+        raise BundleError("BUNDLE_MANIFEST_MISSING", "预设包根目录缺少 bundle.json", "请确认打包时把清单放在根目录")
 
     checksums: dict[str, str] = {}
     checksum_bytes = files.get("checksums.sha256")

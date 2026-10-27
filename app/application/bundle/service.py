@@ -1,4 +1,4 @@
-"""套装服务：校验 / 导入登记 / 列表 / 导出 / 应用到账号 / 回滚。
+"""预设服务：校验 / 导入登记 / 列表 / 导出 / 应用到账号 / 回滚。
 
 P2 负责"工件进得来、看得懂、导得出"；P3 起增加 `apply` / `rollback`
 （写账号配置走 `ConfigService.apply_ops` 单事务，激活记录兼作 journal）。
@@ -63,7 +63,7 @@ class BundleService:
     def _safe_bundle_id(bundle_id: str) -> str:
         text = str(bundle_id or "").strip()
         if not text or "/" in text or "\\" in text or ".." in text:
-            raise BundleError("BUNDLE_ID_INVALID", f"套装 id 不合法：{text or '(空)'}")
+            raise BundleError("BUNDLE_ID_INVALID", f"预设 id 不合法：{text or '(空)'}")
         return text
 
     # ==================== 校验 / 导入 ====================
@@ -152,7 +152,7 @@ class BundleService:
         description: str = "",
         include_modules: bool = True,
     ) -> bytes:
-        """把某账号的当前配置导出成套装 zip（密钥被剥离成 secrets 声明）。"""
+        """把某账号的当前配置导出成预设 zip（密钥被剥离成 secrets 声明）。"""
         bundle_id = self._safe_bundle_id(bundle_id)
         agent_config = self.config_service.get_module_config("agent", account_id) or {}
 
@@ -253,10 +253,10 @@ class BundleService:
     # ==================== 应用到账号 / 回滚（P3） ====================
 
     def _load_parts(self, bundle_id: str) -> tuple[bytes, dict, dict]:
-        """读已登记套装 → (原始字节, 归一清单, 内容物)。"""
+        """读已登记预设 → (原始字节, 归一清单, 内容物)。"""
         path = self.bundle_file(bundle_id)
         if path is None:
-            raise BundleError("BUNDLE_NOT_FOUND", f"套装不存在：{bundle_id}", "先导入套装")
+            raise BundleError("BUNDLE_NOT_FOUND", f"预设不存在：{bundle_id}", "先导入预设")
         data = path.read_bytes()
         report = self.validate(data)
         if not report["ok"]:
@@ -272,7 +272,7 @@ class BundleService:
         *,
         secrets: dict | None = None,
     ) -> dict:
-        """把套装应用到某账号（事务写 + 快照，失败自动回滚）。"""
+        """把预设应用到某账号（事务写 + 快照，失败自动回滚）。"""
         _, manifest, files = self._load_parts(bundle_id)
         return await self.applier.apply(
             bundle_id, str(account_id), manifest, files, secrets=secrets or {}
@@ -285,11 +285,11 @@ class BundleService:
         return await self.applier.recover_interrupted()
 
     async def uninstall(self, bundle_id: str, account_id: str | None = None) -> dict:
-        """卸载套装：先回滚其激活，再删记账与工件文件。
+        """卸载预设：先回滚其激活，再删记账与工件文件。
 
         边界（P4-4）：
-        - 只回滚本套装的激活记录，**不动用户后建的对象**（`bundle_objects` 只记本套装创建的）；
-        - 若该账号还有其它套装处于 active，不在这里处理（各自独立回滚）；
+        - 只回滚本预设的激活记录，**不动用户后建的对象**（`bundle_objects` 只记本预设创建的）；
+        - 若该账号还有其它预设处于 active，不在这里处理（各自独立回滚）；
         - 工件文件只有在**没有任何激活记录再引用它**时才删除，避免误删仍在用的包。
         """
         db = self.config_service.db

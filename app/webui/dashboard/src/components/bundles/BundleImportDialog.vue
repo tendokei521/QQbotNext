@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 导入套装：选文件 → 预检报告 → 确认导入。
+ * 导入预设：选文件 → 预检报告 → 确认导入。
  *
  * 预检是"信任界面"：把「包含什么 / 缺什么 / 需要你填什么 / 会安装什么」讲清楚再装。
  * 导入只登记工件（不应用到账号），所以确认按钮的文案是「导入（暂不应用）」。
@@ -43,7 +43,7 @@ function close() {
 
 async function prepare(picked: File) {
   if (!picked.name.toLowerCase().endsWith('.zip')) {
-    error.value = '仅支持 .zip 套装包'
+    error.value = '仅支持 .zip 预设包'
     return
   }
   file.value = picked
@@ -73,7 +73,7 @@ async function confirmImport() {
     const response = await bundles.importFile(file.value)
     result.value = { bundle: response.bundle }
     screen.value = 'result'
-    notify.push('套装已导入', 'success')
+    notify.push('预设已导入', 'success')
     emit('imported')
   } catch (err) {
     error.value = errorMessage(err)
@@ -93,7 +93,7 @@ function formatSize(bytes: number): string {
     <v-card>
       <v-card-title class="d-flex align-center">
         <v-icon icon="mdi-package-variant" class="mr-2" color="primary" />
-        {{ screen === 'pick' ? '导入套装' : screen === 'preview' ? '预检报告' : '导入完成' }}
+        {{ screen === 'pick' ? '导入预设' : screen === 'preview' ? '预检报告' : '导入完成' }}
         <v-spacer />
         <v-btn icon="mdi-close" variant="text" size="small" @click="close" />
       </v-card-title>
@@ -113,7 +113,7 @@ function formatSize(bytes: number): string {
             @drop.prevent="onDrop"
           >
             <v-icon icon="mdi-cloud-upload-outline" size="40" color="primary" />
-            <div class="text-body-2 mt-2">把 .zip 套装包拖到这里</div>
+            <div class="text-body-2 mt-2">把 .zip 预设包拖到这里</div>
             <v-btn size="small" variant="tonal" class="mt-2" @click="($refs.fileInput as HTMLInputElement)?.click()">
               选择文件
             </v-btn>

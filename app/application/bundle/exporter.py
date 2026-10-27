@@ -1,4 +1,4 @@
-"""套装的导出：把"某个账号的当前配置"打包成工件。
+"""预设的导出：把"某个账号的当前配置"打包成工件。
 
 四条硬规矩（设计 §5.3 / §6.9 + 模块迁移）：
 
@@ -121,7 +121,7 @@ def export_bundle(
         files["persona/default.md"] = str(persona["text"]).strip().encode("utf-8")
         components["personas"].append({
             "source": "persona/default.md",
-            "name": str(persona.get("name") or "套装人格"),
+            "name": str(persona.get("name") or "预设人格"),
             "apply_to": "agent.persona_preset_id",
             "description": str(persona.get("description") or "").strip(),
             "begin_dialogs": list(persona.get("begin_dialogs") or []),
@@ -230,7 +230,7 @@ def export_bundle(
     readme = "\n".join(filter(None, [
         f"# {name}",
         "",
-        description or "由 QQBot Next 导出的配置套装。",
+        description or "由 QQBot Next 导出的配置预设。",
         "",
         "## 导入说明",
         "- 导入后请按提示填写密钥（密钥不随包分发）。",

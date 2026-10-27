@@ -1,9 +1,9 @@
-"""P3-3：套装应用到账号（计划 → 事务 → 校验 → 可回滚）。
+"""P3-3：预设应用到账号（计划 → 事务 → 校验 → 可回滚）。
 
 锁定四件事：
 1. 应用后对象真的建出来（人格/Provider/模型），Agent 配置指向它们；
-2. 记账：`bundle_objects` 记下"本套装创建了什么"，`account_active_bundle` 记激活；
-3. 回滚恢复应用前的绑定，并删掉本套装创建的对象（用户后建的不动）；
+2. 记账：`bundle_objects` 记下"本预设创建了什么"，`account_active_bundle` 记激活；
+3. 回滚恢复应用前的绑定，并删掉本预设创建的对象（用户后建的不动）；
 4. 中途失败 / 进程崩溃（`applying` 残留）→ 自动回到应用前。
 """
 
@@ -21,7 +21,7 @@ from app.infrastructure.config.config_service import ConfigOp
 MANIFEST = {
     "schema": "qqbotnext.bundle/1",
     "id": "demo-pack",
-    "name": "演示套装",
+    "name": "演示预设",
     "version": "1.0.0",
     "framework": {"api_version": 1},
     "components": {
@@ -71,7 +71,7 @@ async def test_apply_creates_objects_and_activates(container, config_service, db
     assert activation["status"] == "active"
 
     agent = config_service.get_module_config("agent", "acc1")
-    assert agent["group_enable"] is True, "套装里的 Agent 配置应合并进来"
+    assert agent["group_enable"] is True, "预设里的 Agent 配置应合并进来"
     assert agent["persona_preset_id"].startswith("role_")
     assert agent["provider_model_pool"], "模型应入池"
     model_id = agent["provider_model_id"]
@@ -105,7 +105,7 @@ async def test_rollback_restores_and_removes_created_objects(container, config_s
     agent = config_service.get_module_config("agent", "acc1")
     assert agent["group_enable"] is False, "回滚后应恢复应用前的值"
     assert agent["persona_preset_id"] == ""
-    assert config_service.get_role_preset(created_role) is None, "本套装创建的对象应被删除"
+    assert config_service.get_role_preset(created_role) is None, "本预设创建的对象应被删除"
     assert await db.fetchone(
         "SELECT account_id FROM account_active_bundle WHERE account_id = ?", ("acc1",)
     ) is None

@@ -1,4 +1,4 @@
-"""配置套装（Bundle）工件：清单解析 / 校验 / 导出。
+"""配置预设（Bundle）工件：清单解析 / 校验 / 导出。
 
 设计依据：`docs/oneclick-bundle-and-onboarding-design.md` §5。
 本子包只处理"工件本身"（zip 字节 + 明细），**不写账号配置**——

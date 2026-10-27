@@ -479,7 +479,7 @@ async def run(settings: Settings | None = None) -> None:
 
     await migrate_legacy_dialog_policies(config_service)
 
-    # 套装应用崩溃恢复：上次进程在"应用中途"退出 → 按快照回滚（幂等、best-effort）
+    # 预设应用崩溃恢复：上次进程在"应用中途"退出 → 按快照回滚（幂等、best-effort）
     try:
         from app.application.bundle.service import BundleService
 

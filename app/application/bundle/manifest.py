@@ -111,12 +111,12 @@ def normalize_manifest(raw: Any) -> dict:
     _require(
         bool(_ID_RE.match(bundle_id)),
         "BUNDLE_ID_INVALID",
-        f"套装 id 不合法：{bundle_id or '(空)'}（只允许小写字母/数字/.-_，3–64 位）",
+        f"预设 id 不合法：{bundle_id or '(空)'}（只允许小写字母/数字/.-_，3–64 位）",
     )
 
     name = str(raw.get("name") or "").strip()
-    _require(bool(name), "BUNDLE_MANIFEST_INVALID", "缺少套装名称（name）")
-    _require(len(name) <= 100, "BUNDLE_MANIFEST_INVALID", "套装名称过长（≤100 字）")
+    _require(bool(name), "BUNDLE_MANIFEST_INVALID", "缺少预设名称（name）")
+    _require(len(name) <= 100, "BUNDLE_MANIFEST_INVALID", "预设名称过长（≤100 字）")
 
     version = str(raw.get("version") or "").strip()
     _require(
@@ -159,7 +159,7 @@ def normalize_manifest(raw: Any) -> dict:
             continue
         personas.append({
             "source": source,
-            "name": str(item.get("name") or "").strip() or "套装人格",
+            "name": str(item.get("name") or "").strip() or "预设人格",
             "apply_to": str(item.get("apply_to") or "agent.persona_preset_id"),
             # 预设的扩展字段（提示词全文在 source 里；这些是"角色卡"的其余部分）
             "description": str(item.get("description") or "").strip(),

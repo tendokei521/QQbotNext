@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 套装中心：导出一个账号的可迁移配置（人格卡 / 模型池 / Agent 配置 / 模块参数与启停 /
+ * 预设中心：导出一个账号的可迁移配置（人格卡 / 模型池 / Agent 配置 / 模块参数与启停 /
  * 第三方模块代码），并把它应用到目标账号（事务写 + 快照，失败自动回滚）。
  */
 import { computed, onMounted, reactive, ref } from 'vue'
@@ -77,10 +77,10 @@ async function doApply() {
 }
 
 async function onUninstall(bundleId: string) {
-  if (!window.confirm('卸载这个套装？会回滚它应用到当前账号的改动，并删除工件文件。')) return
+  if (!window.confirm('卸载这个预设？会回滚它应用到当前账号的改动，并删除工件文件。')) return
   try {
     await bundles.uninstallBundle(bundleId)
-    notify.push('套装已卸载', 'success')
+    notify.push('预设已卸载', 'success')
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   }
@@ -147,7 +147,7 @@ async function doExport() {
       version: exportForm.version.trim() || '1.0.0',
       description: exportForm.description.trim(),
     })
-    notify.push('已导出套装（密钥未包含）', 'success')
+    notify.push('已导出预设（密钥未包含）', 'success')
     exportDialog.value = false
   } catch (err) {
     notify.push(errorMessage(err), 'error')
@@ -169,7 +169,7 @@ onMounted(async () => {
       <div>
         <h1 class="app-page-title">
           <v-icon icon="mdi-package-variant-closed" size="28" color="primary" class="mr-1" />
-          套装中心
+          预设中心
         </h1>
         <div class="app-page-subtitle">把一套配置打包、分享、换机迁移</div>
       </div>
@@ -177,7 +177,7 @@ onMounted(async () => {
         <v-btn variant="tonal" prepend-icon="mdi-export" :disabled="!exportEnabled" @click="openExport">
           导出当前账号
         </v-btn>
-        <v-btn color="primary" prepend-icon="mdi-import" @click="onImport">导入套装</v-btn>
+        <v-btn color="primary" prepend-icon="mdi-import" @click="onImport">导入预设</v-btn>
       </div>
     </div>
 
@@ -193,10 +193,10 @@ onMounted(async () => {
     <v-card v-if="!bundles.list.length && !bundles.loading" variant="outlined">
       <EmptyState
         icon="mdi-package-variant"
-        title="还没有套装"
-        description="可以从当前账号导出第一套，或导入别人分享的 .zip 套装包。"
+        title="还没有预设"
+        description="可以从当前账号导出第一套，或导入别人分享的 .zip 预设包。"
       >
-        <v-btn color="primary" variant="tonal" prepend-icon="mdi-import" @click="onImport">导入套装</v-btn>
+        <v-btn color="primary" variant="tonal" prepend-icon="mdi-import" @click="onImport">导入预设</v-btn>
       </EmptyState>
     </v-card>
 
@@ -280,14 +280,14 @@ onMounted(async () => {
     <v-dialog v-model="exportDialog" max-width="520">
       <v-card>
         <v-card-title class="d-flex align-center">
-          <v-icon icon="mdi-export" class="mr-2" color="primary" /> 导出为套装
+          <v-icon icon="mdi-export" class="mr-2" color="primary" /> 导出为预设
         </v-card-title>
         <v-card-text>
           <div class="text-caption mb-3" style="opacity: 0.7">
             将从「{{ accountName }}」收集人格卡、模型池、Agent 配置与模块参数；第三方模块代码会随包，
             内置模块只记录版本。密钥不包含在包内。
           </div>
-          <v-text-field v-model="exportForm.id" label="套装 ID" density="comfortable" variant="outlined" />
+          <v-text-field v-model="exportForm.id" label="预设 ID" density="comfortable" variant="outlined" />
           <v-text-field v-model="exportForm.name" label="名称" density="comfortable" variant="outlined" />
           <v-text-field v-model="exportForm.version" label="版本" density="comfortable" variant="outlined" />
           <v-text-field v-model="exportForm.description" label="描述（可选）" density="comfortable" variant="outlined" />

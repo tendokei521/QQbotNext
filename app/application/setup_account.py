@@ -241,7 +241,7 @@ class SetupAccountService:
             updated.append(row)
 
         try:
-            # 改名不是新账号：账号名下的绑定/群级覆盖/群列表/响应权/套装激活一起搬
+            # 改名不是新账号：账号名下的绑定/群级覆盖/群列表/响应权/预设激活一起搬
             # （只改 bots 表会让旧设置变成读不到的孤儿）
             if target_id != old_id:
                 await self.config_service.rename_account(old_id, target_id)

@@ -1,4 +1,4 @@
-"""P2-2/P2-3：套装导出、预检、导入登记、下载。
+"""P2-2/P2-3：预设导出、预检、导入登记、下载。
 
 边界：本阶段**不应用**到账号——导入只落盘登记，不改任何运行配置。
 """
@@ -325,7 +325,7 @@ def _bundle_with_module(tmp_path) -> bytes:
     (module_dir / "main.py").write_text("class Module: pass\n", encoding="utf-8")
     return export_bundle(
         bundle_id="mod-pack",
-        name="带模块的套装",
+        name="带模块的预设",
         agent_config={"group_enable": True},
         module_configs={"demo_mod": {"enabled": True, "config": {"switch_on": True}}},
         module_packages={"demo_mod": pack_module_dir(module_dir)},

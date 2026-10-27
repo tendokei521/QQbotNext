@@ -2,7 +2,7 @@
 
 WebUI 是 HTTP 适配层，只该认识 `application/` 的门面（见
 `tests/architecture/test_architecture_boundaries.py` 的 webui→agent 规则）。
-套装校验需要 Agent 配置 schema 来拒绝未知键，因此在这里开一个只读函数，
+预设校验需要 Agent 配置 schema 来拒绝未知键，因此在这里开一个只读函数，
 而不是让 `app/webui/api/bundles.py` 直接 import `app.agent.*`。
 """
 

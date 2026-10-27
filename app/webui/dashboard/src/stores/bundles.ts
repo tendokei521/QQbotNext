@@ -92,7 +92,7 @@ function _filenameFrom(disposition: string | undefined, fallback: string): strin
 }
 
 /**
- * 套装中心：校验 / 导入登记 / 列表 / 下载 / 从账号导出 / 应用 / 回滚 / 卸载。
+ * 预设中心：校验 / 导入登记 / 列表 / 下载 / 从账号导出 / 应用 / 回滚 / 卸载。
  *
  * 导出会带：人格卡（含工具/技能/预设对话）、模型池全量、Agent 配置、模块参数与启停；
  * 第三方模块代码随包（`modules/*.zip`），应用时走既有 zip 安装通道自动安装。
@@ -213,7 +213,7 @@ export const useBundlesStore = defineStore('bundles', () => {
     await loadActivations()
   }
 
-  /** 卸载套装：回滚本账号的激活 + 清理记账；无引用时后端删除工件文件 */
+  /** 卸载预设：回滚本账号的激活 + 清理记账；无引用时后端删除工件文件 */
   async function uninstallBundle(id: string): Promise<void> {
     const accountId = bots.currentAccountId
     await http.post(

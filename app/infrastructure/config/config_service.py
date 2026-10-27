@@ -589,11 +589,11 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
             (str(key), self.db.dumps(value)),
         )
 
-    # ==================== 批量事务写入（套装应用 / 回滚用） ====================
+    # ==================== 批量事务写入（预设应用 / 回滚用） ====================
     async def apply_ops(self, ops: Sequence[ConfigOp]) -> None:
         """把一组配置变更**原子地**写进内存 + 数据库。
 
-        为什么需要它：现有 `save_*` 每个对象独立落库（各自一次 execute）。套装应用
+        为什么需要它：现有 `save_*` 每个对象独立落库（各自一次 execute）。预设应用
         要同时改"预设/模型/账号绑定/模块开关"，中途失败就会留半套配置。
         这里先把内存整体快照，再在**一个 SQLite 事务**里写全部行；任一失败就恢复
         内存并抛错，调用方可以安全地报告"什么都没改"。

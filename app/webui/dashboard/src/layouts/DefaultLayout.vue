@@ -78,7 +78,7 @@ const navItems = computed<NavItem[]>(() => {
     { to: '/bots', title: '账号管理', icon: 'mdi-robot-outline' },
     { to: '/policy', title: '权限与回复', icon: 'mdi-shield-account-outline' },
     { to: '/modules', title: '功能模块', icon: 'mdi-cube-outline' },
-    { to: '/bundles', title: '套装中心', icon: 'mdi-package-variant-closed' },
+    { to: '/bundles', title: '预设中心', icon: 'mdi-package-variant-closed' },
     { to: '/provider-presets', title: 'Provider 预设', icon: 'mdi-api' },
     { to: '/personas', title: '人格设定', icon: 'mdi-account-heart-outline' },
     { to: '/sessions', title: '会话数据', icon: 'mdi-chat-outline' },

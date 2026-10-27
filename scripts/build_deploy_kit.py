@@ -10,7 +10,7 @@
       main.py / pyproject.toml
       app/                        后端源码 + 已构建的 dashboard/dist
       wheelhouse/                 可选：离线依赖轮子（--with-wheelhouse）
-      bundles/                    可选：默认套装（导入即可用）
+      bundles/                    可选：默认预设（导入即可用）
       deploy.json                 版本、构建时间、文件清单与 sha256
       README-FIRST.txt            三步上手说明（给人看的，不是给机器）
 
@@ -81,7 +81,7 @@ README_FIRST = """QQBot Next - 免安装发行包
 数据在哪
 --------
 data/（数据库与配置）、logs/（日志）都在本目录下，**升级时不要删**；
-换机迁移用「套装中心」导出/导入。
+换机迁移用「预设中心」导出/导入。
 
 出问题先看
 ----------
@@ -166,7 +166,7 @@ def _download_wheelhouse(target: Path) -> list[str]:
 
 
 def _collect_starter_bundles(root: Path) -> dict[str, bytes]:
-    """可选：``bundles/`` 下的默认套装（仓库里已导出的 .zip 原样带进包）。"""
+    """可选：``bundles/`` 下的默认预设（仓库里已导出的 .zip 原样带进包）。"""
     source = root / "bundles"
     payloads: dict[str, bytes] = {}
     if not source.is_dir():

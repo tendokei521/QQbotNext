@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS bindings (
     PRIMARY KEY (capability_id, scope_type, scope_id)
 );
 
--- ==================== 套装应用（P3） ====================
+-- ==================== 预设应用（P3） ====================
 -- 一次「应用到账号」= 一条激活记录；快照用于回滚，状态机：
 -- applying → active / failed；active → rolled_back（手动回滚或卸载）
 CREATE TABLE IF NOT EXISTS bundle_activations (
@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS bundle_activations (
 );
 CREATE INDEX IF NOT EXISTS idx_bundle_act_account ON bundle_activations(account_id, status);
 
--- 本套装创建的对象（卸载/回滚时只删这些，用户后建的不动）
+-- 本预设创建的对象（卸载/回滚时只删这些，用户后建的不动）
 CREATE TABLE IF NOT EXISTS bundle_objects (
     bundle_id  TEXT NOT NULL,
     kind       TEXT NOT NULL,
@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS bundle_objects (
     PRIMARY KEY (bundle_id, kind, object_id)
 );
 
--- 账号当前激活的套装（纯元数据：UI 显示 / 卸载前置检查；不参与运行时解析）
+-- 账号当前激活的预设（纯元数据：UI 显示 / 卸载前置检查；不参与运行时解析）
 CREATE TABLE IF NOT EXISTS account_active_bundle (
     account_id    TEXT PRIMARY KEY,
     bundle_id     TEXT NOT NULL,

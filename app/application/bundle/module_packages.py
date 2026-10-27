@@ -1,6 +1,6 @@
 """随包模块（zip 代码包）：打包已安装模块 / 从 zip 识别模块身份。
 
-套装里的模块代码走**既有 zip 安装通道**（`ModuleRegistry.install_from_zip`），
+预设里的模块代码走**既有 zip 安装通道**（`ModuleRegistry.install_from_zip`），
 本模块只负责"打包"和"识别"，不安装、不加载、不碰运行状态——执行面仍只有一条。
 
 两条硬规矩：
@@ -28,7 +28,7 @@ NOISE_NAMES = frozenset({
     "node_modules", ".DS_Store", "Thumbs.db", "desktop.ini",
 })
 
-#: 单个模块包的上限（超过就拒绝随包，避免套装被撑爆；安装器上限同为 200 MB）
+#: 单个模块包的上限（超过就拒绝随包，避免预设被撑爆；安装器上限同为 200 MB）
 MAX_PACKAGE_BYTES = 50 * 1024 * 1024
 MAX_PACKAGE_FILES = 5000
 

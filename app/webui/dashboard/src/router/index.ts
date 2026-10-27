@@ -42,7 +42,7 @@ const router = createRouter({
           path: 'bundles',
           name: 'bundles',
           component: () => import('@/views/BundlesPage.vue'),
-          meta: { title: '套装中心' },
+          meta: { title: '预设中心' },
         },
         { path: 'modules/agent', redirect: '/agent' },
         { path: 'modules/:name', name: 'module-config', component: () => import('@/views/ModuleConfigPage.vue'), meta: { title: '模块配置' } },

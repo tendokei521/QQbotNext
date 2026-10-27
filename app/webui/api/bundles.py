@@ -1,4 +1,4 @@
-"""套装 API：校验 / 导入登记 / 列表 / 下载 / 从账号导出 / 应用 / 回滚。
+"""预设 API：校验 / 导入登记 / 列表 / 下载 / 从账号导出 / 应用 / 回滚。
 
 P2 的端点不改运行配置；P3 起新增 `apply` / `rollback`（写账号配置走单事务 + 快照）。
 """
@@ -48,7 +48,7 @@ def _module_catalog(registry) -> dict[str, dict]:
         return {}
     try:
         entries = registry.catalog_entries()
-    except Exception as e:  # noqa: BLE001 —— 编目不可用不该让套装接口 500
+    except Exception as e:  # noqa: BLE001 —— 编目不可用不该让预设接口 500
         logger.warning(f"[Bundle] 读取模块编目失败（按空目录处理）: {e}")
         return {}
     catalog: dict[str, dict] = {}
@@ -136,7 +136,7 @@ def _service(
 async def _read_upload(file: UploadFile) -> bytes:
     data = await file.read()
     if len(data) > MAX_UPLOAD_BYTES:
-        raise BundleError("BUNDLE_ZIP_TOO_LARGE", "套装包超过 200 MB")
+        raise BundleError("BUNDLE_ZIP_TOO_LARGE", "预设包超过 200 MB")
     return data
 
 
@@ -176,7 +176,7 @@ async def api_bundles_import(
         ).import_bundle(data)
     except BundleError as e:
         return _err(400, str(e), e.code, e.hint)
-    return _ok("套装已导入（尚未应用到账号）", **result)
+    return _ok("预设已导入（尚未应用到账号）", **result)
 
 
 @router.get("/bundles")
@@ -207,7 +207,7 @@ async def api_bundles_download(
     except BundleError as e:
         return _err(400, str(e), e.code, e.hint)
     if path is None:
-        return _err(404, "套装不存在或已被删除", "BUNDLE_NOT_FOUND")
+        return _err(404, "预设不存在或已被删除", "BUNDLE_NOT_FOUND")
     return Response(
         content=path.read_bytes(),
         media_type="application/zip",
@@ -266,7 +266,7 @@ async def api_bundles_apply(
     settings=Depends(get_settings),
     registry=Depends(get_module_registry),
 ):
-    """把已导入的套装应用到某账号（事务写 + 快照；失败自动回滚不落半套）。"""
+    """把已导入的预设应用到某账号（事务写 + 快照；失败自动回滚不落半套）。"""
     try:
         body = await request.json()
     except Exception as e:  # noqa: BLE001
@@ -329,7 +329,7 @@ async def api_bundles_uninstall(
     settings=Depends(get_settings),
     registry=Depends(get_module_registry),
 ):
-    """卸载套装：回滚其激活 + 清理记账，无引用时删除工件文件。"""
+    """卸载预设：回滚其激活 + 清理记账，无引用时删除工件文件。"""
     try:
         body = await request.json()
     except Exception:  # noqa: BLE001 —— 允许空 body（卸载全部账号的激活）
@@ -341,4 +341,4 @@ async def api_bundles_uninstall(
         ).uninstall(bundle_id, account_id)
     except BundleError as e:
         return _err(400, str(e), e.code, e.hint)
-    return _ok("套装已卸载", **result)
+    return _ok("预设已卸载", **result)

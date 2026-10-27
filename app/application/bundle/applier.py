@@ -1,4 +1,4 @@
-"""套装应用到账号：计划 → 快照 → 单事务写入 → 校验 → 记录；失败可回滚。
+"""预设应用到账号：计划 → 快照 → 单事务写入 → 校验 → 记录；失败可回滚。
 
 设计依据：`docs/oneclick-bundle-and-onboarding-design.md` §6.3（7 步事务）。
 
@@ -6,7 +6,7 @@
 - **配置写入走 `ConfigService.apply_ops`（单事务）**：要么全成，要么内存/DB 都回到应用前；
 - **随包模块先安装、再写配置**：模块代码走既有 zip 安装通道（`module_installer`），
   安装失败的模块会被记住，回滚时只卸载"本次新装"的（升级的保留，避免删掉用户原有模块）；
-- **套装的"创建了什么"单独记账**（`bundle_objects`），卸载/回滚只删这些对象；
+- **预设的"创建了什么"单独记账**（`bundle_objects`），卸载/回滚只删这些对象；
 - **激活记录本身就是 journal**：`applying` 行在启动时被 `recover_interrupted()` 自动回滚。
 """
 
@@ -122,7 +122,7 @@ class BundleApplier:
             preset = {
                 "id": role_id,
                 "name": persona["name"],
-                "description": persona.get("description") or "由套装导入",
+                "description": persona.get("description") or "由预设导入",
                 "system_prompt": text,
                 "begin_dialogs": list(persona.get("begin_dialogs") or []),
                 "tools": persona.get("tools"),
@@ -204,7 +204,7 @@ class BundleApplier:
             agent_patch.update(_read_json(files, source["source"]))
 
         # 用户改过的键（当前值 != 上次应用值）保留用户值，不被新包覆盖；
-        # 指向本套装新建对象的引用键总是覆盖（用户不直接编辑它们）。
+        # 指向本预设新建对象的引用键总是覆盖（用户不直接编辑它们）。
         for key in list(agent_patch.keys()):
             if key in ("persona_preset_id", "provider_preset_id", "provider_model_id"):
                 continue
@@ -389,7 +389,7 @@ class BundleApplier:
                 continue
             try:
                 info = await self.module_installer.install(name, payload)
-            except Exception as e:  # noqa: BLE001 —— 安装异常统一转成套装错误码
+            except Exception as e:  # noqa: BLE001 —— 安装异常统一转成预设错误码
                 raise BundleError(
                     "BUNDLE_MODULE_INSTALL_FAILED",
                     f"安装模块 {name} 失败：{e}",
@@ -609,7 +609,7 @@ class BundleApplier:
         }
 
     async def _restore(self, snapshot: dict) -> list[str]:
-        """按快照恢复：删除本套装创建的对象，并把绑定写回应用前的值。"""
+        """按快照恢复：删除本预设创建的对象，并把绑定写回应用前的值。"""
         ops: list[ConfigOp] = []
         restored: list[str] = []
         for item in snapshot.get("created") or []:

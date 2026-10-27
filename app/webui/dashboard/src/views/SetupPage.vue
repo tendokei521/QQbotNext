@@ -405,7 +405,7 @@ onUnmounted(stopPolling)
         <v-card-text>
           <v-tabs v-model="personaMode" density="compact" class="mb-3">
             <v-tab value="scratch">从零写</v-tab>
-            <v-tab value="bundle">选套装（即将支持）</v-tab>
+            <v-tab value="bundle">选预设（即将支持）</v-tab>
           </v-tabs>
 
           <template v-if="personaMode === 'scratch'">
@@ -430,7 +430,7 @@ onUnmounted(stopPolling)
           </template>
           <template v-else>
             <v-alert type="info" variant="tonal" density="compact">
-              套装（整合包）功能在开发中；现在可以先用「从零写」或稍后在 Agent 面板配置。
+              预设（整合包）功能在开发中；现在可以先用「从零写」或稍后在 Agent 面板配置。
             </v-alert>
           </template>
         </v-card-text>

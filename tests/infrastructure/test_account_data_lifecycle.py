@@ -46,7 +46,7 @@ async def _seed_account_data(cfg, account_id: str = "old") -> None:
 
 
 async def test_rename_moves_all_account_scoped_data(tmp_path, settings):
-    """改账号 id：绑定 / 群级覆盖 / 群列表 / 响应权 / 套装激活 / 登录快照全跟着搬。"""
+    """改账号 id：绑定 / 群级覆盖 / 群列表 / 响应权 / 预设激活 / 登录快照全跟着搬。"""
     db, cfg = await _open(tmp_path, settings)
     try:
         await cfg.add_bot({"id": "old", "name": "老号", "ws_url": "ws://old"})

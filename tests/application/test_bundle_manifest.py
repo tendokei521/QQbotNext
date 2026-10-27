@@ -1,4 +1,4 @@
-"""P2-1：套装清单与校验器。
+"""P2-1：预设清单与校验器。
 
 预检报告是"信任界面"：结构问题直接拒绝（400），语义问题进 issues（模块缺失/密钥泄漏/未知键）。
 """
@@ -21,7 +21,7 @@ def _bundle(**kwargs) -> bytes:
         "bundle_id": "group-chat-companion",
         "name": "群聊搭子",
         "version": "1.2.0",
-        "description": "测试套装",
+        "description": "测试预设",
         "agent_config": {"group_enable": True, "persona_preset_id": "abc", "api_key": "sk-secret-key-123456"},
         "persona": {"name": "群聊搭子", "text": "你是一个普通群友。"},
         "provider": {

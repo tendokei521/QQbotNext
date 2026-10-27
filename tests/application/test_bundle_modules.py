@@ -1,4 +1,4 @@
-"""套装迁移：模块代码随包 + 角色卡字段 + 模型池全量（导出侧）。
+"""预设迁移：模块代码随包 + 角色卡字段 + 模型池全量（导出侧）。
 
 对应设计稿 §5.3「模块：引用 + 可选 zip」与 v1 的三处遗漏：
 - 人格只带 system_prompt（tools/skills/begin_dialogs 丢了）；
@@ -269,7 +269,7 @@ def _manifest_with_module(**overrides) -> dict:
     raw = {
         "schema": "qqbotnext.bundle/1",
         "id": "demo-pack",
-        "name": "演示套装",
+        "name": "演示预设",
         "version": "1.2.0",
         "framework": {"api_version": 1},
         "requires": {"modules": [{
