@@ -8,8 +8,11 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
-from collections.abc import Awaitable, Callable
+import time
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +60,32 @@ DEFAULT_PROVIDER_SETTINGS: dict = {
     "default_model_id": "",
     "fallback_model_ids": [],
     "provider_pool": ["*"],
+}
+
+
+@dataclass(frozen=True)
+class ConfigOp:
+    """一次配置写入操作（供 `ConfigService.apply_ops` 批量事务用）。
+
+    ``kind`` 决定落到哪张表；``value=None`` 表示删除该行。
+    key 的形状：
+    - ``binding``: ``(capability_id, scope_type, scope_id)``
+    - ``channel_override``: ``(account_id, capability, channel_id)``
+    - ``role_preset`` / ``provider_preset`` / ``provider_model``: ``(id,)``
+    """
+
+    kind: str
+    key: tuple
+    value: dict | None = None
+
+
+#: kind → 需要快照/恢复的内存缓存属性名（失败回滚用）
+_OP_KIND_ATTR = {
+    "binding": "_bindings",
+    "channel_override": "_channel_overrides",
+    "role_preset": "_role_presets",
+    "provider_preset": "_provider_presets",
+    "provider_model": "_provider_models",
 }
 
 
@@ -545,3 +574,155 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
             "INSERT OR REPLACE INTO kv (key, value_json) VALUES (?,?)",
             (str(key), self.db.dumps(value)),
         )
+
+    # ==================== 批量事务写入（套装应用 / 回滚用） ====================
+    async def apply_ops(self, ops: Sequence[ConfigOp]) -> None:
+        """把一组配置变更**原子地**写进内存 + 数据库。
+
+        为什么需要它：现有 `save_*` 每个对象独立落库（各自一次 execute）。套装应用
+        要同时改"预设/模型/账号绑定/模块开关"，中途失败就会留半套配置。
+        这里先把内存整体快照，再在**一个 SQLite 事务**里写全部行；任一失败就恢复
+        内存并抛错，调用方可以安全地报告"什么都没改"。
+
+        广播在事务成功之后按 kind 各发一次（不在事务里发，避免回滚后前端已收到假更新）。
+        """
+        ops = [op for op in (ops or []) if op is not None]
+        if not ops:
+            return
+
+        snapshot: dict[str, Any] = {}
+        for op in ops:
+            attr = _OP_KIND_ATTR.get(op.kind)
+            if attr is None:
+                raise ValueError(f"未知的配置操作类型: {op.kind}")
+            if attr not in snapshot:
+                snapshot[attr] = copy.deepcopy(getattr(self, attr))
+
+        sqls: list[tuple[str, Sequence[Any]]] = []
+        touched = {op.kind for op in ops}
+        try:
+            for op in ops:
+                sql = self._op_to_sql(op)
+                if sql is not None:
+                    sqls.append(sql)
+            if sqls:
+                await self.db.run_in_transaction(sqls)
+        except Exception:
+            for attr, value in snapshot.items():
+                setattr(self, attr, value)
+            raise
+
+        if "role_preset" in touched:
+            await self._notify("role_presets", self.list_role_presets())
+        if "provider_preset" in touched:
+            await self._notify("provider_presets", self.list_provider_presets())
+        if "provider_model" in touched:
+            await self._notify("provider_models", self.list_provider_models())
+
+    def _op_to_sql(self, op: ConfigOp) -> tuple[str, Sequence[Any]] | None:
+        """把一个 op 写进内存，并返回对应的 SQL（None = 无需落库）。"""
+        now = int(time.time())
+        kind = op.kind
+        if kind == "binding":
+            capability_id, scope_type, scope_id = (str(part) for part in op.key)
+            key = (scope_type, scope_id)
+            if op.value is None:
+                self._bindings.get(capability_id, {}).pop(key, None)
+                return (
+                    "DELETE FROM bindings WHERE capability_id = ? AND scope_type = ? AND scope_id = ?",
+                    (capability_id, scope_type, scope_id),
+                )
+            row = dict(op.value)
+            self._bindings.setdefault(capability_id, {})[key] = row
+            enabled = row.get("enabled")
+            return (
+                "INSERT OR REPLACE INTO bindings "
+                "(capability_id, scope_type, scope_id, enabled, config_json, permission_json, priority, updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    capability_id, scope_type, scope_id,
+                    None if enabled is None else (1 if enabled else 0),
+                    self.db.dumps(row.get("config") or {}),
+                    self.db.dumps(row.get("permission") or {}),
+                    int(row.get("priority", 100)),
+                    now,
+                ),
+            )
+        if kind == "channel_override":
+            account_id, capability, channel_id = (str(part) for part in op.key)
+            key = (account_id, capability, channel_id)
+            if op.value is None:
+                self._channel_overrides.pop(key, None)
+                return (
+                    "DELETE FROM channel_overrides WHERE account_id = ? AND capability = ? AND channel_id = ?",
+                    key,
+                )
+            row = dict(op.value)
+            self._channel_overrides[key] = row
+            enabled = row.get("enabled")
+            return (
+                "INSERT OR REPLACE INTO channel_overrides "
+                "(account_id, capability, channel_id, enabled, config_json, permission_json, muted_until, updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    account_id, capability, channel_id,
+                    None if enabled is None else (1 if enabled else 0),
+                    self.db.dumps(row.get("config") or {}),
+                    self.db.dumps(row.get("permission") or {}),
+                    int(row.get("muted_until") or 0),
+                    now,
+                ),
+            )
+        if kind == "role_preset":
+            (role_id,) = (str(part) for part in op.key)
+            if op.value is None:
+                self._role_presets.pop(role_id, None)
+                return ("DELETE FROM role_presets WHERE id = ?", (role_id,))
+            preset = dict(op.value)
+            self._role_presets[role_id] = preset
+            return (
+                "INSERT OR REPLACE INTO role_presets "
+                "(id, name, description, system_prompt, created_at, updated_at) VALUES (?,?,?,?,?,?)",
+                (
+                    role_id, preset.get("name", ""), preset.get("description", ""),
+                    preset.get("system_prompt", ""),
+                    int(preset.get("created_at", 0)), int(preset.get("updated_at", now)),
+                ),
+            )
+        if kind == "provider_preset":
+            (preset_id,) = (str(part) for part in op.key)
+            if op.value is None:
+                self._provider_presets.pop(preset_id, None)
+                return ("DELETE FROM provider_presets WHERE id = ?", (preset_id,))
+            preset = dict(op.value)
+            self._provider_presets[preset_id] = preset
+            return (
+                "INSERT OR REPLACE INTO provider_presets "
+                "(id, name, provider, config_json, enabled, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
+                (
+                    preset_id, preset.get("name", ""), preset.get("provider", "openai"),
+                    self.db.dumps(preset.get("config") or {}),
+                    1 if preset.get("enabled", True) else 0,
+                    int(preset.get("created_at", 0)), int(preset.get("updated_at", now)),
+                ),
+            )
+        if kind == "provider_model":
+            (model_id,) = (str(part) for part in op.key)
+            if op.value is None:
+                self._provider_models.pop(model_id, None)
+                return ("DELETE FROM provider_models WHERE id = ?", (model_id,))
+            model = dict(op.value)
+            self._provider_models[model_id] = model
+            return (
+                "INSERT OR REPLACE INTO provider_models "
+                "(id, preset_id, model, provider_type, enabled, config_json, created_at, updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    model_id, model.get("preset_id", ""), model.get("model", ""),
+                    model.get("provider_type", "chat"),
+                    1 if model.get("enabled", True) else 0,
+                    self.db.dumps(model.get("config") or {}),
+                    int(model.get("created_at", 0)), int(model.get("updated_at", now)),
+                ),
+            )
+        raise ValueError(f"未知的配置操作类型: {kind}")
