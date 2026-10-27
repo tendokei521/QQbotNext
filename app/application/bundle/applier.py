@@ -150,6 +150,12 @@ class BundleApplier:
                         api_key = str((old_preset.get("config") or {}).get("api_key") or "")
                         break
             provider_config["api_key"] = api_key
+            # 其余 provider 级密钥声明（如 providers[0].timeout）必须在建预设**之前**写进
+            # provider_config，否则预设里存的是旧拷贝、写库后再改内存就丢了。
+            for secret_key, secret_value in provided.items():
+                kind, target, field = _split_secret_key(secret_key)
+                if kind == "provider" and target == "0" and field != "api_key":
+                    provider_config[field] = secret_value
 
             preset_id = f"pp_{uuid.uuid4().hex[:10]}"
             preset = {
@@ -235,8 +241,6 @@ class BundleApplier:
                 continue
             if kind == "agent":
                 agent_patch[field] = value
-            elif kind == "provider" and target == "0" and provider_config:
-                provider_config[field] = value
             elif kind == "provider_model" and provider_models:
                 index = int(target)
                 if 0 <= index < len(provider_models):

@@ -301,6 +301,7 @@ def _manifest_with_module(**overrides) -> dict:
         },
         "secrets": [
             {"key": "providers[0].api_key", "label": "Provider Key", "required": True},
+            {"key": "providers[0].timeout", "label": "连接超时", "required": False},
             {"key": "agent.api_key", "label": "Agent Key", "required": True},
             {"key": "module:demo_mod.api_key", "label": "模块 Key", "required": True},
         ],
@@ -311,6 +312,7 @@ def _manifest_with_module(**overrides) -> dict:
 
 SECRETS = {
     "providers[0].api_key": "sk-provider",
+    "providers[0].timeout": "30",
     "agent.api_key": "sk-agent",
     "module:demo_mod.api_key": "sk-module",
 }
@@ -387,6 +389,7 @@ async def test_apply_creates_all_models_and_persona_card_fields(
     assert {model["model"] for model in models} == {"deepseek-chat", "deepseek-reasoner"}
     preset = config_service.get_provider_preset(models[0]["preset_id"])
     assert preset["config"]["retry"] == 2
+    assert preset["config"]["timeout"] == "30", "provider 级密钥声明应写进连接预设"
 
     persona = config_service.get_role_preset(agent["persona_preset_id"])
     assert persona["tools"] == ["web_search"]
