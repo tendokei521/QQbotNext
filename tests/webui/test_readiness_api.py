@@ -129,3 +129,34 @@ async def test_setup_complete_stops_background_retry(container, config_service):
 
     assert resp.status_code == 200, resp.text
     assert service.connect_loop.running("acc1") is False
+
+
+async def test_readiness_warns_when_account_has_no_address(container, config_service):
+    """正向「向外连接」可以先不填地址，但就绪清单要指出这一点（否则"去连接"必然失败）。"""
+    from starlette.testclient import TestClient
+
+    from app.webui.app import create_app
+
+    await config_service.save_bots([
+        {"id": "acc1", "name": "主号", "ws_url": "", "conn_mode": "forward"},
+    ])
+    body = TestClient(create_app(container)).get("/api/readiness").json()
+
+    by_id = {check["id"]: check for check in body["checks"]}
+    assert "account_address" in by_id
+    assert by_id["account_address"]["ok"] is False
+    assert by_id["account_address"]["level"] == "warn"
+    assert "acc1" in by_id["account_address"]["detail"]
+
+
+async def test_readiness_has_no_address_warning_when_filled(container, config_service):
+    from starlette.testclient import TestClient
+
+    from app.webui.app import create_app
+
+    await config_service.save_bots([
+        {"id": "acc1", "name": "主号", "ws_url": "ws://127.0.0.1:4001/", "conn_mode": "reverse"},
+    ])
+    body = TestClient(create_app(container)).get("/api/readiness").json()
+
+    assert "account_address" not in {check["id"] for check in body["checks"]}

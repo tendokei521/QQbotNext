@@ -134,6 +134,24 @@ class ReadinessService:
             label="添加账号",
         ))
 
+        missing_address = [
+            str(account.get("id"))
+            for account in accounts
+            if not str(account.get("ws_url") or "").strip()
+        ]
+        if missing_address:
+            # 正向「向外连接」允许先不填地址（等用户填协议端地址），
+            # 但这时点"去连接"必然失败——提前用 warn 指出缺什么。
+            checks.append(_check(
+                "account_address",
+                False,
+                "账号还没填连接地址",
+                level=LEVEL_WARN,
+                detail="、".join(missing_address),
+                route="/bots",
+                label="去填写",
+            ))
+
         connections = self._connections()
         connected = [
             aid for aid, conn in connections.items()
