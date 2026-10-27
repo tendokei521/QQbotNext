@@ -138,11 +138,20 @@ async def agent_config_update(request: Request, bot_id: str | None = Depends(par
         return _err(404, f"账号不存在或未装配运行时: {bot_id}")
     try:
         data = await request.json()
-    except Exception:
-        data = {}
-    data = data or {}
+    except Exception as e:
+        # 解析失败曾经退化成 {} 并继续保存 → 接口回"成功"，用户以为改了。
+        # 前端字段名漂移 / 代理截断都会走到这里，必须 400 且不动配置。
+        return _err(400, f"请求体不是合法 JSON，未改动任何配置: {e}")
+    if not isinstance(data, dict):
+        # 顶层不是对象时，后续 data.get 会抛 AttributeError → 500
+        return _err(400, "请求体必须是 JSON 对象，未改动任何配置")
     # 配置字段（password 为脱敏哨兵时保留旧值；legacy 连接字段不允许再写入）
     incoming_config = data.get("config", {}) or {}
+    if not isinstance(incoming_config, dict):
+        return _err(400, "config 必须是 JSON 对象，未改动任何配置")
+    perm = data.get("permission")
+    if perm is not None and not isinstance(perm, dict):
+        return _err(400, "permission 必须是 JSON 对象，未改动任何配置")
     for key in LEGACY_LLM_CONNECTION_KEYS:
         incoming_config.pop(key, None)
     # 模块拥有的键不许**写**进 agent 配置（界面写一处、策略读另一处 → 关了还能用）。

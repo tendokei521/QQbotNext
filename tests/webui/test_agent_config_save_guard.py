@@ -163,3 +163,52 @@ def test_module_owned_keys_cover_migrated_fields():
     for key in ("assembly_profile", "speech_via_tool", "onebot_tools_enable", "memory_enable"):
         assert key in owned, f"{key} 应归模块"
     assert "group_enable" not in owned, "本体键不该被当成模块键"
+
+
+# ==================== 坏请求体：不许"假成功"，也不许 500 ====================
+
+
+def _post_raw(http, body: bytes):
+    return http.post(
+        "/api/agent/config",
+        params={"bot_id": 3437542570},
+        content=body,
+        headers={"Content-Type": "application/json"},
+    )
+
+
+def test_malformed_json_is_rejected_instead_of_silently_ok(client):
+    """坏 JSON 曾经折成 {} → 回 200；现在必须 400 且不动配置。"""
+    http, runtime = client
+    resp = _post_raw(http, b"{not json")
+    assert resp.status_code == 400
+    assert "JSON" in resp.json()["message"]
+    assert runtime.config.saved == 0
+
+
+def test_non_object_body_is_rejected_instead_of_500(client):
+    """顶层是数组时，旧实现 data.get(...) 抛 AttributeError → 500。"""
+    http, runtime = client
+    resp = _post_raw(http, b"[1, 2, 3]")
+    assert resp.status_code == 400
+    assert runtime.config.saved == 0
+
+
+def test_config_must_be_object(client):
+    http, runtime = client
+    resp = http.post(
+        "/api/agent/config", params={"bot_id": 3437542570}, json={"config": "nope"}
+    )
+    assert resp.status_code == 400
+    assert runtime.config.saved == 0
+
+
+def test_permission_must_be_object(client):
+    http, runtime = client
+    resp = http.post(
+        "/api/agent/config",
+        params={"bot_id": 3437542570},
+        json={"permission": ["blacklist"]},
+    )
+    assert resp.status_code == 400
+    assert runtime.config.saved == 0
