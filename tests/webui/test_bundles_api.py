@@ -236,6 +236,35 @@ async def test_apply_unknown_bundle_returns_400(container, config_service):
     assert resp.json()["code"] == "BUNDLE_NOT_FOUND"
 
 
+async def test_import_apply_in_one_call(container, config_service):
+    """一键：导入登记 + 立即应用（P7-2）。"""
+    await _seed_account(config_service)
+    client = _client(container)
+    data = client.get(
+        "/api/bundles/export", params={"account_id": "acc1", "bundle_id": "one-pack"}
+    ).content
+
+    resp = client.post(
+        "/api/bundles/import-apply",
+        files={"file": ("b.zip", data, "application/zip")},
+        data={
+            "account_id": "acc1",
+            "secrets": json.dumps({"providers[0].api_key": "sk-one"}),
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["bundle"]["id"] == "one-pack"
+    assert body["apply"]["status"] == "active"
+    agent = config_service.get_module_config("agent", "acc1")
+    assert agent["persona_preset_id"].startswith("role_")
+    assert client.get("/api/bundles").json()["total"] == 1
+
+    activations = client.get("/api/bundles/activations", params={"account_id": "acc1"}).json()
+    assert activations["total"] == 1
+
+
 async def test_uninstall_rolls_back_and_removes_artifact(container, config_service):
     await _seed_account(config_service)
     client = _client(container)

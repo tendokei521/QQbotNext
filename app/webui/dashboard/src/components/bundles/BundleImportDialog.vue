@@ -1,12 +1,13 @@
 <script setup lang="ts">
 /**
- * 导入预设：选文件 → 预检报告 → 确认导入。
+ * 导入预设：选文件 → 预检报告 → 一键「导入并应用」或「仅导入」。
  *
  * 预检是"信任界面"：把「包含什么 / 缺什么 / 需要你填什么 / 会安装什么」讲清楚再装。
- * 导入只登记工件（不应用到账号），所以确认按钮的文案是「导入（暂不应用）」。
+ * 选中的账号会应用配置并安装随包模块；未选账号时只登记工件。
  */
-import { ref } from 'vue'
-import { useBundlesStore, type BundleReport } from '@/stores/bundles'
+import { computed, reactive, ref } from 'vue'
+import { displayName, useBotsStore } from '@/stores/bots'
+import { useBundlesStore, type ApplyResult, type BundleReport } from '@/stores/bundles'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 
@@ -16,6 +17,7 @@ const emit = defineEmits<{
   (e: 'imported'): void
 }>()
 
+const bots = useBotsStore()
 const bundles = useBundlesStore()
 const notify = useNotifyStore()
 
@@ -24,16 +26,28 @@ const screen = ref<Screen>('pick')
 const file = ref<File | null>(null)
 const report = ref<BundleReport | null>(null)
 const result = ref<{ bundle: { name: string; version: string } } | null>(null)
+const applied = ref<ApplyResult | null>(null)
+const importedOnly = ref(false)
 const error = ref('')
 const dragOver = ref(false)
+const secretsForm = reactive<Record<string, string>>({})
+
+const targetAccountId = computed(() => bots.currentAccountId)
+const accountLabel = computed(() => {
+  const bot = bots.bots.find((item) => item.id === targetAccountId.value)
+  return bot ? displayName(bot) : (targetAccountId.value || '未选择账号')
+})
 
 function reset() {
   screen.value = 'pick'
   file.value = null
   report.value = null
   result.value = null
+  applied.value = null
+  importedOnly.value = false
   error.value = ''
   dragOver.value = false
+  Object.keys(secretsForm).forEach((key) => delete secretsForm[key])
 }
 
 function close() {
@@ -50,6 +64,8 @@ async function prepare(picked: File) {
   error.value = ''
   try {
     report.value = await bundles.validateFile(picked)
+    Object.keys(secretsForm).forEach((key) => delete secretsForm[key])
+    for (const secret of report.value.secrets || []) secretsForm[secret.key] = ''
     screen.value = 'preview'
   } catch (err) {
     error.value = errorMessage(err)
@@ -72,10 +88,42 @@ async function confirmImport() {
   try {
     const response = await bundles.importFile(file.value)
     result.value = { bundle: response.bundle }
+    applied.value = null
+    importedOnly.value = true
     screen.value = 'result'
-    notify.push('预设已导入', 'success')
+    notify.push('预设已导入（未应用）', 'success')
     emit('imported')
   } catch (err) {
+    error.value = errorMessage(err)
+    notify.push(error.value, 'error')
+  }
+}
+
+async function confirmApply() {
+  if (!file.value || !targetAccountId.value) return
+  error.value = ''
+  try {
+    const response = await bundles.importAndApply(
+      file.value,
+      targetAccountId.value,
+      { ...secretsForm },
+    )
+    result.value = { bundle: response.bundle }
+    applied.value = response.apply || null
+    importedOnly.value = false
+    screen.value = 'result'
+    notify.push('预设已导入并应用到账号', 'success')
+    emit('imported')
+  } catch (err: any) {
+    const data = err?.response?.data
+    if (data?.imported && data?.bundle) {
+      // 工件已登记、应用失败：切到结果页说明，用户可补密钥后到列表重试
+      result.value = { bundle: data.bundle }
+      applied.value = null
+      importedOnly.value = true
+      screen.value = 'result'
+      emit('imported')
+    }
     error.value = errorMessage(err)
     notify.push(error.value, 'error')
   }
@@ -171,20 +219,54 @@ function formatSize(bytes: number): string {
           </v-alert>
 
           <v-card v-if="report.secrets.length" variant="tonal" class="mt-2">
-            <v-card-text class="text-caption">
-              <div class="font-weight-medium mb-1">导入后需要你填写的密钥（不随包分发）</div>
-              <div v-for="secret in report.secrets" :key="secret.key">
-                · {{ secret.label }}<span v-if="!secret.required">（可选）</span>
+            <v-card-text>
+              <div class="text-caption font-weight-medium mb-2">
+                密钥（不随包分发；目标账号已填过同名密钥的可以留空）
               </div>
+              <v-text-field
+                v-for="secret in report.secrets"
+                :key="secret.key"
+                v-model="secretsForm[secret.key]"
+                :label="secret.label + (secret.required ? ' *' : '')"
+                :placeholder="secret.required ? '必填（不随包分发）' : '可选'"
+                type="password"
+                density="comfortable"
+                variant="outlined"
+                autocomplete="off"
+                hide-details
+                class="mb-2"
+              />
             </v-card-text>
           </v-card>
+
+          <v-alert
+            v-if="!targetAccountId"
+            type="info"
+            variant="tonal"
+            density="compact"
+            class="mt-2"
+          >
+            <div class="text-caption">
+              未选择账号：这次只会登记工件。到顶部选一个账号后，可在列表里「应用到账号」。
+            </div>
+          </v-alert>
         </template>
 
         <!-- 结果 -->
         <template v-else-if="screen === 'result' && result">
-          <v-alert type="success" variant="tonal" density="compact">
-            已导入「{{ result.bundle.name }}」v{{ result.bundle.version }}。
-            到列表里点「应用到账号」才会写入配置、创建人格/模型，并安装随包模块（可回滚）。
+          <v-alert v-if="applied" type="success" variant="tonal" density="compact">
+            已导入「{{ result.bundle.name }}」v{{ result.bundle.version }} 并应用到「{{ accountLabel }}」：
+            新建 {{ applied.plan.creates.length }} 项、更新 {{ applied.plan.updates.length }} 处。
+            <template v-if="applied.modules_installed?.length">
+              <div>已安装随包模块：{{ applied.modules_installed.join('、') }}</div>
+            </template>
+            <template v-if="applied.modules_upgraded?.length">
+              <div>已升级随包模块：{{ applied.modules_upgraded.join('、') }}</div>
+            </template>
+          </v-alert>
+          <v-alert v-else type="warning" variant="tonal" density="compact">
+            已导入「{{ result.bundle.name }}」v{{ result.bundle.version }}，但尚未应用。
+            到列表里点「应用到账号」即可写入配置、创建人格/模型并安装随包模块（可回滚）。
           </v-alert>
         </template>
       </v-card-text>
@@ -194,16 +276,30 @@ function formatSize(bytes: number): string {
           {{ screen === 'preview' ? '重新选择' : '取消' }}
         </v-btn>
         <v-spacer />
-        <v-btn
-          v-if="screen === 'preview'"
-          color="primary"
-          variant="tonal"
-          :loading="bundles.importing"
-          :disabled="!report?.ok"
-          @click="confirmImport"
-        >
-          导入（暂不应用）
-        </v-btn>
+        <template v-if="screen === 'preview'">
+          <v-btn
+            variant="text"
+            :loading="bundles.importing && !bundles.applying"
+            :disabled="!report?.ok"
+            @click="confirmImport"
+          >
+            仅导入
+          </v-btn>
+          <v-btn
+            v-if="targetAccountId"
+            color="primary"
+            variant="tonal"
+            prepend-icon="mdi-play-circle-outline"
+            :loading="bundles.importing"
+            :disabled="!report?.ok"
+            @click="confirmApply"
+          >
+            导入并应用到「{{ accountLabel }}」
+          </v-btn>
+          <v-btn v-else color="primary" variant="tonal" :disabled="!report?.ok" @click="confirmImport">
+            导入（暂不应用）
+          </v-btn>
+        </template>
         <v-btn v-else-if="screen === 'result'" color="primary" @click="close">完成</v-btn>
       </v-card-actions>
     </v-card>

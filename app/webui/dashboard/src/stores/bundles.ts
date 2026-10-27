@@ -144,6 +144,28 @@ export const useBundlesStore = defineStore('bundles', () => {
     }
   }
 
+  /** 一键：导入 + 应用到账号（失败时后端返回 imported=true，工件已登记可重试） */
+  async function importAndApply(
+    file: File,
+    accountId: string,
+    secrets: Record<string, string>,
+  ): Promise<BundleReport & { apply?: ApplyResult }> {
+    importing.value = true
+    applying.value = true
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      form.append('account_id', accountId)
+      form.append('secrets', JSON.stringify(secrets || {}))
+      const res = await http.post('/api/bundles/import-apply', form)
+      await Promise.all([load(), loadActivations(accountId)])
+      return res.data
+    } finally {
+      importing.value = false
+      applying.value = false
+    }
+  }
+
   async function download(id: string): Promise<void> {
     const res = await http.get(`/api/bundles/${encodeURIComponent(id)}/download`, {
       responseType: 'blob',
@@ -235,6 +257,7 @@ export const useBundlesStore = defineStore('bundles', () => {
     loadActivations,
     validateFile,
     importFile,
+    importAndApply,
     applyBundle,
     rollbackActivation,
     uninstallBundle,

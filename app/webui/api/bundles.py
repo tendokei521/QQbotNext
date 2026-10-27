@@ -5,12 +5,13 @@ P2 的端点不改运行配置；P3 起新增 `apply` / `rollback`（写账号�
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 
 from app.application.agent_metadata import agent_config_schema
@@ -177,6 +178,56 @@ async def api_bundles_import(
     except BundleError as e:
         return _err(400, str(e), e.code, e.hint)
     return _ok("预设已导入（尚未应用到账号）", **result)
+
+
+@router.post("/bundles/import-apply")
+async def api_bundles_import_apply(
+    file: UploadFile = File(...),
+    account_id: str = Form(...),
+    secrets: str = Form("{}"),
+    config_service=Depends(get_config_service),
+    agent_manager=Depends(get_agent_manager),
+    bot_service=Depends(get_bot_service),
+    settings=Depends(get_settings),
+    registry=Depends(get_module_registry),
+):
+    """一键：导入登记 + 立即应用到账号（失败保留工件，返回 ``imported=true`` 便于重试）。"""
+    account_id = str(account_id or "").strip()
+    if not account_id:
+        return _err(400, "缺少 account_id", "BUNDLE_ACCOUNT_REQUIRED")
+    try:
+        secrets_obj = json.loads(secrets or "{}")
+    except json.JSONDecodeError as e:
+        return _err(400, f"secrets 不是合法 JSON: {e}", "BUNDLE_BAD_SECRETS")
+    if not isinstance(secrets_obj, dict):
+        return _err(400, "secrets 必须是 JSON 对象", "BUNDLE_BAD_SECRETS")
+
+    service = _service(config_service, agent_manager, bot_service, settings, registry)
+    try:
+        data = await _read_upload(file)
+        result = await service.import_bundle(data)
+    except BundleError as e:
+        return _err(400, str(e), e.code, e.hint)
+
+    bundle = result.get("bundle") or {}
+    try:
+        applied = await service.apply(
+            str(bundle.get("id") or ""), account_id, secrets=secrets_obj
+        )
+    except BundleError as e:
+        # 工件已登记：前端可以提示"已导入，应用失败"，让用户补密钥/修问题后重试
+        return JSONResponse(
+            status_code=400,
+            content={
+                "ok": False,
+                "code": e.code,
+                "message": str(e),
+                "hint": e.hint,
+                "imported": True,
+                "bundle": bundle,
+            },
+        )
+    return _ok("预设已导入并应用到账号", **result, apply=applied)
 
 
 @router.get("/bundles")
