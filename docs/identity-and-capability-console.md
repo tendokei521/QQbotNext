@@ -50,8 +50,8 @@
 
 后果链条：
 
-1. 名册是"每个账号一份"，所以**新增账号 = 所有人重新失权**（owner 档模块、`#llm` 管理指令、
-   `permission="owner"` 的 3 个内置模块全部静默失效）；
+1. 名册是"每个账号一份"，所以**新增账号 = 所有人重新失权**（`permission="owner"` 的 3 个内置模块、
+   工具里的 owner 档一律静默失效；管理指令另有独立问题，见 §1.3 末段）；
 2. 同一个真人在 3 个账号下要登记 3 次，任一处漏改就出现「A 账号认他是 owner、B 账号不认」；
 3. 现在靠「复制配置」对话框（`AgentCopyConfigDialog.vue`）在账号间搬配置来补，这是把
    **数据模型缺陷**做成了功能；
@@ -91,6 +91,17 @@
 | 工具过滤 | `app/agent/tools/spec.py:168-202`（`allowed_for_event`） | 工具 `permission` + `event.is_bot_owner` |
 | 跨账号响应权 | `app/plugin/responder.py` + `app/application/responder_service.py` | `channel_policies` |
 | 名册注入 | `app/plugin/nodes/inbound.py:288-325` | 再读一次 Agent 配置 |
+
+**其中还有一个已经跑偏的判定**：`#llm` 管理指令只看 `event.is_admin`
+（`app/agent/loop/command_dispatch.py:237`），而 `is_admin` 在 `authority.py:88` 只按
+**QQ 群角色**赋值 `role in ("group_admin", "group_owner")`，名册身份只改 `permission_role`、
+不改 `is_admin`。后果：
+
+- 名册里的拥有者**在私聊里用不了**任何管理指令（私聊没有群角色 → `is_admin=False` → 「权限不足」）；
+- 帮助文案写「仅管理员」（`app/agent/commands.py:32`）、`AGENT_CONFIG.md` 写「仅 Bot 拥有者」、
+  代码实际认「群管理/群主」——**三处说法互不相同**。
+
+这不是笔误，而是 §2 A4 的直接证据：同一份"管理员"概念被四个入口用四种口径实现。
 
 24 个内置模块里，类级 `permission` 是 `everyone` 17 个、`member` 4 个、`owner` 3 个——
 也就是说"谁能用某个模块"在多数情况下**写死在代码里，界面上根本没有对应开关**，
@@ -311,7 +322,7 @@ Agent 的**参数页继续存在**（人格、模型池、上下文、压缩…�
 | 阶段 | 内容 | 规模 | 验收 |
 |---|---|---|---|
 | **P0 修谎言**（0.5d） | 删账号页 Owner ID 与 `bots.owner_id` 的前端读写；修 `MODULE_DEV.md` / dashboard 架构稿的分叉描述；`app.py` 状态接口删该键 | 小 | 界面无账号 owner；`grep -r owner_id` 只剩迁移与 DB 兼容层 |
-| **P1 身份层**（1–2d） | `identities` 表 + 迁移 + `GET/POST /api/identities` + 「身份与权限」页；Agent 页名册字段改只读摘要；`PERMISSIONS`/判定器改读 identity | 中 | 新账号加入后 owner 立即生效；旧数据迁移幂等；`#llm` 管理指令在**未单独配置过的新账号**上可用；`tests/plugin/test_authority*.py` 全绿 |
+| **P1 身份层**（1–2d） | `identities` 表 + 迁移 + `GET/POST /api/identities` + 「身份与权限」页；Agent 页名册字段改只读摘要；判定器改读 identity；`is_admin` 收口到同一判定器（修 §1.3 末段的私聊/口径问题） | 中 | 新账号加入后 owner 立即生效；旧数据迁移幂等；名册 owner 在**私聊**也能用管理指令；`tests/plugin/test_authority*.py` 全绿 |
 | **P2 控制台只读+开关**（2–3d） | `/console` 矩阵（能力 × 账号，三态 + 来源）；开关写 `bindings`；删模块列表卡片开关（改指详情）；删模块页顶部重复开关 | 中 | 任一模块可在一个页面完成开关；"继承/覆盖"显示正确；前端 build 通过 |
 | **P3 抽屉：谁能用 + 怎么回**（2–3d） | 抽屉四段 + 生效预览；删 Agent 页「名单范围控制」与模块页「响应范围控制」卡片（改由抽屉写同一 binding）；身份 picker 支持搜索 | 中大 | 关一个功能 ≤ 1 次点击 + 0 跳页；预览与实际响应一致（同一判定器，单测覆盖） |
 | **P4 收口**（2d） | 响应权策略并入抽屉；`single_service` 兼容层下线；多群对话框删除（或只留群列表）；文档同步 | 中 | 旧配置迁移后行为不变；全量 pytest + `ruff` 无新增；`docs/` 无重复来源 |
