@@ -42,6 +42,15 @@ async def _add_account(bot_service, account_id: str = "acc_offline") -> str:
     )
 
 
+def _enable_timer_modules(container, account_id: str) -> None:
+    """新账号的模块默认关；本组用例只测"计时器的生命周期"，先显式打开带计时器的模块。"""
+    from app.infrastructure.config.config_service import ConfigService
+
+    cfg = container.get(ConfigService)
+    for module in ("llm_schedule", "llm_proactive"):
+        cfg.set_module_authority(module, account_id, {"enabled": True})
+
+
 async def test_creating_account_assembles_runtime_offline(container):
     """建号就把运行时与模块实例装配好——不需要连接。"""
     bot_service = container.get(BotService)
@@ -129,6 +138,7 @@ async def test_going_online_starts_timers_and_offline_stops_them(container):
     """上线武装、断线停止：`on_bot_login` / `on_bot_status` 是这两个开关。"""
     bot_service = container.get(BotService)
     account_id = await _add_account(bot_service, "acc_net")
+    _enable_timer_modules(container, account_id)
     runtime = container.get(AgentManager).get_runtime(account_id)
     scheduler = getattr(runtime, "scheduler", None)
     assert scheduler is not None
@@ -161,6 +171,7 @@ async def test_non_offline_states_do_not_stop_timers(container, state):
     """只有 disconnected / error 才停任务；连接途中的状态不能误停。"""
     bot_service = container.get(BotService)
     account_id = await _add_account(bot_service, f"acc_state_{state}")
+    _enable_timer_modules(container, account_id)
     runtime = container.get(AgentManager).get_runtime(account_id)
     scheduler = getattr(runtime, "scheduler", None)
 

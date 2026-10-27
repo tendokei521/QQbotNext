@@ -7,7 +7,7 @@
 回填、上次登录快照），抽出来既让主文件回到闸门内，也让"账号身份的真相"只有一个文件。
 
 以 mixin 形式提供（不是独立类）：它需要 `ConfigService` 的内存缓存（`_bots` /
-`_bot_accounts`）与变更通知（`_notify`），拆成两个对象反而要在中间维护同步。
+`_bot_accounts` / `_modules_default_off`）与变更通知（`_notify`），拆成两个对象反而要在中间维护同步。
 
 ## 身份约定
 
@@ -102,12 +102,17 @@ class AccountStoreMixin:
         - access_token 为显式值（含空串）→ 直接采用（空串 = 清除 token）；
         - 兼容旧前端：ws_url 本身携带打码 access_token 时同样回填；
         - conn_mode 缺字段/非法值 → 沿用该 id 的旧值（新账号归一为 forward）；
-        - name 缺字段 → 沿用旧名；id 非法或重复 → 抛 ValueError（由 API 转 400）。
+        - name 缺字段 → 沿用旧名；id 非法或重复 → 抛 ValueError（由 API 转 400）；
+        - **新建 id 的账号**：``modules_default_enabled`` 写 0（该账号的模块默认关）；
+          已有账号沿用当前值——升级后不会突然全关，改名也不会把老账号变成关。
 
         顺序即 payload 顺序（写进 sort_order），因为 id 不可变、不能靠下标表达顺序。
         """
         old = self._bots
         normalized: dict[str, dict] = {}
+        # 账号 → 模块是否默认关。**新建账号一律默认关**（用户没打开过的模块不该自己干活）；
+        # 已有账号沿用当前值，保证升级/改名零行为漂移。
+        default_off: dict[str, bool] = {}
         for cfg in bots:
             account_id = normalize_account_id(cfg.get("id"))
             if not account_id:
@@ -134,6 +139,9 @@ class AccountStoreMixin:
             else:
                 name = prev.get("name") or account_id
 
+            default_off[account_id] = (
+                account_id not in old or account_id in self._modules_default_off
+            )
             normalized[account_id] = {
                 "id": account_id,
                 "name": name,
@@ -151,16 +159,19 @@ class AccountStoreMixin:
         for order, (account_id, cfg) in enumerate(normalized.items()):
             sqls.append((
                 "INSERT OR REPLACE INTO bots "
-                "(account_id, name, ws_url, owner_id, auto_connect, conn_mode, sort_order) "
-                "VALUES (?,?,?,?,?,?,?)",
+                "(account_id, name, ws_url, owner_id, auto_connect, conn_mode, "
+                "modules_default_enabled, sort_order) "
+                "VALUES (?,?,?,?,?,?,?,?)",
                 (account_id, cfg["name"], cfg["ws_url"], cfg.get("owner_id"),
-                 1 if cfg.get("auto_connect") else 0, cfg.get("conn_mode", FORWARD), order),
+                 1 if cfg.get("auto_connect") else 0, cfg.get("conn_mode", FORWARD),
+                 0 if default_off[account_id] else 1, order),
             ))
         await self.db.run_in_transaction(sqls)   # 先落库，成功后再更新内存缓存
         removed = set(old) - set(normalized)
         for account_id in removed:
             self._bot_accounts.pop(account_id, None)
         self._bots = normalized
+        self._modules_default_off = {aid for aid, off in default_off.items() if off}
         self._publish_account_labels()
         await self._notify("bots", self.get_bots())
 
@@ -186,6 +197,8 @@ class AccountStoreMixin:
         「没填」与「填错了」必须分开处理：没填 → 自动分配；**填了但不合法 → 直接报错**。
         否则用户手滑打成 ``bad id!`` 会被静默换成另一个 id，之后再也对不上自己的脚本。
         id 已被占用时同样报错——id 是外部引用，绝不静默复用。
+
+        新账号的模块默认关（由 ``save_bots`` 检测新增 id 写入），由用户显式打开。
         """
         raw_id = cfg.get("id")
         raw_id = "" if raw_id is None else str(raw_id).strip()
@@ -222,6 +235,39 @@ class AccountStoreMixin:
         bots = [b for b in self.get_bots() if str(b["id"]) != str(account_id)]
         await self.save_bots(bots)   # 连带清掉 bot_accounts 快照
         return True
+
+    # ==================== 模块默认开关 ====================
+
+    def get_modules_default_enabled(self, account_id: Any) -> bool:
+        """该账号的「模块默认开关」（该模块没有任何 binding 覆盖时生效）。
+
+        - **新账号 = False**：建号时不写 enabled 覆盖，等于「所有模块默认关」；
+          用户显式打开某个模块会产生 account 层 binding，覆盖这个默认值。
+        - **老账号 / 未知账号 = True**：升级零行为漂移（存量账号的模块照旧默认开）。
+        - 只影响功能模块：框架级 Agent 用自身的开关，不读这个值
+          （见 ``binding_store.get_module_authority``）。
+        """
+        if account_id is None:
+            return True
+        return str(account_id) not in self._modules_default_off
+
+    async def set_modules_default_enabled(self, account_id: Any, enabled: bool) -> None:
+        """改某账号的「模块默认开关」（只在**账号 id 改名**时用来搬运原值）。
+
+        改名会删旧行、建新行，`save_bots` 会把新 id 当新账号（默认关）——那会把
+        升级前的老账号静默变成"默认关"。所以调用方在改名后把旧值搬过来。
+        """
+        key = str(account_id)
+        if key not in self._bots:
+            raise ValueError(f"账号不存在：{account_id}")
+        await self.db.execute(
+            "UPDATE bots SET modules_default_enabled = ? WHERE account_id = ?",
+            (1 if enabled else 0, key),
+        )
+        if enabled:
+            self._modules_default_off.discard(key)
+        else:
+            self._modules_default_off.add(key)
 
     # ==================== 上次登录账号快照 ====================
     def get_bot_accounts(self) -> dict[str, dict]:

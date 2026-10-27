@@ -60,3 +60,25 @@ async def test_add_keeps_explicit_address(client, config_service):
 
     assert resp.status_code == 200
     assert config_service.get_bots()[0]["ws_url"] == "ws://10.0.0.5:4000/"
+
+
+async def test_added_account_has_modules_off_by_default(client, config_service):
+    """新增账号 = 模块默认关：「加个号」不能等于「整套功能悄悄上线」。
+
+    Agent 例外：它是框架自身的回复能力，关掉新账号就完全静默（P0 要消灭的"没反应"）。
+    """
+    resp = client.post("/api/bots/config/add", json={"conn_mode": "forward"})
+    account_id = resp.json()["id"]
+
+    assert config_service.get_modules_default_enabled(account_id) is False
+
+    modules = client.get("/api/modules", params={"account_id": account_id}).json()
+    assert modules["agent"]["enabled"] is True, "Agent 必须保持默认开"
+    plugins = {
+        name: data for name, data in modules.items()
+        if name != "agent" and not data.get("hidden")
+    }
+    assert plugins, "容器里应加载出内置模块"
+    assert all(data["enabled"] is False for data in plugins.values()), (
+        "新账号的功能模块应全部默认关，直到用户显式打开"
+    )

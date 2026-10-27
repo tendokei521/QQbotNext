@@ -122,6 +122,21 @@ event.is_member
 
 权限过滤由框架在 `ModulePermissionNode` 统一完成，**不要在业务代码里再判断 owner/admin**。
 
+### 启用开关（`authority.enabled`）：新账号默认关
+
+模块开关存在 `bindings`（`global` / `account` / `channel` 三层，最具体者胜）。没有任何覆盖行时，
+默认值由**账号**决定：
+
+| 账号 | 默认 | 说明 |
+|---|---|---|
+| 新建账号 | **关** | 「加个号」不等于「整套功能上线」。用户显式打开某个模块才产生 account 层覆盖。 |
+| 升级前的存量账号 | 开 | 升级补列默认 1，行为不变；账号 id 改名时该值跟着搬（不会因改名变关）。 |
+| 框架级 Agent | 开 | Agent 不读这个默认值（关掉会让新账号完全静默）；要静默用 Agent 自己的开关。 |
+
+- 群级开关走 `channel_overrides`（见 [`permission-dialogue-policy-design.md`](permission-dialogue-policy-design.md)），与本默认值正交。
+- 只改权限/名单不会把模块打开：开关状态随 `ModuleAuthority` 的当前值一起保存。
+- 实现：`ConfigService.get_modules_default_enabled()`（账号默认值）+ `BindingStoreMixin.module_default_enabled()`（解析时使用）。
+
 ### 名册身份（`manager` / `owner` 档从哪来）
 
 `permission_role` 取的是「名册身份 + 群角色」里的最高档，两条来源缺一不可：

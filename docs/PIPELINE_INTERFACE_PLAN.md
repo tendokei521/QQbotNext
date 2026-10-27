@@ -409,7 +409,7 @@ from app.agent.config_partition import (
 | 风险 | 影响 | 缓解 |
 |---|---|---|
 | 用户升级后配置"消失" | **高** | 迁移脚本 + DB 备份 + `dropped_keys.json` + 发版说明逐键列出新位置 |
-| 破坏性改造后"开箱是个哑巴" | **高** | 9 个模块**随仓库发布、首次启动自动装配并默认 enabled**（"开箱功能全由模块提供"≠"默认不装"）；用户体感与今天一致，只是入口从「Agent 配置」移到「LLM 扩展」 |
+| 破坏性改造后"开箱是个哑巴" | **高** | 9 个模块**随仓库发布、首次启动自动装配并默认 enabled**（"开箱功能全由模块提供"≠"默认不装"）；用户体感与今天一致，只是入口从「Agent 配置」移到「LLM 扩展」。**注（2026-10-27 起）**：新账号的功能模块改为默认关（[`MODULE_DEV.md §2.5`](MODULE_DEV.md)）；回复能力由框架级 Agent 提供且默认开，故"哑巴"风险不复活，但模块功能需要用户显式开启 |
 | `owner_id` 取消导致第三方插件读 `conn.owner_id` 崩 | 中 | `BotConnection.owner_id` 保留为 `@property` 返回 None + 弃用告警一版 |
 | 删除 `runtime.proactive/scheduler/memory/knowledge` 崩旧插件 | 中 | 保留一版 shim：`__getattr__` 转发到接管模块 + 弃用日志 |
 | 9 个模块加载顺序敏感 | 低 | 除 `output` 外全是注册表（与顺序无关）；`llm_output` 三 mode 合一，避免争槽 |

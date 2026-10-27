@@ -103,6 +103,9 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
         # 每个账号上一次成功登录的账号快照：{"user_id": str, "nickname": str, "last_login_at": int}
         # 断开后运行时状态会清空，前端据此回退展示；连接成功时由 gateway 回调刷新。
         self._bot_accounts: dict[str, dict] = {}
+        # 模块「默认关」的账号集合（新账号建号时加入；老账号不在集合里 = 默认开）。
+        # 只影响功能模块：Agent 是框架自身回复能力，走它自己的开关（binding_store）。
+        self._modules_default_off: set[str] = set()
         self._webui: dict = dict(DEFAULT_WEBUI_CONFIG)
         # 作用域绑定：capability -> {(scope_type, scope_id): row}
         # row = {"enabled": bool|None, "config": dict, "permission": dict, "priority": int}
@@ -140,13 +143,18 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
         await self._migrate_bindings_if_needed()
 
     async def _ensure_schema(self) -> None:
-        """老库补列：`conn_mode`（连接方向）晚于 `bots` 表引入。
+        """老库补列：`conn_mode`（连接方向）/ `modules_default_enabled`。
 
         存量库的 `bots` 表只有 ws_url/owner_id/auto_connect；不补列会让
         `SELECT *` 之后所有读取都拿不到连接模式，反向账号被静默当成正向去连。
         默认值 `forward` 保证升级后存量账号行为不变。
+        `modules_default_enabled` 默认 1 = 老账号「模块默认开」；新账号建号时写 0（默认关），
+        所以这个默认值只服务升级路径，不会让新账号意外继承「开」。
         """
-        await self.db.ensure_columns("bots", {"conn_mode": "TEXT NOT NULL DEFAULT 'forward'"})
+        await self.db.ensure_columns("bots", {
+            "conn_mode": "TEXT NOT NULL DEFAULT 'forward'",
+            "modules_default_enabled": "INTEGER NOT NULL DEFAULT 1",
+        })
 
     async def _migrate_legacy_if_needed(self) -> None:
         count = await self.db.fetchone("SELECT COUNT(*) AS c FROM module_config")
@@ -246,6 +254,7 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
         # bots（按 sort_order 还原界面顺序；id 是唯一凭据，顺序只是展示）
         rows = await self.db.fetchall("SELECT * FROM bots ORDER BY sort_order, account_id")
         self._bots = {}
+        self._modules_default_off = set()
         for r in rows:
             owner_id = r["owner_id"]
             if owner_id is not None:
@@ -262,6 +271,8 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
                 "auto_connect": bool(r["auto_connect"]),
                 "conn_mode": normalize_mode(r.get("conn_mode")),
             }
+            if not bool(r.get("modules_default_enabled", 1)):
+                self._modules_default_off.add(account_id)
 
         # 上次登录账号快照（老库无此表时由 SCHEMA 的 CREATE TABLE IF NOT EXISTS 补建）
         rows = await self.db.fetchall("SELECT * FROM bot_accounts")

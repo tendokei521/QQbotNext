@@ -136,6 +136,10 @@ CREATE TABLE IF NOT EXISTS bots (
     auto_connect INTEGER NOT NULL DEFAULT 0,
     -- 连接方向：forward=正向 WS（框架连出）/ reverse=反向 WS（框架监听、OneBot 实现连入）
     conn_mode   TEXT NOT NULL DEFAULT 'forward',
+    -- 模块默认开关：1=该账号未显式配置模块时默认「开」（老账号语义）；
+    -- 0=默认「关」（新账号建号时写 0）：没手动打开的模块不该自己开始干活。
+    -- 只影响功能模块；框架级 Agent 不受影响（要静默用它自己的开关）。
+    modules_default_enabled INTEGER NOT NULL DEFAULT 1,
     -- 仅用于界面排序：id 不可变，所以顺序必须单独存，不能靠数组下标
     sort_order  INTEGER NOT NULL DEFAULT 0
 );

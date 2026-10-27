@@ -103,6 +103,21 @@ async def test_upsert_allows_changing_account_id(service, config_service):
     assert config_service.get_module_config("agent", "main")["group_enable"] is True, "配置要跟着搬"
 
 
+async def test_rename_keeps_modules_default_flag(service, config_service):
+    """改 ID 不是新账号：模块默认开关要跟着搬（老账号不能被静默变成「默认关」）。"""
+    svc, _bots = service
+    await config_service.save_bots(
+        [{"id": "old", "name": "老号", "ws_url": DEFAULT_LISTEN_ADDRESS}]
+    )
+    # 模拟升级前的老账号：模块默认开
+    await config_service.set_modules_default_enabled("old", True)
+
+    renamed = await svc.upsert(account_id="renamed", name="老号")
+
+    assert renamed["account_id"] == "renamed"
+    assert config_service.get_modules_default_enabled("renamed") is True
+
+
 async def test_upsert_rejects_id_already_used(service, config_service):
     svc, bots = service
     await svc.upsert(account_id="a")

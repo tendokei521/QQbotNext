@@ -25,6 +25,12 @@ from app.domain.binding import (
 #: ``set_binding`` 的「本参数未提供」哨兵（区分「不改」与「显式写 None/False」）
 _UNSET = object()
 
+#: 框架级能力：**不参与「新账号模块默认关」**。
+#:
+#: Agent 是框架自身的回复能力——把它也关掉，新账号配完向导后会完全静默
+#: （正是 P0 要消灭的「没反应」）。要静默请用 Agent 自己的开关。
+CORE_CAPABILITIES: tuple[str, ...] = ("agent",)
+
 
 class BindingStoreMixin:
     """作用域绑定（bindings）+ 群响应权策略（channel_policies）的读写与迁移。"""
@@ -398,8 +404,23 @@ class BindingStoreMixin:
 
     # ==================== 模块权限（兼容门面，读写 bindings） ====================
 
+    def module_default_enabled(self, module: Any, bot_id: Any) -> bool:
+        """该模块在该账号上的「默认开关」（没有任何 binding 覆盖时的值）。
+
+        新账号 = False：未显式打开的模块一律不响应（用户加号 ≠ 全功能上线）。
+        老账号 = True：升级后存量账号行为不变（见 ``account_store.get_modules_default_enabled``）。
+        Agent 与全球层（``bot_id is None``）恒 True：它们是框架/全局语义，不是"某个新账号的模块"。
+        """
+        if bot_id is None or str(module) in CORE_CAPABILITIES:
+            return True
+        return self.get_modules_default_enabled(bot_id)
+
     def get_module_authority(self, module: str, bot_id: Any) -> dict:
-        resolved = self.resolve_binding(module, account_id=bot_id)
+        resolved = self.resolve_binding(
+            module,
+            account_id=bot_id,
+            default_enabled=self.module_default_enabled(module, bot_id),
+        )
         data = {"enabled": bool(resolved.enabled)}
         data.update(dict(resolved.permission))
         return data

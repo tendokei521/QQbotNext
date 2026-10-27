@@ -121,6 +121,8 @@ async def migrate_account_identity(db) -> None:
             owner_id     TEXT,
             auto_connect INTEGER NOT NULL DEFAULT 0,
             conn_mode    TEXT NOT NULL DEFAULT 'forward',
+            -- 迁移来的都是「老账号」：模块保持默认开（升级零行为漂移）。
+            modules_default_enabled INTEGER NOT NULL DEFAULT 1,
             sort_order   INTEGER NOT NULL DEFAULT 0
         )
         """

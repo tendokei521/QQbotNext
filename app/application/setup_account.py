@@ -180,6 +180,8 @@ class SetupAccountService:
         target_id = requested_id or old_id
         if target_id != old_id and any(str(bot.get("id")) == target_id for bot in bots):
             raise SetupAccountError(f"账号 ID「{target_id}」已被占用")
+        # 改名不是新账号：模块默认开关要跟着搬，否则升级前的老账号会被静默变成「默认关」
+        old_modules_default = self.config_service.get_modules_default_enabled(old_id)
 
         updated = []
         for bot in bots:
@@ -199,6 +201,9 @@ class SetupAccountService:
         await self.config_service.save_bots(updated)
         if target_id != old_id:
             await self._migrate_bindings(old_id, target_id)
+            await self.config_service.set_modules_default_enabled(
+                target_id, old_modules_default
+            )
         await self.config_service.set_kv(SETUP_ACCOUNT_KV, target_id)
         await self.bot_service.gateway.reconcile()
         self.connect_loop.stop(old_id)
