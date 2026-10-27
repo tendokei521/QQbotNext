@@ -143,21 +143,6 @@ def build_container(settings: Settings | None = None) -> Container:
 
     container.register(Settings, settings)
 
-    # 协议端（NapCat 等）托管：进程管理 + 扫码登录转发。
-    # 放在装配根创建，进程状态随框架生命周期（退出时 stop_all 收子进程）。
-    from app.application.protocol.installer import ProtocolInstaller
-    from app.application.protocol.login import ProtocolLoginService
-    from app.application.protocol.supervisor import ProtocolSupervisor
-
-    _protocol_data_root = Path(settings.module_dir).resolve().parent
-    if Path(settings.module_dir).name != "module":
-        _protocol_data_root = Path(settings.module_dir)
-    container.register(ProtocolInstaller, ProtocolInstaller(_protocol_data_root))
-    container.register(
-        ProtocolSupervisor, ProtocolSupervisor(_protocol_data_root / "protocol")
-    )
-    container.register(ProtocolLoginService, ProtocolLoginService())
-
     # 核心单例
     cache = Cache()
     container.register_factory(Cache, lambda: cache)
@@ -566,12 +551,6 @@ async def run(settings: Settings | None = None) -> None:
             _container.get(SetupAccountService).stop_connecting()
         except Exception as e:  # noqa: BLE001 —— 退出路径必须继续走完
             logger.warning(f"[Setup] 退出时停止连接重试失败: {e}")
-        try:
-            from app.application.protocol.supervisor import ProtocolSupervisor
-
-            _container.get(ProtocolSupervisor).stop_all()
-        except Exception as e:  # noqa: BLE001 —— 退出路径必须继续走完
-            logger.warning(f"[Protocol] 退出时停止协议端失败: {e}")
         await bot_service.shutdown()
         # 先停止 Agent 运行时（定时/主动），再取消残留任务、关 DB
         _container.get(AgentManager).shutdown()
