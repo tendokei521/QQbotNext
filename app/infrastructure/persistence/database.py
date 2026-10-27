@@ -51,6 +51,19 @@ CREATE TABLE IF NOT EXISTS bindings (
     PRIMARY KEY (capability_id, scope_type, scope_id)
 );
 
+-- 群列表缓存：get_group_list 的结果落库，离线也能看到"上次有哪些群"。
+-- in_group=0 表示"上次刷新时已不在该群"，保留行以便历史设置不丢。
+CREATE TABLE IF NOT EXISTS known_groups (
+    account_id   TEXT NOT NULL,
+    group_id     TEXT NOT NULL,
+    name         TEXT NOT NULL DEFAULT '',
+    member_count INTEGER NOT NULL DEFAULT 0,
+    max_member_count INTEGER NOT NULL DEFAULT 0,
+    in_group     INTEGER NOT NULL DEFAULT 1,
+    updated_at   INTEGER NOT NULL,
+    PRIMARY KEY (account_id, group_id)
+);
+
 -- 群响应权策略：同一群里由哪个账号响应某能力（docs/multi-account-design.md §6）。
 CREATE TABLE IF NOT EXISTS channel_policies (
     capability_id      TEXT NOT NULL,

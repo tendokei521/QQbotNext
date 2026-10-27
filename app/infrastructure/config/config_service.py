@@ -16,6 +16,7 @@ from typing import Any
 from app.core.logger import logger
 from app.infrastructure.config.account_store import AccountStoreMixin
 from app.infrastructure.config.binding_store import BindingStoreMixin
+from app.infrastructure.config.group_store import GroupStoreMixin
 from app.infrastructure.config.ws_url import (
     ACCESS_TOKEN_MASK,
     join_ws_url,
@@ -58,7 +59,7 @@ DEFAULT_PROVIDER_SETTINGS: dict = {
 }
 
 
-class ConfigService(AccountStoreMixin, BindingStoreMixin):
+class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin):
     def __init__(self, db: Database, project_root: Path, log=None) -> None:
         self.db = db
         self.root = project_root
@@ -78,6 +79,8 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin):
         self._bindings: dict[str, dict[tuple[str, str], dict]] = {}
         # 群响应权策略：(capability_id, channel_id) -> row
         self._channel_policies: dict[tuple[str, str], dict] = {}
+        # 群列表缓存：(account_id, group_id) -> row（离线可看"上次有哪些群"）
+        self._known_groups: dict[tuple[str, str], dict] = {}
         self._provider_presets: dict[str, dict] = {}              # preset_id -> preset
         self._provider_models: dict[str, dict] = {}               # model_id -> model
         self._provider_settings: dict = dict(DEFAULT_PROVIDER_SETTINGS)
@@ -100,6 +103,7 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin):
         await self._load_all()
         await self._load_bindings()
         await self._load_channel_policies()
+        await self._load_known_groups()
         await self._migrate_bindings_if_needed()
 
     async def _ensure_schema(self) -> None:

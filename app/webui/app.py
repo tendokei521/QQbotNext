@@ -26,6 +26,7 @@ from app.core.logger import webui_logger
 from app.webui.api import agent as agent_router
 from app.webui.api import bots as bots_router
 from app.webui.api import framework as framework_router
+from app.webui.api import groups as groups_router
 from app.webui.api import logs as logs_router
 from app.webui.api import media as media_router
 from app.webui.api import modules as modules_router
@@ -173,6 +174,7 @@ def create_app(container) -> FastAPI:
 
     # 路由
     app.include_router(bots_router.router, prefix="/api")
+    app.include_router(groups_router.router, prefix="/api")
     app.include_router(modules_router.router, prefix="/api")
     app.include_router(agent_router.router, prefix="/api")
     app.include_router(logs_router.router, prefix="/api")
