@@ -15,6 +15,7 @@ from app.application.bundle.applier import BundleApplier
 from app.application.bundle.errors import BundleError
 from app.application.bundle.exporter import export_bundle
 from app.application.bundle.manifest import normalize_manifest
+from app.application.bundle.module_packages import ModulePackageError, pack_module_dir
 from app.application.bundle.validator import inspect_zip, validate_bytes
 
 
@@ -26,6 +27,7 @@ class BundleService:
         data_root: Path | str,
         agent_manager: Any = None,
         installed_modules: dict[str, str] | None = None,
+        module_catalog: dict[str, dict] | None = None,
         agent_schema: dict | None = None,
         framework_api_version: int = 1,
         framework_version: str = "2.0.0",
@@ -34,6 +36,8 @@ class BundleService:
         self.agent_manager = agent_manager
         self.data_root = Path(data_root)
         self.installed_modules = installed_modules or {}
+        #: 模块编目（name → {version, builtin, path}）：导出时决定"打包代码还是只声明版本"
+        self.module_catalog = module_catalog or {}
         self.agent_schema = agent_schema
         self.framework_api_version = framework_api_version
         self.framework_version = framework_version
@@ -150,25 +154,52 @@ class BundleService:
         if persona_id:
             preset = self.config_service.get_role_preset(persona_id)
             if preset:
-                persona = {"name": preset.get("name", ""), "text": preset.get("system_prompt", "")}
+                persona = {
+                    "name": preset.get("name", ""),
+                    "text": preset.get("system_prompt", ""),
+                    "description": preset.get("description", ""),
+                    "begin_dialogs": preset.get("begin_dialogs") or [],
+                    "tools": preset.get("tools"),
+                    "skills": preset.get("skills"),
+                }
 
         provider = None
         preset_id = str(agent_config.get("provider_preset_id") or "")
-        pool = agent_config.get("provider_model_pool") or []
-        model_id = str(pool[0]) if pool else str(agent_config.get("provider_model_id") or "")
+        pool = [str(item) for item in (agent_config.get("provider_model_pool") or []) if str(item)]
+        if not pool and agent_config.get("provider_model_id"):
+            pool = [str(agent_config["provider_model_id"])]
         if preset_id:
             preset = self.config_service.get_provider_preset(preset_id)
-            model_row = self.config_service.get_provider_model(model_id) if model_id else None
-            if preset and model_row:
+            models = []
+            for model_id in pool:
+                model_row = self.config_service.get_provider_model(model_id)
+                if not model_row:
+                    continue
+                models.append({
+                    "model": model_row.get("model", ""),
+                    "provider_type": model_row.get("provider_type") or "chat",
+                    "enabled": bool(model_row.get("enabled", True)),
+                    "config": model_row.get("config") or {},
+                })
+            if preset and models:
+                provider_config = {
+                    key: value
+                    for key, value in (preset.get("config") or {}).items()
+                    if key != "api_key"
+                }
                 provider = {
                     "provider": preset.get("provider", "openai"),
-                    "api_base": (preset.get("config") or {}).get("api_base", ""),
+                    "api_base": provider_config.get("api_base", ""),
                     "api_key": (preset.get("config") or {}).get("api_key", ""),
-                    "model": model_row.get("model", ""),
+                    "model": models[0]["model"],
                     "preset_name": preset.get("name", ""),
+                    "config": provider_config,
+                    "models": models,
                 }
 
         module_configs: dict[str, dict] = {}
+        module_packages: dict[str, bytes] = {}
+        module_meta: dict[str, dict] = {}
         if include_modules:
             for module_name in self.installed_modules:
                 config = self.config_service.get_module_config(module_name, account_id) or {}
@@ -179,6 +210,24 @@ class BundleService:
                     "enabled": bool(authority.get("enabled", True)),
                     "config": config,
                 }
+                catalog_entry = self.module_catalog.get(module_name) or {}
+                builtin = bool(catalog_entry.get("builtin", True))
+                module_version = str(
+                    catalog_entry.get("version") or self.installed_modules.get(module_name) or ""
+                )
+                module_meta[module_name] = {"version": module_version, "builtin": builtin}
+                if builtin:
+                    continue
+                directory = catalog_entry.get("path")
+                if not directory:
+                    continue
+                try:
+                    module_packages[module_name] = pack_module_dir(directory)
+                except ModulePackageError as e:
+                    # 单个模块打不进包不能让整个导出失败：清单里仍声明它（目标机需自行安装）
+                    self.config_service.log.warning(
+                        f"[Bundle] 模块 {module_name} 未能随包导出：{e}"
+                    )
 
         return export_bundle(
             bundle_id=bundle_id,
@@ -189,6 +238,8 @@ class BundleService:
             persona=persona,
             provider=provider,
             module_configs=module_configs,
+            module_packages=module_packages,
+            module_meta=module_meta,
         )
 
 

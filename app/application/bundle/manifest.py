@@ -38,6 +38,32 @@ def _as_list(value: Any) -> list:
     return value if isinstance(value, list) else []
 
 
+def _name_list(value: Any) -> list[str] | None:
+    """工具/技能名列表：``None`` = 不限制（保持 None 语义），其余归一成去重字符串列表。"""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, (list, tuple, set)):
+        return None
+    names = [str(item).strip() for item in value if str(item or "").strip()]
+    return list(dict.fromkeys(names))
+
+
+def _begin_dialogs(value: Any) -> list[dict]:
+    """预设对话：只保留 ``{role: user|assistant, content: 非空}``。"""
+    result: list[dict] = []
+    for item in _as_list(value):
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        content = str(item.get("content") or "").strip()
+        if role not in ("user", "assistant") or not content:
+            continue
+        result.append({"role": role, "content": content})
+    return result
+
+
 def normalize_manifest(raw: Any) -> dict:
     """把 `bundle.json` 归一化成稳定形状；不合法时抛 :class:`BundleError`。"""
     _require(isinstance(raw, dict), "BUNDLE_MANIFEST_INVALID", "bundle.json 必须是 JSON 对象")
@@ -88,6 +114,8 @@ def normalize_manifest(raw: Any) -> dict:
             "name": module_name,
             "version": str(item.get("version") or "").strip(),
             "required": bool(item.get("required", True)),
+            # 随包模块的 zip 路径（包内相对路径，空 = 只声明依赖、不带代码）
+            "source": str(item.get("source") or "").strip(),
         })
 
     components = _as_dict(raw.get("components"))
@@ -102,6 +130,11 @@ def normalize_manifest(raw: Any) -> dict:
             "source": source,
             "name": str(item.get("name") or "").strip() or "套装人格",
             "apply_to": str(item.get("apply_to") or "agent.persona_preset_id"),
+            # 预设的扩展字段（提示词全文在 source 里；这些是"角色卡"的其余部分）
+            "description": str(item.get("description") or "").strip(),
+            "begin_dialogs": _begin_dialogs(item.get("begin_dialogs")),
+            "tools": _name_list(item.get("tools")),
+            "skills": _name_list(item.get("skills")),
         })
 
     providers: list[dict] = []
@@ -109,7 +142,22 @@ def normalize_manifest(raw: Any) -> dict:
         if not isinstance(item, dict):
             continue
         api_base = str(item.get("api_base") or "").strip()
+        models: list[dict] = []
+        for model_item in _as_list(item.get("models")):
+            if not isinstance(model_item, dict):
+                continue
+            model_name = str(model_item.get("model") or "").strip()
+            if not model_name:
+                continue
+            models.append({
+                "model": model_name,
+                "provider_type": str(model_item.get("provider_type") or "chat").strip() or "chat",
+                "enabled": bool(model_item.get("enabled", True)),
+                "config": _as_dict(model_item.get("config")),
+            })
         model = str(item.get("model") or "").strip()
+        if not model and models:
+            model = models[0]["model"]
         if not api_base or not model:
             continue
         _require(
@@ -117,12 +165,20 @@ def normalize_manifest(raw: Any) -> dict:
             "BUNDLE_MANIFEST_INVALID",
             f"provider.api_base 必须是 http(s) URL：{api_base}",
         )
+        if not models:
+            models = [{
+                "model": model, "provider_type": "chat", "enabled": True, "config": {},
+            }]
         providers.append({
             "provider": str(item.get("provider") or "openai").strip() or "openai",
             "api_base": api_base.rstrip("/"),
             "model": model,
             "preset_name": str(item.get("preset_name") or "").strip(),
             "apply_to": str(item.get("apply_to") or "agent.provider_model_pool"),
+            # 连接预设的其余字段（api_base/api_key 之外，如重试次数）；密钥走 secrets
+            "config": _as_dict(item.get("config")),
+            # 模型池全量迁移（v1 曾只带第一个，导致多模型池丢配置）
+            "models": models,
         })
 
     agent_configs: list[dict] = []
@@ -146,6 +202,7 @@ def normalize_manifest(raw: Any) -> dict:
             "name": module_name,
             "enabled": bool(item.get("enabled", True)),
             "source": str(item.get("source") or "").strip(),
+            "version": str(item.get("version") or "").strip(),
         })
 
     secrets: list[dict] = []
