@@ -308,7 +308,7 @@ class BundleApplier:
             "provider_models": provider_models,
             "agent": new_agent_config,
             "modules": applied_modules,
-        })
+        }, provided)
         return plan
 
     def _pending_modules(self, manifest: dict) -> list[str]:
@@ -324,14 +324,20 @@ class BundleApplier:
         return pending
 
     @staticmethod
-    def _require_secrets(manifest: dict, resolved: dict) -> None:
+    def _require_secrets(manifest: dict, resolved: dict, provided: dict | None = None) -> None:
         """必填密钥在"写回后的最终配置"里必须有值（否则应用出来的是半套）。"""
+        provided = provided or {}
         missing: list[str] = []
         for secret in manifest.get("secrets", []):
             if not secret.get("required", True):
                 continue
             key = str(secret.get("key") or "")
             kind, target, field = _split_secret_key(key)
+            if kind == "unknown":
+                # 我们不认识的键路径：用户已填就放行（写不进去会在别处暴露），没填则点名
+                if key and key not in provided:
+                    missing.append(secret.get("label") or key)
+                continue
             value: Any = None
             if kind == "provider":
                 value = (resolved.get("provider_config") or {}).get(field) if target == "0" else None
