@@ -25,6 +25,37 @@ def parse_semver(value: str) -> tuple[int, int, int] | None:
     return int(match.group(1)), int(match.group(2)), int(match.group(3))
 
 
+def satisfies_version(version: str, constraint: str) -> bool:
+    """极简版本约束：``""``/``*`` 恒真；支持 ``>=x.y.z``、``<=``、``==``、``>``、``<``（逗号并列）。"""
+    text = str(constraint or "").strip()
+    if not text or text in ("*", "any"):
+        return True
+    current = parse_semver(version)
+    if current is None:
+        return False
+    for index, part in enumerate(piece.strip() for piece in text.split(",")):
+        if not part:
+            continue
+        match = re.match(r"^(>=|<=|==|>|<|=)?\s*v?(\d+)\.(\d+)\.(\d+)", part)
+        if not match:
+            return False
+        op, *numbers = match.groups()
+        target = (int(numbers[0]), int(numbers[1]), int(numbers[2]))
+        if op in (">=", None, "", "=") and index == 0 and not op:
+            op = ">="
+        if op == ">=" and not current >= target:
+            return False
+        if op == "<=" and not current <= target:
+            return False
+        if op == ">" and not current > target:
+            return False
+        if op == "<" and not current < target:
+            return False
+        if op in ("==", "=") and current != target:
+            return False
+    return True
+
+
 def _require(condition: bool, code: str, message: str, hint: str = "") -> None:
     if not condition:
         raise BundleError(code, message, hint)

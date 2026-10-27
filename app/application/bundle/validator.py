@@ -13,7 +13,7 @@ import re
 import zipfile
 
 from app.application.bundle.errors import BundleError
-from app.application.bundle.manifest import parse_semver
+from app.application.bundle.manifest import parse_semver, satisfies_version
 from app.application.bundle.module_packages import read_module_identity
 from app.domain.dialogue_policy import validate_override_values  # noqa: F401  (预留：P4 值校验复用)
 
@@ -109,37 +109,6 @@ def inspect_zip(data: bytes) -> tuple[dict, dict, dict]:
     return manifest_raw, files, checksums
 
 
-def _satisfies(version: str, constraint: str) -> bool:
-    """极简版本约束：``""``/``*`` 恒真；支持 ``>=x.y.z``、``<=``、``==``、``>``、``<``（逗号并列）。"""
-    text = str(constraint or "").strip()
-    if not text or text in ("*", "any"):
-        return True
-    current = parse_semver(version)
-    if current is None:
-        return False
-    for index, part in enumerate(part.strip() for part in text.split(",")):
-        if not part:
-            continue
-        match = re.match(r"^(>=|<=|==|>|<|=)?\s*v?(\d+)\.(\d+)\.(\d+)", part)
-        if not match:
-            return False
-        op, *numbers = match.groups()
-        target = (int(numbers[0]), int(numbers[1]), int(numbers[2]))
-        if op in (">=", None, "", "=") and index == 0 and not op:
-            op = ">="
-        if op == ">=" and not current >= target:
-            return False
-        if op == "<=" and not current <= target:
-            return False
-        if op == ">" and not current > target:
-            return False
-        if op == "<" and not current < target:
-            return False
-        if op in ("==", "=") and current != target:
-            return False
-    return True
-
-
 def validate_bytes(
     data: bytes,
     *,
@@ -204,7 +173,7 @@ def validate_bytes(
                 "检查导出时的模块打包逻辑",
             ))
             continue
-        if required["version"] and not _satisfies(identity["version"], required["version"]):
+        if required["version"] and not satisfies_version(identity["version"], required["version"]):
             issues.append(_issue(
                 "error", "BUNDLE_MODULE_PACKAGE_INVALID",
                 f"模块代码包版本不满足：{source}",
@@ -229,7 +198,7 @@ def validate_bytes(
                     "warn", "BUNDLE_MODULE_OPTIONAL_MISSING", f"可选模块 {name} 未安装", "将跳过其配置",
                 ))
             continue
-        if required["version"] and not _satisfies(installed[name], required["version"]):
+        if required["version"] and not satisfies_version(installed[name], required["version"]):
             if name in bundled:
                 will_install.append(name)
                 issues.append(_issue(

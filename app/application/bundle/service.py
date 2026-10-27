@@ -28,6 +28,7 @@ class BundleService:
         agent_manager: Any = None,
         installed_modules: dict[str, str] | None = None,
         module_catalog: dict[str, dict] | None = None,
+        module_installer: Any = None,
         agent_schema: dict | None = None,
         framework_api_version: int = 1,
         framework_version: str = "2.0.0",
@@ -38,10 +39,16 @@ class BundleService:
         self.installed_modules = installed_modules or {}
         #: 模块编目（name → {version, builtin, path}）：导出时决定"打包代码还是只声明版本"
         self.module_catalog = module_catalog or {}
+        #: 模块安装器（可选）：随包模块在应用阶段安装/回滚时卸载
+        self.module_installer = module_installer
         self.agent_schema = agent_schema
         self.framework_api_version = framework_api_version
         self.framework_version = framework_version
-        self.applier = BundleApplier(config_service)
+        self.applier = BundleApplier(
+            config_service,
+            installed_modules=self.installed_modules,
+            module_installer=module_installer,
+        )
 
     # ==================== 路径 ====================
 

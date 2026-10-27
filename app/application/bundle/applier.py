@@ -4,6 +4,8 @@
 
 关键取舍：
 - **配置写入走 `ConfigService.apply_ops`（单事务）**：要么全成，要么内存/DB 都回到应用前；
+- **随包模块先安装、再写配置**：模块代码走既有 zip 安装通道（`module_installer`），
+  安装失败的模块会被记住，回滚时只卸载"本次新装"的（升级的保留，避免删掉用户原有模块）；
 - **套装的"创建了什么"单独记账**（`bundle_objects`），卸载/回滚只删这些对象；
 - **激活记录本身就是 journal**：`applying` 行在启动时被 `recover_interrupted()` 自动回滚。
 """
@@ -11,14 +13,22 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 import uuid
 from typing import Any
 
 from app.application.bundle.errors import BundleError
+from app.application.bundle.manifest import satisfies_version
 from app.infrastructure.config.config_service import ConfigOp
 
 AGENT_CAPABILITY = "agent"
+
+#: 密钥声明里的键路径 → (kind, target, field)
+_PROVIDER_SECRET_RE = re.compile(r"^providers\[(\d+)\]\.(.+)$")
+_PROVIDER_MODEL_SECRET_RE = re.compile(r"^provider_models\[(\d+)\]\.(.+)$")
+_MODULE_SECRET_RE = re.compile(r"^module:([A-Za-z0-9_\-]+)\.(.+)$")
+_AGENT_SECRET_RE = re.compile(r"^agent\.(.+)$")
 
 
 def _read_json(files: dict[str, bytes], name: str) -> dict:
@@ -34,9 +44,37 @@ def _read_json(files: dict[str, bytes], name: str) -> dict:
     return data
 
 
+def _split_secret_key(key: str) -> tuple[str, str, str]:
+    """``secrets[].key`` → ``(kind, target, field)``；无法识别返回 ``("unknown", "", "")``。"""
+    text = str(key or "").strip()
+    match = _PROVIDER_SECRET_RE.match(text)
+    if match:
+        return "provider", match.group(1), match.group(2)
+    match = _PROVIDER_MODEL_SECRET_RE.match(text)
+    if match:
+        return "provider_model", match.group(1), match.group(2)
+    match = _MODULE_SECRET_RE.match(text)
+    if match:
+        return "module", match.group(1), match.group(2)
+    match = _AGENT_SECRET_RE.match(text)
+    if match:
+        return "agent", "", match.group(1)
+    return "unknown", "", ""
+
+
 class BundleApplier:
-    def __init__(self, config_service: Any) -> None:
+    def __init__(
+        self,
+        config_service: Any,
+        *,
+        installed_modules: dict[str, str] | None = None,
+        module_installer: Any = None,
+    ) -> None:
         self.config_service = config_service
+        self.installed_modules = dict(installed_modules or {})
+        #: 模块安装器（可选）：需实现 ``async install(name, zip_bytes) -> dict`` /
+        #: ``async uninstall(name) -> None``；不传 = 不支持随包安装模块。
+        self.module_installer = module_installer
 
     # ==================== 计划 ====================
 
@@ -55,7 +93,11 @@ class BundleApplier:
         （``{"agent": {...}, "modules": {name: {...}}}``）。升级同 id 新版本时据此
         **保留用户改动**：用户改过的键不再被新包覆盖；已填密钥缺省复用旧值。
         """
-        secrets = dict(secrets or {})
+        provided = {
+            str(key): str(value)
+            for key, value in (secrets or {}).items()
+            if str(value or "").strip()
+        }
         previous = previous or {}
         prev_agent = dict(previous.get("agent") or {})
         prev_modules = dict(previous.get("modules") or {})
@@ -71,7 +113,7 @@ class BundleApplier:
         creates: list[dict] = []
         creates_meta: list[dict] = []
 
-        # 1) 人格：全文落成新的角色预设（不覆盖任何既有预设）
+        # 1) 人格：全文落成新的角色预设（不覆盖任何既有预设），角色卡字段一起带过来
         for persona in manifest["components"]["personas"]:
             text = files.get(persona["source"], b"").decode("utf-8").strip()
             if not text:
@@ -80,11 +122,11 @@ class BundleApplier:
             preset = {
                 "id": role_id,
                 "name": persona["name"],
-                "description": "由套装导入",
+                "description": persona.get("description") or "由套装导入",
                 "system_prompt": text,
-                "begin_dialogs": [],
-                "tools": [],
-                "skills": [],
+                "begin_dialogs": list(persona.get("begin_dialogs") or []),
+                "tools": persona.get("tools"),
+                "skills": persona.get("skills"),
                 "created_at": int(time.time()),
                 "updated_at": int(time.time()),
             }
@@ -93,50 +135,63 @@ class BundleApplier:
             creates.append({"kind": "role_preset", "name": persona["name"]})
             agent_patch["persona_preset_id"] = role_id
 
-        # 2) Provider 连接 + 模型（密钥来自导入时手填）
+        # 2) Provider 连接 + 模型池（密钥来自导入时手填；升级时缺省复用旧值）
+        provider_config: dict[str, Any] = {}
+        provider_models: list[dict] = []
         provider = (manifest["components"]["providers"] or [None])[0]
         if provider:
-            api_key = str(secrets.get("providers[0].api_key") or "")
+            provider_config = dict(provider.get("config") or {})
+            provider_config["api_base"] = provider["api_base"]
+            api_key = provided.get("providers[0].api_key", "")
             if not api_key:
-                # 升级时用户没重填密钥 → 复用上一次创建的那个预设里的 key
                 for created in previous.get("created") or []:
                     if created.get("kind") == "provider_preset":
                         old_preset = self.config_service.get_provider_preset(created["id"]) or {}
                         api_key = str((old_preset.get("config") or {}).get("api_key") or "")
                         break
+            provider_config["api_key"] = api_key
+
             preset_id = f"pp_{uuid.uuid4().hex[:10]}"
             preset = {
                 "id": preset_id,
                 "name": provider["preset_name"] or provider["provider"],
                 "provider": provider["provider"],
-                "config": {"api_base": provider["api_base"], "api_key": api_key},
+                "config": dict(provider_config),
                 "enabled": True,
-                "created_at": int(time.time()),
-                "updated_at": int(time.time()),
-            }
-            model_id = f"pm_{uuid.uuid4().hex[:10]}"
-            model = {
-                "id": model_id,
-                "preset_id": preset_id,
-                "model": provider["model"],
-                "provider_type": "chat",
-                "enabled": True,
-                "config": {},
                 "created_at": int(time.time()),
                 "updated_at": int(time.time()),
             }
             create_ops.append(ConfigOp("provider_preset", (preset_id,), preset))
-            create_ops.append(ConfigOp("provider_model", (model_id,), model))
             creates_meta.append({"kind": "provider_preset", "id": preset_id})
-            creates_meta.append({"kind": "provider_model", "id": model_id})
             creates.append({"kind": "provider_preset", "name": preset["name"]})
-            creates.append({"kind": "provider_model", "name": provider["model"]})
-            agent_patch["provider_preset_id"] = preset_id
-            agent_patch["provider_model_id"] = model_id
-            pool = [str(item) for item in (agent_config.get("provider_model_pool") or []) if str(item)]
-            if model_id not in pool:
-                pool.append(model_id)
-            agent_patch["provider_model_pool"] = pool
+
+            model_rows = provider.get("models") or [{"model": provider["model"]}]
+            pool: list[str] = [
+                str(item) for item in (agent_config.get("provider_model_pool") or []) if str(item)
+            ]
+            for model in model_rows:
+                model_id = f"pm_{uuid.uuid4().hex[:10]}"
+                model_config = dict(model.get("config") or {})
+                row = {
+                    "id": model_id,
+                    "preset_id": preset_id,
+                    "model": str(model.get("model") or provider["model"]),
+                    "provider_type": str(model.get("provider_type") or "chat"),
+                    "enabled": bool(model.get("enabled", True)),
+                    "config": model_config,
+                    "created_at": int(time.time()),
+                    "updated_at": int(time.time()),
+                }
+                create_ops.append(ConfigOp("provider_model", (model_id,), row))
+                creates_meta.append({"kind": "provider_model", "id": model_id})
+                creates.append({"kind": "provider_model", "name": row["model"]})
+                provider_models.append(row)
+                if model_id not in pool:
+                    pool.append(model_id)
+            if provider_models:
+                agent_patch["provider_preset_id"] = preset_id
+                agent_patch["provider_model_id"] = provider_models[0]["id"]
+                agent_patch["provider_model_pool"] = pool
 
         # 3) Agent 配置子集
         for source in manifest["components"]["agent"]:
@@ -152,6 +207,47 @@ class BundleApplier:
                 agent_patch.pop(key)
                 preserved.append(f"agent.{key}")
 
+        # 4) 模块：配置合并 + 启停（先算合并值，密钥稍后按声明写回）
+        module_patches: list[dict] = []
+        for module in manifest["components"]["modules"]:
+            capability = module["name"]
+            row = self.config_service.get_binding(capability, "account", account_id) or {}
+            merged = {**(row.get("config") or {})}
+            if module.get("source"):
+                incoming = _read_json(files, module["source"])
+                prev_module = prev_modules.get(capability) or {}
+                for key, value in incoming.items():
+                    if key in prev_module and (row.get("config") or {}).get(key) != prev_module[key]:
+                        preserved.append(f"module:{capability}.{key}")
+                        continue
+                    merged[key] = value
+            module_patches.append({
+                "capability": capability,
+                "row": row,
+                "merged": merged,
+                "enabled": bool(module.get("enabled", True)),
+            })
+
+        # 5) 密钥按声明键路径写回（v1 只认 providers[0].api_key，模块/Agent 密钥被静默丢弃）
+        for key, value in provided.items():
+            kind, target, field = _split_secret_key(key)
+            if not field:
+                continue
+            if kind == "agent":
+                agent_patch[field] = value
+            elif kind == "provider" and target == "0" and provider_config:
+                provider_config[field] = value
+            elif kind == "provider_model" and provider_models:
+                index = int(target)
+                if 0 <= index < len(provider_models):
+                    provider_models[index].setdefault("config", {})[field] = value
+            elif kind == "module":
+                for patch in module_patches:
+                    if patch["capability"] == target:
+                        patch["merged"][field] = value
+                        break
+
+        # 6) Agent 绑定 + 模块绑定写操作
         new_agent_config = {**agent_config, **agent_patch}
         ops: list[ConfigOp] = list(create_ops)
         bindings_snapshot = [
@@ -165,23 +261,14 @@ class BundleApplier:
         ))
         updates = [{"target": "agent", "keys": sorted(agent_patch)}]
 
-        # 4) 模块：配置合并 + 启停
         applied_modules: dict[str, dict] = {}
-        for module in manifest["components"]["modules"]:
-            capability = module["name"]
-            row = self.config_service.get_binding(capability, "account", account_id) or {}
-            merged = {**(row.get("config") or {})}
-            if module.get("source"):
-                incoming = _read_json(files, module["source"])
-                prev_module = prev_modules.get(capability) or {}
-                for key, value in incoming.items():
-                    if key in prev_module and (row.get("config") or {}).get(key) != prev_module[key]:
-                        preserved.append(f"module:{capability}.{key}")
-                        continue
-                    merged[key] = value
+        for patch in module_patches:
+            capability = patch["capability"]
+            row = patch["row"]
+            merged = patch["merged"]
             ops.append(ConfigOp(
                 "binding", (capability, "account", account_id),
-                {"enabled": bool(module.get("enabled", True)), "config": merged,
+                {"enabled": patch["enabled"], "config": merged,
                  "permission": dict(row.get("permission") or {}),
                  "priority": int(row.get("priority", 100))},
             ))
@@ -192,7 +279,7 @@ class BundleApplier:
             applied_modules[capability] = merged
             updates.append({"target": f"module:{capability}", "keys": sorted(merged)})
 
-        return {
+        plan = {
             "account_id": account_id,
             "bundle": {"id": manifest["id"], "name": manifest["name"], "version": manifest["version"]},
             "creates": creates,
@@ -200,11 +287,121 @@ class BundleApplier:
             "secrets_required": [
                 secret for secret in manifest.get("secrets", []) if secret.get("required", True)
             ],
-            "snapshot": {"bindings": bindings_snapshot, "created": creates_meta, "active_bundle": None},
+            "modules_to_install": self._pending_modules(manifest),
+            "snapshot": {
+                "bindings": bindings_snapshot,
+                "created": creates_meta,
+                "active_bundle": None,
+                "modules_installed": [],
+                "modules_upgraded": [],
+            },
             "applied": {"agent": new_agent_config, "modules": applied_modules},
             "preserved": preserved,
             "ops": ops,
         }
+        self._require_secrets(manifest, {
+            "provider_config": provider_config,
+            "provider_models": provider_models,
+            "agent": new_agent_config,
+            "modules": applied_modules,
+        })
+        return plan
+
+    def _pending_modules(self, manifest: dict) -> list[str]:
+        """随包且目标机缺/旧（应用时需要安装或升级）的模块名。"""
+        pending: list[str] = []
+        for module in manifest["requires"]["modules"]:
+            if not module.get("source"):
+                continue
+            current = str(self.installed_modules.get(module["name"]) or "")
+            if current and satisfies_version(current, module.get("version") or ""):
+                continue
+            pending.append(module["name"])
+        return pending
+
+    @staticmethod
+    def _require_secrets(manifest: dict, resolved: dict) -> None:
+        """必填密钥在"写回后的最终配置"里必须有值（否则应用出来的是半套）。"""
+        missing: list[str] = []
+        for secret in manifest.get("secrets", []):
+            if not secret.get("required", True):
+                continue
+            key = str(secret.get("key") or "")
+            kind, target, field = _split_secret_key(key)
+            value: Any = None
+            if kind == "provider":
+                value = (resolved.get("provider_config") or {}).get(field) if target == "0" else None
+            elif kind == "provider_model":
+                index = int(target)
+                models = resolved.get("provider_models") or []
+                if 0 <= index < len(models):
+                    value = (models[index].get("config") or {}).get(field)
+            elif kind == "agent":
+                value = (resolved.get("agent") or {}).get(field)
+            elif kind == "module":
+                value = (resolved.get("modules") or {}).get(target, {}).get(field)
+            if not str(value or "").strip():
+                missing.append(secret.get("label") or key or "(未命名密钥)")
+        if missing:
+            raise BundleError(
+                "BUNDLE_SECRET_MISSING",
+                f"缺少必填密钥：{'、'.join(missing)}",
+                "在应用对话框里填写这些密钥后重试（密钥不随包分发）",
+            )
+
+    # ==================== 模块安装 ====================
+
+    async def _install_modules(
+        self, manifest: dict, files: dict[str, bytes]
+    ) -> tuple[list[str], list[str]]:
+        """安装随包模块 → ``(新装, 升级)``；不需要安装时返回空列表。"""
+        targets = [
+            module for module in manifest["requires"]["modules"] if module.get("source")
+        ]
+        if not targets:
+            return [], []
+        if self.module_installer is None:
+            names = "、".join(module["name"] for module in targets)
+            raise BundleError(
+                "BUNDLE_MODULE_INSTALL_UNSUPPORTED",
+                f"当前实例不支持自动安装随包模块：{names}",
+                "先手动安装这些模块，或使用带模块安装能力的 WebUI",
+            )
+        installed: list[str] = []
+        upgraded: list[str] = []
+        for module in targets:
+            name = module["name"]
+            payload = files.get(module["source"])
+            if payload is None:
+                raise BundleError("BUNDLE_REF_MISSING", f"模块代码包不存在：{module['source']}")
+            current = str(self.installed_modules.get(name) or "")
+            if current and satisfies_version(current, module.get("version") or ""):
+                continue
+            try:
+                info = await self.module_installer.install(name, payload)
+            except Exception as e:  # noqa: BLE001 —— 安装异常统一转成套装错误码
+                raise BundleError(
+                    "BUNDLE_MODULE_INSTALL_FAILED",
+                    f"安装模块 {name} 失败：{e}",
+                    "检查模块包是否合法、文件是否被占用后重试",
+                ) from e
+            version = str((info or {}).get("version") or "")
+            self.installed_modules[name] = version or self.installed_modules.get(name, "")
+            (upgraded if current else installed).append(name)
+        return installed, upgraded
+
+    async def _uninstall_modules(self, names: list[str] | None) -> list[str]:
+        """卸载"本次新装"的模块（升级的不动：它可能是用户原本就有的模块）。"""
+        removed: list[str] = []
+        if self.module_installer is None:
+            return removed
+        for name in names or []:
+            try:
+                await self.module_installer.uninstall(name)
+                removed.append(name)
+            except Exception as e:  # noqa: BLE001 —— 单人卸载失败不能盖住回滚结果
+                self.config_service.log.warning(f"[Bundle] 回滚时卸载模块 {name} 失败: {e}")
+        return removed
 
     # ==================== 应用 ====================
 
@@ -239,8 +436,10 @@ class BundleApplier:
         )
         activation_id = f"act_{uuid.uuid4().hex[:12]}"
         now = int(time.time())
-        plan_public = {key: value for key, value in plan.items() if key not in ("ops",)}
-        plan_public["snapshot"] = plan["snapshot"]
+        plan_public = {
+            key: value for key, value in plan.items()
+            if key not in ("ops",) and not str(key).startswith("_")
+        }
 
         await db.execute(
             "INSERT INTO bundle_activations "
@@ -251,7 +450,20 @@ class BundleApplier:
         )
 
         applied = False
+        installed: list[str] = []
+        upgraded: list[str] = []
         try:
+            # 模块代码先落地：装不上就别写配置（避免"配置指向不存在的模块"）
+            installed, upgraded = await self._install_modules(manifest, files)
+            if installed or upgraded:
+                snapshot = dict(plan["snapshot"])
+                snapshot["modules_installed"] = list(installed)
+                snapshot["modules_upgraded"] = list(upgraded)
+                plan["snapshot"] = snapshot
+                await db.execute(
+                    "UPDATE bundle_activations SET snapshot_json = ? WHERE id = ?",
+                    (db.dumps(snapshot), activation_id),
+                )
             await self.config_service.apply_ops(plan["ops"])
             applied = True
             self._verify(account_id, manifest, plan)
@@ -285,13 +497,20 @@ class BundleApplier:
                     self.config_service.log.error(
                         f"[Bundle] 应用失败后回滚也失败，需人工检查: {restore_error}"
                     )
+            await self._uninstall_modules(installed)
             await db.execute(
                 "UPDATE bundle_activations SET status = ?, error = ?, finished_at = ? WHERE id = ?",
                 ("failed", str(e), int(time.time()), activation_id),
             )
             raise BundleError("BUNDLE_APPLY_FAILED", f"应用到账号失败（已回滚）：{e}") from e
 
-        return {"activation_id": activation_id, "status": "active", "plan": plan_public}
+        return {
+            "activation_id": activation_id,
+            "status": "active",
+            "plan": plan_public,
+            "modules_installed": installed,
+            "modules_upgraded": upgraded,
+        }
 
     async def _cleanup_superseded(self, previous: list[dict], current: list[dict]) -> list[str]:
         """升级后清理上一版本创建、且不再被任何账号引用的对象（用户后建的不在此列）。"""
@@ -363,6 +582,7 @@ class BundleApplier:
             return {"activation_id": activation_id, "status": "rolled_back", "restored": []}
 
         restored = await self._restore(snapshot)
+        removed_modules = await self._uninstall_modules(snapshot.get("modules_installed") or [])
         await db.execute(
             "UPDATE bundle_activations SET status = ?, finished_at = ? WHERE id = ?",
             ("rolled_back", int(time.time()), activation_id),
@@ -371,7 +591,12 @@ class BundleApplier:
             "DELETE FROM account_active_bundle WHERE account_id = ? AND activation_id = ?",
             (row["account_id"], activation_id),
         )
-        return {"activation_id": activation_id, "status": "rolled_back", "restored": restored}
+        return {
+            "activation_id": activation_id,
+            "status": "rolled_back",
+            "restored": restored,
+            "modules_uninstalled": removed_modules,
+        }
 
     async def _restore(self, snapshot: dict) -> list[str]:
         """按快照恢复：删除本套装创建的对象，并把绑定写回应用前的值。"""
