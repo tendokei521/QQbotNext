@@ -23,6 +23,24 @@ async def test_new_account_modules_off_but_agent_on(config_service):
     assert config_service.get_module_authority("agent", account_id)["enabled"] is True
 
 
+async def test_onebot_tools_module_is_on_for_new_accounts(config_service):
+    """「工具扩展」（OneBot 工具 / MCP）是新账号默认关的例外：装好就能用。"""
+    account_id = await config_service.add_bot({"id": "fresh", "ws_url": "ws://a"})
+
+    assert config_service.get_module_authority("llm_tools_extra", account_id)["enabled"] is True
+    # 其它业务模块仍然默认关（不能被这条例外带偏）
+    assert config_service.get_module_authority("llm_memory", account_id)["enabled"] is False
+
+
+async def test_onebot_tools_default_can_still_be_turned_off(config_service):
+    """默认开 ≠ 不能关：显式关闭仍然生效。"""
+    account_id = await config_service.add_bot({"id": "fresh", "ws_url": "ws://a"})
+
+    config_service.set_module_authority("llm_tools_extra", account_id, {"enabled": False})
+
+    assert config_service.get_module_authority("llm_tools_extra", account_id)["enabled"] is False
+
+
 async def test_explicit_switches_override_default(config_service):
     """用户显式打开/关闭的模块，不受账号默认值影响（两个方向都要能覆盖）。"""
     account_id = await config_service.add_bot({"id": "fresh", "ws_url": "ws://a"})

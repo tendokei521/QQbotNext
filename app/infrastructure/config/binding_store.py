@@ -31,6 +31,11 @@ _UNSET = object()
 #: （正是 P0 要消灭的「没反应」）。要静默请用 Agent 自己的开关。
 CORE_CAPABILITIES: tuple[str, ...] = ("agent",)
 
+#: 新账号「模块默认关」的例外：这些模块装好就该生效、且不产生对外副作用。
+#: 目前只有「工具扩展」（OneBot 工具 / MCP）：默认开启后模型才能用发送/查询类工具，
+#: 用户仍可在模块页随时关掉。
+DEFAULT_ENABLED_MODULES: tuple[str, ...] = ("llm_tools_extra",)
+
 
 class BindingStoreMixin:
     """作用域绑定（bindings）+ 群响应权策略（channel_policies）的读写与迁移。"""
@@ -412,6 +417,8 @@ class BindingStoreMixin:
         Agent 与全球层（``bot_id is None``）恒 True：它们是框架/全局语义，不是"某个新账号的模块"。
         """
         if bot_id is None or str(module) in CORE_CAPABILITIES:
+            return True
+        if str(module) in DEFAULT_ENABLED_MODULES:
             return True
         return self.get_modules_default_enabled(bot_id)
 

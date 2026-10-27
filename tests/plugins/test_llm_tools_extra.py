@@ -230,3 +230,9 @@ async def test_keys_overridable_by_module(key):
     await module.on_load()
     assert policy_get(runtime, "tools", key) == "module"
     await module.on_unload()
+
+
+def test_onebot_tools_enabled_by_default():
+    """OneBot 工具默认开启：装好即用（用户仍可在模块页关掉）。"""
+    assert Module.default_config["onebot_tools_enable"] is True
+    assert Module.config_schema["onebot_tools_enable"]["default"] is True

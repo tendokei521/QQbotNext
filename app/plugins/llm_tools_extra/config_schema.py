@@ -5,7 +5,7 @@ SCHEMA = {
         "type": "boolean",
         "label": "启用 OneBot 工具",
         "description": "把 OneBot API 暴露给模型（发消息/查群/撤回等），按下面的名单过滤",
-        "default": False,
+        "default": True,
     },
     "onebot_tools_allowed": {
         "type": "string_list",

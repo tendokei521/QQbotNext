@@ -47,12 +47,12 @@ class Module(BaseModule):
     category = "LLM"
     order = 70
     default_config = {
-        "onebot_tools_enable": False,
+        "onebot_tools_enable": True,
         "onebot_tools_allowed": [],
         "onebot_tools_denied": [],
         "onebot_tools_max_result": 2000,
         "onebot_tools_debug": False,
-    "onebot_tool_overrides": {},
+        "onebot_tool_overrides": {},
         "poke_cooldown_seconds": 20,
         "mcp_servers": [],
         "tool_result_directive_enable": True,
