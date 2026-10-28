@@ -61,6 +61,12 @@ LoginHandler = Callable[[BotConnection], Awaitable[None]]
 # 登录成功后记录账号快照（account_id, user_id, nickname）→ 返回是否发生变化
 AccountSaver = Callable[[str, Any, str], Awaitable[bool]]
 
+#: 单账号事件队列上限。超过它 = 模块/Agent 处理能力跟不上事件洪峰；
+#: 此时丢最旧事件（宁可丢旧消息，也不能让接收循环停住）。
+EVENT_QUEUE_MAXSIZE = 1024
+#: 队列丢弃告警的汇总间隔：每丢这么多条打一次 warning，避免洪峰时刷屏。
+EVENT_DROP_WARN_EVERY = 100
+
 
 class OneBotGateway(GatewayLifecycleMixin):
     def __init__(
@@ -98,6 +104,8 @@ class OneBotGateway(GatewayLifecycleMixin):
         self.lifecycle_hook_registry = None
         # 状态变化回调（BotService 注入）：conn, state, detail → 离线时停任务
         self.status_handler: Callable[[Any, str, str], Awaitable[None]] | None = None
+        # 事件队列丢弃计数（account_id → 本连接内累计丢弃条数；供告警与排查）
+        self.event_queue_drops: dict[str, int] = {}
 
     # ==================== 对外查询 ====================
     def get_last_account(self, account_id: str) -> dict | None:
@@ -471,7 +479,10 @@ class OneBotGateway(GatewayLifecycleMixin):
         # 耗时处理（模块调用 / 转发拉取 / LLM 触发）在 worker 串行执行。
         # 若不这样拆分，模块内 await API 响应（如 send_private_msg 等 echo）时，
         # 接收循环被阻塞、无法消费该响应 → 请求/响应自锁 → 10s 超时。
-        queue: asyncio.Queue = asyncio.Queue(maxsize=1024)  # 有界背压，防异常洪峰撑爆内存
+        # 有界队列 + 非阻塞入队：背压由「丢最旧」承担，接收循环永不等待
+        # （见 ``_enqueue_event``：await put 在队满时同样会卡死接收循环）。
+        queue: asyncio.Queue = asyncio.Queue(maxsize=EVENT_QUEUE_MAXSIZE)
+        self.event_queue_drops[key] = 0
         worker = asyncio.create_task(
             self._dispatch_worker(key, queue), name=f"dispatch_worker:{key}"
         )
@@ -534,7 +545,7 @@ class OneBotGateway(GatewayLifecycleMixin):
                     # 2. 解码为领域事件并入队处理（不阻塞接收循环）
                     event = decode(msg_dict, conn)
                     if isinstance(event, BaseEvent):
-                        await queue.put(event)
+                        self._enqueue_event(key, queue, event, bot_logger)
 
                 except Exception as e:
                     bot_logger.error(f"处理消息异常: {e}")
@@ -622,6 +633,35 @@ class OneBotGateway(GatewayLifecycleMixin):
             return "连接已结束（未收到关闭帧）"
         suffix = f" {reason}" if reason else ""
         return f"服务端关闭连接 (code={code}{suffix})"
+
+    def _enqueue_event(self, key: str, queue: asyncio.Queue, event: BaseEvent, bot_logger=None) -> bool:
+        """非阻塞入队；队满时丢最旧事件并汇总告警。返回是否发生了丢弃。
+
+        接收循环**绝不能**等待事件队列：一旦 ``await queue.put`` 在队满时停住，
+        同一连接上一条 API 响应就没人消费，``send_group_msg`` 等全部 echo 超时
+        （请求/响应自锁，表现为整个账号 10~60s 不可用）。因此这里用 ``put_nowait``，
+        把背压代价换成「丢弃最旧事件」——模块处理不过来时丢旧消息，远好于连接卡死。
+        """
+        try:
+            queue.put_nowait(event)
+            return False
+        except asyncio.QueueFull:
+            pass
+
+        # 队列满：腾出最旧的一条再放入新事件。消费者只有一个（_dispatch_worker），
+        # 它只会让队列更空，因此这里的第二次 put_nowait 不会被拒绝。
+        with contextlib.suppress(asyncio.QueueEmpty):
+            queue.get_nowait()
+        queue.put_nowait(event)
+
+        drops = self.event_queue_drops.get(key, 0) + 1
+        self.event_queue_drops[key] = drops
+        if drops == 1 or drops % EVENT_DROP_WARN_EVERY == 0:
+            (bot_logger or self.log).warning(
+                f"[Gateway] 事件队列已满（{EVENT_QUEUE_MAXSIZE}），已累计丢弃 {drops} 条最旧事件；"
+                "事件处理能力不足，请检查模块/Agent 是否阻塞"
+            )
+        return True
 
     async def _dispatch_worker(self, account_id: str, queue: asyncio.Queue) -> None:
         """串行处理该账号的事件队列，独立于接收循环。
