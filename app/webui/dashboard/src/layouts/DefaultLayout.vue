@@ -186,7 +186,16 @@ function botStatusText(status: BotStatus): string {
   return STATUS_TEXT[status]
 }
 
-const currentStatusText = computed(() => (bots.currentBot ? STATUS_TEXT[bots.currentBot.status] : '离线'))
+// 反向账号：监听已就绪但协议端还没连进来时，不能显示「连接中…」（会让人以为在连），
+// 应明确告诉用户在等协议端（与「账号管理」卡片口径一致）。
+const currentStatusText = computed(() => {
+  const bot = bots.currentBot
+  if (!bot) return '离线'
+  if (bot.conn_mode === 'reverse' && bot.status !== 'connected' && bot.listening) {
+    return '等待协议端接入'
+  }
+  return STATUS_TEXT[bot.status]
+})
 const isConnected = computed(() => bots.currentBot?.status === 'connected')
 const hasCurrentBot = computed(() => bots.currentId !== null)
 
