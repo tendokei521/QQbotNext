@@ -368,6 +368,8 @@ async function confirmZip() {
       await modules.installZip(file, !!zipPreview.value.conflict)
       notify.push(`插件 ${zipPreview.value.display_name || zipPreview.value.name} 安装成功`, 'success')
     }
+    // closeZipDialog 在安装中会直接 return：先复位标志再关，否则对话框不关、还能再点一次安装
+    zipInstalling.value = false
     closeZipDialog()
   } catch (err) {
     zipError.value = errorMessage(err)
@@ -970,7 +972,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           <v-btn
             color="primary"
             variant="tonal"
-            :disabled="!zipFile || !zipPreview || zipValidating || zipBlocked"
+            :disabled="!zipFile || !zipPreview || zipValidating || zipBlocked || zipInstalling"
             :loading="zipInstalling"
             @click="confirmZip"
           >
