@@ -653,14 +653,16 @@ def main(
         return rc
 
     # ---------- [4/4] 启动 ----------
-    # 环境检查全过 → 缓存结论，下次直接启动
-    save_cache(cache_key(
-        python,
-        dev=args.dev,
-        vector=args.vector,
-        groups=args.group,
-        python_version=venv_python_version(python, runner=runner),
-    ))
+    # 只有环境检查真的通过才缓存结论：--force-launch 时 rc 可能是 2/4，
+    # 写进缓存会让下次跳过检查，把"依赖不齐/版本不符"的环境当成已就绪。
+    if rc == EXIT_OK:
+        save_cache(cache_key(
+            python,
+            dev=args.dev,
+            vector=args.vector,
+            groups=args.group,
+            python_version=venv_python_version(python, runner=runner),
+        ))
     if not MAIN_SCRIPT.exists():
         print()
         print(f"  [FAIL] 缺少 {MAIN_SCRIPT.name}，仓库拷贝不完整")

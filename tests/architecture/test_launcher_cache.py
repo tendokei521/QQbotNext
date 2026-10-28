@@ -143,3 +143,48 @@ def test_recheck_flag_exists():
     args = launcher.parse_args(["--recheck"])
     assert args.recheck is True
     assert launcher.parse_args([]).recheck is False
+
+
+# ==================== 主流程：--force-launch 不写缓存 ====================
+
+
+class _Done:
+    def __init__(self, returncode: int, stdout: bytes = b"", stderr: bytes = b"") -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def test_force_launch_does_not_write_cache(tmp_path, monkeypatch):
+    """依赖不齐 + --force-launch：允许启动，但不得把"不齐"写进缓存。
+
+    缓存记的是「环境已就绪」这个结论。若强行启动后仍写缓存，下次打开 start.py
+    会命中缓存跳过检查，用户永远看不到依赖不齐的真实原因。
+    """
+    venv = tmp_path / "venv"
+    scripts = venv / ("Scripts" if launcher.IS_WINDOWS else "bin")
+    scripts.mkdir(parents=True)
+    python = scripts / ("python.exe" if launcher.IS_WINDOWS else "python3")
+    python.write_bytes(b"fake")
+    (venv / ("Lib" if launcher.IS_WINDOWS else "lib") / "site-packages").mkdir(parents=True)
+
+    cache_file = tmp_path / "cache.json"
+    monkeypatch.setenv("QQBOT_LAUNCHER_CACHE", str(cache_file))
+
+    def fake_runner(cmd, **kwargs):
+        joined = " ".join(str(item) for item in cmd)
+        if "check_deps.py" in joined:
+            return _Done(launcher.EXIT_DEPS)  # 依赖不齐
+        if "print(" in joined:  # venv_python_version
+            return _Done(0, stdout=b"3.12.1")
+        return _Done(0)
+
+    rc = launcher.main(
+        ["--venv", str(venv), "--force-launch", "--no-open"],
+        runner=fake_runner,
+        in_process=True,  # 不走 execv，交给假 runner 返回
+    )
+
+    assert rc == launcher.EXIT_OK, "假 runner 的启动返回码应为 0"
+    assert not cache_file.exists(), "--force-launch 启动后不得写启动缓存"
+
