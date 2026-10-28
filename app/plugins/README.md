@@ -27,7 +27,6 @@ app/plugins/<name>/
 
 | 插件 | 干什么 | 单一服务 |
 |---|---|---|
-| `astrbot_alignment` | 对齐 AstrBot 的组装方式（参考实现，带 `pages/`） | — |
 | `bilibili_parser` | 解析 B 站链接（视频/动态，含 wbi 签名） | ✓ |
 | `douyin_parser` | 解析抖音链接（含 abogus/xbogus 签名） | ✓ |
 | `df_password` | 定时推送密码（`service/` 子包，推荐范本） | ✓ |

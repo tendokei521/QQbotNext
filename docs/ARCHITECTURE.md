@@ -467,7 +467,7 @@ docs/                设计文档 + 本方案（见 §4）
 
 | 插件 | 内部是否有问题 |
 |---|---|
-| `astrbot_alignment` | ✅ 5 文件（module/config_schema/assembler/astrbot_prompts）结构合理 |
+| ~~`astrbot_alignment`~~ | 已删除（2026-10-28）：接管 assembly 后与 Agent 页「角色预设」冲突，详见对话记录 |
 | `bilibili_parser` | ✅ 9 文件，`bilibili_api`+`video`+`forward`+`wbi` 分层清楚 |
 | `df_password` | ✅ `service/` 子包（handler/fetch/essence/migrate）是**范本** |
 | `douyin_parser` | ✅ 11 文件，签名算法单独成文件 |
@@ -506,7 +506,7 @@ docs/                设计文档 + 本方案（见 §4）
 | `tests/infrastructure/` | `test_gateway*` `test_codec` `test_config*` `test_cache` `test_database` `test_account_runtime_binding` | ~10 |
 | `tests/application/` | `test_session_history*` `test_resource*` `test_role_preset*` `test_agent_manager` | ~6 |
 | `tests/webui/` | `test_webui*` `test_api_*` `test_dashboard*` | ~5 |
-| `tests/plugins/` | `test_bilibili*` `test_douyin*` `test_astrbot_alignment_plugin` `test_df_password*` `test_recall*` `test_sign*` `test_poke*` `test_emoji_reply*` `test_group_log*` | ~15 |
+| `tests/plugins/` | `test_bilibili*` `test_douyin*` `test_df_password*` `test_recall*` `test_sign*` `test_poke*` `test_emoji_reply*` `test_group_log*` | ~15 |
 | `tests/conftest.py` | 保留在根（pytest 自动发现） | — |
 
 **执行方式**：`git mv` 批量迁移 + 全局改相对 import 路径（`tests/` 内一般用绝对 import，

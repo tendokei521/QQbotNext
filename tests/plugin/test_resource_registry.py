@@ -228,16 +228,16 @@ async def test_module_schema_reaches_api_with_resource_field(container):
     registry = container.get(ModuleRegistry)
     registry.plugins_dir = Path(__file__).resolve().parents[2] / "app" / "plugins"
     bot_id = 20250930
-    assert await registry.load_single("astrbot_alignment", bot_id) is True
+    assert await registry.load_single("llm_knowledge", bot_id) is True
     try:
         data = container.get(BotService).get_modules_data(bot_id)
-        field = data["astrbot_alignment"]["config_schema"]["items"]["persona_preset_id"]
+        field = data["llm_knowledge"]["config_schema"]["items"]["knowledge_embedding_model_id"]
         assert field["type"] == "resource"
-        assert field["resource"] == "role_preset"
+        assert field["resource"] == "provider_model"
         assert field["issues"] == [], "种类必须已注册，否则界面会显示「资源种类未注册」"
-        assert field["source_module"] == "astrbot_alignment"
+        assert field["source_module"] == "llm_knowledge"
     finally:
-        await registry.unload_single("astrbot_alignment", bot_id)
+        await registry.unload_single("llm_knowledge", bot_id)
 
 
 # 旧版 UI（/legacy）与 static/js/widgets.js 的两个用例已随 P6 删除：
