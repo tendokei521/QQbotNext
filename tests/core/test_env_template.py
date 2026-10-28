@@ -62,6 +62,15 @@ def test_example_leaves_secrets_blank():
 
 # ==================== 首启生成完整 .env ====================
 
+def _env_path_text(value: Path | str) -> str:
+    """与 `env_template._value_text` 同口径：项目内路径写相对项目根，项目外写绝对。"""
+    path = Path(value)
+    try:
+        return path.relative_to(ROOT_DIR).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
 def test_creates_full_env_when_absent(tmp_path):
     env = tmp_path / ".env"
     settings = _settings(tmp_path)
@@ -76,7 +85,9 @@ def test_creates_full_env_when_absent(tmp_path):
     assert _assignment_keys(text) == list(TEMPLATE_KEYS)
     assert f"WEBUI_TOKEN={state.token}" in text
     # 生效值（不是模板示例值）：这里的 db_path 是临时目录
-    assert f"DB_PATH={Path(tmp_path / 'test.db').as_posix()}" in text
+    # 注意：测试环境的 tmp_path 可能落在项目根内（沙箱把系统临时目录设为不可写时），
+    # 此时生成器按设计写相对路径——断言必须跟同一套规则走，不能写死绝对路径。
+    assert f"DB_PATH={_env_path_text(tmp_path / 'test.db')}" in text
     # 就地更新 settings，WebUI 本次进程立即可用
     assert settings.webui_token == state.token
 
