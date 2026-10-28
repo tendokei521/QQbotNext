@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import http, { errorMessage, unwrap } from '@/api/http'
 import { onSocketMessage } from '@/api/socket'
 import { useBotsStore } from './bots'
@@ -320,6 +320,21 @@ export const useModulesStore = defineStore('modules', () => {
       useNotifyStore().push(`模块数据刷新失败：${errorMessage(err)}`, 'warning')
     })
   })
+
+  // 切账号：模块列表按账号加载。从账号管理新增账号、首启向导 selectBot 等路径不会经过
+  // DefaultLayout 的切号刷新，旧 modules 会残留 → 「功能插件」页展示上一个账号的开关。
+  // 与 policy/bundles/responder 同模式：清空旧数据并按新账号重拉。
+  watch(
+    () => bots.currentAccountId,
+    () => {
+      // 已同步到同一个账号 = 别处（DefaultLayout）已经发起过刷新，不重复请求
+      if (botId.value === bots.currentAccountId) return
+      modules.value = {}
+      load().catch((err) => {
+        useNotifyStore().push(`模块列表刷新失败：${errorMessage(err)}`, 'warning')
+      })
+    },
+  )
 
   return {
     modules,
