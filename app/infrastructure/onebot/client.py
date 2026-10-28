@@ -231,6 +231,8 @@ class BotConnection(IBot):
         # 用户主动「断开」后置位：监督循环不得把它自动连回来（只认意外掉线）。
         # 显式「连接 / 重连」或重新打开该账号的自动连接开关时复位。
         self.suppress_auto_reconnect = False
+        # 用户主动断开进行中：读循环收尾/僵尸扫描不得把它广播成 error
+        self._disconnecting = False
         # 每次「断开」自增：作废握手期间发起的 connect_bot（否则握手成功会把断开覆盖回连接）
         self.connect_epoch = 0
         # 出站拦截钩子（bootstrap 装配）：若设置，_send 先经出站节点链

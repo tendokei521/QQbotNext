@@ -341,6 +341,9 @@ class OneBotGateway(GatewayLifecycleMixin):
         key = str(account_id)
         conn = self.connections.get(key)
         if conn is not None:
+            # 标记「这是用户主动断开」：读循环/僵尸扫描的收尾不得把它广播成 error，
+            # 否则前端会看到 connected → error → disconnected 的错误闪烁。
+            conn._disconnecting = True
             if manual:
                 conn.suppress_auto_reconnect = True
                 self.log.info(
@@ -350,27 +353,31 @@ class OneBotGateway(GatewayLifecycleMixin):
             # 否则握手成功会把刚置好的断开状态覆盖回 connected。
             conn.connect_epoch = getattr(conn, "connect_epoch", 0) + 1
 
-        # 反向监听器随「断开」一并停掉：用户的断开语义包含「不再占端口等人接入」
-        await self.reverse_link.stop(key)
+        try:
+            # 反向监听器随「断开」一并停掉：用户的断开语义包含「不再占端口等人接入」
+            await self.reverse_link.stop(key)
 
-        task = self.bot_server_tasks.pop(key, None)
-        if task and not task.done():
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-        if conn:
-            if conn.websocket:
+            task = self.bot_server_tasks.pop(key, None)
+            if task and not task.done():
+                task.cancel()
                 try:
-                    await conn.websocket.close()
-                except Exception as e:
-                    self.log.warning(f"关闭 WebSocket 异常: {e}")
-                conn.websocket = None
-            await self._notify_status(conn, "disconnected")  # 先广播（保留 bot_id）
-            self._reset_conn_state(conn)
-            conn.status = "disconnected"
-            self.log.info(f"账号「{bot_label(conn)}」断开连接")
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            if conn:
+                if conn.websocket:
+                    try:
+                        await conn.websocket.close()
+                    except Exception as e:
+                        self.log.warning(f"关闭 WebSocket 异常: {e}")
+                    conn.websocket = None
+                await self._notify_status(conn, "disconnected")  # 先广播（保留 bot_id）
+                self._reset_conn_state(conn)
+                conn.status = "disconnected"
+                self.log.info(f"账号「{bot_label(conn)}」断开连接")
+        finally:
+            if conn is not None:
+                conn._disconnecting = False
 
     @staticmethod
     def _reset_conn_state(conn) -> None:
@@ -378,6 +385,7 @@ class OneBotGateway(GatewayLifecycleMixin):
         conn.bot_id = 0
         conn.login_info = {}
         conn.login_retrieved = False
+        conn._disconnecting = False
         conn.all_group_list = []
         conn.all_group_list_info = []
         fail_pending = getattr(conn, "fail_pending", None)
@@ -647,6 +655,11 @@ class OneBotGateway(GatewayLifecycleMixin):
         if ws is not None and conn.websocket is not None and conn.websocket is not ws:
             bot_logger.info("旧连接已结束（当前已有新连接接管），跳过状态收敛")
             return
+        if getattr(conn, "_disconnecting", False):
+            # 主动断开：状态收敛与广播由 disconnect_bot 统一负责（事件序列只应是
+            # connected → disconnected）。这里若照常收尾会先广播一次 error。
+            bot_logger.info("连接结束于用户主动断开，状态收敛交由 disconnect_bot 处理")
+            return
         text = f"WebSocket 连接结束: {reason}"
         if abnormal:
             bot_logger.error(text)
@@ -674,6 +687,10 @@ class OneBotGateway(GatewayLifecycleMixin):
         对端重启属于常态，显示成红色错误会让人以为配置坏了；``last_error`` 仍保留
         原因，排查信息不丢。其余情况（正向掉线 / 反向监听已停）按 ``error`` 处理。
         """
+        if getattr(conn, "_disconnecting", False):
+            # 与 _handle_connection_end 同一口径：主动断开期间的任何「掉线」判定
+            # （含 _sweep_zombies）都不得广播 error，交给 disconnect_bot 收尾。
+            return
         if is_reverse(self._conn_mode(conn)) and await self.reverse_link.mark_waiting(conn, reason):
             return
         conn.status = "error"
