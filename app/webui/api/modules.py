@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from zipfile import BadZipFile
 
@@ -487,7 +488,9 @@ async def validate_module_zip(
     registry = registry
     try:
         with _uploaded_zip(file) as tmp_path:
-            result = registry.validate_zip(tmp_path)
+            # 预检要解压整个 zip（大包几百 MB）：同步跑会占住事件循环，
+            # 这段时间 WS 收发全停，容易被对端判成掉线。
+            result = await asyncio.to_thread(registry.validate_zip, tmp_path)
     except (ValueError, BadZipFile, UnicodeDecodeError, OSError) as exc:
         return _install_error(exc)
     result = result or {}

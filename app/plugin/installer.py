@@ -220,7 +220,9 @@ class ZipPluginInstaller:
             target: Path | None = None
             backup: Path | None = None
             try:
-                root = self._extract(zip_path, staging_root)
+                # 解压是纯 CPU/IO 的同步活：大包（200MB/5000 文件）在事件循环里跑几秒，
+                # 会把 WS ping / 所有 Bot 的收发包一起卡住（对方以为掉线）。丢线程池执行。
+                root = await asyncio.to_thread(self._extract, zip_path, staging_root)
                 manifest = self._read_manifest_or_fail(root)
                 name = manifest.name
                 self._check_name(name)
@@ -248,7 +250,7 @@ class ZipPluginInstaller:
                         )
                     backup = self._backup_existing(name, target)
 
-                files = self._count_files(root)
+                files = await asyncio.to_thread(self._count_files, root)
                 try:
                     self._atomic_install(root, target)
                 except Exception:
@@ -278,7 +280,8 @@ class ZipPluginInstaller:
                     hint="检查 zip 是否完整、插件文件是否被占用，或重启后重试",
                 ) from e
             finally:
-                self._cleanup(staging_root)
+                # staging 里可能是整个已解压的包，rmtree 也不该占住事件循环
+                await asyncio.to_thread(self._cleanup, staging_root)
 
     def rollback(self, result: InstallResult) -> None:
         """安装成功但加载失败时回滚：删新版本、恢复备份（由注册表调用）。"""
