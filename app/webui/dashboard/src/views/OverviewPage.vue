@@ -105,8 +105,17 @@ async function connectCurrent() {
 }
 
 onMounted(() => {
-  if (!modules.list.length) modules.load()
-  if (!logs.logs.length) logs.refresh()
+  // 这两个 store 的加载可能 reject：不 catch 会冒到全局错误兜底（误报「页面出现异常」）
+  if (!modules.list.length) {
+    modules.load().catch((err) => {
+      notify.push(`功能插件加载失败：${errorMessage(err)}`, 'error')
+    })
+  }
+  if (!logs.logs.length) {
+    logs.refresh().catch((err) => {
+      notify.push(`日志加载失败：${errorMessage(err)}`, 'warning')
+    })
+  }
 })
 </script>
 

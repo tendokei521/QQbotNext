@@ -133,7 +133,14 @@ async function loadWithGroups() {
 }
 
 onMounted(async () => {
-  if (!bots.bots.length) await bots.fetchBots()
+  if (!bots.bots.length) {
+    // 账号列表加载失败不该冒成 unhandled rejection（全局会弹「页面出现异常」）
+    try {
+      await bots.fetchBots()
+    } catch (err) {
+      notify.push(`账号列表加载失败：${errorMessage(err)}`, 'error')
+    }
+  }
   await loadWithGroups()
 })
 
