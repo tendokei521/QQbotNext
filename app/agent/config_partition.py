@@ -61,7 +61,7 @@ UI_PAGES: tuple[UIPage, ...] = (
         id="basic",
         label="基础配置",
         order=10,
-        subtitle="响应场景与人格设定（模型参数在「Provider 预设 → 模型」里配）",
+        subtitle="选择在哪些场景回复，以及机器人用谁的人设",
         groups=(
             UIGroup("basic_switch", "响应场景", ("group_enable", "private_enable")),
             UIGroup(
@@ -77,7 +77,7 @@ UI_PAGES: tuple[UIPage, ...] = (
         id="permission",
         label="权限管理",
         order=20,
-        subtitle="响应权限档位、拥有者与管理者名册（群聊开关与回复规则在「权限与回复」）",
+        subtitle="谁能触发机器人：主人、管理员与权限规则",
         groups=(
             UIGroup("permission_role", "响应权限", ("permission",)),
             UIGroup(
@@ -93,7 +93,7 @@ UI_PAGES: tuple[UIPage, ...] = (
         id="behavior",
         label="对话行为",
         order=30,
-        subtitle="触发设置、消息抖动与回复打断",
+        subtitle="什么时候接话、连发消息与打断怎么处理",
         groups=(
             UIGroup("behavior_trigger", "触发设置", ("trigger_at", "trigger_keyword")),
             UIGroup(
@@ -112,7 +112,7 @@ UI_PAGES: tuple[UIPage, ...] = (
         id="session",
         label="会话管理",
         order=40,
-        subtitle="会话窗口、群聊历史注入与上下文压缩",
+        subtitle="回复带多少上下文，群聊历史怎么用",
         groups=(
             UIGroup(
                 "session_window",
