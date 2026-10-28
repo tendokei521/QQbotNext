@@ -283,6 +283,15 @@ const pluginSrc = computed(() => {
   return botId !== null ? `${base}?account_id=${botId}` : base
 })
 
+// 插件自定义页的高度跟随：整个页面只有一个 iframe，观察器复用一份，重载/卸载时替换或断开，
+// 以前每次 load 都 new 一个 ResizeObserver 挂在 iframe 上且从不 disconnect（反复刷新会泄漏）。
+let pluginRO: ResizeObserver | null = null
+
+function releasePluginObserver() {
+  pluginRO?.disconnect()
+  pluginRO = null
+}
+
 function resizePluginFrame(el: HTMLIFrameElement | null) {
   if (!el || !el.contentDocument) return
   try {
@@ -299,12 +308,12 @@ function resizePluginFrame(el: HTMLIFrameElement | null) {
 function onPluginLoad(e: Event) {
   const el = e.target as HTMLIFrameElement
   resizePluginFrame(el)
+  releasePluginObserver()
   try {
     const doc = el.contentDocument
     if (doc?.body) {
-      const ro = new ResizeObserver(() => resizePluginFrame(el))
-      ro.observe(doc.body)
-      ;(el as any).__pluginRO = ro
+      pluginRO = new ResizeObserver(() => resizePluginFrame(el))
+      pluginRO.observe(doc.body)
     }
   } catch {
     /* 跨域忽略 */
@@ -353,6 +362,7 @@ onBeforeUnmount(() => {
 })
 
 onUnmounted(() => {
+  releasePluginObserver()
   unregisterDraftFlush?.()
   unregisterDraftFlush = null
   if (autosaveTimer) clearTimeout(autosaveTimer)
