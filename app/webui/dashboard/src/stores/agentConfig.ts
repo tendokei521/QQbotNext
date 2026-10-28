@@ -238,11 +238,17 @@ export const useAgentConfigStore = defineStore('agentConfig', {
       this.scheduleSave()
     },
 
-    async save() {
+    /**
+     * 保存草稿；返回是否真的落盘成功。
+     *
+     * 失败原因仍由本 action 直接提示（红条），返回值只给「覆盖式操作」的调用方判断
+     * 能不能说「已应用」——以前这里内部吞错，调用方 await 完就无条件提示成功。
+     */
+    async save(): Promise<boolean> {
       this.cancelAutosave()
-      if (!this.dirty) return
+      if (!this.dirty) return true
       const targetBotId = this.pendingBotId ?? this.botId
-      if (targetBotId === null) return
+      if (targetBotId === null) return false
       const snapshotSeq = this.editSeq
       this.pendingBotId = null
       this.saveStatus = 'saving'
@@ -275,16 +281,18 @@ export const useAgentConfigStore = defineStore('agentConfig', {
           { params: { account_id: targetBotId } },
         )
         // 保存期间用户又改了：保持 dirty，等下一轮
-        if (this.editSeq !== snapshotSeq) return
+        if (this.editSeq !== snapshotSeq) return true
         this.dirty = false
         this.saveStatus = 'clean'
         const notify = useNotifyStore()
         notify.push('Agent 配置已保存', 'success')
+        return true
       } catch (err) {
-        if (this.editSeq !== snapshotSeq) return
+        if (this.editSeq !== snapshotSeq) return false
         this.saveStatus = 'error'
         const notify = useNotifyStore()
         notify.push(errorMessage(err), 'error')
+        return false
       }
     },
 
