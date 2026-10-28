@@ -248,7 +248,11 @@ export const useAgentConfigStore = defineStore('agentConfig', {
       this.cancelAutosave()
       if (!this.dirty) return true
       const targetBotId = this.pendingBotId ?? this.botId
-      if (targetBotId === null) return false
+      if (targetBotId === null) {
+        // 没有账号就没有落库归属：不要静默，也不要让调用方误以为保存成功
+        useNotifyStore().push('未选择账号，配置没有保存', 'warning')
+        return false
+      }
       const snapshotSeq = this.editSeq
       this.pendingBotId = null
       this.saveStatus = 'saving'
