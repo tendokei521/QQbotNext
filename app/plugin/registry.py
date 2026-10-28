@@ -296,12 +296,16 @@ class ModuleRegistry:
         bot_id: Any = None,
         bot: IBot | None = None,
         parent: BaseModule | None = None,
+        purge: bool = False,
     ) -> bool:
         """加载一个插件（含递归子模块）。
 
         自己只做**编排**；每道工序在 `app/plugin/loader.py`：
         装配 → 绑钩子 → 连数据源 → 激活。全部成功后才写 `_modules`——
         失败不留幽灵条目/半装配实例（P0-7/P0-8）。
+
+        ``purge=True`` 仅在显式热重载/覆盖安装时传：其它路径（按账号补实例、
+        启动装配）复用已导入的模块对象，避免同一插件被 exec 多遍。
         """
         if module_name.startswith(("_", ".")) or self._is_uninstalled(module_name):
             return False
@@ -336,6 +340,7 @@ class ModuleRegistry:
                 config_service=self.config_service,
                 services=self.services,
                 log=self.log,
+                purge=purge,
             )
             if instance is None:
                 self._record_load_error(module_name, "装配失败（入口文件/Module 类/清单不符合要求）")
@@ -374,7 +379,7 @@ class ModuleRegistry:
             child_name = f"{module_name}.{child_entry.name}"
             if bot_id in self._modules.get(child_name, {}):
                 continue
-            if await self.load_single(child_name, bot_id, bot, parent=instance):
+            if await self.load_single(child_name, bot_id, bot, parent=instance, purge=purge):
                 instance.children[child_entry.name] = self._modules[child_name][bot_id]
         return True
 
@@ -396,12 +401,14 @@ class ModuleRegistry:
         self.log.info(f"[Module] 模块预加载完成: {len(names)} 个")
         return len(names)
 
-    async def load_all(self, bot_id: Any = None, bot: IBot | None = None) -> int:
+    async def load_all(self, bot_id: Any = None, bot: IBot | None = None, *, purge: bool = False) -> int:
         """加载编目里所有可加载模块到指定 bot_id。
 
         启动路径请用 `discover()`：账号实例由 `BotService.ensure_accounts()` 装配，
         这里只负责"补齐缺失实例"（登录时按需、热重载时），所以**只在真的补了东西时
         记 debug**，不再每账号打一行 INFO。**不预建空 dict**：失败不留幽灵条目。
+
+        ``purge=True`` 供 `reload_all()` 使用：显式热重载要重新 exec 插件代码。
         """
         self._ensure_installed_dir()
         count = 0
@@ -410,7 +417,7 @@ class ModuleRegistry:
                 continue
             if bot_id in self._modules.get(entry.name, {}):
                 continue
-            if await self.load_single(entry.name, bot_id, bot):
+            if await self.load_single(entry.name, bot_id, bot, purge=purge):
                 count += 1
         if bot_id is None:
             self.log.info(f"[Module] 模块预加载完成: {count} 个新增")
@@ -430,11 +437,11 @@ class ModuleRegistry:
 
     async def reload_all(self, bot_id: Any = None, bot: IBot | None = None) -> int:
         await self.unload(bot_id)
-        return await self.load_all(bot_id, bot)
+        return await self.load_all(bot_id, bot, purge=True)
 
     async def reload_single(self, module_name: str, bot_id: Any = None, bot: IBot | None = None) -> bool:
         await self.unload_single(module_name, bot_id)
-        return await self.load_single(module_name, bot_id, bot)
+        return await self.load_single(module_name, bot_id, bot, purge=True)
 
     async def unload_single(self, module_name: str, bot_id: Any = None) -> None:
         bot_modules = self._modules.get(module_name)
@@ -550,7 +557,7 @@ class ModuleRegistry:
         保证"不会装上一个跑不起来的版本，也不会弄丢原来能跑的版本"。
         """
         targets: list[Any] = sorted(self._known_account_ids(), key=str) or [None]
-        failed = [bot_id for bot_id in targets if not await self.load_single(result.name, bot_id)]
+        failed = [bot_id for bot_id in targets if not await self.load_single(result.name, bot_id, purge=True)]
         if not failed:
             return
 
@@ -567,7 +574,7 @@ class ModuleRegistry:
             try:
                 await self.unload_single(result.name, bot_id)
                 if result.backup is not None:
-                    await self.load_single(result.name, bot_id)
+                    await self.load_single(result.name, bot_id, purge=True)
             except Exception as e:  # noqa: BLE001 —— 回滚后的恢复是尽力而为，不掩盖原始错误
                 self.log.warning(f"[Module] 回滚后重载旧版本失败（已忽略）: {e}")
         raise ModuleInstallError(

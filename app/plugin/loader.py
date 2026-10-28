@@ -107,8 +107,14 @@ def instantiate_module(
     config_service,
     services: ServiceAccess,
     log,
+    purge: bool = False,
 ) -> BaseModule | None:
-    """导入插件模块并实例化；类不合格/清单不可用时记日志并返回 None（不抛）。"""
+    """导入插件模块并实例化；类不合格/清单不可用时记日志并返回 None（不抛）。
+
+    ``purge=True`` 只给显式热重载/覆盖安装用：普通加载（每个账号各装配一份实例）
+    必须复用 ``sys.modules``，否则模块级单例与连接池会有 N 份（见
+    :func:`sync_module_cache`）。
+    """
     manifest = resolve_manifest(module_name, Path(module_path), source, log)
     if manifest is None:
         return None
@@ -120,8 +126,9 @@ def instantiate_module(
         )
         return None
 
-    purge_module_cache(module_name)
-    mod = import_plugin_module(module_name, module_path)
+    fingerprint, reuse = prepare_module_import(module_name, Path(module_path), force=purge)
+    mod = import_plugin_module(module_name, module_path, reuse=reuse)
+    _import_fingerprints[module_name] = fingerprint
     cls = getattr(mod, "Module", None)
     if cls is None:
         log.error(f"[Module] {module_name} 的入口文件里缺少 Module 类（应为 main.py）")
@@ -344,7 +351,7 @@ async def activate(instance: BaseModule, module_name: str, services: ServiceAcce
         log.warning(f"[Module] {module_name} Feature 接管异常: {e}")
 
 
-def import_plugin_module(module_name: str, module_path: Path):
+def import_plugin_module(module_name: str, module_path: Path, *, reuse: bool = False):
     """按**文件路径**加载插件包，返回它的入口模块（`main.py`，兼容旧 `module.py`）。
 
     为什么不用 `importlib.import_module("app.plugins.X.module")`：
@@ -357,9 +364,25 @@ def import_plugin_module(module_name: str, module_path: Path):
     内部一律用相对导入（`from .service import ...`），必须让它们能解析。
 
     兼容两种布局：包内有 `__init__.py`（正常情况）与没有（极简插件目录）。
+
+    ``reuse=True`` 时若合成包名已在 ``sys.modules`` 里则直接返回缓存模块——
+    多账号装配复用同一份代码，不重复 exec（模块级单例/连接池只有一份）。
     """
     pkg_name = f"qqbot_plugin_{module_name.replace('.', '_')}"
     init_file = module_path / "__init__.py"
+    entry_module_name: str | None = None
+    if init_file.is_file():
+        entry = resolve_entry_file(module_path)
+        entry_stem = entry.stem if entry is not None else Path(ENTRY_FILE).stem
+        entry_module_name = f"{pkg_name}.{entry_stem}"
+    if reuse and pkg_name in sys.modules:
+        if entry_module_name is not None:
+            cached_entry = sys.modules.get(entry_module_name)
+            if cached_entry is not None:
+                return cached_entry
+        else:
+            return sys.modules[pkg_name]
+
     if init_file.is_file():
         spec = importlib.util.spec_from_file_location(
             pkg_name, init_file, submodule_search_locations=[str(module_path)]
@@ -376,14 +399,45 @@ def import_plugin_module(module_name: str, module_path: Path):
     pkg = importlib.util.module_from_spec(spec)
     sys.modules[pkg_name] = pkg
     spec.loader.exec_module(pkg)
-    if init_file.is_file():
-        entry = resolve_entry_file(module_path)
-        entry_name = entry.stem if entry is not None else Path(ENTRY_FILE).stem
-        return importlib.import_module(f"{pkg_name}.{entry_name}")
+    if entry_module_name is not None:
+        return importlib.import_module(entry_module_name)
     return pkg
+
+
+#: 每个插件最近一次**成功导入**时的入口指纹：(绝对路径, mtime_ns, size)。
+#: 用途：普通加载复用 sys.modules，只在显式 reload/覆盖安装或入口文件真的变了时
+#: 才清缓存重新 exec；否则 N 个账号会各 exec 一遍插件——模块级单例/连接池各一份，
+#: isinstance 判定还会失效（同一份代码被定义成两个类对象）。
+_import_fingerprints: dict[str, tuple[str, int, int]] = {}
+
+
+def module_fingerprint(module_path: Path) -> tuple[str, int, int]:
+    """入口文件指纹（绝对路径 + mtime_ns + size）；取不到时返回空指纹（下次必然重导）。"""
+    entry = resolve_entry_file(module_path) or (module_path / "__init__.py")
+    try:
+        stat = entry.stat()
+    except OSError:
+        return ("", 0, 0)
+    return (str(entry.resolve()), stat.st_mtime_ns, stat.st_size)
+
+
+def prepare_module_import(
+    module_name: str, module_path: Path, *, force: bool = False
+) -> tuple[tuple[str, int, int], bool]:
+    """决定本次导入能否复用 sys.modules，返回 (应记录的指纹, 是否复用)。
+
+    - ``force=True``（reload_single / 覆盖安装）：无条件重新导入；
+    - 否则只有入口文件指纹变化才清缓存（用户手工更新插件后重新加载也能生效）。
+    """
+    fingerprint = module_fingerprint(module_path)
+    reuse = (not force) and _import_fingerprints.get(module_name) == fingerprint
+    if not reuse:
+        purge_module_cache(module_name)
+    return fingerprint, reuse
 
 
 def purge_module_cache(module_name: str) -> None:
     pkg_name = f"qqbot_plugin_{module_name.replace('.', '_')}"
     for key in [k for k in sys.modules if k == pkg_name or k.startswith(pkg_name + ".")]:
         del sys.modules[key]
+    _import_fingerprints.pop(module_name, None)
