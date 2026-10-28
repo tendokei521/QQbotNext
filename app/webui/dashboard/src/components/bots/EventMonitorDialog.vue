@@ -28,11 +28,15 @@ interface OnebotEvent {
   group_id?: string | number | null
   summary?: string
   raw?: unknown
+  /** 队列满被丢弃的事件（worker 没处理到） */
+  dropped?: boolean
 }
 
 const events = ref<OnebotEvent[]>([])
 const connected = ref(false)
 const listening = ref(false)
+// 队列满时被丢弃的事件数（洪峰/处理慢时能解释「为什么这里少了几条」）
+const drops = ref(0)
 const loading = ref(false)
 const loadError = ref('')
 const detail = ref<OnebotEvent | null>(null)
@@ -67,6 +71,7 @@ async function load(silent = false) {
     events.value = Array.isArray(res.data?.events) ? res.data.events : []
     connected.value = Boolean(res.data?.connected)
     listening.value = Boolean(res.data?.listening)
+    drops.value = Number(res.data?.drops || 0)
     loadError.value = ''
   } catch (err) {
     if (!silent) loadError.value = errorMessage(err)
@@ -226,6 +231,9 @@ onBeforeUnmount(stopPolling)
 
         <div class="d-flex align-center flex-wrap gap-2 mb-2">
           <span class="text-caption">最近 {{ events.length }} 条</span>
+          <v-chip v-if="drops > 0" size="x-small" color="warning" variant="tonal">
+            处理不过来，已丢弃 {{ drops }} 条
+          </v-chip>
           <v-spacer />
           <v-btn size="small" variant="text" prepend-icon="mdi-refresh" :loading="loading" @click="load()">刷新</v-btn>
           <v-btn size="small" variant="text" color="error" prepend-icon="mdi-delete-outline" :disabled="!events.length" @click="clearEvents">
@@ -245,7 +253,8 @@ onBeforeUnmount(stopPolling)
         <v-list v-else density="compact" class="event-list">
           <v-list-item v-for="item in [...events].reverse()" :key="item.seq" class="event-row" @click="detail = item">
             <template #prepend>
-              <v-chip size="x-small" :color="eventTypeColor(item.event_type)" variant="tonal">
+              <v-chip v-if="item.dropped" size="x-small" color="grey" variant="tonal" class="mr-1">未处理</v-chip>
+            <v-chip size="x-small" :color="eventTypeColor(item.event_type)" variant="tonal">
                 {{ eventTypeText(item.event_type) }}
               </v-chip>
             </template>
