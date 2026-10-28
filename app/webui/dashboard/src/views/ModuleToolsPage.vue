@@ -27,6 +27,7 @@ const notify = useNotifyStore()
 
 const tools = ref<ModuleTool[]>([])
 const loading = ref(false)
+const loadError = ref('')
 
 // 工具开关状态来自后端统一判定（/api/agent/tools），前端不再自算
 
@@ -57,11 +58,12 @@ async function toggleTool(tool: any) {
     tool.enabled = next
     tool.effective = next && (tool.ready ?? true)
   } catch (err) {
-    useNotifyStore().push(errorMessage(err), 'error')
+    notify.push(errorMessage(err), 'error')
   }
 }
 
 async function loadTools() {
+  loadError.value = ''
   if (!agent.botId) return
   loading.value = true
   try {
@@ -70,7 +72,8 @@ async function loadTools() {
     })
     tools.value = res.data.tools || []
   } catch (err) {
-    notify.push(errorMessage(err), 'error')
+    tools.value = []
+    loadError.value = errorMessage(err)
   } finally {
     loading.value = false
   }
@@ -132,6 +135,13 @@ watch(
         <v-chip v-if="tools.length" size="small">{{ tools.length }} 个</v-chip>
       </v-card-title>
       <v-card-text>
+        <v-alert v-if="loadError" type="error" variant="tonal" density="compact" class="mb-3">
+          <div class="d-flex align-center flex-wrap gap-2">
+            <span class="text-caption">{{ loadError }}</span>
+            <v-btn size="small" variant="text" prepend-icon="mdi-refresh" @click="loadTools">重试</v-btn>
+          </div>
+        </v-alert>
+
         <v-progress-linear v-if="loading" indeterminate color="primary" />
 
         <div class="tool-list">
@@ -168,8 +178,13 @@ watch(
               </div>
             </div>
           </template>
-          <div v-if="!tools.length && !loading" class="text-caption text-center pa-4" style="opacity: 0.55">
-            还没有模块提供工具。
+          <div
+            v-if="!tools.length && !loading && !loadError"
+            class="text-caption text-center pa-4"
+            style="opacity: 0.55"
+          >
+            <template v-if="!agent.botId">还没有账号。先在「账号」页添加一个 QQ 账号。</template>
+            <template v-else>还没有模块提供工具。</template>
           </div>
         </div>
       </v-card-text>
