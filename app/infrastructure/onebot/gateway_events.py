@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import time
 from collections import deque
 from typing import Any
@@ -43,8 +42,11 @@ def enqueue_event(
     account_id: str,
     drops: dict[str, int],
     logger: Any = None,
-) -> bool:
-    """非阻塞入队；队满时丢最旧事件并汇总告警。返回是否发生了丢弃。
+) -> Any:
+    """非阻塞入队；队满时丢最旧事件并汇总告警。
+
+    返回**被丢弃的最旧事件**（未丢弃返回 None），供调用方给诊断历史补
+    ``dropped`` 标记——否则洪峰下被丢的事件在诊断台完全看不到。
 
     接收循环**绝不能**等待事件队列：一旦 ``await queue.put`` 在队满时停住，
     同一连接上一条 API 响应就没人消费，``send_group_msg`` 等全部 echo 超时。
@@ -52,14 +54,15 @@ def enqueue_event(
     """
     try:
         queue.put_nowait(event)
-        return False
+        return None
     except asyncio.QueueFull:
         pass
 
     # 队列满：腾出最旧的一条再放入新事件。消费者只有一个（_dispatch_worker），
     # 它只会让队列更空，因此这里的第二次 put_nowait 不会被拒绝。
-    with contextlib.suppress(asyncio.QueueEmpty):
-        queue.get_nowait()
+    dropped = None
+    if not queue.empty():
+        dropped = queue.get_nowait()
     queue.put_nowait(event)
 
     count = drops.get(account_id, 0) + 1
@@ -69,7 +72,7 @@ def enqueue_event(
             f"[Gateway] 事件队列已满（{EVENT_QUEUE_MAXSIZE}），已累计丢弃 {count} 条最旧事件；"
             "事件处理能力不足，请检查模块/Agent 是否阻塞"
         )
-    return True
+    return dropped
 
 
 # ==================== 诊断台：最近收包事件 ====================
@@ -143,11 +146,15 @@ class EventHistory:
         self._buffers: dict[str, deque] = {}
         self._seq: dict[str, int] = {}
 
-    def record(self, account_id: str | None, event: Any) -> None:
-        """记一条事件（环形缓冲满了自动挤掉最旧的）。"""
+    def record(self, account_id: str | None, event: Any) -> dict:
+        """记一条事件（环形缓冲满了自动挤掉最旧的），返回该条记录。
+
+        返回的记录对象与缓冲里的是同一个 dict：调用方可在入队被背压丢弃时给它补
+        ``dropped=True`` 标记（供诊断台显示「收到了但没处理」）。
+        """
         key = str(account_id or "")
         if not key:
-            return
+            return {}
         raw = getattr(event, "raw", None)
         raw = raw if isinstance(raw, dict) else {}
         seq = self._seq.get(key, 0) + 1
@@ -160,7 +167,7 @@ class EventHistory:
         user_id = raw.get("user_id")
         if user_id is None:
             user_id = getattr(event, "user_id", None)
-        buffer.append({
+        record = {
             "seq": seq,
             "time": int(event_time),
             "event_type": _event_type_name(raw) if raw else str(getattr(event, "event_type", "") or "unknown"),
@@ -168,7 +175,9 @@ class EventHistory:
             "group_id": raw.get("group_id"),
             "summary": _message_summary(raw) if raw else "",
             "raw": raw,
-        })
+        }
+        buffer.append(record)
+        return record
 
     def recent(self, account_id: str, limit: int = 50) -> list[dict]:
         """最近 ``limit`` 条事件（按时间正序返回，最新的在末尾）。"""

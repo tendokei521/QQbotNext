@@ -6,6 +6,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+import time
+
 from app.domain.events import GroupMessageEvent
 from app.infrastructure.cache import Cache
 from app.infrastructure.onebot.client import BotConnection
@@ -139,24 +143,125 @@ def test_history_clear_resets_sequence():
     assert history.recent("main", 50)[0]["seq"] == 1, "清空后重新从 #1 计数"
 
 
-# ---------- 网关接线：_process_event 会留痕 ----------
+# ---------- 网关接线：接收循环入队前就留痕（含被背压丢弃的事件） ----------
 
 
-async def test_gateway_process_event_records_history():
-    """端到端：事件经 _process_event 后可从网关读到（诊断台 API 的数据源）。"""
+class _MessagesWs:
+    """投递若干条群消息后保持连接（供网关接收循环测试）。"""
+
+    def __init__(self, texts: list[str]) -> None:
+        self._texts = list(texts)
+        self.sent: list = []
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> str:
+        if self._texts:
+            text = self._texts.pop(0)
+            return json.dumps({
+                "post_type": "message", "message_type": "group",
+                "user_id": 100, "group_id": 999, "self_id": 1,
+                "time": int(time.time()),
+                "message": [{"type": "text", "data": {"text": text}}],
+            })
+        await asyncio.Event().wait()
+
+    async def send(self, data: str) -> None:
+        self.sent.append(data)
+
+    async def close(self) -> None:
+        pass
+
+
+def _gateway() -> OneBotGateway:
     gw = OneBotGateway(settings=_Settings(), cache=Cache())
-    conn = BotConnection()
+
+    async def _noop(conn):
+        return False
+
+    gw._get_login_info = _noop
+    gw._get_login_groups = _noop
+    return gw
+
+
+async def _wait(predicate, timeout: float = 2.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        await asyncio.sleep(0.01)
+    return predicate()
+
+
+async def test_gateway_receive_loop_records_history_before_dispatch():
+    """端到端：事件一进接收循环就进诊断历史（不必等 worker/派发完成）。"""
+    gw = _gateway()
+    conn = BotConnection(websocket=_MessagesWs(["诊断台能看到吗"]))
+    conn.account_id = "main"
+    conn.account_name = "主号"
+    gw.connections = {"main": conn}
+    # 派发故意卡住：历史记录不能依赖派发完成
+    blocked = asyncio.Event()
+
+    async def handler(event):  # pragma: no cover —— 只验证记录不依赖它
+        await blocked.wait()
+
+    gw.dispatch_handler = handler
+    task = asyncio.create_task(gw._bot_server("main"))
+    try:
+        assert await _wait(lambda: bool(gw.recent_events("main", 10))), "接收循环必须写入诊断历史"
+        record = gw.recent_events("main", 10)[0]
+        assert record["summary"] == "诊断台能看到吗"
+        assert record["event_type"] == "message.group"
+        assert gw.latest_group_id("main") == 999
+        assert "dropped" not in record
+    finally:
+        blocked.set()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    gw.clear_events("main")
+    assert gw.recent_events("main", 10) == []
+    assert gw.event_queue_drops.get("main") == 0
+    assert gw.recent_events("ghost", 10) == []
+
+
+async def test_queue_drop_marks_event_dropped_and_counts(monkeypatch):
+    """队列丢弃的事件也要留在诊断历史里，并带 dropped 标记（旧实现在 worker 记录 → 看不到）。"""
+    from app.infrastructure.onebot import gateway_events as events_module
+
+    monkeypatch.setattr(events_module, "EVENT_QUEUE_MAXSIZE", 1)
+    gw = _gateway()
+    conn = BotConnection(websocket=_MessagesWs(["m1", "m2", "m3"]))
     conn.account_id = "main"
     conn.account_name = "主号"
     gw.connections = {"main": conn}
 
-    await gw._process_event(_event(_raw(text="诊断台能看到吗")), conn, _NullLogger(), _NullLogger())
+    block = asyncio.Event()
 
-    records = gw.recent_events("main", 10)
-    assert len(records) == 1
-    assert records[0]["summary"] == "诊断台能看到吗"
-    assert gw.latest_group_id("main") == 999
+    async def handler(event):
+        await block.wait()  # 卡住 worker：接收循环继续收包 → 队列打满 → 丢最旧
 
-    gw.clear_events("main")
-    assert gw.recent_events("main", 10) == []
-    assert gw.recent_events("ghost", 10) == []
+    gw.dispatch_handler = handler
+    task = asyncio.create_task(gw._bot_server("main"))
+    try:
+        assert await _wait(lambda: gw.event_queue_drops.get("main", 0) > 0), "应发生背压丢弃"
+        records = gw.recent_events("main", 10)
+        summaries = [record["summary"] for record in records]
+        assert "m2" in summaries, "被丢弃的事件也必须先记入诊断历史"
+        dropped = [record for record in records if record.get("dropped")]
+        assert dropped, "被丢弃事件应带 dropped 标记"
+        assert any(record["summary"] == "m2" for record in dropped) or any(
+            record["summary"] == "m1" for record in dropped
+        ), f"dropped 标记应落在被挤掉的事件上: {records}"
+    finally:
+        block.set()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass

@@ -187,8 +187,10 @@ class OneBotGateway(GatewayLifecycleMixin):
         return self.event_history.recent(account_id, limit)
 
     def clear_events(self, account_id: str) -> None:
-        """清空该账号的收包事件历史。"""
-        self.event_history.clear(account_id)
+        """清空该账号的收包事件历史（含背压丢弃计数）。"""
+        key = str(account_id)
+        self.event_history.clear(key)
+        self.event_queue_drops[key] = 0
 
     def latest_group_id(self, account_id: str) -> int | None:
         """该账号最近一条群消息的群号（诊断台发送测试消息时缺省用）。"""
@@ -594,13 +596,18 @@ class OneBotGateway(GatewayLifecycleMixin):
                         bot_logger.debug(f"忽略无 post_type 的消息: {msg_dict}")
                         continue
 
-                    # 3. 解码为领域事件并入队处理（不阻塞接收循环）
+                    # 3. 解码为领域事件：**先记诊断历史，再入队**
+                    #    历史在接收循环内记（而非 worker 里）：这样洪峰下被队列丢弃的
+                    #    事件诊断台也能看到（会被补 dropped 标记），且慢 LLM 不影响记录。
                     event = decode(msg_dict, conn)
                     if isinstance(event, BaseEvent):
-                        enqueue_event(
-                            queue, event, account_id=key,
+                        record = self.event_history.record(key, event)
+                        dropped = enqueue_event(
+                            queue, (event, record), account_id=key,
                             drops=self.event_queue_drops, logger=bot_logger,
                         )
+                        if isinstance(dropped, tuple) and len(dropped) == 2 and isinstance(dropped[1], dict):
+                            dropped[1]["dropped"] = True  # 被背压挤掉：收到了但没处理
 
                 except Exception as e:
                     bot_logger.error(f"处理消息异常: {e}")
@@ -711,7 +718,9 @@ class OneBotGateway(GatewayLifecycleMixin):
         bot_logger = self.log.add_info(bot_label(conn))
         recv_logger = self.log.prefix(f"Recv][{bot_label(conn)}")
         while True:
-            event = await queue.get()
+            item = await queue.get()
+            # 队列里是 (event, 诊断记录) 元组：记录已由接收循环写入历史
+            event = item[0] if isinstance(item, tuple) else item
             try:
                 await self._process_event(event, conn, bot_logger, recv_logger)
             except asyncio.CancelledError:
@@ -726,10 +735,9 @@ class OneBotGateway(GatewayLifecycleMixin):
 
         不做跨账号去重：每个账号独立处理自己收到的消息（多账号同群时各自按
         自己的触发规则决定是否回复），避免"消息被其它账号吞掉后无人响应"。
+
+        诊断历史在接收循环入队前就已记录（见 ``_bot_server``），这里只做处理。
         """
-        # 诊断台：先留痕（原始事件），再做转发拉取/日志/派发——保证「协议端到底
-        # 有没有送进来」这条线索不受后续处理（忽略、异常、慢 LLM）影响。
-        self.event_history.record(getattr(conn, "account_id", None), event)
         # 转发消息拉取
         if isinstance(event, MessageEvent) and event.event_type in ("message_group", "message_private"):
             event = await self._attach_forward_msg(event, conn)

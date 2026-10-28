@@ -53,6 +53,8 @@ class _FakeGateway:
         self.events: list[dict] = []
         self.latest_group: int | None = None
         self.cleared = False
+        # 诊断台 GET 的 drops 字段数据源（当前连接内背压丢弃条数）
+        self.event_queue_drops: dict[str, int] = {}
 
     def recent_events(self, account_id: str, limit: int = 50) -> list[dict]:
         return self.events[-limit:]
@@ -60,6 +62,7 @@ class _FakeGateway:
     def clear_events(self, account_id: str) -> None:
         self.cleared = True
         self.events = []
+        self.event_queue_drops[account_id] = 0
 
     def latest_group_id(self, account_id: str) -> int | None:
         return self.latest_group
@@ -105,14 +108,30 @@ def test_events_contract_fields(client):
 
     assert resp.status_code == 200
     body = resp.json()
-    assert set(body) == {"events", "listening", "connected", "account"}
+    assert set(body) == {"events", "listening", "connected", "drops", "account"}
     assert body["connected"] is True
     assert body["listening"] is False
+    assert body["drops"] == 0
     assert body["account"] == {"id": "main", "name": "主号"}
     event = body["events"][0]
     assert set(event) >= {"seq", "time", "event_type", "user_id", "group_id", "summary", "raw"}
     assert event["event_type"] == "message.group"
     assert event["raw"] == {"post_type": "message"}
+
+
+def test_events_exposes_drops_and_dropped_flag(client):
+    """背压丢弃要对排查可见：drops 计数 + 事件上的 dropped 标记。"""
+    test_client, gateway, _ = client
+    gateway.event_queue_drops = {"main": 3}
+    gateway.events = [
+        {"seq": 1, "time": 1, "event_type": "message.group", "user_id": 1, "group_id": 2,
+         "summary": "被挤掉", "raw": {"post_type": "message"}, "dropped": True},
+    ]
+
+    body = test_client.get("/api/bots/main/events").json()
+
+    assert body["drops"] == 3
+    assert body["events"][0]["dropped"] is True
 
 
 def test_events_unknown_account_404(client):

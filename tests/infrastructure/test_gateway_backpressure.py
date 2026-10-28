@@ -144,14 +144,15 @@ async def test_queue_full_does_not_block_api_response():
 
 
 async def test_enqueue_drops_oldest_and_counts():
-    """队列满 → 丢最旧一条，保留最新事件，并累计丢弃计数 + 汇总告警。"""
+    """队列满 → 丢最旧一条（并把它返回，供诊断历史标记 dropped），累计计数+告警。"""
     log = _NullLogger()
     queue: asyncio.Queue = asyncio.Queue(maxsize=2)
     drops: dict[str, int] = {}
 
-    assert enqueue_event(queue, "e1", account_id="main", drops=drops, logger=log) is False
-    assert enqueue_event(queue, "e2", account_id="main", drops=drops, logger=log) is False
-    assert enqueue_event(queue, "e3", account_id="main", drops=drops, logger=log) is True
+    assert enqueue_event(queue, "e1", account_id="main", drops=drops, logger=log) is None
+    assert enqueue_event(queue, "e2", account_id="main", drops=drops, logger=log) is None
+    assert enqueue_event(queue, "e3", account_id="main", drops=drops, logger=log) == "e1", \
+        "队满时必须返回被丢掉的最旧项（诊断台据此标记 dropped）"
 
     assert queue.qsize() == 2
     assert queue.get_nowait() == "e2", "队满时必须丢最旧事件，而不是阻塞或丢新事件"

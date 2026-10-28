@@ -281,7 +281,11 @@ async def api_bot_events(
     bot_service=Depends(get_bot_service),
     config_service=Depends(get_config_service),
 ):
-    """诊断台：该账号最近收到的原始事件（协议端到底有没有把事件送进来）。"""
+    """诊断台：该账号最近收到的原始事件（协议端到底有没有把事件送进来）。
+
+    ``drops``：当前连接内因事件队列背压被丢弃的条数（>0 说明处理能力跟不上，
+    诊断台里那些 ``dropped=true`` 的事件就是「收到了但没进处理链」）。
+    """
     name, error = _account_or_404(account_id, bot_service, config_service)
     if error is not None:
         return error
@@ -295,6 +299,7 @@ async def api_bot_events(
         "events": events,
         "listening": bool(conn is not None and gateway.reverse_link.listening(str(account_id))),
         "connected": bool(conn is not None and conn.status == "connected"),
+        "drops": int(gateway.event_queue_drops.get(str(account_id), 0) or 0),
         "account": {"id": str(account_id), "name": name},
     })
 
