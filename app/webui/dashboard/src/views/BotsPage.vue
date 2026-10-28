@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, reactive, ref } from 'vue'
-import { useBotsStore, displayName, resolveAccount, resolvedBotId, type BotConfig, type BotConnMode, type BotStatus } from '@/stores/bots'
+import { useBotsStore, displayName, resolveAccount, resolvedBotId, type BotConfig, type BotConnMode, type BotData, type BotStatus } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
@@ -40,6 +40,9 @@ const loadingCards = ref(false)
 const deleteTarget = ref<string | null>(null)
 const addDialog = ref(false)
 const acting = reactive<Record<string, boolean>>({})
+/** 批量连接/断开：串行执行，按钮上显示进度，结束后汇总失败项 */
+const batchBusy = ref<'connect' | 'disconnect' | ''>('')
+const batchProgress = reactive({ done: 0, total: 0 })
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
 function draftOf(id: string) {
@@ -195,12 +198,59 @@ async function act(accountId: string, kind: 'connect' | 'disconnect' | 'reconnec
     if (kind === 'connect') await bots.connect(accountId)
     else if (kind === 'disconnect') await bots.disconnect(accountId)
     else await bots.reconnect(accountId)
-    notify.push(kind === 'connect' ? '已连接' : kind === 'disconnect' ? '已断开' : '已重连', 'success')
+    notify.push(
+      kind === 'connect' ? '已发送连接请求' : kind === 'disconnect' ? '已断开' : '已发送重连请求',
+      'success',
+    )
     await bots.fetchBots()
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   } finally {
     acting[accountId] = false
+  }
+}
+
+/** 账号是否已经「连着」：反向模式监听就绪也算，避免批量连接把已在等待的账号再连一遍 */
+function isLive(b: BotData): boolean {
+  return b.status === 'connected' || (b.conn_mode === 'reverse' && !!b.listening)
+}
+
+/** 批量连接/断开：逐个串行调用，失败不打断，最后汇总提示 */
+async function batchAct(kind: 'connect' | 'disconnect') {
+  if (batchBusy.value) return
+  const targets = bots.bots.filter((b) => (kind === 'connect' ? !isLive(b) : isLive(b)))
+  if (!targets.length) {
+    notify.push(kind === 'connect' ? '所有账号都已经连接' : '所有账号都已经断开', 'info')
+    return
+  }
+  const verb = kind === 'connect' ? '连接' : '断开'
+  batchBusy.value = kind
+  batchProgress.total = targets.length
+  batchProgress.done = 0
+  const failed: string[] = []
+  for (const b of targets) {
+    acting[b.id] = true
+    try {
+      if (kind === 'connect') await bots.connect(b.id)
+      else await bots.disconnect(b.id)
+    } catch (err) {
+      failed.push(`${displayName(b)}：${errorMessage(err)}`)
+    } finally {
+      acting[b.id] = false
+      batchProgress.done += 1
+    }
+  }
+  batchBusy.value = ''
+  try {
+    await bots.fetchBots()
+  } catch {
+    // 状态刷新失败不影响本批结果，下次刷新会补齐
+  }
+  if (failed.length) {
+    const shown = failed.slice(0, 2).join('；')
+    notify.push(`${verb}完成，${failed.length} 个失败：${shown}${failed.length > 2 ? '…' : ''}`, 'warning')
+  } else {
+    notify.push(kind === 'connect' ? '全部连接请求已发送' : '全部已断开', 'success')
   }
 }
 
@@ -227,6 +277,31 @@ onUnmounted(() => {
           保存所有配置
         </v-btn>
       </div>
+    </div>
+
+    <div v-if="bots.bots.length" class="d-flex align-center flex-wrap gap-2 mb-3">
+      <span class="text-caption text-medium-emphasis">
+        共 {{ bots.bots.length }} 个账号，已连接 {{ bots.connectedCount }} 个
+      </span>
+      <v-spacer />
+      <v-btn
+        size="small"
+        variant="tonal"
+        prepend-icon="mdi-plug"
+        :disabled="!!batchBusy"
+        @click="batchAct('connect')"
+      >
+        {{ batchBusy === 'connect' ? `连接中 ${batchProgress.done}/${batchProgress.total}` : '全部连接' }}
+      </v-btn>
+      <v-btn
+        size="small"
+        variant="tonal"
+        prepend-icon="mdi-unlink"
+        :disabled="!!batchBusy"
+        @click="batchAct('disconnect')"
+      >
+        {{ batchBusy === 'disconnect' ? `断开中 ${batchProgress.done}/${batchProgress.total}` : '全部断开' }}
+      </v-btn>
     </div>
 
     <v-row v-if="loadingCards && bots.bots.length === 0">
