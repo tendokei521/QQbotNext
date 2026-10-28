@@ -32,7 +32,7 @@ const lightTheme = {
     'input-border': '#787878',
     'container-bg': '#fffffff4',
     surface: '#fff',
-    'on-surface-variant': '#fff',
+    'on-surface-variant': '#444444',
     background: '#ffffff',
     overlay: '#ffffffaa',
     'code-bg': '#ececec',
