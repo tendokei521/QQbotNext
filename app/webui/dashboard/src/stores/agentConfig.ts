@@ -15,6 +15,12 @@ export interface StreamPreset {
 /** 自动保存去抖时长（毫秒） */
 const AUTOSAVE_DEBOUNCE_MS = 2000
 
+/**
+ * 配置加载请求序号：快速切账号 / 连续 load() 时丢弃过期响应。
+ * 否则先发出的「旧账号」响应后到，会把新账号的配置/草稿盖掉。
+ */
+let loadSeq = 0
+
 /** 模块拥有的配置键 → 归属模块名。与后端 `MODULE_KEYS` 对应，
  * 仅用于把保存请求分流到对应模块的配置接口。 */
 const MODULE_OWNED_FIELDS: Record<string, string> = {
@@ -91,6 +97,7 @@ export const useAgentConfigStore = defineStore('agentConfig', {
     },
 
     async load(force = false) {
+      const seq = ++loadSeq
       const bots = useBotsStore()
       if (!bots.bots.length) {
         try {
@@ -99,6 +106,8 @@ export const useAgentConfigStore = defineStore('agentConfig', {
           /* 列表加载失败时由页面显示空态 */
         }
       }
+      // 期间又发起了新的 load：本次直接作废（别用旧账号的数据覆盖新的）
+      if (seq !== loadSeq) return
       if (bots.currentId === null && bots.bots.length) {
         bots.restoreSelection()
       }
@@ -106,6 +115,7 @@ export const useAgentConfigStore = defineStore('agentConfig', {
 
       // 先把旧 Bot 的改动落盘，再切换/重载，避免静默丢失编辑
       await this.flush()
+      if (seq !== loadSeq) return
 
       this.botId = botId
       if (botId === null) {
@@ -134,6 +144,7 @@ export const useAgentConfigStore = defineStore('agentConfig', {
           provider_models: { id: string; preset_id: string; preset_name?: string; model: string }[]
           stream_presets?: Record<string, StreamPreset>
         }>('/api/agent/config', { params: { account_id: botId } })
+        if (seq !== loadSeq) return
         const data = res.data
         this.enabled = !!data.enabled
         this.schema = data.schema || {}
@@ -158,10 +169,11 @@ export const useAgentConfigStore = defineStore('agentConfig', {
         this.editSeq = 0
         this.loadError = ''
       } catch (err) {
+        if (seq !== loadSeq) return
         // 加载失败**不弹红条**：未连接/账号刚建好都可能出现瞬时失败，页面用 loadError 提示即可
         this.loadError = errorMessage(err)
       } finally {
-        this.loading = false
+        if (seq === loadSeq) this.loading = false
       }
     },
 
