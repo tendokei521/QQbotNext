@@ -63,11 +63,17 @@ class GatewayLifecycleMixin:
     async def _mark_offline(self, conn, reason: str) -> None:  # pragma: no cover
         raise NotImplementedError
 
+    async def _notify_status(self, conn, state: str, detail: str = "") -> None:  # pragma: no cover
+        raise NotImplementedError
+
     async def _get_login_info(self, conn) -> bool:  # pragma: no cover
         raise NotImplementedError
 
     async def _get_login_groups(self, conn) -> bool:  # pragma: no cover
         raise NotImplementedError
+
+    #: 反向监听器管理（由网关构造时注入，收尾/掉线态需要使用）
+    reverse_link: Any
 
     @staticmethod
     def _reset_conn_state(conn) -> None:  # pragma: no cover
@@ -206,6 +212,89 @@ class GatewayLifecycleMixin:
             "下一条事件到达时会再试（定时任务/主动消息在取到前不启动）"
         )
         return False
+
+    # ==================== 连接收尾 ====================
+    async def _handle_connection_end(
+        self, conn, reason: str, bot_logger, *, abnormal: bool, ws: Any = None
+    ) -> None:
+        """连接结束的统一收尾：留痕 → 置掉线态 → 广播 → 清 ws → 在途请求立即失败。
+
+        异常断线（ConnectionClosedError 等）与正常关闭（1000）**必须**走同一套收尾：
+        前者由 ``except`` 分支触发，后者由 ``async for`` 正常退出的 ``else`` 分支触发。
+        少了后者就是「僵尸连接」——状态仍 connected，监督循环永远不重连。
+
+        ``ws`` 是**本次**结束的连接：反向模式下同一账号可能已被新连接接管，
+        此时这条旧连接的收尾不得再改状态、更不得关闭新连接（否则新连接刚接上就被掐死）。
+        """
+        if ws is not None and conn.websocket is not None and conn.websocket is not ws:
+            bot_logger.info("旧连接已结束（当前已有新连接接管），跳过状态收敛")
+            return
+        if getattr(conn, "_disconnecting", False):
+            # 主动断开：状态收敛与广播由 disconnect_bot 统一负责（事件序列只应是
+            # connected → disconnected）。这里若照常收尾会先广播一次 error。
+            bot_logger.info("连接结束于用户主动断开，状态收敛交由 disconnect_bot 处理")
+            return
+        text = f"WebSocket 连接结束: {reason}"
+        if abnormal:
+            bot_logger.error(text)
+        else:
+            # 正常关闭是服务端主动行为（重启/下线）：必须留痕（否则无从发现），
+            # 但用 WARNING，不必惊动 errors.log
+            bot_logger.warning(text)
+        await self._mark_offline(conn, reason)
+        target = conn.websocket if ws is None else ws
+        if target is not None:
+            try:
+                await target.close()
+            except Exception as e:
+                # 关闭失败仅记 debug：连接随后会被置空并由监督循环重建，但留痕便于排查
+                bot_logger.debug(f"[Gateway] 关闭已结束的连接失败（已忽略）: {e}")
+            if conn.websocket is target:
+                conn.websocket = None
+        # 清空登录态 + 让在途 API 请求立即失败（与 disconnect_bot 一致）
+        self._reset_conn_state(conn)
+
+    async def _mark_offline(self, conn, reason: str) -> None:
+        """把账号置为「掉线」态并广播。
+
+        反向模式且监听器仍在监听时状态是 ``connecting``（等 OneBot 实现重新接入）：
+        对端重启属于常态，显示成红色错误会让人以为配置坏了；``last_error`` 仍保留
+        原因，排查信息不丢。其余情况（正向掉线 / 反向监听已停）按 ``error`` 处理。
+        """
+        if getattr(conn, "_disconnecting", False):
+            # 与 _handle_connection_end 同一口径：主动断开期间的任何「掉线」判定
+            # （含 _sweep_zombies）都不得广播 error，交给 disconnect_bot 收尾。
+            return
+        if is_reverse(self._conn_mode(conn)) and await self.reverse_link.mark_waiting(conn, reason):
+            return
+        conn.status = "error"
+        conn.last_error = reason
+        await self._notify_status(conn, "error", reason)
+
+    @staticmethod
+    def _close_reason(ws) -> str:
+        """正常关闭的可读原因：带上 close_code/close_reason，便于定位是哪一端关的。"""
+        code = getattr(ws, "close_code", None)
+        reason = getattr(ws, "close_reason", None)
+        if code is None:
+            return "连接已结束（未收到关闭帧）"
+        suffix = f" {reason}" if reason else ""
+        return f"服务端关闭连接 (code={code}{suffix})"
+
+    @staticmethod
+    def _reset_conn_state(conn) -> None:
+        """断开后清空登录态，并让在途 API 请求立即失败（避免调用方阻塞至超时）。"""
+        conn.bot_id = 0
+        conn.login_info = {}
+        conn.login_retrieved = False
+        login_event = getattr(conn, "login_event", None)
+        if login_event is not None:
+            login_event.clear()  # 断开后等待方必须重新等下一次登录
+        conn.all_group_list = []
+        conn.all_group_list_info = []
+        fail_pending = getattr(conn, "fail_pending", None)
+        if fail_pending:
+            fail_pending()
 
     # ==================== 监督 ====================
     async def _supervise(self) -> None:

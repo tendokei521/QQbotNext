@@ -65,6 +65,9 @@ AccountSaver = Callable[[str, Any, str], Awaitable[bool]]
 #: 同时进行的连接建立（正向握手 / 反向起监听）上限。多个账号一起掉线时，
 #: 无上限并发会让所有连接挤在一起互相拖慢（每个最长数秒超时）。
 CONNECT_CONCURRENCY = 3
+#: 网关关停/断开的等待上限（秒）：读循环、后台 worker、监督循环都只等这么久，
+#: 超时只告警不无限挂住（关停是 best-effort，不能被一个卡死的任务拖住整个进程）。
+GATEWAY_SHUTDOWN_TIMEOUT = 5.0
 
 
 class OneBotGateway(GatewayLifecycleMixin):
@@ -391,46 +394,50 @@ class OneBotGateway(GatewayLifecycleMixin):
             conn.connect_epoch = getattr(conn, "connect_epoch", 0) + 1
 
         try:
-            # 反向监听器随「断开」一并停掉：用户的断开语义包含「不再占端口等人接入」
-            await self.reverse_link.stop(key)
-
-            task = self.bot_server_tasks.pop(key, None)
-            if task and not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-            if conn:
-                if conn.websocket:
-                    try:
-                        await conn.websocket.close()
-                    except Exception as e:
-                        self.log.warning(f"关闭 WebSocket 异常: {e}")
-                    conn.websocket = None
-                await self._notify_status(conn, "disconnected")  # 先广播（保留 bot_id）
-                self._reset_conn_state(conn)
-                conn.status = "disconnected"
-                self.log.info(f"账号「{bot_label(conn)}」断开连接")
+            try:
+                # 反向监听器随「断开」一并停掉：用户的断开语义包含「不再占端口等人接入」
+                await self.reverse_link.stop(key)
+            except Exception as e:  # noqa: BLE001 —— 停监听失败也必须继续收尾，但必须留痕
+                self.log.warning(f"账号「{bot_label(conn) if conn else key}」停止反向监听失败（继续收尾）: {e}")
+            await self._cancel_bot_server_task(key, conn)
         finally:
+            # 收尾必须 best-effort：任何一步失败都不能漏掉关 ws / 复位状态 / 广播
             if conn is not None:
-                conn._disconnecting = False
+                await self._finalize_disconnect(conn)
 
-    @staticmethod
-    def _reset_conn_state(conn) -> None:
-        """断开后清空登录态，并让在途 API 请求立即失败（避免调用方阻塞至超时）。"""
-        conn.bot_id = 0
-        conn.login_info = {}
-        conn.login_retrieved = False
-        conn._disconnecting = False
-        login_event = getattr(conn, "login_event", None)
-        if login_event is not None:
-            login_event.clear()  # 断开后等待方必须重新等下一次登录
-        conn.all_group_list = []
-        conn.all_group_list_info = []
-        fail_pending = getattr(conn, "fail_pending", None)
-        if fail_pending:
-            fail_pending()
+    async def _cancel_bot_server_task(self, key: str, conn) -> None:
+        """取消该账号读循环并等它退出（带超时；异常只留痕，不阻断收尾）。"""
+        task = self.bot_server_tasks.pop(key, None)
+        if task is None:
+            return
+        label = bot_label(conn) if conn is not None else key
+        if not task.done():
+            task.cancel()
+            _done, pending = await asyncio.wait({task}, timeout=GATEWAY_SHUTDOWN_TIMEOUT)
+            if pending:
+                self.log.warning(
+                    f"账号「{label}」读循环 {GATEWAY_SHUTDOWN_TIMEOUT:g}s 内未退出（已放弃等待）"
+                )
+        if task.done() and not task.cancelled():
+            exc = task.exception()
+            if exc is not None:
+                self.log.warning(f"账号「{label}」读循环收尾异常: {exc}")
+
+    async def _finalize_disconnect(self, conn) -> None:
+        """断开收尾：关 ws → 广播 disconnected → 复位登录态（保证一定执行到最后）。"""
+        try:
+            if conn.websocket:
+                try:
+                    await conn.websocket.close()
+                except Exception as e:
+                    self.log.warning(f"关闭 WebSocket 异常: {e}")
+                conn.websocket = None
+            await self._notify_status(conn, "disconnected")  # 先广播（保留 bot_id）
+            self._reset_conn_state(conn)
+            conn.status = "disconnected"
+            self.log.info(f"账号「{bot_label(conn)}」断开连接")
+        finally:
+            conn._disconnecting = False
 
     async def reconnect_bot(self, account_id: str) -> bool:
         key = str(account_id)
@@ -629,81 +636,22 @@ class OneBotGateway(GatewayLifecycleMixin):
                 )
         finally:
             worker.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await worker
+            # 有超时：worker 若卡在不肯退出的处理中，关停不能被它无限挂住
+            _done, pending = await asyncio.wait({worker}, timeout=GATEWAY_SHUTDOWN_TIMEOUT)
+            if pending:
+                bot_logger.warning(
+                    f"事件处理 worker {GATEWAY_SHUTDOWN_TIMEOUT:g}s 内未退出（已放弃等待，可能有事件未处理完）"
+                )
             for t in login_tasks:
                 if not t.done():
                     t.cancel()
+            if login_tasks:
+                _done, pending = await asyncio.wait(set(login_tasks), timeout=GATEWAY_SHUTDOWN_TIMEOUT)
+                if pending:
+                    bot_logger.warning(f"登录信息任务 {len(pending)} 个未在超时内退出（已放弃等待）")
             # 只清理自己的登记项：被新连接替换后，这一格已经是新任务
             if self.bot_server_tasks.get(key) is me:
                 self.bot_server_tasks.pop(key, None)
-
-    async def _handle_connection_end(
-        self, conn, reason: str, bot_logger, *, abnormal: bool, ws: Any = None
-    ) -> None:
-        """连接结束的统一收尾：留痕 → 置掉线态 → 广播 → 清 ws → 在途请求立即失败。
-
-        异常断线（ConnectionClosedError 等）与正常关闭（1000）**必须**走同一套收尾：
-        前者由 ``except`` 分支触发，后者由 ``async for`` 正常退出的 ``else`` 分支触发。
-        少了后者就是「僵尸连接」——状态仍 connected，监督循环永远不重连。
-
-        ``ws`` 是**本次**结束的连接：反向模式下同一账号可能已被新连接接管，
-        此时这条旧连接的收尾不得再改状态、更不得关闭新连接（否则新连接刚接上就被掐死）。
-        """
-        if ws is not None and conn.websocket is not None and conn.websocket is not ws:
-            bot_logger.info("旧连接已结束（当前已有新连接接管），跳过状态收敛")
-            return
-        if getattr(conn, "_disconnecting", False):
-            # 主动断开：状态收敛与广播由 disconnect_bot 统一负责（事件序列只应是
-            # connected → disconnected）。这里若照常收尾会先广播一次 error。
-            bot_logger.info("连接结束于用户主动断开，状态收敛交由 disconnect_bot 处理")
-            return
-        text = f"WebSocket 连接结束: {reason}"
-        if abnormal:
-            bot_logger.error(text)
-        else:
-            # 正常关闭是服务端主动行为（重启/下线）：必须留痕（否则无从发现），
-            # 但用 WARNING，不必惊动 errors.log
-            bot_logger.warning(text)
-        await self._mark_offline(conn, reason)
-        target = conn.websocket if ws is None else ws
-        if target is not None:
-            try:
-                await target.close()
-            except Exception as e:
-                # 关闭失败仅记 debug：连接随后会被置空并由监督循环重建，但留痕便于排查
-                bot_logger.debug(f"[Gateway] 关闭已结束的连接失败（已忽略）: {e}")
-            if conn.websocket is target:
-                conn.websocket = None
-        # 清空登录态 + 让在途 API 请求立即失败（与 disconnect_bot 一致）
-        self._reset_conn_state(conn)
-
-    async def _mark_offline(self, conn, reason: str) -> None:
-        """把账号置为「掉线」态并广播。
-
-        反向模式且监听器仍在监听时状态是 ``connecting``（等 OneBot 实现重新接入）：
-        对端重启属于常态，显示成红色错误会让人以为配置坏了；``last_error`` 仍保留
-        原因，排查信息不丢。其余情况（正向掉线 / 反向监听已停）按 ``error`` 处理。
-        """
-        if getattr(conn, "_disconnecting", False):
-            # 与 _handle_connection_end 同一口径：主动断开期间的任何「掉线」判定
-            # （含 _sweep_zombies）都不得广播 error，交给 disconnect_bot 收尾。
-            return
-        if is_reverse(self._conn_mode(conn)) and await self.reverse_link.mark_waiting(conn, reason):
-            return
-        conn.status = "error"
-        conn.last_error = reason
-        await self._notify_status(conn, "error", reason)
-
-    @staticmethod
-    def _close_reason(ws) -> str:
-        """正常关闭的可读原因：带上 close_code/close_reason，便于定位是哪一端关的。"""
-        code = getattr(ws, "close_code", None)
-        reason = getattr(ws, "close_reason", None)
-        if code is None:
-            return "连接已结束（未收到关闭帧）"
-        suffix = f" {reason}" if reason else ""
-        return f"服务端关闭连接 (code={code}{suffix})"
 
     async def _dispatch_worker(self, account_id: str, queue: asyncio.Queue) -> None:
         """串行处理该账号的事件队列，独立于接收循环。
@@ -794,11 +742,19 @@ class OneBotGateway(GatewayLifecycleMixin):
         return False
 
     async def shutdown(self) -> None:
-        """关停：先停监督循环（避免关断过程中又连回来），再逐个断开连接。"""
+        """关停：先停监督循环（避免关断过程中又连回来），再逐个断开连接。
+
+        全程 best-effort：单个账号收尾失败只留痕，不得让后面的账号漏关；
+        监督循环/读循环都有等待上限，超时只告警不无限挂住关停流程。
+        """
         task, self._supervise_task = self._supervise_task, None
         if task is not None and task is not asyncio.current_task():
             task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+            _done, pending = await asyncio.wait({task}, timeout=GATEWAY_SHUTDOWN_TIMEOUT)
+            if pending:
+                self.log.warning("[Gateway] 监督循环未在超时内退出（已继续关停）")
         for account_id in list(self.connections.keys()):
-            await self.disconnect_bot(account_id)
+            try:
+                await self.disconnect_bot(account_id)
+            except Exception as e:  # noqa: BLE001 —— 单账号失败不阻断整体关停，但必须留痕
+                self.log.warning(f"[Gateway] 关停账号「{account_id}」连接失败（已继续）: {e}")
