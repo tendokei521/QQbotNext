@@ -143,7 +143,15 @@ watch(
 
         <div class="tool-list">
           <template v-for="group in groups" :key="group.category">
-            <div class="tool-category" @click="toggleCategory(group.category)">
+            <div
+              class="tool-category"
+              role="button"
+              tabindex="0"
+              :aria-expanded="!isCollapsed(group.category)"
+              @click="toggleCategory(group.category)"
+              @keydown.enter.prevent="toggleCategory(group.category)"
+              @keydown.space.prevent="toggleCategory(group.category)"
+            >
               <v-icon :icon="isCollapsed(group.category) ? 'mdi-chevron-down' : 'mdi-chevron-up'" size="small" />
               <span class="tool-category-name">{{ group.category }}</span>
               <span class="tool-category-count">{{ group.items.length }}</span>
@@ -205,6 +213,13 @@ watch(
 
 .tool-category:first-child {
   margin-top: 0;
+}
+
+/* 键盘聚焦时才出现的焦点环，不改变常态视觉 */
+.tool-category:focus-visible {
+  outline: 2px solid rgb(var(--v-theme-primary));
+  outline-offset: 2px;
+  border-radius: 6px;
 }
 
 .tool-category-name {

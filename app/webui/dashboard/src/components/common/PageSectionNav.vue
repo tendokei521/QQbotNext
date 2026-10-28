@@ -90,7 +90,13 @@ onUnmounted(() => {
       :key="item.id"
       class="section-item"
       :class="{ 'is-active': activeId === item.id, 'is-disabled': item.disabled }"
+      role="button"
+      :tabindex="item.disabled ? -1 : 0"
+      :aria-current="activeId === item.id ? 'true' : undefined"
+      :aria-disabled="item.disabled ? 'true' : undefined"
       @click="onSelect(item)"
+      @keydown.enter.prevent="onSelect(item)"
+      @keydown.space.prevent="onSelect(item)"
     >
       <v-icon v-if="item.icon" size="small" class="mr-1">{{ item.icon }}</v-icon>
       <span>{{ item.label }}</span>
@@ -148,5 +154,11 @@ onUnmounted(() => {
 .section-item.is-disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* 键盘聚焦时才出现的焦点环，不改变常态视觉 */
+.section-item:focus-visible {
+  outline: 2px solid rgb(var(--v-theme-primary));
+  outline-offset: 2px;
 }
 </style>
