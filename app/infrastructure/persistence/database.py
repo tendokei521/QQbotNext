@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import aiosqlite
 
@@ -279,7 +280,7 @@ class Database:
         await self._conn.execute("PRAGMA foreign_keys=ON;")
         await self._conn.executescript(SCHEMA)
         await self._conn.commit()
-        logger.debug(f"[DB] SQLite 已初始化") #: "){self.path}")
+        logger.debug("[DB] SQLite 已初始化") #: "){self.path}")
 
     def _require_conn(self) -> aiosqlite.Connection:
         """取连接；未 connect 或已 close 时明确报错（而不是 `NoneType has no attribute`）。"""

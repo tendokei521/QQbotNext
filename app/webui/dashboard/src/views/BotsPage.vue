@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, reactive, ref } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useBotsStore, displayName, resolveAccount, resolvedBotId, type BotConfig, type BotConnMode, type BotData, type BotStatus } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
 import AddBotDialog from '@/components/bots/AddBotDialog.vue'
+import EventMonitorDialog from '@/components/bots/EventMonitorDialog.vue'
 
 const bots = useBotsStore()
 const notify = useNotifyStore()
@@ -43,7 +44,24 @@ const acting = reactive<Record<string, boolean>>({})
 /** 批量连接/断开：串行执行，按钮上显示进度，结束后汇总失败项 */
 const batchBusy = ref<'connect' | 'disconnect' | ''>('')
 const batchProgress = reactive({ done: 0, total: 0 })
+/** 有改动还没写回后端：页头提示，切页前自动补存一次 */
+const dirty = ref(false)
+const loadError = ref('')
+/** 诊断台：看这个账号最近收到的协议端事件，定位「连上了但没反应」 */
+const diagOpen = ref(false)
+const diagAccountId = ref<string | null>(null)
+const diagAccountName = ref('')
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+
+function openDiagnostics(b: BotData) {
+  diagAccountId.value = b.id
+  diagAccountName.value = displayName(b)
+  diagOpen.value = true
+}
+
+function markDirty() {
+  dirty.value = true
+}
 
 function draftOf(id: string) {
   if (!drafts[id]) {
@@ -87,6 +105,7 @@ function isReverseDraft(id: string): boolean {
 
 async function loadCards() {
   loadingCards.value = true
+  loadError.value = ''
   try {
     const [configs, statuses] = await Promise.all([bots.fetchBotConfig(), bots.fetchBots()])
     // 以配置列表为主填充草稿：两者都按 account id 对齐（id 就是身份，没有下标兜底）
@@ -108,8 +127,11 @@ async function loadCards() {
     for (const key of Object.keys(drafts)) {
       if (!seen.has(key)) delete drafts[key]
     }
+    dirty.value = false
   } catch (err) {
-    notify.push(errorMessage(err), 'error')
+    // 失败要让人看见并能重试，不要把「加载失败」伪装成「没有账号」
+    loadError.value = errorMessage(err)
+    notify.push(loadError.value, 'error')
   } finally {
     loadingCards.value = false
   }
@@ -132,6 +154,7 @@ async function persistDrafts(showToast = true): Promise<boolean> {
   try {
     // 类型上 BotConfig 仍把 owner_id 标为必填，但后端允许缺省（沿用旧值），这里显式转换
     await bots.saveBotConfig(buildPayload() as unknown as BotConfig[])
+    dirty.value = false
     if (showToast) notify.push('配置已保存', 'success')
     return true
   } catch (err) {
@@ -255,11 +278,13 @@ async function batchAct(kind: 'connect' | 'disconnect') {
 }
 
 onMounted(loadCards)
-onUnmounted(() => {
+onBeforeUnmount(() => {
+  // 切页前把挂起的自动保存补一次：否则最后 400ms 内的改动会丢
   if (saveTimer) {
     clearTimeout(saveTimer)
     saveTimer = null
   }
+  if (dirty.value) void persistDrafts(false)
 })
 </script>
 
@@ -270,7 +295,10 @@ onUnmounted(() => {
         <h1 class="app-page-title">账号管理</h1>
         <div class="app-page-subtitle">添加并管理要接入的 QQ 账号</div>
       </div>
-      <div class="d-flex gap-2">
+      <div class="d-flex align-center gap-2">
+        <v-chip v-if="dirty" size="small" color="warning" variant="tonal">
+          <v-icon start size="x-small" icon="mdi-pencil-outline" /> 有未保存修改
+        </v-chip>
         <v-btn variant="tonal" prepend-icon="mdi-refresh" :loading="loadingCards" @click="loadCards">刷新</v-btn>
         <v-btn color="primary" prepend-icon="mdi-plus" @click="addBot">新增账号</v-btn>
         <v-btn color="primary" variant="tonal" prepend-icon="mdi-content-save" :loading="saving" @click="saveAll">
@@ -304,13 +332,21 @@ onUnmounted(() => {
       </v-btn>
     </div>
 
+    <v-alert v-if="loadError" type="error" variant="tonal" class="mb-3">
+      <div class="d-flex align-center flex-wrap gap-2">
+        <span>账号列表加载失败：{{ loadError }}</span>
+        <v-spacer />
+        <v-btn size="small" variant="tonal" prepend-icon="mdi-refresh" @click="loadCards">重试</v-btn>
+      </div>
+    </v-alert>
+
     <v-row v-if="loadingCards && bots.bots.length === 0">
       <v-col v-for="i in 3" :key="i" cols="12" md="6" xl="4">
         <v-skeleton-loader type="card-avatar, article, actions" class="rounded-xl" />
       </v-col>
     </v-row>
 
-    <v-card v-else-if="bots.bots.length === 0" variant="outlined">
+    <v-card v-else-if="bots.bots.length === 0 && !loadError" variant="outlined">
       <EmptyState icon="mdi-robot-off-outline" title="还没有账号" description="先添加一个 QQ 账号，再把它连起来">
         <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="addBot">新增账号</v-btn>
       </EmptyState>
@@ -337,6 +373,14 @@ onUnmounted(() => {
               </span>
             </v-card-subtitle>
             <template #append>
+              <v-btn
+                variant="text"
+                icon="mdi-stethoscope"
+                color="primary"
+                size="small"
+                title="诊断这个账号（看协议端有没有送来消息）"
+                @click="openDiagnostics(b)"
+              />
               <v-btn variant="text" icon="mdi-delete-outline" color="error" size="small" title="删除此账号配置" @click="deleteTarget = b.id" />
             </template>
           </v-card-item>
@@ -349,7 +393,7 @@ onUnmounted(() => {
               density="comfortable"
               hide-details
               class="mb-3"
-              @update:model-value="(v: string) => { draftOf(b.id).name = v }"
+              @update:model-value="(v: string) => { draftOf(b.id).name = v; markDirty() }"
               @blur="scheduleSave()"
             />
             <v-text-field
@@ -359,7 +403,7 @@ onUnmounted(() => {
               density="comfortable"
               hide-details="auto"
               class="mb-3"
-              @update:model-value="(v: string) => { draftOf(b.id).ws_url = v }"
+              @update:model-value="(v: string) => { draftOf(b.id).ws_url = v; markDirty() }"
               @blur="scheduleSave()"
             >
               <template #append-inner>
@@ -409,7 +453,7 @@ onUnmounted(() => {
               hide-details="auto"
               autocomplete="off"
               class="mb-3"
-              @update:model-value="(v: string) => { draftOf(b.id).access_token = v }"
+              @update:model-value="(v: string) => { draftOf(b.id).access_token = v; markDirty() }"
               @blur="scheduleSave()"
             />
             <v-switch
@@ -418,7 +462,7 @@ onUnmounted(() => {
               color="primary"
               density="compact"
               hide-details
-              @update:model-value="(v: boolean | null) => { draftOf(b.id).auto_connect = !!v }"
+              @update:model-value="(v: boolean | null) => { draftOf(b.id).auto_connect = !!v; markDirty() }"
               @change="scheduleSave()"
             />
             <v-divider class="my-3" />
@@ -472,6 +516,9 @@ onUnmounted(() => {
 
     <!-- 新增账号：先选连接方式（正向 / 反向），选定后才创建 -->
     <AddBotDialog v-model="addDialog" @created="onBotCreated" />
+
+    <!-- 诊断台：查这个账号最近收到的协议端事件，确认问题出在哪一侧 -->
+    <EventMonitorDialog v-model="diagOpen" :account-id="diagAccountId" :account-name="diagAccountName" />
   </div>
 </template>
 

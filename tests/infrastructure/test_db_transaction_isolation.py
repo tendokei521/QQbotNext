@@ -15,6 +15,7 @@ recorder 改走公开接口。
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 
 import pytest
 
@@ -73,7 +74,7 @@ async def test_run_in_transaction_rolls_back_every_statement(db):
     """最后一条 SQL 失败 → 前面已执行的语句全部回滚，连接还能继续用。"""
     await db.execute("CREATE TABLE probe (id INTEGER PRIMARY KEY, v TEXT)")
 
-    with pytest.raises(Exception):
+    with pytest.raises(sqlite3.OperationalError):
         await db.run_in_transaction([
             ("INSERT INTO probe (id, v) VALUES (?,?)", (1, "a")),
             ("INSERT INTO no_such_table (id) VALUES (?)", (2,)),
