@@ -322,6 +322,14 @@ def _build_logger(log_dir: str | Path) -> logging.Logger:
     setup_dir(logs_dir)
     logger_ = logging.getLogger("[Service]")
     logger_.setLevel(logging.DEBUG)
+    # 重建前先逐个 close：旧 handler 持有打开的文件句柄，直接 clear 会泄漏
+    # （Windows 上还会锁住日志文件，导致轮转/删除失败）。
+    for handler in list(logger_.handlers):
+        try:
+            handler.close()
+        except Exception as e:  # noqa: BLE001 —— 关闭失败不能阻断重建，换新 handler 即可
+            print(f"关闭旧日志 handler 失败（已忽略）: {e}")
+        logger_.removeHandler(handler)
     logger_.handlers.clear()
     logger_.propagate = False
 
@@ -408,10 +416,32 @@ def get_module_logger(module_name: str) -> PrefixLogger:
     return get_logger("Module").add_info(module_name)
 
 
-# 常用具名 Logger（保持与原 basic.logger 一致的调用习惯）
-logger = get_logger("Main")
-webui_logger = get_logger("WebUI")
-websocket_logger = get_logger("WebSocket")
-api_logger = get_logger("API")
-task_logger = get_logger("Task")
-module_logger = get_logger("Module")
+class LazyLogger:
+    """模块级 logger 的延迟代理：首次真正使用时才初始化日志系统。
+
+    为什么不在 import 期建：`import app.core.logger` 是极常见的依赖（几乎每个模块），
+    若在 import 期 `setup_logging()`，任何一次 import 都会创建 ./logs 目录、打开
+    5 个日志文件句柄——单测、CLI 诊断脚本都会留下这种副作用。真实 logger 由
+    `get_logger()` 在首次访问时创建并复用，行为与原模块级常量一致。
+    """
+
+    __slots__ = ("_prefix",)
+
+    def __init__(self, prefix: str) -> None:
+        self._prefix = prefix
+
+    def __getattr__(self, name: str):
+        return getattr(get_logger(self._prefix), name)
+
+    def __repr__(self) -> str:
+        return f"<LazyLogger {self._prefix}>"
+
+
+# 常用具名 Logger（保持与原 basic.logger 一致的调用习惯；首次使用时才真正初始化）
+logger = LazyLogger("Main")
+webui_logger = LazyLogger("WebUI")
+websocket_logger = LazyLogger("WebSocket")
+api_logger = LazyLogger("API")
+task_logger = LazyLogger("Task")
+module_logger = LazyLogger("Module")
+
