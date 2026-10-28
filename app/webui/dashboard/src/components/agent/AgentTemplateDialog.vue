@@ -23,6 +23,8 @@ const saving = ref(false)
 const applyingId = ref('')
 const deletingId = ref('')
 const newName = ref('')
+/** 待确认覆盖的模板（应用模板会整份替换草稿，先让用户确认） */
+const pendingProfile = ref<ProfileItem | null>(null)
 
 async function loadProfiles() {
   loading.value = true
@@ -57,8 +59,16 @@ async function saveCurrentTemplate() {
   }
 }
 
-async function applyProfile(profile: ProfileItem) {
+/** 应用模板会整份覆盖当前草稿：先弹确认（不用 window.confirm，保持界面风格一致） */
+function requestApply(profile: ProfileItem) {
   if (applyingId.value) return
+  pendingProfile.value = profile
+}
+
+async function confirmApply() {
+  const profile = pendingProfile.value
+  pendingProfile.value = null
+  if (!profile) return
   applyingId.value = profile.id
   try {
     const res = await http.get<{ ok: boolean; profile: ProfileItem }>(`/api/config-profiles/${profile.id}`)
@@ -136,7 +146,7 @@ onMounted(() => {
                 :loading="deletingId === p.id"
                 @click.stop="deleteProfile(p)"
               />
-              <v-btn size="small" variant="tonal" prepend-icon="mdi-arrow-up-bold-circle" :loading="applyingId === p.id" @click="applyProfile(p)">
+              <v-btn size="small" variant="tonal" prepend-icon="mdi-arrow-up-bold-circle" :loading="applyingId === p.id" @click="requestApply(p)">
                 应用
               </v-btn>
             </template>
@@ -148,6 +158,29 @@ onMounted(() => {
           </v-list-item>
         </v-list>
       </v-card-text>
+    </v-card>
+  </v-dialog>
+
+  <!-- 应用模板的覆盖确认：模板会整份替换配置草稿，先让用户明确同意 -->
+  <v-dialog
+    :model-value="!!pendingProfile"
+    max-width="440"
+    @update:model-value="(v: boolean) => { if (!v) pendingProfile = null }"
+  >
+    <v-card>
+      <v-card-title class="d-flex align-center">
+        <v-icon icon="mdi-alert-outline" class="mr-2" color="warning" /> 应用配置模板
+      </v-card-title>
+      <v-card-text class="text-body-2">
+        应用「{{ pendingProfile?.name }}」会用模板内容整份覆盖当前配置草稿，未保存的修改会被替换。
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn variant="text" @click="pendingProfile = null">取消</v-btn>
+        <v-btn color="warning" variant="tonal" prepend-icon="mdi-arrow-up-bold-circle" @click="confirmApply">
+          覆盖并应用
+        </v-btn>
+      </v-card-actions>
     </v-card>
   </v-dialog>
 </template>
