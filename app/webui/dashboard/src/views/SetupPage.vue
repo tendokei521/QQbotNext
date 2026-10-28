@@ -46,6 +46,8 @@ const accountDirty = ref(false)
 const accountError = ref('')
 /** 保存进行中：只用于按钮转圈，不做互斥（同一账号重复保存是幂等的） */
 const savingAccount = ref(false)
+/** 用户点了「稍后再配」：明确跳过时不要顺手建号 */
+const skipped = ref(false)
 let lastNotifiedError = ''
 let pollTimer: number | null = null
 
@@ -103,6 +105,12 @@ const customProviderItems = [
   { title: 'Anthropic', value: 'anthropic' },
   { title: 'Gemini', value: 'gemini' },
 ]
+
+/** 卡片副标题给「默认用哪个模型」，只报数量对用户没有信息量 */
+function presetCardHint(item: PresetOption): string {
+  const first = item.models[0]
+  return first ? `默认 ${first}` : '自行填写模型名'
+}
 
 /** 选中一家服务商：自动填好接口地址与默认模型，用户只需再填 Key */
 function choosePreset(preset: PresetOption) {
@@ -259,6 +267,36 @@ async function saveAccount(): Promise<boolean> {
   }
 }
 
+/** 账号标识：后端只允许字母/数字/下划线/连字符，且以字母或数字开头；留空自动分配 */
+const ACCOUNT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/
+const accountIdFormatError = ref('')
+/** 字段下方同时展示「格式错误」和「保存失败」两种原因 */
+const accountIdMessages = computed(() =>
+  [accountIdFormatError.value, accountError.value].filter(Boolean),
+)
+
+function validateAccountId(): boolean {
+  const value = account.id.trim()
+  // 留空是允许的：后端会自动分配一个标识
+  if (!value || ACCOUNT_ID_PATTERN.test(value)) {
+    accountIdFormatError.value = ''
+    return true
+  }
+  accountIdFormatError.value = '只能用字母、数字、下划线或连字符，且以字母或数字开头'
+  return false
+}
+
+function onAccountIdInput() {
+  markAccountDirty()
+  accountIdFormatError.value = ''
+}
+
+async function onAccountIdBlur() {
+  // 格式不合法就不提交：避免把必然失败的请求发出去
+  if (!validateAccountId()) return
+  await saveAccount()
+}
+
 /** 输入只更新本地草稿；顺带清掉上一次的错误提示 */
 function markAccountDirty() {
   accountDirty.value = true
@@ -271,8 +309,24 @@ function onModeChange(mode: 'reverse' | 'forward') {
   markAccountDirty()
 }
 
+/** 复制监听地址：非 https 的局域网地址下浏览器可能不给剪贴板权限，失败就让用户手动复制 */
+async function copyListenAddress(text: string) {
+  const value = text.trim()
+  if (!value) {
+    notify.push('地址还没填，先填好再复制', 'warning')
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(value)
+    notify.push('地址已复制', 'success')
+  } catch {
+    notify.push('复制失败，请手动选中地址复制', 'warning')
+  }
+}
+
 async function nextFromAccount() {
-  // 点「下一步」才真正建号/保存；失败就停在本步
+  // 点「下一步」才真正建号/保存；格式不合法或保存失败就停在本步
+  if (!validateAccountId()) return
   if (!(await saveAccount())) return
   step.value = 2
 }
@@ -402,18 +456,30 @@ async function finish() {
 }
 
 function skipAll() {
+  // 明确「稍后再配」：不建号、不补存（否则离开时 onBeforeUnmount 会把半填的账号建出来）
+  skipped.value = true
+  accountDirty.value = false
+  stopPolling()
   router.push('/')
 }
 
 onMounted(async () => {
-  if (!bots.bots.length) await bots.fetchBots()
+  if (!bots.bots.length) {
+    // 列表加载失败不该冒成 unhandled rejection（全局会误报「页面出现异常」）
+    try {
+      await bots.fetchBots()
+    } catch (err) {
+      notify.push(`账号列表加载失败：${errorMessage(err)}`, 'warning')
+    }
+  }
   await refreshAccount()
   startPolling()
   await Promise.all([readiness.load(), bundles.load(), loadPresets()])
 })
 
 onBeforeUnmount(() => {
-  // 离开向导前把第 1 步没保存的改动补存一次，避免切页丢配置
+  // 离开向导前把第 1 步没保存的改动补存一次，避免切页丢配置；明确跳过则什么都不建
+  if (skipped.value) return
   if (accountDirty.value) void saveAccount()
 })
 onUnmounted(stopPolling)
@@ -486,13 +552,13 @@ onUnmounted(stopPolling)
                 v-model="account.id"
                 label="账号标识"
                 placeholder="例如：main"
-                hint="随便起个名字，用来区分多个号"
+                hint="用于区分多个号：字母/数字/下划线，留空自动分配"
                 persistent-hint
-                :error-messages="accountError"
+                :error-messages="accountIdMessages"
                 density="comfortable"
                 variant="outlined"
-                @update:model-value="markAccountDirty"
-                @blur="saveAccount"
+                @update:model-value="onAccountIdInput"
+                @blur="onAccountIdBlur"
               />
             </v-col>
             <v-col cols="12" md="6">
@@ -519,7 +585,18 @@ onUnmounted(stopPolling)
             variant="outlined"
             @update:model-value="markAccountDirty"
             @blur="saveAccount"
-          />
+          >
+            <template #append-inner>
+              <v-btn
+                v-if="account.conn_mode === 'reverse'"
+                icon="mdi-content-copy"
+                size="x-small"
+                variant="text"
+                title="复制监听地址"
+                @click="copyListenAddress(account.ws_url)"
+              />
+            </template>
+          </v-text-field>
           <v-text-field
             v-model="account.access_token"
             label="连接令牌（可选）"
@@ -568,7 +645,7 @@ onUnmounted(stopPolling)
                 @click="choosePreset(item)"
               >
                 <div class="preset-card__name">{{ item.name }}</div>
-                <div class="preset-card__hint">常用模型 {{ item.models.length }} 个</div>
+                <div class="preset-card__hint">{{ presetCardHint(item) }}</div>
               </v-card>
               <v-card
                 variant="outlined"
@@ -603,7 +680,7 @@ onUnmounted(stopPolling)
                   @click="choosePreset(item)"
                 >
                   <div class="preset-card__name">{{ item.name }}</div>
-                  <div class="preset-card__hint">常用模型 {{ item.models.length }} 个</div>
+                  <div class="preset-card__hint">{{ presetCardHint(item) }}</div>
                 </v-card>
               </div>
             </v-expand-transition>
