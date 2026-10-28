@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import quote, unquote
+
 #: 对外展示时替换 access_token 的哨兵值（写回时 `restore_ws_url` 会认出它并保留旧值）
 ACCESS_TOKEN_MASK = "****"
 
@@ -26,6 +28,8 @@ def split_ws_url(url: str) -> tuple[str, str]:
     """把完整 ws_url 拆成 (基础地址, access_token)。
 
     仅拆出 access_token 参数，query 中其余参数保留在基础地址里。
+    token 按 URL 解码：配置里存的是编码后的值（中文/`&` 会变成 %XX），
+    拆分后给表单/监听器用的必须是真实值。
     """
     if not url or "?" not in url:
         return (url or ""), ""
@@ -33,9 +37,12 @@ def split_ws_url(url: str) -> tuple[str, str]:
     token = ""
     kept = []
     for param in query.split("&"):
-        if param.startswith("access_token="):
-            token = param[len("access_token="):]
-        elif param:
+        if not param:
+            continue
+        key, _, value = param.partition("=")
+        if unquote(key) == "access_token":
+            token = unquote(value)
+        else:
             kept.append(param)
     if kept:
         return f"{base}?{'&'.join(kept)}", token
@@ -43,12 +50,16 @@ def split_ws_url(url: str) -> tuple[str, str]:
 
 
 def join_ws_url(base: str, token: str) -> str:
-    """把基础地址与 access_token 拼回完整 ws_url（无 token 时原样返回）。"""
+    """把基础地址与 access_token 拼回完整 ws_url（无 token 时原样返回）。
+
+    token 必须 URL 编码：非 ASCII 或含 ``&``/``=`` 的令牌不编码会被拆成多个
+    query 参数（或被 HTTP 客户端改写），结果永远连不上（见 split_ws_url 的解码）。
+    """
     base = (base or "").strip()
     if not token:
         return base
     sep = "&" if "?" in base else "?"
-    return f"{base}{sep}access_token={token}"
+    return f"{base}{sep}access_token={quote(str(token), safe='')}"
 
 
 def restore_ws_url(masked: str, original: str) -> str:

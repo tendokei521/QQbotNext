@@ -23,7 +23,7 @@ OneBot v11 的 WebSocket 有正反两个方向，本项目的账号配置用一�
 from __future__ import annotations
 
 from dataclasses import dataclass
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 #: 正向 WebSocket：框架作为客户端连出（历史默认，也是存量配置的语义）
 FORWARD = "forward"
@@ -126,19 +126,25 @@ def parse_endpoint(url: str, *, require_port: bool = False) -> Endpoint:
     if require_port and port is None:
         raise EndpointError("反向监听地址必须写明端口（形如 ws://0.0.0.0:3001/onebot/v11/ws）")
 
+    # query 一律 URL 解码后再取值/回显：中文 token 在 OneBot 实现里会被编码成
+    # %E4%B8%AD%E6%96%87，不解码就永远对不上；含 & 的 token 也必须先编码成 %26
+    # 才能作为一个参数存在（见 ws_url.join_ws_url 的 quote）。
     token = ""
     kept: list[str] = []
     for param in (parts.query or "").split("&"):
-        if param.startswith("access_token="):
-            token = param[len("access_token="):]
-        elif param:
+        if not param:
+            continue
+        key, _, value = param.partition("=")
+        if unquote(key) == "access_token":
+            token = unquote(value)
+        else:
             kept.append(param)
     return Endpoint(
         url=raw,
         scheme=scheme,
         host=host,
         port=port,
-        path=parts.path or "/",
+        path=unquote(parts.path or "/"),
         token=token,
         query="&".join(kept),
     )

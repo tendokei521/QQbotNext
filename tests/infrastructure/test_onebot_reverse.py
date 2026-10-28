@@ -233,3 +233,58 @@ async def test_separated_role_connection_is_accepted_with_warning():
         await server.stop()
     assert seen[0].universal is False
     assert any("通用" in w for w in log.warnings)
+
+
+# ==================== token 的 URL 编码 ====================
+
+
+async def test_percent_encoded_non_ascii_token_is_accepted():
+    """中文 token：配置里是原文，OneBot 实现按 URL 编码传（%E4%B8%AD...）也必须匹配。"""
+    from urllib.parse import quote
+
+    port = _free_port()
+    token = "中文令牌"
+    seen: list = []
+
+    async def handler(ws, client):
+        seen.append(client)
+        async for _ in ws:
+            pass
+
+    server = ReverseWsServer(url=_url(port, token=token), handler=handler, log=_NullLog())
+    await server.start()
+    try:
+        async with websockets.connect(
+            f"ws://127.0.0.1:{port}/onebot/v11/ws?access_token={quote(token, safe='')}"
+        ) as ws:
+            assert await _wait(lambda: bool(seen)), "URL 编码的中文 token 必须能通过校验"
+            assert seen[0].token == token
+            await ws.send("ping")
+    finally:
+        await server.stop()
+
+
+async def test_token_with_ampersand_survives_url_encoding():
+    """含 & 的 token：必须以 %26 编码传输，解析后仍是完整一个值（不能被拆成两个参数）。"""
+    from urllib.parse import quote
+
+    port = _free_port()
+    token = "abc&def"
+    seen: list = []
+
+    async def handler(ws, client):
+        seen.append(client)
+        async for _ in ws:
+            pass
+
+    server = ReverseWsServer(url=_url(port, token=quote(token, safe="")), handler=handler, log=_NullLog())
+    await server.start()
+    try:
+        async with websockets.connect(
+            f"ws://127.0.0.1:{port}/onebot/v11/ws?access_token={quote(token, safe='')}"
+        ) as ws:
+            assert await _wait(lambda: bool(seen)), "含 & 的 token 必须能通过校验"
+            assert seen[0].token == token, f"token 被拆坏了: {seen[0].token!r}"
+            await ws.send("ping")
+    finally:
+        await server.stop()

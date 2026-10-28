@@ -34,6 +34,7 @@ import hmac
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import unquote
 
 import websockets
 
@@ -96,15 +97,20 @@ def _header(headers: Any, name: str) -> str:
 
 
 def _split_path_and_query(path: str) -> tuple[str, dict[str, str]]:
-    """把 ``/onebot/v11/ws?access_token=x`` 拆成 (路径, query 字典)。"""
+    """把 ``/onebot/v11/ws?access_token=x`` 拆成 (路径, query 字典)。
+
+    **必须 URL 解码**：OneBot 实现的 query 会按 URL 编码传输（中文 token 变成
+    ``%E4%B8%AD%E6%96%87``），裸切会把百分号编码原样当 token → 永远校验失败。
+    路径同样解码，才能与配置里的路径做同口径比较。
+    """
     raw, _, query = (path or "").partition("?")
     params: dict[str, str] = {}
     for item in query.split("&"):
         if not item or "=" not in item:
             continue
         key, _, value = item.partition("=")
-        params[key] = value
-    return raw or "/", params
+        params[unquote(key)] = unquote(value)
+    return unquote(raw) or "/", params
 
 
 def _normalize_path(path: str) -> str:

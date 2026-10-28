@@ -49,6 +49,19 @@ def test_parse_endpoint_splits_access_token():
     assert ep.is_tls is False
 
 
+def test_parse_endpoint_url_decodes_token_and_path():
+    """OneBot 实现按 URL 编码传 token：中文 → %E4%B8%AD...，含 & 的 token → %26。"""
+    ep = parse_endpoint("ws://127.0.0.1:3001/onebot/v11/ws?access_token=%E4%B8%AD%E6%96%87")
+    assert ep.token == "中文", "不解码会拿 %E4%B8%AD%E6%96%87 当 token，永远校验失败"
+
+    ep = parse_endpoint("ws://127.0.0.1:3001/onebot/v11/ws?access_token=abc%26def")
+    assert ep.token == "abc&def", "含 & 的 token 必须以 %26 形式作为一个参数解析"
+    assert ep.query == ""
+
+    ep = parse_endpoint("ws://127.0.0.1:3001/onebot/%E4%B8%AD/v11")
+    assert ep.path == "/onebot/中/v11"
+
+
 def test_parse_endpoint_default_path_and_ports():
     ep = parse_endpoint("ws://127.0.0.1:3001")
     assert ep.path == "/"
