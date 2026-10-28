@@ -565,7 +565,10 @@ onMounted(() => {
   } catch {
     collapsed.value = {}
   }
-  if (!modules.list.length) modules.load()
+  if (!modules.list.length) {
+    // 首载失败要提示，不能把裸 promise 丢给全局错误处理（会误报「页面出现异常」）
+    modules.load().catch((err: unknown) => notify.push(errorMessage(err), 'error'))
+  }
   // 顶部"已卸载"提示条的数据源（软卸载记录）
   modules.loadUninstalled().catch(() => {
     /* 恢复区加载失败不阻塞模块列表 */
