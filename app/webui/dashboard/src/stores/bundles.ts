@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import http, { errorMessage } from '@/api/http'
 import { useBotsStore } from './bots'
 
@@ -158,6 +158,10 @@ export const useBundlesStore = defineStore('bundles', () => {
   const importing = ref(false)
   const applying = ref(false)
   const error = ref('')
+  /** 当前账号：激活记录/应用目标按账号区分（工件列表本身是全局的） */
+  const accountId = computed(() => bots.currentAccountId)
+  /** 激活记录请求序号：切号后丢弃旧账号的迟到响应 */
+  let activationsSeq = 0
 
   async function load(): Promise<void> {
     loading.value = true
@@ -271,19 +275,34 @@ export const useBundlesStore = defineStore('bundles', () => {
     return (res.data?.modules || []) as ExportModuleOption[]
   }
 
-  async function loadActivations(accountId?: string | null): Promise<void> {
-    const aid = accountId || bots.currentAccountId
+  async function loadActivations(scopeAccountId?: string | null): Promise<void> {
+    const seq = ++activationsSeq
+    const aid = scopeAccountId || bots.currentAccountId
     if (!aid) {
       activations.value = []
       return
     }
     try {
       const res = await http.get('/api/bundles/activations', { params: { account_id: aid } })
+      // 加载期间切了账号：丢弃旧账号的激活记录，避免显示到新账号名下
+      if (seq !== activationsSeq) return
       activations.value = res.data?.activations || []
     } catch (err) {
+      if (seq !== activationsSeq) return
       error.value = errorMessage(err)
     }
   }
+
+  // 切账号：激活记录是账号维度的——立即清空旧账号的记录并按新账号重拉
+  // （BundlesPage 不必自己 watch：它读的就是这里的 activations）
+  watch(
+    () => bots.currentAccountId,
+    () => {
+      activations.value = []
+      error.value = ''
+      if (bots.currentAccountId) void loadActivations()
+    },
+  )
 
   /** 应用到账号：写账号配置（事务 + 快照；失败后端自动回滚） */
   async function applyBundle(
@@ -336,6 +355,7 @@ export const useBundlesStore = defineStore('bundles', () => {
     importing,
     applying,
     error,
+    accountId,
     load,
     loadActivations,
     validateFile,
