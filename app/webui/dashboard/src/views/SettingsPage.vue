@@ -15,6 +15,17 @@ const webui = useWebuiStore()
 const modules = useModulesStore()
 const notify = useNotifyStore()
 
+/** 界面构建戳：从侧边栏挪到这里，排查「改了没生效」时用。 */
+const buildStamp = __BUILD_STAMP__
+
+/** 日志级别的中文名（后端仍按 debug/info/warning/error 存储）。 */
+const LOG_LEVELS = [
+  { value: 'debug', title: '调试（最详细）' },
+  { value: 'info', title: '普通' },
+  { value: 'warning', title: '警告' },
+  { value: 'error', title: '错误' },
+]
+
 /** 已卸载记录的来源：新后端为 builtin/installed，旧记录仍是 local/zip。 */
 function isThirdParty(source?: string | null): boolean {
   return source === 'installed' || source === 'zip'
@@ -85,7 +96,7 @@ async function openUninstalledDialog() {
 async function reinstallModule(item: UninstalledModuleData) {
   try {
     await modules.install(item.module_name)
-    notify.push(`模块 ${item.display_name} 已恢复安装`, 'success')
+    notify.push(`插件「${item.display_name}」已恢复`, 'success')
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   }
@@ -101,7 +112,7 @@ onMounted(() => {
     <div class="app-page-header">
       <div>
         <h1 class="app-page-title">设置</h1>
-        <div class="app-page-subtitle">主题、日志与控制台偏好</div>
+        <div class="app-page-subtitle">界面、日志与插件偏好</div>
       </div>
     </div>
 
@@ -109,11 +120,11 @@ onMounted(() => {
       <v-col cols="12" lg="6">
         <v-card variant="outlined" class="mb-4">
           <v-card-title class="d-flex align-center">
-            <v-icon icon="mdi-rocket-launch-outline" class="mr-2" color="primary" /> 首次配置
+            <v-icon icon="mdi-rocket-launch-outline" class="mr-2" color="primary" /> 配置向导
           </v-card-title>
           <v-card-text class="d-flex align-center flex-wrap gap-2">
             <div class="text-caption" style="opacity: 0.7">
-              重新走一遍「连接账号 → 配置模型 → 人格设定」向导（随时可跳过某一步）。
+              再走一遍「连接账号 → 配置模型 → 人格设定」，每一步都可以跳过。
             </div>
             <v-spacer />
             <v-btn color="primary" variant="tonal" prepend-icon="mdi-open-in-new" @click="router.push('/setup')">
@@ -159,16 +170,19 @@ onMounted(() => {
 
         <v-card variant="outlined" class="mb-4">
           <v-card-title class="d-flex align-center">
-            <v-icon icon="mdi-flask-outline" class="mr-2" color="warning" /> 实验性选项
+            <v-icon icon="mdi-flask-outline" class="mr-2" color="warning" /> 高级选项
           </v-card-title>
           <v-card-text>
             <v-switch
               v-model="showExperimental"
-              label="显示实验性选项（含 Tool 管理）"
+              label="显示高级工具与调试入口"
               color="warning"
               density="compact"
               hide-details
             />
+            <div class="text-caption mt-1" style="color: rgba(var(--v-theme-on-surface), 0.55)">
+              面向进阶用户：开启后侧边栏会出现工具调试入口，日常使用不需要打开。
+            </div>
           </v-card-text>
         </v-card>
 
@@ -177,11 +191,11 @@ onMounted(() => {
             <v-icon icon="mdi-package-variant" class="mr-2" color="primary" /> 插件管理
             <v-spacer />
             <v-btn size="small" variant="tonal" prepend-icon="mdi-package-removed" @click="openUninstalledDialog">
-              已卸载模块
+              已停用的插件
             </v-btn>
           </v-card-title>
           <v-card-text class="text-caption" style="color: rgba(var(--v-theme-on-surface), 0.55)">
-            软卸载只屏蔽模块加载与显示，不会删除插件文件、配置或数据；可在此恢复安装。
+            停用插件只会隐藏它的功能，不会删除文件、配置或数据；随时可以在这里恢复。
           </v-card-text>
         </v-card>
 
@@ -193,11 +207,11 @@ onMounted(() => {
             <v-list density="compact">
               <v-list-item>
                 <v-list-item-title>QQBot Next 管理后台</v-list-item-title>
-                <v-list-item-subtitle>基于 OneBot 协议的多账号 QQ 机器人框架</v-list-item-subtitle>
+                <v-list-item-subtitle>轻量、多账号的 QQ 机器人管理后台</v-list-item-subtitle>
               </v-list-item>
               <v-list-item>
-                <v-list-item-title>Dashboard 版本</v-list-item-title>
-                <v-list-item-subtitle>Vue 3 + Vuetify 3 重构版 1.0.0</v-list-item-subtitle>
+                <v-list-item-title>界面版本</v-list-item-title>
+                <v-list-item-subtitle>{{ buildStamp }}</v-list-item-subtitle>
               </v-list-item>
             </v-list>
           </v-card-text>
@@ -219,11 +233,11 @@ onMounted(() => {
           <v-card-text>
             <div class="text-subtitle-2 mb-1">显示级别</div>
             <v-checkbox
-              v-for="lv in ['debug', 'info', 'warning', 'error']"
-              :key="lv"
+              v-for="lv in LOG_LEVELS"
+              :key="lv.value"
               v-model="levels"
-              :label="lv"
-              :value="lv"
+              :label="lv.title"
+              :value="lv.value"
               density="compact"
               hide-details
               color="primary"
@@ -240,14 +254,14 @@ onMounted(() => {
             />
             <v-switch
               v-model="showRawLogs"
-              label="显示原始日志"
+              label="显示技术日志"
               color="primary"
               density="compact"
               class="mt-2"
               hide-details
             />
             <div class="text-caption mt-2" style="color: rgba(var(--v-theme-on-surface), 0.55)">
-              修改后需保存；日志页面实时生效；默认关闭，开启后显示完整技术日志
+              保存后日志页即时生效。技术日志包含内部细节，仅在排查问题时打开。
             </div>
           </v-card-text>
         </v-card>
@@ -259,7 +273,7 @@ onMounted(() => {
     <v-dialog v-model="uninstalledDialog" max-width="620">
       <v-card>
         <v-card-title class="d-flex align-center">
-          <v-icon icon="mdi-package-removed" class="mr-2" color="primary" /> 已卸载模块
+          <v-icon icon="mdi-package-removed" class="mr-2" color="primary" /> 已停用的插件
           <v-spacer />
           <v-btn icon="mdi-close" variant="text" size="small" @click="uninstalledDialog = false" />
         </v-card-title>
@@ -272,17 +286,17 @@ onMounted(() => {
             >
               <v-list-item-title>{{ item.display_name }}</v-list-item-title>
               <v-list-item-subtitle>
-                {{ item.module_name }} · {{ isThirdParty(item.source) ? '第三方插件' : '内置模块' }} · v{{ item.version || '0.0.0' }}
+                {{ isThirdParty(item.source) ? '第三方插件' : '系统自带' }}
               </v-list-item-subtitle>
               <template #append>
                 <v-btn size="small" variant="tonal" prepend-icon="mdi-arrow-up-bold-circle" @click="reinstallModule(item)">
-                  安装
+                  恢复
                 </v-btn>
               </template>
             </v-list-item>
             <v-list-item v-if="!modules.uninstalledModules.length">
               <v-list-item-title class="text-caption text-center py-3" style="color: rgba(var(--v-theme-on-surface), 0.45)">
-                暂无已卸载模块
+                没有已停用的插件
               </v-list-item-title>
             </v-list-item>
           </v-list>

@@ -8,6 +8,7 @@ import { useWebuiStore } from '@/stores/webui'
 import { useNotifyStore } from '@/stores/notify'
 import { useReadinessStore } from '@/stores/readiness'
 import { errorMessage } from '@/api/http'
+import { cleanLogMessage, cleanLogTimestamp } from '@/utils/log'
 import EmptyState from '@/components/EmptyState.vue'
 import ReadinessCard from '@/components/readiness/ReadinessCard.vue'
 
@@ -54,10 +55,10 @@ const pinnedModules = computed(() =>
 )
 
 const statCards = computed(() => [
-  { label: 'Bot 账号', value: bots.botCount, icon: 'mdi-robot-outline', tile: 'primary' },
+  { label: 'QQ 账号', value: bots.botCount, icon: 'mdi-robot-outline', tile: 'primary' },
   { label: '已连接', value: bots.connectedCount, icon: 'mdi-power-plug', tile: 'success' },
-  { label: '功能模块', value: modules.count, icon: 'mdi-cube-outline', tile: 'info' },
-  { label: '已启用模块', value: modules.enabledCount, icon: 'mdi-toggle-switch', tile: 'warning' },
+  { label: '功能插件', value: modules.count, icon: 'mdi-cube-outline', tile: 'info' },
+  { label: '已启用', value: modules.enabledCount, icon: 'mdi-toggle-switch', tile: 'warning' },
 ])
 
 const isLoading = computed(() => bots.loading || modules.loading || refreshing.value)
@@ -104,7 +105,7 @@ onMounted(() => {
     <div class="app-page-header">
       <div>
         <h1 class="app-page-title">总览</h1>
-        <div class="app-page-subtitle">QQBot Next 运行状态一览</div>
+        <div class="app-page-subtitle">账号、模型与功能运行情况</div>
       </div>
       <v-btn variant="tonal" prepend-icon="mdi-refresh" :loading="refreshing" @click="refreshAll">刷新状态</v-btn>
     </div>
@@ -148,8 +149,8 @@ onMounted(() => {
               <EmptyState
                 v-if="bots.bots.length === 0"
                 icon="mdi-robot-off-outline"
-                title="暂无账号配置"
-                description="请到「账号管理」添加 WebSocket 连接"
+                title="还没有账号"
+                description="先去「账号管理」添加一个 QQ 号，再把它连起来"
               >
                 <v-btn size="small" color="primary" variant="tonal" to="/bots">去添加账号</v-btn>
               </EmptyState>
@@ -162,7 +163,7 @@ onMounted(() => {
                     {{ displayName(b) }}{{ resolvedBotId(b) ? ` · QQ ${resolvedBotId(b)}` : '' }}
                   </v-list-item-title>
                   <v-list-item-subtitle>
-                    {{ STATUS_TEXT[b.status] }}{{ resolveAccount(b)?.nickname ? ` · ${resolveAccount(b)!.nickname}` : '' }}{{ b.last_error ? ` · ${b.last_error}` : '' }}
+                    {{ resolveAccount(b)?.nickname || (b.last_error ? b.last_error : '尚未连接') }}
                   </v-list-item-subtitle>
                   <template #append>
                     <v-chip size="x-small" :color="statusColor(b.status)" variant="tonal">{{ STATUS_TEXT[b.status] }}</v-chip>
@@ -182,18 +183,18 @@ onMounted(() => {
         <v-col cols="12" lg="7">
           <v-card variant="outlined" class="app-card-fill">
             <v-card-title>
-              <v-icon icon="mdi-cube-outline" class="mr-2" color="primary" /> 常用模块
+              <v-icon icon="mdi-cube-outline" class="mr-2" color="primary" /> 常用功能
               <v-spacer />
-              <v-btn variant="text" size="small" to="/modules">全部模块 →</v-btn>
+              <v-btn variant="text" size="small" to="/modules">全部功能 →</v-btn>
             </v-card-title>
             <v-card-text>
               <EmptyState
                 v-if="pinnedModules.length === 0"
                 icon="mdi-cube-off-outline"
-                title="暂无模块数据"
-                description="连接 Bot 后模块会自动装配"
+                title="功能还没加载"
+                description="连接账号后，功能会自动就绪"
               >
-                <v-btn size="small" variant="tonal" to="/modules">查看模块</v-btn>
+                <v-btn size="small" variant="tonal" to="/modules">查看功能</v-btn>
               </EmptyState>
               <div v-else class="module-grid">
                 <v-btn
@@ -209,9 +210,6 @@ onMounted(() => {
                 </v-btn>
               </div>
             </v-card-text>
-            <v-card-actions>
-              <v-btn variant="text" size="small" @click="logs.clear()">清空本地日志</v-btn>
-            </v-card-actions>
           </v-card>
         </v-col>
       </v-row>
@@ -225,11 +223,11 @@ onMounted(() => {
               <v-btn variant="text" size="small" @click="logs.clear()">清空</v-btn>
             </v-card-title>
             <v-card-text class="log-preview">
-              <EmptyState v-if="previewLogs.length === 0" icon="mdi-text-box-outline" title="暂无日志" description="日志将实时显示在底部控制台" />
+              <EmptyState v-if="previewLogs.length === 0" icon="mdi-text-box-outline" title="暂无日志" description="机器人运行时的动态会显示在这里" />
               <div v-for="(row, i) in previewLogs" :key="`${row.timestamp}-${i}`" class="log-row">
-                <span class="log-time">{{ row.timestamp }}</span>
+                <span class="log-time">{{ cleanLogTimestamp(row.timestamp) }}</span>
                 <span class="log-level" :class="`log-level-${row.level}`">{{ row.level.toUpperCase() }}</span>
-                <span class="log-message">{{ row.message }}</span>
+                <span class="log-message">{{ cleanLogMessage(row.message) }}</span>
               </div>
             </v-card-text>
           </v-card>

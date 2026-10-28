@@ -182,9 +182,9 @@ class ReadinessService:
         checks.append(_check(
             "connected",
             bool(connected),
-            "账号已连接" if connected else "账号未连接",
+            "所有账号已连接" if connected and not disconnected else "还有账号没连上",
             detail=(
-                "未连接：" + "、".join(names.get(aid, aid) for aid in disconnected)
+                "、".join(names.get(aid, aid) for aid in disconnected)
                 if disconnected else "连接成功后才能收发消息"
             ),
             route="/bots",
@@ -202,10 +202,10 @@ class ReadinessService:
         checks.append(_check(
             "model_pool",
             pool_ok,
-            "Agent 已选择模型" if pool_ok else "Agent 未选择模型",
+            "模型已选好" if pool_ok else "还没选模型",
             detail=(
-                ("未选模型：" + "、".join(names.get(aid, aid) for aid in missing_pool))
-                if missing_pool else "在 Agent → 基础配置里选择模型并加入模型池"
+                ("、".join(names.get(aid, aid) for aid in missing_pool))
+                if missing_pool else "选好模型后机器人才能回复"
             ),
             route="/agent/basic",
             label="选择模型",
@@ -221,13 +221,13 @@ class ReadinessService:
         checks.append(_check(
             "scene_enabled",
             scene_ok,
-            "已开启响应场景" if scene_ok else "群聊与私聊都未开启",
+            "群聊或私聊已开启" if scene_ok else "群聊和私聊都没开启",
             detail=(
-                ("未开启：" + "、".join(names.get(aid, aid) for aid in missing_scene))
+                ("、".join(names.get(aid, aid) for aid in missing_scene))
                 if missing_scene else "群聊回复关闭时，群里 @ 机器人不会有任何回应"
             ),
             route="/agent/basic",
-            label="开启群聊回复",
+            label="开启回复",
             account_id=missing_scene[0] if missing_scene else "",
         ))
 
@@ -242,24 +242,24 @@ class ReadinessService:
                 continue
         if listening:
             checks.append(_check(
-                "protocol_listen", True, "反向 WebSocket 正在监听",
+                "protocol_listen", True, "已开始等待协议端接入",
                 level=LEVEL_INFO, detail="、".join(listening),
             ))
         elif any(getattr(c, "conn_mode", "") == "reverse" for c in connections.values()):
             checks.append(_check(
-                "protocol_listen", False, "反向 WebSocket 未监听",
-                level=LEVEL_WARN, detail="协议端（如 NapCat）还没连进来", route="/bots", label="查看账号",
+                "protocol_listen", False, "协议端还没连进来",
+                level=LEVEL_WARN, detail="在 NapCat 里把反向 WebSocket 指到本页地址即可", route="/bots", label="查看账号",
             ))
 
         module_errors = self._module_errors()
         checks.append(_check(
             "modules",
             not module_errors,
-            "功能模块加载正常" if not module_errors else "有模块加载失败",
+            "功能插件正常" if not module_errors else "有插件加载失败",
             level=LEVEL_INFO if not module_errors else LEVEL_WARN,
             detail="、".join(module_errors) if module_errors else "",
             route="/modules" if module_errors else "",
-            label="查看模块" if module_errors else "",
+            label="查看插件" if module_errors else "",
         ))
 
         blockers = [c for c in checks if not c["ok"] and c["level"] == LEVEL_BLOCKER]
