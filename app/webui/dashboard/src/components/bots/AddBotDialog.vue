@@ -10,10 +10,9 @@ import { errorMessage } from '@/api/http'
  * 文案只描述**本程序**做什么，不提具体对端产品（NapCat / Lagrange / OneBot 实现）：
  * 那是用户自己的另一端，本程序不该假设它是什么。
  *
- * - 选项名 = 本程序在这个模式下扮演的角色（WS服务端 / WS客户端）；
- * - 一行说明 = 本程序实际行为，括号里附 OneBot 的官方方向名（reverse-ws / forward-ws），
- *   方便用户对照别人的教程；
- * - 细节（地址该填什么形）折叠在 `?` tooltip 里，不占版面。
+ * - 选项名 = 用户在协议端里要做的选择（本地监听 / 向外连接）；
+ * - 一行说明 = 协议端里该选什么；
+ * - 细节（地址该填什么形、OneBot 方向名）折叠在 `?` tooltip 里，不占版面。
  *
  * 为什么不直接插一张空卡片：空卡片的地址是空的，用户点「连接」才看到「连接失败」，
  * 而且监听那一侧还需要用户自己知道要填端口和 `/onebot/v11/ws` 路径。
@@ -38,27 +37,28 @@ interface ModeOption {
   recommended?: boolean
 }
 
-// 名字 = 本程序在这个模式下扮演的角色；文案 = 本程序实际干什么。
+// 名字 = 本程序在这个模式下扮演的角色；文案 = 用户要在协议端里怎么配。
 // 括号里是 OneBot 的官方方向名，方便对照别人的教程。
 const OPTIONS: ModeOption[] = [
   {
     value: 'reverse',
     icon: 'mdi-call-received',
-    title: 'WS服务端',
-    desc: '本地监听 WebSocket 端口，客户端建立持久连接',
+    title: '本地监听（推荐）',
+    desc: '本机等协议端连进来，协议端里选「WebSocket 客户端」',
     tip:
-      '本程序在本地监听一个端口，等对端作为客户端连进来（OneBot 里叫 reverse-ws）。' +
-      '地址填本机的监听地址，形如 ws://0.0.0.0:3001/onebot/v11/ws。',
+      '在 NapCat / LLOneBot 里新建「WebSocket 客户端」，URL 填本机的监听地址' +
+      '（形如 ws://127.0.0.1:3001/onebot/v11/ws），保存时记得启用。' +
+      '创建账号后卡片上会给出地址，可一键复制。OneBot 里这叫 reverse-ws。',
     recommended: true,
   },
   {
     value: 'forward',
     icon: 'mdi-call-made',
-    title: 'WS客户端',
-    desc: '主动连接到外部 WebSocket 服务器（forward-ws）',
+    title: '向外连接',
+    desc: '本程序主动连协议端，协议端里选「WebSocket 服务端」',
     tip:
-      '本程序作为客户端主动连出去（OneBot 里叫 forward-ws）。需要先有一个 WebSocket 服务端，' +
-      '把它的地址填进来，形如 ws://127.0.0.1:3001/。',
+      '在协议端里新建「WebSocket 服务端」，把它给出的 ws 地址填到账号卡片里，' +
+      '端口和路径要与协议端一致。OneBot 里这叫 forward-ws。',
   },
 ]
 
@@ -72,9 +72,9 @@ const accountId = ref('')
 const ACCOUNT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/
 const idError = computed(() => {
   const v = accountId.value.trim()
-  if (!v) return '请填写账号 ID'
+  if (!v) return '请填写账号标识'
   if (!ACCOUNT_ID_RE.test(v)) return '只能用字母、数字、下划线、连字符，最多 32 个字符'
-  if (['none', 'null', 'global', '_global'].includes(v.toLowerCase())) return '该 ID 被系统保留，请换一个'
+  if (['none', 'null', 'global', '_global'].includes(v.toLowerCase())) return '这个名字被系统保留，请换一个'
   return ''
 })
 const canCreate = computed(() => !creating.value && !idError.value)
@@ -125,7 +125,7 @@ async function create() {
     <v-card>
       <v-card-title class="text-h5 pa-4 pb-0 pl-6">添加账号</v-card-title>
       <v-card-text class="pa-4 pl-6">
-        <div class="text-body-2 text-medium-emphasis mb-3">选一种连接方式，创建后不能改。</div>
+        <div class="text-body-2 text-medium-emphasis mb-3">选一种连接方式，创建后不能改；不确定就用推荐的本地监听。</div>
 
         <div class="mode-list">
           <v-card
@@ -182,10 +182,10 @@ async function create() {
           <v-col cols="12" sm="6">
             <v-text-field
               v-model="accountId"
-              label="账号 ID"
+              label="账号标识"
               placeholder="bot1"
               :error-messages="accountId ? idError : ''"
-              :hint="accountId ? '程序内部用它区分账号，创建后不能改' : ''"
+              :hint="accountId ? '用来区分多个号，创建后不能改' : ''"
               persistent-hint
               density="comfortable"
               hide-details="auto"
