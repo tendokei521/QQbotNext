@@ -12,7 +12,6 @@ import copy
 import json
 import time
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +20,13 @@ from app.core.task_manager import TaskManager
 from app.infrastructure.config.account_store import AccountStoreMixin
 from app.infrastructure.config.binding_store import BindingStoreMixin
 from app.infrastructure.config.channel_override_store import ChannelOverrideStoreMixin
+from app.infrastructure.config.config_writes import (
+    MISSING,
+    OP_KIND_ATTR,
+    ConfigOp,
+    ReentrantWriteLock,
+    persist_with_retry,
+)
 from app.infrastructure.config.group_store import GroupStoreMixin
 from app.infrastructure.config.ws_url import (
     ACCESS_TOKEN_MASK,
@@ -38,49 +44,16 @@ from app.infrastructure.persistence.database import Database
 
 #: 这四个名字历史上就在这里定义，外部（gateway / webui）从本模块导入。
 #: 现在实现搬到了 `ws_url.py`，这里保留重导出；`__all__` 让 linter 知道它们是公共 API。
+#: `ConfigOp` 由 `config_writes.py` 定义，这里重导出（bundle/applier 等仍从本模块导入）。
 __all__ = [
     "ACCESS_TOKEN_MASK",
+    "ConfigOp",
     "ConfigService",
     "mask_ws_url",
     "join_ws_url",
     "restore_ws_url",
     "split_ws_url",
 ]
-
-class _ReentrantLock:
-    """按事件循环任务可重入的异步写锁。
-
-    为什么不用裸 `asyncio.Lock`：ConfigService 的写路径会互相调用
-    （``add_bot → save_bots``、``delete_bot → save_bots``、
-    ``save_channel_override → delete_channel_override``），裸锁会在同一任务里
-    二次 acquire 时自锁死。重入按 ``current_task()`` 判断，深度归零才真正释放。
-
-    并发语义：同一进程内所有配置写（账号 / 绑定 / 群覆盖 / 预设 / kv）串行；
-    读路径不取锁（读的都是内存快照，写路径保证落库成功后才替换快照）。
-    """
-
-    def __init__(self) -> None:
-        self._lock = asyncio.Lock()
-        self._owner: asyncio.Task | None = None
-        self._depth = 0
-
-    async def __aenter__(self) -> _ReentrantLock:
-        task = asyncio.current_task()
-        if task is not None and task is self._owner:
-            self._depth += 1
-            return self
-        await self._lock.acquire()
-        self._owner = task
-        self._depth = 1
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb) -> None:
-        self._depth -= 1
-        if self._depth > 0:
-            return
-        self._owner = None
-        self._lock.release()
-
 
 Listener = Callable[[str, Any], Awaitable[None]]
 
@@ -99,35 +72,6 @@ DEFAULT_PROVIDER_SETTINGS: dict = {
 }
 
 
-@dataclass(frozen=True)
-class ConfigOp:
-    """一次配置写入操作（供 `ConfigService.apply_ops` 批量事务用）。
-
-    ``kind`` 决定落到哪张表；``value=None`` 表示删除该行。
-    key 的形状：
-    - ``binding``: ``(capability_id, scope_type, scope_id)``
-    - ``channel_override``: ``(account_id, capability, channel_id)``
-    - ``role_preset`` / ``provider_preset`` / ``provider_model``: ``(id,)``
-    """
-
-    kind: str
-    key: tuple
-    value: dict | None = None
-
-
-#: kind → 需要快照/恢复的内存缓存属性名（失败回滚用）
-_OP_KIND_ATTR = {
-    "binding": "_bindings",
-    "channel_override": "_channel_overrides",
-    "role_preset": "_role_presets",
-    "provider_preset": "_provider_presets",
-    "provider_model": "_provider_models",
-}
-
-#: 「内存里原本没有这个 key」哨兵（回滚时区分"没有"与"值为 None"）
-_MISSING = object()
-
-
 class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, ChannelOverrideStoreMixin):
     def __init__(
         self,
@@ -140,8 +84,8 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
         self.root = project_root
         self.log = log or logger
         self._listeners: list[Listener] = []
-        # 全量配置写的串行锁（见 `_ReentrantLock` 的说明）。读路径不取锁。
-        self._write_lock = _ReentrantLock()
+        # 全量配置写的串行锁（见 `config_writes.ReentrantWriteLock`）。读路径不取锁。
+        self._write_lock = ReentrantWriteLock()
         # 同步写路径的后台落盘任务登记在这里（可追踪/可取消；失败重试一次并告警）
         self._task_manager = task_manager
         self._persist_tasks: set[asyncio.Task] = set()
@@ -638,7 +582,7 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return  # 无运行中的事件循环（测试环境）：仅内存生效
-        coro = self._persist_with_retry(persist_fn, args)
+        coro = persist_with_retry(persist_fn, args, self.log)
         if self._task_manager is not None:
             task = self._task_manager.create_task(
                 coro, name="config:persist", owner="framework"
@@ -647,19 +591,6 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
             task = loop.create_task(coro)
         self._persist_tasks.add(task)
         task.add_done_callback(self._persist_tasks.discard)
-
-    async def _persist_with_retry(self, persist_fn: Callable[..., Any], args: tuple[Any, ...]) -> None:
-        """执行一次落盘；失败等 0.5s 重试，再失败则 error 留痕（后台任务无调用方可抛）。"""
-        for attempt in (1, 2):
-            try:
-                await persist_fn(*args)
-                return
-            except Exception as e:  # noqa: BLE001 —— 后台任务必须留痕，不能静默
-                if attempt == 1:
-                    self.log.warning(f"[Config] 配置落盘失败，0.5s 后重试: {e}")
-                    await asyncio.sleep(0.5)
-                else:
-                    self.log.error(f"[Config] 配置落盘失败（已重试，本次修改仅内存生效）: {e}")
 
     # ==================== 通用键值（kv） ====================
     # 迁移标记 / 首启完成标记这类"框架级小状态"统一走这里，不要再各自写 SQL。
@@ -698,7 +629,7 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
             undo: list[tuple[dict, Any, Any]] = []
             seen_slots: set[tuple[str, Any]] = set()
             for op in ops:
-                attr = _OP_KIND_ATTR.get(op.kind)
+                attr = OP_KIND_ATTR.get(op.kind)
                 if attr is None:
                     raise ValueError(f"未知的配置操作类型: {op.kind}")
                 container, slot = self._op_memory_slot(op)
@@ -706,12 +637,12 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
                 if slot_key in seen_slots:
                     continue
                 seen_slots.add(slot_key)
-                previous = container.get(slot, _MISSING)
+                previous = container.get(slot, MISSING)
                 # 不能 deepcopy 哨兵（会变成另一个对象，回滚时 is 判断失效）
                 undo.append((
                     container,
                     slot,
-                    previous if previous is _MISSING else copy.deepcopy(previous),
+                    previous if previous is MISSING else copy.deepcopy(previous),
                 ))
 
             sqls: list[tuple[str, Sequence[Any]]] = []
@@ -725,7 +656,7 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
                     await self.db.run_in_transaction(sqls)
             except Exception:
                 for container, slot, previous in undo:
-                    if previous is _MISSING:
+                    if previous is MISSING:
                         container.pop(slot, None)
                     else:
                         container[slot] = previous
