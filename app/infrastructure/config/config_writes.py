@@ -84,6 +84,51 @@ OP_KIND_ATTR = {
 MISSING = object()
 
 
+def op_memory_slot(store: Any, op: ConfigOp) -> tuple[dict, Any]:
+    """返回 op 对应的「内存容器 + key」（apply_ops 失败回滚按这个粒度记录）。"""
+    kind = op.kind
+    if kind == "binding":
+        container = store._bindings.setdefault(str(op.key[0]), {})
+        return container, (str(op.key[1]), str(op.key[2]))
+    if kind == "channel_override":
+        return store._channel_overrides, (str(op.key[0]), str(op.key[1]), str(op.key[2]))
+    if kind == "role_preset":
+        return store._role_presets, str(op.key[0])
+    if kind == "provider_preset":
+        return store._provider_presets, str(op.key[0])
+    if kind == "provider_model":
+        return store._provider_models, str(op.key[0])
+    raise ValueError(f"未知的配置操作类型: {kind}")
+
+
+async def flush_pending_tasks(tasks: set[asyncio.Task], log: Any, timeout: float = 5.0) -> int:
+    """等待一组后台落盘任务全部结束，返回已结束数量。
+
+    关停时**必须**在取消任务/关库之前调用：同步写接口
+    （`ModuleConfig.set` 等）的最后一次配置修改排在这里，直接取消会让它
+    静默丢失（DB 里没有、日志也没有）。超时只告警并取消残留任务，不无限等。
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    flushed = 0
+    while True:
+        pending = [task for task in tasks if not task.done()]
+        if not pending:
+            return flushed
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            log.warning(
+                f"[Config] 关停时仍有 {len(pending)} 个落盘任务未完成（超时 {timeout}s），"
+                f"取消残留任务: {', '.join(task.get_name() for task in pending)}"
+            )
+            for task in pending:
+                task.cancel()
+            return flushed
+        done, _ = await asyncio.wait(pending, timeout=remaining)
+        flushed += len(done)
+        # 任务收尾时可能又排了新的落盘 → 循环到队列清空或总超时
+
+
 async def persist_with_retry(
     persist_fn: Callable[..., Any],
     args: tuple[Any, ...],
@@ -95,13 +140,33 @@ async def persist_with_retry(
     后台任务没有调用方可以抛出，所以最终失败只能记日志；但不能静默——否则
     "保存成功"的假象会一直留到重启后发现配置没了。
     """
+    async def _final_write() -> None:
+        """取消路径的兜底：落盘任务没有调用方可抛，失败也必须留痕。"""
+        log.warning("[Config] 落盘任务被取消，尝试完成最后一次写入")
+        try:
+            await persist_fn(*args)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 —— 兜底写入失败也要留痕
+            log.error(f"[Config] 取消时的兜底写入仍失败（本次修改仅内存生效）: {e}")
+
     for attempt in (1, 2):
         try:
             await persist_fn(*args)
             return
+        except asyncio.CancelledError:
+            # 关停时任务被取消：仍然尽力写完最后一次再让取消继续传播。
+            # `CancelledError` 是 BaseException，下面的 `except Exception` 抓不到。
+            await _final_write()
+            raise
         except Exception as e:  # noqa: BLE001 —— 后台任务必须留痕，不能静默
             if attempt == 1:
                 log.warning(f"[Config] 配置落盘失败，0.5s 后重试: {e}")
-                await asyncio.sleep(0.5)
+                try:
+                    await asyncio.sleep(0.5)
+                except asyncio.CancelledError:
+                    # 取消正好落在重试等待里（旧实现会在这里静默丢数据）
+                    await _final_write()
+                    raise
             else:
                 log.error(f"[Config] 配置落盘失败（已重试，本次修改仅内存生效）: {e}")

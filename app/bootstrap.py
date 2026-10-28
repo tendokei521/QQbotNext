@@ -452,21 +452,36 @@ async def shutdown_services(
     task_manager: TaskManager,
     stat_recorder: StatRecorder,
     db: Database,
+    config_service: ConfigService | None = None,
     cancel_timeout: float = 5.0,
 ) -> None:
-    """按依赖顺序关停：网关 → Agent/模块运行时 → 残留任务（等待结束）→ 统计 → DB。
+    """按依赖顺序关停：网关 → Agent/模块运行时 → 配置落盘 → 残留任务 → 统计 → DB。
 
     顺序不能换：后台任务的 finally 里仍可能写 DB（统计、会话、账号快照）。
     历史实现只 ``cancel_all()`` 就立刻关库，于是这些写入抛
     "Cannot operate on a closed database"——退出时日志报错、最后一批数据丢失。
-    这里必须先 ``await agent_manager.shutdown()``（等 LLM 回合任务收尾）、
-    再 ``await cancel_all_await()`` 等其余任务结束，最后关统计与库。
+
+    配置落盘任务（owner="config"）必须在取消前先 flush：同步写接口的最后一次
+    修改排在它里面，直接取消会让"保存成功"的假象留到重启后发现配置没了。
     """
     await bot_service.shutdown()
     await agent_manager.shutdown()
+    # ① 先等已排队的配置落盘写完，再取消后台任务
+    if config_service is not None:
+        await config_service.flush_pending()
     cancelled = await task_manager.cancel_all_await(timeout=cancel_timeout)
     if cancelled:
         logger.info(f"已取消 {cancelled} 个后台任务")
+    # ② 取消阶段任务的 finally 可能又排了新的配置落盘：再 flush 一次
+    if config_service is not None:
+        await config_service.flush_pending()
+    # 超时仍未结束的任务仍保留登记（不脱管）：关库前明确告警，便于定位
+    pending_names = task_manager.pending_names()
+    if pending_names:
+        logger.warning(
+            f"关停超时：仍有 {len(pending_names)} 个后台任务未结束"
+            f"（关库后继续运行有风险）: {', '.join(pending_names[:10])}"
+        )
     try:
         await stat_recorder.close()
     except Exception as e:  # noqa: BLE001 —— 退出路径必须继续走完（统计收尾失败不阻断关库）
@@ -580,14 +595,15 @@ async def run(settings: Settings | None = None) -> None:
             _container.get(SetupAccountService).stop_connecting()
         except Exception as e:  # noqa: BLE001 —— 退出路径必须继续走完
             logger.warning(f"[Setup] 退出时停止连接重试失败: {e}")
-        # 关停顺序集中在一处（见 `shutdown_services` 的说明）：网关 → Agent → 任务（await）
-        # → 统计 → DB。任务 finally 里的 DB 写必须早于 db.close()。
+        # 关停顺序集中在一处（见 `shutdown_services` 的说明）：网关 → Agent → 配置落盘
+        # → 任务（await）→ 统计 → DB。任务 finally 里的 DB 写必须早于 db.close()。
         await shutdown_services(
             bot_service=bot_service,
             agent_manager=_container.get(AgentManager),
             task_manager=_container.get(TaskManager),
             stat_recorder=_container.get(StatRecorder),
             db=db,
+            config_service=_container.get(ConfigService),
         )
         logger.info("已关闭")
 

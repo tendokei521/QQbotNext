@@ -25,6 +25,8 @@ from app.infrastructure.config.config_writes import (
     OP_KIND_ATTR,
     ConfigOp,
     ReentrantWriteLock,
+    flush_pending_tasks,
+    op_memory_slot,
     persist_with_retry,
 )
 from app.infrastructure.config.group_store import GroupStoreMixin
@@ -583,14 +585,17 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
         except RuntimeError:
             return  # 无运行中的事件循环（测试环境）：仅内存生效
         coro = persist_with_retry(persist_fn, args, self.log)
+        label = f"persist:{getattr(persist_fn, '__name__', '?')}"
         if self._task_manager is not None:
-            task = self._task_manager.create_task(
-                coro, name="config:persist", owner="framework"
-            )
+            task = self._task_manager.create_task(coro, name=label, owner="config")
         else:
             task = loop.create_task(coro)
         self._persist_tasks.add(task)
         task.add_done_callback(self._persist_tasks.discard)
+
+    async def flush_pending(self, timeout: float = 5.0) -> int:
+        """等待所有后台落盘任务完成（关停时必须在 ``cancel_all_await`` 之前调用）。"""
+        return await flush_pending_tasks(self._persist_tasks, self.log, timeout)
 
     # ==================== 通用键值（kv） ====================
     # 迁移标记 / 首启完成标记这类"框架级小状态"统一走这里，不要再各自写 SQL。
@@ -632,7 +637,7 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
                 attr = OP_KIND_ATTR.get(op.kind)
                 if attr is None:
                     raise ValueError(f"未知的配置操作类型: {op.kind}")
-                container, slot = self._op_memory_slot(op)
+                container, slot = op_memory_slot(self, op)
                 slot_key = (attr, slot)
                 if slot_key in seen_slots:
                     continue
@@ -668,22 +673,6 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
             await self._notify("provider_presets", self.list_provider_presets())
         if "provider_model" in touched:
             await self._notify("provider_models", self.list_provider_models())
-
-    def _op_memory_slot(self, op: ConfigOp) -> tuple[dict, Any]:
-        """返回 op 对应的「内存容器 + key」（回滚快照按这个粒度记录）。"""
-        kind = op.kind
-        if kind == "binding":
-            container = self._bindings.setdefault(str(op.key[0]), {})
-            return container, (str(op.key[1]), str(op.key[2]))
-        if kind == "channel_override":
-            return self._channel_overrides, (str(op.key[0]), str(op.key[1]), str(op.key[2]))
-        if kind == "role_preset":
-            return self._role_presets, str(op.key[0])
-        if kind == "provider_preset":
-            return self._provider_presets, str(op.key[0])
-        if kind == "provider_model":
-            return self._provider_models, str(op.key[0])
-        raise ValueError(f"未知的配置操作类型: {kind}")
 
     def _op_to_sql(self, op: ConfigOp) -> tuple[str, Sequence[Any]] | None:
         """把一个 op 写进内存，并返回对应的 SQL（None = 无需落库）。"""

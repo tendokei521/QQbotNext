@@ -79,9 +79,13 @@ class TaskManager:
         ``timeout``：最多等多久（None = 一直等）。超时只记警告、不再等待——
         任务已收到取消，退出路径不能被卡住；正常情况必须等它跑完 finally，
         因为那里往往还有最后一次 DB 写入（关库前必须完成）。
+
+        **超时后任务保留登记（不 pop）**：它们还在跑，随后关库会出错——保留登记
+        并打印任务名，``pending_names()`` 才能在关库前把"谁还没停"说清楚。
         """
-        tasks = self._tasks.pop(owner, [])
+        tasks = list(self._tasks.get(owner, []))
         if not tasks:
+            self._tasks.pop(owner, None)
             return 0
         for task in tasks:
             if not task.done():
@@ -91,15 +95,23 @@ class TaskManager:
         else:
             _, pending = await asyncio.wait(tasks, timeout=timeout)
             if pending:
+                names = ", ".join(task.get_name() for task in pending)
                 task_logger.warning(
-                    f"task × [{owner}] 取消超时({timeout}s)，仍有 {len(pending)} 个任务未结束"
+                    f"task × [{owner}] 取消超时({timeout}s)，{len(pending)} 个任务仍在运行"
+                    f"（保留登记）: {names}"
                 )
+        remaining = [task for task in tasks if not task.done()]
+        if remaining:
+            self._tasks[owner] = remaining
+        else:
+            self._tasks.pop(owner, None)
         return len(tasks)
 
     async def cancel_all_await(self, timeout: float = 5.0) -> int:
         """取消全部任务并等待其结束（含 finally），返回取消数量。
 
         供优雅停机用：先等任务把 finally 里最后一次 DB 写做完，再关库。
+        超时未结束的任务仍保留登记，调用方可在关库前用 ``pending_names()`` 告警。
         """
         owners = list(self._tasks.keys())
         total = 0
@@ -108,6 +120,15 @@ class TaskManager:
         if total:
             task_logger.info(f"task × [all] 停机取消 {total} 个后台任务")
         return total
+
+    def pending_names(self) -> list[str]:
+        """仍在运行的已登记任务名（关停超时后诊断用；已结束的不计入）。"""
+        return [
+            task.get_name()
+            for tasks in list(self._tasks.values())
+            for task in list(tasks)
+            if not task.done()
+        ]
 
     def cancel_all(self) -> int:
         owners = list(self._tasks.keys())
