@@ -27,16 +27,22 @@ const mod = computed(() => {
 // 加载兜底：模块数据未就绪时自动重试，避免启动期/网络抖动导致永久"不存在"
 const retryCount = ref(0)
 let retryTimer: number | null = null
+/** 当前草稿对应的账号/模块：用于识别「同账号同模块的纯数据刷新」 */
+let draftAccountId: string | null = null
+let draftModuleName = ''
 
 watch(mod, (m) => {
-  if (m) {
-    initFromModule()
-    if (retryTimer) {
-      clearTimeout(retryTimer)
-      retryTimer = null
-    }
-    retryCount.value = 0
+  if (!m) return
+  if (retryTimer) {
+    clearTimeout(retryTimer)
+    retryTimer = null
   }
+  retryCount.value = 0
+  // 同账号、同模块的纯数据刷新（WS 触发的重载 / 其它页面保存后重拉）不要覆盖正在编辑的草稿。
+  // 切账号或换模块时 draftAccountId/draftModuleName 不匹配，照常初始化。
+  const sameScope = draftModuleName === m.name && draftAccountId === modules.botId
+  if (sameScope && (dirtyFlag || permDirtyFlag)) return
+  initFromModule()
 })
 
 const PERMISSION_LABEL: Record<string, string> = {
@@ -78,6 +84,8 @@ let permEditSeq = 0
 function initFromModule() {
   const m = mod.value
   if (!m) return
+  draftModuleName = m.name
+  draftAccountId = modules.botId
   Object.keys(draft).forEach((k) => delete draft[k])
   Object.assign(draft, m.config || {})
   permission.value = {
