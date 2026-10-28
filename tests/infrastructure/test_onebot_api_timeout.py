@@ -88,8 +88,8 @@ async def test_timeout_records_orphan_echo_and_late_response_is_not_matched():
 
     echo_id = conn._orphan_echoes[0]
     late = {"status": "ok", "echo": echo_id, "action": "send_group_forward_msg"}
-    # 迟到响应：不消费（返回 False），不抛异常
-    assert conn.handle_api_response(late) is False
+    # 迟到响应：按「响应」消费（返回 True）→ 网关不会把它当事件派发；但不再配对
+    assert conn.handle_api_response(late) is True
 
 
 async def test_normal_response_still_matched():

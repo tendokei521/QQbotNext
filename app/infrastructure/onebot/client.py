@@ -383,7 +383,14 @@ class BotConnection(IBot):
             self._pending.pop(echo_id, None)
 
     def handle_api_response(self, message: dict) -> bool:
-        """由消息循环调用：把 API 响应填充到对应 Future。返回是否消费了该消息。"""
+        """由消息循环调用：把 API 响应填充到对应 Future。返回是否消费了该消息。
+
+        **任何带 echo 的消息都算已消费**（返回 True）：不在 pending 也不在 orphan 的
+        echo 可能是重复响应或已清理的请求，但它绝不是事件上报——返回 False 会让网关
+        继续 decode 成 ``BaseEvent(type="unknown")`` 塞进模块链，触发无意义派发。
+        区分日志级别：迟到响应用 warning（请求方已放弃，可能已执行）；完全未匹配的
+        echo 用 debug（多为重复/过期回包，不惊动用户）。
+        """
         echo_id = message.get("echo")
         if not echo_id:
             return False
@@ -395,9 +402,12 @@ class BotConnection(IBot):
                     f"[{self.label}] 超时请求的迟到响应 action={message.get('action', '?')} "
                     f"echo={echo_id[:8]}（请求方已放弃，仅留痕）"
                 )
-                return False
-            api_logger.warning(f"[{self.label}] 未找到对应请求 echo={echo_id[:8]}")
-            return False
+            else:
+                api_logger.debug(
+                    f"[{self.label}] 未匹配的 API 响应 action={message.get('action', '?')} "
+                    f"echo={echo_id[:8]}（已按响应消费，不当作事件派发）"
+                )
+            return True
         if not future.done():
             future.set_result(message)
         return True

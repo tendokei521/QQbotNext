@@ -591,7 +591,14 @@ class OneBotGateway(GatewayLifecycleMixin):
                         connection_ended = True
                         break
 
-                    # 2. 解码为领域事件并入队处理（不阻塞接收循环）
+                    # 2. 非事件上报（无 post_type 的心跳/未知包/残留响应）一律不入队：
+                    #    带 echo 的已在上面被消费；这里兜底挡掉无 echo 的无类型消息，
+                    #    否则会被 decode 成 BaseEvent(type="unknown") 塞进模块链。
+                    if not msg_dict.get("post_type"):
+                        bot_logger.debug(f"忽略无 post_type 的消息: {msg_dict}")
+                        continue
+
+                    # 3. 解码为领域事件并入队处理（不阻塞接收循环）
                     event = decode(msg_dict, conn)
                     if isinstance(event, BaseEvent):
                         self._enqueue_event(key, queue, event, bot_logger)
