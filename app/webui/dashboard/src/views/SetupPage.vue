@@ -480,7 +480,7 @@ onUnmounted(stopPolling)
             </tbody>
           </v-table>
 
-          <v-row dense>
+          <v-row dense class="mb-5">
             <v-col cols="12" md="6">
               <v-text-field
                 v-model="account.id"
