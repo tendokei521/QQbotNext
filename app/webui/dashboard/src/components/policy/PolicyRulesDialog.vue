@@ -39,7 +39,7 @@ const userMode = ref<'inherit' | 'blacklist' | 'whitelist'>('inherit')
 const userList = ref('')
 
 const TRIGGER_ITEMS: { title: string; value: TriggerMode }[] = [
-  { title: '继承', value: 'inherit' },
+  { title: '沿用现有', value: 'inherit' },
   { title: '仅 @ 我', value: 'at' },
   { title: '仅关键词', value: 'keyword' },
   { title: '@ 或关键词', value: 'both' },
@@ -47,7 +47,7 @@ const TRIGGER_ITEMS: { title: string; value: TriggerMode }[] = [
 ]
 
 const USER_MODE_ITEMS = [
-  { title: '继承', value: 'inherit' },
+  { title: '沿用现有', value: 'inherit' },
   { title: '黑名单（以下用户不响应）', value: 'blacklist' },
   { title: '白名单（仅以下用户可触发）', value: 'whitelist' },
 ]
@@ -64,7 +64,7 @@ const inheritedTrigger = computed(() => {
 const inheritedQuiet = computed(() => String(resolved.value.quiet_hours || '') || '未设置')
 const inheritedCooldown = computed(() => String(resolved.value.reply_cooldown ?? '') || '未设置（无冷却）')
 const inheritedDebounce = computed(
-  () => String(resolved.value.message_debounce_seconds ?? '') || '未设置（不抖动）',
+  () => String(resolved.value.message_debounce_seconds ?? '') || '未设置（不合并）',
 )
 
 function parseKeywords(): string[] {
@@ -179,7 +179,7 @@ function validate(payload: ReturnType<typeof buildPayload>): string {
   }
   for (const key of ['reply_cooldown', 'message_debounce_seconds']) {
     if (payload.config[key] !== undefined && (!Number.isFinite(payload.config[key]) || payload.config[key] < 0)) {
-      return '冷却/抖动请填写 ≥0 的数字'
+      return '冷却和合并等待请填写 ≥0 的数字'
     }
   }
   const quiet = payload.config.quiet_hours
@@ -187,7 +187,7 @@ function validate(payload: ReturnType<typeof buildPayload>): string {
     return '免打扰时段格式应为 HH:MM-HH:MM（如 23:00-08:00）'
   }
   if (userMode.value !== 'inherit' && !parseLines().length) {
-    return '名单为空白时请选「继承」，或至少填一个 QQ 号'
+    return '请选择「沿用现有」，或至少填一个 QQ 号'
   }
   return ''
 }
@@ -246,7 +246,7 @@ watch(
 
         <template v-else-if="!loading">
           <div class="text-caption mb-3" style="opacity: 0.7">
-            留空 = 继承上一层；保存后本层只记录你改动的那几项。
+            不填的项沿用现有设置；保存后只记录你这次改动的内容。
           </div>
 
           <v-select
@@ -255,7 +255,7 @@ watch(
             label="触发方式"
             density="comfortable"
             variant="outlined"
-            :hint="`继承值：${inheritedTrigger}`"
+            :hint="`当前生效：${inheritedTrigger}`"
             persistent-hint
             class="mb-3"
           />
@@ -276,7 +276,9 @@ watch(
                 label="回复冷却（秒）"
                 type="number"
                 min="0"
-                :placeholder="inheritedCooldown"
+                placeholder="留空 = 沿用当前值"
+                :hint="`当前生效：${inheritedCooldown}`"
+                persistent-hint
                 density="comfortable"
                 variant="outlined"
               />
@@ -284,10 +286,12 @@ watch(
             <v-col cols="12" md="6">
               <v-text-field
                 v-model="debounce"
-                label="消息抖动（秒）"
+                label="消息合并等待（秒）"
                 type="number"
                 min="0"
-                :placeholder="inheritedDebounce"
+                placeholder="留空 = 沿用当前值"
+                :hint="`当前生效：${inheritedDebounce}`"
+                persistent-hint
                 density="comfortable"
                 variant="outlined"
               />
@@ -297,8 +301,8 @@ watch(
           <v-text-field
             v-model="quietHours"
             label="免打扰时段"
-            placeholder="如 23:00-08:00；留空 = 不启用"
-            :hint="`继承值：${inheritedQuiet}`"
+            placeholder="如 23:00-08:00；留空 = 沿用当前值"
+            :hint="`当前生效：${inheritedQuiet}`"
             persistent-hint
             density="comfortable"
             variant="outlined"
@@ -327,7 +331,7 @@ watch(
 
       <v-card-actions>
         <v-chip v-if="Object.keys(sources).length" size="x-small" variant="text" class="ml-2">
-          当前生效来源：{{ channelId ? '本群/账号/默认' : '账号/默认' }}
+          {{ channelId ? '没填的项沿用本群或账号设置' : '没填的项沿用账号设置或默认值' }}
         </v-chip>
         <v-spacer />
         <v-btn variant="text" @click="emit('update:modelValue', false)">取消</v-btn>
