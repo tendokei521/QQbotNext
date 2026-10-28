@@ -1,4 +1,5 @@
 import axios, { AxiosError } from 'axios'
+import { useNotifyStore } from '@/stores/notify'
 
 /**
  * 鉴权凭据解析。
@@ -37,16 +38,55 @@ http.interceptors.request.use((config) => {
   return config
 })
 
+/** 跳登录前的草稿落盘回调：返回 Promise 的回调会被等待（有超时上限）。 */
+type DraftFlush = () => Promise<unknown> | unknown
+const draftFlushes = new Set<DraftFlush>()
+
+/** 注册一个「跳登录前先落盘」回调，返回注销函数（页面卸载时调用）。 */
+export function registerDraftFlush(fn: DraftFlush): () => void {
+  draftFlushes.add(fn)
+  return () => draftFlushes.delete(fn)
+}
+
+/** 会话过期的确认握手机制：同一次过期只处理一次，避免并发 401 触发多次跳转/提示。 */
+let redirecting = false
+
+/**
+ * 会话过期统一兜底：先给未保存草稿一次落盘机会，再整页跳独立登录页（带当前地址以便登录后返回）。
+ *
+ * 用整页跳转而非路由跳转——登录页是后端直出的独立页面，不在 SPA 路由表里。
+ * 落盘请求本身也可能 401，所以只等最多 800ms：不能让用户卡在已过期的页面上。
+ */
+export async function redirectToLogin(reason = '登录已过期'): Promise<void> {
+  if (redirecting || location.pathname.startsWith('/login')) return
+  redirecting = true
+  const next = encodeURIComponent(location.pathname + location.search + location.hash)
+  try {
+    // 提示必须在整页导航前发出：导航会清掉当前文档里的通知
+    useNotifyStore().push(`${reason}，正在返回登录页…`, 'warning')
+  } catch {
+    /* Pinia 尚未就绪（极早期请求）时忽略提示 */
+  }
+  window.dispatchEvent(new CustomEvent('qqbot:session-expired'))
+  try {
+    if (draftFlushes.size) {
+      const pending = Promise.allSettled([...draftFlushes].map((fn) => Promise.resolve().then(fn)))
+      await Promise.race([pending, new Promise((resolve) => setTimeout(resolve, 800))])
+    }
+  } finally {
+    location.href = `/login?next=${next}`
+  }
+}
+
 /**
  * 401 统一兜底：会话过期或 cookie 被清后整页跳到独立登录页（带当前地址以便登录后返回）。
- * 用整页跳转而非路由跳转——登录页是后端直出的独立页面，不在 SPA 路由表里。
+ * 跳转前会给已注册的页面一次保存草稿的机会（见 registerDraftFlush）。
  */
 http.interceptors.response.use(
   (resp) => resp,
   (error: AxiosError) => {
     if (error.response?.status === 401 && !location.pathname.startsWith('/login')) {
-      const next = encodeURIComponent(location.pathname + location.search + location.hash)
-      location.href = `/login?next=${next}`
+      void redirectToLogin()
     }
     return Promise.reject(error)
   },
