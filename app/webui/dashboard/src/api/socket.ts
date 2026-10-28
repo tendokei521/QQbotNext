@@ -1,6 +1,9 @@
-import { token } from './http'
+import { redirectToLogin, token } from './http'
 
 type MessageHandler = (msg: any) => void
+
+/** 实时连接状态：connecting=正在握手 / open=已连上 / closed=已断开（含重连等待中） */
+export type SocketStatus = 'connecting' | 'open' | 'closed'
 
 const handlers = new Map<string, Set<MessageHandler>>()
 let ws: WebSocket | null = null
@@ -10,6 +13,14 @@ let manualClosed = false
 let connected = false
 let logArrayHandler: MessageHandler | null = null
 let logMode: 'simple' | 'raw' = 'simple'
+
+/** 连续重连失败次数（连上后归零）：用于计算退避时长，也用于顶栏「第 N 次重连」提示 */
+let retryAttempt = 0
+let status: SocketStatus = 'closed'
+const BASE_RETRY_MS = 1000
+const MAX_RETRY_MS = 30000
+/** 鉴权失败/被策略拒绝：再怎么重连也不会成功，直接回登录页（与 HTTP 401 兜底同路） */
+const LOGIN_REDIRECT_CODES = new Set([4401, 1008])
 
 /** 向某类订阅者分发一条广播（单个处理器异常不影响其他处理器）。 */
 function dispatch(type: string, payload: Record<string, unknown> = {}): void {
@@ -25,11 +36,27 @@ function dispatch(type: string, payload: Record<string, unknown> = {}): void {
   })
 }
 
+/**
+ * 广播连接状态（供顶栏显示「实时连接断开/重连中」）。
+ *
+ * 契约：`socket_status` 的 payload 固定为 `{ status, attempt }`，
+ * `attempt` 是当前这次连接之前的连续失败次数（0 = 首次连接/刚连上）。
+ */
+function broadcastStatus(next: SocketStatus): void {
+  status = next
+  dispatch('socket_status', { status: next, attempt: retryAttempt })
+}
+
 /** 连接已断开：复位状态并通知订阅者（如「实时」徽标改回「重连中」）。 */
 function markDisconnected(): void {
   if (!connected) return
   connected = false
   dispatch('socket_close')
+}
+
+/** 当前连接状态与连续失败次数（供晚挂载的组件初始化显示，不必等下一次广播）。 */
+export function getSocketStatus(): { status: SocketStatus; attempt: number } {
+  return { status, attempt: retryAttempt }
 }
 
 /**
@@ -51,6 +78,7 @@ export function setLogMode(mode: 'simple' | 'raw'): void {
     clearTimeout(retryTimer)
     retryTimer = null
   }
+  retryAttempt = 0
   if (ws) {
     const old = ws
     ws = null
@@ -61,7 +89,7 @@ export function setLogMode(mode: 'simple' | 'raw'): void {
   connectSocket()
 }
 
-/** 订阅指定 type 的广播消息（bot_status_updated / module_config_updated ...） */
+/** 订阅指定 type 的广播消息（bot_status_updated / module_config_updated / socket_status ...） */
 export function onSocketMessage(type: string, handler: MessageHandler): () => void {
   let set = handlers.get(type)
   if (!set) {
@@ -95,11 +123,18 @@ export function connectSocket(): void {
   const query = `?${params.toString()}`
   const socket = new WebSocket(`${proto}://${location.host}/ws/logs${query}`)
   ws = socket
+  broadcastStatus('connecting')
 
   socket.onopen = () => {
     if (ws !== socket) return // 已被 setLogMode 换掉的旧连接：忽略它的迟到事件
     connected = true
+    retryAttempt = 0 // 连上即复位退避：下一次断线重新从 1s 开始
+    if (retryTimer !== null) {
+      clearTimeout(retryTimer)
+      retryTimer = null
+    }
     // 广播“已连接/重连成功”，各 store 借此重拉状态与模块数据，弥补断线期间的丢失更新
+    broadcastStatus('open')
     dispatch('socket_open')
   }
 
@@ -120,14 +155,32 @@ export function connectSocket(): void {
     }
   }
 
-  socket.onclose = () => {
-    if (ws === socket) {
-      ws = null
-      markDisconnected()
+  socket.onclose = (ev) => {
+    if (ws !== socket) return // 已被替换/主动关闭的旧连接：它的事件不再影响当前状态
+    ws = null
+    markDisconnected()
+
+    if (LOGIN_REDIRECT_CODES.has(ev.code) && !location.pathname.startsWith('/login')) {
+      // 鉴权/策略拒绝：重连没有意义，和 HTTP 401 走同一条「先落盘再跳登录」的路
+      manualClosed = true
+      broadcastStatus('closed')
+      void redirectToLogin()
+      return
     }
-    if (!manualClosed) {
-      retryTimer = window.setTimeout(connectSocket, 3000)
+    if (manualClosed) {
+      broadcastStatus('closed')
+      return
     }
+
+    // 指数退避：1s → 2s → 4s …… 上限 30s；连上后由 onopen 复位
+    const delay = Math.min(BASE_RETRY_MS * 2 ** retryAttempt, MAX_RETRY_MS)
+    retryAttempt += 1
+    broadcastStatus('closed')
+    if (retryTimer !== null) clearTimeout(retryTimer)
+    retryTimer = window.setTimeout(() => {
+      retryTimer = null
+      connectSocket()
+    }, delay)
   }
 }
 
@@ -137,7 +190,9 @@ export function closeSocket(): void {
     clearTimeout(retryTimer)
     retryTimer = null
   }
+  retryAttempt = 0
   markDisconnected()
+  broadcastStatus('closed')
   ws?.close()
   ws = null
 }
