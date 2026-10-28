@@ -494,13 +494,13 @@ onMounted(async () => {
                 :key="mod.name"
                 class="text-caption"
               >
-                模块 {{ mod.name }}：{{ mod.loaded && !mod.error ? '已加载' : '未加载，可在「功能插件」页点重试' }}
+                插件 {{ mod.name }}：{{ mod.loaded && !mod.error ? '已加载' : '未加载，可在「功能插件」页点重试' }}
               </div>
               <div
                 v-if="!applyResult.health.agent.persona || !applyResult.health.agent.provider_preset || !applyResult.health.agent.provider_model"
                 class="text-caption"
               >
-                人设、模型服务或模型还没选好，请到 Agent 页检查后再使用。
+                人设、模型服务或模型还没选好，请到「AI 对话设置」检查后再使用。
               </div>
             </template>
           </v-alert>
