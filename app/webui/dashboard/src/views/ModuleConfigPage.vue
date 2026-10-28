@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useModulesStore, isBuiltinModule, type PermissionConfig } from '@/stores/modules'
 import { useResponderStore, type ResponderGroup } from '@/stores/responder'
 import { useBotsStore, displayName } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
-import { errorMessage } from '@/api/http'
+import { errorMessage, registerDraftFlush } from '@/api/http'
 import ConfigForm from '@/components/config/ConfigForm.vue'
 import PermissionEditor from '@/components/config/PermissionEditor.vue'
 
@@ -69,6 +69,8 @@ let autosaveTimer: number | null = null
 let permTimer: number | null = null
 let dirtyFlag = false
 let permDirtyFlag = false
+/** 会话过期跳转前的草稿落盘注销函数 */
+let unregisterDraftFlush: (() => void) | null = null
 // 编辑序号：保存期间若又有新编辑，完成时按序号判断不清理 dirty，避免最新编辑丢失
 let editSeq = 0
 let permEditSeq = 0
@@ -144,6 +146,12 @@ async function doSavePermission() {
     if (permEditSeq !== snapshotSeq) return
     notify.push(errorMessage(err), 'error')
   }
+}
+
+/** 立即落盘配置与权限的未保存改动（离开页面 / 切账号 / 会话过期前调用）。 */
+async function flushDrafts() {
+  await doSave()
+  await doSavePermission()
 }
 
 // ---------- 启用开关 ----------
@@ -305,7 +313,9 @@ function onPluginLoad(e: Event) {
 
 watch(
   () => bots.currentId,
-  () => {
+  async () => {
+    // 先把当前账号的未保存改动写完，再拉新账号的模块数据（否则草稿会被 initFromModule 覆盖）
+    await flushDrafts()
     loadResponder()
     // 切换账号后重拉模块配置
     modules.load()
@@ -327,6 +337,7 @@ async function ensureModule() {
 }
 
 onMounted(async () => {
+  unregisterDraftFlush = registerDraftFlush(flushDrafts)
   if (!mod.value) {
     await modules.load()
   }
@@ -336,7 +347,14 @@ onMounted(async () => {
   await nextTick()
 })
 
+onBeforeUnmount(() => {
+  // 卸载时 2s 防抖窗口里可能还有未保存的编辑：立即落盘，而不是只 clearTimeout 丢掉
+  void flushDrafts()
+})
+
 onUnmounted(() => {
+  unregisterDraftFlush?.()
+  unregisterDraftFlush = null
   if (autosaveTimer) clearTimeout(autosaveTimer)
   if (permTimer) clearTimeout(permTimer)
   if (retryTimer) clearTimeout(retryTimer)
