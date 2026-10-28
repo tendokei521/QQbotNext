@@ -38,6 +38,8 @@ import secrets
 import time
 from dataclasses import dataclass
 
+from app.core.logger import webui_logger
+
 #: 会话 cookie 名
 SESSION_COOKIE = "qqbot_webui_session"
 
@@ -100,10 +102,31 @@ def verify_session(token: str, value: str | None) -> bool:
 
 
 def tokens_match(provided: str, expected: str) -> bool:
-    """静态令牌比较：定长比较，两条通道共用。"""
+    """静态令牌比较：定长比较，两条通道共用。
+
+    **必须按 UTF-8 编码后比较**：``hmac.compare_digest`` 对 ``str`` 只接受 ASCII，
+    非 ASCII 令牌会直接抛 ``TypeError`` → 所有 ``/api``、页面、WS 握手全部 500，
+    全站不可用（与 ``onebot/reverse.py::_token_matches`` 口径一致）。
+    """
     if not provided or not expected:
         return False
-    return hmac.compare_digest(provided, expected)
+    _warn_non_ascii_token(expected)
+    return hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8"))
+
+
+#: 已经告警过的非 ASCII 令牌（按令牌值去重，避免每个请求都刷一条日志）
+_NON_ASCII_WARNED: set[str] = set()
+
+
+def _warn_non_ascii_token(token: str) -> None:
+    """令牌含非 ASCII 字符时明确告警：能工作，但传给客户端时容易失真。"""
+    if token.isascii() or token in _NON_ASCII_WARNED:
+        return
+    _NON_ASCII_WARNED.add(token)
+    webui_logger.warning(
+        "[WebUI] WEBUI_TOKEN 含非 ASCII 字符：鉴权已按 UTF-8 比较可正常工作，"
+        "但部分终端 / HTTP 客户端 / 反向代理传参会失真，建议改用 ASCII 令牌"
+    )
 
 
 #: 查询参数里可携带令牌的键名。`token` 是历史名，`accesstoken` 与其等价
