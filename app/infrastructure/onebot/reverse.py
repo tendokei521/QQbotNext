@@ -202,16 +202,35 @@ class ReverseWsServer:
         self.last_error = None
 
     async def stop(self) -> None:
-        """停止监听并断开已接入的连接。"""
+        """停止监听并断开已接入的连接。
+
+        **必须**在监听器创建时的事件循环上调用。跨循环调用（测试里每个 TestClient
+        请求各自一个事件循环、热重载残留对象）时不再显式 ``close()``：websockets 16
+        的 ``Server.close()`` 内部要 ``create_task(self._close(...))``，在已关闭的
+        循环上会抛 RuntimeError 并留下未 await 的 ``_close`` 协程（pytest 里的
+        ``coroutine 'Server._close' was never awaited`` RuntimeWarning）。此时传输
+        已随循环销毁，直接丢弃引用即可。
+        """
         server, self._server = self._server, None
-        if server is not None:
-            with contextlib.suppress(Exception):
+        loop = getattr(server, "loop", None) if server is not None else None
+        loop_alive = loop is None or not loop.is_closed()
+        if server is not None and loop_alive:
+            try:
                 server.close()
-            with contextlib.suppress(Exception):
+            except Exception as e:  # noqa: BLE001 —— 关停失败不阻断后续清理，但必须留痕
+                self.log.debug(f"[OneBot] 关闭反向监听器失败（继续清理接入连接）: {e}")
+            try:
                 await server.wait_closed()
-        for ws in list(self._active):
-            with contextlib.suppress(Exception):
-                await ws.close(code=CLOSE_REPLACED, reason="监听已停止")
+            except Exception as e:  # noqa: BLE001
+                self.log.debug(f"[OneBot] 等待反向监听器关闭失败（继续清理接入连接）: {e}")
+        elif server is not None:
+            self.log.debug("[OneBot] 反向监听器所属事件循环已关闭，跳过显式关闭（随循环销毁）")
+        if loop_alive:
+            for ws in list(self._active):
+                try:
+                    await ws.close(code=CLOSE_REPLACED, reason="监听已停止")
+                except Exception as e:  # noqa: BLE001 —— 连接可能已被对端关闭
+                    self.log.debug(f"[OneBot] 关闭反向接入连接失败（已忽略）: {e}")
         self._active.clear()
         self.client = None
 

@@ -46,6 +46,28 @@ class _BrokenServeState:
         raise RuntimeError("loop 已关闭")
 
 
+class _ClosedLoop:
+    def is_closed(self) -> bool:
+        return True
+
+
+class _ServerOnClosedLoop:
+    """监听器创建于另一个（已关闭的）事件循环：stop 不得再调 close()。"""
+
+    def __init__(self) -> None:
+        self.loop = _ClosedLoop()
+        self.close_called = False
+        self.wait_called = False
+
+    def close(self) -> None:
+        self.close_called = True
+        raise AssertionError("已关闭循环上调用 close() 会产生未 await 的 _close 协程")
+
+    async def wait_closed(self) -> None:
+        self.wait_called = True
+        raise AssertionError("已关闭循环上 wait_closed() 不可用")
+
+
 async def test_listening_turns_false_after_underlying_server_is_closed():
     """回归：底层 Server close + wait_closed 后 listening 必须为 False（旧实现恒 True）。"""
     port = _free_port()
@@ -90,3 +112,23 @@ async def test_listening_false_when_state_probe_raises():
 
     assert srv.listening is False
     assert any("监听状态探测失败" in line for line in log.debugs)
+
+
+async def test_stop_skips_close_when_owning_event_loop_is_closed():
+    """回归：跨循环 stop() 不得调用 close()（否则 Server._close 协程未 await 告警）。"""
+
+    async def handler(ws, client):  # pragma: no cover
+        await ws.wait_closed()
+
+    log = _NullLog()
+    srv = ReverseWsServer(url="ws://127.0.0.1:1/onebot/v11/ws", handler=handler, log=log)
+    fake = _ServerOnClosedLoop()
+    srv._server = fake
+
+    await srv.stop()  # 不抛异常、不产生 RuntimeWarning
+
+    assert srv._server is None
+    assert fake.close_called is False
+    assert fake.wait_called is False
+    assert any("事件循环已关闭" in line for line in log.debugs)
+
