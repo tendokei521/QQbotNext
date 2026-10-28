@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -470,7 +471,9 @@ class ModuleRegistry:
             task_manager = getattr(self.services, "task_manager", None)
             if task_manager is not None:
                 try:
-                    task_manager.cancel_owner(f"module:{module_name}:{bot_id}")
+                    await self._cancel_module_tasks(task_manager, module_name, bot_id)
+                except asyncio.TimeoutError:
+                    self.log.warning(f"[Module] {module_name} 后台任务取消超时（5s），继续卸载")
                 except Exception as e:  # noqa: BLE001
                     self.log.warning(f"[Module] {module_name} 后台任务取消异常: {e}")
             scheduler = getattr(self.services, "scheduler", None)
@@ -479,6 +482,20 @@ class ModuleRegistry:
                     await scheduler.unload_module(module_name, bot_id)
                 except Exception as e:  # noqa: BLE001
                     self.log.warning(f"[Module] {module_name} 定时任务注销异常: {e}")
+
+    async def _cancel_module_tasks(self, task_manager: Any, module_name: str, bot_id: Any) -> None:
+        """取消并**等待**模块名下后台任务结束（5s 上限）。
+
+        只 cancel 不 await 时，任务可能还在 finally 里写配置/日志，模块却已卸载，
+        紧接着热重载又加载一遍 → 旧任务与新实例并存。对只有 ``cancel_owner`` 的
+        轻量 task_manager（测试 stub / 旧实现）保持兼容。
+        """
+        owner = f"module:{module_name}:{bot_id}"
+        cancel_await = getattr(task_manager, "cancel_owner_await", None)
+        if cancel_await is None:
+            task_manager.cancel_owner(owner)
+            return
+        await asyncio.wait_for(cancel_await(owner), timeout=5.0)
 
     async def _cleanup_failed_instance(self, instance: BaseModule, module_name: str, bot_id: Any) -> None:
         """装配中途失败：把已经登记出去的东西摘干净（钩子/能力/任务），不留半成品。"""
