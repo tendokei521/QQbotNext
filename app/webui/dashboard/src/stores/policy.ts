@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import http, { errorMessage } from '@/api/http'
 import { useBotsStore } from './bots'
 
@@ -74,6 +74,9 @@ export const usePolicyStore = defineStore('policy', () => {
   const search = ref('')
   const savingScene = ref(false)
 
+  // 请求序号：丢弃过期响应，避免快速切换账号时旧账号的群列表覆盖新账号的数据
+  let loadSeq = 0
+
   const accountId = computed(() => bots.currentAccountId)
   const filtered = computed(() => {
     const kw = search.value.trim().toLowerCase()
@@ -93,23 +96,39 @@ export const usePolicyStore = defineStore('policy', () => {
   }
 
   async function load(): Promise<void> {
+    const seq = ++loadSeq
     const aid = accountId.value
     if (!aid) {
       rows.value = []
+      loading.value = false
+      error.value = ''
       return
     }
     loading.value = true
     error.value = ''
     try {
       const res = await http.get('/api/policy/matrix', { params: { account_id: aid } })
+      if (seq !== loadSeq) return
       rows.value = res.data?.rows || []
       defaultPolicy.value = res.data?.default || { enabled: false, enabled_source: 'default' }
     } catch (err) {
+      if (seq !== loadSeq) return
       error.value = errorMessage(err)
     } finally {
-      loading.value = false
+      if (seq === loadSeq) loading.value = false
     }
   }
+
+  // 切账号：先清空旧账号的数据，再按新账号重拉（各页面无需再各自 watch 账号）
+  watch(accountId, () => {
+    rows.value = []
+    connected.value = false
+    stale.value = true
+    fetchedAt.value = 0
+    error.value = ''
+    defaultPolicy.value = { enabled: false, enabled_source: 'default', scene_enabled: null }
+    if (accountId.value) void load()
+  })
 
   /** 拉取群列表：账号未连接时后端返回 409 + 可读原因 */
   async function refreshGroups(): Promise<number> {
