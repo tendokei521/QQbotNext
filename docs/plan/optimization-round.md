@@ -79,7 +79,7 @@ ext_run`（wall-clock epoch 秒，list_jobs 返回）+ 墙钟跳变时丢弃 cro
 
 ## 6. 验证记录
 
-- 全量 `pytest -q`：**3243 passed, 18 skipped**（整改前基线：3090 passed / 10 failed）
+- 全量 `pytest -q`：**3284 passed, 18 skipped**（整改前基线：3090 passed / 10 failed）
 - 前端 `pnpm typecheck` / `pnpm build`：均通过（dist 已重建入库）
 - 实机截图核对：总览 / 账号管理 / 功能插件 / 模型服务 / 设置 / 首次配置（含浅色主题）
 - 诊断台 API 实测：`GET /api/bots/{id}/events` 返回契约 JSON；未连接时发测试消息返回可读 400

@@ -58,7 +58,7 @@
 - 新增后端测试：队列背压、登录重试、echo 不入队、配置并发、事务隔离、慢 WS 客户端、关停顺序、
   钩子账号匹配、模块 import 复用、事件环形缓冲、诊断台 20 条契约、cron/向导退避等。
 
-验证：全量 `pytest -q` → **3243 passed, 18 skipped**；`pnpm typecheck` + `pnpm build` 通过；
+验证：全量 `pytest -q` → **3284 passed, 18 skipped**；`pnpm typecheck` + `pnpm build` 通过；
 浅色/暗色实机截图核对总览/账号管理/功能插件/模型服务/设置/首次配置。
 
 ### 新增：预设中心「一键化」——来源、依赖预检、密钥复用、向导接入
