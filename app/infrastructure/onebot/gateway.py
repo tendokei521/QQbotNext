@@ -162,11 +162,13 @@ class OneBotGateway(GatewayLifecycleMixin):
         conn = self.connections.get(str(account_id))
         if not conn:
             return None
-        for _ in range(100):  # 最多等待 10s
-            if conn.bot_id:
-                return conn.bot_id
-            await asyncio.sleep(0.1)
-        return None
+        if conn.bot_id:
+            return conn.bot_id
+        waiter = getattr(conn, "wait_login", None)
+        if waiter is None:  # 测试桩可能没有登录就绪信号
+            return None
+        await waiter(timeout=10)
+        return conn.bot_id or None
 
     def get_bot(self, account_id: str) -> BotConnection | None:
         return self.connections.get(str(account_id))
@@ -183,10 +185,14 @@ class OneBotGateway(GatewayLifecycleMixin):
 
         走框架 EventBus（app/core/event_bus.py），由 WebUI 订阅后经 WS 推送前端；
         无订阅者时零开销（测试环境安全）。
+
+        去重键是 ``(state, detail)`` 而不是只有 state：同一状态换了原因（如反向
+        账号「等待接入」→「已登录」）也必须广播，否则前端停在旧详情上。
         """
-        if getattr(conn, "_last_notified_status", None) == state:
+        marker = (state, detail)
+        if getattr(conn, "_last_notified_status", None) == marker:
             return
-        conn._last_notified_status = state
+        conn._last_notified_status = marker
         try:
             await event_bus.publish(BotLifecycleEvent(
                 bot_id=conn.bot_id or None,
@@ -386,6 +392,9 @@ class OneBotGateway(GatewayLifecycleMixin):
         conn.login_info = {}
         conn.login_retrieved = False
         conn._disconnecting = False
+        login_event = getattr(conn, "login_event", None)
+        if login_event is not None:
+            login_event.clear()  # 断开后等待方必须重新等下一次登录
         conn.all_group_list = []
         conn.all_group_list_info = []
         fail_pending = getattr(conn, "fail_pending", None)
@@ -428,6 +437,9 @@ class OneBotGateway(GatewayLifecycleMixin):
                 data = resp.get("data", {}) or {}
                 conn.bot_id = int(data.get("user_id", 0) or 0)
                 conn.login_info = data
+                login_event = getattr(conn, "login_event", None)
+                if login_event is not None:
+                    login_event.set()  # 唤醒 get_bot_id / wait_login 等待方
                 self.log.info(f"登录成功 | {bot_label(conn)} | {conn.bot_id} | {data.get('nickname', '')}")
                 await self._record_login_account(conn)
                 if self.login_handler:
@@ -723,11 +735,22 @@ class OneBotGateway(GatewayLifecycleMixin):
         return event
 
     def _is_ignore(self, event: BaseEvent) -> bool:
-        key = f"{event.event_type}_{event.user_id}_ignore"
-        count = self.cache.get(key)
-        if count:
-            self.cache.set(key, count - 1, 60)
-            return True
+        """忽略标记检查。
+
+        key 含 ``account_id``：历史 key 只有 ``event_type_user_id``，同一用户给多个
+        账号发消息时，A 账号设置的忽略会被 B 账号消费掉（跨账号串味）。旧 key 仍作为
+        兜底读取，兼容仍在写历史格式的第三方插件。
+        """
+        account_id = getattr(event, "account_id", None) or ""
+        keys = (
+            f"{account_id}_{event.event_type}_{event.user_id}_ignore",
+            f"{event.event_type}_{event.user_id}_ignore",
+        )
+        for key in keys:
+            count = self.cache.get(key)
+            if count:
+                self.cache.set(key, count - 1, 60)
+                return True
         return False
 
     async def shutdown(self) -> None:

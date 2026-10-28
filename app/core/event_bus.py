@@ -31,10 +31,14 @@ class EventBus:
             handlers.remove(handler)
 
     async def publish(self, event: Any) -> None:
-        """发布事件：依事件实际类型（含子类）分发给订阅者。"""
+        """发布事件：依事件实际类型（含子类）分发给订阅者。
+
+        订阅者快照：处理器内部可能 ``subscribe`` / ``unsubscribe``（热插拔插件），
+        直接遍历 ``_subscribers`` 会抛「dictionary changed size during iteration」。
+        """
         cls = type(event)
         dispatched = 0
-        for event_cls, handlers in self._subscribers.items():
+        for event_cls, handlers in list(self._subscribers.items()):
             if not issubclass(cls, event_cls):
                 continue
             for handler in list(handlers):

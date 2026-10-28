@@ -217,6 +217,8 @@ class BotConnection(IBot):
         # 登录信息是否已成功拉取（网关维护）：失败时保持 False 并退避重试，
         # 避免一次 get_login_info 失败把连接永久钉在「已连接但未上线」的半上线态。
         self.login_retrieved = False
+        # 登录信息就绪信号：替代 get_bot_id 的 100×0.1s 轮询（见 wait_login）
+        self.login_event = asyncio.Event()
         self.reconnect_attempts = 0
         self.last_error: str | None = None
         self.all_group_list: list = []
@@ -248,6 +250,21 @@ class BotConnection(IBot):
     def label(self) -> str:
         """日志前缀：**一律用账号名**（id 只用于判断，不给人看）。"""
         return self.account_name or self.account_id or "?"
+
+    # ---------- 登录就绪 ----------
+    async def wait_login(self, timeout: float = 10.0) -> bool:
+        """等待登录信息就绪（等价于「bot_id 已拿到」）。返回是否就绪。
+
+        历史实现 ``gateway.get_bot_id`` 用 100 次 × 0.1s 轮询，白耗 CPU 且精度差；
+        登录成功时由网关 ``set`` 本事件，等待方一次 await 即可。
+        """
+        if self.bot_id:
+            return True
+        try:
+            await asyncio.wait_for(self.login_event.wait(), timeout)
+        except asyncio.TimeoutError:
+            return False
+        return bool(self.bot_id)
 
     # ---------- 已废弃：账号级 owner_id ----------
     @property
