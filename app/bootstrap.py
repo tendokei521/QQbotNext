@@ -160,8 +160,8 @@ def build_container(settings: Settings | None = None) -> Container:
     set_recorder(stat_recorder)
     container.register_factory(StatRecorder, lambda: stat_recorder)
 
-    # 配置中心
-    config_service = ConfigService(db, settings.project_root)
+    # 配置中心（同步写路径的后台落盘任务登记进 TaskManager：可追踪/退出时可取消）
+    config_service = ConfigService(db, settings.project_root, task_manager=task_manager)
     container.register_factory(ConfigService, lambda: config_service)
     # Provider 预设服务（LLM 连接配置独立管理）
     provider_preset_service = ProviderPresetService(config_service)

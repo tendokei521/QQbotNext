@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.logger import logger
+from app.core.task_manager import TaskManager
 from app.infrastructure.config.account_store import AccountStoreMixin
 from app.infrastructure.config.binding_store import BindingStoreMixin
 from app.infrastructure.config.channel_override_store import ChannelOverrideStoreMixin
@@ -123,15 +124,27 @@ _OP_KIND_ATTR = {
     "provider_model": "_provider_models",
 }
 
+#: 「内存里原本没有这个 key」哨兵（回滚时区分"没有"与"值为 None"）
+_MISSING = object()
+
 
 class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, ChannelOverrideStoreMixin):
-    def __init__(self, db: Database, project_root: Path, log=None) -> None:
+    def __init__(
+        self,
+        db: Database,
+        project_root: Path,
+        log=None,
+        task_manager: TaskManager | None = None,
+    ) -> None:
         self.db = db
         self.root = project_root
         self.log = log or logger
         self._listeners: list[Listener] = []
         # 全量配置写的串行锁（见 `_ReentrantLock` 的说明）。读路径不取锁。
         self._write_lock = _ReentrantLock()
+        # 同步写路径的后台落盘任务登记在这里（可追踪/可取消；失败重试一次并告警）
+        self._task_manager = task_manager
+        self._persist_tasks: set[asyncio.Task] = set()
 
         # 内存缓存（source of truth for 读取）
         # 账号：account_id -> {id, name, ws_url, owner_id, auto_connect, conn_mode}
@@ -271,7 +284,7 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
                 if isinstance(value, dict):
                     await self.db.execute(
                         "INSERT OR REPLACE INTO module_config (module_name, bot_id, config_json, updated_at) VALUES (?,?,?,?)",
-                        (module, bot_id, self.db.dumps(value), int(asyncio.get_running_loop().time())),
+                        (module, bot_id, self.db.dumps(value), int(time.time())),
                     )
             else:  # authority
                 if isinstance(value, dict):
@@ -286,7 +299,7 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
                             self.db.dumps(value.get("group_list", [])),
                             value.get("user_mode", "blacklist"),
                             self.db.dumps(value.get("user_list", [])),
-                            int(asyncio.get_running_loop().time()),
+                            int(time.time()),
                         ),
                     )
 
@@ -433,11 +446,11 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
         self._schedule_persist(self._persist_provider_preset, key)
 
     async def save_provider_preset(self, preset_id: str, preset: dict) -> None:
-        """持久化 Provider 预设并广播变更。"""
+        """持久化 Provider 预设并广播变更（先落库成功，再换内存）。"""
         key = str(preset_id)
         async with self._write_lock:
+            await self._persist_provider_preset(key, preset)  # 失败抛出，内存不动
             self._provider_presets[key] = dict(preset)
-            await self._persist_provider_preset(key)
         await self._notify("provider_presets", self.list_provider_presets())
 
     async def delete_provider_preset(self, preset_id: str) -> bool:
@@ -455,28 +468,27 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
         await self._notify("provider_presets", self.list_provider_presets())
         return True
 
-    async def _persist_provider_preset(self, preset_id: str) -> None:
-        try:
+    async def _persist_provider_preset(self, preset_id: str, preset: dict | None = None) -> None:
+        """落库 Provider 预设（失败抛出；``preset=None`` 时取内存当前值）。"""
+        if preset is None:
             preset = self._provider_presets.get(preset_id)
-            if preset is None:
-                await self.db.execute("DELETE FROM provider_presets WHERE id = ?", (preset_id,))
-                return
-            await self.db.execute(
-                "INSERT OR REPLACE INTO provider_presets "
-                "(id, name, provider, config_json, enabled, created_at, updated_at) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (
-                    preset_id,
-                    preset.get("name", ""),
-                    preset.get("provider", "openai"),
-                    self.db.dumps(preset.get("config", {})),
-                    1 if preset.get("enabled", True) else 0,
-                    int(preset.get("created_at", 0)),
-                    int(preset.get("updated_at", 0)),
-                ),
-            )
-        except Exception as e:
-            self.log.error(f"[Config] 持久化 Provider 预设失败 {preset_id}: {e}")
+        if preset is None:
+            await self.db.execute("DELETE FROM provider_presets WHERE id = ?", (preset_id,))
+            return
+        await self.db.execute(
+            "INSERT OR REPLACE INTO provider_presets "
+            "(id, name, provider, config_json, enabled, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (
+                preset_id,
+                preset.get("name", ""),
+                preset.get("provider", "openai"),
+                self.db.dumps(preset.get("config", {})),
+                1 if preset.get("enabled", True) else 0,
+                int(preset.get("created_at", 0)),
+                int(preset.get("updated_at", 0)),
+            ),
+        )
 
     # ==================== Provider 模型（连接预设下的模型实例） ====================
     def list_provider_models(self, preset_id: str | None = None) -> list[dict]:
@@ -495,11 +507,11 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
         return copy.deepcopy(model) if model else None
 
     async def save_provider_model(self, model_id: str, model: dict) -> None:
-        """持久化模型实例并广播变更。"""
+        """持久化模型实例并广播变更（先落库成功，再换内存）。"""
         key = str(model_id)
         async with self._write_lock:
+            await self._persist_provider_model(key, model)  # 失败抛出，内存不动
             self._provider_models[key] = dict(model)
-            await self._persist_provider_model(key)
         await self._notify("provider_models", self.list_provider_models())
 
     async def delete_provider_model(self, model_id: str) -> bool:
@@ -516,29 +528,28 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
         await self._notify("provider_models", self.list_provider_models())
         return True
 
-    async def _persist_provider_model(self, model_id: str) -> None:
-        try:
+    async def _persist_provider_model(self, model_id: str, model: dict | None = None) -> None:
+        """落库模型实例（失败抛出；``model=None`` 时取内存当前值）。"""
+        if model is None:
             model = self._provider_models.get(model_id)
-            if model is None:
-                await self.db.execute("DELETE FROM provider_models WHERE id = ?", (model_id,))
-                return
-            await self.db.execute(
-                "INSERT OR REPLACE INTO provider_models "
-                "(id, preset_id, model, provider_type, enabled, config_json, created_at, updated_at) "
-                "VALUES (?,?,?,?,?,?,?,?)",
-                (
-                    model_id,
-                    model.get("preset_id", ""),
-                    model.get("model", ""),
-                    model.get("provider_type", "chat"),
-                    1 if model.get("enabled", True) else 0,
-                    self.db.dumps(model.get("config", {})),
-                    int(model.get("created_at", 0)),
-                    int(model.get("updated_at", 0)),
-                ),
-            )
-        except Exception as e:
-            self.log.error(f"[Config] 持久化 Provider 模型失败 {model_id}: {e}")
+        if model is None:
+            await self.db.execute("DELETE FROM provider_models WHERE id = ?", (model_id,))
+            return
+        await self.db.execute(
+            "INSERT OR REPLACE INTO provider_models "
+            "(id, preset_id, model, provider_type, enabled, config_json, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (
+                model_id,
+                model.get("preset_id", ""),
+                model.get("model", ""),
+                model.get("provider_type", "chat"),
+                1 if model.get("enabled", True) else 0,
+                self.db.dumps(model.get("config", {})),
+                int(model.get("created_at", 0)),
+                int(model.get("updated_at", 0)),
+            ),
+        )
 
     # ==================== Provider 全局设置 ====================
     def get_provider_settings(self) -> dict:
@@ -573,10 +584,11 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
         return copy.deepcopy(preset) if preset else None
 
     async def save_role_preset(self, role_id: str, preset: dict) -> None:
+        """持久化角色预设并广播变更（先落库成功，再换内存）。"""
         key = str(role_id)
         async with self._write_lock:
+            await self._persist_role_preset(key, preset)  # 失败抛出，内存不动
             self._role_presets[key] = dict(preset)
-            await self._persist_role_preset(key)
         await self._notify("role_presets", self.list_role_presets())
 
     async def delete_role_preset(self, role_id: str) -> bool:
@@ -593,33 +605,61 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
         await self._notify("role_presets", self.list_role_presets())
         return True
 
-    async def _persist_role_preset(self, role_id: str) -> None:
-        try:
+    async def _persist_role_preset(self, role_id: str, preset: dict | None = None) -> None:
+        """落库角色预设（失败抛出；``preset=None`` 时取内存当前值）。"""
+        if preset is None:
             preset = self._role_presets.get(role_id)
-            if preset is None:
-                await self.db.execute("DELETE FROM role_presets WHERE id = ?", (role_id,))
-                return
-            await self.db.execute(
-                "INSERT OR REPLACE INTO role_presets "
-                "(id, name, description, system_prompt, created_at, updated_at) "
-                "VALUES (?,?,?,?,?,?)",
-                (
-                    role_id,
-                    preset.get("name", ""),
-                    preset.get("description", ""),
-                    preset.get("system_prompt", ""),
-                    int(preset.get("created_at", 0)),
-                    int(preset.get("updated_at", 0)),
-                ),
-            )
-        except Exception as e:
-            self.log.error(f"[Config] 持久化角色预设失败 {role_id}: {e}")
+        if preset is None:
+            await self.db.execute("DELETE FROM role_presets WHERE id = ?", (role_id,))
+            return
+        await self.db.execute(
+            "INSERT OR REPLACE INTO role_presets "
+            "(id, name, description, system_prompt, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (
+                role_id,
+                preset.get("name", ""),
+                preset.get("description", ""),
+                preset.get("system_prompt", ""),
+                int(preset.get("created_at", 0)),
+                int(preset.get("updated_at", 0)),
+            ),
+        )
 
     def _schedule_persist(self, persist_fn: Callable[..., Any], *args: Any) -> None:
+        """后台落盘（同步写路径专用）：登记进 TaskManager，失败重试一次并告警。
+
+        同步接口（`ModuleConfig.set` / `set_module_authority` 等）不能 await，
+        只能"先改内存、后台落盘"；但绝不能 fire-and-forget：旧实现 create_task
+        后无人持有引用（可能被 GC 掉），失败也只是一行日志。现在任务进 TaskManager
+        （可追踪、退出时可取消），失败自动重试一次，最终失败打 error。
+        """
         try:
-            asyncio.get_running_loop().create_task(persist_fn(*args))
+            loop = asyncio.get_running_loop()
         except RuntimeError:
-            pass  # 无运行中的事件循环（测试环境）：仅内存生效
+            return  # 无运行中的事件循环（测试环境）：仅内存生效
+        coro = self._persist_with_retry(persist_fn, args)
+        if self._task_manager is not None:
+            task = self._task_manager.create_task(
+                coro, name="config:persist", owner="framework"
+            )
+        else:
+            task = loop.create_task(coro)
+        self._persist_tasks.add(task)
+        task.add_done_callback(self._persist_tasks.discard)
+
+    async def _persist_with_retry(self, persist_fn: Callable[..., Any], args: tuple[Any, ...]) -> None:
+        """执行一次落盘；失败等 0.5s 重试，再失败则 error 留痕（后台任务无调用方可抛）。"""
+        for attempt in (1, 2):
+            try:
+                await persist_fn(*args)
+                return
+            except Exception as e:  # noqa: BLE001 —— 后台任务必须留痕，不能静默
+                if attempt == 1:
+                    self.log.warning(f"[Config] 配置落盘失败，0.5s 后重试: {e}")
+                    await asyncio.sleep(0.5)
+                else:
+                    self.log.error(f"[Config] 配置落盘失败（已重试，本次修改仅内存生效）: {e}")
 
     # ==================== 通用键值（kv） ====================
     # 迁移标记 / 首启完成标记这类"框架级小状态"统一走这里，不要再各自写 SQL。
@@ -642,8 +682,8 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
 
         为什么需要它：现有 `save_*` 每个对象独立落库（各自一次 execute）。预设应用
         要同时改"预设/模型/账号绑定/模块开关"，中途失败就会留半套配置。
-        这里先把内存整体快照，再在**一个 SQLite 事务**里写全部行；任一失败就恢复
-        内存并抛错，调用方可以安全地报告"什么都没改"。
+        这里在**一个 SQLite 事务**里写全部行；任一失败就按 key 还原本次涉及的内存
+        条目并抛错，调用方可以安全地报告"什么都没改"。
 
         广播在事务成功之后按 kind 各发一次（不在事务里发，避免回滚后前端已收到假更新）。
         """
@@ -652,13 +692,27 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
             return
 
         async with self._write_lock:
-            snapshot: dict[str, Any] = {}
+            # 按 key 记录旧值，失败时只还原本次涉及的 key。
+            # 不能整表回滚（旧实现 deepcopy 整个缓存）：事务等待/失败期间若有别的
+            # 写入（如另一处配置保存）已经成功，整表恢复会把它们一起抹掉。
+            undo: list[tuple[dict, Any, Any]] = []
+            seen_slots: set[tuple[str, Any]] = set()
             for op in ops:
                 attr = _OP_KIND_ATTR.get(op.kind)
                 if attr is None:
                     raise ValueError(f"未知的配置操作类型: {op.kind}")
-                if attr not in snapshot:
-                    snapshot[attr] = copy.deepcopy(getattr(self, attr))
+                container, slot = self._op_memory_slot(op)
+                slot_key = (attr, slot)
+                if slot_key in seen_slots:
+                    continue
+                seen_slots.add(slot_key)
+                previous = container.get(slot, _MISSING)
+                # 不能 deepcopy 哨兵（会变成另一个对象，回滚时 is 判断失效）
+                undo.append((
+                    container,
+                    slot,
+                    previous if previous is _MISSING else copy.deepcopy(previous),
+                ))
 
             sqls: list[tuple[str, Sequence[Any]]] = []
             touched = {op.kind for op in ops}
@@ -670,8 +724,11 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
                 if sqls:
                     await self.db.run_in_transaction(sqls)
             except Exception:
-                for attr, value in snapshot.items():
-                    setattr(self, attr, value)
+                for container, slot, previous in undo:
+                    if previous is _MISSING:
+                        container.pop(slot, None)
+                    else:
+                        container[slot] = previous
                 raise
 
         if "role_preset" in touched:
@@ -680,6 +737,22 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
             await self._notify("provider_presets", self.list_provider_presets())
         if "provider_model" in touched:
             await self._notify("provider_models", self.list_provider_models())
+
+    def _op_memory_slot(self, op: ConfigOp) -> tuple[dict, Any]:
+        """返回 op 对应的「内存容器 + key」（回滚快照按这个粒度记录）。"""
+        kind = op.kind
+        if kind == "binding":
+            container = self._bindings.setdefault(str(op.key[0]), {})
+            return container, (str(op.key[1]), str(op.key[2]))
+        if kind == "channel_override":
+            return self._channel_overrides, (str(op.key[0]), str(op.key[1]), str(op.key[2]))
+        if kind == "role_preset":
+            return self._role_presets, str(op.key[0])
+        if kind == "provider_preset":
+            return self._provider_presets, str(op.key[0])
+        if kind == "provider_model":
+            return self._provider_models, str(op.key[0])
+        raise ValueError(f"未知的配置操作类型: {kind}")
 
     def _op_to_sql(self, op: ConfigOp) -> tuple[str, Sequence[Any]] | None:
         """把一个 op 写进内存，并返回对应的 SQL（None = 无需落库）。"""

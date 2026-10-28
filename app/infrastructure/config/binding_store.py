@@ -8,7 +8,6 @@ _schedule_persist``。
 
 from __future__ import annotations
 
-import asyncio
 import time
 from collections.abc import Sequence
 from typing import Any
@@ -129,6 +128,34 @@ class BindingStoreMixin:
             "priority": int(row.get("priority", 100)),
         }
 
+    def _compose_binding_row(
+        self,
+        capability_id: str,
+        scope_type: str,
+        scope_id: Any,
+        *,
+        enabled: Any = _UNSET,
+        config: Any = _UNSET,
+        permission: Any = _UNSET,
+        priority: Any = _UNSET,
+    ) -> dict:
+        """按「现有行 + 本次显式字段」合成新行（只读内存，不写入）。"""
+        if scope_type not in SCOPES:
+            raise ValueError(f"未知 binding 作用域: {scope_type!r}")
+        current = self._bindings.get(str(capability_id), {}).get((scope_type, str(scope_id or "")))
+        row = dict(current) if current is not None else {
+            "enabled": None, "config": {}, "permission": {}, "priority": 100,
+        }
+        if enabled is not _UNSET:
+            row["enabled"] = None if enabled is None else bool(enabled)
+        if config is not _UNSET:
+            row["config"] = dict(config or {})
+        if permission is not _UNSET:
+            row["permission"] = dict(permission or {})
+        if priority is not _UNSET:
+            row["priority"] = int(priority)
+        return row
+
     def set_binding(
         self,
         capability_id: str,
@@ -141,23 +168,18 @@ class BindingStoreMixin:
         priority: Any = _UNSET,
         persist: bool = True,
     ) -> dict:
-        """写一条 binding（只更新显式传入的字段，其余保持原样）。"""
-        if scope_type not in SCOPES:
-            raise ValueError(f"未知 binding 作用域: {scope_type!r}")
+        """写一条 binding（只更新显式传入的字段，其余保持原样）。
+
+        同步接口（模块 `ModuleConfig.set` 等不能 await）：只能先改内存、后台落库。
+        落盘失败由 `_schedule_persist` 重试 + 告警；需要「落库失败必须报错」的
+        调用方用 :meth:`save_binding`（先落库成功再换内存）。
+        """
         capability_id = str(capability_id)
         key = (scope_type, str(scope_id or ""))
-        rows = self._bindings.setdefault(capability_id, {})
-        row = rows.setdefault(
-            key, {"enabled": None, "config": {}, "permission": {}, "priority": 100}
+        self._bindings.setdefault(capability_id, {})[key] = self._compose_binding_row(
+            capability_id, scope_type, scope_id,
+            enabled=enabled, config=config, permission=permission, priority=priority,
         )
-        if enabled is not _UNSET:
-            row["enabled"] = None if enabled is None else bool(enabled)
-        if config is not _UNSET:
-            row["config"] = dict(config or {})
-        if permission is not _UNSET:
-            row["permission"] = dict(permission or {})
-        if priority is not _UNSET:
-            row["priority"] = int(priority)
         if persist:
             self._schedule_persist(self._persist_binding, capability_id, key)
         return self.get_binding(capability_id, scope_type, scope_id) or {}
@@ -169,42 +191,53 @@ class BindingStoreMixin:
         scope_id: Any = "",
         **fields: Any,
     ) -> dict:
-        """写 binding + 落库 + 广播（``fields`` 同 :meth:`set_binding`）。"""
+        """写 binding + 落库 + 广播：**先落库成功，再换内存**（失败时内存不动）。
+
+        ``fields`` 同 :meth:`set_binding`。
+        """
         async with self._write_lock:
-            data = self.set_binding(capability_id, scope_type, scope_id, persist=False, **fields)
-            await self._persist_binding(str(capability_id), (scope_type, str(scope_id or "")))
+            capability_id = str(capability_id)
+            key = (scope_type, str(scope_id or ""))
+            row = self._compose_binding_row(capability_id, scope_type, scope_id, **fields)
+            await self._persist_binding_row(capability_id, key, row)  # 失败抛出，内存未改
+            self._bindings.setdefault(capability_id, {})[key] = row
+            data = self.get_binding(capability_id, scope_type, scope_id) or {}
             await self._notify(
                 "bindings",
-                {"capability_id": str(capability_id), "scope_type": scope_type,
+                {"capability_id": capability_id, "scope_type": scope_type,
                  "scope_id": str(scope_id or ""), "binding": data},
             )
         return data
 
+    async def _persist_binding_row(
+        self, capability_id: str, key: tuple[str, str], row: dict
+    ) -> None:
+        """把一行 binding 写进库（失败抛出：调用方决定回滚/报错）。"""
+        enabled = row.get("enabled")
+        await self.db.execute(
+            "INSERT OR REPLACE INTO bindings "
+            "(capability_id, scope_type, scope_id, enabled, config_json, permission_json, priority, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (
+                capability_id, key[0], key[1],
+                None if enabled is None else (1 if enabled else 0),
+                self.db.dumps(row.get("config") or {}),
+                self.db.dumps(row.get("permission") or {}),
+                int(row.get("priority", 100)),
+                int(time.time()),
+            ),
+        )
+
     async def _persist_binding(self, capability_id: str, key: tuple[str, str]) -> None:
-        try:
-            row = self._bindings.get(capability_id, {}).get(key)
-            if row is None:
-                await self.db.execute(
-                    "DELETE FROM bindings WHERE capability_id = ? AND scope_type = ? AND scope_id = ?",
-                    (capability_id, key[0], key[1]),
-                )
-                return
-            enabled = row.get("enabled")
+        """把内存中的某条 binding 落库（后台持久化入口；失败抛给重试逻辑）。"""
+        row = self._bindings.get(capability_id, {}).get(key)
+        if row is None:
             await self.db.execute(
-                "INSERT OR REPLACE INTO bindings "
-                "(capability_id, scope_type, scope_id, enabled, config_json, permission_json, priority, updated_at) "
-                "VALUES (?,?,?,?,?,?,?,?)",
-                (
-                    capability_id, key[0], key[1],
-                    None if enabled is None else (1 if enabled else 0),
-                    self.db.dumps(row.get("config") or {}),
-                    self.db.dumps(row.get("permission") or {}),
-                    int(row.get("priority", 100)),
-                    int(asyncio.get_running_loop().time()),
-                ),
+                "DELETE FROM bindings WHERE capability_id = ? AND scope_type = ? AND scope_id = ?",
+                (capability_id, key[0], key[1]),
             )
-        except Exception as e:
-            self.log.error(f"[Config] 持久化 binding 失败 {capability_id}/{key}: {e}")
+            return
+        await self._persist_binding_row(capability_id, key, row)
 
     async def _load_bindings(self) -> None:
         rows = await self.db.fetchall("SELECT * FROM bindings")
@@ -347,11 +380,6 @@ class BindingStoreMixin:
                 "fallback": str(item.get("fallback") or "open").strip().lower(),
             })
 
-        for key in [key for key in self._channel_policies if key[0] == capability_id]:
-            self._channel_policies.pop(key, None)
-        for row in normalized:
-            self._channel_policies[(capability_id, row["channel_id"])] = dict(row)
-
         now = int(time.time())
         sqls: list[tuple[str, Sequence[Any]]] = [
             ("DELETE FROM channel_policies WHERE capability_id = ?", (capability_id,))
@@ -365,6 +393,11 @@ class BindingStoreMixin:
                  row["primary_account_id"], row["fallback"], now),
             ))
         await self.db.run_in_transaction(sqls)
+        # 事务成功后再换内存：失败时旧内存保持可用，不会出现「内存新 / 库旧」
+        for key in [key for key in self._channel_policies if key[0] == capability_id]:
+            self._channel_policies.pop(key, None)
+        for row in normalized:
+            self._channel_policies[(capability_id, row["channel_id"])] = dict(row)
         await self._notify(
             "channel_policies", {"capability_id": capability_id, "policies": normalized}
         )

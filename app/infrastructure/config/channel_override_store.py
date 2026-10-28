@@ -78,18 +78,18 @@ class ChannelOverrideStoreMixin:
                 enabled=enabled, config=config, permission=permission, muted_until=muted_until,
             )
 
-    async def _save_channel_override_unlocked(
+    def _compose_override_row(
         self,
         account_id: object,
-        capability: str = "agent",
-        channel_id: object = "",
+        capability: str,
+        channel_id: object,
         *,
         enabled: Any = _UNSET,
         config: dict | None = None,
         permission: dict | None = None,
         muted_until: Any = _UNSET,
     ) -> dict:
-        """`save_channel_override` 的实现体（调用方必须已持有写锁）。"""
+        """按「现有行 + 本次显式参数」合成新行（只读内存，不写入）。"""
         key = (str(account_id), str(capability), str(channel_id or ""))
         row = dict(self._channel_overrides.get(key) or {
             "account_id": key[0],
@@ -110,14 +110,34 @@ class ChannelOverrideStoreMixin:
         if muted_until is not _UNSET:
             row["muted_until"] = int(muted_until or 0)
         row["updated_at"] = int(time.time())
+        return row
+
+    async def _save_channel_override_unlocked(
+        self,
+        account_id: object,
+        capability: str = "agent",
+        channel_id: object = "",
+        *,
+        enabled: Any = _UNSET,
+        config: dict | None = None,
+        permission: dict | None = None,
+        muted_until: Any = _UNSET,
+    ) -> dict:
+        """`save_channel_override` 的实现体（调用方必须已持有写锁）。"""
+        key = (str(account_id), str(capability), str(channel_id or ""))
+        row = self._compose_override_row(
+            account_id, capability, channel_id,
+            enabled=enabled, config=config, permission=permission, muted_until=muted_until,
+        )
 
         # 全空行没有任何意义（等于"没有覆盖"）→ 直接删掉，保持表干净
         if row["enabled"] is None and not row["config"] and not row["permission"] and not row["muted_until"]:
             await self.delete_channel_override(key[0], key[1], key[2])
             return row
 
+        # 先落库成功，再换内存：落盘失败时内存保持旧值，API 才能如实报错
+        await self._persist_channel_override(key, row)
         self._channel_overrides[key] = row
-        await self._persist_channel_override(key)
         return dict(row)
 
     async def delete_channel_override(
@@ -128,35 +148,31 @@ class ChannelOverrideStoreMixin:
     ) -> bool:
         async with self._write_lock:
             key = (str(account_id), str(capability), str(channel_id or ""))
-            existed = self._channel_overrides.pop(key, None) is not None
+            existed = key in self._channel_overrides
             if existed:
                 await self.db.execute(
                     "DELETE FROM channel_overrides WHERE account_id = ? AND capability = ? AND channel_id = ?",
                     key,
                 )
+                self._channel_overrides.pop(key, None)
             return existed
 
-    async def _persist_channel_override(self, key: tuple[str, str, str]) -> None:
-        try:
-            row = self._channel_overrides.get(key)
-            if row is None:
-                return
-            enabled = row.get("enabled")
-            await self.db.execute(
-                "INSERT OR REPLACE INTO channel_overrides "
-                "(account_id, capability, channel_id, enabled, config_json, permission_json, muted_until, updated_at) "
-                "VALUES (?,?,?,?,?,?,?,?)",
-                (
-                    key[0], key[1], key[2],
-                    None if enabled is None else (1 if enabled else 0),
-                    self.db.dumps(row.get("config") or {}),
-                    self.db.dumps(row.get("permission") or {}),
-                    int(row.get("muted_until") or 0),
-                    int(row.get("updated_at") or time.time()),
-                ),
-            )
-        except Exception as e:  # noqa: BLE001 —— 落盘失败要留痕，但不能把写操作炸掉
-            self.log.error(f"[Config] 持久化 channel_override 失败 {key}: {e}")
+    async def _persist_channel_override(self, key: tuple[str, str, str], row: dict) -> None:
+        """落库一行覆盖（失败抛出：不能静默成功）。"""
+        enabled = row.get("enabled")
+        await self.db.execute(
+            "INSERT OR REPLACE INTO channel_overrides "
+            "(account_id, capability, channel_id, enabled, config_json, permission_json, muted_until, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (
+                key[0], key[1], key[2],
+                None if enabled is None else (1 if enabled else 0),
+                self.db.dumps(row.get("config") or {}),
+                self.db.dumps(row.get("permission") or {}),
+                int(row.get("muted_until") or 0),
+                int(row.get("updated_at") or time.time()),
+            ),
+        )
 
     # ==================== 加载 ====================
 

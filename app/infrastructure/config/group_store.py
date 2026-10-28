@@ -68,11 +68,16 @@ class GroupStoreMixin:
             return await self._upsert_known_groups_unlocked(account_id, groups)
 
     async def _upsert_known_groups_unlocked(self, account_id: object, groups: list[dict]) -> int:
-        """`upsert_known_groups` 的实现体（调用方必须已持有写锁）。"""
+        """`upsert_known_groups` 的实现体（调用方必须已持有写锁）。
+
+        先拼 SQL 并落库，**提交成功后才换内存**：否则事务失败时内存已经变成
+        "新群列表"，与库不一致（下次重启又变回去）。
+        """
         aid = str(account_id)
         now = int(time.time())
         sqls: list[tuple[str, tuple]] = []
         seen: set[str] = set()
+        fresh_rows: dict[tuple[str, str], dict] = {}
 
         for group in groups or []:
             if not isinstance(group, dict):
@@ -84,7 +89,7 @@ class GroupStoreMixin:
             member_count = int(group.get("member_count") or 0)
             max_member_count = int(group.get("max_member_count") or 0)
             seen.add(gid)
-            self._known_groups[(aid, gid)] = {
+            fresh_rows[(aid, gid)] = {
                 "account_id": aid,
                 "group_id": gid,
                 "name": name,
@@ -100,11 +105,11 @@ class GroupStoreMixin:
                 (aid, gid, name, member_count, max_member_count, 1, now),
             ))
 
+        left_groups: list[tuple[str, str]] = []
         for (row_account, gid), row in list(self._known_groups.items()):
             if row_account != aid or gid in seen or not row.get("in_group"):
                 continue
-            row["in_group"] = False
-            row["updated_at"] = now
+            left_groups.append((row_account, gid))
             sqls.append((
                 "UPDATE known_groups SET in_group = 0, updated_at = ? "
                 "WHERE account_id = ? AND group_id = ?",
@@ -112,7 +117,15 @@ class GroupStoreMixin:
             ))
 
         if sqls:
-            await self.db.run_in_transaction(sqls)
+            await self.db.run_in_transaction(sqls)   # 先落库；失败则内存保持原样
+
+        for key, row in fresh_rows.items():
+            self._known_groups[key] = row
+        for key in left_groups:
+            current = self._known_groups.get(key)
+            if current is not None:
+                current["in_group"] = False
+                current["updated_at"] = now
         return len(seen)
 
     # ==================== 加载 ====================
