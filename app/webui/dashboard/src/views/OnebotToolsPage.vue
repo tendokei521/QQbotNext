@@ -159,12 +159,57 @@ function permissionLabel(permission: string): string {
   if (permission === 'everyone') return '所有人'
   if (permission === 'group_admin') return '群管理'
   if (permission === 'group_owner') return '群主'
-  if (permission === 'owner') return 'Bot拥有者'
+  if (permission === 'owner') return '账号主人'
   return '成员'
 }
 
 function riskLabel(risk: string): string {
   return risk === 'read' ? '只读' : risk === 'send' ? '消息' : '管理'
+}
+
+const SCOPE_LABELS: Record<string, string> = {
+  '*': '全部',
+  group: '群聊',
+  private: '私聊',
+}
+
+const PARAM_TYPE_LABELS: Record<string, string> = {
+  string: '文本',
+  integer: '整数',
+  number: '数字',
+  boolean: '开关',
+  array: '列表',
+  object: '对象',
+}
+
+interface ParamRow {
+  name: string
+  type: string
+  required: boolean
+  description: string
+}
+
+/** 可用范围：后端给的是 `*` / `group` / `private`，界面上说人话。 */
+function scopeLabels(scopes: string[]): string {
+  return scopes.map((scope) => SCOPE_LABELS[scope] || scope).join(' / ')
+}
+
+/** 把 parameters 的 JSON Schema 拆成"参数名 + 类型 + 是否必填 + 说明"。 */
+function paramRows(tool: OneBotTool): ParamRow[] {
+  const properties = tool.parameters?.properties
+  if (!properties || typeof properties !== 'object') return []
+  const required = Array.isArray(tool.parameters?.required) ? tool.parameters.required : []
+  return Object.entries(properties as Record<string, any>).map(([name, raw]) => {
+    const meta = (raw || {}) as Record<string, any>
+    const type = typeof meta.type === 'string' ? meta.type : ''
+    const description = typeof meta.description === 'string' ? meta.description : ''
+    return {
+      name,
+      type: PARAM_TYPE_LABELS[type] || type || '不限',
+      required: required.includes(name),
+      description: description || '无说明',
+    }
+  })
 }
 
 async function loadTools() {
@@ -221,7 +266,7 @@ watch(
         <v-switch v-model="enabled" color="primary" density="compact" hide-details />
       </v-card-title>
       <v-card-text class="text-caption" style="opacity: 0.65; display: flex; flex-wrap: wrap; gap: 16px">
-        <span>开启后，LLM 将获得调用 OneBot API 的能力。请谨慎开启敏感管理工具。</span>
+        <span>开启后，模型可以主动发消息、查群信息等。敏感管理操作只建议给账号主人。</span>
         <v-switch
           v-model="logEnabled"
           label="输出普通调用日志"
@@ -231,7 +276,7 @@ watch(
         />
         <v-switch
           :model-value="!!agent.draft.onebot_tools_debug"
-          label="详细调试日志（请求/响应）"
+          label="详细调试日志（排查问题时开）"
           color="warning"
           density="compact"
           hide-details
@@ -252,7 +297,7 @@ watch(
           target="_blank"
           rel="noopener"
         >
-          OneBot API 文档
+          接口文档
         </v-btn>
         <v-btn size="small" variant="tonal" :disabled="!enabled" @click="resetToggles">恢复默认</v-btn>
       </v-card-title>
@@ -261,7 +306,15 @@ watch(
 
         <div class="tool-list">
           <template v-for="group in toolGroups" :key="group.category">
-            <div class="tool-category" @click="toggleCategory(group.category)">
+            <div
+              class="tool-category"
+              role="button"
+              tabindex="0"
+              :aria-expanded="!isCollapsed(group.category)"
+              @click="toggleCategory(group.category)"
+              @keydown.enter.prevent="toggleCategory(group.category)"
+              @keydown.space.prevent="toggleCategory(group.category)"
+            >
               <v-icon :icon="isCollapsed(group.category) ? 'mdi-chevron-down' : 'mdi-chevron-up'" size="small" />
               <span class="tool-category-name">{{ group.category }}</span>
               <span class="tool-category-count">{{ group.items.length }}</span>
@@ -292,8 +345,8 @@ watch(
                     <div class="tool-desc">{{ tool.description }}</div>
                     <div class="tool-meta d-flex gap-3 flex-wrap">
                       <v-chip size="small" variant="tonal" :color="riskColor(tool.risk)">{{ riskLabel(tool.risk) }}</v-chip>
-                      <v-chip size="small" variant="tonal">权限: {{ permissionLabel(toolPermission(tool)) }}</v-chip>
-                      <v-chip size="small" variant="tonal">作用域: {{ toolScopes(tool).join(' / ') }}</v-chip>
+                      <v-chip size="small" variant="tonal">权限：{{ permissionLabel(toolPermission(tool)) }}</v-chip>
+                      <v-chip size="small" variant="tonal">可用范围：{{ scopeLabels(toolScopes(tool)) }}</v-chip>
                     </div>
                   </div>
                   <v-switch
@@ -314,7 +367,7 @@ watch(
                       { title: '成员及以上', value: 'member' },
                       { title: '群管理及以上', value: 'group_admin' },
                       { title: '群主', value: 'group_owner' },
-                      { title: 'Bot拥有者', value: 'owner' },
+                      { title: '账号主人', value: 'owner' },
                     ]"
                     label="触发权限"
                     variant="outlined"
@@ -323,18 +376,32 @@ watch(
                     @update:model-value="(v: any) => setToolPermission(tool, v)"
                   />
                   <div class="tool-scope-static">
-                    <span class="text-caption">作用域：</span>
-                    <span class="font-weight-medium">{{ toolScopes(tool).join(' / ') }}</span>
+                    <span class="text-caption">可用范围：</span>
+                    <span class="font-weight-medium">{{ scopeLabels(toolScopes(tool)) }}</span>
                   </div>
                   <v-alert v-if="isSensitiveWide(tool)" type="warning" variant="tonal" density="compact" class="mt-2">
-                    ⚠️ {{ tool.name }} 是高/极高敏感工具，默认权限为 {{ permissionLabel(tool.base_permission) }}，当前放宽为 {{ permissionLabel(toolPermission(tool)) }}。
+                    {{ tool.name }} 属于敏感工具。默认只给「{{ permissionLabel(tool.base_permission) }}」，现已放宽到「{{ permissionLabel(toolPermission(tool)) }}」。
                   </v-alert>
                 </div>
                 <div v-if="detailKey === tool.name" class="tool-detail">
-                  <div class="text-caption mb-1">参数 Schema</div>
-                  <pre class="tool-pre">{{ JSON.stringify(tool.parameters, null, 2) }}</pre>
+                  <div class="text-caption mb-1">参数说明</div>
+                  <div v-if="paramRows(tool).length" class="param-list">
+                    <div v-for="row in paramRows(tool)" :key="row.name" class="param-row">
+                      <span class="param-name">{{ row.name }}</span>
+                      <span class="param-type">{{ row.type }}<template v-if="row.required"> · 必填</template></span>
+                      <span class="param-desc">{{ row.description }}</span>
+                    </div>
+                  </div>
+                  <div v-else class="text-caption">这个工具不需要参数。</div>
+                  <v-expansion-panels variant="accordion" flat class="param-raw">
+                    <v-expansion-panel title="查看原始参数">
+                      <v-expansion-panel-text>
+                        <pre class="tool-pre">{{ JSON.stringify(tool.parameters, null, 2) }}</pre>
+                      </v-expansion-panel-text>
+                    </v-expansion-panel>
+                  </v-expansion-panels>
                 </div>
-                <v-btn v-else size="x-small" variant="text" prepend-icon="mdi-code-json" @click="detailKey = tool.name">
+                <v-btn v-else size="x-small" variant="text" prepend-icon="mdi-format-list-bulleted" @click="detailKey = tool.name">
                   查看参数
                 </v-btn>
               </div>
@@ -375,6 +442,13 @@ watch(
 
 .tool-category:first-child {
   margin-top: 0;
+}
+
+/* 键盘聚焦时才出现的焦点环，不改变常态视觉 */
+.tool-category:focus-visible {
+  outline: 2px solid rgb(var(--v-theme-primary));
+  outline-offset: 2px;
+  border-radius: 6px;
 }
 
 .tool-category-name {
@@ -471,6 +545,39 @@ watch(
   margin-top: 10px;
   border-top: 1px dashed rgba(var(--v-theme-on-surface), 0.12);
   padding-top: 10px;
+}
+
+.param-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.param-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.param-name {
+  font-family: monospace;
+  font-weight: 600;
+}
+
+.param-type {
+  font-size: 12px;
+  color: rgba(var(--v-theme-on-surface), 0.6);
+}
+
+.param-desc {
+  color: rgba(var(--v-theme-on-surface), 0.75);
+}
+
+.param-raw {
+  margin-top: 4px;
 }
 
 .tool-pre {
