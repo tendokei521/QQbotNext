@@ -94,11 +94,10 @@ watch(
               <div class="group-name">{{ row.name }}</div>
               <div class="group-meta">
                 {{ row.gid }} · {{ row.botIndexes.length }} 个账号
-                <v-chip size="x-small" variant="tonal" class="ml-1">{{ row.botIndexes.join(', ') }}</v-chip>
               </div>
             </div>
             <div class="text-caption" style="max-width: 220px; color: rgba(var(--v-theme-on-surface), 0.55)">
-              响应权策略请到「功能模块 → 对应模块 → 响应权策略」按群配置
+              这里只汇总群与账号的在线情况；响应权限在对应功能插件的设置里按群调整
             </div>
           </div>
         </div>
