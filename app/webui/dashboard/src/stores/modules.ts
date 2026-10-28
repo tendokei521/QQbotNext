@@ -1,8 +1,9 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import http, { unwrap } from '@/api/http'
+import http, { errorMessage, unwrap } from '@/api/http'
 import { onSocketMessage } from '@/api/socket'
 import { useBotsStore } from './bots'
+import { useNotifyStore } from './notify'
 
 export interface PermissionConfig {
   group_mode: 'whitelist' | 'blacklist'
@@ -302,7 +303,10 @@ export const useModulesStore = defineStore('modules', () => {
 
   // WS 重连/首次连接成功后重拉模块数据，弥补断线期间的更新
   onSocketMessage('socket_open', () => {
-    load()
+    // 回调里没人 await：失败必须自己收口，否则是 unhandled rejection
+    load().catch((err) => {
+      useNotifyStore().push(`模块数据刷新失败：${errorMessage(err)}`, 'warning')
+    })
   })
 
   return {

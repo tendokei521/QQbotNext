@@ -71,7 +71,9 @@ export const useReadinessStore = defineStore('readiness', () => {
     if (refreshTimer !== null) window.clearTimeout(refreshTimer)
     refreshTimer = window.setTimeout(() => {
       refreshTimer = null
-      void load()
+      // load() 内部已把失败收敛到 error.value；这里补一层 catch，
+      // 避免将来改动让 load 可能 reject 时产生 unhandled rejection
+      load().catch((err) => console.error('[readiness] 刷新失败', err))
     }, 250)
   }
 

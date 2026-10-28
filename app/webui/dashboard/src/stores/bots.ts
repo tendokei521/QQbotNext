@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import http, { unwrap } from '@/api/http'
+import http, { errorMessage, unwrap } from '@/api/http'
 import { onSocketMessage } from '@/api/socket'
+import { useNotifyStore } from './notify'
 
 export type BotStatus = 'connected' | 'disconnected' | 'connecting' | 'reconnecting' | 'error'
 
@@ -204,7 +205,10 @@ export const useBotsStore = defineStore('bots', () => {
 
   // WS 重连/首次连接成功后重拉状态，弥补断线期间丢失的 status 更新
   onSocketMessage('socket_open', () => {
-    fetchBots()
+    // 回调里没人 await：失败必须自己收口，否则是 unhandled rejection（连接重建后后端抖动很常见）
+    fetchBots().catch((err) => {
+      useNotifyStore().push(`账号状态刷新失败：${errorMessage(err)}`, 'warning')
+    })
   })
 
   return {
