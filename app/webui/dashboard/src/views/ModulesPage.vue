@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   useModulesStore,
@@ -7,11 +7,13 @@ import {
   type InstallPreview,
   type ModuleData,
 } from '@/stores/modules'
+import { displayName, useBotsStore } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
 
 const modules = useModulesStore()
+const bots = useBotsStore()
 const notify = useNotifyStore()
 const router = useRouter()
 
@@ -24,6 +26,20 @@ const search = ref('')
 const collapsed = ref<Record<string, boolean>>({})
 const toggling = reactive<Record<string, boolean>>({})
 const searchRef = ref<HTMLInputElement | null>(null)
+
+/** 功能开关是按账号存的：页头标清当前账号，避免用户以为改了全局 */
+const accountName = computed(() => {
+  const bot = bots.bots.find((item) => item.id === bots.currentAccountId)
+  return bot ? displayName(bot) : '未选择账号'
+})
+
+// 换账号后原来的搜索词可能只匹配得上上一个账号的模块，清空避免「看起来模块没了」
+watch(
+  () => bots.currentAccountId,
+  () => {
+    search.value = ''
+  },
+)
 
 // ---------- 安装 / 更新对话框 ----------
 type ZipDialogMode = 'install' | 'update'
@@ -65,6 +81,36 @@ function statusOf(m: ModuleData): string {
 /** 是否可交互（开关/配置）：只有已正常加载的模块可以 */
 function isUsable(m: ModuleData): boolean {
   return statusOf(m) === 'ok'
+}
+
+/** 后端 supersedes 里存的是内部能力名，界面上换成用户看得懂的说法 */
+const FEATURE_LABELS: Record<string, string> = {
+  agent: '对话主流程',
+  assembly: '消息组装',
+  provider_invoker: '模型调用',
+  output: '回复输出',
+}
+
+function featureLabels(ids: string[]): string {
+  return ids.map((id) => FEATURE_LABELS[id] || '内置功能').join('、')
+}
+
+/** 模块状态 → 用户能懂的原因，不把状态枚举直接甩给用户 */
+const STATUS_REASON: Record<string, string> = {
+  error: '加载出错，看卡片上的提示',
+  conflict: '与其它插件冲突',
+  uninstalled: '已禁用',
+  manifest_missing: '文件不完整',
+}
+
+function statusReason(m: ModuleData): string {
+  return STATUS_REASON[statusOf(m)] || '暂时不可用'
+}
+
+/** 模块 key（路由/接口里的内部名）→ 用户看到的显示名 */
+function moduleDisplayName(key: string | null): string {
+  if (!key) return ''
+  return modules.list.find((m) => m._key === key)?.name || '该插件'
 }
 
 const filtered = computed(() => {
@@ -118,7 +164,7 @@ function toggleCat(key: string) {
 
 function openModule(m: ModuleData) {
   if (!isUsable(m)) {
-    notify.push(`模块 ${m.name} 当前不可用（${m.error || statusOf(m)}）`, 'warning')
+    notify.push(`模块 ${m.name} 暂时用不了：${statusReason(m)}`, 'warning')
   }
   router.push(`/modules/${m._key}`)
 }
@@ -150,7 +196,7 @@ async function onReload(m: ModuleData) {
 
 /** 内置模块：禁用并隐藏（软卸载，文件/配置保留，可在设置页恢复） */
 async function onHideBuiltin(m: ModuleData) {
-  if (!window.confirm(`禁用并隐藏「${m.name}」？模块文件与配置保留，可在设置页恢复安装。`)) return
+  if (!window.confirm(`禁用并隐藏「${m.name}」？插件文件与它的配置都会保留，之后可以恢复安装。`)) return
   try {
     await modules.uninstall(m._key)
     notify.push(`模块 ${m.name} 已禁用并隐藏`, 'success')
@@ -163,8 +209,7 @@ async function onHideBuiltin(m: ModuleData) {
 async function onDelete(m: ModuleData) {
   const ok = window.confirm(
     `删除插件「${m.name}」？\n\n` +
-      '将删除模块文件；配置与数据默认保留（不会清理 data/module/data 下的运行时数据）。\n' +
-      '删除后如需彻底清理，请手动删除对应数据目录。',
+      '插件文件会被删除；它的配置与聊天数据会保留，重新安装后还能接着用。',
   )
   if (!ok) return
   try {
@@ -305,8 +350,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
     <div class="app-page-header">
       <div>
         <h1 class="app-page-title">功能模块</h1>
-        <div class="app-page-subtitle">共 {{ modules.count }} 个模块，点击进入配置</div>
+        <div class="app-page-subtitle">共 {{ modules.count }} 个模块，开关只影响当前账号</div>
       </div>
+      <v-chip v-if="bots.currentAccountId" size="small" variant="tonal" class="mr-2">
+        当前账号：{{ accountName }}
+      </v-chip>
       <v-btn
         variant="tonal"
         prepend-icon="mdi-package-variant"
@@ -332,12 +380,12 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         >
           <v-icon icon="mdi-alert-circle-outline" size="x-small" color="error" class="mr-1" />
           <span class="font-weight-medium">{{ m.name }}</span>
-          <span class="issue-detail">{{ m.error || statusOf(m) }}</span>
+          <span class="issue-detail">{{ m.error || statusReason(m) }}</span>
           <v-btn size="x-small" variant="text" prepend-icon="mdi-refresh" @click="onReload(m)">重试加载</v-btn>
         </div>
       </template>
       <template v-if="uninstalledModules.length">
-        <div class="text-caption mb-1 mt-2">以下模块已软卸载（文件与配置保留）：</div>
+        <div class="text-caption mb-1 mt-2">以下模块已禁用并隐藏（文件与配置保留）：</div>
         <div
           v-for="item in uninstalledModules"
           :key="`off-${item.module_name}`"
@@ -345,7 +393,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         >
           <v-icon icon="mdi-package-variant-remove" size="x-small" class="mr-1" />
           <span class="font-weight-medium">{{ item.display_name || item.module_name }}</span>
-          <span class="issue-detail">{{ item.module_name }} · v{{ item.version || '0.0.0' }}</span>
+          <span class="issue-detail">v{{ item.version || '0.0.0' }}</span>
           <v-btn size="x-small" variant="text" prepend-icon="mdi-restore" @click="onRestore(item.module_name, item.display_name)">
             恢复安装
           </v-btn>
@@ -424,11 +472,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                         prepend-icon="mdi-package-variant-closed"
                         @click="router.push('/bundles')"
                       >
-                        来自「{{ m.origin.bundle_name || m.origin.bundle_id }}」
+                        来自「{{ m.origin.bundle_name || '未命名预设' }}」
                       </v-chip>
                     </template>
                     <div class="text-caption">
-                      预设「{{ m.origin.bundle_name || m.origin.bundle_id }}」v{{ m.origin.bundle_version }}
+                      预设「{{ m.origin.bundle_name || '未命名预设' }}」v{{ m.origin.bundle_version }}
                     </div>
                     <div class="text-caption">
                       {{ m.origin.action === 'upgraded' ? '随预设升级' : '随预设安装' }} ·
@@ -440,9 +488,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                   <v-chip size="x-small" class="ml-1" :color="PERMISSION_COLOR[m.permission] || 'default'" variant="tonal">
                     {{ PERMISSION_LABEL[m.permission] || m.permission }}
                   </v-chip>
-                  <v-chip v-if="m.supersedes?.length" size="x-small" class="ml-1" color="warning" variant="tonal">
-                    接管: {{ m.supersedes.join(', ') }}
-                  </v-chip>
+                  <v-tooltip v-if="m.supersedes?.length" location="top" max-width="320">
+                    <template #activator="{ props }">
+                      <v-chip v-bind="props" size="x-small" class="ml-1" color="warning" variant="tonal">
+                        替代了{{ featureLabels(m.supersedes) }}
+                      </v-chip>
+                    </template>
+                    <div class="text-caption">开启后，这些内置环节由本插件负责</div>
+                  </v-tooltip>
                   <!-- 装坏/卸载状态：红色小标 + 悬浮错误文本 -->
                   <v-tooltip v-if="statusOf(m) === 'error'" location="top" max-width="420">
                     <template #activator="{ props }">
@@ -461,15 +514,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                   >
                     已卸载
                   </v-chip>
-                  <v-chip
-                    v-else-if="m.manifest_missing"
-                    size="x-small"
-                    class="ml-1"
-                    color="info"
-                    variant="tonal"
-                  >
-                    缺清单
-                  </v-chip>
+                  <v-tooltip v-else-if="m.manifest_missing" location="top" max-width="360">
+                    <template #activator="{ props }">
+                      <v-chip v-bind="props" size="x-small" class="ml-1" color="info" variant="tonal">
+                        文件不完整
+                      </v-chip>
+                    </template>
+                    <div class="text-caption">插件缺少说明文件，版本和显示名用了默认值，一般不影响使用</div>
+                  </v-tooltip>
                 </v-card-title>
                 <v-card-subtitle class="app-line-clamp-2">
                   <span v-if="statusOf(m) === 'error'" class="text-error">{{ m.error || '加载失败' }}</span>
@@ -554,7 +606,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       <v-card>
         <v-card-title class="d-flex align-center">
           <v-icon icon="mdi-package-variant" class="mr-2" color="primary" />
-          {{ zipDialogMode === 'update' ? `更新插件 ${zipTarget || ''}` : '安装插件' }}
+          {{ zipDialogMode === 'update' ? `更新插件 ${moduleDisplayName(zipTarget)}` : '安装插件' }}
           <v-spacer />
           <v-btn icon="mdi-close" variant="text" size="small" :disabled="zipInstalling" @click="closeZipDialog" />
         </v-card-title>
@@ -583,7 +635,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           <v-card v-if="zipPreview" variant="tonal" class="mt-3">
             <v-card-text class="text-caption preview-grid">
               <div class="preview-label">插件名称</div>
-              <div class="preview-value">{{ zipPreview.display_name || zipPreview.name }}（{{ zipPreview.name }}）</div>
+              <div class="preview-value">{{ zipPreview.display_name || '未命名插件' }}</div>
               <div class="preview-label">版本</div>
               <div class="preview-value">v{{ zipPreview.version || '0.0.0' }}</div>
               <div class="preview-label">安装目标</div>
@@ -607,13 +659,12 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           <v-alert v-if="zipPreview?.builtin_conflict" type="error" variant="tonal" density="compact" class="mt-3">
             <div class="text-caption">
               {{ zipPreview.conflict_reason || '该插件与内置模块同名，第三方插件不允许覆盖内置模块。' }}
-              请修改 module.json 的 name 后重新打包。
+              请让插件作者改名后重新打包。
             </div>
           </v-alert>
           <v-alert v-else-if="zipPreview?.conflict" type="warning" variant="tonal" density="compact" class="mt-3">
             <div class="text-caption">
-              已存在同名第三方插件，确认后将<strong>覆盖安装</strong>：旧版本会备份到
-              data/module/.backup，配置与数据保留。
+              已存在同名第三方插件，确认后将<strong>覆盖安装</strong>：旧版本会自动备份，原插件的配置与聊天数据保留。
             </div>
           </v-alert>
           <v-alert
@@ -624,7 +675,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
             class="mt-3"
           >
             <div class="text-caption">
-              包内插件名是「{{ zipPreview.name }}」，与要更新的「{{ zipTarget }}」不一致；确认后将按包内名称安装。
+              包内插件是「{{ zipPreview.display_name || '未命名插件' }}」，与要更新的「{{ moduleDisplayName(zipTarget) }}」不一致；确认后将按包内插件安装。
             </div>
           </v-alert>
         </v-card-text>
