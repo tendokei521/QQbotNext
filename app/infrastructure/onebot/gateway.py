@@ -47,7 +47,7 @@ from app.infrastructure.onebot.client import BotConnection
 from app.infrastructure.onebot.codec import decode
 from app.infrastructure.onebot.endpoint import FORWARD, is_reverse, normalize_mode
 from app.infrastructure.onebot.forward import connect_forward
-from app.infrastructure.onebot.gateway_events import enqueue_event, new_event_queue
+from app.infrastructure.onebot.gateway_events import EventHistory, enqueue_event, new_event_queue
 from app.infrastructure.onebot.gateway_lifecycle import GatewayLifecycleMixin
 from app.infrastructure.onebot.introspect import bot_info, bots_info, conn_mode, effective_bot_id
 from app.infrastructure.onebot.log_text import (  # noqa: F401 - 原路径重导出，第三方插件仍在 import
@@ -107,6 +107,8 @@ class OneBotGateway(GatewayLifecycleMixin):
         self.status_handler: Callable[[Any, str, str], Awaitable[None]] | None = None
         # 事件队列丢弃计数（account_id → 本连接内累计丢弃条数；供告警与排查）
         self.event_queue_drops: dict[str, int] = {}
+        # 诊断台：每账号最近收包事件环形缓冲（只读展示，不参与派发逻辑）
+        self.event_history = EventHistory()
 
     # ==================== 对外查询 ====================
     def get_last_account(self, account_id: str) -> dict | None:
@@ -178,6 +180,19 @@ class OneBotGateway(GatewayLifecycleMixin):
             if conn.bot_id == bot_id:
                 return conn
         return None
+
+    # ==================== 诊断台（最近收包事件） ====================
+    def recent_events(self, account_id: str, limit: int = 50) -> list[dict]:
+        """最近收到的原始事件（WebUI 诊断台；账号不存在返回空列表，不抛异常）。"""
+        return self.event_history.recent(account_id, limit)
+
+    def clear_events(self, account_id: str) -> None:
+        """清空该账号的收包事件历史。"""
+        self.event_history.clear(account_id)
+
+    def latest_group_id(self, account_id: str) -> int | None:
+        """该账号最近一条群消息的群号（诊断台发送测试消息时缺省用）。"""
+        return self.event_history.latest_group_id(account_id)
 
     # ==================== 状态广播 ====================
     async def _notify_status(self, conn, state: str, detail: str = "") -> None:
@@ -698,6 +713,9 @@ class OneBotGateway(GatewayLifecycleMixin):
         不做跨账号去重：每个账号独立处理自己收到的消息（多账号同群时各自按
         自己的触发规则决定是否回复），避免"消息被其它账号吞掉后无人响应"。
         """
+        # 诊断台：先留痕（原始事件），再做转发拉取/日志/派发——保证「协议端到底
+        # 有没有送进来」这条线索不受后续处理（忽略、异常、慢 LLM）影响。
+        self.event_history.record(getattr(conn, "account_id", None), event)
         # 转发消息拉取
         if isinstance(event, MessageEvent) and event.event_type in ("message_group", "message_private"):
             event = await self._attach_forward_msg(event, conn)
