@@ -12,8 +12,11 @@ import asyncio
 import pytest
 
 from app.application.setup_account import (
+    DEFAULT_CONNECT_INTERVAL,
+    MAX_CONNECT_INTERVAL,
     SetupAccountError,
     SetupAccountService,
+    SetupConnectLoop,
     normalize_listen_address,
 )
 
@@ -298,3 +301,75 @@ async def test_forward_requires_explicit_port(service):
         name="主号", conn_mode="forward", ws_url="ws://127.0.0.1:3001/"
     )
     assert ok2["ws_url"] == "ws://127.0.0.1:3001/"
+
+
+# ---------- 后台连接循环：失败指数退避（2/4/8…封顶 60s） ----------
+
+
+async def _run_connect_loop(loop: SetupConnectLoop, account_id: str, real_sleep) -> None:
+    """跑完一次后台连接循环（用真实 sleep 轮询，避免被测试打桩的 asyncio.sleep 干扰）。"""
+    loop.ensure(account_id)
+    for _ in range(500):
+        if not loop.running(account_id):
+            break
+        await real_sleep(0.001)
+    assert not loop.running(account_id), "连接成功后循环必须自行结束"
+
+
+async def test_connect_loop_backs_off_exponentially(monkeypatch, config_service):
+    """失败 3 次后成功：sleep 间隔应为 2 → 4 → 8（旧实现是固定 2s）。"""
+    bots = FakeBotService(connects_needed=4, config_service=config_service)
+    await config_service.save_bots([{"id": "main", "name": "主号", "ws_url": "ws://127.0.0.1:9/"}])
+
+    delays: list[float] = []
+    real_sleep = asyncio.sleep
+
+    async def fake_sleep(delay, *args, **kwargs):
+        delays.append(float(delay))
+        await real_sleep(0)
+
+    loop = SetupConnectLoop(bots, interval=DEFAULT_CONNECT_INTERVAL)
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    await _run_connect_loop(loop, "main", real_sleep)
+    monkeypatch.setattr(asyncio, "sleep", real_sleep)
+
+    assert len(bots.connect_calls) == 4, f"应重试到第 4 次才连上，实际 {bots.connect_calls}"
+    assert delays == [2.0, 4.0, 8.0], f"退避序列错误: {delays}"
+
+
+async def test_connect_loop_backoff_caps_at_max_interval(monkeypatch, config_service):
+    """长时间连不上：间隔翻倍到 60s 后不再增长（旧实现固定，新实现需封顶）。"""
+    bots = FakeBotService(connects_needed=5, config_service=config_service)
+    await config_service.save_bots([{"id": "main", "name": "主号", "ws_url": "ws://127.0.0.1:9/"}])
+
+    delays: list[float] = []
+    real_sleep = asyncio.sleep
+
+    async def fake_sleep(delay, *args, **kwargs):
+        delays.append(float(delay))
+        await real_sleep(0)
+
+    loop = SetupConnectLoop(bots, interval=30.0)
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    await _run_connect_loop(loop, "main", real_sleep)
+    monkeypatch.setattr(asyncio, "sleep", real_sleep)
+
+    assert len(bots.connect_calls) == 5
+    assert delays == [30.0, MAX_CONNECT_INTERVAL, MAX_CONNECT_INTERVAL, MAX_CONNECT_INTERVAL], delays
+
+
+async def test_connect_loop_skips_when_already_connected(config_service):
+    """已连上 / 反向监听已就绪时不得再发起连接（与监督循环不重复驱动）。"""
+    bots = FakeBotService(connects_needed=1, config_service=config_service)
+    await config_service.save_bots([{"id": "main", "name": "主号", "ws_url": "ws://127.0.0.1:9/"}])
+    bots.connected.add("main")
+
+    loop = SetupConnectLoop(bots, interval=0.01)
+    loop.ensure("main")
+    for _ in range(100):
+        if not loop.running("main"):
+            break
+        await asyncio.sleep(0.01)
+
+    assert bots.connect_calls == [], "已有连接时不该再 connect"
+

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 
+from app.core.logger import logger
 from app.infrastructure.onebot.endpoint import (
     EndpointError,
     is_reverse,
@@ -27,8 +28,10 @@ LISTEN_DEFAULT_PORT = 4001
 LISTEN_DEFAULT_PATH = "/"
 #: 向导默认监听地址
 DEFAULT_LISTEN_ADDRESS = f"ws://127.0.0.1:{LISTEN_DEFAULT_PORT}{LISTEN_DEFAULT_PATH}"
-#: 后台连接重试间隔（秒）
+#: 后台连接重试的**起始**间隔（秒）：失败一次翻倍，连上/监听就绪即停
 DEFAULT_CONNECT_INTERVAL = 2.0
+#: 后台连接重试间隔上限（秒）：避免对端长期不可用时无限拉长
+MAX_CONNECT_INTERVAL = 60.0
 #: kv 里记录"向导管理的那个账号"
 SETUP_ACCOUNT_KV = "setup_default_account_id"
 
@@ -75,11 +78,22 @@ def normalize_listen_address(value: str, conn_mode: str = "reverse") -> str:
 
 
 class SetupConnectLoop:
-    """后台连接循环：每 ``interval`` 秒尝试一次，连上就自己停。"""
+    """后台连接循环：失败按指数退避重试（2/4/8…封顶 60s），连上或监听就绪即停。
 
-    def __init__(self, bot_service, *, interval: float = DEFAULT_CONNECT_INTERVAL) -> None:
+    历史实现固定 2s 无限重试：对端长期不可用（地址填错、服务没起）时日志/连接
+    尝试一直刷屏，并且与 gateway 监督循环的退避重连重复驱动同一个账号。
+    """
+
+    def __init__(
+        self,
+        bot_service,
+        *,
+        interval: float = DEFAULT_CONNECT_INTERVAL,
+        max_interval: float = MAX_CONNECT_INTERVAL,
+    ) -> None:
         self.bot_service = bot_service
         self.interval = max(0.05, float(interval))
+        self.max_interval = max(self.interval, float(max_interval))
         self._tasks: dict[str, asyncio.Task] = {}
 
     def running(self, account_id: str) -> bool:
@@ -95,17 +109,26 @@ class SetupConnectLoop:
         return True
 
     async def _run(self, account_id: str) -> None:
+        delay = self.interval
         try:
             while True:
                 if not self.bot_service.account_exists(account_id):
-                    return  # 账号已删除：别对着空账号每 2s 空转
+                    return  # 账号已删除：别对着空账号空转
                 if self.bot_service.is_connected(account_id):
                     return
                 if self.bot_service.is_listening(account_id):
-                    # 反向监听已就绪：端口常驻，不需要继续"连接"（否则每 2s 重复广播状态）
+                    # 反向监听已就绪：端口常驻，不需要继续"连接"（否则重复广播状态）
                     return
-                await self.bot_service.connect(account_id)
-                await asyncio.sleep(self.interval)
+                try:
+                    await self.bot_service.connect(account_id)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:  # noqa: BLE001 —— 单次异常只影响本轮，下一轮退避重试
+                    logger.warning(f"[Setup] 账号「{account_id}」后台连接异常（{delay:g}s 后重试）: {e}")
+                if self.bot_service.is_connected(account_id) or self.bot_service.is_listening(account_id):
+                    return
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, self.max_interval)  # 2→4→8…→60s 封顶
         except asyncio.CancelledError:
             raise
         finally:
