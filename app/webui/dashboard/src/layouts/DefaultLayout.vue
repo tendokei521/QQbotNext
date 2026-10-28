@@ -186,15 +186,21 @@ function botStatusText(status: BotStatus): string {
   return STATUS_TEXT[status]
 }
 
-// 反向账号：监听已就绪但协议端还没连进来时，不能显示「连接中…」（会让人以为在连），
-// 应明确告诉用户在等协议端（与「账号管理」卡片口径一致）。
-const currentStatusText = computed(() => {
+// 顶栏连接状态：反向账号「监听已就绪但协议端还没连进来」是正常过渡态，
+// 必须显示 warning + 接入图标（与「账号管理」卡片口径一致），不能按 isConnected 一律判红。
+const currentStatusChip = computed(() => {
   const bot = bots.currentBot
-  if (!bot) return '离线'
+  if (!bot) return { text: '离线', color: 'error', icon: 'mdi-alert-circle' }
   if (bot.conn_mode === 'reverse' && bot.status !== 'connected' && bot.listening) {
-    return '等待协议端接入'
+    return { text: '等待协议端接入', color: 'warning', icon: 'mdi-access-point-network' }
   }
-  return STATUS_TEXT[bot.status]
+  if (bot.status === 'connected') {
+    return { text: STATUS_TEXT[bot.status], color: 'success', icon: 'mdi-check-circle' }
+  }
+  if (bot.status === 'connecting' || bot.status === 'reconnecting') {
+    return { text: STATUS_TEXT[bot.status], color: 'warning', icon: 'mdi-progress-clock' }
+  }
+  return { text: STATUS_TEXT[bot.status], color: 'error', icon: 'mdi-alert-circle' }
 })
 const isConnected = computed(() => bots.currentBot?.status === 'connected')
 const hasCurrentBot = computed(() => bots.currentId !== null)
@@ -364,12 +370,12 @@ onUnmounted(() => {
         </v-select>
         <v-chip
           class="status-chip"
-          :color="isConnected ? 'success' : bots.currentBot?.status === 'connecting' || bots.currentBot?.status === 'reconnecting' ? 'warning' : 'error'"
+          :color="currentStatusChip.color"
           size="small"
           variant="tonal"
         >
-          <v-icon start :icon="isConnected ? 'mdi-check-circle' : 'mdi-alert-circle'" size="small" />
-          <span>{{ currentStatusText }}</span>
+          <v-icon start :icon="currentStatusChip.icon" size="small" />
+          <span>{{ currentStatusChip.text }}</span>
           <span v-if="bots.currentBot && resolvedBotId(bots.currentBot)" class="chip-bot-id">
             | {{ resolvedBotId(bots.currentBot) }}
           </span>
