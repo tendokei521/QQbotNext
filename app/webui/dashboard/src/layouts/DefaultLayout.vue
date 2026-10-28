@@ -6,7 +6,7 @@ import { useThemeStore } from '@/stores/theme'
 import { useBotsStore, displayName, resolveAccount, resolvedBotId, type BotStatus } from '@/stores/bots'
 import { useWebuiStore } from '@/stores/webui'
 import { useNotifyStore } from '@/stores/notify'
-import { connectSocket } from '@/api/socket'
+import { connectSocket, onSocketMessage } from '@/api/socket'
 import { errorMessage } from '@/api/http'
 import MultiGroupDialog from '@/components/MultiGroupDialog.vue'
 import { agentSidebarEntries } from '@/agent/sections'
@@ -17,6 +17,30 @@ const webui = useWebuiStore()
 const notify = useNotifyStore()
 const route = useRoute()
 
+// 实时连接状态：断线时页面数据会变旧，顶部给一条常驻提示（socket.ts 负责广播）
+const liveState = ref<'connecting' | 'connected' | 'reconnecting'>('connecting')
+const retryCount = ref(0)
+const offSocketStatus = onSocketMessage('socket_status', (msg: any) => {
+  const status = String(msg?.status || '')
+  if (status === 'connected' || status === 'open') {
+    liveState.value = 'connected'
+    retryCount.value = 0
+  } else if (status === 'reconnecting' || status === 'closed') {
+    liveState.value = 'reconnecting'
+    retryCount.value = Number(msg?.attempt || 0) || retryCount.value
+  } else if (status === 'connecting') {
+    liveState.value = 'connecting'
+  }
+})
+// 兼容旧事件名（socket_open / socket_close），两者任一到达都能更新提示
+const offSocketOpen = onSocketMessage('socket_open', () => {
+  liveState.value = 'connected'
+  retryCount.value = 0
+})
+const offSocketClose = onSocketMessage('socket_close', () => {
+  liveState.value = 'reconnecting'
+})
+
 // 自动打开向导只做一次（用户关掉后不再反复弹）
 let setupAutoOpened = false
 
@@ -26,8 +50,9 @@ const rail = ref(false)
 const multiGroupOpen = ref(false)
 const busyAction = ref(false)
 
-/** 前端构建戳（vite 注入）：界面上直接显示，用来判断"改了有没有生效" */
-const buildStamp = __BUILD_STAMP__
+/** 侧栏分组标题：路由 watch 与激活态判断共用，避免同名字符串散落多处。 */
+const AGENT_GROUP = 'AI 对话设置'
+const TOOLS_GROUP = '高级工具'
 
 // 桌面/移动断点：桌面永久展开侧边栏，移动端可收起（导航图标切换）
 const isDesktop = ref(window.innerWidth >= 768)
@@ -54,8 +79,10 @@ interface NavChild {
 }
 
 interface NavItem {
+  /** 分组小标题（只有标题，不可点） */
+  header?: string
   to?: string
-  title: string
+  title?: string
   icon?: string
   children?: NavChild[]
 }
@@ -64,33 +91,37 @@ const navItems = computed<NavItem[]>(() => {
   // Agent 二级菜单由 @/agent/sections 派生，避免与路由/概览卡片各抄一份
   const agentChildren: NavChild[] = agentSidebarEntries()
   const toolChildren: NavChild[] = [
-    { to: '/tools/system', title: 'System Tools' },
-    { to: '/tools/onebot', title: 'OneBot Tools' },
-    { to: '/tools/mcp', title: 'MCP Tools' },
-    { to: '/tools/module', title: '模块 Tools' },
+    { to: '/tools/system', title: '系统工具' },
+    { to: '/tools/onebot', title: 'OneBot 工具' },
+    { to: '/tools/mcp', title: '外部工具' },
+    { to: '/tools/module', title: '插件工具' },
   ]
   // 历史：曾有「高级设置」独立区（内容拆成模块后只剩空概览页，已移除），
   // 以及实验性「配置档案」入口（整套能力已下线）。
-  // 「Tool 管理」属于实验性入口：默认隐藏，设置里打开实验性选项后才出现。
+  // 「高级工具」属于实验性入口：默认隐藏，设置里打开实验性选项后才出现。
   const showExperimental = Boolean(webui.config.experimental?.show_experimental)
-  // 顺序按「配好一个账号」的实际路径排：先连号（账号管理），再配模型（Provider 预设），
-  // 然后开能力（功能模块 / 人格设定 / 预设中心），最后才是 Agent 面板与数据类页面。
+  // 顺序按「配好一个账号」的实际路径排：先连号（账号管理），再配模型（模型服务），
+  // 然后开能力（功能插件 / 人格设定 / 配置包），最后才是 AI 对话设置与数据类页面。
   return [
     { to: '/', title: '总览', icon: 'mdi-view-dashboard-outline' },
+    { header: '运行' },
     { to: '/bots', title: '账号管理', icon: 'mdi-robot-outline' },
-    // 权限与回复紧贴账号管理：它管的就是"这个号在哪些群能说话"
-    { to: '/policy', title: '权限与回复', icon: 'mdi-shield-account-outline' },
-    { to: '/provider-presets', title: 'Provider 预设', icon: 'mdi-api' },
-    { to: '/modules', title: '功能模块', icon: 'mdi-cube-outline' },
+    // 群聊权限紧贴账号管理：它管的就是"这个号在哪些群能说话"
+    { to: '/policy', title: '群聊权限', icon: 'mdi-shield-account-outline' },
+    { header: '能力' },
+    { to: '/provider-presets', title: '模型服务', icon: 'mdi-api' },
+    { to: '/modules', title: '功能插件', icon: 'mdi-cube-outline' },
     { to: '/personas', title: '人格设定', icon: 'mdi-account-heart-outline' },
-    { to: '/bundles', title: '预设中心', icon: 'mdi-package-variant-closed' },
-    { title: 'Agent 面板', icon: 'mdi-creation-outline', children: agentChildren },
+    { to: '/bundles', title: '配置包', icon: 'mdi-package-variant-closed' },
+    { title: AGENT_GROUP, icon: 'mdi-creation-outline', children: agentChildren },
     ...(showExperimental
-      ? [{ title: 'Tool 管理', icon: 'mdi-toolbox-outline', children: toolChildren }]
+      ? [{ title: TOOLS_GROUP, icon: 'mdi-toolbox-outline', children: toolChildren }]
       : []),
+    { header: '数据' },
     { to: '/sessions', title: '会话数据', icon: 'mdi-chat-outline' },
     { to: '/stats', title: '数据统计', icon: 'mdi-chart-bar' },
     { to: '/logs', title: '日志', icon: 'mdi-console' },
+    { header: '系统' },
     { to: '/settings', title: '设置', icon: 'mdi-cog-outline' },
   ]
 })
@@ -108,14 +139,14 @@ watch(
   () => route.path,
   () => {
     if (isAgentActive.value) {
-      if (!openedGroups.value.includes('Agent 面板')) openedGroups.value.push('Agent 面板')
+      if (!openedGroups.value.includes(AGENT_GROUP)) openedGroups.value.push(AGENT_GROUP)
     } else {
-      openedGroups.value = openedGroups.value.filter((g) => g !== 'Agent 面板')
+      openedGroups.value = openedGroups.value.filter((g) => g !== AGENT_GROUP)
     }
     if (isToolsActive.value) {
-      if (!openedGroups.value.includes('Tool 管理')) openedGroups.value.push('Tool 管理')
+      if (!openedGroups.value.includes(TOOLS_GROUP)) openedGroups.value.push(TOOLS_GROUP)
     } else {
-      openedGroups.value = openedGroups.value.filter((g) => g !== 'Tool 管理')
+      openedGroups.value = openedGroups.value.filter((g) => g !== TOOLS_GROUP)
     }
   },
   { immediate: true },
@@ -208,6 +239,9 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', onResize)
+  offSocketStatus()
+  offSocketOpen()
+  offSocketClose()
 })
 </script>
 
@@ -228,16 +262,15 @@ onUnmounted(() => {
           </div>
           <div v-if="!rail" class="brand-text">
             <div class="brand-name">QQBot Next</div>
-            <div class="brand-sub" :title="`前端构建：${buildStamp}（对不上仓库提交 = 缓存旧 JS 或没重建）`">
-              管理后台 · {{ buildStamp }}
-            </div>
+            <div class="brand-sub">多账号 QQ 机器人</div>
           </div>
         </div>
       </template>
 
       <v-list nav density="comfortable" class="pa-2 nav-list">
-        <template v-for="item in navItems" :key="item.title">
-          <v-list-group v-if="item.children" v-model="openedGroups" :value="item.title">
+        <template v-for="item in navItems" :key="item.header || item.title || item.to">
+          <v-list-subheader v-if="item.header" class="nav-subheader">{{ item.header }}</v-list-subheader>
+          <v-list-group v-else-if="item.children" v-model="openedGroups" :value="item.title">
             <template #activator="{ props }">
               <v-list-item
                 v-bind="props"
@@ -245,7 +278,7 @@ onUnmounted(() => {
                 :prepend-icon="item.icon"
                 rounded="lg"
                 class="nav-item"
-                :class="{ 'nav-item--active': item.title === 'Agent 面板' ? isAgentActive : item.title === 'Tool 管理' ? isToolsActive : false }"
+                :class="{ 'nav-item--active': item.title === AGENT_GROUP ? isAgentActive : item.title === TOOLS_GROUP ? isToolsActive : false }"
               />
             </template>
             <v-list-item
@@ -393,6 +426,18 @@ onUnmounted(() => {
     </v-app-bar>
 
     <v-main class="main-area">
+      <v-alert
+        v-if="liveState === 'reconnecting'"
+        type="warning"
+        density="compact"
+        variant="tonal"
+        class="live-banner"
+      >
+        <div class="d-flex align-center flex-wrap gap-2">
+          <span>实时连接已断开{{ retryCount > 1 ? `，正在第 ${retryCount} 次重连` : '，正在自动重连' }}……页面数据可能不是最新。</span>
+          <v-btn size="x-small" variant="text" prepend-icon="mdi-refresh" @click="connectSocket()">立即重试</v-btn>
+        </div>
+      </v-alert>
       <v-container fluid class="pa-4 pa-md-6 page-container">
         <router-view v-slot="{ Component }">
           <transition name="app-router-fade" mode="out-in">
@@ -486,6 +531,25 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+/* 分组小标题：低对比度、紧凑，只用来分区，不抢视觉 */
+.nav-subheader {
+  min-height: 26px !important;
+  height: 26px !important;
+  margin-top: 6px;
+  padding-left: 16px !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.08em !important;
+  color: rgba(var(--v-theme-on-surface), 0.38) !important;
+  text-transform: none !important;
+}
+
+/* 断线提示条：粘在内容区顶部，滚动时仍可见 */
+.live-banner {
+  margin: 12px 16px 0;
+  border-radius: 12px;
 }
 
 .nav-item {

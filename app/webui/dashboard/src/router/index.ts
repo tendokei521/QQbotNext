@@ -36,16 +36,16 @@ const router = createRouter({
         { path: '', name: 'overview', component: () => import('@/views/OverviewPage.vue'), meta: { title: '总览' } },
         { path: 'bots', name: 'bots', component: () => import('@/views/BotsPage.vue'), meta: { title: '账号管理' } },
         // 「权限与回复」：简单视图（群开关矩阵）；高级规则暂仍在 Agent→权限管理
-        { path: 'policy', name: 'policy', component: () => import('@/views/PolicyPage.vue'), meta: { title: '权限与回复' } },
-        { path: 'modules', name: 'modules', component: () => import('@/views/ModulesPage.vue'), meta: { title: '功能模块' } },
+        { path: 'policy', name: 'policy', component: () => import('@/views/PolicyPage.vue'), meta: { title: '群聊权限' } },
+        { path: 'modules', name: 'modules', component: () => import('@/views/ModulesPage.vue'), meta: { title: '功能插件' } },
         {
           path: 'bundles',
           name: 'bundles',
           component: () => import('@/views/BundlesPage.vue'),
-          meta: { title: '预设中心' },
+          meta: { title: '配置包' },
         },
         { path: 'modules/agent', redirect: '/agent' },
-        { path: 'modules/:name', name: 'module-config', component: () => import('@/views/ModuleConfigPage.vue'), meta: { title: '模块配置' } },
+        { path: 'modules/:name', name: 'module-config', component: () => import('@/views/ModuleConfigPage.vue'), meta: { title: '功能设置' } },
         // Agent 配置区共享外壳：bot 守卫 / 头部 / 保存状态 / 段落导航都在 layout 里
         {
           path: 'agent',
@@ -55,7 +55,7 @@ const router = createRouter({
               path: '',
               name: 'agent',
               component: () => import('@/views/AgentPage.vue'),
-              meta: { title: 'Agent 面板' },
+              meta: { title: 'AI 对话设置' },
             },
             ...agentSectionRoutes,
           ],
@@ -76,7 +76,7 @@ const router = createRouter({
         {
           path: 'tools',
           component: () => import('@/views/ToolsPage.vue'),
-          meta: { title: 'Tool 管理' },
+          meta: { title: '高级工具' },
           children: [
             {
         path: 'overview',
@@ -84,13 +84,13 @@ const router = createRouter({
         component: () => import('@/components/tools/ToolsOverview.vue'),
         meta: { title: '工具总览' },
       },
-      { path: 'system', name: 'tools-system', component: () => import('@/views/SystemToolsPage.vue'), meta: { title: 'System Tools' } },
-            { path: 'onebot', name: 'tools-onebot', component: () => import('@/views/OnebotToolsPage.vue'), meta: { title: 'OneBot Tools' } },
-            { path: 'mcp', name: 'tools-mcp', component: () => import('@/views/McpToolsPage.vue'), meta: { title: 'MCP Tools' } },
-            { path: 'module', name: 'tools-module', component: () => import('@/views/ModuleToolsPage.vue'), meta: { title: '模块 Tools' } },
+      { path: 'system', name: 'tools-system', component: () => import('@/views/SystemToolsPage.vue'), meta: { title: '系统工具' } },
+            { path: 'onebot', name: 'tools-onebot', component: () => import('@/views/OnebotToolsPage.vue'), meta: { title: 'OneBot 工具' } },
+            { path: 'mcp', name: 'tools-mcp', component: () => import('@/views/McpToolsPage.vue'), meta: { title: '外部工具' } },
+            { path: 'module', name: 'tools-module', component: () => import('@/views/ModuleToolsPage.vue'), meta: { title: '插件工具' } },
           ],
         },
-        { path: 'provider-presets', name: 'provider-presets', component: () => import('@/views/ProviderPresetsPage.vue'), meta: { title: 'Provider 预设' } },
+        { path: 'provider-presets', name: 'provider-presets', component: () => import('@/views/ProviderPresetsPage.vue'), meta: { title: '模型服务' } },
         { path: 'personas', name: 'personas', component: () => import('@/views/PersonasPage.vue'), meta: { title: '人格设定' } },
         { path: 'sessions', name: 'sessions', component: () => import('@/views/SessionsPage.vue'), meta: { title: '会话数据' } },
         // 「配置档案」(/config-profiles) 已移除：它是实验性功能，且整套能力（前端页 +
