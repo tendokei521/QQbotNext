@@ -70,6 +70,10 @@ const loadingSessions = ref(false)
 const loadingConversations = ref(false)
 const loadingConversation = ref(false)
 
+/** 加载失败原因（空串 = 正常）：失败时必须显示错误态，不能伪装成「暂无数据」 */
+const sessionsError = ref('')
+const conversationsError = ref('')
+
 const selectedSessionId = ref('')
 const selectedTaskId = ref('')
 const selectedTaskIds = ref<string[]>([])
@@ -159,9 +163,11 @@ async function loadSessions() {
     sessions.value = []
     conversations.value = []
     conversation.value = null
+    sessionsError.value = ''
     return
   }
   loadingSessions.value = true
+  sessionsError.value = ''
   try {
     const res = await http.get<{ ok: boolean; sessions: SessionSummary[] }>('/api/sessions', {
       params: { account_id: botId.value },
@@ -181,6 +187,8 @@ async function loadSessions() {
       selectedTaskIds.value = []
     }
   } catch (err) {
+    // 失败时保留错误原因给页面显示重试入口，而不是让列表表现为「没有会话」
+    sessionsError.value = errorMessage(err)
     notify.push(errorMessage(err), 'error')
   } finally {
     loadingSessions.value = false
@@ -198,9 +206,11 @@ async function loadSessions() {
 async function loadConversations(autoOpen = true) {
   if (!selectedSessionId.value || botId.value == null) {
     conversations.value = []
+    conversationsError.value = ''
     return
   }
   loadingConversations.value = true
+  conversationsError.value = ''
   try {
     const res = await http.get<{ ok: boolean; session: { conversations: ConversationSummary[]; empty?: boolean } }>(
       `/api/sessions/${encodeURIComponent(selectedSessionId.value)}`,
@@ -229,6 +239,7 @@ async function loadConversations(autoOpen = true) {
       conversation.value = null
       return
     }
+    conversationsError.value = errorMessage(err)
     notify.push(errorMessage(err), 'error')
   } finally {
     loadingConversations.value = false
@@ -706,6 +717,10 @@ onMounted(() => {
             <template v-else-if="botId == null">
               <div class="text-caption text-center pa-4">请先选择一个账号</div>
             </template>
+            <v-alert v-else-if="sessionsError" type="error" variant="tonal" density="compact" class="ma-2">
+              <div class="text-caption mb-1">会话列表加载失败：{{ sessionsError }}</div>
+              <v-btn size="x-small" variant="text" prepend-icon="mdi-refresh" @click="loadSessions">重试</v-btn>
+            </v-alert>
             <template v-else-if="sessions.length === 0">
               <div class="text-caption text-center pa-4">暂无会话数据</div>
             </template>
@@ -755,6 +770,10 @@ onMounted(() => {
             <template v-else-if="!selectedSessionId">
               <div class="text-caption text-center pa-4">请选择左侧会话</div>
             </template>
+            <v-alert v-else-if="conversationsError" type="error" variant="tonal" density="compact" class="ma-2">
+              <div class="text-caption mb-1">对话列表加载失败：{{ conversationsError }}</div>
+              <v-btn size="x-small" variant="text" prepend-icon="mdi-refresh" @click="loadConversations(false)">重试</v-btn>
+            </v-alert>
             <template v-else-if="conversations.length === 0">
               <div class="text-caption text-center pa-4">该会话暂无对话</div>
             </template>
