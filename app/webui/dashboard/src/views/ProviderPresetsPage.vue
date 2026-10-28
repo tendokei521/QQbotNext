@@ -71,24 +71,49 @@ const API_FORMAT_OPTIONS = [
   {
     title: 'Anthropic Messages（原生）',
     value: 'anthropic',
-    props: { subtitle: 'Anthropic / MiniMax 等 Anthropic 兼容端点' },
+    props: { subtitle: 'Anthropic / MiniMax 等兼容接口' },
   },
   {
     title: 'OpenAI Chat Completions',
     value: 'openai',
-    props: { subtitle: '最常见的 /v1/chat/completions，DeepSeek / 中转 / Ollama 也选它' },
+    props: { subtitle: '最常用；DeepSeek、中转服务、Ollama 都选它' },
   },
   {
     title: 'OpenAI Responses API',
     value: 'openai-responses',
-    props: { subtitle: 'OpenAI 新版 /v1/responses：部分新模型与中转只开这个端点' },
+    props: { subtitle: 'OpenAI 的新版接口；有些新模型只支持它' },
   },
   {
     title: 'Gemini Native generateContent',
     value: 'gemini',
-    props: { subtitle: 'Google Generative Language 原生端点' },
+    props: { subtitle: 'Google Gemini 官方接口' },
   },
 ]
+
+/** 模型类型 → 用户看得懂的名字 */
+const PROVIDER_TYPE_LABELS: Record<string, string> = {
+  chat: '对话',
+  embedding: '文本向量',
+  rerank: '重排',
+  tts: '语音合成',
+  stt: '语音识别',
+}
+
+function providerTypeLabel(type: string): string {
+  return PROVIDER_TYPE_LABELS[type] || type
+}
+
+/** 最大输出的来源 → 用户看得懂的说法 */
+const MAX_TOKENS_ORIGIN_LABELS: Record<string, string> = {
+  连接预设: '模型服务设置',
+  'provider 模型': '这个模型的设置',
+  'agent 配置': 'Agent 页的设置',
+  内置默认: '系统默认',
+}
+
+function maxTokensOriginLabel(origin?: string): string {
+  return MAX_TOKENS_ORIGIN_LABELS[origin || ''] || '系统默认'
+}
 
 /** 老预设里可能存着 deepseek / ollama / claude 这类别名：编辑时归一到四种 API 格式 */
 function normalizeApiFormat(provider: string): string {
@@ -111,6 +136,12 @@ const API_FORMAT_LABELS: Record<string, string> = {
 function apiFormatLabel(provider: string): string {
   const format = normalizeApiFormat(provider)
   return API_FORMAT_LABELS[format] || format
+}
+
+/** 模型下拉里补上所属服务名，避免两个服务下的同名模型分不清 */
+function modelOptionLabel(model: ProviderModel): string {
+  const preset = presets.value.find((item) => item.id === model.preset_id)
+  return preset ? `${model.model} · ${preset.name}` : model.model
 }
 
 const notify = useNotifyStore()
@@ -215,8 +246,8 @@ const maxTokensHint = computed(() => {
   const window = Number(modelForm.context_window) || 0
   if (modelForm.max_tokens == null) {
     return window
-      ? `留空 = 跟随下一层（当前窗口 ${window}，未设上限时按窗口的 1/4 推导）`
-      : '留空 = 跟随「连接预设 → Agent 页 → 内置默认」'
+      ? `留空 = 自动（当前上下文窗口 ${window}，按窗口的 1/4 估算）`
+      : '留空 = 自动（用模型服务或全局设置里的值）'
   }
   if (window && Number(modelForm.max_tokens) >= window) {
     return `不能大于等于上下文窗口（${window}）—— 输出也算在窗口里`
@@ -303,7 +334,7 @@ async function saveSettings() {
         .map((s: string) => s.trim())
         .filter(Boolean),
     })
-    notify.push('Provider 全局设置已保存', 'success')
+    notify.push('模型服务设置已保存', 'success')
     settingsDialog.value = false
   } catch (err) {
     notify.push(errorMessage(err), 'error')
@@ -372,11 +403,11 @@ async function saveSource() {
     }
     if (editingSourceId.value) {
       await http.put(`/api/provider-presets/${editingSourceId.value}`, payload)
-      notify.push('Provider 预设已更新', 'success')
+      notify.push('模型服务已更新', 'success')
     } else {
       const res = await http.post<{ preset: ProviderPreset }>('/api/provider-presets', payload)
       selectedPresetId.value = res.data?.preset?.id || ''
-      notify.push('自定义预设已创建', 'success')
+      notify.push('模型服务已创建', 'success')
     }
     sourceDialog.value = false
     await loadPresets()
@@ -465,21 +496,21 @@ async function saveConfigJson() {
     return
   }
   if (!config.api_base?.trim()) {
-    configError.value = 'api_base 不能为空'
+    configError.value = '接口地址（api_base）不能为空'
     return
   }
   if (config.headers !== undefined && (typeof config.headers !== 'object' || config.headers === null || Array.isArray(config.headers))) {
-    configError.value = 'headers 必须是对象'
+    configError.value = '请求头（headers）必须是对象'
     return
   }
   if (config.extra_body !== undefined && (typeof config.extra_body !== 'object' || config.extra_body === null || Array.isArray(config.extra_body))) {
-    configError.value = 'extra_body 必须是对象'
+    configError.value = '请求体扩展（extra_body）必须是对象'
     return
   }
   configSaving.value = true
   try {
     await http.put(`/api/provider-presets/${editingConfigPresetId.value}`, { config })
-    notify.push('Provider 配置文件已保存', 'success')
+    notify.push('配置已保存', 'success')
     configDialog.value = false
     await loadPresets()
   } catch (err) {
@@ -490,10 +521,10 @@ async function saveConfigJson() {
 }
 
 async function deleteSource(preset: ProviderPreset) {
-  if (!window.confirm(`确认删除连接预设「${preset.name}」？其下模型会一并删除，引用该预设的 Agent 将恢复为默认（空）。`)) return
+  if (!window.confirm(`确认删除模型服务「${preset.name}」？它下面的模型会一起删除，正在用它的 Agent 会恢复为默认。`)) return
   try {
     await http.delete(`/api/provider-presets/${preset.id}`)
-    notify.push('Provider 预设已删除', 'success')
+    notify.push('模型服务已删除', 'success')
     if (selectedPresetId.value === preset.id) selectedPresetId.value = ''
     await loadPresets()
   } catch (err) {
@@ -566,10 +597,10 @@ async function saveModel() {
     }
     if (editingModelId.value) {
       await http.put(`/api/provider-models/${editingModelId.value}`, payload)
-      notify.push('模型实例已更新', 'success')
+      notify.push('模型已更新', 'success')
     } else {
       await http.post('/api/provider-models', payload)
-      notify.push('模型实例已创建', 'success')
+      notify.push('模型已添加', 'success')
     }
     modelDialog.value = false
     await loadModels()
@@ -621,10 +652,10 @@ async function testModel(model: ProviderModel) {
 }
 
 async function deleteModel(model: ProviderModel) {
-  if (!window.confirm(`确认删除模型实例「${model.model}」？`)) return
+  if (!window.confirm(`确认删除模型「${model.model}」？`)) return
   try {
     await http.delete(`/api/provider-models/${model.id}`)
-    notify.push('模型实例已删除', 'success')
+    notify.push('模型已删除', 'success')
     await loadModels()
   } catch (err) {
     notify.push(errorMessage(err), 'error')
@@ -656,20 +687,20 @@ onMounted(() => {
   <div>
     <div class="app-page-header" style="align-items: center">
       <div>
-        <h1 class="app-page-title">Provider 预设</h1>
-        <div class="app-page-subtitle">连接预设 + 模型实例两级管理，Agent 只需选择“预设 / 模型”</div>
+        <h1 class="app-page-title">模型服务</h1>
+        <div class="app-page-subtitle">在这里填一次模型服务的 Key，所有账号共用</div>
       </div>
       <v-spacer />
       <v-btn variant="tonal" prepend-icon="mdi-tune" class="mr-1" @click="openSettings">全局设置</v-btn>
-      <v-btn variant="tonal" prepend-icon="mdi-library-plus" class="mr-1" @click="openBuiltinDialog">添加内置预设</v-btn>
-      <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="openCreateSource">新建自定义预设</v-btn>
+      <v-btn variant="tonal" prepend-icon="mdi-library-plus" class="mr-1" @click="openBuiltinDialog">添加常用服务</v-btn>
+      <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="openCreateSource">新建模型服务</v-btn>
     </div>
 
     <v-row class="mt-2">
       <v-col cols="12" md="4" lg="3">
         <v-card variant="outlined">
           <v-card-title class="d-flex align-center">
-            <v-icon icon="mdi-api" class="mr-2" color="primary" /> 连接预设
+            <v-icon icon="mdi-api" class="mr-2" color="primary" /> 已添加的模型服务
           </v-card-title>
           <v-card-text class="pa-2">
             <v-progress-linear v-if="loadingPresets" indeterminate color="primary" />
@@ -691,7 +722,7 @@ onMounted(() => {
                 </template>
               </v-list-item>
               <v-list-item v-if="presets.length === 0">
-                <v-list-item-title class="text-caption text-center">暂无连接预设</v-list-item-title>
+                <v-list-item-title class="text-caption text-center">还没有模型服务</v-list-item-title>
               </v-list-item>
             </v-list>
           </v-card-text>
@@ -705,18 +736,18 @@ onMounted(() => {
               <v-icon icon="mdi-server" class="mr-2" color="primary" /> {{ selectedPreset.name }}
               <v-chip size="small" variant="tonal" class="ml-2">{{ apiFormatLabel(selectedPreset.provider) }}</v-chip>
               <v-spacer />
-              <v-btn size="small" variant="tonal" prepend-icon="mdi-pencil" @click="openEditSource(selectedPreset)">编辑连接</v-btn>
-              <v-btn size="small" variant="tonal" prepend-icon="mdi-file-code-outline" class="ml-1" @click="openConfigEditor(selectedPreset)">编辑配置文件</v-btn>
+              <v-btn size="small" variant="tonal" prepend-icon="mdi-pencil" @click="openEditSource(selectedPreset)">编辑</v-btn>
+              <v-btn size="small" variant="tonal" prepend-icon="mdi-file-code-outline" class="ml-1" @click="openConfigEditor(selectedPreset)">高级配置</v-btn>
               <v-btn size="small" variant="tonal" prepend-icon="mdi-test-tube" class="ml-1" :loading="testingId === `preset:${selectedPreset.id}`" @click="testPreset(selectedPreset)">测试连接</v-btn>
             </v-card-title>
             <v-card-text class="text-caption">
-              API Base：{{ selectedPreset.config.api_base || '—' }} · 重试：{{ selectedPreset.config.retry_attempts || 3 }} · 超时：{{ selectedPreset.config.timeout || 30 }}s
+              接口地址：{{ selectedPreset.config.api_base || '—' }} · 重试：{{ selectedPreset.config.retry_attempts || 3 }} · 超时：{{ selectedPreset.config.timeout || 30 }}s
             </v-card-text>
           </v-card>
 
           <v-card variant="outlined">
             <v-card-title class="d-flex align-center">
-              <v-icon icon="mdi-creation" class="mr-2" color="primary" /> 模型实例
+              <v-icon icon="mdi-creation" class="mr-2" color="primary" /> 模型
               <v-spacer />
               <v-btn size="small" variant="tonal" prepend-icon="mdi-download" :loading="fetchingModels" @click="fetchModels">拉取模型</v-btn>
               <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-plus" class="ml-1" @click="openCreateModel">添加模型</v-btn>
@@ -730,18 +761,18 @@ onMounted(() => {
                     <th>类型</th>
                     <th>支持能力</th>
                     <th>温度</th>
-                    <th>Max Tokens</th>
+                    <th>最大输出</th>
                     <th>状态</th>
                     <th class="text-right">操作</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr v-if="models.length === 0">
-                    <td colspan="7" class="text-center text-caption pa-6">该连接下还没有模型实例，请拉取或手动添加</td>
+                    <td colspan="7" class="text-center text-caption pa-6">还没有模型，可点「拉取模型」自动获取，或手动添加</td>
                   </tr>
                   <tr v-for="m in models" :key="m.id">
                     <td class="font-weight-medium">{{ m.model }}</td>
-                    <td><v-chip size="x-small" variant="tonal">{{ m.provider_type }}</v-chip></td>
+                    <td><v-chip size="x-small" variant="tonal">{{ providerTypeLabel(m.provider_type) }}</v-chip></td>
                     <td>
                       <v-chip
                         v-for="cap in modelModalityLabels(m)"
@@ -763,9 +794,9 @@ onMounted(() => {
                             class="ml-1"
                           >mdi-information-outline</v-icon>
                         </template>
-                        <div>来源：{{ m.effective?.max_tokens_origin || '内置默认' }}</div>
+                        <div>来源：{{ maxTokensOriginLabel(m.effective?.max_tokens_origin) }}</div>
                         <div v-if="m.config.max_tokens == null">
-                          该模型未设置覆盖，跟随下一层
+                          这个模型没有单独设上限，自动沿用别处的值
                         </div>
                         <div v-for="note in m.effective?.max_tokens_notes || []" :key="note">{{ note }}</div>
                         <div v-if="m.effective?.context_window">上下文窗口：{{ m.effective.context_window }}</div>
@@ -790,7 +821,7 @@ onMounted(() => {
         </template>
 
         <v-card v-else variant="outlined" class="pa-8 text-center text-caption">
-          请先在左侧创建连接预设
+          先在左侧添加一个模型服务
         </v-card>
       </v-col>
     </v-row>
@@ -800,26 +831,25 @@ onMounted(() => {
       <v-card>
         <v-card-title class="d-flex align-center">
           <v-icon icon="mdi-api" class="mr-2" color="primary" />
-          {{ editingSourceId ? '编辑自定义预设' : '新建自定义预设' }}
+          {{ editingSourceId ? '编辑模型服务' : '新建模型服务' }}
         </v-card-title>
         <v-card-text>
-          <v-text-field v-model="sourceForm.name" label="名称" placeholder="例如：DeepSeek 主账号" density="comfortable" hide-details class="mb-3" />
+          <v-text-field v-model="sourceForm.name" label="名称" placeholder="例如：DeepSeek 官方" density="comfortable" hide-details class="mb-3" />
           <v-select
             v-model="sourceForm.provider"
             :items="API_FORMAT_OPTIONS"
             item-title="title"
             item-value="value"
             item-props
-            label="API 格式"
+            label="接口格式"
             density="comfortable"
             hide-details
             class="mb-2"
           />
           <div class="text-caption text-medium-emphasis mb-3">
-            格式要跟端点实际支持的协议一致，选错会直接 404/400。Responses API 是 OpenAI 新一代接口
-            （<code>/v1/responses</code>），部分新模型/中转只开这个端点，本项目已内置适配器。
+            不确定选哪个就用「OpenAI Chat Completions」；保存后可以点「测试连接」验证。
           </div>
-          <v-text-field v-model="sourceForm.api_base" label="API 基础 URL" placeholder="https://api.deepseek.com" density="comfortable" hide-details class="mb-3" />
+          <v-text-field v-model="sourceForm.api_base" label="接口地址" placeholder="https://api.deepseek.com" density="comfortable" hide-details class="mb-3" />
           <v-text-field
             v-model="sourceForm.api_key"
             label="API Key"
@@ -851,12 +881,12 @@ onMounted(() => {
     <v-dialog v-model="builtinDialog" max-width="760" scrollable>
       <v-card>
         <v-card-title class="d-flex align-center">
-          <v-icon icon="mdi-library-plus" class="mr-2" color="primary" /> 添加内置预设
+          <v-icon icon="mdi-library-plus" class="mr-2" color="primary" /> 添加常用服务
           <v-spacer />
           <v-btn size="small" variant="text" prepend-icon="mdi-refresh" :loading="builtinLoading" @click="loadBuiltins">刷新</v-btn>
         </v-card-title>
         <v-card-subtitle class="text-caption">
-          常用服务商端点，点「添加」即可；API Key 与可用模型随后填。
+          常用的模型服务，点「添加」即可；Key 和模型随后填。
         </v-card-subtitle>
         <v-divider />
         <v-card-text>
@@ -894,7 +924,7 @@ onMounted(() => {
             </v-list>
             <v-divider class="my-1" />
           </template>
-          <div v-if="!builtinLoading && !builtinPresets.length" class="text-caption text-center py-6">暂无内置预设</div>
+          <div v-if="!builtinLoading && !builtinPresets.length" class="text-caption text-center py-6">暂无常用服务</div>
         </v-card-text>
         <v-card-actions>
           <v-spacer />
@@ -907,7 +937,7 @@ onMounted(() => {
     <v-dialog v-model="configDialog" max-width="760">
       <v-card>
         <v-card-title class="d-flex align-center">
-          <v-icon icon="mdi-file-code-outline" class="mr-2" color="primary" /> 编辑 Provider 配置文件
+          <v-icon icon="mdi-file-code-outline" class="mr-2" color="primary" /> 高级配置
           <v-spacer />
           <v-btn size="small" variant="tonal" prepend-icon="mdi-restore" :disabled="!providerTemplate" @click="resetToTemplate">
             重置为基础模板
@@ -915,8 +945,7 @@ onMounted(() => {
         </v-card-title>
         <v-card-text>
           <v-alert type="info" variant="tonal" density="compact" class="mb-2">
-            所有预设都从“基础通用兼容 Provider”派生。你可以在 JSON 中直接添加
-            <code>headers</code>（自定义请求头）、<code>extra_body</code>（请求体扩展字段）等特殊配置。
+            只有服务商明确要求补充特殊参数时才需要改这里；不确定就保持原样。
           </v-alert>
           <v-textarea
             v-model="configJsonText"
@@ -941,7 +970,7 @@ onMounted(() => {
       <v-card>
         <v-card-title class="d-flex align-center">
           <v-icon icon="mdi-creation" class="mr-2" color="primary" />
-          {{ editingModelId ? '编辑模型实例' : '添加模型实例' }}
+          {{ editingModelId ? '编辑模型' : '添加模型' }}
         </v-card-title>
         <v-card-text>
           <v-select
@@ -959,11 +988,11 @@ onMounted(() => {
           <v-select
             v-model="modelForm.provider_type"
             :items="[
-              { title: '聊天/对话', value: 'chat' },
-              { title: 'Embedding', value: 'embedding' },
-              { title: 'Rerank', value: 'rerank' },
-              { title: 'TTS', value: 'tts' },
-              { title: 'STT', value: 'stt' },
+              { title: '对话', value: 'chat' },
+              { title: '文本向量（Embedding）', value: 'embedding' },
+              { title: '重排（Rerank）', value: 'rerank' },
+              { title: '语音合成（TTS）', value: 'tts' },
+              { title: '语音识别（STT）', value: 'stt' },
             ]"
             label="能力类型"
             density="comfortable"
@@ -971,7 +1000,7 @@ onMounted(() => {
             class="mb-3"
           />
           <div class="mb-3">
-            <div class="text-caption mb-1">支持能力/模态</div>
+            <div class="text-caption mb-1">支持能力</div>
             <div class="d-flex flex-wrap">
               <v-checkbox
                 v-for="opt in MODALITY_OPTIONS"
@@ -1000,7 +1029,7 @@ onMounted(() => {
                 density="comfortable"
                 hide-details
                 clearable
-                placeholder="留空 = 跟随下一层"
+                placeholder="留空 = 自动"
                 :hint="maxTokensHint"
                 persistent-hint
               >
@@ -1010,7 +1039,7 @@ onMounted(() => {
                     size="x-small"
                     variant="text"
                     @click="resetMaxTokensToInherit"
-                  >恢复继承</v-btn>
+                  >改回自动</v-btn>
                 </template>
               </v-text-field>
             </v-col>
@@ -1060,13 +1089,13 @@ onMounted(() => {
     <v-dialog v-model="settingsDialog" max-width="520">
       <v-card>
         <v-card-title class="d-flex align-center">
-          <v-icon icon="mdi-tune" class="mr-2" color="primary" /> Provider 全局设置
+          <v-icon icon="mdi-tune" class="mr-2" color="primary" /> 模型服务全局设置
         </v-card-title>
         <v-card-text>
           <v-select
             v-model="settingsForm.default_preset_id"
             :items="presets.map((p) => ({ title: p.name, value: p.id }))"
-            label="默认连接预设"
+            label="默认模型服务"
             density="comfortable"
             hide-details
             clearable
@@ -1074,15 +1103,15 @@ onMounted(() => {
           />
           <v-select
             v-model="settingsForm.default_model_id"
-            :items="allModels.map((m) => ({ title: `${m.model} (${m.id})`, value: m.id }))"
-            label="默认模型实例"
+            :items="allModels.map((m) => ({ title: modelOptionLabel(m), value: m.id }))"
+            label="默认模型"
             density="comfortable"
             hide-details
             clearable
             class="mb-3"
           />
-          <v-text-field v-model="settingsForm.fallback_model_ids" label="Fallback 模型 ID（逗号分隔）" density="comfortable" hide-details class="mb-3" />
-          <v-text-field v-model="settingsForm.provider_pool" label="Provider Pool（逗号分隔，* 表示全部）" density="comfortable" hide-details />
+          <v-text-field v-model="settingsForm.fallback_model_ids" label="备用模型 ID（逗号分隔，按顺序尝试）" density="comfortable" hide-details class="mb-3" />
+          <v-text-field v-model="settingsForm.provider_pool" label="允许使用的模型 ID（逗号分隔，* = 全部）" density="comfortable" hide-details />
         </v-card-text>
         <v-card-actions>
           <v-spacer />
