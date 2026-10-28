@@ -1,18 +1,4 @@
-async function toggleTool(tool: any) {
-  // 统一写入口：后端把它记进 `tools_disabled`（唯一总表），不再各写一套 map
-  const next = !tool.enabled
-  try {
-    await http.post('/api/agent/tools/toggle', {
-      name: tool.name,
-      source: 'mcp',
-      enabled: next,
-    })
-    tool.enabled = next
-    tool.effective = next && (tool.ready ?? true)
-  } catch (err) {
-    useNotifyStore().push(errorMessage(err), 'error')
-  }
-}<script setup lang="ts">
+<script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import http, { errorMessage } from '@/api/http'
 import { useAgentConfigStore } from '@/stores/agentConfig'
