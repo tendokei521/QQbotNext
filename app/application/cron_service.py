@@ -11,12 +11,17 @@ from __future__ import annotations
 import asyncio
 import inspect
 import time as _time
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any
 
 from app.core.logger import logger
 
 Handler = Callable[[], Awaitable[None]]
+
+#: cron 目标缓存允许的最大墙钟漂移（秒）。超过它视为 NTP 校时 / 休眠唤醒导致的
+#: 墙钟跳变：此时缓存的目标时刻是按旧墙钟算出来的，已不可信，必须丢弃重算。
+CRON_CACHE_MAX_DRIFT = 60.0
 
 
 class ScheduledTask:
@@ -30,11 +35,21 @@ class ScheduledTask:
         self._task: asyncio.Task | None = None
         self.running = False
         self._cron_target: datetime | None = None  # 最近一次 cron 计算出的目标时刻（命中后复用）
+        self._cron_cached_at: datetime | None = None  # 该目标是用哪个墙钟时刻算出来的（漂移检测用）
+        #: 下次触发的墙钟时刻（epoch 秒；供 WebUI / list_jobs 展示，None = 尚未排期）
+        self.next_run: int | None = None
 
     async def start(self) -> None:
         if self.running:
             return
         self.running = True
+        # 先同步算一次下次执行时间：list_jobs / WebUI 在 start() 返回后立刻就能看到
+        try:
+            self._next()
+        except ValueError as e:
+            self.log.error(f"[Scheduler] {self.key} 时间解析错误: {e}")
+            self.running = False
+            return
         self._task = asyncio.create_task(self._loop(), name=f"sched:{self.key}")
 
     async def stop(self) -> None:
@@ -97,14 +112,21 @@ class ScheduledTask:
                     continue
         return False
 
-    def _next_cron(self) -> float:
-        """计算 5 字段 cron 距下次触发的秒数（缓存目标时刻，避免每次触发后全量重扫）。"""
+    def _next_cron_target(self) -> datetime:
+        """计算 5 字段 cron 的下次触发墙钟时刻（缓存目标时刻，避免触发后全量重扫）。"""
         now = datetime.now()
+        if self._cron_target is not None and self._cron_cached_at is not None:
+            drift = abs((now - self._cron_cached_at).total_seconds())
+            if drift > CRON_CACHE_MAX_DRIFT:
+                # 墙钟跳变（NTP 校时 / 休眠唤醒）：旧目标按跳变前的墙钟算，丢弃重算
+                self._cron_target = None
+                self._cron_cached_at = None
         if self._cron_target is not None:
             delta = (self._cron_target - now).total_seconds()
             if delta >= 1.0:
-                return delta
+                return self._cron_target
             self._cron_target = None  # 已过 → 重新计算
+            self._cron_cached_at = None
 
         minute, hour, dom, month, dow = self.time_str.split()[:5]
         for day_offset in range(0, 366):
@@ -124,19 +146,32 @@ class ScheduledTask:
                     delta = (target - now).total_seconds()
                     if delta >= 1.0:
                         self._cron_target = target
-                        return delta
-        return 365 * 86400
+                        self._cron_cached_at = now
+                        return target
+        return now + timedelta(days=365)
 
-    def _next(self) -> float:
-        """距下次触发的秒数（monotonic）。目标不足 1s（或已过）→ 推到下一周期，避免重复触发。"""
+    def _next_cron(self) -> float:
+        """兼容旧调用：返回 5 字段 cron 距下次触发的秒数（顺带更新 next_run）。"""
+        target = self._next_cron_target()
+        self.next_run = int(target.timestamp())
+        return max(0.0, (target - datetime.now()).total_seconds())
+
+    def _next_target(self) -> datetime:
+        """下次触发的墙钟时刻（cron 或每日 HH:MM[:SS] 简写）。"""
         if self._is_cron():
-            return self._next_cron()
+            return self._next_cron_target()
         h, m, s = self._parse()
         now = datetime.now()
         target = now.replace(hour=h, minute=m, second=s, microsecond=0)
         if (target - now).total_seconds() < 1.0:
             target += timedelta(days=1)
-        return max(0, (target - now).total_seconds())
+        return target
+
+    def _next(self) -> float:
+        """距下次触发的秒数；顺带更新 ``next_run``（wall-clock epoch 秒）。"""
+        target = self._next_target()
+        self.next_run = int(target.timestamp())
+        return max(0.0, (target - datetime.now()).total_seconds())
 
     async def _wait(self, deadline: float) -> None:
         while self.running:
@@ -204,7 +239,7 @@ class SchedulerService:
             #self.log.info(f"[Scheduler] {module.module_name}(bot {module.bot_id}) 注册 {count} 个定时任务")
         return count
 
-    async def register(self, key: str, time_str: str, handler: Handler) -> Optional[ScheduledTask]:
+    async def register(self, key: str, time_str: str, handler: Handler) -> ScheduledTask | None:
         """注册任意定时任务（供模块动态时间注册；key 建议含 `<module>:<bot_id>:` 前缀以便 unload 统一清理）。"""
         old = self._tasks.pop(key, None)
         if old:
@@ -235,6 +270,7 @@ class SchedulerService:
         """列出定时任务（可按 ``<module>:<bot_id>`` 前缀过滤）。
 
         给 WebUI 与模块自检用：此前只有 ``count()``，谁都不知道"到底有哪些任务在跑"。
+        ``next_run`` 为下次触发的 wall-clock **epoch 秒**（尚未排期时为 None）。
         """
         rows: list[dict] = []
         for key, task in sorted(self._tasks.items()):
