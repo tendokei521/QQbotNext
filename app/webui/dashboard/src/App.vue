@@ -21,14 +21,22 @@ watch(
 <template>
   <v-app>
     <router-view />
+    <!--
+      通知由 notify store 的队列驱动：每条独立计时，关掉一条再显示下一条。
+      timeout="-1" 表示关闭时机完全交给 store，避免 Vuetify 自己的定时器与队列打架。
+    -->
     <v-snackbar
-      v-model="notify.visible"
+      :model-value="notify.visible"
       :color="notify.current?.kind ?? 'info'"
       location="top"
-      timeout="3000"
+      :timeout="-1"
       rounded="pill"
+      @update:model-value="(v: boolean) => { if (!v) notify.dismiss() }"
     >
       {{ notify.current?.text }}
+      <template #actions>
+        <v-btn variant="text" size="small" @click="notify.dismiss()">关闭</v-btn>
+      </template>
     </v-snackbar>
   </v-app>
 </template>
