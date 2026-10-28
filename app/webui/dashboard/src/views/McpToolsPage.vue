@@ -119,7 +119,7 @@ watch(
         />
       </v-card-title>
       <v-card-text class="text-caption" style="opacity: 0.65">
-        展示 MCP Server 暴露给 LLM 的工具。MCP Server 的连接与 JSON 配置仍在 Agent 面板 → MCP 工具 中维护。
+        列出 MCP Server 提供给模型的工具。连接和参数在「功能模块 → 工具扩展」里维护。
       </v-card-text>
     </v-card>
 
@@ -165,7 +165,7 @@ watch(
             </div>
           </template>
           <div v-if="!tools.length && !loading" class="text-caption text-center pa-4" style="opacity: 0.55">
-            暂无 MCP 工具，请先在 Agent 面板 → MCP 工具 添加并连接 MCP Server。
+            还没有 MCP 工具。先到「功能模块 → 工具扩展」连接 MCP Server。
           </div>
         </div>
       </v-card-text>

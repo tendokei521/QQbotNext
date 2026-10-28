@@ -121,7 +121,7 @@ watch(
         />
       </v-card-title>
       <v-card-text class="text-caption" style="opacity: 0.65">
-        展示各功能模块通过 @tool 暴露给 LLM 的工具。模块本身的启停仍在 功能模块 页面管理。
+        列出功能模块提供给模型的工具。模块开关在「功能模块」页管理。
       </v-card-text>
     </v-card>
 
@@ -169,7 +169,7 @@ watch(
             </div>
           </template>
           <div v-if="!tools.length && !loading" class="text-caption text-center pa-4" style="opacity: 0.55">
-            暂无模块工具（模块尚未通过 @tool 暴露工具）
+            还没有模块提供工具。
           </div>
         </div>
       </v-card-text>

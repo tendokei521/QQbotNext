@@ -128,7 +128,7 @@ watch(
         />
       </v-card-title>
       <v-card-text class="text-caption" style="opacity: 0.65">
-        控制框架内置系统工具的注入；关闭后该工具不再出现在 LLM 的 function calling 列表中。日志开关只影响普通调用日志，异常/超时仍会保留。
+        关掉后模型不会再调用对应工具。日志开关只记录正常调用，超时和报错仍会保留。
       </v-card-text>
     </v-card>
 
