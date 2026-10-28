@@ -49,6 +49,28 @@ function draftOf(id: string) {
   return drafts[id]
 }
 
+/** 「协议端怎么填」展开状态：account_id -> 是否展开 */
+const helpOpen = reactive<Record<string, boolean>>({})
+
+function toggleHelp(id: string) {
+  helpOpen[id] = !helpOpen[id]
+}
+
+/** 复制地址：非 https 的局域网地址下浏览器可能不给剪贴板权限，失败就让用户手动复制 */
+async function copyAddress(text: string) {
+  const value = text.trim()
+  if (!value) {
+    notify.push('地址还没填，先填好再复制', 'warning')
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(value)
+    notify.push('地址已复制', 'success')
+  } catch {
+    notify.push('复制失败，请手动选中地址复制', 'warning')
+  }
+}
+
 /** 反向账号：监听已就绪但协议端还没连进来时，别让人以为连错了 */
 function statusText(b: { status: BotStatus; conn_mode?: BotConnMode; listening?: boolean }) {
   if (b.conn_mode === 'reverse' && b.status !== 'connected' && b.listening) return '等待协议端接入'
@@ -264,7 +286,44 @@ onUnmounted(() => {
               class="mb-3"
               @update:model-value="(v: string) => { draftOf(b.id).ws_url = v }"
               @blur="scheduleSave()"
-            />
+            >
+              <template #append-inner>
+                <v-btn
+                  icon="mdi-content-copy"
+                  size="x-small"
+                  variant="text"
+                  title="复制地址"
+                  @click="copyAddress(draftOf(b.id).ws_url)"
+                />
+              </template>
+            </v-text-field>
+
+            <v-btn
+              size="small"
+              variant="text"
+              color="primary"
+              class="protocol-help-toggle px-0 mb-2"
+              :prepend-icon="helpOpen[b.id] ? 'mdi-chevron-up' : 'mdi-help-circle-outline'"
+              @click="toggleHelp(b.id)"
+            >
+              协议端怎么填
+            </v-btn>
+            <v-expand-transition>
+              <div v-if="helpOpen[b.id]" class="protocol-help mb-3">
+                <template v-if="draftOf(b.id).conn_mode === 'reverse'">
+                  <div>在 NapCat 或 LLOneBot 里新建「WebSocket 客户端」。</div>
+                  <div>URL 填这张卡片上的本机监听地址，右侧图标可复制。</div>
+                  <div>保存时勾选启用；协议端连上后这里会显示「已连接」。</div>
+                  <div>127.0.0.1 只本机可用；协议端在另一台机器上要填本机 IP。</div>
+                </template>
+                <template v-else>
+                  <div>在协议端里新建「WebSocket 服务端」。</div>
+                  <div>把它的 ws 地址填进来，端口与路径要和协议端一致。</div>
+                  <div>填好后点「连接」，协议端连上后这里会显示「已连接」。</div>
+                </template>
+              </div>
+            </v-expand-transition>
+
             <v-text-field
               :model-value="draftOf(b.id).access_token"
               label="连接令牌（可选）"
@@ -382,5 +441,18 @@ onUnmounted(() => {
   border-radius: 8px;
   padding: 8px 10px;
   word-break: break-all;
+}
+
+/* 协议端指引：折叠面板，四行短句，不做长篇文档 */
+.protocol-help {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(var(--v-theme-primary), 0.06);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: rgba(var(--v-theme-on-surface), 0.75);
 }
 </style>
