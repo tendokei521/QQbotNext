@@ -242,9 +242,9 @@ async function saveAccount(): Promise<boolean> {
     accountError.value = ''
     lastNotifiedError = ''
     accountConnected.value = Boolean(res.data.connected)
-    // 让顶部账号选择器/后续页面拿到这个账号（否则向导走完仍是"未选账号"）
-    bots.selectBot(res.data.account_id)
+    // 先刷新列表再选中：selectBot 只认已在列表里的 id，顺序反了会选不上
     await bots.fetchBots()
+    bots.selectBot(res.data.account_id)
     return true
   } catch (err) {
     const message = errorMessage(err)
