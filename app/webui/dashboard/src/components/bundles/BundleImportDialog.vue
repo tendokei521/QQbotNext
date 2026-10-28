@@ -409,7 +409,7 @@ function formatSize(bytes: number): string {
                 </v-chip>
               </div>
               <div v-for="mod in health.modules" :key="mod.name" class="text-caption">
-                插件 {{ mod.name }}：{{ mod.loaded && !mod.error ? '已加载' : '未加载，可在「功能模块」页点重试' }}
+                插件 {{ mod.name }}：{{ mod.loaded && !mod.error ? '已加载' : '未加载，可在「功能插件」页点重试' }}
               </div>
             </template>
           </v-alert>

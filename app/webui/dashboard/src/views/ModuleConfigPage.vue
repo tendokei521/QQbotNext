@@ -177,7 +177,7 @@ const RESPONDER_POLICY_ITEMS = [
   { title: '全部响应（默认）', value: 'all' },
   { title: '去重：只一个响应', value: 'dedupe' },
   { title: '固定账号响应', value: 'delegate' },
-  { title: '主备接管', value: 'leader' },
+  { title: '主备：主号回答，失败换备用', value: 'leader' },
 ]
 const responderData = computed(() => responder.dataOf(name))
 const responderDeclared = computed(() => !!mod.value?.single_service)
@@ -420,8 +420,8 @@ onUnmounted(() => {
       class="mt-3 mb-3"
     >
       <div class="text-caption">
-        当前显示的是<strong>全局实例</strong>的配置，不是账号「{{ bots.currentBot?.name ?? bots.currentAccountId }}」
-        的配置。点「重新加载」装配该账号的模块实例后再编辑。
+        当前显示的是<strong>所有账号共用</strong>的配置，不是账号「{{ bots.currentBot?.name ?? bots.currentAccountId }}」
+        的专属配置。点「重新加载」为这个账号准备好自己的配置后再编辑。
       </div>
     </v-alert>
 
