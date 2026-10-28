@@ -102,6 +102,9 @@ function onChange(key: string, value: any) {
 }
 
 async function doSave(targetAccountId?: string | null) {
+  // 模板 `@click="doSave"` 会把点击事件对象当第一个参数传进来：只接受字符串账号 id。
+  // null 是「上一个账号不存在」的显式信号，必须保留，不能一起归一化成 undefined。
+  if (targetAccountId != null && typeof targetAccountId !== 'string') targetAccountId = undefined
   if (autosaveTimer) {
     clearTimeout(autosaveTimer)
     autosaveTimer = null
@@ -133,6 +136,8 @@ function onPermissionChange(v: PermissionConfig) {
 }
 
 async function doSavePermission(targetAccountId?: string | null) {
+  // 同 doSave：点击事件不是账号 id；null 保留「没有上一个账号」的语义
+  if (targetAccountId != null && typeof targetAccountId !== 'string') targetAccountId = undefined
   if (permTimer) {
     clearTimeout(permTimer)
     permTimer = null
@@ -502,7 +507,7 @@ onUnmounted(() => {
       <v-card-title class="d-flex align-center">
         <v-icon icon="mdi-shield-account-outline" class="mr-2" color="primary" /> 响应范围控制
         <v-spacer />
-        <v-btn size="small" variant="tonal" prepend-icon="mdi-content-save" @click="doSavePermission">保存权限</v-btn>
+        <v-btn size="small" variant="tonal" prepend-icon="mdi-content-save" @click="doSavePermission()">保存权限</v-btn>
       </v-card-title>
       <v-card-text>
         <PermissionEditor :model-value="permission" @update:model-value="onPermissionChange" />
@@ -514,7 +519,7 @@ onUnmounted(() => {
       <v-card-title class="d-flex align-center">
         <v-icon icon="mdi-cogs" class="mr-2" color="primary" /> 业务配置
         <v-spacer />
-        <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-content-save" :loading="saveStatus === 'saving'" @click="doSave">
+        <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-content-save" :loading="saveStatus === 'saving'" @click="doSave()">
           保存配置
         </v-btn>
       </v-card-title>
