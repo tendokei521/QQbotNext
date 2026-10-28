@@ -16,9 +16,12 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
+from app.core.logger import logger
 from app.infrastructure.onebot.endpoint import (
     EndpointError,
     is_reverse,
@@ -225,3 +228,143 @@ async def api_bot(account_id: str, bot_service=Depends(get_bot_service)):
     if info:
         return JSONResponse(content=info)
     return _err(404, f"账号 {account_id} 不存在")
+
+
+# ==================== 诊断台：收包事件监视 + 发送测试消息 ====================
+#: 单条事件 raw 的 JSON 序列化上限（超出则逐字段截断，防止响应体被超大 payload 撑爆）
+EVENT_RAW_MAX_CHARS = 4000
+_EVENT_RAW_FIELD_MAX = 500
+
+
+def _trim_event_raw(raw):
+    """限制事件 raw 体积：正常事件原样返回；超大 payload 逐字段截断后返回。"""
+    if not isinstance(raw, dict):
+        return raw
+    try:
+        serialized = json.dumps(raw, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return {"preview": str(raw)[:EVENT_RAW_MAX_CHARS]}
+    if len(serialized) <= EVENT_RAW_MAX_CHARS:
+        return raw
+    trimmed: dict = {}
+    for key, value in raw.items():
+        text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+        trimmed[key] = text if len(text) <= _EVENT_RAW_FIELD_MAX else text[:_EVENT_RAW_FIELD_MAX] + "…（已截断）"
+    return trimmed
+
+
+def _parse_group_id(value) -> int | None:
+    """把请求里的 group_id 解析成正整数；缺省/非法都返回 None（由调用方给中文提示）。"""
+    if value in (None, "") or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    text = str(value).strip()
+    if text.isdigit() and int(text) > 0:
+        return int(text)
+    return None
+
+
+def _account_or_404(account_id: str, bot_service, config_service):
+    """取账号展示名；账号既不在配置也不在连接表里 → 返回 404 响应。"""
+    conn = bot_service.gateway.connections.get(str(account_id))
+    if conn is None and config_service.get_bot(account_id) is None:
+        return None, _err(404, f"账号 {account_id} 不存在")
+    name = config_service.get_account_name(account_id) or str(account_id)
+    return name, None
+
+
+@router.get("/bots/{account_id}/events")
+async def api_bot_events(
+    account_id: str,
+    limit: int = 50,
+    bot_service=Depends(get_bot_service),
+    config_service=Depends(get_config_service),
+):
+    """诊断台：该账号最近收到的原始事件（协议端到底有没有把事件送进来）。"""
+    name, error = _account_or_404(account_id, bot_service, config_service)
+    if error is not None:
+        return error
+    gateway = bot_service.gateway
+    conn = gateway.connections.get(str(account_id))
+    events = [
+        {**record, "raw": _trim_event_raw(record.get("raw"))}
+        for record in gateway.recent_events(str(account_id), limit)
+    ]
+    return JSONResponse(content={
+        "events": events,
+        "listening": bool(conn is not None and gateway.reverse_link.listening(str(account_id))),
+        "connected": bool(conn is not None and conn.status == "connected"),
+        "account": {"id": str(account_id), "name": name},
+    })
+
+
+@router.post("/bots/{account_id}/events/clear")
+async def api_bot_events_clear(
+    account_id: str,
+    bot_service=Depends(get_bot_service),
+    config_service=Depends(get_config_service),
+):
+    """诊断台：清空该账号的事件历史。"""
+    _, error = _account_or_404(account_id, bot_service, config_service)
+    if error is not None:
+        return error
+    bot_service.gateway.clear_events(str(account_id))
+    return _ok("已清空")
+
+
+@router.post("/bots/{account_id}/test-message")
+async def api_bot_test_message(
+    account_id: str,
+    request: Request,
+    bot_service=Depends(get_bot_service),
+    config_service=Depends(get_config_service),
+):
+    """诊断台：以该账号身份发一条测试群消息（验证「发送链路」是否真的通）。
+
+    ``group_id`` 缺省时用该账号最近一条群消息的群号；仍没有则 400 并给中文提示。
+    发送失败时把 OneBot 的 retcode / message 原样回传，便于区分「配置问题」还是
+    「群号问题」。
+    """
+    name, error = _account_or_404(account_id, bot_service, config_service)
+    if error is not None:
+        return error
+    try:
+        body = await request.json()
+    except Exception as e:
+        return _err(400, f"请求体不是合法 JSON: {e}")
+    if not isinstance(body, dict):
+        return _err(400, "请求体必须是 JSON 对象")
+
+    text = str(body.get("text") or "").strip()
+    if not text:
+        return _err(400, "测试消息内容不能为空")
+    if len(text) > 500:
+        return _err(400, f"测试消息内容最多 500 字（当前 {len(text)} 字）")
+
+    conn = bot_service.gateway.connections.get(str(account_id))
+    if conn is None or conn.status != "connected":
+        return _err(400, f"账号「{name}」当前未连接，无法发送测试消息")
+
+    raw_group_id = body.get("group_id")
+    group_id = _parse_group_id(raw_group_id)
+    if raw_group_id not in (None, "") and group_id is None:
+        return _err(400, "群号必须是正整数")
+    if group_id is None:
+        group_id = bot_service.gateway.latest_group_id(str(account_id))
+    if not group_id:
+        return _err(400, "还没有收到过群消息，请先填写群号")
+
+    try:
+        response = await conn.send_group_msg(group_id, text)
+    except Exception as e:
+        logger.warning(f"[BotAPI] 账号「{name}」发送测试消息异常: {e}")
+        return _err(500, f"发送失败: {e}")
+    if not response or response.get("status") != "ok":
+        reason = (response or {}).get("message") or (response or {}).get("wording")
+        if not response:
+            reason = "连接已断开或请求被拒绝"
+        retcode = (response or {}).get("retcode")
+        suffix = f"（retcode={retcode}）" if retcode is not None else ""
+        return _err(400, f"发送失败: {reason}{suffix}")
+    return _ok("测试消息已发送")
