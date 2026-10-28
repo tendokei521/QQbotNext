@@ -83,3 +83,16 @@ ext_run`（wall-clock epoch 秒，list_jobs 返回）+ 墙钟跳变时丢弃 cro
 - 前端 `pnpm typecheck` / `pnpm build`：均通过（dist 已重建入库）
 - 实机截图核对：总览 / 账号管理 / 功能插件 / 模型服务 / 设置 / 首次配置（含浅色主题）
 - 诊断台 API 实测：`GET /api/bots/{id}/events` 返回契约 JSON；未连接时发测试消息返回可读 400
+
+## 7. 独立复核（3 个只读子 agent）与修复
+
+复核结论：没有发现"崩溃/丢数据/卡死/安全绕过"的 P0；但发现 1 个前端 P0（ModuleConfigPage 把点击事件当账号 id 传入，导致"已保存"但写错作用域）与若干 P1，已全部修复：
+
+| 类别 | 问题 | 修法 |
+|---|---|---|
+| 前端 P0 | 模块配置页 `@click="doSave"` 把 PointerEvent 当 account_id → 保存到错误作用域 | 模板改 `doSave()` + 参数类型守卫 |
+| 前端 P1 | 诊断台 2s 轮询切页不停；安装成功对话框关不掉可重复装；ErrorBoundary 不随路由复位；顶栏"等待协议端接入"显示红色错误；BotsPage 改地址后直接点连接用旧配置、保存中丢 pending、刷新静默丢草稿；人格应用只写被忽略的 system_prompt；modules store 切号不重拉；agentConfig 无请求序号；SetupPage「稍后再配」仍建号 | 逐项修复并补静默轮询/确认/串行保存/loadSeq/账号 watch 等 |
+| 后端 P1 | 反向"连接中点断开"竞态；反向 token 未做 URL 编解码（中文/含 & 连不上）；非 ASCII 会话 cookie 500；诊断事件在 worker 才记录（丢弃事件看不到）；关停 await 无超时；关停取消配置落盘任务；超时任务脱管；模块 reload 按 QQ 号查连接；登录限流 XFF 可伪造 | epoch 校验、unquote/quote、encode 比较、记录移到入队前 + drops、超时 + best-effort、flush_pending、保留登记、account_id 查连接、可信反代白名单 |
+| 文档/文案 | 「0 表示」写法、框架级/后端/上游/落库 等残留、README 与实现不一致（旧版 UI 回退、就绪卡入口） | 统一改法并扩闸门：`test_ui_copy` 拦「0 表示」；`test_dashboard_copy` 黑话表新增 4 词；README 更正 |
+
+复核后的验证：全量 `pytest -q`、`pnpm typecheck`、`pnpm build` 结果见最终提交；修复过程中新增/更新约 20 个测试文件。
