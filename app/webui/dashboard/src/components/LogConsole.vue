@@ -4,6 +4,7 @@ import { useLogsStore } from '@/stores/logs'
 import { useWebuiStore } from '@/stores/webui'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
+import { cleanLogMessage, cleanLogTimestamp } from '@/utils/log'
 
 const logs = useLogsStore()
 const webui = useWebuiStore()
@@ -24,7 +25,14 @@ function isSimpleLog(row: { level: string; message: string }) {
   return true
 }
 
-const visibleRows = computed(() => logs.filtered.filter(isSimpleLog).slice(-1000))
+/** 「显示行数」设置（设置页可改）：以前固定 slice(-1000)，设置项形同虚设 */
+const rowLimit = computed(() => {
+  const n = Math.floor(Number(webui.config.logs.max_lines))
+  if (!Number.isFinite(n) || n <= 0) return 200
+  return Math.min(Math.max(n, 10), 2000)
+})
+
+const visibleRows = computed(() => logs.filtered.filter(isSimpleLog).slice(-rowLimit.value))
 
 // 弹窗草稿：打开时从 store 快照，保存时才写回，取消可直接丢弃（不再即时改 live 配置）
 const editLevels = ref<string[]>([])
@@ -141,9 +149,9 @@ onUnmounted(() => {
     <div ref="bodyEl" class="console-body">
       <div v-if="visibleRows.length === 0" class="empty-tip">暂无日志</div>
       <div v-for="(row, i) in visibleRows" :key="`${row.timestamp}-${i}`" class="log-row">
-        <span class="log-time">{{ row.timestamp }}</span>
+        <span class="log-time">{{ cleanLogTimestamp(row.timestamp) }}</span>
         <span class="log-level" :class="`log-level-${row.level}`">{{ row.level.toUpperCase() }}</span>
-        <span class="log-message">{{ row.message }}</span>
+        <span class="log-message" :title="row.message">{{ cleanLogMessage(row.message) }}</span>
       </div>
     </div>
 
