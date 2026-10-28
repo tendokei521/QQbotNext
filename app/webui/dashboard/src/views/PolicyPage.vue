@@ -1,10 +1,10 @@
 <script setup lang="ts">
 /**
- * 「权限与回复」——简单视图（群聊开关矩阵）。
+ * 「群聊权限」——简单视图（群聊开关矩阵）。
  *
  * 设计目标（docs/permission-dialogue-policy-design.md §6.2）：
  * 小白只需要回答一个问题——**哪个群允许聊天**。因此这一页不出现"档位/名单/
- * 触发方式"等高级项，只保留：拉取群列表 → 逐群三态开关（允许/禁止/继承）→ 批量。
+ * 触发方式"等高级项，只保留：同步群列表 → 逐群三态开关（允许/禁止/继承）→ 批量。
  *
  * 三态而不是布尔，是为了让"继承账号默认"这件事可见：否则用户关掉一个群后
  * 看不出它是"显式关闭"还是"本来就没开"。
@@ -40,12 +40,12 @@ const SWITCH_ITEMS: { title: string; value: SwitchValue }[] = [
   { title: '继承', value: 'inherit' },
 ]
 
-/** 「账号默认（群聊）」三态：允许 / 不允许 / 跟随 Agent 配置 */
+/** 「账号默认（群聊）」三态：允许 / 不允许 / 跟随 AI 对话设置 */
 type SceneValue = 'on' | 'off' | 'inherit'
 const SCENE_ITEMS: { title: string; value: SceneValue }[] = [
   { title: '允许', value: 'on' },
   { title: '不允许', value: 'off' },
-  { title: '跟随 Agent 配置', value: 'inherit' },
+  { title: '跟随 AI 对话设置', value: 'inherit' },
 ]
 
 const accountName = computed(() => {
@@ -53,7 +53,7 @@ const accountName = computed(() => {
   return bot ? displayName(bot) : bots.currentAccountId
 })
 
-/** 群行选「继承」时用得就是这个值；null = 跟随 Agent 配置里的「群回复启用」 */
+/** 群行选「继承」时用得就是这个值；null = 跟随 AI 对话设置里的「群回复启用」 */
 const sceneDefault = computed<SceneValue>(() => {
   const value = policy.defaultPolicy.scene_enabled
   if (value === true) return 'on'
@@ -65,7 +65,7 @@ async function onSceneDefault(value: SceneValue) {
   try {
     await policy.setSceneEnabled(value === 'inherit' ? null : value === 'on')
     notify.push(
-      value === 'inherit' ? '已改为跟随 Agent 配置' : `账号默认已设为「${value === 'on' ? '允许' : '不允许'}」`,
+      value === 'inherit' ? '已改为跟随 AI 对话设置' : `账号默认已设为「${value === 'on' ? '允许' : '不允许'}」`,
       'success',
     )
   } catch (err) {
@@ -92,7 +92,7 @@ async function onSwitch(row: PolicyMatrixRow, value: SwitchValue) {
 async function onRefreshGroups() {
   try {
     const count = await policy.refreshGroups()
-    notify.push(`已拉取 ${count} 个群`, 'success')
+    notify.push(`已同步 ${count} 个群`, 'success')
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   }
@@ -151,7 +151,7 @@ watch(
       <div>
         <h1 class="app-page-title">
           <v-icon icon="mdi-shield-account-outline" size="28" color="success" class="mr-1" />
-          权限与回复
+          群聊权限
         </h1>
         <div class="app-page-subtitle">哪些群允许聊天、默认允许还是不允许</div>
       </div>
@@ -166,7 +166,7 @@ watch(
           :disabled="!bots.currentAccountId"
           @click="onRefreshGroups"
         >
-          拉取群列表
+          同步群列表
         </v-btn>
         <v-btn variant="text" prepend-icon="mdi-tune" @click="router.push('/agent/permission')">
           高级规则
@@ -256,7 +256,7 @@ watch(
         title="还没有群列表"
         :description="
           bots.currentAccountId
-            ? '账号连接成功后点「拉取群列表」，就能逐群设置是否允许聊天。'
+            ? '账号连上后，点「同步群列表」就能逐群设置是否允许聊天。'
             : '先添加并连接一个 QQ 账号。'
         "
       >
@@ -268,7 +268,7 @@ watch(
           :loading="policy.refreshing"
           @click="onRefreshGroups"
         >
-          拉取群列表
+          同步群列表
         </v-btn>
         <v-btn v-else color="primary" variant="tonal" prepend-icon="mdi-plus" @click="router.push('/bots')">
           去添加账号
@@ -358,7 +358,7 @@ watch(
     <PolicyRulesDialog v-model="rulesDialog" :channel-id="rulesChannel" :title="rulesTitle" />
 
     <div v-if="policy.rows.length" class="text-caption mt-3" style="opacity: 0.6">
-      群列表来自账号在线时的一次拉取；离线时显示上次结果，可能不是最新。
+      群列表来自账号在线时的一次同步；离线时显示上次结果，可能不是最新。
     </div>
   </div>
 </template>
