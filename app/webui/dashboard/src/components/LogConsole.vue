@@ -34,6 +34,19 @@ const rowLimit = computed(() => {
 
 const visibleRows = computed(() => logs.filtered.filter(isSimpleLog).slice(-rowLimit.value))
 
+/** 级别文案与「设置 → 日志」保持一致，界面上不出现英文枚举 */
+const LEVEL_LABELS: Record<string, string> = {
+  debug: '调试',
+  info: '普通',
+  warning: '警告',
+  error: '错误',
+}
+
+function levelLabel(level: string): string {
+  const key = String(level || '').toLowerCase()
+  return LEVEL_LABELS[key] || level
+}
+
 // 弹窗草稿：打开时从 store 快照，保存时才写回，取消可直接丢弃（不再即时改 live 配置）
 const editLevels = ref<string[]>([])
 const editMaxLines = ref(50)
@@ -150,7 +163,7 @@ onUnmounted(() => {
       <div v-if="visibleRows.length === 0" class="empty-tip">暂无日志</div>
       <div v-for="(row, i) in visibleRows" :key="`${row.timestamp}-${i}`" class="log-row">
         <span class="log-time">{{ cleanLogTimestamp(row.timestamp) }}</span>
-        <span class="log-level" :class="`log-level-${row.level}`">{{ row.level.toUpperCase() }}</span>
+        <span class="log-level" :class="`log-level-${row.level}`">{{ levelLabel(row.level) }}</span>
         <span class="log-message" :title="row.message">{{ cleanLogMessage(row.message) }}</span>
       </div>
     </div>
@@ -166,7 +179,7 @@ onUnmounted(() => {
             v-for="lv in ['debug', 'info', 'warning', 'error']"
             :key="lv"
             v-model="editLevels"
-            :label="lv"
+            :label="levelLabel(lv)"
             :value="lv"
             density="compact"
             hide-details
@@ -177,14 +190,14 @@ onUnmounted(() => {
             label="显示行数"
             type="number"
             min="10"
-            max="200"
+            max="2000"
             density="compact"
             class="mt-3"
             hide-details
           />
           <v-switch
             v-model="editShowRawLogs"
-            label="显示原始日志"
+            label="显示技术日志"
             color="primary"
             density="compact"
             class="mt-2"
