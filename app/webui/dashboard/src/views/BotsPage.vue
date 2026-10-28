@@ -52,6 +52,8 @@ const diagOpen = ref(false)
 const diagAccountId = ref<string | null>(null)
 const diagAccountName = ref('')
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+/** 正在进行中的保存：新的保存请求要串到它后面，而不是被 `if (saving) return false` 直接丢掉 */
+let saveInFlight: Promise<boolean> | null = null
 
 function openDiagnostics(b: BotData) {
   diagAccountId.value = b.id
@@ -155,20 +157,31 @@ function buildPayload(): BotConfigPayload[] {
 }
 
 async function persistDrafts(showToast = true): Promise<boolean> {
-  if (saving.value) return false
-  saving.value = true
-  try {
-    // 类型上 BotConfig 仍把 owner_id 标为必填，但后端允许缺省（沿用旧值），这里显式转换
-    await bots.saveBotConfig(buildPayload() as unknown as BotConfig[])
-    dirty.value = false
-    if (showToast) notify.push('配置已保存', 'success')
-    return true
-  } catch (err) {
-    notify.push(errorMessage(err), 'error')
-    return false
-  } finally {
-    saving.value = false
+  // 保存已经在飞行中：等它结束后，若这期间又产生了改动就再补一轮。
+  // 以前这里直接 `if (saving) return false`：到点的自动保存被丢掉且不重排，最后一段编辑永远不落盘。
+  if (saveInFlight) {
+    const ok = await saveInFlight
+    if (ok && dirty.value) return persistDrafts(showToast)
+    return ok
   }
+  const task = (async () => {
+    saving.value = true
+    try {
+      // 类型上 BotConfig 仍把 owner_id 标为必填，但后端允许缺省（沿用旧值），这里显式转换
+      await bots.saveBotConfig(buildPayload() as unknown as BotConfig[])
+      dirty.value = false
+      if (showToast) notify.push('配置已保存', 'success')
+      return true
+    } catch (err) {
+      notify.push(errorMessage(err), 'error')
+      return false
+    } finally {
+      saving.value = false
+      saveInFlight = null
+    }
+  })()
+  saveInFlight = task
+  return task
 }
 
 async function saveAll() {
@@ -180,6 +193,12 @@ async function saveAll() {
   if (await persistDrafts(true)) {
     await loadCards()
   }
+}
+
+/** 用户主动刷新/重试：有未保存改动时先确认，避免草稿被静默丢掉 */
+async function requestReload() {
+  if (dirty.value && !window.confirm('有未保存的修改，刷新会丢弃。继续？')) return
+  await loadCards()
 }
 
 /** 输入框失焦后自动保存一次（防抖，避免连续切换输入框时重复提交） */
@@ -222,6 +241,14 @@ async function doDelete() {
 
 async function act(accountId: string, kind: 'connect' | 'disconnect' | 'reconnect') {
   if (acting[accountId]) return
+  // 改完地址/令牌后立刻点「连接」：先把草稿落盘，否则后端读到的是旧配置
+  if (dirty.value) {
+    const saved = await persistDrafts(false)
+    if (!saved) {
+      notify.push('配置还没保存成功，先处理保存错误再连接', 'warning')
+      return
+    }
+  }
   acting[accountId] = true
   try {
     if (kind === 'connect') await bots.connect(accountId)
@@ -247,6 +274,14 @@ function isLive(b: BotData): boolean {
 /** 批量连接/断开：逐个串行调用，失败不打断，最后汇总提示 */
 async function batchAct(kind: 'connect' | 'disconnect') {
   if (batchBusy.value) return
+  // 批量连接同样按「落盘后的配置」执行：先保存草稿，避免全部用到旧地址
+  if (dirty.value) {
+    const saved = await persistDrafts(false)
+    if (!saved) {
+      notify.push('配置还没保存成功，先处理保存错误再批量操作', 'warning')
+      return
+    }
+  }
   const targets = bots.bots.filter((b) => (kind === 'connect' ? !isLive(b) : isLive(b)))
   if (!targets.length) {
     notify.push(kind === 'connect' ? '所有账号都已经连接' : '所有账号都已经断开', 'info')
@@ -305,7 +340,7 @@ onBeforeUnmount(() => {
         <v-chip v-if="dirty" size="small" color="warning" variant="tonal">
           <v-icon start size="x-small" icon="mdi-pencil-outline" /> 有未保存修改
         </v-chip>
-        <v-btn variant="tonal" prepend-icon="mdi-refresh" :loading="loadingCards" @click="loadCards">刷新</v-btn>
+        <v-btn variant="tonal" prepend-icon="mdi-refresh" :loading="loadingCards" @click="requestReload">刷新</v-btn>
         <v-btn color="primary" prepend-icon="mdi-plus" @click="addBot">新增账号</v-btn>
         <v-btn color="primary" variant="tonal" prepend-icon="mdi-content-save" :loading="saving" @click="saveAll">
           保存所有配置
@@ -342,7 +377,7 @@ onBeforeUnmount(() => {
       <div class="d-flex align-center flex-wrap gap-2">
         <span>账号列表加载失败：{{ loadError }}</span>
         <v-spacer />
-        <v-btn size="small" variant="tonal" prepend-icon="mdi-refresh" @click="loadCards">重试</v-btn>
+        <v-btn size="small" variant="tonal" prepend-icon="mdi-refresh" @click="requestReload">重试</v-btn>
       </div>
     </v-alert>
 
