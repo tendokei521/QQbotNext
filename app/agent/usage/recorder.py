@@ -240,11 +240,10 @@ class StatRecorder:
             batch, self._buf = self._buf, []
             placeholders = [tuple(row[c] for c in COLUMNS) for row in batch]
             try:
-                conn = getattr(self._db, "_conn", None)
-                if conn is None:
-                    raise RuntimeError("数据库未连接")
-                await conn.executemany(_INSERT_SQL, placeholders)
-                await conn.commit()
+                # 走 Database 的受锁公开接口，而不是直接拿 `_conn` 自行 commit：
+                # 统计落库若与配置的 run_in_transaction 交叉，会把事务提前提交
+                # （半写）或触发 "cannot start a transaction within a transaction"。
+                await self._db.executemany(_INSERT_SQL, placeholders)
             except Exception as e:  # noqa: BLE001 —— 统计写失败不该影响主流程
                 self.failed += len(batch)
                 # 放回缓冲（保留数据，下次再试），但设上限防无限增长
@@ -302,9 +301,6 @@ class StatRecorder:
         batch: int = 1000,
     ) -> int:
         """分批删除历史数据（默认永久保留，由用户手动清）。"""
-        conn = getattr(self._db, "_conn", None)
-        if conn is None:
-            return 0
         where = []
         params: list[Any] = []
         if before_ts is not None:
@@ -316,13 +312,11 @@ class StatRecorder:
         clause = (" WHERE " + " AND ".join(where)) if where else ""
         removed = 0
         while True:
-            cur = await conn.execute(
+            count = await self._db.execute(
                 f"DELETE FROM stat_event WHERE id IN "
                 f"(SELECT id FROM stat_event{clause} LIMIT {int(batch)})",
                 tuple(params),
             )
-            await conn.commit()
-            count = cur.rowcount or 0
             removed += count
             if count < batch:
                 break

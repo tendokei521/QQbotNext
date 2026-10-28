@@ -272,10 +272,20 @@ class Database:
         self._conn = await aiosqlite.connect(self.path)
         self._conn.row_factory = aiosqlite.Row
         await self._conn.execute("PRAGMA journal_mode=WAL;")
+        # 多写者（WebUI 请求 / 统计 flush / 配置事务）抢写锁时排队等待，而不是立刻抛
+        # "database is locked"；WAL 下 synchronous=NORMAL 最多丢最后一个事务，不会损坏库。
+        await self._conn.execute("PRAGMA busy_timeout=5000;")
+        await self._conn.execute("PRAGMA synchronous=NORMAL;")
         await self._conn.execute("PRAGMA foreign_keys=ON;")
         await self._conn.executescript(SCHEMA)
         await self._conn.commit()
         logger.debug(f"[DB] SQLite 已初始化") #: "){self.path}")
+
+    def _require_conn(self) -> aiosqlite.Connection:
+        """取连接；未 connect 或已 close 时明确报错（而不是 `NoneType has no attribute`）。"""
+        if self._conn is None:
+            raise RuntimeError("数据库未连接（或已关闭）")
+        return self._conn
 
     async def table_columns(self, table: str) -> set[str]:
         """返回表的列名集合（老库迁移探测用）。"""
@@ -291,38 +301,66 @@ class Database:
                 logger.info(f"[DB] 迁移：{table} 新增列 {name}")
 
     async def close(self) -> None:
-        if self._conn:
-            await self._conn.close()
+        """关闭连接（幂等）。先取锁：等在途写事务提交/回滚完，再真正 close。
+
+        退出顺序必须是「任务全部结束（含 finally 里的 DB 写）→ close」；
+        这里再用锁兜一道，避免 close 与在途 execute 交叉。
+        """
+        async with self._lock:
+            conn = self._conn
+            if conn is None:
+                return
             self._conn = None
+            await conn.close()
 
     async def execute(self, sql: str, params: Sequence[Any] = ()) -> int:
         async with self._lock:
-            cur = await self._conn.execute(sql, params)
-            await self._conn.commit()
+            conn = self._require_conn()
+            cur = await conn.execute(sql, params)
+            await conn.commit()
             return cur.rowcount
+
+    async def executemany(self, sql: str, params_seq: Sequence[Sequence[Any]]) -> int:
+        """批量执行同一条 SQL 并提交（受连接锁保护）。
+
+        给统计落库这类高频批量写用：它们不该拿原始连接自行 commit，
+        否则会打断别的组件正在进行的 `run_in_transaction`（半写 / 事务嵌套报错）。
+        """
+        async with self._lock:
+            conn = self._require_conn()
+            cur = await conn.executemany(sql, params_seq)
+            await conn.commit()
+            return int(cur.rowcount or 0)
 
     async def fetchone(self, sql: str, params: Sequence[Any] = ()) -> dict | None:
         async with self._lock:
-            cur = await self._conn.execute(sql, params)
+            conn = self._require_conn()
+            cur = await conn.execute(sql, params)
             row = await cur.fetchone()
             return dict(row) if row else None
 
     async def fetchall(self, sql: str, params: Sequence[Any] = ()) -> list[dict]:
         async with self._lock:
-            cur = await self._conn.execute(sql, params)
+            conn = self._require_conn()
+            cur = await conn.execute(sql, params)
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
 
     async def run_in_transaction(self, sqls: Sequence[tuple[str, Sequence[Any]]]) -> None:
-        """批量执行并原子提交。"""
+        """批量执行并原子提交。
+
+        注意：事务内不要 await 本类的公开方法（execute / fetch*）：它们会再抢
+        `_lock` 而自锁死。所有 SQL 直接放进 ``sqls``。
+        """
         async with self._lock:
-            await self._conn.execute("BEGIN")
+            conn = self._require_conn()
+            await conn.execute("BEGIN")
             try:
                 for sql, params in sqls:
-                    await self._conn.execute(sql, params)
-                await self._conn.commit()
+                    await conn.execute(sql, params)
+                await conn.commit()
             except Exception:
-                await self._conn.rollback()
+                await conn.rollback()
                 raise
 
     @staticmethod
