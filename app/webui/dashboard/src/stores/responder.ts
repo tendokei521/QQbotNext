@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import http, { unwrap } from '@/api/http'
 import { onSocketMessage } from '@/api/socket'
+import { useBotsStore } from './bots'
 
 /** 某群当前的响应权预览（后端 ResponderDecision 序列化） */
 export interface ResponderPreview {
@@ -40,26 +41,44 @@ export interface ResponderSaveResult {
   message: string
 }
 
-/** 响应权策略中心：按模块加载 / 保存「哪个群由哪个账号响应」 */
+/**
+ * 响应权策略中心：按模块加载 / 保存「哪个群由哪个账号响应」。
+ *
+ * 缓存键是「账号 + 模块」：同一份策略虽然按模块存，但「当前响应者预览」取决于此刻有哪些账号在线，
+ * 切账号后旧预览会误导用户（显示别的账号在响应）。以前只按模块名缓存，切号读到的是旧账号的预览。
+ */
 export const useResponderStore = defineStore('responder', () => {
+  const bots = useBotsStore()
   const data = ref<Record<string, ResponderData>>({})
   const loading = ref<Record<string, boolean>>({})
   const saving = ref<Record<string, boolean>>({})
 
-  const dataOf = computed(() => (moduleName: string) => data.value[moduleName] ?? null)
+  function cacheKey(moduleName: string): string {
+    return `${bots.currentAccountId ?? '-'}::${moduleName}`
+  }
+
+  const dataOf = computed(
+    () => (moduleName: string) => data.value[cacheKey(moduleName)] ?? null,
+  )
+  const loadingOf = computed(() => (moduleName: string) => !!loading.value[cacheKey(moduleName)])
+  const savingOf = computed(() => (moduleName: string) => !!saving.value[cacheKey(moduleName)])
 
   async function load(moduleName: string): Promise<void> {
-    loading.value[moduleName] = true
+    const key = cacheKey(moduleName)
+    loading.value[key] = true
     try {
       const res = await http.get<ResponderData>(`/api/modules/${encodeURIComponent(moduleName)}/responder`)
-      data.value[moduleName] = res.data
+      // 加载期间切了账号：丢弃旧账号的响应，避免写进新账号的缓存槽
+      if (key !== cacheKey(moduleName)) return
+      data.value[key] = res.data
     } finally {
-      loading.value[moduleName] = false
+      if (key in loading.value) loading.value[key] = false
     }
   }
 
   async function save(moduleName: string, policies: ResponderPolicyInput[]): Promise<ResponderSaveResult> {
-    saving.value[moduleName] = true
+    const key = cacheKey(moduleName)
+    saving.value[key] = true
     try {
       const res = await http.post(`/api/modules/${encodeURIComponent(moduleName)}/responder`, { policies })
       const body = unwrap<ResponderSaveResult>(res.data)
@@ -70,14 +89,24 @@ export const useResponderStore = defineStore('responder', () => {
         message: body?.message ?? '响应权策略已保存',
       }
     } finally {
-      saving.value[moduleName] = false
+      if (key in saving.value) saving.value[key] = false
     }
   }
+
+  // 切账号：旧账号的预览/加载态全部作废，由页面按需重新 load
+  watch(
+    () => bots.currentAccountId,
+    () => {
+      data.value = {}
+      loading.value = {}
+      saving.value = {}
+    },
+  )
 
   // 其他客户端保存后刷新当前模块
   onSocketMessage('responder_updated', (msg) => {
     if (msg && typeof msg.module === 'string') load(msg.module).catch(() => undefined)
   })
 
-  return { data, loading, saving, dataOf, load, save }
+  return { data, loading, saving, dataOf, loadingOf, savingOf, load, save }
 })

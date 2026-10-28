@@ -175,13 +175,13 @@ const RESPONDER_POLICY_ITEMS = [
   { title: '固定账号响应', value: 'delegate' },
   { title: '主备接管', value: 'leader' },
 ]
-const responderData = computed(() => responder.data[name] ?? null)
+const responderData = computed(() => responder.dataOf(name))
 const responderDeclared = computed(() => !!mod.value?.single_service)
 const responderDraft = ref<Record<string, { policy: string; primary_account_id: string | null; fallback: string }>>({})
 const responderDirty = ref(false)
 const responderGroups = computed(() => (responderData.value?.groups || []).filter((g) => g.accounts.length > 0))
-const responderLoading = computed(() => !!responder.loading[name])
-const responderSaving = computed(() => !!responder.saving[name])
+const responderLoading = computed(() => responder.loadingOf(name))
+const responderSaving = computed(() => responder.savingOf(name))
 
 function syncResponderDraft() {
   const data = responderData.value
