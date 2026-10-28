@@ -78,15 +78,24 @@ async def test_agent_config_editable_without_connection(container):
     assert got.status_code == 200, got.text
     assert got.json()["bot_id"] == account_id
 
+    # 人设由「角色预设」承载：离线也应能建预设并把它选上（system_prompt 已不再是可写字段）
+    preset = client.post("/api/role-presets", json={
+        "name": "离线人设",
+        "system_prompt": "离线写进去的人设",
+    })
+    assert preset.status_code == 200, preset.text
+    preset_id = preset.json()["preset"]["id"]
+
     posted = client.post(
         "/api/agent/config",
         params={"account_id": account_id},
-        json={"config": {"system_prompt": "离线写进去的人设"}},
+        json={"config": {"persona_preset_id": preset_id}},
     )
     assert posted.status_code == 200, posted.text
 
     again = client.get("/api/agent/config", params={"account_id": account_id})
-    assert again.json()["config"]["system_prompt"] == "离线写进去的人设"
+    assert again.json()["config"]["persona_preset_id"] == preset_id
+    assert again.json()["config"]["system_prompt"] != "离线写进去的人设"
 
 
 async def test_agent_virtual_module_config_without_connection(container):

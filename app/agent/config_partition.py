@@ -67,7 +67,9 @@ UI_PAGES: tuple[UIPage, ...] = (
             UIGroup(
                 "basic_persona",
                 "人格设定",
-                ("prompt_preset", "persona_preset_id", "system_prompt"),
+                # 人格提示词**只在「角色预设」里改**（配置 → 人格设定页维护预设内容）；
+                # 这里不再提供 system_prompt 输入框，避免"两处都能改人格"的歧义。
+                ("prompt_preset", "persona_preset_id"),
             ),
         ),
     ),
@@ -385,6 +387,9 @@ DELETED_KEYS: tuple[str, ...] = (
     "napcat_tools_max_result",
     "napcat_tools_log_enabled",
     "napcat_tool_overrides",
+    # 人格改为「角色预设」唯一来源：旧的内联人格字段不再在界面提供，
+    # 迁移时清掉它（无预设时由内置默认人设兜底）
+    "system_prompt",
     # 无人读取、无处渲染的僵尸键
     "knowledge_recall_max_chars",
     "debug_prompt",

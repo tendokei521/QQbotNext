@@ -64,7 +64,7 @@ EXPECTED_MODULES = {
 def test_exported_schema_is_exactly_the_core_keys():
     """本体 schema 必须正好等于分区表里的本体键（多一个都是没搬干净）。"""
     assert set(SCHEMA_KEYS) == set(CORE_KEYS)
-    assert len(SCHEMA_KEYS) == TARGET_CORE_KEY_COUNT == 58
+    assert len(SCHEMA_KEYS) == TARGET_CORE_KEY_COUNT == 57
 
 
 def test_legacy_schema_still_has_all_legacy_keys():
@@ -85,7 +85,7 @@ def test_ui_has_exactly_five_pages_in_order():
 def test_ui_page_field_counts_match_the_agreed_layout():
     counts = {row["id"]: row["fields"] for row in page_summary()}
     assert counts == {
-        "basic": 5,
+        "basic": 4,
         "permission": 4,
         "behavior": 8,
         "session": 20,
@@ -143,11 +143,11 @@ def test_partition_covers_every_legacy_key_exactly_once():
 
 
 def test_agreed_split_is_core_plus_module_plus_deleted():
-    """数字：本体 47 / 迁移 109 / 删除 34（P3 新增 tool_parallel_max + tool_timeout_default_s）。"""
+    """数字：本体 57 / 迁移 109 / 删除 35（删掉 system_prompt，人格只由角色预设决定）。"""
     migrated = sum(len(keys) for keys in MODULE_KEYS.values())
-    assert len(CORE_KEYS) == 58, f"本体键数 {len(CORE_KEYS)} ≠ 58"
+    assert len(CORE_KEYS) == 57, f"本体键数 {len(CORE_KEYS)} ≠ 57"
     assert migrated == 109, f"迁移键数 {migrated} ≠ 109"
-    assert len(DELETED_KEYS) == 34, f"删除键数 {len(DELETED_KEYS)} ≠ 34"
+    assert len(DELETED_KEYS) == 35, f"删除键数 {len(DELETED_KEYS)} ≠ 35"
     assert len(CORE_KEYS) + migrated + len(DELETED_KEYS) == len(LEGACY_KEYS)
 
 

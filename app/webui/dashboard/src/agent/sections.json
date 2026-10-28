@@ -31,8 +31,7 @@
           "icon": "mdi-account-voice",
           "fields": [
             "prompt_preset",
-            "persona_preset_id",
-            "system_prompt"
+            "persona_preset_id"
           ]
         }
       ]

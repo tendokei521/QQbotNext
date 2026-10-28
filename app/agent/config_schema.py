@@ -143,7 +143,7 @@ SCHEMA = {
     },
 
     "system_prompt": {
-        "type": "textarea", "label": "系统提示词", "description": "设定AI角色的系统提示词",
+        "type": "textarea", "label": "系统提示词（旧）", "description": "旧字段：人设已由「角色预设」维护，仅作兜底。",
         "default": "你是一个友好的助手。", "placeholder": "你是一个友好的助手...", "group": "group_session",
     },
     "prompt_preset": {
@@ -159,8 +159,8 @@ SCHEMA = {
     },
     "persona_preset_id": {
         "type": "resource", "resource": "role_preset",
-        "label": "角色预设（活引用）",
-        "description": "选择预设后每轮实时解析提示词，改动立即生效；留空则用自定义系统提示词。",
+        "label": "角色预设",
+        "description": "人设由预设决定：选中后每轮实时解析，改预设内容立刻生效；未选择时用内置默认人设。",
         "default": "", "group": "group_session",
     },
     "system_prompt_style": {
