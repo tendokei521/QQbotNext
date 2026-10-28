@@ -5,7 +5,7 @@
  * 解决最高频的求助场景「连上了但 @ 没反应」：先看协议端到底有没有把事件送进来，
  * 再决定是协议端问题还是机器人的回复配置问题。
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import http, { errorMessage } from '@/api/http'
 import { useNotifyStore } from '@/stores/notify'
 import EmptyState from '@/components/EmptyState.vue'
@@ -56,9 +56,10 @@ function stopPolling() {
   }
 }
 
-async function load() {
+/** `silent`：轮询刷新用，不置 loading、不覆盖已展示的数据/错误态 */
+async function load(silent = false) {
   if (!props.accountId) return
-  loading.value = true
+  if (!silent) loading.value = true
   try {
     const res = await http.get(`/api/bots/${encodeURIComponent(props.accountId)}/events`, {
       params: { limit: 50 },
@@ -68,9 +69,9 @@ async function load() {
     listening.value = Boolean(res.data?.listening)
     loadError.value = ''
   } catch (err) {
-    loadError.value = errorMessage(err)
+    if (!silent) loadError.value = errorMessage(err)
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -176,7 +177,7 @@ watch(
     testText.value = ''
     detail.value = null
     void load()
-    timer = setInterval(() => void load(), 2000)
+    timer = setInterval(() => void load(true), 2000)
   },
   { immediate: true },
 )
@@ -185,6 +186,9 @@ watch(
 watch(open, (v) => {
   if (!v) stopPolling()
 })
+
+// 组件被销毁（切页/路由离开）时 watch 不会再触发：必须在这里停掉定时器
+onBeforeUnmount(stopPolling)
 </script>
 
 <template>
@@ -214,13 +218,13 @@ watch(open, (v) => {
 
         <v-alert v-if="loadError" type="error" variant="tonal" density="compact" class="mb-3">
           {{ loadError }}
-          <v-btn size="small" variant="text" @click="load">重试</v-btn>
+          <v-btn size="small" variant="text" @click="load()">重试</v-btn>
         </v-alert>
 
         <div class="d-flex align-center flex-wrap gap-2 mb-2">
           <span class="text-caption">最近 {{ events.length }} 条</span>
           <v-spacer />
-          <v-btn size="small" variant="text" prepend-icon="mdi-refresh" :loading="loading" @click="load">刷新</v-btn>
+          <v-btn size="small" variant="text" prepend-icon="mdi-refresh" :loading="loading" @click="load()">刷新</v-btn>
           <v-btn size="small" variant="text" color="error" prepend-icon="mdi-delete-outline" :disabled="!events.length" @click="clearEvents">
             清空
           </v-btn>
@@ -232,7 +236,7 @@ watch(open, (v) => {
           title="还没有收到事件"
           description="确认账号已连接、协议端已启动，然后在群里发一条消息"
         >
-          <v-btn size="small" variant="tonal" @click="load">再看一次</v-btn>
+          <v-btn size="small" variant="tonal" @click="load()">再看一次</v-btn>
         </EmptyState>
 
         <v-list v-else density="compact" class="event-list">
