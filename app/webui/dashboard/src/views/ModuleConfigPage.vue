@@ -101,16 +101,18 @@ function onChange(key: string, value: any) {
   autosaveTimer = window.setTimeout(doSave, 2000)
 }
 
-async function doSave() {
+async function doSave(targetAccountId?: string | null) {
   if (autosaveTimer) {
     clearTimeout(autosaveTimer)
     autosaveTimer = null
   }
   if (!dirtyFlag) return
+  // 显式传入 null = 上一个账号不存在（没什么可写）；传入 id = 切号前写回旧账号
+  if (targetAccountId === null) return
   const snapshotSeq = editSeq
   saveStatus.value = 'saving'
   try {
-    await modules.saveConfig(name, { ...draft })
+    await modules.saveConfig(name, { ...draft }, targetAccountId)
     if (editSeq !== snapshotSeq) return // 保存期间有新编辑：保留 dirty，交由下一次保存
     dirtyFlag = false
     saveStatus.value = 'clean'
@@ -130,15 +132,16 @@ function onPermissionChange(v: PermissionConfig) {
   permTimer = window.setTimeout(doSavePermission, 2000)
 }
 
-async function doSavePermission() {
+async function doSavePermission(targetAccountId?: string | null) {
   if (permTimer) {
     clearTimeout(permTimer)
     permTimer = null
   }
   if (!permDirtyFlag) return
+  if (targetAccountId === null) return
   const snapshotSeq = permEditSeq
   try {
-    await modules.savePermission(name, permission.value)
+    await modules.savePermission(name, permission.value, targetAccountId)
     if (permEditSeq !== snapshotSeq) return // 保存期间有新编辑：保留 dirty
     permDirtyFlag = false
     notify.push('权限已保存', 'success')
@@ -148,10 +151,11 @@ async function doSavePermission() {
   }
 }
 
-/** 立即落盘配置与权限的未保存改动（离开页面 / 切账号 / 会话过期前调用）。 */
-async function flushDrafts() {
-  await doSave()
-  await doSavePermission()
+/** 立即落盘配置与权限的未保存改动（离开页面 / 切账号 / 会话过期前调用）。
+ *  ``accountId`` 显式指定时写到该账号名下：切号 watcher 触发时 currentAccountId 已变成新账号。 */
+async function flushDrafts(accountId?: string | null) {
+  await doSave(accountId)
+  await doSavePermission(accountId)
 }
 
 // ---------- 启用开关 ----------
@@ -322,9 +326,10 @@ function onPluginLoad(e: Event) {
 
 watch(
   () => bots.currentId,
-  async () => {
-    // 先把当前账号的未保存改动写完，再拉新账号的模块数据（否则草稿会被 initFromModule 覆盖）
-    await flushDrafts()
+  async (_currentId, previousId) => {
+    // 先把**上一个账号**的未保存改动写到它自己名下，再拉新账号的模块数据。
+    // 此时 currentId 已经是新账号，必须显式传 previousId，否则会把旧草稿写进新账号。
+    await flushDrafts(previousId ?? null)
     loadResponder()
     // 切换账号后重拉模块配置
     modules.load()

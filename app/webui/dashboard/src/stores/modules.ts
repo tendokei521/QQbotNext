@@ -240,23 +240,35 @@ export const useModulesStore = defineStore('modules', () => {
     if (mod) mod.enabled = enabled
   }
 
-  async function saveConfig(name: string, config: Record<string, any>): Promise<void> {
-    syncBotScope()
+  async function saveConfig(
+    name: string,
+    config: Record<string, any>,
+    accountId?: string | null,
+  ): Promise<void> {
+    // accountId 传 undefined = 保存到当前账号；显式传值用于「切号前把旧账号的草稿写回旧账号」，
+    // 否则 currentAccountId 已经变成新账号，会把旧草稿写进新账号（串台）。
+    if (accountId === undefined) syncBotScope()
+    const aid = accountId === undefined ? botId.value : accountId
     const res = await http.post(`/api/module/${name}/config`, config, {
-      params: { account_id: botId.value },
+      params: { account_id: aid },
     })
     unwrap(res.data)
   }
 
-  async function savePermission(name: string, permission: PermissionConfig): Promise<void> {
-    syncBotScope()
+  async function savePermission(
+    name: string,
+    permission: PermissionConfig,
+    accountId?: string | null,
+  ): Promise<void> {
+    if (accountId === undefined) syncBotScope()
+    const aid = accountId === undefined ? botId.value : accountId
     const form = new FormData()
     form.append('group_mode', permission.group_mode)
     form.append('group_list', permission.group_list.join('\n'))
     form.append('user_mode', permission.user_mode)
     form.append('user_list', permission.user_list.join('\n'))
     const res = await http.post(`/api/module/${name}/permission`, form, {
-      params: { account_id: botId.value },
+      params: { account_id: aid },
     })
     unwrap(res.data)
   }
