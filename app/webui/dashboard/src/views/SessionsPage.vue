@@ -74,6 +74,11 @@ const loadingConversation = ref(false)
 const sessionsError = ref('')
 const conversationsError = ref('')
 
+// 请求序号：快速切换会话/对话（或切账号）时丢弃过期响应，避免标题与内容错配
+let sessionsSeq = 0
+let listSeq = 0
+let conversationSeq = 0
+
 const selectedSessionId = ref('')
 const selectedTaskId = ref('')
 const selectedTaskIds = ref<string[]>([])
@@ -168,10 +173,14 @@ async function loadSessions() {
   }
   loadingSessions.value = true
   sessionsError.value = ''
+  const seq = ++sessionsSeq
+  const accountId = botId.value
+  const stillCurrent = () => seq === sessionsSeq && accountId === botId.value
   try {
     const res = await http.get<{ ok: boolean; sessions: SessionSummary[] }>('/api/sessions', {
-      params: { account_id: botId.value },
+      params: { account_id: accountId },
     })
+    if (!stillCurrent()) return
     sessions.value = res.data?.sessions || []
     if (!selectedSessionId.value || !sessions.value.some((s) => s.session_id === selectedSessionId.value)) {
       selectedSessionId.value = sessions.value[0]?.session_id || ''
@@ -187,11 +196,12 @@ async function loadSessions() {
       selectedTaskIds.value = []
     }
   } catch (err) {
+    if (!stillCurrent()) return
     // 失败时保留错误原因给页面显示重试入口，而不是让列表表现为「没有会话」
     sessionsError.value = errorMessage(err)
     notify.push(errorMessage(err), 'error')
   } finally {
-    loadingSessions.value = false
+    if (seq === sessionsSeq) loadingSessions.value = false
   }
   await loadMediaStats()
 }
@@ -209,13 +219,20 @@ async function loadConversations(autoOpen = true) {
     conversationsError.value = ''
     return
   }
+  const seq = ++listSeq
+  const sessionId = selectedSessionId.value
+  const accountId = botId.value
+  /** 本次响应是否仍对应「当前选中的会话/账号」 */
+  const stillCurrent = () =>
+    seq === listSeq && sessionId === selectedSessionId.value && accountId === botId.value
   loadingConversations.value = true
   conversationsError.value = ''
   try {
     const res = await http.get<{ ok: boolean; session: { conversations: ConversationSummary[]; empty?: boolean } }>(
-      `/api/sessions/${encodeURIComponent(selectedSessionId.value)}`,
-      { params: { account_id: botId.value } },
+      `/api/sessions/${encodeURIComponent(sessionId)}`,
+      { params: { account_id: accountId } },
     )
+    if (!stillCurrent()) return
     conversations.value = res.data?.session?.conversations || []
     selectedTaskIds.value = selectedTaskIds.value.filter((id) =>
       conversations.value.some((c) => c.task_id === id),
@@ -232,6 +249,7 @@ async function loadConversations(autoOpen = true) {
       conversation.value = null
     }
   } catch (err) {
+    if (!stillCurrent()) return
     if (isNotFoundError(err)) {
       // 会话在这期间被删掉了：列表归零，不弹错误（这不是用户操作失败）
       conversations.value = []
@@ -242,7 +260,7 @@ async function loadConversations(autoOpen = true) {
     conversationsError.value = errorMessage(err)
     notify.push(errorMessage(err), 'error')
   } finally {
-    loadingConversations.value = false
+    if (seq === listSeq) loadingConversations.value = false
   }
 }
 
@@ -266,15 +284,23 @@ async function loadMediaStats() {
 
 async function openConversation(taskId: string) {
   if (!selectedSessionId.value || botId.value == null) return
+  const seq = ++conversationSeq
+  const sessionId = selectedSessionId.value
+  const accountId = botId.value
+  /** 本次响应是否仍对应「当前选中的对话/会话/账号」 */
+  const stillCurrent = () =>
+    seq === conversationSeq && sessionId === selectedSessionId.value && accountId === botId.value
   selectedTaskId.value = taskId
   loadingConversation.value = true
   try {
     const res = await http.get<{ ok: boolean; conversation: ConversationDetail }>(
-      `/api/sessions/${encodeURIComponent(selectedSessionId.value)}/conversations/${taskId}`,
-      { params: { account_id: botId.value } },
+      `/api/sessions/${encodeURIComponent(sessionId)}/conversations/${taskId}`,
+      { params: { account_id: accountId } },
     )
+    if (!stillCurrent()) return
     conversation.value = res.data?.conversation || null
   } catch (err) {
+    if (!stillCurrent()) return
     conversation.value = null
     if (isNotFoundError(err)) {
       // 对话已被删除（多端操作 / 刚归档）：静默把选中项清掉，别再弹「不存在」
@@ -284,7 +310,7 @@ async function openConversation(taskId: string) {
     }
     notify.push(errorMessage(err), 'error')
   } finally {
-    loadingConversation.value = false
+    if (seq === conversationSeq) loadingConversation.value = false
   }
 }
 
@@ -293,6 +319,9 @@ function selectSession(id: string) {
   selectedTaskId.value = ''
   selectedTaskIds.value = []
   conversation.value = null
+  // 切换会话：作废在途的详情请求，避免旧会话内容盖到新选择上
+  conversationSeq += 1
+  loadingConversation.value = false
   loadConversations()
 }
 
@@ -648,6 +677,15 @@ async function exportConversation(format: 'text' | 'json') {
 }
 
 watch(botId, () => {
+  // 切账号：作废所有在途请求，避免上一个账号的会话/对话盖到新账号上
+  sessionsSeq += 1
+  listSeq += 1
+  conversationSeq += 1
+  loadingSessions.value = false
+  loadingConversations.value = false
+  loadingConversation.value = false
+  sessionsError.value = ''
+  conversationsError.value = ''
   selectedSessionId.value = ''
   selectedTaskId.value = ''
   selectedTaskIds.value = []
