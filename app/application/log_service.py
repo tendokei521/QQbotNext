@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 
@@ -35,6 +36,16 @@ class LogService:
         except OSError:
             return []
 
+    async def get_recent_logs_async(
+        self, max_lines: int = 50, levels: list[str] | None = None, source: str = "debug"
+    ) -> list[dict]:
+        """异步版 `get_recent_logs`：文件读取放线程池。
+
+        WebSocket 日志端点每秒推一次快照；同步 open/read 会把事件循环卡住
+        （日志文件大时尤其明显），所以异步调用方一律用这个入口。
+        """
+        return await asyncio.to_thread(self.get_recent_logs, max_lines, levels, source)
+
     def get_recent_logs(self, max_lines: int = 50, levels: list[str] | None = None, source: str = "debug") -> list[dict]:
         from app.infrastructure.config.config_service import mask_ws_url
 
@@ -43,7 +54,7 @@ class LogService:
             return []
         if levels is None:
             levels = ["info", "warning", "error"]
-        levels = [l.lower() for l in levels]
+        levels = [level.lower() for level in levels]
 
         logs: list[dict] = []
         # 按级别过滤需要余量：读取 max_lines 的 5 倍行（至少 50 行），过滤后仍够 N 条
