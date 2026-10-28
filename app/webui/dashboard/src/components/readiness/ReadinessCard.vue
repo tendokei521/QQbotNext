@@ -75,7 +75,7 @@ onUnmounted(() => readiness.stopPolling())
             :color="check.level === 'blocker' ? 'error' : 'warning'"
           />
           <span class="text-body-2">{{ check.title }}</span>
-          <span v-if="check.detail" class="text-caption" style="opacity: 0.65">{{ check.detail }}</span>
+          <span v-if="check.detail" class="text-caption readiness-detail">· {{ check.detail }}</span>
           <v-btn
             v-if="check.action?.route"
             size="x-small"
@@ -98,5 +98,10 @@ onUnmounted(() => readiness.stopPolling())
 
 .readiness-row + .readiness-row {
   margin-top: 4px;
+}
+
+.readiness-detail {
+  margin-left: 2px;
+  opacity: 0.65;
 }
 </style>

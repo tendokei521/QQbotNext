@@ -55,7 +55,7 @@ watch(
           class="mr-1"
           @click="router.push(AGENT_INDEX_PATH)"
         >
-          返回{{ panelTitle }}
+          返回 {{ panelTitle }}
         </v-btn>
         <h1 class="app-page-title">
           <v-icon v-if="section" :icon="section.icon" size="28" class="mr-1" :color="section.color" />
@@ -81,7 +81,7 @@ watch(
           :color="agent.enabled ? 'success' : 'grey'"
           :prepend-icon="agent.enabled ? 'mdi-check-circle-outline' : 'mdi-pause-circle-outline'"
         >
-          {{ agent.enabled ? 'Agent 已启用' : 'Agent 未启用' }}
+          {{ agent.enabled ? 'AI 回复已开启' : 'AI 回复已关闭' }}
         </v-chip>
         <v-btn
           size="small"
@@ -96,7 +96,7 @@ watch(
       </div>
     </div>
     <div class="app-page-subtitle">
-      {{ section ? section.subtitle : '框架级 LLM Agent：配置、权限、会话与对话行为' }}
+      {{ section ? section.subtitle : '模型、人格、权限与对话行为' }}
     </div>
 
     <v-progress-linear v-if="agent.loading || booting" indeterminate color="primary" class="mb-3" />

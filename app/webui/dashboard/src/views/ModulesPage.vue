@@ -58,11 +58,11 @@ const zipFileInput = ref<HTMLInputElement | null>(null)
 const zipBlocked = computed(() => !!zipPreview.value?.builtin_conflict)
 
 const PERMISSION_LABEL: Record<string, string> = {
-  everyone: '不限制',
-  member: '成员',
+  everyone: '所有人',
+  member: '群成员',
   group_admin: '管理员',
   group_owner: '群主',
-  owner: '所有者',
+  owner: '仅主人',
 }
 
 const PERMISSION_COLOR: Record<string, string> = {
@@ -404,7 +404,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
     <v-text-field
       ref="searchRef"
       v-model="search"
-      placeholder="搜索模块…（按 / 快速聚焦）"
+      placeholder="搜索功能插件…"
       density="comfortable"
       variant="outlined"
       hide-details
@@ -435,7 +435,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           />
           <v-icon v-else icon="mdi-pin" size="small" class="mr-1" />
           {{ section.title }}
-          <v-chip size="x-small" variant="flat" class="ml-2">{{ section.items.length }}</v-chip>
+          <v-chip size="x-small" variant="tonal" color="primary" class="ml-2">{{ section.items.length }}</v-chip>
         </div>
         <v-row v-show="!section.collapsible || !isCollapsed(section.key)">
           <v-col v-for="m in section.items" :key="m._key" cols="12" md="6" xl="4">
@@ -484,7 +484,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                     </div>
                     <div class="text-caption">点击去配置包</div>
                   </v-tooltip>
-                  <v-chip v-if="m.version" size="x-small" class="ml-1" variant="text">v{{ m.version }}</v-chip>
                   <v-chip size="x-small" class="ml-1" :color="PERMISSION_COLOR[m.permission] || 'default'" variant="tonal">
                     {{ PERMISSION_LABEL[m.permission] || m.permission }}
                   </v-chip>

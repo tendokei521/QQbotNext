@@ -7,7 +7,7 @@
  * 人格预设又在「角色」页，配一次要跳三页。
  *
  * 命名注意：这里的开关是「是否回复」的总闸，配置表里还有一组「响应场景」（群/私信）——
- * 两者不同层，所以卡片标题直接叫「启用 Agent」，不叫「总开关」，避免和下面那组撞名。
+ * 两者不同层，所以卡片标题直接叫「启用 AI 回复」，不叫「总开关」，避免和下面那组撞名。
  *
  * 无 props、自读 store，这样 AgentSectionPage 能用统一的 ``<component :is>`` 挂载。
  */
@@ -22,7 +22,7 @@ const agent = useAgentConfigStore()
   <div>
     <v-card variant="outlined" class="mb-4">
       <v-card-title class="d-flex align-center">
-        <v-icon icon="mdi-power" class="mr-2" color="primary" /> 启用 Agent
+        <v-icon icon="mdi-power" class="mr-2" color="primary" /> 启用 AI 回复
         <v-spacer />
         <v-switch
           v-model="agent.enabled"
@@ -34,7 +34,7 @@ const agent = useAgentConfigStore()
         />
       </v-card-title>
       <v-card-text class="text-body-2" style="opacity: 0.8">
-        关闭后不再由 Agent 兜底回复；模块回复与定时、主动消息各自独立启停。
+        关闭后机器人不再自动回复；功能插件、定时任务与主动消息各自独立生效。
       </v-card-text>
     </v-card>
 
