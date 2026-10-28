@@ -13,7 +13,8 @@ import time
 
 from app.infrastructure.cache import Cache
 from app.infrastructure.onebot.client import BotConnection
-from app.infrastructure.onebot.gateway import EVENT_QUEUE_MAXSIZE, OneBotGateway
+from app.infrastructure.onebot.gateway import OneBotGateway
+from app.infrastructure.onebot.gateway_events import EVENT_QUEUE_MAXSIZE, enqueue_event
 
 
 class _Settings:
@@ -144,16 +145,16 @@ async def test_queue_full_does_not_block_api_response():
 
 async def test_enqueue_drops_oldest_and_counts():
     """队列满 → 丢最旧一条，保留最新事件，并累计丢弃计数 + 汇总告警。"""
-    gw = OneBotGateway(settings=_Settings(), cache=Cache())
     log = _NullLogger()
     queue: asyncio.Queue = asyncio.Queue(maxsize=2)
+    drops: dict[str, int] = {}
 
-    assert gw._enqueue_event("main", queue, "e1", log) is False
-    assert gw._enqueue_event("main", queue, "e2", log) is False
-    assert gw._enqueue_event("main", queue, "e3", log) is True
+    assert enqueue_event(queue, "e1", account_id="main", drops=drops, logger=log) is False
+    assert enqueue_event(queue, "e2", account_id="main", drops=drops, logger=log) is False
+    assert enqueue_event(queue, "e3", account_id="main", drops=drops, logger=log) is True
 
     assert queue.qsize() == 2
     assert queue.get_nowait() == "e2", "队满时必须丢最旧事件，而不是阻塞或丢新事件"
     assert queue.get_nowait() == "e3"
-    assert gw.event_queue_drops["main"] == 1
+    assert drops["main"] == 1
     assert log.warnings and "丢弃" in log.warnings[0]

@@ -47,6 +47,7 @@ from app.infrastructure.onebot.client import BotConnection
 from app.infrastructure.onebot.codec import decode
 from app.infrastructure.onebot.endpoint import FORWARD, is_reverse, normalize_mode
 from app.infrastructure.onebot.forward import connect_forward
+from app.infrastructure.onebot.gateway_events import enqueue_event, new_event_queue
 from app.infrastructure.onebot.gateway_lifecycle import GatewayLifecycleMixin
 from app.infrastructure.onebot.introspect import bot_info, bots_info, conn_mode, effective_bot_id
 from app.infrastructure.onebot.log_text import (  # noqa: F401 - 原路径重导出，第三方插件仍在 import
@@ -61,14 +62,9 @@ LoginHandler = Callable[[BotConnection], Awaitable[None]]
 # 登录成功后记录账号快照（account_id, user_id, nickname）→ 返回是否发生变化
 AccountSaver = Callable[[str, Any, str], Awaitable[bool]]
 
-#: 单账号事件队列上限。超过它 = 模块/Agent 处理能力跟不上事件洪峰；
-#: 此时丢最旧事件（宁可丢旧消息，也不能让接收循环停住）。
-EVENT_QUEUE_MAXSIZE = 1024
-#: 队列丢弃告警的汇总间隔：每丢这么多条打一次 warning，避免洪峰时刷屏。
-EVENT_DROP_WARN_EVERY = 100
-#: 登录信息拉取失败后的退避重试间隔（秒）。OneBot 实现刚起/短暂报错是常态，
-#: 只试一次就放弃会让连接停在「WebSocket 已连上但 runtime.online=False」的半上线态。
-LOGIN_RETRY_DELAYS = (2.0, 4.0, 8.0)
+#: 同时进行的连接建立（正向握手 / 反向起监听）上限。多个账号一起掉线时，
+#: 无上限并发会让所有连接挤在一起互相拖慢（每个最长数秒超时）。
+CONNECT_CONCURRENCY = 3
 
 
 class OneBotGateway(GatewayLifecycleMixin):
@@ -93,6 +89,8 @@ class OneBotGateway(GatewayLifecycleMixin):
         self.connect_type = False
         self._supervise_task: asyncio.Task | None = None
         self._connect_locks: dict[str, asyncio.Lock] = {}  # 防止监督循环与 WebUI 并发双开
+        # 并发握手闸门：限制同时建立的连接数（见 CONNECT_CONCURRENCY）
+        self._connect_semaphore = asyncio.Semaphore(CONNECT_CONCURRENCY)
         # 登录成功时的账号快照写入器（BotService 注入 → ConfigService）；
         # 供前端在断开状态回退展示「上次连接的账号」。
         self.account_saver: AccountSaver | None = None
@@ -292,10 +290,12 @@ class OneBotGateway(GatewayLifecycleMixin):
             conn.suppress_auto_reconnect = False
             if is_reverse(self._conn_mode(conn)):
                 # 反向：起监听等 OneBot 实现连入（成败不依赖对端是否已在线）
-                return await self._listen_reverse(key, conn)
+                async with self._connect_semaphore:
+                    return await self._listen_reverse(key, conn)
 
             epoch = getattr(conn, "connect_epoch", 0)
-            websocket = await self._connect_websocket(conn.ws_url)
+            async with self._connect_semaphore:
+                websocket = await self._connect_websocket(conn.ws_url)
             if getattr(conn, "connect_epoch", 0) != epoch:
                 # 握手期间收到了断开请求 → 本次连接已作废，丢弃结果（不要覆盖 disconnected 状态）
                 if websocket is not None:
@@ -459,58 +459,6 @@ class OneBotGateway(GatewayLifecycleMixin):
             self.log.error(f"获取群聊列表失败: {e}")
         return False
 
-    def _schedule_login(
-        self, conn: BotConnection, key: str, bot_logger, login_tasks: list[asyncio.Task]
-    ) -> None:
-        """按需启动登录信息拉取（每连接同一时刻只允许一个拉取任务）。
-
-        已经取到（``login_retrieved``）→ 不再拉；上一轮重试任务还在跑 → 不叠加。
-        上一轮因 OneBot 实现暂时不可用而全部失败后，下一条正常消息会重新拉起一轮，
-        直到取到为止（配合 ``_login_with_retry`` 的退避重试）。
-        """
-        if getattr(conn, "login_retrieved", False):
-            return
-        if login_tasks and not login_tasks[-1].done():
-            return
-        login_tasks.clear()  # 丢弃已完成任务的引用，避免列表随消息增长
-        login_tasks.append(asyncio.create_task(
-            self._login_with_retry(conn, bot_logger), name=f"login:{key}"
-        ))
-
-    async def _login_with_retry(self, conn: BotConnection, bot_logger) -> bool:
-        """拉取登录信息并在失败时退避重试；只有成功后才把连接标为「已取过」。
-
-        历史缺陷：``_get_login_info`` 失败一次就直接放弃，且 ``start_type`` 在成败
-        之前就已置位 → 之后永不重试。表现为 WebUI 显示已连接，但 ``runtime.online``
-        恒为 False：定时任务、主动消息、模块 ``on_online`` 全部不工作。
-        """
-        delays = LOGIN_RETRY_DELAYS
-        for attempt in range(1 + len(delays)):
-            if getattr(conn, "login_retrieved", False):
-                return True
-            try:
-                if await self._get_login_info(conn):
-                    conn.login_retrieved = True
-                    # 群列表只用于日志展示与群名查找，失败不影响上线；登录成功后补取一次
-                    if not conn.all_group_list:
-                        await self._get_login_groups(conn)
-                    return True
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:  # _get_login_info 内部已兜异常，这里防御性留痕
-                bot_logger.warning(f"[Gateway] 登录信息拉取异常（第 {attempt + 1} 次）: {e}")
-            if attempt >= len(delays):
-                break
-            bot_logger.warning(
-                f"账号「{bot_label(conn)}」未取到登录信息，{delays[attempt]:g}s 后重试"
-            )
-            await asyncio.sleep(delays[attempt])
-        bot_logger.error(
-            f"账号「{bot_label(conn)}」多次重试仍未取到登录信息：连接保持，"
-            "下一条事件到达时会再试（定时任务/主动消息在取到前不启动）"
-        )
-        return False
-
     def _lookup_group_name(self, conn: BotConnection, group_id: int) -> str:
         """从登录时缓存的群列表信息里查群名。"""
         for g in conn.all_group_list_info or []:
@@ -542,9 +490,8 @@ class OneBotGateway(GatewayLifecycleMixin):
         # 若不这样拆分，模块内 await API 响应（如 send_private_msg 等 echo）时，
         # 接收循环被阻塞、无法消费该响应 → 请求/响应自锁 → 10s 超时。
         # 有界队列 + 非阻塞入队：背压由「丢最旧」承担，接收循环永不等待
-        # （见 ``_enqueue_event``：await put 在队满时同样会卡死接收循环）。
-        queue: asyncio.Queue = asyncio.Queue(maxsize=EVENT_QUEUE_MAXSIZE)
-        self.event_queue_drops[key] = 0
+        # （见 gateway_events.enqueue_event：await put 在队满时同样会卡死接收循环）。
+        queue = new_event_queue(key, self.event_queue_drops)
         worker = asyncio.create_task(
             self._dispatch_worker(key, queue), name=f"dispatch_worker:{key}"
         )
@@ -609,7 +556,10 @@ class OneBotGateway(GatewayLifecycleMixin):
                     # 3. 解码为领域事件并入队处理（不阻塞接收循环）
                     event = decode(msg_dict, conn)
                     if isinstance(event, BaseEvent):
-                        self._enqueue_event(key, queue, event, bot_logger)
+                        enqueue_event(
+                            queue, event, account_id=key,
+                            drops=self.event_queue_drops, logger=bot_logger,
+                        )
 
                 except Exception as e:
                     bot_logger.error(f"处理消息异常: {e}")
@@ -707,35 +657,6 @@ class OneBotGateway(GatewayLifecycleMixin):
         suffix = f" {reason}" if reason else ""
         return f"服务端关闭连接 (code={code}{suffix})"
 
-    def _enqueue_event(self, key: str, queue: asyncio.Queue, event: BaseEvent, bot_logger=None) -> bool:
-        """非阻塞入队；队满时丢最旧事件并汇总告警。返回是否发生了丢弃。
-
-        接收循环**绝不能**等待事件队列：一旦 ``await queue.put`` 在队满时停住，
-        同一连接上一条 API 响应就没人消费，``send_group_msg`` 等全部 echo 超时
-        （请求/响应自锁，表现为整个账号 10~60s 不可用）。因此这里用 ``put_nowait``，
-        把背压代价换成「丢弃最旧事件」——模块处理不过来时丢旧消息，远好于连接卡死。
-        """
-        try:
-            queue.put_nowait(event)
-            return False
-        except asyncio.QueueFull:
-            pass
-
-        # 队列满：腾出最旧的一条再放入新事件。消费者只有一个（_dispatch_worker），
-        # 它只会让队列更空，因此这里的第二次 put_nowait 不会被拒绝。
-        with contextlib.suppress(asyncio.QueueEmpty):
-            queue.get_nowait()
-        queue.put_nowait(event)
-
-        drops = self.event_queue_drops.get(key, 0) + 1
-        self.event_queue_drops[key] = drops
-        if drops == 1 or drops % EVENT_DROP_WARN_EVERY == 0:
-            (bot_logger or self.log).warning(
-                f"[Gateway] 事件队列已满（{EVENT_QUEUE_MAXSIZE}），已累计丢弃 {drops} 条最旧事件；"
-                "事件处理能力不足，请检查模块/Agent 是否阻塞"
-            )
-        return True
-
     async def _dispatch_worker(self, account_id: str, queue: asyncio.Queue) -> None:
         """串行处理该账号的事件队列，独立于接收循环。
 
@@ -810,7 +731,11 @@ class OneBotGateway(GatewayLifecycleMixin):
         return False
 
     async def shutdown(self) -> None:
-        if self._supervise_task:
-            self._supervise_task.cancel()
+        """关停：先停监督循环（避免关断过程中又连回来），再逐个断开连接。"""
+        task, self._supervise_task = self._supervise_task, None
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
         for account_id in list(self.connections.keys()):
             await self.disconnect_bot(account_id)

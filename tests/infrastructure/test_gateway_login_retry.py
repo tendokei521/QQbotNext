@@ -14,7 +14,7 @@ import json
 import time
 
 from app.infrastructure.cache import Cache
-from app.infrastructure.onebot import gateway as gateway_module
+from app.infrastructure.onebot import gateway_lifecycle as lifecycle_module
 from app.infrastructure.onebot.client import BotConnection
 from app.infrastructure.onebot.gateway import OneBotGateway
 
@@ -87,7 +87,7 @@ async def _wait(predicate, timeout: float = 2.0) -> bool:
 
 async def test_login_retry_succeeds_on_third_attempt(monkeypatch):
     """前两次 get_login_info 失败、第三次成功 → 必须最终登录成功并置位已取过。"""
-    monkeypatch.setattr(gateway_module, "LOGIN_RETRY_DELAYS", (0.01, 0.01, 0.01))
+    monkeypatch.setattr(lifecycle_module, "LOGIN_RETRY_DELAYS", (0.01, 0.01, 0.01))
     gw = OneBotGateway(settings=_Settings(), cache=Cache())
     conn = _conn(_OneMessageWs())
     gw.connections = {"main": conn}
@@ -117,7 +117,7 @@ async def test_login_retry_succeeds_on_third_attempt(monkeypatch):
 
 async def test_login_failure_keeps_retrieved_false_and_gives_up(monkeypatch):
     """全部尝试失败：不置位已取过（后续事件到达还会再试），返回 False 而非卡死。"""
-    monkeypatch.setattr(gateway_module, "LOGIN_RETRY_DELAYS", (0.01, 0.01, 0.01))
+    monkeypatch.setattr(lifecycle_module, "LOGIN_RETRY_DELAYS", (0.01, 0.01, 0.01))
     gw = OneBotGateway(settings=_Settings(), cache=Cache())
     conn = _conn(_OneMessageWs())
     gw.connections = {"main": conn}
@@ -132,13 +132,13 @@ async def test_login_failure_keeps_retrieved_false_and_gives_up(monkeypatch):
     conn.get_group_list = always_fail
 
     assert await gw._login_with_retry(conn, _NullLogger()) is False
-    assert calls["info"] == 1 + len(gateway_module.LOGIN_RETRY_DELAYS)
+    assert calls["info"] == 1 + len(lifecycle_module.LOGIN_RETRY_DELAYS)
     assert conn.login_retrieved is False, "失败不得置位「已取过」，否则永不重试"
 
 
 async def test_bot_server_recovers_half_online_state(monkeypatch):
     """端到端：接收循环收到第一条事件即拉登录信息，前两次失败后自愈为已上线。"""
-    monkeypatch.setattr(gateway_module, "LOGIN_RETRY_DELAYS", (0.01, 0.01, 0.01))
+    monkeypatch.setattr(lifecycle_module, "LOGIN_RETRY_DELAYS", (0.01, 0.01, 0.01))
     gw = OneBotGateway(settings=_Settings(), cache=Cache())
     ws = _OneMessageWs()
     conn = _conn(ws)
