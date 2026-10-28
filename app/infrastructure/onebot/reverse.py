@@ -161,11 +161,24 @@ class ReverseWsServer:
     # ==================== 生命周期 ====================
     @property
     def listening(self) -> bool:
+        """监听是否**真的**在服务中（而不是「曾经 start 过」）。
+
+        websockets 16 的 ``Server`` 没有 ``closed`` 属性（只有 ``is_serving()`` /
+        ``closed_waiter``），旧写法 ``getattr(server, "closed", None)`` 恒为 None →
+        ``listening`` 永远 True：监听意外停止后不会重建，诊断台/监督循环也会误判。
+        旧版（12/13）没有 ``is_serving``，退回读 ``closed``。
+        """
         server = self._server
         if server is None:
             return False
-        closed = getattr(server, "closed", None)
-        return not bool(closed)
+        is_serving = getattr(server, "is_serving", None)
+        if callable(is_serving):
+            try:
+                return bool(is_serving())
+            except Exception as e:  # noqa: BLE001 —— 探测失败按「未监听」处理（会触发重建）
+                self.log.debug(f"[OneBot] 反向监听状态探测失败（按未监听处理）: {e}")
+                return False
+        return not bool(getattr(server, "closed", None))
 
     @property
     def listen_url(self) -> str:
