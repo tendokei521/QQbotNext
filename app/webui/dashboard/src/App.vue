@@ -1,12 +1,25 @@
 <script setup lang="ts">
-import { watch } from 'vue'
+import { onBeforeUnmount, onMounted, watch } from 'vue'
 import { useTheme } from 'vuetify'
 import { useThemeStore } from '@/stores/theme'
 import { useNotifyStore } from '@/stores/notify'
+import { useAgentConfigStore } from '@/stores/agentConfig'
+import { registerDraftFlush } from '@/api/http'
 
 const theme = useTheme()
 const themeStore = useThemeStore()
 const notify = useNotifyStore()
+const agent = useAgentConfigStore()
+
+// 会话过期会整页跳登录：跳之前把 Agent 配置的自动保存草稿先落盘，避免 2s 防抖窗口内的编辑丢失
+let unregisterDraftFlush: (() => void) | null = null
+onMounted(() => {
+  unregisterDraftFlush = registerDraftFlush(() => agent.flush())
+})
+onBeforeUnmount(() => {
+  unregisterDraftFlush?.()
+  unregisterDraftFlush = null
+})
 
 // 同步 Vuetify 主题（含切换）
 watch(
