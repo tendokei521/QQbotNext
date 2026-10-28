@@ -310,9 +310,23 @@ class OneBotGateway(GatewayLifecycleMixin):
             # 解除「用户手动断开」的抑制，让该账号重新参与自动重连。
             conn.suppress_auto_reconnect = False
             if is_reverse(self._conn_mode(conn)):
-                # 反向：起监听等 OneBot 实现连入（成败不依赖对端是否已在线）
+                # 反向：起监听等 OneBot 实现连入（成败不依赖对端是否已在线）。
+                # 起监听可能很慢（绑定端口/解析地址），期间用户可能已点「断开」或
+                # 已删账号：与正向一样用 epoch 作废这次结果，否则监听会继续起来、
+                # 状态被改回 connecting，而 disconnect_bot 早已收尾结束。
+                epoch = getattr(conn, "connect_epoch", 0)
                 async with self._connect_semaphore:
-                    return await self._listen_reverse(key, conn)
+                    if getattr(conn, "connect_epoch", 0) != epoch or self.connections.get(key) is not conn:
+                        return False  # 排队等待期间已被断开/删除：连监听都不该起
+                    started = await self._listen_reverse(key, conn)
+                if getattr(conn, "connect_epoch", 0) != epoch or self.connections.get(key) is not conn:
+                    await self.reverse_link.stop(key)  # 停掉刚起来的监听（断开语义包含不占端口）
+                    conn.status = "disconnected"
+                    conn.last_error = None
+                    await self._notify_status(conn, "disconnected")
+                    self.log.info(f"账号「{bot_label(conn)}」连接已取消（监听启动期间收到断开请求）")
+                    return False
+                return started
 
             epoch = getattr(conn, "connect_epoch", 0)
             async with self._connect_semaphore:
