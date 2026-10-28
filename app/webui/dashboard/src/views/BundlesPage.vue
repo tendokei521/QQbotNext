@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 预设中心：导出一个账号的可迁移配置（人格卡 / 模型池 / Agent 配置 / 模块参数与启停 /
+ * 配置包：导出一个账号的可迁移配置（人格卡 / 模型池 / Agent 配置 / 模块参数与启停 /
  * 第三方模块代码），并把它应用到目标账号（事务写 + 快照，失败自动回滚）。
  */
 import { computed, onMounted, reactive, ref } from 'vue'
@@ -245,7 +245,7 @@ onMounted(async () => {
       <div>
         <h1 class="app-page-title">
           <v-icon icon="mdi-package-variant-closed" size="28" color="primary" class="mr-1" />
-          预设中心
+          配置包
         </h1>
         <div class="app-page-subtitle">把一套配置打包、分享到另一台电脑</div>
       </div>
@@ -494,7 +494,7 @@ onMounted(async () => {
                 :key="mod.name"
                 class="text-caption"
               >
-                模块 {{ mod.name }}：{{ mod.loaded && !mod.error ? '已加载' : '未加载，可在「功能模块」页点重试' }}
+                模块 {{ mod.name }}：{{ mod.loaded && !mod.error ? '已加载' : '未加载，可在「功能插件」页点重试' }}
               </div>
               <div
                 v-if="!applyResult.health.agent.persona || !applyResult.health.agent.provider_preset || !applyResult.health.agent.provider_model"

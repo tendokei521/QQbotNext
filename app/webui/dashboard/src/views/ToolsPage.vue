@@ -9,10 +9,10 @@ const tools = useToolsStore()
 
 const TABS: { value: ToolTab; to: string; label: string; icon: string }[] = [
   { value: 'overview', to: '/tools/overview', label: '总览', icon: 'mdi-format-list-bulleted-triangle' },
-  { value: 'system', to: '/tools/system', label: 'System Tools', icon: 'mdi-cog-outline' },
-  { value: 'onebot', to: '/tools/onebot', label: 'OneBot Tools', icon: 'mdi-robot-industrial' },
-  { value: 'mcp', to: '/tools/mcp', label: 'MCP Tools', icon: 'mdi-server-network' },
-  { value: 'module', to: '/tools/module', label: '模块 Tools', icon: 'mdi-puzzle-outline' },
+  { value: 'system', to: '/tools/system', label: '系统工具', icon: 'mdi-cog-outline' },
+  { value: 'onebot', to: '/tools/onebot', label: 'OneBot 工具', icon: 'mdi-robot-industrial' },
+  { value: 'mcp', to: '/tools/mcp', label: '外部工具', icon: 'mdi-server-network' },
+  { value: 'module', to: '/tools/module', label: '插件工具', icon: 'mdi-puzzle-outline' },
 ]
 
 const activeTab = computed<ToolTab>(() => {
@@ -49,7 +49,7 @@ watch(
   <div>
     <div class="app-page-header">
       <div>
-        <h1 class="app-page-title">Tool 管理</h1>
+        <h1 class="app-page-title">高级工具</h1>
         <div class="app-page-subtitle">统一管理四类 LLM 工具的开关与日志输出</div>
       </div>
     </div>

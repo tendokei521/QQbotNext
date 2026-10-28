@@ -21,7 +21,7 @@ const searchDialog = ref(false)
 const copyDialog = ref(false)
 
 /*
- * 这里原来还有「只看基础」开关 + 每张卡的「高级」徽标，以及一个 /advanced 进阶区。
+ * 这里原来没有「只看基础」开关 + 每张卡的「高级」徽标，以及一个 /advanced 进阶区。
  * v4 把进阶内容拆成功能模块后两者同时失效：徽标按「分区内全部字段都是 basic 才算基础」
  * 判定，而 importance 已是字段级，几乎每页都至少有一个进阶字段 → 6 张卡 5 张标「高级」。
  * 现在只有单一区域，卡片就是这 5 页本身。
@@ -51,7 +51,7 @@ const pages = computed(() =>
 const warnings = computed(() => {
   const list: string[] = []
   if (!agent.enabled) list.push('Agent 已关闭，不会兜底回复消息（模块回复不受影响）')
-  if (!agent.poolModelIds.length) list.push('尚未配置 Provider 模型，Agent 无法回复')
+  if (!agent.poolModelIds.length) list.push('未未配置 Provider 模型，Agent 无法回复')
   if (agent.draft.tavily_enable && !agent.draft.tavily_api_key) {
     list.push('联网搜索已开启，但未填写 Tavily API Key')
   }

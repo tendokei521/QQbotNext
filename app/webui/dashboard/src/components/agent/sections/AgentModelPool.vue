@@ -62,7 +62,7 @@ function movePoolModel(index: number, delta: number) {
 <template>
   <v-card variant="outlined" class="mb-4">
     <v-card-title class="d-flex align-center">
-      <v-icon icon="mdi-api" class="mr-2" color="info" /> Provider 模型（按顺序请求）
+      <v-icon icon="mdi-api" class="mr-2" color="info" /> 模型服务（按顺序请求）
       <v-spacer />
       <v-btn size="small" variant="tonal" prepend-icon="mdi-plus" @click="poolDialog = true">添加模型</v-btn>
     </v-card-title>
@@ -91,14 +91,14 @@ function movePoolModel(index: number, delta: number) {
         </v-list-item>
       </v-list>
       <div v-else class="text-caption text-center pa-4" style="color: rgba(var(--v-theme-on-surface), 0.45)">
-        尚未配置模型，请添加一个 Provider 模型
+        还没有模型，先添加一个模型
       </div>
     </v-card-text>
 
     <v-dialog v-model="poolDialog" max-width="420">
       <v-card>
         <v-card-title class="d-flex align-center">
-          <v-icon icon="mdi-plus" class="mr-2" color="info" /> 添加 Provider 模型
+          <v-icon icon="mdi-plus" class="mr-2" color="info" /> 添加模型
         </v-card-title>
         <v-card-text>
           <v-select

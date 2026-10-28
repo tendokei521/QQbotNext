@@ -19,7 +19,7 @@ const agent = useAgentConfigStore()
 
 // 当前路由对应的分区（index 路由没有分区）
 const section = computed(() => agentSectionByPath(route.path))
-const panelTitle = 'Agent 面板'
+const panelTitle = 'AI 对话设置'
 const botId = computed(() => bots.currentAccountId)
 /** 是否已选定账号：有账号就够，**不要求连上**（配置按账号存，与连接无关） */
 const hasAccount = computed(() => botId.value !== null)

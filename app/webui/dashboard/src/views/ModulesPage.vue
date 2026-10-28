@@ -349,8 +349,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   <div>
     <div class="app-page-header">
       <div>
-        <h1 class="app-page-title">功能模块</h1>
-        <div class="app-page-subtitle">共 {{ modules.count }} 个模块，开关只影响当前账号</div>
+        <h1 class="app-page-title">功能插件</h1>
+        <div class="app-page-subtitle">共 {{ modules.count }} 个功能，开关只影响当前账号</div>
       </div>
       <v-chip v-if="bots.currentAccountId" size="small" variant="tonal" class="mr-2">
         当前账号：{{ accountName }}
@@ -482,7 +482,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                       {{ m.origin.action === 'upgraded' ? '随预设升级' : '随预设安装' }} ·
                       {{ formatOriginTime(m.origin.installed_at) }}
                     </div>
-                    <div class="text-caption">点击去预设中心</div>
+                    <div class="text-caption">点击去配置包</div>
                   </v-tooltip>
                   <v-chip v-if="m.version" size="x-small" class="ml-1" variant="text">v{{ m.version }}</v-chip>
                   <v-chip size="x-small" class="ml-1" :color="PERMISSION_COLOR[m.permission] || 'default'" variant="tonal">
