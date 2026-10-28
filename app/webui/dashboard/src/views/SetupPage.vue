@@ -50,15 +50,104 @@ let lastNotifiedError = ''
 let pollTimer: number | null = null
 
 // ---------- 第 2 步：模型 ----------
+// 内置目录优先读后端（与「模型服务」页同源），取不到时用这份本地兜底，保证向导可继续。
+interface PresetOption {
+  key: string
+  name: string
+  provider: string
+  api_base: string
+  models: string[]
+}
+
+const FALLBACK_PRESETS: PresetOption[] = [
+  { key: 'deepseek', name: 'DeepSeek', provider: 'openai', api_base: 'https://api.deepseek.com', models: ['deepseek-flash', 'deepseek-v4-pro'] },
+  { key: 'openai', name: 'OpenAI', provider: 'openai', api_base: 'https://api.openai.com/v1', models: ['gpt-5.2', 'gpt-5.4-mini', 'gpt-4.1'] },
+  { key: 'moonshotai-cn', name: 'Kimi（月之暗面）', provider: 'openai', api_base: 'https://api.moonshot.cn/v1', models: ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6'] },
+  { key: 'zai-coding-cn', name: '智谱 GLM', provider: 'openai', api_base: 'https://open.bigmodel.cn/api/coding/paas/v4', models: ['glm-5.3', 'glm-4.6v'] },
+  { key: 'qwen-token-plan-cn', name: '通义千问', provider: 'openai', api_base: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', models: ['qwen3.8-max', 'qwen3.8-flash'] },
+  { key: 'anthropic', name: 'Anthropic', provider: 'anthropic', api_base: 'https://api.anthropic.com', models: ['claude-sonnet-5', 'claude-haiku-5-5'] },
+]
+
+/** 向导首屏优先展示的服务商（其余收进「其它服务」） */
+const RECOMMENDED_KEYS = ['deepseek', 'moonshotai-cn', 'zai-coding-cn', 'qwen-token-plan-cn', 'openai']
+
+const presets = ref<PresetOption[]>([])
+const presetsLoading = ref(false)
+const presetsError = ref('')
+const selectedPresetKey = ref('')
+const customMode = ref(false)
+const moreOpen = ref(false)
+
 const model = reactive({
   provider: 'openai',
-  api_base: 'https://api.deepseek.com/v1',
+  api_base: '',
   api_key: '',
-  model: 'deepseek-chat',
+  model: '',
+  preset_name: '',
 })
 const modelResult = ref<{ model_id: string; preset_name: string } | null>(null)
 const modelTesting = ref(false)
 const modelTestMessage = ref('')
+
+const selectedModelPreset = computed(
+  () => presets.value.find((item) => item.key === selectedPresetKey.value) || null,
+)
+const recommendedPresets = computed(() =>
+  presets.value.filter((item) => RECOMMENDED_KEYS.includes(item.key)),
+)
+const morePresets = computed(() =>
+  presets.value.filter((item) => !RECOMMENDED_KEYS.includes(item.key)),
+)
+const customProviderItems = [
+  { title: 'OpenAI 兼容', value: 'openai' },
+  { title: 'Anthropic', value: 'anthropic' },
+  { title: 'Gemini', value: 'gemini' },
+]
+
+/** 选中一家服务商：自动填好接口地址与默认模型，用户只需再填 Key */
+function choosePreset(preset: PresetOption) {
+  customMode.value = false
+  selectedPresetKey.value = preset.key
+  model.provider = preset.provider
+  model.api_base = preset.api_base
+  model.model = preset.models[0] || ''
+  model.preset_name = preset.name
+}
+
+/** 自定义：手填接口地址与模型名（自建服务、代理等） */
+function chooseCustom() {
+  customMode.value = true
+  selectedPresetKey.value = ''
+  model.preset_name = ''
+}
+
+async function loadPresets() {
+  presetsLoading.value = true
+  try {
+    const res = await http.get('/api/provider-presets/builtin')
+    const rows: unknown[] = Array.isArray(res.data?.presets) ? res.data.presets : []
+    const parsed: PresetOption[] = rows
+      .map((row) => row as Record<string, unknown>)
+      .map((row) => ({
+        key: String(row.key || row.name || ''),
+        name: String(row.name || ''),
+        provider: String(row.provider || 'openai'),
+        api_base: String(row.api_base || ''),
+        models: Array.isArray(row.models) ? row.models.map(String) : [],
+      }))
+      .filter((item) => item.key && item.api_base)
+    presets.value = parsed.length ? parsed : FALLBACK_PRESETS
+    presetsError.value = parsed.length ? '' : '没读到模型服务列表，先用内置的几家'
+  } catch {
+    presets.value = FALLBACK_PRESETS
+    presetsError.value = '没读到模型服务列表，先用内置的几家'
+  } finally {
+    presetsLoading.value = false
+  }
+  if (!selectedPresetKey.value && !customMode.value && presets.value.length) {
+    choosePreset(presets.value.find((item) => item.key === 'deepseek') || presets.value[0])
+  }
+}
 
 // ---------- 第 3 步：人格 ----------
 const personaMode = ref<'scratch' | 'bundle'>('scratch')
@@ -232,6 +321,18 @@ async function saveModel() {
     notify.push('请先在第一步连接账号', 'warning')
     return
   }
+  if (!model.api_base.trim()) {
+    notify.push('先选一家模型服务，或填好接口地址', 'warning')
+    return
+  }
+  if (!model.model.trim()) {
+    notify.push('选一个模型，或直接填模型名', 'warning')
+    return
+  }
+  if (!model.api_key.trim()) {
+    notify.push('填上 API Key 才能用', 'warning')
+    return
+  }
   await run('model', async () => {
     const res = await http.post('/api/setup/quick-model', {
       account_id: currentAccountId.value,
@@ -239,9 +340,10 @@ async function saveModel() {
       api_base: model.api_base.trim(),
       api_key: model.api_key,
       model: model.model.trim(),
+      preset_name: model.preset_name,
     })
     modelResult.value = { model_id: res.data.model_id, preset_name: res.data.preset_name }
-    notify.push('模型已接入 Agent', 'success')
+    notify.push('模型已接入', 'success')
   })
 }
 
@@ -307,7 +409,7 @@ onMounted(async () => {
   if (!bots.bots.length) await bots.fetchBots()
   await refreshAccount()
   startPolling()
-  await Promise.all([readiness.load(), bundles.load()])
+  await Promise.all([readiness.load(), bundles.load(), loadPresets()])
 })
 
 onBeforeUnmount(() => {
@@ -447,68 +549,162 @@ onUnmounted(stopPolling)
 
       <!-- 第 2 步 -->
       <v-card v-else-if="step === 2" variant="outlined">
-        <v-card-title>配置模型（保存即入池）</v-card-title>
+        <v-card-title>接入 AI 模型</v-card-title>
         <v-card-text>
-          <v-row dense>
-            <v-col cols="12" md="4">
-              <v-select
-                v-model="model.provider"
-                :items="[
-                  { title: 'OpenAI 兼容', value: 'openai' },
-                  { title: 'Anthropic', value: 'anthropic' },
-                  { title: 'Gemini', value: 'gemini' },
-                ]"
-                label="服务商协议"
-                density="comfortable"
-                variant="outlined"
-              />
-            </v-col>
-            <v-col cols="12" md="8">
-              <v-text-field
-                v-model="model.api_base"
-                label="API 基础 URL"
-                density="comfortable"
-                variant="outlined"
-              />
-            </v-col>
-          </v-row>
-          <v-text-field
-            v-model="model.api_key"
-            label="API Key"
-            type="password"
-            density="comfortable"
-            variant="outlined"
-            autocomplete="off"
-          />
-          <v-text-field
-            v-model="model.model"
-            label="模型名称"
-            placeholder="如 deepseek-chat"
-            density="comfortable"
-            variant="outlined"
-          />
-          <div v-if="modelResult" class="created-box">
-            <div class="text-caption">
-              已接入：{{ modelResult.preset_name }} · {{ modelResult.model_id }}
-            </div>
-            <v-btn
-              size="small"
-              variant="tonal"
-              class="mt-2"
-              :loading="modelTesting"
-              prepend-icon="mdi-connection"
-              @click="testModel"
-            >
-              测试连通
-            </v-btn>
-            <div v-if="modelTestMessage" class="text-caption mt-1">{{ modelTestMessage }}</div>
+          <div class="text-body-2 text-medium-emphasis mb-3">
+            选一家模型服务，填上它给你的 Key 就能用；换服务商不用改其它设置。
           </div>
+
+          <div v-if="presetsLoading" class="text-caption mb-3">正在读取模型服务列表…</div>
+          <template v-else>
+            <div class="preset-grid">
+              <v-card
+                v-for="item in recommendedPresets"
+                :key="item.key"
+                variant="outlined"
+                hover
+                class="preset-card"
+                :class="{ 'preset-card--active': !customMode && selectedPresetKey === item.key }"
+                @click="choosePreset(item)"
+              >
+                <div class="preset-card__name">{{ item.name }}</div>
+                <div class="preset-card__hint">常用模型 {{ item.models.length }} 个</div>
+              </v-card>
+              <v-card
+                variant="outlined"
+                hover
+                class="preset-card"
+                :class="{ 'preset-card--active': customMode }"
+                @click="chooseCustom"
+              >
+                <div class="preset-card__name">自定义</div>
+                <div class="preset-card__hint">手填接口地址和模型名</div>
+              </v-card>
+            </div>
+
+            <v-btn
+              v-if="morePresets.length"
+              size="small"
+              variant="text"
+              class="px-0 mt-1"
+              @click="moreOpen = !moreOpen"
+            >
+              {{ moreOpen ? '收起其它服务' : `其它服务（${morePresets.length}）` }}
+            </v-btn>
+            <v-expand-transition>
+              <div v-if="moreOpen" class="preset-grid mt-2">
+                <v-card
+                  v-for="item in morePresets"
+                  :key="item.key"
+                  variant="outlined"
+                  hover
+                  class="preset-card"
+                  :class="{ 'preset-card--active': !customMode && selectedPresetKey === item.key }"
+                  @click="choosePreset(item)"
+                >
+                  <div class="preset-card__name">{{ item.name }}</div>
+                  <div class="preset-card__hint">常用模型 {{ item.models.length }} 个</div>
+                </v-card>
+              </div>
+            </v-expand-transition>
+
+            <v-alert v-if="presetsError" type="info" variant="tonal" density="compact" class="mt-3">
+              {{ presetsError }}
+            </v-alert>
+
+            <v-row v-if="!customMode && selectedModelPreset" dense class="mt-2">
+              <v-col cols="12" md="6">
+                <v-combobox
+                  v-model="model.model"
+                  :items="selectedModelPreset.models"
+                  label="模型"
+                  hint="选一个常用模型，也可以直接填名字"
+                  persistent-hint
+                  density="comfortable"
+                  variant="outlined"
+                />
+              </v-col>
+              <v-col cols="12" md="6">
+                <v-text-field
+                  v-model="model.api_key"
+                  label="API Key"
+                  hint="在服务商控制台创建"
+                  persistent-hint
+                  type="password"
+                  density="comfortable"
+                  variant="outlined"
+                  autocomplete="off"
+                />
+              </v-col>
+            </v-row>
+            <div v-if="!customMode && selectedModelPreset" class="text-caption text-medium-emphasis">
+              接口地址：{{ model.api_base }}
+            </div>
+
+            <template v-else>
+              <v-row dense class="mt-2">
+                <v-col cols="12" md="4">
+                  <v-select
+                    v-model="model.provider"
+                    :items="customProviderItems"
+                    label="模型服务"
+                    density="comfortable"
+                    variant="outlined"
+                  />
+                </v-col>
+                <v-col cols="12" md="8">
+                  <v-text-field
+                    v-model="model.api_base"
+                    label="接口地址（一般不用改）"
+                    density="comfortable"
+                    variant="outlined"
+                  />
+                </v-col>
+              </v-row>
+              <v-row dense>
+                <v-col cols="12" md="6">
+                  <v-text-field
+                    v-model="model.model"
+                    label="模型名称"
+                    placeholder="如 deepseek-chat"
+                    density="comfortable"
+                    variant="outlined"
+                  />
+                </v-col>
+                <v-col cols="12" md="6">
+                  <v-text-field
+                    v-model="model.api_key"
+                    label="API Key"
+                    type="password"
+                    density="comfortable"
+                    variant="outlined"
+                    autocomplete="off"
+                  />
+                </v-col>
+              </v-row>
+            </template>
+
+            <div v-if="modelResult" class="created-box">
+              <div class="text-caption">已接入：{{ modelResult.preset_name }}</div>
+              <v-btn
+                size="small"
+                variant="tonal"
+                class="mt-2"
+                :loading="modelTesting"
+                prepend-icon="mdi-connection"
+                @click="testModel"
+              >
+                测试连通
+              </v-btn>
+              <div v-if="modelTestMessage" class="text-caption mt-1">{{ modelTestMessage }}</div>
+            </div>
+          </template>
         </v-card-text>
         <v-card-actions>
           <v-btn variant="text" @click="step = 1">上一步</v-btn>
           <v-spacer />
           <v-btn color="primary" variant="tonal" :loading="busy === 'model'" @click="saveModel">
-            保存并加入模型池
+            保存并使用
           </v-btn>
           <v-btn color="primary" @click="step = 3">下一步</v-btn>
         </v-card-actions>
