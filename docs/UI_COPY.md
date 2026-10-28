@@ -97,8 +97,15 @@ Vuetify 的 `hint` 是两行小字。超过 40 字实际没人读，等于没写
 ## 7. 闸门
 
 ```bash
-pytest tests/architecture/test_ui_copy.py -q
+pytest tests/architecture/test_ui_copy.py -q          # 后端 schema 的 description
+pytest tests/architecture/test_dashboard_copy.py -q   # 前端界面文案
 ```
 
-五条规则：长度、黑话、裸变量名、口语/指路、`0` 写法。
-新增字段时如果文案不合规，测试会直接指出是哪一条。
+`test_ui_copy.py` 守后端 `description`：长度、黑话、裸变量名、口语/指路、`0` 写法。
+
+`test_dashboard_copy.py` 守前端：扫描 `app/webui/dashboard/src/**/*.vue` 的**模板文本**、
+`label` / `title` / `placeholder` / `hint` / `alt` 字面量，以及插值与绑定表达式里的中文字面量；
+另校验 `sections.json` 的 `title` / `subtitle`。`<script>` / `<style>` 块不扫（代码与注释不算文案）。
+规则：黑话、裸 snake_case、旧页面名、长度（属性 ≤ 40 汉字、模板单句 ≤ 60 汉字）。
+
+新增字段或页面时如果文案不合规，测试会直接指出 `文件:行号 + 命中词 + 原文片段`。
