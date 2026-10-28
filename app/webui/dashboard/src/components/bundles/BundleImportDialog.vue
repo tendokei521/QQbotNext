@@ -3,7 +3,7 @@
  * 导入预设：选文件 → 预检报告 → 一键「导入并应用」或「仅导入」。
  *
  * 预检是"信任界面"：把「包含什么 / 缺什么 / 需要你填什么 / 会安装什么」讲清楚再装。
- * 选中的账号会应用配置并安装随包模块；未选账号时只登记工件。
+ * 选中的账号会应用配置并安装随包插件；未选账号时只把预设存到列表。
  */
 import { computed, reactive, ref } from 'vue'
 import { displayName, useBotsStore } from '@/stores/bots'
@@ -151,7 +151,7 @@ async function confirmApply() {
   } catch (err: any) {
     const data = err?.response?.data
     if (data?.imported && data?.bundle) {
-      // 工件已登记、应用失败：切到结果页说明，用户可补密钥后到列表重试
+      // 预设已存到列表、应用失败：切到结果页说明，用户可补密钥后到列表重试
       result.value = { bundle: data.bundle }
       applied.value = null
       importedOnly.value = true
@@ -195,7 +195,7 @@ function formatSize(bytes: number): string {
     <v-card>
       <v-card-title class="d-flex align-center">
         <v-icon icon="mdi-package-variant" class="mr-2" color="primary" />
-        {{ screen === 'pick' ? '导入预设' : screen === 'preview' ? '预检报告' : '导入完成' }}
+        {{ screen === 'pick' ? '导入预设' : screen === 'preview' ? '包内容检查' : '导入完成' }}
         <v-spacer />
         <v-btn icon="mdi-close" variant="text" size="small" @click="close" />
       </v-card-title>
@@ -229,7 +229,6 @@ function formatSize(bytes: number): string {
           <div class="d-flex align-center flex-wrap gap-2 mb-2">
             <span class="text-h6">{{ report.bundle.name }}</span>
             <v-chip size="x-small" variant="tonal">v{{ report.bundle.version }}</v-chip>
-            <v-chip size="x-small" variant="text">{{ report.bundle.id }}</v-chip>
             <v-chip size="x-small" variant="tonal">{{ formatSize(report.summary.size) }}</v-chip>
           </div>
           <div class="text-caption mb-3" style="opacity: 0.7">{{ report.bundle.description }}</div>
@@ -242,7 +241,7 @@ function formatSize(bytes: number): string {
               variant="tonal"
               color="primary"
             >
-              随包模块 {{ report.summary.modules_bundled }}
+              随包插件 {{ report.summary.modules_bundled }}
             </v-chip>
             <v-chip
               v-if="report.summary.modules_to_install"
@@ -253,7 +252,7 @@ function formatSize(bytes: number): string {
               将安装 {{ report.summary.modules_to_install }}
             </v-chip>
             <v-chip size="small" variant="tonal">预设 {{ report.summary.presets }}</v-chip>
-            <v-chip size="small" variant="tonal">配置 {{ report.summary.agent_keys }}</v-chip>
+            <v-chip size="small" variant="tonal">设置项 {{ report.summary.agent_keys }}</v-chip>
             <v-chip size="small" variant="tonal" :color="report.summary.secrets_required ? 'warning' : undefined">
               需填密钥 {{ report.summary.secrets_required }}
             </v-chip>
@@ -274,7 +273,7 @@ function formatSize(bytes: number): string {
 
           <v-card v-if="report.modules?.length" variant="tonal" class="mt-2">
             <v-card-text>
-              <div class="text-caption font-weight-medium mb-1">模块清单</div>
+              <div class="text-caption font-weight-medium mb-1">插件清单</div>
               <div
                 v-for="mod in report.modules"
                 :key="mod.name"
@@ -293,7 +292,7 @@ function formatSize(bytes: number): string {
                 <v-chip v-else-if="mod.installed_version" size="x-small" variant="text">
                   已装 v{{ mod.installed_version }}
                 </v-chip>
-                <v-chip v-else size="x-small" variant="text">不随包</v-chip>
+                <v-chip v-else size="x-small" variant="text">未附带</v-chip>
                 <v-chip size="x-small" :color="moduleActionColor(mod.action)" variant="tonal">
                   {{ moduleActionText(mod.action) }}
                 </v-chip>
@@ -314,7 +313,7 @@ function formatSize(bytes: number): string {
                   v-if="mod.missing_requirements?.length"
                   class="text-caption text-error"
                 >
-                  {{ mod.name }} 缺少：{{ mod.missing_requirements.join('、') }}（框架不会自动 pip 安装）
+                  {{ mod.name }} 缺少：{{ mod.missing_requirements.join('、') }}（需要先自行装好这些组件，插件才能用）
                 </div>
               </div>
             </v-card-text>
@@ -325,7 +324,7 @@ function formatSize(bytes: number): string {
               <div class="font-weight-medium mb-1">此预设包含可执行的模块代码</div>
               <div>
                 应用时会从包内安装并加载
-                {{ report.summary.modules_bundled }} 个第三方模块，请确认来源可信后再继续。
+                {{ report.summary.modules_bundled }} 个第三方插件，请确认来源可信后再继续。
               </div>
               <v-checkbox
                 v-model="acceptCode"
@@ -339,7 +338,7 @@ function formatSize(bytes: number): string {
 
           <v-card v-if="targetAccountId && reusePresetOptions.length" variant="tonal" class="mt-2">
             <v-card-text>
-              <div class="text-caption font-weight-medium mb-1">复用本机 Provider 密钥（可选）</div>
+              <div class="text-caption font-weight-medium mb-1">复用本机已保存的模型服务密钥（可选）</div>
               <v-select
                 v-model="reusePresetId"
                 :items="reusePresetOptions"
@@ -351,7 +350,7 @@ function formatSize(bytes: number): string {
                 hide-details
               />
               <div class="text-caption mt-1" style="opacity: 0.7">
-                选一个已连通的 Provider 预设：Provider Key 不用手填，也不会写进包。
+                选一个已连通的模型服务：密钥不用手填，也不会写进包。
               </div>
             </v-card-text>
           </v-card>
@@ -386,7 +385,7 @@ function formatSize(bytes: number): string {
             class="mt-2"
           >
             <div class="text-caption">
-              未选择账号：这次只会登记工件。到顶部选一个账号后，可在列表里「应用到账号」。
+              未选择账号：这次只把预设存到列表里，不会写入账号配置。到顶部选一个账号后，可在列表里「应用到账号」。
             </div>
           </v-alert>
         </template>
@@ -397,10 +396,10 @@ function formatSize(bytes: number): string {
             已导入「{{ result.bundle.name }}」v{{ result.bundle.version }} 并应用到「{{ accountLabel }}」：
             新建 {{ applied.plan.creates.length }} 项、更新 {{ applied.plan.updates.length }} 处。
             <template v-if="applied.modules_installed?.length">
-              <div>已安装随包模块：{{ applied.modules_installed.join('、') }}</div>
+              <div>已安装随包插件：{{ applied.modules_installed.join('、') }}</div>
             </template>
             <template v-if="applied.modules_upgraded?.length">
-              <div>已升级随包模块：{{ applied.modules_upgraded.join('、') }}</div>
+              <div>已升级随包插件：{{ applied.modules_upgraded.join('、') }}</div>
             </template>
             <template v-if="health">
               <div class="mt-1">
@@ -410,13 +409,13 @@ function formatSize(bytes: number): string {
                 </v-chip>
               </div>
               <div v-for="mod in health.modules" :key="mod.name" class="text-caption">
-                模块 {{ mod.name }}：{{ mod.loaded && !mod.error ? '已加载' : (mod.error || '未加载') }}
+                插件 {{ mod.name }}：{{ mod.loaded && !mod.error ? '已加载' : '未加载，可在「功能模块」页点重试' }}
               </div>
             </template>
           </v-alert>
           <v-alert v-else type="warning" variant="tonal" density="compact">
-            已导入「{{ result.bundle.name }}」v{{ result.bundle.version }}，但尚未应用。
-            到列表里点「应用到账号」即可写入配置、创建人格/模型并安装随包模块（可回滚）。
+            已导入「{{ result.bundle.name }}」v{{ result.bundle.version }}，但还没应用。
+            到预设列表里点「应用到账号」即可写入配置、创建人格和模型并安装随包插件（可撤销）。
           </v-alert>
         </template>
       </v-card-text>
