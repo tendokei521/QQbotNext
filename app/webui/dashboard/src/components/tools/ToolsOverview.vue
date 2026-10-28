@@ -121,7 +121,7 @@ onMounted(load)
         </v-btn>
       </v-card-title>
       <v-card-text class="text-body-2" style="opacity: 0.8">
-        状态由后端统一判定（模块是否启用、模块内开关、工具清单开关、依赖是否就绪），此处显示的就是实际行为。
+        这里显示的是实际生效状态：插件已启用、插件内开关已打开、工具没有被关闭、依赖已就绪。
       </v-card-text>
     </v-card>
 

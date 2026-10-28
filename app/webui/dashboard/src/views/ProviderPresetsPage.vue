@@ -1055,7 +1055,7 @@ onMounted(() => {
                 hide-details
                 clearable
                 placeholder="留空 = 不限制"
-                hint="填了才能在发送前发现「装不下」，不用等上游报错"
+                hint="填了才能提前发现内容超出模型上限，不用等服务商报错"
                 persistent-hint
               />
             </v-col>

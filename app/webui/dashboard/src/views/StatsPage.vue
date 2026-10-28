@@ -13,6 +13,7 @@
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { http } from '@/api/http'
+import { displayName, useBotsStore } from '@/stores/bots'
 import { connectSocket, isSocketConnected, onSocketMessage } from '@/api/socket'
 
 type Kind = 'llm' | 'msg_in' | 'msg_out'
@@ -135,7 +136,13 @@ const breakdown = ref('none')
 const pivot = ref<Pivot>('metric')
 const rangeDays = ref(30)
 const api = ref<string | null>(null)
+const botsStore = useBotsStore()
 const botId = ref<string | null>(null)
+// 账号筛选：null = 全部账号（与顶栏当前账号解耦，页头有明确下拉）
+const accountOptions = computed(() => [
+  { title: '全部账号', value: null },
+  ...botsStore.bots.map((b) => ({ title: displayName(b), value: b.id })),
+])
 const source = ref<string | null>(null)
 const model = ref<string | null>(null)
 const sessionId = ref<string | null>(null)
@@ -453,6 +460,8 @@ function onVisibilityChange() {
 }
 
 onMounted(() => {
+  // 账号下拉的数据源；拉不到就只显示「全部账号」，不影响统计本身
+  if (!botsStore.bots.length) botsStore.fetchBots().catch(() => {})
   loadFacets()
   load()
   startLive()
@@ -476,7 +485,7 @@ onUnmounted(() => {
           <span class="hero-unit">tokens</span>
         </div>
       </div>
-      <div class="hero-card tip" data-tip="实际上游请求次数（含重试与回退，不含未触发的消息）">
+      <div class="hero-card tip" data-tip="实际发给模型服务的请求数（含重试与回退，不含未触发的消息）">
         <span class="hero-label">API 请求次数</span>
         <div class="hero-value">
           {{ summary ? summary.requests : '—' }}
@@ -491,6 +500,9 @@ onUnmounted(() => {
       <v-select v-model="kind" :items="KIND_OPTIONS" item-title="title" item-value="value"
                 density="compact" hide-details variant="solo" flat
                 class="pill" style="max-width: 124px" />
+      <v-select v-model="botId" :items="accountOptions" item-title="title" item-value="value"
+                density="compact" hide-details variant="solo" flat
+                class="pill" style="max-width: 150px" />
       <v-select v-model="rangeDays" :items="RANGES" item-title="title" item-value="value"
                 density="compact" hide-details variant="solo" flat
                 class="pill" style="max-width: 104px" />
@@ -528,7 +540,7 @@ onUnmounted(() => {
           <span class="kpi-label">输出 Tokens</span>
           <div class="kpi-value">{{ fmt(summary.output, 'tokens') }}</div>
         </div>
-        <div class="kpi tip" data-tip="命中 /（命中 + 未命中）。上游不回报缓存时显示 —">
+        <div class="kpi tip" data-tip="命中 /（命中 + 未命中）。服务商未返回缓存数据时显示 —">
           <span class="kpi-label">缓存命中率</span>
           <div class="kpi-value">{{ pct(summary.cache_rate) }}</div>
         </div>

@@ -171,6 +171,9 @@ def test_zero_semantics_notation_is_consistent():
         if "0=" in desc:
             bad.append(f"{key}: 写成 0= ，应为 0 = ")
             continue
+        if "0 表示" in desc:
+            bad.append(f"{key}: 写成「0 表示」，应为「0 = 」")
+            continue
         # 出现 "0 = " 但右边没东西
         for m in re.finditer(r"0 =(\s*)([^\s，。；]*)", desc):
             if not m.group(2):

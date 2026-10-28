@@ -77,7 +77,7 @@ UI_PAGES: tuple[UIPage, ...] = (
         id="permission",
         label="权限管理",
         order=20,
-        subtitle="谁能触发机器人：主人、管理员与权限规则",
+        subtitle="谁能触发机器人：拥有者、管理员与权限规则",
         groups=(
             UIGroup("permission_role", "响应权限", ("permission",)),
             UIGroup(

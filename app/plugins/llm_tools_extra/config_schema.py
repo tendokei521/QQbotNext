@@ -43,8 +43,8 @@ SCHEMA = {
     },
     "mcp_servers": {
         "type": "textarea",
-        "label": "MCP servers",
-        "description": "stdio server 配置（JSON 数组，每项含 name/command/args）",
+        "label": "MCP 服务列表",
+        "description": "每项含名称、启动命令与参数；留空表示不用 MCP，格式可参考文档示例",
         "default": "[]",
     },
     "tool_result_directive_enable": {

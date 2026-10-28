@@ -125,7 +125,7 @@ SCHEMA = {
     "video_cache_ttl_minutes": {
         "type": "integer",
         "label": "缓存保留时长 (分钟)",
-        "description": "超过时长自动清理；0 表示不按时间淘汰",
+        "description": "超过时长自动清理；0 = 不按时间淘汰",
         "default": 720,
         "min": 0,
         "max": 10080,
@@ -134,7 +134,7 @@ SCHEMA = {
     "video_cache_max_mb": {
         "type": "integer",
         "label": "缓存容量上限 (MB)",
-        "description": "超出后删除最旧文件；0 表示不限制",
+        "description": "超出后删除最旧文件；0 = 不限制",
         "default": 1024,
         "min": 0,
         "max": 10240,

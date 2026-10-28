@@ -20,7 +20,7 @@ SCHEMA = {
     "retention_hours": {
         "type": "number",
         "label": "保留时长（小时）",
-        "description": "超过该时长的记录不再保留。0 表示不限时长（仅按条数淘汰）。",
+        "description": "超过该时长的记录不再保留。0 = 不限时长（仅按条数淘汰）。",
         "default": 24,
         "min": 0,
         "step": 1,

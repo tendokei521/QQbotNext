@@ -147,8 +147,8 @@ SCHEMA = {
         "default": "你是一个友好的助手。", "placeholder": "你是一个友好的助手...", "group": "group_session",
     },
     "prompt_preset": {
-        "type": "select", "label": "提示词方案",
-        "description": "替换框架生成的系统提示词，人格设定不受影响；留空沿用内置文案。",
+        "type": "select", "label": "系统提示词风格",
+        "description": "替换内置的系统提示词，人设不受影响；留空沿用内置文案。",
         "default": "", "group": "group_session",
         "options": {
             "": "未选择（沿用内置文案）",
@@ -286,7 +286,7 @@ SCHEMA = {
     },
     "history_mode": {
         "type": "select", "label": "历史注入方式",
-        "description": "recent = 只注入最近若干条，更早的由「历史检索」工具按需取回；full = 全部注入（旧行为）。",
+        "description": "只注入最近若干条，更早的按需检索（推荐）；全部注入（消息多时更贵）。",
         "default": "recent", "group": "session_window",
         "options": {"recent": "最近若干条 + 按需检索", "full": "全部注入"},
     },
@@ -313,7 +313,7 @@ SCHEMA = {
     },
     "context_compress_backend": {
         "type": "select", "label": "压缩方式",
-        "description": "summary = 调模型写摘要；prune = 只裁剪旧工具结果（零成本）；both = 先裁再摘要。",
+        "description": "先调模型写摘要（推荐）；只裁剪旧工具结果（零成本）；先裁再摘要。",
         "default": "summary", "group": "group_compress",
         "options": {"summary": "模型摘要", "prune": "只裁剪工具结果", "both": "先裁再摘要"},
     },
@@ -321,7 +321,7 @@ SCHEMA = {
     # 不等就落盘 diff。默认关：这是一条排查开关，每次请求都做投影比对有开销。
     "prompt_dump_verify": {
         "type": "boolean", "label": "历史一致性自检",
-        "description": "每次请求前核对会话日志与内存历史是否一致，不一致时落盘 diff。默认关闭。",
+        "description": "每次请求前核对日志与内存历史是否一致，不一致时把差异写进日志文件。默认关闭。",
         "default": False, "group": "group_session",
     },
     "context_token_budget": {
@@ -330,7 +330,7 @@ SCHEMA = {
         "default": 0, "min": 0, "max": 200000, "group": "group_compress",
     },
     "context_token_chars_per_token": {
-        "type": "number", "label": "token 估算：每 token 字符数",
+        "type": "number", "label": "字符与 token 的换算（估算用）",
         "description": "粗估用（中文约 1-2 字符/token，英文约 4）；只影响防爆裁剪，不影响真实计费",
         "default": 2.0, "min": 0.5, "max": 8, "group": "group_compress",
     },
@@ -345,7 +345,7 @@ SCHEMA = {
     },
     "group_log_window_minutes": {
         "type": "number", "label": "群聊记录窗口（分钟）",
-        "description": "每次请求最多带回最近多少分钟的群聊记录（本地保留窗口由模块配置决定，此处只控制组装）",
+        "description": "每次请求最多带回最近多少分钟的群聊记录（只影响带多少，不影响本地保留多久）",
         "default": 60, "min": 1, "max": 1440, "group": "group_session",
     },
     "group_log_window_limit": {

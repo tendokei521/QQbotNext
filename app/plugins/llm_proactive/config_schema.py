@@ -88,7 +88,7 @@ SCHEMA = {
     "proactive_unresolved_prompt_enable": {
         "type": "boolean",
         "label": "未展开内容提示",
-        "description": "上下文里有未展开内容时提示可调用 expand_*",
+        "description": "上下文里有未展开内容时，提示模型按需展开",
         "default": True,
     },
     "proactive_env_intent_nudge": {

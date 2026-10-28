@@ -40,7 +40,7 @@
       "id": "permission",
       "path": "/agent/permission",
       "title": "权限管理",
-      "subtitle": "谁能触发机器人：主人、管理员与权限规则",
+      "subtitle": "谁能触发机器人：拥有者、管理员与权限规则",
       "icon": "mdi-shield-account-outline",
       "color": "success",
       "order": 20,

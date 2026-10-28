@@ -10,7 +10,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AGENT_INDEX_PATH, agentSectionByPath } from '@/agent/sections'
 import { useAgentConfigStore } from '@/stores/agentConfig'
-import { useBotsStore } from '@/stores/bots'
+import { displayName, useBotsStore } from '@/stores/bots'
 
 const route = useRoute()
 const router = useRouter()
@@ -24,6 +24,11 @@ const botId = computed(() => bots.currentAccountId)
 /** 是否已选定账号：有账号就够，**不要求连上**（配置按账号存，与连接无关） */
 const hasAccount = computed(() => botId.value !== null)
 const isConnected = computed(() => bots.currentBot?.status === 'connected')
+// 账号作用域提示：这一整片配置是按「当前账号」保存的，页面内要能看见
+const accountLabel = computed(() => {
+  const bot = bots.bots.find((item) => item.id === bots.currentAccountId)
+  return bot ? displayName(bot) : ''
+})
 const booting = ref(false)
 
 async function ensureLoaded() {
@@ -61,7 +66,9 @@ watch(
           <v-icon v-if="section" :icon="section.icon" size="28" class="mr-1" :color="section.color" />
           {{ section ? section.title : panelTitle }}
         </h1>
-        <v-chip v-if="!section" size="small" variant="tonal" color="primary">LLM · 框架级</v-chip>
+        <v-chip v-if="accountLabel" size="small" variant="tonal" prepend-icon="mdi-account">
+          当前账号：{{ accountLabel }}
+        </v-chip>
         <v-chip v-if="agent.saveStatus === 'saving'" size="small" color="primary" variant="flat">
           <v-progress-circular size="12" indeterminate class="mr-1" /> 保存中…
         </v-chip>
@@ -138,7 +145,7 @@ watch(
       <div class="d-flex align-center flex-wrap gap-2">
         <span class="text-caption">
           未添加账号：<strong>人格预设可以照常编辑</strong>（存在全局预设库里，与账号无关）；
-          其余按账号保存的 Agent 配置改完<strong>不会落库</strong>——先在「账号管理」添加账号即可保存。
+          其余按账号保存的配置改完<strong>无法保存</strong>——先在「账号管理」添加账号。
         </span>
         <v-btn size="small" variant="text" prepend-icon="mdi-plus" @click="router.push('/bots')">去添加账号</v-btn>
         <v-btn size="small" variant="text" prepend-icon="mdi-account-heart-outline" @click="router.push('/personas')">
