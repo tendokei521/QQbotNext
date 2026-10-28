@@ -214,6 +214,9 @@ class BotConnection(IBot):
         self.conn_mode = conn_mode
         self.status = "disconnected"
         self.login_info: dict = {}
+        # 登录信息是否已成功拉取（网关维护）：失败时保持 False 并退避重试，
+        # 避免一次 get_login_info 失败把连接永久钉在「已连接但未上线」的半上线态。
+        self.login_retrieved = False
         self.reconnect_attempts = 0
         self.last_error: str | None = None
         self.all_group_list: list = []

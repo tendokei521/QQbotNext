@@ -66,6 +66,9 @@ AccountSaver = Callable[[str, Any, str], Awaitable[bool]]
 EVENT_QUEUE_MAXSIZE = 1024
 #: 队列丢弃告警的汇总间隔：每丢这么多条打一次 warning，避免洪峰时刷屏。
 EVENT_DROP_WARN_EVERY = 100
+#: 登录信息拉取失败后的退避重试间隔（秒）。OneBot 实现刚起/短暂报错是常态，
+#: 只试一次就放弃会让连接停在「WebSocket 已连上但 runtime.online=False」的半上线态。
+LOGIN_RETRY_DELAYS = (2.0, 4.0, 8.0)
 
 
 class OneBotGateway(GatewayLifecycleMixin):
@@ -374,6 +377,7 @@ class OneBotGateway(GatewayLifecycleMixin):
         """断开后清空登录态，并让在途 API 请求立即失败（避免调用方阻塞至超时）。"""
         conn.bot_id = 0
         conn.login_info = {}
+        conn.login_retrieved = False
         conn.all_group_list = []
         conn.all_group_list_info = []
         fail_pending = getattr(conn, "fail_pending", None)
@@ -447,6 +451,58 @@ class OneBotGateway(GatewayLifecycleMixin):
             self.log.error(f"获取群聊列表失败: {e}")
         return False
 
+    def _schedule_login(
+        self, conn: BotConnection, key: str, bot_logger, login_tasks: list[asyncio.Task]
+    ) -> None:
+        """按需启动登录信息拉取（每连接同一时刻只允许一个拉取任务）。
+
+        已经取到（``login_retrieved``）→ 不再拉；上一轮重试任务还在跑 → 不叠加。
+        上一轮因 OneBot 实现暂时不可用而全部失败后，下一条正常消息会重新拉起一轮，
+        直到取到为止（配合 ``_login_with_retry`` 的退避重试）。
+        """
+        if getattr(conn, "login_retrieved", False):
+            return
+        if login_tasks and not login_tasks[-1].done():
+            return
+        login_tasks.clear()  # 丢弃已完成任务的引用，避免列表随消息增长
+        login_tasks.append(asyncio.create_task(
+            self._login_with_retry(conn, bot_logger), name=f"login:{key}"
+        ))
+
+    async def _login_with_retry(self, conn: BotConnection, bot_logger) -> bool:
+        """拉取登录信息并在失败时退避重试；只有成功后才把连接标为「已取过」。
+
+        历史缺陷：``_get_login_info`` 失败一次就直接放弃，且 ``start_type`` 在成败
+        之前就已置位 → 之后永不重试。表现为 WebUI 显示已连接，但 ``runtime.online``
+        恒为 False：定时任务、主动消息、模块 ``on_online`` 全部不工作。
+        """
+        delays = LOGIN_RETRY_DELAYS
+        for attempt in range(1 + len(delays)):
+            if getattr(conn, "login_retrieved", False):
+                return True
+            try:
+                if await self._get_login_info(conn):
+                    conn.login_retrieved = True
+                    # 群列表只用于日志展示与群名查找，失败不影响上线；登录成功后补取一次
+                    if not conn.all_group_list:
+                        await self._get_login_groups(conn)
+                    return True
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # _get_login_info 内部已兜异常，这里防御性留痕
+                bot_logger.warning(f"[Gateway] 登录信息拉取异常（第 {attempt + 1} 次）: {e}")
+            if attempt >= len(delays):
+                break
+            bot_logger.warning(
+                f"账号「{bot_label(conn)}」未取到登录信息，{delays[attempt]:g}s 后重试"
+            )
+            await asyncio.sleep(delays[attempt])
+        bot_logger.error(
+            f"账号「{bot_label(conn)}」多次重试仍未取到登录信息：连接保持，"
+            "下一条事件到达时会再试（定时任务/主动消息在取到前不启动）"
+        )
+        return False
+
     def _lookup_group_name(self, conn: BotConnection, group_id: int) -> str:
         """从登录时缓存的群列表信息里查群名。"""
         for g in conn.all_group_list_info or []:
@@ -465,15 +521,13 @@ class OneBotGateway(GatewayLifecycleMixin):
         me = asyncio.current_task()
         bot_logger = self.log.add_info(bot_label(conn))
         conn.bot_id = 0
-        start_type = False
+        # 新连接 = 登录信息重新开始取；只有真正取到后才置位「已取过」，
+        # 避免一次失败就把连接永久钉在半上线状态（见 _login_with_retry）。
+        conn.login_retrieved = False
         login_tasks: list[asyncio.Task] = []
         if login_immediately:
             # 反向连接：OneBot 实现可能十几秒才推第一个事件，握手成功即主动拉一次
-            start_type = True
-            login_tasks = [
-                asyncio.create_task(self._get_login_info(conn)),
-                asyncio.create_task(self._get_login_groups(conn)),
-            ]
+            self._schedule_login(conn, key, bot_logger, login_tasks)
             bot_logger.info("反向连接已接入，正在获取登录信息")
         # 事件处理 worker：接收循环只负责「解析 + API 响应匹配 + 入队」，
         # 耗时处理（模块调用 / 转发拉取 / LLM 触发）在 worker 串行执行。
@@ -505,13 +559,9 @@ class OneBotGateway(GatewayLifecycleMixin):
                         continue
 
                     if msg_dict.get("status", "ok") != "failed":
-                        if not start_type:
-                            start_type = True
-                            login_tasks = [
-                                asyncio.create_task(self._get_login_info(conn)),
-                                asyncio.create_task(self._get_login_groups(conn)),
-                            ]
-                            bot_logger.info("正在尝试获取登录信息")
+                        # 第一条正常消息证明通道可用：按需启动（或在上轮重试耗尽后补启）
+                        # 登录信息拉取；成功后才置位 login_retrieved，不会重复拉取。
+                        self._schedule_login(conn, key, bot_logger, login_tasks)
                     elif msg_dict.get("echo"):
                         # 带 echo 的 failed 是 API 失败响应（handle_api_response 已记录未匹配），
                         # 不视为断连、也不当作事件。
@@ -521,7 +571,6 @@ class OneBotGateway(GatewayLifecycleMixin):
                         # 不应继续解码成普通事件处理。
                         bot_logger.warning(f"WebSocket失败响应: {msg_dict}")
                         reason = msg_dict.get("message") or msg_dict.get("wording") or "连接失败"
-                        start_type = False
                         conn.bot_id = 0
                         for t in login_tasks:
                             t.cancel()
