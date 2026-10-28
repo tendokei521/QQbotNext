@@ -11,6 +11,7 @@ AgentRuntime 暴露与旧模块一致的接口（.config / .ctx / .bot_id / .sch
 from __future__ import annotations
 
 import asyncio
+import inspect
 from typing import Any
 
 from app.agent import logger
@@ -375,11 +376,13 @@ class AgentRuntime:
             # 归档整理是后台增强，失败不应影响会话主流程，但需留痕以便排查
             logger.add_info(account_label(self.bot_id)).debug(f"[Agent] 归档整理调度失败（已忽略）: {e}")
 
-    def stop(self, close_session: bool = True) -> None:
+    async def stop(self, close_session: bool = True) -> None:
         """停止定时任务与主动消息计时器（任务数据保留，重启恢复）。
 
         各组件按 best-effort 逐个关闭：单个组件关闭失败不应阻断其余组件的关闭，
         因此逐个 try/except 并记录 debug 日志（而非静默 pass，便于定位关闭卡滞原因）。
+        同步组件直接调用，异步组件（如 ``llm_pipeline.shutdown`` 会 await 回合任务）
+        用 ``inspect.isawaitable`` 判断后 await —— 关停必须等回合任务跑完 finally。
 
         ``close_session=False`` 用于「回收单个运行时」的软停止（如连接换号触发的
         运行时淘汰）：此时不能关会话管理器——``SessionManager`` 是按 bot_id 的进程级
@@ -399,7 +402,9 @@ class AgentRuntime:
             if not callable(stop):
                 continue
             try:
-                stop()
+                result = stop()
+                if inspect.isawaitable(result):
+                    await result
             except Exception as e:
                 logger.add_info(account_label(self.bot_id)).debug(f"[Agent] 关闭 {name} 失败（已忽略）: {e}")
         logger.add_info(account_label(self.bot_id)).info("[Agent] 运行时已停止")
@@ -434,7 +439,7 @@ class AgentManager:
             runtime.set_bot(bot)
         return runtime
 
-    def bind_account(self, bot_id: Any, bot=None) -> AgentRuntime | None:
+    async def bind_account(self, bot_id: Any, bot=None) -> AgentRuntime | None:
         """登录/换号入口：把账号的运行时与「当前真正持有该账号的连接」绑好。
 
         与 ``ensure_runtime`` 的区别是它会做两件自愈动作，因为连接是 index 级对象、
@@ -444,6 +449,8 @@ class AgentManager:
            重绑到当前连接——否则回复/主动消息会继续走旧连接（跨号发送或发到死 socket）。
         2. **回收**：把「仍然绑在当前这条连接上、但账号已不是它」的其它运行时停掉并移除。
            这种"幽灵运行时"会继续跑定时任务/主动消息，并按旧人设通过已被换号的连接发言。
+
+        异步：回收路径会 ``await runtime.stop()``（等 LLM 回合任务收尾）。
         """
         if bot_id is None:
             return None
@@ -456,10 +463,10 @@ class AgentManager:
             if other is runtime or str(key) == str(bot_id):
                 continue
             if getattr(other, "_bot", None) is bot:
-                self._evict_runtime(other, f"连接 #{getattr(bot, 'index', '?')} 已换成账号 {bot_id}")
+                await self._evict_runtime(other, f"连接 #{getattr(bot, 'index', '?')} 已换成账号 {bot_id}")
         return runtime
 
-    def _evict_runtime(self, runtime: AgentRuntime, reason: str) -> None:
+    async def _evict_runtime(self, runtime: AgentRuntime, reason: str) -> None:
         """停掉并移除一个运行时（best-effort：单个失败不影响其余清理）。"""
         bot_id = getattr(runtime, "bot_id", None)
         for key, value in list(self._runtimes.items()):
@@ -467,8 +474,8 @@ class AgentManager:
                 self._runtimes.pop(key, None)
         try:
             # 软停止：不关会话管理器（按 bot_id 的进程级单例，仍可能被其他运行时/后续
-            # 重建的运行时使用），只停本运行时自己的定时器与后台任务。
-            runtime.stop(close_session=False)
+            # 重建的运行时使用），只停本运行时自己的定时器与后台任务（含等待回合任务）。
+            await runtime.stop(close_session=False)
         except Exception as e:
             logger.add_info(account_label(bot_id)).warning(f"[Agent] 回收运行时时停止失败（已忽略）: {e}")
         logger.add_info(account_label(bot_id)).info(f"[Agent] 运行时已回收：{reason}")
@@ -476,7 +483,7 @@ class AgentManager:
     def get_runtime(self, bot_id: Any) -> AgentRuntime | None:
         return self._runtimes.get(bot_id)
 
-    def drop_runtime(self, bot_id: Any, reason: str = "") -> None:
+    async def drop_runtime(self, bot_id: Any, reason: str = "") -> None:
         """停掉并移除某个账号的运行时（账号被删除 / 换号回收）。
 
         没有这一步时，删掉的账号会留下"幽灵运行时"：会话管理器、telemetry、工具注册表
@@ -488,9 +495,9 @@ class AgentManager:
         if runtime is None:
             return
         runtime.set_online(False)
-        self._evict_runtime(runtime, reason or f"账号 {bot_id} 已移除")
+        await self._evict_runtime(runtime, reason or f"账号 {bot_id} 已移除")
 
-    def sync_accounts(self, account_ids) -> None:
+    async def sync_accounts(self, account_ids) -> None:
         """按「当前配置里真实存在的账号」对齐运行时集合。
 
         存在的补齐（**不要求连接**：账号一创建就有 id，配置就该能编辑），
@@ -501,18 +508,25 @@ class AgentManager:
             self.ensure_runtime(account_id)
         for key in list(self._runtimes.keys()):
             if str(key) not in wanted:
-                self.drop_runtime(key, f"账号 {key} 已不在配置中")
+                await self.drop_runtime(key, f"账号 {key} 已不在配置中")
 
     def runtimes(self) -> dict[Any, AgentRuntime]:
         return dict(self._runtimes)
 
-    def shutdown(self) -> None:
-        for runtime in self._runtimes.values():
-            try:
-                runtime.stop()
-            except Exception as e:
-                # 单个运行时停止失败不应阻断其余运行时的关闭（best-effort）
-                logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).debug(
-                    f"[Agent] 停止运行时失败（已忽略）: {e}"
-                )
+    async def shutdown(self) -> None:
+        """停止全部运行时并**等待**它们真正结束（含 LLM 回合任务的 finally）。
+
+        关停链路（bootstrap.shutdown_services）必须先等这里返回，再取消残留任务、
+        关统计库/主库；否则回合任务 finally 里的 DB 写入会落在 db.close() 之后。
+        """
+        runtimes = list(self._runtimes.values())
         self._runtimes.clear()
+        if not runtimes:
+            return
+        results = await asyncio.gather(*(rt.stop() for rt in runtimes), return_exceptions=True)
+        for runtime, result in zip(runtimes, results, strict=False):
+            if isinstance(result, BaseException):
+                # 单个运行时停止失败不应阻断其余运行时的关闭（best-effort）
+                logger.add_info(account_label(getattr(runtime, "bot_id", "?"))).warning(
+                    f"[Agent] 停止运行时失败（已忽略）: {result!r}"
+                )

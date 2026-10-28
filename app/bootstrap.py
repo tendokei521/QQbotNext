@@ -459,10 +459,11 @@ async def shutdown_services(
     顺序不能换：后台任务的 finally 里仍可能写 DB（统计、会话、账号快照）。
     历史实现只 ``cancel_all()`` 就立刻关库，于是这些写入抛
     "Cannot operate on a closed database"——退出时日志报错、最后一批数据丢失。
-    这里必须先 ``await cancel_all_await()`` 等任务真正结束，再关统计、最后关库。
+    这里必须先 ``await agent_manager.shutdown()``（等 LLM 回合任务收尾）、
+    再 ``await cancel_all_await()`` 等其余任务结束，最后关统计与库。
     """
     await bot_service.shutdown()
-    agent_manager.shutdown()
+    await agent_manager.shutdown()
     cancelled = await task_manager.cancel_all_await(timeout=cancel_timeout)
     if cancelled:
         logger.info(f"已取消 {cancelled} 个后台任务")

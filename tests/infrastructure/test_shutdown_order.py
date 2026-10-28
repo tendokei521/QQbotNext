@@ -43,10 +43,12 @@ class _FakeGateway:
 
 
 class _FakeAgentManager:
+    """AgentManager.shutdown 已改 async：它会 await 全部 runtime（含 LLM 回合任务）。"""
+
     def __init__(self, events: list[str]) -> None:
         self.events = events
 
-    def shutdown(self) -> None:
+    async def shutdown(self) -> None:
         self.events.append("agent:shutdown")
 
 

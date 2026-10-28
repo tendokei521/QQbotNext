@@ -9,8 +9,6 @@
 
 from __future__ import annotations
 
-from app.core.logger import account_label
-
 import asyncio
 import uuid
 from typing import Any
@@ -22,6 +20,7 @@ from app.agent.loop.context import LlmContext, LlmJob
 from app.agent.loop.locks import SessionLockManager
 from app.agent.loop.pool import LlmPool, merge_debounced_texts
 from app.application.dialogue_policy_service import DialoguePolicyService
+from app.core.logger import account_label
 from app.core.skip_log import log_skip
 from app.domain.dialogue_policy import in_quiet_hours
 from app.domain.message import Message
@@ -37,6 +36,8 @@ class LlmPipeline:
         self.pool = LlmPool()
         self.session_locks = SessionLockManager()
         self._tasks: set[asyncio.Task] = set()
+        #: 关停时等待回合任务结束的上限（秒）：任务若无视取消，超时只告警、不无限等
+        self.shutdown_timeout = 5.0
         self._session_generation: dict[str, int] = {}
         #: 会话 → 当前活跃一轮的取消句柄（`turn_runner.AbortScope`）
         self._active_scopes: dict = {}
@@ -670,7 +671,23 @@ class LlmPipeline:
         # 模块卸载时 LlmHookRegistry.unregister_module 已保证新任务不再触发。
         return
 
-    def shutdown(self) -> None:
-        for task in list(self._tasks):
-            if not task.done():
-                task.cancel()
+    async def shutdown(self) -> None:
+        """取消并**等待**所有回合任务结束（带超时，超时告警不无限等）。
+
+        回合任务由本类用裸 `asyncio.create_task` 创建（不经 TaskManager），
+        所以关停必须在这里 await：它们的 finally 仍可能写会话历史 / 统计，
+        先关 DB 会抛 "Cannot operate on a closed database"（退出时的历史崩溃点）。
+        """
+        pending = [task for task in self._tasks if not task.done()]
+        for task in pending:
+            task.cancel()
+        if not pending:
+            return
+        _, still_pending = await asyncio.wait(pending, timeout=self.shutdown_timeout)
+        if still_pending:
+            from app.core.logger import logger
+
+            logger.add_info(account_label(getattr(self.runtime, "bot_id", "?"))).warning(
+                f"[LLM Pipeline] 关停等待超时（{self.shutdown_timeout}s），"
+                f"仍有 {len(still_pending)} 个回合任务未结束"
+            )

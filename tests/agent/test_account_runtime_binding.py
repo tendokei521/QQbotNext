@@ -197,46 +197,46 @@ async def test_agent_node_logs_when_account_has_no_runtime(caplog):
 # ------------------------------------------------- 3. 换号时的运行时重绑与回收
 
 
-def test_bind_account_rebinds_runtime_to_the_live_connection(monkeypatch, tmp_path):
+async def test_bind_account_rebinds_runtime_to_the_live_connection(monkeypatch, tmp_path):
     """同一账号换了连接（换号/重连）：运行时必须重绑到当前连接。"""
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
     mgr = AgentManager(_CfgSvc(), _TaskMgr())
     old_conn = _FakeBot(account_id=ACC, bot_id=QQ_NEW)
     new_conn = _FakeBot(account_id=ACC, bot_id=QQ_NEW)
     try:
-        runtime = mgr.bind_account(ACC, bot=old_conn)
+        runtime = await mgr.bind_account(ACC, bot=old_conn)
         assert runtime.bot is old_conn
 
-        same = mgr.bind_account(ACC, bot=new_conn)
+        same = await mgr.bind_account(ACC, bot=new_conn)
         assert same is runtime, "同一账号不应重建运行时"
         assert runtime.bot is new_conn, "应重绑到当前持有该账号的连接"
         assert runtime.ctx.bot is new_conn
     finally:
-        mgr.shutdown()
+        await mgr.shutdown()
 
 
-def test_bind_account_evicts_runtime_whose_connection_was_taken_over(monkeypatch, tmp_path):
+async def test_bind_account_evicts_runtime_whose_connection_was_taken_over(monkeypatch, tmp_path):
     """连接被换号：旧账号的运行时必须被回收，否则会按旧人设走新连接发言。"""
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
     mgr = AgentManager(_CfgSvc(), _TaskMgr())
     conn = _FakeBot(account_id="accA", bot_id=QQ_OLD)
     try:
-        old_runtime = mgr.bind_account("accA", bot=conn)
+        old_runtime = await mgr.bind_account("accA", bot=conn)
 
         # 同一条连接重登成了「另一个账号」（连接被别的账号接管）
         conn.account_id = "accB"
         conn.bot_id = QQ_NEW
-        new_runtime = mgr.bind_account("accB", bot=conn)
+        new_runtime = await mgr.bind_account("accB", bot=conn)
 
         assert mgr.get_runtime("accA") is None, "旧账号运行时应被回收"
         assert mgr.get_runtime("accB") is new_runtime
         assert new_runtime.bot is conn
         assert old_runtime is not new_runtime
     finally:
-        mgr.shutdown()
+        await mgr.shutdown()
 
 
-def test_evicted_runtime_does_not_close_shared_session_manager(monkeypatch, tmp_path):
+async def test_evicted_runtime_does_not_close_shared_session_manager(monkeypatch, tmp_path):
     """回收单个运行时的软停止不得关掉共享的会话管理器。
 
     ``SessionManager`` 是按账号的进程级单例，被同一账号的所有运行时共享；
@@ -247,13 +247,13 @@ def test_evicted_runtime_does_not_close_shared_session_manager(monkeypatch, tmp_
     mgr = AgentManager(_CfgSvc(), _TaskMgr())
     conn = _FakeBot(account_id="accA", bot_id=QQ_OLD)
     try:
-        runtime = mgr.bind_account("accA", bot=conn)
+        runtime = await mgr.bind_account("accA", bot=conn)
         session_mgr = runtime.session_mgr
 
         # 触发回收（连接被另一个账号接管）
         conn.account_id = "accB"
         conn.bot_id = QQ_NEW
-        mgr.bind_account("accB", bot=conn)
+        await mgr.bind_account("accB", bot=conn)
 
         # 共享单例的历史库必须仍然可用（关掉的话这里会抛
         # "Cannot operate on a closed database"）
@@ -262,21 +262,21 @@ def test_evicted_runtime_does_not_close_shared_session_manager(monkeypatch, tmp_
         session_mgr.history.save_session(session)
         assert session_mgr.get_history("private_1")
     finally:
-        mgr.shutdown()
+        await mgr.shutdown()
 
 
-def test_detach_bot_clears_connection(monkeypatch, tmp_path):
+async def test_detach_bot_clears_connection(monkeypatch, tmp_path):
     """解绑后运行时不得再持有旧连接（避免把消息发到已换号的 socket 上）。"""
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
     mgr = AgentManager(_CfgSvc(), _TaskMgr())
     conn = _FakeBot(account_id=ACC, bot_id=QQ_OLD)
     try:
-        runtime = mgr.bind_account(ACC, bot=conn)
+        runtime = await mgr.bind_account(ACC, bot=conn)
         runtime.detach_bot()
         assert runtime.bot is None
         assert runtime.ctx.bot is None
     finally:
-        mgr.shutdown()
+        await mgr.shutdown()
 
 
 # ------------------------------------------------- 4. /api/bots 公布的 QQ 一致性

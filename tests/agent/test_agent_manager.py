@@ -29,7 +29,7 @@ class _TM:
         return None  # 测试不真正运行后台任务
 
 
-def test_agent_manager_ensure_and_get():
+async def test_agent_manager_ensure_and_get():
     mgr = AgentManager(_CfgSvc(), _TM())
     try:
         assert mgr.get_runtime(1) is None
@@ -40,10 +40,10 @@ def test_agent_manager_ensure_and_get():
         # 全局 None 不创建运行时
         assert mgr.ensure_runtime(None) is None
     finally:
-        mgr.shutdown()
+        await mgr.shutdown()
 
 
-def test_agent_runtime_config_and_components():
+async def test_agent_runtime_config_and_components():
     cfg_svc = _CfgSvc()
     rt = AgentRuntime(5, cfg_svc, _TM())
     try:
@@ -69,10 +69,10 @@ def test_agent_runtime_config_and_components():
         assert rt.ctx.bot is None  # 未注入 bot
         assert rt.ctx.services.task_manager is not None
     finally:
-        rt.stop()
+        await rt.stop()
 
 
-def test_runtime_creation_is_silent_but_toggling_is_logged(caplog):
+async def test_runtime_creation_is_silent_but_toggling_is_logged(caplog):
     """启动装配是默认行为，不打日志；「开/关」是用户动作，必须留一行。"""
     import logging
 
@@ -98,4 +98,4 @@ def test_runtime_creation_is_silent_but_toggling_is_logged(caplog):
             runtime.config.set_enabled(True)
         assert "已启用" in caplog.text
     finally:
-        mgr.shutdown()
+        await mgr.shutdown()

@@ -62,7 +62,7 @@ async def test_agent_runtime_defaults_to_global_settings(stack):
         assert [c.get("provider_model_id") for c in chain] == [m1, m2]
         assert chain[0]["max_tokens"] == 2048
     finally:
-        rt.stop()
+        await rt.stop()
 
 
 async def test_agent_config_wins_over_global_settings(stack):
@@ -81,7 +81,7 @@ async def test_agent_config_wins_over_global_settings(stack):
 
         assert [c.get("provider_model_id") for c in chain] == [m1]
     finally:
-        rt.stop()
+        await rt.stop()
 
 
 async def test_provider_pool_acts_as_allow_list(stack):
@@ -98,7 +98,7 @@ async def test_provider_pool_acts_as_allow_list(stack):
 
         assert [c.get("provider_model_id") for c in chain] == [m2]
     finally:
-        rt.stop()
+        await rt.stop()
 
 
 async def test_global_settings_ignores_unknown_model_id(stack, caplog):
@@ -115,7 +115,7 @@ async def test_global_settings_ignores_unknown_model_id(stack, caplog):
 
         assert [c.get("provider_model_id") for c in chain] == [m1]
     finally:
-        rt.stop()
+        await rt.stop()
 
 
 async def test_empty_chain_is_reported_loudly(stack):
@@ -125,7 +125,7 @@ async def test_empty_chain_is_reported_loudly(stack):
     try:
         assert rt.provider_chain() == []
     finally:
-        rt.stop()
+        await rt.stop()
 
 
 async def test_global_settings_survive_roundtrip(config_service):

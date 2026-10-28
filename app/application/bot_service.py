@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 from app.agent.config import LEGACY_LLM_CONNECTION_KEYS
@@ -34,6 +35,17 @@ class BotService:
         # 上次登录账号快照：登录成功写入，查询时读取（断开后前端回退展示）
         self.gateway.account_saver = self.on_account_login
         self.gateway.account_lookup = self.config_service.get_bot_accounts
+
+    @staticmethod
+    async def _maybe_await(value: Any) -> Any:
+        """兼容同步/异步两种 AgentManager 实现（测试替身通常是同步的）。
+
+        AgentManager 的换号/删号/对齐账号路径已改 async（要 await 回合任务收尾），
+        但测试与旧装配可能塞进同步替身；这里统一抹平，避免调用方各写一份判断。
+        """
+        if inspect.isawaitable(value):
+            return await value
+        return value
 
     # ==================== 账号装配（不要求连接） ====================
     async def ensure_account(self, account_id: str) -> bool:
@@ -65,7 +77,7 @@ class BotService:
             logger.warning(f"[BotService] 启动装配读取账号失败: {e}")
             return 0
         if self.agent_manager is not None:
-            self.agent_manager.sync_accounts(account_ids)
+            await self._maybe_await(self.agent_manager.sync_accounts(account_ids))
         count = 0
         for account_id in account_ids:
             if await self.ensure_account(account_id):
@@ -91,7 +103,7 @@ class BotService:
         runtime = None
         if self.agent_manager is not None:
             bind = getattr(self.agent_manager, "bind_account", None) or self.agent_manager.ensure_runtime
-            runtime = bind(conn.account_id, bot=conn)
+            runtime = await self._maybe_await(bind(conn.account_id, bot=conn))
         # 账号的模块实例在"账号存在"时就装配好了（启动 / 建号，不要求连接）；
         # 登录只做三件事：补齐缺失实例（热加载场景）、重绑连接、放行联网行为。
         await self.registry.load_all(conn.account_id, bot=conn)
@@ -213,7 +225,9 @@ class BotService:
         deleted = await self.config_service.delete_bot(account_id)
         # 回收运行时与模块实例：否则删掉的账号会留下幽灵运行时（内存/计时器/会话常驻）
         if self.agent_manager is not None:
-            self.agent_manager.drop_runtime(account_id, f"账号 {account_id} 已删除")
+            await self._maybe_await(
+                self.agent_manager.drop_runtime(account_id, f"账号 {account_id} 已删除")
+            )
         try:
             await self.registry.unload(account_id)
         except Exception as e:  # noqa: BLE001 —— 卸载失败不该阻断删号
