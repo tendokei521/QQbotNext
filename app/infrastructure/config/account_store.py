@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections.abc import Sequence
 from typing import Any
@@ -490,17 +491,27 @@ class AccountStoreMixin:
         return snapshot
 
     def _write_orphan_backup(self, snapshot: dict) -> str | None:
-        """备份到 ``data/orphan-account-data.json``；写失败只告警，不阻断清理。"""
+        """备份到 ``data/orphan-account-data.json``；写失败只告警，不阻断清理。
+
+        用 tmp + ``os.replace`` 原子替换：直接往目标文件写，进程在中途退出会留下
+        半个 JSON——下次排查孤儿数据时读到损坏文件。
+        """
         path = self.root / "data" / "orphan-account-data.json"
+        tmp = path.with_name(path.name + ".tmp")
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(
+            tmp.write_text(
                 json.dumps(snapshot, ensure_ascii=False, indent=2, default=str),
                 encoding="utf-8",
             )
+            os.replace(tmp, path)  # 原子：要么旧文件，要么完整新文件
             return str(path)
         except Exception as e:  # noqa: BLE001 —— 备份失败不该让启动失败
             self.log.warning(f"[Config] 孤儿账号数据备份失败（继续清理）: {e}")
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError as cleanup_error:
+                self.log.debug(f"[Config] 清理临时备份文件失败: {cleanup_error}")
             return None
 
     # ==================== 上次登录账号快照 ====================
