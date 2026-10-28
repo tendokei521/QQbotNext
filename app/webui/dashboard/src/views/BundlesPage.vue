@@ -67,6 +67,11 @@ function statusColor(status: string): string {
   return status === 'active' ? 'success' : status === 'failed' ? 'error' : status === 'rolled_back' ? 'grey' : 'warning'
 }
 
+/** 应用记录里存的是预设 id，界面上换成预设名（预设已卸载时给一句人话） */
+function bundleName(bundleId: string): string {
+  return bundles.list.find((item) => item.id === bundleId)?.name || '已卸载的预设'
+}
+
 function openApply(item: { id: string; name: string; version: string; secrets?: { key: string; label: string; required: boolean }[] }) {
   if (!exportEnabled.value) {
     notify.push('先在顶部选择一个账号', 'warning')
@@ -242,7 +247,7 @@ onMounted(async () => {
           <v-icon icon="mdi-package-variant-closed" size="28" color="primary" class="mr-1" />
           预设中心
         </h1>
-        <div class="app-page-subtitle">把一套配置打包、分享、换机迁移</div>
+        <div class="app-page-subtitle">把一套配置打包、分享到另一台电脑</div>
       </div>
       <div class="d-flex align-center gap-2">
         <v-btn variant="tonal" prepend-icon="mdi-export" :disabled="!exportEnabled" @click="openExport">
@@ -254,8 +259,8 @@ onMounted(async () => {
 
     <v-alert type="info" variant="tonal" density="compact" class="mb-4">
       <div class="text-caption">
-        导入后先预检再登记工件；「应用到账号」会创建人格/模型、写入该账号配置，并自动安装随包模块，
-        失败自动回滚。密钥不会随包分发，导入后需要你重新填写。
+        导入后先检查包内容再保存；「应用到账号」会创建人格和模型、写入该账号配置，并自动安装随包插件，
+        失败自动回滚。密钥不随包分发，导入后需要重新填写。
       </div>
     </v-alert>
 
@@ -332,7 +337,7 @@ onMounted(async () => {
           <v-chip size="x-small" :color="statusColor(record.status)" variant="tonal">
             {{ statusText(record.status) }}
           </v-chip>
-          <span class="text-body-2">{{ record.bundle_id }}</span>
+          <span class="text-body-2">{{ bundleName(record.bundle_id) }}</span>
           <span class="text-caption" style="opacity: 0.6">{{ formatTime(record.started_at) }}</span>
           <span v-if="record.error" class="text-caption text-error">{{ record.error }}</span>
           <v-spacer />
@@ -359,16 +364,16 @@ onMounted(async () => {
         </v-card-title>
         <v-card-text>
           <div class="text-caption mb-3" style="opacity: 0.7">
-            将从「{{ accountName }}」收集人格卡、模型池、Agent 配置与模块参数；第三方模块代码会随包，
-            内置模块只记录版本。密钥不包含在包内。
+            将从「{{ accountName }}」收集人格、模型、AI 角色配置与插件参数；第三方插件会连代码一起打包，
+            内置插件只记录版本。密钥不会打进包。
           </div>
-          <v-text-field v-model="exportForm.id" label="预设 ID" density="comfortable" variant="outlined" />
+          <v-text-field v-model="exportForm.id" label="标识（可留空，自动生成）" density="comfortable" variant="outlined" />
           <v-text-field v-model="exportForm.name" label="名称" density="comfortable" variant="outlined" />
           <v-text-field v-model="exportForm.version" label="版本" density="comfortable" variant="outlined" />
           <v-text-field v-model="exportForm.description" label="描述（可选）" density="comfortable" variant="outlined" />
 
           <div class="d-flex align-center mt-2 mb-1">
-            <div class="text-body-2 font-weight-medium">打包哪些模块</div>
+            <div class="text-body-2 font-weight-medium">打包哪些插件</div>
             <v-spacer />
             <v-btn size="x-small" variant="text" @click="toggleAllExportModules(true)">全选</v-btn>
             <v-btn size="x-small" variant="text" @click="toggleAllExportModules(false)">全不选</v-btn>
@@ -421,9 +426,9 @@ onMounted(async () => {
           <template v-if="!applyResult">
             <v-alert type="info" variant="tonal" density="compact" class="mb-3">
               <div class="text-caption">
-                应用会创建人格/模型、写入该账号配置，并自动安装随包模块；失败自动回滚，不留半套配置。
-                应用后可在「应用记录」里一键回滚。密钥不随包分发：目标账号已填过的同名密钥会复用，
-                缺哪个由后端在应用前点名提示。
+                应用会创建人格和模型、写入该账号配置，并自动安装随包插件；失败会自动回滚，不会留下半套配置。
+                应用后可在「应用记录」里一键撤销。密钥不随包分发：目标账号已填过的同名密钥会复用，
+                还缺哪个会在这里提示。
               </div>
             </v-alert>
             <div class="text-body-2 mb-2">
@@ -435,7 +440,7 @@ onMounted(async () => {
               :items="reusePresetOptions"
               item-title="label"
               item-value="id"
-              label="复用本机 Provider 密钥（可选）"
+              label="复用本机已保存的模型服务密钥（可选）"
               clearable
               density="comfortable"
               variant="outlined"
@@ -446,7 +451,7 @@ onMounted(async () => {
               class="text-caption mb-2"
               style="opacity: 0.7"
             >
-              已选择复用：Provider Key 不再需要手填（不会再写进包）。
+              已选择复用：密钥不用再手填，也不会写进包。
             </div>
             <v-text-field
               v-for="secret in applyTarget?.secrets || []"
@@ -462,16 +467,16 @@ onMounted(async () => {
             />
           </template>
           <v-alert v-else type="success" variant="tonal" density="compact">
-            已应用（激活 {{ applyResult.activation_id }}）：
+            已应用到「{{ accountName }}」：
             新建 {{ applyResult.plan.creates.length }} 项、更新 {{ applyResult.plan.updates.length }} 处。
             <div v-if="applyResult.plan.reused_provider_preset_id">
-              密钥复用自本机 Provider 预设 {{ applyResult.plan.reused_provider_preset_id }}
+              密钥复用了本机已保存的模型服务
             </div>
             <template v-if="applyResult.modules_installed?.length">
-              <div>已安装随包模块：{{ applyResult.modules_installed.join('、') }}</div>
+              <div>已安装随包插件：{{ applyResult.modules_installed.join('、') }}</div>
             </template>
             <template v-if="applyResult.modules_upgraded?.length">
-              <div>已升级随包模块：{{ applyResult.modules_upgraded.join('、') }}</div>
+              <div>已升级随包插件：{{ applyResult.modules_upgraded.join('、') }}</div>
             </template>
             <template v-if="applyResult.health">
               <div class="mt-1">
@@ -489,13 +494,13 @@ onMounted(async () => {
                 :key="mod.name"
                 class="text-caption"
               >
-                模块 {{ mod.name }}：{{ mod.loaded && !mod.error ? '已加载' : (mod.error || '未加载') }}
+                模块 {{ mod.name }}：{{ mod.loaded && !mod.error ? '已加载' : '未加载，可在「功能模块」页点重试' }}
               </div>
               <div
                 v-if="!applyResult.health.agent.persona || !applyResult.health.agent.provider_preset || !applyResult.health.agent.provider_model"
                 class="text-caption"
               >
-                账号引用不完整（人格 / Provider / 模型），请检查后再使用。
+                人设、模型服务或模型还没选好，请到 Agent 页检查后再使用。
               </div>
             </template>
           </v-alert>
@@ -523,13 +528,13 @@ onMounted(async () => {
           卸载「{{ uninstallTarget?.name }}」
         </v-card-title>
         <v-card-text class="text-body-2">
-          会回滚它应用到当前账号的改动，并删除工件文件（其它账号仍在用的会保留）。
+          会撤销它应用到当前账号的改动，并删除导入的预设文件（其它账号还在用的会保留）。
           <v-checkbox
             v-model="keepModules"
             density="compact"
             hide-details
             class="mt-2"
-            label="保留随包安装的模块（只回滚配置，模块与来源标记都留下）"
+            label="保留随包安装的插件（只撤销配置，插件保留）"
           />
         </v-card-text>
         <v-card-actions>
