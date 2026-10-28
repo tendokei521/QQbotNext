@@ -92,7 +92,26 @@ def test_history_record_fields_and_summary():
     assert (record["user_id"], record["group_id"]) == (100, 999)
     assert record["summary"] == "看这个[图片]@456"
     assert len(record["summary"]) <= SUMMARY_MAXLEN
-    assert record["raw"] is raw
+    assert record["raw"] == raw
+
+
+def test_history_deep_copies_raw_payload():
+    """诊断历史必须持有 raw 的深拷贝：外部/派发链改写事件不影响已记录内容。"""
+    history = EventHistory()
+    raw = _raw(text="原始内容")
+    event = _event(raw)
+    history.record("main", event)
+
+    # 事件对象与原始 payload 都被后续处理改写
+    raw["message"] = [{"type": "text", "data": {"text": "被外部改了"}}]
+    raw["post_type"] = "notice"
+    event.raw["group_id"] = 123
+
+    record = history.recent("main", 1)[0]
+    assert record["raw"]["post_type"] == "message", "记录必须是深拷贝，不能随外部改动漂移"
+    assert record["raw"]["group_id"] == 999
+    assert record["raw"]["message"][0]["data"]["text"] == "原始内容"
+    assert record["raw"] is not raw
 
 
 def test_history_limits_summary_length():

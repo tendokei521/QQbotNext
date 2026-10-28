@@ -19,9 +19,12 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import time
 from collections import deque
 from typing import Any
+
+from app.core.logger import logger
 
 #: 单账号事件队列上限。超过它说明事件处理能力不足，开始丢最旧事件。
 EVENT_QUEUE_MAXSIZE = 1024
@@ -157,6 +160,13 @@ class EventHistory:
             return {}
         raw = getattr(event, "raw", None)
         raw = raw if isinstance(raw, dict) else {}
+        try:
+            # 深拷贝：事件对象/原始 payload 在派发链里可能被模块改写，且外部若继续持有
+            # 大对象引用会让诊断缓冲常驻不该常驻的数据。拷贝失败（含不可拷贝对象）退回
+            # 原引用并留痕——诊断台不能因为一个奇怪 payload 就停摆。
+            raw = copy.deepcopy(raw)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[Gateway] 诊断事件 raw 深拷贝失败（改用原对象）: {e}")
         seq = self._seq.get(key, 0) + 1
         self._seq[key] = seq
         buffer = self._buffers.get(key)

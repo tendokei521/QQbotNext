@@ -52,12 +52,18 @@ class _ClosedLoop:
 
 
 class _ServerOnClosedLoop:
-    """监听器创建于另一个（已关闭的）事件循环：stop 不得再调 close()。"""
+    """监听器创建于另一个（已关闭的）事件循环：stop 不得再调 close()。
+
+    websockets 16 的 Server 用 get_loop() 暴露所属循环（没有公开的 .loop 接口）。
+    """
 
     def __init__(self) -> None:
-        self.loop = _ClosedLoop()
+        self._loop = _ClosedLoop()
         self.close_called = False
         self.wait_called = False
+
+    def get_loop(self):
+        return self._loop
 
     def close(self) -> None:
         self.close_called = True
@@ -66,6 +72,37 @@ class _ServerOnClosedLoop:
     async def wait_closed(self) -> None:
         self.wait_called = True
         raise AssertionError("已关闭循环上 wait_closed() 不可用")
+
+
+class _LegacyClosedServer:
+    """老版本 websockets 形态：没有 get_loop()，只有 .loop 属性。"""
+
+    def __init__(self) -> None:
+        self.loop = _ClosedLoop()
+        self.close_called = False
+
+    def close(self) -> None:
+        self.close_called = True
+        raise AssertionError("不应调用 close()")
+
+    async def wait_closed(self) -> None:
+        raise AssertionError("不应调用 wait_closed()")
+
+
+async def test_stop_uses_server_loop_attribute_when_get_loop_missing():
+    """websockets 12/13 没有 get_loop()：退回 .loop 判断循环是否已关闭。"""
+
+    async def handler(ws, client):  # pragma: no cover
+        await ws.wait_closed()
+
+    srv = ReverseWsServer(url="ws://127.0.0.1:1/onebot/v11/ws", handler=handler, log=_NullLog())
+    fake = _LegacyClosedServer()
+    srv._server = fake
+
+    await srv.stop()
+
+    assert fake.close_called is False
+    assert srv._server is None
 
 
 async def test_listening_turns_false_after_underlying_server_is_closed():

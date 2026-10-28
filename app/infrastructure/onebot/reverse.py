@@ -134,6 +134,22 @@ def _token_matches(expected: str, given: str) -> bool:
     return hmac.compare_digest(expected.encode(), given.encode())
 
 
+def _server_loop(server: Any) -> Any:
+    """取 websockets Server 所属的事件循环。
+
+    websockets 16 的 ``Server`` 用 ``get_loop()``（实例属性 ``.loop`` 并非公开
+    接口），12/13 则只有 ``.loop``。这里优先用 ``get_loop()``，取不到再退回属性。
+    """
+    get_loop = getattr(server, "get_loop", None)
+    if callable(get_loop):
+        try:
+            return get_loop()
+        except Exception as e:  # noqa: BLE001 —— 取不到就按「无法判断」处理（走正常关闭路径）
+            logger.debug(f"[OneBot] 读取反向监听器事件循环失败（按未关闭处理）: {e}")
+            return None
+    return getattr(server, "loop", None)
+
+
 class ReverseWsServer:
     """单个账号的反向 WS 监听器。
 
@@ -218,7 +234,7 @@ class ReverseWsServer:
         已随循环销毁，直接丢弃引用即可。
         """
         server, self._server = self._server, None
-        loop = getattr(server, "loop", None) if server is not None else None
+        loop = _server_loop(server) if server is not None else None
         loop_alive = loop is None or not loop.is_closed()
         if server is not None and loop_alive:
             try:

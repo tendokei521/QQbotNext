@@ -139,3 +139,32 @@ async def test_ignore_marker_legacy_key_still_honored():
     gw = _gateway()
     gw.cache.set("message_group_100_ignore", 1, 60)
     assert gw._is_ignore(_event("b")) is True
+
+
+# ---------- 断开期间的 _disconnecting 标记 ----------
+
+
+async def test_reset_conn_state_keeps_disconnecting_flag():
+    """复位登录态不得顺手清掉「正在主动断开」标记（否则读循环会补播一次 error）。"""
+    gw = _gateway()
+    conn = _conn()
+    conn._disconnecting = True
+
+    gw._reset_conn_state(conn)
+
+    assert conn._disconnecting is True
+
+
+async def test_sweep_zombies_during_disconnect_keeps_flag():
+    """断开中清扫僵尸：不得清标记、不得改状态（状态收敛归 disconnect_bot）。"""
+    gw = _gateway()
+    conn = _conn()
+    conn.status = "connected"
+    conn.websocket = None  # 连接已消失 → 会命中僵尸判定
+    conn._disconnecting = True
+    gw.connections = {"main": conn}
+
+    await gw._sweep_zombies()
+
+    assert conn._disconnecting is True
+    assert conn.status == "connected", "主动断开期间不得被掉线判定改成 error"
