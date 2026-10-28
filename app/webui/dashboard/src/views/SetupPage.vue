@@ -736,13 +736,13 @@ onUnmounted(stopPolling)
               variant="outlined"
             />
             <div class="text-caption" style="opacity: 0.7">
-              保存后会同时开启「群聊回复」，之后可在 Agent 面板继续细调。
+              保存后会同时开启群聊回复，之后可在「AI 对话设置」里继续调整。
             </div>
           </template>
           <template v-else>
             <div class="text-caption mb-3" style="opacity: 0.7">
-              用别人分享的预设：导入 .zip 后一键应用人格 / 模型池 / Agent 配置 / 随包模块
-              （会以预设里的模型连接为准，覆盖第 2 步的设置）。
+              用别人分享的预设：导入 .zip 后一键应用人格、模型和随包功能
+              （会以预设自带的模型为准，覆盖刚才选的模型）。
             </div>
             <div class="d-flex align-center flex-wrap gap-2 mb-3">
               <v-btn
@@ -810,7 +810,7 @@ onUnmounted(stopPolling)
             </v-card>
 
             <v-alert v-if="appliedPreset" type="success" variant="tonal" density="compact" class="mt-3">
-              已应用「{{ appliedPreset.name }}」v{{ appliedPreset.version }}：人格、模型、模块已就位。
+              已应用「{{ appliedPreset.name }}」：人格、模型、模块都配好了。
             </v-alert>
           </template>
         </v-card-text>
@@ -832,8 +832,9 @@ onUnmounted(stopPolling)
 
       <!-- 第 4 步 -->
       <v-card v-else variant="outlined">
-        <v-card-title>完成前检查</v-card-title>
+        <v-card-title>最后确认</v-card-title>
         <v-card-text>
+          <div class="text-body-2 text-medium-emphasis mb-2">下面几项都打勾，就能在群里聊天了。</div>
           <div v-for="check in readiness.checks.filter((c) => c.level !== 'info')" :key="check.id" class="d-flex align-center gap-2 py-1">
             <v-icon
               size="small"
@@ -844,17 +845,17 @@ onUnmounted(stopPolling)
             <span v-if="check.detail" class="text-caption" style="opacity: 0.65">{{ check.detail }}</span>
           </div>
           <v-alert v-if="readiness.ready" type="success" variant="tonal" density="compact" class="mt-3">
-            全部通过。去群里 @ 一次机器人试试。
+            已经可以聊天了：去群里 @ 一次机器人试试。连接状态在「总览」里看。
           </v-alert>
           <v-alert v-else type="warning" variant="tonal" density="compact" class="mt-3">
-            还有 {{ readiness.blockers.length }} 项没完成；可以回到对应步骤补，或稍后在总览页继续。
+            还有 {{ readiness.blockers.length }} 项没完成。可以返回前面补齐，或先保存、稍后在「总览」里继续。
           </v-alert>
         </v-card-text>
         <v-card-actions>
           <v-btn variant="text" @click="step = 3">上一步</v-btn>
           <v-spacer />
           <v-btn variant="text" :loading="readiness.loading" @click="readiness.load()">重新检查</v-btn>
-          <v-btn color="primary" :loading="busy === 'finish'" @click="finish">完成</v-btn>
+          <v-btn color="primary" :loading="busy === 'finish'" @click="finish">完成并进入总览</v-btn>
         </v-card-actions>
       </v-card>
     </div>
