@@ -98,7 +98,7 @@ UI_PAGES: tuple[UIPage, ...] = (
             UIGroup("behavior_trigger", "触发设置", ("trigger_at", "trigger_keyword")),
             UIGroup(
                 "behavior_debounce",
-                "消息抖动",
+                "消息合并等待",
                 ("message_debounce_seconds", "message_debounce_max_wait", "reply_cooldown"),
             ),
             UIGroup(

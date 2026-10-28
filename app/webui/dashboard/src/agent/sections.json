@@ -92,7 +92,7 @@
         },
         {
           "id": "behavior_debounce",
-          "label": "消息抖动",
+          "label": "消息合并等待",
           "icon": "mdi-timer-outline",
           "fields": [
             "message_debounce_seconds",
