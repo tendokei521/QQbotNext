@@ -215,6 +215,9 @@ onBeforeUnmount(stopPolling)
           这里显示协议端最近发来的原始事件。在群里发一条消息，如果这里出现了「消息」，说明协议端已通；
           如果一直没有，问题在协议端（NapCat/LLOneBot）那一侧。
         </div>
+        <div class="text-caption mb-3" style="opacity: 0.7">
+          如果这里能看到「消息」但群里仍没回复，问题在回复配置。先去「群聊权限」确认这个群允许聊天。再去「AI 对话设置」确认已选模型。
+        </div>
 
         <v-alert v-if="loadError" type="error" variant="tonal" density="compact" class="mb-3">
           {{ loadError }}
