@@ -39,7 +39,7 @@ const logEnabled = computed<boolean>({
 const groups = computed(() => {
   const map = new Map<string, ModuleTool[]>()
   for (const tool of tools.value) {
-    const category = tool.module_label || tool.category || '模块工具'
+    const category = tool.module_label || tool.category || '插件工具'
     if (!map.has(category)) map.set(category, [])
     map.get(category)!.push(tool)
   }
@@ -113,7 +113,7 @@ watch(
   <div>
     <v-card variant="outlined" class="mb-4">
       <v-card-title class="d-flex align-center">
-        <v-icon icon="mdi-puzzle-outline" class="mr-2" color="secondary" /> 模块 Tools
+        <v-icon icon="mdi-puzzle-outline" class="mr-2" color="secondary" /> 插件工具
         <v-spacer />
         <v-switch
           v-model="logEnabled"
@@ -124,13 +124,13 @@ watch(
         />
       </v-card-title>
       <v-card-text class="text-caption" style="opacity: 0.65">
-        列出功能模块提供给模型的工具。模块开关在「功能模块」页管理。
+        列出功能插件提供给模型的工具。插件开关在「功能插件」页管理。
       </v-card-text>
     </v-card>
 
     <v-card variant="outlined" class="mb-4">
       <v-card-title class="d-flex align-center">
-        <v-icon icon="mdi-puzzle-outline" class="mr-2" color="secondary" /> 模块工具
+        <v-icon icon="mdi-puzzle-outline" class="mr-2" color="secondary" /> 工具列表
         <v-spacer />
         <v-chip v-if="tools.length" size="small">{{ tools.length }} 个</v-chip>
       </v-card-title>
@@ -184,7 +184,7 @@ watch(
             style="opacity: 0.55"
           >
             <template v-if="!agent.botId">还没有账号。先在「账号」页添加一个 QQ 账号。</template>
-            <template v-else>还没有模块提供工具。</template>
+            <template v-else>还没有插件提供工具。</template>
           </div>
         </div>
       </v-card-text>

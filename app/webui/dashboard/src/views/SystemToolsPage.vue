@@ -120,7 +120,7 @@ watch(
   <div>
     <v-card variant="outlined" class="mb-4">
       <v-card-title class="d-flex align-center">
-        <v-icon icon="mdi-cog-outline" class="mr-2" color="primary" /> System Tools
+        <v-icon icon="mdi-cog-outline" class="mr-2" color="primary" /> 系统工具
         <v-spacer />
         <v-switch
           v-model="logEnabled"
@@ -137,7 +137,7 @@ watch(
 
     <v-card variant="outlined" class="mb-4">
       <v-card-title class="d-flex align-center">
-        <v-icon icon="mdi-tools" class="mr-2" color="primary" /> 系统工具
+        <v-icon icon="mdi-tools" class="mr-2" color="primary" /> 工具列表
         <v-spacer />
         <v-chip v-if="tools.length" size="small">{{ tools.length }} 个</v-chip>
       </v-card-title>

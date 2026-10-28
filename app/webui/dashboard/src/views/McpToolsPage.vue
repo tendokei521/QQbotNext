@@ -111,7 +111,7 @@ watch(
   <div>
     <v-card variant="outlined" class="mb-4">
       <v-card-title class="d-flex align-center">
-        <v-icon icon="mdi-server-network" class="mr-2" color="blue-grey" /> MCP Tools
+        <v-icon icon="mdi-server-network" class="mr-2" color="blue-grey" /> 外部工具
         <v-spacer />
         <v-switch
           v-model="logEnabled"
@@ -122,13 +122,13 @@ watch(
         />
       </v-card-title>
       <v-card-text class="text-caption" style="opacity: 0.65">
-        列出 MCP Server 提供给模型的工具。连接和参数在「功能模块 → 工具扩展」里维护。
+        列出 MCP Server 提供给模型的工具。连接和参数在「功能插件 → 工具扩展」里维护。
       </v-card-text>
     </v-card>
 
     <v-card variant="outlined" class="mb-4">
       <v-card-title class="d-flex align-center">
-        <v-icon icon="mdi-server-network" class="mr-2" color="blue-grey" /> MCP 工具
+        <v-icon icon="mdi-server-network" class="mr-2" color="blue-grey" /> 工具列表
         <v-spacer />
         <v-chip v-if="tools.length" size="small">{{ tools.length }} 个</v-chip>
       </v-card-title>
@@ -180,7 +180,7 @@ watch(
             style="opacity: 0.55"
           >
             <template v-if="!agent.botId">还没有账号。先在「账号」页添加一个 QQ 账号。</template>
-            <template v-else>还没有 MCP 工具。先到「功能模块 → 工具扩展」连接 MCP Server。</template>
+            <template v-else>还没有 MCP 工具。先到「功能插件 → 工具扩展」连接 MCP Server。</template>
           </div>
         </div>
       </v-card-text>
