@@ -11,6 +11,7 @@ import { errorMessage } from '@/api/http'
 import { cleanLogMessage, cleanLogTimestamp } from '@/utils/log'
 import EmptyState from '@/components/EmptyState.vue'
 import ReadinessCard from '@/components/readiness/ReadinessCard.vue'
+import EventMonitorDialog from '@/components/bots/EventMonitorDialog.vue'
 
 const bots = useBotsStore()
 const modules = useModulesStore()
@@ -22,6 +23,15 @@ const router = useRouter()
 
 const refreshing = ref(false)
 const connecting = ref(false)
+
+// 诊断台：针对某个账号看协议端事件、发测试消息
+const monitorOpen = ref(false)
+const monitorAccount = ref<{ id: string; name: string } | null>(null)
+
+function openMonitor(bot: { id: string }) {
+  monitorAccount.value = { id: bot.id, name: displayName(bot as any) }
+  monitorOpen.value = true
+}
 
 const STATUS_TEXT: Record<BotStatus, string> = {
   connected: '已连接',
@@ -166,7 +176,16 @@ onMounted(() => {
                     {{ resolveAccount(b)?.nickname || (b.last_error ? b.last_error : '尚未连接') }}
                   </v-list-item-subtitle>
                   <template #append>
-                    <v-chip size="x-small" :color="statusColor(b.status)" variant="tonal">{{ STATUS_TEXT[b.status] }}</v-chip>
+                    <div class="d-flex align-center gap-1">
+                      <v-btn
+                        size="x-small"
+                        variant="text"
+                        icon="mdi-stethoscope"
+                        title="诊断：查看协议端事件、发测试消息"
+                        @click.stop="openMonitor(b)"
+                      />
+                      <v-chip size="x-small" :color="statusColor(b.status)" variant="tonal">{{ STATUS_TEXT[b.status] }}</v-chip>
+                    </div>
                   </template>
                 </v-list-item>
               </v-list>
@@ -234,6 +253,12 @@ onMounted(() => {
         </v-col>
       </v-row>
     </template>
+
+    <EventMonitorDialog
+      v-model="monitorOpen"
+      :account-id="monitorAccount?.id ?? null"
+      :account-name="monitorAccount?.name"
+    />
   </div>
 </template>
 

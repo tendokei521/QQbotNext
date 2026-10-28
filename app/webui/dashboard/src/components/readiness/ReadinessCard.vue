@@ -59,7 +59,7 @@ onUnmounted(() => readiness.stopPolling())
 
       <template v-else-if="readiness.ready">
         <div class="text-caption" style="opacity: 0.7">
-          在群里 @ 我试试；如果没反应，去「日志」页看「为什么不回」。
+          在群里 @ 机器人试试。如果没反应，查看下方「最近日志」，或到「账号管理」确认连接状态。
         </div>
       </template>
 
