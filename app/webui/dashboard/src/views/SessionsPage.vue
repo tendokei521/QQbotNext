@@ -107,6 +107,11 @@ const pendingImageTarget = ref<{ index: number; image: HistoryImage } | null>(nu
 
 const botId = computed(() => bots.currentAccountId)
 
+/** 当前选中的会话（展示标题 / 删除确认用，避免直接显示内部 id） */
+const selectedSession = computed(
+  () => sessions.value.find((s) => s.session_id === selectedSessionId.value) || null,
+)
+
 function isNotFoundError(err: unknown): boolean {
   return err instanceof AxiosError && err.response?.status === 404
 }
@@ -133,6 +138,27 @@ function imageSrc(image: HistoryImage): string {
 
 function typeLabel(type: string): string {
   return type === 'group' ? '群聊' : type === 'private' ? '私聊' : type || '未知'
+}
+
+/**
+ * 会话标题：内部 session_id（如 group_123456）对用户没有意义，
+ * 转成「群 123456」「私聊 QQ 789」；确实没有可读数字时退回类型名，不把内部 id 当标题展示。
+ */
+function sessionTitle(s: SessionSummary): string {
+  const numeric = /(\d{4,})\s*$/.exec(String(s.session_id || ''))?.[1] || ''
+  if (numeric) {
+    if (s.type === 'group') return `群 ${numeric}`
+    if (s.type === 'private') return `私聊 QQ ${numeric}`
+    return `会话 ${numeric}`
+  }
+  if (s.type === 'group') return '群聊会话'
+  if (s.type === 'private') return '私聊会话'
+  return '会话'
+}
+
+/** 导出文件名里去掉系统不允许的字符 */
+function safeFileName(name: string): string {
+  return String(name || '').replace(/[\\/:*?"<>|]/g, '_').trim() || '会话'
 }
 
 function fmtTime(ts?: number): string {
@@ -425,7 +451,8 @@ async function bulkDeleteConversations() {
 
 async function deleteSession() {
   if (!selectedSessionId.value) return
-  if (!window.confirm(`确认删除整个会话 ${selectedSessionId.value}？该操作不可恢复。`)) return
+  const label = selectedSession.value ? sessionTitle(selectedSession.value) : '该会话'
+  if (!window.confirm(`确认删除会话「${label}」？该操作不可恢复。`)) return
   try {
     await http.delete(`/api/sessions/${encodeURIComponent(selectedSessionId.value)}`, {
       params: { account_id: botId.value },
@@ -451,7 +478,8 @@ async function exportSession() {
     })
     const blob = res.data instanceof Blob ? res.data : new Blob([res.data])
     // 备份包含 session.json + media/（图片字节），所以是 zip
-    saveBlob(blob, `${selectedSessionId.value}.session.zip`)
+    const label = selectedSession.value ? sessionTitle(selectedSession.value) : '会话'
+    saveBlob(blob, `${safeFileName(label)}-备份.zip`)
     notify.push('会话备份已开始（含图片）', 'success')
   } catch (err) {
     notify.push(errorMessage(err), 'error')
@@ -666,9 +694,8 @@ async function exportConversation(format: 'text' | 'json') {
       { params: { account_id: botId.value, format }, responseType: 'blob' },
     )
     const blob = res.data instanceof Blob ? res.data : new Blob([res.data])
-    const filename = format === 'json'
-      ? `${conversation.value.task_id}.json`
-      : `${conversation.value.task_id}.txt`
+    const baseName = safeFileName(conversation.value.title || '对话')
+    const filename = format === 'json' ? `${baseName}.json` : `${baseName}.txt`
     saveBlob(blob, filename)
     notify.push('导出已开始', 'success')
   } catch (err) {
@@ -703,7 +730,7 @@ onMounted(() => {
     <div class="app-page-header" style="align-items: center">
       <div>
         <h1 class="app-page-title">会话数据</h1>
-        <div class="app-page-subtitle">查看、编辑、导出和恢复当前账号的本地会话历史</div>
+        <div class="app-page-subtitle">查看、编辑、导出与恢复当前账号的聊天记录</div>
       </div>
       <v-spacer />
       <v-chip v-if="mediaStats" size="small" variant="tonal" class="mr-2" :loading="loadingMedia">
@@ -772,7 +799,7 @@ onMounted(() => {
                 <template #prepend>
                   <v-icon :icon="s.type === 'group' ? 'mdi-account-group' : 'mdi-account'" color="primary" />
                 </template>
-                <v-list-item-title class="text-body-2">{{ s.session_id }}</v-list-item-title>
+                <v-list-item-title class="text-body-2">{{ sessionTitle(s) }}</v-list-item-title>
                 <v-list-item-subtitle class="text-caption">
                   {{ typeLabel(s.type) }} · {{ s.conversation_count }} 个对话 · {{ s.total_messages }} 条消息
                 </v-list-item-subtitle>
@@ -858,7 +885,6 @@ onMounted(() => {
           <v-card-title v-if="conversation" class="d-flex align-center flex-wrap gap-2">
             <v-icon icon="mdi-message-text" class="mr-1" color="primary" />
             <span class="text-truncate">{{ conversation.title }}</span>
-            <v-chip size="x-small" variant="tonal" class="ml-1">{{ conversation.task_id }}</v-chip>
             <v-spacer />
             <v-btn size="small" variant="tonal" prepend-icon="mdi-download" @click="exportConversation('text')">导出 TXT</v-btn>
             <v-btn size="small" variant="tonal" prepend-icon="mdi-json" @click="exportConversation('json')">导出 JSON</v-btn>
@@ -877,7 +903,7 @@ onMounted(() => {
                   <span v-if="msg.role === 'user'" class="text-caption">
                     {{ msg.nickname ? `${msg.nickname}(${msg.user_id || '?'})` : `QQ ${msg.user_id || '?'}` }}
                   </span>
-                  <span v-if="msg.message_id" class="text-caption" style="opacity: 0.55">消息 {{ msg.message_id }}</span>
+                  <span v-if="msg.message_id" class="text-caption" style="opacity: 0.55">消息编号 {{ msg.message_id }}</span>
                   <span class="text-caption" style="opacity: 0.55">{{ fmtTime(msg.time) }}</span>
                   <v-spacer />
                   <v-btn size="x-small" variant="text" icon="mdi-pencil" title="编辑消息" @click="openEditMessage(index)" />
@@ -892,11 +918,11 @@ onMounted(() => {
                       :title="`点击预览 · ${fmtBytes(image.bytes)}`"
                       @click="openImagePreview(image)"
                     >
-                      <img :src="imageSrc(image)" :alt="`图片 ${image.sha}`" loading="lazy" />
+                      <img :src="imageSrc(image)" alt="消息里的图片" loading="lazy" />
                     </button>
                     <div v-else class="image-missing" :title="image.status === 'missing' ? '本地文件已丢失（可从备份恢复）' : '这张图没有落盘'">
                       <v-icon icon="mdi-image-off" size="20" />
-                      <span class="text-caption">{{ image.status === 'missing' ? '文件缺失' : '未缓存' }}</span>
+                      <span class="text-caption">{{ image.status === 'missing' ? '文件缺失' : '未下载' }}</span>
                     </div>
                     <div class="image-actions">
                       <v-btn
@@ -978,17 +1004,17 @@ onMounted(() => {
         <v-card-title class="d-flex align-center">
           <v-icon icon="mdi-image" class="mr-2" color="primary" />
           本地图片
-          <v-chip size="x-small" variant="tonal" class="ml-2">{{ previewImage.mime }}</v-chip>
+          <v-chip size="x-small" variant="tonal" class="ml-2">格式 {{ previewImage.mime.split('/')[1]?.toUpperCase() || '图片' }}</v-chip>
           <v-chip size="x-small" variant="tonal" class="ml-1">{{ fmtBytes(previewImage.bytes) }}</v-chip>
           <v-spacer />
-          <span class="text-caption" style="opacity: 0.55">{{ previewImage.sha }}</span>
+          <span class="text-caption" style="opacity: 0.55">校验值 {{ previewImage.sha.slice(0, 8) }}</span>
         </v-card-title>
         <v-card-text class="text-center">
           <img :src="imageSrc(previewImage)" alt="本地图片" style="max-width: 100%; max-height: 70vh" />
         </v-card-text>
         <v-card-actions>
           <span class="text-caption ml-2" style="opacity: 0.65">
-            这张图和模型请求里用的是同一份本地字节
+            预览的就是实际发送给模型的那张图。
           </span>
           <v-spacer />
           <v-btn variant="text" @click="previewImage = null">关闭</v-btn>
