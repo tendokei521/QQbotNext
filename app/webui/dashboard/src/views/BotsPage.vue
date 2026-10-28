@@ -571,6 +571,7 @@ onBeforeUnmount(() => {
 .info-grid {
   display: flex;
   gap: 24px;
+  flex-wrap: wrap;
 }
 
 .info-label {
@@ -583,6 +584,7 @@ onBeforeUnmount(() => {
 .info-value {
   font-size: 13.5px;
   font-weight: 500;
+  word-break: break-all;
 }
 
 /* 「上次连接」标注：明确该账号来自快照而非当前实时连接 */
