@@ -7,7 +7,7 @@
  * - 每一步都可以直接「下一步」（先跳过、稍后再回来补，总览会给 blocker 提示）；
  * - 第 4 步的清单与总览就绪卡、启动横幅同源（`/api/readiness`）。
  */
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import http, { errorMessage } from '@/api/http'
 import { useBotsStore } from '@/stores/bots'
@@ -40,7 +40,13 @@ const account = reactive({
 // 后台每 2s 刷新一次「是否已连接」，前端不显示重试次数之类的过程状态
 const accountConnected = ref(false)
 const accountSaved = ref(false)
-let saveTimer: number | null = null
+/** 字段有改动还没保存：轮询不能拿服务端旧值覆盖用户正在输入的内容 */
+const accountDirty = ref(false)
+/** 保存失败的原因：显示在字段下方，同一条只弹一次提示 */
+const accountError = ref('')
+/** 保存进行中：只用于按钮转圈，不做互斥（同一账号重复保存是幂等的） */
+const savingAccount = ref(false)
+let lastNotifiedError = ''
 let pollTimer: number | null = null
 
 // ---------- 第 2 步：模型 ----------
@@ -127,45 +133,58 @@ async function run(label: string, task: () => Promise<void>) {
 }
 
 // ---------- 第 1 步动作 ----------
-async function saveAccount(quiet = false) {
-  const res = await http.post('/api/setup/default-account', {
-    id: account.id.trim(),
-    name: account.name.trim(),
-    ws_url: account.ws_url.trim(),
-    access_token: account.access_token,
-    conn_mode: account.conn_mode,
-  })
-  account.id = res.data.account_id
-  accountSaved.value = true
-  accountConnected.value = Boolean(res.data.connected)
-  // 让顶部账号选择器/后续页面拿到这个账号（否则向导走完仍是"未选账号"）
-  bots.selectBot(res.data.account_id)
-  await bots.fetchBots()
-  if (!quiet) notify.push('已保存，正在后台尝试连接', 'success')
+/**
+ * 保存向导账号：只在失焦 / 点「下一步」时调用，打字过程中不建号。
+ * 失败把原因显示在字段下方，并用提示条告知一次（同一条不重复弹）。
+ */
+async function saveAccount(): Promise<boolean> {
+  savingAccount.value = true
+  try {
+    const res = await http.post('/api/setup/default-account', {
+      id: account.id.trim(),
+      name: account.name.trim(),
+      ws_url: account.ws_url.trim(),
+      access_token: account.access_token,
+      conn_mode: account.conn_mode,
+    })
+    account.id = res.data.account_id
+    accountSaved.value = true
+    accountDirty.value = false
+    accountError.value = ''
+    lastNotifiedError = ''
+    accountConnected.value = Boolean(res.data.connected)
+    // 让顶部账号选择器/后续页面拿到这个账号（否则向导走完仍是"未选账号"）
+    bots.selectBot(res.data.account_id)
+    await bots.fetchBots()
+    return true
+  } catch (err) {
+    const message = errorMessage(err)
+    accountError.value = message
+    if (message !== lastNotifiedError) {
+      lastNotifiedError = message
+      notify.push(message, 'error')
+    }
+    return false
+  } finally {
+    savingAccount.value = false
+  }
 }
 
-function scheduleSave() {
-  // 还没填任何内容时不建账号（默认地址不算"用户输入"）
-  if (!accountSaved.value && !account.id.trim() && !account.name.trim()) return
-  if (saveTimer !== null) window.clearTimeout(saveTimer)
-  saveTimer = window.setTimeout(() => {
-    void saveAccount(true).catch((err) => notify.push(errorMessage(err), 'error'))
-  }, 600)
+/** 输入只更新本地草稿；顺带清掉上一次的错误提示 */
+function markAccountDirty() {
+  accountDirty.value = true
+  accountError.value = ''
 }
 
 function onModeChange(mode: 'reverse' | 'forward') {
   account.conn_mode = mode
   account.ws_url = mode === 'reverse' ? defaultListenAddress.value : ''
-  scheduleSave()
+  markAccountDirty()
 }
 
 async function nextFromAccount() {
-  try {
-    if (!accountSaved.value) await saveAccount(true)
-  } catch (err) {
-    notify.push(errorMessage(err), 'error')
-    return
-  }
+  // 点「下一步」才真正建号/保存；失败就停在本步
+  if (!(await saveAccount())) return
   step.value = 2
 }
 
@@ -175,7 +194,7 @@ async function refreshAccount() {
     const current = res.data?.account
     defaultListenAddress.value = String(res.data?.default_address || '')
     accountConnected.value = Boolean(current?.connected)
-    if (current && !accountSaved.value) {
+    if (current && !accountSaved.value && !accountDirty.value) {
       const raw = String(current.ws_url || '')
       const [base, query] = raw.split('?')
       account.id = current.account_id
@@ -187,7 +206,7 @@ async function refreshAccount() {
       }
       accountSaved.value = true
     } else if (!current && !accountSaved.value && account.conn_mode === 'reverse' && !account.ws_url) {
-      // 还没有账号：先把后端给的监听地址预填出来（不创建账号，用户填 ID/名称才保存）
+      // 还没有账号：先把后端给的监听地址预填出来（这时还不建号，点「下一步」才保存）
       account.ws_url = defaultListenAddress.value
     }
   } catch {
@@ -291,6 +310,10 @@ onMounted(async () => {
   await Promise.all([readiness.load(), bundles.load()])
 })
 
+onBeforeUnmount(() => {
+  // 离开向导前把第 1 步没保存的改动补存一次，避免切页丢配置
+  if (accountDirty.value) void saveAccount()
+})
 onUnmounted(stopPolling)
 </script>
 
@@ -321,26 +344,53 @@ onUnmounted(stopPolling)
       <v-card v-if="step === 1" variant="outlined">
         <v-card-title>把 QQ 号接进来</v-card-title>
         <v-card-text>
+          <div class="text-body-2 text-medium-emphasis mb-2">先选一种连接方式，两种都行，推荐本地监听。</div>
           <v-btn-toggle
             :model-value="account.conn_mode"
             mandatory
             density="comfortable"
-            class="mb-3"
+            class="mb-4"
             @update:model-value="(value: any) => onModeChange(value)"
           >
-            <v-btn value="reverse" prepend-icon="mdi-lan-connect">本地监听（反向 WebSocket）</v-btn>
-            <v-btn value="forward" prepend-icon="mdi-lan-disconnect">向外连接（正向 WebSocket）</v-btn>
+            <v-btn value="reverse" prepend-icon="mdi-lan-connect">本地监听（推荐）</v-btn>
+            <v-btn value="forward" prepend-icon="mdi-lan-disconnect">向外连接</v-btn>
           </v-btn-toggle>
+
+          <v-table density="compact" class="mode-table mb-5">
+            <thead>
+              <tr>
+                <th>连接方式</th>
+                <th>协议端里选</th>
+                <th>地址填什么</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>本地监听（推荐）</td>
+                <td>WebSocket 客户端</td>
+                <td>填本页给出的本机监听地址</td>
+              </tr>
+              <tr>
+                <td>向外连接</td>
+                <td>WebSocket 服务端</td>
+                <td>把协议端的 ws 地址填到这里</td>
+              </tr>
+            </tbody>
+          </v-table>
 
           <v-row dense>
             <v-col cols="12" md="6">
               <v-text-field
                 v-model="account.id"
-                label="账号 ID"
-                placeholder="例如：default"
+                label="账号标识"
+                placeholder="例如：main"
+                hint="随便起个名字，用来区分多个号"
+                persistent-hint
+                :error-messages="accountError"
                 density="comfortable"
                 variant="outlined"
-                @update:model-value="scheduleSave"
+                @update:model-value="markAccountDirty"
+                @blur="saveAccount"
               />
             </v-col>
             <v-col cols="12" md="6">
@@ -348,27 +398,36 @@ onUnmounted(stopPolling)
                 v-model="account.name"
                 label="账号名称"
                 placeholder="例如：主号"
+                hint="给自己看的名字，可留空"
+                persistent-hint
                 density="comfortable"
                 variant="outlined"
-                @update:model-value="scheduleSave"
+                @update:model-value="markAccountDirty"
+                @blur="saveAccount"
               />
             </v-col>
           </v-row>
 
           <v-text-field
             v-model="account.ws_url"
-            :label="account.conn_mode === 'reverse' ? '监听地址' : '协议端地址'"
+            :label="account.conn_mode === 'reverse' ? '本机监听地址' : '协议端地址'"
+            hint="本地监听时协议端填这个地址；向外连接时填协议端的地址"
+            persistent-hint
             density="comfortable"
             variant="outlined"
-            @update:model-value="scheduleSave"
+            @update:model-value="markAccountDirty"
+            @blur="saveAccount"
           />
           <v-text-field
             v-model="account.access_token"
-            label="Access Token（可选）"
+            label="连接令牌（可选）"
+            hint="与协议端里填的一致，没有就留空"
+            persistent-hint
             density="comfortable"
             variant="outlined"
             autocomplete="off"
-            @update:model-value="scheduleSave"
+            @update:model-value="markAccountDirty"
+            @blur="saveAccount"
           />
 
           <div class="d-flex align-center gap-2 mt-1">
@@ -382,7 +441,7 @@ onUnmounted(stopPolling)
         </v-card-text>
         <v-card-actions>
           <v-spacer />
-          <v-btn color="primary" @click="nextFromAccount">下一步</v-btn>
+          <v-btn color="primary" :loading="savingAccount" @click="nextFromAccount">下一步</v-btn>
         </v-card-actions>
       </v-card>
 
@@ -664,6 +723,51 @@ onUnmounted(stopPolling)
   padding: 10px 12px;
   border-radius: 10px;
   background: rgba(var(--v-theme-primary), 0.06);
+}
+
+/* 「协议端怎么选」对照表：小而灰，作为选项说明而不是正文 */
+.mode-table {
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(var(--v-theme-on-surface), 0.03);
+  font-size: 12.5px;
+}
+
+.mode-table :deep(th) {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(var(--v-theme-on-surface), 0.6);
+}
+
+/* 模型服务卡片网格 */
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.preset-card {
+  padding: 10px 12px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color .15s, background-color .15s;
+}
+
+.preset-card--active {
+  border-color: rgb(var(--v-theme-primary)) !important;
+  background: rgba(var(--v-theme-primary), .06);
+}
+
+.preset-card__name {
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.preset-card__hint {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: rgba(var(--v-theme-on-surface), .55);
 }
 
 .mono {
