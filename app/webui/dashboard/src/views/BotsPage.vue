@@ -98,6 +98,12 @@ function statusText(b: { status: BotStatus; conn_mode?: BotConnMode; listening?:
   return STATUS_TEXT[b.status] ?? b.status
 }
 
+/** 等待协议端接入是正常过渡态，不能用「错误」红色 */
+function statusChipColor(b: { status: BotStatus; conn_mode?: BotConnMode; listening?: boolean }) {
+  if (b.conn_mode === 'reverse' && b.status !== 'connected' && b.listening) return 'warning'
+  return statusColor(b.status)
+}
+
 /** 连接方向自创建时固定，卡片据此调整按钮禁用条件（反向监听已就绪时不必再点「连接」） */
 function isReverseDraft(id: string): boolean {
   return draftOf(id).conn_mode === 'reverse'
@@ -365,7 +371,7 @@ onBeforeUnmount(() => {
               {{ displayName(b) }}<template v-if="resolvedBotId(b)"> · QQ {{ resolvedBotId(b) }}</template>
             </v-card-title>
             <v-card-subtitle class="d-flex align-center gap-2">
-              <v-chip size="x-small" :color="statusColor(b.status)" variant="tonal">
+              <v-chip size="x-small" :color="statusChipColor(b)" variant="tonal">
                 <v-icon start size="x-small" icon="mdi-circle" /> {{ statusText(b) }}
               </v-chip>
               <span v-if="resolveAccount(b)?.nickname" class="text-caption app-line-clamp-1">

@@ -3,7 +3,7 @@
  * 首启向导（4 步）：连接 → 模型 → 人格 → 完成。
  *
  * 设计约束（docs/oneclick-bundle-and-onboarding-design.md §7.2）：
- * - 每一步都只有一个问题，且**同屏完成**（例如"拉模型"和"入池"不再分两页）；
+ * - 每一步都只有一个问题，且**同屏完成**（例如"选模型"和"接入"不再分两页）；
  * - 每一步都可以直接「下一步」（先跳过、稍后再回来补，总览会给 blocker 提示）；
  * - 第 4 步的清单与总览就绪卡、启动横幅同源（`/api/readiness`）。
  */
@@ -154,7 +154,7 @@ const personaMode = ref<'scratch' | 'bundle'>('scratch')
 const persona = reactive({ name: '群聊搭子', prompt: '' })
 const personaDone = ref(false)
 
-// 选预设：导入 + 应用到当前账号（会带上人格/模型池/Agent 配置/随包模块）
+// 选预设：导入 + 应用到当前账号（会带上人格、模型和随包功能）
 const importDialog = ref(false)
 const selectedPresetId = ref('')
 const presetSecrets = reactive<Record<string, string>>({})
