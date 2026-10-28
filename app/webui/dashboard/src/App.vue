@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { defineComponent, h, onBeforeUnmount, onErrorCaptured, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useTheme } from 'vuetify'
 import { useThemeStore } from '@/stores/theme'
 import { useNotifyStore } from '@/stores/notify'
@@ -18,12 +19,20 @@ const agent = useAgentConfigStore()
 const ErrorBoundary = defineComponent({
   name: 'AppErrorBoundary',
   setup(_, { slots }) {
+    const route = useRoute()
     const failed = ref(false)
     onErrorCaptured((err) => {
       console.error('[ui] 页面渲染异常', err)
       failed.value = true
       return false
     })
+    // 渲染异常只影响出错的那一页：路由一变就复位，不能整站卡在错误页
+    watch(
+      () => route.fullPath,
+      () => {
+        failed.value = false
+      },
+    )
     return () =>
       failed.value
         ? h(
