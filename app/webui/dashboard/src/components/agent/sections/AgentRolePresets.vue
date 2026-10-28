@@ -100,8 +100,10 @@ async function applyToAgent() {
     return
   }
   agent.onChange('system_prompt', selectedPreset.value.system_prompt)
-  await agent.save()
-  notify.push(`已应用人格「${selectedPreset.value.name}」`, 'success')
+  // 保存失败时 save() 已经弹了失败原因，这里只在真正落盘后说「已应用」
+  if (await agent.save()) {
+    notify.push(`已应用人格「${selectedPreset.value.name}」`, 'success')
+  }
 }
 
 function goToPersonas() {
