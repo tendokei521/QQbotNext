@@ -38,8 +38,12 @@
 - [x] 诊断台：按账号保留最近 N 条 OneBot 原始事件 + 发送测试消息（「连上了但 @ 没反应」可自助排查）
 - [x] 缓存清理从「每次 set 全表扫」改为节流清理
 - [x] 日志句柄泄漏修复；启动缓存仅在依赖检查通过时写入
-- [ ] `cron_service` 暴露 next_run（本次未做，记录为后续项）
-- [ ] 向导后台连接循环与监督循环合并（本次未做，记录为后续项）
+- [x] 反向监听存活判断改用 `is_serving()`（websockets 16 无 closed 属性）；修复跨事件循环 stop 的未 await 告警
+- [x] LLM 回合任务接入 async 关停链（pipeline/AgentRuntime/AgentManager 全 async，关库前 await 结束）
+- [x] 插件依赖安装前端闭环（功能插件页「检查依赖 / 安装依赖」）
+- [x] `cron_service` 暴露 
+ext_run`（wall-clock epoch 秒，list_jobs 返回）+ 墙钟跳变时丢弃 cron 缓存重算
+- [x] 向导后台连接循环改指数退避（2→60s），连上/监听就绪/账号删除即退出
 
 ## 3. 前端 P0（状态一致性 / 稳定性）
 
@@ -75,6 +79,7 @@
 
 ## 6. 验证记录
 
-- 全量 `pytest -q`：见最终提交说明
-- 前端 `pnpm typecheck` / `pnpm build`：见最终提交说明
-- 实机截图核对：总览 / 账号管理 / 功能插件 / 模型服务 / 设置 / 首次配置
+- 全量 `pytest -q`：**3243 passed, 18 skipped**（整改前基线：3090 passed / 10 failed）
+- 前端 `pnpm typecheck` / `pnpm build`：均通过（dist 已重建入库）
+- 实机截图核对：总览 / 账号管理 / 功能插件 / 模型服务 / 设置 / 首次配置（含浅色主题）
+- 诊断台 API 实测：`GET /api/bots/{id}/events` 返回契约 JSON；未连接时发测试消息返回可读 400
