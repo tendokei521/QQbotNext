@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 from html import escape as html_escape
 from pathlib import Path
@@ -35,8 +36,8 @@ from app.webui.api import policy as policy_router
 from app.webui.api import prompt_dump as prompt_dump_router
 from app.webui.api import provider_presets as provider_presets_router
 from app.webui.api import readiness as readiness_router
-from app.webui.api import responder as responder_router
 from app.webui.api import resources as resources_router
+from app.webui.api import responder as responder_router
 from app.webui.api import role_presets as role_presets_router
 from app.webui.api import sessions as sessions_router
 from app.webui.api import setup as setup_router
@@ -137,12 +138,45 @@ def _is_secure_request(request: Request) -> bool:
     return request.url.scheme == "https" or forwarded == "https"
 
 
+#: 可信反代地址段：只有这些对端转发的 X-Forwarded-For 才可信。
+#: 不用 `ip_address.is_private`：它在部分 Python 版本把 203.0.113.0/24 这类
+#: 文档/保留网段也算成 private，会误信公网来源。
+_TRUSTED_PROXY_NETS = tuple(
+    ipaddress.ip_network(net)
+    for net in (
+        "127.0.0.0/8",     # IPv4 回环
+        "::1/128",         # IPv6 回环
+        "10.0.0.0/8",      # RFC1918
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "fc00::/7",        # IPv6 ULA
+    )
+)
+
+
+def _is_trusted_proxy(host: str) -> bool:
+    """对端是否本机/私网（可信反向代理），只有它转发的 X-Forwarded-For 才可信。
+
+    公网直连的请求可以随便伪造 XFF；若无条件采信，换个头就绕过登录限流。
+    """
+    try:
+        addr = ipaddress.ip_address(str(host or "").strip())
+    except ValueError:
+        return False
+    return any(addr.version == net.version and addr in net for net in _TRUSTED_PROXY_NETS)
+
+
 def _client_address(request: Request) -> str:
-    """登录限流用的来源标识；反代后取 X-Forwarded-For 首个地址。"""
+    """登录限流用的来源标识。
+
+    仅当直连对端是回环/私网地址（本机或内网反代）时才采信 ``X-Forwarded-For``；
+    否则一律用 TCP 层对端地址——客户端改头不能换桶，限流才真正生效。
+    """
+    client_host = request.client.host if request.client else ""
     forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    if forwarded and _is_trusted_proxy(client_host):
+        return forwarded.split(",")[0].strip() or client_host
+    return client_host or "unknown"
 
 
 def _set_session_cookie(response, token: str, request: Request):
