@@ -89,3 +89,39 @@ def _module_exists(registry, module_name: str) -> bool:
     return _catalog_entry(registry, module_name) is not None or _module_dir_exists(registry, module_name)
 
 
+def find_schema_field(module, field_type: str, endpoint: str) -> dict | None:
+    """在模块 config_schema 中查找 type 与 endpoint 匹配的字段定义（返回副本，不污染类级 schema）。"""
+    schema = getattr(module, "config_schema", None) or {}
+    for key, field in schema.items():
+        if not isinstance(field, dict):
+            continue
+        if field.get("type") == field_type and field.get("endpoint") == endpoint:
+            result = dict(field)
+            result["key"] = key
+            return result
+    return None
+
+
+def conn_for_account(gateway, account_id: str | None):
+    """按账号 id 取当前连接（路由里的 ``bot_id`` 参数实际是 account_id，不是 QQ 号）。
+
+    历史 bug：用 ``find_conn_by_bot_id(account_id)`` 按 QQ 号匹配（字符串 vs 整数
+    永不相等）→ 拿 None，热重载后实例 ``ctx.bot=None``、``online=False``、定时任务
+    不注册。``get_bot(account_id)`` 才是按 ``connections`` 的账号 id 查；
+    对只有旧接口的测试替身保留一次回退，真实网关不会走回退。
+    """
+    if not account_id:
+        return None
+    getter = getattr(gateway, "get_bot", None)
+    conn = getter(account_id) if callable(getter) else None
+    if conn is not None:
+        return conn
+    finder = getattr(gateway, "find_conn_by_bot_id", None)
+    return finder(account_id) if callable(finder) else None
+
+
+def resolve_bot(gateway, bot_id: str | None):
+    """路由层按账号解析连接（空账号返回 None）。"""
+    return conn_for_account(gateway, bot_id)
+
+

@@ -34,6 +34,9 @@ from app.webui.api.module_lookup import (
     _module_dir_exists,
     _module_exists,
     _uploaded_zip,
+    conn_for_account,
+    find_schema_field,
+    resolve_bot,
 )
 from app.webui.ws import manager
 
@@ -348,7 +351,7 @@ async def get_module_config(module_name: str, request: Request,
 
 
 @router.post("/module/{module_name}/config")
-async def update_config(module_name: str, request: Request, bot_id: str | None = Depends(parse_account_id), resource_registry=Depends(get_resource_registry), agent_manager=Depends(get_agent_manager), registry=Depends(get_module_registry)):
+async def update_config(module_name: str, request: Request, bot_id: str | None = Depends(parse_account_id), resource_registry=Depends(get_resource_registry), agent_manager=Depends(get_agent_manager), registry=Depends(get_module_registry), config_service=Depends(get_config_service)):
     if not bot_id:
         return _err(404, f"模块 {module_name} 无 Bot ID 实例")
     module = _resolve_module(agent_manager, registry, module_name, bot_id)
@@ -388,7 +391,18 @@ async def update_config(module_name: str, request: Request, bot_id: str | None =
         if isinstance(field, dict) and field.get("type") == "password" and value == _PASSWORD_MASK:
             continue
         module.config.set(key, value, auto_save=False)
-    module.config.save()
+    # 落库必须 await（save() 是 fire-and-forget，失败只留日志却回「已更新」）。
+    # 这里走受锁的 save_binding 而不是 config.save_async()：后者经 save_module_config
+    # 触发「模块配置已变更」广播，会再推一条重复事件、且那份 payload 未脱敏
+    # （password 字段会明文上 WS）。成功路径的广播仍由本接口统一发（已脱敏）。
+    try:
+        await config_service.save_binding(
+            module.module_name, "account", str(bot_id),
+            config=dict(module.config.raw_config),
+        )
+    except Exception as e:  # noqa: BLE001 —— 落库失败必须让前端知道
+        logger.exception(f"[Module] 保存模块配置失败 {module_name}/{bot_id}: {e}")
+        return _err(500, f"配置保存失败：{e}")
 
     await manager.broadcast(json.dumps({
         "type": "module_config_updated",
@@ -406,7 +420,7 @@ async def update_config(module_name: str, request: Request, bot_id: str | None =
 async def reload_modules(request: Request, bot_id: str | None = Depends(parse_account_id), bot_service=Depends(get_bot_service)):
 
     bot_service = bot_service
-    bot = bot_service.gateway.find_conn_by_bot_id(bot_id) if bot_id else None
+    bot = conn_for_account(bot_service.gateway, bot_id)
     await bot_service.registry.reload_all(bot_id, bot=bot)
     await manager.broadcast(json.dumps({"type": "modules_reloaded", "bot_id": bot_id}))
     return _ok("模块已重新加载")
@@ -422,7 +436,7 @@ async def reload_single_module(
 
     bot_service = bot_service
     registry = registry
-    bot = bot_service.gateway.find_conn_by_bot_id(bot_id) if bot_id else None
+    bot = conn_for_account(bot_service.gateway, bot_id)
     ok = await registry.reload_single(module_name, bot_id, bot=bot)
     if not ok:
         return _err(404, f"模块 {module_name} (Bot {bot_id}) 重载失败或不存在")
@@ -694,26 +708,7 @@ async def module_page(module_name: str, request: Request,
 
 
 # ==================== list / dynamic 数据源 ====================
-
-def _find_schema_field(module, field_type: str, endpoint: str) -> dict | None:
-    """在模块 config_schema 中查找 type 与 endpoint 匹配的字段定义（返回副本，不污染类级 schema）。"""
-    schema = getattr(module, "config_schema", None) or {}
-    for key, field in schema.items():
-        if not isinstance(field, dict):
-            continue
-        if field.get("type") == field_type and field.get("endpoint") == endpoint:
-            result = dict(field)
-            result["key"] = key
-            return result
-    return None
-
-
-def _resolve_bot(gateway, bot_id: str | None):
-    if not bot_id:
-        return None
-
-    return gateway.find_conn_by_bot_id(bot_id)
-
+# schema 字段查找 / 按账号取连接 / 连接解析都在 `module_lookup.py`（纯辅助，控制本文件行数）。
 
 @router.get("/module/{module_name}/list/{endpoint}")
 async def module_list_data(module_name: str, endpoint: str, request: Request,
@@ -722,11 +717,11 @@ async def module_list_data(module_name: str, endpoint: str, request: Request,
     module = registry.get(module_name, bot_id)
     if not module:
         return _err(404, f"模块 {module_name} (Bot {bot_id}) 不存在")
-    field = _find_schema_field(module, "list", endpoint)
+    field = find_schema_field(module, "list", endpoint)
     if field is None:
         return _err(404, f"模块 {module_name} 无 list 字段 endpoint={endpoint}")
 
-    bot = _resolve_bot(gateway, bot_id)
+    bot = resolve_bot(gateway, bot_id)
     try:
         data = await provider_registry.call(
             module.module_name, endpoint, "list", module, bot, field
@@ -763,11 +758,11 @@ async def module_dynamic_options(module_name: str, endpoint: str, request: Reque
     module = registry.get(module_name, bot_id)
     if not module:
         return _err(404, f"模块 {module_name} (Bot {bot_id}) 不存在")
-    field = _find_schema_field(module, "dynamic", endpoint)
+    field = find_schema_field(module, "dynamic", endpoint)
     if field is None:
         return _err(404, f"模块 {module_name} 无 dynamic 字段 endpoint={endpoint}")
 
-    bot = _resolve_bot(gateway, bot_id)
+    bot = resolve_bot(gateway, bot_id)
     try:
         data = await provider_registry.call(
             module.module_name, endpoint, "dynamic", module, bot, field, value=None
@@ -784,11 +779,11 @@ async def module_dynamic_fields(module_name: str, endpoint: str, value: str, req
     module = registry.get(module_name, bot_id)
     if not module:
         return _err(404, f"模块 {module_name} (Bot {bot_id}) 不存在")
-    field = _find_schema_field(module, "dynamic", endpoint)
+    field = find_schema_field(module, "dynamic", endpoint)
     if field is None:
         return _err(404, f"模块 {module_name} 无 dynamic 字段 endpoint={endpoint}")
 
-    bot = _resolve_bot(gateway, bot_id)
+    bot = resolve_bot(gateway, bot_id)
     try:
         data = await provider_registry.call(
             module.module_name, endpoint, "dynamic", module, bot, field, value=value
