@@ -546,6 +546,58 @@ async def update_module_zip(
     return _ok(message, plugin=info)
 
 
+@router.get("/modules/{module_name}/dependencies")
+async def module_dependencies(
+    module_name: str,
+    request: Request,
+    registry=Depends(get_module_registry)):
+    """只读：查询该已安装插件声明的 pip 依赖与当前缺失清单。"""
+
+    registry = registry
+    try:
+        status = registry.dependencies_status(module_name)
+    except (ValueError, OSError) as exc:
+        return _install_error(exc)
+    return JSONResponse(content={"ok": True, "status": "success", **status})
+
+
+@router.post("/modules/{module_name}/install-deps")
+async def install_module_dependencies(
+    module_name: str,
+    request: Request,
+    confirm_deps: bool = Form(False),
+    mirror: str = Form(""),
+    bot_id: str | None = Depends(parse_account_id),
+    registry=Depends(get_module_registry)):
+    """安装插件声明的 pip 依赖（只装清单里的包名，需前端显式确认）。
+
+    - ``confirm_deps=true`` 必须显式传：装包会改运行环境，不能由"点进页面"触发；
+    - 失败不阻断插件本身（返回 502 + stdout/stderr + 可复制命令，插件保持原状）；
+    - 成功后重试加载该模块，``loaded`` 告知是否加载成功。
+    """
+
+    registry = registry
+    if not confirm_deps:
+        return _err(
+            400,
+            "安装依赖需要显式确认",
+            "请确认「允许框架用 pip 安装该插件声明的依赖」后再调用（confirm_deps=true）",
+        )
+    try:
+        result = await registry.install_dependencies(module_name, mirror=mirror, bot_id=bot_id)
+    except (ValueError, OSError) as exc:
+        return _install_error(exc)
+    if result.get("ok"):
+        await manager.broadcast(json.dumps({"type": "modules_reloaded", "bot_id": bot_id}))
+        message = f"插件 {module_name} 的依赖已安装" + ("，模块已重新加载" if result.get("loaded") else "")
+        return JSONResponse(content={"ok": True, "status": "success", "message": message, **result})
+    hint = "依赖没有装齐；插件保持原状。可复制 command 到终端手动安装后重试"
+    return JSONResponse(
+        status_code=502,
+        content={"ok": False, "status": "error", "message": f"插件 {module_name} 依赖安装失败", "hint": hint, **result},
+    )
+
+
 @router.delete("/modules/{module_name}")
 async def delete_module(
     module_name: str,

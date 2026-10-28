@@ -18,6 +18,7 @@ import os
 import re
 import shutil
 import stat
+import sys
 import time
 import uuid
 import zipfile
@@ -32,6 +33,13 @@ from app.plugin.manifest import (
     Manifest,
     ManifestError,
     load_manifest,
+)
+from app.plugin.requirements import (
+    PIP_TIMEOUT,
+    inspect_dependencies,
+    is_safe_index_url,
+    missing_requirement_specs,
+    truncate_pip_output,
 )
 
 #: zip 安全阈值（对应 §3.1 D8）：超过即拒绝，避免 zip 炸弹拖死进程
@@ -184,6 +192,7 @@ class ZipPluginInstaller:
             builtin_conflict = (self.builtin_dir / name).is_dir()
             existing_version = self._existing_version(target) if target.is_dir() else ""
             conflict = bool(target.is_dir() or builtin_conflict)
+            deps = inspect_dependencies(root, manifest)
             return {
                 "name": name,
                 "display_name": manifest.display_name,
@@ -197,6 +206,11 @@ class ZipPluginInstaller:
                 "files": self._count_files(root),
                 "manifest": dict(manifest.raw),
                 "requirements": manifest.requirements,
+                # 依赖预检：前端在"安装前"就能看到缺哪些包、给出可复制命令
+                "deps_file": deps["file"],
+                "deps_declared": deps["declared"],
+                "deps_missing": deps["missing"],
+                "deps_rejected": deps["rejected"],
             }
         except ModuleInstallError:
             raise
@@ -346,6 +360,121 @@ class ZipPluginInstaller:
                 "purge_data": purge_data_dir is not None,
                 "data_removed": purge_data_dir is not None and not (data_path and data_path.exists()),
             }
+
+    # ---------- 插件 pip 依赖 ----------
+    def _installed_plugin_dir(self, name: str) -> Path:
+        """已安装第三方插件的目录（不存在就报错，不猜路径）。"""
+        self._require_install_dir()
+        self._check_name(name)
+        target = self.install_dir / name
+        if not (target / "module.json").is_file():
+            raise ModuleInstallError(
+                f"模块 {name} 不是已安装的外部插件",
+                hint="先在模块页安装该插件，再安装它声明的依赖",
+            )
+        return target
+
+    def dependencies(self, name: str) -> dict:
+        """只读：该插件声明的 pip 依赖与当前缺失清单（前端据此显示「安装依赖」）。"""
+        plugin_dir = self._installed_plugin_dir(name)
+        status = inspect_dependencies(plugin_dir, load_manifest(plugin_dir))
+        return {
+            "module_name": name,
+            "requirements": status["file"],
+            "declared": status["declared"],
+            "rejected": status["rejected"],
+            "missing": status["missing"],
+            "command": self._pip_command(status["missing"]),
+        }
+
+    async def install_dependencies(
+        self, name: str, *, mirror: str = "", timeout: float = PIP_TIMEOUT
+    ) -> dict:
+        """用 pip 子进程安装该插件"声明且缺失"的包（只装清单里的包名）。
+
+        pip 非 0 退出不抛异常：返回 ``ok=False`` + stdout/stderr + 可复制命令，
+        由调用方展示（失败不改变插件本身，也不阻断安装）。非法清单/未安装/镜像非法抛错。
+        """
+        plugin_dir = self._installed_plugin_dir(name)
+        status = inspect_dependencies(plugin_dir, load_manifest(plugin_dir))
+        if status["rejected"]:
+            raise ModuleInstallError(
+                "依赖清单里有不支持的写法，已拒绝安装",
+                hint="每行只支持「包名 + 版本约束」；不支持 -e/-r/URL/环境标记："
+                + "；".join(status["rejected"][:3]),
+            )
+        mirror = (mirror or "").strip()
+        if mirror and not is_safe_index_url(mirror):
+            raise ModuleInstallError(
+                "pip 镜像地址不合法",
+                hint="只接受 http(s):// 开头的地址（如 https://pypi.tuna.tsinghua.edu.cn/simple）",
+            )
+        missing = status["missing"]
+        command = self._pip_command(missing, mirror)
+        if not missing:
+            return self._deps_payload(
+                name, status, command, exit_code=0, stdout="", stderr="", missing=[], attempted=[]
+            )
+
+        async with self._lock:  # pip 串行：并发写同一个 site-packages 会互相破坏
+            exit_code, stdout, stderr = await self._run_pip(missing, mirror, timeout)
+        remaining = missing_requirement_specs(missing) if exit_code == 0 else missing
+        return self._deps_payload(
+            name, status, command, exit_code=exit_code, stdout=stdout, stderr=stderr,
+            missing=remaining, attempted=missing,
+        )
+
+    @staticmethod
+    def _deps_payload(
+        name: str, status: dict, command: list[str], *, exit_code: int,
+        stdout: str, stderr: str, missing: list[str], attempted: list[str],
+    ) -> dict:
+        return {
+            "module_name": name,
+            "ok": exit_code == 0,
+            "requirements": status["file"],
+            "declared": status["declared"],
+            "installed": [spec for spec in attempted if spec not in missing],
+            "missing": missing,
+            "deps_missing": bool(missing),
+            "exit_code": exit_code,
+            "command": command,
+            "stdout": stdout,
+            "stderr": stderr,
+        }
+
+    def _pip_command(self, specs: list[str], mirror: str = "") -> list[str]:
+        """拼出真正执行（也可复制）的 pip argv；不经 shell。"""
+        command = [sys.executable, "-m", "pip", "install", "--disable-pip-version-check"]
+        if mirror:
+            command.extend(["--index-url", mirror])
+        command.extend(specs)
+        return command
+
+    async def _run_pip(
+        self, specs: list[str], mirror: str, timeout: float
+    ) -> tuple[int, str, str]:
+        """子进程跑 pip 并捕获输出；超时杀掉进程后如实返回（不抛）。"""
+        command = self._pip_command(specs, mirror)
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except OSError as e:
+            return 1, "", f"无法启动 pip 子进程: {e}"
+        try:
+            raw_stdout, raw_stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            return 1, "", f"pip 安装超时（>{timeout:.0f}s），已终止子进程"
+        return (
+            process.returncode if process.returncode is not None else 1,
+            truncate_pip_output(raw_stdout),
+            truncate_pip_output(raw_stderr),
+        )
 
     # ---------- 解压 / 校验 ----------
     def _extract(self, zip_path: Path, dest: Path) -> Path:

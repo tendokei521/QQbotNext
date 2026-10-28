@@ -602,9 +602,31 @@ class ModuleRegistry:
         }
         if requirements and (result.path / requirements).is_file():
             info["requirements_hint"] = (
-                f"插件声明了依赖清单 {requirements}，框架不会自动 pip 安装；请按需手工安装"
+                f"插件声明了依赖清单 {requirements}；可在模块页点「安装依赖」自动安装，"
+                f"或手动执行 pip install -r {result.path / requirements}"
             )
         return info
+
+    # ---------- pip 依赖 ----------
+    def dependencies_status(self, module_name: str) -> dict:
+        """只读：该已安装插件声明的 pip 依赖与当前缺失清单。"""
+        self._require_installer()
+        return self._installer.dependencies(module_name)
+
+    async def install_dependencies(
+        self, module_name: str, *, mirror: str = "", bot_id: Any = None
+    ) -> dict:
+        """安装插件声明的 pip 依赖；成功后重试加载该模块（失败不阻断、不回滚插件）。"""
+        self._require_installer()
+        result = await self._installer.install_dependencies(module_name, mirror=mirror)
+        result["loaded"] = False
+        if result["ok"]:
+            try:
+                result["loaded"] = await self.reload_single(module_name, bot_id)
+            except Exception as e:  # noqa: BLE001 —— 依赖装好了但插件仍有别的问题，如实回报
+                self.log.warning(f"[Module] {module_name} 依赖安装后重载失败: {e}")
+                result["load_error"] = str(e)
+        return result
 
     async def _unload_tree(self, module_name: str) -> None:
         """卸载模块及其全部子模块（cascade：先子后父）。"""
