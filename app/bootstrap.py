@@ -445,6 +445,34 @@ def build_container(settings: Settings | None = None) -> Container:
     return container
 
 
+async def shutdown_services(
+    *,
+    bot_service: BotService,
+    agent_manager: AgentManager,
+    task_manager: TaskManager,
+    stat_recorder: StatRecorder,
+    db: Database,
+    cancel_timeout: float = 5.0,
+) -> None:
+    """按依赖顺序关停：网关 → Agent/模块运行时 → 残留任务（等待结束）→ 统计 → DB。
+
+    顺序不能换：后台任务的 finally 里仍可能写 DB（统计、会话、账号快照）。
+    历史实现只 ``cancel_all()`` 就立刻关库，于是这些写入抛
+    "Cannot operate on a closed database"——退出时日志报错、最后一批数据丢失。
+    这里必须先 ``await cancel_all_await()`` 等任务真正结束，再关统计、最后关库。
+    """
+    await bot_service.shutdown()
+    agent_manager.shutdown()
+    cancelled = await task_manager.cancel_all_await(timeout=cancel_timeout)
+    if cancelled:
+        logger.info(f"已取消 {cancelled} 个后台任务")
+    try:
+        await stat_recorder.close()
+    except Exception as e:  # noqa: BLE001 —— 退出路径必须继续走完（统计收尾失败不阻断关库）
+        logger.debug(f"[Stats] 关闭统计记录器失败（已忽略）: {e}")
+    await db.close()
+
+
 async def run(settings: Settings | None = None) -> None:
     """主入口：初始化并常驻运行。"""
     global _container
@@ -551,17 +579,15 @@ async def run(settings: Settings | None = None) -> None:
             _container.get(SetupAccountService).stop_connecting()
         except Exception as e:  # noqa: BLE001 —— 退出路径必须继续走完
             logger.warning(f"[Setup] 退出时停止连接重试失败: {e}")
-        await bot_service.shutdown()
-        # 先停止 Agent 运行时（定时/主动），再取消残留任务、关 DB
-        _container.get(AgentManager).shutdown()
-        task_manager = _container.get(TaskManager)
-        task_manager.cancel_all()
-        # 统计记录器：退出前强制落库（禁止 fire-and-forget，否则丢最后一批）
-        try:
-            await _container.get(StatRecorder).close()
-        except Exception as e:  # noqa: BLE001 —— 统计收尾失败不该阻断进程退出
-            logger.debug(f"[Stats] 关闭统计记录器失败（已忽略）: {e}")
-        await db.close()
+        # 关停顺序集中在一处（见 `shutdown_services` 的说明）：网关 → Agent → 任务（await）
+        # → 统计 → DB。任务 finally 里的 DB 写必须早于 db.close()。
+        await shutdown_services(
+            bot_service=bot_service,
+            agent_manager=_container.get(AgentManager),
+            task_manager=_container.get(TaskManager),
+            stat_recorder=_container.get(StatRecorder),
+            db=db,
+        )
         logger.info("已关闭")
 
 
