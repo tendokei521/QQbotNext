@@ -19,6 +19,7 @@ OneBot 的 ``get_group_list`` 现在只在连接成功时拉一次，结果只�
 from __future__ import annotations
 
 import time
+from typing import Any
 
 #: 缓存被认为"新鲜"的时长（秒）；超过就提示用户刷新
 STALE_AFTER_S = 300
@@ -26,6 +27,9 @@ STALE_AFTER_S = 300
 
 class GroupStoreMixin:
     """``known_groups`` 的读写。宿主需提供 ``db / log / _known_groups``。"""
+
+    #: 宿主提供的全量配置写串行锁（按任务可重入）
+    _write_lock: Any
 
     # ==================== 读 ====================
 
@@ -60,6 +64,11 @@ class GroupStoreMixin:
         - 未出现的已知群 → 只把 ``in_group`` 置 0，**不删除行**；
         - 单个群号非法 → 跳过（对端数据脏不能拖垮整次刷新）。
         """
+        async with self._write_lock:
+            return await self._upsert_known_groups_unlocked(account_id, groups)
+
+    async def _upsert_known_groups_unlocked(self, account_id: object, groups: list[dict]) -> int:
+        """`upsert_known_groups` 的实现体（调用方必须已持有写锁）。"""
         aid = str(account_id)
         now = int(time.time())
         sqls: list[tuple[str, tuple]] = []

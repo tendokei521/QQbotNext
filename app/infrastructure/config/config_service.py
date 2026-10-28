@@ -46,6 +46,41 @@ __all__ = [
     "split_ws_url",
 ]
 
+class _ReentrantLock:
+    """按事件循环任务可重入的异步写锁。
+
+    为什么不用裸 `asyncio.Lock`：ConfigService 的写路径会互相调用
+    （``add_bot → save_bots``、``delete_bot → save_bots``、
+    ``save_channel_override → delete_channel_override``），裸锁会在同一任务里
+    二次 acquire 时自锁死。重入按 ``current_task()`` 判断，深度归零才真正释放。
+
+    并发语义：同一进程内所有配置写（账号 / 绑定 / 群覆盖 / 预设 / kv）串行；
+    读路径不取锁（读的都是内存快照，写路径保证落库成功后才替换快照）。
+    """
+
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self._owner: asyncio.Task | None = None
+        self._depth = 0
+
+    async def __aenter__(self) -> _ReentrantLock:
+        task = asyncio.current_task()
+        if task is not None and task is self._owner:
+            self._depth += 1
+            return self
+        await self._lock.acquire()
+        self._owner = task
+        self._depth = 1
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        self._depth -= 1
+        if self._depth > 0:
+            return
+        self._owner = None
+        self._lock.release()
+
+
 Listener = Callable[[str, Any], Awaitable[None]]
 
 DEFAULT_WEBUI_CONFIG: dict = {
@@ -95,6 +130,8 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
         self.root = project_root
         self.log = log or logger
         self._listeners: list[Listener] = []
+        # 全量配置写的串行锁（见 `_ReentrantLock` 的说明）。读路径不取锁。
+        self._write_lock = _ReentrantLock()
 
         # 内存缓存（source of truth for 读取）
         # 账号：account_id -> {id, name, ws_url, owner_id, auto_connect, conn_mode}
@@ -370,8 +407,9 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
         for key, value in merged.items():
             sqls.append(("INSERT OR REPLACE INTO webui_config (key, value_json) VALUES (?,?)",
                          (key, self.db.dumps(value))))
-        await self.db.run_in_transaction(sqls)   # 先落库，成功后再更新内存缓存
-        self._webui = merged
+        async with self._write_lock:
+            await self.db.run_in_transaction(sqls)   # 先落库，成功后再更新内存缓存
+            self._webui = merged
         await self._notify("webui", merged)
 
     # ==================== Provider 预设（全局共享连接配置） ====================
@@ -397,21 +435,23 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
     async def save_provider_preset(self, preset_id: str, preset: dict) -> None:
         """持久化 Provider 预设并广播变更。"""
         key = str(preset_id)
-        self._provider_presets[key] = dict(preset)
-        await self._persist_provider_preset(key)
+        async with self._write_lock:
+            self._provider_presets[key] = dict(preset)
+            await self._persist_provider_preset(key)
         await self._notify("provider_presets", self.list_provider_presets())
 
     async def delete_provider_preset(self, preset_id: str) -> bool:
         """删除 Provider 预设并广播变更。"""
         key = str(preset_id)
-        if key not in self._provider_presets:
-            return False
-        del self._provider_presets[key]
-        try:
-            await self.db.execute("DELETE FROM provider_presets WHERE id = ?", (key,))
-        except Exception as e:
-            self.log.error(f"[Config] 删除 Provider 预设失败 {key}: {e}")
-            return False
+        async with self._write_lock:
+            if key not in self._provider_presets:
+                return False
+            try:
+                await self.db.execute("DELETE FROM provider_presets WHERE id = ?", (key,))
+            except Exception as e:
+                self.log.error(f"[Config] 删除 Provider 预设失败 {key}: {e}")
+                return False
+            del self._provider_presets[key]
         await self._notify("provider_presets", self.list_provider_presets())
         return True
 
@@ -457,20 +497,22 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
     async def save_provider_model(self, model_id: str, model: dict) -> None:
         """持久化模型实例并广播变更。"""
         key = str(model_id)
-        self._provider_models[key] = dict(model)
-        await self._persist_provider_model(key)
+        async with self._write_lock:
+            self._provider_models[key] = dict(model)
+            await self._persist_provider_model(key)
         await self._notify("provider_models", self.list_provider_models())
 
     async def delete_provider_model(self, model_id: str) -> bool:
         key = str(model_id)
-        if key not in self._provider_models:
-            return False
-        del self._provider_models[key]
-        try:
-            await self.db.execute("DELETE FROM provider_models WHERE id = ?", (key,))
-        except Exception as e:
-            self.log.error(f"[Config] 删除 Provider 模型失败 {key}: {e}")
-            return False
+        async with self._write_lock:
+            if key not in self._provider_models:
+                return False
+            try:
+                await self.db.execute("DELETE FROM provider_models WHERE id = ?", (key,))
+            except Exception as e:
+                self.log.error(f"[Config] 删除 Provider 模型失败 {key}: {e}")
+                return False
+            del self._provider_models[key]
         await self._notify("provider_models", self.list_provider_models())
         return True
 
@@ -506,12 +548,14 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
 
     async def save_provider_settings(self, settings: dict) -> None:
         merged = {**DEFAULT_PROVIDER_SETTINGS, **(settings or {})}
-        self._provider_settings = dict(merged)
-        for key, value in merged.items():
-            await self.db.execute(
-                "INSERT OR REPLACE INTO provider_settings (key, value_json) VALUES (?,?)",
-                (key, self.db.dumps(value)),
-            )
+        async with self._write_lock:
+            sqls = [
+                ("INSERT OR REPLACE INTO provider_settings (key, value_json) VALUES (?,?)",
+                 (key, self.db.dumps(value)))
+                for key, value in merged.items()
+            ]
+            await self.db.run_in_transaction(sqls)   # 先落库，全成功后再换内存快照
+            self._provider_settings = dict(merged)
         await self._notify("provider_settings", self.get_provider_settings())
 
     # ==================== 角色预设 ====================
@@ -530,20 +574,22 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
 
     async def save_role_preset(self, role_id: str, preset: dict) -> None:
         key = str(role_id)
-        self._role_presets[key] = dict(preset)
-        await self._persist_role_preset(key)
+        async with self._write_lock:
+            self._role_presets[key] = dict(preset)
+            await self._persist_role_preset(key)
         await self._notify("role_presets", self.list_role_presets())
 
     async def delete_role_preset(self, role_id: str) -> bool:
         key = str(role_id)
-        if key not in self._role_presets:
-            return False
-        del self._role_presets[key]
-        try:
-            await self.db.execute("DELETE FROM role_presets WHERE id = ?", (key,))
-        except Exception as e:
-            self.log.error(f"[Config] 删除角色预设失败 {key}: {e}")
-            return False
+        async with self._write_lock:
+            if key not in self._role_presets:
+                return False
+            try:
+                await self.db.execute("DELETE FROM role_presets WHERE id = ?", (key,))
+            except Exception as e:
+                self.log.error(f"[Config] 删除角色预设失败 {key}: {e}")
+                return False
+            del self._role_presets[key]
         await self._notify("role_presets", self.list_role_presets())
         return True
 
@@ -584,10 +630,11 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
         return self.db.loads(row["value_json"], default)
 
     async def set_kv(self, key: str, value: Any) -> None:
-        await self.db.execute(
-            "INSERT OR REPLACE INTO kv (key, value_json) VALUES (?,?)",
-            (str(key), self.db.dumps(value)),
-        )
+        async with self._write_lock:
+            await self.db.execute(
+                "INSERT OR REPLACE INTO kv (key, value_json) VALUES (?,?)",
+                (str(key), self.db.dumps(value)),
+            )
 
     # ==================== 批量事务写入（预设应用 / 回滚用） ====================
     async def apply_ops(self, ops: Sequence[ConfigOp]) -> None:
@@ -604,27 +651,28 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
         if not ops:
             return
 
-        snapshot: dict[str, Any] = {}
-        for op in ops:
-            attr = _OP_KIND_ATTR.get(op.kind)
-            if attr is None:
-                raise ValueError(f"未知的配置操作类型: {op.kind}")
-            if attr not in snapshot:
-                snapshot[attr] = copy.deepcopy(getattr(self, attr))
-
-        sqls: list[tuple[str, Sequence[Any]]] = []
-        touched = {op.kind for op in ops}
-        try:
+        async with self._write_lock:
+            snapshot: dict[str, Any] = {}
             for op in ops:
-                sql = self._op_to_sql(op)
-                if sql is not None:
-                    sqls.append(sql)
-            if sqls:
-                await self.db.run_in_transaction(sqls)
-        except Exception:
-            for attr, value in snapshot.items():
-                setattr(self, attr, value)
-            raise
+                attr = _OP_KIND_ATTR.get(op.kind)
+                if attr is None:
+                    raise ValueError(f"未知的配置操作类型: {op.kind}")
+                if attr not in snapshot:
+                    snapshot[attr] = copy.deepcopy(getattr(self, attr))
+
+            sqls: list[tuple[str, Sequence[Any]]] = []
+            touched = {op.kind for op in ops}
+            try:
+                for op in ops:
+                    sql = self._op_to_sql(op)
+                    if sql is not None:
+                        sqls.append(sql)
+                if sqls:
+                    await self.db.run_in_transaction(sqls)
+            except Exception:
+                for attr, value in snapshot.items():
+                    setattr(self, attr, value)
+                raise
 
         if "role_preset" in touched:
             await self._notify("role_presets", self.list_role_presets())

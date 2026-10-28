@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 from typing import Any
 
@@ -24,6 +23,9 @@ _UNSET = object()
 
 class ChannelOverrideStoreMixin:
     """``channel_overrides`` 的读写。宿主需提供 ``db / log / _channel_overrides``。"""
+
+    #: 宿主提供的全量配置写串行锁（按任务可重入）
+    _write_lock: Any
 
     # ==================== 读 ====================
 
@@ -70,6 +72,24 @@ class ChannelOverrideStoreMixin:
         ``config`` / ``permission`` 传入即**整值替换**（调用方负责合并出最终值）；
         传 ``None`` 表示"本次不改"。要清空某层，用 ``delete_channel_override``。
         """
+        async with self._write_lock:
+            return await self._save_channel_override_unlocked(
+                account_id, capability, channel_id,
+                enabled=enabled, config=config, permission=permission, muted_until=muted_until,
+            )
+
+    async def _save_channel_override_unlocked(
+        self,
+        account_id: object,
+        capability: str = "agent",
+        channel_id: object = "",
+        *,
+        enabled: Any = _UNSET,
+        config: dict | None = None,
+        permission: dict | None = None,
+        muted_until: Any = _UNSET,
+    ) -> dict:
+        """`save_channel_override` 的实现体（调用方必须已持有写锁）。"""
         key = (str(account_id), str(capability), str(channel_id or ""))
         row = dict(self._channel_overrides.get(key) or {
             "account_id": key[0],
@@ -106,14 +126,15 @@ class ChannelOverrideStoreMixin:
         capability: str = "agent",
         channel_id: object = "",
     ) -> bool:
-        key = (str(account_id), str(capability), str(channel_id or ""))
-        existed = self._channel_overrides.pop(key, None) is not None
-        if existed:
-            await self.db.execute(
-                "DELETE FROM channel_overrides WHERE account_id = ? AND capability = ? AND channel_id = ?",
-                key,
-            )
-        return existed
+        async with self._write_lock:
+            key = (str(account_id), str(capability), str(channel_id or ""))
+            existed = self._channel_overrides.pop(key, None) is not None
+            if existed:
+                await self.db.execute(
+                    "DELETE FROM channel_overrides WHERE account_id = ? AND capability = ? AND channel_id = ?",
+                    key,
+                )
+            return existed
 
     async def _persist_channel_override(self, key: tuple[str, str, str]) -> None:
         try:

@@ -45,6 +45,8 @@ class AccountStoreMixin:
     log: Any
     _bots: dict[str, dict]
     _bot_accounts: dict[str, dict]
+    #: 全量配置写串行锁（`ConfigService._write_lock`，按任务可重入）
+    _write_lock: Any
 
     async def _notify(self, scope: str, payload: Any = None) -> None:  # pragma: no cover
         raise NotImplementedError
@@ -109,6 +111,11 @@ class AccountStoreMixin:
 
         顺序即 payload 顺序（写进 sort_order），因为 id 不可变、不能靠下标表达顺序。
         """
+        async with self._write_lock:
+            await self._save_bots_unlocked(bots)
+
+    async def _save_bots_unlocked(self, bots: list[dict]) -> None:
+        """`save_bots` 的实现体（调用方必须已持有写锁，避免并发全量覆盖互相抹掉）。"""
         old = self._bots
         normalized: dict[str, dict] = {}
         # 账号 → 模块是否默认关。**新建账号一律默认关**（用户没打开过的模块不该自己干活）；
@@ -201,43 +208,64 @@ class AccountStoreMixin:
 
         新账号的模块默认关（由 ``save_bots`` 检测新增 id 写入），由用户显式打开。
         """
-        raw_id = cfg.get("id")
-        raw_id = "" if raw_id is None else str(raw_id).strip()
-        if raw_id:
-            account_id = normalize_account_id(raw_id)
-            if not account_id:
-                raise ValueError(
-                    f"账号 ID 不合法：{raw_id!r}"
-                    "（只能用字母、数字、下划线、连字符，以字母或数字开头，1-32 个字符）"
-                )
-        else:
-            account_id = suggest_account_id(self._bots)
-        if account_id in self._bots:
-            raise ValueError(f"账号 id 已存在：{account_id}")
+        async with self._write_lock:
+            raw_id = cfg.get("id")
+            raw_id = "" if raw_id is None else str(raw_id).strip()
+            if raw_id:
+                account_id = normalize_account_id(raw_id)
+                if not account_id:
+                    raise ValueError(
+                        f"账号 ID 不合法：{raw_id!r}"
+                        "（只能用字母、数字、下划线、连字符，以字母或数字开头，1-32 个字符）"
+                    )
+            else:
+                account_id = suggest_account_id(self._bots)
+            if account_id in self._bots:
+                raise ValueError(f"账号 id 已存在：{account_id}")
 
-        name = normalize_account_name(cfg.get("name"), f"账号 {len(self._bots) + 1}")
-        bots = self.get_bots()
-        bots.append({
-            "id": account_id,
-            "name": name,
-            "ws_url": cfg.get("ws_url", ""),
-            "owner_id": cfg.get("owner_id"),
-            "auto_connect": bool(cfg.get("auto_connect", False)),
-            # 新增账号默认正向：`conn_mode` 未指定时不能写成空值，否则 save_bots 只能靠
-            # 「缺字段沿用旧值」兜底，而新账号没有旧值。
-            "conn_mode": normalize_mode(cfg.get("conn_mode")),
-        })
-        await self.save_bots(bots)
-        return account_id
+            name = normalize_account_name(cfg.get("name"), f"账号 {len(self._bots) + 1}")
+            row = {
+                "id": account_id,
+                "name": name,
+                "ws_url": cfg.get("ws_url", ""),
+                "owner_id": cfg.get("owner_id"),
+                "auto_connect": bool(cfg.get("auto_connect", False)),
+                # 新增账号默认正向：`conn_mode` 未指定时不能写成空值，否则 save_bots 只能靠
+                # 「缺字段沿用旧值」兜底，而新账号没有旧值。
+                "conn_mode": normalize_mode(cfg.get("conn_mode")),
+            }
+            # 只插这一行（不再「读出全部 → 追加 → 全量覆盖」）：两个并发加号不会互相覆盖，
+            # 也不会把一个保存请求的 payload 当作"删除清单"作用到别人身上。
+            await self.db.execute(
+                "INSERT OR REPLACE INTO bots "
+                "(account_id, name, ws_url, owner_id, auto_connect, conn_mode, "
+                "modules_default_enabled, sort_order) VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    account_id,
+                    row["name"],
+                    row["ws_url"],
+                    row.get("owner_id"),
+                    1 if row.get("auto_connect") else 0,
+                    row["conn_mode"],
+                    0,  # 新账号模块默认关
+                    len(self._bots),  # 排序：追加到末尾
+                ),
+            )
+            self._bots[account_id] = row
+            self._modules_default_off.add(account_id)
+            self._publish_account_labels()
+            await self._notify("bots", self.get_bots())
+            return account_id
 
     async def delete_bot(self, account_id: str) -> bool:
-        if str(account_id) not in self._bots:
-            return False
-        bots = [b for b in self.get_bots() if str(b["id"]) != str(account_id)]
-        await self.save_bots(bots)   # 连带清掉 bot_accounts 快照
-        # 账号 id 是这些表的主键：不清理会留下"幽灵配置"（新账号复用同一 id 时被串上）
-        await self._delete_account_scoped_data(account_id)
-        return True
+        async with self._write_lock:
+            if str(account_id) not in self._bots:
+                return False
+            bots = [b for b in self.get_bots() if str(b["id"]) != str(account_id)]
+            await self.save_bots(bots)   # 连带清掉 bot_accounts 快照
+            # 账号 id 是这些表的主键：不清理会留下"幽灵配置"（新账号复用同一 id 时被串上）
+            await self._delete_account_scoped_data(account_id)
+            return True
 
     # ==================== 模块默认开关 ====================
 
@@ -261,16 +289,17 @@ class AccountStoreMixin:
         升级前的老账号静默变成"默认关"。所以调用方在改名后把旧值搬过来。
         """
         key = str(account_id)
-        if key not in self._bots:
-            raise ValueError(f"账号不存在：{account_id}")
-        await self.db.execute(
-            "UPDATE bots SET modules_default_enabled = ? WHERE account_id = ?",
-            (1 if enabled else 0, key),
-        )
-        if enabled:
-            self._modules_default_off.discard(key)
-        else:
-            self._modules_default_off.add(key)
+        async with self._write_lock:
+            if key not in self._bots:
+                raise ValueError(f"账号不存在：{account_id}")
+            await self.db.execute(
+                "UPDATE bots SET modules_default_enabled = ? WHERE account_id = ?",
+                (1 if enabled else 0, key),
+            )
+            if enabled:
+                self._modules_default_off.discard(key)
+            else:
+                self._modules_default_off.add(key)
 
     # ==================== 账号作用域数据（改名 / 删号 / 孤儿） ====================
     #
@@ -286,6 +315,11 @@ class AccountStoreMixin:
 
         供首启向导"改账号 ID"使用；WebUI 的账号 id 本身不可改，没有第二个调用点。
         """
+        async with self._write_lock:
+            return await self._rename_account_unlocked(old_id, new_id)
+
+    async def _rename_account_unlocked(self, old_id: str, new_id: str) -> dict:
+        """`rename_account` 的实现体（调用方必须已持有写锁）。"""
         old = str(old_id)
         new = str(new_id)
         if old == new:
@@ -352,6 +386,11 @@ class AccountStoreMixin:
         群响应权（``channel_policies``）是**群级**配置，不整行删：只把指向该账号的
         ``primary_account_id`` 置空，让它回落到 fallback 策略。
         """
+        async with self._write_lock:
+            await self._delete_account_scoped_data_unlocked(account_id)
+
+    async def _delete_account_scoped_data_unlocked(self, account_id: str) -> None:
+        """`_delete_account_scoped_data` 的实现体（调用方必须已持有写锁）。"""
         aid = str(account_id)
         sqls: list[tuple[str, Sequence[Any]]] = [
             ("DELETE FROM bindings WHERE scope_type = 'account' AND scope_id = ?", (aid,)),
@@ -384,6 +423,11 @@ class AccountStoreMixin:
         ``data/orphan-account-data.json``——这些行读不到但不该无声消失。
         返回 ``{accounts, backup}``（没有孤儿时 accounts 为空）。
         """
+        async with self._write_lock:
+            return await self._purge_orphan_account_data_unlocked()
+
+    async def _purge_orphan_account_data_unlocked(self) -> dict:
+        """`purge_orphan_account_data` 的实现体（调用方必须已持有写锁）。"""
         orphan_ids = await self._orphan_account_ids()
         if not orphan_ids:
             return {"accounts": [], "backup": None}
@@ -476,6 +520,13 @@ class AccountStoreMixin:
         与库中快照相同（user_id 一致）时直接返回 False，不写库、不通知
         —— 满足「账号相同不变、不同才换」；返回 True 表示账号确实发生了变化。
         """
+        async with self._write_lock:
+            return await self._save_bot_account_unlocked(account_id, user_id, nickname)
+
+    async def _save_bot_account_unlocked(
+        self, account_id: str, user_id: Any, nickname: str = ""
+    ) -> bool:
+        """`save_bot_account` 的实现体（调用方必须已持有写锁）。"""
         try:
             normalized = str(user_id) if user_id is not None else ""
         except Exception as e:  # noqa: BLE001 —— 非法 user_id 一律按「没登录」处理

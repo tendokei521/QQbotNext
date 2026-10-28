@@ -40,6 +40,9 @@ DEFAULT_ENABLED_MODULES: tuple[str, ...] = ("llm_tools_extra",)
 class BindingStoreMixin:
     """作用域绑定（bindings）+ 群响应权策略（channel_policies）的读写与迁移。"""
 
+    #: 宿主提供的全量配置写串行锁（按任务可重入）
+    _write_lock: Any
+
     # ==================== 作用域绑定（bindings） ====================
     # 唯一存储：capability × (global|account|channel) → enabled/config/permission。
     # 旧的 module_config / module_authority 只在迁移期读，运行时不再写（docs/multi-account-design.md §4）。
@@ -167,13 +170,14 @@ class BindingStoreMixin:
         **fields: Any,
     ) -> dict:
         """写 binding + 落库 + 广播（``fields`` 同 :meth:`set_binding`）。"""
-        data = self.set_binding(capability_id, scope_type, scope_id, persist=False, **fields)
-        await self._persist_binding(str(capability_id), (scope_type, str(scope_id or "")))
-        await self._notify(
-            "bindings",
-            {"capability_id": str(capability_id), "scope_type": scope_type,
-             "scope_id": str(scope_id or ""), "binding": data},
-        )
+        async with self._write_lock:
+            data = self.set_binding(capability_id, scope_type, scope_id, persist=False, **fields)
+            await self._persist_binding(str(capability_id), (scope_type, str(scope_id or "")))
+            await self._notify(
+                "bindings",
+                {"capability_id": str(capability_id), "scope_type": scope_type,
+                 "scope_id": str(scope_id or ""), "binding": data},
+            )
         return data
 
     async def _persist_binding(self, capability_id: str, key: tuple[str, str]) -> None:
@@ -321,6 +325,13 @@ class BindingStoreMixin:
 
     async def save_channel_policies(self, capability_id: str, policies: list[dict]) -> list[dict]:
         """整值替换某能力的全部群策略（空列表 = 清空，回到 all 语义）。"""
+        async with self._write_lock:
+            return await self._save_channel_policies_unlocked(capability_id, policies)
+
+    async def _save_channel_policies_unlocked(
+        self, capability_id: str, policies: list[dict]
+    ) -> list[dict]:
+        """`save_channel_policies` 的实现体（调用方必须已持有写锁）。"""
         capability_id = str(capability_id)
         normalized: list[dict] = []
         for item in policies or []:
