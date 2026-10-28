@@ -21,6 +21,7 @@ from app.webui.auth import (
     is_authenticated,
     issue_session,
     tokens_match,
+    verify_session,
 )
 
 TOKEN = "中文口令-测试-abc"
@@ -65,3 +66,31 @@ def test_login_one_click_with_non_ascii_token_returns_redirect(client):
     resp = client.get("/login", params={"accesstoken": TOKEN}, follow_redirects=False)
     assert resp.status_code == 303, resp.text
     assert SESSION_COOKIE in resp.cookies
+
+
+# ---------- 伪造/损坏的会话 cookie：按未认证处理，不得 500 ----------
+
+
+def test_forged_non_ascii_session_cookie_is_rejected_not_raised():
+    """回归：compare_digest 对 str 仅限 ASCII，非 ASCII cookie 会抛 TypeError。
+
+    HTTP 头按 latin-1 解码，客户端发原始 UTF-8 字节就会得到 ``ä¸­`` 这类非 ASCII
+    字符串；旧实现直接比较 → 每个请求 500。现在必须当未认证处理。
+    """
+    forged = "cGF5bG9hZA.ä¸­"  # 非 ASCII 签名
+    assert verify_session(TOKEN, forged) is False
+    # 中间件 / WS 握手调用的就是这个入口：不得抛异常
+    assert is_authenticated(expected_token=TOKEN, session_cookie=forged) is False
+
+
+def test_forged_non_ascii_payload_is_rejected():
+    """非 ASCII payload（签名前就编码失败）同样按未认证处理。"""
+    forged = "中文.abc"
+    assert verify_session(TOKEN, forged) is False
+    assert is_authenticated(expected_token=TOKEN, session_cookie=forged) is False
+
+
+def test_valid_session_still_accepted_after_cookie_hardening():
+    """加固不能误伤正常会话。"""
+    assert verify_session(TOKEN, issue_session(TOKEN)) is True
+    assert is_authenticated(expected_token=TOKEN, session_cookie=issue_session(TOKEN)) is True

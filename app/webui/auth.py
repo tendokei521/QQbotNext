@@ -83,20 +83,27 @@ def issue_session(token: str, ttl: int = SESSION_TTL_SECONDS) -> str:
 
 
 def verify_session(token: str, value: str | None) -> bool:
-    """校验会话 cookie：签名必须匹配且未过期。任何异常一律视为无效。"""
+    """校验会话 cookie：签名必须匹配且未过期。任何异常一律视为无效。
+
+    注意：``hmac.compare_digest`` 对 ``str`` 只接受 ASCII。伪造/损坏的 cookie
+    可能带非 ASCII 字符，直接比较会抛 ``TypeError`` → 每个请求 500。因此这里
+    统一按 UTF-8 编码后比较，并把整段解析包在 try 里：坏 cookie = 未认证。
+    """
     if not token or not value or "." not in value:
         return False
     payload, _, signature = value.rpartition(".")
     if not payload or not signature:
         return False
-    expected = _sign(_signing_key(token), payload)
-    # 定长比较，避免逐字节提前返回泄露签名前缀
-    if not hmac.compare_digest(signature, expected):
-        return False
     try:
+        expected = _sign(_signing_key(token), payload)
+        # 定长比较，避免逐字节提前返回泄露签名前缀
+        if not hmac.compare_digest(signature.encode("utf-8"), expected.encode("utf-8")):
+            return False
         data = json.loads(_b64d(payload))
         exp = int(data.get("exp", 0))
-    except (ValueError, TypeError, json.JSONDecodeError):
+    except (ValueError, TypeError, UnicodeError) as e:
+        # 伪造/损坏的 cookie：按未认证处理，不能让它把请求打成 500
+        webui_logger.debug(f"[WebUI] 会话 cookie 无效（按未认证处理）: {e}")
         return False
     return exp > int(time.time())
 
