@@ -335,7 +335,7 @@ watch(
         </v-chip>
         <v-spacer />
         <v-btn variant="text" @click="emit('update:modelValue', false)">取消</v-btn>
-        <v-btn color="primary" variant="tonal" :loading="saving" :disabled="loading" @click="onSave">
+        <v-btn color="primary" variant="tonal" :loading="saving" :disabled="saving" @click="onSave">
           保存规则
         </v-btn>
       </v-card-actions>
