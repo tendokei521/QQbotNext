@@ -139,6 +139,9 @@ async function applyToAgent() {
     return
   }
   agent.onChange('system_prompt', selectedPreset.value.system_prompt)
+  // 人设的唯一来源是角色预设：账号已有 persona_preset_id 时后端会优先用预设内容，
+  // 只写 system_prompt 会出现「提示已应用但人设没变」。同步写活引用，保证两处一致。
+  agent.onChange('persona_preset_id', selectedPreset.value.id)
   // 保存失败时 save() 已经弹了失败原因，这里只在真正落盘后说「已应用」
   if (await agent.save()) {
     notify.push(`已应用人格「${selectedPreset.value.name}」`, 'success')
