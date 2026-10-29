@@ -627,3 +627,7 @@ DELETE /agent/prompt-dumps?bot_id=<qq>
 ```bash
 venv\Scripts\python.exe -m pytest -q
 ```
+
+前端改动（`app/webui/dashboard/**`）除测试外还要**看真实渲染**：1440 + 390 两个尺寸截图、
+量横向溢出与选中态切换的位置差。步骤与命令见
+[`docs/FRONTEND_VERIFY.md`](docs/FRONTEND_VERIFY.md)，规则见 `AGENTS.md`「验证规则」。
