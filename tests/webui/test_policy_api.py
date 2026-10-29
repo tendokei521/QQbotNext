@@ -247,3 +247,86 @@ async def test_bad_json_and_missing_account_are_rejected(container):
     missing = client.get("/api/policy")
     assert missing.status_code == 400
     assert missing.json()["code"] == "POLICY_ACCOUNT_REQUIRED"
+
+
+# ==================== T0/T1：触发方式并入策略 ====================
+
+
+async def test_trigger_mode_writes_back_legacy_keys(container):
+    """新前端只写 trigger_mode，服务端要同步旧键（旧 UI/脚本仍可读）。"""
+    client = _client(container)
+
+    resp = client.post("/api/policy", json={
+        "account_id": "acc1",
+        "channel_id": "111",
+        "patch": {"config": {"trigger_mode": "all", "trigger_probability": 30}},
+    })
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["resolved"]["config"]["trigger_mode"] == "all"
+    assert body["resolved"]["config"]["trigger_probability"] == 30
+    assert body["resolved"]["sources"]["trigger_mode"] == "channel"
+    row = body["override"]["config"]
+    assert row["trigger_at"] is True, "旧键应双写"
+    assert row["trigger_mode"] == "all"
+
+
+async def test_legacy_trigger_keys_are_derived_into_mode(container):
+    """旧前端只写 trigger_at/keyword：读出来要有显式 mode，不能两处漂移。"""
+    client = _client(container)
+
+    posted = client.post("/api/policy", json={
+        "account_id": "acc1",
+        "patch": {"config": {"trigger_at": False, "trigger_keyword": ["摸鱼"]}},
+    })
+    assert posted.status_code == 200, posted.text
+
+    resolved = posted.json()["resolved"]["config"]
+    assert resolved["trigger_mode"] == "keyword"
+    assert resolved["trigger_probability"] == 100
+    assert "trigger_mode" not in (posted.json()["override"]["config"] or {}), (
+        "只写旧键时不应落一份显式 mode（否则以后改旧键会被它压住）"
+    )
+
+
+async def test_trigger_mode_can_be_cleared_back_to_inherit(container):
+    client = _client(container)
+    client.post("/api/policy", json={
+        "account_id": "acc1", "channel_id": "111",
+        "patch": {"config": {"trigger_mode": "none"}},
+    })
+
+    cleared = client.post("/api/policy", json={
+        "account_id": "acc1", "channel_id": "111",
+        "patch": {}, "clear": ["trigger_mode"],
+    })
+
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["resolved"]["sources"]["trigger_mode"] != "channel"
+
+
+async def test_invalid_trigger_mode_is_rejected(container):
+    client = _client(container)
+    resp = client.post("/api/policy", json={
+        "account_id": "acc1", "patch": {"config": {"trigger_mode": "sometimes"}},
+    })
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "POLICY_BAD_VALUE"
+
+
+async def test_matrix_exposes_effective_trigger_mode(container, config_service):
+    await _seed_groups(config_service)
+    client = _client(container)
+    client.post("/api/policy", json={
+        "account_id": "acc1", "channel_id": "111",
+        "patch": {"config": {"trigger_mode": "both", "trigger_keyword": ["AI"]}},
+    })
+
+    body = client.get("/api/policy/matrix", params={"account_id": "acc1"}).json()
+
+    rows = {row["group_id"]: row for row in body["rows"]}
+    assert rows["111"]["trigger_mode"] == "both"
+    assert rows["111"]["trigger_source"] == "channel"
+    assert rows["222"]["trigger_source"] != "channel", "没覆盖的群应显示继承来源"
+    assert "trigger_mode" in body["default"]

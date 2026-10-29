@@ -24,7 +24,9 @@ from app.domain.dialogue_policy import (
     SCOPE_OVERRIDABLE,
     ResolvedPolicy,
     is_overridable,
+    legacy_trigger_keys,
     resolve_policy,
+    trigger_mode_from,
     validate_override_values,
 )
 
@@ -193,9 +195,25 @@ class DialoguePolicyService:
         merged_permission = dict(row.get("permission") or {})
         merged_config.update({k: v for k, v in (config or {}).items() if v is not None})
         merged_permission.update({k: v for k, v in (permission or {}).items() if v is not None})
-        for key in clear or []:
+        clear_keys = list(clear or [])
+        if "trigger_mode" in clear_keys:
+            # 清触发方式 = 这一层不再管触发：连双写出去的旧键一起清，
+            # 否则旧键会把"恢复继承"又折算回一个显式 mode（用户看起来像没生效）。
+            clear_keys.extend(["trigger_at", "trigger_keyword", "trigger_probability"])
+        for key in clear_keys:
             merged_config.pop(key, None)
             merged_permission.pop(key, None)
+
+        # 触发方式双写：新前端只写 trigger_mode，旧前端只写 trigger_at/keyword。
+        # - 写了 trigger_mode → 同步旧键，旧 UI/脚本读到的仍是同一套语义；
+        # - 只写了旧键 → 丢掉显式 mode，让解析时按旧键重新折算。
+        incoming = {k: v for k, v in (config or {}).items() if v is not None}
+        if "trigger_mode" in incoming:
+            mode = str(incoming["trigger_mode"]).strip().lower()
+            merged_config.update(legacy_trigger_keys(mode))
+            merged_config["trigger_mode"] = trigger_mode_from(merged_config)
+        elif "trigger_at" in incoming or "trigger_keyword" in incoming:
+            merged_config.pop("trigger_mode", None)
 
         # enabled 哨兵：区分"没传"与"显式 null（恢复继承）"
         enabled_value: Any
@@ -311,6 +329,11 @@ class DialoguePolicyService:
                 "enabled": resolved.enabled,
                 "enabled_source": resolved.enabled_source,
                 "muted_until": int(override.get("muted_until") or 0),
+                # 生效触发方式：列表页直接展示，不必再为每个群发一次 resolve
+                "trigger_mode": resolved.config.get("trigger_mode", "none"),
+                "trigger_source": resolved.sources.get("trigger_mode", "default"),
+                "trigger_probability": resolved.config.get("trigger_probability", 100),
+                "quiet_hours": str(resolved.config.get("quiet_hours") or ""),
                 "overridden_keys": sorted(set(override.get("config") or {}) | set(override.get("permission") or {})),
             })
         return {
@@ -319,6 +342,10 @@ class DialoguePolicyService:
                 "enabled_source": default_policy.enabled_source,
                 # 账号默认（群聊场景层）的显式值：null = 跟随 Agent 配置
                 "scene_enabled": None if scene_enabled is None else bool(scene_enabled),
+                # 账号默认（群聊场景）的触发方式：群行「继承」时看到的就是它
+                "trigger_mode": default_policy.config.get("trigger_mode", "none"),
+                "trigger_source": default_policy.sources.get("trigger_mode", "default"),
+                "trigger_probability": default_policy.config.get("trigger_probability", 100),
             },
             "rows": out,
         }
