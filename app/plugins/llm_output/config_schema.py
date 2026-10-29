@@ -4,9 +4,9 @@ SCHEMA = {
     "mode": {
         "type": "select",
         "label": "输出形态",
-        "description": "text=一次拿全再发；stream=按句流式；speech=文本只当思考，发言走工具（需流式）",
-        "default": "text",
-        "options": {"text": "一次性（默认）", "stream": "流式", "speech": "发言通道"},
+        "description": "speech=文本只当思考、发言走工具（默认）；stream=按句流式；text=一次发完。",
+        "default": "speech",
+        "options": {"speech": "发言通道（默认）", "stream": "流式", "text": "一次性"},
     },
     "stream_output": {
         "type": "boolean",
@@ -134,12 +134,9 @@ SCHEMA = {
         "description": "流结束后是否忽略剩余间隔立即发送剩余消息",
         "default": False,
     },
-    "speech_via_tool": {
-        "type": "boolean",
-        "label": "发言走工具（文本=思考）",
-        "description": "开启后模型输出只作思考，发言必须调用「发送」工具；不调用即静默。关闭则回到「文本就是回复」。",
-        "default": True,
-    },
+    # 注意：`speech_via_tool` 不再出现在设置页——「输出形态」是唯一开关。
+    # 旧键仍保留在模块默认配置 / 持有键里，只用于老配置迁移
+    # （没有 mode 的账号按它推导，见 `llm_output/service.py::resolve_mode`）。
     "speech_max_bubbles": {
         "type": "number",
         "label": "单轮最多几条",

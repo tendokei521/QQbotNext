@@ -73,7 +73,9 @@ class Module(BaseModule):
     provides = ("output",)
     supersedes = ("output",)
     default_config = {
-        "mode": "text",
+        # 输出形态是**唯一事实源**（`speech_via_tool` / `stream_output` 只用于老配置迁移）。
+        # 默认发言通道：文本=思考、发言走 send_message——与 agent 配置的默认值一致。
+        "mode": "speech",
         "stream_output": False,
         "stream_send_pool_enabled": False,
         "stream_send_by_sentence": True,
@@ -107,16 +109,16 @@ class Module(BaseModule):
         runtime = self.ctx.services.runtime(self.bot_id) if self.ctx.services else None
         if runtime is None:
             return
-        from app.agent.delivery.output import ConfigView
 
-        # 策略视图：让**其它机制**（如 prompt_prep 的发言通道门控）也能读到这些键
-        runtime.output_options = ConfigView(
-            getattr(runtime, "config", None), self.config, OWNED_KEYS
-        )
-        runtime.output = OutputStrategyAdapter(runtime, self.config, OWNED_KEYS)
+        adapter = OutputStrategyAdapter(runtime, self.config, OWNED_KEYS)
+        # 策略视图：让**其它机制**（如 prompt_prep 的发言通道门控、发言协议注入）
+        # 读到与输出层同一口径的生效值——`speech_via_tool` 在这里被覆写成
+        # "mode == speech" 的结果，避免两层各看一个开关而互相矛盾。
+        runtime.output_options = adapter.options_view()
+        runtime.output = adapter
         # P6 能力声明：本模块声明"这套运行时**能**怎么产出"（三选一）。框架此后按
-        # 声明选策略；`stream_output` / `speech_via_tool` 仍表达偏好，但"能力存亡"
-        # 由这里决定（卸载即撤销）。
+        # 声明选策略；"能力存亡"由这里决定（卸载即撤销）。必须与 adapter 真正选中的
+        # 实现一致——否则框架按 speech 处理，输出层却装 BlockingOutput（静默死局）。
         from app.agent.capabilities import (
             OUTPUT_BLOCKING,
             OUTPUT_SPEECH,
@@ -124,12 +126,11 @@ class Module(BaseModule):
             registry_of,
         )
 
-        if self.config.get("speech_via_tool", False):
-            kind = OUTPUT_SPEECH
-        elif self.config.get("stream_output", False):
-            kind = OUTPUT_STREAM
-        else:
-            kind = OUTPUT_BLOCKING
+        mode = adapter.mode
+        kind = {
+            "speech": OUTPUT_SPEECH,
+            "stream": OUTPUT_STREAM,
+        }.get(mode, OUTPUT_BLOCKING)
         registry_of(runtime).declare_output(kind, source="llm_output")
 
     async def on_unload(self) -> None:
@@ -152,12 +153,9 @@ class Module(BaseModule):
     # ── 供测试/诊断：当前生效的模式 ──
     @property
     def mode(self) -> str:
-        raw = str(self.config.get("mode", "text") or "text").strip().lower()
-        if raw == "stream" or (raw == "text" and self.config.get("stream_output", False)):
-            return "stream"
-        if raw == "speech":
-            return "speech"
-        return "text"
+        from .src.output_mode import resolve_mode
+
+        return resolve_mode(self.config)
 
 
 def owned_keys() -> tuple[str, ...]:

@@ -52,6 +52,15 @@ class ModuleConfig:
                 result[key] = value
         return result
 
+    def stored_config(self) -> dict:
+        """用户**已保存**的配置（不含默认值）。
+
+        与 `raw_config` 的区别：`raw_config` 会把每个默认值都铺上，光看它无法区分
+        "用户选了 text" 和"没人动过、默认就是 text"。需要"只有用户真的设置过才生效"
+        的场景（如配置迁移：老配置没有 ``mode`` 键时按旧开关推导）用它。
+        """
+        return dict(self._service.get_module_config(self.module_name, self.bot_id) or {})
+
     def set(self, key: str, value: Any, auto_save: bool = True) -> None:
         data = dict(self.raw_config)
         old = data.get(key)

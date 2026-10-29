@@ -308,14 +308,20 @@ def test_defaults_are_documented():
 
 
 def test_speech_channel_is_on_by_default():
-    """默认就走「文本=思考，send_message=发言」：三处默认值必须一致。"""
+    """默认就走「文本=思考，send_message=发言」：三处默认值必须一致。
+
+    模块侧由「输出形态」表达（mode=speech）；旧的 ``speech_via_tool`` 开关已并入
+    形态选择、不再出现在设置页，只留给老配置迁移。
+    """
     from app.agent.config import DEFAULT_LLM_CONFIG
     from app.plugins.llm_output.config_schema import SCHEMA as OUTPUT_SCHEMA
     from app.plugins.llm_output.main import Module as OutputModule
 
     assert DEFAULT_LLM_CONFIG["speech_via_tool"] is True
     assert OutputModule.default_config["speech_via_tool"] is True
-    assert OUTPUT_SCHEMA["speech_via_tool"]["default"] is True
+    assert OutputModule.default_config["mode"] == "speech"
+    assert OUTPUT_SCHEMA["mode"]["default"] == "speech"
+    assert "speech_via_tool" not in OUTPUT_SCHEMA, "旧开关不该再出现在设置页（两处开关会打架）"
 
 
 def test_chat_prompt_explains_tool_speech():
