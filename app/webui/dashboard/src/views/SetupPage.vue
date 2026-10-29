@@ -15,6 +15,7 @@ import { useBundlesStore } from '@/stores/bundles'
 import { useReadinessStore } from '@/stores/readiness'
 import { useNotifyStore } from '@/stores/notify'
 import BundleImportDialog from '@/components/bundles/BundleImportDialog.vue'
+import ProtocolHelp from '@/components/bots/ProtocolHelp.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -221,7 +222,7 @@ async function applyPreset() {
       : { name: selectedPresetId.value, version: '' }
     personaDone.value = true
     await Promise.all([readiness.load(), bundles.loadActivations(currentAccountId.value)])
-    notify.push('预设已应用：人格 / 模型 / 模块已就位', 'success')
+    notify.push('预设已应用：人格 / 模型 / 功能插件已就位', 'success')
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   } finally {
@@ -441,7 +442,7 @@ async function savePersona() {
     return
   }
   if (!persona.prompt.trim()) {
-    notify.push('写一句人设，或点「稍后再配」', 'warning')
+    notify.push('写一句人格提示词，或点「稍后再配」', 'warning')
     return
   }
   await run('persona', async () => {
@@ -551,6 +552,7 @@ onUnmounted(stopPolling)
         <v-card-title>把 QQ 号接进来</v-card-title>
         <v-card-text>
           <div class="text-body-2 text-medium-emphasis mb-2">先选一种连接方式，两种都行，推荐本地监听。</div>
+          <ProtocolHelp :mode="account.conn_mode" class="mb-3" />
           <v-btn-toggle
             :model-value="account.conn_mode"
             mandatory
@@ -597,33 +599,6 @@ onUnmounted(stopPolling)
             @blur="saveAccount"
           />
 
-          <v-btn
-            size="small"
-            variant="text"
-            color="primary"
-            class="px-0 mb-2"
-            :prepend-icon="advancedOpen ? 'mdi-chevron-up' : 'mdi-cog-outline'"
-            @click="advancedOpen = !advancedOpen"
-          >
-            高级选项（账号标识）
-          </v-btn>
-          <v-expand-transition>
-            <div v-if="advancedOpen" class="mb-4">
-              <v-text-field
-                v-model="account.id"
-                label="账号标识"
-                placeholder="留空自动分配，例如 main"
-                hint="内部使用，用来区分同名账号；一般不用改"
-                persistent-hint
-                :error-messages="accountIdMessages"
-                density="comfortable"
-                variant="outlined"
-                @update:model-value="onAccountIdInput"
-                @blur="onAccountIdBlur"
-              />
-            </div>
-          </v-expand-transition>
-
           <v-text-field
             v-model="account.ws_url"
             :label="account.conn_mode === 'reverse' ? '本机监听地址' : '协议端地址'"
@@ -657,10 +632,40 @@ onUnmounted(stopPolling)
             @blur="saveAccount"
           />
 
+          <!-- 账号标识是内部名，放最后：放前面会被当成"地址/令牌"的分组标题 -->
+          <v-btn
+            size="small"
+            variant="text"
+            color="primary"
+            class="px-0 mb-2"
+            :prepend-icon="advancedOpen ? 'mdi-chevron-up' : 'mdi-cog-outline'"
+            @click="advancedOpen = !advancedOpen"
+          >
+            高级选项（账号标识）
+          </v-btn>
+          <v-expand-transition>
+            <div v-if="advancedOpen" class="mb-4">
+              <v-text-field
+                v-model="account.id"
+                label="账号标识"
+                placeholder="留空自动分配，例如 main"
+                hint="内部使用，用来区分同名账号；一般不用改"
+                persistent-hint
+                :error-messages="accountIdMessages"
+                density="comfortable"
+                variant="outlined"
+                @update:model-value="onAccountIdInput"
+                @blur="onAccountIdBlur"
+              />
+            </div>
+          </v-expand-transition>
+
           <div class="d-flex align-center flex-wrap gap-2 mt-1">
             <v-icon size="small" :icon="accountStatus.icon" :color="accountStatus.color" />
             <span class="text-body-2">{{ accountStatus.text }}</span>
-            <span v-if="accountWaiting" class="text-caption" style="opacity: 0.65">协议端连上后会自动变成已连接</span>
+            <span v-if="accountWaiting" class="text-caption" style="opacity: 0.65">
+              · 协议端连上后会自动变成已连接
+            </span>
           </div>
         </v-card-text>
         <v-card-actions>
@@ -834,7 +839,7 @@ onUnmounted(stopPolling)
 
       <!-- 第 3 步 -->
       <v-card v-else-if="step === 3" variant="outlined">
-        <v-card-title>给它一个人设</v-card-title>
+        <v-card-title>给它一个人格</v-card-title>
         <v-card-text>
           <v-tabs v-model="personaMode" density="compact" class="mb-3">
             <v-tab value="scratch">从零写</v-tab>
@@ -850,7 +855,7 @@ onUnmounted(stopPolling)
             />
             <v-textarea
               v-model="persona.prompt"
-              label="人设提示词"
+              label="人格提示词"
               placeholder="例如：你是一个混在群里的普通群友，说话简短自然，不端着。"
               rows="5"
               auto-grow
@@ -897,7 +902,7 @@ onUnmounted(stopPolling)
                     <span class="font-weight-medium">{{ item.name }}</span>
                     <v-chip size="x-small" variant="tonal">v{{ item.version }}</v-chip>
                     <v-chip v-if="item.modules?.length" size="x-small" variant="text">
-                      含模块 {{ item.modules.length }}
+                      含插件 {{ item.modules.length }}
                     </v-chip>
                   </div>
                 </template>
@@ -932,7 +937,7 @@ onUnmounted(stopPolling)
             </v-card>
 
             <v-alert v-if="appliedPreset" type="success" variant="tonal" density="compact" class="mt-3">
-              已应用「{{ appliedPreset.name }}」：人格、模型、模块都配好了。
+              已应用「{{ appliedPreset.name }}」：人格、模型、功能插件都配好了。
             </v-alert>
           </template>
         </v-card-text>

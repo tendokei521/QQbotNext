@@ -592,7 +592,7 @@ onMounted(async () => {
                 v-if="!applyResult.health.agent.persona || !applyResult.health.agent.provider_preset || !applyResult.health.agent.provider_model"
                 class="text-caption"
               >
-                人设、模型服务或模型还没选好，请到「AI 对话面板」检查后再使用。
+                人格、模型服务或模型还没选好，请到「AI 对话面板」检查后再使用。
               </div>
             </template>
           </v-alert>

@@ -7,6 +7,7 @@ import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
 import AddBotDialog from '@/components/bots/AddBotDialog.vue'
 import EventMonitorDialog from '@/components/bots/EventMonitorDialog.vue'
+import ProtocolHelp from '@/components/bots/ProtocolHelp.vue'
 import MultiGroupDialog from '@/components/MultiGroupDialog.vue'
 import SaveStatusBar from '@/components/common/SaveStatusBar.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
@@ -460,7 +461,7 @@ onBeforeUnmount(() => {
           hint="改动暂存在本页，点保存后写入"
           @save="saveAll"
         />
-        <v-btn size="small" variant="tonal" icon="mdi-refresh" title="刷新账号列表" :loading="loadingCards" @click="requestReload" />
+        <v-btn size="small" variant="tonal" icon="mdi-refresh" title="刷新账号列表（同时刷新账号配置）" :loading="loadingCards" @click="requestReload" />
         <v-btn size="small" variant="tonal" prepend-icon="mdi-layers-triple-outline" @click="groupOpen = true">
           群与账号概览
         </v-btn>
@@ -585,18 +586,8 @@ onBeforeUnmount(() => {
               协议端怎么填
             </v-btn>
             <v-expand-transition>
-              <div v-if="helpOpen[b.id]" class="protocol-help mb-3">
-                <template v-if="draftOf(b.id).conn_mode === 'reverse'">
-                  <div>在 NapCat 或 LLOneBot 里新建「WebSocket 客户端」。</div>
-                  <div>URL 填这张卡片上的本机监听地址，右侧图标可复制。</div>
-                  <div>保存时勾选启用；协议端连上后这里会显示「已连接」。</div>
-                  <div>127.0.0.1 只本机可用；协议端在另一台机器上要填本机 IP。</div>
-                </template>
-                <template v-else>
-                  <div>在协议端里新建「WebSocket 服务端」。</div>
-                  <div>把它的 ws 地址填进来，端口与路径要和协议端一致。</div>
-                  <div>填好后点「连接」，协议端连上后这里会显示「已连接」。</div>
-                </template>
+              <div v-if="helpOpen[b.id]" class="mb-3">
+                <ProtocolHelp :mode="draftOf(b.id).conn_mode" />
               </div>
             </v-expand-transition>
 
@@ -810,18 +801,5 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   padding: 8px 10px;
   word-break: break-all;
-}
-
-/* 协议端指引：折叠面板，四行短句，不做长篇文档 */
-.protocol-help {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: rgba(var(--v-theme-primary), 0.06);
-  font-size: 12.5px;
-  line-height: 1.5;
-  color: rgba(var(--v-theme-on-surface), 0.75);
 }
 </style>

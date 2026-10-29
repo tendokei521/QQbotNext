@@ -100,16 +100,11 @@ const isToolsActive = computed(() => route.path.startsWith('/tools'))
 const navItems = computed<NavItem[]>(() => {
   // AI 设置二级菜单由 @/agent/sections 派生，避免与路由各抄一份
   const agentChildren: NavChild[] = agentSidebarEntries()
-  const toolChildren: NavChild[] = [
-    { to: '/tools/system', title: '系统工具' },
-    { to: '/tools/onebot', title: 'OneBot 工具' },
-    { to: '/tools/mcp', title: '外部工具' },
-    { to: '/tools/module', title: '插件工具' },
-  ]
   // 历史：曾有「高级设置」独立区（内容拆成模块后只剩空概览页，已移除），
   // 以及实验性「配置档案」入口（整套能力已下线）。
   // 「高级工具」属于实验性入口：默认隐藏，设置里打开实验性选项后才常驻。
-  // 用户经直链/旧书签进入 /tools/* 时临时显示该分组并高亮当前子页，避免"进来了却没有归属"。
+  // 用户经直链/旧书签进入 /tools/* 时临时显示该入口，避免"进来了却没有归属"。
+  // 只保留一个入口（/tools/overview）：页内 tab 才是唯一子导航，避免侧栏与 tab 两套并列。
   const showExperimental = Boolean(webui.config.experimental?.show_experimental) || isToolsActive.value
   // 顺序按「配好一个账号」的实际路径排：运行（账号管理、模型服务、人格设定）→ 能力
   // （AI 对话面板 / 回复与权限 / AI 设置 / 功能插件 / 配置包）→ 数据 → 系统。
@@ -128,9 +123,7 @@ const navItems = computed<NavItem[]>(() => {
     { title: AGENT_GROUP, icon: 'mdi-creation-outline', children: agentChildren },
     { to: '/modules', title: '功能插件', icon: 'mdi-cube-outline' },
     { to: '/bundles', title: '配置包', icon: 'mdi-package-variant-closed' },
-    ...(showExperimental
-      ? [{ title: TOOLS_GROUP, icon: 'mdi-toolbox-outline', children: toolChildren }]
-      : []),
+    ...(showExperimental ? [{ to: '/tools/overview', title: TOOLS_GROUP, icon: 'mdi-toolbox-outline' }] : []),
     { header: '数据' },
     { to: '/sessions', title: '会话数据', icon: 'mdi-chat-outline' },
     { to: '/stats', title: '数据统计', icon: 'mdi-chart-bar' },
@@ -147,6 +140,8 @@ const isAiSettingsActive = computed(() => route.path.startsWith('/ai/settings'))
 /** 导航高亮：/ai、/reply 精确匹配（避免设置页把面板也点亮），其余允许子路径 */
 function isNavActive(item: NavItem): boolean {
   if (!item.to) return false
+  // 高级工具只有一个入口；其下所有 tab 都算在这个入口上
+  if (item.to === '/tools/overview') return isToolsActive.value
   if (item.to === '/ai' || item.to === '/reply') return route.path === item.to
   return route.path === item.to || (item.to !== '/' && route.path.startsWith(item.to + '/'))
 }
@@ -163,11 +158,6 @@ watch(
       if (!openedGroups.value.includes(AGENT_GROUP)) openedGroups.value.push(AGENT_GROUP)
     } else {
       openedGroups.value = openedGroups.value.filter((g) => g !== AGENT_GROUP)
-    }
-    if (isToolsActive.value) {
-      if (!openedGroups.value.includes(TOOLS_GROUP)) openedGroups.value.push(TOOLS_GROUP)
-    } else {
-      openedGroups.value = openedGroups.value.filter((g) => g !== TOOLS_GROUP)
     }
   },
   { immediate: true },
@@ -232,6 +222,18 @@ const narrowStatusText = computed(() => {
   if (currentStatusChip.value.text === '等待协议端接入') return '等待接入'
   return currentStatusChip.value.text
 })
+
+/** 「等待协议端接入」对新手没有解释：这里给一句白话 tooltip（其它状态不弹） */
+const chipTooltip = computed(() => {
+  if (currentStatusChip.value.text !== '等待协议端接入') return ''
+  return '协议端＝另外安装的 QQ 客户端插件（NapCat / LLOneBot）；按账号卡上的地址在它里面新建 WebSocket 客户端即可'
+})
+
+/** 点状态 chip 直接去账号管理里对应的那张卡（带高亮） */
+function openCurrentAccount() {
+  if (!bots.currentId) return
+  void router.push({ path: '/bots', query: { highlight: bots.currentId } })
+}
 
 async function moreAct(fn: () => Promise<unknown>, okMsg: string) {
   moreMenu.value = false
@@ -406,18 +408,28 @@ onUnmounted(() => {
             </v-list-item>
           </template>
         </v-select>
-        <v-chip
-          class="status-chip"
-          :color="currentStatusChip.color"
-          size="small"
-          variant="tonal"
-        >
-          <v-icon start :icon="currentStatusChip.icon" size="small" />
-          <span>{{ isNarrow ? narrowStatusText : currentStatusChip.text }}</span>
-          <span v-if="!isNarrow && bots.currentBot && resolvedBotId(bots.currentBot)" class="chip-bot-id">
-            | {{ resolvedBotId(bots.currentBot) }}
-          </span>
-        </v-chip>
+        <v-tooltip :text="chipTooltip" :disabled="!chipTooltip" location="bottom" max-width="320">
+          <template #activator="{ props: chipTipProps }">
+            <v-chip
+              v-bind="chipTipProps"
+              class="status-chip status-chip--clickable"
+              :color="currentStatusChip.color"
+              size="small"
+              variant="tonal"
+              role="button"
+              tabindex="0"
+              aria-label="查看这个账号的连接设置"
+              @click="openCurrentAccount"
+              @keydown.enter.prevent="openCurrentAccount"
+            >
+              <v-icon start :icon="currentStatusChip.icon" size="small" />
+              <span>{{ isNarrow ? narrowStatusText : currentStatusChip.text }}</span>
+              <span v-if="!isNarrow && bots.currentBot && resolvedBotId(bots.currentBot)" class="chip-bot-id">
+                | {{ resolvedBotId(bots.currentBot) }}
+              </span>
+            </v-chip>
+          </template>
+        </v-tooltip>
       </div>
 
       <v-spacer />
@@ -458,9 +470,12 @@ onUnmounted(() => {
                 />
                 <v-divider class="my-1" />
               </template>
-              <v-list-item prepend-icon="mdi-refresh" title="刷新状态" @click="moreAct(() => bots.fetchBots(), '状态已刷新')" />
-              <v-list-item prepend-icon="mdi-layers-triple-outline" :title="GROUP_OVERVIEW_TITLE" @click="openGroupOverview" />
-              <v-divider class="my-1" />
+              <!-- /bots 页内已有「群与账号概览」和「刷新（连配置一起刷）」，顶栏不再重复 -->
+              <template v-if="!isBotsRoute">
+                <v-list-item prepend-icon="mdi-refresh" title="刷新状态" @click="moreAct(() => bots.fetchBots(), '状态已刷新')" />
+                <v-list-item prepend-icon="mdi-layers-triple-outline" :title="GROUP_OVERVIEW_TITLE" @click="openGroupOverview" />
+                <v-divider class="my-1" />
+              </template>
               <v-list-item prepend-icon="mdi-logout-variant" title="退出登录" @click="logout" />
             </v-list>
           </v-menu>
@@ -501,10 +516,13 @@ onUnmounted(() => {
             </v-btn>
           </div>
 
-          <v-btn size="small" variant="tonal" icon="mdi-refresh" title="刷新状态" @click="act(() => bots.fetchBots(), '状态已刷新')" />
-          <v-btn size="small" variant="tonal" prepend-icon="mdi-layers-triple-outline" :title="GROUP_OVERVIEW_TITLE" @click="multiGroupOpen = true">
-            <span class="btn-label">群与账号概览</span>
-          </v-btn>
+          <!-- /bots 页内工具栏已有这两项（且刷新连配置一起刷），顶栏不重复 -->
+          <template v-if="!isBotsRoute">
+            <v-btn size="small" variant="tonal" icon="mdi-refresh" title="刷新状态" @click="act(() => bots.fetchBots(), '状态已刷新')" />
+            <v-btn size="small" variant="tonal" prepend-icon="mdi-layers-triple-outline" :title="GROUP_OVERVIEW_TITLE" @click="multiGroupOpen = true">
+              <span class="btn-label">群与账号概览</span>
+            </v-btn>
+          </template>
           <v-btn
             size="small"
             variant="tonal"
@@ -867,6 +885,15 @@ onUnmounted(() => {
 
 .status-chip :deep(.v-chip__content) {
   gap: 2px;
+}
+
+/* 状态 chip 可点击：点了去账号管理里对应的那张卡 */
+.status-chip--clickable {
+  cursor: pointer;
+}
+
+.status-chip--clickable:hover {
+  filter: brightness(0.96);
 }
 
 .topbar-actions {

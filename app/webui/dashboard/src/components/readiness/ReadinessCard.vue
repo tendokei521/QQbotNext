@@ -20,15 +20,20 @@ const visible = computed(
 )
 
 /**
- * 「继续配置」按当前缺的那一项决定文案与落点：
- * 缺模型 → 第 2 步；缺连接 → 第 1 步；缺回复开关 → 第 3 步。
+ * 「继续配置」直接跟阻塞列表第一条走：主按钮修的就是用户看到的第一条，
+ * 不再出现"按钮说还差模型、列表第一条却是账号没连上"的错位。
  */
+const NEXT_STEP_BY_ID: Record<string, { step: number; text: string }> = {
+  account: { step: 1, text: '继续配置：还差账号' },
+  connected: { step: 1, text: '继续配置：还差账号连接' },
+  model_pool: { step: 2, text: '继续配置：还差模型' },
+  scene_enabled: { step: 3, text: '继续配置：还差回复设置' },
+}
+
 const nextStep = computed(() => {
-  const ids = new Set(readiness.blockers.map((check) => check.id))
-  if (ids.has('model_pool')) return { step: 2, text: '继续配置：还差模型' }
-  if (ids.has('account') || ids.has('connected')) return { step: 1, text: '继续配置：还差账号连接' }
-  if (ids.has('scene_enabled')) return { step: 3, text: '继续配置：还差回复设置' }
-  return { step: 1, text: '继续配置' }
+  const first = readiness.blockers[0]
+  if (!first) return { step: 1, text: '继续配置' }
+  return NEXT_STEP_BY_ID[first.id] || { step: 1, text: '继续配置' }
 })
 
 function startSetup() {
