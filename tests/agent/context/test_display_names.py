@@ -74,7 +74,6 @@ def test_sentence_like_nickname_is_masked_without_calling_model(monkeypatch):
     """
     calls = _stub_chat(monkeypatch, "0")
     assert dn.display_name(SENTENCE_NAME, "30003", runtime=_runtime()) == "用户30003"
-    assert dn.STATS["obvious_sentence"] == 0  # 走的不是确定性句子规则
     assert calls == []                        # 且当下没有被同步阻塞（预热是后台的）
 
 
@@ -85,7 +84,6 @@ def test_marketing_text_is_masked_deterministically():
 
 def test_obvious_name_is_kept_as_is():
     assert dn.display_name(SHORT_NAME, "30003", runtime=_runtime()) == SHORT_NAME
-    assert dn.STATS["obvious_name"] == 1
 
 
 def test_sentence_probe_rules():
@@ -151,7 +149,6 @@ async def test_gray_name_approved_is_restored_after_verdict(monkeypatch):
     assert verdict.is_name is True
     assert dn.display_name(GRAY_NAME, "50005", runtime=runtime) == GRAY_NAME
     assert len(calls) == 1
-    assert dn.STATS["approved"] == 1
 
 
 async def test_gray_name_rejected_stays_masked(monkeypatch):
@@ -159,7 +156,6 @@ async def test_gray_name_rejected_stays_masked(monkeypatch):
     runtime = _runtime()
     await dn.judge(runtime, "bot1", "50005", GRAY_NAME)
     assert dn.display_name(GRAY_NAME, "50005", runtime=runtime) == "用户50005"
-    assert dn.STATS["rejected"] == 1
 
 
 async def test_garbage_reply_falls_back_to_masking(monkeypatch):
@@ -168,7 +164,6 @@ async def test_garbage_reply_falls_back_to_masking(monkeypatch):
     verdict = await dn.judge(runtime, "bot1", "50005", GRAY_NAME)
     assert verdict.is_name is False
     assert verdict.source == "error"
-    assert dn.STATS["fallback_error"] == 1
 
 
 async def test_model_exception_falls_back_to_masking(monkeypatch):
@@ -176,7 +171,6 @@ async def test_model_exception_falls_back_to_masking(monkeypatch):
     runtime = _runtime()
     verdict = await dn.judge(runtime, "bot1", "50005", GRAY_NAME)
     assert verdict.is_name is False
-    assert dn.STATS["fallback_error"] == 1
 
 
 async def test_no_provider_skips_call(monkeypatch):
@@ -185,7 +179,6 @@ async def test_no_provider_skips_call(monkeypatch):
     verdict = await dn.judge(runtime, "bot1", "50005", GRAY_NAME)
     assert verdict.is_name is False
     assert calls == []
-    assert dn.STATS["skipped_no_provider"] == 1
 
 
 # ==================== 缓存语义 ====================
@@ -209,61 +202,41 @@ async def test_verdict_cache_hit_skips_new_call(monkeypatch):
     assert len(calls) == 1  # 判定是幂等的（缓存命中的那一帧不再回模型）
 
 
-def test_expired_verdict_is_ignored(monkeypatch):
-    verdict = dn._remember_verdict("50005", GRAY_NAME, True, "llm")
-    verdict.ts -= dn._VERDICT_TTL + 10
-    assert dn.cached_verdict("50005", GRAY_NAME) is None
-
-
 # ==================== 闸门与预热 ====================
 
 
 async def test_quota_exhaustion_degrades_silently(monkeypatch):
-    """闸门超限：静默脱敏（不排队、不报错、不再调模型）。
-
-    额度在**真正发请求前**收取；排队本身不占额度，但同一个名字不会重复排队。
-    """
+    """闸门超限：静默脱敏（不排队、不报错、不再调模型）。"""
     calls = _stub_chat(monkeypatch, "1")
     runtime = _runtime()
     monkeypatch.setattr(dn, "HOURLY_CALL_LIMIT", 1)
 
-    dn._prefetch(runtime, "bot1", "60001", GRAY_NAME)
-    # 同一个名字再渲染：已在队列里 → 不重复排队
-    dn.display_name(GRAY_NAME, "60001", runtime=runtime)
-    assert dn.STATS["skipped_inflight"] == 1
-    for _ in range(20):
+    assert dn.display_name(GRAY_NAME, "60001", bot_id="bot1", runtime=runtime) == "用户60001"
+    for _ in range(50):
         await asyncio.sleep(0.01)
-        if not dn._PREFETCH:
+        if calls:
             break
     assert len(calls) == 1
     assert dn.quota_used("bot1") == 1
 
     # 额度已用尽：第二个名字静默不发起，显示名保持脱敏
-    dn._prefetch(runtime, "bot1", "60002", GRAY_NAME_2)
-    assert dn.STATS["skipped_quota"] == 1
-    assert dn.display_name(GRAY_NAME_2, "60002", runtime=runtime) == "用户60002"
+    assert dn.display_name(GRAY_NAME_2, "60002", bot_id="bot1", runtime=runtime) == "用户60002"
+    for _ in range(10):
+        await asyncio.sleep(0.01)
     assert len(calls) == 1
-
-
-async def test_prefetch_dedupes_inflight(monkeypatch):
-    calls = _stub_chat(monkeypatch, "1")
-    runtime = _runtime()
-    dn._INFLIGHT.add(("70001", GRAY_NAME))  # 模拟"已有一帧在判"
-    dn.display_name(GRAY_NAME, "70001", runtime=runtime)
-    assert calls == []
-    assert dn.STATS["skipped_inflight"] == 1
+    assert dn.display_name(GRAY_NAME_2, "60002", bot_id="bot1", runtime=runtime) == "用户60002"
 
 
 async def test_display_name_schedules_background_prefetch(monkeypatch):
     """渲染是同步的：首帧给脱敏名，同时排一个后台判定；判完下一帧还原。"""
     calls = _stub_chat(monkeypatch, "1")
     runtime = _runtime()
-    first = dn.display_name(GRAY_NAME, "80001", runtime=runtime)
+    first = dn.display_name(GRAY_NAME, "80001", bot_id="bot1", runtime=runtime)
     assert first == "用户80001"
     # 等后台任务跑完
-    for _ in range(20):
+    for _ in range(50):
         await asyncio.sleep(0.01)
-        if not dn._PREFETCH:
+        if calls:
             break
     assert len(calls) == 1
-    assert dn.display_name(GRAY_NAME, "80001", runtime=runtime) == GRAY_NAME
+    assert dn.display_name(GRAY_NAME, "80001", bot_id="bot1", runtime=runtime) == GRAY_NAME

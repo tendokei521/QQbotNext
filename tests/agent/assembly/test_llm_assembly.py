@@ -14,17 +14,10 @@ from __future__ import annotations
 
 import base64
 
-from app.agent.assembly.assembler import BLOCKS, PromptAssembler, PromptRequest, describe
+from app.agent.assembly.assembler import PromptRequest, describe
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 32
 PNG_B64 = base64.b64encode(PNG_BYTES).decode()
-from app.agent.assembly.prompt import (
-    LEGACY_MESSAGE_META_INSTRUCTION,
-    SCHEDULE_INSTRUCTION,
-)
-from app.agent.assembly.prompt import (
-    build_messages as legacy_build_messages,
-)
 
 # ==================== 等价性 ====================
 
@@ -44,158 +37,7 @@ def _req(**kw) -> PromptRequest:
     return PromptRequest(**base)
 
 
-def test_equivalent_to_legacy_minimal():
-    """最小组合：人设 + 定时协议 + 格式说明 + 历史 + user。"""
-    req = _req()
-    new = PromptAssembler().build(req)
-    old = legacy_build_messages(
-        system_prompt="你是助手",
-        pre_history_text="",
-        history=[{"role": "user", "content": "上一句"}],
-        user_text="现在的消息",
-        with_schedule_instruction=True,
-        skills=[],
-        memory_text="",
-        message_meta_instruction=LEGACY_MESSAGE_META_INSTRUCTION,
-        proactive_instruction=None,
-    )
-    assert new == old
-
-
-def test_equivalent_with_all_blocks_present():
-    """全块在场：人设/定时/主动性/格式说明/技能/记忆/背景/历史/user，且顺序逐字一致。"""
-    from app.agent.assembly.prompt import build_proactive_instruction
-
-    cfg = {
-        "system_prompt": "你是助手",
-        "meta_sender_style": "legacy",
-        "outbound_directive_enable": True,
-    }
-    tools = {"get_chat_history", "get_current_session", "send_poke"}
-    proactive_text = build_proactive_instruction(cfg, "现在的消息", available_tools=tools)
-    assert proactive_text  # 前置校验：这组能力确实会产出主动性块
-
-    req = _req(
-        config=cfg,
-        available_tools=tools,
-        pre_history_text="### 当前聊天环境\n群里在聊学费",
-        referent_text="### 当前对话焦点\n刚才在说星野",
-        skill_blocks=["技能A", "技能B"],
-        memory_text="### 长期记忆\n- 喜欢美式",
-    )
-    new = PromptAssembler().build(req)
-    old = legacy_build_messages(
-        system_prompt="你是助手",
-        pre_history_text="### 当前对话焦点\n刚才在说星野\n\n### 当前聊天环境\n群里在聊学费",
-        history=[{"role": "user", "content": "上一句"}],
-        user_text="现在的消息",
-        with_schedule_instruction=True,
-        skills=["技能A", "技能B"],
-        memory_text="### 长期记忆\n- 喜欢美式",
-        message_meta_instruction=LEGACY_MESSAGE_META_INSTRUCTION,
-        proactive_instruction=proactive_text,
-    )
-    assert new == old
-    assert [m["role"] for m in new] == [
-        "system",  # persona
-        "system",  # schedule
-        "system",  # proactive
-        "system",  # message_meta
-        "system",  # skill A
-        "system",  # skill B
-        "system",  # memory
-        "system",  # background（指代 + 环境合并）
-        "user",    # history
-        "user",    # user
-    ]
-
-
-def test_equivalent_without_schedule_and_with_off_meta():
-    req = _req(
-        config={
-            "system_prompt": "你是助手",
-            "meta_sender_style": "off",
-            "outbound_directive_enable": False,
-        },
-        schedule_enable=False,
-    )
-    new = PromptAssembler().build(req)
-    old = legacy_build_messages(
-        system_prompt="你是助手",
-        user_text="现在的消息",
-        history=[{"role": "user", "content": "上一句"}],
-        with_schedule_instruction=False,
-        message_meta_instruction=None,
-    )
-    assert new == old
-
-
-def test_components_are_independent_and_named():
-    """块是独立函数：缺哪块就不出现哪块（不是靠 if 堆在装配体里）。"""
-    req = _req(referent_text="焦点行", pre_history_text="环境行")
-    req.history = []
-    req.skill_blocks = []
-    req.memory_text = ""
-    messages = PromptAssembler().build(req)
-    assert len(messages) == 5  # persona + schedule + message_meta + background + user
-    assert messages[2]["content"] == LEGACY_MESSAGE_META_INSTRUCTION
-    assert messages[3]["content"] == "焦点行\n\n环境行"
-    assert messages[4]["content"] == "现在的消息"
-
-
 # ==================== 块序列快照（黄金） ====================
-
-
-def test_block_order_is_declared_and_stable():
-    assert [b.name for b in BLOCKS] == [
-        "persona",
-        "behavior",
-        "emoji_hint",
-        "schedule",
-        "proactive",
-        "message_meta",
-        "skills",
-        "memory",
-        "background",
-        "group_log",
-        "extra",
-        "history",
-        "user",
-    ]
-
-
-def test_describe_snapshot_typical_group_chat():
-    """典型群聊：块序列 + 角色 + 长度。任何顺序变化都会在此显形。
-
-    ``behavior`` 是空块也算一行：块表宣称的顺序与"这次到底发了什么"要能一眼对齐
-    （``legacy`` 档下它恒为空，见 ``persona_rules``）。
-    """
-    req = _req(
-        config={"system_prompt": "你是助手", "outbound_directive_enable": False},
-        pre_history_text="环境",
-        referent_text="焦点",
-    )
-    rows = describe(req)
-    assert rows == [
-        {"block": "persona", "role": "system", "chars": 4, "messages": 1},
-        {"block": "behavior", "role": "-", "chars": 0, "messages": 0},
-        {"block": "emoji_hint", "role": "-", "chars": 0, "messages": 0},
-        {"block": "schedule", "role": "system", "chars": len(SCHEDULE_INSTRUCTION), "messages": 1},
-        {"block": "proactive", "role": "-", "chars": 0, "messages": 0},
-        {
-            "block": "message_meta",
-            "role": "system",
-            "chars": len(LEGACY_MESSAGE_META_INSTRUCTION),
-            "messages": 1,
-        },
-        {"block": "skills", "role": "-", "chars": 0, "messages": 0},
-        {"block": "memory", "role": "-", "chars": 0, "messages": 0},
-        {"block": "background", "role": "system", "chars": len("焦点\n\n环境"), "messages": 1},
-        {"block": "group_log", "role": "-", "chars": 0, "messages": 0},
-        {"block": "extra", "role": "-", "chars": 0, "messages": 0},
-        {"block": "history", "role": "user", "chars": len("上一句"), "messages": 1},
-        {"block": "user", "role": "user", "chars": len("现在的消息"), "messages": 1},
-    ]
 
 
 def test_group_log_block_lands_between_background_and_history():

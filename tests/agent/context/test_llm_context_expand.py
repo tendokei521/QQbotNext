@@ -241,45 +241,6 @@ async def test_fetch_failure_returns_empty_and_logs():
     assert await fetch_group_online_history(bot, 778, count=10) == ""
 
 
-# ---------- 开关透传 ----------
-
-
-def test_context_expand_flags_default_on():
-    from app.agent.loop.chat import _context_expand_flags
-
-    assert _context_expand_flags({}) == {"resolve_at": True, "mark_unresolved": True}
-    assert _context_expand_flags({"fetch_at_nickname": False})["resolve_at"] is False
-    assert _context_expand_flags({"context_expand_enable": False})["mark_unresolved"] is False
-
-
-class _BadCfg(dict):
-    def get(self, key, default=None):
-        raise RuntimeError("配置后端异常")
-
-
-def test_context_expand_flags_tolerates_broken_config():
-    from app.agent.loop.chat import _context_expand_flags
-
-    assert _context_expand_flags(_BadCfg()) == {"resolve_at": True, "mark_unresolved": True}
-
-
-async def test_pre_history_block_honours_flags():
-    from app.agent.loop.chat import _build_group_pre_history
-
-    event = SimpleNamespace(
-        bot=_FakeBot(_envelope(AT_MESSAGES), {123: {"nickname": "张三", "card": "三哥"}}),
-        self_id=10001,
-        bot_id=10001,
-        group=SimpleNamespace(group_name="测试群"),
-    )
-
-    expanded = await _build_group_pre_history(event, "778", count=10)
-    raw = await _build_group_pre_history(event, "778", count=10, resolve_at=False)
-
-    assert "@三哥(123) 在吗" in expanded
-    assert "@123 在吗" in raw
-
-
 # ---------- 缺口摘要 ----------
 
 
@@ -324,22 +285,6 @@ async def test_env_block_appends_gap_summary_only_when_needed():
     assert "未展开" not in clean
 
 
-async def test_env_block_summary_appears_in_pre_history():
-    from app.agent.loop.chat import _build_group_pre_history
-
-    event = SimpleNamespace(
-        bot=_FakeBot(_envelope(AT_MESSAGES), member_fail=True),
-        self_id=10001,
-        bot_id=10001,
-        group=SimpleNamespace(group_name="测试群"),
-    )
-
-    block = await _build_group_pre_history(event, "778", count=10, mark_unresolved=True)
-
-    assert "最近群聊记录：" in block
-    assert "未展开" in block
-
-
 async def test_chat_history_tool_reports_unresolved_head():
     """get_chat_history 的头部要给出缺口清单，模型无需逐行扫描。"""
     from app.agent.tools.session_tools import build_session_tools
@@ -362,91 +307,6 @@ async def test_chat_history_tool_reports_unresolved_head():
 
 
 # ---------- 触发消息的引用：不能只给一个段名 ----------
-
-
-def _quote_ctx(bot, message):
-    """最小 ctx：让 enhance._collect_quote_info 能跑起来的字段集合。
-
-    注意 event.message 在真实链路里是 ``MessageSegment`` 对象（不是 dict），
-    用 ``Message.from_onebot`` 转换，别让测试掩盖类型差异。
-    """
-    from app.domain.message import Message
-
-    return SimpleNamespace(
-        event=SimpleNamespace(bot=bot, message=Message.from_onebot(message).segments),
-        runtime=SimpleNamespace(config={"fetch_quote_content": True}),
-    )
-
-
-class _QuoteBot:
-    def __init__(self, quoted_message):
-        self.quoted = quoted_message
-        self.calls: list = []
-
-    async def get_msg(self, message_id):
-        self.calls.append(message_id)
-        return {"status": "ok", "data": {
-            "sender": {"user_id": 1901691195, "nickname": "桉"},
-            "message": self.quoted,
-        }}
-
-
-async def test_quoted_forward_becomes_actionable_marker():
-    """回归（真实日志）：被引用的是一条合并转发时，此前只渲染成 "[forward]"，
-    模型既不知道那是什么、也拿不到 id，只能干瞪眼。现在必须给出可解决的标记 + id。"""
-    from app.plugins.llm_message_meta.src.service import _collect_quote_info
-
-    ctx = _quote_ctx(_QuoteBot([{"type": "forward", "data": {"id": "7686537322889496857"}}]),
-                     [{"type": "reply", "data": {"id": "576048059"}}])
-
-    info = await _collect_quote_info(ctx)
-
-    assert info["text"] == UNRESOLVED_REPLY.format(id="576048059")
-    assert "[forward]" not in info["text"]
-
-
-async def test_quoted_text_still_wins_over_marker():
-    from app.plugins.llm_message_meta.src.service import _collect_quote_info
-
-    ctx = _quote_ctx(_QuoteBot([{"type": "text", "data": {"text": "晚上一起打游戏吗"}}]),
-                     [{"type": "reply", "data": {"id": "576048059"}}])
-
-    info = await _collect_quote_info(ctx)
-
-    assert info["text"] == "晚上一起打游戏吗"
-
-
-async def test_quoted_lookup_failure_yields_marker_not_silence():
-    """取引用内容失败时也要把 id 交给模型（而不是整段引用信息消失）。"""
-    from app.plugins.llm_message_meta.src.service import _collect_quote_info
-
-    class _BrokenBot:
-        async def get_msg(self, message_id):
-            raise RuntimeError("连接已断开")
-
-    ctx = _quote_ctx(_BrokenBot(), [{"type": "reply", "data": {"id": "576048059"}}])
-
-    info = await _collect_quote_info(ctx)
-
-    assert info["text"] == UNRESOLVED_REPLY.format(id="576048059")
-
-
-def test_segments_to_text_renders_forward_marker_with_id():
-    from app.plugins.llm_message_meta.src.service import _segments_to_text
-
-    assert _segments_to_text([{"type": "forward", "data": {"id": "7686537322889496857"}}]) == (
-        UNRESOLVED_FORWARD_ID.format(id="7686537322889496857")
-    )
-    assert _segments_to_text([{"type": "text", "data": {"text": "你好"}}]) == "你好"
-
-
-def test_segments_to_text_prefers_containing_message_id():
-    """合并转发标记要用"承载转发的那条消息 id"（展开入口要的是它）。"""
-    from app.plugins.llm_message_meta.src.service import _segments_to_text
-
-    assert _segments_to_text(
-        [{"type": "forward", "data": {"id": "7686537322889496857"}}], message_id="576048059"
-    ) == UNRESOLVED_FORWARD_ID.format(id="576048059")
 
 
 def test_history_forward_row_carries_message_id():

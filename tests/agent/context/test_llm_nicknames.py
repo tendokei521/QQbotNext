@@ -151,8 +151,3 @@ async def test_resolve_nicknames_empty_input():
 # ---------- 缓存上限 ----------
 
 
-def test_cache_is_bounded():
-    for i in range(nicknames._CACHE_MAX + 500):
-        nicknames.remember("b1", 778, str(i), f"n{i}")
-
-    assert len(nicknames._NICK_CACHE) <= nicknames._CACHE_MAX

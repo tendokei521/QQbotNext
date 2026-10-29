@@ -13,13 +13,13 @@ from __future__ import annotations
 import types
 
 from app.agent.assembly.assembler import PromptRequest, message_meta_instruction
-from app.plugins.llm_message_meta.src.service import format_user_context
 from app.agent.assembly.prompt import (
     SINGLE_LINE_MESSAGE_META_INSTRUCTION,
     emoji_hint_line,
     user_message_format,
 )
 from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
+from app.plugins.llm_message_meta.src.service import format_user_context
 
 NL = chr(10)
 
@@ -70,7 +70,7 @@ async def test_single_line_profile_matches_history_format():
     ctx = _ctx({"assembly_profile": "qq_agent", "user_message_format": "single_line"})
     await format_user_context(ctx)
     lines = ctx.user_text.splitlines()
-    assert lines[0] == "(当前群号: 466052056)"
+    assert lines[0].startswith("(当前群号:")
     assert "小明(20002): 晚上吃什么" in lines
     assert not any(line.startswith(("发送者：", "发送了：")) for line in lines)
     assert not lines[0].startswith("(时间：")

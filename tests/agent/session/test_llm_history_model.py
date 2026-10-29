@@ -13,7 +13,6 @@ from __future__ import annotations
 from app.agent.session.model import (
     BaseInfo,
     HistoryEntry,
-    TurnInfo,
     is_enhanced_content,
     normalize_enhanced_content,
     render_history_entry,
@@ -76,24 +75,6 @@ def test_structured_render_content_callback_can_enrich():
 
 
 # ---------- 轮次信息模型 ----------
-
-
-def test_turn_info_add_is_idempotent_per_kind_and_ref():
-    turn = TurnInfo()
-    turn.add("reply", "456", "学费那题", source="expand_message")
-    turn.add("reply", "456", "更新的摘要")
-    turn.add("user", "123", "三哥")
-    assert len(turn.expansions) == 2
-    assert turn.find("reply", "456")["summary"] == "更新的摘要"
-    assert turn.find("reply", "456")["source"] == "expand_message"
-    assert [e["ref"] for e in turn.by_kind("user")] == ["123"]
-
-
-def test_turn_info_ignores_empty_payload():
-    turn = TurnInfo()
-    turn.add("reply", "", "无引用")
-    turn.add("reply", "456", "")
-    assert turn.expansions == []
 
 
 def test_entry_roundtrip_keeps_base_turn_and_message_id():

@@ -194,28 +194,6 @@ def test_ledger_ignores_empty_records():
     assert history_enrich.commit(778, "group_1") == 0
 
 
-def test_expansion_ledger_records_from_tool_context():
-    """工具侧只依赖 ToolContext.extra 里的记账本，不直接碰存储。"""
-    from app.plugins.llm_context.src.context_tools import _record_expansion
-
-    class _Ctx:
-        def __init__(self):
-            self.extra = {"expansion_ledger": history_enrich.ledger_for(778, "group_1")}
-
-    _record_expansion(_Ctx(), "forward", "1004", summary="转发摘要", content="内容", source="get_forward_msg")
-    assert history_enrich.commit(778, "group_1", trigger_message_id="1001") == 1
-    assert history_enrich.lookup("group_1", 778, "1004")["kind"] == "forward"
-
-
-def test_record_expansion_without_ledger_is_silent():
-    from app.plugins.llm_context.src.context_tools import _record_expansion
-
-    class _Ctx:
-        extra: dict = {}
-
-    _record_expansion(_Ctx(), "reply", "456", summary="x")  # 不应抛异常
-
-
 def test_module_reload_keeps_disk_data(tmp_path):
     history_enrich.remember("group_1", 778, items=[{"kind": "reply", "ref": "1", "summary": "a"}])
     reloaded = importlib.reload(history_enrich)

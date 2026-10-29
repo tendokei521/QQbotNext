@@ -14,11 +14,11 @@ from types import SimpleNamespace
 import pytest
 
 from app.agent.context import nicknames
-from app.plugins.llm_context.src import focus
 from app.agent.media import image as image_mod
 from app.agent.media import store as image_media
-from app.plugins.llm_context.src.context_tools import build_context_tools, derive_targets
 from app.agent.tools.spec import ToolContext
+from app.plugins.llm_context.src import focus
+from app.plugins.llm_context.src.context_tools import build_context_tools, derive_targets
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 32
 
@@ -644,7 +644,10 @@ async def test_expand_image_uses_verdict_when_name_approved(monkeypatch):
     display_names.clear_cache()
     gray = "夜风里的旅人甲乙丙丁戊己庚辛壬癸子"  # 17 字：落在灰区
 
+    judge_calls: list[str] = []
+
     async def fake_chat(chain, messages, **kwargs):
+        judge_calls.append("called")
         return SimpleNamespace(ok=True, text="1")
 
     monkeypatch.setattr("app.agent.providers.chat_with_fallback", fake_chat)
@@ -664,12 +667,13 @@ async def test_expand_image_uses_verdict_when_name_approved(monkeypatch):
     # 等后台判定完成，再渲染同一批数据 → 还原真名
     import asyncio
 
-    for _ in range(30):
+    for _ in range(50):
         await asyncio.sleep(0.01)
-        if not display_names._PREFETCH:
+        if judge_calls:
             break
     second = await _spec(ctx, "expand_image").handler(ctx, {"messages": ["2002"]})
     assert gray in second
+    assert judge_calls
 
 
 # ---------- 摘要抽取（供焦点表 / 已展开标记） ----------

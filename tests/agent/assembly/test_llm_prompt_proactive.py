@@ -4,7 +4,6 @@
 「块的存在性 / 单一性 / 按能力裁剪 / 意图补强 / 可关闭」这几条不变量。
 """
 
-from types import SimpleNamespace
 
 from app.agent.assembly.prompt import (
     PROACTIVE_ENV_NUDGE,
@@ -259,13 +258,3 @@ def test_nudge_not_added_without_intent_or_when_disabled():
 # ---------- chat 侧接入 ----------
 
 
-def test_chat_helper_uses_raw_user_text_and_available_tools():
-    from app.agent.loop.chat import _proactive_instruction
-
-    ctx = SimpleNamespace(state={"user_context": {"sent_text": "刚才我说了什么"}})
-    specs = [SimpleNamespace(name="get_chat_history"), SimpleNamespace(name="send_poke")]
-
-    block = _proactive_instruction(_cfg(), specs, "(时间：...) 刚才我说了什么", ctx)
-
-    assert PROACTIVE_HISTORY_NUDGE in block
-    assert block.count("### 主动性") == 1

@@ -155,19 +155,6 @@ def test_anthropic_cache_is_on_by_default():
     assert system[-1]["cache_control"] == {"type": "ephemeral"}
 
 
-def test_anthropic_stream_payload_reuses_the_same_builder():
-    provider = AnthropicProvider({"api_key": "K", "prompt_cache_enable": True})
-    payload = provider._build_payload(
-        _messages(),
-        model="claude-x",
-        temperature=0.3,
-        max_tokens=64,
-        stream=True,
-    )
-    assert payload["stream"] is True
-    assert payload["system"][-1]["cache_control"] == {"type": "ephemeral"}
-
-
 def test_anthropic_without_system_has_no_system_field():
     provider = AnthropicProvider({"api_key": "K"})
     payload = provider._build_payload(

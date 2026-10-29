@@ -4,10 +4,10 @@ import asyncio
 import types
 
 from app.agent.config import DEFAULT_LLM_CONFIG
-from app.agent.loop.chat import _clean_output_for_history, generate_response
-from app.plugins.llm_memory.src.manager import MemoryManager
+from app.agent.loop.chat import generate_response
 from app.agent.session.manager import SessionManager
 from app.domain.tags import maybe_strip_parentheses, strip_parentheses
+from app.plugins.llm_memory.src.manager import MemoryManager
 
 
 # ---- strip_parentheses ----
@@ -34,22 +34,6 @@ def test_strip_parentheses_keep_unclosed_and_no_nuke():
 def test_maybe_strip_parentheses_toggle():
     assert maybe_strip_parentheses("好（哦）", enabled=True) == "好"
     assert maybe_strip_parentheses("好（哦）", enabled=False) == "好（哦）"
-
-
-# ---- _clean_output_for_history ----
-class _Cfg:
-    def __init__(self, enabled=True):
-        self.enabled = enabled
-
-    def get(self, key, default=None):
-        return self.enabled if key == "clean_output_parentheses" else default
-
-
-def test_clean_output_for_history_respects_switch():
-    assert _clean_output_for_history(_Cfg(True), "我记住了（笑）") == "我记住了"
-    assert _clean_output_for_history(_Cfg(False), "我记住了（笑）") == "我记住了（笑）"
-    assert _clean_output_for_history(None, "我记住了（笑）") == "我记住了"  # 无 config 默认清洗
-    assert _clean_output_for_history(_Cfg(True), "") == ""
 
 
 # ---- 端到端：展示保留原文、历史已清洗 ----

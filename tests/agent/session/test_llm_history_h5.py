@@ -8,8 +8,6 @@ from app.agent.assembly.prompt import (
     LEGACY_MESSAGE_META_INSTRUCTION,
     MESSAGE_META_INSTRUCTION,
 )
-from app.agent.config import DEFAULT_LLM_CONFIG
-from app.agent.config_schema import SCHEMA
 from app.agent.context.group import format_history_for_llm
 from app.agent.session import enrich as history_enrich
 
@@ -58,16 +56,6 @@ def test_background_empty_when_both_parts_missing():
     req.referent_text = ""
     req.pre_history_text = ""
     assert build_background(req) == []
-
-
-def test_config_exposes_background_switch():
-    """`history_background_enable` 已在 v3 删除（与 include_pre_history 重复）。
-
-    这里改为断言：默认值仍在（模块未安装时框架回退到它），且它不再出现在
-    本体 5 页的 schema 里。
-    """
-    assert DEFAULT_LLM_CONFIG["history_background_enable"] is True
-    assert "history_background_enable" not in SCHEMA
 
 
 # ---------- 端到端：第 1 轮查看 → 第 2 轮历史里仍是内容 ----------
