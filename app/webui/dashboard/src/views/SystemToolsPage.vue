@@ -119,7 +119,7 @@ watch(
         <v-icon icon="mdi-cog-outline" class="mr-2" color="primary" /> 系统工具
       </v-card-title>
       <v-card-text class="text-caption" style="opacity: 0.65">
-        关掉后模型不会再调用对应工具。各来源的调用日志在页面顶部的「日志设置」里统一开关。
+        关掉后模型不会再调用对应工具。调用日志在「AI 设置 → 高级功能 → 工具日志」统一开关。
       </v-card-text>
     </v-card>
 

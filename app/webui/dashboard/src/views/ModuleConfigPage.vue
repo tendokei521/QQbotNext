@@ -6,6 +6,7 @@ import { useResponderStore, type ResponderGroup } from '@/stores/responder'
 import { useBotsStore, displayName } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage, registerDraftFlush } from '@/api/http'
+import { PERMISSION_LABELS, PERMISSION_TOOLTIP } from '@/agent/labels'
 import ConfigForm from '@/components/config/ConfigForm.vue'
 import SaveStatusBar from '@/components/common/SaveStatusBar.vue'
 import PluginStatusBanner from '@/components/tools/PluginStatusBanner.vue'
@@ -66,19 +67,12 @@ watch(mod, (m) => {
   initFromModule()
 })
 
-const PERMISSION_LABEL: Record<string, string> = {
-  everyone: '不限制',
-  member: '成员',
-  group_admin: '管理员',
-  group_owner: '群主',
-  owner: '所有者',
-}
-
 const PERMISSION_COLOR: Record<string, string> = {
   everyone: 'grey',
   member: 'primary',
   group_admin: 'info',
   group_owner: 'purple',
+  manager: 'teal',
   owner: 'error',
 }
 
@@ -382,9 +376,13 @@ onUnmounted(() => {
           {{ isBuiltinModule(mod) ? '内置' : '第三方' }}
         </v-chip>
         <v-chip v-if="mod.version" size="small" variant="tonal">v{{ mod.version }}</v-chip>
-        <v-chip size="small" variant="tonal" :color="PERMISSION_COLOR[mod.permission] || 'default'">
-          {{ PERMISSION_LABEL[mod.permission] || mod.permission }}
-        </v-chip>
+        <v-tooltip location="top" :text="PERMISSION_TOOLTIP">
+          <template #activator="{ props }">
+            <v-chip v-bind="props" size="small" variant="tonal" :color="PERMISSION_COLOR[mod.permission] || 'default'">
+              {{ PERMISSION_LABELS[mod.permission] || mod.permission }}
+            </v-chip>
+          </template>
+        </v-tooltip>
         <v-chip v-if="mod.account_id" size="small" variant="tonal">{{ bots.currentBot?.name ?? mod.account_id }}</v-chip>
       </div>
       <v-spacer />
@@ -393,7 +391,10 @@ onUnmounted(() => {
           当前状态：{{ moduleStatusText }}
         </v-chip>
         <v-btn size="small" variant="text" prepend-icon="mdi-cube-outline" @click="router.push('/modules')">
-          回功能插件列表停用
+          返回插件列表
+        </v-btn>
+        <v-btn size="small" variant="text" @click="router.push('/modules')">
+          {{ mod.enabled ? '去列表停用' : '去列表启用' }}
         </v-btn>
       </div>
     </div>
@@ -529,7 +530,6 @@ onUnmounted(() => {
               <iframe :src="pluginSrc" class="plugin-frame" title="插件设置页" @load="onPluginLoad" />
             </v-window-item>
             <v-window-item value="basic">
-              <div class="text-caption mb-2" style="opacity: 0.65">改动会自动保存并立即生效，无需重新加载。</div>
               <ConfigForm
                 :module-name="name"
                 :schema="mod.config_schema || {}"
@@ -545,7 +545,6 @@ onUnmounted(() => {
           <iframe :src="pluginSrc" class="plugin-frame" title="插件设置页" @load="onPluginLoad" />
         </template>
         <template v-else>
-          <div class="text-caption mb-2" style="opacity: 0.65">改动会自动保存并立即生效，无需重新加载。</div>
           <ConfigForm
             :module-name="name"
             :schema="mod.config_schema || {}"

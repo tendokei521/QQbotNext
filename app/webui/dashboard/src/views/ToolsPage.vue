@@ -1,16 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useAgentConfigStore } from '@/stores/agentConfig'
-import { useBotsStore } from '@/stores/bots'
 import { useToolsStore, type ToolTab } from '@/stores/tools'
-import SaveStatusBar from '@/components/common/SaveStatusBar.vue'
 
 const route = useRoute()
 const router = useRouter()
 const tools = useToolsStore()
-const agent = useAgentConfigStore()
-const bots = useBotsStore()
 
 const TABS: { value: ToolTab; to: string; label: string; icon: string; desc: string }[] = [
   {
@@ -26,15 +21,6 @@ const TABS: { value: ToolTab; to: string; label: string; icon: string; desc: str
   { value: 'module', to: '/tools/module', label: '插件工具', icon: 'mdi-puzzle-outline', desc: '功能插件提供给模型的工具，插件开关在「功能插件」页管理' },
 ]
 
-/** 四类工具共用一组日志开关：这里集中放，避免每个标签页各摆一套 */
-const LOG_SWITCHES: { key: string; label: string }[] = [
-  { key: 'system_tools_log_enabled', label: '系统工具调用日志' },
-  { key: 'module_tools_log_enabled', label: '插件工具调用日志' },
-  { key: 'mcp_tools_log_enabled', label: '外部工具调用日志' },
-  { key: 'onebot_tools_log_enabled', label: 'OneBot 工具调用日志' },
-  { key: 'onebot_tools_debug', label: 'OneBot 详细调试日志' },
-]
-
 const activeTab = computed<ToolTab>(() => {
   if (route.path.startsWith('/tools/overview')) return 'overview'
   if (route.path.startsWith('/tools/onebot')) return 'onebot'
@@ -44,16 +30,6 @@ const activeTab = computed<ToolTab>(() => {
 })
 
 const activeDesc = computed(() => TABS.find((t) => t.value === activeTab.value)?.desc || '')
-const ready = ref(false)
-const noAccount = computed(() => agent.botId === null)
-
-function logValue(key: string): boolean {
-  return !!agent.draft[key]
-}
-
-function setLog(key: string, value: boolean | null) {
-  agent.onChange(key, !!value)
-}
 
 function onSelect(tab: ToolTab) {
   tools.setActiveTab(tab)
@@ -61,13 +37,7 @@ function onSelect(tab: ToolTab) {
   if (target) router.push(target.to)
 }
 
-async function initAgent() {
-  await agent.load()
-  ready.value = true
-}
-
-onMounted(async () => {
-  await initAgent()
+onMounted(() => {
   if (route.path === '/tools' || route.path === '/tools/') {
     const target = TABS.find((t) => t.value === tools.activeTab) || TABS[0]
     router.replace(target.to)
@@ -81,13 +51,6 @@ watch(
     if (tools.activeTab !== tab) tools.setActiveTab(tab)
   },
 )
-
-watch(
-  () => bots.currentAccountId,
-  () => {
-    void agent.load(true)
-  },
-)
 </script>
 
 <template>
@@ -95,20 +58,17 @@ watch(
     <div class="app-page-header d-flex align-center flex-wrap gap-2">
       <div class="me-4">
         <h1 class="app-page-title">高级工具</h1>
-        <div class="app-page-subtitle">统一管理四类工具的开关、日志与可用状态</div>
+        <div class="app-page-subtitle">统一查看四类工具的开关与可用状态</div>
       </div>
       <v-spacer />
-      <v-btn variant="text" prepend-icon="mdi-cube-outline" @click="router.push('/modules')">
-        返回功能插件
+      <v-btn variant="text" prepend-icon="mdi-cog-outline" @click="router.push('/settings')">
+        返回设置
       </v-btn>
     </div>
 
     <v-card variant="outlined" class="mb-4">
       <v-card-text class="pb-0">
         <div class="text-caption" style="opacity: 0.7">{{ activeDesc }}</div>
-        <div v-if="ready && noAccount" class="text-caption text-warning mt-1">
-          还没有选中账号：工具开关与日志按账号保存，先在「账号管理」里添加或选中账号。
-        </div>
       </v-card-text>
       <v-tabs
         :model-value="activeTab"
@@ -124,31 +84,23 @@ watch(
       </v-tabs>
     </v-card>
 
+    <!-- 日志开关只有一处：AI 设置 → 高级功能 → 工具日志（配置分区由生成器维护） -->
     <v-card variant="outlined" class="mb-4">
-      <v-expansion-panels variant="accordion" flat>
-        <v-expansion-panel title="日志设置">
-          <v-expansion-panel-text>
-            <div class="d-flex flex-wrap gap-4 mb-2">
-              <v-switch
-                v-for="item in LOG_SWITCHES"
-                :key="item.key"
-                :model-value="logValue(item.key)"
-                :label="item.label"
-                color="primary"
-                density="compact"
-                hide-details
-                :disabled="!ready || noAccount"
-                @update:model-value="(v: boolean | null) => setLog(item.key, v)"
-              />
-            </div>
-            <SaveStatusBar
-              :status="agent.saveStatus"
-              autosave
-              hint="改动会自动保存；详细调试日志只排查问题时打开"
-            />
-          </v-expansion-panel-text>
-        </v-expansion-panel>
-      </v-expansion-panels>
+      <v-card-text class="d-flex align-center flex-wrap gap-3">
+        <v-icon icon="mdi-text-box-search-outline" color="primary" />
+        <div class="text-body-2">
+          工具调用日志（系统 / 插件 / 外部 / OneBot）在「AI 设置 → 高级功能 → 工具日志」统一开关。
+        </div>
+        <v-spacer />
+        <v-btn
+          size="small"
+          variant="tonal"
+          prepend-icon="mdi-cog-outline"
+          @click="router.push('/ai/settings/advanced')"
+        >
+          去工具日志
+        </v-btn>
+      </v-card-text>
     </v-card>
 
     <router-view />

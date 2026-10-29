@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
-import http, { errorMessage } from '@/api/http'
+import { computed, reactive, ref, watch } from 'vue'
+import http from '@/api/http'
 import FieldControl from './FieldControl.vue'
 import StringListWidget from './StringListWidget.vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -35,6 +35,20 @@ const draft = reactive<Record<string, any>>({})
 // 用户一旦编辑就不再被外部快照覆盖，避免输入过程中被重置
 const touched = ref(false)
 
+/** 插件 schema 没声明 endpoint（或声明成空串）时，不发请求、直接说明这项设置不可用 */
+const endpointValid = computed(() => {
+  const endpoint = props.schema?.endpoint
+  return typeof endpoint === 'string' && endpoint.trim().length > 0
+})
+
+/** 用户可读的一句话原因；具体错误只进控制台，避免把后端原文糊到界面上 */
+const LOAD_FAILED = '这项设置暂时读不到数据'
+
+function endpointPath(suffix = ''): string {
+  const endpoint = String(props.schema?.endpoint || '').trim()
+  return `/api/module/${props.moduleName}/dynamic/${endpoint}${suffix}`
+}
+
 function emitValue() {
   touched.value = true
   const saved = { ...(props.modelValue || {}) }
@@ -44,6 +58,7 @@ function emitValue() {
 }
 
 async function loadOptions() {
+  if (!endpointValid.value) return
   if (!props.botId) {
     error.value = '先选择一个账号再设置'
     return
@@ -51,33 +66,39 @@ async function loadOptions() {
   loadingOptions.value = true
   error.value = ''
   try {
-    const res = await http.get(`/api/module/${props.moduleName}/dynamic/${props.schema.endpoint}`, {
+    const res = await http.get(endpointPath(), {
       params: { account_id: props.botId },
     })
     const data = res.data
-    if (!data?.ok) throw new Error(data?.message || '加载失败')
+    if (!data?.ok) {
+      console.warn('[dynamic] 选项加载失败', data)
+      throw new Error(LOAD_FAILED)
+    }
     options.value = data.options || []
     if (!selected.value && options.value.length) {
       selected.value = String(options.value[0].value)
     }
     if (selected.value) await loadFields()
   } catch (err) {
-    error.value = errorMessage(err)
+    console.warn('[dynamic] 选项加载异常', err)
+    error.value = LOAD_FAILED
   } finally {
     loadingOptions.value = false
   }
 }
 
 async function loadFields() {
-  if (!props.botId || !selected.value) return
+  if (!endpointValid.value || !props.botId || !selected.value) return
   loadingFields.value = true
   try {
-    const res = await http.get(
-      `/api/module/${props.moduleName}/dynamic/${props.schema.endpoint}/${encodeURIComponent(selected.value)}`,
-      { params: { account_id: props.botId } },
-    )
+    const res = await http.get(endpointPath(`/${encodeURIComponent(selected.value)}`), {
+      params: { account_id: props.botId },
+    })
     const data = res.data
-    if (!data?.ok) throw new Error(data?.message || '加载失败')
+    if (!data?.ok) {
+      console.warn('[dynamic] 字段加载失败', data)
+      throw new Error(LOAD_FAILED)
+    }
     fields.value = data.fields || []
     // 回填已存值
     const saved = (props.modelValue || {})[selected.value] || {}
@@ -85,7 +106,8 @@ async function loadFields() {
       draft[f.key] = saved[f.key] ?? f.default ?? (f.type === 'boolean' ? false : '')
     })
   } catch (err) {
-    error.value = errorMessage(err)
+    console.warn('[dynamic] 字段加载异常', err)
+    error.value = LOAD_FAILED
   } finally {
     loadingFields.value = false
   }
@@ -135,7 +157,10 @@ if (props.botId) loadOptions()
 
 <template>
   <div class="dynamic-widget">
-    <div v-if="loadingOptions" class="hint"><v-progress-circular size="16" indeterminate /> 加载中…</div>
+    <div v-if="!endpointValid" class="state-box">
+      <span class="state-text">这项设置暂不可用</span>
+    </div>
+    <div v-else-if="loadingOptions" class="hint"><v-progress-circular size="16" indeterminate /> 加载中…</div>
     <div v-else-if="error" class="state-box">
       <span class="state-text">{{ error }}</span>
       <v-btn size="small" variant="text" prepend-icon="mdi-refresh" @click="loadOptions">重试</v-btn>

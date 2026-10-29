@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import http, { errorMessage } from '@/api/http'
-import ConfigForm from '@/components/config/ConfigForm.vue'
-import { useAgentConfigStore } from '@/stores/agentConfig'
 import { useBotsStore } from '@/stores/bots'
+import { useModulesStore } from '@/stores/modules'
 import { useToolsStore } from '@/stores/tools'
 import { useNotifyStore } from '@/stores/notify'
-import { agentSectionById } from '@/agent/sections'
-import { buildSectionSchema } from '@/utils/schema'
+import { PERMISSION_LABELS, permissionLabel } from '@/agent/labels'
 import ToolInfo from '@/components/tools/ToolInfo.vue'
 
 interface OneBotTool {
@@ -33,14 +31,42 @@ interface ToolOverride {
   scopes?: string[]
 }
 
-const agent = useAgentConfigStore()
 const bots = useBotsStore()
+const modules = useModulesStore()
 const toolsStore = useToolsStore()
 const notify = useNotifyStore()
-// OneBot 字段由 registry 的「工具与能力」页 adv_onebot 子分组声明；
-// 本页只渲染那一块，避免把 Tavily/知识库等其它字段也搬进工具管理页。
-const onebotSpec = agentSectionById('adv_tools')?.groups.find((g) => g.id === 'adv_onebot')
-const schema = computed(() => (onebotSpec ? buildSectionSchema(agent.schema, [onebotSpec]) : {}))
+
+/** OneBot 工具设置属于插件「工具扩展」，与「功能插件 → 工具扩展」是同一份配置 */
+const TOOLS_MODULE = 'llm_tools_extra'
+const moduleConfig = computed<Record<string, any>>(() => modules.modules[TOOLS_MODULE]?.config || {})
+/** 插件列表接口给的是「已保存的原始配置」，没保存过的键要回退 schema 默认值 */
+const toolSchemaItems = computed<Record<string, any>>(() => {
+  const schema = modules.modules[TOOLS_MODULE]?.config_schema as { items?: Record<string, any> } | undefined
+  return schema?.items || {}
+})
+const toolsConfig = computed<Record<string, any>>(() => {
+  const defaults: Record<string, any> = {}
+  for (const [key, field] of Object.entries(toolSchemaItems.value)) {
+    if (field && typeof field === 'object' && 'default' in field) defaults[key] = field.default
+  }
+  return { ...defaults, ...moduleConfig.value }
+})
+
+/** 只提交改动的键：后端按 key 合并，不会覆盖插件的其它配置 */
+async function saveToolsConfig(patch: Record<string, unknown>) {
+  const current = moduleConfig.value
+  modules.patch(TOOLS_MODULE, { config: { ...current, ...patch } })
+  try {
+    await modules.saveConfig(TOOLS_MODULE, patch)
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+    try {
+      await modules.load()
+    } catch {
+      /* 回滚加载失败不再叠加提示 */
+    }
+  }
+}
 
 const tools = ref<OneBotTool[]>([])
 const loading = ref(false)
@@ -82,13 +108,17 @@ const toolGroups = computed(() => {
 })
 
 const enabled = computed<boolean>({
-  get: () => !!agent.draft.onebot_tools_enable,
-  set: (v: boolean) => agent.onChange('onebot_tools_enable', v),
+  get: () => !!toolsConfig.value.onebot_tools_enable,
+  set: (v: boolean) => void saveToolsConfig({ onebot_tools_enable: !!v }),
 })
 
-const denied = computed<string[]>(() => Array.isArray(agent.draft.onebot_tools_denied) ? agent.draft.onebot_tools_denied : [])
-const allowed = computed<string[]>(() => Array.isArray(agent.draft.onebot_tools_allowed) ? agent.draft.onebot_tools_allowed : [])
-const overrides = computed<Record<string, ToolOverride>>(() => agent.draft.onebot_tool_overrides || {})
+const denied = computed<string[]>(() =>
+  Array.isArray(toolsConfig.value.onebot_tools_denied) ? toolsConfig.value.onebot_tools_denied : [],
+)
+const allowed = computed<string[]>(() =>
+  Array.isArray(toolsConfig.value.onebot_tools_allowed) ? toolsConfig.value.onebot_tools_allowed : [],
+)
+const overrides = computed<Record<string, ToolOverride>>(() => toolsConfig.value.onebot_tool_overrides || {})
 
 function toolPermission(tool: OneBotTool): string {
   return overrides.value[tool.name]?.permission || tool.base_permission || tool.permission
@@ -101,7 +131,7 @@ function toolScopes(tool: OneBotTool): string[] {
 function updateOverride(tool: OneBotTool, partial: ToolOverride) {
   const current = overrides.value[tool.name] || {}
   const next = { ...overrides.value, [tool.name]: { ...current, ...partial } }
-  agent.onChange('onebot_tool_overrides', next)
+  void saveToolsConfig({ onebot_tool_overrides: next })
 }
 
 function setToolPermission(tool: OneBotTool, permission: string) {
@@ -121,20 +151,27 @@ function isToolOn(name: string): boolean {
 
 function toggleTool(name: string) {
   if (isToolOn(name)) {
-    agent.onChange('onebot_tools_denied', Array.from(new Set([...denied.value, name])))
-    agent.onChange('onebot_tools_allowed', allowed.value.filter((x) => x !== name))
+    void saveToolsConfig({
+      onebot_tools_denied: Array.from(new Set([...denied.value, name])),
+      onebot_tools_allowed: allowed.value.filter((x) => x !== name),
+    })
   } else {
-    agent.onChange('onebot_tools_denied', denied.value.filter((x) => x !== name))
-    if (allowed.value.length) {
-      agent.onChange('onebot_tools_allowed', Array.from(new Set([...allowed.value, name])))
+    const patch: Record<string, unknown> = {
+      onebot_tools_denied: denied.value.filter((x) => x !== name),
     }
+    if (allowed.value.length) {
+      patch.onebot_tools_allowed = Array.from(new Set([...allowed.value, name]))
+    }
+    void saveToolsConfig(patch)
   }
 }
 
 function resetToggles() {
-  agent.onChange('onebot_tools_denied', [])
-  agent.onChange('onebot_tools_allowed', [])
-  agent.onChange('onebot_tool_overrides', {})
+  void saveToolsConfig({
+    onebot_tools_denied: [],
+    onebot_tools_allowed: [],
+    onebot_tool_overrides: {},
+  })
 }
 
 function isCollapsed(category: string): boolean {
@@ -150,17 +187,16 @@ function riskColor(risk: string): string {
   return risk === 'read' ? 'success' : risk === 'send' ? 'info' : 'warning'
 }
 
-function permissionLabel(permission: string): string {
-  if (permission === 'everyone') return '所有人'
-  if (permission === 'group_admin') return '群管理'
-  if (permission === 'group_owner') return '群主'
-  if (permission === 'owner') return '账号主人'
-  return '成员'
-}
-
 function riskLabel(risk: string): string {
   return risk === 'read' ? '只读' : risk === 'send' ? '消息' : '管理'
 }
+
+/** 触发权限可选项：与「回复与权限」共用同一套叫法；OneBot 侧只有这 5 档 */
+const ONEBOT_PERMISSION_KEYS = ['everyone', 'member', 'group_admin', 'group_owner', 'owner']
+const PERMISSION_ITEMS = ONEBOT_PERMISSION_KEYS.map((value) => ({
+  value,
+  title: PERMISSION_LABELS[value] || value,
+}))
 
 const SCOPE_LABELS: Record<string, string> = {
   '*': '全部',
@@ -174,17 +210,27 @@ function scopeLabels(scopes: string[]): string {
 }
 
 async function loadTools() {
-  if (!agent.botId) return
+  if (!bots.currentAccountId) return
   loading.value = true
   try {
     const res = await http.get<{ ok: boolean; log_enabled: boolean; tools: OneBotTool[] }>('/api/agent/onebot/tools', {
-      params: { account_id: agent.botId },
+      params: { account_id: bots.currentAccountId },
     })
     tools.value = res.data.tools || []
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   } finally {
     loading.value = false
+  }
+}
+
+/** 开关数据来自插件配置：首次进入先确保模块列表（含 config）已加载 */
+async function ensureModuleConfig() {
+  if (modules.modules[TOOLS_MODULE]) return
+  try {
+    await modules.load()
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
   }
 }
 
@@ -198,7 +244,7 @@ function saveScroll() {
 }
 
 onMounted(async () => {
-  await agent.load()
+  await ensureModuleConfig()
   loadTools()
   restoreScroll()
   window.addEventListener('scroll', saveScroll, { passive: true })
@@ -212,7 +258,7 @@ onUnmounted(() => {
 watch(
   () => bots.currentAccountId,
   async () => {
-    await agent.load(true)
+    await ensureModuleConfig()
     loadTools()
   },
 )
@@ -227,7 +273,8 @@ watch(
         <v-switch v-model="enabled" color="primary" density="compact" hide-details />
       </v-card-title>
       <v-card-text class="text-caption" style="opacity: 0.65">
-        开启后，模型可以主动发消息、查群信息等。敏感管理操作只建议给账号主人；调用日志与详细调试日志在页面顶部「日志设置」里开关。
+        开启后，模型可以主动发消息、查群信息等。敏感管理操作只建议给账号主人。
+        <div class="mt-1">与「功能插件 → 工具扩展」是同一份设置，改这里等于改插件配置。</div>
       </v-card-text>
     </v-card>
 
@@ -308,13 +355,7 @@ watch(
                   <v-select
                     :model-value="toolPermission(tool)"
                     :disabled="!enabled"
-                    :items="[
-                      { title: '所有人', value: 'everyone' },
-                      { title: '成员及以上', value: 'member' },
-                      { title: '群管理及以上', value: 'group_admin' },
-                      { title: '群主', value: 'group_owner' },
-                      { title: '账号主人', value: 'owner' },
-                    ]"
+                    :items="PERMISSION_ITEMS"
                     label="触发权限"
                     variant="outlined"
                     density="compact"
@@ -333,15 +374,6 @@ watch(
             </template>
           </template>
         </div>
-      </v-card-text>
-    </v-card>
-
-    <v-card variant="outlined" class="mb-4">
-      <v-card-title class="d-flex align-center">
-        <v-icon icon="mdi-tune" class="mr-2" color="teal" /> 高级配置
-      </v-card-title>
-      <v-card-text>
-        <ConfigForm :module-name="'agent'" :schema="schema" :config="agent.draft" :bot-id="agent.botId" @change="agent.onChange" />
       </v-card-text>
     </v-card>
   </div>

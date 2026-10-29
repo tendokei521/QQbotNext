@@ -6,7 +6,7 @@
  * 额外徽标/链接通过 `meta` 插槽传入。
  */
 import { computed, ref } from 'vue'
-import { toolDisplayTitle } from './toolDisplay'
+import { toolDisplayRest, toolDisplayTitle } from './toolDisplay'
 
 const props = defineProps<{
   tool: {
@@ -46,6 +46,8 @@ interface ParamRow {
 
 /** 主标题：中文短名（description 首个分句，≤18 字）；没有描述时退回工具名 */
 const actionTitle = computed(() => toolDisplayTitle(props.tool, 18))
+/** 标题已经用掉了描述的第一分句，正文只显示剩下的部分，避免同一句话出现两遍 */
+const descRest = computed(() => toolDisplayRest(props.tool))
 
 const paramRows = computed<ParamRow[]>(() => {
   const parameters = props.tool.parameters || {}
@@ -80,12 +82,12 @@ function paramLabel(name: string): string {
 
 <template>
   <div class="tool-info">
-    <div class="d-flex align-center flex-wrap gap-2">
+    <div class="tool-head">
       <span class="tool-title">{{ actionTitle }}</span>
       <span class="tool-raw-name" :title="`工具标识：${tool.name}`">{{ tool.name }}</span>
       <slot name="title-extra" />
     </div>
-    <div class="tool-desc">{{ tool.description }}</div>
+    <div v-if="descRest" class="tool-desc">{{ descRest }}</div>
     <div class="d-flex align-center flex-wrap gap-2 mt-1">
       <slot name="meta" />
       <v-btn size="x-small" variant="text" append-icon="mdi-chevron-right" @click.stop="detailOpen = true">
@@ -130,6 +132,13 @@ function paramLabel(name: string): string {
 </template>
 
 <style scoped>
+.tool-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
 .tool-title {
   font-weight: 600;
   font-size: 16px;
@@ -139,8 +148,9 @@ function paramLabel(name: string): string {
 .tool-raw-name {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
-  color: rgba(var(--v-theme-on-surface), 0.45);
+  color: rgba(var(--v-theme-on-surface), 0.4);
   cursor: help;
+  padding-left: 2px;
 }
 
 .tool-desc {

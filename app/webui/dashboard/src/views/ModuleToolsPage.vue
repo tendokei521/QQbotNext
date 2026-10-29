@@ -129,7 +129,7 @@ watch(
         <v-icon icon="mdi-puzzle-outline" class="mr-2" color="secondary" /> 插件工具
       </v-card-title>
       <v-card-text class="text-caption" style="opacity: 0.65">
-        列出功能插件提供给模型的工具。插件开关在「功能插件」页管理；调用日志在页面顶部「日志设置」里开关。
+        列出功能插件提供给模型的工具。插件开关在「功能插件」页管理；调用日志在「AI 设置 → 高级功能 → 工具日志」开关。
       </v-card-text>
     </v-card>
 

@@ -11,6 +11,7 @@ import {
 import { displayName, useBotsStore } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
+import { PERMISSION_LABELS, PERMISSION_TOOLTIP } from '@/agent/labels'
 import EmptyState from '@/components/EmptyState.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import PluginDepsDialog from '@/components/tools/PluginDepsDialog.vue'
@@ -84,14 +85,6 @@ const zipDepsMirror = ref('')
 const cardDepsOpen = ref(false)
 const cardDepsName = ref('')
 const cardDepsLabel = ref('')
-
-const PERMISSION_LABEL: Record<string, string> = {
-  everyone: '所有人',
-  member: '群成员',
-  group_admin: '管理员',
-  group_owner: '群主',
-  owner: '仅主人',
-}
 
 const PERMISSION_COLOR: Record<string, string> = {
   everyone: 'grey',
@@ -459,6 +452,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       <div class="me-2">
         <h1 class="app-page-title">功能插件</h1>
         <div class="app-page-subtitle">共 {{ modules.count }} 个插件，开关只影响当前账号</div>
+        <div class="text-caption mt-1">
+          工具调试入口在
+          <router-link to="/settings">设置 → 高级选项</router-link>
+        </div>
       </div>
       <v-chip v-if="bots.currentAccountId" size="small" variant="tonal">
         当前账号：{{ accountName }}
@@ -604,9 +601,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                     </div>
                     <div class="text-caption">点击去配置包</div>
                   </v-tooltip>
-                  <v-chip size="x-small" class="ml-1" :color="PERMISSION_COLOR[m.permission] || 'default'" variant="tonal">
-                    {{ PERMISSION_LABEL[m.permission] || m.permission }}
-                  </v-chip>
+                  <v-tooltip location="top" :text="PERMISSION_TOOLTIP">
+                    <template #activator="{ props }">
+                      <v-chip v-bind="props" size="x-small" class="ml-1" :color="PERMISSION_COLOR[m.permission] || 'default'" variant="tonal">
+                        {{ PERMISSION_LABELS[m.permission] || m.permission }}
+                      </v-chip>
+                    </template>
+                  </v-tooltip>
                   <v-tooltip v-if="m.supersedes?.length" location="top" max-width="320">
                     <template #activator="{ props }">
                       <v-chip v-bind="props" size="x-small" class="ml-1" color="warning" variant="tonal">
