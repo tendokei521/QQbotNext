@@ -18,6 +18,9 @@
 - **复核**：插件区首轮误删了 7 个文件的行为测试（memory 置信度/矛盾检测、模块配置链式视图、
   调度器触发、provider 能力分发），Lead 复核后恢复并保留（52 例重新纳入）。教训写进流程：
   整文件删除必须证明"该文件全部是内部实现"，否则只删用例。
+- **清理死引用**：bilibili_parser / douyin_parser / emoji_reply / group_log / log_sender 已迁为
+  本地插件（`data/module/plugins/`，不进仓库），对应 13 个测试文件按 TEST_POLICY §4 同批删除；
+  全量从「13 个收集错误 + 2 失败」回到 **2853 passed / 18 skipped**（107s）。
 
 
 ### 变更：系统提示词方案改为「必选三选一」（2026-10-29）
