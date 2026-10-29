@@ -231,7 +231,9 @@ def normalize_manifest(raw: Any) -> dict:
             continue
         component_modules.append({
             "name": module_name,
-            "enabled": bool(item.get("enabled", True)),
+            # None = 包里没声明启停（导出时账号上没有显式开关），应用时保留账号现状。
+            # 不能默认 True：那会把"应用配置包"变成"把所有插件打开"。
+            "enabled": (None if item.get("enabled") is None else bool(item["enabled"])),
             "source": str(item.get("source") or "").strip(),
             "version": str(item.get("version") or "").strip(),
         })

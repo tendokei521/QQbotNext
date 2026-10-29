@@ -189,7 +189,10 @@ def export_bundle(
 
     # ---------- 模块：参数 + 启停 + 可选的代码包 ----------
     for module_name, entry in (module_configs or {}).items():
-        enabled = bool((entry or {}).get("enabled", True))
+        # enabled=None 表示账号上**没有显式启停**（走「新账号默认关 / 老账号默认开」），
+        # 这种"默认值"不能写进包——否则应用时会固化成 enabled=true/false，
+        # 把用户后来手动关掉的插件重新打开（见 docs/TEST_POLICY 之外的坑：#bundle-enabled）。
+        enabled = (entry or {}).get("enabled")
         config = (entry or {}).get("config") or {}
         meta = module_meta.get(module_name) or {}
         module_version = str(meta.get("version") or "")
@@ -211,12 +214,14 @@ def export_bundle(
             package_path = f"modules/{module_name}-{module_version or '0.0.0'}.zip"
             files[package_path] = package
 
-        components["modules"].append({
+        module_component = {
             "name": module_name,
-            "enabled": enabled,
             "source": source,
             "version": module_version,
-        })
+        }
+        if enabled is not None:
+            module_component["enabled"] = bool(enabled)
+        components["modules"].append(module_component)
         requires_modules.append({
             "name": module_name,
             # 内置模块随框架走：只声明版本（低版本框架缺模块时给 warning，不阻断）

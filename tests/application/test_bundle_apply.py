@@ -202,3 +202,50 @@ async def test_upgrade_preserves_user_edits_and_reuses_secret(container, config_
         "SELECT status FROM bundle_activations WHERE bundle_id = ? ORDER BY started_at", ("demo-pack",)
     )
     assert [row["status"] for row in rows] == ["superseded", "active"], "旧激活应标记 superseded"
+
+
+async def test_apply_without_enabled_key_keeps_account_switch(container, config_service):
+    """回归：应用配置包不能把账号上已关掉的插件重新打开。
+
+    包清单里没有 ``enabled`` 键 = 「该模块没写过显式启停」，应用时必须保留账号现状
+    （这里用户显式关过 → 仍然是关）。老实现把它当 True，于是"应用一次包，插件全开"。
+    """
+    await _seed(container, config_service)
+    await config_service.apply_ops([
+        ConfigOp("binding", ("llm_memory", "account", "acc1"), {
+            "enabled": False,
+            "config": {"memory_enable": True},
+        }),
+    ])
+
+    manifest = json.loads(json.dumps(MANIFEST))
+    manifest["components"]["modules"] = [
+        {"name": "llm_memory", "source": "configs/module-llm_memory.json"},
+    ]
+
+    await BundleApplier(config_service).apply(
+        "demo-pack", "acc1", normalize_manifest(manifest), FILES,
+        secrets={"providers[0].api_key": "sk-test"},
+    )
+
+    authority = config_service.get_module_authority("llm_memory", "acc1")
+    assert authority["enabled"] is False, "包里没写 enabled 时不得改动账号上的插件开关"
+
+
+async def test_apply_explicit_enabled_still_wins(container, config_service):
+    """包里显式写了 enabled 时仍按包执行（用户想用包统一开关的场景）。"""
+    await _seed(container, config_service)
+    await config_service.apply_ops([
+        ConfigOp("binding", ("llm_memory", "account", "acc1"), {"enabled": False, "config": {}}),
+    ])
+    manifest = json.loads(json.dumps(MANIFEST))
+    manifest["components"]["modules"] = [
+        {"name": "llm_memory", "enabled": True, "source": "configs/module-llm_memory.json"},
+    ]
+
+    await BundleApplier(config_service).apply(
+        "demo-pack", "acc1", normalize_manifest(manifest), FILES,
+        secrets={"providers[0].api_key": "sk-test"},
+    )
+    assert config_service.get_module_authority("llm_memory", "acc1")["enabled"] is True
+

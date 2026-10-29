@@ -247,8 +247,14 @@ class BundleService:
                 authority = self.config_service.get_module_authority(module_name, account_id) or {}
                 if not config and not authority:
                     continue
+                # 只有账号上**显式写过启停**才随包（get_binding 返回 None = 没写过，
+                # 走账号默认值）。否则"默认开"会被导成 enabled=true，应用时把用户
+                # 后来关掉的插件重新打开。
+                binding_row = (
+                    self.config_service.get_binding(module_name, "account", account_id) or {}
+                )
                 module_configs[module_name] = {
-                    "enabled": bool(authority.get("enabled", True)),
+                    "enabled": binding_row.get("enabled"),
                     "config": config,
                 }
                 catalog_entry = self.module_catalog.get(module_name) or {}

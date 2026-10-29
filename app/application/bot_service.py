@@ -13,6 +13,7 @@ from app.core.logger import logger
 from app.domain.bot import IBot
 from app.infrastructure.onebot.endpoint import FORWARD
 from app.plugin.authority import declares_single_service
+from app.plugin.base import ModuleAuthority, ModuleConfig
 from app.plugin.schema_utils import webui_schema
 
 
@@ -286,6 +287,25 @@ class BotService:
             if mod is None:
                 continue
 
+            # 该账号还没装配实例时，上面回退到的是别的账号 / 全局实例：它的 enabled、
+            # config 都属于那个对象（全局默认 enabled=True），直接展示会变成「这个账号
+            # 所有插件都开着」，而且跟着点开关还会写到别的账号。所以这里按**请求的
+            # 账号**重新解析配置与启停，实例只用来提供 schema / 元数据。
+            view_account_id = mod.bot_id
+            view_config = mod.config
+            view_authority = mod.authority
+            config_service = getattr(mod.config, "_service", None)
+            if (
+                account_id is not None
+                and config_service is not None
+                and str(mod.bot_id) != str(account_id)
+            ):
+                view_account_id = account_id
+                view_config = ModuleConfig(
+                    mod.module_name, account_id, getattr(mod, "default_config", {}) or {}, config_service
+                )
+                view_authority = ModuleAuthority(mod.module_name, account_id, config_service)
+
             entry = catalog_by_name.get(mod_name)
             manifest = getattr(entry, "manifest", None) or {}
             display_name = str(
@@ -298,21 +318,21 @@ class BotService:
                 "name": display_name or mod.name,
                 "name_sign": mod.sign,
                 "description": mod.description,
-                "enabled": mod.authority.enabled,
+                "enabled": view_authority.enabled,
                 "permission": mod.permission,
-                "account_id": mod.bot_id,
+                "account_id": view_account_id,
                 "category": getattr(mod, "category", "未分类"),
                 "tags": list(getattr(mod, "tags", []) or []),
                 "order": int(getattr(mod, "order", 100) or 100),
                 "hidden": bool(getattr(mod, "hidden", False)),
                 "pinned": bool(getattr(mod, "pinned", False)),
                 "permission_config": {
-                    "group_mode": mod.authority.permission.group_mode,
-                    "group_list": mod.authority.permission.group_list,
-                    "user_mode": mod.authority.permission.user_mode,
-                    "user_list": mod.authority.permission.user_list,
+                    "group_mode": view_authority.permission.group_mode,
+                    "group_list": view_authority.permission.group_list,
+                    "user_mode": view_authority.permission.user_mode,
+                    "user_list": view_authority.permission.user_list,
                 },
-                "config": _mask_password_config(dict(mod.config.raw_config), mod.config_schema),
+                "config": _mask_password_config(dict(view_config.raw_config), mod.config_schema),
                 "config_schema": webui_schema(
                     mod.config_schema, registry=self.resource_registry, source_module=mod_name
                 ),

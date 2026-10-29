@@ -302,13 +302,22 @@ async def api_module(
 
 @router.post("/module/{module_name}/toggle")
 async def toggle_module(module_name: str, request: Request,
-                        bot_id: str | None = Depends(parse_account_id), enabled: bool = Form(...), agent_manager=Depends(get_agent_manager), registry=Depends(get_module_registry)):
+                        bot_id: str | None = Depends(parse_account_id), enabled: bool = Form(...), agent_manager=Depends(get_agent_manager), registry=Depends(get_module_registry),
+                        config_service=Depends(get_config_service)):
     module = _resolve_module(agent_manager, registry, module_name, bot_id)
     if not module:
         return _err(404, f"模块 {module_name} (Bot {bot_id}) 不存在")
-    module.authority.set_enabled(enabled)
-    # 生命周期联动：禁用 -> 停止定时任务/取消后台任务；启用 -> 恢复定时任务（含动态每日任务）
-    await _sync_module_runtime(module, enabled)
+    if module_name == VIRTUAL_AGENT_MODULE or bot_id is None:
+        # Agent 虚拟模块走运行时开关（写 agent 配置）；没指定账号时保持旧的全局语义
+        module.authority.set_enabled(enabled)
+    else:
+        # 模块实例可能来自「该账号尚未装配时的回退」（全局实例或别的账号）：
+        # 绝不能拿它的 bot_id 写启停，否则一个账号的开关会写到全局/另一个账号上
+        # （表现为「某个账号的插件莫名其妙全开」）。启停统一按请求的账号落 binding。
+        await config_service.save_binding(module_name, "account", str(bot_id), enabled=enabled)
+    # 生命周期联动只对「确实属于这个账号」的实例做，回退实例不动别人的运行时
+    if bot_id is None or str(getattr(module, "bot_id", "")) == str(bot_id):
+        await _sync_module_runtime(module, enabled)
     await manager.broadcast(json.dumps(_authority_payload(module, bot_id, enabled)))
     return _ok(f"模块 {module.name} (Bot {bot_id}) 已{'启用' if enabled else '禁用'}")
 

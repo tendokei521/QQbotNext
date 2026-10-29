@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+### 修复：应用配置包会把「插件开关全部打开」（2026-10-29）
+
+- **根因（四个环节叠加）**：
+  1. 导出时把「账号上没写过启停、走默认开」的模块固化成 `enabled: true` 写进包
+     （`bundle/service.py` 用 `authority.get("enabled", True)`，`exporter.py` 同样默认 True）；
+  2. 包清单归一化又把缺失的 `enabled` 兜底成 `True`（`bundle/manifest.py`）；
+  3. 应用时同样默认 True（`bundle/applier.py`），于是给**每个模块**写一条显式
+     `enabled=true` 的 account binding；
+  4. 结果：应用一次配置包，账号上原本关掉的插件全部被打开（线上库可见 24 条 binding
+     `enabled=1`、`updated_at` 完全相同，而应用前快照里它们是 `false`）。
+- **修复**：导出/归一化/应用三处都改为「只有账号上**显式设过**启停才随包；包里没有该键
+  就保持账号现状（binding 的 `enabled=NULL` = 继承账号默认值）」。包里显式写 `enabled`
+  时仍按包执行。
+- **顺带修两个同源问题**（`BotService.get_modules_data` / `POST /api/module/{name}/toggle`）：
+  账号尚未装配模块实例时，原先回退到全局/别的账号实例，页面会把全局默认 `enabled=True`
+  显示成「这个账号所有插件都开着」，点开关还会写到全局或别的账号；现在配置与启停统一按
+  **请求的账号**解析，开关只写该账号的 binding，生命周期联动也只对属于该账号的实例执行。
+- **数据修复**：从 `act_f168efc9ae23` 激活快照恢复账号 `123` 的 22 个插件开关（保持应用前
+  的关闭状态）；已导出的 `data/bundles/account-123` 清单去掉固化的 `enabled`（重算校验和）。
+  备份：`logs/review/app.db.bak-*`、`logs/review/account-123-1.0.0.zip.bak`。
+- **排查结论**：仓库测试不会写线上库（`tests/conftest.py` 每个用例用 tmp SQLite）；
+  这次写入来自一次「应用配置包」API 调用（激活记录 `started_at` 与 binding `updated_at`
+  同为 20:15:44），不是 pytest 污染。
+
 ### 工程：测试政策改为「只测契约」+ 首批瘦身（2026-10-29）
 
 - **规则**：`AGENTS.md` 硬性底线第 2 条从「新增/修改功能必须配套测试」改为「必须配套**契约测试**」——

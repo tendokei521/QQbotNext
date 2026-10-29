@@ -253,7 +253,13 @@ class BundleApplier:
                 "capability": capability,
                 "row": row,
                 "merged": merged,
-                "enabled": bool(module.get("enabled", True)),
+                # 包里有 enabled 才改启停；没有就保持账号现状（None = 继承账号默认值）。
+                # 老包里缺这个键曾被当成 True，导致「应用配置包 → 所有插件被打开」。
+                "enabled": (
+                    bool(module["enabled"])
+                    if module.get("enabled") is not None
+                    else row.get("enabled")
+                ),
             })
 
         # 5) 密钥按声明键路径写回（v1 只认 providers[0].api_key，模块/Agent 密钥被静默丢弃）

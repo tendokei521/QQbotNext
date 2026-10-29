@@ -108,3 +108,76 @@ def test_resolve_bot_falls_back_to_legacy_gateway():
 
     gateway = _LegacyGateway()
     assert modules.resolve_bot(gateway, "acc1") is gateway.conn
+
+
+class _Perm:
+    group_mode = "blacklist"
+    group_list: list = []
+    user_mode = "blacklist"
+    user_list: list = []
+
+
+class _Authority:
+    enabled = True
+    permission = _Perm()
+
+    def __init__(self) -> None:
+        self.written: list[bool] = []
+
+    def set_enabled(self, value: bool) -> None:
+        self.written.append(value)
+
+
+class _FallbackInstance:
+    """全局回退实例（该账号还没装配）：bot_id 是 None。"""
+
+    module_name = "demo"
+    name = "演示插件"
+    sign = "Module"
+    bot_id = None
+
+    def __init__(self) -> None:
+        self.authority = _Authority()
+
+
+class _ToggleRegistry:
+    def __init__(self) -> None:
+        self.instance = _FallbackInstance()
+
+    def get(self, module_name: str, bot_id):
+        return self.instance
+
+
+class _RecordingConfigService:
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    async def save_binding(self, capability_id, scope_type, scope_id, **fields):
+        self.calls.append((capability_id, scope_type, scope_id, fields))
+
+
+async def test_toggle_writes_account_binding_not_fallback_instance(monkeypatch):
+    """回归：开关必须写到请求账号的 binding，不能借回退实例写到全局/别的账号。
+
+    老实现直接 ``module.authority.set_enabled()``；回退实例的 bot_id=None 时
+    这会把启停写成全局 binding —— 一个账号的开关影响所有账号。
+    """
+    sent: list[str] = []
+
+    async def fake_broadcast(message: str) -> None:
+        sent.append(message)
+
+    monkeypatch.setattr(modules.manager, "broadcast", fake_broadcast)
+    registry = _ToggleRegistry()
+    cfg = _RecordingConfigService()
+
+    resp = await modules.toggle_module(
+        "demo", _Req(), bot_id="acc1", enabled=False,
+        agent_manager=None, registry=registry, config_service=cfg,
+    )
+
+    assert resp.status_code == 200
+    assert cfg.calls == [("demo", "account", "acc1", {"enabled": False})], "必须按账号落库"
+    assert registry.instance.authority.written == [], "不能改回退实例（=全局）的启停"
+    assert sent and '"enabled": false' in sent[0]
+
