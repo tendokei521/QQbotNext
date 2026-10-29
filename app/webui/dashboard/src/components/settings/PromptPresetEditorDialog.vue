@@ -11,7 +11,7 @@ import { useNotifyStore } from '@/stores/notify'
 import { usePromptPresetsStore } from '@/stores/promptPresets'
 import { errorMessage } from '@/api/http'
 
-defineProps<{ modelValue: boolean }>()
+const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{ (e: 'update:modelValue', v: boolean): void }>()
 
 const prompts = usePromptPresetsStore()
@@ -45,6 +45,15 @@ async function open() {
 watch(
   () => activeTab.value,
   () => syncDraft(),
+)
+
+// 父组件把 modelValue 从 false 改成 true（含「提示词风格 → 编辑这三套文案」的深链）
+// 不会触发 v-dialog 的 update:model-value，所以要在 prop 上自己监听一次。
+watch(
+  () => props.modelValue,
+  (visible) => {
+    if (visible) void open()
+  },
 )
 
 async function save() {
@@ -89,7 +98,8 @@ function close() {
         <v-btn icon="mdi-close" variant="text" size="small" @click="close" />
       </v-card-title>
 
-      <v-tabs v-model="activeTab" density="compact">
+      <!-- scrollable 对话框里 v-card 是 flex 容器：不加 flex-shrink-0 时 tabs 会被压成一条线 -->
+      <v-tabs v-model="activeTab" density="compact" class="flex-shrink-0">
         <v-tab v-for="row in prompts.presets" :key="row.key" :value="row.key">
           {{ row.label }}
           <v-icon v-if="row.customized" icon="mdi-pencil" size="14" class="ml-1" color="warning" />

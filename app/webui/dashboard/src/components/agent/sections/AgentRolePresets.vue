@@ -5,7 +5,7 @@
  * 一屏一张卡，按用户决策顺序排：
  *   1. 当前人格（只读 chip）+ 去「人格设定」编辑文案；
  *   2. 从人格预设里挑一个并应用（唯一的「应用」入口，人格设定页只负责编辑内容）；
- *   3. 低频的「提示词风格」收进折叠面板，默认收起。
+ *   3.「提示词风格」是必选三选一，常驻展示（不再收进折叠面板）。
  *
  * 人格内容的唯一来源是「人格设定」页的角色预设库；这里只读预设列表、写
  * persona_preset_id / system_prompt，不再复制第二份预览与第二个编辑入口。
@@ -62,11 +62,23 @@ const loading = ref(false)
 const search = ref('')
 const selectedId = ref('')
 
-const currentPromptPreset = computed(() => String(agent.draft.prompt_preset || ''))
+/** 三套风格是**必选**的：空/未知值统一按默认 chat 显示（与后端兜底一致） */
+const PROMPT_KEYS = PROMPT_PRESETS.map((p) => p.key)
 
+const currentPromptPreset = computed(() => {
+  const raw = String(agent.draft.prompt_preset || '').trim().toLowerCase()
+  return PROMPT_KEYS.includes(raw) ? raw : 'chat'
+})
+
+/** 点哪张就是哪张，不存在"取消选择"（再点已选项不会清空） */
 function selectPromptPreset(key: string) {
-  // 再点一次同一张卡片 = 取消（回到"沿用内置文案"），省一个额外的取消按钮
-  agent.onChange('prompt_preset', currentPromptPreset.value === key ? '' : key)
+  if (key === currentPromptPreset.value) return
+  agent.onChange('prompt_preset', key)
+}
+
+/** 三套方案正文的全局编辑入口在「设置 → 编辑系统提示词」 */
+function editPromptText() {
+  router.push({ path: '/settings', query: { 'prompt-presets': '1' } })
 }
 
 const filteredPresets = computed(() => {
@@ -142,14 +154,70 @@ onMounted(() => {
       <v-chip v-else class="persona-chip" variant="tonal">当前人格：未选择</v-chip>
       <v-spacer />
     </v-card-title>
-    <v-card-text v-if="presets.length" class="text-caption pt-0 pb-0" style="opacity: 0.7">
-      选中后点「应用所选人格」，会写入当前账号。
-    </v-card-text>
+    <v-divider class="mx-4 mt-3" />
+
+    <div class="px-4 pb-3 pt-3">
+      <div class="d-flex align-center flex-wrap gap-2 mb-1">
+        <v-icon icon="mdi-tune-variant" size="small" color="primary" />
+        <span class="text-subtitle-2">提示词风格</span>
+        <v-chip size="x-small" variant="tonal" color="primary">必选，三选一</v-chip>
+        <v-spacer />
+        <a class="text-caption text-primary text-decoration-none" href="#" @click.prevent="editPromptText">
+          编辑这三套文案
+        </a>
+      </div>
+      <div class="text-caption mb-3" style="opacity: 0.7">
+        决定框架生成的系统提示词口径（聊天 / 角色扮演 / 助手）；只换说法，不改人格内容。
+      </div>
+      <v-row dense role="radiogroup" aria-label="提示词风格（三选一）">
+        <v-col v-for="p in PROMPT_PRESETS" :key="p.key" cols="12" md="4">
+          <v-card
+            :variant="currentPromptPreset === p.key ? 'tonal' : 'outlined'"
+            :color="currentPromptPreset === p.key ? p.color : undefined"
+            class="h-100 prompt-option"
+            role="radio"
+            :aria-checked="currentPromptPreset === p.key"
+            :tabindex="0"
+            @click="selectPromptPreset(p.key)"
+            @keydown.enter.prevent="selectPromptPreset(p.key)"
+            @keydown.space.prevent="selectPromptPreset(p.key)"
+          >
+            <v-card-item>
+              <template #prepend>
+                <v-icon :icon="p.icon" :color="currentPromptPreset === p.key ? p.color : undefined" />
+              </template>
+              <v-card-title class="text-body-1">{{ p.label }}</v-card-title>
+              <v-card-subtitle class="text-caption prompt-desc">{{ p.desc }}</v-card-subtitle>
+              <template #append>
+                <v-icon
+                  :icon="currentPromptPreset === p.key ? 'mdi-radiobox-marked' : 'mdi-radiobox-blank'"
+                  :color="currentPromptPreset === p.key ? p.color : undefined"
+                  :title="currentPromptPreset === p.key ? '当前选择' : '点击选择'"
+                />
+              </template>
+            </v-card-item>
+          </v-card>
+        </v-col>
+      </v-row>
+    </div>
+
+    <v-divider class="mx-4 my-2" />
+
+    <div class="px-4 pt-2 pb-1">
+      <div class="d-flex align-center flex-wrap gap-2">
+        <v-icon icon="mdi-account-heart-outline" size="small" color="pink" />
+        <span class="text-subtitle-2">人格预设</span>
+        <span class="text-caption ml-2" style="opacity: 0.65">选中后点「应用所选人格」，会写入当前账号</span>
+        <v-spacer />
+        <a class="text-caption text-primary text-decoration-none" href="#" @click.prevent="goToPersonas">
+          去「人格设定」编辑
+        </a>
+      </div>
+    </div>
 
     <div class="px-4 pb-2">
       <v-row dense>
         <v-col cols="12" md="7">
-          <div class="text-subtitle-2 mb-2">选择人格预设</div>
           <v-text-field
             v-model="search"
             prepend-inner-icon="mdi-magnify"
@@ -226,47 +294,6 @@ onMounted(() => {
       </v-row>
     </div>
 
-    <div class="px-4 pb-4 pt-2">
-      <v-expansion-panels variant="accordion">
-        <v-expansion-panel>
-          <v-expansion-panel-title class="text-body-2">
-            <v-icon icon="mdi-tune-variant" size="small" class="mr-2" />
-            高级：提示词风格
-            <v-spacer />
-            <v-chip v-if="currentPromptPreset" size="x-small" variant="tonal">
-              {{ PROMPT_PRESETS.find((p) => p.key === currentPromptPreset)?.label || currentPromptPreset }}
-            </v-chip>
-            <v-chip v-else size="x-small" variant="tonal">沿用内置</v-chip>
-          </v-expansion-panel-title>
-          <v-expansion-panel-text>
-            <div class="text-caption mb-3" style="opacity: 0.7">
-              只换说话风格，不改人格内容；再点一次已选卡片可取消。
-            </div>
-            <v-row dense>
-              <v-col v-for="p in PROMPT_PRESETS" :key="p.key" cols="12" md="4">
-                <v-card
-                  :variant="currentPromptPreset === p.key ? 'tonal' : 'outlined'"
-                  :color="currentPromptPreset === p.key ? p.color : undefined"
-                  class="h-100 preset-card"
-                  @click="selectPromptPreset(p.key)"
-                >
-                  <v-card-item>
-                    <template #prepend>
-                      <v-icon :icon="p.icon" :color="currentPromptPreset === p.key ? p.color : undefined" />
-                    </template>
-                    <v-card-title class="text-body-1">{{ p.label }}</v-card-title>
-                    <v-card-subtitle class="text-caption">{{ p.desc }}</v-card-subtitle>
-                    <template #append>
-                      <v-icon v-if="currentPromptPreset === p.key" icon="mdi-check-circle" :color="p.color" />
-                    </template>
-                  </v-card-item>
-                </v-card>
-              </v-col>
-            </v-row>
-          </v-expansion-panel-text>
-        </v-expansion-panel>
-      </v-expansion-panels>
-    </div>
   </v-card>
 </template>
 
@@ -307,5 +334,29 @@ onMounted(() => {
 
 .preset-card:hover {
   transform: translateY(-1px);
+}
+
+.prompt-option {
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.prompt-option:hover {
+  transform: translateY(-1px);
+}
+
+.prompt-option:focus-visible {
+  outline: 2px solid rgb(var(--v-theme-primary));
+  outline-offset: 2px;
+}
+
+.prompt-desc {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 2px;
 }
 </style>

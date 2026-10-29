@@ -1,15 +1,25 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useWebuiStore } from '@/stores/webui'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import PromptPresetEditorDialog from '@/components/settings/PromptPresetEditorDialog.vue'
 
 const router = useRouter()
+const route = useRoute()
 const webui = useWebuiStore()
 const notify = useNotifyStore()
 const promptDialog = ref(false)
+
+/** 从「AI 对话面板 → 提示词风格」跳过来时直接打开编辑弹窗（query: ?prompt-presets=1） */
+onMounted(() => {
+  if (!route.query['prompt-presets']) return
+  promptDialog.value = true
+  const query = { ...route.query }
+  delete query['prompt-presets']
+  router.replace({ query })
+})
 
 /** 界面构建戳：排查「改了没生效」时用。 */
 const buildStamp = __BUILD_STAMP__
