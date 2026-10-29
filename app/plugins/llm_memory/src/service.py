@@ -19,7 +19,7 @@ def memory_manager(module: Any):
     """惰性构造 MemoryManager（首次用到时才连库，避免加载期 IO）。"""
     mgr = getattr(module, "_manager", None)
     if mgr is None:
-        from app.plugins.llm_memory.manager import MemoryManager
+        from .manager import MemoryManager
 
         runtime = module._runtime()
         mgr = MemoryManager(runtime) if runtime is not None else None
@@ -71,7 +71,7 @@ class MemoryToolSource:
         if mgr is None or not mgr.enabled():
             return []
         from app.agent.tools.spec import ToolContext
-        from app.plugins.llm_memory.tool import build_memory_tools
+        from .tool import build_memory_tools
 
         runtime = getattr(scope, "runtime", None)
         tool_ctx = getattr(scope, "tool_ctx", None) or ToolContext(

@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.plugins.llm_knowledge.src.tool import build_knowledge_tools
-from app.plugins.llm_memory.tool import build_memory_tools
+from app.plugins.llm_memory.src.tool import build_memory_tools
 
 
 class _FakeMemory:
@@ -211,7 +211,7 @@ async def test_collect_history_materials_uses_the_memory_service_handle():
 @pytest.mark.asyncio
 async def test_memory_command_uses_the_module_manager():
     """修复前：`handle_memory_command` 读 `module.memory`（模块没有该属性）→ 指令永远"未启用"。"""
-    from app.plugins.llm_memory.commands import handle_memory_command
+    from app.plugins.llm_memory.src.commands import handle_memory_command
 
     memory = _FakeMemory()
     module = SimpleNamespace(memory_manager=lambda: memory)
@@ -231,7 +231,7 @@ async def test_memory_command_uses_the_module_manager():
 
 @pytest.mark.asyncio
 async def test_memory_command_reports_unavailable_without_module():
-    from app.plugins.llm_memory.commands import handle_memory_command
+    from app.plugins.llm_memory.src.commands import handle_memory_command
 
     sent: list[str] = []
 

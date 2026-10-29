@@ -101,7 +101,7 @@
 
 框架代码里有多处**静态 import 插件内部模块**（架构上属于 webui/agent → plugins 的越界）：
 
-- `app/webui/api/agent.py:17-18` → `app.plugins.llm_tools_extra.onebot.{manifest,security}`
+- `app/webui/api/agent.py:17-18` → `app.plugins.llm_tools_extra.src.onebot.{manifest,security}`
 - `app/agent/tools/state.py:137/198/296` → 同上
 - `app/agent/storage/__init__.py:28/39` → `app.plugins.llm_memory.store`、`app.plugins.llm_knowledge.store`
 

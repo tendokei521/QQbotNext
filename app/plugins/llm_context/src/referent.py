@@ -22,7 +22,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.plugins.llm_context import focus
+from . import focus
 from app.core.logger import logger
 
 # 按位置指代："上一条/刚才那条/消息里的那个"
@@ -268,7 +268,7 @@ async def build_block(
             if policy == "focus_first" and messages:
                 recent = 0  # 只取焦点项
             try:
-                from app.plugins.llm_context.context_tools import fetch_entities, fetch_recent
+                from .context_tools import fetch_entities, fetch_recent
 
                 blocks: list[str] = []
                 # 先按位置取最近几条（它会返回涉及的 id），再补取不重复的候选，

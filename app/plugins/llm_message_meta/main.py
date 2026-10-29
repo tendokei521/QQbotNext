@@ -86,12 +86,12 @@ class Module(BaseModule):
             )
 
     async def _collect_user_context(self, ctx) -> None:
-        from .service import collect_user_context
+        from .src.service import collect_user_context
 
         await collect_user_context(ctx)
 
     async def _format_user_context(self, ctx) -> None:
-        from .service import format_user_context
+        from .src.service import format_user_context
 
         await format_user_context(ctx)
 

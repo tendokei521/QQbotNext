@@ -2,7 +2,7 @@
 
 当前默认实现均为 SQLite：
 - SQLiteHistoryStore（app.agent.session.history）
-- MemoryStore（app.plugins.llm_memory.store）
+- MemoryStore（app.plugins.llm_memory.src.store）
 - KnowledgeStore（app.plugins.llm_knowledge.store）
 
 后续新增 Redis / Postgres / 向量库时，只需实现本模块中的接口并在工厂处注册。

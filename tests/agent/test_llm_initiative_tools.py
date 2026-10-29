@@ -22,7 +22,7 @@ def _install_context_tools(runtime):
     v3 起 `expand_*` 由模块的 tool_source 提供，框架不再注入。
     """
     from app.agent.loop.providers import register_tool_source
-    from app.plugins.llm_context.service import ContextToolSource
+    from app.plugins.llm_context.src.service import ContextToolSource
 
     runtime.tool_sources = []
     register_tool_source(runtime, ContextToolSource(_SN(module_name="llm_context")))
@@ -33,7 +33,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.agent.loop.chat import build_initiative_tools
-from app.plugins.llm_proactive import stream as initiative_stream
+from app.plugins.llm_proactive.src import stream as initiative_stream
 from app.agent.providers.base import StreamEvent
 
 
@@ -265,7 +265,7 @@ class _FakeModule:
         self.ctx = _FakeCtx()
         self.config = _FakeConfig({"schedule_enable": True, "context_expand_enable": True})
         # v3：`expand_*` 由 llm_context 模块的 tool_source 提供（框架不再注入）
-        from app.plugins.llm_context.service import ContextToolSource
+        from app.plugins.llm_context.src.service import ContextToolSource
 
         self.tool_sources = [ContextToolSource(self)]
         self.context_providers = []
@@ -273,7 +273,7 @@ class _FakeModule:
 
 def _started_sched(module, tmp_path):
     """构造 + 上线：装配本身不武装计时器，测试要跑任务必须先 start()。"""
-    from app.plugins.llm_schedule import scheduler as ts_mod
+    from app.plugins.llm_schedule.src import scheduler as ts_mod
 
     sched = ts_mod.TaskScheduler(module, data_dir=str(tmp_path))
     sched.start()
@@ -281,7 +281,7 @@ def _started_sched(module, tmp_path):
 
 
 async def test_scheduled_message_gets_proactive_block_and_tools(tmp_path, monkeypatch):
-    from app.plugins.llm_schedule import scheduler as ts_mod
+    from app.plugins.llm_schedule.src import scheduler as ts_mod
 
     module = _FakeModule()
     sched = _started_sched(module, tmp_path)
@@ -315,7 +315,7 @@ async def test_scheduled_message_gets_proactive_block_and_tools(tmp_path, monkey
 
 
 async def test_scheduled_message_skips_tools_when_disabled(tmp_path, monkeypatch):
-    from app.plugins.llm_schedule import scheduler as ts_mod
+    from app.plugins.llm_schedule.src import scheduler as ts_mod
 
     module = _FakeModule()
     module.config = _FakeConfig({"schedule_enable": True, "context_expand_enable": False})

@@ -25,7 +25,7 @@ from typing import Any
 from app.plugin import BaseModule
 
 from .config_schema import SCHEMA
-from .service import ContextToolSource, ReferentProvider, begin_turn
+from .src.service import ContextToolSource, ReferentProvider, begin_turn
 
 #: 本模块持有的键（与 `config_partition.MODULE_KEYS["llm_context"]` 一致）
 OWNED_KEYS: tuple[str, ...] = (

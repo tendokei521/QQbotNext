@@ -15,6 +15,6 @@ def build_manager(module: Any) -> Any:
     `module` 就是**插件模块实例**（`BaseModule`）：它有 `config`（本模块配置）、
     `bot_id`、`llm_turn` / `send_to` / `spawn` 等基础接口，以及 `ctx.services`。
     """
-    from app.plugins.llm_proactive.manager import ProactiveManager
+    from .src.manager import ProactiveManager
 
     return ProactiveManager(module)

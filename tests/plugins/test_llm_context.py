@@ -40,7 +40,7 @@ def test_module_is_pure_business():
 
 
 def test_referent_reads_module_config():
-    from app.plugins.llm_context.referent import _cfg
+    from app.plugins.llm_context.src.referent import _cfg
 
     runtime = SimpleNamespace(
         config={"referent_prefetch_max": 9},
@@ -52,7 +52,7 @@ def test_referent_reads_module_config():
 
 
 def test_referent_falls_back_without_module():
-    from app.plugins.llm_context.referent import _cfg
+    from app.plugins.llm_context.src.referent import _cfg
 
     runtime = SimpleNamespace(config={"referent_prefetch_max": 9})
     assert _cfg(runtime, "referent_prefetch_max", 2) == 9

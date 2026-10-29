@@ -1,4 +1,4 @@
-"""OneBot 工具清单的**数据文件**约束（`app/plugins/llm_tools_extra/onebot/manifest.json`）。
+"""OneBot 工具清单的**数据文件**约束（`app/plugins/llm_tools_extra/src/onebot/manifest.json`）。
 
 清单原本是 4,792 行的 Python 字面量，现已外置为 JSON。外置的收益只有在
 「数据被当作数据校验」时才成立，所以这里守住四件事：
@@ -19,11 +19,11 @@ from pathlib import Path
 
 import pytest
 
-from app.plugins.llm_tools_extra.onebot import manifest as manifest_module
+from app.plugins.llm_tools_extra.src.onebot import manifest as manifest_module
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MANIFEST_JSON = REPO_ROOT / "app" / "plugins" / "llm_tools_extra" / "onebot" / "manifest.json"
-MANIFEST_PY = REPO_ROOT / "app" / "plugins" / "llm_tools_extra" / "onebot" / "manifest.py"
+MANIFEST_JSON = REPO_ROOT / "app" / "plugins" / "llm_tools_extra" / "src" / "onebot" / "manifest.json"
+MANIFEST_PY = REPO_ROOT / "app" / "plugins" / "llm_tools_extra" / "src" / "onebot" / "manifest.py"
 
 REQUIRED_FIELDS = {
     "name": str,
@@ -145,6 +145,6 @@ def test_json_ships_with_the_package():
     """数据文件必须被声明为 package-data，否则 `pip install` 后加载即崩。"""
     pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert "[tool.setuptools.package-data]" in pyproject, "缺少 package-data 配置"
-    assert "app.plugins.llm_tools_extra.onebot" in pyproject and "*.json" in pyproject, (
-        "package-data 必须声明 app.plugins.llm_tools_extra.onebot = [\"*.json\"]，否则打包后 manifest.json 不会被分发"
+    assert "app.plugins.llm_tools_extra.src.onebot" in pyproject and "*.json" in pyproject, (
+        "package-data 必须声明 app.plugins.llm_tools_extra.src.onebot = [\"*.json\"]，否则打包后 manifest.json 不会被分发"
     )

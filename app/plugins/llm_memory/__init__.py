@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from app.plugins.llm_memory.commands import handle_memory_command
-from app.plugins.llm_memory.tool import build_memory_tools
+from .src.commands import handle_memory_command
+from .src.tool import build_memory_tools
 
 __all__ = ["build_memory_tools", "handle_memory_command"]

@@ -56,7 +56,7 @@ def test_module_is_pure_business():
 
 
 def test_onebot_policy_reads_module_config():
-    from app.plugins.llm_tools_extra.onebot.security import resolve_tool_policy
+    from app.plugins.llm_tools_extra.src.onebot.security import resolve_tool_policy
 
     runtime = SimpleNamespace(
         config={"onebot_tools_enable": False},
@@ -74,7 +74,7 @@ def test_onebot_policy_reads_module_config():
 
 
 def test_onebot_policy_falls_back_without_module():
-    from app.plugins.llm_tools_extra.onebot.security import resolve_tool_policy
+    from app.plugins.llm_tools_extra.src.onebot.security import resolve_tool_policy
 
     runtime = SimpleNamespace(config={"onebot_tools_enable": False})
     policy = resolve_tool_policy(runtime, {"name": "send_group_msg", "permission": "member"})
@@ -82,7 +82,7 @@ def test_onebot_policy_falls_back_without_module():
 
 
 def test_poke_cooldown_reads_module_config():
-    from app.plugins.llm_tools_extra.onebot.executor import _poke_cooldown
+    from app.plugins.llm_tools_extra.src.onebot.executor import _poke_cooldown
 
     runtime = SimpleNamespace(
         config={"poke_cooldown_seconds": 99},
@@ -92,7 +92,7 @@ def test_poke_cooldown_reads_module_config():
 
 
 def test_poke_cooldown_falls_back_without_module():
-    from app.plugins.llm_tools_extra.onebot.executor import _poke_cooldown
+    from app.plugins.llm_tools_extra.src.onebot.executor import _poke_cooldown
 
     runtime = SimpleNamespace(config={"poke_cooldown_seconds": 42})
     assert _poke_cooldown(runtime) == 42.0
@@ -122,7 +122,7 @@ async def test_onebot_gate_follows_module():
 
 
 def test_mcp_reads_module_config():
-    from app.plugins.llm_tools_extra.mcp import MCPManager
+    from app.plugins.llm_tools_extra.src.mcp import MCPManager
 
     runtime = SimpleNamespace(
         bot_id="1",
@@ -136,7 +136,7 @@ def test_mcp_reads_module_config():
 
 
 def test_mcp_falls_back_without_module():
-    from app.plugins.llm_tools_extra.mcp import MCPManager
+    from app.plugins.llm_tools_extra.src.mcp import MCPManager
 
     runtime = SimpleNamespace(bot_id="2", config={"mcp_servers": []})
     assert MCPManager(runtime).enabled() is False

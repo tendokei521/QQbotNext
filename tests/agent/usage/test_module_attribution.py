@@ -44,7 +44,7 @@ class _Inner:
 async def test_proactive_wrapper_sets_source(env, monkeypatch):
     """`stream_send_initiative` 内部调用 provider 时应带 `llm_proactive` 归属。"""
     rec, db = env
-    from app.plugins.llm_proactive import stream as initiative_stream
+    from app.plugins.llm_proactive.src import stream as initiative_stream
 
     captured: dict = {}
 

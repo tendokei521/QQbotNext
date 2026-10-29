@@ -282,7 +282,7 @@ async def test_streaming_turn_runs_two_tool_rounds(monkeypatch):
 
 async def test_initiative_stream_runs_two_tool_rounds():
     from app.agent.tools.spec import build_tools, make_executor
-    from app.plugins.llm_proactive.stream import stream_send_initiative
+    from app.plugins.llm_proactive.src.stream import stream_send_initiative
 
     STREAM_SCRIPT.extend([
         [_tool_call("probe_a", '{"x": 1}', "c0"), StreamEvent(type="done", finish_reason="tool_calls")],

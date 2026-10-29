@@ -3,9 +3,9 @@
 import time
 
 from app.agent.config import DEFAULT_LLM_CONFIG
-from app.plugins.llm_memory.commands import handle_memory_command
-from app.plugins.llm_memory.manager import MemoryManager
-from app.plugins.llm_memory.store import owner_private
+from app.plugins.llm_memory.src.commands import handle_memory_command
+from app.plugins.llm_memory.src.manager import MemoryManager
+from app.plugins.llm_memory.src.store import owner_private
 
 
 class FakeConfig:

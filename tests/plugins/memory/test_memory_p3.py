@@ -1,9 +1,9 @@
 """P3 群聊隔离与审计测试：提及扩展 / 注入隔离 / 工具召回他人画像 / #llm memory audit。"""
 
 from app.agent.config import DEFAULT_LLM_CONFIG
-from app.plugins.llm_memory.commands import handle_memory_command
-from app.plugins.llm_memory.manager import MemoryManager
-from app.plugins.llm_memory.store import owner_group, owner_group_member
+from app.plugins.llm_memory.src.commands import handle_memory_command
+from app.plugins.llm_memory.src.manager import MemoryManager
+from app.plugins.llm_memory.src.store import owner_group, owner_group_member
 
 
 class FakeConfig:
@@ -70,7 +70,7 @@ async def test_injection_group_only_own_and_mentioned():
 
 
 async def test_tool_recall_finds_mentioned_member_profile():
-    from app.plugins.llm_memory.tool import build_memory_tools
+    from app.plugins.llm_memory.src.tool import build_memory_tools
 
     rt = FakeRuntime()
     bot = FakeBot(members=[_m(2, "小明", "小明")])
@@ -89,7 +89,7 @@ async def test_tool_recall_finds_mentioned_member_profile():
 
 
 async def test_group_public_tool_scope():
-    from app.plugins.llm_memory.tool import build_memory_tools
+    from app.plugins.llm_memory.src.tool import build_memory_tools
 
     rt = FakeRuntime()
     tools = build_memory_tools(rt, "group_9", "1", False)

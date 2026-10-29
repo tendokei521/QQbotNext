@@ -48,7 +48,7 @@ class OneBotToolSource:
 
         if not bool(policy_get(runtime, "tools", "onebot_tools_enable", False)):
             return []
-        from app.plugins.llm_tools_extra.onebot import build_onebot_tools
+        from .onebot import build_onebot_tools
 
         return list(build_onebot_tools(runtime, _tool_ctx(self.module, scope)) or [])
 

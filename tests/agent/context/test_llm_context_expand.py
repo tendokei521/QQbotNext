@@ -87,7 +87,7 @@ def _envelope(messages):
 
 
 def setup_function(_fn):
-    from app.plugins.llm_context import focus as _focus
+    from app.plugins.llm_context.src import focus as _focus
 
     nicknames.clear_cache()
     _focus.clear_all()
@@ -394,7 +394,7 @@ class _QuoteBot:
 async def test_quoted_forward_becomes_actionable_marker():
     """回归（真实日志）：被引用的是一条合并转发时，此前只渲染成 "[forward]"，
     模型既不知道那是什么、也拿不到 id，只能干瞪眼。现在必须给出可解决的标记 + id。"""
-    from app.plugins.llm_message_meta.service import _collect_quote_info
+    from app.plugins.llm_message_meta.src.service import _collect_quote_info
 
     ctx = _quote_ctx(_QuoteBot([{"type": "forward", "data": {"id": "7686537322889496857"}}]),
                      [{"type": "reply", "data": {"id": "576048059"}}])
@@ -406,7 +406,7 @@ async def test_quoted_forward_becomes_actionable_marker():
 
 
 async def test_quoted_text_still_wins_over_marker():
-    from app.plugins.llm_message_meta.service import _collect_quote_info
+    from app.plugins.llm_message_meta.src.service import _collect_quote_info
 
     ctx = _quote_ctx(_QuoteBot([{"type": "text", "data": {"text": "晚上一起打游戏吗"}}]),
                      [{"type": "reply", "data": {"id": "576048059"}}])
@@ -418,7 +418,7 @@ async def test_quoted_text_still_wins_over_marker():
 
 async def test_quoted_lookup_failure_yields_marker_not_silence():
     """取引用内容失败时也要把 id 交给模型（而不是整段引用信息消失）。"""
-    from app.plugins.llm_message_meta.service import _collect_quote_info
+    from app.plugins.llm_message_meta.src.service import _collect_quote_info
 
     class _BrokenBot:
         async def get_msg(self, message_id):
@@ -432,7 +432,7 @@ async def test_quoted_lookup_failure_yields_marker_not_silence():
 
 
 def test_segments_to_text_renders_forward_marker_with_id():
-    from app.plugins.llm_message_meta.service import _segments_to_text
+    from app.plugins.llm_message_meta.src.service import _segments_to_text
 
     assert _segments_to_text([{"type": "forward", "data": {"id": "7686537322889496857"}}]) == (
         UNRESOLVED_FORWARD_ID.format(id="7686537322889496857")
@@ -442,7 +442,7 @@ def test_segments_to_text_renders_forward_marker_with_id():
 
 def test_segments_to_text_prefers_containing_message_id():
     """合并转发标记要用"承载转发的那条消息 id"（展开入口要的是它）。"""
-    from app.plugins.llm_message_meta.service import _segments_to_text
+    from app.plugins.llm_message_meta.src.service import _segments_to_text
 
     assert _segments_to_text(
         [{"type": "forward", "data": {"id": "7686537322889496857"}}], message_id="576048059"

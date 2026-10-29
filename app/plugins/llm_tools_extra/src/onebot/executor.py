@@ -8,8 +8,8 @@ from typing import Any
 
 from app.agent import logger
 from app.agent.group_log.store import store_of
-from app.plugins.llm_tools_extra.onebot.manifest import ONEBOT_TOOLS
-from app.plugins.llm_tools_extra.onebot.security import resolve_tool_policy
+from .manifest import ONEBOT_TOOLS
+from .security import resolve_tool_policy
 from app.agent.tools.spec import ToolContext, ToolSpec
 
 DEFAULT_MAX_RESULT = 2000

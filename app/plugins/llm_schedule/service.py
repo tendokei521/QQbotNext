@@ -11,7 +11,7 @@ from typing import Any
 
 def build_scheduler(module: Any) -> Any:
     """构造定时任务调度器；`module` 是插件模块实例（带基础接口）。"""
-    from app.plugins.llm_schedule.scheduler import TaskScheduler
+    from .src.scheduler import TaskScheduler
 
     return TaskScheduler(module)
 
@@ -29,7 +29,7 @@ class ScheduleToolSource:
         runtime = getattr(scope, "runtime", None)
         if runtime is None or not getattr(self.module, "enabled", False):
             return []
-        from app.plugins.llm_schedule.schedule_tool import build_schedule_tool
+        from .src.schedule_tool import build_schedule_tool
 
         return [
             build_schedule_tool(

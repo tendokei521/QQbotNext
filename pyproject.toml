@@ -49,7 +49,7 @@ include = ["app*"]
 
 [tool.setuptools.package-data]
 # OneBot 工具清单是数据文件，必须随包一起分发（v3：已搬进 llm_tools_extra 模块）
-"app.plugins.llm_tools_extra.onebot" = ["*.json"]
+"app.plugins.llm_tools_extra.src.onebot" = ["*.json"]
 # 插件自带页面与 manifest。
 # 注意：setuptools 新版的 pyproject 校验器**不再接受中间带通配的模块名**
 # （旧的 "app.plugins.*" 会让 `python -m build` / `pip wheel` 直接失败），

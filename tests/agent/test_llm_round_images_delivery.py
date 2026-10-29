@@ -25,7 +25,7 @@ def _install_context_tools(runtime):
     v3 起 `expand_*` 由模块的 tool_source 提供，框架不再注入。
     """
     from app.agent.loop.providers import register_tool_source
-    from app.plugins.llm_context.service import ContextToolSource
+    from app.plugins.llm_context.src.service import ContextToolSource
 
     runtime.tool_sources = []
     register_tool_source(runtime, ContextToolSource(_SN(module_name="llm_context")))

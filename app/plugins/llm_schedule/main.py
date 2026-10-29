@@ -60,7 +60,7 @@ class Module(BaseModule):
         )
         self._scheduler = build_scheduler(self)
         from app.agent.loop.providers import register_tool_source
-        from app.plugins.llm_schedule.service import ScheduleToolSource
+        from .service import ScheduleToolSource
 
         register_tool_source(runtime, ScheduleToolSource(self))
         runtime.scheduler = self._scheduler

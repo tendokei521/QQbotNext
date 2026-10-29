@@ -3,9 +3,9 @@
 import time
 
 from app.agent.config import DEFAULT_LLM_CONFIG
-from app.plugins.llm_memory.manager import MemoryManager
-from app.plugins.llm_memory.recall import effective_confidence, rank, render_block, score_row
-from app.plugins.llm_memory.store import MemoryStore, owner_private
+from app.plugins.llm_memory.src.manager import MemoryManager
+from app.plugins.llm_memory.src.recall import effective_confidence, rank, render_block, score_row
+from app.plugins.llm_memory.src.store import MemoryStore, owner_private
 
 
 def _store(bot_id="bots2"):

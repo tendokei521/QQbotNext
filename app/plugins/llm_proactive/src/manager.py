@@ -258,7 +258,7 @@ class ProactiveManager:
 
         # 焦点行（主动消息没有用户提问 → 不做预取）：让模型知道"群里刚才在聊什么"。
         # 作为装配器的 referent 块（与 chat 的背景块同一位置），不再手工拼接。
-        from app.plugins.llm_context.referent import focus_only_block
+        from app.plugins.llm_context.src.referent import focus_only_block
 
         focus_text = await focus_only_block(self.module, session_id) or ""
 
@@ -322,7 +322,7 @@ class ProactiveManager:
 
         # 主动消息也支持流式：与普通消息使用同一套流式发送配置
         if config.get("stream_output", False) and config.get("stream_proactive_enabled", False):
-            from app.plugins.llm_proactive.stream import stream_send_initiative
+            from .stream import stream_send_initiative
 
             full_text = await stream_send_initiative(
                 self.module,

@@ -72,7 +72,7 @@ def test_policy_config_kinds_are_independent():
 
 def test_enhance_reads_module_meta_config():
     """`_ctx_cfg` 必须读 `runtime.meta_options`（这是"策略搬进模块"的实证）。"""
-    from app.plugins.llm_message_meta.service import _ctx_cfg
+    from app.plugins.llm_message_meta.src.service import _ctx_cfg
 
     base = {"include_time": False, "include_sender": False}
     view = SimpleNamespace(
@@ -86,7 +86,7 @@ def test_enhance_reads_module_meta_config():
 
 
 def test_enhance_falls_back_without_module():
-    from app.plugins.llm_message_meta.service import _ctx_cfg
+    from app.plugins.llm_message_meta.src.service import _ctx_cfg
 
     runtime = SimpleNamespace(config={"include_time": True})
     assert _ctx_cfg(SimpleNamespace(runtime=runtime), "include_time", False) is True

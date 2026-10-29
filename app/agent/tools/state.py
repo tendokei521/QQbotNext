@@ -134,7 +134,7 @@ def tools_module_loaded(runtime: Any) -> bool:
 
 def _onebot_manifest_entry(name: str) -> dict | None:
     try:
-        from app.plugins.llm_tools_extra.onebot.manifest import ONEBOT_TOOLS
+        from app.plugins.llm_tools_extra.src.onebot.manifest import ONEBOT_TOOLS
     except Exception:  # noqa: BLE001 —— 模块未安装
         return None
     for tool in ONEBOT_TOOLS or []:
@@ -195,7 +195,7 @@ def resolve_tool_state(
         if entry is None:
             return _state(False, REASON_MODULE_SWITCH_OFF, "工具已不在清单中")
         try:
-            from app.plugins.llm_tools_extra.onebot.security import resolve_tool_policy
+            from app.plugins.llm_tools_extra.src.onebot.security import resolve_tool_policy
 
             policy = resolve_tool_policy(runtime, entry)
         except Exception as e:  # noqa: BLE001 —— 策略算不出来按不可用处理（安全侧）
@@ -293,7 +293,7 @@ def resolve_all_tool_states(runtime: Any, *, include_unavailable: bool = True) -
 
     # OneBot 工具
     try:
-        from app.plugins.llm_tools_extra.onebot.manifest import ONEBOT_TOOLS
+        from app.plugins.llm_tools_extra.src.onebot.manifest import ONEBOT_TOOLS
     except Exception:  # noqa: BLE001
         ONEBOT_TOOLS = []
     for tool in ONEBOT_TOOLS or []:

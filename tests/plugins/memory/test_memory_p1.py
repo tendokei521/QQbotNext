@@ -2,10 +2,10 @@
 
 from app.agent.assembly.prompt import build_messages
 from app.agent.config import DEFAULT_LLM_CONFIG
-from app.plugins.llm_memory.commands import handle_memory_command
-from app.plugins.llm_memory.manager import MemoryManager, scope_owners
-from app.plugins.llm_memory.recall import rank, render_block
-from app.plugins.llm_memory.store import MemoryStore, owner_group, owner_group_member, owner_private
+from app.plugins.llm_memory.src.commands import handle_memory_command
+from app.plugins.llm_memory.src.manager import MemoryManager, scope_owners
+from app.plugins.llm_memory.src.recall import rank, render_block
+from app.plugins.llm_memory.src.store import MemoryStore, owner_group, owner_group_member, owner_private
 
 
 class FakeConfig:

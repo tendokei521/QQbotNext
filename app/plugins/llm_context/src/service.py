@@ -27,7 +27,7 @@ async def referent_block(runtime: Any, session_id: str, user_text: str, ctx: Any
     from app.domain.trigger import raw_user_text
 
     try:
-        from app.plugins.llm_context.referent import build_block
+        from .referent import build_block
 
         event = getattr(ctx, "event", None)
         if event is not None:
@@ -88,7 +88,7 @@ class ContextToolSource:
         if not bool(policy_get(runtime, "context", "context_expand_enable", True)):
             return []
         from app.agent.tools.spec import ToolContext
-        from app.plugins.llm_context.context_tools import build_context_tools
+        from .context_tools import build_context_tools
 
         # 优先复用本轮的 ToolContext（`extra["round_images"]` 等队列是共享的）；
         # 只有外部单独调用（没有请求上下文）时才自建一个。
@@ -106,7 +106,7 @@ class ContextToolSource:
 
 def begin_turn(scope: Any) -> None:
     """每轮开始：让焦点表按轮次衰减（原框架 `tool_source` 里的硬调用）。"""
-    from app.plugins.llm_context import focus
+    from . import focus
 
     runtime = getattr(scope, "runtime", None)
     focus.begin_turn(getattr(runtime, "bot_id", ""), scope.session_id)

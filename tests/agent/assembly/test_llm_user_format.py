@@ -13,7 +13,7 @@ from __future__ import annotations
 import types
 
 from app.agent.assembly.assembler import PromptRequest, message_meta_instruction
-from app.plugins.llm_message_meta.service import format_user_context
+from app.plugins.llm_message_meta.src.service import format_user_context
 from app.agent.assembly.prompt import (
     SINGLE_LINE_MESSAGE_META_INSTRUCTION,
     emoji_hint_line,

@@ -66,8 +66,8 @@ class Module(BaseModule):
             return
         from app.agent.delivery.output import ConfigView
         from app.agent.loop.providers import register_tool_source
-        from app.plugins.llm_tools_extra.mcp import MCPManager
-        from app.plugins.llm_tools_extra.service import MCPToolSource, OneBotToolSource
+        from .src.mcp import MCPManager
+        from .src.service import MCPToolSource, OneBotToolSource
 
         runtime.tools_options = ConfigView(
             getattr(runtime, "config", None), self.config, OWNED_KEYS

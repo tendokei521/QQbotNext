@@ -14,7 +14,7 @@ import re
 import time
 from typing import Iterable
 
-from app.plugins.llm_memory.store import _tokenize
+from .store import _tokenize
 
 # 标题沿用「参考/不准确」的措辞引导（模糊记忆视角）
 MEMORY_BLOCK_TITLE = "###供参考（可能不准确）的历史记忆："

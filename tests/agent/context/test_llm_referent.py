@@ -1,4 +1,4 @@
-"""指代消解（app.plugins.llm_context.referent）测试。
+"""指代消解（app.plugins.llm_context.src.referent）测试。
 
 回归目标（真实日志 group_466052056 / 2026-09-18 21:37）：
 用户说「那你能做到消息里的那个样子吗」——纯回指句，没有 id、没有引用段。
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.plugins.llm_context import focus, referent
+from app.plugins.llm_context.src import focus, referent
 
 
 def setup_function(_fn):
@@ -261,7 +261,7 @@ async def test_build_block_survives_prefetch_failure():
 
 async def test_chat_referent_block_uses_raw_user_text():
     """判定必须用原始文本：增强块里的 QQ 号不能被当成消息 id。"""
-    from app.plugins.llm_context.service import referent_block as _referent_block
+    from app.plugins.llm_context.src.service import referent_block as _referent_block
 
     focus.note("10001", "g", "576048059", kind="message", summary="S", source="expand")
     focus.begin_turn("10001", "g")
@@ -285,7 +285,7 @@ async def test_image_only_message_never_prefetches_meta_qq_as_message_id():
     指代块却拿 ``(QQ: 1901691195)`` 当文本判定 → ``get_msg(message_id=1901691195)``
     → ``100 miss``。没有正文就没有可判定的指代，元信息数字一律不能进判定。
     """
-    from app.plugins.llm_context.service import referent_block as _referent_block
+    from app.plugins.llm_context.src.service import referent_block as _referent_block
 
     bot = _Bot()
     event = _event([{"type": "image", "data": {"url": "https://a/1.png"}}])

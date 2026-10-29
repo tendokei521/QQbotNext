@@ -25,7 +25,7 @@ def create_memory_store(bot_id: Any, backend: str = "sqlite", db_path: str | Non
         raise ValueError(f"不支持的记忆存储后端: {backend}")
     
     # v3：记忆存储实现已搬进 `llm_memory` 模块，这里只做工厂转发
-    from app.plugins.llm_memory.store import MemoryStore as _MemoryStore
+    from app.plugins.llm_memory.src.store import MemoryStore as _MemoryStore
 
     return _MemoryStore(bot_id, db_path=db_path)
 

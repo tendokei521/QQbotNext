@@ -16,11 +16,11 @@ import time
 from collections import OrderedDict
 from typing import Any
 
-import app.plugins.llm_memory.extract as extract_mod
+from . import extract as extract_mod
 from app.agent import logger
-from app.plugins.llm_memory.detect import autosave_clause
-from app.plugins.llm_memory.recall import rank, render_block
-from app.plugins.llm_memory.store import (
+from .detect import autosave_clause
+from .recall import rank, render_block
+from .store import (
     MemoryStore,
     owner_group,
     owner_group_member,

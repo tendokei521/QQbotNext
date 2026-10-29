@@ -119,7 +119,7 @@ async def test_run_distill_accepts_history_snapshot_shape(tmp_path, monkeypatch)
     历史 bug：调用方传的是 `session_mgr.sessions`（dict），遍历到字符串键 →
     `'str' object has no attribute 'get'`。
     """
-    from app.plugins.llm_memory.manager import MemoryManager
+    from app.plugins.llm_memory.src.manager import MemoryManager
 
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
     runtime = SimpleNamespace(bot_id="1", config={}, bot=None, session_mgr=None)
@@ -133,7 +133,7 @@ async def test_run_distill_accepts_history_snapshot_shape(tmp_path, monkeypatch)
     monkeypatch.setattr(mgr, "save_fact", lambda *a, **k: saved.append(a) or "m1")
     monkeypatch.setattr(mgr, "own_owner", lambda sid, uid: f"private_{uid}")
 
-    import app.plugins.llm_memory.extract as extract_mod
+    import app.plugins.llm_memory.src.extract as extract_mod
 
     monkeypatch.setattr(extract_mod, "extract_facts_for_user_async", _fake_extract)
 
@@ -148,7 +148,7 @@ async def test_run_distill_accepts_history_snapshot_shape(tmp_path, monkeypatch)
 
 async def test_run_distill_with_dict_logs_warning_instead_of_crashing(tmp_path, monkeypatch, caplog):
     """反向验证：传 dict（旧写法）会被内部捕获并记 warning（就是用户看到的那条日志）。"""
-    from app.plugins.llm_memory.manager import MemoryManager
+    from app.plugins.llm_memory.src.manager import MemoryManager
 
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
     runtime = SimpleNamespace(bot_id="1", config={}, bot=None, session_mgr=None)

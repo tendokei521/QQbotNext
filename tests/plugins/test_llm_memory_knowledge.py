@@ -47,7 +47,7 @@ def test_modules_are_pure_business():
 
 
 def test_memory_manager_reads_module_config(tmp_path, monkeypatch):
-    from app.plugins.llm_memory.manager import MemoryManager
+    from app.plugins.llm_memory.src.manager import MemoryManager
 
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
     runtime = SimpleNamespace(
@@ -60,7 +60,7 @@ def test_memory_manager_reads_module_config(tmp_path, monkeypatch):
 
 
 def test_memory_manager_falls_back_without_module(tmp_path, monkeypatch):
-    from app.plugins.llm_memory.manager import MemoryManager
+    from app.plugins.llm_memory.src.manager import MemoryManager
 
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
     runtime = SimpleNamespace(bot_id="101", config={"memory_enable": True})

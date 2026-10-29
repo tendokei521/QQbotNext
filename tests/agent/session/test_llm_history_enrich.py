@@ -196,7 +196,7 @@ def test_ledger_ignores_empty_records():
 
 def test_expansion_ledger_records_from_tool_context():
     """工具侧只依赖 ToolContext.extra 里的记账本，不直接碰存储。"""
-    from app.plugins.llm_context.context_tools import _record_expansion
+    from app.plugins.llm_context.src.context_tools import _record_expansion
 
     class _Ctx:
         def __init__(self):
@@ -208,7 +208,7 @@ def test_expansion_ledger_records_from_tool_context():
 
 
 def test_record_expansion_without_ledger_is_silent():
-    from app.plugins.llm_context.context_tools import _record_expansion
+    from app.plugins.llm_context.src.context_tools import _record_expansion
 
     class _Ctx:
         extra: dict = {}

@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable
 
-from app.plugins.llm_memory.recall import rank
-from app.plugins.llm_memory.store import owner_group_member, owner_private
+from .recall import rank
+from .store import owner_group_member, owner_private
 
 _USAGE = (
     "用法：\n"

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import types
 
-from app.plugins.llm_message_meta.service import collect_user_context, format_user_context
+from app.plugins.llm_message_meta.src.service import collect_user_context, format_user_context
 from app.agent.context.group import format_history_for_llm, format_online_history
 from app.agent.session.model import build_current_turn_text
 from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo

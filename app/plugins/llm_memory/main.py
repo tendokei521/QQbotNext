@@ -27,7 +27,7 @@ from typing import Any
 
 from app.plugin import BaseModule
 
-from .schemas import MEMORY_SCHEMA
+from .src.schemas import MEMORY_SCHEMA
 
 #: 本模块持有的键（与 `config_partition.MODULE_KEYS["llm_memory"]` 一致）
 OWNED_KEYS: tuple[str, ...] = (
@@ -86,7 +86,7 @@ class Module(BaseModule):
             return
         from app.agent.delivery.output import ConfigView
         from app.agent.loop.providers import register_context_provider, register_tool_source
-        from app.plugins.llm_memory.service import (
+        from .src.service import (
             MemoryLifecycle,
             MemoryProvider,
             MemoryToolSource,
@@ -130,7 +130,7 @@ class Module(BaseModule):
 
     def memory_manager(self) -> Any:
         """本模块的记忆管理器（`#llm memory` 指令、记忆工具共用同一实例）。"""
-        from app.plugins.llm_memory.service import memory_manager
+        from .src.service import memory_manager
 
         return memory_manager(self)
 
