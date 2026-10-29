@@ -35,8 +35,8 @@ const router = createRouter({
       children: [
         { path: '', name: 'overview', component: () => import('@/views/OverviewPage.vue'), meta: { title: '总览' } },
         { path: 'bots', name: 'bots', component: () => import('@/views/BotsPage.vue'), meta: { title: '账号管理' } },
-        // 「权限与回复」：简单视图（群开关矩阵）；高级规则暂仍在 Agent→权限管理
-        { path: 'policy', name: 'policy', component: () => import('@/views/PolicyPage.vue'), meta: { title: '群聊权限' } },
+        // 「回复设置」：简单视图（群开关矩阵）；高级规则暂仍在 AI 对话设置→权限管理
+        { path: 'policy', name: 'policy', component: () => import('@/views/PolicyPage.vue'), meta: { title: '回复设置' } },
         { path: 'modules', name: 'modules', component: () => import('@/views/ModulesPage.vue'), meta: { title: '功能插件' } },
         {
           path: 'bundles',

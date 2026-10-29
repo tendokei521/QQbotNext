@@ -100,16 +100,16 @@ const navItems = computed<NavItem[]>(() => {
   // 以及实验性「配置档案」入口（整套能力已下线）。
   // 「高级工具」属于实验性入口：默认隐藏，设置里打开实验性选项后才出现。
   const showExperimental = Boolean(webui.config.experimental?.show_experimental)
-  // 顺序按「配好一个账号」的实际路径排：先连号（账号管理），再配模型（模型服务），
-  // 然后开能力（功能插件 / 人格设定 / 配置包），最后才是 AI 对话设置与数据类页面。
+  // 顺序按「配好一个账号」的实际路径排：运行（账号管理、模型服务）→ 能力（回复设置 /
+  // 功能插件 / 人格设定 / 配置包 / AI 对话设置）→ 数据 → 系统。
   return [
     { to: '/', title: '总览', icon: 'mdi-view-dashboard-outline' },
     { header: '运行' },
     { to: '/bots', title: '账号管理', icon: 'mdi-robot-outline' },
-    // 群聊权限紧贴账号管理：它管的就是"这个号在哪些群能说话"
-    { to: '/policy', title: '群聊权限', icon: 'mdi-shield-account-outline' },
-    { header: '能力' },
     { to: '/provider-presets', title: '模型服务', icon: 'mdi-api' },
+    { header: '能力' },
+    // 回复设置 = 这个号在哪些群/私聊能说话
+    { to: '/policy', title: '回复设置', icon: 'mdi-shield-account-outline' },
     { to: '/modules', title: '功能插件', icon: 'mdi-cube-outline' },
     { to: '/personas', title: '人格设定', icon: 'mdi-account-heart-outline' },
     { to: '/bundles', title: '配置包', icon: 'mdi-package-variant-closed' },
