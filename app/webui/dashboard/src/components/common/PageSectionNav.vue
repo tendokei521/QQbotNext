@@ -120,11 +120,23 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
+/* 顶部模式：窄屏下是一条可横向滑动的 chips 栏（不再占用 200px 左栏） */
 .is-top {
   flex-direction: row;
-  flex-wrap: wrap;
-  width: auto;
+  flex-wrap: nowrap;
+  width: 100%;
+  max-width: 100%;
   position: static;
+  gap: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+}
+
+.is-top .section-item {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 /* 导航卡小标题：说明这一列是"本页内的分组锚点"，与全局侧栏区分开 */
@@ -139,6 +151,8 @@ onUnmounted(() => {
 .is-top .nav-title {
   padding: 0 4px 0 0;
   align-self: center;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .section-item {

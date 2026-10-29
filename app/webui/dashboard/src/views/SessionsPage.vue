@@ -524,13 +524,13 @@ async function renameConversation(target: ConversationSummary) {
 async function deleteConversation(target: ConversationSummary) {
   if (deletingTaskId.value) return
   const confirmed = await askConfirm({
-    title: '删除这个对话？',
-    message: `对话「${target.title}」将被删除，不可恢复。`,
+    title: '删除这个对话线程？',
+    message: `对话线程「${target.title}」将被删除，不可恢复。`,
     details: [
-      `该对话共 ${target.messages} 条消息，会一并删除`,
-      '只影响聊天记录，机器人配置和其他对话不受影响',
+      `该对话线程共 ${target.messages} 条消息，会一并删除`,
+      '只影响聊天记录，机器人配置和其他对话线程不受影响',
     ],
-    confirmText: '删除对话',
+    confirmText: '删除对话线程',
   })
   if (!confirmed) return
   deletingTaskId.value = target.task_id
@@ -575,9 +575,9 @@ async function bulkDeleteConversations() {
     .filter((c) => selectedTaskIds.value.includes(c.task_id))
     .reduce((total, c) => total + c.messages, 0)
   const confirmed = await askConfirm({
-    title: `删除选中的 ${count} 个对话？`,
-    message: '这些对话及其消息会一并删除，不可恢复。',
-    details: [`共 ${count} 个对话、约 ${messageCount} 条消息`, '删除后本地聊天记录不再保留'],
+    title: `删除选中的 ${count} 个对话线程？`,
+    message: '这些对话线程及其消息会一并删除，不可恢复。',
+    details: [`共 ${count} 个对话线程、约 ${messageCount} 条消息`, '删除后本地聊天记录不再保留'],
     confirmText: '删除选中',
   })
   if (!confirmed) return
@@ -590,7 +590,7 @@ async function bulkDeleteConversations() {
     )
     const failed = res.data?.failed || []
     if (failed.length) {
-      notify.push(`批量删除完成，${failed.length} 个对话可能已被删除或不存在`, 'warning')
+      notify.push(`批量删除完成，${failed.length} 个对话线程可能已被删除或不存在`, 'warning')
     } else {
       notify.push('批量删除完成', 'success')
     }
@@ -1104,22 +1104,22 @@ onMounted(() => {
               hide-details
               clearable
               prepend-inner-icon="mdi-magnify"
-              placeholder="搜索对话"
+              placeholder="搜索对话线程"
               class="list-search mb-2"
             />
             <v-progress-linear v-if="loadingConversations" indeterminate color="primary" />
             <template v-else-if="!selectedSessionId">
-              <div class="text-caption text-center pa-4">先从会话列表选一个</div>
+              <div class="text-caption text-center pa-4">先选一个会话，这里会显示对话线程</div>
             </template>
             <v-alert v-else-if="conversationsError" type="error" variant="tonal" density="compact" class="ma-2">
-              <div class="text-caption mb-1">对话列表加载失败：{{ conversationsError }}</div>
+              <div class="text-caption mb-1">对话线程加载失败：{{ conversationsError }}</div>
               <v-btn size="x-small" variant="text" prepend-icon="mdi-refresh" @click="loadConversations(false)">重试</v-btn>
             </v-alert>
             <template v-else-if="conversations.length === 0">
-              <div class="text-caption text-center pa-4">这个会话还没有对话</div>
+              <div class="text-caption text-center pa-4">这个会话还没有对话线程</div>
             </template>
             <template v-else-if="filteredConversations.length === 0">
-              <div class="text-caption text-center pa-4">没有匹配的对话</div>
+              <div class="text-caption text-center pa-4">没有匹配的对话线程</div>
             </template>
             <v-list v-else density="compact">
               <v-list-item
@@ -1148,7 +1148,7 @@ onMounted(() => {
                         size="x-small"
                         variant="text"
                         icon="mdi-download"
-                        title="导出这个对话"
+                        title="导出这个对话线程"
                         @click.stop
                       />
                     </template>
@@ -1167,7 +1167,7 @@ onMounted(() => {
                     variant="text"
                     icon="mdi-delete"
                     color="error"
-                    title="删除对话"
+                    title="删除对话线程"
                     :disabled="deletingTaskId !== ''"
                     :loading="deletingTaskId === c.task_id"
                     @click.stop="deleteConversation(c)"
@@ -1188,12 +1188,15 @@ onMounted(() => {
             <v-btn size="small" variant="tonal" prepend-icon="mdi-download" @click="exportConversation('text')">导出 TXT</v-btn>
             <v-btn size="small" variant="tonal" prepend-icon="mdi-json" @click="exportConversation('json')">导出 JSON</v-btn>
           </v-card-title>
-          <v-card-title v-else class="text-caption">从对话列表选一个，消息显示在这里</v-card-title>
+          <v-card-title v-else class="text-caption">消息</v-card-title>
 
           <v-card-text class="pa-2">
             <v-progress-linear v-if="loadingConversation" indeterminate color="primary" />
             <template v-else-if="!conversation">
-              <div class="text-caption text-center pa-6">这个对话还没有消息</div>
+              <div class="text-caption text-center pa-6">
+                <span class="guide-desktop">先选左边会话，再选中间的对话线程</span>
+                <span class="guide-narrow">先选一个会话，再选一个对话线程</span>
+              </div>
             </template>
             <div v-else ref="messageBodyEl" class="session-messages" style="max-height: calc(100vh - 320px); overflow-y: auto">
               <div v-for="(msg, index) in conversation.messages" :key="index" class="message-row">
@@ -1246,7 +1249,7 @@ onMounted(() => {
                 </div>
                 <div class="message-content">{{ msg.content }}</div>
               </div>
-              <div v-if="!conversation.messages.length" class="text-caption text-center pa-6">该对话没有消息</div>
+              <div v-if="!conversation.messages.length" class="text-caption text-center pa-6">这个对话线程还没有消息</div>
             </div>
 
             <div v-if="conversation?.messages.length" class="jump-latest-wrap">
@@ -1351,6 +1354,21 @@ onMounted(() => {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.guide-narrow {
+  display: none;
+}
+
+/* 三栏在 md 以下堆叠：方位词换成不带左右的说法 */
+@media (max-width: 959.98px) {
+  .guide-desktop {
+    display: none;
+  }
+
+  .guide-narrow {
+    display: inline;
+  }
 }
 
 .context-link {
