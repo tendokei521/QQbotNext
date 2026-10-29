@@ -3,8 +3,10 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import http, { errorMessage } from '@/api/http'
 import { useAgentConfigStore } from '@/stores/agentConfig'
 import { useBotsStore } from '@/stores/bots'
+import { useModulesStore } from '@/stores/modules'
 import { useToolsStore } from '@/stores/tools'
 import { useNotifyStore } from '@/stores/notify'
+import ToolInfo from '@/components/tools/ToolInfo.vue'
 
 interface ModuleTool {
   name: string
@@ -22,6 +24,7 @@ interface ModuleTool {
 
 const agent = useAgentConfigStore()
 const bots = useBotsStore()
+const modulesStore = useModulesStore()
 const toolsStore = useToolsStore()
 const notify = useNotifyStore()
 
@@ -31,10 +34,10 @@ const loadError = ref('')
 
 // 工具开关状态来自后端统一判定（/api/agent/tools），前端不再自算
 
-const logEnabled = computed<boolean>({
-  get: () => !!agent.draft.module_tools_log_enabled,
-  set: (v: boolean) => agent.onChange('module_tools_log_enabled', !!v),
-})
+/** 插件内部名 → 用户可见名；取不到显示「未知插件」，原名放 tooltip */
+function pluginLabel(key: string): string {
+  return modulesStore.displayNameOf(key) || '未知插件'
+}
 
 const groups = computed(() => {
   const map = new Map<string, ModuleTool[]>()
@@ -88,9 +91,18 @@ function saveScroll() {
   toolsStore.setScroll('module', window.scrollY || 0)
 }
 
+async function loadPluginNames() {
+  try {
+    if (!modulesStore.list.length) await modulesStore.load()
+  } catch {
+    /* 插件名映射失败不影响工具开关；卡片会显示「未知插件」 */
+  }
+}
+
 onMounted(async () => {
   await agent.load()
   loadTools()
+  void loadPluginNames()
   restoreScroll()
   window.addEventListener('scroll', saveScroll, { passive: true })
 })
@@ -104,6 +116,7 @@ watch(
   () => bots.currentAccountId,
   async () => {
     await agent.load(true)
+    void loadPluginNames()
     loadTools()
   },
 )
@@ -114,17 +127,9 @@ watch(
     <v-card variant="outlined" class="mb-4">
       <v-card-title class="d-flex align-center">
         <v-icon icon="mdi-puzzle-outline" class="mr-2" color="secondary" /> 插件工具
-        <v-spacer />
-        <v-switch
-          v-model="logEnabled"
-          label="输出工具调用日志"
-          color="primary"
-          density="compact"
-          hide-details
-        />
       </v-card-title>
       <v-card-text class="text-caption" style="opacity: 0.65">
-        列出功能插件提供给模型的工具。插件开关在「功能插件」页管理。
+        列出功能插件提供给模型的工具。插件开关在「功能插件」页管理；调用日志在页面顶部「日志设置」里开关。
       </v-card-text>
     </v-card>
 
@@ -158,14 +163,14 @@ watch(
             >
               <div class="tool-row">
                 <div class="tool-info">
-                  <div class="tool-name">{{ tool.name }}</div>
-                  <div class="tool-desc">{{ tool.description }}</div>
-                  <div class="tool-meta">
-                    <v-chip size="small" variant="tonal" color="secondary">{{ tool.module }}</v-chip>
-                    <v-chip v-if="!tool.ready && tool.prerequisite" size="small" variant="tonal" color="warning">
-                      {{ tool.prerequisite }}
-                    </v-chip>
-                  </div>
+                  <ToolInfo :tool="tool">
+                    <template #meta>
+                      <v-chip size="small" variant="tonal" color="secondary" :title="tool.module">{{ pluginLabel(tool.module) }}</v-chip>
+                      <v-chip v-if="!tool.ready && tool.prerequisite" size="small" variant="tonal" color="warning">
+                        {{ tool.prerequisite }}
+                      </v-chip>
+                    </template>
+                  </ToolInfo>
                 </div>
                 <v-switch
                   :model-value="tool.enabled"

@@ -280,6 +280,11 @@ export const useModulesStore = defineStore('modules', () => {
     Object.assign(mod, patchData)
   }
 
+  /** 内部模块名 → 用户可见插件名；未安装/未知时返回空串 */
+  function displayNameOf(key: string): string {
+    return modules.value[key]?.name || ''
+  }
+
   /**
    * WS 事件是否属于当前账号。
    *
@@ -360,5 +365,6 @@ export const useModulesStore = defineStore('modules', () => {
     saveConfig,
     savePermission,
     patch,
+    displayNameOf,
   }
 })

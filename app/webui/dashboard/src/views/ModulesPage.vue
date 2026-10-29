@@ -11,6 +11,8 @@ import { displayName, useBotsStore } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
 import http, { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import PluginDepsDialog from '@/components/tools/PluginDepsDialog.vue'
 
 const modules = useModulesStore()
 const bots = useBotsStore()
@@ -73,11 +75,8 @@ const zipDepsRejected = computed<string[]>(() => zipPreview.value?.deps_rejected
 /** 「先安装依赖」前的显式确认：未勾选不允许点 */
 const zipDepsAck = ref(false)
 
-// ---------- 依赖安装对话框（zip 预览 / 模块卡片两条入口共用） ----------
-type DepsDialogMode = 'zip' | 'card'
-
+// ---------- 依赖安装（zip 预览用内置对话框；已安装插件走共享组件） ----------
 const depsDialog = ref(false)
-const depsMode = ref<DepsDialogMode>('zip')
 const depsModuleName = ref('')
 const depsModuleLabel = ref('')
 const depsNote = ref('')
@@ -85,22 +84,11 @@ const depsPackages = ref<string[]>([])
 const depsCommand = ref<string[]>([])
 const depsRejected = ref<string[]>([])
 const depsMirror = ref('')
-const depsLoading = ref(false)
-const depsLoadError = ref('')
 const depsRunning = ref(false)
 const depsError = ref('')
 const depsErrorHint = ref('')
 const depsErrorCommand = ref<string[]>([])
 const depsErrorOutput = ref('')
-
-interface DependencyStatus {
-  module_name?: string
-  requirements?: string | null
-  declared?: string[]
-  rejected?: string[]
-  missing?: string[]
-  command?: string[]
-}
 
 interface DependencyInstallResult {
   ok?: boolean
@@ -112,6 +100,11 @@ interface DependencyInstallResult {
   stdout?: string
   stderr?: string
 }
+
+/** 已安装插件的依赖检查（共享组件 PluginDepsDialog） */
+const cardDepsOpen = ref(false)
+const cardDepsName = ref('')
+const cardDepsLabel = ref('')
 
 const PERMISSION_LABEL: Record<string, string> = {
   everyone: '所有人',
@@ -220,7 +213,7 @@ function toggleCat(key: string) {
 
 function openModule(m: ModuleData) {
   if (!isUsable(m)) {
-    notify.push(`模块 ${m.name} 暂时用不了：${statusReason(m)}`, 'warning')
+    notify.push(`插件 ${m.name} 暂时用不了：${statusReason(m)}`, 'warning')
   }
   router.push(`/modules/${m._key}`)
 }
@@ -231,7 +224,7 @@ async function onToggle(m: ModuleData, v: boolean | null) {
   toggling[m._key] = true
   try {
     await modules.toggle(m._key, enabled)
-    notify.push(`模块 ${m.name} 已${enabled ? '启用' : '禁用'}`, 'success')
+    notify.push(`插件 ${m.name} 已${enabled ? '启用' : '停用'}`, 'success')
   } catch (err) {
     notify.push(errorMessage(err), 'error')
     // 通过 store.patch 改写响应式对象，失败回滚才能反映到界面
@@ -244,43 +237,78 @@ async function onToggle(m: ModuleData, v: boolean | null) {
 async function onReload(m: ModuleData) {
   try {
     await modules.reloadSingle(m._key)
-    notify.push(`模块 ${m.name} 已重新加载`, 'success')
+    notify.push(`插件 ${m.name} 已重新加载`, 'success')
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   }
 }
 
-/** 内置模块：禁用并隐藏（软卸载，文件/配置保留，可在设置页恢复） */
-async function onHideBuiltin(m: ModuleData) {
-  if (!window.confirm(`禁用并隐藏「${m.name}」？插件文件与它的配置都会保留，之后可以恢复安装。`)) return
+// ---------- 危险操作确认（统一 ConfirmDialog，替代 window.confirm） ----------
+interface ConfirmState {
+  title: string
+  message: string
+  details: string[]
+  danger: boolean
+  confirmText: string
+  run: () => Promise<void>
+}
+
+const confirmState = ref<ConfirmState | null>(null)
+const confirmBusy = ref(false)
+
+function askConfirm(state: ConfirmState) {
+  confirmState.value = state
+}
+
+async function runConfirm() {
+  const state = confirmState.value
+  if (!state || confirmBusy.value) return
+  confirmBusy.value = true
   try {
-    await modules.uninstall(m._key)
-    notify.push(`模块 ${m.name} 已禁用并隐藏`, 'success')
+    await state.run()
+    confirmState.value = null
   } catch (err) {
     notify.push(errorMessage(err), 'error')
+  } finally {
+    confirmBusy.value = false
   }
 }
 
-/** 第三方模块：硬删除（配置与数据默认保留） */
-async function onDelete(m: ModuleData) {
-  const ok = window.confirm(
-    `删除插件「${m.name}」？\n\n` +
-      '插件文件会被删除；它的配置与聊天数据会保留，重新安装后还能接着用。',
-  )
-  if (!ok) return
-  try {
-    await modules.deleteModule(m._key, false)
-    notify.push(`插件 ${m.name} 已删除`, 'success')
-  } catch (err) {
-    notify.push(errorMessage(err), 'error')
-  }
+/** 内置插件：停用并隐藏（文件/配置保留，之后可恢复） */
+function onHideBuiltin(m: ModuleData) {
+  askConfirm({
+    title: `停用并隐藏「${m.name}」`,
+    message: '停用后它不再出现在列表里，也不会响应消息。',
+    details: ['插件文件保留', '插件配置保留', '之后可在「已禁用并隐藏」里恢复安装'],
+    danger: false,
+    confirmText: '停用并隐藏',
+    run: async () => {
+      await modules.uninstall(m._key)
+      notify.push(`插件 ${m.name} 已停用并隐藏`, 'success')
+    },
+  })
 }
 
-/** 软卸载模块恢复安装（对所有账号补实例由后端完成） */
+/** 第三方插件：卸载（删除文件，配置与数据默认保留） */
+function onDelete(m: ModuleData) {
+  askConfirm({
+    title: `卸载「${m.name}」`,
+    message: '卸载会删除插件文件，插件配置与聊天数据默认保留。',
+    details: ['删除插件文件，不能靠重新加载恢复', '插件配置与聊天数据保留', '重新安装后还能接着用'],
+    danger: true,
+    confirmText: '卸载',
+    run: async () => {
+      await modules.deleteModule(m._key, false)
+      notify.push(`插件 ${m.name} 已卸载`, 'success')
+    },
+  })
+}
+
+/** 软卸载插件恢复安装（对所有账号补实例由后端完成） */
 async function onRestore(name: string, displayName?: string) {
   try {
     await modules.install(name)
-    notify.push(`模块 ${displayName || name} 已恢复安装`, 'success')
+    notify.push(`插件 ${displayName || name} 已恢复安装`, 'success')
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   }
@@ -399,13 +427,11 @@ function resetDepsFeedback() {
   depsErrorHint.value = ''
   depsErrorCommand.value = []
   depsErrorOutput.value = ''
-  depsLoadError.value = ''
 }
 
 function openZipDepsDialog() {
   const preview = zipPreview.value
   if (!preview) return
-  depsMode.value = 'zip'
   depsModuleName.value = preview.name
   depsModuleLabel.value = preview.display_name || preview.name
   depsNote.value = '会先安装插件，再用 pip 安装这些组件。'
@@ -414,43 +440,18 @@ function openZipDepsDialog() {
   depsRejected.value = [...zipDepsRejected.value]
   depsMirror.value = ''
   resetDepsFeedback()
-  depsLoading.value = false
   depsDialog.value = true
 }
 
+/** 已安装插件的依赖检查：交给共享组件，列表刷新由 done 事件处理 */
 function openDepsCheck(m: ModuleData) {
-  depsMode.value = 'card'
-  depsModuleName.value = m._key
-  depsModuleLabel.value = m.name
-  depsNote.value = ''
-  depsPackages.value = []
-  depsCommand.value = []
-  depsRejected.value = []
-  depsMirror.value = ''
-  resetDepsFeedback()
-  depsDialog.value = true
-  void loadDependencyStatus()
+  cardDepsName.value = m._key
+  cardDepsLabel.value = m.name
+  cardDepsOpen.value = true
 }
 
-/** 查询已装插件声明的组件与当前缺失清单 */
-async function loadDependencyStatus() {
-  if (!depsModuleName.value) return
-  depsLoading.value = true
-  depsLoadError.value = ''
-  try {
-    const res = await http.get<DependencyStatus>(
-      `/api/modules/${encodeURIComponent(depsModuleName.value)}/dependencies`,
-      { params: { account_id: bots.currentAccountId || undefined } },
-    )
-    const status = res.data || {}
-    depsPackages.value = asTextList(status.missing)
-    depsCommand.value = asTextList(status.command)
-    depsRejected.value = asTextList(status.rejected)
-  } catch (err) {
-    depsLoadError.value = errorMessage(err)
-  } finally {
-    depsLoading.value = false
-  }
+function onCardDepsDone() {
+  modules.load().catch((err: unknown) => notify.push(errorMessage(err), 'error'))
 }
 
 function depsFailureDetail(err: unknown): {
@@ -479,20 +480,18 @@ async function runDepsInstall() {
   depsRunning.value = true
   resetDepsFeedback()
   try {
-    if (depsMode.value === 'zip') {
-      const file = zipFile.value
-      if (!file) throw new Error('请先选择插件压缩包')
-      // 后端只接受「已安装插件」的依赖安装：zip 入口先落盘插件
-      zipInstalling.value = true
-      try {
-        if (zipDialogMode.value === 'update' && zipTarget.value) {
-          await modules.updateZip(zipTarget.value, file)
-        } else {
-          await modules.installZip(file, !!zipPreview.value?.conflict)
-        }
-      } finally {
-        zipInstalling.value = false
+    const file = zipFile.value
+    if (!file) throw new Error('请先选择插件压缩包')
+    // 后端只接受「已安装插件」的依赖安装：zip 入口先落盘插件
+    zipInstalling.value = true
+    try {
+      if (zipDialogMode.value === 'update' && zipTarget.value) {
+        await modules.updateZip(zipTarget.value, file)
+      } else {
+        await modules.installZip(file, !!zipPreview.value?.conflict)
       }
+    } finally {
+      zipInstalling.value = false
     }
     const form = new FormData()
     form.append('confirm_deps', 'true')
@@ -508,7 +507,7 @@ async function runDepsInstall() {
     depsDialog.value = false
     if (zipDialog.value) closeZipDialog()
     notify.push(
-      loaded ? '依赖已安装，插件已重新加载' : '依赖已安装，插件还没加载成功，请点重试加载',
+      loaded ? '组件已安装，插件已重新加载' : '组件已安装，插件还没加载成功，请重新加载',
       loaded ? 'success' : 'warning',
     )
   } catch (err) {
@@ -525,17 +524,6 @@ async function runDepsInstall() {
 function closeDepsDialog() {
   if (depsRunning.value) return
   depsDialog.value = false
-}
-
-/** 依赖已就绪：直接重试加载这个插件 */
-async function retryLoadedModule() {
-  const target = modules.list.find((m) => m._key === depsModuleName.value)
-  depsDialog.value = false
-  if (target) {
-    await onReload(target)
-  } else {
-    await modules.load()
-  }
 }
 
 /** 复制命令；剪贴板不可用时提示手动复制 */
@@ -581,32 +569,35 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 <template>
   <div>
-    <div class="app-page-header">
-      <div>
+    <div class="app-page-header d-flex align-center flex-wrap gap-2">
+      <div class="me-2">
         <h1 class="app-page-title">功能插件</h1>
-        <div class="app-page-subtitle">共 {{ modules.count }} 个功能，开关只影响当前账号</div>
+        <div class="app-page-subtitle">共 {{ modules.count }} 个插件，开关只影响当前账号</div>
       </div>
-      <v-chip v-if="bots.currentAccountId" size="small" variant="tonal" class="mr-2">
+      <v-chip v-if="bots.currentAccountId" size="small" variant="tonal">
         当前账号：{{ accountName }}
       </v-chip>
-      <v-btn
-        variant="tonal"
-        prepend-icon="mdi-package-variant"
-        class="mr-2"
-        @click="openInstallDialog"
-      >
-        安装插件
-      </v-btn>
-      <v-btn variant="tonal" prepend-icon="mdi-refresh" :loading="modules.reloading" @click="modules.reloadAll().catch((e: unknown) => notify.push(errorMessage(e), 'error'))">
-        刷新模块
-      </v-btn>
+      <v-spacer />
+      <div class="d-flex flex-wrap gap-2">
+        <v-btn variant="tonal" prepend-icon="mdi-package-variant" @click="openInstallDialog">
+          安装插件
+        </v-btn>
+        <v-btn
+          variant="tonal"
+          prepend-icon="mdi-refresh"
+          :loading="modules.reloading"
+          @click="modules.reloadAll().catch((e: unknown) => notify.push(errorMessage(e), 'error'))"
+        >
+          重新加载
+        </v-btn>
+      </div>
     </div>
 
-    <!-- 顶部提示条：加载失败 / 已软卸载（可恢复） -->
+    <!-- 顶部提示条：加载失败 / 已停用并隐藏（可恢复） -->
     <v-alert v-if="hasIssues" type="warning" variant="tonal" density="compact" class="mb-4">
-      <div class="font-weight-medium mb-1">模块状态提示</div>
+      <div class="font-weight-medium mb-1">插件状态提示</div>
       <template v-if="errorModules.length">
-        <div class="text-caption mb-1">以下模块加载失败（不影响其它模块）：</div>
+        <div class="text-caption mb-1">以下插件加载失败（不影响其它插件）：</div>
         <div
           v-for="m in errorModules"
           :key="`err-${m._key}`"
@@ -624,11 +615,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           >
             检查依赖
           </v-btn>
-          <v-btn size="x-small" variant="text" prepend-icon="mdi-refresh" @click="onReload(m)">重试加载</v-btn>
+          <v-btn size="x-small" variant="text" prepend-icon="mdi-refresh" @click="onReload(m)">重新加载</v-btn>
         </div>
       </template>
       <template v-if="uninstalledModules.length">
-        <div class="text-caption mb-1 mt-2">以下模块已禁用并隐藏（文件与配置保留）：</div>
+        <div class="text-caption mb-1 mt-2">以下插件已停用并隐藏（文件与配置保留）：</div>
         <div
           v-for="item in uninstalledModules"
           :key="`off-${item.module_name}`"
@@ -695,7 +686,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                 </template>
                 <v-card-title class="text-body-1">
                   <span class="app-line-clamp-1">{{ m.name }}</span>
-                  <!-- 来源徽标：内置 / 第三方；预设装的模块再标「来自预设 xxx」 -->
+                  <!-- 来源徽标：内置 / 第三方；配置包装的插件再标「来自某配置包」 -->
                   <v-chip
                     size="x-small"
                     class="ml-1"
@@ -715,14 +706,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                         prepend-icon="mdi-package-variant-closed"
                         @click="router.push('/bundles')"
                       >
-                        来自「{{ m.origin.bundle_name || '未命名预设' }}」
+                        来自「{{ m.origin.bundle_name || '未命名配置包' }}」
                       </v-chip>
                     </template>
                     <div class="text-caption">
-                      预设「{{ m.origin.bundle_name || '未命名预设' }}」v{{ m.origin.bundle_version }}
+                      配置包「{{ m.origin.bundle_name || '未命名配置包' }}」v{{ m.origin.bundle_version }}
                     </div>
                     <div class="text-caption">
-                      {{ m.origin.action === 'upgraded' ? '随预设升级' : '随预设安装' }} ·
+                      {{ m.origin.action === 'upgraded' ? '随配置包升级' : '随配置包安装' }} ·
                       {{ formatOriginTime(m.origin.installed_at) }}
                     </div>
                     <div class="text-caption">点击去配置包</div>
@@ -791,7 +782,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                       />
                     </template>
                     <v-list density="compact">
-                      <v-list-item v-if="isUsable(m)" prepend-icon="mdi-refresh" @click="onReload(m)">重载</v-list-item>
+                      <v-list-item v-if="isUsable(m)" prepend-icon="mdi-refresh" @click="onReload(m)">重新加载</v-list-item>
                       <!-- 内置：禁用并隐藏（软卸载）；已卸载的内置给"恢复安装" -->
                       <template v-if="isBuiltinModule(m)">
                         <v-list-item
@@ -802,10 +793,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                           恢复安装
                         </v-list-item>
                         <v-list-item v-else prepend-icon="mdi-eye-off-outline" @click="onHideBuiltin(m)">
-                          禁用并隐藏
+                          停用（文件保留）
                         </v-list-item>
                       </template>
-                      <!-- 第三方：重载 / 更新… / 删除… -->
+                      <!-- 第三方：重新加载 / 更新… / 卸载（删除文件） -->
                       <template v-else>
                         <v-list-item
                           v-if="statusOf(m) === 'uninstalled'"
@@ -827,7 +818,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                           class="text-error"
                           @click="onDelete(m)"
                         >
-                          删除…
+                          卸载（删除文件）
                         </v-list-item>
                       </template>
                     </v-list>
@@ -842,10 +833,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       <v-card v-if="filtered.length === 0 && !modules.loading" variant="outlined">
         <EmptyState
           icon="mdi-magnify-close"
-          :title="search ? `没有匹配「${search}」的模块` : '暂无模块'"
-          description="尝试更换关键词，或刷新模块列表"
+          :title="search ? `没有匹配「${search}」的插件` : '暂无插件'"
+          description="尝试更换关键词，或重新加载插件列表"
         >
-          <v-btn size="small" variant="tonal" prepend-icon="mdi-refresh" @click="modules.reloadAll().catch((e: unknown) => notify.push(errorMessage(e), 'error'))">刷新模块</v-btn>
+          <v-btn size="small" variant="tonal" prepend-icon="mdi-refresh" @click="modules.reloadAll().catch((e: unknown) => notify.push(errorMessage(e), 'error'))">重新加载</v-btn>
         </EmptyState>
       </v-card>
     </template>
@@ -894,7 +885,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
               <div class="preview-label">覆盖安装</div>
               <div class="preview-value">
                 <template v-if="zipPreview.builtin_conflict">
-                  <span class="text-error">与内置模块同名（禁止覆盖）</span>
+                  <span class="text-error">与内置插件同名（禁止覆盖）</span>
                 </template>
                 <template v-else-if="zipPreview.conflict">
                   <span class="text-warning">是</span>
@@ -907,7 +898,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
           <v-alert v-if="zipPreview?.builtin_conflict" type="error" variant="tonal" density="compact" class="mt-3">
             <div class="text-caption">
-              {{ zipPreview.conflict_reason || '该插件与内置模块同名，第三方插件不允许覆盖内置模块。' }}
+              {{ zipPreview.conflict_reason || '该插件与内置插件同名，第三方插件不允许覆盖内置插件。' }}
               请让插件作者改名后重新打包。
             </div>
           </v-alert>
@@ -968,6 +959,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
               先安装依赖
             </v-btn>
           </v-alert>
+
+          <div class="text-caption mt-3" style="opacity: 0.65">
+            要导入的是整账号配置（配置包 .zip）？
+            <v-btn size="x-small" variant="text" @click="router.push('/bundles')">去配置包</v-btn>
+          </div>
         </v-card-text>
         <v-card-actions>
           <v-spacer />
@@ -985,7 +981,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       </v-card>
     </v-dialog>
 
-    <!-- 依赖安装对话框：zip 预览与卡片「检查依赖」两条入口共用 -->
+    <!-- zip 预检入口的依赖安装：先装插件，再装组件 -->
     <v-dialog v-model="depsDialog" max-width="640" :persistent="depsRunning" @keydown.esc="closeDepsDialog">
       <v-card>
         <v-card-title class="d-flex align-center">
@@ -998,51 +994,24 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           <div v-if="depsModuleLabel" class="text-caption mb-2">插件：{{ depsModuleLabel }}</div>
           <div v-if="depsNote" class="text-caption mb-2">{{ depsNote }}</div>
 
-          <v-progress-linear v-if="depsLoading" indeterminate color="primary" class="mb-3" />
-
-          <v-alert v-if="depsLoadError" type="error" variant="tonal" density="compact" class="mb-3">
-            <div class="text-caption">{{ depsLoadError }}</div>
-            <v-btn size="small" variant="text" prepend-icon="mdi-refresh" class="mt-1" @click="loadDependencyStatus">
-              重试
-            </v-btn>
+          <v-alert v-if="depsRejected.length" type="warning" variant="tonal" density="compact" class="mb-3">
+            <div class="text-caption">清单里有无法自动安装的写法，请让作者改成「包名 + 版本」再试。</div>
           </v-alert>
-
-          <template v-if="!depsLoading && !depsLoadError">
-            <v-alert v-if="depsRejected.length" type="warning" variant="tonal" density="compact" class="mb-3">
-              <div class="text-caption">清单里有无法自动安装的写法，请让作者改成「包名 + 版本」再试。</div>
-            </v-alert>
-            <template v-else-if="!depsPackages.length">
-              <v-alert type="success" variant="tonal" density="compact" class="mb-3">
-                <div class="text-caption">依赖已就绪，点「重试加载」即可。</div>
-              </v-alert>
-              <v-btn size="small" variant="tonal" prepend-icon="mdi-refresh" @click="retryLoadedModule">
-                重试加载
-              </v-btn>
-            </template>
-            <template v-else>
-              <div v-if="depsMode === 'card'" class="text-caption mb-1">缺少运行组件：</div>
-              <div v-else class="text-caption mb-1">将安装这些组件：</div>
-              <div class="d-flex flex-wrap gap-1 mb-3">
-                <v-chip v-for="dep in depsPackages" :key="dep" size="small" variant="tonal">{{ dep }}</v-chip>
-              </div>
-              <div v-if="depsCommand.length" class="mb-3">
-                <div class="text-caption mb-1">将要执行的命令</div>
-                <pre class="deps-command">{{ depsCommand.join(' ') }}</pre>
-                <v-btn size="x-small" variant="text" prepend-icon="mdi-content-copy" @click="copyCommand(depsCommand)">
-                  复制命令
-                </v-btn>
-              </div>
-              <v-text-field
-                v-model="depsMirror"
-                label="镜像地址（可选）"
-                placeholder="留空使用默认源"
-                density="comfortable"
-                variant="outlined"
-                hide-details
-                :disabled="depsRunning"
-                class="mb-2"
-              />
-            </template>
+          <template v-else>
+            <div class="text-caption mb-1">将安装这些组件：</div>
+            <div class="d-flex flex-wrap gap-1 mb-3">
+              <v-chip v-for="dep in depsPackages" :key="dep" size="small" variant="tonal">{{ dep }}</v-chip>
+            </div>
+            <v-text-field
+              v-model="depsMirror"
+              label="镜像地址（可选）"
+              placeholder="留空使用默认源"
+              density="comfortable"
+              variant="outlined"
+              hide-details
+              :disabled="depsRunning"
+              class="mb-2"
+            />
           </template>
 
           <v-progress-linear v-if="depsRunning" indeterminate color="primary" class="mt-3" />
@@ -1077,11 +1046,33 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
             :disabled="depsRunning"
             @click="runDepsInstall"
           >
-            {{ depsMode === 'card' ? '安装依赖' : '确认安装' }}
+            确认安装
           </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- 已安装插件：检查/安装运行组件（共享组件） -->
+    <PluginDepsDialog
+      v-model="cardDepsOpen"
+      :module-name="cardDepsName"
+      :module-label="cardDepsLabel"
+      @done="onCardDepsDone"
+      @reload="onCardDepsDone"
+    />
+
+    <!-- 危险操作统一确认：删除/停用都先讲清后果 -->
+    <ConfirmDialog
+      :model-value="confirmState !== null"
+      :title="confirmState?.title || ''"
+      :message="confirmState?.message || ''"
+      :details="confirmState?.details || []"
+      :danger="!!confirmState?.danger"
+      :confirm-text="confirmState?.confirmText || '确定'"
+      :loading="confirmBusy"
+      @update:model-value="(v: boolean) => { if (!v) confirmState = null }"
+      @confirm="runConfirm"
+    />
   </div>
 </template>
 
@@ -1167,6 +1158,21 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 .origin-chip {
   cursor: pointer;
+}
+
+/* 窄屏：页头按钮换行后，卡片两侧留白收紧，避免操作区被挤出可视范围 */
+@media (max-width: 600px) {
+  .module-card :deep(.v-card-item) {
+    padding: 8px 10px;
+  }
+
+  .module-card :deep(.v-card-item__append) {
+    padding-inline-start: 4px;
+  }
+
+  .issue-row {
+    align-items: flex-start;
+  }
 }
 
 .deps-command {

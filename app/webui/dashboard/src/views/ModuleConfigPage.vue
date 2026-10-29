@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useModulesStore, isBuiltinModule, type PermissionConfig } from '@/stores/modules'
+import { useModulesStore, isBuiltinModule } from '@/stores/modules'
 import { useResponderStore, type ResponderGroup } from '@/stores/responder'
 import { useBotsStore, displayName } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage, registerDraftFlush } from '@/api/http'
 import ConfigForm from '@/components/config/ConfigForm.vue'
-import PermissionEditor from '@/components/config/PermissionEditor.vue'
+import SaveStatusBar from '@/components/common/SaveStatusBar.vue'
+import PluginStatusBanner from '@/components/tools/PluginStatusBanner.vue'
+import PluginDepsDialog from '@/components/tools/PluginDepsDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -31,6 +33,25 @@ let retryTimer: number | null = null
 let draftAccountId: string | null = null
 let draftModuleName = ''
 
+/** 插件状态异常时：表单置灰，顶部横幅给「检查依赖 / 重新加载」 */
+const moduleBroken = computed(() => {
+  const status = mod.value?.status || 'ok'
+  return status === 'error' || status === 'conflict'
+})
+const moduleStatusText = computed(() => (mod.value?.enabled ? '已启用' : '已停用'))
+const hasPluginPage = computed(() => !!mod.value?.has_page)
+const hasConfigForm = computed(() => !!(mod.value?.config_schema || Object.keys(mod.value?.config || {}).length))
+const configTab = ref<'plugin' | 'basic'>('plugin')
+const depsOpen = ref(false)
+
+watch(
+  () => [hasPluginPage.value, hasConfigForm.value],
+  () => {
+    configTab.value = hasPluginPage.value ? 'plugin' : 'basic'
+  },
+  { immediate: true },
+)
+
 watch(mod, (m) => {
   if (!m) return
   if (retryTimer) {
@@ -41,7 +62,7 @@ watch(mod, (m) => {
   // 同账号、同模块的纯数据刷新（WS 触发的重载 / 其它页面保存后重拉）不要覆盖正在编辑的草稿。
   // 切账号或换模块时 draftAccountId/draftModuleName 不匹配，照常初始化。
   const sameScope = draftModuleName === m.name && draftAccountId === modules.botId
-  if (sameScope && (dirtyFlag || permDirtyFlag)) return
+  if (sameScope && dirtyFlag) return
   initFromModule()
 })
 
@@ -63,23 +84,14 @@ const PERMISSION_COLOR: Record<string, string> = {
 
 // ---------- 配置草稿 + 自动保存 ----------
 const draft = reactive<Record<string, any>>({})
-const permission = ref<PermissionConfig>({
-  group_mode: 'blacklist',
-  group_list: [],
-  user_mode: 'blacklist',
-  user_list: [],
-})
 const saveStatus = ref<'clean' | 'dirty' | 'saving' | 'error'>('clean')
 const saveMsg = ref('')
 let autosaveTimer: number | null = null
-let permTimer: number | null = null
 let dirtyFlag = false
-let permDirtyFlag = false
 /** 会话过期跳转前的草稿落盘注销函数 */
 let unregisterDraftFlush: (() => void) | null = null
 // 编辑序号：保存期间若又有新编辑，完成时按序号判断不清理 dirty，避免最新编辑丢失
 let editSeq = 0
-let permEditSeq = 0
 
 function initFromModule() {
   const m = mod.value
@@ -88,16 +100,9 @@ function initFromModule() {
   draftAccountId = modules.botId
   Object.keys(draft).forEach((k) => delete draft[k])
   Object.assign(draft, m.config || {})
-  permission.value = {
-    group_mode: m.permission_config?.group_mode || 'blacklist',
-    group_list: [...(m.permission_config?.group_list || [])],
-    user_mode: m.permission_config?.user_mode || 'blacklist',
-    user_list: [...(m.permission_config?.user_list || [])],
-  }
   saveStatus.value = 'clean'
   saveMsg.value = ''
   dirtyFlag = false
-  permDirtyFlag = false
 }
 
 function onChange(key: string, value: any) {
@@ -135,52 +140,28 @@ async function doSave(targetAccountId?: string | null) {
   }
 }
 
-function onPermissionChange(v: PermissionConfig) {
-  permission.value = v
-  permDirtyFlag = true
-  permEditSeq += 1
-  if (permTimer) clearTimeout(permTimer)
-  permTimer = window.setTimeout(doSavePermission, 2000)
-}
-
-async function doSavePermission(targetAccountId?: string | null) {
-  // 同 doSave：点击事件不是账号 id；null 保留「没有上一个账号」的语义
-  if (targetAccountId != null && typeof targetAccountId !== 'string') targetAccountId = undefined
-  if (permTimer) {
-    clearTimeout(permTimer)
-    permTimer = null
-  }
-  if (!permDirtyFlag) return
-  if (targetAccountId === null) return
-  const snapshotSeq = permEditSeq
-  try {
-    await modules.savePermission(name, permission.value, targetAccountId)
-    if (permEditSeq !== snapshotSeq) return // 保存期间有新编辑：保留 dirty
-    permDirtyFlag = false
-    notify.push('权限已保存', 'success')
-  } catch (err) {
-    if (permEditSeq !== snapshotSeq) return
-    notify.push(errorMessage(err), 'error')
-  }
-}
-
-/** 立即落盘配置与权限的未保存改动（离开页面 / 切账号 / 会话过期前调用）。
+/** 立即落盘未保存的配置（离开页面 / 切账号 / 会话过期前调用）。
  *  ``accountId`` 显式指定时写到该账号名下：切号 watcher 触发时 currentAccountId 已变成新账号。 */
 async function flushDrafts(accountId?: string | null) {
   await doSave(accountId)
-  await doSavePermission(accountId)
 }
 
-// ---------- 启用开关 ----------
-async function onToggleEnabled(v: boolean | null) {
+// 启停只在「功能插件」列表操作：这里只读展示状态，避免同一配置两处入口
+async function reloadModule() {
   if (!mod.value) return
   try {
-    await modules.toggle(name, !!v)
-    notify.push(`模块 ${mod.value.name} 已${v ? '启用' : '禁用'}`, 'success')
+    await modules.reloadSingle(name)
+    notify.push(`${mod.value.name} 已重新加载`, 'success')
   } catch (err) {
     notify.push(errorMessage(err), 'error')
-    // 走 store.patch 改写响应式对象，避免改到 list 派生出的非响应副本
-    modules.patch(name, { enabled: !v })
+  }
+}
+
+async function onDepsDone() {
+  try {
+    await modules.load()
+  } catch {
+    /* 列表刷新失败不影响对话框里的结果提示 */
   }
 }
 
@@ -384,22 +365,19 @@ onUnmounted(() => {
   unregisterDraftFlush?.()
   unregisterDraftFlush = null
   if (autosaveTimer) clearTimeout(autosaveTimer)
-  if (permTimer) clearTimeout(permTimer)
   if (retryTimer) clearTimeout(retryTimer)
   autosaveTimer = null
-  permTimer = null
   retryTimer = null
 })
 </script>
 
 <template>
   <div v-if="mod">
-    <div class="app-page-header" style="align-items: center">
+    <div class="app-page-header d-flex align-center flex-wrap gap-2">
       <div class="d-flex align-center gap-2 flex-wrap">
-        <v-btn variant="text" icon="mdi-arrow-left" size="small" title="返回模块列表" @click="router.push('/modules')" />
+        <v-btn variant="text" icon="mdi-arrow-left" size="small" title="返回插件列表" @click="router.push('/modules')" />
         <h1 class="app-page-title">{{ mod.name }}</h1>
-        <v-chip size="small" variant="tonal" color="primary">{{ mod.name_sign }}</v-chip>
-        <!-- 来源 / 版本：与模块卡片的编目信息一致 -->
+        <!-- 来源 / 版本：与插件卡片的编目信息一致 -->
         <v-chip size="small" variant="tonal" :color="isBuiltinModule(mod) ? 'default' : 'teal'">
           {{ isBuiltinModule(mod) ? '内置' : '第三方' }}
         </v-chip>
@@ -408,18 +386,31 @@ onUnmounted(() => {
           {{ PERMISSION_LABEL[mod.permission] || mod.permission }}
         </v-chip>
         <v-chip v-if="mod.account_id" size="small" variant="tonal">{{ bots.currentBot?.name ?? mod.account_id }}</v-chip>
-        <v-chip v-if="saveStatus === 'saving'" size="small" color="primary" variant="flat" class="ml-2">
-          <v-progress-circular size="12" indeterminate class="mr-1" /> 保存中…
-        </v-chip>
-        <v-chip v-else-if="saveStatus === 'error'" size="small" color="error" variant="flat" class="ml-2">保存失败</v-chip>
-        <v-chip v-else-if="saveStatus === 'dirty'" size="small" color="warning" variant="flat" class="ml-2">未保存</v-chip>
-        <v-chip v-else-if="saveMsg" size="small" variant="flat" class="ml-2">{{ saveMsg }}</v-chip>
       </div>
-      <div class="d-flex align-center gap-3">
-        <v-switch :model-value="mod.enabled" color="primary" label="启用" density="compact" hide-details @update:model-value="onToggleEnabled" />
+      <v-spacer />
+      <div class="d-flex align-center flex-wrap gap-2">
+        <v-chip size="small" variant="tonal" :color="mod.enabled ? 'success' : 'grey'">
+          当前状态：{{ moduleStatusText }}
+        </v-chip>
+        <v-btn size="small" variant="text" prepend-icon="mdi-cube-outline" @click="router.push('/modules')">
+          回功能插件列表停用
+        </v-btn>
       </div>
     </div>
     <div class="app-page-subtitle" style="padding-left: 44px">{{ mod.description }}</div>
+
+    <div class="d-flex align-center flex-wrap gap-2 mt-3 mb-2">
+      <SaveStatusBar :status="saveStatus" autosave hint="改动会自动保存并立即生效，无需重新加载" />
+      <v-btn size="small" variant="text" prepend-icon="mdi-refresh" @click="reloadModule">重新加载</v-btn>
+    </div>
+
+    <PluginStatusBanner
+      :status="mod.status"
+      :error="mod.error"
+      :name="mod.name"
+      @reload="reloadModule"
+      @check-deps="depsOpen = true"
+    />
 
     <!--
       该账号的模块实例尚未装配时，后端会回退到全局实例（account_id 为 null）。
@@ -437,6 +428,9 @@ onUnmounted(() => {
         的专属配置。点「重新加载」为这个账号准备好自己的配置后再编辑。
       </div>
     </v-alert>
+
+    <!-- 插件异常时整块设置置灰：先按顶部横幅修好依赖/冲突 -->
+    <div :class="{ 'plugin-broken': moduleBroken }">
 
     <!-- 响应权策略（同群多账号；仅声明支持该能力的模块显示） -->
     <v-card v-if="responderDeclared" variant="outlined" class="mb-4">
@@ -459,7 +453,7 @@ onUnmounted(() => {
       </v-card-title>
       <v-card-text>
         <div class="text-caption mb-3">
-          默认每个账号各自响应；需要「同一个群只让一个账号处理这个功能」时再按群配置。
+          同一个群同时装了多个账号时，由哪个账号处理这个插件。这里的改动需要点「保存策略」才生效。
         </div>
         <div v-if="responderLoading" class="text-caption">加载中…</div>
         <div v-else-if="!responderGroups.length" class="text-caption">
@@ -500,47 +494,91 @@ onUnmounted(() => {
           <div class="responder-preview text-caption">{{ respondersText(group) }}</div>
           <v-chip v-if="group.preview?.degraded" size="x-small" color="warning" variant="tonal">已降级</v-chip>
         </div>
+        <div class="text-caption mt-2">
+          在「回复与权限」里看谁能触发回复 →
+          <v-btn
+            size="x-small"
+            variant="text"
+            @click="router.push({ path: '/reply', query: { tab: 'who' } })"
+          >
+            去查看
+          </v-btn>
+        </div>
       </v-card-text>
     </v-card>
 
-    <!-- 插件自定义配置页 -->
-    <v-card v-if="mod.has_page" variant="outlined" class="mb-4">
-      <v-card-text class="pa-2">
-        <iframe :src="pluginSrc" class="plugin-frame" title="模块配置页" @load="onPluginLoad" />
+    <!-- 插件设置：有插件自带设置页时用 Tab 与基础设置区分，避免两套界面同时出现 -->
+    <v-card v-if="hasPluginPage || hasConfigForm" variant="outlined" class="mb-4">
+      <v-card-title class="d-flex align-center flex-wrap gap-2">
+        <v-icon icon="mdi-cogs" class="mr-2" color="primary" /> 插件设置
+      </v-card-title>
+      <v-tabs
+        v-if="hasPluginPage && hasConfigForm"
+        v-model="configTab"
+        density="comfortable"
+        color="primary"
+      >
+        <v-tab value="plugin">插件自带设置</v-tab>
+        <v-tab value="basic">基础设置</v-tab>
+      </v-tabs>
+      <v-card-text>
+        <template v-if="hasPluginPage && hasConfigForm">
+          <v-window v-model="configTab">
+            <v-window-item value="plugin">
+              <div class="text-caption mb-2" style="opacity: 0.65">由插件自己提供，保存与生效方式由插件决定。</div>
+              <iframe :src="pluginSrc" class="plugin-frame" title="插件设置页" @load="onPluginLoad" />
+            </v-window-item>
+            <v-window-item value="basic">
+              <div class="text-caption mb-2" style="opacity: 0.65">改动会自动保存并立即生效，无需重新加载。</div>
+              <ConfigForm
+                :module-name="name"
+                :schema="mod.config_schema || {}"
+                :config="draft"
+                :bot-id="bots.currentAccountId"
+                @change="onChange"
+              />
+            </v-window-item>
+          </v-window>
+        </template>
+        <template v-else-if="hasPluginPage">
+          <div class="text-caption mb-2" style="opacity: 0.65">由插件自己提供，保存与生效方式由插件决定。</div>
+          <iframe :src="pluginSrc" class="plugin-frame" title="插件设置页" @load="onPluginLoad" />
+        </template>
+        <template v-else>
+          <div class="text-caption mb-2" style="opacity: 0.65">改动会自动保存并立即生效，无需重新加载。</div>
+          <ConfigForm
+            :module-name="name"
+            :schema="mod.config_schema || {}"
+            :config="draft"
+            :bot-id="bots.currentAccountId"
+            @change="onChange"
+          />
+        </template>
       </v-card-text>
     </v-card>
 
-    <!-- 权限配置 -->
+    <!-- 账号级「谁能回复」统一在回复与权限维护，这里只放链接，避免重复编辑 -->
     <v-card variant="outlined" class="mb-4">
       <v-card-title class="d-flex align-center">
-        <v-icon icon="mdi-shield-account-outline" class="mr-2" color="primary" /> 响应范围控制
-        <v-spacer />
-        <v-btn size="small" variant="tonal" prepend-icon="mdi-content-save" @click="doSavePermission()">保存权限</v-btn>
+        <v-icon icon="mdi-shield-account-outline" class="mr-2" color="primary" /> 谁能回复这个账号
       </v-card-title>
       <v-card-text>
-        <PermissionEditor :model-value="permission" @update:model-value="onPermissionChange" />
-      </v-card-text>
-    </v-card>
-
-    <!-- 业务配置 -->
-    <v-card v-if="mod.config_schema || Object.keys(mod.config || {}).length" variant="outlined" class="mb-4">
-      <v-card-title class="d-flex align-center">
-        <v-icon icon="mdi-cogs" class="mr-2" color="primary" /> 业务配置
-        <v-spacer />
-        <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-content-save" :loading="saveStatus === 'saving'" @click="doSave()">
-          保存配置
+        <div class="text-caption mb-2" style="opacity: 0.65">
+          群与成员范围在「回复与权限」里统一管理，这里不再重复编辑。
+        </div>
+        <v-btn
+          size="small"
+          variant="tonal"
+          prepend-icon="mdi-arrow-right"
+          @click="router.push({ path: '/reply', query: { tab: 'who' } })"
+        >
+          去「回复与权限」
         </v-btn>
-      </v-card-title>
-      <v-card-text>
-        <ConfigForm
-          :module-name="name"
-          :schema="mod.config_schema || {}"
-          :config="draft"
-          :bot-id="bots.currentAccountId"
-          @change="onChange"
-        />
       </v-card-text>
     </v-card>
+    </div>
+
+    <PluginDepsDialog v-model="depsOpen" :module-name="name" :module-label="mod.name" @done="onDepsDone" @reload="reloadModule" />
   </div>
 
   <div v-else-if="modules.loading" class="empty-tip">
@@ -548,7 +586,7 @@ onUnmounted(() => {
   </div>
   <div v-else class="empty-tip">
     <v-icon icon="mdi-cube-off-outline" size="56" color="rgba(var(--v-theme-on-surface), 0.3)" />
-    <div>模块不存在或未加载</div>
+    <div>插件不存在或未加载</div>
     <v-btn variant="tonal" prepend-icon="mdi-refresh" class="mt-2" :loading="modules.loading" @click="ensureModule">
       重新加载
     </v-btn>
@@ -556,6 +594,12 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* 插件异常时：设置区置灰，避免用户在坏状态下继续改 */
+.plugin-broken {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
 .plugin-frame {
   width: 100%;
   min-height: 240px;

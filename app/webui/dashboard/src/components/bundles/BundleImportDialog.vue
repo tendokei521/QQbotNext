@@ -1,11 +1,12 @@
 <script setup lang="ts">
 /**
- * 导入预设：选文件 → 预检报告 → 一键「导入并应用」或「仅导入」。
+ * 导入配置包：选文件 → 预检报告 → 一键「导入并应用」或「仅导入」。
  *
  * 预检是"信任界面"：把「包含什么 / 缺什么 / 需要你填什么 / 会安装什么」讲清楚再装。
- * 选中的账号会应用配置并安装随包插件；未选账号时只把预设存到列表。
+ * 选中的账号会应用配置并安装随包插件；未选账号时只把配置包存到列表。
  */
 import { computed, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { displayName, useBotsStore } from '@/stores/bots'
 import {
   useBundlesStore,
@@ -16,6 +17,7 @@ import {
 } from '@/stores/bundles'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
+import PluginDepsDialog from '@/components/tools/PluginDepsDialog.vue'
 
 defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{
@@ -26,6 +28,23 @@ const emit = defineEmits<{
 const bots = useBotsStore()
 const bundles = useBundlesStore()
 const notify = useNotifyStore()
+const router = useRouter()
+
+// ---- 缺少运行组件：复用插件的依赖安装对话框 ----
+const depsOpen = ref(false)
+const depsModuleName = ref('')
+const depsModuleLabel = ref('')
+
+function openDeps(moduleName: string, label?: string) {
+  depsModuleName.value = moduleName
+  depsModuleLabel.value = label || moduleName
+  depsOpen.value = true
+}
+
+function goPluginInstall() {
+  close()
+  router.push('/modules')
+}
 
 type Screen = 'pick' | 'preview' | 'result'
 const screen = ref<Screen>('pick')
@@ -49,7 +68,7 @@ const reusePresetOptions = computed(() =>
     label: `${preset.name}${preset.config?.api_base ? ` · ${preset.config.api_base}` : ''}`,
   })),
 )
-/** 包含可执行模块代码 → 必须显式确认信任才允许导入/应用 */
+/** 包含可执行插件代码 → 必须显式确认信任才允许导入/应用 */
 const needsConsent = computed(() => Boolean(report.value?.requires_code_consent))
 const consentBlocked = computed(() => needsConsent.value && !acceptCode.value)
 const accountLabel = computed(() => {
@@ -79,7 +98,7 @@ function close() {
 
 async function prepare(picked: File) {
   if (!picked.name.toLowerCase().endsWith('.zip')) {
-    error.value = '仅支持 .zip 预设包'
+    error.value = '仅支持 .zip 配置包'
     return
   }
   file.value = picked
@@ -122,7 +141,7 @@ async function confirmImport() {
     applied.value = null
     importedOnly.value = true
     screen.value = 'result'
-    notify.push('预设已导入（未应用）', 'success')
+    notify.push('配置包已导入（未应用）', 'success')
     emit('imported')
   } catch (err) {
     error.value = errorMessage(err)
@@ -146,12 +165,12 @@ async function confirmApply() {
     health.value = response.health || null
     importedOnly.value = false
     screen.value = 'result'
-    notify.push('预设已导入并应用到账号', 'success')
+    notify.push('配置包已导入并应用到账号', 'success')
     emit('imported')
   } catch (err: any) {
     const data = err?.response?.data
     if (data?.imported && data?.bundle) {
-      // 预设已存到列表、应用失败：切到结果页说明，用户可补密钥后到列表重试
+      // 配置包已存到列表、应用失败：切到结果页说明，用户可补密钥后到列表重试
       result.value = { bundle: data.bundle }
       applied.value = null
       importedOnly.value = true
@@ -195,7 +214,7 @@ function formatSize(bytes: number): string {
     <v-card>
       <v-card-title class="d-flex align-center">
         <v-icon icon="mdi-package-variant" class="mr-2" color="primary" />
-        {{ screen === 'pick' ? '导入预设' : screen === 'preview' ? '包内容检查' : '导入完成' }}
+        {{ screen === 'pick' ? '导入配置包' : screen === 'preview' ? '包内容检查' : '导入完成' }}
         <v-spacer />
         <v-btn icon="mdi-close" variant="text" size="small" @click="close" />
       </v-card-title>
@@ -215,11 +234,15 @@ function formatSize(bytes: number): string {
             @drop.prevent="onDrop"
           >
             <v-icon icon="mdi-cloud-upload-outline" size="40" color="primary" />
-            <div class="text-body-2 mt-2">把 .zip 预设包拖到这里</div>
+            <div class="text-body-2 mt-2">把 .zip 配置包拖到这里</div>
             <v-btn size="small" variant="tonal" class="mt-2" @click="($refs.fileInput as HTMLInputElement)?.click()">
               选择文件
             </v-btn>
             <input ref="fileInput" type="file" accept=".zip" hidden @change="onPick" />
+          </div>
+          <div class="text-caption mt-2" style="opacity: 0.65">
+            要安装的是单个插件（插件包 .zip）？
+            <v-btn size="x-small" variant="text" @click="goPluginInstall">去功能插件</v-btn>
           </div>
           <v-progress-linear v-if="bundles.validating" indeterminate color="primary" class="mt-3" />
         </template>
@@ -234,7 +257,7 @@ function formatSize(bytes: number): string {
           <div class="text-caption mb-3" style="opacity: 0.7">{{ report.bundle.description }}</div>
 
           <div class="d-flex flex-wrap gap-2 mb-3">
-            <v-chip size="small" variant="tonal">模块 {{ report.summary.modules }}</v-chip>
+            <v-chip size="small" variant="tonal">插件 {{ report.summary.modules }}</v-chip>
             <v-chip
               v-if="report.summary.modules_bundled"
               size="small"
@@ -251,7 +274,7 @@ function formatSize(bytes: number): string {
             >
               将安装 {{ report.summary.modules_to_install }}
             </v-chip>
-            <v-chip size="small" variant="tonal">预设 {{ report.summary.presets }}</v-chip>
+            <v-chip size="small" variant="tonal">模板 {{ report.summary.presets }}</v-chip>
             <v-chip size="small" variant="tonal">设置项 {{ report.summary.agent_keys }}</v-chip>
             <v-chip size="small" variant="tonal" :color="report.summary.secrets_required ? 'warning' : undefined">
               需填密钥 {{ report.summary.secrets_required }}
@@ -311,9 +334,21 @@ function formatSize(bytes: number): string {
               >
                 <div
                   v-if="mod.missing_requirements?.length"
-                  class="text-caption text-error"
+                  class="d-flex align-center flex-wrap gap-2 text-caption"
                 >
-                  {{ mod.name }} 缺少：{{ mod.missing_requirements.join('、') }}（需要先自行装好这些组件，插件才能用）
+                  <span class="text-error">
+                    {{ mod.name }} 缺少：{{ mod.missing_requirements.join('、') }}
+                  </span>
+                  <v-btn
+                    v-if="mod.installed_version"
+                    size="x-small"
+                    variant="text"
+                    prepend-icon="mdi-package-variant"
+                    @click="openDeps(mod.name)"
+                  >
+                    安装组件
+                  </v-btn>
+                  <span v-else style="opacity: 0.7">应用完成后可补装</span>
                 </div>
               </div>
             </v-card-text>
@@ -321,7 +356,7 @@ function formatSize(bytes: number): string {
 
           <v-card v-if="needsConsent" variant="tonal" color="warning" class="mt-2">
             <v-card-text class="text-caption">
-              <div class="font-weight-medium mb-1">此预设包含可执行的模块代码</div>
+              <div class="font-weight-medium mb-1">此配置包包含可执行的插件代码</div>
               <div>
                 应用时会从包内安装并加载
                 {{ report.summary.modules_bundled }} 个第三方插件，请确认来源可信后再继续。
@@ -330,7 +365,7 @@ function formatSize(bytes: number): string {
                 v-model="acceptCode"
                 density="compact"
                 hide-details
-                label="我信任此预设包含的模块代码"
+                label="我信任此配置包包含的插件代码"
                 class="mt-1"
               />
             </v-card-text>
@@ -385,7 +420,7 @@ function formatSize(bytes: number): string {
             class="mt-2"
           >
             <div class="text-caption">
-              未选择账号：这次只把预设存到列表里，不会写入账号配置。到顶部选一个账号后，可在列表里「应用到账号」。
+              未选择账号：这次只把配置包存到列表里，不会写入账号配置。到顶部选一个账号后，可在列表里「应用到账号」。
             </div>
           </v-alert>
         </template>
@@ -408,14 +443,27 @@ function formatSize(bytes: number): string {
                   {{ health.ok ? '已就绪' : '有待确认项' }}
                 </v-chip>
               </div>
-              <div v-for="mod in health.modules" :key="mod.name" class="text-caption">
-                插件 {{ mod.name }}：{{ mod.loaded && !mod.error ? '已加载' : '未加载，可在「功能插件」页点重试' }}
+              <div
+                v-for="mod in health.modules"
+                :key="mod.name"
+                class="d-flex align-center flex-wrap gap-2 text-caption"
+              >
+                <span>插件 {{ mod.name }}：{{ mod.loaded && !mod.error ? '已加载' : '未加载' }}</span>
+                <v-btn
+                  v-if="!mod.loaded || mod.error"
+                  size="x-small"
+                  variant="text"
+                  prepend-icon="mdi-package-variant"
+                  @click="openDeps(mod.name)"
+                >
+                  检查依赖
+                </v-btn>
               </div>
             </template>
           </v-alert>
           <v-alert v-else type="warning" variant="tonal" density="compact">
             已导入「{{ result.bundle.name }}」v{{ result.bundle.version }}，但还没应用。
-            到预设列表里点「应用到账号」即可写入配置、创建人格和模型并安装随包插件（可撤销）。
+            到配置包列表里点「应用到账号」即可写入配置、创建人格和模型并安装随包插件（可撤销）。
           </v-alert>
         </template>
       </v-card-text>
@@ -459,6 +507,13 @@ function formatSize(bytes: number): string {
       </v-card-actions>
     </v-card>
   </v-dialog>
+
+  <PluginDepsDialog
+    v-model="depsOpen"
+    :module-name="depsModuleName"
+    :module-label="depsModuleLabel"
+    @done="emit('imported')"
+  />
 </template>
 
 <style scoped>

@@ -5,6 +5,7 @@ import { useAgentConfigStore } from '@/stores/agentConfig'
 import { useBotsStore } from '@/stores/bots'
 import { useToolsStore } from '@/stores/tools'
 import { useNotifyStore } from '@/stores/notify'
+import ToolInfo from '@/components/tools/ToolInfo.vue'
 
 interface SystemTool {
   name: string
@@ -28,11 +29,6 @@ const loading = ref(false)
 const loadError = ref('')
 
 // 工具开关状态来自后端统一判定（/api/agent/tools），前端不再自算
-
-const logEnabled = computed<boolean>({
-  get: () => !!agent.draft.system_tools_log_enabled,
-  set: (v: boolean) => agent.onChange('system_tools_log_enabled', !!v),
-})
 
 function isCollapsed(category: string): boolean {
   return !!toolsStore.collapsedOf('system')[category]
@@ -121,17 +117,9 @@ watch(
     <v-card variant="outlined" class="mb-4">
       <v-card-title class="d-flex align-center">
         <v-icon icon="mdi-cog-outline" class="mr-2" color="primary" /> 系统工具
-        <v-spacer />
-        <v-switch
-          v-model="logEnabled"
-          label="输出工具调用日志"
-          color="primary"
-          density="compact"
-          hide-details
-        />
       </v-card-title>
       <v-card-text class="text-caption" style="opacity: 0.65">
-        关掉后模型不会再调用对应工具。日志开关只记录正常调用，超时和报错仍会保留。
+        关掉后模型不会再调用对应工具。各来源的调用日志在页面顶部的「日志设置」里统一开关。
       </v-card-text>
     </v-card>
 
@@ -175,12 +163,18 @@ watch(
               >
                 <div class="tool-row">
                   <div class="tool-info">
-                    <div class="tool-name">{{ tool.name }}</div>
-                    <div class="tool-desc">{{ tool.description }}</div>
-                    <div v-if="!tool.ready && tool.prerequisite" class="tool-prereq">
-                      <v-icon size="x-small" icon="mdi-alert-circle-outline" color="warning" />
-                      {{ tool.prerequisite }}
-                    </div>
+                    <ToolInfo :tool="tool">
+                      <template #meta>
+                        <v-chip
+                          v-if="!tool.ready && tool.prerequisite"
+                          size="small"
+                          variant="tonal"
+                          color="warning"
+                        >
+                          {{ tool.prerequisite }}
+                        </v-chip>
+                      </template>
+                    </ToolInfo>
                   </div>
                   <v-switch
                     :model-value="tool.enabled"

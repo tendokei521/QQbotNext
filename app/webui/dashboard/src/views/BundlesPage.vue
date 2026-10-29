@@ -4,13 +4,17 @@
  * 第三方模块代码），并把它应用到目标账号（事务写 + 快照，失败自动回滚）。
  */
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { displayName, useBotsStore } from '@/stores/bots'
 import { useBundlesStore, type BundleHealth, type ExportModuleOption, type ReusePreset } from '@/stores/bundles'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
 import BundleImportDialog from '@/components/bundles/BundleImportDialog.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import PluginDepsDialog from '@/components/tools/PluginDepsDialog.vue'
 
+const router = useRouter()
 const bots = useBotsStore()
 const bundles = useBundlesStore()
 const notify = useNotifyStore()
@@ -67,9 +71,9 @@ function statusColor(status: string): string {
   return status === 'active' ? 'success' : status === 'failed' ? 'error' : status === 'rolled_back' ? 'grey' : 'warning'
 }
 
-/** 应用记录里存的是预设 id，界面上换成预设名（预设已卸载时给一句人话） */
+/** 应用记录里存的是配置包 id，界面上换成配置包名（已卸载时给一句人话） */
 function bundleName(bundleId: string): string {
-  return bundles.list.find((item) => item.id === bundleId)?.name || '已卸载的预设'
+  return bundles.list.find((item) => item.id === bundleId)?.name || '已卸载的配置包'
 }
 
 function openApply(item: { id: string; name: string; version: string; secrets?: { key: string; label: string; required: boolean }[] }) {
@@ -123,7 +127,7 @@ async function doUninstall() {
   try {
     await bundles.uninstallBundle(uninstallTarget.value.id, keepModules.value)
     notify.push(
-      keepModules.value ? '预设已卸载（模块保留）' : '预设已卸载',
+      keepModules.value ? '配置包已卸载（插件保留）' : '配置包已卸载',
       'success',
     )
     uninstallDialog.value = false
@@ -134,13 +138,45 @@ async function doUninstall() {
   }
 }
 
-async function onRollback(activationId: string) {
-  if (!window.confirm('回滚这次应用？应用时创建的对象会被删除，账号配置恢复到应用前。')) return
+// ---- 回滚：统一 ConfirmDialog，替代 window.confirm ----
+const rollbackTarget = ref('')
+const rollbackOpen = ref(false)
+const rollbackBusy = ref(false)
+
+function onRollback(activationId: string) {
+  rollbackTarget.value = activationId
+  rollbackOpen.value = true
+}
+
+async function doRollback() {
+  rollbackBusy.value = true
   try {
-    await bundles.rollbackActivation(activationId)
+    await bundles.rollbackActivation(rollbackTarget.value)
     notify.push('已回滚', 'success')
+    rollbackOpen.value = false
   } catch (err) {
     notify.push(errorMessage(err), 'error')
+  } finally {
+    rollbackBusy.value = false
+  }
+}
+
+// ---- 缺少运行组件：直接复用插件的依赖安装能力 ----
+const depsOpen = ref(false)
+const depsModuleName = ref('')
+const depsModuleLabel = ref('')
+
+function openDeps(moduleName: string, label?: string) {
+  depsModuleName.value = moduleName
+  depsModuleLabel.value = label || moduleName
+  depsOpen.value = true
+}
+
+async function onDepsDone() {
+  try {
+    await bundles.load()
+  } catch {
+    /* 依赖安装结果已由对话框提示；列表刷新失败不阻塞 */
   }
 }
 
@@ -223,7 +259,7 @@ async function doExport() {
         ? exportModules.value.map((option) => option.name)
         : undefined,
     })
-    notify.push('已导出预设（密钥未包含）', 'success')
+    notify.push('已导出配置包（密钥未包含）', 'success')
     exportDialog.value = false
   } catch (err) {
     notify.push(errorMessage(err), 'error')
@@ -253,7 +289,7 @@ onMounted(async () => {
         <v-btn variant="tonal" prepend-icon="mdi-export" :disabled="!exportEnabled" @click="openExport">
           导出当前账号
         </v-btn>
-        <v-btn color="primary" prepend-icon="mdi-import" @click="onImport">导入预设</v-btn>
+        <v-btn color="primary" prepend-icon="mdi-import" @click="onImport">导入配置包</v-btn>
       </div>
     </div>
 
@@ -262,6 +298,10 @@ onMounted(async () => {
         导入后先检查包内容再保存；「应用到账号」会创建人格和模型、写入该账号配置，并自动安装随包插件，
         失败自动回滚。密钥不随包分发，导入后需要重新填写。
       </div>
+      <div class="text-caption mt-1">
+        要安装的是单个插件（插件包 .zip）？
+        <v-btn size="x-small" variant="text" @click="router.push('/modules')">去功能插件</v-btn>
+      </div>
     </v-alert>
 
     <v-progress-linear v-if="bundles.loading" indeterminate color="primary" class="mb-3" />
@@ -269,10 +309,10 @@ onMounted(async () => {
     <v-card v-if="!bundles.list.length && !bundles.loading" variant="outlined">
       <EmptyState
         icon="mdi-package-variant"
-        title="还没有预设"
-        description="可以从当前账号导出第一套，或导入别人分享的 .zip 预设包。"
+        title="还没有配置包"
+        description="可以从当前账号导出第一套，或导入别人分享的 .zip 配置包。"
       >
-        <v-btn color="primary" variant="tonal" prepend-icon="mdi-import" @click="onImport">导入预设</v-btn>
+        <v-btn color="primary" variant="tonal" prepend-icon="mdi-import" @click="onImport">导入配置包</v-btn>
       </EmptyState>
     </v-card>
 
@@ -297,7 +337,7 @@ onMounted(async () => {
             <div>导入时间：{{ formatTime(item.imported_at) }}</div>
             <div>大小：{{ formatSize(item.size) }}</div>
             <div v-if="item.modules?.length">
-              含模块 {{ item.modules.length }} 个
+              含插件 {{ item.modules.length }} 个
               <span v-if="item.modules_bundled">（随包 {{ item.modules_bundled }}）</span>
             </div>
           </v-card-text>
@@ -360,7 +400,7 @@ onMounted(async () => {
     <v-dialog v-model="exportDialog" max-width="620">
       <v-card>
         <v-card-title class="d-flex align-center">
-          <v-icon icon="mdi-export" class="mr-2" color="primary" /> 导出为预设
+          <v-icon icon="mdi-export" class="mr-2" color="primary" /> 导出为配置包
         </v-card-title>
         <v-card-text>
           <div class="text-caption mb-3" style="opacity: 0.7">
@@ -379,12 +419,12 @@ onMounted(async () => {
             <v-btn size="x-small" variant="text" @click="toggleAllExportModules(false)">全不选</v-btn>
           </div>
           <div class="text-caption mb-2" style="opacity: 0.65">
-            已选 {{ exportModules.length }} 个；第三方模块代码约 {{ formatSize(exportModuleSize) }}。
-            没选的模块不会进包（目标账号保持原状）。
+            已选 {{ exportModules.length }} 个；第三方插件代码约 {{ formatSize(exportModuleSize) }}。
+            没选的插件不会进包（目标账号保持原状）。
           </div>
           <v-card variant="tonal" class="module-picker">
             <v-card-text class="py-1">
-              <div v-if="!exportOptions.length" class="text-caption py-2">正在读取模块清单…</div>
+              <div v-if="!exportOptions.length" class="text-caption py-2">正在读取插件清单…</div>
               <div
                 v-for="option in exportOptions"
                 :key="option.name"
@@ -492,9 +532,18 @@ onMounted(async () => {
               <div
                 v-for="mod in applyResult.health.modules"
                 :key="mod.name"
-                class="text-caption"
+                class="d-flex align-center flex-wrap gap-2 text-caption"
               >
-                插件 {{ mod.name }}：{{ mod.loaded && !mod.error ? '已加载' : '未加载，可在「功能插件」页点重试' }}
+                <span>插件 {{ mod.name }}：{{ mod.loaded && !mod.error ? '已加载' : '未加载' }}</span>
+                <v-btn
+                  v-if="!mod.loaded || mod.error"
+                  size="x-small"
+                  variant="text"
+                  prepend-icon="mdi-package-variant"
+                  @click="openDeps(mod.name)"
+                >
+                  检查依赖
+                </v-btn>
               </div>
               <div
                 v-if="!applyResult.health.agent.persona || !applyResult.health.agent.provider_preset || !applyResult.health.agent.provider_model"
@@ -521,31 +570,36 @@ onMounted(async () => {
       </v-card>
     </v-dialog>
 
-    <v-dialog v-model="uninstallDialog" max-width="520">
-      <v-card>
-        <v-card-title class="d-flex align-center">
-          <v-icon icon="mdi-delete-outline" class="mr-2" color="error" />
-          卸载「{{ uninstallTarget?.name }}」
-        </v-card-title>
-        <v-card-text class="text-body-2">
-          会撤销它应用到当前账号的改动，并删除导入的预设文件（其它账号还在用的会保留）。
-          <v-checkbox
-            v-model="keepModules"
-            density="compact"
-            hide-details
-            class="mt-2"
-            label="保留随包安装的插件（只撤销配置，插件保留）"
-          />
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer />
-          <v-btn variant="text" @click="uninstallDialog = false">取消</v-btn>
-          <v-btn color="error" variant="tonal" :loading="uninstalling" @click="doUninstall">
-            确认卸载
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+    <ConfirmDialog
+      v-model="uninstallDialog"
+      :title="`卸载「${uninstallTarget?.name || ''}」`"
+      message="会撤销它应用到当前账号的改动，并删除导入的配置包文件（其它账号还在用的会保留）。"
+      :details="['当前账号的配置恢复到应用前', '删除配置包文件（其它账号仍在用的会保留）', '可勾选下方选项保留随包安装的插件']"
+      danger
+      confirm-text="确认卸载"
+      :loading="uninstalling"
+      @confirm="doUninstall"
+    >
+      <v-checkbox v-model="keepModules" density="compact" hide-details label="保留随包安装的插件（只撤销配置）" class="mt-2" />
+    </ConfirmDialog>
+
+    <ConfirmDialog
+      v-model="rollbackOpen"
+      title="回滚这次应用"
+      message="应用时创建的对象会被删除，账号配置恢复到应用前。"
+      :details="['删除这次应用创建的人格与模型', '该账号配置恢复原状', '已卸载的配置包不受影响']"
+      danger
+      confirm-text="回滚"
+      :loading="rollbackBusy"
+      @confirm="doRollback"
+    />
+
+    <PluginDepsDialog
+      v-model="depsOpen"
+      :module-name="depsModuleName"
+      :module-label="depsModuleLabel"
+      @done="onDepsDone"
+    />
   </div>
 </template>
 

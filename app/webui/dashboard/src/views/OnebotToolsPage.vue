@@ -8,6 +8,7 @@ import { useToolsStore } from '@/stores/tools'
 import { useNotifyStore } from '@/stores/notify'
 import { agentSectionById } from '@/agent/sections'
 import { buildSectionSchema } from '@/utils/schema'
+import ToolInfo from '@/components/tools/ToolInfo.vue'
 
 interface OneBotTool {
   name: string
@@ -43,7 +44,6 @@ const schema = computed(() => (onebotSpec ? buildSectionSchema(agent.schema, [on
 
 const tools = ref<OneBotTool[]>([])
 const loading = ref(false)
-const detailKey = ref('')
 
 const DOC_CATEGORY_ORDER = [
   '流式传输扩展',
@@ -84,11 +84,6 @@ const toolGroups = computed(() => {
 const enabled = computed<boolean>({
   get: () => !!agent.draft.onebot_tools_enable,
   set: (v: boolean) => agent.onChange('onebot_tools_enable', v),
-})
-
-const logEnabled = computed<boolean>({
-  get: () => !!agent.draft.onebot_tools_log_enabled,
-  set: (v: boolean) => agent.onChange('onebot_tools_log_enabled', !!v),
 })
 
 const denied = computed<string[]>(() => Array.isArray(agent.draft.onebot_tools_denied) ? agent.draft.onebot_tools_denied : [])
@@ -173,43 +168,9 @@ const SCOPE_LABELS: Record<string, string> = {
   private: '私聊',
 }
 
-const PARAM_TYPE_LABELS: Record<string, string> = {
-  string: '文本',
-  integer: '整数',
-  number: '数字',
-  boolean: '开关',
-  array: '列表',
-  object: '对象',
-}
-
-interface ParamRow {
-  name: string
-  type: string
-  required: boolean
-  description: string
-}
-
 /** 可用范围：后端给的是 `*` / `group` / `private`，界面上说人话。 */
 function scopeLabels(scopes: string[]): string {
   return scopes.map((scope) => SCOPE_LABELS[scope] || scope).join(' / ')
-}
-
-/** 把 parameters 的 JSON Schema 拆成"参数名 + 类型 + 是否必填 + 说明"。 */
-function paramRows(tool: OneBotTool): ParamRow[] {
-  const properties = tool.parameters?.properties
-  if (!properties || typeof properties !== 'object') return []
-  const required = Array.isArray(tool.parameters?.required) ? tool.parameters.required : []
-  return Object.entries(properties as Record<string, any>).map(([name, raw]) => {
-    const meta = (raw || {}) as Record<string, any>
-    const type = typeof meta.type === 'string' ? meta.type : ''
-    const description = typeof meta.description === 'string' ? meta.description : ''
-    return {
-      name,
-      type: PARAM_TYPE_LABELS[type] || type || '不限',
-      required: required.includes(name),
-      description: description || '无说明',
-    }
-  })
 }
 
 async function loadTools() {
@@ -265,23 +226,8 @@ watch(
         <v-spacer />
         <v-switch v-model="enabled" color="primary" density="compact" hide-details />
       </v-card-title>
-      <v-card-text class="text-caption" style="opacity: 0.65; display: flex; flex-wrap: wrap; gap: 16px">
-        <span>开启后，模型可以主动发消息、查群信息等。敏感管理操作只建议给账号主人。</span>
-        <v-switch
-          v-model="logEnabled"
-          label="输出普通调用日志"
-          color="primary"
-          density="compact"
-          hide-details
-        />
-        <v-switch
-          :model-value="!!agent.draft.onebot_tools_debug"
-          label="详细调试日志（排查问题时开）"
-          color="warning"
-          density="compact"
-          hide-details
-          @update:model-value="(v: any) => agent.onChange('onebot_tools_debug', !!v)"
-        />
+      <v-card-text class="text-caption" style="opacity: 0.65">
+        开启后，模型可以主动发消息、查群信息等。敏感管理操作只建议给账号主人；调用日志与详细调试日志在页面顶部「日志设置」里开关。
       </v-card-text>
     </v-card>
 
@@ -328,26 +274,26 @@ watch(
               >
                 <div class="tool-row">
                   <div class="tool-info">
-                    <div class="tool-name">
-                      {{ tool.name }}
-                      <a
-                        v-if="tool.doc_url"
-                        :href="tool.doc_url"
-                        target="_blank"
-                        rel="noopener"
-                        class="tool-doc-link"
-                        @click.stop
-                      >
-                        <v-icon icon="mdi-open-in-new" size="x-small" />
-                        文档
-                      </a>
-                    </div>
-                    <div class="tool-desc">{{ tool.description }}</div>
-                    <div class="tool-meta d-flex gap-3 flex-wrap">
-                      <v-chip size="small" variant="tonal" :color="riskColor(tool.risk)">{{ riskLabel(tool.risk) }}</v-chip>
-                      <v-chip size="small" variant="tonal">权限：{{ permissionLabel(toolPermission(tool)) }}</v-chip>
-                      <v-chip size="small" variant="tonal">可用范围：{{ scopeLabels(toolScopes(tool)) }}</v-chip>
-                    </div>
+                    <ToolInfo :tool="tool">
+                      <template #title-extra>
+                        <a
+                          v-if="tool.doc_url"
+                          :href="tool.doc_url"
+                          target="_blank"
+                          rel="noopener"
+                          class="tool-doc-link"
+                          @click.stop
+                        >
+                          <v-icon icon="mdi-open-in-new" size="x-small" />
+                          文档
+                        </a>
+                      </template>
+                      <template #meta>
+                        <v-chip size="small" variant="tonal" :color="riskColor(tool.risk)">{{ riskLabel(tool.risk) }}</v-chip>
+                        <v-chip size="small" variant="tonal">权限：{{ permissionLabel(toolPermission(tool)) }}</v-chip>
+                        <v-chip size="small" variant="tonal">可用范围：{{ scopeLabels(toolScopes(tool)) }}</v-chip>
+                      </template>
+                    </ToolInfo>
                   </div>
                   <v-switch
                     :model-value="enabled && isToolOn(tool.name)"
@@ -383,27 +329,6 @@ watch(
                     {{ tool.name }} 属于敏感工具。默认只给「{{ permissionLabel(tool.base_permission) }}」，现已放宽到「{{ permissionLabel(toolPermission(tool)) }}」。
                   </v-alert>
                 </div>
-                <div v-if="detailKey === tool.name" class="tool-detail">
-                  <div class="text-caption mb-1">参数说明</div>
-                  <div v-if="paramRows(tool).length" class="param-list">
-                    <div v-for="row in paramRows(tool)" :key="row.name" class="param-row">
-                      <span class="param-name">{{ row.name }}</span>
-                      <span class="param-type">{{ row.type }}<template v-if="row.required"> · 必填</template></span>
-                      <span class="param-desc">{{ row.description }}</span>
-                    </div>
-                  </div>
-                  <div v-else class="text-caption">这个工具不需要参数。</div>
-                  <v-expansion-panels variant="accordion" flat class="param-raw">
-                    <v-expansion-panel title="查看原始参数">
-                      <v-expansion-panel-text>
-                        <pre class="tool-pre">{{ JSON.stringify(tool.parameters, null, 2) }}</pre>
-                      </v-expansion-panel-text>
-                    </v-expansion-panel>
-                  </v-expansion-panels>
-                </div>
-                <v-btn v-else size="x-small" variant="text" prepend-icon="mdi-format-list-bulleted" @click="detailKey = tool.name">
-                  查看参数
-                </v-btn>
               </div>
             </template>
           </template>
