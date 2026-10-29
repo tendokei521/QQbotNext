@@ -188,13 +188,6 @@ onMounted(() => {
               </template>
               <v-card-title class="text-body-1">{{ p.label }}</v-card-title>
               <v-card-subtitle class="text-caption prompt-desc">{{ p.desc }}</v-card-subtitle>
-              <template #append>
-                <v-icon
-                  :icon="currentPromptPreset === p.key ? 'mdi-radiobox-marked' : 'mdi-radiobox-blank'"
-                  :color="currentPromptPreset === p.key ? p.color : undefined"
-                  :title="currentPromptPreset === p.key ? '当前选择' : '点击选择'"
-                />
-              </template>
             </v-card-item>
           </v-card>
         </v-col>
