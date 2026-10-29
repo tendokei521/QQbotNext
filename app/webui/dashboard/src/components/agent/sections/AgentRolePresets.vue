@@ -172,9 +172,9 @@ onMounted(() => {
       <v-row dense role="radiogroup" aria-label="提示词风格（三选一）">
         <v-col v-for="p in PROMPT_PRESETS" :key="p.key" cols="12" md="4">
           <v-card
-            :variant="currentPromptPreset === p.key ? 'tonal' : 'outlined'"
-            :color="currentPromptPreset === p.key ? p.color : undefined"
+            variant="outlined"
             class="h-100 prompt-option"
+            :class="{ 'prompt-option--active': currentPromptPreset === p.key }"
             role="radio"
             :aria-checked="currentPromptPreset === p.key"
             :tabindex="0"
@@ -338,11 +338,20 @@ onMounted(() => {
 
 .prompt-option {
   cursor: pointer;
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  /* 选中/未选中始终是同一个 variant（1px 边框），只换颜色与底色：
+     切 variant 会让 box-sizing 下的内容宽度变化 2px，文字会重排、看起来"位置变了" */
+  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .prompt-option:hover {
-  transform: translateY(-1px);
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.06);
+}
+
+.prompt-option--active {
+  border-color: rgb(var(--v-theme-primary)) !important;
+  background-color: rgba(var(--v-theme-primary), 0.06);
+  /* 内阴影画第二圈边框，不占布局，不会挤动文字 */
+  box-shadow: 0 0 0 1px rgb(var(--v-theme-primary)) inset;
 }
 
 .prompt-option:focus-visible {
