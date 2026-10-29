@@ -17,7 +17,10 @@ import { useRouter } from 'vue-router'
 import http from '@/api/http'
 import { useAgentConfigStore } from '@/stores/agentConfig'
 import { displayName, useBotsStore } from '@/stores/bots'
-import { triggerModeLabel, usePolicyStore, type PolicyDetail } from '@/stores/policy'
+import { useNotifyStore } from '@/stores/notify'
+import { errorMessage } from '@/api/http'
+import { usePolicyStore, type PolicyDetail } from '@/stores/policy'
+import StringListWidget from '@/components/config/StringListWidget.vue'
 import { resolvePersona, type PersonaPresetLike } from '@/agent/persona'
 import SaveStatusBar from '@/components/common/SaveStatusBar.vue'
 import PanelCard from '@/components/agent/panel/PanelCard.vue'
@@ -29,10 +32,10 @@ import AgentConfigSearchDialog from '@/components/agent/AgentConfigSearchDialog.
 import AgentCopyConfigDialog from '@/components/agent/AgentCopyConfigDialog.vue'
 import EventMonitorDialog from '@/components/bots/EventMonitorDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
-import PolicyRulesDialog from '@/components/policy/PolicyRulesDialog.vue'
 
 const agent = useAgentConfigStore()
 const bots = useBotsStore()
+const notify = useNotifyStore()
 const router = useRouter()
 
 const searchDialog = ref(false)
@@ -60,90 +63,88 @@ function onEnabled(value: boolean | null) {
   agent.onEnabledChange(value)
 }
 
-/** 全局触发规则抽屉（channelId=null = 账号层） */
-const rulesOpen = ref(false)
+/** 全局触发规则：直接展开在「触发方式」卡里（channelId=null = 账号层） */
 const policy = usePolicyStore()
 const globalDetail = ref<PolicyDetail | null>(null)
-const policyLoading = ref(false)
+const loadingTrigger = ref(false)
+const savingTrigger = ref(false)
 
-/**
- * 摘要必须来自 /api/policy 的解析结果（resolved.config + sources），
- * 不能从 agent.draft.trigger_at/keyword 推断——账号层覆盖与双写旧键会让两者漂移。
- */
+type TriggerMode = 'at' | 'keyword' | 'both' | 'all' | 'none'
+const triggerMode = ref<TriggerMode>('at')
+const triggerKeywords = ref<string[]>([])
+const triggerProbability = ref('')
+/** 已保存的快照：用于判断当前表单是否有未保存改动 */
+const savedTrigger = ref('')
+
+const TRIGGER_OPTIONS: { title: string; value: TriggerMode }[] = [
+  { title: '仅 @ 我', value: 'at' },
+  { title: '仅关键词', value: 'keyword' },
+  { title: '@ 或关键词', value: 'both' },
+  { title: '所有消息', value: 'all' },
+  { title: '都不触发', value: 'none' },
+]
+
+function snapshotOf(): string {
+  return JSON.stringify({
+    mode: triggerMode.value,
+    keywords: triggerKeywords.value,
+    probability: triggerProbability.value,
+  })
+}
+
+const triggerDirty = computed(() => snapshotOf() !== savedTrigger.value)
+
+/** 摘要固定来自 /api/policy 的解析结果（账号层覆盖 + 旧键折算后的值） */
 async function loadGlobalPolicy() {
   if (!bots.currentAccountId) {
     globalDetail.value = null
     return
   }
-  policyLoading.value = true
+  loadingTrigger.value = true
   try {
     globalDetail.value = await policy.getPolicy(null)
+    const config = globalDetail.value?.resolved?.config || {}
+    const mode = String(config.trigger_mode || 'at')
+    triggerMode.value = (['at', 'keyword', 'both', 'all', 'none'].includes(mode)
+      ? mode
+      : 'at') as TriggerMode
+    triggerKeywords.value = Array.isArray(config.trigger_keyword)
+      ? config.trigger_keyword.map((item: any) => String(item)).filter(Boolean)
+      : []
+    triggerProbability.value =
+      config.trigger_probability !== undefined ? String(config.trigger_probability) : ''
+    savedTrigger.value = snapshotOf()
   } catch {
     globalDetail.value = null
   } finally {
-    policyLoading.value = false
+    loadingTrigger.value = false
   }
 }
 
-const globalConfig = computed<Record<string, any>>(
-  () => globalDetail.value?.resolved?.config || {},
-)
-
-/** 触发方式 + 关键词/概率的一句话摘要 */
-const globalTriggerText = computed(() => {
-  const config = globalConfig.value
-  const mode = String(config.trigger_mode || 'none')
-  const label = triggerModeLabel(mode)
-  const keywords = Array.isArray(config.trigger_keyword)
-    ? config.trigger_keyword.map((item: any) => String(item)).filter(Boolean)
-    : []
-  if ((mode === 'keyword' || mode === 'both') && keywords.length) {
-    return `${label}（${keywords.join('、')}）`
+async function saveTrigger() {
+  if (!bots.currentAccountId || savingTrigger.value) return
+  const config: Record<string, any> = { trigger_mode: triggerMode.value }
+  if (triggerMode.value === 'keyword' || triggerMode.value === 'both') {
+    config.trigger_keyword = triggerKeywords.value.filter(Boolean)
   }
-  if (mode === 'all') {
-    return `${label} ${Number(config.trigger_probability ?? 100)}%`
+  if (triggerMode.value === 'all' && triggerProbability.value.trim()) {
+    const chance = Number(triggerProbability.value.trim())
+    if (!Number.isInteger(chance) || chance < 0 || chance > 100) {
+      notify.push('参与概率应为 0-100 的整数', 'error')
+      return
+    }
+    config.trigger_probability = chance
   }
-  return label
-})
-
-/** 节奏与免打扰：一眼看到"多快回、何时安静" */
-const globalRhythm = computed(() => {
-  const config = globalConfig.value
-  const parts: string[] = []
-  if (config.reply_cooldown !== undefined) parts.push(`冷却 ${config.reply_cooldown}s`)
-  if (config.message_debounce_seconds !== undefined) {
-    parts.push(`合并 ${config.message_debounce_seconds}s`)
+  savingTrigger.value = true
+  try {
+    await policy.savePolicy(null, { config })
+    await loadGlobalPolicy()
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  } finally {
+    savingTrigger.value = false
   }
-  if (config.quiet_hours) parts.push(`免打扰 ${config.quiet_hours}`)
-  return parts.length ? parts.join(' · ') : '默认节奏'
-})
-
-const SOURCE_LABELS: Record<string, string> = {
-  default: '默认',
-  account: '账号规则',
-  scene: '场景默认',
-  channel: '本群规则',
 }
-
-/** 来源 chips：让"这条规则来自账号层还是默认"可见 */
-const globalSourceChips = computed(() => {
-  const sources = globalDetail.value?.resolved?.sources || {}
-  const rows = [
-    ['触发', 'trigger_mode'],
-    ['冷却', 'reply_cooldown'],
-    ['免打扰', 'quiet_hours'],
-  ]
-  return rows.map(([label, key]) => ({
-    label,
-    source: SOURCE_LABELS[String(sources[key] || 'default')] || String(sources[key] || '默认'),
-    overridden: String(sources[key] || 'default') !== 'default',
-  }))
-})
-
-// 规则抽屉关闭 → 刷新摘要（保存成功后卡面立即更新）
-watch(rulesOpen, (open) => {
-  if (!open) void loadGlobalPolicy()
-})
 
 /** 当前人格卡锚点：状态条结论不跳走，滚动到本页面板内的人格卡 */
 const personaSection = ref<HTMLElement | null>(null)
@@ -352,37 +353,44 @@ watch(
       </PanelCard>
 
       <!-- ② 触发方式：什么时候接话 -->
-      <PanelCard
-        title="触发方式"
-        icon="mdi-at"
-        color="info"
-        subtitle="全局规则：什么时候接话、多快回、何时安静"
-      >
-        <v-progress-linear v-if="policyLoading" indeterminate color="info" class="mb-3" />
-        <div class="d-flex align-center flex-wrap gap-2">
-          <v-chip size="small" variant="tonal" color="info">{{ globalTriggerText }}</v-chip>
-          <span class="text-caption" style="opacity: 0.75">{{ globalRhythm }}</span>
-          <v-spacer />
-          <v-btn
-            size="small"
-            variant="tonal"
-            prepend-icon="mdi-tune"
-            :disabled="!hasAccount"
-            @click="rulesOpen = true"
-          >
-            编辑全局触发规则
-          </v-btn>
+      <PanelCard title="触发方式" icon="mdi-at" color="info">
+        <v-progress-linear v-if="loadingTrigger" indeterminate color="info" class="mb-3" />
+        <v-select
+          v-model="triggerMode"
+          :items="TRIGGER_OPTIONS"
+          label="触发方式"
+          density="comfortable"
+          variant="outlined"
+          hide-details
+          class="mb-3"
+          :disabled="!hasAccount"
+        />
+        <div v-if="triggerMode === 'keyword' || triggerMode === 'both'" class="mb-3">
+          <div class="text-body-2 mb-2">关键词</div>
+          <StringListWidget v-model="triggerKeywords" />
         </div>
-        <div class="d-flex align-center flex-wrap gap-2 mt-2">
-          <v-chip
-            v-for="chip in globalSourceChips"
-            :key="chip.label"
-            size="x-small"
+        <v-text-field
+          v-if="triggerMode === 'all'"
+          v-model="triggerProbability"
+          label="参与概率（%）"
+          type="number"
+          min="0"
+          max="100"
+          density="comfortable"
+          variant="outlined"
+          hide-details
+          class="mb-3"
+        />
+        <div class="d-flex justify-end">
+          <v-btn
+            color="primary"
             variant="tonal"
-            :color="chip.overridden ? 'info' : undefined"
+            :loading="savingTrigger"
+            :disabled="!hasAccount || !triggerDirty"
+            @click="saveTrigger"
           >
-            {{ chip.label }}·{{ chip.source }}
-          </v-chip>
+            保存
+          </v-btn>
         </div>
       </PanelCard>
 
@@ -406,7 +414,6 @@ watch(
       </div>
     </template>
 
-    <PolicyRulesDialog v-model="rulesOpen" :channel-id="null" title="全局触发规则" />
     <EventMonitorDialog v-model="monitorOpen" :account-id="accountId" :account-name="accountName" />
     <AgentConfigSearchDialog v-model="searchDialog" />
     <AgentCopyConfigDialog v-model="copyDialog" />
