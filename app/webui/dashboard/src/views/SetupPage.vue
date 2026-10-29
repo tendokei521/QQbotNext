@@ -813,7 +813,7 @@ onUnmounted(stopPolling)
               variant="outlined"
             />
             <div class="text-caption" style="opacity: 0.7">
-              保存后会同时开启群聊回复，之后可在「AI 对话设置」里继续调整。
+              保存后会同时开启群聊回复，之后可在「AI 对话面板」里继续调整。
             </div>
           </template>
           <template v-else>

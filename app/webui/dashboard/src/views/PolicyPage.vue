@@ -70,12 +70,12 @@ const SWITCH_ITEMS: { title: string; value: SwitchValue }[] = [
   { title: '继承', value: 'inherit' },
 ]
 
-/** 「账号默认（群聊）」三态：允许 / 不允许 / 跟随 AI 对话设置 */
+/** 「账号默认（群聊）」三态：允许 / 不允许 / 跟随面板设置 */
 type SceneValue = 'on' | 'off' | 'inherit'
 const SCENE_ITEMS: { title: string; value: SceneValue }[] = [
   { title: '允许', value: 'on' },
   { title: '不允许', value: 'off' },
-  { title: '跟随 AI 对话设置', value: 'inherit' },
+  { title: '跟随面板设置', value: 'inherit' },
 ]
 
 const accountName = computed(() => {
@@ -83,7 +83,7 @@ const accountName = computed(() => {
   return bot ? displayName(bot) : bots.currentAccountId
 })
 
-/** 群行选「继承」时用得就是这个值；null = 跟随 AI 对话设置里的「群回复启用」 */
+/** 群行选「继承」时用得就是这个值；null = 跟随面板里的「群聊回复」开关 */
 const sceneDefault = computed<SceneValue>(() => {
   const value = policy.defaultPolicy.scene_enabled
   if (value === true) return 'on'
@@ -95,7 +95,7 @@ async function onSceneDefault(value: SceneValue) {
   try {
     await policy.setSceneEnabled(value === 'inherit' ? null : value === 'on')
     notify.push(
-      value === 'inherit' ? '已改为跟随 AI 对话设置' : `账号默认已设为「${value === 'on' ? '允许' : '不允许'}」`,
+      value === 'inherit' ? '已改为跟随面板设置' : `账号默认已设为「${value === 'on' ? '允许' : '不允许'}」`,
       'success',
     )
   } catch (err) {

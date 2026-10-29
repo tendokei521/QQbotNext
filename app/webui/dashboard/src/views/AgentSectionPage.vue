@@ -30,7 +30,7 @@ const custom = computed(() => (section.value ? agentCustomSection(section.value.
   <EmptyState
     v-else
     icon="mdi-map-marker-question-outline"
-    title="未知的 Agent 分区"
-    description="这个地址没有对应的配置分区，可能是链接过期。"
+    title="未知的 AI 设置页"
+    description="这个地址没有对应的设置页，可能是链接过期。"
   />
 </template>

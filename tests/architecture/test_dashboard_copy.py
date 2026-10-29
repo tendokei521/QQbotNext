@@ -49,6 +49,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "app" / "webui" / "dashboard" / "src"
 SECTIONS_JSON = SRC / "agent" / "sections.json"
+AI_PANEL_JSON = SRC / "agent" / "ai-panel.json"
 
 #: 内部黑话：设计/框架内部概念，用户不该在界面上看到
 JARGON_CN = (
@@ -91,6 +92,8 @@ OLD_LABELS = (
     "Tool 管理",
     "Provider 预设",
     "Agent 面板",
+    "群聊权限",
+    "AI 对话设置",
     "功能模块",
     "预设中心",
 )
@@ -347,3 +350,26 @@ def test_sections_json_copy_is_compliant():
     assert not bad, (
         "sections.json 的分区标题/副标题含开发者文案或过长：\n  " + "\n  ".join(bad)
     )
+
+
+def test_ai_panel_json_copy_is_compliant():
+    """ai-panel.json（AI 对话面板/回复与权限）的卡片与分组名同样过文案规则。"""
+    assert AI_PANEL_JSON.is_file(), f"文件不存在：{_rel(AI_PANEL_JSON)}"
+    data = json.loads(AI_PANEL_JSON.read_text(encoding="utf-8"))
+    labels: list[tuple[str, str]] = []
+    for card in data.get("panel", {}).get("cards", []):
+        labels.append((f"panel.{card.get('id')}", str(card.get("label") or "")))
+    for group in data.get("reply", {}).get("groups", []):
+        labels.append((f"reply.{group.get('id')}", str(group.get("label") or "")))
+    bad: list[str] = []
+    for where, text in labels:
+        if not text:
+            continue
+        hits = _jargon_hits(text)
+        hits += [label for label in OLD_LABELS if label.lower() in text.lower()]
+        hits += sorted(set(_SNAKE.findall(text)))
+        if hits:
+            bad.append(f"{_rel(AI_PANEL_JSON)}: {where} 含 {hits} —— {_snippet(text)}")
+        if _chinese(text) > TEXT_LIMIT:
+            bad.append(f"{_rel(AI_PANEL_JSON)}: {where} 过长（{_chinese(text)} 字）—— {_snippet(text)}")
+    assert not bad, "ai-panel.json 的卡片/分组名含开发者文案或过长：\n  " + "\n  ".join(bad)

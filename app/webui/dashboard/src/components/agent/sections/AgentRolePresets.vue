@@ -225,7 +225,7 @@ onMounted(() => {
             预览留给「选择人格」里的待应用项（那里是看过再决定），当前生效的正文交给下面表单。
           -->
           <div class="text-caption mt-2" style="opacity: 0.6">
-            当前生效的正文见下方「人格设定 → 系统提示词」。
+            当前正文可在「人格设定」里编辑。
           </div>
         </v-card-text>
       </v-card>

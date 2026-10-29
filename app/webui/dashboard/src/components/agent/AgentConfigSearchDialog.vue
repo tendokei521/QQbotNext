@@ -4,6 +4,26 @@ import { useRouter } from 'vue-router'
 import { useAgentConfigStore } from '@/stores/agentConfig'
 import { splitSchema } from '@/utils/schema'
 import { agentSectionForField } from '@/agent/sections'
+import panelManifest from '@/agent/ai-panel.json'
+
+/** 页面外工作台的字段归属：面板 / 回复与权限（搜索跳转用，见 ai-panel.json）。 */
+interface SurfaceTarget {
+  title: string
+  path: string
+  tab?: string
+}
+
+const SURFACE_BY_FIELD: Record<string, SurfaceTarget> = {}
+for (const card of (panelManifest as any).panel?.cards || []) {
+  for (const field of card.fields || []) {
+    SURFACE_BY_FIELD[field] = { title: 'AI 对话面板', path: '/ai' }
+  }
+}
+for (const group of (panelManifest as any).reply?.groups || []) {
+  for (const field of group.fields || []) {
+    SURFACE_BY_FIELD[field] = { title: '回复与权限', path: '/reply', tab: 'who' }
+  }
+}
 
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{ (e: 'update:modelValue', value: boolean): void }>()
@@ -18,13 +38,15 @@ const fields = computed(() => {
   const { items } = splitSchema(agent.schema)
   return Object.entries(items).map(([key, def]) => {
     const hit = agentSectionForField(key, def?.group || '')
+    const surface = SURFACE_BY_FIELD[key]
     return {
       key,
       label: def?.label || key,
       description: def?.description || '',
-      sectionTitle: hit?.section.title || '',
-      path: hit?.section.path || '',
+      sectionTitle: hit?.section.title || surface?.title || '',
+      path: hit?.section.path || surface?.path || '',
       groupId: hit?.groupId || '',
+      tab: surface?.tab || '',
     }
   })
 })
@@ -37,12 +59,15 @@ const results = computed(() => {
     .slice(0, 30)
 })
 
-function openField(field: { path: string; groupId: string }) {
+function openField(field: { path: string; groupId: string; tab?: string }) {
   if (!field.path) return
   emit('update:modelValue', false)
-  // 用 query 带页内分组：hash 路由下再拼 "#group-xxx" 会被当成路由 hash 的一部分。
-  // AgentConfigSection 读到 group 参数后会展开并滚动到对应卡片。
-  router.push({ path: field.path, query: field.groupId ? { group: field.groupId } : {} })
+  // 用 query 带页内分组/页签：hash 路由下再拼 "#group-xxx" 会被当成路由 hash 的一部分。
+  // AgentConfigSection 读到 group 参数后会展开并滚动到对应卡片；回复与权限页读 tab。
+  const query: Record<string, string> = {}
+  if (field.groupId) query.group = field.groupId
+  if (field.tab) query.tab = field.tab
+  router.push({ path: field.path, query })
 }
 
 watch(

@@ -221,7 +221,7 @@ onBeforeUnmount(stopPolling)
           如果一直没有，问题在协议端（NapCat/LLOneBot）那一侧。
         </div>
         <div class="text-caption mb-3" style="opacity: 0.7">
-          如果这里能看到「消息」但群里仍没回复，问题在回复配置。先去「回复设置」确认这个群允许聊天。再去「AI 对话设置」确认已选模型。
+          如果这里能看到「消息」但群里仍没回复，问题在回复配置。先去「回复设置」确认这个群允许聊天。再去「AI 对话面板」确认已选模型。
         </div>
 
         <v-alert v-if="loadError" type="error" variant="tonal" density="compact" class="mb-3">
