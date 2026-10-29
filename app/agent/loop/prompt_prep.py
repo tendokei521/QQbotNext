@@ -334,7 +334,11 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
         runtime=runtime,
         event=event,
         ctx=ctx,
-        config=config,
+        # 装配/提示词阶段要读**策略键**（`speech_via_tool` / `assembly_profile` / 流式…），
+        # 它们归模块所有。传 agent 配置会让"模块开了发言通道、agent 还留着旧值"时
+        # 提示词与真实通道打架：模型只写文本（因为没被告知"文本不会发出去"）→ 整轮静默。
+        # 链式视图先问模块、问不到再回退 agent 配置；未接管任何模块时等价于旧行为。
+        config=policy_cfg,
         session_id=session_id,
         is_private=is_private,
         user_id=user_id,

@@ -317,6 +317,39 @@ async def test_speech_off_keeps_text_as_speech(monkeypatch, tmp_path):
     assert _assistant_history(997) == ["就这样吧。"]
 
 
+async def test_speech_channel_comes_from_output_module_not_stale_agent_config(monkeypatch, tmp_path):
+    """线上事故回归：模块选了「发言通道」、agent 还留着旧的 ``speech_via_tool=False``。
+
+    事故现场（2026-10-29）：请求里已经有 ``send_message``/``finish`` 工具，但装配层
+    读的是 agent 配置 → 不贴发言协议、人格段还说"输出纯文本" → 模型只写文本
+    → 整轮静默（补一轮也仍是文本）。模块配置才是策略键的事实源，装配层必须跟它走。
+    """
+    from app.plugins.llm_output.main import OWNED_KEYS
+    from app.plugins.llm_output.src.output_mode import OutputOptionsView
+
+    _register(monkeypatch)
+    monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
+    STREAM_SCRIPT.extend([
+        [
+            _text("（老师问我在干什么…）"),
+            _tool_call("send_message", '{"messages": ["在看书，怎么了？"]}'),
+        ],
+        [_text("（说完了）")],
+    ])
+    # agent 里是旧值，模块里显式选了发言通道
+    rt = _runtime(999, _config(speech_via_tool=False, stream_output=False))
+    rt.output_options = OutputOptionsView(rt.config, {"mode": "speech"}, OWNED_KEYS)
+    ctx = _ctx(_event())
+
+    sent = await _run_stream(rt, ctx)
+
+    assert sent == ["在看书，怎么了？"], "模块是发言通道 → send_message 的内容必须真的发出去"
+    user_turns = [m for m in STREAM_MESSAGES[0] if m.get("role") == "user"]
+    assert user_turns and "发言协议" in str(user_turns[-1]["content"]), (
+        "模块策略是发言通道 → 提示词必须贴发言协议，否则模型不知道文本不会发出去"
+    )
+
+
 class _FakeBot:
     """最小的发送接口：记录每条待发消息，并回一个 message_id。"""
 

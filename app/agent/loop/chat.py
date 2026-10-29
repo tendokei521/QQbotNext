@@ -549,7 +549,7 @@ async def stream_response(runtime, event, ctx=None):
         if (
             speech.spoken == 0
             and not stream_error_text
-            and _should_force_speak(config, ctx, is_private)
+            and _should_force_speak(policy_cfg, ctx, is_private)
         ):
             await _force_speak_round(
                 runtime, speech, messages, provider_chain, meta, tools, tool_executor
@@ -573,7 +573,7 @@ async def stream_response(runtime, event, ctx=None):
                 log.info(f"[LLM] 静默（看过但没说话）-> {detail})")
             if ctx is not None and not stream_error_text:
                 ctx.state["silent"] = True
-            if _speech_fallback_enabled(config):
+            if _speech_fallback_enabled(policy_cfg):
                 fallback = "抱歉，我暂时无法回答，请稍后再试。"
                 full_text = fallback
                 spoken_parts.append(fallback)
