@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from app.plugins.llm_knowledge.tool import build_knowledge_tools
+from .src.tool import build_knowledge_tools
 
 __all__ = ["build_knowledge_tools"]

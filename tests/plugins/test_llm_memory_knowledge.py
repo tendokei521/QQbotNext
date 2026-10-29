@@ -68,7 +68,7 @@ def test_memory_manager_falls_back_without_module(tmp_path, monkeypatch):
 
 
 def test_knowledge_manager_reads_module_config(tmp_path, monkeypatch):
-    from app.plugins.llm_knowledge.manager import KnowledgeManager
+    from app.plugins.llm_knowledge.src.manager import KnowledgeManager
 
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
     runtime = SimpleNamespace(
@@ -82,7 +82,7 @@ def test_knowledge_manager_reads_module_config(tmp_path, monkeypatch):
 
 
 def test_knowledge_manager_falls_back_without_module(tmp_path, monkeypatch):
-    from app.plugins.llm_knowledge.manager import KnowledgeManager
+    from app.plugins.llm_knowledge.src.manager import KnowledgeManager
 
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
     runtime = SimpleNamespace(bot_id="201", config={"knowledge_enable": False})

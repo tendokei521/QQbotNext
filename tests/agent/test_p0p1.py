@@ -180,7 +180,7 @@ def test_tool_spec_sanitizes_invalid_openai_name():
 # ---------- 知识库向量后端回退 ----------
 
 def test_knowledge_store_vector_backend_fallback(tmp_path):
-    from app.plugins.llm_knowledge.store import KnowledgeStore
+    from app.plugins.llm_knowledge.src.store import KnowledgeStore
 
     store = KnowledgeStore("kb_test", db_path=str(tmp_path / "kb.db"))
     try:

@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.plugins.llm_knowledge.tool import build_knowledge_tools
+from app.plugins.llm_knowledge.src.tool import build_knowledge_tools
 from app.plugins.llm_memory.tool import build_memory_tools
 
 

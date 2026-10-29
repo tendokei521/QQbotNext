@@ -15,8 +15,9 @@ from pathlib import Path
 from typing import Any
 
 from app.agent import llm_data_dir, safe_bot_id
-from app.plugins.llm_knowledge.vector import SQLiteVecVectorStore
 from app.core.logger import logger
+
+from .vector import SQLiteVecVectorStore
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS knowledge_chunks (
@@ -34,7 +35,7 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_bot ON knowledge_chunks(bot_id, updated
 
 
 def _dot(a: list[float], b: list[float]) -> float:
-    return sum(x * y for x, y in zip(a, b))
+    return sum(x * y for x, y in zip(a, b, strict=False))
 
 
 def _norm(v: list[float]) -> float:

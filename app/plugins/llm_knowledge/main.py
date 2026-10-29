@@ -42,7 +42,8 @@ class Module(BaseModule):
             return
         from app.agent.delivery.output import ConfigView
         from app.agent.loop.providers import register_tool_source
-        from app.plugins.llm_knowledge.service import KnowledgeToolSource
+
+        from .src.service import KnowledgeToolSource
 
         runtime.knowledge_options = ConfigView(
             getattr(runtime, "config", None), self.config, OWNED_KEYS
@@ -64,7 +65,7 @@ class Module(BaseModule):
 
     def knowledge_manager(self) -> Any:
         """本模块的知识库管理器（工具与指令共用同一实例）。"""
-        from app.plugins.llm_knowledge.service import knowledge_manager
+        from .src.service import knowledge_manager
 
         return knowledge_manager(self)
 

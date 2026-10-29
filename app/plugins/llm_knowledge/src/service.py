@@ -13,7 +13,7 @@ from typing import Any
 def knowledge_manager(module: Any):
     mgr = getattr(module, "_manager", None)
     if mgr is None:
-        from app.plugins.llm_knowledge.manager import KnowledgeManager
+        from .manager import KnowledgeManager
 
         runtime = module._runtime()
         mgr = KnowledgeManager(runtime) if runtime is not None else None
@@ -34,7 +34,7 @@ class KnowledgeToolSource:
         mgr = knowledge_manager(self.module)
         if mgr is None or not mgr.enabled():
             return []
-        from app.plugins.llm_knowledge.tool import build_knowledge_tools
+        from .tool import build_knowledge_tools
 
         runtime = getattr(scope, "runtime", None)
         return list(build_knowledge_tools(runtime) or [])

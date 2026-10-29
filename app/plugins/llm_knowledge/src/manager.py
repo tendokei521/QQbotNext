@@ -7,9 +7,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.plugins.llm_knowledge.store import KnowledgeStore
 from app.agent.providers import get_provider
-from app.core.logger import logger, account_label
+from app.core.logger import account_label, logger
+
+from .store import KnowledgeStore
 
 
 class KnowledgeManager:
