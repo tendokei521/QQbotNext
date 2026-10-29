@@ -7,16 +7,15 @@
  * 约定：这里挂的组件必须自包含——不接收 props，直接从 store 读取所需数据，
  * 这样才能被 ``AgentSectionPage`` 用统一的 ``<component :is>`` 挂载。
  *
- * 一个页面需要多块定制 UI 时，用一个**组合组件**包起来（如 AgentBasicSection
- * = 总开关 + 模型池 + 人格预设），而不是让 registry 支持多组件——否则
- * 「定制 UI 排在哪」就会在 registry 里长出一套排序语法。
+ * 一个页面需要多块定制 UI 时，用一个**组合组件**包起来，而不是让 registry
+ * 支持多组件——否则「定制 UI 排在哪」就会在 registry 里长出一套排序语法。
+ *
+ * v5 起「AI 设置」只剩 3 个纯配置页，基础配置/权限管理已并入「AI 对话面板」与
+ * 「回复与权限」，因此这里不再有定制分区。
  */
 import { defineAsyncComponent, type Component } from 'vue'
 
-const CUSTOM_SECTION_LOADERS: Record<string, () => Promise<unknown>> = {
-  basic: () => import('@/components/agent/sections/AgentBasicSection.vue'),
-  permission: () => import('@/components/agent/sections/AgentPermissionSection.vue'),
-}
+const CUSTOM_SECTION_LOADERS: Record<string, () => Promise<unknown>> = {}
 
 // defineAsyncComponent 会创建新的组件包装，缓存避免每次渲染重建（导致重复请求）
 const resolved = new Map<string, Component>()

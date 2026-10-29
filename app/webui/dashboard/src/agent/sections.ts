@@ -1,19 +1,18 @@
 /**
- * Agent 配置分区 registry。
+ * AI 设置分区 registry。
  *
  * 数据的唯一权威是同目录的 ``sections.json``（后端契约测试也读它），本文件只负责：
  * - 把 JSON 收窄成强类型；
  * - 把「页内子分组」翻译成 schema 过滤结果（见 utils/schema 的 buildSectionSchema）；
- * - 派生路由 / 侧边栏二级菜单 / 概览卡片所需的结构；
- * - 概览卡片的「状态徽标」这类**表现层**逻辑（不适合放进 JSON）。
+ * - 派生路由 / 侧边栏二级菜单所需的结构；
+ * - 分区状态徽标这类**表现层**逻辑（不适合放进 JSON）。
  *
  * v3 起 registry 自己拥有**页内分组**：一个页面可以横跨多个后端 group，也可以只取某
  * 后端 group 的两三个字段。后端 group 是模块划分（group_session / group_tools …），
  * 用户心智是任务划分，两者不再强行对齐。
  *
- * v4 起只有**一个区域**（``/agent``）。曾并存的 ``/advanced``「进阶调参」区在内容
- * 拆成功能模块后只剩空概览页，连同 ``area`` 字段一并移除——单值的枚举没有信息量，
- * 留着只会让人以为还有第二个区域。
+ * v5 起「AI 对话设置」拆分为「AI 对话面板（/ai）+ AI 设置（本文件 3 页，/ai/settings/*）」，
+ * 概览页与基础配置/权限管理页已删除，二级菜单只剩 3 个深度设置页。
  */
 
 import manifest from './sections.json'
@@ -71,7 +70,7 @@ export const AGENT_SECTIONS: AgentSection[] = RAW.sections
   }))
   .sort((a, b) => a.order - b.order)
 
-export const AGENT_INDEX_PATH = '/agent'
+export const AGENT_INDEX_PATH = '/ai'
 
 export function agentSectionById(id: string): AgentSection | undefined {
   return AGENT_SECTIONS.find((s) => s.id === id)
@@ -81,12 +80,9 @@ export function agentSectionByPath(path: string): AgentSection | undefined {
   return AGENT_SECTIONS.find((s) => s.path === path)
 }
 
-/** 侧边栏「Agent 面板」二级菜单：概览 + 全部分区。 */
+/** 侧边栏「AI 设置」二级菜单：只剩 3 个深度设置页（概览已删除）。 */
 export function agentSidebarEntries(): { to: string; title: string }[] {
-  return [
-    { to: AGENT_INDEX_PATH, title: '概览' },
-    ...AGENT_SECTIONS.map((s) => ({ to: s.path, title: s.title })),
-  ]
+  return AGENT_SECTIONS.map((s) => ({ to: s.path, title: s.title }))
 }
 
 /** 字段归属哪个页面的哪个子分组（配置搜索跳转用）。 */
@@ -119,21 +115,10 @@ export interface AgentBadgeInput {
   permission: { group_mode: string; user_mode?: string }
 }
 
-/** 概览卡片右上角的状态徽标（纯表现层，故留在 TS 而不是 JSON）。 */
+/** 分区状态徽标（纯表现层，故留在 TS 而不是 JSON）。 */
 export function agentSectionBadge(id: string, input: AgentBadgeInput): string {
   const draft = input.draft
   switch (id) {
-    case 'basic': {
-      const on = [draft.group_enable && '群聊', draft.private_enable && '私聊'].filter(Boolean)
-      const model = input.poolModelIds.length ? `${input.poolModelIds.length} 个模型` : '未配模型'
-      return on.length ? `${on.join(' + ')} · ${model}` : '未开启'
-    }
-    case 'permission': {
-      const owners = (draft.agent_owner_list || []).length
-      const managers = (draft.agent_manager_list || []).length
-      const roster = owners + managers ? `${owners} 拥有者 / ${managers} 管理者` : '仅档位'
-      return roster
-    }
     case 'session':
       return draft.history_rounds ? `${draft.history_rounds} 轮历史` : '可调'
     case 'behavior': {
