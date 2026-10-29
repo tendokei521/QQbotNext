@@ -2,17 +2,17 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import { AGENT_SECTIONS } from '@/agent/sections'
 
 /**
- * 由 registry 生成子路由：``/agent/*``。
+ * 由 registry 生成子路由：``/ai/settings/*``。
  *
- * 所有配置页共用同一个通用页面 ``AgentSectionPage`` 与同一个外壳 ``AgentLayout``：
- * 分区元数据来自 registry，字段来自后端 schema，定制 UI 来自 customSections，
- * 所以新增分区只需改 sections.json，不必再新增页面文件。
+ * 3 个深度设置页共用同一个通用页面 ``AgentSectionPage`` 与同一个外壳 ``AgentLayout``：
+ * 分区元数据来自 registry，字段来自后端 schema，所以新增分区只需改 sections.json，
+ * 不必再新增页面文件。
  *
- * 历史：v3 曾并存一个 ``/advanced/*``「进阶调参」区，v4 把其中内容拆成功能模块后
- * 该区只剩一个空概览页，已整体移除（见下方深链表）。
+ * 历史：``/agent/*`` 与 ``/advanced/*`` 已随信息架构调整下线，旧链接在下方深链表里
+ * 统一重定向到新位置（AI 对话面板 / 回复与权限 / AI 设置）。
  */
 const agentSectionRoutes = AGENT_SECTIONS.map((section) => ({
-  path: section.path.replace(/^\/agent\//, ''),
+  path: section.path.replace(/^\/ai\/settings\//, ''),
   name: `agent-${section.id}`,
   component: () => import('@/views/AgentSectionPage.vue'),
   meta: { title: section.title },
@@ -35,8 +35,10 @@ const router = createRouter({
       children: [
         { path: '', name: 'overview', component: () => import('@/views/OverviewPage.vue'), meta: { title: '总览' } },
         { path: 'bots', name: 'bots', component: () => import('@/views/BotsPage.vue'), meta: { title: '账号管理' } },
-        // 「回复设置」：简单视图（群开关矩阵）；高级规则暂仍在 AI 对话设置→权限管理
-        { path: 'policy', name: 'policy', component: () => import('@/views/PolicyPage.vue'), meta: { title: '回复设置' } },
+        // AI 对话面板：日常操作台（替代原「AI 对话设置 → 概览」）
+        { path: 'ai', name: 'ai-panel', component: () => import('@/views/AiPanelPage.vue'), meta: { title: 'AI 对话面板' } },
+        // 回复与权限：原「回复设置」+ 原「权限管理」合并成一页三个 Tab
+        { path: 'reply', name: 'reply', component: () => import('@/views/PolicyPage.vue'), meta: { title: '回复与权限' } },
         { path: 'modules', name: 'modules', component: () => import('@/views/ModulesPage.vue'), meta: { title: '功能插件' } },
         {
           path: 'bundles',
@@ -44,47 +46,49 @@ const router = createRouter({
           component: () => import('@/views/BundlesPage.vue'),
           meta: { title: '配置包' },
         },
-        { path: 'modules/agent', redirect: '/agent' },
+        { path: 'modules/agent', redirect: '/ai' },
         { path: 'modules/:name', name: 'module-config', component: () => import('@/views/ModuleConfigPage.vue'), meta: { title: '功能设置' } },
-        // Agent 配置区共享外壳：bot 守卫 / 头部 / 保存状态 / 段落导航都在 layout 里
+        // AI 设置：共用外壳（bot 守卫 / 头部 / 保存状态 / 段落导航都在 layout 里）
         {
-          path: 'agent',
+          path: 'ai/settings',
           component: () => import('@/layouts/AgentLayout.vue'),
           children: [
-            {
-              path: '',
-              name: 'agent',
-              component: () => import('@/views/AgentPage.vue'),
-              meta: { title: 'AI 对话设置' },
-            },
+            { path: '', redirect: '/ai/settings/behavior' },
             ...agentSectionRoutes,
           ],
         },
-        // 历史深链：分区重构前的路径统一落到新位置
+        // 历史深链：AI 对话设置拆分前的路径统一落到新位置，不留白屏
+        { path: 'agent', redirect: '/ai' },
+        { path: 'agent/basic', redirect: '/ai' },
+        { path: 'agent/permission', redirect: { path: '/reply', query: { tab: 'who' } } },
+        { path: 'agent/behavior', redirect: '/ai/settings/behavior' },
+        { path: 'agent/session', redirect: '/ai/settings/session' },
+        { path: 'agent/advanced', redirect: '/ai/settings/advanced' },
         { path: 'agent/onebot', redirect: '/tools/onebot' },
-        { path: 'agent/role', redirect: '/agent/basic' },
-        { path: 'agent/model', redirect: '/agent/basic' },
-        // 「进阶中心」已于 v4 拆成模块：工具 / MCP / 知识库 / 主动消息各回自己的模块配置页。
-        // 这几条一度指向已删除的 ``/advanced/*``，会落到无匹配路由（白屏），故改指模块页。
+        { path: 'agent/role', redirect: '/ai' },
+        { path: 'agent/model', redirect: '/ai' },
+        // 「进阶中心」已拆成模块：工具 / MCP / 知识库 / 主动消息各回自己的模块配置页
         { path: 'agent/tools', redirect: '/modules/llm_tools_extra' },
         { path: 'agent/mcp', redirect: '/modules/llm_tools_extra' },
         { path: 'agent/knowledge', redirect: '/modules/llm_knowledge' },
         { path: 'agent/panels', redirect: '/modules/llm_proactive' },
-        // 整个「高级设置」区已移除；旧书签回 Agent 面板，不留无匹配路由
-        { path: 'advanced', redirect: '/agent' },
-        { path: 'advanced/:section', redirect: '/agent' },
+        // 整个「高级设置」区已移除；旧书签回 AI 对话面板，不留无匹配路由
+        { path: 'advanced', redirect: '/ai' },
+        { path: 'advanced/:section', redirect: '/ai' },
+        // 原「回复设置」改名「回复与权限」
+        { path: 'policy', redirect: '/reply' },
         {
           path: 'tools',
           component: () => import('@/views/ToolsPage.vue'),
           meta: { title: '高级工具' },
           children: [
             {
-        path: 'overview',
-        name: 'tools-overview',
-        component: () => import('@/components/tools/ToolsOverview.vue'),
-        meta: { title: '工具总览' },
-      },
-      { path: 'system', name: 'tools-system', component: () => import('@/views/SystemToolsPage.vue'), meta: { title: '系统工具' } },
+              path: 'overview',
+              name: 'tools-overview',
+              component: () => import('@/components/tools/ToolsOverview.vue'),
+              meta: { title: '工具总览' },
+            },
+            { path: 'system', name: 'tools-system', component: () => import('@/views/SystemToolsPage.vue'), meta: { title: '系统工具' } },
             { path: 'onebot', name: 'tools-onebot', component: () => import('@/views/OnebotToolsPage.vue'), meta: { title: 'OneBot 工具' } },
             { path: 'mcp', name: 'tools-mcp', component: () => import('@/views/McpToolsPage.vue'), meta: { title: '外部工具' } },
             { path: 'module', name: 'tools-module', component: () => import('@/views/ModuleToolsPage.vue'), meta: { title: '插件工具' } },
