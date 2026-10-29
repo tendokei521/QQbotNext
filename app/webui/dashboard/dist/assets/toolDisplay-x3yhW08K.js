@@ -1,1 +1,0 @@
-const n=/[。；;，,、：:]/;function c(t,e=18){const i=(t.description||"").replace(/\s+/g," ").trim();if(!i)return t.name;const s=i.split(n)[0].trim()||t.name;return s.length>e?`${s.slice(0,e)}…`:s}export{c as t};
