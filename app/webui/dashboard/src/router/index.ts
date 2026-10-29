@@ -55,6 +55,9 @@ const router = createRouter({
           children: [
             { path: '', redirect: '/ai/settings/behavior' },
             ...agentSectionRoutes,
+            // 拆分前的子路径（basic / permission / 其他拼错的段）在 v6 已不存在，
+            // 没有兜底就整页白屏。统一回 AI 对话面板，旧书签不至于「打不开」。
+            { path: ':rest(.*)', redirect: '/ai' },
           ],
         },
         // 历史深链：AI 对话设置拆分前的路径统一落到新位置，不留白屏
