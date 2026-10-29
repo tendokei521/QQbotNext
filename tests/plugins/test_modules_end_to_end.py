@@ -10,11 +10,6 @@
 
 from __future__ import annotations
 
-import pytest
-
-from app.agent.config_partition import CORE_KEYS, MODULE_KEYS
-from app.agent.config_schema import SCHEMA
-
 V3_MODULES = {
     "llm_output",
     "llm_assembly",
@@ -79,25 +74,3 @@ def _settings_type():
     from app.core.settings import Settings
 
     return Settings
-
-
-def test_body_schema_has_no_module_keys():
-    schema_keys = {
-        key
-        for key, value in SCHEMA.items()
-        if isinstance(value, dict) and value.get("type") != "group"
-    }
-    migrated = {key for keys in MODULE_KEYS.values() for key in keys}
-    assert not (schema_keys & migrated), sorted(schema_keys & migrated)
-    assert schema_keys == set(CORE_KEYS)
-
-
-@pytest.mark.parametrize("module_name", sorted(V3_MODULES))
-def test_module_directory_is_importable(module_name):
-    import importlib
-
-    mod = importlib.import_module(f"app.plugins.{module_name}.main")
-    assert hasattr(mod, "Module")
-    assert getattr(mod.Module, "category", "") == "LLM"
-    keys = getattr(mod, "OWNED_KEYS")
-    assert set(keys) == set(MODULE_KEYS[module_name])

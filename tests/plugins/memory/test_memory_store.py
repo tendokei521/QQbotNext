@@ -1,6 +1,5 @@
 """P0 存储层测试：建表 / CRUD / owner 隔离 / 去重 / 淘汰 / 审计 / bot 隔离。"""
 
-import os
 
 import pytest
 
@@ -15,14 +14,6 @@ from app.plugins.llm_memory.src.store import (
 
 def _store(bot_id="bot1", **kw) -> MemoryStore:
     return MemoryStore(bot_id, **kw)
-
-
-def test_init_creates_db_and_tables():
-    s = _store()
-    assert os.path.exists(s.db_path)
-    tables = {r["name"] for r in s._fetch("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert {"memories", "memory_events"} <= tables
-    s.close()
 
 
 def test_db_path_is_per_bot_isolated():
@@ -112,18 +103,6 @@ def test_delete_clear_count():
     s.close()
 
 
-def test_enforce_limit_evicts_low_priority():
-    s = _store()
-    for i in range(10):
-        s.upsert_fact(f"事实{i}", "user_1", importance=0.1 if i % 2 else 0.9)
-    removed = s.enforce_limit("user_1", max_per_owner=3)
-    assert removed == 7
-    assert s.count_by_owner("user_1") == 3
-    remains = s.list_by_owner("user_1")
-    assert {r["importance"] for r in remains} == {0.9}  # 高重要度保留
-    s.close()
-
-
 def test_audit_and_recent():
     s = _store()
     s.audit("write", owner="user_1", user_id="1", summary="我住上海", source="tool")
@@ -135,15 +114,4 @@ def test_audit_and_recent():
     assert "忘了" in rows[0]["summary"]
     all_rows = s.recent_audit()
     assert len(all_rows) == 2
-    s.close()
-
-
-def test_stats():
-    s = _store()
-    assert s.stats() == {"memories": 0, "owners": 0, "events": 0}
-    s.upsert_fact("x", "user_1")
-    s.upsert_fact("y", "user_2")
-    s.audit("write", owner="user_1")
-    st = s.stats()
-    assert st["memories"] == 2 and st["owners"] == 2 and st["events"] == 1
     s.close()

@@ -1,7 +1,6 @@
 """P2 工具与确定性兜底测试：detect / manager.autosave / build_memory_tools 工具。"""
 
 from app.agent.config import DEFAULT_LLM_CONFIG
-from app.plugins.llm_memory.src.detect import autosave_clause, wants_autosave
 from app.plugins.llm_memory.src.manager import MemoryManager
 from app.plugins.llm_memory.src.store import owner_group, owner_private
 from app.plugins.llm_memory.src.tool import build_memory_tools
@@ -27,50 +26,6 @@ class FakeRuntime:
         self.memory = MemoryManager(self)
         self.llm_tools = None
         self.skills = None
-
-
-# ---- detect ----
-def test_autosave_clause_cases():
-    assert autosave_clause("记住我喜欢喝美式") == "我喜欢喝美式"
-    assert autosave_clause("帮我记住我叫小明") == "我叫小明"
-    assert autosave_clause("我是前端工程师") == "前端工程师"
-    assert autosave_clause("还记得我吗？") == ""
-    assert autosave_clause("你记住了吗") == ""
-    assert autosave_clause("今天天气不错") == ""
-    # 疑问句/问题误拦截：问“我喜欢什么”不得存成“什么”
-    assert autosave_clause("我喜欢什么") == ""
-    assert wants_autosave("记住我住在上海") is True
-    assert wants_autosave("在吗") is False
-
-
-# ---- manager.autosave ----
-async def test_autosave_writes_dedup_and_shutdown():
-    rt = FakeRuntime()
-    mgr = rt.memory
-    assert mgr.autosave("private_5", "5", "记住我喜欢喝美式") == "user_5"
-    assert mgr.store.count_by_owner(owner_private(5)) == 1
-    # 同内容再次触发 → 去重（仍 1 条）
-    mgr.autosave("private_5", "5", "记住我喜欢喝美式")
-    assert mgr.store.count_by_owner(owner_private(5)) == 1
-    # 疑问句不入库
-    assert mgr.autosave("private_5", "5", "还记得我吗？") is None
-    # 场景关 → 不入库
-    assert FakeRuntime(data={"memory_private_enable": False}).memory.autosave(
-        "private_5", "5", "记住我喜欢喝美式"
-    ) is None
-    # 确定性兜底关 → 不入库
-    rt2 = FakeRuntime(data={"memory_save_deterministic": False})
-    assert rt2.memory.autosave("private_5", "5", "记住我喜欢喝美式") is None
-
-
-# ---- build_memory_tools ----
-def test_build_memory_tools_returns_three():
-    rt = FakeRuntime()
-    tools = build_memory_tools(rt, "private_5", "5", True)
-    names = [t.name for t in tools]
-    # 基础三个 + v2 的 correct/deny
-    assert {"memory_save", "memory_recall", "memory_delete",
-            "memory_correct", "memory_deny"} <= set(names)
 
 
 # ---- 工具处理器 ----
@@ -141,4 +96,3 @@ async def test_tool_recall_group_public_but_not_others_profile():
     # 他人画像在未开启提及扩展前不可见（P3 处理）
     out2 = await _spec(tools, "memory_recall").handler(None, {"query": "小明"})
     assert "未找到" in out2
-

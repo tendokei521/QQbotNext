@@ -3,10 +3,10 @@
 import asyncio
 
 from app.agent.config import DEFAULT_LLM_CONFIG
+from app.agent.session.manager import SessionManager
 from app.plugins.llm_memory.src.extract import parse_facts, render_extract_prompt
 from app.plugins.llm_memory.src.manager import MemoryManager
 from app.plugins.llm_memory.src.store import owner_private
-from app.agent.session.manager import SessionManager
 
 
 class FakeConfig:
@@ -153,7 +153,7 @@ def test_session_manager_on_archive_called():
     sm = SessionManager("botmem")
     seen = []
     sm.on_archive = lambda s: seen.append(s.id)
-    s = sm.create_session("private_9", "private", 60)
+    sm.create_session("private_9", "private", 60)
     sm.add_message("private_9", "user", "我喜欢喝美式", user_id="9")
     sm.destroy_session("private_9")
     assert "private_9" in seen

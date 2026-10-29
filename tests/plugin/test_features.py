@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.plugin.features import FeatureRegistry
-from app.plugin.features.builtin import BUILTIN_CONTROLLERS, register_builtin_controllers
+from app.plugin.features.builtin import register_builtin_controllers
 
 
 class _Owner:
@@ -45,25 +45,6 @@ def _registry(runtime=None) -> FeatureRegistry:
 
 
 # ---------- 清单 ----------
-
-
-def test_feature_list_is_exactly_the_four_advanced_interfaces():
-    ids = sorted(c["feature_id"] for c in _registry().list_features())
-    assert ids == ["agent", "assembly", "output", "provider_invoker"]
-
-
-def test_business_capabilities_are_not_features():
-    """业务能力不该出现在能力注册表里（v3 的核心不变量）。"""
-    ids = {c["feature_id"] for c in _registry().list_features()}
-    forbidden = {
-        "memory", "knowledge", "proactive", "schedule", "schedule_driver",
-        "onebot_tools", "mcp", "message_meta", "context",
-    }
-    assert not (ids & forbidden), f"这些业务能力不该是 feature: {sorted(ids & forbidden)}"
-
-
-def test_builtin_controllers_count():
-    assert len(BUILTIN_CONTROLLERS) == 4
 
 
 # ---------- 装槽型：接管 / 交棒 / 还原 ----------

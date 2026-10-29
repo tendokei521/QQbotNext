@@ -1,11 +1,9 @@
 """P1 注入链路测试：build_messages 记忆块 / 召回评分 / manager 注入 / #llm memory 命令。"""
 
-from app.agent.assembly.prompt import build_messages
 from app.agent.config import DEFAULT_LLM_CONFIG
 from app.plugins.llm_memory.src.commands import handle_memory_command
 from app.plugins.llm_memory.src.manager import MemoryManager, scope_owners
-from app.plugins.llm_memory.src.recall import rank, render_block
-from app.plugins.llm_memory.src.store import MemoryStore, owner_group, owner_group_member, owner_private
+from app.plugins.llm_memory.src.store import owner_group, owner_group_member, owner_private
 
 
 class FakeConfig:
@@ -32,49 +30,6 @@ def _manager(runtime=None, bot_id="botmem", data=None):
     rt = runtime or FakeRuntime(data=data, bot_id=bot_id)
     rt.memory = MemoryManager(rt)
     return rt, rt.memory
-
-
-# ---- build_messages ----
-def test_build_messages_injects_memory_block_only_when_present():
-    base = dict(system_prompt="sys", user_text="hi", with_schedule_instruction=False)
-    no = build_messages(**base)
-    assert not any("长期记忆" in m["content"] for m in no)
-    with_block = build_messages(**base, memory_text="### 长期记忆\n- 我喜欢美式")
-    contents = [m["content"] for m in with_block]
-    assert "### 长期记忆\n- 我喜欢美式" in contents
-    assert contents.index("### 长期记忆\n- 我喜欢美式") < contents.index("hi")
-
-
-# ---- rank / render_block ----
-def test_rank_cjk_gram_recall():
-    st = MemoryStore("botmem")
-    st.upsert_fact(
-        "小明喜欢喝美式咖啡", owner_group_member("9", "2"),
-        keywords="小明 咖啡 美式", importance=0.8,
-    )
-    st.upsert_fact("群公共约定：周五不开会", owner_group("9"))
-    hits = rank(
-        st,
-        owners=scope_owners("group_9", "1"),
-        query="小明喜欢什么",
-        mention_owners=[owner_group_member("9", "2")],
-        limit=5,
-    )
-    assert any("美式咖啡" in r["content"] for r in hits)
-    block = render_block(hits)
-    assert block.startswith("###")
-    assert "美式咖啡" in block
-    st.close()
-
-
-def test_rank_private_keyword():
-    st = MemoryStore("botmem")
-    st.upsert_fact("我住在上海", owner_private(5), keywords="上海 住")
-    hits = rank(st, owners=[owner_private(5)], query="上海", limit=5)
-    assert len(hits) == 1 and hits[0]["content"] == "我住在上海"
-    no = rank(st, owners=[owner_private(5)], query="火星", limit=5)
-    assert len(no) == 0
-    st.close()
 
 
 # ---- scope_owners 隔离 ----

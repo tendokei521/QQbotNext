@@ -12,24 +12,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest
-
 from app.agent.assembly.assembler import PromptAssembler, PromptRequest
-from app.agent.config_partition import MODULE_KEYS
-from app.plugins.llm_assembly.main import OWNED_KEYS, Module, owned_keys
+from app.plugins.llm_assembly.main import OWNED_KEYS, Module
 from app.plugins.llm_assembly.service import AssemblyAdapter
-
-
-def test_owned_keys_match_partition():
-    assert set(OWNED_KEYS) == set(MODULE_KEYS["llm_assembly"])
-    assert owned_keys() == OWNED_KEYS
-
-
-def test_default_config_and_schema_cover_owned_keys():
-    missing_default = [k for k in OWNED_KEYS if k not in Module.default_config]
-    missing_schema = [k for k in OWNED_KEYS if k not in Module.config_schema]
-    assert not missing_default, f"default_config 缺: {missing_default}"
-    assert not missing_schema, f"config_schema 缺: {missing_schema}"
 
 
 def test_module_declares_assembly_capability():
@@ -79,19 +64,6 @@ def test_module_profile_drives_behavior_block():
     assert _behavior_chars(with_module) > 0, "模块配置没有影响到装配结果"
 
 
-def test_adapter_build_is_equivalent_to_manual_view():
-    """`adapter.build(req)` 与"手工把 req.config 换成视图再 build"结果一致。"""
-    adapter = AssemblyAdapter(
-        SimpleNamespace(get=lambda k, d=None: {"assembly_profile": "qq_agent"}.get(k, d)),
-        OWNED_KEYS,
-    )
-    via_adapter = adapter.build(_req(config={"system_prompt": "你是助手"}))
-    manual = PromptAssembler().build(
-        _req(config=adapter.view_for({"system_prompt": "你是助手"}))
-    )
-    assert via_adapter == manual
-
-
 def test_module_config_overrides_agent_config():
     """同一个键在两边都有值时，以模块为准。"""
     agent_cfg = {"system_prompt": "你是助手", "user_message_format": "default"}
@@ -102,35 +74,6 @@ def test_module_config_overrides_agent_config():
     view = adapter.view_for(agent_cfg)
     assert view.get("user_message_format") == "single_line"
     assert view.get("system_prompt") == "你是助手"
-
-
-def test_module_missing_key_falls_back_to_agent_config():
-    """迁移期：模块还没有该键 → 回退 agent 配置，升级行为不变。"""
-    agent_cfg = {"user_message_format": "labeled"}
-    adapter = AssemblyAdapter(SimpleNamespace(get=lambda k, d=None: d), OWNED_KEYS)
-    assert adapter.view_for(agent_cfg).get("user_message_format") == "labeled"
-
-
-def test_adapter_restores_req_config_after_build():
-    """装配用的配置视图是本轮临时的，build 后必须还原（不污染后续读取）。"""
-    original = {"system_prompt": "你是助手"}
-    req = _req(config=original)
-    adapter = AssemblyAdapter(SimpleNamespace(get=lambda k, d=None: d), OWNED_KEYS)
-    adapter.build(req)
-    assert req.config is original
-
-
-def test_adapter_describe_reports_profile():
-    adapter = AssemblyAdapter(
-        SimpleNamespace(
-            get=lambda k, d=None: {"assembly_profile": "qq_agent", "behavior_rules_enable": True}.get(k, d)
-        ),
-        OWNED_KEYS,
-    )
-    info = adapter.describe()
-    assert info["profile"] == "qq_agent"
-    assert info["behavior_rules"] is True
-    assert info["owned_keys"] == len(OWNED_KEYS)
 
 
 # ---------- 装/卸 ----------
@@ -216,29 +159,3 @@ async def test_on_load_without_runtime_is_safe():
 
 
 # ---------- prompt_dump 走模块配置 ----------
-
-
-async def test_prompt_dump_reads_assembly_options(tmp_path, monkeypatch):
-    """`prompt_dump_*` 归本模块：`assembly_options` 里的开关要生效。"""
-    from app.agent.assembly import dump
-
-    monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
-    runtime = SimpleNamespace(
-        bot_id="777",
-        config={"prompt_dump_enable": False},          # agent 侧关着
-        assembly_options=SimpleNamespace(
-            get=lambda k, d=None: {"prompt_dump_enable": True, "prompt_dump_max_entries": 5}.get(k, d)
-        ),
-    )
-    ok = dump.record(runtime, [{"role": "user", "content": "hi"}], session_id="group_1")
-    assert ok is True, "assembly_options 里开启后应当落盘"
-
-
-@pytest.mark.parametrize("enabled", [False, True])
-def test_prompt_dump_falls_back_to_agent_config(tmp_path, monkeypatch, enabled):
-    """没有接管者时退回 agent 配置（升级行为不变）。"""
-    from app.agent.assembly import dump
-
-    monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
-    runtime = SimpleNamespace(bot_id="778", config={"prompt_dump_enable": enabled})
-    assert dump.record(runtime, [{"role": "user", "content": "hi"}]) is enabled

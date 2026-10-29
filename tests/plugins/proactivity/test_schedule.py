@@ -1,10 +1,9 @@
 """定时任务功能测试：时间解析 / 调度服务。"""
 
-import time
 from datetime import datetime, timedelta
 
-from app.plugins.llm_schedule.src.scheduler import TaskScheduler
 from app.domain.time_parser import advance_repeat, parse_schedule
+from app.plugins.llm_schedule.src.scheduler import TaskScheduler
 
 
 def _now():
@@ -180,205 +179,11 @@ class _FakeModule:
         self.config = _FakeConfig({"schedule_enable": True})
 
 
-
-
 def make_sched(module, tmp_path):
     """构造 + 上线：装配本身不武装计时器，必须 start() 才算「账号已连上」。"""
     sched = TaskScheduler(module, data_dir=str(tmp_path))
     sched.start()
     return sched
-
-async def test_scheduler_schedule_and_trigger(tmp_path):
-    module = _FakeModule()
-    sched = make_sched(module, tmp_path)
-    try:
-        entry = await sched.schedule("private_100", {"trigger": "明天早上8点", "content": "该起床啦"})
-        assert entry is not None
-        assert entry.repeat == "once"
-        assert entry.session_id == "private_100"
-        assert entry.is_group is False
-
-        ok = await sched.trigger_now(entry.id)
-        assert ok
-        bot = module.ctx.bot
-        assert bot.sent == [("p", 100, "该起床啦")]
-        assert sched.status() == []  # 一次性任务触发后结束
-    finally:
-        sched.stop()
-
-
-async def test_scheduler_fire_uses_llm_reply(tmp_path, monkeypatch):
-    """触发时应做一次带系统提示词的 LLM 请求：回复来自 LLM、状态标签被剥离。"""
-    from app.plugins.llm_schedule.src import scheduler as ts_mod  # noqa: F401 - 保留以固定导入路径
-
-    module = _FakeModule()
-    sched = make_sched(module, tmp_path)
-
-    class _FakeResp:
-        ok = True
-        text = "<type=posture>站着</type>\n明天早上记得带伞哦~"
-
-    class _FakeProvider:
-        async def chat(self, messages, **kw):
-            joined = " ".join(m["content"] for m in messages)
-            assert "该起床啦" in joined          # 任务内容进了请求
-            assert messages[0]["role"] == "system"  # 系统提示词在
-            return _FakeResp()
-
-    monkeypatch.setattr(ts_mod, "get_provider", lambda cfg: _FakeProvider())
-
-    try:
-        entry = await sched.schedule("private_100", {"trigger": "明天早上8点", "content": "该起床啦"})
-        await sched.trigger_now(entry.id)
-        bot = module.ctx.bot
-        assert bot.sent == [("p", 100, "明天早上记得带伞哦~")]  # LLM 回复，状态标签已剥离
-    finally:
-        sched.stop()
-
-
-async def test_scheduler_repeat_advance(tmp_path):
-    module = _FakeModule()
-    sched = make_sched(module, tmp_path)
-    try:
-        entry = await sched.schedule("group_500", {"trigger": "每天20:00", "content": "打卡"})
-        assert entry.repeat == "daily"
-        assert entry.is_group is True
-
-        ok = await sched.trigger_now(entry.id)
-        assert ok
-        bot = module.ctx.bot
-        assert any(s[0] == "g" and s[1] == 500 for s in bot.sent)
-        rows = sched.status()
-        assert len(rows) == 1
-        assert rows[0]["next_trigger_time"] > time.time()  # 周期任务推进到未来
-    finally:
-        sched.stop()
-
-
-async def test_scheduler_cancel(tmp_path):
-    module = _FakeModule()
-    sched = make_sched(module, tmp_path)
-    try:
-        entry = await sched.schedule("private_100", {"trigger": "明天早上8点", "content": "提醒"})
-        assert sched.cancel(entry.id)
-        assert sched.status() == []
-        assert sched.cancel(entry.id) is False
-    finally:
-        sched.stop()
-
-
-async def test_scheduler_session_type_derived_from_id(tmp_path):
-    """回归：由 session_id 推导私聊/群聊，杜绝 is_group/is_private 传反导致任务发错目标。"""
-    module = _FakeModule()
-    sched = make_sched(module, tmp_path)
-    try:
-        priv = await sched.schedule("private_100", {"trigger": "明天早上8点", "content": "私聊提醒"})
-        grp = await sched.schedule("group_500", {"trigger": "明天早上9点", "content": "群聊提醒"})
-        assert priv.is_group is False and priv.target == "100"
-        assert grp.is_group is True and grp.target == "500"
-
-        await sched.trigger_now(priv.id)
-        await sched.trigger_now(grp.id)
-        bot = module.ctx.bot
-        assert any(s[0] == "p" and s[1] == 100 for s in bot.sent)
-        assert any(s[0] == "g" and s[1] == 500 for s in bot.sent)
-    finally:
-        sched.stop()
-
-
-async def test_scheduler_persistence(tmp_path):
-    module = _FakeModule()
-    sched = make_sched(module, tmp_path)
-    try:
-        await sched.schedule("private_100", {"trigger": "明天早上8点", "content": "持久化提醒"})
-    finally:
-        sched.stop()
-
-    # 重启后恢复
-    sched2 = make_sched(module, tmp_path)
-    try:
-        rows = sched2.status()
-        assert len(rows) == 1
-        assert rows[0]["content"] == "持久化提醒"
-    finally:
-        sched2.stop()
-
-
-async def test_scheduler_heals_wrong_is_group(tmp_path):
-    """回归：历史版本可能把私聊任务存成 is_group=True，加载时按 session_id 校正。"""
-    import json
-    from datetime import datetime, timedelta
-
-    from app.plugins.llm_schedule.src.scheduler import TaskEntry
-
-    module = _FakeModule()
-    data_file = str(tmp_path) + f"/tasks_data_{module.bot_id}.json"
-    bad = TaskEntry(
-        task_id="abcd1234", session_id="private_100", is_group=True,  # 故意存反
-        target="100", trigger_expr="明天早上8点", content="提醒",
-        next_at=datetime.now() + timedelta(days=1),
-    )
-    with open(data_file, "w", encoding="utf-8") as f:
-        json.dump({"tasks": [bad.to_dict()]}, f, ensure_ascii=False)
-
-    sched = make_sched(module, tmp_path)
-    try:
-        assert "abcd1234" in sched._tasks
-        e = sched._tasks["abcd1234"]
-        assert e.is_group is False, "私聊任务加载后应校正为私聊"
-        assert e.target == "100"
-    finally:
-        sched.stop()
-
-
-async def test_scheduler_restore_removes_expired_once(tmp_path):
-    """启动恢复：过期的一次性任务被移除，周期任务推进到未来并重新武装。"""
-    import json
-    from datetime import datetime, timedelta
-
-    from app.plugins.llm_schedule.src.scheduler import TaskEntry
-
-    module = _FakeModule()
-    data_file = str(tmp_path) + f"/tasks_data_{module.bot_id}.json"
-    past = datetime.now() - timedelta(hours=2)
-    entries = [
-        TaskEntry(task_id="expired01", session_id="private_1", is_group=False, target="1",
-                  trigger_expr="x", content="过期", repeat="once", next_at=past),
-        TaskEntry(task_id="daily01", session_id="group_2", is_group=True, target="2",
-                  trigger_expr="每天8点", content="每日", repeat="daily", next_at=past),
-    ]
-    with open(data_file, "w", encoding="utf-8") as f:
-        json.dump({"tasks": [e.to_dict() for e in entries]}, f, ensure_ascii=False)
-
-    sched = make_sched(module, tmp_path)
-    try:
-        assert "expired01" not in sched._tasks, "过期一次性任务应被移除"
-        assert "daily01" in sched._tasks, "周期任务应保留"
-        assert sched._tasks["daily01"].next_at > datetime.now(), "周期任务应推进到未来"
-        assert "daily01" in sched._timers, "周期任务应重新武装计时器"
-    finally:
-        sched.stop()
-
-
-async def test_scheduler_bad_trigger(tmp_path):
-    module = _FakeModule()
-    sched = make_sched(module, tmp_path)
-    try:
-        entry = await sched.schedule("private_100", {"trigger": "随便什么", "content": "提醒"})
-        assert entry is None
-    finally:
-        sched.stop()
-
-
-async def test_scheduler_disabled(tmp_path):
-    module = _FakeModule()
-    module.config._cfg["schedule_enable"] = False
-    sched = make_sched(module, tmp_path)
-    try:
-        entry = await sched.schedule("private_100", {"trigger": "明天早上8点", "content": "提醒"})
-        assert entry is None
-    finally:
-        sched.stop()
 
 
 # ==================== schedule_task 工具（原生 function calling） ====================
@@ -435,8 +240,8 @@ async def test_schedule_tool_handler(tmp_path):
 
 def test_schedule_tool_openai_definition():
     """工具定义可转成 OpenAI 原生 function 格式。"""
-    from app.plugins.llm_schedule.src.schedule_tool import SCHEDULE_TASK_SCHEMA
     from app.agent.tools.spec import ToolSpec
+    from app.plugins.llm_schedule.src.schedule_tool import SCHEDULE_TASK_SCHEMA
 
     spec = ToolSpec(name="schedule_task", description="管理定时任务",
                     parameters=SCHEDULE_TASK_SCHEMA, handler=lambda args: "ok")

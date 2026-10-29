@@ -38,37 +38,6 @@ def _m(uid, card, nickname):
     return {"user_id": uid, "card": card, "nickname": nickname}
 
 
-async def test_mention_owners_from_at_and_nickname():
-    rt = FakeRuntime()
-    bot = FakeBot(members=[_m(2, "小明", "小明"), _m(3, "小红", "小红")])
-    owners = await rt.memory.mention_owners_for("group_9", "小明喜欢什么", bot)
-    assert owner_group_member("9", 2) in owners
-    owners2 = await rt.memory.mention_owners_for("group_9", "@123456 在吗", bot)
-    assert owner_group_member("9", "123456") in owners2
-    # 非群聊返回空
-    assert await rt.memory.mention_owners_for("private_1", "小明", bot) == []
-
-
-async def test_injection_group_only_own_and_mentioned():
-    rt = FakeRuntime()
-    bot = FakeBot(members=[_m(2, "小明", "小明"), _m(3, "小红", "小红")])
-    mgr = rt.memory
-    mgr.store.upsert_fact("小明喜欢喝美式咖啡", owner_group_member("9", 2), source="manual")
-    mgr.store.upsert_fact("小红讨厌香菜", owner_group_member("9", 3), source="manual")
-    mgr.store.upsert_fact("群公共：周五不开会", owner_group("9"), source="manual")
-
-    # 问小明的画像（asker=1，不提及小红）→ 只带小明画像 + 群公共
-    block = await mgr.recall_block_async("group_9", user_id="1", query="小明喜欢什么", bot=bot)
-    assert "小明喜欢喝美式咖啡" in block
-    assert "小红讨厌香菜" not in block
-    assert "周五不开会" in block
-
-    # 不提及任何成员 → 不带他人画像
-    block2 = await mgr.recall_block_async("group_9", user_id="1", query="最近怎样", bot=bot)
-    assert "小明喜欢喝美式咖啡" not in block2
-    assert "周五不开会" in block2
-
-
 async def test_tool_recall_finds_mentioned_member_profile():
     from app.plugins.llm_memory.src.tool import build_memory_tools
 

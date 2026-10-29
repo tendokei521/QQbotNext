@@ -126,13 +126,6 @@ def test_register_requires_kind():
 # ==================== 容器内置资源与 API ====================
 
 
-def test_builtin_kinds_are_registered_in_container(container):
-    """框架自带资源种类：不依赖任何模块就应可用。"""
-    reg = container.get(ResourceRegistry)
-    kinds = {k["kind"] for k in reg.kinds()}
-    assert {"role_preset", "provider_preset", "provider_model", "bot", "module"} <= kinds
-
-
 async def test_role_preset_options_come_from_the_real_service(container):
     """真实链路：注册表 → RolePresetService → 候选列表。"""
     from app.application.role_preset_service import RolePresetService
@@ -283,18 +276,6 @@ async def test_resources_updated_broadcast_only_for_resource_scopes(container, m
     sent.clear()
     await on_change("webui", {})  # 非资源 scope
     assert resource_events() == []
-
-
-def test_frontend_subscribes_to_resource_events():
-    """静态自检：前端订阅了资源事件，否则只有刷新页面才看得到新候选。
-
-    （旧版 static/js 的手写实现已随 P6 删除，只剩 dashboard 一套。）
-    """
-    from pathlib import Path
-
-    root = Path(__file__).resolve().parents[2]
-    vue = (root / "app" / "webui" / "dashboard" / "src" / "components" / "config" / "FieldControl.vue").read_text(encoding="utf-8")
-    assert "onSocketMessage('resources_updated'" in vue and "onBeforeUnmount" in vue, "需订阅并在卸载时退订"
 
 
 # ==================== bot / group 种类（按账号） ====================

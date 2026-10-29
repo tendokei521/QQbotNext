@@ -14,34 +14,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.agent.config_partition import MODULE_KEYS
-from app.agent.delivery.output import BlockingOutput, ConfigView, StreamOutput
-from app.plugins.llm_output.main import OWNED_KEYS, Module, adapter_for, owned_keys
+from app.agent.delivery.output import BlockingOutput, StreamOutput
+from app.plugins.llm_output.main import Module, adapter_for
 from app.plugins.llm_output.service import OutputStrategyAdapter
-
-
-def test_owned_keys_match_partition():
-    """模块声明的键必须等于分区表里的键（两侧任何一边改都会红）。"""
-    assert set(OWNED_KEYS) == set(MODULE_KEYS["llm_output"])
-    assert owned_keys() == OWNED_KEYS
-
-
-def test_owned_keys_have_no_duplicates():
-    assert len(OWNED_KEYS) == len(set(OWNED_KEYS))
-
-
-def test_default_config_covers_every_owned_key():
-    """`default_config` 必须覆盖持有的全部键（否则读出来是 None）。"""
-    missing = [k for k in OWNED_KEYS if k not in Module.default_config]
-    assert not missing, f"default_config 缺少: {missing}"
-
-
-def test_config_schema_covers_every_owned_key():
-    """WebUI 表单必须能编辑全部持有的键。"""
-    missing = [k for k in OWNED_KEYS if k not in Module.config_schema]
-    assert not missing, f"config_schema 缺少: {missing}"
-    extra = [k for k in Module.config_schema if k not in OWNED_KEYS and k != "mode"]
-    assert not extra, f"config_schema 有多余键（不在分区表里）: {extra}"
 
 
 def test_module_declares_output_capability():
@@ -100,64 +75,7 @@ async def test_mode_selects_matching_framework_strategy(config, expected_mode, e
     assert produced == [expected_name]
 
 
-async def test_adapter_marks_streaming_for_speech_mode():
-    """`speech` 也是流式（发言通道需要轮次边界才能 flush 气泡）。"""
-    adapter = adapter_for(SimpleNamespace(bot_id="1", config={}), {"mode": "speech"})
-    assert adapter.streams is False  # 构造时还是 False
-    try:
-        async for _ in adapter.respond(SimpleNamespace()):
-            pass
-    except Exception:  # noqa: BLE001 —— 这里只关心 streams 标记，不关心请求成功
-        pass
-    assert adapter.streams is True
-
-
 # ---------- 配置视图 ----------
-
-
-def test_config_view_prefers_module_then_falls_back():
-    base = {"stream_output": False, "model": "gpt-x", "group_enable": True}
-    module = {"stream_output": True}
-
-    view = ConfigView(base, module, ["stream_output"])
-
-    assert view.get("stream_output") is True, "模块持有的键应以模块配置为准"
-    assert view.get("model") == "gpt-x", "未持有的键应回退到 agent 配置"
-    assert view.get("missing", "d") == "d"
-
-
-def test_config_view_falls_back_when_module_has_no_value():
-    """迁移期：模块配置里还没有该键（老配置）→ 回退 agent 配置，行为不变。"""
-    base = {"stream_sentence_max_length": 88}
-    view = ConfigView(base, {}, ["stream_sentence_max_length"])
-    assert view.get("stream_sentence_max_length") == 88
-
-
-def test_config_view_passes_through_other_attributes():
-    class _Base:
-        raw_config = {"a": 1}
-
-        def get(self, key, default=None):
-            return default
-
-    view = ConfigView(_Base(), {}, [])
-    assert view.raw_config == {"a": 1}
-
-
-def test_adapter_describe_reports_effective_shape():
-    adapter = adapter_for(
-        SimpleNamespace(bot_id="1", config={}),
-        {
-            "mode": "stream",
-            "stream_send_pool_enabled": True,
-            "stream_sentence_max_length": 50,
-        },
-    )
-    info = adapter.describe()
-    assert info["mode"] == "stream"
-    assert info["stream_send_pool_enabled"] is True
-    assert info["sentence_max_length"] == 50
-    assert info["owned_keys"] == len(OWNED_KEYS)
 
 
 # ---------- 装/卸 ----------

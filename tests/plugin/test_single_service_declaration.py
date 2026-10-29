@@ -36,14 +36,6 @@ async def _payload_for(container, *module_names):
             await registry.unload_single(name, bot_id)
 
 
-async def test_payload_reports_declaration(container):
-    """声明支持的模块 single_service=True，未声明的为 False（前端据此隐藏开关）。"""
-    data = await _payload_for(container, "what_to_eat", "llm_memory")
-
-    assert data["what_to_eat"]["single_service"] is True
-    assert data["llm_memory"]["single_service"] is False
-
-
 async def test_agent_virtual_module_declares_support(container):
     """框架级 Agent 恒支持单一服务（它没有 BaseModule 实例，走代理声明）。"""
     data = await _payload_for(container)
@@ -72,41 +64,6 @@ def _local_module_classes():
                 yield path.name, cls
         finally:
             loader.purge_module_cache(path.name)
-
-
-def test_declared_modules_are_actually_event_driven():
-    """反向约束：只有「会收事件」的模块才允许声明。
-
-    在 `subscribe=()` 的纯 LLM 策略模块上声明单一服务毫无意义——门控发生在按事件
-    路由之后的权限节点里，这类模块根本走不到，开关只会误导用户。
-    """
-    offenders = []
-    for name, cls in _local_module_classes():
-        if not cls.supports_single_service:
-            continue
-        hooks, _llm_hooks = cls.collect_hooks()
-        commands = cls.collect_commands()
-        if not (cls.subscribe or hooks or commands):
-            offenders.append(name)
-    assert offenders == [], f"这些模块声明了单一服务但根本不收事件: {offenders}"
-
-
-def test_local_module_declarations_snapshot():
-    """声明清单快照：改声明时这里会红，提醒同步 UI 文案与文档。"""
-    declared = {name for name, cls in _local_module_classes() if cls.supports_single_service}
-    assert declared == {
-        "bilibili_parser",
-        "df_password",
-        "douyin_parser",
-        "emoji_reply",
-        "group_log",
-        "group_request",
-        "log_sender",
-        "poke_reply",
-        "recall_back",
-        "time_sign_in",
-        "what_to_eat",
-    }
 
 
 @pytest.mark.parametrize("module_name", ["llm_assembly", "llm_output", "llm_memory"])

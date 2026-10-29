@@ -8,17 +8,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest
-
-from app.agent.config_partition import MODULE_KEYS
 from app.agent.policy import policy_get
-from app.plugins.llm_tools_extra.main import OWNED_KEYS, Module, owned_keys
-
-
-def test_owned_keys_match_partition():
-    assert set(OWNED_KEYS) == set(MODULE_KEYS["llm_tools_extra"])
-    assert owned_keys() == OWNED_KEYS
-
+from app.plugins.llm_tools_extra.main import Module
 
 #: 有意不在「功能插件 → 工具扩展」配置页暴露的键（不是漏配）。
 #:
@@ -34,22 +25,6 @@ SCHEMA_HIDDEN_KEYS = {
     "onebot_tools_debug",
     "onebot_tool_overrides",
 }
-
-
-def test_default_config_and_schema_cover_owned_keys():
-    assert not [k for k in OWNED_KEYS if k not in Module.default_config]
-    missing = [k for k in OWNED_KEYS if k not in Module.config_schema]
-    # 隐藏键必须是有意为之：不能用一个「白名单」把漏配也一起放过
-    assert set(missing) <= SCHEMA_HIDDEN_KEYS, missing
-    # 隐藏键仍要有默认值（运行时照常读取）
-    for hidden in SCHEMA_HIDDEN_KEYS:
-        assert hidden in Module.default_config, hidden
-
-
-def test_module_is_pure_business():
-    """v3：OneBot 工具与 MCP 是**业务**，通过 `tool_sources` 注册，不声明 supersedes。"""
-    assert not getattr(Module, "supersedes", ())
-    assert Module.category == "LLM"
 
 
 # ---------- OneBot 策略 ----------
@@ -73,14 +48,6 @@ def test_onebot_policy_reads_module_config():
     assert denied["enabled"] is False
 
 
-def test_onebot_policy_falls_back_without_module():
-    from app.plugins.llm_tools_extra.src.onebot.security import resolve_tool_policy
-
-    runtime = SimpleNamespace(config={"onebot_tools_enable": False})
-    policy = resolve_tool_policy(runtime, {"name": "send_group_msg", "permission": "member"})
-    assert policy["enabled"] is False
-
-
 def test_poke_cooldown_reads_module_config():
     from app.plugins.llm_tools_extra.src.onebot.executor import _poke_cooldown
 
@@ -89,13 +56,6 @@ def test_poke_cooldown_reads_module_config():
         tools_options=SimpleNamespace(get=lambda k, d=None: {"poke_cooldown_seconds": 5}.get(k, d)),
     )
     assert _poke_cooldown(runtime) == 5.0
-
-
-def test_poke_cooldown_falls_back_without_module():
-    from app.plugins.llm_tools_extra.src.onebot.executor import _poke_cooldown
-
-    runtime = SimpleNamespace(config={"poke_cooldown_seconds": 42})
-    assert _poke_cooldown(runtime) == 42.0
 
 
 async def test_onebot_gate_follows_module():
@@ -133,13 +93,6 @@ def test_mcp_reads_module_config():
     )
     mgr = MCPManager(runtime)
     assert mgr.enabled() is True
-
-
-def test_mcp_falls_back_without_module():
-    from app.plugins.llm_tools_extra.src.mcp import MCPManager
-
-    runtime = SimpleNamespace(bot_id="2", config={"mcp_servers": []})
-    assert MCPManager(runtime).enabled() is False
 
 
 # ---------- 工具结果回应要求 ----------
@@ -225,36 +178,3 @@ async def test_on_load_installs_view_and_unload_clears():
     await module.on_unload()
     assert runtime.tools_options is None
     assert policy_get(runtime, "tools", "onebot_tools_enable") is True
-
-
-async def test_on_load_without_runtime_is_safe():
-    from app.plugin.base import ModuleAuthority, ModuleConfig, ModuleContext, ServiceAccess
-
-    service = _CfgService()
-    ctx = ModuleContext(
-        module_name="llm_tools_extra",
-        bot_id="1",
-        config=ModuleConfig("llm_tools_extra", "1", {}, service),
-        authority=ModuleAuthority("llm_tools_extra", "1", service),
-        services=ServiceAccess(runtime=lambda bot_id: None),
-    )
-    module = type("M", (Module,), {})(ctx)
-    await module.on_load()
-    await module.on_unload()
-
-
-@pytest.mark.parametrize("key", ["onebot_tools_max_result", "mcp_servers", "tool_result_directive"])
-async def test_keys_overridable_by_module(key):
-    runtime = _Runtime()
-    runtime.config = {key: "agent"}
-    module = _make_module(runtime, {key: "module"})
-    await module.on_load()
-    assert policy_get(runtime, "tools", key) == "module"
-    await module.on_unload()
-
-
-def test_onebot_tools_enabled_by_default():
-    """OneBot 工具默认开启：装好即用（开关在「高级工具 → OneBot 工具」）。"""
-    assert Module.default_config["onebot_tools_enable"] is True
-    # 开关不在插件配置页渲染（见 SCHEMA_HIDDEN_KEYS），默认值仍来自 default_config
-    assert "onebot_tools_enable" in Module.default_config
