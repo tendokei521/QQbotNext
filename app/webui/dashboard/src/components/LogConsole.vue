@@ -4,20 +4,46 @@ import { useLogsStore } from '@/stores/logs'
 import { useWebuiStore } from '@/stores/webui'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
-import { cleanLogMessage, cleanLogTimestamp } from '@/utils/log'
+import { cleanLogMessage, cleanLogTimestamp, isTechnicalLog } from '@/utils/log'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import LogExportDialog from '@/components/log/LogExportDialog.vue'
 
 const logs = useLogsStore()
 const webui = useWebuiStore()
 const notify = useNotifyStore()
 
 const settingsOpen = ref(false)
+const exportOpen = ref(false)
+const clearConfirmOpen = ref(false)
 const filterInput = ref('')
 const bodyEl = ref<HTMLDivElement | null>(null)
+
+/** 级别快捷筛选：默认全部；用户找问题时一键只看错误/警告 */
+type LevelFilter = 'all' | 'error' | 'warning'
+const LEVEL_FILTERS: { value: LevelFilter; title: string }[] = [
+  { value: 'all', title: '全部' },
+  { value: 'error', title: '错误' },
+  { value: 'warning', title: '警告' },
+]
+const levelFilter = ref<LevelFilter>('all')
+
+/** 技术日志开关：复用显示设置里的 show_raw_logs（启动/连接等内部细节默认收起） */
+const showTechnical = computed<boolean>({
+  get: () => Boolean(webui.config.logs.show_raw_logs),
+  set: (value) => {
+    webui.config.logs.show_raw_logs = value
+    webui.saveLogs({ show_raw_logs: value }).catch((err) => {
+      notify.push(errorMessage(err), 'error')
+    })
+  },
+})
 
 function isSimpleLog(row: { level: string; message: string }) {
   if (webui.config.logs.show_raw_logs) return true
   const msg = String(row.message || '')
   const level = String(row.level || '').toLowerCase()
+  // 启动/连接/鉴权这类内部细节默认不展示（警告与错误不受影响）
+  if (isTechnicalLog(level, msg)) return false
   const isApiError = ['warning', 'error'].includes(level)
   const isUserApiLog = msg.includes('[发送->]') || msg.includes('[请求->]')
   if (msg.startsWith('[API]') && !isUserApiLog && !isApiError) return false
@@ -32,7 +58,15 @@ const rowLimit = computed(() => {
   return Math.min(Math.max(n, 10), 2000)
 })
 
-const visibleRows = computed(() => logs.filtered.filter(isSimpleLog).slice(-rowLimit.value))
+const visibleRows = computed(() => {
+  const filter = levelFilter.value
+  const rows = logs.filtered.filter((row) => {
+    if (!isSimpleLog(row)) return false
+    if (filter === 'all') return true
+    return String(row.level || '').toLowerCase() === filter
+  })
+  return rows.slice(-rowLimit.value)
+})
 
 /** 级别文案与「设置 → 日志」保持一致，界面上不出现英文枚举 */
 const LEVEL_LABELS: Record<string, string> = {
@@ -75,6 +109,11 @@ async function saveLogsSettings() {
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   }
+}
+
+function confirmClear() {
+  logs.clear()
+  clearConfirmOpen.value = false
 }
 
 // 新日志到达时：仅在用户本来就停在底部附近时跟随滚动，避免打断回看。
@@ -141,10 +180,31 @@ onUnmounted(() => {
           density="compact"
           variant="outlined"
           hide-details
-          placeholder="过滤日志…（如 账号名 / 关键字）"
+          placeholder="搜索日志…（账号名 / 关键字）"
           class="filter-input"
           clearable
           @update:model-value="onFilterInput"
+        />
+        <div class="level-chips">
+          <v-chip
+            v-for="opt in LEVEL_FILTERS"
+            :key="opt.value"
+            size="x-small"
+            :color="levelFilter === opt.value ? 'primary' : undefined"
+            :variant="levelFilter === opt.value ? 'flat' : 'tonal'"
+            @click="levelFilter = opt.value"
+          >
+            {{ opt.title }}
+          </v-chip>
+        </div>
+        <v-switch
+          v-model="showTechnical"
+          label="技术日志"
+          color="primary"
+          density="compact"
+          hide-details
+          class="tech-switch"
+          title="开启后显示启动、连接、鉴权等技术细节"
         />
         <v-btn
           size="small"
@@ -154,13 +214,31 @@ onUnmounted(() => {
           :title="logs.paused ? '继续接收日志' : '暂停接收日志'"
           @click="logs.togglePause()"
         />
+        <v-btn
+          size="small"
+          variant="tonal"
+          icon="mdi-file-export-outline"
+          title="导出日志文件"
+          @click="exportOpen = true"
+        />
         <v-btn size="small" variant="tonal" icon="mdi-cog-outline" title="日志显示设置" @click="openSettings" />
-        <v-btn size="small" variant="tonal" icon="mdi-delete-outline" title="清空日志" @click="logs.clear()" />
+        <v-btn
+          size="small"
+          variant="tonal"
+          icon="mdi-delete-outline"
+          title="清空日志显示"
+          @click="clearConfirmOpen = true"
+        />
       </div>
     </div>
 
     <div ref="bodyEl" class="console-body">
-      <div v-if="visibleRows.length === 0" class="empty-tip">暂无日志</div>
+      <div v-if="visibleRows.length === 0" class="empty-tip">
+        <template v-if="!showTechnical && logs.logs.length">
+          当前没有普通日志；打开工具栏的「技术日志」可查看启动与连接细节。
+        </template>
+        <template v-else>当前筛选下没有日志</template>
+      </div>
       <div v-for="(row, i) in visibleRows" :key="`${row.timestamp}-${i}`" class="log-row">
         <span class="log-time">{{ cleanLogTimestamp(row.timestamp) }}</span>
         <span class="log-level" :class="`log-level-${row.level}`">{{ levelLabel(row.level) }}</span>
@@ -204,7 +282,7 @@ onUnmounted(() => {
             hide-details
           />
           <div class="text-caption mt-1" style="color: rgba(var(--v-theme-on-surface), 0.55)">
-            默认关闭；开启后显示完整技术日志
+            默认关闭；开启后显示启动、连接等完整技术细节
           </div>
         </v-card-text>
         <v-card-actions>
@@ -214,6 +292,27 @@ onUnmounted(() => {
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <ConfirmDialog
+      v-model="clearConfirmOpen"
+      title="清空日志显示"
+      message="只清空界面里显示的最近日志，不影响已保存的日志文件。"
+      :details="['需要留档时，请先导出日志文件', '清空后新产生的日志仍会继续显示']"
+      danger
+      confirm-text="清空"
+      @confirm="confirmClear"
+    >
+      <v-btn
+        size="small"
+        variant="tonal"
+        prepend-icon="mdi-file-export-outline"
+        @click="exportOpen = true; clearConfirmOpen = false"
+      >
+        先导出
+      </v-btn>
+    </ConfirmDialog>
+
+    <LogExportDialog v-model="exportOpen" />
   </div>
 </template>
 
@@ -234,9 +333,10 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  height: 48px;
-  padding: 0 14px;
+  min-height: 48px;
+  padding: 6px 14px;
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+  flex-wrap: wrap;
 }
 
 .console-title {
@@ -253,11 +353,28 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   min-width: 0;
+  flex-wrap: wrap;
 }
 
 .filter-input {
-  width: 260px;
+  width: 220px;
   max-width: 40vw;
+}
+
+.level-chips {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tech-switch {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.tech-switch :deep(.v-label) {
+  font-size: 12px;
+  opacity: 0.85;
 }
 
 .console-body {
@@ -327,24 +444,19 @@ onUnmounted(() => {
   white-space: pre-wrap;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 900px) {
   .console-header {
     flex-direction: column;
     align-items: stretch;
-    height: auto;
-    padding: 10px 12px;
   }
 
   .console-title {
     justify-content: space-between;
   }
 
-  .console-actions {
-    flex-wrap: wrap;
-  }
-
   .filter-input {
     flex: 1 1 180px;
+    width: auto;
     max-width: none;
   }
 }

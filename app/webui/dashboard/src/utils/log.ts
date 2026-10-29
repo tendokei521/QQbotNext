@@ -50,6 +50,35 @@ export function cleanLogTimestamp(timestamp: string): string {
 }
 
 /**
+ * 是否是「技术日志」（启动、连接、鉴权等内部细节）。
+ *
+ * 用户默认只想看「机器人做了什么」；启动地址、反向连接地址、模块预加载数量这类
+ * 是排查问题才需要的技术细节，默认收起，可在日志页开关里打开。
+ *
+ * 注意：
+ * - 匹配的是**原始行**，前面可能带 `[Main] [Config] ` 这类内部标签，所以不锚定行首；
+ * - 启动文案会变（「已配置装配 N 个账号」/「已按配置装配 N 个账号」都出现过），
+ *   这里用宽容匹配，不写死某个版本；
+ * - **警告/错误永远不算技术日志**——真出问题时不能被藏起来。
+ */
+const TECHNICAL_HINTS = [
+  /WebUI 启动中/,
+  /反向 WS 监听中/,
+  /模块预加载完成/,
+  /已.*装配\s*\d+\s*个账号/,
+  /已启用访问令牌鉴权/,
+  /已迁移作用域绑定/,
+  /OneBot 实现里/,
+]
+
+export function isTechnicalLog(level: string, message: string): boolean {
+  const lv = String(level || '').toLowerCase()
+  if (lv === 'warning' || lv === 'error') return false
+  const text = String(message || '')
+  return TECHNICAL_HINTS.some((pattern) => pattern.test(text))
+}
+
+/**
  * 正文去噪：连续去掉内部标签前缀，并合并相邻重复标签。
  *
  * 注意只处理**行首**：正文中间出现的 `[xxx]` 通常是引用内容，保持原样。

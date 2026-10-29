@@ -12,6 +12,7 @@
  * 数据契约见 docs/DATA_STATS_DESIGN.md；默认 `skip_empty=1` 省略无数据时段（不画 0 灰条）。
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { http } from '@/api/http'
 import { displayName, useBotsStore } from '@/stores/bots'
 import { connectSocket, isSocketConnected, onSocketMessage } from '@/api/socket'
@@ -122,12 +123,14 @@ const GRANULARITIES: { value: Granularity; title: string }[] = [
   { value: 'month', title: '按月' },
 ]
 const RANGES = [
-  { value: 1, title: '今天' },
+  { value: 1, title: '今天（本机时区）' },
   { value: 7, title: '近 7 天' },
   { value: 30, title: '近 30 天' },
   { value: 90, title: '近 90 天' },
   { value: 365, title: '近一年' },
 ]
+
+const router = useRouter()
 
 const kind = ref<Kind>('llm')
 const metric = ref('tokens')
@@ -325,6 +328,30 @@ const chartTitle = computed(() => {
 
 /* ---------------- 交互 ---------------- */
 
+/** 某个维度的候选值：没有数据时不显示对应筛选，避免一排空下拉 */
+function facetItems(key: string): { value: string; events: number }[] {
+  return facets.value[key] ?? []
+}
+
+/** 会话候选：内部标识转成用户看得懂的「会话 123456」 */
+const sessionFacetItems = computed(() =>
+  facetItems('session_id').map((item) => ({
+    title: sessionDisplayName(item.value),
+    value: item.value,
+  })),
+)
+
+function sessionDisplayName(raw: string): string {
+  const numeric = /(\d{4,})\s*$/.exec(String(raw || ''))?.[1] || ''
+  return numeric ? `会话 ${numeric}` : String(raw || '')
+}
+
+/** 跳到会话数据页并选中该会话（「按会话」表用） */
+function openSessionRow(sessionId: string) {
+  if (!sessionId) return
+  router.push({ path: '/sessions', query: { session: sessionId } })
+}
+
 function clearFilters() {
   api.value = null
   botId.value = null
@@ -476,17 +503,29 @@ onUnmounted(() => {
 
 <template>
   <div class="stats-page">
+    <div class="app-page-header">
+      <div>
+        <h1 class="app-page-title">数据统计</h1>
+        <div class="app-page-subtitle">按时间范围统计用量，时间按本机时区</div>
+      </div>
+      <div class="header-actions">
+        <v-btn variant="text" prepend-icon="mdi-chat-outline" @click="router.push('/sessions')">会话数据</v-btn>
+        <button class="link-btn" @click="load()">刷新</button>
+        <button class="dark-btn" @click="exportCsv">导出</button>
+      </div>
+    </div>
+
     <!-- ① 大 KPI 卡 -->
     <div class="hero">
       <div class="hero-card tip" data-tip="当前筛选范围内所有 LLM 请求的 token 总数（输入 + 输出）">
-        <span class="hero-label">累计 Tokens</span>
+        <span class="hero-label">当前范围 Tokens</span>
         <div class="hero-value">
           {{ summary ? fmt(summary.tokens, 'tokens') : '—' }}
           <span class="hero-unit">tokens</span>
         </div>
       </div>
       <div class="hero-card tip" data-tip="实际发给模型服务的请求数（含重试与回退，不含未触发的消息）">
-        <span class="hero-label">API 请求次数</span>
+        <span class="hero-label">当前范围请求次数</span>
         <div class="hero-value">
           {{ summary ? summary.requests : '—' }}
           <span class="hero-unit">次</span>
@@ -494,37 +533,126 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- ② 筛选条 -->
+    <!-- ② 筛选条：每个控件都带 label，窄屏自动换行 -->
     <div class="filter-bar">
-      <span class="fb-label">数据维度</span>
-      <v-select v-model="kind" :items="KIND_OPTIONS" item-title="title" item-value="value"
-                density="compact" hide-details variant="solo" flat
-                class="pill" style="max-width: 124px" />
-      <v-select v-model="botId" :items="accountOptions" item-title="title" item-value="value"
-                density="compact" hide-details variant="solo" flat
-                class="pill" style="max-width: 150px" />
-      <v-select v-model="rangeDays" :items="RANGES" item-title="title" item-value="value"
-                density="compact" hide-details variant="solo" flat
-                class="pill" style="max-width: 104px" />
-      <v-select v-model="metric" :items="metricOptions" item-title="title" item-value="value"
-                density="compact" hide-details variant="solo" flat
-                class="pill" style="max-width: 140px" />
-      <v-select v-model="granularity" :items="GRANULARITIES" item-title="title" item-value="value"
-                density="compact" hide-details variant="solo" flat
-                class="pill" style="max-width: 100px" />
-      <span class="fb-label">API</span>
-      <v-select v-model="api" :items="facets.api ?? []" item-title="value" item-value="value"
-                density="compact" hide-details variant="solo" flat clearable
-                class="pill" style="max-width: 140px" placeholder="全部" />
-      <button class="link-btn" @click="clearFilters">清除筛选条件</button>
+      <v-select
+        v-model="kind"
+        :items="KIND_OPTIONS"
+        item-title="title"
+        item-value="value"
+        label="数据维度"
+        density="compact"
+        variant="outlined"
+        hide-details
+        class="filter-field"
+      />
+      <v-select
+        v-model="botId"
+        :items="accountOptions"
+        item-title="title"
+        item-value="value"
+        label="账号"
+        density="compact"
+        variant="outlined"
+        hide-details
+        class="filter-field"
+      />
+      <v-select
+        v-model="rangeDays"
+        :items="RANGES"
+        item-title="title"
+        item-value="value"
+        label="范围"
+        density="compact"
+        variant="outlined"
+        hide-details
+        class="filter-field filter-field--range"
+      />
+      <v-select
+        v-model="metric"
+        :items="metricOptions"
+        item-title="title"
+        item-value="value"
+        label="指标"
+        density="compact"
+        variant="outlined"
+        hide-details
+        class="filter-field"
+      />
+      <v-select
+        v-model="granularity"
+        :items="GRANULARITIES"
+        item-title="title"
+        item-value="value"
+        label="粒度"
+        density="compact"
+        variant="outlined"
+        hide-details
+        class="filter-field"
+      />
+      <v-select
+        v-if="facetItems('api').length"
+        v-model="api"
+        :items="facetItems('api')"
+        item-title="value"
+        item-value="value"
+        label="来源"
+        density="compact"
+        variant="outlined"
+        hide-details
+        clearable
+        placeholder="全部"
+        class="filter-field"
+      />
+      <v-select
+        v-if="facetItems('model').length"
+        v-model="model"
+        :items="facetItems('model')"
+        item-title="value"
+        item-value="value"
+        label="模型"
+        density="compact"
+        variant="outlined"
+        hide-details
+        clearable
+        placeholder="全部"
+        class="filter-field"
+      />
+      <v-select
+        v-if="sessionFacetItems.length"
+        v-model="sessionId"
+        :items="sessionFacetItems"
+        item-title="title"
+        item-value="value"
+        label="会话"
+        density="compact"
+        variant="outlined"
+        hide-details
+        clearable
+        placeholder="全部"
+        class="filter-field"
+      />
+      <v-select
+        v-if="facetItems('outcome').length"
+        v-model="outcome"
+        :items="facetItems('outcome')"
+        item-title="value"
+        item-value="value"
+        label="结局"
+        density="compact"
+        variant="outlined"
+        hide-details
+        clearable
+        placeholder="全部"
+        class="filter-field"
+      />
       <v-spacer />
+      <v-btn variant="text" size="small" class="clear-btn" @click="clearFilters">清除筛选条件</v-btn>
       <span class="live" :title="liveConnected ? '已连接，数据变化会自动推送' : '未连接（会自动重连）'">
         <i class="dot" :class="{ on: liveConnected }" />
         <span>{{ liveConnected ? '实时' : '重连中' }}</span>
         <span v-if="updatedAt" class="live-time">{{ updatedAt }}</span>
       </span>
-      <button class="link-btn" @click="load()">刷新</button>
-      <button class="dark-btn" @click="exportCsv">导出</button>
     </div>
 
     <v-alert v-if="error" type="error" variant="tonal" density="compact" class="mt-3">{{ error }}</v-alert>
@@ -682,7 +810,18 @@ onUnmounted(() => {
           </thead>
           <tbody>
             <tr v-for="name in seriesNames" :key="name">
-              <td class="sticky-col">{{ name || '（未指定）' }}</td>
+              <td class="sticky-col">
+                <span>{{ breakdown === 'session' ? sessionDisplayName(name) : (name || '（未指定）') }}</span>
+                <v-btn
+                  v-if="breakdown === 'session' && name"
+                  size="x-small"
+                  variant="text"
+                  color="primary"
+                  @click="openSessionRow(name)"
+                >
+                  查看会话
+                </v-btn>
+              </td>
               <td v-for="b in tableBuckets" :key="b.bucket" class="num">
                 {{ fmtSeries(seriesMetricValue(b, name)) }}
               </td>
@@ -707,6 +846,14 @@ onUnmounted(() => {
   --accent: #ff6b35;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 /* ① 大 KPI */
 .hero { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .hero-card { background: var(--card-bg); border: var(--card-border); border-radius: 10px;
@@ -719,11 +866,10 @@ onUnmounted(() => {
 /* ② 筛选条 */
 .filter-bar { display: flex; align-items: center; gap: 8px; margin: 16px 0 14px;
               flex-wrap: wrap; }
-.fb-label { font-size: 12px; color: var(--muted); }
-.pill :deep(.v-field) { border-radius: 999px; background: var(--card-bg);
-                       box-shadow: none; border: var(--card-border); }
-.pill :deep(.v-field__input) { min-height: 30px; padding-top: 0; padding-bottom: 0;
-                               font-size: 12px; }
+.filter-field { flex: 0 1 170px; min-width: 150px; }
+.filter-field--range { flex-basis: 190px; }
+.filter-field :deep(.v-field__input) { font-size: 12px; }
+.filter-field :deep(.v-label) { font-size: 12px; }
 .link-btn { background: none; border: none; color: var(--muted); font-size: 12px;
             cursor: pointer; padding: 4px 6px; }
 .link-btn:hover { color: rgb(var(--v-theme-primary)); text-decoration: underline; }
@@ -818,4 +964,28 @@ onUnmounted(() => {
                           border-left: 1px solid rgba(var(--v-theme-on-surface), 0.14); }
 .usage-table tbody tr:hover { background: rgba(var(--v-theme-surface-variant), 0.3); }
 .loading { margin-top: 12px; font-size: 12px; color: var(--muted); }
+
+/* 窄屏：KPI/筛选条单列排，避免数字被压扁 */
+@media (max-width: 720px) {
+  .hero {
+    grid-template-columns: 1fr;
+  }
+
+  .kpis {
+    grid-template-columns: 1fr;
+  }
+
+  .filter-bar {
+    gap: 6px;
+  }
+
+  .filter-field {
+    flex: 1 1 140px;
+    min-width: 140px;
+  }
+
+  .x-axis {
+    margin-left: 46px;
+  }
+}
 </style>

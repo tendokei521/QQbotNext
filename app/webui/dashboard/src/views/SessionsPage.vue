@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { AxiosError } from 'axios'
 import http, { errorMessage, token } from '@/api/http'
 import { useBotsStore } from '@/stores/bots'
@@ -61,6 +62,8 @@ interface MediaStats {
 
 const bots = useBotsStore()
 const notify = useNotifyStore()
+const route = useRoute()
+const router = useRouter()
 
 const sessions = ref<SessionSummary[]>([])
 const conversations = ref<ConversationSummary[]>([])
@@ -82,6 +85,12 @@ let conversationSeq = 0
 const selectedSessionId = ref('')
 const selectedTaskId = ref('')
 const selectedTaskIds = ref<string[]>([])
+
+/** 列表搜索：记录多了以后靠滚动找不动 */
+const sessionQuery = ref('')
+const conversationQuery = ref('')
+/** 消息区容器：用于「跳到最新」 */
+const messageBodyEl = ref<HTMLDivElement | null>(null)
 
 const editDialog = ref(false)
 const editingIndex = ref(-1)
@@ -111,6 +120,28 @@ const botId = computed(() => bots.currentAccountId)
 const selectedSession = computed(
   () => sessions.value.find((s) => s.session_id === selectedSessionId.value) || null,
 )
+
+/** 会话列表搜索：按展示标题或会话标识匹配 */
+const filteredSessions = computed(() => {
+  const keyword = sessionQuery.value.trim().toLowerCase()
+  if (!keyword) return sessions.value
+  return sessions.value.filter(
+    (s) =>
+      sessionTitle(s).toLowerCase().includes(keyword) ||
+      String(s.session_id || '').toLowerCase().includes(keyword),
+  )
+})
+
+/** 对话列表搜索：按标题或任务标识匹配 */
+const filteredConversations = computed(() => {
+  const keyword = conversationQuery.value.trim().toLowerCase()
+  if (!keyword) return conversations.value
+  return conversations.value.filter(
+    (c) =>
+      String(c.title || '').toLowerCase().includes(keyword) ||
+      String(c.task_id || '').toLowerCase().includes(keyword),
+  )
+})
 
 function isNotFoundError(err: unknown): boolean {
   return err instanceof AxiosError && err.response?.status === 404
@@ -208,7 +239,22 @@ async function loadSessions() {
     })
     if (!stillCurrent()) return
     sessions.value = res.data?.sessions || []
-    if (!selectedSessionId.value || !sessions.value.some((s) => s.session_id === selectedSessionId.value)) {
+    // 外部链接（数据统计的「查看会话」）带 ?session= 时优先选中它
+    const wanted = querySessionId()
+    const preferred =
+      wanted && sessions.value.some((s) => s.session_id === wanted) ? wanted : ''
+    // 外部链接指定的会话不在当前账号下（地址过期 / 别的账号）：清掉地址参数，别让它一直指着不存在的会话
+    if (wanted && !preferred) syncSessionQuery('')
+    if (preferred) {
+      if (selectedSessionId.value !== preferred) {
+        selectedSessionId.value = preferred
+        selectedTaskId.value = ''
+        conversation.value = null
+      }
+    } else if (
+      !selectedSessionId.value ||
+      !sessions.value.some((s) => s.session_id === selectedSessionId.value)
+    ) {
       selectedSessionId.value = sessions.value[0]?.session_id || ''
       selectedTaskId.value = '' // 换了会话：旧对话 id 不再有效
       conversation.value = null
@@ -220,6 +266,7 @@ async function loadSessions() {
       conversation.value = null
       selectedTaskId.value = ''
       selectedTaskIds.value = []
+      syncSessionQuery('')
     }
   } catch (err) {
     if (!stillCurrent()) return
@@ -290,6 +337,41 @@ async function loadConversations(autoOpen = true) {
   }
 }
 
+/**
+ * 外部链接通过 ?session= 指定要打开的会话（数据统计的「查看会话」用）。
+ * 只做选中；具体对话由 loadConversations 去拉。
+ */
+function querySessionId(): string {
+  return String(route.query.session || '')
+}
+
+/** 把当前选中会话写回地址栏：刷新/分享后仍停在同一个会话 */
+function syncSessionQuery(sessionId: string) {
+  if (String(route.query.session || '') === sessionId) return
+  const query = { ...route.query }
+  if (sessionId) query.session = sessionId
+  else delete query.session
+  void router.replace({ query })
+}
+
+function applyQuerySelection() {
+  const wanted = querySessionId()
+  if (!wanted || wanted === selectedSessionId.value) return
+  if (!sessions.value.some((s) => s.session_id === wanted)) {
+    // 链接指向的会话不在当前账号下：清掉参数并说明，避免界面停在旧选中项却对不上地址
+    syncSessionQuery('')
+    notify.push('这个会话不在当前账号下，已切换回列表', 'warning')
+    return
+  }
+  selectedSessionId.value = wanted
+  selectedTaskId.value = ''
+  conversation.value = null
+  // 作废在途的旧会话请求
+  conversationSeq += 1
+  loadingConversation.value = false
+  void loadConversations()
+}
+
 async function loadMediaStats() {
   if (botId.value == null) {
     mediaStats.value = null
@@ -348,6 +430,7 @@ function selectSession(id: string) {
   // 切换会话：作废在途的详情请求，避免旧会话内容盖到新选择上
   conversationSeq += 1
   loadingConversation.value = false
+  syncSessionQuery(id)
   loadConversations()
 }
 
@@ -459,6 +542,7 @@ async function deleteSession() {
     })
     notify.push('会话已删除', 'success')
     selectedSessionId.value = ''
+    syncSessionQuery('')
     selectedTaskId.value = ''
     selectedTaskIds.value = []
     conversation.value = null
@@ -703,7 +787,40 @@ async function exportConversation(format: 'text' | 'json') {
   }
 }
 
-watch(botId, () => {
+/** 列表行内导出：不必先点开对话（完整消息由服务端读取） */
+async function exportConversationRow(target: ConversationSummary, format: 'text' | 'json') {
+  if (botId.value == null || !selectedSessionId.value) return
+  try {
+    const res = await http.get(
+      `/api/sessions/${encodeURIComponent(selectedSessionId.value)}/conversations/${target.task_id}/export`,
+      { params: { account_id: botId.value, format }, responseType: 'blob' },
+    )
+    const blob = res.data instanceof Blob ? res.data : new Blob([res.data])
+    const baseName = safeFileName(target.title || '对话')
+    saveBlob(blob, format === 'json' ? `${baseName}.json` : `${baseName}.txt`)
+    notify.push('导出已开始', 'success')
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  }
+}
+
+/** 消息区回到最新一条（对话很长时不用手动滚到底） */
+function scrollToLatest() {
+  const el = messageBodyEl.value
+  if (!el) return
+  el.scrollTop = el.scrollHeight
+}
+
+// 打开对话后默认停在最新消息
+watch(
+  () => conversation.value?.task_id,
+  async () => {
+    await nextTick()
+    scrollToLatest()
+  },
+)
+
+watch(botId, (_next, previous) => {
   // 切账号：作废所有在途请求，避免上一个账号的会话/对话盖到新账号上
   sessionsSeq += 1
   listSeq += 1
@@ -717,8 +834,21 @@ watch(botId, () => {
   selectedTaskId.value = ''
   selectedTaskIds.value = []
   conversation.value = null
+  sessionQuery.value = ''
+  conversationQuery.value = ''
+  // 首次从「还没选中账号」变为有账号（深链直接打开带 ?session=）时保留 query，
+  // 否则会把外部链接指定的会话清掉；真正的账号切换（previous 非空）才清。
+  if (previous != null) syncSessionQuery('')
   loadSessions()
 })
+
+// 地址栏里的 ?session= 变化（例如从数据统计页点「查看会话」回来）时同步选中
+watch(
+  () => route.query.session,
+  () => {
+    applyQuerySelection()
+  },
+)
 
 onMounted(() => {
   loadSessions()
@@ -730,31 +860,32 @@ onMounted(() => {
     <div class="app-page-header" style="align-items: center">
       <div>
         <h1 class="app-page-title">会话数据</h1>
-        <div class="app-page-subtitle">查看、编辑、导出与恢复当前账号的聊天记录</div>
+        <div class="app-page-subtitle">会话是群聊 / 私聊记录，对话是一次任务保存的对话线程</div>
       </div>
-      <v-spacer />
-      <v-chip v-if="mediaStats" size="small" variant="tonal" class="mr-2" :loading="loadingMedia">
-        <v-icon icon="mdi-image-multiple" start size="small" />
-        {{ mediaStats.count }} 张 · {{ fmtBytes(mediaStats.bytes) }} · 可清理 {{ mediaStats.unreferenced }}
-      </v-chip>
-      <v-btn
-        v-if="mediaStats && mediaStats.unreferenced > 0"
-        variant="tonal"
-        prepend-icon="mdi-broom"
-        class="mr-1"
-        :loading="purgingMedia"
-        @click="purgeMedia"
-      >
-        清理未引用图片
-      </v-btn>
-      <v-btn v-if="selectedSessionId" variant="tonal" prepend-icon="mdi-file-upload-outline" class="mr-1" @click="exportSession">
-        导出当前会话
-      </v-btn>
-      <v-btn variant="tonal" prepend-icon="mdi-upload" class="mr-1" @click="openRestorePicker">导入备份</v-btn>
-      <v-btn v-if="selectedSessionId" variant="tonal" prepend-icon="mdi-delete-empty" color="error" @click="deleteSession">
-        删除当前会话
-      </v-btn>
-      <v-btn variant="tonal" prepend-icon="mdi-refresh" @click="loadSessions">刷新</v-btn>
+      <div class="page-header-actions">
+        <v-btn variant="text" prepend-icon="mdi-chart-bar" @click="router.push('/stats')">用量统计</v-btn>
+        <v-chip v-if="mediaStats" size="small" variant="tonal" :loading="loadingMedia">
+          <v-icon icon="mdi-image-multiple" start size="small" />
+          {{ mediaStats.count }} 张 · {{ fmtBytes(mediaStats.bytes) }} · 可清理 {{ mediaStats.unreferenced }}
+        </v-chip>
+        <v-btn
+          v-if="mediaStats && mediaStats.unreferenced > 0"
+          variant="tonal"
+          prepend-icon="mdi-broom"
+          :loading="purgingMedia"
+          @click="purgeMedia"
+        >
+          清理未引用图片
+        </v-btn>
+        <v-btn v-if="selectedSessionId" variant="tonal" prepend-icon="mdi-file-upload-outline" @click="exportSession">
+          导出当前会话
+        </v-btn>
+        <v-btn variant="tonal" prepend-icon="mdi-upload" @click="openRestorePicker">导入备份</v-btn>
+        <v-btn v-if="selectedSessionId" variant="tonal" prepend-icon="mdi-delete-empty" color="error" @click="deleteSession">
+          删除当前会话
+        </v-btn>
+        <v-btn variant="tonal" prepend-icon="mdi-refresh" @click="loadSessions">刷新</v-btn>
+      </div>
       <input
         ref="restoreFileInput"
         type="file"
@@ -778,6 +909,16 @@ onMounted(() => {
             <v-icon icon="mdi-chat-outline" class="mr-2" color="primary" /> 会话列表
           </v-card-title>
           <v-card-text class="pa-2">
+            <v-text-field
+              v-model="sessionQuery"
+              density="compact"
+              variant="outlined"
+              hide-details
+              clearable
+              prepend-inner-icon="mdi-magnify"
+              placeholder="搜索会话"
+              class="list-search mb-2"
+            />
             <v-progress-linear v-if="loadingSessions" indeterminate color="primary" />
             <template v-else-if="botId == null">
               <div class="text-caption text-center pa-4">请先选择一个账号</div>
@@ -787,11 +928,24 @@ onMounted(() => {
               <v-btn size="x-small" variant="text" prepend-icon="mdi-refresh" @click="loadSessions">重试</v-btn>
             </v-alert>
             <template v-else-if="sessions.length === 0">
-              <div class="text-caption text-center pa-4">暂无会话数据</div>
+              <div class="empty-block">
+                <div class="text-caption">账号连上协议端并收到消息后，这里会自动出现记录。</div>
+                <div class="d-flex justify-center flex-wrap gap-2 mt-2">
+                  <v-btn size="small" variant="tonal" prepend-icon="mdi-robot-outline" @click="router.push('/bots')">
+                    去账号管理
+                  </v-btn>
+                  <v-btn size="small" variant="text" prepend-icon="mdi-console" @click="router.push('/logs')">
+                    看连接日志
+                  </v-btn>
+                </div>
+              </div>
+            </template>
+            <template v-else-if="filteredSessions.length === 0">
+              <div class="text-caption text-center pa-4">没有匹配的会话</div>
             </template>
             <v-list v-else density="compact">
               <v-list-item
-                v-for="s in sessions"
+                v-for="s in filteredSessions"
                 :key="s.session_id"
                 :active="selectedSessionId === s.session_id"
                 @click="selectSession(s.session_id)"
@@ -831,20 +985,33 @@ onMounted(() => {
             </v-btn>
           </v-card-title>
           <v-card-text class="pa-2">
+            <v-text-field
+              v-model="conversationQuery"
+              density="compact"
+              variant="outlined"
+              hide-details
+              clearable
+              prepend-inner-icon="mdi-magnify"
+              placeholder="搜索对话"
+              class="list-search mb-2"
+            />
             <v-progress-linear v-if="loadingConversations" indeterminate color="primary" />
             <template v-else-if="!selectedSessionId">
-              <div class="text-caption text-center pa-4">请选择左侧会话</div>
+              <div class="text-caption text-center pa-4">先从会话列表选一个</div>
             </template>
             <v-alert v-else-if="conversationsError" type="error" variant="tonal" density="compact" class="ma-2">
               <div class="text-caption mb-1">对话列表加载失败：{{ conversationsError }}</div>
               <v-btn size="x-small" variant="text" prepend-icon="mdi-refresh" @click="loadConversations(false)">重试</v-btn>
             </v-alert>
             <template v-else-if="conversations.length === 0">
-              <div class="text-caption text-center pa-4">该会话暂无对话</div>
+              <div class="text-caption text-center pa-4">这个会话还没有对话</div>
+            </template>
+            <template v-else-if="filteredConversations.length === 0">
+              <div class="text-caption text-center pa-4">没有匹配的对话</div>
             </template>
             <v-list v-else density="compact">
               <v-list-item
-                v-for="c in conversations"
+                v-for="c in filteredConversations"
                 :key="c.task_id"
                 :active="selectedTaskId === c.task_id"
                 @click="openConversation(c.task_id)"
@@ -862,6 +1029,26 @@ onMounted(() => {
                   {{ c.messages }} 条消息 · {{ fmtTime(c.saved_at) }}
                 </v-list-item-subtitle>
                 <template #append>
+                  <v-menu location="bottom end">
+                    <template #activator="{ props }">
+                      <v-btn
+                        v-bind="props"
+                        size="x-small"
+                        variant="text"
+                        icon="mdi-download"
+                        title="导出这个对话"
+                        @click.stop
+                      />
+                    </template>
+                    <v-list density="compact">
+                      <v-list-item prepend-icon="mdi-file-document-outline" @click="exportConversationRow(c, 'text')">
+                        导出 TXT
+                      </v-list-item>
+                      <v-list-item prepend-icon="mdi-json" @click="exportConversationRow(c, 'json')">
+                        导出 JSON
+                      </v-list-item>
+                    </v-list>
+                  </v-menu>
                   <v-btn size="x-small" variant="text" icon="mdi-pencil" title="重命名" :disabled="deletingTaskId !== ''" @click.stop="renameConversation(c)" />
                   <v-btn
                     size="x-small"
@@ -889,14 +1076,14 @@ onMounted(() => {
             <v-btn size="small" variant="tonal" prepend-icon="mdi-download" @click="exportConversation('text')">导出 TXT</v-btn>
             <v-btn size="small" variant="tonal" prepend-icon="mdi-json" @click="exportConversation('json')">导出 JSON</v-btn>
           </v-card-title>
-          <v-card-title v-else class="text-caption">请选择对话线程查看消息</v-card-title>
+          <v-card-title v-else class="text-caption">从对话列表选一个，消息显示在这里</v-card-title>
 
           <v-card-text class="pa-2">
             <v-progress-linear v-if="loadingConversation" indeterminate color="primary" />
             <template v-else-if="!conversation">
-              <div class="text-caption text-center pa-6">暂无消息内容</div>
+              <div class="text-caption text-center pa-6">这个对话还没有消息</div>
             </template>
-            <div v-else class="session-messages" style="max-height: calc(100vh - 320px); overflow-y: auto">
+            <div v-else ref="messageBodyEl" class="session-messages" style="max-height: calc(100vh - 320px); overflow-y: auto">
               <div v-for="(msg, index) in conversation.messages" :key="index" class="message-row">
                 <div class="message-meta">
                   <v-chip size="x-small" :color="roleColor(msg.role)" variant="tonal">{{ roleLabel(msg.role) }}</v-chip>
@@ -948,6 +1135,12 @@ onMounted(() => {
                 <div class="message-content">{{ msg.content }}</div>
               </div>
               <div v-if="!conversation.messages.length" class="text-caption text-center pa-6">该对话没有消息</div>
+            </div>
+
+            <div v-if="conversation?.messages.length" class="jump-latest-wrap">
+              <v-btn size="x-small" variant="tonal" prepend-icon="mdi-arrow-down" @click="scrollToLatest">
+                跳到最新
+              </v-btn>
             </div>
 
             <v-divider v-if="conversation" class="my-3" />
@@ -1027,6 +1220,37 @@ onMounted(() => {
 <style scoped>
 .h-full {
   height: 100%;
+}
+
+.page-header-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.list-search {
+  flex: 0 0 auto;
+}
+
+.empty-block {
+  padding: 20px 16px;
+  text-align: center;
+  line-height: 1.7;
+}
+
+.jump-latest-wrap {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+@media (max-width: 720px) {
+  .page-header-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
 }
 
 .session-messages {
