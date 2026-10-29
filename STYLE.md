@@ -145,6 +145,9 @@ except Exception as e:
     + `ruff check .` 无新增违规；基线用例数不写死，随迭代增长，需要时用
     `pytest --collect-only -q | tail -2` 取当前值。
 - CI（`.github/workflows/ci.yml`）在每次 push/PR 跑全量测试，是本地豁免全量后的安全网。
+- **前端改动另需"看真实渲染"**：`app/webui/dashboard/**` 的 `.vue` / `.ts`、前端文案、注入页面，
+  除静态闸门外必须截图（1440 + 390）+ DOM 量测（无横向溢出、状态切换位置差 ≤1px）。
+  细则见 `AGENTS.md`「前端改动：必须看真实渲染」与 `docs/FRONTEND_VERIFY.md`（本节不重复命令）。
 - 任何档位都**不许带着已知失败提交**：跑了且失败，就先修或先说明。
 - 测试用 `pytest-asyncio`（`asyncio_mode = "auto"`，无需 `@pytest.mark.asyncio`）。
 
