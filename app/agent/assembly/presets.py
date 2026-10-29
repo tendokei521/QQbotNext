@@ -449,12 +449,20 @@ PRESETS: tuple[PromptPreset, ...] = (CHAT, ROLEPLAY, ASSISTANT)
 #: ``key -> PromptPreset``
 _BY_KEY: dict[str, PromptPreset] = {p.key: p for p in PRESETS}
 
+#: 产品默认方案：新账号 / 老数据迁移后都落到这一套（不再有"不选方案"的界面态）
+DEFAULT_PRESET_KEY = "chat"
+
+
+def get(key: str) -> PromptPreset | None:
+    """按 key 取方案（大小写不敏感）；未知返回 ``None``。"""
+    return _BY_KEY.get(str(key or "").strip().lower())
+
 
 def resolve(config: Any) -> PromptPreset | None:
-    """读 ``prompt_preset`` 得到方案；空 / 未知值返回 ``None``（= 逐字走现状）。
+    """读 ``prompt_preset`` 得到方案；空 / 未知值返回 ``None``（= 库层兼容回退）。
 
-    未知值按"没选"处理而不是报错：拼错方案名只会不生效，不会半生效——
-    与 ``assembly_profile`` 的口径一致。
+    界面与默认配置保证"三选一"（见 ``config.py`` 默认值与启动迁移）；这里的 ``None``
+    只作为兜底：直接构造 config 的库层调用（测试/脚本）仍可走不带方案的旧文案。
     """
     value = ""
     if config is not None and hasattr(config, "get"):

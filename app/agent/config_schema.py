@@ -147,11 +147,10 @@ SCHEMA = {
         "default": "你是一个友好的助手。", "placeholder": "你是一个友好的助手...", "group": "group_session",
     },
     "prompt_preset": {
-        "type": "select", "label": "提示词风格",
-        "description": "只换说话风格的提示词，不改人格；留空沿用内置文案。",
-        "default": "", "group": "group_session",
+        "type": "select", "label": "系统提示词方案",
+        "description": "三选一：决定框架生成的系统提示词口径（人格设定不受影响）。",
+        "default": "chat", "group": "group_session",
         "options": {
-            "": "未选择（沿用内置文案）",
             "chat": "聊天：普通群友口吻，短句、选择性接话",
             "roleplay": "角色扮演：以人设身份持续扮演，不跳出",
             "assistant": "助手：有求必应、先给结论、结构化",

@@ -28,9 +28,8 @@ DEFAULT_LLM_CONFIG: dict = {
     "system_prompt": "你是一个友好的助手。",
     # 提示词方案（Chat / 角色扮演 / 助手）：只替换**框架生成的 system 文案**
     # （行为段 / 定时协议 / 消息格式说明 / 表情提示 / 主动性行），人格块不受影响。
-    # 留空 = 逐字等于改造前（行为段仍只看 assembly_profile），所以选方案是纯增量，
-    # 想回退把这里清空即可。可选值见 app/agent/assembly/presets.py::PRESETS。
-    "prompt_preset": "",
+    # 空/拼错统一落到 chat（三套之一，见 app/agent/assembly/presets.py::PRESETS）。
+    "prompt_preset": "chat",
     # 角色预设**活引用**：填预设 ID 时，每轮组装都按 ID 实时解析预设的提示词与预设对话，
     # 因此改预设名/改提示词立刻生效（不需要"应用一次"把内容拷进 system_prompt）；
     # 留空则完全走下面的 system_prompt —— 旧行为逐字不变。

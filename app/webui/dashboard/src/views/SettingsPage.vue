@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useWebuiStore } from '@/stores/webui'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
+import PromptPresetEditorDialog from '@/components/settings/PromptPresetEditorDialog.vue'
 
 const router = useRouter()
 const webui = useWebuiStore()
 const notify = useNotifyStore()
+const promptDialog = ref(false)
 
 /** 界面构建戳：排查「改了没生效」时用。 */
 const buildStamp = __BUILD_STAMP__
@@ -120,6 +122,21 @@ const showExperimental = computed<boolean>({
       <v-col cols="12" lg="6">
         <v-card variant="outlined" class="mb-4">
           <v-card-title class="d-flex align-center">
+            <v-icon icon="mdi-text-box-edit-outline" class="mr-2" color="primary" /> 系统提示词
+          </v-card-title>
+          <v-card-text class="d-flex align-center flex-wrap gap-2">
+            <div class="text-caption" style="opacity: 0.7">
+              本地修改「聊天 / 角色扮演 / 助手」三套提示词正文（全局生效）。
+            </div>
+            <v-spacer />
+            <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-pencil" @click="promptDialog = true">
+              编辑系统提示词
+            </v-btn>
+          </v-card-text>
+        </v-card>
+
+        <v-card variant="outlined" class="mb-4">
+          <v-card-title class="d-flex align-center">
             <v-icon icon="mdi-flask-outline" class="mr-2" color="warning" /> 高级选项
           </v-card-title>
           <v-card-text>
@@ -170,5 +187,6 @@ const showExperimental = computed<boolean>({
         </v-card>
       </v-col>
     </v-row>
+    <PromptPresetEditorDialog v-model="promptDialog" />
   </div>
 </template>

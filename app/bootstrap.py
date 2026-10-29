@@ -523,6 +523,18 @@ async def run(settings: Settings | None = None) -> None:
 
     await migrate_legacy_dialog_policies(config_service)
 
+    # 系统提示词方案：加载"设置页里编辑过"的覆盖文本 + 把未选方案的存量账号落到 chat
+    try:
+        from app.application import prompt_preset_service
+        from app.application.agent_prompt_preset_migration import migrate_prompt_preset
+
+        await prompt_preset_service.load_overrides(config_service)
+        updated = await migrate_prompt_preset(config_service)
+        if updated:
+            logger.info(f"[PromptPreset] 已将 {updated} 个账号的提示词方案落到默认 chat")
+    except Exception as e:  # noqa: BLE001 —— 提示词方案加载失败不该阻断启动
+        logger.warning(f"[PromptPreset] 初始化失败（已忽略）: {e}")
+
     # 预设应用崩溃恢复：上次进程在"应用中途"退出 → 按快照回滚（幂等、best-effort）
     try:
         from app.application.bundle.service import BundleService
