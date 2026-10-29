@@ -12,6 +12,7 @@ import {
   type ApplyResult,
   type BundleHealth,
   type BundleReport,
+  type ModuleDepsLog,
   type ReusePreset,
 } from '@/stores/bundles'
 import { useNotifyStore } from '@/stores/notify'
@@ -36,6 +37,10 @@ const applied = ref<ApplyResult | null>(null)
 const health = ref<BundleHealth | null>(null)
 const importedOnly = ref(false)
 const acceptCode = ref(false)
+/** 应用后自动安装随包模块的 pip 依赖（需联网；有缺失依赖时默认勾选） */
+const installDeps = ref(false)
+/** 可选 pip 镜像地址（留空用默认源/已配置镜像） */
+const depsMirror = ref('')
 const error = ref('')
 const dragOver = ref(false)
 const secretsForm = reactive<Record<string, string>>({})
@@ -52,6 +57,13 @@ const reusePresetOptions = computed(() =>
 /** 包含可执行模块代码 → 必须显式确认信任才允许导入/应用 */
 const needsConsent = computed(() => Boolean(report.value?.requires_code_consent))
 const consentBlocked = computed(() => needsConsent.value && !acceptCode.value)
+/** 随包模块缺的第三方依赖（模块名 + 依赖行）：勾选后可联网一键补齐 */
+const missingDeps = computed(() =>
+  (report.value?.modules || []).flatMap((mod) =>
+    (mod.missing_requirements || []).map((dep) => ({ module: mod.name, dep })),
+  ),
+)
+const hasMissingDeps = computed(() => missingDeps.value.length > 0)
 const accountLabel = computed(() => {
   const bot = bots.bots.find((item) => item.id === targetAccountId.value)
   return bot ? displayName(bot) : (targetAccountId.value || '未选择账号')
@@ -66,6 +78,8 @@ function reset() {
   health.value = null
   importedOnly.value = false
   acceptCode.value = false
+  installDeps.value = false
+  depsMirror.value = ''
   reusePresetId.value = null
   error.value = ''
   dragOver.value = false
@@ -90,6 +104,8 @@ async function prepare(picked: File) {
     Object.keys(secretsForm).forEach((key) => delete secretsForm[key])
     for (const secret of report.value.secrets || []) secretsForm[secret.key] = ''
     reusePresetId.value = null
+    installDeps.value = hasMissingDeps.value
+    depsMirror.value = ''
     if (targetAccountId.value) {
       try {
         reusePresets.value = await bundles.loadReusePresets()
@@ -140,6 +156,8 @@ async function confirmApply() {
       { ...secretsForm },
       acceptCode.value,
       reusePresetId.value || '',
+      installDeps.value,
+      depsMirror.value,
     )
     result.value = { bundle: response.bundle }
     applied.value = response.apply || null
@@ -187,6 +205,18 @@ function formatSize(bytes: number): string {
   if (!bytes) return '—'
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+/** 依赖安装结果压成一行：已装了什么 / 还缺什么（避免把 pip 输出糊满对话框） */
+function depsLine(item: ModuleDepsLog): string {
+  const deps = item.deps || {}
+  if (deps.ok) {
+    const installed = deps.installed || []
+    return installed.length ? `已安装 ${installed.join('、')}` : '依赖已就绪'
+  }
+  const missing = (deps.missing || []).join('、')
+  const tail = (deps.stderr || deps.error || '').trim().split('\n').pop() || ''
+  return `未装齐${missing ? `：${missing}` : ''}${tail ? `（${tail}）` : ''}`
 }
 </script>
 
@@ -299,23 +329,48 @@ function formatSize(bytes: number): string {
                 <v-chip
                   v-if="mod.missing_requirements?.length"
                   size="x-small"
-                  color="error"
+                  color="warning"
                   variant="tonal"
                 >
                   缺依赖 {{ mod.missing_requirements.length }}
                 </v-chip>
               </div>
-              <div
-                v-for="mod in report.modules"
-                :key="mod.name + '-deps'"
-              >
-                <div
-                  v-if="mod.missing_requirements?.length"
-                  class="text-caption text-error"
-                >
-                  {{ mod.name }} 缺少：{{ mod.missing_requirements.join('、') }}（需要先自行装好这些组件，插件才能用）
-                </div>
+            </v-card-text>
+          </v-card>
+
+          <v-card v-if="hasMissingDeps" variant="tonal" color="warning" class="mt-2">
+            <v-card-text class="text-caption">
+              <div class="font-weight-medium mb-1">
+                目标环境缺少 {{ missingDeps.length }} 个插件依赖
               </div>
+              <div>应用时可联网用 pip 自动安装；不勾选则需稍后到插件页手动安装。</div>
+              <div class="d-flex flex-wrap gap-1 mt-2">
+                <v-chip
+                  v-for="item in missingDeps"
+                  :key="item.module + item.dep"
+                  size="x-small"
+                  variant="tonal"
+                >
+                  {{ item.module }} · {{ item.dep }}
+                </v-chip>
+              </div>
+              <v-checkbox
+                v-model="installDeps"
+                density="compact"
+                hide-details
+                class="mt-1"
+                label="应用后自动安装缺失依赖（需要联网）"
+              />
+              <v-text-field
+                v-if="installDeps"
+                v-model="depsMirror"
+                label="pip 镜像地址（可选）"
+                placeholder="https://pypi.tuna.tsinghua.edu.cn/simple"
+                density="compact"
+                variant="outlined"
+                hide-details
+                class="mt-1"
+              />
             </v-card-text>
           </v-card>
 
@@ -400,6 +455,12 @@ function formatSize(bytes: number): string {
             </template>
             <template v-if="applied.modules_upgraded?.length">
               <div>已升级随包插件：{{ applied.modules_upgraded.join('、') }}</div>
+            </template>
+            <template v-if="applied.modules_deps?.length">
+              <div class="mt-1">插件依赖：</div>
+              <div v-for="item in applied.modules_deps" :key="item.module" class="text-caption">
+                {{ item.module }}：{{ depsLine(item) }}
+              </div>
             </template>
             <template v-if="health">
               <div class="mt-1">

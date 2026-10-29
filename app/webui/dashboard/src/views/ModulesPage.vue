@@ -6,6 +6,7 @@ import {
   isBuiltinModule,
   type InstallPreview,
   type ModuleData,
+  type ZipInstallInfo,
 } from '@/stores/modules'
 import { displayName, useBotsStore } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
@@ -67,17 +68,19 @@ const zipFileInput = ref<HTMLInputElement | null>(null)
 /** 与内置模块同名：第三方不允许覆盖内置，确认按钮直接禁用 */
 const zipBlocked = computed(() => !!zipPreview.value?.builtin_conflict)
 
-/** 预检里的缺失依赖：装之前就提示，并允许确认后补装 */
+/** 预检里的缺失依赖：装之前就提示，并允许确认后自动补装 */
 const zipDepsMissing = computed<string[]>(() => zipPreview.value?.deps_missing || [])
 const zipDepsRejected = computed<string[]>(() => zipPreview.value?.deps_rejected || [])
-/** 「先安装依赖」前的显式确认：未勾选不允许点 */
-const zipDepsAck = ref(false)
+/** 安装时自动装依赖（需联网）：有缺失依赖时默认勾选，一键装完就能用 */
+const zipAutoDeps = ref(false)
+/** 可选 pip 镜像地址（留空用默认源/已配置镜像） */
+const zipDepsMirror = ref('')
 
 // ---------- 依赖安装对话框（zip 预览 / 模块卡片两条入口共用） ----------
 type DepsDialogMode = 'zip' | 'card'
 
 const depsDialog = ref(false)
-const depsMode = ref<DepsDialogMode>('zip')
+const depsMode = ref<DepsDialogMode>('card')
 const depsModuleName = ref('')
 const depsModuleLabel = ref('')
 const depsNote = ref('')
@@ -294,7 +297,8 @@ function resetZipDialog() {
   zipValidating.value = false
   zipInstalling.value = false
   zipDragOver.value = false
-  zipDepsAck.value = false
+  zipAutoDeps.value = false
+  zipDepsMirror.value = ''
   if (zipFileInput.value) zipFileInput.value.value = ''
 }
 
@@ -345,10 +349,13 @@ async function prepareZip(file: File) {
   zipFile.value = file
   zipPreview.value = null
   zipError.value = ''
-  zipDepsAck.value = false
+  zipAutoDeps.value = false
+  zipDepsMirror.value = ''
   zipValidating.value = true
   try {
     zipPreview.value = (await modules.validateZip(file)) as DependencyPreview
+    // 缺依赖时默认勾选自动安装：装完即用，不用再手动点一次
+    zipAutoDeps.value = zipDepsMissing.value.length > 0
   } catch (err) {
     zipError.value = errorMessage(err)
   } finally {
@@ -356,18 +363,41 @@ async function prepareZip(file: File) {
   }
 }
 
+/** 安装回执里的自动装依赖结果：失败时说清缺什么、怎么重试 */
+function notifyDepsResult(info: ZipInstallInfo | null) {
+  const deps = info?.deps
+  if (!deps) return
+  if (deps.ok) {
+    const installed = deps.installed || []
+    if (installed.length) notify.push(`已安装依赖：${installed.join('、')}`, 'success')
+    return
+  }
+  const missing = (deps.missing || []).join('、')
+  const tail = (deps.stderr || deps.error || '').trim().split('\n').pop() || ''
+  notify.push(
+    `依赖没装齐${missing ? `（${missing}）` : ''}${tail ? `：${tail}` : ''}；可在插件卡片点「检查依赖」重试`,
+    'warning',
+  )
+}
+
 async function confirmZip() {
   const file = zipFile.value
   if (!file || !zipPreview.value) return
   zipInstalling.value = true
   try {
+    let info: ZipInstallInfo | null = null
     if (zipDialogMode.value === 'update' && zipTarget.value) {
-      await modules.updateZip(zipTarget.value, file)
+      info = await modules.updateZip(
+        zipTarget.value, file, zipAutoDeps.value, zipDepsMirror.value,
+      )
       notify.push(`插件 ${zipTarget.value} 已更新`, 'success')
     } else {
-      await modules.installZip(file, !!zipPreview.value.conflict)
+      info = await modules.installZip(
+        file, !!zipPreview.value.conflict, zipAutoDeps.value, zipDepsMirror.value,
+      )
       notify.push(`插件 ${zipPreview.value.display_name || zipPreview.value.name} 安装成功`, 'success')
     }
+    notifyDepsResult(info)
     // closeZipDialog 在安装中会直接 return：先复位标志再关，否则对话框不关、还能再点一次安装
     zipInstalling.value = false
     closeZipDialog()
@@ -400,22 +430,6 @@ function resetDepsFeedback() {
   depsErrorCommand.value = []
   depsErrorOutput.value = ''
   depsLoadError.value = ''
-}
-
-function openZipDepsDialog() {
-  const preview = zipPreview.value
-  if (!preview) return
-  depsMode.value = 'zip'
-  depsModuleName.value = preview.name
-  depsModuleLabel.value = preview.display_name || preview.name
-  depsNote.value = '会先安装插件，再用 pip 安装这些组件。'
-  depsPackages.value = [...zipDepsMissing.value]
-  depsCommand.value = []
-  depsRejected.value = [...zipDepsRejected.value]
-  depsMirror.value = ''
-  resetDepsFeedback()
-  depsLoading.value = false
-  depsDialog.value = true
 }
 
 function openDepsCheck(m: ModuleData) {
@@ -473,27 +487,12 @@ function depsFailureDetail(err: unknown): {
   }
 }
 
-/** 确认后用 pip 装声明过的组件；zip 入口必须先把插件装上 */
+/** 确认后用 pip 装声明过的组件（只用于已安装插件的手动补装入口） */
 async function runDepsInstall() {
   if (!depsModuleName.value || depsRunning.value) return
   depsRunning.value = true
   resetDepsFeedback()
   try {
-    if (depsMode.value === 'zip') {
-      const file = zipFile.value
-      if (!file) throw new Error('请先选择插件压缩包')
-      // 后端只接受「已安装插件」的依赖安装：zip 入口先落盘插件
-      zipInstalling.value = true
-      try {
-        if (zipDialogMode.value === 'update' && zipTarget.value) {
-          await modules.updateZip(zipTarget.value, file)
-        } else {
-          await modules.installZip(file, !!zipPreview.value?.conflict)
-        }
-      } finally {
-        zipInstalling.value = false
-      }
-    }
     const form = new FormData()
     form.append('confirm_deps', 'true')
     const mirror = depsMirror.value.trim()
@@ -928,7 +927,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
             </div>
           </v-alert>
 
-          <!-- 依赖预检：先显式勾选确认，再弹确认框安装；不支持的写法只提示不安装 -->
+          <!-- 依赖预检：装之前说清缺什么；勾选后随安装一起用 pip 补装（需联网） -->
           <v-alert
             v-if="zipPreview && zipDepsRejected.length"
             type="warning"
@@ -947,26 +946,27 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
             density="compact"
             class="mt-3"
           >
-            <div class="text-caption">这个插件还需要安装 {{ zipDepsMissing.length }} 个组件才能用：</div>
+            <div class="text-caption">这个插件还需要安装 {{ zipDepsMissing.length }} 个运行组件才能用：</div>
             <div class="d-flex flex-wrap gap-1 mt-1">
               <v-chip v-for="dep in zipDepsMissing" :key="dep" size="x-small" variant="tonal">{{ dep }}</v-chip>
             </div>
             <v-checkbox
-              v-model="zipDepsAck"
+              v-model="zipAutoDeps"
               density="compact"
               hide-details
               class="mt-1"
-              label="我确认允许自动安装这些组件"
+              label="安装时自动安装这些组件（需要联网）"
             />
-            <v-btn
-              size="small"
-              variant="tonal"
-              color="warning"
-              :disabled="!zipDepsAck || zipInstalling || depsRunning"
-              @click="openZipDepsDialog"
-            >
-              先安装依赖
-            </v-btn>
+            <v-text-field
+              v-if="zipAutoDeps"
+              v-model="zipDepsMirror"
+              label="pip 镜像地址（可选）"
+              placeholder="https://pypi.tuna.tsinghua.edu.cn/simple"
+              density="compact"
+              variant="outlined"
+              hide-details
+              class="mt-1"
+            />
           </v-alert>
         </v-card-text>
         <v-card-actions>
