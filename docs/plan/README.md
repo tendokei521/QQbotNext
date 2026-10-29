@@ -37,6 +37,7 @@
 | **R3** | 高级视图（规则覆盖） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r3-高级视图) |
 | **R4** | 迁移收口 | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r4-迁移收口) |
 | **T0–T4** | 触发方式并入「回复与权限」 | `[x]` | [`trigger-policy-integration.md`](trigger-policy-integration.md) |
+| **G0–G3** | 全局触发规则移到 AI 面板「触发方式」（**规划中**） | `[ ]` | [`global-trigger-rules-to-ai-panel.md`](global-trigger-rules-to-ai-panel.md) |
 
 | 编号 | commit | 内容 |
 |---|---|---|
