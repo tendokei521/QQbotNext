@@ -126,13 +126,20 @@ onMounted(() => {
 
 <template>
   <v-card variant="outlined" class="mb-4">
-    <v-card-title class="d-flex align-center flex-wrap gap-2">
+    <v-card-title class="v-card-title persona-head">
       <v-icon icon="mdi-account-heart" class="mr-2" color="pink" /> 人格
-      <v-chip v-if="persona.kind === 'bound'" size="small" color="pink" variant="tonal">当前人格：{{ persona.label }}</v-chip>
-      <v-chip v-else-if="persona.kind === 'same-content'" size="small" color="warning" variant="tonal">
+      <v-chip
+        v-if="persona.kind === 'bound'"
+        class="persona-chip"
+        color="pink"
+        variant="tonal"
+      >
         当前人格：{{ persona.label }}
       </v-chip>
-      <v-chip v-else size="small" variant="tonal">当前人格：未选择</v-chip>
+      <v-chip v-else-if="persona.kind === 'same-content'" class="persona-chip" color="warning" variant="tonal">
+        当前人格：{{ persona.label }}
+      </v-chip>
+      <v-chip v-else class="persona-chip" variant="tonal">当前人格：未选择</v-chip>
       <v-spacer />
     </v-card-title>
     <v-card-text v-if="presets.length" class="text-caption pt-0 pb-0" style="opacity: 0.7">
@@ -264,6 +271,21 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.persona-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.persona-chip {
+  /* 默认尺寸的 chip 高度 32px、左右各 12px 内边距；这里再放宽到 18px，避免长人格名贴边 */
+  padding-inline: 18px;
+  height: 32px;
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
 .preset-list {
   max-height: 300px;
   overflow-y: auto;
