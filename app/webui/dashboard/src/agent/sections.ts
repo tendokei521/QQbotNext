@@ -25,7 +25,7 @@ export interface AgentSection {
   subtitle: string
   icon: string
   color: string
-  /** 侧边栏/概览内的排序权重 */
+  /** 侧边栏内的排序权重 */
   order: number
   /** 页内子分组：决定段内导航、分组标题与字段归属 */
   groups: VirtualGroupSpec[]
