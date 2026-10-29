@@ -66,6 +66,7 @@ class Module(BaseModule):
             return
         from app.agent.delivery.output import ConfigView
         from app.agent.loop.providers import register_tool_source
+
         from .src.mcp import MCPManager
         from .src.service import MCPToolSource, OneBotToolSource
 
