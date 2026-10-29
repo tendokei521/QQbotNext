@@ -45,14 +45,14 @@ SCHEMA = {
     },
     "proactive_quiet_hours_start": {
         "type": "number",
-        "label": "免打扰开始(小时)",
-        "description": "该小时起不主动发言（0-23）",
+        "label": "免打扰开始(小时，仅主动消息)",
+        "description": "该小时起不主动发言（0-23）；被 @ 等被动回复不受影响，其免打扰在「回复与权限 → 高级规则」",
         "default": 1,
     },
     "proactive_quiet_hours_end": {
         "type": "number",
-        "label": "免打扰结束(小时)",
-        "description": "该小时起恢复（支持跨天，如 1→7）",
+        "label": "免打扰结束(小时，仅主动消息)",
+        "description": "该小时起恢复（可跨天）；被 @ 等被动回复不受影响，其免打扰在「回复与权限 → 高级规则」",
         "default": 7,
     },
     "proactive_group_idle_minutes": {

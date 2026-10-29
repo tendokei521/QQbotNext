@@ -41,7 +41,7 @@ OWNED_KEYS: tuple[str, ...] = (
 class Module(BaseModule):
     name = "工具扩展"
     sign = "LlmToolsExtra"
-    description = "给模型更多可用工具，并控制它怎么回应工具结果"
+    description = "给模型更多可用工具，并控制它怎么回应工具结果；OneBot 工具的开关与权限在「高级工具 → OneBot 工具」里设置"
     permission = "everyone"
     subscribe = ()
     category = "LLM"

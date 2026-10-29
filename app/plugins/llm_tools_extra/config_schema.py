@@ -1,38 +1,16 @@
-"""工具扩展模块的配置 Schema（OneBot 6 键 + MCP 1 键 + 回应要求 2 键）。"""
+"""工具扩展模块的配置 Schema（MCP 1 键 + 回应要求 2 键 + 结果长度上限）。
+
+OneBot 工具的启用/允许/禁止/逐工具权限**不在本页配置**：它们都在
+「高级工具 → OneBot 工具」里按工具开关与设置（那里有工具清单，不用手打内部工具名）。
+这些键仍由本模块拥有，只是有意不在插件配置页渲染（见 `SCHEMA_HIDDEN_KEYS`）。
+"""
 
 SCHEMA = {
-    "onebot_tools_enable": {
-        "type": "boolean",
-        "label": "启用 OneBot 工具",
-        "description": "把 OneBot API 暴露给模型（发消息/查群/撤回等），按下面的名单过滤",
-        "default": True,
-    },
-    "onebot_tools_allowed": {
-        "type": "string_list",
-        "label": "允许的工具",
-        "description": "留空=按内置权限表放行；填写则只放行这些（工具名）",
-        "default": [],
-    },
-    "onebot_tools_denied": {
-        "type": "string_list",
-        "label": "禁止的工具",
-        "description": "无论内置策略如何都禁止（工具名）",
-        "default": [],
-    },
     "onebot_tools_max_result": {
         "type": "number",
         "label": "结果长度上限",
         "description": "单个 OneBot 工具返回给模型的字符上限",
         "default": 2000,
-    },
-    # 注意：`onebot_tool_overrides`（按工具名覆盖权限/适用范围）暂时不在配置页暴露：
-    # 该能力的 dynamic 数据源尚未实现，渲染出来只会得到一个永远报错的输入框。
-    # 键本身仍保留在 agent 配置里（`app/agent/config_schema.py`），运行时照常读取。
-    "onebot_tools_debug": {
-        "type": "boolean",
-        "label": "记录 OneBot 调用明细",
-        "description": "记录每次 OneBot 工具调用的 action 与参数",
-        "default": False,
     },
     "poke_cooldown_seconds": {
         "type": "number",

@@ -335,7 +335,7 @@ SCHEMA = {
         "default": 2.0, "min": 0.5, "max": 8, "group": "group_compress",
     },
     "include_pre_history": {
-        "type": "boolean", "label": "包含群聊背景", "description": "请求前拉取群聊最近消息当背景，不算进聊天记录。",
+        "type": "boolean", "label": "额外拉取在线群消息", "description": "请求前拉取群聊最近消息当背景，不算进聊天记录；仅在群聊记录插件停用时才有用。",
         "default": False, "group": "group_session",
     },
     "group_log_enable": {
@@ -359,7 +359,7 @@ SCHEMA = {
         "default": 4000, "min": 0, "max": 20000, "group": "group_session",
     },
     "include_private_pre_history": {
-        "type": "select", "label": "包含私信开始前的消息", "description": "私信时把开始聊之前收到的消息给模型当背景",
+        "type": "select", "label": "私聊也额外拉取在线消息", "description": "私信时把开始聊之前收到的消息给模型当背景；仅在群聊记录插件停用时才有用。",
         "default": "default",
         "options": {"default": "不加载", "history": "加载为背景消息", "load": "加载为会话历史"},
         "group": "group_session",
@@ -821,8 +821,8 @@ SCHEMA = {
         "description": "在日志里记录外部工具（MCP）的调用与结果。",
     },
     "onebot_tools_log_enabled": {
-        "type": "boolean", "label": "记录 OneBot 工具调用", "default": True,
-        "description": "在日志里记录 OneBot 工具的调用与结果。",
+        "type": "boolean", "label": "记录 OneBot 调用（含参数）", "default": True,
+        "description": "每次 OneBot 工具调用的 action 与参数都写进日志，量大，排障时再开",
     },
 "tavily_enable": {
         "type": "boolean", "label": "启用 Tavily 搜索", "description": "开启后模型可联网搜索。",
