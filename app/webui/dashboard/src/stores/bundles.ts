@@ -80,6 +80,10 @@ export interface InstalledBundle {
   modules?: string[]
   modules_bundled?: number
   modules_to_install?: number
+  /** 缺第三方依赖的模块数（导入时预检结果；旧包可能没有） */
+  modules_missing_deps?: number
+  /** 哪些模块缺依赖（应用对话框提示用） */
+  deps_missing_modules?: string[]
   /** 包内含可执行模块代码（导入需显式信任） */
   has_code?: boolean
 }

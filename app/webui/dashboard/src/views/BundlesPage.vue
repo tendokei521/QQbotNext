@@ -6,7 +6,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { displayName, useBotsStore } from '@/stores/bots'
-import { useBundlesStore, type BundleHealth, type ExportModuleOption, type ModuleDepsLog, type ReusePreset } from '@/stores/bundles'
+import { useBundlesStore, type BundleHealth, type ExportModuleOption, type InstalledBundle, type ModuleDepsLog, type ReusePreset } from '@/stores/bundles'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
@@ -42,11 +42,13 @@ const reusePresetOptions = computed(() =>
 
 // ---- 应用到账号（P3） ----
 const applyDialog = ref(false)
-const applyTarget = ref<{ id: string; name: string; version: string; secrets?: { key: string; label: string; required: boolean }[] } | null>(null)
+const applyTarget = ref<InstalledBundle | null>(null)
 const applySecrets = reactive<Record<string, string>>({})
-/** 应用后自动安装随包模块依赖（需联网；默认不勾选，列表里看不到缺包清单） */
+/** 应用后自动安装随包模块依赖（需联网；包内有缺依赖模块时默认勾选） */
 const applyInstallDeps = ref(false)
 const applyDepsMirror = ref('')
+/** 这个包有几个模块缺依赖（导入预检时记进 meta；旧包没有这个字段） */
+const applyMissingDepsCount = computed(() => applyTarget.value?.modules_missing_deps || 0)
 const applyResult = ref<{
   activation_id: string
   plan: { creates: any[]; updates: any[]; reused_provider_preset_id?: string }
@@ -92,7 +94,7 @@ function bundleName(bundleId: string): string {
   return bundles.list.find((item) => item.id === bundleId)?.name || '已卸载的配置包'
 }
 
-function openApply(item: { id: string; name: string; version: string; secrets?: { key: string; label: string; required: boolean }[] }) {
+function openApply(item: InstalledBundle) {
   if (!exportEnabled.value) {
     notify.push('先在顶部选择一个账号', 'warning')
     return
@@ -100,7 +102,8 @@ function openApply(item: { id: string; name: string; version: string; secrets?: 
   applyTarget.value = item
   applyResult.value = null
   reusePresetId.value = null
-  applyInstallDeps.value = false
+  // 包内有缺依赖模块时默认勾选：一键应用即补齐，不用再手动找插件装依赖
+  applyInstallDeps.value = (item.modules_missing_deps || 0) > 0
   applyDepsMirror.value = ''
   Object.keys(applySecrets).forEach((key) => delete applySecrets[key])
   for (const secret of item.secrets || []) applySecrets[secret.key] = ''
@@ -358,6 +361,9 @@ onMounted(async () => {
               含插件 {{ item.modules.length }} 个
               <span v-if="item.modules_bundled">（随包 {{ item.modules_bundled }}）</span>
             </div>
+            <div v-if="item.modules_missing_deps" class="text-warning">
+              缺依赖 {{ item.modules_missing_deps }} 个（应用时可选自动安装）
+            </div>
           </v-card-text>
           <v-card-actions>
             <v-btn
@@ -523,6 +529,18 @@ onMounted(async () => {
               variant="outlined"
               autocomplete="off"
             />
+            <v-alert
+              v-if="applyMissingDepsCount"
+              type="warning"
+              variant="tonal"
+              density="compact"
+              class="mt-2"
+            >
+              <div class="text-caption">
+                这个包有 {{ applyMissingDepsCount }} 个插件缺依赖：
+                {{ (applyTarget?.deps_missing_modules || []).join('、') }}
+              </div>
+            </v-alert>
             <v-checkbox
               v-model="applyInstallDeps"
               density="compact"
