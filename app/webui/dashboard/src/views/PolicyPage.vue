@@ -18,6 +18,7 @@ import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
 import PolicyRulesDialog from '@/components/policy/PolicyRulesDialog.vue'
 import ReplyPermissionPanel from '@/components/policy/ReplyPermissionPanel.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -221,14 +222,38 @@ async function onRefreshGroups() {
   }
 }
 
-async function onBulk(enabled: boolean) {
-  const label = enabled ? '允许' : '禁止'
-  if (!window.confirm(`将把 ${policy.rows.length} 个群设为「${label}」，是否继续？`)) return
+/** 批量开关：一次改动会影响已同步的全部群，先列影响清单再执行 */
+const bulkTarget = ref<boolean | null>(null)
+const bulkDialogOpen = ref(false)
+const bulkLoading = ref(false)
+const bulkTitle = computed(() =>
+  bulkTarget.value === false ? '全部关闭群聊' : '全部允许群聊',
+)
+const bulkDetails = computed(() => [
+  `将影响已同步的 ${policy.rows.length} 个群`,
+  '只改本账号，不影响其它账号',
+  '之后可以逐群再改回来',
+])
+
+function askBulk(enabled: boolean) {
+  bulkTarget.value = enabled
+  bulkDialogOpen.value = true
+}
+
+async function confirmBulk() {
+  const enabled = bulkTarget.value
+  if (enabled === null || bulkLoading.value) return
+  const label = enabled ? '允许' : '关闭'
+  bulkLoading.value = true
   try {
     await policy.bulk(enabled)
     notify.push(`已${label}全部群聊`, 'success')
+    bulkDialogOpen.value = false
+    bulkTarget.value = null
   } catch (err) {
     notify.push(errorMessage(err), 'error')
+  } finally {
+    bulkLoading.value = false
   }
 }
 
@@ -359,7 +384,7 @@ watch(rulesDialog, (open) => {
               variant="tonal"
               color="success"
               :disabled="!policy.rows.length || policy.saving !== null"
-              @click="onBulk(true)"
+              @click="askBulk(true)"
             >
               全部允许
             </v-btn>
@@ -368,7 +393,7 @@ watch(rulesDialog, (open) => {
               variant="tonal"
               color="error"
               :disabled="!policy.rows.length || policy.saving !== null"
-              @click="onBulk(false)"
+              @click="askBulk(false)"
             >
               全部关闭
             </v-btn>
@@ -601,6 +626,16 @@ watch(rulesDialog, (open) => {
     </v-window>
 
     <PolicyRulesDialog v-model="rulesDialog" :channel-id="rulesChannel" :title="rulesTitle" />
+
+    <ConfirmDialog
+      v-model="bulkDialogOpen"
+      :title="bulkTitle"
+      :details="bulkDetails"
+      danger
+      confirm-text="确认"
+      :loading="bulkLoading"
+      @confirm="confirmBulk"
+    />
   </div>
 </template>
 

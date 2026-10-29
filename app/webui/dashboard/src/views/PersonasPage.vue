@@ -31,6 +31,25 @@ const form = reactive({
   system_prompt: '',
 })
 
+const EMPTY_FORM = { name: '', description: '', system_prompt: '' }
+/** 表单快照：用来判断是否有未保存改动（防止「新建/另存」静默覆盖草稿） */
+const formBaseline = ref({ ...EMPTY_FORM })
+const discardDialog = ref(false)
+const formDirty = computed(
+  () =>
+    form.name !== formBaseline.value.name ||
+    form.description !== formBaseline.value.description ||
+    form.system_prompt !== formBaseline.value.system_prompt,
+)
+
+function snapshotForm() {
+  formBaseline.value = {
+    name: form.name,
+    description: form.description,
+    system_prompt: form.system_prompt,
+  }
+}
+
 const filteredPresets = computed(() => {
   const q = search.value.trim().toLowerCase()
   if (!q) return presets.value
@@ -47,6 +66,7 @@ function fillForm(p: RolePreset) {
     description: p.description,
     system_prompt: p.system_prompt,
   })
+  snapshotForm()
 }
 
 function openPreset(p: RolePreset) {
@@ -55,14 +75,33 @@ function openPreset(p: RolePreset) {
   fillForm(p)
 }
 
-function startNew() {
+/** 真正清空表单（不弹确认）；「新建/另存」内部复用 */
+function resetForm() {
   selectedId.value = ''
   editingId.value = ''
-  Object.assign(form, {
-    name: '',
-    description: '',
-    system_prompt: '',
-  })
+  Object.assign(form, EMPTY_FORM)
+  snapshotForm()
+}
+
+/** 确认放弃草稿后的后续动作：null = 只新建；'save-as' = 继续把当前绑定人格另存 */
+const pendingSaveAs = ref(false)
+
+function startNew() {
+  // 有未保存内容时先确认，避免点一下「新建」就把草稿静默丢掉
+  pendingSaveAs.value = false
+  if (formDirty.value) {
+    discardDialog.value = true
+    return
+  }
+  resetForm()
+}
+
+function confirmDiscardDraft() {
+  discardDialog.value = false
+  const continueSaveAs = pendingSaveAs.value
+  pendingSaveAs.value = false
+  resetForm()
+  if (continueSaveAs) loadBoundPresetForCopy()
 }
 
 async function loadPresets() {
@@ -161,13 +200,41 @@ function saveCurrentAsPreset() {
     notify.push('请先在「账号管理」添加账号，才能从当前账号另存', 'warning')
     return
   }
-  if (!agent.draft.system_prompt?.trim()) {
-    notify.push('当前账号没有可保存的提示词', 'warning')
+  // system_prompt 是退役字段：当前人格只认 persona_preset_id
+  if (!boundPersonaPreset()) {
+    notify.push('当前账号还没绑定人格预设', 'warning')
     return
   }
-  startNew()
-  form.system_prompt = agent.draft.system_prompt
-  notify.push('已载入当前提示词，填写人格名称后保存', 'info')
+  if (formDirty.value) {
+    pendingSaveAs.value = true
+    discardDialog.value = true
+    return
+  }
+  loadBoundPresetForCopy()
+}
+
+/** 当前账号活引用的人格预设（读 persona_preset_id，不读退役的 system_prompt） */
+function boundPersonaPreset(): RolePreset | null {
+  const presetId = String(agent.draft.persona_preset_id || '')
+  if (!presetId) return null
+  return presets.value.find((p) => p.id === presetId) || null
+}
+
+/** 把绑定的人格内容载入表单，作为「另存为新人格」的起点 */
+function loadBoundPresetForCopy() {
+  const source = boundPersonaPreset()
+  if (!source) {
+    notify.push('当前账号还没绑定人格预设', 'warning')
+    return
+  }
+  resetForm()
+  Object.assign(form, {
+    name: `${source.name} 副本`,
+    description: source.description,
+    system_prompt: source.system_prompt,
+  })
+  snapshotForm()
+  notify.push(`已载入「${source.name}」的内容，填写名称后保存`, 'info')
 }
 
 onMounted(() => {
@@ -205,9 +272,6 @@ onMounted(() => {
           <v-card-title class="d-flex align-center">
             <v-icon icon="mdi-account-group-outline" class="mr-2" color="pink" /> 人格预设
             <v-spacer />
-            <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-plus" @click="startNew">
-              新建
-            </v-btn>
           </v-card-title>
           <v-card-text class="pa-2">
             <v-text-field
@@ -221,7 +285,7 @@ onMounted(() => {
             />
             <v-progress-linear v-if="loading" indeterminate color="primary" />
             <template v-else-if="!presets.length">
-              <div class="text-caption text-center pa-4">暂无人格预设，点击「新建人格」创建</div>
+              <div class="text-caption text-center pa-4">暂无人格预设，点右上角「新建人格」开始</div>
             </template>
             <v-list v-else density="compact">
               <v-list-item
@@ -348,6 +412,17 @@ onMounted(() => {
       ]"
       @update:model-value="(v: boolean) => { if (!v) deleteTarget = null }"
       @confirm="confirmDelete"
+    />
+
+    <!-- 新建/另存前有未保存内容：先确认，不要静默丢掉草稿 -->
+    <ConfirmDialog
+      v-model="discardDialog"
+      title="放弃未保存的修改？"
+      message="当前表单里还有没保存的内容，新建会清空它们。"
+      danger
+      confirm-text="放弃修改"
+      cancel-text="继续编辑"
+      @confirm="confirmDiscardDraft"
     />
   </div>
 </template>

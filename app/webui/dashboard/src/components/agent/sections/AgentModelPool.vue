@@ -121,10 +121,7 @@ function goToProviderPresets() {
       <div class="text-caption">还没有加入模型，点右上角「从模型服务加入」选择。</div>
     </div>
     <div v-else class="pool-empty px-4 pb-4 pt-2">
-      <div class="text-caption">模型服务里还没有模型：先在「模型服务」添加服务商与模型，再回来加入这里。</div>
-      <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-open-in-new" class="mt-2" @click="goToProviderPresets">
-        去「模型服务」
-      </v-btn>
+      <div class="text-caption">模型服务里还没有模型：用卡片右上角的按钮去添加。</div>
     </div>
 
     <v-dialog v-model="poolDialog" max-width="460">

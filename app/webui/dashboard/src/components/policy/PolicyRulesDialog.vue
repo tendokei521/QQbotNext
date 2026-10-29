@@ -11,6 +11,7 @@ import { computed, ref, watch } from 'vue'
 import { usePolicyStore } from '@/stores/policy'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
+import HintText from '@/components/common/HintText.vue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -310,13 +311,17 @@ watch(
 
           <v-text-field
             v-model="quietHours"
-            label="免打扰时段"
+            label="免打扰时段（被动回复）"
             placeholder="如 23:00-08:00；留空 = 沿用当前值"
             :hint="`当前生效：${inheritedQuiet}`"
             persistent-hint
             density="comfortable"
             variant="outlined"
+            class="mb-1"
+          />
+          <HintText
             class="mb-3"
+            text="此段时间不回复任何消息（含被 @）；只影响主动消息的时段在「功能插件 → 主动消息」里设置。"
           />
 
           <v-select

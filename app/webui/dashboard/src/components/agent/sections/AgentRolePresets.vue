@@ -13,14 +13,12 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import http, { errorMessage } from '@/api/http'
+import { resolvePersona, type PersonaPresetLike } from '@/agent/persona'
 import { useAgentConfigStore } from '@/stores/agentConfig'
 import { useNotifyStore } from '@/stores/notify'
 
-interface RolePreset {
-  id: string
-  name: string
+interface RolePreset extends PersonaPresetLike {
   description: string
-  system_prompt: string
   created_at: number
   updated_at: number
 }
@@ -81,12 +79,10 @@ const filteredPresets = computed(() => {
 
 const selectedPreset = computed(() => presets.value.find((p) => p.id === selectedId.value) || null)
 
-/** 当前生效的人格：优先按活引用 persona_preset_id（人设唯一来源），旧数据回退按提示词内容匹配 */
-const currentPreset = computed(() => {
-  const presetId = String(agent.draft.persona_preset_id || '')
-  if (presetId) return presets.value.find((p) => p.id === presetId) || null
-  return presets.value.find((p) => p.system_prompt === agent.draft.system_prompt) || null
-})
+/** 当前人格：与状态条共用 resolvePersona，三处口径一致（含"内容相同但未绑定"） */
+const persona = computed(() => resolvePersona(agent.draft, presets.value))
+/** 有活引用的预设 id；只有它才算"当前正在使用" */
+const boundPresetId = computed(() => (persona.value.kind === 'bound' ? persona.value.presetId : ''))
 
 async function loadPresets() {
   loading.value = true
@@ -132,11 +128,12 @@ onMounted(() => {
   <v-card variant="outlined" class="mb-4">
     <v-card-title class="d-flex align-center flex-wrap gap-2">
       <v-icon icon="mdi-account-heart" class="mr-2" color="pink" /> 人格
-      <v-chip v-if="currentPreset" size="small" color="pink" variant="tonal">当前人格：{{ currentPreset.name }}</v-chip>
-      <v-chip v-else-if="agent.draft.system_prompt" size="small" variant="tonal">当前人格：自定义</v-chip>
+      <v-chip v-if="persona.kind === 'bound'" size="small" color="pink" variant="tonal">当前人格：{{ persona.label }}</v-chip>
+      <v-chip v-else-if="persona.kind === 'same-content'" size="small" color="warning" variant="tonal">
+        当前人格：{{ persona.label }}
+      </v-chip>
       <v-chip v-else size="small" variant="tonal">当前人格：未选择</v-chip>
       <v-spacer />
-      <v-btn size="small" variant="text" prepend-icon="mdi-pencil-outline" @click="goToPersonas">去编辑提示词</v-btn>
     </v-card-title>
     <v-card-text v-if="presets.length" class="text-caption pt-0 pb-0" style="opacity: 0.7">
       选中后点「应用所选人格」，会写入当前账号。
@@ -185,8 +182,16 @@ onMounted(() => {
             <template v-if="selectedPreset">
               <div class="d-flex align-center flex-wrap gap-2 mb-2">
                 <v-chip size="small" color="pink" variant="tonal">{{ selectedPreset.name }}</v-chip>
-                <v-chip v-if="selectedPreset.id === currentPreset?.id" size="small" color="success" variant="tonal">
+                <v-chip v-if="selectedPreset.id === boundPresetId" size="small" color="success" variant="tonal">
                   当前正在使用
+                </v-chip>
+                <v-chip
+                  v-else-if="persona.kind === 'same-content' && selectedPreset.id === persona.presetId"
+                  size="small"
+                  color="warning"
+                  variant="tonal"
+                >
+                  与当前内容相同（未绑定）
                 </v-chip>
               </div>
               <div v-if="selectedPreset.description" class="text-caption mb-3" style="opacity: 0.7">
@@ -202,6 +207,11 @@ onMounted(() => {
                 应用所选人格
               </v-btn>
               <div class="text-caption mt-2" style="opacity: 0.6">应用后立即对当前账号生效。</div>
+              <div class="text-caption mt-1" style="opacity: 0.6">
+                内容在
+                <a class="text-primary text-decoration-none" href="#" @click.prevent="goToPersonas">「人格设定」</a>
+                里编辑
+              </div>
             </template>
             <div v-else class="text-caption py-6 text-center" style="opacity: 0.55">请从左侧选择一个人格预设</div>
           </div>

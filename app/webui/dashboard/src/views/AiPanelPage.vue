@@ -19,6 +19,7 @@ import { useAgentConfigStore } from '@/stores/agentConfig'
 import { displayName, useBotsStore } from '@/stores/bots'
 import { splitSchema } from '@/utils/schema'
 import panelManifest from '@/agent/ai-panel.json'
+import { resolvePersona, type PersonaPresetLike } from '@/agent/persona'
 import SaveStatusBar from '@/components/common/SaveStatusBar.vue'
 import PanelCard from '@/components/agent/panel/PanelCard.vue'
 import PanelField from '@/components/agent/panel/PanelField.vue'
@@ -108,11 +109,11 @@ const triggerEffect = computed(() => {
   return '没有触发方式，群里不会自动接话'
 })
 
-/** 模型卡片锚点：状态条「在下方加入模型」直接滚到这里，而不是把用户带去模型服务页 */
-const modelSection = ref<HTMLElement | null>(null)
+/** 当前人格卡锚点：状态条结论不跳走，滚动到本页面板内的人格卡 */
+const personaSection = ref<HTMLElement | null>(null)
 
-function scrollToModels() {
-  modelSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+function scrollToPersona() {
+  personaSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 /**
@@ -139,24 +140,21 @@ async function loadGlobalDefaultModel() {
   }
 }
 
-/** 当前人格名：从资源目录（role_preset 候选）里按 id 找名字，拿不到就不展示内部 id */
-const rolePresetOptions = ref<{ value: string; label: string }[]>([])
-const personaName = computed(() => {
-  const id = String(agent.draft.persona_preset_id || '')
-  if (!id) return ''
-  return rolePresetOptions.value.find((item) => item.value === id)?.label || ''
-})
-const personaText = computed(() => {
-  if (!String(agent.draft.persona_preset_id || '')) return '未选择'
-  return personaName.value || '该人格已删除'
-})
+/**
+ * 当前人格：与人格卡共用 `resolvePersona`，避免状态条与卡片各算一套、同屏结论打架。
+ *
+ * 预设列表用 /api/role-presets（含正文），才能判断"内容与某预设相同但未绑定"。
+ */
+const rolePresets = ref<PersonaPresetLike[]>([])
+const persona = computed(() => resolvePersona(agent.draft, rolePresets.value))
 
 async function loadRolePresets() {
   try {
-    const res = await http.get<{ options?: { value: string; label: string }[] }>('/api/resources/role_preset')
-    rolePresetOptions.value = res.data?.options || []
+    const res = await http.get<{ presets?: PersonaPresetLike[] }>('/api/role-presets')
+    rolePresets.value = res.data?.presets || []
   } catch {
-    // 状态条只是辅助信息：候选拉不到就显示「未选择」，不打断面板使用
+    // 状态条只是辅助信息：候选拉不到就按"未选择"展示，不打断面板使用
+    rolePresets.value = []
   }
 }
 
@@ -275,19 +273,18 @@ watch(
               </template>
               <template v-else>
                 <v-chip color="warning" variant="tonal" prepend-icon="mdi-alert-circle-outline">还没选模型</v-chip>
-                <v-btn size="small" variant="text" prepend-icon="mdi-arrow-down" @click="scrollToModels">
-                  在下方加入模型
-                </v-btn>
               </template>
             </template>
-            <v-chip color="pink" variant="tonal" prepend-icon="mdi-account-heart">人格：{{ personaText }}</v-chip>
-            <v-btn v-if="!personaName" size="small" variant="text" prepend-icon="mdi-arrow-right" @click="router.push('/personas')">
-              去「人格设定」
+            <v-chip color="pink" variant="tonal" prepend-icon="mdi-account-heart">人格：{{ persona.label }}</v-chip>
+            <v-btn
+              v-if="persona.kind !== 'bound'"
+              size="small"
+              variant="text"
+              prepend-icon="mdi-arrow-down"
+              @click="scrollToPersona"
+            >
+              去下方选择人格
             </v-btn>
-          </div>
-          <div v-if="!agent.poolModelIds.length && !globalDefaultModelId" class="text-caption mt-1" style="opacity: 0.6">
-            还没有模型服务？先去
-            <a class="text-primary text-decoration-none" href="#" @click.prevent="router.push('/provider-presets')">「模型服务」添加</a>
           </div>
         </v-card-text>
       </v-card>
@@ -351,13 +348,13 @@ watch(
         </div>
       </PanelCard>
 
-      <!-- ③ 模型：复用设置区的模型卡（自读 store，不需要 props） -->
-      <div ref="modelSection" class="panel-block">
+      <!-- ③ 模型：复用设置区的模型卡（自读 store，不需要 props）；加入动作只在卡里出现一次 -->
+      <div class="panel-block">
         <AgentModelPool />
       </div>
 
       <!-- ④ 人格：复用设置区的人格卡（唯一「应用人格」入口） -->
-      <div class="panel-block">
+      <div ref="personaSection" class="panel-block">
         <AgentRolePresets />
       </div>
 

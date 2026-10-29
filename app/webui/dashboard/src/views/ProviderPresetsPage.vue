@@ -809,10 +809,13 @@ onMounted(() => {
                   <v-btn size="x-small" variant="text" icon="mdi-delete" color="error" @click.stop="askDeleteSource(p)" />
                 </template>
               </v-list-item>
-              <v-list-item v-if="presets.length === 0">
-                <v-list-item-title class="text-caption text-center">还没有模型服务</v-list-item-title>
-              </v-list-item>
             </v-list>
+            <div v-if="!presets.length" class="text-center pa-2">
+              <div class="text-caption mb-2">还没有模型服务</div>
+              <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-plus" block @click="openCreateSource">
+                新建模型服务
+              </v-btn>
+            </div>
           </v-card-text>
         </v-card>
       </v-col>
@@ -909,7 +912,7 @@ onMounted(() => {
         </template>
 
         <v-card v-else variant="outlined" class="pa-8 text-center text-caption">
-          先在左侧添加一个模型服务
+          用右上角「新建模型服务」或「添加常用服务」添加，添加后会出现在左侧列表
         </v-card>
       </v-col>
     </v-row>
