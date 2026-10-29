@@ -163,7 +163,7 @@ def test_speech_protocol_is_injected_into_the_user_turn():
     assert out[-1]["content"].startswith("10-18 19:00 小明(20002): 在吗")
     assert out[-1]["content"].rstrip().endswith(SPEECH_PROTOCOL)
     assert out[0] == {"role": "system", "content": "人设"}, "system 侧不能被改写"
-    assert "文本不会发出去" in SPEECH_PROTOCOL
+    assert "不会发到聊天里" in SPEECH_PROTOCOL
     assert "send_message" in SPEECH_PROTOCOL
     assert "不想接话就直接结束" in SPEECH_PROTOCOL, "必须同时给出「沉默」这个正常出口"
 
@@ -190,9 +190,7 @@ def test_speech_protocol_respects_multimodal_user_content():
 @pytest.mark.parametrize(
     "config",
     [
-        {"assembly_profile": "legacy", "speech_via_tool": True, "stream_output": True},
         {"assembly_profile": "qq_agent", "speech_via_tool": False, "stream_output": True},
-        {"assembly_profile": "qq_agent", "speech_via_tool": True, "stream_output": False},
         {},
     ],
 )
@@ -283,7 +281,7 @@ def test_outbox_summary_reports_state():
     }
 
 
-# ---------- 档位开关 ----------
+# ---------- 发言通道开关 ----------
 
 
 @pytest.mark.parametrize(
@@ -291,13 +289,14 @@ def test_outbox_summary_reports_state():
     [
         ({}, False),
         ({"assembly_profile": "qq_agent", "speech_via_tool": False, "stream_output": True}, False),
-        ({"assembly_profile": "qq_agent", "speech_via_tool": True, "stream_output": False}, False),
-        ({"assembly_profile": "legacy", "speech_via_tool": True, "stream_output": True}, False),
-        ({"assembly_profile": "qq_agent", "speech_via_tool": True, "stream_output": True}, True),
+        # 只看开关：档位与 stream_output 都不再是门槛（发言通道已成主形态）
+        ({"assembly_profile": "qq_agent", "speech_via_tool": True, "stream_output": False}, True),
+        ({"assembly_profile": "legacy", "speech_via_tool": True, "stream_output": True}, True),
+        ({"speech_via_tool": True}, True),
     ],
 )
-def test_speech_via_tool_requires_profile_toggle_and_stream(config, expected):
-    """三个条件缺一不可：拟人化档位、开关、流式（非流式没有轮次边界可 flush）。"""
+def test_speech_via_tool_only_reads_the_switch(config, expected):
+    """发言通道只由 ``speech_via_tool`` 决定；档位/流式不再参与。"""
     assert speech_via_tool(config) is expected
 
 
@@ -306,3 +305,52 @@ def test_defaults_are_documented():
     assert "{rounds}" in SPEAK_REMINDER
     assert "send_message" in SPEAK_REMINDER
     assert "send_message" in FORCE_SPEAK_REMINDER
+
+
+def test_speech_channel_is_on_by_default():
+    """默认就走「文本=思考，send_message=发言」：三处默认值必须一致。"""
+    from app.agent.config import DEFAULT_LLM_CONFIG
+    from app.plugins.llm_output.config_schema import SCHEMA as OUTPUT_SCHEMA
+    from app.plugins.llm_output.main import Module as OutputModule
+
+    assert DEFAULT_LLM_CONFIG["speech_via_tool"] is True
+    assert OutputModule.default_config["speech_via_tool"] is True
+    assert OUTPUT_SCHEMA["speech_via_tool"]["default"] is True
+
+
+def test_chat_prompt_explains_tool_speech():
+    """聊天预设的提示词必须讲清"工具是动作/怎么分条"（对齐 qqbridge v2 的口径）。"""
+    from app.agent.persona import rules
+
+    caps = rules.detect_caps(
+        {
+            "send_message",
+            "finish",
+            "send_poke",
+            "tavily_search",
+            "memory_save",
+            "get_chat_history",
+        },
+        {"speech_via_tool": True},
+    )
+    text = rules.render(
+        None,
+        {"send_message", "finish", "send_poke", "tavily_search", "memory_save", "get_chat_history"},
+        {"speech_via_tool": True},
+    )
+
+    assert caps["speech_by_tool"] is True
+    assert "你输出的文本只是思考" in text
+    assert "send_message" in text
+    assert "工具调用是动作" in text
+    assert "不要把同一句话拆到两条里" in text
+    assert "直接结束" in text, "静默必须是明确允许的正常结局"
+
+
+def test_speech_channel_falls_back_when_tools_unavailable():
+    """模型不支持 tool calling 时，发言通道必须降级回文本，而不是整轮静默。"""
+    from app.agent.loop.assistant_output import speech_needs_text_fallback
+
+    assert speech_needs_text_fallback(object(), False) is True
+    assert speech_needs_text_fallback(object(), True) is False
+    assert speech_needs_text_fallback(None, False) is False

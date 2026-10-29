@@ -113,17 +113,18 @@ def test_segment_order_is_stable():
 def test_speech_contract_follows_capability():
     """护栏 2（发言通道）：文本是否会被发出，由发言通道是否生效决定，两者不可混说。
 
-    生效条件是「拟人化档位 + speech_via_tool + 流式输出」三者齐备（见
-    ``speech.speech_via_tool``）——所以提示词不能只看开关那一个字段。
+    生效条件只剩 ``speech_via_tool`` 一个开关（档位/流式不再是门槛，见
+    ``speech.speech_via_tool``）——提示词必须与运行时同一口径。
     """
     by_text = _render(ALL_TOOLS, {"speech_via_tool": False})
     assert "直接发到" in by_text
     assert "不会发到 QQ" not in by_text
     assert "send_message" not in by_text, "文本即发言时不应教模型调 send_message"
 
-    # 只开开关、不满足档位/流式 → 仍是文本即发言（与运行时一致）
+    # 只开开关即可（不再要求 qq_agent / 流式）
     half = _render(ALL_TOOLS, {"speech_via_tool": True})
-    assert "直接发到" in half
+    assert "不会发到 QQ" in half
+    assert "send_message" in half
 
     by_tool = _render(ALL_TOOLS, SPEECH_CONFIG)
     assert "不会发到 QQ" in by_tool

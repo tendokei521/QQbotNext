@@ -137,8 +137,8 @@ SCHEMA = {
     "speech_via_tool": {
         "type": "boolean",
         "label": "发言走工具（文本=思考）",
-        "description": "开启后模型输出只作思考，发言必须调用工具；需同时开启流式输出。",
-        "default": False,
+        "description": "开启后模型输出只作思考，发言必须调用「发送」工具；不调用即静默。关闭则回到「文本就是回复」。",
+        "default": True,
     },
     "speech_max_bubbles": {
         "type": "number",

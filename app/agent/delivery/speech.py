@@ -70,9 +70,9 @@ DEFAULT_REMINDER_ROUNDS = 3
 #: system 层两条相反指令打架时，模型跟着更近/更具体的那条走；
 #: 而「你输出的文本不会发出去」是**关于本程序的事实**，贴在消息旁边才有分量。
 SPEECH_PROTOCOL = (
-    "【发言协议】你输出的文本不会发出去，只有调用 send_message 的内容会到达聊天里。"
-    "想说话就调用 send_message（字符串=一条，字符串数组=多条）；"
-    "不想接话就直接结束，这很正常。"
+    "【发言协议】你输出的文本只是思考，不会发到聊天里；只有调用 send_message 的内容会发出去。"
+    "想说话就调用 send_message（字符串=一条，字符串数组=多条；分条规则见系统提示词）；"
+    "不想接话就直接结束，这很正常。不要用文本描述自己打算说什么，也不要在调用工具后再用文本重复一遍。"
 )
 
 #: 「系统提醒」文本：必须在**没有发言**时才注入，否则等于催已经说过话的人再说一遍。
@@ -312,29 +312,23 @@ def _normalize_at(raw: Any) -> tuple[str, ...]:
 
 
 def speech_via_tool(config: Any, *, stream_output: bool | None = None) -> bool:
-    """本轮是否启用「文本即思考」的发言通道。
+    """本轮是否启用「文本即思考，send_message 才是发言」的通道。
 
-    三个条件同时成立才启用：
+    **只看一个开关**：``speech_via_tool``。
 
-    1. 组装档位是 ``qq_agent``（``legacy`` 档行为逐字不变，可一键回退）；
-    2. ``speech_via_tool`` 打开；
-    3. 走流式输出——**非流式路径没有"轮次边界"可 flush**，硬开会变成
-       "想很多最后只发一句"，不如明确按文本即发言处理（调用方会留日志）。
+    历史实现还要求 ``assembly_profile=qq_agent`` 且开流式输出；那两条是"旧形态"的
+    临时门槛（发言通道最初寄生在流式路径上）。现在发言通道本身已经是产品主形态：
+    - 与组装档位无关：三套系统提示词方案都能用（提示词里通过 ``caps`` 自动适配）；
+    - 与 ``stream_output`` 无关：声明了发言能力就按流式策略跑（capability 的 ``streams``
+      已经包含 speech），非流式账号也会被自动升级到该策略。
+    ``stream_output`` 参数仅为向后兼容保留，不再参与判定。
     """
-    from app.agent.assembly.prompt import is_qq_agent
-
-    if not is_qq_agent(config):
-        return False
     if config is None or not hasattr(config, "get"):
         return False
     try:
-        if not bool(config.get("speech_via_tool", False)):
-            return False
-        if stream_output is None:
-            stream_output = bool(config.get("stream_output", False))
+        return bool(config.get("speech_via_tool", False))
     except Exception:  # noqa: BLE001 —— 配置异常时退回旧的文本即发言
         return False
-    return bool(stream_output)
 
 
 def build_speech_tools(outbox: SpeechOutbox) -> list[ToolSpec]:

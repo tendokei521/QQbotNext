@@ -268,7 +268,7 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
         if warn_key not in _WARNED_SPEECH_INTENT:
             _WARNED_SPEECH_INTENT.add(warn_key)
             logger.add_info(account_label(runtime.bot_id)).warning(
-                "[LLM] 已开启 speech_via_tool 但当前不是拟人化档位或未开流式输出，"
+                "[LLM] 已开启 speech_via_tool 但输出策略未走发言通道（检查 llm_output 模块是否被禁用），"
                 "按「文本即发言」处理（发言通道需要轮次边界才能 flush）"
             )
     # 群聊环境记录块：持续记录面（消息 + 表情/戳/撤回 + 我的动作），

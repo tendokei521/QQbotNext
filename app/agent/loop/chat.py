@@ -312,6 +312,17 @@ async def stream_response(runtime, event, ctx=None):
     )
 
     use_tools = bool(all_specs) and supports_tool_use(modalities)
+    from app.agent.loop.assistant_output import speech_needs_text_fallback
+
+    if speech_needs_text_fallback(speech, use_tools):
+        # 发言通道靠工具调用，本轮却拿不到工具（模型/适配器不支持 tool calling）：
+        # 硬开只会让模型"想完不发"，表现为整轮静默。这里降级回文本即发言并留痕。
+        logger.add_info(account_label(runtime.bot_id)).warning(
+            "[LLM] 发言通道已开启但本轮工具不可用（模型不支持 tool calling），"
+            "已降级为「文本即回复」；如需固定该行为请关掉 speech_via_tool"
+        )
+        speech = None
+        speech_by_tool = False
     tools = build_tools(all_specs) if use_tools else None
     tool_executor = make_executor(all_specs, tool_ctx) if use_tools else None
 

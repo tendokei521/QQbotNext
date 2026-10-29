@@ -93,7 +93,7 @@ class Module(BaseModule):
         "stream_queue_full_policy": "backpressure",
         "stream_flush_on_finish": False,
         "stream_keep_order": True,
-        "speech_via_tool": False,
+        "speech_via_tool": True,
         "speech_max_bubbles": 5,
         "speech_max_bubble_chars": 200,
         "speech_reminder_rounds": 2,

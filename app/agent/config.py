@@ -52,9 +52,9 @@ DEFAULT_LLM_CONFIG: dict = {
     "user_message_format": "single_line",
     # 时间行位置：tail=挪到消息末尾（默认，让逐轮稳定的行靠前，前缀缓存更有效）；head=旧行为
     "prompt_time_position": "tail",
-    # 发言通道：True=模型输出的文本只是思考，发言必须调用 send_message（不调用=静默）。
-    # 需要 assembly_profile=qq_agent 且 stream_output=True（非流式没有轮次边界可 flush）。
-    "speech_via_tool": False,
+    # 发言通道（默认）：True=模型输出的文本只是思考，发言必须调用 send_message
+    # （不调用=静默，这是正常结束）。关掉即回到旧行为「文本就是回复」。
+    "speech_via_tool": True,
     # 一轮最多发几条气泡 / 单条气泡字数上限（防复读机式刷屏）
     "speech_max_bubbles": 4,
     "speech_max_bubble_chars": 300,

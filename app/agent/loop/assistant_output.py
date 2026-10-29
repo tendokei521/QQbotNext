@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from app.core.logger import account_label
 
 from app.agent import logger
@@ -63,12 +65,18 @@ def _build_speech(config):
     return SpeechOutbox(max_bubbles=max_bubbles, max_chars=max_chars)
 
 
-def _speech_intent(config) -> bool:
-    """配置**想**开发言通道吗（不看流式这一条）——用于"配置了但没生效"的告警。"""
-    from app.agent.assembly.prompt import is_qq_agent
+def speech_needs_text_fallback(speech: Any, use_tools: bool) -> bool:
+    """发言通道开着、但本轮工具不可用时需要降级回「文本即发言」。
 
+    发言靠 ``send_message`` 工具；模型/适配器不支持 tool calling 时硬开只会整轮静默。
+    """
+    return speech is not None and not bool(use_tools)
+
+
+def _speech_intent(config) -> bool:
+    """配置里是否开了发言通道（用于"配置了但没生效"的告警）。"""
     try:
-        return bool(config.get("speech_via_tool", False)) and is_qq_agent(config)
+        return bool(config.get("speech_via_tool", False))
     except Exception:  # noqa: BLE001
         return False
 
