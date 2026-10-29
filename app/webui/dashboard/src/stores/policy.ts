@@ -13,7 +13,26 @@ export interface PolicyMatrixRow {
   /** default / account / channel / muted */
   enabled_source: string
   muted_until: number
+  /** 生效触发方式：at/keyword/both/all/none */
+  trigger_mode: string
+  /** 触发方式来自哪一层：default / account / scene / channel */
+  trigger_source: string
+  trigger_probability: number
+  quiet_hours: string
   overridden_keys: string[]
+}
+
+/** 触发方式的中文标签（页面、菜单、提示共用一份） */
+export const TRIGGER_MODE_LABELS: Record<string, string> = {
+  at: '仅 @',
+  keyword: '仅关键词',
+  both: '@ 或关键词',
+  all: '所有消息',
+  none: '不触发',
+}
+
+export function triggerModeLabel(mode: string): string {
+  return TRIGGER_MODE_LABELS[String(mode || 'none')] || '不触发'
 }
 
 export interface PolicyDefault {
@@ -21,6 +40,9 @@ export interface PolicyDefault {
   enabled_source: string
   /** 账号默认（群聊场景层）的显式值：null = 跟随 Agent 配置 */
   scene_enabled?: boolean | null
+  trigger_mode?: string
+  trigger_source?: string
+  trigger_probability?: number
 }
 
 /** 某层（账号层/群层）当前的覆盖行；null 字段在 UI 里表示"继承" */

@@ -37,9 +37,10 @@ const loadError = ref('')
 const resolved = ref<Record<string, any>>({})
 const sources = ref<Record<string, string>>({})
 
-type TriggerMode = 'inherit' | 'at' | 'keyword' | 'both' | 'none'
+type TriggerMode = 'inherit' | 'at' | 'keyword' | 'both' | 'all' | 'none'
 const triggerMode = ref<TriggerMode>('inherit')
 const keywords = ref('')
+const probability = ref('')
 const cooldown = ref('')
 const debounce = ref('')
 const quietHours = ref('')
@@ -51,6 +52,7 @@ const TRIGGER_ITEMS: { title: string; value: TriggerMode }[] = [
   { title: '仅 @ 我', value: 'at' },
   { title: '仅关键词', value: 'keyword' },
   { title: '@ 或关键词', value: 'both' },
+  { title: '所有消息（按概率参与）', value: 'all' },
   { title: '都不触发（沉默）', value: 'none' },
 ]
 
@@ -60,13 +62,43 @@ const USER_MODE_ITEMS = [
   { title: '白名单（仅以下用户可触发）', value: 'whitelist' },
 ]
 
+const TRIGGER_MODE_LABELS: Record<string, string> = {
+  at: '仅 @',
+  keyword: '仅关键词',
+  both: '@ 或关键词',
+  all: '所有消息',
+  none: '不触发',
+}
+
 const inheritedTrigger = computed(() => {
-  const at = Boolean(resolved.value.trigger_at)
+  const mode = String(resolved.value.trigger_mode || '')
   const kws: string[] = resolved.value.trigger_keyword || []
-  if (at && kws.length) return `@ 或关键词（${kws.join('、')}）`
-  if (at) return '仅 @'
-  if (kws.length) return `仅关键词（${kws.join('、')}）`
-  return '未开启触发'
+  const label = TRIGGER_MODE_LABELS[mode] || (kws.length ? '关键词' : '不触发')
+  if ((mode === 'keyword' || mode === 'both') && kws.length) {
+    return `${label}（${kws.join('、')}）`
+  }
+  if (mode === 'all') {
+    return `${label}（${Number(resolved.value.trigger_probability ?? 100)}% 概率）`
+  }
+  return label
+})
+
+const inheritedProbability = computed(
+  () => `${Number(resolved.value.trigger_probability ?? 100)}%`,
+)
+
+/** 生效预览：值 + 来源（default/account/scene/channel），回答"为什么是这样" */
+const previewRows = computed(() => {
+  const sourceLabel = (key: string) => {
+    const source = String(sources.value[key] || 'default')
+    return { default: '默认', account: '账号规则', scene: '场景默认', channel: '本群规则' }[source] || source
+  }
+  return [
+    { label: '触发方式', value: inheritedTrigger.value, source: sourceLabel('trigger_mode') },
+    { label: '回复冷却', value: inheritedCooldown.value, source: sourceLabel('reply_cooldown') },
+    { label: '合并等待', value: inheritedDebounce.value, source: sourceLabel('message_debounce_seconds') },
+    { label: '免打扰', value: inheritedQuiet.value, source: sourceLabel('quiet_hours') },
+  ]
 })
 
 const inheritedQuiet = computed(() => String(resolved.value.quiet_hours || '') || '未设置')
@@ -91,9 +123,12 @@ function parseLines(): string[] {
 
 function applyOverride(row: Record<string, any> | null) {
   const config = (row?.config || {}) as Record<string, any>
+  const hasMode = Object.prototype.hasOwnProperty.call(config, 'trigger_mode')
   const hasAt = Object.prototype.hasOwnProperty.call(config, 'trigger_at')
   const hasKeyword = Object.prototype.hasOwnProperty.call(config, 'trigger_keyword')
-  if (!hasAt && !hasKeyword) {
+  if (hasMode) {
+    triggerMode.value = String(config.trigger_mode) as TriggerMode
+  } else if (!hasAt && !hasKeyword) {
     triggerMode.value = 'inherit'
   } else if (config.trigger_at && (config.trigger_keyword || []).length) {
     triggerMode.value = 'both'
@@ -105,6 +140,8 @@ function applyOverride(row: Record<string, any> | null) {
     triggerMode.value = 'none'
   }
   keywords.value = (config.trigger_keyword || []).join('、')
+  probability.value =
+    config.trigger_probability !== undefined ? String(config.trigger_probability) : ''
   cooldown.value = config.reply_cooldown !== undefined ? String(config.reply_cooldown) : ''
   debounce.value =
     config.message_debounce_seconds !== undefined ? String(config.message_debounce_seconds) : ''
@@ -141,19 +178,17 @@ function buildPayload(): { config: Record<string, any>; permission: Record<strin
   const clear: string[] = []
   const mode = triggerMode.value
   if (mode === 'inherit') {
-    clear.push('trigger_at', 'trigger_keyword')
-  } else if (mode === 'at') {
-    config.trigger_at = true
-    config.trigger_keyword = []
-  } else if (mode === 'keyword') {
-    config.trigger_at = false
+    clear.push('trigger_mode', 'trigger_at', 'trigger_keyword', 'trigger_probability')
+  } else if (mode === 'keyword' || mode === 'both') {
+    config.trigger_mode = mode
     config.trigger_keyword = parseKeywords()
-  } else if (mode === 'both') {
-    config.trigger_at = true
-    config.trigger_keyword = parseKeywords()
+  } else if (mode === 'all') {
+    config.trigger_mode = 'all'
+    const chance = probability.value.trim()
+    if (!chance) clear.push('trigger_probability')
+    else config.trigger_probability = Number(chance)
   } else {
-    config.trigger_at = false
-    config.trigger_keyword = []
+    config.trigger_mode = mode
   }
 
   const putNumber = (key: string, raw: string) => {
@@ -182,8 +217,14 @@ function buildPayload(): { config: Record<string, any>; permission: Record<strin
 }
 
 function validate(payload: ReturnType<typeof buildPayload>): string {
-  if (triggerMode.value === 'keyword' && !parseKeywords().length) {
-    return '「仅关键词」需要至少填写一个关键词'
+  if ((triggerMode.value === 'keyword' || triggerMode.value === 'both') && !parseKeywords().length) {
+    return '「关键词」模式需要至少填写一个关键词'
+  }
+  if (triggerMode.value === 'all' && probability.value.trim()) {
+    const chance = Number(probability.value.trim())
+    if (!Number.isInteger(chance) || chance < 0 || chance > 100) {
+      return '参与概率应为 0-100 的整数'
+    }
   }
   for (const key of ['reply_cooldown', 'message_debounce_seconds']) {
     if (payload.config[key] !== undefined && (!Number.isFinite(payload.config[key]) || payload.config[key] < 0)) {
@@ -279,6 +320,22 @@ watch(
             variant="outlined"
             class="mb-3"
           />
+          <v-row v-if="triggerMode === 'all'" dense class="mb-1">
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model="probability"
+                label="参与概率（%）"
+                type="number"
+                min="0"
+                max="100"
+                placeholder="留空 = 100%"
+                :hint="`当前生效：${inheritedProbability}`"
+                persistent-hint
+                density="comfortable"
+                variant="outlined"
+              />
+            </v-col>
+          </v-row>
 
           <v-row dense>
             <v-col cols="12" md="6">
@@ -323,6 +380,17 @@ watch(
             class="mb-3"
             text="此段时间不回复任何消息（含被 @）；只影响主动消息的时段在「功能插件 → 主动消息」里设置。"
           />
+
+          <v-card variant="tonal" class="mb-3">
+            <v-card-subtitle class="text-caption">生效预览（保存前先看结果与来源）</v-card-subtitle>
+            <v-card-text class="text-caption pt-0">
+              <div v-for="row in previewRows" :key="row.label" class="d-flex align-center flex-wrap gap-2">
+                <span style="min-width: 64px">{{ row.label }}</span>
+                <span>{{ row.value }}</span>
+                <v-chip size="x-small" variant="text">来自：{{ row.source }}</v-chip>
+              </div>
+            </v-card-text>
+          </v-card>
 
           <v-select
             v-model="userMode"

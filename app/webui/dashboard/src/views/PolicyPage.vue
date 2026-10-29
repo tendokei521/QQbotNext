@@ -12,7 +12,13 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { displayName, useBotsStore } from '@/stores/bots'
-import { usePolicyStore, type PolicyMatrixRow, type PolicyOverrideRow, type SwitchValue } from '@/stores/policy'
+import {
+  triggerModeLabel,
+  usePolicyStore,
+  type PolicyMatrixRow,
+  type PolicyOverrideRow,
+  type SwitchValue,
+} from '@/stores/policy'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
@@ -195,6 +201,11 @@ async function onSceneDefault(scene: 'group' | 'private', value: SceneValue) {
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   }
+}
+
+function triggerText(row: PolicyMatrixRow): string {
+  const label = triggerModeLabel(row.trigger_mode)
+  return row.trigger_mode === 'all' ? `${label} ${Number(row.trigger_probability ?? 100)}%` : label
 }
 
 function isMuted(row: PolicyMatrixRow): boolean {
@@ -439,6 +450,8 @@ watch(rulesDialog, (open) => {
             </v-row>
             <div class="text-caption mt-2" style="opacity: 0.6">
               「跟随」指采用 AI 对话面板里的群聊开关、私信开关。
+              当前账号默认触发方式：{{ triggerModeLabel(policy.defaultPolicy.trigger_mode || 'none') }}；
+              需要按群改就在该群菜单里打开「本群专属规则」。
             </div>
           </v-card-text>
         </v-card>
@@ -501,8 +514,20 @@ watch(rulesDialog, (open) => {
                   高级规则 {{ row.overridden_keys.length }} 项
                 </v-chip>
               </v-list-item-title>
-              <v-list-item-subtitle>
-                {{ row.enabled_source === 'muted' ? '静音中' : row.enabled_source === 'channel' ? '按本群设置' : '继承账号默认' }}
+              <v-list-item-subtitle class="d-flex align-center flex-wrap gap-2">
+                <span>
+                  {{ row.enabled_source === 'muted' ? '静音中' : row.enabled_source === 'channel' ? '按本群设置' : '继承账号默认' }}
+                </span>
+                <span>· 触发：{{ triggerText(row) }}</span>
+                <span v-if="row.quiet_hours">· 免打扰 {{ row.quiet_hours }}</span>
+                <v-chip
+                  v-if="row.trigger_source === 'channel'"
+                  size="x-small"
+                  variant="tonal"
+                  color="info"
+                >
+                  触发按本群
+                </v-chip>
               </v-list-item-subtitle>
               <template #append>
                 <div class="d-flex align-center gap-2">
