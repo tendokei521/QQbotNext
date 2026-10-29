@@ -4,8 +4,8 @@
  *
  * 与「AI 设置」的分工：这里只放**高频、一眼要看到**的东西——
  *   1. 状态条：总开关 / 模型是否就绪 / 当前人格；
- *   2. 回复开关：agent.enabled + 群聊、私聊开关；
- *   3. 触发方式：被 @ / 关键词；
+ *   2. 回复开关：只有总开关（群聊/私聊默认与触发方式都在「回复与权限」里改）；
+ *   3. 触发方式：只读摘要 + 跳转（唯一编辑器在「回复与权限」）；
  *   4. 模型池与人格（直接复用设置区已有的定制组件，不写第二套表单）；
  *   5. 谁能回复：只读摘要 + 跳转「回复与权限」。
  *
@@ -17,7 +17,6 @@ import { useRouter } from 'vue-router'
 import http from '@/api/http'
 import { useAgentConfigStore } from '@/stores/agentConfig'
 import { displayName, useBotsStore } from '@/stores/bots'
-import { splitSchema } from '@/utils/schema'
 import panelManifest from '@/agent/ai-panel.json'
 import { resolvePersona, type PersonaPresetLike } from '@/agent/persona'
 import SaveStatusBar from '@/components/common/SaveStatusBar.vue'
@@ -41,8 +40,11 @@ interface PanelCardDef {
 /** 面板字段卡清单（后端生成，勿手改 JSON） */
 const PANEL_CARDS: PanelCardDef[] =
   (panelManifest as unknown as { panel?: { cards?: PanelCardDef[] } }).panel?.cards || []
+// 这两张卡片的信息现在都以只读摘要展示；字段清单仍从后端生成，避免前后端漂移
 const replyCard = PANEL_CARDS.find((card) => card.id === 'panel_reply')
 const triggerCard = PANEL_CARDS.find((card) => card.id === 'panel_trigger')
+void replyCard
+void triggerCard
 
 const agent = useAgentConfigStore()
 const bots = useBotsStore()
@@ -58,33 +60,15 @@ const accountId = computed(() => bots.currentAccountId)
 const accountName = computed(() => (bots.currentBot ? displayName(bots.currentBot) : ''))
 const hasAccount = computed(() => accountId.value !== null)
 
-const schemaItems = computed<Record<string, any>>(() => splitSchema(agent.schema).items)
-
-/** 只渲染 schema 里真实存在的字段：字段清单可能比后端版本新，缺了就跳过而不是渲染裸 key */
-function fieldsOf(card: PanelCardDef | undefined): string[] {
-  return (card?.fields || []).filter((key) => Boolean(schemaItems.value[key]?.type))
-}
-const replyFields = computed(() => fieldsOf(replyCard))
-const triggerFields = computed(() => fieldsOf(triggerCard))
+/** 只读摘要用：群聊/私聊默认是否允许（真正的编辑入口在「回复与权限」） */
+const groupDefault = computed(() => Boolean(agent.draft.group_enable))
+const privateDefault = computed(() => agent.draft.private_enable !== false)
 
 /** 总开关不是 schema 字段（独立存储），包成同样的 boolean schema 交给 PanelField 统一形态 */
 const ENABLED_FIELD_SCHEMA = {
   type: 'boolean',
   label: '启用 AI 回复',
   description: '总开关。关闭后所有场景都不再自动回复。',
-}
-
-function fieldSchema(key: string): Record<string, any> {
-  return schemaItems.value[key] || {}
-}
-
-function fieldValue(key: string): any {
-  const value = agent.draft[key]
-  return value !== undefined ? value : fieldSchema(key).default
-}
-
-function onField(key: string, value: any) {
-  agent.onChange(key, value)
 }
 
 function onEnabled(value: boolean | null) {
@@ -303,36 +287,27 @@ watch(
           @update="onEnabled"
         />
         <v-divider class="my-4" />
-        <div class="field-stack">
-          <PanelField
-            v-for="key in replyFields"
-            :key="key"
-            :field-key="key"
-            :schema="fieldSchema(key)"
-            :value="fieldValue(key)"
-            :bot-id="accountId"
-            @update="(v: any) => onField(key, v)"
-          />
-        </div>
-        <div class="d-flex justify-end mt-2">
+        <div class="d-flex align-center flex-wrap gap-2">
+          <v-chip size="small" variant="tonal" :color="groupDefault ? 'success' : 'grey'">
+            群聊默认：{{ groupDefault ? '允许' : '禁止' }}
+          </v-chip>
+          <v-chip size="small" variant="tonal" :color="privateDefault ? 'success' : 'grey'">
+            私聊默认：{{ privateDefault ? '允许' : '禁止' }}
+          </v-chip>
+          <v-spacer />
           <v-btn size="small" variant="text" append-icon="mdi-arrow-right" @click="router.push('/reply?tab=groups')">
-            单独设置的群
+            去「回复与权限」改默认与例外
           </v-btn>
         </div>
       </PanelCard>
 
       <!-- ② 触发方式：什么时候接话 -->
-      <PanelCard title="触发方式" icon="mdi-at" color="info" subtitle="群聊里什么时候该接话">
-        <div class="field-stack">
-          <PanelField
-            v-for="key in triggerFields"
-            :key="key"
-            :field-key="key"
-            :schema="fieldSchema(key)"
-            :value="fieldValue(key)"
-            :bot-id="accountId"
-            @update="(v: any) => onField(key, v)"
-          />
+      <PanelCard title="触发方式" icon="mdi-at" color="info" subtitle="群聊里什么时候该接话；在「回复与权限」里改">
+        <div class="d-flex align-center flex-wrap gap-2">
+          <v-chip size="small" variant="tonal" color="info">{{ triggerEffect }}</v-chip>
+          <span v-if="keywordList.length" class="text-caption" style="opacity: 0.7">
+            关键词：{{ keywordList.join('、') }}
+          </span>
         </div>
         <div class="effect-line mt-4">
           <v-icon icon="mdi-lightbulb-on-outline" size="small" color="info" class="mr-2" />
@@ -340,10 +315,10 @@ watch(
         </div>
         <div class="d-flex align-center flex-wrap gap-2 mt-2">
           <span class="text-caption" style="opacity: 0.65">
-            账号专属规则或单个群的规则可以覆盖这里的设置
+            触发方式只在这里展示；账号默认、单群例外都在「回复与权限」
           </span>
           <v-btn size="small" variant="text" append-icon="mdi-arrow-right" @click="router.push('/reply?tab=rules')">
-            去调整
+            去修改
           </v-btn>
         </div>
       </PanelCard>
