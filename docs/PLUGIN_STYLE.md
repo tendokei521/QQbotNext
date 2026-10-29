@@ -98,3 +98,9 @@ pytest tests/architecture/test_plugin_layout.py -q
 
 迁移约定：一次性把根级实现文件移进 `src/` 并改 import，**不保留旧路径 shim**；
 根级白名单与存量豁免清单在闸门里以「棘轮」维护——迁完一个删一条，只收紧不放宽。
+
+当前状态（2026-10-29）：`app/plugins/` 的 10 个内置插件已全部符合本规范——实现文件都在
+`src/`（`llm_tools_extra/onebot/` 也收进 `src/onebot/`），只有 `service.py` 这类
+「≤100 行且只被 main import」的小模块按例外留在根；闸门里的迁移基线已清空。
+本地插件（`data/module/plugins/<name>/`）不在本仓库，安装形态同样适用本规范，
+用 `python scripts/plugin_layout.py --check` 可随时核对。
