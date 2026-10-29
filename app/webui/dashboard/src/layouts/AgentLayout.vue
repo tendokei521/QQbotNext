@@ -17,9 +17,9 @@ const router = useRouter()
 const bots = useBotsStore()
 const agent = useAgentConfigStore()
 
-// 当前路由对应的分区（index 路由没有分区）
+// 当前路由对应的分区（AI 设置只有 3 个深度设置页）
 const section = computed(() => agentSectionByPath(route.path))
-const panelTitle = 'AI 对话设置'
+const panelTitle = 'AI 设置'
 const botId = computed(() => bots.currentAccountId)
 /** 是否已选定账号：有账号就够，**不要求连上**（配置按账号存，与连接无关） */
 const hasAccount = computed(() => botId.value !== null)
@@ -60,7 +60,7 @@ watch(
           class="mr-1"
           @click="router.push(AGENT_INDEX_PATH)"
         >
-          返回 {{ panelTitle }}
+          返回 AI 对话面板
         </v-btn>
         <h1 class="app-page-title">
           <v-icon v-if="section" :icon="section.icon" size="28" class="mr-1" :color="section.color" />
@@ -78,8 +78,7 @@ watch(
       </div>
       <div class="d-flex align-center gap-2">
         <!--
-          Agent 启用开关移到「基础配置」页：它是整个 Agent 的总闸，不属于任何一个具体
-          配置页的头部；放在这里会让每个配置页都出现一个"看起来只影响本页"的开关。
+          AI 回复总开关在「AI 对话面板」里维护（高频操作台），不在任何一个深度设置页；
           头部只保留只读状态，让人一眼知道当前是开还是关。
         -->
         <v-chip
@@ -103,7 +102,7 @@ watch(
       </div>
     </div>
     <div class="app-page-subtitle">
-      {{ section ? section.subtitle : '模型、人格、权限与对话行为' }}
+      {{ section ? section.subtitle : '回复时序、上下文与高级能力' }}
     </div>
 
     <v-progress-linear v-if="agent.loading || booting" indeterminate color="primary" class="mb-3" />
