@@ -25,13 +25,12 @@ SCHEMA = {
         "description": "单个 OneBot 工具返回给模型的字符上限",
         "default": 2000,
     },
-        "onebot_tool_overrides": {
-        "type": "dynamic", "label": "工具权限覆盖", "default": {},
-        "description": "按工具名覆盖权限与适用范围。",
-    },
-"onebot_tools_debug": {
+    # 注意：`onebot_tool_overrides`（按工具名覆盖权限/适用范围）暂时不在配置页暴露：
+    # 该能力的 dynamic 数据源尚未实现，渲染出来只会得到一个永远报错的输入框。
+    # 键本身仍保留在 agent 配置里（`app/agent/config_schema.py`），运行时照常读取。
+    "onebot_tools_debug": {
         "type": "boolean",
-        "label": "调试日志",
+        "label": "记录 OneBot 调用明细",
         "description": "记录每次 OneBot 工具调用的 action 与参数",
         "default": False,
     },
@@ -43,8 +42,8 @@ SCHEMA = {
     },
     "mcp_servers": {
         "type": "textarea",
-        "label": "MCP 服务列表",
-        "description": "每项含名称、启动命令与参数；留空表示不用 MCP，格式可参考文档示例",
+        "label": "外部工具（MCP）服务列表",
+        "description": "每项含名称、启动命令与参数；留空表示不用外部工具，格式可参考文档示例",
         "default": "[]",
     },
     "tool_result_directive_enable": {

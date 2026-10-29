@@ -3,7 +3,7 @@
 SCHEMA = {
     "enable": {
         "type": "boolean",
-        "label": "启用模块",
+        "label": "启用插件",
         "description": "是否响应“吃什么”相关消息",
         "default": True,
     },

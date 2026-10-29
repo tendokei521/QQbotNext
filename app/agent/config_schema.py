@@ -17,7 +17,7 @@ SCHEMA = {
     "group_memory": {"type": "group", "label": "长期记忆（实验性）", "collapsible": True},
     "group_knowledge": {"type": "group", "label": "知识库", "collapsible": True},
     "group_tavily": {"type": "group", "label": "Tavily 联网搜索", "collapsible": True},
-    "group_mcp": {"type": "group", "label": "MCP 工具", "collapsible": True},
+    "group_mcp": {"type": "group", "label": "外部工具（MCP）", "collapsible": True},
     "group_onebot": {"type": "group", "label": "OneBot 工具", "collapsible": True},
     "group_tools": {"type": "group", "label": "工具调用", "collapsible": True},
     "group_permission": {"type": "group", "label": "权限", "collapsible": True},
@@ -165,7 +165,7 @@ SCHEMA = {
     },
     "system_prompt_style": {
         "type": "select", "label": "消息组装风格",
-        "description": "分块 = 人设、技能、记忆各一条系统消息（默认）；单条 = 合并为一条。",
+        "description": "分块 = 人格、技能、记忆各一条系统消息（默认）；单条 = 合并为一条。",
         "default": "blocks", "group": "group_session",
         "options": {
             "blocks": "分块：每类一块 system（默认）",
@@ -499,10 +499,10 @@ SCHEMA = {
         "default": "member", "group": "group_permission",
         "options": {
             "everyone": "所有人",
-            "member": "普通成员及以上",
-            "group_admin": "群管理/群主",
+            "member": "群成员及以上",
+            "group_admin": "群管及以上",
             "group_owner": "仅群主",
-            "manager": "管理者和拥有者",
+            "manager": "管理者与拥有者",
             "owner": "仅拥有者",
         },
     },
@@ -618,7 +618,7 @@ SCHEMA = {
 
     # ==================== 长期记忆（实验性） ====================
     "experimental_long_term_memory": {
-        "type": "boolean", "label": "启用长期记忆实验方案", "description": "已废弃，请改用长期记忆模块。",
+        "type": "boolean", "label": "启用长期记忆实验方案", "description": "已废弃，请改用长期记忆插件。",
         "default": False, "group": "group_memory",
     },
     "memory_enable": {
@@ -731,7 +731,7 @@ SCHEMA = {
     },
     "debug_prompt": {
         "type": "boolean", "label": "（已废弃）提示词调试", "default": False,
-        "description": "已废弃，调试开关在增强模块里。",
+        "description": "已废弃，调试开关在增强插件里。",
     },
     "api_base": {
         "type": "string", "label": "（已废弃）api_base", "default": "",
@@ -762,7 +762,7 @@ SCHEMA = {
         # 历史上这里误写成 string，导致 schema 与运行时矛盾、值校验误报；
         # 现在按真实类型声明，由「模型池」卡片写入，不在普通表单里编辑。
         "type": "string_list", "label": "模型池（内部字段）", "default": [],
-        "description": "每个条目是一个模型 id；由 Agent 面板的模型池卡片维护。",
+        "description": "每个条目是一个模型 id；由「AI 对话面板」的模型池卡片维护。",
     },
     "provider_preset_id": {
         "type": "string", "label": "（已废弃）provider_preset_id", "default": "",
@@ -801,14 +801,14 @@ SCHEMA = {
         "description": "已废弃，请改用工具总览页统一关闭。",
     },
     "module_tools_enabled": {
-        "type": "dynamic", "label": "（已废弃）模块工具开关", "default": {},
+        "type": "dynamic", "label": "（已废弃）插件工具开关", "default": {},
         "description": "已废弃，请改用工具总览页统一关闭。",
     },
     "mcp_tools_enabled": {
-        "type": "dynamic", "label": "（已废弃）MCP 工具开关", "default": {},
+        "type": "dynamic", "label": "（已废弃）外部工具开关", "default": {},
         "description": "已废弃，请改用工具总览页统一关闭。",
     },
-"system_tools_log_enabled": {
+    "system_tools_log_enabled": {
         "type": "boolean", "label": "记录系统工具调用", "default": True,
         "description": "在日志里记录系统工具的调用与结果。",
     },
@@ -817,8 +817,8 @@ SCHEMA = {
         "description": "在日志里记录插件工具的调用与结果。",
     },
     "mcp_tools_log_enabled": {
-        "type": "boolean", "label": "记录 MCP 工具调用", "default": True,
-        "description": "在日志里记录 MCP 工具的调用与结果。",
+        "type": "boolean", "label": "记录外部工具调用", "default": True,
+        "description": "在日志里记录外部工具（MCP）的调用与结果。",
     },
     "onebot_tools_log_enabled": {
         "type": "boolean", "label": "记录 OneBot 工具调用", "default": True,
@@ -851,7 +851,7 @@ SCHEMA = {
 
     # ==================== MCP ====================
     "mcp_servers": {
-        "type": "textarea", "label": "MCP Servers (JSON 数组)", "description": "MCP 服务列表（JSON 数组），每项含名称、启动命令、参数与环境变量。",
+        "type": "textarea", "label": "外部工具（MCP）服务列表", "description": "外部工具（MCP）服务列表（JSON 数组），每项含名称、启动命令、参数与环境变量。",
         "default": "[]", "rows": 5, "group": "group_mcp",
     },
 

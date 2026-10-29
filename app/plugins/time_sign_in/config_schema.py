@@ -58,7 +58,7 @@ SCHEMA = {
     "daily_signin_time": {
         "type": "time",
         "label": "自动打卡时间",
-        "description": "每日自动打卡触发时间（修改后需刷新模块生效）",
+        "description": "每日自动打卡触发时间（修改后需刷新插件生效）",
         "default": "00:00",
     },
     "enable_custom_commands": {

@@ -1,9 +1,9 @@
 {
   "name": "recall_back",
-  "display_name": "防撤回模块",
+  "display_name": "防撤回",
   "sign": "RecallBack",
   "version": "1.0.0",
-  "description": "防撤回模块，监听消息并转发被撤回的消息",
+  "description": "消息被撤回时自动转发出来",
   "entry": "main.py",
   "api_version": 1
 }

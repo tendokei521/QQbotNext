@@ -3,7 +3,7 @@
 SCHEMA = {
     "enable": {
         "type": "boolean",
-        "label": "启用模块",
+        "label": "启用插件",
         "description": "关闭后 /log、/logs 不再响应",
         "default": True,
     },

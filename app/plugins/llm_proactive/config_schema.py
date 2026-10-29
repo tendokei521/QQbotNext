@@ -100,7 +100,7 @@ SCHEMA = {
     "stream_proactive_enabled": {
         "type": "boolean",
         "label": "主动消息走流式",
-        "description": "复用「输出策略」模块的流式配置",
+        "description": "复用「输出策略」插件的流式配置",
         "default": False,
     },
 }

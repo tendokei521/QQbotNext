@@ -45,7 +45,7 @@ SCHEMA = {
     "cron_time": {
         "type": "time",
         "label": "推送时间",
-        "description": "每日自动推送触发时间（修改后需刷新模块生效）",
+        "description": "每日自动推送触发时间（修改后需刷新插件生效）",
         "default": "08:00",
     },
     "cron_group_mode": {

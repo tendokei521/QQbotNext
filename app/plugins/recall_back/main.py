@@ -6,7 +6,7 @@ from .config_schema import SCHEMA
 
 
 class Module(BaseModule):
-    name = "防撤回模块"
+    name = "防撤回"
     sign = "RecallBack"
     description = "消息被撤回时自动转发出来"
     permission = "everyone"

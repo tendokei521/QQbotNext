@@ -1,9 +1,9 @@
 {
   "name": "example",
-  "display_name": "示例模块",
+  "display_name": "示例插件",
   "sign": "Example",
   "version": "1.0.0",
-  "description": "这是一个标准演示模块",
+  "description": "示例插件，用来照着写自己的插件",
   "entry": "main.py",
   "api_version": 1
 }

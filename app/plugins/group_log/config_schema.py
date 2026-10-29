@@ -1,4 +1,4 @@
-"""群聊记录模块配置表单。"""
+"""群聊记录插件配置表单。"""
 
 SCHEMA = {
     "group_log_enable": {
@@ -11,8 +11,7 @@ SCHEMA = {
     "retention_count": {
         "type": "number",
         "label": "单群保留条数",
-        "description": "每个群保留的最大条数，超出从最旧开始丢弃。"
-                       "一次请求实际携带多少由 Agent 配置里的组装窗口决定。",
+        "description": "每个群保留多少条；带多少群聊背景由 AI 设置 → 会话管理 → 群聊历史 决定，关掉后那边不再有背景可带。",
         "default": 2000,
         "min": 100,
         "step": 100,

@@ -3,7 +3,7 @@
   "display_name": "日志发送",
   "sign": "LogSender",
   "version": "1.0.0",
-  "description": "在聊天里用 /log 取回本轮次 user 日志、用 /logs 取回四个日志文件",
+  "description": "聊天里发 /log 看本轮日志，/logs 看全部日志文件",
   "entry": "main.py",
   "api_version": 1
 }

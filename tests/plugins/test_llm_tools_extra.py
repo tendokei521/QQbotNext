@@ -20,9 +20,22 @@ def test_owned_keys_match_partition():
     assert owned_keys() == OWNED_KEYS
 
 
+#: 有意不在「功能插件 → 工具扩展」配置页暴露的键（不是漏配）。
+#:
+#: ``onebot_tool_overrides``（按工具名覆盖权限/适用范围）的编辑入口在
+#: 「高级工具 → OneBot 工具」每个工具的「触发权限 / 可用范围」上——那里能按工具
+#: 单独设置，比在插件页填一份 JSON 直观。插件 schema 若也声明一遍，配置页会出现
+#: 一个永远报错的 dynamic 输入框（dynamic 数据源本就没有实现）。
+SCHEMA_HIDDEN_KEYS = {"onebot_tool_overrides"}
+
+
 def test_default_config_and_schema_cover_owned_keys():
     assert not [k for k in OWNED_KEYS if k not in Module.default_config]
-    assert not [k for k in OWNED_KEYS if k not in Module.config_schema]
+    missing = [k for k in OWNED_KEYS if k not in Module.config_schema]
+    # 隐藏键必须是有意为之：不能用一个「白名单」把漏配也一起放过
+    assert set(missing) <= SCHEMA_HIDDEN_KEYS, missing
+    # 隐藏键仍要有默认值（运行时照常读取）
+    assert "onebot_tool_overrides" in Module.default_config
 
 
 def test_module_is_pure_business():

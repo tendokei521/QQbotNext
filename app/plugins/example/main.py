@@ -6,7 +6,7 @@ from .config_schema import SCHEMA
 
 
 class Module(BaseModule):
-    name = "示例模块"
+    name = "示例插件"
     sign = "Example"
     description = "示例插件，用来照着写自己的插件"
     permission = "everyone"

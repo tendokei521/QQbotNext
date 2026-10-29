@@ -3,7 +3,7 @@
   "display_name": "戳一戳回复",
   "sign": "PokeReply",
   "version": "1.0.0",
-  "description": "跟随戳一戳、被戳反戳、被戳概率回复",
+  "description": "被戳后按概率回戳或回应",
   "entry": "main.py",
   "api_version": 1
 }

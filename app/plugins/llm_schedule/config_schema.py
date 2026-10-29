@@ -16,7 +16,7 @@ SCHEMA = {
     "stream_scheduled_enabled": {
         "type": "boolean",
         "label": "定时任务走流式",
-        "description": "复用「输出策略」模块的流式配置",
+        "description": "复用「输出策略」插件的流式配置",
         "default": False,
     },
 }

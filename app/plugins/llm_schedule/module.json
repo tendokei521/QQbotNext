@@ -3,7 +3,7 @@
   "display_name": "定时任务",
   "sign": "LlmSchedule",
   "version": "1.0.0",
-  "description": "到点让 Bot 自然开口（支持 once/daily/weekly/monthly/interval）",
+  "description": "到点自动发言（每天 / 每周 / 每月）",
   "author": "tendokei521",
   "entry": "main.py",
   "api_version": 1

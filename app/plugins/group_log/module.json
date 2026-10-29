@@ -3,7 +3,7 @@
   "display_name": "群聊记录",
   "sign": "GroupLog",
   "version": "1.0.0",
-  "description": "持续记录群聊可见事件（消息/表情/戳/撤回/我的发言），作为 LLM 的环境背景",
+  "description": "记录群里最近的动静，作为群聊背景给模型参考",
   "entry": "main.py",
   "api_version": 1
 }
