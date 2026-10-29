@@ -19,8 +19,9 @@ import sqlite3
 import threading
 import time
 import uuid
+from collections.abc import Iterable
 from difflib import SequenceMatcher
-from typing import Any, Iterable
+from typing import Any
 
 from app.agent import llm_data_dir, logger, safe_bot_id
 

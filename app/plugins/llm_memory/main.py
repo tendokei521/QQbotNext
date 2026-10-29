@@ -86,6 +86,7 @@ class Module(BaseModule):
             return
         from app.agent.delivery.output import ConfigView
         from app.agent.loop.providers import register_context_provider, register_tool_source
+
         from .src.service import (
             MemoryLifecycle,
             MemoryProvider,

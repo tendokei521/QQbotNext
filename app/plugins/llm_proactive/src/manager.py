@@ -8,8 +8,6 @@
 
 from __future__ import annotations
 
-from app.core.logger import account_label
-
 import asyncio
 import json
 import os
@@ -25,6 +23,7 @@ from app.agent.context.group import (
     fetch_group_online_history,
 )
 from app.agent.session.manager import SessionManager
+from app.core.logger import account_label
 from app.domain.tags import strip_all_tags
 
 DEFAULT_PROACTIVE_PROMPT = (
@@ -194,7 +193,6 @@ class ProactiveManager:
         from app.agent.loop.context import LlmContext
 
         session = self.session_mgr.get_session(session_id)
-        system_prompt = self.module.config.get("system_prompt", "你是一个友好的助手。")
         now_str = datetime.now().strftime("%Y年%m月%d日 %H:%M")
         prompt_tpl = self._cfg("proactive_prompt", DEFAULT_PROACTIVE_PROMPT)
         user_prompt = prompt_tpl.replace("{{unanswered_count}}", str(unanswered)).replace("{{current_time}}", now_str)
@@ -415,7 +413,7 @@ class ProactiveManager:
             # 优先新目录文件；不存在则回退旧版根目录共享文件（迁移期兼容）
             file_path = self._file if os.path.exists(self._file) else self._legacy_file
             if os.path.exists(file_path):
-                with open(file_path, "r", encoding="utf-8") as f:
+                with open(file_path, encoding="utf-8") as f:
                     data = json.load(f)
                 if isinstance(data, dict):
                     self._data = data

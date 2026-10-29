@@ -98,10 +98,9 @@ class Module(BaseModule):
         runtime = self._runtime()
         if runtime is None:
             return
-        from app.agent.loop.providers import unregister_owner
-
         # 取消能力声明：框架立刻回到"没人提供"（配置兜底仍在，行为平滑）
         from app.agent.capabilities import CAP_CONTEXT_EXPAND, registry_of
+        from app.agent.loop.providers import unregister_owner
 
         registry_of(runtime).revoke_tool(CAP_CONTEXT_EXPAND, source="llm_context")
         unregister_owner(runtime, self)

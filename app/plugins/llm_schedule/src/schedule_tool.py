@@ -23,13 +23,12 @@
 
 from __future__ import annotations
 
-from app.core.logger import account_label
-
 import re
 from datetime import datetime
 
 from app.agent import logger
 from app.agent.tools.spec import ToolSpec
+from app.core.logger import account_label
 from app.domain.time_parser import parse_schedule
 
 SCHEDULE_TASK_SCHEMA: dict = {

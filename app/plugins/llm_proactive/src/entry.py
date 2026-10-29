@@ -8,19 +8,6 @@
 
 from __future__ import annotations
 
-"""定时任务服务（框架级 CronManager）：识别对话中的定时需求，到点以一次 LLM 请求自然发言。
-
-机制（化用 AstrBot CronJobManager / PROACTIVE_AGENT_CRON_WOKE_SYSTEM_PROMPT）：
-- 每个 Bot 实例一个 TaskScheduler，随框架生命周期创建/销毁；
-- 任务持久化到 llm 数据目录 tasks_data_{bot_id}.json，重启后自动恢复未到期的任务；
-- 触发：task_manager.create_task 睡眠到 next_at → 像主动消息一样做一次
-  带系统提示词的 LLM 请求（结合会话历史）→ 自然发言 → 周期任务推进到下一触发时间；
-- LLM 生成失败时兜底发送任务自带的固定内容；
-- schedule_task 原生工具（create/list/delete）+ 定时意图确定性兜底；
-- 周期支持：once / daily / weekly / monthly / interval（由 time_parser 解析）。
-"""
-
-
 import time
 from datetime import datetime
 
@@ -82,7 +69,7 @@ class TaskEntry:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "TaskEntry":
+    def from_dict(cls, data: dict) -> TaskEntry:
         return cls(
             task_id=data["id"],
             session_id=data["session_id"],

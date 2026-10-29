@@ -8,7 +8,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from .recall import rank
 from .store import owner_group_member, owner_private

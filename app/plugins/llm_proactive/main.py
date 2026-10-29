@@ -22,10 +22,9 @@
 
 from __future__ import annotations
 
-from app.core.logger import account_label
-
 from typing import Any
 
+from app.core.logger import account_label
 from app.plugin import BaseModule
 
 from .config_schema import SCHEMA

@@ -9,9 +9,9 @@
 
 from __future__ import annotations
 
-from app.core.logger import account_label
-
 from typing import Any
+
+from app.core.logger import account_label
 
 
 async def referent_block(runtime: Any, session_id: str, user_text: str, ctx: Any = None) -> str:
@@ -88,6 +88,7 @@ class ContextToolSource:
         if not bool(policy_get(runtime, "context", "context_expand_enable", True)):
             return []
         from app.agent.tools.spec import ToolContext
+
         from .context_tools import build_context_tools
 
         # 优先复用本轮的 ToolContext（`extra["round_images"]` 等队列是共享的）；

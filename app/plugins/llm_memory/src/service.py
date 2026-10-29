@@ -10,9 +10,9 @@
 
 from __future__ import annotations
 
-from app.core.logger import account_label
-
 from typing import Any
+
+from app.core.logger import account_label
 
 
 def memory_manager(module: Any):
@@ -70,19 +70,9 @@ class MemoryToolSource:
         mgr = memory_manager(self.module)
         if mgr is None or not mgr.enabled():
             return []
-        from app.agent.tools.spec import ToolContext
         from .tool import build_memory_tools
 
         runtime = getattr(scope, "runtime", None)
-        tool_ctx = getattr(scope, "tool_ctx", None) or ToolContext(
-            module=self.module,
-            bot=getattr(runtime, "bot", None),
-            session_id=getattr(scope, "session_id", ""),
-            event=getattr(scope, "event", None),
-            runtime=runtime,
-            user_id=getattr(scope, "user_id", None),
-            group_id=getattr(scope, "group_id", None),
-        )
         return list(
             build_memory_tools(
                 runtime,
@@ -91,7 +81,7 @@ class MemoryToolSource:
                 bool(getattr(scope, "is_private", False)),
             )
             or []
-        ) + [None][:0]
+        )
 
 
 class MemoryLifecycle:

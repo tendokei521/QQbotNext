@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from .store import owner_group, owner_private
 from app.agent.tools.spec import ToolSpec
+
+from .store import owner_group, owner_private
 
 
 def _resolve_memory(runtime: Any):

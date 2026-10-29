@@ -8,16 +8,16 @@
 
 from __future__ import annotations
 
-from app.core.logger import account_label
-
 import asyncio
 import re
 import time
 from collections import OrderedDict
 from typing import Any
 
-from . import extract as extract_mod
 from app.agent import logger
+from app.core.logger import account_label
+
+from . import extract as extract_mod
 from .detect import autosave_clause
 from .recall import rank, render_block
 from .store import (

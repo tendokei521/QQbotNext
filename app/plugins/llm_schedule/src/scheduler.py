@@ -12,8 +12,6 @@
 
 from __future__ import annotations
 
-from app.core.logger import account_label
-
 import asyncio
 import json
 import os
@@ -27,11 +25,12 @@ from app.agent.context.group import (
     fetch_group_name,
     fetch_group_online_history,
 )
-from app.plugins.llm_proactive.src.entry import TaskEntry
 from app.agent.providers import get_provider
 from app.agent.session.manager import SessionManager
+from app.core.logger import account_label
 from app.domain.tags import strip_all_tags
 from app.domain.time_parser import advance_repeat, parse_schedule
+from app.plugins.llm_proactive.src.entry import TaskEntry
 
 # 定时触发（cron-wake）默认提示词：对齐 AstrBot PROACTIVE_AGENT_CRON_WOKE_SYSTEM_PROMPT 的轻量版
 DEFAULT_SCHEDULE_PROMPT = (
@@ -446,9 +445,7 @@ class TaskScheduler:
         from app.agent.assembly.inputs import collect_history_materials
         from app.agent.loop.context import LlmContext
 
-        session = self.session_mgr.get_session(entry.session_id)
         config = self.module.config
-        system_prompt = config.get("system_prompt", "你是一个友好的助手。")
         now_str = datetime.now().strftime("%Y年%m月%d日 %H:%M")
         job_json = json.dumps({
             "id": entry.id[:8],
@@ -682,7 +679,7 @@ class TaskScheduler:
             file_path = self._file if os.path.exists(self._file) else self._legacy_file
             if not os.path.exists(file_path):
                 return
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 data = json.load(f)
             items = data.get("tasks", []) if isinstance(data, dict) else data
             for item in items or []:
