@@ -36,6 +36,7 @@
 | **R2** | 简单视图（群开关矩阵） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r2-简单视图) |
 | **R3** | 高级视图（规则覆盖） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r3-高级视图) |
 | **R4** | 迁移收口 | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r4-迁移收口) |
+| **T0–T4** | 触发方式并入「回复与权限」（**规划中**） | `[ ]` | [`trigger-policy-integration.md`](trigger-policy-integration.md) |
 
 ### 已完成进度（2026-10-27）
 
