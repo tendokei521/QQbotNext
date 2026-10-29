@@ -207,7 +207,7 @@ class ReadinessService:
                 ("、".join(names.get(aid, aid) for aid in missing_pool))
                 if missing_pool else "选好模型后机器人才能回复"
             ),
-            route="/agent/basic",
+            route="/ai",
             label="选择模型",
             account_id=missing_pool[0] if missing_pool else "",
         ))
@@ -226,7 +226,7 @@ class ReadinessService:
                 ("、".join(names.get(aid, aid) for aid in missing_scene))
                 if missing_scene else "群聊回复关闭时，群里 @ 机器人不会有任何回应"
             ),
-            route="/agent/basic",
+            route="/ai",
             label="开启回复",
             account_id=missing_scene[0] if missing_scene else "",
         ))

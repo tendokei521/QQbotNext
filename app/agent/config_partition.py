@@ -1,13 +1,16 @@
 """agent 配置的**最终布局**（v3）与每个键的命运 —— 全仓库唯一真相。
 
-## 三条硬性事实
+## 硬性事实
 
-1. **本体界面只保留 5 页**（顺序即展示顺序）：
-   基础配置 → 权限管理 → 对话行为 → 会话管理 → 高级功能。
-   本文件里的 ``UI_PAGES`` 就是这 5 页的字段归属，前端 `sections.json` 应**由它生成**，
-   不再手写。
-2. **其余全部迁移为模块**（9 个），成为该模块的 ``default_config``。
-3. **剩余少量键删除**（能力被别处取代，或改为框架内硬编码的安全默认）。
+1. **本体配置页只剩 3 页**（顺序即展示顺序）：对话行为 → 会话管理 → 高级功能。
+   ``UI_PAGES`` 就是这 3 页的字段归属，前端 `sections.json` 应**由它生成**，不再手写。
+2. **两个"页面外的工作台"**（见 `docs/plan/ai-panel-split.md`）：
+   - ``PANEL_GROUPS``：AI 对话面板的字段（账号级默认、高频开关）；
+   - ``REPLY_GROUPS``：回复与权限页的字段（原「权限管理」并入「回复设置」）。
+   这两处也是用户可见的编辑入口，因此与 ``UI_PAGES`` 一起派生 ``CORE_KEYS``：
+   **每个本体键恰好只有一个编辑入口**。
+3. **其余全部迁移为模块**（9 个），成为该模块的 ``default_config``。
+4. **剩余少量键删除**（能力被别处取代，或改为框架内硬编码的安全默认）。
 
 ## 一次边界变更：``owner_id`` 并入权限管理
 
@@ -55,47 +58,14 @@ class UIPage:
         return tuple(f for g in self.groups for f in g.fields)
 
 
-# ==================== 1. 本体界面（5 页 / 51 键）====================
+# ==================== 1. 本体配置页（3 页 / 47 键）====================
 UI_PAGES: tuple[UIPage, ...] = (
-    UIPage(
-        id="basic",
-        label="基础配置",
-        order=10,
-        subtitle="选择在哪些场景回复，以及机器人用谁的人设",
-        groups=(
-            UIGroup("basic_switch", "响应场景", ("group_enable", "private_enable")),
-            UIGroup(
-                "basic_persona",
-                "人格设定",
-                # 人格提示词**只在「角色预设」里改**（配置 → 人格设定页维护预设内容）；
-                # 这里不再提供 system_prompt 输入框，避免"两处都能改人格"的歧义。
-                ("prompt_preset", "persona_preset_id"),
-            ),
-        ),
-    ),
-    UIPage(
-        id="permission",
-        label="权限管理",
-        order=20,
-        subtitle="谁能触发机器人：拥有者、管理员与权限规则",
-        groups=(
-            UIGroup("permission_role", "响应权限", ("permission",)),
-            UIGroup(
-                "permission_roster",
-                "拥有者与管理者",
-                ("agent_owner_list", "agent_manager_list"),
-            ),
-            # P6：高危工具审批（fail-closed：没有通道就拒绝）
-            UIGroup("permission_tool_approval", "高危工具审批", ("tool_approval_enable",)),
-        ),
-    ),
     UIPage(
         id="behavior",
         label="对话行为",
         order=30,
-        subtitle="什么时候接话、连发消息与打断怎么处理",
+        subtitle="连发消息与打断怎么处理",
         groups=(
-            UIGroup("behavior_trigger", "触发设置", ("trigger_at", "trigger_keyword")),
             UIGroup(
                 "behavior_debounce",
                 "消息合并等待",
@@ -206,8 +176,47 @@ UI_PAGES: tuple[UIPage, ...] = (
     ),
 )
 
-#: 本体界面保留的全部键（由 UI_PAGES 派生，避免两处漂移）
-CORE_KEYS: tuple[str, ...] = tuple(f for page in UI_PAGES for f in page.fields)
+# ==================== 1b. 两个「页面外的工作台」字段面 ====================
+# 背景：原「AI 对话设置」把"面板（高频开关/状态）"与"设置（低频参数）"混在一起，
+# 且「回复设置」与「权限管理」分散在两处。拆分方案见 docs/plan/ai-panel-split.md。
+#
+# 约定：每个键只有一个编辑入口——面板字段不在 UI_PAGES 里重复出现，
+# 权限/名册字段也不在面板里重复出现（面板只显示摘要 + 跳转）。
+PANEL_GROUPS: tuple[UIGroup, ...] = (
+    # 「回复开关」卡：总开关（enabled）是独立存储字段，由前端定制卡片渲染
+    UIGroup("panel_reply", "回复开关", ("group_enable", "private_enable")),
+    UIGroup("panel_trigger", "触发方式", ("trigger_at", "trigger_keyword")),
+    # 人格提示词只在「角色预设」里改；这里只选预设/提示词方案
+    UIGroup("panel_persona", "人格与模型", ("prompt_preset", "persona_preset_id")),
+)
+
+# 原「权限管理」整页并入「回复与权限」（唯一编辑入口）
+REPLY_GROUPS: tuple[UIGroup, ...] = (
+    UIGroup("reply_permission", "响应权限", ("permission",)),
+    UIGroup(
+        "reply_roster",
+        "拥有者与管理者",
+        ("agent_owner_list", "agent_manager_list"),
+    ),
+    # P6：高危工具审批（fail-closed：没有通道就拒绝）
+    UIGroup("reply_tool_approval", "高危工具审批", ("tool_approval_enable",)),
+)
+
+#: 字段面 id → 分组（供 fate_of / ui_group_of 与前端清单生成使用）
+SURFACE_GROUPS: dict[str, tuple[UIGroup, ...]] = {
+    "ai_panel": PANEL_GROUPS,
+    "reply": REPLY_GROUPS,
+}
+
+PANEL_KEYS: tuple[str, ...] = tuple(f for group in PANEL_GROUPS for f in group.fields)
+REPLY_KEYS: tuple[str, ...] = tuple(f for group in REPLY_GROUPS for f in group.fields)
+
+#: 本体保留的全部键（由「面板 + 配置页 + 回复与权限」派生，避免两处漂移）
+CORE_KEYS: tuple[str, ...] = (
+    PANEL_KEYS
+    + tuple(f for page in UI_PAGES for f in page.fields)
+    + REPLY_KEYS
+)
 
 # ==================== 2. 迁移为模块（9 个 / 108 键）====================
 MODULE_KEYS: dict[str, tuple[str, ...]] = {
@@ -406,17 +415,27 @@ OWNER_SOURCE_KEY = "agent_owner_list"
 
 # ==================== 查询助手 ====================
 def ui_page_of(key: str) -> str | None:
-    """键属于本体界面的哪一页；不在本体返回 None。"""
+    """键属于本体界面的哪一页/哪个工作台；不在本体返回 None。
+
+    返回值为 ``UI_PAGES`` 的页 id，或两个页面外工作台 id（``ai_panel`` / ``reply``）。
+    """
     for page in UI_PAGES:
         if key in page.fields:
             return page.id
+    for surface_id, groups in SURFACE_GROUPS.items():
+        if any(key in group.fields for group in groups):
+            return surface_id
     return None
 
 
 def ui_group_of(key: str) -> str | None:
-    """键属于本体界面的哪个分组。"""
+    """键属于本体界面的哪个分组（含页面外工作台的分组）。"""
     for page in UI_PAGES:
         for group in page.groups:
+            if key in group.fields:
+                return group.id
+    for groups in SURFACE_GROUPS.values():
+        for group in groups:
             if key in group.fields:
                 return group.id
     return None
@@ -466,7 +485,7 @@ def stale_keys(schema_keys) -> list[str]:
 
 
 def page_summary() -> list[dict]:
-    """本体界面摘要（供前端生成 sections.json 与文档核对）。"""
+    """本体配置页摘要（供前端生成 sections.json 与文档核对）。"""
     return [
         {
             "id": page.id,
@@ -478,3 +497,23 @@ def page_summary() -> list[dict]:
         }
         for page in sorted(UI_PAGES, key=lambda p: p.order)
     ]
+
+
+def panel_summary() -> dict:
+    """AI 对话面板摘要（供前端生成 ai-panel.json；字段仍引用 SCHEMA 单一真相）。"""
+    return {
+        "groups": [
+            {"id": g.id, "label": g.label, "fields": list(g.fields)} for g in PANEL_GROUPS
+        ],
+        "fields": len(PANEL_KEYS),
+    }
+
+
+def reply_summary() -> dict:
+    """回复与权限页摘要（原「权限管理」并入，供前端生成 ai-panel.json）。"""
+    return {
+        "groups": [
+            {"id": g.id, "label": g.label, "fields": list(g.fields)} for g in REPLY_GROUPS
+        ],
+        "fields": len(REPLY_KEYS),
+    }

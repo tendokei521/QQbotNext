@@ -184,4 +184,4 @@ async def test_model_pool_reports_which_accounts_are_missing(container, config_s
     assert check["ok"] is False
     assert "没配的号" in check["detail"] and "配好的号" not in check["detail"]
     assert check["action"]["account_id"] == "bad"
-    assert check["action"]["route"] == "/agent/basic"
+    assert check["action"]["route"] == "/ai"

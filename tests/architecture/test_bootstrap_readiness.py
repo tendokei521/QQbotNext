@@ -75,7 +75,7 @@ def test_lists_blockers_with_where_to_fix(capsys):
     assert "还没有账号" in out
     assert "/bots" in out
     assert "还没选模型" in out
-    assert "/agent/basic" in out
+    assert "/ai" in out
 
 
 def test_prints_single_line_when_ready(capsys):

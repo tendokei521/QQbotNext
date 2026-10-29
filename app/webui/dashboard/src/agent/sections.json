@@ -1,95 +1,17 @@
 {
-  "version": 5,
-  "note": "本文件由 scripts/gen_sections.py 从 app/agent/config_partition.py 生成，请勿手改。要加字段/换分组请改 config_partition.py 里的 UI_PAGES。v4：模块能力（流式/记忆/主动消息/工具/联网等）已迁到各自模块的配置页，本体只剩 5 页 43 键。v5：移除 area 字段——v4 之后只剩单一区域，单值枚举无信息量，且会让 /advanced 这类已删区域在代码里阴魂不散。",
+  "version": 6,
+  "note": "本文件由 scripts/gen_sections.py 从 app/agent/config_partition.py 生成，请勿手改。v6：AI 对话设置拆分为「AI 对话面板（ai-panel.json）+ AI 设置（本文件）」，本文件只剩 3 页（对话行为 / 会话管理 / 高级功能）；基础配置与权限管理已分别并入面板与「回复与权限」。",
   "generatedFrom": "app/agent/config_partition.py::page_summary()",
   "sections": [
     {
-      "id": "basic",
-      "path": "/agent/basic",
-      "title": "基础配置",
-      "subtitle": "选择在哪些场景回复，以及机器人用谁的人设",
-      "icon": "mdi-tune-variant",
-      "color": "primary",
-      "order": 10,
-      "customFirst": true,
-      "customFields": [
-        "prompt_preset"
-      ],
-      "groups": [
-        {
-          "id": "basic_switch",
-          "label": "响应场景",
-          "icon": "mdi-toggle-switch-outline",
-          "fields": [
-            "group_enable",
-            "private_enable"
-          ]
-        },
-        {
-          "id": "basic_persona",
-          "label": "人格设定",
-          "icon": "mdi-account-voice",
-          "fields": [
-            "prompt_preset",
-            "persona_preset_id"
-          ]
-        }
-      ]
-    },
-    {
-      "id": "permission",
-      "path": "/agent/permission",
-      "title": "权限管理",
-      "subtitle": "谁能触发机器人：拥有者、管理员与权限规则",
-      "icon": "mdi-shield-account-outline",
-      "color": "success",
-      "order": 20,
-      "groups": [
-        {
-          "id": "permission_role",
-          "label": "响应权限",
-          "icon": "mdi-account-key-outline",
-          "fields": [
-            "permission"
-          ]
-        },
-        {
-          "id": "permission_roster",
-          "label": "拥有者与管理者",
-          "icon": "mdi-account-star-outline",
-          "fields": [
-            "agent_owner_list",
-            "agent_manager_list"
-          ]
-        },
-        {
-          "id": "permission_tool_approval",
-          "label": "高危工具审批",
-          "icon": "mdi-folder-outline",
-          "fields": [
-            "tool_approval_enable"
-          ]
-        }
-      ]
-    },
-    {
       "id": "behavior",
-      "path": "/agent/behavior",
+      "path": "/ai/settings/behavior",
       "title": "对话行为",
-      "subtitle": "什么时候接话、连发消息与打断怎么处理",
+      "subtitle": "连发消息与打断怎么处理",
       "icon": "mdi-call-split",
       "color": "secondary",
       "order": 30,
       "groups": [
-        {
-          "id": "behavior_trigger",
-          "label": "触发设置",
-          "icon": "mdi-at",
-          "fields": [
-            "trigger_at",
-            "trigger_keyword"
-          ]
-        },
         {
           "id": "behavior_debounce",
           "label": "消息合并等待",
@@ -114,7 +36,7 @@
     },
     {
       "id": "session",
-      "path": "/agent/session",
+      "path": "/ai/settings/session",
       "title": "会话管理",
       "subtitle": "回复带多少上下文，群聊历史怎么用",
       "icon": "mdi-chat-processing-outline",
@@ -166,7 +88,7 @@
     },
     {
       "id": "advanced",
-      "path": "/agent/advanced",
+      "path": "/ai/settings/advanced",
       "title": "高级功能",
       "subtitle": "图片与动图理解、联网搜索",
       "icon": "mdi-wrench-cog-outline",
@@ -202,7 +124,7 @@
         {
           "id": "adv_tool_exec",
           "label": "工具执行",
-          "icon": "mdi-folder-outline",
+          "icon": "mdi-tools",
           "fields": [
             "tool_parallel_max",
             "tool_timeout_default_s",
@@ -213,7 +135,7 @@
         {
           "id": "adv_tool_logs",
           "label": "工具日志",
-          "icon": "mdi-folder-outline",
+          "icon": "mdi-text-box-search-outline",
           "fields": [
             "system_tools_log_enabled",
             "module_tools_log_enabled",

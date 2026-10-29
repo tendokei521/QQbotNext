@@ -14,12 +14,17 @@ from app.agent.config_partition import (
     DELETED_KEYS,
     MODULE_KEYS,
     OWNER_SOURCE_KEY,
+    PANEL_KEYS,
+    REPLY_KEYS,
+    SURFACE_GROUPS,
     TARGET_CORE_KEY_COUNT,
     UI_PAGES,
     all_partitioned_keys,
     duplicate_keys,
     fate_of,
     page_summary,
+    panel_summary,
+    reply_summary,
     stale_keys,
     ui_group_of,
     ui_page_of,
@@ -41,8 +46,11 @@ SCHEMA_KEYS: tuple[str, ...] = tuple(
     if isinstance(value, dict) and value.get("type") != "group"
 )
 
-#: 本体界面的页面顺序（用户定稿：对话行为在会话管理之前）
-EXPECTED_PAGE_ORDER = ("basic", "permission", "behavior", "session", "advanced")
+#: 本体配置页的顺序（拆分方案定稿：只剩对话行为 → 会话管理 → 高级功能）
+EXPECTED_PAGE_ORDER = ("behavior", "session", "advanced")
+#: 两个页面外工作台的字段数（AI 对话面板 / 回复与权限）
+EXPECTED_PANEL_KEYS = 6
+EXPECTED_REPLY_KEYS = 4
 
 #: 9 个目标模块（目录名）
 EXPECTED_MODULES = {
@@ -75,28 +83,31 @@ def test_legacy_schema_still_has_all_legacy_keys():
 # ==================== 布局本身 ====================
 
 
-def test_ui_has_exactly_five_pages_in_order():
+def test_ui_has_exactly_three_pages_in_order():
     ordered = [p.id for p in sorted(UI_PAGES, key=lambda p: p.order)]
     assert tuple(ordered) == EXPECTED_PAGE_ORDER, (
-        f"本体界面页面顺序漂移：{ordered}，期望 {list(EXPECTED_PAGE_ORDER)}"
+        f"本体配置页页面顺序漂移：{ordered}，期望 {list(EXPECTED_PAGE_ORDER)}"
     )
 
 
 def test_ui_page_field_counts_match_the_agreed_layout():
     counts = {row["id"]: row["fields"] for row in page_summary()}
     assert counts == {
-        "basic": 4,
-        "permission": 4,
-        "behavior": 8,
+        "behavior": 6,
         "session": 20,
         "advanced": 21,
     }, f"页面字段数漂移：{counts}"
+    assert panel_summary()["fields"] == EXPECTED_PANEL_KEYS
+    assert reply_summary()["fields"] == EXPECTED_REPLY_KEYS
 
 
 def test_ui_groups_are_unique_and_named():
-    group_ids = [g.id for page in UI_PAGES for g in page.groups]
+    all_groups = [g for page in UI_PAGES for g in page.groups]
+    for groups in SURFACE_GROUPS.values():
+        all_groups.extend(groups)
+    group_ids = [g.id for g in all_groups]
     assert len(group_ids) == len(set(group_ids)), "分组 id 重复"
-    assert all(g.label.strip() for page in UI_PAGES for g in page.groups), "分组缺 label"
+    assert all(g.label.strip() for g in all_groups), "分组缺 label"
 
 
 def test_every_ui_key_belongs_to_exactly_one_group():
@@ -107,8 +118,13 @@ def test_every_ui_key_belongs_to_exactly_one_group():
     assert not dup, f"这些键在本体界面出现多次（会被渲染两遍）: {dup}"
 
 
-def test_core_keys_are_derived_from_pages():
-    assert CORE_KEYS == tuple(f for page in UI_PAGES for f in page.fields)
+def test_core_keys_are_derived_from_pages_and_surfaces():
+    expected = (
+        PANEL_KEYS
+        + tuple(f for page in UI_PAGES for f in page.fields)
+        + REPLY_KEYS
+    )
+    assert CORE_KEYS == expected
 
 
 # ==================== 分区完整性（对旧 160 键）====================
@@ -175,7 +191,7 @@ def test_core_keys_all_still_exist():
 
 def test_owner_identity_comes_from_one_roster():
     assert OWNER_SOURCE_KEY == "agent_owner_list"
-    assert ui_page_of(OWNER_SOURCE_KEY) == "permission", "拥有者名册必须挂在权限管理页"
+    assert ui_page_of(OWNER_SOURCE_KEY) == "reply", "拥有者名册必须挂在「回复与权限」工作台"
     assert OWNER_SOURCE_KEY in SCHEMA_KEYS, "拥有者名册必须存在于 schema"
 
 
@@ -185,6 +201,10 @@ def test_fate_lookup_is_consistent_with_tables():
     for page in UI_PAGES:
         for key in page.fields:
             assert fate_of(key) == f"ui:{page.id}"
+    for surface_id, groups in SURFACE_GROUPS.items():
+        for group in groups:
+            for key in group.fields:
+                assert fate_of(key) == f"ui:{surface_id}"
     for module_name, keys in MODULE_KEYS.items():
         for key in keys:
             assert fate_of(key) == f"module:{module_name}"

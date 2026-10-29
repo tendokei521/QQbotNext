@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "note": "本文件由 scripts/gen_sections.py 从 app/agent/config_partition.py 生成，请勿手改。panel = AI 对话面板的字段卡（另外三张卡：回复总开关、模型池、权限摘要由前端定制）；reply = 回复与权限页的字段分组。",
+  "generatedFrom": "app/agent/config_partition.py::panel_summary()/reply_summary()",
+  "panel": {
+    "fields": 6,
+    "cards": [
+      {
+        "id": "panel_reply",
+        "label": "回复开关",
+        "icon": "mdi-toggle-switch-outline",
+        "fields": [
+          "group_enable",
+          "private_enable"
+        ]
+      },
+      {
+        "id": "panel_trigger",
+        "label": "触发方式",
+        "icon": "mdi-at",
+        "fields": [
+          "trigger_at",
+          "trigger_keyword"
+        ]
+      },
+      {
+        "id": "panel_persona",
+        "label": "人格与模型",
+        "icon": "mdi-account-voice",
+        "fields": [
+          "prompt_preset",
+          "persona_preset_id"
+        ]
+      }
+    ]
+  },
+  "reply": {
+    "fields": 4,
+    "groups": [
+      {
+        "id": "reply_permission",
+        "label": "响应权限",
+        "icon": "mdi-account-key-outline",
+        "fields": [
+          "permission"
+        ]
+      },
+      {
+        "id": "reply_roster",
+        "label": "拥有者与管理者",
+        "icon": "mdi-account-star-outline",
+        "fields": [
+          "agent_owner_list",
+          "agent_manager_list"
+        ]
+      },
+      {
+        "id": "reply_tool_approval",
+        "label": "高危工具审批",
+        "icon": "mdi-shield-alert-outline",
+        "fields": [
+          "tool_approval_enable"
+        ]
+      }
+    ]
+  }
+}
