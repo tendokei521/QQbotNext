@@ -118,6 +118,12 @@ class BundleService:
             "modules": [item["name"] for item in report.get("modules", [])],
             "modules_bundled": int(report["summary"].get("modules_bundled", 0)),
             "modules_to_install": int(report["summary"].get("modules_to_install", 0)),
+            # 应用对话框据此默认勾选「自动安装依赖」并列出缺依赖的模块
+            "modules_missing_deps": int(report["summary"].get("modules_missing_deps", 0)),
+            "deps_missing_modules": [
+                item["name"] for item in report.get("modules", [])
+                if item.get("missing_requirements")
+            ],
             "has_code": bool(report["summary"].get("modules_bundled", 0)),
         }
         (target_dir / "meta.json").write_text(

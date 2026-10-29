@@ -610,3 +610,42 @@ async def test_import_apply_passes_install_deps_options(monkeypatch, container):
     assert captured["deps_mirror"] == "https://pypi.tuna.tsinghua.edu.cn/simple"
 
 
+async def test_import_records_missing_deps_in_meta(container, config_service, tmp_path):
+    """导入时把「缺依赖」记进 meta：应用对话框据此提示并默认勾选自动安装。"""
+    from app.application.bundle.exporter import export_bundle
+    from app.application.bundle.module_packages import pack_module_dir
+
+    module_dir = tmp_path / "demo_mod"
+    module_dir.mkdir()
+    (module_dir / "module.json").write_text(
+        json.dumps({
+            "name": "demo_mod", "display_name": "演示", "version": "1.2.0",
+            "requirements": "requirements.txt",
+        }),
+        encoding="utf-8",
+    )
+    (module_dir / "main.py").write_text("class Module: pass\n", encoding="utf-8")
+    (module_dir / "requirements.txt").write_text(
+        "definitely-not-installed-pkg==1.0\n", encoding="utf-8"
+    )
+    data = export_bundle(
+        bundle_id="deps-pack",
+        name="缺依赖的配置包",
+        module_configs={"demo_mod": {"enabled": True, "config": {}}},
+        module_packages={"demo_mod": pack_module_dir(module_dir)},
+        module_meta={"demo_mod": {"version": "1.2.0", "builtin": False}},
+    )
+
+    client = _client(container)
+    imported = client.post(
+        "/api/bundles/import",
+        files={"file": ("b.zip", data, "application/zip")},
+        data={"accept_code": "true"},
+    )
+    assert imported.status_code == 200, imported.text
+
+    item = client.get("/api/bundles").json()["bundles"][0]
+    assert item["modules_missing_deps"] == 1
+    assert item["deps_missing_modules"] == ["demo_mod"]
+
+
