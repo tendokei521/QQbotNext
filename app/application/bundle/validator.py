@@ -206,11 +206,13 @@ def validate_bytes(
             identity.get("requirements") or [], known_packages
         )
         if missing_deps:
+            # 不阻断导入：应用时可勾选「自动安装依赖」用 pip 联网补齐（P8）
             issues.append(_issue(
-                "error", "BUNDLE_MODULE_DEP_MISSING",
+                "warn", "BUNDLE_MODULE_DEP_MISSING",
                 f"模块 {identity['name']} 的依赖未安装",
                 "、".join(missing_deps),
-                f"pip install {' '.join(missing_deps)}（框架不会自动安装模块依赖）",
+                "应用时勾选「自动安装依赖」即可联网补齐；也可手动 pip install "
+                + " ".join(missing_deps),
             ))
         bundled[required["name"]] = {**identity, "missing_requirements": missing_deps}
 

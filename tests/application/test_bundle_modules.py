@@ -117,14 +117,18 @@ def _bundle_with_requirements(tmp_path) -> bytes:
     )
 
 
-def test_validate_blocks_missing_module_dependencies(tmp_path):
-    """P7-4：模块依赖缺包 → 预检拦截（框架不会自动 pip 安装）。"""
+def test_validate_warns_missing_module_dependencies_but_allows_import(tmp_path):
+    """P8：模块依赖缺包不再阻断导入——应用时可勾选「自动安装依赖」联网补齐。"""
     data = _bundle_with_requirements(tmp_path)
 
     report = validate_bytes(data, installed_modules={}, installed_packages=set())
 
-    assert report["ok"] is False
-    assert any(issue["code"] == "BUNDLE_MODULE_DEP_MISSING" for issue in report["issues"])
+    assert report["ok"] is True, "缺依赖应可修复，不能把整个预设挡在导入之外"
+    issue = next(
+        issue for issue in report["issues"] if issue["code"] == "BUNDLE_MODULE_DEP_MISSING"
+    )
+    assert issue["level"] == "warn"
+    assert "自动安装" in issue["fix"]
     detail = {item["name"]: item for item in report["modules"]}["demo_mod"]
     assert detail["missing_requirements"] == ["definitely-not-installed-pkg==1.0"]
 
@@ -133,6 +137,9 @@ def test_validate_blocks_missing_module_dependencies(tmp_path):
         installed_packages={"definitely-not-installed-pkg"},
     )
     assert satisfied["ok"] is True, satisfied["issues"]
+    assert not any(
+        issue["code"] == "BUNDLE_MODULE_DEP_MISSING" for issue in satisfied["issues"]
+    )
 
 
 def test_validate_blocks_bundled_module_with_builtin_name(tmp_path):
@@ -552,3 +559,70 @@ async def test_apply_rejects_unknown_reuse_preset(container, config_service, tmp
         )
 
     assert exc.value.code == "BUNDLE_REUSE_PRESET_NOT_FOUND"
+
+
+# ==================== 在线装依赖（勾选「自动安装依赖」） ====================
+
+
+class _FakeInstallerWithDeps(_FakeInstaller):
+    """带依赖回执的安装器：模拟 registry 的 ``deps`` 结果与补装入口。"""
+
+    def __init__(self, deps: dict | None = None):
+        super().__init__()
+        self.deps = dict(deps or {"ok": True, "installed": [], "missing": []})
+        self.ensured: list[str] = []
+
+    async def install(self, name: str, data: bytes) -> dict:
+        info = await super().install(name, data)
+        info["deps"] = dict(self.deps)
+        return info
+
+    async def ensure_dependencies(self, name: str) -> dict:
+        self.ensured.append(name)
+        return {"module_name": name, "ok": True, "installed": [], "missing": []}
+
+
+async def test_apply_reports_installed_dependencies(container, config_service, tmp_path):
+    """随包模块安装时带了依赖回执：应用结果原样带回，前端能显示装了什么。"""
+    await _seed(container, config_service)
+    installer = _FakeInstallerWithDeps(
+        {"ok": True, "installed": ["demo-dep==1.0"], "missing": [], "exit_code": 0}
+    )
+    applier = BundleApplier(config_service, installed_modules={}, module_installer=installer)
+
+    result = await applier.apply(
+        "demo-pack", "acc1", normalize_manifest(_manifest_with_module()), _files(tmp_path),
+        secrets=dict(SECRETS),
+    )
+
+    assert result["modules_deps"] == [
+        {"module": "demo_mod", "deps": {
+            "ok": True, "installed": ["demo-dep==1.0"], "missing": [], "exit_code": 0,
+        }}
+    ]
+
+
+async def test_apply_tops_up_dependencies_for_already_installed_module(
+    container, config_service, tmp_path
+):
+    """模块版本已满足、被跳过时仍要补装依赖（换机只拷到模块代码时依赖还缺）。"""
+    await _seed(container, config_service)
+    installer = _FakeInstallerWithDeps()
+    installer.installed["demo_mod"] = "9.9.9"
+    applier = BundleApplier(
+        config_service,
+        installed_modules={"demo_mod": "9.9.9"},
+        module_installer=installer,
+    )
+
+    result = await applier.apply(
+        "demo-pack", "acc1", normalize_manifest(_manifest_with_module()), _files(tmp_path),
+        secrets=dict(SECRETS),
+    )
+
+    assert installer.ensured == ["demo_mod"], "被跳过的随包模块也要补一次依赖"
+    assert result["modules_deps"] == [
+        {"module": "demo_mod", "deps": {"module_name": "demo_mod", "ok": True,
+                                        "installed": [], "missing": []}}
+    ]
+    assert result["modules_installed"] == []

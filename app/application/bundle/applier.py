@@ -386,16 +386,19 @@ class BundleApplier:
 
     async def _install_modules(
         self, manifest: dict, files: dict[str, bytes], account_id: str = ""
-    ) -> tuple[list[str], list[str]]:
-        """安装随包模块 → ``(新装, 升级)``；不需要安装时返回空列表。
+    ) -> tuple[list[str], list[str], list[dict]]:
+        """安装随包模块 → ``(新装, 升级, 依赖安装回执)``；不需要安装时返回空列表。
 
         成功安装/升级后写「模块来源台账」（模块页显示"来自预设 xxx"）。
+        勾选了自动装依赖时，模块安装器会在回执里带 ``deps``（pip 结果），这里原样
+        收集给前端展示；对"已满足版本、被跳过"的随包模块，再让安装器补一次依赖
+        （换机时可能只拷了配置和模块代码，依赖还缺）。
         """
         targets = [
             module for module in manifest["requires"]["modules"] if module.get("source")
         ]
         if not targets:
-            return [], []
+            return [], [], []
         if self.module_installer is None:
             names = "、".join(module["name"] for module in targets)
             raise BundleError(
@@ -406,6 +409,7 @@ class BundleApplier:
         db = self.config_service.db
         installed: list[str] = []
         upgraded: list[str] = []
+        deps_log: list[dict] = []
         for module in targets:
             name = module["name"]
             payload = files.get(module["source"])
@@ -425,6 +429,9 @@ class BundleApplier:
             version = str((info or {}).get("version") or "")
             self.installed_modules[name] = version or self.installed_modules.get(name, "")
             (upgraded if current else installed).append(name)
+            deps = (info or {}).get("deps")
+            if isinstance(deps, dict):
+                deps_log.append({"module": name, "deps": deps})
             await record_origin(
                 db, name,
                 bundle_id=str(manifest["id"]),
@@ -433,7 +440,26 @@ class BundleApplier:
                 account_id=str(account_id or ""),
                 action="upgraded" if current else "installed",
             )
-        return installed, upgraded
+        ensure_deps = getattr(self.module_installer, "ensure_dependencies", None)
+        if callable(ensure_deps):
+            handled = set(installed) | set(upgraded)
+            for module in targets:
+                name = module["name"]
+                if name in handled:
+                    continue  # 本次刚装/升级的模块已在安装回执里带过依赖结果
+                current = str(self.installed_modules.get(name) or "")
+                if not (current and satisfies_version(current, module.get("version") or "")):
+                    continue
+                try:
+                    deps = await ensure_deps(name)
+                except Exception as e:  # noqa: BLE001 —— 补装失败不阻断配置应用，如实记录
+                    self.config_service.log.warning(
+                        f"[Bundle] 模块 {name} 补装依赖失败: {e}"
+                    )
+                    continue
+                if isinstance(deps, dict):
+                    deps_log.append({"module": name, "deps": deps})
+        return installed, upgraded, deps_log
 
     async def _uninstall_modules(self, names: list[str] | None) -> list[str]:
         """卸载"本次新装"的模块（升级的不动：它可能是用户原本就有的模块）。"""
@@ -501,9 +527,12 @@ class BundleApplier:
         applied = False
         installed: list[str] = []
         upgraded: list[str] = []
+        deps_log: list[dict] = []
         try:
             # 模块代码先落地：装不上就别写配置（避免"配置指向不存在的模块"）
-            installed, upgraded = await self._install_modules(manifest, files, str(account_id))
+            installed, upgraded, deps_log = await self._install_modules(
+                manifest, files, str(account_id)
+            )
             if installed or upgraded:
                 snapshot = dict(plan["snapshot"])
                 snapshot["modules_installed"] = list(installed)
@@ -559,6 +588,7 @@ class BundleApplier:
             "plan": plan_public,
             "modules_installed": installed,
             "modules_upgraded": upgraded,
+            "modules_deps": deps_log,
         }
 
     async def _cleanup_superseded(self, previous: list[dict], current: list[dict]) -> list[str]:

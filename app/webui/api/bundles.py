@@ -73,18 +73,35 @@ class _RegistryModuleInstaller:
 
     安装/卸载都走 `ModuleRegistry`：成功后会为已存在账号补齐模块实例；
     卸载只删外部插件目录（配置与数据保留），内置模块直接跳过。
+
+    ``install_deps=True``（用户在导入对话框勾选"自动安装依赖"）：装模块代码时把
+    ``module.json`` 声明的 pip 依赖一并装上（联网），供加载前使用；对"已满足版本、
+    被跳过"的随包模块，应用阶段再补一次 ``ensure_dependencies``。
     """
 
-    def __init__(self, registry, bot_service) -> None:
+    def __init__(
+        self,
+        registry,
+        bot_service,
+        *,
+        install_deps: bool = False,
+        mirror: str = "",
+    ) -> None:
         self.registry = registry
         self.bot_service = bot_service
+        self.install_deps = bool(install_deps)
+        self.mirror = str(mirror or "")
 
     async def install(self, name: str, data: bytes) -> dict:
         fd, path = tempfile.mkstemp(suffix=".zip", prefix="bundle-module-")
         os.close(fd)
         try:
             Path(path).write_bytes(data)
-            info = await self.registry.install_from_zip(path, force=True)
+            kwargs = {"force": True}
+            if self.install_deps:
+                # 只有勾选了才把新参数传给安装器：保持旧替身/旧注册表可用
+                kwargs.update(auto_deps=True, mirror=self.mirror)
+            info = await self.registry.install_from_zip(path, **kwargs)
         finally:
             try:
                 Path(path).unlink()
@@ -97,6 +114,16 @@ class _RegistryModuleInstaller:
             except Exception as e:  # noqa: BLE001 —— 补实例失败不影响安装结果
                 logger.warning(f"[Bundle] 模块 {name} 安装后补齐账号实例失败: {e}")
         return info or {}
+
+    async def ensure_dependencies(self, name: str) -> dict | None:
+        """已安装且版本满足的随包模块：按需补装依赖（没勾选时什么都不做）。"""
+        if not self.install_deps:
+            return None
+        try:
+            return await self.registry.install_dependencies(name, mirror=self.mirror)
+        except Exception as e:  # noqa: BLE001 —— 依赖补装失败不阻断配置应用，回执里如实记录
+            logger.warning(f"[Bundle] 模块 {name} 补装依赖失败: {e}")
+            return {"module_name": name, "ok": False, "missing": [], "error": str(e)}
 
     async def uninstall(self, name: str) -> None:
         try:
@@ -114,6 +141,9 @@ def _service(
     bot_service,
     settings,
     registry=None,
+    *,
+    install_deps: bool = False,
+    deps_mirror: str = "",
 ) -> BundleService:
     module_dir = Path(settings.module_dir)
     data_root = module_dir.resolve().parent if module_dir.name == "module" else module_dir
@@ -129,7 +159,13 @@ def _service(
         },
         module_catalog=catalog,
         module_installer=(
-            _RegistryModuleInstaller(registry, bot_service) if registry is not None else None
+            _RegistryModuleInstaller(
+                registry,
+                bot_service,
+                install_deps=install_deps,
+                mirror=deps_mirror,
+            )
+            if registry is not None else None
         ),
         agent_schema=agent_config_schema(),
     )
@@ -227,13 +263,18 @@ async def api_bundles_import_apply(
     secrets: str = Form("{}"),
     accept_code: bool = Form(False),
     reuse_provider_preset_id: str = Form(""),
+    install_deps: bool = Form(False),
+    deps_mirror: str = Form(""),
     config_service=Depends(get_config_service),
     agent_manager=Depends(get_agent_manager),
     bot_service=Depends(get_bot_service),
     settings=Depends(get_settings),
     registry=Depends(get_module_registry),
 ):
-    """一键：导入登记 + 立即应用到账号（失败保留工件，返回 ``imported=true`` 便于重试）。"""
+    """一键：导入登记 + 立即应用到账号（失败保留工件，返回 ``imported=true`` 便于重试）。
+
+    ``install_deps=true``：随包模块的 pip 依赖在应用时一并安装（联网，勾选后才装）。
+    """
     account_id = str(account_id or "").strip()
     if not account_id:
         return _err(400, "缺少 account_id", "BUNDLE_ACCOUNT_REQUIRED")
@@ -244,7 +285,10 @@ async def api_bundles_import_apply(
     if not isinstance(secrets_obj, dict):
         return _err(400, "secrets 必须是 JSON 对象", "BUNDLE_BAD_SECRETS")
 
-    service = _service(config_service, agent_manager, bot_service, settings, registry)
+    service = _service(
+        config_service, agent_manager, bot_service, settings, registry,
+        install_deps=install_deps, deps_mirror=deps_mirror,
+    )
     try:
         data = await _read_upload(file)
         result = await service.import_bundle(data, accept_code=accept_code)
@@ -400,9 +444,12 @@ async def api_bundles_apply(
         return _err(400, "缺少 account_id", "BUNDLE_ACCOUNT_REQUIRED")
     secrets = body.get("secrets") if isinstance(body.get("secrets"), dict) else {}
     reuse_id = str(body.get("reuse_provider_preset_id") or "").strip() or None
+    install_deps = bool(body.get("install_deps"))
+    deps_mirror = str(body.get("deps_mirror") or "").strip()
     try:
         result = await _service(
-            config_service, agent_manager, bot_service, settings, registry
+            config_service, agent_manager, bot_service, settings, registry,
+            install_deps=install_deps, deps_mirror=deps_mirror,
         ).apply(
             bundle_id, account_id, secrets=secrets, reuse_provider_preset_id=reuse_id
         )

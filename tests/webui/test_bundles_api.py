@@ -494,3 +494,119 @@ async def test_apply_returns_health_and_can_keep_modules_on_uninstall(
     assert body["deleted_artifact"] is True
 
 
+# ==================== 在线装依赖：接口参数透传（P8） ====================
+
+
+def _fake_bundle_service(captured: dict, *, bundle_id: str = "x"):
+    class _Svc:
+        async def import_bundle(self, data, *, accept_code=True):
+            return {"bundle": {"id": bundle_id, "name": "演示", "version": "1.0.0"}}
+
+        async def apply(self, name, account_id, *, secrets=None, reuse_provider_preset_id=None):
+            return {
+                "activation_id": "act_1",
+                "status": "active",
+                "plan": {
+                    "bundle": {"id": name, "name": "演示", "version": "1.0.0"},
+                    "creates": [], "updates": [], "secrets_required": [],
+                },
+                "modules_installed": [], "modules_upgraded": [], "modules_deps": [],
+            }
+
+    def _factory(*args, **kwargs):
+        captured.update(kwargs)
+        return _Svc()
+
+    return _factory
+
+
+async def test_apply_passes_install_deps_options(monkeypatch, container):
+    """应用接口：install_deps / deps_mirror 从 JSON body 透传进服务（勾选即生效）。"""
+    from app.webui.api import bundles as bundles_api
+
+    captured: dict = {}
+    monkeypatch.setattr(bundles_api, "_service", _fake_bundle_service(captured))
+
+    async def fake_health(*args, **kwargs):
+        return {"ok": True, "agent": {}, "modules": []}
+
+    monkeypatch.setattr(bundles_api, "_bundle_health", fake_health)
+
+    resp = _client(container).post("/api/bundles/x/apply", json={
+        "account_id": "acc1",
+        "install_deps": True,
+        "deps_mirror": "https://pypi.tuna.tsinghua.edu.cn/simple",
+    })
+
+    assert resp.status_code == 200, resp.text
+    assert captured["install_deps"] is True
+    assert captured["deps_mirror"] == "https://pypi.tuna.tsinghua.edu.cn/simple"
+
+
+async def test_registry_module_installer_forwards_auto_deps(tmp_path):
+    """随包模块安装器：勾选自动装依赖时才把 auto_deps/mirror 传给注册表。"""
+    from app.application.bundle.module_packages import pack_module_dir
+    from app.webui.api.bundles import _RegistryModuleInstaller
+
+    module_dir = tmp_path / "demo_mod"
+    module_dir.mkdir()
+    (module_dir / "module.json").write_text(
+        json.dumps({"name": "demo_mod", "display_name": "演示", "version": "1.0.0"}),
+        encoding="utf-8",
+    )
+    (module_dir / "main.py").write_text("class Module: pass\n", encoding="utf-8")
+    data = pack_module_dir(module_dir)
+
+    captured: dict = {}
+
+    class _Registry:
+        async def install_from_zip(self, path, **kwargs):
+            captured.update(kwargs)
+            return {"name": "demo_mod", "version": "1.0.0"}
+
+    installer = _RegistryModuleInstaller(
+        _Registry(), None, install_deps=True, mirror="https://mirror/simple"
+    )
+    await installer.install("demo_mod", data)
+
+    assert captured == {
+        "force": True,
+        "auto_deps": True,
+        "mirror": "https://mirror/simple",
+    }
+
+    captured.clear()
+    plain = _RegistryModuleInstaller(_Registry(), None)
+    await plain.install("demo_mod", data)
+    assert captured == {"force": True}, "没勾选自动装依赖时不能传新参数"
+
+
+async def test_import_apply_passes_install_deps_options(monkeypatch, container):
+    """一键导入并应用：表单里的 install_deps / deps_mirror 同样透传。"""
+    from app.webui.api import bundles as bundles_api
+
+    captured: dict = {}
+    monkeypatch.setattr(
+        bundles_api, "_service", _fake_bundle_service(captured, bundle_id="one-pack")
+    )
+
+    async def fake_health(*args, **kwargs):
+        return {"ok": True, "agent": {}, "modules": []}
+
+    monkeypatch.setattr(bundles_api, "_bundle_health", fake_health)
+
+    resp = _client(container).post(
+        "/api/bundles/import-apply",
+        files={"file": ("b.zip", b"not-a-real-zip", "application/zip")},
+        data={
+            "account_id": "acc1",
+            "install_deps": "true",
+            "deps_mirror": "https://pypi.tuna.tsinghua.edu.cn/simple",
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert captured["install_deps"] is True
+    assert captured["deps_mirror"] == "https://pypi.tuna.tsinghua.edu.cn/simple"
+
+
