@@ -84,6 +84,23 @@ export interface InstallPreview {
   hint?: string
 }
 
+/** install-zip / update 回执：含「安装时自动装依赖」的结果 */
+export interface ZipInstallInfo {
+  module_name?: string
+  version?: string
+  loaded?: boolean
+  deps_missing?: boolean
+  deps?: {
+    ok?: boolean
+    installed?: string[]
+    missing?: string[]
+    error?: string
+    hint?: string
+    stderr?: string
+    command?: string[]
+  }
+}
+
 /** 模块是否内置：优先编目字段，旧后端回退 source=local */
 export function isBuiltinModule(mod: Pick<ModuleData, 'builtin' | 'source'>): boolean {
   if (typeof mod.builtin === 'boolean') return mod.builtin
@@ -160,14 +177,23 @@ export const useModulesStore = defineStore('modules', () => {
     uninstalledModules.value = res.data?.modules || []
   }
 
-  async function installZip(file: File, force = false): Promise<void> {
+  /** 安装 zip 插件：autoDeps=true 时后端会在加载前用 pip 装声明依赖（需联网） */
+  async function installZip(
+    file: File,
+    force = false,
+    autoDeps = false,
+    mirror = '',
+  ): Promise<ZipInstallInfo | null> {
     const form = new FormData()
     form.append('file', file)
     form.append('force', String(force))
-    const res = await http.post('/api/modules/install-zip', form)
+    form.append('auto_deps', String(autoDeps))
+    if (mirror.trim()) form.append('mirror', mirror.trim())
+    const res = await http.post<{ plugin?: ZipInstallInfo }>('/api/modules/install-zip', form)
     unwrap(res.data)
     // 安装后必须 reloadAll：后端为所有账号补实例，前端同步刷新当前账号
     await Promise.all([reloadAll(), loadUninstalled()])
+    return res.data?.plugin || null
   }
 
   /** dry-run 预检：上传前先知道会装成什么名字/版本、是否覆盖 */
@@ -182,13 +208,21 @@ export const useModulesStore = defineStore('modules', () => {
     return res.data.plugin
   }
 
-  /** 覆盖安装（更新）指定的第三方模块，配置与数据保留 */
-  async function updateZip(name: string, file: File): Promise<void> {
+  /** 覆盖安装（更新）指定的第三方模块，配置与数据保留；autoDeps 同安装 */
+  async function updateZip(
+    name: string,
+    file: File,
+    autoDeps = false,
+    mirror = '',
+  ): Promise<ZipInstallInfo | null> {
     const form = new FormData()
     form.append('file', file)
-    const res = await http.post(`/api/modules/${name}/update`, form)
+    form.append('auto_deps', String(autoDeps))
+    if (mirror.trim()) form.append('mirror', mirror.trim())
+    const res = await http.post<{ plugin?: ZipInstallInfo }>(`/api/modules/${name}/update`, form)
     unwrap(res.data)
     await Promise.all([reloadAll(), loadUninstalled()])
+    return res.data?.plugin || null
   }
 
   /** 硬删除第三方模块；purgeData=true 才清理运行时数据目录 */

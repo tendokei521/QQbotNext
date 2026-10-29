@@ -28,7 +28,7 @@ export interface BundleModuleInfo {
   installed_version: string
   /** install=将安装 / upgrade=将升级 / skip=已满足 / missing=缺失 / config_only=只写配置 */
   action: 'install' | 'upgrade' | 'skip' | 'missing' | 'config_only' | string
-  /** 目标环境缺失的第三方依赖（框架不会自动 pip 安装） */
+  /** 目标环境缺失的第三方依赖（导入/应用时可勾选自动联网安装） */
   missing_requirements?: string[]
 }
 
@@ -101,6 +101,23 @@ export interface BundleHealth {
   modules: { name: string; loaded: boolean; error: string }[]
 }
 
+/** 一次模块依赖安装的结果（应用回执里的 modules_deps） */
+export interface DepsInstallResult {
+  ok?: boolean
+  installed?: string[]
+  missing?: string[]
+  error?: string
+  hint?: string
+  stderr?: string
+  command?: string[]
+  exit_code?: number
+}
+
+export interface ModuleDepsLog {
+  module: string
+  deps: DepsInstallResult
+}
+
 export interface ApplyResult {
   activation_id: string
   status: string
@@ -117,6 +134,8 @@ export interface ApplyResult {
   /** 本次真正新装/升级的模块（回滚只卸载"新装"的） */
   modules_installed?: string[]
   modules_upgraded?: string[]
+  /** 勾选「自动安装依赖」时：每个随包模块的 pip 安装结果 */
+  modules_deps?: ModuleDepsLog[]
 }
 
 /** 可复用的本机 Provider 预设 */
@@ -211,6 +230,8 @@ export const useBundlesStore = defineStore('bundles', () => {
     secrets: Record<string, string>,
     acceptCode = false,
     reusePresetId = '',
+    installDeps = false,
+    depsMirror = '',
   ): Promise<BundleReport & { apply?: ApplyResult; health?: BundleHealth }> {
     importing.value = true
     applying.value = true
@@ -221,6 +242,8 @@ export const useBundlesStore = defineStore('bundles', () => {
       form.append('secrets', JSON.stringify(secrets || {}))
       form.append('accept_code', acceptCode ? 'true' : 'false')
       if (reusePresetId) form.append('reuse_provider_preset_id', reusePresetId)
+      if (installDeps) form.append('install_deps', 'true')
+      if (depsMirror.trim()) form.append('deps_mirror', depsMirror.trim())
       const res = await http.post('/api/bundles/import-apply', form)
       await Promise.all([load(), loadActivations(accountId)])
       return res.data as BundleReport & { apply?: ApplyResult; health?: BundleHealth }
@@ -310,6 +333,8 @@ export const useBundlesStore = defineStore('bundles', () => {
     accountId: string,
     secrets: Record<string, string>,
     reusePresetId = '',
+    installDeps = false,
+    depsMirror = '',
   ): Promise<ApplyResult & { health?: BundleHealth }> {
     applying.value = true
     try {
@@ -317,6 +342,8 @@ export const useBundlesStore = defineStore('bundles', () => {
         account_id: accountId,
         secrets,
         ...(reusePresetId ? { reuse_provider_preset_id: reusePresetId } : {}),
+        ...(installDeps ? { install_deps: true } : {}),
+        ...(depsMirror.trim() ? { deps_mirror: depsMirror.trim() } : {}),
       })
       await Promise.all([load(), loadActivations(accountId)])
       return res.data as ApplyResult & { health?: BundleHealth }

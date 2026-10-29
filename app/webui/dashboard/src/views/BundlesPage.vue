@@ -6,7 +6,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { displayName, useBotsStore } from '@/stores/bots'
-import { useBundlesStore, type BundleHealth, type ExportModuleOption, type ReusePreset } from '@/stores/bundles'
+import { useBundlesStore, type BundleHealth, type ExportModuleOption, type ModuleDepsLog, type ReusePreset } from '@/stores/bundles'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
@@ -44,11 +44,15 @@ const reusePresetOptions = computed(() =>
 const applyDialog = ref(false)
 const applyTarget = ref<{ id: string; name: string; version: string; secrets?: { key: string; label: string; required: boolean }[] } | null>(null)
 const applySecrets = reactive<Record<string, string>>({})
+/** 应用后自动安装随包模块依赖（需联网；默认不勾选，列表里看不到缺包清单） */
+const applyInstallDeps = ref(false)
+const applyDepsMirror = ref('')
 const applyResult = ref<{
   activation_id: string
   plan: { creates: any[]; updates: any[]; reused_provider_preset_id?: string }
   modules_installed?: string[]
   modules_upgraded?: string[]
+  modules_deps?: ModuleDepsLog[]
   health?: BundleHealth
 } | null>(null)
 
@@ -71,6 +75,18 @@ function statusColor(status: string): string {
   return status === 'active' ? 'success' : status === 'failed' ? 'error' : status === 'rolled_back' ? 'grey' : 'warning'
 }
 
+/** 依赖安装结果压成一行：已装了什么 / 还缺什么 */
+function depsLine(item: ModuleDepsLog): string {
+  const deps = item.deps || {}
+  if (deps.ok) {
+    const installed = deps.installed || []
+    return installed.length ? `已安装 ${installed.join('、')}` : '依赖已就绪'
+  }
+  const missing = (deps.missing || []).join('、')
+  const tail = (deps.stderr || deps.error || '').trim().split('\n').pop() || ''
+  return `未装齐${missing ? `：${missing}` : ''}${tail ? `（${tail}）` : ''}`
+}
+
 /** 应用记录里存的是配置包 id，界面上换成配置包名（已卸载时给一句人话） */
 function bundleName(bundleId: string): string {
   return bundles.list.find((item) => item.id === bundleId)?.name || '已卸载的配置包'
@@ -84,6 +100,8 @@ function openApply(item: { id: string; name: string; version: string; secrets?: 
   applyTarget.value = item
   applyResult.value = null
   reusePresetId.value = null
+  applyInstallDeps.value = false
+  applyDepsMirror.value = ''
   Object.keys(applySecrets).forEach((key) => delete applySecrets[key])
   for (const secret of item.secrets || []) applySecrets[secret.key] = ''
   applyDialog.value = true
@@ -107,6 +125,8 @@ async function doApply() {
       bots.currentAccountId,
       { ...applySecrets },
       reusePresetId.value || '',
+      applyInstallDeps.value,
+      applyDepsMirror.value,
     )
     notify.push('已应用到当前账号', 'success')
   } catch (err) {
@@ -505,6 +525,23 @@ onMounted(async () => {
               variant="outlined"
               autocomplete="off"
             />
+            <v-checkbox
+              v-model="applyInstallDeps"
+              density="compact"
+              hide-details
+              class="mt-2"
+              label="应用后自动安装插件缺失依赖（需要联网）"
+            />
+            <v-text-field
+              v-if="applyInstallDeps"
+              v-model="applyDepsMirror"
+              label="pip 镜像地址（可选）"
+              placeholder="https://pypi.tuna.tsinghua.edu.cn/simple"
+              density="compact"
+              variant="outlined"
+              hide-details
+              class="mt-1"
+            />
           </template>
           <v-alert v-else type="success" variant="tonal" density="compact">
             已应用到「{{ accountName }}」：
@@ -517,6 +554,12 @@ onMounted(async () => {
             </template>
             <template v-if="applyResult.modules_upgraded?.length">
               <div>已升级随包插件：{{ applyResult.modules_upgraded.join('、') }}</div>
+            </template>
+            <template v-if="applyResult.modules_deps?.length">
+              <div class="mt-1">插件依赖：</div>
+              <div v-for="item in applyResult.modules_deps" :key="item.module" class="text-caption">
+                {{ item.module }}：{{ depsLine(item) }}
+              </div>
             </template>
             <template v-if="applyResult.health">
               <div class="mt-1">
