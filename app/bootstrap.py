@@ -522,6 +522,10 @@ async def run(settings: Settings | None = None) -> None:
     from app.application.dialogue_policy_migration import migrate_legacy_dialog_policies
 
     await migrate_legacy_dialog_policies(config_service)
+    # 触发方式也收口到「回复与权限」：旧账号的 trigger_at/keyword 复制成账号级覆盖
+    from app.application.dialogue_policy_migration import migrate_trigger_overrides
+
+    await migrate_trigger_overrides(config_service)
 
     # 系统提示词方案：加载"设置页里编辑过"的覆盖文本 + 把未选方案的存量账号落到 chat
     try:

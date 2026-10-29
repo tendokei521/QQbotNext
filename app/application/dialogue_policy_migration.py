@@ -12,8 +12,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.domain.dialogue_policy import SCENE_GROUP, SCENE_PRIVATE
 from app.core.logger import logger
+from app.domain.dialogue_policy import (
+    SCENE_GROUP,
+    SCENE_PRIVATE,
+    trigger_mode_from,
+    trigger_probability_of,
+)
 
 #: Agent 配置在配置中心里的模块名（与 app.agent.config.AGENT_CONFIG_MODULE 一致；
 #: 这里写字面量是为了避免 application → agent 的反向依赖）。
@@ -77,3 +82,52 @@ async def migrate_legacy_dialog_policies(config_service: Any) -> bool:
     if migrated:
         logger.info(f"[Config] 已迁移账号级场景/名单到群级覆盖：{migrated} 行")
     return True
+
+
+#: 触发方式迁到「回复与权限」的独立标记（与上面的场景/名单迁移分开：
+#: 上面的迁移早已跑完（标记已写），不能靠它补触发方式。）
+TRIGGER_MIGRATION_FLAG = "trigger_mode_migrated"
+
+
+async def migrate_trigger_overrides(config_service: Any) -> int:
+    """把 Agent 配置里的触发键落到账号级覆盖（幂等，返回写入账号数）。
+
+    为什么需要：改造后触发方式的唯一编辑器是「回复与权限」；旧账号的
+    ``trigger_at`` / ``trigger_keyword`` 留在 Agent 配置里。启动时把它们**复制**成
+    账号级覆盖，保证"升级后行为一个字节都不变"，同时面板上立刻能看见当前值。
+    """
+    if await config_service.get_kv(TRIGGER_MIGRATION_FLAG, "") == "1":
+        return 0
+    bots = config_service.get_bots() or []
+    if not bots:
+        return 0
+
+    migrated = 0
+    for bot in bots:
+        bot_id = str(bot.get("id") or bot.get("account_id") or "")
+        if not bot_id:
+            continue
+        cfg = config_service.get_module_config(AGENT_CONFIG_MODULE, bot_id) or {}
+        if not isinstance(cfg, dict) or not cfg:
+            continue
+        has_legacy = "trigger_at" in cfg or "trigger_keyword" in cfg
+        if not has_legacy and "trigger_mode" not in cfg:
+            continue
+
+        mode = trigger_mode_from(cfg)
+        config = {
+            "trigger_mode": mode,
+            "trigger_probability": trigger_probability_of(cfg),
+            # 双写旧键：旧前端/旧脚本读到的语义不变
+            "trigger_at": mode in ("at", "both", "all"),
+            "trigger_keyword": [
+                str(item).strip() for item in (cfg.get("trigger_keyword") or []) if str(item).strip()
+            ],
+        }
+        await config_service.save_channel_override(bot_id, "agent", "", config=config)
+        migrated += 1
+
+    await config_service.set_kv(TRIGGER_MIGRATION_FLAG, "1")
+    if migrated:
+        logger.info(f"[Config] 已把触发方式迁移到账号级覆盖：{migrated} 个账号")
+    return migrated
