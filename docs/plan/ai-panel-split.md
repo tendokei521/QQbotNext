@@ -41,6 +41,11 @@
 ## 3. 目标信息架构
 
 ```
+运行
+├── 账号管理              /bots
+├── 模型服务              /provider-presets
+└── 人格设定              /personas          ← 配好一个号就要定的事，归到「运行」
+
 能力
 ├── AI 对话面板            /ai                ← 新页面（替代原「概览」，高频操作台）
 ├── 回复与权限            /reply             ← 原「回复设置」+ 原「权限管理」合并
@@ -48,7 +53,6 @@
 │   ├── 对话行为          /ai/settings/behavior
 │   ├── 会话管理          /ai/settings/session
 │   └── 高级功能          /ai/settings/advanced
-├── 人格设定              /personas
 ├── 功能插件              /modules
 └── 配置包                /bundles
 ```

@@ -100,20 +100,21 @@ const navItems = computed<NavItem[]>(() => {
   // 以及实验性「配置档案」入口（整套能力已下线）。
   // 「高级工具」属于实验性入口：默认隐藏，设置里打开实验性选项后才出现。
   const showExperimental = Boolean(webui.config.experimental?.show_experimental)
-  // 顺序按「配好一个账号」的实际路径排：运行（账号管理、模型服务）→ 能力（AI 对话面板 /
-  // 回复与权限 / AI 设置 / 人格设定 / 功能插件 / 配置包）→ 数据 → 系统。
+  // 顺序按「配好一个账号」的实际路径排：运行（账号管理、模型服务、人格设定）→ 能力
+  // （AI 对话面板 / 回复与权限 / AI 设置 / 功能插件 / 配置包）→ 数据 → 系统。
   return [
     { to: '/', title: '总览', icon: 'mdi-view-dashboard-outline' },
     { header: '运行' },
     { to: '/bots', title: '账号管理', icon: 'mdi-robot-outline' },
     { to: '/provider-presets', title: '模型服务', icon: 'mdi-api' },
+    // 人格是"配好一个号"就要定的东西，跟账号/模型放在同一个运行分组
+    { to: '/personas', title: '人格设定', icon: 'mdi-account-heart-outline' },
     { header: '能力' },
     // 日常操作台：回复开关 / 触发方式 / 权限与模型摘要
     { to: '/ai', title: 'AI 对话面板', icon: 'mdi-chat-processing-outline' },
     // 在哪回、回谁、按什么规则（原「回复设置」+「权限管理」合并）
     { to: '/reply', title: '回复与权限', icon: 'mdi-shield-account-outline' },
     { title: AGENT_GROUP, icon: 'mdi-creation-outline', children: agentChildren },
-    { to: '/personas', title: '人格设定', icon: 'mdi-account-heart-outline' },
     { to: '/modules', title: '功能插件', icon: 'mdi-cube-outline' },
     { to: '/bundles', title: '配置包', icon: 'mdi-package-variant-closed' },
     ...(showExperimental
