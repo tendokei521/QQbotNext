@@ -100,7 +100,56 @@ class LlmPipeline:
         policy = self._resolved_policy(event)
         if policy is not None and policy.config:
             base.update(policy.config)
+        # 派生兜底：没有策略层（单服务/未装配账号）时也要有显式触发方式
+        from app.domain.dialogue_policy import (
+            DEFAULT_TRIGGER_PROBABILITY,
+            trigger_mode_from,
+        )
+
+        if "trigger_mode" not in base:
+            base["trigger_mode"] = trigger_mode_from(base)
+        if "trigger_probability" not in base:
+            base["trigger_probability"] = DEFAULT_TRIGGER_PROBABILITY
         return base
+
+    def _trigger_decision(
+        self, event, config, *, has_image: bool = False
+    ) -> tuple[bool, bool, str]:
+        """按生效 ``trigger_mode`` 判定；返回 ``(是否触发, 是否被@, 文本)``。
+
+        @ / 关键词两个事实都从消息里取（``check_trigger`` 一直传 ``trigger_at=True``），
+        真正决定触发与否的是 ``decide_trigger``——这样 ``all`` 与 ``none`` 这类
+        旧键表达不了的模式也走同一条路径，不会出现"两处判定漂移"。
+        """
+        from app.domain.dialogue_policy import (
+            decide_trigger,
+            trigger_mode_from,
+            trigger_probability_of,
+        )
+        from app.domain.trigger import check_trigger
+
+        mode = str(config.get("trigger_mode") or "").strip().lower()
+        if not mode:
+            mode = trigger_mode_from(config)
+        _unused, at_matched, text = check_trigger(
+            event.message,
+            event.self_id,
+            True,
+            config.get("trigger_keyword", []),
+        )
+        keyword_matched = False
+        keywords = config.get("trigger_keyword")
+        if isinstance(keywords, list) and keywords:
+            keyword_matched = any(str(kw) and str(kw) in text for kw in keywords)
+        triggered = decide_trigger(
+            mode,
+            trigger_probability_of(config),
+            at_matched=at_matched,
+            keyword_matched=keyword_matched,
+            # 纯图片（含「@我 + 只发图」）也算有内容：否则 @ 了发张图会被判成空消息
+            has_text=bool(text.strip()) or bool(has_image),
+        )
+        return triggered, at_matched, text
 
     @staticmethod
     def _user_excluded(policy, event) -> tuple[bool, str]:
@@ -260,18 +309,21 @@ class LlmPipeline:
                 return False
 
         config = self._effective_config(event, self.runtime.config)
-        from app.domain.trigger import check_trigger
+        has_image = False
+        try:
+            from app.agent.media.image import collect_image_segments
+
+            has_image = bool(collect_image_segments(event))
+        except Exception:  # noqa: BLE001 —— 图片探测失败按无图处理
+            has_image = False
 
         try:
-            triggered, _is_at, text = check_trigger(
-                event.message,
-                event.self_id,
-                config.get("trigger_at", False),
-                config.get("trigger_keyword", []),
+            triggered, _is_at, text = self._trigger_decision(
+                event, config, has_image=has_image
             )
         except Exception:  # noqa: BLE001 —— 判定失败按"不打断"处理，保守优先
             return False
-        return bool(triggered and (text.strip() or user_text.strip()))
+        return bool(triggered and (text.strip() or user_text.strip() or has_image))
 
     async def _resolve_images(self, ctx: LlmContext) -> list[dict]:
         """解析本轮消息的图片（仅当模型声明了 image 模态且开关打开）。
@@ -365,13 +417,8 @@ class LlmPipeline:
             if ctx.event.event_type == "message_group":
                 # 触发方式可被群级覆盖（"群 A 只回 @、群 B 只认关键词"）
                 config = self._effective_config(ctx.event, self.runtime.config)
-                from app.domain.trigger import check_trigger
-
-                triggered, is_at, user_text = check_trigger(
-                    ctx.event.message,
-                    ctx.event.self_id,
-                    config.get("trigger_at", False),
-                    config.get("trigger_keyword", []),
+                triggered, is_at, user_text = self._trigger_decision(
+                    ctx.event, config, has_image=has_image
                 )
                 if not triggered:
                     return

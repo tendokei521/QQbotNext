@@ -22,7 +22,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import random
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -111,6 +112,42 @@ def trigger_probability_of(config: Mapping[str, Any] | None) -> int:
     except (TypeError, ValueError):
         return DEFAULT_TRIGGER_PROBABILITY
     return max(0, min(100, value))
+
+
+def decide_trigger(
+    mode: str,
+    probability: int,
+    *,
+    at_matched: bool,
+    keyword_matched: bool,
+    has_text: bool,
+    rng: Callable[[], float] | None = None,
+) -> bool:
+    """按触发方式决定这一条消息要不要进 LLM（纯函数，便于测试与预览）。
+
+    - ``at`` / ``keyword`` / ``both``：分别看 @ / 关键词 / 二者之一；
+    - ``all``：所有（有正文的）消息都参与，按 ``trigger_probability`` 抽签
+      （0 = 从不、100 = 总是；``rng`` 可注入，测试里不用真随机）；
+    - ``none``：永不触发；
+    - 没有任何正文（纯图片消息由调用方另行放行）时一律返回 False。
+    """
+    if not has_text:
+        return False
+    normalized = mode if mode in TRIGGER_MODES else DEFAULT_TRIGGER_MODE
+    if normalized == TRIGGER_NONE:
+        return False
+    if normalized == TRIGGER_ALL:
+        chance = max(0, min(100, int(probability)))
+        if chance >= 100:
+            return True
+        if chance <= 0:
+            return False
+        return (rng or random.random)() * 100 < chance
+    if normalized == TRIGGER_AT:
+        return bool(at_matched)
+    if normalized == TRIGGER_KEYWORD:
+        return bool(keyword_matched)
+    return bool(at_matched or keyword_matched)
 
 
 def legacy_trigger_keys(mode: str) -> dict[str, Any]:

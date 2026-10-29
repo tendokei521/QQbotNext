@@ -221,3 +221,21 @@ def test_trigger_mode_override_source_is_channel():
     )
     assert resolved.config["trigger_mode"] == "keyword"
     assert resolved.source_of("trigger_mode") == SOURCE_CHANNEL
+
+
+def test_decide_trigger_all_modes():
+    from app.domain.dialogue_policy import decide_trigger
+
+    base = {"at_matched": False, "keyword_matched": False, "has_text": True}
+    assert decide_trigger("at", 100, **{**base, "at_matched": True}) is True
+    assert decide_trigger("at", 100, **base) is False
+    assert decide_trigger("keyword", 100, **{**base, "keyword_matched": True}) is True
+    assert decide_trigger("both", 100, **{**base, "keyword_matched": True}) is True
+    assert decide_trigger("none", 100, **{**base, "at_matched": True}) is False
+    assert decide_trigger("all", 100, **base) is True
+    assert decide_trigger("all", 0, **base) is False
+    # 概率抽签可注入，0/100 之外也能确定性测试
+    assert decide_trigger("all", 30, **base, rng=lambda: 0.1) is True
+    assert decide_trigger("all", 30, **base, rng=lambda: 0.9) is False
+    # 没有正文一律不触发（纯图片由调用方放行）
+    assert decide_trigger("all", 100, **{**base, "has_text": False}) is False

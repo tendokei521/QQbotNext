@@ -187,3 +187,103 @@ def test_pipeline_uses_scene_gate():
     # 精确守卫：_run 里不应出现裸的 group_enable 读取
     run_body = src.split("async def _run(self, job: LlmJob)")[1]
     assert 'config.get("group_enable"' not in run_body
+
+
+# ==================== T2：触发方式（trigger_mode）分流 ====================
+
+
+def _event_with_message(text="", *, at=False, group_id=111):
+    segments = []
+    if at:
+        segments.append({"type": "at", "data": {"qq": "10001"}})
+    if text:
+        segments.append({"type": "text", "data": {"text": text}})
+    return SimpleNamespace(
+        event_type="message_group",
+        group=SimpleNamespace(group_id=group_id),
+        user_id=1,
+        self_id="10001",
+        message=segments,
+        text=text,
+    )
+
+
+def _pipeline(config, overrides=None):
+    runtime = _Runtime(config, overrides)
+    return LlmPipeline(runtime), runtime
+
+
+def test_trigger_mode_none_ignores_at():
+    pipeline, runtime = _pipeline(
+        {"group_enable": True},
+        {("acc1", "agent", "111"): {"config": {"trigger_mode": "none"}, "permission": {}}},
+    )
+    event = _event_with_message("在吗", at=True)
+    config = pipeline._effective_config(event, runtime.config)
+
+    triggered, _is_at, _text = pipeline._trigger_decision(event, config)
+
+    assert triggered is False, "显式 none 不该因为 @ 就触发"
+
+
+def test_trigger_mode_at_only_matches_mentions():
+    pipeline, runtime = _pipeline({"group_enable": True})
+    at_event = _event_with_message("在吗", at=True)
+    plain_event = _event_with_message("在吗")
+
+    at_config = pipeline._effective_config(at_event, runtime.config)
+    plain_config = pipeline._effective_config(plain_event, runtime.config)
+
+    assert pipeline._trigger_decision(at_event, at_config)[0] is True
+    assert pipeline._trigger_decision(plain_event, plain_config)[0] is False
+
+
+def test_trigger_mode_keyword_matches_without_mention():
+    pipeline, runtime = _pipeline(
+        {"group_enable": True},
+        {("acc1", "agent", "111"): {"config": {"trigger_mode": "keyword", "trigger_keyword": ["摸鱼"]}, "permission": {}}},
+    )
+    hit = _event_with_message("今天摸鱼")
+    miss = _event_with_message("今天学习")
+
+    assert pipeline._trigger_decision(hit, pipeline._effective_config(hit, runtime.config))[0] is True
+    assert pipeline._trigger_decision(miss, pipeline._effective_config(miss, runtime.config))[0] is False
+
+
+def test_trigger_mode_all_follows_probability():
+    for probability, expected in ((100, True), (0, False)):
+        pipeline, runtime = _pipeline(
+            {"group_enable": True},
+            {("acc1", "agent", "111"): {
+                "config": {"trigger_mode": "all", "trigger_probability": probability},
+                "permission": {},
+            }},
+        )
+        event = _event_with_message("随便聊聊")
+        config = pipeline._effective_config(event, runtime.config)
+
+        assert pipeline._trigger_decision(event, config)[0] is expected
+
+
+def test_trigger_mode_both_matches_either():
+    pipeline, runtime = _pipeline(
+        {"group_enable": True},
+        {("acc1", "agent", "111"): {"config": {"trigger_mode": "both", "trigger_keyword": ["AI"]}, "permission": {}}},
+    )
+    at_event = _event_with_message("在吗", at=True)
+    keyword_event = _event_with_message("AI 帮我看看")
+    plain_event = _event_with_message("随便说说")
+
+    for event, expected in ((at_event, True), (keyword_event, True), (plain_event, False)):
+        config = pipeline._effective_config(event, runtime.config)
+        assert pipeline._trigger_decision(event, config)[0] is expected
+
+
+def test_would_trigger_llm_uses_the_same_mode():
+    """打断判定与准入判定同源：mode=none 时普通消息（含 @）不打断旧任务。"""
+    pipeline, runtime = _pipeline(
+        {"group_enable": True},
+        {("acc1", "agent", "111"): {"config": {"trigger_mode": "none"}, "permission": {}}},
+    )
+
+    assert pipeline._would_trigger_llm(_event_with_message("在吗", at=True), "在吗", True) is False
