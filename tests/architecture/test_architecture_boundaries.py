@@ -3,22 +3,16 @@
 这不是风格检查，而是把架构决策变成 CI 能拦的红灯。它回答一个问题：
 **「这条依赖方向是被允许的吗？」**——而不是靠人记得。
 
-## 六条规则
+## 四条方向性硬规则
 
 1. `domain/` 只准依赖 `core/` 与自身（纯规则层，可单测）；
 2. `infrastructure/` 不准依赖上层（agent / plugin / application / webui）；
 3. 生产代码不准 `from app.bootstrap import ...`（服务定位器的来源）；
-4. `get_container()` 直调是**存量债**，只许降不许升；
-5. `webui/` 不准直接 import agent 内部实现（应经 `application/` 门面）；
-6. `app/llm/__init__.py` 必须保持薄壳——不准重导出 Agent 主循环。
+4. `app/agent/__init__.py` 必须保持薄壳——不准重导出 Agent 主循环。
 
-## 预算制（棘轮）
-
-规则 3、4、5 有历史欠账，无法一次清零，所以用 `_BUDGET` 里的数字做棘轮：
-**修好一处就把预算调小一处**；调大必须在提交说明里写清理由。
-
-预算只统计"真实代码"，用 AST 解析——注释与文档字符串里提到 `get_container()`
-不算（否则本文件自己也会违规）。
+历史上的「存量债预算棘轮」（`get_container()` / `container.get()` / webui→agent
+import 的计数）已按 `docs/TEST_POLICY.md §5` 删除：它们断言的是当前实现快照，
+随重构必红却不提供回归价值。需要时改成 `scripts/*.py --check` 更合适。
 
 ## 相关
 
@@ -37,25 +31,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 AGENT_PREFIXES = ("app.agent",)  # P2 后 agent 层只有这一个前缀（app.llm 已并入）
 
-# 存量债预算：只许降，不许升。修好一处就把对应数字改小。
-_BUDGET = {
-    # P3 已清零：生产代码不再从装配根取容器（改用 app.core.container.get_active）
-    "bootstrap_imports": 0,
-    # 剩下的都在 app/webui/api/*。`deps.py` 已经给每个服务备了具名依赖
-    # （get_bot_service 等），把端点改成 `Depends(get_xxx_service)` 就能继续降。
-    # 已清零：logs.py（4 端点，3 条 HTTP 用例守住）、framework.py、resources.py、
-    # webui_cfg.py（12 端点）、bots.py（10 端点）、agent.py（17 端点）。
-    # 只剩 modules.py（它把 container 传进 3 个 helper，需要连着改 helper 签名）。
-    "get_container_calls": 1,
-    # 端点里自己 `container.get(类型)` 的次数（服务定位的味道）。目标 0。
-    "webui_container_get_calls": 2,
-    # app/webui/api/{agent,media,modules,prompt_dump}.py 直接 import app.agent.*
-    # 14 → 16：
-    #   +1 `app.agent.tools.state` —— 统一工具状态判定点（WebUI 靠它"显示即真相"）
-    #   +1 `app.agent.config`      —— `module_owned_keys()`，用于拒写模块拥有的键
-    # 两者都是 WebUI 必需的读/校验缝，不是把业务逻辑搬进 webui。
-    "webui_to_agent_imports": 16,
-}
+#: 预算制已按 `docs/TEST_POLICY.md §5` 删除：`get_container()` / `container.get()`
+#: / webui→agent import 的**存量计数**属于「当前实现快照」，随重构必红却不提供回归价值。
+#: 本文件只保留方向性硬规则（domain 纯净、infrastructure 不反依赖、生产代码不碰
+#: 装配根、agent 包 __init__ 保持薄壳）。
 
 # `app/agent/__init__.py` 允许在模块层 import 的东西（全部廉价、无重依赖）
 _ALLOWED_AGENT_PKG_IMPORTS = {
@@ -112,39 +91,8 @@ def _import_targets(path: Path, *, module_level_only: bool) -> list[str]:
     return targets
 
 
-def _count_get_container_calls(path: Path) -> int:
-    """只数真实的 `get_container(...)` 调用，不算注释/文档字符串。"""
-    tree = _parse(path)
-    if tree is None:
-        return 0
-    total = 0
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        fn = node.func
-        if isinstance(fn, ast.Name) and fn.id == "get_container":
-            total += 1
-        elif isinstance(fn, ast.Attribute) and fn.attr == "get_container":
-            total += 1
-    return total
-
-
 def _rel(path: Path) -> str:
     return path.relative_to(REPO_ROOT).as_posix()
-
-
-def _report(hits: list[tuple[str, str]], budget_key: str, hint: str) -> None:
-    """命中数必须 ≤ 预算；打印可操作的失败信息。"""
-    budget = _BUDGET[budget_key]
-    if len(hits) <= budget:
-        return
-    detail = "\n".join(f"    {where}  ->  {what}" for where, what in sorted(hits)[:40])
-    pytest.fail(
-        f"边界违规 {len(hits)} 处，超过预算 {budget}（{budget_key}）。\n"
-        f"{detail}\n"
-        f"处理方式：{hint}\n"
-        f"若确实无法避免，请在提交说明里写明理由并上调 _BUDGET['{budget_key}']。"
-    )
 
 
 # --------------------------------------------------------------------------- #
@@ -196,83 +144,16 @@ def test_infrastructure_does_not_import_upper_layers():
 # --------------------------------------------------------------------------- #
 def test_no_production_imports_from_bootstrap():
     """`app.bootstrap` 是装配根，谁都不准依赖它——否则装配顺序就成了隐式契约。"""
-    offenders: list[tuple[str, str]] = []
-    for path in _iter_py("app"):
-        for target in _import_targets(path, module_level_only=False):
-            if target == "app.bootstrap":
-                offenders.append((_rel(path), "from app.bootstrap import ..."))
-    _report(
-        offenders,
-        "bootstrap_imports",
-        "改成构造函数注入，或 FastAPI Depends（app/webui/api/deps.py）。",
-    )
-
-
-# --------------------------------------------------------------------------- #
-# 规则 4：get_container() 直调只许降
-# --------------------------------------------------------------------------- #
-def test_get_container_calls_within_budget():
-    """服务定位器是债：每调一次，这个文件就焊进了整个 Agent 实现。"""
-    offenders: list[tuple[str, str]] = []
-    for path in _iter_py("app"):
-        n = _count_get_container_calls(path)
-        if n:
-            offenders.extend([(_rel(path), f"get_container() ×{n}")] * n)
-    _report(
-        offenders,
-        "get_container_calls",
-        "把依赖改成函数参数或 FastAPI Depends；webui/api/deps.py 是落点。",
-    )
-
-
-def _count_container_get_calls(path: Path) -> int:
-    """数 `container.get(...)`：端点自己从容器里按类型捞服务。"""
-    tree = _parse(path)
-    if tree is None:
-        return 0
-    total = 0
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        fn = node.func
-        if (
-            isinstance(fn, ast.Attribute)
-            and fn.attr == "get"
-            and isinstance(fn.value, ast.Name)
-            and fn.value.id == "container"
-        ):
-            total += 1
-    return total
-
-
-def test_webui_container_get_calls_within_budget():
-    """端点不该自己 `container.get(类型)`：依赖应当出现在函数签名上。"""
-    offenders: list[tuple[str, str]] = []
-    for path in _iter_py("app/webui/api"):
-        n = _count_container_get_calls(path)
-        if n:
-            offenders.extend([(_rel(path), f"container.get() ×{n}")] * n)
-    _report(
-        offenders,
-        "webui_container_get_calls",
-        "改成 `x = Depends(get_x_service)`（deps.py 已备好每个服务的具名依赖）。",
-    )
-
-
-# --------------------------------------------------------------------------- #
-# 规则 5：webui 不碰 agent 内部
-# --------------------------------------------------------------------------- #
-def test_webui_does_not_import_agent_internals():
-    """WebUI 是 HTTP 适配层，只该认识 `application/` 的门面。"""
-    offenders: list[tuple[str, str]] = []
-    for path in _iter_py("app/webui"):
-        for target in _import_targets(path, module_level_only=False):
-            if target.startswith(AGENT_PREFIXES):
-                offenders.append((_rel(path), target))
-    _report(
-        offenders,
-        "webui_to_agent_imports",
-        "在 application/ 加一个门面函数，webui 只调门面。",
+    offenders = [
+        (_rel(path), "from app.bootstrap import ...")
+        for path in _iter_py("app")
+        for target in _import_targets(path, module_level_only=False)
+        if target == "app.bootstrap"
+    ]
+    assert not offenders, (
+        "生产代码又 import 了装配根 app.bootstrap：\n"
+        + "\n".join(f"    {where}  ->  {what}" for where, what in sorted(offenders))
+        + "\n处理方式：改成构造函数注入，或 FastAPI Depends（app/webui/api/deps.py）。"
     )
 
 

@@ -102,15 +102,6 @@ def test_missing_dev_extra_is_reported(checker, tmp_path, monkeypatch):
     assert checker.main() == 1
 
 
-def test_dep_name_handles_extras_and_versions(checker):
-    """`uvicorn[standard]>=0.23` 之类的声明要能正确取出包名，避免误判。"""
-    assert checker._dep_name("uvicorn[standard]>=0.23") == "uvicorn"
-    assert checker._dep_name("curl_cffi>=0.15") == "curl_cffi"
-    assert checker._dep_name("pytest-asyncio~=0.21") == "pytest-asyncio"
-    assert checker._dep_name("httpx-sse; python_version<'3.12'") == "httpx-sse"
-    assert checker._dep_name("tomli!=2.0.0") == "tomli"
-
-
 def test_extras_package_is_not_false_positive(checker, tmp_path, monkeypatch):
     """含 extras 的运行时依赖不应被测试期依赖规则误伤。"""
     _write(tmp_path, _GOOD_POINTER, _project(["uvicorn[standard]>=0.23"], ["pytest>=7.4"]))

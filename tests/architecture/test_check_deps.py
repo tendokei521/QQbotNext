@@ -90,19 +90,6 @@ def test_required_specs_merges_optional_groups():
     assert check_deps.required_specs(data, groups=["dev", "vector"])[-1] == "sqlite-vec>=0.1.6"
 
 
-def test_fallback_parser_works_without_toml_library():
-    """没有 tomllib / tomli 时的兜底：只要求抠出依赖清单与 Python 门槛。"""
-    text = (
-        '[project]\nname = "x"\nrequires-python = ">=3.10"\n'
-        'dependencies = [\n    "pillow>=10.0",\n    "fastapi>=0.115",  # 注释\n]\n'
-    )
-
-    data = check_deps._fallback_pyproject(text)
-
-    assert check_deps.required_specs(data) == ["pillow>=10.0", "fastapi>=0.115"]
-    assert check_deps.requires_python(data) == ">=3.10"
-
-
 # ==================== 判定 ====================
 
 

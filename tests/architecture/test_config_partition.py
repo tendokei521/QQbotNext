@@ -1,10 +1,14 @@
-"""配置分区契约（v3 定稿）：本体 5 页 / 9 个模块 / 9 个删除。
+"""配置分区契约：本体界面 / 模块 / 删除项的归属必须自洽。
 
-## 现状（W7 完成后）
+## 测什么（只保留规则，不锁数量）
 
-- `config_schema.SCHEMA` 已经是**收敛后的 43 键**（本体 5 页）；
-- `config_schema.LEGACY_SCHEMA` 保留完整 187 键，供迁移脚本按旧键取类型/标签；
-- 本文件同时校验"分区覆盖 187 键（无遗漏/无重复）"与"导出 SCHEMA 恰为 44 键"。
+- 导出给本体的 schema 必须**恰好**等于分区表里的本体键（多一个都是没搬干净）；
+- 旧键必须全部有归宿（无遗漏、无重复、无引用不存在的键）；
+- 每个本体键有且只有一个所属页面/分组；
+- 拥有者名册只能来自单一来源。
+
+键数/页面字段数/模块清单等「当前布局快照」已按 `docs/TEST_POLICY.md §5` 删除：
+它们在每次调整配置时都会红，却不提供回归价值。
 """
 
 from __future__ import annotations
@@ -17,14 +21,10 @@ from app.agent.config_partition import (
     PANEL_KEYS,
     REPLY_KEYS,
     SURFACE_GROUPS,
-    TARGET_CORE_KEY_COUNT,
     UI_PAGES,
     all_partitioned_keys,
     duplicate_keys,
     fate_of,
-    page_summary,
-    panel_summary,
-    reply_summary,
     stale_keys,
     ui_group_of,
     ui_page_of,
@@ -32,38 +32,19 @@ from app.agent.config_partition import (
 )
 from app.agent.config_schema import LEGACY_SCHEMA, SCHEMA
 
-#: 迁移前的完整键集（185）
+#: 迁移前的完整键集
 LEGACY_KEYS: tuple[str, ...] = tuple(
     key
     for key, value in LEGACY_SCHEMA.items()
     if isinstance(value, dict) and value.get("type") != "group"
 )
 
-#: 当前导出的键集（应为 43）
+#: 当前导出的键集
 SCHEMA_KEYS: tuple[str, ...] = tuple(
     key
     for key, value in SCHEMA.items()
     if isinstance(value, dict) and value.get("type") != "group"
 )
-
-#: 本体配置页的顺序（拆分方案定稿：只剩对话行为 → 会话管理 → 高级功能）
-EXPECTED_PAGE_ORDER = ("behavior", "session", "advanced")
-#: 两个页面外工作台的字段数（AI 对话面板 / 回复与权限）
-EXPECTED_PANEL_KEYS = 6
-EXPECTED_REPLY_KEYS = 4
-
-#: 9 个目标模块（目录名）
-EXPECTED_MODULES = {
-    "llm_output",
-    "llm_context",
-    "llm_message_meta",
-    "llm_memory",
-    "llm_knowledge",
-    "llm_tools_extra",
-    "llm_proactive",
-    "llm_schedule",
-    "llm_assembly",
-}
 
 
 # ==================== 收敛结果 ====================
@@ -72,33 +53,9 @@ EXPECTED_MODULES = {
 def test_exported_schema_is_exactly_the_core_keys():
     """本体 schema 必须正好等于分区表里的本体键（多一个都是没搬干净）。"""
     assert set(SCHEMA_KEYS) == set(CORE_KEYS)
-    assert len(SCHEMA_KEYS) == TARGET_CORE_KEY_COUNT == 57
 
 
-def test_legacy_schema_still_has_all_legacy_keys():
-    """旧 schema 必须完整保留（迁移脚本靠它取旧键的类型与标签）。"""
-    assert len(LEGACY_KEYS) == 201
-
-
-# ==================== 布局本身 ====================
-
-
-def test_ui_has_exactly_three_pages_in_order():
-    ordered = [p.id for p in sorted(UI_PAGES, key=lambda p: p.order)]
-    assert tuple(ordered) == EXPECTED_PAGE_ORDER, (
-        f"本体配置页页面顺序漂移：{ordered}，期望 {list(EXPECTED_PAGE_ORDER)}"
-    )
-
-
-def test_ui_page_field_counts_match_the_agreed_layout():
-    counts = {row["id"]: row["fields"] for row in page_summary()}
-    assert counts == {
-        "behavior": 6,
-        "session": 20,
-        "advanced": 21,
-    }, f"页面字段数漂移：{counts}"
-    assert panel_summary()["fields"] == EXPECTED_PANEL_KEYS
-    assert reply_summary()["fields"] == EXPECTED_REPLY_KEYS
+# ==================== 布局自洽 ====================
 
 
 def test_ui_groups_are_unique_and_named():
@@ -155,30 +112,7 @@ def test_partition_covers_every_legacy_key_exactly_once():
     )
 
 
-# ==================== 数量与棘轮 ====================
-
-
-def test_agreed_split_is_core_plus_module_plus_deleted():
-    """数字：本体 57 / 迁移 109 / 删除 35（删掉 system_prompt，人格只由角色预设决定）。"""
-    migrated = sum(len(keys) for keys in MODULE_KEYS.values())
-    assert len(CORE_KEYS) == 57, f"本体键数 {len(CORE_KEYS)} ≠ 57"
-    assert migrated == 109, f"迁移键数 {migrated} ≠ 109"
-    assert len(DELETED_KEYS) == 35, f"删除键数 {len(DELETED_KEYS)} ≠ 35"
-    assert len(CORE_KEYS) + migrated + len(DELETED_KEYS) == len(LEGACY_KEYS)
-
-
-def test_module_inventory_is_nine():
-    assert set(MODULE_KEYS) == EXPECTED_MODULES, (
-        f"模块清单漂移：多 {sorted(set(MODULE_KEYS) - EXPECTED_MODULES)} / "
-        f"少 {sorted(EXPECTED_MODULES - set(MODULE_KEYS))}"
-    )
-
-
-def test_schema_key_count_only_shrinks():
-    """棘轮：schema 已收敛到 43，任何增长都是有人往 agent 配置页塞新键。"""
-    assert len(SCHEMA_KEYS) <= TARGET_CORE_KEY_COUNT, (
-        f"agent 配置键涨到 {len(SCHEMA_KEYS)}。v3 口径下新增行为请做成模块。"
-    )
+# ==================== 键集不变量 ====================
 
 
 def test_core_keys_all_still_exist():

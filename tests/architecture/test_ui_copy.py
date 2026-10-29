@@ -79,12 +79,12 @@ def _module_descriptions() -> list[tuple[str, str]]:
         for node in ast.walk(tree):
             if not isinstance(node, ast.Dict):
                 continue
-            for key, value in zip(node.keys, node.values):
+            for key, value in zip(node.keys, node.values, strict=False):
                 if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
                     continue
                 if not isinstance(value, ast.Dict):
                     continue
-                for k, v in zip(value.keys, value.values):
+                for k, v in zip(value.keys, value.values, strict=False):
                     if (
                         isinstance(k, ast.Constant)
                         and k.value == "description"
@@ -112,12 +112,12 @@ def _descriptions() -> list[tuple[str, str]]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.Dict):
             continue
-        for key, value in zip(node.keys, node.values):
+        for key, value in zip(node.keys, node.values, strict=False):
             if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
                 continue
             if not isinstance(value, ast.Dict):
                 continue
-            for k, v in zip(value.keys, value.values):
+            for k, v in zip(value.keys, value.values, strict=False):
                 if (
                     isinstance(k, ast.Constant)
                     and k.value == "description"

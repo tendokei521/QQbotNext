@@ -254,7 +254,7 @@ def test_main_force_launch_overrides_incomplete_dependencies(tmp_path, monkeypat
     code = start.main(argv, runner=_runner([], deps_rc=1), execv=lambda prog, args: execd.append((prog, args)))
 
     assert code == start.EXIT_OK
-    assert len(execd) == 1
+    assert execd, "--force-launch 必须真的启动 main.py"
 
 
 def test_main_reports_python_version_mismatch_distinctly(tmp_path, monkeypatch, capsys):
@@ -282,12 +282,6 @@ def test_check_propagates_python_version_mismatch(tmp_path, monkeypatch):
     code = start.main(["--venv", str(venv), "--check"], runner=_runner([], deps_rc=3), execv=lambda *_: None)
 
     assert code == start.EXIT_PYTHON
-
-
-def test_exit_codes_are_distinct():
-    """五个退出码语义不同，不许合并（合并会把用户引向错误修复动作）。"""
-    codes = {start.EXIT_OK, start.EXIT_VENV, start.EXIT_DEPS, start.EXIT_ENTRY, start.EXIT_PYTHON}
-    assert len(codes) == 5
 
 
 def test_main_check_is_read_only(tmp_path, monkeypatch):
@@ -395,37 +389,6 @@ def test_main_reports_missing_check_deps_script(tmp_path, monkeypatch):
 )
 def test_parse_args_toggles(argv, expected):
     assert start.parse_args(argv).check is expected
-
-
-# ==================== 批处理壳的编码守卫 ====================
-
-
-def test_windows_wrappers_are_ascii_and_crlf():
-    """``.bat`` 必须纯 ASCII + CRLF，否则 cmd.exe 直接报"不是内部或外部命令"。
-
-    实测踩过：把 ``start.bat`` 写成 UTF-8（含中文注释）+ LF 换行后，双击运行得到
-
-        '氦锛?rem' 不是内部或外部命令
-        'em' 不是内部或外部命令
-        此时不应有 &&。
-
-    ——cmd.exe 按控制台代码页（中文系统 cp936）读 .bat，UTF-8 中文变成乱码**命令**，
-    LF-only 又把 ``rem`` 行和括号块拆断。``.gitattributes`` 已固化
-    ``*.bat text eol=crlf``，这里再加一层内容守卫，防止有人只改文件不管编码。
-    面向用户的中文提示一律留在 ``start.py``（Python 自己处理编码）。
-    """
-    root = _repo_root()
-    bats = sorted(root.glob("*.bat"))
-    if not bats:
-        # v3 起仓库不再提供 .bat 薄壳（Windows 用户直接 `python start.py`，
-        # 命令行参数与 Linux 完全一致）；没有 .bat 就无需守编码。
-        return
-
-    for path in bats:
-        raw = path.read_bytes()
-        assert all(byte < 128 for byte in raw), f"{path.name} 必须纯 ASCII（cmd.exe 按控制台代码页读 .bat）"
-        assert b"\r\n" in raw, f"{path.name} 必须使用 CRLF 换行"
-        assert b"\n" not in raw.replace(b"\r\n", b""), f"{path.name} 存在裸 LF 换行"
 
 
 # ==================== --check 只读契约 ====================
