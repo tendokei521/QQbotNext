@@ -34,7 +34,7 @@ const availableGroups = computed(() =>
   replyGroups
     .map((group) => ({
       ...group,
-      fields: group.fields.filter((key) => Boolean(agent.schema[key])),
+      fields: group.fields.filter((key) => Boolean(schemaOf(key).type)),
     }))
     .filter((group) => group.fields.length > 0),
 )
@@ -56,8 +56,18 @@ const saveState = computed(() => {
   }
 })
 
+/**
+ * 取字段 schema。
+ *
+ * `/api/agent/config` 下发的 schema 是 `{groups, items}` 分区形态（见 schema_utils.webui_schema），
+ * 字段定义在 `items[key]`；这里同时兼容旧版扁平结构，避免后端版本差异导致整块不显示。
+ */
 function schemaOf(key: string): Record<string, any> {
-  return (agent.schema[key] || {}) as Record<string, any>
+  const schema = (agent.schema || {}) as Record<string, any>
+  const items = schema.items && typeof schema.items === 'object'
+    ? (schema.items as Record<string, any>)
+    : schema
+  return (items[key] || {}) as Record<string, any>
 }
 
 function isStringList(key: string): boolean {
