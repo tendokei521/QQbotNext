@@ -286,3 +286,32 @@ def test_folding_style_still_works_with_preset():
     systems = [m for m in messages if m["role"] == "system"]
     assert len(systems) == 1
     assert "【角色一致性：不许跳出】" in systems[0]["content"]
+
+
+def test_every_preset_explains_tool_speech():
+    """三套方案都要讲清「文本=思考 / send_message=发言 / 分条自检 / 别汇报」。
+
+    机制默认改为工具发言后，roleplay / assistant 也不能只说"文本会直接发出去"，
+    否则模型会按错误事实行动（整轮沉默或把思考当发言）。
+    """
+    for preset in presets.PRESETS:
+        cfg = {"prompt_preset": preset.key, "speech_via_tool": True, "system_prompt": "人设"}
+        text = persona_rules.render(
+            None, ALL_TOOLS, cfg, segments=presets.segments_of(preset)
+        )
+        assert "只是思考" in text, f"{preset.key} 没说明文本只是思考"
+        assert "send_message" in text, f"{preset.key} 没给出真正的发言通道"
+        assert "工具调用是动作" in text, f"{preset.key} 缺「工具是动作」口径"
+        assert "直接发到" not in text, f"{preset.key} 在工具发言下仍说文本会直接发出"
+        assert "不要用文本再重复一遍" in text, f"{preset.key} 缺汇报禁令"
+
+
+def test_presets_keep_text_mode_when_channel_off():
+    """关掉发言通道后，三套方案都要回到「文本即回复」口径（可回滚）。"""
+    for preset in presets.PRESETS:
+        cfg = {"prompt_preset": preset.key, "speech_via_tool": False}
+        text = persona_rules.render(
+            None, ALL_TOOLS, cfg, segments=presets.segments_of(preset)
+        )
+        assert "直接发到" in text, f"{preset.key} 关掉通道后没回到文本发言"
+        assert "只是思考" not in text, f"{preset.key} 关掉通道后仍说文本只是思考"
