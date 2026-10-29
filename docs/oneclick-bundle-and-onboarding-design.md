@@ -388,8 +388,8 @@
 `summary.modules_bundled` / `summary.modules_to_install`。
 
 **仍不迁（有意为之，不是缺口）**：账号接入信息（ws_url/token）、群级策略
-（`channel_overrides`）、global 默认层、模块运行时数据目录、知识库/记忆内容等资源文件、
-模块代码之外的依赖安装（pip 包由部署环境负责）。
+（`channel_overrides`）、global 默认层、模块运行时数据目录、知识库/记忆内容等资源文件。
+模块代码之外的依赖安装从 v1.9 起**改为可选在线安装**（见 §5.9），但仍不随包导出。
 
 ### 5.8 P7 一键化落地（2026-10-27）
 
@@ -410,7 +410,25 @@
 `BUNDLE_MODULE_BUILTIN_CONFLICT`、`BUNDLE_REUSE_PRESET_NOT_FOUND`、
 `BUNDLE_REUSE_PRESET_EMPTY`。
 
-**边界不变**：自动 pip 安装**不做**（只预检拦截）；模块运行时数据、账号接入、群策略仍不迁移。
+**边界不变**：依赖不随包导出（改为可选在线安装，见 §5.9）；模块运行时数据、账号接入、群策略仍不迁移。
+
+### 5.9 依赖改为「联网一键安装」（2026-10-29）
+
+§5.8 最后一句「自动 pip 安装不做」作废。取舍：**不把依赖打进配置包**（跨平台/ABI 组合不可控、
+包体积与安全面都变大），改为在目标机联网装，和已有的模块 pip 通道共用一条执行面。
+
+| 入口 | 行为 |
+|---|---|
+| 插件安装 / 更新（zip） | 勾选「安装时自动安装依赖」→ `ModuleRegistry.install_from_zip(auto_deps=True)` 在**加载前**装 `module.json` 声明的依赖（只装清单里且当前缺失的包），回执带 `deps`；失败不中断安装，若模块因此加载失败则回滚并给出 pip 输出与可复制命令 |
+| 模块页「检查依赖」 | 原有手动通道不变（`GET /modules/{name}/dependencies`、`POST .../install-deps`，需 `confirm_deps=true`），装完自动重载模块 |
+| 预设导入 / 应用 | 预检 `BUNDLE_MODULE_DEP_MISSING` 由 error 降为 **warn（可修复）**，不再把整个预设挡在导入之外；导入对话框勾选「自动安装缺失依赖」后，随包模块安装时带 `auto_deps`，已满足版本被跳过的模块在应用阶段补一次依赖；应用回执新增 `modules_deps` |
+| 安全 | 显式勾选才装（不会因"点进页面"触发）；只装 `module.json` 清单里的包名（白名单正则，拒绝 `-e`/`-r`/URL）；pip 串行 + 180s 超时 + 镜像白名单；失败保留模块但标记未加载，回执带 stdout/stderr |
+
+新增错误面不变（`BUNDLE_MODULE_DEP_MISSING` 从 error 变 warn 是兼容变更）；新增接口参数：
+`install-zip` 的 `auto_deps`/`mirror`、`bundles/{id}/apply` 的 `install_deps`/`deps_mirror`、
+`bundles/import-apply` 的同名表单字段。
+
+**不做**：依赖随包导出（离线包另属 Deploy Kit）；模块运行时数据、账号接入、群策略仍不迁移。
 
 ---
 

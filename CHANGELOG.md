@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### 新增：插件/预设依赖改为「联网一键安装」（2026-10-29）
+
+不把依赖打进配置包（跨平台/ABI 组合不可控），改为在目标机联网安装，两个入口共用同一条 pip 通道：
+
+- **插件安装**：上传/更新 zip 时可勾选「安装时自动安装依赖」，后端 `install_from_zip(auto_deps=True)`
+  在**加载前**装上 `module.json` 声明的依赖（只装清单里、当前缺失的包），回执带 `deps`
+  （已装/缺失/pip 输出）；失败不阻断安装，若模块因此加载失败会回滚并给出可复制命令。
+  原有的模块页「检查依赖 / 安装依赖」手动通道保持不变（装完自动重载）。
+- **配置包导入/应用**：预检里的 `BUNDLE_MODULE_DEP_MISSING` 从阻断导入改为可修复告警；
+  导入对话框可勾选「自动安装缺失依赖」，随包模块安装时带 `auto_deps`，
+  已满足版本被跳过的模块在应用阶段补一次依赖；应用回执新增 `modules_deps`。
+- 安全边界不变：必须显式勾选才装包（不会因点开页面触发）；只装清单声明的包名
+  （拒绝 `-e`/`-r`/URL）；pip 串行 + 超时 + 镜像白名单；pip 失败不会静默。
+
+验证：`pytest tests/plugin/test_pip_deps.py tests/application/test_bundle_modules.py tests/webui/test_bundles_api.py`
+→ 全绿（新增 8 个用例）。
+
 ### 重构：AI 对话设置拆分为「AI 对话面板 / 回复与权限 / AI 设置」
 
 拆分方案见 [`docs/plan/ai-panel-split.md`](docs/plan/ai-panel-split.md)。原则：**面板管日常、
