@@ -2,8 +2,9 @@
 
 守的是四条**会让"选个方案"变成事故**的红线：
 
-1. **默认不生效**：``prompt_preset`` 留空/拼错时装配结果与改造前逐字一致，
-   存量 bot 升级后一个字符都不变（选了才接管，清空即回退）；
+1. **三选一，没有"不选"**：配置里带了这个键但为空/拼错时回落默认方案（chat），
+   保证产品路径不会退回"没有行为规则段"的旧文案；只有完全不携带该键的库层调用
+   才保留旧装配结果（测试/脚本直接构造 config）；
 2. **安全段不可被方案删掉**：三套方案都必须含「安全规则」，用户写了
    ``behavior_rules_override`` 也一样——只能整体替换风格段落，换不掉底线；
 3. **工作方式段必须说真话**：``speech_by_tool`` 开/关对应的措辞不能错位
@@ -60,20 +61,27 @@ def _tool_tokens(text: str) -> set[str]:
 # ==================== 1. 默认不生效 ====================
 
 
-def test_unset_preset_keeps_legacy_assembly_verbatim():
-    """未选方案时装配结果与"没有这个键"逐字一致（纯增量，零回归）。"""
+def test_empty_preset_falls_back_to_default_chat():
+    """带键但为空 → 按默认方案（chat）装配，不会退回"没有行为段"的旧文案。"""
     base = {"system_prompt": "你是助手", "outbound_directive_enable": True}
-    without = PromptAssembler().build(PromptRequest(config=dict(base), user_text="hi"))
     empty = PromptAssembler().build(
         PromptRequest(config={**base, "prompt_preset": ""}, user_text="hi")
     )
-    assert without == empty
+    chat = PromptAssembler().build(
+        PromptRequest(config={**base, "prompt_preset": "chat"}, user_text="hi")
+    )
+    assert empty == chat
+    # 完全不携带该键的库层调用仍保留旧版结果（产品路径永远带键）
+    without = PromptAssembler().build(PromptRequest(config=dict(base), user_text="hi"))
+    assert without != empty
 
 
-def test_unknown_preset_is_treated_as_unset():
-    """拼错方案名只会「不生效」，不会「半生效」。"""
-    assert presets.resolve({"prompt_preset": "role_play"}) is None
-    assert presets.resolve({"prompt_preset": "  "}) is None
+def test_unknown_preset_falls_back_to_default_chat():
+    """拼错方案名 → 回落 chat，不会「不生效/半生效」。"""
+    assert presets.resolve({"prompt_preset": "role_play"}) is presets.CHAT
+    assert presets.resolve({"prompt_preset": "  "}) is presets.CHAT
+    assert presets.resolve({"prompt_preset": ""}) is presets.CHAT
+    # 不带键 / 非配置对象：保留库层旧行为（None）
     assert presets.resolve({}) is None
     assert presets.resolve(None) is None
 

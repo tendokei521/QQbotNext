@@ -96,7 +96,11 @@ def build_persona(req: Any) -> list[dict]:
 
 
 def prompt_preset(req: Any):
-    """本轮选中的「提示词方案」（见 ``assembly.presets``）；未选/未知值返回 ``None``。"""
+    """本轮选中的「提示词方案」（见 ``assembly.presets``）。
+
+    产品口径是三选一：配置带该键时恒返回三套之一（空/未知回落 chat）；
+    只有根本不带该键的库层调用才返回 ``None``（保留旧版装配结果）。
+    """
     from app.agent.assembly import presets
 
     return presets.resolve(req.config)

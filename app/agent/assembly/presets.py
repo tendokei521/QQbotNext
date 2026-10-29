@@ -6,11 +6,13 @@
 可用表情提示、主动性行。**人格块不动** —— 用户自己的 ``system_prompt`` 或角色预设
 永远是人设的唯一来源，选方案只换"怎么说"，不换"我是谁"。
 
-## 为什么默认留空
+## 三选一，没有"不选"
 
-``prompt_preset`` 默认空串 = **逐字等于改造前**：行为段仍只看 ``assembly_profile``，
-其余文案仍是原来那几条常量。这样选方案是**纯增量**：存量 bot 升级后一个字符都不变，
-想回到旧行为把选择清空即可（与 ``assembly_profile`` 的"一键回退"同一个思路）。
+产品口径：系统提示词**必须**是三套之一。新账号默认 ``chat``（``DEFAULT_LLM_CONFIG``），
+存量账号的空值/拼错值由启动迁移改写为 ``chat``；保存路径按 ``config_schema`` 的枚举校验拦截
+非法值。配置读取侧再做一层兜底：**携带了该键但为空/未知 → 按默认方案（chat）**，
+保证任何产品路径都不会出现"没有行为规则段"的旧文案；只有完全不携带该键的库层调用
+（测试/脚本直接构造 config）才保留旧行为。
 
 ## 三条纪律
 
@@ -459,18 +461,25 @@ def get(key: str) -> PromptPreset | None:
 
 
 def resolve(config: Any) -> PromptPreset | None:
-    """读 ``prompt_preset`` 得到方案；空 / 未知值返回 ``None``（= 库层兼容回退）。
+    """读 ``prompt_preset`` 得到方案：三套之一，或 ``None``（仅"键不存在"的库层调用）。
 
-    界面与默认配置保证"三选一"（见 ``config.py`` 默认值与启动迁移）；这里的 ``None``
-    只作为兜底：直接构造 config 的库层调用（测试/脚本）仍可走不带方案的旧文案。
+    规则（产品口径「必须三选一」）：
+
+    - 配置里**有**这个键：空 / 未知值一律回落 ``chat``（``DEFAULT_PRESET_KEY``）——
+      启动迁移与保存校验已经保证正常路径不会出现非法值，这里是最后一层兜底；
+    - 配置里**没有**这个键：返回 ``None``，保留旧版"没有行为规则段"的装配结果，
+      供测试/脚本直接构造 config 用；产品路径（``DEFAULT_LLM_CONFIG``）永远带这个键。
     """
-    value = ""
-    if config is not None and hasattr(config, "get"):
-        try:
-            value = str(config.get("prompt_preset", "") or "")
-        except Exception:  # noqa: BLE001 —— 配置读取失败不该让整轮请求炸掉
-            value = ""
-    return _BY_KEY.get(value.strip().lower())
+    if config is None or not hasattr(config, "get"):
+        return None
+    try:
+        has_key = "prompt_preset" in config
+        value = str(config.get("prompt_preset", "") or "") if has_key else ""
+    except Exception:  # noqa: BLE001 —— 配置读取失败不该让整轮请求炸掉
+        return None
+    if not has_key:
+        return None
+    return _BY_KEY.get(value.strip().lower()) or CHAT
 
 
 def segments_of(preset: PromptPreset | None) -> tuple[Segment, ...]:
