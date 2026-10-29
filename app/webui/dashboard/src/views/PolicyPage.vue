@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 「群聊权限」——简单视图（群聊开关矩阵）。
+ * 「回复设置」——简单视图（群聊开关矩阵）。
  *
  * 设计目标（docs/permission-dialogue-policy-design.md §6.2）：
  * 小白只需要回答一个问题——**哪个群允许聊天**。因此这一页不出现"档位/名单/
@@ -158,7 +158,7 @@ watch(
       <div>
         <h1 class="app-page-title">
           <v-icon icon="mdi-shield-account-outline" size="28" color="success" class="mr-1" />
-          群聊权限
+          回复设置
         </h1>
         <div class="app-page-subtitle">哪些群允许聊天、默认允许还是不允许</div>
       </div>

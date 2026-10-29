@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 「权限管理」页的定制 UI：档位说明 + 跳转到「群聊权限」。
+ * 「权限管理」页的定制 UI：档位说明 + 跳转到「回复设置」。
  *
  * 历史：这里曾内嵌一份「名单范围控制」（群/用户黑白名单）。R4 起名单与场景开关
  * 统一收敛到 `/policy`（同一张 channel_overrides 表），本页不再放第二份编辑器——
@@ -22,7 +22,7 @@ const router = useRouter()
       </v-card-title>
       <v-card-text>
         <div class="text-body-2 mb-3" style="opacity: 0.8">
-          群聊开关、触发方式与免打扰都在「群聊权限」里配置。
+          群聊开关、触发方式与免打扰都在「回复设置」里配置。
         </div>
         <div class="d-flex flex-wrap gap-2">
           <v-btn
@@ -31,7 +31,7 @@ const router = useRouter()
             prepend-icon="mdi-account-group-outline"
             @click="router.push('/policy')"
           >
-            打开群聊权限
+            打开回复设置
           </v-btn>
         </div>
       </v-card-text>
