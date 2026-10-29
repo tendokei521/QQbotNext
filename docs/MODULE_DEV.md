@@ -16,13 +16,20 @@
 ```text
 <插件根>/<name>/
   module.json         # 必须：清单（name/display_name/version/entry/api_version…）
-  __init__.py         # 可选（有则按包加载，支持相对导入）
-  main.py             # 必须：定义 Module(BaseModule)
+  __init__.py         # 必须：包标记（相对导入依赖它）
+  main.py             # 必须：定义 Module(BaseModule) —— 只做属性/生命周期/hook 接线与编排
   config_schema.py    # 可选：WebUI 配置表单
-  service.py          # 可选：业务逻辑
+  src/                # 实现细节：工具函数、领域逻辑、协议/算法（按领域命名）
+    __init__.py
+    api.py / parsing.py / store.py / ...
   pages/index.html    # 可选：自定义配置页
+  README.md           # 推荐：做什么 / 怎么配 / 数据存哪
   requirements.txt    # 可选：第三方依赖清单（安装/更新时可勾选自动装，也可在模块页手动补装）
 ```
+
+`main.py` 不写正则/解析/HTTP/SQL/长常量表——这些放 `src/`；插件内部一律相对导入
+（`from .src.api import ...`）。完整规则（行数上限、命名、日志/异常/异步、检查命令）见
+[`docs/PLUGIN_STYLE.md`](PLUGIN_STYLE.md)，最小骨架见 `docs/plugin-template/`。
 
 ### 1.1 `module.json`（v2 清单）
 

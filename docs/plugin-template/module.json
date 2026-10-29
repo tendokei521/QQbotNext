@@ -1,0 +1,9 @@
+{
+  "name": "example_plugin",
+  "display_name": "示例插件",
+  "sign": "ExamplePlugin",
+  "version": "1.0.0",
+  "description": "复制 docs/plugin-template 后改这里；name 必须与目录名一致",
+  "entry": "main.py",
+  "api_version": 1
+}
