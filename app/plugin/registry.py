@@ -533,19 +533,87 @@ class ModuleRegistry:
             return {"ok": False, "plugin": {}, "error": str(e), "hint": e.hint}
         return {"ok": True, "plugin": preview, "error": "", "hint": ""}
 
-    async def install_from_zip(self, zip_path: str | Path, *, force: bool = False) -> dict:
-        """安装 zip 插件（事务化）：成功后加载并返回统一回执；失败抛 ModuleInstallError。"""
+    async def install_from_zip(
+        self,
+        zip_path: str | Path,
+        *,
+        force: bool = False,
+        auto_deps: bool = False,
+        mirror: str = "",
+    ) -> dict:
+        """安装 zip 插件（事务化）：成功后加载并返回统一回执；失败抛 ModuleInstallError。
+
+        ``auto_deps=True``：**加载前**先用 pip 安装 ``module.json`` 声明的依赖
+        （联网；只装清单里声明且当前环境缺失的包）。安装结果放在回执 ``deps`` 里；
+        依赖装不上不在这里中断——若模块因此加载失败，会带着 pip 输出回滚并给出
+        可复制命令，避免"装上了但跑不起来还看不出来"。
+        """
         self._require_installer()
         self._ensure_installed_dir()
         result = await self._installer.install(Path(zip_path), force=force)
         self.catalog.refresh()
-        await self._load_after_install(result)
+        deps: dict | None = None
+        if auto_deps:
+            deps = await self._install_declared_dependencies(result.name, mirror=mirror)
+        await self._load_after_install(result, deps=deps)
         self.catalog.refresh()
-        return self._install_info(result)
+        info = self._install_info(result)
+        info["loaded"] = True
+        if deps is not None:
+            info["deps"] = deps
+            info["deps_missing"] = bool(deps.get("missing"))
+        return info
 
-    async def update_from_zip(self, zip_path: str | Path) -> dict:
+    async def _install_declared_dependencies(self, module_name: str, *, mirror: str = "") -> dict:
+        """加载前装依赖：只装清单声明且当前缺失的包；失败返回结构化结果（不抛）。
+
+        依赖清单不合法（含 ``-e``/URL 等）时安装器会抛 ``ModuleInstallError``；这里
+        收成 ``ok=False``，由加载失败路径统一展示，避免自动装依赖把安装整体弄崩。
+        """
+        try:
+            return await self._installer.install_dependencies(module_name, mirror=mirror)
+        except ModuleInstallError as e:
+            self.log.warning(f"[Module] {module_name} 自动安装依赖失败: {e}")
+            return {
+                "module_name": module_name,
+                "ok": False,
+                "requirements": None,
+                "declared": [],
+                "installed": [],
+                "missing": [],
+                "deps_missing": False,
+                "exit_code": 1,
+                "command": [],
+                "stdout": "",
+                "stderr": str(e),
+                "error": str(e),
+                "hint": e.hint,
+            }
+        except Exception as e:  # noqa: BLE001 —— 自动装依赖是尽力而为，不能拖崩安装主流程
+            self.log.warning(f"[Module] {module_name} 自动安装依赖异常: {e}")
+            return {
+                "module_name": module_name,
+                "ok": False,
+                "requirements": None,
+                "declared": [],
+                "installed": [],
+                "missing": [],
+                "deps_missing": False,
+                "exit_code": 1,
+                "command": [],
+                "stdout": "",
+                "stderr": str(e),
+                "error": str(e),
+                "hint": "",
+            }
+
+    async def update_from_zip(
+        self, zip_path: str | Path, *, auto_deps: bool = False, mirror: str = ""
+    ) -> dict:
         """覆盖安装（= install force=True）：旧版本自动备份，配置/数据默认保留。"""
-        info = await self.install_from_zip(zip_path, force=True)
+        info = await self.install_from_zip(
+            zip_path, force=True, auto_deps=auto_deps, mirror=mirror
+        )
         info["updated"] = True
         return info
 
@@ -567,11 +635,14 @@ class ModuleRegistry:
         self.catalog.refresh()
         return result
 
-    async def _load_after_install(self, result: InstallResult) -> None:
+    async def _load_after_install(
+        self, result: InstallResult, *, deps: dict | None = None
+    ) -> None:
         """安装成功后装配实例：已装配账号逐个补装；一个都没有时留一个全局实例。
 
         任一账号加载失败 → 回滚安装（删新版本、恢复备份、重载旧版本）再抛错，
         保证"不会装上一个跑不起来的版本，也不会弄丢原来能跑的版本"。
+        ``deps`` 是自动装依赖的回执：装依赖失败时把 pip 输出拼进 hint，方便定位。
         """
         targets: list[Any] = sorted(self._known_account_ids(), key=str) or [None]
         failed = [bot_id for bot_id in targets if not await self.load_single(result.name, bot_id, purge=True)]
@@ -579,12 +650,13 @@ class ModuleRegistry:
             return
 
         detail = self._load_errors.get(result.name, "未知原因")
+        deps_hint = self._deps_failure_hint(deps)
         try:
             self._installer.rollback(result)
         except ModuleInstallError as e:
             raise ModuleInstallError(
                 f"插件 {result.name} 安装后加载失败，且回滚失败: {e}",
-                hint=f"{detail}；{e.hint}",
+                hint="；".join(item for item in (detail, e.hint, deps_hint) if item),
             ) from e
         self.catalog.refresh()
         for bot_id in targets:
@@ -596,8 +668,24 @@ class ModuleRegistry:
                 self.log.warning(f"[Module] 回滚后重载旧版本失败（已忽略）: {e}")
         raise ModuleInstallError(
             f"插件 {result.name} 安装后加载失败",
-            hint=f"{detail}；已回滚到安装前状态（账号: {', '.join(str(item) for item in failed)}）",
+            hint="；".join(item for item in (
+                detail,
+                f"已回滚到安装前状态（账号: {', '.join(str(item) for item in failed)}）",
+                deps_hint,
+            ) if item),
         )
+
+    @staticmethod
+    def _deps_failure_hint(deps: dict | None) -> str:
+        """自动装依赖失败时的可读提示（空字符串 = 依赖没出问题）。"""
+        if not deps or deps.get("ok") is not False:
+            return ""
+        missing = "、".join(str(item) for item in (deps.get("missing") or [])) or "（未知）"
+        detail = str(deps.get("error") or "").strip()
+        if not detail:
+            lines = str(deps.get("stderr") or "").strip().splitlines()
+            detail = lines[-1][:200] if lines else ""
+        return f"依赖未装齐（{missing}）{('：' + detail) if detail else ''}；检查网络/镜像后重试，或在模块页点「安装依赖」"
 
     def _install_info(self, result: InstallResult) -> dict:
         requirements = result.manifest.get("requirements")

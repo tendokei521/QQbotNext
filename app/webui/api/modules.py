@@ -530,6 +530,8 @@ async def update_module_zip(
     module_name: str,
     request: Request,
     file: UploadFile = File(...),
+    auto_deps: bool = Form(False),
+    mirror: str = Form(""),
     bot_service=Depends(get_bot_service), registry=Depends(get_module_registry)):
     """覆盖安装（更新）指定模块：等价 install-zip(force=True)，保留配置与数据。"""
 
@@ -537,7 +539,9 @@ async def update_module_zip(
     bot_service = bot_service
     try:
         with _uploaded_zip(file) as tmp_path:
-            info = await registry.update_from_zip(tmp_path)
+            info = await registry.update_from_zip(
+                tmp_path, auto_deps=auto_deps, mirror=mirror
+            )
     except (ValueError, BadZipFile, UnicodeDecodeError, OSError) as exc:
         return _install_error(exc)
     info = info or {}
@@ -646,12 +650,16 @@ async def install_module_zip(
     request: Request,
     file: UploadFile = File(...),
     force: bool = Form(False),
+    auto_deps: bool = Form(False),
+    mirror: str = Form(""),
     bot_service=Depends(get_bot_service),
     registry=Depends(get_module_registry)):
     """上传 zip 插件并安装到 data/module/plugins。
 
     - 已有同名第三方插件时需 `force=true` 才覆盖（后端备份旧版本）；
     - 与内置同名默认拒绝（第三方不可覆盖内置）；
+    - `auto_deps=true`：安装后、加载前用 pip 安装插件声明的依赖（联网）；
+      回执里的 ``deps`` 是安装结果，失败不回滚插件（由加载阶段统一提示）；
     - 所有已知异常统一 4xx + hint（不再 500）。
     """
 
@@ -659,7 +667,9 @@ async def install_module_zip(
     bot_service = bot_service
     try:
         with _uploaded_zip(file) as tmp_path:
-            info = await registry.install_from_zip(tmp_path, force=force)
+            info = await registry.install_from_zip(
+                tmp_path, force=force, auto_deps=auto_deps, mirror=mirror
+            )
     except (ValueError, BadZipFile, UnicodeDecodeError, OSError) as exc:
         return _install_error(exc)
     info = info or {}
