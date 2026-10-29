@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### 重构：AI 对话设置拆分为「AI 对话面板 / 回复与权限 / AI 设置」
+
+拆分方案见 [`docs/plan/ai-panel-split.md`](docs/plan/ai-panel-split.md)。原则：**面板管日常、
+设置管参数、每个字段只有一个编辑入口**。
+
+- **AI 对话面板（`/ai`）**：新增高频操作台——状态条（回复开关/模型/人格/加载错误）、回复总开关、
+  群聊/私聊开关、触发方式（@ / 关键词）、模型池、人格、权限摘要，以及配置模板/搜索/复制配置/
+  诊断台入口。替代原「AI 对话设置 → 概览」。
+- **回复与权限（`/reply`）**：原「回复设置」+ 原「权限管理」归一成一页三个 Tab——群与私聊
+  （逐群三态/批量/静音/高级规则）、谁能回复（响应权限档位、拥有者/管理者名册、高危工具审批）、
+  高级规则（账号默认规则）。
+- **AI 设置（`/ai/settings/*`）**：只保留 3 页深度参数——对话行为（移出触发设置）、会话管理、
+  高级功能；原「基础配置」「权限管理」页移除。
+- 路由兼容：`/agent*`、`/policy`、`/advanced*` 全部重定向到新位置，旧书签不白屏。
+- 后端字段归属表新增两个「页面外工作台」（`PANEL_GROUPS` / `REPLY_GROUPS`），
+  `CORE_KEYS` 仍为 57 键且每个键恰好一个编辑入口；新增生成物 `ai-panel.json`，
+  `scripts/gen_sections.py` 同时校验两份清单。
+- 删除：`AgentPage.vue`（概览）、`AgentBasicSection.vue`、`AgentPermissionSection.vue`；
+  搜索配置对话框支持跳转到面板/回复与权限。
+
+验证：全量 `pytest -q` → **3283 passed, 18 skipped**；`pnpm typecheck` / `pnpm build` 通过；
+`/ai`、`/reply?tab=who`、`/ai/settings/behavior`、旧 `/agent/basic` 重定向均实机核对。
+
 ### 重大：对标 AstrBot / MaiBot / LangBot 的稳定性与易用性整改（2026-10-28）
 
 先做三份只读审计（后端稳定性、前端 UX/文案、同类项目对标），再按「小问题直接改、大问题列计划」
