@@ -1,27 +1,57 @@
 <script setup lang="ts">
 /**
- * 「回复设置」——简单视图（群聊开关矩阵）。
+ * 「回复与权限」——把群级规则与原权限管理收进同一页，三个页签：
  *
- * 设计目标（docs/permission-dialogue-policy-design.md §6.2）：
- * 小白只需要回答一个问题——**哪个群允许聊天**。因此这一页不出现"档位/名单/
- * 触发方式"等高级项，只保留：同步群列表 → 逐群三态开关（允许/禁止/继承）→ 批量。
- *
- * 三态而不是布尔，是为了让"继承账号默认"这件事可见：否则用户关掉一个群后
- * 看不出它是"显式关闭"还是"本来就没开"。
+ * - 群与私聊：简单视图（同步群列表 → 逐群三态开关 → 批量 / 静音 / 行内高级规则）。
+ *   三态而不是布尔，是为了让「继承账号默认」这件事可见：否则用户关掉一个群后
+ *   看不出它是「显式关闭」还是「本来就没开」。
+ * - 谁能回复：按账号的响应权限档位、拥有者/管理者名册、高危工具审批
+ *   （字段分组来自 `src/agent/ai-panel.json::reply.groups`，见 ReplyPermissionPanel）。
+ * - 高级规则：保留账号默认规则的弹窗入口；逐群规则仍从群列表行内菜单打开。
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { displayName, useBotsStore } from '@/stores/bots'
 import { usePolicyStore, type PolicyMatrixRow, type SwitchValue } from '@/stores/policy'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
 import PolicyRulesDialog from '@/components/policy/PolicyRulesDialog.vue'
+import ReplyPermissionPanel from '@/components/policy/ReplyPermissionPanel.vue'
 
+const route = useRoute()
 const router = useRouter()
 const bots = useBotsStore()
 const policy = usePolicyStore()
 const notify = useNotifyStore()
+
+// ---------- 页签（支持 ?tab=groups|who|rules，默认 groups） ----------
+type PolicyTab = 'groups' | 'who' | 'rules'
+const POLICY_TABS: PolicyTab[] = ['groups', 'who', 'rules']
+
+function readTab(): PolicyTab {
+  const raw = String(route.query.tab || '')
+  return (POLICY_TABS as string[]).includes(raw) ? (raw as PolicyTab) : 'groups'
+}
+
+const tab = ref<PolicyTab>(readTab())
+
+watch(tab, (value) => {
+  // replace：切页签不新增历史记录，但刷新/分享能回到同一页签
+  if (String(route.query.tab || '') !== value) {
+    void router.replace({ query: { ...route.query, tab: value } })
+  }
+  // 从别的页签回到群列表时补一次加载（本页首次进入可能是「谁能回复」）
+  if (value === 'groups' && !policy.rows.length && bots.currentAccountId) void loadWithGroups()
+})
+
+// 外部改地址（浏览器前进/后退、手改 query）时同步回页签
+watch(
+  () => route.query.tab,
+  () => {
+    tab.value = readTab()
+  },
+)
 
 // 高级规则对话框：null = 账号默认层；否则是某个群
 const rulesDialog = ref(false)
@@ -141,7 +171,9 @@ onMounted(async () => {
       notify.push(`账号列表加载失败：${errorMessage(err)}`, 'error')
     }
   }
-  await loadWithGroups()
+  // 首屏在「谁能回复」时只需矩阵数据，不必尝试同步群列表
+  if (tab.value === 'groups') await loadWithGroups()
+  else await policy.load()
 })
 
 watch(
@@ -158,15 +190,16 @@ watch(
       <div>
         <h1 class="app-page-title">
           <v-icon icon="mdi-shield-account-outline" size="28" color="success" class="mr-1" />
-          回复设置
+          回复与权限
         </h1>
-        <div class="app-page-subtitle">哪些群允许聊天、默认允许还是不允许</div>
+        <div class="app-page-subtitle">哪些群能回、谁能触发；面板管默认，这里管例外</div>
       </div>
       <div class="d-flex align-center gap-2">
         <v-chip v-if="bots.currentAccountId" size="small" variant="tonal">
           账号：{{ accountName }}
         </v-chip>
         <v-btn
+          v-if="tab === 'groups'"
           variant="tonal"
           prepend-icon="mdi-refresh"
           :loading="policy.refreshing"
@@ -174,199 +207,228 @@ watch(
           @click="onRefreshGroups"
         >
           同步群列表
-        </v-btn>
-        <v-btn variant="text" prepend-icon="mdi-tune" @click="router.push('/agent/permission')">
-          高级规则
-        </v-btn>
-        <v-btn
-          variant="tonal"
-          prepend-icon="mdi-cog-outline"
-          :disabled="!bots.currentAccountId"
-          @click="openRules(null, '账号默认规则')"
-        >
-          默认规则
         </v-btn>
       </div>
     </div>
 
-    <v-alert v-if="!bots.currentAccountId" type="warning" variant="tonal" density="compact" class="mb-3">
-      <div class="d-flex align-center flex-wrap gap-2">
-        <span class="text-caption">还没有账号：先添加一个 QQ 账号，再配置哪些群允许聊天。</span>
-        <v-btn size="small" variant="text" prepend-icon="mdi-plus" @click="router.push('/bots')">
-          去添加账号
-        </v-btn>
-      </div>
-    </v-alert>
+    <v-tabs v-model="tab" density="compact" class="mb-3">
+      <v-tab value="groups">群与私聊</v-tab>
+      <v-tab value="who">谁能回复</v-tab>
+      <v-tab value="rules">高级规则</v-tab>
+    </v-tabs>
 
-    <v-alert v-if="policy.error" type="error" variant="tonal" density="compact" class="mb-3">
-      <div class="d-flex align-center flex-wrap gap-2">
-        <span class="text-caption">{{ policy.error }}</span>
-        <v-btn size="small" variant="text" prepend-icon="mdi-refresh" @click="onRefreshGroups">重试</v-btn>
-      </div>
-    </v-alert>
+    <v-window v-model="tab">
+      <v-window-item value="groups">
+        <v-alert v-if="!bots.currentAccountId" type="warning" variant="tonal" density="compact" class="mb-3">
+          <div class="d-flex align-center flex-wrap gap-2">
+            <span class="text-caption">还没有账号：先添加一个 QQ 账号，再配置哪些群允许聊天。</span>
+            <v-btn size="small" variant="text" prepend-icon="mdi-plus" @click="router.push('/bots')">
+              去添加账号
+            </v-btn>
+          </div>
+        </v-alert>
 
-    <v-card variant="outlined" class="mb-3">
-      <v-card-text class="d-flex align-center flex-wrap gap-3">
-        <v-text-field
-          v-model="policy.search"
-          placeholder="搜索群名 / 群号"
-          density="compact"
-          variant="outlined"
-          hide-details
-          clearable
-          prepend-inner-icon="mdi-magnify"
-          style="max-width: 320px"
-        />
-        <v-select
-          :model-value="sceneDefault"
-          :items="SCENE_ITEMS"
-          label="账号默认（群聊）"
-          density="compact"
-          variant="outlined"
-          hide-details
-          style="max-width: 200px"
-          :loading="policy.savingScene"
-          :disabled="!bots.currentAccountId || policy.savingScene"
-          @update:model-value="(v: SceneValue) => onSceneDefault(v)"
-        />
-        <v-chip size="small" variant="tonal">允许 {{ policy.allowedCount }} 个</v-chip>
-        <v-chip v-if="policy.mutedCount" size="small" variant="tonal" color="warning">
-          静音中 {{ policy.mutedCount }} 个
-        </v-chip>
-        <v-spacer />
-        <v-btn
-          size="small"
-          variant="tonal"
-          color="success"
-          :disabled="!policy.rows.length || policy.saving !== null"
-          @click="onBulk(true)"
-        >
-          全部允许
-        </v-btn>
-        <v-btn
-          size="small"
-          variant="tonal"
-          color="error"
-          :disabled="!policy.rows.length || policy.saving !== null"
-          @click="onBulk(false)"
-        >
-          全部关闭
-        </v-btn>
-      </v-card-text>
-    </v-card>
+        <v-alert v-if="policy.error" type="error" variant="tonal" density="compact" class="mb-3">
+          <div class="d-flex align-center flex-wrap gap-2">
+            <span class="text-caption">{{ policy.error }}</span>
+            <v-btn size="small" variant="text" prepend-icon="mdi-refresh" @click="onRefreshGroups">重试</v-btn>
+          </div>
+        </v-alert>
 
-    <v-progress-linear v-if="policy.loading" indeterminate color="primary" class="mb-3" />
-
-    <v-card v-if="!policy.rows.length && !policy.loading" variant="outlined">
-      <EmptyState
-        icon="mdi-account-group-outline"
-        title="还没有群列表"
-        :description="
-          bots.currentAccountId
-            ? '账号连上后，点「同步群列表」就能逐群设置是否允许聊天。'
-            : '先添加并连接一个 QQ 账号。'
-        "
-      >
-        <v-btn
-          v-if="bots.currentAccountId"
-          color="primary"
-          variant="tonal"
-          prepend-icon="mdi-refresh"
-          :loading="policy.refreshing"
-          @click="onRefreshGroups"
-        >
-          同步群列表
-        </v-btn>
-        <v-btn v-else color="primary" variant="tonal" prepend-icon="mdi-plus" @click="router.push('/bots')">
-          去添加账号
-        </v-btn>
-      </EmptyState>
-    </v-card>
-
-    <v-card v-else variant="outlined">
-      <v-list density="compact" lines="two">
-        <v-list-item
-          v-for="row in policy.filtered"
-          :key="row.group_id"
-          :class="{ 'policy-row--muted': isMuted(row) }"
-        >
-          <template #prepend>
-            <v-icon
-              :icon="row.enabled ? 'mdi-check-circle-outline' : 'mdi-pause-circle-outline'"
-              :color="isMuted(row) ? 'warning' : row.enabled ? 'success' : 'grey'"
+        <v-card variant="outlined" class="mb-3">
+          <v-card-text class="d-flex align-center flex-wrap gap-3">
+            <v-text-field
+              v-model="policy.search"
+              placeholder="搜索群名 / 群号"
+              density="compact"
+              variant="outlined"
+              hide-details
+              clearable
+              prepend-inner-icon="mdi-magnify"
+              style="max-width: 320px"
             />
-          </template>
-          <v-list-item-title class="d-flex align-center flex-wrap gap-2">
-            <span>{{ row.name }}</span>
-            <v-chip size="x-small" variant="text">{{ row.group_id }}</v-chip>
-            <v-chip v-if="row.member_count" size="x-small" variant="text">{{ row.member_count }} 人</v-chip>
-            <v-chip v-if="!row.in_group" size="x-small" color="warning" variant="tonal">已退群</v-chip>
-            <v-chip v-if="isMuted(row)" size="x-small" color="warning" variant="tonal">
-              静音至 {{ mutedText(row) }}
+            <v-select
+              :model-value="sceneDefault"
+              :items="SCENE_ITEMS"
+              label="账号默认（群聊）"
+              density="compact"
+              variant="outlined"
+              hide-details
+              style="max-width: 200px"
+              :loading="policy.savingScene"
+              :disabled="!bots.currentAccountId || policy.savingScene"
+              @update:model-value="(v: SceneValue) => onSceneDefault(v)"
+            />
+            <v-chip size="small" variant="tonal">允许 {{ policy.allowedCount }} 个</v-chip>
+            <v-chip v-if="policy.mutedCount" size="small" variant="tonal" color="warning">
+              静音中 {{ policy.mutedCount }} 个
             </v-chip>
-            <v-chip
-              v-else-if="row.overridden_keys.length"
-              size="x-small"
-              color="info"
+            <v-spacer />
+            <v-btn
+              size="small"
               variant="tonal"
+              color="success"
+              :disabled="!policy.rows.length || policy.saving !== null"
+              @click="onBulk(true)"
             >
-              高级规则 {{ row.overridden_keys.length }} 项
-            </v-chip>
-          </v-list-item-title>
-          <v-list-item-subtitle>
-            {{ row.enabled_source === 'muted' ? '静音中' : row.enabled_source === 'channel' ? '按本群设置' : '继承账号默认' }}
-          </v-list-item-subtitle>
-          <template #append>
-            <div class="d-flex align-center gap-2">
-              <v-select
-                :model-value="policy.switchValueOf(row)"
-                :items="SWITCH_ITEMS"
-                density="compact"
-                variant="outlined"
-                hide-details
-                style="max-width: 120px"
-                :loading="policy.saving === row.group_id"
-                :disabled="policy.saving !== null"
-                @update:model-value="(v: SwitchValue) => onSwitch(row, v)"
-              />
-              <v-menu location="bottom end">
-                <template #activator="{ props }">
-                  <v-btn v-bind="props" icon="mdi-dots-vertical" variant="text" size="small" />
-                </template>
-                <v-list density="compact">
-                  <v-list-item v-if="isMuted(row)" prepend-icon="mdi-bell-off-outline" @click="onMute(row, 0)">
-                    取消静音
-                  </v-list-item>
-                  <template v-else>
-                    <v-list-item prepend-icon="mdi-bell-sleep-outline" @click="onMute(row, 60)">
-                      静音 1 小时
-                    </v-list-item>
-                    <v-list-item prepend-icon="mdi-bell-sleep-outline" @click="onMute(row, 1440)">
-                      静音 24 小时
-                    </v-list-item>
-                  </template>
-                  <v-list-item prepend-icon="mdi-undo-variant" @click="onRestore(row)">
-                    恢复继承
-                  </v-list-item>
-                  <v-list-item
-                    prepend-icon="mdi-tune"
-                    @click="openRules(row.group_id, `高级规则 · ${row.name}`)"
-                  >
-                    本群高级规则
-                  </v-list-item>
-                </v-list>
-              </v-menu>
+              全部允许
+            </v-btn>
+            <v-btn
+              size="small"
+              variant="tonal"
+              color="error"
+              :disabled="!policy.rows.length || policy.saving !== null"
+              @click="onBulk(false)"
+            >
+              全部关闭
+            </v-btn>
+          </v-card-text>
+        </v-card>
+
+        <v-progress-linear v-if="policy.loading" indeterminate color="primary" class="mb-3" />
+
+        <v-card v-if="!policy.rows.length && !policy.loading" variant="outlined">
+          <EmptyState
+            icon="mdi-account-group-outline"
+            title="还没有群列表"
+            :description="
+              bots.currentAccountId
+                ? '账号连上后，点「同步群列表」就能逐群设置是否允许聊天。'
+                : '先添加并连接一个 QQ 账号。'
+            "
+          >
+            <v-btn
+              v-if="bots.currentAccountId"
+              color="primary"
+              variant="tonal"
+              prepend-icon="mdi-refresh"
+              :loading="policy.refreshing"
+              @click="onRefreshGroups"
+            >
+              同步群列表
+            </v-btn>
+            <v-btn v-else color="primary" variant="tonal" prepend-icon="mdi-plus" @click="router.push('/bots')">
+              去添加账号
+            </v-btn>
+          </EmptyState>
+        </v-card>
+
+        <v-card v-else variant="outlined">
+          <v-list density="compact" lines="two">
+            <v-list-item
+              v-for="row in policy.filtered"
+              :key="row.group_id"
+              :class="{ 'policy-row--muted': isMuted(row) }"
+            >
+              <template #prepend>
+                <v-icon
+                  :icon="row.enabled ? 'mdi-check-circle-outline' : 'mdi-pause-circle-outline'"
+                  :color="isMuted(row) ? 'warning' : row.enabled ? 'success' : 'grey'"
+                />
+              </template>
+              <v-list-item-title class="d-flex align-center flex-wrap gap-2">
+                <span>{{ row.name }}</span>
+                <v-chip size="x-small" variant="text">{{ row.group_id }}</v-chip>
+                <v-chip v-if="row.member_count" size="x-small" variant="text">{{ row.member_count }} 人</v-chip>
+                <v-chip v-if="!row.in_group" size="x-small" color="warning" variant="tonal">已退群</v-chip>
+                <v-chip v-if="isMuted(row)" size="x-small" color="warning" variant="tonal">
+                  静音至 {{ mutedText(row) }}
+                </v-chip>
+                <v-chip
+                  v-else-if="row.overridden_keys.length"
+                  size="x-small"
+                  color="info"
+                  variant="tonal"
+                >
+                  高级规则 {{ row.overridden_keys.length }} 项
+                </v-chip>
+              </v-list-item-title>
+              <v-list-item-subtitle>
+                {{ row.enabled_source === 'muted' ? '静音中' : row.enabled_source === 'channel' ? '按本群设置' : '继承账号默认' }}
+              </v-list-item-subtitle>
+              <template #append>
+                <div class="d-flex align-center gap-2">
+                  <v-select
+                    :model-value="policy.switchValueOf(row)"
+                    :items="SWITCH_ITEMS"
+                    density="compact"
+                    variant="outlined"
+                    hide-details
+                    style="max-width: 120px"
+                    :loading="policy.saving === row.group_id"
+                    :disabled="policy.saving !== null"
+                    @update:model-value="(v: SwitchValue) => onSwitch(row, v)"
+                  />
+                  <v-menu location="bottom end">
+                    <template #activator="{ props }">
+                      <v-btn v-bind="props" icon="mdi-dots-vertical" variant="text" size="small" />
+                    </template>
+                    <v-list density="compact">
+                      <v-list-item v-if="isMuted(row)" prepend-icon="mdi-bell-off-outline" @click="onMute(row, 0)">
+                        取消静音
+                      </v-list-item>
+                      <template v-else>
+                        <v-list-item prepend-icon="mdi-bell-sleep-outline" @click="onMute(row, 60)">
+                          静音 1 小时
+                        </v-list-item>
+                        <v-list-item prepend-icon="mdi-bell-sleep-outline" @click="onMute(row, 1440)">
+                          静音 24 小时
+                        </v-list-item>
+                      </template>
+                      <v-list-item prepend-icon="mdi-undo-variant" @click="onRestore(row)">
+                        恢复继承
+                      </v-list-item>
+                      <v-list-item
+                        prepend-icon="mdi-tune"
+                        @click="openRules(row.group_id, `高级规则 · ${row.name}`)"
+                      >
+                        本群高级规则
+                      </v-list-item>
+                    </v-list>
+                  </v-menu>
+                </div>
+              </template>
+            </v-list-item>
+          </v-list>
+        </v-card>
+
+        <div v-if="policy.rows.length" class="text-caption mt-3" style="opacity: 0.6">
+          群列表来自账号在线时的一次同步；离线时显示上次结果，可能不是最新。
+        </div>
+      </v-window-item>
+
+      <v-window-item value="who">
+        <ReplyPermissionPanel />
+      </v-window-item>
+
+      <v-window-item value="rules">
+        <v-card variant="outlined">
+          <v-card-title class="d-flex align-center">
+            <v-icon icon="mdi-tune" class="mr-2" color="primary" /> 高级规则
+          </v-card-title>
+          <v-card-text>
+            <div class="text-body-2 mb-3">
+              触发方式、回复冷却、免打扰时段与用户例外，按「账号默认」和「单个群」两层设置；
+              不填的项沿用上一层。
             </div>
-          </template>
-        </v-list-item>
-      </v-list>
-    </v-card>
+            <v-btn
+              color="primary"
+              variant="tonal"
+              prepend-icon="mdi-cog-outline"
+              :disabled="!bots.currentAccountId"
+              @click="openRules(null, '账号默认规则')"
+            >
+              账号默认规则
+            </v-btn>
+            <div class="text-caption mt-3" style="opacity: 0.6">
+              单个群的规则从「群与私聊」列表每行右侧菜单打开。
+            </div>
+          </v-card-text>
+        </v-card>
+      </v-window-item>
+    </v-window>
 
     <PolicyRulesDialog v-model="rulesDialog" :channel-id="rulesChannel" :title="rulesTitle" />
-
-    <div v-if="policy.rows.length" class="text-caption mt-3" style="opacity: 0.6">
-      群列表来自账号在线时的一次同步；离线时显示上次结果，可能不是最新。
-    </div>
   </div>
 </template>
 

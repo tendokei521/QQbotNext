@@ -1,0 +1,169 @@
+<script setup lang="ts">
+/**
+ * 「谁能回复」面板：把原来的权限管理字段（响应权限 / 拥有者 / 管理者 / 高危工具审批）
+ * 收进「回复与权限」页。
+ *
+ * 字段分组清单来自 `src/agent/ai-panel.json::reply.groups`（由 scripts/gen_sections.py 生成），
+ * 每个字段的 label / description / options 来自后端 `/api/agent/config` 返回的 schema：
+ * 这里只负责分组展示与保存，不复制第二套字段定义。
+ */
+import { computed, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import panelConfig from '@/agent/ai-panel.json'
+import { useAgentConfigStore } from '@/stores/agentConfig'
+import { useBotsStore } from '@/stores/bots'
+import EmptyState from '@/components/EmptyState.vue'
+import FieldControl from '@/components/config/FieldControl.vue'
+import StringListWidget from '@/components/config/StringListWidget.vue'
+
+interface ReplyGroup {
+  id: string
+  label: string
+  icon: string
+  fields: string[]
+}
+
+const router = useRouter()
+const bots = useBotsStore()
+const agent = useAgentConfigStore()
+
+const replyGroups = (panelConfig as { reply?: { groups?: ReplyGroup[] } }).reply?.groups || []
+
+/** 只渲染当前后端 schema 里真的存在的字段：旧版本缺字段时给说明，而不是留一张空卡片 */
+const availableGroups = computed(() =>
+  replyGroups
+    .map((group) => ({
+      ...group,
+      fields: group.fields.filter((key) => Boolean(agent.schema[key])),
+    }))
+    .filter((group) => group.fields.length > 0),
+)
+
+/** 保存状态：与 AI 对话面板使用同一套自动保存，这里只展示结果 */
+const saveState = computed(() => {
+  if (agent.loading) return { text: '加载中…', color: 'info' }
+  switch (agent.saveStatus) {
+    case 'saving':
+      return { text: '保存中…', color: 'info' }
+    case 'dirty':
+      return { text: '未保存', color: 'warning' }
+    case 'error':
+      return { text: '保存失败', color: 'error' }
+    case 'blocked':
+      return { text: '无账号·不保存', color: 'grey' }
+    default:
+      return { text: '已保存', color: 'success' }
+  }
+})
+
+function schemaOf(key: string): Record<string, any> {
+  return (agent.schema[key] || {}) as Record<string, any>
+}
+
+function isStringList(key: string): boolean {
+  return String(schemaOf(key).type || '').toLowerCase() === 'string_list'
+}
+
+function valueOf(key: string): any {
+  const value = agent.draft[key]
+  return value !== undefined ? value : schemaOf(key).default
+}
+
+onMounted(() => {
+  void agent.load()
+})
+
+// 切账号：强制重载（旧账号的草稿由 store 的 flush 先落盘），避免这里显示上一个账号的权限
+watch(
+  () => bots.currentAccountId,
+  () => {
+    void agent.load(true)
+  },
+)
+</script>
+
+<template>
+  <div>
+    <div class="d-flex align-center flex-wrap gap-2 mb-3">
+      <span class="text-body-2">按账号生效：谁能触发回复、高危工具是否需要审批。修改后自动保存。</span>
+      <v-spacer />
+      <v-chip size="small" :color="saveState.color" variant="tonal">{{ saveState.text }}</v-chip>
+    </div>
+
+    <v-alert v-if="agent.loadError" type="warning" variant="tonal" density="compact" class="mb-3">
+      <div class="d-flex align-center flex-wrap gap-2">
+        <span class="text-caption">这些设置读取失败：{{ agent.loadError }}</span>
+        <v-btn size="small" variant="text" prepend-icon="mdi-refresh" @click="agent.load(true)">重试</v-btn>
+      </div>
+    </v-alert>
+
+    <v-card v-if="!bots.currentAccountId" variant="outlined">
+      <EmptyState
+        icon="mdi-account-key-outline"
+        title="还没有账号"
+        description="先添加一个 QQ 账号，再决定谁能让它回复。"
+      >
+        <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="router.push('/bots')">
+          去添加账号
+        </v-btn>
+      </EmptyState>
+    </v-card>
+
+    <template v-else>
+      <v-card v-for="group in availableGroups" :key="group.id" variant="outlined" class="mb-3">
+        <v-card-title class="d-flex align-center">
+          <v-icon :icon="group.icon" class="mr-2" color="primary" />
+          {{ group.label }}
+        </v-card-title>
+        <v-card-text>
+          <div v-for="key in group.fields" :key="key" class="reply-field">
+            <template v-if="isStringList(key)">
+              <div class="reply-field-label">{{ schemaOf(key).label || key }}</div>
+              <div v-if="schemaOf(key).description" class="reply-field-desc">
+                {{ schemaOf(key).description }}
+              </div>
+              <StringListWidget
+                :model-value="(valueOf(key) as string[]) || []"
+                @update:model-value="(v: string[]) => agent.onChange(key, v)"
+              />
+            </template>
+            <FieldControl
+              v-else
+              :field-key="key"
+              :schema="schemaOf(key)"
+              :value="valueOf(key)"
+              :bot-id="bots.currentAccountId"
+              @update="(v: any) => agent.onChange(key, v)"
+            />
+          </div>
+        </v-card-text>
+      </v-card>
+
+      <v-card v-if="!availableGroups.length && !agent.loading" variant="outlined">
+        <EmptyState
+          icon="mdi-form-select"
+          title="没有可调整的项"
+          description="当前版本没有提供回复权限相关的设置。"
+        />
+      </v-card>
+    </template>
+  </div>
+</template>
+
+<style scoped>
+.reply-field + .reply-field {
+  margin-top: 14px;
+}
+
+.reply-field-label {
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.reply-field-desc {
+  font-size: 12px;
+  color: rgba(var(--v-theme-on-surface), 0.55);
+  line-height: 1.5;
+  margin-bottom: 4px;
+}
+</style>
