@@ -48,51 +48,14 @@ ROOT_PY_MAX_LINES = 100
 
 #: 迁移棘轮：{插件: {根级实现文件: 迁移前起行数}}——迁进 src/ 后从这里删掉
 BASELINE_ROOT_MODULES: dict[str, dict[str, int]] = {
-    "llm_assembly": {"service.py": 54},
-    "llm_context": {
-        "context_summary.py": 460,
-        "context_tools.py": 601,
-        "focus.py": 248,
-        "referent.py": 313,
-        "service.py": 112,
-    },
-    "llm_memory": {
-        "commands.py": 191,
-        "detect.py": 64,
-        "extract.py": 144,
-        "manager.py": 561,
-        "recall.py": 216,
-        "schemas.py": 111,
-        "service.py": 146,
-        "store.py": 634,
-        "tool.py": 255,
-    },
-    "llm_message_meta": {"service.py": 290},
-    "llm_output": {"service.py": 91},
-    "llm_proactive": {"entry.py": 101, "manager.py": 536, "service.py": 20, "stream.py": 186},
-    "llm_schedule": {"schedule_tool.py": 193, "scheduler.py": 748, "service.py": 40},
-    "llm_tools_extra": {"mcp.py": 270, "service.py": 79},
 }
 #: 迁移棘轮：还没有 `__init__.py` 的插件
-BASELINE_MISSING_INIT: set[str] = {"llm_message_meta"}
+BASELINE_MISSING_INIT: set[str] = set()
 #: 迁移棘轮：非 src/pages 的实现子目录
-BASELINE_EXTRA_DIRS: dict[str, set[str]] = {"llm_tools_extra": {"onebot"}}
+BASELINE_EXTRA_DIRS: dict[str, set[str]] = {}
 
 #: 插件内部绝对导入（应当改相对导入）：{插件: {文件: 行数上限}}
 BASELINE_ABSOLUTE_IMPORTS: dict[str, dict[str, int]] = {
-    "llm_context": {"context_tools.py": 1, "referent.py": 1, "service.py": 2},
-    "llm_memory": {
-        "__init__.py": 2,
-        "commands.py": 2,
-        "main.py": 2,
-        "manager.py": 3,
-        "recall.py": 1,
-        "service.py": 2,
-        "tool.py": 1,
-    },
-    "llm_proactive": {"manager.py": 1, "service.py": 1},
-    "llm_schedule": {"main.py": 1, "service.py": 2},
-    "llm_tools_extra": {"main.py": 2, "service.py": 1},
 }
 
 _ABS_IMPORT = re.compile(r"^\s*from\s+app\.plugins\.(?P<plugin>[A-Za-z0-9_]+)\.(?P<rest>[A-Za-z0-9_.]+)\s+import")
@@ -283,8 +246,11 @@ def plan_moves(root: Path | None = None, only: set[str] | None = None) -> list[M
 def _rewrite_plugin_imports(plugin_dir: Path, moved_stems: set[str]) -> list[str]:
     """把「被移动模块」的 import 改到新位置；按文件位置决定相对前缀。
 
-    - 插件根文件：`.mod` → `.src.mod`，`app.plugins.X.mod` → `.src.mod`
-    - src/ 内文件：`app.plugins.X.mod` → `.mod`（同目录兄弟），`.mod` 保持不变
+    覆盖四种写法：
+    - `from .<mod> import ...`（插件根 → `.src.<mod>`；src 内不变）
+    - `from app.plugins.X.<mod> import ...`（根 → `.src.<mod>`；src 内 → `.<mod>`）
+    - `from app.plugins.X import <mod>`（根 → `from .src import <mod>`；src 内 → `from . import <mod>`）
+    - `import app.plugins.X.<mod> as alias`（根 → `from .src import <mod> as alias`；src 内 → `from . import <mod> as alias`）
     """
     changed: list[str] = []
     plugin_name = plugin_dir.name
@@ -294,32 +260,69 @@ def _rewrite_plugin_imports(plugin_dir: Path, moved_stems: set[str]) -> list[str
         in_src = src_dir in f.parents
         new = text
         for stem in moved_stems:
+            esc = re.escape(stem)
             if in_src:
-                # src/ 内部：绝对自引用 → 相对兄弟模块
                 new = re.sub(
-                    rf"^(\s*from\s+)app\.plugins\.{re.escape(plugin_name)}\.{re.escape(stem)}\b",
+                    rf"^(\s*from\s+)app\.plugins\.{re.escape(plugin_name)}\.{esc}\b",
                     rf"\1.{stem}",
                     new,
                     flags=re.M,
                 )
             else:
-                # 插件根：两种写法都改成 .src.<mod>
+                new = re.sub(rf"^(\s*from\s+)\.{esc}\b", rf"\1.src.{stem}", new, flags=re.M)
                 new = re.sub(
-                    rf"^(\s*from\s+)\.{re.escape(stem)}\b",
+                    rf"^(\s*from\s+)app\.plugins\.{re.escape(plugin_name)}\.{esc}\b",
                     rf"\1.src.{stem}",
                     new,
                     flags=re.M,
                 )
-                new = re.sub(
-                    rf"^(\s*from\s+)app\.plugins\.{re.escape(plugin_name)}\.{re.escape(stem)}\b",
-                    rf"\1.src.{stem}",
-                    new,
-                    flags=re.M,
-                )
+        # `from app.plugins.X import a, b`：仅当名字全是被移动模块时改写
+        def _pkg(match: re.Match, in_src: bool = in_src) -> str:
+            names = [n.strip() for n in match.group("names").split(",")]
+            if not names or any(n not in moved_stems for n in names):
+                return match.group(0)
+            head = "." if in_src else ".src"
+            return f"{match.group('lead')}from {head} import {match.group('names')}"
+
+        new = re.sub(
+            rf"^(?P<lead>\s*)from\s+app\.plugins\.{re.escape(plugin_name)}\s+import\s+(?P<names>[A-Za-z0-9_, ]+)$",
+            _pkg,
+            new,
+            flags=re.M,
+        )
+        # `import app.plugins.X.mod as alias`
+        for stem in moved_stems:
+            esc = re.escape(stem)
+            head = "." if in_src else ".src"
+            new = re.sub(
+                rf"^(\s*)import\s+app\.plugins\.{re.escape(plugin_name)}\.{esc}\s+as\s+([A-Za-z0-9_]+)",
+                rf"\1from {head} import {stem} as \2",
+                new,
+                flags=re.M,
+            )
         if new != text:
             f.write_text(new, encoding="utf-8", newline="\n")
             changed.append(f.relative_to(plugin_dir).as_posix())
     return changed
+
+
+def _rewrite_cross_plugin_refs(moves: list[Move]) -> list[str]:
+    """改写「其它插件 / 框架代码」里对被移动模块的绝对引用（跨插件依赖保持绝对路径，只换位置）。"""
+    changed: list[str] = []
+    for move in moves:
+        stem = move.source[:-3]
+        old = f"app.plugins.{move.plugin}.{stem}"
+        new = f"app.plugins.{move.plugin}.src.{stem}"
+        for base in (ROOT / "app",):
+            for f in base.rglob("*.py"):
+                if f.parts and "src" in f.parts and f.parent.name == move.plugin:
+                    continue  # 本插件内部已由 _rewrite_plugin_imports 处理
+                text = f.read_text(encoding="utf-8", errors="ignore")
+                if old not in text:
+                    continue
+                f.write_text(text.replace(old, new), encoding="utf-8", newline="\n")
+                changed.append(f.relative_to(ROOT).as_posix())
+    return sorted(set(changed))
 
 
 def _rewrite_test_imports(moves: list[Move]) -> list[str]:
@@ -334,6 +337,19 @@ def _rewrite_test_imports(moves: list[Move]) -> list[str]:
             new = new.replace(
                 f"app.plugins.{move.plugin}.{stem}",
                 f"app.plugins.{move.plugin}.src.{stem}",
+            )
+            # 包式导入：`from app.plugins.X import mod` → `from app.plugins.X.src import mod`
+            def _pkg_test(match: re.Match, stem: str = stem, plugin: str = move.plugin) -> str:
+                names = [n.strip() for n in match.group("names").split(",")]
+                if stem not in names:
+                    return match.group(0)
+                return f"from app.plugins.{plugin}.src import {match.group('names')}"
+
+            new = re.sub(
+                rf"^\s*from\s+app\.plugins\.{re.escape(move.plugin)}\s+import\s+(?P<names>[A-Za-z0-9_, ]+)$",
+                _pkg_test,
+                new,
+                flags=re.M,
             )
         if new != text:
             f.write_text(new, encoding="utf-8", newline="\n")
@@ -359,6 +375,7 @@ def apply_moves(root: Path | None = None, *, dry_run: bool = True, only: set[str
     for plugin_name in sorted({m.plugin for m in moves}):
         stems = {Path(m.source).stem for m in moves if m.plugin == plugin_name}
         report["changed"].extend(_rewrite_plugin_imports(root / plugin_name, stems))
+    report["changed"].extend(_rewrite_cross_plugin_refs(moves))
     report["changed"].extend(_rewrite_test_imports(moves))
     report["changed"] = sorted(set(report["changed"]))
     return report
