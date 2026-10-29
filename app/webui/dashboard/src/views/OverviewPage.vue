@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useBotsStore, displayName, resolveAccount, resolvedBotId, type BotStatus } from '@/stores/bots'
+import { useBotsStore, displayTitle, resolveAccount, type BotStatus } from '@/stores/bots'
 import { useModulesStore } from '@/stores/modules'
 import { useLogsStore } from '@/stores/logs'
 import { useWebuiStore } from '@/stores/webui'
 import { useNotifyStore } from '@/stores/notify'
 import { useReadinessStore } from '@/stores/readiness'
 import { errorMessage } from '@/api/http'
-import { cleanLogMessage, cleanLogTimestamp } from '@/utils/log'
+import { cleanLogMessage, cleanLogTimestamp, isTechnicalLog } from '@/utils/log'
 import EmptyState from '@/components/EmptyState.vue'
 import ReadinessCard from '@/components/readiness/ReadinessCard.vue'
 import EventMonitorDialog from '@/components/bots/EventMonitorDialog.vue'
@@ -22,15 +22,20 @@ const readiness = useReadinessStore()
 const router = useRouter()
 
 const refreshing = ref(false)
-const connecting = ref(false)
 
 // 诊断台：针对某个账号看协议端事件、发测试消息
 const monitorOpen = ref(false)
 const monitorAccount = ref<{ id: string; name: string } | null>(null)
 
-function openMonitor(bot: { id: string }) {
-  monitorAccount.value = { id: bot.id, name: displayName(bot as any) }
+function openMonitor(bot: { id: string; name?: string }) {
+  monitorAccount.value = { id: bot.id, name: displayTitle(bot as any) }
   monitorOpen.value = true
+}
+
+/** 账号行点进「账号管理」并高亮这个账号；连接/断开只在那里操作 */
+function openAccount(accountId: string) {
+  bots.selectBot(accountId)
+  router.push({ path: '/bots', query: { highlight: accountId } })
 }
 
 const STATUS_TEXT: Record<BotStatus, string> = {
@@ -55,7 +60,16 @@ function isSimpleLog(row: { level: string; message: string }) {
   return true
 }
 
-const previewLogs = computed(() => logs.filtered.filter(isSimpleLog).slice(-12).reverse())
+// 总览只展示「机器人做了什么」：启动地址/鉴权/预加载这类技术行交给日志页。
+// isTechnicalLog 的提示词按清理后的正文匹配（原始行还带 [Main] 等前缀）；
+// warning/error 永不隐藏——真出问题不会被吞。规则只在 utils/log.ts 维护一份。
+function isOverviewTechnical(row: { level: string; message: string }): boolean {
+  return isTechnicalLog(row.level, cleanLogMessage(row.message))
+}
+
+const previewLogs = computed(() =>
+  logs.filtered.filter((row) => isSimpleLog(row) && !isOverviewTechnical(row)).slice(-12).reverse(),
+)
 
 const pinnedModules = computed(() =>
   modules.list
@@ -83,24 +97,6 @@ async function refreshAll() {
     notify.push(errorMessage(err), 'error')
   } finally {
     refreshing.value = false
-  }
-}
-
-async function connectCurrent() {
-  if (connecting.value) return
-  if (bots.currentId === null) {
-    notify.push('请先选择账号', 'warning')
-    return
-  }
-  connecting.value = true
-  try {
-    await bots.connect(bots.currentId)
-    notify.push('已发送连接请求', 'success')
-    await Promise.all([bots.fetchBots(), readiness.load()])
-  } catch (err) {
-    notify.push(errorMessage(err), 'error')
-  } finally {
-    connecting.value = false
   }
 }
 
@@ -174,12 +170,17 @@ onMounted(() => {
                 <v-btn size="small" color="primary" variant="tonal" to="/bots">去添加账号</v-btn>
               </EmptyState>
               <v-list v-else density="compact" class="bg-transparent">
-                <v-list-item v-for="b in bots.bots" :key="b.id" class="bot-row">
+                <v-list-item
+                  v-for="b in bots.bots"
+                  :key="b.id"
+                  class="bot-row"
+                  @click="openAccount(b.id)"
+                >
                   <template #prepend>
                     <v-icon :icon="b.status === 'connected' ? 'mdi-check-circle' : 'mdi-alert-circle'" :color="statusColor(b.status)" size="small" />
                   </template>
                   <v-list-item-title>
-                    {{ displayName(b) }}{{ resolvedBotId(b) ? ` · QQ ${resolvedBotId(b)}` : '' }}
+                    {{ displayTitle(b) }}
                   </v-list-item-title>
                   <v-list-item-subtitle>
                     {{ resolveAccount(b)?.nickname || (b.last_error ? b.last_error : '尚未连接') }}
@@ -200,10 +201,7 @@ onMounted(() => {
               </v-list>
             </v-card-text>
             <v-card-actions>
-              <v-btn v-if="bots.currentId !== null && bots.currentBot?.status !== 'connected'" color="primary" variant="tonal" prepend-icon="mdi-plug" size="small" :loading="connecting" :disabled="connecting" @click="connectCurrent">
-                连接当前账号
-              </v-btn>
-              <v-btn variant="text" size="small" to="/bots">管理账号 →</v-btn>
+              <v-btn variant="text" size="small" to="/bots">去账号管理 →</v-btn>
             </v-card-actions>
           </v-card>
         </v-col>
@@ -248,10 +246,17 @@ onMounted(() => {
             <v-card-title>
               <v-icon icon="mdi-console" class="mr-2" color="primary" /> 最近日志
               <v-spacer />
-              <v-btn variant="text" size="small" @click="logs.clear()">清空</v-btn>
+              <v-btn variant="text" size="small" append-icon="mdi-arrow-right" to="/logs">查看全部日志</v-btn>
             </v-card-title>
             <v-card-text class="log-preview">
-              <EmptyState v-if="previewLogs.length === 0" icon="mdi-text-box-outline" title="暂无日志" description="机器人运行时的动态会显示在这里" />
+              <EmptyState
+                v-if="previewLogs.length === 0"
+                icon="mdi-text-box-outline"
+                title="暂无需要关注的日志"
+                description="机器人运行时的动态会显示在这里"
+              >
+                <v-btn size="small" variant="tonal" to="/logs">查看全部日志</v-btn>
+              </EmptyState>
               <div v-for="(row, i) in previewLogs" :key="`${row.timestamp}-${i}`" class="log-row">
                 <span class="log-time">{{ cleanLogTimestamp(row.timestamp) }}</span>
                 <span class="log-level" :class="`log-level-${row.level}`">{{ row.level.toUpperCase() }}</span>
@@ -298,6 +303,11 @@ onMounted(() => {
 
 .bot-row {
   border-radius: 10px;
+  cursor: pointer;
+}
+
+.bot-row:hover {
+  background: rgba(var(--v-theme-on-surface), 0.04);
 }
 
 .module-grid {

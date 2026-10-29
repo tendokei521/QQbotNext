@@ -99,9 +99,26 @@ export function resolvedBotId(bot: BotData): number | null {
   return Number.isNaN(id) || id <= 0 ? null : id
 }
 
-/** 卡片/下拉里显示的名字（id 不给用户看） */
+/**
+ * 卡片/下拉里显示的名字：用户起的名字优先，其次昵称，再退到 QQ 号；
+ * 什么都没有时显示「未命名账号」——不把内部标识当名字给用户看。
+ */
 export function displayName(bot: BotData): string {
-  return bot.name || bot.id
+  const name = String(bot.name ?? '').trim()
+  if (name) return name
+  const nickname = String(resolveAccount(bot)?.nickname ?? '').trim()
+  if (nickname) return nickname
+  const qq = resolvedBotId(bot)
+  if (qq) return `QQ ${qq}`
+  return '未命名账号'
+}
+
+/** 标题文案：名字里已经带了 QQ 号就不再重复拼「· QQ xxx」 */
+export function displayTitle(bot: BotData): string {
+  const name = displayName(bot)
+  const qq = resolvedBotId(bot)
+  if (!qq || name.includes(String(qq))) return name
+  return `${name} · QQ ${qq}`
 }
 
 /** 账号（Bot）状态中心：列表 / 当前选中 / 连接控制 / WS 实时状态同步 */

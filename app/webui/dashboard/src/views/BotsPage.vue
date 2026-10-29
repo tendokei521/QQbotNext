@@ -1,12 +1,17 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { useBotsStore, displayName, resolveAccount, resolvedBotId, type BotConfig, type BotConnMode, type BotData, type BotStatus } from '@/stores/bots'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import { useBotsStore, displayTitle, resolveAccount, resolvedBotId, type BotConfig, type BotConnMode, type BotData, type BotStatus } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
 import AddBotDialog from '@/components/bots/AddBotDialog.vue'
 import EventMonitorDialog from '@/components/bots/EventMonitorDialog.vue'
+import MultiGroupDialog from '@/components/MultiGroupDialog.vue'
+import SaveStatusBar from '@/components/common/SaveStatusBar.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 
+const route = useRoute()
 const bots = useBotsStore()
 const notify = useNotifyStore()
 
@@ -27,7 +32,7 @@ interface Draft {
   ws_url: string
   access_token: string
   auto_connect: boolean
-  /** 连接方向在「添加账号」时选定，卡片上只读展示、不提供切换 */
+  /** 连接方向在创建时选定；卡片只展示，改方向走「设置向导」（见卡片里的连接详情） */
   conn_mode: BotConnMode
 }
 
@@ -37,32 +42,89 @@ type BotConfigPayload = Omit<BotConfig, 'owner_id'>
 // 编辑草稿：account_id -> 表单字段（id 不可变，所以用它当 key 而不是数组下标）
 const drafts = reactive<Record<string, Draft>>({})
 const saving = ref(false)
+const saveFailed = ref(false)
 const loadingCards = ref(false)
 const deleteTarget = ref<string | null>(null)
+const deleting = ref(false)
+const reloadConfirmOpen = ref(false)
 const addDialog = ref(false)
+const groupOpen = ref(false)
 const acting = reactive<Record<string, boolean>>({})
 /** 批量连接/断开：串行执行，按钮上显示进度，结束后汇总失败项 */
 const batchBusy = ref<'connect' | 'disconnect' | ''>('')
 const batchProgress = reactive({ done: 0, total: 0 })
-/** 有改动还没写回后端：页头提示，切页前自动补存一次 */
+/** 一次断开多个账号前先确认（会中断群里的自动回复） */
+const batchConfirmOpen = ref(false)
+const pendingDisconnectIds = ref<string[]>([])
+/** 有改动还没写回服务：页头状态条 + 卡片角标都靠它 */
 const dirty = ref(false)
+/** 保存基线：用于判断单张卡片是否还有未保存改动 */
+const baseline = reactive<Record<string, string>>({})
 const loadError = ref('')
+/** 「连接详情」展开状态：account_id -> 是否展开 */
+const detailOpen = reactive<Record<string, boolean>>({})
+/** 从总览跳进来要高亮的账号 */
+const highlightId = ref('')
+let highlightTimer: ReturnType<typeof setTimeout> | null = null
 /** 诊断台：看这个账号最近收到的协议端事件，定位「连上了但没反应」 */
 const diagOpen = ref(false)
 const diagAccountId = ref<string | null>(null)
 const diagAccountName = ref('')
-let saveTimer: ReturnType<typeof setTimeout> | null = null
 /** 正在进行中的保存：新的保存请求要串到它后面，而不是被 `if (saving) return false` 直接丢掉 */
 let saveInFlight: Promise<boolean> | null = null
 
+/** 保存状态：状态条与卡片角标共用 */
+const saveStatus = computed<'clean' | 'dirty' | 'saving' | 'error'>(() => {
+  if (saving.value) return 'saving'
+  if (saveFailed.value) return 'error'
+  return dirty.value ? 'dirty' : 'clean'
+})
+
+/** 删除账号的影响清单：比一句"不可撤销"更能让人看清自己在删什么 */
+const DELETE_DETAILS = [
+  '该账号的人格、模型与回复开关',
+  '该账号在功能插件里的启停状态',
+  '该账号的群级回复规则、已知群列表与群响应权',
+  '该账号的登录记录',
+]
+
+function draftSnapshot(id: string): string {
+  return JSON.stringify(drafts[id] ?? {})
+}
+
+/** 单张卡片是否有未保存改动 */
+function isCardDirty(id: string): boolean {
+  const draft = drafts[id]
+  if (!draft) return false
+  const saved = baseline[id]
+  return saved !== undefined && saved !== draftSnapshot(id)
+}
+
+function rememberBaseline() {
+  for (const id of Object.keys(drafts)) baseline[id] = draftSnapshot(id)
+  for (const id of Object.keys(baseline)) {
+    if (!drafts[id]) delete baseline[id]
+  }
+}
+
 function openDiagnostics(b: BotData) {
   diagAccountId.value = b.id
-  diagAccountName.value = displayName(b)
+  diagAccountName.value = displayTitle(b)
   diagOpen.value = true
 }
 
 function markDirty() {
   dirty.value = true
+  saveFailed.value = false
+}
+
+/** 卡片上的连接方式（只读）：改方向要进设置向导 */
+function connModeText(mode: BotConnMode): string {
+  return mode === 'reverse' ? '本地监听（协议端连进来）' : '向外连接（本机连出去）'
+}
+
+function toggleDetail(id: string) {
+  detailOpen[id] = !detailOpen[id]
 }
 
 function draftOf(id: string) {
@@ -135,13 +197,17 @@ async function loadCards() {
     for (const key of Object.keys(drafts)) {
       if (!seen.has(key)) delete drafts[key]
     }
+    rememberBaseline()
     dirty.value = false
+    saveFailed.value = false
   } catch (err) {
     // 失败要让人看见并能重试，不要把「加载失败」伪装成「没有账号」
     loadError.value = errorMessage(err)
     notify.push(loadError.value, 'error')
   } finally {
     loadingCards.value = false
+    // 卡片渲染完成后再滚动到目标账号（从总览跳进来的高亮）
+    if (highlightId.value) scrollToHighlight()
   }
 }
 
@@ -169,10 +235,13 @@ async function persistDrafts(showToast = true): Promise<boolean> {
     try {
       // 类型上 BotConfig 仍把 owner_id 标为必填，但后端允许缺省（沿用旧值），这里显式转换
       await bots.saveBotConfig(buildPayload() as unknown as BotConfig[])
+      rememberBaseline()
       dirty.value = false
+      saveFailed.value = false
       if (showToast) notify.push('配置已保存', 'success')
       return true
     } catch (err) {
+      saveFailed.value = true
       notify.push(errorMessage(err), 'error')
       return false
     } finally {
@@ -184,30 +253,25 @@ async function persistDrafts(showToast = true): Promise<boolean> {
   return task
 }
 
+/** 手动保存全部改动（顶部状态条上的按钮） */
 async function saveAll() {
-  // 取消挂起的自动保存，避免手动保存后 timer 再重复全量写一次
-  if (saveTimer) {
-    clearTimeout(saveTimer)
-    saveTimer = null
-  }
   if (await persistDrafts(true)) {
     await loadCards()
   }
 }
 
 /** 用户主动刷新/重试：有未保存改动时先确认，避免草稿被静默丢掉 */
-async function requestReload() {
-  if (dirty.value && !window.confirm('有未保存的修改，刷新会丢弃。继续？')) return
-  await loadCards()
+function requestReload() {
+  if (dirty.value) {
+    reloadConfirmOpen.value = true
+    return
+  }
+  void loadCards()
 }
 
-/** 输入框失焦后自动保存一次（防抖，避免连续切换输入框时重复提交） */
-function scheduleSave() {
-  if (saveTimer) clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => {
-    saveTimer = null
-    void persistDrafts(false)
-  }, 400)
+async function discardAndReload() {
+  reloadConfirmOpen.value = false
+  await loadCards()
 }
 
 /** 「添加账号」先弹选类型（正向 / 反向），选定后才创建（见 AddBotDialog） */
@@ -223,11 +287,7 @@ async function onBotCreated(accountId: string) {
 
 async function doDelete() {
   if (deleteTarget.value === null) return
-  // 立即取消挂起的自动保存，防止删除竞态把被删账号重新写回
-  if (saveTimer) {
-    clearTimeout(saveTimer)
-    saveTimer = null
-  }
+  deleting.value = true
   try {
     await bots.deleteBotConfig(deleteTarget.value)
     notify.push('账号已删除', 'success')
@@ -235,7 +295,10 @@ async function doDelete() {
     // loadCards 已同时拉取配置与状态，无需再单独 fetchBots
     await loadCards()
   } catch (err) {
+    // 失败时保留确认框，用户可以直接重试
     notify.push(errorMessage(err), 'error')
+  } finally {
+    deleting.value = false
   }
 }
 
@@ -274,7 +337,7 @@ function isLive(b: BotData): boolean {
 /** 批量连接/断开：逐个串行调用，失败不打断，最后汇总提示 */
 async function batchAct(kind: 'connect' | 'disconnect') {
   if (batchBusy.value) return
-  // 批量连接同样按「落盘后的配置」执行：先保存草稿，避免全部用到旧地址
+  // 批量操作同样按「保存后的配置」执行：先保存草稿，避免全部用到旧地址
   if (dirty.value) {
     const saved = await persistDrafts(false)
     if (!saved) {
@@ -287,20 +350,39 @@ async function batchAct(kind: 'connect' | 'disconnect') {
     notify.push(kind === 'connect' ? '所有账号都已经连接' : '所有账号都已经断开', 'info')
     return
   }
+  // 一次断开多个账号会同时中断这些号在群里的回复，先让用户确认
+  if (kind === 'disconnect' && targets.length > 1) {
+    pendingDisconnectIds.value = targets.map((b) => b.id)
+    batchConfirmOpen.value = true
+    return
+  }
+  await runBatch(kind, targets.map((b) => b.id))
+}
+
+/** 用户确认「全部断开」后真正执行 */
+async function confirmBatchDisconnect() {
+  batchConfirmOpen.value = false
+  const ids = pendingDisconnectIds.value
+  pendingDisconnectIds.value = []
+  await runBatch('disconnect', ids)
+}
+
+async function runBatch(kind: 'connect' | 'disconnect', ids: string[]) {
   const verb = kind === 'connect' ? '连接' : '断开'
   batchBusy.value = kind
-  batchProgress.total = targets.length
+  batchProgress.total = ids.length
   batchProgress.done = 0
   const failed: string[] = []
-  for (const b of targets) {
-    acting[b.id] = true
+  for (const id of ids) {
+    acting[id] = true
     try {
-      if (kind === 'connect') await bots.connect(b.id)
-      else await bots.disconnect(b.id)
+      if (kind === 'connect') await bots.connect(id)
+      else await bots.disconnect(id)
     } catch (err) {
-      failed.push(`${displayName(b)}：${errorMessage(err)}`)
+      const bot = bots.bots.find((b) => b.id === id)
+      failed.push(`${bot ? displayTitle(bot) : id}：${errorMessage(err)}`)
     } finally {
-      acting[b.id] = false
+      acting[id] = false
       batchProgress.done += 1
     }
   }
@@ -318,14 +400,40 @@ async function batchAct(kind: 'connect' | 'disconnect') {
   }
 }
 
+/** 从总览/就绪卡跳进来：把目标账号滚到视野内并短暂高亮 */
+function scrollToHighlight() {
+  if (!highlightId.value) return
+  window.setTimeout(() => {
+    const el = document.querySelector(`[data-account-id="${highlightId.value}"]`)
+    el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }, 120)
+}
+
+function applyHighlight(id: string) {
+  if (!id) return
+  highlightId.value = id
+  if (highlightTimer) clearTimeout(highlightTimer)
+  highlightTimer = setTimeout(() => {
+    highlightId.value = ''
+    highlightTimer = null
+  }, 3200)
+  scrollToHighlight()
+}
+
+watch(
+  () => route.query.highlight,
+  (value) => {
+    const id = typeof value === 'string' ? value : ''
+    if (id) applyHighlight(id)
+  },
+  { immediate: true },
+)
+
 onMounted(loadCards)
 onBeforeUnmount(() => {
-  // 切页前把挂起的自动保存补一次：否则最后 400ms 内的改动会丢
-  if (saveTimer) {
-    clearTimeout(saveTimer)
-    saveTimer = null
-  }
+  // 切页前把未保存改动补存一次：手动保存模式下也不该因为切页直接丢掉
   if (dirty.value) void persistDrafts(false)
+  if (highlightTimer) clearTimeout(highlightTimer)
 })
 </script>
 
@@ -336,41 +444,45 @@ onBeforeUnmount(() => {
         <h1 class="app-page-title">账号管理</h1>
         <div class="app-page-subtitle">添加并管理要接入的 QQ 账号</div>
       </div>
-      <div class="d-flex align-center gap-2">
-        <v-chip v-if="dirty" size="small" color="warning" variant="tonal">
-          <v-icon start size="x-small" icon="mdi-pencil-outline" /> 有未保存修改
-        </v-chip>
-        <v-btn variant="tonal" prepend-icon="mdi-refresh" :loading="loadingCards" @click="requestReload">刷新</v-btn>
+      <div class="d-flex align-center flex-wrap gap-2">
         <v-btn color="primary" prepend-icon="mdi-plus" @click="addBot">新增账号</v-btn>
-        <v-btn color="primary" variant="tonal" prepend-icon="mdi-content-save" :loading="saving" @click="saveAll">
-          保存所有配置
-        </v-btn>
       </div>
     </div>
 
-    <div v-if="bots.bots.length" class="d-flex align-center flex-wrap gap-2 mb-3">
+    <div v-if="bots.bots.length" class="bots-toolbar">
       <span class="text-caption text-medium-emphasis">
         共 {{ bots.bots.length }} 个账号，已连接 {{ bots.connectedCount }} 个
       </span>
-      <v-spacer />
-      <v-btn
-        size="small"
-        variant="tonal"
-        prepend-icon="mdi-plug"
-        :disabled="!!batchBusy"
-        @click="batchAct('connect')"
-      >
-        {{ batchBusy === 'connect' ? `连接中 ${batchProgress.done}/${batchProgress.total}` : '全部连接' }}
-      </v-btn>
-      <v-btn
-        size="small"
-        variant="tonal"
-        prepend-icon="mdi-unlink"
-        :disabled="!!batchBusy"
-        @click="batchAct('disconnect')"
-      >
-        {{ batchBusy === 'disconnect' ? `断开中 ${batchProgress.done}/${batchProgress.total}` : '全部断开' }}
-      </v-btn>
+      <div class="bots-toolbar__actions">
+        <SaveStatusBar
+          :status="saveStatus"
+          save-label="保存全部改动"
+          hint="改动暂存在本页，点保存后写入"
+          @save="saveAll"
+        />
+        <v-btn size="small" variant="tonal" icon="mdi-refresh" title="刷新账号列表" :loading="loadingCards" @click="requestReload" />
+        <v-btn size="small" variant="tonal" prepend-icon="mdi-layers-triple-outline" @click="groupOpen = true">
+          群与账号概览
+        </v-btn>
+        <v-btn
+          size="small"
+          variant="tonal"
+          prepend-icon="mdi-plug"
+          :disabled="!!batchBusy"
+          @click="batchAct('connect')"
+        >
+          {{ batchBusy === 'connect' ? `连接中 ${batchProgress.done}/${batchProgress.total}` : '全部连接' }}
+        </v-btn>
+        <v-btn
+          size="small"
+          variant="tonal"
+          prepend-icon="mdi-unlink"
+          :disabled="!!batchBusy"
+          @click="batchAct('disconnect')"
+        >
+          {{ batchBusy === 'disconnect' ? `断开中 ${batchProgress.done}/${batchProgress.total}` : '全部断开' }}
+        </v-btn>
+      </div>
     </div>
 
     <v-alert v-if="loadError" type="error" variant="tonal" class="mb-3">
@@ -395,15 +507,21 @@ onBeforeUnmount(() => {
 
     <v-row v-else>
       <v-col v-for="b in bots.bots" :key="b.id" cols="12" md="6" xl="4">
-        <v-card variant="outlined" class="bot-card app-card-fill">
+        <v-card
+          variant="outlined"
+          class="bot-card app-card-fill"
+          :class="{ 'bot-card--highlight': highlightId === b.id }"
+          :data-account-id="b.id"
+        >
           <v-card-item>
             <template #prepend>
               <v-avatar color="lightprimary" size="40" rounded="lg">
                 <v-icon icon="mdi-robot" color="primary" />
               </v-avatar>
             </template>
-            <v-card-title class="text-body-1 font-weight-bold app-line-clamp-1">
-              {{ displayName(b) }}<template v-if="resolvedBotId(b)"> · QQ {{ resolvedBotId(b) }}</template>
+            <v-card-title class="text-body-1 font-weight-bold d-flex align-center gap-2">
+              <span class="app-line-clamp-1">{{ displayTitle(b) }}</span>
+              <v-chip v-if="isCardDirty(b.id)" size="x-small" color="warning" variant="tonal">未保存</v-chip>
             </v-card-title>
             <v-card-subtitle class="d-flex align-center gap-2">
               <v-chip size="x-small" :color="statusChipColor(b)" variant="tonal">
@@ -435,7 +553,6 @@ onBeforeUnmount(() => {
               hide-details
               class="mb-3"
               @update:model-value="(v: string) => { draftOf(b.id).name = v; markDirty() }"
-              @blur="scheduleSave()"
             />
             <v-text-field
               :model-value="draftOf(b.id).ws_url"
@@ -445,7 +562,6 @@ onBeforeUnmount(() => {
               hide-details="auto"
               class="mb-3"
               @update:model-value="(v: string) => { draftOf(b.id).ws_url = v; markDirty() }"
-              @blur="scheduleSave()"
             >
               <template #append-inner>
                 <v-btn
@@ -495,7 +611,6 @@ onBeforeUnmount(() => {
               autocomplete="off"
               class="mb-3"
               @update:model-value="(v: string) => { draftOf(b.id).access_token = v; markDirty() }"
-              @blur="scheduleSave()"
             />
             <v-switch
               :model-value="draftOf(b.id).auto_connect"
@@ -504,31 +619,53 @@ onBeforeUnmount(() => {
               density="compact"
               hide-details
               @update:model-value="(v: boolean | null) => { draftOf(b.id).auto_connect = !!v; markDirty() }"
-              @change="scheduleSave()"
             />
             <v-divider class="my-3" />
-            <div class="info-grid">
-              <div>
-                <div class="info-label">当前 QQ</div>
-                <div class="info-value">
-                  <template v-if="resolvedBotId(b)">{{ resolvedBotId(b) }}</template>
-                  <template v-else>未连接</template>
-                  <span v-if="!b.bot_id && resolvedBotId(b)" class="info-hint">上次连接</span>
+            <v-btn
+              size="small"
+              variant="text"
+              color="primary"
+              class="px-0 mb-1"
+              :prepend-icon="detailOpen[b.id] ? 'mdi-chevron-up' : 'mdi-information-outline'"
+              @click="toggleDetail(b.id)"
+            >
+              连接详情
+            </v-btn>
+            <v-expand-transition>
+              <div v-if="detailOpen[b.id]" class="info-panel">
+                <div class="info-grid">
+                  <div>
+                    <div class="info-label">当前 QQ</div>
+                    <div class="info-value">
+                      <template v-if="resolvedBotId(b)">{{ resolvedBotId(b) }}</template>
+                      <template v-else>未连接</template>
+                      <span v-if="!b.bot_id && resolvedBotId(b)" class="info-hint">上次连接</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div class="info-label">账号标识</div>
+                    <div class="info-value">{{ b.id }}</div>
+                    <div class="info-note">内部标识，用来区分同名账号</div>
+                  </div>
+                  <div>
+                    <div class="info-label">连接方式</div>
+                    <div class="info-value">{{ connModeText(draftOf(b.id).conn_mode) }}</div>
+                  </div>
+                  <div v-if="draftOf(b.id).conn_mode === 'reverse'">
+                    <div class="info-label">监听</div>
+                    <div class="info-value">{{ b.listening ? '监听中' : '未监听' }}</div>
+                  </div>
+                  <div v-if="b.reconnect_attempts !== undefined">
+                    <div class="info-label">重连次数</div>
+                    <div class="info-value">{{ b.reconnect_attempts }}</div>
+                  </div>
+                </div>
+                <div class="conn-mode-hint">
+                  要改连接方式：到「设置向导」里修改，已有配置不会丢。
+                  <v-btn size="x-small" variant="text" color="primary" to="/setup?step=1">去设置向导</v-btn>
                 </div>
               </div>
-              <div>
-                <div class="info-label">账号标识</div>
-                <div class="info-value">{{ b.id }}</div>
-              </div>
-              <div v-if="draftOf(b.id).conn_mode === 'reverse'">
-                <div class="info-label">监听</div>
-                <div class="info-value">{{ b.listening ? '监听中' : '未监听' }}</div>
-              </div>
-              <div v-if="b.reconnect_attempts !== undefined">
-                <div class="info-label">重连次数</div>
-                <div class="info-value">{{ b.reconnect_attempts }}</div>
-              </div>
-            </div>
+            </v-expand-transition>
             <div v-if="b.last_error" class="error-tip">
               <v-icon icon="mdi-alert-circle-outline" size="small" /> {{ b.last_error }}
             </div>
@@ -543,29 +680,80 @@ onBeforeUnmount(() => {
       </v-col>
     </v-row>
 
-    <v-dialog :model-value="deleteTarget !== null" max-width="400" @update:model-value="(v: boolean) => { if (!v) deleteTarget = null }">
-      <v-card>
-        <v-card-title>删除账号配置</v-card-title>
-        <v-card-text>确定删除该账号的配置吗？此操作不可撤销。</v-card-text>
-        <v-card-actions>
-          <v-spacer />
-          <v-btn variant="text" @click="deleteTarget = null">取消</v-btn>
-          <v-btn color="error" variant="tonal" @click="doDelete">删除</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+    <ConfirmDialog
+      :model-value="deleteTarget !== null"
+      title="删除这个账号？"
+      message="删除后无法恢复，下面这些内容会一起删除："
+      :details="DELETE_DETAILS"
+      danger
+      confirm-text="删除账号"
+      :loading="deleting"
+      @update:model-value="(v: boolean) => { if (!v) deleteTarget = null }"
+      @confirm="doDelete"
+    />
+
+    <ConfirmDialog
+      v-model="reloadConfirmOpen"
+      title="刷新会丢弃未保存的修改"
+      message="这些改动还没保存，刷新后需要重新填写。"
+      confirm-text="丢弃并刷新"
+      danger
+      @confirm="discardAndReload"
+    />
+
+    <ConfirmDialog
+      v-model="batchConfirmOpen"
+      title="全部断开这些账号？"
+      :message="`将断开 ${pendingDisconnectIds.length} 个正在连接的账号，断开后它们在群里不再回复。`"
+      confirm-text="全部断开"
+      danger
+      @confirm="confirmBatchDisconnect"
+    />
 
     <!-- 新增账号：先选连接方式（正向 / 反向），选定后才创建 -->
     <AddBotDialog v-model="addDialog" @created="onBotCreated" />
 
     <!-- 诊断台：查这个账号最近收到的协议端事件，确认问题出在哪一侧 -->
     <EventMonitorDialog v-model="diagOpen" :account-id="diagAccountId" :account-name="diagAccountName" />
+
+    <!-- 群与账号概览：只读汇总；群规则去「回复与权限」改 -->
+    <MultiGroupDialog v-model="groupOpen" />
   </div>
 </template>
 
 <style scoped>
 .bot-card {
   border-radius: 16px;
+}
+
+/* 从总览/就绪卡跳进来时短暂高亮目标账号，避免用户在列表里自己找 */
+.bot-card--highlight {
+  outline: 2px solid rgb(var(--v-theme-primary));
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(var(--v-theme-primary), 0.14);
+}
+
+/* 账号页工具栏：统计 + 保存状态 + 批量/概览操作，窄屏自动换行 */
+.bots-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.bots-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.info-panel {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(var(--v-theme-on-surface), 0.03);
 }
 
 .info-grid {
@@ -585,6 +773,22 @@ onBeforeUnmount(() => {
   font-size: 13.5px;
   font-weight: 500;
   word-break: break-all;
+}
+
+.info-note {
+  margin-top: 2px;
+  font-size: 11px;
+  color: rgba(var(--v-theme-on-surface), 0.45);
+}
+
+.conn-mode-hint {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 12.5px;
+  color: rgba(var(--v-theme-on-surface), 0.6);
 }
 
 /* 「上次连接」标注：明确该账号来自快照而非当前实时连接 */

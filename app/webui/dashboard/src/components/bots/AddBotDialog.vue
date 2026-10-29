@@ -125,7 +125,7 @@ async function create() {
     <v-card>
       <v-card-title class="text-h5 pa-4 pb-0 pl-6">添加账号</v-card-title>
       <v-card-text class="pa-4 pl-6">
-        <div class="text-body-2 text-medium-emphasis mb-3">选一种连接方式，创建后不能改；不确定就用推荐的本地监听。</div>
+        <div class="text-body-2 text-medium-emphasis mb-3">选一种连接方式，之后可在「设置向导」里修改；不确定就用推荐的本地监听。</div>
 
         <div class="mode-list">
           <v-card

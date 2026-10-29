@@ -8,7 +8,7 @@
  * - 第 4 步的清单与总览就绪卡、启动横幅同源（`/api/readiness`）。
  */
 import { computed, onBeforeUnmount, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import http, { errorMessage } from '@/api/http'
 import { useBotsStore } from '@/stores/bots'
 import { useBundlesStore } from '@/stores/bundles'
@@ -16,6 +16,7 @@ import { useReadinessStore } from '@/stores/readiness'
 import { useNotifyStore } from '@/stores/notify'
 import BundleImportDialog from '@/components/bundles/BundleImportDialog.vue'
 
+const route = useRoute()
 const router = useRouter()
 const bots = useBotsStore()
 const bundles = useBundlesStore()
@@ -48,8 +49,21 @@ const accountError = ref('')
 const savingAccount = ref(false)
 /** 用户点了「稍后再配」：明确跳过时不要顺手建号 */
 const skipped = ref(false)
+/** 账号标识收进「高级」里，默认折叠（新账号留空由服务端自动分配） */
+const advancedOpen = ref(false)
 let lastNotifiedError = ''
 let pollTimer: number | null = null
+
+/** 第 1 步的连接状态：反向账号监听已就绪时是「等待协议端接入」，不是「未连接」 */
+const accountWaiting = computed(() => {
+  const bot = bots.currentBot
+  return Boolean(bot && bot.conn_mode === 'reverse' && bot.status !== 'connected' && bot.listening)
+})
+const accountStatus = computed(() => {
+  if (accountConnected.value) return { text: '已连接', icon: 'mdi-check-circle-outline', color: 'success' }
+  if (accountWaiting.value) return { text: '等待协议端接入', icon: 'mdi-access-point-network', color: 'warning' }
+  return { text: '未连接', icon: 'mdi-circle-outline', color: 'grey' }
+})
 
 // ---------- 第 2 步：模型 ----------
 // 内置目录优先读后端（与「模型服务」页同源），取不到时用这份本地兜底，保证向导可继续。
@@ -455,15 +469,25 @@ async function finish() {
   })
 }
 
-function skipAll() {
+async function skipAll() {
   // 明确「稍后再配」：不建号、不补存（否则离开时 onBeforeUnmount 会把半填的账号建出来）
   skipped.value = true
   accountDirty.value = false
   stopPolling()
+  // 「稍后再配」也算结束首次配置：标记完成，否则总览会一直催「继续配置」
+  try {
+    await http.post('/api/setup/complete')
+    await readiness.load()
+  } catch (err) {
+    notify.push(`标记完成失败：${errorMessage(err)}`, 'warning')
+  }
   router.push('/')
 }
 
 onMounted(async () => {
+  // 从「继续配置：还差 X」带 step 参数进来时，直接落到缺的那一步
+  const requested = Number(route.query.step)
+  if (Number.isInteger(requested) && requested >= 1 && requested <= 4) step.value = requested
   if (!bots.bots.length) {
     // 列表加载失败不该冒成 unhandled rejection（全局会误报「页面出现异常」）
     try {
@@ -495,6 +519,20 @@ onUnmounted(stopPolling)
         <v-spacer />
         <v-btn variant="text" @click="skipAll">稍后再配</v-btn>
       </div>
+
+      <v-alert
+        v-if="accountSaved && account.id"
+        type="info"
+        variant="tonal"
+        density="compact"
+        class="mb-3"
+      >
+        <div class="d-flex align-center flex-wrap gap-2">
+          <span>正在修改默认账号「{{ account.name || account.id }}」，日常修改请去「账号管理」。</span>
+          <v-spacer />
+          <v-btn size="small" variant="text" color="primary" to="/bots">去账号管理</v-btn>
+        </div>
+      </v-alert>
 
       <div class="step-strip mb-4">
         <template v-for="(name, index) in STEPS" :key="name">
@@ -546,13 +584,36 @@ onUnmounted(stopPolling)
             </tbody>
           </v-table>
 
-          <v-row dense class="mb-5">
-            <v-col cols="12" md="6">
+          <v-text-field
+            v-model="account.name"
+            label="账号名称"
+            placeholder="例如：主号"
+            hint="给自己看的名字，可留空"
+            persistent-hint
+            density="comfortable"
+            variant="outlined"
+            class="mb-3"
+            @update:model-value="markAccountDirty"
+            @blur="saveAccount"
+          />
+
+          <v-btn
+            size="small"
+            variant="text"
+            color="primary"
+            class="px-0 mb-2"
+            :prepend-icon="advancedOpen ? 'mdi-chevron-up' : 'mdi-cog-outline'"
+            @click="advancedOpen = !advancedOpen"
+          >
+            高级选项（账号标识）
+          </v-btn>
+          <v-expand-transition>
+            <div v-if="advancedOpen" class="mb-4">
               <v-text-field
                 v-model="account.id"
                 label="账号标识"
-                placeholder="例如：main"
-                hint="用于区分多个号：字母/数字/下划线，留空自动分配"
+                placeholder="留空自动分配，例如 main"
+                hint="内部使用，用来区分同名账号；一般不用改"
                 persistent-hint
                 :error-messages="accountIdMessages"
                 density="comfortable"
@@ -560,21 +621,8 @@ onUnmounted(stopPolling)
                 @update:model-value="onAccountIdInput"
                 @blur="onAccountIdBlur"
               />
-            </v-col>
-            <v-col cols="12" md="6">
-              <v-text-field
-                v-model="account.name"
-                label="账号名称"
-                placeholder="例如：主号"
-                hint="给自己看的名字，可留空"
-                persistent-hint
-                density="comfortable"
-                variant="outlined"
-                @update:model-value="markAccountDirty"
-                @blur="saveAccount"
-              />
-            </v-col>
-          </v-row>
+            </div>
+          </v-expand-transition>
 
           <v-text-field
             v-model="account.ws_url"
@@ -609,13 +657,10 @@ onUnmounted(stopPolling)
             @blur="saveAccount"
           />
 
-          <div class="d-flex align-center gap-2 mt-1">
-            <v-icon
-              size="small"
-              :icon="accountConnected ? 'mdi-check-circle-outline' : 'mdi-circle-outline'"
-              :color="accountConnected ? 'success' : 'grey'"
-            />
-            <span class="text-body-2">{{ accountConnected ? '已连接' : '未连接' }}</span>
+          <div class="d-flex align-center flex-wrap gap-2 mt-1">
+            <v-icon size="small" :icon="accountStatus.icon" :color="accountStatus.color" />
+            <span class="text-body-2">{{ accountStatus.text }}</span>
+            <span v-if="accountWaiting" class="text-caption" style="opacity: 0.65">协议端连上后会自动变成已连接</span>
           </div>
         </v-card-text>
         <v-card-actions>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import http, { errorMessage } from '@/api/http'
 import { useWebuiStore } from '@/stores/webui'
 import { useNotifyStore } from '@/stores/notify'
@@ -16,6 +17,7 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: boolean): void }>()
 
 const webui = useWebuiStore()
 const notify = useNotifyStore()
+const router = useRouter()
 
 const rows = ref<GroupRow[]>([])
 const loading = ref(false)
@@ -68,6 +70,12 @@ async function onToggleShowAll() {
   }
 }
 
+/** 群级回复规则不在这里改：直接带去「回复与权限 → 群与私聊」 */
+function openGroupRules() {
+  emit('update:modelValue', false)
+  router.push({ path: '/reply', query: { tab: 'groups' } })
+}
+
 watch(
   () => props.modelValue,
   (v) => {
@@ -80,24 +88,32 @@ watch(
   <v-dialog :model-value="modelValue" @update:model-value="(v: boolean) => emit('update:modelValue', v)" max-width="720">
     <v-card>
       <v-card-title class="pa-4 pb-1">
-        <v-icon icon="mdi-layers-triple-outline" class="mr-2" color="primary" /> 多群管理
+        <v-icon icon="mdi-layers-triple-outline" class="mr-2" color="primary" /> 群与账号概览
       </v-card-title>
       <v-card-text>
+        <div class="d-flex align-center flex-wrap gap-2 mb-3">
+          <span class="text-caption" style="opacity: 0.7">
+            这里只汇总「群」和「哪些账号在群里」，群级的回复规则在「回复与权限 → 群与私聊」里按群调整。
+          </span>
+          <v-btn size="small" variant="text" color="primary" prepend-icon="mdi-shield-account-outline" @click="openGroupRules">
+            去设置群规则
+          </v-btn>
+        </div>
         <v-checkbox :model-value="showAll" label="展示全部（包括仅单个账号在的群）" density="compact" hide-details color="primary" class="mb-2" @update:model-value="onToggleShowAll" />
 
         <div v-if="loading" class="hint"><v-progress-circular size="18" indeterminate /> 加载中…</div>
-        <div v-else-if="error" class="hint error">{{ error }}</div>
+        <div v-else-if="error" class="hint error">
+          <span>{{ error }}</span>
+          <v-btn size="x-small" variant="text" @click="load">重试</v-btn>
+        </div>
         <div v-else class="group-list">
-          <div v-if="visibleRows.length === 0" class="hint">暂无群数据</div>
+          <div v-if="visibleRows.length === 0" class="hint">还没有群数据：等账号连上、在群里收到消息后这里会自动出现。</div>
           <div v-for="row in visibleRows" :key="row.gid" class="group-row">
             <div class="group-info">
               <div class="group-name">{{ row.name }}</div>
               <div class="group-meta">
                 {{ row.gid }} · {{ row.botIndexes.length }} 个账号
               </div>
-            </div>
-            <div class="text-caption" style="max-width: 220px; color: rgba(var(--v-theme-on-surface), 0.55)">
-              这里只汇总群与账号的在线情况；响应权限在对应功能插件的设置里按群调整
             </div>
           </div>
         </div>

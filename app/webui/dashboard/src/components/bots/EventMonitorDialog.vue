@@ -9,6 +9,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import http, { errorMessage } from '@/api/http'
 import { useNotifyStore } from '@/stores/notify'
 import EmptyState from '@/components/EmptyState.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import { cleanLogTimestamp } from '@/utils/log'
 
 const props = defineProps<{
@@ -40,6 +41,9 @@ const drops = ref(0)
 const loading = ref(false)
 const loadError = ref('')
 const detail = ref<OnebotEvent | null>(null)
+/** 清空事件是不可撤销的排障操作，先确认一次 */
+const clearConfirm = ref(false)
+const clearing = ref(false)
 
 // 测试消息
 const groupId = ref('')
@@ -82,12 +86,16 @@ async function load(silent = false) {
 
 async function clearEvents() {
   if (!props.accountId) return
+  clearing.value = true
   try {
     await http.post(`/api/bots/${encodeURIComponent(props.accountId)}/events/clear`)
     events.value = []
+    clearConfirm.value = false
     notify.push('已清空事件记录', 'success')
   } catch (err) {
     notify.push(errorMessage(err), 'error')
+  } finally {
+    clearing.value = false
   }
 }
 
@@ -221,7 +229,7 @@ onBeforeUnmount(stopPolling)
           如果一直没有，问题在协议端（NapCat/LLOneBot）那一侧。
         </div>
         <div class="text-caption mb-3" style="opacity: 0.7">
-          如果这里能看到「消息」但群里仍没回复，问题在回复配置。先去「回复设置」确认这个群允许聊天。再去「AI 对话面板」确认已选模型。
+          如果这里能看到「消息」但群里仍没回复，问题在回复配置。先去「回复与权限」确认这个群允许聊天，再去「AI 对话面板」确认已选模型。
         </div>
 
         <v-alert v-if="loadError" type="error" variant="tonal" density="compact" class="mb-3">
@@ -236,7 +244,7 @@ onBeforeUnmount(stopPolling)
           </v-chip>
           <v-spacer />
           <v-btn size="small" variant="text" prepend-icon="mdi-refresh" :loading="loading" @click="load()">刷新</v-btn>
-          <v-btn size="small" variant="text" color="error" prepend-icon="mdi-delete-outline" :disabled="!events.length" @click="clearEvents">
+          <v-btn size="small" variant="text" color="error" prepend-icon="mdi-delete-outline" :disabled="!events.length" @click="clearConfirm = true">
             清空
           </v-btn>
         </div>
@@ -326,6 +334,16 @@ onBeforeUnmount(stopPolling)
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <ConfirmDialog
+      v-model="clearConfirm"
+      title="清空事件记录？"
+      message="清空后无法恢复，之后的新事件仍会继续记录。"
+      :loading="clearing"
+      confirm-text="清空"
+      danger
+      @confirm="clearEvents"
+    />
   </v-dialog>
 </template>
 

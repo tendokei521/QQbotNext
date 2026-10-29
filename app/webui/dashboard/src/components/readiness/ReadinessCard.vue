@@ -5,7 +5,7 @@
  * 数据与首启向导、启动横幅同源（`/api/readiness`），所以三处口径永远一致；
  * 每条 blocker 都带 action.route，点一下就去修对应的配置。
  */
-import { onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useBotsStore } from '@/stores/bots'
 import { useReadinessStore } from '@/stores/readiness'
@@ -14,6 +14,27 @@ const readiness = useReadinessStore()
 const bots = useBotsStore()
 const router = useRouter()
 
+/** 全部就绪时这张卡没有信息量，直接不显示；首次加载（还没有数据）也不显示，避免闪一句 0 个问题 */
+const visible = computed(
+  () => Boolean(readiness.error) || (!readiness.ready && readiness.checks.length > 0),
+)
+
+/**
+ * 「继续配置」按当前缺的那一项决定文案与落点：
+ * 缺模型 → 第 2 步；缺连接 → 第 1 步；缺回复开关 → 第 3 步。
+ */
+const nextStep = computed(() => {
+  const ids = new Set(readiness.blockers.map((check) => check.id))
+  if (ids.has('model_pool')) return { step: 2, text: '继续配置：还差模型' }
+  if (ids.has('account') || ids.has('connected')) return { step: 1, text: '继续配置：还差账号连接' }
+  if (ids.has('scene_enabled')) return { step: 3, text: '继续配置：还差回复设置' }
+  return { step: 1, text: '继续配置' }
+})
+
+function startSetup() {
+  router.push({ path: '/setup', query: { step: String(nextStep.value.step) } })
+}
+
 /** 点"去修"：先切到该检查指向的账号，再跳转（否则修的是当前选中号，可能不是要修的那个）。 */
 function go(check: { action?: { route?: string; account_id?: string } | null }) {
   const route = check.action?.route
@@ -21,7 +42,13 @@ function go(check: { action?: { route?: string; account_id?: string } | null }) 
   if (accountId && accountId !== bots.currentAccountId) {
     bots.selectBot(accountId)
   }
-  if (route) router.push(route)
+  if (!route) return
+  // 去账号管理时带上要高亮的账号，避免用户到了列表还要自己找
+  if (route === '/bots' && accountId) {
+    router.push({ path: '/bots', query: { highlight: accountId } })
+    return
+  }
+  router.push(route)
 }
 
 onMounted(() => readiness.startPolling())
@@ -29,7 +56,7 @@ onUnmounted(() => readiness.stopPolling())
 </script>
 
 <template>
-  <v-card variant="outlined" class="mb-4 readiness-card">
+  <v-card v-if="visible" variant="outlined" class="mb-4 readiness-card">
     <v-card-text>
       <div class="d-flex align-center flex-wrap gap-2 mb-2">
         <v-icon
@@ -49,9 +76,9 @@ onUnmounted(() => readiness.stopPolling())
           color="primary"
           variant="tonal"
           prepend-icon="mdi-rocket-launch-outline"
-          @click="router.push('/setup')"
+          @click="startSetup"
         >
-          开始首次配置
+          {{ nextStep.text }}
         </v-btn>
       </div>
 
