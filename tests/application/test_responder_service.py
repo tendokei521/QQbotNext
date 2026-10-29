@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from app.application.policy_store import LegacyPolicyStore
 from app.application.responder_service import ResponderService, channel_of
-from app.domain.events import GroupMessageEvent
+from app.domain.events import GroupMessageEvent, PrivateMessageEvent
 from app.plugin.responder import (
     FALLBACK_CLOSED,
     FALLBACK_OPEN,
@@ -482,3 +482,35 @@ def test_channel_policy_store_reads_and_normalizes_rows():
     assert store.get("demo", None) is None
     assert len(store.list_for("demo")) == 2
 
+
+
+# ==================== 私聊事件的群号 ====================
+
+
+def _private_event(account_id="acc1", group_id=0):
+    """OneBot 私聊 payload 里 group 对象存在、但 group_id=0（不是 None）。"""
+    return PrivateMessageEvent(
+        event_type="message_private", post_type="message", message_type="private",
+        user_id=100, self_id=1, message_id=1, time=0, account_id=account_id,
+        user=SimpleNamespace(user_id=100, role="member"),
+        group=SimpleNamespace(group_id=group_id),
+        raw={"sender": {"role": "member"}},
+    )
+
+
+def test_channel_of_private_with_zero_group_id_is_none():
+    """回归：曾把私聊当"群 0"，Agent 候选在群 0 里永远为空 → 私信整条不触发。"""
+    assert channel_of(_private_event(group_id=0)) is None
+    assert channel_of(_private_event(group_id=None)) is None
+
+
+def test_agent_private_candidates_include_current_account():
+    service, _log = _service(
+        runtimes={"acc1": _Runtime(online=True)},
+        conns={"acc1": _Conn(groups=())},
+    )
+
+    decision = service.decide_agent(_private_event("acc1", group_id=0))
+
+    assert decision.candidates == ("acc1",)
+    assert decision.allows("acc1") is True

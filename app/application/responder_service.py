@@ -272,9 +272,20 @@ class ResponderService:
 
 
 def channel_of(event: Any) -> str | None:
-    """事件所属会话（群号）。私聊/无群 → None。"""
+    """事件所属会话（群号）。私聊/无群 → None。
+
+    注意：私聊事件的 ``group`` 对象**存在但 group_id=0**（OneBot 私有消息没有群号），
+    早先只判断 ``None/""`` 会把它当成"群 0"：于是 Agent 的响应权候选在群 0 里找，
+    永远为空 → ``[Responder] Agent 跳过`` → 私信整条不触发。``0`` 必须按"无群"处理。
+    """
+    if str(getattr(event, "event_type", "")) == "message_private":
+        return None
     group = getattr(event, "group", None)
     group_id = getattr(group, "group_id", None) if group is not None else None
-    if group_id in (None, ""):
-        return None
+    try:
+        if not int(group_id or 0):
+            return None
+    except (TypeError, ValueError):
+        if group_id in (None, ""):
+            return None
     return str(group_id)
