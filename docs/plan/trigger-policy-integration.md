@@ -215,3 +215,20 @@
 | 旧前端仍写 `trigger_at`/`trigger_keyword` | 与新字段漂移 | 服务端写入时双写；读取时折算；过渡期保留旧字段 |
 | 群级覆盖太多导致"以为继承" | 排障困难 | 生效预览 + 行内"覆盖"标记 + 抽屉里灰字继承值 |
 | 前端改动大 | 回归面广 | 按 T3/T4 拆分提交；截图 + metrics 验收 |
+
+
+---
+
+## 10. 实现记录（2026-10-29）
+
+| 步骤 | commit | 说明 |
+|---|---|---|
+| T0 | `851fe2e` | `trigger_mode`（at/keyword/both/all/none）+ `trigger_probability`；旧键折算 `trigger_mode_from()`；`decide_trigger()` 纯函数 |
+| T1 | `9594f23` | 解析结果永远带显式 `trigger_mode`/来源；写入双写 `trigger_at`；清 "trigger_mode" = 整组恢复继承；matrix 行新增触发方式/来源/概率/免打扰 |
+| T2 | `133d91c` | 流水线准入与打断统一走 `_trigger_decision`（`decide_trigger`），含 `all` 概率抽签与纯图片兼容 |
+| T3 | `f843176` + `4d8af42` | 群列表行显示「触发：…/免打扰…」+「触发按本群」标记；规则抽屉新增 `all` + 概率 + **生效预览（值+来源）**；账号默认卡显示默认触发方式 |
+| T4 | `f3b38df` + `77b7770` | AI 面板「回复开关」只保留总开关 + 群聊/私聊只读 chip；「触发方式」卡改只读摘要 + 跳转；启动迁移把旧触发键复制成账号级覆盖 |
+
+验证：`tests/domain`、`tests/agent`、`tests/webui/test_policy_api.py`、`tests/application/test_trigger_migration.py` 全绿；
+前端 `npm run typecheck` + `npm run build` 通过；`/reply`、`/ai` 在 1440/390 两个宽度截图，`overflow=0`，
+规则抽屉 1440/390 均无横向溢出（截图与 metrics 在 `logs/review/`，未入库）。

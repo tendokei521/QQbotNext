@@ -36,7 +36,15 @@
 | **R2** | 简单视图（群开关矩阵） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r2-简单视图) |
 | **R3** | 高级视图（规则覆盖） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r3-高级视图) |
 | **R4** | 迁移收口 | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r4-迁移收口) |
-| **T0–T4** | 触发方式并入「回复与权限」（**规划中**） | `[ ]` | [`trigger-policy-integration.md`](trigger-policy-integration.md) |
+| **T0–T4** | 触发方式并入「回复与权限」 | `[x]` | [`trigger-policy-integration.md`](trigger-policy-integration.md) |
+
+| 编号 | commit | 内容 |
+|---|---|---|
+| T0 | `851fe2e` | 领域模型：`trigger_mode`/`trigger_probability` + 旧键折算 + 校验 |
+| T1 | `9594f23` | 服务/API：解析返回显式触发方式与来源；写入双写旧键；matrix 行补齐 |
+| T2 | `133d91c` | 触发判定：pipeline 统一走 `decide_trigger`（含 all/概率，纯图片兼容） |
+| T3 | `f843176` + `4d8af42` | 前端：矩阵行显示触发方式/免打扰、抽屉内生效预览、概率与 all 模式 |
+| T4 | `f3b38df` + `77b7770` + 迁移修复提交 | Agent 面板触发卡改只读摘要 + 启动迁移旧触发键 |
 
 ### 已完成进度（2026-10-27）
 
