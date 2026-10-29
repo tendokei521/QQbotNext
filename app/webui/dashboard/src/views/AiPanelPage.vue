@@ -241,8 +241,8 @@ watch(
         </div>
       </v-alert>
 
-      <!-- 状态条：只读，回答「现在能不能回」 -->
-      <v-card variant="tonal" class="mb-4">
+      <!-- 状态条：只读，回答「现在能不能回」；与其他卡片同样式，不额外铺灰底 -->
+      <v-card variant="outlined" class="mb-4">
         <v-card-text class="d-flex align-center flex-wrap gap-3 py-2">
           <v-chip
             :color="agent.enabled ? 'success' : 'grey'"
