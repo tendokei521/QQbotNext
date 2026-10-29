@@ -48,9 +48,15 @@ const accountId = computed(() => bots.currentAccountId)
 const accountName = computed(() => (bots.currentBot ? displayName(bots.currentBot) : ''))
 const hasAccount = computed(() => accountId.value !== null)
 
-/** 只读摘要用：群聊/私聊默认是否允许（真正的编辑入口在「回复与权限」） */
-const groupDefault = computed(() => Boolean(agent.draft.group_enable))
-const privateDefault = computed(() => agent.draft.private_enable !== false)
+/** 场景开关（agent 配置）：群聊回复 / 私聊回复 */
+const groupDefault = computed<boolean>({
+  get: () => Boolean(agent.draft.group_enable),
+  set: (v) => agent.onChange('group_enable', v),
+})
+const privateDefault = computed<boolean>({
+  get: () => agent.draft.private_enable !== false,
+  set: (v) => agent.onChange('private_enable', v),
+})
 
 /** 总开关不是 schema 字段（独立存储），包成同样的 boolean schema 交给 PanelField 统一形态 */
 const ENABLED_FIELD_SCHEMA = {
@@ -342,13 +348,21 @@ watch(
           @update="onEnabled"
         />
         <v-divider class="my-4" />
-        <div class="d-flex align-center flex-wrap gap-2">
-          <v-chip size="small" variant="tonal" :color="groupDefault ? 'success' : 'grey'">
-            群聊默认：{{ groupDefault ? '允许' : '禁止' }}
-          </v-chip>
-          <v-chip size="small" variant="tonal" :color="privateDefault ? 'success' : 'grey'">
-            私聊默认：{{ privateDefault ? '允许' : '禁止' }}
-          </v-chip>
+        <div class="d-flex align-center flex-wrap gap-6">
+          <v-switch
+            v-model="groupDefault"
+            label="群聊回复"
+            color="success"
+            density="compact"
+            hide-details
+          />
+          <v-switch
+            v-model="privateDefault"
+            label="私聊回复"
+            color="success"
+            density="compact"
+            hide-details
+          />
         </div>
       </PanelCard>
 
