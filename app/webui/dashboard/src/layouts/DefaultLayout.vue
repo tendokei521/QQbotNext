@@ -51,7 +51,7 @@ const multiGroupOpen = ref(false)
 const busyAction = ref(false)
 
 /** 侧栏分组标题：路由 watch 与激活态判断共用，避免同名字符串散落多处。 */
-const AGENT_GROUP = 'AI 对话设置'
+const AGENT_GROUP = 'AI 设置'
 const TOOLS_GROUP = '高级工具'
 
 // 桌面/移动断点：桌面永久展开侧边栏，移动端可收起（导航图标切换）
@@ -88,7 +88,7 @@ interface NavItem {
 }
 
 const navItems = computed<NavItem[]>(() => {
-  // Agent 二级菜单由 @/agent/sections 派生，避免与路由/概览卡片各抄一份
+  // AI 设置二级菜单由 @/agent/sections 派生，避免与路由各抄一份
   const agentChildren: NavChild[] = agentSidebarEntries()
   const toolChildren: NavChild[] = [
     { to: '/tools/system', title: '系统工具' },
@@ -100,20 +100,22 @@ const navItems = computed<NavItem[]>(() => {
   // 以及实验性「配置档案」入口（整套能力已下线）。
   // 「高级工具」属于实验性入口：默认隐藏，设置里打开实验性选项后才出现。
   const showExperimental = Boolean(webui.config.experimental?.show_experimental)
-  // 顺序按「配好一个账号」的实际路径排：运行（账号管理、模型服务）→ 能力（回复设置 /
-  // 功能插件 / 人格设定 / 配置包 / AI 对话设置）→ 数据 → 系统。
+  // 顺序按「配好一个账号」的实际路径排：运行（账号管理、模型服务）→ 能力（AI 对话面板 /
+  // 回复与权限 / AI 设置 / 人格设定 / 功能插件 / 配置包）→ 数据 → 系统。
   return [
     { to: '/', title: '总览', icon: 'mdi-view-dashboard-outline' },
     { header: '运行' },
     { to: '/bots', title: '账号管理', icon: 'mdi-robot-outline' },
     { to: '/provider-presets', title: '模型服务', icon: 'mdi-api' },
     { header: '能力' },
-    // 回复设置 = 这个号在哪些群/私聊能说话
-    { to: '/policy', title: '回复设置', icon: 'mdi-shield-account-outline' },
-    { to: '/modules', title: '功能插件', icon: 'mdi-cube-outline' },
-    { to: '/personas', title: '人格设定', icon: 'mdi-account-heart-outline' },
-    { to: '/bundles', title: '配置包', icon: 'mdi-package-variant-closed' },
+    // 日常操作台：回复开关 / 触发方式 / 权限与模型摘要
+    { to: '/ai', title: 'AI 对话面板', icon: 'mdi-chat-processing-outline' },
+    // 在哪回、回谁、按什么规则（原「回复设置」+「权限管理」合并）
+    { to: '/reply', title: '回复与权限', icon: 'mdi-shield-account-outline' },
     { title: AGENT_GROUP, icon: 'mdi-creation-outline', children: agentChildren },
+    { to: '/personas', title: '人格设定', icon: 'mdi-account-heart-outline' },
+    { to: '/modules', title: '功能插件', icon: 'mdi-cube-outline' },
+    { to: '/bundles', title: '配置包', icon: 'mdi-package-variant-closed' },
     ...(showExperimental
       ? [{ title: TOOLS_GROUP, icon: 'mdi-toolbox-outline', children: toolChildren }]
       : []),
@@ -127,8 +129,16 @@ const navItems = computed<NavItem[]>(() => {
 })
 
 const openedGroups = ref<string[]>([])
-const isAgentActive = computed(() => route.path.startsWith('/agent'))
+/** 只有 /ai/settings/* 展开「AI 设置」分组；/ai 面板本身是独立入口 */
+const isAiSettingsActive = computed(() => route.path.startsWith('/ai/settings'))
 const isToolsActive = computed(() => route.path.startsWith('/tools'))
+
+/** 导航高亮：/ai、/reply 精确匹配（避免设置页把面板也点亮），其余允许子路径 */
+function isNavActive(item: NavItem): boolean {
+  if (!item.to) return false
+  if (item.to === '/ai' || item.to === '/reply') return route.path === item.to
+  return route.path === item.to || (item.to !== '/' && route.path.startsWith(item.to + '/'))
+}
 
 /** 退出登录：会话 cookie 由服务端清除，随后 303 回独立登录页。 */
 function logout() {
@@ -138,7 +148,7 @@ function logout() {
 watch(
   () => route.path,
   () => {
-    if (isAgentActive.value) {
+    if (isAiSettingsActive.value) {
       if (!openedGroups.value.includes(AGENT_GROUP)) openedGroups.value.push(AGENT_GROUP)
     } else {
       openedGroups.value = openedGroups.value.filter((g) => g !== AGENT_GROUP)
@@ -293,7 +303,7 @@ onUnmounted(() => {
                 :prepend-icon="item.icon"
                 rounded="lg"
                 class="nav-item"
-                :class="{ 'nav-item--active': item.title === AGENT_GROUP ? isAgentActive : item.title === TOOLS_GROUP ? isToolsActive : false }"
+                :class="{ 'nav-item--active': item.title === AGENT_GROUP ? isAiSettingsActive : item.title === TOOLS_GROUP ? isToolsActive : false }"
               />
             </template>
             <v-list-item
@@ -314,7 +324,7 @@ onUnmounted(() => {
             :prepend-icon="item.icon"
             rounded="lg"
             class="nav-item"
-            :class="{ 'nav-item--active': item.to ? route.path === item.to || (item.to !== '/' && route.path.startsWith(item.to)) : false }"
+            :class="{ 'nav-item--active': isNavActive(item) }"
           />
         </template>
       </v-list>
