@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import http, { errorMessage } from '@/api/http'
 import { useAgentConfigStore } from '@/stores/agentConfig'
 import { useNotifyStore } from '@/stores/notify'
@@ -15,6 +16,7 @@ interface RolePreset {
 
 const agent = useAgentConfigStore()
 const notify = useNotifyStore()
+const router = useRouter()
 
 const presets = ref<RolePreset[]>([])
 const loading = ref(false)
@@ -118,7 +120,7 @@ async function savePreset() {
 }
 
 async function deletePreset(p: RolePreset) {
-  if (!window.confirm(`确认删除人格预设「${p.name}」？当前 Agent 已应用的提示词不会被清除。`)) return
+  if (!window.confirm(`确认删除人格预设「${p.name}」？已经应用它的账号不会自动改动。`)) return
   try {
     await http.delete(`/api/role-presets/${p.id}`)
     notify.push('人格预设已删除', 'success')
@@ -132,29 +134,21 @@ async function deletePreset(p: RolePreset) {
   }
 }
 
-async function applyToAgent() {
-  if (!selectedPreset.value) return
-  if (agent.botId == null) {
-    notify.push('请先在「账号管理」添加账号，再应用到 Agent', 'warning')
-    return
-  }
-  agent.onChange('system_prompt', selectedPreset.value.system_prompt)
-  // 人设的唯一来源是角色预设：账号已有 persona_preset_id 时后端会优先用预设内容，
-  // 只写 system_prompt 会出现「提示已应用但人设没变」。同步写活引用，保证两处一致。
-  agent.onChange('persona_preset_id', selectedPreset.value.id)
-  // 保存失败时 save() 已经弹了失败原因，这里只在真正落盘后说「已应用」
-  if (await agent.save()) {
-    notify.push(`已应用人格「${selectedPreset.value.name}」`, 'success')
-  }
+/**
+ * 「应用人格」的唯一入口在 AI 对话面板：人格设定页只负责编辑预设内容，
+ * 不再在这里写 system_prompt / persona_preset_id，避免两条写路径悄悄分叉。
+ */
+function goToPanel() {
+  router.push('/ai')
 }
 
 function saveCurrentAsPreset() {
   if (agent.botId == null) {
-    notify.push('请先在「账号管理」添加账号，才能从 Agent 另存', 'warning')
+    notify.push('请先在「账号管理」添加账号，才能从当前账号另存', 'warning')
     return
   }
   if (!agent.draft.system_prompt?.trim()) {
-    notify.push('当前 Agent 没有可保存的提示词', 'warning')
+    notify.push('当前账号没有可保存的提示词', 'warning')
     return
   }
   startNew()
@@ -176,7 +170,7 @@ onMounted(() => {
           <v-icon icon="mdi-account-heart" class="mr-1" color="pink" />
           人格设定
         </h1>
-        <div class="app-page-subtitle">管理可复用的人格预设，供 Agent 配置选择</div>
+        <div class="app-page-subtitle">管理可复用的人格预设，在 AI 对话面板里选用</div>
       </div>
       <v-spacer />
       <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="startNew">新建人格</v-btn>
@@ -187,7 +181,7 @@ onMounted(() => {
     <v-alert v-if="agent.botId == null" type="info" variant="tonal" density="compact" class="mt-2 mb-3">
       <div class="text-caption">
         当前没有选定账号：人格可以照常<strong>新建、编辑、保存</strong>；
-        「应用到 Agent」与「从当前 Agent 另存」需要先在「账号管理」添加账号。
+        「从当前账号另存」需要先在「账号管理」添加账号。
       </div>
     </v-alert>
 
@@ -305,10 +299,10 @@ onMounted(() => {
                 variant="tonal"
                 color="pink"
                 prepend-icon="mdi-arrow-right-bold-circle-outline"
-                :disabled="!selectedPreset || agent.botId == null"
-                @click="applyToAgent"
+                :disabled="!selectedPreset"
+                @click="goToPanel"
               >
-                应用到当前 Agent
+                去 AI 对话面板选用
               </v-btn>
               <v-btn
                 variant="tonal"
@@ -316,7 +310,7 @@ onMounted(() => {
                 :disabled="agent.botId == null"
                 @click="saveCurrentAsPreset"
               >
-                从当前 Agent 另存
+                从当前账号另存为人格
               </v-btn>
             </div>
           </v-card-text>

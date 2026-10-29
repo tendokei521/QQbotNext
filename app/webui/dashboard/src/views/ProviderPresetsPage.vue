@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import http, { errorMessage } from '@/api/http'
 import { useNotifyStore } from '@/stores/notify'
 
@@ -107,7 +108,7 @@ function providerTypeLabel(type: string): string {
 const MAX_TOKENS_ORIGIN_LABELS: Record<string, string> = {
   连接预设: '模型服务设置',
   'provider 模型': '这个模型的设置',
-  'agent 配置': 'Agent 页的设置',
+  'agent 配置': 'AI 对话面板的设置',
   内置默认: '系统默认',
 }
 
@@ -145,6 +146,7 @@ function modelOptionLabel(model: ProviderModel): string {
 }
 
 const notify = useNotifyStore()
+const router = useRouter()
 const presets = ref<ProviderPreset[]>([])
 const models = ref<ProviderModel[]>([])
 const allModels = ref<ProviderModel[]>([])
@@ -203,8 +205,8 @@ const settingsSaving = ref(false)
 const settingsForm = reactive({
   default_preset_id: '',
   default_model_id: '',
-  fallback_model_ids: '',
-  provider_pool: '*',
+  /** 允许清单；空数组 = 全部可用（后端视为 *） */
+  provider_pool: [] as string[],
 })
 
 const selectedPreset = computed(() => presets.value.find((p) => p.id === selectedPresetId.value))
@@ -303,11 +305,14 @@ async function loadSettings() {
     ])
     const s = settingsRes.data?.settings || {}
     allModels.value = modelsRes.data?.models || []
+    // provider_pool 支持 "*"（全允许）；UI 用空数组表达"全部"，不再让用户手抄内部 id
+    const pool = Array.isArray(s.provider_pool)
+      ? s.provider_pool.map((item: string) => String(item)).filter((item: string) => item && item !== '*')
+      : []
     Object.assign(settingsForm, {
       default_preset_id: s.default_preset_id || '',
       default_model_id: s.default_model_id || '',
-      fallback_model_ids: Array.isArray(s.fallback_model_ids) ? s.fallback_model_ids.join(', ') : '',
-      provider_pool: Array.isArray(s.provider_pool) ? s.provider_pool.join(', ') : (s.provider_pool || '*'),
+      provider_pool: pool,
     })
   } catch (err) {
     notify.push(errorMessage(err), 'error')
@@ -325,14 +330,9 @@ async function saveSettings() {
     await http.put('/api/provider-settings', {
       default_preset_id: settingsForm.default_preset_id,
       default_model_id: settingsForm.default_model_id,
-      fallback_model_ids: settingsForm.fallback_model_ids
-        .split(',')
-        .map((s: string) => s.trim())
-        .filter(Boolean),
-      provider_pool: settingsForm.provider_pool
-        .split(',')
-        .map((s: string) => s.trim())
-        .filter(Boolean),
+      // 全局回退链已由「AI 对话面板 → 模型」按账号维护，这里不再提供手填入口
+      fallback_model_ids: [],
+      provider_pool: settingsForm.provider_pool,
     })
     notify.push('模型服务设置已保存', 'success')
     settingsDialog.value = false
@@ -521,7 +521,7 @@ async function saveConfigJson() {
 }
 
 async function deleteSource(preset: ProviderPreset) {
-  if (!window.confirm(`确认删除模型服务「${preset.name}」？它下面的模型会一起删除，正在用它的 Agent 会恢复为默认。`)) return
+  if (!window.confirm(`确认删除模型服务「${preset.name}」？它下面的模型会一起删除，正在用它的账号会恢复为默认。`)) return
   try {
     await http.delete(`/api/provider-presets/${preset.id}`)
     notify.push('模型服务已删除', 'success')
@@ -1091,6 +1091,9 @@ onMounted(() => {
         <v-card-title class="d-flex align-center">
           <v-icon icon="mdi-tune" class="mr-2" color="primary" /> 模型服务全局设置
         </v-card-title>
+        <v-card-text class="text-caption pt-0 pb-0" style="opacity: 0.7">
+          没在 AI 对话面板选模型的账号，用这里的默认模型。
+        </v-card-text>
         <v-card-text>
           <v-select
             v-model="settingsForm.default_preset_id"
@@ -1110,10 +1113,24 @@ onMounted(() => {
             clearable
             class="mb-3"
           />
-          <v-text-field v-model="settingsForm.fallback_model_ids" label="备用模型 ID（逗号分隔，按顺序尝试）" density="comfortable" hide-details class="mb-3" />
-          <v-text-field v-model="settingsForm.provider_pool" label="允许使用的模型 ID（逗号分隔，* = 全部）" density="comfortable" hide-details />
+          <v-autocomplete
+            v-model="settingsForm.provider_pool"
+            :items="allModels.map((m) => ({ title: modelOptionLabel(m), value: m.id }))"
+            label="限制可用的模型"
+            hint="留空 = 全部可用"
+            multiple
+            chips
+            closable-chips
+            clearable
+            density="comfortable"
+            hide-details="auto"
+            persistent-hint
+          />
         </v-card-text>
         <v-card-actions>
+          <v-btn variant="text" prepend-icon="mdi-open-in-new" @click="settingsDialog = false; router.push('/ai')">
+            去 AI 对话面板按账号选模型
+          </v-btn>
           <v-spacer />
           <v-btn variant="text" @click="settingsDialog = false">取消</v-btn>
           <v-btn color="primary" variant="tonal" :loading="settingsSaving" @click="saveSettings">保存</v-btn>

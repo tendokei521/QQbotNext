@@ -3,8 +3,8 @@
  * 渲染某个分区的 schema 配置表单。
  *
  * 分区含多个分组时，左侧出现分组二级导航（PageSectionNav，粘性 + scroll-spy）；
+ * 只有 ≤2 组时不渲染导航——它和全局侧栏并列会像"两层菜单"，用户分不清。
  * 点击导航除了滚动到锚点，还会通过 ConfigForm 的 activeGroup 强制展开对应面板。
- * 只有一个分组时不渲染导航，避免给单卡片页面多加一条侧栏。
  */
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
@@ -33,7 +33,9 @@ const navItems = computed<SectionItem[]>(() => {
   }))
 })
 
-const showNav = computed(() => navItems.value.length > 1)
+// 页内分组导航：≤2 组时收起（和全局侧栏并列会像两层菜单，用户分不清），
+// ≥3 组才有"跳转"价值，并给导航卡加「本页分组」小标题说明这是页内锚点。
+const showNav = computed(() => navItems.value.length >= 3)
 
 const activeGroup = ref<string | null>(null)
 
@@ -73,7 +75,7 @@ watch(
 </script>
 
 <template>
-  <PageWithSections v-if="showNav" :sections="navItems" @select="onSelectSection">
+  <PageWithSections v-if="showNav" :sections="navItems" nav-title="本页分组" @select="onSelectSection">
     <slot name="before" />
     <v-card variant="outlined" class="mb-4">
       <v-card-text>

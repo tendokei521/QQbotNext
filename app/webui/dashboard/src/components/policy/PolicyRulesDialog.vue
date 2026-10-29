@@ -23,6 +23,13 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: boolean): void }>()
 const policy = usePolicyStore()
 const notify = useNotifyStore()
 
+/** 顶层说明：让用户明确这里的规则会压过面板里的默认值 */
+const priorityNote = computed(() =>
+  props.channelId
+    ? '这里的设置只对这个群生效，优先于账号与面板默认值。'
+    : '这里的设置优先于 AI 对话面板里的默认值。',
+)
+
 const loading = ref(false)
 const saving = ref(false)
 const loadError = ref('')
@@ -231,7 +238,7 @@ watch(
     <v-card>
       <v-card-title class="d-flex align-center">
         <v-icon icon="mdi-tune" class="mr-2" color="primary" />
-        {{ title || (channelId ? '本群高级规则' : '账号默认规则') }}
+        {{ title || (channelId ? '本群专属规则' : '账号专属规则') }}
         <v-spacer />
         <v-chip size="small" variant="tonal">
           {{ channelId ? `群 ${channelId}` : '对所有群生效' }}
@@ -245,6 +252,9 @@ watch(
         </v-alert>
 
         <template v-else-if="!loading">
+          <div class="text-caption mb-1" style="opacity: 0.7">
+            {{ priorityNote }}
+          </div>
           <div class="text-caption mb-3" style="opacity: 0.7">
             不填的项沿用现有设置；保存后只记录你这次改动的内容。
           </div>

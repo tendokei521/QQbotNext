@@ -70,12 +70,17 @@ const SWITCH_ITEMS: { title: string; value: SwitchValue }[] = [
   { title: '继承', value: 'inherit' },
 ]
 
-/** 「账号默认（群聊）」三态：允许 / 不允许 / 跟随面板设置 */
+/** 账号默认（场景层）三态：跟随 AI 对话面板 / 一律允许 / 一律不允许 */
 type SceneValue = 'on' | 'off' | 'inherit'
-const SCENE_ITEMS: { title: string; value: SceneValue }[] = [
-  { title: '允许', value: 'on' },
-  { title: '不允许', value: 'off' },
-  { title: '跟随面板设置', value: 'inherit' },
+const GROUP_SCENE_ITEMS: { title: string; value: SceneValue }[] = [
+  { title: '跟随 AI 对话面板（群聊开关）', value: 'inherit' },
+  { title: '一律允许', value: 'on' },
+  { title: '一律不允许', value: 'off' },
+]
+const PRIVATE_SCENE_ITEMS: { title: string; value: SceneValue }[] = [
+  { title: '跟随 AI 对话面板（私信开关）', value: 'inherit' },
+  { title: '一律允许', value: 'on' },
+  { title: '一律不允许', value: 'off' },
 ]
 
 const accountName = computed(() => {
@@ -83,21 +88,44 @@ const accountName = computed(() => {
   return bot ? displayName(bot) : bots.currentAccountId
 })
 
-/** 群行选「继承」时用得就是这个值；null = 跟随面板里的「群聊回复」开关 */
-const sceneDefault = computed<SceneValue>(() => {
+/** 群聊默认：群行选「继承」时用它；null = 跟随 AI 对话面板的群聊开关 */
+const groupScene = computed<SceneValue>(() => {
   const value = policy.defaultPolicy.scene_enabled
   if (value === true) return 'on'
   if (value === false) return 'off'
   return 'inherit'
 })
 
-async function onSceneDefault(value: SceneValue) {
+/**
+ * 私聊默认：后端矩阵只返回群聊场景的显式值，私聊场景用 /api/policy 的解析结果反推——
+ * enabled_source 为 scene 才是账号默认里显式设过，否则就是跟随面板。
+ */
+const privateScene = ref<SceneValue>('inherit')
+
+async function loadPrivateScene() {
   try {
-    await policy.setSceneEnabled(value === 'inherit' ? null : value === 'on')
-    notify.push(
-      value === 'inherit' ? '已改为跟随面板设置' : `账号默认已设为「${value === 'on' ? '允许' : '不允许'}」`,
-      'success',
-    )
+    const detail = await policy.getPolicy(null)
+    if (!detail) {
+      privateScene.value = 'inherit'
+      return
+    }
+    privateScene.value =
+      detail.resolved.enabled_source === 'scene' ? (detail.resolved.enabled ? 'on' : 'off') : 'inherit'
+  } catch {
+    privateScene.value = 'inherit'
+  }
+}
+
+function sceneValueLabel(value: SceneValue): string {
+  return value === 'on' ? '一律允许' : value === 'off' ? '一律不允许' : '跟随 AI 对话面板'
+}
+
+async function onSceneDefault(scene: 'group' | 'private', value: SceneValue) {
+  try {
+    await policy.setSceneEnabled(scene, value === 'inherit' ? null : value === 'on')
+    if (scene === 'private') privateScene.value = value
+    const label = scene === 'group' ? '群聊默认' : '私聊默认'
+    notify.push(`${label}已设为「${sceneValueLabel(value)}」`, 'success')
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   }
@@ -174,12 +202,14 @@ onMounted(async () => {
   // 首屏在「谁能回复」时只需矩阵数据，不必尝试同步群列表
   if (tab.value === 'groups') await loadWithGroups()
   else await policy.load()
+  void loadPrivateScene()
 })
 
 watch(
   () => bots.currentAccountId,
   () => {
     void loadWithGroups()
+    void loadPrivateScene()
   },
 )
 </script>
@@ -192,7 +222,7 @@ watch(
           <v-icon icon="mdi-shield-account-outline" size="28" color="success" class="mr-1" />
           回复与权限
         </h1>
-        <div class="app-page-subtitle">哪些群能回、谁能触发；面板管默认，这里管例外</div>
+        <div class="app-page-subtitle">哪些群能回、谁能触发；AI 对话面板管默认，这里管例外</div>
       </div>
       <div class="d-flex align-center gap-2">
         <v-chip v-if="bots.currentAccountId" size="small" variant="tonal">
@@ -247,18 +277,6 @@ watch(
               prepend-inner-icon="mdi-magnify"
               style="max-width: 320px"
             />
-            <v-select
-              :model-value="sceneDefault"
-              :items="SCENE_ITEMS"
-              label="账号默认（群聊）"
-              density="compact"
-              variant="outlined"
-              hide-details
-              style="max-width: 200px"
-              :loading="policy.savingScene"
-              :disabled="!bots.currentAccountId || policy.savingScene"
-              @update:model-value="(v: SceneValue) => onSceneDefault(v)"
-            />
             <v-chip size="small" variant="tonal">允许 {{ policy.allowedCount }} 个</v-chip>
             <v-chip v-if="policy.mutedCount" size="small" variant="tonal" color="warning">
               静音中 {{ policy.mutedCount }} 个
@@ -282,6 +300,49 @@ watch(
             >
               全部关闭
             </v-btn>
+          </v-card-text>
+        </v-card>
+
+        <!-- 账号默认：群聊/私聊各自的三态；没单独设置的会话按这里的默认走 -->
+        <v-card variant="outlined" class="mb-3">
+          <v-card-title class="d-flex align-center">
+            <v-icon icon="mdi-tune-variant" class="mr-2" color="primary" /> 账号默认
+          </v-card-title>
+          <v-card-text class="text-caption pt-0 pb-0" style="opacity: 0.7">
+            没有单独设置的群或私聊按这里的默认走；单独设置过的以那一处为准。
+          </v-card-text>
+          <v-card-text>
+            <v-row dense>
+              <v-col cols="12" md="6">
+                <v-select
+                  :model-value="groupScene"
+                  :items="GROUP_SCENE_ITEMS"
+                  label="群聊默认"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                  :loading="policy.savingScene"
+                  :disabled="!bots.currentAccountId || policy.savingScene"
+                  @update:model-value="(v: SceneValue) => onSceneDefault('group', v)"
+                />
+              </v-col>
+              <v-col cols="12" md="6">
+                <v-select
+                  :model-value="privateScene"
+                  :items="PRIVATE_SCENE_ITEMS"
+                  label="私聊默认"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                  :loading="policy.savingScene"
+                  :disabled="!bots.currentAccountId || policy.savingScene"
+                  @update:model-value="(v: SceneValue) => onSceneDefault('private', v)"
+                />
+              </v-col>
+            </v-row>
+            <div class="text-caption mt-2" style="opacity: 0.6">
+              「跟随」指采用 AI 对话面板里的群聊开关、私信开关。
+            </div>
           </v-card-text>
         </v-card>
 
@@ -380,9 +441,9 @@ watch(
                       </v-list-item>
                       <v-list-item
                         prepend-icon="mdi-tune"
-                        @click="openRules(row.group_id, `高级规则 · ${row.name}`)"
+                        @click="openRules(row.group_id, `本群专属规则 · ${row.name}`)"
                       >
-                        本群高级规则
+                        本群专属规则
                       </v-list-item>
                     </v-list>
                   </v-menu>
@@ -402,23 +463,39 @@ watch(
       </v-window-item>
 
       <v-window-item value="rules">
+        <!-- 同群多账号的分工在插件层：这里给一个明确的去处，避免用户在此页反复猜 -->
+        <v-card variant="outlined" class="mb-3">
+          <v-card-text>
+            <div class="d-flex align-center flex-wrap gap-2">
+              <v-icon icon="mdi-account-multiple-outline" color="primary" class="mr-1" />
+              <span class="text-body-2">
+                同一个群装了多个账号时，由哪个账号处理某个插件，在「功能插件 → 对应插件 → 响应权策略」里配置
+              </span>
+              <v-spacer />
+              <v-btn size="small" variant="tonal" prepend-icon="mdi-open-in-new" @click="router.push('/modules')">
+                去功能插件
+              </v-btn>
+            </div>
+          </v-card-text>
+        </v-card>
+
         <v-card variant="outlined">
           <v-card-title class="d-flex align-center">
             <v-icon icon="mdi-tune" class="mr-2" color="primary" /> 高级规则
           </v-card-title>
           <v-card-text>
             <div class="text-body-2 mb-3">
-              触发方式、回复冷却、免打扰时段与用户例外，按「账号默认」和「单个群」两层设置；
-              不填的项沿用上一层。
+              触发方式、回复冷却、免打扰时段与用户例外可按「账号专属规则」和「单个群」两层设置；
+              这里的设置优先于 AI 对话面板里的默认值。
             </div>
             <v-btn
               color="primary"
               variant="tonal"
               prepend-icon="mdi-cog-outline"
               :disabled="!bots.currentAccountId"
-              @click="openRules(null, '账号默认规则')"
+              @click="openRules(null, '账号专属规则')"
             >
-              账号默认规则
+              账号专属规则
             </v-btn>
             <div class="text-caption mt-3" style="opacity: 0.6">
               单个群的规则从「群与私聊」列表每行右侧菜单打开。

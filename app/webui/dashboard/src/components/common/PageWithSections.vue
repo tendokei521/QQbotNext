@@ -6,9 +6,12 @@ const props = withDefaults(
   defineProps<{
     sections: SectionItem[]
     position?: 'left' | 'top'
+    /** 页内导航小标题（透传给 PageSectionNav）；空串 = 不显示 */
+    navTitle?: string
   }>(),
   {
     position: 'left',
+    navTitle: '',
   },
 )
 
@@ -30,7 +33,13 @@ function onSelect(id: string) {
 
 <template>
   <div class="page-with-sections" :class="`is-${props.position}`">
-    <PageSectionNav :sections="props.sections" :position="props.position" :active="activeId" @select="onSelect" />
+    <PageSectionNav
+      :sections="props.sections"
+      :position="props.position"
+      :active="activeId"
+      :title="props.navTitle"
+      @select="onSelect"
+    />
     <div class="page-with-sections__content">
       <slot />
     </div>

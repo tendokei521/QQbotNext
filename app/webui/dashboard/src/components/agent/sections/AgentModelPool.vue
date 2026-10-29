@@ -1,19 +1,32 @@
 <script setup lang="ts">
 /**
- * 「模型」分区的定制 UI：Provider 模型池（顺序请求 / 测试 / 增删改序）。
- * 分区的 schema 字段由 AgentConfigSection 统一渲染，这里只管池子。
+ * 「模型」分区的定制 UI：模型池（顺序请求 / 测试 / 增删改序）。
+ *
+ * 这里的「加入」只是把**模型服务页已经建好的模型**放进本账号的模型池；
+ * 新建服务商/模型在「模型服务」页，两者语义不同，按钮文案必须区分开。
  */
 import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import http, { errorMessage } from '@/api/http'
 import { useAgentConfigStore } from '@/stores/agentConfig'
 import { useNotifyStore } from '@/stores/notify'
 
 const agent = useAgentConfigStore()
 const notify = useNotifyStore()
+const router = useRouter()
 
 const poolDialog = ref(false)
 const pendingPoolModelId = ref('')
 const testingId = ref('')
+
+/** 模型服务页还没有任何模型：此时「从模型服务加入」没有候选，直接引导去创建 */
+const hasAnyModel = computed(() => agent.providerModels.length > 0)
+
+const availablePoolModels = computed(() =>
+  agent.providerModels.filter((m) => !agent.poolModelIds.includes(m.id)),
+)
+
+const canJoin = computed(() => availablePoolModels.value.length > 0)
 
 async function testModel(id: string) {
   if (testingId.value) return
@@ -28,13 +41,14 @@ async function testModel(id: string) {
   }
 }
 
-const availablePoolModels = computed(() =>
-  agent.providerModels.filter((m) => !agent.poolModelIds.includes(m.id)),
-)
-
 function poolLabel(id: string): string {
   const m = agent.providerModels.find((x) => x.id === id)
   return m ? `${m.preset_name || m.preset_id} / ${m.model}` : id
+}
+
+function openPoolDialog() {
+  pendingPoolModelId.value = ''
+  poolDialog.value = true
 }
 
 function addPoolModel() {
@@ -43,6 +57,7 @@ function addPoolModel() {
   agent.syncPool()
   poolDialog.value = false
   pendingPoolModelId.value = ''
+  notify.push('已加入，按列表顺序依次尝试', 'success')
 }
 
 function removePoolModel(index: number) {
@@ -57,20 +72,30 @@ function movePoolModel(index: number, delta: number) {
   agent.poolModelIds.splice(target, 0, moved)
   agent.syncPool()
 }
+
+function goToProviderPresets() {
+  poolDialog.value = false
+  router.push('/provider-presets')
+}
 </script>
 
 <template>
   <v-card variant="outlined" class="mb-4">
-    <v-card-title class="d-flex align-center">
-      <v-icon icon="mdi-api" class="mr-2" color="info" /> 模型服务（按顺序请求）
+    <v-card-title class="d-flex align-center flex-wrap gap-2">
+      <v-icon icon="mdi-api" class="mr-2" color="info" /> 模型（按顺序尝试）
       <v-spacer />
-      <v-btn size="small" variant="tonal" prepend-icon="mdi-plus" @click="poolDialog = true">添加模型</v-btn>
+      <v-btn v-if="hasAnyModel" size="small" variant="tonal" prepend-icon="mdi-plus" @click="openPoolDialog">
+        从模型服务加入
+      </v-btn>
+      <v-btn v-else size="small" color="primary" variant="tonal" prepend-icon="mdi-open-in-new" @click="goToProviderPresets">
+        去「模型服务」添加模型
+      </v-btn>
     </v-card-title>
-    <v-card-text class="text-body-2 pt-0" style="opacity: 0.8">
-      按顺序依次尝试，前一个失败时自动切换到下一个。
+    <v-card-text class="text-body-2 pt-0 pb-0" style="opacity: 0.8">
+      顺序即回退顺序，前面的失败才试下一个。
     </v-card-text>
-    <v-card-text>
-      <v-list v-if="agent.poolModelIds.length" density="compact">
+    <v-card-text v-if="agent.poolModelIds.length">
+      <v-list density="compact">
         <v-list-item v-for="(id, i) in agent.poolModelIds" :key="id">
           <template #prepend><span class="pool-order">{{ i + 1 }}</span></template>
           <v-list-item-title>{{ poolLabel(id) }}</v-list-item-title>
@@ -90,29 +115,46 @@ function movePoolModel(index: number, delta: number) {
           </template>
         </v-list-item>
       </v-list>
-      <div v-else class="text-caption text-center pa-4" style="color: rgba(var(--v-theme-on-surface), 0.45)">
-        还没有模型，先添加一个模型
-      </div>
     </v-card-text>
 
-    <v-dialog v-model="poolDialog" max-width="420">
+    <div v-else-if="hasAnyModel" class="pool-empty px-4 pb-4 pt-2">
+      <div class="text-caption">还没有加入模型，点右上角「从模型服务加入」选择。</div>
+    </div>
+    <div v-else class="pool-empty px-4 pb-4 pt-2">
+      <div class="text-caption">模型服务里还没有模型：先在「模型服务」添加服务商与模型，再回来加入这里。</div>
+      <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-open-in-new" class="mt-2" @click="goToProviderPresets">
+        去「模型服务」
+      </v-btn>
+    </div>
+
+    <v-dialog v-model="poolDialog" max-width="460">
       <v-card>
         <v-card-title class="d-flex align-center">
-          <v-icon icon="mdi-plus" class="mr-2" color="info" /> 添加模型
+          <v-icon icon="mdi-plus" class="mr-2" color="info" /> 从模型服务加入
         </v-card-title>
         <v-card-text>
-          <v-select
-            v-model="pendingPoolModelId"
-            :items="availablePoolModels.map((m) => ({ title: `${m.preset_name || m.preset_id} / ${m.model}`, value: m.id }))"
-            label="选择模型"
-            density="comfortable"
-            hide-details
-          />
+          <template v-if="canJoin">
+            <v-select
+              v-model="pendingPoolModelId"
+              :items="availablePoolModels.map((m) => ({ title: `${m.preset_name || m.preset_id} / ${m.model}`, value: m.id }))"
+              label="选择模型"
+              density="comfortable"
+              hide-details
+            />
+          </template>
+          <template v-else>
+            <div class="text-body-2">没有可加入的模型：先去「模型服务」添加服务商与模型，再回来加入这里。</div>
+            <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-open-in-new" class="mt-3" @click="goToProviderPresets">
+              去「模型服务」
+            </v-btn>
+          </template>
         </v-card-text>
         <v-card-actions>
           <v-spacer />
           <v-btn variant="text" @click="poolDialog = false">取消</v-btn>
-          <v-btn color="primary" variant="tonal" :disabled="!pendingPoolModelId" @click="addPoolModel">添加</v-btn>
+          <v-btn v-if="canJoin" color="primary" variant="tonal" :disabled="!pendingPoolModelId" @click="addPoolModel">
+            加入
+          </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -131,5 +173,11 @@ function movePoolModel(index: number, delta: number) {
   color: rgb(var(--v-theme-info));
   font-size: 12px;
   font-weight: 600;
+}
+
+.pool-empty {
+  padding: 18px 12px;
+  text-align: center;
+  color: rgba(var(--v-theme-on-surface), 0.55);
 }
 </style>

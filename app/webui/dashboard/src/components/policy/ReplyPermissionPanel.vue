@@ -15,6 +15,7 @@ import { useBotsStore } from '@/stores/bots'
 import EmptyState from '@/components/EmptyState.vue'
 import FieldControl from '@/components/config/FieldControl.vue'
 import StringListWidget from '@/components/config/StringListWidget.vue'
+import SaveStatusBar from '@/components/common/SaveStatusBar.vue'
 
 interface ReplyGroup {
   id: string
@@ -39,22 +40,8 @@ const availableGroups = computed(() =>
     .filter((group) => group.fields.length > 0),
 )
 
-/** 保存状态：与 AI 对话面板使用同一套自动保存，这里只展示结果 */
-const saveState = computed(() => {
-  if (agent.loading) return { text: '加载中…', color: 'info' }
-  switch (agent.saveStatus) {
-    case 'saving':
-      return { text: '保存中…', color: 'info' }
-    case 'dirty':
-      return { text: '未保存', color: 'warning' }
-    case 'error':
-      return { text: '保存失败', color: 'error' }
-    case 'blocked':
-      return { text: '无账号·不保存', color: 'grey' }
-    default:
-      return { text: '已保存', color: 'success' }
-  }
-})
+/** 保存状态：与 AI 对话面板使用同一套自动保存与状态条，这里只展示结果 */
+const showSaveStatus = computed(() => Boolean(bots.currentAccountId) && agent.loadedFor !== null)
 
 /**
  * 取字段 schema。
@@ -95,9 +82,9 @@ watch(
 <template>
   <div>
     <div class="d-flex align-center flex-wrap gap-2 mb-3">
-      <span class="text-body-2">按账号生效：谁能触发回复、高危工具是否需要审批。修改后自动保存。</span>
+      <span class="text-body-2">按账号生效：谁能触发回复、高危工具是否需要审批。</span>
       <v-spacer />
-      <v-chip size="small" :color="saveState.color" variant="tonal">{{ saveState.text }}</v-chip>
+      <SaveStatusBar v-if="showSaveStatus" :status="agent.saveStatus" autosave />
     </div>
 
     <v-alert v-if="agent.loadError" type="warning" variant="tonal" density="compact" class="mb-3">

@@ -20,17 +20,29 @@ const custom = computed(() => (section.value ? agentCustomSection(section.value.
 </script>
 
 <template>
-  <AgentConfigSection v-if="section" :section="section">
-    <template v-if="section.customFirst && custom" #before>
-      <component :is="custom" />
-    </template>
-    <component :is="custom" v-if="!section.customFirst && custom" />
-  </AgentConfigSection>
+  <div class="agent-section-page">
+    <AgentConfigSection v-if="section" :section="section">
+      <template v-if="section.customFirst && custom" #before>
+        <component :is="custom" />
+      </template>
+      <component :is="custom" v-if="!section.customFirst && custom" />
+    </AgentConfigSection>
 
-  <EmptyState
-    v-else
-    icon="mdi-map-marker-question-outline"
-    title="未知的 AI 设置页"
-    description="这个地址没有对应的设置页，可能是链接过期。"
-  />
+    <EmptyState
+      v-else
+      icon="mdi-map-marker-question-outline"
+      title="未知的 AI 设置页"
+      description="这个地址没有对应的设置页，可能是链接过期。"
+    />
+  </div>
 </template>
+
+<style scoped>
+/*
+ * 页内锚点滚动留白：锚点会被固定顶栏（56px）挡住，scrollIntoView 时补上这段偏移。
+ * 只在有页内分组（id 前缀 group-）的 AI 设置页生效，不影响其它页面。
+ */
+.agent-section-page :deep([id^='group-']) {
+  scroll-margin-top: 88px;
+}
+</style>

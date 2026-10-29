@@ -13,10 +13,13 @@ const props = withDefaults(
     sections: SectionItem[]
     active?: string
     position?: 'left' | 'top'
+    /** 导航卡小标题（如「本页分组」）；空串 = 不显示，保持旧调用方外观不变 */
+    title?: string
   }>(),
   {
     active: '',
     position: 'left',
+    title: '',
   },
 )
 
@@ -85,6 +88,7 @@ onUnmounted(() => {
 
 <template>
   <nav class="page-section-nav" :class="`is-${position}`">
+    <div v-if="title" class="nav-title">{{ title }}</div>
     <div
       v-for="item in sections"
       :key="item.id"
@@ -121,6 +125,20 @@ onUnmounted(() => {
   flex-wrap: wrap;
   width: auto;
   position: static;
+}
+
+/* 导航卡小标题：说明这一列是"本页内的分组锚点"，与全局侧栏区分开 */
+.nav-title {
+  padding: 0 12px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: rgba(var(--v-theme-on-surface), 0.38);
+}
+
+.is-top .nav-title {
+  padding: 0 4px 0 0;
+  align-self: center;
 }
 
 .section-item {

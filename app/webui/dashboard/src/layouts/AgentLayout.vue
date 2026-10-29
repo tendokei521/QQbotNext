@@ -11,6 +11,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { AGENT_INDEX_PATH, agentSectionByPath } from '@/agent/sections'
 import { useAgentConfigStore } from '@/stores/agentConfig'
 import { displayName, useBotsStore } from '@/stores/bots'
+import SaveStatusBar from '@/components/common/SaveStatusBar.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -69,14 +70,8 @@ watch(
         <v-chip v-if="accountLabel" size="small" variant="tonal" prepend-icon="mdi-account">
           当前账号：{{ accountLabel }}
         </v-chip>
-        <v-chip v-if="agent.saveStatus === 'saving'" size="small" color="primary" variant="flat">
-          <v-progress-circular size="12" indeterminate class="mr-1" /> 保存中…
-        </v-chip>
-        <v-chip v-else-if="agent.saveStatus === 'error'" size="small" color="error" variant="flat">保存失败</v-chip>
-        <v-chip v-else-if="agent.saveStatus === 'dirty'" size="small" color="warning" variant="flat">未保存</v-chip>
-        <v-chip v-else-if="agent.saveStatus === 'blocked'" size="small" color="grey" variant="flat">无账号·不保存</v-chip>
       </div>
-      <div class="d-flex align-center gap-2">
+      <div class="d-flex align-center flex-wrap gap-2">
         <!--
           AI 回复总开关在「AI 对话面板」里维护（高频操作台），不在任何一个深度设置页；
           头部只保留只读状态，让人一眼知道当前是开还是关。
@@ -89,16 +84,12 @@ watch(
         >
           {{ agent.enabled ? 'AI 回复已开启' : 'AI 回复已关闭' }}
         </v-chip>
-        <v-btn
-          size="small"
-          color="primary"
-          variant="tonal"
-          prepend-icon="mdi-content-save"
-          :loading="agent.saveStatus === 'saving'"
-          @click="agent.save()"
-        >
-          保存配置
-        </v-btn>
+        <!-- 保存状态与动作统一走共享状态条（自动保存，成功后回到「已保存」） -->
+        <SaveStatusBar
+          v-if="hasAccount && agent.loadedFor !== null"
+          :status="agent.saveStatus"
+          autosave
+        />
       </div>
     </div>
     <div class="app-page-subtitle">

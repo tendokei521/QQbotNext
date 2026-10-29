@@ -19,6 +19,7 @@ import { useAgentConfigStore } from '@/stores/agentConfig'
 import { displayName, useBotsStore } from '@/stores/bots'
 import { splitSchema } from '@/utils/schema'
 import panelManifest from '@/agent/ai-panel.json'
+import SaveStatusBar from '@/components/common/SaveStatusBar.vue'
 import PanelCard from '@/components/agent/panel/PanelCard.vue'
 import PanelField from '@/components/agent/panel/PanelField.vue'
 import ReplyScopeCard from '@/components/agent/panel/ReplyScopeCard.vue'
@@ -102,21 +103,12 @@ const triggerEffect = computed(() => {
   return '没有触发方式，群里不会自动接话'
 })
 
-/** 保存状态 → 顶部 chip（文案与 AgentLayout 保持一致） */
-const saveChip = computed(() => {
-  switch (agent.saveStatus) {
-    case 'saving':
-      return { text: '保存中…', color: 'primary', icon: 'mdi-progress-clock' }
-    case 'dirty':
-      return { text: '有未保存修改', color: 'warning', icon: 'mdi-pencil-outline' }
-    case 'error':
-      return { text: '保存失败', color: 'error', icon: 'mdi-alert-circle-outline' }
-    case 'blocked':
-      return { text: '未选账号，改动不会保存', color: 'grey', icon: 'mdi-account-off-outline' }
-    default:
-      return { text: '已保存', color: 'success', icon: 'mdi-check-circle-outline' }
-  }
-})
+/** 模型卡片锚点：状态条「在下方加入模型」直接滚到这里，而不是把用户带去模型服务页 */
+const modelSection = ref<HTMLElement | null>(null)
+
+function scrollToModels() {
+  modelSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 
 /** 当前人格名：从资源目录（role_preset 候选）里按 id 找名字，拿不到就不展示内部 id */
 const rolePresetOptions = ref<{ value: string; label: string }[]>([])
@@ -151,10 +143,6 @@ function reload() {
   void agent.load(true)
 }
 
-async function saveNow() {
-  await agent.save()
-}
-
 onMounted(() => {
   void bootstrap()
   void loadRolePresets()
@@ -184,11 +172,13 @@ watch(
         <v-chip v-if="accountName" size="small" variant="tonal" prepend-icon="mdi-account">
           当前账号：{{ accountName }}
         </v-chip>
-        <!-- 配置还没成功加载时不要显示「已保存」：那是没读到内容，不是已经存好 -->
-        <v-chip v-if="hasAccount && agent.loadedFor !== null" size="small" :color="saveChip.color" variant="tonal">
-          <v-icon start size="x-small" :icon="saveChip.icon" />
-          {{ saveChip.text }}
-        </v-chip>
+        <!-- 保存状态与保存动作统一走共享状态条（自动保存，不再放手动「保存」按钮） -->
+        <SaveStatusBar
+          v-if="hasAccount && agent.loadedFor !== null"
+          :status="agent.saveStatus"
+          autosave
+          hint="改动会在 2 秒内自动保存"
+        />
         <v-btn size="small" variant="text" prepend-icon="mdi-book-multiple" @click="templateDialog = true">
           配置模板
         </v-btn>
@@ -206,16 +196,6 @@ watch(
           @click="monitorOpen = true"
         >
           诊断
-        </v-btn>
-        <v-btn
-          color="primary"
-          variant="tonal"
-          prepend-icon="mdi-content-save"
-          :loading="agent.saveStatus === 'saving'"
-          :disabled="!hasAccount"
-          @click="saveNow"
-        >
-          保存
         </v-btn>
       </div>
     </div>
@@ -243,31 +223,35 @@ watch(
 
       <!-- 状态条：只读，回答「现在能不能回」；与其他卡片同样式，不额外铺灰底 -->
       <v-card variant="outlined" class="mb-4">
-        <v-card-text class="d-flex align-center flex-wrap gap-3 py-2">
-          <v-chip
-            :color="agent.enabled ? 'success' : 'grey'"
-            variant="tonal"
-            :prepend-icon="agent.enabled ? 'mdi-check-circle-outline' : 'mdi-pause-circle-outline'"
-          >
-            {{ agent.enabled ? 'AI 回复已开启' : 'AI 回复已关闭' }}
-          </v-chip>
-          <template v-if="agent.poolModelIds.length">
-            <v-chip color="info" variant="tonal" prepend-icon="mdi-api">
-              模型 {{ agent.poolModelIds.length }} 个
+        <v-card-text class="py-2">
+          <div class="d-flex align-center flex-wrap gap-3">
+            <v-chip
+              :color="agent.enabled ? 'success' : 'grey'"
+              variant="tonal"
+              :prepend-icon="agent.enabled ? 'mdi-check-circle-outline' : 'mdi-pause-circle-outline'"
+            >
+              {{ agent.enabled ? 'AI 回复已开启' : 'AI 回复已关闭' }}
             </v-chip>
-          </template>
-          <template v-else>
-            <v-chip color="warning" variant="tonal" prepend-icon="mdi-alert-circle-outline">还没选模型</v-chip>
-            <v-btn size="small" variant="text" prepend-icon="mdi-arrow-right" @click="router.push('/provider-presets')">
-              去「模型服务」
+            <template v-if="agent.poolModelIds.length">
+              <v-chip color="info" variant="tonal" prepend-icon="mdi-api">
+                模型 {{ agent.poolModelIds.length }} 个
+              </v-chip>
+            </template>
+            <template v-else>
+              <v-chip color="warning" variant="tonal" prepend-icon="mdi-alert-circle-outline">还没选模型</v-chip>
+              <v-btn size="small" variant="text" prepend-icon="mdi-arrow-down" @click="scrollToModels">
+                在下方加入模型
+              </v-btn>
+            </template>
+            <v-chip color="pink" variant="tonal" prepend-icon="mdi-account-heart">人格：{{ personaText }}</v-chip>
+            <v-btn v-if="!personaName" size="small" variant="text" prepend-icon="mdi-arrow-right" @click="router.push('/personas')">
+              去「人格设定」
             </v-btn>
-          </template>
-          <v-chip color="pink" variant="tonal" prepend-icon="mdi-account-heart">人格：{{ personaText }}</v-chip>
-          <v-btn v-if="!personaName" size="small" variant="text" prepend-icon="mdi-arrow-right" @click="router.push('/personas')">
-            去「人格设定」
-          </v-btn>
-          <v-spacer />
-          <span class="text-caption" style="opacity: 0.6">改动会在 2 秒内自动保存</span>
+          </div>
+          <div v-if="!agent.poolModelIds.length" class="text-caption mt-1" style="opacity: 0.6">
+            还没有模型服务？先去
+            <a class="text-primary text-decoration-none" href="#" @click.prevent="router.push('/provider-presets')">「模型服务」添加</a>
+          </div>
         </v-card-text>
       </v-card>
 
@@ -275,7 +259,7 @@ watch(
       <PanelCard
         title="回复开关"
         icon="mdi-toggle-switch-outline"
-        subtitle="群聊与私聊分开控制；关掉后对应场景不再自动回复"
+        subtitle="只对没有单独设置的群/私聊生效；在「回复与权限」里单独开过的以那边为准"
       >
         <div class="switch-row">
           <div>
@@ -302,6 +286,11 @@ watch(
             @update="(v: any) => onField(key, v)"
           />
         </div>
+        <div class="d-flex justify-end mt-2">
+          <v-btn size="small" variant="text" append-icon="mdi-arrow-right" @click="router.push('/reply?tab=groups')">
+            单独设置的群
+          </v-btn>
+        </div>
       </PanelCard>
 
       <!-- ② 触发方式：什么时候接话 -->
@@ -321,23 +310,23 @@ watch(
           <v-icon icon="mdi-lightbulb-on-outline" size="small" color="info" class="mr-2" />
           当前：{{ triggerEffect }}
         </div>
+        <div class="d-flex align-center flex-wrap gap-2 mt-2">
+          <span class="text-caption" style="opacity: 0.65">
+            账号专属规则或单个群的规则可以覆盖这里的设置
+          </span>
+          <v-btn size="small" variant="text" append-icon="mdi-arrow-right" @click="router.push('/reply?tab=rules')">
+            去调整
+          </v-btn>
+        </div>
       </PanelCard>
 
-      <!-- ③ 模型：复用设置区的模型池组件（自读 store，不需要 props） -->
-      <div class="panel-block">
-        <div class="panel-block-title">
-          <v-icon icon="mdi-api" size="small" color="info" class="mr-2" />
-          模型
-        </div>
+      <!-- ③ 模型：复用设置区的模型卡（自读 store，不需要 props） -->
+      <div ref="modelSection" class="panel-block">
         <AgentModelPool />
       </div>
 
-      <!-- ④ 人格：复用设置区的「提示词方案 + 人格预设」组件 -->
+      <!-- ④ 人格：复用设置区的人格卡（唯一「应用人格」入口） -->
       <div class="panel-block">
-        <div class="panel-block-title">
-          <v-icon icon="mdi-account-voice" size="small" color="pink" class="mr-2" />
-          人格
-        </div>
         <AgentRolePresets />
       </div>
 
@@ -393,13 +382,5 @@ watch(
 
 .panel-block {
   margin-bottom: 8px;
-}
-
-.panel-block-title {
-  display: flex;
-  align-items: center;
-  font-size: 14px;
-  font-weight: 700;
-  margin: 0 0 8px 2px;
 }
 </style>

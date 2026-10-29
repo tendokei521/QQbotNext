@@ -168,15 +168,15 @@ export const usePolicyStore = defineStore('policy', () => {
     }
   }
 
-  /** 写「账号默认（群聊）」：null = 跟随 Agent 配置（清掉场景层覆盖） */
-  async function setSceneEnabled(enabled: boolean | null): Promise<void> {
+  /** 写「账号默认」：null = 跟随 AI 对话面板的开关（清掉场景层覆盖） */
+  async function setSceneEnabled(scene: 'group' | 'private', enabled: boolean | null): Promise<void> {
     const aid = accountId.value
     if (!aid) return
     savingScene.value = true
     try {
       await http.post('/api/policy/scene', {
         account_id: aid,
-        scene: 'group',
+        scene,
         enabled,
       })
       await load()
