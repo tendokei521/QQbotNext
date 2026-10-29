@@ -184,7 +184,8 @@ watch(
         <v-chip v-if="accountName" size="small" variant="tonal" prepend-icon="mdi-account">
           当前账号：{{ accountName }}
         </v-chip>
-        <v-chip v-if="hasAccount" size="small" :color="saveChip.color" variant="tonal">
+        <!-- 配置还没成功加载时不要显示「已保存」：那是没读到内容，不是已经存好 -->
+        <v-chip v-if="hasAccount && agent.loadedFor !== null" size="small" :color="saveChip.color" variant="tonal">
           <v-icon start size="x-small" :icon="saveChip.icon" />
           {{ saveChip.text }}
         </v-chip>
