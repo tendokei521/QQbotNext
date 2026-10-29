@@ -27,8 +27,8 @@ const notify = useNotifyStore()
 /** 顶层说明：让用户明确这里的规则会压过面板里的默认值 */
 const priorityNote = computed(() =>
   props.channelId
-    ? '这里的设置只对这个群生效，优先于账号与面板默认值。'
-    : '这里的设置优先于 AI 对话面板里的默认值。',
+    ? '这里的设置只对这个群生效，优先于账号与全局默认值。'
+    : '这里的设置是账号级全局规则，对没有单独设置过的群生效。',
 )
 
 const loading = ref(false)
@@ -414,7 +414,7 @@ watch(
 
       <v-card-actions>
         <v-chip v-if="Object.keys(sources).length" size="x-small" variant="text" class="ml-2">
-          {{ channelId ? '没填的项沿用本群或账号设置' : '没填的项沿用账号设置或默认值' }}
+          {{ channelId ? '没填的项沿用本群或全局规则' : '没填的项沿用系统默认值' }}
         </v-chip>
         <v-spacer />
         <v-btn variant="text" @click="emit('update:modelValue', false)">取消</v-btn>

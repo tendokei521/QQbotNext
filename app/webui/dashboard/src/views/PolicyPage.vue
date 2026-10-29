@@ -7,7 +7,6 @@
  *   看不出它是「显式关闭」还是「本来就没开」。
  * - 谁能回复：按账号的响应权限档位、拥有者/管理者名册、高危工具审批
  *   （字段分组来自 `src/agent/ai-panel.json::reply.groups`，见 ReplyPermissionPanel）。
- * - 高级规则：保留账号默认规则的弹窗入口；逐群规则仍从群列表行内菜单打开。
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -16,7 +15,6 @@ import {
   triggerModeLabel,
   usePolicyStore,
   type PolicyMatrixRow,
-  type PolicyOverrideRow,
   type SwitchValue,
 } from '@/stores/policy'
 import { useNotifyStore } from '@/stores/notify'
@@ -32,9 +30,9 @@ const bots = useBotsStore()
 const policy = usePolicyStore()
 const notify = useNotifyStore()
 
-// ---------- 页签（支持 ?tab=groups|who|rules，默认 groups） ----------
-type PolicyTab = 'groups' | 'who' | 'rules'
-const POLICY_TABS: PolicyTab[] = ['groups', 'who', 'rules']
+// ---------- 页签（支持 ?tab=groups|who，默认 groups） ----------
+type PolicyTab = 'groups' | 'who'
+const POLICY_TABS: PolicyTab[] = ['groups', 'who']
 
 function readTab(): PolicyTab {
   const raw = String(route.query.tab || '')
@@ -50,8 +48,6 @@ watch(tab, (value) => {
   }
   // 从别的页签回到群列表时补一次加载（本页首次进入可能是「谁能回复」）
   if (value === 'groups' && !policy.rows.length && bots.currentAccountId) void loadWithGroups()
-  // 高级规则 tab 每次进入都刷新覆盖摘要（弹窗来源相同，保证看到最新值）
-  if (value === 'rules') void loadAccountOverride()
 })
 
 // 外部改地址（浏览器前进/后退、手改 query）时同步回页签
@@ -66,69 +62,6 @@ watch(
 const rulesDialog = ref(false)
 const rulesChannel = ref<string | null>(null)
 const rulesTitle = ref('')
-
-/** 账号级覆盖行（高级规则 tab 的摘要来源）：null = 还没读到 */
-const accountOverride = ref<PolicyOverrideRow | null>(null)
-const loadingAccountOverride = ref(false)
-
-/**
- * 读账号层的覆盖行。
- *
- * 高级规则 tab 以前只有一句说明和一个按钮，用户看不到"我到底覆盖了什么"；
- * 这里把已覆盖项与值列出来，规则的真实编辑仍走弹窗。
- */
-async function loadAccountOverride() {
-  if (!bots.currentAccountId) {
-    accountOverride.value = null
-    return
-  }
-  loadingAccountOverride.value = true
-  try {
-    const detail = await policy.getPolicy(null)
-    accountOverride.value = detail?.overrides?.account || null
-  } catch {
-    accountOverride.value = null
-  } finally {
-    loadingAccountOverride.value = false
-  }
-}
-
-/** 覆盖项 → 人话摘要 */
-const accountOverrideRows = computed<{ label: string; value: string }[]>(() => {
-  const row = accountOverride.value
-  const config = (row?.config || {}) as Record<string, any>
-  const permission = (row?.permission || {}) as Record<string, any>
-  const rows: { label: string; value: string }[] = []
-
-  const hasAt = Object.prototype.hasOwnProperty.call(config, 'trigger_at')
-  const hasKeyword = Object.prototype.hasOwnProperty.call(config, 'trigger_keyword')
-  if (hasAt || hasKeyword) {
-    const at = Boolean(config.trigger_at)
-    const keywords = Array.isArray(config.trigger_keyword)
-      ? config.trigger_keyword.map((item: any) => String(item)).filter(Boolean)
-      : []
-    if (at && keywords.length) rows.push({ label: '触发方式', value: `@ 或关键词（${keywords.join('、')}）` })
-    else if (at) rows.push({ label: '触发方式', value: '仅 @' })
-    else if (keywords.length) rows.push({ label: '触发方式', value: `仅关键词（${keywords.join('、')}）` })
-    else rows.push({ label: '触发方式', value: '不触发' })
-  }
-  if (config.reply_cooldown !== undefined) {
-    rows.push({ label: '回复冷却', value: `${config.reply_cooldown} 秒` })
-  }
-  if (config.message_debounce_seconds !== undefined) {
-    rows.push({ label: '消息合并等待', value: `${config.message_debounce_seconds} 秒` })
-  }
-  if (config.quiet_hours) {
-    rows.push({ label: '免打扰时段', value: String(config.quiet_hours) })
-  }
-  const mode = String(permission.user_mode || '')
-  const userList = Array.isArray(permission.user_list) ? permission.user_list : []
-  if (mode === 'blacklist') rows.push({ label: '用户例外', value: `黑名单 ${userList.length} 人` })
-  if (mode === 'whitelist') rows.push({ label: '用户例外', value: `仅白名单 ${userList.length} 人` })
-  if (row?.enabled === true) rows.push({ label: '账号开关', value: '一律允许' })
-  if (row?.enabled === false) rows.push({ label: '账号开关', value: '一律不允许' })
-  return rows
-})
 
 function openRules(channelId: string | null, title = '') {
   rulesChannel.value = channelId
@@ -304,7 +237,6 @@ onMounted(async () => {
   if (tab.value === 'groups') await loadWithGroups()
   else await policy.load()
   void loadPrivateScene()
-  void loadAccountOverride()
 })
 
 watch(
@@ -312,14 +244,9 @@ watch(
   () => {
     void loadWithGroups()
     void loadPrivateScene()
-    void loadAccountOverride()
   },
 )
 
-// 关闭规则弹窗后刷新摘要：保存成功的覆盖项要立刻出现在 tab 里
-watch(rulesDialog, (open) => {
-  if (!open) void loadAccountOverride()
-})
 </script>
 
 <template>
@@ -352,7 +279,6 @@ watch(rulesDialog, (open) => {
     <v-tabs v-model="tab" density="compact" class="mb-3">
       <v-tab value="groups">群与私聊</v-tab>
       <v-tab value="who">谁能回复</v-tab>
-      <v-tab value="rules">高级规则</v-tab>
     </v-tabs>
 
     <v-window v-model="tab">
@@ -584,70 +510,6 @@ watch(rulesDialog, (open) => {
         <ReplyPermissionPanel />
       </v-window-item>
 
-      <v-window-item value="rules">
-        <!-- 同群多账号的分工在插件层：这里给一个明确的去处，避免用户在此页反复猜 -->
-        <v-card variant="outlined" class="mb-3">
-          <v-card-text>
-            <div class="d-flex align-center flex-wrap gap-2">
-              <v-icon icon="mdi-account-multiple-outline" color="primary" class="mr-1" />
-              <span class="text-body-2">
-                同一个群装了多个账号时，由哪个账号处理某个插件，在「功能插件 → 对应插件 → 响应权策略」里配置
-              </span>
-              <v-spacer />
-              <v-btn size="small" variant="tonal" prepend-icon="mdi-open-in-new" @click="router.push('/modules')">
-                去功能插件
-              </v-btn>
-            </div>
-          </v-card-text>
-        </v-card>
-
-        <!-- 当前账号级覆盖摘要：让用户先看到"我改过什么、现在值是多少"，再决定要不要进弹窗 -->
-        <v-card variant="outlined" class="mb-3">
-          <v-card-title class="d-flex align-center">
-            <v-icon icon="mdi-format-list-checkbox" class="mr-2" color="primary" /> 当前账号专属规则
-            <v-spacer />
-            <v-chip v-if="accountOverrideRows.length" size="small" variant="tonal">
-              已覆盖 {{ accountOverrideRows.length }} 项
-            </v-chip>
-          </v-card-title>
-          <v-card-text>
-            <v-progress-linear v-if="loadingAccountOverride" indeterminate color="primary" class="mb-2" />
-            <v-list v-else-if="accountOverrideRows.length" density="compact">
-              <v-list-item v-for="row in accountOverrideRows" :key="row.label">
-                <v-list-item-title class="text-body-2">{{ row.label }}</v-list-item-title>
-                <v-list-item-subtitle>{{ row.value }}</v-list-item-subtitle>
-              </v-list-item>
-            </v-list>
-            <div v-else class="text-caption">
-              还没有账号专属规则，全部按 AI 对话面板与账号默认执行。
-            </div>
-          </v-card-text>
-        </v-card>
-
-        <v-card variant="outlined">
-          <v-card-title class="d-flex align-center">
-            <v-icon icon="mdi-tune" class="mr-2" color="primary" /> 高级规则
-          </v-card-title>
-          <v-card-text>
-            <div class="text-body-2 mb-3">
-              触发方式、回复冷却、免打扰时段与用户例外可按「账号专属规则」和「单个群」两层设置；
-              这里的设置优先于 AI 对话面板里的默认值。
-            </div>
-            <v-btn
-              color="primary"
-              variant="tonal"
-              prepend-icon="mdi-cog-outline"
-              :disabled="!bots.currentAccountId"
-              @click="openRules(null, '账号专属规则')"
-            >
-              账号专属规则
-            </v-btn>
-            <div class="text-caption mt-3" style="opacity: 0.6">
-              单个群的规则从「群与私聊」列表每行右侧菜单打开。
-            </div>
-          </v-card-text>
-        </v-card>
-      </v-window-item>
     </v-window>
 
     <PolicyRulesDialog v-model="rulesDialog" :channel-id="rulesChannel" :title="rulesTitle" />

@@ -4,8 +4,8 @@
  *
  * 与「AI 设置」的分工：这里只放**高频、一眼要看到**的东西——
  *   1. 状态条：总开关 / 模型是否就绪 / 当前人格；
- *   2. 回复开关：只有总开关（群聊/私聊默认与触发方式都在「回复与权限」里改）；
- *   3. 触发方式：只读摘要 + 跳转（唯一编辑器在「回复与权限」）；
+ *   2. 回复开关：总开关（群聊/私聊默认在「回复与权限」里改）；
+ *   3. 触发方式：**全局触发规则的唯一编辑入口**（生效摘要 + 规则抽屉）；
  *   4. 模型池与人格（直接复用设置区已有的定制组件，不写第二套表单）；
  *   5. 谁能回复：只读摘要 + 跳转「回复与权限」。
  *
@@ -17,7 +17,7 @@ import { useRouter } from 'vue-router'
 import http from '@/api/http'
 import { useAgentConfigStore } from '@/stores/agentConfig'
 import { displayName, useBotsStore } from '@/stores/bots'
-import panelManifest from '@/agent/ai-panel.json'
+import { triggerModeLabel, usePolicyStore, type PolicyDetail } from '@/stores/policy'
 import { resolvePersona, type PersonaPresetLike } from '@/agent/persona'
 import SaveStatusBar from '@/components/common/SaveStatusBar.vue'
 import PanelCard from '@/components/agent/panel/PanelCard.vue'
@@ -29,22 +29,7 @@ import AgentConfigSearchDialog from '@/components/agent/AgentConfigSearchDialog.
 import AgentCopyConfigDialog from '@/components/agent/AgentCopyConfigDialog.vue'
 import EventMonitorDialog from '@/components/bots/EventMonitorDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
-
-interface PanelCardDef {
-  id: string
-  label: string
-  icon: string
-  fields: string[]
-}
-
-/** 面板字段卡清单（后端生成，勿手改 JSON） */
-const PANEL_CARDS: PanelCardDef[] =
-  (panelManifest as unknown as { panel?: { cards?: PanelCardDef[] } }).panel?.cards || []
-// 这两张卡片的信息现在都以只读摘要展示；字段清单仍从后端生成，避免前后端漂移
-const replyCard = PANEL_CARDS.find((card) => card.id === 'panel_reply')
-const triggerCard = PANEL_CARDS.find((card) => card.id === 'panel_trigger')
-void replyCard
-void triggerCard
+import PolicyRulesDialog from '@/components/policy/PolicyRulesDialog.vue'
 
 const agent = useAgentConfigStore()
 const bots = useBotsStore()
@@ -75,22 +60,89 @@ function onEnabled(value: boolean | null) {
   agent.onEnabledChange(value)
 }
 
-/** 关键词可能是数组，也可能是历史数据里的多行文本 */
-const keywordList = computed<string[]>(() => {
-  const value = agent.draft.trigger_keyword
-  if (Array.isArray(value)) return value.map((item) => String(item ?? '').trim()).filter(Boolean)
-  if (typeof value === 'string') return value.split(/[\n,，]/).map((item) => item.trim()).filter(Boolean)
-  return []
+/** 全局触发规则抽屉（channelId=null = 账号层） */
+const rulesOpen = ref(false)
+const policy = usePolicyStore()
+const globalDetail = ref<PolicyDetail | null>(null)
+const policyLoading = ref(false)
+
+/**
+ * 摘要必须来自 /api/policy 的解析结果（resolved.config + sources），
+ * 不能从 agent.draft.trigger_at/keyword 推断——账号层覆盖与双写旧键会让两者漂移。
+ */
+async function loadGlobalPolicy() {
+  if (!bots.currentAccountId) {
+    globalDetail.value = null
+    return
+  }
+  policyLoading.value = true
+  try {
+    globalDetail.value = await policy.getPolicy(null)
+  } catch {
+    globalDetail.value = null
+  } finally {
+    policyLoading.value = false
+  }
+}
+
+const globalConfig = computed<Record<string, any>>(
+  () => globalDetail.value?.resolved?.config || {},
+)
+
+/** 触发方式 + 关键词/概率的一句话摘要 */
+const globalTriggerText = computed(() => {
+  const config = globalConfig.value
+  const mode = String(config.trigger_mode || 'none')
+  const label = triggerModeLabel(mode)
+  const keywords = Array.isArray(config.trigger_keyword)
+    ? config.trigger_keyword.map((item: any) => String(item)).filter(Boolean)
+    : []
+  if ((mode === 'keyword' || mode === 'both') && keywords.length) {
+    return `${label}（${keywords.join('、')}）`
+  }
+  if (mode === 'all') {
+    return `${label} ${Number(config.trigger_probability ?? 100)}%`
+  }
+  return label
 })
 
-/** 触发方式的一句话结论：让用户不用看懂两个开关的组合效果 */
-const triggerEffect = computed(() => {
-  const at = Boolean(agent.draft.trigger_at)
-  const keyword = keywordList.value.length > 0
-  if (at && keyword) return '被 @ 或命中关键词时回复'
-  if (at) return '被 @ 时回复'
-  if (keyword) return '消息命中关键词时回复'
-  return '没有触发方式，群里不会自动接话'
+/** 节奏与免打扰：一眼看到"多快回、何时安静" */
+const globalRhythm = computed(() => {
+  const config = globalConfig.value
+  const parts: string[] = []
+  if (config.reply_cooldown !== undefined) parts.push(`冷却 ${config.reply_cooldown}s`)
+  if (config.message_debounce_seconds !== undefined) {
+    parts.push(`合并 ${config.message_debounce_seconds}s`)
+  }
+  if (config.quiet_hours) parts.push(`免打扰 ${config.quiet_hours}`)
+  return parts.length ? parts.join(' · ') : '默认节奏'
+})
+
+const SOURCE_LABELS: Record<string, string> = {
+  default: '默认',
+  account: '账号规则',
+  scene: '场景默认',
+  channel: '本群规则',
+}
+
+/** 来源 chips：让"这条规则来自账号层还是默认"可见 */
+const globalSourceChips = computed(() => {
+  const sources = globalDetail.value?.resolved?.sources || {}
+  const rows = [
+    ['触发', 'trigger_mode'],
+    ['冷却', 'reply_cooldown'],
+    ['免打扰', 'quiet_hours'],
+  ]
+  return rows.map(([label, key]) => ({
+    label,
+    source: SOURCE_LABELS[String(sources[key] || 'default')] || String(sources[key] || '默认'),
+    overridden: String(sources[key] || 'default') !== 'default',
+  }))
+})
+
+// 规则抽屉关闭 → 刷新摘要（保存成功后卡面立即更新）
+watch(rulesOpen, (open) => {
+  if (!open) void loadGlobalPolicy()
 })
 
 /** 当前人格卡锚点：状态条结论不跳走，滚动到本页面板内的人格卡 */
@@ -158,6 +210,7 @@ onMounted(() => {
   void bootstrap()
   void loadRolePresets()
   void loadGlobalDefaultModel()
+  void loadGlobalPolicy()
 })
 
 // 切账号：整份配置按账号重新拉（有未保存改动时 store 会先落盘）
@@ -166,6 +219,7 @@ watch(
   (id, prev) => {
     if (id === prev) return
     void agent.load(true)
+    void loadGlobalPolicy()
   },
 )
 </script>
@@ -294,32 +348,41 @@ watch(
           <v-chip size="small" variant="tonal" :color="privateDefault ? 'success' : 'grey'">
             私聊默认：{{ privateDefault ? '允许' : '禁止' }}
           </v-chip>
-          <v-spacer />
-          <v-btn size="small" variant="text" append-icon="mdi-arrow-right" @click="router.push('/reply?tab=groups')">
-            去「回复与权限」改默认与例外
-          </v-btn>
         </div>
       </PanelCard>
 
       <!-- ② 触发方式：什么时候接话 -->
-      <PanelCard title="触发方式" icon="mdi-at" color="info" subtitle="群聊里什么时候该接话；在「回复与权限」里改">
+      <PanelCard
+        title="触发方式"
+        icon="mdi-at"
+        color="info"
+        subtitle="全局规则：什么时候接话、多快回、何时安静"
+      >
+        <v-progress-linear v-if="policyLoading" indeterminate color="info" class="mb-3" />
         <div class="d-flex align-center flex-wrap gap-2">
-          <v-chip size="small" variant="tonal" color="info">{{ triggerEffect }}</v-chip>
-          <span v-if="keywordList.length" class="text-caption" style="opacity: 0.7">
-            关键词：{{ keywordList.join('、') }}
-          </span>
-        </div>
-        <div class="effect-line mt-4">
-          <v-icon icon="mdi-lightbulb-on-outline" size="small" color="info" class="mr-2" />
-          当前：{{ triggerEffect }}
+          <v-chip size="small" variant="tonal" color="info">{{ globalTriggerText }}</v-chip>
+          <span class="text-caption" style="opacity: 0.75">{{ globalRhythm }}</span>
+          <v-spacer />
+          <v-btn
+            size="small"
+            variant="tonal"
+            prepend-icon="mdi-tune"
+            :disabled="!hasAccount"
+            @click="rulesOpen = true"
+          >
+            编辑全局触发规则
+          </v-btn>
         </div>
         <div class="d-flex align-center flex-wrap gap-2 mt-2">
-          <span class="text-caption" style="opacity: 0.65">
-            触发方式只在这里展示；账号默认、单群例外都在「回复与权限」
-          </span>
-          <v-btn size="small" variant="text" append-icon="mdi-arrow-right" @click="router.push('/reply?tab=rules')">
-            去修改
-          </v-btn>
+          <v-chip
+            v-for="chip in globalSourceChips"
+            :key="chip.label"
+            size="x-small"
+            variant="tonal"
+            :color="chip.overridden ? 'info' : undefined"
+          >
+            {{ chip.label }}·{{ chip.source }}
+          </v-chip>
         </div>
       </PanelCard>
 
@@ -343,6 +406,7 @@ watch(
       </div>
     </template>
 
+    <PolicyRulesDialog v-model="rulesOpen" :channel-id="null" title="全局触发规则" />
     <EventMonitorDialog v-model="monitorOpen" :account-id="accountId" :account-name="accountName" />
     <AgentConfigSearchDialog v-model="searchDialog" />
     <AgentCopyConfigDialog v-model="copyDialog" />
