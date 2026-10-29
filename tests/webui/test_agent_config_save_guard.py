@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from app.agent.config import module_owned_keys
 from app.webui.api import agent as agent_api
-from app.webui.api.deps import get_config_service, get_agent_manager
+from app.webui.api.deps import get_agent_manager, get_config_service
 
 
 class _Config:

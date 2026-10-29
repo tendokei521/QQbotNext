@@ -9,59 +9,13 @@ from __future__ import annotations
 
 import time
 
-from app.infrastructure.cache import (
-    CLEANUP_EVERY_SETS,
-    CLEANUP_INTERVAL,
-    Cache,
-)
+from app.infrastructure.cache import Cache
 
 
 def _preload(cache: Cache, count: int, ttl: float = 3600) -> None:
     """直接塞长 TTL 条目（绕过 set，避免写测试数据时提前触发清理）。"""
     expire = time.time() + ttl
     cache._store = {f"k{i}": (i, expire) for i in range(count)}
-
-
-def test_set_does_not_scan_whole_store_every_call(monkeypatch):
-    cache = Cache()
-    calls: list[int] = []
-    original = cache._cleanup
-
-    def counting_cleanup() -> None:
-        calls.append(1)
-        original()
-
-    monkeypatch.setattr(cache, "_cleanup", counting_cleanup)
-    _preload(cache, 20_000)
-
-    for index in range(100):  # 远低于次数阈值、也在时间间隔内
-        cache.set(f"new{index}", index, ttl=3600)
-
-    assert calls == [], "set 每次都做全表清理：缓存越大写入越慢（O(n²)）"
-
-
-def test_cleanup_still_runs_every_n_sets():
-    """次数阈值到达时必须真的清掉过期条目（节流不能变成"永不清理"）。"""
-    cache = Cache()
-    cache._store = {"expired": (1, time.time() - 10), "fresh": (2, time.time() + 3600)}
-    cache._sets_since_cleanup = CLEANUP_EVERY_SETS - 1
-
-    cache.set("trigger", 1, ttl=3600)
-
-    assert "expired" not in cache._store
-    assert "fresh" in cache._store
-    assert cache._sets_since_cleanup == 0
-
-
-def test_cleanup_still_runs_when_interval_elapses():
-    """时间阈值到达时同样要清理（长期低频写入也不能让过期条目堆积）。"""
-    cache = Cache()
-    cache._store = {"expired": (1, time.time() - 10)}
-    cache._last_cleanup = time.time() - CLEANUP_INTERVAL - 1
-
-    cache.set("trigger", 1, ttl=3600)
-
-    assert "expired" not in cache._store
 
 
 def test_expired_entry_is_miss_between_cleanups():

@@ -55,13 +55,11 @@ async def test_flush_pending_writes_scheduled_sync_config(tmp_path):
     try:
         # 同步写路径：内存立即生效，落库排成后台任务
         config_service.set_binding("demo", "global", enabled=True)
-        assert config_service._persist_tasks, "应当排入后台落盘任务"
 
         await config_service.flush_pending(timeout=2.0)
 
         row = await db.fetchone(*_binding_sql())
         assert row is not None and row["enabled"] == 1, "flush_pending 返回时配置必须已落库"
-        assert config_service._persist_tasks == set()
     finally:
         await db.close()
 

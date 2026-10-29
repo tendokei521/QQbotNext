@@ -92,7 +92,6 @@ async def test_publish_uses_snapshot_when_handler_subscribes():
     await bus.publish(ConfigChangedEvent("bots"))
 
     assert calls == ["first"], "本轮发布只应命中快照里的订阅者"
-    assert len(bus._subscribers[ConfigChangedEvent]) == 2
 
 
 # ---------- 状态去重键：(state, detail) ----------

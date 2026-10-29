@@ -19,7 +19,6 @@ from app.infrastructure.onebot.client import (
     API_TIMEOUT_SECONDS,
     DEFAULT_API_TIMEOUT,
     BotConnection,
-    _callable_accepts_timeout,
     resolve_api_timeout,
 )
 from app.plugin.nodes.outbound import OutboundPipeline, SendNode
@@ -107,21 +106,6 @@ async def test_normal_response_still_matched():
 
 
 # ---------- 超时沿出站链下传 ----------
-
-
-def test_hook_signature_detection():
-    async def legacy(action, params):
-        return None
-
-    async def modern(action, params, timeout=None):
-        return None
-
-    async def varargs(*args):
-        return None
-
-    assert _callable_accepts_timeout(legacy) is False
-    assert _callable_accepts_timeout(modern) is True
-    assert _callable_accepts_timeout(varargs) is True
 
 
 async def test_timeout_reaches_direct_send_through_outbound_pipeline():

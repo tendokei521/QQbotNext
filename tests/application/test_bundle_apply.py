@@ -160,7 +160,7 @@ async def test_upgrade_preserves_user_edits_and_reuses_secret(container, config_
     """P4-3：同 id 升版本 → 用户改过的键不被覆盖、未重填的密钥复用旧值、旧对象清理。"""
     await _seed(container, config_service)
     applier = BundleApplier(config_service)
-    first = await applier.apply(
+    await applier.apply(
         "demo-pack", "acc1", normalize_manifest(MANIFEST), FILES,
         secrets={"providers[0].api_key": "sk-old"},
     )

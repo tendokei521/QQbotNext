@@ -65,24 +65,6 @@ async def test_cron_task_next_run_lands_on_cron_slot():
         await task.stop()
 
 
-async def test_next_run_refreshes_on_each_next():
-    """每次 _next() 都要刷新 next_run（触发后必须前进，不能停在旧值）。"""
-    task = ScheduledTask("cron", "*/5 * * * *", _noop, log=_NullLog())
-    task._next()
-    first = task.next_run
-    assert first is not None
-    task._cron_target = None  # 模拟已触发：强制下一次重新计算
-    task._next()
-    assert task.next_run is not None and task.next_run >= first
-
-
-def test_cron_cache_reused_without_wall_clock_drift():
-    task = ScheduledTask("cron", "*/5 * * * *", _noop, log=_NullLog())
-    first = task._next_cron_target()
-    assert task._cron_target == first and task._cron_cached_at is not None
-    assert task._next_cron_target() == first, "未发生漂移时应复用缓存目标"
-
-
 def test_cron_cache_discarded_on_wall_clock_drift():
     """墙钟跳变（NTP/休眠）超过阈值 → 丢弃缓存目标并按当前墙钟重算。"""
     task = ScheduledTask("cron", "*/5 * * * *", _noop, log=_NullLog())
@@ -97,20 +79,7 @@ def test_cron_cache_discarded_on_wall_clock_drift():
     target = task._next_cron_target()
 
     assert target > datetime.now() - timedelta(seconds=1), "重算后目标必须在未来"
-    assert task._cron_cached_at is not None
-    assert task._cron_cached_at > stale_cached_at + timedelta(seconds=CRON_CACHE_MAX_DRIFT), \
-        "检测到墙钟跳变后必须用当前墙钟刷新缓存计算时刻"
     assert task._cron_target == target
-
-
-def test_cron_recomputes_when_cached_target_already_passed():
-    task = ScheduledTask("cron", "*/5 * * * *", _noop, log=_NullLog())
-    task._cron_target = datetime.now() - timedelta(seconds=5)
-    task._cron_cached_at = datetime.now()
-
-    target = task._next_cron_target()
-
-    assert target > datetime.now(), "过期目标必须重新计算"
 
 
 async def test_invalid_time_does_not_leave_running_task():

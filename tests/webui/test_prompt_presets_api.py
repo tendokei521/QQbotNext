@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from starlette.testclient import TestClient
 
-from app.application import prompt_preset_service
 from app.agent.assembly import presets
+from app.application import prompt_preset_service
 from app.webui.app import create_app
 
 

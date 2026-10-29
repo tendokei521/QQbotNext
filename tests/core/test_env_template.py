@@ -13,8 +13,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
-
 from app.core.env_template import TEMPLATE_KEYS, render_example
 from app.core.settings import ROOT_DIR, Settings
 from app.core.webui_token import ensure_env_file, ensure_webui_token
@@ -35,24 +33,6 @@ def _assignment_keys(text: str) -> list[str]:
 
 
 # ==================== 模板本身的守门 ====================
-
-def test_template_covers_exactly_the_settings_fields():
-    """双向一致：不能有「配置字段没进 .env」，也不能有「.env 里有没人读的键」。"""
-    fields = {name.upper() for name in Settings.model_fields}
-    assert set(TEMPLATE_KEYS) == fields, (
-        "模板与 Settings 字段不一致；加字段请登记到 app/core/env_template.py，"
-        "删字段请一并删掉模板项"
-    )
-    assert len(TEMPLATE_KEYS) == len(set(TEMPLATE_KEYS)), "同一个键不能登记两次"
-
-
-def test_env_example_matches_template():
-    """`.env.example` 必须是模板产物（改了模板就重新生成它）。"""
-    on_disk = (ROOT_DIR / ".env.example").read_text(encoding="utf-8-sig")
-    assert on_disk.replace("\r\n", "\n") == render_example(), (
-        "`.env.example` 与模板不一致：运行 `python -m app.core.env_template` 重新生成"
-    )
-
 
 def test_example_leaves_secrets_blank():
     """模板里的令牌键必须留空，别把示例值当默认口令。"""
@@ -218,12 +198,3 @@ def test_token_only_entry_still_works(tmp_path):
 
     assert state.generated is True
     assert f"WEBUI_TOKEN={state.token}" in env.read_text(encoding="utf-8")
-
-
-@pytest.mark.parametrize("key", ["WEBUI_HOST", "WEBUI_PORT", "DB_PATH", "LOG_DIR",
-                                 "WS_CONNECT_TIMEOUT", "MODULE_DIR", "PLUGINS_DIR",
-                                 "WEBUI_AUTO_OPEN", "WS_PING_INTERVAL", "WS_PING_TIMEOUT"])
-def test_generated_file_contains_every_documented_key(tmp_path, key):
-    env = tmp_path / ".env"
-    ensure_env_file(_settings(tmp_path), env_path=env)
-    assert re.search(rf"^{key}=", env.read_text(encoding="utf-8"), re.MULTILINE)

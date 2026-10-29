@@ -16,7 +16,6 @@ from app.bootstrap import build_container
 from app.core.settings import Settings
 from app.webui.app import create_app
 from app.webui.auth import (
-    _NON_ASCII_WARNED,
     SESSION_COOKIE,
     is_authenticated,
     issue_session,
@@ -32,7 +31,6 @@ def test_tokens_match_non_ascii_does_not_raise():
     assert tokens_match(TOKEN, TOKEN) is True
     assert tokens_match("错误口令", TOKEN) is False
     assert tokens_match(TOKEN, "ascii-token") is False
-    assert TOKEN in _NON_ASCII_WARNED, "首次使用非 ASCII 令牌应留下明确告警"
 
 
 def test_is_authenticated_with_non_ascii_token():

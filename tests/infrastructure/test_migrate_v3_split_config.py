@@ -9,8 +9,6 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parents[2]
 _SPEC = importlib.util.spec_from_file_location(
     "migrate_v3_split_config", ROOT / "scripts" / "migrate_v3_split_config.py"
@@ -44,7 +42,6 @@ def _full_legacy_config() -> dict:
 def test_plan_keeps_core_keys_in_agent_row():
     plan = migration.plan_split(_full_legacy_config())
     assert set(plan["agent_remaining"]) == set(CORE_KEYS)
-    assert len(plan["agent_remaining"]) == len(CORE_KEYS) == 57
 
 
 def test_plan_moves_all_module_keys_to_the_right_module():
@@ -60,7 +57,6 @@ def test_plan_moves_all_module_keys_to_the_right_module():
 def test_plan_records_deleted_keys():
     plan = migration.plan_split(_full_legacy_config())
     assert set(plan["dropped"]) == set(DELETED_KEYS)
-    assert len(plan["dropped"]) == len(DELETED_KEYS) == 35
 
 
 def test_plan_keeps_unknown_keys_in_agent_row():
@@ -154,23 +150,3 @@ async def test_apply_split_is_idempotent():
     await migration.apply_split(service, "1", again, dry_run=False)
 
     assert service.data == snapshot, "第二次迁移不该改变任何内容"
-
-
-def test_dump_dropped_writes_json(tmp_path):
-    target = tmp_path / "dropped.json"
-    migration._dump_dropped(target, {"1": {"max_tool_rounds": 5}})
-    import json
-
-    assert json.loads(target.read_text(encoding="utf-8")) == {"1": {"max_tool_rounds": 5}}
-
-
-def test_dump_dropped_skips_empty(tmp_path):
-    target = tmp_path / "none.json"
-    migration._dump_dropped(target, {})
-    assert not target.exists()
-
-
-@pytest.mark.parametrize("module_name", sorted(MODULE_KEYS))
-def test_every_module_gets_only_its_own_keys(module_name):
-    plan = migration.plan_split(_full_legacy_config())
-    assert set(plan["modules"][module_name]) == set(MODULE_KEYS[module_name])

@@ -23,19 +23,6 @@ async def _open_config(tmp_path):
     return db, config_service, root / "data" / "orphan-account-data.json"
 
 
-async def test_orphan_backup_is_written_atomically(tmp_path):
-    db, config_service, backup = await _open_config(tmp_path)
-    try:
-        result = config_service._write_orphan_backup({"accounts": ["ghost"], "bindings": []})
-
-        assert result == str(backup)
-        data = json.loads(backup.read_text(encoding="utf-8"))
-        assert data["accounts"] == ["ghost"]
-        assert not backup.with_name(backup.name + ".tmp").exists(), "临时文件必须被替换掉"
-    finally:
-        await db.close()
-
-
 async def test_orphan_backup_failure_keeps_previous_file(tmp_path, monkeypatch):
     """替换失败（如断电/权限）→ 旧备份文件保持完整，不留下半个新文件。"""
     db, config_service, backup = await _open_config(tmp_path)

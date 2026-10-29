@@ -17,10 +17,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.agent.tools.spec import ToolContext, is_error_result, sanitize_tool_name
 from app.plugins.llm_tools_extra.src.onebot import executor as onebot_tools
 from app.plugins.llm_tools_extra.src.onebot.executor import build_onebot_tools, resolve_action
 from app.plugins.llm_tools_extra.src.onebot.manifest import ONEBOT_TOOLS
-from app.agent.tools.spec import ToolContext, is_error_result, sanitize_tool_name
 
 # 上游文档站形如 https://napcat.apifox.cn/226657401e0
 # （OneBot 是协议名，NapCat 是本项目使用的协议端实现；改文案时**不要改这个域名**，

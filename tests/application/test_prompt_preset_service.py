@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import pytest
 
-from app.application import prompt_preset_service
 from app.agent.assembly import presets
 from app.agent.assembly.assembler import PromptAssembler, PromptRequest
+from app.application import prompt_preset_service
 
 
 @pytest.fixture(autouse=True)

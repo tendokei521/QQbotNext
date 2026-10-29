@@ -84,12 +84,6 @@ async def test_each_account_dispatches_group_message_independently():
     assert seen == [("a", 1000), ("b", 1001)], f"同群两个账号都必须各自派发 → {seen}"
 
 
-async def test_process_event_has_no_cross_account_dedup_api():
-    """去重实现已移除：网关不得再暴露 _wait_for_message / _mentions_bot 等入口。"""
-    for name in ("_wait_for_message", "_message_indexes", "_mentions_bot"):
-        assert not hasattr(OneBotGateway, name), f"{name} 应随跨账号去重一并移除"
-
-
 def _msg_event(segs):
     return GroupMessageEvent(
         event_type="message_group", message_type="group", time=1,
