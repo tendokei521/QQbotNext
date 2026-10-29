@@ -25,7 +25,10 @@ def test_defaults_are_filtered_to_whitelist():
     )
     assert resolved.enabled is True
     assert resolved.enabled_source == SOURCE_DEFAULT
-    assert resolved.config == {"trigger_at": True}
+    assert resolved.config["trigger_at"] is True
+    # 派生字段：解析结果永远给出显式 trigger_mode / 概率，UI 与运行时都只读它
+    assert resolved.config["trigger_mode"] == "at"
+    assert resolved.config["trigger_probability"] == 100
     assert "max_tokens" not in resolved.config, "白名单外的键不该进入解析结果"
 
 
@@ -41,7 +44,10 @@ def test_account_then_channel_override_and_sources():
     )
     assert resolved.enabled is False
     assert resolved.enabled_source == SOURCE_CHANNEL
-    assert resolved.config == {"trigger_at": True, "reply_cooldown": 10}
+    assert resolved.config["trigger_at"] is True
+    assert resolved.config["reply_cooldown"] == 10
+    assert resolved.config["trigger_mode"] == "at", "旧键 trigger_at 要折算成显式 mode"
+    assert resolved.source_of("trigger_mode") == SOURCE_ACCOUNT
     assert resolved.source_of("trigger_at") == SOURCE_ACCOUNT
     assert resolved.source_of("reply_cooldown") == SOURCE_CHANNEL
     assert resolved.permission == {"role_min": "manager"}
@@ -150,3 +156,68 @@ def test_validate_override_values_rejects_bad_values():
         "quiet_hours": "晚上",
     })
     assert len(errors) == 4, errors
+
+
+# ==================== 触发方式（trigger_mode） ====================
+
+
+def test_trigger_mode_is_derived_from_legacy_keys():
+    from app.domain.dialogue_policy import trigger_mode_from
+
+    assert trigger_mode_from({"trigger_at": True, "trigger_keyword": []}) == "at"
+    assert trigger_mode_from({"trigger_at": False, "trigger_keyword": ["AI"]}) == "keyword"
+    assert trigger_mode_from({"trigger_at": True, "trigger_keyword": ["AI"]}) == "both"
+    assert trigger_mode_from({"trigger_at": False, "trigger_keyword": []}) == "none"
+    # 没配置过触发键（新账号默认配置为空）→ 产品默认「只回 @」
+    assert trigger_mode_from({}) == "at"
+
+
+def test_explicit_trigger_mode_wins_over_legacy_keys():
+    from app.domain.dialogue_policy import trigger_mode_from
+
+    assert trigger_mode_from({"trigger_mode": "all", "trigger_at": False}) == "all"
+    assert trigger_mode_from({"trigger_mode": "  NONE  ", "trigger_at": True}) == "none"
+    # 非法显式值 → 退回旧键折算（不会变成"半生效"）
+    assert trigger_mode_from({"trigger_mode": "whatever", "trigger_at": True}) == "at"
+
+
+def test_trigger_probability_is_clamped_and_defaulted():
+    from app.domain.dialogue_policy import trigger_probability_of
+
+    assert trigger_probability_of({}) == 100
+    assert trigger_probability_of({"trigger_probability": 0}) == 0
+    assert trigger_probability_of({"trigger_probability": 250}) == 100
+    assert trigger_probability_of({"trigger_probability": -5}) == 0
+    assert trigger_probability_of({"trigger_probability": "abc"}) == 100
+
+
+def test_legacy_trigger_keys_dual_write():
+    from app.domain.dialogue_policy import legacy_trigger_keys
+
+    assert legacy_trigger_keys("at") == {"trigger_at": True}
+    assert legacy_trigger_keys("both") == {"trigger_at": True}
+    assert legacy_trigger_keys("all") == {"trigger_at": True}
+    assert legacy_trigger_keys("keyword") == {"trigger_at": False}
+    assert legacy_trigger_keys("none") == {"trigger_at": False}
+
+
+def test_override_values_validate_trigger_keys():
+    from app.domain.dialogue_policy import validate_override_values
+
+    assert validate_override_values({"trigger_mode": "all", "trigger_probability": 30}) == []
+    assert validate_override_values({"trigger_mode": "sometimes"}), "非法枚举必须报错"
+    assert validate_override_values({"trigger_probability": 101}), "概率越界必须报错"
+    assert validate_override_values({"trigger_probability": True}), "bool 不是合法概率"
+
+
+def test_trigger_mode_override_source_is_channel():
+    resolved = resolve_policy(
+        "agent",
+        account_id="acc1",
+        channel_id="111",
+        defaults={"trigger_at": True},
+        account_row={"config": {}},
+        channel_row={"config": {"trigger_mode": "keyword", "trigger_keyword": ["摸鱼"]}},
+    )
+    assert resolved.config["trigger_mode"] == "keyword"
+    assert resolved.source_of("trigger_mode") == SOURCE_CHANNEL

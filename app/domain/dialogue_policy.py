@@ -43,8 +43,10 @@ SCENES: tuple[str, ...] = (SCENE_GROUP, SCENE_PRIVATE)
 #: 未在名单里的键，写接口直接拒绝（``POLICY_KEY_NOT_OVERRIDABLE``）。
 SCOPE_OVERRIDABLE: dict[str, tuple[str, ...]] = {
     "agent": (
-        "trigger_at",             # 是否响应 @
-        "trigger_keyword",        # 关键词触发列表
+        "trigger_mode",           # 触发方式：at/keyword/both/all/none（显式字段）
+        "trigger_probability",    # mode=all 时的参与概率（0-100）
+        "trigger_at",             # 旧字段：是否响应 @（保留兼容）
+        "trigger_keyword",        # 旧字段：关键词触发列表
         "reply_cooldown",         # 同会话最小回复间隔（秒）
         "message_debounce_seconds",   # 消息抖动窗口
         "message_debounce_max_wait",  # 抖动最长等待
@@ -55,6 +57,66 @@ SCOPE_OVERRIDABLE: dict[str, tuple[str, ...]] = {
 
 #: 权限键同样按层覆盖：谁能触发 / 谁被排除
 PERMISSION_KEYS: tuple[str, ...] = ("role_min", "user_mode", "user_list")
+
+# ==================== 触发方式（trigger_mode） ====================
+#
+# 历史只有 ``trigger_at``（bool）+ ``trigger_keyword``（list）两个键，UI 只能表达
+# "只 @ / 只关键词 / 两者 / 都不"。``trigger_mode`` 把四种组合显式成一个字段，并补上
+# "所有消息按概率参与"（``all`` + ``trigger_probability``）。读取时旧键缺省会被折算，
+# 所以旧配置/旧脚本不需要迁移即可继续工作。
+
+TRIGGER_AT = "at"
+TRIGGER_KEYWORD = "keyword"
+TRIGGER_BOTH = "both"
+TRIGGER_ALL = "all"
+TRIGGER_NONE = "none"
+TRIGGER_MODES: tuple[str, ...] = (TRIGGER_AT, TRIGGER_KEYWORD, TRIGGER_BOTH, TRIGGER_ALL, TRIGGER_NONE)
+#: 没配置过触发方式时的默认（与"只回 @ 我"的产品口径一致）
+DEFAULT_TRIGGER_MODE = TRIGGER_AT
+DEFAULT_TRIGGER_PROBABILITY = 100
+
+
+def trigger_mode_from(config: Mapping[str, Any] | None) -> str:
+    """从配置里取值：显式 ``trigger_mode`` 优先，否则由旧键折算。
+
+    - 显式值合法 → 直接用；
+    - 否则 ``trigger_at`` + 非空 ``trigger_keyword`` → ``both``；
+    - 只有 ``trigger_at`` → ``at``；只有关键词 → ``keyword``；
+    - 两者都没有 → ``none``（= 群消息不会触发；与改造前一致）。
+    """
+    data = config if isinstance(config, Mapping) else {}
+    explicit = str(data.get("trigger_mode") or "").strip().lower()
+    if explicit in TRIGGER_MODES:
+        return explicit
+    keywords = data.get("trigger_keyword")
+    has_keywords = isinstance(keywords, list) and any(str(item).strip() for item in keywords)
+    has_at = bool(data.get("trigger_at", False))
+    if has_at and has_keywords:
+        return TRIGGER_BOTH
+    if has_at:
+        return TRIGGER_AT
+    if has_keywords:
+        return TRIGGER_KEYWORD
+    # 完全没有配置过这两个键（例如新建账号的默认配置还没写）→ 产品默认「只回 @」
+    if "trigger_at" not in data and "trigger_keyword" not in data:
+        return DEFAULT_TRIGGER_MODE
+    return TRIGGER_NONE
+
+
+def trigger_probability_of(config: Mapping[str, Any] | None) -> int:
+    """``all`` 模式的参与概率（0-100，非法值按 100 = 不额外限制）。"""
+    data = config if isinstance(config, Mapping) else {}
+    try:
+        value = int(data.get("trigger_probability", DEFAULT_TRIGGER_PROBABILITY))
+    except (TypeError, ValueError):
+        return DEFAULT_TRIGGER_PROBABILITY
+    return max(0, min(100, value))
+
+
+def legacy_trigger_keys(mode: str) -> dict[str, Any]:
+    """把 ``trigger_mode`` 折算回旧键（双写，让旧前端/脚本继续可读）。"""
+    normalized = mode if mode in TRIGGER_MODES else DEFAULT_TRIGGER_MODE
+    return {"trigger_at": normalized in (TRIGGER_AT, TRIGGER_BOTH, TRIGGER_ALL)}
 
 
 def is_overridable(capability: str, key: str) -> bool:
@@ -141,6 +203,12 @@ def validate_override_values(config: Mapping[str, Any] | None) -> list[str]:
         elif key in ("trigger_at", "interrupt_enable"):
             if not isinstance(value, bool):
                 errors.append(f"「{key}」应为 true/false")
+        elif key == "trigger_mode":
+            if str(value).strip().lower() not in TRIGGER_MODES:
+                errors.append("触发方式只能是：" + "、".join(TRIGGER_MODES))
+        elif key == "trigger_probability":
+            if isinstance(value, bool) or not isinstance(value, int) or not (0 <= value <= 100):
+                errors.append("参与概率应为 0-100 的整数")
         elif key == "trigger_keyword":
             if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
                 errors.append("触发关键词应为字符串数组")
@@ -227,6 +295,17 @@ def resolve_policy(
                 if key in row_permission:
                     permission[key] = row_permission[key]
                     sources[key] = source
+
+    # 派生字段：让 UI / 运行时只读 ``trigger_mode`` 一个字段，不必各自折算旧键。
+    if "trigger_mode" not in config:
+        config["trigger_mode"] = trigger_mode_from(config)
+        derived_from = (
+            sources.get("trigger_at") or sources.get("trigger_keyword") or SOURCE_DEFAULT
+        )
+        sources["trigger_mode"] = derived_from
+    if "trigger_probability" not in config:
+        config["trigger_probability"] = DEFAULT_TRIGGER_PROBABILITY
+        sources["trigger_probability"] = SOURCE_DEFAULT
 
     return ResolvedPolicy(
         capability=str(capability),
