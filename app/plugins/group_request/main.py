@@ -14,7 +14,7 @@ from .config_schema import SCHEMA
 class Module(BaseModule):
     name = "群申请管理"
     sign = "GroupRequest"
-    description = "按群独立配置入群申请自动审核（关键词 / QQ等级 / 黑名单）"
+    description = "按群自动审核入群申请，可按关键词和 QQ 等级判断"
     permission = "owner"
     category = "请求"
     # 按群响应的模块：同群多账号时可由「单一服务模式」指定唯一负责账号

@@ -44,7 +44,7 @@ ECHO_REPLY = "是啊，吃什么"
 class Module(BaseModule):
     name = "今天吃什么"
     sign = "WhatToEat"
-    description = "遇到“吃什么”时随机推荐食物"
+    description = "有人问「吃什么」时随机推荐"
     permission = "everyone"
     category = "消息"
     subscribe = ("message_group", "message_private")

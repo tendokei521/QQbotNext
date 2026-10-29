@@ -17,7 +17,7 @@ from .config_schema import SCHEMA
 class Module(BaseModule):
     name = "戳一戳回复"
     sign = "PokeReply"
-    description = "跟随戳一戳、被戳反戳、被戳概率回复"
+    description = "被戳后按概率回戳或回应"
     permission = "everyone"
     subscribe = ("notice_poke",)
     category = "通知"

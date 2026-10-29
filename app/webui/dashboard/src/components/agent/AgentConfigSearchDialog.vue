@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useAgentConfigStore } from '@/stores/agentConfig'
 import { splitSchema } from '@/utils/schema'
 import { agentSectionForField } from '@/agent/sections'
+import HintText from '@/components/common/HintText.vue'
 import panelManifest from '@/agent/ai-panel.json'
 
 /** 页面外工作台的字段归属：面板 / 回复与权限（搜索跳转用，见 ai-panel.json）。 */
@@ -41,7 +42,7 @@ const fields = computed(() => {
     const surface = SURFACE_BY_FIELD[key]
     return {
       key,
-      label: def?.label || key,
+      label: def?.label || '设置项',
       description: def?.description || '',
       sectionTitle: hit?.section.title || surface?.title || '',
       path: hit?.section.path || surface?.path || '',
@@ -57,6 +58,18 @@ const results = computed(() => {
   return fields.value
     .filter((f) => f.label.toLowerCase().includes(q) || f.key.toLowerCase().includes(q) || f.description.toLowerCase().includes(q))
     .slice(0, 30)
+})
+
+/** 结果按所在页面分组：一次搜索会横跨多个页面，先看分组再点，避免同名项点错页 */
+const groupedResults = computed(() => {
+  const groups: { title: string; items: typeof results.value }[] = []
+  for (const field of results.value) {
+    const title = field.sectionTitle || '其他设置'
+    const group = groups.find((item) => item.title === title)
+    if (group) group.items.push(field)
+    else groups.push({ title, items: [field] })
+  }
+  return groups
 })
 
 function openField(field: { path: string; groupId: string; tab?: string }) {
@@ -96,11 +109,17 @@ watch(
           hide-details
           autofocus
         />
-        <v-list density="compact" class="mt-3" max-height="400" style="overflow-y: auto">
-          <v-list-item v-for="f in results" :key="f.key" @click="openField(f)">
-            <v-list-item-title>{{ f.label }}</v-list-item-title>
-            <v-list-item-subtitle>{{ f.sectionTitle ? `位于「${f.sectionTitle}」` : '配置项' }}</v-list-item-subtitle>
-          </v-list-item>
+        <HintText class="mt-2" text="结果按所在页面分组，点一条直接跳过去。" />
+        <v-list density="compact" class="mt-2" max-height="400" style="overflow-y: auto">
+          <template v-for="group in groupedResults" :key="group.title">
+            <v-list-subheader>{{ group.title }}</v-list-subheader>
+            <v-list-item v-for="f in group.items" :key="f.key" @click="openField(f)">
+              <v-list-item-title>{{ f.label }}</v-list-item-title>
+              <v-list-item-subtitle v-if="f.description" class="text-caption">
+                {{ f.description }}
+              </v-list-item-subtitle>
+            </v-list-item>
+          </template>
           <v-list-item v-if="!results.length">
             <v-list-item-title class="text-caption text-center py-3" style="opacity: 0.5">
               未找到匹配配置项

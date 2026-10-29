@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import http, { errorMessage } from '@/api/http'
+import EmptyState from '@/components/EmptyState.vue'
 
 interface ListRow {
   id: string
@@ -50,7 +51,7 @@ function emitValue() {
 async function load() {
   if (!props.botId) {
     rows.value = []
-    error.value = '连接 Bot 后获取数据'
+    error.value = '先选择一个账号再设置'
     return
   }
   loading.value = true
@@ -144,7 +145,18 @@ if (props.botId) load()
 <template>
   <div class="list-widget">
     <div v-if="loading" class="hint"><v-progress-circular size="16" indeterminate /> 加载中…</div>
-    <div v-else-if="error" class="hint error">{{ error }}</div>
+    <div v-else-if="error" class="state-box">
+      <span class="state-text">{{ error }}</span>
+      <v-btn size="small" variant="text" prepend-icon="mdi-refresh" @click="load">重试</v-btn>
+    </div>
+    <EmptyState
+      v-else-if="!rows.length"
+      icon="mdi-format-list-bulleted"
+      title="还没有可选的项"
+      description="先连接账号；如果刚添加过，点按钮刷新一下。"
+    >
+      <v-btn size="small" variant="tonal" prepend-icon="mdi-refresh" @click="load">刷新</v-btn>
+    </EmptyState>
     <template v-else>
       <v-select
         v-if="modeSelect"
@@ -203,8 +215,18 @@ if (props.botId) load()
   padding: 8px 0;
 }
 
-.hint.error {
+.state-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12.5px;
   color: rgb(var(--v-theme-error));
+}
+
+.state-text {
+  flex: 1;
+  line-height: 1.5;
 }
 
 .mode-select {

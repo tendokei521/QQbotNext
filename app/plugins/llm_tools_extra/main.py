@@ -41,7 +41,7 @@ OWNED_KEYS: tuple[str, ...] = (
 class Module(BaseModule):
     name = "工具扩展"
     sign = "LlmToolsExtra"
-    description = "把 OneBot API 与 MCP server 暴露给模型，并控制工具结果的回应要求"
+    description = "给模型更多可用工具，并控制它怎么回应工具结果"
     permission = "everyone"
     subscribe = ()
     category = "LLM"

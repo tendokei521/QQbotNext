@@ -46,7 +46,7 @@ OWNED_KEYS: tuple[str, ...] = (
 class Module(BaseModule):
     name = "消息元信息"
     sign = "LlmMessageMeta"
-    description = "用户消息里的时间/发送者/引用/@ 元信息渲染，以及写入历史时的括号清洗"
+    description = "给消息补上时间、发送者、引用和 @ 信息"
     permission = "everyone"
     subscribe = ()
     category = "LLM"

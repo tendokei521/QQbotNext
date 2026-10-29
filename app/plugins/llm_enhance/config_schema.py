@@ -8,8 +8,8 @@ SCHEMA = {
 
     "debug_prompt": {
         "type": "boolean",
-        "label": "调试本轮 Prompt",
-        "description": "开启后在本轮 LLM 请求前打印完整 prompt 到日志",
+        "label": "记录本轮请求内容",
+        "description": "开启后把本轮发给模型的完整内容写进日志",
         "default": False,
         "group": "group_debug",
     },

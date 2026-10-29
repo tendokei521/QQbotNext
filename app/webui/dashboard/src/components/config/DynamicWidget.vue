@@ -3,6 +3,8 @@ import { reactive, ref, watch } from 'vue'
 import http, { errorMessage } from '@/api/http'
 import FieldControl from './FieldControl.vue'
 import StringListWidget from './StringListWidget.vue'
+import EmptyState from '@/components/EmptyState.vue'
+import HintText from '@/components/common/HintText.vue'
 
 interface DynOption {
   value: string
@@ -43,7 +45,7 @@ function emitValue() {
 
 async function loadOptions() {
   if (!props.botId) {
-    error.value = '连接 Bot 后获取数据'
+    error.value = '先选择一个账号再设置'
     return
   }
   loadingOptions.value = true
@@ -134,19 +136,30 @@ if (props.botId) loadOptions()
 <template>
   <div class="dynamic-widget">
     <div v-if="loadingOptions" class="hint"><v-progress-circular size="16" indeterminate /> 加载中…</div>
-    <div v-else-if="error" class="hint error">{{ error }}</div>
+    <div v-else-if="error" class="state-box">
+      <span class="state-text">{{ error }}</span>
+      <v-btn size="small" variant="text" prepend-icon="mdi-refresh" @click="loadOptions">重试</v-btn>
+    </div>
+    <EmptyState
+      v-else-if="!options.length"
+      icon="mdi-tune-variant"
+      title="还没有可设置的项"
+      description="先连接账号；如果刚添加过，点按钮刷新一下。"
+    >
+      <v-btn size="small" variant="tonal" prepend-icon="mdi-refresh" @click="loadOptions">刷新</v-btn>
+    </EmptyState>
     <template v-else>
       <v-select
         :model-value="selected || undefined"
         :items="options.map((o) => ({ title: o.label, value: o.value }))"
-        label="选择配置项"
+        label="选择要设置的项"
         density="comfortable"
         variant="outlined"
         hide-details
         class="mb-2"
         @update:model-value="onSelect"
       />
-      <div v-if="loadingFields" class="hint"><v-progress-circular size="16" indeterminate /> 加载字段…</div>
+      <div v-if="loadingFields" class="hint"><v-progress-circular size="16" indeterminate /> 加载中…</div>
       <div v-else class="fields-box">
         <template v-for="f in fields" :key="f.key">
           <div
@@ -154,7 +167,7 @@ if (props.botId) loadOptions()
             class="dynamic-subfield"
           >
             <div v-if="f.label" class="field-label">{{ f.label }}</div>
-            <div v-if="f.description" class="field-desc">{{ f.description }}</div>
+            <HintText :text="f.description" />
             <StringListWidget
               :model-value="(draft[f.key] as string[]) || []"
               @update:model-value="(v: string[]) => { draft[f.key] = v; emitValue() }"
@@ -189,8 +202,18 @@ if (props.botId) loadOptions()
   padding: 8px 0;
 }
 
-.hint.error {
+.state-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12.5px;
   color: rgb(var(--v-theme-error));
+}
+
+.state-text {
+  flex: 1;
+  line-height: 1.5;
 }
 
 .fields-box {
@@ -212,12 +235,5 @@ if (props.botId) loadOptions()
 .field-label {
   font-size: 13.5px;
   font-weight: 500;
-}
-
-.field-desc {
-  font-size: 12px;
-  color: rgba(var(--v-theme-on-surface), 0.55);
-  line-height: 1.5;
-  white-space: pre-wrap;
 }
 </style>

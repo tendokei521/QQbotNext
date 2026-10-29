@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import http, { errorMessage } from '@/api/http'
 import { connectSocket, onSocketMessage } from '@/api/socket'
+import HintText from '@/components/common/HintText.vue'
 
 const props = defineProps<{
   fieldKey: string
@@ -45,7 +46,7 @@ async function loadResourceOptions() {
   resourceOptions.value = []
   resourceError.value = ''
   if (!kind) {
-    resourceError.value = '该字段未声明 resource（资源种类）'
+    resourceError.value = '这个选项暂时不可用，请刷新后重试'
     return
   }
   resourceLoading.value = true
@@ -53,9 +54,9 @@ async function loadResourceOptions() {
     const { data } = await http.get(`/api/resources/${encodeURIComponent(kind)}`, { params: resourceParams.value })
     resourceOptions.value = (data?.options || []) as { value: string; label: string }[]
   } catch (e: any) {
-    // 404 = 资源种类未注册（框架版本不含该种类 / 插件没装）：给可读提示，而不是一个空下拉
+    // 取不到候选时给一句能行动的话，不把内部概念丢给用户
     resourceError.value =
-      e?.response?.status === 404 ? `资源种类未注册：${kind}` : errorMessage?.(e) || `资源加载失败：${kind}`
+      e?.response?.status === 404 ? '没有找到可选项，请刷新后重试' : errorMessage?.(e) || '选项加载失败，请刷新后重试'
   } finally {
     resourceLoading.value = false
   }
@@ -165,8 +166,8 @@ function onBoolInput(v: boolean | null) {
 
 <template>
   <div class="field-control">
-    <div v-if="schema.label" class="field-label">{{ schema.label || fieldKey }}</div>
-    <div v-if="schema.description" class="field-desc">{{ schema.description }}</div>
+    <div v-if="schema.label" class="field-label">{{ schema.label || '设置项' }}</div>
+    <HintText :text="schema.description" />
 
     <v-switch
       v-if="isBool"
@@ -258,12 +259,5 @@ function onBoolInput(v: boolean | null) {
 .field-label {
   font-size: 13.5px;
   font-weight: 500;
-}
-
-.field-desc {
-  font-size: 12px;
-  color: rgba(var(--v-theme-on-surface), 0.55);
-  line-height: 1.5;
-  white-space: pre-wrap;
 }
 </style>

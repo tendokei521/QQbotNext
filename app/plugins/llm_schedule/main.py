@@ -32,7 +32,7 @@ OWNED_KEYS: tuple[str, ...] = (
 class Module(BaseModule):
     name = "定时任务"
     sign = "LlmSchedule"
-    description = "到点让 Bot 自然开口（支持 once/daily/weekly/monthly/interval）"
+    description = "到点自动发言（每天 / 每周 / 每月）"
     permission = "everyone"
     subscribe = ()
     category = "LLM"

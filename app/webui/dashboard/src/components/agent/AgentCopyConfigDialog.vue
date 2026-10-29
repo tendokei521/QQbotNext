@@ -5,6 +5,7 @@ import { useBotsStore } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
 import { useAgentConfigStore } from '@/stores/agentConfig'
 import { splitSchema } from '@/utils/schema'
+import HintText from '@/components/common/HintText.vue'
 
 interface BotOption {
   accountId: string
@@ -115,6 +116,7 @@ watch(
         <div v-else-if="selectedBotId" class="mt-3">
           <div class="text-caption mb-1">来源账号与当前配置共有 <strong>{{ diffKeys.length }}</strong> 项不同。</div>
           <v-chip v-for="k in diffKeys.slice(0, 10)" :key="k" size="x-small" variant="tonal" class="mr-1 mb-1">{{ fieldLabels[k] || '配置项' }}</v-chip>
+          <HintText class="mt-2" text="应用后会整份覆盖当前账号的配置。" />
         </div>
       </v-card-text>
       <v-card-actions>

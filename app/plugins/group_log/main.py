@@ -51,7 +51,7 @@ from .service import strip_directives  # noqa: F401 - 对外保持 module.strip_
 class Module(BaseModule):
     name = "群聊记录"
     sign = "GroupLog"
-    description = "持续记录群聊最近可见事件（消息/表情/戳/撤回/我的发言），作为模型的环境背景"
+    description = "记录群里最近的动静，作为群聊背景给模型参考"
     permission = "everyone"
     category = "消息"
     # 按群响应的模块：同群多账号时可由「单一服务模式」指定唯一负责账号

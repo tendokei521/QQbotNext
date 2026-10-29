@@ -7,7 +7,7 @@ SCHEMA = {
     "group_session": {"type": "group", "label": "会话管理", "collapsible": True},
     "group_compress": {"type": "group", "label": "上下文压缩", "collapsible": True},
     "group_trigger": {"type": "group", "label": "触发设置", "collapsible": True},
-    "group_debounce": {"type": "group", "label": "消息抖动", "collapsible": True},
+    "group_debounce": {"type": "group", "label": "消息合并等待", "collapsible": True},
     "group_context": {"type": "group", "label": "用户信息感知", "collapsible": True},
     "group_behavior": {"type": "group", "label": "行为规则（拟人化）", "collapsible": True},
     "group_interrupt": {"type": "group", "label": "回复打断", "collapsible": True},
@@ -25,15 +25,15 @@ SCHEMA = {
 
     # ==================== 配置项 ====================
     "group_enable": {
-        "type": "boolean", "label": "群回复启用", "description": "是否启用群LLM功能",
+        "type": "boolean", "label": "在群里回复", "description": "开启后在群聊里自动回复",
         "default": False, "group": "group_switch",
     },
     "private_enable": {
-        "type": "boolean", "label": "私信回复启用", "description": "是否启用私信LLM功能",
+        "type": "boolean", "label": "在私聊里回复", "description": "开启后私聊自动回复",
         "default": True, "group": "group_switch",
     },
     "reply_cooldown": {
-        "type": "number", "label": "回复冷却时间(秒)", "description": "群聊时Bot回复后多少秒内不再响应新消息",
+        "type": "number", "label": "回复冷却时间(秒)", "description": "群聊里机器人回复后，多少秒内不再响应新消息",
         "default": 5, "min": 1, "max": 30, "group": "group_switch",
     },
     "model": {
@@ -45,8 +45,8 @@ SCHEMA = {
         "default": 0.7, "min": 0, "max": 2, "step": 0.1, "group": "group_model",
     },
     "max_tokens": {
-        "type": "number", "label": "最大输出 Tokens（兜底）",
-        "description": "整条模型链都未设置时使用的兜底上限。通常应在 Provider 模型的「最大输出 Token」中配置。",
+        "type": "number", "label": "最大输出 Token（默认值）",
+        "description": "模型都没单独设上限时用这个值。通常先在模型服务的「最大输出」里设置。",
         "default": 1024, "min": 1, "max": 1000000, "group": "group_model",
     },
     "stream_output": {
@@ -143,12 +143,12 @@ SCHEMA = {
     },
 
     "system_prompt": {
-        "type": "textarea", "label": "系统提示词（旧）", "description": "旧字段：人设已由「角色预设」维护，仅作兜底。",
+        "type": "textarea", "label": "系统提示词（已不再使用）", "description": "这个字段已不再使用，人格改在「人格预设」里设置。",
         "default": "你是一个友好的助手。", "placeholder": "你是一个友好的助手...", "group": "group_session",
     },
     "prompt_preset": {
-        "type": "select", "label": "系统提示词风格",
-        "description": "替换内置的系统提示词，人设不受影响；留空沿用内置文案。",
+        "type": "select", "label": "提示词风格",
+        "description": "只换说话风格的提示词，不改人格；留空沿用内置文案。",
         "default": "", "group": "group_session",
         "options": {
             "": "未选择（沿用内置文案）",
@@ -159,8 +159,8 @@ SCHEMA = {
     },
     "persona_preset_id": {
         "type": "resource", "resource": "role_preset",
-        "label": "角色预设",
-        "description": "人设由预设决定：选中后每轮实时解析，改预设内容立刻生效；未选择时用内置默认人设。",
+        "label": "人格预设",
+        "description": "人格由选中的预设决定，改预设立刻生效；留空用内置默认人格。",
         "default": "", "group": "group_session",
     },
     "system_prompt_style": {
@@ -259,15 +259,15 @@ SCHEMA = {
         "default": 60, "min": 30, "max": 300, "group": "group_session",
     },
     "history_rounds": {
-        "type": "number", "label": "历史对话轮数", "description": "保留多少轮对话历史",
+        "type": "number", "label": "保留多少轮对话", "description": "带多少轮对话给模型（1 轮 = 一问一答）",
         "default": 50, "min": 5, "max": 100, "group": "group_session",
     },
     "context_compress_enable": {
-        "type": "boolean", "label": "启用上下文压缩", "description": "历史超过轮数上限时，把较早部分压缩成摘要，保留最近若干条原文。",
+        "type": "boolean", "label": "启用上下文压缩", "description": "对话超过轮数上限时，把较早部分压成摘要，保留最近几条原文。",
         "default": True, "group": "group_compress",
     },
     "context_compress_prompt": {
-        "type": "textarea", "label": "压缩提示词", "description": "让 LLM 生成摘要的指令",
+        "type": "textarea", "label": "压缩提示词", "description": "让模型生成摘要的指令",
         "default": "请把上面的历史对话压缩成一份简洁但完整的摘要，用于后续对话无缝续接：\n1. 覆盖所有核心话题及最终结论/结果；\n2. 高亮最近的主要关注点；\n3. 如有工具调用、任务进度或待办，说明当前状态和下一步；\n4. 保留用户的重要个人信息、偏好、称呼等关键事实；\n5. 使用与对话相同的语言输出。\n只输出摘要内容，不要输出额外解释。",
         "rows": 6, "group": "group_compress",
     },
@@ -285,20 +285,20 @@ SCHEMA = {
         "default": 20, "min": 1, "max": 500, "group": "group_session",
     },
     "history_mode": {
-        "type": "select", "label": "历史注入方式",
-        "description": "只注入最近若干条，更早的按需检索（推荐）；全部注入（消息多时更贵）。",
+        "type": "select", "label": "带多少历史给模型",
+        "description": "最近的更省；更早的内容模型可以自己查。全部带上更贵。",
         "default": "recent", "group": "session_window",
-        "options": {"recent": "最近若干条 + 按需检索", "full": "全部注入"},
+        "options": {"recent": "最近几条 + 模型需要时再查", "full": "全部带上（更贵）"},
     },
     "history_recent_messages": {
-        "type": "number", "label": "注入最近条数",
-        "description": "「最近若干条」模式下注入多少条历史；更早的内容仍可通过工具检索。",
+        "type": "number", "label": "最近带几条",
+        "description": "带最近多少条历史给模型；更早的让模型自己查。",
         "default": 12, "min": 2, "max": 200, "group": "session_window",
     },
     # Q1：上下文预算（按 token 压力触发压缩，而不是按条数）
     "context_window": {
         "type": "number", "label": "模型上下文窗口（token）",
-        "description": "用来判断是否该压缩历史。0 = 不启用压力触发（回退按「保留条数」那个配置）。",
+        "description": "用来判断什么时候该压缩上下文。0 = 不按长度触发（按条数）。",
         "default": 0, "min": 0, "max": 2000000, "group": "group_compress",
     },
     "context_compress_trigger_ratio": {
@@ -320,27 +320,27 @@ SCHEMA = {
     # P4：在线不变式。开启后每次请求前核对「会话日志派生结果」与「内存历史」是否一致，
     # 不等就落盘 diff。默认关：这是一条排查开关，每次请求都做投影比对有开销。
     "prompt_dump_verify": {
-        "type": "boolean", "label": "历史一致性自检",
-        "description": "每次请求前核对日志与内存历史是否一致，不一致时把差异写进日志文件。默认关闭。",
+        "type": "boolean", "label": "核对聊天记录",
+        "description": "每次请求前检查记录是否一致，不一致会写进日志。默认关闭。",
         "default": False, "group": "group_session",
     },
     "context_token_budget": {
         "type": "number", "label": "上下文 token 预算",
-        "description": "上下文 token 上限，超出时从最旧的历史开始丢弃。0 = 不限制。",
+        "description": "上下文的上限，超出时从最旧的对话开始丢。0 = 不限制。",
         "default": 0, "min": 0, "max": 200000, "group": "group_compress",
     },
     "context_token_chars_per_token": {
         "type": "number", "label": "字符与 token 的换算（估算用）",
-        "description": "粗估用（中文约 1-2 字符/token，英文约 4）；只影响防爆裁剪，不影响真实计费",
+        "description": "只用于估算上下文长度，不影响实际费用；不确定就保持 2。",
         "default": 2.0, "min": 0.5, "max": 8, "group": "group_compress",
     },
     "include_pre_history": {
-        "type": "boolean", "label": "包含群聊环境背景", "description": "请求前拉取群聊最近消息作为背景，不计入会话历史。",
+        "type": "boolean", "label": "包含群聊背景", "description": "请求前拉取群聊最近消息当背景，不算进聊天记录。",
         "default": False, "group": "group_session",
     },
     "group_log_enable": {
-        "type": "boolean", "label": "注入群聊环境记录",
-        "description": "注入群聊记录（消息、表情回应、戳一戳、撤回）作为环境块，与在线历史不会重复。",
+        "type": "boolean", "label": "包含群聊背景记录",
+        "description": "把最近的消息、表情回应、戳一戳和撤回放进背景，和聊天记录不重复。",
         "default": True, "group": "group_session",
     },
     "group_log_window_minutes": {
@@ -354,12 +354,12 @@ SCHEMA = {
         "default": 50, "min": 1, "max": 500, "group": "group_session",
     },
     "group_log_max_chars": {
-        "type": "number", "label": "群聊环境块字符预算",
-        "description": "环境块的字符上限，超出时从最旧记录开始丢弃。0 = 不限制，会显著增加消耗。",
+        "type": "number", "label": "群聊背景字数上限",
+        "description": "背景最多占多少字，超出时从最旧的开始丢。0 = 不限制，会明显增加消耗。",
         "default": 4000, "min": 0, "max": 20000, "group": "group_session",
     },
     "include_private_pre_history": {
-        "type": "select", "label": "包含私信会话前历史", "description": "私信时是否将会话开始前的私信消息提供给LLM",
+        "type": "select", "label": "包含私信开始前的消息", "description": "私信时把开始聊之前收到的消息给模型当背景",
         "default": "default",
         "options": {"default": "不加载", "history": "加载为背景消息", "load": "加载为会话历史"},
         "group": "group_session",
@@ -419,17 +419,13 @@ SCHEMA = {
         "default": [], "placeholder": "例如：AI、助手", "group": "group_trigger",
     },
     "message_debounce_seconds": {
-        "type": "number", "label": "消息抖动(秒)",
-        "description": (
-            "触发后先等这么久，期间的新消息合并进同一轮。0 = 立即请求。"
-        ),
+        "type": "number", "label": "消息合并等待(秒)",
+        "description": "同一个人连发多条时，等这么久再一起回复。0 = 每条都立刻回",
         "default": 0, "min": 0, "max": 30, "group": "group_debounce",
     },
     "message_debounce_max_wait": {
-        "type": "number", "label": "抖动最长等待(秒)",
-        "description": (
-            "连续刷屏时的强制放行上限，应明显大于消息抖动秒数。"
-        ),
+        "type": "number", "label": "合并最长等待(秒)",
+        "description": "一直有人发消息时，最多等这么久就先回一次，避免一直不回",
         "default": 15, "min": 1, "max": 120, "group": "group_debounce",
     },
 
@@ -483,23 +479,23 @@ SCHEMA = {
     # ==================== 回复打断 ====================
     "interrupt_enable": {
         "type": "boolean", "label": "启用回复打断",
-        "description": "LLM 输出过程中收到新消息时取消剩余发送并开始新一轮请求",
+        "description": "回复到一半收到新消息时，停下来重新回复",
         "default": False, "group": "group_interrupt",
     },
     "interrupt_save_sent": {
         "type": "boolean", "label": "保存已发送内容",
-        "description": "中断时把实际已发送的句子写入历史",
+        "description": "中断时把已经发出去的句子记进聊天记录",
         "default": True, "group": "group_interrupt",
     },
     "interrupt_debug": {
-        "type": "boolean", "label": "调试回复打断",
-        "description": "开启后打印回复被打断的日志",
+        "type": "boolean", "label": "记录打断日志",
+        "description": "开启后把回复被打断的情况写进日志。",
         "default": False, "group": "group_interrupt",
     },
 
     # ==================== 权限 ====================
     "permission": {
-        "type": "select", "label": "响应权限档位", "description": "Agent 可响应的事件权限角色（按角色高低判定：拥有者 > 管理者 > 群主 > 群管理 > 成员）",
+        "type": "select", "label": "响应权限档位", "description": "谁能触发回复：拥有者 > 管理者 > 群主 > 群管 > 成员",
         "default": "member", "group": "group_permission",
         "options": {
             "everyone": "所有人",
@@ -517,7 +513,7 @@ SCHEMA = {
     },
     "agent_manager_list": {
         "type": "string_list", "label": "管理者（QQ号）",
-        "description": "每行一个 QQ 号。管理者高于群主但低于拥有者，适合授予「帮我调教 Bot」的人",
+        "description": "每行一个 QQ 号。比群主高、比拥有者低，适合帮你管理机器人的人",
         "default": [], "placeholder": "每行一个 QQ 号", "group": "group_permission",
     },
 
@@ -817,8 +813,8 @@ SCHEMA = {
         "description": "在日志里记录系统工具的调用与结果。",
     },
     "module_tools_log_enabled": {
-        "type": "boolean", "label": "记录模块工具调用", "default": True,
-        "description": "在日志里记录模块工具的调用与结果。",
+        "type": "boolean", "label": "记录插件工具调用", "default": True,
+        "description": "在日志里记录插件工具的调用与结果。",
     },
     "mcp_tools_log_enabled": {
         "type": "boolean", "label": "记录 MCP 工具调用", "default": True,
@@ -841,11 +837,11 @@ SCHEMA = {
         "default": 5, "min": 1, "max": 20, "group": "group_tavily",
     },
     "tavily_search_depth": {
-        "type": "select", "label": "搜索深度", "description": "basic 快且省额度；advanced 结果更准但成本更高",
+        "type": "select", "label": "搜索深度", "description": "快速模式省额度；深入模式更准但更贵。",
         "default": "basic", "group": "group_tavily",
         "options": {
-            "basic": "basic（推荐）",
-            "advanced": "advanced（更准）",
+            "basic": "快速（省额度）",
+            "advanced": "深入（更准但更贵）",
         },
     },
     "tavily_max_content_chars": {
@@ -884,24 +880,24 @@ SCHEMA = {
     },
     "tool_timeout_default_s": {
         "type": "number", "label": "工具默认超时（秒）",
-        "description": "工具没声明自己的超时就用这个值。超时只把结果换成失败回执，工具协程仍会跑完。",
+        "description": "工具没有单独设超时就按这个值算。超时只算这次工具失败，不会卡住整轮回复。",
         "default": 20, "min": 1, "max": 600, "group": "group_tools",
     },
     # P5：超大工具结果落盘（消息里只留预览 + 取回路径）
     "tool_spill_enable": {
-        "type": "boolean", "label": "超大结果落盘",
-        "description": "工具结果超过阈值时把全文落盘、消息里只留预览与路径，模型可再调用取回工具读回全文。",
+        "type": "boolean", "label": "超大结果存成文件",
+        "description": "工具返回太长时，只把摘要和文件位置给模型，需要时再读全文。",
         "default": True, "group": "group_tools",
     },
     "tool_spill_max_bytes": {
-        "type": "number", "label": "落盘阈值（字符）",
-        "description": "工具结果超过多少字符就落盘。默认 50000。",
+        "type": "number", "label": "超过多少字就存文件",
+        "description": "工具结果超过这个字数就存成文件。默认 50000。",
         "default": 50000, "min": 1024, "max": 2000000, "group": "group_tools",
     },
     # P6：高危工具人工审批（fail-closed）
     "tool_approval_enable": {
         "type": "boolean", "label": "高危工具需人工审批",
-        "description": "OneBot 的高风险工具执行前先请拥有者确认；没有可用审批通道时一律拒绝。",
+        "description": "高风险工具执行前先请你确认；没人能确认时一律不执行。",
         "default": False, "group": "group_permission",
     },
     "retry_profile": {
@@ -920,18 +916,18 @@ SCHEMA = {
         "default": 0, "min": 0, "max": 2000000, "group": "group_tools",
     },
     "image_understanding_enable": {
-        "type": "boolean", "label": "图片理解（多模态同传）",
-        "description": "把本轮图片直接传给模型，仅对支持图片的模型生效。",
+        "type": "boolean", "label": "图片理解（能看图片）",
+        "description": "把本轮图片一起发给模型，只对支持看图的模型有效。",
         "default": True, "group": "group_tools",
     },
     "image_max_count": {
         "type": "number", "label": "单轮最多图片数",
-        "description": "一次请求最多附带几张图，超出部分不再传给模型（避免 token 与带宽失控）",
+        "description": "一次请求最多带几张图；太多会明显变慢。",
         "default": 4, "min": 1, "max": 10, "group": "group_tools",
     },
     "image_max_mb": {
         "type": "number", "label": "单张图片体积上限(MB)",
-        "description": "超过该体积的图片跳过传输并记录日志（base64 会让请求体膨胀约 1/3，过大易被网关拒绝）",
+        "description": "超过这个大小的图片会跳过不发，日志里有记录。",
         "default": 10, "min": 1, "max": 50, "group": "group_tools",
     },
     "gif_understanding_enable": {
@@ -946,8 +942,7 @@ SCHEMA = {
     },
     "gif_frame_max_edge": {
         "type": "number", "label": "动图帧长边上限(像素)",
-        "description": "每帧缩放后的最长边。512 兼顾清晰度与体积；"
-                       "调小可显著省 token（384 左右对表情包语义几乎无损）",
+        "description": "每帧最长边，越小越省 token，表情包 512 够用。",
         "default": 512, "min": 256, "max": 1024, "group": "group_tools",
     },
     "gif_probe_all_images": {
@@ -977,11 +972,11 @@ SCHEMA = {
         "default": False, "group": "group_onebot",
     },
     "onebot_tools_allowed": {
-        "type": "string_list", "label": "允许的工具（白名单）", "description": "留空表示允许全部；非空时只允许列出的工具",
+        "type": "string_list", "label": "允许的工具", "description": "留空 = 全部允许；填了就只允许这些工具",
         "default": [], "group": "group_onebot",
     },
     "onebot_tools_denied": {
-        "type": "string_list", "label": "禁用的工具（黑名单）", "description": "黑名单优先于白名单，可在此关闭敏感工具",
+        "type": "string_list", "label": "禁止的工具", "description": "禁止优先于允许，可在这里关掉敏感工具",
         "default": [], "group": "group_onebot",
     },
     "onebot_tools_max_result": {

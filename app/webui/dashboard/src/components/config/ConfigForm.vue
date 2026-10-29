@@ -5,6 +5,7 @@ import StringListWidget from './StringListWidget.vue'
 import ListWidget from './ListWidget.vue'
 import DynamicWidget from './DynamicWidget.vue'
 import RepeaterWidget from './RepeaterWidget.vue'
+import HintText from '@/components/common/HintText.vue'
 
 const props = defineProps<{
   moduleName: string
@@ -50,7 +51,7 @@ const parsed = computed(() => {
 
   const groups: GroupDef[] = Object.entries(groupsRaw).map(([id, g]) => ({
     id,
-    label: g?.label || id,
+    label: g?.label || '其他设置',
     collapsible: g?.collapsible !== false,
   }))
 
@@ -70,7 +71,7 @@ const groupDefs = computed(() => {
   const defs = groups.map((g) => ({ ...g, items: items.filter((it) => it.group === g.id) }))
   const ungrouped = items.filter((it) => !it.group)
   if (ungrouped.length) {
-    defs.push({ id: '__default__', label: '默认配置', collapsible: true, items: ungrouped })
+    defs.push({ id: '__default__', label: '其他设置', collapsible: true, items: ungrouped })
   }
   return defs
 })
@@ -165,7 +166,7 @@ function currentValue(item: ItemDef): any {
           v-for="(value, key) in config"
           :key="String(key)"
           :field-key="String(key)"
-          :schema="{ type: typeof value === 'boolean' ? 'boolean' : typeof value === 'number' ? 'number' : 'text', label: String(key) }"
+          :schema="{ type: typeof value === 'boolean' ? 'boolean' : typeof value === 'number' ? 'number' : 'text', label: '设置项' }"
           :value="value"
           @update="(v: any) => emit('change', String(key), v)"
         />
@@ -192,8 +193,8 @@ function currentValue(item: ItemDef): any {
               <template v-for="item in g.items" :key="item.key">
                 <div v-if="isVisible(item)" class="config-item">
                   <template v-if="isComplexType(item)">
-                    <div v-if="item.schema.label" class="field-label">{{ item.schema.label || item.key }}</div>
-                    <div v-if="item.schema.description" class="field-desc">{{ item.schema.description }}</div>
+                    <div v-if="item.schema.label" class="field-label">{{ item.schema.label || '设置项' }}</div>
+                    <HintText :text="item.schema.description" class="mb-2" />
                   </template>
                   <FieldControl
                     v-if="!isComplexType(item)"
@@ -274,14 +275,6 @@ function currentValue(item: ItemDef): any {
   font-size: 13.5px;
   font-weight: 500;
   margin-bottom: 4px;
-}
-
-.field-desc {
-  font-size: 12px;
-  color: rgba(var(--v-theme-on-surface), 0.55);
-  line-height: 1.5;
-  white-space: pre-wrap;
-  margin-bottom: 8px;
 }
 
 .flat-fields {

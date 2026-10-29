@@ -3,6 +3,7 @@ import { onMounted, ref, watch } from 'vue'
 import http, { errorMessage } from '@/api/http'
 import { useNotifyStore } from '@/stores/notify'
 import { useAgentConfigStore } from '@/stores/agentConfig'
+import HintText from '@/components/common/HintText.vue'
 
 interface ProfileItem {
   id: string
@@ -49,7 +50,7 @@ async function saveCurrentTemplate() {
       name: newName.value.trim(),
       config: { ...agent.draft },
     })
-    notify.push('已保存为配置模板', 'success')
+    notify.push('已存为配置模板', 'success')
     newName.value = ''
     await loadProfiles()
   } catch (err) {
@@ -112,12 +113,12 @@ onMounted(() => {
   <v-dialog :model-value="props.modelValue" max-width="560" @update:model-value="emit('update:modelValue', $event)">
     <v-card>
       <v-card-title class="d-flex align-center">
-        <v-icon icon="mdi-book-multiple" class="mr-2" color="primary" /> Agent 配置模板
+        <v-icon icon="mdi-book-multiple" class="mr-2" color="primary" /> 配置模板
         <v-spacer />
         <v-btn icon="mdi-close" variant="text" size="small" @click="emit('update:modelValue', false)" />
       </v-card-title>
       <v-card-text>
-        <div class="d-flex gap-3 align-center mb-4">
+        <div class="d-flex gap-3 align-center mb-2">
           <v-text-field
             v-model="newName"
             label="模板名称"
@@ -125,8 +126,9 @@ onMounted(() => {
             variant="outlined"
             hide-details
           />
-          <v-btn color="primary" variant="tonal" :loading="saving" @click="saveCurrentTemplate">保存当前配置</v-btn>
+          <v-btn color="primary" variant="tonal" :loading="saving" @click="saveCurrentTemplate">存为模板</v-btn>
         </div>
+        <HintText class="mb-4" text="模板保存当前账号的整份设置，可随时应用或删除。" />
 
         <v-progress-linear v-if="loading" indeterminate color="primary" />
         <v-list v-else density="compact">
@@ -153,7 +155,7 @@ onMounted(() => {
           </v-list-item>
           <v-list-item v-if="!profiles.length && !loading">
             <v-list-item-title class="text-caption text-center py-3" style="opacity: 0.5">
-              暂无模板，可先保存当前配置
+              还没有配置模板，可把当前配置存为模板
             </v-list-item-title>
           </v-list-item>
         </v-list>
@@ -161,7 +163,7 @@ onMounted(() => {
     </v-card>
   </v-dialog>
 
-  <!-- 应用模板的覆盖确认：模板会整份替换配置草稿，先让用户明确同意 -->
+  <!-- 应用模板的覆盖确认：模板会整份替换当前配置，先让用户明确同意 -->
   <v-dialog
     :model-value="!!pendingProfile"
     max-width="440"
@@ -172,7 +174,7 @@ onMounted(() => {
         <v-icon icon="mdi-alert-outline" class="mr-2" color="warning" /> 应用配置模板
       </v-card-title>
       <v-card-text class="text-body-2">
-        应用「{{ pendingProfile?.name }}」会用模板内容整份覆盖当前配置草稿，未保存的修改会被替换。
+        应用「{{ pendingProfile?.name }}」会整份替换当前配置，未保存的修改会被覆盖。
       </v-card-text>
       <v-card-actions>
         <v-spacer />

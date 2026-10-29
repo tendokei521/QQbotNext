@@ -8,7 +8,7 @@ from .config_schema import SCHEMA
 class Module(BaseModule):
     name = "今日密码"
     sign = "Delta_Password"
-    description = "三角洲行动今日密码"
+    description = "查「三角洲行动」今天的密码"
     permission = "member"
     category = "消息"
     # 按群响应的模块：同群多账号时可由「单一服务模式」指定唯一负责账号

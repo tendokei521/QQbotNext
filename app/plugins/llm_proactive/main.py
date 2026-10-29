@@ -56,7 +56,7 @@ OWNED_KEYS: tuple[str, ...] = (
 class Module(BaseModule):
     name = "主动消息"
     sign = "LlmProactive"
-    description = "私聊按随机间隔、群聊按沉默时长主动开口（含免打扰与追问上限）"
+    description = "私聊随机、群聊沉默后主动开口，支持免打扰"
     permission = "everyone"
     subscribe = ()
     category = "LLM"

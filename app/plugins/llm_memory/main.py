@@ -54,7 +54,7 @@ OWNED_KEYS: tuple[str, ...] = (
 class Module(BaseModule):
     name = "长期记忆"
     sign = "LlmMemory"
-    description = "跨会话记住用户偏好与事实，并在后续对话里按可信度召回"
+    description = "记住用户的偏好和事实，之后聊天时想起来"
     permission = "everyone"
     subscribe = ()
     category = "LLM"

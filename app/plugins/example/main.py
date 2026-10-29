@@ -8,7 +8,7 @@ from .config_schema import SCHEMA
 class Module(BaseModule):
     name = "示例模块"
     sign = "Example"
-    description = "这是一个标准演示模块"
+    description = "示例插件，用来照着写自己的插件"
     permission = "everyone"
     category = "消息"
     default_config = {

@@ -14,7 +14,7 @@ from .config_schema import SCHEMA
 class Module(BaseModule):
     name = "LLM增强"
     sign = "LlmEnhance"
-    description = "LLM 请求防抖 + 用户信息感知 + 回复打断 + 调试"
+    description = "连发的消息自动合并，补齐用户信息再回复"
     permission = "everyone"
     subscribe = ()
     category = "LLM"

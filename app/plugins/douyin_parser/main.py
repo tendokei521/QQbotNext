@@ -8,7 +8,7 @@ from .config_schema import SCHEMA
 class Module(BaseModule):
     name = "抖音视频解析"
     sign = "DouyinParser"
-    description = "自动解析抖音分享链接，合并转发文案 + 无水印视频/图集"
+    description = "贴抖音分享链接，自动转发文案和视频"
     permission = "member"
     category = "消息"
     # 按群响应的模块：同群多账号时可由「单一服务模式」指定唯一负责账号

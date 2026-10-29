@@ -8,7 +8,7 @@ from .config_schema import SCHEMA
 class Module(BaseModule):
     name = "群打卡"
     sign = "TimeSignInModule"
-    description = "每日自动群打卡 + #打卡/#全群打卡 指令"
+    description = "每天自动群打卡，支持 #打卡 指令"
     # 框架级权限过滤：仅 Bot 拥有者可执行
     permission = "owner"
     category = "消息"

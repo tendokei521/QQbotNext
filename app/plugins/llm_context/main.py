@@ -45,7 +45,7 @@ OWNED_KEYS: tuple[str, ...] = (
 class Module(BaseModule):
     name = "上下文增强"
     sign = "LlmContext"
-    description = "指代消解、上下文按需展开、群聊/跨会话历史查询权限"
+    description = "让模型知道「刚才」「那条」指什么，需要时再展开上下文"
     permission = "everyone"
     subscribe = ()
     category = "LLM"

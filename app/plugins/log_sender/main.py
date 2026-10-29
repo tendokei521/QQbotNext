@@ -30,7 +30,7 @@ from .config_schema import SCHEMA
 class Module(BaseModule):
     name = "日志发送"
     sign = "LogSender"
-    description = "聊天里用 /log 取本轮次 user 日志、/logs 取四个日志文件"
+    description = "聊天里发 /log 看本轮日志，/logs 看全部日志文件"
     permission = "owner"
     category = "消息"
     # 按群响应的模块：同群多账号时可由「单一服务模式」指定唯一负责账号

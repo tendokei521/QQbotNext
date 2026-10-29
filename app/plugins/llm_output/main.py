@@ -64,7 +64,7 @@ OWNED_KEYS: tuple[str, ...] = (
 class Module(BaseModule):
     name = "输出策略"
     sign = "LlmOutput"
-    description = "流式输出与发言通道：决定一轮回复怎么产出来（一次性 / 逐句流式 / 文本即思考）"
+    description = "决定一轮回复怎么发：一次发完、逐句发还是先想再说"
     permission = "everyone"
     subscribe = ()
     category = "LLM"

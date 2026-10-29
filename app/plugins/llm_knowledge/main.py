@@ -24,7 +24,7 @@ OWNED_KEYS: tuple[str, ...] = (
 class Module(BaseModule):
     name = "知识库"
     sign = "LlmKnowledge"
-    description = "把资料向量化后按需检索，作为回答的依据"
+    description = "把资料整理成知识库，回答前先查一查"
     permission = "everyone"
     subscribe = ()
     category = "LLM"

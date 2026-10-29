@@ -41,7 +41,7 @@ OWNED_KEYS: tuple[str, ...] = (
 class Module(BaseModule):
     name = "组装策略"
     sign = "LlmAssembly"
-    description = "组装档位、行为规则段、消息格式与请求落盘对账"
+    description = "控制每轮回复怎么拼、按什么格式发给模型"
     permission = "everyone"
     subscribe = ()
     category = "LLM"

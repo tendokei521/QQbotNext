@@ -2,6 +2,8 @@
 import { ref, watch } from 'vue'
 import FieldControl from './FieldControl.vue'
 import StringListWidget from './StringListWidget.vue'
+import EmptyState from '@/components/EmptyState.vue'
+import HintText from '@/components/common/HintText.vue'
 
 const props = defineProps<{
   schema: Record<string, any>
@@ -89,9 +91,7 @@ watch(
             <div v-if="(schema.template || {})[key]?.label" class="field-label">
               {{ (schema.template || {})[key].label }}
             </div>
-            <div v-if="(schema.template || {})[key]?.description" class="field-desc">
-              {{ (schema.template || {})[key].description }}
-            </div>
+            <HintText :text="(schema.template || {})[key]?.description" />
             <StringListWidget
               :model-value="(item.values[key] as string[]) || []"
               @update:model-value="(v: string[]) => onSub(i, key, v)"
@@ -107,6 +107,12 @@ watch(
         </template>
       </div>
     </div>
+    <EmptyState
+      v-if="!items.length"
+      icon="mdi-plus-box-outline"
+      title="还没有分组"
+      description="点按钮添加第一组。"
+    />
     <v-btn size="small" variant="tonal" prepend-icon="mdi-plus" class="align-self-start" @click="add">
       新增分组
     </v-btn>
@@ -156,12 +162,5 @@ watch(
 .field-label {
   font-size: 13.5px;
   font-weight: 500;
-}
-
-.field-desc {
-  font-size: 12px;
-  color: rgba(var(--v-theme-on-surface), 0.55);
-  line-height: 1.5;
-  white-space: pre-wrap;
 }
 </style>
