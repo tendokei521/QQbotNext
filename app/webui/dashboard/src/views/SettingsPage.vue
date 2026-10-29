@@ -1,14 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { useModulesStore, type UninstalledModuleData } from '@/stores/modules'
 import { useWebuiStore } from '@/stores/webui'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 
 const router = useRouter()
 const webui = useWebuiStore()
-const modules = useModulesStore()
 const notify = useNotifyStore()
 
 /** 界面构建戳：排查「改了没生效」时用。 */
@@ -19,14 +17,6 @@ const accessAddress = typeof location !== 'undefined' ? location.origin : ''
 const accessPort =
   typeof location !== 'undefined' && location.port ? location.port : '默认端口'
 
-/** 已停用记录的来源：新版本为 builtin/installed，旧记录仍是 local/zip。 */
-function isThirdParty(source?: string | null): boolean {
-  return source === 'installed' || source === 'zip'
-}
-
-const uninstalledDialog = ref(false)
-const uninstalledLoading = ref(false)
-
 const showExperimental = computed<boolean>({
   get: () => !!webui.config.experimental?.show_experimental,
   set: (v) => {
@@ -36,27 +26,6 @@ const showExperimental = computed<boolean>({
     })
   },
 })
-
-async function openUninstalledDialog() {
-  uninstalledDialog.value = true
-  uninstalledLoading.value = true
-  try {
-    await modules.loadUninstalled()
-  } catch (err) {
-    notify.push(errorMessage(err), 'error')
-  } finally {
-    uninstalledLoading.value = false
-  }
-}
-
-async function reinstallModule(item: UninstalledModuleData) {
-  try {
-    await modules.install(item.module_name)
-    notify.push(`插件「${item.display_name}」已恢复`, 'success')
-  } catch (err) {
-    notify.push(errorMessage(err), 'error')
-  }
-}
 </script>
 
 <template>
@@ -170,13 +139,15 @@ async function reinstallModule(item: UninstalledModuleData) {
         <v-card variant="outlined" class="mb-4">
           <v-card-title class="d-flex align-center">
             <v-icon icon="mdi-package-variant" class="mr-2" color="primary" /> 插件管理
-            <v-spacer />
-            <v-btn size="small" variant="tonal" prepend-icon="mdi-package-removed" @click="openUninstalledDialog">
-              已停用的插件
-            </v-btn>
           </v-card-title>
-          <v-card-text class="text-caption" style="color: rgba(var(--v-theme-on-surface), 0.55)">
-            停用插件只会隐藏它的功能，不会删除文件、配置或数据；随时可以在这里恢复。
+          <v-card-text class="d-flex align-center flex-wrap gap-2">
+            <div class="text-caption" style="opacity: 0.7">
+              插件启停与恢复都在「功能插件」页，这里不再重复入口。
+            </div>
+            <v-spacer />
+            <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-open-in-new" @click="router.push('/modules')">
+              打开功能插件
+            </v-btn>
           </v-card-text>
         </v-card>
 
@@ -199,39 +170,5 @@ async function reinstallModule(item: UninstalledModuleData) {
         </v-card>
       </v-col>
     </v-row>
-
-    <v-dialog v-model="uninstalledDialog" max-width="620">
-      <v-card>
-        <v-card-title class="d-flex align-center">
-          <v-icon icon="mdi-package-removed" class="mr-2" color="primary" /> 已停用的插件
-          <v-spacer />
-          <v-btn icon="mdi-close" variant="text" size="small" @click="uninstalledDialog = false" />
-        </v-card-title>
-        <v-card-text>
-          <v-progress-linear v-if="uninstalledLoading" indeterminate color="primary" />
-          <v-list v-else density="compact">
-            <v-list-item
-              v-for="item in modules.uninstalledModules"
-              :key="item.module_name"
-            >
-              <v-list-item-title>{{ item.display_name }}</v-list-item-title>
-              <v-list-item-subtitle>
-                {{ isThirdParty(item.source) ? '第三方插件' : '系统自带' }}
-              </v-list-item-subtitle>
-              <template #append>
-                <v-btn size="small" variant="tonal" prepend-icon="mdi-arrow-up-bold-circle" @click="reinstallModule(item)">
-                  恢复
-                </v-btn>
-              </template>
-            </v-list-item>
-            <v-list-item v-if="!modules.uninstalledModules.length">
-              <v-list-item-title class="text-caption text-center py-3" style="color: rgba(var(--v-theme-on-surface), 0.45)">
-                没有已停用的插件
-              </v-list-item-title>
-            </v-list-item>
-          </v-list>
-        </v-card-text>
-      </v-card>
-    </v-dialog>
   </div>
 </template>

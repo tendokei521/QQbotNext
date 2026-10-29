@@ -678,19 +678,19 @@ onUnmounted(() => {
           <span class="kpi-label">收到消息</span>
           <div class="kpi-value">{{ summary.messages }}</div>
         </div>
-        <div class="kpi tip" data-tip="其中真的响应了：指令 + 模块响应 + LLM 响应">
+        <div class="kpi tip" data-tip="其中真的响应了：指令 + 插件响应 + LLM 响应">
           <span class="kpi-label">响应条数</span>
           <div class="kpi-value">{{ summary.triggered }}</div>
         </div>
         <div class="kpi">
-          <span class="kpi-label">指令 / 模块 / LLM</span>
+          <span class="kpi-label">指令 / 插件 / LLM</span>
           <div class="kpi-value small">
             {{ summary.by_command }} / {{ summary.by_module }} / {{ summary.by_llm }}
           </div>
         </div>
       </template>
       <template v-else>
-        <div class="kpi tip" data-tip="Bot 主动发出的消息条数">
+        <div class="kpi tip" data-tip="机器人主动发出的消息条数">
           <span class="kpi-label">发出消息</span>
           <div class="kpi-value">{{ summary.messages }}</div>
         </div>

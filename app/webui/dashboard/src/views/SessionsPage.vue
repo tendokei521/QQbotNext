@@ -5,6 +5,7 @@ import { AxiosError } from 'axios'
 import http, { errorMessage, token } from '@/api/http'
 import { useBotsStore } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 
 interface SessionSummary {
   session_id: string
@@ -113,6 +114,61 @@ const purgingMedia = ref(false)
 const previewImage = ref<HistoryImage | null>(null)
 const imageBusy = ref('')
 const pendingImageTarget = ref<{ index: number; image: HistoryImage } | null>(null)
+
+/** 统一确认弹窗：替代各处的 window.confirm，能写清「删什么、影响多少、能否恢复」 */
+interface ConfirmOptions {
+  title: string
+  message?: string
+  details?: string[]
+  confirmText?: string
+  danger?: boolean
+}
+
+const confirmState = ref<ConfirmOptions & { open: boolean }>({
+  open: false,
+  title: '',
+  message: '',
+  details: [],
+  confirmText: '确定',
+  danger: true,
+})
+let confirmResolve: ((ok: boolean) => void) | null = null
+
+/** 弹确认框并等用户选择：`await askConfirm(...)` 返回 true 才继续执行危险动作 */
+function askConfirm(options: ConfirmOptions): Promise<boolean> {
+  return new Promise((resolve) => {
+    // 上一次还没结束就被新确认覆盖：按取消处理，避免 Promise 永远不 resolve
+    confirmResolve?.(false)
+    confirmResolve = resolve
+    confirmState.value = {
+      open: true,
+      title: options.title,
+      message: options.message || '',
+      details: options.details || [],
+      confirmText: options.confirmText || '确定',
+      danger: options.danger !== false,
+    }
+  })
+}
+
+function settleConfirm(ok: boolean) {
+  const resolve = confirmResolve
+  confirmResolve = null
+  confirmState.value.open = false
+  resolve?.(ok)
+}
+
+// 点取消/遮罩关闭时（ConfirmDialog 发 v-model=false）也要结束等待
+watch(
+  () => confirmState.value.open,
+  (open) => {
+    if (!open && confirmResolve) {
+      const resolve = confirmResolve
+      confirmResolve = null
+      resolve(false)
+    }
+  },
+)
 
 const botId = computed(() => bots.currentAccountId)
 
@@ -467,7 +523,16 @@ async function renameConversation(target: ConversationSummary) {
 
 async function deleteConversation(target: ConversationSummary) {
   if (deletingTaskId.value) return
-  if (!window.confirm(`确认删除对话「${target.title}」？该操作不可恢复。`)) return
+  const confirmed = await askConfirm({
+    title: '删除这个对话？',
+    message: `对话「${target.title}」将被删除，不可恢复。`,
+    details: [
+      `该对话共 ${target.messages} 条消息，会一并删除`,
+      '只影响聊天记录，机器人配置和其他对话不受影响',
+    ],
+    confirmText: '删除对话',
+  })
+  if (!confirmed) return
   deletingTaskId.value = target.task_id
   try {
     const res = await http.delete<{ ok: boolean; mode?: string; message?: string }>(
@@ -505,7 +570,17 @@ async function deleteConversation(target: ConversationSummary) {
 async function bulkDeleteConversations() {
   if (!selectedTaskIds.value.length) return
   if (bulkDeleting.value) return
-  if (!window.confirm(`确认删除选中的 ${selectedTaskIds.value.length} 个对话？`)) return
+  const count = selectedTaskIds.value.length
+  const messageCount = conversations.value
+    .filter((c) => selectedTaskIds.value.includes(c.task_id))
+    .reduce((total, c) => total + c.messages, 0)
+  const confirmed = await askConfirm({
+    title: `删除选中的 ${count} 个对话？`,
+    message: '这些对话及其消息会一并删除，不可恢复。',
+    details: [`共 ${count} 个对话、约 ${messageCount} 条消息`, '删除后本地聊天记录不再保留'],
+    confirmText: '删除选中',
+  })
+  if (!confirmed) return
   bulkDeleting.value = true
   try {
     const res = await http.post<{ ok: boolean; deleted?: string[]; failed?: { task_id: string; error: string }[] }>(
@@ -534,8 +609,18 @@ async function bulkDeleteConversations() {
 
 async function deleteSession() {
   if (!selectedSessionId.value) return
-  const label = selectedSession.value ? sessionTitle(selectedSession.value) : '该会话'
-  if (!window.confirm(`确认删除会话「${label}」？该操作不可恢复。`)) return
+  const session = selectedSession.value
+  const label = session ? sessionTitle(session) : '该会话'
+  const confirmed = await askConfirm({
+    title: '删除整个会话？',
+    message: `会话「${label}」将被删除，不可恢复。`,
+    details: [
+      `该会话下 ${session?.conversation_count ?? 0} 个对话、${session?.total_messages ?? 0} 条消息一并删除`,
+      '本地图片文件不会立即删除，可在图片清理时统一处理',
+    ],
+    confirmText: '删除会话',
+  })
+  if (!confirmed) return
   try {
     await http.delete(`/api/sessions/${encodeURIComponent(selectedSessionId.value)}`, {
       params: { account_id: botId.value },
@@ -677,7 +762,14 @@ async function onReplacementPicked(event: Event) {
 
 async function removeImage(index: number, image: HistoryImage) {
   if (!conversation.value) return
-  if (!window.confirm('确认从这条消息里移除这张图片？移除后模型不再看到它。')) return
+  const confirmed = await askConfirm({
+    title: '移除这张图片？',
+    message: '从这条消息里移除后，模型不会再看到它。',
+    details: ['只影响当前对话这一条消息里的这张图', '本地图片文件不会被立即删除'],
+    confirmText: '移除图片',
+    danger: false,
+  })
+  if (!confirmed) return
   const key = `remove-${index}-${image.seg}`
   imageBusy.value = key
   try {
@@ -697,7 +789,17 @@ async function removeImage(index: number, image: HistoryImage) {
 
 async function purgeMedia() {
   if (botId.value == null || purgingMedia.value) return
-  if (!window.confirm('清理所有"没有任何会话引用"的本地图片？被引用的图片不会被删。')) return
+  const unreferenced = mediaStats.value?.unreferenced ?? 0
+  const confirmed = await askConfirm({
+    title: '清理未被引用的图片？',
+    message: '只删除没有被任何消息引用的图片。',
+    details: [
+      `当前可清理 ${unreferenced} 张，仍被消息引用的图片不会删除`,
+      '清理后无法恢复，需要时请先从会话数据里导出备份',
+    ],
+    confirmText: '开始清理',
+  })
+  if (!confirmed) return
   purgingMedia.value = true
   try {
     const res = await http.post<{ ok: boolean; removed?: number; kept_referenced?: number; message?: string }>(
@@ -757,7 +859,14 @@ async function addMessage() {
 }
 
 async function deleteMessage(index: number) {
-  if (!conversation.value || !window.confirm(`确认删除第 ${index + 1} 条消息？`)) return
+  if (!conversation.value) return
+  const confirmed = await askConfirm({
+    title: '删除这条消息？',
+    message: `第 ${index + 1} 条消息将被删除，不可恢复。`,
+    details: ['只影响当前对话的这条消息', '删除后模型下一轮不会再看到它'],
+    confirmText: '删除消息',
+  })
+  if (!confirmed) return
   try {
     const res = await http.delete<{ ok: boolean; conversation: ConversationDetail }>(
       `/api/sessions/${encodeURIComponent(selectedSessionId.value)}/conversations/${conversation.value.task_id}/messages/${index}`,
@@ -860,7 +969,10 @@ onMounted(() => {
     <div class="app-page-header" style="align-items: center">
       <div>
         <h1 class="app-page-title">会话数据</h1>
-        <div class="app-page-subtitle">会话是群聊 / 私聊记录，对话是一次任务保存的对话线程</div>
+        <div class="app-page-subtitle">
+          会话是群聊 / 私聊记录，对话是一次任务保存的对话线程；回复带多少上下文在
+          <router-link class="context-link" to="/ai/settings/session">AI 设置 → 会话管理</router-link>
+        </div>
       </div>
       <div class="page-header-actions">
         <v-btn variant="text" prepend-icon="mdi-chart-bar" @click="router.push('/stats')">用量统计</v-btn>
@@ -1214,6 +1326,17 @@ onMounted(() => {
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- 删除/清理类动作统一走这里：写清影响范围，不再用 window.confirm -->
+    <ConfirmDialog
+      v-model="confirmState.open"
+      :title="confirmState.title"
+      :message="confirmState.message"
+      :details="confirmState.details"
+      :danger="confirmState.danger"
+      :confirm-text="confirmState.confirmText"
+      @confirm="settleConfirm(true)"
+    />
   </div>
 </template>
 
@@ -1228,6 +1351,16 @@ onMounted(() => {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.context-link {
+  color: rgb(var(--v-theme-primary));
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.context-link:hover {
+  text-decoration: underline;
 }
 
 .list-search {
