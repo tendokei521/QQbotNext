@@ -123,3 +123,20 @@ AI 对话面板（/ai）
 3. 前端：`npm run typecheck` + `npm run build` 通过；`/ai`、`/reply` 在 1440/390 截图，
    `metrics.json` overflow 均为 0；抽屉打开态两种宽度均无横向溢出。
 4. 后端回归：`tests/webui/test_policy_api.py`、`tests/domain/test_dialogue_policy.py` 全绿。
+
+
+---
+
+## 7. 实现记录（2026-10-29）
+
+按用户要求**不加额外指路/链接**（开发期无存量用户）：
+
+- `d980757`：AI 面板「触发方式」卡改为唯一编辑器——摘要读 `/api/policy` 的
+  `resolved.config + sources`（触发方式/关键词/概率、冷却/合并/免打扰、来源 chips），
+  「编辑全局触发规则」打开 `PolicyRulesDialog`（`channelId=null`），关闭即刷新摘要；
+  `/reply` 删除「高级规则」tab 及其账号摘要代码，`tab=rules` 静默落回「群与私聊」，无 toast。
+- `acbcabe`：重建 dist。
+
+验证：`tests/architecture` + `tests/webui/test_policy_api.py` **147 passed**；
+`npm run typecheck` / `npm run build` 通过；`/ai`、`/reply` 在 1440/390 截图 `overflow=0`；
+AI 面板打开全局触发规则抽屉（1440：720×657，390：342×775）均无横向溢出。

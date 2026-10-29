@@ -37,7 +37,7 @@
 | **R3** | 高级视图（规则覆盖） | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r3-高级视图) |
 | **R4** | 迁移收口 | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r4-迁移收口) |
 | **T0–T4** | 触发方式并入「回复与权限」 | `[x]` | [`trigger-policy-integration.md`](trigger-policy-integration.md) |
-| **G0–G3** | 全局触发规则移到 AI 面板「触发方式」（**规划中**） | `[ ]` | [`global-trigger-rules-to-ai-panel.md`](global-trigger-rules-to-ai-panel.md) |
+| **G0–G3** | 全局触发规则移到 AI 面板「触发方式」 | `[x]` | [`global-trigger-rules-to-ai-panel.md`](global-trigger-rules-to-ai-panel.md) |
 
 | 编号 | commit | 内容 |
 |---|---|---|
@@ -46,6 +46,7 @@
 | T2 | `133d91c` | 触发判定：pipeline 统一走 `decide_trigger`（含 all/概率，纯图片兼容） |
 | T3 | `f843176` + `4d8af42` | 前端：矩阵行显示触发方式/免打扰、抽屉内生效预览、概率与 all 模式 |
 | T4 | `f3b38df` + `77b7770` + 迁移修复提交 | Agent 面板触发卡改只读摘要 + 启动迁移旧触发键 |
+| G0–G2 | `d980757` + `acbcabe` | 全局触发规则编辑器移到 AI 面板「触发方式」；`/reply` 删除「高级规则」tab |
 
 ### 已完成进度（2026-10-27）
 
