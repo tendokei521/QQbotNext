@@ -17,7 +17,7 @@ const TABS: { value: ToolTab; to: string; label: string; icon: string; desc: str
   },
   { value: 'system', to: '/tools/system', label: '系统工具', icon: 'mdi-cog-outline', desc: '框架内置工具，控制模型能调用哪些能力' },
   { value: 'onebot', to: '/tools/onebot', label: 'OneBot 工具', icon: 'mdi-robot-industrial', desc: '通过 OneBot 协议调用 QQ 接口，例如发消息、查群' },
-  { value: 'mcp', to: '/tools/mcp', label: '外部工具', icon: 'mdi-server-network', desc: 'MCP 服务提供的工具，连接与参数在「功能插件 → 工具扩展」维护' },
+  { value: 'mcp', to: '/tools/mcp', label: '外部工具', icon: 'mdi-server-network', desc: 'MCP 服务提供的工具' },
   { value: 'module', to: '/tools/module', label: '插件工具', icon: 'mdi-puzzle-outline', desc: '功能插件提供给模型的工具，插件开关在「功能插件」页管理' },
 ]
 
@@ -96,7 +96,7 @@ watch(
           size="small"
           variant="tonal"
           prepend-icon="mdi-cog-outline"
-          @click="router.push('/ai/settings/advanced')"
+          @click="router.push({ path: '/ai/settings/advanced', query: { group: 'adv_tool_logs' } })"
         >
           去工具日志
         </v-btn>

@@ -110,7 +110,7 @@ watch(
         <v-icon icon="mdi-server-network" class="mr-2" color="blue-grey" /> 外部工具
       </v-card-title>
       <v-card-text class="text-caption" style="opacity: 0.65">
-        列出外部工具（MCP）提供给模型的工具。连接和参数在「功能插件 → 工具扩展」里维护；调用日志在「AI 设置 → 高级功能 → 工具日志」开关。
+        列出外部工具（MCP）提供给模型的工具。连接和参数在「功能插件 → 工具扩展」里维护。
       </v-card-text>
     </v-card>
 
@@ -173,8 +173,8 @@ watch(
             class="text-caption text-center pa-4"
             style="opacity: 0.55"
           >
-            <template v-if="!agent.botId">还没有账号。先在「账号」页添加一个 QQ 账号。</template>
-            <template v-else>还没有外部工具。先到「功能插件 → 工具扩展」连接外部工具（MCP）。</template>
+            <template v-if="!agent.botId">还没有账号。先在「账号管理」添加一个 QQ 账号。</template>
+            <template v-else>还没有外部工具，先在上面提到的插件里连接。</template>
           </div>
         </div>
       </v-card-text>

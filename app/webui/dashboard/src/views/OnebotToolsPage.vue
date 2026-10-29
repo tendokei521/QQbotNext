@@ -7,6 +7,7 @@ import { useToolsStore } from '@/stores/tools'
 import { useNotifyStore } from '@/stores/notify'
 import { PERMISSION_LABELS, permissionLabel } from '@/agent/labels'
 import ToolInfo from '@/components/tools/ToolInfo.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 
 interface OneBotTool {
   name: string
@@ -108,16 +109,11 @@ const toolGroups = computed(() => {
 })
 
 const enabled = computed<boolean>({
-  get: () => !!toolsConfig.value.onebot_tools_enable,
+  // 默认开启：schema 里已隐藏该键，未显式关过时按 true 处理
+  get: () => toolsConfig.value.onebot_tools_enable !== false,
   set: (v: boolean) => void saveToolsConfig({ onebot_tools_enable: !!v }),
 })
 
-const denied = computed<string[]>(() =>
-  Array.isArray(toolsConfig.value.onebot_tools_denied) ? toolsConfig.value.onebot_tools_denied : [],
-)
-const allowed = computed<string[]>(() =>
-  Array.isArray(toolsConfig.value.onebot_tools_allowed) ? toolsConfig.value.onebot_tools_allowed : [],
-)
 const overrides = computed<Record<string, ToolOverride>>(() => toolsConfig.value.onebot_tool_overrides || {})
 
 function toolPermission(tool: OneBotTool): string {
@@ -143,35 +139,53 @@ function isSensitiveWide(tool: OneBotTool): boolean {
   return ['everyone', 'member'].includes(toolPermission(tool))
 }
 
-function isToolOn(name: string): boolean {
-  if (denied.value.includes(name)) return false
-  if (allowed.value.length && !allowed.value.includes(name)) return false
-  return true
-}
+const busyTool = ref('')
+const resetOpen = ref(false)
+const resetting = ref(false)
 
-function toggleTool(name: string) {
-  if (isToolOn(name)) {
-    void saveToolsConfig({
-      onebot_tools_denied: Array.from(new Set([...denied.value, name])),
-      onebot_tools_allowed: allowed.value.filter((x) => x !== name),
+/** 逐工具开关与「工具总览」共用同一写入口：POST /api/agent/tools/toggle（source=onebot） */
+async function toggleTool(tool: OneBotTool) {
+  if (busyTool.value) return
+  busyTool.value = tool.name
+  try {
+    await http.post('/api/agent/tools/toggle', {
+      name: tool.name,
+      source: 'onebot',
+      enabled: !tool.enabled,
     })
-  } else {
-    const patch: Record<string, unknown> = {
-      onebot_tools_denied: denied.value.filter((x) => x !== name),
-    }
-    if (allowed.value.length) {
-      patch.onebot_tools_allowed = Array.from(new Set([...allowed.value, name]))
-    }
-    void saveToolsConfig(patch)
+    await loadTools()
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  } finally {
+    busyTool.value = ''
   }
 }
 
-function resetToggles() {
-  void saveToolsConfig({
-    onebot_tools_denied: [],
-    onebot_tools_allowed: [],
-    onebot_tool_overrides: {},
-  })
+/** 「恢复默认」：清空插件里的旧名单/权限覆盖，并把被停用的 OneBot 工具全部打开 */
+async function doResetToggles() {
+  if (resetting.value) return
+  resetting.value = true
+  try {
+    await saveToolsConfig({
+      onebot_tools_allowed: [],
+      onebot_tools_denied: [],
+      onebot_tool_overrides: {},
+    })
+    for (const tool of tools.value.filter((item) => !item.enabled)) {
+      await http.post('/api/agent/tools/toggle', {
+        name: tool.name,
+        source: 'onebot',
+        enabled: true,
+      })
+    }
+    await loadTools()
+    notify.push('已恢复默认', 'success')
+    resetOpen.value = false
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  } finally {
+    resetting.value = false
+  }
 }
 
 function isCollapsed(category: string): boolean {
@@ -213,10 +227,24 @@ async function loadTools() {
   if (!bots.currentAccountId) return
   loading.value = true
   try {
-    const res = await http.get<{ ok: boolean; log_enabled: boolean; tools: OneBotTool[] }>('/api/agent/onebot/tools', {
-      params: { account_id: bots.currentAccountId },
-    })
-    tools.value = res.data.tools || []
+    // 工具清单来自 OneBot 端点；开关状态以「/api/agent/tools」统一判定为准，
+    // 这样与「工具总览」里停用/启用同一工具时两边状态一致。
+    const [toolsRes, stateRes] = await Promise.all([
+      http.get<{ ok: boolean; log_enabled: boolean; tools: OneBotTool[] }>('/api/agent/onebot/tools', {
+        params: { account_id: bots.currentAccountId },
+      }),
+      http.get<{ tools: { name: string; source: string; available: boolean }[] }>('/api/agent/tools', {
+        params: { account_id: bots.currentAccountId },
+      }),
+    ])
+    const available = new Map<string, boolean>()
+    for (const item of stateRes.data?.tools || []) {
+      if (item.source === 'onebot') available.set(item.name, !!item.available)
+    }
+    tools.value = (toolsRes.data?.tools || []).map((tool) => ({
+      ...tool,
+      enabled: available.has(tool.name) ? !!available.get(tool.name) : !!tool.enabled,
+    }))
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   } finally {
@@ -292,7 +320,7 @@ watch(
         >
           接口文档
         </v-btn>
-        <v-btn size="small" variant="tonal" :disabled="!enabled" @click="resetToggles">恢复默认</v-btn>
+        <v-btn size="small" variant="tonal" :disabled="!enabled" @click="resetOpen = true">恢复默认</v-btn>
       </v-card-title>
       <v-card-text>
         <v-progress-linear v-if="loading" indeterminate color="primary" />
@@ -317,7 +345,7 @@ watch(
                 v-for="tool in group.items"
                 :key="tool.name"
                 class="tool-item"
-                :class="{ 'is-off': !enabled || !isToolOn(tool.name) }"
+                :class="{ 'is-off': !enabled || !tool.enabled }"
               >
                 <div class="tool-row">
                   <div class="tool-info">
@@ -343,12 +371,13 @@ watch(
                     </ToolInfo>
                   </div>
                   <v-switch
-                    :model-value="enabled && isToolOn(tool.name)"
+                    :model-value="enabled && tool.enabled"
                     :disabled="!enabled"
+                    :loading="busyTool === tool.name"
                     color="primary"
                     density="compact"
                     hide-details
-                    @update:model-value="toggleTool(tool.name)"
+                    @update:model-value="() => toggleTool(tool)"
                   />
                 </div>
                 <div class="tool-policy" :class="{ 'is-disabled': !enabled }">
@@ -376,6 +405,22 @@ watch(
         </div>
       </v-card-text>
     </v-card>
+
+    <ConfirmDialog
+      v-model="resetOpen"
+      title="恢复 OneBot 工具默认设置"
+      danger
+      confirm-text="恢复默认"
+      :loading="resetting"
+      message="会清空逐工具的自定义设置，并把被停用的 OneBot 工具重新打开。"
+      :details="[
+        '清空「允许的工具」「禁止的工具」两份旧名单',
+        '清空逐工具的触发权限与可用范围覆盖',
+        '被关掉的 OneBot 工具会全部重新启用',
+        '不可撤销，建议先确认当前设置确实想丢弃',
+      ]"
+      @confirm="doResetToggles"
+    />
   </div>
 </template>
 

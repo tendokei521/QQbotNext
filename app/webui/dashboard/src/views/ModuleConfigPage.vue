@@ -401,8 +401,16 @@ onUnmounted(() => {
     <div class="app-page-subtitle" style="padding-left: 44px">{{ mod.description }}</div>
 
     <div class="d-flex align-center flex-wrap gap-2 mt-3 mb-2">
-      <SaveStatusBar :status="saveStatus" autosave hint="改动会自动保存并立即生效，无需重新加载" />
-      <v-btn size="small" variant="text" prepend-icon="mdi-refresh" @click="reloadModule">重新加载</v-btn>
+      <SaveStatusBar :status="saveStatus" autosave hint="改动会自动保存并生效" />
+      <v-btn
+        size="small"
+        variant="text"
+        prepend-icon="mdi-refresh"
+        title="切换账号实例或插件异常时使用；会先保存当前改动"
+        @click="reloadModule"
+      >
+        重新加载
+      </v-btn>
     </div>
 
     <PluginStatusBanner
@@ -426,7 +434,7 @@ onUnmounted(() => {
     >
       <div class="text-caption">
         当前显示的是<strong>所有账号共用</strong>的配置，不是账号「{{ bots.currentBot?.name ?? bots.currentAccountId }}」
-        的专属配置。点「重新加载」为这个账号准备好自己的配置后再编辑。
+        的专属配置。点「重新加载」为这个账号准备好自己的配置后再编辑（当前改动会先保存）。
       </div>
     </v-alert>
 

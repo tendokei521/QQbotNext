@@ -330,10 +330,8 @@ onMounted(async () => {
       <EmptyState
         icon="mdi-package-variant"
         title="还没有配置包"
-        description="可以从当前账号导出第一套，或导入别人分享的 .zip 配置包。"
-      >
-        <v-btn color="primary" variant="tonal" prepend-icon="mdi-import" @click="onImport">导入配置包</v-btn>
-      </EmptyState>
+        description="用右上角「导出当前账号」导出第一套，或「导入配置包」载入别人分享的 .zip。"
+      />
     </v-card>
 
     <v-row v-else>
