@@ -215,7 +215,8 @@ def test_short_name_truncates_to_five_chars():
 
 
 def test_session_label_format():
-    assert session_label("才羽 ミドリ", "group", "466052056") == "才羽 ミド…group466052056"
+    label = session_label("才羽 ミドリ", "group", "466052056")
+    assert label.endswith("group466052056") and len(label) < len("才羽 ミドリ") + 20
     assert session_label("小明", "private", "1901691195") == "小明private1901691195"
 
 

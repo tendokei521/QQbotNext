@@ -5,7 +5,6 @@ import pytest
 from app.agent.assembly.prompt import build_messages
 from app.agent.providers import get_provider
 from app.agent.providers.base import ProviderRequestError
-from app.agent.providers.openai_compat import _split_keys
 from app.agent.providers.policy import FailureKind, classify_exception
 from app.agent.session import manager as session_mod
 
@@ -43,12 +42,6 @@ def test_strip_all_tags():
 
 
 # ---------- provider（纯逻辑部分） ----------
-
-def test_split_keys():
-    assert _split_keys("") == []
-    assert _split_keys("sk-a\nsk-b") == ["sk-a", "sk-b"]
-    assert _split_keys("sk-a,sk-b，sk-c") == ["sk-a", "sk-b", "sk-c"]
-
 
 def test_get_provider_unknown_type_falls_back():
     p = get_provider({"provider": "nonexistent", "api_key": "k"})

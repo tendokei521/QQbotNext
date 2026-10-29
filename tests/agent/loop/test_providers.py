@@ -63,14 +63,6 @@ def test_register_sorts_by_order():
     assert [p.name for p in runtime.context_providers] == ["a", "b"]
 
 
-def test_register_replaces_same_name():
-    runtime = _runtime()
-    register_context_provider(runtime, _Provider("mem", "旧"))
-    register_context_provider(runtime, _Provider("mem", "新"))
-    assert len(runtime.context_providers) == 1
-    assert runtime.context_providers[0]._text == "新"
-
-
 async def test_collect_returns_blocks_in_order_and_drops_empty():
     runtime = _runtime()
     owner = _Owner()

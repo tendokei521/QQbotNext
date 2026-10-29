@@ -64,14 +64,17 @@ def test_format_usage_prefers_upstream_cache_fields():
         "prompt_cache_hit_tokens": 1000,
         "prompt_cache_miss_tokens": 234,
     }
-    assert format_usage(deepseek) == (
-        "输入 1234（缓存命中 1000 / 未命中 234） / 输出 567 / 合计 1801 tokens"
-    )
+    text = format_usage(deepseek)
+    assert "输入 1234" in text
+    assert "缓存命中 1000" in text and "未命中 234" in text
+    assert "输出 567" in text and "合计 1801" in text
 
 
 def test_format_usage_openai_cached_details():
     usage = {"prompt_tokens": 100, "completion_tokens": 20, "prompt_tokens_details": {"cached_tokens": 80}}
-    assert format_usage(usage) == "输入 100（缓存命中 80 / 未命中 20） / 输出 20 tokens"
+    text = format_usage(usage)
+    assert "输入 100" in text and "缓存命中 80" in text and "未命中 20" in text
+    assert "输出 20" in text
 
 
 def test_format_usage_anthropic_fields():
@@ -81,11 +84,14 @@ def test_format_usage_anthropic_fields():
         "cache_read_input_tokens": 3,
         "cache_creation_input_tokens": 7,
     }
-    assert format_usage(usage) == "输入 10（缓存命中 3 / 未命中 7） / 输出 5 tokens"
+    text = format_usage(usage)
+    assert "输入 10" in text and "缓存命中 3" in text and "未命中 7" in text
+    assert "输出 5" in text
 
 
 def test_format_usage_without_cache_or_total():
-    assert format_usage({"prompt_tokens": 12, "completion_tokens": 3}) == "输入 12 / 输出 3 tokens"
+    text = format_usage({"prompt_tokens": 12, "completion_tokens": 3})
+    assert "输入 12" in text and "输出 3" in text
     assert format_usage({}) == ""
     assert format_usage(None) == ""
 

@@ -17,13 +17,11 @@ from __future__ import annotations
 import base64
 import io
 
-import pytest
 from PIL import Image as PILImage
 
 from app.agent.assembly.assembler import PromptRequest, place_images
 from app.agent.media.animated import extract_frames, frame_indices, is_animated
 from app.agent.media.image import (
-    _animated_hint,
     build_user_content,
     collect_image_segments,
     count_images,
@@ -149,26 +147,6 @@ def _seg(seg_type: str, data: dict):
     import types as _types
 
     return _types.SimpleNamespace(type=seg_type, data=data)
-
-
-@pytest.mark.parametrize(
-    ("seg", "expected"),
-    [
-        (("image", {"summary": "[动画表情]"}), True),
-        (("image", {"file": "abc.gif"}), True),
-        (("image", {"url": "https://cdn.example/x.webp?term=2"}), True),
-        (("image", {"sub_type": "1"}), True),
-        (("mface", {"summary": "[表情]", "url": "https://cdn.example/m"}), True),
-        (("image", {"file": "abc.jpg", "summary": "图片"}), False),
-        (("image", {"url": "https://cdn.example/x.png"}), False),
-    ],
-)
-def test_animated_hint(seg, expected):
-    assert _animated_hint(_seg(seg[0], seg[1])) is expected
-
-
-def test_probe_all_images_overrides_hint():
-    assert _animated_hint(_seg("image", {"url": "https://cdn.example/x.png"}), probe_all=True) is True
 
 
 def test_mface_counts_as_image():

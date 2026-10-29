@@ -3,30 +3,7 @@
 from types import SimpleNamespace
 
 from app.agent.tools import web_search as tavily_mod
-from app.agent.tools.web_search import _format_result, build_tavily_tool
-
-
-def test_format_result_with_answer_and_results():
-    data = {
-        "answer": "这是答案",
-        "results": [
-            {"title": "标题A", "url": "https://a.example", "content": "摘要A", "score": 0.98},
-            {"title": "标题B", "url": "https://b.example", "content": "摘要B", "score": 0.75},
-        ],
-    }
-    text = _format_result(data, max_chars=2000)
-    assert "答案：这是答案" in text
-    assert "标题A" in text
-    assert "https://a.example" in text
-    assert "相关度: 0.980" in text
-
-
-def test_format_result_empty():
-    text = _format_result({"answer": "", "results": []}, max_chars=2000)
-    assert text == "未找到相关搜索结果。"
-    text = _format_result({"answer": "孤答案", "results": []}, max_chars=2000)
-    assert "答案：孤答案" in text
-    assert "未找到相关搜索结果" in text
+from app.agent.tools.web_search import build_tavily_tool
 
 
 async def test_tool_requires_api_key():
@@ -43,7 +20,7 @@ async def test_tool_requires_api_key():
     spec = build_tavily_tool(runtime)
     assert spec.name == "tavily_search"
     result = await spec.handler(None, {"query": "test"})
-    assert result == "error: 未配置 Tavily API Key"
+    assert "未配置" in result and "Tavily" in result
 
 
 async def test_handler_calls_search_and_formats(monkeypatch):

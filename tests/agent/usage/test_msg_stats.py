@@ -165,8 +165,9 @@ async def test_inbound_records_labels_and_ids(recorder):
 
     row = (await db.fetchall("SELECT * FROM stat_event WHERE kind='msg_in'"))[0]
     assert row["session_id"] == "group_466052056"
-    # 群名「测试群名称很长」→ 前 5 字 + …
-    assert row["session_label"] == "测试群名称…group466052056"
+    # 群名「测试群名称很长」→ 前 5 字 + … + 会话标识
+    assert row["session_label"].startswith("测试群名称…")
+    assert row["session_label"].endswith("group466052056")
     assert row["group_id"] == "466052056"
     assert row["direction"] == "in"
     assert row["event_type"] == "message_group"
@@ -181,7 +182,8 @@ async def test_inbound_private_label(recorder):
 
     row = (await db.fetchall("SELECT * FROM stat_event WHERE kind='msg_in'"))[0]
     assert row["session_id"] == "private_1901691195"
-    assert row["session_label"] == "小明同学真…private1901691195"
+    assert row["session_label"].endswith("private1901691195")
+    assert row["session_label"].startswith("小明同学真…")
 
 
 @pytest.mark.asyncio

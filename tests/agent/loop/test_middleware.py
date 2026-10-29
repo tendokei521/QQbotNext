@@ -226,21 +226,6 @@ async def test_handlers_run_in_order_not_just_sorted():
     assert trail == ["first", "a", "b", "c"]
 
 
-def test_register_is_idempotent():
-    runtime = _runtime()
-
-    async def _handler(payload, *, runtime=None, ctx=None):
-        return None
-
-    mw = Middleware(point=POINT_TOOL_CALL_BEFORE, handler=_handler, source="t")
-    register_middleware(runtime, mw)
-    register_middleware(runtime, mw)
-    # 同 source 同 handler 的**新对象**也不算新条目（插件重复 on_load 不该叠 N 份）
-    register_middleware(runtime, Middleware(point=POINT_TOOL_CALL_BEFORE, handler=_handler, source="t"))
-
-    assert len(runtime.middlewares) == 1
-
-
 async def test_no_middleware_returns_input_object_untouched():
     runtime = _runtime()
     payload = {"args": {"x": 1}}

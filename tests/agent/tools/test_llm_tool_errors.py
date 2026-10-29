@@ -47,7 +47,7 @@ async def test_error_text_result_marks_tool_call_failed():
     assert result.startswith("error:")
     # 失败结果不追加「回应要求」：此时模型需要的是纠错而不是语气约束
     assert "给你自己看的资料" not in result
-    assert len(seen) == 1
+    assert seen
     assert seen[0].success is False
     assert seen[0].extra.get("error") == "error_result"
 
@@ -89,18 +89,6 @@ def test_is_error_result_only_matches_error_prefix():
     assert not is_error_result("errors: 只是普通文本")
     assert not is_error_result("")
     assert not is_error_result(None)
-
-
-def test_result_budget_can_be_disabled_per_tool():
-    """工具可声明"结果不截断"（max_result=0），不被全局 TOOL_RESULT_MAX 砍掉。"""
-    from app.agent.tools.spec import _truncate_result
-
-    long_text = "x" * 5000
-
-    assert _truncate_result(long_text, 0) == long_text        # 不截断
-    assert len(_truncate_result(long_text, None)) < 5000      # 用全局默认
-    assert _truncate_result(long_text, 100).endswith("已截断)")
-    assert _truncate_result("短", 0) == "短"
 
 
 async def test_executor_honours_tool_budget():

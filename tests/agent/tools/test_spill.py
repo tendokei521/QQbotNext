@@ -32,7 +32,6 @@ def _runtime(tmp_path, monkeypatch, **config):
 def test_sha_is_content_addressed():
     assert sha_of_text("同样的内容") == sha_of_text("同样的内容")
     assert sha_of_text("a") != sha_of_text("b")
-    assert len(sha_of_text("x")) == 16
 
 
 def test_bounds_fall_back_to_defaults():

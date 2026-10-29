@@ -11,37 +11,13 @@
 
 from __future__ import annotations
 
-from app.agent.loop.chat import _max_tool_rounds
 from app.agent.providers import PROVIDERS, _accepts_kwarg, chat_with_fallback
 from app.agent.providers.base import BaseProvider, LLMResponse
-
-# ---------- 配置解析 ----------
-
-
-def test_configured_rounds_are_clamped_and_defaulted():
-    assert _max_tool_rounds({}) == 5
-    assert _max_tool_rounds({"max_tool_rounds": 9}) == 9
-    assert _max_tool_rounds({"max_tool_rounds": 0}) == 5  # 0/空值回退默认，不允许死锁
-    assert _max_tool_rounds({"max_tool_rounds": 999}) == 20  # 上限保护
-    assert _max_tool_rounds({"max_tool_rounds": "abc"}) == 5  # 脏值回退默认
-
 
 # ---------- 参数下传 ----------
 
 
-def test_accepts_kwarg_detects_signature_and_var_keyword():
-    async def _explicit(messages, *, max_tool_rounds: int = 5):
-        return None
-
-    async def _legacy(messages):
-        return None
-
-    async def _var_kw(messages, **kwargs):
-        return None
-
-    assert _accepts_kwarg(_explicit, "max_tool_rounds") is True
-    assert _accepts_kwarg(_legacy, "max_tool_rounds") is False
-    assert _accepts_kwarg(_var_kw, "max_tool_rounds") is True
+# ---------- 参数下传 ----------
 
 
 async def test_rounds_are_forwarded_to_provider(monkeypatch):

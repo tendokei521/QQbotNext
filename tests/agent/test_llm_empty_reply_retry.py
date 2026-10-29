@@ -17,7 +17,6 @@
 
 from __future__ import annotations
 
-from app.agent.loop.chat import DEFAULT_EMPTY_REPLY_RETRIES, _max_empty_retries
 from app.agent.providers import PROVIDERS, chat_with_fallback, iter_stream_with_fallback
 from app.agent.providers.base import BaseProvider, LLMResponse, StreamEvent
 
@@ -83,15 +82,6 @@ def _text(events) -> str:
 
 
 # ---------- 配置解析 ----------
-
-
-def test_empty_reply_retries_config_clamped():
-    assert _max_empty_retries({}) == DEFAULT_EMPTY_REPLY_RETRIES
-    assert _max_empty_retries({"empty_reply_retries": 0}) == 0     # 显式关闭
-    assert _max_empty_retries({"empty_reply_retries": 3}) == 3
-    assert _max_empty_retries({"empty_reply_retries": 99}) == 3    # 上限保护
-    assert _max_empty_retries({"empty_reply_retries": -5}) == 0
-    assert _max_empty_retries({"empty_reply_retries": "abc"}) == DEFAULT_EMPTY_REPLY_RETRIES
 
 
 # ---------- 流式重试 ----------

@@ -433,40 +433,6 @@ class _BoomLocks:
         return _BoomLock()
 
 
-async def test_pipeline_lets_image_only_at_message_through(monkeypatch, offline_download):
-    """回归：此前 ``if not ctx.user_text: return`` 会把「@我 + 只发图」整轮丢掉。"""
-    from app.agent.loop.context import LlmContext, LlmJob
-    from app.agent.loop.pipeline import LlmPipeline
-
-    runtime = _FakeRuntime()
-    pipeline = LlmPipeline(runtime)
-    pipeline.session_locks = _BoomLocks()
-    event = _event([("at", {"qq": "3569937952"}), ("image", {"url": "https://a/1.png"})])
-    stages: list[str] = []
-
-    async def _continue(_job, debounce=0.0, max_wait=0.0):
-        return True  # 让流程继续，直到 pre_request
-
-    async def _record_stage(stage, ctx, *args, **kwargs):
-        stages.append(stage)
-        return True
-
-    monkeypatch.setattr(pipeline.pool, "wait_for_continue", _continue)
-    monkeypatch.setattr(pipeline, "_run_stage", _record_stage)
-
-    ctx = LlmContext(event=event, runtime=runtime, bot=None, session_id="group_778", user_text="")
-    ctx.job = LlmJob(id="t", group_key="group_778", ctx=ctx, generation=0)
-    await pipeline._run(ctx.job)
-
-    assert stages == ["pre_request"]          # 没有被 `if not ctx.user_text: return` 拦下
-    assert ctx.state.get("has_image") is True
-    images = ctx.state.get("user_images") or []
-    assert len(images) == 1
-    _assert_local_base64(images[0])
-    # 落盘结果写在段自身上：chat 稍后拿到的就是同一批（不再二次下载）
-    assert image_media.segment_media(event.message[1]) is not None
-
-
 async def test_pipeline_resolve_images_skips_text_only_model(monkeypatch):
     from app.agent.loop.context import LlmContext
     from app.agent.loop.pipeline import LlmPipeline

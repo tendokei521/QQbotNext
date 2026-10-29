@@ -33,8 +33,8 @@ from types import SimpleNamespace
 import pytest
 
 from app.agent.loop.chat import build_initiative_tools
-from app.plugins.llm_proactive.src import stream as initiative_stream
 from app.agent.providers.base import StreamEvent
+from app.plugins.llm_proactive.src import stream as initiative_stream
 
 
 class _Bot:

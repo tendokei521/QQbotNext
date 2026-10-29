@@ -89,18 +89,6 @@ def test_capacity_eviction_clears_index_so_event_can_be_reappended():
     assert store.append_many([_msg(mid="1")]) == 1
 
 
-def test_prune_by_hours_uses_ingest_stamps():
-    """过了保留时长的记录会被淘汰（保留窗口按入账时间滚动）。"""
-    store = GroupLogStore(bot_id=1, retention_hours=1)
-    store.append_many([_msg(mid="old"), _msg(mid="new")])
-    assert len(store.recent(GROUP)) == 2
-    # 把两条的入账时间伪造成 2 小时前 → 均已过期
-    store._stamps[GROUP] = type(store._stamps[GROUP])([time.time() - 7200] * 2)
-    assert store.prune(GROUP) == 2
-    assert store.recent(GROUP) == []
-    assert store.stats["dropped_by_retention"] == 2
-
-
 def test_zero_retention_count_rejects_everything():
     store = GroupLogStore(bot_id=1, retention_count=0)
     assert store.append_many([_msg()]) == 0

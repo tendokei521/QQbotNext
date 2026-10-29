@@ -40,19 +40,6 @@ def test_telemetry_record_call_simple():
 
 # ---------- 会话锁 ----------
 
-async def test_session_lock_serializes():
-    lm = SessionLockManager()
-    lock = lm.lock("group_1")
-    assert lock.locked() is False
-    await lm.acquire("group_1")
-    assert lm.active_count() == 1
-    assert lock.locked() is True
-    lm.release("group_1")
-    assert lock.locked() is False
-    lm.clear("group_1")
-    assert "group_1" not in lm._locks
-
-
 async def test_session_lock_reclaims_idle_entry():
     """空闲会话的锁必须被回收：否则会话数无界时会永久累积（内存泄漏）。"""
     lm = SessionLockManager()

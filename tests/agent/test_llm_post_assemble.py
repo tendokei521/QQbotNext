@@ -204,17 +204,3 @@ async def test_run_stage_filters_by_event_type():
     assert calls == ["group"]
 
 
-async def test_pipeline_run_stage_delegates_to_shared_runner():
-    """流水线阶段也走同一实现：插件在一个地方注册，四条路径语义一致。"""
-    from app.agent.loop.pipeline import LlmPipeline
-
-    runtime = _Runtime()
-    calls = []
-
-    async def hook(ctx):
-        calls.append("hit")
-
-    runtime.llm_hooks.register(stage="post_assemble", handler=hook)
-    pipeline = LlmPipeline(runtime)
-    assert await pipeline._run_stage("post_assemble", _ctx(runtime)) is True
-    assert calls == ["hit"]

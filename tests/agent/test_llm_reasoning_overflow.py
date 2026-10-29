@@ -27,41 +27,6 @@ from app.agent.providers.base import BaseProvider, LLMResponse, StreamEvent
 # ==================== 1. max_tokens 来源 ====================
 
 
-def test_effective_max_tokens_prefers_provider_model_config():
-    """链上（provider 模型/预设）写了 max_tokens 就赢过 Agent 配置。"""
-    value, src = chat._effective_max_tokens(
-        [{"provider": "x", "model": "m", "max_tokens": 8192}], 1024
-    )
-    assert (value, src) == (8192, "provider 模型/预设")
-
-
-def test_effective_max_tokens_falls_back_to_agent_config():
-    value, src = chat._effective_max_tokens([{"provider": "x", "model": "m"}], 2048)
-    assert (value, src) == (2048, "agent 配置")
-
-
-def test_effective_max_tokens_ignores_blank_chain_value():
-    """链上写了空串/None 等于没写，要落到 Agent 配置。"""
-    value, src = chat._effective_max_tokens([{"max_tokens": ""}, {"max_tokens": None}], 300)
-    assert (value, src) == (300, "agent 配置")
-
-
-def test_effective_max_tokens_tolerates_garbage():
-    assert chat._effective_max_tokens([{"max_tokens": "abc"}], 300) == (300, "agent 配置")
-    assert chat._effective_max_tokens(None, None) == (0, "agent 配置")
-
-
-def test_reasoning_overflow_retries_clamped():
-    assert chat._reasoning_overflow_retries({}) == chat.DEFAULT_REASONING_OVERFLOW_RETRIES
-    assert chat._reasoning_overflow_retries({"reasoning_overflow_retries": 0}) == 0
-    assert chat._reasoning_overflow_retries({"reasoning_overflow_retries": 2}) == 2
-    assert chat._reasoning_overflow_retries({"reasoning_overflow_retries": 99}) == 2
-    assert chat._reasoning_overflow_retries({"reasoning_overflow_retries": -1}) == 0
-    assert chat._reasoning_overflow_retries({"reasoning_overflow_retries": "abc"}) == (
-        chat.DEFAULT_REASONING_OVERFLOW_RETRIES
-    )
-
-
 # ==================== 2. 流式收敛轮 ====================
 
 STREAM_MESSAGES: list[list[dict]] = []

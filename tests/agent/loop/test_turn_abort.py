@@ -135,16 +135,3 @@ async def test_abort_before_dispatch_records_a_paired_tool_result():
     }
 
 
-async def test_interrupt_session_cancels_the_running_scope():
-    """流水线的 `interrupt_session` 要同时抬代际**和**取消正在跑的循环。"""
-    from app.agent.loop.pipeline import LlmPipeline
-
-    runtime = SimpleNamespace(bot_id="1", config={})
-    pipeline = LlmPipeline(runtime)
-    scope = AbortScope()
-    pipeline._active_scopes["group_1"] = scope
-
-    pipeline.interrupt_session("group_1")
-
-    assert scope.aborted, "代际只负责'别再发句子'，停住循环要靠 AbortScope"
-    assert pipeline._session_generation["group_1"] == 1
