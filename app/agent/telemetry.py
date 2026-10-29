@@ -38,6 +38,10 @@ class LLMCallRecord:
     characters: int = 0
     fallback_count: int = 0
     error: str = ""
+    #: 本轮结构化结局（``TurnReason``：completed/silent/blocked/max_rounds/…）。
+    #: 两条收尾路径（非流式 `_record_telemetry`、流式 `_record_stream_telemetry`）
+    #: 都写它；缺这个字段会让调用方的关键字参数直接抛 TypeError，把整轮打成任务异常。
+    reason: str = ""
     hook_times: dict = field(default_factory=dict)
 
 
@@ -181,6 +185,7 @@ class TelemetryRecorder:
         characters: int = 0,
         fallback_count: int = 0,
         error: str = "",
+        reason: str = "",
         hook_times: dict | None = None,
     ) -> None:
         self.record_call(LLMCallRecord(
@@ -198,5 +203,6 @@ class TelemetryRecorder:
             characters=characters,
             fallback_count=fallback_count,
             error=error,
+            reason=str(reason or ""),
             hook_times=dict(hook_times or {}),
         ))

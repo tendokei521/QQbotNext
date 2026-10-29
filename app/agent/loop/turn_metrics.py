@@ -277,30 +277,39 @@ def _record_stream_telemetry(
     usage: dict | None = None,
     reason: str = "",
 ) -> None:
-    """流式生成的统一遥测落点。"""
+    """流式生成的统一遥测落点（失败只留痕，绝不影响一轮结果）。
+
+    这里是**流式收尾的最后一步**，异常一旦外抛就会被流水线记成「任务异常」：
+    用户那边回复已经发完，却凭空多出一条 ERROR。遥测是旁路，任何失败都只能降级为日志。
+    """
     telemetry = getattr(runtime, "telemetry", None)
     if telemetry is None:
         return
     full_text = "".join(full_text_parts)
     first_cfg = provider_chain[0] if provider_chain else {}
     tokens = usage or {}
-    telemetry.record_call_simple(
-        bot_id=runtime.bot_id,
-        session_id=session_id,
-        provider=str(first_cfg.get("provider", "openai") or "openai"),
-        # 实际服务者（回退后不是 chain[0]）：与 token 消耗那一行同源，避免遥测也记错模型
-        model=_served_model_label(tokens, first_cfg.get("model", model)),
-        stream=True,
-        success=success,
-        latency_ms=(time.monotonic() - stream_start) * 1000,
-        input_tokens=int(tokens.get("prompt_tokens") or tokens.get("input_tokens") or 0),
-        output_tokens=int(tokens.get("completion_tokens") or tokens.get("output_tokens") or 0),
-        message_count=len(messages),
-        tool_calls=len(tool_results),
-        characters=len(full_text),
-        error=error_text,
-        reason=reason,
-    )
+    try:
+        telemetry.record_call_simple(
+            bot_id=runtime.bot_id,
+            session_id=session_id,
+            provider=str(first_cfg.get("provider", "openai") or "openai"),
+            # 实际服务者（回退后不是 chain[0]）：与 token 消耗那一行同源，避免遥测也记错模型
+            model=_served_model_label(tokens, first_cfg.get("model", model)),
+            stream=True,
+            success=success,
+            latency_ms=(time.monotonic() - stream_start) * 1000,
+            input_tokens=int(tokens.get("prompt_tokens") or tokens.get("input_tokens") or 0),
+            output_tokens=int(tokens.get("completion_tokens") or tokens.get("output_tokens") or 0),
+            message_count=len(messages),
+            tool_calls=len(tool_results),
+            characters=len(full_text),
+            error=error_text,
+            reason=str(reason or ""),
+        )
+    except Exception as e:  # noqa: BLE001 —— 遥测不该影响一轮结果
+        logger.add_info(account_label(getattr(runtime, "bot_id", "?"))).debug(
+            f"[LLM] 流式遥测记录失败（已忽略）: {e}"
+        )
 
 
 def _log_debug_prompt(runtime, session_id: str, messages: list[dict], debug_enabled: bool = False) -> None:
