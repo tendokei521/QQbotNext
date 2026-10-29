@@ -7,13 +7,14 @@
  * 因此新增分区只需要在 sections.json 里加一条，**不需要新增页面文件**。
  */
 import { computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import EmptyState from '@/components/EmptyState.vue'
 import AgentConfigSection from '@/components/agent/AgentConfigSection.vue'
 import { agentCustomSection } from '@/agent/customSections'
 import { agentSectionByPath } from '@/agent/sections'
 
 const route = useRoute()
+const router = useRouter()
 
 const section = computed(() => agentSectionByPath(route.path))
 const custom = computed(() => (section.value ? agentCustomSection(section.value.id) : null))
@@ -21,6 +22,16 @@ const custom = computed(() => (section.value ? agentCustomSection(section.value.
 
 <template>
   <div class="agent-section-page">
+    <!-- 会话管理管"回复带多少上下文"，聊天记录本身在「会话数据」：两页互不相连，这里给个去处 -->
+    <v-alert v-if="section?.id === 'session'" type="info" variant="tonal" density="compact" class="mb-3">
+      <div class="d-flex align-center flex-wrap gap-2">
+        <span class="text-caption">这里配置回复带多少上下文；聊天记录本身在</span>
+        <v-btn size="small" variant="text" prepend-icon="mdi-arrow-right" @click="router.push('/sessions')">
+          会话数据
+        </v-btn>
+      </div>
+    </v-alert>
+
     <AgentConfigSection v-if="section" :section="section">
       <template v-if="section.customFirst && custom" #before>
         <component :is="custom" />

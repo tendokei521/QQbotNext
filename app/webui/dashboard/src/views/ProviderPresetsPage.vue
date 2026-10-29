@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import http, { errorMessage } from '@/api/http'
 import { useNotifyStore } from '@/stores/notify'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 
 interface ProviderPreset {
   id: string
@@ -183,6 +184,44 @@ const configJsonText = ref('')
 const configError = ref('')
 const configSaving = ref(false)
 const providerTemplate = ref<any>(null)
+/**
+ * JSON 编辑器里以只读方式展示的连接参数。
+ *
+ * 这几个键在「编辑」表单里有校验与更明确的说明；JSON 编辑器只应收尾表单没暴露的高级键
+ * （headers / extra_body 等），否则同一份配置有两个入口、且 JSON 路径能绕过校验。
+ */
+const JSON_READONLY_KEYS = ['api_base', 'api_key', 'retry_attempts', 'timeout'] as const
+const readonlyConfigPreview = ref<Record<string, any>>({})
+
+/** 删除确认：服务商/模型的删除都是不可撤销操作，统一走 ConfirmDialog 并列出影响 */
+interface PendingDelete {
+  kind: 'source' | 'model'
+  id: string
+  name: string
+  details: string[]
+}
+const pendingDelete = ref<PendingDelete | null>(null)
+const deleteLoading = ref(false)
+const deleteDialogOpen = computed({
+  get: () => pendingDelete.value !== null,
+  set: (value: boolean) => {
+    if (!value) pendingDelete.value = null
+  },
+})
+const deleteDialogTitle = computed(() =>
+  pendingDelete.value?.kind === 'model' ? '删除模型' : '删除模型服务',
+)
+const deleteDialogMessage = computed(() => {
+  const target = pendingDelete.value
+  if (!target) return ''
+  return target.kind === 'model' ? `模型「${target.name}」将被删除。` : `模型服务「${target.name}」将被删除。`
+})
+
+function stripReadonlyConfigKeys(config: Record<string, any> | null | undefined): Record<string, any> {
+  const out: Record<string, any> = { ...(config || {}) }
+  for (const key of JSON_READONLY_KEYS) delete out[key]
+  return out
+}
 
 const modelDialog = ref(false)
 const editingModelId = ref('')
@@ -472,39 +511,48 @@ async function importBuiltin(item: BuiltinPreset) {
 
 function openConfigEditor(preset: ProviderPreset) {
   editingConfigPresetId.value = preset.id
-  configJsonText.value = JSON.stringify({ ...(preset.config || {}) }, null, 2)
+  readonlyConfigPreview.value = { ...(preset.config || {}) }
+  configJsonText.value = JSON.stringify(stripReadonlyConfigKeys(preset.config), null, 2)
   configError.value = ''
   configDialog.value = true
 }
 
 function resetToTemplate() {
   if (!providerTemplate.value) return
-  configJsonText.value = JSON.stringify({ ...(providerTemplate.value.config || {}) }, null, 2)
+  readonlyConfigPreview.value = { ...(providerTemplate.value.config || {}) }
+  configJsonText.value = JSON.stringify(stripReadonlyConfigKeys(providerTemplate.value.config), null, 2)
   configError.value = ''
 }
 
 async function saveConfigJson() {
-  let config: Record<string, any>
+  let editable: Record<string, any>
   try {
-    config = JSON.parse(configJsonText.value)
+    editable = JSON.parse(configJsonText.value)
   } catch {
     configError.value = 'JSON 格式不正确'
     return
   }
-  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+  if (!editable || typeof editable !== 'object' || Array.isArray(editable)) {
     configError.value = '配置必须是 JSON 对象'
     return
   }
-  if (!config.api_base?.trim()) {
-    configError.value = '接口地址（api_base）不能为空'
-    return
-  }
-  if (config.headers !== undefined && (typeof config.headers !== 'object' || config.headers === null || Array.isArray(config.headers))) {
+  if (editable.headers !== undefined && (typeof editable.headers !== 'object' || editable.headers === null || Array.isArray(editable.headers))) {
     configError.value = '请求头（headers）必须是对象'
     return
   }
-  if (config.extra_body !== undefined && (typeof config.extra_body !== 'object' || config.extra_body === null || Array.isArray(config.extra_body))) {
+  if (editable.extra_body !== undefined && (typeof editable.extra_body !== 'object' || editable.extra_body === null || Array.isArray(editable.extra_body))) {
     configError.value = '请求体扩展（extra_body）必须是对象'
+    return
+  }
+  // 连接参数不在 JSON 编辑器里改：保存时用现有值原样合并回去（避免被手写覆盖/丢失）
+  const source =
+    presets.value.find((item) => item.id === editingConfigPresetId.value)?.config || readonlyConfigPreview.value
+  const config = stripReadonlyConfigKeys(editable)
+  for (const key of JSON_READONLY_KEYS) {
+    if (source[key] !== undefined) config[key] = source[key]
+  }
+  if (!String(config.api_base || '').trim()) {
+    configError.value = '接口地址为空，请用「编辑」填写接口地址'
     return
   }
   configSaving.value = true
@@ -520,15 +568,65 @@ async function saveConfigJson() {
   }
 }
 
-async function deleteSource(preset: ProviderPreset) {
-  if (!window.confirm(`确认删除模型服务「${preset.name}」？它下面的模型会一起删除，正在用它的账号会恢复为默认。`)) return
+async function askDeleteSource(preset: ProviderPreset) {
+  let modelCount = 0
+  let defaultsInUse = false
   try {
-    await http.delete(`/api/provider-presets/${preset.id}`)
-    notify.push('模型服务已删除', 'success')
-    if (selectedPresetId.value === preset.id) selectedPresetId.value = ''
-    await loadPresets()
+    const res = await http.get<{ models: ProviderModel[] }>('/api/provider-models', {
+      params: { preset_id: preset.id },
+    })
+    modelCount = (res.data?.models || []).length
+    defaultsInUse = (res.data?.models || []).some((model) => model.id === settingsForm.default_model_id)
+  } catch {
+    modelCount = 0
+  }
+  pendingDelete.value = {
+    kind: 'source',
+    id: preset.id,
+    name: preset.name,
+    details: [
+      `它下面的 ${modelCount} 个模型会一起删除`,
+      defaultsInUse ? '其中包含全局默认模型，删除后会回落到其它模型' : '正在使用这些模型的账号会回落到默认模型',
+      '删除后不能撤销',
+    ],
+  }
+}
+
+function askDeleteModel(model: ProviderModel) {
+  pendingDelete.value = {
+    kind: 'model',
+    id: model.id,
+    name: model.model,
+    details: [
+      '这个模型的单独设置会一起删除',
+      model.id === settingsForm.default_model_id
+        ? '它是全局默认模型，删除后没选模型的账号会没有可用模型'
+        : '正在使用它的账号会回落到默认模型',
+      '删除后不能撤销',
+    ],
+  }
+}
+
+async function confirmDelete() {
+  const target = pendingDelete.value
+  if (!target || deleteLoading.value) return
+  deleteLoading.value = true
+  try {
+    if (target.kind === 'source') {
+      await http.delete(`/api/provider-presets/${target.id}`)
+      notify.push('模型服务已删除', 'success')
+      if (selectedPresetId.value === target.id) selectedPresetId.value = ''
+      await loadPresets()
+    } else {
+      await http.delete(`/api/provider-models/${target.id}`)
+      notify.push('模型已删除', 'success')
+      await loadModels()
+    }
+    pendingDelete.value = null
   } catch (err) {
     notify.push(errorMessage(err), 'error')
+  } finally {
+    deleteLoading.value = false
   }
 }
 
@@ -651,17 +749,6 @@ async function testModel(model: ProviderModel) {
   }
 }
 
-async function deleteModel(model: ProviderModel) {
-  if (!window.confirm(`确认删除模型「${model.model}」？`)) return
-  try {
-    await http.delete(`/api/provider-models/${model.id}`)
-    notify.push('模型已删除', 'success')
-    await loadModels()
-  } catch (err) {
-    notify.push(errorMessage(err), 'error')
-  }
-}
-
 async function testPreset(preset: ProviderPreset) {
   testingId.value = `preset:${preset.id}`
   try {
@@ -680,6 +767,7 @@ async function testPreset(preset: ProviderPreset) {
 onMounted(() => {
   loadPresets()
   loadTemplate()
+  loadSettings()
 })
 </script>
 
@@ -718,7 +806,7 @@ onMounted(() => {
                 <v-list-item-subtitle>{{ p.config.api_base || p.provider }}</v-list-item-subtitle>
                 <template #append>
                   <v-btn size="x-small" variant="text" icon="mdi-pencil" @click.stop="openEditSource(p)" />
-                  <v-btn size="x-small" variant="text" icon="mdi-delete" color="error" @click.stop="deleteSource(p)" />
+                  <v-btn size="x-small" variant="text" icon="mdi-delete" color="error" @click.stop="askDeleteSource(p)" />
                 </template>
               </v-list-item>
               <v-list-item v-if="presets.length === 0">
@@ -811,7 +899,7 @@ onMounted(() => {
                     <td class="text-right">
                       <v-btn size="x-small" variant="text" color="primary" :loading="testingId === m.id" @click="testModel(m)">测试</v-btn>
                       <v-btn size="x-small" variant="text" color="primary" @click="openEditModel(m)">编辑</v-btn>
-                      <v-btn size="x-small" variant="text" color="error" @click="deleteModel(m)">删除</v-btn>
+                      <v-btn size="x-small" variant="text" color="error" @click="askDeleteModel(m)">删除</v-btn>
                     </td>
                   </tr>
                 </tbody>
@@ -947,6 +1035,14 @@ onMounted(() => {
           <v-alert type="info" variant="tonal" density="compact" class="mb-2">
             只有服务商明确要求补充特殊参数时才需要改这里；不确定就保持原样。
           </v-alert>
+          <div class="config-readonly mb-2">
+            <div class="text-caption mb-1">连接参数请用「编辑」修改；这里只改请求头、请求体扩展等高级键。</div>
+            <div class="text-caption">接口地址：{{ readonlyConfigPreview.api_base || '未设置' }}</div>
+            <div class="text-caption">API Key：{{ readonlyConfigPreview.api_key ? '已填写（不在编辑框里显示）' : '未填写' }}</div>
+            <div class="text-caption">
+              重试次数：{{ readonlyConfigPreview.retry_attempts ?? 3 }} · 超时：{{ readonlyConfigPreview.timeout ?? 30 }} 秒
+            </div>
+          </div>
           <v-textarea
             v-model="configJsonText"
             rows="20"
@@ -1137,6 +1233,18 @@ onMounted(() => {
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- 删除确认：列出影响清单，避免一句话 confirm 让人误删 -->
+    <ConfirmDialog
+      v-model="deleteDialogOpen"
+      :title="deleteDialogTitle"
+      :message="deleteDialogMessage"
+      :details="pendingDelete?.details || []"
+      danger
+      confirm-text="删除"
+      :loading="deleteLoading"
+      @confirm="confirmDelete"
+    />
   </div>
 </template>
 
@@ -1145,5 +1253,12 @@ onMounted(() => {
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
   font-size: 13px;
   line-height: 1.6;
+}
+
+.config-readonly {
+  padding: 10px 12px;
+  border: 1px dashed rgba(var(--v-theme-on-surface), 0.18);
+  border-radius: 8px;
+  background: rgba(var(--v-theme-on-surface), 0.02);
 }
 </style>

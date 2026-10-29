@@ -15,10 +15,10 @@ import { splitSchema } from '@/utils/schema'
 /** 后端 schema 的选项表拿不到时的替代文案（与 config_schema.py 的 permission.options 对齐） */
 const FALLBACK_PERMISSION_LABELS: Record<string, string> = {
   everyone: '所有人',
-  member: '普通成员及以上',
-  group_admin: '群管理或群主',
+  member: '群成员及以上',
+  group_admin: '群管及以上',
   group_owner: '仅群主',
-  manager: '管理者和拥有者',
+  manager: '管理者与拥有者',
   owner: '仅拥有者',
 }
 

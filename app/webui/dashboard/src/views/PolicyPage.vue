@@ -12,7 +12,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { displayName, useBotsStore } from '@/stores/bots'
-import { usePolicyStore, type PolicyMatrixRow, type SwitchValue } from '@/stores/policy'
+import { usePolicyStore, type PolicyMatrixRow, type PolicyOverrideRow, type SwitchValue } from '@/stores/policy'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
@@ -43,6 +43,8 @@ watch(tab, (value) => {
   }
   // 从别的页签回到群列表时补一次加载（本页首次进入可能是「谁能回复」）
   if (value === 'groups' && !policy.rows.length && bots.currentAccountId) void loadWithGroups()
+  // 高级规则 tab 每次进入都刷新覆盖摘要（弹窗来源相同，保证看到最新值）
+  if (value === 'rules') void loadAccountOverride()
 })
 
 // 外部改地址（浏览器前进/后退、手改 query）时同步回页签
@@ -57,6 +59,69 @@ watch(
 const rulesDialog = ref(false)
 const rulesChannel = ref<string | null>(null)
 const rulesTitle = ref('')
+
+/** 账号级覆盖行（高级规则 tab 的摘要来源）：null = 还没读到 */
+const accountOverride = ref<PolicyOverrideRow | null>(null)
+const loadingAccountOverride = ref(false)
+
+/**
+ * 读账号层的覆盖行。
+ *
+ * 高级规则 tab 以前只有一句说明和一个按钮，用户看不到"我到底覆盖了什么"；
+ * 这里把已覆盖项与值列出来，规则的真实编辑仍走弹窗。
+ */
+async function loadAccountOverride() {
+  if (!bots.currentAccountId) {
+    accountOverride.value = null
+    return
+  }
+  loadingAccountOverride.value = true
+  try {
+    const detail = await policy.getPolicy(null)
+    accountOverride.value = detail?.overrides?.account || null
+  } catch {
+    accountOverride.value = null
+  } finally {
+    loadingAccountOverride.value = false
+  }
+}
+
+/** 覆盖项 → 人话摘要 */
+const accountOverrideRows = computed<{ label: string; value: string }[]>(() => {
+  const row = accountOverride.value
+  const config = (row?.config || {}) as Record<string, any>
+  const permission = (row?.permission || {}) as Record<string, any>
+  const rows: { label: string; value: string }[] = []
+
+  const hasAt = Object.prototype.hasOwnProperty.call(config, 'trigger_at')
+  const hasKeyword = Object.prototype.hasOwnProperty.call(config, 'trigger_keyword')
+  if (hasAt || hasKeyword) {
+    const at = Boolean(config.trigger_at)
+    const keywords = Array.isArray(config.trigger_keyword)
+      ? config.trigger_keyword.map((item: any) => String(item)).filter(Boolean)
+      : []
+    if (at && keywords.length) rows.push({ label: '触发方式', value: `@ 或关键词（${keywords.join('、')}）` })
+    else if (at) rows.push({ label: '触发方式', value: '仅 @' })
+    else if (keywords.length) rows.push({ label: '触发方式', value: `仅关键词（${keywords.join('、')}）` })
+    else rows.push({ label: '触发方式', value: '不触发' })
+  }
+  if (config.reply_cooldown !== undefined) {
+    rows.push({ label: '回复冷却', value: `${config.reply_cooldown} 秒` })
+  }
+  if (config.message_debounce_seconds !== undefined) {
+    rows.push({ label: '消息合并等待', value: `${config.message_debounce_seconds} 秒` })
+  }
+  if (config.quiet_hours) {
+    rows.push({ label: '免打扰时段', value: String(config.quiet_hours) })
+  }
+  const mode = String(permission.user_mode || '')
+  const userList = Array.isArray(permission.user_list) ? permission.user_list : []
+  if (mode === 'blacklist') rows.push({ label: '用户例外', value: `黑名单 ${userList.length} 人` })
+  if (mode === 'whitelist') rows.push({ label: '用户例外', value: `仅白名单 ${userList.length} 人` })
+  if (row?.enabled === true) rows.push({ label: '账号开关', value: '一律允许' })
+  if (row?.enabled === false) rows.push({ label: '账号开关', value: '一律不允许' })
+  return rows
+})
 
 function openRules(channelId: string | null, title = '') {
   rulesChannel.value = channelId
@@ -203,6 +268,7 @@ onMounted(async () => {
   if (tab.value === 'groups') await loadWithGroups()
   else await policy.load()
   void loadPrivateScene()
+  void loadAccountOverride()
 })
 
 watch(
@@ -210,8 +276,14 @@ watch(
   () => {
     void loadWithGroups()
     void loadPrivateScene()
+    void loadAccountOverride()
   },
 )
+
+// 关闭规则弹窗后刷新摘要：保存成功的覆盖项要立刻出现在 tab 里
+watch(rulesDialog, (open) => {
+  if (!open) void loadAccountOverride()
+})
 </script>
 
 <template>
@@ -475,6 +547,29 @@ watch(
               <v-btn size="small" variant="tonal" prepend-icon="mdi-open-in-new" @click="router.push('/modules')">
                 去功能插件
               </v-btn>
+            </div>
+          </v-card-text>
+        </v-card>
+
+        <!-- 当前账号级覆盖摘要：让用户先看到"我改过什么、现在值是多少"，再决定要不要进弹窗 -->
+        <v-card variant="outlined" class="mb-3">
+          <v-card-title class="d-flex align-center">
+            <v-icon icon="mdi-format-list-checkbox" class="mr-2" color="primary" /> 当前账号专属规则
+            <v-spacer />
+            <v-chip v-if="accountOverrideRows.length" size="small" variant="tonal">
+              已覆盖 {{ accountOverrideRows.length }} 项
+            </v-chip>
+          </v-card-title>
+          <v-card-text>
+            <v-progress-linear v-if="loadingAccountOverride" indeterminate color="primary" class="mb-2" />
+            <v-list v-else-if="accountOverrideRows.length" density="compact">
+              <v-list-item v-for="row in accountOverrideRows" :key="row.label">
+                <v-list-item-title class="text-body-2">{{ row.label }}</v-list-item-title>
+                <v-list-item-subtitle>{{ row.value }}</v-list-item-subtitle>
+              </v-list-item>
+            </v-list>
+            <div v-else class="text-caption">
+              还没有账号专属规则，全部按 AI 对话面板与账号默认执行。
             </div>
           </v-card-text>
         </v-card>

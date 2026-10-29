@@ -25,7 +25,6 @@ import PanelField from '@/components/agent/panel/PanelField.vue'
 import ReplyScopeCard from '@/components/agent/panel/ReplyScopeCard.vue'
 import AgentModelPool from '@/components/agent/sections/AgentModelPool.vue'
 import AgentRolePresets from '@/components/agent/sections/AgentRolePresets.vue'
-import AgentTemplateDialog from '@/components/agent/AgentTemplateDialog.vue'
 import AgentConfigSearchDialog from '@/components/agent/AgentConfigSearchDialog.vue'
 import AgentCopyConfigDialog from '@/components/agent/AgentCopyConfigDialog.vue'
 import EventMonitorDialog from '@/components/bots/EventMonitorDialog.vue'
@@ -48,7 +47,6 @@ const agent = useAgentConfigStore()
 const bots = useBotsStore()
 const router = useRouter()
 
-const templateDialog = ref(false)
 const searchDialog = ref(false)
 const copyDialog = ref(false)
 const monitorOpen = ref(false)
@@ -67,6 +65,13 @@ function fieldsOf(card: PanelCardDef | undefined): string[] {
 }
 const replyFields = computed(() => fieldsOf(replyCard))
 const triggerFields = computed(() => fieldsOf(triggerCard))
+
+/** 总开关不是 schema 字段（独立存储），包成同样的 boolean schema 交给 PanelField 统一形态 */
+const ENABLED_FIELD_SCHEMA = {
+  type: 'boolean',
+  label: '启用 AI 回复',
+  description: '总开关。关闭后所有场景都不再自动回复。',
+}
 
 function fieldSchema(key: string): Record<string, any> {
   return schemaItems.value[key] || {}
@@ -110,6 +115,30 @@ function scrollToModels() {
   modelSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
+/**
+ * 全局默认模型（模型服务 → 全局设置）。
+ *
+ * 模型池为空时，后端会改用全局设置的 default_model_id 兜底；不看这个值就催用户
+ * 「还没选模型」是误报——用户已经配过默认模型了。
+ */
+const globalDefaultModelId = ref('')
+const globalDefaultModelName = computed(() => {
+  const id = globalDefaultModelId.value
+  if (!id) return ''
+  const hit = agent.providerModels.find((m) => m.id === id)
+  return hit ? `${hit.preset_name || hit.preset_id} / ${hit.model}` : '已配置'
+})
+
+async function loadGlobalDefaultModel() {
+  try {
+    const res = await http.get<{ settings?: { default_model_id?: string } }>('/api/provider-settings')
+    globalDefaultModelId.value = String(res.data?.settings?.default_model_id || '')
+  } catch {
+    // 读不到按「没有全局默认」处理：宁可多提示一句，也不假装一切就绪
+    globalDefaultModelId.value = ''
+  }
+}
+
 /** 当前人格名：从资源目录（role_preset 候选）里按 id 找名字，拿不到就不展示内部 id */
 const rolePresetOptions = ref<{ value: string; label: string }[]>([])
 const personaName = computed(() => {
@@ -146,6 +175,7 @@ function reload() {
 onMounted(() => {
   void bootstrap()
   void loadRolePresets()
+  void loadGlobalDefaultModel()
 })
 
 // 切账号：整份配置按账号重新拉（有未保存改动时 store 会先落盘）
@@ -179,9 +209,6 @@ watch(
           autosave
           hint="改动会在 2 秒内自动保存"
         />
-        <v-btn size="small" variant="text" prepend-icon="mdi-book-multiple" @click="templateDialog = true">
-          配置模板
-        </v-btn>
         <v-btn size="small" variant="text" prepend-icon="mdi-magnify" @click="searchDialog = true">
           搜索配置
         </v-btn>
@@ -238,17 +265,27 @@ watch(
               </v-chip>
             </template>
             <template v-else>
-              <v-chip color="warning" variant="tonal" prepend-icon="mdi-alert-circle-outline">还没选模型</v-chip>
-              <v-btn size="small" variant="text" prepend-icon="mdi-arrow-down" @click="scrollToModels">
-                在下方加入模型
-              </v-btn>
+              <template v-if="globalDefaultModelId">
+                <v-chip color="info" variant="tonal" prepend-icon="mdi-api">
+                  使用全局默认模型：{{ globalDefaultModelName }}
+                </v-chip>
+                <v-btn size="small" variant="text" prepend-icon="mdi-arrow-right" @click="router.push('/provider-presets')">
+                  去模型服务改默认
+                </v-btn>
+              </template>
+              <template v-else>
+                <v-chip color="warning" variant="tonal" prepend-icon="mdi-alert-circle-outline">还没选模型</v-chip>
+                <v-btn size="small" variant="text" prepend-icon="mdi-arrow-down" @click="scrollToModels">
+                  在下方加入模型
+                </v-btn>
+              </template>
             </template>
             <v-chip color="pink" variant="tonal" prepend-icon="mdi-account-heart">人格：{{ personaText }}</v-chip>
             <v-btn v-if="!personaName" size="small" variant="text" prepend-icon="mdi-arrow-right" @click="router.push('/personas')">
               去「人格设定」
             </v-btn>
           </div>
-          <div v-if="!agent.poolModelIds.length" class="text-caption mt-1" style="opacity: 0.6">
+          <div v-if="!agent.poolModelIds.length && !globalDefaultModelId" class="text-caption mt-1" style="opacity: 0.6">
             还没有模型服务？先去
             <a class="text-primary text-decoration-none" href="#" @click.prevent="router.push('/provider-presets')">「模型服务」添加</a>
           </div>
@@ -261,19 +298,13 @@ watch(
         icon="mdi-toggle-switch-outline"
         subtitle="只对没有单独设置的群/私聊生效；在「回复与权限」里单独开过的以那边为准"
       >
-        <div class="switch-row">
-          <div>
-            <div class="switch-title">启用 AI 回复</div>
-            <div class="switch-desc">总开关。关闭后所有场景都不再自动回复。</div>
-          </div>
-          <v-switch
-            :model-value="agent.enabled"
-            color="primary"
-            inset
-            hide-details
-            @update:model-value="onEnabled"
-          />
-        </div>
+        <PanelField
+          :field-key="'enabled'"
+          :schema="ENABLED_FIELD_SCHEMA"
+          :value="agent.enabled"
+          :bot-id="accountId"
+          @update="onEnabled"
+        />
         <v-divider class="my-4" />
         <div class="field-stack">
           <PanelField
@@ -341,32 +372,12 @@ watch(
     </template>
 
     <EventMonitorDialog v-model="monitorOpen" :account-id="accountId" :account-name="accountName" />
-    <AgentTemplateDialog v-model="templateDialog" />
     <AgentConfigSearchDialog v-model="searchDialog" />
     <AgentCopyConfigDialog v-model="copyDialog" />
   </div>
 </template>
 
 <style scoped>
-.switch-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.switch-title {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.switch-desc {
-  font-size: 12.5px;
-  color: rgba(var(--v-theme-on-surface), 0.55);
-  margin-top: 2px;
-}
-
 .field-stack {
   display: flex;
   flex-direction: column;

@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import http, { errorMessage } from '@/api/http'
 import { useAgentConfigStore } from '@/stores/agentConfig'
 import { useNotifyStore } from '@/stores/notify'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 
 interface RolePreset {
   id: string
@@ -86,7 +87,7 @@ async function savePreset() {
     return
   }
   if (!form.system_prompt.trim()) {
-    notify.push('请填写系统提示词', 'warning')
+    notify.push('请填写人格提示词', 'warning')
     return
   }
   saving.value = true
@@ -119,8 +120,18 @@ async function savePreset() {
   }
 }
 
-async function deletePreset(p: RolePreset) {
-  if (!window.confirm(`确认删除人格预设「${p.name}」？已经应用它的账号不会自动改动。`)) return
+/** 删除确认：统一 ConfirmDialog（与删号/卸载插件同一套样式与影响清单） */
+const deleteTarget = ref<RolePreset | null>(null)
+const deleting = ref(false)
+
+function askDelete(p: RolePreset) {
+  deleteTarget.value = p
+}
+
+async function confirmDelete() {
+  const p = deleteTarget.value
+  if (!p) return
+  deleting.value = true
   try {
     await http.delete(`/api/role-presets/${p.id}`)
     notify.push('人格预设已删除', 'success')
@@ -128,9 +139,12 @@ async function deletePreset(p: RolePreset) {
       selectedId.value = ''
       editingId.value = ''
     }
+    deleteTarget.value = null
     await loadPresets()
   } catch (err) {
     notify.push(errorMessage(err), 'error')
+  } finally {
+    deleting.value = false
   }
 }
 
@@ -230,7 +244,7 @@ onMounted(() => {
                     icon="mdi-delete"
                     color="error"
                     title="删除人格"
-                    @click.stop="deletePreset(p)"
+                    @click.stop="askDelete(p)"
                   />
                 </template>
               </v-list-item>
@@ -278,7 +292,10 @@ onMounted(() => {
             </v-row>
             <v-textarea
               v-model="form.system_prompt"
-              label="系统提示词"
+              label="人格提示词"
+              hint="描述它是什么样的人、怎么说话；写得具体一些效果更稳"
+              persistent-hint
+              placeholder="例如：你是一个混在群里的普通群友，说话简短自然，不端着"
               auto-grow
               rows="14"
               variant="outlined"
@@ -317,5 +334,20 @@ onMounted(() => {
         </v-card>
       </v-col>
     </v-row>
+
+    <ConfirmDialog
+      :model-value="deleteTarget !== null"
+      title="删除人格预设"
+      danger
+      confirm-text="删除"
+      :loading="deleting"
+      :message="`「${deleteTarget?.name || ''}」删除后不可恢复。`"
+      :details="[
+        '已经应用它的人格提示词会保留在该账号里，不会自动改动',
+        '其它账号如果引用了同一个人格预设，会回退到内置默认人格',
+      ]"
+      @update:model-value="(v: boolean) => { if (!v) deleteTarget = null }"
+      @confirm="confirmDelete"
+    />
   </div>
 </template>

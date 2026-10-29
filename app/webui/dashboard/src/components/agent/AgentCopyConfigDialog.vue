@@ -117,6 +117,7 @@ watch(
           <div class="text-caption mb-1">来源账号与当前配置共有 <strong>{{ diffKeys.length }}</strong> 项不同。</div>
           <v-chip v-for="k in diffKeys.slice(0, 10)" :key="k" size="x-small" variant="tonal" class="mr-1 mb-1">{{ fieldLabels[k] || '配置项' }}</v-chip>
           <HintText class="mt-2" text="应用后会整份覆盖当前账号的配置。" />
+          <HintText class="mt-1" text="要把整个账号的配置带到别处，请用「配置包」。" />
         </div>
       </v-card-text>
       <v-card-actions>

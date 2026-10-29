@@ -7,7 +7,7 @@
  * 点击导航除了滚动到锚点，还会通过 ConfigForm 的 activeGroup 强制展开对应面板。
  */
 import { computed, nextTick, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import ConfigForm from '@/components/config/ConfigForm.vue'
 import PageWithSections from '@/components/common/PageWithSections.vue'
 import type { SectionItem } from '@/components/common/PageSectionNav.vue'
@@ -19,6 +19,7 @@ const props = defineProps<{ section: AgentSection }>()
 
 const agent = useAgentConfigStore()
 const route = useRoute()
+const router = useRouter()
 
 // 页内分组结构来自 registry（不是后端 group）：标题、顺序、字段归属都由
 // sections.json 决定，后端 group 在这里已被重写成本页的子分组 id。
@@ -75,36 +76,48 @@ watch(
 </script>
 
 <template>
-  <PageWithSections v-if="showNav" :sections="navItems" nav-title="本页分组" @select="onSelectSection">
-    <slot name="before" />
-    <v-card variant="outlined" class="mb-4">
-      <v-card-text>
-        <ConfigForm
-          :module-name="'agent'"
-          :schema="schema"
-          :config="agent.draft"
-          :bot-id="agent.botId"
-          :active-group="activeGroup"
-          @change="agent.onChange"
-        />
-      </v-card-text>
-    </v-card>
-    <slot />
-  </PageWithSections>
+  <div>
+    <!-- 对话行为的合并等待/冷却/打断可被账号或单群规则覆盖：页内先给一句提示，不用用户自己猜 -->
+    <v-alert v-if="props.section.id === 'behavior'" type="info" variant="tonal" density="compact" class="mb-3">
+      <div class="d-flex align-center flex-wrap gap-2">
+        <span class="text-caption">账号专属规则或单个群的规则可以覆盖这些值</span>
+        <v-btn size="small" variant="text" prepend-icon="mdi-arrow-right" @click="router.push('/reply?tab=rules')">
+          去调整
+        </v-btn>
+      </div>
+    </v-alert>
 
-  <div v-else>
-    <slot name="before" />
-    <v-card v-if="navItems.length" variant="outlined" class="mb-4">
-      <v-card-text>
-        <ConfigForm
-          :module-name="'agent'"
-          :schema="schema"
-          :config="agent.draft"
-          :bot-id="agent.botId"
-          @change="agent.onChange"
-        />
-      </v-card-text>
-    </v-card>
-    <slot />
+    <PageWithSections v-if="showNav" :sections="navItems" nav-title="本页分组" @select="onSelectSection">
+      <slot name="before" />
+      <v-card variant="outlined" class="mb-4">
+        <v-card-text>
+          <ConfigForm
+            :module-name="'agent'"
+            :schema="schema"
+            :config="agent.draft"
+            :bot-id="agent.botId"
+            :active-group="activeGroup"
+            @change="agent.onChange"
+          />
+        </v-card-text>
+      </v-card>
+      <slot />
+    </PageWithSections>
+
+    <div v-else>
+      <slot name="before" />
+      <v-card v-if="navItems.length" variant="outlined" class="mb-4">
+        <v-card-text>
+          <ConfigForm
+            :module-name="'agent'"
+            :schema="schema"
+            :config="agent.draft"
+            :bot-id="agent.botId"
+            @change="agent.onChange"
+          />
+        </v-card-text>
+      </v-card>
+      <slot />
+    </div>
   </div>
 </template>

@@ -136,10 +136,10 @@ onMounted(() => {
       <v-chip v-else-if="agent.draft.system_prompt" size="small" variant="tonal">当前人格：自定义</v-chip>
       <v-chip v-else size="small" variant="tonal">当前人格：未选择</v-chip>
       <v-spacer />
-      <v-btn size="small" variant="text" prepend-icon="mdi-pencil-outline" @click="goToPersonas">去编辑文案</v-btn>
+      <v-btn size="small" variant="text" prepend-icon="mdi-pencil-outline" @click="goToPersonas">去编辑提示词</v-btn>
     </v-card-title>
-    <v-card-text class="text-caption pt-0 pb-0" style="opacity: 0.7">
-      选中一个人格预设后点「应用」，会立即写入当前账号。
+    <v-card-text v-if="presets.length" class="text-caption pt-0 pb-0" style="opacity: 0.7">
+      选中后点「应用所选人格」，会写入当前账号。
     </v-card-text>
 
     <div class="px-4 pb-2">
@@ -157,7 +157,7 @@ onMounted(() => {
           />
           <v-progress-linear v-if="loading" indeterminate color="primary" />
           <template v-else-if="!presets.length">
-            <div class="text-caption text-center pa-4">还没有人格预设，先去「人格设定」新建一个。</div>
+            <div class="text-caption text-center pa-4">还没有人格预设，先去「人格设定」新建。</div>
           </template>
           <v-list v-else density="compact" class="preset-list">
             <v-list-item
@@ -219,7 +219,7 @@ onMounted(() => {
             <v-chip v-if="currentPromptPreset" size="x-small" variant="tonal">
               {{ PROMPT_PRESETS.find((p) => p.key === currentPromptPreset)?.label || currentPromptPreset }}
             </v-chip>
-            <v-chip v-else size="x-small" variant="tonal">沿用内置文案</v-chip>
+            <v-chip v-else size="x-small" variant="tonal">沿用内置</v-chip>
           </v-expansion-panel-title>
           <v-expansion-panel-text>
             <div class="text-caption mb-3" style="opacity: 0.7">
