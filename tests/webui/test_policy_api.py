@@ -330,3 +330,48 @@ async def test_matrix_exposes_effective_trigger_mode(container, config_service):
     assert rows["111"]["trigger_source"] == "channel"
     assert rows["222"]["trigger_source"] != "channel", "没覆盖的群应显示继承来源"
     assert "trigger_mode" in body["default"]
+
+
+# ==================== 判定链（会不会回、被哪一层拦） ====================
+
+
+async def test_decision_endpoint_reports_no_runtime(container):
+    """判定链接口：即使账号没装配运行时，也要给出结构化判定链而不是报错。"""
+    body = _client(container).get(
+        "/api/policy/decision", params={"account_id": "acc1", "channel_id": "111"}
+    ).json()
+
+    decision = body["decision"]
+    assert decision["allowed"] is False
+    assert decision["reason"] == "no_runtime"
+    assert decision["decided_by"] == "account"
+    assert body["roles"][0] == "everyone"
+    stages = {item["stage"]: item for item in decision["checks"]}
+    assert stages["account"]["allowed"] is False
+    assert "responder" in decision
+    assert body["stages"], "前端要能拿到阶段标签"
+
+
+async def test_decision_endpoint_requires_account(container):
+    resp = _client(container).get("/api/policy/decision")
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "POLICY_ACCOUNT_REQUIRED"
+
+
+async def test_role_min_override_is_validated_on_write(container):
+    """``role_min`` 现在真的生效，所以坏值必须写不进去（否则运行时静默回落）。"""
+    resp = _client(container).post("/api/policy", json={
+        "account_id": "acc1", "channel_id": "111",
+        "patch": {"permission": {"role_min": "管理员"}},
+    })
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "POLICY_BAD_VALUE"
+
+    client = _client(container)
+    ok = client.post("/api/policy", json={
+        "account_id": "acc1", "channel_id": "111",
+        "patch": {"permission": {"role_min": "group_admin"}},
+    })
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["resolved"]["permission"]["role_min"] == "group_admin"
+    assert ok.json()["resolved"]["sources"]["role_min"] == "channel"

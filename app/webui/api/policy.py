@@ -7,7 +7,8 @@
 - ``POST /api/policy/bulk``     批量开关一批群（全部允许/全部关闭）；
 - ``POST /api/policy/mute``     临时静音（到点自动恢复）；
 - ``POST /api/policy/scene``    写「账号默认」（群聊/私聊场景层，群行"继承"时用它）；
-- ``GET  /api/policy/matrix``   群列表 × 生效状态（列表页一次拉全）。
+- ``GET  /api/policy/matrix``   群列表 × 生效状态（列表页一次拉全）；
+- ``GET  /api/policy/decision`` 判定链预览：这条消息会不会回、被哪一层拦、为什么。
 """
 
 from __future__ import annotations
@@ -20,8 +21,15 @@ from app.application.dialogue_policy_service import (
     DialoguePolicyService,
     PolicyError,
 )
+from app.application.response_authority import ResponseAuthority
 from app.domain.dialogue_policy import PERMISSION_KEYS, SCOPE_OVERRIDABLE
-from app.webui.api.deps import get_agent_manager, get_config_service
+from app.domain.response_access import STAGE_LABELS, TIERS
+from app.webui.api.deps import (
+    get_agent_manager,
+    get_config_service,
+    get_module_registry,
+    get_responder_service,
+)
 
 router = APIRouter(tags=["policy"])
 
@@ -223,4 +231,43 @@ async def api_policy_matrix(
         default=data["default"],
         rows=data["rows"],
         overridable=list(SCOPE_OVERRIDABLE.get(str(capability), ())),
+    )
+
+
+@router.get("/policy/decision")
+async def api_policy_decision(
+    account_id: str | None = None,
+    capability: str = DEFAULT_CAPABILITY,
+    channel_id: str | None = None,
+    user_id: str | None = None,
+    role: str | None = None,
+    config_service=Depends(get_config_service),
+    agent_manager=Depends(get_agent_manager),
+    responder=Depends(get_responder_service),
+    registry=Depends(get_module_registry),
+):
+    """判定链预览：给定账号/群/用户，回答「会不会回、被哪一层拦、为什么」。
+
+    与运行时**同一套语义**（``app.domain.response_access`` + ``ResponseAuthority``）：
+    页面看到的判定链就是流水线真正执行的那条，不会出现"界面说允许、运行时不动"。
+    """
+    if not account_id:
+        return _err(400, "缺少 account_id", "POLICY_ACCOUNT_REQUIRED")
+    authority = ResponseAuthority(
+        config_service=config_service,
+        agent_manager=agent_manager,
+        responder=responder,
+        registry=registry,
+    )
+    decision = authority.explain(
+        account_id=account_id,
+        capability=capability,
+        channel_id=channel_id,
+        user_id=user_id,
+        role=role,
+    )
+    return _ok(
+        decision=decision,
+        roles=list(TIERS),
+        stages=[{"stage": stage, "label": label} for stage, label in STAGE_LABELS.items()],
     )
