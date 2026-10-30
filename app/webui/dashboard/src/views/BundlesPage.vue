@@ -256,7 +256,8 @@ async function loadExportOptions() {
   try {
     const options = await bundles.loadExportOptions()
     exportOptions.value = options
-    for (const option of options) exportSelected[option.name] = true
+    // 默认全部不勾选：导出配置包默认只带账号配置，插件按需勾选（避免无意识把全部插件代码打进包）
+    for (const option of options) exportSelected[option.name] = false
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   }
@@ -436,10 +437,10 @@ onMounted(async () => {
             <v-btn size="x-small" variant="text" @click="toggleAllExportModules(false)">全不选</v-btn>
           </div>
           <div class="text-caption mb-2" style="opacity: 0.65">
-            已选 {{ exportModules.length }} 个；第三方插件代码约 {{ formatSize(exportModuleSize) }}。
+            已选 {{ exportModules.length }} / {{ exportOptions.length }} 个；第三方插件代码约 {{ formatSize(exportModuleSize) }}。
             没选的插件不会进包（目标账号保持原状）。
           </div>
-          <v-card variant="tonal" class="module-picker">
+          <v-card variant="outlined" class="module-picker">
             <v-card-text class="py-1">
               <div v-if="!exportOptions.length" class="text-caption py-2">正在读取插件清单…</div>
               <div
@@ -662,7 +663,10 @@ onMounted(async () => {
 }
 
 .module-picker {
-  max-height: 220px;
+  max-height: 260px;
   overflow-y: auto;
+  /* 不用 tonal 卡片：暗色主题下 tonal 会渲染成一整片黑块（用户反馈），
+     改成「描边 + 跟随主题的极浅底色」，亮/暗都是同一层灰。 */
+  background: rgba(var(--v-theme-on-surface), 0.03);
 }
 </style>
