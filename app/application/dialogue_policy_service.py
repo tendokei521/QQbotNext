@@ -29,6 +29,7 @@ from app.domain.dialogue_policy import (
     trigger_mode_from,
     validate_override_values,
 )
+from app.domain.response_access import validate_permission_values
 
 DEFAULT_CAPABILITY = "agent"
 SOURCE_MUTED = "muted"
@@ -165,6 +166,9 @@ class DialoguePolicyService:
         value_errors = validate_override_values(config)
         if value_errors:
             raise PolicyError("POLICY_BAD_VALUE", "；".join(value_errors))
+        permission_errors = validate_permission_values(permission)
+        if permission_errors:
+            raise PolicyError("POLICY_BAD_VALUE", "；".join(permission_errors))
 
     async def update(
         self,
