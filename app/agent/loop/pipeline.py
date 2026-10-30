@@ -20,10 +20,18 @@ from app.agent.loop.context import LlmContext, LlmJob
 from app.agent.loop.locks import SessionLockManager
 from app.agent.loop.pool import LlmPool, merge_debounced_texts
 from app.application.dialogue_policy_service import DialoguePolicyService
-from app.core.logger import account_label
+from app.application.response_authority import ResponseAuthority
+from app.core.logger import account_label, logger
 from app.core.skip_log import log_skip
 from app.domain.dialogue_policy import in_quiet_hours
 from app.domain.message import Message
+from app.domain.response_access import (
+    PIPELINE_STAGES,
+    hint_for,
+    remember_decision,
+    stored_decision,
+    trigger_check,
+)
 
 #: 「配置里没有这个键」的哨兵（区分"没配"与"配了 None"）
 _MISSING = object()
@@ -49,6 +57,35 @@ class LlmPipeline:
             if config_service is not None
             else None
         )
+        #: 统一判定器：与入站节点同一套语义（场景/用户例外/免打扰/谁响应）
+        self.access = (
+            ResponseAuthority(
+                config_service=config_service,
+                agent_manager=getattr(runtime, "agent_manager", None),
+                responder=getattr(runtime, "responder", None),
+                runtime=runtime,
+                log=logger,
+            )
+            if config_service is not None
+            else None
+        )
+
+    # ---------- 统一判定（入站算过一次就直接用） ----------
+
+    def _decision(self, event):
+        """本轮的判定结果：优先复用入站节点算好的那份，否则自己算一次。"""
+        decision = stored_decision(event)
+        if decision is not None:
+            return decision
+        if self.access is None:
+            return None
+        try:
+            decision = self.access.decide_agent(event)
+        except Exception as e:  # noqa: BLE001 —— 判定失败不能阻断对话
+            logger.add_info("LLM").debug(f"[Access] 判定异常（本轮放行）: {e}")
+            return None
+        remember_decision(event, decision)
+        return decision
 
     # ---------- 场景开关（群级覆盖的唯一入口） ----------
 
@@ -75,6 +112,9 @@ class LlmPipeline:
 
     def _scene_enabled(self, event, config) -> tuple[bool, str]:
         """(是否响应, 来源)。来源用于日志与排障（default/account/channel/muted）。"""
+        decision = self._decision(event)
+        if decision is not None:
+            return bool(decision.enabled), str(decision.enabled_source)
         policy = self._resolved_policy(event)
         if policy is not None:
             return bool(policy.enabled), str(policy.enabled_source)
@@ -97,9 +137,13 @@ class LlmPipeline:
                 value = getter(key, _MISSING)
                 if value is not _MISSING:
                     base[key] = value
-        policy = self._resolved_policy(event)
-        if policy is not None and policy.config:
-            base.update(policy.config)
+        decision = self._decision(event)
+        if decision is not None and decision.config:
+            base.update(decision.config)
+        else:
+            policy = self._resolved_policy(event)
+            if policy is not None and policy.config:
+                base.update(policy.config)
         # 派生兜底：没有策略层（单服务/未装配账号）时也要有显式触发方式
         from app.domain.dialogue_policy import (
             DEFAULT_TRIGGER_PROBABILITY,
@@ -421,7 +465,27 @@ class LlmPipeline:
                     ctx.event, config, has_image=has_image
                 )
                 if not triggered:
+                    log_skip(
+                        getattr(self.runtime, "bot_id", "?"),
+                        "trigger_not_matched",
+                        f"group={getattr(getattr(ctx.event, 'group', None), 'group_id', '?')} · mode={config.get('trigger_mode', '?')}",
+                        hint=hint_for("trigger_not_matched"),
+                        level="info",
+                    )
                     return
+                # 把「触发条件」补进统一判定链，让「为什么不回」在 UI/日志里是同一条链
+                base = self._decision(ctx.event)
+                if base is not None:
+                    from app.domain.dialogue_policy import trigger_probability_of
+
+                    base = base.with_checks(
+                        trigger_check(
+                            triggered,
+                            mode=str(config.get("trigger_mode") or ""),
+                            probability=trigger_probability_of(config),
+                        )
+                    )
+                    remember_decision(ctx.event, base)
 
                 if is_at:
                     ctx.state["is_at"] = True
@@ -437,8 +501,11 @@ class LlmPipeline:
             config = self.runtime.config
             account_id = getattr(self.runtime, "bot_id", "?")
             group_id = getattr(getattr(ctx.event, "group", None), "group_id", "?")
-            # 场景开关：账号级 group_enable/private_enable + 群级覆盖（channel_overrides）
-            scene_enabled, scene_source = self._scene_enabled(ctx.event, config)
+            # 统一判定：入站节点（AgentNode）通常已经算过一次，这里直接复用同一份结论；
+            # 直接调用 chat.handle 的旧路径没有入站判定，则在这里补算一次。
+            decision = self._decision(ctx.event)
+            if decision is not None:
+                ctx.state["response_decision"] = decision
             # 没有 key 或对应场景未启用时，不视为“触发 LLM”，不重置主动消息状态。
             # 所有静默 return 都走 log_skip：用户可见、限流、格式统一（见 skip_log 模块）。
             if not self.runtime.provider_config().get("api_key", ""):
@@ -448,49 +515,62 @@ class LlmPipeline:
                     hint="在「Provider 预设」页填写 API Key；自建网关若靠额外请求头鉴权，请配 extra_headers",
                 )
                 return
-            if ctx.event.event_type == "message_group" and not scene_enabled:
-                log_skip(
-                    account_id,
-                    "group_disabled",
-                    f"group={group_id} · source={scene_source}",
-                    hint="在「权限与回复」页打开该群，或在「Agent → 基础配置 → 响应场景」打开「群聊回复」",
-                )
-                return
-            if ctx.event.event_type == "message_private":
-                if not scene_enabled:
+            if decision is not None:
+                # 场所 / 用户例外 / 免打扰：由判定器给出（含来源层，日志能指到具体配置）
+                deny = decision.first_denial(PIPELINE_STAGES)
+                if deny is not None:
                     log_skip(
                         account_id,
-                        "private_disabled",
-                        f"source={scene_source}",
-                        hint="在「Agent → 基础配置 → 响应场景」打开「私聊回复」",
+                        deny.reason,
+                        f"stage={deny.stage} · source={deny.source} · {deny.detail}".strip(" ·"),
+                        hint=hint_for(deny.reason),
+                    )
+                    return
+            else:
+                # 兜底（无配置中心的旧运行时替身）：保持改造前的逐项判定
+                scene_enabled, scene_source = self._scene_enabled(ctx.event, config)
+                if ctx.event.event_type == "message_group" and not scene_enabled:
+                    log_skip(
+                        account_id,
+                        "group_disabled",
+                        f"group={group_id} · source={scene_source}",
+                        hint="在「权限与回复」页打开该群，或在「Agent → 基础配置 → 响应场景」打开「群聊回复」",
+                    )
+                    return
+                if ctx.event.event_type == "message_private":
+                    if not scene_enabled:
+                        log_skip(
+                            account_id,
+                            "private_disabled",
+                            f"source={scene_source}",
+                            hint="在「Agent → 基础配置 → 响应场景」打开「私聊回复」",
+                        )
+                        return
+
+                effective_fallback = self._effective_config(ctx.event, config)
+                quiet_fallback = str(effective_fallback.get("quiet_hours") or "").strip()
+                if in_quiet_hours(quiet_fallback):
+                    log_skip(
+                        account_id,
+                        "quiet_hours",
+                        f"window={quiet_fallback} · group={group_id}",
+                        hint="在「权限与回复 → 高级规则」调整免打扰时段",
+                    )
+                    return
+                excluded, exclude_reason = self._user_excluded(
+                    self._resolved_policy(ctx.event), ctx.event
+                )
+                if excluded:
+                    log_skip(
+                        account_id,
+                        "user_excluded",
+                        f"user={getattr(ctx.event, 'user_id', '?')} · reason={exclude_reason}",
+                        hint="在「权限与回复 → 高级规则」调整用户例外名单",
                     )
                     return
 
             # 群级规则：触发方式之外的"什么时候不回 / 谁不能触发"
             effective = self._effective_config(ctx.event, config)
-            quiet = str(effective.get("quiet_hours") or "").strip()
-            if in_quiet_hours(quiet):
-                log_skip(
-                    account_id,
-                    "quiet_hours",
-                    f"window={quiet} · group={group_id}",
-                    hint="在「权限与回复 → 高级规则」调整免打扰时段",
-                )
-                return
-            excluded, exclude_reason = self._user_excluded(
-                self._resolved_policy(ctx.event), ctx.event
-            )
-            if excluded:
-                log_skip(
-                    account_id,
-                    "user_excluded",
-                    f"user={getattr(ctx.event, 'user_id', '?')} · reason={exclude_reason}",
-                    hint="在「权限与回复 → 高级规则」调整用户例外名单",
-                )
-                return
-                # 私聊纯图片同样放行（图片内容由多模态链路承载）
-                if not ctx.user_text.strip() and not has_image:
-                    return
 
             # 先截断原始用户消息，避免后续上下文包装后被 max_message_length 截掉“发送了”
             max_msg_len = int(config.get("max_message_length", 200) or 200)
