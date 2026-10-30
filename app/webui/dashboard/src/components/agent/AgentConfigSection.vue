@@ -2,10 +2,10 @@
 /**
  * 渲染某个分区的 schema 配置表单。
  *
- * 页内分组只在 ≥3 组时出现：用一排紧凑的分段按钮切换（不再用左侧列表，
- * 避免和全局侧栏的「AI 设置」导航重复）。点击分组同时展开对应面板并滚到位置。
+ * 页内分组只在 ≥3 组时出现：顶部一排紧凑分段按钮，点击即切换当前分组
+ * （单分组渲染，不再把所有分组纵向堆叠；也不再和全局侧栏的「AI 设置」导航重复）。
  */
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ConfigForm from '@/components/config/ConfigForm.vue'
 import type { SectionItem } from '@/components/common/PageSectionNav.vue'
@@ -47,35 +47,22 @@ watch(
   { immediate: true },
 )
 
-const activeGroup = ref<string | null>(null)
+/** 当前 tab 对应的 schema 分组 id（去 DOM 前缀）；单分组渲染时传给 ConfigForm */
+const activeGroupId = computed(() => activeSectionId.value.replace(/^group-/, ''))
 
-async function onSelectSection(domId: string) {
+function onSelectSection(domId: string) {
+  // tab 即页面：切换分组时只渲染该组字段，不再把所有分组纵向堆叠
   activeSectionId.value = domId
-  const groupId = domId.replace(/^group-/, '')
-  // activeGroup 的 watcher 只在值变化时触发；先置空再设回，
-  // 保证「面板被手动收起后再点同一个分组」仍然会重新展开。
-  activeGroup.value = null
-  await nextTick()
-  activeGroup.value = groupId
-  // 等面板展开后布局才最终确定，再滚动才准
-  await nextTick()
-  document.getElementById(domId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  // 换组后回到页头，避免停在上一组中间位置
+  window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
-// 切换分区时清空，避免上一个分区的分组 id 误展开本页同名面板
-watch(
-  () => props.section.id,
-  () => {
-    activeGroup.value = null
-  },
-)
-
-// 配置搜索跳转带来 ?group=xxx 时展开并滚动到对应卡片
+// 配置搜索跳转带来 ?group=xxx 时切到对应分组
 watch(
   () => route.query.group,
-  async (groupId) => {
+  (groupId) => {
     if (typeof groupId !== 'string' || !groupId) return
-    await onSelectSection(configGroupDomId(groupId))
+    onSelectSection(configGroupDomId(groupId))
   },
   { immediate: true },
 )
@@ -118,7 +105,7 @@ watch(
           :schema="schema"
           :config="agent.draft"
           :bot-id="agent.botId"
-          :active-group="activeGroup"
+          :only-group="hasNav ? activeGroupId : null"
           @change="agent.onChange"
         />
       </v-card-text>
@@ -140,8 +127,19 @@ watch(
 
 /*
  * AI 设置页只保留「卡片 > 字段」一层：
- * 抹掉 ConfigForm 内部的分组面板描边与每字段的描边框，用分隔线代替。
+ * 抹掉 ConfigForm 内部的分组面板描边与每字段的描边框。
+ * 卡片内留出和其他页一致的呼吸位，避免字段文字贴到左侧/顶部边线（用户反馈「顶格」）。
  */
+.agent-config-card :deep(.v-card-text) {
+  padding: 18px 24px 22px;
+}
+
+.agent-config-card :deep(.v-expansion-panels) {
+  box-shadow: none !important;
+  background: transparent !important;
+  border-radius: 0;
+}
+
 .agent-config-card :deep(.v-expansion-panel) {
   box-shadow: none !important;
   background: transparent !important;
@@ -168,19 +166,14 @@ watch(
 }
 
 .agent-config-card :deep(.group-body) {
-  gap: 0;
   padding: 0;
 }
 
 .agent-config-card :deep(.config-item) {
-  padding: 14px 0;
+  padding: 12px 0;
   border: 0;
   border-radius: 0;
   background: transparent;
-}
-
-.agent-config-card :deep(.config-item + .config-item) {
-  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.08);
 }
 
 .agent-config-card :deep(.flat-fields) {

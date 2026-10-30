@@ -47,9 +47,10 @@ watch(
 <template>
   <div>
     <div class="app-page-header">
-      <div class="d-flex align-center gap-2 flex-wrap">
+      <div class="agent-head">
         <v-btn
           v-if="section"
+          class="agent-back"
           icon="mdi-arrow-left"
           variant="text"
           size="small"
@@ -114,3 +115,18 @@ watch(
     <router-view />
   </div>
 </template>
+
+<style scoped>
+/* 返回箭头与标题首行对齐，而不是浮在标题与副标题之间 */
+.agent-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.agent-back {
+  margin-top: -6px;
+  flex: 0 0 auto;
+}
+</style>

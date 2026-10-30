@@ -165,87 +165,96 @@ function onBoolInput(v: boolean | null) {
 </script>
 
 <template>
-  <div class="field-control">
-    <div v-if="schema.label" class="field-label">{{ schema.label || '设置项' }}</div>
-    <HintText :text="schema.description" />
+  <div class="field-control" :class="{ 'field-control--bool': isBool, 'field-control--number': isNumber }">
+    <!-- 开关：左侧标题+说明，右侧开关，一行读完；不要把开关甩到标题下方占一整块 -->
+    <template v-if="isBool">
+      <div class="bool-main">
+        <div v-if="schema.label" class="field-label">{{ schema.label }}</div>
+        <HintText :text="schema.description" />
+      </div>
+      <v-switch
+        class="bool-switch"
+        :model-value="!!value"
+        color="primary"
+        inset
+        hide-details
+        @update:model-value="onBoolInput"
+      />
+    </template>
 
-    <v-switch
-      v-if="isBool"
-      :model-value="!!value"
-      color="primary"
-      inset
-      hide-details
-      @update:model-value="onBoolInput"
-    />
+    <template v-else>
+      <div v-if="schema.label" class="field-label">{{ schema.label }}</div>
+      <HintText :text="schema.description" />
 
-    <v-autocomplete
-      v-else-if="isResource"
-      :model-value="resourceModelValue"
-      :items="resourceOptions"
-      :multiple="isMultiResource"
-      :loading="resourceLoading"
-      :error-messages="resourceError"
-      :placeholder="schema.placeholder || (resourceLoading ? '加载中…' : '请选择')"
-      chips
-      closable-chips
-      clearable
-      hide-details="auto"
-      density="comfortable"
-      item-title="label"
-      item-value="value"
-      @update:model-value="onResourceInput"
-    />
+      <v-autocomplete
+        v-if="isResource"
+        :model-value="resourceModelValue"
+        :items="resourceOptions"
+        :multiple="isMultiResource"
+        :loading="resourceLoading"
+        :error-messages="resourceError"
+        :placeholder="schema.placeholder || (resourceLoading ? '加载中…' : '请选择')"
+        chips
+        closable-chips
+        clearable
+        hide-details="auto"
+        density="comfortable"
+        item-title="label"
+        item-value="value"
+        @update:model-value="onResourceInput"
+      />
 
-    <v-select
-      v-else-if="isSelect"
-      :model-value="value !== undefined && value !== null ? String(value) : undefined"
-      :items="selectOptions"
-      :placeholder="schema.placeholder"
-      hide-details
-      density="comfortable"
-      @update:model-value="(v: any) => emit('update', v ?? '')"
-    />
+      <v-select
+        v-else-if="isSelect"
+        :model-value="value !== undefined && value !== null ? String(value) : undefined"
+        :items="selectOptions"
+        :placeholder="schema.placeholder"
+        hide-details
+        density="comfortable"
+        @update:model-value="(v: any) => emit('update', v ?? '')"
+      />
 
-    <v-textarea
-      v-else-if="isTextarea"
-      :model-value="value !== undefined && value !== null ? String(value) : ''"
-      :rows="schema.rows || 3"
-      :placeholder="schema.placeholder"
-      hide-details
-      density="comfortable"
-      auto-grow
-      @update:model-value="(v: string) => emit('update', v)"
-    />
+      <v-textarea
+        v-else-if="isTextarea"
+        :model-value="value !== undefined && value !== null ? String(value) : ''"
+        :rows="schema.rows || 3"
+        :placeholder="schema.placeholder"
+        hide-details
+        density="comfortable"
+        auto-grow
+        @update:model-value="(v: string) => emit('update', v)"
+      />
 
-    <v-text-field
-      v-else-if="isTime"
-      :model-value="value || '00:00'"
-      type="time"
-      hide-details
-      density="comfortable"
-      style="max-width: 160px"
-      @update:model-value="(v: string) => emit('update', v)"
-    />
+      <v-text-field
+        v-else-if="isTime"
+        :model-value="value || '00:00'"
+        type="time"
+        hide-details
+        density="comfortable"
+        style="max-width: 160px"
+        @update:model-value="(v: string) => emit('update', v)"
+      />
 
-    <v-text-field
-      v-else-if="isNumber"
-      :model-value="numberValue"
-      type="number"
-      v-bind="numberAttrs"
-      hide-details
-      density="comfortable"
-      @update:model-value="onNumberInput"
-    />
+      <v-text-field
+        v-else-if="isNumber"
+        :model-value="numberValue"
+        type="number"
+        v-bind="numberAttrs"
+        hide-details
+        density="comfortable"
+        @update:model-value="onNumberInput"
+      />
 
-    <v-text-field
-      v-else
-      :model-value="value !== undefined && value !== null ? String(value) : ''"
-      :type="isPassword ? 'password' : 'text'"
-      :placeholder="schema.placeholder || (isPassword ? '••••••••' : '')"
-      hide-details
-      density="comfortable"
-      @update:model-value="(v: string) => emit('update', v)"
-    />
+      <v-text-field
+        v-else
+        :model-value="value !== undefined && value !== null ? String(value) : ''"
+        :type="isPassword ? 'password' : 'text'"
+        :placeholder="schema.placeholder || (isPassword ? '••••••••' : '')"
+        hide-details
+        density="comfortable"
+        @update:model-value="(v: string) => emit('update', v)"
+      />
+    </template>
   </div>
 </template>
 
@@ -254,6 +263,30 @@ function onBoolInput(v: boolean | null) {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
+}
+
+/* 开关行：标题/说明在左，开关在右；开关只占自身宽度 */
+.field-control--bool {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 44px;
+}
+
+.bool-main {
+  min-width: 0;
+}
+
+.bool-switch {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+/* 数字输入不需要铺满整个卡片宽度 */
+.field-control--number :deep(.v-field) {
+  max-width: 260px;
 }
 
 .field-label {
