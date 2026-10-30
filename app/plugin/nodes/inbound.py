@@ -19,6 +19,7 @@ from app.core.skip_log import log_skip
 from app.domain.events import BaseEvent
 from app.domain.response_access import (
     INBOUND_STAGES,
+    REASON_ACCOUNT_DISABLED,
     hint_for,
     remember_decision,
     stored_decision,
@@ -333,6 +334,11 @@ class ModuleRouterNode(MessageNode):
             else:
                 if module.bot_id:
                     continue
+            # 该账号下已关闭的模块不进候选：关闭是用户显式状态（静默），
+            # 之前它每 60s 会在权限节点刷一条 "xxx:account_disabled" info，
+            # 被当成"出问题了"的噪音；关闭模块也不应该在每个群里参与判定。
+            if not check_module_enabled(module):
+                continue
             candidates.append(module)
         ctx.state["candidates"] = candidates
         await next_()
@@ -421,12 +427,15 @@ class ModulePermissionNode(MessageNode):
             decision = self.access.decide_module(module, event)
             deny = decision.first_denial(INBOUND_STAGES)
             if deny is not None:
+                # 模块在该账号下关闭 = 明确的用户状态，不是"回不回的故障"：
+                # 只留 debug 技术日志，避免每分钟一条 info 把真实问题淹没。
+                level = "debug" if deny.reason == REASON_ACCOUNT_DISABLED else "info"
                 log_skip(
                     getattr(event, "account_id", "") or "?",
                     f"{name}:{deny.reason}",
                     f"stage={deny.stage} · source={deny.source} · {deny.detail}",
                     hint=hint_for(deny.reason),
-                    level="info",
+                    level=level,
                 )
                 continue
             module.permission_granted = True
