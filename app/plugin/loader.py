@@ -337,15 +337,30 @@ async def register_data_sources(
 
 
 async def activate(instance: BaseModule, module_name: str, services: ServiceAccess, log) -> None:
-    """`on_load` + 能力接管（`supersedes`）。"""
+    """`on_load` + 能力接管（`supersedes`）。
+
+    **模块关闭（``authority.enabled=False``）时跳过 `on_load`**：它是"装配/接管"钩子，
+    会在 runtime 上直接挂输出策略（`runtime.output`）、组装器、上下文/工具来源与钩子；
+    这些直挂对象不受 Feature 租约约束，过去"关了模块、重启后又生效"就是因为它每次
+    启动都被无条件执行。关闭是一个静默状态——不产生用户可见日志，只留 debug 技术日志；
+    之后在 WebUI 打开模块时由 `_sync_module_runtime(enabled=True)` 补跑 `on_load`。
+    """
+    try:
+        enabled = bool(getattr(getattr(instance, "authority", None), "enabled", True))
+    except Exception:  # noqa: BLE001 —— 读不到权限按启用处理（与旧行为一致）
+        enabled = True
+
+    if not enabled:
+        log.debug(f"[Module] {module_name} 已禁用：跳过 on_load（不接管运行时能力）")
+        return
+
     try:
         await instance.on_load()
     except Exception as e:  # noqa: BLE001 —— 插件自身异常不能拖垮整个加载流程
         log.warning(f"[Module] {module_name} on_load 异常: {e}")
 
     try:
-        enabled = getattr(getattr(instance, "authority", None), "enabled", True)
-        if services and services.features and enabled:
+        if services and services.features:
             services.features.acquire_module(instance)
     except Exception as e:  # noqa: BLE001
         log.warning(f"[Module] {module_name} Feature 接管异常: {e}")
