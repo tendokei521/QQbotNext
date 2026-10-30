@@ -528,7 +528,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
     </v-alert>
 
     <!-- 首载骨架屏 -->
-    <div v-if="modules.loading && modules.list.length === 0" class="app-card-grid">
+    <div v-if="modules.loading && modules.list.length === 0" class="app-card-grid modules-grid">
       <v-skeleton-loader v-for="i in 6" :key="i" type="card-avatar, article" class="rounded-xl" />
     </div>
 
@@ -550,7 +550,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           <v-chip size="x-small" variant="tonal" color="primary" class="ml-2">{{ section.items.length }}</v-chip>
         </div>
 
-        <div v-show="!section.collapsible || !isCollapsed(section.key)" class="app-card-grid">
+        <div v-show="!section.collapsible || !isCollapsed(section.key)" class="app-card-grid modules-grid">
           <v-card
             v-for="m in section.items"
             :key="m._key"
@@ -1017,6 +1017,24 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 .origin-chip {
   cursor: pointer;
+}
+
+/* 插件卡片固定每排三个（宽屏不再自动变成 4 个）；平板两列、手机单列。
+   用组合选择器压过全局 .app-card-grid 的 auto-fill。 */
+.app-card-grid.modules-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 1200px) {
+  .app-card-grid.modules-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .app-card-grid.modules-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* 窄屏：卡片单列，开关与文字间距收紧，避免操作区被挤出可视范围 */
