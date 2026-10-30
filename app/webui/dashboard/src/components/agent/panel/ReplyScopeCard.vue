@@ -155,13 +155,6 @@ function goExceptionRules() {
         <span class="scope-label">高危工具审批</span>
         <span class="scope-value">{{ toolApprovalOn ? '开启' : '关闭' }}</span>
       </div>
-      <v-divider class="my-3" />
-      <div class="d-flex align-center flex-wrap gap-2">
-        <v-btn size="small" variant="text" prepend-icon="mdi-account-group-outline" @click="goGroupScope">
-          逐群回复范围
-        </v-btn>
-        <span class="text-caption" style="opacity: 0.6">这里只显示摘要，修改在「回复与权限」</span>
-      </div>
     </v-card-text>
   </v-card>
 </template>

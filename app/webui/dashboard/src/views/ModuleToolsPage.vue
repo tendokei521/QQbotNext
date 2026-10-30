@@ -6,7 +6,8 @@ import { useBotsStore } from '@/stores/bots'
 import { useModulesStore } from '@/stores/modules'
 import { useToolsStore } from '@/stores/tools'
 import { useNotifyStore } from '@/stores/notify'
-import ToolInfo from '@/components/tools/ToolInfo.vue'
+import ToolSourceList from '@/components/tools/ToolSourceList.vue'
+import type { ToolLike } from '@/components/tools/ToolRow.vue'
 
 interface ModuleTool {
   name: string
@@ -34,11 +35,6 @@ const loadError = ref('')
 
 // 工具开关状态来自后端统一判定（/api/agent/tools），前端不再自算
 
-/** 插件内部名 → 用户可见名；取不到显示「未知插件」，原名放 tooltip */
-function pluginLabel(key: string): string {
-  return modulesStore.displayNameOf(key) || '未知插件'
-}
-
 const groups = computed(() => {
   const map = new Map<string, ModuleTool[]>()
   for (const tool of tools.value) {
@@ -49,8 +45,22 @@ const groups = computed(() => {
   return Array.from(map.entries()).map(([category, items]) => ({ category, items }))
 })
 
-async function toggleTool(tool: any) {
-  // 统一写入口：后端记进 `tools_disabled`（唯一总表），不再各写一套 map
+/** 插件内部名 → 用户可见名；取不到显示「插件」，原名只用于 tooltip */
+const moduleNames = computed<Record<string, string>>(() => {
+  const out: Record<string, string> = {}
+  for (const tool of tools.value) {
+    if (!tool.module) continue
+    out[tool.module] = modulesStore.displayNameOf(tool.module) || '插件'
+  }
+  return out
+})
+
+const emptyText = computed(() =>
+  !agent.botId ? '还没有账号，先去账号管理添加一个' : '还没有插件提供工具',
+)
+
+/** 统一写入口：后端记进 `tools_disabled`（唯一总表），不再各写一套 map */
+async function toggleTool(tool: ToolLike) {
   const next = !tool.enabled
   try {
     await http.post('/api/agent/tools/toggle', {
@@ -95,7 +105,7 @@ async function loadPluginNames() {
   try {
     if (!modulesStore.list.length) await modulesStore.load()
   } catch {
-    /* 插件名映射失败不影响工具开关；卡片会显示「未知插件」 */
+    /* 插件名映射失败不影响工具开关；卡片会显示「插件」 */
   }
 }
 
@@ -124,151 +134,28 @@ watch(
 
 <template>
   <div>
-    <v-card variant="outlined" class="mb-4">
-      <v-card-title class="d-flex align-center">
-        <v-icon icon="mdi-puzzle-outline" class="mr-2" color="secondary" /> 插件工具
-      </v-card-title>
-      <v-card-text class="text-caption" style="opacity: 0.65">
-        列出功能插件提供给模型的工具。插件开关在「功能插件」页管理。
-      </v-card-text>
-    </v-card>
+    <div class="app-toolbar">
+      <span class="app-muted">共 {{ tools.length }} 个工具</span>
+      <v-spacer />
+      <v-btn
+        icon="mdi-refresh"
+        variant="text"
+        size="small"
+        title="重新加载"
+        :loading="loading"
+        @click="loadTools"
+      />
+    </div>
 
-    <v-card variant="outlined" class="mb-4">
-      <v-card-title class="d-flex align-center">
-        <v-icon icon="mdi-puzzle-outline" class="mr-2" color="secondary" /> 工具列表
-        <v-spacer />
-        <v-chip v-if="tools.length" size="small">{{ tools.length }} 个</v-chip>
-      </v-card-title>
-      <v-card-text>
-        <v-alert v-if="loadError" type="error" variant="tonal" density="compact" class="mb-3">
-          <div class="d-flex align-center flex-wrap gap-2">
-            <span class="text-caption">{{ loadError }}</span>
-            <v-btn size="small" variant="text" prepend-icon="mdi-refresh" @click="loadTools">重试</v-btn>
-          </div>
-        </v-alert>
-
-        <v-progress-linear v-if="loading" indeterminate color="primary" />
-
-        <div class="tool-list">
-          <template v-for="group in groups" :key="group.category">
-            <div class="tool-category">
-              <span class="tool-category-name">{{ group.category }}</span>
-              <span class="tool-category-count">{{ group.items.length }}</span>
-            </div>
-            <div
-              v-for="tool in group.items"
-              :key="tool.name"
-              class="tool-item"
-              :class="{ 'is-off': !tool.effective }"
-            >
-              <div class="tool-row">
-                <div class="tool-info">
-                  <ToolInfo :tool="tool">
-                    <template #meta>
-                      <v-chip size="small" variant="tonal" color="secondary" :title="tool.module">{{ pluginLabel(tool.module) }}</v-chip>
-                      <v-chip v-if="!tool.ready && tool.prerequisite" size="small" variant="tonal" color="warning">
-                        {{ tool.prerequisite }}
-                      </v-chip>
-                    </template>
-                  </ToolInfo>
-                </div>
-                <v-switch
-                  :model-value="tool.enabled"
-                  :disabled="!tool.ready"
-                  color="primary"
-                  density="compact"
-                  hide-details
-                  @update:model-value="() => toggleTool(tool)"
-                />
-              </div>
-            </div>
-          </template>
-          <div
-            v-if="!tools.length && !loading && !loadError"
-            class="text-caption text-center pa-4"
-            style="opacity: 0.55"
-          >
-            <template v-if="!agent.botId">还没有账号。先在「账号管理」添加一个 QQ 账号。</template>
-            <template v-else>还没有插件提供工具。</template>
-          </div>
-        </div>
-      </v-card-text>
-    </v-card>
+    <ToolSourceList
+      :groups="groups"
+      source="module"
+      :loading="loading"
+      :error="loadError"
+      :empty-text="emptyText"
+      :module-names="moduleNames"
+      @toggle="toggleTool"
+      @reload="loadTools"
+    />
   </div>
 </template>
-
-<style scoped>
-.tool-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.tool-category {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-  padding: 4px 2px;
-  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.1);
-}
-
-.tool-category:first-child {
-  margin-top: 0;
-}
-
-.tool-category-name {
-  font-weight: 700;
-  font-size: 15px;
-  color: rgba(var(--v-theme-on-surface), 0.85);
-}
-
-.tool-category-count {
-  font-size: 12px;
-  color: rgba(var(--v-theme-on-surface), 0.55);
-  background: rgba(var(--v-theme-on-surface), 0.08);
-  border-radius: 999px;
-  padding: 1px 8px;
-}
-
-.tool-item {
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-  border-radius: 10px;
-  padding: 12px;
-  transition: opacity 0.12s ease;
-}
-
-.tool-item.is-off {
-  opacity: 0.55;
-}
-
-.tool-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.tool-info {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.tool-name {
-  font-weight: 600;
-  font-size: 16px;
-}
-
-.tool-desc {
-  font-size: 14px;
-  color: rgba(var(--v-theme-on-surface), 0.65);
-  margin: 2px 0 4px;
-}
-
-.tool-meta {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-top: 4px;
-}
-</style>

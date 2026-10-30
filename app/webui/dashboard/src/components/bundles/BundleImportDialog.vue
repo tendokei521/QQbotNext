@@ -270,9 +270,9 @@ function depsLine(item: ModuleDepsLog): string {
             </v-btn>
             <input ref="fileInput" type="file" accept=".zip" hidden @change="onPick" />
           </div>
-          <div class="text-caption mt-2" style="opacity: 0.65">
-            要安装的是单个插件（插件包 .zip）？
-            <v-btn size="x-small" variant="text" @click="goPluginInstall">去功能插件</v-btn>
+          <div class="text-caption mt-2 app-muted">
+            导入插件包请去功能插件
+            <v-btn size="x-small" variant="text" @click="goPluginInstall">打开功能插件</v-btn>
           </div>
           <v-progress-linear v-if="bundles.validating" indeterminate color="primary" class="mt-3" />
         </template>
@@ -304,7 +304,7 @@ function depsLine(item: ModuleDepsLog): string {
             >
               将安装 {{ report.summary.modules_to_install }}
             </v-chip>
-            <v-chip size="small" variant="tonal">模板 {{ report.summary.presets }}</v-chip>
+            <v-chip size="small" variant="tonal">人格 {{ report.summary.presets }}</v-chip>
             <v-chip size="small" variant="tonal">设置项 {{ report.summary.agent_keys }}</v-chip>
             <v-chip size="small" variant="tonal" :color="report.summary.secrets_required ? 'warning' : undefined">
               需填密钥 {{ report.summary.secrets_required }}

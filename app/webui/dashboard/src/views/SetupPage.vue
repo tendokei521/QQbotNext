@@ -222,7 +222,7 @@ async function applyPreset() {
       : { name: selectedPresetId.value, version: '' }
     personaDone.value = true
     await Promise.all([readiness.load(), bundles.loadActivations(currentAccountId.value)])
-    notify.push('预设已应用：人格 / 模型 / 功能插件已就位', 'success')
+    notify.push('预设已应用', 'success')
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   } finally {
@@ -513,11 +513,15 @@ onUnmounted(stopPolling)
 <template>
   <div class="setup-page">
     <div class="setup-shell">
-      <div class="d-flex align-center flex-wrap gap-3 mb-2">
-        <v-icon icon="mdi-rocket-launch-outline" size="34" color="primary" />
-        <h1 class="text-h5 font-weight-bold">首次配置</h1>
-        <v-chip size="small" variant="tonal">约 3 分钟</v-chip>
-        <v-spacer />
+        <div class="app-page-header setup-header">
+        <div>
+          <div class="d-flex align-center flex-wrap gap-2">
+            <v-icon icon="mdi-rocket-launch-outline" size="28" color="primary" />
+            <h1 class="app-page-title">首次配置</h1>
+            <v-chip size="small" variant="tonal">约 3 分钟</v-chip>
+          </div>
+          <div class="app-page-subtitle">按 4 步完成，每一步都能跳过</div>
+        </div>
         <v-btn variant="text" @click="skipAll">稍后再配</v-btn>
       </div>
 
@@ -529,7 +533,7 @@ onUnmounted(stopPolling)
         class="mb-3"
       >
         <div class="d-flex align-center flex-wrap gap-2">
-          <span>正在修改默认账号「{{ account.name || account.id }}」，日常修改请去「账号管理」。</span>
+          <span>正在配置账号「{{ account.name || account.id }}」，日常修改请去「账号管理」。</span>
           <v-spacer />
           <v-btn size="small" variant="text" color="primary" to="/bots">去账号管理</v-btn>
         </div>
@@ -549,9 +553,9 @@ onUnmounted(stopPolling)
 
       <!-- 第 1 步 -->
       <v-card v-if="step === 1" variant="outlined">
-        <v-card-title>把 QQ 号接进来</v-card-title>
+        <v-card-title>连接 QQ 账号</v-card-title>
         <v-card-text>
-          <div class="text-body-2 text-medium-emphasis mb-2">先选一种连接方式，两种都行，推荐本地监听。</div>
+          <div class="app-muted mb-2">选一种连接方式，不确定就用本地监听</div>
           <ProtocolHelp :mode="account.conn_mode" class="mb-3" />
           <v-btn-toggle
             :model-value="account.conn_mode"
@@ -564,33 +568,35 @@ onUnmounted(stopPolling)
             <v-btn value="forward" prepend-icon="mdi-lan-disconnect">向外连接</v-btn>
           </v-btn-toggle>
 
-          <v-table density="compact" class="mode-table mb-5">
-            <thead>
-              <tr>
-                <th>连接方式</th>
-                <th>协议端里选</th>
-                <th>地址填什么</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>本地监听（推荐）</td>
-                <td>WebSocket 客户端</td>
-                <td>填本页给出的本机监听地址</td>
-              </tr>
-              <tr>
-                <td>向外连接</td>
-                <td>WebSocket 服务端</td>
-                <td>把协议端的 ws 地址填到这里</td>
-              </tr>
-            </tbody>
-          </v-table>
+          <div class="table-scroll mb-4">
+            <v-table density="compact" class="mode-table">
+              <thead>
+                <tr>
+                  <th>连接方式</th>
+                  <th>协议端里选</th>
+                  <th>地址填什么</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>本地监听（推荐）</td>
+                  <td>WebSocket 客户端</td>
+                  <td>本页给出的本机监听地址</td>
+                </tr>
+                <tr>
+                  <td>向外连接</td>
+                  <td>WebSocket 服务端</td>
+                  <td>协议端的 ws 地址</td>
+                </tr>
+              </tbody>
+            </v-table>
+          </div>
 
           <v-text-field
             v-model="account.name"
             label="账号名称"
             placeholder="例如：主号"
-            hint="给自己看的名字，可留空"
+            hint="可留空，只在列表显示"
             persistent-hint
             density="comfortable"
             variant="outlined"
@@ -602,10 +608,11 @@ onUnmounted(stopPolling)
           <v-text-field
             v-model="account.ws_url"
             :label="account.conn_mode === 'reverse' ? '本机监听地址' : '协议端地址'"
-            hint="本地监听时协议端填这个地址；向外连接时填协议端的地址"
+            :hint="account.conn_mode === 'reverse' ? '协议端填这个地址' : '填协议端的 ws 地址'"
             persistent-hint
             density="comfortable"
             variant="outlined"
+            class="mb-3"
             @update:model-value="markAccountDirty"
             @blur="saveAccount"
           >
@@ -623,7 +630,7 @@ onUnmounted(stopPolling)
           <v-text-field
             v-model="account.access_token"
             label="连接令牌（可选）"
-            hint="与协议端里填的一致，没有就留空"
+            hint="与协议端一致，可留空"
             persistent-hint
             density="comfortable"
             variant="outlined"
@@ -641,7 +648,7 @@ onUnmounted(stopPolling)
             :prepend-icon="advancedOpen ? 'mdi-chevron-up' : 'mdi-cog-outline'"
             @click="advancedOpen = !advancedOpen"
           >
-            高级选项（账号标识）
+            账号标识（可选）
           </v-btn>
           <v-expand-transition>
             <div v-if="advancedOpen" class="mb-4">
@@ -649,7 +656,7 @@ onUnmounted(stopPolling)
                 v-model="account.id"
                 label="账号标识"
                 placeholder="留空自动分配，例如 main"
-                hint="内部使用，用来区分同名账号；一般不用改"
+                hint="留空自动分配，一般不用改"
                 persistent-hint
                 :error-messages="accountIdMessages"
                 density="comfortable"
@@ -660,17 +667,15 @@ onUnmounted(stopPolling)
             </div>
           </v-expand-transition>
 
-          <div class="d-flex align-center flex-wrap gap-2 mt-1">
+          <div class="d-flex align-center flex-wrap gap-2 mt-1 app-muted">
             <v-icon size="small" :icon="accountStatus.icon" :color="accountStatus.color" />
-            <span class="text-body-2">{{ accountStatus.text }}</span>
-            <span v-if="accountWaiting" class="text-caption" style="opacity: 0.65">
-              · 协议端连上后会自动变成已连接
-            </span>
+            <span>{{ accountStatus.text }}</span>
+            <span v-if="accountWaiting">· 协议端连上后自动变成已连接</span>
           </div>
         </v-card-text>
-        <v-card-actions>
+        <v-card-actions class="flex-wrap">
           <v-spacer />
-          <v-btn color="primary" :loading="savingAccount" @click="nextFromAccount">下一步</v-btn>
+          <v-btn color="primary" variant="flat" :loading="savingAccount" @click="nextFromAccount">下一步</v-btn>
         </v-card-actions>
       </v-card>
 
@@ -678,8 +683,8 @@ onUnmounted(stopPolling)
       <v-card v-else-if="step === 2" variant="outlined">
         <v-card-title>接入 AI 模型</v-card-title>
         <v-card-text>
-          <div class="text-body-2 text-medium-emphasis mb-3">
-            选一家模型服务，填上它给你的 Key 就能用；换服务商不用改其它设置。
+          <div class="app-muted mb-3">
+            选一家服务商，填上 Key 就能用
           </div>
 
           <div v-if="presetsLoading" class="text-caption mb-3">正在读取模型服务列表…</div>
@@ -739,76 +744,62 @@ onUnmounted(stopPolling)
               {{ presetsError }}
             </v-alert>
 
-            <v-row v-if="!customMode && selectedModelPreset" dense class="mt-2">
-              <v-col cols="12" md="6">
-                <v-combobox
-                  v-model="model.model"
-                  :items="selectedModelPreset.models"
-                  label="模型"
-                  hint="选一个常用模型，也可以直接填名字"
-                  persistent-hint
+            <div v-if="!customMode && selectedModelPreset" class="app-form-grid mt-3">
+              <v-combobox
+                v-model="model.model"
+                :items="selectedModelPreset.models"
+                label="模型"
+                hint="可下拉选，也可手填"
+                persistent-hint
+                density="comfortable"
+                variant="outlined"
+              />
+              <v-text-field
+                v-model="model.api_key"
+                label="API Key"
+                hint="在服务商控制台创建"
+                persistent-hint
+                type="password"
+                density="comfortable"
+                variant="outlined"
+                autocomplete="off"
+              />
+            </div>
+            <div v-if="!customMode && selectedModelPreset" class="app-muted mt-2">
+              接口地址：{{ model.api_base }}
+            </div>
+
+            <template v-else>
+              <div class="app-form-grid mt-3">
+                <v-select
+                  v-model="model.provider"
+                  :items="customProviderItems"
+                  label="模型服务"
                   density="comfortable"
                   variant="outlined"
                 />
-              </v-col>
-              <v-col cols="12" md="6">
+                <v-text-field
+                  v-model="model.api_base"
+                  label="接口地址（一般不用改）"
+                  density="comfortable"
+                  variant="outlined"
+                />
+                <v-text-field
+                  v-model="model.model"
+                  label="模型名称"
+                  placeholder="如 deepseek-chat"
+                  density="comfortable"
+                  variant="outlined"
+                />
                 <v-text-field
                   v-model="model.api_key"
                   label="API Key"
-                  hint="在服务商控制台创建"
-                  persistent-hint
                   type="password"
                   density="comfortable"
                   variant="outlined"
                   autocomplete="off"
                 />
-              </v-col>
-            </v-row>
-            <div v-if="!customMode && selectedModelPreset" class="text-caption text-medium-emphasis">
-              接口地址：{{ model.api_base }}
-            </div>
-
-            <template v-else>
-              <v-row dense class="mt-2">
-                <v-col cols="12" md="4">
-                  <v-select
-                    v-model="model.provider"
-                    :items="customProviderItems"
-                    label="模型服务"
-                    density="comfortable"
-                    variant="outlined"
-                  />
-                </v-col>
-                <v-col cols="12" md="8">
-                  <v-text-field
-                    v-model="model.api_base"
-                    label="接口地址（一般不用改）"
-                    density="comfortable"
-                    variant="outlined"
-                  />
-                </v-col>
-              </v-row>
-              <v-row dense>
-                <v-col cols="12" md="6">
-                  <v-text-field
-                    v-model="model.model"
-                    label="模型名称"
-                    placeholder="如 deepseek-chat"
-                    density="comfortable"
-                    variant="outlined"
-                  />
-                </v-col>
-                <v-col cols="12" md="6">
-                  <v-text-field
-                    v-model="model.api_key"
-                    label="API Key"
-                    type="password"
-                    density="comfortable"
-                    variant="outlined"
-                    autocomplete="off"
-                  />
-                </v-col>
-              </v-row>
+              </div>
             </template>
 
             <div v-if="modelResult" class="created-box">
@@ -827,19 +818,19 @@ onUnmounted(stopPolling)
             </div>
           </template>
         </v-card-text>
-        <v-card-actions>
+        <v-card-actions class="flex-wrap">
           <v-btn variant="text" @click="step = 1">上一步</v-btn>
           <v-spacer />
           <v-btn color="primary" variant="tonal" :loading="busy === 'model'" @click="saveModel">
             保存并使用
           </v-btn>
-          <v-btn color="primary" @click="step = 3">下一步</v-btn>
+          <v-btn color="primary" variant="flat" @click="step = 3">下一步</v-btn>
         </v-card-actions>
       </v-card>
 
       <!-- 第 3 步 -->
       <v-card v-else-if="step === 3" variant="outlined">
-        <v-card-title>给它一个人格</v-card-title>
+        <v-card-title>人格设定</v-card-title>
         <v-card-text>
           <v-tabs v-model="personaMode" density="compact" class="mb-3">
             <v-tab value="scratch">从零写</v-tab>
@@ -862,14 +853,13 @@ onUnmounted(stopPolling)
               density="comfortable"
               variant="outlined"
             />
-            <div class="text-caption" style="opacity: 0.7">
-              保存后会同时开启群聊回复，之后可在「AI 对话面板」里继续调整。
+            <div class="app-muted">
+              保存后会开启群聊回复
             </div>
           </template>
           <template v-else>
-            <div class="text-caption mb-3" style="opacity: 0.7">
-              用别人分享的预设：导入 .zip 后一键应用人格、模型和随包功能
-              （会以预设自带的模型为准，覆盖刚才选的模型）。
+            <div class="app-muted mb-3">
+              导入 .zip 预设包，一键应用人格、模型和随包插件；模型以包内为准。
             </div>
             <div class="d-flex align-center flex-wrap gap-2 mb-3">
               <v-btn
@@ -941,7 +931,7 @@ onUnmounted(stopPolling)
             </v-alert>
           </template>
         </v-card-text>
-        <v-card-actions>
+        <v-card-actions class="flex-wrap">
           <v-btn variant="text" @click="step = 2">上一步</v-btn>
           <v-spacer />
           <v-btn
@@ -953,15 +943,15 @@ onUnmounted(stopPolling)
           >
             保存并应用
           </v-btn>
-          <v-btn color="primary" @click="step = 4">下一步</v-btn>
+          <v-btn color="primary" variant="flat" @click="step = 4">下一步</v-btn>
         </v-card-actions>
       </v-card>
 
       <!-- 第 4 步 -->
       <v-card v-else variant="outlined">
-        <v-card-title>最后确认</v-card-title>
+        <v-card-title>完成</v-card-title>
         <v-card-text>
-          <div class="text-body-2 text-medium-emphasis mb-2">下面几项都打勾，就能在群里聊天了。</div>
+          <div class="app-muted mb-2">检查全部通过后即可在群里聊天</div>
           <div v-for="check in readiness.checks.filter((c) => c.level !== 'info')" :key="check.id" class="d-flex align-center gap-2 py-1">
             <v-icon
               size="small"
@@ -969,20 +959,20 @@ onUnmounted(stopPolling)
               :color="check.ok ? 'success' : check.level === 'blocker' ? 'error' : 'warning'"
             />
             <span class="text-body-2">{{ check.title }}</span>
-            <span v-if="check.detail" class="text-caption" style="opacity: 0.65">{{ check.detail }}</span>
+            <span v-if="check.detail" class="app-muted">{{ check.detail }}</span>
           </div>
           <v-alert v-if="readiness.ready" type="success" variant="tonal" density="compact" class="mt-3">
-            已经可以聊天了：去群里 @ 一次机器人试试。连接状态在「总览」里看。
+            可以去群里 @ 一次试试
           </v-alert>
           <v-alert v-else type="warning" variant="tonal" density="compact" class="mt-3">
-            还有 {{ readiness.blockers.length }} 项没完成。可以返回前面补齐，或先保存、稍后在「总览」里继续。
+            还有 {{ readiness.blockers.length }} 项未完成，可返回补齐
           </v-alert>
         </v-card-text>
-        <v-card-actions>
+        <v-card-actions class="flex-wrap">
           <v-btn variant="text" @click="step = 3">上一步</v-btn>
           <v-spacer />
           <v-btn variant="text" :loading="readiness.loading" @click="readiness.load()">重新检查</v-btn>
-          <v-btn color="primary" :loading="busy === 'finish'" @click="finish">完成并进入总览</v-btn>
+          <v-btn color="primary" variant="flat" :loading="busy === 'finish'" @click="finish">完成并进入总览</v-btn>
         </v-card-actions>
       </v-card>
     </div>
@@ -996,12 +986,21 @@ onUnmounted(stopPolling)
   min-height: 100vh;
   display: flex;
   justify-content: center;
-  padding: 32px 16px;
+  padding: 28px 16px 40px;
 }
 
 .setup-shell {
   width: 100%;
   max-width: 860px;
+}
+
+.setup-header {
+  align-items: flex-start;
+}
+
+/* 对照表窄屏可横向滚动，不撑破页面 */
+.table-scroll {
+  overflow-x: auto;
 }
 
 .step-strip {
@@ -1094,9 +1093,9 @@ onUnmounted(stopPolling)
   color: rgba(var(--v-theme-on-surface), .55);
 }
 
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  word-break: break-all;
+@media (max-width: 720px) {
+  .setup-page {
+    padding: 18px 12px 32px;
+  }
 }
 </style>

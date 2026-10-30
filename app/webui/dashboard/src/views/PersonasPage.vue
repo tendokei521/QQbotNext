@@ -60,6 +60,26 @@ const filteredPresets = computed(() => {
 
 const selectedPreset = computed(() => presets.value.find((p) => p.id === selectedId.value) || null)
 
+/** 历史数据里的内部描述不该露给用户：这类都改用提示词首句生成一句话介绍 */
+const INTERNAL_DESCRIPTIONS = ['自动兼容保存的历史角色设定']
+
+function oneLine(text: string, max = 16): string {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim()
+  if (!clean) return ''
+  return clean.length > max ? `${clean.slice(0, max)}…` : clean
+}
+
+/** 列表一句话介绍（≤16 字）：优先用户填的描述，内部描述/空描述回落到提示词首句 */
+function presetSummary(preset: RolePreset): string {
+  const description = String(preset.description || '').trim()
+  const isInternal = INTERNAL_DESCRIPTIONS.some((item) => description.includes(item))
+  if (description && !isInternal) return oneLine(description)
+  const firstLine = String(preset.system_prompt || '')
+    .split('\n')[0]
+    .replace(/^【[^】]*】\s*/, '')
+  return oneLine(firstLine) || '暂无描述'
+}
+
 function fillForm(p: RolePreset) {
   Object.assign(form, {
     name: p.name,
@@ -245,25 +265,23 @@ onMounted(() => {
 
 <template>
   <div>
-    <div class="app-page-header" style="align-items: center">
+    <div class="app-page-header">
       <div>
         <h1 class="app-page-title">
           <v-icon icon="mdi-account-heart" class="mr-1" color="pink" />
           人格设定
         </h1>
-        <div class="app-page-subtitle">管理可复用的人格预设，在 AI 对话面板里选用</div>
+        <div class="app-page-subtitle">可复用的人格，供各账号选用</div>
       </div>
-      <v-spacer />
-      <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="startNew">新建人格</v-btn>
-      <v-btn variant="tonal" prepend-icon="mdi-refresh" @click="loadPresets">刷新</v-btn>
+      <div class="d-flex flex-wrap gap-2">
+        <v-btn variant="text" prepend-icon="mdi-refresh" @click="loadPresets">刷新</v-btn>
+        <v-btn color="primary" prepend-icon="mdi-plus" @click="startNew">新建人格</v-btn>
+      </div>
     </div>
 
     <!-- 人格是全局资产：没有账号也能全部编辑；只有「应用」这类动作需要账号 -->
     <v-alert v-if="agent.botId == null" type="info" variant="tonal" density="compact" class="mt-2 mb-3">
-      <div class="text-caption">
-        当前没有选定账号：人格可以照常<strong>新建、编辑、保存</strong>；
-        「从当前账号另存」需要先在「账号管理」添加账号。
-      </div>
+      <div class="text-caption">未选账号：人格仍可新建和编辑；「从当前账号另存」需先添加账号。</div>
     </v-alert>
 
     <v-row class="mt-2">
@@ -298,8 +316,8 @@ onMounted(() => {
                   <v-icon icon="mdi-account-heart" color="pink" />
                 </template>
                 <v-list-item-title class="text-body-2">{{ p.name }}</v-list-item-title>
-                <v-list-item-subtitle class="text-caption">
-                  {{ p.description || p.system_prompt.slice(0, 30) || '无描述' }}
+                <v-list-item-subtitle class="text-caption app-muted app-line-clamp-1">
+                  {{ presetSummary(p) }}
                 </v-list-item-subtitle>
                 <template #append>
                   <v-btn
@@ -333,43 +351,37 @@ onMounted(() => {
             </v-chip>
           </v-card-title>
           <v-card-text>
-            <v-row>
-              <v-col cols="12" md="6">
-                <v-text-field
-                  v-model="form.name"
-                  label="人格名称"
-                  density="comfortable"
-                  variant="outlined"
-                  hide-details
-                  placeholder="例如：元气少女"
-                />
-              </v-col>
-              <v-col cols="12" md="6">
-                <v-text-field
-                  v-model="form.description"
-                  label="人格描述（一句话）"
-                  density="comfortable"
-                  variant="outlined"
-                  hide-details
-                />
-              </v-col>
-            </v-row>
+            <div class="app-form-grid mb-3">
+              <v-text-field
+                v-model="form.name"
+                label="人格名称"
+                density="comfortable"
+                variant="outlined"
+                hide-details
+                placeholder="例如：元气少女"
+              />
+              <v-text-field
+                v-model="form.description"
+                label="一句话描述"
+                density="comfortable"
+                variant="outlined"
+                hide-details
+                placeholder="例如：毒舌但护短的群友"
+              />
+            </div>
             <v-textarea
               v-model="form.system_prompt"
               label="人格提示词"
-              hint="描述它是什么样的人、怎么说话；写得具体一些效果更稳"
+              hint="写清说话风格和界限，越具体越稳"
               persistent-hint
               placeholder="例如：你是一个混在群里的普通群友，说话简短自然，不端着"
-              auto-grow
-              rows="14"
+              rows="10"
               variant="outlined"
-              class="mt-3"
               spellcheck="false"
             />
-            <div class="d-flex flex-wrap gap-3 mt-3">
+            <div class="d-flex flex-wrap gap-3 mt-4">
               <v-btn
                 color="primary"
-                variant="tonal"
                 prepend-icon="mdi-content-save"
                 :loading="saving"
                 @click="savePreset"
@@ -378,20 +390,19 @@ onMounted(() => {
               </v-btn>
               <v-btn
                 variant="tonal"
-                color="pink"
+                prepend-icon="mdi-account-plus-outline"
+                :disabled="agent.botId == null"
+                @click="saveCurrentAsPreset"
+              >
+                从当前账号另存
+              </v-btn>
+              <v-btn
+                variant="text"
                 prepend-icon="mdi-arrow-right-bold-circle-outline"
                 :disabled="!selectedPreset"
                 @click="goToPanel"
               >
                 去 AI 对话面板选用
-              </v-btn>
-              <v-btn
-                variant="tonal"
-                prepend-icon="mdi-account-plus-outline"
-                :disabled="agent.botId == null"
-                @click="saveCurrentAsPreset"
-              >
-                从当前账号另存为人格
               </v-btn>
             </div>
           </v-card-text>

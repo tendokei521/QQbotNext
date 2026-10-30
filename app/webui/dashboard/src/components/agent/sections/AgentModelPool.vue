@@ -82,7 +82,7 @@ function goToProviderPresets() {
 <template>
   <v-card variant="outlined" class="mb-4">
     <v-card-title class="d-flex align-center flex-wrap gap-2">
-      <v-icon icon="mdi-api" class="mr-2" color="info" /> 模型（按顺序尝试）
+      <v-icon icon="mdi-api" class="mr-2" color="info" /> 模型
       <v-spacer />
       <v-btn v-if="hasAnyModel" size="small" variant="tonal" prepend-icon="mdi-plus" @click="openPoolDialog">
         从模型服务加入
@@ -92,36 +92,58 @@ function goToProviderPresets() {
       </v-btn>
     </v-card-title>
     <v-card-text class="text-body-2 pt-0 pb-0" style="opacity: 0.8">
-      顺序即回退顺序，前面的失败才试下一个。
+      从上到下依次尝试，前面的失败再换下一个。
     </v-card-text>
     <v-card-text v-if="agent.poolModelIds.length">
-      <v-list density="compact">
+      <v-list density="compact" class="model-list">
         <v-list-item v-for="(id, i) in agent.poolModelIds" :key="id">
           <template #prepend><span class="pool-order">{{ i + 1 }}</span></template>
           <v-list-item-title>{{ poolLabel(id) }}</v-list-item-title>
           <template #append>
-            <v-btn size="x-small" variant="text" prepend-icon="mdi-play" :loading="testingId === id" @click="testModel(id)">
-              测试
-            </v-btn>
-            <v-btn size="x-small" variant="text" icon="mdi-arrow-up" :disabled="i === 0" @click="movePoolModel(i, -1)" />
-            <v-btn
-              size="x-small"
-              variant="text"
-              icon="mdi-arrow-down"
-              :disabled="i === agent.poolModelIds.length - 1"
-              @click="movePoolModel(i, 1)"
-            />
-            <v-btn size="x-small" variant="text" icon="mdi-close" color="error" @click="removePoolModel(i)" />
+            <div class="model-actions">
+              <v-btn
+                icon="mdi-play-circle-outline"
+                size="small"
+                variant="text"
+                title="测试连接"
+                :loading="testingId === id"
+                @click="testModel(id)"
+              />
+              <v-btn
+                icon="mdi-arrow-up"
+                size="small"
+                variant="text"
+                title="上移"
+                :disabled="i === 0"
+                @click="movePoolModel(i, -1)"
+              />
+              <v-btn
+                icon="mdi-arrow-down"
+                size="small"
+                variant="text"
+                title="下移"
+                :disabled="i === agent.poolModelIds.length - 1"
+                @click="movePoolModel(i, 1)"
+              />
+              <v-btn
+                icon="mdi-close"
+                size="small"
+                variant="text"
+                color="error"
+                title="移出模型池"
+                @click="removePoolModel(i)"
+              />
+            </div>
           </template>
         </v-list-item>
       </v-list>
     </v-card-text>
 
     <div v-else-if="hasAnyModel" class="pool-empty px-4 pb-4 pt-2">
-      <div class="text-caption">还没有加入模型，点右上角「从模型服务加入」选择。</div>
+      <div class="text-caption">还没有加入模型</div>
     </div>
     <div v-else class="pool-empty px-4 pb-4 pt-2">
-      <div class="text-caption">模型服务里还没有模型：用卡片右上角的按钮去添加。</div>
+      <div class="text-caption">模型服务里还没有模型</div>
     </div>
 
     <v-dialog v-model="poolDialog" max-width="460">
@@ -140,7 +162,7 @@ function goToProviderPresets() {
             />
           </template>
           <template v-else>
-            <div class="text-body-2">没有可加入的模型：先去「模型服务」添加服务商与模型，再回来加入这里。</div>
+            <div class="text-body-2">没有可加入的模型</div>
             <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-open-in-new" class="mt-3" @click="goToProviderPresets">
               去「模型服务」
             </v-btn>
@@ -159,6 +181,16 @@ function goToProviderPresets() {
 </template>
 
 <style scoped>
+.model-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.model-list :deep(.v-list-item) {
+  padding-inline: 0;
+}
+
 .pool-order {
   display: inline-flex;
   align-items: center;

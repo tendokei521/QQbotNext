@@ -213,20 +213,21 @@ const currentStatusChip = computed(() => {
   return { text: STATUS_TEXT[bot.status], color: 'error', icon: 'mdi-alert-circle' }
 })
 const isConnected = computed(() => bots.currentBot?.status === 'connected')
+/** 连接中/重连中：按钮显示状态而不是可点操作，避免连点 */
+const isConnecting = computed(
+  () => bots.currentBot?.status === 'connecting' || bots.currentBot?.status === 'reconnecting',
+)
 const hasCurrentBot = computed(() => bots.currentId !== null)
 /** 账号管理页本身有每张卡片的连接按钮，顶栏不再重复给一套 */
 const isBotsRoute = computed(() => route.path.startsWith('/bots'))
 const showConnectControls = computed(() => !isBotsRoute.value)
-/** 窄屏状态 chip 用短文案，避免把顶栏撑出屏幕 */
-const narrowStatusText = computed(() => {
-  if (currentStatusChip.value.text === '等待协议端接入') return '等待接入'
-  return currentStatusChip.value.text
-})
 
-/** 「等待协议端接入」对新手没有解释：这里给一句白话 tooltip（其它状态不弹） */
+/** 状态 chip 的悬停说明：窄屏只显示图标，tooltip 负责给出完整状态 */
 const chipTooltip = computed(() => {
-  if (currentStatusChip.value.text !== '等待协议端接入') return ''
-  return '协议端＝另外安装的 QQ 客户端插件（NapCat / LLOneBot）；按账号卡上的地址在它里面新建 WebSocket 客户端即可'
+  if (currentStatusChip.value.text === '等待协议端接入') {
+    return '协议端＝另外安装的 QQ 客户端插件（NapCat / LLOneBot）；按账号卡上的地址在它里面新建 WebSocket 客户端即可'
+  }
+  return `当前状态：${currentStatusChip.value.text}（点击去账号管理）`
 })
 
 /** 点状态 chip 直接去账号管理里对应的那张卡（带高亮） */
@@ -423,10 +424,8 @@ onUnmounted(() => {
               @keydown.enter.prevent="openCurrentAccount"
             >
               <v-icon start :icon="currentStatusChip.icon" size="small" />
-              <span>{{ isNarrow ? narrowStatusText : currentStatusChip.text }}</span>
-              <span v-if="!isNarrow && bots.currentBot && resolvedBotId(bots.currentBot)" class="chip-bot-id">
-                | {{ resolvedBotId(bots.currentBot) }}
-              </span>
+              <!-- 窄屏只留状态图标（tooltip 里是完整文案），避免把账号选择挤没 -->
+              <span v-if="!isNarrow">{{ currentStatusChip.text }}</span>
             </v-chip>
           </template>
         </v-tooltip>
@@ -439,14 +438,14 @@ onUnmounted(() => {
         <template v-if="isNarrow">
           <v-btn
             size="small"
-            variant="tonal"
+            variant="text"
             :icon="themeStore.isDark ? 'mdi-weather-night' : 'mdi-white-balance-sunny'"
             :title="themeStore.isDark ? '切换到浅色模式' : '切换到暗色模式'"
             @click="themeStore.toggle()"
           />
           <v-menu v-model="moreMenu" location="bottom end">
             <template #activator="{ props }">
-              <v-btn v-bind="props" size="small" variant="tonal" icon="mdi-dots-vertical" title="更多操作" />
+              <v-btn v-bind="props" size="small" variant="text" icon="mdi-dots-vertical" title="更多操作" />
             </template>
             <v-list density="compact" min-width="180">
               <template v-if="showConnectControls">
@@ -481,63 +480,49 @@ onUnmounted(() => {
           </v-menu>
         </template>
 
-        <!-- 桌面：保持一行；账号管理页隐藏连接组（卡片上的按钮才是权威入口） -->
+        <!-- 桌面：一个当前动作 + 主题 + 「更多」，不再并排三个彩色按钮 -->
         <template v-else>
-          <div v-if="showConnectControls" class="topbar-group" role="group" aria-label="连接控制">
-            <v-btn
-              color="success"
-              variant="tonal"
-              prepend-icon="mdi-plug"
-              :disabled="isConnected || !hasCurrentBot || busyAction"
-              title="连接当前账号"
-              @click="act(() => bots.connect(bots.currentId!), '已发送连接请求')"
-            >
-              <span class="btn-label">连接</span>
-            </v-btn>
-            <v-btn
-              color="error"
-              variant="tonal"
-              prepend-icon="mdi-unlink"
-              :disabled="!isConnected || busyAction"
-              title="断开当前账号"
-              @click="act(() => bots.disconnect(bots.currentId!), '已断开')"
-            >
-              <span class="btn-label">断开</span>
-            </v-btn>
-            <v-btn
-              color="warning"
-              variant="tonal"
-              prepend-icon="mdi-restart"
-              :disabled="!hasCurrentBot || busyAction"
-              title="重连当前账号"
-              @click="act(() => bots.reconnect(bots.currentId!), '已发送重连请求')"
-            >
-              <span class="btn-label">重连</span>
-            </v-btn>
-          </div>
-
-          <!-- /bots 页内工具栏已有这两项（且刷新连配置一起刷），顶栏不重复 -->
-          <template v-if="!isBotsRoute">
-            <v-btn size="small" variant="tonal" icon="mdi-refresh" title="刷新状态" @click="act(() => bots.fetchBots(), '状态已刷新')" />
-            <v-btn size="small" variant="tonal" prepend-icon="mdi-layers-triple-outline" :title="GROUP_OVERVIEW_TITLE" @click="multiGroupOpen = true">
-              <span class="btn-label">群与账号概览</span>
-            </v-btn>
-          </template>
+          <v-btn
+            v-if="showConnectControls"
+            class="topbar-connect"
+            :color="isConnected ? 'error' : 'primary'"
+            :variant="isConnected ? 'tonal' : 'flat'"
+            :prepend-icon="isConnected ? 'mdi-unlink' : 'mdi-plug'"
+            :disabled="!hasCurrentBot || busyAction || isConnecting"
+            :loading="busyAction"
+            :title="isConnected ? '断开当前账号' : '连接当前账号'"
+            @click="isConnected
+              ? act(() => bots.disconnect(bots.currentId!), '已断开')
+              : act(() => bots.connect(bots.currentId!), '已发送连接请求')"
+          >
+            {{ isConnected ? '断开' : isConnecting ? '连接中' : '连接' }}
+          </v-btn>
           <v-btn
             size="small"
-            variant="tonal"
+            variant="text"
             :icon="themeStore.isDark ? 'mdi-weather-night' : 'mdi-white-balance-sunny'"
             :title="themeStore.isDark ? '切换到浅色模式' : '切换到暗色模式'"
             @click="themeStore.toggle()"
           />
-          <!-- 登出：清会话 cookie 后回独立登录页（服务端 303 重定向，无需前端处理） -->
-          <v-btn
-            size="small"
-            variant="tonal"
-            icon="mdi-logout-variant"
-            title="退出登录"
-            @click="logout"
-          />
+          <v-menu location="bottom end">
+            <template #activator="{ props }">
+              <v-btn v-bind="props" size="small" variant="text" icon="mdi-dots-vertical" title="更多操作" />
+            </template>
+            <v-list density="compact" min-width="190">
+              <v-list-item
+                prepend-icon="mdi-restart"
+                title="重连当前账号"
+                :disabled="!hasCurrentBot || busyAction"
+                @click="moreAct(() => bots.reconnect(bots.currentId!), '已发送重连请求')"
+              />
+              <template v-if="!isBotsRoute">
+                <v-list-item prepend-icon="mdi-refresh" title="刷新状态" @click="moreAct(() => bots.fetchBots(), '状态已刷新')" />
+                <v-list-item prepend-icon="mdi-layers-triple-outline" :title="GROUP_OVERVIEW_TITLE" @click="openGroupOverview" />
+              </template>
+              <v-divider class="my-1" />
+              <v-list-item prepend-icon="mdi-logout-variant" title="退出登录" @click="logout" />
+            </v-list>
+          </v-menu>
         </template>
       </div>
     </v-app-bar>
@@ -551,7 +536,7 @@ onUnmounted(() => {
         class="live-banner"
       >
         <div class="d-flex align-center flex-wrap gap-2">
-          <span>实时连接已断开{{ retryCount > 1 ? `，正在第 ${retryCount} 次重连` : '，正在自动重连' }}……页面数据可能不是最新。</span>
+          <span>连接已断开，正在重连…页面数据可能不是最新。</span>
           <v-btn size="x-small" variant="text" prepend-icon="mdi-refresh" @click="connectSocket()">立即重试</v-btn>
         </div>
       </v-alert>
@@ -919,23 +904,11 @@ onUnmounted(() => {
   padding-right: 0;
 }
 
-/* 连接/断开/重连：胶囊分组 */
-.topbar-group {
-  display: flex;
-  align-items: stretch;
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
-  border-radius: 10px;
-  overflow: hidden;
+/* 主操作（连接/断开）：固定宽度，状态切换时顶栏不跳动 */
+.topbar-connect {
+  min-width: 92px;
+  justify-content: center;
   flex: 0 0 auto;
-}
-
-.topbar-group :deep(.v-btn) {
-  border-radius: 0;
-  border-right: 1px solid rgba(var(--v-theme-on-surface), 0.1);
-}
-
-.topbar-group :deep(.v-btn:last-child) {
-  border-right: none;
 }
 
 .main-area {
@@ -947,20 +920,10 @@ onUnmounted(() => {
   margin: 0 auto;
 }
 
-/* 空间不足时：顶栏按钮先退化为纯图标，保证单行高度一致 */
+/* 空间不足时：账号选择先收缩，主操作按钮保持完整文字 */
 @media (max-width: 1360px) {
-  .btn-label {
-    display: none;
-  }
-
-  .topbar-actions :deep(.v-btn:not(.v-btn--icon)) {
-    width: 40px;
-    padding-left: 0;
-    padding-right: 0;
-  }
-
   .bot-select {
-    width: 170px;
+    width: 180px;
   }
 }
 

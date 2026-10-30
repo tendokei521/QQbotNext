@@ -10,7 +10,7 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { displayName, useBotsStore } from '@/stores/bots'
+import { useBotsStore } from '@/stores/bots'
 import {
   triggerModeLabel,
   usePolicyStore,
@@ -87,11 +87,6 @@ const PRIVATE_SCENE_ITEMS: { title: string; value: SceneValue }[] = [
   { title: '一律允许', value: 'on' },
   { title: '一律不允许', value: 'off' },
 ]
-
-const accountName = computed(() => {
-  const bot = bots.bots.find((item) => item.id === bots.currentAccountId)
-  return bot ? displayName(bot) : bots.currentAccountId
-})
 
 /** 群聊默认：群行选「继承」时用它；null = 跟随 AI 对话面板的群聊开关 */
 const groupScene = computed<SceneValue>(() => {
@@ -251,18 +246,15 @@ watch(
 
 <template>
   <div>
-    <div class="app-page-header" style="align-items: center">
+    <div class="app-page-header">
       <div>
         <h1 class="app-page-title">
           <v-icon icon="mdi-shield-account-outline" size="28" color="success" class="mr-1" />
           回复与权限
         </h1>
-        <div class="app-page-subtitle">哪些群能回、谁能触发；AI 对话面板管默认，这里管例外</div>
+        <div class="app-page-subtitle">哪些群能回、谁能触发</div>
       </div>
       <div class="d-flex align-center gap-2">
-        <v-chip v-if="bots.currentAccountId" size="small" variant="tonal">
-          账号：{{ accountName }}
-        </v-chip>
         <v-btn
           v-if="tab === 'groups'"
           variant="tonal"
@@ -299,85 +291,72 @@ watch(
           </div>
         </v-alert>
 
-        <v-card variant="outlined" class="mb-3">
-          <v-card-text class="d-flex align-center flex-wrap gap-3">
-            <v-text-field
-              v-model="policy.search"
-              placeholder="搜索群名 / 群号"
-              density="compact"
-              variant="outlined"
-              hide-details
-              clearable
-              prepend-inner-icon="mdi-magnify"
-              style="max-width: 320px"
-            />
-            <v-chip size="small" variant="tonal">允许 {{ policy.allowedCount }} 个</v-chip>
-            <v-chip v-if="policy.mutedCount" size="small" variant="tonal" color="warning">
-              静音中 {{ policy.mutedCount }} 个
-            </v-chip>
-            <v-spacer />
-            <v-btn
-              size="small"
-              variant="tonal"
-              color="success"
-              :disabled="!policy.rows.length || policy.saving !== null"
-              @click="askBulk(true)"
-            >
-              全部允许
-            </v-btn>
-            <v-btn
-              size="small"
-              variant="tonal"
-              color="error"
-              :disabled="!policy.rows.length || policy.saving !== null"
-              @click="askBulk(false)"
-            >
-              全部关闭
-            </v-btn>
-          </v-card-text>
-        </v-card>
+        <div class="app-toolbar">
+          <v-text-field
+            v-model="policy.search"
+            placeholder="搜索群名 / 群号"
+            density="compact"
+            variant="outlined"
+            hide-details
+            clearable
+            prepend-inner-icon="mdi-magnify"
+            style="max-width: 320px"
+          />
+          <span class="text-caption app-muted">允许 {{ policy.allowedCount }} 个</span>
+          <span v-if="policy.mutedCount" class="text-caption app-muted">静音 {{ policy.mutedCount }} 个</span>
+          <v-spacer />
+          <v-btn
+            size="small"
+            variant="text"
+            color="success"
+            :disabled="!policy.rows.length || policy.saving !== null"
+            @click="askBulk(true)"
+          >
+            全部允许
+          </v-btn>
+          <v-btn
+            size="small"
+            variant="text"
+            color="error"
+            :disabled="!policy.rows.length || policy.saving !== null"
+            @click="askBulk(false)"
+          >
+            全部关闭
+          </v-btn>
+        </div>
 
         <!-- 账号默认：群聊/私聊各自的三态；没单独设置的会话按这里的默认走 -->
-        <v-card variant="outlined" class="mb-3">
+        <v-card variant="outlined" class="mb-4">
           <v-card-title class="d-flex align-center">
             <v-icon icon="mdi-tune-variant" class="mr-2" color="primary" /> 账号默认
           </v-card-title>
-          <v-card-text class="text-caption pt-0 pb-0" style="opacity: 0.7">
-            没有单独设置的群或私聊按这里的默认走；单独设置过的以那一处为准。
-          </v-card-text>
           <v-card-text>
-            <v-row dense>
-              <v-col cols="12" md="6">
-                <v-select
-                  :model-value="groupScene"
-                  :items="GROUP_SCENE_ITEMS"
-                  label="群聊默认"
-                  density="compact"
-                  variant="outlined"
-                  hide-details
-                  :loading="policy.savingScene"
-                  :disabled="!bots.currentAccountId || policy.savingScene"
-                  @update:model-value="(v: SceneValue) => onSceneDefault('group', v)"
-                />
-              </v-col>
-              <v-col cols="12" md="6">
-                <v-select
-                  :model-value="privateScene"
-                  :items="PRIVATE_SCENE_ITEMS"
-                  label="私聊默认"
-                  density="compact"
-                  variant="outlined"
-                  hide-details
-                  :loading="policy.savingScene"
-                  :disabled="!bots.currentAccountId || policy.savingScene"
-                  @update:model-value="(v: SceneValue) => onSceneDefault('private', v)"
-                />
-              </v-col>
-            </v-row>
+            <div class="app-form-grid">
+              <v-select
+                :model-value="groupScene"
+                :items="GROUP_SCENE_ITEMS"
+                label="群聊默认"
+                density="compact"
+                variant="outlined"
+                hide-details
+                :loading="policy.savingScene"
+                :disabled="!bots.currentAccountId || policy.savingScene"
+                @update:model-value="(v: SceneValue) => onSceneDefault('group', v)"
+              />
+              <v-select
+                :model-value="privateScene"
+                :items="PRIVATE_SCENE_ITEMS"
+                label="私聊默认"
+                density="compact"
+                variant="outlined"
+                hide-details
+                :loading="policy.savingScene"
+                :disabled="!bots.currentAccountId || policy.savingScene"
+                @update:model-value="(v: SceneValue) => onSceneDefault('private', v)"
+              />
+            </div>
             <div class="text-caption mt-2" style="opacity: 0.6">
-              「跟随」指采用 AI 对话面板里的群聊开关、私信开关。
-              当前账号默认触发方式：{{ triggerModeLabel(policy.defaultPolicy.trigger_mode || 'none') }}；
-              需要按群改就在该群菜单里打开「本群专属规则」。
+              未单独设置的按这里，单独设置的优先
             </div>
           </v-card-text>
         </v-card>
@@ -463,14 +442,14 @@ watch(
                     density="compact"
                     variant="outlined"
                     hide-details
-                    style="max-width: 120px"
+                    class="row-switch"
                     :loading="policy.saving === row.group_id"
                     :disabled="policy.saving !== null"
                     @update:model-value="(v: SwitchValue) => onSwitch(row, v)"
                   />
                   <v-menu location="bottom end">
                     <template #activator="{ props }">
-                      <v-btn v-bind="props" icon="mdi-dots-vertical" variant="text" size="small" />
+                      <v-btn v-bind="props" icon="mdi-dots-vertical" variant="text" size="small" class="row-more" />
                     </template>
                     <v-list density="compact">
                       <v-list-item v-if="isMuted(row)" prepend-icon="mdi-bell-off-outline" @click="onMute(row, 0)">
@@ -502,7 +481,7 @@ watch(
         </v-card>
 
         <div v-if="policy.rows.length" class="text-caption mt-3" style="opacity: 0.6">
-          群列表来自账号在线时的一次同步；离线时显示上次结果，可能不是最新。
+          群列表来自上次同步，离线时可能不是最新。
         </div>
       </v-window-item>
 
@@ -529,5 +508,19 @@ watch(
 <style scoped>
 .policy-row--muted {
   opacity: 0.7;
+}
+
+.row-switch {
+  width: 120px;
+  flex: 0 0 120px;
+}
+
+.row-switch :deep(.v-field) {
+  min-height: 40px;
+}
+
+.row-more {
+  width: 40px;
+  height: 40px;
 }
 </style>

@@ -298,7 +298,7 @@ watch(
             {{ priorityNote }}
           </div>
           <div class="text-caption mb-3" style="opacity: 0.7">
-            不填的项沿用现有设置；保存后只记录你这次改动的内容。
+            不填的项沿用现有设置
           </div>
 
           <v-select
@@ -378,11 +378,11 @@ watch(
           />
           <HintText
             class="mb-3"
-            text="此段时间不回复任何消息（含被 @）；只影响主动消息的时段在「功能插件 → 主动消息」里设置。"
+            text="此段时间不回复任何消息（含被 @）"
           />
 
           <v-card variant="tonal" class="mb-3">
-            <v-card-subtitle class="text-caption">生效预览（保存前先看结果与来源）</v-card-subtitle>
+            <v-card-subtitle class="text-caption">生效预览</v-card-subtitle>
             <v-card-text class="text-caption pt-0">
               <div v-for="row in previewRows" :key="row.label" class="d-flex align-center flex-wrap gap-2">
                 <span style="min-width: 64px">{{ row.label }}</span>
@@ -414,7 +414,7 @@ watch(
 
       <v-card-actions>
         <v-chip v-if="Object.keys(sources).length" size="x-small" variant="text" class="ml-2">
-          {{ channelId ? '没填的项沿用本群或全局规则' : '没填的项沿用系统默认值' }}
+          没填的项沿用上层设置
         </v-chip>
         <v-spacer />
         <v-btn variant="text" @click="emit('update:modelValue', false)">取消</v-btn>

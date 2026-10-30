@@ -22,12 +22,12 @@ const custom = computed(() => (section.value ? agentCustomSection(section.value.
 
 <template>
   <div class="agent-section-page">
-    <!-- 会话管理管"回复带多少上下文"，聊天记录本身在「会话数据」：两页互不相连，这里给个去处 -->
+    <!-- 会话管理管"回复带多少上下文"，聊天记录本身在「会话数据」 -->
     <v-alert v-if="section?.id === 'session'" type="info" variant="tonal" density="compact" class="mb-3">
       <div class="d-flex align-center flex-wrap gap-2">
-        <span class="text-caption">这里配置回复带多少上下文；聊天记录本身在</span>
+        <span class="text-caption">这里设置回复带多少上下文</span>
         <v-btn size="small" variant="text" prepend-icon="mdi-arrow-right" @click="router.push('/sessions')">
-          会话数据
+          看聊天记录
         </v-btn>
       </div>
     </v-alert>

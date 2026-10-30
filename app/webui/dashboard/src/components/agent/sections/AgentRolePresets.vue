@@ -138,37 +138,24 @@ onMounted(() => {
 
 <template>
   <v-card variant="outlined" class="mb-4">
-    <v-card-title class="v-card-title persona-head">
+    <v-card-title class="persona-head">
       <v-icon icon="mdi-account-heart" class="mr-2" color="pink" /> 人格
-      <v-chip
-        v-if="persona.kind === 'bound'"
-        class="persona-chip"
-        color="pink"
-        variant="tonal"
-      >
-        当前人格：{{ persona.label }}
-      </v-chip>
-      <v-chip v-else-if="persona.kind === 'same-content'" class="persona-chip" color="warning" variant="tonal">
-        当前人格：{{ persona.label }}
-      </v-chip>
-      <v-chip v-else class="persona-chip" variant="tonal">当前人格：未选择</v-chip>
       <v-spacer />
+      <a class="text-caption text-primary text-decoration-none" href="#" @click.prevent="goToPersonas">
+        去「人格设定」编辑
+      </a>
     </v-card-title>
-    <v-divider class="mx-4 mt-3" />
 
-    <div class="px-4 pb-3 pt-3">
+    <div class="px-4 pb-3 pt-2">
       <div class="d-flex align-center flex-wrap gap-2 mb-1">
         <v-icon icon="mdi-tune-variant" size="small" color="primary" />
         <span class="text-subtitle-2">提示词风格</span>
-        <v-chip size="x-small" variant="tonal" color="primary">必选，三选一</v-chip>
         <v-spacer />
         <a class="text-caption text-primary text-decoration-none" href="#" @click.prevent="editPromptText">
-          编辑这三套文案
+          编辑文案
         </a>
       </div>
-      <div class="text-caption mb-3" style="opacity: 0.7">
-        决定框架生成的系统提示词口径（聊天 / 角色扮演 / 助手）；只换说法，不改人格内容。
-      </div>
+      <div class="text-caption mb-3" style="opacity: 0.7">只换说话风格，不改人格内容</div>
       <v-row dense role="radiogroup" aria-label="提示词风格（三选一）">
         <v-col v-for="p in PROMPT_PRESETS" :key="p.key" cols="12" md="4">
           <v-card
@@ -200,11 +187,6 @@ onMounted(() => {
       <div class="d-flex align-center flex-wrap gap-2">
         <v-icon icon="mdi-account-heart-outline" size="small" color="pink" />
         <span class="text-subtitle-2">人格预设</span>
-        <span class="text-caption ml-2" style="opacity: 0.65">选中后点「应用所选人格」，会写入当前账号</span>
-        <v-spacer />
-        <a class="text-caption text-primary text-decoration-none" href="#" @click.prevent="goToPersonas">
-          去「人格设定」编辑
-        </a>
       </div>
     </div>
 
@@ -274,14 +256,13 @@ onMounted(() => {
               >
                 应用所选人格
               </v-btn>
-              <div class="text-caption mt-2" style="opacity: 0.6">应用后立即对当前账号生效。</div>
-              <div class="text-caption mt-1" style="opacity: 0.6">
+              <div class="text-caption mt-2" style="opacity: 0.6">
                 内容在
                 <a class="text-primary text-decoration-none" href="#" @click.prevent="goToPersonas">「人格设定」</a>
                 里编辑
               </div>
             </template>
-            <div v-else class="text-caption py-6 text-center" style="opacity: 0.55">请从左侧选择一个人格预设</div>
+            <div v-else class="text-caption py-6 text-center" style="opacity: 0.55">选择一个人格预设</div>
           </div>
         </v-col>
       </v-row>
@@ -314,10 +295,7 @@ onMounted(() => {
 .selected-box {
   height: 100%;
   min-height: 120px;
-  padding: 12px;
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-  border-radius: 10px;
-  background: rgba(var(--v-theme-on-surface), 0.02);
+  padding-left: 12px;
 }
 
 .preset-card {

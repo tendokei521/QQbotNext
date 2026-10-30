@@ -109,10 +109,7 @@ function close() {
       <v-card-text>
         <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-2" />
         <v-alert type="info" variant="tonal" density="compact" class="mb-3">
-          <div class="text-caption">
-            全局生效；账号级「行为规则覆盖」仍优先。改成静态文本后，视觉/搜索/记忆/发言方式等
-            按能力裁剪的句子不再自动调整，请自行保留。
-          </div>
+          <div class="text-caption">全局生效；账号级规则仍优先</div>
         </v-alert>
 
         <div v-if="current" class="text-caption mb-2" style="opacity: 0.7">{{ current.description }}</div>

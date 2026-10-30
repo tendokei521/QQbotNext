@@ -40,15 +40,15 @@ const VIEW = {
 } as const
 
 const view = computed(() => VIEW[props.status])
-const hintText = computed(() => {
-  if (props.hint) return props.hint
-  return props.autosave ? '改动会自动保存' : ''
-})
+// 常驻的「已保存」和「改动会自动保存」都是噪音：清态不显示任何提示，
+// 只有保存成功后的短暂 saved、未保存/保存中/失败才占位。
+const showChip = computed(() => props.status !== 'clean')
 </script>
 
 <template>
   <div class="save-bar">
     <v-chip
+      v-if="showChip"
       size="small"
       :color="view.color"
       variant="tonal"
@@ -68,7 +68,7 @@ const hintText = computed(() => {
     >
       {{ saveLabel }}
     </v-btn>
-    <span v-if="hintText" class="save-hint">{{ hintText }}</span>
+    <span v-if="hint" class="save-hint">{{ hint }}</span>
   </div>
 </template>
 

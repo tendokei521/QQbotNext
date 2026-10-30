@@ -448,21 +448,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 <template>
   <div>
-    <div class="app-page-header d-flex align-center flex-wrap gap-2">
-      <div class="me-2">
+    <div class="app-page-header">
+      <div>
         <h1 class="app-page-title">功能插件</h1>
-        <div class="app-page-subtitle">共 {{ modules.count }} 个插件，开关只影响当前账号</div>
-        <div class="text-caption mt-1">
-          工具调试入口在
-          <router-link to="/settings">设置 → 高级选项</router-link>
-        </div>
+        <div class="app-page-subtitle">开关只影响当前账号</div>
       </div>
-      <v-chip v-if="bots.currentAccountId" size="small" variant="tonal">
-        当前账号：{{ accountName }}
-      </v-chip>
-      <v-spacer />
       <div class="d-flex flex-wrap gap-2">
-        <v-btn variant="tonal" prepend-icon="mdi-package-variant" @click="openInstallDialog">
+        <v-btn color="primary" variant="flat" prepend-icon="mdi-package-variant" @click="openInstallDialog">
           安装插件
         </v-btn>
         <v-btn
@@ -474,6 +466,23 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           重新加载
         </v-btn>
       </div>
+    </div>
+
+    <div class="app-toolbar">
+      <v-text-field
+        ref="searchRef"
+        v-model="search"
+        placeholder="搜索功能插件"
+        density="compact"
+        variant="outlined"
+        hide-details
+        clearable
+        prepend-inner-icon="mdi-magnify"
+        class="module-search"
+      />
+      <span v-if="bots.currentAccountId" class="app-muted">当前账号：{{ accountName }}</span>
+      <v-spacer />
+      <span class="app-muted">共 {{ modules.count }} 个插件</span>
     </div>
 
     <!-- 顶部提示条：加载失败 / 已停用并隐藏（可恢复） -->
@@ -518,27 +527,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       </template>
     </v-alert>
 
-    <v-text-field
-      ref="searchRef"
-      v-model="search"
-      placeholder="搜索功能插件…"
-      density="comfortable"
-      variant="outlined"
-      hide-details
-      clearable
-      prepend-inner-icon="mdi-magnify"
-      class="mb-4"
-    />
-
     <!-- 首载骨架屏 -->
-    <v-row v-if="modules.loading && modules.list.length === 0">
-      <v-col v-for="i in 6" :key="i" cols="12" md="6" xl="4">
-        <v-skeleton-loader type="card-avatar, article" class="rounded-xl" />
-      </v-col>
-    </v-row>
+    <div v-if="modules.loading && modules.list.length === 0" class="app-card-grid">
+      <v-skeleton-loader v-for="i in 6" :key="i" type="card-avatar, article" class="rounded-xl" />
+    </div>
 
     <template v-else>
-      <div v-for="section in sections" :key="section.key" class="mb-3">
+      <div v-for="section in sections" :key="section.key" class="plugin-section">
         <div
           class="group-heading d-flex align-center"
           :class="{ 'group-heading--static': !section.collapsible }"
@@ -551,28 +546,33 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
             class="mr-1"
           />
           <v-icon v-else icon="mdi-pin" size="small" class="mr-1" />
-          {{ section.title }}
+          <span class="app-section-title">{{ section.title }}</span>
           <v-chip size="x-small" variant="tonal" color="primary" class="ml-2">{{ section.items.length }}</v-chip>
         </div>
-        <v-row v-show="!section.collapsible || !isCollapsed(section.key)">
-          <v-col v-for="m in section.items" :key="m._key" cols="12" md="6" xl="4">
-            <v-card variant="outlined" class="module-card app-card-hover" @click="openModule(m)">
-              <v-card-item>
-                <template #prepend>
-                  <v-avatar color="lightprimary" size="36" rounded="lg">
-                    <v-icon
-                      :icon="m.pinned ? 'mdi-pin' : isBuiltinModule(m) ? 'mdi-cube-outline' : 'mdi-package-variant-closed'"
-                      color="primary"
-                      size="small"
-                    />
-                  </v-avatar>
-                </template>
-                <v-card-title class="text-body-1">
-                  <span class="app-line-clamp-1">{{ m.name }}</span>
+
+        <div v-show="!section.collapsible || !isCollapsed(section.key)" class="app-card-grid">
+          <v-card
+            v-for="m in section.items"
+            :key="m._key"
+            variant="outlined"
+            class="module-card app-card-hover"
+            @click="openModule(m)"
+          >
+            <div class="module-card-body">
+              <v-avatar color="lightprimary" size="36" rounded="lg" class="module-icon">
+                <v-icon
+                  :icon="m.pinned ? 'mdi-pin' : isBuiltinModule(m) ? 'mdi-cube-outline' : 'mdi-package-variant-closed'"
+                  color="primary"
+                  size="small"
+                />
+              </v-avatar>
+
+              <div class="module-body">
+                <div class="module-title-row">
+                  <span class="module-name app-line-clamp-1">{{ m.name }}</span>
                   <!-- 来源徽标：内置 / 第三方；配置包装的插件再标「来自某配置包」 -->
                   <v-chip
                     size="x-small"
-                    class="ml-1"
                     :color="isBuiltinModule(m) ? 'default' : 'teal'"
                     variant="tonal"
                   >
@@ -583,13 +583,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                       <v-chip
                         v-bind="props"
                         size="x-small"
-                        class="ml-1 origin-chip"
+                        class="origin-chip"
                         color="primary"
                         variant="tonal"
                         prepend-icon="mdi-package-variant-closed"
-                        @click="router.push('/bundles')"
+                        @click.stop="router.push('/bundles')"
                       >
-                        来自「{{ m.origin.bundle_name || '未命名配置包' }}」
+                        来自配置包
                       </v-chip>
                     </template>
                     <div class="text-caption">
@@ -603,14 +603,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                   </v-tooltip>
                   <v-tooltip location="top" :text="PERMISSION_TOOLTIP">
                     <template #activator="{ props }">
-                      <v-chip v-bind="props" size="x-small" class="ml-1" :color="PERMISSION_COLOR[m.permission] || 'default'" variant="tonal">
+                      <v-chip v-bind="props" size="x-small" :color="PERMISSION_COLOR[m.permission] || 'default'" variant="tonal">
                         {{ PERMISSION_LABELS[m.permission] || m.permission }}
                       </v-chip>
                     </template>
                   </v-tooltip>
                   <v-tooltip v-if="m.supersedes?.length" location="top" max-width="320">
                     <template #activator="{ props }">
-                      <v-chip v-bind="props" size="x-small" class="ml-1" color="warning" variant="tonal">
+                      <v-chip v-bind="props" size="x-small" color="warning" variant="tonal">
                         替代了{{ featureLabels(m.supersedes) }}
                       </v-chip>
                     </template>
@@ -619,7 +619,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                   <!-- 装坏/卸载状态：红色小标 + 悬浮错误文本 -->
                   <v-tooltip v-if="statusOf(m) === 'error'" location="top" max-width="420">
                     <template #activator="{ props }">
-                      <v-chip v-bind="props" size="x-small" class="ml-1" color="error" variant="flat" prepend-icon="mdi-alert-circle">
+                      <v-chip v-bind="props" size="x-small" color="error" variant="flat" prepend-icon="mdi-alert-circle">
                         加载失败
                       </v-chip>
                     </template>
@@ -628,104 +628,104 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                   <v-chip
                     v-else-if="statusOf(m) === 'uninstalled'"
                     size="x-small"
-                    class="ml-1"
                     color="warning"
                     variant="tonal"
                   >
-                    已卸载
+                    已停用
                   </v-chip>
                   <v-tooltip v-else-if="m.manifest_missing" location="top" max-width="360">
                     <template #activator="{ props }">
-                      <v-chip v-bind="props" size="x-small" class="ml-1" color="info" variant="tonal">
+                      <v-chip v-bind="props" size="x-small" color="info" variant="tonal">
                         文件不完整
                       </v-chip>
                     </template>
                     <div class="text-caption">插件缺少说明文件，版本和显示名用了默认值，一般不影响使用</div>
                   </v-tooltip>
-                </v-card-title>
-                <v-card-subtitle class="app-line-clamp-2">
-                  <span v-if="statusOf(m) === 'error'" class="text-error">{{ m.error || '加载失败' }}</span>
-                  <span v-else>{{ m.description }}</span>
-                </v-card-subtitle>
-                <template #append>
-                  <v-switch
-                    :model-value="m.enabled"
-                    color="primary"
-                    density="compact"
-                    hide-details
-                    :loading="toggling[m._key]"
-                    :disabled="toggling[m._key] || !isUsable(m)"
-                    @click.stop
-                    @update:model-value="(v: boolean | null) => onToggle(m, v)"
-                  />
-                  <v-menu location="bottom end">
-                    <template #activator="{ props }">
-                      <v-btn
-                        v-bind="props"
-                        icon="mdi-dots-vertical"
-                        size="x-small"
-                        variant="text"
-                        @click.stop
-                      />
+                </div>
+
+                <div class="module-desc app-line-clamp-1">
+                  <template v-if="statusOf(m) === 'error'">加载出错，可重新加载或检查依赖</template>
+                  <template v-else-if="statusOf(m) === 'uninstalled'">已停用并隐藏，可在提示条恢复</template>
+                  <template v-else>{{ m.description }}</template>
+                </div>
+              </div>
+
+              <div class="module-actions" @click.stop>
+                <v-switch
+                  class="module-switch"
+                  :model-value="m.enabled"
+                  color="primary"
+                  density="compact"
+                  hide-details
+                  :loading="toggling[m._key]"
+                  :disabled="toggling[m._key] || !isUsable(m)"
+                  @update:model-value="(v: boolean | null) => onToggle(m, v)"
+                />
+                <v-menu location="bottom end">
+                  <template #activator="{ props }">
+                    <v-btn
+                      v-bind="props"
+                      icon="mdi-dots-vertical"
+                      size="x-small"
+                      variant="text"
+                    />
+                  </template>
+                  <v-list density="compact">
+                    <v-list-item v-if="isUsable(m)" prepend-icon="mdi-refresh" @click="onReload(m)">重新加载</v-list-item>
+                    <!-- 内置：禁用并隐藏（软卸载）；已卸载的内置给"恢复安装" -->
+                    <template v-if="isBuiltinModule(m)">
+                      <v-list-item
+                        v-if="statusOf(m) === 'uninstalled'"
+                        prepend-icon="mdi-restore"
+                        @click="onRestore(m._key, m.name)"
+                      >
+                        恢复安装
+                      </v-list-item>
+                      <v-list-item v-else prepend-icon="mdi-eye-off-outline" @click="onHideBuiltin(m)">
+                        停用（文件保留）
+                      </v-list-item>
                     </template>
-                    <v-list density="compact">
-                      <v-list-item v-if="isUsable(m)" prepend-icon="mdi-refresh" @click="onReload(m)">重新加载</v-list-item>
-                      <!-- 内置：禁用并隐藏（软卸载）；已卸载的内置给"恢复安装" -->
-                      <template v-if="isBuiltinModule(m)">
-                        <v-list-item
-                          v-if="statusOf(m) === 'uninstalled'"
-                          prepend-icon="mdi-restore"
-                          @click="onRestore(m._key, m.name)"
-                        >
-                          恢复安装
-                        </v-list-item>
-                        <v-list-item v-else prepend-icon="mdi-eye-off-outline" @click="onHideBuiltin(m)">
-                          停用（文件保留）
-                        </v-list-item>
-                      </template>
-                      <!-- 第三方：重新加载 / 更新… / 卸载（删除文件） -->
-                      <template v-else>
-                        <v-list-item
-                          v-if="statusOf(m) === 'uninstalled'"
-                          prepend-icon="mdi-restore"
-                          @click="onRestore(m._key, m.name)"
-                        >
-                          恢复安装
-                        </v-list-item>
-                        <v-list-item
-                          v-if="statusOf(m) === 'error'"
-                          prepend-icon="mdi-package-variant"
-                          @click="openDepsCheck(m)"
-                        >
-                          检查依赖
-                        </v-list-item>
-                        <v-list-item prepend-icon="mdi-update" @click="openUpdateDialog(m)">更新…</v-list-item>
-                        <v-list-item
-                          prepend-icon="mdi-trash-can-outline"
-                          class="text-error"
-                          @click="onDelete(m)"
-                        >
-                          卸载（删除文件）
-                        </v-list-item>
-                      </template>
-                    </v-list>
-                  </v-menu>
-                </template>
-              </v-card-item>
-            </v-card>
-          </v-col>
-        </v-row>
+                    <!-- 第三方：重新加载 / 更新… / 卸载（删除文件） -->
+                    <template v-else>
+                      <v-list-item
+                        v-if="statusOf(m) === 'uninstalled'"
+                        prepend-icon="mdi-restore"
+                        @click="onRestore(m._key, m.name)"
+                      >
+                        恢复安装
+                      </v-list-item>
+                      <v-list-item
+                        v-if="statusOf(m) === 'error'"
+                        prepend-icon="mdi-package-variant"
+                        @click="openDepsCheck(m)"
+                      >
+                        检查依赖
+                      </v-list-item>
+                      <v-list-item prepend-icon="mdi-update" @click="openUpdateDialog(m)">更新…</v-list-item>
+                      <v-list-item
+                        prepend-icon="mdi-trash-can-outline"
+                        class="text-error"
+                        @click="onDelete(m)"
+                      >
+                        卸载（删除文件）
+                      </v-list-item>
+                    </template>
+                  </v-list>
+                </v-menu>
+              </div>
+            </div>
+          </v-card>
+        </div>
       </div>
 
-      <v-card v-if="filtered.length === 0 && !modules.loading" variant="outlined">
-        <EmptyState
-          icon="mdi-magnify-close"
-          :title="search ? `没有匹配「${search}」的插件` : '暂无插件'"
-          description="尝试更换关键词，或重新加载插件列表"
-        >
-          <v-btn size="small" variant="tonal" prepend-icon="mdi-refresh" @click="modules.reloadAll().catch((e: unknown) => notify.push(errorMessage(e), 'error'))">重新加载</v-btn>
-        </EmptyState>
-      </v-card>
+      <EmptyState
+        v-if="filtered.length === 0 && !modules.loading"
+        icon="mdi-magnify-close"
+        :title="search ? `没有匹配「${search}」的插件` : '暂无插件'"
+        description="尝试更换关键词，或重新加载插件列表"
+      >
+        <v-btn size="small" variant="tonal" prepend-icon="mdi-refresh" @click="modules.reloadAll().catch((e: unknown) => notify.push(errorMessage(e), 'error'))">重新加载</v-btn>
+      </EmptyState>
     </template>
 
     <!-- 安装 / 更新插件对话框：先预检确认，再真正安装 -->
@@ -895,10 +895,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 <style scoped>
 .group-heading {
-  font-size: 14px;
-  font-weight: 600;
-  color: rgba(var(--v-theme-on-surface), 0.7);
-  padding: 8px 2px;
+  padding: 4px 2px 8px;
   cursor: pointer;
   user-select: none;
 }
@@ -907,23 +904,68 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   cursor: default;
 }
 
+.plugin-section {
+  margin-bottom: 18px;
+}
+
 .module-card {
   height: 100%;
-  border-radius: 14px;
+  border-radius: 12px;
   cursor: pointer;
 }
 
-.module-card :deep(.v-card-item__title) {
+.module-card-body {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 14px 14px 16px;
+}
+
+.module-icon {
+  flex: 0 0 auto;
+}
+
+.module-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.module-title-row {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
+  gap: 4px 6px;
   min-width: 0;
-  white-space: normal;
 }
 
-.module-card :deep(.v-card-item__subtitle) {
-  min-height: 36px;
+.module-name {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  max-width: 100%;
+}
+
+.module-desc {
+  margin-top: 3px;
+  font-size: 12.5px;
   line-height: 1.5;
+  color: rgba(var(--v-theme-on-surface), 0.6);
+}
+
+.module-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.module-switch {
+  margin: 0;
+}
+
+.module-search {
+  max-width: 320px;
+  flex: 1 1 220px;
 }
 
 .issue-row {
@@ -977,18 +1019,20 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   cursor: pointer;
 }
 
-/* 窄屏：页头按钮换行后，卡片两侧留白收紧，避免操作区被挤出可视范围 */
+/* 窄屏：卡片单列，开关与文字间距收紧，避免操作区被挤出可视范围 */
 @media (max-width: 600px) {
-  .module-card :deep(.v-card-item) {
-    padding: 8px 10px;
-  }
-
-  .module-card :deep(.v-card-item__append) {
-    padding-inline-start: 4px;
+  .module-card-body {
+    padding: 12px 12px 12px 14px;
+    gap: 10px;
   }
 
   .issue-row {
     align-items: flex-start;
+  }
+
+  .module-search {
+    flex: 1 1 100%;
+    max-width: none;
   }
 }
 

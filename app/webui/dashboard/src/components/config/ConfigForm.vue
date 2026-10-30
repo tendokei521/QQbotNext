@@ -185,8 +185,10 @@ function currentValue(item: ItemDef): any {
       >
         <v-expansion-panel>
           <v-expansion-panel-title class="group-title">
-            <v-icon size="small" class="mr-1" :icon="open[g.id] === false ? 'mdi-chevron-right' : 'mdi-chevron-down'" />
-            {{ g.label }}
+            <span class="group-title__inner">
+              <v-icon size="small" class="mr-1" :icon="open[g.id] === false ? 'mdi-chevron-right' : 'mdi-chevron-down'" />
+              {{ g.label }}
+            </span>
           </v-expansion-panel-title>
           <v-expansion-panel-text>
             <div class="group-body">
@@ -256,19 +258,31 @@ function currentValue(item: ItemDef): any {
   font-weight: 600;
 }
 
+/* 标题内容包一层，配合隐藏右侧默认箭头后仍保持「图标+标题」左对齐 */
+.group-title__inner {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* 分组标题左侧已有展开/收起箭头，隐藏 Vuetify 自带的右侧箭头，避免一左一右两个 */
+.group-title :deep(.v-expansion-panel-title__icon) {
+  display: none;
+}
+
 .group-body {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 4px;
   padding: 4px 0;
 }
 
+/* 字段不再套描边容器（卡片 > 描边框 > 输入 三层压成两层）；只在字段之间用分隔线 */
 .config-item {
-  padding: 12px 14px;
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.07);
-  border-left: 3px solid rgba(var(--v-theme-primary), 0.35);
-  border-radius: 8px;
-  background: rgba(var(--v-theme-on-surface), 0.015);
+  padding: 12px 0;
+}
+
+.config-item + .config-item {
+  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.06);
 }
 
 .field-label {

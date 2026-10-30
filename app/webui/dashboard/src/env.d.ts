@@ -22,3 +22,6 @@ interface Window {
  */
 declare const __BUILD_STAMP__: string
 
+/** 应用版本（`vite.config.ts` 从 package.json 注入）：界面上只展示这个，不展示 commit。 */
+declare const __APP_VERSION__: string
+

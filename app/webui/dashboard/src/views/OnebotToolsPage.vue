@@ -6,7 +6,9 @@ import { useModulesStore } from '@/stores/modules'
 import { useToolsStore } from '@/stores/tools'
 import { useNotifyStore } from '@/stores/notify'
 import { PERMISSION_LABELS, permissionLabel } from '@/agent/labels'
-import ToolInfo from '@/components/tools/ToolInfo.vue'
+import EmptyState from '@/components/EmptyState.vue'
+import ToolRow from '@/components/tools/ToolRow.vue'
+import { toolDisplayTitle } from '@/components/tools/toolDisplay'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 
 interface OneBotTool {
@@ -107,6 +109,10 @@ const toolGroups = computed(() => {
     })
     .map(([category, items]) => ({ category, items }))
 })
+
+const emptyText = computed(() =>
+  !bots.currentAccountId ? '还没有账号，先去账号管理添加一个' : '还没有 OneBot 工具',
+)
 
 const enabled = computed<boolean>({
   // 默认开启：schema 里已隐藏该键，未显式关过时按 true 处理
@@ -294,117 +300,97 @@ watch(
 
 <template>
   <div>
-    <v-card variant="outlined" class="mb-4">
-      <v-card-title class="d-flex align-center">
-        <v-icon icon="mdi-power" class="mr-2" color="teal" /> 总开关
-        <v-spacer />
-        <v-switch v-model="enabled" color="primary" density="compact" hide-details />
-      </v-card-title>
-      <v-card-text class="text-caption" style="opacity: 0.65">
-        开启后，模型可以主动发消息、查群信息等。敏感管理操作只建议给账号主人。
-        <div class="mt-1">与「功能插件 → 工具扩展」是同一份设置，改这里等于改插件配置。</div>
-      </v-card-text>
-    </v-card>
+    <div class="app-toolbar">
+      <span class="text-body-2">启用 OneBot 工具</span>
+      <v-switch v-model="enabled" color="primary" density="compact" hide-details class="ms-1" />
+      <v-spacer />
+      <v-btn
+        variant="text"
+        size="small"
+        prepend-icon="mdi-open-in-new"
+        href="https://napcat.apifox.cn/"
+        target="_blank"
+        rel="noopener"
+      >
+        接口文档
+      </v-btn>
+      <v-btn variant="tonal" size="small" prepend-icon="mdi-restore" :disabled="!enabled" @click="resetOpen = true">
+        恢复默认
+      </v-btn>
+    </div>
 
-    <v-card variant="outlined" class="mb-4">
-      <v-card-title class="d-flex align-center">
-        <v-icon icon="mdi-robot-industrial" class="mr-2" color="teal" /> 可用工具
-        <v-spacer />
-        <v-btn
-          size="small"
-          variant="outlined"
-          prepend-icon="mdi-open-in-new"
-          href="https://napcat.apifox.cn/"
-          target="_blank"
-          rel="noopener"
+    <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-3" />
+
+    <div v-for="group in toolGroups" :key="group.category" class="tool-group">
+      <div
+        class="tool-category"
+        role="button"
+        tabindex="0"
+        :aria-expanded="!isCollapsed(group.category)"
+        @click="toggleCategory(group.category)"
+        @keydown.enter.prevent="toggleCategory(group.category)"
+        @keydown.space.prevent="toggleCategory(group.category)"
+      >
+        <v-icon :icon="isCollapsed(group.category) ? 'mdi-chevron-right' : 'mdi-chevron-down'" size="small" />
+        <span class="app-section-title">{{ group.category }}</span>
+        <span class="tool-category-count">{{ group.items.length }}</span>
+      </div>
+      <div v-show="!isCollapsed(group.category)" class="tool-list">
+        <ToolRow
+          v-for="tool in group.items"
+          :key="tool.name"
+          :tool="tool"
+          :disabled="!enabled"
+          :switch-loading="busyTool === tool.name"
+          @toggle="toggleTool(tool)"
         >
-          接口文档
-        </v-btn>
-        <v-btn size="small" variant="tonal" :disabled="!enabled" @click="resetOpen = true">恢复默认</v-btn>
-      </v-card-title>
-      <v-card-text>
-        <v-progress-linear v-if="loading" indeterminate color="primary" />
-
-        <div class="tool-list">
-          <template v-for="group in toolGroups" :key="group.category">
-            <div
-              class="tool-category"
-              role="button"
-              tabindex="0"
-              :aria-expanded="!isCollapsed(group.category)"
-              @click="toggleCategory(group.category)"
-              @keydown.enter.prevent="toggleCategory(group.category)"
-              @keydown.space.prevent="toggleCategory(group.category)"
+          <template #badges>
+            <v-chip size="x-small" variant="tonal" :color="riskColor(tool.risk)">{{ riskLabel(tool.risk) }}</v-chip>
+            <a
+              v-if="tool.doc_url"
+              :href="tool.doc_url"
+              target="_blank"
+              rel="noopener"
+              class="tool-doc-link"
+              @click.stop
             >
-              <v-icon :icon="isCollapsed(group.category) ? 'mdi-chevron-down' : 'mdi-chevron-up'" size="small" />
-              <span class="tool-category-name">{{ group.category }}</span>
-              <span class="tool-category-count">{{ group.items.length }}</span>
-            </div>
-            <template v-if="!isCollapsed(group.category)">
-              <div
-                v-for="tool in group.items"
-                :key="tool.name"
-                class="tool-item"
-                :class="{ 'is-off': !enabled || !tool.enabled }"
-              >
-                <div class="tool-row">
-                  <div class="tool-info">
-                    <ToolInfo :tool="tool">
-                      <template #title-extra>
-                        <a
-                          v-if="tool.doc_url"
-                          :href="tool.doc_url"
-                          target="_blank"
-                          rel="noopener"
-                          class="tool-doc-link"
-                          @click.stop
-                        >
-                          <v-icon icon="mdi-open-in-new" size="x-small" />
-                          文档
-                        </a>
-                      </template>
-                      <template #meta>
-                        <v-chip size="small" variant="tonal" :color="riskColor(tool.risk)">{{ riskLabel(tool.risk) }}</v-chip>
-                        <v-chip size="small" variant="tonal">权限：{{ permissionLabel(toolPermission(tool)) }}</v-chip>
-                        <v-chip size="small" variant="tonal">可用范围：{{ scopeLabels(toolScopes(tool)) }}</v-chip>
-                      </template>
-                    </ToolInfo>
-                  </div>
-                  <v-switch
-                    :model-value="enabled && tool.enabled"
-                    :disabled="!enabled"
-                    :loading="busyTool === tool.name"
-                    color="primary"
-                    density="compact"
-                    hide-details
-                    @update:model-value="() => toggleTool(tool)"
-                  />
-                </div>
-                <div class="tool-policy" :class="{ 'is-disabled': !enabled }">
-                  <v-select
-                    :model-value="toolPermission(tool)"
-                    :disabled="!enabled"
-                    :items="PERMISSION_ITEMS"
-                    label="触发权限"
-                    variant="outlined"
-                    density="compact"
-                    hide-details
-                    @update:model-value="(v: any) => setToolPermission(tool, v)"
-                  />
-                  <div class="tool-scope-static">
-                    <span class="text-caption">可用范围：</span>
-                    <span class="font-weight-medium">{{ scopeLabels(toolScopes(tool)) }}</span>
-                  </div>
-                  <v-alert v-if="isSensitiveWide(tool)" type="warning" variant="tonal" density="compact" class="mt-2">
-                    {{ tool.name }} 属于敏感工具。默认只给「{{ permissionLabel(tool.base_permission) }}」，现已放宽到「{{ permissionLabel(toolPermission(tool)) }}」。
-                  </v-alert>
-                </div>
-              </div>
-            </template>
+              文档
+            </a>
           </template>
-        </div>
-      </v-card-text>
-    </v-card>
+          <template #meta>
+            <span class="app-muted">
+              权限：{{ permissionLabel(toolPermission(tool)) }} · 范围：{{ scopeLabels(toolScopes(tool)) }}
+            </span>
+          </template>
+          <template #detail>
+            <div class="tool-policy">
+              <v-select
+                :model-value="toolPermission(tool)"
+                :disabled="!enabled"
+                :items="PERMISSION_ITEMS"
+                label="触发权限"
+                variant="outlined"
+                density="compact"
+                hide-details
+                class="tool-permission"
+                @update:model-value="(v: any) => setToolPermission(tool, v)"
+              />
+              <span class="app-muted">可用范围：{{ scopeLabels(toolScopes(tool)) }}</span>
+            </div>
+            <v-alert v-if="isSensitiveWide(tool)" type="warning" variant="tonal" density="compact" class="mt-2">
+              「{{ toolDisplayTitle(tool) }}」属于敏感操作，默认只给「{{ permissionLabel(tool.base_permission) }}」，现已放宽到「{{ permissionLabel(toolPermission(tool)) }}」。
+            </v-alert>
+          </template>
+        </ToolRow>
+      </div>
+    </div>
+
+    <EmptyState
+      v-if="!tools.length && !loading"
+      icon="mdi-robot-industrial"
+      :title="emptyText"
+      description="账号连接后这里会列出可调用的 QQ 接口"
+    />
 
     <ConfirmDialog
       v-model="resetOpen"
@@ -425,170 +411,59 @@ watch(
 </template>
 
 <style scoped>
-.tool-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+.tool-group {
+  margin-bottom: 6px;
 }
 
 .tool-category {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 8px;
-  padding: 4px 2px;
-  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.1);
+  padding: 6px 2px;
   cursor: pointer;
   user-select: none;
 }
 
-.tool-category:first-child {
-  margin-top: 0;
-}
-
-/* 键盘聚焦时才出现的焦点环，不改变常态视觉 */
 .tool-category:focus-visible {
   outline: 2px solid rgb(var(--v-theme-primary));
   outline-offset: 2px;
   border-radius: 6px;
 }
 
-.tool-category-name {
-  font-weight: 700;
-  font-size: 15px;
-  color: rgba(var(--v-theme-on-surface), 0.85);
-}
-
 .tool-category-count {
   font-size: 12px;
   color: rgba(var(--v-theme-on-surface), 0.55);
-  background: rgba(var(--v-theme-on-surface), 0.08);
+  background: rgba(var(--v-theme-on-surface), 0.06);
   border-radius: 999px;
   padding: 1px 8px;
 }
 
 .tool-doc-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  margin-left: 8px;
   font-size: 12px;
   color: rgb(var(--v-theme-primary));
   text-decoration: none;
-  vertical-align: middle;
 }
 
 .tool-doc-link:hover {
   text-decoration: underline;
 }
 
-.tool-item {
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-  border-radius: 10px;
-  padding: 12px;
-  transition: opacity 0.12s ease;
-}
-
-.tool-item.is-off {
-  opacity: 0.55;
-}
-
-.tool-row {
+.tool-list {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  cursor: pointer;
-}
-
-.tool-info {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.tool-name {
-  font-weight: 600;
-  font-size: 16px;
-}
-
-.tool-desc {
-  font-size: 14px;
-  color: rgba(var(--v-theme-on-surface), 0.65);
-  margin: 2px 0 4px;
-}
-
-.tool-meta {
-  align-items: center;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 0 8px;
 }
 
 .tool-policy {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
-  flex-wrap: wrap;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px dashed rgba(var(--v-theme-on-surface), 0.1);
-}
-
-.tool-policy.is-disabled {
-  opacity: 0.55;
-}
-
-.tool-policy :deep(.v-select) {
-  max-width: 180px;
-}
-
-.tool-scope-static {
-  font-size: 14px;
-  color: rgba(var(--v-theme-on-surface), 0.7);
-}
-
-.tool-detail {
   margin-top: 10px;
-  border-top: 1px dashed rgba(var(--v-theme-on-surface), 0.12);
-  padding-top: 10px;
 }
 
-.param-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 8px;
-}
-
-.param-row {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 8px;
-  font-size: 13px;
-}
-
-.param-name {
-  font-family: monospace;
-  font-weight: 600;
-}
-
-.param-type {
-  font-size: 12px;
-  color: rgba(var(--v-theme-on-surface), 0.6);
-}
-
-.param-desc {
-  color: rgba(var(--v-theme-on-surface), 0.75);
-}
-
-.param-raw {
-  margin-top: 4px;
-}
-
-.tool-pre {
-  background: rgba(var(--v-theme-on-surface), 0.04);
-  border-radius: 8px;
-  padding: 10px;
-  font-size: 12px;
-  max-height: 220px;
-  overflow: auto;
-  white-space: pre-wrap;
+.tool-permission {
+  max-width: 180px;
 }
 </style>

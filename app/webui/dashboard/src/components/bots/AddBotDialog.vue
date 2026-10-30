@@ -48,7 +48,7 @@ const OPTIONS: ModeOption[] = [
     tip:
       '在 NapCat / LLOneBot 里新建「WebSocket 客户端」，URL 填本机的监听地址' +
       '（形如 ws://127.0.0.1:3001/onebot/v11/ws），保存时记得启用。' +
-      '创建账号后卡片上会给出地址，可一键复制。OneBot 里这叫 reverse-ws。',
+      '创建账号后卡片上会给出地址，可一键复制。',
     recommended: true,
   },
   {
@@ -58,7 +58,7 @@ const OPTIONS: ModeOption[] = [
     desc: '本程序主动连协议端，协议端里选「WebSocket 服务端」',
     tip:
       '在协议端里新建「WebSocket 服务端」，把它给出的 ws 地址填到账号卡片里，' +
-      '端口和路径要与协议端一致。OneBot 里这叫 forward-ws。',
+      '端口和路径要与协议端一致。',
   },
 ]
 
@@ -125,7 +125,7 @@ async function create() {
     <v-card>
       <v-card-title class="text-h5 pa-4 pb-0 pl-6">添加账号</v-card-title>
       <v-card-text class="pa-4 pl-6">
-        <div class="text-body-2 text-medium-emphasis mb-3">选一种连接方式，之后可在「设置向导」里修改；不确定就用推荐的本地监听。</div>
+        <div class="app-muted mb-3">先选连接方式，不确定就用本地监听</div>
 
         <div class="mode-list">
           <v-card
@@ -166,41 +166,37 @@ async function create() {
           </v-card>
         </div>
 
-        <v-row dense class="mt-2">
-          <v-col cols="12" sm="6">
-            <v-text-field
-              v-model="name"
-              label="名称"
-              placeholder="如：主号"
-              hint="随便起，只影响显示"
-              persistent-hint
-              density="comfortable"
-              hide-details="auto"
-              maxlength="32"
-            />
-          </v-col>
-          <v-col cols="12" sm="6">
-            <v-text-field
-              v-model="accountId"
-              label="账号标识"
-              placeholder="bot1"
-              :error-messages="accountId ? idError : ''"
-              :hint="accountId ? '用来区分多个号，创建后不能改' : ''"
-              persistent-hint
-              density="comfortable"
-              hide-details="auto"
-              autocomplete="off"
-              spellcheck="false"
-            />
-          </v-col>
-        </v-row>
+        <div class="app-form-grid mt-3">
+          <v-text-field
+            v-model="name"
+            label="名称"
+            placeholder="如：主号"
+            hint="可留空，只影响显示"
+            persistent-hint
+            density="comfortable"
+            hide-details="auto"
+            maxlength="32"
+          />
+          <v-text-field
+            v-model="accountId"
+            label="账号标识"
+            placeholder="bot1"
+            :error-messages="accountId ? idError : ''"
+            :hint="accountId ? '用来区分多个账号，创建后不能改' : ''"
+            persistent-hint
+            density="comfortable"
+            hide-details="auto"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </div>
       </v-card-text>
       <v-card-actions class="px-4 pb-4">
         <v-spacer />
         <v-btn variant="text" :disabled="creating" @click="close">取消</v-btn>
         <v-btn
           color="primary"
-          variant="tonal"
+          variant="flat"
           :loading="creating"
           :disabled="!canCreate"
           prepend-icon="mdi-check"

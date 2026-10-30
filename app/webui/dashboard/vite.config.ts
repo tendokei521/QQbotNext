@@ -1,8 +1,22 @@
 import { fileURLToPath, URL } from 'node:url'
 import { execSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vuetify from 'vite-plugin-vuetify'
+
+/**
+ * 应用版本（package.json version）：界面「设置 → 关于」展示用。
+ * 构建戳里带了 commit，只适合排查问题，不该出现在用户界面。
+ */
+function appVersion(): string {
+  try {
+    const pkgPath = fileURLToPath(new URL('./package.json', import.meta.url))
+    return String(JSON.parse(readFileSync(pkgPath, 'utf8')).version || '')
+  } catch {
+    return ''
+  }
+}
 
 /**
  * 构建戳：`<短 commit> <构建日期>`，显示在侧边栏底部。
@@ -32,6 +46,7 @@ export default defineConfig({
   plugins: [vue(), vuetify({ autoImport: true })],
   define: {
     __BUILD_STAMP__: JSON.stringify(buildStamp()),
+    __APP_VERSION__: JSON.stringify(appVersion()),
   },
   resolve: {
     alias: {

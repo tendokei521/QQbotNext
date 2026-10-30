@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { useBotsStore, displayTitle, resolveAccount, resolvedBotId, type BotConfig, type BotConnMode, type BotData, type BotStatus } from '@/stores/bots'
+import { useBotsStore, displayTitle, resolveAccount, type BotConfig, type BotConnMode, type BotData, type BotStatus } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
@@ -10,6 +10,7 @@ import EventMonitorDialog from '@/components/bots/EventMonitorDialog.vue'
 import ProtocolHelp from '@/components/bots/ProtocolHelp.vue'
 import MultiGroupDialog from '@/components/MultiGroupDialog.vue'
 import SaveStatusBar from '@/components/common/SaveStatusBar.vue'
+import HintText from '@/components/common/HintText.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 
 const route = useRoute()
@@ -62,8 +63,6 @@ const dirty = ref(false)
 /** 保存基线：用于判断单张卡片是否还有未保存改动 */
 const baseline = reactive<Record<string, string>>({})
 const loadError = ref('')
-/** 「连接详情」展开状态：account_id -> 是否展开 */
-const detailOpen = reactive<Record<string, boolean>>({})
 /** 从总览跳进来要高亮的账号 */
 const highlightId = ref('')
 let highlightTimer: ReturnType<typeof setTimeout> | null = null
@@ -121,11 +120,20 @@ function markDirty() {
 
 /** 卡片上的连接方式（只读）：改方向要进设置向导 */
 function connModeText(mode: BotConnMode): string {
-  return mode === 'reverse' ? '本地监听（协议端连进来）' : '向外连接（本机连出去）'
+  return mode === 'reverse' ? '本地监听' : '向外连接'
 }
 
-function toggleDetail(id: string) {
-  detailOpen[id] = !detailOpen[id]
+/** 卡片底部一行摘要：连接方式 + 当前协议端状态 + 账号标识 */
+function cardSummary(b: BotData): string {
+  const parts = [connModeText(draftOf(b.id).conn_mode), statusText(b)]
+  if (b.conn_mode === 'reverse') parts.push(b.listening ? '监听中' : '未监听')
+  parts.push(`账号标识 ${b.id}`)
+  return parts.join(' · ')
+}
+
+/** 连接/重连进行中：主操作显示 loading 并禁用，避免重复点击 */
+function cardBusy(b: BotData): boolean {
+  return Boolean(acting[b.id]) || b.status === 'connecting' || b.status === 'reconnecting'
 }
 
 function draftOf(id: string) {
@@ -167,11 +175,6 @@ function statusText(b: { status: BotStatus; conn_mode?: BotConnMode; listening?:
 function statusChipColor(b: { status: BotStatus; conn_mode?: BotConnMode; listening?: boolean }) {
   if (b.conn_mode === 'reverse' && b.status !== 'connected' && b.listening) return 'warning'
   return statusColor(b.status)
-}
-
-/** 连接方向自创建时固定，卡片据此调整按钮禁用条件（反向监听已就绪时不必再点「连接」） */
-function isReverseDraft(id: string): boolean {
-  return draftOf(id).conn_mode === 'reverse'
 }
 
 async function loadCards() {
@@ -439,35 +442,31 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div>
+  <div class="pb-6">
     <div class="app-page-header">
       <div>
         <h1 class="app-page-title">账号管理</h1>
-        <div class="app-page-subtitle">添加并管理要接入的 QQ 账号</div>
+        <div class="app-page-subtitle">管理要接入的 QQ 账号</div>
       </div>
       <div class="d-flex align-center flex-wrap gap-2">
-        <v-btn color="primary" prepend-icon="mdi-plus" @click="addBot">新增账号</v-btn>
+        <v-btn color="primary" variant="flat" prepend-icon="mdi-plus" @click="addBot">新增账号</v-btn>
       </div>
     </div>
 
-    <div v-if="bots.bots.length" class="bots-toolbar">
-      <span class="text-caption text-medium-emphasis">
-        共 {{ bots.bots.length }} 个账号，已连接 {{ bots.connectedCount }} 个
+    <div v-if="bots.bots.length" class="app-toolbar">
+      <span class="app-muted">
+        共 {{ bots.bots.length }} 个账号 · 已连接 {{ bots.connectedCount }}
       </span>
-      <div class="bots-toolbar__actions">
+      <v-spacer />
+      <div class="d-flex align-center flex-wrap gap-2">
         <SaveStatusBar
           :status="saveStatus"
           save-label="保存全部改动"
-          hint="改动暂存在本页，点保存后写入"
           @save="saveAll"
         />
-        <v-btn size="small" variant="tonal" icon="mdi-refresh" title="刷新账号列表（同时刷新账号配置）" :loading="loadingCards" @click="requestReload" />
-        <v-btn size="small" variant="tonal" prepend-icon="mdi-layers-triple-outline" @click="groupOpen = true">
-          群与账号概览
-        </v-btn>
         <v-btn
           size="small"
-          variant="tonal"
+          variant="text"
           prepend-icon="mdi-plug"
           :disabled="!!batchBusy"
           @click="batchAct('connect')"
@@ -476,13 +475,19 @@ onBeforeUnmount(() => {
         </v-btn>
         <v-btn
           size="small"
-          variant="tonal"
+          variant="text"
           prepend-icon="mdi-unlink"
           :disabled="!!batchBusy"
           @click="batchAct('disconnect')"
         >
           {{ batchBusy === 'disconnect' ? `断开中 ${batchProgress.done}/${batchProgress.total}` : '全部断开' }}
         </v-btn>
+        <!-- 图标组：窄屏整体换行，不会单独把某一个图标甩到下一行 -->
+        <div class="d-flex align-center" style="gap: 2px">
+          <v-btn size="small" variant="text" icon="mdi-refresh" title="刷新账号列表" :loading="loadingCards" @click="requestReload" />
+          <v-btn size="small" variant="text" icon="mdi-layers-triple-outline" title="群与账号概览" @click="groupOpen = true" />
+        </div>
+
       </div>
     </div>
 
@@ -494,182 +499,173 @@ onBeforeUnmount(() => {
       </div>
     </v-alert>
 
-    <v-row v-if="loadingCards && bots.bots.length === 0">
-      <v-col v-for="i in 3" :key="i" cols="12" md="6" xl="4">
-        <v-skeleton-loader type="card-avatar, article, actions" class="rounded-xl" />
-      </v-col>
-    </v-row>
+    <div v-if="loadingCards && bots.bots.length === 0" class="app-card-grid">
+      <v-skeleton-loader v-for="i in 3" :key="i" type="card-avatar, article, actions" class="rounded-xl" />
+    </div>
 
     <v-card v-else-if="bots.bots.length === 0 && !loadError" variant="outlined">
       <EmptyState icon="mdi-robot-off-outline" title="还没有账号" description="先添加一个 QQ 账号，再把它连起来">
-        <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="addBot">新增账号</v-btn>
+        <v-btn color="primary" variant="flat" prepend-icon="mdi-plus" @click="addBot">新增账号</v-btn>
       </EmptyState>
     </v-card>
 
-    <v-row v-else>
-      <v-col v-for="b in bots.bots" :key="b.id" cols="12" md="6" xl="4">
-        <v-card
-          variant="outlined"
-          class="bot-card app-card-fill"
-          :class="{ 'bot-card--highlight': highlightId === b.id }"
-          :data-account-id="b.id"
-        >
-          <v-card-item>
-            <template #prepend>
-              <v-avatar color="lightprimary" size="40" rounded="lg">
-                <v-icon icon="mdi-robot" color="primary" />
-              </v-avatar>
-            </template>
-            <v-card-title class="text-body-1 font-weight-bold d-flex align-center gap-2">
-              <span class="app-line-clamp-1">{{ displayTitle(b) }}</span>
-              <v-chip v-if="isCardDirty(b.id)" size="x-small" color="warning" variant="tonal">未保存</v-chip>
-            </v-card-title>
-            <v-card-subtitle class="d-flex align-center gap-2">
-              <v-chip size="x-small" :color="statusChipColor(b)" variant="tonal">
-                <v-icon start size="x-small" icon="mdi-circle" /> {{ statusText(b) }}
-              </v-chip>
-              <span v-if="resolveAccount(b)?.nickname" class="text-caption app-line-clamp-1">
-                {{ resolveAccount(b)!.nickname }}<template v-if="Number(resolveAccount(b)!.user_id) > 0"> ({{ resolveAccount(b)!.user_id }})</template>
-              </span>
-            </v-card-subtitle>
-            <template #append>
-              <v-btn
-                variant="text"
-                icon="mdi-stethoscope"
-                color="primary"
-                size="small"
-                title="诊断这个账号（看协议端有没有送来消息）"
-                @click="openDiagnostics(b)"
-              />
-              <v-btn variant="text" icon="mdi-delete-outline" color="error" size="small" title="删除此账号配置" @click="deleteTarget = b.id" />
-            </template>
-          </v-card-item>
-
-          <v-card-text>
-            <v-text-field
-              :model-value="draftOf(b.id).name"
-              label="名称"
-              placeholder="给这个账号起个名字"
-              density="comfortable"
-              hide-details
-              class="mb-3"
-              @update:model-value="(v: string) => { draftOf(b.id).name = v; markDirty() }"
+    <div v-else class="app-card-grid app-card-grid--wide">
+      <v-card
+        v-for="b in bots.bots"
+        :key="b.id"
+        variant="outlined"
+        class="bot-card app-card-fill"
+        :class="{ 'bot-card--highlight': highlightId === b.id }"
+        :data-account-id="b.id"
+      >
+        <v-card-item>
+          <template #prepend>
+            <v-avatar color="lightprimary" size="40" rounded="lg">
+              <v-icon icon="mdi-robot" color="primary" />
+            </v-avatar>
+          </template>
+          <v-card-title class="text-body-1 font-weight-bold d-flex align-center gap-2">
+            <span class="app-line-clamp-1">{{ displayTitle(b) }}</span>
+            <v-chip v-if="isCardDirty(b.id)" size="x-small" color="warning" variant="tonal">未保存</v-chip>
+          </v-card-title>
+          <v-card-subtitle class="d-flex align-center gap-2">
+            <v-chip size="x-small" :color="statusChipColor(b)" variant="tonal">
+              <v-icon start size="x-small" icon="mdi-circle" /> {{ statusText(b) }}
+            </v-chip>
+            <span v-if="resolveAccount(b)?.nickname" class="text-caption app-line-clamp-1">
+              {{ resolveAccount(b)!.nickname }}<template v-if="Number(resolveAccount(b)!.user_id) > 0"> ({{ resolveAccount(b)!.user_id }})</template>
+            </span>
+          </v-card-subtitle>
+          <template #append>
+            <v-btn
+              variant="text"
+              icon="mdi-stethoscope"
+              color="primary"
+              size="small"
+              title="诊断这个账号"
+              @click="openDiagnostics(b)"
             />
-            <v-text-field
-              :model-value="draftOf(b.id).ws_url"
-              :label="draftOf(b.id).conn_mode === 'reverse' ? '本机监听地址' : '协议端地址'"
-              :placeholder="draftOf(b.id).conn_mode === 'reverse' ? 'ws://0.0.0.0:3001/onebot/v11/ws' : 'ws://127.0.0.1:3001/'"
-              density="comfortable"
-              hide-details="auto"
-              class="mb-3"
-              @update:model-value="(v: string) => { draftOf(b.id).ws_url = v; markDirty() }"
-            >
-              <template #append-inner>
-                <v-btn
-                  icon="mdi-content-copy"
-                  size="x-small"
-                  variant="text"
-                  title="复制地址"
-                  @click="copyAddress(draftOf(b.id).ws_url)"
-                />
+            <v-menu location="bottom end">
+              <template #activator="{ props }">
+                <v-btn v-bind="props" icon="mdi-dots-vertical" variant="text" size="small" title="更多操作" />
               </template>
-            </v-text-field>
+              <v-list density="compact">
+                <v-list-item prepend-icon="mdi-content-copy" @click="copyAddress(draftOf(b.id).ws_url)">复制地址</v-list-item>
+                <v-list-item prepend-icon="mdi-delete-outline" class="text-error" @click="deleteTarget = b.id">删除账号</v-list-item>
+              </v-list>
+            </v-menu>
+          </template>
+        </v-card-item>
 
-            <v-btn
-              size="small"
-              variant="text"
-              color="primary"
-              class="protocol-help-toggle px-0 mb-2"
-              :prepend-icon="helpOpen[b.id] ? 'mdi-chevron-up' : 'mdi-help-circle-outline'"
-              @click="toggleHelp(b.id)"
-            >
-              协议端怎么填
-            </v-btn>
-            <v-expand-transition>
-              <div v-if="helpOpen[b.id]" class="mb-3">
-                <ProtocolHelp :mode="draftOf(b.id).conn_mode" />
-              </div>
-            </v-expand-transition>
+        <v-card-text>
+          <v-text-field
+            :model-value="draftOf(b.id).name"
+            label="显示名称"
+            placeholder="例如：主号"
+            density="comfortable"
+            hide-details="auto"
+            class="mb-2"
+            @update:model-value="(v: string) => { draftOf(b.id).name = v; markDirty() }"
+          />
+          <v-text-field
+            :model-value="draftOf(b.id).ws_url"
+            :label="draftOf(b.id).conn_mode === 'reverse' ? '本机监听地址' : '协议端地址'"
+            :placeholder="draftOf(b.id).conn_mode === 'reverse' ? 'ws://0.0.0.0:3001/onebot/v11/ws' : 'ws://127.0.0.1:3001/'"
+            density="comfortable"
+            hide-details="auto"
+            class="mb-2"
+            @update:model-value="(v: string) => { draftOf(b.id).ws_url = v; markDirty() }"
+          >
+            <template #append-inner>
+              <v-btn
+                icon="mdi-content-copy"
+                size="x-small"
+                variant="text"
+                title="复制地址"
+                @click="copyAddress(draftOf(b.id).ws_url)"
+              />
+            </template>
+          </v-text-field>
 
-            <v-text-field
-              :model-value="draftOf(b.id).access_token"
-              label="连接令牌（可选）"
-              placeholder="没有就留空"
-              hint="与协议端里填的一致，没有就留空"
-              persistent-hint
-              density="comfortable"
-              hide-details="auto"
-              autocomplete="off"
-              class="mb-3"
-              @update:model-value="(v: string) => { draftOf(b.id).access_token = v; markDirty() }"
-            />
-            <v-switch
-              :model-value="draftOf(b.id).auto_connect"
-              label="启动时自动连接"
-              color="primary"
-              density="compact"
-              hide-details
-              @update:model-value="(v: boolean | null) => { draftOf(b.id).auto_connect = !!v; markDirty() }"
-            />
-            <v-divider class="my-3" />
-            <v-btn
-              size="small"
-              variant="text"
-              color="primary"
-              class="px-0 mb-1"
-              :prepend-icon="detailOpen[b.id] ? 'mdi-chevron-up' : 'mdi-information-outline'"
-              @click="toggleDetail(b.id)"
-            >
-              连接详情
-            </v-btn>
-            <v-expand-transition>
-              <div v-if="detailOpen[b.id]" class="info-panel">
-                <div class="info-grid">
-                  <div>
-                    <div class="info-label">当前 QQ</div>
-                    <div class="info-value">
-                      <template v-if="resolvedBotId(b)">{{ resolvedBotId(b) }}</template>
-                      <template v-else>未连接</template>
-                      <span v-if="!b.bot_id && resolvedBotId(b)" class="info-hint">上次连接</span>
-                    </div>
-                  </div>
-                  <div>
-                    <div class="info-label">账号标识</div>
-                    <div class="info-value">{{ b.id }}</div>
-                    <div class="info-note">内部标识，用来区分同名账号</div>
-                  </div>
-                  <div>
-                    <div class="info-label">连接方式</div>
-                    <div class="info-value">{{ connModeText(draftOf(b.id).conn_mode) }}</div>
-                  </div>
-                  <div v-if="draftOf(b.id).conn_mode === 'reverse'">
-                    <div class="info-label">监听</div>
-                    <div class="info-value">{{ b.listening ? '监听中' : '未监听' }}</div>
-                  </div>
-                  <div v-if="b.reconnect_attempts !== undefined">
-                    <div class="info-label">重连次数</div>
-                    <div class="info-value">{{ b.reconnect_attempts }}</div>
-                  </div>
-                </div>
-                <div class="conn-mode-hint">
-                  要改连接方式：到「设置向导」里修改，已有配置不会丢。
-                  <v-btn size="x-small" variant="text" color="primary" to="/setup?step=1">去设置向导</v-btn>
-                </div>
-              </div>
-            </v-expand-transition>
-            <div v-if="b.last_error" class="error-tip">
-              <v-icon icon="mdi-alert-circle-outline" size="small" /> {{ b.last_error }}
+          <v-btn
+            size="small"
+            variant="text"
+            color="primary"
+            class="protocol-help-toggle px-0 mb-2"
+            :prepend-icon="helpOpen[b.id] ? 'mdi-chevron-up' : 'mdi-help-circle-outline'"
+            @click="toggleHelp(b.id)"
+          >
+            协议端怎么填
+          </v-btn>
+          <v-expand-transition>
+            <div v-if="helpOpen[b.id]" class="mb-3">
+              <ProtocolHelp :mode="draftOf(b.id).conn_mode" />
             </div>
-          </v-card-text>
+          </v-expand-transition>
 
-          <v-card-actions>
-            <v-btn color="success" variant="tonal" size="small" prepend-icon="mdi-plug" :loading="acting[b.id]" :disabled="acting[b.id] || b.status === 'connected' || (isReverseDraft(b.id) && !!b.listening)" @click="act(b.id, 'connect')">连接</v-btn>
-            <v-btn color="error" variant="tonal" size="small" prepend-icon="mdi-unlink" :disabled="acting[b.id] || (b.status !== 'connected' && !(isReverseDraft(b.id) && b.listening))" @click="act(b.id, 'disconnect')">断开</v-btn>
-            <v-btn color="warning" variant="tonal" size="small" prepend-icon="mdi-restart" :disabled="acting[b.id]" @click="act(b.id, 'reconnect')">重连</v-btn>
-          </v-card-actions>
-        </v-card>
-      </v-col>
-    </v-row>
+          <v-text-field
+            :model-value="draftOf(b.id).access_token"
+            label="连接令牌（可选）"
+            placeholder="没有就留空"
+            hint="与协议端一致，可留空"
+            persistent-hint
+            density="comfortable"
+            hide-details="auto"
+            autocomplete="off"
+            class="mb-2"
+            @update:model-value="(v: string) => { draftOf(b.id).access_token = v; markDirty() }"
+          />
+          <v-switch
+            :model-value="draftOf(b.id).auto_connect"
+            label="启动时自动连接"
+            color="primary"
+            density="compact"
+            hide-details
+            @update:model-value="(v: boolean | null) => { draftOf(b.id).auto_connect = !!v; markDirty() }"
+          />
+          <HintText class="mt-1" :text="cardSummary(b)" />
+          <div v-if="b.last_error" class="error-tip">
+            <v-icon icon="mdi-alert-circle-outline" size="small" /> {{ b.last_error }}
+          </div>
+        </v-card-text>
+
+        <v-card-actions class="flex-wrap gap-2">
+          <v-btn
+            v-if="!isLive(b)"
+            color="primary"
+            variant="tonal"
+            size="small"
+            prepend-icon="mdi-plug"
+            :loading="cardBusy(b)"
+            :disabled="cardBusy(b)"
+            @click="act(b.id, 'connect')"
+          >
+            {{ cardBusy(b) ? statusText(b) : '连接' }}
+          </v-btn>
+          <v-btn
+            v-else
+            color="error"
+            variant="tonal"
+            size="small"
+            prepend-icon="mdi-unlink"
+            :loading="acting[b.id]"
+            :disabled="acting[b.id]"
+            @click="act(b.id, 'disconnect')"
+          >
+            断开
+          </v-btn>
+          <v-btn
+            variant="text"
+            icon="mdi-restart"
+            size="small"
+            title="重新连接"
+            :disabled="cardBusy(b)"
+            @click="act(b.id, 'reconnect')"
+          />
+          <v-spacer />
+        </v-card-actions>
+      </v-card>
+    </div>
 
     <ConfirmDialog
       :model-value="deleteTarget !== null"
@@ -722,72 +718,6 @@ onBeforeUnmount(() => {
   outline: 2px solid rgb(var(--v-theme-primary));
   outline-offset: 2px;
   box-shadow: 0 0 0 4px rgba(var(--v-theme-primary), 0.14);
-}
-
-/* 账号页工具栏：统计 + 保存状态 + 批量/概览操作，窄屏自动换行 */
-.bots-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 14px;
-}
-
-.bots-toolbar__actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-left: auto;
-}
-
-.info-panel {
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: rgba(var(--v-theme-on-surface), 0.03);
-}
-
-.info-grid {
-  display: flex;
-  gap: 24px;
-  flex-wrap: wrap;
-}
-
-.info-label {
-  font-size: 11px;
-  color: rgba(var(--v-theme-on-surface), 0.45);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
-
-.info-value {
-  font-size: 13.5px;
-  font-weight: 500;
-  word-break: break-all;
-}
-
-.info-note {
-  margin-top: 2px;
-  font-size: 11px;
-  color: rgba(var(--v-theme-on-surface), 0.45);
-}
-
-.conn-mode-hint {
-  margin-top: 10px;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
-  font-size: 12.5px;
-  color: rgba(var(--v-theme-on-surface), 0.6);
-}
-
-/* 「上次连接」标注：明确该账号来自快照而非当前实时连接 */
-.info-hint {
-  margin-left: 6px;
-  font-size: 11px;
-  font-weight: 400;
-  color: rgba(var(--v-theme-on-surface), 0.45);
 }
 
 .error-tip {

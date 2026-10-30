@@ -185,17 +185,18 @@ onUnmounted(() => {
           clearable
           @update:model-value="onFilterInput"
         />
-        <div class="level-chips">
-          <v-chip
-            v-for="opt in LEVEL_FILTERS"
-            :key="opt.value"
-            size="x-small"
-            :color="levelFilter === opt.value ? 'primary' : undefined"
-            :variant="levelFilter === opt.value ? 'flat' : 'tonal'"
-            @click="levelFilter = opt.value"
+        <div class="level-seg">
+          <v-btn-toggle
+            v-model="levelFilter"
+            density="compact"
+            variant="outlined"
+            divided
+            mandatory
           >
-            {{ opt.title }}
-          </v-chip>
+            <v-btn v-for="opt in LEVEL_FILTERS" :key="opt.value" :value="opt.value" size="small">
+              {{ opt.title }}
+            </v-btn>
+          </v-btn-toggle>
         </div>
         <v-switch
           v-model="showTechnical"
@@ -208,27 +209,25 @@ onUnmounted(() => {
         />
         <v-btn
           size="small"
-          variant="tonal"
-          :color="logs.paused ? 'warning' : undefined"
-          :icon="logs.paused ? 'mdi-play' : 'mdi-pause'"
-          :title="logs.paused ? '继续接收日志' : '暂停接收日志'"
-          @click="logs.togglePause()"
-        />
-        <v-btn
-          size="small"
-          variant="tonal"
+          variant="text"
           icon="mdi-file-export-outline"
           title="导出日志文件"
           @click="exportOpen = true"
         />
-        <v-btn size="small" variant="tonal" icon="mdi-cog-outline" title="日志显示设置" @click="openSettings" />
-        <v-btn
-          size="small"
-          variant="tonal"
-          icon="mdi-delete-outline"
-          title="清空日志显示"
-          @click="clearConfirmOpen = true"
-        />
+        <v-menu location="bottom end">
+          <template #activator="{ props }">
+            <v-btn v-bind="props" size="small" variant="text" icon="mdi-dots-vertical" title="更多日志操作" />
+          </template>
+          <v-list density="compact" min-width="180">
+            <v-list-item
+              :prepend-icon="logs.paused ? 'mdi-play' : 'mdi-pause'"
+              :title="logs.paused ? '继续接收日志' : '暂停接收日志'"
+              @click="logs.togglePause()"
+            />
+            <v-list-item prepend-icon="mdi-cog-outline" title="日志显示设置" @click="openSettings" />
+            <v-list-item prepend-icon="mdi-delete-outline" title="清空日志显示" @click="clearConfirmOpen = true" />
+          </v-list>
+        </v-menu>
       </div>
     </div>
 
@@ -241,7 +240,12 @@ onUnmounted(() => {
       </div>
       <div v-for="(row, i) in visibleRows" :key="`${row.timestamp}-${i}`" class="log-row">
         <span class="log-time">{{ cleanLogTimestamp(row.timestamp) }}</span>
-        <span class="log-level" :class="`log-level-${row.level}`">{{ levelLabel(row.level) }}</span>
+        <!-- 普通日志不渲染级别标签：整屏「普通」只有噪音，异常才需要跳出来 -->
+        <span
+          v-if="row.level !== 'info'"
+          class="log-level"
+          :class="`log-level-${row.level}`"
+        >{{ levelLabel(row.level) }}</span>
         <span class="log-message" :title="row.message">{{ cleanLogMessage(row.message) }}</span>
       </div>
     </div>
@@ -361,10 +365,13 @@ onUnmounted(() => {
   max-width: 40vw;
 }
 
-.level-chips {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+.level-seg {
+  flex: 0 0 auto;
+}
+
+.level-seg :deep(.v-btn) {
+  font-size: 12px;
+  min-width: 48px;
 }
 
 .tech-switch {

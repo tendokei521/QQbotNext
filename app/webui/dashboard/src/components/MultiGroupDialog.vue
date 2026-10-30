@@ -92,14 +92,14 @@ watch(
       </v-card-title>
       <v-card-text>
         <div class="d-flex align-center flex-wrap gap-2 mb-3">
-          <span class="text-caption" style="opacity: 0.7">
-            这里只汇总「群」和「哪些账号在群里」，群级的回复规则在「回复与权限 → 群与私聊」里按群调整。
+          <span class="app-muted">
+            只看群与在线账号；群级回复规则在「回复与权限」改
           </span>
           <v-btn size="small" variant="text" color="primary" prepend-icon="mdi-shield-account-outline" @click="openGroupRules">
             去设置群规则
           </v-btn>
         </div>
-        <v-checkbox :model-value="showAll" label="展示全部（包括仅单个账号在的群）" density="compact" hide-details color="primary" class="mb-2" @update:model-value="onToggleShowAll" />
+        <v-checkbox :model-value="showAll" label="显示只有 1 个账号的群" density="compact" hide-details color="primary" class="mb-2" @update:model-value="onToggleShowAll" />
 
         <div v-if="loading" class="hint"><v-progress-circular size="18" indeterminate /> 加载中…</div>
         <div v-else-if="error" class="hint error">
@@ -107,7 +107,7 @@ watch(
           <v-btn size="x-small" variant="text" @click="load">重试</v-btn>
         </div>
         <div v-else class="group-list">
-          <div v-if="visibleRows.length === 0" class="hint">还没有群数据：等账号连上、在群里收到消息后这里会自动出现。</div>
+          <div v-if="visibleRows.length === 0" class="hint">账号连上并收到群消息后，这里会显示群。</div>
           <div v-for="row in visibleRows" :key="row.gid" class="group-row">
             <div class="group-info">
               <div class="group-name">{{ row.name }}</div>

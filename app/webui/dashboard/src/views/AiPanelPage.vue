@@ -12,7 +12,7 @@
  * 字段清单的唯一真相是 ``@/agent/ai-panel.json``（后端从 config_partition 生成），
  * 这里不硬编码字段名；保存沿用 agentConfig store 的 2 秒自动保存 + 保存状态。
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import http from '@/api/http'
 import { useAgentConfigStore } from '@/stores/agentConfig'
@@ -73,7 +73,6 @@ function onEnabled(value: boolean | null) {
 const policy = usePolicyStore()
 const globalDetail = ref<PolicyDetail | null>(null)
 const loadingTrigger = ref(false)
-const savingTrigger = ref(false)
 
 type TriggerMode = 'at' | 'keyword' | 'both' | 'all' | 'none'
 const triggerMode = ref<TriggerMode>('at')
@@ -81,6 +80,10 @@ const triggerKeywords = ref<string[]>([])
 const triggerProbability = ref('')
 /** 已保存的快照：用于判断当前表单是否有未保存改动 */
 const savedTrigger = ref('')
+let triggerSaveTimer: number | null = null
+let triggerSaving = false
+/** 载入配置期间不要触发自动保存（否则回填动作会被当成用户编辑） */
+let triggerHydrating = false
 
 const TRIGGER_OPTIONS: { title: string; value: TriggerMode }[] = [
   { title: '仅 @ 我', value: 'at' },
@@ -107,6 +110,7 @@ async function loadGlobalPolicy() {
     return
   }
   loadingTrigger.value = true
+  triggerHydrating = true
   try {
     globalDetail.value = await policy.getPolicy(null)
     const config = globalDetail.value?.resolved?.config || {}
@@ -123,12 +127,15 @@ async function loadGlobalPolicy() {
   } catch {
     globalDetail.value = null
   } finally {
+    triggerHydrating = false
     loadingTrigger.value = false
   }
 }
 
 async function saveTrigger() {
-  if (!bots.currentAccountId || savingTrigger.value) return
+  if (!bots.currentAccountId || triggerSaving) return
+  // 读取失败时不要用默认值覆盖服务端配置（等用户主动改或重试加载）
+  if (!globalDetail.value) return
   const config: Record<string, any> = { trigger_mode: triggerMode.value }
   if (triggerMode.value === 'keyword' || triggerMode.value === 'both') {
     config.trigger_keyword = triggerKeywords.value.filter(Boolean)
@@ -141,16 +148,32 @@ async function saveTrigger() {
     }
     config.trigger_probability = chance
   }
-  savingTrigger.value = true
+  triggerSaving = true
   try {
     await policy.savePolicy(null, { config })
     await loadGlobalPolicy()
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   } finally {
-    savingTrigger.value = false
+    triggerSaving = false
   }
 }
+
+/** 触发方式改动后自动保存（去抖 800ms，与 Agent 配置自动保存一致） */
+function scheduleTriggerSave() {
+  if (triggerHydrating || !triggerDirty.value) return
+  if (triggerSaveTimer !== null) window.clearTimeout(triggerSaveTimer)
+  triggerSaveTimer = window.setTimeout(() => {
+    triggerSaveTimer = null
+    void saveTrigger()
+  }, 800)
+}
+
+watch(
+  [triggerMode, triggerKeywords, triggerProbability],
+  () => scheduleTriggerSave(),
+  { deep: true },
+)
 
 /** 当前人格卡锚点：状态条结论不跳走，滚动到本页面板内的人格卡 */
 const personaSection = ref<HTMLElement | null>(null)
@@ -166,13 +189,6 @@ function scrollToPersona() {
  * 「还没选模型」是误报——用户已经配过默认模型了。
  */
 const globalDefaultModelId = ref('')
-const globalDefaultModelName = computed(() => {
-  const id = globalDefaultModelId.value
-  if (!id) return ''
-  const hit = agent.providerModels.find((m) => m.id === id)
-  return hit ? `${hit.preset_name || hit.preset_id} / ${hit.model}` : '已配置'
-})
-
 async function loadGlobalDefaultModel() {
   try {
     const res = await http.get<{ settings?: { default_model_id?: string } }>('/api/provider-settings')
@@ -220,6 +236,15 @@ onMounted(() => {
   void loadGlobalPolicy()
 })
 
+onUnmounted(() => {
+  // 离开页面前把去抖中的触发方式改动落盘（自动保存不能因为切页丢掉最后一次编辑）
+  if (triggerSaveTimer !== null) {
+    window.clearTimeout(triggerSaveTimer)
+    triggerSaveTimer = null
+    if (triggerDirty.value) void saveTrigger()
+  }
+})
+
 // 切账号：整份配置按账号重新拉（有未保存改动时 store 会先落盘）
 watch(
   () => bots.currentAccountId,
@@ -233,31 +258,17 @@ watch(
 
 <template>
   <div>
-    <div class="app-page-header" style="align-items: center">
+    <div class="app-page-header">
       <div>
         <h1 class="app-page-title">
           <v-icon icon="mdi-chat-processing-outline" size="28" color="primary" class="mr-1" />
           AI 对话面板
         </h1>
-        <div class="app-page-subtitle">日常开关、触发方式与状态</div>
+        <div class="app-page-subtitle">日常开关与触发方式</div>
       </div>
-      <div class="d-flex align-center flex-wrap gap-2">
-        <v-chip v-if="accountName" size="small" variant="tonal" prepend-icon="mdi-account">
-          当前账号：{{ accountName }}
-        </v-chip>
-        <!-- 保存状态与保存动作统一走共享状态条（自动保存，不再放手动「保存」按钮） -->
-        <SaveStatusBar
-          v-if="hasAccount && agent.loadedFor !== null"
-          :status="agent.saveStatus"
-          autosave
-          hint="改动会在 2 秒内自动保存"
-        />
-        <v-btn size="small" variant="text" prepend-icon="mdi-magnify" @click="searchDialog = true">
-          搜索配置
-        </v-btn>
-        <v-btn size="small" variant="text" prepend-icon="mdi-content-copy" @click="copyDialog = true">
-          复制配置
-        </v-btn>
+      <div class="d-flex align-center flex-wrap gap-1">
+        <v-btn icon="mdi-magnify" variant="text" size="small" title="搜索配置" @click="searchDialog = true" />
+        <v-btn icon="mdi-content-copy" variant="text" size="small" title="复制配置" @click="copyDialog = true" />
         <v-btn
           size="small"
           variant="tonal"
@@ -291,54 +302,61 @@ watch(
         </div>
       </v-alert>
 
-      <!-- 状态条：只读，回答「现在能不能回」；与其他卡片同样式，不额外铺灰底 -->
-      <v-card variant="outlined" class="mb-4">
-        <v-card-text class="py-2">
-          <div class="d-flex align-center flex-wrap gap-3">
-            <v-chip
-              :color="agent.enabled ? 'success' : 'grey'"
-              variant="tonal"
-              :prepend-icon="agent.enabled ? 'mdi-check-circle-outline' : 'mdi-pause-circle-outline'"
-            >
-              {{ agent.enabled ? 'AI 回复已开启' : 'AI 回复已关闭' }}
+      <!-- 状态：内容区第一行，不再占用页头 -->
+      <div class="panel-status d-flex align-center flex-wrap gap-2 mb-4">
+        <v-chip
+          size="small"
+          :color="agent.enabled ? 'success' : 'grey'"
+          variant="tonal"
+          :prepend-icon="agent.enabled ? 'mdi-check-circle-outline' : 'mdi-pause-circle-outline'"
+        >
+          {{ agent.enabled ? 'AI 回复已开启' : 'AI 回复已关闭' }}
+        </v-chip>
+        <template v-if="agent.poolModelIds.length">
+          <v-chip size="small" color="info" variant="tonal" prepend-icon="mdi-api">
+            模型 {{ agent.poolModelIds.length }} 个
+          </v-chip>
+        </template>
+        <template v-else>
+          <template v-if="globalDefaultModelId">
+            <v-chip size="small" color="info" variant="tonal" prepend-icon="mdi-api">
+              全局默认模型
             </v-chip>
-            <template v-if="agent.poolModelIds.length">
-              <v-chip color="info" variant="tonal" prepend-icon="mdi-api">
-                模型 {{ agent.poolModelIds.length }} 个
-              </v-chip>
-            </template>
-            <template v-else>
-              <template v-if="globalDefaultModelId">
-                <v-chip color="info" variant="tonal" prepend-icon="mdi-api">
-                  使用全局默认模型：{{ globalDefaultModelName }}
-                </v-chip>
-                <v-btn size="small" variant="text" prepend-icon="mdi-arrow-right" @click="router.push('/provider-presets')">
-                  去模型服务改默认
-                </v-btn>
-              </template>
-              <template v-else>
-                <v-chip color="warning" variant="tonal" prepend-icon="mdi-alert-circle-outline">还没选模型</v-chip>
-              </template>
-            </template>
-            <v-chip color="pink" variant="tonal" prepend-icon="mdi-account-heart">人格：{{ persona.label }}</v-chip>
-            <v-btn
-              v-if="persona.kind !== 'bound'"
-              size="small"
-              variant="text"
-              prepend-icon="mdi-arrow-down"
-              @click="scrollToPersona"
-            >
-              去下方选择人格
+            <v-btn size="small" variant="text" prepend-icon="mdi-arrow-right" @click="router.push('/provider-presets')">
+              去模型服务改默认
             </v-btn>
-          </div>
-        </v-card-text>
-      </v-card>
+          </template>
+          <template v-else>
+            <v-chip size="small" color="warning" variant="tonal" prepend-icon="mdi-alert-circle-outline">
+              还没选模型
+            </v-chip>
+          </template>
+        </template>
+        <v-chip size="small" color="pink" variant="tonal" prepend-icon="mdi-account-heart">
+          人格：{{ persona.label }}
+        </v-chip>
+        <v-btn
+          v-if="persona.kind !== 'bound'"
+          size="small"
+          variant="text"
+          prepend-icon="mdi-arrow-down"
+          @click="scrollToPersona"
+        >
+          去下方选择人格
+        </v-btn>
+        <v-spacer />
+        <SaveStatusBar
+          v-if="hasAccount && agent.loadedFor !== null"
+          :status="agent.saveStatus"
+          autosave
+        />
+      </div>
 
       <!-- ① 回复开关：总开关 + 群聊/私聊 -->
       <PanelCard
         title="回复开关"
         icon="mdi-toggle-switch-outline"
-        subtitle="只对没有单独设置的群/私聊生效；在「回复与权限」里单独开过的以那边为准"
+        subtitle="未单独设置的群和私聊按这里"
       >
         <PanelField
           :field-key="'enabled'"
@@ -347,8 +365,7 @@ watch(
           :bot-id="accountId"
           @update="onEnabled"
         />
-        <v-divider class="my-4" />
-        <div class="d-flex align-center flex-wrap gap-6">
+        <div class="reply-secondary d-flex align-center flex-wrap gap-6">
           <v-switch
             v-model="groupDefault"
             label="群聊回复"
@@ -366,14 +383,14 @@ watch(
         </div>
       </PanelCard>
 
-      <!-- ② 触发方式：什么时候接话 -->
+      <!-- ② 触发方式：什么时候接话（改动自动保存） -->
       <PanelCard title="触发方式" icon="mdi-at" color="info">
         <v-progress-linear v-if="loadingTrigger" indeterminate color="info" class="mb-3" />
+        <div class="text-caption app-muted mb-2">所有群和私聊的默认触发方式</div>
         <v-select
           v-model="triggerMode"
           :items="TRIGGER_OPTIONS"
-          label="触发方式"
-          density="comfortable"
+          density="compact"
           variant="outlined"
           hide-details
           class="mb-3"
@@ -390,22 +407,10 @@ watch(
           type="number"
           min="0"
           max="100"
-          density="comfortable"
+          density="compact"
           variant="outlined"
           hide-details
-          class="mb-3"
         />
-        <div class="d-flex justify-end">
-          <v-btn
-            color="primary"
-            variant="tonal"
-            :loading="savingTrigger"
-            :disabled="!hasAccount || !triggerDirty"
-            @click="saveTrigger"
-          >
-            保存
-          </v-btn>
-        </div>
       </PanelCard>
 
       <!-- ③ 模型：复用设置区的模型卡（自读 store，不需要 props）；加入动作只在卡里出现一次 -->
@@ -435,20 +440,22 @@ watch(
 </template>
 
 <style scoped>
-.field-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+.panel-status {
+  min-height: 40px;
 }
 
-.effect-line {
-  display: flex;
-  align-items: center;
-  font-size: 13px;
-  color: rgba(var(--v-theme-on-surface), 0.7);
+.reply-secondary {
+  margin-top: 8px;
+  padding-left: 4px;
 }
 
 .panel-block {
-  margin-bottom: 8px;
+  margin-bottom: 16px;
+}
+
+@media (max-width: 600px) {
+  .reply-secondary {
+    gap: 8px 24px !important;
+  }
 }
 </style>

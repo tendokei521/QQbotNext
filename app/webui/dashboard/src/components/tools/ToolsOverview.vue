@@ -13,7 +13,8 @@ import { errorMessage, http } from '@/api/http'
 import { useAgentConfigStore } from '@/stores/agentConfig'
 import { useBotsStore } from '@/stores/bots'
 import { useModulesStore } from '@/stores/modules'
-import { toolDisplayTitle } from './toolDisplay'
+import { toolDisplayBrief, toolDisplayTitle } from './toolDisplay'
+import EmptyState from '@/components/EmptyState.vue'
 
 interface ToolState {
   name: string
@@ -42,7 +43,7 @@ const SOURCE_LABEL: Record<string, string> = {
   onebot: 'OneBot',
   module: '插件',
   system: '系统',
-  mcp: 'MCP',
+  mcp: '外部',
 }
 
 /** 工具状态接口不返回 description：按来源补拉清单，拼出中文名给「工具」列用 */
@@ -78,13 +79,21 @@ function toolForDisplay(tool: ToolState): { name: string; description?: string }
   return { name: tool.name, description: descriptionByTool.value[`${tool.source}:${tool.name}`] || '' }
 }
 
-/** 归属列说人话：框架内置 / 中文插件名；取不到就给「未知插件」 */
+function titleOf(tool: ToolState): string {
+  return toolDisplayTitle(toolForDisplay(tool))
+}
+
+function briefOf(tool: ToolState): string {
+  return toolDisplayBrief(toolForDisplay(tool), 40)
+}
+
+/** 归属列说人话：框架内置 / 中文插件名；取不到就给「插件」 */
 function ownerLabel(tool: ToolState): string {
-  if (tool.owner === 'framework') return '框架内置'
+  if (tool.owner === 'framework') return '系统内置'
   const pluginName = modules.displayNameOf(tool.owner)
   if (pluginName) return pluginName
   if (tool.source === 'mcp') return tool.owner ? `外部服务：${tool.owner}` : '外部服务'
-  return '未知插件'
+  return '插件'
 }
 
 /** 状态文案里可能拼了内部模块名/旧术语，展示前换成中文与统一叫法 */
@@ -106,7 +115,7 @@ const filtered = computed(() => {
     if (!kw) return true
     return (
       t.name.toLowerCase().includes(kw) ||
-      toolDisplayTitle(toolForDisplay(t)).toLowerCase().includes(kw) ||
+      titleOf(t).toLowerCase().includes(kw) ||
       t.owner.toLowerCase().includes(kw) ||
       ownerLabel(t).toLowerCase().includes(kw) ||
       (SOURCE_LABEL[t.source] ?? t.source).toLowerCase().includes(kw)
@@ -122,10 +131,10 @@ const stats = computed(() => {
 
 /** 空表原因分三种：还没读完账号 / 没有匹配 / 这个来源就是没有工具 */
 const emptyText = computed(() => {
-  if (!ready.value) return '正在读取账号与工具状态…'
-  if (!tools.value.length) return '还没有可用的工具：插件已启用后，工具会出现在这里'
+  if (!ready.value) return '正在读取账号与工具状态'
+  if (!tools.value.length) return '还没有可用的工具'
   if (onlyDisabled.value) return '所有工具当前都可用'
-  return '没有匹配的工具，换个关键词试试'
+  return '没有匹配的工具'
 })
 
 async function load() {
@@ -171,7 +180,7 @@ async function init() {
   await Promise.all([load(), loadPluginNames(), loadDescriptions()])
 }
 
-/** 归属列需要模块中文名：列表没加载过就补拉一次（失败时归属列显示未知插件） */
+/** 归属列需要插件中文名：列表没加载过就补拉一次（失败时归属列显示「插件」） */
 async function loadPluginNames() {
   try {
     if (!modules.list.length) await modules.load()
@@ -195,46 +204,34 @@ watch(
 
 <template>
   <div>
-    <v-card variant="outlined" class="mb-4">
-      <v-card-title class="d-flex align-center flex-wrap gap-2">
-        <v-icon icon="mdi-format-list-bulleted-triangle" class="mr-2" color="primary" />
-        工具总览
-        <v-chip v-if="agent.botId" size="small" color="success" variant="tonal">可用 {{ stats.on }}</v-chip>
-        <v-chip v-if="agent.botId" size="small" variant="tonal">共 {{ stats.total }}</v-chip>
-        <v-spacer />
-        <v-text-field
-          v-model="keyword"
-          prepend-inner-icon="mdi-magnify"
-          placeholder="搜索工具 / 插件"
-          density="compact"
-          variant="outlined"
-          hide-details
-          clearable
-          style="max-width: 240px"
-        />
-        <v-switch
-          v-model="onlyDisabled"
-          label="只看不可用"
-          density="compact"
-          hide-details
-          inset
-          color="primary"
-        />
-        <v-btn
-          size="small"
-          variant="text"
-          prepend-icon="mdi-refresh"
-          :loading="loading"
-          :disabled="!ready || noAccount"
-          @click="load"
-        >
-          重新加载
-        </v-btn>
-      </v-card-title>
-      <v-card-text class="text-body-2" style="opacity: 0.8">
-        这里显示的是实际生效状态：插件已启用、插件内开关已打开、工具没有被关闭、依赖已就绪。
-      </v-card-text>
-    </v-card>
+    <div class="app-toolbar">
+      <v-text-field
+        v-model="keyword"
+        prepend-inner-icon="mdi-magnify"
+        placeholder="搜索工具"
+        density="compact"
+        variant="outlined"
+        hide-details
+        clearable
+        class="overview-search"
+        style="max-width: 240px"
+      />
+      <span class="app-muted">可用 {{ stats.on }} / 共 {{ stats.total }}</span>
+      <v-spacer />
+      <div class="d-flex align-center gap-2">
+        <span class="text-body-2">只看不可用</span>
+        <v-switch v-model="onlyDisabled" density="compact" hide-details inset color="primary" />
+      </div>
+      <v-btn
+        icon="mdi-refresh"
+        variant="text"
+        size="small"
+        title="重新加载"
+        :loading="loading"
+        :disabled="!ready || noAccount"
+        @click="load"
+      />
+    </div>
 
     <v-alert v-if="ready && noAccount" type="info" variant="tonal" density="compact" class="mb-3">
       <div class="d-flex align-center flex-wrap gap-2">
@@ -250,105 +247,94 @@ watch(
       </div>
     </v-alert>
 
-    <v-card variant="outlined" class="overview-table-card">
-      <div class="overview-table-scroll">
-        <v-table density="comfortable" class="overview-table">
-          <thead>
-            <tr>
-              <th style="min-width: 220px">工具</th>
-              <th style="width: 100px">来源</th>
-              <th style="min-width: 150px">归属</th>
-              <th style="min-width: 210px">状态</th>
-              <th style="width: 130px" class="text-right">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="tool in filtered" :key="`${tool.source}:${tool.name}`">
-              <td class="tool-cell">
-                <div class="tool-title">{{ toolDisplayTitle(toolForDisplay(tool)) }}</div>
-                <div class="tool-name" :title="`工具标识：${tool.name}`">{{ tool.name }}</div>
-              </td>
-              <td>
-                <v-chip size="x-small" variant="tonal">{{ SOURCE_LABEL[tool.source] ?? tool.source }}</v-chip>
-              </td>
-              <td class="text-caption">{{ ownerLabel(tool) }}</td>
-              <td>
-                <span v-if="tool.available" class="state-on">
-                  <v-icon icon="mdi-check-circle" size="14" class="mr-1" />可用
-                </span>
-                <span v-else class="state-off">
-                  <v-icon icon="mdi-minus-circle-outline" size="14" class="mr-1" />{{ reasonText(tool) }}
-                  <v-chip
-                    v-if="tool.reason === 'module_disabled'"
-                    size="x-small"
-                    variant="text"
-                    color="primary"
-                    class="ml-2"
-                    to="/modules"
-                  >
-                    去插件页启用
-                  </v-chip>
-                </span>
-              </td>
-              <td class="text-right">
-                <v-btn
-                  size="x-small"
-                  variant="text"
-                  :loading="busy === tool.name"
-                  :disabled="tool.source === 'onebot' && !tool.available && tool.reason === 'module_disabled'"
-                  @click="toggle(tool)"
-                >
-                  {{ tool.available ? '停用此工具' : '启用此工具' }}
-                </v-btn>
-              </td>
-            </tr>
-            <tr v-if="!filtered.length">
-              <td colspan="5" class="text-center text-caption py-6" style="opacity: 0.6">
-                {{ emptyText }}
-              </td>
-            </tr>
-          </tbody>
-        </v-table>
+    <div class="overview-list">
+      <div v-for="tool in filtered" :key="`${tool.source}:${tool.name}`" class="overview-row">
+        <div class="overview-main">
+          <div class="overview-title">{{ titleOf(tool) }}</div>
+          <div v-if="briefOf(tool)" class="overview-brief app-line-clamp-1">{{ briefOf(tool) }}</div>
+          <div class="overview-meta">
+            <v-chip size="x-small" variant="tonal">{{ SOURCE_LABEL[tool.source] ?? tool.source }}</v-chip>
+            <span class="app-muted">{{ ownerLabel(tool) }}</span>
+            <span v-if="tool.available" class="state-on">
+              <v-icon icon="mdi-check-circle" size="14" class="mr-1" />可用
+            </span>
+            <span v-else class="state-off">
+              <v-icon icon="mdi-minus-circle-outline" size="14" class="mr-1" />{{ reasonText(tool) }}
+            </span>
+            <v-btn
+              v-if="tool.reason === 'module_disabled'"
+              size="x-small"
+              variant="text"
+              color="primary"
+              to="/modules"
+            >
+              去插件页启用
+            </v-btn>
+          </div>
+        </div>
+        <v-btn
+          size="small"
+          variant="text"
+          :loading="busy === tool.name"
+          :disabled="tool.source === 'onebot' && !tool.available && tool.reason === 'module_disabled'"
+          @click="toggle(tool)"
+        >
+          {{ tool.available ? '停用' : '启用' }}
+        </v-btn>
       </div>
-    </v-card>
+
+      <EmptyState
+        v-if="!filtered.length"
+        icon="mdi-radar"
+        :title="emptyText"
+        description="插件启用后，它提供的工具会出现在这里"
+      >
+        <v-btn size="small" variant="tonal" @click="load">重新加载</v-btn>
+      </EmptyState>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.overview-table-scroll {
-  width: 100%;
-  overflow-x: auto;
+.overview-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.overview-table {
-  min-width: 780px;
+.overview-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+  border-radius: 10px;
 }
 
-.overview-table :deep(td),
-.overview-table :deep(th) {
-  white-space: nowrap;
+.overview-main {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
-.overview-table :deep(td.tool-cell) {
-  white-space: normal;
-}
-
-.tool-cell {
-  padding-block: 8px;
-}
-
-.tool-title {
-  font-size: 13.5px;
+.overview-title {
+  font-size: 14px;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 
-.tool-name {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
-  color: rgba(var(--v-theme-on-surface), 0.45);
-  cursor: help;
-  overflow-wrap: anywhere;
+.overview-brief {
+  margin-top: 2px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: rgba(var(--v-theme-on-surface), 0.62);
+}
+
+.overview-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 4px;
 }
 
 .state-on {
@@ -363,5 +349,18 @@ watch(
   font-size: 12px;
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+@media (max-width: 720px) {
+  .overview-row {
+    align-items: flex-start;
+  }
+
+  .overview-search {
+    max-width: none !important;
+    flex: 1 1 100%;
+  }
 }
 </style>

@@ -67,6 +67,7 @@ const uninstalling = ref(false)
 function statusText(status: string): string {
   return {
     active: '已应用',
+    superseded: '已被替代',
     failed: '失败（已回滚）',
     rolled_back: '已回滚',
     applying: '应用中…',
@@ -74,7 +75,10 @@ function statusText(status: string): string {
 }
 
 function statusColor(status: string): string {
-  return status === 'active' ? 'success' : status === 'failed' ? 'error' : status === 'rolled_back' ? 'grey' : 'warning'
+  if (status === 'active') return 'success'
+  if (status === 'failed') return 'error'
+  if (status === 'superseded' || status === 'rolled_back') return 'grey'
+  return 'warning'
 }
 
 /** 依赖安装结果压成一行：已装了什么 / 还缺什么 */
@@ -300,15 +304,15 @@ onMounted(async () => {
 
 <template>
   <div>
-    <div class="app-page-header" style="align-items: center">
+    <div class="app-page-header">
       <div>
         <h1 class="app-page-title">
           <v-icon icon="mdi-package-variant-closed" size="28" color="primary" class="mr-1" />
           配置包
         </h1>
-        <div class="app-page-subtitle">把一套配置打包、分享到另一台电脑</div>
+        <div class="app-page-subtitle">导出和导入账号配置</div>
       </div>
-      <div class="d-flex align-center gap-2">
+      <div class="d-flex align-center flex-wrap gap-2">
         <v-btn variant="tonal" prepend-icon="mdi-export" :disabled="!exportEnabled" @click="openExport">
           导出当前账号
         </v-btn>
@@ -317,13 +321,9 @@ onMounted(async () => {
     </div>
 
     <v-alert type="info" variant="tonal" density="compact" class="mb-4">
-      <div class="text-caption">
-        导入后先检查包内容再保存；「应用到账号」会创建人格和模型、写入该账号配置，并自动安装随包插件，
-        失败自动回滚。密钥不随包分发，导入后需要重新填写。
-      </div>
-      <div class="text-caption mt-1">
-        要安装的是单个插件（插件包 .zip）？
-        <v-btn size="x-small" variant="text" @click="router.push('/modules')">去功能插件</v-btn>
+      <div class="d-flex flex-wrap align-center gap-2 text-caption">
+        <span>导入后先检查内容再应用；密钥需重新填写</span>
+        <v-btn size="x-small" variant="text" @click="router.push('/modules')">导入插件包请去功能插件</v-btn>
       </div>
     </v-alert>
 
@@ -333,60 +333,54 @@ onMounted(async () => {
       <EmptyState
         icon="mdi-package-variant"
         title="还没有配置包"
-        description="用右上角「导出当前账号」导出第一套，或「导入配置包」载入别人分享的 .zip。"
-      />
+        description="导入一个配置包，或把当前账号导出备用。"
+      >
+        <v-btn color="primary" prepend-icon="mdi-import" @click="onImport">导入配置包</v-btn>
+      </EmptyState>
     </v-card>
 
-    <v-row v-else>
-      <v-col v-for="item in bundles.list" :key="item.id" cols="12" md="6" xl="4">
-        <v-card variant="outlined" class="bundle-card app-card-hover">
-          <v-card-item>
-            <template #prepend>
-              <v-avatar color="lightprimary" size="40" rounded="lg">
-                <v-icon icon="mdi-package-variant" color="primary" />
-              </v-avatar>
-            </template>
-            <v-card-title class="text-body-1 font-weight-bold app-line-clamp-1">
-              {{ item.name }}
-              <v-chip size="x-small" variant="tonal" class="ml-1">v{{ item.version }}</v-chip>
-            </v-card-title>
-            <v-card-subtitle class="app-line-clamp-2">
-              {{ item.description || '导入自本地文件' }}
-            </v-card-subtitle>
-          </v-card-item>
-          <v-card-text class="text-caption" style="opacity: 0.7">
-            <div>导入时间：{{ formatTime(item.imported_at) }}</div>
-            <div>大小：{{ formatSize(item.size) }}</div>
-            <div v-if="item.modules?.length">
-              含插件 {{ item.modules.length }} 个
-              <span v-if="item.modules_bundled">（随包 {{ item.modules_bundled }}）</span>
-            </div>
-            <div v-if="item.modules_missing_deps" class="text-warning">
-              缺依赖 {{ item.modules_missing_deps }} 个（应用时可选自动安装）
-            </div>
-          </v-card-text>
-          <v-card-actions>
-            <v-btn
-              size="small"
-              color="primary"
-              variant="tonal"
-              prepend-icon="mdi-play-circle-outline"
-              :disabled="!exportEnabled"
-              @click="openApply(item)"
-            >
-              应用到账号
-            </v-btn>
-            <v-btn size="small" variant="text" prepend-icon="mdi-download" @click="onDownload(item.id)">
-              下载
-            </v-btn>
-            <v-spacer />
-            <v-btn size="small" variant="text" color="error" prepend-icon="mdi-delete-outline" @click="onUninstall(item.id)">
-              卸载
-            </v-btn>
-          </v-card-actions>
-        </v-card>
-      </v-col>
-    </v-row>
+    <div v-else class="app-card-grid app-card-grid--wide">
+      <v-card v-for="item in bundles.list" :key="item.id" variant="outlined" class="bundle-card app-card-hover">
+        <v-card-item>
+          <template #prepend>
+            <v-avatar color="lightprimary" size="40" rounded="lg">
+              <v-icon icon="mdi-package-variant" color="primary" />
+            </v-avatar>
+          </template>
+          <v-card-title class="d-flex align-center flex-wrap gap-2 text-body-1 font-weight-bold">
+            <span class="app-line-clamp-1">{{ item.name }}</span>
+            <v-chip size="x-small" variant="tonal">v{{ item.version }}</v-chip>
+          </v-card-title>
+          <v-card-subtitle class="app-muted app-line-clamp-1">
+            {{ item.description || '导入自本地文件' }}
+          </v-card-subtitle>
+        </v-card-item>
+        <v-card-text class="app-muted text-caption pt-0">
+          <div>{{ formatTime(item.imported_at) }} · {{ formatSize(item.size) }}</div>
+          <div v-if="item.modules?.length">
+            含插件 {{ item.modules.length }} 个
+            <span v-if="item.modules_bundled">（随包 {{ item.modules_bundled }}）</span>
+          </div>
+          <div v-if="item.modules_missing_deps" class="text-warning">
+            缺依赖 {{ item.modules_missing_deps }} 个（应用时可选自动安装）
+          </div>
+        </v-card-text>
+        <v-card-actions class="px-3 pb-3">
+          <v-btn
+            size="small"
+            color="primary"
+            variant="tonal"
+            prepend-icon="mdi-play-circle-outline"
+            :disabled="!exportEnabled"
+            @click="openApply(item)"
+          >
+            应用到账号
+          </v-btn>
+          <v-btn size="small" variant="text" icon="mdi-download" title="下载" @click="onDownload(item.id)" />
+          <v-btn size="small" variant="text" icon="mdi-delete-outline" color="error" title="卸载" @click="onUninstall(item.id)" />
+        </v-card-actions>
+      </v-card>
+    </div>
 
     <v-card v-if="bundles.activations.length" variant="outlined" class="mt-4">
       <v-card-title class="text-body-1">
@@ -401,8 +395,8 @@ onMounted(async () => {
           <v-chip size="x-small" :color="statusColor(record.status)" variant="tonal">
             {{ statusText(record.status) }}
           </v-chip>
-          <span class="text-body-2">{{ bundleName(record.bundle_id) }}</span>
-          <span class="text-caption" style="opacity: 0.6">{{ formatTime(record.started_at) }}</span>
+          <span class="text-body-2 font-weight-medium">{{ bundleName(record.bundle_id) }}</span>
+          <span class="text-caption app-muted">{{ formatTime(record.started_at) }}</span>
           <span v-if="record.error" class="text-caption text-error">{{ record.error }}</span>
           <v-spacer />
           <v-btn
@@ -410,7 +404,6 @@ onMounted(async () => {
             size="x-small"
             variant="text"
             color="warning"
-            prepend-icon="mdi-undo-variant"
             @click="onRollback(record.id)"
           >
             回滚

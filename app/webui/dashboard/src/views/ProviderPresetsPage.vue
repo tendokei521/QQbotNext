@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useDisplay } from 'vuetify'
 import http, { errorMessage } from '@/api/http'
 import { useNotifyStore } from '@/stores/notify'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
@@ -55,38 +56,38 @@ interface BuiltinPreset {
 const MODALITY_OPTIONS = [
   { title: '文本', value: 'text' },
   { title: '图像', value: 'image' },
-  { title: '音频/语音', value: 'audio' },
+  { title: '语音', value: 'audio' },
   { title: '工具调用', value: 'tool_use' },
 ]
 const MODALITY_LABELS: Record<string, string> = {
   text: '文本',
   image: '图像',
-  audio: '音频/语音',
+  audio: '语音',
   tool_use: '工具调用',
 }
 
 /**
- * 「自定义预设」只让你选四种 API 格式——和成熟客户端的自定义 API 配置一致：
- * 格式必须和端点实际支持的协议对得上，选错就是 404/400，而不是「玄学连不上」。
+ * 「自定义模型服务」只让你选四种接口格式——格式必须和端点实际支持的协议对得上，
+ * 选错就是 404/400，而不是「玄学连不上」。
  */
 const API_FORMAT_OPTIONS = [
   {
-    title: 'Anthropic Messages（原生）',
+    title: 'Anthropic 兼容',
     value: 'anthropic',
-    props: { subtitle: 'Anthropic / MiniMax 等兼容接口' },
+    props: { subtitle: 'Anthropic、MiniMax 等兼容接口' },
   },
   {
-    title: 'OpenAI Chat Completions',
+    title: 'OpenAI 兼容',
     value: 'openai',
     props: { subtitle: '最常用；DeepSeek、中转服务、Ollama 都选它' },
   },
   {
-    title: 'OpenAI Responses API',
+    title: 'OpenAI Responses 兼容',
     value: 'openai-responses',
-    props: { subtitle: 'OpenAI 的新版接口；有些新模型只支持它' },
+    props: { subtitle: 'OpenAI 新版接口；部分新模型只支持它' },
   },
   {
-    title: 'Gemini Native generateContent',
+    title: 'Gemini 兼容',
     value: 'gemini',
     props: { subtitle: 'Google Gemini 官方接口' },
   },
@@ -102,7 +103,7 @@ const PROVIDER_TYPE_LABELS: Record<string, string> = {
 }
 
 function providerTypeLabel(type: string): string {
-  return PROVIDER_TYPE_LABELS[type] || type
+  return PROVIDER_TYPE_LABELS[type] || '其它'
 }
 
 /** 最大输出的来源 → 用户看得懂的说法 */
@@ -113,6 +114,7 @@ const MAX_TOKENS_ORIGIN_LABELS: Record<string, string> = {
   内置默认: '系统默认',
 }
 
+/** 表格里空间有限：来源只留一个词 */
 function maxTokensOriginLabel(origin?: string): string {
   return MAX_TOKENS_ORIGIN_LABELS[origin || ''] || '系统默认'
 }
@@ -129,15 +131,37 @@ function normalizeApiFormat(provider: string): string {
 }
 
 const API_FORMAT_LABELS: Record<string, string> = {
-  anthropic: 'Anthropic Messages',
-  openai: 'OpenAI Chat Completions',
-  'openai-responses': 'OpenAI Responses',
-  gemini: 'Gemini Native',
+  anthropic: 'Anthropic 兼容',
+  openai: 'OpenAI 兼容',
+  'openai-responses': 'OpenAI Responses 兼容',
+  gemini: 'Gemini 兼容',
 }
 
 function apiFormatLabel(provider: string): string {
   const format = normalizeApiFormat(provider)
   return API_FORMAT_LABELS[format] || format
+}
+
+/** 左栏列表的地址小字：只显示域名（拿不到域名时退回路径），完整地址放在 title 里 */
+function presetEndpoint(preset: ProviderPreset): string {
+  const raw = String(preset.config?.api_base || '').trim()
+  if (!raw) return apiFormatLabel(preset.provider)
+  try {
+    return new URL(raw).host
+  } catch {
+    return raw.replace(/^wss?:\/\//i, '').replace(/^https?:\/\//i, '').replace(/\/+$/, '')
+  }
+}
+
+/** 信息行：0 要写成「不重试」，其余带中文单位 */
+function retryText(preset: ProviderPreset): string {
+  const attempts = Number(preset.config?.retry_attempts ?? 3)
+  return attempts > 0 ? `重试 ${attempts} 次` : '不重试'
+}
+
+function timeoutText(preset: ProviderPreset): string {
+  const seconds = Number(preset.config?.timeout ?? 30)
+  return `超时 ${seconds} 秒`
 }
 
 /** 模型下拉里补上所属服务名，避免两个服务下的同名模型分不清 */
@@ -148,6 +172,8 @@ function modelOptionLabel(model: ProviderModel): string {
 
 const notify = useNotifyStore()
 const router = useRouter()
+/** 窄屏把模型表换成卡片行，避免表格横向滚动撑破页面 */
+const { mdAndDown } = useDisplay()
 const presets = ref<ProviderPreset[]>([])
 const models = ref<ProviderModel[]>([])
 const allModels = ref<ProviderModel[]>([])
@@ -417,7 +443,7 @@ function openEditSource(preset: ProviderPreset) {
 
 async function saveSource() {
   if (!sourceForm.name.trim() || !sourceForm.api_base.trim()) {
-    notify.push('请填写名称与 API 基础 URL', 'warning')
+    notify.push('请填写名称与接口地址', 'warning')
     return
   }
   savingSource.value = true
@@ -773,22 +799,23 @@ onMounted(() => {
 
 <template>
   <div>
-    <div class="app-page-header" style="align-items: center">
+    <div class="app-page-header">
       <div>
         <h1 class="app-page-title">模型服务</h1>
-        <div class="app-page-subtitle">在这里填一次模型服务的 Key，所有账号共用</div>
+        <div class="app-page-subtitle">填一次 Key，所有账号共用</div>
       </div>
-      <v-spacer />
-      <v-btn variant="tonal" prepend-icon="mdi-tune" class="mr-1" @click="openSettings">全局设置</v-btn>
-      <v-btn variant="tonal" prepend-icon="mdi-library-plus" class="mr-1" @click="openBuiltinDialog">添加常用服务</v-btn>
-      <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="openCreateSource">新建模型服务</v-btn>
+      <div class="d-flex flex-wrap gap-2">
+        <v-btn variant="text" prepend-icon="mdi-tune" @click="openSettings">全局设置</v-btn>
+        <v-btn variant="text" prepend-icon="mdi-library-plus" @click="openBuiltinDialog">添加常用服务</v-btn>
+        <v-btn color="primary" prepend-icon="mdi-plus" @click="openCreateSource">新建模型服务</v-btn>
+      </div>
     </div>
 
     <v-row class="mt-2">
       <v-col cols="12" md="4" lg="3">
         <v-card variant="outlined">
           <v-card-title class="d-flex align-center">
-            <v-icon icon="mdi-api" class="mr-2" color="primary" /> 已添加的模型服务
+            <v-icon icon="mdi-server-network" class="mr-2" color="primary" /> 模型服务
           </v-card-title>
           <v-card-text class="pa-2">
             <v-progress-linear v-if="loadingPresets" indeterminate color="primary" />
@@ -797,16 +824,19 @@ onMounted(() => {
                 v-for="p in presets"
                 :key="p.id"
                 :active="selectedPresetId === p.id"
+                class="preset-item"
                 @click="selectPreset(p.id)"
               >
                 <template #prepend>
                   <v-icon :color="p.enabled ? 'primary' : ''" icon="mdi-server" />
                 </template>
-                <v-list-item-title>{{ p.name }}</v-list-item-title>
-                <v-list-item-subtitle>{{ p.config.api_base || p.provider }}</v-list-item-subtitle>
+                <v-list-item-title class="preset-name app-line-clamp-2">{{ p.name }}</v-list-item-title>
+                <v-list-item-subtitle class="preset-base text-caption" :title="p.config.api_base || apiFormatLabel(p.provider)">
+                  {{ presetEndpoint(p) }}
+                </v-list-item-subtitle>
                 <template #append>
-                  <v-btn size="x-small" variant="text" icon="mdi-pencil" @click.stop="openEditSource(p)" />
-                  <v-btn size="x-small" variant="text" icon="mdi-delete" color="error" @click.stop="askDeleteSource(p)" />
+                  <v-btn size="small" variant="text" icon="mdi-pencil" title="编辑" @click.stop="openEditSource(p)" />
+                  <v-btn size="small" variant="text" icon="mdi-delete" color="error" title="删除" @click.stop="askDeleteSource(p)" />
                 </template>
               </v-list-item>
             </v-list>
@@ -823,96 +853,152 @@ onMounted(() => {
       <v-col cols="12" md="8" lg="9">
         <template v-if="selectedPreset">
           <v-card variant="outlined" class="mb-4">
-            <v-card-title class="d-flex align-center">
+            <v-card-title class="d-flex align-center flex-wrap gap-2">
               <v-icon icon="mdi-server" class="mr-2" color="primary" /> {{ selectedPreset.name }}
-              <v-chip size="small" variant="tonal" class="ml-2">{{ apiFormatLabel(selectedPreset.provider) }}</v-chip>
+              <v-chip size="small" variant="tonal">{{ apiFormatLabel(selectedPreset.provider) }}</v-chip>
               <v-spacer />
               <v-btn size="small" variant="tonal" prepend-icon="mdi-pencil" @click="openEditSource(selectedPreset)">编辑</v-btn>
-              <v-btn size="small" variant="tonal" prepend-icon="mdi-file-code-outline" class="ml-1" @click="openConfigEditor(selectedPreset)">高级配置</v-btn>
-              <v-btn size="small" variant="tonal" prepend-icon="mdi-test-tube" class="ml-1" :loading="testingId === `preset:${selectedPreset.id}`" @click="testPreset(selectedPreset)">测试连接</v-btn>
+              <v-btn size="small" variant="tonal" prepend-icon="mdi-file-code-outline" @click="openConfigEditor(selectedPreset)">高级配置</v-btn>
+              <v-btn size="small" variant="tonal" prepend-icon="mdi-test-tube" :loading="testingId === `preset:${selectedPreset.id}`" @click="testPreset(selectedPreset)">测试连接</v-btn>
             </v-card-title>
-            <v-card-text class="text-caption">
-              接口地址：{{ selectedPreset.config.api_base || '—' }} · 重试：{{ selectedPreset.config.retry_attempts || 3 }} · 超时：{{ selectedPreset.config.timeout || 30 }}s
+            <v-card-text class="d-flex flex-wrap gap-x-4 gap-y-1 text-caption app-muted">
+              <span>接口地址：{{ selectedPreset.config.api_base || '—' }}</span>
+              <span>{{ retryText(selectedPreset) }} · {{ timeoutText(selectedPreset) }}</span>
             </v-card-text>
           </v-card>
 
           <v-card variant="outlined">
-            <v-card-title class="d-flex align-center">
+            <v-card-title class="d-flex align-center flex-wrap gap-2">
               <v-icon icon="mdi-creation" class="mr-2" color="primary" /> 模型
               <v-spacer />
               <v-btn size="small" variant="tonal" prepend-icon="mdi-download" :loading="fetchingModels" @click="fetchModels">拉取模型</v-btn>
-              <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-plus" class="ml-1" @click="openCreateModel">添加模型</v-btn>
+              <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-plus" @click="openCreateModel">添加模型</v-btn>
             </v-card-title>
             <v-card-text>
               <v-progress-linear v-if="loadingModels" indeterminate color="primary" />
-              <v-table v-else density="comfortable">
-                <thead>
-                  <tr>
-                    <th>模型</th>
-                    <th>类型</th>
-                    <th>支持能力</th>
-                    <th>温度</th>
-                    <th>最大输出</th>
-                    <th>状态</th>
-                    <th class="text-right">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-if="models.length === 0">
-                    <td colspan="7" class="text-center text-caption pa-6">还没有模型，可点「拉取模型」自动获取，或手动添加</td>
-                  </tr>
-                  <tr v-for="m in models" :key="m.id">
-                    <td class="font-weight-medium">{{ m.model }}</td>
-                    <td><v-chip size="x-small" variant="tonal">{{ providerTypeLabel(m.provider_type) }}</v-chip></td>
-                    <td>
-                      <v-chip
-                        v-for="cap in modelModalityLabels(m)"
-                        :key="cap"
-                        size="x-small"
-                        variant="tonal"
-                        class="mr-1"
-                      >{{ cap }}</v-chip>
-                    </td>
-                    <td class="text-caption">{{ m.config.temperature ?? 0.7 }}</td>
-                    <td class="text-caption">
-                      {{ m.effective?.max_tokens ?? '—' }}
-                      <v-tooltip location="top" max-width="320">
-                        <template #activator="{ props }">
-                          <v-icon
-                            v-bind="props"
+              <template v-else>
+                <div v-if="models.length === 0" class="text-center text-caption pa-6">
+                  还没有模型，可拉取或手动添加
+                </div>
+
+                <!-- 窄屏：卡片行，避免表格把页面撑出横向滚动 -->
+                <template v-else-if="mdAndDown">
+                  <v-card v-for="m in models" :key="m.id" variant="tonal" class="mb-2">
+                    <v-card-text class="pa-3">
+                      <div class="d-flex align-center flex-wrap gap-2">
+                        <span class="text-body-2 font-weight-medium">{{ m.model }}</span>
+                        <v-chip size="x-small" :color="m.enabled ? 'success' : 'default'" variant="tonal">
+                          {{ m.enabled ? '启用' : '停用' }}
+                        </v-chip>
+                        <v-spacer />
+                        <v-btn size="x-small" variant="text" color="primary" :loading="testingId === m.id" @click="testModel(m)">测试</v-btn>
+                        <v-btn size="x-small" variant="text" color="primary" @click="openEditModel(m)">编辑</v-btn>
+                        <v-btn size="x-small" variant="text" color="error" @click="askDeleteModel(m)">删除</v-btn>
+                      </div>
+                      <div class="d-flex flex-wrap gap-1 mt-2">
+                        <v-chip size="x-small" variant="tonal">{{ providerTypeLabel(m.provider_type) }}</v-chip>
+                        <v-chip v-for="cap in modelModalityLabels(m)" :key="cap" size="x-small" variant="tonal">
+                          {{ cap }}
+                        </v-chip>
+                      </div>
+                      <div class="d-flex flex-wrap gap-x-4 gap-y-1 text-caption app-muted mt-2">
+                        <span>温度 {{ m.config.temperature ?? 0.7 }}</span>
+                        <span class="d-inline-flex align-center">
+                          最大输出 {{ m.effective?.max_tokens ?? '—' }}
+                          <v-tooltip location="top" max-width="320">
+                            <template #activator="{ props }">
+                              <v-icon
+                                v-bind="props"
+                                size="14"
+                                :color="maxTokensOriginColor(m)"
+                                class="ml-1"
+                              >mdi-information-outline</v-icon>
+                            </template>
+                            <div>来源：{{ maxTokensOriginLabel(m.effective?.max_tokens_origin) }}</div>
+                            <div v-if="m.config.max_tokens == null">
+                              这个模型没有单独设上限，自动沿用了别处的值
+                            </div>
+                            <div v-for="note in m.effective?.max_tokens_notes || []" :key="note">{{ note }}</div>
+                            <div v-if="m.effective?.context_window">上下文窗口：{{ m.effective.context_window }}</div>
+                            <div v-if="m.effective?.reasoning">思考模型（输出预算有下限）</div>
+                          </v-tooltip>
+                        </span>
+                      </div>
+                    </v-card-text>
+                  </v-card>
+                </template>
+
+                <!-- 宽屏：表格（外层可横向滚动，不撑破页面） -->
+                <div v-else class="table-scroll">
+                  <v-table density="comfortable">
+                  <thead>
+                    <tr>
+                      <th>模型</th>
+                      <th>能力</th>
+                      <th>温度</th>
+                      <th>最大输出</th>
+                      <th>状态</th>
+                      <th class="text-right">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="m in models" :key="m.id">
+                      <td class="font-weight-medium">{{ m.model }}</td>
+                      <td>
+                        <div class="d-flex flex-wrap gap-1">
+                          <v-chip size="x-small" variant="tonal">{{ providerTypeLabel(m.provider_type) }}</v-chip>
+                          <v-chip
+                            v-for="cap in modelModalityLabels(m)"
+                            :key="cap"
                             size="x-small"
-                            :color="maxTokensOriginColor(m)"
-                            class="ml-1"
-                          >mdi-information-outline</v-icon>
-                        </template>
-                        <div>来源：{{ maxTokensOriginLabel(m.effective?.max_tokens_origin) }}</div>
-                        <div v-if="m.config.max_tokens == null">
-                          这个模型没有单独设上限，自动沿用别处的值
+                            variant="tonal"
+                          >{{ cap }}</v-chip>
                         </div>
-                        <div v-for="note in m.effective?.max_tokens_notes || []" :key="note">{{ note }}</div>
-                        <div v-if="m.effective?.context_window">上下文窗口：{{ m.effective.context_window }}</div>
-                        <div v-if="m.effective?.reasoning">思考模型（输出预算有下限）</div>
-                      </v-tooltip>
-                    </td>
-                    <td>
-                      <v-chip size="x-small" :color="m.enabled ? 'success' : 'default'" variant="tonal">
-                        {{ m.enabled ? '启用' : '停用' }}
-                      </v-chip>
-                    </td>
-                    <td class="text-right">
-                      <v-btn size="x-small" variant="text" color="primary" :loading="testingId === m.id" @click="testModel(m)">测试</v-btn>
-                      <v-btn size="x-small" variant="text" color="primary" @click="openEditModel(m)">编辑</v-btn>
-                      <v-btn size="x-small" variant="text" color="error" @click="askDeleteModel(m)">删除</v-btn>
-                    </td>
-                  </tr>
-                </tbody>
-              </v-table>
+                      </td>
+                      <td class="text-caption">{{ m.config.temperature ?? 0.7 }}</td>
+                      <td class="text-caption">
+                        <span class="d-inline-flex align-center">
+                          {{ m.effective?.max_tokens ?? '—' }}
+                          <v-tooltip location="top" max-width="320">
+                            <template #activator="{ props }">
+                              <v-icon
+                                v-bind="props"
+                                size="14"
+                                :color="maxTokensOriginColor(m)"
+                                class="ml-1"
+                              >mdi-information-outline</v-icon>
+                            </template>
+                            <div>来源：{{ maxTokensOriginLabel(m.effective?.max_tokens_origin) }}</div>
+                            <div v-if="m.config.max_tokens == null">
+                              这个模型没有单独设上限，自动沿用了别处的值
+                            </div>
+                            <div v-for="note in m.effective?.max_tokens_notes || []" :key="note">{{ note }}</div>
+                            <div v-if="m.effective?.context_window">上下文窗口：{{ m.effective.context_window }}</div>
+                            <div v-if="m.effective?.reasoning">思考模型（输出预算有下限）</div>
+                          </v-tooltip>
+                        </span>
+                      </td>
+                      <td>
+                        <v-chip size="x-small" :color="m.enabled ? 'success' : 'default'" variant="tonal">
+                          {{ m.enabled ? '启用' : '停用' }}
+                        </v-chip>
+                      </td>
+                      <td class="text-right">
+                        <v-btn size="x-small" variant="text" color="primary" :loading="testingId === m.id" @click="testModel(m)">测试</v-btn>
+                        <v-btn size="x-small" variant="text" color="primary" @click="openEditModel(m)">编辑</v-btn>
+                        <v-btn size="x-small" variant="text" color="error" @click="askDeleteModel(m)">删除</v-btn>
+                      </td>
+                    </tr>
+                  </tbody>
+                </v-table>
+                </div>
+              </template>
             </v-card-text>
           </v-card>
         </template>
 
         <v-card v-else variant="outlined" class="pa-8 text-center text-caption">
-          用右上角「新建模型服务」或「添加常用服务」添加，添加后会出现在左侧列表
+          新建或添加服务后，这里会显示它的模型列表
         </v-card>
       </v-col>
     </v-row>
@@ -938,7 +1024,7 @@ onMounted(() => {
             class="mb-2"
           />
           <div class="text-caption text-medium-emphasis mb-3">
-            不确定选哪个就用「OpenAI Chat Completions」；保存后可以点「测试连接」验证。
+            不确定选哪个就用「OpenAI 兼容」；保存后可点「测试连接」验证。
           </div>
           <v-text-field v-model="sourceForm.api_base" label="接口地址" placeholder="https://api.deepseek.com" density="comfortable" hide-details class="mb-3" />
           <v-text-field
@@ -1263,5 +1349,28 @@ onMounted(() => {
   border: 1px dashed rgba(var(--v-theme-on-surface), 0.18);
   border-radius: 8px;
   background: rgba(var(--v-theme-on-surface), 0.02);
+}
+
+/* 左栏：服务名最多两行、地址小字单行；避免全部截成 OpenCode... / https://openc... */
+.preset-item {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.preset-name {
+  white-space: normal;
+  line-height: 1.3;
+  font-size: 14px;
+}
+
+.preset-base {
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.table-scroll {
+  overflow-x: auto;
 }
 </style>

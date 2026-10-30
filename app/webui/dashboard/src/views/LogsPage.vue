@@ -15,7 +15,7 @@ onMounted(() => {
     <div class="app-page-header">
       <div>
         <h1 class="app-page-title">日志</h1>
-        <div class="app-page-subtitle">实时运行日志：按级别筛选、搜索与导出都在控制台工具栏</div>
+        <div class="app-page-subtitle">实时运行日志</div>
       </div>
       <div class="d-flex align-center gap-2">
         <v-btn variant="tonal" prepend-icon="mdi-refresh" @click="logs.refresh">刷新</v-btn>

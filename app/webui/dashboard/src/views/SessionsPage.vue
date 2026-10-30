@@ -107,7 +107,6 @@ const mediaFileInput = ref<HTMLInputElement | null>(null)
 
 /** 本地图片仓（每账号一个 media/ 目录）的占用情况 */
 const mediaStats = ref<MediaStats | null>(null)
-const loadingMedia = ref(false)
 const purgingMedia = ref(false)
 
 /** 图片预览 / 换图的目标 */
@@ -433,7 +432,6 @@ async function loadMediaStats() {
     mediaStats.value = null
     return
   }
-  loadingMedia.value = true
   try {
     const res = await http.get<MediaStats & { ok: boolean }>('/api/media', {
       params: { account_id: botId.value },
@@ -441,8 +439,6 @@ async function loadMediaStats() {
     mediaStats.value = res.data || null
   } catch (err) {
     mediaStats.value = null
-  } finally {
-    loadingMedia.value = false
   }
 }
 
@@ -966,38 +962,39 @@ onMounted(() => {
 
 <template>
   <div>
-    <div class="app-page-header" style="align-items: center">
+    <div class="app-page-header">
       <div>
         <h1 class="app-page-title">会话数据</h1>
-        <div class="app-page-subtitle">
-          会话是群聊 / 私聊记录，对话是一次任务保存的对话线程；回复带多少上下文在
-          <router-link class="context-link" to="/ai/settings/session">AI 设置 → 会话管理</router-link>
-        </div>
+        <div class="app-page-subtitle">群聊与私聊的会话记录</div>
       </div>
-      <div class="page-header-actions">
-        <v-btn variant="text" prepend-icon="mdi-chart-bar" @click="router.push('/stats')">用量统计</v-btn>
-        <v-chip v-if="mediaStats" size="small" variant="tonal" :loading="loadingMedia">
-          <v-icon icon="mdi-image-multiple" start size="small" />
-          {{ mediaStats.count }} 张 · {{ fmtBytes(mediaStats.bytes) }} · 可清理 {{ mediaStats.unreferenced }}
-        </v-chip>
-        <v-btn
-          v-if="mediaStats && mediaStats.unreferenced > 0"
-          variant="tonal"
-          prepend-icon="mdi-broom"
-          :loading="purgingMedia"
-          @click="purgeMedia"
-        >
-          清理未引用图片
-        </v-btn>
-        <v-btn v-if="selectedSessionId" variant="tonal" prepend-icon="mdi-file-upload-outline" @click="exportSession">
-          导出当前会话
-        </v-btn>
-        <v-btn variant="tonal" prepend-icon="mdi-upload" @click="openRestorePicker">导入备份</v-btn>
-        <v-btn v-if="selectedSessionId" variant="tonal" prepend-icon="mdi-delete-empty" color="error" @click="deleteSession">
-          删除当前会话
-        </v-btn>
-        <v-btn variant="tonal" prepend-icon="mdi-refresh" @click="loadSessions">刷新</v-btn>
-      </div>
+    </div>
+
+    <div class="app-toolbar">
+      <v-btn size="small" variant="text" prepend-icon="mdi-chart-bar" @click="router.push('/stats')">
+        用量统计
+      </v-btn>
+      <span v-if="mediaStats" class="app-muted">
+        图片 {{ mediaStats.count }} 张 · {{ fmtBytes(mediaStats.bytes) }}<template v-if="mediaStats.unreferenced"> · 可清理 {{ mediaStats.unreferenced }}</template>
+      </span>
+      <v-btn
+        v-if="mediaStats && mediaStats.unreferenced > 0"
+        size="small"
+        variant="text"
+        prepend-icon="mdi-broom"
+        :loading="purgingMedia"
+        @click="purgeMedia"
+      >
+        清理未引用图片
+      </v-btn>
+      <v-spacer />
+      <v-btn v-if="selectedSessionId" size="small" variant="tonal" prepend-icon="mdi-file-upload-outline" @click="exportSession">
+        导出当前会话
+      </v-btn>
+      <v-btn size="small" variant="tonal" prepend-icon="mdi-upload" @click="openRestorePicker">导入备份</v-btn>
+      <v-btn v-if="selectedSessionId" size="small" variant="text" color="error" prepend-icon="mdi-delete-empty" @click="deleteSession">
+        删除当前会话
+      </v-btn>
+      <v-btn size="small" variant="text" icon="mdi-refresh" title="刷新会话列表" @click="loadSessions" />
       <input
         ref="restoreFileInput"
         type="file"
@@ -1014,13 +1011,13 @@ onMounted(() => {
       />
     </div>
 
-    <v-row class="mt-2">
-      <v-col cols="12" md="3">
-        <v-card variant="outlined" class="h-full">
+    <div class="sessions-layout">
+      <div class="session-col">
+        <v-card variant="outlined" class="session-card">
           <v-card-title class="d-flex align-center">
             <v-icon icon="mdi-chat-outline" class="mr-2" color="primary" /> 会话列表
           </v-card-title>
-          <v-card-text class="pa-2">
+          <v-card-text class="pa-2 session-scroll">
             <v-text-field
               v-model="sessionQuery"
               density="compact"
@@ -1076,10 +1073,10 @@ onMounted(() => {
             </v-list>
           </v-card-text>
         </v-card>
-      </v-col>
+      </div>
 
-      <v-col cols="12" md="3">
-        <v-card variant="outlined" class="h-full">
+      <div class="session-col">
+        <v-card variant="outlined" class="session-card">
           <v-card-title class="d-flex align-center">
             <v-icon icon="mdi-message-text-outline" class="mr-2" color="primary" /> 对话线程
             <v-spacer />
@@ -1096,7 +1093,7 @@ onMounted(() => {
               删除选中
             </v-btn>
           </v-card-title>
-          <v-card-text class="pa-2">
+          <v-card-text class="pa-2 session-scroll">
             <v-text-field
               v-model="conversationQuery"
               density="compact"
@@ -1177,10 +1174,10 @@ onMounted(() => {
             </v-list>
           </v-card-text>
         </v-card>
-      </v-col>
+      </div>
 
-      <v-col cols="12" md="6">
-        <v-card variant="outlined" class="h-full">
+      <div class="session-col session-col--main">
+        <v-card variant="outlined" class="session-card">
           <v-card-title v-if="conversation" class="d-flex align-center flex-wrap gap-2">
             <v-icon icon="mdi-message-text" class="mr-1" color="primary" />
             <span class="text-truncate">{{ conversation.title }}</span>
@@ -1190,7 +1187,7 @@ onMounted(() => {
           </v-card-title>
           <v-card-title v-else class="text-caption">消息</v-card-title>
 
-          <v-card-text class="pa-2">
+          <v-card-text class="pa-2 message-pane">
             <v-progress-linear v-if="loadingConversation" indeterminate color="primary" />
             <template v-else-if="!conversation">
               <div class="text-caption text-center pa-6">
@@ -1198,14 +1195,13 @@ onMounted(() => {
                 <span class="guide-narrow">先选一个会话，再选一个对话线程</span>
               </div>
             </template>
-            <div v-else ref="messageBodyEl" class="session-messages" style="max-height: calc(100vh - 320px); overflow-y: auto">
+            <div v-else ref="messageBodyEl" class="session-messages">
               <div v-for="(msg, index) in conversation.messages" :key="index" class="message-row">
                 <div class="message-meta">
                   <v-chip size="x-small" :color="roleColor(msg.role)" variant="tonal">{{ roleLabel(msg.role) }}</v-chip>
                   <span v-if="msg.role === 'user'" class="text-caption">
                     {{ msg.nickname ? `${msg.nickname}(${msg.user_id || '?'})` : `QQ ${msg.user_id || '?'}` }}
                   </span>
-                  <span v-if="msg.message_id" class="text-caption" style="opacity: 0.55">消息编号 {{ msg.message_id }}</span>
                   <span class="text-caption" style="opacity: 0.55">{{ fmtTime(msg.time) }}</span>
                   <v-spacer />
                   <v-btn size="x-small" variant="text" icon="mdi-pencil" title="编辑消息" @click="openEditMessage(index)" />
@@ -1287,8 +1283,8 @@ onMounted(() => {
             </v-form>
           </v-card-text>
         </v-card>
-      </v-col>
-    </v-row>
+      </div>
+    </div>
 
     <v-dialog v-model="editDialog" max-width="560">
       <v-card>
@@ -1344,16 +1340,40 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.h-full {
-  height: 100%;
+/* 三栏等高布局：列表 260 + 线程 300 + 消息自适应，撑满可视区，下方不再留空白 */
+.sessions-layout {
+  display: grid;
+  grid-template-columns: 260px 300px minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+  height: calc(100vh - 230px);
+  min-height: 460px;
+  margin-top: 2px;
 }
 
-.page-header-actions {
+.session-col {
+  min-height: 0;
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
+}
+
+.session-card {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.session-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.message-pane {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .guide-narrow {
@@ -1362,6 +1382,20 @@ onMounted(() => {
 
 /* 三栏在 md 以下堆叠：方位词换成不带左右的说法 */
 @media (max-width: 959.98px) {
+  .sessions-layout {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+    min-height: 0;
+  }
+
+  .session-card {
+    max-height: 68vh;
+  }
+
+  .session-col--main .session-card {
+    max-height: none;
+  }
+
   .guide-desktop {
     display: none;
   }
@@ -1369,16 +1403,6 @@ onMounted(() => {
   .guide-narrow {
     display: inline;
   }
-}
-
-.context-link {
-  color: rgb(var(--v-theme-primary));
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.context-link:hover {
-  text-decoration: underline;
 }
 
 .list-search {
@@ -1398,9 +1422,8 @@ onMounted(() => {
 }
 
 @media (max-width: 720px) {
-  .page-header-actions {
-    justify-content: flex-start;
-    width: 100%;
+  .add-role {
+    width: 88px;
   }
 }
 
@@ -1486,11 +1509,12 @@ onMounted(() => {
 }
 
 .add-role {
-  width: 120px;
+  width: 96px;
   flex: 0 0 auto;
 }
 
 .add-content {
   flex: 1 1 auto;
+  min-width: 0;
 }
 </style>

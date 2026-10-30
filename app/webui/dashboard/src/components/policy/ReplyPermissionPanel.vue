@@ -61,6 +61,19 @@ function isStringList(key: string): boolean {
   return String(schemaOf(key).type || '').toLowerCase() === 'string_list'
 }
 
+/** 名册字段的说明统一收短（后端原文较长，这里按页面口径展示） */
+const SHORT_DESCRIPTIONS: Record<string, string> = {
+  agent_owner_list: '每行一个 QQ 号，留空即无人拥有',
+  agent_manager_list: '每行一个 QQ 号，权限低于拥有者',
+  permission: '谁能触发回复：拥有者 > 管理者 > 群主 > 群管 > 成员',
+}
+
+function displaySchema(key: string): Record<string, any> {
+  const schema = schemaOf(key)
+  const short = SHORT_DESCRIPTIONS[key]
+  return short ? { ...schema, description: short } : schema
+}
+
 function valueOf(key: string): any {
   const value = agent.draft[key]
   return value !== undefined ? value : schemaOf(key).default
@@ -82,7 +95,7 @@ watch(
 <template>
   <div>
     <div class="d-flex align-center flex-wrap gap-2 mb-3">
-      <span class="text-body-2">按账号生效：谁能触发回复、高危工具是否需要审批。</span>
+      <span class="text-caption app-muted">按账号生效：谁能触发、是否需要审批</span>
       <v-spacer />
       <SaveStatusBar v-if="showSaveStatus" :status="agent.saveStatus" autosave />
     </div>
@@ -107,7 +120,7 @@ watch(
     </v-card>
 
     <template v-else>
-      <v-card v-for="group in availableGroups" :key="group.id" variant="outlined" class="mb-3">
+      <v-card v-for="group in availableGroups" :key="group.id" variant="outlined" class="mb-4">
         <v-card-title class="d-flex align-center">
           <v-icon :icon="group.icon" class="mr-2" color="primary" />
           {{ group.label }}
@@ -115,9 +128,9 @@ watch(
         <v-card-text>
           <div v-for="key in group.fields" :key="key" class="reply-field">
             <template v-if="isStringList(key)">
-              <div class="reply-field-label">{{ schemaOf(key).label || key }}</div>
-              <div v-if="schemaOf(key).description" class="reply-field-desc">
-                {{ schemaOf(key).description }}
+              <div class="reply-field-label">{{ displaySchema(key).label || key }}</div>
+              <div v-if="displaySchema(key).description" class="reply-field-desc">
+                {{ displaySchema(key).description }}
               </div>
               <StringListWidget
                 :model-value="(valueOf(key) as string[]) || []"
@@ -127,7 +140,7 @@ watch(
             <FieldControl
               v-else
               :field-key="key"
-              :schema="schemaOf(key)"
+              :schema="displaySchema(key)"
               :value="valueOf(key)"
               :bot-id="bots.currentAccountId"
               @update="(v: any) => agent.onChange(key, v)"
@@ -149,7 +162,12 @@ watch(
 
 <style scoped>
 .reply-field + .reply-field {
-  margin-top: 14px;
+  margin-top: 16px;
+}
+
+/* 「添加」是普通按钮，不要被 flex 拉伸成一整行输入框的样子 */
+.reply-field :deep(.string-list .v-btn) {
+  align-self: flex-start;
 }
 
 .reply-field-label {

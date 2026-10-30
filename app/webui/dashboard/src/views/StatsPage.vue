@@ -103,7 +103,7 @@ const BREAKDOWN_BY_KIND: Record<Kind, { value: string; title: string }[]> = {
   llm: [
     { value: 'none', title: '不拆分' },
     { value: 'model', title: '按模型' },
-    { value: 'api', title: '按 API' },
+    { value: 'api', title: '按服务' },
   ],
   msg_in: [
     { value: 'none', title: '不拆分' },
@@ -166,7 +166,10 @@ const metricOptions = computed(() => METRIC_BY_KIND[kind.value] ?? [])
 const breakdownOptions = computed(() => BREAKDOWN_BY_KIND[kind.value] ?? [])
 const seriesNames = computed(() => data.value?.meta.series_order ?? [])
 const buckets = computed(() => data.value?.buckets ?? [])
-const unit = computed(() => data.value?.meta.unit ?? 'tokens')
+const unit = computed(() => {
+  const raw = data.value?.meta.unit ?? 'tokens'
+  return raw === 'tokens' ? 'token' : raw
+})
 const summary = computed<Summary | null>(() => data.value?.summary ?? null)
 
 /** 时间范围（UTC 秒）。to 取次日 0 点，保证"今天"完整。 */
@@ -509,19 +512,19 @@ onUnmounted(() => {
         <div class="app-page-subtitle">按时间范围统计用量，时间按本机时区</div>
       </div>
       <div class="header-actions">
-        <v-btn variant="text" prepend-icon="mdi-chat-outline" @click="router.push('/sessions')">会话数据</v-btn>
-        <button class="link-btn" @click="load()">刷新</button>
-        <button class="dark-btn" @click="exportCsv">导出</button>
+        <v-btn size="small" variant="text" prepend-icon="mdi-chat-outline" @click="router.push('/sessions')">会话数据</v-btn>
+        <v-btn size="small" variant="text" prepend-icon="mdi-refresh" @click="load()">刷新</v-btn>
+        <v-btn size="small" color="primary" variant="flat" prepend-icon="mdi-download" @click="exportCsv">导出</v-btn>
       </div>
     </div>
 
     <!-- ① 大 KPI 卡 -->
     <div class="hero">
       <div class="hero-card tip" data-tip="当前筛选范围内所有 LLM 请求的 token 总数（输入 + 输出）">
-        <span class="hero-label">当前范围 Tokens</span>
+        <span class="hero-label">当前范围用量</span>
         <div class="hero-value">
-          {{ summary ? fmt(summary.tokens, 'tokens') : '—' }}
-          <span class="hero-unit">tokens</span>
+          {{ summary ? fmt(summary.tokens, unit) : '—' }}
+          <span class="hero-unit">token</span>
         </div>
       </div>
       <div class="hero-card tip" data-tip="实际发给模型服务的请求数（含重试与回退，不含未触发的消息）">
@@ -533,7 +536,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- ② 筛选条：每个控件都带 label，窄屏自动换行 -->
+    <!-- ② 筛选条：固定网格排布，避免 8 个下拉「7+1」错落 -->
     <div class="filter-bar">
       <v-select
         v-model="kind"
@@ -646,14 +649,15 @@ onUnmounted(() => {
         placeholder="全部"
         class="filter-field"
       />
-      <v-spacer />
-      <v-btn variant="text" size="small" class="clear-btn" @click="clearFilters">清除筛选条件</v-btn>
-      <span class="live" :title="liveConnected ? '已连接，数据变化会自动推送' : '未连接（会自动重连）'">
-        <i class="dot" :class="{ on: liveConnected }" />
-        <span>{{ liveConnected ? '实时' : '重连中' }}</span>
-        <span v-if="updatedAt" class="live-time">{{ updatedAt }}</span>
-      </span>
-    </div>
+      </div>
+      <div class="filter-actions">
+        <v-btn variant="text" size="small" class="clear-btn" @click="clearFilters">清除筛选条件</v-btn>
+        <span class="live" :title="liveConnected ? '已连接，数据变化会自动推送' : '未连接（会自动重连）'">
+          <i class="dot" :class="{ on: liveConnected }" />
+          <span>{{ liveConnected ? '实时' : '重连中' }}</span>
+          <span v-if="updatedAt" class="live-time">{{ updatedAt }}</span>
+        </span>
+      </div>
 
     <v-alert v-if="error" type="error" variant="tonal" density="compact" class="mt-3">{{ error }}</v-alert>
 
@@ -661,12 +665,12 @@ onUnmounted(() => {
     <div v-if="summary" class="kpis">
       <template v-if="kind === 'llm'">
         <div class="kpi tip" data-tip="送给模型的输入 token（含系统提示、历史、工具结果）">
-          <span class="kpi-label">输入 Tokens</span>
-          <div class="kpi-value">{{ fmt(summary.input, 'tokens') }}</div>
+          <span class="kpi-label">输入 token</span>
+          <div class="kpi-value">{{ fmt(summary.input, unit) }}</div>
         </div>
         <div class="kpi tip" data-tip="模型生成的输出 token（含思考 token）">
-          <span class="kpi-label">输出 Tokens</span>
-          <div class="kpi-value">{{ fmt(summary.output, 'tokens') }}</div>
+          <span class="kpi-label">输出 token</span>
+          <div class="kpi-value">{{ fmt(summary.output, unit) }}</div>
         </div>
         <div class="kpi tip" data-tip="命中 /（命中 + 未命中）。服务商未返回缓存数据时显示 —">
           <span class="kpi-label">缓存命中率</span>
@@ -711,7 +715,7 @@ onUnmounted(() => {
         <span class="chart-title">{{ chartTitle }}</span>
         <div class="seg">
           <button v-for="opt in breakdownOptions" :key="opt.value"
-                  class="tip" :data-tip="opt.value === 'none' ? '所有调用合计成一根柱' : `按 ${opt.title.replace('按 ', '')} 拆成多段堆叠`"
+                  class="tip" :data-tip="opt.value === 'none' ? '所有调用合计成一根柱' : `按${opt.title.replace('按 ', '')}拆成多段堆叠`"
                   :class="{ on: breakdown === opt.value }" @click="breakdown = opt.value">
             {{ opt.title }}
           </button>
@@ -863,16 +867,19 @@ onUnmounted(() => {
               font-variant-numeric: tabular-nums; }
 .hero-unit { font-size: 13px; font-weight: 400; color: var(--muted); margin-left: 6px; }
 
-/* ② 筛选条 */
-.filter-bar { display: flex; align-items: center; gap: 8px; margin: 16px 0 14px;
-              flex-wrap: wrap; }
-.filter-field { flex: 0 1 170px; min-width: 150px; }
-.filter-field--range { flex-basis: 190px; }
+/* ② 筛选条：固定 4 列网格（窄屏 2 列 / 手机 1 列），所有下拉等宽对齐 */
+.filter-bar { margin: 16px 0 8px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px 12px; }
+.filter-field { width: 100%; max-width: none; }
 .filter-field :deep(.v-field__input) { font-size: 12px; }
 .filter-field :deep(.v-label) { font-size: 12px; }
-.link-btn { background: none; border: none; color: var(--muted); font-size: 12px;
-            cursor: pointer; padding: 4px 6px; }
-.link-btn:hover { color: rgb(var(--v-theme-primary)); text-decoration: underline; }
+.filter-actions { display: flex; align-items: center; justify-content: flex-end; gap: 14px; margin-bottom: 14px; }
+@media (max-width: 960px) {
+  .filter-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .filter-bar { grid-template-columns: 1fr; }
+  .filter-actions { justify-content: space-between; }
+}
 .live { display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
         color: var(--muted); user-select: none; }
 .live .dot { width: 7px; height: 7px; border-radius: 50%; background: #c9ced6; display: inline-block; }
@@ -901,9 +908,6 @@ onUnmounted(() => {
   transition: none;          /* ★ 关键：不做淡入，放上去立刻显示 */
 }
 .tip:hover { z-index: 51; }
-.dark-btn { background: #1f2328; color: #fff; border: none; border-radius: 999px;
-            padding: 7px 18px; font-size: 12px; cursor: pointer; }
-.dark-btn:hover { background: #33383f; }
 
 /* ③ 小 KPI */
 .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
@@ -958,6 +962,7 @@ onUnmounted(() => {
 .usage-table thead th { font-weight: 600; color: var(--muted); position: sticky; top: 0;
                         background: var(--card-bg); }
 .usage-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.usage-table thead th.num { text-align: right; }
 .usage-table .sticky-col { position: sticky; left: 0; background: var(--card-bg);
                            text-align: left; font-weight: 500; }
 .usage-table .total-col { font-weight: 700;

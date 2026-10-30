@@ -224,12 +224,8 @@ onBeforeUnmount(stopPolling)
       </v-toolbar>
 
       <v-card-text style="max-height: 62vh">
-        <div class="text-caption mb-3" style="opacity: 0.7">
-          这里显示协议端最近发来的原始事件。在群里发一条消息，如果这里出现了「消息」，说明协议端已通；
-          如果一直没有，问题在协议端（NapCat/LLOneBot）那一侧。
-        </div>
-        <div class="text-caption mb-3" style="opacity: 0.7">
-          如果这里能看到「消息」但群里仍没回复，问题在回复配置。先去「回复与权限」确认这个群允许聊天，再去「AI 对话面板」确认已选模型。
+        <div class="app-muted mb-3">
+          在群里发一条消息：这里出现「消息」说明协议端已通；仍不回复就检查回复配置。
         </div>
 
         <v-alert v-if="loadError" type="error" variant="tonal" density="compact" class="mb-3">
@@ -314,8 +310,8 @@ onBeforeUnmount(stopPolling)
             发送
           </v-btn>
         </div>
-        <div class="text-caption mt-2" style="opacity: 0.6">
-          消息会以当前账号的身份发到指定群；发送失败时这里会显示协议端返回的原因。
+        <div class="app-muted mt-2">
+          以当前账号身份发送；失败会显示协议端返回的原因。
         </div>
       </v-card-text>
     </v-card>
