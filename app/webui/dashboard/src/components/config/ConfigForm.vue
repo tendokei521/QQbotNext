@@ -13,8 +13,6 @@ const props = defineProps<{
   config: Record<string, any>
   botId: string | null
   activeGroup?: string | null
-  /** 只显示某一分组（AI 设置页用顶部 tab 切换分组时传；不传 = 全部分组纵向排列） */
-  onlyGroup?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -70,12 +68,11 @@ const parsed = computed(() => {
 
 const groupDefs = computed(() => {
   const { groups, items } = parsed.value
-  let defs = groups.map((g) => ({ ...g, items: items.filter((it) => it.group === g.id) }))
+  const defs = groups.map((g) => ({ ...g, items: items.filter((it) => it.group === g.id) }))
   const ungrouped = items.filter((it) => !it.group)
   if (ungrouped.length) {
     defs.push({ id: '__default__', label: '其他设置', collapsible: true, items: ungrouped })
   }
-  if (props.onlyGroup) defs = defs.filter((g) => g.id === props.onlyGroup)
   return defs
 })
 
@@ -154,18 +151,6 @@ function isComplexType(item: ItemDef): boolean {
   return ['string_list', 'list', 'dynamic', 'repeater'].includes(String(item.schema.type).toLowerCase())
 }
 
-/** 需要在两列网格里独占整行的字段：开关/长文本/复杂控件/显式声明 full_width */
-function isWideField(item: ItemDef): boolean {
-  const type = String(item.schema.type || '').toLowerCase()
-  return (
-    isComplexType(item) ||
-    type === 'textarea' ||
-    type === 'boolean' ||
-    type === 'bool' ||
-    item.schema.full_width === true
-  )
-}
-
 function currentValue(item: ItemDef): any {
   const v = props.config[item.key]
   return v !== undefined ? v : item.schema.default
@@ -173,7 +158,7 @@ function currentValue(item: ItemDef): any {
 </script>
 
 <template>
-  <div class="config-form" :class="{ 'config-form--single': !!onlyGroup }">
+  <div class="config-form">
     <!-- 完全退化形态：schema 不可解析时按值类型渲染 -->
     <template v-if="!parsed.hasItems">
       <div class="flat-fields">
@@ -200,19 +185,13 @@ function currentValue(item: ItemDef): any {
       >
         <v-expansion-panel>
           <v-expansion-panel-title class="group-title">
-            <span class="group-title__inner">
-              <v-icon size="small" class="mr-1" :icon="open[g.id] === false ? 'mdi-chevron-right' : 'mdi-chevron-down'" />
-              {{ g.label }}
-            </span>
+            <v-icon size="small" class="mr-1" :icon="open[g.id] === false ? 'mdi-chevron-right' : 'mdi-chevron-down'" />
+            {{ g.label }}
           </v-expansion-panel-title>
           <v-expansion-panel-text>
             <div class="group-body">
               <template v-for="item in g.items" :key="item.key">
-                <div
-                  v-if="isVisible(item)"
-                  class="config-item"
-                  :class="{ 'config-item--wide': isWideField(item) }"
-                >
+                <div v-if="isVisible(item)" class="config-item">
                   <template v-if="isComplexType(item)">
                     <div v-if="item.schema.label" class="field-label">{{ item.schema.label || '设置项' }}</div>
                     <HintText :text="item.schema.description" class="mb-2" />
@@ -277,65 +256,19 @@ function currentValue(item: ItemDef): any {
   font-weight: 600;
 }
 
-/* 标题内容包一层，配合隐藏右侧默认箭头后仍保持「图标+标题」左对齐 */
-.group-title__inner {
-  display: inline-flex;
-  align-items: center;
-}
-
-/* 分组标题左侧已有展开/收起箭头，隐藏 Vuetify 自带的右侧箭头，避免一左一右两个 */
-.group-title :deep(.v-expansion-panel-title__icon) {
-  display: none;
-}
-
-/* 字段网格：短字段两列排（设置页不再是 3000px 长的单列），长文本/复杂控件跨整行 */
 .group-body {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
   padding: 4px 0;
 }
 
 .config-item {
-  padding: 10px 0;
-  min-width: 0;
-}
-
-.config-item--wide {
-  grid-column: 1 / -1;
-}
-
-/* 单分组模式（AI 设置顶部 tab 切换）：保留分组标题当卡片内小标题，只是不可折叠。
-   之前把标题整块隐藏，内容直接从卡片左上角开始，看起来「顶格」。 */
-.config-form--single :deep(.v-expansion-panels) {
-  margin-bottom: 0 !important;
-}
-
-.config-form--single :deep(.v-expansion-panel-title) {
-  min-height: 40px;
-  padding: 8px 16px;
-  pointer-events: none;
-  cursor: default;
-}
-
-.config-form--single :deep(.v-expansion-panel-title__icon),
-.config-form--single :deep(.v-expansion-panel-title__overlay) {
-  display: none;
-}
-
-.config-form--single :deep(.v-expansion-panel-text__wrapper) {
-  padding: 0 16px 4px;
-}
-
-.config-form--single :deep(.v-expansion-panel) {
-  box-shadow: none !important;
-  background: transparent !important;
-}
-
-@media (max-width: 960px) {
-  .group-body {
-    grid-template-columns: minmax(0, 1fr);
-  }
+  padding: 12px 14px;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.07);
+  border-left: 3px solid rgba(var(--v-theme-primary), 0.35);
+  border-radius: 8px;
+  background: rgba(var(--v-theme-on-surface), 0.015);
 }
 
 .field-label {

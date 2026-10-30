@@ -67,6 +67,15 @@ watch(mod, (m) => {
   initFromModule()
 })
 
+const PERMISSION_COLOR: Record<string, string> = {
+  everyone: 'grey',
+  member: 'primary',
+  group_admin: 'info',
+  group_owner: 'purple',
+  manager: 'teal',
+  owner: 'error',
+}
+
 // ---------- 配置草稿 + 自动保存 ----------
 const draft = reactive<Record<string, any>>({})
 const saveStatus = ref<'clean' | 'dirty' | 'saving' | 'error'>('clean')
@@ -358,37 +367,50 @@ onUnmounted(() => {
 
 <template>
   <div v-if="mod">
-    <div class="app-page-header">
-      <div class="module-title-block">
-        <v-btn
-          variant="text"
-          icon="mdi-arrow-left"
-          size="small"
-          title="返回插件列表"
-          @click="router.push('/modules')"
-        />
-        <div>
-          <h1 class="app-page-title">{{ mod.name }}</h1>
-          <div class="app-page-subtitle">{{ mod.description }}</div>
-        </div>
+    <div class="app-page-header d-flex align-center flex-wrap gap-2">
+      <div class="d-flex align-center gap-2 flex-wrap">
+        <v-btn variant="text" icon="mdi-arrow-left" size="small" title="返回插件列表" @click="router.push('/modules')" />
+        <h1 class="app-page-title">{{ mod.name }}</h1>
+        <!-- 来源 / 版本：与插件卡片的编目信息一致 -->
+        <v-chip size="small" variant="tonal" :color="isBuiltinModule(mod) ? 'default' : 'teal'">
+          {{ isBuiltinModule(mod) ? '内置' : '第三方' }}
+        </v-chip>
+        <v-chip v-if="mod.version" size="small" variant="tonal">v{{ mod.version }}</v-chip>
+        <v-tooltip location="top" :text="PERMISSION_TOOLTIP">
+          <template #activator="{ props }">
+            <v-chip v-bind="props" size="small" variant="tonal" :color="PERMISSION_COLOR[mod.permission] || 'default'">
+              {{ PERMISSION_LABELS[mod.permission] || mod.permission }}
+            </v-chip>
+          </template>
+        </v-tooltip>
+        <v-chip v-if="mod.account_id" size="small" variant="tonal">{{ bots.currentBot?.name ?? mod.account_id }}</v-chip>
       </div>
-      <div class="d-flex flex-wrap gap-2">
-        <v-btn size="small" variant="text" prepend-icon="mdi-refresh" @click="reloadModule">
-          重新加载
+      <v-spacer />
+      <div class="d-flex align-center flex-wrap gap-2">
+        <v-chip size="small" variant="tonal" :color="mod.enabled ? 'success' : 'grey'">
+          当前状态：{{ moduleStatusText }}
+        </v-chip>
+        <v-btn size="small" variant="text" prepend-icon="mdi-cube-outline" @click="router.push('/modules')">
+          返回插件列表
+        </v-btn>
+        <v-btn size="small" variant="text" @click="router.push('/modules')">
+          {{ mod.enabled ? '去列表停用' : '去列表启用' }}
         </v-btn>
       </div>
     </div>
+    <div class="app-page-subtitle" style="padding-left: 44px">{{ mod.description }}</div>
 
-    <div class="app-toolbar">
-      <SaveStatusBar :status="saveStatus" autosave />
-      <span class="app-muted">{{ moduleStatusText }}</span>
-      <span class="app-muted">
-        {{ isBuiltinModule(mod) ? '内置插件' : '第三方插件' }}<template v-if="mod.version"> · v{{ mod.version }}</template>
-      </span>
-      <span class="app-muted" :title="PERMISSION_TOOLTIP">
-        权限：{{ PERMISSION_LABELS[mod.permission] || mod.permission }}
-      </span>
-      <span v-if="mod.account_id" class="app-muted">账号：{{ bots.currentBot?.name ?? mod.account_id }}</span>
+    <div class="d-flex align-center flex-wrap gap-2 mt-3 mb-2">
+      <SaveStatusBar :status="saveStatus" autosave hint="改动会自动保存并生效" />
+      <v-btn
+        size="small"
+        variant="text"
+        prepend-icon="mdi-refresh"
+        title="切换账号实例或插件异常时使用；会先保存当前改动"
+        @click="reloadModule"
+      >
+        重新加载
+      </v-btn>
     </div>
 
     <PluginStatusBanner
@@ -482,7 +504,7 @@ onUnmounted(() => {
           <v-chip v-if="group.preview?.degraded" size="x-small" color="warning" variant="tonal">已降级</v-chip>
         </div>
         <div class="text-caption mt-2">
-          群与成员范围在「回复与权限」管理
+          在「回复与权限」里看谁能触发回复 →
           <v-btn
             size="x-small"
             variant="text"
@@ -494,22 +516,26 @@ onUnmounted(() => {
       </v-card-text>
     </v-card>
 
-    <!-- 插件设置：有插件自带页面时用 Tab 与配置表单区分，避免两套界面同时出现 -->
+    <!-- 插件设置：有插件自带设置页时用 Tab 与基础设置区分，避免两套界面同时出现 -->
     <v-card v-if="hasPluginPage || hasConfigForm" variant="outlined" class="mb-4">
+      <v-card-title class="d-flex align-center flex-wrap gap-2">
+        <v-icon icon="mdi-cogs" class="mr-2" color="primary" /> 插件设置
+      </v-card-title>
       <v-tabs
         v-if="hasPluginPage && hasConfigForm"
         v-model="configTab"
         density="comfortable"
         color="primary"
       >
-        <v-tab value="plugin">插件页面</v-tab>
-        <v-tab value="basic">插件设置</v-tab>
+        <v-tab value="plugin">插件自带设置</v-tab>
+        <v-tab value="basic">基础设置</v-tab>
       </v-tabs>
       <v-card-text>
         <template v-if="hasPluginPage && hasConfigForm">
           <v-window v-model="configTab">
             <v-window-item value="plugin">
-              <iframe :src="pluginSrc" class="plugin-frame" title="插件页面" @load="onPluginLoad" />
+              <div class="text-caption mb-2" style="opacity: 0.65">由插件自己提供，保存与生效方式由插件决定。</div>
+              <iframe :src="pluginSrc" class="plugin-frame" title="插件设置页" @load="onPluginLoad" />
             </v-window-item>
             <v-window-item value="basic">
               <ConfigForm
@@ -523,7 +549,8 @@ onUnmounted(() => {
           </v-window>
         </template>
         <template v-else-if="hasPluginPage">
-          <iframe :src="pluginSrc" class="plugin-frame" title="插件页面" @load="onPluginLoad" />
+          <div class="text-caption mb-2" style="opacity: 0.65">由插件自己提供，保存与生效方式由插件决定。</div>
+          <iframe :src="pluginSrc" class="plugin-frame" title="插件设置页" @load="onPluginLoad" />
         </template>
         <template v-else>
           <ConfigForm
@@ -534,6 +561,26 @@ onUnmounted(() => {
             @change="onChange"
           />
         </template>
+      </v-card-text>
+    </v-card>
+
+    <!-- 账号级「谁能回复」统一在回复与权限维护，这里只放链接，避免重复编辑 -->
+    <v-card variant="outlined" class="mb-4">
+      <v-card-title class="d-flex align-center">
+        <v-icon icon="mdi-shield-account-outline" class="mr-2" color="primary" /> 谁能回复这个账号
+      </v-card-title>
+      <v-card-text>
+        <div class="text-caption mb-2" style="opacity: 0.65">
+          群与成员范围在「回复与权限」里统一管理，这里不再重复编辑。
+        </div>
+        <v-btn
+          size="small"
+          variant="tonal"
+          prepend-icon="mdi-arrow-right"
+          @click="router.push({ path: '/reply', query: { tab: 'who' } })"
+        >
+          去「回复与权限」
+        </v-btn>
       </v-card-text>
     </v-card>
     </div>
@@ -558,17 +605,6 @@ onUnmounted(() => {
 .plugin-broken {
   opacity: 0.55;
   pointer-events: none;
-}
-
-.module-title-block {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.module-title-block .app-page-title {
-  overflow-wrap: anywhere;
 }
 
 .plugin-frame {
