@@ -226,7 +226,7 @@ def test_responder_layer_denies_and_is_explained():
     assert decision.reason == REASON_RESPONDER_SKIPPED
     assert decision.decided_by == STAGE_RESPONDER
     check = decision.check(STAGE_RESPONDER)
-    assert check is not None and "policy=dedupe" in check.detail
+    assert check is not None and "同群只回一次" in check.detail, "仲裁原因要给用户看得懂的说明"
 
 
 def test_responder_selection_keeps_other_layers_intact():

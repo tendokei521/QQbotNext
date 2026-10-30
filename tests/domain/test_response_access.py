@@ -88,7 +88,7 @@ def test_blacklist_hit_is_denied_with_detail():
     check = user_scope_check("blacklist", ["42"], 42)
     assert check.allowed is False
     assert check.reason == REASON_USER_BLACKLISTED
-    assert "user=42" in check.detail
+    assert "用户 42" in check.detail
 
 
 def test_group_scope_check_uses_group_id():

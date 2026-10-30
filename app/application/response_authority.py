@@ -53,7 +53,9 @@ from app.domain.response_access import (
     quiet_check,
     remember_decision,
     responder_check,
+    responder_policy_label,
     scene_check,
+    tier_label,
     user_scope_check,
 )
 
@@ -348,7 +350,7 @@ class ResponseAuthority:
             )
         else:
             actual = ""
-            checks.append(not_evaluated_check("identity", detail=f"未指定发信人身份（要求 {required}）"))
+            checks.append(not_evaluated_check("identity", detail=f"未指定发信人身份（要求 {tier_label(required)}）"))
 
         if user_id is not None and user_id != "":
             if permission is not None:
@@ -536,7 +538,10 @@ class ResponseAuthority:
             return _responder_bundle(
                 not_evaluated_check(
                     STAGE_RESPONDER,
-                    detail=f"当前没有在线候选（policy={decision.policy}），响应权不参与判定",
+                    detail=(
+                        f"当前没有在线候选（策略：{responder_policy_label(decision.policy)}），"
+                        "响应权不参与判定"
+                    ),
                 ),
                 decision=decision,
             )

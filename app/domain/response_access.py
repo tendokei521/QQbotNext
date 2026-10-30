@@ -233,7 +233,7 @@ def validate_permission_values(permission: Mapping[str, Any] | None) -> list[str
     data = permission if isinstance(permission, Mapping) else {}
     if "role_min" in data:
         if str(data.get("role_min") or "").strip().lower() not in TIERS:
-            errors.append("触发身份只能是：" + "、".join(TIERS))
+            errors.append("触发身份只能是：" + "、".join(tier_label(item) for item in TIERS))
     if "user_mode" in data:
         if str(data.get("user_mode") or "").strip().lower() not in ("", "blacklist", "whitelist"):
             errors.append("用户名单模式只能是 blacklist / whitelist / 空（不限制）")
@@ -401,11 +401,15 @@ DECISION_ATTR = "response_decision"
 
 
 def remember_decision(event: Any, decision: ResponseDecision) -> None:
-    """把本轮判定挂到事件上（流水线/统计/排障复用同一份结论）。"""
+    """把本轮判定挂到事件上（流水线/统计/排障复用同一份结论）。
+
+    只忽略"事件对象不允许设属性"这一种情况（冻结/代理对象）；异常类型写窄，
+    便于 ``test_no_silent_except`` 区分"故意不处理"与"裸吞"。
+    """
     try:
         setattr(event, DECISION_ATTR, decision)
-    except Exception:  # noqa: BLE001 —— 事件对象不允许设属性时忽略（判定仍然返回）
-        pass
+    except (AttributeError, TypeError):
+        return
 
 
 def stored_decision(event: Any) -> ResponseDecision | None:
@@ -473,7 +477,7 @@ def scene_check(
         reason = REASON_MUTED
     else:
         reason = REASON_PRIVATE_DISABLED if is_private else REASON_GROUP_DISABLED
-    detail = "私聊" if is_private else (f"group={channel_id}" if channel_id not in (None, "") else "")
+    detail = "私聊" if is_private else (f"群 {channel_id}" if channel_id not in (None, "") else "")
     return AccessCheck(STAGE_SCENE, ok, reason, source, detail)
 
 
@@ -490,17 +494,19 @@ def responder_check(
     """多账号：本账号这一轮是否被响应权策略选中。
 
     ``reason`` 是仲裁器给出的结构化原因（``dedupe`` / ``primary`` /
-    ``primary-unavailable:fallback-open`` / ``no-candidates`` …），原样放进 detail，
-    UI 与日志据此解释「为什么是这个号」。
+    ``primary-unavailable:fallback-open`` / ``no-candidates`` …），这里翻成中文，
+    保证 UI 与日志都不露出内部 token。
     """
     ok = bool(allowed)
-    detail_parts = [f"policy={policy}", f"account={account_id}"]
+    detail_parts = [f"策略：{responder_policy_label(policy)}"]
     if reason:
-        detail_parts.append(f"reason={reason}")
+        detail_parts.append(f"原因：{responder_reason_label(reason)}")
+    if account_id not in (None, ""):
+        detail_parts.append(f"本账号：{account_id}")
     if candidates:
-        detail_parts.append("candidates=" + ",".join(str(item) for item in candidates))
+        detail_parts.append("候选：" + "、".join(str(item) for item in candidates))
     if degraded:
-        detail_parts.append("degraded=true")
+        detail_parts.append("已降级")
     if ok:
         check_reason = REASON_OK
     elif str(reason or "") == "no-candidates":
@@ -522,7 +528,7 @@ def group_scope_check(
     mode_text = str(mode or "").strip().lower()
     listed = _listed(values, group_id)
     reason = scope_reason(mode_text, listed, kind="group")
-    detail = f"group={group_id} · mode={mode_text or 'unset'}"
+    detail = f"群 {group_id} · {scope_mode_label(mode_text)}"
     if reason is None:
         return AccessCheck(STAGE_GROUP_SCOPE, True, REASON_OK, source, detail)
     return AccessCheck(STAGE_GROUP_SCOPE, False, reason, source, detail)
@@ -539,7 +545,7 @@ def user_scope_check(
     mode_text = str(mode or "").strip().lower()
     listed = _listed(values, user_id)
     reason = scope_reason(mode_text, listed, kind="user")
-    detail = f"user={user_id} · mode={mode_text or 'unset'}"
+    detail = f"用户 {user_id} · {scope_mode_label(mode_text)}"
     if reason is None:
         return AccessCheck(STAGE_USER_SCOPE, True, REASON_OK, source, detail)
     return AccessCheck(STAGE_USER_SCOPE, False, reason, source, detail)
@@ -557,7 +563,7 @@ def identity_check(
     need = normalize_tier(required, "member")
     have = normalize_tier(actual, "member")
     ok = tier_allows(need, have, is_private=is_private)
-    detail = f"需要 {need}（{source}）· 实际 {have}（{actual_source}）"
+    detail = f"需要 {tier_label(need)} · 实际 {tier_label(have)}"
     return AccessCheck(
         STAGE_IDENTITY, ok, REASON_OK if ok else REASON_IDENTITY_INSUFFICIENT, source, detail
     )
@@ -618,6 +624,73 @@ def _as_id_set(value: Any) -> set[str]:
 def _listed(values: Any, item_id: Any) -> bool:
     key = str(item_id or "").strip()
     return bool(key) and key in _as_id_set(values)
+
+
+#: 档位的中文名（UI/日志共用一份，避免页面上露出 ``member``/``owner`` 这类内部值）
+TIER_LABELS: dict[str, str] = {
+    "everyone": "所有人",
+    "member": "普通成员",
+    "group_admin": "群管理员",
+    "group_owner": "群主",
+    "manager": "管理者",
+    "owner": "拥有者",
+}
+
+#: 响应权策略的中文名（多账号那一层的解释口径）
+RESPONDER_POLICY_LABELS: dict[str, str] = {
+    "all": "所有账号各自响应",
+    "dedupe": "同群只回一次",
+    "delegate": "固定由指定账号响应",
+    "leader": "主备接管",
+}
+
+#: 仲裁原因的中文名（原始原因是结构化 token，展示时翻成人话）
+RESPONDER_REASON_LABELS: dict[str, str] = {
+    "all": "各自响应",
+    "dedupe": "去重后选一个",
+    "primary": "由指定账号响应",
+    "no-candidates": "没有可用账号",
+    "missing-primary": "未指定主账号",
+    "primary-unavailable": "指定账号不可用",
+}
+
+
+def tier_label(value: Any, default: str = "普通成员") -> str:
+    """档位 → 中文名（未知值原样返回，不猜）。"""
+    text = str(value or "").strip().lower()
+    return TIER_LABELS.get(text, text or default)
+
+
+def responder_policy_label(policy: Any) -> str:
+    text = str(policy or "").strip().lower() or "all"
+    return RESPONDER_POLICY_LABELS.get(text, text)
+
+
+def responder_reason_label(reason: Any) -> str:
+    """``primary-unavailable:fallback-open`` → 「指定账号不可用，降级放行」。"""
+    text = str(reason or "").strip()
+    if not text:
+        return "未说明"
+    base, _, suffix = text.partition(":")
+    label = RESPONDER_REASON_LABELS.get(base, base)
+    if suffix == "fallback-open":
+        return f"{label}，降级放行"
+    if suffix == "closed":
+        return f"{label}，按配置不响应"
+    return label
+
+
+#: 名单模式的中文名（UI/日志共用）
+SCOPE_MODE_LABELS: dict[str, str] = {
+    "blacklist": "黑名单",
+    "whitelist": "白名单",
+    "": "不限制",
+}
+
+
+def scope_mode_label(mode: Any) -> str:
+    text = str(mode or "").strip().lower()
+    return SCOPE_MODE_LABELS.get(text, text)
 
 
 def scope_reason(mode: str, listed: bool, *, kind: str) -> str | None:
