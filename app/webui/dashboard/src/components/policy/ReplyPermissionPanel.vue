@@ -99,6 +99,9 @@ watch(
       <v-spacer />
       <SaveStatusBar v-if="showSaveStatus" :status="agent.saveStatus" autosave />
     </div>
+    <div class="text-caption app-muted mb-3">
+      这里的身份档位对所有群生效；要按群收窄，在「群与私聊 → 该群 → 高级规则 → 触发身份」里单独设置。
+    </div>
 
     <v-alert v-if="agent.loadError" type="warning" variant="tonal" density="compact" class="mb-3">
       <div class="d-flex align-center flex-wrap gap-2">

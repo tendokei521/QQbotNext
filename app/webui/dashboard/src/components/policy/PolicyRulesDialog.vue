@@ -47,6 +47,63 @@ const quietHours = ref('')
 const userMode = ref<'inherit' | 'blacklist' | 'whitelist'>('inherit')
 const userList = ref('')
 
+/** 触发身份档位：账号级默认 → 本群可收窄；inherit = 本层不覆盖 */
+type RoleMin = 'inherit' | 'everyone' | 'member' | 'group_admin' | 'group_owner' | 'manager' | 'owner'
+const roleMin = ref<RoleMin>('inherit')
+
+const ROLE_MIN_ITEMS: { title: string; value: RoleMin }[] = [
+  { title: '跟随账号默认', value: 'inherit' },
+  { title: '所有人', value: 'everyone' },
+  { title: '普通成员', value: 'member' },
+  { title: '群管理员', value: 'group_admin' },
+  { title: '群主', value: 'group_owner' },
+  { title: '管理者', value: 'manager' },
+  { title: '拥有者', value: 'owner' },
+]
+
+const ROLE_LABELS: Record<string, string> = {
+  everyone: '所有人',
+  member: '普通成员',
+  group_admin: '群管理员',
+  group_owner: '群主',
+  manager: '管理者',
+  owner: '拥有者',
+}
+
+function roleLabel(role?: string | null): string {
+  if (!role) return '所有人'
+  return ROLE_LABELS[role] || role
+}
+
+/** 未在账号/场景/群任一层写过 role_min 时，实际档位来自「谁能回复」里的账号级配置 */
+const ROLE_MIN_INHERIT_TEXT = '跟随「谁能回复」里的身份档位'
+
+const inheritedRoleMin = computed(() => {
+  const value = (resolved.value.permission || {}).role_min
+  return value ? roleLabel(String(value)) : ROLE_MIN_INHERIT_TEXT
+})
+
+/** 本层已覆盖时，预览/提示直接用本层选择；未覆盖才显示上层生效值与来源 */
+const effectiveRoleMin = computed(() =>
+  roleMin.value === 'inherit' ? inheritedRoleMin.value : roleLabel(roleMin.value),
+)
+const effectiveRoleSource = computed(() =>
+  roleMin.value === 'inherit' ? sourceLabel('role_min') : '本群规则',
+)
+const roleMinHint = computed(() => {
+  if (roleMin.value !== 'inherit') return '已在本群单独设置，保存后按这里生效'
+  const value = (resolved.value.permission || {}).role_min
+  return value
+    ? `当前生效：${inheritedRoleMin.value}（${sourceLabel('role_min')}）`
+    : `未在本群设置，按${ROLE_MIN_INHERIT_TEXT}（对所有群生效）`
+})
+
+/** 来源中文化：与「生效预览」共用一份映射 */
+function sourceLabel(key: string): string {
+  const source = String(sources.value[key] || 'default')
+  return { default: '默认', account: '账号规则', scene: '场景默认', channel: '本群规则' }[source] || source
+}
+
 const TRIGGER_ITEMS: { title: string; value: TriggerMode }[] = [
   { title: '沿用现有', value: 'inherit' },
   { title: '仅 @ 我', value: 'at' },
@@ -89,12 +146,9 @@ const inheritedProbability = computed(
 
 /** 生效预览：值 + 来源（default/account/scene/channel），回答"为什么是这样" */
 const previewRows = computed(() => {
-  const sourceLabel = (key: string) => {
-    const source = String(sources.value[key] || 'default')
-    return { default: '默认', account: '账号规则', scene: '场景默认', channel: '本群规则' }[source] || source
-  }
   return [
     { label: '触发方式', value: inheritedTrigger.value, source: sourceLabel('trigger_mode') },
+    { label: '触发身份', value: effectiveRoleMin.value, source: effectiveRoleSource.value },
     { label: '回复冷却', value: inheritedCooldown.value, source: sourceLabel('reply_cooldown') },
     { label: '合并等待', value: inheritedDebounce.value, source: sourceLabel('message_debounce_seconds') },
     { label: '免打扰', value: inheritedQuiet.value, source: sourceLabel('quiet_hours') },
@@ -152,6 +206,9 @@ function applyOverride(row: Record<string, any> | null) {
     ? permission.user_mode
     : 'inherit'
   userList.value = (permission.user_list || []).join('\n')
+  roleMin.value = Object.prototype.hasOwnProperty.call(permission, 'role_min') && permission.role_min
+    ? (String(permission.role_min) as RoleMin)
+    : 'inherit'
 }
 
 async function load() {
@@ -212,6 +269,11 @@ function buildPayload(): { config: Record<string, any>; permission: Record<strin
   } else {
     permission.user_mode = userMode.value
     permission.user_list = parseLines()
+  }
+  if (roleMin.value === 'inherit') {
+    clear.push('role_min')
+  } else {
+    permission.role_min = roleMin.value
   }
   return { config, permission, clear }
 }
@@ -278,7 +340,7 @@ watch(
     @update:model-value="(v: boolean) => emit('update:modelValue', v)"
   >
     <v-card>
-      <v-card-title class="d-flex align-center">
+      <v-card-title class="d-flex align-center flex-wrap gap-1 dialog-title">
         <v-icon icon="mdi-tune" class="mr-2" color="primary" />
         {{ title || (channelId ? '本群专属规则' : '账号专属规则') }}
         <v-spacer />
@@ -337,6 +399,21 @@ watch(
             </v-col>
           </v-row>
 
+          <v-select
+            v-model="roleMin"
+            :items="ROLE_MIN_ITEMS"
+            label="触发身份"
+            density="comfortable"
+            variant="outlined"
+            :hint="roleMinHint"
+            persistent-hint
+            class="mb-3"
+          />
+          <HintText
+            class="mb-3"
+            text="身份低于这个档位的成员不能触发回复；跟随账号默认则不覆盖本群。"
+          />
+
           <v-row dense>
             <v-col cols="12" md="6">
               <v-text-field
@@ -349,6 +426,7 @@ watch(
                 persistent-hint
                 density="comfortable"
                 variant="outlined"
+                class="mb-3"
               />
             </v-col>
             <v-col cols="12" md="6">
@@ -362,6 +440,7 @@ watch(
                 persistent-hint
                 density="comfortable"
                 variant="outlined"
+                class="mb-3"
               />
             </v-col>
           </v-row>
@@ -425,3 +504,12 @@ watch(
     </v-card>
   </v-dialog>
 </template>
+
+<style scoped>
+/* 群名可能很长：窄屏允许换行，不要被标题行截断 */
+.dialog-title {
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.4;
+}
+</style>

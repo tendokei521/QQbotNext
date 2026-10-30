@@ -8,12 +8,15 @@
  * - 谁能回复：按账号的响应权限档位、拥有者/管理者名册、高危工具审批
  *   （字段分组来自 `src/agent/ai-panel.json::reply.groups`，见 ReplyPermissionPanel）。
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useBotsStore } from '@/stores/bots'
 import {
   triggerModeLabel,
   usePolicyStore,
+  type PolicyDecision,
+  type PolicyDecisionCheck,
+  type PolicyDecisionResult,
   type PolicyMatrixRow,
   type SwitchValue,
 } from '@/stores/policy'
@@ -219,6 +222,173 @@ async function loadWithGroups() {
   }
 }
 
+// ---------- 判定链（「谁能回复」页签顶部） ----------
+/** 身份档位：后端 roles 的展示名，账号级 / 群级共用 */
+const ROLE_LABELS: Record<string, string> = {
+  everyone: '所有人',
+  member: '普通成员',
+  group_admin: '群管理员',
+  group_owner: '群主',
+  manager: '管理者',
+  owner: '拥有者',
+}
+
+function tierLabel(role?: string | null): string {
+  if (!role) return '不限'
+  return ROLE_LABELS[role] || role
+}
+
+/** 判定链来源 → 用户看得懂的位置名 */
+const SOURCE_LABELS: Record<string, string> = {
+  default: '默认',
+  account: '账号默认',
+  scene: '场景默认',
+  channel: '该群',
+  muted: '静音',
+  agent_config: 'Agent 配置',
+  module_authority: '模块权限',
+  module: '模块声明',
+  single_service: '单一服务',
+  responder: '多账号仲裁',
+  all: '所有账号',
+  global: '全局',
+  role: '按身份',
+}
+
+function sourceLabel(source?: string | null): string {
+  if (!source) return '默认'
+  return SOURCE_LABELS[source] || source
+}
+
+const decisionChannel = ref<string>('')
+const decisionUserId = ref('')
+const decisionRole = ref<string>('')
+const decisionLoading = ref(false)
+const decisionError = ref('')
+const decisionResult = ref<PolicyDecisionResult | null>(null)
+const decision = computed<PolicyDecision | null>(() => decisionResult.value?.decision || null)
+
+const accountDefaultEl = ref<HTMLElement | null>(null)
+const permissionPanelEl = ref<HTMLElement | null>(null)
+
+const channelOptions = computed(() => [
+  { title: '私聊 / 不限', value: '' },
+  ...policy.rows.map((row) => ({ title: `${row.name}（${row.group_id}）`, value: row.group_id })),
+])
+
+const roleOptions = computed(() => [
+  { title: '不评估', value: '' },
+  ...(decisionResult.value?.roles || Object.keys(ROLE_LABELS)).map((role) => ({
+    title: tierLabel(role),
+    value: role,
+  })),
+])
+
+async function runDecision() {
+  if (!bots.currentAccountId) {
+    notify.push('请先选择一个账号', 'warning')
+    return
+  }
+  decisionLoading.value = true
+  decisionError.value = ''
+  try {
+    decisionResult.value = await policy.fetchDecision({
+      channelId: decisionChannel.value || null,
+      userId: decisionUserId.value,
+      role: decisionRole.value || null,
+    })
+  } catch (err) {
+    decisionError.value = errorMessage(err)
+    decisionResult.value = null
+  } finally {
+    decisionLoading.value = false
+  }
+}
+
+/** 「跳到实际生效的那一层」：只在本页切页签/滚动/开本群规则，不跳新页面 */
+interface JumpAction {
+  label: string
+  target: 'group' | 'account' | 'permission'
+}
+
+function jumpsFor(state: PolicyDecision | null): JumpAction[] {
+  if (!state) return []
+  const jumps: JumpAction[] = []
+  const add = (target: JumpAction['target'], label: string) => {
+    if (!jumps.some((item) => item.target === target)) jumps.push({ target, label })
+  }
+  const decidedBy = String(state.decided_by || '')
+  if (decidedBy === 'channel' || decidedBy === 'muted') add('group', '打开该群规则')
+  else if (decidedBy === 'account' || decidedBy === 'scene' || decidedBy === 'default') add('account', '去账号默认')
+  else if (decidedBy) add('permission', '去身份档位')
+  if (state.required_tier_source === 'channel') add('group', '去该群触发身份')
+  else if (state.required_tier_source === 'account') add('permission', '去身份档位')
+  return jumps.slice(0, 2)
+}
+
+async function doJump(jump: JumpAction) {
+  if (jump.target === 'permission') {
+    await nextTick()
+    permissionPanelEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    return
+  }
+  tab.value = 'groups'
+  await nextTick()
+  if (jump.target === 'account') {
+    accountDefaultEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    return
+  }
+  const state = decision.value
+  if (state?.channel_id) {
+    const row = policy.rows.find((item) => item.group_id === state.channel_id)
+    openRules(state.channel_id, `本群专属规则 · ${row?.name || state.channel_id}`)
+  }
+}
+
+/** 每一层右侧的「去哪改」快捷入口 */
+function checkJump(check: PolicyDecisionCheck): JumpAction | null {
+  if (check.source === 'channel') return { label: '该群规则', target: 'group' }
+  if (check.source === 'account' || check.source === 'scene' || check.source === 'default') {
+    return { label: '账号默认', target: 'account' }
+  }
+  if (check.source === 'agent_config') return { label: '身份档位', target: 'permission' }
+  return null
+}
+
+function checkJumpLabel(check: PolicyDecisionCheck): string {
+  return checkJump(check)?.label || ''
+}
+
+function onCheckJump(check: PolicyDecisionCheck) {
+  const jump = checkJump(check)
+  if (jump) void doJump(jump)
+}
+
+/** 结论一句话 + 多账号响应权 / 身份要求，文案集中在这里，模板里只插值 */
+const decisionConclusion = computed(() => {
+  const state = decision.value
+  if (!state) return ''
+  return state.allowed ? '会回复' : `不会回复 · 被「${state.decided_by_label}」拦下`
+})
+
+const responderLine = computed(() => {
+  const responder = decision.value?.responder
+  if (!responder) return '未设置'
+  const parts = [responder.policy || '未设置']
+  if (responder.responders?.length) parts.push(`由 ${responder.responders.join('、')} 响应`)
+  if (responder.candidates?.length) parts.push(`候选 ${responder.candidates.join('、')}`)
+  if (responder.degraded) parts.push('已降级')
+  return parts.join(' · ')
+})
+
+const tierLine = computed(() => {
+  const state = decision.value
+  if (!state) return ''
+  const parts = [`身份要求：${tierLabel(state.required_tier)}（${sourceLabel(state.required_tier_source)}）`]
+  if (state.actual_tier) parts.push(`实际：${tierLabel(state.actual_tier)}`)
+  return parts.join(' · ')
+})
+
 onMounted(async () => {
   if (!bots.bots.length) {
     // 账号列表加载失败不该冒成 unhandled rejection（全局会弹「页面出现异常」）
@@ -326,7 +496,8 @@ watch(
         </div>
 
         <!-- 账号默认：群聊/私聊各自的三态；没单独设置的会话按这里的默认走 -->
-        <v-card variant="outlined" class="mb-4">
+        <div ref="accountDefaultEl">
+          <v-card variant="outlined" class="mb-4">
           <v-card-title class="d-flex align-center">
             <v-icon icon="mdi-tune-variant" class="mr-2" color="primary" /> 账号默认
           </v-card-title>
@@ -359,7 +530,8 @@ watch(
               未单独设置的按这里，单独设置的优先
             </div>
           </v-card-text>
-        </v-card>
+          </v-card>
+        </div>
 
         <v-progress-linear v-if="policy.loading" indeterminate color="primary" class="mb-3" />
 
@@ -486,7 +658,113 @@ watch(
       </v-window-item>
 
       <v-window-item value="who">
-        <ReplyPermissionPanel />
+        <v-card variant="outlined" class="mb-4">
+          <v-card-title class="d-flex align-center flex-wrap gap-2">
+            <v-icon icon="mdi-source-branch" class="mr-2" color="primary" />
+            判定链
+            <v-spacer />
+            <v-btn
+              size="small"
+              color="primary"
+              variant="tonal"
+              prepend-icon="mdi-magnify"
+              :loading="decisionLoading"
+              :disabled="!bots.currentAccountId"
+              @click="runDecision"
+            >
+              查看判定链
+            </v-btn>
+          </v-card-title>
+          <v-card-text>
+            <div class="app-form-grid">
+              <v-select
+                v-model="decisionChannel"
+                :items="channelOptions"
+                label="群聊"
+                density="compact"
+                variant="outlined"
+                hide-details
+              />
+              <v-text-field
+                v-model="decisionUserId"
+                label="发信人 QQ"
+                placeholder="可留空"
+                density="compact"
+                variant="outlined"
+                hide-details
+              />
+              <v-select
+                v-model="decisionRole"
+                :items="roleOptions"
+                label="身份档位"
+                density="compact"
+                variant="outlined"
+                hide-details
+              />
+            </div>
+            <div class="text-caption mt-2" style="opacity: 0.65">
+              用当前账号预览一条消息的真实判定过程；留空的项不评估。
+            </div>
+
+            <v-alert v-if="decisionError" type="error" variant="tonal" density="compact" class="mt-3">
+              {{ decisionError }}
+            </v-alert>
+
+            <template v-if="decision">
+              <v-alert :type="decision.allowed ? 'success' : 'error'" variant="tonal" density="compact" class="mt-3">
+                <div class="font-weight-medium">{{ decisionConclusion }}</div>
+                <div v-if="decision.hint" class="text-caption mt-1">{{ decision.hint }}</div>
+                <div v-if="jumpsFor(decision).length" class="d-flex flex-wrap gap-2 mt-2">
+                  <v-btn
+                    v-for="jump in jumpsFor(decision)"
+                    :key="jump.label"
+                    size="small"
+                    variant="tonal"
+                    append-icon="mdi-arrow-right"
+                    @click="doJump(jump)"
+                  >
+                    {{ jump.label }}
+                  </v-btn>
+                </div>
+              </v-alert>
+
+              <div class="decision-checks mt-3">
+                <div v-for="check in decision.checks" :key="check.stage" class="decision-row">
+                  <v-icon
+                    :icon="check.allowed ? 'mdi-check-circle-outline' : 'mdi-close-circle-outline'"
+                    :color="check.allowed ? 'success' : 'error'"
+                    size="18"
+                  />
+                  <span class="decision-stage">{{ check.label }}</span>
+                  <v-chip size="x-small" :color="check.allowed ? 'success' : 'error'" variant="tonal">
+                    {{ check.allowed ? '通过' : '拦截' }}
+                  </v-chip>
+                  <span class="text-caption app-muted">{{ sourceLabel(check.source) }}</span>
+                  <span v-if="check.detail" class="text-caption decision-detail">{{ check.detail }}</span>
+                  <v-btn
+                    v-if="checkJumpLabel(check)"
+                    size="x-small"
+                    variant="text"
+                    color="primary"
+                    class="decision-jump"
+                    @click="onCheckJump(check)"
+                  >
+                    {{ checkJumpLabel(check) }}
+                  </v-btn>
+                </div>
+              </div>
+
+              <div class="decision-extra mt-3">
+                <div class="text-caption">响应权：{{ responderLine }}</div>
+                <div class="text-caption">{{ tierLine }}</div>
+              </div>
+            </template>
+          </v-card-text>
+        </v-card>
+
+        <div ref="permissionPanelEl">
+          <ReplyPermissionPanel />
+        </div>
       </v-window-item>
 
     </v-window>
@@ -522,5 +800,38 @@ watch(
 .row-more {
   width: 40px;
   height: 40px;
+}
+
+/* 判定链：一层一行，窄屏自动换行 */
+.decision-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px dashed rgba(var(--v-theme-on-surface), 0.07);
+}
+
+.decision-stage {
+  font-size: 13px;
+  font-weight: 500;
+  min-width: 76px;
+}
+
+.decision-detail {
+  flex: 1 1 220px;
+  min-width: 0;
+  opacity: 0.65;
+}
+
+.decision-jump {
+  margin-left: auto;
+}
+
+.decision-extra {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: rgba(var(--v-theme-on-surface), 0.65);
 }
 </style>

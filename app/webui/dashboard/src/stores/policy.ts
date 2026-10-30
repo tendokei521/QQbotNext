@@ -72,6 +72,51 @@ export interface PolicyDetail {
 /** 三态：继承账号级默认 / 允许 / 禁止 */
 export type SwitchValue = 'inherit' | 'on' | 'off'
 
+/** 判定链的一层：与运行时同一套语义，allowed=false 表示这一层拦下 */
+export interface PolicyDecisionCheck {
+  stage: string
+  label: string
+  allowed: boolean
+  reason: string
+  /** default / account / scene / channel / muted / agent_config / module_authority / module / single_service / responder */
+  source: string
+  detail?: string
+}
+
+/** 同群多账号的响应权仲裁结果 */
+export interface PolicyDecisionResponder {
+  policy: string
+  responders: string[]
+  candidates: string[]
+  degraded?: boolean | string
+}
+
+export interface PolicyDecision {
+  account_id: string
+  capability: string
+  channel_id: string | null
+  allowed: boolean
+  reason: string
+  decided_by: string
+  decided_by_label: string
+  hint: string
+  checks: PolicyDecisionCheck[]
+  enabled: boolean
+  enabled_source: string
+  required_tier: string | null
+  required_tier_source: string
+  actual_tier: string | null
+  config: Record<string, any>
+  sources: Record<string, string>
+  responder: PolicyDecisionResponder
+}
+
+export interface PolicyDecisionResult {
+  decision: PolicyDecision
+  roles: string[]
+  stages: { stage: string; label: string }[]
+}
+
 /**
  * 「回复设置」的数据中心：群列表 + 每群开关。
  *
@@ -250,6 +295,40 @@ export const usePolicyStore = defineStore('policy', () => {
     return res.data as PolicyDetail
   }
 
+  /**
+   * 判定链预览：给定群/发信人/身份，问后端「这条消息会不会回、被哪一层拦」。
+   * 与运行时同一套语义，前端不自行推断；失败直接抛出，由调用方按现有风格提示。
+   */
+  async function fetchDecision(options: {
+    channelId?: string | null
+    userId?: string
+    role?: string | null
+    capability?: string
+  } = {}): Promise<PolicyDecisionResult | null> {
+    const aid = accountId.value
+    if (!aid) return null
+    const params: Record<string, string> = {
+      account_id: aid,
+      capability: options.capability || 'agent',
+    }
+    if (options.channelId) params.channel_id = options.channelId
+    const userId = String(options.userId || '').trim()
+    if (userId) params.user_id = userId
+    if (options.role) params.role = options.role
+    const res = await http.get('/api/policy/decision', { params })
+    const body = (res.data || {}) as {
+      decision?: PolicyDecision
+      roles?: string[]
+      stages?: { stage: string; label: string }[]
+    }
+    if (!body.decision) return null
+    return {
+      decision: body.decision,
+      roles: body.roles || [],
+      stages: body.stages || [],
+    }
+  }
+
   /** 写某层覆盖；`clear` 里的键恢复继承 */
   async function savePolicy(
     channelId: string | null,
@@ -291,6 +370,7 @@ export const usePolicyStore = defineStore('policy', () => {
     bulk,
     mute,
     getPolicy,
+    fetchDecision,
     savePolicy,
   }
 })

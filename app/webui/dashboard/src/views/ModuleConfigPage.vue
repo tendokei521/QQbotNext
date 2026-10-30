@@ -461,8 +461,11 @@ onUnmounted(() => {
         </v-btn>
       </v-card-title>
       <v-card-text>
-        <div class="text-caption mb-3">
+        <div class="text-caption mb-1">
           同一个群同时装了多个账号时，由哪个账号处理这个插件。这里的改动需要点「保存策略」才生效。
+        </div>
+        <div class="text-caption mb-3">
+          这层只决定「同群里由哪个账号响应」，和「这个群能不能触发」是两层；触发条件在「权限与回复」的判定链里核对。
         </div>
         <div v-if="responderLoading" class="text-caption">加载中…</div>
         <div v-else-if="!responderGroups.length" class="text-caption">
