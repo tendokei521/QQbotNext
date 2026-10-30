@@ -199,8 +199,8 @@ event.is_member
 ## 2.5.1 同群多账号：响应权策略（声明制能力）
 
 同一群里配了多个 Bot 账号时，默认**每个账号各自响应**（账号级独立，互不干扰）。
-需要「同一个群里只让一个账号响应某个模块」时，用 WebUI 的**响应权策略**
-（设计见 [`multi-account-design.md`](multi-account-design.md) §6）：
+需要「同一个群里只让一个账号响应某个模块」时，用 WebUI 的**框架功能 → 插件响应策略**
+（总览面板点进该插件的独立配置页；设计见 [`multi-account-design.md`](multi-account-design.md) §6/§9）：
 
 ```python
 from app.plugin import BaseModule
@@ -215,7 +215,7 @@ class Module(BaseModule):
 
 | 层 | 行为 |
 |---|---|
-| WebUI | `/api/modules` 返回 `single_service` 字段；为 false 时**不显示**策略入口 |
+| WebUI | `/api/modules` 返回 `single_service` 字段；`/api/responder/overview` 用已加载实例的声明值分组（为 false 的插件在面板里只标「无需配置」，没有策略入口） |
 | 写入 | `POST /api/modules/{module}/responder` 只收声明模块，其余 403 |
 | 运行期 | 候选集合只含「该账号该模块启用 ∧ 在线 ∧ 在群 ∧ 权限通过」的账号 |
 | 迁移 | 旧 `single_service/multi_group` 自动迁成 `channel_policies`（`delegate/open`），旧行为不变 |

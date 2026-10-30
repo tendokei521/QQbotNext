@@ -74,7 +74,7 @@
 | 8 | 功能模块 | 列表卡片开关 `ModulesPage.vue:451-460` | `bindings(module, account).enabled` | 账号 × 模块 |
 | 9 | 模块详情 | 顶部「启用」开关 `ModuleConfigPage.vue:373` | 同上（同一事实两处入口） | 账号 × 模块 |
 | 10 | 模块详情 | 「响应范围控制」`ModuleConfigPage.vue:467-477` | `bindings(module, account).permission` | 账号 × 模块 |
-| 11 | 模块详情 | 「响应权策略」`ModuleConfigPage.vue:395-458` | `channel_policies(module, group)` | 模块 × 群 |
+| 11 | 框架功能 → 插件响应策略 | 总览卡片 + 单插件页 `ResponderOverviewPage.vue` / `ResponderModulePage.vue` | `channel_policies(module, group)` | 模块 × 群（全局） |
 | 12 | Tool 管理 | System Tools 每工具开关 | `bindings(agent, account).config.tools_disabled` | 账号 × 工具 |
 | 13 | Tool 管理 | OneBot Tools 每工具开关 + 档位展示 | 同上 | 账号 × 工具 |
 | 14 | Tool 管理 | MCP Tools 每工具开关 | 同上 | 账号 × 工具 |
