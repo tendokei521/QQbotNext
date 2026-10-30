@@ -87,7 +87,7 @@ watch(
       </div>
     </v-alert>
 
-    <PageWithSections v-if="showNav" :sections="navItems" nav-title="本页分组" @select="onSelectSection">
+    <PageWithSections v-if="showNav" :sections="navItems" @select="onSelectSection">
       <slot name="before" />
       <v-card variant="outlined" class="mb-4">
         <v-card-text>
