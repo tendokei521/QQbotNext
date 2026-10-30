@@ -234,7 +234,15 @@ router(100) → permission(110) → command(115) → invoke(120) → agent(130)
 
 - `ModulePermissionNode` 与 `AgentNode` 共用同一个仲裁器；Agent 的候选来自
   `agent_manager.runtimes()`，模块的候选来自 `ModuleRegistry`；
-- 被仲裁拦下的原因必须写 DEBUG（`[Responder] skip account=... reason=...`），不再静默。
+- **统一判定链（2026-10-30）**：节点不再各自先判"能不能聊"再判"谁回"，而是由
+  `ResponseAuthority.decide_agent/decide_module` 一次算出 `ResponseDecision`，
+  仲裁结果作为其中的 `responder` 阶段（`policy/responders/candidates/degraded` 一并带出）。
+  入站节点执行 `INBOUND_STAGES`、流水线执行 `PIPELINE_STAGES`，两处共用同一个决策对象；
+  `GET /api/policy/decision` 返回同一条链，页面所见 == 运行时所见。
+- 被仲裁拦下写限流 `log_skip`（`reason=responder_skipped`/`no_candidates` + 候选与策略），
+  不再静默；降级仍由 `ResponderService` 按 `(能力, 群, 原因)` 限频 WARNING。
+- **不要**把 `channel_policies` 合并进 `channel_overrides`：前者回答"这个群由谁响应"，
+  后者回答"这个群能不能聊/怎么回"，合表会让多账号选举与场所开关互相约束。
 
 ---
 

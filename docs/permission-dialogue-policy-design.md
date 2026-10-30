@@ -7,6 +7,14 @@
 > 身份与能力面板 → [`identity-and-capability-console.md`](identity-and-capability-console.md)；
 > 执行清单 → [`plan/permission-dialogue.md`](plan/permission-dialogue.md)。
 
+> **实现状态（2026-10-30）**：§5.2 的 6 个替换点、日志升级与预览接口已落地为**统一判定器**：
+> 纯判定模型 `app/domain/response_access.py`（阶段/检查/决策，带来源层），
+> 取值与仲裁 `app/application/response_authority.py`；入站节点（`nodes/inbound.py`）与
+> LLM 流水线（`loop/pipeline.py`）消费**同一个** `ResponseDecision`，
+> 预览接口为 `GET /api/policy/decision`（返回完整判定链）。
+> `permission.role_min`（群级触发身份）此前只进白名单、运行时从不读，现在**真正生效**；
+> 同一份判定还被"多账号谁响应"复用（responder 只是判定链里的一层，不与场所/规则合并）。
+
 ---
 
 ## 0. 一页结论
@@ -206,7 +214,7 @@ muted_until INTEGER   -- 0 = 未静音；时间戳 = 到点自动恢复
 | POST | `/api/policy/scene` | `{account_id, capability?, scene:"group"\|"private", enabled:true\|false\|null}`：写「账号默认」（场景层 `__group__`/`__private__`）；`null` = 跟随 Agent 配置 |
 | POST | `/api/policy/mute` | `{account_id, capability, channel_id, minutes}`（0=取消） |
 | GET | `/api/policy/matrix?account_id=&capability=agent` | 列表页用：每群 `{group_id, name, member_count, enabled, muted_until, source, overridden_keys[]}`；`default` 额外带 `scene_enabled`（null = 跟随 Agent 配置） |
-| GET | `/api/permission/preview?account_id=&channel_id=&user_id=` | 复用统一判定器：`{allowed, role, role_source, reason}` |
+| GET | `/api/policy/decision?account_id=&capability=&channel_id=&user_id=&role=` | **判定链**：`{allowed, reason, decided_by, hint, checks[{stage,label,allowed,reason,source,detail}], required_tier/source, responder{policy,responders,candidates,degraded}}`，与运行时同一份语义（替代原计划的 `/api/permission/preview`） |
 
 **错误语义**：写不可覆盖键 → 400 `POLICY_KEY_NOT_OVERRIDABLE`（附允许键列表）；写非法值 → 422 + 逐键原因；账号不在 → 404。
 
@@ -232,11 +240,12 @@ event → account_id
 | `config.get("group_enable"/"private_enable")` | `policy.enabled`（无覆盖时回落原值） | `pipeline.py:316-320` |
 | `config.get("trigger_at"/"trigger_keyword")` | `policy.config[...]` | `pipeline.py:283-295`、`:184-191` |
 | `reply_cooldown` / `message_debounce_*` | `policy.config[...]` | pipeline/会话相关 |
-| `runtime.config.permission`（档位） | `policy.permission["role_min"]` | `nodes/inbound.py:120-153` |
+| `runtime.config.permission`（档位） | `policy.permission["role_min"]`（已落地：`ResponseAuthority._required_tier`） | `nodes/inbound.py` / `application/response_authority.py` |
 | 名单（群/用户黑白） | `policy.permission` 的 `user_*`（群维度不再需要"群名单"，由 `enabled` 表达） | `authority.py:178-200` |
 | 模块权限 | `resolve_policy(account, module, channel)` 的 permission | `authority.py:203-224` |
 
-**日志必须升级**：所有跳过分支从 `debug` 改成"按账号+原因限流的 info/warn"，格式统一：
+**日志必须升级**（已落地）：所有跳过分支从 `debug` 改成"按账号+原因限流"的 `log_skip`
+（`app/core/skip_log.py`，默认 warning/模块级 info），格式统一：
 
 ```
 [skip] group=123456 account=acc1 reason=disabled_by_channel source=channel
@@ -254,6 +263,35 @@ event → account_id
 | `#llm status` | 回复当前群生效的策略摘要（含来源） |
 
 指令与页面写同一张表 → 不存在"指令改了但页面没变"。
+
+---
+
+### 5.4 统一判定器（ResponseAuthority）
+
+判定不再散在四处各自判断，而是**一次算完、多处消费**：
+
+```
+事件 → compute_event_permission（名册 + 群角色 → event.permission_role）
+     → ResponseAuthority.decide_agent(event) → ResponseDecision
+        checks[按阶段]: account → scene → responder → group_scope
+                        → identity(role_min) → user_scope → quiet_hours [→ trigger]
+     → 入站节点只执行 INBOUND_STAGES（账号/响应权/群范围/身份）
+     → LLM 流水线执行 PIPELINE_STAGES（场所/用户例外/免打扰/触发）
+```
+
+为什么分两段执行：命令（`#llm on`）必须能在**被关闭的群**里把自己打开，所以场所判定
+只能放在流水线、且在命令之后；而身份/响应权必须在进模块链之前拦下。同一个
+`ResponseDecision` 两处共用，`reason/source` 一致，日志与 UI 用同一份解释。
+
+关键性质：
+
+| 性质 | 落点 | 效果 |
+|---|---|---|
+| 每个阶段带来源 | `AccessCheck.source`（default/account/scene/channel/muted/…） | 「生效的是哪一层」可答 |
+| 失败可见 | 第一个不通过的阶段决定 `reason/decided_by`，配 `SKIP_HINTS`「去哪修」 | 日志与 UI 都能指到页面 |
+| `role_min` 真生效 | `ResponseAuthority._required_tier` 优先读 `policy.permission.role_min` | 群级「谁能触发」不再是死键 |
+| 多账号正交 | responder 只占一个阶段，不改变场所/规则语义 | 「谁响应」与「能不能聊」不混成一份配置 |
+| 预览同源 | `GET /api/policy/decision` → `ResponseAuthority.explain` | 界面判定链 == 运行时判定链 |
 
 ---
 

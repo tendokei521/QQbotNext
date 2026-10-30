@@ -9,6 +9,12 @@ R2-2/2-3 `7252d47` ✅（页面 `/policy` + 批量 + 静音）· R3 `323867f` / 
 （触发/免打扰/用户例外 + 群内指令 + 高级规则对话框）· R4 `ec26b82` / `24fae90` ✅（迁移 + 旧卡片收敛）。
 **本计划已全部完成**；模块级（`capability=模块`）的群级覆盖留作后续独立项（v2，见设计 §10.5）。
 
+**R5 · 统一判定器（2026-10-30）** ✅：判定收敛为 `domain/response_access.py`（阶段/检查/决策）
++ `application/response_authority.py`（取值与仲裁），入站节点与 LLM 流水线消费同一份
+`ResponseDecision`；`permission.role_min` 从"白名单死键"变为真正生效；跳过日志统一走
+`log_skip`（含来源层与「去哪修」）；判定链预览 `GET /api/policy/decision`。
+R5 不新增存储：prerequisite 仍是"一份数据"，只是把消费它的路径合并成一条。
+
 ---
 
 ## 前置约定（开工前先确认，避免返工）
