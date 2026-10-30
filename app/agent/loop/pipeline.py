@@ -466,7 +466,9 @@ class LlmPipeline:
                         "trigger_not_matched",
                         f"group={getattr(getattr(ctx.event, 'group', None), 'group_id', '?')} · mode={config.get('trigger_mode', '?')}",
                         hint=hint_for("trigger_not_matched"),
-                        level="info",
+                        # 群消息没 @/关键词是常态（大部分群消息都不是在叫 bot），
+                        # 属于技术排查信息，不进用户可见日志（UI 的生效预览已能解释）。
+                        level="debug",
                     )
                     return
                 # 把「触发条件」补进统一判定链，让「为什么不回」在 UI/日志里是同一条链
