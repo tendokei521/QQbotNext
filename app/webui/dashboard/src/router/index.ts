@@ -40,6 +40,19 @@ const router = createRouter({
         // 回复与权限：原「回复设置」+ 原「权限管理」合并成一页三个 Tab
         { path: 'reply', name: 'reply', component: () => import('@/views/PolicyPage.vue'), meta: { title: '回复与权限' } },
         { path: 'modules', name: 'modules', component: () => import('@/views/ModulesPage.vue'), meta: { title: '功能插件' } },
+        // 插件响应策略：同群多账号「谁响应」，独立面板 + 单插件独立配置页
+        {
+          path: 'responder',
+          name: 'responder-overview',
+          component: () => import('@/views/ResponderOverviewPage.vue'),
+          meta: { title: '插件响应策略' },
+        },
+        {
+          path: 'responder/:name',
+          name: 'responder-module',
+          component: () => import('@/views/ResponderModulePage.vue'),
+          meta: { title: '插件响应策略' },
+        },
         {
           path: 'bundles',
           name: 'bundles',

@@ -25,7 +25,28 @@ export interface ResponderGroup {
 export interface ResponderData {
   module: string
   declared: boolean
+  /** 展示信息（后端在声明分支带回，独立配置页头部直接用，不必再拉 /api/modules） */
+  name?: string
+  sign?: string
+  description?: string
   groups: ResponderGroup[]
+}
+
+/** 面板卡片摘要：只统计「同群 ≥2 账号」的群 */
+export interface ResponderOverviewItem {
+  capability_id: string
+  name: string
+  sign: string
+  description: string
+  groups_total: number
+  configured: number
+  degraded: number
+  policies: Record<string, number>
+}
+
+export interface ResponderOverview {
+  declared: ResponderOverviewItem[]
+  undeclared: { capability_id: string; name: string; sign: string; description: string }[]
 }
 
 export interface ResponderPolicyInput {
@@ -52,6 +73,9 @@ export const useResponderStore = defineStore('responder', () => {
   const data = ref<Record<string, ResponderData>>({})
   const loading = ref<Record<string, boolean>>({})
   const saving = ref<Record<string, boolean>>({})
+  //: 面板总览（全局：不随账号变化，只有在线候选会变）
+  const overviewData = ref<ResponderOverview | null>(null)
+  const overviewLoading = ref(false)
 
   function cacheKey(moduleName: string): string {
     return `${bots.currentAccountId ?? '-'}::${moduleName}`
@@ -93,6 +117,21 @@ export const useResponderStore = defineStore('responder', () => {
     }
   }
 
+  /** 插件响应策略总览（独立面板用）：一次拿全声明/未声明模块与摘要。 */
+  async function loadOverview(): Promise<void> {
+    overviewLoading.value = true
+    try {
+      const res = await http.get('/api/responder/overview')
+      const body = unwrap<ResponderOverview>(res.data)
+      overviewData.value = {
+        declared: body?.declared ?? [],
+        undeclared: body?.undeclared ?? [],
+      }
+    } finally {
+      overviewLoading.value = false
+    }
+  }
+
   // 切账号：旧账号的预览/加载态全部作废，由页面按需重新 load
   watch(
     () => bots.currentAccountId,
@@ -100,13 +139,28 @@ export const useResponderStore = defineStore('responder', () => {
       data.value = {}
       loading.value = {}
       saving.value = {}
+      // 总览是全局的，但「当前响应者」取决于在线账号；切号后重拉一次更稳
+      void loadOverview().catch(() => undefined)
     },
   )
 
-  // 其他客户端保存后刷新当前模块
+  // 其他客户端保存后刷新当前模块 + 总览摘要
   onSocketMessage('responder_updated', (msg) => {
     if (msg && typeof msg.module === 'string') load(msg.module).catch(() => undefined)
+    void loadOverview().catch(() => undefined)
   })
 
-  return { data, loading, saving, dataOf, loadingOf, savingOf, load, save }
+  return {
+    data,
+    loading,
+    saving,
+    dataOf,
+    loadingOf,
+    savingOf,
+    load,
+    save,
+    overviewData,
+    overviewLoading,
+    loadOverview,
+  }
 })

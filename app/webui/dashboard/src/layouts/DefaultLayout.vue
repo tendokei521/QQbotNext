@@ -122,8 +122,11 @@ const navItems = computed<NavItem[]>(() => {
     { to: '/reply', title: '回复与权限', icon: 'mdi-shield-account-outline' },
     { title: AGENT_GROUP, icon: 'mdi-creation-outline', children: agentChildren },
     { to: '/modules', title: '功能插件', icon: 'mdi-cube-outline' },
-    { to: '/bundles', title: '配置包', icon: 'mdi-package-variant-closed' },
     ...(showExperimental ? [{ to: '/tools/overview', title: TOOLS_GROUP, icon: 'mdi-toolbox-outline' }] : []),
+    // 框架功能：对所有账号生效的框架级能力（不是某个账号的配置）
+    { header: '框架功能' },
+    { to: '/responder', title: '插件响应策略', icon: 'mdi-account-multiple-check-outline' },
+    { to: '/bundles', title: '配置包', icon: 'mdi-package-variant-closed' },
     { header: '数据' },
     { to: '/sessions', title: '会话数据', icon: 'mdi-chat-outline' },
     { to: '/stats', title: '数据统计', icon: 'mdi-chart-bar' },

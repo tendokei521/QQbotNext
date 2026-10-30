@@ -2,8 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useModulesStore, isBuiltinModule } from '@/stores/modules'
-import { useResponderStore, type ResponderGroup } from '@/stores/responder'
-import { useBotsStore, displayName } from '@/stores/bots'
+import { useBotsStore } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage, registerDraftFlush } from '@/api/http'
 import { PERMISSION_LABELS, PERMISSION_TOOLTIP } from '@/agent/labels'
@@ -15,7 +14,6 @@ import PluginDepsDialog from '@/components/tools/PluginDepsDialog.vue'
 const route = useRoute()
 const router = useRouter()
 const modules = useModulesStore()
-const responder = useResponderStore()
 const bots = useBotsStore()
 const notify = useNotifyStore()
 
@@ -159,115 +157,6 @@ async function onDepsDone() {
   }
 }
 
-// ---------- 响应权策略（同群多账号） ----------
-// 声明制能力：只有后端回报 single_service=true 的模块才显示策略卡片。
-const RESPONDER_POLICY_ITEMS = [
-  { title: '全部响应（默认）', value: 'all' },
-  { title: '去重：只一个响应', value: 'dedupe' },
-  { title: '固定账号响应', value: 'delegate' },
-  { title: '主备：主号回答，失败换备用', value: 'leader' },
-]
-const responderData = computed(() => responder.dataOf(name))
-const responderDeclared = computed(() => !!mod.value?.single_service)
-const responderDraft = ref<Record<string, { policy: string; primary_account_id: string | null; fallback: string }>>({})
-const responderDirty = ref(false)
-const responderGroups = computed(() => (responderData.value?.groups || []).filter((g) => g.accounts.length > 0))
-const responderLoading = computed(() => responder.loadingOf(name))
-const responderSaving = computed(() => responder.savingOf(name))
-
-function syncResponderDraft() {
-  const data = responderData.value
-  if (!data) return
-  const next: Record<string, { policy: string; primary_account_id: string | null; fallback: string }> = {}
-  data.groups.forEach((group) => {
-    next[group.group_id] = {
-      policy: group.policy || 'all',
-      primary_account_id: group.primary_account_id,
-      fallback: group.fallback || 'open',
-    }
-  })
-  responderDraft.value = next
-  responderDirty.value = false
-}
-
-async function loadResponder() {
-  if (!responderDeclared.value) return
-  try {
-    await responder.load(name)
-    syncResponderDraft()
-  } catch (err) {
-    notify.push(errorMessage(err), 'error')
-  }
-}
-
-watch(responderData, syncResponderDraft)
-
-function accountName(accountId: string): string {
-  const bot = bots.bots.find((item) => item.id === accountId)
-  return bot ? displayName(bot) : accountId
-}
-
-function needsPrimary(policy: string | undefined): boolean {
-  return policy === 'delegate' || policy === 'leader'
-}
-
-function primaryItems(group: ResponderGroup) {
-  return [
-    { title: '未指定（按 fallback）', value: null },
-    ...group.accounts.map((accountId) => ({ title: accountName(accountId), value: accountId })),
-  ]
-}
-
-function onPolicyChange(groupId: string, policy: string) {
-  const draft = responderDraft.value[groupId]
-  if (!draft) return
-  draft.policy = policy
-  if (needsPrimary(policy) && !draft.primary_account_id) {
-    draft.primary_account_id = responderGroups.value.find((g) => g.group_id === groupId)?.accounts[0] ?? null
-  }
-  responderDirty.value = true
-}
-
-function onPrimaryChange(groupId: string, primary: string | null) {
-  const draft = responderDraft.value[groupId]
-  if (!draft) return
-  draft.primary_account_id = primary || null
-  responderDirty.value = true
-}
-
-function onFallbackChange(groupId: string, silent: boolean | null) {
-  const draft = responderDraft.value[groupId]
-  if (!draft) return
-  draft.fallback = silent ? 'closed' : 'open'
-  responderDirty.value = true
-}
-
-function respondersText(group: ResponderGroup): string {
-  const preview = group.preview
-  if (preview?.responders?.length) {
-    return `当前响应：${preview.responders.map(accountName).join('、')}（${preview.reason}）`
-  }
-  if (preview?.degraded) return `当前无人响应（${preview.reason}）`
-  return '当前无人响应'
-}
-
-async function onSaveResponder() {
-  const policies = Object.entries(responderDraft.value).map(([groupId, draft]) => ({
-    group_id: groupId,
-    policy: draft.policy,
-    primary_account_id: draft.primary_account_id,
-    fallback: draft.fallback,
-  }))
-  try {
-    const result = await responder.save(name, policies)
-    responderDirty.value = false
-    if (result.warnings.length) notify.push(result.warnings.join('；'), 'warning')
-    else notify.push(result.message, 'success')
-  } catch (err) {
-    notify.push(errorMessage(err), 'error')
-  }
-}
-
 // ---------- 插件自定义页 ----------
 const pluginSrc = computed(() => {
   const base = `/api/module/${name}/page`
@@ -318,7 +207,6 @@ watch(
     // 先把**上一个账号**的未保存改动写到它自己名下，再拉新账号的模块数据。
     // 此时 currentId 已经是新账号，必须显式传 previousId，否则会把旧草稿写进新账号。
     await flushDrafts(previousId ?? null)
-    loadResponder()
     // 切换账号后重拉模块配置
     modules.load()
   },
@@ -344,7 +232,6 @@ onMounted(async () => {
     await modules.load()
   }
   initFromModule()
-  loadResponder()
   await ensureModule()
   await nextTick()
 })
@@ -440,84 +327,6 @@ onUnmounted(() => {
 
     <!-- 插件异常时整块设置置灰：先按顶部横幅修好依赖/冲突 -->
     <div :class="{ 'plugin-broken': moduleBroken }">
-
-    <!-- 响应权策略（同群多账号；仅声明支持该能力的模块显示） -->
-    <v-card v-if="responderDeclared" variant="outlined" class="mb-4">
-      <v-card-title class="d-flex align-center flex-wrap gap-2">
-        <v-icon icon="mdi-account-multiple-check" class="mr-2" color="primary" />
-        响应权策略
-        <v-chip size="x-small" variant="tonal">同群多账号 · 对所有账号生效</v-chip>
-        <v-spacer />
-        <v-btn
-          size="small"
-          color="primary"
-          variant="tonal"
-          prepend-icon="mdi-content-save"
-          :loading="responderSaving"
-          :disabled="!responderDirty"
-          @click="onSaveResponder"
-        >
-          保存策略
-        </v-btn>
-      </v-card-title>
-      <v-card-text>
-        <div class="text-caption mb-1">
-          同一个群同时装了多个账号时，由哪个账号处理这个插件。这里的改动需要点「保存策略」才生效。
-        </div>
-        <div class="text-caption mb-3">
-          这层只决定「同群里由哪个账号响应」，和「这个群能不能触发」是两层；触发条件在「权限与回复」的判定链里核对。
-        </div>
-        <div v-if="responderLoading" class="text-caption">加载中…</div>
-        <div v-else-if="!responderGroups.length" class="text-caption">
-          暂无可配置的群：需要至少一个账号在线并已拉取到群列表。
-        </div>
-        <div v-for="group in responderGroups" :key="group.group_id" class="responder-row">
-          <div class="responder-group-info">
-            <div class="font-weight-medium">{{ group.name }}</div>
-            <div class="text-caption">{{ group.group_id }} · {{ group.accounts.map(accountName).join('、') }}</div>
-          </div>
-          <v-select
-            :model-value="responderDraft[group.group_id]?.policy || 'all'"
-            :items="RESPONDER_POLICY_ITEMS"
-            density="compact"
-            variant="outlined"
-            hide-details
-            style="max-width: 170px"
-            @update:model-value="(v: string) => onPolicyChange(group.group_id, v)"
-          />
-          <v-select
-            :model-value="responderDraft[group.group_id]?.primary_account_id ?? null"
-            :items="primaryItems(group)"
-            :disabled="!needsPrimary(responderDraft[group.group_id]?.policy)"
-            density="compact"
-            variant="outlined"
-            hide-details
-            style="max-width: 170px"
-            @update:model-value="(v: string | null) => onPrimaryChange(group.group_id, v)"
-          />
-          <v-switch
-            :model-value="responderDraft[group.group_id]?.fallback === 'closed'"
-            label="无候选时静默"
-            density="compact"
-            hide-details
-            color="warning"
-            @update:model-value="(v: boolean | null) => onFallbackChange(group.group_id, v)"
-          />
-          <div class="responder-preview text-caption">{{ respondersText(group) }}</div>
-          <v-chip v-if="group.preview?.degraded" size="x-small" color="warning" variant="tonal">已降级</v-chip>
-        </div>
-        <div class="text-caption mt-2">
-          在「回复与权限」里看谁能触发回复 →
-          <v-btn
-            size="x-small"
-            variant="text"
-            @click="router.push({ path: '/reply', query: { tab: 'who' } })"
-          >
-            去查看
-          </v-btn>
-        </div>
-      </v-card-text>
-    </v-card>
 
     <!-- 插件设置：有插件自带设置页时用 Tab 与基础设置区分，避免两套界面同时出现 -->
     <v-card v-if="hasPluginPage || hasConfigForm" variant="outlined" class="mb-4">
@@ -624,24 +433,5 @@ onUnmounted(() => {
   gap: 10px;
   padding: 60px 0;
   color: rgba(var(--v-theme-on-surface), 0.5);
-}
-
-.responder-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-  padding: 10px 0;
-  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-}
-
-.responder-group-info {
-  min-width: 200px;
-  flex: 1 1 200px;
-}
-
-.responder-preview {
-  flex: 1 1 220px;
-  color: rgba(var(--v-theme-on-surface), 0.65);
 }
 </style>
