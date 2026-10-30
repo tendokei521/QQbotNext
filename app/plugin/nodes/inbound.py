@@ -13,8 +13,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.application.response_authority import ResponseAuthority
 from app.core.logger import logger
+from app.core.skip_log import log_skip
 from app.domain.events import BaseEvent
+from app.domain.response_access import (
+    INBOUND_STAGES,
+    hint_for,
+    remember_decision,
+    stored_decision,
+)
 from app.plugin.authority import (
     check_module_enabled,
     check_module_permission,
@@ -84,9 +92,69 @@ class AgentNode(MessageNode):
         self.log = log or logger
         #: 响应权仲裁器（docs/multi-account-design.md §6）；为空时退回旧的单一服务判定
         self.responder = responder
+        #: 唯一判定入口（账号/场所/响应权/群范围/身份/用户例外/免打扰都从这里出）
+        self.access = ResponseAuthority(
+            config_service=config_service,
+            agent_manager=agent_manager,
+            responder=responder,
+            log=self.log,
+            legacy_skip=self._legacy_single_service,
+        )
 
     def _account_logger(self, event):
         return self.log.add_info(getattr(event, "account_name", "") or "?")
+
+    # ---------- 统一判定 ----------
+
+    def _decision(self, event):
+        """本轮判定：入站节点算一次，流水线直接复用（不重复算）。"""
+        decision = stored_decision(event)
+        if decision is not None:
+            return decision
+        if self.access is None:
+            return None
+        try:
+            decision = self.access.decide_agent(event)
+        except Exception as e:  # noqa: BLE001 —— 判定失败按"放行"处理，绝不吞消息
+            self.log.debug(f"[Access] 判定异常（本轮放行）: {e}")
+            return None
+        remember_decision(event, decision)
+        return decision
+
+    def _legacy_single_service(self, event, module=None) -> bool:
+        """responder 未装配时的旧「单一服务」判定（声明制，见 authority.py）。"""
+        target = module
+        if target is None:
+            account_id = getattr(event, "account_id", None)
+            runtime = None
+            if self.agent_manager is not None and account_id is not None:
+                try:
+                    runtime = self.agent_manager.get_runtime(account_id)
+                except Exception:  # noqa: BLE001
+                    runtime = None
+            if runtime is None:
+                return False
+            target = _AgentGate(runtime)
+        return is_single_service_skipped(target, event, self.config_service, self.gateway)
+
+    def _log_decision_skip(self, event, denial) -> None:
+        """把"被哪一层拦下"写进用户可见日志（统一格式 + 限流，见 core/skip_log）。"""
+        detail = f"stage={denial.stage} · source={denial.source}"
+        if denial.detail:
+            detail += f" · {denial.detail}"
+        group_id = getattr(getattr(event, "group", None), "group_id", "")
+        if group_id:
+            detail += f" · group={group_id}"
+        log_skip(
+            getattr(event, "account_id", "") or self._account_of(event),
+            denial.reason,
+            detail.strip(" ·"),
+            hint=hint_for(denial.reason),
+        )
+
+    @staticmethod
+    def _account_of(event) -> str:
+        return str(getattr(event, "account_id", "") or getattr(event, "self_id", "") or "?")
 
     async def process(self, ctx: MessageContext, next_: Next) -> None:
         """路由入口。外面包一层统计：**一次入站消息一条 `msg_in`**。"""
@@ -117,40 +185,44 @@ class AgentNode(MessageNode):
             )
             await next_()
             return
-        # 门控：Agent 启停 / 单一服务 / 黑白名单（框架级配置）
-        gate = _AgentGate(runtime)
-        if not check_module_enabled(gate):
-            self._account_logger(event).debug(f"[Agent] 跳过：账号 {account_id} 的 Agent 已在配置中禁用")
-            await next_()
-            return
-        if self.responder is not None:
-            decision = self.responder.decide_agent(event)
-            if not decision.allows(account_id):
+        # 名册身份（拥有者/管理者）优先于群角色：这两个名单是 Agent 自己的身份，
+        # 跨群生效，所以必须由 Agent 配置提供；统一判定器要读 event.permission_role。
+        _owner_roster, _manager_roster = roster_lists(getattr(runtime, "config", None))
+        compute_event_permission(event, owner_list=_owner_roster, manager_list=_manager_roster)
+
+        # 唯一判定入口：账号启用 → 场所 → 谁响应 → 群范围 → 身份 → 用户例外 → 免打扰。
+        # 入站只执行 INBOUND_STAGES 那几段（场景/例外/免打扰留给流水线，命令要先能跑）。
+        decision = self._decision(event)
+        if decision is not None:
+            ctx.state["response_decision"] = decision
+            denial = decision.first_denial(INBOUND_STAGES)
+            if denial is not None:
+                self._log_decision_skip(event, denial)
+                await next_()
+                return
+        else:
+            # 兜底（旧运行时替身 / 判定异常）：保持改造前的逐项门控，行为不变
+            gate = _AgentGate(runtime)
+            if not check_module_enabled(gate):
                 self._account_logger(event).debug(
-                    f"[Responder] Agent 跳过：{decision.reason}"
-                    f"（候选={list(decision.candidates)}，响应={list(decision.responders)}，"
-                    f"当前账号={account_id}）"
+                    f"[Agent] 跳过：账号 {account_id} 的 Agent 已在配置中禁用"
                 )
                 await next_()
                 return
-        elif is_single_service_skipped(gate, event, self.config_service, self.gateway):
-            self._account_logger(event).debug(
-                f"[Agent] 跳过：单一服务模式把本群响应权交给了账号 "
-                f"{self._single_service_index(event)}（当前账号={account_id}）"
-            )
-            await next_()
-            return
-        # 名册身份（拥有者/管理者）优先于群角色：这两个名单是 Agent 自己的身份，
-        # 跨群生效，所以必须由 Agent 配置提供
-        _owner_roster, _manager_roster = roster_lists(getattr(runtime, "config", None))
-        compute_event_permission(event, owner_list=_owner_roster, manager_list=_manager_roster)
-        if not check_module_permission(gate, event):
-            self._account_logger(event).debug(
-                f"[Agent] 跳过：账号 {account_id} 权限不足"
-                f"（role={getattr(event, 'permission_role', '?')} 策略={gate.permission}）"
-            )
-            await next_()
-            return
+            if is_single_service_skipped(gate, event, self.config_service, self.gateway):
+                self._account_logger(event).debug(
+                    f"[Agent] 跳过：单一服务模式把本群响应权交给了账号 "
+                    f"{self._single_service_index(event)}（当前账号={account_id}）"
+                )
+                await next_()
+                return
+            if not check_module_permission(gate, event):
+                self._account_logger(event).debug(
+                    f"[Agent] 跳过：账号 {account_id} 权限不足"
+                    f"（role={getattr(event, 'permission_role', '?')} 策略={gate.permission}）"
+                )
+                await next_()
+                return
         # 前面的模块已调用 event.stop() 强制终止 → 链已短路（含 LLM 兜底）
         if getattr(event, "_stopped", False):
             await next_()
@@ -282,6 +354,21 @@ class ModulePermissionNode(MessageNode):
         self.registry = registry
         #: 响应权仲裁器（docs/multi-account-design.md §6）
         self.responder = responder
+        #: 唯一判定入口（模块路径：authority 启用 + 谁响应 + 群/用户范围 + 身份档位）
+        self.access = ResponseAuthority(
+            config_service=config_service,
+            agent_manager=agent_manager,
+            responder=responder,
+            registry=registry,
+            log=self.log,
+            legacy_skip=self._legacy_single_service,
+        )
+
+    def _legacy_single_service(self, event, module=None) -> bool:
+        """responder 未装配时：旧的「单一服务」声明制判定（模块维度）。"""
+        if module is None:
+            return False
+        return self._is_single_service_skipped(module, event)
 
     # ---------- 名册身份 ----------
 
@@ -328,20 +415,19 @@ class ModulePermissionNode(MessageNode):
 
         allowed: list[BaseModule] = []
         for module in ctx.state.get("candidates", []) or []:
-            if not check_module_enabled(module):
-                continue
-            if self.responder is not None:
-                decision = self.responder.decide_module(module.module_name, event)
-                if not decision.allows(event.account_id):
-                    self.log.debug(
-                        f"[Responder] {module.module_name} 跳过账号 {event.account_id}："
-                        f"{decision.reason}（候选={list(decision.candidates)}）"
-                    )
-                    continue
-            elif self._is_single_service_skipped(module, event):
-                continue
-            # 模块级权限过滤：黑白名单 + permission 角色
-            if not check_module_permission(module, event):
+            name = str(getattr(module, "module_name", "?") or "?")
+            # 统一判定入口：authority 启用 → 谁响应 → 群/用户范围 → 身份档位。
+            # 被拦下的原因从 debug 升级为限流 info（"模块为什么不响应"可查）。
+            decision = self.access.decide_module(module, event)
+            deny = decision.first_denial(INBOUND_STAGES)
+            if deny is not None:
+                log_skip(
+                    getattr(event, "account_id", "") or "?",
+                    f"{name}:{deny.reason}",
+                    f"stage={deny.stage} · source={deny.source} · {deny.detail}",
+                    hint=hint_for(deny.reason),
+                    level="info",
+                )
                 continue
             module.permission_granted = True
             allowed.append(module)

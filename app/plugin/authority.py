@@ -27,16 +27,24 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from app.domain.events import BaseEvent
+from app.domain.response_access import (  # noqa: F401 - PERMISSIONS/ROLE_RANK 为历史导出
+    PERMISSIONS,
+    ROLE_RANK,
+    enabled_of,
+    normalize_tier,
+    scope_reason,
+    tier_allows,
+)
 from app.plugin.base import BaseModule, ModulePermission
 
-PERMISSIONS = ("everyone", "member", "group_admin", "group_owner", "manager", "owner")
-
-ROLE_RANK = {
-    "member": 0,
-    "group_admin": 1,
-    "group_owner": 2,
-    "manager": 3,
-    "owner": 4,
+#: 各档位的语义说明（展示用；判定在 domain.response_access.tier_allows）
+PERMISSION_DOCS = {
+    "everyone": "所有人",
+    "member": "普通群成员及以上",
+    "group_admin": "群管理员/群主",
+    "group_owner": "群主",
+    "manager": "管理者与拥有者",
+    "owner": "仅拥有者",
 }
 
 
@@ -115,11 +123,8 @@ def compute_event_permission(
 
 
 def check_module_enabled(module: BaseModule) -> bool:
-    """模块是否启用（读 authority.enabled）。"""
-    auth = getattr(module, "authority", None)
-    if auth is not None and hasattr(auth, "enabled"):
-        return bool(auth.enabled)
-    return True
+    """模块是否启用（读 authority.enabled；语义见 ``domain.response_access.enabled_of``）。"""
+    return enabled_of(module)
 
 
 def single_service_key(module) -> str:
@@ -176,28 +181,28 @@ def is_single_service_skipped(module: BaseModule, event: BaseEvent, config_servi
 
 
 def _scope_allows(event: BaseEvent, permission: ModulePermission) -> bool:
-    """群/用户黑白名单前置过滤。"""
+    """群/用户黑白名单前置过滤（语义与 ``domain.response_access.scope_reason`` 同源）。"""
     group_id = str(getattr(getattr(event, "group", None), "group_id", "") or "")
     user_id = str(event.user_id or "")
 
     if group_id:
         mode, group_list = permission.group_mode, permission.group_list
-        if mode == "whitelist":
-            if not group_list or group_id not in group_list:
-                return False
-        elif mode == "blacklist" and group_id in group_list:
+        listed = group_id in {str(item).strip() for item in (group_list or [])}
+        if scope_reason(str(mode or ""), listed, kind="group") is not None:
             return False
 
     if user_id:
         user_mode, user_list = permission.user_mode, permission.user_list
-        if user_mode == "whitelist":
-            if not (user_list and user_id in user_list):
-                return False
-        elif user_mode == "blacklist":
-            if user_list and user_id in user_list:
-                return False
+        listed = user_id in {str(item).strip() for item in (user_list or [])}
+        if scope_reason(str(user_mode or ""), listed, kind="user") is not None:
+            return False
 
     return True
+
+
+def required_tier_of(module: object) -> str:
+    """模块要求的身份档位（非法值按 ``member``，判定在 ``tier_allows``）。"""
+    return normalize_tier(getattr(module, "permission", "member"), "member")
 
 
 def check_module_permission(module: BaseModule, event: BaseEvent) -> bool:
@@ -207,18 +212,11 @@ def check_module_permission(module: BaseModule, event: BaseEvent) -> bool:
         if not _scope_allows(event, auth.permission):
             return False
 
-    policy = getattr(module, "permission", "member") or "member"
-
-    # 私聊场景没有群角色概念：群管理/群主策略自动降级为 member，
-    # 避免私聊被“仅群管理”错误拦截。
-    # manager / owner 是**名册身份**（不是群角色），私聊里照样有效，故不降级。
-    if getattr(event, "event_type", "") == "message_private":
-        if policy in ("group_admin", "group_owner"):
-            policy = "member"
-
+    policy = required_tier_of(module)
     if policy == "everyone":
         return True
-
-    required_rank = ROLE_RANK.get(policy, ROLE_RANK["member"])
-    current_rank = ROLE_RANK.get(event.permission_role, ROLE_RANK["member"])
-    return current_rank >= required_rank
+    return tier_allows(
+        policy,
+        getattr(event, "permission_role", "member"),
+        is_private=getattr(event, "event_type", "") == "message_private",
+    )
