@@ -18,9 +18,13 @@
 
 ## 验证规则（分层：按改动规模决定跑多少）
 
+**测试时机（用户明确要求，2026-10-30 起，优先级最高）：日常任何修改都不跑测试。**
+只有用户明确说「最终验收 / 发版前验收」时才跑测试（架构闸门、全量 pytest、ruff 等）；
+小改动（CSS、文案、布局、单文件局部修改）一律不测试，直接改完 → 构建 → 截图/手测 → 提交。
+不要把测试当"确认效果"的手段：前端看截图、后端看日志与手测。
+
 **原则：CI 是安全网，本地不必每次全量。** `.github/workflows/ci.yml` 已在每次 push / PR
-跑全量测试 + ruff + 依赖校验 + 前端构建，所以本地把全量测试压到「阶段收尾」即可，
-日常小改动**直接提交**。
+跑全量测试 + ruff + 依赖校验 + 前端构建，所以本地测试只在「最终验收」时跑，其余时间跳过。
 
 | 档位 | 典型改动 | 本地要做的验证 |
 |---|---|---|
@@ -41,9 +45,8 @@
 所以只要改动 `app/webui/dashboard/**` 的 `.vue` / `.ts`、前端文案或后端注入页面，
 除上面按规模跑的验证外，还必须完成：
 
-1. **静态闸门**：`cd app/webui/dashboard; npm run typecheck`，改完跑 `npm run build`
-   （`dist/` 是进仓库的产物，**截图前必须重新 build**，否则截的是旧界面）；
-   改文案再跑 `venv\Scripts\python.exe -m pytest tests\architecture -q`。
+1. **构建**：`cd app/webui/dashboard; npm run build`（含 `vue-tsc --noEmit`）；
+   `dist/` 是进仓库的产物，**截图前必须重新 build**，否则截的是旧界面。不跑 pytest。
 2. **两个尺寸截图**：起独立测试库预览服务（端口 9311），用
    `node scripts\frontend_shots.mjs --routes <改过的路由> --widths 1440,390`
    出图 + `metrics.json`，**逐张人工看**：不竖排、不截断、不重叠、主操作可见。
