@@ -57,15 +57,11 @@ class LlmPipeline:
             if config_service is not None
             else None
         )
-        #: 统一判定器：与入站节点同一套语义（场景/用户例外/免打扰/谁响应）
+        #: 统一判定器：与入站节点同一套语义（场景/用户例外/免打扰/谁响应）。
+        #: 入站节点已经把「谁响应」那一层判过并挂在事件上，这里只复用结论；
+        #: 直接调用 chat.handle 的旧路径没有仲裁器，按"未启用多账号"处理。
         self.access = (
-            ResponseAuthority(
-                config_service=config_service,
-                agent_manager=getattr(runtime, "agent_manager", None),
-                responder=getattr(runtime, "responder", None),
-                runtime=runtime,
-                log=logger,
-            )
+            ResponseAuthority(config_service=config_service, runtime=runtime, log=logger)
             if config_service is not None
             else None
         )
