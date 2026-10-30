@@ -313,7 +313,7 @@ function currentValue(item: ItemDef): any {
 
 .config-form--single :deep(.v-expansion-panel-title) {
   min-height: 40px;
-  padding: 2px 0 8px;
+  padding: 8px 16px;
   pointer-events: none;
   cursor: default;
 }
@@ -324,7 +324,7 @@ function currentValue(item: ItemDef): any {
 }
 
 .config-form--single :deep(.v-expansion-panel-text__wrapper) {
-  padding: 0 0 4px;
+  padding: 0 16px 4px;
 }
 
 .config-form--single :deep(.v-expansion-panel) {

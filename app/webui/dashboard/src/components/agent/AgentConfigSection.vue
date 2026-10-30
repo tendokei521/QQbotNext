@@ -148,7 +148,7 @@ watch(
 
 .agent-config-card :deep(.v-expansion-panel-title) {
   min-height: 40px;
-  padding: 8px 0;
+  padding: 8px 16px;
   font-size: 14px;
   font-weight: 600;
 }
@@ -158,11 +158,17 @@ watch(
 }
 
 .agent-config-card :deep(.v-expansion-panel-text__wrapper) {
-  padding: 0 0 10px;
+  padding: 0 16px 12px;
 }
 
+/* 分组之间用留白分隔，不再画一条贯穿的边框线（看起来像卡片里套卡片） */
 .agent-config-card :deep(.v-expansion-panels + .v-expansion-panels) {
-  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+  margin-top: 6px;
+}
+
+/* Vuetify 3 的展开面板阴影画在独立元素上，仅改 panel 的 box-shadow 去不掉 */
+.agent-config-card :deep(.v-expansion-panel__shadow) {
+  display: none;
 }
 
 .agent-config-card :deep(.group-body) {
