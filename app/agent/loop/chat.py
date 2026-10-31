@@ -79,7 +79,6 @@ from app.agent.loop.turn_metrics import (  # noqa: F401 - 重导出保持 chat.*
     _effective_max_tokens,
     _history_meta_flags,
     _input_tokens_estimate,
-    _log_debug_prompt,
     _log_request_line,
     _max_empty_retries,
     _max_tool_rounds,
@@ -89,6 +88,7 @@ from app.agent.loop.turn_metrics import (  # noqa: F401 - 重导出保持 chat.*
     _turn_budget,
     _usage_delta,
     _usage_snapshot,
+    log_debug_prompt_if_enabled,
 )
 from app.agent.providers import log_token_usage
 from app.agent.session.manager import SessionManager
@@ -289,7 +289,7 @@ async def stream_response(runtime, event, ctx=None):
     if messages is None:
         return
 
-    _log_debug_prompt(runtime, session_id, messages, debug_enabled=bool(ctx and ctx.state.get("debug_prompt", False)))
+    log_debug_prompt_if_enabled(runtime, session_id, messages, ctx)
 
     # P4 在线不变式（默认关）：核对"事件日志派生"与"内存历史"是否仍然一致
     if ctx is not None and session is not None:

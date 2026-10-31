@@ -63,6 +63,7 @@ from app.agent.loop.turn_metrics import (
     _effective_max_tokens,
     _input_tokens_estimate,
     _turn_budget,
+    log_debug_prompt_if_enabled,
 )
 from app.agent.loop.turn_runner import TurnReason, TurnState
 from app.agent.tools.spec import build_tools, make_executor
@@ -251,6 +252,10 @@ async def _run_inner(
         result.reason = state.finish(TurnReason.BLOCKED)
         return result
     result.messages = list(messages)
+
+    # 调试开关（「LLM调试」模块）开启时打印本轮完整 prompt：非流式是默认路径，
+    # 这条日志必须和流式路径一样在这里出现，否则开了开关却什么都看不到。
+    log_debug_prompt_if_enabled(runtime, session_id, messages, ctx)
 
     # P4 在线不变式（默认关）：核对"事件日志派生"与"内存历史"是否仍然一致
     try:

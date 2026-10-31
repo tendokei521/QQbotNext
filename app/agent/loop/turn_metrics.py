@@ -323,6 +323,22 @@ def _log_debug_prompt(runtime, session_id: str, messages: list[dict], debug_enab
     logger.add_info(account_label(runtime.bot_id)).info(f"[Prompt] {session_id}\n{text}")
 
 
+def log_debug_prompt_if_enabled(runtime, session_id: str, messages: list[dict], ctx: Any = None) -> None:
+    """按本轮钩子设置的开关打印完整 prompt（流式/非流式共用）。
+
+    开关由 ``llm_enhance``（显示名「LLM调试」）的 ``pre_request`` 钩子写进
+    ``ctx.state["debug_prompt"]``。**两条组装路径都要调用它**：
+    ``chat.stream_response``（流式）与 ``turn.run_turn``（非流式，默认路径）。
+
+    历史坑：这段日志只写在流式路径里，于是默认的非流式输出下"开启调试后
+    只看到一行 user_text、看不到完整 prompt"——用户以为开关坏了。
+    """
+    enabled = bool(getattr(ctx, "state", {}).get("debug_prompt", False)) if ctx is not None else False
+    if not enabled:
+        return
+    _log_debug_prompt(runtime, session_id, messages, debug_enabled=True)
+
+
 def _history_meta_flags(runtime) -> dict:
     """计算历史渲染标志：是否归一化单行、是否脱敏昵称。
 
