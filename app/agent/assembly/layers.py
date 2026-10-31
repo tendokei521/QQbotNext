@@ -59,7 +59,7 @@ LAYER_LABELS: dict[str, str] = {
 LAYER_ORDER: dict[str, int] = {layer: index for index, layer in enumerate(LAYERS)}
 
 #: L1 内部段的展示顺序（合同一层的段合并成一条 system 时按它拼）
-SYSTEM_PROMPT_SECTIONS: tuple[str, ...] = ("behavior", "schedule", "proactive", "message_meta")
+SYSTEM_PROMPT_SECTIONS: tuple[str, ...] = ("behavior", "schedule", "proactive", "message_meta", "safety_recap")
 
 #: 内置段 → 层。未登记的段（插件注册的）默认归 L3 钩子注入。
 SECTION_LAYERS: dict[str, str] = {
@@ -67,6 +67,7 @@ SECTION_LAYERS: dict[str, str] = {
     "schedule": LAYER_SYSTEM_PROMPT,
     "proactive": LAYER_SYSTEM_PROMPT,
     "message_meta": LAYER_SYSTEM_PROMPT,
+    "safety_recap": LAYER_SYSTEM_PROMPT,
     "persona": LAYER_PERSONA,
     "emoji_hint": LAYER_INJECTED,
     "skills": LAYER_INJECTED,

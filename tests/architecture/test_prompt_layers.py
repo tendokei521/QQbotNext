@@ -41,6 +41,7 @@ REQUIRED_SECTION_LAYERS = {
     "schedule": LAYER_SYSTEM_PROMPT,
     "proactive": LAYER_SYSTEM_PROMPT,
     "message_meta": LAYER_SYSTEM_PROMPT,
+    "safety_recap": LAYER_SYSTEM_PROMPT,
     "persona": LAYER_PERSONA,
     "emoji_hint": LAYER_INJECTED,
     "skills": LAYER_INJECTED,
