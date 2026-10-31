@@ -296,7 +296,26 @@ def merge_layer_blocks(built: BuiltBlocks, layer: str) -> BuiltBlocks:
     if target is None or not texts:
         return built
     kept[target].insert(0, {"role": "system", "content": "\n\n".join(texts)})
-    return [(block, kept[i]) for i, (block, _msgs) in enumerate(built)]
+    # 合并后原段的身份不再准确（多个段合进一条），用一个明确的合并段名替代，
+    # 这样 ``describe()`` 与 ``[Prompt]`` 日志显示 ``system_prompt(4454)`` 而不是
+    # 误写成"只有 behavior 有内容"。
+    merged_block = _MergedBlock(layer=layer, order=int(getattr(built[target][0], "order", 0) or 0))
+    return [
+        (merged_block if i == target else block, kept[i])
+        for i, (block, _msgs) in enumerate(built)
+    ]
+
+
+@dataclass(frozen=True)
+class _MergedBlock:
+    """层内合并后的合成段（只承载名字/层/顺序，供 describe 与日志归因）。"""
+
+    layer: str
+    order: int
+
+    @property
+    def name(self) -> str:
+        return self.layer
 
 
 def _build_legacy_blocks(req: PromptRequest, blocks: tuple[Block, ...]) -> BuiltBlocks:

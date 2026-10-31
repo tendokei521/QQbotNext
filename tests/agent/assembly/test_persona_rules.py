@@ -243,12 +243,13 @@ def test_behavior_block_precedes_persona():
     req = _request(config={"prompt_preset": "chat"})
     req.available_tools = ALL_TOOLS
     names = [name for name, _ in _block_names(req)]
-    assert "behavior" in names and "persona" in names
-    assert names.index("behavior") < names.index("persona"), f"层序错了: {names}"
+    assert "persona" in names
+    # L1 层内合并后段名是 "system_prompt"（合成段），L1 必须排在 persona 之前
+    assert names.index("system_prompt") < names.index("persona"), f"层序错了: {names}"
     text = "".join(
         str(m.get("content") or "")
         for name, messages in _block_names(req)
-        if name == "behavior"
+        if name == "system_prompt"
         for m in messages
     )
     assert "【安全规则" in text
