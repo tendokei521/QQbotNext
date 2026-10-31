@@ -92,6 +92,9 @@ class ToolState:
             "reason": self.reason,
             "reason_text": self.reason_text,
             "detail": self.detail,
+            # 描述/分类来自 spec（界面上没描述只能显示内部名）；没有就留空
+            "description": str(self.extra.get("description", "") or ""),
+            "category": str(self.extra.get("category", "") or ""),
         }
 
 
@@ -252,6 +255,81 @@ def resolve_tool_state(
             logger.debug(f"[Tool] 权限预判失败（{tool_name}），交由执行期判定: {e}")
 
     return _state(True, REASON_OK, "", extra)
+
+
+async def resolve_tool_source_states(runtime: Any) -> list[ToolState]:
+    """枚举**模块工具源**（`runtime.tool_sources`）贡献的工具及其状态。
+
+    这些工具（`expand_*` / `memory_*` / `knowledge_*` / `schedule_task`）在注入时
+    同样走 ``resolve_tool_state``，但此前统一清单只枚举了 `llm_tools`（`@tool` 装饰器）
+    / 系统工具 / OneBot / MCP，导致它们在「高级工具」里不可见、也无法单独关闭。
+
+    清单场景没有真实会话，用一个空 scope 收集即可：这些工具源的 `collect()` 只按
+    运行时与配置决定要不要产出工具，不依赖具体会话内容（会话相关的值在执行时才用）。
+    """
+    from app.agent.loop.providers import TurnScope
+    from app.agent.tools.spec import ToolContext
+
+    sources = list(getattr(runtime, "tool_sources", None) or [])
+    if not sources:
+        return []
+
+    tool_ctx = ToolContext(
+        runtime=runtime,
+        bot=getattr(runtime, "bot", None),
+        session_id="",
+        event=None,
+    )
+    scope = TurnScope(
+        runtime=runtime,
+        config=getattr(runtime, "config", None),
+        session_id="",
+        is_private=False,
+        user_id="",
+        group_id=None,
+        tool_ctx=tool_ctx,
+    )
+
+    states: list[ToolState] = []
+    for source in sources:
+        provider = str(getattr(source, "name", "") or "?")
+        owner_module = getattr(source, "owner", None)
+        try:
+            specs = await source.collect(scope) or []
+        except Exception as e:  # noqa: BLE001 —— 单个工具源失败不该拖垮整张清单
+            logger.debug(f"[Tool] 工具源 {provider} 枚举失败（已忽略）: {e}")
+            continue
+        for spec in specs:
+            st = resolve_tool_state(runtime, spec)
+            # OneBot / MCP 有各自的清单页与统一枚举（`resolve_all_tool_states` 里已去重），
+            # 这里跳过，避免「插件工具」页把 175 个 OneBot 工具再列一遍。
+            if st.source in ("onebot", "mcp"):
+                continue
+            owner = st.owner
+            if owner in ("", "framework"):
+                owner = (
+                    str(getattr(owner_module, "module_name", "") or "")
+                    or provider
+                    or st.owner
+                )
+            states.append(
+                ToolState(
+                    name=st.name,
+                    source=st.source,
+                    owner=owner,
+                    available=st.available,
+                    reason=st.reason,
+                    detail=st.detail,
+                    extra={
+                        **st.extra,
+                        "description": str(getattr(spec, "description", "") or ""),
+                        "category": str(getattr(spec, "category", "") or ""),
+                        "provider": provider,
+                        "module_label": str(getattr(owner_module, "name", "") or ""),
+                    },
+                )
+            )
+    return states
 
 
 def resolve_all_tool_states(runtime: Any, *, include_unavailable: bool = True) -> list[ToolState]:

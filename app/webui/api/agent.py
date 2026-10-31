@@ -387,9 +387,18 @@ async def agent_tools_all(
     if runtime is None:
         return _err(404, f"账号不存在或未装配运行时: {bot_id}")
 
-    from app.agent.tools.state import resolve_all_tool_states
+    from app.agent.tools.state import resolve_all_tool_states, resolve_tool_source_states
 
-    states = [s.to_dict() for s in resolve_all_tool_states(runtime)]
+    base_states = resolve_all_tool_states(runtime)
+    seen = {st.name for st in base_states}
+    # 模块工具源（expand_* / memory_* / knowledge_* / schedule_task）也必须出现在清单里，
+    # 否则这些工具在「高级工具」不可见、无法单独关闭（只能关整个模块）。
+    for st in await resolve_tool_source_states(runtime):
+        if st.name in seen:
+            continue
+        base_states.append(st)
+        seen.add(st.name)
+    states = [s.to_dict() for s in base_states]
     summary: dict[str, int] = {}
     for item in states:
         summary[item["source"]] = summary.get(item["source"], 0) + 1
@@ -491,6 +500,37 @@ async def agent_module_tools(request: Request, bot_id: str | None = Depends(pars
             "effective": bool(user_enabled and ready),
             "prerequisite": f"模块 {module_label} 未启用" if not ready else "",
         })
+    # 模块工具源（记忆/知识库/上下文展开/定时）也归「插件工具」展示；
+    # 它们不属于 `llm_tools`（@tool）注册表，之前整页看不到。
+    from app.agent.tools.state import (
+        REASON_USER_DISABLED,
+        resolve_tool_source_states,
+        user_disabled_names,
+    )
+
+    seen = {tool["name"] for tool in tools}
+    disabled = user_disabled_names(runtime)
+    for st in await resolve_tool_source_states(runtime):
+        if st.name in seen:
+            continue
+        seen.add(st.name)
+        module_name = "" if st.owner in ("", "framework") else st.owner
+        module_label = str(st.extra.get("module_label", "") or "") or module_name or "插件"
+        ready = st.available or st.reason == REASON_USER_DISABLED
+        tools.append({
+            "name": st.name,
+            "description": str(st.extra.get("description", "") or ""),
+            "parameters": {},
+            "category": str(st.extra.get("category", "") or "插件工具"),
+            "source": st.source,
+            "module": module_name,
+            "module_label": module_label,
+            "enabled": st.name not in disabled,
+            "ready": bool(ready),
+            "effective": bool(st.available),
+            "prerequisite": "" if ready else st.reason_text,
+        })
+
     return JSONResponse(content={
         "ok": True,
         "log_enabled": bool(runtime.config.get("module_tools_log_enabled", True)),
