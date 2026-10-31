@@ -178,6 +178,10 @@ const presets = ref<ProviderPreset[]>([])
 const models = ref<ProviderModel[]>([])
 const allModels = ref<ProviderModel[]>([])
 const availableModels = ref<string[]>([])
+/** 拉取时服务端给出的能力建议：模型名 → { modalities, source } */
+const modelCatalog = ref<Record<string, { modalities: string[]; source: string }>>({})
+/** 「支持能力」下方那行提示：说清本次勾选是厂商信息、名字推断还是默认值 */
+const modalityHint = ref('')
 const selectedPresetId = ref('')
 const loadingPresets = ref(false)
 const loadingModels = ref(false)
@@ -301,6 +305,28 @@ function modelModalityLabels(model: ProviderModel): string[] {
   const list = model.config?.modalities
   if (!Array.isArray(list)) return ['文本']
   return list.map((item: string) => MODALITY_LABELS[item] || item)
+}
+
+/**
+ * 选中「拉取结果」里的模型时，把服务端推断出的能力预勾选上。
+ *
+ * 只用于**新建**：编辑已保存的模型时以用户存下的配置为准，不能被推断值覆盖。
+ * 提示语按来源区分，避免"服务端没给信息"被说成"已按厂商信息勾好"。
+ */
+function applyCatalogEntry(modelName: string | null | undefined): void {
+  const name = String(modelName || '').trim()
+  const entry = name ? modelCatalog.value[name] : undefined
+  if (!entry) {
+    modalityHint.value = name ? '服务端未返回这个模型的能力信息，用默认值' : ''
+    return
+  }
+  modelForm.modalities = [...entry.modalities]
+  modalityHint.value =
+    entry.source === 'metadata'
+      ? '已按服务端返回的能力信息预勾选'
+      : entry.source === 'name'
+        ? '服务端未返回能力信息，按模型名推断（可改）'
+        : '服务端未返回能力信息，用默认值（可改）'
 }
 
 /** 生效值的来源配色：模型自己设的（蓝）vs 继承来的（灰） */
@@ -659,6 +685,7 @@ async function confirmDelete() {
 function openCreateModel() {
   if (!selectedPresetId.value) return
   editingModelId.value = ''
+  modalityHint.value = ''
   Object.assign(modelForm, {
     preset_id: selectedPresetId.value,
     model: '',
@@ -739,19 +766,30 @@ async function fetchModels() {
   if (!selectedPresetId.value) return
   fetchingModels.value = true
   try {
-    const res = await http.post<{ ok: boolean; models: string[] }>(
-      `/api/provider-presets/${selectedPresetId.value}/models/fetch`,
-      {},
-    )
+    const res = await http.post<{
+      ok: boolean
+      models: string[]
+      catalog?: Array<{ id: string; modalities: string[]; source: string }>
+    }>(`/api/provider-presets/${selectedPresetId.value}/models/fetch`, {})
     const list = res.data?.models || []
     availableModels.value = list
+    modelCatalog.value = Object.fromEntries(
+      (res.data?.catalog || []).map((item) => [item.id, { modalities: item.modalities, source: item.source }]),
+    )
     if (!list.length) {
       notify.push('没有拉取到模型，可手动添加', 'warning')
     } else {
-      notify.push(`拉取到 ${list.length} 个模型，可用下拉选择`, 'success')
-      // 预填第一个模型名，方便快速创建
+      const known = Object.values(modelCatalog.value).filter((item) => item.source === 'metadata').length
+      notify.push(
+        known
+          ? `拉取到 ${list.length} 个模型（其中 ${known} 个带能力信息），可用下拉选择`
+          : `拉取到 ${list.length} 个模型，可用下拉选择`,
+        'success',
+      )
+      // 预填第一个模型名，并按服务端返回的能力信息预勾选支持能力
       openCreateModel()
       modelForm.model = list[0]
+      applyCatalogEntry(list[0])
     }
   } catch (err) {
     notify.push(errorMessage(err), 'error')
@@ -1163,11 +1201,12 @@ onMounted(() => {
             v-model="modelForm.model"
             :items="availableModels"
             label="可选模型（拉取结果）"
-            placeholder="选择后同步到模型名称"
+            placeholder="选择后同步到模型名称，并预勾选支持能力"
             density="comfortable"
             hide-details
             clearable
             class="mb-3"
+            @update:model-value="applyCatalogEntry"
           />
           <v-text-field v-model="modelForm.model" label="模型名称" placeholder="deepseek-chat" density="comfortable" hide-details class="mb-3" />
           <v-select
@@ -1198,6 +1237,9 @@ onMounted(() => {
                 color="primary"
                 class="mr-4"
               />
+            </div>
+            <div v-if="modalityHint" class="text-caption mt-1" style="opacity: 0.7">
+              {{ modalityHint }}
             </div>
           </div>
           <v-row>
