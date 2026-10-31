@@ -148,7 +148,7 @@ async def test_registry_checks_requirements_on_load(container, monkeypatch):
     registry = container.get(ModuleRegistry)
     registry.plugins_dir = Path(__file__).resolve().parents[2] / "app" / "plugins"
     try:
-        assert await registry.load_single("llm_knowledge", None) is True
-        assert any(name == "llm_knowledge" for name, _missing in calls), "加载时应做过依赖自检"
+        assert await registry.load_single("llm_assembly", None) is True
+        assert any(name == "llm_assembly" for name, _missing in calls), "加载时应做过依赖自检"
     finally:
-        await registry.unload_single("llm_knowledge", None)
+        await registry.unload_single("llm_assembly", None)

@@ -162,19 +162,3 @@ def test_tool_spec_sanitizes_invalid_openai_name():
 
     spec = ToolSpec(name=".ocr_image", description="", parameters={}, handler=handler)
     assert spec.to_openai()["function"]["name"] == "_ocr_image"
-
-
-# ---------- 知识库向量后端回退 ----------
-
-def test_knowledge_store_vector_backend_fallback(tmp_path):
-    from app.plugins.llm_knowledge.src.store import KnowledgeStore
-
-    store = KnowledgeStore("kb_test", db_path=str(tmp_path / "kb.db"))
-    try:
-        cid = store.add("苹果是一种水果", title="水果", embedding=[1.0, 0.0, 0.0])
-        assert cid
-        rows = store.search([1.0, 0.0, 0.0], limit=5)
-        assert rows and rows[0]["title"] == "水果"
-        assert rows[0]["_score"] >= 0.9
-    finally:
-        store.close()

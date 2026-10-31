@@ -33,7 +33,6 @@ RUNTIME_PY = APP / "agent" / "runtime.py"
 _DOCUMENTED_HANDLES = {
     # v3：业务模块把自己实现的服务挂到这些句柄上，框架按鸭子类型使用
     "memory_service": "llm_memory.on_load 挂载的记忆管理器（框架已无 memory 字段）",
-    "knowledge_service": "llm_knowledge.on_load 挂载的知识库管理器（框架已无 knowledge 字段）",
     # 设计上就允许为 None 的槽
     "output": "输出策略槽（llm_output 接管；None = 框架默认）",
     "assembler": "组装器槽（llm_assembly 接管）",

@@ -1,7 +1,6 @@
-"""`llm_memory`（17 键）与 `llm_knowledge`（3 键）模块测试。
+"""`llm_memory`（17 键）模块测试。
 
-验证"策略搬走"：把模块值设成与 agent 相反，`MemoryManager.enabled()` /
-`KnowledgeManager.enabled()` 必须跟着模块走；卸载后回退。
+验证“策略搬走”：把模块值设成与 agent 相反，`MemoryManager.enabled()` 必须跟着模块走；卸载后回退。
 """
 
 from __future__ import annotations
@@ -9,7 +8,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from app.agent.policy import policy_get
-from app.plugins.llm_knowledge.main import Module as KnowledgeModule
 from app.plugins.llm_memory.main import Module as MemoryModule
 
 # ---------- 框架读取点跟随模块 ----------
@@ -28,20 +26,6 @@ def test_memory_manager_reads_module_config(tmp_path, monkeypatch):
     assert mgr.enabled() is False, "模块关掉时框架必须跟着关"
 
 
-def test_knowledge_manager_reads_module_config(tmp_path, monkeypatch):
-    from app.plugins.llm_knowledge.src.manager import KnowledgeManager
-
-    monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
-    runtime = SimpleNamespace(
-        bot_id="200",
-        config={"knowledge_enable": False},
-        knowledge_options=SimpleNamespace(
-            get=lambda k, d=None: {"knowledge_enable": True}.get(k, d)
-        ),
-    )
-    assert KnowledgeManager(runtime).enabled() is True
-
-
 # ---------- 装/卸 ----------
 
 
@@ -58,7 +42,6 @@ class _Runtime:
         self.bot_id = "12345"
         self.config = {}
         self.memory_options = None
-        self.knowledge_options = None
         self.context_providers: list = []
         self.tool_sources: list = []
         self.llm_hooks = _Hooks()
@@ -117,14 +100,3 @@ async def test_memory_module_installs_and_clears_view():
     assert policy_get(runtime, "memory", "memory_enable") is True
 
 
-async def test_knowledge_module_installs_and_clears_view():
-    runtime = _Runtime()
-    runtime.config = {"knowledge_enable": False}
-    module = _make(KnowledgeModule, "llm_knowledge", runtime, {"knowledge_enable": True})
-
-    await module.on_load()
-    assert policy_get(runtime, "knowledge", "knowledge_enable") is True
-    assert module.enabled is True
-
-    await module.on_unload()
-    assert runtime.knowledge_options is None
