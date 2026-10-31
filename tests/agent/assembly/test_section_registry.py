@@ -80,20 +80,22 @@ def test_two_bot_runtimes_do_not_share_sections():
 # ==================== 2. order=55 落在 proactive 与 message_meta 之间 ====================
 
 
-def test_order_55_section_lands_between_proactive_and_message_meta():
+def test_section_order_decides_position_inside_its_layer():
+    """层内位置由段的 order 决定：L1 里的段落合并成一条 system，但合并顺序就是 order。"""
     runtime = _runtime()
-    register_section(runtime, _section("between", 55, "### 插进来的段"))
+    register_section(runtime, Section("between", 55, lambda req: [{"role": "system", "content": "### 插进来的段"}], layer="system_prompt"))
 
     names = _names(resolve_sections(runtime))
     assert names.index("between") == names.index("proactive") + 1
     assert names.index("between") + 1 == names.index("message_meta")
 
-    # 装配结果里也真的落在两者之间（describe 的空段也留行，位置可断言）
-    rows = describe(PromptRequest(runtime=runtime, config={"system_prompt": "人设"}, user_text="hi"))
-    blocks = [row["block"] for row in rows]
-    assert blocks.index("between") == blocks.index("proactive") + 1
-    assert blocks.index("between") + 1 == blocks.index("message_meta")
-    assert any(row["block"] == "between" and row["chars"] == len("### 插进来的段") for row in rows)
+    # L1 层内合并后只有一条 system，位置改看文本里的先后
+    req = PromptRequest(runtime=runtime, config={"system_prompt": "人设", "prompt_preset": "chat"}, user_text="hi")
+    l1 = next(m["content"] for m in PromptAssembler().build(req) if m.get("role") == "system")
+    assert "### 插进来的段" in l1
+    # 合并顺序 = 段 order：behavior(20) < between(55) < message_meta(60)
+    assert l1.index("【安全规则") < l1.index("### 插进来的段")
+    assert l1.index("### 插进来的段") < l1.index("### 消息格式说明")
 
 
 def test_resolve_blocks_keeps_extra_between_group_log_and_history():
@@ -225,8 +227,10 @@ def test_builder_failure_skips_section_and_logs_error(monkeypatch):
 
     monkeypatch.setattr(assembler_mod, "logger", _Recorder())
 
-    messages = PromptAssembler().build(PromptRequest(runtime=runtime, config={"system_prompt": "人设"}))
-    assert messages[0] == {"role": "system", "content": "人设"}  # 其它段照常
+    messages = PromptAssembler().build(PromptRequest(runtime=runtime, config={"system_prompt": "人设", "prompt_preset": "chat"}))
+    systems = [m["content"] for m in messages if m.get("role") == "system"]
+    assert "人设" in systems, "其它段照常（人格仍在）"
+    assert "【安全规则" in systems[0], "L1 仍在第一条"
     assert any("boom_section" in msg and "构建失败" in msg for msg in errors)
 
 

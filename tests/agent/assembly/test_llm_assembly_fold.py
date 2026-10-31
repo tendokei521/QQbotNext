@@ -132,7 +132,9 @@ def test_single_style_describe_stays_aligned_with_build():
 
     non_empty = [r for r in rows if r["role"] != "-"]
     assert len(non_empty) == len(messages), "非空块行数应等于最终消息数（对位不串）"
-    assert [r["block"] for r in non_empty] == ["persona", "history", "history", "user"]
+    # L1（规则）在层内合并成一条 system，单条风格下再折成人设那条，
+    # 于是第一个非空块是 L1 的承载段（behavior），人设被折走。
+    assert non_empty[0]["layer"] == "system_prompt"
     assert [r["role"] for r in non_empty] == ["system", messages[1]["role"], messages[2]["role"], "user"]
     assert non_empty[0]["chars"] == len(messages[0]["content"])
     assert len([r for r in rows if r["role"] == "system"]) == 1

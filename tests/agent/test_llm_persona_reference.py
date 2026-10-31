@@ -66,8 +66,23 @@ def _req(**kw):
     return PromptRequest(**base)
 
 
-def _system(messages: list[dict]) -> str:
-    return messages[0]["content"]
+def _persona_text(req) -> str:
+    """取人格（L2）那条 system 的正文。
+
+    L1 规则段是另一条 system（层内合并、排在前面），所以不能再用 "第一条 system"
+    代表人格；这里按 `describe()` 的段名对齐找 persona。
+    """
+    from app.agent.assembly.assembler import describe
+
+    messages = PromptAssembler().build(req)
+    index = 0
+    for row in describe(req):
+        if row.get("role") == "-":
+            continue
+        if row.get("block") == "persona":
+            return str(messages[index].get("content") or "")
+        index += 1
+    return ""
 
 
 # ==================== 默认行为不变 ====================
@@ -75,7 +90,7 @@ def _system(messages: list[dict]) -> str:
 
 def test_without_preset_config_behaviour_is_unchanged():
     req = _req(config_service=_ConfigService({"p1": PRESET}))
-    assert _system(PromptAssembler().build(req)) == OLD_PROMPT
+    assert _persona_text(req) == OLD_PROMPT
     assert build_history(req) == [{"role": "user", "content": "上一句"}], "没引用预设就不该插入预设对话"
     assert persona_begin_dialogs(req) == []
 
@@ -85,17 +100,17 @@ def test_without_preset_config_behaviour_is_unchanged():
 
 def test_preset_prompt_is_used_when_referenced():
     req = _req(config_service=_ConfigService({"p1": PRESET}), config={"system_prompt": OLD_PROMPT, "persona_preset_id": "p1"})
-    assert _system(PromptAssembler().build(req)) == "你是傲娇猫娘。"
+    assert _persona_text(req) == "你是傲娇猫娘。"
 
 
 def test_preset_edit_takes_effect_without_reapplying():
     """活引用：改预设内容后**下一次组装**立即反映，不需要重新"应用预设"。"""
     service = _ConfigService({"p1": dict(PRESET)})
     config = {"system_prompt": OLD_PROMPT, "persona_preset_id": "p1"}
-    assert _system(PromptAssembler().build(_req(config_service=service, config=config))) == "你是傲娇猫娘。"
+    assert _persona_text(_req(config_service=service, config=config)) == "你是傲娇猫娘。"
 
     service.presets["p1"]["system_prompt"] = "你是一只猫（改过了）。"
-    assert _system(PromptAssembler().build(_req(config_service=service, config=config))) == "你是一只猫（改过了）。"
+    assert _persona_text(_req(config_service=service, config=config)) == "你是一只猫（改过了）。"
 
 
 def test_begin_dialogs_prepended_to_history():
@@ -138,21 +153,21 @@ def test_begin_dialogs_bad_shapes_are_ignored():
 
 def test_missing_preset_falls_back_to_system_prompt():
     req = _req(config_service=_ConfigService({}), config={"system_prompt": OLD_PROMPT, "persona_preset_id": "gone"})
-    assert _system(PromptAssembler().build(req)) == OLD_PROMPT
+    assert _persona_text(req) == OLD_PROMPT
     assert build_history(req) == [{"role": "user", "content": "上一句"}]
 
 
 def test_preset_without_prompt_falls_back():
     preset = {"id": "p1", "system_prompt": "   ", "begin_dialogs": [{"role": "user", "content": "hi"}]}
     req = _req(config_service=_ConfigService({"p1": preset}), config={"system_prompt": OLD_PROMPT, "persona_preset_id": "p1"})
-    assert _system(PromptAssembler().build(req)) == OLD_PROMPT
+    assert _persona_text(req) == OLD_PROMPT
     # 提示词为空但预设对话有效时，预设对话仍然前插（两者互不牵连）
     assert build_history(req)[0] == {"role": "user", "content": "hi"}
 
 
 def test_config_service_exception_falls_back():
     req = _req(config_service=_ConfigService(boom=True), config={"system_prompt": OLD_PROMPT, "persona_preset_id": "p1"})
-    assert _system(PromptAssembler().build(req)) == OLD_PROMPT
+    assert _persona_text(req) == OLD_PROMPT
 
 
 def test_runtime_without_config_service_is_safe():
@@ -171,7 +186,8 @@ def test_single_style_folds_preset_prompt_into_one_system():
     )
     messages = PromptAssembler().build(req)
     systems = [m for m in messages if m["role"] == "system"]
-    assert len(systems) == 1 and systems[0]["content"].startswith("你是傲娇猫娘。")
+    assert len(systems) == 1, "单条风格应只剩一条 system"
+    assert "你是傲娇猫娘。" in systems[0]["content"], "人设必须还在折叠结果里"
 
 
 def test_describe_reports_persona_block():
@@ -179,8 +195,9 @@ def test_describe_reports_persona_block():
 
     req = _req(config_service=_ConfigService({"p1": PRESET}), config={"persona_preset_id": "p1"})
     rows = describe(req)
-    assert rows[0]["block"] == "persona" and rows[0]["role"] == "system"
-    assert rows[0]["chars"] == len("你是傲娇猫娘。")
+    persona = next(row for row in rows if row["block"] == "persona")
+    assert persona["role"] == "system" and persona["layer"] == "persona"
+    assert persona["chars"] == len("你是傲娇猫娘。")
 
 
 def test_agent_schema_exposes_persona_as_resource_field():

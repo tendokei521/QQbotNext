@@ -336,6 +336,11 @@ def log_debug_prompt_if_enabled(runtime, session_id: str, messages: list[dict], 
     enabled = bool(getattr(ctx, "state", {}).get("debug_prompt", False)) if ctx is not None else False
     if not enabled:
         return
+    # 先打一行「这条 prompt 由哪几层组成」（装配器 build 时挂在 ctx.state），
+    # 再打全文。排障时看层摘要就能判断"缺的是规则、人设还是插件块"。
+    layers = str(getattr(ctx, "state", {}).get("assembly_layers", "") or "") if ctx is not None else ""
+    if layers:
+        logger.add_info(account_label(runtime.bot_id)).info(f"[Prompt] {session_id} · {layers}")
     _log_debug_prompt(runtime, session_id, messages, debug_enabled=True)
 
 

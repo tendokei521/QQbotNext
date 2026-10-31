@@ -52,7 +52,7 @@ async def test_save_override_persists_and_wins_in_assembly(config_service):
         available_tools={"send_message"},
     )
     systems = [m["content"] for m in PromptAssembler().build(req) if m["role"] == "system"]
-    assert custom in systems, "装配应直接使用覆盖文本"
+    assert any(custom in text for text in systems), "装配应直接使用覆盖文本（L1 会跟其它规则合并成一条）"
 
 
 async def test_account_level_override_still_wins(config_service):

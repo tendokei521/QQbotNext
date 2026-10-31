@@ -70,7 +70,9 @@ class Section:
     - ``builder``：``(req) -> list[dict]``，返回该段消息；不适用时返回 ``[]``（不产生空消息）；
     - ``scope``：``agent`` / ``global``，同名时 agent 遮蔽 global；
     - ``complete``：``True`` 表示该段声明自己产出整条 system（一次解析最多一个，冲突即报错）；
-    - ``source``：声明者（模块名 / 内置来源），只用于日志与排查，不参与排序。
+    - ``source``：声明者（模块名 / 内置来源），只用于日志与排查，不参与排序；
+    - ``layer``：属于哪一层（见 ``assembly.layers``）。留空 = 按段名推断
+      （内置段有固定映射，插件段默认 L3 钩子注入）。
     """
 
     name: str
@@ -79,6 +81,7 @@ class Section:
     scope: str = SCOPE_AGENT
     complete: bool = False
     source: str = ""
+    layer: str = ""
 
     def __post_init__(self) -> None:
         name = str(self.name or "").strip()
@@ -190,7 +193,11 @@ class SectionRegistry:
                 {s.name: s for s in self._sections.values() if s.scope == SCOPE_AGENT}
             )
             visible = list(by_name.values())
-        resolved = sorted(visible, key=lambda section: (section.order, section.name))
+        # 排序：先按「层」（L1 系统提示词 → L2 人格 → L3 注入 → L4 历史 → L5 本轮），
+        # 层内再按段自己的 order（name 兜底，保证同输入必然同顺序 → 前缀稳定）。
+        from app.agent.assembly.layers import sort_key as _layer_sort_key
+
+        resolved = sorted(visible, key=_layer_sort_key)
         complete = [section for section in resolved if section.complete]
         if len(complete) > 1:
             names = ", ".join(f"{s.name}(order={s.order})" for s in complete)

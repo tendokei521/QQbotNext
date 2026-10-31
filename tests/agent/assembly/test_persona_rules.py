@@ -238,12 +238,13 @@ def _block_names(req):
     return [(block.name, messages) for block, messages in build_all_blocks(req) if messages]
 
 
-def test_behavior_block_follows_persona():
+def test_behavior_block_precedes_persona():
+    """顺序口径 A：规则（L1）在前、人设（L2）在后——人设里手写的输出格式压不住规则。"""
     req = _request(config={"prompt_preset": "chat"})
     req.available_tools = ALL_TOOLS
     names = [name for name, _ in _block_names(req)]
-    assert "behavior" in names
-    assert names.index("behavior") == names.index("persona") + 1
+    assert "behavior" in names and "persona" in names
+    assert names.index("behavior") < names.index("persona"), f"层序错了: {names}"
     text = "".join(
         str(m.get("content") or "")
         for name, messages in _block_names(req)

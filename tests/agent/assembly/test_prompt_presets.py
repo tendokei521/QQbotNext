@@ -25,6 +25,18 @@ from app.agent.persona import rules as persona_rules
 #: 工具名形态：小写字母开头、至少含一个下划线（``memory_save`` / ``expand_message`` …）
 _TOOL_TOKEN_RE = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b")
 
+def _l1_text(req) -> str:
+    """取 L1 系统提示词正文。
+
+    层模型里 L1 是**一条** system（层内合并），排在 L2 人格之前，
+    所以"第一条 system"就是它。
+    """
+    for msg in PromptAssembler().build(req):
+        if msg.get("role") == "system":
+            return str(msg.get("content") or "")
+    return ""
+
+
 ALL_TOOLS = {
     "send_message",
     "finish",
@@ -209,8 +221,7 @@ def test_schedule_instruction_follows_preset():
             user_text="hi",
             available_tools=ALL_TOOLS,
         )
-        contents = [str(m["content"]) for m in PromptAssembler().build(req)]
-        assert preset.schedule_instruction in contents
+        assert preset.schedule_instruction in _l1_text(req)
 
 
 def test_message_meta_matches_real_format():
@@ -226,8 +237,8 @@ def test_message_meta_matches_real_format():
             user_text="hi",
             available_tools=ALL_TOOLS,
         )
-        assert preset.message_meta_single_line in [m["content"] for m in PromptAssembler().build(single)]
-        assert preset.message_meta_legacy in [m["content"] for m in PromptAssembler().build(legacy)]
+        assert preset.message_meta_single_line in _l1_text(single)
+        assert preset.message_meta_legacy in _l1_text(legacy)
         assert preset.message_meta_single_line != preset.message_meta_legacy
 
 
@@ -286,8 +297,9 @@ def test_preset_does_not_touch_persona_block():
             user_text="hi",
             available_tools=ALL_TOOLS,
         )
-        first = PromptAssembler().build(req)[0]
-        assert first == {"role": "system", "content": "我是独特的人设正文"}
+        systems = [m for m in PromptAssembler().build(req) if m.get("role") == "system"]
+        assert {"role": "system", "content": "我是独特的人设正文"} in systems
+        assert _l1_text(req) != "我是独特的人设正文", "人设不该被并进 L1 规则段"
 
 
 def test_folding_style_still_works_with_preset():

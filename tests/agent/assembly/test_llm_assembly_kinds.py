@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from app.agent.assembly.assembler import PromptRequest, describe
+from app.agent.assembly.assembler import PromptAssembler, PromptRequest, describe
 
 
 def _rows(req: PromptRequest) -> list[dict]:
@@ -29,9 +29,11 @@ def test_proactive_prompt_has_message_meta_and_no_schedule_instruction():
         schedule_enable=False,
     )
 
+    # L1 是层内合并后的**一条** system：格式说明与定时协议都在它里面
+    l1 = next(m["content"] for m in PromptAssembler().build(req) if m.get("role") == "system")
+    assert "### 消息格式说明" in l1 or "### 记录格式" in l1, "主动消息必须带格式说明"
+    assert "### 定时任务" not in l1, "schedule_enable=False 时不应注入定时协议"
     rows = _rows(req)
-    assert rows["message_meta"]["messages"] == 1, "主动消息必须带消息格式说明块"
-    assert rows["schedule"]["messages"] == 0, "schedule_enable=False 时不应注入定时协议"
     assert rows["user"]["messages"] == 1
 
 

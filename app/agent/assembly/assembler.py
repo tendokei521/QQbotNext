@@ -97,6 +97,7 @@ from app.agent.assembly.builtin_sections import (
     prompt_preset,
     resolve_persona_preset,
 )
+from app.agent.assembly.layers import LAYER_SYSTEM_PROMPT, layer_of, summarize_layers
 from app.agent.assembly.sections import (
     SCOPE_AGENT,
     register_section,
@@ -217,7 +218,10 @@ def resolve_blocks(req: PromptRequest) -> list[Any]:
     sections = list(registry_of(getattr(req, "runtime", None)).resolve(scope=SCOPE_AGENT))
     if not any(section.name == EXTRA_SECTION.name for section in sections):
         sections.append(EXTRA_SECTION)
-    sections.sort(key=lambda section: (section.order, section.name))
+    # 追加 extra 之后要重排：与注册表同一口径（先层、再 order、再名字）
+    from app.agent.assembly.layers import sort_key as _layer_sort_key
+
+    sections.sort(key=_layer_sort_key)
     return sections
 
 
@@ -252,9 +256,47 @@ def build_all_blocks(req: PromptRequest, sections: list[Any] | None = None) -> B
             )
             messages = []
         built.append((section, list(messages)))
+    built = merge_layer_blocks(built, LAYER_SYSTEM_PROMPT)
     if system_style(req) == SYSTEM_STYLE_SINGLE:
         built = fold_system_blocks(built)
     return built
+
+
+def merge_layer_blocks(built: BuiltBlocks, layer: str) -> BuiltBlocks:
+    """把某一层的多条 system 合并成**一条**（挂在层内第一个有内容的段上）。
+
+    为什么需要：L1（系统提示词）里行为段、定时协议、主动性、消息格式说明都是"规则"，
+    拆成 4 条 system 会让模型把它们当 4 段独立口述顺序，也让 ``[Prompt]`` 的
+    "这条 prompt 由哪几层组成"说不清。层内合并后，L1 恰好一条 system，
+    L2 人格一条，L3 之后才是插件/动态块——与文档里的 5 层一一对应。
+
+    只合并 ``role == "system"`` 且 ``content`` 是字符串的消息；其它角色/多模态块原样保留。
+    在**段结果**上合并（不是摊平后），``describe()`` 仍能看出每段贡献了多少字。
+    """
+    index_of_layer = [i for i, (block, _msgs) in enumerate(built) if layer_of(block) == layer]
+    if len(index_of_layer) <= 1:
+        return built
+
+    texts: list[str] = []
+    target: int | None = None
+    kept: list[list[dict]] = []
+    for index, (_block, msgs) in enumerate(built):
+        rest: list[dict] = []
+        for msg in msgs:
+            content = msg.get("content")
+            if index in index_of_layer and msg.get("role") == "system" and isinstance(content, str):
+                if target is None:
+                    target = index
+                if content.strip():
+                    texts.append(content)
+                continue
+            rest.append(msg)
+        kept.append(rest)
+
+    if target is None or not texts:
+        return built
+    kept[target].insert(0, {"role": "system", "content": "\n\n".join(texts)})
+    return [(block, kept[i]) for i, (block, _msgs) in enumerate(built)]
 
 
 def _build_legacy_blocks(req: PromptRequest, blocks: tuple[Block, ...]) -> BuiltBlocks:
@@ -351,11 +393,32 @@ class PromptAssembler:
         return _build_legacy_blocks(req, self.blocks)
 
     def build(self, req: PromptRequest) -> list[dict]:
-        """装配 messages：解析段 → 逐段生成 → 归位 → 按模态清洗（唯一兜底）→ 贴发言协议。"""
+        """装配 messages：解析段 → 逐段生成 → 归位 → 按模态清洗（唯一兜底）→ 贴发言协议。
+
+        顺带把 ``describe()`` 的行（每段的层/角色/字数）挂到 ``ctx.state["assembly_blocks"]``：
+        ``[Prompt]`` 日志用它在全文之前打一行"这条 prompt 由哪几层组成"，排障不必数段。
+        """
         built = self._built(req)
         messages = flatten(built)
         messages = place_images(messages, req)
-        return apply_speech_protocol(sanitize(messages, req), req)
+        final = sanitize(messages, req)
+        self._remember_blocks(req, built, final)
+        return apply_speech_protocol(final, req)
+
+    @staticmethod
+    def _remember_blocks(req: PromptRequest, built: BuiltBlocks, final: list[dict]) -> None:
+        """把本轮段摘要挂到 ctx（装配是旁路，任何异常都不该影响请求）。"""
+        ctx = getattr(req, "ctx", None)
+        if ctx is None:
+            return
+        try:
+            rows = describe_blocks(built, final=final)
+            ctx.state["assembly_blocks"] = rows
+            ctx.state["assembly_layers"] = summarize_layers(rows)
+        except Exception as e:  # noqa: BLE001 —— 摘要只是排障信息
+            logger.add_info(account_label(getattr(req.runtime, "bot_id", "?"))).debug(
+                f"[Assembly] 段摘要生成失败（已忽略）: {e}"
+            )
 
     def describe(self, req: PromptRequest) -> list[dict]:
         """返回 ``[{block, role, chars, messages}]``：不打印全文也能看清本轮发了什么。
@@ -426,20 +489,22 @@ def describe_blocks(
 ) -> list[dict]:
     """把 (段, 消息) 压成可读摘要。
 
-    每段一行：``{"block": 名字, "role": 角色, "chars": 文本长度, "messages": 条数}``；
+    每段一行：``{"block": 名字, "layer": 层, "role": 角色, "chars": 文本长度, "messages": 条数}``；
     空段也保留一行（``role="-"``、``chars=0``），便于"一眼看出本轮缺哪块"。
     传入 ``final`` 时角色/长度以**最终发出**的消息为准（图片归位后为 ``user+media``）。
     """
     if final is None:
         rows: list[dict] = []
         for block, msgs in built:
+            layer = layer_of(block)
             if not msgs:
-                rows.append({"block": block.name, "role": "-", "chars": 0, "messages": 0})
+                rows.append({"block": block.name, "layer": layer, "role": "-", "chars": 0, "messages": 0})
                 continue
             for msg in msgs:
                 role, chars = _summarize(msg)
                 rows.append({
                     "block": block.name,
+                    "layer": layer,
                     "role": role,
                     "chars": chars,
                     "messages": 1,
@@ -450,12 +515,13 @@ def describe_blocks(
     cursor = 0
     rows = []
     for block, msgs in built:
+        layer = layer_of(block)
         if not msgs:
-            rows.append({"block": block.name, "role": "-", "chars": 0, "messages": 0})
+            rows.append({"block": block.name, "layer": layer, "role": "-", "chars": 0, "messages": 0})
             continue
         for _ in range(len(msgs)):
             role, chars = _summarize(final[cursor]) if cursor < len(final) else ("?", 0)
-            rows.append({"block": block.name, "role": role, "chars": chars, "messages": 1})
+            rows.append({"block": block.name, "layer": layer, "role": role, "chars": chars, "messages": 1})
             cursor += 1
     return rows
 
