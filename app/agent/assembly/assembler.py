@@ -1,4 +1,4 @@
-"""LLM 消息组装：有序 section 注册表 + 一次装配。
+"""LLM 消息组装：五层 + 有序 section 注册表 + 一次装配。
 
 ## 为什么有这个模块
 
@@ -12,28 +12,30 @@ messages：``chat.generate_response``、``chat.stream_response``、``scheduler._
 ```
 PromptRequest（一次请求的全部归一化输入）
       ↓
-registry_of(runtime).resolve()   ← 12 个默认段（builtin_sections）+ 插件注册段，按 order 排序
-      ↓
+registry_of(runtime).resolve()   ← 默认段（builtin_sections）+ 插件注册段
+      ↓                          ← 先按「层」（layers.py），层内按 order
 逐段 builder(req)                ← 段内自带适用条件，不适用返回 []
+      ↓
+merge_layer_blocks(L1)           ← L1 的多条规则合成一条 system
       ↓
 place_images → sanitize_contexts_by_modalities   ← 归位在前、清洗在最后（清洗是唯一兜底）
       ↓
 messages（OpenAI 风格）
 ```
 
-- **顺序只看 section 的 ``order``**（10 的倍数给内置段，见 ``builtin_sections``），
-  不藏在函数体里；插件用 ``sections.register_section`` 加一段即可，不必接管装配器；
+- **先说层，再说段**：一次请求固定是 L1 系统提示词 → L2 人格预设 → L3 钩子注入 →
+  L4 对话历史 → L5 本轮消息（见 :mod:`app.agent.assembly.layers`）。层由段的 ``layer``
+  或内置映射决定，**层序优先于段的 order**；所以规则天然在人设之前，插件段天然在两者之后；
 - **每个段是独立函数**（``builtin_sections.build_xxx(req) -> list[dict]``），
   只读 req、不产生副作用，可单测；
 - **注册表按 runtime 实例隔离**（``runtime.prompt_sections``）；没有 runtime 的直调/单测
-  用进程级默认表。默认段由 ``default_sections()`` 首次解析时注入，"默认段总是存在"；
-- **`describe(req)`** 返回 ``[{block, role, chars, messages}]``，`[Prompt]` 调试日志与
-  黄金快照测试都用它，想回答"这次请求发了什么"不必再打印全文；
-- **组装风格可切**：``system_prompt_style="single"`` 时把所有 system 段折成一条
-  （``fold_system_blocks``），对齐第三方框架「一整条 system prompt」的形态；默认
-  ``blocks`` 保持既有形态不变。
+  用进程级默认表。默认段由 ``default_sections()`` 首次解析时注入，"默认段始终存在"；
+- **`describe(req)`** 返回 ``[{block, layer, role, chars, messages}]``，`[Prompt]` 调试日志
+  与快照测试都用它，想回答"这次请求发了什么、由哪几层组成"不必再打印全文；
+- **组装风格可切**：``system_prompt_style="single"`` 时把所有 system 段再折成一条
+  （``fold_system_blocks``）；默认 ``blocks`` 保留分层形态（L1 一条、L2 一条、L3 若干）。
 
-## 段顺序（与改造前逐字一致；详见 ``builtin_sections`` 的表）
+## 段顺序（层内 order；详见 ``builtin_sections`` 的表）
 
 | order | 段 | 角色 | 条件 |
 |---|---|---|---|
@@ -47,7 +49,7 @@ messages（OpenAI 风格）
 | 80 | memory | system | 记忆有召回 |
 | 90 | background | system | 指代块或聊天环境背景非空 |
 | 100 | group_log | system | 群聊记录模块在场且有记录 |
-| 105 | extra | system ×N | **兼容通道**：``req.extra_blocks`` 非空（不是默认段） |
+| 105 | extra | system ×N | **L3 本轮注入**：``req.extra_blocks`` 非空（context_providers 收集，不是默认段） |
 | 110 | history | 对话 | 非空 |
 | 120 | user | user | 始终 |
 

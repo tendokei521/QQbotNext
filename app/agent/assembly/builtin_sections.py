@@ -1,32 +1,26 @@
-"""内置的 12 段提示词（从 ``assembler.py`` 的硬编码块表迁出）。
+"""内置段的定义（哪些段、每段的层与条件、每段文案）。
 
 ## 为什么单独成文件
 
-``assembler.py`` 负责「怎么装配」（解析注册表、折叠、清洗、图片归位），
-本文件负责「默认有哪些段、每段的适用条件与文案」。拆开后：
+``assembler.py`` 负责「怎么装配」（解析注册表、按层排序、层内合并、折叠、清洗、图片归位），
+本文件负责「默认有哪些段、每段属于哪一层、适用条件与文案」：
 
-- 默认段顺序/条件只有这一处，``default_sections()`` 是「默认段总是存在」的唯一来源；
-- 插件 `register_section` 只加一段，不必读/改装配器；
-- 迁移是**逐条搬运**：每个 builder 与改造前的 ``build_xxx(req)`` 一字不差
-  （条件写进 builder 内部，不适用时返回 ``[]``），输出由 ``tests/agent/assembly``
-  的既有黄金快照兜底。
+- 默认段顺序/条件只有这一处，``default_sections()`` 是「默认段始终存在」的唯一来源；
+- 插件 `register_section` 只加一段（默认落 L3，想进 L1 就显式写 ``layer="system_prompt"``）；
+- 每个 builder 只读 ``req``、不适用时返回 ``[]``，输出由 ``tests/agent/assembly`` 兜底。
 
-## 顺序与条件（与改造前块表一致）
+## 段 → 层（层序见 ``assembly/layers.py``）
 
-| order | 段 | 角色 | 条件 |
+| 层 | 段（层内 order 升序） | 角色 | 条件 |
 |---|---|---|---|
-| 10 | persona | system | 始终 |
-| 20 | behavior | system | 选中提示词方案（产品路径恒有） |
-| 30 | emoji_hint | system | 能贴表情且活跃度 > 0、词典有标签 |
-| 40 | schedule | system | ``schedule_enable`` |
-| 50 | proactive | system | 有可用能力时 |
-| 60 | message_meta | system | 消歧说明开启且本轮确实注入了元信息 |
-| 70 | skills | system ×N | 有技能时 |
-| 80 | memory | system | 记忆有召回 |
-| 90 | background | system | 指代块或聊天环境背景非空 |
-| 100 | group_log | system | 群聊记录模块在场且有记录 |
-| 110 | history | 对话 | 非空（角色预设的预设对话前插） |
-| 120 | user | user | 始终 |
+| L1 系统提示词 | behavior(20) / schedule(40) / proactive(50) / message_meta(60) | system | 方案恒有；其余看开关与能力 |
+| L2 人格预设 | persona(10) | system | 始终 |
+| L3 钩子注入 | emoji_hint(30) / skills(70) / memory(80) / background(90) / group_log(100) / extra(105) | system | 各自有内容才出现 |
+| L4 对话历史 | history(110) | 对话 | 非空（角色预设的预设对话前插） |
+| L5 本轮消息 | user(120) | user | 始终 |
+
+L1 的四段在装配时会**合并成一条 system**（``assembler.merge_layer_blocks``），
+所以最终 messages 里 L1 只占一条；``order`` 仍决定它们在合并文本里的先后。
 
 ``EXTRA_SECTION``（order=105）**不是**默认段：它承载模块贡献的
 ``PromptRequest.extra_blocks``，由装配器在渲染时插回 ``group_log`` 与 ``history``

@@ -826,10 +826,18 @@ runtime.approval_channel = MyApprovalChannel()
 
 ### 4.7.4 注册一段提示词：`runtime.prompt_sections`（P1 起）
 
-默认提示词由 **12 个段**组成（人格 / 行为 / 表情 / 定时 / 主动性 / 元信息 / 技能 /
-记忆 / 背景 / 群聊记录 / 历史 / 本轮），顺序由每段的 `order` 决定，定义在
-`app/agent/assembly/builtin_sections.py`。模块只想**加一段**时不必接管整个装配器
-（`supersedes=("assembly",)` 仍可用于整体替换，但那是另一回事）：
+一次请求固定按 **5 层**拼（顺序不可变），默认段与它们的层定义在
+`app/agent/assembly/builtin_sections.py` + `app/agent/assembly/layers.py`：
+
+| 层 | 默认段 | 说明 |
+|---|---|---|
+| L1 系统提示词 | `behavior` / `schedule` / `proactive` / `message_meta` | 规则与协议；装配时**合并成一条 system** |
+| L2 人格预设 | `persona` | 「我是谁」，唯一来源是人格预设 |
+| L3 钩子注入 | `emoji_hint` / `skills` / `memory` / `background` / `group_log` / `extra` | 插件与本轮动态信息 |
+| L4 对话历史 | `history` | 窗口 / 压缩 / 开场对话 |
+| L5 本轮消息 | `user` | 正文 + 元信息 + 引用 + 图片 |
+
+模块只想**加一段**时不必接管整个装配器（`supersedes=("assembly",)` 仍可用于整体替换）：
 
 ```python
 from app.agent.assembly.sections import Section, register_section, unregister_section
@@ -847,9 +855,10 @@ class Module(BaseModule):
         runtime = self.ctx.services.runtime(self.bot_id)
         register_section(runtime, Section(
             name="my_knowledge",        # 稳定标识：同名同 scope 覆盖（幂等）
-            order=85,                   # 升序；取值见下表
+            order=85,                   # 层内升序
             builder=build_my_block,     # 只读 req、无副作用
             source="my_module",         # 只用于日志/排查
+            # layer="system_prompt",    # 留空 = L3 钩子注入；要进 L1 必须显式声明
         ))
 
     async def on_unload(self) -> None:
@@ -860,7 +869,10 @@ class Module(BaseModule):
 要点：
 
 - 注册表按 **runtime 实例隔离**（`runtime.prompt_sections`），不同 bot、不同模块互不串；
-  12 个默认段在首次解析时自动注入，插件**不要**手动注册它们；
+  默认段在首次解析时自动注入，插件**不要**手动注册它们；
+- **层优先于 order**：`layer` 留空时插件段自动落 **L3 钩子注入**（排在 L1/L2 之后）；
+  确实要改规则才显式写 `layer="system_prompt"`——那样它会被并进 L1 那条合并 system 里，
+  顺序由 `order` 决定；
 - `builder(req)` 只读请求、不产生副作用；返回 `[]` 表示"这段本轮不适用"（不产生空消息）；
   `describe()` 与装配各跑一次 builder，所以它必须幂等/无副作用（不要在里面发请求、写库）；
 - `scope="agent"`（默认）只影响本 runtime；同名 `scope="global"` 段会被 agent 段**遮蔽**
@@ -869,27 +881,27 @@ class Module(BaseModule):
   `resolve()` 抛 `ValueError`，装配器留 `error` 日志后中止本轮（绝不发畸形 prompt）；
 - 单段 builder 抛异常时装配器会**跳过该段**并记 `error` 日志（其余段照常），
   不会因为记忆召回之类旁路故障让整轮没有回复；
-- `PromptRequest.extra_blocks` 是旧兼容通道（位置固定在群聊记录之后、历史之前）：
-  能改的用 section，只有"一次塞多块、且不挑位置"才用它。
+- `PromptRequest.extra_blocks` 是 L3 的**动态注入通道**（`runtime.context_providers` 收集，
+  位置固定在群聊记录之后、历史之前）：一次要塞多块、且不挑位置时用它；要挑位置/命名/分层就用 section。
 
 **order 取值约定**（内置段占 10 的倍数；插件从 **200 起**，避免与以后新增的内置段撞号）：
 
-| order | 段 | 含义 |
-|---|---|---|
-| 10 | `persona` | 人格 |
-| 20 | `behavior` | 行为规则 |
-| 30 | `emoji_hint` | 表情提示 |
-| 40 | `schedule` | 定时任务协议 |
-| 50 | `proactive` | 主动性协议 |
-| 60 | `message_meta` | 消息元信息说明 |
-| 70 | `skills` | 技能说明（可多块） |
-| 80 | `memory` | 记忆召回 |
-| 90 | `background` | 背景（指代 + 聊天环境） |
-| 100 | `group_log` | 群聊环境记录 |
-| 105 | `extra` | **兼容通道**：`req.extra_blocks`，插件不要占用这个段号 |
-| 110 | `history` | 会话历史 |
-| 120 | `user` | 本轮消息 |
-| 200+ | 插件段 | 想插进内置序列中间就取同区间的小数（如 85）；想排最后取 ≥200 |
+| order | 段 | 层 | 含义 |
+|---|---|---|---|
+| 10 | `persona` | L2 | 人格 |
+| 20 | `behavior` | L1 | 行为规则 |
+| 30 | `emoji_hint` | L3 | 表情提示 |
+| 40 | `schedule` | L1 | 定时任务协议 |
+| 50 | `proactive` | L1 | 主动性协议 |
+| 60 | `message_meta` | L1 | 消息元信息说明 |
+| 70 | `skills` | L3 | 技能说明（可多块） |
+| 80 | `memory` | L3 | 记忆召回 |
+| 90 | `background` | L3 | 背景（指代 + 聊天环境） |
+| 100 | `group_log` | L3 | 群聊环境记录 |
+| 105 | `extra` | L3 | 动态注入通道（`req.extra_blocks`），插件不要占用这个段号 |
+| 110 | `history` | L4 | 会话历史 |
+| 120 | `user` | L5 | 本轮消息 |
+| 200+ | 插件段 | 默认 L3 | 想插进 L3 中间就取同区间的小数（如 85）；`layer="system_prompt"` 时才在 L1 内按 order 排序 |
 
 同 `order` 的段按 `name` 排序兜底（同一输入必然同一字节，便于快照/前缀缓存）。
 
