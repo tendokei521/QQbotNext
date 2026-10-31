@@ -38,7 +38,7 @@
 | **R4** | 迁移收口 | `[x]` | [`permission-dialogue.md`](permission-dialogue.md#r4-迁移收口) |
 | **T0–T4** | 触发方式并入「回复与权限」 | `[x]` | [`trigger-policy-integration.md`](trigger-policy-integration.md) |
 | **G0–G3** | 全局触发规则移到 AI 面板「触发方式」 | `[x]` | [`global-trigger-rules-to-ai-panel.md`](global-trigger-rules-to-ai-panel.md) |
-| **D0–D5** | 三个对话模块（组装 / 交互 / 发送），把 9 个 LLM 插件按"能改的点"重切 | `[~]` 方案 | [`dialog-modules.md`](dialog-modules.md) |
+| **D0–D5** | 四个模块（提示词组装 / 触发与调度 / 输出 / 上下文）合并完成；配置收敛与接管契约待做 | `[~]` 已合并 | [`dialog-modules.md`](dialog-modules.md) · [`../reviews/2026-10-31-four-module-merge.md`](../reviews/2026-10-31-four-module-merge.md) |
 | **C0–C5** | ~~三个核心模块（按生命周期切）~~ 已被 D 系列取代 | `[!]` | [`three-core-modules.md`](three-core-modules.md) |
 
 | 编号 | commit | 内容 |
