@@ -242,6 +242,7 @@ def render_extract_prompt(
     existing: list[dict],
     *,
     max_chars: int = 6000,
+    today: str | None = None,
 ) -> str:
     """拼抽取用 user prompt；总长超过 ``max_chars`` 时优先丢最旧的行。
 
@@ -250,12 +251,17 @@ def render_extract_prompt(
         lines: 最近的对话内容（按时间先后，末尾最新）。
         existing: 已有记忆 ``[{id, content}, ...]``，渲染成 ``id | content`` 供 target_id 引用。
         max_chars: prompt 总字数上限（保留最近的行，最早的行先丢）。
+        today: 当前日期（``YYYY-MM-DD``）；给出时要求模型把「昨天/下周三」换算成绝对日期。
 
     Returns:
         可直接作为 user 消息的文本。
     """
     speaker = str(speaker_label or "未知用户").strip() or "未知用户"
-    header = f"说话人：{speaker}\n\n【已有记忆（id | 内容；覆盖/否认时把 id 填进 target_id）】\n"
+    date_line = f"今天是 {today}。相对时间（昨天/下周/下个月）必须换算成绝对日期。\n" if today else ""
+    header = (
+        f"说话人：{speaker}\n{date_line}\n"
+        "【已有记忆（id | 内容；覆盖/否认时把 id 填进 target_id）】\n"
+    )
     separator = "\n【最近对话（按时间先后，越靠后越新）】\n"
     footer = "\n\n只输出 JSON 对象，形如 {\"memories\": [...]}。"
 

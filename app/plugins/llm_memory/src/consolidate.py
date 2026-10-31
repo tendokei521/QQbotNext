@@ -38,6 +38,9 @@ _DEFAULT_INTERVAL_MIN = 10.0
 _DEFAULT_BATCH = 20
 #: 语料最少字数（不足不调模型）
 _DEFAULT_MIN_CHARS = 30
+#: 「用户明确保存/已确认」型来源不在本文件判断；这里只控抽取产出上限
+_MAX_OPS_PER_GROUP = 6
+
 #: 抽取请求参数（低温 + 小上限：只要结构化 JSON）
 _EXTRACT_TEMPERATURE = 0.1
 _EXTRACT_MAX_TOKENS = 500
@@ -291,7 +294,8 @@ class Consolidator:
         )
 
         existing = self._candidates(session_id, is_group, text)
-        prompt = render_extract_prompt(speaker_label, lines, existing)
+        today = time.strftime("%Y-%m-%d", time.localtime())
+        prompt = render_extract_prompt(speaker_label, lines, existing, today=today)
         resp = await self._llm(prompt)
         if resp is None or not bool(getattr(resp, "ok", False)):
             self._log().warning(
@@ -308,6 +312,8 @@ class Consolidator:
             existing_ids=existing_ids,
             source_text=text,
         )
+        # 单轮最多落 _MAX_OPS_PER_GROUP 条（防模型一次刷屏占满预算）
+        ops = ops[: _MAX_OPS_PER_GROUP]
         written = 0
         for op in ops:
             try:
