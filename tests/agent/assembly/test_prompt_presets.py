@@ -86,6 +86,52 @@ def test_unknown_preset_falls_back_to_default_chat():
     assert presets.resolve(None) is None
 
 
+class _GetOnlyConfig:
+    """只有 ``get()`` 的配置门面——运行时真实传入的形状（``AgentConfig`` / ``ChainedConfig``）。
+
+    它们**没有** ``__contains__``，所以"用 ``in`` 判断键是否存在"的写法会抛
+    ``TypeError`` 并被吞掉、误判成"没有这个键"。历史上这里让三选一与
+    「编辑系统提示词」在真实路径上全部静默失效（见
+    docs/reviews/2026-10-31-prompt-assembly-analysis.md）。
+    """
+
+    def __init__(self, data: dict) -> None:
+        self._data = dict(data)
+
+    def get(self, key, default=None):
+        return self._data.get(key, default)
+
+
+def test_resolve_works_with_get_only_config_objects():
+    """真实配置对象不是 dict：``resolve`` 绝不能依赖 ``in`` / ``[]`` 这类容器协议。"""
+    base = {"system_prompt": "你是助手"}
+    for config in (
+        _GetOnlyConfig({**base, "prompt_preset": "chat"}),
+        _GetOnlyConfig({**base, "prompt_preset": "roleplay"}),
+        _GetOnlyConfig({**base, "prompt_preset": ""}),
+        _GetOnlyConfig({**base, "prompt_preset": "拼错了"}),
+    ):
+        assert presets.resolve(config) is not None, f"{config.get('prompt_preset')!r} 没解析出方案"
+
+    # 不带该键时仍是 None（库层旧行为）
+    assert presets.resolve(_GetOnlyConfig(base)) is None
+
+
+def test_behavior_block_survives_get_only_config():
+    """端到端：真实形状的配置对象也必须装配出行为规则段（本次事故的回归守卫）。"""
+
+    def blocks(config):
+        return [str(m.get("content") or "") for m in PromptAssembler().build(
+            PromptRequest(config=config, user_text="hi")
+        )]
+
+    by_dict = blocks({"system_prompt": "人格", "prompt_preset": "chat"})
+    by_facade = blocks(_GetOnlyConfig({"system_prompt": "人格", "prompt_preset": "chat"}))
+
+    assert by_facade == by_dict, "配置对象形态不该改变装配结果"
+    assert any("【安全规则" in text for text in by_facade), "行为规则段必须真的进 messages"
+
+
 # ==================== 2. 三套互不相同，但底线相同 ====================
 
 

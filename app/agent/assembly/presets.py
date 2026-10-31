@@ -481,6 +481,10 @@ def get(key: str) -> PromptPreset | None:
     return _BY_KEY.get(str(key or "").strip().lower())
 
 
+#: 「配置里没有这个键」的哨兵（区分"键不存在"与"键存在但值为空"）
+_MISSING = object()
+
+
 def resolve(config: Any) -> PromptPreset | None:
     """读 ``prompt_preset`` 得到方案：三套之一，或 ``None``（仅"键不存在"的库层调用）。
 
@@ -490,17 +494,23 @@ def resolve(config: Any) -> PromptPreset | None:
       启动迁移与保存校验已经保证正常路径不会出现非法值，这里是最后一层兜底；
     - 配置里**没有**这个键：返回 ``None``，保留旧版"没有行为规则段"的装配结果，
       供测试/脚本直接构造 config 用；产品路径（``DEFAULT_LLM_CONFIG``）永远带这个键。
+
+    **不能用 ``"prompt_preset" in config`` 判"有没有这个键"**：运行时传进来的
+    ``AgentConfig`` / ``ChainedConfig`` 只实现 ``get()``，没有 ``__contains__``，
+    ``in`` 会抛 ``TypeError``。历史上那行被 ``except`` 吞掉、当成"键不存在"，
+    于是真实路径永远拿不到方案——三选一与「编辑系统提示词」全部静默失效
+    （详见 docs/reviews/2026-10-31-prompt-assembly-analysis.md）。哨兵写法只依赖
+    ``get()``，对 dict / 配置门面 / 链式视图一律成立。
     """
     if config is None or not hasattr(config, "get"):
         return None
     try:
-        has_key = "prompt_preset" in config
-        value = str(config.get("prompt_preset", "") or "") if has_key else ""
+        value = config.get("prompt_preset", _MISSING)
     except Exception:  # noqa: BLE001 —— 配置读取失败不该让整轮请求炸掉
         return None
-    if not has_key:
+    if value is _MISSING:
         return None
-    return _BY_KEY.get(value.strip().lower()) or CHAT
+    return _BY_KEY.get(str(value or "").strip().lower()) or CHAT
 
 
 def segments_of(preset: PromptPreset | None) -> tuple[Segment, ...]:
