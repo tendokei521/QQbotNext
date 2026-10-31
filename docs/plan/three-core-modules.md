@@ -1,5 +1,10 @@
 # 计划 · 把 9 个 LLM 插件浓缩成 3 个核心模块
 
+> ⚠️ **已取代**：本方案按"一轮请求的生命周期"切（组装→发送→触发），已被
+> [`dialog-modules.md`](dialog-modules.md) 取代（那版按"用户能改的点"切成 组装/交互/发送）。
+> 仍然有效的部分：§2.3 槽接管路线 A、§3 框架侧 5 个 P0 修复、§6 迁移机制、§7 降级契约。
+> 已作废的部分：TurnPlan、按生命周期划分的模块边界、§5 的旧键映射口径。
+
 > 状态：**只出方案，未动工**（本轮不改任何 `.py`；`git status` 干净）。
 > 写作时间：2026-10-31 21:5x ｜ 基线 HEAD：见 `git log -1`（含另一会话正在改的 `assembly/` WIP）。
 > 上游评估：[`../reviews/2026-10-31-assembly-output-consolidation.md`](../reviews/2026-10-31-assembly-output-consolidation.md)
