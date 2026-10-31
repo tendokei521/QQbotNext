@@ -527,6 +527,16 @@ async def run(settings: Settings | None = None) -> None:
 
     await migrate_trigger_overrides(config_service)
 
+    # 四模块合并：9 个旧 LLM 模块的 bindings → llm_prompt / llm_trigger（幂等、带备份）
+    try:
+        from app.application.core_modules_merge import migrate_four_modules
+
+        merge_report = await migrate_four_modules(config_service)
+        if merge_report.migrated:
+            logger.info(merge_report.summary())
+    except Exception as e:  # noqa: BLE001 —— 迁移失败不该阻断启动，但必须可见
+        logger.error(f"[Migrate] 四模块合并失败（模块配置可能仍是旧的）: {e}")
+
     # 系统提示词方案：加载"设置页里编辑过"的覆盖文本 + 把未选方案的存量账号落到 chat
     try:
         from app.application import prompt_preset_service

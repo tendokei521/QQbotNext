@@ -65,3 +65,6 @@ cfg.log
 # Bundle ¹¤¼şÓëÕËºÅ¿ìÕÕ£¨ÔËĞĞÊ±Êı¾İ£©
 data/bundles/
 data/orphan-account-data.json
+
+# æ•°æ®åº“/é…ç½®å¤‡ä»½ï¼ˆè¿ç§»å‰å¿«ç…§ï¼Œå±è¿è¡Œæ•°æ®ï¼‰
+/backups/
