@@ -68,7 +68,19 @@ def policy_view(runtime: Any) -> Any:
 
 
 class ChainedConfig:
-    """链式配置：按注册顺序问每个模块视图，全都答不上再问 agent 配置。"""
+    """链式配置：按注册顺序问每个**拥有该键**的模块视图，全都答不上再问 agent 配置。
+
+    ## 为什么只问"拥有该键"的视图（2026-10-31 修复）
+
+    每个 ``ConfigView`` 对**不属于自己**的键会回退到 agent 配置——那是给"机制直接拿
+    一个视图当配置用"设计的。但在链里，这会让排在最前的视图（``output_options``）
+    把所有键都用 agent 旧值答掉，**后面模块的配置永远读不到**（已实测复现）：
+
+        ChainedConfig.get("user_message_format") -> "legacy"（agent 旧值）
+        而 llm_assembly 里用户真正保存的是 "single_line"
+
+    所以链里只问 ``owns(key)`` 为真的视图；不暴露所有权信息的旧式视图仍然全量参与。
+    """
 
     def __init__(self, runtime: Any, views: list | None = None) -> None:
         self._runtime = runtime
@@ -76,6 +88,8 @@ class ChainedConfig:
 
     def get(self, key: str, default: Any = None) -> Any:
         for view in self._views:
+            if not _view_owns(view, key):
+                continue
             value = _safe_get(view, key, None)
             if value is not None:
                 return value
@@ -83,6 +97,23 @@ class ChainedConfig:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._runtime.config, name)
+
+
+def _view_owns(view: Any, key: str) -> bool:
+    """该视图是否"拥有"这个键；没有所有权信息（第三方对象）视为拥有。"""
+    owns = getattr(view, "owns", None)
+    if callable(owns):
+        try:
+            return bool(owns(key))
+        except Exception:  # noqa: BLE001 —— 判定失败按"不拥有"处理，别吞掉后面的视图
+            return False
+    owned = getattr(view, "owned_keys", None)
+    if owned is None:
+        return True
+    try:
+        return key in owned
+    except TypeError:
+        return True
 
 
 def _safe_get(config: Any, key: str, default: Any) -> Any:

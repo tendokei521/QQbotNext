@@ -269,6 +269,16 @@ class ConfigView:
         self._module = module_config
         self._owned = frozenset(owned_keys or ())
 
+    #: 本视图**拥有**的键（其余键只是回退到 base 的透传，不算回答）。
+    #: ``ChainedConfig`` 靠它判断"这个视图该不该参与该键的仲裁"——否则排在最前的
+    #: 视图会把所有键都用 agent 旧值答掉，后面模块的配置永远读不到（实测复现过）。
+    @property
+    def owned_keys(self) -> frozenset[str]:
+        return self._owned
+
+    def owns(self, key: str) -> bool:
+        return key in self._owned
+
     def get(self, key: str, default: Any = None) -> Any:
         if key in self._owned:
             value = _safe_get(self._module, key, None)
