@@ -1,9 +1,0 @@
-{
-  "name": "poke_reply",
-  "display_name": "戳一戳回复",
-  "sign": "PokeReply",
-  "version": "1.0.0",
-  "description": "被戳后按概率回戳或回应",
-  "entry": "main.py",
-  "api_version": 1
-}

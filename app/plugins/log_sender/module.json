@@ -1,9 +1,0 @@
-{
-  "name": "log_sender",
-  "display_name": "日志发送",
-  "sign": "LogSender",
-  "version": "1.0.0",
-  "description": "聊天里发 /log 看本轮日志，/logs 看全部日志文件",
-  "entry": "main.py",
-  "api_version": 1
-}

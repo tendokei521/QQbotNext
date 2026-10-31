@@ -1,9 +1,0 @@
-{
-  "name": "emoji_reply",
-  "display_name": "Emoji回复",
-  "sign": "EmojiReply",
-  "version": "1.0.0",
-  "description": "按关键词回 Emoji，并跟随群里的 Emoji 回应",
-  "entry": "main.py",
-  "api_version": 1
-}

@@ -1,9 +1,0 @@
-{
-  "name": "group_log",
-  "display_name": "群聊记录",
-  "sign": "GroupLog",
-  "version": "1.0.0",
-  "description": "记录群里最近的动静，作为群聊背景给模型参考",
-  "entry": "main.py",
-  "api_version": 1
-}
