@@ -13,8 +13,6 @@
 
 from __future__ import annotations
 
-from app.core.logger import account_label
-
 import json
 import os
 import time
@@ -22,6 +20,7 @@ from typing import Any
 
 from app.agent import bot_data_dir, logger
 from app.core import redact
+from app.core.logger import account_label
 
 FILE_NAME = "prompt_dump.jsonl"
 DEFAULT_MAX_ENTRIES = 20

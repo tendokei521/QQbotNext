@@ -32,8 +32,8 @@ from __future__ import annotations
 from typing import Any
 
 from app.agent.assembly.prompt import (
-    MULTI_LINE_MESSAGE_META_INSTRUCTION,
     MASKED_MESSAGE_META_INSTRUCTION,
+    MULTI_LINE_MESSAGE_META_INSTRUCTION,
     SCHEDULE_INSTRUCTION,
     SINGLE_LINE_MESSAGE_META_INSTRUCTION,
     build_proactive_instruction,
