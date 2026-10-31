@@ -17,6 +17,8 @@ export interface ToolLike {
   effective?: boolean
   prerequisite?: string
   module?: string
+  /** 工具来源（system / module / onebot / mcp）：逐工具开关要原样回传 */
+  source?: string
 }
 
 const props = withDefaults(

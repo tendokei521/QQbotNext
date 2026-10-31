@@ -24,6 +24,8 @@ interface ToolState {
   reason: string
   reason_text: string
   detail?: string
+  description?: string
+  category?: string
 }
 
 const agent = useAgentConfigStore()
@@ -76,7 +78,12 @@ async function loadDescriptions() {
 
 /** 给展示辅助补上描述（工具状态本身不带 description） */
 function toolForDisplay(tool: ToolState): { name: string; description?: string } {
-  return { name: tool.name, description: descriptionByTool.value[`${tool.source}:${tool.name}`] || '' }
+  // 新接口直接带 description（含模块工具源），省一次按来源补拉；
+  // 旧数据没有时回退到 DESC_ENDPOINTS 的映射。
+  return {
+    name: tool.name,
+    description: tool.description || descriptionByTool.value[`${tool.source}:${tool.name}`] || '',
+  }
 }
 
 function titleOf(tool: ToolState): string {

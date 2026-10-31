@@ -65,7 +65,7 @@ async function toggleTool(tool: ToolLike) {
   try {
     await http.post('/api/agent/tools/toggle', {
       name: tool.name,
-      source: 'module',
+      source: tool.source || 'module',
       enabled: next,
     })
     tool.enabled = next
