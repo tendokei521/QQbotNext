@@ -71,7 +71,6 @@ async def test_onebot_gate_follows_module():
         llm_tools=None,
         skills=None,
         memory=None,
-        knowledge=None,
         mcp_manager=None,
     )
     specs, _skills, _ctx = await _collect_llm_ext(runtime, None, "group_1", False, False)

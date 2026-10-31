@@ -1,9 +1,8 @@
-"""存储抽象：为会话历史/长期记忆/知识库定义可替换后端接口。
+"""存储抽象：为会话历史/长期记忆定义可替换后端接口。
 
 当前默认实现均为 SQLite：
 - SQLiteHistoryStore（app.agent.session.history）
 - MemoryStore（app.plugins.llm_memory.src.store）
-- KnowledgeStore（app.plugins.llm_knowledge.store）
 
 后续新增 Redis / Postgres / 向量库时，只需实现本模块中的接口并在工厂处注册。
 """
@@ -49,20 +48,4 @@ class MemoryStore(ABC):
     def close(self) -> None: ...
 
 
-class KnowledgeStoreInterface(ABC):
-    """知识库存储接口（当前 KnowledgeStore 已按此接口实现）。"""
-
-    def add(self, content: str, *, title: str = "", embedding: list[float] | None = None, source: str = "manual") -> str: ...
-
-    def delete(self, cid: str) -> bool: ...
-
-    def get(self, cid: str) -> dict | None: ...
-
-    def list(self, limit: int = 100) -> list[dict]: ...
-
-    def search(self, embedding: list[float], *, limit: int = 5) -> list[dict]: ...
-
-    def close(self) -> None: ...
-
-
-__all__ = ["HistoryStore", "MemoryStore", "KnowledgeStoreInterface"]
+__all__ = ["HistoryStore", "MemoryStore"]

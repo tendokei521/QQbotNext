@@ -292,7 +292,6 @@ def make_runtime(config: dict | None = None) -> SimpleNamespace:
         llm_tools=None,
         skills=None,
         memory=None,
-        knowledge=None,
         mcp_manager=None,
         telemetry=_Telemetry(),
         provider_config=lambda: {"provider": "scripted", "model": "eval-model", "api_key": "sk-eval"},

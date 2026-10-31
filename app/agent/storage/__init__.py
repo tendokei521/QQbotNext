@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.agent.storage.base import HistoryStore, KnowledgeStoreInterface, MemoryStore
+from app.agent.storage.base import HistoryStore, MemoryStore
 
 
 def create_history_store(bot_id: Any, backend: str = "sqlite", db_path: str | None = None) -> HistoryStore:
@@ -23,29 +23,16 @@ def create_memory_store(bot_id: Any, backend: str = "sqlite", db_path: str | Non
     """创建长期记忆存储实例。"""
     if backend != "sqlite":
         raise ValueError(f"不支持的记忆存储后端: {backend}")
-    
+
     # v3：记忆存储实现已搬进 `llm_memory` 模块，这里只做工厂转发
     from app.plugins.llm_memory.src.store import MemoryStore as _MemoryStore
 
     return _MemoryStore(bot_id, db_path=db_path)
 
 
-def create_knowledge_store(bot_id: Any, backend: str = "sqlite", db_path: str | None = None) -> KnowledgeStoreInterface:
-    """创建知识库存储实例。"""
-    if backend != "sqlite":
-        raise ValueError(f"不支持的知识库存储后端: {backend}")
-    
-    # v3：知识库存储实现已搬进 `llm_knowledge` 模块
-    from app.plugins.llm_knowledge.store import KnowledgeStore as _KnowledgeStore
-
-    return _KnowledgeStore(bot_id, db_path=db_path)
-
-
 __all__ = [
     "HistoryStore",
     "MemoryStore",
-    "KnowledgeStoreInterface",
     "create_history_store",
     "create_memory_store",
-    "create_knowledge_store",
 ]

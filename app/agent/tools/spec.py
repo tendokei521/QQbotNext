@@ -169,7 +169,7 @@ class ToolSpec:
         """按**事件**判定权限与作用域（`allows()` 与 `resolve_tool_state` 共用同一份实现）。
 
         修正记录：``event is None`` 的放行判断此前排在**作用域检查之后**，于是
-        没声明 ``scopes=("*",)`` 的工具（memory_* / knowledge_* / schedule_task…）
+        没声明 ``scopes=("*",)`` 的工具（memory_* / schedule_task…）
         在主动消息与定时任务路径上被当成"当前会话类型不在适用范围"而静默失败，
         与本文档字符串"无事件场景默认放行"自相矛盾。现在无事件一律在最前面放行：
         那类触发不归属于任何普通群成员，权限判定没有主语。

@@ -4,8 +4,8 @@
 
 ``ToolSpec.allows()`` 的 docstring 写着"主动/定时等无事件场景默认放行"，
 但代码把 ``event is None`` 的放行判断排在了**作用域检查之后**。
-于是没声明 ``scopes=("*",)`` 的工具（``memory_*`` / ``knowledge_*`` /
-``schedule_task``…）在主动消息与定时任务路径上被判成
+于是没声明 ``scopes=("*",)`` 的工具（``memory_*`` / ``schedule_task``…）
+在主动消息与定时任务路径上被判成
 "当前会话类型不在适用范围"，模型收到 ``error: 无权限调用工具 …`` 而静默放弃。
 
 主动消息/定时任务的 ``ToolContext`` 天生没有 ``event``（它们不是由某条群消息触发的），

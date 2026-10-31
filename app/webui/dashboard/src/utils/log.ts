@@ -22,7 +22,6 @@ const INTERNAL_TAGS = new Set([
   'Hooks',
   'Scheduler',
   'Memory',
-  'Knowledge',
   'Resource',
   'RolePreset',
   'Setup',

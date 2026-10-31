@@ -246,7 +246,6 @@ decide(capability_id, event_facts, resolved_binding, identity) -> Decision{
 │ 能力                       acc1(主号)   acc2        acc3       操作         │
 │ ▸ Agent（框架级）           ● 开         ○ 继承      ○ 继承     [详情]      │
 │ ▸ 长期记忆 llm_memory        ● 开         ● 关        ○ 继承     [详情]      │
-│ ▸ 知识库 llm_knowledge       ○ 继承       ○ 继承      ○ 继承     [详情]      │
 │ ▸ 主动消息 llm_proactive     ● 关         ○ 继承      ○ 继承     [详情]      │
 │ ▸ OneBot 工具                ● 开(12/18)  …                     [详情]      │
 └──────────────────────────────────────────────────────────────────────────┘

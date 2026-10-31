@@ -3,7 +3,7 @@
 ## 本模块只负责
 
 判定「某个工具该不该出现在这一轮的 tools 列表里」——用户开关 + 功能前置开关
-（如 `memory_enable` / `knowledge_enable` / `schedule_enable`）。纯读配置，无 IO。
+（如 `memory_enable` / `schedule_enable`）。纯读配置，无 IO。
 
 ## 为什么单独拆出来
 
@@ -44,9 +44,6 @@ _SYSTEM_TOOL_PREREQUISITES: dict[str, tuple] = {
     "memory_delete": ("memory_enable", "长期记忆未启用"),
     "memory_correct": ("memory_enable", "长期记忆未启用"),
     "memory_deny": ("memory_enable", "长期记忆未启用"),
-    "knowledge_add": ("knowledge_enable", "知识库未启用"),
-    "knowledge_search": ("knowledge_enable", "知识库未启用"),
-    "knowledge_delete": ("knowledge_enable", "知识库未启用"),
 }
 
 

@@ -1,8 +1,7 @@
-"""P0 回归测试：证明"记忆/知识库工具与指令、主动消息记忆召回"确实恢复了。
+"""P0 回归测试：证明"记忆工具与指令、主动消息记忆召回"确实恢复了。
 
-这些用例**故意不给 runtime 挂 `memory` / `knowledge` 字段**（模拟真实的 v3 运行时），
-只挂模块自己的 `memory_service` / `knowledge_service` —— 修复前它们全部失效，
-修复后必须工作。
+这些用例**故意不给 runtime 挂 `memory` 字段**（模拟真实的 v3 运行时），
+只挂模块自己的 `memory_service` —— 修复前它们全部失效，修复后必须工作。
 """
 
 from __future__ import annotations
@@ -11,7 +10,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.plugins.llm_knowledge.src.tool import build_knowledge_tools
 from app.plugins.llm_memory.src.tool import build_memory_tools
 
 
@@ -86,22 +84,8 @@ class _FakeMemory:
         return True
 
 
-class _FakeKnowledge:
-    def enabled(self) -> bool:
-        return True
-
-    async def add_text(self, content, title="", source=""):
-        return "c1", "ok"
-
-    def search(self, *a, **k):
-        return [{"id": "c1", "title": "文档", "text": "内容"}]
-
-    def delete(self, cid):
-        return True
-
-
 def _runtime(**extra):
-    """真实 v3 运行时形状：**没有** memory / knowledge 字段。"""
+    """真实 v3 运行时形状：**没有** memory 字段。"""
     base = {"bot_id": "12345", "config": {}}
     base.update(extra)
     return SimpleNamespace(**base)
@@ -154,28 +138,6 @@ async def test_memory_tools_report_unavailable_without_any_handle():
 # ---------- 知识库工具 ----------
 
 
-def test_knowledge_tools_resolve_the_module_service_handle():
-    rt = _runtime(knowledge_service=_FakeKnowledge())
-    names = {t.name for t in build_knowledge_tools(rt)}
-    assert names, "知识库工具必须能构建出来"
-
-
-@pytest.mark.asyncio
-async def test_knowledge_add_tool_actually_writes():
-    kb = _FakeKnowledge()
-    rt = _runtime(knowledge_service=kb)
-    tools = {t.name: t for t in build_knowledge_tools(rt)}
-    name = next(n for n in tools if "add" in n)
-
-    result = await tools[name].handler(None, {"content": "量子计算入门", "title": "笔记"})
-
-    assert "error" not in result.lower()
-
-
-# ---------- 主动消息 / 定时任务路径的记忆召回 ----------
-
-
-@pytest.mark.asyncio
 async def test_collect_history_materials_uses_the_memory_service_handle():
     """`assembly/inputs.py` 过去读 `runtime.memory`（已删）→ 主动消息/定时任务永不召回记忆。"""
     from app.agent.assembly.inputs import collect_history_materials

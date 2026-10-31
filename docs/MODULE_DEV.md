@@ -1272,7 +1272,6 @@ v3 把「高级功能」从 agent 配置页整体搬进了模块。**这 9 个�
 | 消息元信息 | `llm_message_meta` | 14 | 业务 | `@llm_hook("pre_request")` + `raw_user_text` |
 | 上下文增强 | `llm_context` | 10 | 业务 | `context_providers` + `tool_sources` + `pre_request` |
 | 长期记忆 | `llm_memory` | 17 | 业务 | `context_providers` + `tool_sources` + `pre_request`/`turn_completed` + `@command` |
-| 知识库 | `llm_knowledge` | 3 | 业务 | `tool_sources` |
 | 工具扩展 | `llm_tools_extra` | 9 | 业务 | `tool_sources`（OneBot + MCP） |
 | 主动消息 | `llm_proactive` | 17 | 业务 | `message_observed`/`bot_sent` 订阅 + `spawn` + `llm_turn` + `send_to` |
 | 定时任务 | `llm_schedule` | 3 | 业务 | 自建 `TaskScheduler` + `tool_sources` + `llm_turn` + `send_to` |
@@ -1314,7 +1313,7 @@ class Module(BaseModule):
     supersedes = ("output",)
     async def respond(self, ctx, *, should_stop=None): ...
 
-    # 或策略型（只有一组配置键）：memory / knowledge / context / message_meta / mcp …
+    # 或策略型（只有一组配置键）：memory / context / message_meta / mcp …
     # 接管 = 把 runtime.<kind>_options 换成你的配置视图，框架自然读你的值
     async def on_load(self):
         from app.agent.delivery.output import ConfigView

@@ -86,8 +86,7 @@ const router = createRouter({
         // 「进阶中心」已拆成模块：工具 / MCP / 知识库 / 主动消息各回自己的模块配置页
         { path: 'agent/tools', redirect: '/modules/llm_tools_extra' },
         { path: 'agent/mcp', redirect: '/modules/llm_tools_extra' },
-        { path: 'agent/knowledge', redirect: '/modules/llm_knowledge' },
-        { path: 'agent/panels', redirect: '/modules/llm_proactive' },
+              { path: 'agent/panels', redirect: '/modules/llm_proactive' },
         // 整个「高级设置」区已移除；旧书签回 AI 对话面板，不留无匹配路由
         { path: 'advanced', redirect: '/ai' },
         { path: 'advanced/:section', redirect: '/ai' },

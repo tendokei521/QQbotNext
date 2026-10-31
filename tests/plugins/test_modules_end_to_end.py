@@ -1,8 +1,8 @@
-"""端到端：真实容器里 9 个功能模块能被自动装配，并把实现装进运行时。
+"""端到端：真实容器里 8 个功能模块能被自动装配，并把实现装进运行时。
 
 这是 v3 的最终验收——不是"模块文件存在"，而是"装机即生效"：
 
-1. `registry.load_all(bot_id)` 扫到 9 个模块并实例化；
+1. `registry.load_all(bot_id)` 扫到 8 个模块并实例化；
 2. 它们的 `on_load` 把 `runtime.output` / `runtime.assembler` / 各 `*_options`
    视图装好（说明"框架不再自带，全由模块提供"）；
 3. 本体 schema 只有 43 键，模块键一个都不在里面。
@@ -16,14 +16,13 @@ V3_MODULES = {
     "llm_message_meta",
     "llm_context",
     "llm_memory",
-    "llm_knowledge",
     "llm_tools_extra",
     "llm_proactive",
     "llm_schedule",
 }
 
 
-async def test_all_nine_modules_load_and_install_into_runtime(container):
+async def test_all_modules_load_and_install_into_runtime(container):
     from app.agent.runtime import AgentManager
     from app.plugin.registry import ModuleRegistry
 
@@ -56,7 +55,6 @@ async def test_all_nine_modules_load_and_install_into_runtime(container):
         "meta_options",
         "context_options",
         "memory_options",
-        "knowledge_options",
         "tools_options",
         "proactive_options",
         "schedule_options",

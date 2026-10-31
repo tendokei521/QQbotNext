@@ -86,7 +86,6 @@ def _runtime(config: dict) -> SimpleNamespace:
         llm_tools=None,
         skills=None,
         memory=None,
-        knowledge=None,
         mcp_manager=None,
         telemetry=_Telemetry(),
         provider_config=lambda: {"provider": "scripted", "model": "fake-model", "api_key": "sk-test"},

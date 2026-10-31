@@ -3,8 +3,8 @@
 历史 bug：`/api/agent/mcp/tools` 直读 `runtime.mcp_manager`，而 MCP 已搬进
 `llm_tools_extra` 模块 → AttributeError → 500，前端弹「Failed to load resource」。
 
-同类接口：知识库 / 定时任务 / 主动消息 / 模块工具。
-它们的实现都归模块，框架只持「服务句柄」（`knowledge_service` / `mcp_service` /
+同类接口：定时任务 / 主动消息 / 模块工具。
+它们的实现都归模块，框架只持「服务句柄」（`mcp_service` /
 `proactive_service` / `scheduler`）。
 """
 
@@ -51,14 +51,6 @@ def test_mcp_tools_degrades_without_module(client):
     body = resp.json()
     assert body["available"] is False
     assert body["tools"] == []
-
-
-def test_knowledge_items_degrades_without_module(client):
-    resp = client.get("/api/agent/knowledge/items", params={"bot_id": 3437542570})
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["available"] is False
-    assert body["items"] == []
 
 
 def test_tasks_degrades_without_module(client):

@@ -127,7 +127,6 @@ class AgentRuntime:
         self.meta_options: Any = None
         self.context_options: Any = None
         self.memory_options: Any = None
-        self.knowledge_options: Any = None
         self.tools_options: Any = None
         self.proactive_options: Any = None
         self.schedule_options: Any = None

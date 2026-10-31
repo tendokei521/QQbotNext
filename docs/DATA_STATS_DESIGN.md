@@ -105,10 +105,9 @@ C  app/plugins/llm_proactive/stream.py:115    resolve_invoker(...).stream(...)
 C  app/plugins/llm_schedule/scheduler.py:582  resolve_invoker(...).chat(...)
 D  app/plugins/llm_schedule/scheduler.py:596  get_provider(...)  (legacy 兼容分支)
 D  app/plugins/llm_schedule/scheduler.py:607  provider.chat(...)
-D  app/plugins/llm_knowledge/manager.py:52    get_provider(config)  (embedding)
 ```
 
-**这些恰恰是 token 大头**（主动消息 / 定时任务 / 知识库 embedding）。
+**这些恰恰是 token 大头**（主动消息 / 定时任务的模型调用）。
 所以记账点**不能**放 `turn.run_turn`，否则统计会漏掉最费钱的部分。
 
 ### 1.1 唯一真正的收口点
@@ -557,7 +556,7 @@ POST /api/stats/purge  {"bot_id":"...", "before":"..."}
 | S6 | `GET /api/stats/facets`（只列出现过的值，自身筛选不约束自身） | 同上 | `6b6b696` |
 | S7 | `POST /api/stats/purge`（分批删，无参数拒绝防误清） | 同上 | `6b6b696` |
 | S8 | 前端「数据统计」页（筛选行 + 概览卡 + 堆叠柱 + 明细表，K/M 单位） | `dashboard/src/views/StatsPage.vue` + 路由 + 侧边栏 | `45c3b21` |
-| S9 | 模块直连 provider 的 4 处补归属（`llm_proactive` ×2、`llm_schedule`、`llm_knowledge`） | 各模块 | `957bb9d` |
+| S9 | 模块直连 provider 的补归属（`llm_proactive` ×2、`llm_schedule`；`llm_knowledge` 已随模块删除） | 各模块 | `957bb9d` |
 
 测试：`tests/agent/usage/*`（37 例）+ `tests/webui/test_stats_api.py`（17 例），全仓 **2102 passed**。
 

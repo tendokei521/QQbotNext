@@ -124,26 +124,27 @@ async def test_non_resource_fields_untouched_and_input_not_mutated():
 
 
 async def test_config_endpoint_reports_cleared_fields(container):
-    """保存接口会调用它并把被清空的字段回给前端（两套 UI 共用同一条 API）。"""
-    from pathlib import Path
+    """保存接口会调用它并把被清空的字段回给前端（两套 UI 共用同一条 API）。
 
+    用 agent 的 `persona_preset_id`（role_preset 资源字段、未声明 on_missing）
+    验证默认 keep：悬挂 id 不会被静默抹掉。
+    """
     from starlette.testclient import TestClient
 
-    from app.plugin.registry import ModuleRegistry
+    from app.application.bot_service import BotService
     from app.webui.app import create_app
 
-    registry = container.get(ModuleRegistry)
-    registry.plugins_dir = Path(__file__).resolve().parents[2] / "app" / "plugins"
-    account_id = "acc_t1"
-    assert await registry.load_single("llm_knowledge", account_id) is True
-    try:
-        client = TestClient(create_app(container))
-        # 该模块的资源字段未声明 on_missing（默认 keep）→ 悬挂值原样保留
-        resp = client.post(
-            f"/api/module/llm_knowledge/config?account_id={account_id}",
-            json={"knowledge_embedding_model_id": "不存在的模型"},
-        )
-        assert resp.status_code == 200
-        assert "cleared" not in resp.json(), "默认 keep 不该清空"
-    finally:
-        await registry.unload_single("llm_knowledge", account_id)
+    account_id = await container.get(BotService).add_bot(
+        ws_url="ws://127.0.0.1:39999",
+        owner_id=None,
+        auto_connect=False,
+        account_id="acc_t1",
+        name="资源校验账号",
+    )
+    client = TestClient(create_app(container))
+    resp = client.post(
+        f"/api/module/agent/config?account_id={account_id}",
+        json={"persona_preset_id": "不存在的人格"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert "cleared" not in resp.json(), "默认 keep 不该清空"

@@ -294,63 +294,6 @@ def _missing(service_label: str):
     )
 
 
-# ==================== 知识库管理 ====================
-
-@router.get("/knowledge/items")
-async def agent_knowledge_items(request: Request, bot_id: str | None = Depends(parse_account_id), limit: int = 100, agent_manager=Depends(get_agent_manager)):
-    runtime, _ = _runtime(agent_manager, bot_id)
-    if runtime is None:
-        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
-    kb = _service(runtime, "knowledge_service")
-    if kb is None:
-        return _missing("知识库")
-    try:
-        items = kb.list(limit=max(1, min(limit, 500)))
-    except Exception as e:
-        return _err(500, f"读取知识库失败: {e}")
-    return JSONResponse(content={"ok": True, "items": items})
-
-
-@router.post("/knowledge/items")
-async def agent_knowledge_add(request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
-    runtime, _ = _runtime(agent_manager, bot_id)
-    if runtime is None:
-        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-    title = str((body or {}).get("title", "") or "").strip()
-    content = str((body or {}).get("content", "") or "").strip()
-    source = str((body or {}).get("source", "manual") or "manual").strip()
-    if not content:
-        return _err(400, "内容不能为空")
-    kb = _service(runtime, "knowledge_service")
-    if kb is None:
-        return _err(400, "知识库未启用（请安装并启用「知识库」模块）")
-    cid, message = await kb.add_text(content, title=title, source=source)
-    if cid is None:
-        return _err(400, message)
-    return _ok("知识库条目已添加", cid=cid)
-
-
-@router.delete("/knowledge/items/{cid}")
-async def agent_knowledge_delete(cid: str, request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
-    runtime, _ = _runtime(agent_manager, bot_id)
-    if runtime is None:
-        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
-    kb = _service(runtime, "knowledge_service")
-    if kb is None:
-        return _err(400, "知识库未启用（请安装并启用「知识库」模块）")
-    try:
-        ok = kb.delete(cid)
-    except Exception as e:
-        return _err(500, f"删除知识库失败: {e}")
-    if not ok:
-        return _err(404, "知识库条目不存在")
-    return _ok("知识库条目已删除")
-
-
 # ==================== OneBot 工具清单 ====================
 
 @router.get("/onebot/tools")

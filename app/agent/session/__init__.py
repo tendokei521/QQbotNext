@@ -8,7 +8,7 @@
 ## 不负责
 
 - 决定取哪些历史（`assembly/inputs.py`）；
-- 记忆与知识库（那是 `memory/` 与 `knowledge/`，独立的库）。
+- 长期记忆（那是 `llm_memory` 模块，独立的库）。
 
 ## 文件地图
 

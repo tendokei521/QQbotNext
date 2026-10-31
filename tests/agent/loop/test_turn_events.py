@@ -97,7 +97,7 @@ def harness(tmp_path, monkeypatch):
 
     runtime = SimpleNamespace(
         bot_id="10001", config=_config(), invoker=None, bot=None, llm_tools=None,
-        skills=None, memory=None, knowledge=None, mcp_manager=None, telemetry=None,
+        skills=None, memory=None, mcp_manager=None, telemetry=None,
         provider_config=lambda: {"provider": "scripted", "model": "fake-model", "api_key": "sk-test"},
         provider_chain=lambda: [{"provider": "scripted", "model": "fake-model"}],
         llm_hooks=None, llm_tool_call_hooks=None,

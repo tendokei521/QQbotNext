@@ -66,7 +66,6 @@ class _Runtime:
         self.llm_tools = None
         self.skills = None
         self.memory = None
-        self.knowledge = None
         self.mcp_manager = None
 
 
