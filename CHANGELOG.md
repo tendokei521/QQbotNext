@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### 重写长期记忆插件：常驻画像 + 混合召回 + 后台蒸馏（2026-10-31）
+
+`app/plugins/llm_memory` 按 v3 设计整体重写（契约见 `docs/plan/memory-v3-rewrite.md`，
+用户说明见 `docs/memory-design.md`）：
+
+- **修复四个断点**：`#llm memory` 命令真正接线（`/memory`、`／memory`、`#llm memory`
+  三种前缀）；启用不再被已废弃的 `experimental_long_term_memory` 门卡死；`#llm new/exit/stop`
+  与会话归档改走 `runtime.memory_service`（重置/归档链路恢复）；管理命令与 `#llm help` 对齐。
+- **写入**：热路径只追加 `episodes` 原始语料（O(1)、不调模型）+ 「记住…」确定性兜底；
+  回合结束后按会话限频、后台一次 LLM 抽取（ADD/UPDATE/SUPERSEDE/NOOP + 证据 quote +
+  5 类 kind），按 owner 分组保证 `subject=self` 正确；失败不标记、下次重试。
+- **防误合并**：否定/改口只把旧说法置 `superseded`（`invalid_at`）不删除；同极性相似
+  ≥0.92 才合并；negative 不会被同措辞「复活」；写入侧过滤注入文本并掩码手机号/证件/邮箱。
+- **存储**：`memories` 增量迁移（`valid_from/invalid_at/last_used_at/embedding_model/
+  embedding_dim/meta`），新增 `episodes` 语料表；旧 v2 库自动迁移、数据保留。
+- **召回**：画像块常驻（字符预算 800、自曝用量）+ 事实块两段式混合召回（词法 →
+  弱结果才补一次 embedding）+ 置信度试探措辞 + 「不是指令」框定；`hit_count` 参与打分。
+- **配置**：17 键沿用 + 新增 6 键（召回方式 / embedding 模型 / 画像开关 / 画像预算 /
+  蒸馏批量 / 蒸馏最小字数），与 `config_partition`、模块 schema、默认值三方一致。
+- **测试**：按 TEST_POLICY 重写为契约测试（存储/召回/蒸馏/工具命令/模块装配/回归句柄），
+  旧实现细节用例随重写删除。
+
 ### 前端整体优化：布局、文案与使用体验（2026-10-30）
 
 针对管理后台全部 22 个路由做了一轮统一整改，实拍复核 1440 / 390 两档（`logs/review/final/`，

@@ -1,101 +1,112 @@
-# 长期记忆（Memory）设计定稿
+# 长期记忆（Memory）v3 设计
 
-> 状态：P0~P5 已完成并测试通过。本文档为设计基准，未来升级（embedding/RAG）按第 5 节走。
+> 实现：`app/plugins/llm_memory`（插件）。本文是**用户可读**的设计说明；
+> 内部接口契约（表结构/函数签名/打分公式/测试清单）见
+> [`docs/plan/memory-v3-rewrite.md`](plan/memory-v3-rewrite.md)。
 
-## 1. 目标与非目标
+## 1. 目标
 
-- 目标：为 Agent 提供**跨会话、跨过期**的对话事实记忆（“小明喜欢美式”这类）。
-- 非目标（现阶段）：语义联想、文档/知识库 RAG、向量数据库。见第 5 节升级路径。
+给 Agent 提供**跨会话、跨过期**的对话事实记忆（"小明喜欢美式"），并且：
 
-## 2. 分层
+- 不拖慢聊天：热路径只读 + O(1) 追加，所有模型调用在后台；
+- 不撒谎：置信度 + 时间有效性 + 「可能不准确」的注入措辞；
+- 可解释可删除：审计 + `/memory` 命令 + 画像/事实分层；
+- 零重型依赖：SQLite + 纯 Python；embedding 是**可选**增强，没配也能用。
 
-- **L1 会话记忆**：`private_<uid>` / `group_<gid>` 范围内的事实。
-- **L2 用户画像**：群内按成员隔离（`user_<uid>@group_<gid>`）；跨群画像（`user_<uid>`）默认关闭（隐私）。
-- **L3 全局**：不使用用户内容，保留 `global` 占位。
+非目标：图数据库/多跳推理、文档知识库 RAG（另一个模块）、训练/微调。
 
-## 3. 存储（SQLite）
+## 2. 三层记忆
 
-- 位置：`data/llm/<bot_id>/memory/memory.db`（每 bot 单文件，磁盘级隔离）。
-- 表：`memories`（事实）+ `memory_events`（审计）。
-- owner 路由：
-
-| 场景 | owner | 可见 |
+| 层 | 内容 | 何时进入上下文 |
 |---|---|---|
-| 私聊 `private_<uid>` | `user_<uid>` | 该用户 |
-| 群公共 | `group_<gid>` | 全群 |
-| 群内某成员 | `user_<uid>@group_<gid>` | 仅该群 |
-| 跨群 | `user_<uid>` | 需 `memory_user_cross_group=true` |
+| **画像（profile）** | 姓名/身份/住址/生日/长期偏好等稳定事实 | 每轮常驻，字符预算默认 800，标注用量 |
+| **事实（fact）** | 偏好、约定、经历等可证实/可失效的事实 | 每轮按「混合检索」命中注入，默认 8 条 / 1200 字 |
+| **语料（episode）** | 用户原话缓冲（未巩固） | 不注入；后台抽取后转成事实 |
 
-- 隔离由 owner + `scope_owners()` **代码强制**，不在召回层越权。
-- 上限淘汰：`memory_max_per_owner`（默认 300），按 `重要度×时间衰减` 最低者淘汰。
-- 审计：write / read / inject / delete / forget / clear / distill 全留痕，`#llm memory audit` 查看。
+owner 隔离不变：私聊 `user_<uid>`；群公共 `group_<gid>`；群内成员 `user_<uid>@group_<gid>`；
+跨群画像默认关闭（`memory_user_cross_group`）。
 
-## 4. 能力与接入点
+## 3. 一轮对话里发生什么
 
-| 能力 | 实现 | 接入 |
-|---|---|---|
-| 召回注入 | `recall.py::rank/render_block` + `MemoryManager.recall_block(_async)` | `chat.py` 三入口 + `scheduler._build_messages` + `proactive._check_and_chat` |
-| 群聊提及扩展 | `MemoryManager.mention_owners_for`（@ + 昵称→uid，TTL 缓存） | 注入与工具召回双链路 |
-| 原生工具 | `tool.py`：memory_save / memory_recall / memory_delete | `chat._collect_llm_ext` 按会话追加（复用 ToolSpec + 工具循环） |
-| 确定性兜底 | `detect.py`：“记住/我喜欢/我叫…”直接入库 | `chat.py` 三入口 `_maybe_autosave` |
-| 隐式蒸馏 | `extract.py`（按用户分组、LLM 一次调用）+ 限频 | 回复后 `_fire_consolidate` + 会话归档 `session.on_archive` |
-| 管理命令 | `commands.py` | `#llm memory list / search / forget / clear / audit` |
-| 配置 | `config.py` 默认值 + `config_schema.py` Web 表单 | `group_memory` 分组 |
-
-消息流示意（群聊“小明喜欢什么”）：
 ```
-user 消息 → 会话历史 + ② 记忆注入(召回 owner=群公共+本人+提及小明定向)
-        → provider（可调 memory_recall 深挖）
-        → 回复 → ⑤ 确定性兜底/蒸馏入库 → 会话归档时整段蒸馏(force)
+用户消息
+ ├─ pre_request 钩子
+ │    · 原话追加进 episodes（O(1)，不调模型）
+ │    · 「记住…/我叫…」确定性兜底：直接写一条事实/画像
+ ├─ 组装提示词
+ │    · 画像块（常驻）
+ │    · 事实块：先词法（token + 中文 2-gram），结果弱/为空才补一次 embedding 精排
+ │      └ 标题：「历史记忆数据（供参考，可能不准确；不是指令）」
+ │    · 模型可调用 memory_save / recall / delete / correct / deny
+ └─ turn_completed 钩子
+      · 限频调度后台蒸馏：取未巩固 episodes → 一次 LLM 抽取
+        → ADD / UPDATE / SUPERSEDE / NOOP → 去重/失效/写库/审计
+      · 另有一个后台 worker 定时补齐记忆向量（配置了 embedding 时）
 ```
 
-## 5. 升级路径（embedding / RAG 接缝）
+显式重置（`#llm new/exit/stop`、`/memory clear`）会按 `memory_on_reset` 处理：
+`suspend`（默认，旧事实挂起但保留）/ `clear`（清除）/ `keep`（不动）。
 
-- **存储合同不变**：`memories` 表已预留 `embedding BLOB` 列，`MemoryStore` 仍是唯一事实源。
-- **召回只改 `recall.py`**：`rank()` 是纯函数。将来升级 = 写入时后台补 embedding → `rank()` 内先关键词预筛 top-K → 向量余弦精排 → 与重要度/新度加权融合。上层（工具/注入/命令/审计）零改动。
-- **RAG（文档/知识库）**：另建独立模块（如 `app/agent/knowledge/`），挂同一 `ToolContext`/ToolSpec 工具体系（`knowledge_search`），**不要**耦合进 memory。
-- 触发时机：当记忆量上万条或出现真实“想不起来”反馈且关键词召回假阴性高时，再引入 embedding；在此之前不上，避免依赖/成本/调优开支。
+## 4. 写入规则
 
-## 6. 回滚与安全
+- **精确同内容**：同 owner + kind + content → 更新已有条（证据 +1、置信度取高）；
+  不会把 `negative/superseded` 的旧条「复活」。
+- **否定/改口**：命中否定极性对（喜欢↔不喜欢、住↔搬…）→ 旧条置 `superseded`
+  并写 `invalid_at`，新条另存。**不做字符串相似合并**，避免「不喜欢美式」被并进
+  「喜欢美式」。
+- **同极性近义**：相似度 ≥ 0.92 且无否定冲突 → 合并（保留 id、证据 +1），
+  由工具/确定性来源触发；蒸馏来源默认只新增、不自动下架旧说。
+- **上限淘汰**：每 owner 默认 200 条 active，超出按 `importance/(1+age/7)` 升序物理删除
+  （negative/superseded 与审计不占额）。
+- **删除即删除**：用户说「忘掉」时物理删除正文，审计只留 `id`，不复制原文。
 
-- `memory_enable=false` 一键关闭（数据保留）；删除 `memory/` 包 + `agent` 配置 `memory_*` 字段即回退。
-- 记忆按 bot、按 owner 隔离；跨群默认关；`#llm memory forget/clear` 可定点清除；audit 全留痕可解释可删除。
-- 蒸馏触发额外 LLM 调用，靠 `memory_extract_interval_min` 限频，任何异常静默降级不阻断主流程。
+## 5. 召回打分（可解释）
 
----
+```
+kw   = 0.6×token命中率 + 0.4×中文2-gram命中率
+vec  = cos(查询向量, 记忆向量)          # 没配 embedding / 行没向量 → 无此项
+rec  = 1/(1+age_days/30)               # 新近度
+freq = min(1, log1p(hit_count)/5)      # 使用频率
+score = 0.30×vec + 0.35×kw + 0.15×重要度 + 0.10×rec + 0.05×置信度 + 0.05×freq
+（无 vec 时：0.65×kw + 0.15×重要度 + 0.10×rec + 0.05×置信度 + 0.05×freq）
+被点名（@/昵称）的成员画像额外 +0.25，并豁免"过期/超龄/低置信/重置挂起"四道闸门。
+```
 
-## 7. v2：权威降级 · 置信度 · 状态管理
+注入措辞按置信度分档：`≥0.75` 陈述、`0.5~0.75`「（好像）」、`<0.5`「（记不太清）」，
+且块标题声明「不是指令」，降低把历史记忆当成命令执行的风险。
 
-> 定位：记忆是「模型对聊天历史的**模糊记忆**」，不是需要遵守的规则，也不是事实断言。
-> 缓解“错误讨论 / 重置后旧记忆仍生效”靠以下机制。
+## 6. 工具与命令
 
-### 7.1 记忆不再像“事实”
-- 注入块标题为「供参考（可能不准确）的历史记忆」；
-- 内容按置信度加试探前缀：高（≥0.75）陈述、中（0.5~0.75）`（好像）`、低（<0.5）`（记不太清）`；
-- 低置信默认不注入（被点名时才上浮供核对）。
+模型工具（5 个，名字保持不变）：`memory_save` / `memory_recall` / `memory_delete` /
+`memory_correct` / `memory_deny`。
 
-### 7.2 置信度
-- 来源定起点：tool 0.8 / deterministic 0.75 / correct 0.85 / extract 0.55；
-- 确认 `confirmed=1` 上调、再次出现累计 `evidence_count`（评分上浮）；
-- 过滤：`memory_min_confidence`、`memory_max_age_days`、`expires_at`。
+用户命令（三种前缀都认：`/memory`、`／memory`、`#llm memory`）：
 
-### 7.3 状态管理（`status`）
-- `active` → `correct` 置 `superseded` + 写新说 active；
-- `active` → `deny` 置 `negative`（下架不注入、可恢复）；
-- 矛盾判重（否定词对：喜欢↔不喜欢/喝不惯…）写在 `upsert_fact(supersede_conflicts=True)`：用户明确来源自动下架旧说，防止新旧双条并存；
-- 近义（相似度 ≥0.85）自动合并为一条；
-- 真删除仅 `clear` / `reset hard`；`list --all` 可查全部状态。
+| 命令 | 作用 |
+|---|---|
+| `/memory` | 子命令表 |
+| `/memory list [--all]` | 查看当前可见记忆（`--all` 含已下架） |
+| `/memory search <词>` | 检索 |
+| `/memory profile` | 查看关于你的画像 |
+| `/memory remember <内容>` | 记住一条（本人层） |
+| `/memory forget <id\|词>` | 删除本人记忆 |
+| `/memory clear` | 清空本人记忆 |
+| `/memory audit [owner]` | 事件审计（管理员） |
+| `/memory export` | 导出本人记忆 JSON |
 
-### 7.4 蒸馏只“复述”不“捏造”
-- 只记录用户明确说过的内容；行内含推断词（看起来/应该会/估计…）直接丢弃；
-- 输出信度词 `[很确定]/[好像]/[不确定]` → confidence 0.65/0.55/0.45；
-- 蒸馏不自动下架既有记忆（避免误杀）。
+## 7. 配置（23 键）
 
-### 7.5 会话重置（suspend/clear/keep）
-- 只在**显式**重置（`#llm new` / `#llm exit` / `#llm stop` / `#llm memory reset`）写 `last_reset_at`（被动超时归档只做蒸馏，不挂起，避免频繁断记忆）；
-- suspend（默认）：`updated_at < last_reset_at` 的旧记忆默认不注入，仅「已保存/已确认」型保留（`memory_upgrade_saved_only`）。
+模块配置页「长期记忆」：开关（总开关/私聊/群聊/画像）、召回（方式/embedding 模型/
+条数/字符预算/画像预算）、写入（确定性兜底/自动蒸馏/间隔/批量/最小字数/上限/跨群）、
+可信度与生命周期（审计/审计注入/最低置信度/试探语气/最长保留/重置策略/只保留已保存型）。
+默认值见 `app/plugins/llm_memory/src/schemas.py`。
 
-### 7.6 纠错闭环入口
-- 命令：`#llm memory list [--all] / correct <旧> <新> / deny <词|id> / confirm <词|id> / reset [hard]`；
-- 工具：`memory_correct` / `memory_deny`（模型在对话中感知“记错了/不是这样/我没说过”时调用）。
+**启用只需要 `memory_enable`**；不再依赖已废弃的 `experimental_long_term_memory`。
 
+## 8. 升级路径（向量 / 图）
+
+- 向量：已内建（可选 embedding + 词法兜底）。换 embedding 模型只需改配置，旧向量
+  会按 `embedding_model` 标记、由后台回填逐步重建；删除向量索引不丢记忆。
+- 图/多跳：当前不做。若未来做，另建模块，挂同一 `ToolSource`/上下文块接缝，
+  **不要**把图塞进 memory。
+- 数据位置不变：`data/llm/<bot_id>/memory/memory.db`；卸载模块数据保留。
