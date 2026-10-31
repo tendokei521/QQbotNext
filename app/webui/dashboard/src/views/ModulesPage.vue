@@ -1019,10 +1019,16 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   cursor: pointer;
 }
 
-/* 插件卡片一排两个：卡片里有开关、标签、描述与操作菜单，三列时描述被截得只剩半句；
-   平板/手机仍按窄屏规则退成单列。用组合选择器压过全局 .app-card-grid 的 auto-fill。 */
+/* 插件卡片固定每排三个（宽屏不再自动变成 4 个）；平板两列、手机单列。
+   用组合选择器压过全局 .app-card-grid 的 auto-fill。 */
 .app-card-grid.modules-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 1200px) {
+  .app-card-grid.modules-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 720px) {
