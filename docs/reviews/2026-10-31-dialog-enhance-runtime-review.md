@@ -176,3 +176,86 @@ app/plugins/dialog_enhance/
 - 能力事实表（CapabilityFacts）→ 仍然要，它防的是"提示词说 A、代码做 B"（真实"不回"的成因）。
 
 **唯一要警惕的是**：三层都在一个插件里时，"配置谁负责、代码谁负责"更容易糊在一起 → 所以三个目录必须有**单向依赖**：`deliver → interact → context`，不许反向。
+
+---
+
+## 7. 第二轮讨论复核（2026-10-31 追加）
+
+对方在看到本仓库实情后做了大幅纠偏，结论基本正确。**我同意它的 8 个结论**：
+一插件三目录、main.py 只做装配、吸 5 留 4（且"吸收功能≠复制实现"）、第一版不接管 `assembly`、
+只做 (b) 分段发送、18 键平铺、不做请求级覆盖、**先稳定契约再并行开发**、统一交付管线 ≠ 同一个底层 API。
+
+但它的 **18 键清单还没有做去重**，而这正是这个项目要治的病。下面逐条核。
+
+### 7.1 18 键里约 8 个是"已经存在的真值"（照抄会重造双真值）
+
+| 它提的键 | 已有的真值 | 处置 |
+|---|---|---|
+| `deliver.max_message_length` | 本体键 `max_message_length`（`config_partition.py:90`，UI 在「会话窗口」组），且**同时用于截断入站正文**（`loop/turn_input.py:97`）——语义不是"出站消息长度" | **删**。出站长度用吸收过来的 `stream_sentence_max_length` / 气泡字数 |
+| `deliver.flush_min_chars` / `flush_interval_ms` | `llm_output` 的 `stream_send_*`（被吸收后本来就是这个插件的键） | **不新增**，直接沿用/改名迁移，别两套并存 |
+| `deliver.actions_enabled` / `action_allowlist` | `llm_tools_extra` 的 `onebot_tools_allowed/denied` + `tools_disabled` + 审批通道 | **删 allowlist**；动作就是工具，用现有门控，插件只加频率/场景 |
+| `context.include_poke` | 框架 `group_log` 渲染已支持 `KIND_POKE/EMOJI/RECALL/MY_SEND`（`app/agent/group_log/events.py:27-31`、`render.py:146-186`）；开关是本体 `group_log_enable` + 窗口 | 这是**渲染开关**，不是插件新能力；要么做成框架级开关，要么插件替换该段（见 §7.3） |
+| `context.include_member_meta` | 框架已有昵称/群名片解析（`app/agent/context/{display_names,nicknames}.py`） | 同上：渲染开关，不要重实现 |
+| `context.recent_limit` / `recent_window_minutes` | 本体已有两套窗口：会话历史 `history_rounds`/`history_recent_messages`/`history_mode`，群记录 `group_log_window_limit/minutes` | **先决定接管哪一处渲染**，否则会变成"第三套窗口" |
+
+→ 18 键里**真正新增**的只有：相关消息检索（2）、回复链深度、群摘要、历史工具预算、指代策略、含义解释、流式呈现策略、动作频率。**约 10 个**。
+
+### 7.2 三处工作量被当成一个布尔值
+
+1. **`related_search`（相关消息检索）**：现有 `search_history` 只是**单会话、内存历史、子串包含**的线性扫描（`app/agent/tools/history_search.py` 文档头；`MAX_LIMIT=20`，不跨会话/不跨群）。
+   要做到"找到上次讨论的那个方案"，需要索引（SQLite FTS5）或向量（memory 已有 embeddings 基建可复用），**约 1 周起**。V1 建议先用现有 `search_history`，把"相关消息"放 V2。
+2. **`group_summary`（群摘要）**：不是开关，是**后台 LLM 任务 + 存储 + 失效策略 + 预算**——独立的一块工程，且和 `memory` 的生命周期重叠。V2。
+3. **`include_poke` 的集成点**：群环境记录块现在由框架 `build_context_text()`（`group_log/context.py:80-123`）渲染后塞进 `PromptRequest.group_log_text`，再由内置段 `group_log` 渲染。插件要控制它，只有两条路：**改框架那段渲染**，或**替换该段**（后者要求段注册支持"覆盖同名内置段"——需要先确认/补）。这个集成点它没写。
+
+### 7.3 一个被低估的事实：「找得到信息」这条 V1 目标，框架已经有一半
+
+`search_history` **是默认注入的系统工具**（`loop/tool_source.py:104-106`、`tools/system.py:56`），`get_chat_history` / `recall_tool_result` 也在；`expand_*` 由 `llm_context` 提供。
+所以 V1 里"主动查历史"不是从零做，而是**把已有工具做得更可控**（范围/预算/提示文案/指代预填）。这会把 V1 的重心推到：**上下文组织质量（话题/回复链/参与者/压缩）+ 输出形态**——和它自己的"三个具体问题"排序其实是矛盾的。
+
+### 7.4 「统一交付管线」的真实工作量，比它列的一条 P2 大
+
+要"主动/定时也走统一出口"，得先修两处它没列的东西：
+- `build_for(self.module, …)` / `apply_post_assemble(self.module, …)` 传的是 **`BaseModule` 而不是 `AgentRuntime`** → 主动/定时路径上装配器/section/钩子/预算/dump **全部静默失效**（`02-framework.md §6.3`）；
+- 主动/定时现在**裸 `bot.send_*`**（`manager.py:391`、`proactive/stream.py:110`），不经 `pre_send`、不解析 `[reply]`。
+这两条是"统一"的前置，不是附带项。另外 `turn.py` 全文没有发言通道判定（非流式 + 先想后发 = 气泡丢弃且无日志），也必须同批修。
+
+### 7.5 验收表要补 5 条（它列的 12 条漏了这些，都是本仓库踩过的坑）
+
+| # | 补测 | 为什么 |
+|---|---|---|
+| 1 | **前缀缓存不被破坏**：同一配置连续两轮，system 前缀逐字节一致 | 上下文注入最容易把 `prompt_cache` 命中率打没；仓库已有前缀指纹测试可扩展 |
+| 2 | **模块配置保存后真的生效**（`policy_view` 读得到） | `ConfigView/ChainedConfig` 短路已实测复现，否则"改了没反应"会重演 |
+| 3 | **模块被禁用/加载失败的降级**：明确日志 + UI 提示，不静默丢能力 | 现在 `on_load` 抛异常只 warning 且仍显示"已启用" |
+| 4 | **静默必留痕**：任何路径没发出去 → 一行日志含 `source/形态/spoken=0/原因` | 真实"不回"发生时日志一片安静 |
+| 5 | **schema 词表 = 代码真实词表**（提交前跑一遍静态扫描） | 现有 4 处"选项写 A、代码认 B" |
+
+### 7.6 我建议的"先契约后并行"具体清单
+
+**串行（框架，Lead 做，5 个提交）**：
+1. `ConfigView`/`ChainedConfig` 修复 + 隔离测试；
+2. 槽接管契约（`Module.build/respond` + 签名校验 + 失败 fail-loud + health 可查）；
+3. 统一交付管线 `send_outbound()`（pre_send / 指令解析 / msg_out / message_id / 冷却全在这一条）；
+4. 主动/定时改传真 runtime + `policy_view`，并切到统一管线；
+5. `turn.py` 发言通道判定与 flush（或 fail-fast）。
+
+**契约先行物（30 行，给三个目录当接口）**：
+- `ContextContribution`：`{role: system|user, text, section_order, budget_hint}` —— 映射到现有 `context_providers` + `register_section`；
+- `OutputPort`：`respond(ctx) -> AsyncIterator[Message]` + 轮次边界 flush 语义 —— 映射到现有 `output` 槽；
+- `PlanSummary`：每轮一行日志（source / 形态 / 注入了哪些块 / 发了没 / 原因）。
+
+**并行（3 个子代理，写域不重叠）**：`src/context/`、`src/interact/`、`src/deliver/`；
+**串行收尾**：`main.py` 装配 + `config_schema.py` + 迁移脚本 + 验收表。
+
+### 7.7 一个仍需你拍板的事：`group_log` 算不算"对话增强"的管辖范围
+
+群环境记录（谁戳了谁、谁贴了表情、谁撤回了）是这个插件"群上下文感知"的核心输入，但：
+- **记录者**是外置插件 `group_log`（`data/module/plugins/`，不在仓库）；
+- **渲染者**是框架 `app/agent/group_log/`；
+- 插件只能通过"替换该段/改框架渲染"来影响它。
+
+三条路，代价不同：
+(a) **插件不碰**，只在文档里说明"群记录质量取决于 group_log 插件"——最省事，但"群上下文感知"会有一半不受控；
+(b) **框架加 2 个渲染开关**（是否含戳/表情/撤回），插件只读——改动小、语义清晰；
+(c) **插件接管该段渲染**（要先把"覆盖内置同名段"补进段注册表）——最灵活，但引入"两套渲染器"风险。
+
+我推荐 **(b)**，并在验收里加一条"关掉戳记录后 prompt 里确实没有戳行"。
