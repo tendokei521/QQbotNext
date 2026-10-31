@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
+from app.domain.events import GroupMessageEvent, MessageSegment, NoticeEvent, UserInfo
 from app.infrastructure.onebot.log_text import received_log_lines
 
 
@@ -56,3 +56,26 @@ def test_normal_nickname_still_readable():
 
     prefix, body = lines[0]
     assert "普通群名片" in prefix + body
+
+
+def test_group_card_notice_renders_readable_line():
+    """群名片变更的日志必须是一句人话（老名片 → 新名片），不落到「未知类型」。"""
+    event = NoticeEvent(
+        event_type="notice_group_card",
+        post_type="notice",
+        time=1793445194,
+        user_id=3513365354,
+        self_id=3437542570,
+        group_id=237881486,
+        notice_type="group_card",
+        card_old="落娜(钟会的人)",
+        card_new="钟娜(麦道格邦)",
+    )
+
+    lines = received_log_lines(_Conn(), event)
+
+    assert lines, "群名片变更应有一条日志"
+    text = "".join(lines[0])
+    assert "群名片" in text
+    assert "落娜(钟会的人)" in text and "钟娜(麦道格邦)" in text
+    assert "未知类型" not in text

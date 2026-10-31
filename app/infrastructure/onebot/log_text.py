@@ -121,6 +121,10 @@ def _event_text(event: BaseEvent) -> str:
     t = event.event_type
     uid = event.user_id or 0
     if isinstance(event, NoticeEvent):
+        if t == "notice_group_card":
+            old_card = _one_line(getattr(event, "card_old", "")) or "（空）"
+            new_card = _one_line(getattr(event, "card_new", "")) or "（空）"
+            return f"{uid} 群名片：{old_card} → {new_card}"
         if t == "notice_input_status":
             return f"{uid}正在输入"
         if t == "notice_poke":

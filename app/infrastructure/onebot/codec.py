@@ -36,6 +36,7 @@ EVENT_NAMES: dict[str, str] = {
     "notice_private_recall": "私信撤回",
     "notice_group_increase": "入群通知",
     "notice_group_decrease": "退群通知",
+    "notice_group_card": "群名片变更",
     "bot_offline": "下线事件",
     "bot_heartbeat": "心跳",
     "bot_send_msg": "发送消息",
@@ -127,6 +128,7 @@ def _decode_notice(payload: dict, bot: IBot) -> NoticeEvent:
         "friend_recall": "notice_private_recall",
         "group_increase": "notice_group_increase",
         "group_decrease": "notice_group_decrease",
+        "group_card": "notice_group_card",
         "bot_offline": "bot_offline",
     }
     event_type = event_type_map.get(notice_type, f"notice_{notice_type}")
@@ -149,6 +151,9 @@ def _decode_notice(payload: dict, bot: IBot) -> NoticeEvent:
         emoji_is_add=bool(payload.get("is_add", False)),
         operator_id=int(payload.get("operator_id", 0) or 0),
         message_id=int(payload.get("message_id", 0) or 0),
+        # 群名片变更：老/新名片都保留，日志与订阅方可读
+        card_new=str(payload.get("card_new", "") or ""),
+        card_old=str(payload.get("card_old", "") or ""),
     )
     return NoticeEvent(**common)
 

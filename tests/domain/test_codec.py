@@ -135,3 +135,22 @@ def test_event_reply_targets_bot():
     asyncio.run(run())
     assert sent["group"][0] == 999
     assert sent["group"][1].text == "hello"
+
+
+def test_decode_group_card_notice():
+    """群名片/头衔变更（notice_type=group_card）必须是可识别事件，而不是未知类型。"""
+    payload = _base_payload(
+        post_type="notice",
+        notice_type="group_card",
+        group_id=237881486,
+        user_id=3513365354,
+        card_old="落娜(钟会的人)",
+        card_new="钟娜(麦道格邦)",
+    )
+    event = decode(payload, FakeBot())
+
+    assert isinstance(event, NoticeEvent)
+    assert event.event_type == "notice_group_card"
+    assert event.group_id == 237881486
+    assert event.card_old == "落娜(钟会的人)"
+    assert event.card_new == "钟娜(麦道格邦)"

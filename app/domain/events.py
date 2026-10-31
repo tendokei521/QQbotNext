@@ -42,7 +42,7 @@ class LlmGate:
     实现暂停与继续（如请求池防抖）。
     """
 
-    def __init__(self, event: "BaseEvent") -> None:
+    def __init__(self, event: BaseEvent) -> None:
         self._event = event
 
     def stop(self) -> None:
@@ -249,6 +249,9 @@ class NoticeEvent(BaseEvent):
     # 撤回
     operator_id: int = 0
     message_id: int = 0
+    # 群名片变更（notice_type=group_card）
+    card_new: str = ""
+    card_old: str = ""
 
     async def reply(self, message: SegmentLike, **kwargs) -> dict:
         m = _to_message(message)
