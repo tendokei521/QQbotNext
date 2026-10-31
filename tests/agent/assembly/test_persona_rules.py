@@ -34,7 +34,6 @@ ALL_TOOLS = {
     "get_chat_history",
     "get_current_session",
     "schedule_task",
-    "knowledge_search",
     "memory_save",
     "memory_recall",
     "memory_correct",

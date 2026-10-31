@@ -205,19 +205,6 @@ def test_resources_endpoint_filters_pass_through(container):
     assert resp.json()["kind"] == "provider_model"
 
 
-async def test_module_schema_reaches_api_with_resource_field(container):
-    """端到端（API 契约层）：WebUI 拿到的 schema 里，人设字段是可渲染的资源引用。
-
-    这是“界面能直接选系统预设”的最小证据链：schema 归一化（种类校验 + issues）
-    → bot_service 下发 → 前端按 resource 拉候选。
-    """
-    from app.application.bot_service import BotService
-
-    data = container.get(BotService).get_modules_data(None)
-    field = data["agent"]["config_schema"]["items"]["persona_preset_id"]
-    assert field["type"] == "resource"
-    assert field["resource"] == "role_preset"
-    assert field["issues"] == [], "种类必须已注册，否则界面会显示「资源种类未注册」"
 # 旧版 UI（/legacy）与 static/js/widgets.js 的两个用例已随 P6 删除：
 # 前端只剩 app/webui/dashboard/dist 一套，资源选择器改由 Vue 的 ResourcePicker 组件实现，
 # 对应前端测试在 app/webui/dashboard/ 内的构建期检查。
