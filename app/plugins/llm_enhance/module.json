@@ -1,9 +1,9 @@
 {
   "name": "llm_enhance",
-  "display_name": "LLM增强",
+  "display_name": "LLM调试",
   "sign": "LlmEnhance",
   "version": "1.0.0",
-  "description": "连发的消息自动合并，补齐用户信息再回复",
+  "description": "开启后把本轮发给模型的完整内容写进日志",
   "entry": "main.py",
   "api_version": 1
 }
