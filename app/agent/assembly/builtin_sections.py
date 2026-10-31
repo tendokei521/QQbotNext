@@ -16,7 +16,7 @@
 | order | 段 | 角色 | 条件 |
 |---|---|---|---|
 | 10 | persona | system | 始终 |
-| 20 | behavior | system | 选中提示词方案，或 ``assembly_profile=qq_agent`` 且未关 |
+| 20 | behavior | system | 选中提示词方案（产品路径恒有） |
 | 30 | emoji_hint | system | 能贴表情且活跃度 > 0、词典有标签 |
 | 40 | schedule | system | ``schedule_enable`` |
 | 50 | proactive | system | 有可用能力时 |
@@ -40,7 +40,6 @@ from typing import Any
 from app.agent.assembly.prompt import (
     LEGACY_MESSAGE_META_INSTRUCTION,
     MESSAGE_META_INSTRUCTION,
-    PROFILE_QQ_AGENT,
     SCHEDULE_INSTRUCTION,
     SINGLE_LINE_MESSAGE_META_INSTRUCTION,
     build_proactive_instruction,
@@ -137,35 +136,22 @@ def build_schedule_instruction(req: Any) -> list[dict]:
     return [{"role": "system", "content": text}] if text else []
 
 
-def assembly_profile(req: Any) -> str:
-    """组装档位：``legacy``（默认，旧行为逐字不变）或 ``qq_agent``（对齐外部实现）。
-
-    用**一个总闸**而不是散落的开关，是为了能一键回退与 A/B：某次改动效果不好时，
-    把档位切回 ``legacy`` 就回到改造前，不必逐个关块。
-    """
-    return str(req.cfg("assembly_profile", "legacy") or "legacy").strip().lower()
-
-
 def build_behavior(req: Any) -> list[dict]:
     """行为规则块：拟人化的主来源（独立成段，不塞进人格正文）。
 
-    四条纪律：
+    三条纪律：
 
-    1. **选中提示词方案时无条件注入**——方案本身就是一套行为文案（差异主要在这里），
-       不再看 ``assembly_profile``；否则用户选了方案却因模块默认档位而拿不到行为段，
-       等于点了没反应。方案的开关就是它自己：清空 ``prompt_preset`` 即回退。
-    2. **未选方案时只在 ``qq_agent`` 档注入**——``legacy`` 下整块消失，改造前逐字不变；
-    3. **段落里点名的工具按本轮能力裁剪**（见 ``persona_rules.detect_caps``）；
-    4. **``behavior_rules_override`` 可整体替换**，但安全规则与工作方式强制追加——
+    1. **选中提示词方案就注入**——方案本身就是一套行为文案（差异主要在这里）。
+       方案的开关就是它自己：清空 ``prompt_preset`` 即回退（库层直调才可能没有方案）。
+    2. **段落里点名的工具按本轮能力裁剪**（见 ``persona_rules.detect_caps``）；
+    3. **``behavior_rules_override`` 可整体替换**，但安全规则与工作方式强制追加——
        一次误配置不该能把"不越权 / 不泄露 / 怎么发言"整套删掉。
     """
     from app.agent.assembly import presets as prompt_presets
     from app.agent.persona import rules as persona_rules
 
     preset = prompt_preset(req)
-    if preset is None and (
-        assembly_profile(req) != "qq_agent" or not bool(req.cfg("behavior_rules_enable", True))
-    ):
+    if preset is None:
         return []
     override = str(req.cfg("behavior_rules_override", "") or "").strip()
     if preset is not None and not override:
@@ -197,10 +183,10 @@ def build_emoji_hint(req: Any) -> list[dict]:
 
     三条注入条件（任一不满足就整块不出现）：本轮真的能贴表情、活跃度 > 0、
     词典里确实有标签。标签表是静态的，所以这段在会话内逐字稳定，不破坏前缀缓存。
-    选中提示词方案时不再要求 ``qq_agent`` 档（方案自带这套文案的口径）。
+    文案口径由提示词方案提供；没有方案（库层直调）时不注入。
     """
     preset = prompt_preset(req)
-    if preset is None and assembly_profile(req) != PROFILE_QQ_AGENT:
+    if preset is None:
         return []
     tools = req.available_tools
     if tools is not None and "set_msg_emoji_like" not in tools:
@@ -229,15 +215,15 @@ def build_proactive(req: Any) -> list[dict]:
     """「主动性」协议块：按本轮实际可用工具裁剪，没有可用能力时整块不注入。
 
     意图判定用**原始正文**（``req.intent_text``），避免元信息前缀干扰。
-    ``qq_agent`` 档或选中提示词方案时去重：通用用法归行为段，这里只留本轮的意图补强
-    与标记语义。方案的措辞只覆盖 ``PROACTIVE_LINES`` 里若干行，能力裁剪不变。
+    选中提示词方案时去重：通用用法归行为段，这里只留本轮的意图补强与标记语义。
+    方案的措辞只覆盖 ``PROACTIVE_LINES`` 里若干行，能力裁剪不变。
     """
     preset = prompt_preset(req)
     text = build_proactive_instruction(
         req.config,
         req.intent_text,
         available_tools=req.available_tools,
-        dedupe=preset is not None or assembly_profile(req) == "qq_agent",
+        dedupe=preset is not None,
         lines=preset.proactive_lines if preset is not None else None,
     )
     return [{"role": "system", "content": text}] if text else []
@@ -247,13 +233,11 @@ def message_meta_instruction(req: Any) -> str | None:
     """消息格式说明：让模型知道"发送者：…"是元信息、只有正文才是用户说的话。
 
     模式（``meta_instruction_mode`` 优先，兼容 ``meta_sender_style``）：
-    ``off`` 不注入；``new`` 用单行脱敏版；其余用默认真人感版。
+    ``off`` 不注入；``new`` 用单行脱敏版；其余按**本轮真实的元信息格式**选说明：
+    单行（"时间 昵称(QQ): 正文"）配单行图例，否则配旧版多行说明——格式变了却还在
+    解释旧格式，等于给模型一本错的手册。
     此外，仅当本轮**真的注入了元信息**（``ctx.state["message_meta_injected"]``）时才注入说明——
     否则说明本身就是噪音，会诱导模型去找并不存在的"发送者："前缀。
-
-    ``qq_agent`` 档 + 单行格式时改用**单行格式图例**：老说明讲的是"发送者：/发送了："
-    那一套，格式已经变了却还在解释旧格式，等于给模型一本错的手册。
-    选中提示词方案时用**方案自己的两份说明**（同样是"单行讲单行、多行讲多行"）。
     """
     ctx = req.ctx
     if ctx is not None and not ctx.state.get("message_meta_injected"):
@@ -264,12 +248,13 @@ def message_meta_instruction(req: Any) -> str | None:
     mode = str(mode or "legacy").lower()
     if mode == "off":
         return None
+    fmt = user_message_format(req.config)
     preset = prompt_preset(req)
     if preset is not None:
-        # 方案自己保证"单行讲单行、多行讲多行"：直接读配置原值，不经过 qq_agent 档门控
-        fmt = str(req.cfg("user_message_format", "single_line") or "").strip().lower()
+        # 方案自己保证"单行讲单行、多行讲多行"
         return preset.message_meta_single_line if fmt != "legacy" else preset.message_meta_legacy
-    if assembly_profile(req) == PROFILE_QQ_AGENT and user_message_format(req.config) == "single_line":
+    if fmt != "legacy":
+        # 没有方案（库层直调）时，仍按真实格式给对应图例
         return SINGLE_LINE_MESSAGE_META_INSTRUCTION
     if mode == "new":
         return MESSAGE_META_INSTRUCTION
@@ -402,7 +387,6 @@ EXTRA_SECTION = Section(
 __all__ = [
     "EXTRA_ORDER",
     "EXTRA_SECTION",
-    "assembly_profile",
     "build_background",
     "build_behavior",
     "build_emoji_hint",

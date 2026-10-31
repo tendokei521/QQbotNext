@@ -38,7 +38,7 @@ messages（OpenAI 风格）
 | order | 段 | 角色 | 条件 |
 |---|---|---|---|
 | 10 | persona | system | 始终 |
-| 20 | behavior | system | 选中提示词方案，或 ``assembly_profile=qq_agent`` 且未关 |
+| 20 | behavior | system | 选中提示词方案（产品路径恒有） |
 | 30 | emoji_hint | system | 能贴表情且活跃度 > 0 |
 | 40 | schedule | system | ``schedule_enable`` |
 | 50 | proactive | system | 有可用能力时 |
@@ -78,7 +78,6 @@ from typing import Any
 from app.agent.assembly.builtin_sections import (
     EXTRA_SECTION,
     _extra_text_parts,
-    assembly_profile,
     build_background,
     build_behavior,
     build_emoji_hint,
@@ -676,7 +675,6 @@ __all__ = [
     "PromptRequest",
     "apply_post_assemble",
     "apply_speech_protocol",
-    "assembly_profile",
     "build_all_blocks",
     "build_background",
     "build_behavior",

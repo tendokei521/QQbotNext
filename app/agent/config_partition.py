@@ -339,10 +339,8 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
         "schedule_prompt",
         "stream_scheduled_enabled",
     ),
-    # 组装档位 / 行为规则 / 组装对账诊断
+    # 行为规则 / 消息格式 / 组装对账诊断
     "llm_assembly": (
-        "assembly_profile",
-        "behavior_rules_enable",
         "behavior_rules_override",
         "participation",
         "emoji_react_level",

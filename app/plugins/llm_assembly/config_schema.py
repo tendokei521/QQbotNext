@@ -1,19 +1,6 @@
-"""组装策略模块的配置 Schema（原 agent「行为规则 / 组装档位」组，共 10 键）。"""
+"""组装策略模块的配置 Schema（原 agent「行为规则」组）。"""
 
 SCHEMA = {
-    "assembly_profile": {
-        "type": "select",
-        "label": "组装档位",
-        "description": "标准 = 分块注入；人格 = 复合行为段；旧版 = 仅基础格式。",
-        "default": "blocks",
-        "options": {"blocks": "分块（推荐）", "qq_agent": "QQ Agent 复合档", "legacy": "旧格式"},
-    },
-    "behavior_rules_enable": {
-        "type": "boolean",
-        "label": "注入行为规则段",
-        "description": "在「人格」档下注入行为约束段。",
-        "default": False,
-    },
     "behavior_rules_override": {
         "type": "textarea",
         "label": "覆盖行为规则",

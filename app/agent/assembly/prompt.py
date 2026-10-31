@@ -141,46 +141,33 @@ def _cfg_str(config, key: str, default: str) -> str:
     return text or default
 
 
-# ==================== 组装档位 / 用户侧格式 ====================
+# ==================== 用户侧格式 ====================
+#
+# 这里曾经有一对「组装档位」常量（``legacy`` / ``qq_agent``），用一道总闸决定
+# "要不要注入行为规则段 / 消息格式走单行还是多行 / 时间戳放头还是尾"。
+# 它带来的默认状态是"新功能全关"：选了提示词方案也拿不到行为段（详见
+# docs/reviews/2026-10-31-prompt-assembly-analysis.md）。
+# 现在档位没了，每个键就是它自己那个语义，默认值直接就是产品想要的形态。
 
-#: 拟人化档位名：注入行为规则段、user 侧单行格式、消息格式说明换成单行版
-PROFILE_QQ_AGENT = "qq_agent"
-#: 旧档位：改造前行为逐字不变
-PROFILE_LEGACY = "legacy"
+#: user 侧消息元信息格式：``single_line``（默认，"时间 昵称(QQ): 正文"）| ``legacy``（六行块）
+USER_MESSAGE_FORMAT_SINGLE = "single_line"
+USER_MESSAGE_FORMAT_LEGACY = "legacy"
 
-
-def assembly_profile(config) -> str:
-    """本轮组装档位（``legacy`` 默认 / ``qq_agent``）。
-
-    与 ``assembly.assembly_profile`` 同源：都读 ``assembly_profile``，未知值一律按
-    ``legacy`` 处理——这样拼错档位名只会"不生效"，不会"半生效"。
-    """
-    name = _cfg_str(config, "assembly_profile", PROFILE_LEGACY)
-    return PROFILE_QQ_AGENT if name == PROFILE_QQ_AGENT else PROFILE_LEGACY
-
-
-def is_qq_agent(config) -> bool:
-    return assembly_profile(config) == PROFILE_QQ_AGENT
+#: 时间行位置：``tail``（默认，稳定内容靠前，利于前缀缓存）| ``head``
+TIME_POSITION_TAIL = "tail"
+TIME_POSITION_HEAD = "head"
 
 
 def user_message_format(config) -> str:
-    """本轮 user 侧格式：``single_line``（默认）| ``legacy``（六行元信息块）。
-
-    只在 ``qq_agent`` 档生效——``legacy`` 档永远走原来的多行块，保证可回退。
-    """
-    if not is_qq_agent(config):
-        return "legacy"
-    return "single_line" if _cfg_str(config, "user_message_format", "single_line") != "legacy" else "legacy"
+    """本轮 user 侧格式：``single_line``（默认）| ``legacy``（六行元信息块）。"""
+    value = _cfg_str(config, "user_message_format", USER_MESSAGE_FORMAT_SINGLE)
+    return USER_MESSAGE_FORMAT_LEGACY if value == USER_MESSAGE_FORMAT_LEGACY else USER_MESSAGE_FORMAT_SINGLE
 
 
 def prompt_time_position(config) -> str:
-    """时间行位置：``tail``（默认，挪到末尾让稳定行靠前）| ``head``。
-
-    只在 ``qq_agent`` 档生效；``legacy`` 档时间恒在首行。
-    """
-    if not is_qq_agent(config):
-        return "head"
-    return "tail" if _cfg_str(config, "prompt_time_position", "tail") != "head" else "head"
+    """时间行位置：``tail``（默认，挪到末尾让稳定行靠前）| ``head``。"""
+    value = _cfg_str(config, "prompt_time_position", TIME_POSITION_TAIL)
+    return TIME_POSITION_HEAD if value == TIME_POSITION_HEAD else TIME_POSITION_TAIL
 
 
 def history_intent(text: str) -> bool:

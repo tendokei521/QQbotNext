@@ -25,8 +25,6 @@ from .service import AssemblyAdapter
 
 #: 本模块持有的键（与 `config_partition.MODULE_KEYS["llm_assembly"]` 一致）
 OWNED_KEYS: tuple[str, ...] = (
-    "assembly_profile",
-    "behavior_rules_enable",
     "behavior_rules_override",
     "participation",
     "emoji_react_level",
@@ -49,8 +47,6 @@ class Module(BaseModule):
     provides = ("assembly",)
     supersedes = ("assembly",)
     default_config = {
-        "assembly_profile": "blocks",
-        "behavior_rules_enable": False,
         "behavior_rules_override": "",
         "participation": "normal",
         "emoji_react_level": 0,
@@ -87,10 +83,6 @@ class Module(BaseModule):
         services = getattr(services, "services", None)
         getter = getattr(services, "runtime", None)
         return getter(self.bot_id) if callable(getter) else None
-
-    @property
-    def profile(self) -> str:
-        return str(self.config.get("assembly_profile", "blocks") or "blocks")
 
 
 def owned_keys() -> tuple[str, ...]:

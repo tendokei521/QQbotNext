@@ -68,9 +68,9 @@ async def format_user_context(ctx):
     组装规则复用 ``history_model.build_current_turn_text``——与历史条目同一套字段语义
     （头部行 + 正文 + 附注行），避免"本轮"和"历史"两套格式各自漂移。
 
-    ``assembly_profile=qq_agent`` + ``user_message_format=single_line`` 时改成**单行**形态：
+    ``user_message_format=single_line``（默认）时用**单行**形态：
     本轮消息和历史条目长得一样（``昵称(QQ): 正文``），时间挪到末尾，六行元信息块消失。
-    旧形态下"本轮是六行块、历史是单行"本身就是模型混乱的来源之一。
+    旧的多行形态下"本轮是六行块、历史是单行"本身就是模型混乱的来源之一。
     """
     from app.agent.context.group import safe_sender_label
     from app.agent.session.model import build_current_turn_text

@@ -171,20 +171,6 @@ SCHEMA = {
             "single": "单条：折成一整条 system prompt",
         },
     },
-    "assembly_profile": {
-        "type": "select", "label": "组装档位",
-        "description": "标准 = 注入行为规则段，拟人化效果更好；旧版 = 保持原有组装行为。",
-        "default": "legacy", "group": "group_behavior",
-        "options": {
-            "legacy": "旧版：只有人格设定（默认）",
-            "qq_agent": "拟人化：人格 + 行为规则段",
-        },
-    },
-    "behavior_rules_enable": {
-        "type": "boolean", "label": "注入行为规则段",
-        "description": "关闭后即使档位是拟人化也不注入（排查「为什么回复变味」时用）",
-        "default": True, "group": "group_behavior",
-    },
     "behavior_rules_override": {
         "type": "textarea", "label": "覆盖行为规则",
         "description": "留空使用内置行为规则；填写后整体替换，安全规则与工作方式仍强制保留。",
@@ -1150,7 +1136,7 @@ _BASIC_FIELDS = {
     # 「Provider 预设 → 模型」页，摆在 Agent 首页只会继续误导
     "model", "temperature",
     "system_prompt", "persona_preset_id",
-    "assembly_profile", "behavior_rules_enable", "participation", "emoji_react_level",
+    "participation", "emoji_react_level",
     # 权限
     "permission", "agent_owner_list", "agent_manager_list",
     # 会话管理

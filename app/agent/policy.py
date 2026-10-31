@@ -23,7 +23,7 @@ v3 把一批"策略键"从 agent 配置搬进了功能模块。框架的机制�
 
 - `policy_config(runtime, kind)` —— 只关心**一个模块**的键时用它（定位精准）；
 - `policy_view(runtime)` —— 机制会**跨模块**读键时用它（如发言通道同时需要
-  `assembly_profile` + `stream_output`），内部按上表顺序链式查询再回退 agent 配置。
+  行为规则与 `stream_output`），内部按上表顺序链式查询再回退 agent 配置。
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ def policy_view(runtime: Any) -> Any:
     """把所有已接管的策略视图**串成一条链**再回退 agent 配置。
 
     为什么需要：有些机制会跨模块读键 —— 例如发言通道要同时看
-    `assembly_profile`（归 `llm_assembly`）和 `stream_output`/`speech_via_tool`
+    行为规则（归 `llm_assembly`）和 `stream_output`/`speech_via_tool`
     （归 `llm_output`）。只给一个视图会让另一半读不到，行为静默退化。
 
     Returns:

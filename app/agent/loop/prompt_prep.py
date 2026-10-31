@@ -237,11 +237,10 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
         runtime, event, session_id, is_private, schedule_enable
     )
     # 发言通道（P2）：文本只当思考，真正的发言走 send_message / finish。
-    # 只在「拟人化档位 + speech_via_tool + 流式」三者齐备时挂上；否则保持旧的文本即发言。
-    # `speech_via_tool` 与 `assembly_profile` 归模块所有：
-    # `llm_output` 接管输出槽时把视图挂 `runtime.output`，`llm_assembly` 挂
-    # `runtime.assembly_options`；未接管时回退 agent 配置，行为不变。
-    # 发言通道跨模块读键（assembly_profile 归 llm_assembly、speech_via_tool 归 llm_output），
+    # 只在「speech_via_tool + 流式」齐备时挂上；否则保持旧的文本即发言。
+    # `speech_via_tool` 归模块所有：`llm_output` 接管输出槽时把视图挂 `runtime.output`，
+    # `llm_assembly` 挂 `runtime.assembly_options`；未接管时回退 agent 配置，行为不变。
+    # 发言通道跨模块读键（行为规则归 llm_assembly、speech_via_tool 归 llm_output），
     # 所以用链式视图；未接管任何模块时等价于 agent 配置。
     from app.agent.policy import policy_view
 
@@ -334,7 +333,7 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
         runtime=runtime,
         event=event,
         ctx=ctx,
-        # 装配/提示词阶段要读**策略键**（`speech_via_tool` / `assembly_profile` / 流式…），
+        # 装配/提示词阶段要读**策略键**（`speech_via_tool` / 行为规则 / 流式…），
         # 它们归模块所有。传 agent 配置会让"模块开了发言通道、agent 还留着旧值"时
         # 提示词与真实通道打架：模型只写文本（因为没被告知"文本不会发出去"）→ 整轮静默。
         # 链式视图先问模块、问不到再回退 agent 配置；未接管任何模块时等价于旧行为。

@@ -5,8 +5,7 @@
 框架的 `PromptAssembler` 里所有可配项都走 `PromptRequest.cfg(key)`，
 而 `cfg()` 读的是 `req.config`。所以这里把 `req.config` 临时换成
 `ConfigView(base=原req.config, module_config)` —— 装配器一行不改，
-`assembly_profile` / 行为规则 / 表情提示 / 消息格式 / 时间位置 / 组装对账
-这些键就从 agent 配置搬到了本模块。
+行为规则 / 表情提示 / 消息格式 / 时间位置 / 组装对账这些键就从 agent 配置搬到了本模块。
 
 `prompt_dump_*` 由 `apply_post_assemble` 读取，那条路径认
 `runtime.assembly_options`（本模块在 `on_load` 里设置）。
@@ -47,8 +46,6 @@ class AssemblyAdapter:
         getter = getattr(self.module_config, "get", None)
         get = getter if callable(getter) else (lambda k, d=None: d)
         return {
-            "profile": str(get("assembly_profile", "blocks") or "blocks"),
-            "behavior_rules": bool(get("behavior_rules_enable", False)),
             "message_format": str(get("user_message_format", "") or ""),
             "owned_keys": len(self.owned_keys),
         }
