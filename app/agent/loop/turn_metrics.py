@@ -340,8 +340,21 @@ def log_debug_prompt_if_enabled(runtime, session_id: str, messages: list[dict], 
     # 再打全文。排障时看层摘要就能判断"缺的是规则、人设还是插件块"。
     layers = str(getattr(ctx, "state", {}).get("assembly_layers", "") or "") if ctx is not None else ""
     if layers:
-        logger.add_info(account_label(runtime.bot_id)).info(f"[Prompt] {session_id} · {layers}")
+        logger.add_info(account_label(runtime.bot_id)).info(
+            f"[Prompt] {session_id} · {layers} · prefix={_prefix_fingerprint(messages)}"
+        )
     _log_debug_prompt(runtime, session_id, messages, debug_enabled=True)
+
+
+def _prefix_fingerprint(messages: list[dict]) -> str:
+    """system 段短指纹：相同 = 前缀缓存可命中；排障时比对两轮日志即可看出"是不是白缓存了"。"""
+    try:
+        from app.agent.assembly.prompt_cache import system_prefix_fingerprint
+
+        return system_prefix_fingerprint(messages)
+    except Exception as e:  # noqa: BLE001 —— 指纹只用于排障，算不出来就不显示
+        logger.add_info("LLM").debug(f"[Prompt] 前缀指纹计算失败（已忽略）: {e}")
+        return "?"
 
 
 def _history_meta_flags(runtime) -> dict:
