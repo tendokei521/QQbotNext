@@ -337,13 +337,36 @@ def log_debug_prompt_if_enabled(runtime, session_id: str, messages: list[dict], 
     if not enabled:
         return
     # 先打一行「这条 prompt 由哪几层组成」（装配器 build 时挂在 ctx.state），
-    # 再打全文。排障时看层摘要就能判断"缺的是规则、人设还是插件块"。
+    # 再打全文。排障时看层摘要就能判断"缺的是规则、人设还是插件块"；
+    # 顺带给出 system 的 token 估算与超预算标记（L1+L2 是每轮都要付的固定成本）。
     layers = str(getattr(ctx, "state", {}).get("assembly_layers", "") or "") if ctx is not None else ""
     if layers:
+        budget_note = _system_budget_note(messages)
         logger.add_info(account_label(runtime.bot_id)).info(
-            f"[Prompt] {session_id} · {layers} · prefix={_prefix_fingerprint(messages)}"
+            f"[Prompt] {session_id} · {layers} · {budget_note} · prefix={_prefix_fingerprint(messages)}"
         )
     _log_debug_prompt(runtime, session_id, messages, debug_enabled=True)
+
+
+#: system 段（L1+L2+L3 全是 system）每轮的 token 预算提示线：超过只提示，不裁剪。
+#: 之所以只提示：裁剪规则段会静默降低安全约束，宁可让日志里出现一个刺眼的标记。
+SYSTEM_TOKEN_WARN = 6000
+
+
+def _system_budget_note(messages: list[dict]) -> str:
+    """「system 占多少 token、是否超预算」的一小段文字，拼进 ``[Prompt]`` 头行。"""
+    system = [m for m in messages or [] if isinstance(m, dict) and m.get("role") == "system"]
+    try:
+        from app.agent.assembly.token_budget import estimate_tokens
+
+        tokens = estimate_tokens(system)
+    except Exception as e:  # noqa: BLE001 —— 只是估算，算不出来不影响本轮
+        logger.add_info("LLM").debug(f"[Prompt] system token 估算失败（已忽略）: {e}")
+        return "system≈?tok"
+    note = f"system≈{tokens}tok"
+    if tokens > SYSTEM_TOKEN_WARN:
+        note += f" ⚠超预算({SYSTEM_TOKEN_WARN})"
+    return note
 
 
 def _prefix_fingerprint(messages: list[dict]) -> str:

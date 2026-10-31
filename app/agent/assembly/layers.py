@@ -122,6 +122,24 @@ def summarize_layers(rows: list[dict]) -> str:
         if row.get("role") == "-" or not row.get("chars"):
             continue
         layer = normalize_layer(row.get("layer"))
-        buckets[layer].append(f"{row.get('block')}({row.get('chars')})")
-    parts = [f"{LAYER_LABELS[layer]}: " + "+".join(items) for layer, items in buckets.items() if items]
+        label = f"{row.get('block')}({row.get('chars')})"
+        # 合并段带上"谁贡献了多少字"，一眼看出这条规则为什么这么长
+        contributors = row.get("contributors") or []
+        if contributors:
+            detail = "+".join(f"{item.get('block')} {item.get('chars')}" for item in contributors)
+            label = f"{row.get('block')}({row.get('chars')}: {detail})"
+        buckets[layer].append(label)
+    parts = [f"{LAYER_LABELS[layer]}: " + " + ".join(items) for layer, items in buckets.items() if items]
     return " | ".join(parts)
+
+
+def estimate_layer_tokens(rows: list[dict], layer: str) -> int:
+    """某一层的大致 token 数（按 ``token_budget`` 的同一口径估算，仅用于排障）。"""
+    from app.agent.assembly.token_budget import estimate_tokens
+
+    messages = [
+        {"role": "system", "content": "x" * int(row.get("chars") or 0)}
+        for row in rows or []
+        if normalize_layer(row.get("layer")) == normalize_layer(layer) and row.get("role") != "-"
+    ]
+    return estimate_tokens(messages)

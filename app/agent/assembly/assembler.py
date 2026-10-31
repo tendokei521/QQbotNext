@@ -300,20 +300,45 @@ def merge_layer_blocks(built: BuiltBlocks, layer: str) -> BuiltBlocks:
     kept[target].insert(0, {"role": "system", "content": "\n\n".join(texts)})
     # 合并后原段的身份不再准确（多个段合进一条），用一个明确的合并段名替代，
     # 这样 ``describe()`` 与 ``[Prompt]`` 日志显示 ``system_prompt(4454)`` 而不是
-    # 误写成"只有 behavior 有内容"。
-    merged_block = _MergedBlock(layer=layer, order=int(getattr(built[target][0], "order", 0) or 0))
+    # 误写成"只有 behavior 有内容"；``contributors`` 保留"谁贡献了多少字"，
+    # 排查"这条规则为什么这么长"时不必再翻代码。
+    contributors = tuple(
+        (str(getattr(built[i][0], "name", "?")), _chars_of(built[i][1]))
+        for i in index_of_layer
+        if built[i][1]
+    )
+    merged_block = _MergedBlock(
+        layer=layer, order=int(getattr(built[target][0], "order", 0) or 0), contributors=contributors
+    )
     return [
         (merged_block if i == target else block, kept[i])
         for i, (block, _msgs) in enumerate(built)
     ]
 
 
+def _chars_of(messages: list[dict]) -> int:
+    """一组消息的文本字符数（多模态只算 text 块）。"""
+    total = 0
+    for msg in messages or []:
+        content = msg.get("content")
+        if isinstance(content, list):
+            total += sum(
+                len(str(part.get("text", "")))
+                for part in content
+                if isinstance(part, dict) and part.get("type") == "text"
+            )
+        else:
+            total += len(str(content or ""))
+    return total
+
+
 @dataclass(frozen=True)
 class _MergedBlock:
-    """层内合并后的合成段（只承载名字/层/顺序，供 describe 与日志归因）。"""
+    """层内合并后的合成段（承载名字/层/顺序/贡献者，供 describe 与日志归因）。"""
 
     layer: str
     order: int
+    contributors: tuple[tuple[str, int], ...] = ()
 
     @property
     def name(self) -> str:
@@ -523,13 +548,17 @@ def describe_blocks(
                 continue
             for msg in msgs:
                 role, chars = _summarize(msg)
-                rows.append({
+                row = {
                     "block": block.name,
                     "layer": layer,
                     "role": role,
                     "chars": chars,
                     "messages": 1,
-                })
+                }
+                contributors = getattr(block, "contributors", ())
+                if contributors:
+                    row["contributors"] = [{"block": name, "chars": count} for name, count in contributors]
+                rows.append(row)
         return rows
 
     # 按最终消息对齐：段与消息顺序一致（段可产出 0/1/N 条）
@@ -540,9 +569,13 @@ def describe_blocks(
         if not msgs:
             rows.append({"block": block.name, "layer": layer, "role": "-", "chars": 0, "messages": 0})
             continue
+        contributors = getattr(block, "contributors", ())
         for _ in range(len(msgs)):
             role, chars = _summarize(final[cursor]) if cursor < len(final) else ("?", 0)
-            rows.append({"block": block.name, "layer": layer, "role": role, "chars": chars, "messages": 1})
+            row = {"block": block.name, "layer": layer, "role": role, "chars": chars, "messages": 1}
+            if contributors:
+                row["contributors"] = [{"block": name, "chars": count} for name, count in contributors]
+            rows.append(row)
             cursor += 1
     return rows
 
