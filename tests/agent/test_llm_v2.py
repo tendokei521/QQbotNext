@@ -2,33 +2,12 @@
 
 import pytest
 
-from app.agent.assembly.prompt import build_messages
 from app.agent.providers import get_provider
 from app.agent.providers.base import ProviderRequestError
 from app.agent.providers.policy import FailureKind, classify_exception
 from app.agent.session import manager as session_mod
 
 # ---------- prompt ----------
-
-def test_build_messages_structure():
-    messages = build_messages(
-        system_prompt="你是助手",
-        history=[{"role": "user", "content": "上一句"}],
-        user_text="现在呢",
-    )
-    assert messages[0] == {"role": "system", "content": "你是助手"}
-    # 定时任务协议为默认注入的系统消息
-    assert messages[1]["role"] == "system"
-    assert "schedule_task" in messages[1]["content"]
-    assert messages[2] == {"role": "user", "content": "上一句"}
-    assert messages[-1] == {"role": "user", "content": "现在呢"}
-
-
-def test_build_messages_no_tags_no_history():
-    m = build_messages(system_prompt="sys", user_text="hi", with_schedule_instruction=False)
-    assert len(m) == 2
-    assert m[1] == {"role": "user", "content": "hi"}
-
 
 def test_strip_all_tags():
     """防御性标签剥离：任意 <type=xxx>（含 mood/action/中文）均剥离，不留空行。"""

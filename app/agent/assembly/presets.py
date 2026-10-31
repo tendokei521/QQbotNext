@@ -340,7 +340,8 @@ def _assistant_segments() -> tuple[Segment, ...]:
 # ==================== 三套方案的其余文案 ====================
 
 # 定时协议：三套只说同一件事（到点要说话 ⇒ 调 schedule_task），措辞各随其风格。
-_CHAT_SCHEDULE = SCHEDULE_INSTRUCTION
+# chat 不单独写：它直接沿用 dataclass 默认值（``SCHEDULE_INSTRUCTION``），
+# 所以这里没有 ``_CHAT_SCHEDULE``（曾有一个恒等别名，从未被引用，已删）。
 
 _ROLEPLAY_SCHEDULE = """### 定时提醒
 当群友要求「到点提醒我 / 明天早上说一句 / 每周五来一发」这类安排时，调用 schedule_task，

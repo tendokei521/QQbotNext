@@ -51,11 +51,6 @@ _TOOL_CAPS: dict[str, tuple[str, ...]] = {
     "has_knowledge": ("knowledge_search",),
 }
 
-#: 这些能力的名字本身就是工具名，测试用它们做"提示词 ⊆ 可用工具"的护栏
-CAP_TOOL_NAMES: frozenset[str] = frozenset(
-    name for names in _TOOL_CAPS.values() for name in names
-)
-
 
 def _cfg(config: Any, key: str, default: Any = None) -> Any:
     """读配置（缺 config / 配置对象异常时返回 default）。"""

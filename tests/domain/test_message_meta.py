@@ -1,6 +1,5 @@
 """消息元信息格式消歧测试：单行脱敏格式与旧格式归一化。"""
 
-from app.agent.assembly.prompt import MESSAGE_META_INSTRUCTION, build_messages
 from app.agent.context.group import (
     _is_enhanced_context,
     _mask_enhanced_content,
@@ -36,24 +35,6 @@ def test_safe_nickname():
 def test_safe_sender_label():
     assert safe_sender_label("Iyiy(2934350679)") == "Iyiy(2934350679)"
     assert safe_sender_label("老师，今年的学费也是一次性交吗(1901691195)") == "用户1901691195"
-
-
-def test_build_messages_injects_meta_instruction_when_enabled():
-    messages = build_messages(
-        system_prompt="你是一个助手。",
-        user_text="用户1901691195: 你好",
-        message_meta_instruction=MESSAGE_META_INSTRUCTION,
-    )
-    assert any(
-        m["role"] == "system" and m["content"] == MESSAGE_META_INSTRUCTION
-        for m in messages
-    )
-    assert any("绝对不要用“用户<QQ>”“用户A”等代号直接称呼对方" in m["content"] for m in messages)
-
-
-def test_build_messages_skips_meta_instruction_by_default():
-    messages = build_messages(system_prompt="你是一个助手。", user_text="你好")
-    assert not any("消息格式说明" in m["content"] for m in messages)
 
 
 def test_normalize_enhanced_content_old_to_single_line():

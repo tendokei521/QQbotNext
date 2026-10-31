@@ -351,61 +351,6 @@ def emoji_hint_line(tags: str) -> str:
     )
 
 
-def build_messages(
-    *,
-    system_prompt: str,
-    pre_history_text: str = "",
-    history: list[dict] | None = None,
-    user_text: str,
-    with_schedule_instruction: bool = True,
-    skills: list[str] | None = None,
-    memory_text: str = "",
-    message_meta_instruction: str | None = None,
-    proactive_instruction: str | None = None,
-    user_content: list[dict] | None = None,
-) -> list[dict]:
-    """组装 LLM 消息列表。
-
-    Args:
-        system_prompt: 系统提示词
-        pre_history_text: 前置历史文本，为空则跳过
-        history: 会话历史消息（[{role, content}, ...]）
-        user_text: 当前用户消息
-        with_schedule_instruction: 是否追加「定时任务协议」指令
-        skills: 模块技能 prompt 块列表（逐个追加为 system 消息）
-        memory_text: 长期记忆文本块，为空则跳过（默认空 = 旧调用方零影响）
-        message_meta_instruction: “发送者/正文”消歧说明文本；传入非空字符串时追加为 system 消息
-        proactive_instruction: 「主动性」协议块（见 build_proactive_instruction）；
-            仍是一块 system，为空则完全不注入
-        user_content: 本轮 user 消息的多模态内容块（OpenAI 风格）。
-            传入时替换纯文本 content，仅用于「本轮触发消息带图 + 模型支持图片」的场景
-    """
-    messages: list[dict] = [{"role": "system", "content": system_prompt}]
-
-    if with_schedule_instruction:
-        messages.append({"role": "system", "content": SCHEDULE_INSTRUCTION})
-
-    if proactive_instruction:
-        messages.append({"role": "system", "content": proactive_instruction})
-
-    if message_meta_instruction:
-        messages.append({"role": "system", "content": message_meta_instruction})
-
-    for block in skills or []:
-        messages.append({"role": "system", "content": block})
-
-    if memory_text:
-        messages.append({"role": "system", "content": memory_text})
-
-    if pre_history_text:
-        messages.append({"role": "system", "content": pre_history_text})
-
-    if history:
-        messages.extend(history)
-
-    messages.append({"role": "user", "content": user_content or user_text})
-    return messages
-
 #: Q2：`history_mode=recent` 时插在历史块前面的固定提示。
 #: 文案**不随条数变化**——它每轮都会出现，变数字等于每轮改写 system 前缀。
 HISTORY_OMITTED_HINT = (

@@ -15,7 +15,6 @@ from app.agent.assembly.prompt import (
     PROACTIVE_QUOTE_LINE,
     PROACTIVE_REFERENT_LINE,
     PROACTIVE_UNRESOLVED_LINE,
-    build_messages,
     build_proactive_instruction,
     env_intent,
     env_line,
@@ -47,22 +46,26 @@ def _cfg(**over):
 
 
 def test_block_is_added_as_exactly_one_system_message():
-    messages = build_messages(
-        system_prompt="你是助手",
-        user_text="在吗",
-        with_schedule_instruction=False,
-        proactive_instruction=build_proactive_instruction(_cfg(), "在吗", available_tools=ALL_TOOLS),
+    """主动性协议是一整块（由 section 产出），不是拼进人格或历史里。"""
+    from app.agent.assembly.assembler import PromptAssembler, PromptRequest
+
+    config = _cfg(outbound_directive_enable=True)
+    messages = PromptAssembler().build(
+        PromptRequest(
+            config=config,
+            user_text="在吗",
+            available_tools=ALL_TOOLS,
+            schedule_enable=False,
+        )
     )
 
     blobs = [m for m in messages if m["role"] == "system" and m["content"].startswith("### 主动性")]
-    assert len(blobs) == 1
+    assert len(blobs) == 1, "主动性块必须恰好一条 system"
     assert messages[-1] == {"role": "user", "content": "在吗"}
 
 
 def test_block_can_be_disabled():
     assert build_proactive_instruction(_cfg(proactive_prompt_enable=False), "", available_tools=ALL_TOOLS) is None
-    messages = build_messages(system_prompt="s", user_text="u", with_schedule_instruction=False)
-    assert not [m for m in messages if m["role"] == "system" and m["content"].startswith("### 主动性")]
 
 
 # ---------- 按能力裁剪 ----------
