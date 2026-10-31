@@ -1,54 +1,34 @@
-"""长期记忆模块：接管记忆策略配置（17 键）。
+"""长期记忆模块（llm_memory，v3）：接管记忆策略配置与全部实现。
 
 ## 它负责什么
 
-`memory_enable` / 召回条数与预算 / 确定性兜底 / 自动蒸馏 / 可信度与年龄门槛 /
-审计 / 重置策略 —— 原来全在 agent 配置页的「长期记忆」组里，现在归本模块。
+记忆的存储、抽取、巩固、召回、画像、工具与命令现在**全部在本模块**（`src/`），
+框架只保留四个通用接缝：`context_providers`（每轮上下文块）、`tool_sources`
+（模型工具）、`llm_hooks`（pre_request / turn_completed）和 `runtime.memory_service`
+（归档/重置等生命周期句柄）。
 
-## 机制在哪
+## 配置与开关
 
-记忆的存储、检索、蒸馏 worker 仍是框架的 `app/agent/memory/*`（那是机制，
-做过大量线上打磨）。本模块只提供**策略配置**：`on_load` 挂
-`runtime.memory_options`，框架侧 `MemoryManager._get()` 全部走
-`policy_config(runtime, "memory")`。
+23 个策略键归本模块（`schemas.py`）。`on_load` 把 `ConfigView` 挂到
+`runtime.memory_options`，框架侧 `policy_get(runtime, "memory", key)` 全部走模块配置；
+**没有任何额外的「实验性总开关」**：`memory_enable` 即唯一总开关。
 
-于是：
-- 装模块 → 记忆功能可用，参数由模块配置决定；
-- 卸模块 → `memory_options` 清空，框架回退 agent 配置（迁移期）/ 默认（删键后）。
+## 数据
 
-## 数据位置不变
-
-记忆数据仍写 `data/llm/<bot_id>/`，模块化不改数据布局，用户升级零迁移。
+`data/llm/<bot_id>/memory/memory.db`（SQLite，旧 v2 库自动增量迁移）。卸载模块不会
+删除数据。
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from app.plugin import BaseModule
+from app.plugin import BaseModule, GreedyStr, command_group
 
 from .src.schemas import MEMORY_SCHEMA
 
-#: 本模块持有的键（与 `config_partition.MODULE_KEYS["llm_memory"]` 一致）
-OWNED_KEYS: tuple[str, ...] = (
-    "memory_enable",
-    "memory_private_enable",
-    "memory_group_enable",
-    "memory_recall_max",
-    "memory_recall_max_chars",
-    "memory_save_deterministic",
-    "memory_extract_enable",
-    "memory_extract_interval_min",
-    "memory_max_per_owner",
-    "memory_user_cross_group",
-    "memory_audit_enable",
-    "memory_audit_inject",
-    "memory_min_confidence",
-    "memory_inject_hedge",
-    "memory_max_age_days",
-    "memory_on_reset",
-    "memory_upgrade_saved_only",
-)
+#: 本模块持有的配置键（与 `config_partition.MODULE_KEYS["llm_memory"]` 一致）
+OWNED_KEYS: tuple[str, ...] = tuple(MEMORY_SCHEMA.keys())
 
 
 class Module(BaseModule):
@@ -59,27 +39,11 @@ class Module(BaseModule):
     subscribe = ()
     category = "LLM"
     order = 50
-    default_config = {
-        "memory_enable": False,
-        "memory_private_enable": True,
-        "memory_group_enable": True,
-        "memory_recall_max": 8,
-        "memory_recall_max_chars": 1200,
-        "memory_save_deterministic": True,
-        "memory_extract_enable": False,
-        "memory_extract_interval_min": 30,
-        "memory_max_per_owner": 200,
-        "memory_user_cross_group": False,
-        "memory_audit_enable": False,
-        "memory_audit_inject": False,
-        "memory_min_confidence": 0.5,
-        "memory_inject_hedge": True,
-        "memory_max_age_days": 0,
-        "memory_on_reset": "keep",
-        "memory_upgrade_saved_only": True,
-    }
+
+    default_config = {key: field.get("default") for key, field in MEMORY_SCHEMA.items()}
     config_schema = MEMORY_SCHEMA
 
+    # ── 生命周期 ─────────────────────────────────────────
     async def on_load(self) -> None:
         runtime = self._runtime()
         if runtime is None:
@@ -87,16 +51,12 @@ class Module(BaseModule):
         from app.agent.delivery.output import ConfigView
         from app.agent.loop.providers import register_context_provider, register_tool_source
 
-        from .src.service import (
-            MemoryLifecycle,
-            MemoryProvider,
-            MemoryToolSource,
-        )
+        from .src.service import MemoryLifecycle, MemoryProvider, MemoryToolSource
 
         runtime.memory_options = ConfigView(
             getattr(runtime, "config", None), self.config, OWNED_KEYS
         )
-        # 文档化句柄：框架（assembly/inputs.py）与记忆工具都按鸭子类型用它
+        # 文档化句柄：框架（归档/重置/装配）与工具都按鸭子类型用它
         runtime.memory_service = self.memory_manager()
         register_context_provider(runtime, MemoryProvider(self))
         register_tool_source(runtime, MemoryToolSource(self))
@@ -109,6 +69,16 @@ class Module(BaseModule):
             stage="turn_completed", event_type="*", order=60,
             handler=lifecycle.on_turn_completed, module=self,
         )
+        # 向量回填 worker：托管给模块后台任务（卸载/热重载自动取消）
+        manager = self.memory_manager()
+        if manager is not None:
+            spawn = getattr(self, "spawn", None)
+            services = getattr(getattr(self, "ctx", None), "services", None)
+            task_manager = getattr(services, "task_manager", None)
+            if callable(spawn) and getattr(task_manager, "create_task", None) is not None:
+                spawn(manager.embedding_worker(), name=f"memory-embeddings:{self.bot_id}")
+            else:
+                manager.start_worker()
 
     async def on_unload(self) -> None:
         runtime = self._runtime()
@@ -117,10 +87,10 @@ class Module(BaseModule):
         from app.agent.loop.providers import unregister_owner
 
         unregister_owner(runtime, self)
-        mgr = getattr(self, "_manager", None)
-        if mgr is not None:
+        manager = getattr(self, "_manager", None)
+        if manager is not None:
             try:
-                mgr.stop()
+                manager.stop()
             except Exception as e:  # noqa: BLE001 —— 停止失败不该阻断卸载，但要留痕
                 from app.core.logger import logger
 
@@ -130,7 +100,7 @@ class Module(BaseModule):
         runtime.memory_options = None
 
     def memory_manager(self) -> Any:
-        """本模块的记忆管理器（`#llm memory` 指令、记忆工具共用同一实例）。"""
+        """本模块的记忆管理器（命令 / 工具 / 钩子共用同一实例）。"""
         from .src.service import memory_manager
 
         return memory_manager(self)
@@ -143,6 +113,91 @@ class Module(BaseModule):
     @property
     def enabled(self) -> bool:
         return bool(self.config.get("memory_enable", False))
+
+    # ── 命令（/memory、／memory、#llm memory 三种前缀） ──
+    @command_group(
+        "memory",
+        description="长期记忆（list/search/profile/forget/clear/audit/remember/export）",
+        prefixes=("/", "／", "#llm "),
+    )
+    async def memory(self, event):
+        """只发 /memory 时打印子命令表。"""
+        await self._run_memory_command(event, "")
+
+    @memory.command("list", description="列出当前可见记忆（--all 含已下架）")
+    async def memory_list(self, event):
+        await self._run_memory_command(event, _with_args("list", event))
+
+    @memory.command("search", description="检索记忆")
+    async def memory_search(self, event):
+        await self._run_memory_command(event, _with_args("search", event))
+
+    @memory.command("profile", description="查看关于你的画像")
+    async def memory_profile(self, event):
+        await self._run_memory_command(event, "profile")
+
+    @memory.command("remember", description="记住一条关于你的信息")
+    async def memory_remember(self, event, text: GreedyStr = ""):
+        await self._run_memory_command(event, f"remember {text}".strip())
+
+    @memory.command("forget", description="删除本人记忆（id 或关键词）")
+    async def memory_forget(self, event, target: GreedyStr = ""):
+        await self._run_memory_command(event, f"forget {target}".strip())
+
+    @memory.command("clear", description="清空本人记忆")
+    async def memory_clear(self, event):
+        await self._run_memory_command(event, "clear")
+
+    @memory.command("audit", description="记忆事件审计（管理员）")
+    async def memory_audit(self, event, owner: str = ""):
+        await self._run_memory_command(event, f"audit {owner}".strip())
+
+    @memory.command("export", description="导出本人记忆（JSON 文本）")
+    async def memory_export(self, event):
+        await self._run_memory_command(event, "export")
+
+    async def _run_memory_command(self, event, action: str) -> None:
+        """把命令转给 `src/commands.py`（纯函数解析，便于测试与直调）。"""
+        from .src.commands import handle_memory_command
+
+        session_id, user_id, is_private = _event_session(event)
+        is_admin = bool(getattr(event, "is_admin", False))
+
+        async def send(text: str) -> None:
+            reply = getattr(event, "reply", None)
+            if reply is None:
+                return
+            await reply(text)
+
+        try:
+            await handle_memory_command(
+                self, session_id, user_id, is_private, is_admin, action, send
+            )
+        except Exception as e:  # noqa: BLE001 —— 命令异常不能掀翻节点链
+            from app.core.logger import logger
+
+            logger.add_info(str(getattr(self, "bot_id", "?"))).exception(
+                f"[llm_memory] 命令处理异常: {e}"
+            )
+            await send("记忆命令执行失败，请稍后再试")
+
+
+def _event_session(event: Any) -> tuple[str, str, bool]:
+    """从事件推导 (session_id, user_id, is_private)。"""
+    user_id = str(getattr(event, "user_id", "") or "")
+    message_type = str(getattr(event, "message_type", "") or "")
+    group = getattr(event, "group", None)
+    if message_type == "private" or (message_type == "" and group is None):
+        return f"private_{user_id}", user_id, True
+    group_id = getattr(group, "group_id", None) if group is not None else None
+    if group_id is None:
+        return f"private_{user_id}", user_id, True
+    return f"group_{group_id}", user_id, False
+
+
+def _with_args(sub: str, event: Any) -> str:
+    text = str(getattr(getattr(event, "command", None), "text", "") or "").strip()
+    return f"{sub} {text}".strip()
 
 
 def owned_keys() -> tuple[str, ...]:

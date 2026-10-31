@@ -1,11 +1,14 @@
-"""llm_memory 的服务层：把记忆能力接到框架的三个基础接口上。
+"""llm_memory 的服务层：把记忆能力接到框架的基础接口上。
 
-模块**不接管任何东西**，只做三件事：
+模块**不接管任何东西**，只做四件事：
 
-1. `context_providers` —— 每轮贡献「记忆召回块」；
-2. `tool_sources` —— 注册 `memory_save` / `recall` / `delete` / `correct` / `deny` 工具；
-3. `@llm_hook` —— `pre_request` 里做确定性兜底写入（用户说"记住…"），
-   `turn_completed` 里做蒸馏（原框架 `_memory_consolidate` 的活）。
+1. `context_providers` —— 每轮贡献「常驻画像块 + 事实召回块」；
+2. `tool_sources` —— 注册 `memory_save/recall/delete/correct/deny` 五个工具；
+3. `llm_hooks.pre_request` —— 把用户原话追加进 `episodes`（O(1)），并做
+   「记住…」的确定性兜底写入；
+4. `llm_hooks.turn_completed` —— 限频调度后台蒸馏（热点路径不调模型）。
+
+失败一律降级并留痕：记忆是增强能力，不能毁掉一轮对话。
 """
 
 from __future__ import annotations
@@ -17,18 +20,25 @@ from app.core.logger import account_label
 
 def memory_manager(module: Any):
     """惰性构造 MemoryManager（首次用到时才连库，避免加载期 IO）。"""
-    mgr = getattr(module, "_manager", None)
-    if mgr is None:
+    manager = getattr(module, "_manager", None)
+    if manager is None:
         from .manager import MemoryManager
 
-        runtime = module._runtime()
-        mgr = MemoryManager(runtime) if runtime is not None else None
-        module._manager = mgr
-    return mgr
+        try:
+            manager = MemoryManager(module)
+        except Exception as e:  # noqa: BLE001 —— 存储不可用时记忆整体降级，而不是让模块加载失败
+            from app.core.logger import logger
+
+            logger.add_info(account_label(getattr(module, "bot_id", "?"))).warning(
+                f"[llm_memory] 初始化记忆管理器失败（记忆不可用）: {e}"
+            )
+            return None
+        module._manager = manager
+    return manager
 
 
 class MemoryProvider:
-    """上下文贡献者：产出「长期记忆」块。"""
+    """上下文贡献者：产出「画像块 + 事实记忆块」。"""
 
     def __init__(self, module: Any) -> None:
         self.module = module
@@ -37,22 +47,27 @@ class MemoryProvider:
         self.owner = module
 
     async def collect(self, scope: Any) -> str | None:
-        mgr = memory_manager(self.module)
-        if mgr is None or not mgr.enabled():
+        manager = memory_manager(self.module)
+        if manager is None or not manager.enabled():
             return None
         runtime = getattr(scope, "runtime", None)
+        session_id = str(getattr(scope, "session_id", "") or "")
+        user_id = str(getattr(scope, "user_id", "") or "")
         try:
-            return await mgr.recall_block_async(
-                scope.session_id,
-                scope.user_id if getattr(scope, "is_private", False) else "",
-                scope.user_text or "",
+            profile = await manager.profile_block(session_id, user_id)
+            facts = await manager.recall_block_async(
+                session_id,
+                user_id,
+                str(getattr(scope, "user_text", "") or ""),
                 bot=getattr(runtime, "bot", None),
             )
+            parts = [part.strip() for part in (profile, facts) if part and part.strip()]
+            return "\n\n".join(parts) or None
         except Exception as e:  # noqa: BLE001 —— 记忆召回失败不该毁掉整轮
             from app.core.logger import logger
 
-            logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).debug(
-                f"[llm_memory] 召回失败（已忽略）: {e}"
+            logger.add_info(account_label(getattr(runtime, "bot_id", "?"))).debug(
+                f"[llm_memory] 上下文块收集失败（已忽略）: {e}"
             )
             return None
 
@@ -67,8 +82,8 @@ class MemoryToolSource:
         self.owner = module
 
     async def collect(self, scope: Any) -> list:
-        mgr = memory_manager(self.module)
-        if mgr is None or not mgr.enabled():
+        manager = memory_manager(self.module)
+        if manager is None or not manager.enabled():
             return []
         from .tool import build_memory_tools
 
@@ -76,7 +91,7 @@ class MemoryToolSource:
         return list(
             build_memory_tools(
                 runtime,
-                scope.session_id,
+                str(getattr(scope, "session_id", "") or ""),
                 str(getattr(scope, "user_id", "") or ""),
                 bool(getattr(scope, "is_private", False)),
             )
@@ -85,14 +100,14 @@ class MemoryToolSource:
 
 
 class MemoryLifecycle:
-    """LLM 钩子：确定性兜底写入 + 回合结束蒸馏。"""
+    """LLM 钩子：语料缓冲 + 确定性兜底写入 + 回合结束调度蒸馏。"""
 
     def __init__(self, module: Any) -> None:
         self.module = module
 
     async def on_pre_request(self, ctx: Any) -> None:
-        mgr = memory_manager(self.module)
-        if mgr is None or not mgr.enabled():
+        manager = memory_manager(self.module)
+        if manager is None or not manager.enabled():
             return
         event = getattr(ctx, "event", None)
         if event is None:
@@ -102,35 +117,48 @@ class MemoryLifecycle:
 
             text = raw_user_text(event)
             user_id = str(getattr(event, "user_id", "") or "")
-            if text and user_id:
-                mgr.autosave(ctx.session_id, user_id, text)
-        except Exception as e:  # noqa: BLE001
+            if not text or not user_id:
+                return
+            session_id = str(getattr(ctx, "session_id", "") or "")
+            manager.record_episode(
+                session_id,
+                user_id,
+                text,
+                message_id=str(getattr(event, "message_id", "") or ""),
+            )
+            manager.autosave(session_id, user_id, text)
+        except Exception as e:  # noqa: BLE001 —— 兜底写入失败已忽略，但要留痕
             from app.core.logger import logger
 
-            logger.add_info(account_label(getattr(getattr(ctx, 'runtime', None), 'bot_id', '?'))).debug(
+            logger.add_info(account_label(getattr(getattr(ctx, "runtime", None), "bot_id", "?"))).debug(
                 f"[llm_memory] 兜底写入失败（已忽略）: {e}"
             )
 
     async def on_turn_completed(self, ctx: Any) -> None:
-        mgr = memory_manager(self.module)
-        if mgr is None or not mgr.enabled():
+        manager = memory_manager(self.module)
+        if manager is None or not manager.enabled():
             return
         runtime = getattr(ctx, "runtime", None)
         try:
-            from app.agent.session.manager import SessionManager
+            session_mgr = getattr(self.module, "sessions", None)
+            if session_mgr is None:
+                from app.agent.session.manager import SessionManager
 
-            session_mgr = SessionManager(str(getattr(runtime, "bot_id", "")))
+                session_mgr = SessionManager(str(getattr(runtime, "bot_id", "")))
+            messages = session_mgr.history_snapshot(str(getattr(ctx, "session_id", "") or ""))
             event = getattr(ctx, "event", None)
             is_private = getattr(event, "message_type", "") == "private"
-            # 注意：`maybe_consolidate` 要的是**消息列表**，不是会话表。
-            # 传 `session_mgr.sessions`（dict）会让它遍历到字符串键 →
-            # `'str' object has no attribute 'get'`（历史 bug）。
-            messages = session_mgr.history_snapshot(ctx.session_id)
-            if messages:
-                mgr.maybe_consolidate(ctx.session_id, not is_private, messages, source="chat")
-        except Exception as e:  # noqa: BLE001
+            if not is_private and str(getattr(ctx, "session_id", "")).startswith("private_"):
+                is_private = True
+            await manager.maybe_consolidate(
+                str(getattr(ctx, "session_id", "") or ""),
+                not is_private,
+                messages,
+                source="chat",
+            )
+        except Exception as e:  # noqa: BLE001 —— 蒸馏调度失败不该影响本轮
             from app.core.logger import logger
 
-            logger.add_info(account_label(getattr(getattr(ctx, 'runtime', None), 'bot_id', '?'))).debug(
-                f"[llm_memory] 蒸馏触发失败（已忽略）: {e}"
+            logger.add_info(account_label(getattr(getattr(ctx, "runtime", None), "bot_id", "?"))).debug(
+                f"[llm_memory] 蒸馏调度失败（已忽略）: {e}"
             )

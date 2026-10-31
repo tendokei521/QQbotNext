@@ -359,8 +359,12 @@ class AgentRuntime:
         return self._bot
 
     def _on_session_archive(self, session) -> None:
-        """会话过期/结束时触发长期记忆归档蒸馏（异步提交到主事件循环）。"""
-        memory = getattr(self, "memory", None)
+        """会话过期/结束时触发长期记忆归档蒸馏（异步提交到主事件循环）。
+
+        v3：记忆实现归 `llm_memory` 模块，句柄挂在 ``memory_service``（运行时已无
+        ``memory`` 字段）。模块未安装/被禁用时句柄为 None，这里直接跳过。
+        """
+        memory = getattr(self, "memory_service", None)
         if memory is None or self._loop is None or self._loop.is_closed():
             return
         try:

@@ -111,51 +111,56 @@ async def test_stream_without_usage_marks_estimated(env):
 
 
 # ==================== Bug 1：蒸馏参数类型 ====================
+# v3 记忆重写后，蒸馏入口是 MemoryManager.maybe_consolidate（原 _run_distill 已删除）：
+# 它只把 list[dict] 的消息写进 episodes，形状错误（dict）也不能把一轮对话打断。
 
 
-async def test_run_distill_accepts_history_snapshot_shape(tmp_path, monkeypatch):
-    """`_run_distill` 收到 `history_snapshot()` 的形状（list[dict]）必须正常工作。
-
-    历史 bug：调用方传的是 `session_mgr.sessions`（dict），遍历到字符串键 →
-    `'str' object has no attribute 'get'`。
-    """
+def _memory_manager(tmp_path, monkeypatch):
     from app.plugins.llm_memory.src.manager import MemoryManager
 
+    class _Module:
+        bot_id = "1"
+
+        def __init__(self):
+            self.config = {
+                "memory_enable": True,
+                "memory_extract_enable": False,  # 只验证入参形状，不触发后台 LLM
+                "memory_private_enable": True,
+                "memory_group_enable": True,
+                "memory_min_confidence": 0.5,
+                "memory_audit_enable": False,
+            }
+            self.ctx = SimpleNamespace(services=None)
+            self._runtime = lambda: None
+
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
-    runtime = SimpleNamespace(bot_id="1", config={}, bot=None, session_mgr=None)
-    mgr = MemoryManager(runtime)
+    return MemoryManager(_Module())
 
-    saved: list = []
 
-    async def _fake_extract(_runtime, uid, texts, is_group=False):
-        return [{"content": f"{uid} 喜欢猫", "importance": 0.9, "confidence": 0.8}]
-
-    monkeypatch.setattr(mgr, "save_fact", lambda *a, **k: saved.append(a) or "m1")
-    monkeypatch.setattr(mgr, "own_owner", lambda sid, uid: f"private_{uid}")
-
-    import app.plugins.llm_memory.src.extract as extract_mod
-
-    monkeypatch.setattr(extract_mod, "extract_facts_for_user_async", _fake_extract)
-
+async def test_maybe_consolidate_accepts_history_snapshot_shape(tmp_path, monkeypatch):
+    """`history_snapshot()` 的形状（list[dict]）必须被正常消费为原始语料。"""
+    manager = _memory_manager(tmp_path, monkeypatch)
     messages = [
         {"role": "user", "content": "我喜欢猫", "user_id": "5"},
         {"role": "assistant", "content": "记住了"},
     ]
-    await mgr._run_distill("private_5", False, messages, "chat")
-    assert saved, "正常入参应能蒸馏出记忆"
-    mgr.stop()
-
-
-async def test_run_distill_with_dict_logs_warning_instead_of_crashing(tmp_path, monkeypatch, caplog):
-    """反向验证：传 dict（旧写法）会被内部捕获并记 warning（就是用户看到的那条日志）。"""
-    from app.plugins.llm_memory.src.manager import MemoryManager
-
-    monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
-    runtime = SimpleNamespace(bot_id="1", config={}, bot=None, session_mgr=None)
-    mgr = MemoryManager(runtime)
     try:
-        await mgr._run_distill("private_5", False, {"private_5": "Session对象"}, "chat")
+        await manager.maybe_consolidate("private_5", False, messages)
+        episodes = manager.store.list_episodes("private_5")
     finally:
-        mgr.stop()
-    # 不抛异常（内部吞掉），但要留下 warning 痕迹
-    assert any("蒸馏失败" in r.message for r in caplog.records), "应记录蒸馏失败日志"
+        manager.stop()
+    assert [ep["content"] for ep in episodes] == ["我喜欢猫"]
+
+
+async def test_maybe_consolidate_with_dict_does_not_crash(tmp_path, monkeypatch):
+    """反向验证：误传 dict（旧代码传 `session_mgr.sessions`）不抛异常。"""
+    manager = _memory_manager(tmp_path, monkeypatch)
+    try:
+        await manager.maybe_consolidate(
+            "private_5", False, {"private_5": "Session对象"}
+        )
+        episodes = manager.store.list_episodes("private_5")
+    finally:
+        manager.stop()
+    # 非 dict 的值被忽略，但调用本身必须安全返回
+    assert episodes == []

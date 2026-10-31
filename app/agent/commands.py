@@ -78,13 +78,12 @@ COMMAND_GROUPS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
         (
             (f"{PREFIX} memory list [--all]", "查看当前可见记忆（--all 含已下架）"),
             (f"{PREFIX} memory search <词>", "检索记忆"),
-            (f"{PREFIX} memory correct <旧词> <新事实>", "纠正记忆：旧记忆下架，写入新事实"),
-            (f"{PREFIX} memory deny <词|id>", "下架记忆（可恢复）"),
-            (f"{PREFIX} memory confirm <词|id>", "确认记忆（上调置信度）"),
+            (f"{PREFIX} memory profile", "查看关于你的画像"),
+            (f"{PREFIX} memory remember <内容>", "记住一条关于你的信息"),
             (f"{PREFIX} memory forget <id|词>", "删除本人记忆"),
             (f"{PREFIX} memory clear", "清空本人记忆（群公共记忆不受影响）"),
-            (f"{PREFIX} memory reset [hard]", "重置记忆上下文；hard 彻底清除"),
-            (f"{PREFIX} memory audit [owner|all]", "记忆事件审计（管理员）"),
+            (f"{PREFIX} memory audit [owner]", "记忆事件审计（管理员）"),
+            (f"{PREFIX} memory export", "导出本人记忆（JSON）"),
         ),
     ),
     (

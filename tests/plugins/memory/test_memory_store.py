@@ -1,117 +1,127 @@
-"""P0 存储层测试：建表 / CRUD / owner 隔离 / 去重 / 淘汰 / 审计 / bot 隔离。"""
+"""记忆存储层契约测试（v3）：旧库迁移 / 去重与失效 / 淘汰 / 语料缓冲。
+
+只测对外行为，不锁内部实现细节（见 docs/TEST_POLICY.md）。
+"""
+
+from __future__ import annotations
+
+import sqlite3
+
+from app.plugins.llm_memory.src.store import MemoryStore
 
 
-import pytest
-
-from app.plugins.llm_memory.src.store import (
-    MemoryStore,
-    owner_group,
-    owner_group_member,
-    owner_private,
-    session_owner,
-)
+def _store(tmp_path, bot_id: str = "bot1") -> MemoryStore:
+    return MemoryStore(bot_id, db_path=str(tmp_path / "memory.db"))
 
 
-def _store(bot_id="bot1", **kw) -> MemoryStore:
-    return MemoryStore(bot_id, **kw)
+def _old_v2_database(path) -> None:
+    """造一个 v2 结构的旧库（缺少 v3 新增列），用来验证增量迁移不丢数据。"""
+    conn = sqlite3.connect(path)
+    conn.execute(
+        """
+        CREATE TABLE memories (
+            id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, owner TEXT NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'fact', content TEXT NOT NULL,
+            keywords TEXT NOT NULL DEFAULT '', importance REAL NOT NULL DEFAULT 0.5,
+            visibility TEXT NOT NULL DEFAULT 'group', source TEXT NOT NULL DEFAULT 'tool',
+            source_user TEXT NOT NULL DEFAULT '', source_task TEXT NOT NULL DEFAULT '',
+            embedding BLOB, status TEXT NOT NULL DEFAULT 'active',
+            confidence REAL NOT NULL DEFAULT 0.5, confirmed INTEGER NOT NULL DEFAULT 0,
+            expires_at INTEGER, evidence_count INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+            hit_count INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO memories (id, bot_id, owner, content, created_at, updated_at)"
+        " VALUES ('old1', 'bot1', 'user_1', '旧记忆：小明喜欢美式', 100, 100)"
+    )
+    conn.commit()
+    conn.close()
 
 
-def test_db_path_is_per_bot_isolated():
-    a = _store("botA")
-    b = _store("botB")
-    assert a.bot_id == "botA"
-    assert b.bot_id == "botB"
-    assert a.db_path != b.db_path
-    assert "botA" in a.db_path and "botB" in b.db_path
-    # 存在同 owner 记忆互不可见（bot 级隔离）
-    a.upsert_fact("小明喜欢美式", "user_1", source="tool")
-    assert b.count_by_owner("user_1") == 0
-    assert a.count_by_owner("user_1") == 1
-    a.close()
-    b.close()
+def test_v2_database_migrates_without_data_loss(tmp_path):
+    path = tmp_path / "old.db"
+    _old_v2_database(path)
+
+    store = MemoryStore("bot1", db_path=str(path))
+    row = store.get("old1")
+    assert row is not None and row["content"] == "旧记忆：小明喜欢美式"
+    # v3 新列补齐，且 valid_from 回填为创建时间（时间有效性语义）
+    assert int(row["valid_from"]) == 100
+    assert store.list_episodes("private_1") == []
+    store.close()
+
+    # 再次打开幂等（不重复迁移、数据仍在）
+    reopened = MemoryStore("bot1", db_path=str(path))
+    assert reopened.get("old1") is not None
+    reopened.close()
 
 
-def test_owner_helpers():
-    assert owner_private(10001) == "user_10001"
-    assert owner_group(555) == "group_555"
-    assert owner_group_member(555, 10001) == "user_10001@group_555"
-    assert session_owner("private_10001") == "user_10001"
-    assert session_owner("group_555") == "group_555"
-    assert session_owner("group_555", user_id=10001) == "user_10001@group_555"
-    # 非法字符 sanitize
-    assert owner_private("100 01") == "user_100_01"
+def test_exact_duplicate_updates_evidence(tmp_path):
+    store = _store(tmp_path)
+    first = store.upsert_fact("我养了一只叫咪咪的猫", "user_1", importance=0.5)
+    second = store.upsert_fact("我养了一只叫咪咪的猫", "user_1", importance=0.9)
+
+    assert first.id == second.id
+    assert second.action == "update"
+    row = store.get(first.id)
+    assert row["importance"] == 0.9
+    assert int(row["evidence_count"]) == 2
+    assert store.count_by_owner("user_1") == 1
+    store.close()
 
 
-def test_add_get_and_owner_isolation():
-    s = _store()
-    mid = s.upsert_fact("我住上海", owner="user_1", source_user="1", keywords="上海 住")
-    assert mid
-    got = s.get(mid)
-    assert got["content"] == "我住上海"
-    assert got["owner"] == "user_1"
-    # 其它 owner 不可见（isolation）
-    assert s.get_owned(mid, "group_999") is None
-    assert s.get_owned(mid, "user_1") is not None
-    # 空内容拒绝
-    with pytest.raises(ValueError):
-        s.upsert_fact("  ", "user_1")
-    s.close()
+def test_negated_fact_supersedes_instead_of_merging(tmp_path):
+    """曾坏过：裸子串 + 0.85 相似合并会把「不喜欢」合并进「喜欢」并静默翻转。"""
+    store = _store(tmp_path)
+    old = store.upsert_fact("我喜欢喝美式", "user_1", source="tool", supersede_conflicts=True)
+    new = store.upsert_fact(
+        "我不喜欢喝美式，喝不惯", "user_1", source="tool", supersede_conflicts=True
+    )
+
+    assert old.id != new.id
+    assert store.get(old.id)["status"] == "superseded"
+    assert store.get(old.id)["invalid_at"] is not None
+    assert store.get(new.id)["status"] == "active"
+    assert store.count_by_owner("user_1") == 2
+    store.close()
 
 
-def test_upsert_dedupe():
-    s = _store()
-    a = s.upsert_fact("我养了一只叫咪咪的猫", "user_1")
-    b = s.upsert_fact("我养了一只叫咪咪的猫", "user_1", importance=0.9)
-    assert a == b  # 同 owner 同内容 → 同一 id
-    assert s.count_by_owner("user_1") == 1
-    assert s.get(a)["importance"] == pytest.approx(0.9)
-    # 不同内容 → 不同条
-    c = s.upsert_fact("我喜欢喝美式", "user_1")
-    assert c != a
-    assert s.count_by_owner("user_1") == 2
-    s.close()
+def test_negative_is_not_resurrected(tmp_path):
+    store = _store(tmp_path)
+    fact = store.upsert_fact("我喜欢喝美式", "user_1", source="tool")
+    assert store.deny("user_1", "美式") == 1
+    assert store.get(fact.id)["status"] == "negative"
+
+    # 同一措辞再次出现：只累计证据，不能把用户否认过的记忆复活
+    store.upsert_fact("我喜欢喝美式", "user_1", source="tool")
+    assert store.get(fact.id)["status"] == "negative"
+    store.close()
 
 
-def test_list_by_owner_and_search():
-    s = _store()
-    s.upsert_fact("小明喜欢喝美式咖啡", "user_2@group_9", keywords="小明 咖啡 美式")
-    s.upsert_fact("小红讨厌香菜", "user_3@group_9", keywords="小红 香菜")
-    s.upsert_fact("群约定：周五不开会", "group_9")
-    rows = s.list_by_owner("user_2@group_9")
-    assert len(rows) == 1 and rows[0]["content"] == "小明喜欢喝美式咖啡"
-    # 跨 owner 搜索
-    hits = s.search_in_owners(["user_2@group_9", "user_3@group_9", "group_9"], "小明")
-    assert len(hits) == 1 and "美式" in hits[0]["content"]
-    hits2 = s.search_in_owners(["user_2@group_9", "group_9"], "开会")
-    assert len(hits2) == 1 and hits2[0]["owner"] == "group_9"
-    s.close()
+def test_enforce_limit_keeps_important_rows(tmp_path):
+    store = _store(tmp_path)
+    for index, importance in enumerate((0.1, 0.2, 0.5, 0.8, 0.9)):
+        store.upsert_fact(f"事实 {index}", "user_1", importance=importance)
+
+    removed = store.enforce_limit("user_1", 2)
+    assert removed == 3
+    rows = store.list_by_owner("user_1")
+    assert {row["content"] for row in rows} == {"事实 3", "事实 4"}
+    store.close()
 
 
-def test_delete_clear_count():
-    s = _store()
-    a = s.upsert_fact("A", "user_1")
-    s.upsert_fact("B带词", "user_1")
-    s.upsert_fact("C", "group_2")
-    assert s.delete_fact(a, owner="user_1") is True
-    assert s.delete_fact(a, owner="group_2") is False  # owner 不匹配
-    assert s.count_by_owner("user_1") == 1
-    # delete_by_query
-    removed = s.delete_by_query("user_1", "带词")
-    assert removed == 1
-    assert s.count_by_owner("user_1") == 0
-    assert s.clear("group_2") == 1
-    s.close()
+def test_episode_buffer_dedupes_and_marks(tmp_path):
+    store = _store(tmp_path)
+    first = store.add_episode("private_5", "user_5", "我喜欢美式", user_id="5", message_id="m1")
+    duplicate = store.add_episode("private_5", "user_5", "我喜欢美式", user_id="5", message_id="m1")
+    assert first and duplicate in (first, "")
+    assert len(store.list_episodes("private_5")) == 1
 
-
-def test_audit_and_recent():
-    s = _store()
-    s.audit("write", owner="user_1", user_id="1", summary="我住上海", source="tool")
-    s.audit("delete", owner="user_1", user_id="1", summary="忘了那条", source="chat")
-    rows = s.recent_audit(owner="user_1")
-    assert len(rows) == 2
-    assert rows[1]["action"] == "write"  # 时间倒序
-    assert rows[0]["action"] == "delete"
-    assert "忘了" in rows[0]["summary"]
-    all_rows = s.recent_audit()
-    assert len(all_rows) == 2
-    s.close()
+    rows = store.list_episodes("private_5")
+    assert rows[0]["owner"] == "user_5" and rows[0]["user_id"] == "5"
+    assert store.mark_episodes_consolidated([rows[0]["id"]]) == 1
+    assert store.list_episodes("private_5") == []
+    store.close()

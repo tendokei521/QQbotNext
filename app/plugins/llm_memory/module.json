@@ -2,8 +2,8 @@
   "name": "llm_memory",
   "display_name": "长期记忆",
   "sign": "LlmMemory",
-  "version": "1.0.0",
-  "description": "记住用户的偏好和事实，之后聊天时想起来",
+  "version": "2.0.0",
+  "description": "记住用户的偏好和事实：常驻画像 + 混合召回 + 后台蒸馏",
   "author": "tendokei521",
   "entry": "main.py",
   "api_version": 1

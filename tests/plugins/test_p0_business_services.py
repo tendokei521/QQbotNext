@@ -1,8 +1,7 @@
-"""P0 回归测试：证明"记忆/知识库工具与指令、主动消息记忆召回"确实恢复了。
+"""P0 回归测试：证明记忆工具/指令/召回确实挂在模块的 `memory_service` 句柄上。
 
-这些用例**故意不给 runtime 挂 `memory` / `knowledge` 字段**（模拟真实的 v3 运行时），
-只挂模块自己的 `memory_service` / `knowledge_service` —— 修复前它们全部失效，
-修复后必须工作。
+这些用例**故意不给 runtime 挂 `memory` 字段**（模拟真实的 v3 运行时），
+只挂模块自己的 `memory_service` —— 修复前它们全部失效，修复后必须工作。
 """
 
 from __future__ import annotations
@@ -15,74 +14,56 @@ from app.plugins.llm_memory.src.tool import build_memory_tools
 
 
 class _FakeMemory:
-    """最小记忆管理器：只实现 `tool.py` 真正调用的方法（鸭子类型）。"""
+    """最小记忆管理器：只实现记忆工具/指令真正调用的方法（鸭子类型）。"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.saved: list[dict] = []
         self.enabled_flag = True
 
-    # --- 配置读取（工具用它判断跨群记忆等开关）---
     def _get(self, key, default=None):
         return {"memory_user_cross_group": True}.get(key, default)
 
     def enabled(self) -> bool:
         return self.enabled_flag
 
-    # --- 指令层要用的 store ---
-    @property
-    def store(self):
-        def _empty(*a, **k):
-            return []
+    def scene_enabled(self, session_id: str) -> bool:
+        return self.enabled_flag
 
-        return SimpleNamespace(
-            list_for_owners=_empty, list=_empty, count=_empty,
-        )
-
-    # --- 指令层 ---
-    def scope_owners(self, session_id, user_id):
-        return [f"private_{user_id}"]
-
-    def stats(self):
-        return {"total": 0}
-
-    # --- 归属 ---
     def own_owner(self, session_id, user_id):
-        return f"private_{user_id}" if str(session_id).startswith("private_") else session_id
+        return f"user_{user_id}"
 
-    # --- 写入（工具实际调用 `save_fact`）---
+    def scope_owners(self, session_id, user_id):
+        return [f"user_{user_id}"]
+
     def save_fact(self, content, owner, **kwargs):
         self.saved.append({"content": content, "owner": owner, **kwargs})
         return "m1"
 
-    def save(self, **kwargs):
-        self.saved.append(kwargs)
-        return "m1", "ok"
+    async def search_async(self, session_id, user_id, query, *, limit=8):
+        return "### 历史记忆数据\n\n- 用户喜欢猫"
 
-    async def save_async(self, **kwargs):
-        return self.save(**kwargs)
+    def delete_own(self, session_id, user_id, target):
+        return 1
 
-    # --- 召回 ---
-    def visible_recall(self, *a, **k):
-        return "【长期记忆】用户喜欢猫"
+    def correct_own(self, session_id, user_id, old, new):
+        return "m2"
 
-    async def visible_recall_async(self, *a, **k):
-        return self.visible_recall(*a, **k)
+    def deny_own(self, session_id, user_id, target):
+        return 1
 
-    def recall(self, *a, **k):
-        return [{"id": "m1", "content": "用户喜欢猫", "score": 0.9}]
+    @property
+    def store(self):
+        def _empty(*args, **kwargs):
+            return []
 
-    # --- 增删改 ---
-    def get(self, memory_id):
-        return {"id": memory_id, "content": "用户喜欢猫", "owner": "private_5"}
+        return SimpleNamespace(
+            list_for_owners=_empty,
+            list_by_owner=_empty,
+            recent_audit=_empty,
+        )
 
-    def delete_by_id(self, memory_id):
-        return True
-
-    def mark_denied(self, memory_id, reason=""):
-        return True
-
-    def set_content(self, memory_id, content):
-        return True
+    async def profile_block(self, session_id, user_id):
+        return ""
 
 
 def _runtime(**extra):
@@ -101,7 +82,7 @@ def test_memory_tools_resolve_the_module_service_handle():
     rt = _runtime(memory_service=memory)
 
     names = {t.name for t in build_memory_tools(rt, "private_5", "5", True)}
-    assert {"memory_save", "memory_recall"} <= names
+    assert {"memory_save", "memory_recall", "memory_delete", "memory_correct", "memory_deny"} <= names
 
 
 @pytest.mark.asyncio
@@ -136,9 +117,6 @@ async def test_memory_tools_report_unavailable_without_any_handle():
     assert "error" in result.lower() and "不可用" in result
 
 
-# ---------- 知识库工具 ----------
-
-
 async def test_collect_history_materials_uses_the_memory_service_handle():
     """`assembly/inputs.py` 过去读 `runtime.memory`（已删）→ 主动消息/定时任务永不召回记忆。"""
     from app.agent.assembly.inputs import collect_history_materials
@@ -168,7 +146,8 @@ async def test_collect_history_materials_uses_the_memory_service_handle():
     assert calls, "必须真的去召回"
     assert "猫" in (materials.get("memory_text") or "")
 
-# ---------- `#llm memory` 指令 ----------
+
+# ---------- 管理命令 ----------
 
 
 @pytest.mark.asyncio
@@ -184,7 +163,7 @@ async def test_memory_command_uses_the_module_manager():
         sent.append(text)
 
     handled = await handle_memory_command(
-        module, "private_5", "5", True, True, "memory list", _send
+        module, "private_5", "5", True, True, "list", _send
     )
 
     assert handled is True
@@ -202,6 +181,6 @@ async def test_memory_command_reports_unavailable_without_module():
         sent.append(text)
 
     await handle_memory_command(
-        SimpleNamespace(), "private_5", "5", True, True, "memory list", _send
+        SimpleNamespace(), "private_5", "5", True, True, "list", _send
     )
     assert "未启用" in sent[0]

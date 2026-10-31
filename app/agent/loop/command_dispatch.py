@@ -17,8 +17,6 @@ export / exit / stop / schedule / proactive / memory …）、`_send_help`（合
 
 from __future__ import annotations
 
-from app.core.logger import account_label
-
 import time
 from typing import Any
 
@@ -30,6 +28,7 @@ from app.agent.commands import (
     is_help_action,
     parse_action,
 )
+from app.core.logger import account_label
 
 
 async def handle_commands(module, session_mgr, session_id, group_id, user_id,
@@ -115,14 +114,8 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
             session_mgr.history.save_session(session)
         created = session_mgr.new_conversation(session_id, title)
         if created:
-            memory = getattr(module, "memory", None)
-            if memory is not None:
-                try:
-                    memory.on_session_reset(session_id, user_id)
-                except Exception as e:
-                    logger.add_info(account_label(getattr(module, 'bot_id', '?'))).debug(
-                        f"[Memory] 会话重置钩子失败（已忽略）: {e}"
-                    )
+            # v3：记忆归 `llm_memory` 模块，句柄是 runtime.memory_service
+            await _notify_memory_session_reset(module, session_id, user_id)
             await send(f"已开启新对话「{created['title']}」(task: {created['task_id']})")
         else:
             await send("创建失败")
@@ -238,6 +231,7 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
             session_mgr.add_message(session_id, "assistant", "#llm exit")
             history_mgr.save_session(session)
         session_mgr.destroy_session(session_id)
+        await _notify_memory_session_reset(module, session_id, user_id)
         await send("已退出会话")
         return True
 
@@ -245,14 +239,7 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
         if not is_admin:
             await send("权限不足，无法执行此命令")
             return True
-        memory = getattr(module, "memory", None)
-        if memory is not None:
-            try:
-                memory.on_session_reset(session_id, user_id)
-            except Exception as e:
-                logger.add_info(account_label(getattr(module, 'bot_id', '?'))).debug(
-                    f"[Memory] 会话重置钩子失败（已忽略）: {e}"
-                )
+        await _notify_memory_session_reset(module, session_id, user_id)
         if session:
             session_mgr.add_message(session_id, "assistant", "#llm stop")
             history_mgr.save_session(session)
@@ -263,6 +250,25 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
     # 未知动作：明确回一句（此前静默返回，用户会以为机器人坏了）
     await send(f"未知指令：{action}\n发送 #llm help 查看全部指令")
     return True
+
+
+async def _notify_memory_session_reset(module, session_id: str, user_id) -> None:
+    """把「会话被显式重置」告诉长期记忆模块（存在时）。
+
+    v3 的记忆实现归 `llm_memory` 模块，运行时句柄是 ``memory_service``；模块未安装
+    或被禁用时为 None，直接跳过。返回文案不需要展示给用户，失败只留痕。
+    """
+    memory = getattr(module, "memory_service", None)
+    if memory is None:
+        return
+    try:
+        result = memory.on_session_reset(session_id, user_id)
+        if hasattr(result, "__await__"):
+            await result
+    except Exception as e:  # noqa: BLE001 —— 重置处理失败不该阻断会话操作
+        logger.add_info(account_label(getattr(module, 'bot_id', '?'))).debug(
+            f"[Memory] 会话重置处理失败（已忽略）: {e}"
+        )
 
 
 async def _send_help(module, event, bot, *, is_private, group_id, user_id, send) -> None:
@@ -295,7 +301,7 @@ async def _send_help(module, event, bot, *, is_private, group_id, user_id, send)
 
 def _availability(module) -> dict:
     """当前 bot 实际启用的能力（帮助里标注「本 bot 未启用」，避免照着表试却没反应）。"""
-    memory = getattr(module, "memory", None)
+    memory = getattr(module, "memory_service", None)
     memory_on = False
     if memory is not None:
         try:

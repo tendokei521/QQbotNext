@@ -25,6 +25,7 @@ from app.agent.config_partition import (
     all_partitioned_keys,
     duplicate_keys,
     fate_of,
+    module_of,
     stale_keys,
     ui_group_of,
     ui_page_of,
@@ -101,14 +102,19 @@ def test_no_key_is_partitioned_twice():
 
 
 def test_partition_has_no_stale_entries():
-    stale = stale_keys(LEGACY_KEYS)
+    # 模块可以在自己的 schema 里新增键（不属 agent 旧 schema）；这里只拦
+    # 「本体/删除项」引用了旧 schema 里不存在的键。
+    stale = [key for key in stale_keys(LEGACY_KEYS) if module_of(key) is None]
     assert not stale, f"布局表引用了旧 schema 里不存在的键: {stale}"
 
 
 def test_partition_covers_every_legacy_key_exactly_once():
-    covered = len(all_partitioned_keys())
-    assert covered == len(LEGACY_KEYS), (
-        f"分区覆盖 {covered} 键，旧 schema 有 {len(LEGACY_KEYS)} 键"
+    # 只约束「迁移前的旧键」：模块可以新增自己的配置键（不属旧 schema），
+    # 它们由 module_of/fate_of 覆盖，不能靠这条计数闸门拦住。
+    legacy = set(LEGACY_KEYS)
+    covered = [key for key in all_partitioned_keys() if key in legacy]
+    assert len(covered) == len(LEGACY_KEYS), (
+        f"分区覆盖 {len(covered)} 个旧键，旧 schema 有 {len(LEGACY_KEYS)} 键"
     )
 
 
