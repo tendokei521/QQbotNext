@@ -15,6 +15,7 @@ SCHEMA = {
     "group_proactive": {"type": "group", "label": "主动消息", "collapsible": True},
     "group_schedule": {"type": "group", "label": "定时任务", "collapsible": True},
     "group_memory": {"type": "group", "label": "长期记忆（实验性）", "collapsible": True},
+    "group_knowledge": {"type": "group", "label": "知识库", "collapsible": True},
     "group_tavily": {"type": "group", "label": "Tavily 联网搜索", "collapsible": True},
     "group_mcp": {"type": "group", "label": "外部工具（MCP）", "collapsible": True},
     "group_onebot": {"type": "group", "label": "OneBot 工具", "collapsible": True},
@@ -670,6 +671,21 @@ SCHEMA = {
         "default": True, "group": "group_memory",
     },
 
+    # ==================== 知识库 ====================
+    "knowledge_enable": {
+        "type": "boolean", "label": "启用知识库", "description": "开启后模型可调用知识库的检索与写入工具。",
+        "default": False, "group": "group_knowledge",
+    },
+    "knowledge_embedding_model_id": {
+        "type": "resource", "resource": "provider_model", "filters": {"provider_type": "embedding"},
+        "label": "Embedding 模型实例", "description": "下拉直接选模型实例（只列能力类型为 Embedding 的）；留空自动选择第一个启用且能力类型为 Embedding 的模型实例",
+        "default": "", "group": "group_knowledge",
+    },
+    "knowledge_recall_limit": {
+        "type": "number", "label": "默认检索条数", "description": "检索工具默认返回的片段数量。",
+        "default": 5, "min": 1, "max": 20, "group": "group_knowledge",
+    },
+
     # ==================== Tavily 联网搜索 ====================
             # 已废弃：三套 per-tool map 收敛为 tools_disabled（迁移脚本会合并后删除）
         # 已废弃 / 归模块：仅保留定义供迁移脚本取类型，界面不渲染
@@ -1080,6 +1096,7 @@ _gate(["message_debounce_max_wait"], {"key": "message_debounce_seconds", "gt": 0
 
 # ── 能力开关：各自只在启用后展开参数 ────────────────────────────────
 _gate(_group_fields("group_tavily", exclude=("tavily_enable",)), _on("tavily_enable"))
+_gate(_group_fields("group_knowledge", exclude=("knowledge_enable",)), _on("knowledge_enable"))
 _gate(_group_fields("group_onebot", exclude=("onebot_tools_enable",)), _on("onebot_tools_enable"))
 _gate(["image_max_count", "image_max_mb"], _on("image_understanding_enable"))
 _gate(["gif_max_frames", "gif_frame_max_edge", "gif_probe_all_images"], _on("gif_understanding_enable"))

@@ -929,13 +929,13 @@ async def test_collect_llm_ext_registers_tool_unless_disabled():
     names = {"expand_recent", "expand_message", "expand_user"}
 
     on = SimpleNamespace(bot_id="1", config={}, llm_tools=None, skills=None, memory=None,
-                         mcp_manager=None)
+                         knowledge=None, mcp_manager=None)
     specs, _skills, _ctx2 = await _collect_llm_ext(on, event, "group_778", False, False)
     # v3：框架不再注入 `expand_*` —— 它们由 llm_context 模块的 tool_source 提供
     assert not names & {s.name for s in specs}
 
     off = SimpleNamespace(bot_id="1", config={"context_expand_enable": False}, llm_tools=None,
-                          skills=None, memory=None, mcp_manager=None)
+                          skills=None, memory=None, knowledge=None, mcp_manager=None)
     specs_off, _s, _c = await _collect_llm_ext(off, event, "group_778", False, False)
     assert not (names & {s.name for s in specs_off})
 

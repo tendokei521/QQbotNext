@@ -103,7 +103,7 @@
 
 - `app/webui/api/agent.py:17-18` → `app.plugins.llm_tools_extra.src.onebot.{manifest,security}`
 - `app/agent/tools/state.py:137/198/296` → 同上
-- pp/agent/storage/__init__.py → pp.plugins.llm_memory.store
+- `app/agent/storage/__init__.py:28/39` → `app.plugins.llm_memory.store`、`app.plugins.llm_knowledge.store`
 
 后果：同一个插件文件在 `sys.modules` 里可能同时以 `app.plugins.X...`（静态 import）与
 `qqbot_plugin_X...`（加载器别名）两个名字存在 → **模块级单例/缓存分裂**。
@@ -214,7 +214,7 @@ hiddenimports = [
     "uvicorn.lifespan", "uvicorn.lifespan.on",
     "websockets.legacy", "websockets.legacy.server",
 ]
-# 可选：向量加速等可选依赖未装时自动降级
+# 可选：装了 sqlite-vec 才支持知识库 ANN；未装自动降级（plugins/llm_knowledge/vector.py:41-45）
 try:
     import sqlite_vec
     hiddenimports += ["sqlite_vec"]

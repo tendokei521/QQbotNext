@@ -48,6 +48,7 @@ _TOOL_CAPS: dict[str, tuple[str, ...]] = {
     "has_image": ("expand_image",),
     "has_history": ("get_chat_history",),
     "has_schedule": ("schedule_task",),
+    "has_knowledge": ("knowledge_search",),
 }
 
 

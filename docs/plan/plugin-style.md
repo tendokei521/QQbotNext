@@ -2,14 +2,14 @@
 
 > **状态（2026-10-29）**：B0 已实施，规范正文见 [`docs/PLUGIN_STYLE.md`](../PLUGIN_STYLE.md)；
 > 闸门 `tests/architecture/test_plugin_layout.py`、检查/迁移工具 `scripts/plugin_layout.py`、
-> 模板 `docs/plugin-template/` 已就位；迁移样例见 `app/plugins/llm_assembly/`
-> （根级实现文件 → `src/`，测试导入同步改为 `...src.xxx`）。
+> 模板 `docs/plugin-template/` 已就位；第一个迁移样例是 `app/plugins/llm_knowledge/`
+> （5 个根级实现文件 → `src/`，测试导入同步改为 `...src.xxx`）。
 >
 > 注：本地插件现在安装在 `data/module/plugins/<name>/`（运行时目录、不进仓库），
 > 其源码仓库沿用同一份规范；`python scripts/plugin_layout.py --check` 会把已安装插件
 > 一起列出来（只提示、不阻断，因为它们不在本仓库）。
 
-> 范围：两批 Python 插件 —— ①`app/plugins/` 内置插件（现 9 个 LLM 插件）；
+> 范围：两批 Python 插件 —— ①`app/plugins/` 内置插件（现 10 个 LLM 插件）；
 > ②本地插件（原 `app/plugins/` 里的业务插件：bilibili_parser / douyin_parser /
 > df_password / emoji_reply / group_log / group_request / log_sender / poke_reply /
 > recall_back / time_sign_in / what_to_eat / example；安装形态在 `data/module/plugins/<name>/`）。

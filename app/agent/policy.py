@@ -14,6 +14,7 @@ v3 把一批"策略键"从 agent 配置搬进了功能模块。框架的机制�
 | `runtime.meta_options` | `llm_message_meta` | 消息元信息 / 历史清洗 |
 | `runtime.context_options` | `llm_context` | 指代 / 展开 / 预历史 |
 | `runtime.memory_options` | `llm_memory` | 长期记忆 |
+| `runtime.knowledge_options` | `llm_knowledge` | 知识库 |
 | `runtime.tools_options` | `llm_tools_extra` | OneBot / MCP 工具 |
 | `runtime.proactive_options` | `llm_proactive` | 主动消息 |
 | `runtime.schedule_options` | `llm_schedule` | 定时任务 |
@@ -38,6 +39,7 @@ def _policy_views(runtime: Any) -> list:
         "meta_options",
         "context_options",
         "memory_options",
+        "knowledge_options",
         "tools_options",
         "proactive_options",
         "schedule_options",
@@ -98,7 +100,8 @@ def policy_config(runtime: Any, kind: str) -> Any:
 
     Args:
         runtime: ``AgentRuntime``（可为 None）。
-        kind: 槽名（``assembly`` / ``meta`` / ``context`` / ``memory`` / ``tools``）。
+        kind: 槽名（``assembly`` / ``meta`` / ``context`` / ``memory`` /
+            ``knowledge`` / ``tools``）。
 
     Returns:
         模块提供的配置视图（若已接管），否则 agent 配置对象（可能为 None）。

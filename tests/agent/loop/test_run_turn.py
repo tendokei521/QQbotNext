@@ -85,6 +85,7 @@ def _runtime(*, invoker=None, config=None, bot=None):
         llm_tools=None,
         skills=None,
         memory=None,
+        knowledge=None,
         mcp_manager=None,
         telemetry=_Telemetry(),
         provider_chain=lambda: [{"provider": "openai", "model": "fake-model"}],

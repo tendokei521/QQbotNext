@@ -297,6 +297,11 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
         "memory_on_reset",
         "memory_upgrade_saved_only",
     ),
+    "llm_knowledge": (
+        "knowledge_enable",
+        "knowledge_embedding_model_id",
+        "knowledge_recall_limit",
+    ),
     # 工具扩展：OneBot 工具 / MCP / 工具结果回应要求（联网搜索留在本体高级功能）
     "llm_tools_extra": (
         "onebot_tools_enable",

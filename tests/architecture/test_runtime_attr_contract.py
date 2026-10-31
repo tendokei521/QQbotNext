@@ -33,6 +33,7 @@ RUNTIME_PY = APP / "agent" / "runtime.py"
 _DOCUMENTED_HANDLES = {
     # v3：业务模块把自己实现的服务挂到这些句柄上，框架按鸭子类型使用
     "memory_service": "llm_memory.on_load 挂载的记忆管理器（框架已无 memory 字段）",
+    "knowledge_service": "llm_knowledge.on_load 挂载的知识库管理器（框架已无 knowledge 字段）",
     # 设计上就允许为 None 的槽
     "output": "输出策略槽（llm_output 接管；None = 框架默认）",
     "assembler": "组装器槽（llm_assembly 接管）",
@@ -47,6 +48,7 @@ _DOCUMENTED_HANDLES = {
 #: 仅用于兼容测试替身的旧字段读取（生产路径必须走新句柄）
 _LEGACY_FALLBACK = {
     "memory": "旧字段，v3 已删；仅 `_resolve_memory()` 的测试替身回退分支会读",
+    "knowledge": "旧字段，v3 已删；仅 `_kb()` 的测试替身回退分支会读",
     "mcp_manager": "旧字段，v3 已删；仅历史代码兼容",
     "session_mgr": "真实字段，但旧代码用 getattr 读（保留）",
 }
@@ -57,6 +59,7 @@ _OPTION_SLOTS = {
     "meta_options",
     "context_options",
     "memory_options",
+    "knowledge_options",
     "tools_options",
     "output_options",
     "proactive_options",

@@ -206,18 +206,32 @@ def test_resources_endpoint_filters_pass_through(container):
 
 
 async def test_module_schema_reaches_api_with_resource_field(container):
-    """端到端（API 契约层）：WebUI 拿到的 schema 里，人设字段是可渲染的资源引用。
+    """端到端（API 合同层）：WebUI 拿到的模块 schema 里，人设字段是可渲染的资源引用。
 
-    这是“界面能直接选系统预设”的最小证据链：schema 归一化（种类校验 + issues）
-    → bot_service 下发 → 前端按 resource 拉候选。
+    这是"界面能直接选系统预设"的最小证据链：模块注册表加载 → schema 归一化
+    （种类校验 + issues + source_module）→ bot_service 下发 → 前端按 resource 拉候选。
     """
-    from app.application.bot_service import BotService
+    from pathlib import Path
 
-    data = container.get(BotService).get_modules_data(None)
-    field = data["agent"]["config_schema"]["items"]["persona_preset_id"]
-    assert field["type"] == "resource"
-    assert field["resource"] == "role_preset"
-    assert field["issues"] == [], "种类必须已注册，否则界面会显示「资源种类未注册」"
+    from app.application.bot_service import BotService
+    from app.plugin.registry import ModuleRegistry
+
+    # BotService 持有的是容器里的注册表实例：把它的模块目录定向到仓库真实目录，
+    # 这样加载出来的模块才会经过 bot_service 的 schema 归一化链路。
+    registry = container.get(ModuleRegistry)
+    registry.plugins_dir = Path(__file__).resolve().parents[2] / "app" / "plugins"
+    bot_id = 20250930
+    assert await registry.load_single("llm_knowledge", bot_id) is True
+    try:
+        data = container.get(BotService).get_modules_data(bot_id)
+        field = data["llm_knowledge"]["config_schema"]["items"]["knowledge_embedding_model_id"]
+        assert field["type"] == "resource"
+        assert field["resource"] == "provider_model"
+        assert field["issues"] == [], "种类必须已注册，否则界面会显示「资源种类未注册」"
+        assert field["source_module"] == "llm_knowledge"
+    finally:
+        await registry.unload_single("llm_knowledge", bot_id)
+
 
 # 旧版 UI（/legacy）与 static/js/widgets.js 的两个用例已随 P6 删除：
 # 前端只剩 app/webui/dashboard/dist 一套，资源选择器改由 Vue 的 ResourcePicker 组件实现，

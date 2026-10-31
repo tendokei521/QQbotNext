@@ -55,6 +55,7 @@ def _runtime(config=None, **over):
         llm_tools=None,
         skills=None,
         memory=None,
+        knowledge=None,
         mcp_manager=None,
     )
     base.update(over)

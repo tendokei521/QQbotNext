@@ -1,0 +1,10 @@
+{
+  "name": "llm_knowledge",
+  "display_name": "知识库",
+  "sign": "LlmKnowledge",
+  "version": "1.0.0",
+  "description": "把资料整理成知识库，回答前先查一查",
+  "author": "tendokei521",
+  "entry": "main.py",
+  "api_version": 1
+}
