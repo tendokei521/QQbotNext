@@ -282,3 +282,65 @@ async def test_run_turn_clears_session_config_after_run(patched_prepare):
         runtime, TurnRequest(session_id="group_77", is_private=False, user_text="hi")
     )
     assert config.session == "", "跑完必须清掉会话级配置路由（否则串场）"
+
+
+async def test_run_turn_logs_full_prompt_when_debug_enabled(monkeypatch, patched_prepare):
+    """「LLM调试」开着时必须打出完整请求体（回归：非流式路径曾完全不打）。
+
+    默认输出是非流式（`stream_output` 默认 False），所以这段日志只在流式路径里
+    写过就等于"开关坏了"——用户只看到一行 user_text，拿不到真正的 messages。
+    """
+    import app.agent.loop.turn_metrics as metrics
+
+    captured: list[str] = []
+
+    class _Log:
+        def info(self, msg):
+            captured.append(msg)
+
+        def debug(self, msg):
+            captured.append(msg)
+
+    class _Logger:
+        def add_info(self, name):
+            return _Log()
+
+    monkeypatch.setattr(metrics, "logger", _Logger())
+
+    from app.agent.loop.context import LlmContext
+
+    runtime = _runtime()
+    ctx = LlmContext(event=None, runtime=runtime, bot=None, session_id="group_1")
+    ctx.state["debug_prompt"] = True
+
+    await run_turn(
+        runtime,
+        TurnRequest(session_id="group_1", is_private=False, user_text="hi"),
+        ctx=ctx,
+    )
+
+    prompts = [msg for msg in captured if msg.startswith("[Prompt] group_1")]
+    assert prompts, f"开着调试却没打完整 prompt：{captured}"
+    assert '"content": "hi"' in prompts[0], "日志里要能看到本轮请求体内容"
+
+
+async def test_run_turn_stays_quiet_when_debug_disabled(monkeypatch, patched_prepare):
+    import app.agent.loop.turn_metrics as metrics
+
+    captured: list[str] = []
+
+    class _Log:
+        def info(self, msg):
+            captured.append(msg)
+
+        def debug(self, msg):
+            captured.append(msg)
+
+    class _Logger:
+        def add_info(self, name):
+            return _Log()
+
+    monkeypatch.setattr(metrics, "logger", _Logger())
+    await run_turn(_runtime(), TurnRequest(session_id="group_1", is_private=False, user_text="hi"))
+
+    assert not [msg for msg in captured if msg.startswith("[Prompt]")], "没开调试不该刷请求体"

@@ -177,7 +177,11 @@ async def test_agent_node_resolves_runtime_by_account_id():
     finally:
         llm_chat.handle = original
 
-    assert mgr.queried == [ACC], "应按账号 id 查询运行时"
+    # 只断言"用账号 id 查"，不断言查了几次：入站判定（统一判定器/名册）会
+    # 合法地多查几次同一个 key，次数是实现细节，用 QQ 号查才是要防的 bug。
+    assert mgr.queried, "应该查询运行时"
+    assert set(mgr.queried) == {ACC}, f"应按账号 id 查询运行时（实际查了 {mgr.queried}）"
+    assert QQ_NEW not in mgr.queried, "绝不能拿登录 QQ 当 key 查运行时"
     assert called == [real], "应把事件交给该账号的运行时"
 
 

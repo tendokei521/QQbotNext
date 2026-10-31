@@ -97,3 +97,16 @@ def test_both_paths_clean_history_text():
 def test_turn_completed_is_broadcast_once_per_turn():
     """`turn_completed` 是记忆蒸馏等业务的收口：run_turn 里必须有。"""
     assert '"turn_completed"' in _text(TURN_PY) or "'turn_completed'" in _text(TURN_PY)
+
+
+def test_both_paths_log_the_debug_prompt():
+    """「LLM调试」开启后必须能看到完整 prompt，两条路径都要打。
+
+    回归：这段日志曾只写在流式路径（`chat.stream_response`），而默认输出是
+    **非流式**（`stream_output` 默认 False → `BlockingOutput` → `turn.run_turn`），
+    于是用户开了开关只看到一行 user_text、拿不到完整请求体，以为开关坏了。
+    """
+    for path in (TURN_PY, CHAT_PY):
+        assert "log_debug_prompt_if_enabled" in _text(path), (
+            f"{path.name} 漏了完整 prompt 日志（开关开了却看不到请求体）"
+        )
