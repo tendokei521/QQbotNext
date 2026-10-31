@@ -1270,22 +1270,25 @@ class Module(BaseModule):
 
 ---
 
-## 4.10 v3 内置的 9 个功能模块（配置归属的既定事实）
+## 4.10 v3 内置的 7 个功能模块（配置归属的既定事实）
 
-v3 把「高级功能」从 agent 配置页整体搬进了模块。**这 9 个模块随仓库发布、随账号自动装配**，
+v3 把「高级功能」从 agent 配置页整体搬进了模块。**这 7 个模块随仓库发布、随账号自动装配**，
 每个模块自己持有配置（`config_schema`），框架侧机制只认 `policy_view`。
+
+> 2026-10-31 四模块合并：`llm_assembly` + `llm_message_meta` → `llm_prompt`；
+> `llm_proactive` + `llm_schedule` → `llm_trigger`；`llm_knowledge` 已随目录删除而移除。
+> 存量 bindings 由 `app/application/core_modules_merge.py` 幂等迁移（带备份、旧行删除、
+> 无归宿的键落 `dropped` 日志）。
 
 | 模块 | 目录 | 键数 | 性质 | 用哪些基础接口 |
 |---|---|---|---|---|
-| 输出策略 | `llm_output` | 25 | **高级接口**（`supersedes=("output",)`） | `output` 槽（`mode=text/stream/speech`） |
-| 组装策略 | `llm_assembly` | 10 | **高级接口**（`supersedes=("assembly",)`） | `assembly` 槽（`build(req)`） |
-| 消息元信息 | `llm_message_meta` | 14 | 业务 | `@llm_hook("pre_request")` + `raw_user_text` |
+| 提示词组装 | `llm_prompt` | 21 | **高级接口**（`supersedes=("assembly",)`）+ 业务 | `assembly` 槽（装配器视图）+ `@llm_hook("pre_request")` ×2（本轮消息渲染） |
+| 触发与调度 | `llm_trigger` | 20 | 业务 | `message_observed`/`bot_sent` 订阅 + 自建 `TaskScheduler` + `tool_sources` + `llm_turn` + `send_to` |
+| 输出策略 | `llm_output` | 24 | **高级接口**（`supersedes=("output",)`） | `output` 槽（`mode=text/stream/speech`） |
 | 上下文增强 | `llm_context` | 10 | 业务 | `context_providers` + `tool_sources` + `pre_request` |
 | 长期记忆 | `llm_memory` | 24 | 业务 | `context_providers`（`role="user"` 数据块）+ `tool_sources` + `pre_request`/`turn_completed` + `@command` + 后台 `spawn` |
-| 知识库 | `llm_knowledge` | 3 | 业务 | `tool_sources` |
-| 工具扩展 | `llm_tools_extra` | 9 | 业务 | `tool_sources`（OneBot + MCP） |
-| 主动消息 | `llm_proactive` | 17 | 业务 | `message_observed`/`bot_sent` 订阅 + `spawn` + `llm_turn` + `send_to` |
-| 定时任务 | `llm_schedule` | 3 | 业务 | 自建 `TaskScheduler` + `tool_sources` + `llm_turn` + `send_to` |
+| 工具扩展 | `llm_tools_extra` | 10 | 业务 | `tool_sources`（OneBot + MCP） |
+| 调试 | `llm_enhance` | 1 | 业务 | `@llm_hook("pre_request")`（打印本轮完整 prompt） |
 
 > **业务模块一律不声明 `supersedes`。** 只有"更换机制 / 接管行为"的模块才声明。
 

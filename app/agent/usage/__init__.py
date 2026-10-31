@@ -16,7 +16,7 @@
 
 ## 归属
 
-`source` = 模块名（`chat` / `llm_proactive` / …）；拿不到上下文时记 `unknown`
+`source` = 模块名（`chat` / `llm_trigger` / …）；拿不到上下文时记 `unknown`
 （这本身是有用信号：说明该调用绕过了总线）。
 """
 

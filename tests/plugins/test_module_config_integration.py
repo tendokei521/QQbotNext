@@ -1,4 +1,4 @@
-"""v3 集成验证：9 个模块全部装上后，全部迁走的键都必须"读得到、且读的是模块值"。
+"""v3 集成验证：7 个模块全部装上后，全部迁走的键都必须"读得到、且读的是模块值"。
 
 这条测试代替"逐处 grep 框架是否还直接读 agent 配置"——那个静态检查分不清
 "读入参 config"和"读 runtime.config"。真正的判据是**行为**：
@@ -6,7 +6,7 @@
 > 把 agent 配置里的同名键设成 A、模块配置设成 B，机制侧经 `policy_view`
 > 必须读到 B；卸载模块后必须回到 A。
 
-它同时是 W8 的收尾验收：9 个模块 + 108 键 + 跨模块链式视图。
+它同时是 W8 的收尾验收：7 个模块 + 109 键 + 跨模块链式视图。
 """
 
 from __future__ import annotations
@@ -46,17 +46,16 @@ def _runtime_with_views(views: dict, agent_config: dict | None = None):
     return runtime
 
 
-#: 模块 → 运行时视图属性名（`llm_proactive`/`llm_schedule` 还有驱动槽，此处只测配置）
-VIEW_ATTR = {
-    "llm_output": "output",
-    "llm_assembly": "assembly",
-    "llm_message_meta": "meta",
-    "llm_context": "context",
-    "llm_memory": "memory",
-    "llm_knowledge": "knowledge",
-    "llm_tools_extra": "tools",
-    "llm_proactive": "proactive",
-    "llm_schedule": "schedule",
+#: 模块 → 运行时视图属性名（合并后的模块可能拥有多个视图，如提示词组装/触发调度）
+#: 空元组 = 该模块没有配置视图（`llm_enhance` 直接读自己的 config，不挂视图）。
+VIEW_ATTR: dict[str, tuple[str, ...]] = {
+    "llm_output": ("output",),
+    "llm_prompt": ("assembly", "meta"),
+    "llm_context": ("context",),
+    "llm_memory": ("memory",),
+    "llm_tools_extra": ("tools",),
+    "llm_trigger": ("proactive", "schedule"),
+    "llm_enhance": (),
 }
 
 
@@ -65,24 +64,32 @@ def test_every_module_has_a_view_slot():
 
 
 def test_all_migrated_keys_resolve_to_module_values():
-    """一次装齐 9 个模块：每个迁走的键都必须从模块值读出来。"""
+    """一次装齐模块：每个挂视图的键都必须从模块值读出来。"""
     views = {}
     module_values = {}
     for module_name, keys in MODULE_KEYS.items():
         values = {key: f"{module_name}:{key}" for key in keys}
         module_values[module_name] = values
-        views[VIEW_ATTR[module_name]] = values
+        for attr in VIEW_ATTR[module_name]:
+            views[attr] = values
     # agent 侧故意放上"会被覆盖"的值
     agent_config = {key: "FROM-AGENT" for keys in MODULE_KEYS.values() for key in keys}
     runtime = _runtime_with_views(views, agent_config)
 
     checked = 0
     for module_name, keys in MODULE_KEYS.items():
+        attrs = VIEW_ATTR[module_name]
+        if not attrs:
+            # 没有配置视图的模块（llm_enhance）：键应回退到 agent 配置
+            for key in keys:
+                assert policy_view(runtime).get(key) == "FROM-AGENT", (module_name, key)
+            continue
         for key in keys:
-            got = policy_get(runtime, VIEW_ATTR[module_name], key)
+            got = policy_get(runtime, attrs[0], key)
             assert got == f"{module_name}:{key}", (module_name, key, got)
             checked += 1
-    assert checked == len(MODULE_KEY_SET)
+    expected = sum(len(keys) for module, keys in MODULE_KEYS.items() if VIEW_ATTR[module])
+    assert checked == expected
 
 
 def test_chained_view_handles_cross_module_keys():
@@ -97,7 +104,7 @@ def test_chained_view_handles_cross_module_keys():
     view = policy_view(runtime)
 
     assert isinstance(view, ChainedConfig)
-    assert view.get("behavior_rules_override") == "自定义"      # 归 llm_assembly
+    assert view.get("behavior_rules_override") == "自定义"      # 归 llm_prompt
     assert view.get("speech_via_tool") is True             # 归 llm_output
     assert view.get("max_message_length") == 200           # 回退 agent 配置
     assert view.get("不存在", "默认") == "默认"
@@ -127,9 +134,12 @@ def test_uninstalling_one_module_restores_agent_value_for_its_keys_only():
 @pytest.mark.parametrize("module_name", ALL_MODULES)
 def test_module_view_ordering_is_deterministic(module_name):
     """同一键只在它的模块视图里命中（视图顺序不影响结果）。"""
+    attrs = VIEW_ATTR[module_name]
+    if not attrs:
+        pytest.skip(f"{module_name} 不挂配置视图")
     keys = MODULE_KEYS[module_name]
     key = keys[0]
-    views = {VIEW_ATTR[module_name]: {key: "mine"}}
+    views = {attrs[0]: {key: "mine"}}
     runtime = _runtime_with_views(views, {key: "agent"})
     assert policy_view(runtime).get(key) == "mine"
 

@@ -34,7 +34,7 @@ import pytest
 
 from app.agent.loop.chat import build_initiative_tools
 from app.agent.providers.base import StreamEvent
-from app.plugins.llm_proactive.src import stream as initiative_stream
+from app.plugins.llm_trigger.src.proactive import stream as initiative_stream
 
 
 class _Bot:
@@ -273,7 +273,7 @@ class _FakeModule:
 
 def _started_sched(module, tmp_path):
     """构造 + 上线：装配本身不武装计时器，测试要跑任务必须先 start()。"""
-    from app.plugins.llm_schedule.src import scheduler as ts_mod
+    from app.plugins.llm_trigger.src.schedule import scheduler as ts_mod
 
     sched = ts_mod.TaskScheduler(module, data_dir=str(tmp_path))
     sched.start()
@@ -281,7 +281,7 @@ def _started_sched(module, tmp_path):
 
 
 async def test_scheduled_message_gets_proactive_block_and_tools(tmp_path, monkeypatch):
-    from app.plugins.llm_schedule.src import scheduler as ts_mod
+    from app.plugins.llm_trigger.src.schedule import scheduler as ts_mod
 
     module = _FakeModule()
     sched = _started_sched(module, tmp_path)
@@ -315,7 +315,7 @@ async def test_scheduled_message_gets_proactive_block_and_tools(tmp_path, monkey
 
 
 async def test_scheduled_message_skips_tools_when_disabled(tmp_path, monkeypatch):
-    from app.plugins.llm_schedule.src import scheduler as ts_mod
+    from app.plugins.llm_trigger.src.schedule import scheduler as ts_mod
 
     module = _FakeModule()
     module.config = _FakeConfig({"schedule_enable": True, "context_expand_enable": False})

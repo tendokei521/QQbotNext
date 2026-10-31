@@ -8,7 +8,7 @@
 |---|---|---|
 | `chat.stream_response` | `yield` 句子/气泡（async generator） | 发言通道 flush + `SPEAK_REMINDER` |
 | `turn._stream_once` | `await on_sentence(text)` | 无（只补图） |
-| `plugins/llm_proactive/stream.py` | `await pool.put(Message)` | 无（只补图） |
+| `plugins/llm_trigger/src/proactive/stream.py` | `await pool.put(Message)` | 无（只补图） |
 | `providers/{openai_compat,anthropic,gemini}.chat` | 返回 `LLMResponse` | 无 |
 
 于是"改一处漏一处"成了常态：`expand_image` 补图轮、补全登记、空回复重试
@@ -157,7 +157,7 @@ class StepResult:
 def accumulate_tool_call(slot_map: dict, tc: dict) -> None:
     """把流式工具调用碎片按 index 累积进 ``slot_map``。
 
-    此前 `chat.py` 与 `llm_proactive/stream.py` 各有一份**逐字相同**的实现；
+    此前 `chat.py` 与 `llm_trigger/src/proactive/stream.py` 各有一份**逐字相同**的实现；
     这里收成一份，并保留两处既有防御：碎片里的 ``id`` / ``name`` / ``arguments``
     可能是 ``null``（部分网关如此），直接拼接会抛 TypeError。
     """

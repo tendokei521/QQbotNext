@@ -10,14 +10,14 @@ v3 把一批"策略键"从 agent 配置搬进了功能模块。框架的机制�
 | 运行时属性 | 由哪个模块设置 | 覆盖哪些键 |
 |---|---|---|
 | `runtime.output_options` | `llm_output` | 流式 / 发言通道 |
-| `runtime.assembly_options` | `llm_assembly` | 组装档位 / 行为规则 / 请求落盘 |
-| `runtime.meta_options` | `llm_message_meta` | 消息元信息 / 历史清洗 |
+| `runtime.assembly_options` | `llm_prompt` | 组装档位 / 行为规则 / 请求落盘 |
+| `runtime.meta_options` | `llm_prompt` | 消息元信息 / 历史清洗 |
 | `runtime.context_options` | `llm_context` | 指代 / 展开 / 预历史 |
 | `runtime.memory_options` | `llm_memory` | 长期记忆 |
 | `runtime.knowledge_options` | `llm_knowledge` | 知识库 |
 | `runtime.tools_options` | `llm_tools_extra` | OneBot / MCP 工具 |
-| `runtime.proactive_options` | `llm_proactive` | 主动消息 |
-| `runtime.schedule_options` | `llm_schedule` | 定时任务 |
+| `runtime.proactive_options` | `llm_trigger` | 主动消息 |
+| `runtime.schedule_options` | `llm_trigger` | 定时任务 |
 
 两条取用口径：
 
@@ -56,7 +56,7 @@ def policy_view(runtime: Any) -> Any:
     """把所有已接管的策略视图**串成一条链**再回退 agent 配置。
 
     为什么需要：有些机制会跨模块读键 —— 例如发言通道要同时看
-    行为规则（归 `llm_assembly`）和 `stream_output`/`speech_via_tool`
+    行为规则（归 `llm_prompt`）和 `stream_output`/`speech_via_tool`
     （归 `llm_output`）。只给一个视图会让另一半读不到，行为静默退化。
 
     Returns:

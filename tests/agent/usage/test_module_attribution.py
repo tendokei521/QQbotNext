@@ -42,9 +42,9 @@ class _Inner:
 
 
 async def test_proactive_wrapper_sets_source(env, monkeypatch):
-    """`stream_send_initiative` 内部调用 provider 时应带 `llm_proactive` 归属。"""
+    """`stream_send_initiative` 内部调用 provider 时应带 `llm_trigger` 归属。"""
     rec, db = env
-    from app.plugins.llm_proactive.src import stream as initiative_stream
+    from app.plugins.llm_trigger.src.proactive import stream as initiative_stream
 
     captured: dict = {}
 
@@ -59,7 +59,7 @@ async def test_proactive_wrapper_sets_source(env, monkeypatch):
     runtime = SimpleNamespace(bot_id="42")
     out = await initiative_stream.stream_send_initiative(runtime, None, "group_9", True, 9, [])
     assert out == "ok"
-    assert captured["source"] == "llm_proactive"
+    assert captured["source"] == "llm_trigger"
     assert captured["session_id"] == "group_9"
 
 
@@ -67,11 +67,11 @@ async def test_metered_provider_records_module_source_via_scope(env):
     """scope 生效时，provider 层记录的是模块名而不是 unknown。"""
     rec, db = env
     wrapped = MeteredProvider(_Inner())
-    with usage_context.usage_scope(bot_id="42", source="llm_schedule", session_id="group_7"):
+    with usage_context.usage_scope(bot_id="42", source="llm_trigger", session_id="group_7"):
         await wrapped.chat([], model="m")
     await rec.flush()
     row = (await db.fetchall("SELECT * FROM stat_event"))[0]
-    assert row["source"] == "llm_schedule"
+    assert row["source"] == "llm_trigger"
     assert row["session_id"] == "group_7"
     assert row["session_label"] == "group7"
     assert row["tokens_total"] == 10

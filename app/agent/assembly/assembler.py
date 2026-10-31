@@ -719,7 +719,7 @@ async def apply_post_assemble(
     # system 与本轮提问必留；不知道窗口时退化为用户自定的 context_token_budget。
     from app.agent.assembly.token_budget import apply_request_policy
 
-    # 策略侧配置：`llm_assembly` 模块接管时把视图挂在 `runtime.assembly_options`，
+    # 策略侧配置：`llm_prompt` 模块接管时把视图挂在 `runtime.assembly_options`，
     # 于是 token 预算与请求落盘这些开关读的是**模块配置**（未接管时退回 agent 配置）。
     policy_cfg = getattr(runtime, "assembly_options", None) or getattr(runtime, "config", None)
 

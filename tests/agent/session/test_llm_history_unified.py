@@ -14,7 +14,7 @@ import types
 from app.agent.context.group import format_history_for_llm, format_online_history
 from app.agent.session.model import build_current_turn_text
 from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
-from app.plugins.llm_message_meta.src.service import collect_user_context, format_user_context
+from app.plugins.llm_prompt.src.meta import collect_user_context, format_user_context
 
 NL = chr(10)
 

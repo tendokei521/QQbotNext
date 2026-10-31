@@ -53,7 +53,7 @@ async def _enable_timer_modules(container, account_id: str) -> None:
     from app.infrastructure.config.config_service import ConfigService
 
     cfg = container.get(ConfigService)
-    for module in ("llm_schedule", "llm_proactive"):
+    for module in ("llm_trigger",):
         cfg.set_module_authority(module, account_id, {"enabled": True})
     await container.get(BotService).reload_modules(account_id)
 

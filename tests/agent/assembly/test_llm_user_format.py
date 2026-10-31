@@ -20,7 +20,7 @@ from app.agent.assembly.prompt import (
     user_message_format,
 )
 from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
-from app.plugins.llm_message_meta.src.service import format_user_context
+from app.plugins.llm_prompt.src.meta import format_user_context
 
 NL = chr(10)
 

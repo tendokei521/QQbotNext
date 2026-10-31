@@ -70,7 +70,7 @@ async def _collect_llm_ext(
         group_id = getattr(group, "group_id", None) if group is not None else None
 
     specs = []
-    # 定时任务工具由 `llm_schedule` 模块的 tool_source 提供（框架不认识"定时任务"）
+    # 定时任务工具由 `llm_trigger` 模块的 tool_source 提供（框架不认识"定时任务"）
 
     if getattr(runtime, "llm_tools", None) is not None:
         specs.extend(runtime.llm_tools.enabled_specs())

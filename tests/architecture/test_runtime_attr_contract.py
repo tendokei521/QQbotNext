@@ -35,7 +35,7 @@ _DOCUMENTED_HANDLES = {
     "memory_service": "llm_memory.on_load 挂载的记忆管理器（框架已无 memory 字段）",
     # 设计上就允许为 None 的槽
     "output": "输出策略槽（llm_output 接管；None = 框架默认）",
-    "assembler": "组装器槽（llm_assembly 接管）",
+    "assembler": "组装器槽（llm_prompt 接管）",
     "invoker": "provider 调用策略槽（provider_invoker 接管）",
     "llm_tools": "用户自定义工具注册表（可为 None）",
     "skills": "技能注册表（可为 None）",

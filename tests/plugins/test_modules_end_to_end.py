@@ -1,4 +1,4 @@
-"""端到端：真实容器里 8 个功能模块能被自动装配，并把实现装进运行时。
+"""端到端：真实容器里 6 个功能模块能被自动装配，并把实现装进运行时。
 
 这是 v3 的最终验收——不是"模块文件存在"，而是"装机即生效"：
 
@@ -11,14 +11,12 @@
 from __future__ import annotations
 
 V3_MODULES = {
+    "llm_prompt",
+    "llm_trigger",
     "llm_output",
-    "llm_assembly",
-    "llm_message_meta",
     "llm_context",
     "llm_memory",
     "llm_tools_extra",
-    "llm_proactive",
-    "llm_schedule",
 }
 
 

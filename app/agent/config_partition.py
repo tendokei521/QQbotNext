@@ -9,7 +9,7 @@
    - ``REPLY_GROUPS``：回复与权限页的字段（原「权限管理」并入「回复设置」）。
    这两处也是用户可见的编辑入口，因此与 ``UI_PAGES`` 一起派生 ``CORE_KEYS``：
    **每个本体键恰好只有一个编辑入口**。
-3. **其余全部迁移为模块**（9 个），成为该模块的 ``default_config``。
+3. **其余全部迁移为模块**（7 个），成为该模块的 ``default_config``。
 4. **剩余少量键删除**（能力被别处取代，或改为框架内硬编码的安全默认）。
 
 ## 一次边界变更：``owner_id`` 并入权限管理
@@ -218,8 +218,61 @@ CORE_KEYS: tuple[str, ...] = (
     + REPLY_KEYS
 )
 
-# ==================== 2. 迁移为模块（9 个 / 107 键）====================
+# ==================== 2. 迁移为模块（7 个 / 110 键）====================
+# 2026-10-31 四模块合并：9 → 7
+#   llm_assembly + llm_message_meta      → llm_prompt   （组装 + 本轮消息渲染）
+#   llm_proactive + llm_schedule         → llm_trigger  （主动 + 定时）
+#   llm_knowledge                        → 删除（目录早已不存在，键无归宿）
 MODULE_KEYS: dict[str, tuple[str, ...]] = {
+    # 提示词组装：组装档位/行为规则/本轮消息渲染（原两个模块的键并集，键名不变）
+    "llm_prompt": (
+        # 组装（7）
+        "behavior_rules_override",
+        "participation",
+        "emoji_react_level",
+        "user_message_format",
+        "prompt_time_position",
+        "prompt_dump_enable",
+        "prompt_dump_max_entries",
+        # 消息元信息（14）
+        "include_time",
+        "include_private_qq",
+        "include_sender",
+        "include_mentioned",
+        "include_quote",
+        "include_quote_sender",
+        "include_sent",
+        "fetch_at_nickname",
+        "fetch_quote_content",
+        "meta_sender_style",
+        "meta_sent_style",
+        "meta_instruction_mode",
+        "meta_mask_nickname",
+        "clean_output_parentheses",
+    ),
+    # 触发与调度：主动消息 + 定时任务（同一条"自己发起一轮"的路径）
+    "llm_trigger": (
+        "proactive_friend_enable",
+        "proactive_group_enable",
+        "stream_proactive_enabled",
+        "proactive_friend_sessions",
+        "proactive_group_sessions",
+        "proactive_min_interval_minutes",
+        "proactive_max_interval_minutes",
+        "proactive_max_unanswered",
+        "proactive_quiet_hours_start",
+        "proactive_quiet_hours_end",
+        "proactive_group_idle_minutes",
+        "proactive_prompt",
+        "proactive_prompt_enable",
+        "proactive_history_intent_nudge",
+        "proactive_env_prompt_enable",
+        "proactive_unresolved_prompt_enable",
+        "proactive_env_intent_nudge",
+        "schedule_enable",
+        "schedule_prompt",
+        "stream_scheduled_enabled",
+    ),
     # 输出策略：流式 / 发言通道（共用 output 槽，故同一模块用 mode 三选一）
     "llm_output": (
         "stream_output",
@@ -260,23 +313,6 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
         "history_auto_qq_min_local",
         "history_cross_query_enable",
     ),
-    # 消息元信息渲染（含历史清洗）
-    "llm_message_meta": (
-        "include_time",
-        "include_private_qq",
-        "include_sender",
-        "include_mentioned",
-        "include_quote",
-        "include_quote_sender",
-        "include_sent",
-        "fetch_at_nickname",
-        "fetch_quote_content",
-        "meta_sender_style",
-        "meta_sent_style",
-        "meta_instruction_mode",
-        "meta_mask_nickname",
-        "clean_output_parentheses",
-    ),
     "llm_memory": (
         "memory_enable",
         "memory_private_enable",
@@ -292,22 +328,16 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
         "memory_audit_inject",
         "memory_min_confidence",
         "memory_inject_hedge",
+        "memory_inject_recency",
         "memory_max_age_days",
         "memory_on_reset",
         "memory_upgrade_saved_only",
-        "memory_inject_recency",
-        # v3 新增：混合检索 / 常驻画像 / 蒸馏批量
         "memory_recall_mode",
         "memory_embedding_model_id",
         "memory_profile_enable",
         "memory_profile_max_chars",
         "memory_consolidate_batch",
         "memory_consolidate_min_chars",
-    ),
-    "llm_knowledge": (
-        "knowledge_enable",
-        "knowledge_embedding_model_id",
-        "knowledge_recall_limit",
     ),
     # 工具扩展：OneBot 工具 / MCP / 工具结果回应要求（联网搜索留在本体高级功能）
     "llm_tools_extra": (
@@ -322,40 +352,8 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
         "tool_result_directive_enable",
         "tool_result_directive",
     ),
-    "llm_proactive": (
-        "proactive_friend_enable",
-        "proactive_group_enable",
-        "stream_proactive_enabled",
-        "proactive_friend_sessions",
-        "proactive_group_sessions",
-        "proactive_min_interval_minutes",
-        "proactive_max_interval_minutes",
-        "proactive_max_unanswered",
-        "proactive_quiet_hours_start",
-        "proactive_quiet_hours_end",
-        "proactive_group_idle_minutes",
-        "proactive_prompt",
-        "proactive_prompt_enable",
-        "proactive_history_intent_nudge",
-        "proactive_env_prompt_enable",
-        "proactive_unresolved_prompt_enable",
-        "proactive_env_intent_nudge",
-    ),
-    "llm_schedule": (
-        "schedule_enable",
-        "schedule_prompt",
-        "stream_scheduled_enabled",
-    ),
-    # 行为规则 / 消息格式 / 组装对账诊断
-    "llm_assembly": (
-        "behavior_rules_override",
-        "participation",
-        "emoji_react_level",
-        "user_message_format",
-        "prompt_time_position",
-        "prompt_dump_enable",
-        "prompt_dump_max_entries",
-    ),
+    # 调试：只有一个开关（原来被判成"已删除"，但模块一直在用）
+    "llm_enhance": ("debug_prompt",),
 }
 
 # ==================== 3. 删除（9 键）====================
@@ -405,7 +403,11 @@ DELETED_KEYS: tuple[str, ...] = (
     "system_prompt",
     # 无人读取、无处渲染的僵尸键
     "knowledge_recall_max_chars",
-    "debug_prompt",
+    # 知识库模块已整体移除（目录早就没了），这 3 个键没有归宿
+    "knowledge_enable",
+    "knowledge_embedding_model_id",
+    "knowledge_recall_limit",
+    # `debug_prompt` 已归 llm_enhance 模块所有（曾经被误判为"已删除"）
     "authority_type",
     "stream_proactive_scheduled_enabled",
 )

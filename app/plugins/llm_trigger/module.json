@@ -1,0 +1,10 @@
+{
+  "name": "llm_trigger",
+  "display_name": "触发与调度",
+  "sign": "LlmTrigger",
+  "version": "1.0.0",
+  "description": "谁在什么时候发起发言：主动消息（私聊随机 / 群聊沉默后开口，支持免打扰）与定时任务（每天 / 每周 / 每月）",
+  "author": "tendokei521",
+  "entry": "main.py",
+  "api_version": 1
+}

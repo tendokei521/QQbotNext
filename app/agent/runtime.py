@@ -115,7 +115,7 @@ class AgentRuntime:
         self.ctx = _Ctx(bot, task_manager)
 
         self.session_mgr = SessionManager(str(bot_id))
-        # 主动消息与定时任务是**业务**：由 `llm_proactive` / `llm_schedule` 模块在
+        # 主动消息与定时任务是**业务**：由 `llm_trigger` 模块在
         # `on_load` 时把各自的实现装进来（框架只提供 `send_to`/`llm_turn`/`spawn` 等原料）。
         # 未装模块时这里保持 None，流水线侧的调用点全部做了 getattr 保护。
         self.scheduler: Any = None
@@ -140,7 +140,7 @@ class AgentRuntime:
         # LLM 流水线：模块可在任意阶段注册钩子
         self.llm_hooks = LlmHookRegistry()
         # 框架只装**本体行为**的钩子（回复打断开关来自「对话行为」页）；
-        # 消息元信息渲染等业务由 `llm_message_meta` 模块自己注册。
+        # 消息元信息渲染等业务由 `llm_prompt` 模块自己注册。
         self.llm_hooks.register(
             stage="pre_request", event_type="*", order=25,
             handler=interrupt_config_hook, module=None,

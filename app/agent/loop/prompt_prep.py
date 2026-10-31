@@ -238,8 +238,8 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
     # 发言通道（P2）：文本只当思考，真正的发言走 send_message / finish。
     # 只在「speech_via_tool + 流式」齐备时挂上；否则保持旧的文本即发言。
     # `speech_via_tool` 归模块所有：`llm_output` 接管输出槽时把视图挂 `runtime.output`，
-    # `llm_assembly` 挂 `runtime.assembly_options`；未接管时回退 agent 配置，行为不变。
-    # 发言通道跨模块读键（行为规则归 llm_assembly、speech_via_tool 归 llm_output），
+    # `llm_prompt` 挂 `runtime.assembly_options`；未接管时回退 agent 配置，行为不变。
+    # 发言通道跨模块读键（行为规则归 llm_prompt、speech_via_tool 归 llm_output），
     # 所以用链式视图；未接管任何模块时等价于 agent 配置。
     from app.agent.policy import policy_view
 

@@ -256,7 +256,7 @@ async def stream_response(runtime, event, ctx=None):
 
     turn_log = log_of(session_mgr, session)
     safe_append(turn_log, EVENT_TURN_START, kind="chat", session_id=session_id, model=meta["model"])
-    # 历史清洗开关归 `llm_message_meta` 模块所有（未接管时回退 agent 配置）
+    # 历史清洗开关归 `llm_prompt` 模块所有（未接管时回退 agent 配置）
     from app.agent.policy import policy_config
 
     meta_cfg = policy_config(runtime, "meta")
