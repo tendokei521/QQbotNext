@@ -376,25 +376,6 @@ onUnmounted(() => {
       </v-card-text>
     </v-card>
 
-    <!-- 账号级「谁能回复」统一在回复与权限维护，这里只放链接，避免重复编辑 -->
-    <v-card variant="outlined" class="mb-4">
-      <v-card-title class="d-flex align-center">
-        <v-icon icon="mdi-shield-account-outline" class="mr-2" color="primary" /> 谁能回复这个账号
-      </v-card-title>
-      <v-card-text>
-        <div class="text-caption mb-2" style="opacity: 0.65">
-          群与成员范围在「回复与权限」里统一管理，这里不再重复编辑。
-        </div>
-        <v-btn
-          size="small"
-          variant="tonal"
-          prepend-icon="mdi-arrow-right"
-          @click="router.push({ path: '/reply', query: { tab: 'who' } })"
-        >
-          去「回复与权限」
-        </v-btn>
-      </v-card-text>
-    </v-card>
     </div>
 
     <PluginDepsDialog v-model="depsOpen" :module-name="name" :module-label="mod.name" @done="onDepsDone" @reload="reloadModule" />
