@@ -253,7 +253,9 @@ def _confidence_from_tag(tag: str) -> float   # [很确定]0.8 [好像]0.6 [不�
 - `subject`：`self`=说话人本人；`group`=群公共约定；其他=被提到的群成员 QQ 号（只在群聊）；
 - `op=UPDATE` 时必须给 `target_id`（来自 existing 列表）；拿不准就 `ADD`；
 - 同一事实反复出现 → `ADD` 一次即可，框架按内容去重；
-- 无值得记的内容 → `[]`。
+- 无值得记的内容 → `[]`；
+- `render_extract_prompt(..., today="YYYY-MM-DD")` 会把当前日期写进 prompt，要求把
+  「昨天/下周/下个月」换算成绝对日期（时间语义不能靠模型猜）。
 
 ### 5.5 `src/consolidate.py`（T2 实现）
 
@@ -275,7 +277,8 @@ class Consolidator:
 3. 取候选事实：`manager.candidates_for_extraction(session_id, is_group, text)`（见 manager）；
 4. `prompt = render_extract_prompt(...)`；`resp = await manager.llm_chat([...])`；
    `resp.ok` 为假 → 记 warning、返回 0（**不** mark 已巩固，下次再试）；
-5. `ops = parse_ops(resp.text)`；逐条 `manager.apply_op(op, session_id=..., is_group=...)`；
+5. `ops = parse_ops(resp.text)[:6]`（单组每轮最多 6 条，防一次刷屏）；
+   逐条 `manager.apply_op(op, session_id=..., is_group=...)`；
    成功后 `mark_episodes_consolidated(ids)` + audit("consolidate")；
    单条失败只 warning，不中断其余；
 6. 结束 `prune_episodes()`（保留策略见 store）。
@@ -284,11 +287,13 @@ class Consolidator:
 
 ```python
 MEMORY_BLOCK_TITLE = "### 供参考（可能不准确）的历史记忆："
+def clean_query(text) -> str               # 剥「你还记得吗/之前说过/帮我查查」元话语
 def rank(store, *, owners, mention_owners=None, query="", query_embedding=None,
          limit=8, max_chars=1200, require_match=True, min_confidence=0.5,
          max_age_days=0.0, owner_resets=None, keep_saved_before_reset=True,
          now=None) -> list[dict]
-def render_block(hits, *, title=MEMORY_BLOCK_TITLE, hedge=True) -> str
+def render_block(hits, *, title=MEMORY_BLOCK_TITLE, hedge=True,
+                 annotate_age=False, now=None) -> str
 def render_profile(profiles) -> str        # "### 关于你的长期印象：" + 列表；空→""
 def cosine(a, b) -> float                  # 转调 vector.cosine（兼容）
 ```
@@ -308,6 +313,15 @@ if row.owner in mention_set: score += .25
 
 > 两段式召回（延迟优化）：注入路径先跑词法；只有结果为空 / top1 归一化分 < 0.35
 > 才补一次 embedding 再精排（工具显式检索始终走混合）。查询向量有 LRU 缓存。
+>
+> 查询清洗：`clean_query()` 用规则剥掉「你还记得吗/之前说过/帮我查查」等元话语，
+> 比每轮让 LLM 改写便宜（0ms），实体词不动。
+>
+> 多样性：候选 ≥8 且多于 limit 时做一次 MMR 重排（λ=0.7；有向量用余弦，无向量用
+> 字符 2-gram Jaccard），避免同一件事的多条近义记忆占满预算。
+>
+> 时间提示：`render_block(annotate_age=True)` 给 ≥1 天的记忆追加「（N 天前）」，
+> 由配置 `memory_inject_recency` 控制（默认开），帮模型判断信息是否过时。
 
 过滤（mention 豁免）：`status='active'`、`expires_at` 过期、`max_age_days` 超龄
 （confirmed=1 豁免）、`min_confidence`、重置线（`updated_at < last_reset_at` 且非
@@ -380,7 +394,7 @@ stop()
 order=30）、`MemoryToolSource`、`MemoryLifecycle`（pre_request：record_episode + autosave；
 turn_completed：maybe_consolidate；session_reset：on_session_reset）。
 
-`main.py`：`OWNED_KEYS` 17+6；`on_load` 挂 `memory_options` / `memory_service` /
+`main.py`：`OWNED_KEYS` 17+7；`on_load` 挂 `memory_options` / `memory_service` /
 provider / tool source / 3 个 llm_hook / 后台 embedding 回填（`self.spawn`）；
 `@command_group("memory", ...)` + 8 个子命令；`on_unload` 全摘。
 
@@ -398,17 +412,19 @@ provider / tool source / 3 个 llm_hook / 后台 embedding 回填（`self.spawn`
 - 记忆不再占用 system 指令位，system 前缀更稳定；agent 侧 `MemoryProvider` 与
   无事件路径共用同一包装函数，格式不会漂移。
 
-## 7. 配置（23 键）
+## 7. 配置（24 键）
 
-沿用 17 键（名字不变，语义不变），新增 5 键：
+沿用 17 键（名字不变，语义不变），新增 7 键：
 
 | key | type | 默认 | 说明 |
 |---|---|---|---|
 | `memory_recall_mode` | select | `hybrid` | `hybrid`=词法+向量（无 embedding 自动退化）；`keyword`=只用词法 |
 | `memory_embedding_model_id` | resource(provider_model, provider_type=embedding) | `""` | 空=自动选第一个 embedding 模型 |
 | `memory_profile_enable` | boolean | `True` | 画像块常驻注入 |
+| `memory_profile_max_chars` | number | `800` | 画像块字符预算 |
 | `memory_consolidate_batch` | number | `20` | 每次巩固最多多少条 episode |
 | `memory_consolidate_min_chars` | number | `30` | 会话语料不足多少字不调 LLM |
+| `memory_inject_recency` | boolean | `True` | 超过 1 天的记忆注入时标注「（N 天前）」 |
 
 同步修改：`main.py::OWNED_KEYS`、`app/agent/config_partition.py::MODULE_KEYS["llm_memory"]`、
 `tests/architecture/test_config_partition.py` 的覆盖计数（新键不属旧 160 键，计数改为

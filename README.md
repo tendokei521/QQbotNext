@@ -257,7 +257,7 @@ python scripts/update.py rollback                # 退回上一版（含数据�
 | `llm_assembly` | 10 | 组装档位、行为规则段、请求落盘对账 |
 | `llm_message_meta` | 14 | 消息元信息渲染（时间/发送者/引用/@）与历史清洗 |
 | `llm_context` | 10 | 指代消解、上下文按需展开、历史查询权限 |
-| `llm_memory` | 23 | 长期记忆：常驻画像 + 混合召回 + 后台蒸馏 |
+| `llm_memory` | 24 | 长期记忆：常驻画像 + 混合召回 + 后台蒸馏 |
 | `llm_knowledge` | 3 | 知识库检索 |
 | `llm_tools_extra` | 9 | OneBot 工具、MCP、工具结果回应要求 |
 | `llm_proactive` | 17 | 主动消息（私聊随机间隔 / 群聊沉默后开口） |
