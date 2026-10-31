@@ -27,7 +27,7 @@ from app.core.logger import account_label
 from . import detect
 from .consolidate import Consolidator
 from .embeddings import EmbeddingClient
-from .recall import rank, render_block, render_profile
+from .recall import clean_query, rank, render_block, render_profile
 from .store import (
     MemoryStore,
     owner_group,
@@ -274,6 +274,8 @@ class MemoryManager:
             max_chars = int(
                 max_chars if max_chars is not None else self._get("memory_recall_max_chars", 1200)
             )
+            # 规则化清洗 query：剥「你还记得吗/之前说过」这类元话语（不改实体词）
+            query = clean_query(query)
             owners = self.scope_owners(session_id, user_id)
             mention_owners: list[str] = []
             if str(session_id or "").startswith("group_") and bot is not None:
@@ -303,7 +305,11 @@ class MemoryManager:
                     )
             if not hits:
                 return ""
-            block = render_block(hits, hedge=params["hedge"])
+            block = render_block(
+                hits,
+                hedge=params["hedge"],
+                annotate_age=bool(self._get("memory_inject_recency", True)),
+            )
             ids = [str(h.get("id") or "") for h in hits if h.get("id")]
             if ids:
                 try:
@@ -417,6 +423,14 @@ class MemoryManager:
         """写一条记忆（去重/失效/画像/淘汰/审计），未启用返回 None。"""
         try:
             if not self.enabled():
+                return None
+            # 所有写入都过同一道安全过滤：注入特征直接丢弃，PII 掩码后才落库
+            # （工具/命令/兜底路径以前绕过了抽取侧的 sanitize，这里收口）。
+            from .extract import sanitize_content
+
+            content = sanitize_content(content)
+            if not content:
+                self._log("debug")("[Memory] 写入内容被安全过滤丢弃")
                 return None
             conf = (
                 float(confidence)

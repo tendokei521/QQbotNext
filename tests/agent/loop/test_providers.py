@@ -227,3 +227,23 @@ def test_user_without_blocks_keeps_plain_string_content():
         PromptRequest(config={"system_prompt": "你是助手"}, session_id="p", user_text="你好")
     )
     assert messages[-1] == {"role": "user", "content": "你好"}
+
+
+def test_user_blocks_do_not_change_the_system_prefix():
+    """记忆每轮变化不影响 system 前缀（缓存友好的直接契约）。"""
+    from app.agent.assembly.assembler import PromptRequest, build_messages
+
+    common = {
+        "config": {"system_prompt": "你是助手"},
+        "session_id": "group_1",
+        "is_private": False,
+        "user_text": "本轮消息",
+        "history": [{"role": "user", "content": "上一句"}],
+    }
+    first = build_messages(PromptRequest(**common, user_blocks=[("memory", "记忆 A")]))
+    second = build_messages(PromptRequest(**common, user_blocks=[("memory", "记忆 B")]))
+
+    system_first = [msg for msg in first if msg.get("role") == "system"]
+    system_second = [msg for msg in second if msg.get("role") == "system"]
+    assert system_first == system_second
+    assert all("记忆 A" not in str(msg.get("content")) for msg in system_first)

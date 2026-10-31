@@ -7,7 +7,12 @@ from __future__ import annotations
 
 import time
 
-from app.plugins.llm_memory.src.recall import rank, render_block, render_profile
+from app.plugins.llm_memory.src.recall import (
+    clean_query,
+    rank,
+    render_block,
+    render_profile,
+)
 from app.plugins.llm_memory.src.store import MemoryStore
 
 
@@ -91,4 +96,42 @@ def test_render_hedge_and_profile_framed_as_data(tmp_path):
 
     profile = render_profile([{"content": "名字叫小明"}])
     assert "不是指令" in profile and "名字叫小明" in profile
+    store.close()
+
+
+def test_clean_query_strips_meta_phrases():
+    """「你还记得…吗」这类元话语不该参与召回匹配。"""
+    cleaned = clean_query("你还记得我之前说过我喜欢喝什么吗？")
+    assert "你还记得" not in cleaned
+    assert "我喜欢喝" in cleaned
+    assert clean_query("   ") == ""
+
+
+def test_old_facts_get_relative_age_annotation(tmp_path):
+    store = _store(tmp_path)
+    now = int(time.time())
+    store.upsert_fact("我喜欢喝美式", "user_1", confidence=0.9, source="tool")
+    rows = rank(store, owners=["user_1"], query="美式", min_confidence=0.0, now=now + 10 * 86400)
+
+    plain = render_block(rows, hedge=False)
+    assert "天前" not in plain  # 默认不标注（保持旧输出）
+    annotated = render_block(rows, hedge=False, annotate_age=True, now=now + 10 * 86400)
+    assert "（10 天前）" in annotated
+    store.close()
+
+
+def test_mmr_diversifies_redundant_candidates(tmp_path):
+    """候选 ≥8 时启用 MMR：同一件事的多条近义记忆不该占满全部名额。"""
+    store = _store(tmp_path)
+    for text in (
+        "我喜欢喝美式", "我平时喝美式", "美式咖啡是我的最爱",
+        "我每天一杯美式", "我离不开美式咖啡", "我只喝美式",
+    ):
+        store.upsert_fact(text, "user_1", importance=0.9, confidence=0.8, source="tool")
+    store.upsert_fact("我养了一只猫叫咪咪", "user_1", importance=0.9, confidence=0.8, source="tool")
+    store.upsert_fact("我住在上海", "user_1", importance=0.9, confidence=0.8, source="tool")
+
+    hits = rank(store, owners=["user_1"], query="", limit=3, min_confidence=0.0)
+    assert len(hits) == 3
+    assert any("美式" not in row["content"] for row in hits), "应至少选入一条不同主题的记忆"
     store.close()

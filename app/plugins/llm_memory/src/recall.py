@@ -43,6 +43,83 @@ _CONF_MID = 0.5
 #: 近似去重阈值（去空白后的字符级相似度）
 _DEDUPE_RATIO = 0.95
 
+#: MMR 多样性重排：λ 越大越偏相关、越小越偏多样；候选足够多时才启用
+_MMR_LAMBDA = 0.7
+_MMR_MIN_CANDIDATES = 8
+
+#: 查询清洗：去掉「你还记得吗/之前说过/帮我查查」这类元话语（不碰实体词）
+_META_QUERY_PATTERNS = (
+    re.compile(r"你还记得(我)?(以前|之前)?(说过|讲过|提过)?的?"),
+    re.compile(r"你(还)?记得(吗|么)?"),
+    re.compile(r"(我)?(以前|之前|上次|之前跟你)(说过|讲过|提过|告诉过你)的?"),
+    re.compile(r"帮我(查查|查一下|回忆一下|想想|找找)"),
+    re.compile(r"(请)?(告诉|回答)我"),
+)
+_QUERY_TAIL_RE = re.compile(r"[，,。！!？?；;\s]+$")
+
+
+def clean_query(text: str) -> str:
+    """规则化清洗检索 query：剥掉元话语与句末标点，保留实体词。
+
+    例：``"你还记得我喜欢喝什么吗"`` → ``"我喜欢喝什么吗"``（再去句末问号）
+    —— 比每轮让 LLM 改写便宜，也不会引入新的延迟。
+    """
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return ""
+    for pattern in _META_QUERY_PATTERNS:
+        cleaned = pattern.sub(" ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = _QUERY_TAIL_RE.sub("", cleaned).strip()
+    return cleaned
+
+
+def _content_grams(text: str) -> set[str]:
+    """字符级 2-gram（去掉空白）：无 vector 时衡量「说的是不是同一件事」。"""
+    normalized = re.sub(r"\s+", "", str(text or ""))
+    if len(normalized) < 2:
+        return {normalized} if normalized else set()
+    return {normalized[i : i + 2] for i in range(len(normalized) - 1)}
+
+
+def _jaccard(a: set[str], b: set[str]) -> float:
+    if not a or not b:
+        return 0.0
+    union = a | b
+    return len(a & b) / len(union) if union else 0.0
+
+
+def _row_similarity(a: dict, b: dict) -> float:
+    """两条记忆的相似度：都有向量用余弦，否则退回字符 2-gram Jaccard。"""
+    vector_a, vector_b = a.get("_vector"), b.get("_vector")
+    if vector_a and vector_b:
+        return max(0.0, cosine(vector_a, vector_b))
+    return _jaccard(a.get("_grams") or set(), b.get("_grams") or set())
+
+
+def _mmr_select(scored: list[tuple[float, dict]], limit: int) -> list[dict]:
+    """MMR 贪心挑选（只在候选足够多时启用，避免少候选时放大噪声）。"""
+    candidates = [item for _score, item in scored]
+    if not candidates:
+        return []
+    for _score, item in scored:
+        item["_vector"] = as_vector(item.get("embedding")) or None
+        item["_grams"] = _content_grams(str(item.get("content") or ""))
+    max_score = max((score for score, _item in scored), default=0.0) or 1.0
+    selected: list[dict] = []
+    while candidates and len(selected) < limit:
+        best_index = 0
+        best_value = float("-inf")
+        for index, item in enumerate(candidates):
+            relevance = float(item.get("_score") or 0.0) / max_score
+            redundancy = max((_row_similarity(item, kept) for kept in selected), default=0.0)
+            value = _MMR_LAMBDA * relevance - (1.0 - _MMR_LAMBDA) * redundancy
+            if value > best_value:
+                best_value = value
+                best_index = index
+        selected.append(candidates.pop(best_index))
+    return selected
+
 _CJK_RUN_RE = re.compile(r"[\u4e00-\u9fff]+")
 #: 空白 + 中英标点/符号（作为 token 分隔符）
 _SPLIT_RE = re.compile(r"[\s\u3000，。！？、；：,.!?;:\"'“”‘’（）()\[\]【】《》<>/\\|~`@#$%^&*+=_\-]+")
@@ -263,6 +340,7 @@ def rank(
     mention_set = {str(owner) for owner in (mention_owners or []) if owner}
     merged = list(dict.fromkeys([*owner_list, *mention_set]))
 
+    query = clean_query(query)
     tokens = tokenize(query) if query else []
     grams = query_grams(query) if query else set()
     has_query = bool(tokens or grams)
@@ -332,11 +410,17 @@ def rank(
 
     scored.sort(key=lambda pair: (-pair[0], -_int_of(pair[1].get("updated_at"))))
 
+    # 候选足够多时做一次 MMR 多样性重排（避免同一件事的多条近义记忆占满预算）
+    if len(scored) >= _MMR_MIN_CANDIDATES and len(scored) > limit:
+        ordered = _mmr_select(scored, limit)
+    else:
+        ordered = [item for _score, item in scored]
+
     per_item = min(250, max(60, max_chars // max(1, limit)))
     result: list[dict] = []
     accepted: list[str] = []
     used = 0
-    for _score, item in scored:
+    for item in ordered:
         if len(result) >= limit:
             break
         content = str(item.get("content") or "").strip()
@@ -376,12 +460,16 @@ def render_block(
     *,
     title: str = MEMORY_BLOCK_TITLE,
     hedge: bool = True,
+    annotate_age: bool = False,
+    now: int | None = None,
 ) -> str:
     """把命中行渲染成注入块；无有效行返回空串。
 
     ``hedge=True`` 时按置信度加试探前缀：
     高（≥0.75）陈述；中（0.5~0.75）「（好像）」；低（<0.5）「（记不太清）」。
+    ``annotate_age=True`` 时给超过 1 天的记忆加「（N 天前）」，帮模型判断是否过时。
     """
+    now_ts = int(now) if now is not None else int(time.time())
     lines: list[str] = [title, ""]
     for row in hits or []:
         if not isinstance(row, dict):
@@ -396,10 +484,22 @@ def render_block(
                 prefix = "（记不太清）"
             elif confidence < _CONF_HIGH:
                 prefix = "（好像）"
-        lines.append(f"- {prefix}{content}")
+        age = _age_label(row, now_ts) if annotate_age else ""
+        lines.append(f"- {prefix}{content}{age}")
     if len(lines) <= 2:  # 只有标题与空行 → 没有可注入内容
         return ""
     return "\n".join(lines)
+
+
+def _age_label(row: dict, now: int) -> str:
+    """相对时间标注（只标 ≥1 天，避免每条都带噪音）。"""
+    updated = _int_of(row.get("updated_at") or row.get("created_at"))
+    if not updated:
+        return ""
+    age_days = max(0.0, (now - updated) / 86400.0)
+    if age_days < 1:
+        return ""
+    return f"（{int(age_days)} 天前）"
 
 
 def render_profile(profiles: Iterable[dict]) -> str:

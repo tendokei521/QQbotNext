@@ -295,6 +295,7 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
         "memory_max_age_days",
         "memory_on_reset",
         "memory_upgrade_saved_only",
+        "memory_inject_recency",
         # v3 新增：混合检索 / 常驻画像 / 蒸馏批量
         "memory_recall_mode",
         "memory_embedding_model_id",

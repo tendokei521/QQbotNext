@@ -159,6 +159,12 @@ MEMORY_SCHEMA: dict[str, dict] = {
         "description": "中/低置信记忆加「（好像）/（记不太清）」前缀，提醒模型这些是模糊记忆",
         "default": True,
     },
+    "memory_inject_recency": {
+        "type": "boolean",
+        "label": "注入时标注时间",
+        "description": "超过 1 天的记忆加「（N 天前）」，帮模型判断信息是否过时",
+        "default": True,
+    },
     "memory_max_age_days": {
         "type": "number",
         "label": "记忆最长保留(天)",
