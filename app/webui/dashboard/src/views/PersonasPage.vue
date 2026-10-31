@@ -233,24 +233,11 @@ function saveCurrentAsPreset() {
   loadBoundPresetForCopy()
 }
 
-/** 当前账号绑定的人格预设 id（读 persona_preset_id，不读退役的 system_prompt） */
-const currentPresetId = computed(() => String(agent.draft.persona_preset_id || ''))
-
-/** 当前绑定的人格预设对象（列表里没有时 = 已删除/未加载，界面只显示 id 缺失态） */
-const currentPreset = computed<RolePreset | null>(
-  () => presets.value.find((p) => p.id === currentPresetId.value) || null,
-)
-
-/** 当前使用的人格名字：没有账号 / 没选 / 选中的已不存在，各给一句人话 */
-const currentPresetName = computed(() => {
-  if (agent.botId == null) return '未选账号'
-  if (!currentPresetId.value) return '未选择'
-  return currentPreset.value?.name || '已失效（重新选择）'
-})
-
-/** 给「另存为副本」等动作用：等价于旧 boundPersonaPreset() */
+/** 当前账号活引用的人格预设（读 persona_preset_id，不读退役的 system_prompt） */
 function boundPersonaPreset(): RolePreset | null {
-  return currentPreset.value
+  const presetId = String(agent.draft.persona_preset_id || '')
+  if (!presetId) return null
+  return presets.value.find((p) => p.id === presetId) || null
 }
 
 /** 把绑定的人格内容载入表单，作为「另存为新人格」的起点 */
@@ -286,16 +273,6 @@ onMounted(() => {
         </h1>
         <div class="app-page-subtitle">可复用的人格，供各账号选用</div>
       </div>
-      <v-chip
-        v-if="agent.botId != null"
-        size="small"
-        variant="tonal"
-        color="pink"
-        prepend-icon="mdi-account-check-outline"
-        :title="currentPreset?.description || ''"
-      >
-        当前使用：{{ currentPresetName }}
-      </v-chip>
       <div class="d-flex flex-wrap gap-2">
         <v-btn variant="text" prepend-icon="mdi-refresh" @click="loadPresets">刷新</v-btn>
         <v-btn color="primary" prepend-icon="mdi-plus" @click="startNew">新建人格</v-btn>
@@ -338,17 +315,7 @@ onMounted(() => {
                 <template #prepend>
                   <v-icon icon="mdi-account-heart" color="pink" />
                 </template>
-                <v-list-item-title class="d-flex align-center flex-wrap gap-2 text-body-2">
-                  <span>{{ p.name }}</span>
-                  <v-chip
-                    v-if="p.id === currentPresetId"
-                    size="x-small"
-                    color="pink"
-                    variant="tonal"
-                  >
-                    使用中
-                  </v-chip>
-                </v-list-item-title>
+                <v-list-item-title class="text-body-2">{{ p.name }}</v-list-item-title>
                 <v-list-item-subtitle class="text-caption app-muted app-line-clamp-1">
                   {{ presetSummary(p) }}
                 </v-list-item-subtitle>
