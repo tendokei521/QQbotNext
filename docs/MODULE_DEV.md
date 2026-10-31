@@ -1281,7 +1281,7 @@ v3 把「高级功能」从 agent 配置页整体搬进了模块。**这 9 个�
 | 组装策略 | `llm_assembly` | 10 | **高级接口**（`supersedes=("assembly",)`） | `assembly` 槽（`build(req)`） |
 | 消息元信息 | `llm_message_meta` | 14 | 业务 | `@llm_hook("pre_request")` + `raw_user_text` |
 | 上下文增强 | `llm_context` | 10 | 业务 | `context_providers` + `tool_sources` + `pre_request` |
-| 长期记忆 | `llm_memory` | 17 | 业务 | `context_providers` + `tool_sources` + `pre_request`/`turn_completed` + `@command` |
+| 长期记忆 | `llm_memory` | 24 | 业务 | `context_providers`（`role="user"` 数据块）+ `tool_sources` + `pre_request`/`turn_completed` + `@command` + 后台 `spawn` |
 | 知识库 | `llm_knowledge` | 3 | 业务 | `tool_sources` |
 | 工具扩展 | `llm_tools_extra` | 9 | 业务 | `tool_sources`（OneBot + MCP） |
 | 主动消息 | `llm_proactive` | 17 | 业务 | `message_observed`/`bot_sent` 订阅 + `spawn` + `llm_turn` + `send_to` |

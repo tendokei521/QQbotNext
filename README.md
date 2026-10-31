@@ -412,7 +412,7 @@ class Module(BaseModule):
 #llm task / list / switch <id> / new / load <id> / export / exit / stop
 #llm schedule / schedule cancel <id>       # 定时任务
 #llm proactive [session_id]                # 主动消息
-#llm memory list | search <词> | profile | remember <内容> | forget <id|词> | clear | audit | export
+#llm memory list | status | search <词> | profile | remember <内容> | forget <id|词> | clear | audit | export
 ```
 
 - 指令回复统一以「# 」开头，便于与聊天内容区分；`#llm stop`、`#llm memory audit` 仅 Bot 拥有者可用；

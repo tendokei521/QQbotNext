@@ -360,9 +360,10 @@ async def handle_memory_command(module, session_id, user_id, is_private, is_admi
 `@command_group("memory", prefixes=("/", "／", "#llm "))` 分发；`handle_memory_command`
 只做纯函数式解析，便于测试）：
 
-`list [--all]` / `search <词>` / `forget <id|词>` / `clear` / `audit [owner]`（管理员）/
-`export`（导出 JSON 文本，最多 100 条）/ `profile`（列出本会话可见画像）/ `remember <内容>`
-（本人层写入一条，等价确定性保存）。无子命令 → 帮助清单。
+`list [--all]` / `status`（条数/语料/向量/上次蒸馏）/ `search <词>` / `forget <id|词>` /
+`clear` / `audit [owner]`（管理员）/ `export`（导出 JSON 文本，最多 100 条）/
+`profile`（列出本会话可见画像）/ `remember <内容>`（本人层写入一条，等价确定性保存）。
+无子命令 → 帮助清单。
 
 ## 6. manager / service / main（Lead 实现）
 
@@ -396,7 +397,7 @@ turn_completed：maybe_consolidate；session_reset：on_session_reset）。
 
 `main.py`：`OWNED_KEYS` 17+7；`on_load` 挂 `memory_options` / `memory_service` /
 provider / tool source / 3 个 llm_hook / 后台 embedding 回填（`self.spawn`）；
-`@command_group("memory", ...)` + 8 个子命令；`on_unload` 全摘。
+`@command_group("memory", ...)` + 9 个子命令；`on_unload` 全摘。
 
 ### 5.9 框架接口（v3 配套改动）
 

@@ -93,6 +93,7 @@ score = 0.30×vec + 0.35×kw + 0.15×重要度 + 0.10×rec + 0.05×置信度 + 0
 |---|---|
 | `/memory` | 子命令表 |
 | `/memory list [--all]` | 查看当前可见记忆（`--all` 含已下架） |
+| `/memory status` | 记忆状态：条数 / 语料 / 向量 / 上次蒸馏 |
 | `/memory search <词>` | 检索 |
 | `/memory profile` | 查看关于你的画像 |
 | `/memory remember <内容>` | 记住一条（本人层） |
@@ -105,8 +106,8 @@ score = 0.30×vec + 0.35×kw + 0.15×重要度 + 0.10×rec + 0.05×置信度 + 0
 
 模块配置页「长期记忆」：开关（总开关/私聊/群聊/画像）、召回（方式/embedding 模型/
 条数/字符预算/画像预算）、写入（确定性兜底/自动蒸馏/间隔/批量/最小字数/上限/跨群）、
-可信度与生命周期（审计/审计注入/最低置信度/试探语气/最长保留/重置策略/只保留已保存型）。
-默认值见 `app/plugins/llm_memory/src/schemas.py`。
+可信度与生命周期（审计/审计注入/最低置信度/试探语气/时间标注/最长保留/重置策略/
+只保留已保存型）。默认值见 `app/plugins/llm_memory/src/schemas.py`。
 
 **启用只需要 `memory_enable`**；不再依赖已废弃的 `experimental_long_term_memory`。
 
