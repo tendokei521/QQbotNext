@@ -9,13 +9,14 @@
 |---|---|
 | P0 修 `presets.resolve`（getter-only 配置对象）+ 契约测试 | ✅ `adc81f94` |
 | 清理死代码（`prompt.build_messages` 老装配器 / `_CHAT_SCHEDULE` / `CAP_TOOL_NAMES`） | ✅ `9f1483f9` |
-| **删除旧配置键**：`assembly_profile`（legacy/qq_agent 双档）、`behavior_rules_enable`；格式类键保留并去掉"档位"语义（默认单行 / 时间在尾） | ✅ 本次提交 |
-| 顺序口径：**A**（规则在前 + L1 末尾复述安全段与工作方式） | ✅ 已定 |
-| P1 定契约（AssemblyPlan / describe 带 layer） | 待做 |
-| P2 文案收敛（L1 合成一条 system；legacy 常量退场） | 待做（键已删，剩文案合并） |
-| P3 人格单一来源 | 待做 |
-| P4 钩子通道收敛（Section 唯一） | 待做 |
-| P5 缓存与预算、P6 文档门禁 | 待做 |
+| **删除旧配置键**：`assembly_profile`（legacy/qq_agent 双档）、`behavior_rules_enable`；格式类键保留并去掉"档位"语义（默认单行 / 时间在尾） | ✅ `45f99495`、`cc7e497d` |
+| 顺序口径：**A**（规则在前 + L1 末尾复述安全段与工作方式） | ✅ 已定，P1 实现 |
+| P1 定契约：`assembly.layers`（5 层 / 标签 / 段→层映射），`Section.layer`，`describe()` 带 layer，`[Prompt]` 打层摘要 | ✅ `1c600b81`、`74b87ac1` |
+| P2 文案收敛：L1 四段合并成**一条** system（层内合并），`system_prompt_style=single` 仍可整体折叠 | ✅ `1c600b81` |
+| P3 人格单一来源：启动对账把账号 `system_prompt` 副本对齐到绑定预设（幂等、预设缺失时不覆盖） | ✅ `1be1d38d` |
+| P4 钩子通道收敛：`Section` 为唯一有序通道（默认 L3、可声明层），`extra_blocks` 定位为 L3 动态注入通道并改文档口径 | ✅ `f402b453` |
+| P5 缓存与预算：`[Prompt]` 打 system 前缀指纹；前缀稳定性用例（同配置同前缀 / 换方案变 / 只追加） | ✅ `cbc8462d` |
+| P6 文档与门禁：架构测试（层序 / 内置段登记 / L1 单条 system / 前缀稳定）+ `MODULE_DEV` §4.7.4 五层 | ✅ `1c600b81`、`f402b453` |
 
 ---
 
