@@ -601,7 +601,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                     </div>
                     <div class="text-caption">点击去配置包</div>
                   </v-tooltip>
-                  <v-tooltip location="top" :text="PERMISSION_TOOLTIP">
+                  <!-- 「所有人」= 不设门槛，是默认值也是噪音：卡片上不渲染这个标签 -->
+                  <v-tooltip v-if="m.permission && m.permission !== 'everyone'" location="top" :text="PERMISSION_TOOLTIP">
                     <template #activator="{ props }">
                       <v-chip v-bind="props" size="x-small" :color="PERMISSION_COLOR[m.permission] || 'default'" variant="tonal">
                         {{ PERMISSION_LABELS[m.permission] || m.permission }}

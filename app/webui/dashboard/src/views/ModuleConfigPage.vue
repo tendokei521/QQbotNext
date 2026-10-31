@@ -263,7 +263,8 @@ onUnmounted(() => {
           {{ isBuiltinModule(mod) ? '内置' : '第三方' }}
         </v-chip>
         <v-chip v-if="mod.version" size="small" variant="tonal">v{{ mod.version }}</v-chip>
-        <v-tooltip location="top" :text="PERMISSION_TOOLTIP">
+        <!-- 「所有人」= 不设门槛，是默认值也是噪音：详情页头部不渲染这个标签 -->
+        <v-tooltip v-if="mod.permission && mod.permission !== 'everyone'" location="top" :text="PERMISSION_TOOLTIP">
           <template #activator="{ props }">
             <v-chip v-bind="props" size="small" variant="tonal" :color="PERMISSION_COLOR[mod.permission] || 'default'">
               {{ PERMISSION_LABELS[mod.permission] || mod.permission }}
