@@ -94,10 +94,12 @@ async def test_format_user_context_group_injects_sender_group_time_quote():
     })
     await format_user_context(ctx)
     text = ctx.user_text
-    assert text.splitlines()[0].startswith("(时间：")
-    assert "(当前群号: 466052056)" in text
-    assert "发送者：小明(20002)" in text
-    assert "发送了：你好" in text
+    lines = text.splitlines()
+    # 默认单行形态：群号一行 + 昵称(QQ): 正文 + 附注，时间挪到末尾
+    assert lines[0].startswith("(当前群号: 466052056)")
+    assert "小明(20002): 你好" in text
+    assert not any(line.startswith(("发送者：", "发送了：")) for line in lines)
+    assert lines[-1].startswith("(时间：")
     assert "提到了(用户名)：小红(30003)" in text
     assert "引用了：小红(30003)发送的引用消息：“在吗”" in text
     assert ctx.state["message_meta_injected"] is True
@@ -131,8 +133,9 @@ async def test_collect_then_format_matches_history_semantics():
     })
     await collect_user_context(ctx)
     await format_user_context(ctx)
-    assert "发送者：小明(20002)" in ctx.user_text
-    assert "发送了：你好" in ctx.user_text
+    # 本轮消息与历史条目同形（单行）：昵称(QQ): 正文
+    assert "小明(20002): 你好" in ctx.user_text
+    assert ctx.state["message_meta_injected"] is True
 
 
 # ---------- 在线背景与会话历史共用渲染器 ----------

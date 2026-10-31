@@ -3,6 +3,20 @@
 > 背景与证据：[`../reviews/2026-10-31-prompt-assembly-analysis.md`](../reviews/2026-10-31-prompt-assembly-analysis.md)
 > 目标一句话：**废掉"legacy 老装配"，把一次请求固定按 5 层拼：系统提示词（方案）→ 人格预设 → 钩子注入 → 对话历史 → 本轮消息。**
 
+## 进度（2026-10-31）
+
+| 步骤 | 状态 |
+|---|---|
+| P0 修 `presets.resolve`（getter-only 配置对象）+ 契约测试 | ✅ `adc81f94` |
+| 清理死代码（`prompt.build_messages` 老装配器 / `_CHAT_SCHEDULE` / `CAP_TOOL_NAMES`） | ✅ `9f1483f9` |
+| **删除旧配置键**：`assembly_profile`（legacy/qq_agent 双档）、`behavior_rules_enable`；格式类键保留并去掉"档位"语义（默认单行 / 时间在尾） | ✅ 本次提交 |
+| 顺序口径：**A**（规则在前 + L1 末尾复述安全段与工作方式） | ✅ 已定 |
+| P1 定契约（AssemblyPlan / describe 带 layer） | 待做 |
+| P2 文案收敛（L1 合成一条 system；legacy 常量退场） | 待做（键已删，剩文案合并） |
+| P3 人格单一来源 | 待做 |
+| P4 钩子通道收敛（Section 唯一） | 待做 |
+| P5 缓存与预算、P6 文档门禁 | 待做 |
+
 ---
 
 ## 0. 结论先行
@@ -23,7 +37,7 @@
 | order | 段 | 角色 | 生效条件 | 文案来源 |
 |---|---|---|---|---|
 | 10 | persona | system | 始终 | 人格预设 / `config.system_prompt` |
-| 20 | behavior | system | 方案已解析，或 `assembly_profile=qq_agent` | 方案段落 / `behavior_rules_override` |
+| 20 | behavior | system | 选中提示词方案（产品路径恒有） | 方案段落 / `behavior_rules_override` |
 | 30 | emoji_hint | system | 方案或 qq_agent + 能贴表情 + 活跃度>0 | 方案 `emoji_hint` |
 | 40 | schedule | system | `schedule_enable` | 方案 `schedule_instruction` / 常量 |
 | 50 | proactive | system | 有可用能力 | 方案 `proactive_lines` / 常量 |
@@ -48,11 +62,14 @@
 
 ### 1.3 双档 + 文案矩阵（"旧提示词还在用"的直接来源）
 
-- `assembly_profile`：`legacy`（默认）/ `qq_agent`。5 处 `build_*` 用它做门控。
+> 已处理：`assembly_profile` 与 `behavior_rules_enable` 已删除；下面记录删除前的形态，
+> 供复盘"为什么会出现新旧两套文案同时在跑"。
+
+- ~~`assembly_profile`：`legacy`（默认）/ `qq_agent`。5 处 `build_*` 用它做门控。~~
 - 旧常量：`SCHEDULE_INSTRUCTION`、`PROACTIVE_LINES`、`LEGACY_MESSAGE_META_INSTRUCTION`、
   `MESSAGE_META_INSTRUCTION`、`SINGLE_LINE_MESSAGE_META_INSTRUCTION`。
 - 方案又各带一份：`schedule_instruction` / `proactive_lines` / `message_meta_single_line` / `message_meta_legacy`。
-- 结果：同一句"消息格式说明"最多有 **4 个版本**，运行时选哪个取决于档位 × 方案 × 模块开关。
+- 结果：同一句"消息格式说明"最多有 **4 个版本**，运行时选哪个取决于（已删除的）档位 × 方案 × 模块开关。
 
 ### 1.4 本轮实测（账号 123，2026-10-31 13:56）
 

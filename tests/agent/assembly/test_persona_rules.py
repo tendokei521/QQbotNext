@@ -5,7 +5,7 @@
 1. **提示词里点名的工具必须真实存在**：写进提示词的每个工具名都得在本轮 ``available_tools``
    里，否则模型会去调不存在的工具（或者以为能力被禁用）；
 2. **能力关掉，对应句子必须整句消失**（不是留空壳）；
-3. **``assembly_profile=legacy`` 下输出逐字不变**：改造必须可一键回退。
+3. **没有提示词方案时（库层直调）不注入行为段**：旧形态仍可用。
 
 除工具名子集外，只断言"结构/包含关系"，不对全文做脆弱的逐字快照——文案会持续打磨。
 """
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 
-from app.agent.assembly.assembler import PromptRequest, assembly_profile
+from app.agent.assembly.assembler import PromptRequest
 from app.agent.persona import rules as persona_rules
 
 #: 工具名形态：小写字母开头、至少含一个下划线（``memory_save`` / ``expand_message`` …）。
@@ -45,7 +45,6 @@ EMPTY_CONFIG: dict = {}
 
 #: 发言通道生效的完整条件（档位 + 开关 + 流式）——多处复用，避免各写一遍而漂移
 SPEECH_CONFIG: dict = {
-    "assembly_profile": "qq_agent",
     "speech_via_tool": True,
     "stream_output": True,
 }
@@ -121,7 +120,7 @@ def test_speech_contract_follows_capability():
     assert "不会发到 QQ" not in by_text
     assert "send_message" not in by_text, "文本即发言时不应教模型调 send_message"
 
-    # 只开开关即可（不再要求 qq_agent / 流式）
+    # 只开开关即可（不依赖任何档位 / 流式）
     half = _render(ALL_TOOLS, {"speech_via_tool": True})
     assert "不会发到 QQ" in half
     assert "send_message" in half
@@ -220,11 +219,14 @@ def _request(**overrides) -> PromptRequest:
     return req
 
 
-def test_legacy_profile_injects_no_behavior_block():
-    """护栏 3：默认档位下行为块整块消失（改造前行为逐字不变的保证）。"""
-    req = _request(config={"assembly_profile": "legacy"})
+def test_no_behavior_block_without_a_preset():
+    """库层直调（配置里根本没有 ``prompt_preset``）时不注入行为块——向后兼容。
+
+    产品路径（``DEFAULT_LLM_CONFIG``）永远带这个键，所以这不影响线上行为；
+    它守的是"直接构造 config 的脚本/测试仍能拿到旧形态"。
+    """
+    req = _request(config={})
     req.available_tools = ALL_TOOLS
-    assert assembly_profile(req) == "legacy"
     names = [name for name, _ in _block_names(req)]
     assert "behavior" not in names
 
@@ -236,8 +238,8 @@ def _block_names(req):
     return [(block.name, messages) for block, messages in build_all_blocks(req) if messages]
 
 
-def test_qq_agent_profile_injects_behavior_after_persona():
-    req = _request(config={"assembly_profile": "qq_agent"})
+def test_behavior_block_follows_persona():
+    req = _request(config={"prompt_preset": "chat"})
     req.available_tools = ALL_TOOLS
     names = [name for name, _ in _block_names(req)]
     assert "behavior" in names
@@ -252,17 +254,8 @@ def test_qq_agent_profile_injects_behavior_after_persona():
     assert "【工作方式】" in text
 
 
-def test_behavior_block_can_be_disabled():
-    req = _request(
-        config={"assembly_profile": "qq_agent", "behavior_rules_enable": False}
-    )
-    req.available_tools = ALL_TOOLS
-    names = [name for name, _ in _block_names(req)]
-    assert "behavior" not in names
-
-
-def test_proactive_block_dedupes_in_qq_agent_profile():
-    """行为段已讲通用用法：``qq_agent`` 档下「主动性」块不再重复引用/戳一戳的用法。"""
+def test_proactive_block_dedupes_when_behavior_block_present():
+    """行为段已讲通用用法：选了方案（有行为段）时「主动性」块不再重复引用/戳一戳的用法。"""
     from app.agent.assembly.prompt import build_proactive_instruction
 
     tools = ALL_TOOLS

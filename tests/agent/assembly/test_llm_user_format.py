@@ -1,8 +1,8 @@
-"""``assembly_profile=qq_agent`` 的 user 侧改造：单行格式 / 时间挪位 / 表情提示 / 格式图例。
+"""user 侧元信息格式：单行形态 / 时间挪位 / 表情提示 / 格式图例。
 
 守的是这三件容易悄悄回退的事：
 
-1. ``legacy`` 档 user 侧**逐字不变**（六行元信息块、时间在首行）；
+1. ``legacy`` 格式下 user 侧**逐字不变**（六行元信息块、时间在首行）；
 2. ``single_line`` 档本轮消息与历史条目同形（``昵称(QQ): 正文``），且时间挪到末尾——
    否则"本轮六行块 + 历史单行"的混搭会原样回来；
 3. 消息格式说明随格式一起换（别一边发单行、一边解释"发送者：/发送了："）。
@@ -16,6 +16,7 @@ from app.agent.assembly.assembler import PromptRequest, message_meta_instruction
 from app.agent.assembly.prompt import (
     SINGLE_LINE_MESSAGE_META_INSTRUCTION,
     emoji_hint_line,
+    prompt_time_position,
     user_message_format,
 )
 from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
@@ -53,9 +54,9 @@ def _ctx(config: dict | None):
     return ctx
 
 
-async def test_legacy_profile_keeps_multi_line_block():
-    """legacy 档：六行元信息块 + 时间在首行（改造前逐字不变）。"""
-    ctx = _ctx({"assembly_profile": "legacy"})
+async def test_multi_line_format_keeps_six_line_block():
+    """``user_message_format=legacy`` + 时间放头：六行元信息块（旧形态仍可选）。"""
+    ctx = _ctx({"user_message_format": "legacy", "prompt_time_position": "head"})
     await format_user_context(ctx)
     lines = ctx.user_text.splitlines()
     assert lines[0].startswith("(时间：")
@@ -65,9 +66,9 @@ async def test_legacy_profile_keeps_multi_line_block():
     assert "提到了(用户名)：小红(30003)" in lines
 
 
-async def test_single_line_profile_matches_history_format():
+async def test_single_line_format_matches_history_format():
     """单一形态：群号一行 + 昵称(QQ): 正文 + 附注 + 时间，没有「发送者：/发送了：」。"""
-    ctx = _ctx({"assembly_profile": "qq_agent", "user_message_format": "single_line"})
+    ctx = _ctx({"user_message_format": "single_line"})
     await format_user_context(ctx)
     lines = ctx.user_text.splitlines()
     assert lines[0].startswith("(当前群号:")
@@ -81,8 +82,7 @@ async def test_single_line_profile_matches_history_format():
 async def test_time_position_head_restores_old_order():
     ctx = _ctx(
         {
-            "assembly_profile": "qq_agent",
-            "user_message_format": "single_line",
+                    "user_message_format": "single_line",
             "prompt_time_position": "head",
         }
     )
@@ -90,18 +90,19 @@ async def test_time_position_head_restores_old_order():
     assert ctx.user_text.splitlines()[0].startswith("(时间：")
 
 
-def test_format_helpers_default_to_legacy_off_profile():
-    """档位没开时两个格式开关都不生效（可一键回退）。"""
-    assert user_message_format({}) == "legacy"
-    assert user_message_format({"assembly_profile": "qq_agent"}) == "single_line"
-    assert user_message_format({"assembly_profile": "qq_agent", "user_message_format": "legacy"}) == "legacy"
+def test_format_helpers_default_to_single_line():
+    """默认就是单行形态；显式写 legacy 才回到六行块。"""
+    assert user_message_format({}) == "single_line"
+    assert user_message_format({"user_message_format": "single_line"}) == "single_line"
+    assert user_message_format({"user_message_format": "legacy"}) == "legacy"
+    assert prompt_time_position({}) == "tail"
+    assert prompt_time_position({"prompt_time_position": "head"}) == "head"
 
 
 def test_message_meta_legend_follows_format():
     """格式换了，说明也得换：发单行却解释「发送者：/发送了：」= 给模型一本错手册。"""
     base = {
-        "assembly_profile": "qq_agent",
-        "user_message_format": "single_line",
+            "user_message_format": "single_line",
         "meta_sender_style": "legacy",
     }
     req = PromptRequest(session_id="group_1", is_private=False, user_text="在吗", config=base)
@@ -119,7 +120,7 @@ def test_message_meta_off_wins_over_profile():
         session_id="group_1",
         is_private=False,
         user_text="在吗",
-        config={"assembly_profile": "qq_agent", "meta_instruction_mode": "off"},
+        config={"meta_instruction_mode": "off"},
     )
     req.ctx = types.SimpleNamespace(state={"message_meta_injected": True})
     assert message_meta_instruction(req) is None

@@ -43,7 +43,7 @@ ALL_TOOLS = {
 }
 
 #: 发言通道生效的完整条件（档位 + 开关 + 流式）
-SPEECH_CONFIG = {"assembly_profile": "qq_agent", "speech_via_tool": True, "stream_output": True}
+SPEECH_CONFIG = {"speech_via_tool": True, "stream_output": True}
 
 
 def _behavior(req: PromptRequest) -> str:
@@ -265,13 +265,13 @@ def test_emoji_hint_follows_preset():
 
 
 def test_selecting_preset_injects_behavior_without_qq_agent_profile():
-    """选了方案就该有行为段：不再要求 ``assembly_profile=qq_agent``。
+    """选了方案就该有行为段（不依赖任何档位开关）。
 
     否则用户在本体页面点了"角色扮演"，却因为模块默认档位是 legacy 而拿不到行为段，
     表现为"点了没反应"。
     """
     req = PromptRequest(
-        config={"prompt_preset": "assistant", "assembly_profile": "legacy", "system_prompt": "人设"},
+        config={"prompt_preset": "assistant", "system_prompt": "人设"},
         user_text="hi",
         available_tools=ALL_TOOLS,
     )

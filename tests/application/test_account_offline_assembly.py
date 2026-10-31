@@ -42,13 +42,20 @@ async def _add_account(bot_service, account_id: str = "acc_offline") -> str:
     )
 
 
-def _enable_timer_modules(container, account_id: str) -> None:
-    """新账号的模块默认关；本组用例只测"计时器的生命周期"，先显式打开带计时器的模块。"""
+async def _enable_timer_modules(container, account_id: str) -> None:
+    """新账号的模块默认关；本组用例只测"计时器的生命周期"，先显式打开带计时器的模块。
+
+    **禁用模块不会跑 `on_load`**（`app/plugin/loader.activate`：关着的模块不装配定时任务/
+    主动消息管理器），所以只改 authority 不够——必须重载实例，让 on_load 在"已启用"
+    状态下执行，管理器和计时器才会挂到运行时上。
+    """
+    from app.application.bot_service import BotService
     from app.infrastructure.config.config_service import ConfigService
 
     cfg = container.get(ConfigService)
     for module in ("llm_schedule", "llm_proactive"):
         cfg.set_module_authority(module, account_id, {"enabled": True})
+    await container.get(BotService).reload_modules(account_id)
 
 
 async def test_creating_account_assembles_runtime_offline(container):
@@ -127,9 +134,14 @@ async def test_unknown_account_is_404(container):
 
 
 async def test_offline_account_arms_no_timers(container):
-    """**离线不跑任务**：定时任务/主动消息管理器都在，但计时器一个都不许武装。"""
+    """**离线不跑任务**：定时任务/主动消息管理器都在，但计时器一个都不许武装。
+
+    注意：模块关闭时框架**不跑 `on_load`**（关着的模块不该装定时任务），所以这里先
+    显式启用再重载——本用例要守的是"管理器装好了但没武装"，不是"关着也装配"。
+    """
     bot_service = container.get(BotService)
     account_id = await _add_account(bot_service, "acc_idle")
+    await _enable_timer_modules(container, account_id)
     runtime = container.get(AgentManager).get_runtime(account_id)
 
     scheduler = getattr(runtime, "scheduler", None)
@@ -147,7 +159,7 @@ async def test_going_online_starts_timers_and_offline_stops_them(container):
     """上线武装、断线停止：`on_bot_login` / `on_bot_status` 是这两个开关。"""
     bot_service = container.get(BotService)
     account_id = await _add_account(bot_service, "acc_net")
-    _enable_timer_modules(container, account_id)
+    await _enable_timer_modules(container, account_id)
     runtime = container.get(AgentManager).get_runtime(account_id)
     scheduler = getattr(runtime, "scheduler", None)
     assert scheduler is not None
@@ -180,7 +192,7 @@ async def test_non_offline_states_do_not_stop_timers(container, state):
     """只有 disconnected / error 才停任务；连接途中的状态不能误停。"""
     bot_service = container.get(BotService)
     account_id = await _add_account(bot_service, f"acc_state_{state}")
-    _enable_timer_modules(container, account_id)
+    await _enable_timer_modules(container, account_id)
     runtime = container.get(AgentManager).get_runtime(account_id)
     scheduler = getattr(runtime, "scheduler", None)
 

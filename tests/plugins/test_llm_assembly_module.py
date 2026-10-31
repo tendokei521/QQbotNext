@@ -37,31 +37,37 @@ def _req(config=None, **over):
     return PromptRequest(**base)
 
 
-def test_module_profile_drives_behavior_block():
-    """`assembly_profile=qq_agent` + 行为规则开启 → `behavior` 块真的产出内容。
+def test_module_config_drives_behavior_block():
+    """模块自己的配置能改变装配结果：``behavior_rules_override`` 整体替换行为段。
 
-    用 `describe()` 按块名断言，比在文本里搜关键词稳（行为段正文由
-    `persona_rules` 生成，措辞会变）。
+    行为段本身由提示词方案决定（agent 级 ``prompt_preset``）；本模块持有的是
+    "覆盖正文"这类细调键，所以用覆盖文本来验证"模块配置真的进了装配"。
     """
-    agent_cfg = {"system_prompt": "你是助手", "assembly_profile": "blocks"}
+    agent_cfg = {"system_prompt": "你是助手", "prompt_preset": "chat"}
 
     plain = PromptAssembler().describe(_req(config=dict(agent_cfg)))
-    adapter = AssemblyAdapter(
-        SimpleNamespace(
+    adapter = AssemblyAdapter(        SimpleNamespace(
             get=lambda k, d=None: {
-                "assembly_profile": "qq_agent",
-                "behavior_rules_enable": True,
+                            "behavior_rules_override": "自定义行为规则",
             }.get(k, d)
         ),
         OWNED_KEYS,
     )
     with_module = PromptAssembler().describe(_req(config=adapter.view_for(dict(agent_cfg))))
 
-    def _behavior_chars(rows):
-        return next(r["chars"] for r in rows if r["block"] == "behavior")
+    plain_req = _req(config=dict(agent_cfg))
+    module_adapter = adapter
+    module_req = _req(config=module_adapter.view_for(dict(agent_cfg)))
 
-    assert _behavior_chars(plain) == 0, "blocks 档不该有行为段"
-    assert _behavior_chars(with_module) > 0, "模块配置没有影响到装配结果"
+    def _behavior_text(req):
+        for msg in PromptAssembler().build(req):
+            text = str(msg.get("content") or "")
+            if msg.get("role") == "system" and "【安全规则" in text:
+                return text
+        return ""
+
+    assert _behavior_text(plain_req) != _behavior_text(module_req), "模块配置没有影响到装配结果"
+    assert "自定义行为规则" in _behavior_text(module_req)
 
 
 def test_module_config_overrides_agent_config():
@@ -125,12 +131,12 @@ def _make_module(runtime, values=None):
 
 async def test_on_load_installs_adapter_and_options():
     runtime = _Runtime()
-    module = _make_module(runtime, {"assembly_profile": "qq_agent"})
+    module = _make_module(runtime, {"behavior_rules_override": "自定义"})
 
     await module.on_load()
     assert isinstance(runtime.assembler, AssemblyAdapter)
     assert runtime.assembly_options is not None
-    assert runtime.assembly_options.get("assembly_profile") == "qq_agent"
+    assert runtime.assembly_options.get("behavior_rules_override") == "自定义"
 
     await module.on_unload()
     assert isinstance(runtime.assembler, PromptAssembler)

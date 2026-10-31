@@ -90,14 +90,14 @@ def test_chained_view_handles_cross_module_keys():
     runtime = _runtime_with_views(
         {
             "output": {"stream_output": True, "speech_via_tool": True},
-            "assembly": {"assembly_profile": "qq_agent"},
+            "assembly": {"behavior_rules_override": "自定义"},
         },
         {"max_message_length": 200},
     )
     view = policy_view(runtime)
 
     assert isinstance(view, ChainedConfig)
-    assert view.get("assembly_profile") == "qq_agent"      # 归 llm_assembly
+    assert view.get("behavior_rules_override") == "自定义"      # 归 llm_assembly
     assert view.get("speech_via_tool") is True             # 归 llm_output
     assert view.get("max_message_length") == 200           # 回退 agent 配置
     assert view.get("不存在", "默认") == "默认"
@@ -114,7 +114,7 @@ def test_uninstalling_one_module_restores_agent_value_for_its_keys_only():
         "memory": {"memory_enable": True},
     }
     runtime = _runtime_with_views(
-        views, {"stream_output": False, "memory_enable": False, "assembly_profile": "blocks"}
+        views, {"stream_output": False, "memory_enable": False}
     )
     assert policy_view(runtime).get("stream_output") is True
 

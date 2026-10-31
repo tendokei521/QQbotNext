@@ -27,7 +27,6 @@ from app.agent.delivery.speech import (
 
 #: 发言通道生效的完整条件（档位 + 开关 + 流式）
 SPEECH_CONFIG: dict = {
-    "assembly_profile": "qq_agent",
     "speech_via_tool": True,
     "stream_output": True,
 }
@@ -190,7 +189,7 @@ def test_speech_protocol_respects_multimodal_user_content():
 @pytest.mark.parametrize(
     "config",
     [
-        {"assembly_profile": "qq_agent", "speech_via_tool": False, "stream_output": True},
+        {"speech_via_tool": False, "stream_output": True},
         {},
     ],
 )
@@ -288,10 +287,10 @@ def test_outbox_summary_reports_state():
     "config,expected",
     [
         ({}, False),
-        ({"assembly_profile": "qq_agent", "speech_via_tool": False, "stream_output": True}, False),
+        ({"speech_via_tool": False, "stream_output": True}, False),
         # 只看开关：档位与 stream_output 都不再是门槛（发言通道已成主形态）
-        ({"assembly_profile": "qq_agent", "speech_via_tool": True, "stream_output": False}, True),
-        ({"assembly_profile": "legacy", "speech_via_tool": True, "stream_output": True}, True),
+        ({"speech_via_tool": True, "stream_output": False}, True),
+        ({"speech_via_tool": True, "stream_output": True}, True),
         ({"speech_via_tool": True}, True),
     ],
 )

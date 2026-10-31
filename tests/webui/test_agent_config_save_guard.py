@@ -56,8 +56,7 @@ class _Runtime:
             "group_enable": True,
             "private_enable": True,
             # 模块拥有的旧键（迁移残渣，值一直没变）
-            "assembly_profile": "qq_agent",
-            "speech_via_tool": False,
+                    "speech_via_tool": False,
             "onebot_tools_enable": True,
         })
         self.bot_id = "3437542570"
@@ -126,7 +125,7 @@ def test_get_config_hides_module_owned_keys(client):
     resp = http.get("/api/agent/config", params={"bot_id": 3437542570})
     assert resp.status_code == 200, resp.text
     config = resp.json()["config"]
-    for key in ("assembly_profile", "speech_via_tool", "onebot_tools_enable"):
+    for key in ("behavior_rules_override", "speech_via_tool", "onebot_tools_enable"):
         assert key not in config, f"{key} 是模块键，不该回传给 agent 页"
 
 
@@ -138,8 +137,7 @@ def test_small_save_is_not_blocked_by_echoed_module_keys(client):
             "group_enable": True,
             "private_enable": True,
             # 回声：值未变
-            "assembly_profile": "qq_agent",
-            "onebot_tools_enable": True,
+                    "onebot_tools_enable": True,
         },
     }
     resp = http.post("/api/agent/config", params={"bot_id": 3437542570}, json=body)
@@ -160,9 +158,12 @@ def test_changing_a_module_key_is_still_rejected(client):
 def test_module_owned_keys_cover_migrated_fields():
     """迁移清单里的键必须都被认定成模块拥有（否则仍会写错抽屉）。"""
     owned = module_owned_keys()
-    for key in ("assembly_profile", "speech_via_tool", "onebot_tools_enable", "memory_enable"):
+    for key in ("behavior_rules_override", "speech_via_tool", "onebot_tools_enable", "memory_enable"):
         assert key in owned, f"{key} 应归模块"
     assert "group_enable" not in owned, "本体键不该被当成模块键"
+    # 已删除的旧键不该再出现在任何清单里
+    for gone in ("assembly_profile", "behavior_rules_enable"):
+        assert gone not in owned, f"{gone} 已删除，不该仍被当成模块键"
 
 
 # ==================== 坏请求体：不许"假成功"，也不许 500 ====================

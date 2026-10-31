@@ -177,7 +177,7 @@ async def test_error_still_records_telemetry(probe):
 async def test_speech_fallback_is_written_to_history(probe):
     """发言通道开兜底时，兜底话术发出去就必须进历史。"""
     STREAMS.append([StreamEvent(type="error", text="HTTP 500")])
-    rt = _runtime(6604, _config(assembly_profile="qq_agent", speech_via_tool=True, speech_fallback_enable=True))
+    rt = _runtime(6604, _config(speech_via_tool=True, speech_fallback_enable=True))
     ctx = _ctx()
 
     out = [str(item) async for item in chat.stream_response(rt, ctx.event, ctx)]
@@ -189,7 +189,7 @@ async def test_speech_fallback_is_written_to_history(probe):
 async def test_error_does_not_force_speak_again(probe):
     """流式已失败就不该再补一轮请求（认证/配额类错误再打一枪只是再烧钱）。"""
     STREAMS.append([StreamEvent(type="error", text="HTTP 401")])
-    rt = _runtime(6605, _config(assembly_profile="qq_agent", speech_via_tool=True))
+    rt = _runtime(6605, _config(speech_via_tool=True))
     ctx = _ctx()
     forced = {"n": 0}
 

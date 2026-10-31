@@ -98,8 +98,7 @@ def _config(**over):
         "meta_sender_style": "off",
         "history_rounds": 50,
         "schedule_enable": True,
-        "assembly_profile": "qq_agent",
-        "speech_via_tool": True,
+            "speech_via_tool": True,
         "stream_output": True,
         "max_tool_rounds": 5,
     }
@@ -308,7 +307,7 @@ async def test_speech_off_keeps_text_as_speech(monkeypatch, tmp_path):
     _register(monkeypatch)
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
     STREAM_SCRIPT.append([_text("就这样吧。")])
-    rt = _runtime(997, _config(assembly_profile="legacy", speech_via_tool=False))
+    rt = _runtime(997, _config(speech_via_tool=False))
     ctx = _ctx(_event())
 
     sent = await _run_stream(rt, ctx)

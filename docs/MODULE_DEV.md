@@ -1274,7 +1274,7 @@ v3 把「高级功能」从 agent 配置页整体搬进了模块。**这 9 个�
 from app.agent.policy import policy_config, policy_get, policy_view
 
 policy_get(runtime, "memory", "memory_enable", False)   # 只关心一个模块的键
-policy_view(runtime).get("assembly_profile")            # 机制跨模块读键时用这条链
+policy_view(runtime).get("speech_via_tool", False)      # 机制跨模块读键时用这条链
 ```
 
 ### 4.10.1b 广播型钩子（业务订阅"事实"）
