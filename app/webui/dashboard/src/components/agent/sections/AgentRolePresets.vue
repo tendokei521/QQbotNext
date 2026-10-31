@@ -216,7 +216,18 @@ onMounted(() => {
               <template #prepend>
                 <v-icon icon="mdi-account-heart-outline" color="pink" />
               </template>
-              <v-list-item-title class="text-body-2">{{ p.name }}</v-list-item-title>
+              <v-list-item-title class="d-flex align-center flex-wrap gap-2 text-body-2">
+                <span>{{ p.name }}</span>
+                <!-- 用着哪个就在列表里标出来：不用点开右侧预览才知道当前生效的是谁 -->
+                <v-chip
+                  v-if="p.id === boundPresetId"
+                  size="x-small"
+                  color="pink"
+                  variant="tonal"
+                >
+                  使用中
+                </v-chip>
+              </v-list-item-title>
               <v-list-item-subtitle class="text-caption">
                 {{ p.description || '无描述' }}
               </v-list-item-subtitle>
@@ -233,7 +244,7 @@ onMounted(() => {
               <div class="d-flex align-center flex-wrap gap-2 mb-2">
                 <v-chip size="small" color="pink" variant="tonal">{{ selectedPreset.name }}</v-chip>
                 <v-chip v-if="selectedPreset.id === boundPresetId" size="small" color="success" variant="tonal">
-                  当前正在使用
+                  使用中
                 </v-chip>
                 <v-chip
                   v-else-if="persona.kind === 'same-content' && selectedPreset.id === persona.presetId"
