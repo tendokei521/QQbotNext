@@ -1,6 +1,6 @@
 {
   "name": "llm_output",
-  "display_name": "输出策略",
+  "display_name": "流式输出",
   "sign": "LlmOutput",
   "version": "1.0.0",
   "description": "决定一轮回复怎么发：一次发完、逐句发还是先想再说",
