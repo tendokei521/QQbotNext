@@ -32,8 +32,8 @@ messages（OpenAI 风格）
   用进程级默认表。默认段由 ``default_sections()`` 首次解析时注入，"默认段始终存在"；
 - **`describe(req)`** 返回 ``[{block, layer, role, chars, messages}]``，`[Prompt]` 调试日志
   与快照测试都用它，想回答"这次请求发了什么、由哪几层组成"不必再打印全文；
-- **组装风格可切**：``system_prompt_style="single"`` 时把所有 system 段再折成一条
-  （``fold_system_blocks``）；默认 ``blocks`` 保留分层形态（L1 一条、L2 一条、L3 若干）。
+- **只有一种形态**：L1 一条 system、L2 一条、L3 若干。旧的 ``system_prompt_style=single``
+  （把所有 system 折成一整条，只为对齐第三方形态）已删除——折掉之后"层"就不存在了。
 
 ## 段顺序（层内 order；详见 ``builtin_sections`` 的表）
 
@@ -194,7 +194,7 @@ class Block:
     """（deprecated）旧的「命名块」接口：名称 + 生成函数 + 适用条件。
 
     新代码请用 ``sections.Section`` + ``register_section(runtime, ...)``；本类只为
-    兼容既有外部引用（``fold_system_blocks`` 的测试替身、自定义块表）保留。
+    兼容既有外部引用（自定义块表）保留。
     它没有 ``order``，只在 ``PromptAssembler(blocks=...)`` 的旧构造路径里使用。
     """
 
@@ -237,8 +237,7 @@ def build_all_blocks(req: PromptRequest, sections: list[Any] | None = None) -> B
       一次旁路故障就会让用户完全收不到回复，代价远大于收益。该取舍与改造前
       「单块失败已跳过」一致，只把日志级别从 warning 提到 error。
 
-    ``system_prompt_style == "single"`` 时把所有 system 段折成一条（见
-    ``fold_system_blocks``）；默认 ``blocks`` 保持既有形态不变。
+    每层独立成条：L1 合并后一条 system，L2 一条，L3 若干（不再支持整体折叠）。
     """
     if sections is None:
         try:
@@ -258,10 +257,7 @@ def build_all_blocks(req: PromptRequest, sections: list[Any] | None = None) -> B
             )
             messages = []
         built.append((section, list(messages)))
-    built = merge_layer_blocks(built, LAYER_SYSTEM_PROMPT)
-    if system_style(req) == SYSTEM_STYLE_SINGLE:
-        built = fold_system_blocks(built)
-    return built
+    return merge_layer_blocks(built, LAYER_SYSTEM_PROMPT)
 
 
 def merge_layer_blocks(built: BuiltBlocks, layer: str) -> BuiltBlocks:
@@ -359,52 +355,7 @@ def _build_legacy_blocks(req: PromptRequest, blocks: tuple[Block, ...]) -> Built
                 f"[Assembly] 块 {block.name} 构建失败（已跳过）: {e}"
             )
             built.append((block, []))
-    if system_style(req) == SYSTEM_STYLE_SINGLE:
-        built = fold_system_blocks(built)
     return built
-
-
-#: 组装风格：各段各自一条 system（默认，保持既有形态）
-SYSTEM_STYLE_BLOCKS = "blocks"
-#: 组装风格：所有 system 段折成一条（对齐 AstrBot 「一整条 system prompt」的形态）
-SYSTEM_STYLE_SINGLE = "single"
-
-
-def system_style(req: PromptRequest) -> str:
-    """读取本轮组装风格（未知值一律按默认 ``blocks`` 处理）。"""
-    style = str(req.cfg("system_prompt_style", SYSTEM_STYLE_BLOCKS) or SYSTEM_STYLE_BLOCKS)
-    return SYSTEM_STYLE_SINGLE if style.strip().lower() == SYSTEM_STYLE_SINGLE else SYSTEM_STYLE_BLOCKS
-
-
-def fold_system_blocks(built: BuiltBlocks) -> BuiltBlocks:
-    """把各段的 system 消息折成一条，挂在**第一个**含 system 的段上。
-
-    - 只折叠 ``role == "system"`` 且 content 为字符串的消息，文本按段顺序用
-      ``\\n\\n`` 连接（空内容丢弃）；其余角色（历史 / 本轮 user）与多模态块原样保留；
-    - 在**段结果**上折叠而不是在摊平后的消息列表上，是为了让 ``describe()`` 的
-      「段 ↔ 消息」对位继续成立：被折走消息的段显示为无消息，一眼能看出它去了哪。
-    """
-    texts: list[str] = []
-    target: int | None = None
-    kept_blocks: list[list[dict]] = []
-    for index, (_block, msgs) in enumerate(built):
-        kept: list[dict] = []
-        for msg in msgs:
-            content = msg.get("content")
-            if msg.get("role") == "system" and isinstance(content, str):
-                if target is None:
-                    target = index
-                if content.strip():
-                    texts.append(content)
-                continue
-            kept.append(msg)
-        kept_blocks.append(kept)
-
-    if target is None:
-        return built  # 没有任何 system 段 → 原样返回
-
-    kept_blocks[target].insert(0, {"role": "system", "content": "\n\n".join(texts)})
-    return [(block, kept_blocks[index]) for index, (block, _msgs) in enumerate(built)]
 
 
 def default_blocks() -> tuple[Block, ...]:
@@ -788,8 +739,6 @@ async def apply_post_assemble(
 
 __all__ = [
     "BLOCKS",
-    "SYSTEM_STYLE_BLOCKS",
-    "SYSTEM_STYLE_SINGLE",
     "Block",
     "PromptAssembler",
     "PromptRequest",
@@ -815,7 +764,6 @@ __all__ = [
     "describe",
     "describe_blocks",
     "flatten",
-    "fold_system_blocks",
     "message_meta_instruction",
     "persona_begin_dialogs",
     "place_images",
@@ -824,6 +772,5 @@ __all__ = [
     "resolve_blocks",
     "resolve_persona_preset",
     "sanitize",
-    "system_style",
     "unregister_section",
 ]

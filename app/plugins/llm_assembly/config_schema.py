@@ -38,13 +38,6 @@ SCHEMA = {
         "default": "user_head",
         "options": {"user_head": "消息头部", "user_tail": "消息尾部", "off": "不注入"},
     },
-    "system_prompt_style": {
-        "type": "select",
-        "label": "消息组装风格",
-        "description": "blocks=多个 system 块；single=折成一整条（对齐第三方形态）",
-        "default": "blocks",
-        "options": {"blocks": "分块（默认）", "single": "折成一条"},
-    },
     "prompt_dump_enable": {
         "type": "boolean",
         "label": "请求落盘（对账）",

@@ -179,15 +179,17 @@ def test_runtime_without_config_service_is_safe():
 # ==================== 与其它组装能力的配合 ====================
 
 
-def test_single_style_folds_preset_prompt_into_one_system():
+def test_persona_stays_its_own_system_message():
+    """层各自成条：人格是独立一条 system（L2），不会被并进 L1 规则段。"""
     req = _req(
         config_service=_ConfigService({"p1": PRESET}),
-        config={"persona_preset_id": "p1", "system_prompt_style": "single", "outbound_directive_enable": False},
+        config={"persona_preset_id": "p1", "outbound_directive_enable": False},
     )
-    messages = PromptAssembler().build(req)
-    systems = [m for m in messages if m["role"] == "system"]
-    assert len(systems) == 1, "单条风格应只剩一条 system"
-    assert "你是傲娇猫娘。" in systems[0]["content"], "人设必须还在折叠结果里"
+    systems = [m["content"] for m in PromptAssembler().build(req) if m["role"] == "system"]
+    assert "你是傲娇猫娘。" in systems, "人格必须单独成条"
+    # 人设那条里不该出现规则段的标记（说明没有被并进 L1）
+    persona_text = systems[systems.index("你是傲娇猫娘。")]
+    assert "【安全规则" not in persona_text
 
 
 def test_describe_reports_persona_block():

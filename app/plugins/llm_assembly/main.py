@@ -30,7 +30,6 @@ OWNED_KEYS: tuple[str, ...] = (
     "emoji_react_level",
     "user_message_format",
     "prompt_time_position",
-    "system_prompt_style",
     "prompt_dump_enable",
     "prompt_dump_max_entries",
 )
@@ -52,7 +51,6 @@ class Module(BaseModule):
         "emoji_react_level": 0,
         "user_message_format": "default",
         "prompt_time_position": "user_head",
-        "system_prompt_style": "blocks",
         "prompt_dump_enable": False,
         "prompt_dump_max_entries": 20,
     }

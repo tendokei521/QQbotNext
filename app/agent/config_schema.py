@@ -162,15 +162,6 @@ SCHEMA = {
         "description": "人格由选中的预设决定，改预设立刻生效；留空用内置默认人格。",
         "default": "", "group": "group_session",
     },
-    "system_prompt_style": {
-        "type": "select", "label": "消息组装风格",
-        "description": "分块 = 人格、技能、记忆各一条系统消息（默认）；单条 = 合并为一条。",
-        "default": "blocks", "group": "group_session",
-        "options": {
-            "blocks": "分块：每类一块 system（默认）",
-            "single": "单条：折成一整条 system prompt",
-        },
-    },
     "behavior_rules_override": {
         "type": "textarea", "label": "覆盖行为规则",
         "description": "留空使用内置行为规则；填写后整体替换，安全规则与工作方式仍强制保留。",

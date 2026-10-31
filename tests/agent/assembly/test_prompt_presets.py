@@ -302,22 +302,17 @@ def test_preset_does_not_touch_persona_block():
         assert _l1_text(req) != "我是独特的人设正文", "人设不该被并进 L1 规则段"
 
 
-def test_folding_style_still_works_with_preset():
-    """``system_prompt_style=single`` 与方案正交：折成一条后段落在里面。"""
+def test_layers_stay_separate_after_preset_selection():
+    """层各自成条（旧的整体折叠风格已删除）：L1 规则一条、L2 人设一条。"""
     req = PromptRequest(
-        config={
-            "prompt_preset": "roleplay",
-            "system_prompt": "人设",
-            "system_prompt_style": "single",
-            "outbound_directive_enable": True,
-        },
+        config={"prompt_preset": "roleplay", "system_prompt": "人设", "outbound_directive_enable": True},
         user_text="hi",
         available_tools=ALL_TOOLS,
     )
-    messages = PromptAssembler().build(req)
-    systems = [m for m in messages if m["role"] == "system"]
-    assert len(systems) == 1
-    assert "【角色一致性：不许跳出】" in systems[0]["content"]
+    systems = [m["content"] for m in PromptAssembler().build(req) if m["role"] == "system"]
+    assert len(systems) >= 2
+    assert "【角色一致性：不许跳出】" in systems[0], "L1 规则必须是第一条"
+    assert systems[1] == "人设", "L2 人格紧跟其后、独立成条"
 
 
 def test_every_preset_explains_tool_speech():

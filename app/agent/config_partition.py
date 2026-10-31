@@ -346,7 +346,6 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
         "emoji_react_level",
         "user_message_format",
         "prompt_time_position",
-        "system_prompt_style",
         "prompt_dump_enable",
         "prompt_dump_max_entries",
     ),

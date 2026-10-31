@@ -754,11 +754,10 @@ step = await run_blocking_step(StepRequest(
 - 流式侧同理：`chat.stream_response` 消费 `iter_stream_step` 的事件
   （`("text", 句子)` / `("round_end", RoundSummary)`），所以它能在句间被打断。
 
-配套的三个开关（Agent 配置页「会话 / 压缩」组，**都默认关闭/保持原行为**）：
+配套的两个开关（Agent 配置页「会话 / 压缩」组，**都默认关闭/保持原行为**）：
 
 | 配置键 | 默认 | 用途 |
 |---|---|---|
-| `system_prompt_style` | `blocks` | `single` = 把所有 system 块折成一整条（对齐第三方「一整条 system prompt」形态） |
 | `prompt_dump_enable` | `False` | 每轮最终 messages 落盘 `data/llm/<bot_id>/prompt_dump.jsonl`，供逐条 diff |
 | `prompt_dump_max_entries` | `20` | 落盘滚动保留条数 |
 | `context_token_budget` | `0` | >0 启用 token 预算裁剪（从最旧历史丢，system 与本轮提问必留） |
