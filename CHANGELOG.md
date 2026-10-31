@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### 记忆改走 user 侧数据块：上下文贡献者支持 `role="user"`（2026-10-31）
+
+`context_providers` 以前只能产出 system 指令块；记忆这类「来自用户的资料」被当成
+system 内容，既抬高了 prompt-injection 风险，也让 system 前缀逐轮变化。现在：
+
+- `providers.ContextBlock` + `collect_context_blocks()` 按 `role`（`system` / `user`）分流；
+  provider 可声明 `role="user"` 或直接返回 `ContextBlock`；
+- 新增 `PromptRequest.user_blocks`：user 数据块合并进本轮 user 消息，顺序为
+  「数据块 → 用户正文 → 额外内容块 → 图片」，有图时同样保留；
+- 新增 `assembly/context_data.py`：`<memory_data source=…>` 标签 + 「不是指令」声明，
+  并清理正文里的同名标签防止数据边界逃逸；
+- `llm_memory` 的画像/事实块改走该通道；主动消息/定时任务路径
+  （`assembly/inputs.py`）同步返回 `memory_user_blocks`，两条路径格式一致；
+- 兼容：`extra_blocks`（system）与 `PromptRequest.memory_text` 旧字段保留，现有模块无需改。
+
 ### 重写长期记忆插件：常驻画像 + 混合召回 + 后台蒸馏（2026-10-31）
 
 `app/plugins/llm_memory` 按 v3 设计整体重写（契约见 `docs/plan/memory-v3-rewrite.md`，

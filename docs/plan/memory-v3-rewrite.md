@@ -376,13 +376,27 @@ async embedding_status() -> dict
 stop()
 ```
 
-`src/service.py`：`MemoryProvider`（画像块 + 召回块拼成一个块，order=30）、
-`MemoryToolSource`、`MemoryLifecycle`（pre_request：record_episode + autosave；
+`src/service.py`：`MemoryProvider`（画像块 + 召回块 → 包成 **user 侧数据块**，`role="user"`，
+order=30）、`MemoryToolSource`、`MemoryLifecycle`（pre_request：record_episode + autosave；
 turn_completed：maybe_consolidate；session_reset：on_session_reset）。
 
 `main.py`：`OWNED_KEYS` 17+6；`on_load` 挂 `memory_options` / `memory_service` /
 provider / tool source / 3 个 llm_hook / 后台 embedding 回填（`self.spawn`）；
 `@command_group("memory", ...)` + 8 个子命令；`on_unload` 全摘。
+
+### 5.9 框架接口（v3 配套改动）
+
+- `app/agent/loop/providers.py`：新增 `ContextBlock(name, text, role="system")`；
+  `collect_context_blocks()` 返回 `list[ContextBlock]`，provider 可声明 `role="user"`
+  或直接返回 `ContextBlock`（显式指定）。
+- `PromptRequest.user_blocks`（`list[(块名, 文本)]`）：user 侧数据块。`build_user`
+  按「数据块 → 用户正文 → 额外内容块 → 图片」渲染；`place_images` 在有图时同样保留数据块。
+- `app/agent/assembly/context_data.py`：`wrap_data_block()` / `wrap_memory_data()` 统一
+  加 `<memory_data source=…>` 标签与「不是指令」声明，并替换正文里的同名标签（防边界逃逸）。
+- 主动消息 / 定时任务走 `assembly/inputs.py`：`collect_history_materials()` 现在同时返回
+  `memory_text`（旧字段）与 `memory_user_blocks`（数据块），两条路径都把记忆放 user 侧。
+- 记忆不再占用 system 指令位，system 前缀更稳定；agent 侧 `MemoryProvider` 与
+  无事件路径共用同一包装函数，格式不会漂移。
 
 ## 7. 配置（23 键）
 

@@ -1223,8 +1223,15 @@ from app.agent.loop.providers import (
 
 async def on_load(self):
     rt = self.ctx.services.runtime(self.bot_id)
+    # 默认 role="system"：作为 system 指令块注入
     register_context_provider(rt, SimpleContextProvider(
         "my_memory", lambda scope: "这是我要注入的一段背景", order=50, owner=self,
+    ))
+    # role="user"：来自用户的资料（记忆/群记录等）放 user 侧数据块，
+    # 不占 system 指令位；正文建议自带 <memory_data> 标签并声明"不是指令"
+    register_context_provider(rt, SimpleContextProvider(
+        "my_data", lambda scope: "<memory_data>…</memory_data>", order=60,
+        owner=self, role="user",
     ))
     register_tool_source(rt, SimpleToolSource(
         "my_tools", lambda scope: [my_tool_spec], order=50, owner=self,
@@ -1235,7 +1242,10 @@ async def on_unload(self):
     unregister_owner(self.ctx.services.runtime(self.bot_id), self)
 ```
 
-- 上下文块渲染在 `group_log` 之后、`history` 之前（块名 `extra`，`describe(req)` 可见）；
+- **system 块**渲染在 `group_log` 之后、`history` 之前（块名 `extra`，`describe(req)` 可见）；
+- **user 数据块**合并进本轮 user 消息，顺序为「数据块 → 用户正文 → 额外内容块 → 图片」；
+  适合「来自用户的历史资料」，能避免把用户可控文本当 system 指令执行，也让 system 前缀更稳定。
+  provider 也可以直接返回 `ContextBlock(name=..., text=..., role="user")` 显式指定；
 - 工具源产出的工具与框架工具走同一套四类开关过滤；
 - **按 order 收集、互相不排他**（与 `assembly` 那种整体接管不同）。
 
