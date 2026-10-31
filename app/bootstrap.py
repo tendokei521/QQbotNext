@@ -530,12 +530,19 @@ async def run(settings: Settings | None = None) -> None:
     # 系统提示词方案：加载"设置页里编辑过"的覆盖文本 + 把未选方案的存量账号落到 chat
     try:
         from app.application import prompt_preset_service
-        from app.application.agent_prompt_preset_migration import migrate_prompt_preset
+        from app.application.agent_prompt_preset_migration import (
+            migrate_prompt_preset,
+            reconcile_persona_copy,
+        )
 
         await prompt_preset_service.load_overrides(config_service)
         updated = await migrate_prompt_preset(config_service)
         if updated:
             logger.info(f"[PromptPreset] 已将 {updated} 个账号的提示词方案落到默认 chat")
+        # 人格单一来源：把账号里的 system_prompt 副本对齐到它绑定的预设
+        fixed = await reconcile_persona_copy(config_service)
+        if fixed:
+            logger.info(f"[Persona] 已对齐 {fixed} 个账号的人格文案副本")
     except Exception as e:  # noqa: BLE001 —— 提示词方案加载失败不该阻断启动
         logger.warning(f"[PromptPreset] 初始化失败（已忽略）: {e}")
 
