@@ -338,16 +338,30 @@ def _extra_text_parts(req: Any) -> list[dict]:
     ]
 
 
+def _user_block_parts(req: Any) -> list[dict]:
+    """模块贡献的 user 侧数据块（``req.user_blocks``）→ 多模态 text 块。"""
+    return [
+        {"type": "text", "text": str(text).strip()}
+        for _name, text in (getattr(req, "user_blocks", None) or [])
+        if str(text or "").strip()
+    ]
+
+
 def build_user(req: Any) -> list[dict]:
     """本轮消息。图片块由 ``place_images`` 在清洗前归位。
 
-    没有 ``extra_user_content_parts`` 时保持**纯字符串** content（与旧行为逐字一致）；
-    有值时改多块数组（正文 → 额外块），空正文只留额外块。
+    没有 user 数据块 / ``extra_user_content_parts`` 时保持**纯字符串** content
+    （与旧行为逐字一致）；有值时改多块数组：
+
+    - 顺序：**模块 user 数据块 → 正文 → 额外内容块 → 图片**。数据块放在正文之前，
+      模型先读到"历史资料"再读本轮问题，同时它属于 user 轮次而不是 system 指令位。
+    - 空正文只留数据块 / 额外块。
     """
+    blocks = _user_block_parts(req)
     parts = _extra_text_parts(req)
-    if not parts:
+    if not blocks and not parts:
         return [{"role": "user", "content": req.user_text}]
-    content: list[dict] = []
+    content: list[dict] = list(blocks)
     if str(req.user_text or "").strip():
         content.append({"type": "text", "text": req.user_text})
     content.extend(parts)

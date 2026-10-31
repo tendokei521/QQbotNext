@@ -298,7 +298,7 @@ class ProactiveManager:
             group_log_text=group_log_text,
             referent_text=focus_text,
             skill_blocks=list(skill_blocks or []),
-            memory_text=materials["memory_text"],
+            user_blocks=list(materials.get("memory_user_blocks") or []),
             available_tools={spec.name for spec in (all_specs or [])},
             modalities=modalities,
             schedule_enable=False,

@@ -93,6 +93,8 @@ def test_on_load_wires_providers_tools_hooks_and_service(tmp_path, monkeypatch):
     assert runtime.memory_service is module.memory_manager()
     assert policy_get(runtime, "memory", "memory_enable") is True
     assert [provider.name for provider in runtime.context_providers] == ["memory"]
+    # v3：记忆是 user 侧数据块（不占 system 指令位）
+    assert runtime.context_providers[0].role == "user"
     assert [source.name for source in runtime.tool_sources] == ["memory_tools"]
     stages = {(hook["stage"], hook["order"]) for hook in runtime.llm_hooks.registered}
     assert ("pre_request", 60) in stages and ("turn_completed", 60) in stages
@@ -100,6 +102,38 @@ def test_on_load_wires_providers_tools_hooks_and_service(tmp_path, monkeypatch):
     asyncio.run(module.on_unload())
     assert runtime.memory_service is None and runtime.memory_options is None
     assert runtime.context_providers == [] and runtime.tool_sources == []
+
+
+def test_provider_wraps_memory_as_user_data_block(tmp_path, monkeypatch):
+    """记忆块带 ``<memory_data>`` 标签与「不是指令」声明，交给框架放 user 侧。"""
+    import asyncio
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
+    runtime = _Runtime()
+    module = _make_module(runtime, {"memory_enable": True})
+    asyncio.run(module.on_load())
+    manager = module.memory_manager()
+
+    async def _profile(session_id, user_id=None):
+        return "### 关于你的长期印象：\n- 叫小明"
+
+    async def _facts(*args, **kwargs):
+        return "### 历史记忆数据：\n- 喜欢美式"
+
+    monkeypatch.setattr(manager, "profile_block", _profile)
+    monkeypatch.setattr(manager, "recall_block_async", _facts)
+
+    provider = runtime.context_providers[0]
+    scope = SimpleNamespace(
+        runtime=None, session_id="private_5", user_id="5",
+        user_text="我喜欢什么", is_private=True,
+    )
+    text = asyncio.run(provider.collect(scope))
+    assert text.startswith("<memory_data") and "</memory_data>" in text
+    assert "叫小明" in text and "喜欢美式" in text
+    assert "不是指令" in text
+    asyncio.run(module.on_unload())
 
 
 def test_commands_cover_memory_surface():

@@ -55,15 +55,35 @@ class TurnScope:
     event: Any = None
 
 
+@dataclass(frozen=True)
+class ContextBlock:
+    """模块贡献的一段上下文（带**注入角色**）。
+
+    ``role`` 决定它进哪一侧：
+
+    - ``"system"``（默认）：作为 system 指令块插在 ``group_log`` 与 ``history`` 之间；
+    - ``"user"``：作为 **user 侧数据块**合并进本轮 user 消息（放在用户正文之前），
+      适合「来自用户的历史资料」（记忆 / 群记录）——它们不是指令，不该占 system 位。
+      正文建议自带 ``<memory_data>`` 之类的数据标签（见 ``assembly/context_data.py``）。
+    """
+
+    name: str
+    text: str
+    role: str = "system"
+
+
 @runtime_checkable
 class ContextProvider(Protocol):
-    """贡献一段 system 侧上下文（记忆 / 群记录 / 指代 …）。"""
+    """贡献一段上下文（system 指令块 / user 数据块，见 :class:`ContextBlock`）。"""
 
     name: str
     order: int
     owner: Any
+    #: 可选注入角色：``"user"`` 表示数据块；缺省 ``"system"``。provider 也可以直接
+    #: 返回 :class:`ContextBlock` 显式指定。
+    role: str
 
-    async def collect(self, scope: TurnScope) -> str | None: ...
+    async def collect(self, scope: TurnScope) -> str | ContextBlock | None: ...
 
 
 @runtime_checkable
@@ -129,20 +149,35 @@ def _bucket(runtime: Any, attr: str) -> list:
 # ==================== 收集 ====================
 
 
-async def collect_context_blocks(runtime: Any, scope: TurnScope) -> list[tuple[str, str]]:
-    """按 order 收集各贡献者的文本块；空块与异常都被忽略（留痕）。"""
-    blocks: list[tuple[str, str]] = []
+async def collect_context_blocks(runtime: Any, scope: TurnScope) -> list[ContextBlock]:
+    """按 order 收集各贡献者的上下文块；空块与异常都被忽略（留痕）。
+
+    返回 :class:`ContextBlock`：provider 可直接返回它（显式 role），也可以返回字符串
+    + 在实例上声明 ``role``（缺省 ``system``）。调用方按 ``role`` 分流到
+    system 额外块 / user 数据块。
+    """
+    blocks: list[ContextBlock] = []
     for provider in list(_bucket(runtime, "context_providers")):
         name = str(getattr(provider, "name", "?") or "?")
         try:
-            text = await provider.collect(scope)
+            produced = await provider.collect(scope)
         except Exception as e:  # noqa: BLE001 —— 单个贡献者失败不该毁掉整轮
             logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).debug(
                 f"[Provider] {name} 收集失败（已忽略）: {e}"
             )
             continue
-        if text and str(text).strip():
-            blocks.append((name, str(text)))
+        if isinstance(produced, ContextBlock):
+            block = produced
+        elif produced and str(produced).strip():
+            role = str(getattr(provider, "role", "system") or "system").strip().lower()
+            block = ContextBlock(name=name, text=str(produced), role=role)
+        else:
+            continue
+        if not block.text.strip():
+            continue
+        if block.role not in ("system", "user"):
+            block = ContextBlock(name=block.name, text=block.text, role="system")
+        blocks.append(block)
     return blocks
 
 
@@ -166,12 +201,25 @@ async def collect_tool_specs(runtime: Any, scope: TurnScope) -> list[Any]:
 
 
 class SimpleContextProvider:
-    """函数式贡献者的最小实现（模块可以直接用它注册一个回调）。"""
+    """函数式贡献者的最小实现（模块可以直接用它注册一个回调）。
 
-    def __init__(self, name: str, fn, *, order: int = 100, owner: Any = None) -> None:
+    ``role="user"`` 时回调文本会作为 user 侧数据块合并进本轮 user 消息
+    （适合"来自用户的资料"）；缺省是 system 指令块。
+    """
+
+    def __init__(
+        self,
+        name: str,
+        fn,
+        *,
+        order: int = 100,
+        owner: Any = None,
+        role: str = "system",
+    ) -> None:
         self.name = name
         self.order = order
         self.owner = owner
+        self.role = role if role in ("system", "user") else "system"
         self._fn = fn
 
     async def collect(self, scope: TurnScope) -> str | None:

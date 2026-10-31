@@ -291,9 +291,10 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
     # 指代消解：焦点行 + 明确指向时的确定性预取（放在背景块之前，信息密度更高）
     referent_text = ""  # 指代块由 `llm_context` 模块通过 context_providers 贡献
 
-    # 模块贡献的额外上下文块（记忆/知识库/群记录等做成模块时的接入点）：
-    # 按 order 收集，装配器把它们渲染在 group_log 之后、history 之前。
-    extra_blocks = await _collect_extra_blocks(
+    # 模块贡献的上下文块（记忆/群记录/指代等做成模块时的接入点）：
+    # 按 order 收集后按 role 分流——system 块渲染在 group_log 之后、history 之前；
+    # user 块（来自用户的资料，如记忆）合并进本轮 user 消息，避免占用 system 指令位。
+    extra_blocks, user_blocks = await _collect_extra_blocks(
         runtime,
         session_id=session_id,
         is_private=is_private,
@@ -356,6 +357,7 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
         schedule_enable=schedule_enable,
         user_images=user_images,
         extra_blocks=extra_blocks,
+        user_blocks=user_blocks,
     )
     # 模型参数**只认 provider chain**（用户在「Provider 预设 → 模型」里配）。
     # agent 配置里不再有 model / max_tokens / temperature（v3.2 删除）。
@@ -390,8 +392,11 @@ def _context_policy(runtime):
 
 async def _collect_extra_blocks(
     runtime, *, session_id, is_private, user_id, group_id, user_text, history
-) -> list[tuple[str, str]]:
-    """收集模块注册的额外上下文块；没有注册者时返回空列表（零开销）。"""
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """收集模块注册的上下文块，按 role 分成 ``(system 块, user 数据块)``。
+
+    没有注册者时返回两个空列表（零开销）；单个贡献者失败只留痕、不影响其它块。
+    """
     try:
         from app.agent.loop.providers import TurnScope, collect_context_blocks
 
@@ -405,12 +410,15 @@ async def _collect_extra_blocks(
             user_text=user_text,
             history=tuple(history or ()),
         )
-        return await collect_context_blocks(runtime, scope)
+        blocks = await collect_context_blocks(runtime, scope)
+        system_blocks = [(block.name, block.text) for block in blocks if block.role == "system"]
+        user_blocks = [(block.name, block.text) for block in blocks if block.role == "user"]
+        return system_blocks, user_blocks
     except Exception as e:  # noqa: BLE001 —— 贡献者收集失败不该毁掉整轮
         logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).debug(
             f"[Provider] 额外上下文块收集失败（已忽略）: {e}"
         )
-        return []
+        return [], []
 
 
 async def _fetch_pre_history(

@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.agent.loop.providers import (
+    ContextBlock,
     SimpleContextProvider,
     SimpleToolSource,
     TurnScope,
@@ -24,10 +25,11 @@ from app.agent.loop.providers import (
 
 
 class _Provider:
-    def __init__(self, name, text, *, order=100, owner=None, boom=False):
+    def __init__(self, name, text, *, order=100, owner=None, boom=False, role="system"):
         self.name = name
         self.order = order
         self.owner = owner
+        self.role = role
         self._text = text
         self._boom = boom
 
@@ -71,7 +73,36 @@ async def test_collect_returns_blocks_in_order_and_drops_empty():
     register_context_provider(runtime, _Provider("ref", "焦点", order=30, owner=owner))
 
     blocks = await collect_context_blocks(runtime, TurnScope(runtime=runtime))
-    assert blocks == [("mem", "记忆内容"), ("ref", "焦点")]
+    assert blocks == [
+        ContextBlock("mem", "记忆内容"),
+        ContextBlock("ref", "焦点"),
+    ]
+
+
+async def test_collect_marks_user_role_blocks():
+    """``role="user"`` 的 provider 产出 user 数据块（记忆走这条，不占 system 位）。"""
+    runtime = _runtime()
+    register_context_provider(runtime, _Provider("mem", "记忆", order=10, role="user"))
+    register_context_provider(runtime, _Provider("ctx", "指代", order=20))
+    blocks = await collect_context_blocks(runtime, TurnScope(runtime=runtime))
+    assert blocks[0] == ContextBlock("mem", "记忆", role="user")
+    assert blocks[1].role == "system"
+
+
+async def test_provider_can_return_context_block_explicitly():
+    runtime = _runtime()
+
+    class _Explicit:
+        name = "explicit"
+        order = 10
+        owner = None
+
+        async def collect(self, scope):
+            return ContextBlock("explicit", "显式 user 块", role="user")
+
+    register_context_provider(runtime, _Explicit())
+    blocks = await collect_context_blocks(runtime, TurnScope(runtime=runtime))
+    assert blocks == [ContextBlock("explicit", "显式 user 块", role="user")]
 
 
 async def test_collect_ignores_failing_provider():
@@ -79,7 +110,7 @@ async def test_collect_ignores_failing_provider():
     register_context_provider(runtime, _Provider("bad", "", order=10, boom=True))
     register_context_provider(runtime, _Provider("good", "好的", order=20))
     blocks = await collect_context_blocks(runtime, TurnScope(runtime=runtime))
-    assert blocks == [("good", "好的")]
+    assert blocks == [ContextBlock("good", "好的")]
 
 
 async def test_tool_sources_contribute_specs():
@@ -121,7 +152,10 @@ async def test_simple_provider_accepts_sync_and_async():
 
     register_context_provider(runtime, SimpleContextProvider("async", _async_fn, order=200))
     blocks = await collect_context_blocks(runtime, TurnScope(runtime=runtime))
-    assert blocks == [("sync", "同步"), ("async", "异步")]
+    assert blocks == [
+        ContextBlock("sync", "同步"),
+        ContextBlock("async", "异步"),
+    ]
 
 
 async def test_simple_tool_source_returns_list():
@@ -157,3 +191,39 @@ def test_prompt_request_has_extra_blocks_field():
     from app.agent.assembly.assembler import PromptRequest
 
     assert PromptRequest(session_id="g", is_private=False).extra_blocks == []
+    assert PromptRequest(session_id="g", is_private=False).user_blocks == []
+
+
+def test_user_blocks_render_inside_user_message_before_text():
+    """user 侧数据块（记忆）合并进本轮 user 消息，不占 system 位。"""
+    from app.agent.assembly.assembler import PromptRequest, build_messages
+
+    block = '<memory_data source="long_term_memory">\n- 喜欢美式\n</memory_data>'
+    req = PromptRequest(
+        config={"system_prompt": "你是助手"},
+        session_id="private_5",
+        is_private=True,
+        user_text="我喜欢什么",
+        history=[{"role": "user", "content": "上一句"}, {"role": "assistant", "content": "嗯"}],
+        user_blocks=[("memory", block)],
+    )
+    messages = build_messages(req)
+
+    assert messages[-1]["role"] == "user"
+    content = messages[-1]["content"]
+    assert isinstance(content, list)
+    texts = [part.get("text", "") for part in content if part.get("type") == "text"]
+    assert block in texts and "我喜欢什么" in texts
+    assert texts.index(block) < texts.index("我喜欢什么")
+    # 记忆不得出现在任何 system 消息里
+    assert all("喜欢美式" not in str(msg.get("content")) for msg in messages if msg.get("role") == "system")
+
+
+def test_user_without_blocks_keeps_plain_string_content():
+    """没有 user 数据块时保持旧行为（纯字符串 content，逐字一致）。"""
+    from app.agent.assembly.assembler import PromptRequest, build_messages
+
+    messages = build_messages(
+        PromptRequest(config={"system_prompt": "你是助手"}, session_id="p", user_text="你好")
+    )
+    assert messages[-1] == {"role": "user", "content": "你好"}

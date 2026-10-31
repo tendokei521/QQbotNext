@@ -145,6 +145,9 @@ async def test_collect_history_materials_uses_the_memory_service_handle():
 
     assert calls, "必须真的去召回"
     assert "猫" in (materials.get("memory_text") or "")
+    # v3：主动消息/定时任务路径也把记忆包成 user 侧数据块
+    blocks = materials.get("memory_user_blocks") or []
+    assert blocks and "<memory_data" in blocks[0][1] and "猫" in blocks[0][1]
 
 
 # ---------- 管理命令 ----------

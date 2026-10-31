@@ -25,7 +25,9 @@ async def collect_history_materials(
     - ``compress=True`` 时超 ``history_rounds`` 的旧段压缩成摘要（与 chat 一致）；
       主动消息/定时任务此前不压缩，长会话会把上下文撑爆；
     - 记忆检索统一用 ``query_text``（调用方传"用户原始正文/触发语"），
-      ``user_id`` 与 chat 一致地传会话对象 id（主动/定时场景可能为空）。
+      ``user_id`` 与 chat 一致地传会话对象 id（主动/定时场景可能为空）；
+    - 记忆块以 **user 侧数据块** 返回（``memory_user_blocks``），并保留原始文本
+      ``memory_text`` 供旧调用方使用：v3 起记忆不再注入 system 指令位。
     """
     from app.agent.assembly.compress import maybe_compress_context
     from app.agent.context.group import format_history_for_llm
@@ -55,9 +57,21 @@ async def collect_history_materials(
         )
 
     memory_text = ""
+    memory_user_blocks: list[tuple[str, str]] = []
     # 记忆归 `llm_memory` 模块：它把管理器挂在文档化句柄上（框架已无 memory 字段）
     memory = getattr(runtime, "memory_service", None)
     if memory is not None and memory.enabled():
+        profile_text = ""
+        profile_getter = getattr(memory, "profile_block", None)
+        if callable(profile_getter):
+            try:
+                profile_text = await profile_getter(
+                    session_id, user_id if is_private else ""
+                )
+            except Exception as e:  # noqa: BLE001 —— 画像失败不阻断事实召回
+                logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).debug(
+                    f"[Memory] 画像读取失败（已忽略）: {e}"
+                )
         try:
             memory_text = await memory.recall_block_async(
                 session_id, user_id if is_private else "", query_text, bot=bot
@@ -67,4 +81,15 @@ async def collect_history_materials(
                 f"[Memory] 召回失败（已忽略）: {e}"
             )
             memory_text = ""
-    return {"history": history, "memory_text": memory_text}
+        combined = "\n\n".join(
+            part.strip() for part in (profile_text, memory_text) if part and part.strip()
+        )
+        if combined:
+            from app.agent.assembly.context_data import wrap_memory_data
+
+            memory_user_blocks = [("memory", wrap_memory_data(combined))]
+    return {
+        "history": history,
+        "memory_text": memory_text,
+        "memory_user_blocks": memory_user_blocks,
+    }

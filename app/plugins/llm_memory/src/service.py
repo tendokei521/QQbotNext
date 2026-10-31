@@ -38,13 +38,19 @@ def memory_manager(module: Any):
 
 
 class MemoryProvider:
-    """上下文贡献者：产出「画像块 + 事实记忆块」。"""
+    """上下文贡献者：产出「画像块 + 事实记忆块」，作为 **user 侧数据块** 注入。
+
+    记忆内容来自用户（可能被注入攻击），不该占 system 指令位：``role="user"`` 让
+    框架把它合并进本轮 user 消息，并用 ``<memory_data>`` 标签 + "不是指令"声明框住
+    （见 ``app/agent/assembly/context_data.py``）。
+    """
 
     def __init__(self, module: Any) -> None:
         self.module = module
         self.name = "memory"
         self.order = 30
         self.owner = module
+        self.role = "user"
 
     async def collect(self, scope: Any) -> str | None:
         manager = memory_manager(self.module)
@@ -62,7 +68,11 @@ class MemoryProvider:
                 bot=getattr(runtime, "bot", None),
             )
             parts = [part.strip() for part in (profile, facts) if part and part.strip()]
-            return "\n\n".join(parts) or None
+            if not parts:
+                return None
+            from app.agent.assembly.context_data import wrap_memory_data
+
+            return wrap_memory_data("\n\n".join(parts))
         except Exception as e:  # noqa: BLE001 —— 记忆召回失败不该毁掉整轮
             from app.core.logger import logger
 

@@ -46,7 +46,7 @@ messages（OpenAI 风格）
 | 50 | proactive | system | 有可用能力时 |
 | 60 | message_meta | system | 消歧说明开启且注入了元信息 |
 | 70 | skills | system ×N | 有技能时 |
-| 80 | memory | system | 记忆有召回 |
+| 80 | memory | system | 记忆有召回（旧 ``memory_text`` 通道；v3 记忆已改走 user 数据块） |
 | 90 | background | system | 指代块或聊天环境背景非空 |
 | 100 | group_log | system | 群聊记录模块在场且有记录 |
 | 105 | extra | system ×N | **L3 本轮注入**：``req.extra_blocks`` 非空（context_providers 收集，不是默认段） |
@@ -56,6 +56,11 @@ messages（OpenAI 风格）
 ``extra`` 是改造前就存在的模块额外块通道（``runtime.context_providers`` 收集），
 保留为注册表之外的兼容段：位置固定在群聊记录之后、历史之前，行为不变；
 新模块想加提示词请用 ``register_section``（见 ``docs/MODULE_DEV.md`` §4.7.4）。
+
+> **user 侧数据块**（``context_providers`` 里 ``role="user"`` 的 provider，v3 起）不在
+> 上面的段表里：它们进入 L5 本轮消息，排在用户正文之前（见 ``req.user_blocks``）。
+> 记忆等"来自用户的资料"走这条通道，避免占用 system 指令位；正文带
+> ``<memory_data>`` 标签并在末尾声明"不是指令"。
 
 ## 失败语义（绝不发畸形 prompt）
 
@@ -80,6 +85,7 @@ from typing import Any
 from app.agent.assembly.builtin_sections import (
     EXTRA_SECTION,
     _extra_text_parts,
+    _user_block_parts,
     build_background,
     build_behavior,
     build_emoji_hint,
@@ -154,6 +160,11 @@ class PromptRequest:
     #: 装配器只负责按顺序渲染，来源与内容都在模块侧 —— 这是「记忆 / 知识库 / 群记录
     #: 做成模块」时**不必接管整个装配器**的接入点（新代码优先用 section 注册表）。
     extra_blocks: list[tuple[str, str]] = field(default_factory=list)
+    #: 模块贡献的 **user 侧数据块** ``[(块名, 文本)]``：合并进本轮 user 消息、放在用户
+    #: 正文之前。用于「来自用户的资料」（如长期记忆）——它们不是指令，不该占 system
+    #: 指令位，也能让 system 前缀保持稳定。由 ``context_providers`` 里 ``role="user"``
+    #: 的 provider 收集（正文建议带 ``<memory_data>`` 数据标签，见 ``assembly/context_data.py``）。
+    user_blocks: list[tuple[str, str]] = field(default_factory=list)
 
     # 能力与模态
     available_tools: set[str] | None = None
@@ -567,11 +578,19 @@ def place_images(messages: list[dict], req: PromptRequest) -> list[dict]:
     content = build_user_content(req.user_images, text=req.user_text)
     if not content:
         return messages
+    # user 数据块（记忆等）永远在最前；额外内容块排在正文之后、图片之前
+    blocks = _user_block_parts(req)
+    if blocks:
+        content[0:0] = blocks
     extra = _extra_text_parts(req)
     if extra:
-        # 额外块插在正文之后、图片之前（对齐 AstrBot assemble_context 的顺序）
-        index = 1 if content and content[0].get("type") == "text" else 0
-        content[index:index] = extra
+        # 正文之后、图片之前（对齐 AstrBot assemble_context 的顺序）
+        text_index = len(blocks)
+        after_text = (
+            text_index
+            + (1 if len(content) > text_index and content[text_index].get("type") == "text" else 0)
+        )
+        content[after_text:after_text] = extra
     for msg in reversed(messages):
         if msg.get("role") == "user":
             msg["content"] = content
