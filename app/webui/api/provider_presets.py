@@ -130,11 +130,18 @@ async def test_provider_preset(preset_id: str, request: Request):
 
 @router.post("/{preset_id}/models/fetch")
 async def fetch_provider_models(preset_id: str, request: Request):
+    """拉取模型列表 + 能力推断结果（只请求厂商一次）。
+
+    返回里 ``models`` 保持旧形态（纯字符串数组，兼容既有调用方）；
+    ``catalog`` 带 ``modalities``（建议勾选的能力）与 ``source``（metadata/name/default），
+    前端据此在「添加模型」时预勾选——厂商没给能力信息时如实退回默认值。
+    """
     try:
-        models = await _model_service(request).fetch_models(preset_id)
+        catalog = await _model_service(request).fetch_model_catalog(preset_id)
     except ValueError as e:
         return _err(400, str(e))
-    return JSONResponse(content={"ok": True, "models": models})
+    models = [item["id"] for item in catalog]
+    return JSONResponse(content={"ok": True, "models": models, "catalog": catalog})
 
 
 # ==================== Provider 模型实例 ====================

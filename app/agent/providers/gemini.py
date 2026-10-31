@@ -9,10 +9,10 @@ API 形态说明：Gemini 的流式默认按 `alt=sse` 返回，可被本适配�
 """
 
 from __future__ import annotations
-from typing import Any
 
 import json
 import re
+from typing import Any
 
 import aiohttp
 
@@ -170,6 +170,10 @@ class GeminiProvider(BaseProvider):
         return f"{base}/models/{model}:generateContent?key={self.api_key}"
 
     async def get_models(self) -> list[str]:
+        return [entry["id"] for entry in await self.get_model_catalog()]
+
+    async def get_model_catalog(self) -> list[dict]:
+        """拉取 Gemini 模型目录（保留 ``supportedGenerationMethods`` 等字段供能力推断）。"""
         if not self.api_key:
             return []
         url = f"{self._base()}/models?key={self.api_key}"
@@ -179,7 +183,14 @@ class GeminiProvider(BaseProvider):
                     if resp.status != 200:
                         return []
                     data = await resp.json()
-            return [str(m.get("name", "")).split("/")[-1] for m in data.get("models", []) if isinstance(m, dict)]
+            catalog: list[dict] = []
+            for item in data.get("models", []):
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name", "")).split("/")[-1]
+                if name:
+                    catalog.append({"id": name, "raw": item})
+            return catalog
         except Exception as e:
             logger.debug(f"[gemini] 176: 已忽略异常: {e}")
             return []

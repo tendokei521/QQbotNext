@@ -304,6 +304,15 @@ class BaseProvider:
         """返回该连接可用的模型列表；不支持时返回空列表。"""
         return []
 
+    async def get_model_catalog(self) -> list[dict]:
+        """返回模型目录：``[{"id": ..., "raw": 厂商原始条目}]``。
+
+        ``raw`` 保留厂商返回的原样字段，供 ``model_capabilities.infer_modalities``
+        从"厂商确实给了"的元数据里推断能力（OpenRouter / Gemini / Ollama 都有这类字段，
+        标准 OpenAI 兼容接口没有）。默认实现只给 id，能力一律走默认值。
+        """
+        return [{"id": model} for model in await self.get_models()]
+
     async def chat(
         self,
         messages: list[dict],

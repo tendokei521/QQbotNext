@@ -112,18 +112,43 @@ class ProviderRuntimeManager:
     # ── 模型能力 ───────────────────────────────────────
     async def fetch_models(self, preset_id: str) -> list[str]:
         """拉取连接预设下可用的模型列表。"""
+        return [entry["id"] for entry in await self.fetch_model_catalog(preset_id)]
+
+    async def fetch_model_catalog(self, preset_id: str, provider_type: str = "chat") -> list[dict]:
+        """拉取模型目录：``[{"id", "modalities", "source"}]``。
+
+        ``modalities`` 是**推断出来**的建议（见 ``model_capabilities``），只在"添加模型"
+        时用于预勾选；``source`` 说明结论来自厂商元数据、模型名还是默认值。
+        """
+        from app.agent.providers.model_capabilities import infer_modalities
+
         config = self.resolve_preset_config(preset_id)
         if config is None:
             raise ValueError(f"Provider 预设不存在: {preset_id}")
         cls = get_provider_class(config.get("provider", "openai"))
         instance = cls(config)
         try:
-            models = await instance.get_models()
-            return models or []
+            getter = getattr(instance, "get_model_catalog", None)
+            entries = await getter() if callable(getter) else []
+            if not entries:
+                entries = [{"id": model} for model in (await instance.get_models() or [])]
         finally:
             terminate = getattr(instance, "terminate", None)
             if callable(terminate):
                 await terminate() if hasattr(terminate, "__await__") else terminate()
+
+        catalog: list[dict] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            raw = entry.get("raw") if isinstance(entry.get("raw"), dict) else {}
+            model_id = str(entry.get("id") or raw.get("id") or "").strip()
+            if not model_id:
+                continue
+            payload = raw if raw.get("id") else {**raw, "id": model_id}
+            modalities, source = infer_modalities(payload, provider_type)
+            catalog.append({"id": model_id, "modalities": modalities, "source": source})
+        return catalog
 
     async def test_model(self, model_id: str) -> dict:
         """测试模型实例连接。"""

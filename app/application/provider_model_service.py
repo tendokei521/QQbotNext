@@ -289,6 +289,10 @@ class ProviderModelService:
     async def fetch_models(self, preset_id: str) -> list[str]:
         return await self.runtime_manager.fetch_models(preset_id)
 
+    async def fetch_model_catalog(self, preset_id: str, provider_type: str = "chat") -> list[dict]:
+        """模型列表 + 推断出的能力（供前端"添加模型"预勾选）。"""
+        return await self.runtime_manager.fetch_model_catalog(preset_id, provider_type)
+
     async def test_model(self, model_id: str) -> dict:
         return await self.runtime_manager.test_model(model_id)
 

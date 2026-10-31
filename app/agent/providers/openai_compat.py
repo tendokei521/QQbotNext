@@ -207,6 +207,15 @@ class OpenAICompatProvider(BaseProvider):
 
     async def get_models(self) -> list[str]:
         """拉取 OpenAI 兼容 /models 列表。"""
+        return [entry["id"] for entry in await self.get_model_catalog()]
+
+    async def get_model_catalog(self) -> list[dict]:
+        """拉取模型目录，保留厂商原始条目供能力推断使用。
+
+        标准 OpenAI 兼容返回只有 ``id/object/created/owned_by``（无能力信息），但
+        OpenRouter 会带 ``architecture.input_modalities`` + ``supported_parameters``、
+        部分中转会带 ``capabilities``——原样留住，交给 ``infer_modalities`` 统一解读。
+        """
         if not self._has_auth():
             return []
         base = self._normalize_base()
@@ -220,7 +229,12 @@ class OpenAICompatProvider(BaseProvider):
                     logger.add_info("Api").error(f"拉取模型列表失败 HTTP {resp.status}")
                     return []
                 data = await resp.json()
-        return [str(item.get("id")) for item in (data.get("data") or []) if isinstance(item, dict) and item.get("id")]
+        catalog: list[dict] = []
+        for item in data.get("data") or []:
+            if not isinstance(item, dict) or not item.get("id"):
+                continue
+            catalog.append({"id": str(item["id"]), "raw": item})
+        return catalog
 
     # ---------- 底层请求 ----------
     async def _post(self, api_key: str, payload: dict, timeout: int) -> dict:
