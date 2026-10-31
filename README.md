@@ -257,7 +257,7 @@ python scripts/update.py rollback                # 退回上一版（含数据�
 | `llm_assembly` | 10 | 组装档位、行为规则段、请求落盘对账 |
 | `llm_message_meta` | 14 | 消息元信息渲染（时间/发送者/引用/@）与历史清洗 |
 | `llm_context` | 10 | 指代消解、上下文按需展开、历史查询权限 |
-| `llm_memory` | 17 | 长期记忆召回策略 |
+| `llm_memory` | 23 | 长期记忆：常驻画像 + 混合召回 + 后台蒸馏 |
 | `llm_knowledge` | 3 | 知识库检索 |
 | `llm_tools_extra` | 9 | OneBot 工具、MCP、工具结果回应要求 |
 | `llm_proactive` | 17 | 主动消息（私聊随机间隔 / 群聊沉默后开口） |
@@ -412,7 +412,7 @@ class Module(BaseModule):
 #llm task / list / switch <id> / new / load <id> / export / exit / stop
 #llm schedule / schedule cancel <id>       # 定时任务
 #llm proactive [session_id]                # 主动消息
-#llm memory list | search | correct | deny | confirm | forget | clear | reset | audit
+#llm memory list | search <词> | profile | remember <内容> | forget <id|词> | clear | audit | export
 ```
 
 - 指令回复统一以「# 」开头，便于与聊天内容区分；`#llm stop`、`#llm memory audit` 仅 Bot 拥有者可用；
