@@ -27,6 +27,7 @@ from app.plugin.commands import render_group_help as _render_group_help
 #: 子命令说明：main.py 的命令 ``description`` 直接复用（也用于无子命令时的帮助清单）
 COMMAND_HELP: dict[str, str] = {
     "list": "列出当前可见记忆（--all 含已下架/被替换）",
+    "status": "查看记忆状态（条数/向量/蒸馏）",
     "search": "按关键词检索：search <词>",
     "profile": "查看当前会话的用户画像",
     "remember": "记住一条（写本人层）：remember <内容>",
@@ -37,7 +38,9 @@ COMMAND_HELP: dict[str, str] = {
 }
 
 #: 帮助清单的展示顺序
-_USAGE_ORDER = ("list", "search", "profile", "remember", "forget", "clear", "audit", "export")
+_USAGE_ORDER = (
+    "list", "status", "search", "profile", "remember", "forget", "clear", "audit", "export",
+)
 
 #: 导出条数 / 文本上限（QQ 单条消息装不下太多）
 _EXPORT_LIMIT = 100
@@ -148,6 +151,46 @@ async def handle_memory_command(
     return True
 
 
+async def _status_text(manager: Any, store: Any) -> str:
+    """记忆状态：条数 / 语料 / 向量 / 上次蒸馏（运维排查入口）。"""
+    stats: dict = {}
+    if store is not None:
+        try:
+            stats = await _invoke(store.stats) or {}
+        except Exception as e:  # noqa: BLE001 —— 状态查询失败时仍返回可读文本
+            logger.debug(f"[记忆] 读取统计失败（已忽略）: {e}")
+    embedding: dict = {}
+    getter = getattr(manager, "embedding_status", None)
+    if callable(getter):
+        try:
+            embedding = await _invoke(getter) or {}
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[记忆] 读取向量状态失败（已忽略）: {e}")
+    last_run = {}
+    consolidator = getattr(manager, "consolidator", None)
+    status = getattr(consolidator, "status", None)
+    if callable(status):
+        try:
+            last_run = (status() or {}).get("last_run") or {}
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[记忆] 读取蒸馏状态失败（已忽略）: {e}")
+
+    vector_state = "可用" if embedding.get("enabled") else "未启用（纯词法召回）"
+    lines = [
+        "【memory】长期记忆状态",
+        f"记忆：{int(stats.get('memories') or 0)} 条 / {int(stats.get('owners') or 0)} 个 owner"
+        f" / 画像 {int(stats.get('profiles') or 0)} 条",
+        f"语料：{int(stats.get('episodes') or 0)} 条（未巩固的由后台蒸馏处理）",
+        f"向量：{vector_state}  model={embedding.get('model') or '—'}",
+    ]
+    if isinstance(last_run, dict) and last_run:
+        latest = max(float(value) for value in last_run.values())
+        lines.append(f"上次蒸馏：{time.strftime('%m-%d %H:%M', time.localtime(latest))}")
+    else:
+        lines.append("上次蒸馏：尚无记录")
+    return "\n".join(lines)
+
+
 async def _dispatch(
     manager: Any,
     session_id: str,
@@ -171,6 +214,9 @@ async def _dispatch(
             include_all=include_all,
         )
         return _format_rows(rows or [], include_all=include_all)
+
+    if cmd == "status":
+        return await _status_text(manager, store)
 
     if cmd == "search":
         if not arg:

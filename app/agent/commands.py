@@ -77,6 +77,7 @@ COMMAND_GROUPS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
         "长期记忆",
         (
             (f"{PREFIX} memory list [--all]", "查看当前可见记忆（--all 含已下架）"),
+            (f"{PREFIX} memory status", "记忆状态：条数 / 向量 / 上次蒸馏"),
             (f"{PREFIX} memory search <词>", "检索记忆"),
             (f"{PREFIX} memory profile", "查看关于你的画像"),
             (f"{PREFIX} memory remember <内容>", "记住一条关于你的信息"),

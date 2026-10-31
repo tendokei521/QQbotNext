@@ -169,6 +169,10 @@ async def test_commands_list_remember_forget_and_audit(tmp_path, monkeypatch):
     assert sent and "我叫小明" in sent[-1]
 
     sent.clear()
+    await handle_memory_command(module, "private_5", "5", True, False, "status", send)
+    assert sent and "长期记忆状态" in sent[-1] and "条" in sent[-1]
+
+    sent.clear()
     await handle_memory_command(module, "private_5", "5", True, False, "forget 小明", send)
     assert sent and "已删除" in sent[-1]
 

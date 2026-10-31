@@ -140,8 +140,9 @@ def test_commands_cover_memory_surface():
     from app.plugin.commands import CommandSpec
 
     names = {spec.name: spec for spec, _method in Module.collect_commands()}
-    assert {"memory", "memory list", "memory search", "memory profile", "memory remember",
-            "memory forget", "memory clear", "memory audit", "memory export"} <= set(names)
+    assert {"memory", "memory list", "memory status", "memory search", "memory profile",
+            "memory remember", "memory forget", "memory clear", "memory audit",
+            "memory export"} <= set(names)
     memory_group: CommandSpec = names["memory"]
     # 兼容旧习惯：#llm memory 与 /memory 都能触发
     assert "#llm " in memory_group.prefixes and "/" in memory_group.prefixes

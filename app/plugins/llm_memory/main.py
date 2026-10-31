@@ -117,7 +117,7 @@ class Module(BaseModule):
     # ── 命令（/memory、／memory、#llm memory 三种前缀） ──
     @command_group(
         "memory",
-        description="长期记忆（list/search/profile/forget/clear/audit/remember/export）",
+        description="长期记忆（list/status/search/profile/remember/forget/clear/audit/export）",
         prefixes=("/", "／", "#llm "),
     )
     async def memory(self, event):
@@ -127,6 +127,10 @@ class Module(BaseModule):
     @memory.command("list", description="列出当前可见记忆（--all 含已下架）")
     async def memory_list(self, event):
         await self._run_memory_command(event, _with_args("list", event))
+
+    @memory.command("status", description="查看记忆状态（条数/向量/蒸馏）")
+    async def memory_status(self, event):
+        await self._run_memory_command(event, "status")
 
     @memory.command("search", description="检索记忆")
     async def memory_search(self, event):
