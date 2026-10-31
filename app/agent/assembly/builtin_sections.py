@@ -32,8 +32,8 @@ from __future__ import annotations
 from typing import Any
 
 from app.agent.assembly.prompt import (
-    LEGACY_MESSAGE_META_INSTRUCTION,
-    MESSAGE_META_INSTRUCTION,
+    MULTI_LINE_MESSAGE_META_INSTRUCTION,
+    MASKED_MESSAGE_META_INSTRUCTION,
     SCHEDULE_INSTRUCTION,
     SINGLE_LINE_MESSAGE_META_INSTRUCTION,
     build_proactive_instruction,
@@ -251,10 +251,10 @@ def message_meta_instruction(req: Any) -> str | None:
         # 没有方案（库层直调）时，仍按真实格式给对应图例
         return SINGLE_LINE_MESSAGE_META_INSTRUCTION
     if mode == "new":
-        return MESSAGE_META_INSTRUCTION
+        return MASKED_MESSAGE_META_INSTRUCTION
     if bool(req.cfg("experimental_long_term_memory", False)):
-        return MESSAGE_META_INSTRUCTION
-    return LEGACY_MESSAGE_META_INSTRUCTION
+        return MASKED_MESSAGE_META_INSTRUCTION
+    return MULTI_LINE_MESSAGE_META_INSTRUCTION
 
 
 def build_message_meta(req: Any) -> list[dict]:

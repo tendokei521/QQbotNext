@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.agent.assembly.prompt import (
-    LEGACY_MESSAGE_META_INSTRUCTION,
+    MULTI_LINE_MESSAGE_META_INSTRUCTION,
     PROACTIVE_LINES,
     SCHEDULE_INSTRUCTION,
     SINGLE_LINE_MESSAGE_META_INSTRUCTION,
@@ -66,7 +66,7 @@ class PromptPreset:
     segments: tuple[Segment, ...] | None = None
     schedule_instruction: str = SCHEDULE_INSTRUCTION
     message_meta_single_line: str = SINGLE_LINE_MESSAGE_META_INSTRUCTION
-    message_meta_legacy: str = LEGACY_MESSAGE_META_INSTRUCTION
+    message_meta_legacy: str = MULTI_LINE_MESSAGE_META_INSTRUCTION
     emoji_hint: Callable[[str], str] = emoji_hint_line
     #: 覆盖「主动性」块里的具体行（键见 ``prompt.PROACTIVE_LINES``），只写要改的
     proactive_lines: dict[str, str] = field(default_factory=dict)
