@@ -225,11 +225,6 @@ SCHEMA = {
         "description": "被 @ / 私聊时若一句话没说，再补一轮要求它发言（防「叫了不理」）",
         "default": True, "group": "group_behavior",
     },
-    "speech_fallback_enable": {
-        "type": "boolean", "label": "静默时补兜底话术",
-        "description": "关闭（默认）=静默就是真沉默，符合拟人化；开启则静默时仍发「抱歉，我暂时无法回答」",
-        "default": False, "group": "group_behavior",
-    },
     "session_timeout": {
         "type": "number", "label": "会话超时时间(秒)", "description": "无消息后多久结束会话",
         "default": 60, "min": 30, "max": 300, "group": "group_session",

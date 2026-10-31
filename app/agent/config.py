@@ -56,8 +56,6 @@ DEFAULT_LLM_CONFIG: dict = {
     "speech_reminder_rounds": 3,
     # 被直接点名（@/私聊）却一句话没说时，允许再补一轮把话说出来
     "speech_force_reply_on_call": True,
-    # 静默时是否仍补一句"抱歉我暂时无法回答"（本档位默认关闭：静默更拟人）
-    "speech_fallback_enable": False,
     # 记录历史时强制清洗助手输出里的（…）/(…) 内容，避免后续回复模仿括号风格
     "clean_output_parentheses": True,
     "group_enable": False,

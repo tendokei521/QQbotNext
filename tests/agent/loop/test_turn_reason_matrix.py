@@ -220,8 +220,8 @@ async def test_max_tokens_when_the_budget_is_eaten_by_thinking(monkeypatch):
     result = await _run(turn_module, stream=False)
 
     assert result.reason is TurnReason.MAX_TOKENS, "被截断 ≠ 模型不想说话"
-    # 兜底话术仍然给调用方（用户不能收到空消息），但它不改变结局
-    assert "抱歉" in result.text
+    # 空回复不再补兜底话术：调用方拿到空文本，按静默处理
+    assert result.text == ""
 
 
 async def test_reason_reaches_telemetry(monkeypatch):

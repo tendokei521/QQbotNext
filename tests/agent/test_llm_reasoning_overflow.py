@@ -159,7 +159,7 @@ async def test_stream_response_nudges_once_after_reasoning_overflow(monkeypatch,
 
 
 async def test_stream_response_nudge_can_be_disabled(monkeypatch, tmp_path):
-    """配置 0 = 关闭收敛轮，回到旧行为（给兜底话术，但只请求一次）。"""
+    """配置 0 = 关闭收敛轮：只请求一次，空回复按静默处理。"""
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
     monkeypatch.setitem(PROVIDERS, "nudge_probe", _NudgeProbe)
     STREAM_SCRIPT.extend([[
@@ -172,7 +172,7 @@ async def test_stream_response_nudge_can_be_disabled(monkeypatch, tmp_path):
     sent = await _run_stream(rt, ctx)
 
     assert len(STREAM_MESSAGES) == 1
-    assert sent == ["抱歉，我暂时无法回答，请稍后再试。"]
+    assert sent == [], "空回复不再补兜底话术（静默）"
 
 
 async def test_stream_response_nudge_only_once(monkeypatch, tmp_path):
@@ -189,7 +189,7 @@ async def test_stream_response_nudge_only_once(monkeypatch, tmp_path):
     sent = await _run_stream(rt, ctx)
 
     assert len(STREAM_MESSAGES) == 2, "思考吃满只补一次，不把轮数全耗在同一问题上"
-    assert sent == ["抱歉，我暂时无法回答，请稍后再试。"]
+    assert sent == [], "收敛轮也失败时空回复按静默处理"
 
 
 async def test_stream_response_normal_text_still_works(monkeypatch, tmp_path):

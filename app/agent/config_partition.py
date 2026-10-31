@@ -218,7 +218,7 @@ CORE_KEYS: tuple[str, ...] = (
     + REPLY_KEYS
 )
 
-# ==================== 2. 迁移为模块（9 个 / 108 键）====================
+# ==================== 2. 迁移为模块（9 个 / 107 键）====================
 MODULE_KEYS: dict[str, tuple[str, ...]] = {
     # 输出策略：流式 / 发言通道（共用 output 槽，故同一模块用 mode 三选一）
     "llm_output": (
@@ -246,7 +246,6 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
         "speech_max_bubble_chars",
         "speech_reminder_rounds",
         "speech_force_reply_on_call",
-        "speech_fallback_enable",
     ),
     # 上下文增强：指代消解 / 按需展开 / 历史查询权限
     "llm_context": (
@@ -296,6 +295,13 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
         "memory_max_age_days",
         "memory_on_reset",
         "memory_upgrade_saved_only",
+        # v3 新增：混合检索 / 常驻画像 / 蒸馏批量
+        "memory_recall_mode",
+        "memory_embedding_model_id",
+        "memory_profile_enable",
+        "memory_profile_max_chars",
+        "memory_consolidate_batch",
+        "memory_consolidate_min_chars",
     ),
     "llm_knowledge": (
         "knowledge_enable",

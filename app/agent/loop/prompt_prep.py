@@ -45,7 +45,6 @@ from app.agent.loop.assistant_output import (  # noqa: F401 - 重导出保持 ch
     _flush_speech,
     _force_speak_round,
     _should_force_speak,
-    _speech_fallback_enabled,
     _speech_intent,
 )
 from app.agent.loop.command_dispatch import (  # noqa: F401 - 重导出保持 chat.* API

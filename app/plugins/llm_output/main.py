@@ -57,7 +57,6 @@ OWNED_KEYS: tuple[str, ...] = (
     "speech_max_bubble_chars",
     "speech_reminder_rounds",
     "speech_force_reply_on_call",
-    "speech_fallback_enable",
 )
 
 
@@ -100,7 +99,6 @@ class Module(BaseModule):
         "speech_max_bubble_chars": 200,
         "speech_reminder_rounds": 2,
         "speech_force_reply_on_call": True,
-        "speech_fallback_enable": False,
     }
     config_schema = SCHEMA
 

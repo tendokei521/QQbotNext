@@ -29,7 +29,6 @@ from app.agent.loop.assistant_output import (  # noqa: F401 - 重导出保持 ch
     _flush_speech,
     _force_speak_round,
     _should_force_speak,
-    _speech_fallback_enabled,
     _speech_intent,
 )
 from app.agent.loop.command_dispatch import (  # noqa: F401 - 重导出保持 chat.* API
@@ -573,17 +572,7 @@ async def stream_response(runtime, event, ctx=None):
                 log.info(f"[LLM] 静默（看过但没说话）-> {detail})")
             if ctx is not None and not stream_error_text:
                 ctx.state["silent"] = True
-            if _speech_fallback_enabled(policy_cfg):
-                fallback = "抱歉，我暂时无法回答，请稍后再试。"
-                full_text = fallback
-                spoken_parts.append(fallback)
-                yield fallback
-                # 兜底话术**已经发给用户**了 → 必须进历史，否则下一轮"我没说过"
-                session_mgr.add_message(
-                    session_id, "assistant", _clean_output_for_history(meta_cfg, fallback)
-                )
-                if not is_private:
-                    session.mark_replied()
+            # 空回复一律静默：不再补「抱歉，我暂时无法回答」这类兜底话术。
         elif not is_private:
             session.mark_replied()
         await asyncio.to_thread(session_mgr.history.save_session, session)
@@ -600,20 +589,21 @@ async def stream_response(runtime, event, ctx=None):
                 else ""
             )
             logger.add_info(account_label(runtime.bot_id)).warning(
-                f"[LLM] 流式模型返回空回复，使用兜底文本 -> {session_id} "
+                f"[LLM] 流式模型返回空回复，按静默处理（不补兜底话术）-> {session_id} "
                 f"(task: {session.task_id}, 已执行工具数={len(tool_results)}{reason})"
             )
-            full_text = "抱歉，我暂时无法回答，请稍后再试。"
-            yield full_text
+            if ctx is not None and not stream_error_text:
+                ctx.state["silent"] = True
 
         # 收尾把正文定稿到**同一条**历史（分片发送期间已 upsert 过）。stub/旧
         # session_mgr 没有 upsert 时才退回 add_message，保证行为不回退。
-        _cleaned = _clean_output_for_history(meta_cfg, full_text)
-        if not _write_partial_history(_cleaned):
-            session_mgr.add_message(session_id, "assistant", _cleaned)
+        _cleaned = _clean_output_for_history(meta_cfg, full_text) if full_text.strip() else ""
+        if _cleaned:
+            if not _write_partial_history(_cleaned):
+                session_mgr.add_message(session_id, "assistant", _cleaned)
         if hasattr(session_mgr, "end_streaming_assistant"):
             session_mgr.end_streaming_assistant(session_id)
-        if not is_private:
+        if _cleaned and not is_private:
             session.mark_replied()
         await asyncio.to_thread(session_mgr.history.save_session, session)
 

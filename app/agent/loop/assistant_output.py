@@ -4,7 +4,7 @@
 
 1. `_clean_output_for_history`：落库前把内部标记 / 流式残留清干净；
 2. 发言通道：`_build_speech`（文本=思考，`send_message`=真正发出）、`_speech_intent`、
-   `_speech_fallback_enabled`、`_should_force_speak`、`_flush_speech`、`_force_speak_round`。
+   `_should_force_speak`、`_flush_speech`、`_force_speak_round`。
 
 ## 为什么单独成文件
 
@@ -77,14 +77,6 @@ def _speech_intent(config) -> bool:
     """配置里是否开了发言通道（用于"配置了但没生效"的告警）。"""
     try:
         return bool(config.get("speech_via_tool", False))
-    except Exception:  # noqa: BLE001
-        return False
-
-
-def _speech_fallback_enabled(config) -> bool:
-    """静默时是否仍要补一句兜底话术（本档位默认关闭：静默比"抱歉我无法回答"更拟人）。"""
-    try:
-        return bool(config.get("speech_fallback_enable", False))
     except Exception:  # noqa: BLE001
         return False
 

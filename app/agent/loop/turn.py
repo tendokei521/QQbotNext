@@ -492,10 +492,11 @@ async def _chat_once(
         eff, src = _effective_max_tokens(provider_chain, meta["max_tokens"])
         hint = f"，思考 {reasoning} 字符但无正文（max_tokens={eff}，来自{src}）" if reasoning else ""
         logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).warning(
-            f"[Turn] 空回复，使用兜底文本{hint}"
+            f"[Turn] 空回复，按静默处理（不补兜底话术）{hint}"
         )
-        # 兜底话术**不是模型说的**：结局保持 silent/max_tokens，别让它冒充 completed
-        return "抱歉，我暂时无法回答，请稍后再试。", tool_results
+        # 空回复就是空回复：不再用「抱歉，我暂时无法回答」冒充模型说的话。
+        # 结局由调用方按空文本判为 silent/max_tokens；这一轮不发消息、不写 assistant 历史。
+        return "", tool_results
     return text, tool_results
 
 

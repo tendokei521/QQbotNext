@@ -8,7 +8,7 @@
 2. **跳过 mark_replied**：群里被当成"没回复过"，可能被再次触发。
 3. **跳过记忆蒸馏与遥测落库**：失败轮的经验永远进不了长期记忆，
    而遥测只在错误分支里记一次（成功路径的分支根本没走到）。
-4. 发言通道下兜底话术是**纯文本 yield**，且没写进历史（"发出去了但没记录"）。
+4. 发言通道下静默时曾补兜底话术（现已移除：空回复一律静默）。
 
 修法：错误分支不再 ``return``，而是 ``break`` 出工具轮循环，统一走收尾逻辑
 （写历史 / mark_replied / 记忆蒸馏 / 遥测 / token usage）；兜底话术与"是否静默"
@@ -149,17 +149,16 @@ async def test_partial_text_then_error_is_written_to_history(probe):
     assert any("我觉得可以" in t for t in texts), f"已发送的正文必须进历史，实际 {texts}"
 
 
-async def test_error_without_text_still_writes_fallback_and_marks_replied(probe):
-    """一个字都没产出就失败：兜底话术照发，且同样进历史。"""
+async def test_error_without_text_stays_silent(probe):
+    """一个字都没产出就失败：静默（不发兜底话术，也不写 assistant 历史）。"""
     STREAMS.append([StreamEvent(type="error", text="HTTP 401: bad key")])
     rt = _runtime(6602, _config())
     ctx = _ctx()
 
     out = [str(item) async for item in chat.stream_response(rt, ctx.event, ctx)]
 
-    joined = "".join(out)
-    assert "抱歉" in joined
-    assert any("抱歉" in t for t in _history_texts(rt))
+    assert out == [], "空回复不该补「抱歉…」"
+    assert not any("抱歉" in t for t in _history_texts(rt))
 
 
 async def test_error_still_records_telemetry(probe):
@@ -174,16 +173,16 @@ async def test_error_still_records_telemetry(probe):
     assert rt.telemetry.calls[0].get("success") is False
 
 
-async def test_speech_fallback_is_written_to_history(probe):
-    """发言通道开兜底时，兜底话术发出去就必须进历史。"""
+async def test_speech_silence_does_not_inject_a_fallback(probe):
+    """发言通道空回复必须静默：不发「抱歉…」，也不写进历史。"""
     STREAMS.append([StreamEvent(type="error", text="HTTP 500")])
-    rt = _runtime(6604, _config(speech_via_tool=True, speech_fallback_enable=True))
+    rt = _runtime(6604, _config(speech_via_tool=True))
     ctx = _ctx()
 
     out = [str(item) async for item in chat.stream_response(rt, ctx.event, ctx)]
 
-    assert any("抱歉" in str(item) for item in out)
-    assert any("抱歉" in t for t in _history_texts(rt)), "兜底话术已发出，必须进历史"
+    assert not any("抱歉" in str(item) for item in out)
+    assert not any("抱歉" in t for t in _history_texts(rt)), "静默不应写兜底话术进历史"
 
 
 async def test_error_does_not_force_speak_again(probe):

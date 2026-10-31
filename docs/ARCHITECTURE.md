@@ -261,7 +261,7 @@ docs/                设计文档 + 本方案（见 §4）
 | `agent/loop/stream.py` | `stream_response()` | ~400 | 流式一轮（含工具循环、flush） |
 | `agent/loop/output.py` | `_segments_as_dicts()` `_images_enabled()` `_clean_output_for_history()` `_log_debug_prompt()` `_served_model_label()` `_event_nickname()` | ~200 | 模型的输出怎么清洗、怎么记账 |
 | `agent/providers/policy.py` | `_max_tool_rounds()` `_max_empty_retries()` `_reasoning_overflow_retries()` `_turn_budget()` `_effective_max_tokens()` `_max_tokens_override_note()` `_provider_config_for()` `_provider_chain_for()` `_modalities_for_chain()` | 并入现文件 | **请求参数与重试策略**——它们本属于 `request_policy` 的"唯一决策点" |
-| `agent/delivery/speech.py` | `_build_speech()` `_speech_intent()` `_speech_fallback_enabled()` `_should_force_speak()` `_flush_speech()` `_force_speak_round()` | 并入现文件 | 发言相关判定与执行 |
+| `agent/delivery/speech.py` | `_build_speech()` `_speech_intent()` `_should_force_speak()` `_flush_speech()` `_force_speak_round()` | 并入现文件 | 发言相关判定与执行 |
 | `agent/session/` `agent/memory/` `agent/context/` `agent/media/` `agent/commands/` | `_commit_history_enrichment` `_format_session_history` `_history_meta_flags` / `_memory_block` `_memory_autosave` `_memory_consolidate` / `_build_group_pre_history` `_referent_block` / `_append_round_images` `_history_media_hook` / `handle_commands` | 各并入 | 按归属分散，`chat.py` 只剩编排骨架 |
 | `agent/tools/initiative.py` | `build_initiative_tools()` `_proactive_instruction()` | ~120 | 主动消息用的工具集 |
 

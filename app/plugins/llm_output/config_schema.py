@@ -161,10 +161,4 @@ SCHEMA = {
         "description": "@ / 私聊 / 拍一拍时，若一句话没说会额外补一轮",
         "default": True,
     },
-    "speech_fallback_enable": {
-        "type": "boolean",
-        "label": "静默时补兜底话术",
-        "description": "模型看过但没开口时是否补一句「抱歉，我暂时无法回答」",
-        "default": False,
-    },
 }
