@@ -53,6 +53,12 @@ SCOPE_OVERRIDABLE: dict[str, tuple[str, ...]] = {
         "message_debounce_max_wait",  # 抖动最长等待
         "interrupt_enable",       # 新消息是否打断旧回复
         "quiet_hours",            # 免打扰时段（"23:00-08:00"，空=不启用）
+        # 回复模式（2026-11-01）：账号级默认 + 群级覆盖，灰度时按群开
+        "reply_mode",             # legacy / participation
+        "participation_level",    # 参与度档位（语义写在提示词里）
+        "participation_max_requests",    # 10 分钟请求上限
+        "participation_max_tokens",      # 10 分钟 token 上限
+        "participation_cooldown_seconds",  # 同群两次请求的最小间隔
     ),
 }
 
