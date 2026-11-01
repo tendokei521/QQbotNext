@@ -357,6 +357,17 @@ class LlmPipeline:
         except Exception:  # noqa: BLE001 —— 图片探测失败按无图处理
             has_image = False
 
+        # 参与度模式：这条消息**有没有可能**被成本门放行（不看冷却/预算，这两者随
+        # 时间变化，不该影响"新消息是否打断旧回复"）。不放行的普通消息不该打断。
+        if str(config.get("reply_mode", "legacy") or "legacy") == "participation":
+            try:
+                from app.agent.participation import gate
+
+                level = str(config.get("participation_level", "low") or "low")
+                return bool(gate(self.runtime, event, level).allowed or has_image)
+            except Exception:  # noqa: BLE001 —— 判定失败按"不打断"处理，保守优先
+                return False
+
         try:
             triggered, _is_at, text = self._trigger_decision(
                 event, config, has_image=has_image
@@ -428,6 +439,9 @@ class LlmPipeline:
         调用点必须排在场景/免打扰/用户例外之后：这三类拒绝不该产生历史写入，
         也不该消耗冷却与预算（旧实现把参与度块放在它们之前）。
         """
+        # 本轮生效的回复配置：提示词层（reply_rules 段）要用它渲染模式/档位，
+        # 否则群级覆盖在提示词里读不到（只能读到账号级配置）。
+        ctx.state["reply_config"] = dict(config)
         if str(config.get("reply_mode", "legacy") or "legacy") == "participation":
             return await self._admit_participation(ctx, config)
         triggered, is_at, user_text = self._trigger_decision(

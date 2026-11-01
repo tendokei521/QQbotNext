@@ -61,11 +61,32 @@ LEGACY_TRIGGER_TEXT: dict[str, str] = {
 }
 
 
+def _reply_config_getter(req: Any):
+    """取"本轮生效的回复配置"读取器。
+
+    优先用 pipeline 放在 ``ctx.state["reply_config"]`` 的**生效值**（账号级 + 群级覆盖 +
+    派生触发方式）；没有时退回 `req.config`（账号级）。旧实现只读 `req.config`，于是
+    群级覆盖（以及只用 `trigger_at` 配置的账号）在提示词里永远显示成"仅 @"。
+    """
+    ctx = getattr(req, "ctx", None)
+    state = getattr(ctx, "state", None)
+    effective = state.get("reply_config") if isinstance(state, dict) else None
+    base = getattr(req, "config", None)
+    base_get = getattr(base, "get", None)
+
+    def get(key: str, default: Any = None) -> Any:
+        if isinstance(effective, dict) and key in effective:
+            return effective[key]
+        if callable(base_get):
+            return base_get(key, default)
+        return default
+
+    return get
+
+
 def reply_rules_section(req: Any) -> list[dict]:
     """L1 段：把当前回复模式的内置规则告诉模型（随回复设置动态变化）。"""
-    getter = getattr(getattr(req, "config", None), "get", None)
-    if not callable(getter):
-        return []
+    getter = _reply_config_getter(req)
     try:
         mode = str(getter("reply_mode", "legacy") or "legacy")
         group_enable = bool(getter("group_enable", False))
@@ -74,6 +95,7 @@ def reply_rules_section(req: Any) -> list[dict]:
         return []
 
     if mode == "participation":
+        # 档位之间的差别**就写在这里**：本地只做成本门，由模型决定说不说。
         try:
             level = str(getter("participation_level", DEFAULT_LEVEL) or DEFAULT_LEVEL)
         except Exception:  # noqa: BLE001
@@ -86,9 +108,17 @@ def reply_rules_section(req: Any) -> list[dict]:
         )
         return [{"role": "system", "content": text}]
 
-    # 旧版：条件触发
+    # 旧版：条件触发。trigger_mode 走 `trigger_mode_from()` 折算旧键，
+    # 否则只配了 trigger_at/trigger_keyword 的账号会被误显示成"仅 @"。
     try:
-        trigger = str(getter("trigger_mode", "at") or "at")
+        from app.domain.dialogue_policy import trigger_mode_from
+
+        raw = {
+            "trigger_mode": getter("trigger_mode", ""),
+            "trigger_at": getter("trigger_at", False),
+            "trigger_keyword": getter("trigger_keyword", []) or [],
+        }
+        trigger = trigger_mode_from(raw)
         chance = int(getter("trigger_probability", 100) or 100)
         keywords = getter("trigger_keyword", []) or []
     except Exception:  # noqa: BLE001
