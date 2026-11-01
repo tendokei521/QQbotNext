@@ -26,8 +26,6 @@ from app.agent.loop.assistant_output import (  # noqa: F401 - 重导出保持 ch
     _build_speech,
     _clean_output_for_history,
     _flush_speech,
-    _force_speak_round,
-    _should_force_speak,
     _speech_intent,
 )
 from app.agent.loop.command_dispatch import (  # noqa: F401 - 重导出保持 chat.* API
@@ -266,12 +264,9 @@ async def stream_response(runtime, event, ctx=None):
     )
 
     # 发言通道（P2）：``speech`` 非 None 时，模型输出的文本只是思考，发言靠 send_message；
-    # 本轮一句话没说 = 静默（正常结局），不再用兜底话术填空。
-    from app.agent.delivery.speech import DEFAULT_REMINDER_ROUNDS, SPEAK_REMINDER
-
+    # 本轮一句话没说 = 静默（正常结局），不再用兜底话术填空、也不做催发言/补救轮。
     speech = meta.get("speech")
     speech_by_tool = speech is not None
-    reminder_rounds = int(policy_cfg.get("speech_reminder_rounds", DEFAULT_REMINDER_ROUNDS) or 0)
     spoken_parts: list[str] = []
 
     messages = assembly.build_for(runtime, req)
@@ -304,17 +299,15 @@ async def stream_response(runtime, event, ctx=None):
     )
 
     use_tools = bool(all_specs) and supports_tool_use(modalities)
-    from app.agent.loop.assistant_output import speech_needs_text_fallback
-
-    if speech_needs_text_fallback(speech, use_tools):
-        # 发言通道靠工具调用，本轮却拿不到工具（模型/适配器不支持 tool calling）：
-        # 硬开只会让模型"想完不发"，表现为整轮静默。这里降级回文本即发言并留痕。
-        logger.add_info(account_label(runtime.bot_id)).warning(
-            "[LLM] 发言通道（参与度模式）本轮工具不可用（模型不支持 tool calling），"
-            "已降级为「文本即回复」；请换用支持工具调用的模型，或把回复模式切回条件触发"
+    if speech_by_tool and not use_tools:
+        # 发言通道靠工具调用，而本轮拿不到工具（模型/适配器不支持 tool calling）：
+        # 模型想说什么都发不出去。这里**不降级为「文本即回复」**——那会把"思考"
+        # 当正文发进群里，等于把沉默语义彻底抹掉。直接结束本轮并留痕，让用户换模型。
+        logger.add_info(account_label(runtime.bot_id)).error(
+            "[LLM] 本轮处于发言通道但工具不可用（模型不支持 tool calling）→ 本轮静默。"
+            "请换用支持工具调用的模型，或把回复模式切回条件触发"
         )
-        speech = None
-        speech_by_tool = False
+        return
     tools = build_tools(all_specs) if use_tools else None
     tool_executor = make_executor(all_specs, tool_ctx) if use_tools else None
 
@@ -470,16 +463,12 @@ async def stream_response(runtime, event, ctx=None):
                     # 它随后还能继续"想下一句"。体感接近真人"想一句说一句"，
                     # 也不至于因为工具循环很久而让群友干等。
                     # 收尾轮也 flush：否则"最后一轮才调 send_message"的话永远不会发出去。
+                    #
+                    # 注意：这里**不再**注入「剩余轮次催发言」提醒——参与度模式下"不说话"
+                    # 是合法结局（沉默即正常结束），催它开口等于把沉默语义又抹掉。
                     async for message in _flush_speech(speech, session_mgr, session_id, meta_cfg, event):
                         spoken_parts.append(message.text)
                         yield message
-                    rounds_left = summary.rounds_left
-                    if rounds_left > 0 and speech.spoken == 0 and rounds_left <= reminder_rounds:
-                        # 剩的轮次不多了还没开口：用 user 角色提醒（中途 system 会被适配器上提到最前）
-                        messages.append({
-                            "role": "user",
-                            "content": SPEAK_REMINDER.format(rounds=rounds_left),
-                        })
         except TurnAborted as e:
             # 只在边界被取消：已经 yield 出去的句子、已经 upsert 的历史前缀都算数。
             # 这里**不能 raise**：收尾（历史定稿 / mark_replied / 遥测）必须照常走完，
@@ -535,21 +524,8 @@ async def stream_response(runtime, event, ctx=None):
         break
 
     if speech_by_tool:
-        # 被直接点名（@ / 私聊）却一句话没说：再要一次，避免"叫了不理"。
-        # 用非流式补一轮是因为这里只关心"有没有入稿"，不需要把文本流给用户。
-        # 流式已失败时不再补：错误多半是认证/配额/上下文超长，再打一枪只会再烧一次钱。
-        if (
-            speech.spoken == 0
-            and not stream_error_text
-            and _should_force_speak(policy_cfg, ctx, is_private)
-        ):
-            await _force_speak_round(
-                runtime, speech, messages, provider_chain, meta, tools, tool_executor
-            )
-            async for message in _flush_speech(speech, session_mgr, session_id, meta_cfg, event):
-                spoken_parts.append(message.text)
-                yield message
-
+        # 参与度模式下**不做"补救轮"**：旧模式里"输出=回复"，@ 了不说话是故障；
+        # 新模式里"沉默"是合法结局，再补一轮等于逼它开口，与参与度语义相反。
         full_text = "\n".join(spoken_parts)
         if speech.spoken == 0:
             # 静默：不发、不写 assistant 历史。这是正常结局，不是失败——但必须留痕，

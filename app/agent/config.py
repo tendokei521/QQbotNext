@@ -46,15 +46,12 @@ DEFAULT_LLM_CONFIG: dict = {
     "user_message_format": "single_line",
     # 时间行位置：tail=挪到消息末尾（默认，让逐轮稳定的行靠前，前缀缓存更有效）；head=旧行为
     "prompt_time_position": "tail",
-    # 发言通道（文本=思考、send_message=发言）不再是一个开关：它由 reply_mode 决定
-    # （participation ⇒ 发言通道；legacy ⇒ 文本即回复）。下面三个 speech_* 是启用后的细节参数。
-    # 一轮最多发几条气泡 / 单条气泡字数上限（防复读机式刷屏）
+    # 发言通道（文本=思考、send_message=发言）不是开关：它由 reply_mode 决定
+    # （participation ⇒ 发言通道；legacy ⇒ 文本即回复）。下面两个是启用后的**气泡约束**。
+    # 「催发言 / 被点名补救一轮」两个键已删除：参与度模式下沉默是合法结局，
+    # 补一轮等于逼它开口，和新模式的语义相反。
     "speech_max_bubbles": 4,
     "speech_max_bubble_chars": 300,
-    # 剩余轮次提醒：剩这么多轮还没开口就注入一条【系统提醒】催发言
-    "speech_reminder_rounds": 3,
-    # 被直接点名（@/私聊）却一句话没说时，允许再补一轮把话说出来
-    "speech_force_reply_on_call": True,
     # 记录历史时强制清洗助手输出里的（…）/(…) 内容，避免后续回复模仿括号风格
     "clean_output_parentheses": True,
     "group_enable": False,

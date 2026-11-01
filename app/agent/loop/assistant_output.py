@@ -4,7 +4,7 @@
 
 1. `_clean_output_for_history`：落库前把内部标记 / 流式残留清干净；
 2. 发言通道：`_build_speech`（文本=思考，`send_message`=真正发出）、`_speech_intent`、
-   `_should_force_speak`、`_flush_speech`、`_force_speak_round`。
+   `_flush_speech`（轮次边界或整轮结束时把气泡变成待发消息）。
 
 ## 为什么单独成文件
 
@@ -61,14 +61,6 @@ def _build_speech(config, *, force: bool = False):
     return SpeechOutbox(max_bubbles=max_bubbles, max_chars=max_chars)
 
 
-def speech_needs_text_fallback(speech: Any, use_tools: bool) -> bool:
-    """发言通道开着、但本轮工具不可用时需要降级回「文本即发言」。
-
-    发言靠 ``send_message`` 工具；模型/适配器不支持 tool calling 时硬开只会整轮静默。
-    """
-    return speech is not None and not bool(use_tools)
-
-
 def _speech_intent(config) -> bool:
     """本轮是否**应该**走发言通道（由回复模式决定，见 delivery/speech.py）。"""
     from app.agent.delivery.speech import speech_via_tool
@@ -77,22 +69,6 @@ def _speech_intent(config) -> bool:
         return speech_via_tool(config)
     except Exception:  # noqa: BLE001
         return False
-
-
-def _should_force_speak(config, ctx, is_private: bool) -> bool:
-    """是否属于"被直接点名，必须回应"的场景（@ / 私聊 / 拍一拍）。
-
-    这类场景一句话不说会被当成掉线，因此允许额外补一轮把话说出来；
-    群里没被点名的闲聊则不该强制——那正是静默要保护的部分。
-    """
-    try:
-        if not bool(config.get("speech_force_reply_on_call", True)):
-            return False
-    except Exception:  # noqa: BLE001
-        return False
-    if is_private:
-        return True
-    return bool(ctx is not None and ctx.state.get("is_at"))
 
 
 async def _flush_speech(speech, session_mgr, session_id: str, config, event):
@@ -128,36 +104,3 @@ async def _flush_speech(speech, session_mgr, session_id: str, config, event):
 #: 公开别名：输出策略（包括非流式的发言通道）flush 气泡时用它。
 flush_speech = _flush_speech
 
-
-async def _force_speak_round(
-    runtime, speech, messages, provider_chain, meta, tools, tool_executor
-) -> None:
-    """被点名却没开口时的补救：非流式再要一次（只关心会不会调 send_message）。
-
-    用非流式而不是再来一轮流式：这里不需要把文本流给用户，只需要一次工具调用。
-    轮数上限刻意压到 2（一次展开 + 一次发言），失败也只是回到静默，不会拖住会话。
-    """
-    from app.agent.delivery.speech import FORCE_SPEAK_REMINDER
-
-    messages.append({"role": "user", "content": FORCE_SPEAK_REMINDER})
-    try:
-        await resolve_invoker(runtime).chat(
-            runtime=runtime,
-            chain=provider_chain,
-            messages=messages,
-            params={
-                "model": meta["model"],
-                "temperature": meta["temperature"],
-                "max_tokens": meta["max_tokens"],
-                "tools": tools,
-                "tool_executor": tool_executor,
-                "max_tool_rounds": 2,
-                "max_empty_retries": 0,
-            },
-        )
-    except Exception as e:  # noqa: BLE001 —— 补救轮失败就回到静默，不能让整轮炸掉
-        logger.add_info(account_label(runtime.bot_id)).warning(f"[LLM] 强制发言补救轮失败（按静默处理）: {e}")
-    if speech.spoken == 0 and speech.queued == 0:
-        logger.add_info(account_label(runtime.bot_id)).warning(
-            "[LLM] 被直接点名但补一轮后仍未开口（模型可能没调用 send_message）"
-        )

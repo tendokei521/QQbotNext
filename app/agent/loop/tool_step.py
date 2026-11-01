@@ -6,7 +6,7 @@
 
 | 位置 | 产出方式 | round 边界额外动作 |
 |---|---|---|
-| `chat.stream_response` | `yield` 句子/气泡（async generator） | 发言通道 flush + `SPEAK_REMINDER` |
+| `chat.stream_response` | `yield` 句子/气泡（async generator） | 发言通道 flush（轮次边界） |
 | `turn._stream_once` | `await on_sentence(text)` | 无（只补图） |
 | `plugins/llm_trigger/src/proactive/stream.py` | `await pool.put(Message)` | 无（只补图） |
 | `providers/{openai_compat,anthropic,gemini}.chat` | 返回 `LLMResponse` | 无 |

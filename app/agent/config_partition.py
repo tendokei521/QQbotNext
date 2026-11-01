@@ -296,8 +296,6 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
         "stream_keep_order",
         "speech_max_bubbles",
         "speech_max_bubble_chars",
-        "speech_reminder_rounds",
-        "speech_force_reply_on_call",
     ),
     # 上下文增强：指代消解 / 按需展开 / 历史查询权限
     "llm_context": (
@@ -389,6 +387,9 @@ DELETED_KEYS: tuple[str, ...] = (
     # 2026-11-01 发言通道移植：输出形态不再由模块开关决定，而由 reply_mode 决定
     # （participation ⇒ 文本=思考 + send_message 发言；legacy ⇒ 文本即回复）
     "speech_via_tool",
+    # 2026-11-01 补救轮删除：参与度模式下"沉默"是合法结局，不再催发言/补一轮
+    "speech_reminder_rounds",
+    "speech_force_reply_on_call",
     # 循环安全阀：改为框架内硬编码安全默认（5 轮 / 1 次空回复重试 / 1 次收敛）
     # —— 它们不是"功能开关"，暴露给用户只会让用户把钱烧在不理解的地方
     "max_tool_rounds",
