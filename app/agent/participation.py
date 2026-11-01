@@ -51,6 +51,70 @@ SILENCE_RULE = (
 )
 
 
+LEGACY_TRIGGER_TEXT: dict[str, str] = {
+    "at": "只有被 @ 时系统才会请求你回复；没被 @ 的群消息你看不到，也不会被要求回复。",
+    "keyword": "只有消息命中配置的关键词时系统才会请求你回复；其余群消息不会被要求回复。",
+    "both": "只有被 @ 或消息命中关键词时系统才会请求你回复；其余群消息不会被要求回复。",
+    "all": "每条群消息都可能请求你回复（参与概率 {chance}%）；被请求时请按人设自然地回应，不需要说明自己在“参与”。",
+    "none": "当前群聊不会请求你回复；如被显式指令调用，正常回应即可。",
+}
+
+
+def reply_rules_section(req: Any) -> list[dict]:
+    """L1 段：把当前回复模式的内置规则告诉模型（随回复设置动态变化）。"""
+    getter = getattr(getattr(req, "config", None), "get", None)
+    if not callable(getter):
+        return []
+    try:
+        mode = str(getter("reply_mode", "legacy") or "legacy")
+        group_enable = bool(getter("group_enable", False))
+        private_enable = bool(getter("private_enable", True))
+    except Exception:  # noqa: BLE001
+        return []
+
+    if mode == "participation":
+        try:
+            level = str(getter("participation_level", DEFAULT_LEVEL) or DEFAULT_LEVEL)
+        except Exception:  # noqa: BLE001
+            level = DEFAULT_LEVEL
+        text = (
+            "### 群聊参与度\n"
+            "所有群消息都会进入你的上下文，由你决定是否发言（发言需要通过发送工具）。\n"
+            + LEVEL_PROMPT.get(level, LEVEL_PROMPT[DEFAULT_LEVEL])
+            + SILENCE_RULE
+        )
+        return [{"role": "system", "content": text}]
+
+    # 旧版：条件触发
+    try:
+        trigger = str(getter("trigger_mode", "at") or "at")
+        chance = int(getter("trigger_probability", 100) or 100)
+        keywords = getter("trigger_keyword", []) or []
+    except Exception:  # noqa: BLE001
+        trigger, chance, keywords = "at", 100, []
+    if trigger not in LEGACY_TRIGGER_TEXT:
+        trigger = "at"
+    detail = LEGACY_TRIGGER_TEXT[trigger].format(chance=chance)
+    if trigger in ("keyword", "both") and keywords:
+        detail += "关键词：" + "、".join(str(k) for k in keywords) + "。"
+    scope = []
+    if group_enable:
+        scope.append("群聊")
+    if private_enable:
+        scope.append("私聊")
+    text = (
+        "### 回复触发规则\n"
+        f"当前模式：条件触发（生效场景：{'、'.join(scope) or '无'}）。\n"
+        + detail
+    )
+    return [{"role": "system", "content": text}]
+
+
+def participation_section(req: Any) -> list[dict]:
+    """兼容旧名：等同 reply_rules_section。"""
+    return reply_rules_section(req)
+
+
 def participation_section(req: Any) -> list[dict]:
     """L1 段：参与度约定（仅新版模式生效）。"""
     getter = getattr(getattr(req, "config", None), "get", None)
@@ -243,6 +307,7 @@ __all__ = [
     "LEVEL_PROMPT",
     "budget_of",
     "gate",
+    "reply_rules_section",
     "participation_section",
     "observe_message",
 ]
