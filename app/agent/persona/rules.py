@@ -34,6 +34,9 @@ from typing import Any
 
 from app.core.logger import logger
 
+#: 参与度档位（与 `app/agent/participation.LEVELS` 同源；这里只用于取值归一化）
+_PARTICIPATION_LEVELS: tuple[str, ...] = ("very_low", "low", "medium", "high", "very_high")
+
 # ==================== 能力探测 ====================
 
 #: 能力键 → 能体现该能力的工具名（任一存在即算可用）
@@ -112,7 +115,11 @@ def detect_caps(
     caps["outbound_directive"] = bool(_cfg(config, "outbound_directive_enable", True))
     # 引用/@ 的输出通道：工具通道与行内指令通道二选一
     caps["quote_channel"] = speech_by_tool or caps["outbound_directive"]
-    caps["participation"] = str(_cfg(config, "participation", "medium") or "medium")
+    # 参与度：**只认新键** `participation_level`（5 档，成本门用的同一份值）。
+    # 旧键 `participation`（3 档、默认 medium）已随 llm_prompt 精简退役——两套"参与度"
+    # 并存时会出现「人格段说能接就接、成本门却根本不请求」的自相矛盾（线上实测过）。
+    raw_level = str(_cfg(config, "participation_level", "medium") or "medium").strip().lower()
+    caps["participation"] = raw_level if raw_level in _PARTICIPATION_LEVELS else "medium"
     # 表情活跃度开关已删除（2026-11-01 精简）：固定按"普通频率"渲染
     caps["emoji_level"] = 1
     return caps
@@ -263,8 +270,18 @@ def subjectivity(caps: dict | None = None) -> str:
 
 
 def participation_text(level: Any = "medium") -> str:
-    """参与度档位首行（改写的是系统提示，不是人格正文）。"""
+    """参与度档位首行（改写的是系统提示，不是人格正文）。
+
+    5 档与成本门（`participation.gate`）**同一份值**：成本门决定"这条消息要不要交给
+    模型"，这里决定"模型该不该开口"。两处必须对齐，否则会出现「提示词说能接就接、
+    系统根本不请求」的分裂。
+    """
     key = str(level or "medium").strip().lower()
+    if key == "very_low":
+        return (
+            "你的参与度风格：极低。只有被 @、被回复或直接被点名时才开口；"
+            "其余时间安静看戏，哪怕话题很有意思也不主动插话。"
+        )
     if key == "low":
         return (
             "你的参与度风格：安静型。大部分时候潜水看戏，只在被 @/点名/直接提问、"
@@ -274,6 +291,11 @@ def participation_text(level: Any = "medium") -> str:
         return (
             "你的参与度风格：活跃型。热闹的群聊里可以比较活跃，能接的话题尽量接，偶尔主动开话题；"
             "但依然选择性接话，不要每条都回、不要刷屏。"
+        )
+    if key == "very_high":
+        return (
+            "你的参与度风格：很高。几乎每条消息都可以接话，优先回应提问、观点、梗和需要帮助的内容；"
+            "连续多条时挑最有价值的一条回应，不要逐条复读。"
         )
     return "你的参与度风格：普通群友。能接的话题就接，插不上就安静看；不抢话也不故意隐身。"
 

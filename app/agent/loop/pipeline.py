@@ -506,14 +506,21 @@ class LlmPipeline:
             )
             return False
 
-        # ① 成本门：只回答"值不值得花一次请求"，发言与否由提示词 + 模型决定
+        # ① 成本门：只回答"值不值得花一次请求"，发言与否由提示词 + 模型决定。
+        # 沉默原因**必须可见**：以前这里只有 debug 级，用户看到的是"群开着却不理我"，
+        # 日志里却查不到原因（这是参与度模式最容易被误判成 bug 的地方）。
         verdict = gate(self.runtime, ctx.event, level)
         if not verdict.allowed:
             log_skip(
                 account_id,
                 "participation_silent",
                 f"参与度={level} · {verdict.reason}",
-                level="debug",
+                hint=(
+                    "这是成本闸门：低档位只把「@我 / 回复我」的消息交给模型。"
+                    "想让普通群消息也进模型，把参与度调到「中」或更高"
+                ),
+                level="info",
+                interval_s=60,
             )
             return False
 
@@ -525,7 +532,9 @@ class LlmPipeline:
                 account_id,
                 "participation_cooldown",
                 f"同群冷却中（{cooldown}s）",
-                level="debug",
+                hint="同群两次请求的最小间隔；被 @/回复不受它限制",
+                level="info",
+                interval_s=60,
             )
             return False
 
@@ -537,8 +546,11 @@ class LlmPipeline:
             log_skip(
                 account_id,
                 "participation_budget",
-                "参与度模式 10 分钟预算已用完（只记录不请求）",
-                level="debug",
+                f"10 分钟窗口已用 {len(budget.requests)} 次 / {max_req} 次请求、"
+                f"{sum(t for _, t in budget.tokens)} / {max_tok} tokens（只记录不请求）",
+                hint="调高「10 分钟请求上限 / token 上限」，或等窗口滚动后再试",
+                level="warning",
+                interval_s=120,
             )
             return False
 
