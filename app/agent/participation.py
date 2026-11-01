@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import time
 from collections import deque
+from dataclasses import dataclass
 from typing import Any
 
 #: 参与度等级（从低到高）
@@ -111,23 +112,8 @@ def reply_rules_section(req: Any) -> list[dict]:
 
 
 def participation_section(req: Any) -> list[dict]:
-    """兼容旧名：等同 reply_rules_section。"""
+    """兼容旧名：等同 reply_rules_section（唯一来源在 `reply_rules_section`）。"""
     return reply_rules_section(req)
-
-
-def participation_section(req: Any) -> list[dict]:
-    """L1 段：参与度约定（仅新版模式生效）。"""
-    getter = getattr(getattr(req, "config", None), "get", None)
-    if not callable(getter):
-        return []
-    try:
-        if str(getter("reply_mode", "legacy") or "legacy") != "participation":
-            return []
-        level = str(getter("participation_level", DEFAULT_LEVEL) or DEFAULT_LEVEL)
-    except Exception:  # noqa: BLE001
-        return []
-    text = LEVEL_PROMPT.get(level, LEVEL_PROMPT[DEFAULT_LEVEL]) + SILENCE_RULE
-    return [{"role": "system", "content": "### 群聊参与度\n" + text}]
 
 
 # ---------------- 预算 ----------------
@@ -182,11 +168,35 @@ def _is_at_me(event: Any, self_id: str) -> bool:
     return False
 
 
-def _is_reply_to_me(event: Any, self_id: str) -> bool:
-    # reply 段不带作者信息，极低/低等级下先放行（让模型用引用内容判断）
+def _reply_segment_id(event: Any) -> str:
     for seg in getattr(event, "message", None) or []:
         if getattr(seg, "type", "") == "reply":
-            return True
+            return str((getattr(seg, "data", {}) or {}).get("id") or "")
+    return ""
+
+
+def _is_reply_to_me(runtime: Any, event: Any, self_id: str) -> bool:
+    """这条消息是不是**回复我**（而不是随便引用了别人）。
+
+    reply 段只带目标 message_id，真正的作者要去会话历史里反查。查不到时按
+    "不是我"保守处理——宁可少回一条，也不要在"仅被 @"的档位下乱接话。
+    """
+    target = _reply_segment_id(event)
+    if not target:
+        return False
+    try:
+        from app.agent.session.manager import SessionManager
+
+        mgr = SessionManager(str(getattr(runtime, "bot_id", "")))
+        history = mgr.get_history(_session_id(event), limit=mgr.MAX_HISTORY_MESSAGES)
+        for item in history or []:
+            if str(item.get("message_id") or "") != target:
+                continue
+            if str(item.get("role") or "") == "assistant":
+                return True
+            return str(item.get("user_id") or "") == self_id
+    except Exception:  # noqa: BLE001 —— 反查失败按"不是我"，不阻断本轮
+        return False
     return False
 
 
@@ -217,44 +227,68 @@ def _session_id(event: Any) -> str:
     return f"private_{getattr(event, 'user_id', '')}"
 
 
-def _cooldown_ok(runtime: Any, event: Any, seconds: int) -> bool:
+def cooldown_ok(runtime: Any, event: Any, seconds: int) -> bool:
+    """同群冷却**检查**（不写状态）。配合 `mark_request` 用：只有真请求才计时。
+
+    旧实现把"检查"与"计时"揉在一行里，于是被门拒绝的消息也消耗冷却，
+    真正 @ 到达时反而被挡（见 docs/plan/participation-reply-mode.md P0-6）。
+    """
     if seconds <= 0:
         return True
     now = time.time()
-    last = getattr(runtime, 'participation_last_request', None)
+    last = getattr(runtime, "participation_last_request", None) or {}
+    key = _session_id(event)
+    return now - float(last.get(key, 0) or 0) >= seconds
+
+
+def mark_request(runtime: Any, event: Any) -> None:
+    """记录"这个会话刚花了一次请求"（冷却计时起点）。"""
+    now = time.time()
+    last = getattr(runtime, "participation_last_request", None)
     if last is None:
         last = {}
         try:
             runtime.participation_last_request = last
-        except Exception:  # noqa: BLE001
-            return True
-    key = _session_id(event)
-    if now - float(last.get(key, 0) or 0) < seconds:
-        return False
-    last[key] = now
-    return True
+        except Exception:  # noqa: BLE001 —— 只读运行时替身：冷却退化为"不生效"
+            return
+    last[_session_id(event)] = now
 
 
-def gate(runtime: Any, event: Any, level: str) -> tuple[bool, str]:
-    """本地规则门：True=进入 LLM，False=只记录不请求。"""
+@dataclass(frozen=True)
+class GateResult:
+    """成本门的结论。``at_me``/``reply_me`` 同时供冷却豁免与"必须有发言"使用。"""
+
+    allowed: bool
+    reason: str
+    at_me: bool = False
+    reply_me: bool = False
+
+
+def gate(runtime: Any, event: Any, level: str) -> GateResult:
+    """本地**成本门**：True=值得花一次请求，False=只记录不请求。
+
+    注意这不是"要不要发言"的语义判断——档位之间的差别写在系统提示词里
+    （`LEVEL_PROMPT`）。这里只按档位给一个**成本**映射：档位越高，越愿意为
+    普通消息付费。禁止往这里再加关键词/情绪之类的语义谓词。
+    """
     self_id = str(getattr(event, "self_id", "") or "")
     at_me = _is_at_me(event, self_id)
-    reply_me = _is_reply_to_me(event, self_id)
+    reply_me = _is_reply_to_me(runtime, event, self_id)
     if level == "very_low":
-        return (at_me or reply_me, "at_or_reply" if (at_me or reply_me) else "level_very_low")
+        return GateResult(at_me or reply_me, "at_or_reply" if (at_me or reply_me) else "level_very_low", at_me, reply_me)
     if level == "low":
         if at_me or reply_me:
-            return True, "at_or_reply"
-        return (False, "level_low")
+            return GateResult(True, "at_or_reply", at_me, reply_me)
+        return GateResult(False, "level_low", at_me, reply_me)
     if level == "medium":
         if at_me or reply_me or _bot_spoke_recently(runtime, event):
-            return True, "thread_continuation"
-        return (False, "level_medium")
+            return GateResult(True, "thread_continuation", at_me, reply_me)
+        return GateResult(False, "level_medium", at_me, reply_me)
     if level == "high":
-        return True, "level_high"
+        return GateResult(True, "level_high", at_me, reply_me)
     if level == "very_high":
-        return True, "level_very_high"
-    return (False, "unknown_level")
+        return GateResult(True, "level_very_high", at_me, reply_me)
+    return GateResult(False, "unknown_level", at_me, reply_me)
 
 
 __all__ = [
@@ -263,10 +297,13 @@ __all__ = [
     "DEFAULT_LEVEL",
     "DEFAULT_MAX_REQUESTS",
     "DEFAULT_MAX_TOKENS",
+    "GateResult",
     "LEVELS",
     "LEVEL_PROMPT",
     "budget_of",
+    "cooldown_ok",
     "gate",
+    "mark_request",
     "reply_rules_section",
     "participation_section",
 ]

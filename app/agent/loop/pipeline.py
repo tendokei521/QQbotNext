@@ -466,7 +466,7 @@ class LlmPipeline:
         观察结果决定 ``user_recorded``：只有真的写进历史才标记，否则由
         `prompt_prep` 的正常路径补写（旧实现无条件置 True → 冷却期消息永久丢失）。
         """
-        from app.agent.participation import _cooldown_ok, budget_of, gate
+        from app.agent.participation import budget_of, cooldown_ok, gate, mark_request
         from app.agent.reply.observer import observe_group_message
 
         observed, _reason = await observe_group_message(self.runtime, ctx.event, config)
@@ -475,6 +475,31 @@ class LlmPipeline:
 
         account_id = getattr(self.runtime, "bot_id", "?")
         level = str(config.get("participation_level", "low") or "low")
+
+        # ① 成本门：只回答"值不值得花一次请求"，发言与否由提示词 + 模型决定
+        verdict = gate(self.runtime, ctx.event, level)
+        if not verdict.allowed:
+            log_skip(
+                account_id,
+                "participation_silent",
+                f"参与度={level} · {verdict.reason}",
+                level="debug",
+            )
+            return False
+
+        # ② 冷却：@/回复豁免（被叫了不该等冷却）；只有真请求才计时（mark_request）
+        cooldown = int(config.get("participation_cooldown_seconds", 20) or 0)
+        exempt = verdict.at_me or verdict.reply_me
+        if not exempt and not cooldown_ok(self.runtime, ctx.event, cooldown):
+            log_skip(
+                account_id,
+                "participation_cooldown",
+                f"同群冷却中（{cooldown}s）",
+                level="debug",
+            )
+            return False
+
+        # ③ 预算：10 分钟窗口的请求数 / token（token 由 usage 回填，见 A-12）
         budget = budget_of(self.runtime)
         max_req = int(config.get("participation_max_requests", 60) or 60)
         max_tok = int(config.get("participation_max_tokens", 10000000) or 10000000)
@@ -486,29 +511,14 @@ class LlmPipeline:
                 level="debug",
             )
             return False
-        cooldown = int(config.get("participation_cooldown_seconds", 20) or 0)
-        if not _cooldown_ok(self.runtime, ctx.event, cooldown):
-            log_skip(
-                account_id,
-                "participation_cooldown",
-                f"同群冷却中（{cooldown}s）",
-                level="debug",
-            )
-            return False
-        ok, reason = gate(self.runtime, ctx.event, level)
-        if not ok:
-            log_skip(
-                account_id,
-                "participation_silent",
-                f"参与度={level} · {reason}",
-                level="debug",
-            )
-            return False
+
+        mark_request(self.runtime, ctx.event)
         budget.record(0)
         # 标记"本轮由参与度门放行"：prompt_prep 据此绕开旧会话冷却（`can_reply`），
         # 否则过完门仍可能在组装阶段被静默吞掉。
         ctx.state["participation_gate"] = True
-        self._apply_inbound_text(ctx, str(getattr(ctx.event, "text", "") or ""), False)
+        # is_at 由门给：@ 时才置位（"必须有发言"的兜底依赖它）
+        self._apply_inbound_text(ctx, str(getattr(ctx.event, "text", "") or ""), verdict.at_me)
         return True
 
     @staticmethod
