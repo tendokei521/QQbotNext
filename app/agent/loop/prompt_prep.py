@@ -132,7 +132,15 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
         bot = getattr(event, "bot", None)
 
     session_mgr = session_mgr or SessionManager(str(runtime.bot_id))
-    session = await get_or_create_session(session_mgr, turn, config, ctx)
+    # 参与度模式：本轮已在 pipeline 里过完成本门、并写进历史，这里的旧会话冷却
+    # （`can_reply()`，基于"bot 上次发言时间"）不能再判一次——它会静默返回 None，
+    # 让"过完门却被吞掉"变成一条没有日志的黑洞。观察口径下同一开关也用于绕开冷却。
+    admitted_by_participation = bool(
+        ctx is not None and ctx.state.get("participation_gate")
+    )
+    session = await get_or_create_session(
+        session_mgr, turn, config, ctx, observe=admitted_by_participation
+    )
     if session is None:
         return None, None, None
 

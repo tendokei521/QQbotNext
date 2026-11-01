@@ -505,6 +505,9 @@ class LlmPipeline:
             )
             return False
         budget.record(0)
+        # 标记"本轮由参与度门放行"：prompt_prep 据此绕开旧会话冷却（`can_reply`），
+        # 否则过完门仍可能在组装阶段被静默吞掉。
+        ctx.state["participation_gate"] = True
         self._apply_inbound_text(ctx, str(getattr(ctx.event, "text", "") or ""), False)
         return True
 

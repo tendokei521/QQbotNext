@@ -221,6 +221,16 @@ async def stream_response(runtime, event, ctx=None):
     # 流式仅额外需要 stream_sentence_max_length 作为切句长度。
     req, session, meta = await prepare_prompt(runtime, event, ctx)
     if req is None:
+        # 以前这里是裸 return：参与度模式下"过完门却整轮消失"完全无迹可查。
+        from app.core.skip_log import log_skip
+
+        log_skip(
+            getattr(runtime, "bot_id", "?"),
+            "prompt_unavailable",
+            f"session={getattr(ctx, 'session_id', '?')} · group={getattr(event, 'group_id', '')}",
+            hint="本轮无法组装请求（会话冷却 / 空消息），详情见 debug 日志",
+            level="debug",
+        )
         return
     session_id = meta["session_id"]
     provider_chain = meta["provider_chain"]
