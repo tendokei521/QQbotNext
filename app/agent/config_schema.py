@@ -243,8 +243,9 @@ SCHEMA = {
         "rows": 6, "group": "group_compress",
     },
     "max_message_length": {
-        "type": "number", "label": "消息最大长度", "description": "单条消息的最大字符数",
-        "default": 200, "min": 20, "max": 500, "group": "group_session",
+        "type": "number", "label": "消息最大长度",
+        "description": "单轮原文的字符上限，超出截断；太短会把长消息/引用截半",
+        "default": 4000, "min": 200, "max": 20000, "group": "group_session",
     },
     "prompt_dump_enable": {
         "type": "boolean", "label": "请求落盘（迁移对账）",
