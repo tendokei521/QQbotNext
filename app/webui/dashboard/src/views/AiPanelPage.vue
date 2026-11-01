@@ -119,6 +119,10 @@ const PARTICIPATION_ITEMS = [
   { title: '高（参与可讨论的话题）', value: 'high' },
   { title: '超高（几乎都参与）', value: 'very_high' },
 ]
+const participationMaxRequests = computed<number>({
+  get: () => Number(agent.draft.participation_max_requests ?? 60),
+  set: (v) => agent.onChange('participation_max_requests', Number(v) || 1),
+})
 const participationCooldown = computed<number>({
   get: () => Number(agent.draft.participation_cooldown_seconds ?? 20),
   set: (v) => agent.onChange('participation_cooldown_seconds', Number(v) || 0),
@@ -407,36 +411,6 @@ watch(
       <!-- ② 触发方式：什么时候接话（改动自动保存） -->
       <PanelCard title="触发方式" icon="mdi-at" color="info">
         <v-progress-linear v-if="loadingTrigger" indeterminate color="info" class="mb-3" />
-        <div class="text-caption app-muted mb-2">所有群和私聊的默认触发方式</div>
-        <v-select
-          v-model="triggerMode"
-          :items="TRIGGER_OPTIONS"
-          density="compact"
-          variant="outlined"
-          hide-details
-          class="mb-3"
-          :disabled="!hasAccount"
-        />
-        <div v-if="triggerMode === 'keyword' || triggerMode === 'both'" class="mb-3">
-          <div class="text-body-2 mb-2">关键词</div>
-          <StringListWidget v-model="triggerKeywords" />
-        </div>
-        <v-text-field
-          v-if="triggerMode === 'all'"
-          v-model="triggerProbability"
-          label="参与概率（%）"
-          type="number"
-          min="0"
-          max="100"
-          density="compact"
-          variant="outlined"
-          hide-details
-        />
-      </PanelCard>
-
-      <!-- ②b 回复模式：旧版条件触发 / 新版参与度驱动 -->
-      <PanelCard title="回复模式" icon="mdi-transit-connection-variant" color="warning">
-        <div class="text-caption app-muted mb-2">新版：所有消息都记入会话，由参与度决定是否发言</div>
         <v-select
           v-model="replyMode"
           :items="[
@@ -450,7 +424,39 @@ watch(
           class="mb-3"
           :disabled="!hasAccount"
         />
-        <template v-if="replyMode === 'participation'">
+
+        <!-- 旧版：条件触发 -->
+        <template v-if="replyMode === 'legacy'">
+          <div class="text-caption app-muted mb-2">所有群和私聊的默认触发方式</div>
+          <v-select
+            v-model="triggerMode"
+            :items="TRIGGER_OPTIONS"
+            density="compact"
+            variant="outlined"
+            hide-details
+            class="mb-3"
+            :disabled="!hasAccount"
+          />
+          <div v-if="triggerMode === 'keyword' || triggerMode === 'both'" class="mb-3">
+            <div class="text-body-2 mb-2">关键词</div>
+            <StringListWidget v-model="triggerKeywords" />
+          </div>
+          <v-text-field
+            v-if="triggerMode === 'all'"
+            v-model="triggerProbability"
+            label="参与概率（%）"
+            type="number"
+            min="0"
+            max="100"
+            density="compact"
+            variant="outlined"
+            hide-details
+          />
+        </template>
+
+        <!-- 新版：参与度驱动 -->
+        <template v-else>
+          <div class="text-caption app-muted mb-2">所有消息都记入会话，由参与度决定是否发言</div>
           <v-select
             v-model="participationLevel"
             :items="PARTICIPATION_ITEMS"
@@ -459,6 +465,7 @@ watch(
             variant="outlined"
             hide-details
             class="mb-3"
+            :disabled="!hasAccount"
           />
           <v-text-field
             v-model.number="participationCooldown"
@@ -469,9 +476,20 @@ watch(
             density="compact"
             variant="outlined"
             hide-details
+            class="mb-3"
+          />
+          <v-text-field
+            v-model.number="participationMaxRequests"
+            label="10 分钟请求上限"
+            type="number"
+            min="1"
+            max="1000"
+            density="compact"
+            variant="outlined"
+            hide-details
           />
         </template>
-      </PanelCard>
+</PanelCard>
 
       <!-- ③ 模型：复用设置区的模型卡（自读 store，不需要 props）；加入动作只在卡里出现一次 -->
       <div class="panel-block">
