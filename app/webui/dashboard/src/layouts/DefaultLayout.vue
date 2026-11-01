@@ -125,7 +125,7 @@ const navItems = computed<NavItem[]>(() => {
     ...(showExperimental
       ? [
           { to: '/tools/overview', title: TOOLS_GROUP, icon: 'mdi-toolbox-outline' },
-          { to: '/prompt-assembly', title: '提示词组装', icon: 'mdi-text-box-edit-outline' },
+          { to: '/advanced-options', title: '高级选项', icon: 'mdi-tune-variant' },
         ]
       : []),
     // 框架功能：对所有账号生效的框架级能力（不是某个账号的配置）

@@ -325,6 +325,9 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
 
 # ==================== 3. 删除（9 键）====================
 DELETED_KEYS: tuple[str, ...] = (
+    # 2026-11-01 系统方案：提示词注入功能删除（行为规则只由提示词方案决定）
+    "behavior_rules_override",
+    "participation",
     # 2026-11-01 llm_context 重写：焦点表/预取候选/歧义策略全部删除，
     # 改为"id 可寻址 + get_context 按需取回"
     "context_expand_enable",

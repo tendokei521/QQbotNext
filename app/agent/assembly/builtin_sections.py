@@ -128,29 +128,21 @@ def build_behavior(req: Any) -> list[dict]:
 
     preset = prompt_preset(req)
     if preset is None:
-        return []
-    override = str(req.cfg("behavior_rules_override", "") or "").strip()
-    if preset is not None and not override:
-        # 设置页里编辑过的「系统提示词」覆盖（全局、按方案）：静态文本，优先于默认渲染
-        from app.application import prompt_preset_service
-
-        preset_override = prompt_preset_service.get_override(preset.key)
-        if preset_override:
-            return [{"role": "system", "content": preset_override}]
-    if preset is not None:
-        text = prompt_presets.render(
-            preset,
-            runtime=req.runtime,
-            available_tools=req.available_tools,
-            config=req.config,
-            modalities=req.modalities,
-            override=override,
-        )
-    elif override:
-        caps = persona_rules.detect_caps(req.available_tools, req.config, req.modalities)
-        text = persona_rules.override_with_safety(override, caps)
-    else:
         text = persona_rules.render(req.runtime, req.available_tools, req.config, req.modalities)
+        return [{"role": "system", "content": text}] if str(text).strip() else []
+    # 设置页里编辑过的「系统提示词」覆盖（全局、按方案）：静态文本，优先于默认渲染
+    from app.application import prompt_preset_service
+
+    preset_override = prompt_preset_service.get_override(preset.key)
+    if preset_override:
+        return [{"role": "system", "content": preset_override}]
+    text = prompt_presets.render(
+        preset,
+        runtime=req.runtime,
+        available_tools=req.available_tools,
+        config=req.config,
+        modalities=req.modalities,
+    )
     return [{"role": "system", "content": text}] if str(text).strip() else []
 
 
