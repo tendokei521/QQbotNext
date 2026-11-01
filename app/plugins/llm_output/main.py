@@ -52,12 +52,10 @@ OWNED_KEYS: tuple[str, ...] = (
     "stream_queue_full_policy",
     "stream_flush_on_finish",
     "stream_keep_order",
-    # 发言通道本身（是否走"文本=思考"）已归回复模式决定，本模块不再持有该开关；
-    # 这里保留的 speech_* 只是发言通道启用后的**细节参数**（气泡数/字数/催发言）。
+    # 发言通道本身（是否走"文本=思考"）归回复模式决定，本模块不再持有该开关；
+    # 这里保留的 speech_* 只是发言通道启用后的**气泡约束**。
     "speech_max_bubbles",
     "speech_max_bubble_chars",
-    "speech_reminder_rounds",
-    "speech_force_reply_on_call",
 )
 
 
@@ -73,9 +71,8 @@ class Module(BaseModule):
     provides = ("output",)
     supersedes = ("output",)
     default_config = {
-        # 输出形态是**唯一事实源**（`stream_output` 只用于老配置迁移）。
-        # 发言通道已归回复模式（`reply_mode=participation`），不再由本模块提供。
-        "mode": "stream",
+        # 传输方式只有一个开关：`stream_output`（流式 / 一次拿全）。
+        # 通道（文本即回复 / 发言通道）归回复模式，不在本模块。
         "stream_output": False,
         "stream_send_pool_enabled": False,
         "stream_send_by_sentence": True,
@@ -95,11 +92,8 @@ class Module(BaseModule):
         "stream_queue_full_policy": "backpressure",
         "stream_flush_on_finish": False,
         "stream_keep_order": True,
-        "speech_via_tool": True,
         "speech_max_bubbles": 5,
         "speech_max_bubble_chars": 200,
-        "speech_reminder_rounds": 2,
-        "speech_force_reply_on_call": True,
     }
     config_schema = SCHEMA
 
@@ -110,23 +104,12 @@ class Module(BaseModule):
             return
 
         adapter = OutputStrategyAdapter(runtime, self.config, OWNED_KEYS)
-        # 策略视图：让**其它机制**读到与输出层同一口径的生效值。
-        # 发言通道不在这里覆写——它由 `reply_mode` 决定（`delivery/speech.py`），
-        # 本模块只负责"流式 / 一次性"。
+        # 策略视图：让装配/提示词层读到与本模块同一口径的 `stream_*` 参数。
+        # 通道（发言通道与否）由回复模式决定，不在本模块；传输只有 `stream_output` 一个键。
         runtime.output_options = adapter.options_view()
         runtime.output = adapter
-        # P6 能力声明：本模块声明"这套运行时**能**怎么产出"（流式 / 一次性）。框架此后按
-        # 声明选策略；"能力存亡"由这里决定（卸载即撤销）。参与度模式下框架会以
-        # 「回复模式」为准强制发言通道，模块的声明只在 legacy 生效。
-        from app.agent.capabilities import (
-            OUTPUT_BLOCKING,
-            OUTPUT_STREAM,
-            registry_of,
-        )
-
-        mode = adapter.mode
-        kind = OUTPUT_STREAM if mode == "stream" else OUTPUT_BLOCKING
-        registry_of(runtime).declare_output(kind, source="llm_output")
+        # 不再声明输出能力：策略选择统一由框架 `select_default_output` 完成
+        # （通道=回复模式 × 传输=stream_output）。模块声明会把"通道"重新抢回去。
 
     async def on_unload(self) -> None:
         """卸载时把槽恢复成"按配置自动选择"（框架默认行为）。
@@ -140,17 +123,15 @@ class Module(BaseModule):
         if isinstance(getattr(runtime, "output", None), OutputStrategyAdapter):
             runtime.output = None
         runtime.output_options = None
-        # 同时撤销能力声明，否则框架会以为"还能流式"（配置兜底仍在，行为平滑）
-        from app.agent.capabilities import registry_of
 
-        registry_of(runtime).revoke_output(source="llm_output")
-
-    # ── 供测试/诊断：当前生效的模式 ──
+    # ── 供测试/诊断：当前生效的传输方式 ──
     @property
-    def mode(self) -> str:
-        from .src.output_mode import resolve_mode
-
-        return resolve_mode(self.config)
+    def transport(self) -> str:
+        """``stream`` / ``blocking``（通道不在这里判定，见框架 select_default_output）。"""
+        try:
+            return "stream" if bool(self.config.get("stream_output", False)) else "blocking"
+        except Exception:  # noqa: BLE001 —— 配置坏了按最保守的传输方式
+            return "blocking"
 
 
 def owned_keys() -> tuple[str, ...]:

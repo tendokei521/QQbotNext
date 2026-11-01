@@ -1,17 +1,15 @@
-"""输出策略模块的配置 Schema（流式 + 发言通道，共 25 键 → 本模块持有）。"""
+"""输出模块的配置 Schema（流式传输参数 + 发言通道的气泡约束）。
+
+两个正交维度里，本模块只提供**实现参数**：
+- 传输方式：`stream_output`（流式 / 一次拿全）——唯一开关，不再有 `mode` 三选一；
+- 发言通道：由回复模式决定（不在这里），模块只留 `speech_max_bubbles` 等气泡约束。
+"""
 
 SCHEMA = {
-    "mode": {
-        "type": "select",
-        "label": "输出形态",
-        "description": "stream=按句流式；text=一次发完。发言通道归回复模式（参与度模式）。",
-        "default": "stream",
-        "options": {"stream": "流式（默认）", "text": "一次性"},
-    },
     "stream_output": {
         "type": "boolean",
-        "label": "流式输出（兼容开关）",
-        "description": "moved 自 agent 配置。mode=text 时仅作兼容：打开等同类 mode=stream",
+        "label": "流式输出",
+        "description": "开启=边收边发；关闭=一次拿全再发。只影响请求方式，不影响是否发言。",
         "default": False,
     },
     "stream_send_by_sentence": {
@@ -134,9 +132,8 @@ SCHEMA = {
         "description": "流结束后是否忽略剩余间隔立即发送剩余消息",
         "default": False,
     },
-    # 注意：`speech_via_tool` 不再出现在设置页——「输出形态」是唯一开关。
-    # 旧键仍保留在模块默认配置 / 持有键里，只用于老配置迁移
-    # （没有 mode 的账号按它推导，见 `llm_output/service.py::resolve_mode`）。
+    # 发言通道由回复模式决定；模块只保留气泡约束（催发言/补救轮的键已删除：
+    # 参与度模式下"沉默"是合法结局，不该再催它开口）。
     "speech_max_bubbles": {
         "type": "number",
         "label": "单轮最多几条",
@@ -148,17 +145,5 @@ SCHEMA = {
         "label": "单条字数上限",
         "description": "单个气泡的最大字符数",
         "default": 200,
-    },
-    "speech_reminder_rounds": {
-        "type": "number",
-        "label": "催发言提醒轮次",
-        "description": "剩余轮次不足该值时提醒模型尽快开口",
-        "default": 2,
-    },
-    "speech_force_reply_on_call": {
-        "type": "boolean",
-        "label": "被点名必须回应",
-        "description": "@ / 私聊 / 拍一拍时，若一句话没说会额外补一轮",
-        "default": True,
     },
 }
