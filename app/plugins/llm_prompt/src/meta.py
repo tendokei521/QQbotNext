@@ -108,11 +108,24 @@ async def _collect_reply(ctx) -> dict | None:
         data = (resp or {}).get("data", {}) or {}
         sender = data.get("sender", {}) or {}
         name = sender.get("card") or sender.get("nickname") or ""
-        text = _segments_to_text(data.get("message"), message_id=reply_id)
+        text = _render_reply_text(data.get("message"), message_id=reply_id)
         return {"id": reply_id, "message_id": reply_id, "name": name, "text": text}
     except Exception as e:  # noqa: BLE001
         logger.debug(f"[Enhance] 获取引用消息失败（reply_id={reply_id}）: {e}")
         return {"id": reply_id, "message_id": reply_id, "name": "", "text": UNRESOLVED_REPLY.format(id=reply_id)}
+
+
+def _render_reply_text(message, message_id: Any = None) -> str:
+    """引用正文：优先用组装模块的渲染器（占位符带消息 id），失败退回纯文本。"""
+    try:
+        from .message_assembly import render_segments
+
+        rendered = render_segments(message, message_id=message_id)
+        if rendered:
+            return rendered
+    except Exception:  # noqa: BLE001
+        pass
+    return _segments_to_text(message, message_id=message_id)
 
 
 def _segments_to_text(message, message_id: Any = None) -> str:

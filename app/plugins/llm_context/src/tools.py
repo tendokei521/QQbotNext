@@ -157,8 +157,15 @@ async def _handle(tool_ctx: ToolContext, args: dict) -> str:
         for seg in data.get("message", []) or []:
             stype = seg.get("type") if isinstance(seg, dict) else getattr(seg, "type", "")
             sdata = (seg.get("data") if isinstance(seg, dict) else getattr(seg, "data", {})) or {}
-            if stype == "image":
-                urls.append(str(sdata.get("url") or sdata.get("file") or ""))
+            if stype != "image":
+                continue
+            url = str(sdata.get("url") or "")
+            if not url:
+                # 段里只有 file（hash）时，调 get_image 换可访问地址
+                file_ref = str(sdata.get("file") or "")
+                url = await _image_url(bot, file_ref) if file_ref else ""
+            if url:
+                urls.append(url)
         if not urls:
             return f"[image:id={ref}]（没有取到图片地址）"
         return f"[image:id={ref}]（图片内容需视觉模型查看；地址：{'; '.join(u for u in urls if u)}）"
@@ -166,17 +173,32 @@ async def _handle(tool_ctx: ToolContext, args: dict) -> str:
     return f"不支持的 target 类型：{kind}（可用：message/recent/forward/user/image）"
 
 
-async def _try_get_image(bot: Any, file_ref: str) -> str:
-    """按 file/url 直接取图（OneBot get_image）；取不到返回空串。"""
+async def _image_url(bot: Any, file_ref: str) -> str:
+    """按 file/hash 换图片地址：先 get_image，再 call_api 兜底。"""
     getter = getattr(bot, "get_image", None)
-    if not callable(getter):
-        return ""
-    try:
-        resp = await getter(file=file_ref)
-    except Exception:  # noqa: BLE001
-        return ""
-    data = (resp or {}).get("data", {}) or {}
-    url = str(data.get("url") or data.get("file") or "")
+    if callable(getter):
+        try:
+            resp = await getter(file=file_ref)
+            data = (resp or {}).get("data", {}) or {}
+            url = str(data.get("url") or "")
+            if url:
+                return url
+        except Exception:  # noqa: BLE001
+            pass
+    caller = getattr(bot, "call_api", None)
+    if callable(caller):
+        try:
+            resp = await caller("get_image", {"file": file_ref})
+            data = (resp or {}).get("data", {}) or {}
+            return str(data.get("url") or "")
+        except Exception:  # noqa: BLE001
+            return ""
+    return ""
+
+
+async def _try_get_image(bot: Any, file_ref: str) -> str:
+    """按 file/url 直接取图；取不到返回空串。"""
+    url = await _image_url(bot, file_ref)
     if not url:
         return ""
     return f"[image:id={file_ref}]（图片内容需视觉模型查看；地址：{url}）"

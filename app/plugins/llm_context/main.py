@@ -138,7 +138,12 @@ class Module(BaseModule):
             body = getattr(renderer, "render_segments", None)
             if callable(body):
                 try:
-                    text = body(message)
+                    text = body(message, message_id=reply_id)
+                except TypeError:
+                    try:
+                        text = body(message)
+                    except Exception:  # noqa: BLE001
+                        text = ""
                 except Exception:  # noqa: BLE001
                     text = ""
         if not text:
