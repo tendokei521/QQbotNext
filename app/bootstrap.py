@@ -545,6 +545,14 @@ async def run(settings: Settings | None = None) -> None:
     except Exception as e:  # noqa: BLE001 —— 迁移失败不该阻断启动
         logger.error(f"[Migrate] llm_output 模块配置迁移失败（旧参数可能未生效）: {e}")
 
+    # 存量脏值自愈：模块时代存下的值可能已不在 schema 枚举里（保存会被整份拒绝）
+    try:
+        from app.application.config_self_heal import heal_agent_config
+
+        await heal_agent_config(config_service)
+    except Exception as e:  # noqa: BLE001 —— 自愈失败不该阻断启动
+        logger.error(f"[Heal] 配置自愈失败（保存可能仍报值不合法）: {e}")
+
     # 系统提示词方案：加载"设置页里编辑过"的覆盖文本 + 把未选方案的存量账号落到 chat
     try:
         from app.application import prompt_preset_service
