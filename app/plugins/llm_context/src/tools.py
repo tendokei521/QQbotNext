@@ -95,9 +95,21 @@ async def _handle(tool_ctx: ToolContext, args: dict) -> str:
         rendered = format_history_for_llm(history, is_private=is_private)
         return "\n".join(str(item.get("content", "")) for item in rendered)
 
-    if kind == "forward":
+    if kind in ("forward", "forward_full"):
         if bot is None:
             return "当前没有可用连接，取不到合并转发。"
+        from . import forward_cache, summarize
+
+        # 已缓存的摘要：直接给摘要（便宜），并提示可再取全文
+        if kind == "forward":
+            cached = forward_cache.get(getattr(runtime, "bot_id", ""), ref)
+            if cached:
+                forward_cache.touch(getattr(runtime, "bot_id", ""), ref)
+                return (
+                    f"[forward_message:id={ref}][forward_summary:nodes={cached.get('nodes', 0)}]"
+                    f"{cached.get('summary', '')}\n"
+                    f"[forward_full:id={ref}]（需要原文时用 forward_full:{ref} 再取）"
+                )
         try:
             resp = await bot.get_forward_msg(id=ref)
         except Exception as e:  # noqa: BLE001
@@ -105,16 +117,14 @@ async def _handle(tool_ctx: ToolContext, args: dict) -> str:
         nodes = _normalize_forward(resp)
         if not nodes:
             return f"合并转发 {ref} 没有内容（可能已过期）。"
-        lines: list[str] = []
-        for index, node in enumerate(nodes[:30], start=1):
-            body = _segments_to_text(runtime, node["message"])
-            lines.append(
-                f"[forward_message:id={ref}][node:{index}]"
-                f"[sender:id={node['user_id']},name=\"{node['name']}\"]{body}"
-            )
-        if len(nodes) > 30:
-            lines.append(f"[forward_more:count={len(nodes) - 30}]")
-        return "\n".join(lines)
+        full = _render_forward_full(runtime, ref, nodes)
+        # 首次展开：大转发给全文，同时异步生成摘要供后续轮次复用
+        if kind == "forward":
+            chars = len(full)
+            summarize.maybe_schedule(runtime, ref, nodes, chars)
+            if not summarize.is_small(chars, len(nodes)):
+                full += f"\n[forward_summary:pending]（摘要生成中，之后可直接用摘要；原文可用 forward_full:{ref}）"
+        return full
 
     if kind == "user":
         if bot is None:
@@ -176,12 +186,34 @@ def _normalize_forward(response: Any) -> list[dict]:
     return out
 
 
+#: 单次返回的全文字符上限（超过截断，提示用 forward_full 再取）
+FULL_MAX_CHARS = 20000
+
+
+def _render_forward_full(runtime: Any, ref: str, nodes: list[dict]) -> str:
+    """转发全文：每条一行结构化标记；超过上限截断并注明。"""
+    lines: list[str] = []
+    for index, node in enumerate(nodes[:30], start=1):
+        body = _segments_to_text(runtime, node["message"])
+        lines.append(
+            f"[forward_message:id={ref}][node:{index}]"
+            f"[sender:id={node['user_id']},name=\"{node['name']}\"]{body}"
+        )
+    if len(nodes) > 30:
+        lines.append(f"[forward_more:count={len(nodes) - 30}]")
+    text = "\n".join(lines)
+    if len(text) > FULL_MAX_CHARS:
+        text = text[:FULL_MAX_CHARS] + f"\n[forward_truncated:nodes={len(nodes)}]（用 forward_full:{ref} 可再取）"
+    return text
+
+
 def build_context_tool() -> ToolSpec:
     return ToolSpec(
         name="get_context",
         description=(
             "取回上下文内容。target 形如 message:<id>（某条消息）、recent:<n>（最近 n 条）、"
-            "forward:<id>（合并转发）、user:<qq>（群成员）、image:<id>（图片消息）。"
+            "forward:<id>（合并转发：首次给全文，之后给摘要）、forward_full:<id>（强制给全文）、"
+            "user:<qq>（群成员）、image:<id>（图片消息）。"
             "用户提到“那个/刚才/上一条”，或需要对某个 id 的内容做判断时调用；查不到就说明查不到。"
         ),
         parameters={
@@ -189,7 +221,7 @@ def build_context_tool() -> ToolSpec:
             "properties": {
                 "target": {
                     "type": "string",
-                    "description": "message:<id> / recent:<n> / forward:<id> / user:<qq> / image:<id>",
+                    "description": "message:<id> / recent:<n> / forward:<id> / forward_full:<id> / user:<qq> / image:<id>",
                 }
             },
             "required": ["target"],
