@@ -767,20 +767,32 @@ async def module_asset(module_name: str, asset_path: str, registry=Depends(get_m
     )
 
 
-#: 插件页公共 SDK 的磁盘位置（`app/webui/static/qqbot-plugin.js`）
-_PLUGIN_SDK = Path(__file__).resolve().parents[1] / "static" / "qqbot-plugin.js"
+#: 插件页公共资源（SDK / 基础样式）的磁盘位置：`app/webui/static/`
+_PLUGIN_STATIC = Path(__file__).resolve().parents[1] / "static"
+_PLUGIN_SDK = _PLUGIN_STATIC / "qqbot-plugin.js"
+_PLUGIN_CSS = _PLUGIN_STATIC / "qqbot-plugin.css"
+
+
+def _serve_plugin_static(path: Path, media_type: str) -> FileResponse | JSONResponse:
+    if not path.is_file():
+        return _err(500, "插件页公共资源缺失（安装包不完整）")
+    return FileResponse(
+        path,
+        media_type=media_type,
+        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "public, max-age=300"},
+    )
 
 
 @router.get("/plugin-sdk.js")
 async def plugin_sdk():
-    """插件自定义页的公共 SDK（鉴权/账号参数/配置读写/静态资源 URL）。"""
-    if not _PLUGIN_SDK.is_file():
-        return _err(500, "插件页 SDK 缺失（安装包不完整）")
-    return FileResponse(
-        _PLUGIN_SDK,
-        media_type="application/javascript",
-        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "public, max-age=300"},
-    )
+    """插件自定义页的公共 SDK（鉴权/账号参数/配置读写/声明式表单）。"""
+    return _serve_plugin_static(_PLUGIN_SDK, "application/javascript")
+
+
+@router.get("/plugin-sdk.css")
+async def plugin_sdk_css():
+    """插件自定义页的基础样式（卡片/字段行/开关/状态条，跟随系统深浅色）。"""
+    return _serve_plugin_static(_PLUGIN_CSS, "text/css")
 
 
 

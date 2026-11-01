@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>触发与调度</title>
+  <link rel="stylesheet" href="/api/plugin-sdk.css">
+</head>
+<body>
+<div id="app"></div>
+<script src="/api/plugin-sdk.js"></script>
+<script>
+  QQBOT.form({
+    title: '触发与调度',
+    description: '决定「谁在什么时候主动开口」：群聊冷场、私聊随机、定时任务。改动自动保存。',
+    groups: [
+      {
+        title: '主动消息',
+        hint: '不看消息也要开口的场景',
+        fields: [
+          {
+            key: 'proactive_friend_enable', label: '私聊主动发言', type: 'switch',
+            hint: '对启用的私聊会话按随机间隔主动说话。',
+          },
+          {
+            key: 'proactive_friend_sessions', label: '私聊会话（QQ 号）', type: 'lines',
+            rows: 4, placeholder: '一行一个 QQ 号',
+            visible: (cfg) => !!cfg.proactive_friend_enable,
+          },
+          {
+            key: 'proactive_group_enable', label: '群聊主动发言', type: 'switch',
+            hint: '群聊沉默超过阈值后主动开口。',
+          },
+          {
+            key: 'proactive_group_sessions', label: '群聊会话（群号）', type: 'lines',
+            rows: 4, placeholder: '一行一个群号',
+            visible: (cfg) => !!cfg.proactive_group_enable,
+          },
+          {
+            key: 'proactive_group_idle_minutes', label: '群聊沉默阈值', type: 'number',
+            min: 1, max: 1440, step: 1, unit: '分钟',
+            hint: '群里安静这么久之后才考虑开口。',
+            visible: (cfg) => !!cfg.proactive_group_enable,
+          },
+          {
+            key: 'proactive_min_interval_minutes', label: '最短发送间隔', type: 'number',
+            min: 1, max: 1440, step: 1, unit: '分钟',
+            hint: '两次主动发言之间至少等这么久（防刷屏）。',
+          },
+          {
+            key: 'proactive_max_interval_minutes', label: '最长发送间隔', type: 'number',
+            min: 1, max: 10080, step: 1, unit: '分钟',
+            hint: '超过这个间隔没有主动发言就再开一次口。应大于最短间隔。',
+          },
+          {
+            key: 'proactive_max_unanswered', label: '最多追问次数', type: 'number',
+            min: 1, max: 10, step: 1, unit: '次',
+            hint: '连续没人接话时最多追几次，超过就安静等待。',
+          },
+          {
+            key: 'proactive_quiet_hours_start', label: '免打扰开始', type: 'number',
+            min: 0, max: 23, step: 1, unit: '点',
+            hint: '这个时间段内不发主动消息（例如 1 点到 7 点）。',
+          },
+          {
+            key: 'proactive_quiet_hours_end', label: '免打扰结束', type: 'number',
+            min: 0, max: 23, step: 1, unit: '点',
+          },
+          {
+            key: 'stream_proactive_enabled', label: '主动消息走流式', type: 'switch',
+            hint: '开启后主动发言也按句发送；关闭则一次发完。',
+          },
+        ],
+      },
+      {
+        title: '主动发言的提示词',
+        hint: '决定主动开口时「说什么」的引导',
+        fields: [
+          {
+            key: 'proactive_prompt_enable', label: '启用主动发言提示词', type: 'switch',
+            hint: '关闭则用内置文案。',
+          },
+          {
+            key: 'proactive_prompt', label: '主动发言提示词', type: 'textarea', rows: 6,
+            placeholder: '例如：群里安静很久了，说点符合人设的话引出话题',
+            visible: (cfg) => !!cfg.proactive_prompt_enable,
+          },
+          {
+            key: 'proactive_history_intent_nudge', label: '历史意图提示', type: 'switch',
+            hint: '把「之前聊到一半的话题」提示给模型。',
+          },
+          {
+            key: 'proactive_env_prompt_enable', label: '环境能力提示', type: 'switch',
+            hint: '把「当前群里有谁、最近互动」这类环境信息提示给模型。',
+          },
+          {
+            key: 'proactive_unresolved_prompt_enable', label: '未展开内容提示', type: 'switch',
+            hint: '把记录里还没展开的引用/@/图片标出来，提示模型可以取回。',
+          },
+          {
+            key: 'proactive_env_intent_nudge', label: '环境意图提示', type: 'switch',
+          },
+        ],
+      },
+      {
+        title: '定时任务',
+        hint: '到点自动发言（每天 / 每周 / 每月）',
+        fields: [
+          {
+            key: 'schedule_enable', label: '启用定时任务', type: 'switch',
+            hint: '关闭后模型不再能建定时任务，已有任务也不执行。',
+          },
+          {
+            key: 'schedule_prompt', label: '定时触发提示词', type: 'textarea', rows: 5,
+            placeholder: '例如：你被定时叫醒，自然地说一句此刻适合说的话',
+            visible: (cfg) => !!cfg.schedule_enable,
+          },
+          {
+            key: 'stream_scheduled_enabled', label: '定时任务走流式', type: 'switch',
+            hint: '开启后定时发言也按句发送。',
+            visible: (cfg) => !!cfg.schedule_enable,
+          },
+        ],
+      },
+    ],
+  })
+</script>
+</body>
+</html>

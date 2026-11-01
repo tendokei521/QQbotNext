@@ -144,6 +144,20 @@ async def test_plugin_sdk_is_served(page_env):
     body = resp.text
     assert "QQBOT" in body and "getConfig" in body and "saveConfig" in body
     assert "/api/module/" in body and "/assets/" in body
+    # 声明式表单：内置模块页只写字段清单
+    assert "form: renderForm" in body and "buildControl" in body
+
+
+async def test_plugin_sdk_css_is_served(page_env):
+    client, c = page_env
+    resp = client.get("/api/plugin-sdk.css")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/css")
+    assert resp.headers.get("x-content-type-options") == "nosniff"
+    body = resp.text
+    # 基础排版/控件类名是页面契约的一部分
+    for token in (".q-card", ".q-row", ".q-switch", ".q-status", ".q-input"):
+        assert token in body, token
 
 
 async def test_config_get_endpoint(page_env):

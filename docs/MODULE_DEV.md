@@ -133,6 +133,7 @@ window.WEBUI_TOKEN        // 访问令牌；仅作后备通道
 推荐写法（SDK 已封装鉴权、账号参数、错误处理）：
 
 ```html
+<link rel="stylesheet" href="/api/plugin-sdk.css">
 <script src="/api/plugin-sdk.js"></script>
 <script>
   const bot = QQBOT.plugin()                       // 自动读注入的模块名/账号
@@ -143,6 +144,33 @@ window.WEBUI_TOKEN        // 访问令牌；仅作后备通道
 </script>
 ```
 
+**更省事的做法：`QQBOT.form(spec)`**（内置模块都在用）。页面只写"分组 + 字段清单"，
+表单渲染 / 取值 / 防抖保存 / 失败重试 / `visible(cfg)` 条件显隐都由 SDK 负责：
+
+```html
+<link rel="stylesheet" href="/api/plugin-sdk.css">
+<script src="/api/plugin-sdk.js"></script>
+<script>
+QQBOT.form({
+  title: '流式输出',
+  description: '决定回复怎么发出去。改动自动保存。',
+  groups: [
+    { title: '输出形态', fields: [
+      { key: 'mode', label: '输出形态', type: 'select',
+        options: { speech: '发言通道', stream: '流式', text: '一次性' } },
+    ]},
+    { title: '流式发送', fields: [
+      { key: 'stream_sentence_max_length', label: '单句最大长度', type: 'number',
+        min: 20, max: 2000, unit: '字', visible: (cfg) => cfg.mode !== 'text' },
+    ]},
+  ],
+})
+</script>
+```
+
+字段类型：`switch / select / number / text / textarea / lines`（`lines` = 一行一个的字符串数组）。
+完整范例见 `app/plugins/llm_prompt|llm_trigger|llm_output|llm_context/pages/index.html`。
+
 约定与边界：
 
 - **鉴权**：插件页与 Dashboard 同源，靠浏览器的 HttpOnly 会话 cookie；SDK 在 401 时会用注入的
@@ -152,7 +180,8 @@ window.WEBUI_TOKEN        // 访问令牌；仅作后备通道
 - **没有页面时**由框架返回一个中文占位页（HTTP 404），并提示去「基础设置」改配置；
   不会再把 JSON 塞进 iframe。
 - 页面里不要做整页导航（会顶掉 Dashboard 布局）；需要提示用户时优先用页面内文案。
-- 参考实现：`data/module/plugins/example/pages/index.html`。
+- 参考实现：`data/module/plugins/example/pages/index.html`（手写 fetch 版），
+  以及上面四个内置模块（声明式表单版）。
 
 ---
 
