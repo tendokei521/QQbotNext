@@ -39,6 +39,7 @@ round 边界：outbox 里的气泡按顺序真发（走 pipeline 原有发送路
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -271,13 +272,58 @@ def persona_output_conflicts(config: Any) -> list[str]:
     return hits
 
 
+def _parse_json_arg(value: str) -> Any:
+    """把模型偶尔"把参数写成 JSON 文本"的情况还原。
+
+    线上实例：``send_message(messages='["先说一句。", "再说一句。"]')``——模型把数组
+    序列化成字符串传进来。旧实现把它当成"一条消息"，于是群里收到的是这串 JSON 原文，
+    而工具还回了"已排队 1 条"，看起来一切正常。这里只在**明显的容器字面量**上尝试解析，
+    解析失败就原样保留（正文里出现 ``[图片]`` 这类不会误伤）。
+    """
+    text = value.strip()
+    if not text or text[0] not in "[{\"'":
+        return None
+    try:
+        return json.loads(text)
+    except Exception:  # noqa: BLE001 —— 不是 JSON 就按普通正文
+        return None
+
+
+def _coerce_args(raw: Any) -> dict:
+    """工具参数容错：``dict`` 原样用；JSON 文本解析成 dict；其它当空参数。"""
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        parsed = _parse_json_arg(raw)
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
 def normalize_messages(raw: Any) -> list[str]:
     """把 ``messages`` 参数归一化成字符串列表（字符串=一条，数组=多条）。
 
     只是搬运：**不**按空格/标点切句。切句是"要不要分条"的决定，属于模型，
     框架切出来的碎片永远不像人说话（旧实现的 ``split_sentences`` 正是这个毛病）。
+
+    容错：模型把数组写成 JSON 文本时（``'["a", "b"]'``）按数组处理，避免把那串
+    JSON 原文当正文发进群里。
     """
     if isinstance(raw, str):
+        parsed = _parse_json_arg(raw)
+        if isinstance(parsed, (list, tuple)):
+            # 只接受"纯文本数组"：`[{...}]`（有人把段结构塞进来）按原样当正文，
+            # 免得序列化出更难懂的东西；
+            if all(isinstance(x, (str, int, float)) and not isinstance(x, bool) for x in parsed):
+                from app.core.logger import logger
+
+                logger.debug(
+                    f"[speech] messages 参数是 JSON 文本（{len(parsed)} 条），已按数组展开"
+                )
+                return normalize_messages(list(parsed))
+            return [raw] if raw.strip() else []
+        if isinstance(parsed, str):
+            return normalize_messages(parsed)
         return [raw] if raw.strip() else []
     if isinstance(raw, (list, tuple)):
         out: list[str] = []
@@ -338,7 +384,7 @@ def build_speech_tools(outbox: SpeechOutbox) -> list[ToolSpec]:
     """
 
     async def _send_message(ctx, args: dict) -> str:
-        args = args or {}
+        args = _coerce_args(args)
         texts = normalize_messages(args.get("messages"))
         if not texts:
             return "error: messages 不能为空：传字符串=发一条，传字符串数组=连发多条。"
@@ -358,7 +404,7 @@ def build_speech_tools(outbox: SpeechOutbox) -> list[ToolSpec]:
         return reply
 
     async def _finish(ctx, args: dict) -> str:
-        args = args or {}
+        args = _coerce_args(args)
         outbox.mark_finished(
             summary=str(args.get("summary") or ""),
             active_topic=str(args.get("active_topic") or ""),
@@ -386,7 +432,10 @@ def build_speech_tools(outbox: SpeechOutbox) -> list[ToolSpec]:
                 "type": "object",
                 "properties": {
                     "messages": {
-                        "description": "要说的话：字符串=一条，字符串数组=多条（每条是一条完整消息）",
+                        "description": (
+                            "要说的话：字符串=一条，字符串数组=多条（每条是一条完整消息）。"
+                            "直接传数组本身，不要把它写成 JSON 文本。"
+                        ),
                         # 用联合类型而不是 anyOf：部分 Provider/网关会拒绝嵌套的 anyOf，
                         # 而联合 type 在各家 tool schema 转换里都被接受；具体形状由
                         # normalize_messages 容错（字符串/数组/其它都能归一化）。
