@@ -139,21 +139,55 @@ class Budget:
         return len(self.requests) < max_requests and used_tokens < max_tokens
 
     def record(self, tokens: int = 0) -> None:
+        """记一次请求（顺带记 token，若已知）。"""
         now = time.time()
         self.requests.append(now)
         if tokens:
-            self.tokens.append((now, max(0, int(tokens))))
+            self.charge(tokens)
+
+    def charge(self, tokens: Any) -> None:
+        """只回填 token（真实用量由 usage 记账在请求结束后异步补进来）。"""
+        try:
+            count = int(tokens or 0)
+        except (TypeError, ValueError):
+            return
+        if count > 0:
+            self.tokens.append((time.time(), count))
+
+
+#: 每账号一份预算。以前挂在 `runtime.participation_budget` 上，但真实用量是在
+#: `usage/metered.py` 里记的（那里只有 bot_id，拿不到 runtime），所以改成模块级表，
+#: 两条写入路径（门控记账 / 用量回填）共用同一个对象。
+_BUDGETS: dict[str, Budget] = {}
 
 
 def budget_of(runtime: Any) -> Budget:
-    b = getattr(runtime, "participation_budget", None)
-    if b is None:
-        b = Budget()
-        try:
-            runtime.participation_budget = b
-        except Exception:  # noqa: BLE001
-            pass
-    return b
+    """取该账号的预算对象（同一 bot_id 恒等）。"""
+    bot_id = str(getattr(runtime, "bot_id", "") or "")
+    existing = getattr(runtime, "participation_budget", None)
+    if isinstance(existing, Budget):
+        return existing
+    budget = _BUDGETS.get(bot_id)
+    if budget is None:
+        budget = Budget()
+        _BUDGETS[bot_id] = budget
+    return budget
+
+
+def charge_tokens(bot_id: Any, tokens: Any) -> None:
+    """把一次真实 LLM 调用的 token 用量记进该账号的预算窗口。
+
+    调用方是 `app/agent/usage/metered.py`（所有 provider 调用的唯一收口，
+    覆盖流式/非流式/回退链/压缩摘要），因此"预算"统计的是该账号**全部** LLM 花销。
+    """
+    key = str(bot_id or "")
+    if not key:
+        return
+    budget = _BUDGETS.get(key)
+    if budget is None:
+        budget = Budget()
+        _BUDGETS[key] = budget
+    budget.charge(tokens)
 
 
 # ---------------- 本地规则门 ----------------
@@ -301,6 +335,7 @@ __all__ = [
     "LEVELS",
     "LEVEL_PROMPT",
     "budget_of",
+    "charge_tokens",
     "cooldown_ok",
     "gate",
     "mark_request",

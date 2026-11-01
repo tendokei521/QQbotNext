@@ -131,6 +131,28 @@ def _record(
         group_id=ctx.group_id,
         user_id=ctx.user_id,
     )
+    # 参与度模式的 token 预算：这里是**所有** provider 调用的唯一收口（流式/非流式/
+    # 回退链/压缩摘要都经过），所以"该账号 10 分钟花掉多少 token"只有这里算得准。
+    _charge_participation_budget(ctx.bot_id, usage)
+
+
+def _charge_participation_budget(bot_id: Any, usage: dict | None) -> None:
+    """把真实用量回填进参与度预算；任何异常都不该影响记账主流程。"""
+    if not bot_id or not isinstance(usage, dict):
+        return
+    tokens = usage.get("total_tokens")
+    if tokens is None:
+        tokens = int(usage.get("prompt_tokens") or 0) + int(usage.get("completion_tokens") or 0)
+    if not tokens:
+        return
+    try:
+        from app.agent.participation import charge_tokens
+
+        charge_tokens(bot_id, tokens)
+    except Exception as e:  # noqa: BLE001 —— 预算回填是旁路
+        from app.core.logger import logger
+
+        logger.debug(f"[Budget] 参与度预算回填失败（已忽略）: {e}")
 
 
 class MeteredProvider:
