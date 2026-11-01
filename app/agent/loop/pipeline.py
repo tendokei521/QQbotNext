@@ -501,7 +501,7 @@ class LlmPipeline:
                 account_id,
                 "participation_needs_speech",
                 f"当前输出形态={capability.kind} · source={capability.source}",
-                hint="参与度模式需要「发言通道」输出形态：启用 llm_output 模块并把输出形态切到发言通道",
+                hint="参与度模式需要发言通道：它由回复模式决定，检查输出策略是否被第三方模块接管",
                 level="error",
             )
             return False

@@ -150,6 +150,48 @@
           "fields": [
             "prompt_cache_enable"
           ]
+        },
+        {
+          "id": "adv_stream",
+          "label": "流式输出",
+          "icon": "mdi-folder-outline",
+          "fields": [
+            "stream_output",
+            "stream_send_by_sentence",
+            "stream_sentence_max_length",
+            "stream_send_pool_enabled"
+          ]
+        },
+        {
+          "id": "adv_stream_tune",
+          "label": "流式节奏",
+          "icon": "mdi-folder-outline",
+          "fields": [
+            "stream_send_interval_mode",
+            "stream_send_interval_base_ms",
+            "stream_send_interval_min_ms",
+            "stream_send_interval_max_ms",
+            "stream_send_curve",
+            "stream_send_curve_k",
+            "stream_short_message_length",
+            "stream_short_message_delay_ms",
+            "stream_long_message_delay_ms",
+            "stream_send_prefix",
+            "stream_send_suffix",
+            "stream_send_max_queue",
+            "stream_queue_full_policy",
+            "stream_flush_on_finish",
+            "stream_keep_order"
+          ]
+        },
+        {
+          "id": "adv_speech",
+          "label": "气泡约束",
+          "icon": "mdi-folder-outline",
+          "fields": [
+            "speech_max_bubbles",
+            "speech_max_bubble_chars"
+          ]
         }
       ]
     }

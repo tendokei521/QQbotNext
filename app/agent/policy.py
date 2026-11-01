@@ -9,7 +9,6 @@ v3 把一批"策略键"从 agent 配置搬进了功能模块。框架的机制�
 
 | 运行时属性 | 由哪个模块设置 | 覆盖哪些键 |
 |---|---|---|
-| `runtime.output_options` | `llm_output` | 流式 / 发言通道 |
 | `runtime.assembly_options` | `llm_prompt` | 组装档位 / 行为规则 / 请求落盘 |
 | `runtime.meta_options` | `llm_prompt` | 消息元信息 / 历史清洗 |
 | `runtime.context_options` | `llm_context` | 指代 / 展开 / 预历史 |
@@ -18,6 +17,10 @@ v3 把一批"策略键"从 agent 配置搬进了功能模块。框架的机制�
 | `runtime.tools_options` | `llm_tools_extra` | OneBot / MCP 工具 |
 | `runtime.proactive_options` | `llm_trigger` | 主动消息 |
 | `runtime.schedule_options` | `llm_trigger` | 定时任务 |
+
+> 2026-11-01：`runtime.output_options` 不再由模块提供——流式输出已内置进框架
+> （`delivery/output.py` + `delivery/pool.py`），参数回到账号级 agent 配置；
+> 发言通道由回复模式决定，也不再是模块能力。
 
 两条取用口径：
 
@@ -32,9 +35,12 @@ from typing import Any
 
 
 def _policy_views(runtime: Any) -> list:
-    """按固定顺序列出可用的策略视图（先模块、后 agent 配置）。"""
+    """按固定顺序列出可用的策略视图（先模块、后 agent 配置）。
+
+    ``output_options`` 已从列表移除：流式输出内置进框架后，模块不再提供该视图，
+    传输参数直接读账号级 agent 配置。
+    """
     order = (
-        "output_options",
         "assembly_options",
         "meta_options",
         "context_options",
@@ -55,9 +61,12 @@ def _policy_views(runtime: Any) -> list:
 def policy_view(runtime: Any) -> Any:
     """把所有已接管的策略视图**串成一条链**再回退 agent 配置。
 
-    为什么需要：有些机制会跨模块读键 —— 例如发言通道要同时看
-    行为规则（归 `llm_prompt`）和 `stream_output`/`speech_via_tool`
-    （归 `llm_output`）。只给一个视图会让另一半读不到，行为静默退化。
+    为什么需要：有些机制会跨模块读键 —— 例如记忆注入要同时看行为规则
+    （归 `llm_prompt` 时代）和 `memory_*`（归 `llm_memory`）。只给一个视图会让
+    另一半读不到，行为静默退化。
+
+    > 流式/发言通道早已不在模块里（2026-11-01 内置进框架），所以它读的是 agent
+    > 账号级配置；这里无需再为它链式查询。
 
     Returns:
         配置对象（有 ``get``）；``runtime`` 为空时返回 None。

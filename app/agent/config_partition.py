@@ -172,6 +172,41 @@ UI_PAGES: tuple[UIPage, ...] = (
             ),
             # Q5：提示词缓存（显式缓存标记 + 前缀稳定）；不开也能跑，只是更贵
             UIGroup("adv_model_cache", "模型缓存", ("prompt_cache_enable",)),
+            # 2026-11-01 流式输出内置：原 llm_output 模块删除，参数回到框架（账号级）。
+            # 开关只有 `stream_output`（传输方式）；其余是发送节奏/切句/池的调参。
+            UIGroup(
+                "adv_stream",
+                "流式输出",
+                (
+                    "stream_output",
+                    "stream_send_by_sentence",
+                    "stream_sentence_max_length",
+                    "stream_send_pool_enabled",
+                ),
+            ),
+            UIGroup(
+                "adv_stream_tune",
+                "流式节奏",
+                (
+                    "stream_send_interval_mode",
+                    "stream_send_interval_base_ms",
+                    "stream_send_interval_min_ms",
+                    "stream_send_interval_max_ms",
+                    "stream_send_curve",
+                    "stream_send_curve_k",
+                    "stream_short_message_length",
+                    "stream_short_message_delay_ms",
+                    "stream_long_message_delay_ms",
+                    "stream_send_prefix",
+                    "stream_send_suffix",
+                    "stream_send_max_queue",
+                    "stream_queue_full_policy",
+                    "stream_flush_on_finish",
+                    "stream_keep_order",
+                ),
+            ),
+            # 发言通道启用后的气泡约束（通道本身由回复模式决定）
+            UIGroup("adv_speech", "气泡约束", ("speech_max_bubbles", "speech_max_bubble_chars")),
         ),
     ),
 )
@@ -272,30 +307,6 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
         "schedule_enable",
         "schedule_prompt",
         "stream_scheduled_enabled",
-    ),
-    # 输出策略：流式 / 发言通道（共用 output 槽，故同一模块用 mode 三选一）
-    "llm_output": (
-        "stream_output",
-        "stream_send_pool_enabled",
-        "stream_send_by_sentence",
-        "stream_sentence_max_length",
-        "stream_send_interval_mode",
-        "stream_send_interval_base_ms",
-        "stream_send_interval_min_ms",
-        "stream_send_interval_max_ms",
-        "stream_send_curve",
-        "stream_send_curve_k",
-        "stream_short_message_length",
-        "stream_short_message_delay_ms",
-        "stream_long_message_delay_ms",
-        "stream_send_prefix",
-        "stream_send_suffix",
-        "stream_send_max_queue",
-        "stream_queue_full_policy",
-        "stream_flush_on_finish",
-        "stream_keep_order",
-        "speech_max_bubbles",
-        "speech_max_bubble_chars",
     ),
     # 上下文增强：指代消解 / 按需展开 / 历史查询权限
     "llm_context": (
