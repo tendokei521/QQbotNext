@@ -129,6 +129,23 @@ class Module(BaseModule):
             runtime.llm_hooks.register(
                 stage=stage, event_type="*", order=order, handler=handler, module=self
             )
+        # 消息格式说明段（L1）归本模块：模块禁用/卸载 → 段随之消失，
+        # 不会给模型留下一本"解释不存在格式"的手册。
+        from app.agent.assembly.layers import LAYER_SYSTEM_PROMPT
+        from app.agent.assembly.sections import Section, register_section
+
+        from .src.prompt import message_meta_section
+
+        register_section(
+            runtime,
+            Section(
+                "message_meta",
+                60,
+                message_meta_section,
+                layer=LAYER_SYSTEM_PROMPT,
+                source="llm_prompt",
+            ),
+        )
 
     async def _collect_user_context(self, ctx) -> None:
         from .src.meta import collect_user_context
@@ -146,6 +163,9 @@ class Module(BaseModule):
         if runtime is None:
             return
         # 钩子在模块卸载时由 loader 统一注销（`llm_hooks.unregister_module(self)`）
+        from app.agent.assembly.sections import unregister_section
+
+        unregister_section(runtime, "message_meta")
         if isinstance(getattr(runtime, "assembler", None), AssemblyAdapter):
             from app.agent.assembly.assembler import PromptAssembler
 

@@ -2,29 +2,23 @@
 
 ## 为什么合成一个模块
 
-两者是同一件事的两面——**谁在什么时候发起一轮发言**：主动消息按沉默/随机间隔开口，
-定时任务按到点时间开口。它们的实现同构（都建一个管理器、都在 `on_online` 武装计时器、
-都在 `on_offline` 停掉、都用同一套流式发送器），且定时任务原本就直接 import 主动消息的
-`entry` / `stream`。合并后这两处跨插件 import 变成包内相对导入。
+两者是同一件事的两面——**谁在什么时候发起一轮发言**：主动按沉默/随机间隔开口，定时按到点
+开口。实现同构（都建管理器、都在 `on_online` 武装计时器、`on_offline` 停掉、共用流式发送器），
+且定时原本就直接 import 主动的 `entry` / `stream`；合并后跨插件 import 变成包内相对导入。
 
 ## 框架侧只保留两件事
 
-1. **通知**：用户说话了 / Bot 说话了 → `runtime.llm_hooks` 的 `message_observed` /
-   `bot_sent`（pipeline 里已有，且有 `getattr(..., None)` 保护）；
+1. **通知**：用户/ Bot 说话了 → `llm_hooks` 的 `message_observed` / `bot_sent`；
 2. **原料**：`send_to` / `llm_turn` / `spawn` / `sessions`。
 
 ## 实现方式
 
-复用框架里打磨过的 `ProactiveManager` / `TaskScheduler`（计时器和状态机是机制），但
-**用本模块的配置**驱动它们：`ConfigView` 把本模块配置投影成运行时视图，
-`build_manager` / `build_scheduler` 拿到的是本模块实例。
+复用框架的 `ProactiveManager` / `TaskScheduler`（计时器与状态机是机制），但**用本模块配置**
+驱动：`ConfigView` 把模块配置投影成运行时视图，`build_manager` / `build_scheduler` 拿到本模块实例。
+数据位置不变（`data/llm/<bot_id>/proactive_data.json`、`tasks_data.json`）。
 
-## 数据位置不变
-
-- 主动消息状态仍写 `data/llm/<bot_id>/proactive_data.json`；
-- 定时任务仍写 `data/llm/<bot_id>/tasks_data.json`。
-
-升级零迁移。
+定时协议与主动性引导两段系统提示词也归本模块（`src/prompt.py` + `src/wiring.py`）：
+模块禁用/卸载时整段消失，不会出现"提示词说有能力、调度器却已不在"的悬空说明。
 """
 
 from __future__ import annotations
@@ -114,13 +108,12 @@ class Module(BaseModule):
             return
         from app.agent.delivery.output import ConfigView
 
-        # 两个视图各自保留原来的 owned 子集（主动 17 键 / 定时 3 键），不合成 20 键视图：
-        # 读视图的框架侧代码按模块归属取键，多给的键会改变它们"读不到就回落"的语义。
+        # 两个视图各自保留原 owned 子集（主动 17 键 / 定时 3 键）：多给的键会改变框架侧
+        # "读不到就回落"的语义。文档化句柄供 WebUI 按鸭子类型读。
         runtime.proactive_options = ConfigView(
             getattr(runtime, "config", None), self.config, PROACTIVE_OWNED_KEYS
         )
         self._manager = build_manager(self)
-        # 文档化句柄：WebUI「主动消息」状态页按鸭子类型读它（不再塞 runtime.proactive）
         runtime.proactive_service = self._manager
         # **订阅**框架广播的两个事实（框架不认识"主动消息"）：
         runtime.llm_hooks.register(
@@ -140,6 +133,11 @@ class Module(BaseModule):
 
         register_tool_source(runtime, ScheduleToolSource(self))
         runtime.scheduler = self._scheduler
+
+        # 定时协议 / 主动性引导两段系统提示词归本模块（细节见 src/wiring.py）
+        from .src.wiring import register_prompt_sections
+
+        register_prompt_sections(runtime)
 
     async def on_online(self) -> None:
         """账号连上：武装主动消息计时器与定时任务计时器（离线期间一条都不会发）。"""
@@ -177,6 +175,9 @@ class Module(BaseModule):
         runtime = self._runtime()
         if runtime is None:
             return
+        from .src.wiring import unregister_prompt_sections
+
+        unregister_prompt_sections(runtime)
         runtime.proactive_service = None
         runtime.proactive_options = None
         runtime.scheduler = None

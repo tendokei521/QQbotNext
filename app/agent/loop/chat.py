@@ -16,7 +16,6 @@ import asyncio
 import time
 
 from app.agent import logger
-from app.core.logger import account_label
 from app.agent.assembly import assembler as assembly
 from app.agent.commands import (
     is_help_action,
@@ -68,7 +67,6 @@ from app.agent.loop.tool_step import (
     StepResult,
     iter_stream_step,
 )
-from app.agent.loop.turn_runner import TurnAborted
 from app.agent.loop.turn_metrics import (  # noqa: F401 - 重导出保持 chat.* API
     _MAX_TOKENS_WARNED,
     DEFAULT_EMPTY_REPLY_RETRIES,
@@ -89,9 +87,11 @@ from app.agent.loop.turn_metrics import (  # noqa: F401 - 重导出保持 chat.*
     _usage_snapshot,
     log_debug_prompt_if_enabled,
 )
+from app.agent.loop.turn_runner import TurnAborted
 from app.agent.providers import log_token_usage
 from app.agent.session.manager import SessionManager
 from app.agent.tools.spec import build_tools, make_executor
+from app.core.logger import account_label
 from app.domain.modalities import supports_tool_use
 from app.domain.trigger import extract_text
 
@@ -99,22 +99,6 @@ from app.domain.trigger import extract_text
 
 
 #: 已经提醒过的 (bot_id, agent 值, 生效值)，避免每条消息刷同一条告警
-
-
-def _proactive_instruction(config, all_specs, user_text: str, ctx=None) -> str | None:
-    """本轮「主动性」协议块：只在本轮确有对应工具时注入（唯一一块 system 提示）。
-
-    用户原始文本优先取 llm_enhance 暂存的 sent_text，避免元信息前缀干扰意图识别。
-    """
-    from app.agent.assembly.prompt import build_proactive_instruction
-
-    raw_text = user_text
-    if ctx is not None:
-        info = ctx.state.get("user_context") or {}
-        raw_text = (info.get("sent_text") or user_text) or user_text
-    return build_proactive_instruction(
-        config, raw_text, available_tools={spec.name for spec in (all_specs or [])}
-    )
 
 
 # ==================== 发言通道（文本=思考，发言=send_message） ====================
@@ -186,12 +170,14 @@ async def build_initiative_tools(
     group_id=None,
     schedule_enable: bool = False,
 ):
-    """主动消息 / 定时任务路径的工具与「主动性」提示块（没有触发事件）。
+    """主动消息 / 定时任务路径的工具（没有触发事件）。
 
     这两条路径此前**完全不传 tools**，也就完全没有主动性：模型只能看到会话历史，
     拿不到群名、成员信息，也无法展开记录里的 @ / 引用。返回
-    ``(specs, skill_blocks, tool_ctx, proactive_instruction)``，其中提示块同样按本轮
-    实际可用工具裁剪（没有能力的行不会出现）。
+    ``(specs, skill_blocks, tool_ctx)``。
+
+    提示词块不在这里返回：它是「触发与调度」模块自己的能力文案
+    （`app/plugins/llm_trigger/src/prompt.py`），由插件自己构建。
 
     ``schedule_enable`` 默认 False：主动发言/定时任务自身不需要再创建定时任务。
     """
@@ -205,9 +191,7 @@ async def build_initiative_tools(
         user_id=user_id,
         group_id=group_id,
     )
-    # 无用户提问 → 不做历史/环境意图补强（user_text=""），只给常驻协议行
-    instruction = _proactive_instruction(runtime.config, specs, "")
-    return specs, skill_blocks, tool_ctx, instruction
+    return specs, skill_blocks, tool_ctx
 
 
 async def stream_response(runtime, event, ctx=None):
@@ -261,7 +245,6 @@ async def stream_response(runtime, event, ctx=None):
 
     meta_cfg = policy_config(runtime, "meta")
     is_private = meta["is_private"]
-    user_id = meta["user_id"]
     model = meta["model"]
     from app.agent.policy import policy_view
 

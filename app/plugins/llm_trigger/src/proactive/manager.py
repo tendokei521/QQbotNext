@@ -238,7 +238,7 @@ class ProactiveManager:
         config = self.module.config
         max_tool_rounds = _max_tool_rounds(config)
 
-        all_specs, skill_blocks, tool_ctx, instruction = await build_initiative_tools(
+        all_specs, skill_blocks, tool_ctx = await build_initiative_tools(
             self.module,
             session_id,
             not is_group,

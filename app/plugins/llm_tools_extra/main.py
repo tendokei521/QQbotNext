@@ -79,6 +79,15 @@ class Module(BaseModule):
         # 文档化句柄：WebUI「MCP Tools」页按鸭子类型读它
         runtime.mcp_service = self._mcp
         register_tool_source(runtime, MCPToolSource(self))
+        # 「可用表情」提示段归本模块：贴表情的工具由这里提供，模块禁用/卸载时段消失。
+        from app.agent.assembly.sections import Section, register_section
+
+        from .src.prompt import emoji_hint_section
+
+        register_section(
+            runtime,
+            Section("emoji_hint", 30, emoji_hint_section, source="llm_tools_extra"),
+        )
 
     async def on_unload(self) -> None:
         runtime = self._runtime()
@@ -87,6 +96,9 @@ class Module(BaseModule):
         from app.agent.loop.providers import unregister_owner
 
         unregister_owner(runtime, self)
+        from app.agent.assembly.sections import unregister_section
+
+        unregister_section(runtime, "emoji_hint")
         mcp = getattr(self, "_mcp", None)
         if mcp is not None:
             try:
