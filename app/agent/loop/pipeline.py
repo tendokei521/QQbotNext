@@ -457,9 +457,38 @@ class LlmPipeline:
             if ctx.event.event_type == "message_group":
                 # 触发方式可被群级覆盖（"群 A 只回 @、群 B 只认关键词"）
                 config = self._effective_config(ctx.event, self.runtime.config)
-                triggered, is_at, user_text = self._trigger_decision(
-                    ctx.event, config, has_image=has_image
-                )
+                if str(config.get("reply_mode", "legacy") or "legacy") == "participation":
+                    from app.agent.participation import budget_of, gate, observe_message
+
+                    await observe_message(self.runtime, ctx.event, config)
+                    ctx.state["user_recorded"] = True
+                    level = str(config.get("participation_level", "low") or "low")
+                    budget = budget_of(self.runtime)
+                    max_req = int(config.get("participation_max_requests", 60) or 60)
+                    max_tok = int(config.get("participation_max_tokens", 10000000) or 10000000)
+                    if not budget.allow(max_req, max_tok):
+                        log_skip(
+                            getattr(self.runtime, "bot_id", "?"),
+                            "participation_budget",
+                            "参与度模式 10 分钟预算已用完（只记录不请求）",
+                            level="debug",
+                        )
+                        return
+                    ok, reason = gate(self.runtime, ctx.event, level)
+                    if not ok:
+                        log_skip(
+                            getattr(self.runtime, "bot_id", "?"),
+                            "participation_silent",
+                            f"参与度={level} · {reason}",
+                            level="debug",
+                        )
+                        return
+                    budget.record(0)
+                    triggered, is_at, user_text = True, False, str(getattr(ctx.event, "text", "") or "")
+                else:
+                    triggered, is_at, user_text = self._trigger_decision(
+                        ctx.event, config, has_image=has_image
+                    )
                 if not triggered:
                     log_skip(
                         getattr(self.runtime, "bot_id", "?"),

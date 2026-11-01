@@ -146,6 +146,13 @@ def build_behavior(req: Any) -> list[dict]:
     return [{"role": "system", "content": text}] if str(text).strip() else []
 
 
+def build_participation(req: Any) -> list[dict]:
+    """群聊参与度约定段（新版模式，order 55）。"""
+    from app.agent.participation import participation_section
+
+    return participation_section(req)
+
+
 def build_message_meta(req: Any) -> list[dict]:
     """消息格式说明段（框架系统方案，order 60）。"""
     from app.agent.message_assembly.convention import convention_section
@@ -258,6 +265,7 @@ def default_sections() -> list[Section]:
         Section("behavior", 20, build_behavior, source="builtin"),
         # 能力段（emoji_hint / schedule / proactive / message_meta）由对应插件注册；
         # 框架只保留人设 + 行为规则 + 材料通道 + 历史 + 本轮消息。
+        Section("participation", 55, build_participation, source="builtin"),
         Section("message_meta", 60, build_message_meta, source="builtin"),
         Section("skills", 70, build_skills, source="builtin"),
         Section("memory", 80, build_memory, source="builtin"),

@@ -243,6 +243,28 @@ SCHEMA = {
         "default": "请把上面的历史对话压缩成一份简洁但完整的摘要，用于后续对话无缝续接：\n1. 覆盖所有核心话题及最终结论/结果；\n2. 高亮最近的主要关注点；\n3. 如有工具调用、任务进度或待办，说明当前状态和下一步；\n4. 保留用户的重要个人信息、偏好、称呼等关键事实；\n5. 使用与对话相同的语言输出。\n只输出摘要内容，不要输出额外解释。",
         "rows": 6, "group": "group_compress",
     },
+    "reply_mode": {
+        "type": "select", "label": "回复模式",
+        "description": "条件触发=只在 @/关键词时回复；参与度=全量观察并由参与度决定",
+        "default": "legacy", "group": "group_advanced",
+        "options": {"legacy": "条件触发（旧版）", "participation": "参与度驱动（新版）"},
+    },
+    "participation_level": {
+        "type": "select", "label": "参与度",
+        "description": "新版模式下的发言倾向：极低=仅@；低=只接与自己相关的；中=延续正在聊的话题；高=参与可讨论的话题；超高=几乎都参与",
+        "default": "low", "group": "group_advanced",
+        "options": {"very_low": "极低（仅@）", "low": "低", "medium": "中", "high": "高", "very_high": "超高"},
+    },
+    "participation_max_requests": {
+        "type": "number", "label": "10 分钟请求上限",
+        "description": "参与度模式下的预算保护，超出后只记录不请求",
+        "default": 60, "min": 1, "max": 1000, "group": "group_advanced",
+    },
+    "participation_max_tokens": {
+        "type": "number", "label": "10 分钟 token 上限",
+        "description": "参与度模式下的 token 预算，超出后只记录不请求",
+        "default": 10000000, "min": 1000, "max": 100000000, "group": "group_advanced",
+    },
     "structured_assembly": {
         "type": "boolean", "label": "结构化消息",
         "description": "用标记格式组装本轮消息（含时间/群/发送者/引用）；关闭则只发原始正文",

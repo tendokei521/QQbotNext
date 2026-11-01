@@ -137,7 +137,8 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
         return None, None, None
 
     # 用户发言入历史：只有真实事件才写（无事件路径没有"用户发言"这件事）
-    if event is not None:
+    # 新版参与度模式已在 pipeline 全量写入，这里跳过避免重复
+    if event is not None and not (ctx is not None and ctx.state.get("user_recorded")):
         await record_user_turn(
             runtime, event, turn, config, session_mgr, nickname=_event_nickname(event)
         )
