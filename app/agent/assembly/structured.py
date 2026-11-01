@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import time as _time
 from typing import Any
 
 #: 非文本段 → 占位符名（文档/工具契约共同引用这一份）
@@ -31,6 +32,14 @@ PLACEHOLDER_KINDS: dict[str, str] = {
     "forward": "forward_message",
     "markdown": "markdown",
 }
+
+
+def format_time(ts: Any = None) -> str:
+    """统一时间格式：``2026-08-13 11:20``（本地时区，分钟级）。"""
+    try:
+        return _time.strftime("%Y-%m-%d %H:%M", _time.localtime(int(ts) if ts else None))
+    except (TypeError, ValueError, OSError):
+        return _time.strftime("%Y-%m-%d %H:%M")
 
 
 def _q(value: Any) -> str:

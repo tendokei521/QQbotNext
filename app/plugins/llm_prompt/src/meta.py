@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 from app.agent import logger
@@ -33,7 +32,9 @@ def _cfg(ctx, key: str, default: Any):
 
 
 def _time_str() -> str:
-    return datetime.now().strftime("%H:%M")
+    from app.agent.assembly.structured import format_time
+
+    return format_time()
 
 
 async def collect_user_context(ctx) -> None:
