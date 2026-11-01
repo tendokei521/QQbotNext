@@ -193,7 +193,10 @@ async def record_user_turn(
     """把这条用户消息写进会话历史（图片先落盘，正文与元信息分离）。"""
     from app.agent.loop.context_blocks import _segments_as_dicts
 
-    body_text, meta_lines = split_user_context(turn.user_text)
+    # 存历史只用**原始正文**：user_text 可能已被组装钩子改成结构化格式
+    # （[time=…][sender:…]…），那是"给模型的请求视图"，不是消息本身。
+    # raw_user_text 缺省时等于 user_text（外部直调路径）。
+    body_text, meta_lines = split_user_context(turn.raw_user_text or turn.user_text)
     event_segments = _segments_as_dicts(getattr(event, "message", None))
 
     # 图片：**收到即落盘**。历史里只留本地指向（sha），远端直链不写进历史——QQ 图片链接

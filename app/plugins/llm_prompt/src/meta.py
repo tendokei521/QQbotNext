@@ -55,9 +55,14 @@ async def collect_user_context(ctx) -> None:
 
 
 async def format_user_context(ctx) -> None:
-    """把本轮消息渲染成结构化文本（开关关闭时保持原样）。"""
+    """把本轮消息渲染成结构化文本（开关关闭时保持原样，已是组装格式则跳过）。"""
     if not bool(_cfg(ctx, "structured_assembly", True)):
         return
+    # 幂等：重试/复跑路径里 ctx.user_text 可能已经是组装结果，别二次包裹。
+    # 同时把原始正文留档，历史写入只认它（组装文本不是"消息本身"）。
+    if ctx.user_text.lstrip().startswith("[time="):
+        return
+    ctx.state.setdefault("raw_user_text", ctx.user_text)
     info = ctx.state.get("user_context") or {}
     reply = info.get("reply") or {}
     event = ctx.event
