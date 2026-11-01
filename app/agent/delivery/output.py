@@ -335,6 +335,12 @@ class SpeechOutput:
             speech, session_mgr, session_id, config, getattr(ctx, "event", None)
         ):
             yield message
+        # 思考内容在"发完之后"才齐（一轮的 reasoning 由 tool_step 累积）：
+        # 把它补到最后一条 assistant 历史上，会话数据页才能展开溯源。
+        reasoning = str((getattr(ctx, "state", None) or {}).get("reasoning_text") or "").strip()
+        setter = getattr(session_mgr, "set_last_assistant_reasoning", None)
+        if reasoning and callable(setter):
+            setter(session_id, reasoning)
 
 
 def select_default_output(config: Any = None, runtime: Any = None, ctx: Any = None) -> OutputStrategy:

@@ -1453,6 +1453,12 @@ onMounted(() => {
 
 .session-messages {
   padding: 4px 2px;
+  /* 右侧对话详情自己的滚动区：父级 .message-pane 是 flex column，
+     这里必须显式 flex:1 + min-height:0 + overflow，否则消息一多就溢出被裁、
+     整个面板无法滚动（`scrollToLatest()` 用的也是这个节点）。 */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .message-row {

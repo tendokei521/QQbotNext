@@ -585,6 +585,14 @@ async def stream_response(runtime, event, ctx=None):
         if _cleaned and not is_private:
             session.mark_replied()
         await asyncio.to_thread(session_mgr.history.save_session, session)
+        # 发言通道：历史条目由 `_flush_speech` 逐气泡写入，那时还没拿到整轮思考，
+        # 这里补到最近一条 assistant 上（会话数据页展开"思考过程"用它）。
+        if speech_by_tool:
+            final_reasoning = str(getattr(step, "reasoning_text", "") or "").strip()
+            setter = getattr(session_mgr, "set_last_assistant_reasoning", None)
+            if final_reasoning and callable(setter):
+                setter(session_id, final_reasoning)
+                await asyncio.to_thread(session_mgr.history.save_session, session)
 
     _commit_history_enrichment(runtime, session_id, ctx)
 
