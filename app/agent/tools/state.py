@@ -355,11 +355,10 @@ def resolve_all_tool_states(runtime: Any, *, include_unavailable: bool = True) -
             seen.add(spec.name)
 
         # P5：spill 取回工具也是系统工具（漏登记 = 界面上看不到）
+        # 注意：web_search 已从框架系统工具中移除，这里不能再留 `search` 变量引用——
+        # 2026-11-01 前那段残留会让下面整块抛 NameError，于是 recall 工具永远登记不上。
         from app.agent.tools.recall import build_recall_tool
 
-        if search.name not in seen:
-            states.append(resolve_tool_state(runtime, search))
-            seen.add(search.name)
         recall = build_recall_tool(runtime, None)
         if recall.name not in seen:
             states.append(resolve_tool_state(runtime, recall))
