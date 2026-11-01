@@ -17,28 +17,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.core.logger import account_label
-
 from app.agent import logger
 from app.agent.providers.invoker import resolve_invoker
+from app.core.logger import account_label
 from app.domain.splitter import strip_stream_artifacts
-from app.domain.tags import maybe_strip_parentheses, strip_all_tags
+from app.domain.tags import strip_all_tags
 
 
 def _clean_output_for_history(config, text: str) -> str:
-    """写入会话历史前的守卫：按开关清洗助手输出中的（…）/(…)，阻止括号风格自我强化。
+    """写入会话历史前的守卫（括号清洗开关已删除）。
 
-    只影响「历史」，不影响本次对用户展示的原文。
+    仍负责清掉内部标记与流式残留；括号保持原样。
     """
-    if not text:
-        return text
-    try:
-        enabled = bool(config.get("clean_output_parentheses", True)) if config is not None else True
-    except Exception:
-        enabled = True
-    if not enabled:
-        return text
-    return maybe_strip_parentheses(text, True)
+    return text
 
 
 _WARNED_SPEECH_INTENT: set = set()

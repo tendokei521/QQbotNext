@@ -70,7 +70,7 @@ def test_message_meta_section_requires_injected_meta():
     assert "单行格式" in messages[0]["content"]
 
 
-def test_emoji_hint_requires_tool_and_level():
+def test_emoji_hint_requires_tool():
     from app.plugins.llm_tools_extra.src.prompt import emoji_hint_section
 
     req_no_tool = SimpleNamespace(
@@ -78,9 +78,11 @@ def test_emoji_hint_requires_tool_and_level():
     )
     assert emoji_hint_section(req_no_tool) == []
 
-    req_level_off = SimpleNamespace(
-        config={"emoji_react_level": 0},
+    # 活跃度开关已删除（2026-11-01 精简）：配置里残留旧键也不影响，工具在就有提示
+    req_with_tool = SimpleNamespace(
+        config={},
         available_tools={"set_msg_emoji_like"},
         runtime=None,
     )
-    assert emoji_hint_section(req_level_off) == []
+    messages = emoji_hint_section(req_with_tool)
+    assert len(messages) == 1 and "【可用表情】" in messages[0]["content"]

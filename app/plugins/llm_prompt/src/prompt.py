@@ -1,12 +1,8 @@
-"""提示词组装模块自带的消息格式说明段（L1）。
+"""提示词组装模块的「消息格式说明」段（L1，order 60）。
 
-## 为什么文案在这里
-
-"聊天记录里的 `昵称(QQ): 正文` 到底哪部分是正文"是本模块渲染出来的事实（它持有
-`include_*` / `meta_*` 这些渲染开关），说明文字必须跟着它走：模块禁用/卸载时
-说明段一起消失，否则模型会拿着一本"解释不存在格式"的手册。
-
-框架侧（`app/agent/assembly/prompt.py`）已不再持有这三份说明文案。
+只读两个键：`user_message_format`（单行/多行）与 `auto_disambiguation`（要不要说明）。
+说明文本按**本轮真实渲染格式**选：单行配单行图例，多行配六行图例；昵称脱敏时补充
+"不要用代号称呼对方"的要求。
 """
 
 from __future__ import annotations
@@ -40,41 +36,27 @@ SINGLE_LINE_MESSAGE_META_INSTRUCTION = """### 消息格式说明
 如果记录和长期记忆里都没有对方的名字，不要用「用户<QQ>」这类代号称呼对方，可以问「怎么称呼你」或避开称呼。"""
 
 
-def message_meta_instruction(req: Any) -> str | None:
-    """消息格式说明：让模型知道"昵称(QQ): 正文"里哪部分是正文。
+def _cfg(req: Any, key: str, default: Any):
+    getter = getattr(getattr(req, "config", None), "get", None)
+    if callable(getter):
+        try:
+            return getter(key, default)
+        except Exception:  # noqa: BLE001
+            return default
+    return default
 
-    仅当本轮**真的注入了元信息**（`ctx.state["message_meta_injected"]`）时才给说明。
-    """
+
+def message_meta_instruction(req: Any) -> str | None:
+    """消息格式说明：仅当本轮真的注入过元信息、且用户没关掉消歧说明时给。"""
     ctx = getattr(req, "ctx", None)
     if ctx is not None and not ctx.state.get("message_meta_injected"):
         return None
-    cfg = getattr(req, "config", None)
-    mode = None
-    getter = getattr(cfg, "get", None)
-    if callable(getter):
-        try:
-            mode = getter("meta_instruction_mode")
-        except Exception:  # noqa: BLE001
-            mode = None
-    if mode is None:
-        try:
-            mode = getter("meta_sender_style", "legacy") if callable(getter) else "legacy"
-        except Exception:  # noqa: BLE001
-            mode = "legacy"
-    mode = str(mode or "legacy").lower()
-    if mode == "off":
+    if not bool(_cfg(req, "auto_disambiguation", True)):
         return None
-
-    fmt = user_message_format(cfg)
-    if fmt != "legacy":
+    if user_message_format(req.config) != "multi_line":
         return SINGLE_LINE_MESSAGE_META_INSTRUCTION
-    if mode == "new":
-        return MASKED_MESSAGE_META_INSTRUCTION
-    try:
-        long_term = bool(getter("experimental_long_term_memory", False)) if callable(getter) else False
-    except Exception:  # noqa: BLE001
-        long_term = False
-    return MASKED_MESSAGE_META_INSTRUCTION if long_term else MULTI_LINE_MESSAGE_META_INSTRUCTION
+    masked = str(_cfg(req, "sender_label", "compact") or "compact").lower() == "masked"
+    return MASKED_MESSAGE_META_INSTRUCTION if masked else MULTI_LINE_MESSAGE_META_INSTRUCTION
 
 
 def message_meta_section(req: Any) -> list[dict]:

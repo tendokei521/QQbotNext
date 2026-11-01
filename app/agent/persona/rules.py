@@ -114,10 +114,8 @@ def detect_caps(
     # 引用/@ 的输出通道：工具通道与行内指令通道二选一
     caps["quote_channel"] = speech_by_tool or caps["outbound_directive"]
     caps["participation"] = str(_cfg(config, "participation", "medium") or "medium")
-    try:
-        caps["emoji_level"] = int(_cfg(config, "emoji_react_level", 1) or 0)
-    except (TypeError, ValueError):
-        caps["emoji_level"] = 1
+    # 表情活跃度开关已删除（2026-11-01 精简）：固定按"普通频率"渲染
+    caps["emoji_level"] = 1
     return caps
 
 

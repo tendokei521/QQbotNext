@@ -727,18 +727,8 @@ class LlmPipeline:
         session = session_mgr.get_session(ctx.session_id)
         if session is None:
             return
-        from app.agent.policy import policy_config
-
-        cfg = policy_config(self.runtime, "meta")
-        enabled = True
-        if cfg is not None:
-            try:
-                enabled = bool(cfg.get("clean_output_parentheses", True))
-            except Exception:
-                enabled = True
-        from app.domain.tags import maybe_strip_parentheses
-
-        session_mgr.add_message(ctx.session_id, "assistant", maybe_strip_parentheses(text, enabled))
+        # 括号清洗开关已删除（2026-11-01 精简）：历史里保留原样
+        session_mgr.add_message(ctx.session_id, "assistant", text)
         await asyncio.to_thread(session_mgr.history.save_session, session)
 
     async def _run_stage(self, stage: str, ctx: LlmContext, msg: Any = None) -> bool:

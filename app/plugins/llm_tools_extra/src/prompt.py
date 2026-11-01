@@ -29,14 +29,6 @@ def emoji_hint_section(req: Any) -> list[dict]:
     tools = getattr(req, "available_tools", None)
     if tools is not None and "set_msg_emoji_like" not in tools:
         return []
-    cfg = getattr(req, "config", None)
-    getter = getattr(cfg, "get", None)
-    try:
-        level = int(getter("emoji_react_level", 1) or 0) if callable(getter) else 1
-    except (TypeError, ValueError):
-        level = 1
-    if level <= 0:
-        return []
     try:
         from app.agent.persona.emoji import available_tags
 

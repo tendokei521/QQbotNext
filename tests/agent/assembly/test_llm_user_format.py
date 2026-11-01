@@ -1,11 +1,11 @@
-"""user 侧元信息格式：单行形态 / 时间挪位 / 表情提示 / 格式图例。
+"""消息组装渲染契约（精简后的 8 键）。
 
-守的是这三件容易悄悄回退的事：
-
-1. ``legacy`` 格式下 user 侧**逐字不变**（六行元信息块、时间在首行）；
-2. ``single_line`` 档本轮消息与历史条目同形（``昵称(QQ): 正文``），且时间挪到末尾——
-   否则"本轮六行块 + 历史单行"的混搭会原样回来；
-3. 消息格式说明随格式一起换（别一边发单行、一边解释"发送者：/发送了："）。
+覆盖：
+- `user_message_format`：single_line / multi_line 两种形态；
+- `prompt_time_position`：off / head / tail；
+- `sender_label`：off / compact / verbose / masked；
+- `quote_and_at`：off / mark（不取正文）/ enrich（取正文与昵称）；
+- `include_sent`（仅多行块生效）与 `auto_disambiguation`（决定 L1 说明段）。
 """
 
 from __future__ import annotations
@@ -13,122 +13,128 @@ from __future__ import annotations
 import types
 
 from app.agent.assembly.assembler import PromptRequest
-from app.agent.assembly.prompt import prompt_time_position, user_message_format
+from app.agent.loop.context import LlmContext
 from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
-from app.plugins.llm_prompt.src.meta import format_user_context
-from app.plugins.llm_prompt.src.prompt import SINGLE_LINE_MESSAGE_META_INSTRUCTION, message_meta_instruction
-from app.plugins.llm_tools_extra.src.prompt import emoji_hint_line
+from app.plugins.llm_prompt.src.meta import collect_user_context, format_user_context
+from app.plugins.llm_prompt.src.prompt import (
+    SINGLE_LINE_MESSAGE_META_INSTRUCTION,
+    message_meta_instruction,
+)
 
-NL = chr(10)
+
+class _FakeBot:
+    def __init__(self):
+        self.calls = 0
+
+    async def get_msg(self, message_id):
+        self.calls += 1
+        return {
+            "data": {
+                "sender": {"card": "小红", "user_id": 10002},
+                "message": [{"type": "text", "data": {"text": "昨晚那部剧结局真离谱"}}],
+            }
+        }
+
+    async def get_group_member_info(self, group_id, user_id):
+        return {"data": {"card": "小明", "nickname": "小明"}}
 
 
-def _group_event() -> GroupMessageEvent:
+def _event(bot=None) -> GroupMessageEvent:
     return GroupMessageEvent(
         event_type="message_group",
         message_type="group",
-        time=1,
+        time=1730000000,
         user_id=20002,
-        self_id=778,
-        message=[MessageSegment("text", {"text": "晚上吃什么"})],
+        self_id=3437542570,
+        message=[
+            MessageSegment("reply", {"id": "456"}),
+            MessageSegment("text", {"text": "刚那条是什么意思？"}),
+        ],
         user=UserInfo(user_id=20002, nickname="小明"),
         group=types.SimpleNamespace(group_id=466052056),
+        bot=bot,
     )
 
 
-def _ctx(config: dict | None):
-    from app.agent.loop.context import LlmContext
-
-    runtime = types.SimpleNamespace(config=config or {}, bot_id=3437542570)
-    ctx = LlmContext(event=_group_event(), runtime=runtime, bot=None, session_id="group_1")
-    ctx.user_text = "晚上吃什么"
-    ctx.state["user_context"] = {
-        "sender": "小明(20002)",
-        "mentioned": ["小红(30003)"],
-        "quote": "在吗",
-        "quote_sender": "小红(30003)",
-        "sent_text": "晚上吃什么",
-    }
+def _ctx(config: dict, bot=None) -> LlmContext:
+    runtime = types.SimpleNamespace(config=config, bot_id=3437542570)
+    ctx = LlmContext(event=_event(bot), runtime=runtime, bot=bot, session_id="group_1")
+    ctx.user_text = "刚那条是什么意思？"
     return ctx
 
 
-async def test_multi_line_format_keeps_six_line_block():
-    """``user_message_format=legacy`` + 时间放头：六行元信息块（旧形态仍可选）。"""
-    ctx = _ctx({"user_message_format": "legacy", "prompt_time_position": "head"})
+async def _render(config: dict, bot=None) -> LlmContext:
+    ctx = _ctx(config, bot)
+    await collect_user_context(ctx)
     await format_user_context(ctx)
+    return ctx
+
+
+async def test_single_line_default_matches_history_format():
+    ctx = await _render({}, _FakeBot())
     lines = ctx.user_text.splitlines()
-    assert lines[0].startswith("(时间：")
-    assert "(当前群号: 466052056)" in lines
-    assert "发送者：小明(20002)" in lines
-    assert "发送了：晚上吃什么" in lines
-    assert "提到了(用户名)：小红(30003)" in lines
+    assert lines[0].startswith("(当前群号: 466052056)")
+    assert "小明(20002): 刚那条是什么意思？" in ctx.user_text
+    assert "(时间：" in ctx.user_text, "默认时间放尾部"
+    assert ctx.user_text.index("小明(20002)") < ctx.user_text.index("(时间：")
 
 
-async def test_single_line_format_matches_history_format():
-    """单一形态：群号一行 + 昵称(QQ): 正文 + 附注 + 时间，没有「发送者：/发送了：」。"""
-    ctx = _ctx({"user_message_format": "single_line"})
-    await format_user_context(ctx)
-    lines = ctx.user_text.splitlines()
-    assert lines[0].startswith("(当前群号:")
-    assert "小明(20002): 晚上吃什么" in lines
-    assert not any(line.startswith(("发送者：", "发送了：")) for line in lines)
-    assert not lines[0].startswith("(时间：")
-    assert lines[-1].startswith("(时间："), "时间应挪到末尾"
-    assert "提到了(用户名)：小红(30003)" in ctx.user_text
+async def test_multi_line_block_with_sent_marker():
+    ctx = await _render({"user_message_format": "multi_line"}, _FakeBot())
+    assert "发送者：小明(20002)" in ctx.user_text
+    assert "发送了：刚那条是什么意思？" in ctx.user_text
 
 
-async def test_time_position_head_restores_old_order():
-    ctx = _ctx(
-        {
-                    "user_message_format": "single_line",
-            "prompt_time_position": "head",
-        }
+async def test_multi_line_can_hide_sent_text():
+    ctx = await _render(
+        {"user_message_format": "multi_line", "include_sent": False}, _FakeBot()
     )
-    await format_user_context(ctx)
-    assert ctx.user_text.splitlines()[0].startswith("(时间：")
+    assert "发送了：" not in ctx.user_text
+    assert "发送者：小明(20002)" in ctx.user_text
 
 
-def test_format_helpers_default_to_single_line():
-    """默认就是单行形态；显式写 legacy 才回到六行块。"""
-    assert user_message_format({}) == "single_line"
-    assert user_message_format({"user_message_format": "single_line"}) == "single_line"
-    assert user_message_format({"user_message_format": "legacy"}) == "legacy"
-    assert prompt_time_position({}) == "tail"
-    assert prompt_time_position({"prompt_time_position": "head"}) == "head"
+async def test_time_position_off_and_head():
+    off = await _render({"prompt_time_position": "off"}, _FakeBot())
+    assert "(时间：" not in off.user_text
+    head = await _render({"prompt_time_position": "head"}, _FakeBot())
+    assert head.user_text.splitlines()[0].startswith("(时间：")
 
 
-def test_message_meta_legend_follows_format():
-    """格式换了，说明也得换：发单行却解释「发送者：/发送了：」= 给模型一本错手册。"""
-    base = {
-            "user_message_format": "single_line",
-        "meta_sender_style": "legacy",
-    }
-    req = PromptRequest(session_id="group_1", is_private=False, user_text="在吗", config=base)
-    req.ctx = types.SimpleNamespace(state={"message_meta_injected": True})
-    assert message_meta_instruction(req) == SINGLE_LINE_MESSAGE_META_INSTRUCTION
-
-    legacy = dict(base, user_message_format="legacy")
-    req = PromptRequest(session_id="group_1", is_private=False, user_text="在吗", config=legacy)
-    req.ctx = types.SimpleNamespace(state={"message_meta_injected": True})
-    assert message_meta_instruction(req) != SINGLE_LINE_MESSAGE_META_INSTRUCTION
+async def test_sender_label_off_and_masked():
+    off = await _render({"sender_label": "off"}, _FakeBot())
+    assert "小明" not in off.user_text
+    masked = await _render({"sender_label": "masked"}, _FakeBot())
+    assert "用户<20002>" in masked.user_text
 
 
-def test_message_meta_off_wins_over_profile():
-    req = PromptRequest(
-        session_id="group_1",
-        is_private=False,
-        user_text="在吗",
-        config={"meta_instruction_mode": "off"},
-    )
-    req.ctx = types.SimpleNamespace(state={"message_meta_injected": True})
-    assert message_meta_instruction(req) is None
+async def test_quote_mark_does_not_fetch_body():
+    bot = _FakeBot()
+    ctx = await _render({"quote_and_at": "mark"}, bot)
+    assert bot.calls == 0, "只标关系时不该请求被引用消息"
+    assert "引用了：" in ctx.user_text
 
 
-def test_emoji_hint_line_is_stable_and_names_tags():
-    from app.agent.persona.emoji import available_tags
+async def test_quote_enrich_fetches_body():
+    bot = _FakeBot()
+    ctx = await _render({"quote_and_at": "enrich"}, bot)
+    assert bot.calls == 1
+    assert "昨晚那部剧结局真离谱" in ctx.user_text
 
-    tags = available_tags(20)
-    line = emoji_hint_line(tags)
-    assert line.startswith("【可用表情】")
-    assert "赞" in line
-    assert emoji_hint_line("") == ""
-    assert emoji_hint_line(tags) == line, "同一标签表必须逐字稳定（前缀缓存）"
+
+async def test_quote_off_drops_quote_and_mention():
+    ctx = await _render({"quote_and_at": "off"}, _FakeBot())
+    assert "引用了：" not in ctx.user_text
+
+
+def _req(config: dict, injected: bool):
+    req = PromptRequest(config=config)
+    req.ctx = types.SimpleNamespace(state={"message_meta_injected": injected} if injected else {})
+    return req
+
+
+def test_legend_follows_format_and_can_be_disabled():
+    assert message_meta_instruction(_req({}, False)) is None, "没注入元信息就不解释"
+    assert message_meta_instruction(_req({}, True)) == SINGLE_LINE_MESSAGE_META_INSTRUCTION
+    multi = message_meta_instruction(_req({"user_message_format": "multi_line"}, True))
+    assert multi and "发送了" in multi
+    assert message_meta_instruction(_req({"auto_disambiguation": False}, True)) is None

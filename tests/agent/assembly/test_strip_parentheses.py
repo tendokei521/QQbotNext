@@ -107,7 +107,8 @@ async def test_e2e_history_cleaned_but_display_kept(monkeypatch):
     assert s is not None
     last = s.data.history[-1]
     assert last["role"] == "assistant"
-    assert "(" not in last["content"] and "（" not in last["content"]
+    # 括号清洗开关已删除（2026-11-01 精简）：历史保留原文，与展示一致
+    assert "（笑）" in last["content"]
     assert "好的" in last["content"]
     rt.memory.stop()
 

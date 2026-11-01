@@ -226,29 +226,16 @@ CORE_KEYS: tuple[str, ...] = (
 MODULE_KEYS: dict[str, tuple[str, ...]] = {
     # 提示词组装：组装档位/行为规则/本轮消息渲染（原两个模块的键并集，键名不变）
     "llm_prompt": (
-        # 组装（7）
+        # 提示词注入（2）
         "behavior_rules_override",
         "participation",
-        "emoji_react_level",
+        # 消息组装方式（6）
         "user_message_format",
         "prompt_time_position",
-        "prompt_dump_enable",
-        "prompt_dump_max_entries",
-        # 消息元信息（14）
-        "include_time",
-        "include_private_qq",
-        "include_sender",
-        "include_mentioned",
-        "include_quote",
-        "include_quote_sender",
+        "sender_label",
+        "quote_and_at",
         "include_sent",
-        "fetch_at_nickname",
-        "fetch_quote_content",
-        "meta_sender_style",
-        "meta_sent_style",
-        "meta_instruction_mode",
-        "meta_mask_nickname",
-        "clean_output_parentheses",
+        "auto_disambiguation",
     ),
     # 触发与调度：主动消息 + 定时任务（同一条"自己发起一轮"的路径）
     "llm_trigger": (
@@ -358,6 +345,24 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
 
 # ==================== 3. 删除（9 键）====================
 DELETED_KEYS: tuple[str, ...] = (
+    # 2026-11-01 llm_prompt 精简：12 个元信息开关收敛进 sender_label / quote_and_at /
+    # prompt_time_position / auto_disambiguation；表情活跃度、括号清洗、请求落盘三项功能删除
+    "include_time",
+    "include_private_qq",
+    "include_sender",
+    "include_mentioned",
+    "include_quote",
+    "include_quote_sender",
+    "fetch_at_nickname",
+    "fetch_quote_content",
+    "meta_sender_style",
+    "meta_sent_style",
+    "meta_instruction_mode",
+    "meta_mask_nickname",
+    "emoji_react_level",
+    "clean_output_parentheses",
+    "prompt_dump_enable",
+    "prompt_dump_max_entries",
     # 循环安全阀：改为框架内硬编码安全默认（5 轮 / 1 次空回复重试 / 1 次收敛）
     # —— 它们不是"功能开关"，暴露给用户只会让用户把钱烧在不理解的地方
     "max_tool_rounds",

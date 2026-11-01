@@ -27,24 +27,31 @@ def _cfg_str(config, key: str, default: str) -> str:
 # docs/reviews/2026-10-31-prompt-assembly-analysis.md）。
 # 现在档位没了，每个键就是它自己那个语义，默认值直接就是产品想要的形态。
 
-#: user 侧消息元信息格式：``single_line``（默认，"时间 昵称(QQ): 正文"）| ``legacy``（六行块）
+#: user 侧消息元信息格式：``single_line``（默认，"昵称(QQ): 正文"）| ``multi_line``（六行块）
 USER_MESSAGE_FORMAT_SINGLE = "single_line"
+USER_MESSAGE_FORMAT_MULTI = "multi_line"
+#: 兼容旧值（历史配置里出现过 ``legacy``）
 USER_MESSAGE_FORMAT_LEGACY = "legacy"
 
-#: 时间行位置：``tail``（默认，稳定内容靠前，利于前缀缓存）| ``head``
+#: 时间行位置：``tail``（默认，稳定内容靠前）| ``head`` | ``off``（不注入）
 TIME_POSITION_TAIL = "tail"
 TIME_POSITION_HEAD = "head"
+TIME_POSITION_OFF = "off"
 
 
 def user_message_format(config) -> str:
-    """本轮 user 侧格式：``single_line``（默认）| ``legacy``（六行元信息块）。"""
+    """本轮 user 侧格式：``single_line``（默认）| ``multi_line``（六行元信息块）。"""
     value = _cfg_str(config, "user_message_format", USER_MESSAGE_FORMAT_SINGLE)
-    return USER_MESSAGE_FORMAT_LEGACY if value == USER_MESSAGE_FORMAT_LEGACY else USER_MESSAGE_FORMAT_SINGLE
+    if value in (USER_MESSAGE_FORMAT_MULTI, USER_MESSAGE_FORMAT_LEGACY):
+        return USER_MESSAGE_FORMAT_MULTI
+    return USER_MESSAGE_FORMAT_SINGLE
 
 
 def prompt_time_position(config) -> str:
-    """时间行位置：``tail``（默认，挪到末尾让稳定行靠前）| ``head``。"""
+    """时间行位置：``tail``（默认）| ``head`` | ``off``。"""
     value = _cfg_str(config, "prompt_time_position", TIME_POSITION_TAIL)
+    if value == TIME_POSITION_OFF:
+        return TIME_POSITION_OFF
     return TIME_POSITION_HEAD if value == TIME_POSITION_HEAD else TIME_POSITION_TAIL
 
 

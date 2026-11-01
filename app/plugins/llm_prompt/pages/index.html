@@ -10,19 +10,19 @@
 <div id="app"></div>
 <script src="/api/plugin-sdk.js"></script>
 <script>
-  const visible = (key) => (cfg) => cfg[key] !== false
+  const multiLine = (cfg) => cfg.user_message_format === 'multi_line'
 
   QQBOT.form({
     title: '提示词组装',
-    description: '决定模型「看到什么」：行为语气、本轮消息带哪些标注、引用怎么补全。改动自动保存。',
+    description: '决定模型看到什么：行为规则、本轮消息怎么标注。改动自动保存。',
     groups: [
       {
-        title: '行为与语气',
+        title: '提示词注入',
         hint: '影响系统提示词里的行为段',
         fields: [
           {
             key: 'behavior_rules_override', label: '覆盖行为规则', type: 'textarea', rows: 6,
-            hint: '留空即使用内置行为规则；填写后整段替换（安全规则与工作方式仍会追加）。',
+            hint: '留空即使用内置规则；填写后整段替换（安全规则与工作方式仍会追加）。',
             placeholder: '留空 = 内置规则',
           },
           {
@@ -30,103 +30,45 @@
             hint: '低=少插话；高=更主动接话。只改语气与倾向，不改触发规则。',
             options: { low: '低（少插话）', normal: '正常', high: '高（多参与）' },
           },
-          {
-            key: 'emoji_react_level', label: '贴表情活跃度', type: 'number',
-            min: 0, max: 3, step: 1, unit: '级',
-            hint: '0 = 不贴（也不注入可用表情段）；1 = 每 3~5 轮；2 = 优先贴；3 = 能贴就贴。',
-          },
         ],
       },
       {
-        title: '时间与发送者',
-        hint: '让模型知道「谁、在什么时候」说的话',
-        fields: [
-          { key: 'include_time', label: '包含当前时间', type: 'switch' },
-          {
-            key: 'prompt_time_position', label: '时间行位置', type: 'select',
-            hint: '放在末尾更利于模型把「现在几点」当最新事实。',
-            options: { user_head: '消息头部', user_tail: '消息尾部', off: '不注入' },
-            visible: visible('include_time'),
-          },
-          { key: 'include_sender', label: '包含发送者信息', type: 'switch' },
-          {
-            key: 'include_private_qq', label: '私聊包含对方 QQ', type: 'switch',
-            hint: '私聊本来就一对一，一般不需要再带 QQ。',
-            visible: visible('include_sender'),
-          },
-          {
-            key: 'meta_sender_style', label: '发送者写法', type: 'select',
-            hint: '同一会话内保持一致，避免模型对格式反复适应。',
-            options: { compact: '紧凑（昵称(QQ)）', verbose: '详细', name_only: '只要昵称' },
-            visible: visible('include_sender'),
-          },
-          {
-            key: 'meta_mask_nickname', label: '昵称脱敏', type: 'switch',
-            hint: '开启后昵称只保留首字，适合不想让模型看到完整群昵称的场景。',
-            visible: visible('include_sender'),
-          },
-        ],
-      },
-      {
-        title: '引用、@ 与正文',
-        hint: '回复关系与正文标记',
-        fields: [
-          { key: 'include_mentioned', label: '包含「提到了」信息', type: 'switch' },
-          {
-            key: 'fetch_at_nickname', label: '拉取 @ 对象昵称', type: 'switch',
-            hint: '关闭后只看到 QQ 号，可能认错人。',
-            visible: visible('include_mentioned'),
-          },
-          { key: 'include_quote', label: '包含引用消息', type: 'switch' },
-          {
-            key: 'include_quote_sender', label: '引用里带发送者', type: 'switch',
-            visible: visible('include_quote'),
-          },
-          {
-            key: 'fetch_quote_content', label: '拉取引用正文', type: 'switch',
-            hint: '关闭后只标「引用了某条」，模型需要时会自己去展开。',
-            visible: visible('include_quote'),
-          },
-          { key: 'include_sent', label: '包含发送内容', type: 'switch' },
-          {
-            key: 'meta_sent_style', label: '正文写法', type: 'select',
-            options: { compact: '紧凑', quoted: '带引号', fenced: '代码块' },
-            visible: visible('include_sent'),
-          },
-        ],
-      },
-      {
-        title: '格式与清洗',
+        title: '消息组装方式',
+        hint: '本轮消息发给模型时的写法',
         fields: [
           {
-            key: 'user_message_format', label: '本轮消息格式', type: 'select',
-            hint: '单行更省 token；多行块适合保留了「发送者：/发送了：」旧格式的会话。',
-            options: { default: '默认（多行）', single_line: '单行', labeled: '带标签' },
+            key: 'user_message_format', label: '消息格式', type: 'select',
+            hint: '单行与聊天记录同形，最省 token；多行块信息更工整但更长。',
+            options: { single_line: '单行（推荐）', multi_line: '多行块' },
           },
           {
-            key: 'meta_instruction_mode', label: '消歧说明', type: 'select',
-            hint: '告诉模型「行尾括号是元信息」。自动=只在真注入了元信息时才加。',
-            options: { auto: '自动（有歧义才加）', always: '总是加', off: '不加' },
+            key: 'prompt_time_position', label: '时间位置', type: 'select',
+            hint: '放在末尾利于模型把「现在几点」当最新事实。',
+            options: { off: '不注入', head: '消息头部', tail: '消息尾部' },
           },
           {
-            key: 'clean_output_parentheses', label: '写入历史时清洗括号',
-            type: 'switch',
-            hint: '把（动作描写）从历史里去掉，防止模型自我强化括号风格。',
-          },
-        ],
-      },
-      {
-        title: '调试与对账',
-        hint: '排障用，日常保持关闭',
-        fields: [
-          {
-            key: 'prompt_dump_enable', label: '请求落盘（对账）', type: 'switch',
-            hint: '把每轮最终请求写到文件，便于比对「提示词到底装了什么」。',
+            key: 'sender_label', label: '发送者写法', type: 'select',
+            hint: '脱敏会把昵称换成「用户<QQ>」；详细档在私聊里额外给出对方 QQ。',
+            options: {
+              off: '不标发送者',
+              compact: '昵称(QQ)',
+              verbose: '详细（含私信 QQ）',
+              masked: '昵称脱敏',
+            },
           },
           {
-            key: 'prompt_dump_max_entries', label: '落盘保留条数', type: 'number',
-            min: 1, max: 500, step: 1, unit: '轮',
-            visible: visible('prompt_dump_enable'),
+            key: 'quote_and_at', label: '引用与 @', type: 'select',
+            hint: '只标关系不取正文（省一次请求）；带内容会自动把被引用的话取回来。',
+            options: { off: '关闭', mark: '只标关系', enrich: '带内容（自动取回）' },
+          },
+          {
+            key: 'include_sent', label: '标注发送内容', type: 'switch',
+            hint: '多行块里单独标出正文，方便模型分清标注与内容。',
+            visible: multiLine,
+          },
+          {
+            key: 'auto_disambiguation', label: '消歧说明', type: 'switch',
+            hint: '告诉模型「昵称、时间这些是标注，不是对方说的话」。',
           },
         ],
       },

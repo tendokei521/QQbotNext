@@ -181,16 +181,17 @@ def test_quote_channel_follows_tool_mode():
     assert "【引用与点名" not in disabled
 
 
-def test_participation_and_emoji_level_rewrite_lines():
+def test_participation_rewrites_lines_and_emoji_level_is_fixed():
     low = _render(ALL_TOOLS, {"participation": "low"})
     high = _render(ALL_TOOLS, {"participation": "high"})
     assert "安静型" in low and "活跃型" in high
     assert low != high
 
+    # 表情活跃度开关已删除（2026-11-01 精简）：旧键存在与否都不再改变文案。
+    base = _render(ALL_TOOLS, {})
     level0 = _render(ALL_TOOLS, {"emoji_react_level": 0})
     level3 = _render(ALL_TOOLS, {"emoji_react_level": 3})
-    assert "备选项" in level0
-    assert "表情爱好者" in level3
+    assert level0 == base and level3 == base
 
 
 def test_override_keeps_safety_and_work_protocol():

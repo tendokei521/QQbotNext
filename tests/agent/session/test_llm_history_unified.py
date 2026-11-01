@@ -105,17 +105,25 @@ async def test_format_user_context_group_injects_sender_group_time_quote():
     assert ctx.state["message_meta_injected"] is True
 
 
-async def test_format_user_context_private_injects_qq_line():
+async def test_format_user_context_private_qq_line_only_in_verbose():
     event = GroupMessageEvent(
         event_type="message_private", message_type="private", time=1, user_id=30003, self_id=778,
         message=[MessageSegment("text", {"text": "在吗"})],
         user=UserInfo(user_id=30003, nickname="小红"),
         group=types.SimpleNamespace(group_id=0),
     )
+    # 默认（紧凑档）：私聊不额外给 QQ 行，时间在尾部，正文是「QQ: 正文」单行
     ctx = _ctx(event, "在吗", user_context={"sent_text": "在吗"})
     await format_user_context(ctx)
-    assert "(QQ: 30003)" in ctx.user_text
-    assert "发送了：在吗" in ctx.user_text
+    assert "(QQ: 30003)" not in ctx.user_text
+    assert "30003: 在吗" in ctx.user_text
+    assert ctx.user_text.splitlines()[-1].startswith("(时间：")
+
+    # 详细档：私聊额外给出对方 QQ
+    verbose = _ctx(event, "在吗", user_context={"sent_text": "在吗"})
+    verbose.runtime = types.SimpleNamespace(config={"sender_label": "verbose"}, bot_id=778)
+    await format_user_context(verbose)
+    assert "(QQ: 30003)" in verbose.user_text
 
 
 async def test_format_user_context_without_info_is_noop():
