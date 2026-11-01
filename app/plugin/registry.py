@@ -194,17 +194,43 @@ class ModuleRegistry:
     def module_names(self) -> list[str]:
         return sorted(self._modules.keys())
 
-    def module_page_path(self, module_name: str) -> Path | None:
-        """自定义配置页：插件根/pages/index.html（内置与外部同口径，修 P0-2）。"""
+    def module_pages_dir(self, module_name: str) -> Path | None:
+        """模块自带页面目录（`<plugin>/pages/`）：内置与外部同口径；不存在返回 None。"""
         entry = self.catalog.get(module_name)
-        if entry is not None:
-            page = entry.path / "pages" / "index.html"
-            return page if page.is_file() else None
-        module_path = self.catalog.resolve_path(module_name)
-        if module_path is None:
+        base = entry.path if entry is not None else self.catalog.resolve_path(module_name)
+        if base is None:
             return None
-        page = module_path / "pages" / "index.html"
+        pages = Path(base) / "pages"
+        return pages if pages.is_dir() else None
+
+    def module_page_path(self, module_name: str) -> Path | None:
+        """自定义配置页：`<plugin>/pages/index.html`；没有页面时返回 None。"""
+        pages = self.module_pages_dir(module_name)
+        if pages is None:
+            return None
+        page = pages / "index.html"
         return page if page.is_file() else None
+
+    def module_asset_path(self, module_name: str, relative: str) -> Path | None:
+        """页面静态资源：`<plugin>/pages/<relative>`；越界（`../`）或不存在返回 None。
+
+        安全口径：解析后必须仍是 `pages/` 的后代，否则一律拒绝——插件页是
+        第三方 HTML，不能让一个拼错的相对路径把整台机器的文件读出去。
+        """
+        pages = self.module_pages_dir(module_name)
+        if pages is None:
+            return None
+        rel = str(relative or "").strip().lstrip("/\\")
+        if not rel:
+            return None
+        try:
+            base = pages.resolve()
+            candidate = (base / rel).resolve()
+        except OSError:
+            return None
+        if candidate != base and base not in candidate.parents:
+            return None
+        return candidate if candidate.is_file() else None
 
     def module_has_page(self, module_name: str) -> bool:
         return self.module_page_path(module_name) is not None

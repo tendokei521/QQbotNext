@@ -95,6 +95,57 @@ async def test_page_endpoint_404_without_page(page_env):
     assert resp.status_code == 404
 
 
+async def test_missing_page_returns_friendly_html(page_env):
+    """无页/未知模块都返回**给人看的 HTML**，而不是塞进 iframe 的裸 JSON。"""
+    client, c = page_env
+    # 1) 完全未知的模块名
+    resp = client.get("/api/module/ghost_module/page")
+    assert resp.status_code == 404
+    assert resp.headers["content-type"].startswith("text/html")
+    assert "不存在或未安装" in resp.text
+
+
+async def test_module_assets_are_served_with_media_type(page_env, tmp_path):
+    client, c = page_env
+    pages = tmp_path / "plugins" / "pagemod" / "pages"
+    (pages / "app.css").write_text("body{color:red}", encoding="utf-8")
+    (pages / "sub").mkdir()
+    (pages / "sub" / "logo.svg").write_text("<svg/>", encoding="utf-8")
+
+    resp = client.get("/api/module/pagemod/assets/app.css")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/css")
+    assert resp.headers.get("x-content-type-options") == "nosniff"
+    assert "color:red" in resp.text
+
+    resp2 = client.get("/api/module/pagemod/assets/sub/logo.svg")
+    assert resp2.status_code == 200
+    assert "image/svg" in resp2.headers["content-type"]
+
+
+async def test_module_assets_block_path_traversal(page_env):
+    """插件页是第三方 HTML：一个拼错的相对路径不能把机器上的文件读出去。"""
+    client, c = page_env
+    for path in ("../main.py", "..%2Fmain.py", "%2e%2e%2fmain.py"):
+        resp = client.get(f"/api/module/pagemod/assets/{path}")
+        assert resp.status_code == 404, path
+        assert "def Module" not in resp.text
+
+    assert client.get("/api/module/pagemod/assets/%2Fetc%2Fpasswd").status_code == 404
+    assert client.get("/api/module/pagemod/assets/nope.css").status_code == 404
+
+
+async def test_plugin_sdk_is_served(page_env):
+    client, c = page_env
+    resp = client.get("/api/plugin-sdk.js")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/javascript")
+    assert resp.headers.get("x-content-type-options") == "nosniff"
+    body = resp.text
+    assert "QQBOT" in body and "getConfig" in body and "saveConfig" in body
+    assert "/api/module/" in body and "/assets/" in body
+
+
 async def test_config_get_endpoint(page_env):
     client, c = page_env
     resp = client.get("/api/module/pagemod/config?account_id=acc1")

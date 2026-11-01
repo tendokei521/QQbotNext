@@ -16,7 +16,8 @@ app/plugins/<name>/
 ├── main.py           **唯一必需**：导出 class Module(BaseModule)
 ├── config_schema.py    配置 schema（WebUI 表单由此渲染）
 ├── service/            业务逻辑（推荐；df_password / time_sign_in / recall_back 是范本）
-├── pages/index.html    可选：插件自带页面（GET /api/module/<name>/page）
+├── pages/index.html    可选：插件自带页面（GET /api/module/<name>/page；静态资源放 pages/，
+│                       页面里用 /api/plugin-sdk.js 读写配置）
 └── module.json         可选：manifest（名称/版本/入口/权限声明）
 ```
 

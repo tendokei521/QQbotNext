@@ -103,6 +103,57 @@ class Module(BaseModule):
     permission = "member"
 ```
 
+### 1.3 插件自定义页（`pages/`）
+
+模块可以自带一个设置页，WebUI 用 iframe 内嵌（`/modules/<name>` → 自定义页 tab）。
+
+```text
+<插件根>/<name>/pages/
+  index.html          # 入口：框架会注入 4 个全局变量后原样返回
+  app.css             # 可选的静态资源（同目录下任意文件都可被页面引用）
+  sub/logo.svg
+```
+
+| 能力 | 地址 / 用法 |
+|---|---|
+| 页面 | `GET /api/module/<name>/page`（框架在 `<head>` 注入全局变量；页面高度由容器自动跟随，**不要自己算高度**） |
+| 静态资源 | `GET /api/module/<name>/assets/<相对路径>`：只允许 `pages/` 下的文件，`../` 越界返回 404，响应带 `X-Content-Type-Options: nosniff` |
+| 公共 SDK | `<script src="/api/plugin-sdk.js"></script>` |
+| 配置读写 | SDK 的 `getConfig()` / `saveConfig(patch)`；等价于 `GET/POST /api/module/<name>/config`（POST 是**扁平对象**，只传要改的键） |
+
+框架注入的全局变量（页面不用自己解析 URL）：
+
+```js
+window.PLUGIN_MODULE      // 模块名，如 "example"
+window.PLUGIN_ACCOUNT_ID  // 当前选中账号 id；没选账号时为 null
+window.PLUGIN_BOT_ID      // 同上，历史别名（老插件页在用）
+window.WEBUI_TOKEN        // 访问令牌；仅作后备通道
+```
+
+推荐写法（SDK 已封装鉴权、账号参数、错误处理）：
+
+```html
+<script src="/api/plugin-sdk.js"></script>
+<script>
+  const bot = QQBOT.plugin()                       // 自动读注入的模块名/账号
+  const { config } = await bot.getConfig()
+  await bot.saveConfig({ greet: 'hi' })            // 只传要改的键
+  document.querySelector('link').href = bot.asset('app.css')
+  const stop = bot.watchConfig(cfg => console.log('外部改了配置', cfg), 5000)  // 可选
+</script>
+```
+
+约定与边界：
+
+- **鉴权**：插件页与 Dashboard 同源，靠浏览器的 HttpOnly 会话 cookie；SDK 在 401 时会用注入的
+  `WEBUI_TOKEN` 重试一次。**不要在页面里把 token 写进日志/地址栏**。
+- **安全边界**：自定义页是与 Dashboard 同源的 iframe（没有 sandbox），属于**可信代码**——
+  能访问 `window.parent`、也持有注入令牌。**只安装可信来源的插件**。
+- **没有页面时**由框架返回一个中文占位页（HTTP 404），并提示去「基础设置」改配置；
+  不会再把 JSON 塞进 iframe。
+- 页面里不要做整页导航（会顶掉 Dashboard 布局）；需要提示用户时优先用页面内文案。
+- 参考实现：`data/module/plugins/example/pages/index.html`。
+
 ---
 
 ## 2. 两种流水线

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import mimetypes
+from pathlib import Path
 from zipfile import BadZipFile
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from app.agent.config import LEGACY_LLM_CONNECTION_KEYS
 from app.application.bot_service import PASSWORD_MASK as _PASSWORD_MASK
@@ -691,6 +693,37 @@ async def install_module_zip(
 
 # ==================== 自定义配置页 ====================
 
+#: 插件没有自带设置页时返回的友好 HTML（此前是 JSON 404，塞进 iframe 里就是一段裸 JSON）
+_MISSING_PAGE_HTML = """<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>没有自定义设置页</title>
+<style>
+  html,body{{height:100%;margin:0;background:transparent}}
+  body{{display:flex;align-items:center;justify-content:center;
+        font:14px/1.7 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;color:#666}}
+  .box{{max-width:420px;padding:28px 32px;text-align:center}}
+  .title{{font-size:15px;font-weight:600;color:#333;margin-bottom:8px}}
+  .hint{{opacity:.75}}
+</style></head>
+<body><div class="box">
+  <div class="title">{title}</div>
+  <div class="hint">{hint}</div>
+</div></body></html>"""
+
+
+def _missing_page_html(module_name: str, *, exists: bool) -> HTMLResponse:
+    """插件没有自定义页时的统一占位页（HTTP 404，但内容是给人看的 HTML）。"""
+    if exists:
+        title = "这个插件没有自带设置页"
+        hint = "它的配置可以直接在上方「基础设置」里改；如果你是从旧书签点进来的，请回到「功能插件」列表重新打开。"
+    else:
+        title = f"插件「{module_name}」不存在或未安装"
+        hint = "它可能已被合并、卸载或改名。请回到「功能插件」列表查看当前可用的插件。"
+    return HTMLResponse(
+        content=_MISSING_PAGE_HTML.format(title=title, hint=hint),
+        status_code=404,
+    )
+
+
 @router.get("/module/{module_name}/page", response_class=HTMLResponse)
 async def module_page(module_name: str, request: Request,
                       bot_id: str | None = Depends(parse_account_id), registry=Depends(get_module_registry), settings=Depends(get_settings)):
@@ -699,11 +732,11 @@ async def module_page(module_name: str, request: Request,
     reg = registry
     page_path = reg.module_page_path(module_name)
     if page_path is None:
-        return _err(404, f"模块 {module_name} 无自定义页面")
+        exists = reg.module_pages_dir(module_name) is not None or reg.catalog.get(module_name) is not None
+        return _missing_page_html(module_name, exists=exists)
     content = page_path.read_text(encoding="utf-8")
 
     # 注入模块名 / 当前选中账号 / WebUI 访问令牌，方便页面 JS 拼接配置 API 并携带鉴权
-
     webui_token = settings.webui_token or ""
     module_var = (
         f'<script>window.PLUGIN_MODULE = {json.dumps(module_name)};'
@@ -716,7 +749,38 @@ async def module_page(module_name: str, request: Request,
         content = content.replace("<head>", f"<head>{module_var}", 1)
     else:
         content = module_var + content
-    return HTMLResponse(content=content)
+    # 自定义页是插件自己的 HTML：不缓存，避免改完页面还要手动清缓存
+    return HTMLResponse(content=content, headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/module/{module_name}/assets/{asset_path:path}")
+async def module_asset(module_name: str, asset_path: str, registry=Depends(get_module_registry)):
+    """插件页静态资源：`<plugin>/pages/<asset_path>`（含路径穿越防护）。"""
+    target = registry.module_asset_path(module_name, asset_path)
+    if target is None:
+        return _err(404, f"模块 {module_name} 无此页面资源: {asset_path}")
+    media_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+    return FileResponse(
+        target,
+        media_type=media_type,
+        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "no-cache"},
+    )
+
+
+#: 插件页公共 SDK 的磁盘位置（`app/webui/static/qqbot-plugin.js`）
+_PLUGIN_SDK = Path(__file__).resolve().parents[1] / "static" / "qqbot-plugin.js"
+
+
+@router.get("/plugin-sdk.js")
+async def plugin_sdk():
+    """插件自定义页的公共 SDK（鉴权/账号参数/配置读写/静态资源 URL）。"""
+    if not _PLUGIN_SDK.is_file():
+        return _err(500, "插件页 SDK 缺失（安装包不完整）")
+    return FileResponse(
+        _PLUGIN_SDK,
+        media_type="application/javascript",
+        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "public, max-age=300"},
+    )
 
 
 

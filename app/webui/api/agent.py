@@ -327,7 +327,7 @@ async def agent_knowledge_add(request: Request, bot_id: str | None = Depends(par
         return _err(400, "内容不能为空")
     kb = _service(runtime, "knowledge_service")
     if kb is None:
-        return _err(400, "知识库未启用（请安装并启用「知识库」模块）")
+        return _err(400, "知识库能力已移除（原知识库模块不再随包发布）")
     cid, message = await kb.add_text(content, title=title, source=source)
     if cid is None:
         return _err(400, message)
@@ -341,7 +341,7 @@ async def agent_knowledge_delete(cid: str, request: Request, bot_id: str | None 
         return _err(404, f"账号不存在或未装配运行时: {bot_id}")
     kb = _service(runtime, "knowledge_service")
     if kb is None:
-        return _err(400, "知识库未启用（请安装并启用「知识库」模块）")
+        return _err(400, "知识库能力已移除（原知识库模块不再随包发布）")
     try:
         ok = kb.delete(cid)
     except Exception as e:
@@ -599,7 +599,7 @@ async def agent_task_add(request: Request, bot_id: str | None = Depends(parse_ac
         return _err(404, f"账号不存在或未装配运行时: {bot_id}")
     scheduler = _service(runtime, "scheduler")
     if scheduler is None:
-        return _err(400, "定时任务未启用（请安装并启用「定时任务」模块）")
+        return _err(400, "定时任务未启用（请安装并启用「触发与调度」模块）")
     try:
         data = await request.json()
     except Exception:
@@ -635,7 +635,7 @@ async def agent_task_trigger(task_id: str, request: Request, bot_id: str | None 
         return _err(404, f"账号不存在或未装配运行时: {bot_id}")
     scheduler = _service(runtime, "scheduler")
     if scheduler is None:
-        return _err(400, "定时任务未启用（请安装并启用「定时任务」模块）")
+        return _err(400, "定时任务未启用（请安装并启用「触发与调度」模块）")
     ok = await scheduler.trigger_now(task_id)
     if not ok:
         return _err(400, f"任务 {task_id} 不存在或已结束")
@@ -649,7 +649,7 @@ async def agent_task_cancel(task_id: str, request: Request, bot_id: str | None =
         return _err(404, f"账号不存在或未装配运行时: {bot_id}")
     scheduler = _service(runtime, "scheduler")
     if scheduler is None:
-        return _err(400, "定时任务未启用（请安装并启用「定时任务」模块）")
+        return _err(400, "定时任务未启用（请安装并启用「触发与调度」模块）")
     ok = scheduler.cancel(task_id)
     if not ok:
         return _err(400, f"任务 {task_id} 不存在")
@@ -683,7 +683,7 @@ async def agent_proactive_trigger(request: Request, bot_id: str | None = Depends
         return _err(400, "缺少 session_id")
     proactive = _service(runtime, "proactive_service")
     if proactive is None:
-        return _err(400, "主动消息未启用（请安装并启用「主动消息」模块）")
+        return _err(400, "主动消息未启用（请安装并启用「触发与调度」模块）")
     ok = await proactive.manual_trigger(session_id)
     if not ok:
         return _err(400, f"会话 {session_id} 未启用或不在主动列表")
