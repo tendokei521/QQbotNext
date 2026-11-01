@@ -584,8 +584,15 @@ class LlmPipeline:
             if is_command(ctx.user_text):
                 outcome = "command"
                 from app.agent.loop.chat import handle as agent_handle
+                from app.agent.usage.context import usage_scope
 
-                await agent_handle(self.runtime, ctx.event)
+                with usage_scope(
+                    bot_id=getattr(self.runtime, "bot_id", ""),
+                    source="chat",
+                    session_id=ctx.session_id,
+                    user_id=str(getattr(ctx.event, "user_id", "") or ""),
+                ):
+                    await agent_handle(self.runtime, ctx.event)
                 return
 
             # 图片段（本轮触发消息）：「@我 + 只发图」/私聊纯图片也应当进入 LLM
@@ -764,34 +771,51 @@ class LlmPipeline:
 
         输出形态（一次性 / 逐句流式 / 发言通道）全在策略里，这里只负责
         "拿到消息就发"和发送前后的钩子 —— 于是「流式输出」可以整块被模块接管。
+
+        记账归属：provider 层只在**有 usage 上下文**时才写得出 bot_id（否则统计里
+        会多出一个空账号桶）。主对话走的是这个函数而不是 `turn.run_turn`，所以这里
+        必须自己挂一次 `usage_scope`——参与度模式（发言通道）同样走这里。
         """
-        sent_parts: list[str] = []
-        async for msg in strategy.respond(
-            ctx, should_stop=lambda: self._should_break_stream(ctx)
+        from app.agent.usage.context import usage_scope
+        from app.agent.usage.labels import label_from_session_id
+
+        event = ctx.event
+        with usage_scope(
+            bot_id=getattr(self.runtime, "bot_id", ""),
+            source="chat",
+            session_id=ctx.session_id,
+            session_label=str(getattr(ctx, "session_label", "") or "")
+            or label_from_session_id(ctx.session_id),
+            group_id=str(getattr(getattr(event, "group", None), "group_id", "") or ""),
+            user_id=str(getattr(event, "user_id", "") or ""),
         ):
-            job = ctx.job
-            if job is not None and (job.skip or job.superseded):
-                return
-            if msg is None or getattr(msg, "skip", False):
-                continue
-            if not await self._run_stage("pre_send", ctx, msg):
-                return
-            if getattr(msg, "skip", False):
-                continue
+            sent_parts: list[str] = []
+            async for msg in strategy.respond(
+                ctx, should_stop=lambda: self._should_break_stream(ctx)
+            ):
+                job = ctx.job
+                if job is not None and (job.skip or job.superseded):
+                    return
+                if msg is None or getattr(msg, "skip", False):
+                    continue
+                if not await self._run_stage("pre_send", ctx, msg):
+                    return
+                if getattr(msg, "skip", False):
+                    continue
 
-            await self._send(ctx, msg)
-            sent_parts.append(msg.text)
+                await self._send(ctx, msg)
+                sent_parts.append(msg.text)
 
-            await self._run_stage("post_send", ctx, msg)
+                await self._run_stage("post_send", ctx, msg)
 
-        if getattr(strategy, "streams", False):
-            # 流式收尾：整体结束后触发 post_stream；被打断则把已发内容写进历史
-            if ctx.state.get("interrupted"):
-                await self._save_sent_history(ctx, sent_parts)
-            await self._run_stage("post_stream", ctx)
+            if getattr(strategy, "streams", False):
+                # 流式收尾：整体结束后触发 post_stream；被打断则把已发内容写进历史
+                if ctx.state.get("interrupted"):
+                    await self._save_sent_history(ctx, sent_parts)
+                await self._run_stage("post_stream", ctx)
 
-        # 一轮结束：广播给订阅者（记忆蒸馏、统计、审计等业务自己接）
-        await self._run_stage("turn_completed", ctx)
+            # 一轮结束：广播给订阅者（记忆蒸馏、统计、审计等业务自己接）
+            await self._run_stage("turn_completed", ctx)
 
     async def _run_stream(self, ctx: LlmContext) -> None:
         """显式走流式策略（内部/测试入口；等价于 ``_drive`` + 流式策略）。"""
