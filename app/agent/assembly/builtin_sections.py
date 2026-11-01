@@ -160,28 +160,6 @@ def build_message_meta(req: Any) -> list[dict]:
     return convention_section(req)
 
 
-def build_speech_protocol(req: Any) -> list[dict]:
-    """发言协议段（order 56）：参与度模式下「文本=思考，发言走 send_message」。
-
-    以前这段贴在**本轮 user 消息末尾**（`assembler.apply_speech_protocol`）。
-    贴 user 侧能压住人设里的"输出纯文本"条款，但代价是：每轮用户消息都被追加
-    一段系统事实、历史里读起来像"用户说的"，而且同一事实在 prompt 里出现两次
-    （本轮一次、下一轮的历史渲染里又一次）。现在挪到 L1 系统提示词，和 reply_rules
-    挨着——"你现在处在什么回复模式"和"这个模式下怎么说话"是同一件事。
-    """
-    from app.agent.delivery.speech import SPEECH_PROTOCOL, speech_via_tool
-
-    config = getattr(req, "config", None)
-    forced = False
-    ctx = getattr(req, "ctx", None)
-    if ctx is not None:
-        state = getattr(ctx, "state", None) or {}
-        forced = bool(state.get("participation_gate"))
-    if not (forced or speech_via_tool(config)):
-        return []
-    return [{"role": "system", "content": SPEECH_PROTOCOL}]
-
-
 def build_skills(req: Any) -> list[dict]:
     """技能块（可能多块，各自一条 system）。"""
     return [{"role": "system", "content": block} for block in (req.skill_blocks or []) if block]
@@ -279,7 +257,11 @@ def build_user(req: Any) -> list[dict]:
 
 
 def default_sections() -> list[Section]:
-    """默认段（人设/行为/回复规则/发言协议/消息格式/能力/记忆/背景/环境/历史/本轮）。"""
+    """默认段（人设/行为/回复规则/消息格式/能力/记忆/背景/环境/历史/本轮）。
+
+    注：**发言协议不是段**——它必须贴在最后一条 user 消息末尾才生效
+    （`assembler.apply_speech_protocol`，含对照实验结论）。
+    """
     return [
         Section("persona", 10, build_persona, source="builtin"),
         # 行为规则紧跟人格：人格讲"我是谁"，行为段讲"在这个群里怎么说话"，
@@ -288,11 +270,6 @@ def default_sections() -> list[Section]:
         # 能力段（emoji_hint / schedule / proactive / message_meta）由对应插件注册；
         # 框架只保留人设 + 行为规则 + 材料通道 + 历史 + 本轮消息。
         Section("reply_rules", 54, build_participation, source="builtin"),
-        # 发言协议：仍是 system 消息（不再贴 user 消息尾巴），但要放在**人设之后、
-        # 对话之前**——L1 的第一条 system 离对话太远，实测压不住人设里
-        # "输出纯文本段落即可"这类条款（旧对照实验的结论）。这里归 L3 钩子注入层，
-        # order 115 让它排在 group_log(100) 之后，成为系统指令的最后一段。
-        Section("speech_protocol", 115, build_speech_protocol, source="builtin"),
         Section("message_meta", 60, build_message_meta, source="builtin"),
         Section("skills", 70, build_skills, source="builtin"),
         Section("memory", 80, build_memory, source="builtin"),

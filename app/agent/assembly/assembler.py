@@ -396,10 +396,10 @@ class PromptAssembler:
         return _build_legacy_blocks(req, self.blocks)
 
     def build(self, req: PromptRequest) -> list[dict]:
-        """装配 messages：解析段 → 逐段生成 → 归位 → 按模态清洗（唯一兜底）。
+        """装配 messages：解析段 → 逐段生成 → 归位 → 按模态清洗（唯一兜底）→ 贴发言协议。
 
-        发言协议不再贴在本轮 user 消息末尾：它已是内置 L1 段
-        （`builtin_sections.build_speech_protocol`，order 56），随系统提示词一起下发。
+        发言协议**贴在最后一条 user 消息末尾**（不是 system 段）：对照实验证明这是
+        唯一能稳定让模型调用 ``send_message`` 的位置，见 `apply_speech_protocol`。
 
         顺带把 ``describe()`` 的行（每段的层/角色/字数）挂到 ``ctx.state["assembly_blocks"]``：
         ``[Prompt]`` 日志用它在全文之前打一行"这条 prompt 由哪几层组成"，排障不必数段。
@@ -409,7 +409,7 @@ class PromptAssembler:
         messages = place_images(messages, req)
         final = sanitize(messages, req)
         self._remember_blocks(req, built, final)
-        return final
+        return apply_speech_protocol(final, req)
 
     @staticmethod
     def _remember_blocks(req: PromptRequest, built: BuiltBlocks, final: list[dict]) -> None:
@@ -447,14 +447,52 @@ def flatten(built: BuiltBlocks) -> list[dict]:
 
 
 def apply_speech_protocol(messages: list[dict], req: PromptRequest) -> list[dict]:
-    """【已废弃】发言协议不再贴在本轮 user 消息末尾。
+    """把「发言协议」贴到**本轮 user 消息末尾**（最后一条 user）。
 
-    历史上这段贴 user 侧确实压住过"人设里写着输出纯文本"的冲突指令（见旧注释的
-    对照实验），但代价是：每轮 user 消息都被塞进一段系统事实、历史里读起来像用户
-    自己说的、同一事实还会在下一轮的历史渲染里再出现一次。2026-11-01 起协议改为内置
-    L1 段（`builtin_sections.build_speech_protocol`，order 56），本函数保留为
-    no-op 兼容壳，仅供仍按旧名调用的第三方代码/测试使用。
+    ## 为什么必须贴在 user 侧（实测结论，别再搬回 system）
+
+    同一份真实请求（27 条 messages + 162 个工具）的对照实验：
+
+    - 协议只写在 system 行为段里 → 模型照旧输出纯文本 → **整轮静默**；
+    - 协议作为尾部 system 消息追加（"必须调用"）→ 仍然静默；
+    - 协议贴在 user 消息里（同一条尾部或另起一条）→ 稳定调用 ``send_message``。
+
+    根因不是"模型不会用工具"，而是**两条相反指令打架**：人设块里写着
+    "输出：以第一人称回答…输出纯文本段落即可"，而行为段说"文本不会发出去"。
+    system 层里模型跟着更近、更具体的那条走；把关于本程序的事实
+    （"你输出的文本不会发出去"）贴到消息旁边，才压得住人设里的输出格式条款。
+
+    > 2026-11-01 曾按"提示词应归到 system"把它搬进 L1/L3 段，线上实测**整轮不发言**
+    > （模型只输出正文、不调 send_message），现已迁回此处。
+
+    副作用可控：只改最后一条 user 消息，历史前缀（system + 之前的对话）逐字不变，
+    前缀缓存不受影响。
+
+    另外这条**只在发言通道生效时**才贴（``speech.speech_via_tool`` 或本轮已过参与度门）：
+    文本即发言的档位贴这句就是自相矛盾的假话。
     """
+    from app.agent.delivery.speech import SPEECH_PROTOCOL, speech_via_tool
+
+    config = getattr(req, "config", None)
+    forced = False
+    ctx = getattr(req, "ctx", None)
+    if ctx is not None:
+        state = getattr(ctx, "state", None) or {}
+        forced = bool(state.get("participation_gate"))
+    if not (forced or speech_via_tool(config)):
+        return messages
+
+    for msg in reversed(messages):
+        if not isinstance(msg, dict) or msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            msg["content"] = f"{content}\n\n{SPEECH_PROTOCOL}"
+        elif isinstance(content, list):
+            content.append({"type": "text", "text": SPEECH_PROTOCOL})
+        else:
+            continue
+        return messages
     return messages
 
 
