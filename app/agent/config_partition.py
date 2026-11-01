@@ -186,6 +186,19 @@ PANEL_GROUPS: tuple[UIGroup, ...] = (
     # 「回复开关」卡：总开关（enabled）是独立存储字段，由前端定制卡片渲染
     UIGroup("panel_reply", "回复开关", ("group_enable", "private_enable")),
     UIGroup("panel_trigger", "触发方式", ("trigger_at", "trigger_keyword")),
+    # 回复模式（2026-11-01 新增）：编辑入口是 AI 面板「触发方式」卡的模式下拉 +
+    # 参与度/冷却/预算输入框。模式本身是"账号级默认"，群级可覆盖（见 SCOPE_OVERRIDABLE）。
+    UIGroup(
+        "panel_reply_mode",
+        "回复模式",
+        (
+            "reply_mode",
+            "participation_level",
+            "participation_max_requests",
+            "participation_max_tokens",
+            "participation_cooldown_seconds",
+        ),
+    ),
     # 人格提示词只在「角色预设」里改；这里只选预设/提示词方案
     UIGroup("panel_persona", "人格与模型", ("prompt_preset", "persona_preset_id")),
 )
@@ -202,20 +215,32 @@ REPLY_GROUPS: tuple[UIGroup, ...] = (
     UIGroup("reply_tool_approval", "高危工具审批", ("tool_approval_enable",)),
 )
 
+#: 实验性入口「高级选项」页（页面外工作台，非本体 3 页）
+#:
+#: 现状只有一个开关：消息组装方式。它不算"模块策略"（框架内建），也不属于任何
+#: 一页本体配置，所以单列一个 surface，保证 `fate_of()` 有归宿、`SCHEMA` 能包含它
+#: （否则保存路径会把该键静默丢弃，见 app/webui/api/agent.py）。
+ADVANCED_GROUPS: tuple[UIGroup, ...] = (
+    UIGroup("advanced_assembly", "消息组装", ("structured_assembly",)),
+)
+
 #: 字段面 id → 分组（供 fate_of / ui_group_of 与前端清单生成使用）
 SURFACE_GROUPS: dict[str, tuple[UIGroup, ...]] = {
     "ai_panel": PANEL_GROUPS,
     "reply": REPLY_GROUPS,
+    "advanced_options": ADVANCED_GROUPS,
 }
 
 PANEL_KEYS: tuple[str, ...] = tuple(f for group in PANEL_GROUPS for f in group.fields)
 REPLY_KEYS: tuple[str, ...] = tuple(f for group in REPLY_GROUPS for f in group.fields)
+ADVANCED_KEYS: tuple[str, ...] = tuple(f for group in ADVANCED_GROUPS for f in group.fields)
 
-#: 本体保留的全部键（由「面板 + 配置页 + 回复与权限」派生，避免两处漂移）
+#: 本体保留的全部键（由「面板 + 配置页 + 回复与权限 + 高级选项」派生，避免两处漂移）
 CORE_KEYS: tuple[str, ...] = (
     PANEL_KEYS
     + tuple(f for page in UI_PAGES for f in page.fields)
     + REPLY_KEYS
+    + ADVANCED_KEYS
 )
 
 # ==================== 2. 迁移为模块（7 个 / 110 键）====================
@@ -360,6 +385,8 @@ DELETED_KEYS: tuple[str, ...] = (
     "clean_output_parentheses",
     "prompt_dump_enable",
     "prompt_dump_max_entries",
+    # 多行消息块删除后无消费方（结构化组装用 segments 自行渲染"发送了…"）
+    "include_sent",
     # 循环安全阀：改为框架内硬编码安全默认（5 轮 / 1 次空回复重试 / 1 次收敛）
     # —— 它们不是"功能开关"，暴露给用户只会让用户把钱烧在不理解的地方
     "max_tool_rounds",

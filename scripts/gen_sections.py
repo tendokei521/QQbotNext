@@ -66,10 +66,13 @@ GROUP_ICONS = {
     # 页面外工作台（AI 对话面板 / 回复与权限）
     "panel_reply": "mdi-toggle-switch-outline",
     "panel_trigger": "mdi-at",
+    "panel_reply_mode": "mdi-forum-outline",
     "panel_persona": "mdi-account-voice",
     "reply_permission": "mdi-account-key-outline",
     "reply_roster": "mdi-account-star-outline",
     "reply_tool_approval": "mdi-shield-alert-outline",
+    # 实验性入口「高级选项」
+    "advanced_assembly": "mdi-message-text-outline",
 }
 
 #: 由**定制卡片**渲染、不在 schema 表单里重复出现的字段（展示层决定）。

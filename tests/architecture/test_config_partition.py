@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 from app.agent.config_partition import (
+    ADVANCED_KEYS,
     CORE_KEYS,
     DELETED_KEYS,
     MODULE_KEYS,
@@ -81,6 +82,7 @@ def test_core_keys_are_derived_from_pages_and_surfaces():
         PANEL_KEYS
         + tuple(f for page in UI_PAGES for f in page.fields)
         + REPLY_KEYS
+        + ADVANCED_KEYS
     )
     assert CORE_KEYS == expected
 
