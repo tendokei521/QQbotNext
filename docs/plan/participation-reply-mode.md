@@ -15,7 +15,7 @@
 | **P0-3** | **冷却顺序错、@/回复被误伤** | `pipeline.py:482-491`：先 `_cooldown_ok()` 再 `gate()`；`_cooldown_ok()` 在**通过检查的那一刻**就写 `last[key]=now`（`participation.py:234`） | 被门拒绝的消息也消耗冷却；随后 @/回复到达时正处冷却 → 该回的不回，且冷却计时被无关消息不断刷新 |
 | **P0-4** | **沉默语义不成立** | `delivery/speech.py:314-320` 在参与度模式强制 `speech_via_tool=True`，但发言通道依赖 `llm_output` 模块接管 `runtime.output`；`llm_output` 当前**禁用中** → `output.py:304-317` 回退 `BlockingOutput/StreamOutput`（文本即回复） | 每条通过门的消息都会**被直接回一条**，模型无法"沉默"；`prompt_prep.py:276-284` 只打一条 `warning`（每 bot 一次），随后"按文本即发言处理" |
 | **P0-5** | **判定链自相矛盾** | 通过参与度门后仍走 `pipeline.py:518-529` 的 `trigger_check(triggered, mode=config.get("trigger_mode"), probability=...)`；`submit()` 的 `_would_trigger_llm()`（`pipeline.py:329-366`）也仍用旧 `_trigger_decision()` | 通过参与度门的消息在 UI/日志里被记成旧模式的判定；`high/very_high` 下多条消息并发时**不抬高代际**（不打断），可能一轮未说完又起一轮 |
-| **P0-6** | **配置未入体系** | `reply_mode` / `participation_level` / `participation_max_requests` / `participation_max_tokens` / `participation_cooldown_seconds` / `structured_assembly` 六个键只在 `config_schema.py:246-277` 定义，**不在** `config_partition.py` 的 `PANEL_GROUPS / UI_PAGES / MODULE_KEYS / DELETED_KEYS` 任一归宿 → `tests/architecture/test_config_partition.py:91-96`（孤键）会红；且 `SCHEMA` 在 `config_schema.py:1260` 被过滤成 `CORE_KEYS`，这 6 键实际被当作"已迁移/废弃" | 配置合法性无人守；前端 `AiPanelPage.vue:414-491` 能存但后端无白名单校验；契约测试红 |
+| **P0-6** | **配置未入体系** | `reply_mode` / `participation_level` / `participation_max_requests` / `participation_max_tokens` / `participation_cooldown_seconds` / `structured_assembly` / `include_sent` **七个键**只在 `config_schema.py:246-277, 468` 定义，**不在** `config_partition.py` 的 `PANEL_GROUPS / UI_PAGES / MODULE_KEYS / DELETED_KEYS` 任一归宿 → `tests/architecture/test_config_partition.py:91-96`（孤键）红（实测 7 键无归宿）；且 `SCHEMA` 在 `config_schema.py:1260` 被过滤成 `CORE_KEYS`，这 7 键实际被当作"已迁移/废弃" | 配置合法性无人守；前端 `AiPanelPage.vue:414-491` 能存但后端无白名单校验；契约测试红 |
 
 补充（非阻塞但需在同轮处理）：
 
@@ -23,6 +23,21 @@
 - `participation.py:113-130` `participation_section` 定义**两次**，后者覆盖前者（当前无引用，属死代码）。
 - 私聊没有参与度分支（全仓 grep 无 `message_private` 侧判定）→ 新版只影响群聊。
 - 全量写入后 `MAX_HISTORY_MESSAGES=200`（`session/manager.py:434`）滚动加快；图片逐条落盘未评估。
+- **`app/agent/tools/state.py:360` 引用了已删除的 `search` 变量**（web_search 系统工具删除时的残留），异常被 `except` 吞掉 → `resolve_all_tool_states()` 跳过后续登记，**`recall_tool_result` 不在工具清单里**（工具管理页看不到）。与参与度无关但会干扰验收，排进 S0-1。
+
+### 0.1 测试基线（实测 2026-11-01 20:2x，`venv\Scripts\python.exe -m pytest -q`）
+
+| 命令 | 结果 |
+|---|---|
+| `pytest -q` | `1 warning, 9 errors in 2.28s` → **`Interrupted: 9 errors during collection`（0 个用例执行）** |
+| `pytest -q --continue-on-collection-errors` | **`56 failed, 2693 passed, 19 skipped, 37 errors in 109s`** |
+| `python -m compileall -q app` | exit 0，无语法错误 |
+
+- 37 errors = **9 个收集错误**（模块 import 即挂）+ **28 个 setup 错误**（`tests/agent/context/test_llm_context_expand.py` 的 autouse fixture）。
+- 这 9 个收集失败文件里共有 **135 个用例从未被收集**；加 28 个 setup error ≈ **163 个用例根本没跑** → "56 failed"是低估。
+- 根因分组（改造遗留，**不是**新装配架构的副作用）：llm_prompt 已删(4 文件) / llm_context 旧 focus·referent·context_tools 已删(5 文件) / history_search 已删(1) / get_chat_history 已删(18 例) / 提示词文案与历史行格式期望过期(8) / 框架仍要求 llm_prompt 存在(9) / 配置分区孤键(3) / 文案与架构卫生(6) / 测试桩漂移(3)。
+- **结论：在 S0 把收集错误清零之前，任何"跑全量 pytest 判断回归"都是假信号。** 参与度改造的验证只能靠新增的契约测试（§4）+ 定向用例。
+
 
 ---
 
@@ -31,11 +46,11 @@
 ```
 入站(AgentNode) ── 场景/权限/免打扰 ──► LlmPipeline._run
                                            │
-                         ① Observer（participation 模式，先于一切本地门）
+                         ① 场景/免打扰/用户例外判定（与 legacy 同序，先于一切写入）
+                                           │
+                         ② Observer（participation 模式）
                             · 无条件写会话：不看冷却、不看触发、不看预算
                             · 返回 Observed(ok/reason)；只有 ok 才置 user_recorded
-                                           │
-                         ② 场景/免打扰/用户例外判定（与 legacy 同序）
                                            │
                          ③ Decider（唯一规则来源 app/agent/reply/rules.py）
                             · gate(level, event) → allow/deny + reason + checks
@@ -50,6 +65,21 @@
                             · 未调用 send_message = 沉默；被 @/回复必须有发言
 ```
 
+### 1.1 判定顺序契约（P0-2 的核心，别做漂移）
+
+现状是「触发/参与度」（`pipeline.py:457-540`）**早于**场景/免打扰/用户例外（`pipeline.py:542-611`），
+于是"群已禁用"也会写历史、消耗冷却与预算。重排后**必须**是：
+
+| 顺序 | 阶段 | 失败时 |
+|---|---|---|
+| 1 | `#llm` 指令 | 走命令分支 |
+| 2 | 场景：账号启用 / 场所 / 权限 / 免打扰 / 用户例外 | `return`，**不写历史、不消耗冷却/预算** |
+| 3 | **Observer**（仅 `participation`）：写会话历史 | 失败只记 warning，不置 `user_recorded` |
+| 4 | 触发判定（legacy）或 **Decider**（participation：gate → 冷却 → 预算） | `log_skip` + `return`（消息已入库） |
+| 5 | api_key / debounce / pre_request / 会话锁 / LLM | 同现状 |
+
+日志语义（避免"为什么不回"更难查）：**场景拒绝 > 触发拒绝 > 无 API Key**；因此 api_key 检查留在门之后、debounce 之前。
+
 三条硬契约（写进测试）：
 
 1. **观察先于门**：`participation` 模式下，通过入站（账号启用/场景/权限）的每条群消息都进会话历史；门/冷却/预算只决定"要不要请求"。
@@ -62,24 +92,40 @@
 
 状态：`[ ]` 未开始 / `[~]` 进行中 / `[x]` 已完成（补 hash） / `[!]` 阻塞
 
+### S0 基线归零（前置：不然后面所有"跑了什么"都不可信）
+
+上一轮删模块时没有同提交删掉对应测试（违反 AGENTS.md 硬性底线 #2），于是 9 个文件在**收集阶段**就挂。
+S0 全部是"删/改测试 + 1 行生产修复"，不改功能语义：
+
+| 编号 | 提交信息 | 改动 | 验收 |
+|---|---|---|---|
+| S0-1 | `fix(tools): remove stale search reference in tool state` | `app/agent/tools/state.py:357-366` 删掉 360-362 的 `search` 残留 | `tests/agent/tools/test_recall_tool.py` 转绿；工具清单能列出 `recall_tool_result` |
+| S0-2 | `test: drop llm_prompt tests for the removed module` | 删 `tests/plugins/test_llm_prompt.py`；`tests/agent/assembly/test_llm_user_format.py`、`tests/agent/session/test_llm_history_h5.py`、`tests/agent/session/test_llm_history_unified.py` 三个文件改为断言**框架内置组装**（不再 import llm_prompt） | 4 个 collection error 消失 |
+| S0-3 | `test: drop llm_context focus/referent tests for the rewritten module` | `tests/agent/context/test_llm_context_tools.py`、`test_llm_referent.py`、`tests/agent/test_llm_focus.py`、`tests/agent/session/test_llm_history_image_expand.py`、`tests/agent/context/test_llm_context_expand.py`（28 个 setup error 的来源）按新 `get_context` 契约重写或删除 | 收集/装配错误清零；`get_context` 保留契约测试 |
+| S0-4 | `test: drop history_search and get_chat_history tests` | `tests/agent/tools/test_history_search.py` 删除；`tests/agent/session/test_llm_session_tools.py`、`tests/agent/test_llm_initiative_tools.py` 去掉对已删工具的断言 | 18 例恢复或删除 |
+| S0-5 | `test: align module/capability tests with built-in assembly` | `test_builtin_module_pages`、`test_modules_end_to_end`、`test_module_config_integration`、`test_single_service_declaration`、`test_framework_capabilities`、`test_capability_prompt_sections`、`test_llm_prompt_proactive`、`test_llm_assembly_paths`、`test_group_log_integration`、`test_prompt_preset_service`、`test_persona_rules` | 失败仅剩已知项（文案/分区） |
+| S0-6 | `docs(agent): document message_assembly and register its sections` | 新增 `app/agent/message_assembly/README.md`；`app/agent/assembly/layers.py:66` 的 `SECTION_LAYERS` 登记 `reply_rules` | `test_architecture_layout` / `test_prompt_layers` 绿 |
+
+> S0 结束时目标：`pytest -q` **无 collection / setup error**，失败集合只剩"参与度相关 + 文案"。
+
 ### P0 止血（必须全部完成才可开灰度）
 
 | 编号 | 提交信息 | 改动 | 验收 |
 |---|---|---|---|
 | P0-1 | `fix(reply): make participation keys visible to the group gate` | `domain/dialogue_policy.py` 白名单加 `reply_mode`/`participation_*`；`pipeline.py` 用生效配置读模式 | 单测：`_effective_config` 含 `reply_mode`；手测日志出现 `reply_mode=participation` |
-| P0-2 | `refactor(reply): add reply observer before any local gate` | 新增 `app/agent/reply/observer.py`；`pipeline.py` 顶部（`is_command` 之后、群/私聊分支之前）统一观察；删除分支内观察与误置的 `user_recorded`；`turn_input.get_or_create_session(..., observe=True)` 绕开冷却 | 单测：冷却期消息仍写入；`observe` 失败不置 `user_recorded`；禁用场景不写入 |
+| P0-2 | `refactor(reply): add reply observer before any local gate` | 新增 `app/agent/reply/observer.py`；把「触发/参与度」块整体后移到场景判定之后（§1.1 顺序），块内先观察再判定；删除分支内观察与误置的 `user_recorded`；`turn_input.get_or_create_session(..., observe=True)` 绕开冷却 | 单测：冷却期消息仍写入；`observe` 失败不置 `user_recorded`；禁用群不写入历史；日志顺序正确 |
 | P0-3 | `fix(reply): gate before cooldown and exempt at/reply` | `_cooldown_ok` 改为"仅在允许请求后计时"；@/回复豁免冷却 | 单测：门拒绝不消耗冷却；@ 不被冷却挡住 |
 | P0-4 | `fix(reply): fail loud when the speech channel is missing` | `participation` 且 `runtime.output` 非发言通道 → `log_skip("participation_needs_speech", level=error)` 并 return，**不进入 LLM**；前端模式卡给红字提示 | 单测：无 speech 通道 → 0 次请求 + error 日志；有通道 → 正常 |
 | P0-5 | `refactor(reply): single reply policy table` | 新增 `app/agent/reply/rules.py`（`ReplyPolicy`：mode/level/cooldown/budget/exempt）；`participation.py` 删除或降为兼容壳；`reply_rules_section` 读生效配置 + `trigger_mode_from()` | 单测：五档 gate 表驱动；文案两种模式；群级覆盖生效 |
 | P0-6 | `fix(pipeline): record participation decisions with the new gate` | 通过参与度门后写 `Decision(kind=respond, reason=gate.reason)`，不再套 `trigger_check` 旧模式；`_would_trigger_llm()` 复用同一 gate 谓词 | 单测：判定链记录 `participation` 来源；`high` 下新消息抬高代际 |
 | P0-7 | `fix(usage): charge participation budget with real tokens` | `usage/metered.py::_record` 成功后回填 `Budget.charge(tokens)`（按 bot_id 存模块级 Budget 表）；`budget.record(0)` 删除 | 单测：一次请求后 token 预算减少；预算耗尽只记录不请求 |
-| P0-8 | `refactor(config): partition reply-mode keys` | `config_partition.py` 归类 6 键（`reply_mode`/`participation_*` → `PANEL_GROUPS` 新增组；`structured_assembly` → 新 surface `advanced_options`）；跑 `scripts/gen_sections.py` 重新生成 JSON；`SCOPE_OVERRIDABLE` 加键（按群灰度用） | `tests/architecture/test_config_partition.py` 全绿；`sections.json`/`ai-panel.json` 逐字节一致 |
+| P0-8 | `refactor(config): partition reply-mode keys` | `config_partition.py` 归类 7 键（`reply_mode`/`participation_*` → `PANEL_GROUPS` 新增组；`structured_assembly`/`include_sent` → `advanced_options` surface 或 `DELETED_KEYS`）；跑 `scripts/gen_sections.py` 重新生成 JSON；`SCOPE_OVERRIDABLE` 加键（按群灰度用）；顺带把 `participation_level` 的说明压到 **≤40 汉字**（`tests/architecture/test_ui_copy.py:135`） | `tests/architecture/test_config_partition.py` 全绿；`sections.json`/`ai-panel.json` 逐字节一致；`test_ui_copy` 绿 |
 
 ### P1 补齐（灰度期做，可与 P0 并行验证）
 
 | 编号 | 提交信息 | 说明 |
 |---|---|---|
-| P1-1 | `test(reply): contract tests for observe/gate/budget` | 四支契约测试（见 §4），并把 `tests/plugins/test_llm_prompt.py` 随已删模块一起清理 |
+| P1-1 | `test(reply): contract tests for observe/gate/budget` | 四支契约测试（见 §4）；S0 已清掉失效测试，这里只加新的 |
 | P1-2 | `feat(dashboard): expose participation token budget` | AI 面板触发卡补 `participation_max_tokens`；`AdvancedOptionsPage.vue:58` 标题「提示词组装」→「高级选项」 |
 | P1-3 | `build(dashboard): rebuild dist for reply-mode changes` | 单独提交 dist（与 src 分开） |
 | P1-4 | `fix(reply): explicit group_enable check before the gate` | 门前显式判场景，避免"群关着却消耗冷却/预算" |
@@ -106,14 +152,14 @@
 
 | 编号 | 文件 | 具体位置 |
 |---|---|---|
-| P0-1 | `app/domain/dialogue_policy.py` | `SCOPE_OVERRIDABLE["agent"]`（:45-57）加 6 键；`app/agent/loop/pipeline.py:459-500` 改读生效配置 |
+| P0-1 | `app/domain/dialogue_policy.py` | `SCOPE_OVERRIDABLE["agent"]`（:45-57）加 6 键（不改现有 9 键，`test_overridable_whitelist_is_explicit` 只断成员，不会红）；`app/agent/loop/pipeline.py:459-500` 改读生效配置 |
 | P0-2 | 新增 `app/agent/reply/observer.py`；`app/agent/loop/pipeline.py:423-541`；`app/agent/loop/turn_input.py:163-181`；`app/agent/loop/prompt_prep.py:141-144` | — |
 | P0-3 | `app/agent/participation.py:220-235`、`238-257` | 冷却改为 `check()` + `mark()` 两步；gate 先跑 |
 | P0-4 | `app/agent/loop/pipeline.py`（门前）/`app/agent/delivery/output.py:241-317`/`app/agent/delivery/speech.py:314-320` | 能力探测函数放 `delivery/output.py`，pipeline 只消费 |
 | P0-5 | 新增 `app/agent/reply/rules.py`；`app/agent/participation.py`；`app/agent/assembly/builtin_sections.py:149-151`、`:268` | 段构建改调 `reply.rules.reply_rules_section` |
 | P0-6 | `app/agent/loop/pipeline.py:518-529`、`:329-366` | — |
 | P0-7 | `app/agent/usage/metered.py:104-133`；`app/agent/participation.py:136-170` | Budget 表从 runtime 挂载改为模块级 `bot_id → Budget` |
-| P0-8 | `app/agent/config_partition.py:185-219`；`app/agent/config_schema.py:246-277`；`scripts/gen_sections.py`；`app/webui/dashboard/src/agent/{sections,ai-panel}.json` | — |
+| P0-8 | `app/agent/config_partition.py:185-219`；`app/agent/config_schema.py:246-277, 468`；`scripts/gen_sections.py`；`app/webui/dashboard/src/agent/{sections,ai-panel}.json` | 7 键须**恰好一个**归宿 |
 
 ---
 
@@ -135,12 +181,13 @@
    - `participation` + 有通道 → 正常进入。
 5. 架构：`tests/architecture/test_config_partition.py` 必须绿；`sections.json` 契约（`tests/agent/test_agent_section_contract.py`）必须绿。
 
-> 按 AGENTS.md：删/改模块时**同一提交**删掉对应测试（`tests/plugins/test_llm_prompt.py` 属已删模块的遗留）。
+> 按 AGENTS.md：删/改模块时**同一提交**删掉对应测试——上一轮删 llm_prompt / llm_context 旧实现时没做到，S0 就是在补这笔账。
 
 ---
 
 ## 5. 上线前置（人肉清单，跑完再开灰度）
 
+- [ ] `pytest -q` 无 collection / setup error（S0 完成）。
 - [ ] `llm_output` 模块**启用**，输出形态 = 发言通道（否则 P0-4 会一直拒绝请求，属于"设计如此"）。
 - [ ] `llm_context` 模块启用（`get_context` 工具；否则模型无法按 id 回看被折叠的消息）。
 - [ ] `participation_max_tokens` 从 10,000,000 调到真实预算（当前默认等于"不限"）。
