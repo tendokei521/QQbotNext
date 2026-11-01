@@ -447,6 +447,7 @@ class SessionManager:
         group_id: Any = None,
         is_private: bool = False,
         meta_lines: list[str] | None = None,
+        reasoning: str = "",
     ):
         """追加一条历史。
 
@@ -483,6 +484,10 @@ class SessionManager:
                 entry["nickname"] = str(nickname)
             if message_id not in (None, ""):
                 entry["message_id"] = str(message_id)
+            # 思考内容（可溯源）：只给 assistant，且截断后存——它不进模型上下文，
+            # 仅供会话数据页"点开看这一句是怎么想出来的"。
+            if reasoning:
+                entry["reasoning"] = str(reasoning)[:4000]
             history = session.data.history
             # 稳定 entry_id：事件日志里"这条消息"的身份。跟着 entry 一起存，
             # WebUI 按 id 编辑/删除时就能精确折叠到它（老数据没有，用 task:idx 兜底）。
@@ -582,9 +587,30 @@ class SessionManager:
             return True
         return False
 
+    def set_last_assistant_reasoning(self, session_id: str, reasoning: str) -> bool:
+        """给"最近一条 assistant 历史"补思考内容（流式分片 upsert 后调用）。
+
+        思考只用于会话数据页溯源：不进模型上下文、不参与渲染，因此它是"对已有发言的
+        补充事实"，不是一条新消息。
+        """
+        text = str(reasoning or "").strip()
+        if not text:
+            return False
+        session = self.get_session(session_id)
+        if not session or session.data is None:
+            return False
+        for entry in reversed(session.data.history):
+            if entry.get("role") != "assistant":
+                continue
+            if entry.get("reasoning"):
+                return False
+            entry["reasoning"] = text[:4000]
+            session.touch()
+            return True
+        return False
+
     def _log_event(self, session, type_: str, **kwargs) -> None:
         """把一条历史事件追加进事件日志（P4 单一真相）。
-
         - 存储层没有 `append_event`（测试/旧 JSON 替身）时静默跳过，行为与改造前一致；
         - 任何异常只留痕：记日志失败绝不能把一条回复搞没。
         """

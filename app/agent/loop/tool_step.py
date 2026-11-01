@@ -101,6 +101,8 @@ class RoundSummary:
     images_appended: bool = False
     finish_reason: str = ""
     reasoning_chars: int = 0
+    #: 本轮思考文本（截断）：只用于会话数据页溯源，**不进模型上下文**
+    reasoning_text: str = ""
     #: 本轮模型要求调用的工具数（0 = 收尾轮）
     tool_calls: int = 0
     error: str = ""
@@ -145,6 +147,8 @@ class StepResult:
     finish_reason: str = ""
     error: str = ""
     reasoning_chars: int = 0
+    #: 本次步骤的思考文本（截断）：**只用于会话数据页溯源**，不参与任何提示词
+    reasoning_text: str = ""
     #: 最后一轮的思考字符数（"思考吃满预算"的收敛判断只看它，不看累计值）
     last_round_reasoning: int = 0
     rounds: int = 0
@@ -315,8 +319,12 @@ async def _drive_stream_rounds(
             elif event.type == "tool_call":
                 accumulate_tool_call(tool_calls, event.tool_call or {})
             elif event.type == "reasoning":
-                # 思考只计数、绝不产出：调用方用它与"真空回复"区分
-                reasoning_chars += len(event.text or "")
+                # 思考只计数、绝不产出：调用方用它与"真空回复"区分。
+                # 文本另存一份（截断）给会话数据页溯源用——绝不回灌模型。
+                text = event.text or ""
+                reasoning_chars += len(text)
+                if text and len(result.reasoning_text) < 4000:
+                    result.reasoning_text += text
             elif event.type == "error":
                 round_error = event.text or "流式请求失败"
                 break

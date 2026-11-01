@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AxiosError } from 'axios'
 import http, { errorMessage, token } from '@/api/http'
@@ -51,6 +51,8 @@ interface HistoryMessage {
   message_id?: string
   time?: number
   images?: HistoryImage[]
+  /** 本轮思考内容（仅 assistant，可能为空）：会话数据页可展开溯源 */
+  reasoning?: string
 }
 
 interface MediaStats {
@@ -257,6 +259,13 @@ function roleLabel(role: string): string {
   if (role === 'assistant') return '助手'
   if (role === 'system') return '系统'
   return role
+}
+
+/** 思考内容展开状态（按消息下标；默认收起，避免长思考把列表撑爆） */
+const reasoningOpen = reactive<Record<number, boolean>>({})
+
+function toggleReasoning(index: number) {
+  reasoningOpen[index] = !reasoningOpen[index]
 }
 
 function roleColor(role: string): string {
@@ -1244,6 +1253,21 @@ onMounted(() => {
                   </div>
                 </div>
                 <div class="message-content">{{ msg.content }}</div>
+                <template v-if="msg.role === 'assistant' && msg.reasoning">
+                  <button
+                    type="button"
+                    class="reasoning-toggle"
+                    :aria-expanded="!!reasoningOpen[index]"
+                    @click="toggleReasoning(index)"
+                  >
+                    <v-icon
+                      :icon="reasoningOpen[index] ? 'mdi-chevron-down' : 'mdi-chevron-right'"
+                      size="16"
+                    />
+                    <span class="text-caption">思考过程</span>
+                  </button>
+                  <div v-if="reasoningOpen[index]" class="reasoning-body">{{ msg.reasoning }}</div>
+                </template>
               </div>
               <div v-if="!conversation.messages.length" class="text-caption text-center pa-6">这个对话线程还没有消息</div>
             </div>
@@ -1450,6 +1474,36 @@ onMounted(() => {
 }
 
 .message-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 思考内容：默认收起，点小三角展开（只给 assistant 且该条有 reasoning） */
+.reasoning-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: rgba(var(--v-theme-on-surface), 0.62);
+  cursor: pointer;
+}
+
+.reasoning-toggle:hover {
+  color: rgba(var(--v-theme-on-surface), 0.9);
+}
+
+.reasoning-body {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-left: 3px solid rgba(var(--v-theme-on-surface), 0.18);
+  border-radius: 2px;
+  background: rgba(var(--v-theme-on-surface), 0.04);
+  color: rgba(var(--v-theme-on-surface), 0.72);
+  font-size: 12px;
+  line-height: 1.65;
   white-space: pre-wrap;
   word-break: break-word;
 }

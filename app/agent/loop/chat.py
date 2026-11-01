@@ -567,9 +567,19 @@ async def stream_response(runtime, event, ctx=None):
         # 收尾把正文定稿到**同一条**历史（分片发送期间已 upsert 过）。stub/旧
         # session_mgr 没有 upsert 时才退回 add_message，保证行为不回退。
         _cleaned = _clean_output_for_history(meta_cfg, full_text) if full_text.strip() else ""
+        # 本轮思考（截断）随这条 assistant 消息一起存：会话数据页可展开溯源。
+        # 只写一次、只给"这条正文"，不进模型上下文、也不参与渲染。
+        _reasoning = str(getattr(step, "reasoning_text", "") or "").strip()
         if _cleaned:
             if not _write_partial_history(_cleaned):
-                session_mgr.add_message(session_id, "assistant", _cleaned)
+                session_mgr.add_message(
+                    session_id, "assistant", _cleaned, reasoning=_reasoning
+                )
+            elif _reasoning:
+                # 流式分片已 upsert 过正文：补一次思考，别让这条历史缺溯源
+                setter = getattr(session_mgr, "set_last_assistant_reasoning", None)
+                if callable(setter):
+                    setter(session_id, _reasoning)
         if hasattr(session_mgr, "end_streaming_assistant"):
             session_mgr.end_streaming_assistant(session_id)
         if _cleaned and not is_private:
