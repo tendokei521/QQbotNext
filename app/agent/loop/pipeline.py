@@ -476,6 +476,22 @@ class LlmPipeline:
         account_id = getattr(self.runtime, "bot_id", "?")
         level = str(config.get("participation_level", "low") or "low")
 
+        # ⓪ 能力检查（fail-loud）：没有发言通道就没有"沉默"这个状态——
+        # 输出策略是阻塞/纯流式时，模型写的正文会被当回复直接发出去。
+        # 与其静默降级，不如拒绝本轮并让用户看得见原因。
+        from app.agent.capabilities import OUTPUT_SPEECH, output_capability
+
+        capability = output_capability(self.runtime, None)
+        if capability.kind != OUTPUT_SPEECH:
+            log_skip(
+                account_id,
+                "participation_needs_speech",
+                f"当前输出形态={capability.kind} · source={capability.source}",
+                hint="参与度模式需要「发言通道」输出形态：启用 llm_output 模块并把输出形态切到发言通道",
+                level="error",
+            )
+            return False
+
         # ① 成本门：只回答"值不值得花一次请求"，发言与否由提示词 + 模型决定
         verdict = gate(self.runtime, ctx.event, level)
         if not verdict.allowed:
