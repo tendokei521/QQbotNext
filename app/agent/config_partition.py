@@ -229,13 +229,8 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
         # 提示词注入（2）
         "behavior_rules_override",
         "participation",
-        # 消息组装方式（6）
-        "user_message_format",
-        "prompt_time_position",
-        "sender_label",
-        "quote_and_at",
-        "include_sent",
-        "auto_disambiguation",
+        # 消息组装方式（1 个开关）
+        "structured_assembly",
     ),
     # 触发与调度：主动消息 + 定时任务（同一条"自己发起一轮"的路径）
     "llm_trigger": (
@@ -347,6 +342,8 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
 DELETED_KEYS: tuple[str, ...] = (
     # 2026-11-01 llm_prompt 精简：12 个元信息开关收敛进 sender_label / quote_and_at /
     # prompt_time_position / auto_disambiguation；表情活跃度、括号清洗、请求落盘三项功能删除
+    "user_message_format",
+    "prompt_time_position",
     "include_time",
     "include_private_qq",
     "include_sender",

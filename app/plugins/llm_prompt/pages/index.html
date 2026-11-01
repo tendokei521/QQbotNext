@@ -10,11 +10,9 @@
 <div id="app"></div>
 <script src="/api/plugin-sdk.js"></script>
 <script>
-  const multiLine = (cfg) => cfg.user_message_format === 'multi_line'
-
   QQBOT.form({
     title: '提示词组装',
-    description: '决定模型看到什么：行为规则、本轮消息怎么标注。改动自动保存。',
+    description: '行为规则怎么注入，本轮消息用哪种组装方式。改动自动保存。',
     groups: [
       {
         title: '提示词注入',
@@ -34,41 +32,10 @@
       },
       {
         title: '消息组装方式',
-        hint: '本轮消息发给模型时的写法',
         fields: [
           {
-            key: 'user_message_format', label: '消息格式', type: 'select',
-            hint: '单行与聊天记录同形，最省 token；多行块信息更工整但更长。',
-            options: { single_line: '单行（推荐）', multi_line: '多行块' },
-          },
-          {
-            key: 'prompt_time_position', label: '时间位置', type: 'select',
-            hint: '放在末尾利于模型把「现在几点」当最新事实。',
-            options: { off: '不注入', head: '消息头部', tail: '消息尾部' },
-          },
-          {
-            key: 'sender_label', label: '发送者写法', type: 'select',
-            hint: '脱敏会把昵称换成「用户<QQ>」；详细档在私聊里额外给出对方 QQ。',
-            options: {
-              off: '不标发送者',
-              compact: '昵称(QQ)',
-              verbose: '详细（含私信 QQ）',
-              masked: '昵称脱敏',
-            },
-          },
-          {
-            key: 'quote_and_at', label: '引用与 @', type: 'select',
-            hint: '只标关系不取正文（省一次请求）；带内容会自动把被引用的话取回来。',
-            options: { off: '关闭', mark: '只标关系', enrich: '带内容（自动取回）' },
-          },
-          {
-            key: 'include_sent', label: '标注发送内容', type: 'switch',
-            hint: '多行块里单独标出正文，方便模型分清标注与内容。',
-            visible: multiLine,
-          },
-          {
-            key: 'auto_disambiguation', label: '消歧说明', type: 'switch',
-            hint: '告诉模型「昵称、时间这些是标注，不是对方说的话」。',
+            key: 'structured_assembly', label: '结构化消息', type: 'switch',
+            hint: '打开后用 [time][sender] 正文 [at] [reply_to] 的标记格式；关闭则只发原始正文。',
           },
         ],
       },
