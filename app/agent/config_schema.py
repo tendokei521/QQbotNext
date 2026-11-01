@@ -253,7 +253,13 @@ SCHEMA = {
         "type": "select", "label": "参与度",
         "description": "新版模式下的发言倾向：极低=仅@；低=只接与自己相关的；中=延续正在聊的话题；高=参与可讨论的话题；超高=几乎都参与",
         "default": "low", "group": "group_advanced",
-        "options": {"very_low": "极低（仅@）", "low": "低", "medium": "中", "high": "高", "very_high": "超高"},
+        "options": {
+            "very_low": "极低（只接与自己相关的）",
+            "low": "低（提到自己才有）",
+            "medium": "中（延续正在聊的话题）",
+            "high": "高（参与可讨论的话题）",
+            "very_high": "超高（几乎都参与）",
+        },
     },
     "participation_max_requests": {
         "type": "number", "label": "10 分钟请求上限",

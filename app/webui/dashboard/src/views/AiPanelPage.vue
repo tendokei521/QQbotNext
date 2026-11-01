@@ -113,8 +113,8 @@ const participationLevel = computed<string>({
   set: (v) => agent.onChange('participation_level', v),
 })
 const PARTICIPATION_ITEMS = [
-  { title: '极低（仅 @ / 回复我）', value: 'very_low' },
-  { title: '低（只接与自己相关的）', value: 'low' },
+  { title: '极低（只接与自己相关的）', value: 'very_low' },
+  { title: '低（提到自己才有）', value: 'low' },
   { title: '中（延续正在聊的话题）', value: 'medium' },
   { title: '高（参与可讨论的话题）', value: 'high' },
   { title: '超高（几乎都参与）', value: 'very_high' },
