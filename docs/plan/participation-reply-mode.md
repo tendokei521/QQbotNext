@@ -101,6 +101,25 @@
 状态：`[ ]` 未开始 / `[~]` 进行中 / `[x]` 已完成（补 hash） / `[!]` 阻塞
 节奏：**一步一提交**；每步只做 `compileall` / 定向冒烟，不跑 pytest；测试与全量验收统一放阶段 E。
 
+**进度（2026-11-01 晚，HEAD `49e18422`）**
+
+| 编号 | hash | 一句话 |
+|---|---|---|
+| A-1 | `cc79a9b5` | 删 `state.py` 里的 `search` 残留，`recall_tool_result` 重新出现在工具清单 |
+| A-2 | `6186bfff` | 7 键入配置体系（`CORE_KEYS` 派生并入 `SURFACE_GROUPS`；`include_sent` → 已删），重新生成 `ai-panel.json`；**实测 `/api/agent/config` 保存后能读回** |
+| A-3 | `3d38c52f` | `SCOPE_OVERRIDABLE` 加 5 键 → 参与度分支**首次可达**（实测 `reply_mode=participation`） |
+| A-4 | `4ef419e3` | 新增 `app/agent/reply/observer.py`；群聊准入后移到场景判定之后，先观察再判定，`user_recorded` 只在真写入时为真 |
+| A-5 | `db3790cb` | `prompt_prep` 二次会话门不再吞掉已放行的轮次；`req is None` 补 `log_skip` |
+| A-6/7/8 | `3d4cebd6` | `GateResult` 带 `at_me/reply_me`；冷却拆 `check`/`mark` 并豁免 @；引用目标反查（引用别人 ≠ 回复我） |
+| A-9 | 部分 | `participation.py` 重复的 `participation_section` 已删；规则表仍集中在 `participation.py`，未拆出 `reply/rules.py`（功能等价，拆包留作后续） |
+| A-11 | `e4c1cddd` | 输出形态不是发言通道时 `participation_needs_speech`（error 级）拒绝本轮 |
+| A-12 | `8c7eae26` | `usage/metered.py` 回填真实 token；预算改模块级 `bot_id → Budget` |
+| 文案/打断 | `3e425b75` | 提示词段读生效配置 + `trigger_mode_from()`；参与度消息参与打断代际 |
+| B-1/B-2 | `94e2e6fe` / `49e18422` | 触发卡补 token 上限；高级选项页标题修正；dist 重建；**1440/390 截图 + metrics `overflow=0`** |
+
+仍待做：A-10（判定链把参与度结论写进 Decision，目前只在 debug 日志）、A-9 拆包、阶段 C 真群手测、阶段 E 全量验收。
+
+
 ### 阶段 A：止血（代码，按依赖顺序）
 
 | 编号 | 提交信息 | 改动 | 自检 |
