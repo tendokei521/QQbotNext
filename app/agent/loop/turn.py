@@ -136,6 +136,9 @@ class TurnResult:
     rounds: int = 0
     interrupted: bool = False
     session_id: str = ""
+    #: 本轮思考文本（截断）：**仅用于会话数据页溯源**，不进模型上下文。
+    #: 采集在 `tool_step`（流式/非流式两条路径都填），与"请求方式"无关。
+    reasoning_text: str = ""
 
 
 async def run_turn(
@@ -361,6 +364,9 @@ async def _run_inner(
     result.reason = state.finish()
     result.rounds = state.rounds
     result.interrupted = state.interrupted
+    # 思考文本（截断，存在 ctx 里）：只给会话数据页溯源，不进模型上下文
+    if ctx is not None:
+        result.reasoning_text = str((getattr(ctx, "state", None) or {}).get("reasoning_text") or "")
     # 收尾广播（写历史/遥测之前）：结局已经定了
     if ctx is not None:
         ctx.state["turn_reason"] = str(result.reason)
@@ -380,7 +386,16 @@ async def _run_inner(
     )
 
     if req.record_history and text.strip() and session is not None:
-        await _write_history(runtime, session_mgr, session, session_id, text, is_private, ctx)
+        await _write_history(
+            runtime,
+            session_mgr,
+            session,
+            session_id,
+            text,
+            is_private,
+            ctx,
+            reasoning=result.reasoning_text,
+        )
     _commit_history_enrichment(runtime, session_id, ctx)
     # Q3：日志里的 turn/end 放在**所有落库之后**——它必须是这一轮的最后一条事件
     safe_append(
@@ -496,7 +511,11 @@ async def _chat_once(
         )
         # 空回复就是空回复：不再用「抱歉，我暂时无法回答」冒充模型说的话。
         # 结局由调用方按空文本判为 silent/max_tokens；这一轮不发消息、不写 assistant 历史。
+        if ctx is not None and step.reasoning_text:
+            ctx.state["reasoning_text"] = step.reasoning_text
         return "", tool_results
+    if ctx is not None and step.reasoning_text:
+        ctx.state["reasoning_text"] = step.reasoning_text
     return text, tool_results
 
 
@@ -571,6 +590,9 @@ async def _stream_once(
         )
     if state is not None:
         state.add_step(step)
+    if ctx is not None and step.reasoning_text:
+        # 思考文本：与"流式还是非流式"无关，两条路径都在这里汇合
+        ctx.state["reasoning_text"] = step.reasoning_text
     # 与收口前同口径：句子之间用换行连接（历史/遥测里看到的是同一段文本）
     return "\n".join(sentences), step.tool_results
 
@@ -677,15 +699,24 @@ async def _write_history(
     text: str,
     is_private: bool,
     ctx: Any = None,
+    *,
+    reasoning: str = "",
 ) -> None:
-    """把本轮回复写进会话历史（清洗口径与主路径一致）。"""
+    """把本轮回复写进会话历史（清洗口径与主路径一致）。
+
+    ``reasoning``：本轮思考文本（截断），只挂在 assistant 条目上供会话数据页溯源，
+    不参与历史渲染、也不进模型上下文。
+    """
     try:
         import asyncio
 
         from app.agent.policy import policy_config
 
         session_mgr.add_message(
-            session_id, "assistant", _clean_output_for_history(policy_config(runtime, "meta"), text)
+            session_id,
+            "assistant",
+            _clean_output_for_history(policy_config(runtime, "meta"), text),
+            reasoning=reasoning,
         )
         if not is_private:
             session.mark_replied()

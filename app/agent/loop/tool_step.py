@@ -514,6 +514,10 @@ async def run_blocking_step(req: StepRequest) -> StepResult:
         text = str(getattr(response, "text", "") or "")
         reasoning = str(getattr(response, "reasoning", "") or "")
         result.reasoning_chars += len(reasoning)
+        # 思考文本：与流式路径同一口径（截断后存，仅用于会话数据页溯源）。
+        # 采集是"步骤"的职责，与"这次请求是流式还是非流式"无关。
+        if reasoning and len(result.reasoning_text) < 4000:
+            result.reasoning_text += reasoning
         calls = list(getattr(response, "tool_calls", None) or [])
 
         # finish_reason 只有 raw 里有（OpenAI 形状）：结局判定要用它区分
