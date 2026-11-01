@@ -303,9 +303,12 @@ class SpeechOutput:
         config = self.config if self.config is not None else getattr(runtime, "config", None)
 
         # 非流式：跑完一轮（工具循环里 send_message 会把气泡入稿）再统一 flush。
-        # 文本=思考，返回值不用（也不该发出去）。
+        # 文本=思考，**不写历史、不发出去**：历史由 `flush_speech` 按气泡写，
+        # 否则"想过但没发"的正文会被落成一条用户看不到的 assistant 消息。
         try:
-            await generate_response(runtime, getattr(ctx, "event", None), ctx)
+            await generate_response(
+                runtime, getattr(ctx, "event", None), ctx, record_history=False
+            )
         except Exception as e:  # noqa: BLE001 —— 单轮失败仍要把已入稿的气泡发出去
             from app.core.logger import account_label, logger
 

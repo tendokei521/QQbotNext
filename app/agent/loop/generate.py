@@ -19,17 +19,22 @@ v3.1 起合并为**单一实现** `turn.run_turn`：
 
 from __future__ import annotations
 
-from app.core.logger import account_label
-
 from typing import Any
 
 from app.agent import logger
+from app.core.logger import account_label
 
 
-async def generate_response(runtime: Any, event: Any, ctx: Any = None) -> str | None:
+async def generate_response(
+    runtime: Any, event: Any, ctx: Any = None, *, record_history: bool = True
+) -> str | None:
     """非流式一轮：返回回复正文（无回复时返回 None）。
 
     参数与旧接口完全一致，供 `delivery/output.py::BlockingOutput` 等既有调用方使用。
+
+    ``record_history=False``：**不要**把本轮生成的文本写进会话历史。
+    发言通道（文本=思考）必须这么用——否则模型"想过但没发"的正文会被当成
+    一轮回复落库，用户看不到、历史里却有一条（线上实测到的错位）。
     """
     from app.agent.loop.turn import TurnRequest, run_turn
     from app.domain.trigger import raw_user_text
@@ -69,7 +74,7 @@ async def generate_response(runtime: Any, event: Any, ctx: Any = None) -> str | 
             event=event,
             bot=getattr(event, "bot", None),
             stream=False,
-            record_history=True,
+            record_history=record_history,
         ),
         ctx=ctx,
     )

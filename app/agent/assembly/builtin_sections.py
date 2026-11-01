@@ -288,8 +288,11 @@ def default_sections() -> list[Section]:
         # 能力段（emoji_hint / schedule / proactive / message_meta）由对应插件注册；
         # 框架只保留人设 + 行为规则 + 材料通道 + 历史 + 本轮消息。
         Section("reply_rules", 54, build_participation, source="builtin"),
-        # 发言协议紧跟回复规则：模式 + 该模式下的发言方式，放一起才不会被别处覆盖
-        Section("speech_protocol", 56, build_speech_protocol, source="builtin"),
+        # 发言协议：仍是 system 消息（不再贴 user 消息尾巴），但要放在**人设之后、
+        # 对话之前**——L1 的第一条 system 离对话太远，实测压不住人设里
+        # "输出纯文本段落即可"这类条款（旧对照实验的结论）。这里归 L3 钩子注入层，
+        # order 115 让它排在 group_log(100) 之后，成为系统指令的最后一段。
+        Section("speech_protocol", 115, build_speech_protocol, source="builtin"),
         Section("message_meta", 60, build_message_meta, source="builtin"),
         Section("skills", 70, build_skills, source="builtin"),
         Section("memory", 80, build_memory, source="builtin"),
