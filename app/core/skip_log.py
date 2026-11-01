@@ -5,7 +5,11 @@
 这里提供**唯一入口**，保证：
 
 1. 格式统一：``[skip] reason=<原因> · <细节> · <去哪修>``；
-2. 限流统一：同一 ``(账号, 原因)`` 默认 60s 内只记一次，避免刷屏；
+2. 去重统一：同一 ``(账号, 原因, 细节)`` **进程内只记一次**——群没开、没填 key
+   这类是「配置状态」而不是「瞬时事件」，每条消息都刷一遍警告只会把真问题淹掉。
+   进程重启后去重状态清空，于是用户可见的那一条正好落在「启动后的第一次」
+   （也就不会出现同一提示隔几分钟又刷一条的观感）；
+   ``debug`` 级只进 debug.log、是纯技术证据，保留 60s 窗口，排查时可反复看到；
 3. 可测试：日志出口是模块级 ``_emit``，测试可直接替换。
 
 后续新增"跳过"分支一律走 ``log_skip``，不要各自 ``return``。
@@ -17,11 +21,12 @@ import time
 
 from app.core.logger import account_label, logger
 
-#: 同一 (账号, 原因) 的最小记录间隔（秒）
-SKIP_LOG_INTERVAL_S = 60.0
+#: debug 级（技术日志，只进 debug.log）的重复提醒间隔（秒）。
+#: 用户可见级别（warning/info/error）不按时间窗口，而是「进程内只记一次」。
+DEBUG_REPEAT_INTERVAL_S = 60.0
 
-#: (账号, 原因) → 上次记录时刻（monotonic）
-_last_logged: dict[tuple[str, str], float] = {}
+#: (账号, 原因, 细节) → 上次记录时刻（monotonic）；进程重启后自然清空。
+_seen: dict[tuple[str, str, str], float] = {}
 
 #: 时钟可替换（测试注入）
 _now = time.monotonic
@@ -42,37 +47,50 @@ def log_skip(
     level: str = "warning",
     interval_s: float | None = None,
 ) -> bool:
-    """记录一条"本轮被跳过"的日志（限流）。
+    """记录一条"本轮被跳过"的日志（去重）。
 
     Args:
-        account_id: 账号 id（用于日志前缀与限流键）。
+        account_id: 账号 id（用于日志前缀与去重键）。
         reason: 机器可读的稳定原因码，如 ``group_disabled``。
-        detail: 人类可读细节，如 ``group=123456``。
+        detail: 人类可读细节，如 ``群 123456``。**参与去重**：不同群/不同用户
+            各自提醒一次，否则只会看到第一个。
         hint: 去哪修（一句话，界面文案口径见 docs/UI_COPY.md）。
-        level: ``warning``（默认）/ ``info`` / ``debug``。
-        interval_s: 覆盖默认限流间隔；``0`` 表示不限制（测试用）。
+        level: ``warning``（默认）/ ``info`` / ``error`` / ``debug``。
+        interval_s: 覆盖默认去重窗口。``None`` = 按级别的默认（debug 60s，
+            其余进程内只记一次）；``0`` = 不限流（测试/排查用）；
+            ``>0`` = 该秒数内只记一次。
 
     Returns:
-        True = 本次真的写了日志；False = 被限流。
+        True = 本次真的写了日志；False = 被去重。
     """
-    key = (str(account_id if account_id not in (None, "") else "?"), str(reason))
-    window = SKIP_LOG_INTERVAL_S if interval_s is None else max(0.0, float(interval_s))
-    if window > 0:
-        last = _last_logged.get(key)
+    account_key = str(account_id if account_id not in (None, "") else "?")
+    key = (account_key, str(reason), str(detail))
+    # 默认窗口：debug 是技术日志（可反复看），其余是用户可见提示（进程内一次）
+    window: float | None = DEBUG_REPEAT_INTERVAL_S if str(level) == "debug" else None
+    if interval_s is not None:
+        window = max(0.0, float(interval_s))
+
+    if window is None:
+        # 进程内只记一次：同一「账号 + 原因 + 细节」重启后才会再提醒
+        if key in _seen:
+            return False
+        _seen[key] = _now()
+    elif window > 0:
+        last = _seen.get(key)
         now = _now()
         if last is not None and now - last < window:
             return False
-        _last_logged[key] = now
+        _seen[key] = now
 
     parts = [f"[skip] reason={reason}"]
     if detail:
         parts.append(str(detail))
     if hint:
         parts.append(str(hint))
-    _emit(key[0], " · ".join(parts), level)
+    _emit(account_key, " · ".join(parts), level)
     return True
 
 
 def reset_skip_log_state() -> None:
-    """清空限流状态（测试与「重连后重新提醒」用）。"""
-    _last_logged.clear()
+    """清空去重状态（测试与「重连 / 配置变更后重新提醒」用）。"""
+    _seen.clear()

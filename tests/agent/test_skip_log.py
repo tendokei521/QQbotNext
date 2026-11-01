@@ -1,8 +1,10 @@
-"""P0-1：被跳过的消息必须留下可查原因（限流 + 统一格式 + 可注入）。
+"""P0-1：被跳过的消息必须留下可查原因（去重 + 统一格式 + 可注入）。
 
 背景：LLM 流水线里多处静默 return，用户表现为「群里 @ 没反应、日志干净」。
-本测试锁定三件事：①同一 (账号, 原因) 限流；②日志含原因码/细节/修复提示；
-③流水线的场景开关确实走统一入口。
+本测试锁定四件事：①用户可见级别同一 (账号, 原因, 细节) **进程内只记一次**
+（"仅启动第一次体现"，重启后才再提醒）；②不同群/不同用户各自提醒一次；
+③debug 级是技术日志、保留 60s 窗口；④日志含原因码/细节/修复提示，
+流水线的场景开关确实走统一入口。
 """
 
 from __future__ import annotations
@@ -42,6 +44,46 @@ def test_different_reason_or_account_is_not_throttled(monkeypatch):
     skip_log.log_skip("acc1", "private_disabled")
     skip_log.log_skip("acc2", "group_disabled")
     assert len(calls) == 3
+
+
+def test_same_skip_is_logged_once_per_process(monkeypatch):
+    """用户口径：这类提示只在（进程重启后的）第一次出现，之后同一情形不再刷屏。
+
+    旧实现是 60s 窗口，于是同一群被禁用时每几分钟仍会冒一条 WARNING。
+    """
+    calls = _capture(monkeypatch)
+    clock = [1000.0]
+    monkeypatch.setattr(skip_log, "_now", lambda: clock[0])
+
+    assert skip_log.log_skip("acc1", "group_disabled", "群 1075894179") is True
+    for _ in range(3):
+        clock[0] += 6 * 3600  # 远超旧的 60s 窗口：同一情形仍然不再记录
+        assert skip_log.log_skip("acc1", "group_disabled", "群 1075894179") is False
+    assert len(calls) == 1
+
+
+def test_different_detail_is_reported_separately(monkeypatch):
+    """细节参与去重键：两个群都被禁用时，两个群各要有一条提示。"""
+    calls = _capture(monkeypatch)
+    assert skip_log.log_skip("acc1", "group_disabled", "群 1") is True
+    assert skip_log.log_skip("acc1", "group_disabled", "群 2") is True
+    assert skip_log.log_skip("acc1", "group_disabled", "群 1") is False
+    assert len(calls) == 2
+
+
+def test_debug_level_keeps_repeat_window(monkeypatch):
+    """debug 级只进 debug.log（技术证据），保留 60s 窗口，不参与"进程内一次"。"""
+    calls = _capture(monkeypatch)
+    clock = [500.0]
+    monkeypatch.setattr(skip_log, "_now", lambda: clock[0])
+
+    assert skip_log.log_skip("acc1", "trigger_not_matched", "group=1", level="debug") is True
+    clock[0] += 10
+    assert skip_log.log_skip("acc1", "trigger_not_matched", "group=1", level="debug") is False
+    clock[0] += 120
+    assert skip_log.log_skip("acc1", "trigger_not_matched", "group=1", level="debug") is True
+    assert len(calls) == 2
+    assert all(call["level"] == "debug" for call in calls)
 
 
 def test_interval_zero_disables_throttle(monkeypatch):

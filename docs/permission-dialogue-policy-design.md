@@ -244,13 +244,18 @@ event → account_id
 | 名单（群/用户黑白） | `policy.permission` 的 `user_*`（群维度不再需要"群名单"，由 `enabled` 表达） | `authority.py:178-200` |
 | 模块权限 | `resolve_policy(account, module, channel)` 的 permission | `authority.py:203-224` |
 
-**日志必须升级**（已落地）：所有跳过分支从 `debug` 改成"按账号+原因限流"的 `log_skip`
-（`app/core/skip_log.py`，默认 warning/模块级 info），格式统一：
+**日志必须升级**（已落地）：所有跳过分支从 `debug` 改成统一的 `log_skip`
+（`app/core/skip_log.py`），格式统一：
 
 ```
 [skip] group=123456 account=acc1 reason=disabled_by_channel source=channel
 [skip] reason=trigger_not_matched source=channel keys={trigger_at:true, keywords:[]}
 ```
+
+**去重口径**：用户可见级别（`warning` / `info` / `error`）同一「账号 + 原因 + 细节」在
+**进程内只记一次**——被禁用群、没填 key 这类是"配置状态"而不是瞬时故障，每条消息刷一遍
+只会把真问题淹掉；进程重启后去重状态清空，于是提示只落在「启动后的第一次」。
+`debug` 级只进 `debug.log` 的纯技术证据，仍保留 60s 窗口，排查时可反复看到。
 
 这样"为什么不回"在日志页可过滤（配合就绪卡的"为什么不回"入口）。
 
