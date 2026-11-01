@@ -119,6 +119,12 @@ const router = createRouter({
         { path: 'config-profiles', redirect: '/settings' },
         { path: 'stats', name: 'stats', component: () => import('@/views/StatsPage.vue'), meta: { title: '数据统计' } },
         { path: 'logs', name: 'logs', component: () => import('@/views/LogsPage.vue'), meta: { title: '日志' } },
+        {
+          path: 'prompt-assembly',
+          name: 'prompt-assembly',
+          component: () => import('@/views/PromptAssemblyPage.vue'),
+          meta: { title: '提示词组装' },
+        },
         { path: 'settings', name: 'settings', component: () => import('@/views/SettingsPage.vue'), meta: { title: '设置' } },
       ],
     },
