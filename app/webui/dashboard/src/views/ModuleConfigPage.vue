@@ -17,12 +17,15 @@ const modules = useModulesStore()
 const bots = useBotsStore()
 const notify = useNotifyStore()
 
-const name = String(route.params.name)
+// 模块名必须是**响应式**的：`/modules/a` → `/modules/b` 会复用同一个路由组件，
+// 旧实现用 const 取一次 route.params，切模块后页面/iframe 仍停在上一个模块。
+const name = computed(() => String(route.params.name || ''))
 const mod = computed(() => {
-  const m = modules.modules[name]
+  const key = name.value
+  const m = modules.modules[key]
   if (m) return m
   // 容错：兼容以显示名 / 简称访问的 URL（旧书签等）
-  return modules.list.find((x) => x.name === name || x.name_sign === name)
+  return modules.list.find((x) => x.name === key || x.name_sign === key)
 })
 
 // 加载兜底：模块数据未就绪时自动重试，避免启动期/网络抖动导致永久"不存在"
@@ -62,6 +65,16 @@ watch(mod, (m) => {
   // 切账号或换模块时 draftAccountId/draftModuleName 不匹配，照常初始化。
   const sameScope = draftModuleName === m.name && draftAccountId === modules.botId
   if (sameScope && dirtyFlag) return
+  // 换模块（同路由复用组件）时：先把上一个模块未保存的草稿写回**它自己**，再初始化新模块，
+  // 否则 A 模块改了一半直接点 B，改动会静默消失。
+  if (!sameScope && dirtyFlag && draftModuleName && draftModuleName !== m.name) {
+    const previousModule = draftModuleName
+    const previousAccount = draftAccountId
+    const snapshot = { ...draft }
+    void modules.saveConfig(previousModule, snapshot, previousAccount ?? undefined).catch(() => {
+      /* 写回失败不阻断切换；用户仍可在回到该模块时重新编辑 */
+    })
+  }
   initFromModule()
 })
 
@@ -120,7 +133,7 @@ async function doSave(targetAccountId?: string | null) {
   const snapshotSeq = editSeq
   saveStatus.value = 'saving'
   try {
-    await modules.saveConfig(name, { ...draft }, targetAccountId)
+    await modules.saveConfig(name.value, { ...draft }, targetAccountId)
     if (editSeq !== snapshotSeq) return // 保存期间有新编辑：保留 dirty，交由下一次保存
     dirtyFlag = false
     saveStatus.value = 'clean'
@@ -142,7 +155,7 @@ async function flushDrafts(accountId?: string | null) {
 async function reloadModule() {
   if (!mod.value) return
   try {
-    await modules.reloadSingle(name)
+    await modules.reloadSingle(name.value)
     notify.push(`${mod.value.name} 已重新加载`, 'success')
   } catch (err) {
     notify.push(errorMessage(err), 'error')
@@ -159,7 +172,7 @@ async function onDepsDone() {
 
 // ---------- 插件自定义页 ----------
 const pluginSrc = computed(() => {
-  const base = `/api/module/${name}/page`
+  const base = `/api/module/${name.value}/page`
   const botId = bots.currentAccountId
   return botId !== null ? `${base}?account_id=${botId}` : base
 })
