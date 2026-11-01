@@ -320,27 +320,3 @@ def test_stats_counts_files_and_references():
     assert data["bytes"] >= len(PNG_BYTES)
     assert data["referenced"] >= 1
     assert data["unreferenced"] >= 1
-
-
-# ---------- prompt dump 脱敏 ----------
-
-
-def test_prompt_dump_redacts_base64_payloads():
-    from app.agent.assembly.dump import _redact_media
-
-    payload = "data:image/png;base64," + "A" * 5000
-    messages = [{
-        "role": "user",
-        "content": [
-            {"type": "text", "text": "看图"},
-            {"type": "image_url", "image_url": {"url": payload}},
-        ],
-    }]
-
-    redacted = _redact_media(messages)
-
-    text = str(redacted)
-    assert "A" * 100 not in text
-    # 占位符形状与日志出口一致（见 app/core/redact.py）
-    assert "data:image/png;base64,[base64 4.9KB]" in text
-    assert redacted[0]["content"][1]["image_url"]["url"].endswith("[base64 4.9KB]")

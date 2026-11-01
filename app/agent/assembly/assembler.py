@@ -739,15 +739,6 @@ async def apply_post_assemble(
         return None
     result = final_messages
 
-    # 请求落盘（默认关闭）：把「最终发出去的东西」留成可比对的证据
-    from app.agent.assembly.dump import record as _record_dump
-
-    _record_dump(
-        runtime,
-        result,
-        session_id=getattr(req, "session_id", "") or getattr(ctx, "session_id", ""),
-        kind=getattr(req, "kind", ""),
-    )
     return result
 
 
