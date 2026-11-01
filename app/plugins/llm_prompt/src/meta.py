@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.agent import logger
-from app.agent.assembly.structured import render_turn
+from .message_assembly import render_turn
 from app.agent.context.group import UNRESOLVED_REPLY
 
 #: 引用 / @ 的占位与展开语义（与 tools 侧对齐）
@@ -32,7 +32,7 @@ def _cfg(ctx, key: str, default: Any):
 
 
 def _time_str() -> str:
-    from app.agent.assembly.structured import format_time
+    from .message_assembly import format_time
 
     return format_time()
 

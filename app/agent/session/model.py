@@ -34,12 +34,12 @@ HistoryEntry
 
 from __future__ import annotations
 
+from app.core.logger import logger
+
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
-
-from app.core.logger import logger
 
 # ==================== 常量（与 group_context 同源，迁移期两处保持一致） ====================
 
@@ -162,7 +162,7 @@ class BaseInfo:
         return data
 
     @classmethod
-    def from_dict(cls, data: dict | None) -> BaseInfo:
+    def from_dict(cls, data: dict | None) -> "BaseInfo":
         data = data or {}
         return cls(
             time=int(data.get("time", 0) or 0),
@@ -224,7 +224,7 @@ class TurnInfo:
         return {"expansions": list(self.expansions)} if self.expansions else {}
 
     @classmethod
-    def from_dict(cls, data: dict | None) -> TurnInfo:
+    def from_dict(cls, data: dict | None) -> "TurnInfo":
         data = data or {}
         return cls(expansions=list(data.get("expansions", []) or []))
 
@@ -257,7 +257,7 @@ class HistoryEntry:
         return data
 
     @classmethod
-    def from_dict(cls, data: dict | None) -> HistoryEntry:
+    def from_dict(cls, data: dict | None) -> "HistoryEntry":
         data = data or {}
         raw_base = data.get("base")
         base = BaseInfo.from_dict(raw_base if isinstance(raw_base, dict) else {})
@@ -422,23 +422,18 @@ def _single_line(
     mask_nickname: bool,
     meta_lines: list[str] | None = None,
 ) -> str:
-    """结构化单行：``[time=..][sender:id=..,name=".."]正文``；附注行接在正文之后。"""
-    from app.agent.assembly.structured import escape_text, format_time
-
+    """``MM-DD HH:MM 昵称(QQ): 正文`` 形态；附注行接在正文之后。"""
     if sender_id and str(sender_id) in self_ids:
-        name = SELF_TAG
+        label = SELF_TAG
     elif is_private:
-        name = PRIVATE_OTHER_TAG
+        label = PRIVATE_OTHER_TAG
     else:
-        name = str(sender_name or sender_id or "")
-        if mask_nickname:
-            name = f"用户<{sender_id}>"
-    head = ""
-    if include_time:
-        head += f"[time={format_time(time)}]"
-    if sender_id or name:
-        head += f'[sender:id={sender_id or ""},name="{name}"]'
-    lines = [f"{head}{escape_text(content)}"]
+        label = sender_label(
+            sender_name, sender_id,
+            include_user_id=include_user_id, mask_nickname=mask_nickname,
+        )
+    prefix = time_prefix(time) if include_time else ""
+    lines = [f"{prefix}{label}: {content}"]
     for line in meta_lines or []:
         text = normalize_newlines(line).strip()
         if text:
@@ -453,7 +448,6 @@ META_LINE_PREFIXES = ("提到了", "引用了")
 #: 与时间/群号同级：不进正文，否则纯图片消息的正文会退化成 "（QQ: 1901691195）"。
 RENDERED_LINE_PREFIXES = (
     "发送者：", "发送者昵称：", "(时间", "（时间", "(当前群号", "（当前群号", "(QQ", "（QQ",
-    "[time=",  # 结构化格式的元信息前缀（写侧丢弃，读侧按当前配置重排）
 )
 
 

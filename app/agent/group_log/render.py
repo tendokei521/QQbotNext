@@ -73,9 +73,9 @@ class RenderResult:
 
 def _time_label(ts: Any) -> str:
     try:
-        return time.strftime("%Y-%m-%d %H:%M", time.localtime(int(ts or 0)))
+        return time.strftime("%H:%M", time.localtime(int(ts or 0)))
     except (ValueError, OSError, TypeError):
-        return "--"
+        return "--:--"
 
 
 def _id_tag(message_id: Any) -> str:
@@ -169,10 +169,7 @@ def render_environment(
             who = "我" if event.by_me else _person(event)
             # 消息 id 必须露出来：模型要用它做引用（send_message 的 reply_to_message_id）
             # 和"按需展开"（expand_message）。只出现在行首，正文本身不掺标记。
-            line = (
-                f'[time={_time_label(event.ts)}][sender:id={event.user_id or ""},name="{who}"]'
-                f"{_id_tag(event.message_id)}{text}"
-            )
+            line = f"{_time_label(event.ts)} {_id_tag(event.message_id)}{who}: {text}"
             if event.reply_to:
                 line += f" [↩{event.reply_to}]"
             if event.message_id:
@@ -183,20 +180,15 @@ def render_environment(
 
         if event.kind == KIND_RECALL:
             who = "我" if event.by_me else _person(event)
-            lines.append(
-                f'[time={_time_label(event.ts)}][sender:id={event.user_id or ""},name="{who}"]'
-                "撤回了一条消息"
-            )
+            lines.append(f"{_time_label(event.ts)} {who} 撤回了一条消息")
             continue
 
         if event.kind == KIND_POKE:
             who = "我" if event.by_me else _person(event)
             target = str(event.payload.get("target_id", "") or "")
             where = f"（{event.group_id}）" if event.group_id else "（私聊）"
-            lines.append(
-                f'[time={_time_label(event.ts)}][sender:id={event.user_id or ""},name="{who}"]'
-                + (f"戳了 {target}{where}" if target else f"戳了一下{where}")
-            )
+            lines.append(f"{_time_label(event.ts)} {who} 戳了 {target or '某人'}{where}" if target
+                         else f"{_time_label(event.ts)} {who} 戳了一下{where}")
             continue
 
     # 没被任何消息行消费掉的互动（正文被去重、为空、或被裁）→ 补一条影子行，
