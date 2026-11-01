@@ -20,7 +20,16 @@ def render_history_entry(entry: Any, **kwargs) -> str | None:
     base = parsed.base
     self_ids = {str(x) for x in (kwargs.get("self_ids") or set())}
     mask = bool(kwargs.get("mask_nickname", False))
-    is_me = parsed.role == "assistant" or (base.sender_id and str(base.sender_id) in self_ids)
+
+    # bot 自己的回复（assistant）**不加任何组装标记**：原样输出正文。
+    # 否则模型会照抄自己的格式（历史里出现 [time][sender] 的 assistant 行），
+    # 与框架原生口径一致（框架对 assistant 从不加时间/发送者前缀）。
+    if parsed.role == "assistant":
+        if base.segments:
+            return render_segments(base.segments) or ""
+        return str(base.text or parsed.legacy_text or "")
+
+    is_me = bool(base.sender_id and str(base.sender_id) in self_ids)
 
     if base.segments:
         body = render_segments(base.segments)
