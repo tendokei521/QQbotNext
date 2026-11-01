@@ -1,16 +1,17 @@
-"""历史渲染接管实现（模块能力）：把历史条目渲染成占位符结构化格式。
+"""历史渲染：把历史条目渲染成与「本轮消息」同一套结构化格式。
 
 契约：``renderer(entry, **kwargs) -> str | None``，entry 是 HistoryEntry 或旧式 dict。
-框架在 ``runtime.history_renderer`` 被设置时用它渲染历史；未设置时用原生单行格式。
+框架在 ``runtime.history_renderer`` 上挂的就是本函数（不再是"模块接管才生效"）：
+历史与当前轮必须同一口径，否则模型会看到两种格式。
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from .render import _head_marker, _sender_marker
+from .render import _sender_marker
 from .segments import render_segments
-from .spec import escape_body, format_time, marker, quote
+from .spec import escape_body, format_time
 
 
 def _reply_id_from_segments(segments: Any) -> str:
@@ -39,6 +40,8 @@ def render_history_entry(entry: Any, **kwargs) -> str | None:
     base = parsed.base
     self_ids = {str(x) for x in (kwargs.get("self_ids") or set())}
     mask = bool(kwargs.get("mask_nickname", False))
+    include_time = bool(kwargs.get("include_time", True))
+    is_private = bool(kwargs.get("is_private", False))
 
     # bot 自己的回复（assistant）**不加任何组装标记**：原样输出正文。
     # 否则模型会照抄自己的格式（历史里出现 [time][sender] 的 assistant 行），
@@ -51,19 +54,36 @@ def render_history_entry(entry: Any, **kwargs) -> str | None:
     is_me = bool(base.sender_id and str(base.sender_id) in self_ids)
 
     reply_id = _reply_id_from_segments(base.segments)
-    if base.segments:
-        body = render_segments(base.segments, message_id=parsed.message_id)
-    else:
-        body = escape_body(base.text or parsed.legacy_text or "")
+    # 富渲染优先：历史展开（引用/转发/用户名）走 `render_content`，
+    # 群聊在线历史走 `content_renderer`（把 OneBot 段转成文本）。
+    rich = kwargs.get("render_content") or kwargs.get("content_renderer")
+    body: str | None = None
+    if callable(rich):
+        try:
+            rendered = rich(parsed)
+        except Exception as e:  # noqa: BLE001 —— 富渲染失败退回结构化段
+            from app.core.logger import logger
+
+            logger.debug(f"[消息组装] 历史富渲染失败（退回段渲染）: {e}")
+            rendered = None
+        if rendered is not None:
+            body = str(rendered)
+    if body is None:
+        if base.segments:
+            body = render_segments(base.segments, message_id=parsed.message_id)
+        else:
+            body = escape_body(base.text or parsed.legacy_text or "")
     if not reply_id:
         reply_id = _reply_id_from_meta(base.meta_lines)
 
-    time_str = format_time(base.time)
-    head = f"time={time_str}"
+    head = ""
+    if include_time:
+        head = f"time={format_time(base.time)}"
     if base.group_id not in (None, "", 0, "0"):
-        head += f",group_id={base.group_id}"
-    name = "我" if is_me else (f"用户<{base.sender_id}>" if mask else base.sender_name)
-    line = f"[{head}]{_sender_marker(base.sender_id, name)}{body}"
+        head += ("," if head else "") + f"group_id={base.group_id}"
+    default_name = "对方" if is_private else ""
+    name = "我" if is_me else (f"用户<{base.sender_id}>" if mask else (base.sender_name or default_name))
+    line = (f"[{head}]" if head else "") + _sender_marker(base.sender_id, name) + body
     if reply_id:
         line += f"[reply_to:id={reply_id}]"
     for meta in base.meta_lines or []:

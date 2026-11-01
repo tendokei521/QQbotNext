@@ -152,11 +152,11 @@ class AgentRuntime:
         from app.agent.message_assembly import history as _history
 
         self.assembler = PromptAssembler()
-        # 系统方案：消息组装/渲染由框架完成（原 llm_prompt 模块能力）
-        self.history_renderer = _history.render_history_entry
         self.message_assembly = _assembly
-        # 历史渲染接管槽：模块可设置（None = 用框架原生渲染），卸载时须还原
-        self.history_renderer = None
+        # 系统方案：消息组装/渲染由框架完成（原 llm_prompt 模块能力）。
+        # 历史条目也用同一套结构化格式（`[time=…][sender:id=…,name=…]正文`）；
+        # 模块仍可通过接管槽覆盖（FeatureRegistry 卸载时还原成本值）。
+        self.history_renderer = _history.render_history_entry
         # provider 调用策略：插件可声明 supersedes=("provider_invoker",) 整体替换
         self.invoker = ProviderInvoker()
         # 能力声明表（P6）：模块在 on_load 里声明"我提供什么能力"，框架只问不猜
