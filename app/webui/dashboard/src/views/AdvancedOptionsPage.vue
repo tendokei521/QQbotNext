@@ -55,8 +55,8 @@ onMounted(load)
   <div>
     <div class="app-page-header">
       <div>
-        <h1 class="app-page-title">提示词组装</h1>
-        <div class="app-page-subtitle">系统级方案：消息组装方式。改动即保存。</div>
+        <h1 class="app-page-title">高级选项</h1>
+        <div class="app-page-subtitle">实验性开关：消息组装方式。改动即保存。</div>
       </div>
       <v-chip size="small" variant="tonal">{{ accountLabel }}</v-chip>
     </div>
@@ -70,7 +70,7 @@ onMounted(load)
         <v-switch
           v-model="form.structured_assembly"
           label="结构化消息"
-          hint="[time][sender] 正文 [at] [reply_to]；关闭则只发原始正文"
+          hint="开启后消息带时间、发送者与引用标记；关闭则只发原始正文"
           density="comfortable"
           color="primary"
           hide-details="auto"

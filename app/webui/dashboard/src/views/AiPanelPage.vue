@@ -127,6 +127,10 @@ const participationCooldown = computed<number>({
   get: () => Number(agent.draft.participation_cooldown_seconds ?? 20),
   set: (v) => agent.onChange('participation_cooldown_seconds', Number(v) || 0),
 })
+const participationMaxTokens = computed<number>({
+  get: () => Number(agent.draft.participation_max_tokens ?? 10000000),
+  set: (v) => agent.onChange('participation_max_tokens', Number(v) || 1),
+})
 
 /** 摘要固定来自 /api/policy 的解析结果（账号层覆盖 + 旧键折算后的值） */
 async function loadGlobalPolicy() {
@@ -484,6 +488,18 @@ watch(
             type="number"
             min="1"
             max="1000"
+            density="compact"
+            variant="outlined"
+            hide-details
+            class="mb-3"
+          />
+          <v-text-field
+            v-model.number="participationMaxTokens"
+            label="10 分钟 token 上限"
+            hint="按该账号全部模型调用累计，超出后只记录不请求"
+            type="number"
+            min="1000"
+            max="100000000"
             density="compact"
             variant="outlined"
             hide-details
