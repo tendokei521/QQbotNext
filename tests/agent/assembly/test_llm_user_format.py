@@ -12,15 +12,12 @@ from __future__ import annotations
 
 import types
 
-from app.agent.assembly.assembler import PromptRequest, message_meta_instruction
-from app.agent.assembly.prompt import (
-    SINGLE_LINE_MESSAGE_META_INSTRUCTION,
-    emoji_hint_line,
-    prompt_time_position,
-    user_message_format,
-)
+from app.agent.assembly.assembler import PromptRequest
+from app.agent.assembly.prompt import prompt_time_position, user_message_format
 from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
 from app.plugins.llm_prompt.src.meta import format_user_context
+from app.plugins.llm_prompt.src.prompt import SINGLE_LINE_MESSAGE_META_INSTRUCTION, message_meta_instruction
+from app.plugins.llm_tools_extra.src.prompt import emoji_hint_line
 
 NL = chr(10)
 

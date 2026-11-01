@@ -81,21 +81,24 @@ def test_two_bot_runtimes_do_not_share_sections():
 
 
 def test_section_order_decides_position_inside_its_layer():
-    """层内位置由段的 order 决定：L1 里的段落合并成一条 system，但合并顺序就是 order。"""
+    """层内位置由段的 order 决定：L1 里的段落合并成一条 system，但合并顺序就是 order。
+
+    能力段（schedule/proactive/message_meta）已归插件，框架内置的 L1 只有 behavior(20)，
+    所以这里自己注册两个 L1 段来验证排序与合并。
+    """
     runtime = _runtime()
-    register_section(runtime, Section("between", 55, lambda req: [{"role": "system", "content": "### 插进来的段"}], layer="system_prompt"))
+    register_section(runtime, Section("late", 56, lambda req: [{"role": "system", "content": "### 后插的段"}], layer="system_prompt"))
+    register_section(runtime, Section("early", 55, lambda req: [{"role": "system", "content": "### 先插的段"}], layer="system_prompt"))
 
     names = _names(resolve_sections(runtime))
-    assert names.index("between") == names.index("proactive") + 1
-    assert names.index("between") + 1 == names.index("message_meta")
+    assert names.index("early") < names.index("late")
 
     # L1 层内合并后只有一条 system，位置改看文本里的先后
     req = PromptRequest(runtime=runtime, config={"system_prompt": "人设", "prompt_preset": "chat"}, user_text="hi")
     l1 = next(m["content"] for m in PromptAssembler().build(req) if m.get("role") == "system")
-    assert "### 插进来的段" in l1
-    # 合并顺序 = 段 order：behavior(20) < between(55) < message_meta(60)
-    assert l1.index("【安全规则") < l1.index("### 插进来的段")
-    assert l1.index("### 插进来的段") < l1.index("### 消息格式说明")
+    assert "### 先插的段" in l1 and "### 后插的段" in l1
+    # 合并顺序 = 段 order：behavior(20) < early(55) < late(56)
+    assert l1.index("【安全规则") < l1.index("### 先插的段") < l1.index("### 后插的段")
 
 
 def test_resolve_blocks_keeps_extra_between_group_log_and_history():

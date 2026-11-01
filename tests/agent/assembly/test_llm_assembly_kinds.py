@@ -13,8 +13,12 @@ def _rows(req: PromptRequest) -> list[dict]:
     return {row["block"]: row for row in describe(req)}
 
 
-def test_proactive_prompt_has_message_meta_and_no_schedule_instruction():
-    """主动消息必须带格式说明块（历史上缺过），且定时协议按开关关闭。"""
+def test_framework_does_not_own_capability_prompt_text():
+    """能力说明（消息格式/定时/主动性/表情）已归各插件，框架裸装配不再产出这些文案。
+
+    以前这些段是 `default_sections()` 的一部分，模块禁用后文案还在（"提示词说有、
+    能力却不在"）。现在它们由插件 `register_section`，卸载即消失。
+    """
     req = PromptRequest(
         config={"system_prompt": "人设", "meta_sender_style": "legacy"},
         session_id="group_1",
@@ -28,11 +32,10 @@ def test_proactive_prompt_has_message_meta_and_no_schedule_instruction():
         available_tools={"get_chat_history"},
         schedule_enable=False,
     )
-
-    # L1 是层内合并后的**一条** system：格式说明与定时协议都在它里面
-    l1 = next(m["content"] for m in PromptAssembler().build(req) if m.get("role") == "system")
-    assert "### 消息格式说明" in l1 or "### 记录格式" in l1, "主动消息必须带格式说明"
-    assert "### 定时任务" not in l1, "schedule_enable=False 时不应注入定时协议"
+    messages = PromptAssembler().build(req)
+    joined = "\n".join(str(m.get("content") or "") for m in messages if m.get("role") == "system")
+    for capability_marker in ("### 定时任务", "### 消息格式说明", "### 记录格式", "【可用表情】"):
+        assert capability_marker not in joined, f"框架不该再内置: {capability_marker}"
     rows = _rows(req)
     assert rows["user"]["messages"] == 1
 

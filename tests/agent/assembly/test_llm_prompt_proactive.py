@@ -5,7 +5,7 @@
 """
 
 
-from app.agent.assembly.prompt import (
+from app.plugins.llm_trigger.src.prompt import (
     PROACTIVE_ENV_NUDGE,
     PROACTIVE_FOOTER_LINE,
     PROACTIVE_FOOTER_UNRESOLVED_LINE,
@@ -46,22 +46,22 @@ def _cfg(**over):
 
 
 def test_block_is_added_as_exactly_one_system_message():
-    """主动性协议是一整块（由 section 产出），不是拼进人格或历史里。"""
-    from app.agent.assembly.assembler import PromptAssembler, PromptRequest
+    """主动性协议是一整块：插件注册的 section 构建器只产出一条 system。"""
+    from types import SimpleNamespace
 
-    config = _cfg(outbound_directive_enable=True)
-    messages = PromptAssembler().build(
-        PromptRequest(
-            config=config,
-            user_text="在吗",
-            available_tools=ALL_TOOLS,
-            schedule_enable=False,
-        )
+    from app.plugins.llm_trigger.src.prompt import proactive_section
+
+    req = SimpleNamespace(
+        config=_cfg(outbound_directive_enable=True),
+        intent_text="在吗",
+        available_tools=ALL_TOOLS,
+        schedule_enable=False,
     )
-
-    blobs = [m for m in messages if m["role"] == "system" and m["content"].startswith("### 主动性")]
+    messages = proactive_section(req)
+    assert len(messages) == 1 and messages[0]["role"] == "system"
+    blobs = [m for m in messages if m["content"].startswith("### ")]
     assert len(blobs) == 1, "主动性块必须恰好一条 system"
-    assert messages[-1] == {"role": "user", "content": "在吗"}
+    assert not any(m["role"] == "user" for m in messages), "提示块不夹带 user 消息"
 
 
 def test_block_can_be_disabled():

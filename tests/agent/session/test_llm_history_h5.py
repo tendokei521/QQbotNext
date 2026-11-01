@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from app.agent.assembly.assembler import PromptRequest, build_background
-from app.agent.assembly.prompt import (
-    EXPANDED_MARKER_NOTE,
-    MULTI_LINE_MESSAGE_META_INSTRUCTION,
-    MASKED_MESSAGE_META_INSTRUCTION,
-)
 from app.agent.context.group import format_history_for_llm
 from app.agent.session import enrich as history_enrich
+from app.plugins.llm_prompt.src.prompt import (
+    EXPANDED_MARKER_NOTE,
+    MASKED_MESSAGE_META_INSTRUCTION,
+    MULTI_LINE_MESSAGE_META_INSTRUCTION,
+)
 
 # ---------- 提示词：已展开标记的语义 ----------
 

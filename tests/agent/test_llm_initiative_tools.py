@@ -65,11 +65,27 @@ def _runtime(config=None, **over):
 # ---------- 工具与提示块收集 ----------
 
 
+async def _initiative(runtime, *args, **kwargs):
+    """`build_initiative_tools` 只返回工具；提示块由触发与调度插件自己构建。"""
+    from app.plugins.llm_trigger.src.prompt import build_proactive_instruction
+
+    specs, skill_blocks, tool_ctx = await build_initiative_tools(runtime, *args, **kwargs)
+    instruction = build_proactive_instruction(
+        getattr(runtime, "config", None),
+        "",
+        available_tools={spec.name for spec in (specs or [])},
+        dedupe=True,
+    )
+    return specs, skill_blocks, tool_ctx, instruction
+
+
+
+
 async def test_initiative_tools_include_context_tools_without_event():
     bot = _Bot()
     runtime = _runtime()
 
-    specs, skill_blocks, ctx, instruction = await build_initiative_tools(
+    specs, skill_blocks, ctx, instruction = await _initiative(
         runtime, "group_778", False, bot=bot, group_id=778
     )
     names = {s.name for s in specs}
@@ -90,7 +106,7 @@ async def test_initiative_tools_include_context_tools_without_event():
 async def test_initiative_tools_private_session_maps_user_id():
     runtime = _runtime()
 
-    _specs, _skills, ctx, _instr = await build_initiative_tools(
+    _specs, _skills, ctx, _instr = await _initiative(
         runtime, "private_20002", True, bot=_Bot(), user_id=20002
     )
 
@@ -101,7 +117,7 @@ async def test_initiative_tools_private_session_maps_user_id():
 async def test_initiative_tools_respect_context_expand_switch():
     runtime = _runtime({"context_expand_enable": False})
 
-    specs, _s, _c, instruction = await build_initiative_tools(
+    specs, _s, _c, instruction = await _initiative(
         runtime, "group_778", False, bot=_Bot(), group_id=778
     )
     names = {s.name for s in specs}
@@ -115,7 +131,7 @@ async def test_initiative_tools_respect_context_expand_switch():
 async def test_initiative_instruction_can_be_disabled():
     runtime = _runtime({"proactive_prompt_enable": False})
 
-    _s, _sk, _c, instruction = await build_initiative_tools(
+    _s, _sk, _c, instruction = await _initiative(
         runtime, "group_778", False, bot=_Bot(), group_id=778
     )
 
@@ -305,13 +321,19 @@ async def test_scheduled_message_gets_proactive_block_and_tools(tmp_path, monkey
     finally:
         sched.stop()
 
-    joined = "\n".join(str(m.get("content")) for m in captured["messages"])
-    assert "### 主动性" in joined
-    assert "先自己取" in joined
     tool_names = {t["function"]["name"] for t in captured["kwargs"].get("tools") or []}
     assert {"expand_recent", "expand_message", "expand_user"} <= tool_names
     assert "get_current_session" in tool_names
     assert captured["kwargs"]["max_tool_rounds"] == 5
+
+    # 提示块由「触发与调度」插件的 section 装配（测试里的 fake runtime 没装它）：
+    # 直接验证插件构建器按本轮真实工具给出了引导。
+    from app.plugins.llm_trigger.src.prompt import build_proactive_instruction
+
+    block = build_proactive_instruction(
+        module.config, "", available_tools=tool_names, dedupe=True
+    )
+    assert block and "### 上下文补全" in block and "先自己取" in block
 
 
 async def test_scheduled_message_skips_tools_when_disabled(tmp_path, monkeypatch):
@@ -352,7 +374,7 @@ async def test_collect_tools_maps_session_targets(tmp_path, is_group):
 
     try:
         entry = await sched.schedule(session_id, {"trigger": "明天早上8点", "content": "x"})
-        _specs, _skills, ctx, instruction = await sched._collect_tools(entry)
+        _specs, _skills, ctx = await sched._collect_tools(entry)
     finally:
         sched.stop()
 
@@ -360,4 +382,3 @@ async def test_collect_tools_maps_session_targets(tmp_path, is_group):
     # TaskEntry.target 是 str（与 session_id 解析保持一致）；工具侧会自行归一化为纯数字
     assert str(ctx.group_id) == ("500" if is_group else "None")
     assert str(ctx.user_id) == ("None" if is_group else "100")
-    assert instruction and "### 主动性" in instruction

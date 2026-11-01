@@ -212,67 +212,8 @@ def test_tool_tokens_are_subset_of_available_tools():
 # ==================== 5. 其余框架文案跟着方案走 ====================
 
 
-def test_schedule_instruction_follows_preset():
-    texts = {p.key: p.schedule_instruction for p in presets.PRESETS}
-    assert len(set(texts.values())) > 1, "不同方案应给出不同的定时协议说明"
-    for preset in presets.PRESETS:
-        req = PromptRequest(
-            config={"prompt_preset": preset.key, "system_prompt": "人设"},
-            user_text="hi",
-            available_tools=ALL_TOOLS,
-        )
-        assert preset.schedule_instruction in _l1_text(req)
 
 
-def test_message_meta_matches_real_format():
-    """单行/多行格式各取各的说明：不能讲一套、用的是另一套。"""
-    for preset in presets.PRESETS:
-        single = PromptRequest(
-            config={"prompt_preset": preset.key, "user_message_format": "single_line"},
-            user_text="hi",
-            available_tools=ALL_TOOLS,
-        )
-        legacy = PromptRequest(
-            config={"prompt_preset": preset.key, "user_message_format": "legacy"},
-            user_text="hi",
-            available_tools=ALL_TOOLS,
-        )
-        assert preset.message_meta_single_line in _l1_text(single)
-        assert preset.message_meta_legacy in _l1_text(legacy)
-        assert preset.message_meta_single_line != preset.message_meta_legacy
-
-
-def test_proactive_lines_override_only_changes_listed_lines():
-    """方案的主动性覆盖只改它列出的行，能力裁剪与其余行不受影响。"""
-    from app.agent.assembly.prompt import PROACTIVE_LINES, build_proactive_instruction
-
-    override = presets.ROLEPLAY.proactive_lines
-    not_overridden = [k for k in PROACTIVE_LINES if k not in override]
-    assert not_overridden, "方案至少要留下一批未覆盖的行"
-
-    cfg = {"prompt_preset": "roleplay"}
-    text = build_proactive_instruction(
-        cfg,
-        "你好",
-        available_tools={"send_message", "send_poke", "get_chat_history"},
-        lines=override,
-    )
-    assert text is not None
-    assert override["poke"].strip() in text
-    # 未覆盖的行仍是内置原文（这里用 history 行验证：它在 roleplay 侧没被改）
-    assert "history" in not_overridden
-    assert PROACTIVE_LINES["history"].strip() in text
-
-
-def test_emoji_hint_follows_preset():
-    tags = "赞 / 笑哭 / 狗头"
-    variants = {p.key: p.emoji_hint(tags) for p in presets.PRESETS}
-    assert len(set(variants.values())) > 1, "不同方案的表情提示应有差异"
-    for key, text in variants.items():
-        assert tags in text, f"{key} 的表情提示丢了标签"
-
-
-# ==================== 6. 装配接线 ====================
 
 
 def test_selecting_preset_injects_behavior_without_qq_agent_profile():
@@ -342,3 +283,23 @@ def test_presets_keep_text_mode_when_channel_off():
         )
         assert "直接发到" in text, f"{preset.key} 关掉通道后没回到文本发言"
         assert "只是思考" not in text, f"{preset.key} 关掉通道后仍说文本只是思考"
+
+
+def test_presets_carry_only_system_prompt_text():
+    """三套方案只负责「系统提示词正文」：能力文案（定时/主动性/格式/表情）已归插件。
+
+    这条是架构契约：`PromptPreset` 不再有 schedule/meta/emoji/proactive 字段；
+    渲染结果末尾统一带「底线再声明」。
+    """
+    from app.agent.assembly import presets as prompt_presets
+
+    for preset in prompt_presets.PRESETS:
+        assert not hasattr(preset, "schedule_instruction"), preset.key
+        assert not hasattr(preset, "proactive_lines"), preset.key
+        assert not hasattr(preset, "message_meta_single_line"), preset.key
+        assert not hasattr(preset, "emoji_hint"), preset.key
+        rendered = prompt_presets.render(
+            preset, runtime=None, available_tools=None, config={}, modalities=[]
+        )
+        assert rendered.strip(), preset.key
+        assert "【底线再声明" in rendered, f"{preset.key} 缺少底线再声明"
