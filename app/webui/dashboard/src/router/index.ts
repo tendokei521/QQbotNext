@@ -83,11 +83,12 @@ const router = createRouter({
         { path: 'agent/onebot', redirect: '/tools/onebot' },
         { path: 'agent/role', redirect: '/ai' },
         { path: 'agent/model', redirect: '/ai' },
-        // 「进阶中心」已拆成模块：工具 / MCP / 知识库 / 主动消息各回自己的模块配置页
+        // 「进阶中心」已拆成模块：工具 / MCP 回工具扩展，主动与定时已合并为「触发与调度」
         { path: 'agent/tools', redirect: '/modules/llm_tools_extra' },
         { path: 'agent/mcp', redirect: '/modules/llm_tools_extra' },
-        { path: 'agent/knowledge', redirect: '/modules/llm_knowledge' },
-        { path: 'agent/panels', redirect: '/modules/llm_proactive' },
+        // 知识库模块已移除：旧书签回模块列表，避免落到「插件不存在」空态
+        { path: 'agent/knowledge', redirect: '/modules' },
+        { path: 'agent/panels', redirect: '/modules/llm_trigger' },
         // 整个「高级设置」区已移除；旧书签回 AI 对话面板，不留无匹配路由
         { path: 'advanced', redirect: '/ai' },
         { path: 'advanced/:section', redirect: '/ai' },
