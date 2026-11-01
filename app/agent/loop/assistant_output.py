@@ -35,8 +35,13 @@ def _clean_output_for_history(config, text: str) -> str:
 _WARNED_SPEECH_INTENT: set = set()
 
 
-def _build_speech(config):
-    """按配置构造本轮发言记账本；不该启用时返回 None（= 旧的文本即发言）。"""
+def _build_speech(config, *, force: bool = False):
+    """按配置构造本轮发言记账本；不该启用时返回 None（= 旧的文本即发言）。
+
+    Args:
+        force: 本轮已由回复模式判定为发言通道（`reply_mode=participation`）。
+            群级覆盖下 `config` 可能是账号级视图，读不到 `reply_mode`，所以要显式传。
+    """
     from app.agent.delivery.speech import (
         DEFAULT_MAX_BUBBLE_CHARS,
         DEFAULT_MAX_BUBBLES,
@@ -44,7 +49,7 @@ def _build_speech(config):
         speech_via_tool,
     )
 
-    if not speech_via_tool(config):
+    if not (force or speech_via_tool(config)):
         return None
     try:
         max_bubbles = int(config.get("speech_max_bubbles", DEFAULT_MAX_BUBBLES) or DEFAULT_MAX_BUBBLES)
@@ -65,9 +70,11 @@ def speech_needs_text_fallback(speech: Any, use_tools: bool) -> bool:
 
 
 def _speech_intent(config) -> bool:
-    """配置里是否开了发言通道（用于"配置了但没生效"的告警）。"""
+    """本轮是否**应该**走发言通道（由回复模式决定，见 delivery/speech.py）。"""
+    from app.agent.delivery.speech import speech_via_tool
+
     try:
-        return bool(config.get("speech_via_tool", False))
+        return speech_via_tool(config)
     except Exception:  # noqa: BLE001
         return False
 

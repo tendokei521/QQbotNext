@@ -310,8 +310,8 @@ async def stream_response(runtime, event, ctx=None):
         # 发言通道靠工具调用，本轮却拿不到工具（模型/适配器不支持 tool calling）：
         # 硬开只会让模型"想完不发"，表现为整轮静默。这里降级回文本即发言并留痕。
         logger.add_info(account_label(runtime.bot_id)).warning(
-            "[LLM] 发言通道已开启但本轮工具不可用（模型不支持 tool calling），"
-            "已降级为「文本即回复」；如需固定该行为请关掉 speech_via_tool"
+            "[LLM] 发言通道（参与度模式）本轮工具不可用（模型不支持 tool calling），"
+            "已降级为「文本即回复」；请换用支持工具调用的模型，或把回复模式切回条件触发"
         )
         speech = None
         speech_by_tool = False

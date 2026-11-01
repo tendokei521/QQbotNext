@@ -238,7 +238,7 @@ def _has_get(config: Any) -> bool:
     return callable(getattr(config, "get", None))
 
 
-def select_default_output(config: Any = None, runtime: Any = None) -> OutputStrategy:
+def select_default_output(config: Any = None, runtime: Any = None, ctx: Any = None) -> OutputStrategy:
     """框架默认输出策略（模块接管前的既有行为）。
 
     ``config`` 可以是一个**配置视图**（模块接管时传入自己的配置），
@@ -246,9 +246,18 @@ def select_default_output(config: Any = None, runtime: Any = None) -> OutputStra
 
     P6：**能力声明优先**。有模块声明了输出能力（流式/阻塞/发言通道）就按它走；
     没人声明时按配置推导——升级期间行为与改造前完全一致。
+
+    2026-11-01：参与度模式（发言通道）由**回复模式**决定，而不是输出模块。群级覆盖
+    下账号级配置读不到模式，所以 ``ctx.state["participation_gate"]``（本轮已过参与度门）
+    优先于一切声明。
     """
     from app.agent.capabilities import output_capability
 
+    participation_turn = bool(
+        ctx is not None and getattr(ctx, "state", None) and ctx.state.get("participation_gate")
+    )
+    if participation_turn:
+        return StreamOutput(runtime, config)
     capability = output_capability(runtime, config)
     return StreamOutput(runtime, config) if capability.streams else BlockingOutput(runtime, config)
 
@@ -301,11 +310,23 @@ def _safe_get(config: Any, key: str, default: Any) -> Any:
         return default
 
 
-def resolve_output(runtime: Any) -> OutputStrategy:
-    """取该运行时的输出策略；缺失或不合格时回退默认（与 invoker 同口径）。"""
+def resolve_output(runtime: Any, ctx: Any = None) -> OutputStrategy:
+    """取该运行时的输出策略；缺失或不合格时回退默认（与 invoker 同口径）。
+
+    ``ctx`` 参与判定：参与度模式（发言通道）由回复模式决定，模块声明的输出形态
+    不能把它改回"文本即回复"（否则整轮无输出——发言都记在 outbox 里没人 flush）。
+    """
     strategy = getattr(runtime, "output", None)
     if isinstance(strategy, OutputStrategy) and callable(getattr(strategy, "respond", None)):
-        return strategy
+        # 模块接管：参与度模式下仍需框架的发言通道语义——模块策略只在 legacy 生效
+        participation_turn = bool(
+            ctx is not None
+            and getattr(ctx, "state", None)
+            and ctx.state.get("participation_gate")
+        )
+        if not participation_turn:
+            return strategy
+        return select_default_output(getattr(runtime, "config", None), runtime, ctx)
     if strategy is not None and callable(getattr(strategy, "respond", None)):
         return strategy
     if strategy is not None:
@@ -314,4 +335,4 @@ def resolve_output(runtime: Any) -> OutputStrategy:
         logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).warning(
             f"[Output] runtime.output 不可用（{type(strategy).__name__}），已回退默认输出策略"
         )
-    return select_default_output(getattr(runtime, "config", None), runtime)
+    return select_default_output(getattr(runtime, "config", None), runtime, ctx)

@@ -7,7 +7,7 @@
 | 键 | 真实语义 |
 |---|---|
 | `stream_output` | 输出策略是流式还是阻塞 |
-| `speech_via_tool` | 输出策略是"发言通道"（文本只是思考，发话靠 ``send_message``） |
+| `speech_via_tool` | 输出策略是"发言通道"（文本只是思考，发话靠 ``send_message``）；**由回复模式决定**（participation） |
 | `context_expand_enable` | 有没有人提供"上下文按需展开"这项能力（`llm_context` 模块） |
 
 把它们当开关的结果：框架必须知道"谁提供了什么"，并且要靠读配置去猜。于是
@@ -65,8 +65,8 @@ class OutputCapability:
     def from_config(cls, config: Any, *, source: str = "config") -> OutputCapability:
         """按配置推导（**升级兜底**：没人声明时保持改造前的行为）。
 
-        ``speech_via_tool`` 优先于 ``stream_output``：它是发言通道形态，
-        该形态下文本只是思考。
+        「发言通道」由**回复模式**决定（参与度模式 = 文本只是思考），不再读
+        `speech_via_tool`；其余形态仍按 `stream_output` 推导。
         """
         getter = getattr(config, "get", None)
         if not callable(getter):
@@ -78,8 +78,8 @@ class OutputCapability:
             except Exception:  # noqa: BLE001 —— 配置坏了按默认（非流式/非发言通道）
                 return False
 
-        if _flag("speech_via_tool"):
-            return cls(OUTPUT_SPEECH, source)
+        if reply_mode_of(config) == "participation":
+            return cls(OUTPUT_SPEECH, "reply_mode")
         return cls(OUTPUT_STREAM if _flag("stream_output") else OUTPUT_BLOCKING, source)
 
 
@@ -157,14 +157,31 @@ def registry_of(runtime: Any) -> CapabilityRegistry:
     return registry
 
 
+def reply_mode_of(config: Any) -> str:
+    """读回复模式（``legacy`` / ``participation``）；读不到按 legacy。"""
+    getter = getattr(config, "get", None)
+    if not callable(getter):
+        return "legacy"
+    try:
+        return str(getter("reply_mode", "legacy") or "legacy")
+    except Exception:  # noqa: BLE001
+        return "legacy"
+
+
 def output_capability(runtime: Any, config: Any = None) -> OutputCapability:
-    """输出能力：**声明优先**，没人声明就按配置推导（保持旧行为）。"""
+    """输出能力：**回复模式优先** → 模块声明 → 配置推导。
+
+    「发言通道」（文本=思考，发言走 ``send_message``）是回复模式的语义，不是输出模块的
+    一个选项：参与度模式下它必须成立，否则"沉默"这个状态根本不存在。所以这条判定放在
+    声明之前——模块只能决定"流式 / 一次性"，不能把参与度模式改回文本即回复。
+    """
+    cfg = config if config is not None else getattr(runtime, "config", None)
+    if reply_mode_of(cfg) == "participation":
+        return OutputCapability(OUTPUT_SPEECH, "reply_mode")
     registry = getattr(runtime, "capabilities", None)
     if isinstance(registry, CapabilityRegistry) and registry.output is not None:
         return registry.output
-    return OutputCapability.from_config(
-        config if config is not None else getattr(runtime, "config", None)
-    )
+    return OutputCapability.from_config(cfg)
 
 
 def has_tool_capability(

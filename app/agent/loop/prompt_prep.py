@@ -256,16 +256,15 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
     all_specs, skill_blocks, tool_ctx = await _collect_llm_ext(
         runtime, event, session_id, is_private, schedule_enable
     )
-    # 发言通道（P2）：文本只当思考，真正的发言走 send_message / finish。
-    # 只在「speech_via_tool + 流式」齐备时挂上；否则保持旧的文本即发言。
-    # `speech_via_tool` 归模块所有：`llm_output` 接管输出槽时把视图挂 `runtime.output`，
-    # `llm_prompt` 挂 `runtime.assembly_options`；未接管时回退 agent 配置，行为不变。
-    # 发言通道跨模块读键（行为规则归 llm_prompt、speech_via_tool 归 llm_output），
-    # 所以用链式视图；未接管任何模块时等价于 agent 配置。
+    # 发言通道：**由回复模式决定**（`reply_mode=participation` ⇒ 文本只当思考，
+    # 真正的发言走 send_message / finish；legacy ⇒ 文本即回复）。
+    # `ctx.state["participation_gate"]` 是流水线本轮过门时打的标记：群级覆盖下
+    # 账号级配置读不到参与度模式，这个标记是唯一可靠的事实。
     from app.agent.policy import policy_view
 
     policy_cfg = policy_view(runtime) or config
-    speech = _build_speech(policy_cfg)
+    participation_turn = bool(ctx is not None and ctx.state.get("participation_gate"))
+    speech = _build_speech(policy_cfg, force=participation_turn)
     if speech is not None:
         from app.agent.delivery.speech import build_speech_tools, persona_output_conflicts
 

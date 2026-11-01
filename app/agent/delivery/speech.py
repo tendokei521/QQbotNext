@@ -312,29 +312,22 @@ def _normalize_at(raw: Any) -> tuple[str, ...]:
 
 
 def speech_via_tool(config: Any, *, stream_output: bool | None = None) -> bool:
-    # 参与度模式必须走工具发送：没有工具就没有"沉默"这个状态
-    try:
-        if config is not None and config.get("reply_mode") == "participation":
-            return True
-    except Exception:  # noqa: BLE001
-        pass
-    """本轮是否启用「文本即思考，send_message 才是发言」的通道。
+    """本轮是否走「文本=思考，send_message 才是发言」的通道。
 
-    **只看一个开关**：``speech_via_tool``。
+    **由回复模式决定**（2026-11-01 从模块移植为系统能力）：
+    - `reply_mode=participation` → 必然 True。参与度模式的沉默语义就建立在这上面，
+      没有它模型只能"把想法直接说出来"，"沉默"无从表达；
+    - `reply_mode=legacy` → False（文本即回复，流式/一次性由输出模块决定）。
 
-    历史实现还要求过一道（现已删除的）「组装档位」总闸且开流式输出；那些是"旧形态"的
-    临时门槛（发言通道最初寄生在流式路径上）。现在发言通道本身已经是产品主形态：
-    - 与提示词方案无关：三套系统提示词方案都能用（提示词里通过 ``caps`` 自动适配）；
-    - 与 ``stream_output`` 无关：声明了发言能力就按流式策略跑（capability 的 ``streams``
-      已经包含 speech），非流式账号也会被自动升级到该策略。
-    ``stream_output`` 参数仅为向后兼容保留，不再参与判定。
+    历史实现读 `speech_via_tool` 开关（llm_output 模块的"输出形态"三选一之一），
+    于是装配层与输出层各看一个开关，最坏组合是"贴了发言协议但输出层按文本发"。
+    那个键已退役，输出模块不再管发言通道。
     """
+    from app.agent.capabilities import reply_mode_of
+
     if config is None or not hasattr(config, "get"):
         return False
-    try:
-        return bool(config.get("speech_via_tool", False))
-    except Exception:  # noqa: BLE001 —— 配置异常时退回旧的文本即发言
-        return False
+    return reply_mode_of(config) == "participation"
 
 
 def build_speech_tools(outbox: SpeechOutbox) -> list[ToolSpec]:

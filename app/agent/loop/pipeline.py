@@ -495,7 +495,7 @@ class LlmPipeline:
         # 与其静默降级，不如拒绝本轮并让用户看得见原因。
         from app.agent.capabilities import OUTPUT_SPEECH, output_capability
 
-        capability = output_capability(self.runtime, None)
+        capability = output_capability(self.runtime, config)
         if capability.kind != OUTPUT_SPEECH:
             log_skip(
                 account_id,
@@ -732,7 +732,7 @@ class LlmPipeline:
             await self._observe(ctx)
 
             # 2. 实际 LLM 请求 —— 交给输出策略（`runtime.output`，模块可整体接管）
-            await self._drive(ctx, resolve_output(self.runtime))
+            await self._drive(ctx, resolve_output(self.runtime, ctx))
         except asyncio.CancelledError:
             raise
         except Exception as e:
