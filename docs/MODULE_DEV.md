@@ -910,11 +910,18 @@ runtime.approval_channel = MyApprovalChannel()
 
 | 层 | 默认段 | 说明 |
 |---|---|---|
-| L1 系统提示词 | `behavior` / `schedule` / `proactive` / `message_meta` | 规则与协议；装配时**合并成一条 system** |
+| L1 系统提示词 | `behavior` | 三套方案的正文（含安全规则/工作方式/底线再声明）；装配时合并成一条 system |
 | L2 人格预设 | `persona` | 「我是谁」，唯一来源是人格预设 |
-| L3 钩子注入 | `emoji_hint` / `skills` / `memory` / `background` / `group_log` / `extra` | 插件与本轮动态信息 |
+| L3 钩子注入 | `skills` / `memory` / `background` / `group_log` / `extra` | 插件与本轮动态信息 |
 | L4 对话历史 | `history` | 窗口 / 压缩 / 开场对话 |
 | L5 本轮消息 | `user` | 正文 + 元信息 + 引用 + 图片 |
+
+> **能力文案归插件**（2026-11 起）：`schedule` / `proactive` / `message_meta` / `emoji_hint`
+> 这几段是**能力说明书**，由对应模块自己 `register_section`（见下表 order 约定），
+> 框架不再内置。好处是模块禁用/卸载时整段消失——不会再出现"提示词说能建定时任务、
+> 但调度器已经不在了"的悬空说明。范例：`app/plugins/llm_trigger/src/prompt.py`
+> （定时 40 + 主动性 50）、`app/plugins/llm_prompt/src/prompt.py`（格式说明 60）、
+> `app/plugins/llm_tools_extra/src/prompt.py`（表情提示 30）。
 
 模块只想**加一段**时不必接管整个装配器（`supersedes=("assembly",)` 仍可用于整体替换）：
 
@@ -968,11 +975,11 @@ class Module(BaseModule):
 | order | 段 | 层 | 含义 |
 |---|---|---|---|
 | 10 | `persona` | L2 | 人格 |
-| 20 | `behavior` | L1 | 行为规则 |
-| 30 | `emoji_hint` | L3 | 表情提示 |
-| 40 | `schedule` | L1 | 定时任务协议 |
-| 50 | `proactive` | L1 | 主动性协议 |
-| 60 | `message_meta` | L1 | 消息元信息说明 |
+| 20 | `behavior` | L1 | 行为规则（框架内置） |
+| 30 | `emoji_hint` | L3 | 表情提示（`llm_tools_extra` 注册） |
+| 40 | `schedule` | L1 | 定时任务协议（`llm_trigger` 注册） |
+| 50 | `proactive` | L1 | 主动性协议（`llm_trigger` 注册） |
+| 60 | `message_meta` | L1 | 消息元信息说明（`llm_prompt` 注册） |
 | 70 | `skills` | L3 | 技能说明（可多块） |
 | 80 | `memory` | L3 | 记忆召回 |
 | 90 | `background` | L3 | 背景（指代 + 聊天环境） |
@@ -981,6 +988,10 @@ class Module(BaseModule):
 | 110 | `history` | L4 | 会话历史 |
 | 120 | `user` | L5 | 本轮消息 |
 | 200+ | 插件段 | 默认 L3 | 想插进 L3 中间就取同区间的小数（如 85）；`layer="system_prompt"` 时才在 L1 内按 order 排序 |
+
+> 上表 30/40/50/60 是**内置模块自己占用的号**（它们都显式传 `layer`），框架的
+> `default_sections()` 里只有 10/20/70/80/90/100/110/120；第三方模块请从 200 起，
+> 不要占用这些号，避免和内置模块的能力段撞位置。
 
 同 `order` 的段按 `name` 排序兜底（同一输入必然同一字节，便于快照/前缀缓存）。
 
