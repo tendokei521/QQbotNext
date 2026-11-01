@@ -197,6 +197,13 @@ async def record_user_turn(
     # （[time=…][sender:…]…），那是"给模型的请求视图"，不是消息本身。
     # raw_user_text 缺省时等于 user_text（外部直调路径）。
     body_text, meta_lines = split_user_context(turn.raw_user_text or turn.user_text)
+    # 引用关系落库（只存 id，正文按需 get_context 取回）：否则历史里的 reply 会丢
+    for _seg in getattr(event, "message", None) or []:
+        if getattr(_seg, "type", "") == "reply":
+            _rid = str((getattr(_seg, "data", {}) or {}).get("id", "") or "")
+            if _rid:
+                meta_lines = list(meta_lines) + [f"[reply_to:id={_rid}]"]
+            break
     event_segments = _segments_as_dicts(getattr(event, "message", None))
 
     # 图片：**收到即落盘**。历史里只留本地指向（sha），远端直链不写进历史——QQ 图片链接

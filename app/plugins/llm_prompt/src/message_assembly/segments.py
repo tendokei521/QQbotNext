@@ -35,8 +35,9 @@ def _seg(seg: Any) -> tuple[str, dict]:
     return str(getattr(seg, "type", "") or ""), _data(seg)
 
 
-def render_segments(message: Any) -> str:
-    """渲染内容流（按原始段顺序，text/at/占位符交错）。"""
+def render_segments(message: Any, message_id: Any = None) -> str:
+    """渲染内容流；`message_id` 是承载这条消息的 id（图片/转发占位符优先用它，
+    因为 get_msg / get_forward_msg 认的是消息 id，不是段内 file hash）。"""
     parts: list[str] = []
     for seg in message or []:
         stype, data = _seg(seg)
@@ -52,7 +53,7 @@ def render_segments(message: Any) -> str:
         elif stype == "reply":
             continue
         elif stype in PLACEHOLDERS:
-            ident = _seg_id(data)
+            ident = str(message_id or "") or _seg_id(data)
             parts.append(marker(PLACEHOLDERS[stype], f"id={ident}" if ident else ""))
         elif stype:
             parts.append(f"[{stype}]")

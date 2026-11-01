@@ -75,6 +75,7 @@ async def format_user_context(ctx) -> None:
         group_id=getattr(group, "group_id", None),
         group_name=getattr(group, "group_name", "") or "",
         reply=reply or None,
+        message_id=getattr(event, "message_id", None),
     )
     if rendered and rendered != ctx.user_text:
         ctx.user_text = rendered

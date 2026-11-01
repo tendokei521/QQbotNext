@@ -147,6 +147,10 @@ async def _handle(tool_ctx: ToolContext, args: dict) -> str:
         try:
             resp = await bot.get_msg(ref)
         except Exception as e:  # noqa: BLE001
+            # 兼容老占位符传的是图片 file hash（不是消息 id）：尝试 get_image
+            got = await _try_get_image(bot, ref)
+            if got:
+                return got
             return f"取回图片消息 {ref} 失败：{e}"
         data = (resp or {}).get("data", {}) or {}
         urls: list[str] = []
@@ -160,6 +164,22 @@ async def _handle(tool_ctx: ToolContext, args: dict) -> str:
         return f"[image:id={ref}]（图片内容需视觉模型查看；地址：{'; '.join(u for u in urls if u)}）"
 
     return f"不支持的 target 类型：{kind}（可用：message/recent/forward/user/image）"
+
+
+async def _try_get_image(bot: Any, file_ref: str) -> str:
+    """按 file/url 直接取图（OneBot get_image）；取不到返回空串。"""
+    getter = getattr(bot, "get_image", None)
+    if not callable(getter):
+        return ""
+    try:
+        resp = await getter(file=file_ref)
+    except Exception:  # noqa: BLE001
+        return ""
+    data = (resp or {}).get("data", {}) or {}
+    url = str(data.get("url") or data.get("file") or "")
+    if not url:
+        return ""
+    return f"[image:id={file_ref}]（图片内容需视觉模型查看；地址：{url}）"
 
 
 def _normalize_forward(response: Any) -> list[dict]:

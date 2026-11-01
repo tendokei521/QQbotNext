@@ -32,7 +32,7 @@ def render_history_entry(entry: Any, **kwargs) -> str | None:
     is_me = bool(base.sender_id and str(base.sender_id) in self_ids)
 
     if base.segments:
-        body = render_segments(base.segments)
+        body = render_segments(base.segments, message_id=parsed.message_id)
     else:
         body = escape_body(base.text or parsed.legacy_text or "")
 
@@ -41,7 +41,13 @@ def render_history_entry(entry: Any, **kwargs) -> str | None:
     if base.group_id not in (None, "", 0, "0"):
         head += f",group_id={base.group_id}"
     name = "我" if is_me else (f"用户<{base.sender_id}>" if mask else base.sender_name)
-    return f"[{head}]{_sender_marker(base.sender_id, name)}{body}"
+    line = f"[{head}]{_sender_marker(base.sender_id, name)}{body}"
+    for meta in base.meta_lines or []:
+        text = str(meta or "").strip()
+        if not text:
+            continue
+        line += text if text.startswith("[") else "\n" + text
+    return line
 
 
 def render_current_turn(ctx: Any, **kwargs) -> str | None:

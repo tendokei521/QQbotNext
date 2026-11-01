@@ -35,11 +35,12 @@ def render_turn(
     group_name: str = "",
     time_str: str = "",
     reply: dict | None = None,
+    message_id: Any = None,
 ) -> str:
     """本轮消息：头部 + 发送者 + 内容流 + 引用。"""
     out = [_head_marker(time_str or format_time(), group_id, group_name)]
     out.append(_sender_marker(sender_id, sender_name))
-    out.append(render_segments(message))
+    out.append(render_segments(message, message_id=message_id))
     if reply:
         fields = [
             f"id={reply.get('id', '')}",
@@ -59,13 +60,22 @@ def render_history_entry(
     content: str = "",
     is_me: bool = False,
     mask_nickname: bool = False,
+    message_id: Any = None,
+    meta_lines: list[str] | None = None,
 ) -> str:
     """历史条目：``[time=…][sender:…]正文``（正文已是文本，仅做转义）。"""
     name = sender_name
     if mask_nickname:
         name = f"用户<{sender_id}>"
     head = _head_marker(format_time(time), None, "")
-    return f"{head}{_sender_marker(sender_id, name, is_me=is_me)}{escape_body(content)}"
+    line = f"{head}{_sender_marker(sender_id, name, is_me=is_me)}{escape_body(content)}"
+    # 附注行：结构化标记（如 [reply_to:...]）接在行尾，其它文本另起一行
+    for meta in meta_lines or []:
+        text = str(meta or "").strip()
+        if not text:
+            continue
+        line += text if text.startswith("[") else "\n" + text
+    return line
 
 
 def render_group_event(
