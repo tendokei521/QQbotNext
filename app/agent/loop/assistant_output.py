@@ -125,6 +125,10 @@ async def _flush_speech(speech, session_mgr, session_id: str, config, event):
         yield message
 
 
+#: 公开别名：输出策略（包括非流式的发言通道）flush 气泡时用它。
+flush_speech = _flush_speech
+
+
 async def _force_speak_round(
     runtime, speech, messages, provider_chain, meta, tools, tool_executor
 ) -> None:

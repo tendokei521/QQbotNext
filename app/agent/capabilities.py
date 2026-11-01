@@ -59,7 +59,19 @@ class OutputCapability:
 
     @property
     def streams(self) -> bool:
-        return self.kind in (OUTPUT_STREAM, OUTPUT_SPEECH)
+        """是否**逐句流式产出**。
+
+        注意：「发言通道」（speech）**不是**流式。流式是**请求/响应方式**
+        （边收边用 vs 一次拿全），发言通道是**语义形态**（文本只是思考、发言走工具）。
+        两者正交，历史实现把它们混成一个维度（`kind in (stream, speech)`），
+        结果就是"没开流式却被迫走流式"。这里只把 stream 算流式。
+        """
+        return self.kind == OUTPUT_STREAM
+
+    @property
+    def speech(self) -> bool:
+        """是否是发言通道（文本=思考，发言走 ``send_message``）。"""
+        return self.kind == OUTPUT_SPEECH
 
     @classmethod
     def from_config(cls, config: Any, *, source: str = "config") -> OutputCapability:

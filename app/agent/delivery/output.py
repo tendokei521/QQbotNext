@@ -25,12 +25,24 @@ class OutputStrategy(Protocol):
 
 ## 现状
 
-- `BlockingOutput`：非流式（`generate_response` + `post_response` 钩子 + 输出指令解析）；
-- `StreamOutput`：流式（`stream_response` 逐句 + 可选消息池节奏）；
-- `select_default_output(config)`：**框架默认策略**，按 `stream_output` 选择。
+两个**正交**的维度：
 
-模块可 `supersedes = ("output",)` 并提供自己的 `respond()` 整体替换。
-框架默认策略仍然读 `stream_output` 配置——**在模块接管之前，行为逐字不变**。
+| | 说明 | 谁决定 |
+|---|---|---|
+| **通道** | 文本即回复 / 发言通道（文本=思考，发言走工具） | 回复模式（`reply_mode`） |
+| **传输** | 流式（边收边用）/ 一次拿全 | `stream_output` |
+
+- `BlockingOutput`：文本即回复 + 非流式；
+- `StreamOutput`：文本即回复 + 流式；
+- `SpeechOutput(stream=…)`：发言通道，**两种传输都支持**（流式=轮次边界 flush，非流式=整轮结束统一 flush）；
+- `select_default_output(config, runtime, ctx)`：按上面两个维度选策略。
+
+> 历史坑：发言通道曾经**寄生在流式里**（`capability.streams` 把 speech 也算流式），
+> 结果是"没开流式却被强制走流式请求"，而且非流式路径根本没有 flush 气球的实现。
+> 现在通道与传输拆开，四种组合都成立。
+
+模块可 `supersedes = ("output",)` 并提供自己的 `respond()` 整体替换；
+参与度模式（发言通道）由框架直接决定，模块策略只在 legacy 生效。
 """
 
 from __future__ import annotations
@@ -238,28 +250,114 @@ def _has_get(config: Any) -> bool:
     return callable(getattr(config, "get", None))
 
 
+def _transport_stream(config: Any) -> bool:
+    """请求/响应方式：``True`` = 流式（边收边用），``False`` = 一次拿全。
+
+    **只读 `stream_output`**。这是传输维度的唯一开关，和"是不是发言通道"无关：
+    发言通道可以流式、也可以非流式（见 `SpeechOutput`）。
+    """
+    if config is None:
+        return False
+    getter = getattr(config, "get", None)
+    if not callable(getter):
+        return False
+    try:
+        return bool(getter("stream_output", False))
+    except Exception:  # noqa: BLE001 —— 配置坏了按非流式（最保守的传输方式）
+        return False
+
+
+class SpeechOutput:
+    """发言通道策略：文本只是思考，真正的发言由 ``send_message`` 入稿。
+
+    **通道 ≠ 传输**：`stream` 只决定请求方式，与"文本发不发言"无关。
+
+    - ``stream=True``：走流式循环，在**轮次边界** flush 气泡（想一句说一句，体感最像人）；
+    - ``stream=False``：走一次拿全的非流式请求，本轮结束后**一次性** flush 气泡。
+
+    历史实现把发言通道硬绑在流式上（`capability.streams` 把 speech 也算流式），
+    于是"没开流式却走了流式请求"。这里把两者拆开。
+    """
+
+    def __init__(self, runtime: Any = None, config: Any = None, *, stream: bool = True) -> None:
+        self.runtime = runtime
+        self.config = config
+        self.stream = bool(stream)
+
+    @property
+    def streams(self) -> bool:
+        """是否逐句产出（决定流水线要不要跑 post_stream / 打断语义）。"""
+        return self.stream
+
+    async def respond(self, ctx: Any, *, should_stop: Callable[[], bool] | None = None):
+        if self.stream:
+            inner = StreamOutput(self.runtime, self.config)
+            async for msg in inner.respond(ctx, should_stop=should_stop):
+                yield msg
+            return
+
+        from app.agent.loop.assistant_output import flush_speech
+        from app.agent.loop.generate import generate_response
+
+        runtime = self.runtime or getattr(ctx, "runtime", None)
+        config = self.config if self.config is not None else getattr(runtime, "config", None)
+
+        # 非流式：跑完一轮（工具循环里 send_message 会把气泡入稿）再统一 flush。
+        # 文本=思考，返回值不用（也不该发出去）。
+        try:
+            await generate_response(runtime, getattr(ctx, "event", None), ctx)
+        except Exception as e:  # noqa: BLE001 —— 单轮失败仍要把已入稿的气泡发出去
+            from app.core.logger import account_label, logger
+
+            logger.add_info(account_label(getattr(runtime, "bot_id", "?"))).warning(
+                f"[Speech] 非流式轮次失败（仍会发送已入稿的气泡）: {e}"
+            )
+
+        speech = (getattr(ctx, "state", None) or {}).get("speech_outbox")
+        if speech is None:
+            return
+        session_mgr = getattr(runtime, "session_mgr", None)
+        if session_mgr is None:
+            from app.agent.session.manager import SessionManager
+
+            session_mgr = SessionManager(str(getattr(runtime, "bot_id", "")))
+        session_id = str(getattr(ctx, "session_id", "") or "")
+        async for message in flush_speech(
+            speech, session_mgr, session_id, config, getattr(ctx, "event", None)
+        ):
+            yield message
+
+
 def select_default_output(config: Any = None, runtime: Any = None, ctx: Any = None) -> OutputStrategy:
-    """框架默认输出策略（模块接管前的既有行为）。
+    """框架默认输出策略：**通道**（发言通道 / 文本即回复）× **传输**（流式 / 一次拿全）。
 
-    ``config`` 可以是一个**配置视图**（模块接管时传入自己的配置），
-    这样同一套策略实现既能服务框架默认路径，也能服务模块路径。
+    这两个维度是正交的，四种组合都成立：
 
-    P6：**能力声明优先**。有模块声明了输出能力（流式/阻塞/发言通道）就按它走；
-    没人声明时按配置推导——升级期间行为与改造前完全一致。
+    | 通道 | 传输 | 策略 |
+    |---|---|---|
+    | 文本即回复 | 一次拿全 | `BlockingOutput` |
+    | 文本即回复 | 流式 | `StreamOutput` |
+    | 发言通道 | 流式 | `SpeechOutput(stream=True)` |
+    | 发言通道 | 非流式 | `SpeechOutput(stream=False)` |
 
-    2026-11-01：参与度模式（发言通道）由**回复模式**决定，而不是输出模块。群级覆盖
-    下账号级配置读不到模式，所以 ``ctx.state["participation_gate"]``（本轮已过参与度门）
-    优先于一切声明。
+    通道由**回复模式**决定（`reply_mode=participation` ⇒ 发言通道）；传输由
+    `stream_output` 决定。模块声明（`capabilities`）只在 legacy 且没有上下文时参与，
+    不再能把发言通道改回"文本即回复"。
     """
     from app.agent.capabilities import output_capability
+    from app.agent.delivery.speech import speech_via_tool
 
     participation_turn = bool(
         ctx is not None and getattr(ctx, "state", None) and ctx.state.get("participation_gate")
     )
-    if participation_turn:
-        return StreamOutput(runtime, config)
+    speech = participation_turn or speech_via_tool(config)
+    transport = _transport_stream(config)
+    if speech:
+        return SpeechOutput(runtime, config, stream=transport)
     capability = output_capability(runtime, config)
-    return StreamOutput(runtime, config) if capability.streams else BlockingOutput(runtime, config)
+    if capability.speech:  # 声明了发言通道（模块/配置），同样尊重传输开关
+        return SpeechOutput(runtime, config, stream=transport)
+    return StreamOutput(runtime, config) if transport else BlockingOutput(runtime, config)
 
 
 class ConfigView:
