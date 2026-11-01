@@ -202,6 +202,11 @@
 | Q1 | token 预算按**该账号所有 LLM 调用**计（含压缩/摘要/记忆蒸馏）→ A-12 挂 `metered.py` |
 | Q2 | **私聊不接入**参与度：群聊特有方案；私聊永远走 legacy 触发（A-4/A-9 的判定显式限定 `message_group`） |
 | Q3 | **档位差异主要写在系统提示词**：gate 只做成本闸门、不写语义谓词（§1.1） |
+| Q4 | **发言通道从模块移植为系统能力**（2026-11-01 晚）：`reply_mode=participation` ⇒ 文本=思考、发言走 `send_message`；`legacy` ⇒ 文本即回复。`llm_output` 只保留「流式 / 一次性」，不再提供发言通道；`speech_via_tool` 键退役（DELETED），旧 `mode=speech` 迁移为 `stream`。实现在 `capabilities.output_capability()`（回复模式优先于模块声明）与 `delivery/speech.py::speech_via_tool()`（单一真相）。 |
+
+> 由此带来的**行为变化**：legacy 模式下不再有"发言通道"（以前 `llm_output` 默认就是发言通道）。
+> 想要"文本只是思考、发言走工具"的账号，请把回复模式切到「参与度驱动」。
+
 
 ---
 
