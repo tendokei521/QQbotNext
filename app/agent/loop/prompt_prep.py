@@ -143,6 +143,17 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
         )
 
 
+    # 系统方案：本轮消息组装由框架直接完成（原 llm_prompt 模块的两个钩子）
+    if event is not None:
+        from app.agent.message_assembly.enrich import (
+            collect_user_context,
+            format_user_context,
+        )
+
+        await collect_user_context(ctx)
+        await format_user_context(ctx)
+        user_text = ctx.user_text or user_text
+
     provider_chain = _provider_chain_for(runtime)
     modalities = _modalities_for_chain(provider_chain)
     history_rounds = config.get("history_rounds", 50)

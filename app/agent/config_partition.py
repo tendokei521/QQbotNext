@@ -225,13 +225,6 @@ CORE_KEYS: tuple[str, ...] = (
 #   llm_knowledge                        → 删除（目录早已不存在，键无归宿）
 MODULE_KEYS: dict[str, tuple[str, ...]] = {
     # 提示词组装：组装档位/行为规则/本轮消息渲染（原两个模块的键并集，键名不变）
-    "llm_prompt": (
-        # 提示词注入（2）
-        "behavior_rules_override",
-        "participation",
-        # 消息组装方式（1 个开关）
-        "structured_assembly",
-    ),
     # 触发与调度：主动消息 + 定时任务（同一条"自己发起一轮"的路径）
     "llm_trigger": (
         "proactive_friend_enable",

@@ -148,7 +148,13 @@ class AgentRuntime:
         self.llm_tool_call_hooks = ToolCallHookRegistry(logger)
         self.llm_pipeline = LlmPipeline(self, task_manager=task_manager)
         # 消息组装器：插件可声明 supersedes=("assembly",) 整体替换（FeatureRegistry 自动还原）
+        from app.agent import message_assembly as _assembly
+        from app.agent.message_assembly import history as _history
+
         self.assembler = PromptAssembler()
+        # 系统方案：消息组装/渲染由框架完成（原 llm_prompt 模块能力）
+        self.history_renderer = _history.render_history_entry
+        self.message_assembly = _assembly
         # 历史渲染接管槽：模块可设置（None = 用框架原生渲染），卸载时须还原
         self.history_renderer = None
         # provider 调用策略：插件可声明 supersedes=("provider_invoker",) 整体替换

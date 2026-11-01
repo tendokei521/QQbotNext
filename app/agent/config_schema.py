@@ -15,6 +15,7 @@ SCHEMA = {
     "group_proactive": {"type": "group", "label": "主动消息", "collapsible": True},
     "group_schedule": {"type": "group", "label": "定时任务", "collapsible": True},
     "group_memory": {"type": "group", "label": "长期记忆（实验性）", "collapsible": True},
+    "group_advanced": {"type": "group", "label": "高级选项", "collapsible": True},
     "group_knowledge": {"type": "group", "label": "知识库", "collapsible": True},
     "group_tavily": {"type": "group", "label": "Tavily 联网搜索", "collapsible": True},
     "group_mcp": {"type": "group", "label": "外部工具（MCP）", "collapsible": True},
@@ -241,6 +242,22 @@ SCHEMA = {
         "type": "textarea", "label": "压缩提示词", "description": "让模型生成摘要的指令",
         "default": "请把上面的历史对话压缩成一份简洁但完整的摘要，用于后续对话无缝续接：\n1. 覆盖所有核心话题及最终结论/结果；\n2. 高亮最近的主要关注点；\n3. 如有工具调用、任务进度或待办，说明当前状态和下一步；\n4. 保留用户的重要个人信息、偏好、称呼等关键事实；\n5. 使用与对话相同的语言输出。\n只输出摘要内容，不要输出额外解释。",
         "rows": 6, "group": "group_compress",
+    },
+    "behavior_rules_override": {
+        "type": "textarea", "label": "覆盖行为规则",
+        "description": "留空则用内置规则；填写后整段替换",
+        "default": "", "rows": 6, "group": "group_advanced",
+    },
+    "participation": {
+        "type": "select", "label": "参与度",
+        "description": "影响行为规则段的语气与主动程度",
+        "default": "normal", "group": "group_advanced",
+        "options": {"low": "低（少插话）", "normal": "正常", "high": "高（多参与）"},
+    },
+    "structured_assembly": {
+        "type": "boolean", "label": "结构化消息",
+        "description": "用 [time][sender] 正文 [at] [reply_to] 的标记格式；关闭则发原始正文",
+        "default": True, "group": "group_advanced",
     },
     "max_message_length": {
         "type": "number", "label": "消息最大长度",

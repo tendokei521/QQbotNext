@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.agent import logger
-from .message_assembly import render_turn
+from .render import render_turn
 from app.agent.context.group import UNRESOLVED_REPLY
 
 #: 引用 / @ 的占位与展开语义（与 tools 侧对齐）
@@ -20,9 +20,8 @@ UNRESOLVED_FORWARD = "【未展开:合并转发{id}】"
 
 
 def _cfg(ctx, key: str, default: Any):
-    from app.agent.policy import policy_config
-
-    cfg = policy_config(getattr(ctx, "runtime", None), "meta")
+    # 提示词组装的配置已迁到 agent 配置（不再走模块视图）
+    cfg = getattr(getattr(ctx, "runtime", None), "config", None)
     if cfg is not None and hasattr(cfg, "get"):
         try:
             return cfg.get(key, default)
@@ -32,7 +31,7 @@ def _cfg(ctx, key: str, default: Any):
 
 
 def _time_str() -> str:
-    from .message_assembly import format_time
+    from .spec import format_time
 
     return format_time()
 
