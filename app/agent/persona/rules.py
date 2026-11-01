@@ -46,7 +46,6 @@ _TOOL_CAPS: dict[str, tuple[str, ...]] = {
     "has_expand": ("expand_message", "expand_recent"),
     "has_expand_user": ("expand_user",),
     "has_image": ("expand_image",),
-    "has_history": ("get_chat_history",),
     "has_schedule": ("schedule_task",),
     "has_knowledge": ("knowledge_search",),
 }
@@ -230,9 +229,7 @@ def work_protocol(caps: dict) -> str:
             "标记成【已展开:… → 摘要】的表示已经取过，不要再重复取。"
             "确实取不到就直接说这项拿不到，不要按标记里的数字猜内容。"
         )
-    if caps.get("has_history"):
         add(
-            "上下文不足以回答「刚才/之前聊了什么」时，用 get_chat_history 翻记录再回答，"
             "不要凭印象编，也不要说「我不记得」。"
         )
     return "\n".join(["【工作方式】", *body])

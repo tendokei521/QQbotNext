@@ -35,7 +35,6 @@ SCHEDULE_INSTRUCTION = """### 定时任务
 
 PROACTIVE_HISTORY_LINE = (
     "- 上下文不足时先查记录：用户问“刚才/之前聊了什么”“我说过什么”“你指的是哪条”，"
-    "或当前对话记录不足以回答时，调用 get_chat_history（无需参数；本地记录不足会自动补拉 "
     "QQ 聊天记录）。先查到内容再回答，不要凭猜测，也不要说“我不记得”。"
     "若用户在私聊里问“某个群说了什么”，带上 group_name 查那个群（只能查你自己也在的群）。"
 )
@@ -75,7 +74,6 @@ PROACTIVE_REFERENT_LINE = (
     "- 用户说“上一条消息/刚才那条”这类**按位置指代**时用 expand_recent，不需要 id。"
 )
 PROACTIVE_HISTORY_NUDGE = (
-    "- 就本轮而言：用户在追问历史，必须先调用 get_chat_history 核实内容再回答，"
     "不要直接说“我不记得”，也不要凭印象编。"
 )
 PROACTIVE_ENV_NUDGE = (
@@ -162,7 +160,7 @@ def build_proactive_instruction(
         return None
 
     tools = set(available_tools) if available_tools is not None else None
-    has_history = tools is None or "get_chat_history" in tools
+    has_history = False  # get_chat_history 工具已删除（2026-11-01）
     has_poke = tools is None or any(name in tools for name in _POKE_TOOL_NAMES)
     has_quote = _cfg_flag(config, "outbound_directive_enable", True)
     has_env = tools is None or "get_current_session" in tools

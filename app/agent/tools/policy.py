@@ -32,7 +32,6 @@ from app.agent.tools.spec import ToolSpec
 _SYSTEM_TOOL_PREREQUISITES: dict[str, tuple] = {
     "schedule_task": ("schedule_enable", "定时任务未启用"),
     "get_current_session": ("", "始终可用"),
-    "get_chat_history": ("", "始终可用"),
     "expand_recent": ("context_expand_enable", "上下文按需展开未启用", True),
     "expand_message": ("context_expand_enable", "上下文按需展开未启用", True),
     "expand_user": ("context_expand_enable", "上下文按需展开未启用", True),

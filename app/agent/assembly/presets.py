@@ -146,8 +146,6 @@ def _rp_work_protocol(caps: dict) -> str:
         )
         add("分条：一句台词一条消息；同一段话不要拆到两条里，也不要为了分段而用空格断句。")
         add("想留白、想等对方先开口时：这一轮可以只回很短一句，或者干脆不接。")
-    if caps.get("has_history"):
-        add("对方提起「刚才/之前说过什么」时，用 get_chat_history 翻记录，保持前后一致，不要编。")
     return "\n".join(["【扮演的工作方式】", *body])
 
 
@@ -266,7 +264,6 @@ def _as_work_protocol(caps: dict) -> str:
         )
         add(
             "工具调用是动作，不是写代码：send_message=回复、tavily_search=查资料、"
-            "get_chat_history=翻记录。内心不要写「我调用 xx 获取数据」这种伪代码。"
         )
         add(
             "回复要完整、可读：结论放最前面，需要步骤就用 1. 2. 3. 写清楚；"
@@ -288,8 +285,6 @@ def _as_work_protocol(caps: dict) -> str:
     )
     if caps.get("has_search"):
         add("需要现实世界的事实、时效信息或你不确定的内容时，用 tavily_search 查证后再回答。")
-    if caps.get("has_history"):
-        add("用户提到之前的对话时，用 get_chat_history 查证，不要凭印象编。")
     return "\n".join(["【工作方式】", *body])
 
 

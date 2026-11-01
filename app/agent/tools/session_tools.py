@@ -433,9 +433,6 @@ def build_session_tools(runtime: Any, ctx: Any) -> list[ToolSpec]:
     async def _current_session(_ctx, _args: dict) -> str:
         return await _handle_current_session(ctx, _args)
 
-    async def _chat_history(_ctx, _args: dict) -> str:
-        return await _handle_chat_history(ctx, _args)
-
     return [
         ToolSpec(
             name="get_current_session",
@@ -449,50 +446,6 @@ def build_session_tools(runtime: Any, ctx: Any) -> list[ToolSpec]:
                 "properties": {},
             },
             handler=_current_session,
-            permission="member",
-            scopes=("*",),
-            source="system",
-            category="会话",
-        ),
-        ToolSpec(
-            name="get_chat_history",
-            description=(
-                "获取聊天记录。不传参数＝当前会话（默认先给本地记录，本地条数不足时自动补拉 "
-                "QQ 原始聊天记录，最近 30 条）；当用户问“刚才/之前聊了什么”“我说过什么”"
-                "“你指的是哪条”，或需要更早的上下文来回答时调用；不要在记录不足时凭猜测回答"
-                "或说“我不记得”。\n"
-                "跨会话（仅私聊场景）：用户在私聊里问“群里/某群说了什么”时，用 group_name（群名，"
-                "如“蛋挞空间站”）或 group_id 指定该群；只允许查询发起人自己也是成员的群，"
-                "结果只发给发起人。不要用它去查别的私聊记录。\n"
-                "scope：auto=本地优先、不足补 QQ（默认）；local=仅本地（仅当前会话）；qq=仅 QQ。"
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "scope": {
-                        "type": "string",
-                        "enum": ["auto", "local", "qq"],
-                        "description": "auto=本地优先、不足自动补 QQ（默认）；local=仅本地；qq=仅 QQ",
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "返回条数，1~100，默认 30。",
-                    },
-                    "group_id": {
-                        "type": "integer",
-                        "description": "要查询的群号；只在私聊里、且你/发起人是该群成员时可用（跨会话查询）",
-                    },
-                    "group_name": {
-                        "type": "string",
-                        "description": "要查询的群名（用户通常只说群名）；与 group_id 二选一，匹配到多个群时会返回候选让用户确认",
-                    },
-                    "user_id": {
-                        "type": "integer",
-                        "description": "私聊对方的 QQ 号；只允许查当前会话这一条私聊，其它一律拒绝",
-                    },
-                },
-            },
-            handler=_chat_history,
             permission="member",
             scopes=("*",),
             source="system",
