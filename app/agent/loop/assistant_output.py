@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from app.domain.splitter import strip_stream_artifacts
 from app.domain.tags import strip_all_tags
 
@@ -30,12 +32,13 @@ def _clean_output_for_history(config, text: str) -> str:
 _WARNED_SPEECH_INTENT: set = set()
 
 
-def _build_speech(config, *, force: bool = False):
+def _build_speech(config, *, force: bool = False, immediate: bool = False):
     """按配置构造本轮发言记账本；不该启用时返回 None（= 旧的文本即发言）。
 
     Args:
         force: 本轮已由回复模式判定为发言通道（`reply_mode=participation`）。
             群级覆盖下 `config` 可能是账号级视图，读不到 `reply_mode`，所以要显式传。
+        immediate: 入稿即发送（非流式请求没有轮次边界可 flush，只能由工具自己发）。
     """
     from app.agent.delivery.speech import (
         DEFAULT_MAX_BUBBLE_CHARS,
@@ -53,7 +56,7 @@ def _build_speech(config, *, force: bool = False):
         )
     except Exception:  # noqa: BLE001 —— 配置异常时用默认值，不要因此关掉发言通道
         max_bubbles, max_chars = DEFAULT_MAX_BUBBLES, DEFAULT_MAX_BUBBLE_CHARS
-    return SpeechOutbox(max_bubbles=max_bubbles, max_chars=max_chars)
+    return SpeechOutbox(max_bubbles=max_bubbles, max_chars=max_chars, immediate=immediate)
 
 
 def _speech_intent(config) -> bool:
@@ -98,4 +101,69 @@ async def _flush_speech(speech, session_mgr, session_id: str, config, event):
 
 #: 公开别名：输出策略（包括非流式的发言通道）flush 气泡时用它。
 flush_speech = _flush_speech
+
+
+async def deliver_now(ctx: Any, speech: Any) -> tuple[int, str]:
+    """把 outbox 里的气泡**立刻**发出去（工具调用即发送）。
+
+    用于非流式请求：那条路径没有"轮次边界"可以 flush，气泡只能由工具自己发——
+    否则模型调完 ``send_message`` 还要等整轮结束，用户会看到明显的延迟。
+
+    与 `_flush_speech` 的区别：后者产出 ``Message`` 交给流水线发送（会走
+    ``pre_send``/``post_send`` 钩子）；这里必须自己发，所以只做"发送 + 写历史 +
+    回填 message_id"三件事。
+
+    Returns:
+        ``(成功条数, 错误文本)``：错误文本非空时由工具回执告诉模型（它可以重试）。
+    """
+    from app.agent.delivery.directives import OutboundDirectives, assemble_message
+    from app.domain.splitter import strip_stream_artifacts
+    from app.domain.tags import strip_all_tags
+
+    bot = getattr(ctx, "bot", None)
+    event = getattr(ctx, "event", None)
+    runtime = getattr(ctx, "runtime", None)
+    if bot is None or event is None or speech is None:
+        return 0, "没有可用的发送上下文（主动消息/定时任务请改用普通回复）"
+
+    session_id = str(getattr(ctx, "session_id", "") or "")
+    session_mgr = getattr(runtime, "session_mgr", None) if runtime is not None else None
+    if session_mgr is None:
+        from app.agent.session.manager import SessionManager
+
+        session_mgr = SessionManager(str(getattr(runtime, "bot_id", "") or ""))
+    is_group = (
+        getattr(event, "event_type", "") == "message_group"
+        or getattr(event, "group", None) is not None
+    )
+    sent = 0
+    for bubble in speech.take():
+        text = strip_stream_artifacts(strip_all_tags(bubble.text)).strip()
+        if not text:
+            continue
+        directives = OutboundDirectives(reply=bool(bubble.reply_to), ats=list(bubble.at))
+        message = assemble_message(
+            text,
+            directives,
+            event,
+            is_group=is_group,
+            reply_message_id=bubble.reply_to or None,
+        )
+        try:
+            if is_group:
+                response = await bot.send_group_msg(event.group.group_id, message)
+            else:
+                response = await bot.send_private_msg(event.user_id, message)
+        except Exception as e:  # noqa: BLE001 —— 交给模型决定是否重试
+            return sent, f"发送失败: {e}"
+        sent += 1
+        session_mgr.add_message(session_id, "assistant", _clean_output_for_history(None, text))
+        data = response.get("data") if isinstance(response, dict) else None
+        mid = (data or {}).get("message_id") if isinstance(data, dict) else None
+        if mid:
+            try:
+                session_mgr.mark_last_assistant_message_id(session_id, mid)
+            except Exception:  # noqa: BLE001 —— 句柄回填失败不影响发送
+                pass
+    return sent, ""
 

@@ -302,8 +302,14 @@ class SpeechOutput:
         runtime = self.runtime or getattr(ctx, "runtime", None)
         config = self.config if self.config is not None else getattr(runtime, "config", None)
 
-        # 非流式：跑完一轮（工具循环里 send_message 会把气泡入稿）再统一 flush。
-        # 文本=思考，**不写历史、不发出去**：历史由 `flush_speech` 按气泡写，
+        # 非流式：没有"轮次边界"可以 flush，所以让 send_message 入稿即发送
+        # （`SpeechOutbox.immediate` → 工具 handler 自己发）。文本仍只是思考。
+        state = getattr(ctx, "state", None)
+        if isinstance(state, dict):
+            state["speech_immediate"] = True
+
+        # 跑完一轮（工具循环里 send_message 会把气泡入稿并直接发出）
+        # 文本=思考，**不写历史、不发出去**：历史由发送方按气泡写，
         # 否则"想过但没发"的正文会被落成一条用户看不到的 assistant 消息。
         try:
             await generate_response(

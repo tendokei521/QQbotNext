@@ -262,7 +262,9 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
 
     policy_cfg = policy_view(runtime) or config
     participation_turn = bool(ctx is not None and ctx.state.get("participation_gate"))
-    speech = _build_speech(policy_cfg, force=participation_turn)
+    # 非流式请求：让 send_message 入稿即发送（见 SpeechOutbox.immediate）
+    immediate = bool(ctx is not None and ctx.state.get("speech_immediate"))
+    speech = _build_speech(policy_cfg, force=participation_turn, immediate=immediate)
     if speech is not None and ctx is not None:
         # 非流式的发言通道需要在一轮结束后统一 flush：把 outbox 挂到 ctx 上，
         # 由输出策略取用（流式路径仍走 meta["speech"]，两条路共用同一个 outbox）。

@@ -76,6 +76,8 @@ SPEECH_PROTOCOL = (
 
 #: 入稿成功的回执：只陈述事实 + 防重复，不再教它怎么写（那是行为段的事）
 QUEUED_OK = "ok: 已排队 {count} 条（本轮结束前会按顺序发出）。这就是发送通道本身，不要再用文本重复同一句。"
+#: 非流式路径的回执：气泡已**直接发出**，不是排队
+QUEUED_SENT = "ok: 已直接发出 {count} 条。这就是发送通道本身，不要再用文本重复同一句。"
 #: 触到上限的回执
 QUEUED_LIMIT = (
     "error: 本轮已排队 {count}/{limit} 条，不再接受新消息。"
@@ -117,6 +119,9 @@ class SpeechOutbox:
 
     max_bubbles: int = DEFAULT_MAX_BUBBLES
     max_chars: int = DEFAULT_MAX_BUBBLE_CHARS
+    #: 入稿即发送：非流式请求没有"轮次边界"可 flush，只能由工具自己把气泡发出去
+    #: （否则用户要等整轮结束才看到消息，体感像"点了发送没反应"）。
+    immediate: bool = False
     bubbles: list[SpeechBubble] = field(default_factory=list)
     finished: bool = False
     finish_reason: str = ""
@@ -377,6 +382,15 @@ def build_speech_tools(outbox: SpeechOutbox) -> list[ToolSpec]:
         if accepted == 0:
             # 全部被拒/被去重：把原因原样回传（模型据此修正，而不是以为说完了）
             return "\n".join(notes) or "error: 没有可发送的正文。"
+        # 非流式请求：入稿即发送（没有轮次边界可 flush，等整轮结束用户会明显感到慢）
+        if getattr(outbox, "immediate", False):
+            from app.agent.loop.assistant_output import deliver_now
+
+            sent, error = await deliver_now(ctx, outbox)
+            if error:
+                return f"error: {error}（已发 {sent} 条）"
+            tail = ("\n" + "\n".join(notes)) if notes else ""
+            return QUEUED_SENT.format(count=sent) + tail
         reply = QUEUED_OK.format(count=accepted)
         if len(texts) > accepted:
             reply += f"\n（另 {len(texts) - accepted} 条未入稿：已到本轮条数上限，或与本轮某条重复）"
