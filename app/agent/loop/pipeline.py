@@ -458,7 +458,12 @@ class LlmPipeline:
                 # 触发方式可被群级覆盖（"群 A 只回 @、群 B 只认关键词"）
                 config = self._effective_config(ctx.event, self.runtime.config)
                 if str(config.get("reply_mode", "legacy") or "legacy") == "participation":
-                    from app.agent.participation import budget_of, gate, observe_message
+                    from app.agent.participation import (
+                        _cooldown_ok,
+                        budget_of,
+                        gate,
+                        observe_message,
+                    )
 
                     await observe_message(self.runtime, ctx.event, config)
                     ctx.state["user_recorded"] = True
@@ -471,6 +476,15 @@ class LlmPipeline:
                             getattr(self.runtime, "bot_id", "?"),
                             "participation_budget",
                             "参与度模式 10 分钟预算已用完（只记录不请求）",
+                            level="debug",
+                        )
+                        return
+                    cooldown = int(config.get("participation_cooldown_seconds", 20) or 0)
+                    if not _cooldown_ok(self.runtime, ctx.event, cooldown):
+                        log_skip(
+                            getattr(self.runtime, "bot_id", "?"),
+                            "participation_cooldown",
+                            f"同群冷却中（{cooldown}s）",
                             level="debug",
                         )
                         return

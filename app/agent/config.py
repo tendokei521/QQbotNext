@@ -76,6 +76,7 @@ DEFAULT_LLM_CONFIG: dict = {
     "participation_level": "low",
     "participation_max_requests": 60,    # 10 分钟窗口请求上限
     "participation_max_tokens": 10000000,  # 10 分钟窗口 token 上限
+    "participation_cooldown_seconds": 20,  # 同群两次请求最小间隔
     "max_message_length": 1000,  # 单轮原文字符上限（组装标记不计入，先截原文再组装）
     # 流式输出
     "stream_output": False,

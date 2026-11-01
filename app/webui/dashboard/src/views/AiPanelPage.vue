@@ -103,6 +103,27 @@ function snapshotOf(): string {
 
 const triggerDirty = computed(() => snapshotOf() !== savedTrigger.value)
 
+/** 新版参与度模式（agent 配置，走 2 秒自动保存） */
+const replyMode = computed<string>({
+  get: () => String(agent.draft.reply_mode || 'legacy'),
+  set: (v) => agent.onChange('reply_mode', v),
+})
+const participationLevel = computed<string>({
+  get: () => String(agent.draft.participation_level || 'low'),
+  set: (v) => agent.onChange('participation_level', v),
+})
+const PARTICIPATION_ITEMS = [
+  { title: '极低（仅 @ / 回复我）', value: 'very_low' },
+  { title: '低（只接与自己相关的）', value: 'low' },
+  { title: '中（延续正在聊的话题）', value: 'medium' },
+  { title: '高（参与可讨论的话题）', value: 'high' },
+  { title: '超高（几乎都参与）', value: 'very_high' },
+]
+const participationCooldown = computed<number>({
+  get: () => Number(agent.draft.participation_cooldown_seconds ?? 20),
+  set: (v) => agent.onChange('participation_cooldown_seconds', Number(v) || 0),
+})
+
 /** 摘要固定来自 /api/policy 的解析结果（账号层覆盖 + 旧键折算后的值） */
 async function loadGlobalPolicy() {
   if (!bots.currentAccountId) {
@@ -411,6 +432,45 @@ watch(
           variant="outlined"
           hide-details
         />
+      </PanelCard>
+
+      <!-- ②b 回复模式：旧版条件触发 / 新版参与度驱动 -->
+      <PanelCard title="回复模式" icon="mdi-transit-connection-variant" color="warning">
+        <div class="text-caption app-muted mb-2">新版：所有消息都记入会话，由参与度决定是否发言</div>
+        <v-select
+          v-model="replyMode"
+          :items="[
+            { title: '条件触发（旧版）', value: 'legacy' },
+            { title: '参与度驱动（新版）', value: 'participation' },
+          ]"
+          label="模式"
+          density="compact"
+          variant="outlined"
+          hide-details
+          class="mb-3"
+          :disabled="!hasAccount"
+        />
+        <template v-if="replyMode === 'participation'">
+          <v-select
+            v-model="participationLevel"
+            :items="PARTICIPATION_ITEMS"
+            label="参与度"
+            density="compact"
+            variant="outlined"
+            hide-details
+            class="mb-3"
+          />
+          <v-text-field
+            v-model.number="participationCooldown"
+            label="同群冷却（秒）"
+            type="number"
+            min="0"
+            max="600"
+            density="compact"
+            variant="outlined"
+            hide-details
+          />
+        </template>
       </PanelCard>
 
       <!-- ③ 模型：复用设置区的模型卡（自读 store，不需要 props）；加入动作只在卡里出现一次 -->

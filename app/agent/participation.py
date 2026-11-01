@@ -153,6 +153,24 @@ def _session_id(event: Any) -> str:
     return f"private_{getattr(event, 'user_id', '')}"
 
 
+def _cooldown_ok(runtime: Any, event: Any, seconds: int) -> bool:
+    if seconds <= 0:
+        return True
+    now = time.time()
+    last = getattr(runtime, 'participation_last_request', None)
+    if last is None:
+        last = {}
+        try:
+            runtime.participation_last_request = last
+        except Exception:  # noqa: BLE001
+            return True
+    key = _session_id(event)
+    if now - float(last.get(key, 0) or 0) < seconds:
+        return False
+    last[key] = now
+    return True
+
+
 def gate(runtime: Any, event: Any, level: str) -> tuple[bool, str]:
     """本地规则门：True=进入 LLM，False=只记录不请求。"""
     self_id = str(getattr(event, "self_id", "") or "")

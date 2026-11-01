@@ -260,6 +260,11 @@ SCHEMA = {
         "description": "参与度模式下的预算保护，超出后只记录不请求",
         "default": 60, "min": 1, "max": 1000, "group": "group_advanced",
     },
+    "participation_cooldown_seconds": {
+        "type": "number", "label": "同群冷却（秒）",
+        "description": "参与度模式下同一群两次请求的最小间隔，防止连续刷屏",
+        "default": 20, "min": 0, "max": 600, "group": "group_advanced",
+    },
     "participation_max_tokens": {
         "type": "number", "label": "10 分钟 token 上限",
         "description": "参与度模式下的 token 预算，超出后只记录不请求",

@@ -312,6 +312,12 @@ def _normalize_at(raw: Any) -> tuple[str, ...]:
 
 
 def speech_via_tool(config: Any, *, stream_output: bool | None = None) -> bool:
+    # 参与度模式必须走工具发送：没有工具就没有"沉默"这个状态
+    try:
+        if config is not None and config.get("reply_mode") == "participation":
+            return True
+    except Exception:  # noqa: BLE001
+        pass
     """本轮是否启用「文本即思考，send_message 才是发言」的通道。
 
     **只看一个开关**：``speech_via_tool``。
