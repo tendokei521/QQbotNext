@@ -49,7 +49,7 @@ watch(
   <div>
     <div class="app-page-header">
       <div>
-        <h1 class="app-page-title">高级工具</h1>
+        <h1 class="app-page-title">工具管理</h1>
         <div class="app-page-subtitle">四类工具的开关与可用状态</div>
       </div>
       <div class="d-flex flex-wrap gap-2">

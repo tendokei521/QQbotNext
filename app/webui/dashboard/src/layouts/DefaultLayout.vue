@@ -54,7 +54,7 @@ const moreMenu = ref(false)
 
 /** 侧栏分组标题：路由 watch 与激活态判断共用，避免同名字符串散落多处。 */
 const AGENT_GROUP = 'AI 设置'
-const TOOLS_GROUP = '高级工具'
+const TOOLS_GROUP = '工具管理'
 /** 群概览入口统一用这个标题，顶栏按钮与弹窗标题一致 */
 const GROUP_OVERVIEW_TITLE = '群与账号概览'
 
@@ -94,7 +94,7 @@ interface NavItem {
   children?: NavChild[]
 }
 
-/** 高级工具默认隐藏在实验性开关后；但用户直接打开 /tools/* 时临时显示分组（不改持久化开关） */
+/** 工具管理默认隐藏在实验性开关后；但用户直接打开 /tools/* 时临时显示分组（不改持久化开关） */
 const isToolsActive = computed(() => route.path.startsWith('/tools'))
 
 const navItems = computed<NavItem[]>(() => {
@@ -102,7 +102,7 @@ const navItems = computed<NavItem[]>(() => {
   const agentChildren: NavChild[] = agentSidebarEntries()
   // 历史：曾有「高级设置」独立区（内容拆成模块后只剩空概览页，已移除），
   // 以及实验性「配置档案」入口（整套能力已下线）。
-  // 「高级工具」属于实验性入口：默认隐藏，设置里打开实验性选项后才常驻。
+  // 「工具管理」属于实验性入口：默认隐藏，设置里打开实验性选项后才常驻。
   // 用户经直链/旧书签进入 /tools/* 时临时显示该入口，避免"进来了却没有归属"。
   // 只保留一个入口（/tools/overview）：页内 tab 才是唯一子导航，避免侧栏与 tab 两套并列。
   const showExperimental = Boolean(webui.config.experimental?.show_experimental) || isToolsActive.value
@@ -143,7 +143,7 @@ const isAiSettingsActive = computed(() => route.path.startsWith('/ai/settings'))
 /** 导航高亮：/ai、/reply 精确匹配（避免设置页把面板也点亮），其余允许子路径 */
 function isNavActive(item: NavItem): boolean {
   if (!item.to) return false
-  // 高级工具只有一个入口；其下所有 tab 都算在这个入口上
+  // 工具管理只有一个入口；其下所有 tab 都算在这个入口上
   if (item.to === '/tools/overview') return isToolsActive.value
   if (item.to === '/ai' || item.to === '/reply') return route.path === item.to
   return route.path === item.to || (item.to !== '/' && route.path.startsWith(item.to + '/'))

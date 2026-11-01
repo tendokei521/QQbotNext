@@ -97,7 +97,7 @@ const router = createRouter({
         {
           path: 'tools',
           component: () => import('@/views/ToolsPage.vue'),
-          meta: { title: '高级工具' },
+          meta: { title: '工具管理' },
           children: [
             {
               path: 'overview',

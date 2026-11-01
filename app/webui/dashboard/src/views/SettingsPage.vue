@@ -139,7 +139,7 @@ const showExperimental = computed<boolean>({
         <v-card-text>
           <v-switch
             v-model="showExperimental"
-            label="显示高级工具与调试入口"
+            label="显示工具管理与调试入口"
             color="warning"
             density="compact"
             hide-details
