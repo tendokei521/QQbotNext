@@ -1,19 +1,61 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useWebuiStore } from '@/stores/webui'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import PromptPresetEditorDialog from '@/components/settings/PromptPresetEditorDialog.vue'
+import http from '@/api/http'
+import { useAgentConfigStore } from '@/stores/agentConfig'
 
 const router = useRouter()
 const route = useRoute()
 const webui = useWebuiStore()
 const notify = useNotifyStore()
 const promptDialog = ref(false)
+const agent = useAgentConfigStore()
+
+/** 提示词组装（系统方案）：行为规则 / 参与度 / 结构化消息 */
+const advanced = reactive({
+  behavior_rules_override: '',
+  participation: 'normal',
+  structured_assembly: true,
+})
+const advancedSaving = ref(false)
+
+async function loadAdvanced() {
+  if (!agent.botId) return
+  try {
+    const res = await http.get('/api/agent/config', { params: { account_id: agent.botId } })
+    const cfg = (res.data && res.data.config) || {}
+    advanced.behavior_rules_override = cfg.behavior_rules_override ?? ''
+    advanced.participation = cfg.participation ?? 'normal'
+    advanced.structured_assembly = cfg.structured_assembly !== false
+  } catch {
+    /* 读取失败保持默认值，不阻断设置页 */
+  }
+}
+
+async function saveAdvanced() {
+  if (!agent.botId || advancedSaving.value) return
+  advancedSaving.value = true
+  try {
+    await http.post(
+      '/api/agent/config',
+      { config: { ...advanced } },
+      { params: { account_id: agent.botId } },
+    )
+  } catch (err) {
+    notify.push(errorMessage(err), 'error')
+  } finally {
+    advancedSaving.value = false
+  }
+}
+
 
 /** 从「AI 对话面板 → 提示词风格」跳过来时直接打开编辑弹窗（query: ?prompt-presets=1） */
 onMounted(() => {
+  loadAdvanced()
   if (!route.query['prompt-presets']) return
   promptDialog.value = true
   const query = { ...route.query }
@@ -145,6 +187,41 @@ const showExperimental = computed<boolean>({
             hide-details
           />
           <div class="app-muted mt-1">开启后侧边栏显示工具调试入口</div>
+
+          <v-divider class="my-4" />
+          <div class="app-muted mb-2">提示词组装（系统方案，改完自动保存）</div>
+          <v-textarea
+            v-model="advanced.behavior_rules_override"
+            label="覆盖行为规则（留空用内置）"
+            rows="4"
+            density="compact"
+            variant="outlined"
+            hide-details
+            class="mb-3"
+            @blur="saveAdvanced"
+          />
+          <v-select
+            v-model="advanced.participation"
+            :items="[
+              { title: '低（少插话）', value: 'low' },
+              { title: '正常', value: 'normal' },
+              { title: '高（多参与）', value: 'high' },
+            ]"
+            label="参与度"
+            density="compact"
+            variant="outlined"
+            hide-details
+            class="mb-3"
+            @update:model-value="saveAdvanced"
+          />
+          <v-switch
+            v-model="advanced.structured_assembly"
+            label="结构化消息（[time][sender] 正文 [at] [reply_to]）"
+            density="compact"
+            hide-details
+            color="warning"
+            @update:model-value="saveAdvanced"
+          />
         </v-card-text>
       </v-card>
 
