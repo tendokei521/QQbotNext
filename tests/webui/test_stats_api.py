@@ -29,6 +29,7 @@ async def env(tmp_path):
     set_recorder(rec)
 
     # 造数据：3 天 × 2 模型
+    # 时间一律取当天凌晨：查询默认窗口是「30 天前 ~ now」，写中午会在上午跑测试时变成未来
     rows = [
         (2, "deepseek-chat", 100, 50, 30, 70, "chat", "99", "group_1"),
         (2, "gpt-4o", 20, 10, 0, 20, "llm_proactive", "99", "group_1"),
@@ -48,12 +49,12 @@ async def env(tmp_path):
             api="deepseek" if "deepseek" in model else "openai",
             model=model,
             session_id=session,
-            ts=_day(offset) + 43200,
+            ts=_day(offset) + 60,
         )
     # 入站消息：一条 llm 响应、一条 ignored
-    rec.record_msg_in(outcome="llm", bot_id="99", session_id="group_1", ts=_day(0) + 43200)
-    rec.record_msg_in(outcome="ignored", bot_id="99", session_id="group_1", ts=_day(0) + 43300)
-    rec.record_msg_out(segments=2, nbytes=40, bot_id="99", session_id="group_1", ts=_day(0) + 43400)
+    rec.record_msg_in(outcome="llm", bot_id="99", session_id="group_1", ts=_day(0) + 60)
+    rec.record_msg_in(outcome="ignored", bot_id="99", session_id="group_1", ts=_day(0) + 160)
+    rec.record_msg_out(segments=2, nbytes=40, bot_id="99", session_id="group_1", ts=_day(0) + 260)
     await rec.flush()
     yield rec, db
     await rec.close()
