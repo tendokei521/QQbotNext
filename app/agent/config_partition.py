@@ -294,7 +294,6 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
         "stream_queue_full_policy",
         "stream_flush_on_finish",
         "stream_keep_order",
-        "speech_via_tool",
         "speech_max_bubbles",
         "speech_max_bubble_chars",
         "speech_reminder_rounds",
@@ -387,6 +386,9 @@ DELETED_KEYS: tuple[str, ...] = (
     "prompt_dump_max_entries",
     # 多行消息块删除后无消费方（结构化组装用 segments 自行渲染"发送了…"）
     "include_sent",
+    # 2026-11-01 发言通道移植：输出形态不再由模块开关决定，而由 reply_mode 决定
+    # （participation ⇒ 文本=思考 + send_message 发言；legacy ⇒ 文本即回复）
+    "speech_via_tool",
     # 循环安全阀：改为框架内硬编码安全默认（5 轮 / 1 次空回复重试 / 1 次收敛）
     # —— 它们不是"功能开关"，暴露给用户只会让用户把钱烧在不理解的地方
     "max_tool_rounds",

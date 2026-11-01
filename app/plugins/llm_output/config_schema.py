@@ -4,9 +4,9 @@ SCHEMA = {
     "mode": {
         "type": "select",
         "label": "输出形态",
-        "description": "speech=文本只当思考、发言走工具（默认）；stream=按句流式；text=一次发完。",
-        "default": "speech",
-        "options": {"speech": "发言通道（默认）", "stream": "流式", "text": "一次性"},
+        "description": "stream=按句流式；text=一次发完。发言通道归回复模式（参与度模式）。",
+        "default": "stream",
+        "options": {"stream": "流式（默认）", "text": "一次性"},
     },
     "stream_output": {
         "type": "boolean",

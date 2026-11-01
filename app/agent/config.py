@@ -46,9 +46,8 @@ DEFAULT_LLM_CONFIG: dict = {
     "user_message_format": "single_line",
     # 时间行位置：tail=挪到消息末尾（默认，让逐轮稳定的行靠前，前缀缓存更有效）；head=旧行为
     "prompt_time_position": "tail",
-    # 发言通道（默认）：True=模型输出的文本只是思考，发言必须调用 send_message
-    # （不调用=静默，这是正常结束）。关掉即回到旧行为「文本就是回复」。
-    "speech_via_tool": True,
+    # 发言通道（文本=思考、send_message=发言）不再是一个开关：它由 reply_mode 决定
+    # （participation ⇒ 发言通道；legacy ⇒ 文本即回复）。下面三个 speech_* 是启用后的细节参数。
     # 一轮最多发几条气泡 / 单条气泡字数上限（防复读机式刷屏）
     "speech_max_bubbles": 4,
     "speech_max_bubble_chars": 300,

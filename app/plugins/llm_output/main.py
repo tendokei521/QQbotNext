@@ -52,7 +52,8 @@ OWNED_KEYS: tuple[str, ...] = (
     "stream_queue_full_policy",
     "stream_flush_on_finish",
     "stream_keep_order",
-    "speech_via_tool",
+    # 发言通道本身（是否走"文本=思考"）已归回复模式决定，本模块不再持有该开关；
+    # 这里保留的 speech_* 只是发言通道启用后的**细节参数**（气泡数/字数/催发言）。
     "speech_max_bubbles",
     "speech_max_bubble_chars",
     "speech_reminder_rounds",
@@ -72,9 +73,9 @@ class Module(BaseModule):
     provides = ("output",)
     supersedes = ("output",)
     default_config = {
-        # 输出形态是**唯一事实源**（`speech_via_tool` / `stream_output` 只用于老配置迁移）。
-        # 默认发言通道：文本=思考、发言走 send_message——与 agent 配置的默认值一致。
-        "mode": "speech",
+        # 输出形态是**唯一事实源**（`stream_output` 只用于老配置迁移）。
+        # 发言通道已归回复模式（`reply_mode=participation`），不再由本模块提供。
+        "mode": "stream",
         "stream_output": False,
         "stream_send_pool_enabled": False,
         "stream_send_by_sentence": True,
@@ -109,26 +110,22 @@ class Module(BaseModule):
             return
 
         adapter = OutputStrategyAdapter(runtime, self.config, OWNED_KEYS)
-        # 策略视图：让**其它机制**（如 prompt_prep 的发言通道门控、发言协议注入）
-        # 读到与输出层同一口径的生效值——`speech_via_tool` 在这里被覆写成
-        # "mode == speech" 的结果，避免两层各看一个开关而互相矛盾。
+        # 策略视图：让**其它机制**读到与输出层同一口径的生效值。
+        # 发言通道不在这里覆写——它由 `reply_mode` 决定（`delivery/speech.py`），
+        # 本模块只负责"流式 / 一次性"。
         runtime.output_options = adapter.options_view()
         runtime.output = adapter
-        # P6 能力声明：本模块声明"这套运行时**能**怎么产出"（三选一）。框架此后按
-        # 声明选策略；"能力存亡"由这里决定（卸载即撤销）。必须与 adapter 真正选中的
-        # 实现一致——否则框架按 speech 处理，输出层却装 BlockingOutput（静默死局）。
+        # P6 能力声明：本模块声明"这套运行时**能**怎么产出"（流式 / 一次性）。框架此后按
+        # 声明选策略；"能力存亡"由这里决定（卸载即撤销）。参与度模式下框架会以
+        # 「回复模式」为准强制发言通道，模块的声明只在 legacy 生效。
         from app.agent.capabilities import (
             OUTPUT_BLOCKING,
-            OUTPUT_SPEECH,
             OUTPUT_STREAM,
             registry_of,
         )
 
         mode = adapter.mode
-        kind = {
-            "speech": OUTPUT_SPEECH,
-            "stream": OUTPUT_STREAM,
-        }.get(mode, OUTPUT_BLOCKING)
+        kind = OUTPUT_STREAM if mode == "stream" else OUTPUT_BLOCKING
         registry_of(runtime).declare_output(kind, source="llm_output")
 
     async def on_unload(self) -> None:

@@ -36,41 +36,41 @@ def _stored_config(config: Any) -> dict:
 
 
 def resolve_mode(module_config: Any) -> str:
-    """本模块**生效的输出形态**：``text`` / ``stream`` / ``speech`` 三选一。
+    """本模块**生效的输出形态**：``stream`` / ``text`` 二选一。
 
-    Args:
-        module_config: 模块配置门面（`ModuleConfig`）或普通 dict。
+    发言通道（文本=思考）已从模块移植为**系统能力**：它由 `reply_mode=participation`
+    决定，本模块不再提供该选项。历史存过 ``speech`` 的账号按流式处理——那是发言通道
+    唯一可用的底层策略，升级后不会静默丢消息。
     """
     stored = _stored_config(module_config)
 
     raw = str(stored.get("mode") or "").strip().lower()
-    if raw in ("text", "stream", "speech"):
+    if raw == "speech":  # 迁移：旧"发言通道"形态 → 流式（发言通道由回复模式接管）
+        return "stream"
+    if raw in ("text", "stream"):
         return raw
 
     # ── 老配置迁移：没有 mode 键，按旧的开关推导，升级后行为不变 ──
     if "speech_via_tool" in stored:
         if stored["speech_via_tool"]:
-            return "speech"
+            return "stream"  # 旧发言通道 → 流式（发言通道现在只看 reply_mode）
         return "stream" if stored.get("stream_output") else "text"
     if "stream_output" in stored:
         return "stream" if stored["stream_output"] else "text"
 
-    # 从没保存过配置 → 用模块默认值（新默认 = 发言通道）
+    # 从没保存过配置 → 用模块默认值（新默认 = 流式）
     getter = getattr(module_config, "get", None)
-    default = getter("mode", "text") if callable(getter) else "text"
-    default = str(default or "text").strip().lower()
-    return default if default in ("text", "stream", "speech") else "text"
+    default = getter("mode", "stream") if callable(getter) else "stream"
+    default = str(default or "stream").strip().lower()
+    if default == "speech":
+        return "stream"
+    return default if default in ("text", "stream") else "stream"
 
 
 class OutputOptionsView(ConfigView):
-    """给「框架其它机制」读的策略视图：``speech_via_tool`` 按**生效形态**给出。
+    """给「框架其它机制」读的策略视图。
 
-    装配层（发言协议 / `send_message` 工具 / 人格 caps）与输出层必须同一口径。
-    其它键仍按 `ConfigView` 的"模块优先、agent 兜底"规则；只有这一个键被覆写成
-    由 `mode` 推导的值（动态计算，用户改配置立刻生效）。
+    以前这里把 ``speech_via_tool`` 覆写成"生效形态 == speech"，好让装配层与输出层
+    同一口径。发言通道归回复模式之后**不再需要**这层覆写：`speech_via_tool()` 只看
+    `reply_mode`，两边天然同源，模块也不再持有那个键。
     """
-
-    def get(self, key: str, default: Any = None) -> Any:
-        if key == "speech_via_tool":
-            return resolve_mode(self._module) == "speech"
-        return super().get(key, default)
