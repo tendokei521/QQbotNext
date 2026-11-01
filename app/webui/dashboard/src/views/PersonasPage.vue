@@ -375,7 +375,9 @@ onMounted(() => {
               hint="写清说话风格和界限，越具体越稳"
               persistent-hint
               placeholder="例如：你是一个混在群里的普通群友，说话简短自然，不端着"
-              rows="10"
+              rows="6"
+              max-rows="26"
+              auto-grow
               variant="outlined"
               spellcheck="false"
             />
