@@ -71,6 +71,8 @@ SPEECH_PROTOCOL = (
     "想说话就调用 send_message（一条消息=一个字符串，多条=字符串数组），"
     "例如要回「在的」就调用 send_message({\"messages\": \"在的\"})；"
     "不想接话就直接结束，这很正常。"
+    "普通接话**直接说就行、不要引用**（不传 reply_to_message_id）；"
+    "只有明确回应某一条具体消息时才引用，且 id 必须是上下文里真实出现过的 message_id，不要自己编号。"
     "不要用文本描述自己打算说什么，也不要在调用工具后再用文本重复一遍。"
 )
 
@@ -364,6 +366,32 @@ def speech_via_tool(config: Any, *, stream_output: bool | None = None) -> bool:
     return reply_mode_of(config) == "participation"
 
 
+def _validated_reply_id(ctx: Any, reply_id: str) -> str:
+    """校验模型给的引用 id：必须是**当前会话真实出现过**的 message_id，否则返回空串。
+
+    线上实测：模型会自己编 id（``"0"`` / ``"1"``），或从上下文里抄一个跟自己无关的
+    message_id。不做校验的后果是发出"引用不存在/引用错人"的消息，甚至日志里有
+    ``[reply]``、QQ 端却因为 id 无效而什么都不显示。
+    """
+    runtime = getattr(ctx, "runtime", None)
+    session_id = str(getattr(ctx, "session_id", "") or "")
+    if not session_id:
+        return ""
+    mgr = getattr(runtime, "session_mgr", None) if runtime is not None else None
+    if mgr is None:
+        from app.agent.session.manager import SessionManager
+
+        mgr = SessionManager(str(getattr(runtime, "bot_id", "") or ""))
+    try:
+        history = mgr.get_history(session_id, limit=getattr(mgr, "MAX_HISTORY_MESSAGES", 200))
+    except Exception:  # noqa: BLE001 —— 查不到就按"无效引用"处理（宁可不引用）
+        return ""
+    for item in history or []:
+        if str(item.get("message_id") or "") == str(reply_id):
+            return str(reply_id)
+    return ""
+
+
 def build_speech_tools(outbox: SpeechOutbox) -> list[ToolSpec]:
     """构造 ``send_message`` / ``finish`` 两个工具。
 
@@ -376,9 +404,21 @@ def build_speech_tools(outbox: SpeechOutbox) -> list[ToolSpec]:
         texts = normalize_messages(args.get("messages"))
         if not texts:
             return "error: messages 不能为空：传字符串=发一条，传字符串数组=连发多条。"
+        notes: list[str] = []
         reply_to = str(args.get("reply_to_message_id") or "").strip()
+        if reply_to:
+            checked = _validated_reply_id(ctx, reply_to)
+            if not checked:
+                # 模型经常自己编 id（"0" / "1" / 抄来的无关数字）：直接丢掉引用，
+                # 否则会发出"引用不存在/引用错人"的消息（线上实测）。
+                notes.append(
+                    f"（reply_to_message_id={reply_to} 不在当前会话的消息 id 里，已忽略引用；"
+                    "要引用只能填上下文里出现过的 message_id）"
+                )
+                reply_to = ""
         ats = _normalize_at(args.get("at_user_id"))
-        accepted, notes = outbox.queue_many(texts, reply_to=reply_to, at=ats)
+        accepted, queue_notes = outbox.queue_many(texts, reply_to=reply_to, at=ats)
+        notes.extend(queue_notes)
         if accepted == 0:
             # 全部被拒/被去重：把原因原样回传（模型据此修正，而不是以为说完了）
             return "\n".join(notes) or "error: 没有可发送的正文。"
@@ -420,7 +460,9 @@ def build_speech_tools(outbox: SpeechOutbox) -> list[ToolSpec]:
                 "- messages：字符串=发一条；字符串数组=连发多条。普通对话 1 条就够、最多 2 条，"
                 "讲故事/回忆/补刀才 2~4 条；\n"
                 "- 数组里每个字符串是一条**完整**消息：不要把同一句话拆到两条里，也不要用空格断句；\n"
-                "- reply_to_message_id：只在「我这条是在回哪一条」需要点明时传（上下文里消息前的 #数字）；\n"
+                "- reply_to_message_id：只有确实要引用某条**真实存在**的消息时才填；"
+                "只能填上下文里出现过的 message_id（形如 `message_id=数字`），"
+                "**不要自己编号**（0、1 这种一律无效），不确定就别传；\n"
                 "- at_user_id：只在需要点名某人才传（对方 QQ 号）；引用已经够清楚时不要再 @；\n"
                 "- 正文里不要写 [reply]/[@QQ] 这类标记，用参数表达；\n"
                 "- 想好了就说，不必先解释、也不要汇报「我已经回复了」。"
