@@ -257,46 +257,6 @@ def gate(runtime: Any, event: Any, level: str) -> tuple[bool, str]:
     return (False, "unknown_level")
 
 
-async def observe_message(runtime: Any, event: Any, config: Any) -> bool:
-    """新版：先把消息写进会话（无论最终是否回复）。返回是否真的写入。"""
-    try:
-        from app.agent.loop.turn_input import (
-            TurnInput,
-            get_or_create_session,
-            record_user_turn,
-        )
-        from app.agent.session.manager import SessionManager
-
-        raw = str(getattr(event, "text", "") or "").strip()
-        if not raw and not getattr(event, "message", None):
-            return False
-        is_private = getattr(event, "event_type", "") != "message_group"
-        group = getattr(event, "group", None)
-        turn = TurnInput(
-            is_private=is_private,
-            session_id=_session_id(event),
-            user_id=str(getattr(event, "user_id", "") or ""),
-            group_id=None if is_private else str(getattr(group, "group_id", "") or ""),
-            user_text=raw,
-            raw_user_text=raw,
-            segment_text=raw,
-            include_pre_history=False,
-        )
-        mgr = SessionManager(str(getattr(runtime, "bot_id", "")))
-        session = await get_or_create_session(mgr, turn, config, None)
-        if session is None:
-            return False
-        user = getattr(event, "user", None)
-        nickname = (getattr(user, "card", "") or getattr(user, "nickname", "") or "") if user else ""
-        await record_user_turn(runtime, event, turn, config, mgr, nickname=nickname)
-        return True
-    except Exception as e:  # noqa: BLE001 —— 观察写入失败不该阻断整轮
-        from app.agent import logger
-
-        logger.debug(f"[参与度] 全量写入失败（已忽略）: {e}")
-        return False
-
-
 __all__ = [
     "BUDGET_WINDOW_SECONDS",
     "Budget",
@@ -309,5 +269,4 @@ __all__ = [
     "gate",
     "reply_rules_section",
     "participation_section",
-    "observe_message",
 ]

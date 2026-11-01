@@ -420,6 +420,105 @@ class LlmPipeline:
             logger.add_info(account_label(self.runtime.bot_id)).warning(f"图片解析失败，按纯文本处理: {e}")
             return []
 
+    # ---------- 群聊准入（观察 → 触发 / 成本门） ----------
+
+    async def _admit_group(self, ctx: LlmContext, config, *, has_image: bool) -> bool:
+        """群聊准入：返回 ``True`` 表示本轮继续（进入 debounce → LLM）。
+
+        调用点必须排在场景/免打扰/用户例外之后：这三类拒绝不该产生历史写入，
+        也不该消耗冷却与预算（旧实现把参与度块放在它们之前）。
+        """
+        if str(config.get("reply_mode", "legacy") or "legacy") == "participation":
+            return await self._admit_participation(ctx, config)
+        triggered, is_at, user_text = self._trigger_decision(
+            ctx.event, config, has_image=has_image
+        )
+        if not triggered:
+            log_skip(
+                getattr(self.runtime, "bot_id", "?"),
+                "trigger_not_matched",
+                f"group={getattr(getattr(ctx.event, 'group', None), 'group_id', '?')} · mode={config.get('trigger_mode', '?')}",
+                hint=hint_for("trigger_not_matched"),
+                # 群消息没 @/关键词是常态（大部分群消息都不是在叫 bot），
+                # 属于技术排查信息，不进用户可见日志（UI 的生效预览已能解释）。
+                level="debug",
+            )
+            return False
+        # 把「触发条件」补进统一判定链，让「为什么不回」在 UI/日志里是同一条链
+        base = self._decision(ctx.event)
+        if base is not None:
+            from app.domain.dialogue_policy import trigger_probability_of
+
+            base = base.with_checks(
+                trigger_check(
+                    triggered,
+                    mode=str(config.get("trigger_mode") or ""),
+                    probability=trigger_probability_of(config),
+                )
+            )
+            remember_decision(ctx.event, base)
+        self._apply_inbound_text(ctx, user_text, is_at)
+        return True
+
+    async def _admit_participation(self, ctx: LlmContext, config) -> bool:
+        """参与度模式：**先全量观察**（不看冷却/触发/预算），再过成本门。
+
+        观察结果决定 ``user_recorded``：只有真的写进历史才标记，否则由
+        `prompt_prep` 的正常路径补写（旧实现无条件置 True → 冷却期消息永久丢失）。
+        """
+        from app.agent.participation import _cooldown_ok, budget_of, gate
+        from app.agent.reply.observer import observe_group_message
+
+        observed, _reason = await observe_group_message(self.runtime, ctx.event, config)
+        if observed:
+            ctx.state["user_recorded"] = True
+
+        account_id = getattr(self.runtime, "bot_id", "?")
+        level = str(config.get("participation_level", "low") or "low")
+        budget = budget_of(self.runtime)
+        max_req = int(config.get("participation_max_requests", 60) or 60)
+        max_tok = int(config.get("participation_max_tokens", 10000000) or 10000000)
+        if not budget.allow(max_req, max_tok):
+            log_skip(
+                account_id,
+                "participation_budget",
+                "参与度模式 10 分钟预算已用完（只记录不请求）",
+                level="debug",
+            )
+            return False
+        cooldown = int(config.get("participation_cooldown_seconds", 20) or 0)
+        if not _cooldown_ok(self.runtime, ctx.event, cooldown):
+            log_skip(
+                account_id,
+                "participation_cooldown",
+                f"同群冷却中（{cooldown}s）",
+                level="debug",
+            )
+            return False
+        ok, reason = gate(self.runtime, ctx.event, level)
+        if not ok:
+            log_skip(
+                account_id,
+                "participation_silent",
+                f"参与度={level} · {reason}",
+                level="debug",
+            )
+            return False
+        budget.record(0)
+        self._apply_inbound_text(ctx, str(getattr(ctx.event, "text", "") or ""), False)
+        return True
+
+    @staticmethod
+    def _apply_inbound_text(ctx: LlmContext, user_text: str, is_at: bool) -> None:
+        """把本轮的可用正文写回 ctx（@ 提及从正文里去掉，避免模型复述）。"""
+        if is_at:
+            ctx.state["is_at"] = True
+            import re
+
+            user_text = re.sub(r"\[CQ:at,qq=\d+\]", "", user_text).strip()
+            user_text = re.sub(r"@\S+\s*", "", user_text).strip()
+        ctx.user_text = user_text.strip()
+
     async def _run(self, job: LlmJob) -> None:
         session_lock: asyncio.Lock | None = None
         lock_acquired = False
@@ -453,91 +552,8 @@ class LlmPipeline:
             if has_image:
                 ctx.state["has_image"] = True
 
-            # 群聊必须满足触发条件（@ 或关键词），否则不进入 LLM 流水线
-            if ctx.event.event_type == "message_group":
-                # 触发方式可被群级覆盖（"群 A 只回 @、群 B 只认关键词"）
-                config = self._effective_config(ctx.event, self.runtime.config)
-                if str(config.get("reply_mode", "legacy") or "legacy") == "participation":
-                    from app.agent.participation import (
-                        _cooldown_ok,
-                        budget_of,
-                        gate,
-                        observe_message,
-                    )
-
-                    await observe_message(self.runtime, ctx.event, config)
-                    ctx.state["user_recorded"] = True
-                    level = str(config.get("participation_level", "low") or "low")
-                    budget = budget_of(self.runtime)
-                    max_req = int(config.get("participation_max_requests", 60) or 60)
-                    max_tok = int(config.get("participation_max_tokens", 10000000) or 10000000)
-                    if not budget.allow(max_req, max_tok):
-                        log_skip(
-                            getattr(self.runtime, "bot_id", "?"),
-                            "participation_budget",
-                            "参与度模式 10 分钟预算已用完（只记录不请求）",
-                            level="debug",
-                        )
-                        return
-                    cooldown = int(config.get("participation_cooldown_seconds", 20) or 0)
-                    if not _cooldown_ok(self.runtime, ctx.event, cooldown):
-                        log_skip(
-                            getattr(self.runtime, "bot_id", "?"),
-                            "participation_cooldown",
-                            f"同群冷却中（{cooldown}s）",
-                            level="debug",
-                        )
-                        return
-                    ok, reason = gate(self.runtime, ctx.event, level)
-                    if not ok:
-                        log_skip(
-                            getattr(self.runtime, "bot_id", "?"),
-                            "participation_silent",
-                            f"参与度={level} · {reason}",
-                            level="debug",
-                        )
-                        return
-                    budget.record(0)
-                    triggered, is_at, user_text = True, False, str(getattr(ctx.event, "text", "") or "")
-                else:
-                    triggered, is_at, user_text = self._trigger_decision(
-                        ctx.event, config, has_image=has_image
-                    )
-                if not triggered:
-                    log_skip(
-                        getattr(self.runtime, "bot_id", "?"),
-                        "trigger_not_matched",
-                        f"group={getattr(getattr(ctx.event, 'group', None), 'group_id', '?')} · mode={config.get('trigger_mode', '?')}",
-                        hint=hint_for("trigger_not_matched"),
-                        # 群消息没 @/关键词是常态（大部分群消息都不是在叫 bot），
-                        # 属于技术排查信息，不进用户可见日志（UI 的生效预览已能解释）。
-                        level="debug",
-                    )
-                    return
-                # 把「触发条件」补进统一判定链，让「为什么不回」在 UI/日志里是同一条链
-                base = self._decision(ctx.event)
-                if base is not None:
-                    from app.domain.dialogue_policy import trigger_probability_of
-
-                    base = base.with_checks(
-                        trigger_check(
-                            triggered,
-                            mode=str(config.get("trigger_mode") or ""),
-                            probability=trigger_probability_of(config),
-                        )
-                    )
-                    remember_decision(ctx.event, base)
-
-                if is_at:
-                    ctx.state["is_at"] = True
-                    import re
-
-                    user_text = re.sub(r"\[CQ:at,qq=\d+\]", "", user_text).strip()
-                    user_text = re.sub(r"@\S+\s*", "", user_text).strip()
-
-                ctx.user_text = user_text.strip()
-                if not ctx.user_text and not has_image:
-                    return
+            # 群聊准入（触发 / 参与度门）已后移到判定链之后：旧位置在场景/免打扰/用户例外
+            # **之前**，会把被禁用群、免打扰时段的普通消息也写进会话历史（见 _admit_group）。
 
             config = self.runtime.config
             account_id = getattr(self.runtime, "bot_id", "?")
@@ -612,6 +628,14 @@ class LlmPipeline:
 
             # 群级规则：触发方式之外的"什么时候不回 / 谁不能触发"
             effective = self._effective_config(ctx.event, config)
+
+            # 群聊准入：场景/免打扰/用户例外都通过了才轮到「观察 → 门」。
+            # 参与度模式下**先无条件写历史**，再判断这次要不要花请求（§1.2 顺序）。
+            if ctx.event.event_type == "message_group":
+                if not await self._admit_group(ctx, effective, has_image=has_image):
+                    return
+                if not ctx.user_text and not has_image:
+                    return
 
             # 先截断原始用户消息，避免后续上下文包装后被 max_message_length 截掉“发送了”
             max_msg_len = int(config.get("max_message_length", 200) or 200)

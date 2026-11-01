@@ -160,8 +160,15 @@ def normalize_event(config, event, ctx=None) -> TurnInput | None:
     )
 
 
-async def get_or_create_session(session_mgr: SessionManager, turn: TurnInput, config, ctx=None):
-    """取或建会话；群聊冷却期内且非 @ 时返回 None（本轮不触发）。"""
+async def get_or_create_session(session_mgr: SessionManager, turn: TurnInput, config, ctx=None, *, observe: bool = False):
+    """取或建会话；群聊冷却期内且非 @ 时返回 None（本轮不触发）。
+
+    Args:
+        observe: ``True`` 时表示这次调用是"全量观察"（参与度模式写历史），
+            必须**绕开** ``can_reply()`` 冷却——观察只看"消息该不该记进历史"，
+            与"本轮要不要请求"是两件事（旧实现把两者混在一起，导致冷却期消息
+            既不落库又被标成已记录，永久丢历史）。
+    """
     session = session_mgr.get_session(turn.session_id)
     if not session:
         session = session_mgr.create_session(
@@ -175,7 +182,9 @@ async def get_or_create_session(session_mgr: SessionManager, turn: TurnInput, co
         return session
 
     # 群聊冷却：非 @ 且不在冷却窗口内 → 本轮不触发（与旧 generate_response 一致）
-    if not turn.is_private and not session.can_reply() and not (ctx is not None and ctx.state.get("is_at")):
+    if not observe and not turn.is_private and not session.can_reply() and not (
+        ctx is not None and ctx.state.get("is_at")
+    ):
         return None
     session.add_participant(turn.user_id)
     return session
