@@ -13,6 +13,25 @@ from .segments import render_segments
 from .spec import escape_body, format_time, marker, quote
 
 
+def _reply_id_from_segments(segments: Any) -> str:
+    """从消息段里取引用 id（reply 是消息内容的一部分，不是外挂字段）。"""
+    for seg in segments or []:
+        stype = seg.get("type") if isinstance(seg, dict) else getattr(seg, "type", "")
+        if stype == "reply":
+            data = (seg.get("data") if isinstance(seg, dict) else getattr(seg, "data", {})) or {}
+            return str(data.get("id", "") or "")
+    return ""
+
+
+def _reply_id_from_meta(meta_lines: Any) -> str:
+    """兜底：旧条目可能把引用写成了附注行。"""
+    for meta in meta_lines or []:
+        text = str(meta or "").strip()
+        if text.startswith("[reply_to:id="):
+            return text[len("[reply_to:id="):].rstrip("]").strip()
+    return ""
+
+
 def render_history_entry(entry: Any, **kwargs) -> str | None:
     from app.agent.session.model import HistoryEntry
 
@@ -31,10 +50,13 @@ def render_history_entry(entry: Any, **kwargs) -> str | None:
 
     is_me = bool(base.sender_id and str(base.sender_id) in self_ids)
 
+    reply_id = _reply_id_from_segments(base.segments)
     if base.segments:
         body = render_segments(base.segments, message_id=parsed.message_id)
     else:
         body = escape_body(base.text or parsed.legacy_text or "")
+    if not reply_id:
+        reply_id = _reply_id_from_meta(base.meta_lines)
 
     time_str = format_time(base.time)
     head = f"time={time_str}"
@@ -42,7 +64,11 @@ def render_history_entry(entry: Any, **kwargs) -> str | None:
         head += f",group_id={base.group_id}"
     name = "我" if is_me else (f"用户<{base.sender_id}>" if mask else base.sender_name)
     line = f"[{head}]{_sender_marker(base.sender_id, name)}{body}"
+    if reply_id:
+        line += f"[reply_to:id={reply_id}]"
     for meta in base.meta_lines or []:
+        if str(meta or "").strip().startswith("[reply_to:"):
+            continue  # 已由消息段推导出来，避免重复
         text = str(meta or "").strip()
         if not text:
             continue
