@@ -65,6 +65,7 @@ SYSTEM_PROMPT_SECTIONS: tuple[str, ...] = ("behavior",)
 #: 内置段 → 层。未登记的段（插件注册的）默认归 L3 钩子注入。
 SECTION_LAYERS: dict[str, str] = {
     "behavior": LAYER_SYSTEM_PROMPT,
+    "speech_protocol": LAYER_SYSTEM_PROMPT,
     "persona": LAYER_PERSONA,
     "skills": LAYER_INJECTED,
     "memory": LAYER_INJECTED,
