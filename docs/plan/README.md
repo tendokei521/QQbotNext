@@ -40,6 +40,7 @@
 | **G0–G3** | 全局触发规则移到 AI 面板「触发方式」 | `[x]` | [`global-trigger-rules-to-ai-panel.md`](global-trigger-rules-to-ai-panel.md) |
 | **D0–D5** | 四个模块（提示词组装 / 触发与调度 / 输出 / 上下文）合并完成；配置收敛与接管契约待做 | `[~]` 已合并 | [`dialog-modules.md`](dialog-modules.md) · [`../reviews/2026-10-31-four-module-merge.md`](../reviews/2026-10-31-four-module-merge.md) |
 | **C0–C5** | ~~三个核心模块（按生命周期切）~~ 已被 D 系列取代 | `[!]` | [`three-core-modules.md`](three-core-modules.md) |
+| **V0–V2** | 参与度回复模式收口（止血 → 补齐 → 指标）；当前分支不可达、会丢消息，禁止上真实群 | `[ ]` | [`participation-reply-mode.md`](participation-reply-mode.md) |
 
 | 编号 | commit | 内容 |
 |---|---|---|
