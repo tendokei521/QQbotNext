@@ -10,73 +10,23 @@
 <div id="app"></div>
 <script src="/api/plugin-sdk.js"></script>
 <script>
+  const on = (cfg) => cfg.context_enable !== false
+
   QQBOT.form({
     title: '上下文增强',
-    description: '让模型知道「刚才」「那条」「那个人」指什么，需要时自己去取回。改动自动保存。',
+    description: '让模型按 id 取回上下文、理解「刚才 / 那条」指什么。改动自动保存。',
     groups: [
       {
-        title: '指代消解',
-        hint: '维护会话焦点，让「那个样子 / 上一条」能定位到具体消息',
+        title: '上下文',
         fields: [
           {
-            key: 'referent_resolve_enable', label: '指代消解', type: 'switch',
-            hint: '关闭后模型只能靠上下文猜，容易理解错。',
+            key: 'context_enable', label: '上下文增强', type: 'switch',
+            hint: '开启后模型可用 get_context 按 id 取回消息 / 转发 / 成员 / 图片。',
           },
           {
-            key: 'referent_prefetch_enable', label: '指代预取', type: 'switch',
-            hint: '确定指向时请求前直接把内容取回来，不等模型调工具（更准、也稍贵）。',
-            visible: (cfg) => !!cfg.referent_resolve_enable,
-          },
-          {
-            key: 'referent_ambiguous_policy', label: '指代不明时', type: 'select',
-            hint: '候选不止一个怎么办：全部取回最准；只取焦点最省；让模型先问最稳。',
-            options: { fetch_all: '全部取回（推荐）', focus_first: '只取焦点项', ask: '让模型先问' },
-            visible: (cfg) => !!cfg.referent_resolve_enable && !!cfg.referent_prefetch_enable,
-          },
-          {
-            key: 'referent_prefetch_max', label: '预取候选上限', type: 'number',
-            min: 1, max: 10, step: 1, unit: '个',
-            hint: '一轮最多预取几个候选，防止上下文被塞爆。',
-            visible: (cfg) => !!cfg.referent_resolve_enable && !!cfg.referent_prefetch_enable,
-          },
-          {
-            key: 'referent_prompt_enable', label: '注入指代提示行', type: 'switch',
-            hint: '把「当前焦点」写进提示词，让模型对指代更有把握。',
-            visible: (cfg) => !!cfg.referent_resolve_enable,
-          },
-          {
-            key: 'referent_focus_ttl', label: '焦点存活时长', type: 'number',
-            min: 60, max: 86400, step: 60, unit: '秒',
-            hint: '这么久没被关注就淘汰，避免拿着几天前的焦点乱指。',
-            visible: (cfg) => !!cfg.referent_resolve_enable,
-          },
-          {
-            key: 'referent_focus_max', label: '焦点项上限', type: 'number',
-            min: 1, max: 100, step: 1, unit: '条',
-            visible: (cfg) => !!cfg.referent_resolve_enable,
-          },
-        ],
-      },
-      {
-        title: '按需展开',
-        fields: [
-          {
-            key: 'context_expand_enable', label: '未展开标记与按需展开', type: 'switch',
-            hint: '记录里放不下的引用 / 某人 / 图片先留【未展开】标记，模型需要时再取回。',
-          },
-        ],
-      },
-      {
-        title: '历史与跨会话',
-        fields: [
-          {
-            key: 'history_auto_qq_min_local', label: '自动补拉阈值', type: 'number',
-            min: 0, max: 100, step: 1, unit: '条',
-            hint: '本地记录少于该条数时自动补拉 QQ 聊天记录；0 = 总是补拉。',
-          },
-          {
-            key: 'history_cross_query_enable', label: '允许私聊查群记录', type: 'switch',
-            hint: '私聊里允许查询「发起人自己也是成员」的群历史（结果只回给发起人）。',
+            key: 'prefetch_reply', label: '内联引用正文', type: 'switch',
+            hint: '本轮消息引用了某条时，自动把被引用的内容取回填进 reply_to。',
+            visible: on,
           },
         ],
       },

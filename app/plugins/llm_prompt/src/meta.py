@@ -92,6 +92,10 @@ def _reply_id(event) -> str:
 
 
 async def _collect_reply(ctx) -> dict | None:
+    # 上下文增强模块可能已经预取（prefetch_reply），直接复用，省一次 get_msg
+    prefetched = (ctx.state or {}).get("reply_prefetched")
+    if prefetched:
+        return dict(prefetched)
     event = ctx.event
     reply_id = _reply_id(event)
     if not reply_id:

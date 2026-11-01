@@ -284,16 +284,8 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
     ),
     # 上下文增强：指代消解 / 按需展开 / 历史查询权限
     "llm_context": (
-        "context_expand_enable",
-        "referent_resolve_enable",
-        "referent_prefetch_enable",
-        "referent_ambiguous_policy",
-        "referent_prefetch_max",
-        "referent_focus_ttl",
-        "referent_focus_max",
-        "referent_prompt_enable",
-        "history_auto_qq_min_local",
-        "history_cross_query_enable",
+        "context_enable",
+        "prefetch_reply",
     ),
     "llm_memory": (
         "memory_enable",
@@ -340,6 +332,18 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
 
 # ==================== 3. 删除（9 键）====================
 DELETED_KEYS: tuple[str, ...] = (
+    # 2026-11-01 llm_context 重写：焦点表/预取候选/歧义策略全部删除，
+    # 改为"id 可寻址 + get_context 按需取回"
+    "context_expand_enable",
+    "referent_resolve_enable",
+    "referent_prefetch_enable",
+    "referent_ambiguous_policy",
+    "referent_prefetch_max",
+    "referent_focus_ttl",
+    "referent_focus_max",
+    "referent_prompt_enable",
+    "history_auto_qq_min_local",
+    "history_cross_query_enable",
     # 2026-11-01 llm_prompt 精简：12 个元信息开关收敛进 sender_label / quote_and_at /
     # prompt_time_position / auto_disambiguation；表情活跃度、括号清洗、请求落盘三项功能删除
     "user_message_format",

@@ -58,6 +58,11 @@ class Module(BaseModule):
         runtime.meta_options = ConfigView(
             getattr(runtime, "config", None), self.config, OWNED_KEYS
         )
+        # 把占位符渲染器挂到框架槽：llm_context 的工具结果、其它模块都复用它，
+        # 保证"谁的输出都是同一套标记词汇"。模块卸载时清空 → 回退纯文本。
+        from .src import message_assembly as _assembly
+
+        runtime.message_assembly = _assembly
         # 接管历史渲染（模块能力）：启用结构化时用本模块渲染器，否则交还框架原生
         from .src.message_assembly.history import render_history_entry as _history_renderer
 
@@ -103,6 +108,7 @@ class Module(BaseModule):
 
         unregister_section(runtime, "message_meta")
         runtime.history_renderer = None
+        runtime.message_assembly = None
         if isinstance(getattr(runtime, "assembler", None), AssemblyAdapter):
             from app.agent.assembly.assembler import PromptAssembler
 

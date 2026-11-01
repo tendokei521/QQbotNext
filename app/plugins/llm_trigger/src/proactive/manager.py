@@ -254,11 +254,8 @@ class ProactiveManager:
         )
         use_tools = bool(all_specs) and supports_tool_use(modalities)
 
-        # 焦点行（主动消息没有用户提问 → 不做预取）：让模型知道"群里刚才在聊什么"。
-        # 作为装配器的 referent 块（与 chat 的背景块同一位置），不再手工拼接。
-        from app.plugins.llm_context.src.referent import focus_only_block
-
-        focus_text = await focus_only_block(self.module, session_id) or ""
+        # 焦点行已随 llm_context 重写删除（新设计用 id 按需取回，不再维护焦点表）
+        focus_text = ""
 
         materials = await collect_history_materials(
             runtime=self.module,
