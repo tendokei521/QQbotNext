@@ -82,6 +82,7 @@ def _render_local_lines(runtime, session_id: str, is_private: bool, limit: int) 
         is_private=is_private,
         normalize_enhanced=False,
         mask_nickname=True,
+        renderer=getattr(runtime, "history_renderer", None),
     )
     lines: list[str] = []
     for item in rendered:

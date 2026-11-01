@@ -149,6 +149,8 @@ class AgentRuntime:
         self.llm_pipeline = LlmPipeline(self, task_manager=task_manager)
         # 消息组装器：插件可声明 supersedes=("assembly",) 整体替换（FeatureRegistry 自动还原）
         self.assembler = PromptAssembler()
+        # 历史渲染接管槽：模块可设置（None = 用框架原生渲染），卸载时须还原
+        self.history_renderer = None
         # provider 调用策略：插件可声明 supersedes=("provider_invoker",) 整体替换
         self.invoker = ProviderInvoker()
         # 能力声明表（P6）：模块在 on_load 里声明"我提供什么能力"，框架只问不猜

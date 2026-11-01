@@ -44,6 +44,7 @@ async def collect_history_materials(
         is_private=is_private,
         normalize_enhanced=bool(config.get("experimental_long_term_memory", False)),
         mask_nickname=True,
+        renderer=getattr(runtime, "history_renderer", None),
     )
     if compress:
         chain = runtime.provider_chain() if callable(getattr(runtime, "provider_chain", None)) else []

@@ -159,6 +159,7 @@ def _format_session_history(
         bot_id=bot_id,
         session_id=session_id,
         entry_media=entry_media,
+        renderer=getattr(runtime, "history_renderer", None),
     )
 
 

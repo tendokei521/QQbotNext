@@ -58,6 +58,12 @@ class Module(BaseModule):
         runtime.meta_options = ConfigView(
             getattr(runtime, "config", None), self.config, OWNED_KEYS
         )
+        # 接管历史渲染（模块能力）：启用结构化时用本模块渲染器，否则交还框架原生
+        from .src.message_assembly.history import render_history_entry as _history_renderer
+
+        runtime.history_renderer = (
+            _history_renderer if bool(self.config.get("structured_assembly", True)) else None
+        )
         for stage, order, handler in (
             ("pre_request", -100, self._collect_user_context),
             ("pre_request", 20, self._format_user_context),
@@ -96,6 +102,7 @@ class Module(BaseModule):
         from .src.assembly import AssemblyAdapter
 
         unregister_section(runtime, "message_meta")
+        runtime.history_renderer = None
         if isinstance(getattr(runtime, "assembler", None), AssemblyAdapter):
             from app.agent.assembly.assembler import PromptAssembler
 

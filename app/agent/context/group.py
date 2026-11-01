@@ -386,6 +386,7 @@ def format_online_history(
     at_names: dict[str, str] | None = None,
     mark_unresolved: bool = False,
     expanded: "ExpandedRefs | None" = None,
+    renderer=None,
 ) -> str:
     """把 OneBot 消息列表格式化为群聊/私聊背景文本。
 
@@ -432,16 +433,19 @@ def format_online_history(
         entry = online_message_to_entry(raw)
         if entry is None:
             continue
-        rendered = _hm.render_history_entry(
-            entry,
-            is_private=is_private,
-            self_ids=self_ids,
-            include_time=include_time,
-            include_user_id=include_user_id,
-            mask_nickname=mask_nickname,
-            normalize_enhanced=normalize_enhanced,
-            content_renderer=_content,
-        )
+        if renderer is not None:
+            rendered = renderer(entry)
+        else:
+            rendered = _hm.render_history_entry(
+                entry,
+                is_private=is_private,
+                self_ids=self_ids,
+                include_time=include_time,
+                include_user_id=include_user_id,
+                mask_nickname=mask_nickname,
+                normalize_enhanced=normalize_enhanced,
+                content_renderer=_content,
+            )
         if rendered is None:
             continue
         lines.append(rendered)
@@ -600,6 +604,7 @@ def format_history_for_llm(
     bot_id: Any = "",
     session_id: Any = "",
     entry_media=None,
+    renderer=None,
 ) -> list[dict]:
     """把会话历史渲染成纯文本 messages（渲染实现见 history_model.render_history_entry）。
 
@@ -633,6 +638,7 @@ def format_history_for_llm(
         render_content=render_content,
         entry_blocks=entry_blocks,
         entry_media=entry_media,
+        entry_renderer=renderer,
     )
 
 
