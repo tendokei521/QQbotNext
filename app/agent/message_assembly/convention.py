@@ -33,3 +33,7 @@ def message_meta_section(req: Any) -> list[dict]:
     if not bool(_cfg(req, "structured_assembly", True)):
         return []
     return [{"role": "system", "content": CONVENTION}]
+
+
+# 兼容：框架内置段统一用 convention_section 这个名字
+convention_section = message_meta_section
