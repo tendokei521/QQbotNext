@@ -255,7 +255,7 @@ SCHEMA = {
         "default": "low", "group": "group_advanced",
         "options": {
             "very_low": "极低（只接与自己相关的）",
-            "low": "低（提到自己才有）",
+            "low": "低（提到自己才有，模型判断）",
             "medium": "中（延续正在聊的话题）",
             "high": "高（参与可讨论的话题）",
             "very_high": "超高（几乎都参与）",

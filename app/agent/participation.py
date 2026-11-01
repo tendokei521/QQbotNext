@@ -38,8 +38,9 @@ LEVEL_PROMPT: dict[str, str] = {
         "别人开了新话题且没有叫到你时保持沉默；同一话题连续对话时可以接着聊。"
     ),
     "low": (
-        "你在群里的参与度是「低」：只有被提到时才回应——被 @、被回复、被叫名字；"
-        "没被提到的消息不要接话，安静看戏。"
+        "你在群里的参与度是「低」：群里的消息都会给你看，但只有被提到时才接——"
+        "被 @、被回复、被叫名字，或明显在说与你相关的事；没被提到的消息保持沉默。"
+        "判断是否被提到、是否值得接，由你自己根据上下文决定。"
     ),
     "very_low": (
         "你在群里的参与度是「极低」：只接与自己相关的消息——被 @、被回复，"
@@ -343,13 +344,15 @@ def gate(runtime: Any, event: Any, level: str) -> GateResult:
     if level == "very_low":
         return GateResult(at_me or reply_me, "at_or_reply" if (at_me or reply_me) else "level_very_low", at_me, reply_me)
     if level == "low":
-        if at_me or reply_me:
-            return GateResult(True, "at_or_reply", at_me, reply_me)
-        return GateResult(False, "level_low", at_me, reply_me)
+        # 低档：「有没有被提到/相关」交给**模型**判断。
+        # 本地放行全部消息，成本由「10 分钟预算 + 同群冷却」兜底，而不是由
+        # 本地谓词替模型做决定（本地判定只会三种硬信号，剩下的都得靠模型）。
+        return GateResult(True, "at_or_reply" if (at_me or reply_me) else "level_low_model", at_me, reply_me)
     if level == "medium":
-        if at_me or reply_me or _bot_spoke_recently(runtime, event):
-            return GateResult(True, "thread_continuation", at_me, reply_me)
-        return GateResult(False, "level_medium", at_me, reply_me)
+        # 中档同样放行全部消息：档位差异写在提示词里（中=只延续正在聊的话题），
+        # 本地不再用"会话尾部有没有我说过话"这种条数判据替模型判断
+        # （全量观察会把 assistant 消息稀释掉，那个判据本身也不可靠）。
+        return GateResult(True, "at_or_reply" if (at_me or reply_me) else "level_medium_model", at_me, reply_me)
     if level == "high":
         return GateResult(True, "level_high", at_me, reply_me)
     if level == "very_high":
