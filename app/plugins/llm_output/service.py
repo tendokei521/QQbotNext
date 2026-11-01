@@ -49,6 +49,11 @@ class OutputStrategyAdapter:
             getattr(self.runtime, "config", None), self.module_config, self.owned_keys
         )
 
+    @property
+    def config_view(self) -> ConfigView:
+        """本模块的配置视图（框架选策略时用它读 ``stream_*`` 参数）。"""
+        return self._view
+
     def _get(self, key: str, default: Any = None) -> Any:
         getter = getattr(self.module_config, "get", None)
         value = getter(key, default) if callable(getter) else default

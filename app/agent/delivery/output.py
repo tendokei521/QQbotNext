@@ -424,7 +424,11 @@ def resolve_output(runtime: Any, ctx: Any = None) -> OutputStrategy:
         )
         if not participation_turn:
             return strategy
-        return select_default_output(getattr(runtime, "config", None), runtime, ctx)
+        # 参与度轮次：策略实现由框架给（模块只能贡献传输参数），所以用模块的配置视图
+        # 让 `stream_output` / 气泡约束仍是模块那份——否则"模块开了流式、account 没开"
+        # 会被静默降成非流式（另一种形态错位）。
+        view = getattr(strategy, "config_view", None) or getattr(runtime, "config", None)
+        return select_default_output(view, runtime, ctx)
     if strategy is not None and callable(getattr(strategy, "respond", None)):
         return strategy
     if strategy is not None:
