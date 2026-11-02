@@ -15,7 +15,6 @@ import { useBundlesStore } from '@/stores/bundles'
 import { useReadinessStore } from '@/stores/readiness'
 import { useNotifyStore } from '@/stores/notify'
 import BundleImportDialog from '@/components/bundles/BundleImportDialog.vue'
-import ProtocolHelp from '@/components/bots/ProtocolHelp.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -78,22 +77,16 @@ interface PresetOption {
 
 const FALLBACK_PRESETS: PresetOption[] = [
   { key: 'deepseek', name: 'DeepSeek', provider: 'openai', api_base: 'https://api.deepseek.com', models: ['deepseek-flash', 'deepseek-v4-pro'] },
-  { key: 'openai', name: 'OpenAI', provider: 'openai', api_base: 'https://api.openai.com/v1', models: ['gpt-5.2', 'gpt-5.4-mini', 'gpt-4.1'] },
-  { key: 'moonshotai-cn', name: 'Kimi（月之暗面）', provider: 'openai', api_base: 'https://api.moonshot.cn/v1', models: ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6'] },
-  { key: 'zai-coding-cn', name: '智谱 GLM', provider: 'openai', api_base: 'https://open.bigmodel.cn/api/coding/paas/v4', models: ['glm-5.3', 'glm-4.6v'] },
-  { key: 'qwen-token-plan-cn', name: '通义千问', provider: 'openai', api_base: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', models: ['qwen3.8-max', 'qwen3.8-flash'] },
-  { key: 'anthropic', name: 'Anthropic', provider: 'anthropic', api_base: 'https://api.anthropic.com', models: ['claude-sonnet-5', 'claude-haiku-5-5'] },
 ]
 
-/** 向导首屏优先展示的服务商（其余收进「其它服务」） */
-const RECOMMENDED_KEYS = ['deepseek', 'moonshotai-cn', 'zai-coding-cn', 'qwen-token-plan-cn', 'openai']
+/** 向导只展示 DeepSeek，其它服务走「自定义」 */
+const RECOMMENDED_KEYS = ['deepseek']
 
 const presets = ref<PresetOption[]>([])
 const presetsLoading = ref(false)
 const presetsError = ref('')
 const selectedPresetKey = ref('')
 const customMode = ref(false)
-const moreOpen = ref(false)
 
 const model = reactive({
   provider: 'openai',
@@ -111,9 +104,6 @@ const selectedModelPreset = computed(
 )
 const recommendedPresets = computed(() =>
   presets.value.filter((item) => RECOMMENDED_KEYS.includes(item.key)),
-)
-const morePresets = computed(() =>
-  presets.value.filter((item) => !RECOMMENDED_KEYS.includes(item.key)),
 )
 const customProviderItems = [
   { title: 'OpenAI 兼容', value: 'openai' },
@@ -522,24 +512,9 @@ onUnmounted(stopPolling)
             <h1 class="app-page-title">首次配置</h1>
             <v-chip size="small" variant="tonal">约 3 分钟</v-chip>
           </div>
-          <div class="app-page-subtitle">按 4 步完成，每一步都能跳过</div>
         </div>
         <v-btn variant="text" @click="skipAll">稍后再配</v-btn>
       </div>
-
-      <v-alert
-        v-if="accountSaved && account.id"
-        type="info"
-        variant="tonal"
-        density="compact"
-        class="mb-3"
-      >
-        <div class="d-flex align-center flex-wrap gap-2">
-          <span>正在配置账号「{{ account.name || account.id }}」，日常修改请去「账号管理」。</span>
-          <v-spacer />
-          <v-btn size="small" variant="text" color="primary" to="/bots">去账号管理</v-btn>
-        </div>
-      </v-alert>
 
       <div class="step-strip mb-4">
         <template v-for="(name, index) in STEPS" :key="name">
@@ -557,8 +532,6 @@ onUnmounted(stopPolling)
       <v-card v-if="step === 1" variant="outlined">
         <v-card-title>连接 QQ 账号</v-card-title>
         <v-card-text>
-          <div class="app-muted mb-2">选一种连接方式，不确定就用本地监听</div>
-          <ProtocolHelp :mode="account.conn_mode" class="mb-3" />
           <v-btn-toggle
             :model-value="account.conn_mode"
             mandatory
@@ -569,30 +542,6 @@ onUnmounted(stopPolling)
             <v-btn value="reverse" prepend-icon="mdi-lan-connect">本地监听（推荐）</v-btn>
             <v-btn value="forward" prepend-icon="mdi-lan-disconnect">向外连接</v-btn>
           </v-btn-toggle>
-
-          <div class="table-scroll mb-4">
-            <v-table density="compact" class="mode-table">
-              <thead>
-                <tr>
-                  <th>连接方式</th>
-                  <th>协议端里选</th>
-                  <th>地址填什么</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>本地监听（推荐）</td>
-                  <td>WebSocket 客户端</td>
-                  <td>本页给出的本机监听地址</td>
-                </tr>
-                <tr>
-                  <td>向外连接</td>
-                  <td>WebSocket 服务端</td>
-                  <td>协议端的 ws 地址</td>
-                </tr>
-              </tbody>
-            </v-table>
-          </div>
 
           <v-text-field
             v-model="account.name"
@@ -716,37 +665,11 @@ onUnmounted(stopPolling)
               </v-card>
             </div>
 
-            <v-btn
-              v-if="morePresets.length"
-              size="small"
-              variant="text"
-              class="px-0 mt-1"
-              @click="moreOpen = !moreOpen"
-            >
-              {{ moreOpen ? '收起其它服务' : `其它服务（${morePresets.length}）` }}
-            </v-btn>
-            <v-expand-transition>
-              <div v-if="moreOpen" class="preset-grid mt-2">
-                <v-card
-                  v-for="item in morePresets"
-                  :key="item.key"
-                  variant="outlined"
-                  hover
-                  class="preset-card"
-                  :class="{ 'preset-card--active': !customMode && selectedPresetKey === item.key }"
-                  @click="choosePreset(item)"
-                >
-                  <div class="preset-card__name">{{ item.name }}</div>
-                  <div class="preset-card__hint">{{ presetCardHint(item) }}</div>
-                </v-card>
-              </div>
-            </v-expand-transition>
-
             <v-alert v-if="presetsError" type="info" variant="tonal" density="compact" class="mt-3">
               {{ presetsError }}
             </v-alert>
 
-            <div v-if="!customMode && selectedModelPreset" class="app-form-grid mt-3">
+            <div v-if="!customMode && selectedModelPreset" class="mt-3">
               <v-combobox
                 v-model="model.model"
                 :items="selectedModelPreset.models"
@@ -765,6 +688,7 @@ onUnmounted(stopPolling)
                 density="comfortable"
                 variant="outlined"
                 autocomplete="off"
+                class="mt-2"
               />
             </div>
             <div v-if="!customMode && selectedModelPreset" class="app-muted mt-2">
@@ -772,7 +696,7 @@ onUnmounted(stopPolling)
             </div>
 
             <template v-else>
-              <div class="app-form-grid mt-3">
+              <div class="mt-3">
                 <v-select
                   v-model="model.provider"
                   :items="customProviderItems"
@@ -782,9 +706,10 @@ onUnmounted(stopPolling)
                 />
                 <v-text-field
                   v-model="model.api_base"
-                  label="接口地址（一般不用改）"
+                  label="如 https://api.deepseek.com"
                   density="comfortable"
                   variant="outlined"
+                  class="mt-2"
                 />
                 <v-text-field
                   v-model="model.model"
@@ -792,6 +717,7 @@ onUnmounted(stopPolling)
                   placeholder="如 deepseek-chat"
                   density="comfortable"
                   variant="outlined"
+                  class="mt-2"
                 />
                 <v-text-field
                   v-model="model.api_key"
@@ -800,6 +726,7 @@ onUnmounted(stopPolling)
                   density="comfortable"
                   variant="outlined"
                   autocomplete="off"
+                  class="mt-2"
                 />
               </div>
             </template>
@@ -835,7 +762,7 @@ onUnmounted(stopPolling)
         <v-card-title>人格设定</v-card-title>
         <v-card-text>
           <v-tabs v-model="personaMode" density="compact" class="mb-3">
-            <v-tab value="scratch">从零写</v-tab>
+            <v-tab value="scratch">默认</v-tab>
             <v-tab value="bundle">选预设 / 导入预设包</v-tab>
           </v-tabs>
 
@@ -855,9 +782,6 @@ onUnmounted(stopPolling)
               density="comfortable"
               variant="outlined"
             />
-            <div class="app-muted">
-              保存后会开启群聊回复
-            </div>
           </template>
           <template v-else>
             <div class="app-muted mb-3">
@@ -879,7 +803,7 @@ onUnmounted(stopPolling)
             </div>
 
             <v-alert v-if="!bundles.list.length && !bundles.loading" type="info" variant="tonal" density="compact">
-              还没有预设：导入一个 .zip 预设包，或先用「从零写」。
+              还没有预设：导入一个 .zip 预设包，或先用「默认」。
             </v-alert>
 
             <v-radio-group v-else v-model="selectedPresetId" hide-details class="mt-0">
@@ -1000,11 +924,6 @@ onUnmounted(stopPolling)
   align-items: flex-start;
 }
 
-/* 对照表窄屏可横向滚动，不撑破页面 */
-.table-scroll {
-  overflow-x: auto;
-}
-
 .step-strip {
   display: flex;
   flex-wrap: wrap;
@@ -1048,20 +967,6 @@ onUnmounted(stopPolling)
   padding: 10px 12px;
   border-radius: 10px;
   background: rgba(var(--v-theme-primary), 0.06);
-}
-
-/* 「协议端怎么选」对照表：小而灰，作为选项说明而不是正文 */
-.mode-table {
-  border-radius: 10px;
-  overflow: hidden;
-  background: rgba(var(--v-theme-on-surface), 0.03);
-  font-size: 12.5px;
-}
-
-.mode-table :deep(th) {
-  font-size: 12px;
-  font-weight: 600;
-  color: rgba(var(--v-theme-on-surface), 0.6);
 }
 
 /* 模型服务卡片网格 */
