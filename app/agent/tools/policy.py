@@ -3,7 +3,7 @@
 ## 本模块只负责
 
 判定「某个工具该不该出现在这一轮的 tools 列表里」——用户开关 + 功能前置开关
-（如 `memory_enable` / `knowledge_enable` / `schedule_enable`）。纯读配置，无 IO。
+（如 `memory_enable` / `schedule_enable` / `tavily_enable`）。纯读配置，无 IO。
 
 ## 为什么单独拆出来
 
@@ -17,9 +17,9 @@ loop/chat` 形成环（4 模块 / 3,481 行）。
 
 ## 前置开关默认值必须与功能真实默认一致
 
-`context_expand_enable` 这类「默认开启」的功能，若在配置里读不到该键却被当作
-False，会出现「spec 已加入但被系统过滤掉」的静默消失——所以下表的第三项
-（缺省默认值）不能省。
+表里不存在的工具 = 没有前置条件（始终可用）。列了前置键的工具，第三项是「键缺失时的
+默认值」：默认开启类功能（如 `tool_spill_enable`）若读不到键却当 False，会出现
+「spec 已加入但被系统过滤掉」的静默消失——所以这一项不能省。
 """
 
 from __future__ import annotations
@@ -32,9 +32,6 @@ from app.agent.tools.spec import ToolSpec
 _SYSTEM_TOOL_PREREQUISITES: dict[str, tuple] = {
     "schedule_task": ("schedule_enable", "定时任务未启用"),
     "get_current_session": ("", "始终可用"),
-    "expand_recent": ("context_expand_enable", "上下文按需展开未启用", True),
-    "expand_message": ("context_expand_enable", "上下文按需展开未启用", True),
-    "expand_user": ("context_expand_enable", "上下文按需展开未启用", True),
     "tavily_search": ("tavily_enable", "Tavily 联网搜索未启用"),
     # P5：spill 取回工具（关掉落盘就没有可读的东西了）
     "recall_tool_result": ("tool_spill_enable", "超大结果落盘未启用"),
@@ -43,9 +40,6 @@ _SYSTEM_TOOL_PREREQUISITES: dict[str, tuple] = {
     "memory_delete": ("memory_enable", "长期记忆未启用"),
     "memory_correct": ("memory_enable", "长期记忆未启用"),
     "memory_deny": ("memory_enable", "长期记忆未启用"),
-    "knowledge_add": ("knowledge_enable", "知识库未启用"),
-    "knowledge_search": ("knowledge_enable", "知识库未启用"),
-    "knowledge_delete": ("knowledge_enable", "知识库未启用"),
 }
 
 
@@ -61,9 +55,8 @@ def cfg_get(runtime: Any, key: str, default: Any = None) -> Any:
 def prereq_state(runtime: Any, name: str) -> tuple[bool, str]:
     """该工具的前置功能是否就绪，以及不可用时的说明文案。
 
-    能力声明优先（P6）：`context_expand_*` 这类"由某个模块提供"的能力，
-    先问 ``runtime.capabilities`` 有没有人声明；没人声明再回退到配置键，
-    保证没装模块/旧配置时行为与改造前一致。
+    表里没有的工具一律「就绪」（没有前置条件）。记忆类工具优先问模块挂在
+    ``runtime.memory_service`` 的管理器，其余按配置键 + 表里的缺省值判定。
     """
     entry = _SYSTEM_TOOL_PREREQUISITES.get(name, ("", ""))
     key, label = entry[0], entry[1]
@@ -75,14 +68,6 @@ def prereq_state(runtime: Any, name: str) -> tuple[bool, str]:
         memory = getattr(runtime, "memory_service", None)
         if memory is not None and hasattr(memory, "enabled"):
             return bool(memory.enabled()), label
-    if key == "context_expand_enable":
-        from app.agent.capabilities import CAP_CONTEXT_EXPAND, has_tool_capability
-
-        if has_tool_capability(
-            runtime, CAP_CONTEXT_EXPAND, config_key=key, config_default=default
-        ):
-            return True, ""
-        return False, label
     return bool(cfg_get(runtime, key, default)), label
 
 

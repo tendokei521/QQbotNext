@@ -36,7 +36,7 @@ def _runtime(**config):
 
 def test_only_three_kinds_are_accepted():
     assert OutputCapability(OUTPUT_STREAM).streams is True
-    assert OutputCapability(OUTPUT_SPEECH).streams is True, "发言通道也是边产边发"
+    assert OutputCapability(OUTPUT_SPEECH).streams is False, "发言通道不决定传输形态（流式/整段另算）"
     assert OutputCapability(OUTPUT_BLOCKING).streams is False
     with pytest.raises(ValueError):
         OutputCapability("turbo")
@@ -45,9 +45,9 @@ def test_only_three_kinds_are_accepted():
 def test_config_derivation_matches_the_old_switch_behaviour():
     assert OutputCapability.from_config({"stream_output": True}).kind == OUTPUT_STREAM
     assert OutputCapability.from_config({"stream_output": False}).kind == OUTPUT_BLOCKING
-    # 发言通道优先：它才是真正决定产出形态的那个
+    # 回复模式优先：participation = 发言通道（文本只是思考，发言走 send_message）
     assert OutputCapability.from_config(
-        {"stream_output": True, "speech_via_tool": True}
+        {"stream_output": True, "reply_mode": "participation"}
     ).kind == OUTPUT_SPEECH
     assert OutputCapability.from_config(None).kind == OUTPUT_BLOCKING
 
@@ -89,20 +89,20 @@ def test_select_default_output_uses_the_declaration():
 # ── 工具能力 ──────────────────────────────────────────
 
 
-def test_context_expand_capability_gates_the_tool_prereq():
-    from app.agent.tools.policy import prereq_state
+def test_prereq_table_only_lists_tools_that_exist():
+    """前置表里不许留“没有生产者”的死条目（曾留下 expand_* / knowledge_*）。
 
-    runtime = _runtime(context_expand_enable=False)
+    表里没有工具 = 没有前置条件（恒可用）；表里有它的前提是它真的会被产出。
+    """
+    from app.agent.tools.policy import _SYSTEM_TOOL_PREREQUISITES, prereq_state
 
-    ready, _ = prereq_state(runtime, "expand_recent")
-    assert ready is False, "没人声明 + 配置关着 = 不可用（与改造前一致）"
+    dead_prefixes = ("expand_", "knowledge_")
+    dead = [name for name in _SYSTEM_TOOL_PREREQUISITES if name.startswith(dead_prefixes)]
+    assert not dead, f"这些工具已没有生产者，前置条目应删掉: {dead}"
 
-    registry_of(runtime).declare_tool(CAP_CONTEXT_EXPAND, source="llm_context")
-    ready, _ = prereq_state(runtime, "expand_recent")
-    assert ready is True, "模块声明提供该能力后，工具就绪"
-
-    registry_of(runtime).revoke_tool(CAP_CONTEXT_EXPAND, source="llm_context")
-    assert prereq_state(runtime, "expand_recent")[0] is False
+    runtime = _runtime()
+    assert prereq_state(runtime, "get_current_session")[0] is True
+    assert prereq_state(runtime, "某个不存在的工具")[0] is True, "无前置条件 = 恒可用"
 
 
 def test_tool_capability_falls_back_to_the_config_key():
@@ -121,14 +121,12 @@ def test_registry_is_idempotent_and_enumerable():
     assert list(caps) == [CAP_CONTEXT_EXPAND]
     assert caps[CAP_CONTEXT_EXPAND].source == "b", "后声明者覆盖（最后装的模块说话）"
 
-def test_missing_config_key_keeps_the_table_default():
-    """键缺失时按前置表的默认值（`expand_*` 默认可用），不能因为"没人声明 + 键不在"
-    就让工具静默消失——这是改造前 `cfg_get(runtime, key, default)` 的口径。"""
+def test_missing_config_key_falls_back_to_the_table_default():
+    """键缺失时按前置表的默认值判定：默认关闭的键（缺省 False）缺键即不可用，
+    默认开启的键靠表里第三项显式写 True——两者不能混。"""
     from app.agent.tools.policy import prereq_state
 
-    runtime = _runtime()          # 配置里没有 context_expand_enable
+    runtime = _runtime()          # 配置里没有 tavily_enable
 
-    assert prereq_state(runtime, "expand_recent")[0] is True
-
-    other = _runtime()            # 反过来：默认不可用的键缺失时仍不可用
-    assert prereq_state(other, "tavily_search")[0] is False
+    assert prereq_state(runtime, "tavily_search")[0] is False, "缺键 + 默认关闭 = 不可用"
+    assert prereq_state(runtime, "recall_tool_result")[0] is False
