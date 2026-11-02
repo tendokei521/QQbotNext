@@ -69,7 +69,7 @@
 | `order` | 层内升序；同 order 按 name（保证同输入同字节） |
 | `builder(req)` | 返回该段 messages，不适用返回 `[]` |
 | `scope` | `agent`（默认）/ `global`；同名时 agent 遮蔽 global |
-| `complete` | `True` = 独占整条 system；一次解析最多一个，冲突抛 `ValueError`（装配器留 error 并中止本轮） |
+| `complete` | 声明"本段自己产出整条 system"；一次解析最多一个，冲突抛 `ValueError`（装配器 error 后中止本轮） |
 | `layer` | `system_prompt` / `persona` / `injected` / `history` / `user`；留空按内置映射，插件段默认 L3 |
 
 - 层序 L1→L5 固定（`assembly/layers.py`），L1 的多段装配时合并成**一条** system。
