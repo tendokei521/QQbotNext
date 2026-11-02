@@ -250,21 +250,30 @@ def _has_get(config: Any) -> bool:
     return callable(getattr(config, "get", None))
 
 
-def _transport_stream(config: Any) -> bool:
+def _transport_stream(config: Any, runtime: Any = None) -> bool:
     """请求/响应方式：``True`` = 流式（边收边用），``False`` = 一次拿全。
 
-    **只读 `stream_output`**。这是传输维度的唯一开关，和"是不是发言通道"无关：
-    发言通道可以流式、也可以非流式（见 `SpeechOutput`）。
+    **声明优先，配置兜底**：模块用 ``runtime.capabilities.declare_output`` 声明自己能
+    流式（``stream``）还是只能整段（``blocking``）时，以声明为准；没声明、或声明的是
+    发言通道（``speech``，它不决定传输形态）才读 ``stream_output``。这样"声明决定能力、
+    配置决定偏好"在传输这一维也成立，不会出现"模块只能整段、配置却逼它流式"。
     """
-    if config is None:
-        return False
+    config_stream = False
     getter = getattr(config, "get", None)
-    if not callable(getter):
-        return False
-    try:
-        return bool(getter("stream_output", False))
-    except Exception:  # noqa: BLE001 —— 配置坏了按非流式（最保守的传输方式）
-        return False
+    if callable(getter):
+        try:
+            config_stream = bool(getter("stream_output", False))
+        except Exception:  # noqa: BLE001 —— 配置坏了按非流式（最保守的传输方式）
+            config_stream = False
+
+    from app.agent.capabilities import OUTPUT_BLOCKING, OUTPUT_STREAM, CapabilityRegistry
+
+    registry = getattr(runtime, "capabilities", None)
+    if isinstance(registry, CapabilityRegistry) and registry.output is not None:
+        declared = registry.output
+        if declared.kind in (OUTPUT_STREAM, OUTPUT_BLOCKING):
+            return declared.kind == OUTPUT_STREAM
+    return config_stream
 
 
 class SpeechOutput:
@@ -366,7 +375,7 @@ def select_default_output(config: Any = None, runtime: Any = None, ctx: Any = No
         ctx is not None and getattr(ctx, "state", None) and ctx.state.get("participation_gate")
     )
     speech = participation_turn or speech_via_tool(config)
-    transport = _transport_stream(config)
+    transport = _transport_stream(config, runtime)
     if speech:
         return SpeechOutput(runtime, config, stream=transport)
     capability = output_capability(runtime, config)
