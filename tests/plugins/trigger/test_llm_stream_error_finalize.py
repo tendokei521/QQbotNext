@@ -1,4 +1,4 @@
-﻿"""流式请求失败时，这一轮的收尾必须照常发生。
+"""流式请求失败时，这一轮的收尾必须照常发生。
 
 审查发现的缺陷（``chat.stream_response`` 的 ``if stream_error: ... return``）：
 
@@ -183,26 +183,4 @@ async def test_speech_silence_does_not_inject_a_fallback(probe):
 
     assert not any("抱歉" in str(item) for item in out)
     assert not any("抱歉" in t for t in _history_texts(rt)), "静默不应写兜底话术进历史"
-
-
-async def test_error_does_not_force_speak_again(probe):
-    """流式已失败就不该再补一轮请求（认证/配额类错误再打一枪只是再烧钱）。"""
-    STREAMS.append([StreamEvent(type="error", text="HTTP 401")])
-    rt = _runtime(6605, _config(speech_via_tool=True))
-    ctx = _ctx()
-    forced = {"n": 0}
-
-    async def _no_force(*args, **kwargs):
-        forced["n"] += 1
-
-    import app.agent.loop.chat as chat_mod
-
-    original = chat_mod._force_speak_round
-    chat_mod._force_speak_round = _no_force
-    try:
-        _ = [str(item) async for item in chat.stream_response(rt, ctx.event, ctx)]
-    finally:
-        chat_mod._force_speak_round = original
-
-    assert forced["n"] == 0
 

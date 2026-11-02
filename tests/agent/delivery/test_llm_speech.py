@@ -14,10 +14,8 @@ import pytest
 
 from app.agent.delivery.speech import (
     DEFAULT_MAX_BUBBLES,
-    FORCE_SPEAK_REMINDER,
     QUEUE_DUP,
     QUEUE_OK,
-    SPEAK_REMINDER,
     SPEECH_PROTOCOL,
     SpeechOutbox,
     build_speech_tools,
@@ -25,10 +23,9 @@ from app.agent.delivery.speech import (
     speech_via_tool,
 )
 
-#: 发言通道生效的完整条件（档位 + 开关 + 流式）
+#: 发言通道生效的条件（2026-11-01 起由**回复模式**决定，旧 `speech_via_tool` 已退役）
 SPEECH_CONFIG: dict = {
-    "speech_via_tool": True,
-    "stream_output": True,
+    "reply_mode": "participation",
 }
 
 
@@ -78,7 +75,8 @@ async def test_send_message_array_keeps_order_and_metadata():
     )
     bubbles = outbox.take()
     assert [b.text for b in bubbles] == ["先这条", "再这条"]
-    assert bubbles[0].reply_to == "22350"
+    # 没有会话上下文（ctx=None）时无法校验引用 id 是否真实存在 → 安全地丢弃引用
+    assert bubbles[0].reply_to == ""
     assert bubbles[0].at == ("10001", "10002")
 
 
@@ -287,62 +285,41 @@ def test_outbox_summary_reports_state():
     "config,expected",
     [
         ({}, False),
-        ({"speech_via_tool": False, "stream_output": True}, False),
-        # 只看开关：档位与 stream_output 都不再是门槛（发言通道已成主形态）
-        ({"speech_via_tool": True, "stream_output": False}, True),
-        ({"speech_via_tool": True, "stream_output": True}, True),
-        ({"speech_via_tool": True}, True),
+        ({"reply_mode": "legacy", "stream_output": True}, False),
+        # 只看回复模式：传输方式（流式/一次性）不再是门槛
+        ({"reply_mode": "participation", "stream_output": False}, True),
+        ({"reply_mode": "participation", "stream_output": True}, True),
+        ({"reply_mode": "participation"}, True),
+        # 退役的旧键不再生效（否则装配层与输出层会各看一个开关）
+        ({"speech_via_tool": True}, False),
     ],
 )
-def test_speech_via_tool_only_reads_the_switch(config, expected):
-    """发言通道只由 ``speech_via_tool`` 决定；档位/流式不再参与。"""
+def test_speech_via_tool_only_reads_reply_mode(config, expected):
+    """发言通道只由 ``reply_mode=participation`` 决定；旧 ``speech_via_tool`` 已退役。"""
     assert speech_via_tool(config) is expected
 
 
 def test_defaults_are_documented():
     assert DEFAULT_MAX_BUBBLES >= 2, "至少能发 2 条，否则「分条说话」无从谈起"
-    assert "{rounds}" in SPEAK_REMINDER
-    assert "send_message" in SPEAK_REMINDER
-    assert "send_message" in FORCE_SPEAK_REMINDER
-
-
-def test_speech_channel_is_on_by_default():
-    """默认就走「文本=思考，send_message=发言」：三处默认值必须一致。
-
-    模块侧由「输出形态」表达（mode=speech）；旧的 ``speech_via_tool`` 开关已并入
-    形态选择、不再出现在设置页，只留给老配置迁移。
-    """
-    from app.agent.config import DEFAULT_LLM_CONFIG
-    from app.plugins.llm_output.config_schema import SCHEMA as OUTPUT_SCHEMA
-    from app.plugins.llm_output.main import Module as OutputModule
-
-    assert DEFAULT_LLM_CONFIG["speech_via_tool"] is True
-    assert OutputModule.default_config["speech_via_tool"] is True
-    assert OutputModule.default_config["mode"] == "speech"
-    assert OUTPUT_SCHEMA["mode"]["default"] == "speech"
-    assert "speech_via_tool" not in OUTPUT_SCHEMA, "旧开关不该再出现在设置页（两处开关会打架）"
+    assert "send_message" in SPEECH_PROTOCOL
 
 
 def test_chat_prompt_explains_tool_speech():
     """聊天预设的提示词必须讲清"工具是动作/怎么分条"（对齐 qqbridge v2 的口径）。"""
     from app.agent.persona import rules
 
-    caps = rules.detect_caps(
-        {
-            "send_message",
-            "finish",
-            "send_poke",
-            "tavily_search",
-            "memory_save",
-            "get_chat_history",
-        },
-        {"speech_via_tool": True},
-    )
-    text = rules.render(
-        None,
-        {"send_message", "finish", "send_poke", "tavily_search", "memory_save", "get_chat_history"},
-        {"speech_via_tool": True},
-    )
+    tools = {
+        "send_message",
+        "finish",
+        "send_poke",
+        "tavily_search",
+        "memory_save",
+        "get_chat_history",
+    }
+    speech_cfg = {"reply_mode": "participation"}
+
+    caps = rules.detect_caps(tools, speech_cfg)
+    text = rules.render(None, tools, speech_cfg)
 
     assert caps["speech_by_tool"] is True
     assert "你输出的文本只是思考" in text
@@ -350,12 +327,3 @@ def test_chat_prompt_explains_tool_speech():
     assert "工具调用是动作" in text
     assert "不要把同一句话拆到两条里" in text
     assert "直接结束" in text, "静默必须是明确允许的正常结局"
-
-
-def test_speech_channel_falls_back_when_tools_unavailable():
-    """模型不支持 tool calling 时，发言通道必须降级回文本，而不是整轮静默。"""
-    from app.agent.loop.assistant_output import speech_needs_text_fallback
-
-    assert speech_needs_text_fallback(object(), False) is True
-    assert speech_needs_text_fallback(object(), True) is False
-    assert speech_needs_text_fallback(None, False) is False

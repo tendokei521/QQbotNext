@@ -14,18 +14,6 @@ from app.plugins.llm_context.main import Module
 # ---------- 框架侧读取点跟随模块 ----------
 
 
-def test_referent_reads_module_config():
-    from app.plugins.llm_context.src.referent import _cfg
-
-    runtime = SimpleNamespace(
-        config={"referent_prefetch_max": 9},
-        context_options=SimpleNamespace(
-            get=lambda k, d=None: {"referent_prefetch_max": 3}.get(k, d)
-        ),
-    )
-    assert _cfg(runtime, "referent_prefetch_max", 2) == 3
-
-
 def test_session_tools_read_module_config():
     from app.agent.tools.session_tools import _cfg
 
@@ -113,17 +101,16 @@ def _make_module(runtime, values=None):
 
 
 async def test_on_load_installs_view_and_unload_clears():
+    """装/卸模块：context 视图跟着上、跟着清（读的就是模块值）。"""
     runtime = _Runtime()
-    module = _make_module(runtime, {"context_expand_enable": False})
+    module = _make_module(runtime, {"context_enable": False})
 
     await module.on_load()
-    assert policy_get(runtime, "context", "context_expand_enable") is False
-    assert [p.name for p in runtime.context_providers] == ["referent"]
-    assert [s.name for s in runtime.tool_sources] == ["context_expand"]
+    assert policy_get(runtime, "context", "context_enable") is False
 
     await module.on_unload()
     assert runtime.context_options is None
-    assert policy_get(runtime, "context", "context_expand_enable") is True
+    assert policy_get(runtime, "context", "context_enable") is None
 
 
 async def test_on_load_without_runtime_is_safe():

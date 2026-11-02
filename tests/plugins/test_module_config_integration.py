@@ -49,12 +49,10 @@ def _runtime_with_views(views: dict, agent_config: dict | None = None):
 #: 模块 → 运行时视图属性名（合并后的模块可能拥有多个视图，如提示词组装/触发调度）
 #: 空元组 = 该模块没有配置视图（`llm_enhance` 直接读自己的 config，不挂视图）。
 VIEW_ATTR: dict[str, tuple[str, ...]] = {
-    "llm_output": ("output",),
-    "llm_prompt": ("assembly", "meta"),
+    "llm_trigger": ("proactive", "schedule"),
     "llm_context": ("context",),
     "llm_memory": ("memory",),
     "llm_tools_extra": ("tools",),
-    "llm_trigger": ("proactive", "schedule"),
     "llm_enhance": (),
 }
 
@@ -93,19 +91,19 @@ def test_all_migrated_keys_resolve_to_module_values():
 
 
 def test_chained_view_handles_cross_module_keys():
-    """发言通道那类跨模块读取：链式视图两个模块的键都要读得到。"""
+    """跨模块读取：链式视图里两个模块的键都要读得到。"""
     runtime = _runtime_with_views(
         {
-            "output": {"stream_output": True, "speech_via_tool": True},
-            "assembly": {"behavior_rules_override": "自定义"},
+            "context": {"context_expand_enable": True},
+            "memory": {"memory_enable": True},
         },
         {"max_message_length": 200},
     )
     view = policy_view(runtime)
 
     assert isinstance(view, ChainedConfig)
-    assert view.get("behavior_rules_override") == "自定义"      # 归 llm_prompt
-    assert view.get("speech_via_tool") is True             # 归 llm_output
+    assert view.get("context_expand_enable") is True      # 归 llm_context
+    assert view.get("memory_enable") is True              # 归 llm_memory
     assert view.get("max_message_length") == 200           # 回退 agent 配置
     assert view.get("不存在", "默认") == "默认"
 
@@ -117,18 +115,18 @@ def test_chained_view_returns_none_without_runtime():
 def test_uninstalling_one_module_restores_agent_value_for_its_keys_only():
     """卸掉一个模块：它自己的键回退 agent 值，别人的键不受影响。"""
     views = {
-        "output": {"stream_output": True},
         "memory": {"memory_enable": True},
+        "tools": {"onebot_tools_debug": True},
     }
     runtime = _runtime_with_views(
-        views, {"stream_output": False, "memory_enable": False}
+        views, {"memory_enable": False, "onebot_tools_debug": False}
     )
-    assert policy_view(runtime).get("stream_output") is True
+    assert policy_view(runtime).get("memory_enable") is True
 
-    runtime.output_options = None  # 卸载 llm_output
+    runtime.memory_options = None  # 卸载 llm_memory
 
-    assert policy_view(runtime).get("stream_output") is False, "卸载后应回退 agent 配置"
-    assert policy_view(runtime).get("memory_enable") is True, "其它模块不受影响"
+    assert policy_view(runtime).get("memory_enable") is False, "卸载后应回退 agent 配置"
+    assert policy_view(runtime).get("onebot_tools_debug") is True, "其它模块不受影响"
 
 
 @pytest.mark.parametrize("module_name", ALL_MODULES)

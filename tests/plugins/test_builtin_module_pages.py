@@ -1,7 +1,7 @@
 """内置模块自定义页的契约测试（页面文件层面，不起容器）。
 
 锁三件事：
-1. 四个整合后的模块都有自己的 `pages/index.html`；
+1. 带自定义页的内置模块都有自己的 `pages/index.html`；
 2. 页面只依赖框架提供的公共资源（SDK/CSS），不引外部 CDN、不碰 `window.parent`；
 3. 页面用声明式表单（`QQBOT.form`），不自己拼 fetch/保存逻辑。
 """
@@ -13,8 +13,8 @@ import pathlib
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 PLUGINS = ROOT / "app" / "plugins"
 
-#: 四个整合后的核心模块（外加的 memory/tools/enhance 仍用 schema 表单）
-PAGE_MODULES = ("llm_prompt", "llm_trigger", "llm_output", "llm_context")
+#: 仍有自定义页的内置模块（其余模块已改回 schema 表单）
+PAGE_MODULES = ("llm_trigger", "llm_context")
 
 
 def _pages() -> dict[str, str]:

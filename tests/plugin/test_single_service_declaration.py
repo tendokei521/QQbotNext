@@ -66,7 +66,7 @@ def _local_module_classes():
             loader.purge_module_cache(path.name)
 
 
-@pytest.mark.parametrize("module_name", ["llm_prompt", "llm_output", "llm_memory"])
+@pytest.mark.parametrize("module_name", ["llm_memory", "llm_tools_extra", "llm_enhance"])
 def test_llm_strategy_modules_stay_undeclared(module_name):
     """纯 LLM 策略模块不声明（subscribe=()，单一服务对它们没有意义）。"""
     cls = dict(_local_module_classes()).get(module_name)
