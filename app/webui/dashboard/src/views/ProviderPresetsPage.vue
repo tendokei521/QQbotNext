@@ -191,6 +191,8 @@ const savingSource = ref(false)
 const savingModel = ref(false)
 const builtinPresets = ref<BuiltinPreset[]>([])
 const builtinDialog = ref(false)
+/** 「新建模型服务」入口的选择框：预设服务商 / 自定义服务商 */
+const sourceChooser = ref(false)
 const builtinLoading = ref(false)
 const importingBuiltinKey = ref('')
 // 请求序号：快速切换预设时丢弃过期响应，避免模型表显示别的预设的数据
@@ -437,6 +439,21 @@ async function saveSettings() {
 function selectPreset(id: string) {
   selectedPresetId.value = id
   loadModels()
+}
+
+/** 点「新建模型服务」：先问走预设还是自定义（空页时两个入口都走这里） */
+function openSourceChooser() {
+  sourceChooser.value = true
+}
+
+function chooseBuiltinSource() {
+  sourceChooser.value = false
+  openBuiltinDialog()
+}
+
+function chooseCustomSource() {
+  sourceChooser.value = false
+  openCreateSource()
 }
 
 function openCreateSource() {
@@ -845,7 +862,7 @@ onMounted(() => {
       <div class="d-flex flex-wrap gap-2">
         <v-btn variant="text" prepend-icon="mdi-tune" @click="openSettings">全局设置</v-btn>
         <v-btn variant="text" prepend-icon="mdi-library-plus" @click="openBuiltinDialog">添加常用服务</v-btn>
-        <v-btn color="primary" prepend-icon="mdi-plus" @click="openCreateSource">新建模型服务</v-btn>
+        <v-btn color="primary" prepend-icon="mdi-plus" @click="openSourceChooser">新建模型服务</v-btn>
       </div>
     </div>
 
@@ -880,7 +897,7 @@ onMounted(() => {
             </v-list>
             <div v-if="!presets.length" class="text-center pa-2">
               <div class="text-caption mb-2">还没有模型服务</div>
-              <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-plus" block @click="openCreateSource">
+              <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-plus" block @click="openSourceChooser">
                 新建模型服务
               </v-btn>
             </div>
@@ -1040,6 +1057,42 @@ onMounted(() => {
         </v-card>
       </v-col>
     </v-row>
+
+    <!-- 新建模型服务：先选预设服务商还是自定义 -->
+    <v-dialog v-model="sourceChooser" max-width="480">
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon icon="mdi-plus" class="mr-2" color="primary" />
+          新建模型服务
+        </v-card-title>
+        <v-card-text>
+          <div class="d-flex flex-column gap-2">
+            <v-card variant="outlined" hover class="source-option" @click="chooseBuiltinSource">
+              <div class="d-flex align-center gap-3 pa-3">
+                <v-icon icon="mdi-server" color="primary" />
+                <div>
+                  <div class="font-weight-medium">预设服务商</div>
+                  <div class="text-caption app-muted">从常用服务商里选，接口地址自动填好</div>
+                </div>
+              </div>
+            </v-card>
+            <v-card variant="outlined" hover class="source-option" @click="chooseCustomSource">
+              <div class="d-flex align-center gap-3 pa-3">
+                <v-icon icon="mdi-api" color="primary" />
+                <div>
+                  <div class="font-weight-medium">自定义服务商</div>
+                  <div class="text-caption app-muted">自己填接口地址与 API Key（自建网关、代理等）</div>
+                </div>
+              </div>
+            </v-card>
+          </div>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="sourceChooser = false">取消</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
     <!-- 自定义预设编辑 -->
     <v-dialog v-model="sourceDialog" max-width="520">
@@ -1414,5 +1467,10 @@ onMounted(() => {
 
 .table-scroll {
   overflow-x: auto;
+}
+
+/* 「新建模型服务」选择框里的两张选项卡：整张可点 */
+.source-option {
+  cursor: pointer;
 }
 </style>
