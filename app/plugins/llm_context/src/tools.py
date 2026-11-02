@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.agent.tools.spec import ToolContext, ToolSpec
+from app.core.logger import logger
 
 
 def _renderer(runtime: Any):
@@ -41,8 +42,8 @@ def _segments_to_text(runtime: Any, message: Any) -> str:
     if callable(render):
         try:
             return render(message)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[Context] 渲染器处理消息失败，退回纯文本: {e}")
     return _plain_segments(message)
 
 
@@ -183,8 +184,8 @@ async def _image_url(bot: Any, file_ref: str) -> str:
             url = str(data.get("url") or "")
             if url:
                 return url
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[Context] get_image 取图失败，改走 call_api: {e}")
     caller = getattr(bot, "call_api", None)
     if callable(caller):
         try:

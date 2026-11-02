@@ -122,8 +122,8 @@ def _render_reply_text(message, message_id: Any = None) -> str:
         rendered = render_segments(message, message_id=message_id)
         if rendered:
             return rendered
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"[Enhance] 引用正文渲染失败，退回纯文本: {e}")
     return _segments_to_text(message, message_id=message_id)
 
 

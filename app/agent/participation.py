@@ -15,6 +15,8 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
+from app.core.logger import logger
+
 #: 参与度等级（从低到高）
 LEVELS: tuple[str, ...] = ("very_low", "low", "medium", "high", "very_high")
 DEFAULT_LEVEL = "low"
@@ -188,18 +190,15 @@ class Budget:
             self.tokens.append((time.time(), count))
 
 
-#: 每账号一份预算。以前挂在 `runtime.participation_budget` 上，但真实用量是在
-#: `usage/metered.py` 里记的（那里只有 bot_id，拿不到 runtime），所以改成模块级表，
-#: 两条写入路径（门控记账 / 用量回填）共用同一个对象。
+#: 每账号一份预算。真实用量是在 `usage/metered.py` 里记的（那里只有 bot_id、
+#: 拿不到 runtime），所以统一放模块级表，两条写入路径（门控记账 / 用量回填）
+#: 共用同一个对象；不再从 runtime 上读旧属性。
 _BUDGETS: dict[str, Budget] = {}
 
 
 def budget_of(runtime: Any) -> Budget:
     """取该账号的预算对象（同一 bot_id 恒等）。"""
     bot_id = str(getattr(runtime, "bot_id", "") or "")
-    existing = getattr(runtime, "participation_budget", None)
-    if isinstance(existing, Budget):
-        return existing
     budget = _BUDGETS.get(bot_id)
     if budget is None:
         budget = Budget()
@@ -316,7 +315,8 @@ def mark_request(runtime: Any, event: Any) -> None:
         last = {}
         try:
             runtime.participation_last_request = last
-        except Exception:  # noqa: BLE001 —— 只读运行时替身：冷却退化为"不生效"
+        except Exception as e:  # noqa: BLE001 —— 只读运行时替身：冷却退化为"不生效"
+            logger.debug(f"[Participation] 冷却状态写入失败（只读运行时替身）: {e}")
             return
     last[_session_id(event)] = now
 

@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.core.logger import logger
+
 from app.domain.splitter import strip_stream_artifacts
 from app.domain.tags import strip_all_tags
 
@@ -163,7 +165,7 @@ async def deliver_now(ctx: Any, speech: Any) -> tuple[int, str]:
         if mid:
             try:
                 session_mgr.mark_last_assistant_message_id(session_id, mid)
-            except Exception:  # noqa: BLE001 —— 句柄回填失败不影响发送
-                pass
+            except Exception as e:  # noqa: BLE001 —— 句柄回填失败不影响发送
+                logger.debug(f"[Speech] 回填 assistant 消息 id 失败（已忽略）: {e}")
     return sent, ""
 

@@ -12,13 +12,13 @@ SCHEMA = {
     "context_enable": {
         "type": "boolean",
         "label": "上下文增强",
-        "description": "开启后提供 get_context 工具与解析约定；关闭则模型只能用窗口内消息",
+        "description": "开启后模型能按需取回上下文（工具与解析约定）；关闭只能用窗口内消息",
         "default": True,
     },
     "prefetch_reply": {
         "type": "boolean",
         "label": "内联引用正文",
-        "description": "本轮消息引用了某条时，自动把被引用内容取回填进 reply_to",
+        "description": "本轮消息引用了某条时，自动把被引用内容取回并内联",
         "default": True,
         "showIf": {"key": "context_enable", "value": True},
     },
