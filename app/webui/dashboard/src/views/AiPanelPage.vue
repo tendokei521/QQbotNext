@@ -124,7 +124,7 @@ const participationMaxRequests = computed<number>({
   set: (v) => agent.onChange('participation_max_requests', Number(v) || 1),
 })
 const participationCooldown = computed<number>({
-  get: () => Number(agent.draft.participation_cooldown_seconds ?? 20),
+  get: () => Number(agent.draft.participation_cooldown_seconds ?? 3),
   set: (v) => agent.onChange('participation_cooldown_seconds', Number(v) || 0),
 })
 const participationMaxTokens = computed<number>({
@@ -484,7 +484,7 @@ watch(
           />
           <v-text-field
             v-model.number="participationMaxRequests"
-            label="10 分钟请求上限"
+            label="5 分钟请求上限"
             type="number"
             min="1"
             max="1000"
@@ -495,7 +495,7 @@ watch(
           />
           <v-text-field
             v-model.number="participationMaxTokens"
-            label="10 分钟 token 上限"
+            label="5 分钟 token 上限"
             hint="按该账号全部模型调用累计，超出后只记录不请求"
             type="number"
             min="1000"
