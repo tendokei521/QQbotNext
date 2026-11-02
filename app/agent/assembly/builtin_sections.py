@@ -15,7 +15,7 @@
 |---|---|---|---|
 | L1 系统提示词 | behavior(20) / schedule(40) / proactive(50) / message_meta(60) | system | 方案恒有；其余看开关与能力 |
 | L2 人格预设 | persona(10) | system | 始终 |
-| L3 钩子注入 | emoji_hint(30) / skills(70) / memory(80) / background(90) / group_log(100) / extra(105) | system | 各自有内容才出现 |
+| L3 钩子注入 | emoji_hint(30) / skills(70) / memory(80) / background(90) / group_log(100) / extra(105) / identity_context(106) | system | 各自有内容才出现（identity_context 恒有） |
 | L4 对话历史 | history(110) | 对话 | 非空（角色预设的预设对话前插） |
 | L5 本轮消息 | user(120) | user | 始终 |
 
@@ -214,6 +214,48 @@ def build_extra_blocks(req: Any) -> list[dict]:
     ]
 
 
+def build_identity_context(req: Any) -> list[dict]:
+    """账号身份块：告诉模型"我是谁、谁是我的拥有者/管理员"。
+
+    位置固定在**所有 system 块的最后**（L3 order=106，紧跟 ``extra``、在历史之前）：
+    这是每轮都成立的稳定事实，靠后放既不打断"规则 → 人设 → 环境"的连续性，
+    又离模型开口最近。没有配置的字段写「未设置」，不整块消失（否则模型会误以为
+    "我没有拥有者"）。
+    """
+    runtime = getattr(req, "runtime", None)
+    bot = getattr(runtime, "bot", None) if runtime is not None else None
+    account_id = str(getattr(runtime, "bot_id", "") or "") if runtime is not None else ""
+
+    # 自己的 QQ 号：优先取运行时登录快照，其次查账号快照表，最后退回账号 id
+    account = str(getattr(bot, "bot_id", "") or "") if bot is not None else ""
+    if not account and account_id:
+        service = getattr(runtime, "config_service", None) if runtime is not None else None
+        getter = getattr(service, "get_bot_account", None)
+        if callable(getter):
+            try:
+                account = str((getter(account_id) or {}).get("user_id") or "")
+            except Exception:  # noqa: BLE001 —— 身份块读失败不该影响本轮
+                account = ""
+    if not account:
+        account = account_id or "未知"
+
+    def _roster(key: str) -> str:
+        """名册（string_list）→ 顿号分隔；空/缺失 → 「未设置」。"""
+        getter = getattr(req, "cfg", None)
+        values = getter(key, []) if callable(getter) else []
+        if isinstance(values, str):
+            values = values.replace("，", ",").replace(",", "\n").splitlines()
+        items = [str(item).strip() for item in (values or []) if str(item).strip()]
+        return "、".join(items) if items else "未设置"
+
+    content = "\n".join([
+        f"你的账号：{account}",
+        f"你的拥有者：{_roster('agent_owner_list')}",
+        f"你的管理员：{_roster('agent_manager_list')}",
+    ])
+    return [{"role": "system", "content": content}]
+
+
 def _extra_text_parts(req: Any) -> list[dict]:
     """把 ``extra_user_content_parts`` 转成多模态 text 块；空白项丢弃。"""
     return [
@@ -275,6 +317,9 @@ def default_sections() -> list[Section]:
         Section("memory", 80, build_memory, source="builtin"),
         Section("background", 90, build_background, source="builtin"),
         Section("group_log", 100, build_group_log, source="builtin"),
+        # 账号身份（账号/拥有者/管理员）固定在所有 system 块的最后：order=106 紧跟
+        # extra(105)、排在 history(110) 之前。
+        Section("identity_context", 106, build_identity_context, source="builtin"),
         Section("history", 110, build_history, source="builtin"),
         Section("user", 120, build_user, source="builtin"),
     ]
@@ -301,6 +346,7 @@ __all__ = [
     "build_extra_blocks",
     "build_group_log",
     "build_history",
+    "build_identity_context",
     "build_memory",
     "build_persona",
     "build_skills",

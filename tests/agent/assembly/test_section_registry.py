@@ -102,11 +102,15 @@ def test_section_order_decides_position_inside_its_layer():
 
 
 def test_resolve_blocks_keeps_extra_between_group_log_and_history():
-    """兼容的 extra 通道仍按老位置渲染（extra 不是默认段，但每次渲染都插回）。"""
+    """兼容的 extra 通道仍按老位置渲染（extra 不是默认段，但每次渲染都插回）。
+
+    extra 之后紧跟账号身份块（identity_context，order=106），再是历史。
+    """
     runtime = _runtime()
     names = _names(resolve_blocks(PromptRequest(runtime=runtime)))
     assert names.index("extra") == names.index("group_log") + 1
-    assert names.index("extra") + 1 == names.index("history")
+    assert names.index("identity_context") == names.index("extra") + 1
+    assert names.index("history") == names.index("identity_context") + 1
 
 
 def test_plugin_registered_extra_overrides_compat_channel():

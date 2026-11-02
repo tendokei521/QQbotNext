@@ -71,6 +71,7 @@ SECTION_LAYERS: dict[str, str] = {
     "background": LAYER_INJECTED,
     "group_log": LAYER_INJECTED,
     "extra": LAYER_INJECTED,
+    "identity_context": LAYER_INJECTED,
     "history": LAYER_HISTORY,
     "user": LAYER_USER,
 }
