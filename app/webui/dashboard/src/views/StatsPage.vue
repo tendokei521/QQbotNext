@@ -266,6 +266,42 @@ function seriesTotal(series: string): number {
   return buckets.value.reduce((acc, b) => acc + seriesMetricValue(b, series), 0)
 }
 
+/** 大 KPI 卡：跟着「数据维度」走，不要固定展示 token/请求数。
+ *
+ * 历史 bug：切到消息维度后大卡仍读 summary.tokens / summary.requests，
+ * 而消息维度下这两个字段是 0 —— 看起来像统计坏了。
+ */
+interface HeroKpi {
+  label: string
+  value: string
+  unit: string
+  tip: string
+}
+const heroKpis = computed<HeroKpi[]>(() => {
+  const s = summary.value
+  const pick = (key: keyof SeriesItem, label: string, unitText: string, tip: string): HeroKpi => {
+    if (!s) return { label, value: '—', unit: unitText, tip }
+    const isCount = ['requests', 'messages', 'triggered', 'events'].includes(String(key))
+    return { label, value: fmt(metricTotal(key), isCount ? 'count' : unit.value), unit: unitText, tip }
+  }
+  if (kind.value === 'llm') {
+    return [
+      pick('tokens', '当前范围用量', 'token', '当前筛选范围内所有 LLM 请求的 token 总数（输入 + 输出）'),
+      pick('requests', '当前范围请求次数', '次', '实际发给模型服务的请求数（含重试与回退）'),
+    ]
+  }
+  if (kind.value === 'msg_in') {
+    return [
+      pick('messages', '当前范围收到消息', '条', '当前筛选范围内收到的消息条数'),
+      pick('triggered', '其中触发响应', '条', '这些消息里真正触发了机器人回复的条数'),
+    ]
+  }
+  return [
+    pick('messages', '当前范围发出消息', '条', '当前筛选范围内机器人发出的消息条数'),
+    pick('bytes', '当前范围发送字节', 'B', '发出消息的 UTF-8 字节数（与收到的字符数口径不同，别横向比）'),
+  ]
+})
+
 /** 序列值格式化（按当前度量单位）。 */
 function fmtSeries(value: number): string {
   const m = data.value?.meta.metric ?? 'tokens'
@@ -518,20 +554,13 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- ① 大 KPI 卡 -->
+    <!-- ① 大 KPI 卡（跟着数据维度走） -->
     <div class="hero">
-      <div class="hero-card tip" data-tip="当前筛选范围内所有 LLM 请求的 token 总数（输入 + 输出）">
-        <span class="hero-label">当前范围用量</span>
+      <div v-for="card in heroKpis" :key="card.label" class="hero-card tip" :data-tip="card.tip">
+        <span class="hero-label">{{ card.label }}</span>
         <div class="hero-value">
-          {{ summary ? fmt(summary.tokens, unit) : '—' }}
-          <span class="hero-unit">token</span>
-        </div>
-      </div>
-      <div class="hero-card tip" data-tip="实际发给模型服务的请求数（含重试与回退，不含未触发的消息）">
-        <span class="hero-label">当前范围请求次数</span>
-        <div class="hero-value">
-          {{ summary ? summary.requests : '—' }}
-          <span class="hero-unit">次</span>
+          {{ card.value }}
+          <span class="hero-unit">{{ card.unit }}</span>
         </div>
       </div>
     </div>
