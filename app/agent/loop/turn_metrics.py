@@ -348,6 +348,85 @@ def log_debug_prompt_if_enabled(runtime, session_id: str, messages: list[dict], 
     _log_debug_prompt(runtime, session_id, messages, debug_enabled=True)
 
 
+#: 调试输出里正文/思考的最大字符数：模型可能复述超长工具结果，无上限打印会把
+#: user.log 一条就撑到几 MB。超出截断并标注，完整内容仍在会话数据页里。
+DEBUG_RESPONSE_MAX_CHARS = 20000
+
+
+def log_debug_response_if_enabled(
+    runtime,
+    session_id: str,
+    *,
+    text: str = "",
+    reasoning: str = "",
+    tool_calls: list | None = None,
+    reason: str = "",
+    rounds: int = 0,
+    error: str = "",
+    usage: dict | None = None,
+    ctx: Any = None,
+) -> None:
+    """按本轮钩子设置的开关打印模型**这一次请求的结果**（流式/非流式共用）。
+
+    开关由 ``llm_enhance``（显示名「LLM调试」）的 ``pre_request`` 钩子写进
+    ``ctx.state["debug_response"]``，与 ``debug_prompt`` 相互独立——只想看"模型回了
+    什么"、不想被整段 prompt 刷屏时只开这一个。
+
+    刻意连**思考**和**工具调用**一起打：发言通道下正文只是思考（不会发出去），
+    "模型写了正文却没调用 send_message"这种问题只能从原文看出来。
+    """
+    state = getattr(ctx, "state", None) or {}
+    if not isinstance(state, dict) or not state.get("debug_response"):
+        return
+
+    def _clip(value: Any, limit: int = DEBUG_RESPONSE_MAX_CHARS) -> str:
+        body = str(value if value is not None else "")
+        if len(body) <= limit:
+            return body
+        return f"{body[:limit]}…（已截断，原长 {len(body)} 字符）"
+
+    calls: list[dict] = []
+    for item in tool_calls or []:
+        if not isinstance(item, dict):
+            continue
+        args = item.get("args", item.get("arguments", {}))
+        try:
+            args_text = (
+                args if isinstance(args, str)
+                else json.dumps(args, ensure_ascii=False, default=str)
+            )
+        except Exception:  # noqa: BLE001 —— 调试输出失败不该影响本轮
+            args_text = str(args)
+        calls.append({
+            "name": str(item.get("name") or item.get("tool") or ""),
+            "args": _clip(args_text, 500),
+        })
+
+    body_text = str(text or "")
+    body_reasoning = str(reasoning or "")
+    payload = {
+        "session_id": session_id,
+        "reason": str(reason or ""),
+        "rounds": int(rounds or 0),
+        "error": str(error or ""),
+        "text_chars": len(body_text),
+        "reasoning_chars": len(body_reasoning),
+        "text": _clip(body_text) or "（空：模型这次没有输出正文）",
+        "reasoning": _clip(body_reasoning) or "（空）",
+        "tool_calls": calls,
+        "usage": usage or {},
+    }
+    try:
+        dumped = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+    except Exception:  # noqa: BLE001 —— 兜底：结构里有不可序列化对象时退化成 str
+        dumped = str(payload)
+    logger.add_info(account_label(runtime.bot_id)).info(
+        f"[Response] {session_id} · 结局={payload['reason'] or '-'}"
+        f" · 轮次={payload['rounds']} · 正文 {payload['text_chars']} 字"
+        f" · 思考 {payload['reasoning_chars']} 字 · 工具 {len(calls)} 个\n{dumped}"
+    )
+
+
 #: system 段（L1+L2+L3 全是 system）每轮的 token 预算提示线：超过只提示，不裁剪。
 #: 之所以只提示：裁剪规则段会静默降低安全约束，宁可让日志里出现一个刺眼的标记。
 SYSTEM_TOKEN_WARN = 6000

@@ -64,6 +64,7 @@ from app.agent.loop.turn_metrics import (
     _input_tokens_estimate,
     _turn_budget,
     log_debug_prompt_if_enabled,
+    log_debug_response_if_enabled,
 )
 from app.agent.loop.turn_runner import TurnReason, TurnState
 from app.agent.tools.spec import build_tools, make_executor
@@ -407,6 +408,19 @@ async def _run_inner(
     )
     # 一轮结束：广播给订阅者（记忆蒸馏、统计、审计等业务自己接）
     await run_stage(runtime, "turn_completed", ctx)
+    # 「LLM调试」的返回日志：放在所有结局判定之后，打的是"这一次请求最终得到了什么"
+    log_debug_response_if_enabled(
+        runtime,
+        session_id,
+        text=result.text,
+        reasoning=result.reasoning_text,
+        tool_calls=result.tool_results,
+        reason=str(result.reason),
+        rounds=result.rounds,
+        error=result.error,
+        usage=result.usage,
+        ctx=ctx,
+    )
     return result
 
 

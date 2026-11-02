@@ -352,8 +352,8 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
         "tool_result_directive_enable",
         "tool_result_directive",
     ),
-    # 调试：只有一个开关（原来被判成"已删除"，但模块一直在用）
-    "llm_enhance": ("debug_prompt",),
+    # 调试：请求内容 + 模型返回各一个开关（原来被判成"已删除"，但模块一直在用）
+    "llm_enhance": ("debug_prompt", "debug_response"),
 }
 
 # ==================== 3. 删除（9 键）====================

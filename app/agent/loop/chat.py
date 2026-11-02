@@ -84,6 +84,7 @@ from app.agent.loop.turn_metrics import (  # noqa: F401 - 重导出保持 chat.*
     _usage_delta,
     _usage_snapshot,
     log_debug_prompt_if_enabled,
+    log_debug_response_if_enabled,
 )
 from app.agent.loop.turn_runner import TurnAborted
 from app.agent.providers import log_token_usage
@@ -647,6 +648,20 @@ async def stream_response(runtime, event, ctx=None):
         model=_served_model_label(usage_sink, meta["model"]),
         chars=len("".join(full_text_parts)),
         stream=True,
+    )
+    # 「LLM调试」的返回日志（与非流式路径同一口径）：整轮正文 + 思考 + 工具调用。
+    # 发言通道下"正文只是思考"，模型写了正文却没调发送工具时只有这里能看到原文。
+    log_debug_response_if_enabled(
+        runtime,
+        session_id,
+        text="".join(full_text_parts),
+        reasoning=str(getattr(step, "reasoning_text", "") or ""),
+        tool_calls=tool_results,
+        reason=str(turn_reason),
+        rounds=rounds_so_far,
+        error=stream_error_text,
+        usage=usage_sink,
+        ctx=ctx,
     )
     # 预算总账只留在 debug.log：逐请求打这个数字对用户没有信息量（见 turn_metrics
     # 里请求行的说明），而每轮都进 user.log 只会把用户日志刷成内部字段清单。

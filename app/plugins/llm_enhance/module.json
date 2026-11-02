@@ -3,7 +3,7 @@
   "display_name": "LLM调试",
   "sign": "LlmEnhance",
   "version": "1.0.0",
-  "description": "开启后把本轮发给模型的完整内容写进日志",
+  "description": "开启后把本轮发给模型的内容、以及模型返回的结果写进日志",
   "entry": "main.py",
   "api_version": 1
 }

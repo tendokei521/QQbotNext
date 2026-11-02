@@ -110,3 +110,15 @@ def test_both_paths_log_the_debug_prompt():
         assert "log_debug_prompt_if_enabled" in _text(path), (
             f"{path.name} 漏了完整 prompt 日志（开关开了却看不到请求体）"
         )
+
+
+def test_both_paths_log_the_debug_response():
+    """「记录模型返回」同样两条路径都要打。
+
+    与 prompt 日志同一类坑：只写在一条路径上，用户开了开关会发现"有时能看到、
+    有时看不到"（取决于该账号是流式还是非流式）。
+    """
+    for path in (TURN_PY, CHAT_PY):
+        assert "log_debug_response_if_enabled" in _text(path), (
+            f"{path.name} 漏了模型返回日志（开关开了却看不到返回结果）"
+        )
