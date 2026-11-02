@@ -7,8 +7,7 @@
 - **README 改为面向用户**：只讲"能做什么、怎么装、怎么接 QQ、后台各页干什么、出问题先查哪"；
   插件开发/架构/配置细节全部移到 `docs/`。
 - **现行文档只留 15 份**（根目录 5 份 + `docs/` 顶层 12 份，见 `docs/README.md` 的文档地图）；
-  其余计划、评审、研究、早期设计稿统一移入 `docs/archive/`，并新增 `docs/archive/README.md`
-  说明"档案不代表现状"。
+  历史计划、评审、研究稿已删除（过程记录以 commit message 为准）。
 - **全部现行文档按代码重写/精简**：模块已合并为 5 个（触发与调度 / 上下文增强 / 长期记忆 /
   工具扩展 / LLM 调试），提示词按五层装配，`assembly_profile` 等旧配置键已删除——
   文档里的过时描述一并清掉。总行数从约 12,000 行降到约 2,000 行。
@@ -153,7 +152,7 @@ system 内容，既抬高了 prompt-injection 风险，也让 system 前缀逐�
 先由 5 个子 agent 分区只读审查（AI 面板 / 账号与向导 / 插件与工具 / 数据与设置 / 文案与术语），
 在真实构建产物上实拍 1440 与 390 两档，共记录 62 条问题；再分域并行修复，最后用 3 个独立
 子 agent 交叉审查「新手可用性 / 配置重复 / 信息架构」，修掉复查发现的新问题。完整清单与
-验收记录见 [`docs/plan/ui-intuition-round.md`](docs/archive/plan/ui-intuition-round.md)。
+验收记录见 `docs/plan/ui-intuition-round.md`（已删除）。
 
 **口径（每个配置只有一个编辑入口）**
 
@@ -230,7 +229,7 @@ system 内容，既抬高了 prompt-injection 风险，也让 system 前缀逐�
 
 ### 重构：AI 对话设置拆分为「AI 对话面板 / 回复与权限 / AI 设置」
 
-拆分方案见 [`docs/plan/ai-panel-split.md`](docs/archive/plan/ai-panel-split.md)。原则：**面板管日常、
+拆分方案见 `docs/plan/ai-panel-split.md`（已删除）。原则：**面板管日常、
 设置管参数、每个字段只有一个编辑入口**。
 
 - **AI 对话面板（`/ai`）**：新增高频操作台——状态条（回复开关/模型/人格/加载错误）、回复总开关、
@@ -254,7 +253,7 @@ system 内容，既抬高了 prompt-injection 风险，也让 system 前缀逐�
 ### 重大：对标 AstrBot / MaiBot / LangBot 的稳定性与易用性整改（2026-10-28）
 
 先做三份只读审计（后端稳定性、前端 UX/文案、同类项目对标），再按「小问题直接改、大问题列计划」
-执行。完整清单与验证记录见 [`docs/plan/optimization-round.md`](docs/archive/plan/optimization-round.md)。
+执行。完整清单与验证记录见 `docs/plan/optimization-round.md`（已删除）。
 
 **后端稳定性（P0，防卡死/丢数据/静默失效）**
 
@@ -337,7 +336,7 @@ system 内容，既抬高了 prompt-injection 风险，也让 system 前缀逐�
 
 验证：`pytest tests/application/test_bundle_modules.py tests/webui/test_bundles_api.py
 tests/webui/test_module_api.py -q` + `npm run build`；逐项 commit 见
-[`docs/plan/onboarding-bundle.md#p7`](docs/archive/plan/onboarding-bundle.md#p7-预设一键化2026-10-27-追加)。
+`docs/plan/onboarding-bundle.md#p7`（已删除）。
 
 ### 新增：预设迁移补齐——随包模块 / 人格卡 / 模型池全量 / 密钥回写
 

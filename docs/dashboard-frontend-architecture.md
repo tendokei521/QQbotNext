@@ -1,8 +1,7 @@
 # Dashboard 前端架构（现状）
 
 > 读者：改 `app/webui/dashboard/**` 的人。
-> 只写现在的结构与约定；历史上"11 个入口合并成 5 个"那套改造计划在
-> [archive/legacy/dashboard-frontend-architecture-plan.md](archive/legacy/dashboard-frontend-architecture-plan.md)。
+> 只写现在的结构与约定；页面/路由以 `src/router/index.ts` 为准。
 
 ## 1. 技术栈与产物
 

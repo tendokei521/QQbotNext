@@ -1,9 +1,10 @@
 # 本地文档地图
 
-本仓库文档分三层：**给人用**（根目录 README / MAINTENANCE）、**给改代码的人**（本目录）、**历史档案**（docs/archive，只作过程记录，不代表现状）。
+本仓库的文档只有两层：**给人用**（根目录 `README.md` / `MAINTENANCE.md`）与**给改代码的人**（本目录）。
+不保留历史稿：过程记录以 commit message 和 PR 为准，文档只写**当前事实**。
 
-> 规则：**只有本目录顶层这 12 份文档（含本索引） + 根目录 README/MAINTENANCE 属于"现行文档"**，必须与代码一致；
-> 其余全部进 `docs/archive/`，不再维护，里面的模块名/配置键可能早已不存在。
+> 规则：只有本目录顶层这 12 份文档（含本索引）+ 根目录 README/MAINTENANCE/STYLE/AGENTS 属于现行文档，
+> 必须与代码一致。写新文档前先在这里登记；过时内容直接改掉或删除，不要"留着以后看"。
 
 ---
 
@@ -14,7 +15,7 @@
 | [../README.md](../README.md) | **使用者** | 这是什么、装、启动、接 QQ、后台各页干什么、更新回滚、常见故障 |
 | [../MAINTENANCE.md](../MAINTENANCE.md) | **部署者 / 运维** | 目录结构、环境变量、日志、数据库备份恢复、模块管理、排障手册 |
 
-## 二、开发者（现行，必须与代码一致）
+## 二、开发者（必须与代码一致）
 
 | 文档 | 读者 | 内容 |
 |---|---|---|
@@ -31,24 +32,11 @@
 | [DATA_STATS_DESIGN.md](DATA_STATS_DESIGN.md) | 改统计 | 统计什么、口径、数据来源、页面怎么呈现 |
 | [plugin-template/](plugin-template/) | 写新插件 | 可直接复制的插件骨架 |
 
-## 三、历史档案（不维护）
-
-| 目录 | 内容 |
-|---|---|
-| [archive/plan/](archive/plan/) | 已完成的实施计划（按阶段记录 commit） |
-| [archive/reviews/](archive/reviews/) | 代码/流程评审与问题分析（含当年的证据） |
-| [archive/research/](archive/research/) | 外部实现研究与差分对比 |
-| [archive/legacy/](archive/legacy/) | 早期设计稿（模块重设计、多账号、打包、提示词重写等） |
-| [archive/assembly-takeover-progress.md](archive/assembly-takeover-progress.md) | 更早的一次改造进度记录 |
-
-> 档案里的链接可能因搬家失效；需要引用历史时请整段摘录而不是链进去。
-> 判断某份档案是否已过时：它提到的 `llm_output / llm_assembly / llm_message_meta / llm_proactive / llm_schedule / llm_knowledge` 这些模块和 `assembly_profile / system_prompt_style` 这些配置键都已经不存在。
-
 ---
 
-## 怎么写新文档
+## 怎么写文档
 
 1. 先问"读者是谁"：用户能看懂的不写实现细节，改代码的人需要能照做。
-2. 现行文档只写**当前事实**；"当初为什么这么做"放档案，一句话链接即可。
+2. 只写**当前事实**；"当初为什么这么做"用一句 commit message 交代，不单独存档。
 3. 同一事实只写透一次，其它地方用相对链接引用。
-4. 改完手动核对内部链接（`docs/` 内用相对路径，从仓库根出发也可以）。
+4. 改完核对内部链接（`docs/` 内用相对路径），确保点得开。

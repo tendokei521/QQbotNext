@@ -4,9 +4,9 @@
 已经不存在的 `llm_output` / `assembly_profile`，下一个人（或 Agent）会照着错的做。
 这里把三件事变成可执行检查：
 
-1. **现行文档清单固定**：`docs/` 顶层只允许白名单里的文件（其余一律进 `docs/archive/`）；
-2. **相对链接必须能打开**（只查现行文档；档案里的链接允许失效）；
-3. **现行文档不许再提已删除的模块名/配置键**（除非同一行明确写"已删除/已合并"）。
+1. **文档清单固定**：`docs/` 顶层只允许白名单里的文件（不保留历史稿）；
+2. **相对链接必须能打开**；
+3. **文档不许再提已删除的模块名/配置键**（除非同一行明确写"已删除/已合并"）。
 
 新增文档时：先在白名单里登记，再写内容。
 """
@@ -55,7 +55,7 @@ DEAD_NAMES = (
 _LINK_RE = re.compile(r"\]\(([^)]+)\)")
 
 #: 同一行出现这些词时，允许提到已删除的名字（是在解释"它没了"）
-_EXCUSE_WORDS = ("已删除", "已合并", "已移除", "不再", "不存在", "archive")
+_EXCUSE_WORDS = ("已删除", "已合并", "已移除", "不再", "不存在")
 
 
 def _live_paths() -> list[Path]:
@@ -67,10 +67,10 @@ def _live_paths() -> list[Path]:
 
 
 def test_docs_top_level_only_contains_live_docs():
-    """docs/ 顶层只放现行文档；历史稿一律进 docs/archive/。"""
+    """docs/ 顶层只放现行文档；不保留历史稿（过程记录以 commit message 为准）。"""
     docs = REPO_ROOT / "docs"
     extra = sorted(p.name for p in docs.glob("*.md") if p.name not in LIVE_DOCS)
-    assert not extra, f"这些文档不是现行文档，请移到 docs/archive/ 或在 docs/README.md 登记: {extra}"
+    assert not extra, f"这些文档没在 docs/README.md 登记（不许留历史稿）: {extra}"
 
 
 def test_every_live_doc_is_registered():
@@ -107,9 +107,3 @@ def test_live_docs_do_not_describe_dead_modules(path: Path):
         f"{path.relative_to(REPO_ROOT)} 仍在描述已删除的模块/配置键: {offenders}；"
         "如果是在说明'它已经没了'，请在同一行写上'已删除/已合并'"
     )
-
-
-def test_archive_is_documented():
-    """档案目录必须有一份说明，告诉读者'这里不代表现状'。"""
-    archive = REPO_ROOT / "docs" / "archive"
-    assert (archive / "README.md").exists(), "docs/archive/README.md 丢失：档案需要总说明"

@@ -16,7 +16,6 @@
   `policy_get(runtime, kind, key, default)`（模块接管读模块值，否则回退本体值）。
 - 已删除的键：`assembly_profile`、`behavior_rules_enable`、`system_prompt_style`。
   库里的残值会被忽略，不需要手工清理。
-- 键的历史设计意图（为什么这么设计）在 [archive/legacy/](archive/legacy/)；不要拿它当现状。
 
 ## 1. 回复开关与触发（`group_switch` / `group_trigger` / `group_debounce`）
 
