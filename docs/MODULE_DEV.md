@@ -187,7 +187,7 @@ from app.plugin import command, command_group
 async def cmd_mymod(self, ctx, arg: str = ""): ...
 ```
 
-默认前缀与框架指令一致（`#` 开头，见 `app/plugin/commands.py` 的 `DEFAULT_PREFIXES`）；
+默认前缀与框架指令一致（`/` 或全角 `／`，见 `app/plugin/commands.py` 的 `DEFAULT_PREFIXES`）；
 `skip_llm=True` 表示这条指令不触发 LLM 回复。
 
 ### 6.5 给模型加工具 — `ToolSource`
@@ -272,8 +272,9 @@ data_dir = get_data_path(self.module_name)      # data/module/data/<name>/（自
 
 ## 10. 接管槽位（高级，少用）
 
-声明 `supersedes=("assembly",)` / `("provider_invoker",)` / `("output",)` / `("trigger",)`
-表示你要**替换**该机制。真正实现对应协议（如 `build(req) -> list[dict]`）后，框架会把槽位指向你。
+只有 4 个可接管的槽位（清单与租约语义见 [FEATURE_REGISTRY.md](FEATURE_REGISTRY.md)）：
+`supersedes=("assembly",)` / `("provider_invoker",)` / `("output",)` / `("agent",)`。
+声明表示你要**替换**该机制；真正实现对应协议（如 `build(req) -> list[dict]`）后，框架会把槽位指向你。
 只有"要复刻另一套组装/调用形态"时才这么做；普通功能一律用 §6 的扩展点。
 
 ---
