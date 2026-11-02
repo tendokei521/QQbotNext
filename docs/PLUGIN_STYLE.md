@@ -32,7 +32,7 @@
 
 - 必填 `name` / `display_name` / `version`；`name` 只能是 `[A-Za-z_][A-Za-z0-9_]*`；`api_version` 目前只支持 `1`。
 - 可选 `sign` / `description` / `author` / `entry`（缺省 `main.py`）/ `requires`（字符串数组）/ `requirements`（清单文件名）。
-- 第三方安装时框架校验 `name == 目录名`，不一致拒绝加载（`plugin/loader.py`）。
+- 第三方模块加载时校验 `manifest.name == 目录名`，不一致拒绝加载（`plugin/loader.py`）；安装目录也以 `manifest.name` 命名。
 
 ## 2. 硬规则（闸门逐条可判定）
 
