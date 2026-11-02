@@ -336,7 +336,7 @@ class AgentRuntime:
             chain = self._chain_from_global_settings()
         if not chain:
             # 这条日志此前不存在：表现为 bot 一句话不回、日志里毫无线索
-            logger.add_info(account_label(self.bot_id)).error(
+            logger.add_info(account_label(self.bot_id)).warning(
                 "[Provider] 没有可用模型：Agent 页未选择模型，且「Provider 全局设置」里也没有"
                 "默认模型——请在 Agent 页选择模型，或在 Provider 预设页设置全局默认模型"
             )
