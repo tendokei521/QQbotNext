@@ -2,7 +2,7 @@
 /**
  * 首启向导（4 步）：连接 → 模型 → 人格 → 完成。
  *
- * 设计约束（docs/oneclick-bundle-and-onboarding-design.md §7.2）：
+ * 设计约束：
  * - 每一步都只有一个问题，且**同屏完成**（例如"选模型"和"接入"不再分两页）；
  * - 每一步都可以直接「下一步」（先跳过、稍后再回来补，总览会给 blocker 提示）；
  * - 第 4 步的清单与总览就绪卡、启动横幅同源（`/api/readiness`）。
@@ -137,11 +137,13 @@ function choosePreset(preset: PresetOption) {
   model.preset_name = preset.name
 }
 
-/** 自定义：手填接口地址与模型名（自建服务、代理等） */
+/** 自定义：手填接口地址与模型名（自建服务、代理等），不继承上一家的地址 */
 function chooseCustom() {
   customMode.value = true
   selectedPresetKey.value = ''
   model.preset_name = ''
+  model.api_base = ''
+  model.model = ''
 }
 
 async function loadPresets() {
@@ -454,7 +456,7 @@ async function savePersona() {
     if (!presetId) throw new Error('角色预设创建失败')
     await http.post(
       '/api/agent/config',
-      { enabled: true, config: { group_enable: true, persona_preset_id: presetId } },
+      { config: { group_enable: true, persona_preset_id: presetId } },
       { params: { account_id: currentAccountId.value } },
     )
     personaDone.value = true
