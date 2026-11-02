@@ -5,7 +5,7 @@
 - 用「参与度」做**本地规则门**，低等级消息根本不发请求（控制 QQ 场景成本）；
 - 通过门的消息才进入 LLM，最终是否发言由系统提示词里的参与度约定 + 模型决定
   （沉默 = 不调用发送工具）；
-- 预算保护：每账号 10 分钟窗口内最多 60 次请求 / 10M tokens。
+- 预算保护：每账号 5 分钟窗口内最多 60 次请求 / 10M tokens（上限不变，窗口收窄一半）。
 """
 
 from __future__ import annotations
@@ -19,8 +19,8 @@ from typing import Any
 LEVELS: tuple[str, ...] = ("very_low", "low", "medium", "high", "very_high")
 DEFAULT_LEVEL = "low"
 
-#: 预算：10 分钟窗口
-BUDGET_WINDOW_SECONDS = 600
+#: 预算窗口：5 分钟（请求/token 上限数值不变，只把统计窗口从 10 分钟收窄）
+BUDGET_WINDOW_SECONDS = 300
 DEFAULT_MAX_REQUESTS = 60
 DEFAULT_MAX_TOKENS = 10_000_000
 
@@ -153,7 +153,7 @@ def participation_section(req: Any) -> list[dict]:
 
 
 class Budget:
-    """每账号的 10 分钟请求/token 预算。"""
+    """每账号的 5 分钟请求/token 预算。"""
 
     def __init__(self) -> None:
         self.requests: deque[float] = deque()
@@ -345,7 +345,7 @@ def gate(runtime: Any, event: Any, level: str) -> GateResult:
         return GateResult(at_me or reply_me, "at_or_reply" if (at_me or reply_me) else "level_very_low", at_me, reply_me)
     if level == "low":
         # 低档：「有没有被提到/相关」交给**模型**判断。
-        # 本地放行全部消息，成本由「10 分钟预算 + 同群冷却」兜底，而不是由
+        # 本地放行全部消息，成本由「5 分钟预算 + 同群冷却」兜底，而不是由
         # 本地谓词替模型做决定（本地判定只会三种硬信号，剩下的都得靠模型）。
         return GateResult(True, "at_or_reply" if (at_me or reply_me) else "level_low_model", at_me, reply_me)
     if level == "medium":

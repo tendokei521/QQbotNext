@@ -525,7 +525,7 @@ class LlmPipeline:
             return False
 
         # ② 冷却：@/回复豁免（被叫了不该等冷却）；只有真请求才计时（mark_request）
-        cooldown = int(config.get("participation_cooldown_seconds", 20) or 0)
+        cooldown = int(config.get("participation_cooldown_seconds", 3) or 0)
         exempt = verdict.at_me or verdict.reply_me
         if not exempt and not cooldown_ok(self.runtime, ctx.event, cooldown):
             log_skip(
@@ -538,7 +538,7 @@ class LlmPipeline:
             )
             return False
 
-        # ③ 预算：10 分钟窗口的请求数 / token（token 由 usage 回填，见 A-12）
+        # ③ 预算：5 分钟窗口的请求数 / token（token 由 usage 回填，见 A-12）
         budget = budget_of(self.runtime)
         max_req = int(config.get("participation_max_requests", 60) or 60)
         max_tok = int(config.get("participation_max_tokens", 10000000) or 10000000)
@@ -546,9 +546,9 @@ class LlmPipeline:
             log_skip(
                 account_id,
                 "participation_budget",
-                f"10 分钟窗口已用 {len(budget.requests)} 次 / {max_req} 次请求、"
+                f"5 分钟窗口已用 {len(budget.requests)} 次 / {max_req} 次请求、"
                 f"{sum(t for _, t in budget.tokens)} / {max_tok} tokens（只记录不请求）",
-                hint="调高「10 分钟请求上限 / token 上限」，或等窗口滚动后再试",
+                hint="调高「5 分钟请求上限 / token 上限」，或等窗口滚动后再试",
                 level="warning",
                 interval_s=120,
             )

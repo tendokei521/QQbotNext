@@ -56,8 +56,8 @@ SCOPE_OVERRIDABLE: dict[str, tuple[str, ...]] = {
         # 回复模式（2026-11-01）：账号级默认 + 群级覆盖，灰度时按群开
         "reply_mode",             # legacy / participation
         "participation_level",    # 参与度档位（语义写在提示词里）
-        "participation_max_requests",    # 10 分钟请求上限
-        "participation_max_tokens",      # 10 分钟 token 上限
+        "participation_max_requests",    # 5 分钟请求上限
+        "participation_max_tokens",      # 5 分钟 token 上限
         "participation_cooldown_seconds",  # 同群两次请求的最小间隔
     ),
 }
