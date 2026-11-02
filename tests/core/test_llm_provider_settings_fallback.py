@@ -11,7 +11,8 @@
 ``api_key`` 为空时静默 return）。
 
 现在：Agent 层没给出任何模型时，由全局设置接管；``provider_pool`` 作允许清单
-（``*`` 或不填 = 全允许）；都能落空时打一条明确的 error。
+（``*`` 或不填 = 全允许）；都能落空时打一条明确的 warning（属于配置缺失，
+不是程序错误）。
 """
 
 from __future__ import annotations
@@ -119,7 +120,7 @@ async def test_global_settings_ignores_unknown_model_id(stack, caplog):
 
 
 async def test_empty_chain_is_reported_loudly(stack):
-    """两层都没有模型时必须留一条明确的 error —— 此前是彻底静默的「不回复」。"""
+    """两层都没有模型时必须留一条明确的 warning —— 此前是彻底静默的「不回复」。"""
     config_service, _ids = stack
     rt = _runtime(config_service)
     try:

@@ -1,9 +1,9 @@
 """P0-1：被跳过的消息必须留下可查原因（去重 + 统一格式 + 可注入）。
 
 背景：LLM 流水线里多处静默 return，用户表现为「群里 @ 没反应、日志干净」。
-本测试锁定四件事：①用户可见级别同一 (账号, 原因, 细节) **进程内只记一次**
-（"仅启动第一次体现"，重启后才再提醒）；②不同群/不同用户各自提醒一次；
-③debug 级是技术日志、保留 60s 窗口；④日志含原因码/细节/修复提示，
+本测试锁定四件事：①用户可见级别同一 (账号, 原因) **进程内只记一次**
+（"仅启动第一次体现"，重启后才再提醒）；②同一原因跨不同群也只提醒一次
+（细节不参与去重）；③debug 级是技术日志、保留 60s 窗口；④日志含原因码/细节/修复提示，
 流水线的场景开关确实走统一入口。
 """
 
@@ -62,13 +62,13 @@ def test_same_skip_is_logged_once_per_process(monkeypatch):
     assert len(calls) == 1
 
 
-def test_different_detail_is_reported_separately(monkeypatch):
-    """细节参与去重键：两个群都被禁用时，两个群各要有一条提示。"""
+def test_different_detail_is_not_reported_separately(monkeypatch):
+    """细节不参与用户可见级别的去重：两个群都被禁用也只留一条警告。"""
     calls = _capture(monkeypatch)
     assert skip_log.log_skip("acc1", "group_disabled", "群 1") is True
-    assert skip_log.log_skip("acc1", "group_disabled", "群 2") is True
+    assert skip_log.log_skip("acc1", "group_disabled", "群 2") is False
     assert skip_log.log_skip("acc1", "group_disabled", "群 1") is False
-    assert len(calls) == 2
+    assert len(calls) == 1
 
 
 def test_debug_level_keeps_repeat_window(monkeypatch):
