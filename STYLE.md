@@ -241,126 +241,29 @@ pytest -q --cov --cov-report=term-missing   # 需要覆盖率时
 - **模板**：仓库根目录 `.gitmessage` 提供 Conventional Commits 预填模板，执行
   `git config commit.template .gitmessage` 后 `git commit`（不带 `-m`）即可启用。
 
-## 12. 已知架构债（可量化，改动前必读）
+## 12. 现状与残余债（改动前读一眼）
 
-> 本节数字为 **AST 解析全库 import 图实测**得出，不是估计。动手前先读这里：
-> **不要以现状为范例**。债还掉一部分后请把新数字更新回本节（这是唯一的进度记录）。
->
-> 口径：行数=文件总行数（含空行与注释）；扫描域 `app/` + `module/` + `scripts/`；
-> **数字会随代码变动漂移**，复核时请重算，不要照抄。
-> **重算方法（唯一来源）**：`venv\Scripts\python.exe scripts\gen\arch_closure.py`
-> ——`--scc` 看环、`--why <模块>` 看环的成因路径、`--assert-max N` 供 CI 断言。
-> 不要再手写脚本重算（口径会漂）。
+> 详细分层与目录职责见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)；这里只留"有坑的地方"。
+> 数字会漂移，**需要引用数字时用 `scripts/gen/arch_closure.py` 现算，不要照抄文档**。
 
-### 12.0 进度速览（P0–P9 已完成，收尾见 §12.1 末尾）
+已收敛、不必再防的：
 
-> **2026-10-26 复测**（工具循环 P0–P6 落地后）：本节数字用
-> `scripts/gen/arch_closure.py` 重算过一遍，只更新了能**直接测出来**的行；
-> 标「未复核」的仍是上一轮的数字，别当准数用。
+- 前端只有一套（`app/webui/dashboard`，产物 `dist` 进仓库）；旧的 `static/` 与 `/legacy` 已删；
+- 模块按**文件路径**加载（位置与 import 名解耦）；`app/plugin/` 是框架，`app/plugins/` 是内置业务插件；
+- 生产代码不再 `from app.bootstrap import ...`；服务定位只剩 `app/core/container.get_active()`，
+  且只给插件无参便捷 API 用（新代码传参或 `Depends`）；
+- `tests/` 按源码镜像分区；`app/**/*.py` 单文件 ≤ 800 行由架构测试守着（豁免名单只许缩小）。
 
-| 指标 | 制定方案时 | 现在 |
+仍然存在的债（改到相关代码时留意）：
+
+| 债 | 现状 | 注意 |
 |---|---|---|
-| 最大强连通块 | 24 文件 / 12,112 行（仅模块层 import；含惰性 import 实测 27 文件 / 13,547 行） | 含惰性 import：**2 块 / 53 文件 / 17,418 行**；`--no-lazy`：**1 块 / 4 文件 / 661 行**（这是**既有欠账**：`git worktree` 回测 `2a1c1ab^` 时同样是 1/2 个块，不是这一轮引入的） |
-| `chat.py` 可达闭包 | 143 文件 / 42,082 行 | 未复核（重算见下方命令） |
-| 生产代码 `from app.bootstrap import` | 4 | **0** |
-| `get_container()` 直调 | 71 次 / 14 文件 | **1 次**（只剩 `deps.py` 里的实现本身） |
-| 端点里 `container.get(类型)` | — | **2 次**（都在 `deps.get_service` 内部） |
-| 单文件最大 `manifest.py` | 4,789 行 | **已外置 JSON**（加载器 78 行） |
-| `app/agent/` 顶层平铺 | 55 文件 / 20,916 行 | **10 文件 / 3,856 行**（子包 14 个） |
-| 单文件最大 `chat.py` | 2,192 行 | **660 行**（循环已搬进 `loop/tool_step.py`；`loop/` 下 19 个子模块） |
-| `registry.py` / `features.py` / `gateway.py` / `config_service.py` | 681 / 538 / 817 / 823 行 | **505 / 包（最大 326）/ 753 / 779 行**（未复核） |
-| `app/domain/` | 4 文件 / 595 行（全是 DTO） | **10 文件 / 1,288 行**（未复核） |
-| 包职责说明 README | 0 份 | **27 份**，且由 `tests/architecture/test_architecture_layout.py` 强制 |
-| 超 800 行的源文件 | — | **1 个**（`config_schema.py`，1,195 行：数据 + DSL，刻意不拆） |
-| 前端套数 | 2 套（Vue + 手写 JS，约 4,800 行重复） | **1 套**（`app/webui/dashboard/dist`；旧版与 `/legacy` 已删） |
-| 业务插件位置 | `module/modules/`（仓库根） | **`app/plugins/`**（运行时数据在 `data/module/`） |
-| `app/` 顶层目录 | 10 个（含 `nodes` / `services`） | **8 个**（agent application core domain infrastructure plugin plugins webui） |
-| 插件框架名 | `app/modules/`（与 `module/` 字面混淆） | **`app/plugin/`**（单数=框架，复数=业务插件） |
-| 插件加载方式 | 硬编码包名 `module.modules.<name>` | **按文件路径加载**（合成包名，位置与 import 名解耦） |
-| `tests/` 组织 | 142 文件全平铺 | **按源码镜像分区**（`tests/agent/...`、`tests/webui/...`） |
-| `scripts/` 组织 | 25 文件全平铺 | **`gen/ experiments/ diag/ ops/`** |
-| `tests/` 目录 | 142 文件平铺 | **9 个目录**，与源码一一对应 |
-| 前端源码位置 | 仓库根 `dashboard/` | **`app/webui/dashboard/`** |
-
-改造过程与实测见 `docs/ARCHITECTURE.md §5.2`；剩余工作见同文件 §5.1.1。
-
-> **单文件长度有闸**：`tests/architecture/test_architecture_layout.py::test_no_file_grows_beyond_allowlist`
-> 要求 `app/**/*.py` ≤ 800 行，豁免名单（6 个）只许缩小。
-
-### 12.1 强连通块已清零（保留本节作为「怎么做到」的记录）
-
-**现状：278 个模块、0 个强连通块。** 任何入口的可达闭包都是真正的 DAG 下游，
-改一个文件不会再静默影响它的上游。
-
-清零靠拆掉七条**方向错了**的边，每条都只改一处：
-
-| 反向边 | 原来为什么存在 | 修法 |
-|---|---|---|
-| `core/container → bootstrap` | `service(type_)` 桥接函数 | 删除该函数；依赖走构造函数或 `Depends` |
-| `agent/__init__ → loop/chat` | 包级重导出 `handle` | 不再导出 `handle`；顺带砍掉 46k 行闭包 |
-| `modules/api → bootstrap` | 插件无参便捷 API 要拿容器 | `app.core.container.get_active()`（唯一允许的服务定位） |
-| `agent/media/store → modules` | 只为用 `media_cache` | 下沉到 `app/infrastructure/fs/media_cache.py` |
-| `agent/loop/chat → agent/tools/system` | 只为 `is_system_tool_enabled` | 拆出 `app/agent/tools/policy.py`（策略 vs 展示） |
-| `agent/memory/manager → agent.memory`（包属性） | `from app.agent.memory import extract` | `import app.agent.memory.extract`，不经包属性 |
-| `agent/loop/chat → proactivity/scheduler` | `build_schedule_tool` 与引擎同文件 | 工具移到 `app/agent/tools/schedule.py`，引擎留原地 |
-
-最后一处（P4）是最典型的「锅不在依赖，在心里放错了文件」：`build_schedule_tool`
-只是 17 行的工具包装，却和 830 行的时间轮住在一起，导致主循环为了拿它必须
-import 整个引擎，而引擎又要回头 import 主循环跑生成。
-
-**验收指标：任何入口文件的可达闭包 ≤ 8,000 行。**
-`app.bootstrap` / `app.webui.app` 两个装配根**豁免**（它们的闭包按定义就是全图）。
-自检：`arch_closure.py` 的入口闭包表。
-
-### 12.2 服务定位器剩 64 处（已收敛到一个入口）
-
-`get_container()` 直调 **64 次 / 10 个文件**，全在 `app/webui/api/*`，且都已经是
-FastAPI 依赖（`request.app.state.container`，见 `deps.py`）——不再是"绕过容器直调"。
-
-- 已清零：`app/plugin/api.py` 的 4 处（改用 `app.core.container.get_active()`）。
-- 目标：端点改成 `Depends(具体服务)`，不再自己从容器里用 `type` 捞。
-- **`app.core.container.get_active()` 是全库唯一允许的服务定位**，且只给「插件无参
-  便捷 API」用（插件不该被迫先拿容器）。新代码一律传参或 `Depends`。
-
-### 12.3 两套同名调度器
-
-`app/application/scheduler.py::SchedulerService`（230 行，模块 `SCHEDULES=` 声明式定点任务）
-与 `app/agent/proactivity/scheduler.py::TaskScheduler`（967 行，LLM 语义定时，落盘 `tasks_data.json`）
-在时间解析、到点触发、取 bot 连接上**零复用**。改任一处前先确认改的是哪一个。
-（P5 把 `app/application/` 改名 `app/application/` 时，两者会分别落在
-`app/application/scheduler.py` 与 `app/agent/proactivity/scheduler.py`——名字仍撞，
-届时给前者改名为 `cron_service.py`。）
-
-### 12.4 双前端 → 已收敛为一套（P6）
-
-现在只有 `dashboard/`（Vue3 + Vuetify）一套前端，由 `dashboard/dist` 提供。
-手写的 `app/webui/static/`（4,065 行）+ `templates/index.html`（727 行）与 `/legacy`
-回退路由**已删除**——那套实现让同一张 Agent 配置表单存在两遍（`DynamicWidget.vue` vs
-`widgets.js`），schema 每加一个字段要改两处、第二处极易漏且没有测试会红。
-
-构建产物缺失时 `/` 返回 503 + 一段「请先 `cd dashboard && pnpm install && pnpm build`」
-的提示页（内联 HTML，不引模板依赖）。`jinja2` 依赖已从 `pyproject.toml` 移除。
-
-### 12.5 巨型数据伪装成代码（已还一半）
-
-| 文件 | 原状 | 现状 |
-|---|---|---|
-| `app/agent/tools/onebot/manifest.py` | 4,789 行纯 `ONEBOT_TOOLS` 字面量 | **已外置 `manifest.json`**，加载器约 100 行；175 条由 `tests/test_onebot_manifest_data.py` 逐条校验 |
-| `app/agent/config_schema.py` | 1,072 行 | **保留不拆**：它是「数据 + `_gate`/`_on` DSL」，JSON 化会把条件可见性的可读意图摊成重复字面量 |
-| `app/agent/persona/data/qq_faces.py` | 127 行 | **保留不拆**：生成物，`scripts/gen/export_napcat_faces.py --check` 依赖 Python 渲染 |
-
-### 12.6 领域层仍然空心
-
-`app/domain/` 仅 **595 行 / 4 文件**，全是 DTO，没有业务规则。真正该属于领域的判断
-（"何时该主动说话""下次触发怎么算""人格规则怎么裁"）散在 `agent/proactivity/`、
-`agent/persona/` 里，与 LLM 调用、JSON 落盘混居。P4 要把「零内部依赖的纯规则模块」
-（`time_parser` / `trigger` / `splitter` 一类）搬进 `app/domain/`。
-同时 `BaseRepository` 零引用（见 §8 门面）。
+| 两个"调度器" | `app/application/cron_service.py`（声明式定点任务）与模块侧的 LLM 语义定时任务 | 零复用；改之前先确认改的是哪一个 |
+| 领域层偏薄 | `app/domain/` 以 DTO + 少量纯规则为主 | 纯规则（时间解析/触发判定/切分）应优先放这里，别塞进 plugins |
+| 巨型 schema | `app/agent/config_schema.py` 超 800 行（刻意豁免） | 它是"数据 + 显隐 DSL"，拆成 JSON 反而更难读 |
+| 内置插件即业务 | 记忆/触发/上下文/工具都以插件形态存在 | 框架不要为了某个插件加特例；用钩子与注册表解决 |
 
 ---
 
-*本规范依据代码库实际风格整理，2025 年定稿、2025 年按实测复核修订（§6 / §8 / §10.1 / §12）。
-新增约定请先与本文件核对，必要时经讨论后更新。*
-
-*遇到规范与代码不一致时，先判断哪一边是对的——**既不要把既成事实直接写成规范，
-也不要把无人执行的理想一直留在文档里。** 这两种做法都会让下一个人（或 Agent）照着错的做。*
+*本规范依据代码库实际风格整理；与代码不一致时先判断哪边是对的——既不要把既成事实直接写成规范，
+也不要把无人执行的理想留在文档里。*

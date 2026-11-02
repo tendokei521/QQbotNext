@@ -1,390 +1,159 @@
-# QQBot Next 维护文档
+# 维护与运维
 
-> 适用版本：2.0（分层 + 插件架构）。日常维护、故障排查、备份恢复看这一份就够。
+> 读者：自己部署、自己维护这台机器人的用户。
+> 安装与首次配置看 [README.md](README.md)；改代码看 [docs/](docs/README.md)。
 
 ---
 
-## 1. 系统概览
+## 1. 它由哪些进程内组件组成
 
-- **入口**：`main.py` → `app/bootstrap.py run()`（装配容器 → 初始化 SQLite → 连接 Bot → 启动 WebUI + 定时器）
-- **运行环境**：`venv/` 虚拟环境（**必须用它**，见 §12.1）
-- **三大常驻组件**：
-  - OneBot 网关（`app/infrastructure/onebot/gateway.py`）—— 多账号 WebSocket 连接 / 断线重连
-  - 模块分发器（`app/plugin/dispatcher.py`）—— 事件 → 权限过滤 → 模块
-  - WebUI（`app/webui/`）—— FastAPI 管理后台，默认 `http://127.0.0.1:9200`
+一个 Python 进程里跑四件事（没有独立守护进程，重启 = 停这一个进程）：
 
-## 2. 目录结构
+| 组件 | 作用 |
+|---|---|
+| **OneBot 网关** | 每账号一条 WebSocket（正向连出去 / 反向监听），断线自动重连 |
+| **模块分发器** | 入站事件 → 权限过滤 → 模块；多个模块抢同一条消息时由「插件响应策略」仲裁 |
+| **调度器** | 定时任务（精确到点）+ 模块的后台任务 |
+| **WebUI** | FastAPI + 静态前端，默认 `http://127.0.0.1:9200` |
+
+入口：`main.py` → `app.bootstrap.run()`（装配容器 → 初始化 SQLite → 连账号 → 起 WebUI）。
+**务必用仓库自带的 `venv/`**，不要用系统 Python 直接跑。
+
+## 2. 目录一览
 
 ```
-main.py / pyproject.toml / .env.example
-app/
-├── bootstrap.py         装配与生命周期
-├── core/                settings / container / logger / task_manager / event_bus
-├── domain/              IBot 抽象 / 事件 / 消息模型
-├── infrastructure/      onebot(网关/API/编解码) + config(配置中心) + persistence(SQLite)
-├── llm/                 框架级 LLM Agent（provider/会话/定时/主动/工具）
-├── modules/             BaseModule / registry / authority / dispatcher / api(插件API)
-├── nodes/               MessageNode 框架（base/registry/outbound）——消息分发「一切皆节点」
-├── services/            bot_service / scheduler(定时) / log_service / provider(数据源)
-└── webui/               管理后台（api/ + schemas/ + templates/ + static/）
-data/                    SQLite（app.db）+ LLM 数据（data/llm）+ 插件运行时数据（data/module/）
-├── module/              ★ 插件运行时数据根（MODULE_DIR）：configs/ + data/ + plugins(zip) + uninstalled_modules.json
-logs/                    debug.log / warn.log / errors.log / user.log + 归档目录
+main.py  start.py  start.bat  start.sh     启动入口（start.py 负责建环境/装依赖）
+pyproject.toml                             依赖与工具配置（唯一真源）
+.env                                       首次启动自动生成（进程级配置 + 令牌）
+data/
+  app.db                                   配置 / 账号 / 模块 / 模型 / 人格 / 会话（SQLite）
+  llm/  media/  module/                    模块数据、媒体缓存、第三方插件与配置
+logs/                                      debug/warn/errors/user 四份日志 + 归档目录
+app/                                       代码（见 docs/ARCHITECTURE.md）
+app/webui/dashboard/dist/                  前端构建产物（已进仓库，克隆即有）
+scripts/                                   迁移、更新、打包、前端截图等工具
 ```
 
-> **注意**：模块配置迁移源是 `data/module/configs/<name>/config.json`、`authority.json`
-> （老布局 `module/configs/` 仍会被读，启动时也会自动搬进 `data/module/`）；
-> 模块主体代码在 `app/plugins/<name>/`。首次启动若 DB 为空，自动从 `data/module/configs/*/` 迁移一次，
-> 之后以 SQLite 为准。
-
-> ⚠️ 上图的「分层」与实际依赖并不完全一致：`app/agent/` 被 24 个文件互为循环依赖（12,112 行），
-> `app/webui/api/` 也在该环内。改动前请先读 **`STYLE.md §12 已知架构债`**。
-
-## 3. 启动 / 停止
+## 3. 启停
 
 ```bash
-# 启动（推荐）：建 venv → 查/装依赖 → 启动，一条命令搞定
-python start.py
-
-# 或双击 start.bat（Windows）/ ./start.sh（Linux/macOS），二者都转交给 start.py
-
-# 已经进了 venv 的话，也可以直接跑主程序
-venv\Scripts\activate.bat
-python main.py
+python start.py          # 建 venv → 查/装依赖 → 启动（Windows/macOS/Linux 同一条）
+python start.py --check  # 只做只读检查，退出码 1 = 依赖不齐
+python start.py --recreate   # venv 坏掉时删掉重建
 ```
 
-> 只想确认"这台机器现在能不能跑"：`python start.py --check`（只读，不联网不装包）。
-> venv 坏了（重装过 Python、删过解释器）：`python start.py --recreate`。
+- Windows 可双击 `start.bat`；Linux/macOS 用 `./start.sh`（首次若报换行符错误，`dos2unix start.sh`）。
+- 停止：前台 `Ctrl+C`；后台运行建议用 systemd / NSSM 之类的守护，进程退出即全停。
+- 不要同时起两个实例：SQLite 与反向 WebSocket 端口都会冲突。
 
-- **停止**：`Ctrl+C`。框架会顺序关闭：定时任务 → 网关(断开所有 Bot) → SQLite → 后台任务。
-- **确认是否在跑**：WebUI 端口（默认 9200）有进程监听即运行中。
-  ```bash
-  netstat -ano | grep 9200
-  ```
+## 4. 进程级配置（.env）
 
-## 4. 配置管理
-
-### 4.1 环境变量（.env，变量名 = 字段名大写，无前缀）
-
-**首次启动自动生成完整 `.env`**（键 + 注释 + 随机令牌）；文件已存在时只补空 `WEBUI_TOKEN`，
-其余内容不改。键清单唯一来源是 `app/core/env_template.py`，`.env.example` 由它渲染
-（`python -m app.core.env_template` 重新生成，`tests/core/test_env_template.py` 保证不漂移）。
+首次启动生成完整 `.env`（含随机 `WEBUI_TOKEN`）；已存在时只补空令牌，不覆盖你的内容。
+变量名 = `app/core/settings.py` 字段名大写，**环境变量优先于 `.env`**。
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `WEBUI_HOST` | `127.0.0.1` | WebUI 监听地址（外网访问请配反向代理，勿直接 0.0.0.0 裸奔） |
-| `WEBUI_PORT` | `9200` | WebUI 端口 |
-| `WEBUI_TOKEN` | 空（首次启动自动生成） | 鉴权令牌；**留空启动时会自动生成并写回 `.env`**，令牌见控制台横幅。注意环境变量若已设置则以环境变量为准，此时不会写盘 |
-| `WEBUI_AUTO_OPEN` | `false` | 启动后自动打开带令牌的一键登录链接（start 脚本默认开，`--no-open` 关） |
-| `DB_PATH` | `data/app.db` | SQLite 路径 |
-| `LOG_DIR` | `logs` | 日志目录 |
-| `WS_CONNECT_TIMEOUT` | `30` | 连接超时（秒） |
-| `WS_PING_INTERVAL` / `WS_PING_TIMEOUT` | `30`/`10` | WebSocket 心跳 |
-| `MODULE_DIR` | `data/module` | 插件运行时数据根目录（configs / data / plugins(zip) / 软卸载状态） |
-| `PLUGINS_DIR` | `app/plugins` | 业务插件代码目录 |
+| `WEBUI_HOST` / `WEBUI_PORT` | `127.0.0.1` / `9200` | 后台监听地址与端口（外网访问请配反向代理 + HTTPS） |
+| `WEBUI_TOKEN` | 自动生成 | 后台登录令牌；一键登录链接形如 `/?accesstoken=<令牌>` |
+| `WEBUI_AUTO_OPEN` | `false` | 启动后自动打开浏览器（本地 start 脚本默认开） |
+| `DB_PATH` | `data/app.db` | SQLite 路径（换库=换一整套配置/账号） |
+| `LOG_DIR` | `logs` | 日志目录（日志页与 `/log` 指令都读它） |
+| `MODULE_DIR` | `data/module` | 模块数据根（configs / data / plugins / 卸载记录） |
+| `PLUGINS_DIR` | `app/plugins` | 内置模块代码目录（可指向别处换一套内置集） |
+| `WS_CONNECT_TIMEOUT` / `WS_PING_INTERVAL` / `WS_PING_TIMEOUT` | `30` / `30` / `10` | 连接超时与心跳（秒）；代理/弱网下可调大 |
 
-> `.env` 只喂 `pydantic-settings`，**不会**进入 `os.environ`。像 `QQBOT_LLM_DATA_DIR`
-> 这种在代码里直接 `os.environ.get()` 的开关只能作为 shell 环境变量，写进 `.env` 无效。
-> 旧的 `DEBUG` / `SCHEDULER_INTERVAL` 两个键从未被任何代码读取，已删除。
+> 键清单的唯一来源是 `app/core/env_template.py`；漏登记会被 `tests/core/test_env_template.py` 拦下。
 
-参考 `pyproject.toml` 与 `app/core/settings.py`。改完 `.env` 需重启生效。
+## 5. 账号连接
 
-### 4.2 配置分层
+| 方式 | 谁发起 | 填什么 |
+|---|---|---|
+| 正向 WebSocket | 本程序连出去 | 协议端暴露的 ws 地址，如 `ws://127.0.0.1:3001/` |
+| 反向 WebSocket | 本程序监听，协议端连进来 | 监听地址，如 `ws://0.0.0.0:3001/onebot/v11/ws` |
 
-所有配置集中在 **SQLite（`data/app.db`）**，通过 WebUI 修改即落库：
-- 账号配置（ws_url / owner_id / auto_connect）
-- 模块配置 + 权限（启停 / 黑白名单）
-- WebUI 偏好（日志显示级别 / “显示原始日志”开关 / 单一服务 / 多群管理）
+- 两种方式能力一致；`access_token` 都支持（正向放 URL，反向校验 `Authorization: Bearer` 或 URL 参数，不匹配以 4401 关闭）。
+- 反向监听端口需自行保证未被占用；对端重启会自动重连。
+- 连不上先看「账号管理」里的状态与诊断台，再看协议端日志。
 
-> **旧 JSON 迁移**：首次启动若 DB 为空，会从 `webserver/webconfig.json`、`webui/webui_config.json`、`data/module/configs/*/config.json`、`data/module/configs/*/authority.json` 自动迁移一次。迁移后以 SQLite 为准，旧 JSON 仅作迁移源保留。
+## 6. 日志
 
-## 5. 日志
-
-- **文件**：
-  - `logs/debug.log`：原始完整日志（全部级别）
-  - `logs/warn.log`：WARNING+
-  - `logs/errors.log`：ERROR+
-  - `logs/user.log`：用户简洁日志（系统日志 + 消息收发/通知/请求 + API 错误，不含 API 底层成功日志与 DEBUG）
-- **轮转**：`debug.log / warn.log / errors.log / user.log` 四个文件每 6 小时**同步归档**到 `logs/YYYY-MM-DD-HH/` 子目录，保留 48 份，超出自动清理
-- **WebUI**：日志面板默认显示简洁日志；开启“显示原始日志”后读取 `debug.log` 显示完整技术日志
-- **控制台**：控制台输出与 WebUI 的“显示原始日志”开关同步；无论开关状态，`debug.log` 始终完整记录
-- **查看最近日志（按级别）**：
-  ```bash
-  tail -100 logs/debug.log
-  tail -100 logs/user.log
-  grep ERROR logs/errors.log | tail -50
-  ```
-
-## 6. 账号连接
-
-- WebUI「账号连接管理」里增删改账号；账号配置输入框失焦会自动保存，也可点“保存所有配置”手动保存。`auto_connect=true` 的账号启动时自动连接。
-- **断线重连**：auto_connect 账号掉线后按**指数退避**自动重连：
-  `10s → 20s → 40s → 80s → 160s → 300s（封顶）`，连接成功归零。
-- **正常关闭（1000）也算掉线**：OneBot 服务端重启/自己下线时会以 1000 关掉客户端连接，
-  现在同样走掉线收尾——日志 `WebSocket 连接结束: 服务端关闭连接 (code=1000 …)`、
-  账号置为 `error`、在途 API 请求立刻失败（不再干等满超时），随后由上面的退避重连拉回。
-  历史 bug：这一路曾被 `websockets` 的迭代器静默吞掉 → 状态仍 `connected`、Supervise 不重连，
-  表现为「机器人不干活，日志里却一条断线记录都没有」（见 §12.2）。
-- **手动断开**：点「断开」是明确意图，只停「意外掉线」的自动重连语义——该账号在**本次运行期间**
-  不再被监督循环自动连回（`/api/bots` 里 `suppress_auto_reconnect=true` 可确认）。
-  恢复自动重连的方式：点「连接 / 重连」，或把该账号的「自动连接」开关关掉再打开，或重启进程。
-  > 历史行为：断开只置 status，`auto_connect` 账号会在 ≤10s 被监督循环当成掉线连回来
-  > （日志：`断开连接` → `连接成功` → `登录成功`），即「点了断开，一会儿又自己连上」。
-- 断开 / 重连与在途握手：握手期间收到「断开」会**作废该次握手**（不会先断开又被握手结果覆盖回已连接）。
-- 连接失败常见原因：OneBot 服务未启动 / 地址端口错误 / `access_token` 不匹配 → 查 `logs/errors.log`。
-
-## 7. 模块管理
-
-### 7.1 模块结构
-
-每个插件 = `app/plugins/<name>/`（模块内部用相对导入）＋ `data/module/configs/<name>/`（配置迁移源）：
-
-```
-app/plugins/<name>/
-  module.py              必须：插件声明（Module(BaseModule)）
-  config_schema.py       可选：WebUI 表单定义
-  service.py             可选：业务逻辑（业务一多就升级成 service/ 子包）
-  pages/index.html       可选：自定义配置页
-data/module/configs/<name>/
-  config.json            配置迁移源（首次启动迁入 SQLite，之后以 SQLite 为准）
-  authority.json         权限迁移源
-data/module/data/<name>/ 可选持久化数据（get_data_path 自动创建）
-```
-
-> 只有 `module.py` 是必需的。现状里 13 个插件有 4 个没有 `service.py`（逻辑直接在 `module.py`），
-> 3 个用了 `service/` 子包（`df_password`、`recall_back`、`time_sign_in`）。
-> 契约细节见 `docs/MODULE_DEV.md §1`。
-
-```python
-# module.py —— 声明
-from .config_schema import SCHEMA
-class Module(BaseModule):
-    name = "插件名"; sign = "Sign"
-    permission = "member"            # everyone/member/group_admin/group_owner/owner
-    subscribe = ("message_group",)   # 订阅事件类型
-    SCHEDULES = {"05:00:00": "daily_push"}   # 可选：定时任务
-    LIST_PROVIDERS = {"groups": "list_groups"}   # 可选：list 数据源
-    DYNAMIC_PROVIDERS = {...}        # 可选：dynamic 数据源
-    config_schema = SCHEMA           # 来自 config_schema.py
-    async def handle(self, event): ...   # 事件入口
-```
-
-### 7.2 常用操作
-
-| 操作 | 方式 |
+| 文件 | 内容 |
 |---|---|
-| 新增模块 | 在 `app/plugins/` 建目录写文件，重启；或 WebUI「刷新模块」 |
-| 启停 / 权限 | WebUI 模块卡片开关 + 群/用户黑白名单 |
-| 热重载 | WebUI「刷新模块」按钮（彻底卸载→重新导入，清空后台任务与定时器） |
-| 删除模块 | 删目录 + 重启 |
+| `logs/debug.log` | 完整技术日志（默认写） |
+| `logs/warn.log` / `errors.log` | 只含对应级别 |
+| `logs/user.log` | 给人看的简洁日志（后台默认显示这份） |
 
-### 7.3 注意
+- **轮转**：每 6 小时切段，四份同步归档到 `logs/<日期-小时>/`，保留 48 份。
+- **后台**：日志页可切"简洁 / 原始"；可按时间段导出 ZIP。
+- **开启提示词调试**：启用内置「LLM 调试」模块后，`[Prompt]` 头行会打「层摘要 + system token + 前缀指纹」，
+  随后是完整 messages，可用于逐轮对比。
 
-- **模块权限由框架统一过滤**：`permission` 声明 everyone/member/group_admin/group_owner/owner，黑白名单仍作为前置过滤。
-- **LLM 是框架级能力**：WebUI 侧栏的「LLM服务」为虚拟模块卡（`app/agent/`），不依赖任何插件目录，
-  删除全部插件后仍保留；其配置/定时/主动走框架运行时（`module_config("agent")`、`data/llm`）。
-- 模块卸载时框架会自动取消其后台任务（`TaskManager`）与定时任务（`SchedulerService`）。
+## 7. 数据备份与恢复
 
-## 8. 定时任务（精确到点）
-
-模块在 `Module` 类声明 `SCHEDULES = {"HH:MM[:SS]": "方法名"}`，加载时自动注册、卸载时注销。
-
-```python
-class Module(BaseModule):
-    SCHEDULES = {"00:00:00": "daily_job"}
-    async def daily_job(self):
-        # self.ctx.bot = 当前账号 IBot；self.config = 该账号配置
-        ...
-```
-
-- 每天在指定时刻触发**一次**，精确到秒、不漂移（monotonic deadline）。
-- 仅对**真实 Bot 实例**生效；全局（WebUI 展示）实例不注册。
-- 内置示例：`msg_df_password`（05:00 推密码）、`time_sign_in`（00:00 打卡）。
-- 已移除旧 `time_core` 轮询广播。
-
-## 9. 配置 Schema 与动态数据源
-
-字段类型见 `module/CONFIG_SCHEMA.md`。要点：
-
-- **`list`**：后端数据列表（勾选/拖拽排序/全开-部分-全关）。内置 `groups`（群）、`friends`（好友）数据源，模块也可自注册 `LIST_PROVIDERS`。
-- **`dynamic`**：后端动态下拉 + 每选项独立表单，`DYNAMIC_PROVIDERS`。
-- **`string_list`**：可增删字符串列表（曾用名 `list`，已改名）。
-- **`showIf` / `time` / `repeater`**：条件显示 / 时间选择 / 可增删分组。
-- **保存**：`module.config.set(key, value)` 会自动按旧值类型做安全转换（bool/int/float/str），支持点号 `config.api_key`。
-
-## 10. 数据库维护
-
-### 10.1 备份
+**唯一需要备份的是 `data/`（核心是 `data/app.db`）和 `.env`。**
+`logs/`、`app/webui/dashboard/dist`、`venv/` 都不用备份。
 
 ```bash
-# 推荐：SQLite 在线备份（WAL 模式下直接拷文件可能丢最新数据）
-venv\Scripts\python.exe -c "import sqlite3; sqlite3.connect('data/app.db').backup(sqlite3.connect('data/app_backup_$(date +%F).db'))"
+# 在线备份（SQLite 官方方式，WAL 下直接 copy 可能丢最新写入）
+sqlite3 data/app.db ".backup 'backup-$(date +%F).db'"
+# Windows 没装 sqlite3 时：先停进程再复制 data/app.db（及其 -wal/-shm）
 ```
-或停机后直接复制 `data/app.db`。
 
-### 10.2 恢复
+恢复：停进程 → 用备份覆盖 `data/app.db`（同时删掉 `app.db-wal`/`app.db-shm`）→ 启动。
+`scripts/update.py apply` 每次都会自动备份 `data/` 与 `.env`，回滚用 `scripts/update.py rollback`。
 
-把备份文件改名为 `data/app.db` 后重启即可。恢复的是：账号配置、模块配置/权限、WebUI 偏好。
+数据库里有哪些表：配置与账号（`agent`、`bots`、`modules`…）、模型与人格（`provider_*`、`role_presets`）、
+会话（`sessions`、`conversations`、`messages`）、统计数据。想手工查：`sqlite3 data/app.db ".tables"`。
 
-### 10.3 重置
+## 8. 模块（插件）管理
 
-删除 `data/app.db`（及其 `-wal`/`-shm`）后重启 → 会从旧 JSON **重新迁移**一次。若已不需要旧配置，先备份旧 JSON 再删除 DB。
+- 内置模块在 `app/plugins/`（随仓库，只读语义）；第三方模块在 `data/module/plugins/<name>/`。
+- 页面「功能插件」可安装 zip、启停、进入配置页、卸载；装/卸会执行模块的 `on_load` / `on_unload`。
+- **禁用 ≠ 不加载**：禁用的模块不会跑 `on_load`（因此不会注册定时器/工具），重新启用才重新加载。
+- 模块配置与授权存在 `data/app.db`，模块自己的数据在 `data/module/data/<name>/`；升级不会丢。
+- 卸载模块不会自动删它的数据目录——确认不再用可以手动删。
 
-### 10.4 手动查库
+## 9. 更新
 
 ```bash
-venv\Scripts\python.exe -c "import sqlite3; c=sqlite3.connect('data/app.db'); print(c.execute('select module_name,bot_id from module_config').fetchall())"
+python scripts/update.py status                  # 当前版本 / 待应用 / 可回滚
+python scripts/update.py stage --kit <kit.zip>   # 校验并暂存（不动线上）
+python scripts/update.py apply                   # 备份 data 与 .env 后切换
+python scripts/update.py rollback                # 退回上一版（含数据库备份）
 ```
 
-## 11. WebUI 维护
+从更早的大版本升级时，按提示跑迁移脚本（都支持 `--dry-run`、自动备份 DB），例如
+`scripts/migrate_v3_owner_to_roster.py`（拥有者名册）、`scripts/migrate_v3_split_config.py`（配置拆分）。
 
-- **打不开**：确认进程在跑；确认 `WEBUI_HOST/PORT`；外网访问需放行端口或反代。
-- **模块列表为空**：首次打开时模块列表来自「全局实例」，若为空说明模块未加载成功 → 查 `logs/errors.log` 的 `[Module]` 加载失败记录。
-- **实时日志不显示**：控制台走 `/ws/logs?mode=simple|raw` WebSocket，若浏览器控制台报错刷新即可；后端日志仍会写入 `logs/`。
-- **改了模块配置不生效**：点「保存配置」后模块运行逻辑读 `module.config`；个别模块需「刷新模块」重载。
+## 10. 常见故障
 
-## 12. 常见问题排查
+先看**总览页「运行状态」**或 `GET /api/readiness`：它按"差什么、去哪修"逐条列。
 
-### 12.1 环境 / 启动类
-
-| 现象 | 原因与处理 |
+| 现象 | 先查 |
 |---|---|
-| 启动报 fastapi/starlette 相关错误 | 用了**基础 Python**。必须用 `venv\Scripts\python.exe`（venv 内 fastapi 0.138 + starlette 1.2 配套；基础 Python310 的 fastapi 0.104 与其 starlette 1.3 不兼容） |
-| 端口被占用 | `netstat -ano | grep 9200` 找到 PID 后结束，或改 `WEBUI_PORT` |
-| 首次启动很慢 | 正在从旧 JSON 迁移 + 加载 14 个模块，正常 |
+| 启动直接退出 | 退出码：1=venv、2=依赖、3=缺 main.py、4=Python 版本不符（控制台已写明修复命令） |
+| 端口被占用 | 后台端口（默认 9200）或反向 WS 端口（默认 3001）；`netstat -ano \| findstr :9200` |
+| 账号一直连不上 | 反向：协议端是否填同一地址/Token；正向：地址端口；诊断台是否有事件 |
+| 连上但不回话 | 回复开关（群聊默认关）、权限、模型是否配置 |
+| 有回复但内容空/报错 | 模型池为空、Key 失效、模型不支持工具调用 |
+| 改了配置不生效 | 账号级被群级覆盖（「回复与权限」标了来源）；模块配置是否在该模块自己的页面 |
+| 前端打不开/白屏 | `app/webui/dashboard/dist` 是否在；改了源码要重新 `npm run build` |
+| 内存/磁盘涨得快 | `data/media`（媒体缓存，可在设置页清理）、`logs/` 归档、`data/llm` 下的模块数据 |
 
-### 12.2 连接类
-
-| 现象 | 原因与处理 |
-|---|---|
-| 某 Bot 反复「连接失败」 | 地址/`access_token` 错，或 OneBot 未启动；改配置或关掉它的 auto_connect |
-| 连接后立即报 `token验证失败` / `WebSocket失败响应` | OneBot 端 `access_token` 不匹配；现在会视为连接失败并断开，检查 token 后重连 |
-| Bot 连上了但群列表空 | 登录信息获取失败 → 查 `logs/errors.log` 的 `获取群聊列表失败` |
-| 重连太频繁 | 已是指数退避；若仍嫌吵，把该 Bot 的 auto_connect 关掉改手动 |
-| 机器人「莫名其妙」不干活，日志里**没有任何断线记录**，发送报 `received 1000 (OK) normal; then sent 1000 (OK) normal` | 旧版 bug：服务端以 **1000 正常关闭**时 `websockets` 的 `__aiter__` 会吞掉 `ConnectionClosedOK`、接收循环静默退出 → 状态仍 `connected`，监督循环永不重连（僵死到人工重启；线上案例远端只停了 7 秒，客户端僵了 6 小时+）。现已修复：正常关闭同样走掉线收尾（日志 `WebSocket 连接结束: 服务端关闭连接 (code=1000 …)`），另有 `_sweep_zombies()` 每 10s 兜底扫描僵尸连接。排查工具：`scripts/diag/log_timeline.py`（时间线含 `[关]` 标记）与 `scripts/diag/diag_disconnect_pairs.py` |
-| 点了「断开」，过一会儿又自己连上 | 旧版会这样：auto_connect 账号断开后被监督循环当掉线连回（现已修复，手动断开在本次运行期间生效） |
-| 断开后确实不再重连，但想让它在下面自己回来 | 点「连接 / 重连」，或重新打开该账号的「自动连接」开关，或重启进程 |
-
-### 12.3 消息 / 模块类
-
-| 现象 | 原因与处理 |
-|---|---|
-| 模块不响应 | ①模块开关没开 ②权限黑白名单拦了 ③`permission` 角色不满足 ④`subscribe` 不含该事件 |
-| 单一服务模式下群消息不触发 | 该群未在「多群管理」指定服务账号，或当前账号非服务账号 |
-| Agent 面板 / 人格设定打不开，提示要「连接 Bot」 | 老版本口径：配置曾依赖登录装配。现在**账号存在即可编辑**，只需在「账号管理」添加账号；未连接时页面顶部会给离线提示。若仍 404，看是不是账号真不存在（接口消息会点名账号 id） |
-| 模块配置改了没生效 / 显示的不是该账号的配置 | 页面顶部出现「当前显示的是全局实例的配置」提示 = 该账号模块实例没装配。点重新加载即可（账号存在即装配，不需要连接） |
-| 定时任务 / 主动消息不跑 | 先看该账号是否**已连接**：离线（含断开后）一律不跑任务，这是刻意设计；断线会自动停表，重连后自动恢复 |
-| 模块页看不到「单一服务模式」开关 | 正常：单一服务是**声明制**能力，该模块没声明 `supports_single_service = True`。要用就在模块 `main.py` 的 `Module` 上声明（见 `docs/MODULE_DEV.md` §2.5.1）；纯 LLM 策略模块即使声明也不生效 |
-| 单一服务开了但看起来没生效 | 未声明模块的配置会被忽略（后端 `POST /webui/single-service` 会在 `rejected` 里回报），另外生效还要求：同群 ≥2 个在线账号 + 「多群管理」给该群指定了服务账号 |
-| 消息处理慢（曾出现每条约 1.7s） | 已知旧 bug（`_eventable_sync` off-by-one）已修复；若仍慢查模块内是否调用网络 API |
-| 群消息被静默丢弃 | 旧 bug（多 Bot 去重 `_message_indexes` 为空时丢弃、等待超时无兜底）已修复：无跟踪直接放行、有界等待超时由等待方处理 |
-| LLM 不回复 | WebUI「LLM服务」卡（框架级 Agent）里检查 api_key 是否已填、群/私信开关是否开启 |
-
-### 12.4 WebUI / 前端类
-
-| 现象 | 原因与处理 |
-|---|---|
-| `list` 字段空白 | 未连接 Bot（数据源需从 Bot 拉群/好友）→ 连接后自动加载，或点「刷新」 |
-| 拖拽排序无效 | 浏览器需支持 HTML5 drag；已修复 `setData` 与作用域问题，强刷新（Ctrl+F5） |
-| 刷新后账号回到 #0 | 选择账号会写入 localStorage；若仍回 #0 说明记忆的是 #0 |
-| 首次进页面模块列表空 | 正常，加载「全局实例」；Bot 连接后切换账号即显示其配置 |
-
-## 12.5 账号身份：id 与 name
-
-每个账号有两个字段，**别混用**：
-
-| 字段 | 作用 | 谁在用 | 可变 |
-|---|---|---|---|
-| `id` | 唯一凭据。`[A-Za-z0-9][A-Za-z0-9_-]{0,31}`，添加账号时填 | 前后端判断、API 路径/查询参数、模块配置/Agent 运行时/会话/统计/磁盘文件名的 key | **不可变** |
-| `name` | 展示名 | 界面（卡片、顶栏选择器）与**日志前缀** | 随时可改 |
-| `bot_id` | 当前登录的 QQ 号 | 仅展示与 OneBot 协议语义（运行时信息，登录后才有） | 换号即变 |
-
-要点：
-
-- **索引 `#0/#1`（数组下标）已彻底移除**。删掉中间账号不会让其它账号"换个身份"，
-  书签/脚本里的 `/api/bots/<id>/connect`、`?account_id=<id>` 长期有效。
-- 换 QQ 登录**不会**换掉模块配置：配置跟着账号 `id` 走，而不是跟着 QQ 号走。
-- 日志一律打账号名（`账号「主号」连接成功`）：`app/core/logger.py` 的 `account_label()`
-  负责把 id 换成名字，映射由 `ConfigService` 在账号加载/保存时推送。
-- 存量库自动迁移（`app/infrastructure/persistence/account_migration.py`，幂等）：
-  登录过的账号 `id` 取它当时的 QQ 号（于是旧的模块配置/磁盘目录天然对得上），
-  从未登录过的取 `botN`，`name` 取昵称或「账号 N」。
-
-## 13. 安全建议
-
-- **默认只绑 `127.0.0.1`**；需要远程管理时，用反向代理（Nginx/Caddy）+ HTTPS。
-- **登录页鉴权**：`WEBUI_TOKEN` 为空时首次启动自动生成并写回 `.env`（令牌只打印到**控制台**，
-  不写 `logs/*.log`）。浏览器访问 `/` 会 302 到独立登录页 `/login`，粘贴令牌即登录；
-  登录后靠 **HttpOnly 签名 cookie** 鉴权，令牌对页面 JS 不可见（从前的 `window.WEBUI_TOKEN`
-  注入已移除）。有效期 7 天，`/logout` 可退出；同一来源 5 分钟内失败 10 次会被限流（429）。
-- **一键登录链接**：`http://127.0.0.1:9200/?accesstoken=<令牌>`（`?token=` 等价）。
-  校验通过后服务端**换成会话 cookie 并 303 到去掉令牌的地址**，所以令牌不会留在地址栏、
-  浏览历史与后续 `Referer` 里。启动横幅会打印这条链接；本地 `start` 脚本还会用浏览器
-  直接打开它（`WEBUI_AUTO_OPEN` / `--no-open` 可关）。
-- **脚本 / 第三方调用**：`Authorization: Bearer <token>`、Basic（password 位放令牌）、
-  `?token=<token>` 三种通道仍并存；`/api/*` 与 `/ws/logs` 均校验。
-- 换掉 `WEBUI_TOKEN` 会立即让所有已登录会话失效（cookie 签名密钥由令牌派生）。
-- 不要在群里转发 `.env` / `data/app.db`；`data/`、`logs/` 已在 `.gitignore`。
-
-## 14. 测试
+## 11. 开发侧验证（改代码后）
 
 ```bash
-venv\Scripts\python.exe -m pytest -q
-```
-- 覆盖：领域编解码 / 权限 / 配置中心(含迁移) / 模块注册表 / 事件分发 / Provider 与 list/dynamic API /
-  定时任务 / LLM 流水线与记忆 / 节点链 / 模块安装。
-- 新增功能**收尾时**跑一遍全量，确保**全绿无失败**；日常小改动（文档/注释/文案等）不必跑全量，
-  按 `AGENTS.md`「验证规则」分档执行（CI 每次 push 也会跑全量兜底）。
-  基线用例数会随迭代增长，此处不再写死数字（写死必然过期），需要时用下面的命令取当前值：
-  ```bash
-  venv\Scripts\python.exe -m pytest --collect-only -q | Select-Object -Last 2
-  ```
-
-### 静态检查（ruff）
-
-```bash
-venv\Scripts\python.exe -m ruff check .                    # 检查
-venv\Scripts\python.exe -m ruff check --statistics .        # 按规则统计违规分布
-venv\Scripts\python.exe -m ruff check --fix .               # 自动修可修项
+venv\Scripts\python.exe -m pytest tests/architecture -q     # 结构性闸门
+venv\Scripts\python.exe -m pytest -q                        # 最终验收跑全量
+venv\Scripts\python.exe -m ruff check app tests
 ```
 
-> 规则集见 `pyproject.toml` 的 `[tool.ruff.lint]`（`E/F/I/UP/B`）。
-> **当前 CI 以 `--exit-zero` 运行（只报告、不阻断）**——存量违规尚未清理完，
-> 先在每次 CI 日志/artifact（`ruff-report`）里观察数量，分批清理后再去掉 `--exit-zero` 收紧门禁。
+CI（`.github/workflows/ci.yml`）在每次 push/PR 跑：后端全量测试（py3.10 / 3.12）、
+ruff、依赖元数据校验、前端构建。本地日常改动不必每次全量，见 [docs/TEST_POLICY.md](docs/TEST_POLICY.md)。
 
-### 覆盖率
+## 12. 安全建议
 
-```bash
-venv\Scripts\python.exe -m pytest -q --cov --cov-report=term-missing
-venv\Scripts\python.exe -m pytest -q --cov --cov-report=html   # 产物 htmlcov/index.html
-```
-
-> 统计范围见 `pyproject.toml` 的 `[tool.coverage.run]`（`app` + `module`）。
-> **当前不设失败阈值**：CI 只生成 `coverage.xml` 与 `htmlcov/` 作为 artifact 供下载，
-> 拿到稳定基线后再加 `--cov-fail-under` 作"不得下降"的棘轮。
-
-### CI（`.github/workflows/ci.yml`）
-
-push / PR 时自动执行三组校验，无需手动触发：
-
-| job | 内容 |
-|---|---|
-| `backend` | py3.10 + py3.12 矩阵跑全量测试；3.10 上额外跑 ruff 报告与覆盖率；产物上传为 artifact |
-| `deps` | 校验 `requirements.txt` 仍是指向 `pyproject.toml` 的纯指针、无不存在包、测试依赖未混入运行时；并构建发行包 |
-| `dashboard` | `pnpm install --frozen-lockfile` + `pnpm build`，确保前端源码可构建 |
-
-## 15. 架构演进备忘（本版相对 v1 的变化）
-
-- 旧 `basic/`、`webserver/` 单体 → `app/` 分层（core/domain/infrastructure/modules/services/webui）
-- JSON 直读写 → **SQLite 配置中心**（首次自动迁移）
-- `time_core` 轮询广播 → **精确到点定时器**（SCHEDULES）
-- 模块配置 `list` 类型改名 `string_list`；新增 `list`（后端数据）/ `dynamic` / `repeater` / `showIf`
-- 前端账号选择持久化（localStorage）
-- **消息分发「一切皆节点」**：dispatcher 硬编码过滤 → `app/nodes` 入站节点链
-  （Router → Permission → Invoke），出站发送可拦截；`app/plugin/nodes.py` 为内置节点，
-  `app/plugin/keyword.py` 为共享关键词库；支持父模块递归子模块（`parent.child` 配置命名空间）。
-- **模块流水线 + LLM 流水线**：模块流水线在前（`@module_hook`），LLM 流水线在后
-  （`@llm_hook`：pre_request / post_response / pre_send / post_send）；LLM 请求池
-  `app/agent/pool.py` 支持同会话防抖合并；`event.llm.resume()` 手动放行。
-- **日志双系统**：`debug.log` 保留原始完整日志，新增 `user.log` 简洁日志；
-  `debug/warn/errors/user` 四文件同步 6h 轮转；WebUI“显示原始日志”开关与控制台输出同步。
+- 后台**不要直接暴露公网**：保持 `WEBUI_HOST=127.0.0.1`，需要外网就上反向代理 + HTTPS + 额外鉴权。
+- `WEBUI_TOKEN` 泄露等于后台泄露；怀疑泄露就改 `.env` 里的令牌并重启。
+- `.env` 与 `data/app.db` 含 Key 与聊天记录，不要提交到公开仓库（`.gitignore` 已覆盖）。
+- 高危工具（OneBot 全量 API 等）建议开「高危工具需人工审批」，并按拥有者/管理者名册限制触发者。
