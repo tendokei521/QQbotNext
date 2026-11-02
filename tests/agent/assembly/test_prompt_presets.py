@@ -104,7 +104,7 @@ class _GetOnlyConfig:
     它们**没有** ``__contains__``，所以"用 ``in`` 判断键是否存在"的写法会抛
     ``TypeError`` 并被吞掉、误判成"没有这个键"。历史上这里让三选一与
     「编辑系统提示词」在真实路径上全部静默失效（见
-    docs/reviews/2026-10-31-prompt-assembly-analysis.md）。
+    docs/archive/reviews/2026-10-31-prompt-assembly-analysis.md）。
     """
 
     def __init__(self, data: dict) -> None:
