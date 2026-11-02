@@ -47,6 +47,7 @@
 | 导入 | E1 | 插件内部只用相对导入，禁 `from app.plugins.<自己>.xxx import` |
 
 E1 的理由：loader 按合成包名 `qqbot_plugin_<name>` 加载插件（`plugin/loader.py`），绝对路径安装到 `data/module/plugins/` 后会失效。
+C3 的现存示例：`llm_trigger/service.py`（55 行、只被 `main.py` import）按例外留在根。
 
 ## 3. `main.py` 只放这些
 
