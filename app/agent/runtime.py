@@ -27,6 +27,7 @@ from app.agent.providers.policy import TRACKED_KEYS, merge_config_layers
 from app.agent.session.manager import SessionManager
 from app.agent.telemetry import TelemetryRecorder
 from app.agent.tools.spec import ModuleToolRegistry
+from app.core.log_once import warn_once
 from app.core.logger import account_label
 
 
@@ -222,8 +223,10 @@ class AgentRuntime:
         try:
             return getter() or {}
         except Exception as e:  # noqa: BLE001 —— 设置读失败不该拖垮整条链
-            logger.add_info(account_label(self.bot_id)).warning(
-                f"[Provider] 读取全局设置失败（已忽略）: {e}"
+            warn_once(
+                self.bot_id,
+                "provider.settings_read_failed",
+                f"[Provider] 读取全局设置失败（已忽略）: {e}",
             )
             return {}
 
@@ -259,16 +262,20 @@ class AgentRuntime:
         chain: list[dict] = []
         for mid in ids:
             if allow is not None and mid not in allow:
-                logger.add_info(account_label(self.bot_id)).warning(
-                    f"[Provider] 全局设置里的模型 {mid} 不在 provider_pool 允许清单内，已跳过"
+                warn_once(
+                    self.bot_id,
+                    "provider.pool_denied",
+                    f"[Provider] 全局设置里的模型 {mid} 不在 provider_pool 允许清单内，已跳过",
                 )
                 continue
             cfg = self._config_for_model_id(mid)
             if cfg:
                 chain.append(cfg)
             else:
-                logger.add_info(account_label(self.bot_id)).warning(
-                    f"[Provider] 全局设置引用的模型不存在（可能已被删除）: {mid}"
+                warn_once(
+                    self.bot_id,
+                    "provider.model_missing",
+                    f"[Provider] 全局设置引用的模型不存在（可能已被删除）: {mid}",
                 )
         if chain:
             names = [str(c.get("provider_model_id") or c.get("model") or "") for c in chain]
@@ -335,10 +342,13 @@ class AgentRuntime:
         if not chain:
             chain = self._chain_from_global_settings()
         if not chain:
-            # 这条日志此前不存在：表现为 bot 一句话不回、日志里毫无线索
-            logger.add_info(account_label(self.bot_id)).warning(
+            # 这条日志此前不存在：表现为 bot 一句话不回、日志里毫无线索。
+            # 配置缺失是持久状态：进程内只提醒一次，否则每条消息都会刷一遍。
+            warn_once(
+                self.bot_id,
+                "provider.no_model",
                 "[Provider] 没有可用模型：Agent 页未选择模型，且「Provider 全局设置」里也没有"
-                "默认模型——请在 Agent 页选择模型，或在 Provider 预设页设置全局默认模型"
+                "默认模型——请在 Agent 页选择模型，或在 Provider 预设页设置全局默认模型",
             )
         return chain
 

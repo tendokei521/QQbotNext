@@ -21,6 +21,7 @@ resp = await module.llm_chat(messages, model_id=model_id, system="你是翻译�
 
 from __future__ import annotations
 
+from app.core.log_once import warn_once
 from app.core.logger import account_label
 
 from collections.abc import AsyncIterator
@@ -261,9 +262,11 @@ class ModuleLLMClient:
 
         chain = self._chain(bot_id=bot_id, model_id=model_id, preset_id=preset_id)
         if not chain:
-            self._account_log(bot_id).warning(
+            warn_once(
+                bot_id,
+                f"module_llm.no_provider:{purpose}",
                 f"[ModuleLLM] 没有可用的 provider 配置（purpose={purpose}）："
-                "请检查账号的 Agent 模型配置或传入 model_id"
+                "请检查账号的 Agent 模型配置或传入 model_id",
             )
             return LLMResponse(text="", raw=None)
         kwargs = self._optional_kwargs(
@@ -299,8 +302,10 @@ class ModuleLLMClient:
 
         chain = self._chain(bot_id=bot_id, model_id=model_id, preset_id=preset_id)
         if not chain:
-            self._account_log(bot_id).warning(
-                f"[ModuleLLM] 没有可用的 provider 配置（purpose={purpose}）：流式请求已跳过"
+            warn_once(
+                bot_id,
+                f"module_llm.no_provider_stream:{purpose}",
+                f"[ModuleLLM] 没有可用的 provider 配置（purpose={purpose}）：流式请求已跳过",
             )
             return
         kwargs = self._optional_kwargs(
