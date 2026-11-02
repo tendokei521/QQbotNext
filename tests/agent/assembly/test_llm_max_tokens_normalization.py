@@ -7,8 +7,9 @@
    ``openEditModel`` 用 ``?? 1024`` 回填 —— 即使后端不烘，UI 也每次都把它烘进来；
 3. 迁移函数 ``migrate_legacy_models`` 同样烘 1024。
 
-现在模型实例这一层遵循同一套三态：缺省/空串 = 不覆盖（回落到连接预设 → Agent 页 →
-内置默认），数值 = 显式覆盖，``None`` = 清除覆盖。写入侧对"必然跑不通"的值直接拒绝。
+现在模型实例这一层遵循同一套三态：缺省 = **创建默认值**（温度 1 / 最大输出 8192，
+见 ``DEFAULT_MODEL_*``），空串/``None`` = 不覆盖（回落到连接预设 → Agent 页 →
+内置默认），数值 = 显式覆盖。写入侧对"必然跑不通"的值直接拒绝。
 """
 
 from __future__ import annotations
@@ -18,6 +19,8 @@ import pytest
 from app.agent.providers.policy import REASONING_FLOOR
 from app.agent.providers.runtime_manager import ProviderRuntimeManager
 from app.application.provider_model_service import (
+    DEFAULT_MODEL_MAX_TOKENS,
+    DEFAULT_MODEL_TEMPERATURE,
     ProviderModelService,
     normalize_model_config,
     validate_model_config,
@@ -40,11 +43,16 @@ async def services(config_service):
 # ── 三态 ───────────────────────────────────────────────────────────────
 
 
-async def test_omitting_max_tokens_does_not_bake_a_default(services):
-    """不填 = 不覆盖。此前无条件写 1024，永久压死 Agent 页。"""
+async def test_omitting_max_tokens_uses_creation_default(services):
+    """不填 = 用创建默认值（温度 1 / 最大输出 8192）。
+
+    此前"不填就不写"让新建模型的参数取决于更底层的默认值，同一批模型配置不一致；
+    现在统一成同一组默认值。要"跟随下一层"必须显式传 ``None``/``""``。
+    """
     _, model_service, preset = services
     created = await model_service.create_model(preset["id"], {"model": "gpt-4o"})
-    assert "max_tokens" not in created["config"]
+    assert created["config"]["max_tokens"] == DEFAULT_MODEL_MAX_TOKENS == 8192
+    assert created["config"]["temperature"] == DEFAULT_MODEL_TEMPERATURE == 1.0
 
 
 async def test_blank_max_tokens_is_treated_as_inherit(services):
@@ -162,16 +170,19 @@ async def test_list_models_reports_effective_value_and_origin(services):
 
 async def test_effective_value_falls_back_to_defaults_when_inherited(services):
     _, model_service, preset = services
-    await model_service.create_model(preset["id"], {"model": "gpt-4o"})
+    # 显式传 None = 清除覆盖，跟随下一层（不写创建默认值）
+    await model_service.create_model(preset["id"], {"model": "gpt-4o", "max_tokens": None})
     listed = model_service.list_models(preset["id"])
     effective = listed[0]["effective"]
     assert effective["max_tokens"] > 0
-    assert effective["overrides"] == [] or "max_tokens" not in effective["overrides"]
+    assert "max_tokens" not in effective["overrides"]
 
 
 async def test_effective_flags_reasoning_models(services):
     _, model_service, preset = services
-    created = await model_service.create_model(preset["id"], {"model": "deepseek-reasoner"})
+    created = await model_service.create_model(
+        preset["id"], {"model": "deepseek-reasoner", "max_tokens": None}
+    )
     listed = model_service.list_models(preset["id"])
     assert listed[0]["effective"]["reasoning"] is True
     assert listed[0]["effective"]["max_tokens"] >= REASONING_FLOOR

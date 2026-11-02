@@ -32,6 +32,12 @@ OPTIONAL_OVERRIDE_KEYS = ("max_tokens", "context_window", "temperature", "reason
 #: ``max_tokens`` 的硬上限（防止手滑写成一百万）
 MAX_TOKENS_CEILING = 1_000_000
 
+#: 新建模型（「拉取模型」后添加 / 手动添加 / 向导 / 导入都走同一口）的默认参数。
+#: 温度 1、最大输出 8192：此前温度默认 0.7 且 max_tokens 不写（回落到更底层的
+#: 默认值），新建出来的模型参数不一致；统一成同一组默认值。
+DEFAULT_MODEL_TEMPERATURE = 1.0
+DEFAULT_MODEL_MAX_TOKENS = 8192
+
 
 def _as_int(value: Any, default: int = 0) -> int:
     try:
@@ -231,12 +237,15 @@ class ProviderModelService:
         model_id = str(data.get("id") or uuid.uuid4().hex[:12])
         provider_type = str(data.get("provider_type", "chat")).strip() or "chat"
         model_config = normalize_model_config(data)
-        model_config.setdefault("temperature", 0.7)
+        # 新模型的默认参数：温度 1、最大输出 8192。显式传了这两个键（包括 null =
+        # 清除覆盖）时以调用方为准，不再补默认。
+        if "temperature" not in data:
+            model_config.setdefault("temperature", DEFAULT_MODEL_TEMPERATURE)
+        if "max_tokens" not in data:
+            model_config.setdefault("max_tokens", DEFAULT_MODEL_MAX_TOKENS)
         if not model_config.get("modalities"):
             model_config["modalities"] = default_modalities_for(provider_type)
-        # 写入侧校验：把"必然跑不通"的值挡在落库之前。max_tokens **不填就不写**，
-        # 交回下一层（连接预设 → Agent 页 → 内置默认）——此前无条件写 1024，
-        # 于是每个新建模型都带一个"看起来像用户设置"的 1024，永久压死 Agent 页。
+        # 写入侧校验：把"必然跑不通"的值挡在落库之前（例如 max_tokens ≥ 上下文窗口）。
         validate_model_config(model_name, model_config)
         now = int(time.time())
         model = {

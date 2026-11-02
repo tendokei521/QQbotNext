@@ -262,10 +262,10 @@ const modelForm = reactive({
   model: '',
   provider_type: 'chat',
   modalities: ['text', 'tool_use'] as string[],
-  temperature: 0.7,
-  // null = 不覆盖（回落到连接预设 → Agent 页 → 内置默认）。字段类型必须是
-  // `number | null`：写成数字就会在每次保存时把一个"看起来像用户设置"的值烘进去。
-  max_tokens: null as number | null,
+  temperature: 1,
+  // 新建模型默认给 8192；清空 = 不覆盖（回落到连接预设 → Agent 页 → 内置默认）。
+  // 字段类型必须是 `number | null`：写成数字就会在每次保存时把默认值烘进已有模型。
+  max_tokens: 8192 as number | null,
   context_window: null as number | null,
   reasoning: null as boolean | null,
   enabled: true,
@@ -708,9 +708,9 @@ function openCreateModel() {
     model: '',
     provider_type: 'chat',
     modalities: defaultModalitiesFor('chat'),
-    temperature: 0.7,
-    // 留空 = 不覆盖（回落到连接预设 → Agent 页 → 内置默认）
-    max_tokens: null,
+    temperature: 1,
+    // 新建（含「拉取模型」后添加）默认 8192；清空 = 不覆盖（回落下一层）
+    max_tokens: 8192,
     context_window: null,
     reasoning: null,
     enabled: true,
@@ -728,7 +728,7 @@ function openEditModel(model: ProviderModel) {
     model: model.model,
     provider_type: model.provider_type,
     modalities: [...savedModalities],
-    temperature: model.config.temperature ?? 0.7,
+    temperature: model.config.temperature ?? 1,
     // `?? 1024` 会把"没设"变成一个"看起来像用户设的"值再存回去 —— 那正是
     // Agent 页「最大输出 Tokens」被杀死的路径。这里必须保持 null 原样。
     max_tokens: model.config.max_tokens ?? null,
@@ -755,7 +755,7 @@ async function saveModel() {
       model: modelForm.model.trim(),
       provider_type: modelForm.provider_type,
       modalities: [...modelForm.modalities],
-      temperature: Number(modelForm.temperature) || 0.7,
+      temperature: Number(modelForm.temperature) || 1,
       // 空 / null → 不覆盖；后端按三态处理（0 与空串同样视为"清除覆盖"）。
       // 用 `?? null` 而不是 `Number(...) || 1024`：后者会把"没设"变成一个写死的值。
       max_tokens: modelForm.max_tokens == null ? null : Number(modelForm.max_tokens),

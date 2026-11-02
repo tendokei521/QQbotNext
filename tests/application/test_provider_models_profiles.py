@@ -102,6 +102,35 @@ async def test_provider_model_modalities(preset_service, model_service, config_s
     assert updated["config"]["modalities"] == ["text", "image"]
 
 
+async def test_new_model_defaults_temperature_and_max_tokens(preset_service, model_service):
+    """「拉取模型」后添加的模型默认温度 1、最大输出 8192。
+
+    此前温度默认 0.7、max_tokens 干脆不写（回落到更底层默认），新建模型参数不一致。
+    显式传值（或显式 null = 清除覆盖）仍以调用方为准。
+    """
+    preset = await preset_service.create_preset({
+        "name": "默认参数测试",
+        "provider": "openai",
+        "config": {"api_base": "https://api.deepseek.com", "api_key": "sk-model"},
+    })
+
+    defaulted = await model_service.create_model(preset["id"], {"model": "deepseek-chat"})
+    assert defaulted["config"]["temperature"] == 1.0
+    assert defaulted["config"]["max_tokens"] == 8192
+
+    # 显式 null = 不覆盖（回落预设/Agent/内置默认）：默认值不该把它填回去
+    cleared = await model_service.create_model(
+        preset["id"], {"model": "deepseek-reasoner", "max_tokens": None}
+    )
+    assert "max_tokens" not in cleared["config"]
+
+    explicit = await model_service.create_model(
+        preset["id"], {"model": "gpt-4o", "temperature": 0.3, "max_tokens": 2048}
+    )
+    assert explicit["config"]["temperature"] == 0.3
+    assert explicit["config"]["max_tokens"] == 2048
+
+
 async def test_provider_settings_save(model_service):
     settings = await model_service.save_settings({
         "default_preset_id": "p1",
