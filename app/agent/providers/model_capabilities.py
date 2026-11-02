@@ -15,7 +15,11 @@
 
 所以这里做三档推断，并如实告诉调用方结论是哪一档来的：
 
-1. ``metadata``：厂商返回了能读懂的能力字段（可信，直接预勾选）；
+1. ``metadata``：厂商返回了能读懂的能力字段（可信，直接预勾选）。对话模型额外
+   **默认补上工具调用**——厂商的元数据几乎不声明它，不补就会把"能调工具的模型"
+   预勾成纯文本/图片，框架随后按"不支持工具调用"把 tools 全部剔除；
+   只有厂商**明确否定**（OpenRouter ``supported_parameters`` 不含 tools、
+   或 ``supports_tools: false``）才不补；
 2. ``name``：没有元数据，但模型名带强线索（``-vl`` / ``-vision`` / ``gpt-4o`` …），
    只用来**补**图像/语音，不动工具调用；
 3. ``default``：什么都没有，用该能力类型的默认值（对话模型 = 文本 + 工具调用）。
@@ -166,6 +170,24 @@ def _metadata_modalities(entry: dict) -> set[str]:
     return found
 
 
+def _metadata_denies_tools(entry: dict) -> bool:
+    """厂商**明确否定**工具调用时返回 True。
+
+    只认可信的否定来源：OpenRouter ``supported_parameters`` 里有参数列表却不含
+    tools/tool_choice，或显式 ``supports_tools: false`` / ``tool_use: false``。
+    「字段里没提工具调用」**不算**否定——绝大多数厂商的能力元数据根本不声明它。
+    """
+    params = entry.get("supported_parameters") or entry.get("supportedParameters")
+    if isinstance(params, (list, tuple, set)):
+        names = {str(item).strip().lower() for item in params if isinstance(item, str)}
+        if names and "tools" not in names and "tool_choice" not in names:
+            return True
+    for key in ("supports_tools", "tool_use"):
+        if entry.get(key) is False:
+            return True
+    return False
+
+
 def infer_modalities(entry: dict | None, provider_type: str = "chat") -> tuple[list[str], str]:
     """推断一个模型的能力，返回 ``(modalities, source)``。
 
@@ -183,6 +205,12 @@ def infer_modalities(entry: dict | None, provider_type: str = "chat") -> tuple[l
         # 语音类（tts/stt）不因为"有元数据"就凭空多出 text。
         if kind in ("chat", "embedding", "rerank", ""):
             from_metadata.add(TEXT)
+        # 工具调用是对话模型的通用能力，而厂商元数据通常不声明它（OpenAI 兼容
+        # 接口尤其如此）。不补的话，这里预勾成「文本(+图片)」，框架就认为模型
+        # 不支持工具调用 → 请求里 tools=0 → 参与度模式下模型只能输出文本（思考），
+        # 表现为「机器人永远不回复」。
+        if kind in ("chat", "agent", "") and not _metadata_denies_tools(data):
+            from_metadata.add(TOOL_USE)
         return _ordered(from_metadata), _SOURCE_METADATA
 
     name = str(data.get("id") or data.get("name") or data.get("model") or "")

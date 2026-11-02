@@ -4,6 +4,9 @@
 
 1. **能读到厂商元数据就以厂商为准**（OpenRouter 的 ``architecture`` + ``supported_parameters``、
    Gemini 的 ``supportedGenerationMethods``、Ollama ``/api/show`` 的 ``capabilities``）；
+   对话模型再**默认补上工具调用**——厂商元数据通常不声明它，不补就会把能调工具的模型
+   预勾成纯文本/图片，框架随后把 tools 全部剔除（表现为参与度模式下永远不回复）；
+   只有厂商**明确否定**时才不补；
 2. **读不到才按模型名补图像/语音**，且**绝不用名字猜工具调用**（猜错会让模型收到 tools 直接 400）；
 3. **什么都读不到就用该能力类型的默认值**，并如实标 ``source="default"``——前端不会假装"已按厂商信息勾选"。
 """
@@ -43,18 +46,47 @@ def test_openrouter_text_only_model_has_no_tool_use():
     assert modalities == [TEXT]
 
 
+def test_explicit_tool_use_false_is_respected():
+    """厂商明确说"不支持工具调用"时不高默认值覆盖。"""
+    modalities, source = infer_modalities({"id": "m", "capabilities": ["completion"], "tool_use": False})
+    assert source == "metadata"
+    assert TOOL_USE not in modalities
+
+
 def test_gemini_supported_generation_methods():
+    """Gemini 的方法列表只说能做什么，没说工具调用——对话模型按通用能力补上。"""
     entry = {"id": "gemini-2.0-flash", "supportedGenerationMethods": ["generateContent", "countTokens"]}
     modalities, source = infer_modalities(entry)
     assert source == "metadata"
-    assert modalities == [TEXT]
+    assert modalities == [TEXT, TOOL_USE]
 
 
 def test_ollama_capabilities_list():
     entry = {"id": "llava:13b", "capabilities": ["completion", "vision"]}
     modalities, source = infer_modalities(entry)
     assert source == "metadata"
-    assert modalities == [TEXT, IMAGE]
+    assert modalities == [TEXT, IMAGE, TOOL_USE]
+
+
+def test_metadata_without_tool_declaration_still_gets_tool_use():
+    """回归：厂商元数据只声明文本能力时，对话模型仍要预勾工具调用。
+
+    线上事故：``/models`` 返回 ``capabilities: ["completion"]``（或只给图像），
+    预勾选就没有 tool_use → 运行时 `supports_tool_use` 为假 → 请求里 tools=0 →
+    参与度模式（文本=思考、发言靠 send_message）下模型只能输出文本，群里永远没回复。
+    """
+    modalities, source = infer_modalities({"id": "deepseek-chat", "capabilities": ["completion"]})
+    assert source == "metadata"
+    assert modalities == [TEXT, TOOL_USE]
+
+    image_only, _ = infer_modalities({"id": "some-vl", "capabilities": ["completion", "vision"]})
+    assert image_only == [TEXT, IMAGE, TOOL_USE]
+
+
+def test_non_chat_kinds_never_get_tool_use():
+    """embedding / rerank / tts / stt 不该被补上工具调用。"""
+    assert infer_modalities({"id": "embed-v1", "capabilities": ["completion"]}, "embedding")[0] == [TEXT]
+    assert infer_modalities({"id": "rerank-v1", "capabilities": ["completion"]}, "rerank")[0] == [TEXT]
 
 
 def test_generic_boolean_flags():
