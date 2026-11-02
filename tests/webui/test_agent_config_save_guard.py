@@ -125,7 +125,7 @@ def test_get_config_hides_module_owned_keys(client):
     resp = http.get("/api/agent/config", params={"bot_id": 3437542570})
     assert resp.status_code == 200, resp.text
     config = resp.json()["config"]
-    for key in ("behavior_rules_override", "speech_via_tool", "onebot_tools_enable"):
+    for key in ("onebot_tools_enable", "debug_prompt", "debug_response"):
         assert key not in config, f"{key} 是模块键，不该回传给 agent 页"
 
 
@@ -158,7 +158,7 @@ def test_changing_a_module_key_is_still_rejected(client):
 def test_module_owned_keys_cover_migrated_fields():
     """迁移清单里的键必须都被认定成模块拥有（否则仍会写错抽屉）。"""
     owned = module_owned_keys()
-    for key in ("behavior_rules_override", "speech_via_tool", "onebot_tools_enable", "memory_enable"):
+    for key in ("context_enable", "onebot_tools_enable", "memory_enable", "debug_prompt"):
         assert key in owned, f"{key} 应归模块"
     assert "group_enable" not in owned, "本体键不该被当成模块键"
     # 已删除的旧键不该再出现在任何清单里

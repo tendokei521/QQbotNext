@@ -1,4 +1,4 @@
-"""群聊记录 → 上下文端到端测试：真的进 prompt、去重、关闭即回到今天的行为。
+﻿"""群聊记录 → 上下文端到端测试：真的进 prompt、去重、关闭即回到今天的行为。
 
 这是 A–D 四个阶段的收口：记录面（store）→ 模块（写入）→ 渲染（排版）→ 装配（进 prompt），
 用**真实 production 路径**（``chat.generate_response``）验证，而不是只测各层函数。
@@ -97,7 +97,7 @@ async def test_trigger_message_is_not_duplicated(monkeypatch, tmp_path):
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
 
     event = _event()
-    event.message_id = 0
+    event.message_id = "0"
     store = GroupLogStore(bot_id=778, retention_hours=0)
     store.append_many([LogEvent(
         ts=int(time.time()), kind=KIND_MESSAGE, scope=GROUP_SCOPE, group_id="466052056",

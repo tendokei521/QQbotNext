@@ -57,13 +57,14 @@ def test_later_view_is_not_swallowed_by_earlier_view():
 
 
 def test_owner_wins_and_order_is_priority():
-    first = ConfigView(BASE, _Cfg(mode="speech"), ["mode"])
-    second = ConfigView(BASE, _Cfg(mode="stream"), ["mode"])
-    assert _chain(output_options=first, assembly_options=second).get("mode") == "speech"
+    """链里靠前的视图拥有该键时，后面的视图不能抢。"""
+    first = ConfigView(BASE, _Cfg(user_message_format="first"), ["user_message_format"])
+    second = ConfigView(BASE, _Cfg(user_message_format="second"), ["user_message_format"])
+    assert _chain(context_options=first, memory_options=second).get("user_message_format") == "first"
 
 
 def test_no_owner_falls_back_to_agent_config():
-    chain = _chain(output_options=OUT_VIEW, assembly_options=ASM_VIEW)
+    chain = _chain(context_options=OUT_VIEW, assembly_options=ASM_VIEW)
     assert chain.get("unrelated") == "agent-value"
     assert chain.get("missing_key", "fallback") == "fallback"
 
@@ -74,6 +75,6 @@ def test_view_without_ownership_info_still_participates():
         def get(self, key, default=None):
             return {"mode": "blocking"}.get(key, default)
 
-    chain = _chain(output_options=_Plain(), assembly_options=ASM_VIEW)
+    chain = _chain(context_options=_Plain(), assembly_options=ASM_VIEW)
     assert chain.get("mode") == "blocking"
     assert chain.get("user_message_format") == "single_line"

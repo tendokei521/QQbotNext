@@ -74,13 +74,15 @@ def test_build_for_falls_back_when_assembler_unusable():
     """装配器不合格（无 build）时回退默认装配器，不让一个坏装配器炸掉整轮请求。"""
     runtime = _Runtime()
     runtime.assembler = object()
-    assert build_for(runtime, _req()) == PromptAssembler().build(_req())
+    req = _req()
+    assert build_for(runtime, req) == PromptAssembler().build(req)
 
 
 def test_build_for_defaults_without_assembler_attribute():
     """没有 assembler 属性（旧测试替身/旧运行时）时等价于默认装配器。"""
     runtime = _Runtime()
-    assert build_for(runtime, _req()) == PromptAssembler().build(_req())
+    req = _req()
+    assert build_for(runtime, req) == PromptAssembler().build(req)
 
 
 # ==================== 钩子可读写 messages ====================

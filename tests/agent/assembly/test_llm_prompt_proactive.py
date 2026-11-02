@@ -9,8 +9,6 @@ from app.plugins.llm_trigger.src.prompt import (
     PROACTIVE_ENV_NUDGE,
     PROACTIVE_FOOTER_LINE,
     PROACTIVE_FOOTER_UNRESOLVED_LINE,
-    PROACTIVE_HISTORY_LINE,
-    PROACTIVE_HISTORY_NUDGE,
     PROACTIVE_POKE_LINE,
     PROACTIVE_QUOTE_LINE,
     PROACTIVE_REFERENT_LINE,
@@ -21,13 +19,12 @@ from app.plugins.llm_trigger.src.prompt import (
     history_intent,
 )
 
-ALL_TOOLS = {"get_chat_history", "send_poke", "get_current_session", "schedule_task"}
-HISTORY_ONLY = {"get_chat_history", "get_current_session"}
+ALL_TOOLS = {"send_poke", "get_current_session", "schedule_task"}
 POKE_ONLY = {"send_poke"}
 ENV_ONLY = {"get_current_session"}
 EXPAND_TOOLS = {"expand_recent", "expand_message", "expand_user"}
 ENV_WITH_EXPAND = {"get_current_session"} | EXPAND_TOOLS
-HISTORY_NO_ENV = {"get_chat_history"}   # 有历史能力但没有任何环境能力
+HISTORY_NO_ENV = {"get_chat_history"}   # 没有任何环境能力（历史工具已删除，不再产出行）
 # 与环境/历史/戳一戳都无关的能力：不应触发任何一行
 UNRELATED_TOOLS = {"schedule_task"}
 
@@ -69,18 +66,6 @@ def test_block_can_be_disabled():
 
 
 # ---------- 按能力裁剪 ----------
-
-
-def test_history_line_only_when_history_tool_available():
-    history_block = build_proactive_instruction(_cfg(), "", available_tools=HISTORY_ONLY)
-    poke_block = build_proactive_instruction(_cfg(), "", available_tools=POKE_ONLY)
-
-    assert PROACTIVE_HISTORY_LINE in history_block
-    assert PROACTIVE_POKE_LINE not in history_block
-    assert PROACTIVE_POKE_LINE in poke_block
-    assert PROACTIVE_HISTORY_LINE not in poke_block
-    # 尾部免责声明两块都有
-    assert PROACTIVE_FOOTER_LINE in history_block and PROACTIVE_FOOTER_LINE in poke_block
 
 
 def test_no_block_when_no_relevant_capability():
@@ -152,10 +137,13 @@ def test_env_can_be_disabled_independently():
     assert "先自己取" in off_marker
 
 
-def test_unknown_tools_keeps_both_lines():
-    """不传 available_tools（旧调用方/单测）时保留完整协议。"""
+def test_unknown_tools_keeps_full_protocol():
+    """不传 available_tools（旧调用方/单测）时保留现有协议。
+
+    注：``get_chat_history`` 已删除（2026-11-01），对应的「先查记录」行不再出现。
+    """
     block = build_proactive_instruction(_cfg(), "")
-    assert PROACTIVE_HISTORY_LINE in block and PROACTIVE_POKE_LINE in block
+    assert PROACTIVE_POKE_LINE in block
     assert PROACTIVE_QUOTE_LINE in block
     assert "先自己取" in block and PROACTIVE_UNRESOLVED_LINE in block
 
@@ -238,26 +226,4 @@ def test_referent_lines_can_be_disabled():
     assert PROACTIVE_REFERENT_LINE not in off
     assert PROACTIVE_REFERENT_LINE not in off_resolve
     assert "先自己取" in off  # 其它行不受影响
-
-
-def test_nudge_added_inside_same_block_on_history_intent():
-    block = build_proactive_instruction(_cfg(), "刚才我说了什么来着", available_tools=ALL_TOOLS)
-
-    assert PROACTIVE_HISTORY_NUDGE in block
-    assert block.count("### 主动性") == 1  # 仍是一块
-
-
-def test_nudge_not_added_without_intent_or_when_disabled():
-    plain = build_proactive_instruction(_cfg(), "今天天气不错", available_tools=ALL_TOOLS)
-    assert PROACTIVE_HISTORY_NUDGE not in plain
-
-    off = build_proactive_instruction(
-        _cfg(proactive_history_intent_nudge=False), "刚才我说了什么", available_tools=ALL_TOOLS
-    )
-    assert PROACTIVE_HISTORY_NUDGE not in off
-    assert PROACTIVE_HISTORY_LINE in off
-
-
-# ---------- chat 侧接入 ----------
-
 

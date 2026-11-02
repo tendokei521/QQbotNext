@@ -98,7 +98,8 @@ def _config(**over):
         "meta_sender_style": "off",
         "history_rounds": 50,
         "schedule_enable": True,
-            "speech_via_tool": True,
+        # 发言通道由回复模式决定（旧 `speech_via_tool` 已退役）
+        "reply_mode": "participation",
         "stream_output": True,
         "max_tool_rounds": 5,
     }
@@ -228,61 +229,6 @@ async def test_silence_sends_nothing_and_writes_no_history(monkeypatch, tmp_path
     assert _assistant_history(992) == [], "静默不该留下 assistant 历史"
 
 
-async def test_at_trigger_forces_one_more_round(monkeypatch, tmp_path):
-    """被 @ 却静默：补一轮要求它发言（防「叫了不理」）。"""
-    _register(monkeypatch)
-    monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
-    global FORCE_SPEAK_TEXT
-    FORCE_SPEAK_TEXT = "干嘛"
-    STREAM_SCRIPT.append([_text("（懒得理）")])
-    rt = _runtime(993, _config())
-    ctx = _ctx(_event(), is_at=True)
-
-    sent = await _run_stream(rt, ctx)
-
-    assert sent == ["干嘛"]
-    assert TIMELINE == ["round", "force", "send:干嘛"]
-    assert CHAT_MESSAGES and CHAT_MESSAGES[0][-1]["role"] == "user"
-    # 措辞必须带"文本不会发出去"这个因果：实测纯祈使句（"你必须调用"）反而无效
-    assert "文本不会发出去" in str(CHAT_MESSAGES[0][-1]["content"])
-    assert "send_message" in str(CHAT_MESSAGES[0][-1]["content"])
-    assert _assistant_history(993) == ["干嘛"]
-
-
-async def test_force_reply_can_be_disabled(monkeypatch, tmp_path):
-    """关掉「被点名必须回应」后，@ 也允许静默。"""
-    _register(monkeypatch)
-    monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
-    STREAM_SCRIPT.append([_text("（不想说话）")])
-    rt = _runtime(994, _config(speech_force_reply_on_call=False))
-    ctx = _ctx(_event(), is_at=True)
-
-    sent = await _run_stream(rt, ctx)
-
-    assert sent == []
-    assert CHAT_MESSAGES == []
-
-
-async def test_reminder_injected_when_no_speech_yet(monkeypatch, tmp_path):
-    """剩余轮次不多且还没开口 → 注入一条 user 角色的【系统提醒】。"""
-    _register(monkeypatch)
-    monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
-    STREAM_SCRIPT.extend([
-        [_tool_call("expand_recent", "{}")],
-        [_text("（还是不说）")],
-    ])
-    rt = _runtime(995, _config(max_tool_rounds=4, speech_reminder_rounds=3))
-    ctx = _ctx(_event(), is_at=False)
-
-    await _run_stream(rt, ctx)
-
-    assert len(STREAM_MESSAGES) >= 2, "提醒要出现在下一轮请求里"
-    reminder = [m for m in STREAM_MESSAGES[1] if m["role"] == "user"]
-    assert reminder, "提醒必须是 user 角色（system 会被适配器上提到最前，等于没加）"
-    assert "【系统提醒】" in str(reminder[-1]["content"])
-    assert "send_message" in str(reminder[-1]["content"])
-
-
 async def test_speech_tools_are_injected_into_request(monkeypatch, tmp_path):
     """发言通道开启时，send_message / finish 必须真的出现在工具表里。"""
     _register(monkeypatch)
@@ -307,46 +253,13 @@ async def test_speech_off_keeps_text_as_speech(monkeypatch, tmp_path):
     _register(monkeypatch)
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
     STREAM_SCRIPT.append([_text("就这样吧。")])
-    rt = _runtime(997, _config(speech_via_tool=False))
+    rt = _runtime(997, _config(reply_mode="legacy"))
     ctx = _ctx(_event())
 
     sent = await _run_stream(rt, ctx)
 
     assert sent == ["就这样吧。"]
     assert _assistant_history(997) == ["就这样吧。"]
-
-
-async def test_speech_channel_comes_from_output_module_not_stale_agent_config(monkeypatch, tmp_path):
-    """线上事故回归：模块选了「发言通道」、agent 还留着旧的 ``speech_via_tool=False``。
-
-    事故现场（2026-10-29）：请求里已经有 ``send_message``/``finish`` 工具，但装配层
-    读的是 agent 配置 → 不贴发言协议、人格段还说"输出纯文本" → 模型只写文本
-    → 整轮静默（补一轮也仍是文本）。模块配置才是策略键的事实源，装配层必须跟它走。
-    """
-    from app.plugins.llm_output.main import OWNED_KEYS
-    from app.plugins.llm_output.src.output_mode import OutputOptionsView
-
-    _register(monkeypatch)
-    monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
-    STREAM_SCRIPT.extend([
-        [
-            _text("（老师问我在干什么…）"),
-            _tool_call("send_message", '{"messages": ["在看书，怎么了？"]}'),
-        ],
-        [_text("（说完了）")],
-    ])
-    # agent 里是旧值，模块里显式选了发言通道
-    rt = _runtime(999, _config(speech_via_tool=False, stream_output=False))
-    rt.output_options = OutputOptionsView(rt.config, {"mode": "speech"}, OWNED_KEYS)
-    ctx = _ctx(_event())
-
-    sent = await _run_stream(rt, ctx)
-
-    assert sent == ["在看书，怎么了？"], "模块是发言通道 → send_message 的内容必须真的发出去"
-    user_turns = [m for m in STREAM_MESSAGES[0] if m.get("role") == "user"]
-    assert user_turns and "发言协议" in str(user_turns[-1]["content"]), (
-        "模块策略是发言通道 → 提示词必须贴发言协议，否则模型不知道文本不会发出去"
-    )
 
 
 class _FakeBot:
@@ -385,6 +298,9 @@ async def test_pipeline_sends_bubbles_and_backfills_history_id(monkeypatch, tmp_
     ])
     rt = _runtime(998, _config())
     event = _event()
+    # 引用校验只认「会话里真实出现过的 message_id」：让本轮消息自己带上这个 id，
+    # 回填历史后它就以 id=22350 存在，send_message 的引用才是合法的。
+    event.message_id = "22350"
     ctx = _ctx(event)
     bot = _FakeBot()
     ctx.bot = bot

@@ -1,4 +1,4 @@
-"""v3 配置拆分迁移测试（`scripts/migrate_v3_split_config.py`）。
+﻿"""v3 配置拆分迁移测试（`scripts/migrate_v3_split_config.py`）。
 
 这条迁移决定"升级后用户的记忆/主动消息/流式等设置还在不在"，所以测试要覆盖：
 留本体、搬到模块、模块已有值优先、丢弃记录、未知键保留、幂等。
@@ -108,7 +108,7 @@ async def test_apply_split_writes_modules_and_trims_agent_row():
         service, "12345", plan, dry_run=False, dropped_sink=dropped
     )
 
-    assert stats["agent_keys"] == len(CORE_KEYS) == 57
+    assert stats["agent_keys"] == len(CORE_KEYS)
     assert sum(stats["modules"].values()) == len(MODULE_KEY_SET)
     # agent 行只剩本体键
     assert set(service.get_module_config("agent", "12345")) == set(CORE_KEYS)

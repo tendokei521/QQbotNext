@@ -32,6 +32,7 @@ gen_sections = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(gen_sections)
 
 from app.agent.config_partition import (  # noqa: E402
+    ADVANCED_KEYS,
     CORE_KEYS,
     DELETED_KEYS,
     MODULE_KEYS,
@@ -117,7 +118,7 @@ def test_page_titles_match_the_agreed_layout():
     [
         ("behavior", 6),
         ("session", 20),
-        ("advanced", 21),
+        ("advanced", 42),
     ],
 )
 def test_section_field_counts(section_id, expected):
@@ -149,11 +150,14 @@ def test_every_ui_field_appears_exactly_once():
 
 
 def test_manifest_plus_panel_covers_exactly_the_core_keys():
-    """设置页 + 面板 + 回复与权限 = 本体全部键，且三处互不重叠（单一编辑入口）。"""
+    """设置页 + 面板 + 回复与权限 + 高级选项 = 本体全部键，且互不重叠（单一编辑入口）。"""
     listed = set(_all_fields()) | set(_panel_fields()) | set(_reply_fields())
-    assert listed == set(CORE_KEYS)
-    assert len(_panel_fields()) == len(PANEL_KEYS) == 6
-    assert len(_reply_fields()) == len(REPLY_KEYS) == 4
+    # 「高级选项」是页面外工作台（单独页面，不在三份清单里）
+    assert listed == set(CORE_KEYS) - set(ADVANCED_KEYS)
+    assert len(ADVANCED_KEYS) == 1, "高级选项目前只有「消息组装」一个开关"
+    # 面板/回复清单与实际键数一致（数量本身不锁定：入口增减属产品决策）
+    assert len(_panel_fields()) == len(PANEL_KEYS)
+    assert len(_reply_fields()) == len(REPLY_KEYS)
     overlap = set(_all_fields()) & (set(_panel_fields()) | set(_reply_fields()))
     assert not overlap, f"同一个键出现了两个编辑入口: {sorted(overlap)}"
 

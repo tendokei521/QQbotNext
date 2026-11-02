@@ -1,13 +1,11 @@
-"""括号清洗测试：strip/maybe_strip 函数 + 历史写入只清历史、展示保留原文。"""
+"""括号清洗测试：strip / maybe_strip 的纯函数语义。
 
-import asyncio
-import types
+历史：端到端用例曾验证「展示保留原文、写历史时清洗」，但 ``clean_output_parentheses``
+开关与那段历史清洗逻辑已删除（2026-11-01 精简）：现在展示与历史都保留原文，
+不再有需要跨链路验证的分叉，因此只保留纯函数契约。
+"""
 
-from app.agent.config import DEFAULT_LLM_CONFIG
-from app.agent.loop.chat import generate_response
-from app.agent.session.manager import SessionManager
 from app.domain.tags import maybe_strip_parentheses, strip_parentheses
-from app.plugins.llm_memory.src.manager import MemoryManager
 
 
 # ---- strip_parentheses ----
@@ -34,92 +32,3 @@ def test_strip_parentheses_keep_unclosed_and_no_nuke():
 def test_maybe_strip_parentheses_toggle():
     assert maybe_strip_parentheses("好（哦）", enabled=True) == "好"
     assert maybe_strip_parentheses("好（哦）", enabled=False) == "好（哦）"
-
-
-# ---- 端到端：展示保留原文、历史已清洗 ----
-class _Tools:
-    def enabled_specs(self):
-        return []
-
-
-class _Skills:
-    def prompt_blocks(self):
-        return []
-
-
-def _make(bot_id, data=None, enabled=None):
-    rt = types.SimpleNamespace()
-    rt.bot_id = bot_id
-    rt.config = _FullConfig(data, enabled)
-    rt.memory = MemoryManager(rt)
-    rt.llm_tools = _Tools()
-    rt.skills = _Skills()
-    rt.scheduler = None
-    rt.proactive = None
-    rt.provider_config = lambda: {"api_key": "k"}
-    rt.provider_chain = lambda: [{"provider": "openai", "api_key": "k", "model": "m"}]
-    return rt
-
-
-class _FullConfig:
-    def __init__(self, data=None, enabled=None):
-        self.data = dict(DEFAULT_LLM_CONFIG)
-        self.data.update({"memory_enable": True, "experimental_long_term_memory": True})
-        if data:
-            self.data.update(data)
-        if enabled is not None:
-            self.data["clean_output_parentheses"] = enabled
-
-    def get(self, key, default=None):
-        if key in self.data and self.data[key] is not None:
-            return self.data[key]
-        return default
-
-
-async def _run_once(rt, text, monkeypatch):
-    captured = []
-
-    async def fake_chat(chain, messages, **_kw):
-        captured.append(messages)
-        from app.agent.providers.base import LLMResponse
-
-        if any("记忆提取器" in (m.get("content", "") or "") for m in messages):
-            return LLMResponse(text="无")
-        return LLMResponse(text="好的，我已经记住了（笑）")
-
-    # 请求出口已收口到 runtime.invoker（默认实现按属性查找转调 providers），
-    # 因此这里只需要打 providers 这一层的补丁。
-    monkeypatch.setattr("app.agent.providers.chat_with_fallback", fake_chat)
-    ev = types.SimpleNamespace(message_type="private", user_id="5", group=None, bot=None, self_id="5")
-    ctx = types.SimpleNamespace(session_id="", user_text=text, state={})
-    out = await generate_response(rt, ev, ctx)
-    await asyncio.sleep(0.05)
-    return out
-
-
-async def test_e2e_history_cleaned_but_display_kept(monkeypatch):
-    rt = _make("bot_par_on")
-    out = await _run_once(rt, "记住我喜欢喝美式", monkeypatch)
-    assert "（笑）" in out  # 本次展示保留原文
-
-    sm = SessionManager("bot_par_on")
-    s = sm.get_session("private_5")
-    assert s is not None
-    last = s.data.history[-1]
-    assert last["role"] == "assistant"
-    # 括号清洗开关已删除（2026-11-01 精简）：历史保留原文，与展示一致
-    assert "（笑）" in last["content"]
-    assert "好的" in last["content"]
-    rt.memory.stop()
-
-
-async def test_e2e_option_disabled_keeps_history(monkeypatch):
-    rt = _make("bot_par_off", enabled=False)
-    out = await _run_once(rt, "记住我喜欢喝美式", monkeypatch)
-    assert "（笑）" in out
-    sm = SessionManager("bot_par_off")
-    s = sm.get_session("private_5")
-    assert s is not None
-    last = s.data.history[-1]
-    assert "（笑）" in last["content"]  # 关闭时历史保留括号
-    rt.memory.stop()

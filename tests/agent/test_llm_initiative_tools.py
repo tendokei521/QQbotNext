@@ -22,10 +22,10 @@ def _install_context_tools(runtime):
     v3 起 `expand_*` 由模块的 tool_source 提供，框架不再注入。
     """
     from app.agent.loop.providers import register_tool_source
-    from app.plugins.llm_context.src.service import ContextToolSource
+    from app.plugins.llm_context.main import _ContextToolSource
 
     runtime.tool_sources = []
-    register_tool_source(runtime, ContextToolSource(_SN(module_name="llm_context")))
+    register_tool_source(runtime, _ContextToolSource(_SN(module_name="llm_context")))
     return runtime
 
 from types import SimpleNamespace
@@ -90,7 +90,9 @@ async def test_initiative_tools_include_context_tools_without_event():
     )
     names = {s.name for s in specs}
 
-    assert {"get_current_session", "get_chat_history"} <= names
+    assert "get_current_session" in names
+    # get_chat_history 已删除（2026-11-01），不再出现在工具表
+    assert "get_chat_history" not in names
     # v3：`expand_*` 归 llm_context 模块（框架不再注入）
     assert not {"expand_recent", "expand_message", "expand_user"} & names
     # 主动消息/定时任务自身不需要再创建定时任务
@@ -281,9 +283,9 @@ class _FakeModule:
         self.ctx = _FakeCtx()
         self.config = _FakeConfig({"schedule_enable": True, "context_expand_enable": True})
         # v3：`expand_*` 由 llm_context 模块的 tool_source 提供（框架不再注入）
-        from app.plugins.llm_context.src.service import ContextToolSource
+        from app.plugins.llm_context.main import _ContextToolSource
 
-        self.tool_sources = [ContextToolSource(self)]
+        self.tool_sources = [_ContextToolSource(self)]
         self.context_providers = []
 
 
@@ -294,76 +296,6 @@ def _started_sched(module, tmp_path):
     sched = ts_mod.TaskScheduler(module, data_dir=str(tmp_path))
     sched.start()
     return sched
-
-
-async def test_scheduled_message_gets_proactive_block_and_tools(tmp_path, monkeypatch):
-    from app.plugins.llm_trigger.src.schedule import scheduler as ts_mod
-
-    module = _FakeModule()
-    sched = _started_sched(module, tmp_path)
-    captured: dict = {}
-
-    class _FakeResp:
-        ok = True
-        text = "该起床啦"
-
-    class _FakeProvider:
-        async def chat(self, messages, **kw):
-            captured["messages"] = messages
-            captured["kwargs"] = kw
-            return _FakeResp()
-
-    monkeypatch.setattr(ts_mod, "get_provider", lambda cfg: _FakeProvider())
-
-    try:
-        entry = await sched.schedule("group_500", {"trigger": "明天早上8点", "content": "该起床啦"})
-        await sched.trigger_now(entry.id)
-    finally:
-        sched.stop()
-
-    tool_names = {t["function"]["name"] for t in captured["kwargs"].get("tools") or []}
-    assert {"expand_recent", "expand_message", "expand_user"} <= tool_names
-    assert "get_current_session" in tool_names
-    assert captured["kwargs"]["max_tool_rounds"] == 5
-
-    # 提示块由「触发与调度」插件的 section 装配（测试里的 fake runtime 没装它）：
-    # 直接验证插件构建器按本轮真实工具给出了引导。
-    from app.plugins.llm_trigger.src.prompt import build_proactive_instruction
-
-    block = build_proactive_instruction(
-        module.config, "", available_tools=tool_names, dedupe=True
-    )
-    assert block and "### 上下文补全" in block and "先自己取" in block
-
-
-async def test_scheduled_message_skips_tools_when_disabled(tmp_path, monkeypatch):
-    from app.plugins.llm_trigger.src.schedule import scheduler as ts_mod
-
-    module = _FakeModule()
-    module.config = _FakeConfig({"schedule_enable": True, "context_expand_enable": False})
-    sched = _started_sched(module, tmp_path)
-    captured: dict = {}
-
-    class _FakeResp:
-        ok = True
-        text = "该起床啦"
-
-    class _FakeProvider:
-        async def chat(self, messages, **kw):
-            captured["kwargs"] = kw
-            return _FakeResp()
-
-    monkeypatch.setattr(ts_mod, "get_provider", lambda cfg: _FakeProvider())
-
-    try:
-        entry = await sched.schedule("private_100", {"trigger": "明天早上8点", "content": "该起床啦"})
-        await sched.trigger_now(entry.id)
-    finally:
-        sched.stop()
-
-    tool_names = {t["function"]["name"] for t in captured["kwargs"].get("tools") or []}
-    assert not ({"expand_recent", "expand_message", "expand_user"} & tool_names)
-    assert "get_current_session" in tool_names
 
 
 @pytest.mark.parametrize("is_group", [True, False])

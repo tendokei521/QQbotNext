@@ -55,7 +55,7 @@ ALL_TOOLS = {
 }
 
 #: 发言通道生效的完整条件（档位 + 开关 + 流式）
-SPEECH_CONFIG = {"speech_via_tool": True, "stream_output": True}
+SPEECH_CONFIG = {"reply_mode": "participation"}
 
 
 def _behavior(req: PromptRequest) -> str:
@@ -263,7 +263,7 @@ def test_every_preset_explains_tool_speech():
     否则模型会按错误事实行动（整轮沉默或把思考当发言）。
     """
     for preset in presets.PRESETS:
-        cfg = {"prompt_preset": preset.key, "speech_via_tool": True, "system_prompt": "人设"}
+        cfg = {"reply_mode": "participation", "system_prompt": "人设"}
         text = persona_rules.render(
             None, ALL_TOOLS, cfg, segments=presets.segments_of(preset)
         )
@@ -277,7 +277,7 @@ def test_every_preset_explains_tool_speech():
 def test_presets_keep_text_mode_when_channel_off():
     """关掉发言通道后，三套方案都要回到「文本即回复」口径（可回滚）。"""
     for preset in presets.PRESETS:
-        cfg = {"prompt_preset": preset.key, "speech_via_tool": False}
+        cfg = {"reply_mode": "legacy"}
         text = persona_rules.render(
             None, ALL_TOOLS, cfg, segments=presets.segments_of(preset)
         )

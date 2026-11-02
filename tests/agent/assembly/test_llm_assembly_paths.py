@@ -72,19 +72,22 @@ def _runtime(config: dict):
     return rt
 
 
-def _event(time: int = 1788342260):
+def _event(time: int = 1788342260, message_id: str = "m-1", text: str = "现在几点"):
     from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
 
-    return GroupMessageEvent(
+    ev = GroupMessageEvent(
         event_type="message_group",
         message_type="group",
         time=time,
         user_id=20002,
         self_id=778,
-        message=[MessageSegment("text", {"text": "现在几点"})],
+        message=[MessageSegment("text", {"text": text})],
         user=UserInfo(user_id=20002, nickname="小明"),
         group=types.SimpleNamespace(group_id=466052056, group_name="测试群"),
     )
+    # 生产事件带 message_id：装配层靠它把"会话历史尾部的当前消息"去掉（去重锚点）
+    ev.message_id = message_id
+    return ev
 
 
 def _ctx(event, *, session_id: str | None = None):
@@ -161,11 +164,11 @@ async def test_both_paths_share_deduplicated_history(monkeypatch, tmp_path):
 
     rt = _runtime(_config_dict())
 
-    event1 = _event()
+    event1 = _event(message_id="m-1")
     ctx1 = _ctx(event1)
     await chat.generate_response(rt, event1, ctx1)
 
-    event2 = _event(time=1788343000)  # 时间推进，绕过群聊回复冷却
+    event2 = _event(time=1788343000, message_id="m-2", text="第二条")  # 时间推进，绕过群聊回复冷却
     ctx2 = _ctx(event2)
     ctx2.user_text = "第二条"
     ctx2.state["user_context"] = {"sent_text": "第二条"}
@@ -173,7 +176,8 @@ async def test_both_paths_share_deduplicated_history(monkeypatch, tmp_path):
 
     second = CHAT_MESSAGES[-1]
     user_texts = [m["content"] for m in second if m["role"] == "user"]
-    assert user_texts.count("第二条") == 1, user_texts
+    # 当前消息只出现一次（历史尾部那条会被 message_id 去掉）
+    assert sum("第二条" in str(t) for t in user_texts) == 1, user_texts
     assert any("现在几点" in str(t) for t in user_texts), user_texts
 
 

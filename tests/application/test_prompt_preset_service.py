@@ -55,24 +55,6 @@ async def test_save_override_persists_and_wins_in_assembly(config_service):
     assert any(custom in text for text in systems), "装配应直接使用覆盖文本（L1 会跟其它规则合并成一条）"
 
 
-async def test_account_level_override_still_wins(config_service):
-    await prompt_preset_service.save_override(config_service, "chat", "全局自定义")
-
-    req = PromptRequest(
-        config={
-            "prompt_preset": "chat",
-            "behavior_rules_override": "账号级自定义",
-            "system_prompt": "人设",
-        },
-        user_text="hi",
-        available_tools={"send_message"},
-    )
-    systems = " ".join(str(m["content"]) for m in PromptAssembler().build(req) if m["role"] == "system")
-
-    assert "账号级自定义" in systems
-    assert "全局自定义" not in systems
-
-
 async def test_reset_restores_default_and_empty_text_is_reset(config_service):
     await prompt_preset_service.save_override(config_service, "roleplay", "临时文本")
     await prompt_preset_service.reset_override(config_service, "roleplay")

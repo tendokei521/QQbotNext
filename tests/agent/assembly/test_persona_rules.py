@@ -42,10 +42,9 @@ ALL_TOOLS = {
 
 EMPTY_CONFIG: dict = {}
 
-#: 发言通道生效的完整条件（档位 + 开关 + 流式）——多处复用，避免各写一遍而漂移
+#: 发言通道生效的条件（2026-11-01 起由**回复模式**决定，旧 `speech_via_tool` 已退役）
 SPEECH_CONFIG: dict = {
-    "speech_via_tool": True,
-    "stream_output": True,
+    "reply_mode": "participation",
 }
 
 
@@ -109,18 +108,18 @@ def test_segment_order_is_stable():
 
 
 def test_speech_contract_follows_capability():
-    """护栏 2（发言通道）：文本是否会被发出，由发言通道是否生效决定，两者不可混说。
+    """护栏 2（发言通道）：文本是否会被发出，由回复模式决定，两者不可混说。
 
-    生效条件只剩 ``speech_via_tool`` 一个开关（档位/流式不再是门槛，见
-    ``speech.speech_via_tool``）——提示词必须与运行时同一口径。
+    发言通道只看 ``reply_mode``（``participation`` = 文本只是思考），档位/流式不再是
+    门槛（见 ``speech.speech_via_tool``）——提示词必须与运行时同一口径。
     """
-    by_text = _render(ALL_TOOLS, {"speech_via_tool": False})
+    by_text = _render(ALL_TOOLS, {"reply_mode": "legacy"})
     assert "直接发到" in by_text
     assert "不会发到 QQ" not in by_text
     assert "send_message" not in by_text, "文本即发言时不应教模型调 send_message"
 
-    # 只开开关即可（不依赖任何档位 / 流式）
-    half = _render(ALL_TOOLS, {"speech_via_tool": True})
+    # 只开回复模式即可（不依赖任何档位 / 流式）
+    half = _render(ALL_TOOLS, {"reply_mode": "participation"})
     assert "不会发到 QQ" in half
     assert "send_message" in half
 
@@ -173,7 +172,7 @@ def test_quote_channel_follows_tool_mode():
     assert "reply_to_message_id" in by_tool
     assert "[reply]" not in by_tool
 
-    by_text = _render(ALL_TOOLS, {"speech_via_tool": False})
+    by_text = _render(ALL_TOOLS, {"reply_mode": "legacy"})
     assert "[reply]" in by_text
     assert "reply_to_message_id" not in by_text
 
@@ -182,9 +181,9 @@ def test_quote_channel_follows_tool_mode():
 
 
 def test_participation_rewrites_lines_and_emoji_level_is_fixed():
-    low = _render(ALL_TOOLS, {"participation": "low"})
-    high = _render(ALL_TOOLS, {"participation": "high"})
-    assert "安静型" in low and "活跃型" in high
+    low = _render(ALL_TOOLS, {"participation_level": "low"})
+    high = _render(ALL_TOOLS, {"participation_level": "high"})
+    assert "低" in low and "活跃型" in high
     assert low != high
 
     # 表情活跃度开关已删除（2026-11-01 精简）：旧键存在与否都不再改变文案。
@@ -219,16 +218,16 @@ def _request(**overrides) -> PromptRequest:
     return req
 
 
-def test_no_behavior_block_without_a_preset():
-    """库层直调（配置里根本没有 ``prompt_preset``）时不注入行为块——向后兼容。
+def test_behavior_block_falls_back_without_a_preset():
+    """库层直调（配置里根本没 ``prompt_preset``）时仍注入行为段。
 
-    产品路径（``DEFAULT_LLM_CONFIG``）永远带这个键，所以这不影响线上行为；
-    它守的是"直接构造 config 的脚本/测试仍能拿到旧形态"。
+    行为段是"怎么说话"的底线，不能因为没选方案就消失；``prompt_preset`` 只决定
+    **用哪套文案**（chat/roleplay/assistant），缺省时退回 ``persona_rules`` 默认渲染。
     """
     req = _request(config={})
     req.available_tools = ALL_TOOLS
     names = [name for name, _ in _block_names(req)]
-    assert "behavior" not in names
+    assert "behavior" in names
 
 
 def _block_names(req):

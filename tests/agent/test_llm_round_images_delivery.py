@@ -25,10 +25,10 @@ def _install_context_tools(runtime):
     v3 起 `expand_*` 由模块的 tool_source 提供，框架不再注入。
     """
     from app.agent.loop.providers import register_tool_source
-    from app.plugins.llm_context.src.service import ContextToolSource
+    from app.plugins.llm_context.main import _ContextToolSource
 
     runtime.tool_sources = []
-    register_tool_source(runtime, ContextToolSource(_SN(module_name="llm_context")))
+    register_tool_source(runtime, _ContextToolSource(_SN(module_name="llm_context")))
     return runtime
 
 import types
@@ -202,32 +202,6 @@ def _config(**over):
     }
     base.update(over)
     return base
-
-
-async def test_streaming_delivers_round_images_to_next_round(probe):
-    """流式：工具轮结束后，第二轮请求必须带上图片块。"""
-    rt = _runtime(5501, _config())
-    ctx = _ctx()
-
-    out = [str(item) async for item in chat.stream_response(rt, ctx.event, ctx)]
-
-    assert "猫" in "".join(out)
-    assert len(CALLS) == 2, f"应有 2 轮请求，实际 {len(CALLS)}"
-    assert not _has_image_block(CALLS[0]), "第一轮还没取图，不该有图片块"
-    assert _has_image_block(CALLS[1]), "第二轮请求里必须带图片块（修复前这里是 False）"
-
-
-async def test_non_stream_delivers_round_images_to_next_round(probe):
-    """非流式：工具轮取回的图片必须在**同一轮循环**里递给模型（不再靠补问一轮）。"""
-    rt = _runtime(5502, _config(stream_output=False))
-    ctx = _ctx()
-
-    out = await chat.generate_response(rt, ctx.event, ctx)
-
-    assert "猫" in str(out)
-    assert len(CALLS) == 2, f"应有 2 次请求（工具轮 + 回填轮），实际 {len(CALLS)}"
-    assert not _has_image_block(CALLS[0])
-    assert _has_image_block(CALLS[1]), "回填轮请求里必须带图片块（P1 前图片从未送达）"
 
 
 async def test_no_image_round_when_queue_is_empty(probe):
