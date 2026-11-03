@@ -85,7 +85,7 @@ def test_auth_section_only_when_privileged_tool_available():
 
 
 def test_sender_name_goes_to_message_name_field_not_content():
-    """方案 A：昵称只走 OpenAI message 的 ``name`` 字段，正文不再放任何发送者占位符。"""
+    """方案 A：昵称走 OpenAI message 的 ``name`` 字段，正文只留 id 标记。"""
     from app.agent.message_assembly import history as history_assembly
     from app.agent.prompts.sections import build_user
 
@@ -102,8 +102,7 @@ def test_sender_name_goes_to_message_name_field_not_content():
     )
     assert rendered[0]["name"] == "老师，今年的学费也是一次性交吗"
     assert "老师，今年的学费也是一次性交吗" not in rendered[0]["content"]
-    assert "[sender:" not in rendered[0]["content"]
-    assert rendered[0]["content"].startswith("[time=")
+    assert "[sender:id=20002]" in rendered[0]["content"]
 
     event = SimpleNamespace(
         message_type="group",
@@ -111,7 +110,7 @@ def test_sender_name_goes_to_message_name_field_not_content():
         group=SimpleNamespace(group_id=466052056, group_name="测试群"),
     )
     req = SimpleNamespace(
-        event=event, is_private=False, user_text="[time=..,message_id=1]在吗",
+        event=event, is_private=False, user_text="[time=..,message_id=1][sender:id=20002]在吗",
         user_blocks=[], extra_user_content_parts=[],
     )
     msg = build_user(req)[0]

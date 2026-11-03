@@ -6,15 +6,8 @@
 
 - `_history_meta_flags` 的 `mask_nickname` 直接固定为 `False`：历史/本轮发送者昵称
   原样进入 OpenAI `message.name`，不做 `用户<QQ>` 脱敏。
+- 发送者 `[sender:...]` 结构保留（新方案只是把昵称放到 `name` 字段，不删除该标记）。
 
-### 新方案彻底移除发送者占位符（2026-11-03）
-
-- 本轮与历史消息的正文不再输出 `[sender:id=..]` / `[sender:...]` 占位符；
-  发送者昵称只走 OpenAI `message.name` 字段。
-- `render_turn` / `render_history_entry` 在 `include_sender_name=False` 时完全省略
-  sender 标记；Anthropic/Gemini 适配层继续用 `inline_message_name` 把 `name`
-  还原成旧内联格式（没有字段可承载时的兼容路径）。
-- 消息格式约定同步：`name` 是昵称，正文里没有 sender 占位符。
 
 ### 群聊旧史冻结 + 迁 user 块（提示词缓存命中，2026-11-03）
 

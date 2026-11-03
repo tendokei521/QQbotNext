@@ -108,8 +108,11 @@ def render_history_entry(entry: Any, **kwargs) -> str | None:
         head += ("," if head else "") + f"message_id={mid}"
     default_name = "对方" if is_private else ""
     name = "我" if is_me else (f"用户<{base.sender_id}>" if mask else (base.sender_name or default_name))
-    sender = _sender_marker(base.sender_id, name) if include_sender_name else ""
-    line = (f"[{head}]" if head else "") + sender + body
+    line = (
+        (f"[{head}]" if head else "")
+        + _sender_marker(base.sender_id, name, include_name=include_sender_name)
+        + body
+    )
     if reply_id:
         line += f"[reply_to:id={reply_id}]"
     for meta in base.meta_lines or []:
