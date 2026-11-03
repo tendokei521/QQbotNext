@@ -260,23 +260,39 @@ ADVANCED_GROUPS: tuple[UIGroup, ...] = (
     UIGroup("advanced_tools", "工具", ("onebot_tools_enable",)),
 )
 
+#: 工具管理 →「OneBot 工具」页的字段面（页面自己在 `/tools/onebot`，不走 schema 表单）。
+#:
+#: 这些键只被 OneBot 工具页的逐工具权限编辑/恢复默认写入；总开关在「高级选项」。
+ONEBOT_TOOL_GROUPS: tuple[UIGroup, ...] = (
+    UIGroup(
+        "onebot_tools_policy",
+        "OneBot 工具策略",
+        ("onebot_tools_allowed", "onebot_tools_denied", "onebot_tool_overrides"),
+    ),
+)
+
 #: 字段面 id → 分组（供 fate_of / ui_group_of 与前端清单生成使用）
 SURFACE_GROUPS: dict[str, tuple[UIGroup, ...]] = {
     "ai_panel": PANEL_GROUPS,
     "reply": REPLY_GROUPS,
     "advanced_options": ADVANCED_GROUPS,
+    "onebot_tools": ONEBOT_TOOL_GROUPS,
 }
 
 PANEL_KEYS: tuple[str, ...] = tuple(f for group in PANEL_GROUPS for f in group.fields)
 REPLY_KEYS: tuple[str, ...] = tuple(f for group in REPLY_GROUPS for f in group.fields)
 ADVANCED_KEYS: tuple[str, ...] = tuple(f for group in ADVANCED_GROUPS for f in group.fields)
+ONEBOT_TOOL_KEYS: tuple[str, ...] = tuple(
+    f for group in ONEBOT_TOOL_GROUPS for f in group.fields
+)
 
-#: 本体保留的全部键（由「面板 + 配置页 + 回复与权限 + 高级选项」派生，避免两处漂移）
+#: 本体保留的全部键（由「面板 + 配置页 + 回复与权限 + 高级选项 + OneBot 工具页」派生）
 CORE_KEYS: tuple[str, ...] = (
     PANEL_KEYS
     + tuple(f for page in UI_PAGES for f in page.fields)
     + REPLY_KEYS
     + ADVANCED_KEYS
+    + ONEBOT_TOOL_KEYS
 )
 
 # ==================== 2. 迁移为模块（6 个 / 100 键）====================
@@ -443,14 +459,10 @@ DELETED_KEYS: tuple[str, ...] = (
     # `debug_prompt` 已归 llm_enhance 模块所有（曾经被误判为"已删除"）
     "authority_type",
     "stream_proactive_scheduled_enabled",
-    # 2026-11-03 工具扩展插件下线：除总开关（升为「高级选项」的 CORE 键）外，
-    # 细粒度策略全部删除（单工具黑白名单 / 权限覆盖 / 结果长度 / 调试 / 戳一戳冷却 /
-    # MCP server 配置 / 工具结果回应要求）；OneBot 工具改由清单默认值 + 总开关驱动。
-    "onebot_tools_allowed",
-    "onebot_tools_denied",
+    # 2026-11-03 工具扩展插件下线：总开关升为「高级选项」的 CORE 键，逐工具策略
+    # （允许/禁止名单、权限覆盖）归「工具管理 → OneBot 工具」页；以下调参随插件删除。
     "onebot_tools_max_result",
     "onebot_tools_debug",
-    "onebot_tool_overrides",
     "poke_cooldown_seconds",
     "mcp_servers",
     "mcp_tools_log_enabled",

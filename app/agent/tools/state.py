@@ -205,6 +205,10 @@ def resolve_tool_state(
         }
         if not policy.get("enabled"):
             return _state(False, REASON_TOOLS_DISABLED, "「高级选项」里没有开启工具", extra)
+        if policy.get("blocked"):
+            reason = str(policy.get("blocked_reason") or "disabled")
+            detail = "已在黑名单中" if reason == "denied" else "不在白名单中"
+            return _state(False, REASON_MODULE_SWITCH_OFF, detail, extra)
         scopes = extra["scopes"]
         if session_scope and scopes and "*" not in scopes and session_scope not in scopes:
             return _state(False, REASON_OUT_OF_SCOPE, f"仅适用于 {scopes}", extra)
@@ -318,10 +322,7 @@ async def resolve_tool_source_states(runtime: Any) -> list[ToolState]:
 
 
 def resolve_all_tool_states(runtime: Any, *, include_unavailable: bool = True) -> list[ToolState]:
-    """枚举系统工具与模块工具的状态（统一页面/诊断用）。
-
-    OneBot 工具是框架内置但只由一个总开关控制，不在这里逐条列出（见模块注释）。
-    """
+    """枚举系统工具、模块工具与 OneBot 工具的状态（统一页面/诊断用）。"""
     states: list[ToolState] = []
     seen: set[str] = set()
 
@@ -354,8 +355,33 @@ def resolve_all_tool_states(runtime: Any, *, include_unavailable: bool = True) -
     except Exception as e:  # noqa: BLE001 —— 组装失败不该拖垮清单
         logger.debug(f"[Tool] 系统工具清单组装失败（已忽略）: {e}")
 
-    # OneBot 工具不再逐一列出：并入框架后只剩「高级选项」里的一个总开关，
-    # 工具管理页只管理系统工具与插件工具（避免出现与总开关打架的 per-tool 按钮）。
+    # OneBot 工具（框架内置；「工具管理 → OneBot 工具」页与总览都从这里取状态）
+    try:
+        from app.agent.tools.onebot.manifest import ONEBOT_TOOLS
+    except Exception:  # noqa: BLE001
+        ONEBOT_TOOLS = []
+    for tool in ONEBOT_TOOLS or []:
+        name = str(tool.get("name", "") or "")
+        if not name or name in seen:
+            continue
+        st = resolve_tool_state(runtime, name=name, source="onebot", session_scope=None)
+        states.append(
+            ToolState(
+                name=st.name,
+                source=st.source,
+                owner=st.owner,
+                available=st.available,
+                reason=st.reason,
+                detail=st.detail,
+                extra={
+                    **st.extra,
+                    "description": str(tool.get("description", "") or ""),
+                    "category": str(tool.get("category", "onebot") or "onebot"),
+                },
+            )
+        )
+        seen.add(name)
+
     if include_unavailable:
         return states
     return [s for s in states if s.available]

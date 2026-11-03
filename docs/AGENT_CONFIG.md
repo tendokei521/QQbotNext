@@ -104,6 +104,7 @@
 | `reply_mode` / `participation_level` / … | 见界面 | 参与度与"该不该接话"的策略键（`participation_*`） |
 | `structured_assembly` | 见界面 | 结构化消息组装（如按 JSON 组织回复段落） |
 | `onebot_tools_enable` | `true` | 「高级选项」页的**工具总开关**：开启后模型可调用 OneBot 工具（权限仍按调用者身份校验） |
+| `onebot_tools_allowed` / `onebot_tools_denied` / `onebot_tool_overrides` | `[]` / `[]` / `{}` | 「工具管理 → OneBot 工具」页：允许/禁止名单与逐工具权限/作用域覆盖 |
 | `retry_profile` | `balanced` | 一轮请求次数与输入 token 上限总闸：`thrifty` 2 次 / `balanced` 4 次 / `robust` 6 次 |
 | `reasoning_overflow_retries` | `1` | 推理超长时的收敛重试次数 |
 | `empty_reply_retries` | `1` | 模型返回空内容时重试次数 |

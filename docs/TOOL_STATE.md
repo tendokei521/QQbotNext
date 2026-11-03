@@ -24,7 +24,7 @@ resolve_tool_state(runtime, spec | name+source, session_scope=..., event=...)
       onebot: runtime.config.onebot_tools_enable（「高级选项」总开关）
       module: spec.module.authority.enabled
  ② 工具自己的策略   → module_switch_off / out_of_scope
-      onebot: manifest 默认权限/作用域（security.resolve_tool_policy；无黑白名单/override）
+      onebot: 「工具管理 → OneBot 工具」页的允许/禁止名单 + 逐工具权限覆盖 + 清单默认值
       module: 模块配置 tools_enabled[name] is False
  ③ 用户总表         → user_disabled（tools_disabled + 三套旧 map 只读兼容）
  ④ 依赖就绪         → dependency_missing
@@ -81,8 +81,10 @@ resolve_tool_state(runtime, spec | name+source, session_scope=..., event=...)
 ## 7. 写入归属
 
 - per-tool 开关只有一处：`tools_disabled`（`POST /api/agent/tools/toggle` → `set_tool_disabled`）。
-- OneBot 工具只受一个本体开关控制：`onebot_tools_enable`（「高级选项」页）；原模块的
-  黑白名单/逐工具覆盖/结果长度/调试/戳一戳冷却/MCP 配置已随插件删除。
+- OneBot 工具总开关：`onebot_tools_enable`（「高级选项 → 工具」页）。
+- OneBot 工具策略：`onebot_tools_allowed` / `onebot_tools_denied` / `onebot_tool_overrides`
+  （「工具管理 → OneBot 工具」页：允许/禁止名单、逐工具触发权限与可用范围）。
+- 结果长度、调试日志、戳一戳冷却、MCP 配置随「工具扩展」插件删除（改为框架常量/下线）。
 - 各模块 `tools_enabled` 归各自模块。
 - `POST /api/agent/config` 遇到模块键且**值真的变了**才 400（等值视为前端回声丢弃）；`GET` 不回传模块键。
 

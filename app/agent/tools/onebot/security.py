@@ -1,17 +1,16 @@
-"""OneBot 工具策略：**只有一个总开关** + 清单里的默认权限/作用域。
+"""OneBot 工具策略：总开关（「高级选项」）+ 逐工具策略（「工具管理 → OneBot 工具」）。
 
-## 现在的策略面（2026-11-03 精简）
+## 策略面
 
-「工具扩展」插件并入框架后，OneBot 工具只剩一个开关注册在 Agent 配置里
-（``onebot_tools_enable``，界面入口在「高级选项」页），不再有：
+- ``onebot_tools_enable``：总开关，入口在「高级选项」页；
+- ``onebot_tools_allowed`` / ``onebot_tools_denied``：允许 / 禁止名单（空=全部允许；
+  禁止优先于允许）；
+- ``onebot_tool_overrides``：逐工具权限/作用域覆盖：
+  ``{"set_group_ban": {"permission": "group_owner", "scopes": ["group"]}}``；
+- 其余（结果长度、调试日志、戳一戳冷却）已固化为框架常量，不再暴露。
 
-- 单工具的允许/禁止黑白名单；
-- 逐工具的权限/作用域覆盖；
-- 结果长度、调试日志、戳一戳冷却等调参（都固化为框架常量）。
-
-每个工具的 ``permission`` / ``scopes`` / ``sensitivity`` 一律取清单默认值
-（``manifest.json`` + ``manifest.py`` 的高危名单派生）。**权限判定本身不变**：
-仍由 ``ToolSpec.allowed_for_event`` 按本轮调用者身份完成（见 tools/spec.py）。
+**权限判定本身不变**：仍由 ``ToolSpec.allowed_for_event`` 按本轮调用者身份完成
+（见 tools/spec.py）。本模块只负责「这个工具此刻是否注入 + 声明的权限档位」。
 """
 
 from __future__ import annotations
@@ -20,40 +19,90 @@ PERMISSION_PATH = ("everyone", "member", "group_admin", "group_owner", "owner")
 
 #: 配置键（Agent 配置）与默认值
 TOOLS_ENABLED_KEY = "onebot_tools_enable"
-#: 合并前「工具扩展」模块的默认值是开；新账号保持同一行为
 DEFAULT_TOOLS_ENABLED = True
+
+
+def _cfg(runtime, key: str, default):
+    if runtime is None:
+        return default
+    try:
+        return runtime.config.get(key, default)
+    except Exception:  # noqa: BLE001 —— 配置读取失败按默认值处理
+        return default
 
 
 def tools_enabled(runtime) -> bool:
     """「高级选项 → 启用工具」总开关（读不到按默认值）。"""
     if runtime is None:
         return False
-    try:
-        return bool(runtime.config.get(TOOLS_ENABLED_KEY, DEFAULT_TOOLS_ENABLED))
-    except Exception:  # noqa: BLE001 —— 配置读取失败按默认值处理
-        return DEFAULT_TOOLS_ENABLED
+    return bool(_cfg(runtime, TOOLS_ENABLED_KEY, DEFAULT_TOOLS_ENABLED))
+
+
+def _overrides(runtime) -> dict:
+    raw = _cfg(runtime, "onebot_tool_overrides", {}) or {}
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _name_list(runtime, key: str) -> list[str]:
+    raw = _cfg(runtime, key, []) or []
+    if isinstance(raw, str):
+        raw = raw.replace("，", ",").replace(",", "\n").splitlines()
+    if not isinstance(raw, (list, tuple, set)):
+        return []
+    return [str(item).strip() for item in raw if str(item).strip()]
 
 
 def resolve_tool_policy(runtime, tool: dict) -> dict:
-    """返回某个 OneBot 工具的最终策略（清单默认值 + 总开关）。"""
+    """返回某个 OneBot 工具的最终策略（清单默认值 + 名单 + 逐工具覆盖）。"""
     name = str(tool.get("name", "") or "")
-    permission = str(tool.get("permission", "member") or "member")
-    if permission not in PERMISSION_PATH:
-        permission = "member"
+    base_permission = str(tool.get("permission", "member") or "member")
     base_scopes = list(tool.get("scopes", ["*"]) or ["*"])
-    scopes = [s for s in base_scopes if s in ("group", "private", "*")] or ["*"]
+    sensitivity = str(tool.get("sensitivity", "normal") or "normal")
+    risk = str(tool.get("risk", "normal") or "normal")
+
+    override = _overrides(runtime).get(name, {}) or {}
+    permission = str(override.get("permission", base_permission) or base_permission)
+    scopes = list(override.get("scopes", base_scopes) or base_scopes)
+    if permission not in PERMISSION_PATH:
+        permission = base_permission
+    scopes = [s for s in scopes if s in ("group", "private", "*")] or base_scopes
+
+    blocked = False
+    blocked_reason = ""
+    warning = ""
+
+    if not tools_enabled(runtime):
+        blocked = True
+        blocked_reason = "onebot_tools_enable=false"
+    elif name in _name_list(runtime, "onebot_tools_denied"):
+        blocked = True
+        blocked_reason = "denied"
+    else:
+        allowed = _name_list(runtime, "onebot_tools_allowed")
+        if allowed and name not in allowed:
+            blocked = True
+            blocked_reason = "not_in_whitelist"
+
+    # 敏感工具放宽权限时仅提示警告，不直接屏蔽（前端展示 warning）
+    if sensitivity in ("high", "critical") and permission in ("everyone", "member"):
+        warning = f"{name} 为敏感工具，默认权限是 {base_permission}，当前被放宽为 {permission}"
+
     return {
         "name": name,
         "enabled": tools_enabled(runtime),
-        "blocked": False,
-        "blocked_reason": "",
+        "blocked": blocked,
+        "blocked_reason": blocked_reason,
+        "warning": warning,
         "permission": permission,
         "scopes": scopes,
-        "sensitivity": str(tool.get("sensitivity", "normal") or "normal"),
-        "risk": str(tool.get("risk", "normal") or "normal"),
+        "base_permission": base_permission,
+        "base_scopes": base_scopes,
+        "sensitivity": sensitivity,
+        "risk": risk,
     }
 
 
 def is_tool_enabled(runtime, spec: dict) -> bool:
-    """兼容旧接口：工具是否允许注入（只看总开关）。"""
-    return bool(resolve_tool_policy(runtime, spec)["enabled"])
+    """兼容旧接口：返回工具是否允许注入。"""
+    policy = resolve_tool_policy(runtime, spec)
+    return bool(policy["enabled"]) and not policy["blocked"]

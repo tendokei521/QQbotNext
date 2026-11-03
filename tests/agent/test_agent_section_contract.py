@@ -36,6 +36,7 @@ from app.agent.config_partition import (  # noqa: E402
     CORE_KEYS,
     DELETED_KEYS,
     MODULE_KEYS,
+    ONEBOT_TOOL_KEYS,
     PANEL_KEYS,
     REPLY_KEYS,
 )
@@ -150,11 +151,12 @@ def test_every_ui_field_appears_exactly_once():
 
 
 def test_manifest_plus_panel_covers_exactly_the_core_keys():
-    """设置页 + 面板 + 回复与权限 + 高级选项 = 本体全部键，且互不重叠（单一编辑入口）。"""
+    """设置页 + 面板 + 回复与权限 = 本体全部键（扣掉两个独立工作台），且互不重叠。"""
     listed = set(_all_fields()) | set(_panel_fields()) | set(_reply_fields())
-    # 「高级选项」是页面外工作台（单独页面，不在三份清单里）
-    assert listed == set(CORE_KEYS) - set(ADVANCED_KEYS)
+    # 「高级选项」与「工具管理 → OneBot 工具」是独立页面（不在三份清单里）
+    assert listed == set(CORE_KEYS) - set(ADVANCED_KEYS) - set(ONEBOT_TOOL_KEYS)
     assert len(ADVANCED_KEYS) == 2, "高级选项只有「消息组装」「工具」两个开关"
+    assert len(ONEBOT_TOOL_KEYS) >= 1, "OneBot 工具页至少持有逐工具策略键"
     # 面板/回复清单与实际键数一致（数量本身不锁定：入口增减属产品决策）
     assert len(_panel_fields()) == len(PANEL_KEYS)
     assert len(_reply_fields()) == len(REPLY_KEYS)

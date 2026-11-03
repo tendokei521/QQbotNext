@@ -109,8 +109,9 @@ LLM 阶段（`run_stage` 的真实调用点）：`pre_request` / `post_assemble`
 | `llm_enhance` | `pre_request`（调试 prompt 开关） |
 
 > 2026-11-03：「工具扩展」插件并入框架——OneBot 工具（175 个）成为框架内置工具源
-> （`app/agent/tools/onebot/`），提示段 `emoji_hint` 回到默认段表；唯一开关
-> `onebot_tools_enable` 是本体键（「高级选项」页），不再有模块与 `runtime.tools_options`。
+> （`app/agent/tools/onebot/`），提示段 `emoji_hint` 回到默认段表；**总开关**
+> `onebot_tools_enable` 移到本体键（「高级选项」页），**逐工具策略**（允许/禁止名单、
+> 权限覆盖）留在「工具管理 → OneBot 工具」页；不再有模块与 `runtime.tools_options`。
 
 ## 8. 卸载纪律
 

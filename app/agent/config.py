@@ -252,9 +252,12 @@ DEFAULT_LLM_CONFIG: dict = {
     "module_tools_enabled": {},        # 模块工具开关：{"tool_name": bool}
     "module_tools_log_enabled": True,  # 模块工具普通调用日志
     # OneBot 通用工具（框架内置能力，原「工具扩展」插件）：
-    # 统一的唯一开关在「高级选项」页；工具权限/作用域取 manifest 默认值。
+    # 总开关在「高级选项」页；逐工具策略（名单/权限覆盖）在「工具管理 → OneBot 工具」页。
     "onebot_tools_enable": True,
     "onebot_tools_log_enabled": True,  # OneBot 工具普通调用日志
+    "onebot_tools_allowed": [],        # 空 = 全部；非空 = 只允许白名单
+    "onebot_tools_denied": [],         # 黑名单（优先级高于白名单）
+    "onebot_tool_overrides": {},       # 权限/作用域覆盖：{"send_poke":{"permission":"member"}}
     # 群聊环境记录（由「群聊记录」模块持续写入，这里只管"一次请求塞多少"）
     "group_log_enable": True,          # 是否把群聊记录作为环境块注入（模块未装/未启用时自动为空）
     "group_log_window_minutes": 60,    # 组装窗口：最近多少分钟

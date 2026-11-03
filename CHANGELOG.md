@@ -2,18 +2,21 @@
 
 ## [Unreleased]
 
-### 工具扩展并入框架：OneBot 工具只留一个总开关（2026-11-03）
+### 工具扩展并入框架：OneBot 总开关移到「高级选项」（2026-11-03）
 
 - **删除「工具扩展」插件**（`llm_tools_extra`）：OneBot 工具实现整体迁入框架
   `app/agent/tools/onebot/`（175 个工具、清单、执行器、权限分级），由 `AgentRuntime`
   直接注册工具源；提示段 `emoji_hint` 回到默认段表。
-- **配置收口成一个开关**：`onebot_tools_enable`（默认开）成为本体键，入口在
-  「高级选项」页的「启用工具」；单工具黑白名单、逐工具权限覆盖、结果长度、调试日志、
-  戳一戳冷却、工具结果回应要求配置、MCP server 配置全部删除（MCP 随插件下线）。
-- **迁移**：启动时把旧模块的 `onebot_tools_enable` / 模块总开关搬到 agent 配置（幂等，
-  不删除旧行）；新账号默认开、行为与合并前一致。
-- **前端**：移除「设置 → 编辑系统提示词」入口（上一轮）与 OneBot/MCP 工具管理页、
-  `/api/agent/onebot|mcp/tools` 接口；工具管理只剩系统工具 / 插件工具。
+- **总开关搬家**：`onebot_tools_enable`（默认开）成为本体键，入口在「高级选项」页的
+  「启用工具」；**「工具管理 → OneBot 工具」页保留**，逐工具开关、允许/禁止名单与
+  权限覆盖（`onebot_tools_allowed` / `onebot_tools_denied` / `onebot_tool_overrides`）
+  继续在那里编辑。
+- **删除的调参**：结果长度、调试日志、戳一戳冷却、工具结果回应要求配置、MCP server
+  配置（MCP 随插件下线）；对应行为改为框架常量。
+- **迁移**：启动时把旧模块的开关/名单/覆盖搬到 agent 配置（幂等、删旧 binding、写 kv
+  标记）；新账号默认开、行为与合并前一致。
+- **前端**：工具管理恢复 OneBot 工具页（开关控件移走，只保留策略编辑）；
+  删除 MCP 页面与 `/api/agent/mcp/tools`；旧深链重定向到新位置。
 - 文档同步：`TOOL_STATE.md`、`FEATURE_REGISTRY.md`、`AGENT_CONFIG.md`、`MODULE_DEV.md`、
   `PLUGIN_STYLE.md`、`dashboard-frontend-architecture.md`、`UI_COPY.md`。
 

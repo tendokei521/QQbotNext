@@ -44,7 +44,7 @@ src/
 | `/modules/:name` | ModuleConfigPage | 插件自己的配置表单（由模块 schema 渲染） |
 | `/responder` `/responder/:name` | ResponderOverviewPage / ResponderModulePage | 插件响应策略：多插件争抢时的仲裁 |
 | `/bundles` | BundlesPage | 配置包：导出 / 导入 / 回滚 |
-| `/tools/{overview,system,module}` | ToolsPage 等 | 系统工具与插件工具的总览与逐工具开关（OneBot 工具只剩「高级选项」里的总开关） |
+| `/tools/{overview,system,onebot,module}` | ToolsPage 等 | 系统 / OneBot / 插件工具的总览与逐工具开关（OneBot 总开关在「高级选项」） |
 | `/sessions` | SessionsPage | 会话数据浏览、导出、删除 |
 | `/stats` | StatsPage | 用量统计（token/请求/消息） |
 | `/logs` | LogsPage | 日志查看（简洁/原始）与导出 |

@@ -44,11 +44,13 @@ const busy = ref<string>('')
 const SOURCE_LABEL: Record<string, string> = {
   module: '插件',
   system: '系统',
+  onebot: 'OneBot',
 }
 
 /** 工具状态接口不返回 description：按来源补拉清单，拼出中文名给「工具」列用 */
 const DESC_ENDPOINTS: { source: string; url: string }[] = [
   { source: 'system', url: '/api/agent/system/tools' },
+  { source: 'onebot', url: '/api/agent/onebot/tools' },
   { source: 'module', url: '/api/agent/module/tools' },
 ]
 
@@ -92,6 +94,7 @@ function briefOf(tool: ToolState): string {
 
 /** 归属列说人话：框架内置 / 中文插件名；取不到就给「插件」 */
 function ownerLabel(tool: ToolState): string {
+  if (tool.source === 'onebot') return 'OneBot 内置'
   if (tool.owner === 'framework') return '系统内置'
   const pluginName = modules.displayNameOf(tool.owner)
   if (pluginName) return pluginName
@@ -278,6 +281,7 @@ watch(
           size="small"
           variant="text"
           :loading="busy === tool.name"
+          :disabled="tool.source === 'onebot' && tool.reason === 'tools_disabled'"
           @click="toggle(tool)"
         >
           {{ tool.available ? '停用' : '启用' }}

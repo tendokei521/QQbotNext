@@ -12,6 +12,8 @@ from fastapi.responses import JSONResponse
 
 from app.agent.config import LEGACY_LLM_CONNECTION_KEYS, module_owned_keys
 from app.agent.config_schema import MIGRATED_OR_RETIRED_KEYS, STREAM_PRESETS
+from app.agent.tools.onebot.manifest import ONEBOT_TOOLS
+from app.agent.tools.onebot.security import resolve_tool_policy
 from app.agent.tools.system import list_system_tools
 from app.application.bot_service import PASSWORD_MASK as _PASSWORD_MASK
 from app.core.logger import logger
@@ -349,7 +351,30 @@ async def agent_knowledge_delete(cid: str, request: Request, bot_id: str | None 
     return _ok("知识库条目已删除")
 
 
-# ==================== 统一 Tool 管理：系统 / 模块工具清单 ====================
+# ==================== OneBot 工具清单（工具管理 → OneBot 工具页） ====================
+
+@router.get("/onebot/tools")
+async def agent_onebot_tools(
+    request: Request,
+    bot_id: str | None = Depends(parse_account_id),
+    agent_manager=Depends(get_agent_manager),
+):
+    runtime, _ = _runtime(agent_manager, bot_id)
+    if runtime is None:
+        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
+    tools = []
+    for tool in ONEBOT_TOOLS:
+        item = dict(tool)
+        item.update(resolve_tool_policy(runtime, tool))
+        tools.append(item)
+    return JSONResponse(content={
+        "ok": True,
+        "log_enabled": bool(runtime.config.get("onebot_tools_log_enabled", True)),
+        "tools": tools,
+    })
+
+
+# ==================== 统一 Tool 管理：系统 / 模块 / OneBot 工具清单 ====================
 
 @router.get("/tools")
 async def agent_tools_all(
