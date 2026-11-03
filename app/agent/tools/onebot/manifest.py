@@ -66,6 +66,21 @@ _CRITICAL_TOOLS: frozenset[str] = frozenset({
     "set_qq_profile",             # 修改昵称/签名等资料
     "set_restart",                # 重启服务
     "set_self_longnick",          # 修改个性签名
+    # 凭证/账号级数据读取（泄露等同账号被接管，按 owner-only 处理）
+    "get_clientkey",              # 获取 ClientKey
+    "get_collection_list",        # 获取收藏列表
+    "get_cookies",                # 获取 Cookies
+    "get_credentials",            # 获取登录凭证
+    "get_csrf_token",             # 获取 CSRF Token
+    "get_mini_app_ark",           # 获取小程序 Ark
+    "get_online_clients",         # 获取当前账号在线客户端
+    "get_profile_like",           # 获取资料点赞
+    "get_recent_contact",         # 获取最近会话
+    "get_rkey",                   # 获取扩展 RKey
+    "get_rkey_server",            # 获取 RKey 服务器
+    "get_robot_uin_range",        # 获取机器人 UIN 范围
+    "nc_get_packet_status",       # 获取底层 Packet 服务状态
+    "nc_get_rkey",                # 获取 RKey
 })
 
 #: high：清单默认「群管理员及以上」才能用的工具（授权需要 bot 管理者/拥有者）。
