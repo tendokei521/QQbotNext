@@ -47,6 +47,29 @@ def test_session_history_group_single_line_and_assistant_plain():
     assert rendered[2]["content"].startswith("(时间：2026-08-20 21:10:02)")
 
 
+def test_history_sender_name_survives_mask_flag():
+    """mask_nickname 只该脱敏句子型昵称；普通昵称在历史 name 里必须保留。"""
+    from app.agent.message_assembly.history import render_history_entry
+
+    history = [
+        {"role": "user", "content": "你好", "time": 1788342260,
+         "user_id": "3223373213", "nickname": "小明"},
+    ]
+    rendered = format_history_for_llm(
+        history, mask_nickname=True, renderer=render_history_entry
+    )
+    assert rendered[0].get("name") == "小明", "普通昵称不能变成 用户<QQ>"
+
+    noisy = [
+        {"role": "user", "content": "你好", "time": 1788342260,
+         "user_id": "3223373213", "nickname": "今年的学费也是一次性交的吗谢谢"},
+    ]
+    masked = format_history_for_llm(
+        noisy, mask_nickname=True, renderer=render_history_entry
+    )
+    assert masked[0].get("name") == "用户3223373213"
+
+
 def test_session_history_private_uses_other_tag():
     rendered = format_history_for_llm(HISTORY_GROUP[:2], is_private=True)
     assert rendered[0]["content"].endswith("对方: 你好")

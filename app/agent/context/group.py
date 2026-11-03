@@ -20,6 +20,7 @@ from app.agent.session import model as _hm
 from app.agent.session.model import (
     online_message_to_entry,
     render_history,
+    safe_nickname,
     sender_label,
     time_prefix,
 )
@@ -658,7 +659,9 @@ def format_history_for_llm(
         if is_private:
             return "对方"
         if mask_nickname and sender_id:
-            return f"用户<{sender_id}>"
+            # 只脱敏句子型/超长昵称；普通昵称必须原样保留（否则历史里的 name
+            # 会变成 用户<QQ>，重启后尤其明显）。
+            return safe_nickname(sender_name, sender_id)
         return sender_name
 
     return render_history(
