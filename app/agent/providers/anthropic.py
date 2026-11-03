@@ -15,6 +15,7 @@ import aiohttp
 
 from app.agent import logger
 from app.agent.providers.base import (
+    inline_message_name,
     BaseProvider,
     LLMResponse,
     ProviderRequestError,
@@ -83,6 +84,9 @@ def _normalize_messages(messages: list[dict]) -> tuple[str | None, list[dict]]:
     for raw in messages or []:
         role = str(raw.get("role", "") or "")
         content = raw.get("content", "")
+        if role == "user":
+            # Anthropic 没有 message.name：按旧实现把昵称内联回正文
+            content = inline_message_name(content, raw.get("name", ""))
         text = ""
         if isinstance(content, list):
             parts = []

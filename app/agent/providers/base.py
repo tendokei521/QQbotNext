@@ -2,12 +2,57 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any
 
 # 用于从异常消息中回挖 HTTP 状态码（历史异常可能不带 code 属性）
 _HTTP_RE = re.compile(r"\bHTTP[ /_]?(\d{3})\b", re.IGNORECASE)
+
+#: 旧版内联发送者标记：``[sender:id=..]``（A 方案把昵称移到 message.name 后留下的形状）
+_SENDER_ID_RE = re.compile(r"\[sender:id=([^\]]*)\]")
+
+
+def inline_message_name(content: Any, name: Any) -> Any:
+    """把 ``message.name`` 还原成旧版内联格式，供不支持 name 字段的协议用。
+
+    OpenAI 兼容链路直接透传 ``name``；Anthropic/Gemini 这类没有"参与者名"字段的
+    协议，在适配层按旧实现把昵称拼回正文：``[sender:id=..,name=".."]正文``。
+    正文里的昵称按 JSON 字符串转义，避免昵称里的引号/换行破坏标记。
+    """
+    text = str(name or "").strip()
+    if not text:
+        return content
+    quoted = json.dumps(text, ensure_ascii=False)
+
+    def _inject(value: str) -> str:
+        value = str(value or "")
+        if _SENDER_ID_RE.search(value):
+            return _SENDER_ID_RE.sub(
+                lambda m: f"[sender:id={m.group(1)},name={quoted}]", value, count=1
+            )
+        return f"[sender:name={quoted}]" + value
+
+    if isinstance(content, str):
+        return _inject(content)
+    if isinstance(content, list):
+        out: list[Any] = []
+        injected = False
+        for part in content:
+            if (
+                not injected
+                and isinstance(part, dict)
+                and part.get("type") in ("text", "input_text")
+            ):
+                out.append({**part, "text": _inject(str(part.get("text", "")))})
+                injected = True
+            else:
+                out.append(part)
+        if not injected:
+            out.insert(0, {"type": "text", "text": f"[sender:name={quoted}]"})
+        return out
+    return content
 
 
 @dataclass
