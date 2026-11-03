@@ -39,7 +39,7 @@
 | `permission` | `member` | 响应权档位：拥有者 > 管理者 > 群主 > 群管 > 成员 |
 | `agent_owner_list` | `[]` | 拥有者 QQ 名册（唯一来源，取代旧 `owner_id`） |
 | `agent_manager_list` | `[]` | 管理者 QQ 名册 |
-| `tool_approval_enable` | `false` | 高危工具执行前是否要求人工审批（无人确认则不执行） |
+| `tool_approval_mode` | `auto` | 「对话行为」页：`auto`=自动审批（消息凭证鉴权通过即执行）/ `manual`=人工审批（敏感工具执行前需确认，无通道则拒绝）；旧布尔键 `tool_approval_enable` 已废弃（true 视为 manual） |
 
 ## 3. 会话与上下文（`group_session` / `session_window` / `group_compress`）
 

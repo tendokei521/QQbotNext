@@ -18,6 +18,7 @@ from app.agent.config_partition import (
     CORE_KEYS,
     DELETED_KEYS,
     MODULE_KEYS,
+    ONEBOT_TOOL_KEYS,
     OWNER_SOURCE_KEY,
     PANEL_KEYS,
     REPLY_KEYS,
@@ -83,6 +84,7 @@ def test_core_keys_are_derived_from_pages_and_surfaces():
         + tuple(f for page in UI_PAGES for f in page.fields)
         + REPLY_KEYS
         + ADVANCED_KEYS
+        + ONEBOT_TOOL_KEYS
     )
     assert CORE_KEYS == expected
 

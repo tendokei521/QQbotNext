@@ -53,15 +53,34 @@ _REJECT_TEXT = {
 }
 
 
-def approval_enabled(runtime: Any) -> bool:
+#: 审批模式：auto=自动审批（消息凭证鉴权通过即执行）/ manual=人工审批（fail-closed）
+MODE_AUTO = "auto"
+MODE_MANUAL = "manual"
+#: 配置键（「对话行为 → 工具审批」下拉）
+MODE_KEY = "tool_approval_mode"
+#: 旧布尔键（true = 人工审批），仅兼容读取
+LEGACY_KEY = "tool_approval_enable"
+
+
+def approval_mode(runtime: Any) -> str:
+    """读取审批模式：auto / manual；旧布尔键 true 视为 manual，异常按 auto。"""
     config = getattr(runtime, "config", None)
     getter = getattr(config, "get", None)
     if not callable(getter):
-        return False
+        return MODE_AUTO
     try:
-        return bool(getter("tool_approval_enable", False))
-    except Exception:  # noqa: BLE001 —— 配置坏了按关闭（与默认值一致）
-        return False
+        mode = str(getter(MODE_KEY, "") or "").strip().lower()
+        if mode in (MODE_AUTO, MODE_MANUAL):
+            return mode
+        # 兼容旧配置：tool_approval_enable=True → 人工审批；未配置 → 自动审批
+        return MODE_MANUAL if bool(getter(LEGACY_KEY, False)) else MODE_AUTO
+    except Exception:  # noqa: BLE001 —— 配置坏了按自动审批（与默认值一致）
+        return MODE_AUTO
+
+
+def approval_enabled(runtime: Any) -> bool:
+    """是否启用**人工**审批（默认自动审批 = False）。"""
+    return approval_mode(runtime) == MODE_MANUAL
 
 
 def needs_approval(runtime: Any, spec: Any) -> bool:

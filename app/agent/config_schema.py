@@ -905,10 +905,19 @@ SCHEMA = {
         "description": "工具结果超过这个字数就存成文件。默认 50000。",
         "default": 50000, "min": 1024, "max": 2000000, "group": "group_tools",
     },
-    # P6：高危工具人工审批（fail-closed）
+    # P6：工具审批模式（默认自动审批；旧布尔键 tool_approval_enable 已废弃）
+    "tool_approval_mode": {
+        "type": "select", "label": "工具审批",
+        "description": "自动审批：消息凭证鉴权通过即执行；人工审批：敏感工具执行前再请你确认，无人确认时一律不执行。",
+        "default": "auto", "group": "group_interrupt",
+        "options": {
+            "auto": "自动审批",
+            "manual": "人工审批",
+        },
+    },
     "tool_approval_enable": {
-        "type": "boolean", "label": "高危工具需人工审批",
-        "description": "高风险工具执行前先请你确认；没人能确认时一律不执行。",
+        "type": "boolean", "label": "（已废弃）高危工具需人工审批",
+        "description": "已废弃，改用「工具审批」下拉（tool_approval_mode）。",
         "default": False, "group": "group_permission",
     },
     "retry_profile": {

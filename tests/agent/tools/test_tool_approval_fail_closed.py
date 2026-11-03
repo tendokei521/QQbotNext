@@ -2,8 +2,8 @@
 
 验四件事：
 
-1. 没开开关 → 不问、直接执行（老行为）；
-2. 开了开关但**没有通道** → 拒绝（不是"放行"）；
+1. 默认「自动审批」→ 不问、鉴权通过即执行；切到「人工审批」才启用本闸门；
+2. 人工审批但**没有通道** → 拒绝（不是"放行"）；
 3. 通道批准 → 执行；拒绝/超时/通道异常 → 都不执行；
 4. 只有 OneBot 的高危工具会触发审批（普通工具、系统工具不受影响）。
 """
@@ -15,9 +15,12 @@ import types
 import pytest
 
 from app.agent.tools.approval import (
+    MODE_AUTO,
+    MODE_MANUAL,
     SENSITIVE_LEVELS,
     ApprovalOutcome,
     approval_enabled,
+    approval_mode,
     needs_approval,
     request_approval,
 )
@@ -41,17 +44,30 @@ def _runtime(tmp_path, monkeypatch, *, approval: bool, channel=None):
     monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
     return types.SimpleNamespace(
         bot_id=778,
-        config={"tool_approval_enable": approval, "tool_spill_enable": False},
+        config={
+            "tool_approval_mode": MODE_MANUAL if approval else MODE_AUTO,
+            "tool_spill_enable": False,
+        },
         telemetry=None,
         llm_tool_call_hooks=None,
         approval_channel=channel,
     )
 
 
+def _runtime_with_config(config: dict) -> types.SimpleNamespace:
+    return types.SimpleNamespace(
+        bot_id=778,
+        config=config,
+        telemetry=None,
+        llm_tool_call_hooks=None,
+        approval_channel=None,
+    )
+
+
 @pytest.fixture(autouse=True)
 def _gate_open(monkeypatch):
     """审批测试只关心闸门，不关心"模块是否装了"：执行前复核统一放行。"""
-    monkeypatch.setattr("app.agent.tools.spec._execution_gate", lambda ctx, spec: "")
+    monkeypatch.setattr("app.agent.tools.spec._execution_gate", lambda ctx, spec, **kw: "")
 
 
 def _ctx(runtime):
@@ -85,6 +101,22 @@ def test_only_onebot_sensitive_tools_need_approval(tmp_path, monkeypatch):
     off = _runtime(tmp_path, monkeypatch, approval=False)
     assert approval_enabled(off) is False
     assert needs_approval(off, _spec(lambda: None)) is False
+
+
+def test_default_mode_is_auto_and_legacy_boolean_maps_to_manual():
+    """默认自动审批；旧布尔键 tool_approval_enable=True 仍按人工审批处理。"""
+    assert approval_mode(_runtime_with_config({})) == MODE_AUTO
+    assert approval_mode(_runtime_with_config({"tool_approval_mode": "auto"})) == MODE_AUTO
+    assert approval_mode(_runtime_with_config({"tool_approval_mode": "manual"})) == MODE_MANUAL
+    assert approval_mode(_runtime_with_config({"tool_approval_enable": True})) == MODE_MANUAL
+    assert approval_mode(_runtime_with_config({"tool_approval_enable": False})) == MODE_AUTO
+    # 新键优先于旧键
+    assert (
+        approval_mode(
+            _runtime_with_config({"tool_approval_mode": "auto", "tool_approval_enable": True})
+        )
+        == MODE_AUTO
+    )
 
 
 async def test_no_channel_means_rejected(tmp_path, monkeypatch):

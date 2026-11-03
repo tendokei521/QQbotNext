@@ -64,7 +64,7 @@ UI_PAGES: tuple[UIPage, ...] = (
         id="behavior",
         label="对话行为",
         order=30,
-        subtitle="连发消息与打断怎么处理",
+        subtitle="连发消息、打断与工具审批怎么处理",
         groups=(
             UIGroup(
                 "behavior_debounce",
@@ -76,6 +76,7 @@ UI_PAGES: tuple[UIPage, ...] = (
                 "回复打断",
                 ("interrupt_enable", "interrupt_save_sent", "interrupt_debug"),
             ),
+            UIGroup("behavior_approval", "工具审批", ("tool_approval_mode",)),
         ),
     ),
     UIPage(
@@ -245,8 +246,6 @@ REPLY_GROUPS: tuple[UIGroup, ...] = (
         "拥有者与管理者",
         ("agent_owner_list", "agent_manager_list"),
     ),
-    # P6：高危工具审批（fail-closed：没有通道就拒绝）
-    UIGroup("reply_tool_approval", "高危工具审批", ("tool_approval_enable",)),
 )
 
 #: 实验性入口「高级选项」页（页面外工作台，非本体 3 页）
@@ -468,6 +467,8 @@ DELETED_KEYS: tuple[str, ...] = (
     "mcp_tools_log_enabled",
     "tool_result_directive_enable",
     "tool_result_directive",
+    # 2026-11-03 工具审批改为「对话行为」页的下拉（tool_approval_mode，默认自动审批）
+    "tool_approval_enable",
 )
 
 #: 迁移完成后的目标键数（W7 验收线）

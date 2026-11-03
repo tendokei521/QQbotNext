@@ -58,7 +58,7 @@
 | 工具调用后钩子 | `@tool_call_hook(event_type="*", order=100)` | `async (ToolCallContext)` | 每次工具调用后 |
 
 - 中间件钩点（`loop/middleware.py`）：`tool_call.before` `{name,args,call_id}`、`tool_result.after` `{name,call_id,result_text,is_error,code}`、`messages.before_send` `{messages}`。返回 `dict` 合并（只覆盖给出的键）、返回 `{"abort": "原因"}` 拦截、异常按 `fail_closed` 中断或跳过。
-- 审批（`tools/approval.py`）：取值 `ALLOWED_ONCE` / `REJECTED` / `TIMEOUT` / `UNAVAILABLE`；没有通道、抛异常、返回值不认识 → 一律 `UNAVAILABLE` 拒绝（fail-closed），只有 `ALLOWED_ONCE` 且仅本次生效。触发条件：`tool_approval_enable` + `source == "onebot"` + `sensitivity in {high, critical}`。
+- 审批（`tools/approval.py`）：取值 `ALLOWED_ONCE` / `REJECTED` / `TIMEOUT` / `UNAVAILABLE`；没有通道、抛异常、返回值不认识 → 一律 `UNAVAILABLE` 拒绝（fail-closed），只有 `ALLOWED_ONCE` 且仅本次生效。触发条件：`tool_approval_mode=manual`（「对话行为」页，默认 auto）+ `source == "onebot"` + `sensitivity in {high, critical}`。
 - 节点：框架启动时注册入站链 `router → permission → command → invoke → agent`；插件 `owner=self` 注册的节点在实例卸载时由框架清掉（`remove_owner`）。
 
 ## 4. 提示词段（`Section`）

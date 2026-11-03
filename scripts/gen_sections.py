@@ -55,6 +55,7 @@ PAGE_VIEW = {
 GROUP_ICONS = {
     "behavior_debounce": "mdi-timer-outline",
     "behavior_interrupt": "mdi-hand-back-right-outline",
+    "behavior_approval": "mdi-shield-check-outline",
     "session_window": "mdi-timer-sand",
     "session_history": "mdi-forum-outline",
     "session_compress": "mdi-arrow-collapse-vertical",
