@@ -44,7 +44,10 @@ def test_uses_login_qq_and_rosters():
         {"agent_owner_list": ["10001"], "agent_manager_list": ["20002", "30003"]},
         bot=SimpleNamespace(bot_id=3437542570),
     ))
-    assert text == "你的账号：3437542570\n你的拥有者：10001\n你的管理员：20002、30003"
+    assert text.startswith(
+        "你的账号：3437542570\n你的拥有者：10001\n你的管理员：20002、30003\n"
+    )
+    assert "若发言者是拥有者或管理者" in text
 
 
 def test_missing_rosters_render_as_placeholder():
@@ -68,17 +71,17 @@ def test_account_falls_back_to_account_id_without_login():
     assert text.startswith("你的账号：bot1\n")
 
 
-def test_owner_and_manager_speakers_get_higher_compliance_line():
-    owner = _text(_req({}, event=SimpleNamespace(permission_role="owner")))
-    assert "当前发言者是你的拥有者" in owner
-    manager = _text(_req({}, event=SimpleNamespace(permission_role="manager")))
-    assert "当前发言者是你的管理者" in manager
-
-
-def test_member_speaker_has_no_compliance_line():
-    text = _text(_req({}, event=SimpleNamespace(permission_role="member")))
-    assert "当前发言者是你的" not in text
-    assert "你的账号：" in text
+def test_authority_rule_is_always_injected():
+    """不判本轮最后一条是谁发的：规则常驻，避免合并消息/冷却期发言误判。"""
+    for event in (
+        None,
+        SimpleNamespace(permission_role="owner"),
+        SimpleNamespace(permission_role="manager"),
+        SimpleNamespace(permission_role="member"),
+    ):
+        text = _text(_req({}, event=event))
+        assert "若发言者是拥有者或管理者" in text
+        assert "优先遵循其明确要求" in text
 
 
 def test_identity_context_is_the_last_system_block():

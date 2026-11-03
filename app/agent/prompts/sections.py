@@ -304,19 +304,10 @@ def build_identity_context(req: Any) -> list[dict]:
         ACCOUNT_LINE.format(account),
         OWNER_LINE.format(_roster('agent_owner_list')),
         MANAGER_LINE.format(_roster('agent_manager_list')),
+        # 常注入：一次请求可能合并多条消息，最后一条不一定是主要发言人；
+        # 不判断本轮发言者身份，把规则常驻在身份块末尾。
+        SPEAKER_AUTHORITY_LINE,
     ]
-    # 发言人身份（仅本轮）：拥有者/管理者发言时配合度更高；放在身份块最后一行，
-    # 让模型先知道“我是谁、谁有权管理我”，再知道“这条消息是谁说的”。
-    role = str(getattr(event, "permission_role", "") or "")
-    if not role:
-        if getattr(event, "is_bot_owner", False) or getattr(event, "is_agent_owner", False):
-            role = "owner"
-        elif getattr(event, "is_agent_manager", False):
-            role = "manager"
-    if role in ("owner", "manager"):
-        content_lines.append(
-            SPEAKER_AUTHORITY_LINE.format(role="拥有者" if role == "owner" else "管理者")
-        )
     content = "\n".join(content_lines)
     return [{"role": "system", "content": content}]
 
