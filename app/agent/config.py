@@ -311,7 +311,7 @@ def legacy_key_of(key: str) -> str:
 
     「NapCat 工具」这套配置在 2026-09 改名成「OneBot 工具」（协议名字才是 OneBot），
     但用户库里存的还是旧键。没有这层映射，升级后读不到旧键就会回落到默认值——
-    ``onebot_tools_enable`` 默认 False，等于把用户已经打开的开关**静默关掉**。
+    ``onebot_tools_enable`` 默认 True，等于把用户**已经关掉**的开关静默打开。
     """
     text = str(key or "")
     if text.startswith("onebot_"):
