@@ -60,5 +60,15 @@ def test_schedule_prompt_uses_task_text_and_merges_background():
     )
 
     rows = _rows(req)
-    assert rows["user"]["chars"] == len("【定时任务】到点提醒: 吃药")
-    assert rows["background"]["messages"] == 1, "焦点行与环境行应合并成一块背景"
+    assert rows["user"]["messages"] == 1
+    messages = PromptAssembler().build(req)
+    user_content = [m.get("content") for m in messages if m.get("role") == "user"][-1]
+    if isinstance(user_content, list):
+        user_text = "\n".join(
+            str(part.get("text") or "") if isinstance(part, dict) else str(part)
+            for part in user_content
+        )
+    else:
+        user_text = str(user_content or "")
+    assert "### 当前聊天环境" in user_text
+    assert rows["background"]["chars"] == len("### 当前对话焦点")

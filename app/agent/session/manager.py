@@ -125,6 +125,10 @@ def normalize_import_entry(entry: Any) -> dict | None:
 class ConversationData:
     def __init__(self):
         self.history: list = []
+        #: 会话第一次拉取的「不在会话内的旧群聊历史」（冻结后逐轮复用）。
+        #: 放在 user 侧数据块注入，system 前缀因此保持稳定。
+        self.group_history_text: str = ""
+        self.group_history_loaded: bool = False
 
 
 class Conversation:

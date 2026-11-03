@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### 群聊旧史冻结 + 迁 user 块（提示词缓存命中，2026-11-03）
+
+- `pre_history` 首次拉取只取**不在会话内、且早于会话起点**的群消息：
+  按会话历史的 `message_id` 排除 + 以最早会话时间为截止；
+  拉到的文本存进 `ConversationData.group_history_text`，本会话后续逐轮复用，不再变化。
+- 群聊旧史与群记录不再渲染成 `background` / `group_log` 的 **system 块**：
+  装配器 `_fold_pulled_history` 统一折到 `user_blocks`（user 侧数据块，合并进本轮 user 消息），
+  system 前缀只留稳定内容。
+- `prompt_prep` 把冻结旧史与群记录加入 `user_blocks`；`background` 段只剩指代，
+  `group_log` 段保留名字但恒空（兼容注册表顺序）。
+- 新增契约测试：旧史冻结只拉一次、排除会话内/新消息、装配后 system 不含旧史。
+
 ### RP 与普通群友共用段落统一（2026-11-03）
 
 - 抽出 `_work_core`：事件驱动、发言通道、工具语义、工具提示、finish 收尾等

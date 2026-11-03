@@ -47,8 +47,8 @@ messages（OpenAI 风格）
 | 60 | message_meta | system | 消歧说明开启且注入了元信息 |
 | 70 | skills | system ×N | 有技能时 |
 | 80 | memory | system | 记忆有召回（旧 ``memory_text`` 通道；v3 记忆已改走 user 数据块） |
-| 90 | background | system | 指代块或聊天环境背景非空 |
-| 100 | group_log | system | 群聊记录模块在场且有记录 |
+| 90 | background | system | 指代块非空（群聊旧史已迁 user 侧） |
+| 100 | group_log | system | **恒空**（群记录已迁 user 侧；保留段名以兼容注册表顺序） |
 | 105 | extra | system ×N | **L3 本轮注入**：``req.extra_blocks`` 非空（context_providers 收集，不是默认段） |
 | 110 | history | 对话 | 非空 |
 | 120 | user | user | 始终 |
@@ -143,13 +143,13 @@ class PromptRequest:
 
     # 块原料
     history: list[dict] = field(default_factory=list)
+    #: 兼容字段：旧版 system 背景原料。装配时会由 ``_fold_pulled_history`` 折到
+    #: ``user_blocks``（user 侧数据块），不再渲染成 system 段。
     pre_history_text: str = ""
     referent_text: str = ""
     skill_blocks: list[str] = field(default_factory=list)
     memory_text: str = ""
-    #: 群聊环境记录块（群聊记录模块产出，见 ``app.agent.group_log.context``）。
-    #: 与 ``pre_history_text``（在线历史拉取）是**两个来源**：前者含互动（表情/戳/撤回）
-    #: 与"我做过什么"，后者只有消息正文。两者正文按 message_id 去重，不会重复出现。
+    #: 兼容字段：旧版 system 群记录原料；同样由 ``_fold_pulled_history`` 折到 user 侧。
     group_log_text: str = ""
     #: 模块贡献的额外 system 块 ``[(块名, 文本)]``（由 `runtime.context_providers` 收集）。
     #: 装配器只负责按顺序渲染，来源与内容都在模块侧 —— 这是「记忆 / 知识库 / 群记录
@@ -379,6 +379,28 @@ def default_blocks() -> tuple[Block, ...]:
 BLOCKS: tuple[Block, ...] = default_blocks()
 
 
+def _fold_pulled_history(req: PromptRequest) -> None:
+    """把「拉取/记录出来的群聊历史」从 system 块折到 user 侧数据块。
+
+    旧实现把 ``pre_history_text`` / ``group_log_text`` 渲染成 L1/L3 的 system 段；
+    它们每轮都可能变化，会让整段 system 前缀失去缓存。迁到 user 侧后：
+
+    - system 前缀只留稳定内容；
+    - 旧群史（调用方已按会话冻结）在 user 数据块里逐轮复用；
+    - 群记录只保留不在会话历史里的互动，不占 system 指令位。
+    """
+    moved: list[tuple[str, str]] = []
+    if str(req.pre_history_text or "").strip() and bool(req.cfg("history_background_enable", True)):
+        moved.append(("group_history", str(req.pre_history_text)))
+    if str(req.group_log_text or "").strip():
+        moved.append(("group_log", str(req.group_log_text)))
+    if not moved:
+        return
+    req.user_blocks = [*(getattr(req, "user_blocks", None) or []), *moved]
+    req.pre_history_text = ""
+    req.group_log_text = ""
+
+
 class PromptAssembler:
     """把 PromptRequest 装配成 final messages。
 
@@ -391,6 +413,7 @@ class PromptAssembler:
         self.blocks = blocks
 
     def _built(self, req: PromptRequest) -> BuiltBlocks:
+        _fold_pulled_history(req)
         if self.blocks is None:
             return build_all_blocks(req)
         return _build_legacy_blocks(req, self.blocks)

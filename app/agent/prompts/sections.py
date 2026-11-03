@@ -15,7 +15,7 @@
 |---|---|---|---|
 | L1 系统提示词 | behavior(20) / schedule(40) / proactive(50) / message_meta(60) | system | 方案恒有；其余看开关与能力 |
 | L2 人格预设 | persona(10) | system | 始终 |
-| L3 钩子注入 | emoji_hint(62) / skills(70) / memory(80) / background(90) / group_log(100) / extra(105) / identity_context(106) | system | 各自有内容才出现（identity_context 恒有） |
+| L3 钩子注入 | emoji_hint(62) / skills(70) / memory(80) / background(90，只剩指代) / group_log(100，恒空，兼容段名) / extra(105) / identity_context(106) | system | 各自有内容才出现（identity_context 恒有） |
 | L4 对话历史 | history(110) | 对话 | 非空（角色预设的预设对话前插） |
 | L5 本轮消息 | user(120) | user | 始终 |
 
@@ -216,30 +216,20 @@ def build_memory(req: Any) -> list[dict]:
 
 # ---- L1 90 background ----
 def build_background(req: Any) -> list[dict]:
-    """背景块：指代消解行 + 聊天环境背景合并为一条 system（指代在前，信息密度更高）。
+    """背景块：只剩指代消解行。
 
-    可用 ``history_background_enable`` 关掉"聊天环境背景"部分（指代行保留）——
-    目标是把会话历史作为唯一历史来源时，避免同一批消息在两处出现。
+    群聊旧史（``pre_history_text``）已迁到 user 侧数据块（见 assembler
+    ``_fold_pulled_history``），不再占 system 指令位。
     """
-    parts: list[str] = []
     if req.referent_text and req.referent_text.strip():
-        parts.append(req.referent_text)
-    if req.cfg("history_background_enable", True) and req.pre_history_text and req.pre_history_text.strip():
-        parts.append(req.pre_history_text)
-    if not parts:
-        return []
-    return [{"role": "system", "content": "\n\n".join(parts)}]
+        return [{"role": "system", "content": req.referent_text}]
+    return []
 
 
 # ---- L1 100 group_log ----
 def build_group_log(req: Any) -> list[dict]:
-    """群聊环境记录块（消息 + 互动 + 我的动作）。
-
-    独立成块（而不是并进 ``background``）是为了让"这次请求为什么带了/没带群聊记录"
-    能从块表一眼看出：它是**另一个来源**，有自己的开关、窗口与预算。
-    """
-    text = str(req.group_log_text or "").strip()
-    return [{"role": "system", "content": text}] if text else []
+    """群聊环境记录（已迁 user 侧数据块；此段保留名字以兼容注册表顺序）。"""
+    return []
 
 
 # ---- L1 105 extra ----

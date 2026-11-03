@@ -1,4 +1,4 @@
-﻿"""群聊记录 → 上下文端到端测试：真的进 prompt、去重、关闭即回到今天的行为。
+"""群聊记录 → 上下文端到端测试：真的进 prompt、去重、关闭即回到今天的行为。
 
 这是 A–D 四个阶段的收口：记录面（store）→ 模块（写入）→ 渲染（排版）→ 装配（进 prompt），
 用**真实 production 路径**（``chat.generate_response``）验证，而不是只测各层函数。
@@ -52,6 +52,23 @@ def _systems(messages: list[dict]) -> list[str]:
     return [m["content"] for m in messages if m["role"] == "system"]
 
 
+def _content_text(content) -> str:
+    if isinstance(content, list):
+        return "\n".join(
+            str(part.get("text") or "") if isinstance(part, dict) else str(part)
+            for part in content
+        )
+    return str(content or "")
+
+
+def _user_text(messages: list[dict]) -> str:
+    """最后一轮 user 的文本（群记录/旧群史现在作为 user 数据块并入这里）。"""
+    for msg in reversed(messages):
+        if msg.get("role") == "user":
+            return _content_text(msg.get("content"))
+    return ""
+
+
 async def test_group_log_block_reaches_prompt(monkeypatch, tmp_path):
     """环境块真的进了 prompt，且带上别人的表情与我做过的动作。"""
     from app.agent.loop import chat
@@ -70,10 +87,8 @@ async def test_group_log_block_reaches_prompt(monkeypatch, tmp_path):
     assert out == "非流式回复"
     assert CHAT_MESSAGES, "provider 必须收到请求"
 
-    systems = _systems(CHAT_MESSAGES[0])
-    block = [s for s in systems if s.startswith("【群聊环境记录")]
-    assert block, f"环境块缺失，实际 system 块：{systems}"
-    text = block[0]
+    text = _user_text(CHAT_MESSAGES[0])
+    assert "【群聊环境记录" in text, "环境块应作为 user 侧数据块注入"
     assert "今晚加班吗" in text             # 别人说的话
     assert "♡66" in text                    # 互动
     assert "我先走了" in text               # 我自己的发言（环境视角）
@@ -113,11 +128,10 @@ async def test_trigger_message_is_not_duplicated(monkeypatch, tmp_path):
 
     await chat.generate_response(rt, event, _ctx(event))
     messages = CHAT_MESSAGES[0]
-    systems = [str(m.get("content") or "") for m in messages if m["role"] == "system"]
     # 触发消息由会话历史承载（历史里带 message_id）→ 环境块去重掉它；
     # 去重后环境里没有别的内容，整块不注入（空块不如不加）。
-    env_block = next((s for s in systems if s.startswith("【群聊环境记录")), "")
-    assert "现在几点" not in env_block, "触发消息在环境块里重复出现（双源去重失效）"
+    env_block = _user_text(messages)
+    assert "【群聊环境记录" not in env_block, "触发消息在环境块里重复出现（双源去重失效）"
     history_text = "\n".join(str(m.get("content") or "") for m in messages if m["role"] != "system")
     assert "现在几点" in history_text
     assert sum(1 for m in messages if "现在几点" in str(m.get("content") or "")) == 2, (
@@ -159,12 +173,11 @@ async def test_history_written_message_is_deduped_from_environment(monkeypatch, 
     )])
     await chat.generate_response(rt, second, _ctx(second))
     messages = CHAT_MESSAGES[0]
-    systems = [str(m.get("content") or "") for m in messages if m["role"] == "system"]
+    user_text = _user_text(messages)
     #: 被去重的消息 = 会话历史里已按 5150 渲染过的条目（正文与第一轮事件同文）
     deduped_text = "现在几点"
-    env_block = next((s for s in systems if s.startswith("【群聊环境记录")), "")
-    assert env_block, "环境块缺失"
-    assert "（消息 5150 上）[♡66" in env_block, "被去重消息上的互动必须保留"
+    assert "【群聊环境记录" in user_text, "环境块缺失（应在 user 侧数据块）"
+    assert "（消息 5150 上）[♡66" in user_text, "被去重消息上的互动必须保留"
     history_text = "\n".join(str(m.get("content") or "") for m in messages if m["role"] != "system")
     assert deduped_text in history_text, "会话历史应当承载它"
 
@@ -184,9 +197,9 @@ async def test_disabled_group_log_matches_today(monkeypatch, tmp_path):
 
     event = _event()
     await chat.generate_response(rt, event, _ctx(event))
-    systems = _systems(CHAT_MESSAGES[0])
-    assert not [s for s in systems if s.startswith("【群聊环境记录")]
-    assert not any("今晚加班吗" in s for s in systems)
+    user_text = _user_text(CHAT_MESSAGES[0])
+    assert "【群聊环境记录" not in user_text
+    assert "今晚加班吗" not in user_text
 
 
 async def test_missing_module_matches_today(monkeypatch, tmp_path):
@@ -201,8 +214,7 @@ async def test_missing_module_matches_today(monkeypatch, tmp_path):
     event = _event()
     out = await chat.generate_response(rt, event, _ctx(event))
     assert out == "非流式回复"
-    systems = _systems(CHAT_MESSAGES[0])
-    assert not [s for s in systems if s.startswith("【群聊环境记录")]
+    assert "【群聊环境记录" not in _user_text(CHAT_MESSAGES[0])
 
 
 def test_config_defaults_align_with_schema():

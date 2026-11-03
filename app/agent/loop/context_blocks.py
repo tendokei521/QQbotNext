@@ -97,6 +97,8 @@ async def _build_group_pre_history(
     bot_id: Any = "",
     session_id: Any = "",
     bot: Any = None,
+    exclude_ids: set[str] | None = None,
+    before_ts: int | None = None,
 ) -> str:
     """根据 include_pre_history 配置，拉取并组装群聊环境背景块。
 
@@ -126,6 +128,8 @@ async def _build_group_pre_history(
         mark_unresolved=mark_unresolved,
         bot_id=bot_id or getattr(event, "bot_id", "") or "",
         session_id=session_id,
+        exclude_ids=exclude_ids,
+        before_ts=before_ts,
     )
     if not history_text:
         return ""

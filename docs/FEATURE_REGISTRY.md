@@ -73,7 +73,7 @@
 | `layer` | `system_prompt` / `persona` / `injected` / `history` / `user`；留空按内置映射，插件段默认 L3 |
 
 - 层序 L1→L5 固定（`assembly/layers.py`），L1 的多段装配时合并成**一条** system。
-- 内置段（`prompts/sections.default_sections()`）：`persona(10)` `behavior(20)` `reply_rules(54)` `message_meta(60)` `skills(70)` `memory(80)` `background(90)` `group_log(100)` `identity_context(106)` `history(110)` `user(120)`；`extra(105)` 是 `extra_blocks` 兼容段，每次渲染按原位置插入。`identity_context` = 每轮最后一个 system 块（你的账号 / 拥有者 / 管理员）。
+- 内置段（`prompts/sections.default_sections()`）：`persona(10)` `behavior(20)` `reply_rules(54)` `message_meta(60)` `skills(70)` `memory(80)` `background(90，只剩指代)` `group_log(100，恒空兼容段名)` `identity_context(106)` `history(110)` `user(120)`；旧群史/群记录已作为 **user 侧数据块** 并入本轮 user 消息，不再占 system 前缀。`extra(105)` 是 `extra_blocks` 兼容段，每次渲染按原位置插入。`identity_context` = 每轮最后一个 system 块（你的账号 / 拥有者 / 管理员）。
 - 内置模块另注册：`emoji_hint(62, L3)`、`schedule(40)` / `proactive(50)`（L1）、`context_convention(59, L1)`。
 - 撤段：`unregister_section(runtime, name)`；撤掉的是对内置段的覆盖时自动恢复内置版本。
 

@@ -167,8 +167,8 @@ async def test_simple_tool_source_returns_list():
 # ---------- 接进真实取值/装配链路 ----------
 
 
-async def test_extra_blocks_render_between_group_log_and_history():
-    """贡献的块出现在装配结果里，位置在 group_log 之后、history 之前。"""
+async def test_extra_blocks_and_group_log_land_in_expected_roles():
+    """模块 system 块留在 system；群记录已迁到 user 侧数据块。"""
     from app.agent.assembly.assembler import PromptRequest, build_messages
 
     req = PromptRequest(
@@ -181,10 +181,20 @@ async def test_extra_blocks_render_between_group_log_and_history():
         extra_blocks=[("mem", "记忆块正文")],
     )
     messages = build_messages(req)
-    contents = [str(m.get("content")) for m in messages]
-    assert "群记录" in contents
-    assert "记忆块正文" in contents
-    assert contents.index("群记录") < contents.index("记忆块正文") < contents.index("上一句")
+    system_text = "\n".join(
+        str(m.get("content")) for m in messages if m.get("role") == "system"
+    )
+    user_content = [m.get("content") for m in messages if m.get("role") == "user"][-1]
+    if isinstance(user_content, list):
+        user_text = "\n".join(
+            str(part.get("text") or "") if isinstance(part, dict) else str(part)
+            for part in user_content
+        )
+    else:
+        user_text = str(user_content or "")
+    assert "记忆块正文" in system_text
+    assert "群记录" in user_text
+    assert "群记录" not in system_text
 
 
 def test_prompt_request_has_extra_blocks_field():

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import base64
 
-from app.agent.assembly.assembler import PromptRequest, describe
+from app.agent.assembly.assembler import PromptAssembler, PromptRequest, describe
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 32
 PNG_B64 = base64.b64encode(PNG_BYTES).decode()
@@ -40,19 +40,30 @@ def _req(**kw) -> PromptRequest:
 # ==================== 块序列快照（黄金） ====================
 
 
-def test_group_log_block_lands_between_background_and_history():
-    """群聊环境记录块的位置与内容：背景之后、会话历史之前。"""
+def test_pulled_history_is_folded_into_user_block():
+    """拉取的群聊旧史/群记录从 system 块迁到 user 侧数据块（保留 system 缓存前缀）。"""
     req = _req(
         config={"system_prompt": "你是助手", "outbound_directive_enable": False},
         pre_history_text="环境",
         group_log_text="【群聊环境记录】\n14:03 三哥(30003): 绝了",
     )
-    rows = describe(req)
-    names = [r["block"] for r in rows]
-    assert names.index("background") < names.index("group_log") < names.index("history")
-    row = [r for r in rows if r["block"] == "group_log"][0]
-    assert row["role"] == "system"
-    assert row["chars"] == len("【群聊环境记录】\n14:03 三哥(30003): 绝了")
+    messages = PromptAssembler().build(req)
+    system_text = "\n".join(
+        str(m.get("content") or "") for m in messages if m.get("role") == "system"
+    )
+    assert "环境" not in system_text
+    assert "【群聊环境记录】" not in system_text
+
+    user_content = [m.get("content") for m in messages if m.get("role") == "user"][-1]
+    if isinstance(user_content, list):
+        user_text = "\n".join(
+            str(part.get("text") or "") if isinstance(part, dict) else str(part)
+            for part in user_content
+        )
+    else:
+        user_text = str(user_content or "")
+    assert "环境" in user_text
+    assert "【群聊环境记录】" in user_text
 
 
 def test_describe_reports_media_for_image_turn():

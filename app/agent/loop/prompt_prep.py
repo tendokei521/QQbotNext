@@ -186,13 +186,10 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
             except Exception as e:  # noqa: BLE001 —— 回填是增强，失败只降级
                 logger.add_info(account_label(runtime.bot_id)).debug(f"历史图片回填失败（已忽略）: {e}")
 
-    pre_history_text = await _fetch_pre_history(
-        runtime, event, is_private=is_private, group_id=group_id, user_id=user_id,
-        include_pre_history=include_pre_history, history_rounds=history_rounds,
-        session_id=session_id, meta_flags=_meta_flags, bot=bot,
-    )
-
-    session_history_raw = session_mgr.get_history(session_id, limit=session_mgr.MAX_HISTORY_MESSAGES)
+    # 先取完整会话历史：冻结群史需要知道"哪些 message_id 已在会话内"以及会话起点，
+    # 只把**更早的、会话外的消息**拉成背景。
+    session_history_all = session_mgr.get_history(session_id, limit=session_mgr.MAX_HISTORY_MESSAGES)
+    session_history_raw = list(session_history_all)
     # 防重复：history 尾部就是刚追加的当前用户消息 → 去掉。
     # 结构化条目存的是**正文**（不是 user_text），所以先按 message_id 比对（唯一锚点），
     # 拿不到 id 时退回旧的文本比对；否则当前这条会在历史里再出现一次
@@ -231,6 +228,21 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
             ),
             **_meta_flags,
         ),
+    )
+    # 群聊旧历史：会话第一次拉取后冻结，之后逐轮复用同一段文本（system 前缀因此稳定）。
+    # 只拉会话外的旧消息：message_id 已在会话里、或时间不早于会话起点的全部排除。
+    pre_history_text = await _load_frozen_group_history(
+        runtime, event,
+        session=session,
+        session_history_all=session_history_all,
+        is_private=is_private,
+        group_id=group_id,
+        user_id=user_id,
+        include_pre_history=include_pre_history,
+        history_rounds=history_rounds,
+        session_id=session_id,
+        meta_flags=_meta_flags,
+        bot=bot,
     )
     # Q1：先看 token 压力（窗口未知或 trigger_ratio<=0 时 pressure 恒 False，回退按条数）
     from app.agent.assembly.context_budget import should_compress_by_pressure
@@ -296,6 +308,8 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
             )
     # 群聊环境记录块：持续记录面（消息 + 表情/戳/撤回 + 我的动作），
     # 与上面的 pre_history（按需拉取在线历史）是两个来源，正文按 message_id 去重。
+    # 两者都不再进 system：旧史已冻结，群记录只留不在会话历史里的互动，均作为
+    # user 侧数据块并入本轮 user 消息（system 前缀因此可命中缓存）。
     from app.agent.group_log.context import build_context_text
 
     group_log_text = build_context_text(
@@ -328,6 +342,12 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
         user_text=user_text,
         history=session_history,
     )
+    # 旧群史与群记录不再占 system 指令位：作为 user 侧数据块合并进本轮 user 消息。
+    # 旧群史已按会话冻结；群记录只保留不在会话历史里的互动，因此 system 前缀逐轮稳定。
+    if pre_history_text.strip() and bool(config.get("history_background_enable", True)):
+        user_blocks.append(("group_history", pre_history_text))
+    if group_log_text.strip():
+        user_blocks.append(("group_log", group_log_text))
 
     # 图片：复用上面**已经落盘**的那批段（一张图只下载一次），渲染成 base64 块；
     # 是否真正传给模型由 assembly 的模态门控决定。
@@ -372,8 +392,8 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
         raw_user_text=raw_user_text,
         memory_source_text=raw_user_text or user_text,
         history=session_history,
-        pre_history_text=pre_history_text,
-        group_log_text=group_log_text,
+        pre_history_text="",
+        group_log_text="",
         referent_text=referent_text,
         skill_blocks=skill_blocks,
         memory_text=memory_text,
@@ -446,9 +466,65 @@ async def _collect_extra_blocks(
         return [], []
 
 
+async def _load_frozen_group_history(
+    runtime,
+    event,
+    *,
+    session,
+    session_history_all: list[dict],
+    is_private: bool,
+    group_id,
+    user_id,
+    include_pre_history,
+    history_rounds,
+    session_id,
+    meta_flags: dict,
+    bot=None,
+) -> str:
+    """会话级冻结的旧群史：首次只拉「不在会话内、且早于会话起点」的消息。
+
+    冻结后逐轮返回同一字符串，保证 system / 历史前缀可命中缓存；会话重置或换对话
+    （``ConversationData`` 变化）才会重新拉取。
+    """
+    data = getattr(session, "data", None)
+    if data is None or not include_pre_history:
+        return ""
+    if getattr(data, "group_history_loaded", False):
+        return str(getattr(data, "group_history_text", "") or "")
+
+    session_mids = {
+        str(entry.get("message_id") or "").strip()
+        for entry in session_history_all
+        if str(entry.get("message_id") or "").strip()
+    }
+    session_times = [
+        int(entry.get("time") or 0)
+        for entry in session_history_all
+        if int(entry.get("time") or 0) > 0
+    ]
+    before_ts = min(session_times) if session_times else None
+    text = await _fetch_pre_history(
+        runtime, event,
+        is_private=is_private,
+        group_id=group_id,
+        user_id=user_id,
+        include_pre_history=include_pre_history,
+        history_rounds=history_rounds,
+        session_id=session_id,
+        meta_flags=meta_flags,
+        bot=bot,
+        exclude_ids=session_mids,
+        before_ts=before_ts,
+    )
+    data.group_history_text = text
+    data.group_history_loaded = True
+    return text
+
+
 async def _fetch_pre_history(
     runtime, event, *, is_private, group_id, user_id, include_pre_history,
     history_rounds, session_id, meta_flags, bot=None,
+    exclude_ids: set[str] | None = None, before_ts: int | None = None,
 ) -> str:
     """前置背景：群聊在线记录 / 私聊近期记录（与既有触发条件完全一致）。
 
@@ -465,6 +541,8 @@ async def _fetch_pre_history(
             bot_id=getattr(event, "bot_id", "") or getattr(bot, "bot_id", "") or "",
             session_id=session_id,
             bot=bot,
+            exclude_ids=exclude_ids,
+            before_ts=before_ts,
         )
     if is_private and include_pre_history in ("history", "load") and bot is not None:
         text = await fetch_private_online_history(

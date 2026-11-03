@@ -384,6 +384,8 @@ def format_online_history(
     mark_unresolved: bool = False,
     expanded: "ExpandedRefs | None" = None,
     renderer=None,
+    exclude_ids: set[str] | None = None,
+    before_ts: int | None = None,
 ) -> str:
     """把 OneBot 消息列表格式化为群聊/私聊背景文本。
 
@@ -429,6 +431,11 @@ def format_online_history(
     for raw in messages[-count:]:
         entry = online_message_to_entry(raw)
         if entry is None:
+            continue
+        mid = str(entry.message_id or "").strip()
+        if exclude_ids and mid and mid in exclude_ids:
+            continue
+        if before_ts is not None and int(entry.base.time or 0) >= int(before_ts):
             continue
         if renderer is not None:
             rendered = renderer(entry)
@@ -500,6 +507,8 @@ async def fetch_group_online_history(
     bot_id: Any = "",
     session_id: Any = "",
     expanded: "ExpandedRefs | None" = None,
+    exclude_ids: set[str] | None = None,
+    before_ts: int | None = None,
 ) -> str:
     """拉取群聊最近消息，格式化为带发送者/时间/QQ 的背景文本。
 
@@ -544,6 +553,8 @@ async def fetch_group_online_history(
             at_names=at_names,
             mark_unresolved=mark_unresolved,
             expanded=refs,
+            exclude_ids=exclude_ids,
+            before_ts=before_ts,
         )
     except Exception as e:
         # 背景块取不到时退回空串（调用方本来就把空块当作“无背景”），但必须留痕

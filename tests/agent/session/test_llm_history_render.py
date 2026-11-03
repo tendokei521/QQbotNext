@@ -131,6 +131,16 @@ def test_online_history_mark_unresolved_only_marks_forward_gap():
     assert "[图片#1003]" in text  # 但带 id，可按需 expand_image
 
 
+def test_online_history_excludes_session_messages_and_newer():
+    """只拉“不在会话内、且早于会话起点”的旧消息：冻结背景不会和会话历史重复。"""
+    text = format_online_history(
+        ONLINE, self_ids={"778"}, exclude_ids={"1002"}, before_ts=1788342300
+    )
+    assert "在吗" in text
+    assert "收到" not in text, "已在会话内/新的消息不能进旧史背景"
+    assert "图片" not in text, "不早于会话起点的消息必须排除"
+
+
 def test_online_history_expanded_registry_upgrades_marker():
     # ExpandedRefs 只分 messages（消息 id → 摘要）与 users（QQ → 昵称）两类，避免数字串号
     refs = ExpandedRefs(messages={"456": "上一条说的学费", "1004": "转发摘要"})
