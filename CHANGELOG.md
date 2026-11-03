@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### 新方案彻底移除发送者占位符（2026-11-03）
+
+- 本轮与历史消息的正文不再输出 `[sender:id=..]` / `[sender:...]` 占位符；
+  发送者昵称只走 OpenAI `message.name` 字段。
+- `render_turn` / `render_history_entry` 在 `include_sender_name=False` 时完全省略
+  sender 标记；Anthropic/Gemini 适配层继续用 `inline_message_name` 把 `name`
+  还原成旧内联格式（没有字段可承载时的兼容路径）。
+- 消息格式约定同步：`name` 是昵称，正文里没有 sender 占位符。
+
 ### 历史消息的发送者 name 不再统一脱敏（2026-11-03）
 
 - `_entry_name` 之前在 `mask_nickname=True` 时把所有发送者都改成 `用户<QQ>`，重启后

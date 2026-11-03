@@ -36,13 +36,14 @@ def render_turn(
     message_id: Any = None,
     include_sender_name: bool = True,
 ) -> str:
-    """本轮消息：头部（time/message_id）+ 发送者 + 内容流 + 引用。
+    """本轮消息：头部（time/message_id）+ 内容流 + 引用。
 
-    ``include_sender_name=False``：昵称走 OpenAI message 的 ``name`` 字段，
-    这里只留发送者 id（避免昵称句被模型当成正文）。
+    ``include_sender_name=False``：发送者昵称走 OpenAI message 的 ``name`` 字段，
+    正文不再放任何 ``[sender:...]`` 占位符。
     """
     out = [_head_marker(time_str or format_time(), message_id)]
-    out.append(_sender_marker(sender_id, sender_name, include_name=include_sender_name))
+    if include_sender_name:
+        out.append(_sender_marker(sender_id, sender_name))
     out.append(render_segments(message, message_id=message_id))
     if reply:
         fields = [
@@ -67,12 +68,16 @@ def render_history_entry(
     meta_lines: list[str] | None = None,
     include_sender_name: bool = True,
 ) -> str:
-    """历史条目：``[time=…][sender:…]正文``（正文已是文本，仅做转义）。"""
+    """历史条目：``[time=…]正文``；昵称走 OpenAI ``message.name``。
+
+    ``include_sender_name=False`` 时正文里不放任何发送者占位符（新方案直接传 name）。
+    """
     name = sender_name
     if mask_nickname:
         name = f"用户<{sender_id}>"
     head = _head_marker(format_time(time), message_id)
-    line = f"{head}{_sender_marker(sender_id, name, is_me=is_me, include_name=include_sender_name)}{escape_body(content)}"
+    sender = _sender_marker(sender_id, name, is_me=is_me) if include_sender_name else ""
+    line = f"{head}{sender}{escape_body(content)}"
     # 附注行：结构化标记（如 [reply_to:...]）接在行尾，其它文本另起一行
     for meta in meta_lines or []:
         text = str(meta or "").strip()
