@@ -28,13 +28,20 @@ MIGRATION_FLAG = "llm_tools_extra_retired_v1"
 AGENT_CAPABILITY = "agent"
 TARGET_KEY = "onebot_tools_enable"
 
+#: 旧模块配置里需要原样搬走的逐工具策略键（OneBot 工具页继续编辑它们）
+POLICY_KEYS: tuple[str, ...] = (
+    "onebot_tools_allowed",
+    "onebot_tools_denied",
+    "onebot_tool_overrides",
+)
+
 
 def _bot_id_of(bot: dict) -> str:
     return str(bot.get("id") or bot.get("account_id") or "")
 
 
 async def migrate_tools_module_config(config_service: Any) -> dict:
-    """把「工具扩展」的旧开关并入 agent 配置，然后删掉旧模块行。
+    """把「工具扩展」的旧开关与逐工具策略并入 agent 配置，然后删掉旧模块行。
 
     Returns:
         ``{"accounts": 处理了几个账号, "enabled": 其中开了工具的数量, "deleted": 删了几行旧绑定}``
@@ -60,12 +67,13 @@ async def migrate_tools_module_config(config_service: Any) -> dict:
             )
             existing = config_service.get_binding(AGENT_CAPABILITY, "account", bot_id) or {}
             base = existing.get("config") if isinstance(existing.get("config"), dict) else {}
+            policy = {key: legacy_cfg[key] for key in POLICY_KEYS if key in legacy_cfg}
             await config_service.save_binding(
                 AGENT_CAPABILITY,
                 "account",
                 bot_id,
                 enabled=bool(existing.get("enabled", True)),
-                config={**base, TARGET_KEY: legacy_enabled},
+                config={**base, TARGET_KEY: legacy_enabled, **policy},
             )
             report["accounts"] += 1
             report["enabled"] += int(legacy_enabled)
