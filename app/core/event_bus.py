@@ -101,3 +101,20 @@ class BotAccountUpdatedEvent:
     def __init__(self, account_id: str, user_id: int | None = None) -> None:
         self.account_id = account_id
         self.user_id = user_id
+
+
+class SessionUpdatedEvent:
+    """会话历史有更新（新消息/助手回复/思考补写）→ WebUI 会话数据页刷新。"""
+
+    def __init__(
+        self,
+        bot_id: Any,
+        session_id: str = "",
+        *,
+        task_id: str = "",
+        kind: str = "",
+    ) -> None:
+        self.bot_id = bot_id
+        self.session_id = session_id
+        self.task_id = task_id
+        self.kind = kind

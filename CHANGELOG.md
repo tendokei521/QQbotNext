@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### 会话数据页实时刷新推送（2026-11-03）
+
+- 会话历史发生写入/思考补写/流式结束时，`SessionManager` 发 `SessionUpdatedEvent`；
+  WebUI `/ws/logs` 广播 `sessions_updated`。
+- 会话数据页订阅该事件，按 bot_id 过滤，400ms 防抖后刷新会话/对话列表；
+  页面卸载时取消订阅。
+- 后端与前端构建产物分提交。
+
 ### 发言人身份规则常注入（2026-11-03）
 
 - `identity_context` 末尾**常驻**一条规则：若发言者是拥有者/管理者，在不违反安全规则、

@@ -22,7 +22,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.core.event_bus import BotAccountUpdatedEvent, BotLifecycleEvent, event_bus
+from app.core.event_bus import BotAccountUpdatedEvent, BotLifecycleEvent, SessionUpdatedEvent, event_bus
 from app.core.logger import webui_logger
 from app.webui.api import agent as agent_router
 from app.webui.api import bots as bots_router
@@ -415,6 +415,19 @@ def _install_bot_lifecycle_listener(container) -> None:
 
     event_bus.subscribe(BotAccountUpdatedEvent, on_bot_account_updated)
     webui_logger.debug("[WebUI] Bot 账号变更监听已注册")
+
+    async def on_session_updated(event: SessionUpdatedEvent) -> None:
+        # 会话数据页收到后刷新一次（前端自己做防抖，避免流式分片刷屏）
+        await manager.broadcast(json.dumps({
+            "type": "sessions_updated",
+            "bot_id": event.bot_id,
+            "session_id": event.session_id,
+            "task_id": event.task_id,
+            "kind": event.kind,
+        }))
+
+    event_bus.subscribe(SessionUpdatedEvent, on_session_updated)
+    webui_logger.debug("[WebUI] 会话更新监听已注册")
 
 
 def _install_config_listener(container) -> None:

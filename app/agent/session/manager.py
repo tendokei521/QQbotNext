@@ -32,6 +32,7 @@
 ``history_snapshot`` 自己管一套，或继续沿用框架这套存储。
 """
 
+import asyncio
 import copy
 import re
 import threading
@@ -400,6 +401,7 @@ class SessionManager:
         with self.lock:
             self.sessions[session_id] = session
         logger.add_info(account_label(self.bot_id)).info(f"创建会话: {session_id}")
+        self._notify_updated(session_id, "created")
         return session
 
     def get_session(self, session_id: str) -> Session | None:
@@ -436,6 +438,31 @@ class SessionManager:
 
     # ── 消息 ──────────────────────────────────────────────
     MAX_HISTORY_MESSAGES = 200  # 单对话内存/归档有界：超过后裁剪最旧消息
+
+    def _notify_updated(self, session_id: str, kind: str = "") -> None:
+        """广播“会话已更新”，供 WebUI 会话数据页刷新（没有事件循环时静默跳过）。"""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        try:
+            from app.core.event_bus import SessionUpdatedEvent, event_bus
+
+            session = self.get_session(session_id)
+            loop.create_task(
+                event_bus.publish(
+                    SessionUpdatedEvent(
+                        self.bot_id,
+                        session_id,
+                        task_id=str(getattr(session, "task_id", "") or ""),
+                        kind=kind,
+                    )
+                )
+            )
+        except Exception as e:  # noqa: BLE001 —— 推送失败不能影响历史写入
+            logger.add_info(account_label(self.bot_id)).debug(
+                f"[Session] 会话更新广播失败（已忽略）: {e}"
+            )
 
     def add_message(
         self,
@@ -519,6 +546,7 @@ class SessionManager:
                     f"历史裁剪: {session_id} 丢弃最旧 {dropped} 条 (上限 {self.MAX_HISTORY_MESSAGES})"
                 )
             session.touch()
+            self._notify_updated(session_id, "message")
 
     def upsert_streaming_assistant(self, session_id: str, text: str) -> bool:
         """流式路径专用：把本轮 assistant 正文写进历史，**支持边发边更新**。
@@ -569,6 +597,7 @@ class SessionManager:
         """本轮流式发言结束：释放 upsert 的跟踪标记（下轮重新插入新条目）。"""
         self._streaming_entries.pop(session_id, None)
         self._streaming_ids.pop(session_id, None)
+        self._notify_updated(session_id, "stream_end")
 
     def mark_last_assistant_message_id(self, session_id: str, message_id: Any) -> bool:
         """把最近一条 assistant 历史补上 ``message_id``（发送成功后调用）。
@@ -615,6 +644,7 @@ class SessionManager:
                 return False
             entry["reasoning"] = text[:4000]
             session.touch()
+            self._notify_updated(session_id, "reasoning")
             return True
         return False
 
@@ -736,6 +766,7 @@ class SessionManager:
 
         if persist:
             self.history.save_session(session)
+        self._notify_updated(session_id, "import")
         logger.add_info(account_label(self.bot_id)).info(
             f"导入外部历史: {session_id} 写入 {len(normalized)} 条"
             f"（丢弃 {len(raw) - len(normalized)}，裁剪 {dropped}）"
