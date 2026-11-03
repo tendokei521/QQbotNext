@@ -14,7 +14,7 @@
 
 | 文件 | 职责 |
 |---|---|
-| `rules.py` | 拟人化行为规则（口癖、回复长度、标点习惯） |
+| `rules.py` | 行为段的渲染工具：能力探测（caps）与逐段拼接（文案在 `assembly/presets.py`） |
 | `skills.py` | `@skill` 装饰器与技能注册表 |
 | `tags.py` | 状态标签协议（心情/活动，供 prompt 复用） |
 | `emoji.py` | 表情词表与 `name → emoji_id` 解析 |

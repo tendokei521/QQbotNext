@@ -1,4 +1,5 @@
-"""行为规则段（``app.agent.persona.rules``）与组装接线（``assembly.build_behavior``）的护栏测试。
+"""行为段（``assembly.presets`` 的三套段落文案 + ``persona.rules`` 的渲染工具）与
+组装接线（``assembly.build_behavior``）的护栏测试。
 
 这批测试守的是三条**会直接让拟人化反噬**的红线：
 
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 import re
 
+from app.agent.assembly import presets
 from app.agent.assembly.assembler import PromptRequest
 from app.agent.persona import rules as persona_rules
 
@@ -49,8 +51,12 @@ SPEECH_CONFIG: dict = {
 
 
 def _render(tools=None, config=None, modalities=None) -> str:
-    return persona_rules.render(
-        None, tools, config if config is not None else EMPTY_CONFIG, modalities
+    return presets.render(
+        presets.CHAT,
+        runtime=None,
+        available_tools=tools,
+        config=config if config is not None else EMPTY_CONFIG,
+        modalities=modalities,
     )
 
 
@@ -196,7 +202,7 @@ def test_participation_rewrites_lines_and_emoji_level_is_fixed():
 def test_override_keeps_safety_and_work_protocol():
     """覆盖模式：用户文本替换行为段，但安全规则与工作方式强制保留。"""
     caps = persona_rules.detect_caps(ALL_TOOLS, EMPTY_CONFIG)
-    text = persona_rules.override_with_safety("你是一只猫，只会喵。", caps)
+    text = presets.override_with_safety("你是一只猫，只会喵。", caps)
     assert text.startswith("你是一只猫")
     assert "【安全规则" in text
     assert "【工作方式】" in text
@@ -268,6 +274,6 @@ def test_proactive_block_dedupes_when_behavior_block_present():
     assert "[reply]" not in deduped
     assert "send_poke" not in deduped
     assert "上下文补全" in deduped
-    # 【未展开】标记语义归行为段（persona_rules.work_protocol 第 6 条），不再重复
+    # 【未展开】标记语义归行为段（presets.work_protocol 第 6 条），不再重复
     assert "未展开:用户123" not in deduped
     assert len(deduped) < len(legacy)

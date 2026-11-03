@@ -1,9 +1,10 @@
-"""系统提示词方案的可编辑覆盖（设置页「编辑系统提示词」）。
+"""系统提示词方案的可编辑覆盖（设置页入口已移除，服务保留）。
 
 锁三件事：
 1. 三套方案都能读出默认文本；
-2. 保存覆盖后装配优先用覆盖文本（账号级 behavior_rules_override 仍更优先）；
-3. 覆盖是全局 kv，重启后仍在；空文本 = 恢复默认。
+2. 覆盖能保存、重启后仍在，但**装配不再应用**（2026-11-03 起三套文案以仓内代码为准，
+   设置页编辑入口也一并移除；service / API 保留待恢复）；
+3. 覆盖是全局 kv，空文本 = 恢复默认。
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ def test_describe_lists_three_presets_with_default_text():
     assert rows[0]["effective_text"] == rows[0]["default_text"]
 
 
-async def test_save_override_persists_and_wins_in_assembly(config_service):
+async def test_save_override_persists_but_assembly_ignores_it(config_service):
     custom = "【自定义系统提示词】\n- 只按这套说话。"
     result = await prompt_preset_service.save_override(config_service, "chat", custom)
 
@@ -52,7 +53,8 @@ async def test_save_override_persists_and_wins_in_assembly(config_service):
         available_tools={"send_message"},
     )
     systems = [m["content"] for m in PromptAssembler().build(req) if m["role"] == "system"]
-    assert any(custom in text for text in systems), "装配应直接使用覆盖文本（L1 会跟其它规则合并成一条）"
+    assert not any(custom in text for text in systems), "装配已停用覆盖：不应使用 kv 里的自定义文本"
+    assert any("【安全规则" in text for text in systems), "装配应使用代码里的默认三套文案"
 
 
 async def test_reset_restores_default_and_empty_text_is_reset(config_service):

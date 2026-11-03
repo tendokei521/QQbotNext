@@ -20,7 +20,6 @@ import re
 
 from app.agent.assembly import presets
 from app.agent.assembly.assembler import PromptAssembler, PromptRequest
-from app.agent.persona import rules as persona_rules
 
 #: 工具名形态：小写字母开头、至少含一个下划线（``memory_save`` / ``expand_message`` …）
 _TOOL_TOKEN_RE = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b")
@@ -264,8 +263,8 @@ def test_every_preset_explains_tool_speech():
     """
     for preset in presets.PRESETS:
         cfg = {"reply_mode": "participation", "system_prompt": "人设"}
-        text = persona_rules.render(
-            None, ALL_TOOLS, cfg, segments=presets.segments_of(preset)
+        text = presets.render(
+            preset, runtime=None, available_tools=ALL_TOOLS, config=cfg
         )
         assert "只是思考" in text, f"{preset.key} 没说明文本只是思考"
         assert "send_message" in text, f"{preset.key} 没给出真正的发言通道"
@@ -278,8 +277,8 @@ def test_presets_keep_text_mode_when_channel_off():
     """关掉发言通道后，三套方案都要回到「文本即回复」口径（可回滚）。"""
     for preset in presets.PRESETS:
         cfg = {"reply_mode": "legacy"}
-        text = persona_rules.render(
-            None, ALL_TOOLS, cfg, segments=presets.segments_of(preset)
+        text = presets.render(
+            preset, runtime=None, available_tools=ALL_TOOLS, config=cfg
         )
         assert "直接发到" in text, f"{preset.key} 关掉通道后没回到文本发言"
         assert "只是思考" not in text, f"{preset.key} 关掉通道后仍说文本只是思考"

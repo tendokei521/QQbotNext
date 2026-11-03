@@ -128,14 +128,17 @@ def build_behavior(req: Any) -> list[dict]:
 
     preset = prompt_preset(req)
     if preset is None:
-        text = persona_rules.render(req.runtime, req.available_tools, req.config, req.modalities)
+        # 库层直调（配置里根本没这个键）：仍按聊天段落表渲染，行为段不能消失
+        text = persona_rules.render(
+            req.runtime,
+            req.available_tools,
+            req.config,
+            req.modalities,
+            segments=prompt_presets.CHAT_SEGMENTS,
+        )
         return [{"role": "system", "content": text}] if str(text).strip() else []
-    # 设置页里编辑过的「系统提示词」覆盖（全局、按方案）：静态文本，优先于默认渲染
-    from app.application import prompt_preset_service
-
-    preset_override = prompt_preset_service.get_override(preset.key)
-    if preset_override:
-        return [{"role": "system", "content": preset_override}]
+    # 设置页的「系统提示词覆盖」已暂时停用（2026-11-03）：三套文案以仓内代码为准，
+    # 不再读 prompt_preset_service 的全局 kv 覆盖（service 与 API 保留，便于以后恢复）。
     text = prompt_presets.render(
         preset,
         runtime=req.runtime,

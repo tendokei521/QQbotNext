@@ -6,13 +6,16 @@
 
 | 文件 | 职责 |
 |---|---|
-| `rules.py` | 人格规则：分段渲染 + 能力检测 |
+| `rules.py` | 行为段渲染工具：本轮能力探测（caps）+ 按段落表逐段拼接 |
 | `skills.py` | 技能声明与渲染 |
 | `tags.py` | 标签体系 |
 | `emoji.py` | 表情词典：口语别名 → QQ 系统表情 id |
 | `data/` | 生成的数据（`qq_faces.py`：QQ 客户端系统表情全量表） |
 
 ## 注意
+
+三套系统提示词（chat / roleplay / assistant）的**段落文案不在本包**，统一放在
+`app/agent/assembly/presets.py`；`rules.py` 只保留与文案无关的机制。
 
 `data/qq_faces.py` 是**生成物**，由 `scripts/gen/export_napcat_faces.py` 从本机
 NapCat 包导出，`--check` 做升级后比对。**不要手改**。

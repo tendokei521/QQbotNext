@@ -7,13 +7,18 @@
 | 文件 | 职责 |
 |---|---|
 | `assembler.py` | 总装配：按 profile 决定「放哪些块、按什么顺序」 |
-| `inputs.py` | 取料：群语境、历史、记忆、知识库、人格规则各取一份 |
+| `builtin_sections.py` | 内置段的定义（每段的层、条件、文案） |
+| `sections.py` | 提示词 section 注册表：加一段提示词不必接管整个装配器 |
+| `layers.py` | 五层模型（L1 系统提示词 → L2 人格 → L3 注入 → L4 历史 → L5 本轮） |
+| `presets.py` | **三套系统提示词的全部段落文案**（chat / roleplay / assistant） |
 | `prompt.py` | 系统提示词的分段渲染 |
-| `token_budget.py` | token 预算分配与裁剪 |
-| `compress.py` | 超预算时的历史压缩（切点由 `pairing.legal_cut` 保证不切开工具配对） |
-| `pairing.py` | 压缩切点校验：旧段里带 `tool_calls` 的 assistant 数 == `role:tool` 数，不合法就往前挪（最坏不压缩） |
-| `dump.py` | 把最终 messages 落盘（`/agent/prompt_dump` 用） |
-| `enhance.py` | 外部注入的增强块 |
+| `prompt_cache.py` | 提示词前缀稳定性工具（KV cache 的可测基础） |
+| `inputs.py` | 取料：群语境、历史、记忆、知识库、人格规则各取一份 |
+| `token_budget.py` / `context_budget.py` | token 预算分配与"离窗口爆掉还有多远"的估计 |
+| `compress.py` / `compaction.py` / `pairing.py` | 超预算时的历史压缩、可插拔压缩后端、压缩切点不切开工具配对 |
+| `history_window.py` | 历史窗口：这一次请求内联多少条历史 |
+| `context_data.py` | 模块注入的参考资料统一加数据边界 |
+| `interrupt.py` | 回复打断的配置桥（开关落到运行时中断标记） |
 
 ## 注意
 

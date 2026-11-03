@@ -1,12 +1,17 @@
 """三种系统提示词方案的可编辑文本（全局覆盖，存 kv）。
 
+> **当前状态（2026-11-03）：装配侧已停用覆盖。** 三套系统提示词以仓内代码为准
+> （``app/agent/assembly/presets.py``），``build_behavior`` 不再读本服务的覆盖值；
+> 设置页的编辑入口也已移除。本模块与 ``/api/prompt-presets`` 保留，便于以后恢复，
+> 恢复时需要同时把 ``build_behavior`` 的覆盖分支加回来。
+
 为什么单独一层：提示词方案（chat / roleplay / assistant）的正文原本是代码常量
-（`app/agent/assembly/presets.py` + `app/agent/persona/rules.py`）。用户希望在设置里
+（``app/agent/assembly/presets.py``，段落文案已全部集中在那里）。用户希望在设置里
 本地改这三套「系统提示词」，就需要一个**不碰代码**的覆盖层：
 
 - 覆盖文本按方案 key 存一份（全局，对所有账号生效）；
 - 没覆盖时用代码里的默认渲染结果；
-- 装配时优先用覆盖文本（账号级 `behavior_rules_override` 仍然优先于它）。
+- 装配时优先用覆盖文本（账号级 ``behavior_rules_override`` 仍然优先于它）。
 
 覆盖后不再按账号能力（视觉/搜索/记忆/发言方式）动态裁剪——文案变成静态文本，
 这一点在设置页会明确提示，属于"高级编辑"的取舍。
