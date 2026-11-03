@@ -160,7 +160,7 @@ def test_speech_protocol_is_injected_into_the_user_turn():
     assert out[-1]["content"].startswith("10-18 19:00 小明(20002): 在吗")
     assert out[-1]["content"].rstrip().endswith(SPEECH_PROTOCOL)
     assert out[0] == {"role": "system", "content": "人设"}, "system 侧不能被改写"
-    assert "不会发到聊天里" in SPEECH_PROTOCOL
+    assert "文本只是思考" in SPEECH_PROTOCOL
     assert "send_message" in SPEECH_PROTOCOL
     assert "不想接话就直接结束" in SPEECH_PROTOCOL, "必须同时给出「沉默」这个正常出口"
 
@@ -325,6 +325,6 @@ def test_chat_prompt_explains_tool_speech():
     assert caps["speech_by_tool"] is True
     assert "你输出的文本只是思考" in text
     assert "send_message" in text
-    assert "工具调用是动作" in text
+    assert "工具调用才是动作" in text
     assert "不要把同一句话拆到两条里" in text
     assert "直接结束" in text, "静默必须是明确允许的正常结局"
