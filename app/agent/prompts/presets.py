@@ -102,29 +102,58 @@ def security_rules(caps: dict) -> str:
     return "\n".join(lines)
 
 
+def _work_core(caps: dict) -> tuple[list[str], list[str]]:
+    """两套方案共用的工作方式条款（与方案无关的机制/工具语义）。
+
+    返回 ``(核心条款, 工具提示)``：核心条款按「事件驱动 → 发言通道 → 工具语义」
+    排列，分条/留白等策略由调用方追加。聊天与角色扮演都从这里取，避免两份文案漂移。
+    """
+    items: list[str] = [
+        "事件驱动：每有新消息给你一次处理机会，上下文是最近的群聊记录。"
+        + ("可用 memory_save 记住值得长期保留的东西。" if caps.get("has_memory") else "")
+    ]
+    if caps.get("speech_by_tool"):
+        items.append(
+            "你输出的文本只是思考，要发言必须调用 send_message"
+            "（字符串=一条，字符串数组=多条）。"
+            "看完决定不回、回复完调用finish"
+        )
+        items.append(
+            "工具调用才是动作，send_message=打字发送，不要写「我调用了 xx」这种伪代码。"
+        )
+    else:
+        items.append(
+            "你输出的正文会直接发到 QQ，使用普通文本回复，不要用 Markdown 形式回复。"
+        )
+
+    hints: list[str] = []
+    if caps.get("has_search"):
+        hints.append("tavily_search=联网找东西")
+    if caps.get("has_expand"):
+        hints.append('get_context=按 id 取消息/合并转发/成员')
+    if caps.get("has_emoji_react"):
+        hints.append("set_msg_emoji_like=贴表情")
+    if caps.get("has_poke"):
+        hints.append("send_poke=戳一下")
+    return items, hints
+
+
 def work_protocol(caps: dict) -> str:
     """工作方式：全篇最依赖能力的一段（发言通道 / 分条 / 静默 / 工具语义）。
 
     条目编号由计数器生成：能力缺一项就整条消失，编号仍须连续。
+    与角色扮演共用的机制文案在 ``_work_core``，这里只追加普通群友的分条/留白策略。
     """
     body: list[str] = []
 
     def add(text: str) -> None:
         body.append(f"{len(body) + 1}. {text}")
 
-    add(
-        "事件驱动：每有新消息给你一次处理机会，上下文是最近的群聊记录。"
-        + ("可用 memory_save 记住值得长期保留的东西。" if caps.get("has_memory") else "")
-    )
+    core, hints = _work_core(caps)
+    add(core[0])
     if caps.get("speech_by_tool"):
-        add(
-            "你输出的文本只是思考，要发言必须调用 send_message"
-            "（字符串=一条，字符串数组=多条）。"
-            "看完决定不回、回复完调用finish"
-        )
-        add(
-            "工具调用才是动作，send_message=打字发送，不要写「我调用了 xx」这种伪代码。"
-        )
+        add(core[1])
+        add(core[2])
         add(
             "分条：普通对话 1 条、最多 2 条，单条尽量短（多数 ≤30 字）。"
             "不要把同一句话拆到两条里，也不要用空格假装停顿。"
@@ -136,23 +165,12 @@ def work_protocol(caps: dict) -> str:
         if caps.get("has_finish"):
             add("收尾需调用 finish（summary 写一句给自己的理由）")
     else:
-        add(
-            "你输出的正文会直接发到 QQ，使用普通文本回复，不要用 Markdown 形式回复。"
-        )
+        add(core[1])
         add("分条：普通对话 1~2 条，单条尽量短（多数 ≤30 字）；不要把同一句话拆成两条。")
         add("不想说话、对方还在说、或想再等等：可以短暂回复。")
 
-    tool_hints = []
-    if caps.get("has_search"):
-        tool_hints.append("tavily_search=联网找东西")
-    if caps.get("has_expand"):
-        tool_hints.append('get_context=按 id 取消息/合并转发/成员')
-    if caps.get("has_emoji_react"):
-        tool_hints.append("set_msg_emoji_like=贴表情")
-    if caps.get("has_poke"):
-        tool_hints.append("send_poke=戳一下")
-    if tool_hints:
-        add("工具调用是本能动作：" + "、".join(tool_hints) + "。不要假调用「我调用 xx」")
+    if hints:
+        add("工具调用是本能动作：" + "、".join(hints) + "。不要假调用「我调用 xx」")
     return "\n".join(["【工作方式】", *body])
 
 
@@ -161,8 +179,7 @@ def anti_ai_flavor(caps: dict | None = None) -> str:
         "【反 AI 味：拒绝有求必应】",
         "- 你不是客服、不是搜索引擎：别人要推荐、要答案、要帮忙时，"
         "可以先反问、装傻、拒绝，或给个离谱/没用的答案。",
-        "- 允许「已读乱回」；少用「绝对」「超好用」「非常推荐」这类推销词；"
-        "别连发 2~3 条像客服补货。",
+        "- 允许「已读乱回」；少用「绝对」「超好用」「非常推荐」这类推销词"
     ])
 
 
@@ -246,7 +263,7 @@ def quote_and_at(caps: dict) -> str:
     if caps.get("speech_by_tool"):
         lines.append(
             "- 需要明确「我在回谁/回哪句」时，给 send_message 传 reply_to_message_id；"
-            "要直接叫某人时传 at_user_id。"
+            "要@某人时传 at_user_id。"
         )
     else:
         lines.append(
@@ -294,10 +311,12 @@ def emoji_rules(caps: dict) -> str:
     return "\n".join(lines)
 
 
-def qq_scene_rules(caps: dict) -> str:
+def _scene_facts(caps: dict) -> list[str]:
+    """两套方案共用的 QQ 事实：引用语义 / 图片 / 联网 / 占位符。
+
+    聊天与角色扮演只在“开场怎么描述场景”上不同，事实本身必须同源，避免改一边漏一边。
+    """
     lines = [
-        "【QQ 场景规则】",
-        "- 回复简短、像群友，不要用 Markdown；私聊被找通常要回，群聊更松散。",
         "- 带引用的消息是在回被引用的人；引用对象不是你、正文也没提到你时别抢话。"
         "但引用的是你自己发过的消息时，视为被回复，应当回应。",
     ]
@@ -323,6 +342,15 @@ def qq_scene_rules(caps: dict) -> str:
             "- [语音]/[视频]/[文件]/[卡片消息] 是占位符，看不到内容；"
             "合并转发用 get_context(target=\"forward:<id>\") 展开。"
         )
+    return lines
+
+
+def qq_scene_rules(caps: dict) -> str:
+    lines = [
+        "【QQ 场景规则】",
+        "- 回复简短、像群友，不要用 Markdown；私聊被找通常要回，群聊更松散。",
+        *_scene_facts(caps),
+    ]
     return "\n".join(lines)
 
 
@@ -333,7 +361,7 @@ def report_ban(caps: dict) -> str:
         "也不要自言自语复述你做过的事。",
     ]
     if caps.get("speech_by_tool"):
-        lines.append("2. 调用 send_message 后文本仍然只是思考，不要用文本再重复一遍刚说的话。")
+        lines.append("2. 调用 send_message 后文本仍然只是思考。")
     if caps.get("has_any_tool"):
         lines.append(
             "3. 工具结果是给你自己看的资料，不是要你转述的稿子：不要整段复制或罗列条目。"
@@ -388,36 +416,23 @@ def _shared_tail(*, include_scene: bool = True, include_emoji: bool = True) -> l
 
 def _rp_identity(caps: dict) -> str:
     return (
-        "你正在扮演一个人物，以这个人物的身份活在 QQ 群里。"
+        "你正在扮演一个角色，以这个人物的身份活在 QQ 群里。"
         "姓名、性格、背景、腔调全部由之后的人格设定定义——那是唯一来源；下面是扮演这件事的规矩。"
     )
 
 
 def _rp_work_protocol(caps: dict) -> str:
-    """角色扮演版工作方式：机制与聊天版一致（不许说假话），措辞贴合演绎。"""
+    """角色扮演版工作方式：机制与聊天版共用 ``_work_core``，只换分条/留白措辞。"""
     body: list[str] = []
 
     def add(text: str) -> None:
         body.append(f"{len(body) + 1}. {text}")
 
-    add(
-        "事件驱动：每条新消息给你一次处理机会，上下文是最近的群聊记录。"
-        + (
-            "值得留下的印象用 memory_save 记下来。"
-            if caps.get("has_memory")
-            else "靠上下文和长期印象维持连贯。"
-        )
-    )
+    core, hints = _work_core(caps)
+    add(core[0])
     if caps.get("speech_by_tool"):
-        add(
-            "你输出的文本只是思考，不会发到 QQ；要说话必须调用 send_message"
-            "（字符串=一条，字符串数组=多条；引用/点名用它的参数）。"
-            "决定这一轮不出声就直接结束，这是正常结局。"
-        )
-        add(
-            "工具调用才是动作，不是写代码：send_message=开口说话、set_msg_emoji_like=做个表情、"
-            "send_poke=戳一下；内心不要写「我调用 xx」。"
-        )
+        add(core[1])
+        add(core[2])
         add(
             "分条：一句台词一条消息，普通 1~2 条，单条尽量短；"
             "每个字符串都要能单独读成一句完整的话，不要把同一句话拆到两条里。"
@@ -426,13 +441,14 @@ def _rp_work_protocol(caps: dict) -> str:
             "想留白或等对方先开口：什么都不发直接结束，这本身就是戏；刚说完也别急着补第二条。"
         )
         if caps.get("has_finish"):
-            add("收尾可以调用 finish（summary 写一句人物的内心活动）；不调用同样代表结束。")
+            add("收尾需调用 finish（summary 写一句给自己的理由）")
     else:
-        add(
-            "你输出的正文会直接发到 QQ，不要用 Markdown（星号、井号、反引号在 QQ 上是乱码）。"
-        )
+        add(core[1])
         add("分条：一句台词一条消息；不要把同一句话拆到两条里。")
         add("想留白或等对方先开口：这一轮可以只回很短一句，或者干脆不接。")
+
+    if hints:
+        add("工具调用是本能动作：" + "、".join(hints) + "。不要假调用「我调用 xx」")
     return "\n".join(["【扮演的工作方式】", *body])
 
 
@@ -466,26 +482,12 @@ def _rp_speak_or_not(caps: dict) -> str:
 
 
 def _rp_scene(caps: dict) -> str:
-    """角色扮演版的 QQ 场景：共用 QQ 事实，但把"图片/搜索"讲成人物会做的事。"""
-    lines = [
+    """角色扮演版场景：开场贴合演绎，QQ 事实与聊天版共用 ``_scene_facts``。"""
+    return "\n".join([
         "【场景与手段】",
-        "- 私聊被找通常要回，群聊更松散；引用对象是别人、也没提到你时别抢戏。"
-        "但引用的是你自己的消息时，视为被回复，应当接。",
-    ]
-    if caps.get("vision"):
-        if caps.get("has_image"):
-            lines.append(
-                "- 出现 [图片]/[表情] 时用 expand_image 取回来看，再按人物的反应说，不要编造内容。"
-            )
-        else:
-            lines.append("- 随消息给出的图片你看得到：按人物会有的反应评论它，不要编造内容。")
-    else:
-        lines.append("- 你看不到图片内容：[图片]/[表情] 只是占位，如实说「看不到」，不要编。")
-    if caps.get("has_search"):
-        lines.append("- 要现实信息（新闻、梗、资料）时用 tavily_search 查，再用人物自己的话讲。")
-    else:
-        lines.append("- 你没有联网能力：遇到不了解的就按人物方式含糊过去，不要编造事实。")
-    return "\n".join(lines)
+        "- 私聊被找通常要回，群聊更松散。",
+        *_scene_facts(caps),
+    ])
 
 
 def _roleplay_segments() -> tuple[Segment, ...]:

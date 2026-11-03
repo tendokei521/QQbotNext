@@ -253,6 +253,24 @@ def test_layers_stay_separate_after_preset_selection():
     assert systems[1] == "人设", "L2 人格紧跟其后、独立成条"
 
 
+def test_rp_shares_common_group_member_rules():
+    """RP 只保留演绎专属段；与群友相同的机制/QQ 事实必须从同一 helper 渲染。"""
+    cfg = {"reply_mode": "participation", "system_prompt": "人设"}
+    chat = presets.render(presets.CHAT, runtime=None, available_tools=ALL_TOOLS, config=cfg)
+    rp = presets.render(presets.ROLEPLAY, runtime=None, available_tools=ALL_TOOLS, config=cfg)
+    for shared in (
+        "【安全规则（最高优先级，不可违反）】",
+        "事件驱动：每有新消息给你一次处理机会",
+        "工具调用才是动作",
+        "收尾需调用 finish",
+        "带引用的消息是在回被引用的人",
+    ):
+        assert shared in chat, f"chat 缺少共用段：{shared}"
+        assert shared in rp, f"roleplay 缺少共用段：{shared}"
+    # RP 的旧版重复措辞不应再出现
+    assert "不会发到 QQ" not in rp
+
+
 def test_every_preset_explains_tool_speech():
     """两套方案都要讲清「文本=思考 / send_message=发言 / 分条自检 / 别汇报」。
 
@@ -268,7 +286,7 @@ def test_every_preset_explains_tool_speech():
         assert "send_message" in text, f"{preset.key} 没给出真正的发言通道"
         assert "工具调用才是动作" in text, f"{preset.key} 缺「工具是动作」口径"
         assert "直接发到" not in text, f"{preset.key} 在工具发言下仍说文本会直接发出"
-        assert "不要用文本再重复一遍" in text, f"{preset.key} 缺汇报禁令"
+        assert "不要输出「我已在群里回复了」" in text, f"{preset.key} 缺汇报禁令"
 
 
 def test_presets_keep_text_mode_when_channel_off():
