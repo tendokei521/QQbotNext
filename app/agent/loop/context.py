@@ -51,4 +51,7 @@ class LlmJob:
     skip: bool = False
     superseded: bool = False
     generation: int = 0
+    #: 参与度模式下同一群已有在飞回合：这条消息只观察/落历史，不请求 LLM
+    #: （轮次优先；旧模式仍走"新消息打断旧回合"）。
+    busy_dropped: bool = False
     module: Any = None

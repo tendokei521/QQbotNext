@@ -49,6 +49,8 @@ class LlmPipeline:
         self._session_generation: dict[str, int] = {}
         #: 会话 → 当前活跃一轮的取消句柄（`turn_runner.AbortScope`）
         self._active_scopes: dict = {}
+        #: 参与度模式：会话 → 正在跑的 job.id（同群同时只允许一个 LLM 回合）
+        self._inflight: dict[str, str] = {}
         # 对话策略（群级覆盖）：运行时没有 config_service（测试替身）时退回旧读取。
         # 解析是纯函数 + 内存字典，单事件开销可忽略；不缓存是为了"改完立刻生效"。
         config_service = getattr(runtime, "config_service", None)
@@ -152,6 +154,16 @@ class LlmPipeline:
             base["trigger_probability"] = DEFAULT_TRIGGER_PROBABILITY
         return base
 
+    def _reply_mode_of(self, event) -> str:
+        """本轮生效的回复模式（账号级 + 群级覆盖）；读不到按 legacy。"""
+        try:
+            return str(
+                self._effective_config(event, self.runtime.config).get("reply_mode", "legacy")
+                or "legacy"
+            )
+        except Exception:  # noqa: BLE001 —— 判定失败按旧模式（打断）走
+            return "legacy"
+
     def _trigger_decision(
         self, event, config, *, has_image: bool = False
     ) -> tuple[bool, bool, str]:
@@ -210,7 +222,14 @@ class LlmPipeline:
         return False, ""
 
     def submit(self, event) -> asyncio.Task | None:
-        """提交一个 LLM 处理任务（非阻塞）。"""
+        """提交一个 LLM 处理任务（非阻塞）。
+
+        并发语义由回复模式决定：
+
+        - ``legacy``：旧模式，新消息打断/取代旧回合，以最新消息优先；
+        - ``participation``：新模式，轮次优先——同群同时只允许一个 LLM 回合，
+          上一个没结束时到达的新消息只观察并写入历史，不发起请求，也不打断旧回合。
+        """
         if event.bot is None:
             return None
 
@@ -229,7 +248,14 @@ class LlmPipeline:
         # 这里在提交时只对**确实会触发 LLM**的消息抬高代际（与 _run 的准入判定
         # 共用 _would_trigger_llm，避免两处漂移）：群聊里没被 @/未命中关键词的
         # 普通消息不会误打断，这正是 b86fc18 原本要防的问题。
-        if self._would_trigger_llm(event, user_text, is_group):
+        #
+        # 参与度模式例外：轮次优先，新消息不打断旧回合；若同群已有在飞回合，
+        # 这条消息标记为 busy_dropped（只观察，不请求）。
+        would_trigger = self._would_trigger_llm(event, user_text, is_group)
+        participation = is_group and self._reply_mode_of(event) == "participation"
+        busy = participation and bool(self._inflight.get(session_id))
+        busy_dropped = bool(busy and would_trigger)
+        if would_trigger and not busy_dropped:
             self.interrupt_session(session_id)
         generation = self._session_generation.get(session_id, 0)
 
@@ -241,6 +267,10 @@ class LlmPipeline:
             user_text=user_text,
         )
         job = LlmJob(id=uuid.uuid4().hex, group_key=session_id, ctx=ctx, generation=generation)
+        job.busy_dropped = busy_dropped
+        if participation and would_trigger and not busy_dropped:
+            # 先占位再起 task：连续两条消息几乎同时 submit 时，第二条能立刻看到第一条。
+            self._inflight[session_id] = job.id
         ctx.job = job
         event._llm_job = job
 
@@ -269,6 +299,8 @@ class LlmPipeline:
         from app.core.logger import logger
 
         self._tasks.discard(task)
+        if self._inflight.get(job.group_key) == job.id:
+            self._inflight.pop(job.group_key, None)
         if task.cancelled():
             return
         try:
@@ -574,6 +606,27 @@ class LlmPipeline:
             user_text = re.sub(r"@\S+\s*", "", user_text).strip()
         ctx.user_text = user_text.strip()
 
+    async def _observe_busy_drop(self, ctx: LlmContext) -> None:
+        """参与度模式：同群上一轮未结束时，新消息只观察/落历史，不请求。"""
+        account_id = getattr(self.runtime, "bot_id", "?")
+        try:
+            config = self._effective_config(ctx.event, self.runtime.config)
+            from app.agent.reply.observer import observe_group_message
+
+            await observe_group_message(self.runtime, ctx.event, config)
+        except Exception as e:  # noqa: BLE001 —— 观察失败不影响丢弃结论
+            logger.add_info(account_label(account_id)).debug(
+                f"[LLM Pipeline] 轮次优先丢弃时观察失败（已忽略）: {e}"
+            )
+        log_skip(
+            account_id,
+            "turn_in_flight",
+            f"group={getattr(getattr(ctx.event, 'group', None), 'group_id', '?')}",
+            hint="参与度模式按轮次优先：上一轮结束后才会处理新消息",
+            level="info",
+            interval_s=30,
+        )
+
     async def _run(self, job: LlmJob) -> None:
         session_lock: asyncio.Lock | None = None
         lock_acquired = False
@@ -581,6 +634,11 @@ class LlmPipeline:
         # 本轮结局：默认「收到但不需要响应」，后续按真实分支升级
         outcome = "ignored"
         try:
+            # 轮次优先：同群已有在飞回合时，这条消息只观察/落历史，不发起 LLM。
+            # 必须在注册 AbortScope 之前返回，不能顶掉旧回合的取消句柄。
+            if ctx is not None and getattr(job, "busy_dropped", False):
+                await self._observe_busy_drop(ctx)
+                return
             # 本轮的取消句柄：注册到会话上，`interrupt_session` 才能停住**正在跑**的循环
             # （代际只在新消息进来时抬高，它停不住一个非流式的工具轮）。
             # 放在 try 内：prologue 里任何取属性抛异常都会让整轮静默消失。
@@ -761,6 +819,8 @@ class LlmPipeline:
                 f"[LLM Pipeline] 任务异常: {e}"
             )
         finally:
+            if self._inflight.get(job.group_key) == job.id:
+                self._inflight.pop(job.group_key, None)
             scope = getattr(ctx, "abort", None)
             if scope is not None and self._active_scopes.get(job.group_key) is scope:
                 self._active_scopes.pop(job.group_key, None)

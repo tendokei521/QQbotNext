@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### 参与度模式：同群同时只跑一轮 LLM（2026-11-03）
+
+- `reply_mode=legacy`：保持旧行为，新消息打断旧回合并以最新优先。
+- `reply_mode=participation`：改为**轮次优先**——同群已有在飞回合时，新消息只做观察
+  并写入历史，不发起请求、不打断旧回合；回合结束后同群才能继续请求。
+- 实现：`LlmPipeline._inflight` 在 submit 时占位（同步，连续提交也不会重复进门）；
+  忙时 job 标记 `busy_dropped`，`_run` 只观察后返回；finally / task done 双路径释放槽位。
+- 跳过原因 `turn_in_flight` 进统一 skip 日志；`reply_mode` 设置项描述同步。
+
 ### 系统提示词装配顺序：要求优先，角色后置（2026-11-03）
 
 - 对齐 qq-bridge 的仿真层顺序（安全规则 → 工具协议 → 行为/风格，角色卡单独后置）：

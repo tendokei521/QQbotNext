@@ -244,7 +244,7 @@ SCHEMA = {
     },
     "reply_mode": {
         "type": "select", "label": "回复模式",
-        "description": "条件触发=只在 @/关键词时回复；参与度=全量观察并由参与度决定",
+        "description": "条件触发=新消息打断旧回合并以最新优先；参与度=同群同时只跑一轮，未结束的新消息只记录不请求",
         "default": "legacy", "group": "group_advanced",
         "options": {"legacy": "条件触发（旧版）", "participation": "参与度驱动（新版）"},
     },
