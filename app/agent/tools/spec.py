@@ -369,7 +369,7 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
                 result_note = _present(
                     spec.present_result, tr, what=f"present_result({name})"
                 )
-                logger.add_info("Tool").info(
+                logger.add_info("Tool").debug(
                     f"[ToolCall]返回：{name} success={success} duration={duration_ms:.0f}ms "
                     f"error={error} code={tr.code} result={str(result)[:200]}"
                     + (f" | {result_note}" if result_note else "")
