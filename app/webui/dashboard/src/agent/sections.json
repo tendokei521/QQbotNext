@@ -139,7 +139,6 @@
           "fields": [
             "system_tools_log_enabled",
             "module_tools_log_enabled",
-            "mcp_tools_log_enabled",
             "onebot_tools_log_enabled"
           ]
         },

@@ -8,9 +8,10 @@ import { useNotifyStore } from '@/stores/notify'
 const agent = useAgentConfigStore()
 const notify = useNotifyStore()
 
-/** 高级选项（系统方案）：行为规则 / 参与度 / 结构化消息 */
+/** 高级选项（系统方案）：消息组装 / 工具 */
 const form = reactive({
   structured_assembly: true,
+  onebot_tools_enable: true,
 })
 const loading = ref(true)
 const saving = ref(false)
@@ -24,6 +25,7 @@ async function load() {
       const res = await http.get('/api/agent/config', { params: { account_id: agent.botId } })
       const cfg = (res.data && res.data.config) || {}
       form.structured_assembly = cfg.structured_assembly !== false
+      form.onebot_tools_enable = cfg.onebot_tools_enable !== false
     }
   } catch (err) {
     notify.push(errorMessage(err), 'error')
@@ -38,7 +40,12 @@ async function save() {
   try {
     await http.post(
       '/api/agent/config',
-      { config: { structured_assembly: form.structured_assembly } },
+      {
+        config: {
+          structured_assembly: form.structured_assembly,
+          onebot_tools_enable: form.onebot_tools_enable,
+        },
+      },
       { params: { account_id: agent.botId } },
     )
   } catch (err) {
@@ -56,7 +63,7 @@ onMounted(load)
     <div class="app-page-header">
       <div>
         <h1 class="app-page-title">高级选项</h1>
-        <div class="app-page-subtitle">实验性开关：消息组装方式。改动即保存。</div>
+        <div class="app-page-subtitle">实验性开关：消息组装方式与工具。改动即保存。</div>
       </div>
       <v-chip size="small" variant="tonal">{{ accountLabel }}</v-chip>
     </div>
@@ -71,6 +78,17 @@ onMounted(load)
           v-model="form.structured_assembly"
           label="结构化消息"
           hint="开启后消息带时间、发送者与引用标记；关闭则只发原始正文"
+          density="comfortable"
+          color="primary"
+          hide-details="auto"
+          @update:model-value="save"
+        />
+        <v-divider class="my-4" />
+        <div class="app-muted mb-3">工具</div>
+        <v-switch
+          v-model="form.onebot_tools_enable"
+          label="启用工具"
+          hint="开启后模型可以调用 OneBot 工具（发消息、查询、群管理等）；工具自身的权限仍按调用者身份校验"
           density="comfortable"
           color="primary"
           hide-details="auto"

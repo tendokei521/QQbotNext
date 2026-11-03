@@ -42,17 +42,13 @@ const onlyDisabled = ref(false)
 const busy = ref<string>('')
 
 const SOURCE_LABEL: Record<string, string> = {
-  onebot: 'OneBot',
   module: '插件',
   system: '系统',
-  mcp: '外部',
 }
 
 /** 工具状态接口不返回 description：按来源补拉清单，拼出中文名给「工具」列用 */
 const DESC_ENDPOINTS: { source: string; url: string }[] = [
   { source: 'system', url: '/api/agent/system/tools' },
-  { source: 'onebot', url: '/api/agent/onebot/tools' },
-  { source: 'mcp', url: '/api/agent/mcp/tools' },
   { source: 'module', url: '/api/agent/module/tools' },
 ]
 
@@ -99,7 +95,6 @@ function ownerLabel(tool: ToolState): string {
   if (tool.owner === 'framework') return '系统内置'
   const pluginName = modules.displayNameOf(tool.owner)
   if (pluginName) return pluginName
-  if (tool.source === 'mcp') return tool.owner ? `外部服务：${tool.owner}` : '外部服务'
   return '插件'
 }
 
@@ -283,7 +278,6 @@ watch(
           size="small"
           variant="text"
           :loading="busy === tool.name"
-          :disabled="tool.source === 'onebot' && !tool.available && tool.reason === 'module_disabled'"
           @click="toggle(tool)"
         >
           {{ tool.available ? '停用' : '启用' }}

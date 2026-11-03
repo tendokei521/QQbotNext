@@ -80,12 +80,12 @@ const router = createRouter({
         { path: 'agent/behavior', redirect: '/ai/settings/behavior' },
         { path: 'agent/session', redirect: '/ai/settings/session' },
         { path: 'agent/advanced', redirect: '/ai/settings/advanced' },
-        { path: 'agent/onebot', redirect: '/tools/onebot' },
+        { path: 'agent/onebot', redirect: '/advanced-options' },
         { path: 'agent/role', redirect: '/ai' },
         { path: 'agent/model', redirect: '/ai' },
-        // 「进阶中心」已拆成模块：工具 / MCP 回工具扩展，主动与定时已合并为「触发与调度」
-        { path: 'agent/tools', redirect: '/modules/llm_tools_extra' },
-        { path: 'agent/mcp', redirect: '/modules/llm_tools_extra' },
+        // 「工具扩展」插件已并入框架：OneBot 工具只剩「高级选项」里的一个开关
+        { path: 'agent/tools', redirect: '/tools/overview' },
+        { path: 'agent/mcp', redirect: '/advanced-options' },
         // 知识库模块已移除：旧书签回模块列表，避免落到「插件不存在」空态
         { path: 'agent/knowledge', redirect: '/modules' },
         { path: 'agent/panels', redirect: '/modules/llm_trigger' },
@@ -106,8 +106,6 @@ const router = createRouter({
               meta: { title: '工具总览' },
             },
             { path: 'system', name: 'tools-system', component: () => import('@/views/SystemToolsPage.vue'), meta: { title: '系统工具' } },
-            { path: 'onebot', name: 'tools-onebot', component: () => import('@/views/OnebotToolsPage.vue'), meta: { title: 'OneBot 工具' } },
-            { path: 'mcp', name: 'tools-mcp', component: () => import('@/views/McpToolsPage.vue'), meta: { title: '外部工具' } },
             { path: 'module', name: 'tools-module', component: () => import('@/views/ModuleToolsPage.vue'), meta: { title: '插件工具' } },
           ],
         },

@@ -12,7 +12,7 @@ import { useNotifyStore } from '@/stores/notify'
 const props = withDefaults(
   defineProps<{
     modelValue: boolean
-    /** 插件内部名（接口参数），例如 llm_tools_extra */
+    /** 插件内部名（接口参数），例如 llm_memory */
     moduleName: string
     /** 插件显示名（给用户看） */
     moduleLabel?: string

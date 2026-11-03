@@ -22,17 +22,10 @@ const AUTOSAVE_DEBOUNCE_MS = 2000
 let loadSeq = 0
 
 /** 模块拥有的配置键 → 归属模块名。与后端 `MODULE_KEYS` 对应，
- * 仅用于把保存请求分流到对应模块的配置接口。 */
-const MODULE_OWNED_FIELDS: Record<string, string> = {
-  onebot_tools_enable: 'llm_tools_extra',
-  onebot_tools_allowed: 'llm_tools_extra',
-  onebot_tools_denied: 'llm_tools_extra',
-  onebot_tool_overrides: 'llm_tools_extra',
-  onebot_tools_max_result: 'llm_tools_extra',
-  onebot_tools_debug: 'llm_tools_extra',
-  tool_result_directive_enable: 'llm_tools_extra',
-  tool_result_directive: 'llm_tools_extra',
-}
+ * 仅用于把保存请求分流到对应模块的配置接口。
+ * 2026-11-03：原「工具扩展」的 8 个键随插件并入框架，「高级选项」里的
+ * `onebot_tools_enable` 是 agent 本体键，不再需要分流。 */
+const MODULE_OWNED_FIELDS: Record<string, string> = {}
 
 export const useAgentConfigStore = defineStore('agentConfig', {
   state: () => ({

@@ -2,13 +2,11 @@ import { defineStore } from 'pinia'
 
 const STORAGE_KEY = 'qqbot_tool_page_state'
 
-export type ToolTab = 'overview' | 'system' | 'onebot' | 'mcp' | 'module'
+export type ToolTab = 'overview' | 'system' | 'module'
 
 interface ToolsPageState {
   activeTab: ToolTab
   systemCollapsed: Record<string, boolean>
-  onebotCollapsed: Record<string, boolean>
-  mcpCollapsed: Record<string, boolean>
   moduleCollapsed: Record<string, boolean>
   scrollTop: Record<string, number>
 }
@@ -17,8 +15,6 @@ function readState(): ToolsPageState {
   const fallback: ToolsPageState = {
     activeTab: 'overview',
     systemCollapsed: {},
-    onebotCollapsed: {},
-    mcpCollapsed: {},
     moduleCollapsed: {},
     scrollTop: {},
   }
@@ -39,8 +35,6 @@ export const useToolsStore = defineStore('tools', {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         activeTab: this.activeTab,
         systemCollapsed: this.systemCollapsed,
-        onebotCollapsed: this.onebotCollapsed,
-        mcpCollapsed: this.mcpCollapsed,
         moduleCollapsed: this.moduleCollapsed,
         scrollTop: this.scrollTop,
       }))
@@ -52,16 +46,12 @@ export const useToolsStore = defineStore('tools', {
     setCollapsed(kind: ToolTab, collapsed: Record<string, boolean>) {
       if (kind === 'overview') return
       if (kind === 'system') this.systemCollapsed = collapsed
-      else if (kind === 'onebot') this.onebotCollapsed = collapsed
-      else if (kind === 'mcp') this.mcpCollapsed = collapsed
       else if (kind === 'module') this.moduleCollapsed = collapsed
       this.persist()
     },
     collapsedOf(kind: ToolTab): Record<string, boolean> {
       if (kind === 'overview') return {}
       if (kind === 'system') return this.systemCollapsed
-      if (kind === 'onebot') return this.onebotCollapsed
-      if (kind === 'mcp') return this.mcpCollapsed
       return this.moduleCollapsed
     },
     setScroll(tab: ToolTab, value: number) {
