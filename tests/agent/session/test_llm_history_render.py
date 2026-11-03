@@ -38,6 +38,16 @@ HISTORY_GROUP = [
 ]
 
 
+def test_history_mask_flag_is_constant_false():
+    """name 字段不脱敏：mask_nickname 常量 false。"""
+    from types import SimpleNamespace
+
+    from app.agent.loop.turn_metrics import _history_meta_flags
+
+    flags = _history_meta_flags(SimpleNamespace(config={}))
+    assert flags["mask_nickname"] is False
+
+
 def test_session_history_group_single_line_and_assistant_plain():
     rendered = format_history_for_llm(HISTORY_GROUP, is_private=False)
     assert rendered[0]["content"].endswith("小明(20002): 你好")

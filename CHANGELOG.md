@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### 历史 name 字段不脱敏（2026-11-03）
+
+- `_history_meta_flags` 的 `mask_nickname` 直接固定为 `False`：历史/本轮发送者昵称
+  原样进入 OpenAI `message.name`，不做 `用户<QQ>` 脱敏。
+
 ### 新方案彻底移除发送者占位符（2026-11-03）
 
 - 本轮与历史消息的正文不再输出 `[sender:id=..]` / `[sender:...]` 占位符；

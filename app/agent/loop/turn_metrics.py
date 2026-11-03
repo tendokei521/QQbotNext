@@ -457,11 +457,11 @@ def _prefix_fingerprint(messages: list[dict]) -> str:
 def _history_meta_flags(runtime) -> dict:
     """计算历史渲染标志：是否归一化单行、是否脱敏昵称。
 
-    mask_nickname 恒为 True：句子型/超长昵称一律脱敏，避免昵称内容泄漏进 LLM 上下文。
+    mask_nickname 恒为 False：name 字段不脱敏，普通/句子型昵称都原样保留。
     """
     return {
         "normalize_enhanced": bool(runtime.config.get("experimental_long_term_memory", False)),
-        "mask_nickname": True,
+        "mask_nickname": False,
     }
 
 @dataclass
