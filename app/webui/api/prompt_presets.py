@@ -1,7 +1,7 @@
 """系统提示词方案 API（原设置页编辑用）。
 
 > **当前状态（2026-11-03）：设置页编辑入口已移除，装配侧也停用覆盖**
-> （三套文案以 ``app/agent/assembly/presets.py`` 为准）。路由保留，便于以后恢复；
+> （两套文案以 ``app/agent/prompts/presets.py`` 为准）。路由保留，便于以后恢复；
 > 恢复时需同时恢复 ``build_behavior`` 的覆盖分支与前端编辑入口。
 
 - ``GET /api/prompt-presets``：三套方案的默认文本 / 当前覆盖 / 生效文本；

@@ -1,12 +1,12 @@
 """三种系统提示词方案的可编辑文本（全局覆盖，存 kv）。
 
-> **当前状态（2026-11-03）：装配侧已停用覆盖。** 三套系统提示词以仓内代码为准
-> （``app/agent/assembly/presets.py``），``build_behavior`` 不再读本服务的覆盖值；
+> **当前状态（2026-11-03）：装配侧已停用覆盖。** 两套系统提示词以仓内代码为准
+> （``app/agent/prompts/presets.py``），``build_behavior`` 不再读本服务的覆盖值；
 > 设置页的编辑入口也已移除。本模块与 ``/api/prompt-presets`` 保留，便于以后恢复，
 > 恢复时需要同时把 ``build_behavior`` 的覆盖分支加回来。
 
-为什么单独一层：提示词方案（chat / roleplay / assistant）的正文原本是代码常量
-（``app/agent/assembly/presets.py``，段落文案已全部集中在那里）。用户希望在设置里
+为什么单独一层：提示词方案（chat / roleplay）的正文原本是代码常量
+（``app/agent/prompts/presets.py``，段落文案已全部集中在那里）。用户希望在设置里
 本地改这三套「系统提示词」，就需要一个**不碰代码**的覆盖层：
 
 - 覆盖文本按方案 key 存一份（全局，对所有账号生效）；
@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.agent.assembly import presets as prompt_presets
+from app.agent.prompts import presets as prompt_presets
 
 #: kv 键：``{preset_key: 覆盖文本}``
 KV_KEY = "prompt_preset_overrides"
@@ -72,7 +72,7 @@ async def load_overrides(config_service: Any) -> dict[str, str]:
 
 
 def describe_presets() -> list[dict]:
-    """三套方案的默认文本 + 当前覆盖 + 实际生效文本（供设置页编辑）。"""
+    """两套方案的默认文本 + 当前覆盖 + 实际生效文本（供设置页编辑）。"""
     rows: list[dict] = []
     for preset in prompt_presets.PRESETS:
         default_text = _default_text(preset)

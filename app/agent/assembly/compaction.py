@@ -91,11 +91,12 @@ class SummaryBackend:
 
     async def compact(self, old, keep, *, plan, provider_chain=None, config=None):
         from app.agent.assembly.compress import compress_history
+        from app.agent.prompts.history import SUMMARY_HEADER
 
         summary = await compress_history(provider_chain or [], config or {}, old)
         if not summary:
             return CompactionResult(history=list(old) + list(keep))
-        head = [{"role": "system", "content": "【更早对话摘要】\n" + summary}]
+        head = [{"role": "system", "content": SUMMARY_HEADER + summary}]
         return CompactionResult(
             history=head + list(keep), compacted=True, summary=summary, replaced=len(old)
         )

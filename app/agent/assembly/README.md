@@ -7,10 +7,9 @@
 | 文件 | 职责 |
 |---|---|
 | `assembler.py` | 总装配：按 profile 决定「放哪些块、按什么顺序」 |
-| `builtin_sections.py` | 内置段的定义（每段的层、条件、文案） |
+| `prompts/sections.py` | 内置段的定义（每段的层、条件、文案） |
 | `sections.py` | 提示词 section 注册表：加一段提示词不必接管整个装配器 |
 | `layers.py` | 五层模型（L1 系统提示词 → L2 人格 → L3 注入 → L4 历史 → L5 本轮） |
-| `presets.py` | **三套系统提示词的全部段落文案**（chat / roleplay / assistant） |
 | `prompt.py` | 系统提示词的分段渲染 |
 | `prompt_cache.py` | 提示词前缀稳定性工具（KV cache 的可测基础） |
 | `inputs.py` | 取料：群语境、历史、记忆、知识库、人格规则各取一份 |
@@ -19,6 +18,9 @@
 | `history_window.py` | 历史窗口：这一次请求内联多少条历史 |
 | `context_data.py` | 模块注入的参考资料统一加数据边界 |
 | `interrupt.py` | 回复打断的配置桥（开关落到运行时中断标记） |
+
+> 提示词文案/方案/内置段定义已统一到 `app/agent/prompts/`（不在 `assembly/`）：
+> 本包只做"取料 → 排序 → 预算 → 压缩"，具体说什么见 `prompts/`。
 
 ## 注意
 

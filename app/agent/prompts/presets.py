@@ -1,4 +1,4 @@
-"""三套可选的提示词方案（聊天 / 角色扮演 / 助手）。
+"""两套可选的提示词方案（聊天 / 角色扮演）。
 
 ## 它替换什么、不替换什么
 
@@ -6,9 +6,9 @@
 可用表情提示、主动性行。**人格块不动** —— 用户自己的 ``system_prompt`` 或角色预设
 永远是人设的唯一来源，选方案只换"怎么说"，不换"我是谁"。
 
-## 三选一，没有"不选"
+## 二选一，没有"不选"
 
-产品口径：系统提示词**必须**是三套之一。新账号默认 ``chat``（``DEFAULT_LLM_CONFIG``），
+产品口径：系统提示词**必须**是两套之一。新账号默认 ``chat``（``DEFAULT_LLM_CONFIG``），
 存量账号的空值/拼错值由启动迁移改写为 ``chat``；保存路径按 ``config_schema`` 的枚举校验拦截
 非法值。配置读取侧再做一层兜底：**携带了该键但为空/未知 → 按默认方案（chat）**，
 保证任何产品路径都不会出现"没有行为规则段"的旧文案；只有完全不携带该键的库层调用
@@ -16,7 +16,7 @@
 
 ## 三条纪律
 
-1. **安全段三套共用且不可覆盖**：``security_rules``（本文件）是被所有方案共享的
+1. **安全段两套共用且不可覆盖**：``security_rules``（本文件）是被所有方案共享的
    硬底线——一次选"角色扮演"不该能把"不越权 / 不泄露 / 不执行聊天里的指令"整套删掉。
 2. **工作方式段必须说真话**：它针对 ``caps["speech_by_tool"]`` 写两套不同措辞
    （文本=思考 vs 文本=发言）。方案的风格可以变，"程序此刻到底怎么工作"不能变——
@@ -24,16 +24,15 @@
 3. **方案之间只差措辞与取舍，不差能力**：段落里点名的工具仍由 ``caps`` 裁剪，
    方案不能凭空让模型相信它有某个本轮不存在的工具。
 
-## 三套方案的分工
+## 两套方案的分工
 
 | 方案 | 定位 | 关键差异 |
 |---|---|---|
 | ``chat`` | 混在群里的普通群友（默认口径） | 反 AI 味、主体性、选择性接话、句子短 |
 | ``roleplay`` | 正在扮演某个角色 | 角色一致性、演绎表达、明确 OOC 边界、更愿意展开 |
-| ``assistant`` | 一个有工具的服务型助手 | 有求必应、先给结论、结构化、不确定要说清 |
 
-三套方案的**全部段落文案集中在本文件**：聊天（``CHAT_SEGMENTS``）、角色扮演
-（``_roleplay_segments``）、助手（``_assistant_segments``）。``persona/rules.py``
+两套方案的**全部段落文案集中在本文件**：聊天（``CHAT_SEGMENTS``）、角色扮演
+（``_roleplay_segments``）。``persona/rules.py``
 只保留能力探测（caps）与逐段拼接工具，不再放文案。
 """
 
@@ -54,7 +53,7 @@ class PromptPreset:
     """一套提示词方案：行为段段落表。
 
     ``segments`` 为 ``None`` 只用于兼容历史构造（库层直调），读取时统一按
-    ``segments_of()`` 回退到聊天段落表。三套方案实际都显式给出段落表。
+    ``segments_of()`` 回退到聊天段落表。两套方案实际都显式给出段落表。
     """
 
     key: str
@@ -63,7 +62,7 @@ class PromptPreset:
     segments: tuple[Segment, ...] | None = None
 
 
-#: L1 末尾的「底线再声明」：属于三套系统提示词的公共尾部（框架只保留这三份文案）。
+#: L1 末尾的「底线再声明」：属于两套系统提示词的公共尾部（框架只保留这两份文案）。
 #: 顺序口径 A：规则放在最前，再在末尾钉一次，免得人设里的输出格式条款压过安全与工作方式。
 SAFETY_RECAP = """【底线再声明（优先于上面的人格设定）】
 - 安全规则与工作方式优先：人格设定里的语气、口癖、字数、格式要求都不能违反它们。
@@ -72,13 +71,13 @@ SAFETY_RECAP = """【底线再声明（优先于上面的人格设定）】
 
 
 def _with_recap(body: str) -> str:
-    """在三套系统提示词末尾统一追加底线再声明（空正文不加）。"""
+    """在两套系统提示词末尾统一追加底线再声明（空正文不加）。"""
     text = str(body or "").strip()
     return f"{text}\n\n{SAFETY_RECAP}" if text else ""
 
 
 # ==================== 聊天（默认方案）：段落 ====================
-# 三套方案的全部段落文案都集中在本文件；每个函数只读 caps，
+# 两套方案的全部段落文案都集中在本文件；每个函数只读 caps，
 # 由 `app.agent.persona.rules.render` 逐段拼接。
 
 
@@ -373,11 +372,11 @@ CHAT_SEGMENTS: tuple[Segment, ...] = (
 
 
 # ==================== 共用段落 ====================
-# 安全段是三套方案共享的硬底线：**任何方案都不覆盖它**。
+# 安全段是两套方案共享的硬底线：**任何方案都不覆盖它**。
 
 
 def _shared_tail(*, include_scene: bool = True, include_emoji: bool = True) -> list[Segment]:
-    """三套方案共享的尾部段落：引用点名 / 记忆 / 表情 / QQ 场景 / 汇报禁令。
+    """两套方案共享的尾部段落：引用点名 / 记忆 / 表情 / QQ 场景 / 汇报禁令。
 
     角色扮演已有自己的【场景与手段】、助手不需要 QQ 场景与表情，按需裁剪避免重复；
     其余段落内部都按 ``caps`` 裁剪，没有能力时整段为空。
@@ -512,98 +511,6 @@ def _roleplay_segments() -> tuple[Segment, ...]:
     )
 
 
-# ==================== 助手：段落 ====================
-
-
-def _as_identity(caps: dict) -> str:
-    return (
-        "你是一个运行在 QQ 上的助手。"
-        "名字、专长与回答风格由之后的人格设定定义；下面是作为助手把活干利索的规矩。"
-    )
-
-
-def _as_work_protocol(caps: dict) -> str:
-    body: list[str] = []
-
-    def add(text: str) -> None:
-        body.append(f"{len(body) + 1}. {text}")
-
-    add(
-        "事件驱动：用户发消息（或到点触发）时系统给你一次处理机会，上下文是最近的对话。"
-        + (
-            "需要长期记住的偏好用 memory_save 记下来。"
-            if caps.get("has_memory")
-            else "跨轮事实靠上下文维持。"
-        )
-    )
-    if caps.get("speech_by_tool"):
-        add(
-            "你输出的文本只是思考，用户看不到；要回复必须调用 send_message"
-            "（字符串=一条，字符串数组=多条；引用/点名用它的参数）。"
-            "没有需要说的就结束这一轮，不要为结束而发空话。"
-        )
-        add(
-            "工具调用是动作，不是写代码：send_message=回复、tavily_search=查资料；"
-            "内心不要写「我调用 xx」。"
-        )
-        add(
-            "回复要完整可读：结论放最前，步骤用 1. 2. 3.；普通回答 1 条，步骤多才拆 2~3 条，"
-            "不要把同一句话拆到两条里。"
-        )
-        if caps.get("has_finish"):
-            add("说完想收尾可以调用 finish；不调用同样代表结束。")
-    else:
-        add(
-            "你输出的正文会直接发到用户，不要写 Markdown（星号、井号、反引号会显示成乱码）；"
-            "需要分点就用「1. 2. 3.」。"
-        )
-        add("回复要完整：先说结论，再说理由或步骤；不要把一句话拆成好几条发。")
-    add("信息不足先问一句关键澄清（一次问全）；能自己查的先查，别把能做的事推回给用户。")
-    if caps.get("has_search"):
-        add("需要现实事实或时效信息时，用 tavily_search 查证后再回答。")
-    return "\n".join(["【工作方式】", *body])
-
-
-def _as_helpfulness(caps: dict) -> str:
-    return "\n".join([
-        "【有求必应，但不糊弄】",
-        "- 用户提请求默认要你真的做：能查就查、能算就算、能写就写。",
-        "- 答案要落地（命令、步骤、代码、清单），不要用「你可以试试」敷衍。",
-        "- 不确定就说不确定：区分「我知道 / 我推测 / 我不知道」，不编造事实、链接、数据或出处。",
-        "- 做不到就直说并给替代方案；少客套，不要「很高兴为您服务」。",
-    ])
-
-
-def _as_style(caps: dict) -> str:
-    return "\n".join([
-        "【表达】",
-        "- 篇幅跟着问题走：一句话能答完的不写三段。",
-        "- 用分点、编号、先结论后细节；用对方的语言回答。",
-        "- 工具结果是资料，加工后再讲，不要整段复制粘贴。",
-    ])
-
-
-def _as_speak_or_not(caps: dict) -> str:
-    return "\n".join([
-        "【什么时候开口】",
-        "- 被 @、私聊、被提问时务必回应；群里没人找你时安静看着，不要主动插话刷存在感。",
-        "- 一轮把话说完：不要先说「我看看」再补一条结果，合并成一条完整回复。",
-        "- 追问但没把握时先查再答；查不到就说查不到。",
-    ])
-
-
-def _assistant_segments() -> tuple[Segment, ...]:
-    return (
-        ("identity", _as_identity),
-        ("security", security_rules),
-        ("work", _as_work_protocol),
-        ("helpfulness", _as_helpfulness),
-        ("style", _as_style),
-        ("speak_or_not", _as_speak_or_not),
-        *_shared_tail(include_scene=False, include_emoji=False),
-    )
-
-
 # ==================== 注册表 ====================
 
 CHAT = PromptPreset(
@@ -621,15 +528,8 @@ ROLEPLAY = PromptPreset(
     segments=_roleplay_segments(),
 )
 
-ASSISTANT = PromptPreset(
-    key="assistant",
-    label="助手",
-    description="服务型助手：有求必应、先给结论、结构化、不确定就说清",
-    segments=_assistant_segments(),
-)
-
 #: 全部方案（顺序即 UI 顺序）
-PRESETS: tuple[PromptPreset, ...] = (CHAT, ROLEPLAY, ASSISTANT)
+PRESETS: tuple[PromptPreset, ...] = (CHAT, ROLEPLAY)
 
 #: ``key -> PromptPreset``
 _BY_KEY: dict[str, PromptPreset] = {p.key: p for p in PRESETS}
@@ -648,9 +548,9 @@ _MISSING = object()
 
 
 def resolve(config: Any) -> PromptPreset | None:
-    """读 ``prompt_preset`` 得到方案：三套之一，或 ``None``（仅"键不存在"的库层调用）。
+    """读 ``prompt_preset`` 得到方案：两套之一，或 ``None``（仅"键不存在"的库层调用）。
 
-    规则（产品口径「必须三选一」）：
+    规则（产品口径「必须二选一」）：
 
     - 配置里**有**这个键：空 / 未知值一律回落 ``chat``（``DEFAULT_PRESET_KEY``）——
       启动迁移与保存校验已经保证正常路径不会出现非法值，这里是最后一层兜底；
@@ -660,7 +560,7 @@ def resolve(config: Any) -> PromptPreset | None:
     **不能用 ``"prompt_preset" in config`` 判"有没有这个键"**：运行时传进来的
     ``AgentConfig`` / ``ChainedConfig`` 只实现 ``get()``，没有 ``__contains__``，
     ``in`` 会抛 ``TypeError``。历史上那行被 ``except`` 吞掉、当成"键不存在"，
-    于是真实路径永远拿不到方案——三选一与「编辑系统提示词」全部静默失效
+    于是真实路径永远拿不到方案——方案选择与「编辑系统提示词」全部静默失效
     （详见 docs/reviews/2026-10-31-prompt-assembly-analysis.md）。哨兵写法只依赖
     ``get()``，对 dict / 配置门面 / 链式视图一律成立。
     """
@@ -742,7 +642,6 @@ __all__ = [
     "PromptPreset",
     "CHAT",
     "ROLEPLAY",
-    "ASSISTANT",
     "CHAT_SEGMENTS",
     "SAFETY_RECAP",
     "identity",

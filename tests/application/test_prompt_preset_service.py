@@ -1,8 +1,8 @@
 """系统提示词方案的可编辑覆盖（设置页入口已移除，服务保留）。
 
 锁三件事：
-1. 三套方案都能读出默认文本；
-2. 覆盖能保存、重启后仍在，但**装配不再应用**（2026-11-03 起三套文案以仓内代码为准，
+1. 两套方案都能读出默认文本；
+2. 覆盖能保存、重启后仍在，但**装配不再应用**（2026-11-03 起两套文案以仓内代码为准，
    设置页编辑入口也一并移除；service / API 保留待恢复）；
 3. 覆盖是全局 kv，空文本 = 恢复默认。
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.agent.assembly import presets
+from app.agent.prompts import presets
 from app.agent.assembly.assembler import PromptAssembler, PromptRequest
 from app.application import prompt_preset_service
 
@@ -27,11 +27,11 @@ async def _clean(container, config_service):
         await prompt_preset_service.reset_override(config_service, key)
 
 
-def test_describe_lists_three_presets_with_default_text():
+def test_describe_lists_two_presets_with_default_text():
     rows = prompt_preset_service.describe_presets()
 
-    assert [row["key"] for row in rows] == ["chat", "roleplay", "assistant"]
-    assert all(row["default_text"].strip() for row in rows), "三套都要有默认文本"
+    assert [row["key"] for row in rows] == ["chat", "roleplay"]
+    assert all(row["default_text"].strip() for row in rows), "两套都要有默认文本"
     assert all(row["customized"] is False for row in rows)
     assert rows[0]["effective_text"] == rows[0]["default_text"]
 
@@ -54,7 +54,7 @@ async def test_save_override_persists_but_assembly_ignores_it(config_service):
     )
     systems = [m["content"] for m in PromptAssembler().build(req) if m["role"] == "system"]
     assert not any(custom in text for text in systems), "装配已停用覆盖：不应使用 kv 里的自定义文本"
-    assert any("【安全规则" in text for text in systems), "装配应使用代码里的默认三套文案"
+    assert any("【安全规则" in text for text in systems), "装配应使用代码里的默认两套文案"
 
 
 async def test_reset_restores_default_and_empty_text_is_reset(config_service):

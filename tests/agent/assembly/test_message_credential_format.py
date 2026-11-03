@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.agent.assembly.builtin_sections import build_identity_context, build_onebot_auth
+from app.agent.prompts.sections import build_identity_context, build_onebot_auth
 from app.agent.message_assembly.history import render_history_entry
 from app.agent.message_assembly.render import render_turn
 from app.agent.session.model import BaseInfo, HistoryEntry

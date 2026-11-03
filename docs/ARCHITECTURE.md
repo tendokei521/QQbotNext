@@ -80,7 +80,7 @@ OneBot 事件（WebSocket）
 
 | 层 | 内容 | 谁产出 |
 |---|---|---|
-| **L1 系统提示词** | 规则与协议：安全规则、工作方式、表达底线、定时/主动性/消息格式说明、结尾的底线再声明 | 提示词方案（`assembly/presets.py`）+ 内置段落 |
+| **L1 系统提示词** | 规则与协议：安全规则、工作方式、表达底线、定时/主动性/消息格式说明、结尾的底线再声明 | 提示词方案（`prompts/presets.py`）+ 内置段落 |
 | **L2 人格预设** | 「我是谁」，唯一来源是人格预设 | `persona_preset_id` |
 | **L3 钩子注入** | 插件与本轮动态信息：记忆、上下文、群记录、表情标签… | 模块 `register_section` / `context_blocks` |
 | **L4 对话历史** | 窗口 / 压缩 / 开场对话 | `assembly/history_window.py`、`compress.py` |
@@ -131,7 +131,7 @@ OneBot 事件（WebSocket）
 | 想改什么 | 先看 |
 |---|---|
 | 一次回复的流程 / 卡在哪一步 | `app/agent/loop/{turn_runner,pipeline,generate,chat}.py` + 日志 |
-| 提示词内容 / 段落顺序 | `app/agent/assembly/{layers,builtin_sections,presets}.py` |
+| 提示词内容 / 段落顺序 | `app/agent/{assembly/layers.py,prompts/sections.py,prompts/presets.py}` |
 | 工具怎么暴露、什么时候不可用 | `app/agent/tools/{spec,policy}.py` + [TOOL_STATE.md](TOOL_STATE.md) |
 | 模型调用、重试、故障转移 | `app/agent/providers/*`（`runtime_manager.py` 管实例） |
 | 人格 / 记忆 / 上下文 / 触发调度 | 对应内置插件 `app/plugins/llm_*` |

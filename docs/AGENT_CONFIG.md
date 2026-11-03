@@ -45,7 +45,7 @@
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `prompt_preset` | `chat` | **三选一提示词方案**：`chat` 群友 / `roleplay` 扮演 / `assistant` 助手。决定 L1 规则文案，不改人格 |
+| `prompt_preset` | `chat` | **二选一提示词方案**：`chat` 群友 / `roleplay` 扮演。决定 L1 规则文案，不改人格 |
 | `persona_preset_id` | `""` | **人格唯一来源**；`system_prompt` 只是兜底副本（启动时对齐） |
 | `session_timeout` | `60` | 无消息多久结束一轮会话（秒） |
 | `history_rounds` | `50` | 带多少轮历史给模型 |

@@ -34,6 +34,11 @@ from typing import Any
 from app.agent.assembly.sections import Section
 from app.core.logger import account_label, logger
 
+from .emoji import emoji_hint_line
+from .identity import ACCOUNT_LINE, GROUP_LINE_TEMPLATE, MANAGER_LINE, OWNER_LINE
+from .onebot import ONEBOT_AUTH_TEXT
+from .persona import DEFAULT_PERSONA_PROMPT
+
 # ==================== 各块实现（只读 req，无副作用） ====================
 
 
@@ -75,20 +80,8 @@ def build_persona(req: Any) -> list[dict]:
         logger.add_info(account_label(getattr(req.runtime, 'bot_id', '?'))).warning(
             "[Assembly] 角色预设没有 system_prompt，已回退 system_prompt"
         )
-    system_prompt = req.cfg("system_prompt", "你是一个友好的助手。")
+    system_prompt = req.cfg("system_prompt", DEFAULT_PERSONA_PROMPT)
     return [{"role": "system", "content": system_prompt}]
-
-
-def emoji_hint_line(tags: str) -> str:
-    """【可用表情】一行提示：把可贴标签摆到 prompt 里，省得模型去翻工具文档。"""
-    text = str(tags or "").strip()
-    if not text:
-        return ""
-    return (
-        f"【可用表情】可贴的表情标签：{text}。"
-        "贴表情时直接写标签名（如 赞 / 笑哭 / 吃瓜 / 狗头），框架会翻成正确的表情 id；"
-        "若上下文里出现过 [♡66] 这类数字，那是别的消息上已贴过的表情 id，可原样复用。"
-    )
 
 
 def build_emoji_hint(req: Any) -> list[dict]:
@@ -114,12 +107,12 @@ def build_emoji_hint(req: Any) -> list[dict]:
 
 
 def prompt_preset(req: Any):
-    """本轮选中的「提示词方案」（见 ``assembly.presets``）。
+    """本轮选中的「提示词方案」（见 ``prompts/presets.py``）。
 
-    产品口径是三选一：配置带该键时恒返回三套之一（空/未知回落 chat）；
+    产品口径是二选一：配置带该键时恒返回两套之一（空/未知回落 chat）；
     只有根本不带该键的库层调用才返回 ``None``（保留旧版装配结果）。
     """
-    from app.agent.assembly import presets
+    from . import presets
 
     return presets.resolve(req.config)
 
@@ -157,7 +150,7 @@ def build_behavior(req: Any) -> list[dict]:
     3. **``behavior_rules_override`` 可整体替换**，但安全规则与工作方式强制追加——
        一次误配置不该能把"不越权 / 不泄露 / 怎么发言"整套删掉。
     """
-    from app.agent.assembly import presets as prompt_presets
+    from . import presets as prompt_presets
     from app.agent.persona import rules as persona_rules
 
     preset = prompt_preset(req)
@@ -171,7 +164,7 @@ def build_behavior(req: Any) -> list[dict]:
             segments=prompt_presets.CHAT_SEGMENTS,
         )
         return [{"role": "system", "content": text}] if str(text).strip() else []
-    # 设置页的「系统提示词覆盖」已暂时停用（2026-11-03）：三套文案以仓内代码为准，
+    # 设置页的「系统提示词覆盖」已暂时停用（2026-11-03）：两套文案以仓内代码为准，
     # 不再读 prompt_preset_service 的全局 kv 覆盖（service 与 API 保留，便于以后恢复）。
     text = prompt_presets.render(
         preset,
@@ -185,29 +178,16 @@ def build_behavior(req: Any) -> list[dict]:
 
 def build_participation(req: Any) -> list[dict]:
     """回复触发规则段（随回复设置变化，order 54）。"""
-    from app.agent.participation import reply_rules_section
+    from .participation import reply_rules_section
 
     return reply_rules_section(req)
 
 
 def build_message_meta(req: Any) -> list[dict]:
     """消息格式说明段（框架系统方案，order 60）。"""
-    from app.agent.message_assembly.convention import convention_section
+    from .convention import convention_section
 
     return convention_section(req)
-
-
-ONEBOT_AUTH_TEXT = """### 群管理操作与消息凭证（必须遵守）
-- 每条消息头部都有 `message_id=..`（群聊记录行首的 `#数字` 也是同一种 id）。
-- 调用**需要权限的 OneBot 工具**（踢人/禁言/删消息/改群设置/群名/群文件/群公告，
-  以及修改本账号资料、好友、凭证等）时，除工具自身参数外，必须传 `auth_message_id`
-  = **让你执行该操作的那条群消息**的 message_id。
-- 程序会用这条消息的发送者身份校验权限：`high` 级工具（群管理类）需要 bot 管理者
-  或拥有者；`critical` 级工具（自身账号/凭证类）仅 bot 拥有者。消息不存在、不属于
-  当前群、或发送者权限不足，工具都会被拒绝。
-- 只能引用本群里真实存在的消息 id，禁止编造，也不要用无关消息凑数；没有明确要求
-  你执行该操作的消息时，说明「需要管理员在管理端操作」，不要强行调用。
-- 这些工具的参数 schema 里 `auth_message_id` 是必填项；缺省会被拒绝。"""
 
 
 def build_onebot_auth(req: Any) -> list[dict]:
@@ -338,13 +318,13 @@ def build_identity_context(req: Any) -> list[dict]:
         inner = f"group_id={group_id}"
         if group_name:
             inner += f",group_name={quote(group_name)}"
-        first_lines.append(f"【当前群聊[{inner}]】")
+        first_lines.append(GROUP_LINE_TEMPLATE.format(inner))
 
     content = "\n".join([
         *first_lines,
-        f"你的账号：{account}",
-        f"你的拥有者：{_roster('agent_owner_list')}",
-        f"你的管理员：{_roster('agent_manager_list')}",
+        ACCOUNT_LINE.format(account),
+        OWNER_LINE.format(_roster('agent_owner_list')),
+        MANAGER_LINE.format(_roster('agent_manager_list')),
     ])
     return [{"role": "system", "content": content}]
 

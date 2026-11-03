@@ -6,7 +6,7 @@
 插件想加一段提示词只有两条路：塞 ``PromptRequest.extra_blocks``（位置固定在历史之前、
 不能选顺序），或整体替换装配器（``supersedes=("assembly",)``，等于把既有 12 块全抄一遍）。
 
-现在默认 12 段迁到 ``builtin_sections.py`` 并注册进本表，``PromptAssembler.build()``
+现在默认 12 段迁到 ``prompts/sections.py`` 并注册进本表，``PromptAssembler.build()``
 改为「解析注册表 → 逐段生成 → 折叠/清洗」，插件只需 ``register_section(runtime, Section(...))``
 加自己那一段，不必接管整个装配器。
 
@@ -110,7 +110,7 @@ class SectionRegistry:
     """一组 section：按 ``(scope, name)`` 去重、按 order 解析成有序列表。
 
     ``defaults=True``（默认）时，首次使用（add / remove / resolve）惰性注入
-    ``builtin_sections.default_sections()`` —— 保证「默认段总是存在」，但注入不覆盖
+    ``prompts/sections.default_sections()`` —— 保证「默认段总是存在」，但注入不覆盖
     调用方在注入前显式注册的同名段（插件替换内置段时以插件为准）。
     """
 
@@ -130,7 +130,7 @@ class SectionRegistry:
         self._defaults_loaded = True
         if not self._with_defaults:
             return
-        from app.agent.assembly.builtin_sections import default_sections
+        from app.agent.prompts.sections import default_sections
 
         self._builtin = {section.key: section for section in default_sections()}
         for key, section in self._builtin.items():

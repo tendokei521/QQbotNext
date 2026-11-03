@@ -1,4 +1,4 @@
-"""行为段（``assembly.presets`` 的三套段落文案 + ``persona.rules`` 的渲染工具）与
+"""行为段（``prompts/presets`` 的两套段落文案 + ``persona.rules`` 的渲染工具）与
 组装接线（``assembly.build_behavior``）的护栏测试。
 
 这批测试守的是三条**会直接让拟人化反噬**的红线：
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 
-from app.agent.assembly import presets
+from app.agent.prompts import presets
 from app.agent.assembly.assembler import PromptRequest
 from app.agent.persona import rules as persona_rules
 
@@ -228,7 +228,7 @@ def test_behavior_block_falls_back_without_a_preset():
     """库层直调（配置里根本没 ``prompt_preset``）时仍注入行为段。
 
     行为段是"怎么说话"的底线，不能因为没选方案就消失；``prompt_preset`` 只决定
-    **用哪套文案**（chat/roleplay/assistant），缺省时退回 ``persona_rules`` 默认渲染。
+    **用哪套文案**（chat/roleplay），缺省时退回 ``persona_rules`` 默认渲染。
     """
     req = _request(config={})
     req.available_tools = ALL_TOOLS
@@ -237,10 +237,23 @@ def test_behavior_block_falls_back_without_a_preset():
 
 
 def _block_names(req):
-    """只返回**实际产出内容**的块名（``build_all_blocks`` 会把空块也列出来）。"""
+    """只返回**实际产出内容**的块名（``build_all_blocks`` 会把空块也列出来）。
+
+    同一层（L1）的多段会被合并成一个 ``_MergedBlock``，块名变成层名；
+    这里把它的 ``contributors`` 展开，断言仍按原始段名检查。
+    """
     from app.agent.assembly.assembler import build_all_blocks
 
-    return [(block.name, messages) for block, messages in build_all_blocks(req) if messages]
+    rows: list[tuple[str, list]] = []
+    for block, messages in build_all_blocks(req):
+        if not messages:
+            continue
+        contributors = getattr(block, "contributors", ()) or ()
+        if contributors:
+            rows.extend((name, messages) for name, _chars in contributors)
+        else:
+            rows.append((block.name, messages))
+    return rows
 
 
 def test_behavior_block_precedes_persona():

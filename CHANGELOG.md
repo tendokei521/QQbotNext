@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### 框架提示词统一到 `app/agent/prompts/`；删除「助手」方案（2026-11-03）
+
+- 框架所有提示词注入的文案/渲染入口集中到 `app/agent/prompts/`：
+  `presets.py`（两套方案）、`sections.py`（内置 system 段）、`convention.py`、
+  `participation.py`、`emoji.py`、`onebot.py`、`identity.py`、`persona.py`、
+  `speech.py`、`tool_reply.py`、`group_log.py`、`history.py`、`nudges.py`、`internal.py`。
+  `assembler` / `loop` / `delivery` / `group_log` / `tools` 改为从该包 import，不再各自持有文案。
+- 模块自己的提示词（`llm_context` / `llm_trigger` 的 `register_section`）仍归模块，
+  模块卸载时随模块消失。
+- **删除 `assistant` 提示词方案**：后端 `PRESETS` 只留 `chat` / `roleplay`，
+  `prompt_preset` 的 schema 枚举与前端风格卡同步删除；存量 `assistant` 由启动迁移
+  自动落到默认 `chat`。
+
 ### assistant 历史按回复模式渲染（2026-11-03）
 
 - 修复参与度模式的「哑火」：历史里 assistant 原本是裸正文，模型照抄"直接说话"的历史，

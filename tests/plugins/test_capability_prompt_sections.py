@@ -54,7 +54,7 @@ def test_proactive_section_disappears_when_capability_missing():
 
 
 def test_emoji_hint_requires_tool():
-    from app.agent.assembly.builtin_sections import build_emoji_hint
+    from app.agent.prompts.sections import build_emoji_hint
 
     req_no_tool = SimpleNamespace(
         config={"emoji_react_level": 2}, available_tools={"send_message"}, runtime=None

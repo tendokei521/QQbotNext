@@ -1,11 +1,11 @@
-"""提示词方案（``app.agent.assembly.presets``）的护栏测试。
+"""提示词方案（``app.agent.prompts.presets``）的护栏测试。
 
 守的是四条**会让"选个方案"变成事故**的红线：
 
-1. **三选一，没有"不选"**：配置里带了这个键但为空/拼错时回落默认方案（chat），
+1. **二选一，没有"不选"**：配置里带了这个键但为空/拼错时回落默认方案（chat），
    保证产品路径不会退回"没有行为规则段"的旧文案；只有完全不携带该键的库层调用
    才保留旧装配结果（测试/脚本直接构造 config）；
-2. **安全段不可被方案删掉**：三套方案都必须含「安全规则」，用户写了
+2. **安全段不可被方案删掉**：两套方案都必须含「安全规则」，用户写了
    ``behavior_rules_override`` 也一样——只能整体替换风格段落，换不掉底线；
 3. **工作方式段必须说真话**：``speech_by_tool`` 开/关对应的措辞不能错位
    （说错会让模型整轮静默或把思考发出去）；
@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 
-from app.agent.assembly import presets
+from app.agent.prompts import presets
 from app.agent.assembly.assembler import PromptAssembler, PromptRequest
 
 #: 工具名形态：小写字母开头、至少含一个下划线（``memory_save`` / ``expand_message`` …）
@@ -143,7 +143,7 @@ def test_behavior_block_survives_get_only_config():
     assert any("【安全规则" in text for text in by_facade), "行为规则段必须真的进 messages"
 
 
-# ==================== 2. 三套互不相同，但底线相同 ====================
+# ==================== 2. 两套互不相同，但底线相同 ====================
 
 
 def test_every_preset_keeps_security_rules():
@@ -167,21 +167,19 @@ def test_override_cannot_drop_security_or_work_protocol():
 
 
 def test_preset_style_hints_differ():
-    """三套方案的定位差异要能在正文里认出来（防"复制一份没改"）。"""
+    """两套方案的定位差异要能在正文里认出来（防"复制一份没改"）。"""
     cfg = {"participation": "medium"}
     chat = presets.render(presets.CHAT, available_tools=ALL_TOOLS, config=cfg)
     roleplay = presets.render(presets.ROLEPLAY, available_tools=ALL_TOOLS, config=cfg)
-    assistant = presets.render(presets.ASSISTANT, available_tools=ALL_TOOLS, config=cfg)
     assert "反 AI 味" in chat
     assert "角色一致性" in roleplay and "跳出" in roleplay
-    assert "有求必应" in assistant
 
 
 # ==================== 3. 工作方式段说真话 ====================
 
 
 def test_work_protocol_tracks_real_speech_channel():
-    """发言通道开/关时，三套方案都必须换到对应措辞（不许两套说辞并存或错位）。"""
+    """发言通道开/关时，两套方案都必须换到对应措辞（不许两套说辞并存或错位）。"""
     for preset in presets.PRESETS:
         by_tool = presets.render(preset, available_tools=ALL_TOOLS, config=dict(SPEECH_CONFIG))
         plain = presets.render(preset, available_tools=ALL_TOOLS, config={})
@@ -194,7 +192,7 @@ def test_work_protocol_tracks_real_speech_channel():
 
 
 def test_no_phantom_tools_when_nothing_available():
-    """本轮没有任何工具时，三套方案正文里不该出现任何工具名。"""
+    """本轮没有任何工具时，两套方案正文里不该出现任何工具名。"""
     for preset in presets.PRESETS:
         text = presets.render(preset, available_tools=set(), config={})
         assert _tool_tokens(text) == set(), f"{preset.key} 提到了本轮不存在的工具"
@@ -222,11 +220,11 @@ def test_selecting_preset_injects_behavior_without_qq_agent_profile():
     表现为"点了没反应"。
     """
     req = PromptRequest(
-        config={"prompt_preset": "assistant", "system_prompt": "人设"},
+        config={"prompt_preset": "roleplay", "system_prompt": "人设"},
         user_text="hi",
         available_tools=ALL_TOOLS,
     )
-    assert "【有求必应，但不糊弄】" in _behavior(req)
+    assert "【角色一致性：不许跳出】" in _behavior(req)
 
 
 def test_preset_does_not_touch_persona_block():
@@ -256,9 +254,9 @@ def test_layers_stay_separate_after_preset_selection():
 
 
 def test_every_preset_explains_tool_speech():
-    """三套方案都要讲清「文本=思考 / send_message=发言 / 分条自检 / 别汇报」。
+    """两套方案都要讲清「文本=思考 / send_message=发言 / 分条自检 / 别汇报」。
 
-    机制默认改为工具发言后，roleplay / assistant 也不能只说"文本会直接发出去"，
+    机制默认改为工具发言后，两套方案 也不能只说"文本会直接发出去"，
     否则模型会按错误事实行动（整轮沉默或把思考当发言）。
     """
     for preset in presets.PRESETS:
@@ -274,7 +272,7 @@ def test_every_preset_explains_tool_speech():
 
 
 def test_presets_keep_text_mode_when_channel_off():
-    """关掉发言通道后，三套方案都要回到「文本即回复」口径（可回滚）。"""
+    """关掉发言通道后，两套方案都要回到「文本即回复」口径（可回滚）。"""
     for preset in presets.PRESETS:
         cfg = {"reply_mode": "legacy"}
         text = presets.render(
@@ -285,12 +283,12 @@ def test_presets_keep_text_mode_when_channel_off():
 
 
 def test_presets_carry_only_system_prompt_text():
-    """三套方案只负责「系统提示词正文」：能力文案（定时/主动性/格式/表情）已归插件。
+    """两套方案只负责「系统提示词正文」：能力文案（定时/主动性/格式/表情）已归插件。
 
     这条是架构契约：`PromptPreset` 不再有 schedule/meta/emoji/proactive 字段；
     渲染结果末尾统一带「底线再声明」。
     """
-    from app.agent.assembly import presets as prompt_presets
+    from app.agent.prompts import presets as prompt_presets
 
     for preset in prompt_presets.PRESETS:
         assert not hasattr(preset, "schedule_instruction"), preset.key

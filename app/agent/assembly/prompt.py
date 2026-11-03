@@ -55,8 +55,4 @@ def prompt_time_position(config) -> str:
     return TIME_POSITION_HEAD if value == TIME_POSITION_HEAD else TIME_POSITION_TAIL
 
 
-#: Q2：`history_mode=recent` 时插在历史块前面的固定提示。
-#: 文案**不随条数变化**——它每轮都会出现，变数字等于每轮改写 system 前缀。
-HISTORY_OMITTED_HINT = (
-    "（更早的对话没有全部列出。）"
-)
+# Q2 的历史省略提示已迁到 ``app/agent/prompts/history.py``（HISTORY_OMITTED_HINT）。

@@ -1,17 +1,17 @@
 """启动迁移：把"未选提示词方案"的存量账号落到默认方案（chat）。
 
-产品口径已改为「必须使用三种系统提示词之一」（见 `app/agent/assembly/presets.py`）：
+产品口径已改为「必须使用两种系统提示词之一」（见 `app/agent/prompts/presets.py`）：
 新账号由 `DEFAULT_LLM_CONFIG["prompt_preset"] = "chat"` 兜底，存量账号里显式存着的
 空串/拼错值需要一次改写，否则它们仍走"没有行为规则块"的旧文案。
 
-幂等：已是三套之一（chat/roleplay/assistant）的账号不写。
+幂等：已是两套之一（chat/roleplay）的账号不写。
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from app.agent.assembly import presets as prompt_presets
+from app.agent.prompts import presets as prompt_presets
 
 AGENT_CAPABILITY = "agent"
 

@@ -12,11 +12,11 @@ from __future__ import annotations
 
 import pytest
 
+from app.agent.prompts.speech import SPEECH_PROTOCOL
 from app.agent.delivery.speech import (
     DEFAULT_MAX_BUBBLES,
     QUEUE_DUP,
     QUEUE_OK,
-    SPEECH_PROTOCOL,
     SpeechOutbox,
     build_speech_tools,
     normalize_messages,
@@ -307,6 +307,7 @@ def test_defaults_are_documented():
 def test_chat_prompt_explains_tool_speech():
     """聊天预设的提示词必须讲清"工具是动作/怎么分条"（对齐 qqbridge v2 的口径）。"""
     from app.agent.persona import rules
+    from app.agent.prompts import presets
 
     tools = {
         "send_message",
@@ -319,7 +320,7 @@ def test_chat_prompt_explains_tool_speech():
     speech_cfg = {"reply_mode": "participation"}
 
     caps = rules.detect_caps(tools, speech_cfg)
-    text = rules.render(None, tools, speech_cfg)
+    text = presets.render(presets.CHAT, available_tools=tools, config=speech_cfg)
 
     assert caps["speech_by_tool"] is True
     assert "你输出的文本只是思考" in text

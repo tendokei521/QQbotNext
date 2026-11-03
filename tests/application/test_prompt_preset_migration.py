@@ -1,4 +1,4 @@
-"""存量账号的提示词方案迁移：空/拼错 → chat（幂等）。"""
+"""存量账号的提示词方案迁移：空/拼错/已删除方案 → chat（幂等）。"""
 
 from __future__ import annotations
 
@@ -17,10 +17,10 @@ async def test_empty_or_unknown_preset_falls_back_to_chat(container, config_serv
 
     updated = await migrate_prompt_preset(config_service)
 
-    assert updated == 2
+    assert updated == 3
     assert config_service.get_module_config("agent", "a")["prompt_preset"] == "chat"
     assert config_service.get_module_config("agent", "b")["prompt_preset"] == "chat"
-    assert config_service.get_module_config("agent", "c")["prompt_preset"] == "assistant"
+    assert config_service.get_module_config("agent", "c")["prompt_preset"] == "chat"
 
 
 async def test_migration_is_idempotent(container, config_service):

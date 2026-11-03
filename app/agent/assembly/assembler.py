@@ -12,7 +12,7 @@ messages：``chat.generate_response``、``chat.stream_response``、``scheduler._
 ```
 PromptRequest（一次请求的全部归一化输入）
       ↓
-registry_of(runtime).resolve()   ← 默认段（builtin_sections）+ 插件注册段
+registry_of(runtime).resolve()   ← 默认段（prompts/sections）+ 插件注册段
       ↓                          ← 先按「层」（layers.py），层内按 order
 逐段 builder(req)                ← 段内自带适用条件，不适用返回 []
       ↓
@@ -26,7 +26,7 @@ messages（OpenAI 风格）
 - **先说层，再说段**：一次请求固定是 L1 系统提示词 → L2 人格预设 → L3 钩子注入 →
   L4 对话历史 → L5 本轮消息（见 :mod:`app.agent.assembly.layers`）。层由段的 ``layer``
   或内置映射决定，**层序优先于段的 order**；所以规则天然在人设之前，插件段天然在两者之后；
-- **每个段是独立函数**（``builtin_sections.build_xxx(req) -> list[dict]``），
+- **每个段是独立函数**（``prompts/sections.build_xxx(req) -> list[dict]``），
   只读 req、不产生副作用，可单测；
 - **注册表按 runtime 实例隔离**（``runtime.prompt_sections``）；没有 runtime 的直调/单测
   用进程级默认表。默认段由 ``default_sections()`` 首次解析时注入，"默认段始终存在"；
@@ -35,7 +35,7 @@ messages（OpenAI 风格）
 - **只有一种形态**：L1 一条 system、L2 一条、L3 若干。旧的 ``system_prompt_style=single``
   （把所有 system 折成一整条，只为对齐第三方形态）已删除——折掉之后"层"就不存在了。
 
-## 段顺序（层内 order；详见 ``builtin_sections`` 的表）
+## 段顺序（层内 order；详见 ``prompts/sections`` 的表）
 
 | order | 段 | 角色 | 条件 |
 |---|---|---|---|
@@ -73,7 +73,7 @@ messages（OpenAI 风格）
   只是日志从 warning 提升为 error 以便排查。
 
 提示词方案（``prompt_preset``）改的是**文案不是段**：段的位置与顺序不变，正文换成
-该方案的版本（见 ``assembly.presets``）；人格段永远不受影响。
+该方案的版本（见 ``prompts/presets``）；人格段永远不受影响。
 """
 
 from __future__ import annotations
@@ -82,7 +82,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.agent.assembly.builtin_sections import (
+from app.agent.prompts.sections import (
     EXTRA_SECTION,
     _extra_text_parts,
     _user_block_parts,
@@ -471,7 +471,8 @@ def apply_speech_protocol(messages: list[dict], req: PromptRequest) -> list[dict
     另外这条**只在发言通道生效时**才贴（``speech.speech_via_tool`` 或本轮已过参与度门）：
     文本即发言的档位贴这句就是自相矛盾的假话。
     """
-    from app.agent.delivery.speech import SPEECH_PROTOCOL, speech_via_tool
+    from app.agent.delivery.speech import speech_via_tool
+    from app.agent.prompts.speech import SPEECH_PROTOCOL
 
     config = getattr(req, "config", None)
     forced = False

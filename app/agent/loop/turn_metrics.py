@@ -177,12 +177,7 @@ def _input_tokens_estimate(messages: list[dict]) -> int:
 DEFAULT_REASONING_OVERFLOW_RETRIES = 1
 
 
-REASONING_OVERFLOW_NUDGE = (
-    "【系统提醒】上一轮你的思考把输出预算用满了，正文还没开始就被截断，"
-    "对方什么都没收到。这一轮不要复述思考过程，直接给最终回答；"
-    "如果要看图，就只说你看到的关键内容，别长篇推理。"
-)
-
+# 重试提醒文案已迁到 ``app/agent/prompts/nudges.py``（chat/turn 直接从那里 import）。
 
 def _reasoning_overflow_retries(config, default: int = DEFAULT_REASONING_OVERFLOW_RETRIES) -> int:
     """思考吃满 ``max_tokens`` 时的收敛重试次数（配置 ``reasoning_overflow_retries``）。

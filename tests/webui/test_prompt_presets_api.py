@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from starlette.testclient import TestClient
 
-from app.agent.assembly import presets
+from app.agent.prompts import presets
 from app.application import prompt_preset_service
 from app.webui.app import create_app
 
@@ -13,7 +13,7 @@ def _client(container) -> TestClient:
     return TestClient(create_app(container))
 
 
-async def test_list_returns_three_presets(container, config_service):
+async def test_list_returns_both_presets(container, config_service):
     client = _client(container)
 
     resp = client.get("/api/prompt-presets")
@@ -21,7 +21,7 @@ async def test_list_returns_three_presets(container, config_service):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["ok"] is True
-    assert [row["key"] for row in body["presets"]] == ["chat", "roleplay", "assistant"]
+    assert [row["key"] for row in body["presets"]] == ["chat", "roleplay"]
     assert all(row["default_text"].strip() for row in body["presets"])
 
 

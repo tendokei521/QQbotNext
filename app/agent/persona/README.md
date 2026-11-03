@@ -14,8 +14,8 @@
 
 ## 注意
 
-三套系统提示词（chat / roleplay / assistant）的**段落文案不在本包**，统一放在
-`app/agent/assembly/presets.py`；`rules.py` 只保留与文案无关的机制。
+两套系统提示词（chat / roleplay）的**段落文案不在本包**，统一放在
+`app/agent/prompts/presets.py`；`rules.py` 只保留与文案无关的机制。
 
 `data/qq_faces.py` 是**生成物**，由 `scripts/gen/export_napcat_faces.py` 从本机
 NapCat 包导出，`--check` 做升级后比对。**不要手改**。

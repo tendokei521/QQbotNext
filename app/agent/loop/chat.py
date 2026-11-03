@@ -70,7 +70,6 @@ from app.agent.loop.turn_metrics import (  # noqa: F401 - 重导出保持 chat.*
     DEFAULT_EMPTY_REPLY_RETRIES,
     DEFAULT_MAX_TOOL_ROUNDS,
     DEFAULT_REASONING_OVERFLOW_RETRIES,
-    REASONING_OVERFLOW_NUDGE,
     _effective_max_tokens,
     _history_meta_flags,
     _input_tokens_estimate,
@@ -87,6 +86,7 @@ from app.agent.loop.turn_metrics import (  # noqa: F401 - 重导出保持 chat.*
     log_debug_response_if_enabled,
 )
 from app.agent.loop.turn_runner import TurnAborted
+from app.agent.prompts.nudges import REASONING_OVERFLOW_NUDGE
 from app.agent.providers import log_token_usage
 from app.agent.session.manager import SessionManager
 from app.agent.tools.spec import build_tools, make_executor

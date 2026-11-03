@@ -35,6 +35,7 @@ from app.agent.assembly.sections import Section, resolve_sections
 #: 允许出现在 L1/L2 之外的段（层内顺序由段 order 决定）
 REQUIRED_SECTION_LAYERS = {
     "behavior": LAYER_SYSTEM_PROMPT,
+    "onebot_auth": LAYER_SYSTEM_PROMPT,
     "schedule": LAYER_SYSTEM_PROMPT,
     "proactive": LAYER_SYSTEM_PROMPT,
     "message_meta": LAYER_INJECTED,

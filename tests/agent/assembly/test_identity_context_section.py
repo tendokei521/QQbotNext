@@ -14,7 +14,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from app.agent.assembly.assembler import PromptAssembler, PromptRequest
-from app.agent.assembly.builtin_sections import build_identity_context
+from app.agent.prompts.sections import build_identity_context
 
 
 def _req(config: dict | None = None, bot=None, bot_id: str = "bot1"):
