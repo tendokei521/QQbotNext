@@ -530,7 +530,15 @@ async def stream_response(runtime, event, ctx=None):
         # 新模式里"沉默"是合法结局，再补一轮等于逼它开口，与参与度语义相反。
         full_text = "\n".join(spoken_parts)
         if speech.spoken == 0:
-            # 静默：不发、不写 assistant 历史。这是正常结局，不是失败——但必须留痕，
+            # 静默：不发、不写 assistant 正文；但把本轮思考记成（未回复）条目，
+            # 会话数据页仍可点开思考内容。silent 条目 get_history 会过滤，不回灌模型。
+            _silent_reasoning = str(getattr(step, "reasoning_text", "") or "").strip()
+            if _silent_reasoning:
+                session_mgr.add_message(
+                    session_id, "assistant", "（未回复）",
+                    reasoning=_silent_reasoning, silent=True,
+                )
+            # 这是正常结局，不是失败——但必须留痕，
             # 否则"哑火太多"会变成查不到原因的现象。流式失败要说失败，别说静默。
             log = logger.add_info(account_label(runtime.bot_id))
             detail = (

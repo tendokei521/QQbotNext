@@ -58,6 +58,23 @@ def test_add_message_legacy_shape_unchanged(tmp_path):
     assert entry == {"role": "assistant", "content": "回复内容", "time": 1788342260}
 
 
+def test_silent_assistant_entry_hidden_from_model_history(tmp_path):
+    """未回复轮：正文（未回复）+ 思考留存给会话页，但 get_history 绝不回灌模型。"""
+    mgr = _mgr(tmp_path)
+    mgr.create_session("group_1", "group", 60)
+    mgr.add_message(
+        "group_1", "assistant", "（未回复）", reasoning="想了一下，决定不接话", silent=True
+    )
+
+    stored = mgr.get_session("group_1").data.history[-1]
+    assert stored["content"] == "（未回复）"
+    assert stored["reasoning"] == "想了一下，决定不接话"
+    assert stored["silent"] is True
+    assert mgr.get_history("group_1") == []
+    assert mgr.history_snapshot("group_1") == []
+    assert mgr.history_snapshot("group_1", include_junk=True)[0]["content"] == "（未回复）"
+
+
 def test_get_history_preserves_turn_and_base_for_enrichment(tmp_path):
     """轮次信息必须能被读取侧看到，否则 H4 的补全回写无法按 message_id 定位。"""
     mgr = _mgr(tmp_path)

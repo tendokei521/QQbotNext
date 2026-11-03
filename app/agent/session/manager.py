@@ -452,6 +452,7 @@ class SessionManager:
         is_private: bool = False,
         meta_lines: list[str] | None = None,
         reasoning: str = "",
+        silent: bool = False,
     ):
         """追加一条历史。
 
@@ -492,6 +493,10 @@ class SessionManager:
             # 仅供会话数据页"点开看这一句是怎么想出来的"。
             if reasoning:
                 entry["reasoning"] = str(reasoning)[:4000]
+            if silent:
+                # 未回复轮：正文用（未回复）占位，只用于会话数据页展示；
+                # get_history 会过滤掉它，绝不回灌模型上下文。
+                entry["silent"] = True
             history = session.data.history
             # 稳定 entry_id：事件日志里"这条消息"的身份。跟着 entry 一起存，
             # WebUI 按 id 编辑/删除时就能精确折叠到它（老数据没有，用 task:idx 兜底）。
@@ -635,10 +640,12 @@ class SessionManager:
         session = self.get_session(session_id)
         if not session or session.data is None:
             return []
-        # 过滤掉空 assistant 消息与已知杂散 token：模型返回空/rate. 不应再作为上下文回灌
+        # 过滤掉空 assistant、已标记 silent（未回复）与已知杂散 token：
+        # silent 只给会话数据页展示思考，绝不回灌模型上下文。
         filtered = [
             m for m in session.data.history
-            if not (
+            if not m.get("silent")
+            and not (
                 m.get("role") == "assistant"
                 and (not str(m.get("content") or "").strip() or _is_junk_assistant(m.get("content")))
             )
@@ -676,7 +683,8 @@ class SessionManager:
         if not include_junk:
             items = [
                 m for m in items
-                if not (
+                if not m.get("silent")
+                and not (
                     m.get("role") == "assistant"
                     and (not str(m.get("content") or "").strip() or _is_junk_assistant(m.get("content")))
                 )

@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### 未回复轮记录（未回复）正文 + 可展开思考（2026-11-03）
+
+- 发言通道静默（没有 `send_message`）时，若本轮有思考内容，写入一条 assistant 历史：
+  正文固定 `（未回复）`，`reasoning` 保存本轮思考（含并入的普通文字），会话数据页可展开。
+- 该条目带 `silent=True`：`get_history` / `history_snapshot` 默认过滤，**不回灌模型上下文**；
+  WebUI 从历史归档读取时仍能看到并展开思考。
+
 ### 发言通道的普通文字并入思考内容（2026-11-03）
 
 - `StepRequest.text_as_thinking`：发言通道（`reply_mode=participation`）下，流式/非流式
