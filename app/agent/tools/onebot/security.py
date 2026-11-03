@@ -17,6 +17,22 @@ from __future__ import annotations
 
 PERMISSION_PATH = ("everyone", "member", "group_admin", "group_owner", "owner")
 
+#: 敏感级 → 允许**授权该操作**的账号侧身份（「消息凭证」鉴权用；2026-11-03 重写）。
+#:
+#: - ``high``（群管理类工具）：bot 管理者或拥有者；
+#: - ``critical``（自身账号修改类工具）：仅 bot 拥有者；
+#: - ``normal``：不额外要求账号侧身份（沿用工具自身的 permission 判定）。
+SENSITIVITY_AUTHORIZER_ROLES: dict[str, tuple[str, ...]] = {
+    "high": ("manager", "owner"),
+    "critical": ("owner",),
+}
+
+
+def authorizer_roles(sensitivity: str) -> tuple[str, ...]:
+    """某敏感级需要的授权身份（大写/未知值按 normal 处理）。"""
+    return SENSITIVITY_AUTHORIZER_ROLES.get(str(sensitivity or "").strip().lower(), ())
+
+
 #: 配置键（Agent 配置）与默认值
 TOOLS_ENABLED_KEY = "onebot_tools_enable"
 DEFAULT_TOOLS_ENABLED = True

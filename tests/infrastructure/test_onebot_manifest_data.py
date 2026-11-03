@@ -128,6 +128,50 @@ def test_policy_sets_have_no_dangling_names(catalog):
     assert not dangling, f"策略名单引用了清单里不存在的工具：{dangling}"
 
 
+def test_high_means_group_admin_or_above(catalog):
+    """high 的判定口径：清单 permission 为「群管理员及以上」（2026-11-03 重写）。"""
+    perms = {e["name"]: e["permission"] for e in catalog}
+    bad = sorted(
+        name
+        for name in manifest_module._HIGH_TOOLS
+        if perms.get(name) not in manifest_module._HIGH_PERMISSIONS
+    )
+    assert not bad, f"这些工具标了 high 但清单权限不到群管理员：{bad}"
+
+
+def test_critical_is_self_account_scope(catalog):
+    """critical 只收「自身账号修改」类工具，且与 high 互斥。"""
+    names = {e["name"] for e in catalog}
+    perms = {e["name"]: e["permission"] for e in catalog}
+    assert manifest_module._CRITICAL_TOOLS, "critical 名单不能为空"
+    assert manifest_module._CRITICAL_TOOLS <= names, "critical 名单里有清单外的工具"
+    # 这些工具动的是账号本身：默认权限都应是 owner（放宽成 everyone/member 属于错误配置）
+    not_owner = sorted(
+        name for name in manifest_module._CRITICAL_TOOLS if perms.get(name) != "owner"
+    )
+    assert not not_owner, f"critical 工具默认权限应为 owner：{not_owner}"
+    assert not (manifest_module._CRITICAL_TOOLS & manifest_module._HIGH_TOOLS), (
+        "critical 与 high 不能重叠（critical 优先，重叠说明派生规则有歧义）"
+    )
+
+
+def test_authorizer_roles_follow_sensitivity():
+    """high → bot 管理者/拥有者；critical → 仅拥有者；normal → 不额外要求。"""
+    from app.agent.tools.onebot.security import (
+        SENSITIVITY_AUTHORIZER_ROLES,
+        authorizer_roles,
+    )
+
+    assert SENSITIVITY_AUTHORIZER_ROLES == {
+        "high": ("manager", "owner"),
+        "critical": ("owner",),
+    }
+    assert authorizer_roles("HIGH") == ("manager", "owner")
+    assert authorizer_roles("critical") == ("owner",)
+    assert authorizer_roles("normal") == ()
+    assert authorizer_roles("") == ()
+
+
 def test_manifest_module_stays_a_thin_loader():
     """`manifest.py` 必须是加载器，不是数据。
 

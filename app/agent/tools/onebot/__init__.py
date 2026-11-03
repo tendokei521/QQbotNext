@@ -3,7 +3,7 @@
 原「工具扩展」插件的 OneBot 部分（2026-11-03 并入框架）：
 
 - ``manifest.json``：175 个 OneBot API 的目录数据（name/description/schema/权限）；
-- ``manifest.py``：加载 JSON 并派生 ``sensitivity``（高危名单写在代码里）；
+- ``manifest.py``：加载 JSON 并派生 ``sensitivity``（critical=自身账号类、high=群管理类）；
 - ``security.py``：只读总开关 + 清单默认权限/作用域；
 - ``executor.py``：构建 Toolspec、执行 OneBot action、表情/戳一戳的特殊处理；
 - ``source.py``：注册到 ``runtime.tool_sources`` 的工具源。

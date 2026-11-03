@@ -55,6 +55,19 @@ resolve_tool_state(runtime, spec | name+source, session_scope=..., event=...)
 - `event is None`（主动消息 / 定时任务）→ 直接放行：这类触发没有"普通群成员"主语。
 - `allowed_for_event` 是唯一实现：判定链第 ⑤ 层与执行器共用。
 
+### 4.1 敏感级与授权身份（2026-11-03 重写）
+
+`sensitivity` 由清单派生（critical 优先），不再按"不可撤销"划分：
+
+| 等级 | 判定 | 需要谁授权 |
+|---|---|---|
+| `critical` | 修改/退出**自身账号**或账号级数据：资料/头像/签名/在线状态、好友、自定义表情、收藏/空间、原始数据包、缓存/重启…（见 `manifest._CRITICAL_TOOLS`） | **bot 拥有者**（owner） |
+| `high` | 清单默认权限为**群管理员及以上**（group_admin / group_owner / owner） | **bot 管理者或拥有者**（manager / owner） |
+| `normal` | 其余（member / everyone） | 不额外要求账号侧身份 |
+
+授权身份的映射在 `tools/onebot/security.SENSITIVITY_AUTHORIZER_ROLES`，供「消息凭证」
+鉴权使用；人工审批（`tool_approval_enable`）仍然对 high/critical 生效（fail-closed）。
+
 ## 5. 注入与执行
 
 | 阶段 | 位置 | 行为 |
@@ -71,7 +84,7 @@ resolve_tool_state(runtime, spec | name+source, session_scope=..., event=...)
 |---|---|---|
 | 并发 | `ToolSpec.concurrency`、`concurrency_safe(args)`、`tool_parallel_max` | 仅 `parallel` 且 `concurrency_safe(args) is True` 才并行，其余独占；独占是屏障；池默认 8（1..32）；回填按模型顺序 |
 | 超时 | `ToolSpec.timeout_s`、`tool_timeout_default_s` | 工具声明优先，否则 20s；超时**不取消**协程，只换成 `error: TOOL_TIMEOUT` 并给孤儿任务留痕 |
-| 审批 | `tool_approval_enable`、`runtime.approval_channel` | 开关 + `source=onebot` + `sensitivity in {high,critical}`；fail-closed，仅 `ALLOWED_ONCE` 本次有效 |
+| 审批 | `tool_approval_enable`、`runtime.approval_channel` | 开关 + `source=onebot` + `sensitivity in {high,critical}`（high=群管理类 / critical=自身账号类，见 §4.1）；fail-closed，仅 `ALLOWED_ONCE` 本次有效 |
 | 结果 | `ToolResult(blocks, is_error, code, meta, additional_contexts, concludes_turn)`、`ERROR_CODES` | 结构化出口；旧 `"error:"` 前缀双读；钩子能在 `ctx.extra["code"]` 读到错误码 |
 | 落盘 | `tool_spill_enable`、`tool_spill_max_bytes` | 超阈值（默认 50KB）写 `data/llm/<bot>/spill/<session>/<sha16>.txt`，正文换成预览+路径；失败只 warn；跳过 `recall_tool_result` 与 `speech` |
 | 回应要求 | 固定框架默认 `tool_loop.DEFAULT_REPLY_DIRECTIVE` | 拼在**结果末尾**（截断/落盘之后）；错误结果与 `speech` 不追加；原模块配置随「工具扩展」插件下线 |

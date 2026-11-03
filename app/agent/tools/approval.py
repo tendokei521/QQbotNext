@@ -2,8 +2,9 @@
 
 ## 为什么要有
 
-OneBot 侧有一批不可撤销的操作（踢人、禁言、退群…）打着 ``sensitivity in {high, critical}``
-的标，但运行期只做了权限校验：只要调用者权限够，模型一句"帮我踢了他"就能执行。
+OneBot 侧有一批需要权限的操作打着 ``sensitivity in {high, critical}`` 的标
+（high=群管理类、critical=自身账号修改类，见 ``tools/onebot/manifest.py``），
+但光有权限校验不足：只要调用者权限够，模型一句"帮我踢了他"就能执行，
 审计里也只有"调用成功"，没有"谁批准过"。
 
 ## 设计要点（fail-closed 是全部重点）
