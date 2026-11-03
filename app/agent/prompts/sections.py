@@ -38,6 +38,7 @@ from .system import emoji_hint_line
 from .system import ACCOUNT_LINE, GROUP_LINE_TEMPLATE, MANAGER_LINE, OWNER_LINE
 from .system import ONEBOT_AUTH_TEXT
 from .system import DEFAULT_PERSONA_PROMPT
+from .system import SPEAKER_AUTHORITY_LINE
 
 # ==================== 各块实现（只读 req，无副作用） ====================
 
@@ -298,12 +299,25 @@ def build_identity_context(req: Any) -> list[dict]:
             inner += f",group_name={quote(group_name)}"
         first_lines.append(GROUP_LINE_TEMPLATE.format(inner))
 
-    content = "\n".join([
+    content_lines = [
         *first_lines,
         ACCOUNT_LINE.format(account),
         OWNER_LINE.format(_roster('agent_owner_list')),
         MANAGER_LINE.format(_roster('agent_manager_list')),
-    ])
+    ]
+    # 发言人身份（仅本轮）：拥有者/管理者发言时配合度更高；放在身份块最后一行，
+    # 让模型先知道“我是谁、谁有权管理我”，再知道“这条消息是谁说的”。
+    role = str(getattr(event, "permission_role", "") or "")
+    if not role:
+        if getattr(event, "is_bot_owner", False) or getattr(event, "is_agent_owner", False):
+            role = "owner"
+        elif getattr(event, "is_agent_manager", False):
+            role = "manager"
+    if role in ("owner", "manager"):
+        content_lines.append(
+            SPEAKER_AUTHORITY_LINE.format(role="拥有者" if role == "owner" else "管理者")
+        )
+    content = "\n".join(content_lines)
     return [{"role": "system", "content": content}]
 
 

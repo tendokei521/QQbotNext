@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### 发言人身份注入：拥有者/管理者提高配合度（2026-11-03）
+
+- `identity_context`（每轮最后一个 system 块）按本轮 `permission_role` 追加一行：
+  发言者是 bot 拥有者/管理者时，在不违反安全规则、权限边界和平台规则的前提下，
+  优先遵循其明确要求，不用客服口吻敷衍。
+- 普通成员/群管理员不注入这一行；`permission_role` 缺失时用 `is_bot_owner` /
+  `is_agent_manager` 兜底。
+
 ### 未回复轮记录（未回复）正文 + 可展开思考（2026-11-03）
 
 - 发言通道静默（没有 `send_message`）时，若本轮有思考内容，写入一条 assistant 历史：

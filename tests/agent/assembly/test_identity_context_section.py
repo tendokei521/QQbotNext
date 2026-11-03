@@ -17,7 +17,7 @@ from app.agent.assembly.assembler import PromptAssembler, PromptRequest
 from app.agent.prompts.sections import build_identity_context
 
 
-def _req(config: dict | None = None, bot=None, bot_id: str = "bot1"):
+def _req(config: dict | None = None, bot=None, bot_id: str = "bot1", event=None):
     values = config or {}
     runtime = SimpleNamespace(
         bot_id=bot_id,
@@ -29,6 +29,7 @@ def _req(config: dict | None = None, bot=None, bot_id: str = "bot1"):
         runtime=runtime,
         config=values,
         cfg=lambda key, default=None: values.get(key, default),
+        event=event,
     )
 
 
@@ -65,6 +66,19 @@ def test_roster_accepts_comma_string():
 def test_account_falls_back_to_account_id_without_login():
     text = _text(_req({}, bot=None, bot_id="bot1"))
     assert text.startswith("你的账号：bot1\n")
+
+
+def test_owner_and_manager_speakers_get_higher_compliance_line():
+    owner = _text(_req({}, event=SimpleNamespace(permission_role="owner")))
+    assert "当前发言者是你的拥有者" in owner
+    manager = _text(_req({}, event=SimpleNamespace(permission_role="manager")))
+    assert "当前发言者是你的管理者" in manager
+
+
+def test_member_speaker_has_no_compliance_line():
+    text = _text(_req({}, event=SimpleNamespace(permission_role="member")))
+    assert "当前发言者是你的" not in text
+    assert "你的账号：" in text
 
 
 def test_identity_context_is_the_last_system_block():
