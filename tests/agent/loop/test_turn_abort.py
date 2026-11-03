@@ -39,7 +39,7 @@ class _Invoker:
             yield event
 
 
-def _request(invoker, *, abort=None, executor=None, max_rounds=5) -> StepRequest:
+def _request(invoker, *, abort=None, executor=None, max_rounds=5, text_as_thinking=False) -> StepRequest:
     return StepRequest(
         runtime=SimpleNamespace(bot_id="1", invoker=invoker, config={}),
         chain=[{"provider": "fake", "model": "m"}],
@@ -48,7 +48,20 @@ def _request(invoker, *, abort=None, executor=None, max_rounds=5) -> StepRequest
         max_rounds=max_rounds,
         tool_ctx=SimpleNamespace(extra={}),
         abort=abort,
+        text_as_thinking=text_as_thinking,
     )
+
+
+async def test_stream_text_is_folded_into_reasoning_when_speech_by_tool():
+    """发言通道下普通文字只是思考：换行并入 reasoning_text，供 UI/历史溯源。"""
+    invoker = _Invoker(stream_script=[[
+        StreamEvent(type="reasoning", text="先想一下"),
+        StreamEvent(type="text", text="普通文字"),
+        StreamEvent(type="done", finish_reason="stop"),
+    ]])
+    result = await run_stream_step(_request(invoker, text_as_thinking=True))
+    assert result.reasoning_text == "先想一下\n普通文字"
+    assert result.text == "普通文字"
 
 
 def test_abort_scope_is_idempotent_and_raises():

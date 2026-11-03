@@ -408,6 +408,7 @@ async def stream_response(runtime, event, ctx=None):
                 max_msg_len=max_msg_len,
                 abort=abort,
                 tool_log=turn_log,
+                text_as_thinking=speech_by_tool,
             ),
             step,
         )

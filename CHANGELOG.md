@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### 发言通道的普通文字并入思考内容（2026-11-03）
+
+- `StepRequest.text_as_thinking`：发言通道（`reply_mode=participation`）下，流式/非流式
+  的普通文字输出也写入 `reasoning_text`，按换行直接拼接（上限 4000 字）。
+- 实际回复仍只由 `send_message` 决定；这里只影响会话数据页/历史里的“思考过程”溯源。
+
 ### 历史 name 字段不脱敏（2026-11-03）
 
 - `_history_meta_flags` 的 `mask_nickname` 直接固定为 `False`：历史/本轮发送者昵称

@@ -41,6 +41,7 @@ from typing import Any
 
 from app.agent import logger
 from app.agent.assembly import assembler as assembly
+from app.agent.delivery.speech import speech_via_tool
 from app.agent.hooks import run_stage
 from app.agent.loop.assistant_output import _clean_output_for_history
 from app.agent.loop.context_blocks import (
@@ -497,6 +498,7 @@ async def _chat_once(
                 on_round_end=_on_round_end,
                 tool_log=tool_log,
                 abort=abort,
+                text_as_thinking=speech_via_tool(config),
             )
         )
 
@@ -596,6 +598,7 @@ async def _stream_once(
             max_msg_len=max_msg_len,
             tool_log=tool_log,
             abort=abort,
+            text_as_thinking=speech_via_tool(policy_cfg),
         )
     )
     if step.kind == KIND_ERROR:

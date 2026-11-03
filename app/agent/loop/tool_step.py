@@ -134,6 +134,8 @@ class StepRequest:
     abort: Any = None
     #: 会话事件日志（`session_log.SessionLog`）：记 tool/call 与 tool/result（Q3）
     tool_log: Any = None
+    #: 发言通道：普通文字输出只是思考，也并入 reasoning_text（换行拼接）
+    text_as_thinking: bool = False
 
 
 @dataclass
@@ -223,6 +225,16 @@ def concluding_tool(structured: list | None, normalized: list | None = None) -> 
             name = str((call.get("function") or {}).get("name") or "")
         return name or "tool"
     return ""
+
+
+def _append_reasoning_text(result: Any, text: Any) -> None:
+    """把一段文字并入 reasoning_text（思考内容），直接换行拼接并保留 4000 字上限。"""
+    piece = str(text or "").strip()
+    if not piece or len(result.reasoning_text) >= 4000:
+        return
+    current = str(result.reasoning_text or "")
+    merged = f"{current}\n{piece}" if current else piece
+    result.reasoning_text = merged[:4000]
 
 
 async def iter_stream_step(req: StepRequest, result: StepResult) -> AsyncIterator[tuple[str, Any]]:
@@ -340,6 +352,9 @@ async def _drive_stream_rounds(
         result.last_round_reasoning = reasoning_chars
         result.finish_reason = finish_reason or result.finish_reason
         round_text = "".join(text_parts[round_start:])
+        if req.text_as_thinking and round_text.strip():
+            # 发言通道：普通文字输出也只是思考，换行并入 reasoning_text（UI 溯源/历史）。
+            _append_reasoning_text(result, round_text)
 
         if round_error:
             result.error = round_error
@@ -518,6 +533,9 @@ async def run_blocking_step(req: StepRequest) -> StepResult:
         # 采集是"步骤"的职责，与"这次请求是流式还是非流式"无关。
         if reasoning and len(result.reasoning_text) < 4000:
             result.reasoning_text += reasoning
+        if req.text_as_thinking and text.strip():
+            # 发言通道：普通文字输出也只是思考，换行并入 reasoning_text。
+            _append_reasoning_text(result, text)
         calls = list(getattr(response, "tool_calls", None) or [])
 
         # finish_reason 只有 raw 里有（OpenAI 形状）：结局判定要用它区分
