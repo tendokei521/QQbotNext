@@ -457,8 +457,7 @@ def _prefix_fingerprint(messages: list[dict]) -> str:
 def _history_meta_flags(runtime) -> dict:
     """计算历史渲染标志：是否归一化单行、是否脱敏昵称。
 
-    mask_nickname=True 只脱敏**句子型/超长**昵称，普通昵称保留；
-    渲染层不要把所有人统一改成 ``用户<QQ>``。
+    mask_nickname 恒为 True：句子型/超长昵称一律脱敏，避免昵称内容泄漏进 LLM 上下文。
     """
     return {
         "normalize_enhanced": bool(runtime.config.get("experimental_long_term_memory", False)),
