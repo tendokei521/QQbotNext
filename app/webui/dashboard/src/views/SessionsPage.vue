@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AxiosError } from 'axios'
 import http, { errorMessage, token } from '@/api/http'
+import { onSocketMessage } from '@/api/socket'
 import { useBotsStore } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
@@ -964,8 +965,33 @@ watch(
   },
 )
 
+// 会话更新推送：后端每次写历史/补思考/结束流式都会广播 sessions_updated。
+// 400ms 防抖：同一轮可能连续触发 add_message + reasoning，合并成一次刷新。
+let sessionsPushTimer: number | null = null
+let offSessionsUpdated: (() => void) | null = null
+
+function scheduleSessionsRefresh(payload: any): void {
+  const pushedBot = payload?.bot_id
+  if (pushedBot != null && botId.value != null && String(pushedBot) !== String(botId.value)) return
+  if (sessionsPushTimer !== null) clearTimeout(sessionsPushTimer)
+  sessionsPushTimer = window.setTimeout(() => {
+    sessionsPushTimer = null
+    void loadSessions()
+  }, 400)
+}
+
 onMounted(() => {
   loadSessions()
+  offSessionsUpdated = onSocketMessage('sessions_updated', scheduleSessionsRefresh)
+})
+
+onUnmounted(() => {
+  offSessionsUpdated?.()
+  offSessionsUpdated = null
+  if (sessionsPushTimer !== null) {
+    clearTimeout(sessionsPushTimer)
+    sessionsPushTimer = null
+  }
 })
 </script>
 
