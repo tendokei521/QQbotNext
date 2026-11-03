@@ -121,15 +121,15 @@ class AgentRuntime:
         # 未装模块时这里保持 None，流水线侧的调用点全部做了 getattr 保护。
         self.scheduler: Any = None
         self.proactive: Any = None
-        # 记忆 / 知识库 / MCP / OneBot 工具都是**业务**：实现已搬进对应模块，
-        # 框架不再持有它们的实例（模块通过 tool_sources 接入）。
+        # 记忆 / 知识库是**业务**：实现已搬进对应模块，框架不再持有它们的实例
+        # （模块通过 tool_sources 接入）。OneBot 工具是框架内置能力（2026-11-03
+        # 从「工具扩展」插件并入），下面直接注册它的工具源。
         # 策略配置视图（模块接管时挂载；None = 回退 agent 配置）
         self.assembly_options: Any = None
         self.meta_options: Any = None
         self.context_options: Any = None
         self.memory_options: Any = None
         self.knowledge_options: Any = None
-        self.tools_options: Any = None
         self.proactive_options: Any = None
         self.schedule_options: Any = None
         try:
@@ -173,6 +173,13 @@ class AgentRuntime:
         # 上下文贡献者与工具源（注册制、可组合；模块 on_load 里 register）
         self.context_providers: list = []
         self.tool_sources: list = []
+        # 框架内置工具源：OneBot 工具（原「工具扩展」插件，2026-11-03 并入框架）。
+        # 开关是 Agent 配置的 ``onebot_tools_enable``（「高级选项」页）。
+        from app.agent.tools.onebot import OneBotToolSource
+
+        from app.agent.loop.providers import register_tool_source
+
+        register_tool_source(self, OneBotToolSource())
         # Q7 中间件 waterfall：插件在"具体一步"插入（tool_call.before /
         # tool_result.after / messages.before_send），不必整体接管。见 app.agent.loop.middleware。
         self.middlewares = MiddlewareRegistry()

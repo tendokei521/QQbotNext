@@ -118,7 +118,7 @@ def test_page_titles_match_the_agreed_layout():
     [
         ("behavior", 6),
         ("session", 20),
-        ("advanced", 42),
+        ("advanced", 41),
     ],
 )
 def test_section_field_counts(section_id, expected):
@@ -154,7 +154,7 @@ def test_manifest_plus_panel_covers_exactly_the_core_keys():
     listed = set(_all_fields()) | set(_panel_fields()) | set(_reply_fields())
     # 「高级选项」是页面外工作台（单独页面，不在三份清单里）
     assert listed == set(CORE_KEYS) - set(ADVANCED_KEYS)
-    assert len(ADVANCED_KEYS) == 1, "高级选项目前只有「消息组装」一个开关"
+    assert len(ADVANCED_KEYS) == 2, "高级选项只有「消息组装」「工具」两个开关"
     # 面板/回复清单与实际键数一致（数量本身不锁定：入口增减属产品决策）
     assert len(_panel_fields()) == len(PANEL_KEYS)
     assert len(_reply_fields()) == len(REPLY_KEYS)

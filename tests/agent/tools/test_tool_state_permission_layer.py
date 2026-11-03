@@ -25,9 +25,7 @@ def _runtime():
     return SimpleNamespace(
         bot_id="1",
         config=cfg,
-        tools_options=SimpleNamespace(get=lambda k, d=None: config.get(k, d)),
         llm_tools=None,
-        mcp_service=None,
         telemetry=None,
         llm_tool_call_hooks=None,
     )

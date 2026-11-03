@@ -545,6 +545,19 @@ async def run(settings: Settings | None = None) -> None:
     except Exception as e:  # noqa: BLE001 —— 迁移失败不该阻断启动
         logger.error(f"[Migrate] llm_output 模块配置迁移失败（旧参数可能未生效）: {e}")
 
+    # 工具扩展模块退役（2026-11-03）：OneBot 工具并入框架，旧开关并进 agent 配置
+    try:
+        from app.application.tools_module_retirement import migrate_tools_module_config
+
+        tools_report = await migrate_tools_module_config(config_service)
+        if tools_report.get("accounts"):
+            logger.info(
+                f"[Migrate] 工具扩展退役：{tools_report['accounts']} 个账号的开关已并入"
+                f"「高级选项」（其中 {tools_report['enabled']} 个保持开启）"
+            )
+    except Exception as e:  # noqa: BLE001 —— 迁移失败不该阻断启动
+        logger.error(f"[Migrate] 工具扩展模块配置迁移失败（旧开关可能未生效）: {e}")
+
     # 存量脏值自愈：模块时代存下的值可能已不在 schema 枚举里（保存会被整份拒绝）
     try:
         from app.application.config_self_heal import heal_agent_config

@@ -1,9 +1,11 @@
 """「NapCat 工具」改名「OneBot 工具」后的配置兼容回归。
 
 改名本身只是文案清理，**真正的风险在配置键**：老用户库里存的是 ``napcat_tools_*``，
-升级后如果只认 ``onebot_tools_*``，读不到就回落默认值——而
-``onebot_tools_enable`` 默认 ``False``，等于把用户已经打开的开关静默关掉。
-本文件把这个不变量钉死：**旧键仍生效，新键优先，且不改写用户数据**。
+升级后如果只认 ``onebot_tools_*``，读不到就回落默认值——等于把用户已经打开的开关
+静默关掉。本文件把这个不变量钉死：**旧键仍生效，新键优先，且不改写用户数据**。
+
+> 2026-11-03：「工具扩展」插件并入框架后，OneBot 工具只剩两个 agent 配置键
+> （``onebot_tools_enable`` / ``onebot_tools_log_enabled``）；其余旧键已随插件下线。
 """
 
 from __future__ import annotations
@@ -17,12 +19,7 @@ from app.agent.config import (
 
 LEGACY_PAIRS = [
     ("onebot_tools_enable", "napcat_tools_enable"),
-    ("onebot_tools_allowed", "napcat_tools_allowed"),
-    ("onebot_tools_denied", "napcat_tools_denied"),
-    ("onebot_tools_max_result", "napcat_tools_max_result"),
-    ("onebot_tools_debug", "napcat_tools_debug"),
     ("onebot_tools_log_enabled", "napcat_tools_log_enabled"),
-    ("onebot_tool_overrides", "napcat_tool_overrides"),
 ]
 
 
@@ -61,8 +58,8 @@ def _config(stored: dict | None = None) -> tuple[AgentConfig, _Svc]:
 # ==================== 键映射表 ====================
 
 
-def test_legacy_key_mapping_covers_every_onebot_key():
-    """每一个 onebot_* 配置键都要有旧键映射（否则改名就是丢设置）。"""
+def test_legacy_key_mapping_covers_remaining_onebot_keys():
+    """保留下来的 onebot_* 配置键都要有旧键映射（否则改名就是丢设置）。"""
     for new_key, old_key in LEGACY_PAIRS:
         assert new_key in DEFAULT_LLM_CONFIG, f"{new_key} 不在默认配置里"
         assert legacy_key_of(new_key) == old_key
@@ -78,20 +75,10 @@ def test_old_keys_still_take_effect_after_rename():
     """用户库里的 napcat_* 值必须照常读到（这是升级不丢设置的核心断言）。"""
     cfg, _ = _config({
         "napcat_tools_enable": True,
-        "napcat_tools_allowed": ["send_msg"],
-        "napcat_tools_denied": ["set_group_kick"],
-        "napcat_tools_max_result": 555,
-        "napcat_tools_debug": True,
         "napcat_tools_log_enabled": False,
-        "napcat_tool_overrides": {"send_poke": {"permission": "member"}},
     })
     assert cfg.get("onebot_tools_enable") is True
-    assert cfg.get("onebot_tools_allowed") == ["send_msg"]
-    assert cfg.get("onebot_tools_denied") == ["set_group_kick"]
-    assert cfg.get("onebot_tools_max_result") == 555
-    assert cfg.get("onebot_tools_debug") is True
     assert cfg.get("onebot_tools_log_enabled") is False
-    assert cfg.get("onebot_tool_overrides") == {"send_poke": {"permission": "member"}}
 
 
 def test_new_key_wins_over_legacy_key():
@@ -99,33 +86,30 @@ def test_new_key_wins_over_legacy_key():
     cfg, _ = _config({
         "onebot_tools_enable": True,
         "napcat_tools_enable": False,
-        "onebot_tools_max_result": 100,
-        "napcat_tools_max_result": 200,
     })
     assert cfg.get("onebot_tools_enable") is True
-    assert cfg.get("onebot_tools_max_result") == 100
 
 
 def test_missing_keys_fall_back_to_defaults():
+    """没有显式配置时：工具默认开（与合并前「工具扩展」模块默认一致）。"""
     cfg, _ = _config({})
-    assert cfg.get("onebot_tools_enable") is False
-    assert cfg.get("onebot_tools_max_result") == DEFAULT_LLM_CONFIG["onebot_tools_max_result"]
+    assert cfg.get("onebot_tools_enable") is True
+    assert cfg.get("onebot_tools_enable") == DEFAULT_LLM_CONFIG["onebot_tools_enable"]
+    assert cfg.get("onebot_tools_log_enabled") is True
 
 
 def test_reading_legacy_does_not_rewrite_user_data():
     """兼容读取是内存适配：不得把旧键抹掉或替用户改名（避免不可逆的静默迁移）。"""
-    cfg, svc = _config({"napcat_tools_enable": True, "napcat_tools_debug": True})
+    cfg, svc = _config({"napcat_tools_enable": True})
     cfg.get("onebot_tools_enable")
-    cfg.get("onebot_tools_debug")
-    assert svc.stored[1] == {"napcat_tools_enable": True, "napcat_tools_debug": True}
+    assert svc.stored[1] == {"napcat_tools_enable": True}
 
 
 def test_raw_config_exposes_new_keys_for_legacy_users():
     """raw_config（下发到前端/写库）应按新键口径给出旧用户的值。"""
-    cfg, _ = _config({"napcat_tools_enable": True, "napcat_tools_max_result": 777})
+    cfg, _ = _config({"napcat_tools_enable": True})
     raw = cfg.raw_config
     assert raw["onebot_tools_enable"] is True
-    assert raw["onebot_tools_max_result"] == 777
     # 旧键仍原样保留（不丢历史，便于回滚/排查）
     assert raw["napcat_tools_enable"] is True
 

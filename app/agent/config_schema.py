@@ -977,10 +977,11 @@ SCHEMA = {
         "default": "", "rows": 3, "group": "group_tools",
     },
 
-    # ==================== OneBot 工具 ====================
+    # ==================== OneBot 工具（框架内置；唯一开关在「高级选项」页） ====================
     "onebot_tools_enable": {
-        "type": "boolean", "label": "启用 OneBot 工具", "description": "把 OneBot API 暴露给 LLM 作为 function calling 工具",
-        "default": False, "group": "group_onebot",
+        "type": "boolean", "label": "启用工具",
+        "description": "开启后模型可以调用 OneBot 工具（发消息、查询、群管理等）；权限仍按调用者身份校验",
+        "default": True, "group": "group_advanced",
     },
     "onebot_tools_allowed": {
         "type": "string_list", "label": "允许的工具", "description": "留空 = 全部允许；填了就只允许这些工具",
@@ -1132,7 +1133,6 @@ _gate(["message_debounce_max_wait"], {"key": "message_debounce_seconds", "gt": 0
 # ── 能力开关：各自只在启用后展开参数 ────────────────────────────────
 _gate(_group_fields("group_tavily", exclude=("tavily_enable",)), _on("tavily_enable"))
 _gate(_group_fields("group_knowledge", exclude=("knowledge_enable",)), _on("knowledge_enable"))
-_gate(_group_fields("group_onebot", exclude=("onebot_tools_enable",)), _on("onebot_tools_enable"))
 _gate(["image_max_count", "image_max_mb"], _on("image_understanding_enable"))
 _gate(["gif_max_frames", "gif_frame_max_edge", "gif_probe_all_images"], _on("gif_understanding_enable"))
 _gate(["schedule_prompt"], _on("schedule_enable"))

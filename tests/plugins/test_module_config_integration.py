@@ -1,4 +1,4 @@
-"""v3 集成验证：7 个模块全部装上后，全部迁走的键都必须"读得到、且读的是模块值"。
+"""v3 集成验证：内置模块全部装上后，全部迁走的键都必须"读得到、且读的是模块值"。
 
 这条测试代替"逐处 grep 框架是否还直接读 agent 配置"——那个静态检查分不清
 "读入参 config"和"读 runtime.config"。真正的判据是**行为**：
@@ -6,7 +6,7 @@
 > 把 agent 配置里的同名键设成 A、模块配置设成 B，机制侧经 `policy_view`
 > 必须读到 B；卸载模块后必须回到 A。
 
-它同时是 W8 的收尾验收：7 个模块 + 109 键 + 跨模块链式视图。
+它同时是 W8 的收尾验收：模块 + 键 + 跨模块链式视图。
 """
 
 from __future__ import annotations
@@ -36,7 +36,6 @@ def _runtime_with_views(views: dict, agent_config: dict | None = None):
         "context_options",
         "memory_options",
         "knowledge_options",
-        "tools_options",
         "proactive_options",
         "schedule_options",
     ):
@@ -52,7 +51,6 @@ VIEW_ATTR: dict[str, tuple[str, ...]] = {
     "llm_trigger": ("proactive", "schedule"),
     "llm_context": ("context",),
     "llm_memory": ("memory",),
-    "llm_tools_extra": ("tools",),
     "llm_enhance": (),
 }
 
@@ -116,17 +114,17 @@ def test_uninstalling_one_module_restores_agent_value_for_its_keys_only():
     """卸掉一个模块：它自己的键回退 agent 值，别人的键不受影响。"""
     views = {
         "memory": {"memory_enable": True},
-        "tools": {"onebot_tools_debug": True},
+        "context": {"context_enable": True},
     }
     runtime = _runtime_with_views(
-        views, {"memory_enable": False, "onebot_tools_debug": False}
+        views, {"memory_enable": False, "context_enable": False}
     )
     assert policy_view(runtime).get("memory_enable") is True
 
     runtime.memory_options = None  # 卸载 llm_memory
 
     assert policy_view(runtime).get("memory_enable") is False, "卸载后应回退 agent 配置"
-    assert policy_view(runtime).get("onebot_tools_debug") is True, "其它模块不受影响"
+    assert policy_view(runtime).get("context_enable") is True, "其它模块不受影响"
 
 
 @pytest.mark.parametrize("module_name", ALL_MODULES)

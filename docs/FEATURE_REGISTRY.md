@@ -99,15 +99,18 @@ LLM 阶段（`run_stage` 的真实调用点）：`pre_request` / `post_assemble`
 - 依赖自检：`requires = ("llm", "assembly", ...)`，加载时缺项只 WARNING；`self.missing_requirements()` 可查。
 - 框架有什么：`ctx.services.capabilities()` 返回 `{services, features, resource_types, schema_types, ...}`（`app/application/capabilities.py`）。
 
-## 7. 当前使用方（内置 5 模块）
+## 7. 当前使用方（内置 4 模块）
 
 | 模块 | 用到的扩展点 |
 |---|---|
 | `llm_trigger` | Section `schedule`/`proactive`（L1）、工具源 `schedule_task`、LLM 钩子 `message_observed`/`bot_sent`、`runtime.scheduler` / `proactive_service` |
 | `llm_context` | Section `context_convention`（L1）、工具源 `get_context`、`pre_request` 预取引用、`runtime.context_options` |
 | `llm_memory` | 上下文块 + 工具源（`memory_*`）、`pre_request`/`turn_completed`、`runtime.memory_service` |
-| `llm_tools_extra` | 工具源（OneBot 175 个 + MCP）、Section `emoji_hint`、`runtime.tools_options` |
 | `llm_enhance` | `pre_request`（调试 prompt 开关） |
+
+> 2026-11-03：「工具扩展」插件并入框架——OneBot 工具（175 个）成为框架内置工具源
+> （`app/agent/tools/onebot/`），提示段 `emoji_hint` 回到默认段表；唯一开关
+> `onebot_tools_enable` 是本体键（「高级选项」页），不再有模块与 `runtime.tools_options`。
 
 ## 8. 卸载纪律
 

@@ -16,8 +16,6 @@ from app.agent.tools.system import list_system_tools
 from app.application.bot_service import PASSWORD_MASK as _PASSWORD_MASK
 from app.core.logger import logger
 from app.plugin.schema_utils import webui_schema
-from app.plugins.llm_tools_extra.src.onebot.manifest import ONEBOT_TOOLS
-from app.plugins.llm_tools_extra.src.onebot.security import resolve_tool_policy
 from app.webui.api.deps import (
     get_agent_manager,
     get_config_service,
@@ -351,27 +349,7 @@ async def agent_knowledge_delete(cid: str, request: Request, bot_id: str | None 
     return _ok("知识库条目已删除")
 
 
-# ==================== OneBot 工具清单 ====================
-
-@router.get("/onebot/tools")
-async def agent_onebot_tools(request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
-    runtime, _ = _runtime(agent_manager, bot_id)
-    if runtime is None:
-        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
-    tools = []
-    for tool in ONEBOT_TOOLS:
-        policy = resolve_tool_policy(runtime, tool)
-        item = dict(tool)
-        item.update(policy)
-        tools.append(item)
-    return JSONResponse(content={
-        "ok": True,
-        "log_enabled": bool(runtime.config.get("onebot_tools_log_enabled", True)),
-        "tools": tools,
-    })
-
-
-# ==================== 统一 Tool 管理：系统 / 模块 / OneBot / MCP 工具清单 ====================
+# ==================== 统一 Tool 管理：系统 / 模块工具清单 ====================
 
 @router.get("/tools")
 async def agent_tools_all(
@@ -534,47 +512,6 @@ async def agent_module_tools(request: Request, bot_id: str | None = Depends(pars
     return JSONResponse(content={
         "ok": True,
         "log_enabled": bool(runtime.config.get("module_tools_log_enabled", True)),
-        "tools": tools,
-    })
-
-
-@router.get("/mcp/tools")
-async def agent_mcp_tools(request: Request, bot_id: str | None = Depends(parse_account_id), agent_manager=Depends(get_agent_manager)):
-    runtime, _ = _runtime(agent_manager, bot_id)
-    if runtime is None:
-        return _err(404, f"账号不存在或未装配运行时: {bot_id}")
-    mcp = _service(runtime, "mcp_service")
-    if mcp is None:
-        return _missing("MCP 工具")
-    try:
-        await mcp.ensure_ready()
-    except Exception as e:  # noqa: BLE001 —— MCP 连不上不该让页面 500
-        return JSONResponse(
-            content={
-                "ok": True,
-                "available": False,
-                "message": f"MCP 服务不可用: {e}",
-                "tools": [],
-            }
-        )
-    mcp_map = runtime.config.get("mcp_tools_enabled", {}) or {}
-    tools = []
-    for spec in mcp.build_tools():
-        user_enabled = mcp_map.get(spec.name, True) if isinstance(mcp_map, dict) else True
-        tools.append({
-            "name": spec.name,
-            "description": spec.description,
-            "parameters": spec.parameters,
-            "category": spec.category or "MCP",
-            "source": spec.source,
-            "enabled": bool(user_enabled),
-            "ready": True,
-            "effective": bool(user_enabled),
-            "prerequisite": "",
-        })
-    return JSONResponse(content={
-        "ok": True,
-        "log_enabled": bool(runtime.config.get("mcp_tools_log_enabled", True)),
         "tools": tools,
     })
 

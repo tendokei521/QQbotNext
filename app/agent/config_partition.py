@@ -166,7 +166,6 @@ UI_PAGES: tuple[UIPage, ...] = (
                 (
                     "system_tools_log_enabled",
                     "module_tools_log_enabled",
-                    "mcp_tools_log_enabled",
                     "onebot_tools_log_enabled",
                 ),
             ),
@@ -252,11 +251,13 @@ REPLY_GROUPS: tuple[UIGroup, ...] = (
 
 #: 实验性入口「高级选项」页（页面外工作台，非本体 3 页）
 #:
-#: 现状只有一个开关：消息组装方式。它不算"模块策略"（框架内建），也不属于任何
-#: 一页本体配置，所以单列一个 surface，保证 `fate_of()` 有归宿、`SCHEMA` 能包含它
+#: 现状两个开关：消息组装方式 + 工具总开关。它们不算"模块策略"（框架内建），也不属于
+#: 任何一页本体配置，所以单列一个 surface，保证 `fate_of()` 有归宿、`SCHEMA` 能包含它
 #: （否则保存路径会把该键静默丢弃，见 app/webui/api/agent.py）。
 ADVANCED_GROUPS: tuple[UIGroup, ...] = (
     UIGroup("advanced_assembly", "消息组装", ("structured_assembly",)),
+    # 「工具扩展」插件并入框架后只剩这一个开关（OneBot 工具）
+    UIGroup("advanced_tools", "工具", ("onebot_tools_enable",)),
 )
 
 #: 字段面 id → 分组（供 fate_of / ui_group_of 与前端清单生成使用）
@@ -278,7 +279,7 @@ CORE_KEYS: tuple[str, ...] = (
     + ADVANCED_KEYS
 )
 
-# ==================== 2. 迁移为模块（7 个 / 110 键）====================
+# ==================== 2. 迁移为模块（6 个 / 100 键）====================
 # 2026-10-31 四模块合并：9 → 7
 #   llm_assembly + llm_message_meta      → llm_prompt   （组装 + 本轮消息渲染）
 #   llm_proactive + llm_schedule         → llm_trigger  （主动 + 定时）
@@ -339,19 +340,8 @@ MODULE_KEYS: dict[str, tuple[str, ...]] = {
         "memory_consolidate_batch",
         "memory_consolidate_min_chars",
     ),
-    # 工具扩展：OneBot 工具 / MCP / 工具结果回应要求（联网搜索留在本体高级功能）
-    "llm_tools_extra": (
-        "onebot_tools_enable",
-        "onebot_tools_allowed",
-        "onebot_tools_denied",
-        "onebot_tools_max_result",
-        "onebot_tools_debug",
-        "onebot_tool_overrides",
-        "poke_cooldown_seconds",
-        "mcp_servers",
-        "tool_result_directive_enable",
-        "tool_result_directive",
-    ),
+    # 工具扩展：插件已下线，OneBot 工具开关升为本体「高级选项」页的键；
+    # 其余策略键（黑白名单/覆盖/调参/MCP）全部删除，详见 DELETED_KEYS。
     # 调试：请求内容 + 模型返回各一个开关（原来被判成"已删除"，但模块一直在用）
     "llm_enhance": ("debug_prompt", "debug_response"),
 }
@@ -453,6 +443,19 @@ DELETED_KEYS: tuple[str, ...] = (
     # `debug_prompt` 已归 llm_enhance 模块所有（曾经被误判为"已删除"）
     "authority_type",
     "stream_proactive_scheduled_enabled",
+    # 2026-11-03 工具扩展插件下线：除总开关（升为「高级选项」的 CORE 键）外，
+    # 细粒度策略全部删除（单工具黑白名单 / 权限覆盖 / 结果长度 / 调试 / 戳一戳冷却 /
+    # MCP server 配置 / 工具结果回应要求）；OneBot 工具改由清单默认值 + 总开关驱动。
+    "onebot_tools_allowed",
+    "onebot_tools_denied",
+    "onebot_tools_max_result",
+    "onebot_tools_debug",
+    "onebot_tool_overrides",
+    "poke_cooldown_seconds",
+    "mcp_servers",
+    "mcp_tools_log_enabled",
+    "tool_result_directive_enable",
+    "tool_result_directive",
 )
 
 #: 迁移完成后的目标键数（W7 验收线）

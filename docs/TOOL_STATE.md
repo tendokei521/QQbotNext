@@ -8,27 +8,26 @@
 | `source` | 谁提供 | 例子 |
 |---|---|---|
 | `system` | 框架与模块（模块产出也标 system） | `get_current_session`、`tavily_search`、`recall_tool_result`（框架）；`schedule_task`（llm_trigger）；`memory_*`（llm_memory） |
-| `onebot` | `llm_tools_extra` | OneBot API 175 个 |
-| `mcp` | `llm_tools_extra` 的 MCPManager | 外部 MCP server |
+| `onebot` | **框架内置**（`app/agent/tools/onebot/`，2026-11-03 从「工具扩展」插件并入） | OneBot API 175 个 |
 | `module` | 模块 `@tool` / `TOOLS` | 第三方工具 |
 | `llm_context` | `llm_context` | `get_context` |
 | `speech` | 框架发言通道 | `send_message` / `finish` |
 
-判定链只对 `onebot` / `module` / `mcp` / `system` 分来源处理；其余来源跳过 ①—④，只受总表与权限约束。
+判定链只对 `onebot` / `module` / `system` 分来源处理；其余来源跳过 ①—④，只受总表与权限约束。
+MCP（`source=mcp`）随「工具扩展」插件一起下线，不再有这一来源。
 
 ## 2. 判定链（`tools/state.py`，固定顺序、短路）
 
 ```text
 resolve_tool_state(runtime, spec | name+source, session_scope=..., event=...)
- ① 所属模块在不在   → module_disabled
-      onebot: runtime.tools_options is not None（模块卸载即 None）
-      module/mcp: spec.module.authority.enabled
- ② 模块自己的策略   → module_switch_off / out_of_scope
-      onebot: OneBotToolSource 策略（总开关 / 黑白名单 / override / scopes）
+ ① 能力在不在       → tools_disabled / module_disabled
+      onebot: runtime.config.onebot_tools_enable（「高级选项」总开关）
+      module: spec.module.authority.enabled
+ ② 工具自己的策略   → module_switch_off / out_of_scope
+      onebot: manifest 默认权限/作用域（security.resolve_tool_policy；无黑白名单/override）
       module: 模块配置 tools_enabled[name] is False
  ③ 用户总表         → user_disabled（tools_disabled + 三套旧 map 只读兼容）
  ④ 依赖就绪         → dependency_missing
-      mcp: runtime.mcp_service 存在且 enabled()
       system: tools/policy.prereq_state(name)
  ⑤ 作用域/权限      → out_of_scope / permission_denied（只在给了 event 时判）
 ```
@@ -64,7 +63,7 @@ resolve_tool_state(runtime, spec | name+source, session_scope=..., event=...)
 | 执行 | `tools/spec.make_executor` | ①`_execution_gate`（带 event 再判一次）→ ②`spec.allows` → ③审批 → ④调用 |
 | 未知工具 | 同上 | `error: 未知工具 <name>` |
 
-执行前复核的价值：清单是"本轮开始时"的快照；期间模块被关或工具被关同样拦住，提示 `error: 工具 X 当前不可用（原因）`。
+执行前复核的价值：清单是"本轮开始时"的快照；期间「高级选项」关掉工具或模块被关同样拦住，提示 `error: 工具 X 当前不可用（原因）`。
 
 ## 6. 执行期契约（通过判定之后，同样 fail-closed）
 
@@ -75,14 +74,16 @@ resolve_tool_state(runtime, spec | name+source, session_scope=..., event=...)
 | 审批 | `tool_approval_enable`、`runtime.approval_channel` | 开关 + `source=onebot` + `sensitivity in {high,critical}`；fail-closed，仅 `ALLOWED_ONCE` 本次有效 |
 | 结果 | `ToolResult(blocks, is_error, code, meta, additional_contexts, concludes_turn)`、`ERROR_CODES` | 结构化出口；旧 `"error:"` 前缀双读；钩子能在 `ctx.extra["code"]` 读到错误码 |
 | 落盘 | `tool_spill_enable`、`tool_spill_max_bytes` | 超阈值（默认 50KB）写 `data/llm/<bot>/spill/<session>/<sha16>.txt`，正文换成预览+路径；失败只 warn；跳过 `recall_tool_result` 与 `speech` |
-| 回应要求 | `tool_result_directive_enable`、`tool_result_directive` | 拼在**结果末尾**（截断/落盘之后）；错误结果与 `speech` 不追加；文案归 `llm_tools_extra` |
+| 回应要求 | 固定框架默认 `tool_loop.DEFAULT_REPLY_DIRECTIVE` | 拼在**结果末尾**（截断/落盘之后）；错误结果与 `speech` 不追加；原模块配置随「工具扩展」插件下线 |
 
 `make_executor` 也支持 `sink`：把 `ToolResult` 交给调用方——`additional_contexts` 汇总成一条 user 消息，`concludes_turn` 停止继续请求（`loop/tool_step.py`）。
 
 ## 7. 写入归属
 
 - per-tool 开关只有一处：`tools_disabled`（`POST /api/agent/tools/toggle` → `set_tool_disabled`）。
-- `onebot_tools_*` / `mcp_servers` / `tool_result_directive*` 归 `llm_tools_extra`；各模块 `tools_enabled` 归各自模块。
+- OneBot 工具只受一个本体开关控制：`onebot_tools_enable`（「高级选项」页）；原模块的
+  黑白名单/逐工具覆盖/结果长度/调试/戳一戳冷却/MCP 配置已随插件删除。
+- 各模块 `tools_enabled` 归各自模块。
 - `POST /api/agent/config` 遇到模块键且**值真的变了**才 400（等值视为前端回声丢弃）；`GET` 不回传模块键。
 
 ## 8. 闸门
@@ -92,4 +93,6 @@ venv\Scripts\python.exe -m pytest tests/architecture/test_tool_state_single_sour
 venv\Scripts\python.exe -m pytest tests/agent/test_tool_execution_gate.py -q               # 3 条
 ```
 
-锁死：写读同源（模块键 400）、模块键与本体键不相交、注入无"按来源放行"、模块卸载给 `module_disabled` 而不是复活、`tools_disabled` 全来源生效、不可用项必有 `reason_text`、per-tool 只写一处、清单发出后关工具执行被拦。
+锁死：写读同源（模块键 400）、模块键与本体键不相交、OneBot 开关是本体键、注入无"按来源放行"、
+工具关闭给 `tools_disabled` 而不是复活、`tools_disabled` 全来源生效、不可用项必有 `reason_text`、
+per-tool 只写一处、清单发出后关工具执行被拦。

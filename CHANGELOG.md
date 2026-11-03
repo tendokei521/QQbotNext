@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### 工具扩展并入框架：OneBot 工具只留一个总开关（2026-11-03）
+
+- **删除「工具扩展」插件**（`llm_tools_extra`）：OneBot 工具实现整体迁入框架
+  `app/agent/tools/onebot/`（175 个工具、清单、执行器、权限分级），由 `AgentRuntime`
+  直接注册工具源；提示段 `emoji_hint` 回到默认段表。
+- **配置收口成一个开关**：`onebot_tools_enable`（默认开）成为本体键，入口在
+  「高级选项」页的「启用工具」；单工具黑白名单、逐工具权限覆盖、结果长度、调试日志、
+  戳一戳冷却、工具结果回应要求配置、MCP server 配置全部删除（MCP 随插件下线）。
+- **迁移**：启动时把旧模块的 `onebot_tools_enable` / 模块总开关搬到 agent 配置（幂等，
+  不删除旧行）；新账号默认开、行为与合并前一致。
+- **前端**：移除「设置 → 编辑系统提示词」入口（上一轮）与 OneBot/MCP 工具管理页、
+  `/api/agent/onebot|mcp/tools` 接口；工具管理只剩系统工具 / 插件工具。
+- 文档同步：`TOOL_STATE.md`、`FEATURE_REGISTRY.md`、`AGENT_CONFIG.md`、`MODULE_DEV.md`、
+  `PLUGIN_STYLE.md`、`dashboard-frontend-architecture.md`、`UI_COPY.md`。
+
 ### 文档体系整理：现行文档瘦身、历史稿归档（2026-11-02）
 
 - **README 改为面向用户**：只讲"能做什么、怎么装、怎么接 QQ、后台各页干什么、出问题先查哪"；

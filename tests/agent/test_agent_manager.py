@@ -59,7 +59,6 @@ async def test_agent_runtime_config_and_components():
         assert rt.session_mgr is not None
         # 策略配置视图默认未接管（= 回退 agent 配置）
         assert rt.assembly_options is None
-        assert rt.tools_options is None
         # 配置写入与读取
         rt.config.set("api_key", "sk-test")
         assert rt.config.get("api_key") == "sk-test"

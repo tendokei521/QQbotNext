@@ -6,6 +6,9 @@
 2. 老账号（升级前已存在）：默认开，升级零行为漂移；
 3. 显式开关（account 层 binding）覆盖默认值，双向都算；
 4. **框架级 Agent 不受影响**：关掉它新账号配完向导也完全不回复，要静默用 Agent 自己的开关。
+
+> 2026-11-03：「工具扩展」插件并入框架后不再有"默认开启的模块例外"；
+> OneBot 工具开关改由 Agent 配置的 ``onebot_tools_enable`` 控制（默认开）。
 """
 
 from __future__ import annotations
@@ -21,24 +24,6 @@ async def test_new_account_modules_off_but_agent_on(config_service):
     assert config_service.get_modules_default_enabled(account_id) is False
     assert config_service.get_module_authority("demo", account_id)["enabled"] is False
     assert config_service.get_module_authority("agent", account_id)["enabled"] is True
-
-
-async def test_onebot_tools_module_is_on_for_new_accounts(config_service):
-    """「工具扩展」（OneBot 工具 / MCP）是新账号默认关的例外：装好就能用。"""
-    account_id = await config_service.add_bot({"id": "fresh", "ws_url": "ws://a"})
-
-    assert config_service.get_module_authority("llm_tools_extra", account_id)["enabled"] is True
-    # 其它业务模块仍然默认关（不能被这条例外带偏）
-    assert config_service.get_module_authority("llm_memory", account_id)["enabled"] is False
-
-
-async def test_onebot_tools_default_can_still_be_turned_off(config_service):
-    """默认开 ≠ 不能关：显式关闭仍然生效。"""
-    account_id = await config_service.add_bot({"id": "fresh", "ws_url": "ws://a"})
-
-    config_service.set_module_authority("llm_tools_extra", account_id, {"enabled": False})
-
-    assert config_service.get_module_authority("llm_tools_extra", account_id)["enabled"] is False
 
 
 async def test_explicit_switches_override_default(config_service):

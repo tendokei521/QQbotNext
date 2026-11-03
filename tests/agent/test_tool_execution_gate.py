@@ -7,16 +7,13 @@ from types import SimpleNamespace
 from app.agent.tools.spec import ToolSpec
 
 
-def _runtime(*, disabled: list[str], module_loaded: bool = True):
-    config = {"tools_disabled": disabled, "onebot_tools_enable": True}
+def _runtime(*, disabled: list[str], tools_enabled: bool = True):
+    config = {"tools_disabled": disabled, "onebot_tools_enable": tools_enabled}
     cfg = SimpleNamespace(get=lambda k, d=None: config.get(k, d))
-    view = SimpleNamespace(get=lambda k, d=None: config.get(k, d)) if module_loaded else None
     return SimpleNamespace(
         bot_id="1",
         config=cfg,
-        tools_options=view,
         llm_tools=None,
-        mcp_service=None,
         telemetry=None,
         llm_tool_call_hooks=None,
     )
@@ -58,10 +55,10 @@ async def test_blocked_when_user_disabled_after_prompt():
     assert not calls, "被拦下的工具不该真的执行"
 
 
-async def test_blocked_when_module_unloaded_after_prompt():
+async def test_blocked_when_tools_switch_turned_off_after_prompt():
     calls: list = []
     spec = _spec(calls)
-    out = await _run(_runtime(disabled=[], module_loaded=False), spec)
+    out = await _run(_runtime(disabled=[], tools_enabled=False), spec)
     assert "不可用" in out
     assert not calls
 

@@ -79,6 +79,40 @@ def build_persona(req: Any) -> list[dict]:
     return [{"role": "system", "content": system_prompt}]
 
 
+def emoji_hint_line(tags: str) -> str:
+    """【可用表情】一行提示：把可贴标签摆到 prompt 里，省得模型去翻工具文档。"""
+    text = str(tags or "").strip()
+    if not text:
+        return ""
+    return (
+        f"【可用表情】可贴的表情标签：{text}。"
+        "贴表情时直接写标签名（如 赞 / 笑哭 / 吃瓜 / 狗头），框架会翻成正确的表情 id；"
+        "若上下文里出现过 [♡66] 这类数字，那是别的消息上已贴过的表情 id，可原样复用。"
+    )
+
+
+def build_emoji_hint(req: Any) -> list[dict]:
+    """【可用表情】提示段（L3，order 30）：本轮真能贴表情时才出现。
+
+    2026-11-03 随 OneBot 工具并入框架：以前由「工具扩展」模块注册，
+    现在工具是框架内置能力，所以提示段也回到默认段表（工具不在时整段消失）。
+    """
+    tools = getattr(req, "available_tools", None)
+    if tools is not None and "set_msg_emoji_like" not in tools:
+        return []
+    try:
+        from app.agent.persona.emoji import available_tags
+
+        tags = available_tags(20)
+    except Exception as e:  # noqa: BLE001 —— 词典不可用不该影响整轮组装
+        logger.add_info(account_label(getattr(getattr(req, "runtime", None), "bot_id", "?"))).warning(
+            f"[Assembly] 读取表情词典失败（已跳过表情提示）: {e}"
+        )
+        return []
+    text = emoji_hint_line(tags)
+    return [{"role": "system", "content": text}] if text else []
+
+
 def prompt_preset(req: Any):
     """本轮选中的「提示词方案」（见 ``assembly.presets``）。
 
@@ -312,8 +346,10 @@ def default_sections() -> list[Section]:
         # 行为规则紧跟人格：人格讲"我是谁"，行为段讲"在这个群里怎么说话"，
         # 越硬的约束越靠前（对齐 QQ-agent 的段落顺序，见 persona_rules 模块 docstring）
         Section("behavior", 20, build_behavior, source="builtin"),
-        # 能力段（emoji_hint / schedule / proactive / message_meta）由对应插件注册；
-        # 框架只保留人设 + 行为规则 + 材料通道 + 历史 + 本轮消息。
+        # 表情提示随 OneBot 工具并入框架后回归默认段（order 30）：工具不在时整段为空
+        Section("emoji_hint", 30, build_emoji_hint, source="builtin"),
+        # 能力段（schedule / proactive / message_meta）由对应插件注册；
+        # 框架只保留人设 + 行为规则 + 表情 + 材料通道 + 历史 + 本轮消息。
         Section("reply_rules", 54, build_participation, source="builtin"),
         Section("message_meta", 60, build_message_meta, source="builtin"),
         Section("skills", 70, build_skills, source="builtin"),
@@ -346,6 +382,7 @@ __all__ = [
     "EXTRA_SECTION",
     "build_background",
     "build_behavior",
+    "build_emoji_hint",
     "build_extra_blocks",
     "build_group_log",
     "build_history",

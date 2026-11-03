@@ -13,11 +13,9 @@
 | `recall.py` | 取回工具 `recall_tool_result`：只读本账号 spill 目录，分页 |
 | `approval.py` | 高危工具人工审批：走 `runtime.approval_channel`，fail-closed |
 | `system.py` | 系统工具目录（收集 + 标注 enabled/ready，供 WebUI 展示） |
-| `context_tools.py` | 上下文展开类工具（expand_*） |
 | `session_tools.py` | 会话类工具（get_current_session / get_chat_history） |
 | `web_search.py` | Tavily 联网搜索工具 |
-| `mcp.py` | MCP 协议工具接入 |
-| `onebot/` | OneBot 工具清单与执行（`manifest.json` 175 条 + 权限分级） |
+| `onebot/` | **框架内置** OneBot 工具（`manifest.json` 175 条 + 权限分级 + 执行）；唯一开关是 `onebot_tools_enable`（「高级选项」页） |
 
 ## 注意
 
@@ -26,7 +24,7 @@
 执行统一走 `make_executor`；一批工具内部的并发由 `loop/tool_loop.execute_tool_batch`
 调度（有界池 + 独占屏障，回填按模型顺序），超时只换结果、不 cancel 协程。
 加一条 OneBot 工具 → 改 `onebot/manifest.json`，不要写 Python 字面量；
-`tests/test_onebot_manifest_data.py` 会校验结构、敏感级别与 JSON 大小上限。
+`tests/infrastructure/test_onebot_manifest_data.py` 会校验结构、敏感级别与 JSON 大小上限。
 
 ## 边界
 

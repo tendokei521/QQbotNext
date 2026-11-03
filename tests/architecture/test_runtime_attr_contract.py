@@ -59,7 +59,6 @@ _OPTION_SLOTS = {
     "context_options",
     "memory_options",
     "knowledge_options",
-    "tools_options",
     "output_options",
     "proactive_options",
     "schedule_options",

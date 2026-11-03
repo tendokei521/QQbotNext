@@ -53,22 +53,6 @@ DEFAULT_REPLY_DIRECTIVE = (
 ERROR_RESULT_PREFIX = "error:"
 
 
-def reply_directive(config: Any) -> str:
-    """读取「回应要求」文本；未启用或读取失败时返回空串。"""
-    if config is None:
-        return ""
-    try:
-        if not bool(config.get("tool_result_directive_enable", True)):
-            return ""
-        text = config.get("tool_result_directive")
-    except Exception:
-        # 配置对象异常不应影响工具结果回传：按"不追加"处理（保守）
-        return ""
-    if text in (None, ""):
-        return DEFAULT_REPLY_DIRECTIVE
-    return str(text).strip()
-
-
 def append_reply_directive(result: str, directive: str) -> str:
     """把「回应要求」拼到工具结果末尾。
 

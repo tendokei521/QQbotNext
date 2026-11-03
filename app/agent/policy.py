@@ -14,9 +14,11 @@ v3 把一批"策略键"从 agent 配置搬进了功能模块。框架的机制�
 | `runtime.context_options` | `llm_context` | 指代 / 展开 / 预历史 |
 | `runtime.memory_options` | `llm_memory` | 长期记忆 |
 | `runtime.knowledge_options` | `llm_knowledge` | 知识库 |
-| `runtime.tools_options` | `llm_tools_extra` | OneBot / MCP 工具 |
 | `runtime.proactive_options` | `llm_trigger` | 主动消息 |
 | `runtime.schedule_options` | `llm_trigger` | 定时任务 |
+
+> 2026-11-03：`runtime.tools_options` 随「工具扩展」插件并入框架而移除——OneBot
+> 工具只剩一个 Agent 配置开关（`onebot_tools_enable`），机制直接读 agent 配置。
 
 > 2026-11-01：`runtime.output_options` 不再由模块提供——流式输出已内置进框架
 > （`delivery/output.py` + `delivery/pool.py`），参数回到账号级 agent 配置；
@@ -46,7 +48,6 @@ def _policy_views(runtime: Any) -> list:
         "context_options",
         "memory_options",
         "knowledge_options",
-        "tools_options",
         "proactive_options",
         "schedule_options",
     )

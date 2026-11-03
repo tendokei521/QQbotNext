@@ -48,8 +48,8 @@ build-backend = "setuptools.build_meta"
 include = ["app*"]
 
 [tool.setuptools.package-data]
-# OneBot 工具清单是数据文件，必须随包一起分发（v3：已搬进 llm_tools_extra 模块）
-"app.plugins.llm_tools_extra.src.onebot" = ["*.json"]
+# OneBot 工具清单是数据文件，必须随包一起分发（2026-11-03 起在框架内，原插件已下线）
+"app.agent.tools.onebot" = ["*.json"]
 # 插件自带页面与 manifest。
 # 注意：setuptools 新版的 pyproject 校验器**不再接受中间带通配的模块名**
 # （旧的 "app.plugins.*" 会让 `python -m build` / `pip wheel` 直接失败），

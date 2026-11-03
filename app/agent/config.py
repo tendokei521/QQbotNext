@@ -173,10 +173,7 @@ DEFAULT_LLM_CONFIG: dict = {
     "tavily_max_results": 5,              # 默认搜索结果条数
     "tavily_search_depth": "basic",       # basic / advanced
     "tavily_max_content_chars": 2000,     # 返回结果最大字符数
-    # MCP（Model Context Protocol）stdio server 配置
-    # [{"name":"filesystem","command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","/tmp"],"env":{},"timeout":30}]
-    "mcp_servers": [],
-    # 统一工具管理：四类工具各自的开关与日志输出
+    # 统一工具管理：各类工具自己的开关与日志输出
     "system_tools_enabled": {},        # 系统工具开关：{"tool_name": bool}
     "system_tools_log_enabled": True,  # 系统工具普通调用日志
     # 工具调用循环轮数上限（流式与非流式共用）：调大后"展开环境→再判断→再展开"这类
@@ -227,10 +224,7 @@ DEFAULT_LLM_CONFIG: dict = {
     # 会话历史是主历史来源；在线「聊天环境背景」默认仍注入（指代行保留）。
     # 关掉后历史只来自会话记录，避免同一批消息在两处重复出现。
     "history_background_enable": True,
-    # 工具结果尾部的「回应要求」：压住"工具返回后写长串汇报"的倾向
-    # （拼在结果末尾而不是新增 system —— 中途 system 在 Anthropic/Gemini 会被上提到最前）
-    "tool_result_directive_enable": True,
-    "tool_result_directive": "",       # 空=用内置默认（见 tool_loop.DEFAULT_REPLY_DIRECTIVE）
+    # 工具结果尾部的「回应要求」固定用框架默认文案（原「工具扩展」插件的配置已下线）
     # get_chat_history：本地记录少于该条数时自动补拉 QQ 聊天记录（0=总是补拉）
     "history_auto_qq_min_local": 4,
     # get_chat_history 跨会话：私聊里查询"自己也是成员"的群历史（群聊里一律拒绝）
@@ -257,17 +251,10 @@ DEFAULT_LLM_CONFIG: dict = {
     "outbound_directive_max_at": 3,           # 单条回复最多 @ 人数
     "module_tools_enabled": {},        # 模块工具开关：{"tool_name": bool}
     "module_tools_log_enabled": True,  # 模块工具普通调用日志
-    "mcp_tools_enabled": {},           # MCP 工具开关：{"tool_name": bool}
-    "mcp_tools_log_enabled": True,     # MCP 工具普通调用日志
-    # OneBot 通用工具：数据驱动地暴露 OneBot API 给 LLM
-    "onebot_tools_enable": False,      # 总开关
-    "onebot_tools_allowed": [],        # 空=全部；非空=只允许白名单
-    "onebot_tools_denied": [],         # 黑名单（优先级高于白名单）
-    "onebot_tools_max_result": 2000,   # 返回结果截断长度
-    "onebot_tools_debug": False,       # 调试：完整记录 OneBot 请求与响应
+    # OneBot 通用工具（框架内置能力，原「工具扩展」插件）：
+    # 统一的唯一开关在「高级选项」页；工具权限/作用域取 manifest 默认值。
+    "onebot_tools_enable": True,
     "onebot_tools_log_enabled": True,  # OneBot 工具普通调用日志
-    "onebot_tool_overrides": {},       # 工具权限/作用域覆盖：{"send_poke":{"permission":"member","scopes":["private"]}}
-    "poke_cooldown_seconds": 20,       # 戳一戳节流：同会话同一人该秒数内不重复戳（0=不节流）
     # 群聊环境记录（由「群聊记录」模块持续写入，这里只管"一次请求塞多少"）
     "group_log_enable": True,          # 是否把群聊记录作为环境块注入（模块未装/未启用时自动为空）
     "group_log_window_minutes": 60,    # 组装窗口：最近多少分钟

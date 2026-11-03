@@ -264,8 +264,6 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
                     return True
                 if spec.source == "onebot":
                     return bool(config.get("onebot_tools_log_enabled", True))
-                if spec.source == "mcp":
-                    return bool(config.get("mcp_tools_log_enabled", True))
                 if spec.source == "module":
                     return bool(config.get("module_tools_log_enabled", True))
                 return bool(config.get("system_tools_log_enabled", True))
@@ -399,13 +397,13 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
             if sink is not None:
                 sink["result"] = tr
             if runtime is not None and spec.source != "speech":
-                from app.agent.loop.tool_loop import append_reply_directive, reply_directive
-                from app.agent.policy import policy_config
-
-                # 回应要求文案归 `llm_tools_extra` 模块所有（未接管时回退 agent 配置）
-                final = append_reply_directive(
-                    final, reply_directive(policy_config(runtime, "tools"))
+                from app.agent.loop.tool_loop import (
+                    DEFAULT_REPLY_DIRECTIVE,
+                    append_reply_directive,
                 )
+
+                # 回应要求固定用框架默认文案（原「工具扩展」插件的配置随插件下线）
+                final = append_reply_directive(final, DEFAULT_REPLY_DIRECTIVE)
             return final
         return f"error: 未知工具 {name}"
 

@@ -105,4 +105,4 @@ venv\Scripts\python.exe -m pytest tests/architecture/test_plugin_layout.py -q
 
 - `--check` 同时扫 `app/plugins/` 与 `data/module/plugins/`；前者必须 0 条，后者是运行时目录（`.gitignore` 的 `module/`），存量不合规只影响本机安装，不进 CI。
 - 迁移约定：一次性把根级实现文件移进 `src/` 并改 import，**不留旧路径 shim**；`BASELINE_*` 棘轮已清空，规则只收紧。
-- 当前状态：`app/plugins/` 的 5 个内置模块（`llm_trigger` / `llm_context` / `llm_memory` / `llm_tools_extra` / `llm_enhance`）全部合规。
+- 当前状态：`app/plugins/` 的 4 个内置模块（`llm_trigger` / `llm_context` / `llm_memory` / `llm_enhance`）全部合规。

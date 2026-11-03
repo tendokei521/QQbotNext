@@ -30,8 +30,8 @@
 ## 大表情的已知不确定（``LARGE_FACES``）
 
 ``QSid >= 222`` 或带 ``AniStickerType`` 的表情（捂脸/吃瓜/比心/打call…）在客户端里走
-``faceType 2/3``；表情回应是否同样吃这套 id 需要真机校准：开 ``onebot_tools_debug``，
-对一条真实消息贴一次，看群聊记录里 ``KIND_EMOJI`` 落下来的 ``emoji_id``。
+``faceType 2/3``；表情回应是否同样吃这套 id 需要真机校准：看群聊记录里
+``KIND_EMOJI`` 落下来的 ``emoji_id``（贴一次真实消息即可）。
 没校准过就说"不确定"，**不要凭印象补**。
 
 ## 拒绝猜测

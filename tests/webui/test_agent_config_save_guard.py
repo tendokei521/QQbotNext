@@ -120,13 +120,14 @@ def client(monkeypatch):
 
 
 def test_get_config_hides_module_owned_keys(client):
-    """模块拥有的键不该出现在 agent 配置视图里。"""
+    """模块拥有的键不该出现在 agent 配置视图里；本体键照常回传。"""
     http, _runtime = client
     resp = http.get("/api/agent/config", params={"bot_id": 3437542570})
     assert resp.status_code == 200, resp.text
     config = resp.json()["config"]
-    for key in ("onebot_tools_enable", "debug_prompt", "debug_response"):
+    for key in ("debug_prompt", "debug_response"):
         assert key not in config, f"{key} 是模块键，不该回传给 agent 页"
+    assert "onebot_tools_enable" in config, "工具总开关是本体键（高级选项），应回传"
 
 
 def test_small_save_is_not_blocked_by_echoed_module_keys(client):
@@ -148,19 +149,20 @@ def test_small_save_is_not_blocked_by_echoed_module_keys(client):
 def test_changing_a_module_key_is_still_rejected(client):
     """真的想改模块键 → 仍然 400，并点出是哪个键。"""
     http, runtime = client
-    body = {"config": {"onebot_tools_enable": False}}   # 值变了
+    body = {"config": {"debug_prompt": True}}   # debug_prompt 归 llm_enhance 模块
     resp = http.post("/api/agent/config", params={"bot_id": 3437542570}, json=body)
     assert resp.status_code == 400
-    assert "onebot_tools_enable" in resp.json()["message"]
-    assert runtime.config.get("onebot_tools_enable") is True, "被拒的写入不能生效"
+    assert "debug_prompt" in resp.json()["message"]
+    assert runtime.config.get("debug_prompt") is None, "被拒的写入不能生效"
 
 
 def test_module_owned_keys_cover_migrated_fields():
     """迁移清单里的键必须都被认定成模块拥有（否则仍会写错抽屉）。"""
     owned = module_owned_keys()
-    for key in ("context_enable", "onebot_tools_enable", "memory_enable", "debug_prompt"):
+    for key in ("context_enable", "memory_enable", "debug_prompt"):
         assert key in owned, f"{key} 应归模块"
     assert "group_enable" not in owned, "本体键不该被当成模块键"
+    assert "onebot_tools_enable" not in owned, "工具总开关已升为本体键（高级选项）"
     # 已删除的旧键不该再出现在任何清单里
     for gone in ("assembly_profile", "behavior_rules_enable"):
         assert gone not in owned, f"{gone} 已删除，不该仍被当成模块键"

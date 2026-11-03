@@ -229,21 +229,6 @@ async def test_non_str_result_is_stringified():
 # ---------- 「回应要求」拼在工具结果末尾（T1） ----------
 
 
-class _BadCfg(dict):
-    def get(self, key, default=None):
-        raise RuntimeError("配置后端异常")
-
-
-def test_reply_directive_default_and_switch():
-    from app.agent.loop.tool_loop import DEFAULT_REPLY_DIRECTIVE, reply_directive
-
-    assert reply_directive(None) == ""
-    assert reply_directive({}) == DEFAULT_REPLY_DIRECTIVE          # 空=用内置默认
-    assert reply_directive({"tool_result_directive": "简短点"}) == "简短点"
-    assert reply_directive({"tool_result_directive_enable": False}) == ""
-    assert reply_directive(_BadCfg()) == ""                        # 配置异常按不追加
-
-
 def test_default_directive_says_short_and_no_report():
     from app.agent.loop.tool_loop import DEFAULT_REPLY_DIRECTIVE
 
@@ -281,7 +266,8 @@ async def test_executor_appends_directive_to_successful_result():
     assert "给你自己看的资料" in result
 
 
-async def test_executor_respects_disabled_directive():
+async def test_executor_always_appends_default_directive():
+    """工具结果末尾固定带上默认回应要求（原模块开关随插件下线）。"""
     from types import SimpleNamespace
 
     from app.agent.tools.spec import ToolContext, ToolSpec, make_executor
@@ -295,4 +281,4 @@ async def test_executor_respects_disabled_directive():
                               telemetry=None, llm_tool_call_hooks=None)
     executor = make_executor([spec], ToolContext(runtime=runtime))
 
-    assert await executor("t", {}) == "结果"
+    assert "给你自己看的资料" in await executor("t", {})

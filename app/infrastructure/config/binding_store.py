@@ -31,9 +31,9 @@ _UNSET = object()
 CORE_CAPABILITIES: tuple[str, ...] = ("agent",)
 
 #: 新账号「模块默认关」的例外：这些模块装好就该生效、且不产生对外副作用。
-#: 目前只有「工具扩展」（OneBot 工具 / MCP）：默认开启后模型才能用发送/查询类工具，
-#: 用户仍可在模块页随时关掉。
-DEFAULT_ENABLED_MODULES: tuple[str, ...] = ("llm_tools_extra",)
+#: 2026-11-03：「工具扩展」插件并入框架后不再有需要默认开启的模块
+#: （OneBot 工具开关改由 Agent 配置的 ``onebot_tools_enable`` 控制）。
+DEFAULT_ENABLED_MODULES: tuple[str, ...] = ()
 
 
 class BindingStoreMixin:

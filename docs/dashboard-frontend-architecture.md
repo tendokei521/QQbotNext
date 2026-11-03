@@ -39,11 +39,12 @@ src/
 | `/ai` | AiPanelPage | 这个号怎么说话（回复开关、触发、模型池、人格、行为/会话/上下文分区） |
 | `/ai/settings/:section` | AgentSectionPage | AI 面板的分区页（behavior / session / advanced…） |
 | `/reply` | PolicyPage | 群/私聊范围、响应权限、名册、高危工具审批 |
+| `/advanced-options` | AdvancedOptionsPage | 实验性开关：消息组装方式、工具总开关 |
 | `/modules` | ModulesPage | 功能插件列表（启停、进入配置、卸载） |
 | `/modules/:name` | ModuleConfigPage | 插件自己的配置表单（由模块 schema 渲染） |
 | `/responder` `/responder/:name` | ResponderOverviewPage / ResponderModulePage | 插件响应策略：多插件争抢时的仲裁 |
 | `/bundles` | BundlesPage | 配置包：导出 / 导入 / 回滚 |
-| `/tools/{system,onebot,mcp,module}` | ToolsPage 等 | 四类工具的总览与逐工具开关 |
+| `/tools/{overview,system,module}` | ToolsPage 等 | 系统工具与插件工具的总览与逐工具开关（OneBot 工具只剩「高级选项」里的总开关） |
 | `/sessions` | SessionsPage | 会话数据浏览、导出、删除 |
 | `/stats` | StatsPage | 用量统计（token/请求/消息） |
 | `/logs` | LogsPage | 日志查看（简洁/原始）与导出 |

@@ -3,13 +3,16 @@
 ## 为什么清单是 JSON 而不是 Python 字面量
 
 这里原本是 4,792 行的 `ONEBOT_TOOLS: list[dict] = [...]` 字面量——它是**数据**，
-不是代码，却占了整个 `app/llm/onebot_tools/` 目录的绝大部分篇幅，让「安全策略在哪」
-「执行逻辑在哪」都看不见。改成 `manifest.json` 之后：
+不是代码，却占了整个目录的绝大部分篇幅，让「安全策略在哪」「执行逻辑在哪」都看不见。
+改成 `manifest.json` 之后：
 
 - 加一条工具 = 改一小段 JSON（不用在 4,792 行的 Python diff 里定位）；
-- 结构可被测试校验（`tests/test_onebot_manifest_data.py` 检查必填字段、
-  枚举值、重名、`doc_url` 形态）；
-- 目录里只剩两个 .py：本文件（加载）与 `tools.py`（执行）——职责一眼可见。
+- 结构可被测试校验（`tests/infrastructure/test_onebot_manifest_data.py` 检查必填
+  字段、枚举值、重名、`doc_url` 形态）；
+- 目录里只剩少量职责单一的 .py：本文件（加载）与 ``executor.py``（执行）。
+
+> 2026-11-03：从「工具扩展」插件并入框架（``app/agent/tools/onebot/``），
+> 数据路径不变、字段不变。
 
 ## 每条记录的字段
 

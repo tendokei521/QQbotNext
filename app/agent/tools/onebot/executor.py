@@ -1,4 +1,12 @@
-"""OneBot ToolSpec 构建与执行。"""
+"""OneBot ToolSpec 构建与执行（框架内置工具，2026-11-03 从「工具扩展」插件迁入）。
+
+策略在 ``security.py``（只有一个总开关）；本文件只做两件事：
+
+1. ``build_onebot_tools``：按清单与当前会话作用域生成本轮可用的 ``ToolSpec``；
+2. ``_handler``：把一次工具调用翻成 OneBot action，并处理表情/戳一戳的特殊语义。
+
+调参（结果长度上限、戳一戳冷却）已固化为常量：合并后不再暴露给用户。
+"""
 
 from __future__ import annotations
 
@@ -62,14 +70,8 @@ def _poke_key(runtime, ctx: ToolContext | None, args: dict) -> str:
 
 
 def _poke_cooldown(runtime) -> float:
-    try:
-        from app.agent.policy import policy_get
-
-        # OneBot 工具的冷却/调试开关归 `llm_tools_extra` 模块所有
-        value = policy_get(runtime, "tools", "poke_cooldown_seconds", DEFAULT_POKE_COOLDOWN_SECONDS)
-        return max(0.0, float(value))
-    except Exception:
-        return float(DEFAULT_POKE_COOLDOWN_SECONDS)
+    """戳一戳冷却秒数（合并后固化为常量，不再读配置）。"""
+    return float(DEFAULT_POKE_COOLDOWN_SECONDS)
 
 
 def poke_cooldown_left(runtime, ctx: ToolContext | None, args: dict) -> float:
@@ -118,16 +120,6 @@ async def _handler(runtime, tool: dict, ctx: ToolContext | None, args: dict) -> 
             # 语义解析成功但这条消息上已经有同一个表情 → 当作"已经满足"返回，不再下行
             return "这条消息上已经有同一个表情了，没有重复贴。"
         args = params
-    debug = False
-    try:
-        from app.agent.policy import policy_get as _pg
-        debug = bool(_pg(runtime, "tools", "onebot_tools_debug", False))
-    except Exception as e:
-        logger.add_info("OneBotTool").debug(f"[OneBotTool] 读取 debug 开关失败，按关闭处理: {e}")
-    if debug:
-        logger.add_info("OneBotTool").info(
-            f"[OneBotDebug] 请求 {name} action={action} args={json.dumps(args, ensure_ascii=False)}"
-        )
     try:
         response = await bot.call_api(action, args)
     except Exception as e:
@@ -138,16 +130,8 @@ async def _handler(runtime, tool: dict, ctx: ToolContext | None, args: dict) -> 
     if action == EMOJI_LIKE_ACTION and isinstance(response, dict) and response.get("status") == "ok":
         # 成功才记账：失败不写"我贴过"，否则模型会以为已经贴上了（幂等判断在这里失真）
         _emoji_like_record(runtime, ctx, args, str(args.get("emoji_id", "") or ""))
-    if debug:
-        logger.add_info("OneBotTool").info(
-            f"[OneBotDebug] 响应 {name} response={json.dumps(response, ensure_ascii=False, default=str)}"
-        )
     result = _format_result(response, name)
-    max_len = 2000
-    try:
-        max_len = int(getattr(runtime, "config", None).get("onebot_tools_max_result", DEFAULT_MAX_RESULT) or DEFAULT_MAX_RESULT)
-    except Exception as e:
-        logger.add_info("OneBotTool").debug(f"[OneBotTool] 读取结果长度上限失败，使用默认 {max_len}: {e}")
+    max_len = DEFAULT_MAX_RESULT
     if len(result) > max_len:
         result = result[:max_len] + "\n…(结果过长已截断)"
     return result

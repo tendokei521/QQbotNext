@@ -2,12 +2,16 @@
 
 ## 锁死的三件事
 
-1. **写读同源**：模块拥有的键不能写进 agent 配置（`POST /api/agent/config` 必须拒）
+1. **写读同源**：模块拥有的键不能写进 agent 配置（`POST /api/agent/config` 必须拒）；
+   本体键（如「高级选项」里的 OneBot 工具总开关）必须能被保存
 2. **没有 VIP 通道**：注入过滤里不许出现"某来源直接放行"
 3. **显示即真相**：界面拿到的 `available` 必须等于解析器结论
 
 历史 bug：`onebot_tools_enable` 界面写 agent 配置、策略读模块配置 →
 关掉后工具照用；模块卸载后又回退到 agent 旧值复活。
+
+> 2026-11-03：「工具扩展」插件并入框架后，OneBot 工具总开关是**本体键**
+> （「高级选项」页），不再属于任何模块；模块卸载不再是它的失效路径。
 """
 
 from __future__ import annotations
@@ -39,13 +43,13 @@ def test_module_owned_keys_are_disjoint_from_core_keys():
     assert not overlap, f"同一配置键被两方同时拥有：{sorted(overlap)}"
 
 
-def test_onebot_switches_belong_to_the_tools_module():
-    """OneBot 工具开关必须归模块，agent 配置不该是它们的家。"""
-    from app.agent.config_partition import CORE_KEYS, MODULE_KEYS
+def test_onebot_switch_is_a_core_key_in_advanced_options():
+    """OneBot 工具总开关是本体键（高级选项），不属于任何模块。"""
+    from app.agent.config_partition import ADVANCED_KEYS, MODULE_KEYS
 
-    for key in ("onebot_tools_enable", "onebot_tools_allowed", "onebot_tools_denied"):
-        assert key in MODULE_KEYS.get("llm_tools_extra", ()), f"{key} 应归 llm_tools_extra"
-        assert key not in CORE_KEYS, f"{key} 不该出现在本体配置"
+    assert "onebot_tools_enable" in ADVANCED_KEYS
+    for module_name, keys in MODULE_KEYS.items():
+        assert "onebot_tools_enable" not in keys, f"仍被模块 {module_name} 拥有"
 
 
 # ==================== ② 没有 VIP 通道 ====================
@@ -71,35 +75,38 @@ def test_tool_injection_has_no_source_specific_bypass():
 
 
 def _base_runtime(**overrides):
-    """一个"模块都装着、开关都开着"的运行时。"""
+    """一个"开关都开着"的运行时（OneBot 工具已内置，不再需要模块视图）。"""
     config = {
         "tools_disabled": [],
         "module_tools_enabled": {},
         "system_tools_enabled": {},
-        "mcp_tools_enabled": {},
         "onebot_tools_enable": True,
     }
     cfg = SimpleNamespace(get=lambda k, d=None: config.get(k, d))
     runtime = SimpleNamespace(
         bot_id="1",
         config=cfg,
-        tools_options=SimpleNamespace(get=lambda k, d=None: config.get(k, d)),
         llm_tools=None,
-        mcp_service=None,
     )
     for key, value in overrides.items():
         setattr(runtime, key, value)
     return runtime
 
 
-def test_resolver_reports_module_disabled_instead_of_resurrecting():
-    """模块卸载（tools_options=None）时，旧的 agent 配置不能让工具复活。"""
-    from app.agent.tools.state import REASON_MODULE_DISABLED, resolve_tool_state
+def test_resolver_reports_tools_disabled_when_switch_off():
+    """「高级选项」关掉工具后，解析器必须给出 tools_disabled（而不是静默复活）。"""
+    from app.agent.tools.state import REASON_TOOLS_DISABLED, resolve_tool_state
 
-    rt = _base_runtime(tools_options=None)
+    rt = _base_runtime()
+    rt.config = SimpleNamespace(
+        get=lambda k, d=None: {
+            "tools_disabled": [],
+            "onebot_tools_enable": False,
+        }.get(k, d)
+    )
     state = resolve_tool_state(rt, name="send_poke", source="onebot")
     assert not state.available
-    assert state.reason == REASON_MODULE_DISABLED, state
+    assert state.reason == REASON_TOOLS_DISABLED, state
 
 
 def test_resolver_respects_user_master_list():
@@ -108,7 +115,10 @@ def test_resolver_respects_user_master_list():
 
     rt = _base_runtime()
     rt.config = SimpleNamespace(
-        get=lambda k, d=None: {"tools_disabled": ["send_poke"]}.get(k, d) if k == "tools_disabled" else d
+        get=lambda k, d=None: {
+            "tools_disabled": ["send_poke"],
+            "onebot_tools_enable": True,
+        }.get(k, d)
     )
     state = resolve_tool_state(rt, name="send_poke", source="onebot")
     assert not state.available

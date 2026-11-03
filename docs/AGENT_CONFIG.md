@@ -86,7 +86,7 @@
 | `image_understanding_enable` | `true` | 把本轮图片发给模型（需模型支持视觉） |
 | `gif_understanding_enable` | `true` | 动图/表情包拆帧后一起发 |
 | `gif_max_frames` / `gif_frame_max_edge` | `6` / `512` | 拆帧数与单帧长边 |
-| `system_tools_enabled` / `module_tools_enabled` / `mcp_tools_enabled` | `{}` | 逐工具开关（未列出的按默认） |
+| `system_tools_enabled` / `module_tools_enabled` | `{}` | 逐工具开关（未列出的按默认；OneBot 工具只受「高级选项」总开关控制） |
 
 ## 6. 联网与缓存（`group_tavily` / `group_model_cache`）
 
@@ -103,6 +103,7 @@
 |---|---|---|
 | `reply_mode` / `participation_level` / … | 见界面 | 参与度与"该不该接话"的策略键（`participation_*`） |
 | `structured_assembly` | 见界面 | 结构化消息组装（如按 JSON 组织回复段落） |
+| `onebot_tools_enable` | `true` | 「高级选项」页的**工具总开关**：开启后模型可调用 OneBot 工具（权限仍按调用者身份校验） |
 | `retry_profile` | `balanced` | 一轮请求次数与输入 token 上限总闸：`thrifty` 2 次 / `balanced` 4 次 / `robust` 6 次 |
 | `reasoning_overflow_retries` | `1` | 推理超长时的收敛重试次数 |
 | `empty_reply_retries` | `1` | 模型返回空内容时重试次数 |

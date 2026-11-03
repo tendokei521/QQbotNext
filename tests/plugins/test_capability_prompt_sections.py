@@ -4,7 +4,8 @@
 
 1. `llm_trigger` 注册的 `schedule` / `proactive` 是 **L1** 段，且卸载后消失；
 2. `llm_trigger` 的主动消息段在没有相关工具时不出现；
-3. `llm_tools_extra` 的表情提示只在贴表情工具本轮可用、且活跃度 > 0 时产出。
+3. 表情提示（`emoji_hint`）已随 OneBot 工具并入框架，是默认段：只有贴表情工具
+   本轮可用时才产出。
 
 这是「框架只剩三套系统提示词、能力文案随模块生灭」的回归闸门：模块禁用时
 提示词里不该再出现"你可以建定时任务 / 这就是格式"这类悬空说明。
@@ -53,12 +54,12 @@ def test_proactive_section_disappears_when_capability_missing():
 
 
 def test_emoji_hint_requires_tool():
-    from app.plugins.llm_tools_extra.src.prompt import emoji_hint_section
+    from app.agent.assembly.builtin_sections import build_emoji_hint
 
     req_no_tool = SimpleNamespace(
         config={"emoji_react_level": 2}, available_tools={"send_message"}, runtime=None
     )
-    assert emoji_hint_section(req_no_tool) == []
+    assert build_emoji_hint(req_no_tool) == []
 
     # 活跃度开关已删除（2026-11-01 精简）：配置里残留旧键也不影响，工具在就有提示
     req_with_tool = SimpleNamespace(
@@ -66,5 +67,5 @@ def test_emoji_hint_requires_tool():
         available_tools={"set_msg_emoji_like"},
         runtime=None,
     )
-    messages = emoji_hint_section(req_with_tool)
+    messages = build_emoji_hint(req_with_tool)
     assert len(messages) == 1 and "【可用表情】" in messages[0]["content"]

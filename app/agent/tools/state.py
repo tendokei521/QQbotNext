@@ -22,13 +22,18 @@
 
 判定链顺序固定，每一层只回答一件事：
 
-1. **模块在不在** —— 工具所属模块未加载/未启用 → `module_disabled`
-2. **模块开关** —— 模块自己的策略（OneBot 黑白名单、模块 `tools_enabled`）→ `module_switch_off`
+1. **能力在不在** —— OneBot 工具看「高级选项 → 启用工具」开关；模块工具看模块是否启用
+   → `tools_disabled` / `module_disabled`
+2. **工具自己的策略** —— OneBot 清单默认权限/作用域；模块 `tools_enabled`
+   → `module_switch_off` / `out_of_scope`
 3. **用户偏好** —— 统一总表 `tools_disabled` → `user_disabled`
-4. **依赖** —— MCP 连接、API Key → `dependency_missing`
+4. **依赖** —— 前置功能开关、API Key → `dependency_missing`
 5. **会话作用域/权限** —— → `out_of_scope` / `permission_denied`
 
 所有注入点（含 OneBot）只调 `resolve_tool_state`，不再各写一套 if。
+
+> 2026-11-03：「工具扩展」插件并入框架后，OneBot 工具不再有模块归属，也不再有
+> 单工具黑白名单/权限覆盖；总开关是 Agent 配置的 `onebot_tools_enable`。
 """
 
 from __future__ import annotations
@@ -43,6 +48,7 @@ from app.core.logger import logger
 REASON_OK = "ok"
 REASON_MODULE_DISABLED = "module_disabled"
 REASON_MODULE_SWITCH_OFF = "module_switch_off"
+REASON_TOOLS_DISABLED = "tools_disabled"
 REASON_USER_DISABLED = "user_disabled"
 REASON_DEPENDENCY_MISSING = "dependency_missing"
 REASON_OUT_OF_SCOPE = "out_of_scope"
@@ -53,6 +59,7 @@ REASON_TEXT = {
     REASON_OK: "可用",
     REASON_MODULE_DISABLED: "所属模块未启用",
     REASON_MODULE_SWITCH_OFF: "模块内的工具总开关已关闭",
+    REASON_TOOLS_DISABLED: "工具未开启（高级选项）",
     REASON_USER_DISABLED: "已在工具清单中关闭",
     REASON_DEPENDENCY_MISSING: "依赖未就绪（连接或密钥）",
     REASON_OUT_OF_SCOPE: "当前会话类型不在适用范围",
@@ -125,20 +132,10 @@ def user_disabled_names(runtime: Any) -> set[str]:
     return names
 
 
-def tools_module_loaded(runtime: Any) -> bool:
-    """`llm_tools_extra`（OneBot/MCP 工具的拥有者）是否已加载。
-
-    模块卸载时会把 `runtime.tools_options` 置 None。**这个判断必须挡在
-    OneBot 策略读取之前** —— 否则模块关掉后 `policy_config` 会回退到
-    agent 配置里的旧值，工具就此"复活"（历史 bug）。
-    """
-    return getattr(runtime, "tools_options", None) is not None
-
-
 def _onebot_manifest_entry(name: str) -> dict | None:
     try:
-        from app.plugins.llm_tools_extra.src.onebot.manifest import ONEBOT_TOOLS
-    except Exception:  # noqa: BLE001 —— 模块未安装
+        from app.agent.tools.onebot.manifest import ONEBOT_TOOLS
+    except Exception:  # noqa: BLE001 —— 清单不可用按"没有该工具"处理
         return None
     for tool in ONEBOT_TOOLS or []:
         if str(tool.get("name", "")) == name:
@@ -165,10 +162,6 @@ def resolve_tool_state(
     if spec is not None:
         module = getattr(spec, "module", None)
         owner = getattr(module, "module_name", "") or ""
-        if not owner and tool_source == "onebot":
-            owner = "llm_tools_extra"
-    if not owner and tool_source == "onebot":
-        owner = "llm_tools_extra"
 
     def _state(ok: bool, reason: str, detail: str = "", extra: dict | None = None) -> ToolState:
         return ToolState(
@@ -181,24 +174,26 @@ def resolve_tool_state(
             extra=extra or {},
         )
 
-    # ── ① 所属模块在不在 ──
+    # ── ① 能力在不在 ──
     if tool_source == "onebot":
-        if not tools_module_loaded(runtime):
-            return _state(False, REASON_MODULE_DISABLED, "llm_tools_extra 模块未启用")
-    elif tool_source in ("module", "mcp"):
+        from app.agent.tools.onebot.security import tools_enabled
+
+        if not tools_enabled(runtime):
+            return _state(False, REASON_TOOLS_DISABLED, "「高级选项」里没有开启工具")
+    elif tool_source == "module":
         module = getattr(spec, "module", None) if spec is not None else None
         authority = getattr(module, "authority", None)
         if authority is not None and not getattr(authority, "enabled", True):
             return _state(False, REASON_MODULE_DISABLED, f"{owner} 模块未启用")
 
-    # ── ② 模块自己的策略 ──
+    # ── ② 工具自己的策略 ──
     extra: dict = {}
     if tool_source == "onebot":
         entry = _onebot_manifest_entry(tool_name)
         if entry is None:
             return _state(False, REASON_MODULE_SWITCH_OFF, "工具已不在清单中")
         try:
-            from app.plugins.llm_tools_extra.src.onebot.security import resolve_tool_policy
+            from app.agent.tools.onebot.security import resolve_tool_policy
 
             policy = resolve_tool_policy(runtime, entry)
         except Exception as e:  # noqa: BLE001 —— 策略算不出来按不可用处理（安全侧）
@@ -208,14 +203,8 @@ def resolve_tool_state(
             "scopes": list(policy.get("scopes") or []),
             "sensitivity": policy.get("sensitivity"),
         }
-        if not policy.get("enabled") or policy.get("blocked"):
-            reason = policy.get("blocked_reason") or "disabled"
-            detail = (
-                "OneBot 工具总开关已关闭"
-                if reason == "onebot_tools_enable=false"
-                else ("已在黑名单中" if reason == "denied" else "不在白名单中")
-            )
-            return _state(False, REASON_MODULE_SWITCH_OFF, detail, extra)
+        if not policy.get("enabled"):
+            return _state(False, REASON_TOOLS_DISABLED, "「高级选项」里没有开启工具", extra)
         scopes = extra["scopes"]
         if session_scope and scopes and "*" not in scopes and session_scope not in scopes:
             return _state(False, REASON_OUT_OF_SCOPE, f"仅适用于 {scopes}", extra)
@@ -231,11 +220,7 @@ def resolve_tool_state(
         return _state(False, REASON_USER_DISABLED, "已在工具清单中关闭", extra)
 
     # ── ④ 依赖 ──
-    if tool_source == "mcp":
-        manager = getattr(runtime, "mcp_service", None)
-        if manager is None or not getattr(manager, "enabled", lambda: True)():
-            return _state(False, REASON_DEPENDENCY_MISSING, "MCP 未启用", extra)
-    elif tool_source == "system":
+    if tool_source == "system":
         try:
             from app.agent.tools.policy import prereq_state
 
@@ -262,7 +247,7 @@ async def resolve_tool_source_states(runtime: Any) -> list[ToolState]:
 
     这些工具（`expand_*` / `memory_*` / `knowledge_*` / `schedule_task`）在注入时
     同样走 ``resolve_tool_state``，但此前统一清单只枚举了 `llm_tools`（`@tool` 装饰器）
-    / 系统工具 / OneBot / MCP，导致它们在「高级工具」里不可见、也无法单独关闭。
+    / 系统工具 / OneBot，导致它们在「高级工具」里不可见、也无法单独关闭。
 
     清单场景没有真实会话，用一个空 scope 收集即可：这些工具源的 `collect()` 只按
     运行时与配置决定要不要产出工具，不依赖具体会话内容（会话相关的值在执行时才用）。
@@ -333,7 +318,10 @@ async def resolve_tool_source_states(runtime: Any) -> list[ToolState]:
 
 
 def resolve_all_tool_states(runtime: Any, *, include_unavailable: bool = True) -> list[ToolState]:
-    """枚举**所有来源**的工具及其状态（统一页面/诊断用）。"""
+    """枚举系统工具与模块工具的状态（统一页面/诊断用）。
+
+    OneBot 工具是框架内置但只由一个总开关控制，不在这里逐条列出（见模块注释）。
+    """
     states: list[ToolState] = []
     seen: set[str] = set()
 
@@ -366,49 +354,8 @@ def resolve_all_tool_states(runtime: Any, *, include_unavailable: bool = True) -
     except Exception as e:  # noqa: BLE001 —— 组装失败不该拖垮清单
         logger.debug(f"[Tool] 系统工具清单组装失败（已忽略）: {e}")
 
-    # OneBot 工具
-    try:
-        from app.plugins.llm_tools_extra.src.onebot.manifest import ONEBOT_TOOLS
-    except Exception:  # noqa: BLE001
-        ONEBOT_TOOLS = []
-    for tool in ONEBOT_TOOLS or []:
-        name = str(tool.get("name", "") or "")
-        if not name or name in seen:
-            continue
-        st = resolve_tool_state(
-            runtime,
-            name=name,
-            source="onebot",
-            session_scope=None,
-        )
-        st = ToolState(
-            name=st.name,
-            source=st.source,
-            owner=st.owner,
-            available=st.available,
-            reason=st.reason,
-            detail=st.detail,
-            extra={
-                **st.extra,
-                "description": str(tool.get("description", "") or ""),
-                "category": str(tool.get("category", "onebot") or "onebot"),
-            },
-        )
-        states.append(st)
-        seen.add(name)
-
-    # MCP 工具
-    manager = getattr(runtime, "mcp_service", None)
-    if manager is not None:
-        try:
-            for spec in manager.build_tools() or []:
-                if spec.name in seen:
-                    continue
-                states.append(resolve_tool_state(runtime, spec))
-                seen.add(spec.name)
-        except Exception as e:  # noqa: BLE001
-            logger.debug(f"[Tool] MCP 工具枚举失败（已忽略）: {e}")
-
+    # OneBot 工具不再逐一列出：并入框架后只剩「高级选项」里的一个总开关，
+    # 工具管理页只管理系统工具与插件工具（避免出现与总开关打架的 per-tool 按钮）。
     if include_unavailable:
         return states
     return [s for s in states if s.available]
@@ -441,12 +388,12 @@ __all__ = [
     "REASON_OUT_OF_SCOPE",
     "REASON_PERMISSION_DENIED",
     "REASON_TEXT",
+    "REASON_TOOLS_DISABLED",
     "REASON_USER_DISABLED",
     "USER_TOOLS_DISABLED_KEY",
     "ToolState",
     "resolve_all_tool_states",
     "resolve_tool_state",
     "set_tool_disabled",
-    "tools_module_loaded",
     "user_disabled_names",
 ]
