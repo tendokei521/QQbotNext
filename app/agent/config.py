@@ -232,7 +232,7 @@ DEFAULT_LLM_CONFIG: dict = {
     "history_cross_query_enable": True,
     # 上下文「骨架补全」：聊天记录里展不开的内容标成【未展开:...】并允许按需展开
     # （与 expand_context 工具同开同关；@ 昵称预展开沿用上面的 fetch_at_nickname）
-    "context_expand_enable": True,
+    "context_expand_enable": False,
     # 指代消解（设计基准 docs/referent-resolution-design.md）
     "referent_resolve_enable": True,           # 总开关（焦点表 + 预取 + 焦点行）
     "referent_prefetch_enable": True,          # 确定性预取：有明确指向时框架直接取回

@@ -101,7 +101,7 @@ CONVENTION = """### 消息格式约定
 - `[at:id=..]` `[reply_to:..]` 表示 @ 与引用；`[reply_to:...,text="..."]` 里的 text 是
   被引用消息的内容（里面可能还有占位符）；
 - `[image:id=..]` `[forward_message:id=..]` `[record:id=..]` 等是不可内联内容的占位符：
-  需要内容时用对应工具展开（合并转发用 get_forward_message，其余用 expand_message）；
+  需要内容时用 get_context 展开（合并转发用 target="forward:<id>"，消息用 target="message:<id>"）；
   取不到就说取不到，不要猜；
 - 调用需要权限的 OneBot 工具时，`auth_message_id` 必须填「让你执行该操作的那条群消息」
   的 message_id；程序会用该消息的发送者身份校验权限（high 需 bot 管理者/拥有者，

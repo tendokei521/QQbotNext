@@ -46,14 +46,14 @@ PRIVATE_OTHER_TAG = "对方"
 #: 可"按需取回"的内容型段（渲染成 ``[图片#<消息id>]``，模型可调用 expand_image）
 _EXPANDABLE_SEGMENTS = ("image", "record", "video")
 
-# ==================== “未展开”标记 ====================
-# 只标记**可被解决的缺口**（marker must be actionable）：
-# - @ 用户：本轮尝试反查过昵称但没取到（无权限/退群/连接异常）→ 标记后可让模型按需展开；
-# - 引用 / 合并转发：正文没有被内联，需要按 id 取。
-# 图片/语音/文件等「内容型」缺口在无对应能力时**保持 ``[图片]`` 这类纯占位**，
-# 标成“未展开”只会诱导模型空转或谎称无法回答。
-UNRESOLVED_AT = "【未展开:用户{qq}】"
-UNRESOLVED_REPLY = "【未展开:引用{id}】"
+# ==================== “未展开”标记（仅合并转发保留） ====================
+# 只有“模型工具能走另一条路取回”的缺口才值得标记：
+# - 引用：普通预取与 `get_context(message)` 都是 `bot.get_msg`，预取失败时模型也取不到，
+#   标记没有意义，直接保留 `[引用]` 占位；
+# - @ 用户：预取与 `get_context(user)` 都是 `get_group_member_info`，同理不再标记；
+# - 合并转发：背景块从不预取正文，模型可用 `get_context(forward:<id>)` 走
+#   `get_forward_msg` 另一条路径取回，所以仍标记（显式开启时才输出）。
+# 图片/语音/文件等「内容型」缺口在无对应能力时保持 ``[图片]`` 这类纯占位。
 UNRESOLVED_FORWARD = "【未展开:合并转发】"
 # 合并转发标记里的 id 是**承载转发的那条消息的 id**（不是转发节点内部的 forward id）：
 # 展开入口 ``get_forward_msg(id=...)`` 要的就是这个 id；内部 id 是可能超出
@@ -313,30 +313,27 @@ def _segment_text(
         name = (at_names or {}).get(qq) or (expanded.user_name(qq) if expanded else "")
         if name:
             return f"@{name}({qq})"
-        if mark_unresolved:
-            return UNRESOLVED_AT.format(qq=qq)
+        # 与 get_context(user) 同一条 get_group_member_info 路径：预取失败时模型也取不到，
+        # 不再打“未展开”标记，保留裸 @id 即可。
         return f"@{qq}"
     if stype == "reply":
         if mark_unresolved:
             reply_id = str(data.get("id", "") or "")
-            # 没有 id 就无从展开，保持旧占位而不是打一个无法解决的标记
-            if reply_id:
-                summary = expanded.message_summary(reply_id) if expanded else ""
-                if summary:
-                    return _expanded_marker("reply", reply_id, summary)
-                return UNRESOLVED_REPLY.format(id=reply_id)
+            summary = expanded.message_summary(reply_id) if (expanded and reply_id) else ""
+            if summary:
+                return _expanded_marker("reply", reply_id, summary)
+        # 引用正文与预取同走 bot.get_msg；失败时标记不可解决，只留占位。
         return f"[{_NON_TEXT_SEGMENTS['reply']}]"
     if stype == "forward":
         if mark_unresolved:
-            # 优先用整条消息的 id（可直接交给 expand_message → get_forward_msg），
-            # 拿不到才退回段内 id
+            # 优先用整条消息的 id（可直接交给 get_forward_msg），拿不到才退回占位
             ref = str(message_id or data.get("id", "") or "")
             if ref:
                 summary = expanded.message_summary(ref) if expanded else ""
                 if summary:
                     return _expanded_marker("forward", ref, summary)
                 return UNRESOLVED_FORWARD_ID.format(id=ref)
-            return UNRESOLVED_FORWARD
+            return f"[{_NON_TEXT_SEGMENTS['forward']}]"
         return f"[{_NON_TEXT_SEGMENTS['forward']}]"
     if stype in _NON_TEXT_SEGMENTS:
         # 图片/语音等「内容型」段：带上承载消息 id，模型可用 expand_image 按需取回

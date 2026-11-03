@@ -211,7 +211,7 @@ class ProactiveManager:
                 count=int(self.module.config.get("history_rounds", 50)),
                 self_ids={str(self.module.bot_id), str(getattr(self.bot, "bot_id", "") or "")},
                 resolve_at=bool(self.module.config.get("fetch_at_nickname", True)),
-                mark_unresolved=bool(self.module.config.get("context_expand_enable", True)),
+                mark_unresolved=bool(self.module.config.get("context_expand_enable", False)),
                 bot_id=str(self.module.bot_id),
                 session_id=session_id,
                 **_meta_flags,

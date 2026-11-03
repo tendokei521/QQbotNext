@@ -32,10 +32,10 @@ def _context_expand_flags(config) -> dict:
     - ``mark_unresolved``：``context_expand_enable``，控制 ``【未展开:...】`` 标记
       （与按需展开能力同开同关：标记必须可被解决，否则只会诱导模型空转）。
     """
-    flags = {"resolve_at": True, "mark_unresolved": True}
+    flags = {"resolve_at": True, "mark_unresolved": False}
     for key, name in (("fetch_at_nickname", "resolve_at"), ("context_expand_enable", "mark_unresolved")):
         try:
-            flags[name] = bool(config.get(key, True))
+            flags[name] = bool(config.get(key, flags[name]))
         except Exception as e:
             # 配置读取异常不能影响回复主流程，退回默认（开启）并留痕
             logger.add_info("Chat").debug(f"[Context] 读取配置 {key} 失败，按默认开启处理: {e}")

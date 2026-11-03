@@ -138,7 +138,7 @@ async def _fetch_qq_history(ctx, bot, runtime, group_id: str, user_id: str, limi
                 self_ids=self_ids,
                 mask_nickname=True,
                 resolve_at=bool(_cfg(ctx, "fetch_at_nickname", True)),
-                mark_unresolved=bool(_cfg(ctx, "context_expand_enable", True)),
+                mark_unresolved=bool(_cfg(ctx, "context_expand_enable", False)),
                 bot_id=getattr(runtime, "bot_id", "") or "",
                 session_id=getattr(ctx, "session_id", "") or "",
             )

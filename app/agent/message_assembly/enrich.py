@@ -13,10 +13,8 @@ from typing import Any
 
 from app.agent import logger
 from .render import render_turn
-from app.agent.context.group import UNRESOLVED_REPLY
 
-#: 引用 / @ 的占位与展开语义（与 tools 侧对齐）
-UNRESOLVED_FORWARD = "【未展开:合并转发{id}】"
+#: 引用/合并转发的占位语义（与 tools 侧对齐）
 
 
 def _cfg(ctx, key: str, default: Any):
@@ -99,7 +97,8 @@ async def _collect_reply(ctx) -> dict | None:
     if not reply_id:
         return None
     if not event.bot:
-        return {"id": reply_id, "message_id": reply_id, "name": "", "text": UNRESOLVED_REPLY.format(id=reply_id)}
+        # 引用正文与 get_context(message) 同走 bot.get_msg；这里取不到，标记也无法解决。
+        return {"id": reply_id, "message_id": reply_id, "name": "", "text": ""}
     try:
         resp = await event.bot.get_msg(reply_id)
         data = (resp or {}).get("data", {}) or {}
@@ -109,7 +108,7 @@ async def _collect_reply(ctx) -> dict | None:
         return {"id": reply_id, "message_id": reply_id, "name": name, "text": text}
     except Exception as e:  # noqa: BLE001
         logger.debug(f"[Enhance] 获取引用消息失败（reply_id={reply_id}）: {e}")
-        return {"id": reply_id, "message_id": reply_id, "name": "", "text": UNRESOLVED_REPLY.format(id=reply_id)}
+        return {"id": reply_id, "message_id": reply_id, "name": "", "text": ""}
 
 
 def _render_reply_text(message, message_id: Any = None) -> str:
@@ -143,4 +142,4 @@ def _segments_to_text(message, message_id: Any = None) -> str:
         else:
             parts.append(f"[{seg.type}]")
     text = "".join(parts).strip()
-    return text or UNRESOLVED_REPLY.format(id=message_id or "")
+    return text

@@ -473,7 +473,7 @@ class TaskScheduler:
                 count=int(config.get("history_rounds", 50)),
                 self_ids={str(self.bot_id), str(getattr(self.bot, "bot_id", "") or "")},
                 resolve_at=bool(config.get("fetch_at_nickname", True)),
-                mark_unresolved=bool(config.get("context_expand_enable", True)),
+                mark_unresolved=bool(config.get("context_expand_enable", False)),
                 bot_id=str(self.bot_id),
                 session_id=entry.session_id,
                 **_meta_flags,

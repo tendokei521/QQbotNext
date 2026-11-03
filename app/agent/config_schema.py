@@ -383,9 +383,9 @@ SCHEMA = {
         "default": True, "group": "group_session",
     },
     "context_expand_enable": {
-        "type": "boolean", "label": "未展开内容标记与按需展开",
-        "description": "把展不开的内容标为【未展开】，并允许模型按需展开。",
-        "default": True, "group": "group_session",
+        "type": "boolean", "label": "合并转发未展开标记",
+        "description": "极端情况下才需要：背景里的合并转发只给 id，开启后标为【未展开】提示模型用 get_context 取回。",
+        "default": False, "group": "group_session",
     },
     "referent_resolve_enable": {
         "type": "boolean", "label": "指代消解",

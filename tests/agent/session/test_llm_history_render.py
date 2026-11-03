@@ -7,7 +7,8 @@
 
 - 单行形态 ``MM-DD HH:MM 昵称(QQ): 正文``（会话历史 / 群聊背景）
 - 多行形态 ``(时间：…)\\n发送者：…\\n发送了：正文``（增强块，历史里原样保留）
-- 未展开标记与已展开标记（``【未展开:引用456】`` / ``【已展开:引用456 → …】``）
+- 合并转发未展开标记与已展开标记（``【未展开:合并转发456】`` / ``【已展开:… → …】``）
+- 引用/@ 不再打“未展开”标记（与模型工具同一 get_msg / 成员查询路径）
 - 旧数据（只有 content、没有结构化字段）必须仍可读
 """
 
@@ -16,7 +17,6 @@ from __future__ import annotations
 from app.agent.context.group import (
     EXPANDED_REPLY,
     UNRESOLVED_FORWARD_ID,
-    UNRESOLVED_REPLY,
     ExpandedRefs,
     extract_msg_text,
     format_history_for_llm,
@@ -122,9 +122,11 @@ def test_online_history_without_id_hides_user_id():
     assert text.endswith("小明: 在吗")
 
 
-def test_online_history_mark_unresolved_marks_actionable_gaps():
+def test_online_history_mark_unresolved_only_marks_forward_gap():
     text = format_online_history(ONLINE, self_ids={"778"}, mark_unresolved=True)
-    assert UNRESOLVED_REPLY.format(id="456") in text
+    # 引用正文与预取同走 get_msg，失败时模型也取不到 → 只留 [引用] 占位
+    assert "[引用]" in text
+    assert "【未展开:引用" not in text
     assert UNRESOLVED_FORWARD_ID.format(id="1003") not in text  # 图片不是"未展开"缺口
     assert "[图片#1003]" in text  # 但带 id，可按需 expand_image
 
