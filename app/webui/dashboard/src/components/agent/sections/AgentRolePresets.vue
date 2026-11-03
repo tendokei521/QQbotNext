@@ -76,11 +76,10 @@ function selectPromptPreset(key: string) {
   agent.onChange('prompt_preset', key)
 }
 
-/** 三套方案正文的全局编辑入口在「设置 → 编辑系统提示词」 */
-function editPromptText() {
-  router.push({ path: '/settings', query: { 'prompt-presets': '1' } })
-}
-
+/**
+ * 三套方案正文的全局编辑入口已暂时移除（2026-11-03）：文案以代码
+ * `app/agent/assembly/presets.py` 为准，不再允许在设置里改。
+ */
 const filteredPresets = computed(() => {
   const q = search.value.trim().toLowerCase()
   if (!q) return presets.value
@@ -150,10 +149,6 @@ onMounted(() => {
       <div class="d-flex align-center flex-wrap gap-2 mb-1">
         <v-icon icon="mdi-tune-variant" size="small" color="primary" />
         <span class="text-subtitle-2">提示词风格</span>
-        <v-spacer />
-        <a class="text-caption text-primary text-decoration-none" href="#" @click.prevent="editPromptText">
-          编辑文案
-        </a>
       </div>
       <div class="text-caption mb-3" style="opacity: 0.7">只换说话风格，不改人格内容</div>
       <v-row dense role="radiogroup" aria-label="提示词风格（三选一）">

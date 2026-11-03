@@ -1,25 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { useWebuiStore } from '@/stores/webui'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
-import PromptPresetEditorDialog from '@/components/settings/PromptPresetEditorDialog.vue'
 
 const router = useRouter()
-const route = useRoute()
 const webui = useWebuiStore()
 const notify = useNotifyStore()
-const promptDialog = ref(false)
-
-/** 从「AI 对话面板 → 提示词风格」跳过来时直接打开编辑弹窗（query: ?prompt-presets=1） */
-onMounted(() => {
-  if (!route.query['prompt-presets']) return
-  promptDialog.value = true
-  const query = { ...route.query }
-  delete query['prompt-presets']
-  router.replace({ query })
-})
 
 /** 应用版本：界面只展示 package.json 的版本，不展示 commit 戳 */
 const appVersion = __APP_VERSION__
@@ -121,19 +109,6 @@ const showExperimental = computed<boolean>({
 
       <v-card variant="outlined" class="settings-card">
         <v-card-title class="d-flex align-center">
-          <v-icon icon="mdi-text-box-edit-outline" class="mr-2" color="primary" /> 系统提示词
-        </v-card-title>
-        <v-card-text class="d-flex align-center flex-wrap gap-2">
-          <span class="app-muted">修改「聊天 / 角色扮演 / 助手」三套提示词</span>
-          <v-spacer />
-          <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-pencil" @click="promptDialog = true">
-            编辑提示词
-          </v-btn>
-        </v-card-text>
-      </v-card>
-
-      <v-card variant="outlined" class="settings-card">
-        <v-card-title class="d-flex align-center">
           <v-icon icon="mdi-flask-outline" class="mr-2" color="warning" /> 高级选项
         </v-card-title>
         <v-card-text>
@@ -161,7 +136,6 @@ const showExperimental = computed<boolean>({
         </v-card-text>
       </v-card>
     </div>
-    <PromptPresetEditorDialog v-model="promptDialog" />
   </div>
 </template>
 
