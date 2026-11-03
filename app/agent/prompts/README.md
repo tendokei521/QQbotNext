@@ -17,7 +17,7 @@
 
 | 文件 | 内容 |
 |---|---|
-| `system.py` | **全部静态文案，严格按组装顺序**：L1 10 persona → 30 emoji → 54 reply_rules → 55 onebot_auth → 60 message_meta → 100 group_log → 106 identity → L4 历史提示/摘要头 → L5 发言协议 → 工具结果回应要求 → 重试 nudge → 后台压缩 prompt |
+| `system.py` | **全部静态文案，严格按组装顺序**：L1 10 persona → 54 reply_rules → 55 onebot_auth → 60 message_meta → 62 emoji → 100 group_log → 106 identity → L4 历史提示/摘要头 → L5 发言协议 → 工具结果回应要求 → 重试 nudge → 后台压缩 prompt |
 | `presets.py` | L1 order 20 behavior 的两套方案段落（chat / roleplay） |
 | `sections.py` | 默认段 builder，函数顺序与 `default_sections()` 的 order 一致（persona → … → user），每个函数上方标了实际槽位 |
 | `convention.py` | L1 order 60 消息格式约定段的 builder（文案在 `system.py`） |

@@ -4,8 +4,8 @@
 `app/agent/assembly/assembler.py` 的注入点：
 
     ① L1 系统提示词段（层内 order 升序）
-       10 persona → 20 behavior → 30 emoji_hint → 40 schedule(模块) → 50 proactive(模块)
-       → 54 reply_rules → 55 onebot_auth → 60 message_meta → 70 skills → 80 memory
+       10 persona → 20 behavior → 40 schedule(模块) → 50 proactive(模块) → 54 reply_rules
+       → 55 onebot_auth → 60 message_meta → 62 emoji_hint → 70 skills → 80 memory
        → 90 background → 100 group_log → 105 extra → 106 identity_context
     ② L4 对话历史：history（必要时先插「历史省略提示」；压缩时替换为摘要头）
     ③ L5 本轮消息：user（发言协议贴在最后一条 user 消息末尾）
@@ -29,21 +29,6 @@ DEFAULT_PERSONA_PROMPT = "你是一个在QQ群内的普通群友。"
 
 # 行为段文案在各套方案（chat / roleplay）的段落数组里，见 ``presets.py``。
 # 这里只保留「段落表按 speech_by_tool 等能力裁剪」的渲染入口。
-
-
-# ==================== ① L1 · order 30 emoji_hint ====================
-
-EMOJI_HINT_TEMPLATE = (
-    "【可用表情】贴表情可用内容：{}。"
-    "贴表情时直接使用标签名，程序会翻成正确的表情 id；"
-    "上下文里出现 [♡66] 这类数字，是别的消息上已贴过的表情 id，可原样复用。"
-)
-
-
-def emoji_hint_line(tags: str) -> str:
-    """把表情标签清单渲染成一行提示；空清单返回空串。"""
-    text = str(tags or "").strip()
-    return EMOJI_HINT_TEMPLATE.format(text) if text else ""
 
 
 # ==================== ① L1 · order 54 reply_rules ====================
@@ -121,6 +106,21 @@ CONVENTION = """### 消息格式约定
 - 调用需要权限的 OneBot 工具时，`auth_message_id` 必须填「让你执行该操作的那条群消息」
   的 message_id；程序会用该消息的发送者身份校验权限（high 需 bot 管理者/拥有者，
   critical 仅拥有者）。不要编造 id，也不要拿无关消息凑数。"""
+
+
+# ==================== ① L1 · order 62 emoji_hint ====================
+
+EMOJI_HINT_TEMPLATE = (
+    "【可用表情】贴表情可用内容：{}。"
+    "贴表情时直接使用标签名，程序会翻成正确的表情 id；"
+    "上下文里出现 [♡66] 这类数字，是别的消息上已贴过的表情 id，可原样复用。"
+)
+
+
+def emoji_hint_line(tags: str) -> str:
+    """把表情标签清单渲染成一行提示；空清单返回空串。"""
+    text = str(tags or "").strip()
+    return EMOJI_HINT_TEMPLATE.format(text) if text else ""
 
 
 # ==================== ① L1 · order 70/80/90 ====================

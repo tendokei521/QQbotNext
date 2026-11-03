@@ -41,7 +41,7 @@ messages（OpenAI 风格）
 |---|---|---|---|
 | 10 | persona | system | 始终 |
 | 20 | behavior | system | 选中提示词方案（产品路径恒有） |
-| 30 | emoji_hint | system | 能贴表情且活跃度 > 0 |
+| 62 | emoji_hint | system | 能贴表情且活跃度 > 0 |
 | 40 | schedule | system | ``schedule_enable`` |
 | 50 | proactive | system | 有可用能力时 |
 | 60 | message_meta | system | 消歧说明开启且注入了元信息 |

@@ -352,11 +352,12 @@ def report_ban(caps: dict) -> str:
     return "\n".join(lines)
 
 
-#: 聊天方案的段落表（声明顺序 = 渲染顺序：与 QQ-agent 一致，硬的约束在前）
+#: 聊天方案的段落表（声明顺序 = 渲染顺序：硬的约束在前）
 CHAT_SEGMENTS: tuple[Segment, ...] = (
-    ("identity", identity),
+    # 对齐 qq-bridge 仿真层顺序：安全 → 工具协议 → 行为/风格；身份与社交风格靠后
     ("security", security_rules),
     ("work", work_protocol),
+    ("identity", identity),
     ("anti_ai", anti_ai_flavor),
     ("subjectivity", subjectivity),
     ("speak_or_not", speak_or_not),

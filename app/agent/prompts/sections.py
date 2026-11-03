@@ -15,7 +15,7 @@
 |---|---|---|---|
 | L1 系统提示词 | behavior(20) / schedule(40) / proactive(50) / message_meta(60) | system | 方案恒有；其余看开关与能力 |
 | L2 人格预设 | persona(10) | system | 始终 |
-| L3 钩子注入 | emoji_hint(30) / skills(70) / memory(80) / background(90) / group_log(100) / extra(105) / identity_context(106) | system | 各自有内容才出现（identity_context 恒有） |
+| L3 钩子注入 | emoji_hint(62) / skills(70) / memory(80) / background(90) / group_log(100) / extra(105) / identity_context(106) | system | 各自有内容才出现（identity_context 恒有） |
 | L4 对话历史 | history(110) | 对话 | 非空（角色预设的预设对话前插） |
 | L5 本轮消息 | user(120) | user | 始终 |
 
@@ -136,12 +136,13 @@ def build_behavior(req: Any) -> list[dict]:
     return [{"role": "system", "content": text}] if str(text).strip() else []
 
 
-# ---- L1 30 emoji_hint ----
+# ---- L1 62 emoji_hint ----
 def build_emoji_hint(req: Any) -> list[dict]:
-    """【可用表情】提示段（L3，order 30）：本轮真能贴表情时才出现。
+    """【可用表情】提示段（L3，order 62）：本轮真能贴表情时才出现。
 
     2026-11-03 随 OneBot 工具并入框架：以前由「工具扩展」模块注册，
     现在工具是框架内置能力，所以提示段也回到默认段表（工具不在时整段消失）。
+    顺序放在 message_meta 之后：能力清单是补充信息，排在规则/协议之后。
     """
     tools = getattr(req, "available_tools", None)
     if tools is not None and "set_msg_emoji_like" not in tools:
@@ -421,14 +422,14 @@ def default_sections() -> list[Section]:
         # 行为规则紧跟人格：人格讲"我是谁"，行为段讲"在这个群里怎么说话"，
         # 越硬的约束越靠前（对齐 QQ-agent 的段落顺序，见 persona_rules 模块 docstring）
         Section("behavior", 20, build_behavior, source="builtin"),
-        # 表情提示随 OneBot 工具并入框架后回归默认段（order 30）：工具不在时整段为空
-        Section("emoji_hint", 30, build_emoji_hint, source="builtin"),
         # 能力段（schedule / proactive / message_meta）由对应插件注册；
-        # 框架只保留人设 + 行为规则 + 表情 + 材料通道 + 历史 + 本轮消息。
+        # 框架只保留人设 + 行为规则 + 材料通道 + 历史 + 本轮消息。
         Section("reply_rules", 54, build_participation, source="builtin"),
         # 需要权限的 OneBot 工具：消息凭证约束（order 55，紧跟在回复规则之后）
         Section("onebot_auth", 55, build_onebot_auth, source="builtin"),
         Section("message_meta", 60, build_message_meta, source="builtin"),
+        # 能力清单排在规则/协议之后：先要求、后补充信息
+        Section("emoji_hint", 62, build_emoji_hint, source="builtin"),
         Section("skills", 70, build_skills, source="builtin"),
         Section("memory", 80, build_memory, source="builtin"),
         Section("background", 90, build_background, source="builtin"),
