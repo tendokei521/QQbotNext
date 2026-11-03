@@ -415,7 +415,7 @@ def _rp_work_protocol(caps: dict) -> str:
             "决定这一轮不出声就直接结束，这是正常结局。"
         )
         add(
-            "工具调用是动作，不是写代码：send_message=开口说话、set_msg_emoji_like=做个表情、"
+            "工具调用才是动作，不是写代码：send_message=开口说话、set_msg_emoji_like=做个表情、"
             "send_poke=戳一下；内心不要写「我调用 xx」。"
         )
         add(

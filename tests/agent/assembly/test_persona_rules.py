@@ -126,11 +126,11 @@ def test_speech_contract_follows_capability():
 
     # 只开回复模式即可（不依赖任何档位 / 流式）
     half = _render(ALL_TOOLS, {"reply_mode": "participation"})
-    assert "不会发到 QQ" in half
+    assert "只是思考" in half
     assert "send_message" in half
 
     by_tool = _render(ALL_TOOLS, SPEECH_CONFIG)
-    assert "不会发到 QQ" in by_tool
+    assert "只是思考" in by_tool
     assert "send_message" in by_tool
 
 

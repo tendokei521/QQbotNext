@@ -266,7 +266,7 @@ def test_every_preset_explains_tool_speech():
         )
         assert "只是思考" in text, f"{preset.key} 没说明文本只是思考"
         assert "send_message" in text, f"{preset.key} 没给出真正的发言通道"
-        assert "工具调用是动作" in text, f"{preset.key} 缺「工具是动作」口径"
+        assert "工具调用才是动作" in text, f"{preset.key} 缺「工具是动作」口径"
         assert "直接发到" not in text, f"{preset.key} 在工具发言下仍说文本会直接发出"
         assert "不要用文本再重复一遍" in text, f"{preset.key} 缺汇报禁令"
 
