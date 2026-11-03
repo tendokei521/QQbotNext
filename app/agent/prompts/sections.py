@@ -347,6 +347,19 @@ def _user_block_parts(req: Any) -> list[dict]:
     ]
 
 
+def _current_sender_name(req: Any) -> str:
+    """本轮发送者昵称（供 OpenAI message 的 name 字段；不进正文）。"""
+    event = getattr(req, "event", None)
+    if event is None:
+        return ""
+    if bool(getattr(req, "is_private", False)):
+        return "对方"
+    user = getattr(event, "user", None)
+    if user is None:
+        return ""
+    return str(getattr(user, "card", "") or getattr(user, "nickname", "") or "")
+
+
 def build_user(req: Any) -> list[dict]:
     """本轮消息。图片块由 ``place_images`` 在清洗前归位。
 
@@ -356,16 +369,22 @@ def build_user(req: Any) -> list[dict]:
     - 顺序：**模块 user 数据块 → 正文 → 额外内容块 → 图片**。数据块放在正文之前，
       模型先读到"历史资料"再读本轮问题，同时它属于 user 轮次而不是 system 指令位。
     - 空正文只留数据块 / 额外块。
+    - 发送者昵称放在消息的 ``name`` 字段（不混进正文，避免昵称句被当内容）。
     """
     blocks = _user_block_parts(req)
     parts = _extra_text_parts(req)
+    sender_name = _current_sender_name(req)
     if not blocks and not parts:
-        return [{"role": "user", "content": req.user_text}]
-    content: list[dict] = list(blocks)
-    if str(req.user_text or "").strip():
-        content.append({"type": "text", "text": req.user_text})
-    content.extend(parts)
-    return [{"role": "user", "content": content}]
+        message: dict = {"role": "user", "content": req.user_text}
+    else:
+        content: list[dict] = list(blocks)
+        if str(req.user_text or "").strip():
+            content.append({"type": "text", "text": req.user_text})
+        content.extend(parts)
+        message = {"role": "user", "content": content}
+    if sender_name:
+        message["name"] = sender_name
+    return [message]
 
 
 # ==================== 默认段 / 兼容的 extra 通道 ====================

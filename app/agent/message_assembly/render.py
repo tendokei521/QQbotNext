@@ -8,12 +8,14 @@ from .segments import render_segments
 from .spec import escape_body, format_time, marker, quote
 
 
-def _sender_marker(sender_id: Any, sender_name: str, *, is_me: bool = False) -> str:
+def _sender_marker(
+    sender_id: Any, sender_name: str, *, is_me: bool = False, include_name: bool = True
+) -> str:
     name = "我" if is_me else str(sender_name or "")
     return marker(
         "sender",
         f"id={'' if sender_id in (None, '') else sender_id}",
-        f"name={quote(name)}" if name else "",
+        f"name={quote(name)}" if include_name and name else "",
     )
 
 
@@ -32,10 +34,15 @@ def render_turn(
     time_str: str = "",
     reply: dict | None = None,
     message_id: Any = None,
+    include_sender_name: bool = True,
 ) -> str:
-    """本轮消息：头部（time/message_id）+ 发送者 + 内容流 + 引用。"""
+    """本轮消息：头部（time/message_id）+ 发送者 + 内容流 + 引用。
+
+    ``include_sender_name=False``：昵称走 OpenAI message 的 ``name`` 字段，
+    这里只留发送者 id（避免昵称句被模型当成正文）。
+    """
     out = [_head_marker(time_str or format_time(), message_id)]
-    out.append(_sender_marker(sender_id, sender_name))
+    out.append(_sender_marker(sender_id, sender_name, include_name=include_sender_name))
     out.append(render_segments(message, message_id=message_id))
     if reply:
         fields = [
@@ -58,13 +65,14 @@ def render_history_entry(
     mask_nickname: bool = False,
     message_id: Any = None,
     meta_lines: list[str] | None = None,
+    include_sender_name: bool = True,
 ) -> str:
     """历史条目：``[time=…][sender:…]正文``（正文已是文本，仅做转义）。"""
     name = sender_name
     if mask_nickname:
         name = f"用户<{sender_id}>"
     head = _head_marker(format_time(time), message_id)
-    line = f"{head}{_sender_marker(sender_id, name, is_me=is_me)}{escape_body(content)}"
+    line = f"{head}{_sender_marker(sender_id, name, is_me=is_me, include_name=include_sender_name)}{escape_body(content)}"
     # 附注行：结构化标记（如 [reply_to:...]）接在行尾，其它文本另起一行
     for meta in meta_lines or []:
         text = str(meta or "").strip()

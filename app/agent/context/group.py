@@ -634,6 +634,25 @@ def format_history_for_llm(
 
         render_content, entry_blocks = history_enrich.rendering_for(session_id, bot_id)
 
+    # 只有框架渲染器支持""昵称走 message.name""；默认/旧渲染器仍把昵称写在正文里
+    # （它们不认识 include_sender_name，硬塞 name 字段会变成"正文+字段"重复）。
+    from app.agent.message_assembly.history import render_history_entry as _ma_entry
+
+    out_of_band_name = renderer is _ma_entry
+
+    def _entry_name(parsed) -> str:
+        """user 条目的发送者昵称（走消息 name 字段，不进正文）。"""
+        if str(getattr(parsed, "role", "") or "") != "user":
+            return ""
+        base = getattr(parsed, "base", None)
+        sender_name = str(getattr(base, "sender_name", "") or "")
+        sender_id = str(getattr(base, "sender_id", "") or "")
+        if is_private:
+            return "对方"
+        if mask_nickname and sender_id:
+            return f"用户<{sender_id}>"
+        return sender_name
+
     return render_history(
         history,
         is_private=is_private,
@@ -644,6 +663,8 @@ def format_history_for_llm(
         entry_media=entry_media,
         entry_renderer=renderer,
         reply_mode=reply_mode,
+        include_sender_name=not out_of_band_name,
+        entry_name=_entry_name if out_of_band_name else None,
     )
 
 

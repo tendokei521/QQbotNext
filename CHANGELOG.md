@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### 发送者昵称改走 message.name 字段（2026-11-03）
+
+- 消息级（L4 历史 / L5 本轮）不再把昵称拼进正文：正文只保留
+  `[time=...,message_id=...][sender:id=..]`，昵称放进 OpenAI message 的 `name` 字段
+  （`{"role":"user","name":"...","content":"..."}`），避免"昵称本身是一句话"时被模型
+  当成正文内容。
+- 仅框架渲染器（`runtime.history_renderer`）启用；默认/旧渲染器仍把昵称写在正文里
+  （不认识 name 能力，避免"正文+字段"重复）。
+- 约定段补一条：`name` 字段是发送者昵称、不是正文；正文从时间/发送者标记之后开始。
+- 群记录/在线背景仍是单段 system 文本（无法用 per-message name），格式未变。
+
 ### 框架提示词统一到 `app/agent/prompts/`；删除「助手」方案（2026-11-03）
 
 - 框架所有提示词注入的文案/渲染入口集中到 `app/agent/prompts/`：

@@ -82,3 +82,37 @@ def test_auth_section_only_when_privileged_tool_available():
     assert build_onebot_auth(req) == []
     req = SimpleNamespace(available_tools={"send_msg", "set_group_kick"})
     assert build_onebot_auth(req)[0]["role"] == "system"
+
+
+def test_sender_name_goes_to_message_name_field_not_content():
+    """方案 A：昵称走 OpenAI message 的 ``name`` 字段，正文只留 id 标记。"""
+    from app.agent.message_assembly import history as history_assembly
+    from app.agent.prompts.sections import build_user
+
+    entry = HistoryEntry(
+        role="user",
+        message_id="777",
+        base=BaseInfo(sender_id="20002", sender_name="老师，今年的学费也是一次性交吗",
+                      text="在吗", time=1788342260, group_id="466052056"),
+    )
+    from app.agent.context.group import format_history_for_llm
+
+    rendered = format_history_for_llm(
+        [entry], is_private=False, renderer=history_assembly.render_history_entry
+    )
+    assert rendered[0]["name"] == "老师，今年的学费也是一次性交吗"
+    assert "老师，今年的学费也是一次性交吗" not in rendered[0]["content"]
+    assert "[sender:id=20002]" in rendered[0]["content"]
+
+    event = SimpleNamespace(
+        message_type="group",
+        user=SimpleNamespace(card="", nickname="老师，今年的学费也是一次性交吗"),
+        group=SimpleNamespace(group_id=466052056, group_name="测试群"),
+    )
+    req = SimpleNamespace(
+        event=event, is_private=False, user_text="[time=..,message_id=1][sender:id=20002]在吗",
+        user_blocks=[], extra_user_content_parts=[],
+    )
+    msg = build_user(req)[0]
+    assert msg["name"] == "老师，今年的学费也是一次性交吗"
+    assert "老师，今年的学费也是一次性交吗" not in str(msg["content"])

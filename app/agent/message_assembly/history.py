@@ -62,6 +62,7 @@ def render_history_entry(entry: Any, **kwargs) -> str | None:
     mask = bool(kwargs.get("mask_nickname", False))
     include_time = bool(kwargs.get("include_time", True))
     is_private = bool(kwargs.get("is_private", False))
+    include_sender_name = bool(kwargs.get("include_sender_name", True))
 
     reply_mode = str(kwargs.get("reply_mode", "") or "")
 
@@ -107,7 +108,11 @@ def render_history_entry(entry: Any, **kwargs) -> str | None:
         head += ("," if head else "") + f"message_id={mid}"
     default_name = "对方" if is_private else ""
     name = "我" if is_me else (f"用户<{base.sender_id}>" if mask else (base.sender_name or default_name))
-    line = (f"[{head}]" if head else "") + _sender_marker(base.sender_id, name) + body
+    line = (
+        (f"[{head}]" if head else "")
+        + _sender_marker(base.sender_id, name, include_name=include_sender_name)
+        + body
+    )
     if reply_id:
         line += f"[reply_to:id={reply_id}]"
     for meta in base.meta_lines or []:

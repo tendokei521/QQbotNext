@@ -617,6 +617,7 @@ def render_history(
     entry_renderer=None,
     entry_blocks=None,
     entry_media=None,
+    entry_name=None,
     **kwargs,
 ) -> list[dict]:
     """批量渲染为 OpenAI messages。
@@ -630,10 +631,14 @@ def render_history(
     - 返回的 ``text`` 覆盖渲染文本（``None`` = 不改）；
     - 返回的 ``parts`` 是追加在文本之后的内容块（``image_url`` 等）；非空时
       该条的 ``content`` 变成块数组，文本为空则只发块。
+
+    ``entry_name``：``callable(entry) -> str``，给 user 消息补 OpenAI ``name``
+    字段（发送者昵称走带外字段，不混进正文）。
     """
     renderer = entry_renderer or render_history_entry
     result: list[dict] = []
     for entry in entries or []:
+        start = len(result)
         content = renderer(entry, **kwargs)
         text: Any = content
         parts: list[dict] = []
@@ -663,6 +668,19 @@ def render_history(
                 result.append({"role": role, "content": blocks})
         elif text is not None:
             result.append({"role": role, "content": text})
+        # 昵称走 OpenAI message 的 name 字段（不混进正文）；只给 user 条目、
+        # 且只挂在"这条历史自己"的首条消息上（附加块不带 name）。
+        if (
+            entry_name is not None
+            and len(result) > start
+            and role == "user"
+        ):
+            try:
+                sender_name = str(entry_name(parsed) or "").strip()
+            except Exception:  # noqa: BLE001 —— 昵称失败不影响正文
+                sender_name = ""
+            if sender_name:
+                result[start]["name"] = sender_name
         if entry_blocks is None:
             continue
         try:
