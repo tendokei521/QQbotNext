@@ -5,7 +5,7 @@
  * 一屏一张卡，按用户决策顺序排：
  *   1. 当前人格（只读 chip）+ 去「人格设定」编辑文案；
  *   2. 从人格预设里挑一个并应用（唯一的「应用」入口，人格设定页只负责编辑内容）；
- *   3.「提示词风格」是必选三选一，常驻展示（不再收进折叠面板）。
+ *   3.「提示词风格」是必选二选一，常驻展示（不再收进折叠面板）。
  *
  * 人格内容的唯一来源是「人格设定」页的角色预设库；这里只读预设列表、写
  * persona_preset_id / system_prompt，不再复制第二份预览与第二个编辑入口。
@@ -24,9 +24,9 @@ interface RolePreset extends PersonaPresetLike {
 }
 
 /**
- * 提示词风格（三选一）。
+ * 提示词风格（二选一）。
  *
- * 唯一真相是后端 `app/agent/assembly/presets.py::PRESETS`（那里有全文），这里只放
+ * 唯一真相是后端 `app/agent/prompts/presets.py::PRESETS`（那里有全文），这里只放
  * 展示用的标签与图标——`key` 必须与后端逐字一致，否则选了等于没选（后端按未知值忽略）。
  */
 const PROMPT_PRESETS = [
@@ -44,13 +44,6 @@ const PROMPT_PRESETS = [
     color: 'purple',
     desc: '以人格设定里的身份持续扮演：有人物感、不跳出',
   },
-  {
-    key: 'assistant',
-    label: '助手',
-    icon: 'mdi-robot-outline',
-    color: 'success',
-    desc: '服务型助手：有求必应、先给结论、结构化',
-  },
 ]
 
 const agent = useAgentConfigStore()
@@ -62,7 +55,7 @@ const loading = ref(false)
 const search = ref('')
 const selectedId = ref('')
 
-/** 三套风格是**必选**的：空/未知值统一按默认 chat 显示（与后端兜底一致） */
+/** 两套风格是**必选**的：空/未知值统一按默认 chat 显示（与后端兜底一致） */
 const PROMPT_KEYS = PROMPT_PRESETS.map((p) => p.key)
 
 const currentPromptPreset = computed(() => {
@@ -77,8 +70,8 @@ function selectPromptPreset(key: string) {
 }
 
 /**
- * 三套方案正文的全局编辑入口已暂时移除（2026-11-03）：文案以代码
- * `app/agent/assembly/presets.py` 为准，不再允许在设置里改。
+ * 两套方案正文的全局编辑入口已暂时移除（2026-11-03）：文案以代码
+ * `app/agent/prompts/presets.py` 为准，不再允许在设置里改。
  */
 const filteredPresets = computed(() => {
   const q = search.value.trim().toLowerCase()
@@ -151,7 +144,7 @@ onMounted(() => {
         <span class="text-subtitle-2">提示词风格</span>
       </div>
       <div class="text-caption mb-3" style="opacity: 0.7">只换说话风格，不改人格内容</div>
-      <v-row dense role="radiogroup" aria-label="提示词风格（三选一）">
+      <v-row dense role="radiogroup" aria-label="提示词风格（二选一）">
         <v-col v-for="p in PROMPT_PRESETS" :key="p.key" cols="12" md="4">
           <v-card
             variant="outlined"
