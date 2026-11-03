@@ -226,15 +226,15 @@ SCHEMA = {
         "default": True, "group": "group_behavior",
     },
     "session_timeout": {
-        "type": "number", "label": "会话超时时间(秒)", "description": "无消息后多久结束会话",
+        "type": "number", "label": "会话超时时间", "description": "无新消息多久结束本轮会话，单位秒",
         "default": 60, "min": 30, "max": 300, "group": "group_session",
     },
     "history_rounds": {
-        "type": "number", "label": "保留多少轮对话", "description": "带多少轮对话给模型（1 轮 = 一问一答）",
+        "type": "number", "label": "保留多少轮对话", "description": "最多带多少轮对话给模型",
         "default": 50, "min": 5, "max": 100, "group": "group_session",
     },
     "context_compress_enable": {
-        "type": "boolean", "label": "启用上下文压缩", "description": "对话超过轮数上限时，把较早部分压成摘要，保留最近几条原文。",
+        "type": "boolean", "label": "启用上下文压缩", "description": "较早的对话压成摘要，保留最近原文",
         "default": True, "group": "group_compress",
     },
     "context_compress_prompt": {
@@ -282,7 +282,7 @@ SCHEMA = {
     },
     "max_message_length": {
         "type": "number", "label": "消息最大长度",
-        "description": "单轮原文的字符上限，超出截断；太短会把长消息/引用截半",
+        "description": "单轮原文的字符上限，超出会截断",
         "default": 1000, "min": 200, "max": 16384, "group": "group_session",
     },
     "prompt_dump_enable": {
@@ -296,34 +296,34 @@ SCHEMA = {
     },
     "history_mode": {
         "type": "select", "label": "带多少历史给模型",
-        "description": "最近的更省；更早的内容模型可以自己查。全部带上更贵。",
+        "description": "最近的更省，更早的内容模型可自己查",
         "default": "recent", "group": "session_window",
-        "options": {"recent": "最近几条 + 模型需要时再查", "full": "全部带上（更贵）"},
+        "options": {"recent": "最近几条，需要时再查", "full": "全部带上"},
     },
     "history_recent_messages": {
         "type": "number", "label": "最近带几条",
-        "description": "带最近多少条历史给模型；更早的让模型自己查。",
+        "description": "带最近多少条历史给模型",
         "default": 12, "min": 2, "max": 200, "group": "session_window",
     },
     # Q1：上下文预算（按 token 压力触发压缩，而不是按条数）
     "context_window": {
-        "type": "number", "label": "模型上下文窗口（token）",
-        "description": "用来判断什么时候该压缩上下文。0 = 不按长度触发（按条数）。",
+        "type": "number", "label": "模型上下文窗口",
+        "description": "按 token 计，用于判断何时压缩上下文。0 表示按条数触发",
         "default": 0, "min": 0, "max": 2000000, "group": "group_compress",
     },
     "context_compress_trigger_ratio": {
         "type": "number", "label": "压缩触发比例",
-        "description": "估算输入占窗口的比例超过它就压缩。0 = 不启用（按条数）。",
+        "description": "输入占窗口比例超过它时压缩。0 表示按条数触发",
         "default": 0.8, "min": 0, "max": 1, "group": "group_compress",
     },
     "context_compress_keep_ratio": {
         "type": "number", "label": "压缩后保留比例",
-        "description": "压缩时保留最近多少比例的原文（不超过「保留条数」配置的上限）。",
+        "description": "压缩时保留最近原文的比例",
         "default": 0.16, "min": 0, "max": 0.9, "group": "group_compress",
     },
     "context_compress_backend": {
         "type": "select", "label": "压缩方式",
-        "description": "先调模型写摘要（推荐）；只裁剪旧工具结果（零成本）；先裁再摘要。",
+        "description": "先让模型写摘要，或只裁剪旧工具结果，或先裁剪再摘要",
         "default": "summary", "group": "group_compress",
         "options": {"summary": "模型摘要", "prune": "只裁剪工具结果", "both": "先裁再摘要"},
     },
@@ -331,45 +331,45 @@ SCHEMA = {
     # 不等就落盘 diff。默认关：这是一条排查开关，每次请求都做投影比对有开销。
     "prompt_dump_verify": {
         "type": "boolean", "label": "核对聊天记录",
-        "description": "每次请求前检查记录是否一致，不一致会写进日志。默认关闭。",
+        "description": "每次请求前自检会话记录是否一致，异常写日志",
         "default": False, "group": "group_session",
     },
     "context_token_budget": {
         "type": "number", "label": "上下文 token 预算",
-        "description": "上下文的上限，超出时从最旧的对话开始丢。0 = 不限制。",
+        "description": "上下文 token 上限，超出从最旧对话开始丢。0 表示不限制",
         "default": 0, "min": 0, "max": 200000, "group": "group_compress",
     },
     "context_token_chars_per_token": {
-        "type": "number", "label": "字符与 token 的换算（估算用）",
-        "description": "只用于估算上下文长度，不影响实际费用；不确定就保持 2。",
+        "type": "number", "label": "字符与 token 换算",
+        "description": "仅用于估算上下文长度，不影响费用",
         "default": 2.0, "min": 0.5, "max": 8, "group": "group_compress",
     },
     "include_pre_history": {
-        "type": "boolean", "label": "额外拉取在线群消息", "description": "请求前拉取群聊最近消息当背景，不算进聊天记录；仅在群聊记录插件停用时才有用。",
+        "type": "boolean", "label": "额外拉取在线群消息", "description": "请求前拉取群聊最近消息当背景，不计入聊天记录",
         "default": False, "group": "group_session",
     },
     "group_log_enable": {
         "type": "boolean", "label": "包含群聊背景记录",
-        "description": "把最近的消息、表情回应、戳一戳和撤回放进背景，和聊天记录不重复。",
+        "description": "把最近消息、表情回应、戳一戳、撤回放进背景，不与聊天记录重复",
         "default": True, "group": "group_session",
     },
     "group_log_window_minutes": {
-        "type": "number", "label": "群聊记录窗口（分钟）",
-        "description": "每次请求最多带回最近多少分钟的群聊记录（只影响带多少，不影响本地保留多久）",
+        "type": "number", "label": "群聊记录窗口",
+        "description": "每次请求最多带回最近多少分钟的群聊记录",
         "default": 60, "min": 1, "max": 1440, "group": "group_session",
     },
     "group_log_window_limit": {
         "type": "number", "label": "群聊记录条数上限",
-        "description": "每次请求最多带回多少条群聊记录（超出时保留最新的）",
+        "description": "每次请求最多带回多少条群聊记录，超出保留最新",
         "default": 50, "min": 1, "max": 500, "group": "group_session",
     },
     "group_log_max_chars": {
         "type": "number", "label": "群聊背景字数上限",
-        "description": "背景最多占多少字，超出时从最旧的开始丢。0 = 不限制，会明显增加消耗。",
+        "description": "背景最多占多少字，超出从最旧开始丢。0 表示不限制",
         "default": 4000, "min": 0, "max": 20000, "group": "group_session",
     },
     "include_private_pre_history": {
-        "type": "select", "label": "私聊也额外拉取在线消息", "description": "私信时把开始聊之前收到的消息给模型当背景；仅在群聊记录插件停用时才有用。",
+        "type": "select", "label": "私聊也额外拉取在线消息", "description": "私聊时把开始前的消息给模型当背景",
         "default": "default",
         "options": {"default": "不加载", "history": "加载为背景消息", "load": "加载为会话历史"},
         "group": "group_session",
