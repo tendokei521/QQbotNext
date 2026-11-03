@@ -47,7 +47,7 @@
     ]
   },
   "reply": {
-    "fields": 4,
+    "fields": 3,
     "groups": [
       {
         "id": "reply_permission",
@@ -64,14 +64,6 @@
         "fields": [
           "agent_owner_list",
           "agent_manager_list"
-        ]
-      },
-      {
-        "id": "reply_tool_approval",
-        "label": "高危工具审批",
-        "icon": "mdi-shield-alert-outline",
-        "fields": [
-          "tool_approval_enable"
         ]
       }
     ]

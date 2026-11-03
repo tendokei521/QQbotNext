@@ -7,7 +7,7 @@
       "id": "behavior",
       "path": "/ai/settings/behavior",
       "title": "对话行为",
-      "subtitle": "连发消息与打断怎么处理",
+      "subtitle": "连发消息、打断与工具审批怎么处理",
       "icon": "mdi-call-split",
       "color": "secondary",
       "order": 30,
@@ -30,6 +30,14 @@
             "interrupt_enable",
             "interrupt_save_sent",
             "interrupt_debug"
+          ]
+        },
+        {
+          "id": "behavior_approval",
+          "label": "工具审批",
+          "icon": "mdi-shield-check-outline",
+          "fields": [
+            "tool_approval_mode"
           ]
         }
       ]
