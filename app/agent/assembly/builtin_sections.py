@@ -197,6 +197,44 @@ def build_message_meta(req: Any) -> list[dict]:
     return convention_section(req)
 
 
+ONEBOT_AUTH_TEXT = """### 群管理操作与消息凭证（必须遵守）
+- 每条消息头部都有 `message_id=..`（群聊记录行首的 `#数字` 也是同一种 id）。
+- 调用**需要权限的 OneBot 工具**（踢人/禁言/删消息/改群设置/群名/群文件/群公告，
+  以及修改本账号资料、好友、凭证等）时，除工具自身参数外，必须传 `auth_message_id`
+  = **让你执行该操作的那条群消息**的 message_id。
+- 程序会用这条消息的发送者身份校验权限：`high` 级工具（群管理类）需要 bot 管理者
+  或拥有者；`critical` 级工具（自身账号/凭证类）仅 bot 拥有者。消息不存在、不属于
+  当前群、或发送者权限不足，工具都会被拒绝。
+- 只能引用本群里真实存在的消息 id，禁止编造，也不要用无关消息凑数；没有明确要求
+  你执行该操作的消息时，说明「需要管理员在管理端操作」，不要强行调用。
+- 这些工具的参数 schema 里 `auth_message_id` 是必填项；缺省会被拒绝。"""
+
+
+def build_onebot_auth(req: Any) -> list[dict]:
+    """OneBot 敏感工具的「消息凭证」约束段（L1，order 55）。
+
+    只有本轮工具列表里真的存在 high/critical 的 OneBot 工具时才出现——
+    模型没有这类工具时，谈凭证只会增加噪音。
+    """
+    tools = getattr(req, "available_tools", None)
+    if not tools:
+        return []
+    try:
+        from app.agent.tools.onebot.manifest import ONEBOT_TOOLS
+
+        privileged = {
+            str(tool.get("name", ""))
+            for tool in ONEBOT_TOOLS
+            if str(tool.get("sensitivity", "normal")) in ("high", "critical")
+        }
+    except Exception as e:  # noqa: BLE001 —— 清单不可用不该拖垮组装
+        logger.debug(f"[Assembly] 读取 OneBot 清单失败（跳过凭证说明）: {e}")
+        return []
+    if not (set(tools) & privileged):
+        return []
+    return [{"role": "system", "content": ONEBOT_AUTH_TEXT}]
+
+
 def build_skills(req: Any) -> list[dict]:
     """技能块（可能多块，各自一条 system）。"""
     return [{"role": "system", "content": block} for block in (req.skill_blocks or []) if block]
@@ -285,7 +323,25 @@ def build_identity_context(req: Any) -> list[dict]:
         items = [str(item).strip() for item in (values or []) if str(item).strip()]
         return "、".join(items) if items else "未设置"
 
+    group_id = str(getattr(req, "group_id", "") or "")
+    event = getattr(req, "event", None)
+    group = getattr(event, "group", None)
+    if not group_id and group is not None:
+        group_id = str(getattr(group, "group_id", "") or "")
+    group_name = str(getattr(group, "group_name", "") or "") if group is not None else ""
+
+    first_lines: list[str] = []
+    if group_id:
+        # 群信息只在这里出现一次（移动自每条 user 消息的头部，2026-11-03）：放在「你的账号」前
+        from app.agent.message_assembly.spec import quote
+
+        inner = f"group_id={group_id}"
+        if group_name:
+            inner += f",group_name={quote(group_name)}"
+        first_lines.append(f"【当前群聊[{inner}]】")
+
     content = "\n".join([
+        *first_lines,
         f"你的账号：{account}",
         f"你的拥有者：{_roster('agent_owner_list')}",
         f"你的管理员：{_roster('agent_manager_list')}",
@@ -351,6 +407,8 @@ def default_sections() -> list[Section]:
         # 能力段（schedule / proactive / message_meta）由对应插件注册；
         # 框架只保留人设 + 行为规则 + 表情 + 材料通道 + 历史 + 本轮消息。
         Section("reply_rules", 54, build_participation, source="builtin"),
+        # 需要权限的 OneBot 工具：消息凭证约束（order 55，紧跟在回复规则之后）
+        Section("onebot_auth", 55, build_onebot_auth, source="builtin"),
         Section("message_meta", 60, build_message_meta, source="builtin"),
         Section("skills", 70, build_skills, source="builtin"),
         Section("memory", 80, build_memory, source="builtin"),
@@ -388,6 +446,7 @@ __all__ = [
     "build_history",
     "build_identity_context",
     "build_memory",
+    "build_onebot_auth",
     "build_persona",
     "build_skills",
     "build_user",

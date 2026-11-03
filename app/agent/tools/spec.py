@@ -111,6 +111,8 @@ class ToolSpec:
         sensitivity: str = "normal",
         present_call: Callable[[dict], str] | None = None,
         present_result: Callable[[ToolResult], str] | None = None,
+        auth_check: Callable[[Any, dict], Awaitable[str]] | None = None,
+        self_checked_permission: bool = False,
     ) -> None:
         raw_name = str(name or "")
         self.name = sanitize_tool_name(raw_name)
@@ -142,6 +144,12 @@ class ToolSpec:
         # 渲染器只影响**日志文本**，绝不改变返回给模型的字符串（那是协议面）。
         self.present_call = present_call
         self.present_result = present_result
+        # 工具自带的权限校验器（异步，返回空串=通过，否则返回回给模型的错误文本）。
+        # 用于「需要消息凭证」的 OneBot 工具：授权主体不是本轮触发者，而是在参数里。
+        self.auth_check = auth_check
+        # True = 该工具的权限由 auth_check 自己负责：跳过按触发事件的权限判定
+        # （否则成员触发、管理员下命令的合法场景会被旧判定提前拒绝）。
+        self.self_checked_permission = bool(self_checked_permission)
 
     def runs_parallel(self, args: dict) -> bool:
         """这次调用能否与其他工具并发（**fail-closed**：拿不准就按独占）。
@@ -276,14 +284,29 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
                 logger.add_info("Tool").info(
                     f"[ToolCall]调用工具：{name}" + (f" | {call_note}" if call_note else "")
                 )
+            # 消息凭证鉴权（需要权限的 OneBot 工具在群聊里由「被引用的消息发送者」授权）：
+            # 必须在旧的事件权限判定之前跑——它本身就是这类工具的权限来源；校验器由
+            # 工具构造方注入，未注入时按普通工具处理。
+            self_checked = bool(getattr(spec, "self_checked_permission", False))
+            auth_error = ""
+            auth_check = getattr(spec, "auth_check", None)
+            if self_checked and callable(auth_check):
+                try:
+                    auth_error = str(await auth_check(ctx, args) or "").strip()
+                except Exception as e:  # noqa: BLE001 —— 校验器异常按拒绝（fail-closed）
+                    auth_error = f"error: 工具 {name} 权限校验异常，已拒绝: {e}"
             # 执行前复核：清单是在本轮开始时组的，此刻开关可能已经变了
             # （模块被关掉、工具在总表里被关掉）。这里再问一次唯一判定点。
-            gate_reason = _execution_gate(ctx, spec)
-            if gate_reason:
+            gate_reason = _execution_gate(ctx, spec, check_permission=not self_checked)
+            if auth_error:
+                error = "auth_denied"
+                success = False
+                result = auth_error
+            elif gate_reason:
                 error = "unavailable"
                 success = False
                 result = f"error: 工具 {name} 当前不可用（{gate_reason}）"
-            elif not spec.allows(ctx):
+            elif not self_checked and not spec.allows(ctx):
                 error = "forbidden"
                 success = False
                 result = f"error: 无权限调用工具 {name}"
@@ -427,12 +450,15 @@ def _parallel_max_of(ctx: Any, default: int = 8) -> int:
         return default
 
 
-def _execution_gate(ctx: Any, spec: ToolSpec) -> str:
+def _execution_gate(ctx: Any, spec: ToolSpec, *, check_permission: bool = True) -> str:
     """执行前的可用性复核；返回空串表示可以执行。
 
     与注入期用的是**同一个** `resolve_tool_state`，所以两侧不会打架。
     这里显式传 ``event``：判定链的第 ⑤ 层（权限/作用域）只有在拿到事件时才有主语，
     此前不传事件导致该层在**任何**调用点都是死代码（详见 `tools/state.py` 顶部说明）。
+
+    ``check_permission=False``：该工具的权限由自带 auth_check 负责（消息凭证鉴权），
+    跳过第 ⑤ 层的"按触发事件判权限"，其余可用性检查照常。
     """
     runtime = getattr(ctx, "runtime", None) if ctx is not None else None
     if runtime is None:
@@ -442,7 +468,13 @@ def _execution_gate(ctx: Any, spec: ToolSpec) -> str:
 
         event = getattr(ctx, "event", None)
         scope = "private" if getattr(event, "message_type", "") == "private" else "group"
-        state = resolve_tool_state(runtime, spec, session_scope=scope, event=event)
+        state = resolve_tool_state(
+            runtime,
+            spec,
+            session_scope=scope,
+            event=event,
+            check_permission=check_permission,
+        )
         if state.available:
             return ""
         return state.reason_text

@@ -9,14 +9,19 @@ from __future__ import annotations
 from typing import Any
 
 CONVENTION = """### 消息格式约定
-本轮与历史消息都是用方括号字段标记的结构化文本：
-- `[time=..]` `[group_id=..]` `[sender:id=..,name=..]` 是元信息，不是对方说的话；
+本轮与历史消息都是用方括号字段标记的结构化文本（群信息在系统提示的「当前群聊」一行）：
+- `[time=..,message_id=..]` 里的 `message_id` 是这条消息的 OneBot 消息 id；
+  群聊记录行首的 `#数字` 也是同一种 id；
+- `[sender:id=..,name=..]` 是发送者元信息，不是对方说的话；
 - 正文里的 `\\[` 是转义后的普通方括号，不是标记；
 - `[at:id=..]` `[reply_to:..]` 表示 @ 与引用；`[reply_to:...,text="..."]` 里的 text 是
   被引用消息的内容（里面可能还有占位符）；
 - `[image:id=..]` `[forward_message:id=..]` `[record:id=..]` 等是不可内联内容的占位符：
   需要内容时用对应工具展开（合并转发用 get_forward_message，其余用 expand_message）；
-  取不到就说取不到，不要猜。"""
+  取不到就说取不到，不要猜；
+- 调用需要权限的 OneBot 工具时，`auth_message_id` 必须填「让你执行该操作的那条群消息」
+  的 message_id；程序会用该消息的发送者身份校验权限（high 需 bot 管理者/拥有者，
+  critical 仅拥有者）。不要编造 id，也不要拿无关消息凑数。"""
 
 
 def _cfg(req: Any, key: str, default: Any):

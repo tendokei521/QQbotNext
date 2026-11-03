@@ -154,8 +154,13 @@ def resolve_tool_state(
     source: str = "",
     session_scope: str | None = None,
     event: Any = None,
+    check_permission: bool = True,
 ) -> ToolState:
-    """判定一个工具是否可用。`spec` 与 `(name, source)` 二选一。"""
+    """判定一个工具是否可用。`spec` 与 `(name, source)` 二选一。
+
+    ``check_permission=False``：跳过第 ⑤ 层（权限由工具自带的 auth_check 负责，
+    见 tools/spec.py 的「消息凭证」鉴权）。
+    """
     tool_name = str(name or getattr(spec, "name", "") or "")
     tool_source = str(source or getattr(spec, "source", "") or "")
     owner = ""
@@ -235,7 +240,7 @@ def resolve_tool_state(
             return _state(False, REASON_DEPENDENCY_MISSING, why or "前置功能未开启", extra)
 
     # ── ⑤ 执行期权限（如给了事件）──
-    if event is not None and spec is not None:
+    if check_permission and event is not None and spec is not None:
         try:
             scope = session_scope or ("private" if getattr(event, "message_type", "") == "private" else "group")
             if not spec.allowed_for_event(event, scope=scope):

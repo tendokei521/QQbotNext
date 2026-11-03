@@ -31,7 +31,6 @@ def render_from_ctx(ctx: Any) -> str | None:
     event = getattr(ctx, "event", None)
     if event is None or not getattr(event, "message", None):
         return None
-    group = getattr(event, "group", None)
     user = getattr(event, "user", None)
     sender_name = ""
     if user is not None:
@@ -40,8 +39,7 @@ def render_from_ctx(ctx: Any) -> str | None:
         message=event.message,
         sender_id=getattr(event, "user_id", ""),
         sender_name=sender_name,
-        group_id=getattr(group, "group_id", None),
-        group_name=getattr(group, "group_name", "") or "",
         time_str=format_time(getattr(event, "time", None)),
         reply=_reply_marker(event),
+        message_id=getattr(event, "message_id", None),
     )

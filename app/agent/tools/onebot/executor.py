@@ -19,6 +19,7 @@ from app.agent.group_log.store import store_of
 from app.agent.tools.spec import ToolContext, ToolSpec
 
 from .manifest import ONEBOT_TOOLS
+from .message_auth import AUTH_ARG, AUTH_ARG_DESCRIPTION, authorize_from_message
 from .security import resolve_tool_policy
 
 DEFAULT_MAX_RESULT = 2000
@@ -104,7 +105,8 @@ async def _handler(runtime, tool: dict, ctx: ToolContext | None, args: dict) -> 
         return "error: 当前上下文无可用 Bot"
     name = str(tool.get("name", ""))
     action = resolve_action(tool)
-    args = args or {}
+    # 消息凭证参数只用于鉴权，不传给 OneBot action
+    args = {k: v for k, v in (args or {}).items() if k != AUTH_ARG}
     if action in POKE_ACTIONS:
         left = poke_cooldown_left(runtime, ctx, args)
         if left > 0:
@@ -142,6 +144,12 @@ def _ctx_scope(ctx: ToolContext | None) -> str | None:
         return None
     event = getattr(ctx, "event", None)
     if event is None:
+        # 无事件轮次（主动/定时/模块自建）：从会话 id / group_id 推导
+        session_id = str(getattr(ctx, "session_id", "") or "")
+        if session_id.startswith("group_") or getattr(ctx, "group_id", None) not in (None, ""):
+            return "group"
+        if session_id.startswith("private_"):
+            return "private"
         return None
     event_type = getattr(event, "event_type", "") or ""
     if event_type == "message_group" or getattr(event, "group", None) is not None:
@@ -264,8 +272,33 @@ def _emoji_like_record(runtime, ctx: ToolContext | None, args: dict, emoji_id: s
     )])
 
 
+def _with_auth_param(parameters: Any) -> dict:
+    """给工具参数 schema 追加必填的 ``auth_message_id``（不改动清单原文）。"""
+    import copy
+
+    params = copy.deepcopy(parameters) if isinstance(parameters, dict) else {}
+    if params.get("type") != "object":
+        params = {"type": "object", "properties": {}}
+    props = params.get("properties")
+    if not isinstance(props, dict):
+        props = {}
+        params["properties"] = props
+    props[AUTH_ARG] = {"type": "string", "description": AUTH_ARG_DESCRIPTION}
+    required = params.get("required")
+    if not isinstance(required, list):
+        required = []
+    if AUTH_ARG not in required:
+        required.append(AUTH_ARG)
+    params["required"] = required
+    return params
+
+
 def build_onebot_tools(runtime: Any, ctx: ToolContext | None = None) -> list[ToolSpec]:
-    """根据配置与当前会话作用域生成本轮可用的 OneBot 工具。"""
+    """根据配置与当前会话作用域生成本轮可用的 OneBot 工具。
+
+    群聊里的 high/critical 工具会追加必填参数 ``auth_message_id``，并挂上
+    ``auth_check``（消息凭证鉴权）；其余工具的权限仍按触发事件判定。
+    """
     specs: list[ToolSpec] = []
     scope = _ctx_scope(ctx)
     for tool in ONEBOT_TOOLS:
@@ -281,9 +314,32 @@ def build_onebot_tools(runtime: Any, ctx: ToolContext | None = None) -> list[Too
         description = str(tool.get("description", ""))
         parameters = tool.get("parameters") or {"type": "object", "properties": {}}
         permission = policy["permission"]
+        sensitivity = str(policy.get("sensitivity", "normal") or "normal")
 
         async def _tool_handler(ctx: ToolContext, args: dict, _tool=tool):
             return await _handler(runtime, _tool, ctx, args)
+
+        auth_check = None
+        auth_needed = scope == "group" and sensitivity in ("high", "critical")
+        if auth_needed:
+            parameters = _with_auth_param(parameters)
+
+            async def _auth_check(
+                auth_ctx: ToolContext,
+                args: dict,
+                _tool_name: str = name,
+                _sensitivity: str = sensitivity,
+            ) -> str:
+                return await authorize_from_message(
+                    runtime,
+                    getattr(auth_ctx, "bot", None),
+                    tool_name=_tool_name,
+                    args=args,
+                    ctx=auth_ctx,
+                    sensitivity=_sensitivity,
+                )
+
+            auth_check = _auth_check
 
         # 并发分类：读类可与其他工具并行，发消息/管理类一律独占。
         # 未知风险等级按独占处理（fail-closed）：多一次串行只是慢，并发写错不可逆。
@@ -298,7 +354,9 @@ def build_onebot_tools(runtime: Any, ctx: ToolContext | None = None) -> list[Too
             source="onebot",
             category=str(tool.get("category", "onebot")),
             concurrency="parallel" if policy.get("risk") == "read" else "exclusive",
-            sensitivity=str(policy.get("sensitivity", "normal") or "normal"),
+            sensitivity=sensitivity,
+            auth_check=auth_check,
+            self_checked_permission=auth_needed,
         )
         specs.append(spec)
     return specs

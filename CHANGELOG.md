@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### 群管理工具「消息凭证」鉴权 + 工具审批模式（2026-11-03）
+
+- **消息格式**：每条消息头部改用 `message_id`（不再逐条带 `group_id/group_name`）；
+  群信息移到 L1 system 尾部的「【当前群聊[...]】」一行，位于「你的账号」之前。
+- **消息凭证鉴权**：群聊里调用 high/critical 的 OneBot 工具必须传 `auth_message_id`；
+  程序用 `get_msg` 校验该消息属于当前群、发送者身份（high=bot 管理者/拥有者，
+  critical=仅拥有者），缺参/跨群/权限不足一律 fail-closed，参数不透传给 action。
+- **系统提示词**：新增「群管理操作与消息凭证」L1 段（本轮有敏感工具时出现）；
+  「消息格式约定」同步说明 `message_id` 与凭证规则。
+- **敏感级重写**：critical=自身账号修改类 + 凭证/账号数据读取类；high=群管理员及以上
+  （由清单 permission 派生）；凭证/数据读取类从 high 收进 critical。
+- **工具审批**：从「回复与权限」的布尔开关改为「对话行为 → 工具审批」下拉
+  （自动审批/人工审批，默认自动）；旧 `tool_approval_enable` 兼容读取（true=manual）。
+- 测试/文档同步（TOOL_STATE、AGENT_CONFIG、FEATURE_REGISTRY）。
+
 ### 工具扩展并入框架：OneBot 总开关移到「高级选项」（2026-11-03）
 
 - **删除「工具扩展」插件**（`llm_tools_extra`）：OneBot 工具实现整体迁入框架

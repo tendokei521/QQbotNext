@@ -79,8 +79,9 @@ def render_history_entry(entry: Any, **kwargs) -> str | None:
     head = ""
     if include_time:
         head = f"time={format_time(base.time)}"
-    if base.group_id not in (None, "", 0, "0"):
-        head += ("," if head else "") + f"group_id={base.group_id}"
+    mid = str(parsed.message_id or "").strip()
+    if mid:
+        head += ("," if head else "") + f"message_id={mid}"
     default_name = "对方" if is_private else ""
     name = "我" if is_me else (f"用户<{base.sender_id}>" if mask else (base.sender_name or default_name))
     line = (f"[{head}]" if head else "") + _sender_marker(base.sender_id, name) + body
@@ -103,7 +104,6 @@ def render_current_turn(ctx: Any, **kwargs) -> str | None:
     event = getattr(ctx, "event", None)
     if event is None or not getattr(event, "message", None):
         return None
-    group = getattr(event, "group", None)
     user = getattr(event, "user", None)
     name = ""
     if user is not None:
@@ -119,10 +119,9 @@ def render_current_turn(ctx: Any, **kwargs) -> str | None:
         message=event.message,
         sender_id=getattr(event, "user_id", ""),
         sender_name=name,
-        group_id=getattr(group, "group_id", None),
-        group_name=getattr(group, "group_name", "") or "",
         time_str=format_time(getattr(event, "time", None)),
         reply=reply,
+        message_id=getattr(event, "message_id", None),
     )
 
 

@@ -65,14 +65,11 @@ async def format_user_context(ctx) -> None:
     info = ctx.state.get("user_context") or {}
     reply = info.get("reply") or {}
     event = ctx.event
-    group = getattr(event, "group", None)
     rendered = render_turn(
         message=event.message,
         time_str=_time_str(),
         sender_id=event.user_id,
         sender_name=info.get("sender") or "",
-        group_id=getattr(group, "group_id", None),
-        group_name=getattr(group, "group_name", "") or "",
         reply=reply or None,
         message_id=getattr(event, "message_id", None),
     )

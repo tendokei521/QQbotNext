@@ -17,12 +17,10 @@ def _sender_marker(sender_id: Any, sender_name: str, *, is_me: bool = False) -> 
     )
 
 
-def _head_marker(time_str: str, group_id: Any, group_name: str) -> str:
+def _head_marker(time_str: str, message_id: Any = None) -> str:
     head = f"time={time_str}"
-    if group_id not in (None, "", 0, "0"):
-        head += f",group_id={group_id}"
-        if group_name:
-            head += f",group_name={quote(group_name)}"
+    if str(message_id or "").strip():
+        head += f",message_id={message_id}"
     return f"[{head}]"
 
 
@@ -31,14 +29,12 @@ def render_turn(
     message: Any,
     sender_id: Any,
     sender_name: str = "",
-    group_id: Any = None,
-    group_name: str = "",
     time_str: str = "",
     reply: dict | None = None,
     message_id: Any = None,
 ) -> str:
-    """本轮消息：头部 + 发送者 + 内容流 + 引用。"""
-    out = [_head_marker(time_str or format_time(), group_id, group_name)]
+    """本轮消息：头部（time/message_id）+ 发送者 + 内容流 + 引用。"""
+    out = [_head_marker(time_str or format_time(), message_id)]
     out.append(_sender_marker(sender_id, sender_name))
     out.append(render_segments(message, message_id=message_id))
     if reply:
@@ -67,7 +63,7 @@ def render_history_entry(
     name = sender_name
     if mask_nickname:
         name = f"用户<{sender_id}>"
-    head = _head_marker(format_time(time), None, "")
+    head = _head_marker(format_time(time), message_id)
     line = f"{head}{_sender_marker(sender_id, name, is_me=is_me)}{escape_body(content)}"
     # 附注行：结构化标记（如 [reply_to:...]）接在行尾，其它文本另起一行
     for meta in meta_lines or []:
@@ -89,10 +85,8 @@ def render_group_event(
     reply_to: Any = None,
 ) -> str:
     """群记录事件：一条一行，消息 id / 引用也用标记表达。"""
-    head = _head_marker(format_time(time), None, "")
+    head = _head_marker(format_time(time), message_id)
     parts = [head, _sender_marker(sender_id, sender_name, is_me=is_me)]
-    if message_id:
-        parts.append(marker("message", f"id={message_id}"))
     parts.append(escape_body(text))
     if reply_to:
         parts.append(marker("reply_to", f"id={reply_to}"))

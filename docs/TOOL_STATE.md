@@ -66,14 +66,30 @@ resolve_tool_state(runtime, spec | name+source, session_scope=..., event=...)
 | `normal` | 其余（member / everyone） | 不额外要求账号侧身份 |
 
 授权身份的映射在 `tools/onebot/security.SENSITIVITY_AUTHORIZER_ROLES`，供「消息凭证」
-鉴权使用；人工审批（`tool_approval_enable`）仍然对 high/critical 生效（fail-closed）。
+鉴权使用；人工审批（`tool_approval_mode=manual`）对 high/critical 额外生效（fail-closed）。
+
+### 4.2 消息凭证鉴权（群聊）
+
+群聊里调用 high/critical 的 OneBot 工具时，模型必须传 `auth_message_id` = 让它执行
+该操作的那条群消息的 message_id：
+
+| 等级 | 消息发送者要求 |
+|---|---|
+| `high` | 在 `agent_owner_list` 或 `agent_manager_list` 里 |
+| `critical` | 仅在 `agent_owner_list` 里 |
+
+校验（`tools/onebot/message_auth.py`）：`get_msg(auth_message_id)` 取消息 → 必须属于
+**当前群** → 取发送者 → 按名册判身份。消息不存在、跨群、缺参、发送者权限不足
+一律返回 `error: PERMISSION_DENIED ...`，处理器不执行（fail-closed）。
+私聊与无 `auth_message_id` 的普通工具维持原判定。
 
 ## 5. 注入与执行
 
 | 阶段 | 位置 | 行为 |
 |---|---|---|
 | 组装清单 | `loop/tool_source._collect_llm_ext` | 各来源产 spec → 逐个 `resolve_tool_state` → 剔除不可用并 debug 记录 |
-| 执行 | `tools/spec.make_executor` | ①`_execution_gate`（带 event 再判一次）→ ②`spec.allows` → ③审批 → ④调用 |
+| 执行 | `tools/spec.make_executor` | ①权限（消息凭证 auth_check 或事件判定）→ ②`_execution_gate` 复核 → ③审批 → ④调用 |
+| 鉴权 | `ToolSpec.auth_check` / `self_checked_permission` | 群聊 high/critical 工具先校验 `auth_message_id`（见 §4.2），通过后才进入审批/执行 |
 | 未知工具 | 同上 | `error: 未知工具 <name>` |
 
 执行前复核的价值：清单是"本轮开始时"的快照；期间「高级选项」关掉工具或模块被关同样拦住，提示 `error: 工具 X 当前不可用（原因）`。
@@ -84,7 +100,7 @@ resolve_tool_state(runtime, spec | name+source, session_scope=..., event=...)
 |---|---|---|
 | 并发 | `ToolSpec.concurrency`、`concurrency_safe(args)`、`tool_parallel_max` | 仅 `parallel` 且 `concurrency_safe(args) is True` 才并行，其余独占；独占是屏障；池默认 8（1..32）；回填按模型顺序 |
 | 超时 | `ToolSpec.timeout_s`、`tool_timeout_default_s` | 工具声明优先，否则 20s；超时**不取消**协程，只换成 `error: TOOL_TIMEOUT` 并给孤儿任务留痕 |
-| 审批 | `tool_approval_enable`、`runtime.approval_channel` | 开关 + `source=onebot` + `sensitivity in {high,critical}`（high=群管理类 / critical=自身账号类，见 §4.1）；fail-closed，仅 `ALLOWED_ONCE` 本次有效 |
+| 审批 | `tool_approval_mode`（「对话行为」页）、`runtime.approval_channel` | manual + `source=onebot` + `sensitivity in {high,critical}`（high=群管理类 / critical=自身账号类，见 §4.1）；fail-closed，仅 `ALLOWED_ONCE` 本次有效 |
 | 结果 | `ToolResult(blocks, is_error, code, meta, additional_contexts, concludes_turn)`、`ERROR_CODES` | 结构化出口；旧 `"error:"` 前缀双读；钩子能在 `ctx.extra["code"]` 读到错误码 |
 | 落盘 | `tool_spill_enable`、`tool_spill_max_bytes` | 超阈值（默认 50KB）写 `data/llm/<bot>/spill/<session>/<sha16>.txt`，正文换成预览+路径；失败只 warn；跳过 `recall_tool_result` 与 `speech` |
 | 回应要求 | 固定框架默认 `tool_loop.DEFAULT_REPLY_DIRECTIVE` | 拼在**结果末尾**（截断/落盘之后）；错误结果与 `speech` 不追加；原模块配置随「工具扩展」插件下线 |
@@ -97,6 +113,8 @@ resolve_tool_state(runtime, spec | name+source, session_scope=..., event=...)
 - OneBot 工具总开关：`onebot_tools_enable`（「高级选项 → 工具」页）。
 - OneBot 工具策略：`onebot_tools_allowed` / `onebot_tools_denied` / `onebot_tool_overrides`
   （「工具管理 → OneBot 工具」页：允许/禁止名单、逐工具触发权限与可用范围）。
+- 消息凭证：`auth_message_id` 是**模型输入参数**（不是配置键），由 `message_auth.py`
+  校验消息发送者身份（见 §4.2）；校验参数不传给 OneBot action。
 - 结果长度、调试日志、戳一戳冷却、MCP 配置随「工具扩展」插件删除（改为框架常量/下线）。
 - 各模块 `tools_enabled` 归各自模块。
 - `POST /api/agent/config` 遇到模块键且**值真的变了**才 400（等值视为前端回声丢弃）；`GET` 不回传模块键。

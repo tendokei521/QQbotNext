@@ -186,7 +186,7 @@ async def test_poke_is_throttled_per_target(runtime, monkeypatch):
     assert len(bot.calls) == 2
 
 
-async def test_poke_throttle_is_per_target_and_can_be_disabled(runtime, monkeypatch):
+async def test_poke_throttle_is_per_target_and_ignores_legacy_config(runtime, monkeypatch):
     clock = _Clock()
     monkeypatch.setattr(onebot_tools, "_now", clock)
 
@@ -201,11 +201,12 @@ async def test_poke_throttle_is_per_target_and_can_be_disabled(runtime, monkeypa
     assert not is_error_result(other)
     assert len(bot.calls) == 2
 
-    # 关闭节流后可以连续戳
+    # 旧配置键 poke_cooldown_seconds 已随插件下线，节流窗口固定
     runtime.config["poke_cooldown_seconds"] = 0
     again = await poke.handler(ctx, {"user_id": USER_ID})
-    assert not is_error_result(again)
-    assert len(bot.calls) == 3
+    assert is_error_result(again)
+    assert "冷却中" in again
+    assert len(bot.calls) == 2
 
 
 async def test_failed_poke_does_not_consume_cooldown(runtime, monkeypatch):

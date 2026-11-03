@@ -2,13 +2,14 @@
 
 一条消息 = 头部标记 + 发送者标记 + 内容流 + 尾部标记：
 
-    [time=2026-08-13 11:20,group_id=466052056,group_name="测试群"]
+    [time=2026-08-13 11:20,message_id=123456]
     [sender:id=20002,name="小明"]
     这题怎么做[at:id=10002,name="小红"]你看得懂吗[forward_message:id=9f3c2a]
     [reply_to:id=456,name="小红",text="昨晚那部剧结局真离谱",message_id=456]
 
 规则：
-1. 字段顺序固定（time → group → sender → 内容流 → reply）——同输入必然同字节；
+1. 字段顺序固定（time → message_id → sender → 内容流 → reply）——同输入必然同字节；
+   群信息（group_id/group_name）不逐条出现，统一放在 L1 system 尾部的「当前群聊」一行；
 2. 正文里的 ``[`` 转义为 ``\\[``，结构化标记只由本模块产生（不可伪造）；
 3. 不可内联的内容一律占位符（见 ``PLACEHOLDERS``），由工具按需展开；
 4. 时间统一 ``年-月-日 时:分``（本地时区）。
