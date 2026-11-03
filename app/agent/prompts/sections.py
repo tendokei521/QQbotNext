@@ -34,14 +34,15 @@ from typing import Any
 from app.agent.assembly.sections import Section
 from app.core.logger import account_label, logger
 
-from .emoji import emoji_hint_line
-from .identity import ACCOUNT_LINE, GROUP_LINE_TEMPLATE, MANAGER_LINE, OWNER_LINE
-from .onebot import ONEBOT_AUTH_TEXT
-from .persona import DEFAULT_PERSONA_PROMPT
+from .system import emoji_hint_line
+from .system import ACCOUNT_LINE, GROUP_LINE_TEMPLATE, MANAGER_LINE, OWNER_LINE
+from .system import ONEBOT_AUTH_TEXT
+from .system import DEFAULT_PERSONA_PROMPT
 
 # ==================== 各块实现（只读 req，无副作用） ====================
 
 
+# ---- L1 10 persona · 人格预设解析 ----
 def resolve_persona_preset(req: Any) -> dict | None:
     """按 ``persona_preset_id`` 解析角色预设（同步读配置中心，不阻塞）。
 
@@ -70,6 +71,7 @@ def resolve_persona_preset(req: Any) -> dict | None:
     return preset
 
 
+# ---- L1 10 persona ----
 def build_persona(req: Any) -> list[dict]:
     """基础人设：优先 ``persona_preset_id``（活引用），否则用 ``system_prompt``。"""
     preset = resolve_persona_preset(req)
@@ -84,28 +86,7 @@ def build_persona(req: Any) -> list[dict]:
     return [{"role": "system", "content": system_prompt}]
 
 
-def build_emoji_hint(req: Any) -> list[dict]:
-    """【可用表情】提示段（L3，order 30）：本轮真能贴表情时才出现。
-
-    2026-11-03 随 OneBot 工具并入框架：以前由「工具扩展」模块注册，
-    现在工具是框架内置能力，所以提示段也回到默认段表（工具不在时整段消失）。
-    """
-    tools = getattr(req, "available_tools", None)
-    if tools is not None and "set_msg_emoji_like" not in tools:
-        return []
-    try:
-        from app.agent.persona.emoji import available_tags
-
-        tags = available_tags(20)
-    except Exception as e:  # noqa: BLE001 —— 词典不可用不该影响整轮组装
-        logger.add_info(account_label(getattr(getattr(req, "runtime", None), "bot_id", "?"))).warning(
-            f"[Assembly] 读取表情词典失败（已跳过表情提示）: {e}"
-        )
-        return []
-    text = emoji_hint_line(tags)
-    return [{"role": "system", "content": text}] if text else []
-
-
+# ---- L1 20 behavior · 方案解析 ----
 def prompt_preset(req: Any):
     """本轮选中的「提示词方案」（见 ``prompts/presets.py``）。
 
@@ -117,28 +98,7 @@ def prompt_preset(req: Any):
     return presets.resolve(req.config)
 
 
-def persona_begin_dialogs(req: Any) -> list[dict]:
-    """角色预设的预设对话（前插到历史最前，对齐 AstrBot 的 ``begin_dialogs``）。
-
-    只保留 ``{role: user|assistant, content: 非空}``，脏条目丢弃而不是抛错。
-    """
-    preset = resolve_persona_preset(req)
-    if preset is None:
-        return []
-    rows = preset.get("begin_dialogs")
-    if not isinstance(rows, list):
-        return []
-    result: list[dict] = []
-    for item in rows:
-        if not isinstance(item, dict):
-            continue
-        role = str(item.get("role") or "").lower()
-        content = str(item.get("content") or "").strip()
-        if role in ("user", "assistant") and content:
-            result.append({"role": role, "content": content})
-    return result
-
-
+# ---- L1 20 behavior ----
 def build_behavior(req: Any) -> list[dict]:
     """行为规则块：拟人化的主来源（独立成段，不塞进人格正文）。
 
@@ -176,6 +136,30 @@ def build_behavior(req: Any) -> list[dict]:
     return [{"role": "system", "content": text}] if str(text).strip() else []
 
 
+# ---- L1 30 emoji_hint ----
+def build_emoji_hint(req: Any) -> list[dict]:
+    """【可用表情】提示段（L3，order 30）：本轮真能贴表情时才出现。
+
+    2026-11-03 随 OneBot 工具并入框架：以前由「工具扩展」模块注册，
+    现在工具是框架内置能力，所以提示段也回到默认段表（工具不在时整段消失）。
+    """
+    tools = getattr(req, "available_tools", None)
+    if tools is not None and "set_msg_emoji_like" not in tools:
+        return []
+    try:
+        from app.agent.persona.emoji import available_tags
+
+        tags = available_tags(20)
+    except Exception as e:  # noqa: BLE001 —— 词典不可用不该影响整轮组装
+        logger.add_info(account_label(getattr(getattr(req, "runtime", None), "bot_id", "?"))).warning(
+            f"[Assembly] 读取表情词典失败（已跳过表情提示）: {e}"
+        )
+        return []
+    text = emoji_hint_line(tags)
+    return [{"role": "system", "content": text}] if text else []
+
+
+# ---- L1 54 reply_rules ----
 def build_participation(req: Any) -> list[dict]:
     """回复触发规则段（随回复设置变化，order 54）。"""
     from .participation import reply_rules_section
@@ -183,13 +167,7 @@ def build_participation(req: Any) -> list[dict]:
     return reply_rules_section(req)
 
 
-def build_message_meta(req: Any) -> list[dict]:
-    """消息格式说明段（框架系统方案，order 60）。"""
-    from .convention import convention_section
-
-    return convention_section(req)
-
-
+# ---- L1 55 onebot_auth ----
 def build_onebot_auth(req: Any) -> list[dict]:
     """OneBot 敏感工具的「消息凭证」约束段（L1，order 55）。
 
@@ -215,16 +193,27 @@ def build_onebot_auth(req: Any) -> list[dict]:
     return [{"role": "system", "content": ONEBOT_AUTH_TEXT}]
 
 
+# ---- L1 60 message_meta ----
+def build_message_meta(req: Any) -> list[dict]:
+    """消息格式说明段（框架系统方案，order 60）。"""
+    from .convention import convention_section
+
+    return convention_section(req)
+
+
+# ---- L1 70 skills ----
 def build_skills(req: Any) -> list[dict]:
     """技能块（可能多块，各自一条 system）。"""
     return [{"role": "system", "content": block} for block in (req.skill_blocks or []) if block]
 
 
+# ---- L1 80 memory ----
 def build_memory(req: Any) -> list[dict]:
     """长期记忆召回块。"""
     return [{"role": "system", "content": req.memory_text}] if req.memory_text else []
 
 
+# ---- L1 90 background ----
 def build_background(req: Any) -> list[dict]:
     """背景块：指代消解行 + 聊天环境背景合并为一条 system（指代在前，信息密度更高）。
 
@@ -241,11 +230,7 @@ def build_background(req: Any) -> list[dict]:
     return [{"role": "system", "content": "\n\n".join(parts)}]
 
 
-def build_history(req: Any) -> list[dict]:
-    """会话历史（调用方已渲染打标并压缩）；角色预设的预设对话前插到最前。"""
-    return list(persona_begin_dialogs(req)) + list(req.history or [])
-
-
+# ---- L1 100 group_log ----
 def build_group_log(req: Any) -> list[dict]:
     """群聊环境记录块（消息 + 互动 + 我的动作）。
 
@@ -256,6 +241,7 @@ def build_group_log(req: Any) -> list[dict]:
     return [{"role": "system", "content": text}] if text else []
 
 
+# ---- L1 105 extra ----
 def build_extra_blocks(req: Any) -> list[dict]:
     """模块贡献的额外 system 块（按收集顺序，空块已在收集侧丢弃）。
 
@@ -269,6 +255,7 @@ def build_extra_blocks(req: Any) -> list[dict]:
     ]
 
 
+# ---- L1 106 identity_context ----
 def build_identity_context(req: Any) -> list[dict]:
     """账号身份块：告诉模型"我是谁、谁是我的拥有者/管理员"。
 
@@ -329,6 +316,36 @@ def build_identity_context(req: Any) -> list[dict]:
     return [{"role": "system", "content": content}]
 
 
+# ---- L4 history · 角色预设的开场对话 ----
+def persona_begin_dialogs(req: Any) -> list[dict]:
+    """角色预设的预设对话（前插到历史最前，对齐 AstrBot 的 ``begin_dialogs``）。
+
+    只保留 ``{role: user|assistant, content: 非空}``，脏条目丢弃而不是抛错。
+    """
+    preset = resolve_persona_preset(req)
+    if preset is None:
+        return []
+    rows = preset.get("begin_dialogs")
+    if not isinstance(rows, list):
+        return []
+    result: list[dict] = []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").lower()
+        content = str(item.get("content") or "").strip()
+        if role in ("user", "assistant") and content:
+            result.append({"role": role, "content": content})
+    return result
+
+
+# ---- L4 history ----
+def build_history(req: Any) -> list[dict]:
+    """会话历史（调用方已渲染打标并压缩）；角色预设的预设对话前插到最前。"""
+    return list(persona_begin_dialogs(req)) + list(req.history or [])
+
+
+# ---- L5 user · extra 内容块 ----
 def _extra_text_parts(req: Any) -> list[dict]:
     """把 ``extra_user_content_parts`` 转成多模态 text 块；空白项丢弃。"""
     return [
@@ -338,6 +355,7 @@ def _extra_text_parts(req: Any) -> list[dict]:
     ]
 
 
+# ---- L5 user · user 数据块 ----
 def _user_block_parts(req: Any) -> list[dict]:
     """模块贡献的 user 侧数据块（``req.user_blocks``）→ 多模态 text 块。"""
     return [
@@ -347,6 +365,7 @@ def _user_block_parts(req: Any) -> list[dict]:
     ]
 
 
+# ---- L5 user · 发送者 name 字段 ----
 def _current_sender_name(req: Any) -> str:
     """本轮发送者昵称（供 OpenAI message 的 name 字段；不进正文）。"""
     event = getattr(req, "event", None)
@@ -360,6 +379,7 @@ def _current_sender_name(req: Any) -> str:
     return str(getattr(user, "card", "") or getattr(user, "nickname", "") or "")
 
 
+# ---- L5 user ----
 def build_user(req: Any) -> list[dict]:
     """本轮消息。图片块由 ``place_images`` 在清洗前归位。
 

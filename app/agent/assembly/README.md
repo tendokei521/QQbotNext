@@ -7,7 +7,7 @@
 | 文件 | 职责 |
 |---|---|
 | `assembler.py` | 总装配：按 profile 决定「放哪些块、按什么顺序」 |
-| `prompts/sections.py` | 内置段的定义（每段的层、条件、文案） |
+| `prompts/sections.py` | 内置段的定义（按组装顺序排列的 builder；文案在 `prompts/system.py`） |
 | `sections.py` | 提示词 section 注册表：加一段提示词不必接管整个装配器 |
 | `layers.py` | 五层模型（L1 系统提示词 → L2 人格 → L3 注入 → L4 历史 → L5 本轮） |
 | `prompt.py` | 系统提示词的分段渲染 |

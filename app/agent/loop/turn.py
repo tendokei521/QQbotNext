@@ -57,7 +57,7 @@ from app.agent.loop.tool_step import (
     run_stream_step,
 )
 from app.agent.loop.turn_input import from_request
-from app.agent.prompts.nudges import REASONING_OVERFLOW_NUDGE
+from app.agent.prompts.system import REASONING_OVERFLOW_NUDGE
 from app.agent.loop.turn_metrics import (
     TurnLimits,
     _effective_max_tokens,

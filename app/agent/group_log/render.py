@@ -29,7 +29,7 @@ from app.agent.group_log.events import (
     LogEvent,
 )
 
-from app.agent.prompts.group_log import FOOTER, HEADER
+from app.agent.prompts.system import FOOTER, HEADER
 
 DEFAULT_WINDOW_MINUTES = 60
 DEFAULT_WINDOW_LIMIT = 50

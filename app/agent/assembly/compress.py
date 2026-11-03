@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.agent import logger
-from app.agent.prompts.internal import COMPRESS_SYSTEM_PROMPT, DEFAULT_COMPRESS_PROMPT
+from app.agent.prompts.system import COMPRESS_SYSTEM_PROMPT, DEFAULT_COMPRESS_PROMPT
 from app.agent.providers import chat_with_fallback
 
 

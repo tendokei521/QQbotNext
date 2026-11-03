@@ -91,7 +91,7 @@ class SummaryBackend:
 
     async def compact(self, old, keep, *, plan, provider_chain=None, config=None):
         from app.agent.assembly.compress import compress_history
-        from app.agent.prompts.history import SUMMARY_HEADER
+        from app.agent.prompts.system import SUMMARY_HEADER
 
         summary = await compress_history(provider_chain or [], config or {}, old)
         if not summary:

@@ -238,7 +238,7 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
 
     pressure = should_compress_by_pressure(session_history, config)
     if omitted_history:
-        from app.agent.prompts.history import HISTORY_OMITTED_HINT
+        from app.agent.prompts.system import HISTORY_OMITTED_HINT
 
         session_history = [{"role": "system", "content": HISTORY_OMITTED_HINT}, *session_history]
     session_history = await maybe_compress_context(

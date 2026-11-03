@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### 框架提示词按实际组装顺序整理（2026-11-03）
+
+- 新增 `app/agent/prompts/system.py`：全部框架静态文案按真实注入顺序排列
+  （L1 persona/behavior/emoji/reply_rules/onebot_auth/message_meta/group_log/identity
+  → L4 历史提示 → L5 发言协议 → 工具结果回应要求 → 重试 nudge → 后台压缩 prompt），
+  删除原先按主题散放的 10 个提示词模块。
+- `prompts/sections.py` 的 builder 函数按 `default_sections()` 的 order 重排，
+  每个函数上方标注实际槽位；`__init__.py`/README 目录同步。
+- `convention.py` / `participation.py` 只保留 builder，文案从 `system.py` 取。
+- 各注入点改为从 `app.agent.prompts.system` import。
+
 ### 发送者昵称改走 message.name 字段（2026-11-03）
 
 - 消息级（L4 历史 / L5 本轮）不再把昵称拼进正文：正文只保留

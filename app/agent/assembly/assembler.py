@@ -472,7 +472,7 @@ def apply_speech_protocol(messages: list[dict], req: PromptRequest) -> list[dict
     文本即发言的档位贴这句就是自相矛盾的假话。
     """
     from app.agent.delivery.speech import speech_via_tool
-    from app.agent.prompts.speech import SPEECH_PROTOCOL
+    from app.agent.prompts.system import SPEECH_PROTOCOL
 
     config = getattr(req, "config", None)
     forced = False

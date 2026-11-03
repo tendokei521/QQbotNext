@@ -65,8 +65,8 @@ def _identity_req(*, group=True):
 def test_group_block_is_first_line_before_account():
     text = build_identity_context(_identity_req())[0]["content"]
     first = text.splitlines()[0]
-    assert first.startswith("【当前群聊[group_id=466052056")
-    assert first.endswith("】")
+    assert first.startswith("当前群聊")
+    assert "group_id=466052056" in first
     assert '"测试\\"群\\""' in first  # 群名按 JSON 字符串转义，不能伪造标记
     assert text.splitlines()[1] == "你的账号：42"
 

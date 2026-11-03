@@ -421,7 +421,7 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
                 sink["result"] = tr
             if runtime is not None and spec.source != "speech":
                 from app.agent.loop.tool_loop import append_reply_directive
-                from app.agent.prompts.tool_reply import DEFAULT_REPLY_DIRECTIVE
+                from app.agent.prompts.system import DEFAULT_REPLY_DIRECTIVE
 
                 # 回应要求固定用框架默认文案（原「工具扩展」插件的配置随插件下线）
                 final = append_reply_directive(final, DEFAULT_REPLY_DIRECTIVE)

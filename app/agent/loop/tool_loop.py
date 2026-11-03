@@ -43,7 +43,7 @@ from app.agent.loop.middleware import (
 )
 from app.agent.loop.tool_step import ABORTED_BEFORE_DISPATCH
 
-from app.agent.prompts.tool_reply import DEFAULT_REPLY_DIRECTIVE
+from app.agent.prompts.system import DEFAULT_REPLY_DIRECTIVE
 
 ERROR_RESULT_PREFIX = "error:"
 

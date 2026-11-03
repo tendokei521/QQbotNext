@@ -131,7 +131,7 @@ OneBot 事件（WebSocket）
 | 想改什么 | 先看 |
 |---|---|
 | 一次回复的流程 / 卡在哪一步 | `app/agent/loop/{turn_runner,pipeline,generate,chat}.py` + 日志 |
-| 提示词内容 / 段落顺序 | `app/agent/{assembly/layers.py,prompts/sections.py,prompts/presets.py}` |
+| 提示词内容 / 段落顺序 | `app/agent/{assembly/layers.py,prompts/system.py,prompts/sections.py,prompts/presets.py}` |
 | 工具怎么暴露、什么时候不可用 | `app/agent/tools/{spec,policy}.py` + [TOOL_STATE.md](TOOL_STATE.md) |
 | 模型调用、重试、故障转移 | `app/agent/providers/*`（`runtime_manager.py` 管实例） |
 | 人格 / 记忆 / 上下文 / 触发调度 | 对应内置插件 `app/plugins/llm_*` |

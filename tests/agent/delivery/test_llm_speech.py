@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.agent.prompts.speech import SPEECH_PROTOCOL
+from app.agent.prompts import SPEECH_PROTOCOL
 from app.agent.delivery.speech import (
     DEFAULT_MAX_BUBBLES,
     QUEUE_DUP,
