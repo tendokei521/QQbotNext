@@ -3,15 +3,35 @@
 契约：``renderer(entry, **kwargs) -> str | None``，entry 是 HistoryEntry 或旧式 dict。
 框架在 ``runtime.history_renderer`` 上挂的就是本函数（不再是"模块接管才生效"）：
 历史与当前轮必须同一口径，否则模型会看到两种格式。
+
+## assistant 条目按回复模式渲染（2026-11-03）
+
+- ``reply_mode=participation``（发言通道）：assistant 历史必须表现为**工具调用回复**
+  ``[tool_call:send_message]{"messages":"..."}``，不能再是裸正文——否则模型会照抄
+  "历史里 assistant 都是直接说话"，于是自己也不调 send_message（线上实测的哑火原因）。
+- ``reply_mode=legacy``（文本即回复）：assistant 仍是不带任何标记的裸正文。
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from .render import _sender_marker
 from .segments import render_segments
 from .spec import escape_body, format_time
+
+#: 发言通道下 assistant 历史条目的标记（与真实工具调用同名，强化模型的工具使用模式）
+SPEECH_TOOL_CALL_MARKER = "[tool_call:send_message]"
+
+
+def _render_assistant(text: str, reply_mode: str) -> str:
+    """assistant 历史正文：参与度模式还原成工具调用形态，legacy 模式保持裸正文。"""
+    if str(reply_mode or "").strip().lower() == "participation":
+        payload = json.dumps({"messages": text}, ensure_ascii=False)
+        return f"{SPEECH_TOOL_CALL_MARKER}{payload}"
+    return text
+
 
 
 def _reply_id_from_segments(segments: Any) -> str:
@@ -43,13 +63,16 @@ def render_history_entry(entry: Any, **kwargs) -> str | None:
     include_time = bool(kwargs.get("include_time", True))
     is_private = bool(kwargs.get("is_private", False))
 
-    # bot 自己的回复（assistant）**不加任何组装标记**：原样输出正文。
-    # 否则模型会照抄自己的格式（历史里出现 [time][sender] 的 assistant 行），
-    # 与框架原生口径一致（框架对 assistant 从不加时间/发送者前缀）。
+    reply_mode = str(kwargs.get("reply_mode", "") or "")
+
+    # bot 自己的回复（assistant）：legacy 模式原样输出正文；参与度模式还原成
+    # ``[tool_call:send_message]{...}``，让历史与"发言要调工具"的协议一致。
     if parsed.role == "assistant":
         if base.segments:
-            return render_segments(base.segments) or ""
-        return str(base.text or parsed.legacy_text or "")
+            text = render_segments(base.segments) or ""
+        else:
+            text = str(base.text or parsed.legacy_text or "")
+        return _render_assistant(text, reply_mode)
 
     is_me = bool(base.sender_id and str(base.sender_id) in self_ids)
 

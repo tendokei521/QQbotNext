@@ -16,6 +16,18 @@ def _renderer(runtime: Any):
     return getattr(runtime, "message_assembly", None)
 
 
+def _reply_mode(runtime: Any) -> str:
+    """当前回复模式：参与度模式下历史里的 assistant 要显示成工具调用。"""
+    config = getattr(runtime, "config", None)
+    getter = getattr(config, "get", None)
+    if callable(getter):
+        try:
+            return str(getter("reply_mode", "legacy") or "legacy")
+        except Exception:  # noqa: BLE001
+            return "legacy"
+    return "legacy"
+
+
 def _plain_segments(message: Any) -> str:
     parts: list[str] = []
     for seg in message or []:
@@ -93,7 +105,12 @@ async def _handle(tool_ctx: ToolContext, args: dict) -> str:
         if not history:
             return "本地没有可读的会话记录。"
         is_private = str(tool_ctx.session_id).startswith("private_")
-        rendered = format_history_for_llm(history, is_private=is_private)
+        rendered = format_history_for_llm(
+            history,
+            is_private=is_private,
+            renderer=getattr(runtime, "history_renderer", None),
+            reply_mode=_reply_mode(runtime),
+        )
         return "\n".join(str(item.get("content", "")) for item in rendered)
 
     if kind in ("forward", "forward_full"):

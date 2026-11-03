@@ -605,6 +605,7 @@ def format_history_for_llm(
     session_id: Any = "",
     entry_media=None,
     renderer=None,
+    reply_mode: str = "",
 ) -> list[dict]:
     """把会话历史渲染成纯文本 messages（渲染实现见 history_model.render_history_entry）。
 
@@ -622,6 +623,9 @@ def format_history_for_llm(
 
     ``entry_media`` 见 :func:`history_model.render_history`：会话历史里的图片靠它
     接回消息（视觉模型内联 ``image_url``，文本模型留 ``[图片#id]`` 占位）。
+
+    ``reply_mode``：参与度模式下 assistant 条目渲染成 ``[tool_call:send_message]...``
+    （见 ``message_assembly.history``）；legacy 模式保持裸正文。
     """
     render_content = None
     entry_blocks = None
@@ -639,6 +643,7 @@ def format_history_for_llm(
         entry_blocks=entry_blocks,
         entry_media=entry_media,
         entry_renderer=renderer,
+        reply_mode=reply_mode,
     )
 
 

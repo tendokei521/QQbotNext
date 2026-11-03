@@ -218,6 +218,7 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
             session_history_raw, is_private,
             bot_id=getattr(runtime, "bot_id", ""), session_id=session_id,
             runtime=runtime,
+            reply_mode=str(config.get("reply_mode", "legacy") or "legacy"),
             entry_media=_history_media_hook(
                 session_history_raw,
                 # 历史图片与"本轮图片"同一道门：开关 + 模型声明 image 模态

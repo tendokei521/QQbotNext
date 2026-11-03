@@ -45,6 +45,7 @@ async def collect_history_materials(
         normalize_enhanced=bool(config.get("experimental_long_term_memory", False)),
         mask_nickname=True,
         renderer=getattr(runtime, "history_renderer", None),
+        reply_mode=str(config.get("reply_mode", "legacy") or "legacy"),
     )
     if compress:
         chain = runtime.provider_chain() if callable(getattr(runtime, "provider_chain", None)) else []

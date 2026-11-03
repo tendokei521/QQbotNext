@@ -60,6 +60,18 @@ def _cfg(ctx, key: str, default: Any):
     return policy_get(getattr(ctx, "runtime", None), "context", key, default)
 
 
+def _reply_mode(runtime) -> str:
+    """当前回复模式（参与度模式下 assistant 历史要渲染成工具调用形态）。"""
+    config = getattr(runtime, "config", None)
+    getter = getattr(config, "get", None)
+    if callable(getter):
+        try:
+            return str(getter("reply_mode", "legacy") or "legacy")
+        except Exception:  # noqa: BLE001 —— 读不到按 legacy
+            return "legacy"
+    return "legacy"
+
+
 def _session_manager(runtime):
     """优先复用 runtime 上的会话管理器；否则按 bot_id 取单例（同一对象）。"""
     manager = getattr(runtime, "session_mgr", None)
@@ -83,6 +95,7 @@ def _render_local_lines(runtime, session_id: str, is_private: bool, limit: int) 
         normalize_enhanced=False,
         mask_nickname=True,
         renderer=getattr(runtime, "history_renderer", None),
+        reply_mode=_reply_mode(runtime),
     )
     lines: list[str] = []
     for item in rendered:

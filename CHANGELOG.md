@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### assistant 历史按回复模式渲染（2026-11-03）
+
+- 修复参与度模式的「哑火」：历史里 assistant 原本是裸正文，模型照抄"直接说话"的历史，
+  只输出文本而不调用 `send_message`（本地日志：`[Response] 工具 0 个`、只落 user 条目）。
+  现在 `reply_mode=participation` 会把 assistant 历史渲染成
+  `[tool_call:send_message]{"messages": "..."}`，让历史与「发言要调工具」的协议一致。
+- `reply_mode=legacy`（文本即回复）保持裸正文不变；两种模式的 assistant 渲染明确不同。
+- 历史渲染链路新增 `reply_mode` 透传：`prompt_prep` / `assembly.inputs` /
+  `session_tools` / `get_context recent` 同口径；默认渲染器兼容多余参数。
+- 测试：新增 `tests/agent/session/test_history_reply_mode_render.py`。
+
 ### 群管理工具「消息凭证」鉴权 + 工具审批模式（2026-11-03）
 
 - **消息格式**：每条消息头部改用 `message_id`（不再逐条带 `group_id/group_name`）；

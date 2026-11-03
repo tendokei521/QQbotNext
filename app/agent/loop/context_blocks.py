@@ -146,11 +146,13 @@ def _format_session_history(
     session_id: Any = "",
     entry_media=None,
     runtime: Any = None,
+    reply_mode: str = "",
 ) -> list[dict]:
     """兼容包装：委托给 group_context 的共享渲染函数。
 
     传入 ``bot_id`` / ``session_id`` 时接入补全登记（取回过的内容留在历史里）。
     ``runtime`` 给出时，若模块接管了 ``runtime.history_renderer`` 就用它渲染历史。
+    ``reply_mode``：参与度模式下 assistant 历史渲染成工具调用形态（发言通道一致性）。
     ``entry_media`` 见 :func:`_history_media_hook`。
     """
     return format_history_for_llm(
@@ -162,6 +164,7 @@ def _format_session_history(
         session_id=session_id,
         entry_media=entry_media,
         renderer=getattr(runtime, "history_renderer", None),
+        reply_mode=reply_mode,
     )
 
 

@@ -326,6 +326,7 @@ def render_history_entry(
     content_renderer=None,
     render_content=None,
     normalize_enhanced: bool = False,
+    **_extra: Any,
 ) -> str | None:
     """把一条历史渲染成模型可读文本。返回 None 表示"本条不进上下文"。
 
