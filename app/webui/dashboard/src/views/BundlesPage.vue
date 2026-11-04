@@ -6,10 +6,22 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { displayName, useBotsStore } from '@/stores/bots'
-import { useBundlesStore, type BundleHealth, type ExportModuleOption, type InstalledBundle, type ModuleDepsLog, type ReusePreset } from '@/stores/bundles'
+import {
+  defaultSelection,
+  secretSection,
+  selectionSummary,
+  useBundlesStore,
+  type BundleContentSelection,
+  type BundleContents,
+  type BundleHealth,
+  type InstalledBundle,
+  type ModuleDepsLog,
+  type ReusePreset,
+} from '@/stores/bundles'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
 import EmptyState from '@/components/EmptyState.vue'
+import BundleContentPicker from '@/components/bundles/BundleContentPicker.vue'
 import BundleImportDialog from '@/components/bundles/BundleImportDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import PluginDepsDialog from '@/components/tools/PluginDepsDialog.vue'
@@ -22,8 +34,8 @@ const notify = useNotifyStore()
 const importDialog = ref(false)
 const exportDialog = ref(false)
 const exporting = ref(false)
-const exportOptions = ref<ExportModuleOption[]>([])
-const exportSelected = reactive<Record<string, boolean>>({})
+const exportContents = ref<BundleContents | null>(null)
+const exportSelection = ref<BundleContentSelection>({ sections: [], modules: [] })
 const reusePresets = ref<ReusePreset[]>([])
 const reusePresetId = ref<string | null>(null)
 const exportForm = reactive({
@@ -44,6 +56,16 @@ const reusePresetOptions = computed(() =>
 const applyDialog = ref(false)
 const applyTarget = ref<InstalledBundle | null>(null)
 const applySecrets = reactive<Record<string, string>>({})
+/** 包内容明细（导入时记进 meta；旧包没有就退回"全部应用"） */
+const applyContents = ref<BundleContents | null>(null)
+const applySelection = ref<BundleContentSelection>({ sections: [], modules: [] })
+const applySecretsVisible = computed(() =>
+  (applyTarget.value?.secrets || []).filter((secret) => {
+    if (!applyContents.value) return true
+    const section = secretSection(secret.key)
+    return section === 'other' || applySelection.value.sections.includes(section)
+  }),
+)
 /** 应用后自动安装随包模块依赖（需联网；包内有缺依赖模块时默认勾选） */
 const applyInstallDeps = ref(false)
 const applyDepsMirror = ref('')
@@ -106,6 +128,11 @@ function openApply(item: InstalledBundle) {
   applyTarget.value = item
   applyResult.value = null
   reusePresetId.value = null
+  // 包内容明细：导入时记进 meta；旧包没有就退回"全部应用"（不显示勾选面板）
+  applyContents.value = item.contents || null
+  applySelection.value = item.contents
+    ? defaultSelection(item.contents, 'import')
+    : { sections: [], modules: [] }
   // 包内有缺依赖模块时默认勾选：一键应用即补齐，不用再手动找插件装依赖
   applyInstallDeps.value = (item.modules_missing_deps || 0) > 0
   applyDepsMirror.value = ''
@@ -125,6 +152,10 @@ async function loadReusePresets() {
 
 async function doApply() {
   if (!applyTarget.value || !bots.currentAccountId) return
+  if (applyContents.value && !applySelection.value.sections.length) {
+    notify.push('至少勾选一项要应用的内容', 'warning')
+    return
+  }
   // 必填校验交给后端：目标账号可能已填过同名密钥（升级场景会复用），前端不该先拦。
   try {
     applyResult.value = await bundles.applyBundle(
@@ -134,6 +165,7 @@ async function doApply() {
       reusePresetId.value || '',
       applyInstallDeps.value,
       applyDepsMirror.value,
+      applyContents.value ? applySelection.value : undefined,
     )
     notify.push('已应用到当前账号', 'success')
   } catch (err) {
@@ -246,36 +278,39 @@ function openExport() {
   exportForm.name = `${accountName.value} 的配置`
   exportForm.version = '1.0.0'
   exportForm.description = ''
-  exportOptions.value = []
-  Object.keys(exportSelected).forEach((key) => delete exportSelected[key])
+  exportContents.value = null
+  exportSelection.value = { sections: [], modules: [] }
   exportDialog.value = true
   void loadExportOptions()
 }
 
 async function loadExportOptions() {
   try {
-    const options = await bundles.loadExportOptions()
-    exportOptions.value = options
-    // 默认全部不勾选：导出配置包默认只带账号配置，插件按需勾选（避免无意识把全部插件代码打进包）
-    for (const option of options) exportSelected[option.name] = false
+    const contents = await bundles.loadExportOptions()
+    exportContents.value = contents
+    // 导出默认带上人格/模型/AI 设置，插件代码默认不勾（避免无意识把全部插件代码打进包）
+    exportSelection.value = defaultSelection(contents, 'export')
   } catch (err) {
     notify.push(errorMessage(err), 'error')
   }
 }
 
-const exportModules = computed(() =>
-  exportOptions.value.filter((option) => exportSelected[option.name]),
-)
+const exportModuleSize = computed(() => {
+  const selected = new Set(exportSelection.value.modules)
+  return (exportContents.value?.modules || [])
+    .filter((item) => selected.has(item.name))
+    .reduce((total, item) => total + (item.size || 0), 0)
+})
 
-const exportModuleSize = computed(() =>
-  exportModules.value.reduce((total, option) => total + (option.size || 0), 0),
+const exportSummary = computed(() =>
+  selectionSummary(exportContents.value, exportSelection.value, 'export'),
 )
-
-function toggleAllExportModules(value: boolean) {
-  for (const option of exportOptions.value) exportSelected[option.name] = value
-}
 
 async function doExport() {
+  if (!exportSelection.value.sections.length) {
+    notify.push('至少勾选一项要导出的内容', 'warning')
+    return
+  }
   exporting.value = true
   try {
     await bundles.exportAccount({
@@ -283,9 +318,8 @@ async function doExport() {
       name: exportForm.name.trim() || '账号配置',
       version: exportForm.version.trim() || '1.0.0',
       description: exportForm.description.trim(),
-      modules: exportOptions.value.length
-        ? exportModules.value.map((option) => option.name)
-        : undefined,
+      sections: exportSelection.value.sections,
+      modules: exportSelection.value.modules,
     })
     notify.push('已导出配置包（密钥未包含）', 'success')
     exportDialog.value = false
@@ -415,72 +449,57 @@ onMounted(async () => {
 
     <BundleImportDialog v-model="importDialog" @imported="bundles.load()" />
 
-    <v-dialog v-model="exportDialog" max-width="620">
+    <v-dialog v-model="exportDialog" max-width="760">
       <v-card>
         <v-card-title class="d-flex align-center">
           <v-icon icon="mdi-export" class="mr-2" color="primary" /> 导出为配置包
         </v-card-title>
-        <v-card-text>
+        <v-card-text class="bundle-panel">
           <div class="text-caption mb-3" style="opacity: 0.7">
-            将从「{{ accountName }}」收集人格、模型、AI 角色配置与插件参数；第三方插件会连代码一起打包，
-            内置插件只记录版本。密钥不会打进包。
+            从「{{ accountName }}」收集勾选的内容；密钥不会打进包。
           </div>
           <v-text-field v-model="exportForm.id" label="标识（可留空，自动生成）" density="comfortable" variant="outlined" />
           <v-text-field v-model="exportForm.name" label="名称" density="comfortable" variant="outlined" />
           <v-text-field v-model="exportForm.version" label="版本" density="comfortable" variant="outlined" />
           <v-text-field v-model="exportForm.description" label="描述（可选）" density="comfortable" variant="outlined" />
 
-          <div class="d-flex align-center mt-2 mb-1">
-            <div class="text-body-2 font-weight-medium">打包哪些插件</div>
-            <v-spacer />
-            <v-btn size="x-small" variant="text" @click="toggleAllExportModules(true)">全选</v-btn>
-            <v-btn size="x-small" variant="text" @click="toggleAllExportModules(false)">全不选</v-btn>
+          <div v-if="!exportContents" class="text-caption py-2 mt-3">正在读取账号内容…</div>
+          <BundleContentPicker
+            v-else
+            v-model="exportSelection"
+            :contents="exportContents"
+            mode="export"
+            class="mt-3"
+          />          <div class="text-caption mt-2" style="opacity: 0.7">
+            {{ exportSummary }}
+            <template v-if="exportSelection.sections.includes('modules') && exportModuleSize">
+              · 第三方插件代码约 {{ formatSize(exportModuleSize) }}
+            </template>
           </div>
-          <div class="text-caption mb-2" style="opacity: 0.65">
-            已选 {{ exportModules.length }} / {{ exportOptions.length }} 个；第三方插件代码约 {{ formatSize(exportModuleSize) }}。
-            没选的插件不会进包（目标账号保持原状）。
-          </div>
-          <v-card variant="outlined" class="module-picker">
-            <v-card-text class="py-1">
-              <div v-if="!exportOptions.length" class="text-caption py-2">正在读取插件清单…</div>
-              <div
-                v-for="option in exportOptions"
-                :key="option.name"
-                class="d-flex align-center"
-              >
-                <v-checkbox
-                  v-model="exportSelected[option.name]"
-                  :label="option.display_name || option.name"
-                  density="compact"
-                  hide-details
-                  class="flex-grow-1"
-                />
-                <v-chip size="x-small" variant="text">v{{ option.version || '—' }}</v-chip>
-                <v-chip size="x-small" variant="text" class="ml-1">
-                  {{ option.builtin ? '内置' : '第三方' }}
-                </v-chip>
-                <span v-if="!option.builtin" class="text-caption ml-2" style="opacity: 0.65">
-                  {{ formatSize(option.size) }}
-                </span>
-              </div>
-            </v-card-text>
-          </v-card>
         </v-card-text>
         <v-card-actions>
           <v-spacer />
           <v-btn variant="text" @click="exportDialog = false">取消</v-btn>
-          <v-btn color="primary" variant="tonal" :loading="exporting" @click="doExport">导出</v-btn>
+          <v-btn
+            color="primary"
+            variant="tonal"
+            :loading="exporting"
+            :disabled="!exportSelection.sections.length"
+            @click="doExport"
+          >
+            导出
+          </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
 
-    <v-dialog v-model="applyDialog" max-width="620">
+    <v-dialog v-model="applyDialog" max-width="760">
       <v-card>
         <v-card-title class="d-flex align-center">
           <v-icon icon="mdi-play-circle-outline" class="mr-2" color="primary" />
           应用到「{{ accountName }}」
         </v-card-title>
-        <v-card-text>
+        <v-card-text class="bundle-panel">
           <template v-if="!applyResult">
             <v-alert type="info" variant="tonal" density="compact" class="mb-3">
               <div class="text-caption">
@@ -492,6 +511,17 @@ onMounted(async () => {
             <div class="text-body-2 mb-2">
               {{ applyTarget?.name }} <span style="opacity: 0.6">v{{ applyTarget?.version }}</span>
             </div>
+            <template v-if="applyContents">
+              <BundleContentPicker
+                v-model="applySelection"
+                :contents="applyContents"
+                mode="import"
+                class="mt-2"
+              />
+              <div class="text-caption mt-2 mb-2" style="opacity: 0.7">
+                {{ selectionSummary(applyContents, applySelection, 'import') }}
+              </div>
+            </template>
             <v-select
               v-if="reusePresetOptions.length"
               v-model="reusePresetId"
@@ -512,7 +542,7 @@ onMounted(async () => {
               已选择复用：密钥不用再手填，也不会写进包。
             </div>
             <v-text-field
-              v-for="secret in applyTarget?.secrets || []"
+              v-for="secret in applySecretsVisible"
               :key="secret.key"
               v-model="applySecrets[secret.key]"
               :label="secret.label"
@@ -615,6 +645,7 @@ onMounted(async () => {
             color="primary"
             variant="tonal"
             :loading="bundles.applying"
+            :disabled="Boolean(applyContents) && !applySelection.sections.length"
             @click="doApply"
           >
             确认应用
@@ -662,11 +693,9 @@ onMounted(async () => {
   border-radius: 14px;
 }
 
-.module-picker {
-  max-height: 260px;
+/* 面板模式：对话框正文单独滚动，底部操作按钮始终可见 */
+.bundle-panel {
+  max-height: 70vh;
   overflow-y: auto;
-  /* 不用 tonal 卡片：暗色主题下 tonal 会渲染成一整片黑块（用户反馈），
-     改成「描边 + 跟随主题的极浅底色」，亮/暗都是同一层灰。 */
-  background: rgba(var(--v-theme-on-surface), 0.03);
 }
 </style>

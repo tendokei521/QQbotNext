@@ -9,8 +9,12 @@ import { computed, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { displayName, useBotsStore } from '@/stores/bots'
 import {
+  defaultSelection,
+  secretSection,
+  selectionSummary,
   useBundlesStore,
   type ApplyResult,
+  type BundleContentSelection,
   type BundleHealth,
   type BundleReport,
   type ModuleDepsLog,
@@ -18,6 +22,7 @@ import {
 } from '@/stores/bundles'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
+import BundleContentPicker from '@/components/bundles/BundleContentPicker.vue'
 import PluginDepsDialog from '@/components/tools/PluginDepsDialog.vue'
 
 defineProps<{ modelValue: boolean }>()
@@ -65,6 +70,19 @@ const dragOver = ref(false)
 const secretsForm = reactive<Record<string, string>>({})
 const reusePresets = ref<ReusePreset[]>([])
 const reusePresetId = ref<string | null>(null)
+/** 导入并应用时只写勾选的内容（仅导入仍然保存整个包） */
+const selection = ref<BundleContentSelection>({ sections: [], modules: [] })
+const reportContents = computed(() => report.value?.contents || null)
+const selectedSecrets = computed(() =>
+  (report.value?.secrets || []).filter((secret) => {
+    if (!reportContents.value) return true
+    const section = secretSection(secret.key)
+    return section === 'other' || selection.value.sections.includes(section)
+  }),
+)
+const applySummary = computed(() =>
+  selectionSummary(reportContents.value, selection.value, 'import'),
+)
 
 const targetAccountId = computed(() => bots.currentAccountId)
 const reusePresetOptions = computed(() =>
@@ -102,6 +120,7 @@ function reset() {
   reusePresetId.value = null
   error.value = ''
   dragOver.value = false
+  selection.value = { sections: [], modules: [] }
   Object.keys(secretsForm).forEach((key) => delete secretsForm[key])
 }
 
@@ -122,6 +141,7 @@ async function prepare(picked: File) {
     report.value = await bundles.validateFile(picked)
     Object.keys(secretsForm).forEach((key) => delete secretsForm[key])
     for (const secret of report.value.secrets || []) secretsForm[secret.key] = ''
+    selection.value = defaultSelection(report.value.contents, 'import')
     reusePresetId.value = null
     installDeps.value = hasMissingDeps.value
     depsMirror.value = ''
@@ -177,6 +197,7 @@ async function confirmApply() {
       reusePresetId.value || '',
       installDeps.value,
       depsMirror.value,
+      reportContents.value ? selection.value : undefined,
     )
     result.value = { bundle: response.bundle }
     applied.value = response.apply || null
@@ -240,7 +261,7 @@ function depsLine(item: ModuleDepsLog): string {
 </script>
 
 <template>
-  <v-dialog :model-value="modelValue" max-width="720" @update:model-value="(v: boolean) => !v && close()">
+  <v-dialog :model-value="modelValue" max-width="760" @update:model-value="(v: boolean) => !v && close()">
     <v-card>
       <v-card-title class="d-flex align-center">
         <v-icon icon="mdi-package-variant" class="mr-2" color="primary" />
@@ -249,7 +270,7 @@ function depsLine(item: ModuleDepsLog): string {
         <v-btn icon="mdi-close" variant="text" size="small" @click="close" />
       </v-card-title>
 
-      <v-card-text>
+      <v-card-text class="bundle-panel">
         <v-alert v-if="error" type="error" variant="tonal" density="compact" class="mb-3">
           {{ error }}
         </v-alert>
@@ -437,6 +458,22 @@ function depsLine(item: ModuleDepsLog): string {
             </v-card-text>
           </v-card>
 
+          <v-card v-if="!targetAccountId && reportContents" variant="tonal" class="mt-2">
+            <v-card-text class="text-caption">
+              未选择账号：这次只把整个配置包存到列表，下面勾选的内容在「应用到账号」时才生效。
+            </v-card-text>
+          </v-card>
+
+          <template v-if="targetAccountId && reportContents">
+            <BundleContentPicker
+              v-model="selection"
+              :contents="reportContents"
+              mode="import"
+              class="mt-3"
+            />
+            <div class="text-caption mt-2" style="opacity: 0.7">{{ applySummary }}</div>
+          </template>
+
           <v-card v-if="targetAccountId && reusePresetOptions.length" variant="tonal" class="mt-2">
             <v-card-text>
               <div class="text-caption font-weight-medium mb-1">复用本机已保存的模型服务密钥（可选）</div>
@@ -456,13 +493,13 @@ function depsLine(item: ModuleDepsLog): string {
             </v-card-text>
           </v-card>
 
-          <v-card v-if="report.secrets.length" variant="tonal" class="mt-2">
+          <v-card v-if="selectedSecrets.length" variant="tonal" class="mt-2">
             <v-card-text>
               <div class="text-caption font-weight-medium mb-2">
                 密钥（不随包分发；目标账号已填过同名密钥的可以留空）
               </div>
               <v-text-field
-                v-for="secret in report.secrets"
+                v-for="secret in selectedSecrets"
                 :key="secret.key"
                 v-model="secretsForm[secret.key]"
                 :label="secret.label + (secret.required ? ' *' : '')"
@@ -560,7 +597,7 @@ function depsLine(item: ModuleDepsLog): string {
             variant="tonal"
             prepend-icon="mdi-play-circle-outline"
             :loading="bundles.importing"
-            :disabled="!report?.ok || consentBlocked"
+            :disabled="!report?.ok || consentBlocked || (Boolean(reportContents) && !selection.sections.length)"
             @click="confirmApply"
           >
             导入并应用到「{{ accountLabel }}」
@@ -601,5 +638,11 @@ function depsLine(item: ModuleDepsLog): string {
 .drop-zone--over {
   border-color: rgb(var(--v-theme-primary));
   background: rgba(var(--v-theme-primary), 0.06);
+}
+
+/* 面板模式：对话框正文单独滚动，底部按钮始终可见 */
+.bundle-panel {
+  max-height: 70vh;
+  overflow-y: auto;
 }
 </style>

@@ -49,6 +49,8 @@ export interface BundleReport {
   }
   /** 预检的模块明细（逐条展示名称/版本/动作/体积） */
   modules?: BundleModuleInfo[]
+  /** 可勾选内容（导入预检 / 导出面板共用） */
+  contents?: BundleContents
   /** 包内带可执行模块代码 → 导入方必须显式确认信任 */
   requires_code_consent?: boolean
   issues: BundleIssue[]
@@ -56,15 +58,96 @@ export interface BundleReport {
   manifest?: Record<string, any>
 }
 
-/** 导出对话框的模块选项 */
-export interface ExportModuleOption {
+/** 一个可勾选的内容分类（persona / provider / agent / modules） */
+export type BundleSectionKey = 'persona' | 'provider' | 'agent' | 'modules'
+
+/** 导出面板 / 导入应用的内容明细 */
+export interface ContentModule {
   name: string
-  display_name: string
-  version: string
-  builtin: boolean
-  enabled: boolean
-  has_config: boolean
-  size: number
+  display_name?: string
+  version?: string
+  builtin?: boolean
+  enabled?: boolean | null
+  has_config?: boolean
+  size?: number
+  bundled?: boolean
+  action?: string
+  missing_requirements?: string[]
+}
+
+export interface BundleContents {
+  persona: { available: boolean; name?: string; names?: string[]; fields?: string[] }
+  provider: {
+    available: boolean
+    preset_name?: string
+    provider?: string
+    api_base?: string
+    has_secret?: boolean
+    models?: { model: string; enabled?: boolean }[]
+  }
+  agent: { available: boolean; key_count?: number }
+  modules: ContentModule[]
+}
+
+/** 勾选结果：要处理哪些分类、要处理哪些插件 */
+export interface BundleContentSelection {
+  sections: string[]
+  modules: string[]
+}
+
+export const BUNDLE_SECTIONS: { key: BundleSectionKey; label: string }[] = [
+  { key: 'persona', label: '人格' },
+  { key: 'provider', label: '模型配置' },
+  { key: 'agent', label: 'AI 设置' },
+  { key: 'modules', label: '插件' },
+]
+
+/** 默认勾选：导出默认不带插件代码；导入/应用默认全带。 */
+export function defaultSelection(
+  contents: BundleContents | null | undefined,
+  mode: 'export' | 'import',
+): BundleContentSelection {
+  const sections: string[] = []
+  if (contents?.persona?.available) sections.push('persona')
+  if (contents?.provider?.available) sections.push('provider')
+  if (contents?.agent?.available) sections.push('agent')
+  const modules = contents?.modules || []
+  if (mode === 'import' && modules.length) sections.push('modules')
+  return {
+    sections,
+    modules: mode === 'import' ? modules.map((item) => item.name) : [],
+  }
+}
+
+/** 一句话摘要：将导出/应用哪些内容。 */
+export function selectionSummary(
+  contents: BundleContents | null | undefined,
+  selection: BundleContentSelection,
+  mode: 'export' | 'import',
+): string {
+  const parts: string[] = []
+  if (selection.sections.includes('persona') && contents?.persona?.available) {
+    parts.push('人格')
+  }
+  if (selection.sections.includes('provider') && contents?.provider?.available) {
+    parts.push('模型配置')
+  }
+  if (selection.sections.includes('agent') && contents?.agent?.available) {
+    parts.push('AI 设置')
+  }
+  if (selection.sections.includes('modules')) {
+    parts.push(`插件 ${selection.modules.length} 个`)
+  }
+  if (!parts.length) return '还没有勾选内容'
+  return `${mode === 'export' ? '将导出' : '将应用'}：${parts.join('、')}`
+}
+
+/** 密钥声明属于哪个内容分类（界面按勾选隐藏不需要填的密钥）。 */
+export function secretSection(key: string): string {
+  if (key.startsWith('providers[') || key.startsWith('provider_models[')) return 'provider'
+  if (key.startsWith('agent.')) return 'agent'
+  if (key.startsWith('module:')) return 'modules'
+  return 'other'
 }
 
 export interface InstalledBundle {
@@ -86,6 +169,8 @@ export interface InstalledBundle {
   deps_missing_modules?: string[]
   /** 包内含可执行模块代码（导入需显式信任） */
   has_code?: boolean
+  /** 可勾选内容（导入时记下，应用对话框据此展示勾选面板；旧包没有） */
+  contents?: BundleContents
 }
 
 export interface ActivationRecord {
@@ -236,6 +321,7 @@ export const useBundlesStore = defineStore('bundles', () => {
     reusePresetId = '',
     installDeps = false,
     depsMirror = '',
+    selection?: BundleContentSelection,
   ): Promise<BundleReport & { apply?: ApplyResult; health?: BundleHealth }> {
     importing.value = true
     applying.value = true
@@ -248,6 +334,7 @@ export const useBundlesStore = defineStore('bundles', () => {
       if (reusePresetId) form.append('reuse_provider_preset_id', reusePresetId)
       if (installDeps) form.append('install_deps', 'true')
       if (depsMirror.trim()) form.append('deps_mirror', depsMirror.trim())
+      form.append('selection', JSON.stringify(selection || {}))
       const res = await http.post('/api/bundles/import-apply', form)
       await Promise.all([load(), loadActivations(accountId)])
       return res.data as BundleReport & { apply?: ApplyResult; health?: BundleHealth }
@@ -269,8 +356,10 @@ export const useBundlesStore = defineStore('bundles', () => {
     name: string
     version?: string
     description?: string
-    /** 只打包这些模块；不传 = 全部 */
-    modules?: string[]
+    /** 只打包这些内容分类（persona / provider / agent / modules） */
+    sections: string[]
+    /** 只打包这些模块；空数组 = 不带插件 */
+    modules: string[]
   }): Promise<void> {
     const accountId = bots.currentAccountId
     if (!accountId) throw new Error('先选择一个账号')
@@ -280,8 +369,9 @@ export const useBundlesStore = defineStore('bundles', () => {
       name: options.name,
       version: options.version || '1.0.0',
       description: options.description || '',
+      sections: options.sections.join(','),
+      modules: options.modules.join(','),
     }
-    if (options.modules) params.modules = options.modules.join(',')
     const res = await http.get('/api/bundles/export', {
       params,
       responseType: 'blob',
@@ -292,14 +382,20 @@ export const useBundlesStore = defineStore('bundles', () => {
     )
   }
 
-  /** 导出对话框：可选模块清单（含体积） */
-  async function loadExportOptions(): Promise<ExportModuleOption[]> {
+  /** 导出面板：可勾选内容（人格 / 模型配置 / AI 设置 / 插件明细） */
+  async function loadExportOptions(): Promise<BundleContents> {
     const accountId = bots.currentAccountId
-    if (!accountId) return []
+    const empty: BundleContents = {
+      persona: { available: false, fields: [] },
+      provider: { available: false, models: [] },
+      agent: { available: false, key_count: 0 },
+      modules: [],
+    }
+    if (!accountId) return empty
     const res = await http.get('/api/bundles/export-options', {
       params: { account_id: accountId },
     })
-    return (res.data?.modules || []) as ExportModuleOption[]
+    return (res.data?.contents || empty) as BundleContents
   }
 
   async function loadActivations(scopeAccountId?: string | null): Promise<void> {
@@ -339,12 +435,14 @@ export const useBundlesStore = defineStore('bundles', () => {
     reusePresetId = '',
     installDeps = false,
     depsMirror = '',
+    selection?: BundleContentSelection,
   ): Promise<ApplyResult & { health?: BundleHealth }> {
     applying.value = true
     try {
       const res = await http.post(`/api/bundles/${encodeURIComponent(id)}/apply`, {
         account_id: accountId,
         secrets,
+        ...(selection ? { sections: selection.sections, modules: selection.modules } : {}),
         ...(reusePresetId ? { reuse_provider_preset_id: reusePresetId } : {}),
         ...(installDeps ? { install_deps: true } : {}),
         ...(depsMirror.trim() ? { deps_mirror: depsMirror.trim() } : {}),
