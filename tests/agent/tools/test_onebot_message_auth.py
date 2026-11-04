@@ -82,6 +82,8 @@ def _messages() -> dict:
         102: {"group_id": GROUP_ID, "sender": {"user_id": MANAGER_ID}},
         103: {"group_id": GROUP_ID, "sender": {"user_id": MEMBER_ID}},
         104: {"group_id": 999, "sender": {"user_id": OWNER_ID}},
+        # QQ 的 message_id 是 int32，可以是负数（线上实测 -1097120530）
+        -1097120530: {"group_id": GROUP_ID, "sender": {"user_id": OWNER_ID}},
     }
 
 
@@ -126,6 +128,43 @@ async def test_message_sender_authorizes_high_and_critical():
     assert await _authorize(ctx, bot, 104, "high") != ""      # 跨群消息不能用
     assert await _authorize(ctx, bot, 999, "high") != ""      # 查不到
     assert await _authorize(ctx, bot, "", "high") != ""       # 缺参
+
+
+async def test_negative_message_id_is_a_valid_credential():
+    """负 message_id 必须能通过凭证鉴权（线上回归：QQ 的 id 是 int32，可为负）。
+
+    此前的 ``str.isdigit()`` 会把 ``-1208685782`` 判成"不是数字消息 id"，
+    于是负 id 的消息永远无法授权敏感工具；但负 id 是 QQ 的正常值，
+    ``get_msg(-1208685782)`` 完全能取到消息。
+    """
+    from app.agent.tools.onebot.message_auth import parse_message_id
+
+    bot = FakeBot(_messages())
+    ctx = _ctx(bot=bot)
+    assert parse_message_id(-1097120530) == -1097120530
+    assert parse_message_id("-1097120530") == -1097120530
+    assert parse_message_id("+7") == 7
+    assert parse_message_id("abc") is None
+    assert parse_message_id("12.5") is None
+    assert parse_message_id("") is None
+
+    assert await _authorize(ctx, bot, -1097120530, "high") == ""
+    assert await _authorize(ctx, bot, "-1097120530", "critical") == ""
+
+
+async def test_executor_accepts_negative_auth_id():
+    """端到端：负 auth_message_id 鉴权通过后真的执行 action，且参数不透传。"""
+    bot = FakeBot(_messages())
+    ctx = _ctx(bot=bot)
+    specs = [s for s in build_onebot_tools(ctx.runtime, ctx) if s.name == "set_group_kick"]
+    executor = make_executor(specs, ctx)
+
+    result = await executor(
+        "set_group_kick", {"group_id": GROUP_ID, "user_id": 9, AUTH_ARG: "-1097120530"}
+    )
+    assert "PERMISSION_DENIED" not in result
+    assert bot.calls, "负 id 鉴权通过后应执行 action"
+    assert AUTH_ARG not in bot.calls[0][1], "鉴权参数不能透传给 OneBot"
 
 
 async def test_executor_fails_closed_and_strips_auth_arg():

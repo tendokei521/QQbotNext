@@ -19,7 +19,7 @@ from app.agent.group_log.store import store_of
 from app.agent.tools.spec import ToolContext, ToolSpec
 
 from .manifest import ONEBOT_TOOLS
-from .message_auth import AUTH_ARG, AUTH_ARG_DESCRIPTION, authorize_from_message
+from .message_auth import AUTH_ARG, AUTH_ARG_DESCRIPTION, authorize_from_message, parse_message_id
 from .security import resolve_tool_policy
 
 DEFAULT_MAX_RESULT = 2000
@@ -175,8 +175,8 @@ def _current_message_id(ctx: ToolContext | None, args: dict) -> tuple[str, str]:
     """
     raw = str((args or {}).get("message_id", "") or "").strip()
     if raw:
-        if not raw.isdigit():
-            return "", f"error: message_id 必须是数字消息 id，收到 {raw!r}"
+        if parse_message_id(raw) is None:
+            return "", f"error: message_id 必须是数字消息 id（可为负），收到 {raw!r}"
         return raw, ""
     extracted = (getattr(ctx, "extra", {}) or {}).get("trigger_message_id", "") if ctx is not None else ""
     if not extracted:
@@ -234,8 +234,10 @@ def _emoji_like_prepare(ctx: ToolContext | None, args: dict) -> tuple[dict, str]
                     f"({emoji_id})」，无需重复；想表达别的意思请换一个。"
                 )
 
+    mid_value = parse_message_id(message_id)
     params = {
-        "message_id": int(message_id) if message_id.isdigit() else message_id,
+        # 负数 id 是 QQ 的正常值（int32），统一转成 int 再下行
+        "message_id": mid_value if mid_value is not None else message_id,
         "emoji_id": emoji_id,
     }
     return params, ""

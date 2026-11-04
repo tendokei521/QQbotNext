@@ -27,10 +27,31 @@ from .security import authorizer_roles
 AUTH_ARG = "auth_message_id"
 #: 参数说明（进 tool schema）
 AUTH_ARG_DESCRIPTION = (
-    "让你执行该操作的那条群消息的 message_id（必填）。程序会用该消息的发送者身份"
+    "让你执行该操作的那条群消息的 message_id（必填）。消息 id 是 QQ 的 int32，"
+    "可能为负数，原样传入即可。程序会用该消息的发送者身份"
     "校验权限：high 级工具需要 bot 管理者/拥有者，critical 级工具仅拥有者；"
     "消息不存在、不属于当前群或发送者权限不够都会被拒绝。不要编造 id。"
 )
+
+
+def parse_message_id(value: Any) -> int | None:
+    """把模型/事件给的 message_id 解析成整数；不合法返回 ``None``。
+
+    **负号必须放行**：QQ（NT / OneBot 实现）的 message_id 是 int32，可以是负数
+    （线上实测 ``-1208685782``）。此前这里用 ``str.isdigit()``，负 id 会被判成
+    "不是数字消息 id"，于是负 id 的消息永远无法通过凭证鉴权。
+    只接受十进制整数串（可带 ``+``/``-`` 前缀）；空串、字母、全角数字均拒绝。
+    """
+    text = str(value or "").strip()
+    if not text:
+        return None
+    body = text[1:] if text[:1] in ("+", "-") else text
+    if not body.isascii() or not body.isdigit():
+        return None
+    try:
+        return int(text)
+    except ValueError:  # pragma: no cover —— 上面已保证是整数串
+        return None
 
 
 def _id_list(value: Any) -> set[str]:
@@ -96,8 +117,9 @@ async def authorize_from_message(
             f"缺少 {AUTH_ARG}：调用 {tool_name} 必须传入让你执行该操作的群消息 message_id"
             f"（该工具需要{need}授权）。"
         )
-    if not raw.isdigit():
-        return _error(f"{AUTH_ARG} 必须是数字消息 id，收到 {raw!r}。")
+    mid = parse_message_id(raw)
+    if mid is None:
+        return _error(f"{AUTH_ARG} 必须是数字消息 id（可为负），收到 {raw!r}。")
     if bot is None or not callable(getattr(bot, "get_msg", None)):
         return _error("当前没有可用的 OneBot 连接，无法校验消息凭证。")
 
@@ -106,7 +128,7 @@ async def authorize_from_message(
         return _error("当前不是群聊场景，无法按群消息校验权限。")
 
     try:
-        response = await bot.get_msg(int(raw))
+        response = await bot.get_msg(mid)
     except Exception as e:  # noqa: BLE001 —— 查不到 = 无法授权
         _audit(runtime, tool_name, raw, "",
                f"get_msg 失败: {e}")
@@ -172,4 +194,4 @@ def _audit(runtime: Any, tool: str, message_id: str, sender: str, detail: str) -
         logger.debug("[MessageAuth] 审计日志写入失败（已忽略）")
 
 
-__all__ = ["AUTH_ARG", "AUTH_ARG_DESCRIPTION", "authorize_from_message"]
+__all__ = ["AUTH_ARG", "AUTH_ARG_DESCRIPTION", "authorize_from_message", "parse_message_id"]
