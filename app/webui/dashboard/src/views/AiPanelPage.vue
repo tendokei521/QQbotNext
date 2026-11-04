@@ -130,6 +130,17 @@ const participationMaxTokens = computed<number>({
   get: () => Number(agent.draft.participation_max_tokens ?? 10000000),
   set: (v) => agent.onChange('participation_max_tokens', Number(v) || 1),
 })
+/** 5 分钟预算 ÷ 10 = 每 30 秒粒度（与后端 participation.BUDGET_STEPS_PER_WINDOW 对齐） */
+const PARTICIPATION_BUDGET_STEPS = 10
+const participationRequestsPerStep = computed(() => {
+  const value = Number(agent.draft.participation_max_requests ?? 60) / PARTICIPATION_BUDGET_STEPS
+  return Number.isInteger(value) ? String(value) : value.toFixed(1)
+})
+const participationTokensPerStep = computed(() => {
+  const value =
+    Number(agent.draft.participation_max_tokens ?? 10000000) / PARTICIPATION_BUDGET_STEPS
+  return Math.max(1, Math.round(value)).toLocaleString('zh-CN')
+})
 
 /** 摘要固定来自 /api/policy 的解析结果（账号层覆盖 + 旧键折算后的值） */
 async function loadGlobalPolicy() {
@@ -503,6 +514,10 @@ watch(
             variant="outlined"
             hide-details
           />
+          <div class="text-caption app-muted mt-2">
+            预算按 30 秒粒度执行：每 30 秒最多 {{ participationRequestsPerStep }} 次请求 /
+            {{ participationTokensPerStep }} tokens（5 分钟上限的 1/10）
+          </div>
         </template>
 </PanelCard>
 
