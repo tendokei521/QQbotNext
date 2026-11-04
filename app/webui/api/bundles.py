@@ -30,6 +30,48 @@ router = APIRouter(tags=["bundles"])
 
 #: 上传体积上限（与校验器一致；先在 API 层挡一次，避免把超大文件读进内存）
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+#: 可勾选的内容分类（前端导出面板 / 导入应用共用）
+ALL_SECTIONS = ("persona", "provider", "agent", "modules")
+
+
+def _parse_sections(value) -> set[str] | None:
+    """内容分类参数 → 集合；``None`` = 全部；空字符串 = 空集合（调用方决定是否报错）。"""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        parts = {item.strip() for item in value.split(",") if item.strip()}
+    elif isinstance(value, (list, tuple, set)):
+        parts = {str(item).strip() for item in value if str(item or "").strip()}
+    else:
+        raise BundleError("BUNDLE_SECTION_UNKNOWN", "内容分类参数格式不对")
+    unknown = parts - set(ALL_SECTIONS)
+    if unknown:
+        raise BundleError(
+            "BUNDLE_SECTION_UNKNOWN",
+            f"不认识的内容分类：{'、'.join(sorted(unknown))}",
+            "刷新页面后重试",
+        )
+    return parts
+
+
+def _module_names(value) -> list[str] | None:
+    """插件名参数 → 列表；``None`` = 全部。"""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item or "").strip()]
+    raise BundleError("BUNDLE_MODULE_INVALID", "插件清单参数格式不对")
+
+
+def _parse_selection(raw) -> tuple[set[str] | None, list[str] | None]:
+    """``{"sections": [...], "modules": [...]}`` → (sections, modules)；缺省 = 全部。"""
+    if raw is None:
+        return None, None
+    if not isinstance(raw, dict):
+        raise BundleError("BUNDLE_SELECTION_INVALID", "内容选择必须是 JSON 对象")
+    return _parse_sections(raw.get("sections")), _module_names(raw.get("modules"))
 
 
 def _ok(message: str = "", **extra):
@@ -265,6 +307,7 @@ async def api_bundles_import_apply(
     reuse_provider_preset_id: str = Form(""),
     install_deps: bool = Form(False),
     deps_mirror: str = Form(""),
+    selection: str = Form(""),
     config_service=Depends(get_config_service),
     agent_manager=Depends(get_agent_manager),
     bot_service=Depends(get_bot_service),
@@ -273,7 +316,8 @@ async def api_bundles_import_apply(
 ):
     """一键：导入登记 + 立即应用到账号（失败保留工件，返回 ``imported=true`` 便于重试）。
 
-    ``install_deps=true``：随包模块的 pip 依赖在应用时一并安装（联网，勾选后才装）。
+    ``selection``：``{"sections": [...], "modules": [...]}``，只应用勾选的内容；
+    不传 = 全部应用。``install_deps=true``：随包模块的 pip 依赖在应用时一并安装。
     """
     account_id = str(account_id or "").strip()
     if not account_id:
@@ -284,6 +328,18 @@ async def api_bundles_import_apply(
         return _err(400, f"secrets 不是合法 JSON: {e}", "BUNDLE_BAD_SECRETS")
     if not isinstance(secrets_obj, dict):
         return _err(400, "secrets 必须是 JSON 对象", "BUNDLE_BAD_SECRETS")
+    try:
+        selection_obj = json.loads(selection) if str(selection or "").strip() else None
+        selected_sections, selected_modules = _parse_selection(selection_obj)
+    except (json.JSONDecodeError, BundleError) as e:
+        if isinstance(e, BundleError):
+            return _err(400, str(e), e.code, e.hint)
+        return _err(400, f"selection 不是合法 JSON: {e}", "BUNDLE_SELECTION_INVALID")
+    if selected_sections is not None and not selected_sections:
+        return _err(
+            400, "至少选择一项要应用到账号的内容", "BUNDLE_NOTHING_SELECTED",
+            "勾选人格、模型配置、AI 设置或插件后重试",
+        )
 
     service = _service(
         config_service, agent_manager, bot_service, settings, registry,
@@ -296,12 +352,18 @@ async def api_bundles_import_apply(
         return _err(400, str(e), e.code, e.hint)
 
     bundle = result.get("bundle") or {}
+    apply_kwargs = {}
+    if selected_sections is not None:
+        apply_kwargs["sections"] = selected_sections
+    if selected_modules is not None:
+        apply_kwargs["modules"] = selected_modules
     try:
         applied = await service.apply(
             str(bundle.get("id") or ""), account_id, secrets=secrets_obj,
             reuse_provider_preset_id=(
                 str(reuse_provider_preset_id or "").strip() or None
             ),
+            **apply_kwargs,
         )
     except BundleError as e:
         # 工件已登记：前端可以提示"已导入，应用失败"，让用户补密钥/修问题后重试
@@ -367,13 +429,14 @@ async def api_bundles_export_options(
     settings=Depends(get_settings),
     registry=Depends(get_module_registry),
 ):
-    """导出对话框的模块清单（名称/版本/内置/体积/启停），供勾选"打包哪些模块"。"""
+    """导出面板的可勾选内容：人格 / 模型配置 / AI 设置 / 插件明细。"""
     if not account_id:
         return _err(400, "缺少 account_id", "BUNDLE_ACCOUNT_REQUIRED")
-    options = _service(
+    contents = _service(
         config_service, agent_manager, bot_service, settings, registry
     ).export_options(account_id)
-    return _ok(modules=options, total=len(options))
+    modules = contents.get("modules") or []
+    return _ok(contents=contents, modules=modules, total=len(modules))
 
 
 @router.get("/bundles/export")
@@ -384,6 +447,7 @@ async def api_bundles_export(
     version: str = "1.0.0",
     description: str = "",
     modules: str | None = None,
+    sections: str | None = None,
     config_service=Depends(get_config_service),
     agent_manager=Depends(get_agent_manager),
     bot_service=Depends(get_bot_service),
@@ -392,9 +456,16 @@ async def api_bundles_export(
 ):
     if not account_id:
         return _err(400, "缺少 account_id", "BUNDLE_ACCOUNT_REQUIRED")
-    module_filter = None
-    if modules is not None:
-        module_filter = [item.strip() for item in modules.split(",") if item.strip()]
+    try:
+        selected_sections = _parse_sections(sections)
+        module_filter = _module_names(modules)
+    except BundleError as e:
+        return _err(400, str(e), e.code, e.hint)
+    if selected_sections is not None and not selected_sections:
+        return _err(
+            400, "至少选择一项要导出的内容", "BUNDLE_NOTHING_SELECTED",
+            "勾选人格、模型配置、AI 设置或插件后重试",
+        )
     try:
         data = _service(
             config_service, agent_manager, bot_service, settings, registry
@@ -405,6 +476,7 @@ async def api_bundles_export(
             version=str(version or "1.0.0"),
             description=str(description or ""),
             module_filter=module_filter,
+            sections=selected_sections,
         )
     except BundleError as e:
         return _err(400, str(e), e.code, e.hint)
@@ -447,11 +519,30 @@ async def api_bundles_apply(
     install_deps = bool(body.get("install_deps"))
     deps_mirror = str(body.get("deps_mirror") or "").strip()
     try:
+        if isinstance(body.get("selection"), dict):
+            selected_sections, selected_modules = _parse_selection(body["selection"])
+        else:
+            selected_sections = _parse_sections(body.get("sections"))
+            selected_modules = _module_names(body.get("modules"))
+    except BundleError as e:
+        return _err(400, str(e), e.code, e.hint)
+    if selected_sections is not None and not selected_sections:
+        return _err(
+            400, "至少选择一项要应用到账号的内容", "BUNDLE_NOTHING_SELECTED",
+            "勾选人格、模型配置、AI 设置或插件后重试",
+        )
+    selected_kwargs = {}
+    if selected_sections is not None:
+        selected_kwargs["sections"] = selected_sections
+    if selected_modules is not None:
+        selected_kwargs["modules"] = selected_modules
+    try:
         result = await _service(
             config_service, agent_manager, bot_service, settings, registry,
             install_deps=install_deps, deps_mirror=deps_mirror,
         ).apply(
-            bundle_id, account_id, secrets=secrets, reuse_provider_preset_id=reuse_id
+            bundle_id, account_id, secrets=secrets, reuse_provider_preset_id=reuse_id,
+            **selected_kwargs,
         )
     except BundleError as e:
         return _err(400, str(e), e.code, e.hint)

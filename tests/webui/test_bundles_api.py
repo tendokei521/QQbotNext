@@ -649,3 +649,197 @@ async def test_import_records_missing_deps_in_meta(container, config_service, tm
     assert item["deps_missing_modules"] == ["demo_mod"]
 
 
+
+# ==================== 内容勾选：导出 / 应用 ====================
+
+
+def _manifest_of(data: bytes) -> dict:
+    import io
+
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        return json.loads(archive.read("bundle.json"))
+
+
+def _names_of(data: bytes) -> set[str]:
+    import io
+
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        return set(archive.namelist())
+
+
+async def test_export_options_lists_contents(container, config_service):
+    """导出面板：人格 / 模型配置 / AI 设置 / 插件明细都能勾选。"""
+    await _seed_account(config_service)
+    client = _client(container)
+
+    body = client.get("/api/bundles/export-options", params={"account_id": "acc1"}).json()
+    contents = body["contents"]
+    assert contents["persona"]["available"] is True
+    assert contents["persona"]["name"] == "群聊搭子"
+    assert "提示词" in contents["persona"]["fields"]
+    assert contents["provider"]["preset_name"] == "DeepSeek"
+    assert [item["model"] for item in contents["provider"]["models"]] == [
+        "deepseek-chat", "deepseek-reasoner",
+    ]
+    assert contents["agent"]["available"] is True
+    assert contents["agent"]["key_count"] >= 4
+    assert body["modules"] == contents["modules"]
+    assert any(item["builtin"] for item in contents["modules"])
+
+
+async def test_export_sections_filter(container, config_service):
+    """只勾人格时：包里没有模型 / AI 设置 / 插件，也没有对应密钥声明。"""
+    await _seed_account(config_service)
+    client = _client(container)
+
+    data = client.get("/api/bundles/export", params={
+        "account_id": "acc1",
+        "bundle_id": "persona-only",
+        "sections": "persona",
+    }).content
+
+    names = _names_of(data)
+    manifest = _manifest_of(data)
+    assert "persona/default.md" in names
+    assert "configs/agent.json" not in names
+    assert manifest["components"]["personas"]
+    assert manifest["components"]["providers"] == []
+    assert manifest["components"]["agent"] == []
+    assert manifest["components"]["modules"] == []
+    assert manifest["requires"]["modules"] == []
+    assert manifest["secrets"] == []
+
+    check = client.post("/api/bundles/validate", files={"file": ("b.zip", data, "application/zip")})
+    assert check.status_code == 200, check.text
+    assert check.json()["ok"] is True, check.json()["issues"]
+
+
+async def test_export_sections_without_plugins(container, config_service):
+    """勾人格 + 模型 + AI 设置但不勾插件：只声明版本，不带模块配置与代码。"""
+    await _seed_account(config_service)
+    client = _client(container)
+
+    data = client.get("/api/bundles/export", params={
+        "account_id": "acc1",
+        "bundle_id": "no-plugin",
+        "sections": "persona,provider,agent",
+        "modules": "",
+    }).content
+
+    manifest = _manifest_of(data)
+    assert manifest["components"]["personas"]
+    assert manifest["components"]["providers"]
+    assert manifest["components"]["agent"]
+    assert manifest["components"]["modules"] == []
+    secret_keys = {item["key"] for item in manifest["secrets"]}
+    assert "providers[0].api_key" in secret_keys
+    assert not any(key.startswith("module:") for key in secret_keys)
+
+
+async def test_export_nothing_selected_returns_400(container, config_service):
+    await _seed_account(config_service)
+    resp = _client(container).get("/api/bundles/export", params={
+        "account_id": "acc1",
+        "bundle_id": "empty-pack",
+        "sections": "",
+    })
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "BUNDLE_NOTHING_SELECTED"
+
+
+async def test_apply_persona_only_skips_provider_secret(container, config_service):
+    """应用只勾人格：不要求填模型密钥，模型配置保持账号原样。"""
+    await _seed_account(config_service)
+    client = _client(container)
+    data = client.get("/api/bundles/export", params={
+        "account_id": "acc1", "bundle_id": "persona-apply",
+    }).content
+    assert client.post(
+        "/api/bundles/import", files={"file": ("b.zip", data, "application/zip")}
+    ).status_code == 200
+
+    presets_before = len(config_service.list_provider_presets())
+    applied = client.post("/api/bundles/persona-apply/apply", json={
+        "account_id": "acc1",
+        "sections": ["persona"],
+        "secrets": {},
+    })
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["plan"]["sections"] == ["persona"]
+
+    agent = config_service.get_module_config("agent", "acc1")
+    assert agent["persona_preset_id"] != "role123", "人格应换成包里新建的"
+    assert agent["provider_preset_id"] == "preset123", "没勾模型配置就不能动模型引用"
+    assert len(config_service.list_provider_presets()) == presets_before
+    assert len(config_service.list_role_presets()) == 2
+
+
+async def test_apply_modules_only_keeps_agent_config(container, config_service):
+    """应用只勾插件：只写插件配置，人格与 AI 设置不动。"""
+    await _seed_account(config_service)
+    client = _client(container)
+    options = client.get("/api/bundles/export-options", params={"account_id": "acc1"}).json()
+    picked = (options["contents"]["modules"])[0]["name"]
+    data = client.get("/api/bundles/export", params={
+        "account_id": "acc1",
+        "bundle_id": "module-only",
+        "sections": "modules",
+        "modules": picked,
+    }).content
+    assert client.post(
+        "/api/bundles/import", files={"file": ("b.zip", data, "application/zip")}
+    ).status_code == 200
+
+    agent_before = dict(config_service.get_module_config("agent", "acc1"))
+    roles_before = len(config_service.list_role_presets())
+    applied = client.post("/api/bundles/module-only/apply", json={
+        "account_id": "acc1",
+        "sections": ["modules"],
+        "modules": [picked],
+    })
+    assert applied.status_code == 200, applied.text
+    assert config_service.get_module_config("agent", "acc1") == agent_before
+    assert len(config_service.list_role_presets()) == roles_before
+
+
+async def test_apply_nothing_selected_returns_400(container, config_service):
+    await _seed_account(config_service)
+    client = _client(container)
+    data = client.get("/api/bundles/export", params={
+        "account_id": "acc1", "bundle_id": "nothing-pack",
+    }).content
+    assert client.post(
+        "/api/bundles/import", files={"file": ("b.zip", data, "application/zip")}
+    ).status_code == 200
+
+    resp = client.post("/api/bundles/nothing-pack/apply", json={
+        "account_id": "acc1",
+        "sections": [],
+    })
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "BUNDLE_NOTHING_SELECTED"
+
+
+async def test_import_apply_respects_selection(container, config_service):
+    """一键导入并应用：selection 只应用勾选的人格，模型不重建。"""
+    await _seed_account(config_service)
+    client = _client(container)
+    data = client.get("/api/bundles/export", params={
+        "account_id": "acc1", "bundle_id": "one-persona",
+    }).content
+    presets_before = len(config_service.list_provider_presets())
+
+    resp = client.post(
+        "/api/bundles/import-apply",
+        files={"file": ("b.zip", data, "application/zip")},
+        data={
+            "account_id": "acc1",
+            "selection": json.dumps({"sections": ["persona"], "modules": []}),
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["apply"]["plan"]["sections"] == ["persona"]
+    agent = config_service.get_module_config("agent", "acc1")
+    assert agent["provider_preset_id"] == "preset123"
+    assert len(config_service.list_provider_presets()) == presets_before

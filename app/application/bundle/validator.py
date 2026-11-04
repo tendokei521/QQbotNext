@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import re
 import zipfile
 
@@ -102,8 +103,6 @@ def inspect_zip(data: bytes) -> tuple[dict, dict, dict]:
             if actual != expected:
                 raise BundleError("BUNDLE_CHECKSUM_MISMATCH", f"文件校验失败：{path}")
 
-    import json
-
     try:
         manifest_raw = json.loads(files["bundle.json"].decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as e:
@@ -120,11 +119,13 @@ def validate_bytes(
     agent_schema: dict | None = None,
     builtin_modules: set[str] | None = None,
     installed_packages: set[str] | None = None,
+    module_catalog: dict[str, dict] | None = None,
 ) -> dict:
     """产出一份预检报告（结构性问题抛 BundleError，语义问题进 issues）。
 
     ``builtin_modules``：本机内置模块名集合（随包模块与内置同名会被安装器拒绝，提前拦）；
     ``installed_packages``：本机已安装发行包（归一化名），不传则实时探测环境。
+    ``module_catalog``：本机模块编目（名称 → 显示名/内置），只用于预检页展示。
     """
     from app.application.bundle.manifest import normalize_manifest
 
@@ -303,8 +304,6 @@ def validate_bytes(
 
     # ---------- Agent 配置键校验（未知键 = 装进去也不会生效） ----------
     if agent_schema:
-        import json
-
         for agent in manifest["components"]["agent"]:
             payload = files.get(agent["source"])
             if payload is None:
@@ -351,6 +350,103 @@ def validate_bytes(
                 f"内容物疑似包含明文密钥：{path}", "", "导出时不要包含 Key；接收方导入后自行填写",
             ))
 
+    # ---------- 可勾选内容（导入预检页 / 导出面板共用同一形状） ----------
+    persona_items: list[dict] = []
+    for persona in manifest["components"]["personas"]:
+        prompt = files.get(persona["source"], b"").decode("utf-8", "replace").strip()
+        fields: list[str] = []
+        if prompt:
+            fields.append("提示词")
+        if persona.get("description"):
+            fields.append("描述")
+        if persona.get("begin_dialogs"):
+            fields.append("预设对话")
+        if persona.get("tools") is not None:
+            fields.append("工具")
+        if persona.get("skills") is not None:
+            fields.append("技能")
+        persona_items.append({"name": persona["name"], "fields": fields})
+    persona_fields: list[str] = []
+    for item in persona_items:
+        for field_name in item["fields"]:
+            if field_name not in persona_fields:
+                persona_fields.append(field_name)
+
+    provider_items: list[dict] = []
+    for provider in manifest["components"]["providers"]:
+        provider_items.append({
+            "preset_name": provider.get("preset_name") or provider.get("provider") or "",
+            "provider": provider.get("provider") or "",
+            "api_base": provider.get("api_base") or "",
+            "models": [
+                {"model": model["model"], "enabled": bool(model.get("enabled", True))}
+                for model in provider.get("models") or []
+            ],
+        })
+    provider_secret = any(
+        str(secret.get("key") or "").startswith(("providers[", "provider_models["))
+        for secret in manifest["secrets"]
+    )
+
+    agent_key_count = 0
+    for agent in manifest["components"]["agent"]:
+        payload = files.get(agent["source"])
+        if payload is None:
+            continue
+        try:
+            data_obj = json.loads(payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if isinstance(data_obj, dict):
+            agent_key_count += len(data_obj)
+
+    enabled_by_name = {
+        item["name"]: item.get("enabled")
+        for item in manifest["components"]["modules"]
+    }
+    config_by_name = {
+        item["name"]: bool(item.get("source"))
+        for item in manifest["components"]["modules"]
+    }
+    module_catalog = module_catalog or {}
+    module_contents: list[dict] = []
+    for item in modules_detail:
+        entry = module_catalog.get(item["name"]) or {}
+        module_contents.append({
+            "name": item["name"],
+            "display_name": str(entry.get("display_name") or item["name"]),
+            "version": (
+                item.get("version") or item.get("package_version")
+                or item.get("installed_version") or ""
+            ),
+            "builtin": bool(entry.get("builtin", True)),
+            "has_config": bool(config_by_name.get(item["name"])),
+            "enabled": enabled_by_name.get(item["name"]),
+            "bundled": bool(item.get("bundled")),
+            "action": item.get("action") or "",
+            "missing_requirements": list(item.get("missing_requirements") or []),
+            "size": int(item.get("package_size") or 0),
+        })
+
+    contents = {
+        "persona": {
+            "available": bool(persona_items),
+            "name": "、".join(item["name"] for item in persona_items),
+            "names": [item["name"] for item in persona_items],
+            "fields": persona_fields,
+        },
+        "provider": {
+            "available": bool(provider_items),
+            "preset_name": (provider_items[0]["preset_name"] if provider_items else ""),
+            "provider": (provider_items[0]["provider"] if provider_items else ""),
+            "api_base": (provider_items[0]["api_base"] if provider_items else ""),
+            "has_secret": provider_secret,
+            "models": (provider_items[0]["models"] if provider_items else []),
+        },
+        "agent": {"available": agent_key_count > 0, "key_count": agent_key_count},
+        "modules": module_contents,
+    }
+
     # ---------- 汇总 ----------
     secrets_required = [secret for secret in manifest["secrets"] if secret["required"]]
     summary = {
@@ -379,6 +475,7 @@ def validate_bytes(
         },
         "summary": summary,
         "modules": modules_detail,
+        "contents": contents,
         # 含可执行模块代码 → 导入方必须显式确认信任后才会安装
         "requires_code_consent": bool(summary["modules_bundled"]),
         "issues": issues,

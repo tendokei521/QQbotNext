@@ -25,6 +25,15 @@ from app.infrastructure.config.config_service import ConfigOp
 
 AGENT_CAPABILITY = "agent"
 
+#: 可勾选的内容分类（导出 / 应用共用）。顺序即界面展示顺序。
+ALL_SECTIONS: tuple[str, ...] = ("persona", "provider", "agent", "modules")
+_SECTION_LABELS = {
+    "persona": "人格",
+    "provider": "模型配置",
+    "agent": "AI 设置",
+    "modules": "插件",
+}
+
 #: 密钥声明里的键路径 → (kind, target, field)
 _PROVIDER_SECRET_RE = re.compile(r"^providers\[(\d+)\]\.(.+)$")
 _PROVIDER_MODEL_SECRET_RE = re.compile(r"^provider_models\[(\d+)\]\.(.+)$")
@@ -45,6 +54,39 @@ def _read_json(files: dict[str, bytes], name: str) -> dict:
     return data
 
 
+def _secret_section(key: str) -> str:
+    """密钥声明属于哪个内容分类；``unknown`` 表示未知路径。"""
+    kind, _target, _field = _split_secret_key(key)
+    if kind in ("provider", "provider_model"):
+        return "provider"
+    if kind == "agent":
+        return "agent"
+    if kind == "module":
+        return "modules"
+    return "unknown"
+
+
+def normalize_sections(selected: Any) -> set[str]:
+    """校验内容分类集合；空集合 / 未知分类直接报错。"""
+    if selected is None:
+        return set(ALL_SECTIONS)
+    names = {str(item).strip() for item in selected if str(item or "").strip()}
+    unknown = names - set(ALL_SECTIONS)
+    if unknown:
+        raise BundleError(
+            "BUNDLE_SECTION_UNKNOWN",
+            f"不认识的内容分类：{'、'.join(sorted(unknown))}",
+            "检查导出/应用参数",
+        )
+    if not names:
+        raise BundleError(
+            "BUNDLE_NOTHING_SELECTED",
+            "至少选择一项要处理的内容",
+            "勾选人格、模型配置、AI 设置或插件后重试",
+        )
+    return names
+
+
 def _split_secret_key(key: str) -> tuple[str, str, str]:
     """``secrets[].key`` → ``(kind, target, field)``；无法识别返回 ``("unknown", "", "")``。"""
     text = str(key or "").strip()
@@ -61,6 +103,53 @@ def _split_secret_key(key: str) -> tuple[str, str, str]:
     if match:
         return "agent", "", match.group(1)
     return "unknown", "", ""
+
+
+def select_components(
+    manifest: dict,
+    selected: set[str],
+    module_filter: set[str] | None = None,
+) -> dict:
+    """按勾选内容裁出"这次真正要应用"的组件（清单其余字段保持不变）。"""
+    components = dict(manifest.get("components") or {})
+    selected_modules = [
+        item for item in (components.get("modules") or [])
+        if "modules" in selected
+        and (module_filter is None or str(item.get("name") or "") in module_filter)
+    ]
+    result = dict(manifest)
+    result["components"] = {
+        "personas": list(components.get("personas") or []) if "persona" in selected else [],
+        "providers": list(components.get("providers") or []) if "provider" in selected else [],
+        "agent": list(components.get("agent") or []) if "agent" in selected else [],
+        "modules": selected_modules,
+    }
+    return result
+
+
+def select_secrets(
+    manifest: dict,
+    selected: set[str],
+    module_names: set[str] | None = None,
+) -> list[dict]:
+    """只保留与勾选内容相关的密钥声明（没勾的不会要求填）。"""
+    kept: list[dict] = []
+    for secret in manifest.get("secrets") or []:
+        section = _secret_section(str(secret.get("key") or ""))
+        if section == "unknown":
+            # 未知路径没法和分类对应：只有"全选"时才要求，避免部分应用被未知密钥卡住
+            if selected == set(ALL_SECTIONS):
+                kept.append(secret)
+            continue
+        if section not in selected:
+            continue
+        if section == "modules":
+            match = _MODULE_SECRET_RE.match(str(secret.get("key") or ""))
+            module_name = match.group(1) if match else ""
+            if module_names is not None and module_name not in module_names:
+                continue
+        kept.append(secret)
+    return kept
 
 
 class BundleApplier:
@@ -88,8 +177,13 @@ class BundleApplier:
         secrets: dict | None = None,
         previous: dict | None = None,
         reuse_provider_preset_id: str | None = None,
+        sections: Any = None,
+        modules: Any = None,
     ) -> dict:
         """把「清单 + 内容物 + 目标账号现状」算成幂等计划（含内部 ops）。
+
+        ``sections``：只应用这些内容分类（``persona`` / ``provider`` / ``agent`` /
+        ``modules``）；``None`` = 全部。``modules``：只应用这些插件的配置；``None`` = 全部。
 
         ``previous`` = 上一次同等价应用于该账号时记录的 ``applied_json``
         （``{"agent": {...}, "modules": {name: {...}}}``）。升级同 id 新版本时据此
@@ -98,6 +192,17 @@ class BundleApplier:
         ``reuse_provider_preset_id``：复用本机已有 Provider 预设的密钥（"一键"场景，
         用户不想重填 Key 时选一个已连通的连接）。
         """
+        selected = normalize_sections(sections)
+        module_filter = (
+            None if modules is None
+            else {str(item).strip() for item in modules if str(item or "").strip()}
+        )
+        # 只保留这次勾选的组件：后续步骤/密钥/自检都基于裁剪后的清单
+        full_manifest = manifest
+        manifest = select_components(manifest, selected, module_filter)
+        applied_module_names = {
+            str(item.get("name") or "") for item in manifest["components"]["modules"]
+        }
         provided = {
             str(key): str(value)
             for key, value in (secrets or {}).items()
@@ -311,15 +416,20 @@ class BundleApplier:
             applied_modules[capability] = merged
             updates.append({"target": f"module:{capability}", "keys": sorted(merged)})
 
+        # 只要求"这次勾选内容"相关的密钥：没勾模型配置就不该被 API Key 卡住
+        selected_secrets = select_secrets(manifest, selected, applied_module_names)
         plan = {
             "account_id": account_id,
             "bundle": {"id": manifest["id"], "name": manifest["name"], "version": manifest["version"]},
             "creates": creates,
             "updates": updates,
+            "sections": sorted(selected),
             "secrets_required": [
-                secret for secret in manifest.get("secrets", []) if secret.get("required", True)
+                secret for secret in selected_secrets if secret.get("required", True)
             ],
-            "modules_to_install": self._pending_modules(manifest),
+            "modules_to_install": self._pending_modules(
+                full_manifest, module_filter if "modules" in selected else set()
+            ),
             "reused_provider_preset_id": reused_from,
             "snapshot": {
                 "bindings": bindings_snapshot,
@@ -332,7 +442,7 @@ class BundleApplier:
             "preserved": preserved,
             "ops": ops,
         }
-        self._require_secrets(manifest, {
+        self._require_secrets(selected_secrets, {
             "provider_config": provider_config,
             "provider_models": provider_models,
             "agent": new_agent_config,
@@ -340,10 +450,15 @@ class BundleApplier:
         }, provided)
         return plan
 
-    def _pending_modules(self, manifest: dict) -> list[str]:
-        """随包且目标机缺/旧（应用时需要安装或升级）的模块名。"""
+    def _pending_modules(self, manifest: dict, module_filter: set[str] | None = None) -> list[str]:
+        """随包且目标机缺/旧（应用时需要安装或升级）的模块名。
+
+        ``module_filter``：只算这些插件；``None`` = 全部，空集合 = 一个都不装。
+        """
         pending: list[str] = []
         for module in manifest["requires"]["modules"]:
+            if module_filter is not None and module["name"] not in module_filter:
+                continue
             if not module.get("source"):
                 continue
             current = str(self.installed_modules.get(module["name"]) or "")
@@ -353,11 +468,11 @@ class BundleApplier:
         return pending
 
     @staticmethod
-    def _require_secrets(manifest: dict, resolved: dict, provided: dict | None = None) -> None:
+    def _require_secrets(secrets: list[dict], resolved: dict, provided: dict | None = None) -> None:
         """必填密钥在"写回后的最终配置"里必须有值（否则应用出来的是半套）。"""
         provided = provided or {}
         missing: list[str] = []
-        for secret in manifest.get("secrets", []):
+        for secret in secrets:
             if not secret.get("required", True):
                 continue
             key = str(secret.get("key") or "")
@@ -391,9 +506,15 @@ class BundleApplier:
     # ==================== 模块安装 ====================
 
     async def _install_modules(
-        self, manifest: dict, files: dict[str, bytes], account_id: str = ""
+        self,
+        manifest: dict,
+        files: dict[str, bytes],
+        account_id: str = "",
+        module_filter: set[str] | None = None,
     ) -> tuple[list[str], list[str], list[dict]]:
         """安装随包模块 → ``(新装, 升级, 依赖安装回执)``；不需要安装时返回空列表。
+
+        ``module_filter``：只安装这些插件；``None`` = 全部，空集合 = 一个都不装。
 
         成功安装/升级后写「模块来源台账」（模块页显示"来自预设 xxx"）。
         勾选了自动装依赖时，模块安装器会在回执里带 ``deps``（pip 结果），这里原样
@@ -401,7 +522,9 @@ class BundleApplier:
         （换机时可能只拷了配置和模块代码，依赖还缺）。
         """
         targets = [
-            module for module in manifest["requires"]["modules"] if module.get("source")
+            module for module in manifest["requires"]["modules"]
+            if module.get("source")
+            and (module_filter is None or module["name"] in module_filter)
         ]
         if not targets:
             return [], [], []
@@ -493,8 +616,17 @@ class BundleApplier:
         *,
         secrets: dict | None = None,
         reuse_provider_preset_id: str | None = None,
+        sections: Any = None,
+        modules: Any = None,
     ) -> dict:
         db = self.config_service.db
+        selected = normalize_sections(sections)
+        module_filter = (
+            None if modules is None
+            else {str(item).strip() for item in modules if str(item or "").strip()}
+        )
+        if "modules" not in selected:
+            module_filter = set()
         # 升级 diff：取该 (bundle, account) 最近一次 active 的 applied 快照与记账对象
         previous = None
         prev_row = await db.fetchone(
@@ -514,6 +646,7 @@ class BundleApplier:
         plan = self.build_plan(
             manifest, files, account_id=account_id, secrets=secrets, previous=previous,
             reuse_provider_preset_id=reuse_provider_preset_id,
+            sections=selected, modules=modules,
         )
         activation_id = f"act_{uuid.uuid4().hex[:12]}"
         now = int(time.time())
@@ -537,7 +670,7 @@ class BundleApplier:
         try:
             # 模块代码先落地：装不上就别写配置（避免"配置指向不存在的模块"）
             installed, upgraded, deps_log = await self._install_modules(
-                manifest, files, str(account_id)
+                manifest, files, str(account_id), module_filter
             )
             if installed or upgraded:
                 snapshot = dict(plan["snapshot"])
@@ -570,7 +703,18 @@ class BundleApplier:
                     ("superseded", bundle_id, str(account_id), "active", activation_id),
                 )
             if previous and previous.get("created"):
-                await self._cleanup_superseded(previous["created"], plan["snapshot"]["created"])
+                # 只清理"这次勾选内容"上一版本创建的对象：部分应用不能把
+                # 没勾的人格/模型当成被替代对象删掉
+                kind_sections = {
+                    "role_preset": "persona",
+                    "provider_preset": "provider",
+                    "provider_model": "provider",
+                }
+                superseded = [
+                    item for item in previous["created"]
+                    if kind_sections.get(str(item.get("kind"))) in selected
+                ]
+                await self._cleanup_superseded(superseded, plan["snapshot"]["created"])
         except Exception as e:  # noqa: BLE001 —— 失败要留痕并可回滚，不往上抛原始栈
             # apply_ops 自身是原子的：它抛错时内存/DB 已回到应用前，不必再"恢复"；
             # 只有"已写入但后续步骤失败（校验/记账）"才需要按快照回滚。

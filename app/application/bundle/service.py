@@ -78,6 +78,7 @@ class BundleService:
             builtin_modules={
                 name for name, item in self.module_catalog.items() if item.get("builtin")
             },
+            module_catalog=self.module_catalog,
         )
 
     async def import_bundle(self, data: bytes, *, accept_code: bool = True) -> dict:
@@ -125,6 +126,8 @@ class BundleService:
                 if item.get("missing_requirements")
             ],
             "has_code": bool(report["summary"].get("modules_bundled", 0)),
+            # 应用对话框据此展示"这次要应用哪些内容"的勾选面板（旧包没有这个字段）
+            "contents": report.get("contents") or {},
         }
         (target_dir / "meta.json").write_text(
             json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -166,26 +169,8 @@ class BundleService:
 
     # ==================== 导出 ====================
 
-    def export_account(
-        self,
-        account_id: str,
-        *,
-        bundle_id: str,
-        name: str,
-        version: str = "1.0.0",
-        description: str = "",
-        include_modules: bool = True,
-        module_filter: list[str] | None = None,
-    ) -> bytes:
-        """把某账号的当前配置导出成预设 zip（密钥被剥离成 secrets 声明）。
-
-        ``module_filter``：只导出这些模块（``None`` = 全部）。未列出的模块既不带配置
-        也不带代码，导入方保持原样。
-        """
-        bundle_id = self._safe_bundle_id(bundle_id)
-        selected = None if module_filter is None else {
-            str(item) for item in module_filter if str(item or "").strip()
-        }
+    def _account_materials(self, account_id: str) -> tuple[dict, dict | None, dict | None]:
+        """账号当前可导出的三块内容：Agent 配置 / 人格 / 模型连接（含模型池）。"""
         agent_config = self.config_service.get_module_config("agent", account_id) or {}
 
         persona = None
@@ -235,13 +220,69 @@ class BundleService:
                     "config": provider_config,
                     "models": models,
                 }
+        return agent_config, persona, provider
+
+    @staticmethod
+    def _persona_fields(persona: dict) -> list[str]:
+        """人格卡里"实际有内容"的部分（供导出面板展示勾选明细）。"""
+        fields: list[str] = []
+        if str(persona.get("text") or "").strip():
+            fields.append("提示词")
+        if str(persona.get("description") or "").strip():
+            fields.append("描述")
+        if persona.get("begin_dialogs"):
+            fields.append("预设对话")
+        if persona.get("tools") is not None:
+            fields.append("工具")
+        if persona.get("skills") is not None:
+            fields.append("技能")
+        return fields
+
+    def export_account(
+        self,
+        account_id: str,
+        *,
+        bundle_id: str,
+        name: str,
+        version: str = "1.0.0",
+        description: str = "",
+        include_modules: bool = True,
+        module_filter: list[str] | None = None,
+        sections: set[str] | None = None,
+    ) -> bytes:
+        """把某账号的当前配置导出成预设 zip（密钥被剥离成 secrets 声明）。
+
+        ``sections``：只导出这些内容分类（``persona`` / ``provider`` / ``agent`` /
+        ``modules``）；``None`` = 全部。未勾选的内容既不带配置也不带代码，导入方保持原样。
+        ``module_filter``：只导出这些模块（``None`` = 全部）。
+        """
+        bundle_id = self._safe_bundle_id(bundle_id)
+        selected = None if sections is None else {str(item) for item in sections}
+        include_persona = selected is None or "persona" in selected
+        include_provider = selected is None or "provider" in selected
+        include_agent = selected is None or "agent" in selected
+        if selected is not None and "modules" not in selected:
+            include_modules = False
+        selected_modules = None if module_filter is None else {
+            str(item) for item in module_filter if str(item or "").strip()
+        }
+        if not include_modules:
+            selected_modules = set()
+
+        agent_config, persona, provider = self._account_materials(account_id)
+        if not include_persona:
+            persona = None
+        if not include_provider:
+            provider = None
+        if not include_agent:
+            agent_config = {}
 
         module_configs: dict[str, dict] = {}
         module_packages: dict[str, bytes] = {}
         module_meta: dict[str, dict] = {}
         if include_modules:
             for module_name in self.installed_modules:
-                if selected is not None and module_name not in selected:
+                if selected_modules is not None and module_name not in selected_modules:
                     continue
                 config = self.config_service.get_module_config(module_name, account_id) or {}
                 authority = self.config_service.get_module_authority(module_name, account_id) or {}
@@ -289,15 +330,19 @@ class BundleService:
             module_meta=module_meta,
         )
 
-    def export_options(self, account_id: str) -> list[dict]:
-        """导出对话框的模块清单：名称 / 版本 / 是否内置 / 体积 / 当前启停。"""
-        options: list[dict] = []
+    def export_options(self, account_id: str) -> dict:
+        """导出面板的可勾选内容：人格 / 模型配置 / AI 设置 / 插件明细。
+
+        返回 ``{"persona", "provider", "agent", "modules"}``；导入预检报告里的
+        ``contents`` 用同一形状，前端可以复用同一个勾选面板。
+        """
+        modules: list[dict] = []
         for module_name, version in self.installed_modules.items():
             entry = self.module_catalog.get(module_name) or {}
             builtin = bool(entry.get("builtin", True))
             directory = entry.get("path")
             authority = self.config_service.get_module_authority(module_name, account_id) or {}
-            options.append({
+            modules.append({
                 "name": module_name,
                 "display_name": str(entry.get("display_name") or module_name),
                 "version": str(entry.get("version") or version or ""),
@@ -308,8 +353,32 @@ class BundleService:
                 ),
                 "size": 0 if builtin or not directory else dir_size(directory),
             })
-        options.sort(key=lambda item: (item["builtin"], item["name"]))
-        return options
+        modules.sort(key=lambda item: (item["builtin"], item["name"]))
+
+        agent_config, persona, provider = self._account_materials(account_id)
+        return {
+            "persona": {
+                "available": bool(persona),
+                "name": str((persona or {}).get("name") or ""),
+                "fields": self._persona_fields(persona or {}),
+            },
+            "provider": {
+                "available": bool(provider),
+                "preset_name": str((provider or {}).get("preset_name") or ""),
+                "provider": str((provider or {}).get("provider") or ""),
+                "api_base": str((provider or {}).get("api_base") or ""),
+                "has_secret": bool((provider or {}).get("api_key")),
+                "models": [
+                    {"model": item.get("model", ""), "enabled": bool(item.get("enabled", True))}
+                    for item in (provider or {}).get("models") or []
+                ],
+            },
+            "agent": {
+                "available": bool(agent_config),
+                "key_count": len(agent_config),
+            },
+            "modules": modules,
+        }
 
     # ==================== 应用到账号 / 回滚（P3） ====================
 
@@ -333,12 +402,19 @@ class BundleService:
         *,
         secrets: dict | None = None,
         reuse_provider_preset_id: str | None = None,
+        sections: set[str] | None = None,
+        modules: list[str] | None = None,
     ) -> dict:
-        """把预设应用到某账号（事务写 + 快照，失败自动回滚）。"""
+        """把预设应用到某账号（事务写 + 快照，失败自动回滚）。
+
+        ``sections``：只应用这些内容分类；``None`` = 全部。
+        ``modules``：只应用这些插件的配置；``None`` = 全部。
+        """
         _, manifest, files = self._load_parts(bundle_id)
         return await self.applier.apply(
             bundle_id, str(account_id), manifest, files, secrets=secrets or {},
             reuse_provider_preset_id=reuse_provider_preset_id,
+            sections=sections, modules=modules,
         )
 
     async def rollback(self, activation_id: str, *, keep_modules: bool = False) -> dict:
