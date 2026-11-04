@@ -5,7 +5,8 @@
 - 用「参与度」做**本地规则门**，低等级消息根本不发请求（控制 QQ 场景成本）；
 - 通过门的消息才进入 LLM，最终是否发言由系统提示词里的参与度约定 + 模型决定
   （沉默 = 不调用发送工具）；
-- 预算保护：每账号 5 分钟窗口内最多 60 次请求 / 10M tokens（上限不变，窗口收窄一半）。
+- 预算保护：每账号 5 分钟窗口内最多 60 次请求 / 10M tokens；执行时按 30 秒粒度
+  折算（每 30 秒最多「5 分钟上限 ÷ 10」），避免前 30 秒花光 5 分钟额度后长时间沉默。
 """
 
 from __future__ import annotations
@@ -21,8 +22,14 @@ from app.core.logger import logger
 LEVELS: tuple[str, ...] = ("very_low", "low", "medium", "high")
 DEFAULT_LEVEL = "low"
 
-#: 预算窗口：5 分钟（请求/token 上限数值不变，只把统计窗口从 10 分钟收窄）
+#: 预算窗口：5 分钟（面板里配置的请求/token 上限就是这个窗口的总量）
 BUDGET_WINDOW_SECONDS = 300
+#: 执行粒度：30 秒。5 分钟上限按时间比例折算到该粒度执行（÷10），
+#: 让请求节奏变细：任意 30 秒都只能用掉 5 分钟额度的 1/10，
+#: 而不是开局 30 秒就把 5 分钟额度打满、之后 4 分半只能沉默。
+BUDGET_STEP_SECONDS = 30
+#: 5 分钟窗口 ÷ 30 秒粒度 = 折算系数（10）
+BUDGET_STEPS_PER_WINDOW = BUDGET_WINDOW_SECONDS // BUDGET_STEP_SECONDS
 DEFAULT_MAX_REQUESTS = 60
 DEFAULT_MAX_TOKENS = 10_000_000
 
@@ -34,8 +41,33 @@ DEFAULT_MAX_TOKENS = 10_000_000
 # ---------------- 预算 ----------------
 
 
+def step_quota(limit: int) -> float:
+    """把 5 分钟上限折算成 30 秒粒度额度（不足 1 时按 1 计，避免完全饿死）。
+
+    ``60`` → ``6``、``10_000_000`` → ``1_000_000``；低上限（如 5）折算后不足 1，
+    仍给 1 次/30 秒的**尝试**机会，但 5 分钟总量仍由 ``Budget.allow`` 的
+    总量闸门兜住，所以不会因此放大预算。
+    """
+    try:
+        value = float(limit)
+    except (TypeError, ValueError):
+        return 1.0
+    if value <= 0:
+        return 0.0
+    return max(1.0, value / BUDGET_STEPS_PER_WINDOW)
+
+
 class Budget:
-    """每账号的 5 分钟请求/token 预算。"""
+    """每账号的 5 分钟请求/token 预算，按 30 秒粒度执行。
+
+    两级闸门：
+
+    1. **总量**：5 分钟窗口内的用量 < 面板配置值（上限不变）；
+    2. **节奏**：任意 30 秒窗口内的用量 < 配置值 ÷ 10（``step_quota``）。
+
+    第 2 级不改变总预算，只改变「怎么花」：把 5 分钟额度摊到每个 30 秒，
+    突发上限从「一次 60 次」降到「一次 6 次」（默认值换算）。
+    """
 
     def __init__(self) -> None:
         self.requests: deque[float] = deque()
@@ -47,11 +79,34 @@ class Budget:
         while self.tokens and now - self.tokens[0][0] > BUDGET_WINDOW_SECONDS:
             self.tokens.popleft()
 
+    def _since(self, now: float, window: int) -> tuple[int, int]:
+        """最近 ``window`` 秒内的（请求数, token 数）；deque 按时间递增。"""
+        requests = sum(1 for ts in self.requests if now - ts <= window)
+        tokens = sum(t for ts, t in self.tokens if now - ts <= window)
+        return requests, tokens
+
+    def usage(self, now: float | None = None) -> dict[str, int]:
+        """当前用量快照：5 分钟总量 + 最近 30 秒的折算用量。"""
+        now = time.time() if now is None else now
+        self._trim(now)
+        step_requests, step_tokens = self._since(now, BUDGET_STEP_SECONDS)
+        return {
+            "requests": len(self.requests),
+            "tokens": sum(t for _, t in self.tokens),
+            "step_requests": step_requests,
+            "step_tokens": step_tokens,
+        }
+
     def allow(self, max_requests: int, max_tokens: int) -> bool:
         now = time.time()
         self._trim(now)
-        used_tokens = sum(t for _, t in self.tokens)
-        return len(self.requests) < max_requests and used_tokens < max_tokens
+        step_requests, step_tokens = self._since(now, BUDGET_STEP_SECONDS)
+        return (
+            len(self.requests) < max_requests
+            and sum(t for _, t in self.tokens) < max_tokens
+            and step_requests < step_quota(max_requests)
+            and step_tokens < step_quota(max_tokens)
+        )
 
     def record(self, tokens: int = 0) -> None:
         """记一次请求（顺带记 token，若已知）。"""
@@ -239,6 +294,8 @@ def gate(runtime: Any, event: Any, level: str) -> GateResult:
 
 
 __all__ = [
+    "BUDGET_STEPS_PER_WINDOW",
+    "BUDGET_STEP_SECONDS",
     "BUDGET_WINDOW_SECONDS",
     "Budget",
     "DEFAULT_LEVEL",
@@ -251,4 +308,5 @@ __all__ = [
     "cooldown_ok",
     "gate",
     "mark_request",
+    "step_quota",
 ]

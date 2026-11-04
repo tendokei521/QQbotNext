@@ -70,8 +70,8 @@ DEFAULT_LLM_CONFIG: dict = {
     # 回复模式：legacy=条件触发；participation=全量观察+参与度
     "reply_mode": "legacy",
     "participation_level": "low",
-    "participation_max_requests": 60,    # 5 分钟窗口请求上限
-    "participation_max_tokens": 10000000,  # 5 分钟窗口 token 上限
+    "participation_max_requests": 60,    # 5 分钟窗口请求上限（执行按 30 秒粒度折算：每 30 秒 ≤ 6 次）
+    "participation_max_tokens": 10000000,  # 5 分钟窗口 token 上限（执行按 30 秒粒度折算：每 30 秒 ≤ 100 万）
     "participation_cooldown_seconds": 3,  # 同群两次请求最小间隔
     "max_message_length": 1000,  # 单轮原文字符上限（组装标记不计入，先截原文再组装）
     # 流式输出

@@ -261,7 +261,7 @@ SCHEMA = {
     },
     "participation_max_requests": {
         "type": "number", "label": "5 分钟请求上限",
-        "description": "参与度模式下的预算保护，超出后只记录不请求",
+        "description": "参与度模式下的预算保护，超出后只记录不请求；执行粒度 30 秒（每 30 秒最多上限的 1/10，如 60 次 ≈ 每 30 秒 6 次）",
         "default": 60, "min": 1, "max": 1000, "group": "group_advanced",
     },
     "participation_cooldown_seconds": {
@@ -271,7 +271,7 @@ SCHEMA = {
     },
     "participation_max_tokens": {
         "type": "number", "label": "5 分钟 token 上限",
-        "description": "参与度模式下的 token 预算，超出后只记录不请求",
+        "description": "参与度模式下的 token 预算，超出后只记录不请求；执行粒度 30 秒（每 30 秒最多上限的 1/10，如 1000 万 ≈ 每 30 秒 100 万）",
         "default": 10000000, "min": 1000, "max": 100000000, "group": "group_advanced",
     },
     "structured_assembly": {

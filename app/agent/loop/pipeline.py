@@ -512,7 +512,13 @@ class LlmPipeline:
         观察结果决定 ``user_recorded``：只有真的写进历史才标记，否则由
         `prompt_prep` 的正常路径补写（旧实现无条件置 True → 冷却期消息永久丢失）。
         """
-        from app.agent.participation import budget_of, cooldown_ok, gate, mark_request
+        from app.agent.participation import (
+            budget_of,
+            cooldown_ok,
+            gate,
+            mark_request,
+            step_quota,
+        )
         from app.agent.reply.observer import observe_group_message
 
         observed, _reason = await observe_group_message(self.runtime, ctx.event, config)
@@ -570,17 +576,23 @@ class LlmPipeline:
             )
             return False
 
-        # ③ 预算：5 分钟窗口的请求数 / token（token 由 usage 回填，见 A-12）
+        # ③ 预算：5 分钟总量 + 30 秒折算额度（token 由 usage 回填，见 A-12）
         budget = budget_of(self.runtime)
         max_req = int(config.get("participation_max_requests", 60) or 60)
         max_tok = int(config.get("participation_max_tokens", 10000000) or 10000000)
         if not budget.allow(max_req, max_tok):
+            usage = budget.usage()
             log_skip(
                 account_id,
                 "participation_budget",
-                f"5 分钟窗口已用 {len(budget.requests)} 次 / {max_req} 次请求、"
-                f"{sum(t for _, t in budget.tokens)} / {max_tok} tokens（只记录不请求）",
-                hint="调高「5 分钟请求上限 / token 上限」，或等窗口滚动后再试",
+                f"5 分钟窗口已用 {usage['requests']}/{max_req} 次请求、"
+                f"{usage['tokens']}/{max_tok} tokens；最近 30 秒已用 "
+                f"{usage['step_requests']}/{step_quota(max_req):g} 次请求、"
+                f"{usage['step_tokens']}/{step_quota(max_tok):g} tokens（只记录不请求）",
+                hint=(
+                    "预算按 30 秒粒度执行：每 30 秒最多 5 分钟上限的 1/10，"
+                    "等窗口滚动后再试；确需更多请求请调高「5 分钟请求上限 / token 上限」"
+                ),
                 level="warning",
                 interval_s=120,
             )

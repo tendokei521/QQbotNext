@@ -132,7 +132,8 @@ def _record(
         user_id=ctx.user_id,
     )
     # 参与度模式的 token 预算：这里是**所有** provider 调用的唯一收口（流式/非流式/
-    # 回退链/压缩摘要都经过），所以"该账号 5 分钟花掉多少 token"只有这里算得准。
+    # 回退链/压缩摘要都经过），所以"该账号 5 分钟花掉多少 token"只有这里算得准；
+    # 预算按 30 秒粒度执行（见 app/agent/participation.py 的 step_quota）。
     _charge_participation_budget(ctx.bot_id, usage)
 
 
