@@ -116,3 +116,43 @@ def test_sender_name_goes_to_message_name_field_not_content():
     msg = build_user(req)[0]
     assert msg["name"] == "老师，今年的学费也是一次性交吗"
     assert "老师，今年的学费也是一次性交吗" not in str(msg["content"])
+
+
+# ---------- 本轮消息的 message_id 字段（2026-11-04） ----------
+
+
+def test_current_turn_message_carries_message_id_field_like_history():
+    """本轮（最后一条 user）消息也要有独立 ``message_id`` 字段，与历史条目同口径。
+
+    回归（线上）：历史条目由 ``with_message_ids`` 贴上 ``message_id`` 字段，本轮
+    消息却只有正文头部的 ``[time=..,message_id=..]``：同一个 id 在请求里有两种
+    形状，负 id 的消息在凭证鉴权时被判"不是数字 id"，模型只能从占位文本里抄。
+    """
+    from app.agent.assembly.assembler import PromptAssembler, PromptRequest
+
+    event = SimpleNamespace(message_id="-1208685782")
+    req = PromptRequest(
+        event=event,
+        config={"system_prompt": "你是助手", "prompt_preset": "chat"},
+        user_text="[time=2026-11-04 19:40,message_id=-1208685782][sender:id=1]在吗",
+    )
+    messages = PromptAssembler().build(req)
+    last = messages[-1]
+    assert last["role"] == "user"
+    assert last["message_id"] == "-1208685782"
+    # 正文里的占位标记保留（模型读的是正文，字段给框架/调试视图校验）
+    assert "message_id=-1208685782" in last["content"]
+
+
+def test_current_turn_without_event_has_no_message_id_field():
+    """无事件（主动消息 / 定时任务）没有"本轮消息 id"可贴：保持原样，不造字段。"""
+    from app.agent.assembly.assembler import PromptAssembler, PromptRequest
+
+    messages = PromptAssembler().build(
+        PromptRequest(
+            config={"system_prompt": "你是助手", "prompt_preset": "chat"},
+            user_text="在吗",
+        )
+    )
+    assert messages[-1]["role"] == "user"
+    assert "message_id" not in messages[-1]

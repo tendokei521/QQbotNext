@@ -432,7 +432,8 @@ class PromptAssembler:
         messages = place_images(messages, req)
         final = sanitize(messages, req)
         self._remember_blocks(req, built, final)
-        return apply_speech_protocol(final, req)
+        final = apply_speech_protocol(final, req)
+        return attach_turn_message_id(final, req)
 
     @staticmethod
     def _remember_blocks(req: PromptRequest, built: BuiltBlocks, final: list[dict]) -> None:
@@ -517,6 +518,30 @@ def apply_speech_protocol(messages: list[dict], req: PromptRequest) -> list[dict
         else:
             continue
         return messages
+    return messages
+
+
+def attach_turn_message_id(messages: list[dict], req: PromptRequest) -> list[dict]:
+    """给本轮 user 消息补 ``message_id`` **字段**，与历史条目同一口径。
+
+    为什么需要：历史条目的 ``message_id`` 由 ``with_message_ids`` 作为独立字段贴上
+    （群聊环境记录的双源去重、引用校验都按这个字段比对），而本轮消息此前只有正文
+    头部的 ``[time=..,message_id=..]`` 文本标记——同一个 id 在请求里有两种形状，
+    对"最后一条消息"来说，它只存在于占位符文本里，不是可校验的字段。
+
+    QQ（NT / OneBot 实现）的 message_id 是 int32，**可以是负数**（如 ``-1208685782``）；
+    原样以字符串写入，不做数字化（不同协议端可能给非纯数字 id）。
+
+    无事件（主动消息 / 定时任务 / 库层直调）或事件没有 id 时保持原样。
+    """
+    event = getattr(req, "event", None)
+    mid = str(getattr(event, "message_id", "") or "").strip() if event is not None else ""
+    if not mid:
+        return messages
+    for msg in reversed(messages):
+        if isinstance(msg, dict) and msg.get("role") == "user":
+            msg["message_id"] = mid
+            break
     return messages
 
 
@@ -784,6 +809,7 @@ __all__ = [
     "PromptRequest",
     "apply_post_assemble",
     "apply_speech_protocol",
+    "attach_turn_message_id",
     "build_all_blocks",
     "build_background",
     "build_behavior",
