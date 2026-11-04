@@ -48,7 +48,7 @@
 | `prompt_preset` | `chat` | **二选一提示词方案**：`chat` 群友 / `roleplay` 扮演。决定 L1 规则文案，不改人格 |
 | `persona_preset_id` | `""` | **人格唯一来源**；`system_prompt` 只是兜底副本（启动时对齐） |
 | `session_timeout` | `60` | 无消息多久结束一轮会话（秒） |
-| `history_rounds` | `50` | 带多少轮历史给模型 |
+| `history_rounds` | `25` | 带多少轮历史给模型 |
 | `history_mode` | `recent` | `recent` 只带最近若干条（更省，旧内容模型可自己查）；`all` 全带 |
 | `history_recent_messages` | `12` | `recent` 模式的条数 |
 | `max_message_length` | `200` | 单条消息字数上限（长回复会被切分） |

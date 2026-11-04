@@ -470,7 +470,7 @@ class TaskScheduler:
             history_text = await fetch_group_online_history(
                 self.bot,
                 entry.target,
-                count=int(config.get("history_rounds", 50)),
+                count=int(config.get("history_rounds", 25)),
                 self_ids={str(self.bot_id), str(getattr(self.bot, "bot_id", "") or "")},
                 resolve_at=bool(config.get("fetch_at_nickname", True)),
                 mark_unresolved=bool(config.get("context_expand_enable", False)),

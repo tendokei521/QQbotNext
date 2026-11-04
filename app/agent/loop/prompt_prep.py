@@ -163,7 +163,7 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
 
     provider_chain = _provider_chain_for(runtime)
     modalities = _modalities_for_chain(provider_chain)
-    history_rounds = config.get("history_rounds", 50)
+    history_rounds = config.get("history_rounds", 25)
     _meta_flags = _history_meta_flags(runtime)
     # 内联预算（单张 MB 上限、长边上限）：落盘上限与"能塞进请求体"的上限是两把尺子，
     # 10MB 原图 base64 后接近 13MB，多数网关直接 400，所以这里先缩再发。

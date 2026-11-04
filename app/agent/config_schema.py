@@ -231,7 +231,7 @@ SCHEMA = {
     },
     "history_rounds": {
         "type": "number", "label": "保留多少轮对话", "description": "最多带多少轮对话给模型",
-        "default": 50, "min": 5, "max": 100, "group": "group_session",
+        "default": 25, "min": 5, "max": 100, "group": "group_session",
     },
     "context_compress_enable": {
         "type": "boolean", "label": "启用上下文压缩", "description": "较早的对话压成摘要，保留最近原文",

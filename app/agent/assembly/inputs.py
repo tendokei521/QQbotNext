@@ -32,7 +32,7 @@ async def collect_history_materials(
     from app.agent.assembly.compress import maybe_compress_context
     from app.agent.context.group import format_history_for_llm
 
-    rounds = int(config.get("history_rounds", 50) or 50)
+    rounds = int(config.get("history_rounds", 25) or 25)
     # 取全量再压缩：``maybe_compress_context`` 的判据是 ``len(history) > history_rounds``，
     # 而这里此前先 ``get_history(limit=rounds)`` 把条数**削到 rounds 以内**再传进去 ——
     # 条件永远不成立，压缩分支是彻底的死代码（主动消息/定时任务的长会话从不压缩，

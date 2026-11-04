@@ -208,7 +208,7 @@ class ProactiveManager:
             history_text = await fetch_group_online_history(
                 self.bot,
                 target,
-                count=int(self.module.config.get("history_rounds", 50)),
+                count=int(self.module.config.get("history_rounds", 25)),
                 self_ids={str(self.module.bot_id), str(getattr(self.bot, "bot_id", "") or "")},
                 resolve_at=bool(self.module.config.get("fetch_at_nickname", True)),
                 mark_unresolved=bool(self.module.config.get("context_expand_enable", False)),

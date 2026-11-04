@@ -57,7 +57,7 @@ DEFAULT_LLM_CONFIG: dict = {
     "group_enable": False,
     "private_enable": True,
     "session_timeout": 60,
-    "history_rounds": 50,
+    "history_rounds": 25,
     # Q2 历史按需化：recent = 只内联最近 N 条（更早的用 search_history 取回）；
     # full = 旧行为（最多 history_rounds 条全量内联）。
     "history_mode": "recent",
