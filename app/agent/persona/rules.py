@@ -33,7 +33,7 @@ from typing import Any
 from app.core.logger import logger
 
 #: 参与度档位（与 `app/agent/participation.LEVELS` 同源；这里只用于取值归一化）
-_PARTICIPATION_LEVELS: tuple[str, ...] = ("very_low", "low", "medium", "high", "very_high")
+_PARTICIPATION_LEVELS: tuple[str, ...] = ("very_low", "low", "medium", "high")
 
 # ==================== 能力探测 ====================
 
@@ -113,7 +113,7 @@ def detect_caps(
     caps["outbound_directive"] = bool(_cfg(config, "outbound_directive_enable", True))
     # 引用/@ 的输出通道：工具通道与行内指令通道二选一
     caps["quote_channel"] = speech_by_tool or caps["outbound_directive"]
-    # 参与度：**只认新键** `participation_level`（5 档，成本门用的同一份值）。
+    # 参与度：**只认新键** `participation_level`（4 档，成本门用的同一份值）。
     # 旧键 `participation`（3 档、默认 medium）已随 llm_prompt 精简退役——两套"参与度"
     # 并存时会出现「人格段说能接就接、成本门却根本不请求」的自相矛盾（线上实测过）。
     raw_level = str(_cfg(config, "participation_level", "medium") or "medium").strip().lower()

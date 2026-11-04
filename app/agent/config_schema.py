@@ -250,14 +250,13 @@ SCHEMA = {
     },
     "participation_level": {
         "type": "select", "label": "参与度",
-        "description": "发言倾向：极低=仅@；低=只接相关；中=延续话题；高=参与讨论；超高=几乎都参与",
+        "description": "发言倾向：极低=仅@；低=只接相关；中=延续话题；高=参与讨论",
         "default": "low", "group": "group_advanced",
         "options": {
             "very_low": "极低（只接与自己相关的）",
             "low": "低（提到自己才有，模型判断）",
             "medium": "中（延续正在聊的话题）",
             "high": "高（参与可讨论的话题）",
-            "very_high": "超高（几乎都参与）",
         },
     },
     "participation_max_requests": {

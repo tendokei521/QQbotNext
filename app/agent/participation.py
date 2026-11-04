@@ -18,7 +18,7 @@ from typing import Any
 from app.core.logger import logger
 
 #: 参与度等级（从低到高）
-LEVELS: tuple[str, ...] = ("very_low", "low", "medium", "high", "very_high")
+LEVELS: tuple[str, ...] = ("very_low", "low", "medium", "high")
 DEFAULT_LEVEL = "low"
 
 #: 预算窗口：5 分钟（请求/token 上限数值不变，只把统计窗口从 10 分钟收窄）
@@ -235,8 +235,6 @@ def gate(runtime: Any, event: Any, level: str) -> GateResult:
         return GateResult(True, "at_or_reply" if (at_me or reply_me) else "level_medium_model", at_me, reply_me)
     if level == "high":
         return GateResult(True, "level_high", at_me, reply_me)
-    if level == "very_high":
-        return GateResult(True, "level_very_high", at_me, reply_me)
     return GateResult(False, "unknown_level", at_me, reply_me)
 
 
