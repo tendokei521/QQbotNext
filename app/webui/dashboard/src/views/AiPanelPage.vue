@@ -117,7 +117,6 @@ const PARTICIPATION_ITEMS = [
   { title: '低（提到自己才有，模型判断）', value: 'low' },
   { title: '中（延续正在聊的话题）', value: 'medium' },
   { title: '高（参与可讨论的话题）', value: 'high' },
-  { title: '超高（几乎都参与）', value: 'very_high' },
 ]
 const participationMaxRequests = computed<number>({
   get: () => Number(agent.draft.participation_max_requests ?? 60),
