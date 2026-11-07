@@ -77,3 +77,12 @@ def test_private_message_meta_uses_private_convention():
     assert "当前群聊" not in text
     assert "auth_message_id" not in text
     assert "私聊里没有群聊" in text
+
+
+def test_private_skips_group_message_credential_section():
+    """私聊不挂消息凭证，也不该出现「哪条群消息授权了你」的说明。"""
+    from app.agent.prompts.sections import build_onebot_auth
+
+    tools = {"delete_msg", "set_group_kick"}
+    assert build_onebot_auth(_req(is_private=True, tools=tools)) == []
+    assert build_onebot_auth(_req(is_private=False, tools=tools)) != []

@@ -187,7 +187,12 @@ def build_onebot_auth(req: Any) -> list[dict]:
 
     只有本轮工具列表里真的存在 high/critical 的 OneBot 工具时才出现——
     模型没有这类工具时，谈凭证只会增加噪音。
+
+    **私聊不出现**：私聊不挂消息凭证（`auth_needed` 只在群聊成立），
+    这段文案讲的是「哪条群消息授权了你」，放进私聊只会让模型去找不存在的群消息。
     """
+    if bool(getattr(req, "is_private", False)):
+        return []
     tools = getattr(req, "available_tools", None)
     if not tools:
         return []
