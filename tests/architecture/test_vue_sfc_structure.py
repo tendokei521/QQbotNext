@@ -36,7 +36,7 @@ _HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
 _SETUP_ATTR = re.compile(r"\bsetup\b")
 
 #: 本次事故的三份文件（回归点）
-TOOL_PAGES = ("SystemToolsPage.vue", "McpToolsPage.vue", "ModuleToolsPage.vue")
+TOOL_PAGES = ("SystemToolsPage.vue", "ModuleToolsPage.vue")
 
 
 def _vue_files() -> list[Path]:

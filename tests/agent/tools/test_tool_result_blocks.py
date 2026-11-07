@@ -349,6 +349,9 @@ class _LogSink:
     def info(self, msg: str) -> None:
         self.lines.append(f"[{self.tag}] {msg}")
 
+    def debug(self, msg: str) -> None:
+        self.lines.append(f"[{self.tag}] DEBUG {msg}")
+
     def warning(self, msg: str) -> None:
         self.lines.append(f"[{self.tag}] WARNING {msg}")
 
