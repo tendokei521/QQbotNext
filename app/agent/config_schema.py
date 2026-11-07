@@ -245,7 +245,7 @@ SCHEMA = {
     },
     "reply_mode": {
         "type": "select", "label": "回复模式（仅群聊）",
-        "description": "仅对群聊生效；私聊始终是普通输出（文本即回复）。条件触发=新消息打断旧回合，最新优先；参与度=同群只跑一轮，新消息只记录",
+        "description": "仅群聊生效；私聊始终普通输出。条件触发=最新优先；参与度=同群只跑一轮",
         "default": "legacy", "group": "group_advanced",
         "options": {"legacy": "条件触发（旧版）", "participation": "参与度驱动（新版）"},
     },
