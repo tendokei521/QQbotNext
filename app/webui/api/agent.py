@@ -111,9 +111,10 @@ async def agent_config(
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"账号不存在或未装配运行时: {bot_id}")
-    # 兼容旧格式：若 agent 配置里保存了旧 system_prompt，自动转为角色预设
-    stored_config = config_service.get_module_config("agent", bot_id) or {}
-    await role_preset_service.ensure_legacy_prompt(bot_id, stored_config.get("system_prompt"))
+    # 兼容旧格式：只有「用户真的写过旧人设、且没绑定人格预设」的账号才迁移
+    # （判断全在服务内：绑定预设/内置默认值/已迁移过的账号一律跳过，
+    # 否则每次打开设置页都会凭空多出一份「XX角色设定」）。
+    await role_preset_service.ensure_legacy_prompt(bot_id)
     perm = runtime.config.permission
     raw_config = dict(runtime.config.raw_config)
     for key in LEGACY_LLM_CONNECTION_KEYS:

@@ -79,7 +79,7 @@ class _ConfigService:
 
 
 class _RolePresetService:
-    async def ensure_legacy_prompt(self, bot_id, prompt):
+    async def ensure_legacy_prompt(self, bot_id):
         return None
 
     def list_presets(self):

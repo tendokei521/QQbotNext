@@ -60,6 +60,13 @@ def with_extended_defaults(preset: dict | None) -> dict | None:
 class RolePresetService:
     """角色预设 CRUD。"""
 
+    #: 旧人设自动迁移的一次性标记前缀（kv，按账号）。迁移完成/判定不需要迁移后写一次，
+    #: 用户把迁移出来的预设删掉后，下次读配置不会又重建一份。
+    LEGACY_MIGRATED_KV_PREFIX = "legacy_role_preset_migrated:"
+
+    #: 自动迁移创建的角色预设使用的内部描述（同名预设据此区分"是我们建的"还是用户建的）
+    LEGACY_PRESET_DESCRIPTION = "自动兼容保存的历史角色设定"
+
     def __init__(self, config_service: ConfigService) -> None:
         self.config_service = config_service
 
@@ -126,27 +133,78 @@ class RolePresetService:
         logger.info(f"[RolePreset] 更新角色 {role_id}")
         return dict(updated)
 
-    async def ensure_legacy_prompt(self, bot_id: Any, system_prompt: str | None) -> dict | None:
-        """兼容旧格式：把 Agent 配置里已有的 system_prompt 自动保存为角色预设。
+    async def ensure_legacy_prompt(self, bot_id: Any) -> dict | None:
+        """兼容旧格式：把「用户自己写过的旧 system_prompt」一次性保存成角色预设。
 
-        预设名称固定为 f"{bot_id}角色设定"，幂等：
-        - 不存在则创建；
-        - 已存在但内容不一致则更新；
-        - 内容一致则原样返回。
+        ## 迁移条件（2026-11-07 收窄）
+
+        此前这里只看"账号里有没有 system_prompt"，而旧的保存路径会把内置默认值落成
+        显式键、人格副本也会被同步写入，于是**每次打开 AI 设置都会凭空多出一份**
+        ``{bot_id}角色设定``；用户删掉后下次读配置又重建。现在只在确实存在旧式人设时迁移：
+
+        1. 账号**没有**绑定人格预设（``persona_preset_id`` 为空）——绑定了预设时人设来自
+           预设，账号里的 ``system_prompt`` 只是代码维护的兜底副本，迁移它只会多一份重复；
+        2. 内容**不是**内置默认值——默认值是旧保存路径顺手写进去的，不是用户写的人设；
+        3. 该账号还没迁移过（kv 标记）——迁移完写标记，用户删掉预设后不会再出现。
+
+        同名预设若已存在且不是本迁移创建的（描述不是内部标记），**不动它**，避免覆盖用户数据。
+
+        Returns:
+            迁移/找到的角色预设；不需要迁移或已迁移过时返回 ``None``。
         """
-        prompt = str(system_prompt or "").strip()
-        if not prompt:
+        stored = self.config_service.get_module_config("agent", bot_id) or {}
+        if str(stored.get("persona_preset_id") or "").strip():
             return None
+        prompt = str(stored.get("system_prompt") or "").strip()
+        if not prompt or prompt == self._default_system_prompt():
+            return None
+
+        marker = f"{self.LEGACY_MIGRATED_KV_PREFIX}{bot_id}"
+        if await self._kv_flag(marker):
+            return None
+
         target_name = f"{bot_id}角色设定"
         existing = next((p for p in self.list_presets() if p.get("name") == target_name), None)
         if existing is not None:
+            if existing.get("description") != self.LEGACY_PRESET_DESCRIPTION:
+                # 用户自己建的同名预设：不覆盖、也不重复创建，标记为已处理即可。
+                await self._set_kv_flag(marker)
+                return None
             if existing.get("system_prompt") != prompt:
-                return await self.update_preset(existing["id"], {
+                result = await self.update_preset(existing["id"], {
                     "name": target_name,
                     "system_prompt": prompt,
                 })
-            return existing
-        return await self.create_preset(target_name, "自动兼容保存的历史角色设定", prompt)
+            else:
+                result = existing
+        else:
+            result = await self.create_preset(
+                target_name, self.LEGACY_PRESET_DESCRIPTION, prompt
+            )
+        await self._set_kv_flag(marker)
+        return result
+
+    @staticmethod
+    def _default_system_prompt() -> str:
+        """内置默认人设（旧保存路径可能把它落成显式键，不算用户写的人设）。"""
+        from app.agent.config import DEFAULT_LLM_CONFIG
+
+        return str(DEFAULT_LLM_CONFIG.get("system_prompt") or "").strip()
+
+    async def _kv_flag(self, key: str) -> bool:
+        """读迁移标记（kv 读失败按"没迁移过"处理，不阻断页面加载）。"""
+        try:
+            return bool(await self.config_service.get_kv(key, ""))
+        except Exception as e:  # noqa: BLE001 —— 迁移标记是旁路，读不到只影响去重
+            logger.debug(f"[RolePreset] 读取迁移标记失败（按未迁移处理）: {e}")
+            return False
+
+    async def _set_kv_flag(self, key: str) -> None:
+        """写迁移标记（失败不影响已经完成的迁移，最多下次重复一次同样的判定）。"""
+        try:
+            await self.config_service.set_kv(key, "1")
+        except Exception as e:  # noqa: BLE001 —— 标记写失败只影响"删了不再长"的去重
+            logger.debug(f"[RolePreset] 写入迁移标记失败（已忽略）: {e}")
 
     async def delete_preset(self, role_id: str) -> None:
         deleted = await self.config_service.delete_role_preset(role_id)
