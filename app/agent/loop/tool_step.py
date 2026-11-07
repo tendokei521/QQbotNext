@@ -163,6 +163,9 @@ class StepResult:
     usage: dict = field(default_factory=dict)
     #: 让本轮提前收尾的工具名（``ToolResult.concludes_turn``；空串 = 没发生）
     concluded_by: str = ""
+    #: 本回合（跨轮累计）是否已经真正调用过 ``send_message``。
+    #: 正文兜底只在这份记录为 False 时才解析——已经发过言的回合不该再被正文补一刀。
+    send_message_called: bool = False
 
 
 def accumulate_tool_call(slot_map: dict, tc: dict) -> None:
@@ -242,12 +245,24 @@ def _append_reasoning_text(result: Any, text: Any) -> None:
     result.reasoning_text = merged[:4000]
 
 
-def _recover_text_tool_calls(req: StepRequest, text: str, round_index: int) -> list[dict]:
+def _recover_text_tool_calls(
+    req: StepRequest,
+    text: str,
+    round_index: int,
+    *,
+    already_called_send_message: bool,
+) -> list[dict]:
     """发言通道兜底：把正文里写出的工具调用还原成真正的调用。
 
-    只在"正文=思考 + 开关打开"时生效（两条 runner 共用这一处判断）：
-    文本即回复的通道里正文已经发出去了，再按工具执行一次就是重复发送。
+    只在"正文=思考 + 开关打开 + 本回合还没真正发过言"时生效（两条 runner 共用这一处判断）：
+
+    - 文本即回复的通道里正文已经发出去了，再按工具执行一次就是重复发送；
+    - 本回合只要已经调用过 ``send_message``（模型自己调的，或前面轮次由正文还原的），
+      后续轮次的正文一律不再解析——模型可能只是又照抄了一遍历史写法，
+      再补一次就是同一句话发两遍。
     """
+    if already_called_send_message:
+        return []
     if not (req.text_tool_call_fallback and req.text_as_thinking):
         return []
     recovered = extract_text_tool_calls(text, id_prefix=f"text_call_r{round_index}")
@@ -259,6 +274,15 @@ def _recover_text_tool_calls(req: StepRequest, text: str, round_index: int) -> l
             f"[Speech] 正文里出现了工具调用写法（{names}），已按工具调用执行"
         )
     return recovered
+
+
+def _note_send_message_called(result: StepResult, calls: list[dict]) -> None:
+    """记下"本回合发过言"（真实调用与正文还原的调用都算）。"""
+    for call in calls or ():
+        function = call.get("function") or {}
+        if str(function.get("name") or "") == "send_message":
+            result.send_message_called = True
+            return
 
 
 async def iter_stream_step(req: StepRequest, result: StepResult) -> AsyncIterator[tuple[str, Any]]:
@@ -399,8 +423,14 @@ async def _drive_stream_rounds(
         if not tool_calls:
             # 发言通道兜底：模型可能把 `[tool_call:send_message]{...}` 当普通正文写出来，
             # 此时正文只是思考（不会发出去），这里按真正的工具调用补执行。
+            # 保险：本回合已经真正发过言就不再解析（否则同一句话可能被补发第二遍）。
             for slot, recovered_call in enumerate(
-                _recover_text_tool_calls(req, round_text, round_index)
+                _recover_text_tool_calls(
+                    req,
+                    round_text,
+                    round_index,
+                    already_called_send_message=result.send_message_called,
+                )
             ):
                 tool_calls[slot] = recovered_call
 
@@ -418,6 +448,7 @@ async def _drive_stream_rounds(
             break
 
         calls = [tool_calls[idx] for idx in sorted(tool_calls)]
+        _note_send_message_called(result, calls)
         # 派发前再查一次：模型刚给出的这批工具调用如果不再需要，就不该真的去执行
         # （执行一个已经没人要的写操作是不可撤销的）。补配对结果后再抛：assistant 里
         # 带了 tool_calls 就必须有 role=tool 回执，否则这条 messages 下次回放会被 400。
@@ -580,13 +611,20 @@ async def run_blocking_step(req: StepRequest) -> StepResult:
 
         if not calls:
             # 发言通道兜底：与流式路径同一判断（见 `_recover_text_tool_calls`）。
-            calls = _recover_text_tool_calls(req, text, round_index)
+            calls = _recover_text_tool_calls(
+                req,
+                text,
+                round_index,
+                already_called_send_message=result.send_message_called,
+            )
 
         if not calls:
             result.text = text
             result.tool_calls = []
             result.kind = KIND_ASSISTANT if text.strip() else KIND_EMPTY
             break
+
+        _note_send_message_called(result, calls)
 
         # 与流式路径同一口径：取消时补配对结果，再往上抛。
         if req.abort is not None:

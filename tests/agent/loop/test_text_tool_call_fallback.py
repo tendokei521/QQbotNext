@@ -222,6 +222,50 @@ async def test_real_tool_calls_take_precedence_over_text_markup():
     assert executed == [("send_message", {"messages": "真正的调用"})]
 
 
+# ==================== 保险：本回合已发过言就不再解析正文 ====================
+
+
+async def test_fallback_skipped_after_real_send_message_this_turn():
+    """本回合（跨轮）已经真正调过 send_message，后续轮次的正文写法一律不再补执行。"""
+    executed: list[tuple[str, dict]] = []
+    invoker = _ChatInvoker([
+        LLMResponse(
+            text="",
+            tool_calls=[{
+                "id": "c0",
+                "type": "function",
+                "function": {"name": "send_message", "arguments": json.dumps({"messages": "先说一句"})},
+            }],
+        ),
+        LLMResponse(text=_markup("send_message", {"messages": "照抄历史又写了一遍"})),
+    ])
+
+    result = await run_blocking_step(
+        _request(invoker, _executor(executed), text_as_thinking=True, fallback=True)
+    )
+
+    assert executed == [("send_message", {"messages": "先说一句"})]
+    assert result.send_message_called is True
+    assert result.rounds == 2
+
+
+async def test_fallback_skipped_after_fallback_sent_something_this_turn():
+    """兜底还原出的发送同样算"本回合发过言"，下一轮正文不再被解析第二遍。"""
+    executed: list[tuple[str, dict]] = []
+    invoker = _ChatInvoker([
+        LLMResponse(text=_markup("send_message", {"messages": "第一遍"})),
+        LLMResponse(text=_markup("send_message", {"messages": "第二遍"})),
+    ])
+
+    result = await run_blocking_step(
+        _request(invoker, _executor(executed), text_as_thinking=True, fallback=True)
+    )
+
+    assert executed == [("send_message", {"messages": "第一遍"})]
+    assert result.send_message_called is True
+    assert result.rounds == 2, "第二次正文不再触发执行，也不该再多跑一轮请求"
+
+
 # ==================== 流式 runner ====================
 
 
@@ -260,3 +304,33 @@ async def test_stream_fallback_off_keeps_silent_semantics():
     assert executed == []
     assert result.rounds == 1
     assert result.text == _markup("send_message", {"messages": REPLY})
+
+
+async def test_stream_fallback_skipped_after_send_message_this_turn():
+    """流式路径同一保险：本回合发过言后，后续轮次的正文写法不再补执行。"""
+    executed: list[tuple[str, dict]] = []
+    invoker = _StreamInvoker([
+        [
+            StreamEvent(
+                type="tool_call",
+                tool_call={
+                    "index": 0,
+                    "id": "c0",
+                    "function": {
+                        "name": "send_message",
+                        "arguments": json.dumps({"messages": "先说一句"}),
+                    },
+                },
+            ),
+            StreamEvent(type="done", finish_reason="tool_calls"),
+        ],
+        [StreamEvent(type="text", text=_markup("send_message", {"messages": "又写了一遍"})), StreamEvent(type="done")],
+    ])
+
+    result = await run_stream_step(
+        _request(invoker, _executor(executed), text_as_thinking=True, fallback=True)
+    )
+
+    assert executed == [("send_message", {"messages": "先说一句"})]
+    assert result.send_message_called is True
+    assert result.rounds == 2
