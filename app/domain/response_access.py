@@ -220,7 +220,15 @@ def channel_of(event: Any) -> str | None:
 
 
 def is_private_event(event: Any) -> bool:
-    return str(getattr(event, "event_type", "")) == "message_private"
+    """是否是私聊消息事件。
+
+    唯一真相在 ``app.domain.events.is_private_event``：场景只由协议字段
+    （``message_type`` / ``event_type``）决定，不看 ``event.group`` 是否存在。
+    这里保留同名导出只是为了兼容既有调用方。
+    """
+    from app.domain.events import is_private_event as _is_private_event
+
+    return _is_private_event(event)
 
 
 def validate_permission_values(permission: Mapping[str, Any] | None) -> list[str]:

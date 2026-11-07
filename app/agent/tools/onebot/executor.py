@@ -152,9 +152,11 @@ def _ctx_scope(ctx: ToolContext | None) -> str | None:
             return "private"
         return None
     event_type = getattr(event, "event_type", "") or ""
-    if event_type == "message_group" or getattr(event, "group", None) is not None:
+    from app.domain.events import is_group_event, is_private_event
+
+    if is_group_event(event) or event_type == "message_group":
         return "group"
-    if event_type == "message_private" or getattr(event, "user_id", None):
+    if is_private_event(event) or event_type == "message_private" or getattr(event, "user_id", None):
         return "private"
     return None
 

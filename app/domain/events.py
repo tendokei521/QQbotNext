@@ -153,6 +153,14 @@ class MessageEvent(BaseEvent):
     对应 OneBot v11 中 ``post_type="message"`` / ``"message_sent"`` 的上报。
     解码器（``app/infrastructure/onebot/codec.py``）从 payload 中提取以下可能字段：
 
+    .. note::
+       **私聊事件的 ``group`` 恒为 ``None``**（2026-11-07 修正）。此前它被无条件
+       构造成 ``GroupInfo(group_id=0)``，于是全仓 ``event.group is not None`` 这种
+       "有没有群对象" 的写法会把私聊判成群聊——私信回复被发进「群 0」、
+       工具清单拿成群工具集、提示词贴成群聊规则，都是同一个根因。
+       判场景请一律用 ``is_private_event()`` / ``is_group_event()``，
+       **不要**再看 ``group`` 是否存在。
+
     公共字段（由 BaseEvent 承载）：
     - ``time``: int，事件发生时间（Unix 秒）
     - ``self_id``: int，收到事件的机器人 QQ
@@ -173,7 +181,7 @@ class MessageEvent(BaseEvent):
     - ``sender``: dict，发送者信息，解码为 ``UserInfo``：
       ``user_id`` / ``nickname`` / ``card`` / ``role`` / ``sex`` / ``age`` / ``area`` / ``level`` / ``title`` / ``group_id``
     - ``user``: UserInfo，解码后的发送者
-    - ``group``: GroupInfo，解码后的群信息（仅群消息，含 ``group_id`` / ``group_name`` / 发送者群内角色）
+    - ``group``: GroupInfo | None，解码后的群信息（**仅群消息**；私聊为 ``None``）
     """
 
     message_type: str = ""
@@ -183,7 +191,7 @@ class MessageEvent(BaseEvent):
     message: list = field(default_factory=list)  # list[MessageSegment]
     forward_msg: list = field(default_factory=list)
     user: UserInfo = field(default_factory=UserInfo)
-    group: GroupInfo = field(default_factory=GroupInfo)
+    group: GroupInfo | None = field(default=None)
 
     @property
     def text(self) -> str:
@@ -199,9 +207,12 @@ class MessageEvent(BaseEvent):
 
     async def reply(self, message: SegmentLike, **kwargs) -> dict:
         m = _to_message(message)
-        if self.message_type == "private":
+        if is_private_event(self):
             return await self.bot.send_private_msg(self.user_id, m, **kwargs)
-        return await self.bot.send_group_msg(self.group.group_id, m, **kwargs)
+        group = self.group
+        if group is None:
+            raise RuntimeError("群消息事件缺少 group 对象，无法确定发送目标")
+        return await self.bot.send_group_msg(group.group_id, m, **kwargs)
 
 
 @dataclass
@@ -295,6 +306,51 @@ class TimeCoreEvent(BaseEvent):
 
     async def reply(self, message: SegmentLike, **kwargs) -> dict:  # pragma: no cover
         raise RuntimeError("time_core 事件无回复目标")
+
+
+# ==================== 场景判据（唯一真相） ====================
+#
+# 一条消息是「群聊」还是「私聊」，只由 OneBot 的 ``message_type`` / ``event_type``
+# 决定。**不要**再用 ``event.group is not None`` 之类"有没有群对象"的写法：
+# 私聊事件的 ``group`` 从 2026-11-07 起恒为 ``None``，而历史事故正是"以 group
+# 是否存在判场景"——私聊被当成「群 0」，回复发进 `send_group_msg(0)`。
+
+#: 场景取值
+SCENE_GROUP = "group"
+SCENE_PRIVATE = "private"
+
+
+def is_private_event(event: Any) -> bool:
+    """是否是私聊消息事件（private message）。
+
+    判据只看协议字段：``message_type == "private"`` 或 ``event_type ==
+    "message_private"``；非消息事件（通知/请求/心跳）一律 False。
+    """
+    if event is None:
+        return False
+    return (
+        str(getattr(event, "message_type", "") or "") == "private"
+        or str(getattr(event, "event_type", "") or "") == "message_private"
+    )
+
+
+def is_group_event(event: Any) -> bool:
+    """是否是群消息事件（group message）；判据同上，只看协议字段。"""
+    if event is None:
+        return False
+    return (
+        str(getattr(event, "message_type", "") or "") == "group"
+        or str(getattr(event, "event_type", "") or "") == "message_group"
+    )
+
+
+def event_scene(event: Any) -> str:
+    """消息事件所属场景：``"group"`` / ``"private"`` / ``""``（非消息事件）。"""
+    if is_group_event(event):
+        return SCENE_GROUP
+    if is_private_event(event):
+        return SCENE_PRIVATE
+    return ""
 
 
 def _to_message(message: SegmentLike) -> Message:

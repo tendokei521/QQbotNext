@@ -189,10 +189,11 @@ class ToolSpec:
             return True
         if scope is None:
             scope = "*"
-            event_type = getattr(event, "event_type", "") or ""
-            if event_type == "message_group" or getattr(event, "group", None) is not None:
+            from app.domain.events import is_group_event, is_private_event
+
+            if is_group_event(event):
                 scope = "group"
-            elif event_type == "message_private" or getattr(event, "user_id", None):
+            elif is_private_event(event) or getattr(event, "user_id", None):
                 scope = "private"
         if "*" not in self.scopes and scope not in self.scopes:
             return False

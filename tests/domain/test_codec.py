@@ -58,6 +58,30 @@ def test_decode_private_message():
     event = decode(payload, FakeBot())
     assert isinstance(event, PrivateMessageEvent)
     assert event.event_type == "message_private"
+    # 私聊没有群：group 必须是 None。历史事故是把私聊塞成 GroupInfo(0)，
+    # 于是所有 "group 是否存在 = 是否群聊" 的写法把私信发进了「群 0」。
+    assert event.group is None
+
+
+def test_scene_helpers_use_protocol_fields_only():
+    """场景判据只看 message_type / event_type，不看 group 是否存在。"""
+    from app.domain.events import event_scene, is_group_event, is_private_event
+
+    private = decode(
+        _base_payload(post_type="message", message_type="private", message="hi", message_id=3),
+        FakeBot(),
+    )
+    group = decode(
+        _base_payload(post_type="message", message_type="group", group_id=999, message="hi"),
+        FakeBot(),
+    )
+    assert is_private_event(private) is True
+    assert is_group_event(private) is False
+    assert event_scene(private) == "private"
+    assert is_group_event(group) is True
+    assert is_private_event(group) is False
+    assert event_scene(group) == "group"
+    assert event_scene(None) == ""
 
 
 def test_decode_poke_notice():

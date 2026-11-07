@@ -146,9 +146,9 @@ class OutboundBuilder:
         if not clean:
             return None
 
-        is_group = getattr(self.event, "event_type", "") == "message_group" or (
-            getattr(self.event, "group", None) is not None
-        )
+        from app.domain.events import is_group_event
+
+        is_group = is_group_event(self.event)
         return assemble_message(clean, directives, self.event, is_group=is_group)
 
 

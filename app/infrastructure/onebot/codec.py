@@ -106,10 +106,16 @@ def _decode_message(payload: dict, bot: IBot) -> MessageEvent:
             card=sender.get("card", ""),
             role=sender.get("role", ""),
         ),
-        group=GroupInfo(
-            group_id=int(payload.get("group_id", 0) or 0),
-            group_name=payload.get("group_name", "") or "",
-            user_role=sender.get("role", ""),
+        # 只有群消息才有群对象。私聊若也塞一个 GroupInfo(0)，所有
+        # "group 是否存在 = 是否群聊" 的写法都会把私聊判成群 0（历史事故根因）。
+        group=(
+            GroupInfo(
+                group_id=int(payload.get("group_id", 0) or 0),
+                group_name=payload.get("group_name", "") or "",
+                user_role=sender.get("role", ""),
+            )
+            if message_type == "group"
+            else None
         ),
     )
 

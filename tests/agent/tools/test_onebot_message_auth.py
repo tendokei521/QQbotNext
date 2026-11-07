@@ -25,6 +25,8 @@ MEMBER_ID = 20002
 
 class FakeBot:
     bot_id = 1
+    owner_id = None
+    account_id = "acc"
 
     def __init__(self, messages):
         self.messages = messages
@@ -181,3 +183,37 @@ async def test_executor_fails_closed_and_strips_auth_arg():
     assert "PERMISSION_DENIED" not in allowed
     assert bot.calls, "鉴权通过后应执行 action"
     assert AUTH_ARG not in bot.calls[0][1], "鉴权参数不能透传给 OneBot"
+
+
+def test_private_tool_set_uses_private_scope():
+    """契约：真实私聊事件（group=None）拿到私聊工具集，且不出现群工具。
+
+    历史事故：私聊事件自带 ``GroupInfo(0)``，``_ctx_scope`` 用
+    ``event.group is not None`` 判群聊 → 私聊里既没有 ``send_private_msg``，
+    又出现整套群管理工具；随后 resolve_tool_state 再按 private 把群工具滤掉，
+    结果私聊一个 OneBot 私聊工具都不剩。
+    """
+    from app.infrastructure.onebot.codec import decode
+
+    bot = FakeBot({})
+    event = decode(
+        {
+            "post_type": "message",
+            "message_type": "private",
+            "user_id": 1901691195,
+            "self_id": 123,
+            "message_id": 7,
+            "raw_message": "hi",
+            "sender": {},
+        },
+        bot,
+    )
+    ctx = ToolContext(
+        runtime=_runtime(), event=event, session_id="private_1901691195", bot=bot
+    )
+    names = {spec.name for spec in build_onebot_tools(ctx.runtime, ctx)}
+    assert "send_private_msg" in names
+    assert "get_friend_msg_history" in names
+    assert "send_group_msg" not in names
+    assert "set_group_kick" not in names
+

@@ -80,11 +80,9 @@ async def _flush_speech(speech, session_mgr, session_id: str, config, event):
     反了：先发后写，句柄永远补在上一条上）。
     """
     from app.agent.delivery.directives import OutboundDirectives, assemble_message
+    from app.domain.events import is_group_event
 
-    is_group = (
-        getattr(event, "event_type", "") == "message_group"
-        or getattr(event, "group", None) is not None
-    )
+    is_group = is_group_event(event)
     for bubble in speech.take():
         text = strip_stream_artifacts(strip_all_tags(bubble.text)).strip()
         if not text:
@@ -119,6 +117,7 @@ async def deliver_now(ctx: Any, speech: Any) -> tuple[int, str]:
         ``(成功条数, 错误文本)``：错误文本非空时由工具回执告诉模型（它可以重试）。
     """
     from app.agent.delivery.directives import OutboundDirectives, assemble_message
+    from app.domain.events import is_group_event
     from app.domain.splitter import strip_stream_artifacts
     from app.domain.tags import strip_all_tags
 
@@ -134,10 +133,7 @@ async def deliver_now(ctx: Any, speech: Any) -> tuple[int, str]:
         from app.agent.session.manager import SessionManager
 
         session_mgr = SessionManager(str(getattr(runtime, "bot_id", "") or ""))
-    is_group = (
-        getattr(event, "event_type", "") == "message_group"
-        or getattr(event, "group", None) is not None
-    )
+    is_group = is_group_event(event)
     sent = 0
     for bubble in speech.take():
         text = strip_stream_artifacts(strip_all_tags(bubble.text)).strip()
@@ -153,7 +149,10 @@ async def deliver_now(ctx: Any, speech: Any) -> tuple[int, str]:
         )
         try:
             if is_group:
-                response = await bot.send_group_msg(event.group.group_id, message)
+                group = getattr(event, "group", None)
+                if group is None:
+                    return sent, "发送失败: 群消息事件缺少群对象"
+                response = await bot.send_group_msg(group.group_id, message)
             else:
                 response = await bot.send_private_msg(event.user_id, message)
         except Exception as e:  # noqa: BLE001 —— 交给模型决定是否重试

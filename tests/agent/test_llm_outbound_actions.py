@@ -13,6 +13,7 @@ from app.agent.delivery.directives import (
     parse_outbound_directives,
     strip_outbound_directives,
 )
+from app.domain.events import PrivateMessageEvent
 from app.domain.message import Message
 
 GROUP_EVENT = SimpleNamespace(
@@ -21,7 +22,14 @@ GROUP_EVENT = SimpleNamespace(
     group=SimpleNamespace(group_id=778459818),
     user_id=10001,
 )
-PRIVATE_EVENT = SimpleNamespace(event_type="message_private", message_id=99887766, user_id=10001)
+# 用真实事件而不是 SimpleNamespace：后者的"没有 group 属性"会让旧判据碰巧正确，
+# 掩盖了线上 PrivateMessageEvent 曾经自带 GroupInfo(0) 的假绿。
+PRIVATE_EVENT = PrivateMessageEvent(
+    event_type="message_private",
+    message_type="private",
+    message_id=99887766,
+    user_id=10001,
+)
 
 
 def _types(msg: Message) -> list[str]:

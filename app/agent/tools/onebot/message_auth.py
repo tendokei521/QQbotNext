@@ -68,8 +68,15 @@ def _id_list(value: Any) -> set[str]:
 
 
 def _expected_group_id(runtime: Any, ctx: Any) -> str:
-    """本轮所在群 id（事件优先；无事件轮次从会话 id / group_id 推导）。"""
+    """本轮所在群 id（事件优先；无事件轮次从会话 id / group_id 推导）。
+
+    私聊返回空串：鉴权据此走「当前不是群聊场景」分支，不再拿「群 0」去校验。
+    """
+    from app.domain.events import is_private_event
+
     event = getattr(ctx, "event", None) if ctx is not None else None
+    if is_private_event(event):
+        return ""
     group = getattr(event, "group", None) if event is not None else None
     if group is not None:
         group_id = getattr(group, "group_id", "")

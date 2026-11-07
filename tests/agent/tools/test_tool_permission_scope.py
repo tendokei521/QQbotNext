@@ -113,3 +113,41 @@ def test_explicit_scope_wins_over_event_inference():
     # 事件是私聊，但调用方说"这是群作用域"——按调用方的判定走
     assert spec.allowed_for_event(_PrivateUser(), scope="group") is True
     assert spec.allowed_for_event(_GroupMember(), scope="private") is False
+
+
+class _DecodeBot:
+    bot_id = 123
+    owner_id = None
+    account_id = "acc"
+
+
+def _decoded_private_event():
+    from app.infrastructure.onebot.codec import decode
+
+    return decode(
+        {
+            "post_time": 1,
+            "post_type": "message",
+            "message_type": "private",
+            "user_id": 1901691195,
+            "self_id": 123,
+            "message_id": 9,
+            "raw_message": "hi",
+            "sender": {},
+        },
+        _DecodeBot(),
+    )
+
+
+def test_real_private_event_infers_private_scope():
+    """契约：真实 codec 产出的私聊事件（group=None）必须被判成 private。
+
+    历史事故：私聊事件自带 ``GroupInfo(0)``，旧判据 ``event.group is not None``
+    把它当群聊 → 私聊专用工具被判"无权限"、群管理工具反而被放行。
+    """
+    event = _decoded_private_event()
+    assert event.group is None
+    private_only = _spec(permission="everyone", scopes=["private"])
+    group_only = _spec(permission="everyone", scopes=["group"])
+    assert private_only.allowed_for_event(event) is True
+    assert group_only.allowed_for_event(event) is False
