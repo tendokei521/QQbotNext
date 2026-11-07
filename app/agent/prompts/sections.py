@@ -74,7 +74,10 @@ def resolve_persona_preset(req: Any) -> dict | None:
 
 # ---- L1 10 persona ----
 def build_persona(req: Any) -> list[dict]:
-    """基础人设：优先 ``persona_preset_id``（活引用），否则用 ``system_prompt``。"""
+    """基础人设：优先 ``persona_preset_id``（活引用），否则用 ``system_prompt``。
+
+    兜底默认文案按场景区分：私聊不该拿到「你是一个在QQ群内的普通群友」。
+    """
     preset = resolve_persona_preset(req)
     if preset is not None:
         text = str(preset.get("system_prompt") or "").strip()
@@ -83,7 +86,14 @@ def build_persona(req: Any) -> list[dict]:
         logger.add_info(account_label(getattr(req.runtime, 'bot_id', '?'))).warning(
             "[Assembly] 角色预设没有 system_prompt，已回退 system_prompt"
         )
-    system_prompt = req.cfg("system_prompt", DEFAULT_PERSONA_PROMPT)
+    from .system import PRIVATE_DEFAULT_PERSONA_PROMPT
+
+    fallback = (
+        PRIVATE_DEFAULT_PERSONA_PROMPT
+        if bool(getattr(req, "is_private", False))
+        else DEFAULT_PERSONA_PROMPT
+    )
+    system_prompt = req.cfg("system_prompt", fallback) or fallback
     return [{"role": "system", "content": system_prompt}]
 
 

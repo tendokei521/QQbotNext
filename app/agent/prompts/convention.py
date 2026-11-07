@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .system import CONVENTION
+from .system import CONVENTION, PRIVATE_CONVENTION
 
 
 def _cfg(req: Any, key: str, default: Any):
@@ -24,7 +24,9 @@ def _cfg(req: Any, key: str, default: Any):
 def message_meta_section(req: Any) -> list[dict]:
     if not bool(_cfg(req, "structured_assembly", True)):
         return []
-    return [{"role": "system", "content": CONVENTION}]
+    # 私聊没有「当前群聊」行、也没有群消息凭证；用私聊版约定，避免模型按群聊读法理解。
+    text = PRIVATE_CONVENTION if bool(getattr(req, "is_private", False)) else CONVENTION
+    return [{"role": "system", "content": text}]
 
 
 # 兼容：框架内置段统一用 convention_section 这个名字

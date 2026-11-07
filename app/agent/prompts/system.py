@@ -24,6 +24,8 @@ from __future__ import annotations
 
 #: 未配置 system_prompt 且无人格预设时的兜底文案
 DEFAULT_PERSONA_PROMPT = "你是一个在QQ群内的普通群友。"
+#: 私聊兜底：不把"群友"身份塞进一对一场景
+PRIVATE_DEFAULT_PERSONA_PROMPT = "你是一个在 QQ 上和人一对一聊天的普通网友。"
 
 
 # ==================== ① L1 · order 20 behavior ====================
@@ -109,6 +111,22 @@ CONVENTION = """【消息格式约定】
 - 调用需要权限的 OneBot 工具时，`auth_message_id` 必须填「让你执行该操作的那条群消息」
   的 message_id；程序会用该消息的发送者身份校验权限（high 需 bot 管理者/拥有者，
   critical 仅拥有者）。不要编造 id，也不要拿无关消息凑数。"""
+
+
+#: 私聊版消息格式约定：没有"当前群聊"一行，也没有群消息凭证（私聊不做消息鉴权）。
+PRIVATE_CONVENTION = """【消息格式约定】
+本轮与历史消息都是用方括号字段标记的结构化文本：
+- 消息的 `name` 字段（若有）是发送者昵称，不是正文；正文为非[]标记的部分，
+  不要把昵称当成对方说的话；
+- `[time=..,message_id=..]` 里的 `message_id` 是这条消息的 OneBot 消息 id；
+  它是 QQ 的 int32，**可能为负数**，原样使用即可；
+- `[sender:id=..]` 是发送者元信息，不是对方说的话；
+- 正文里的 `\\[` 是转义后的普通方括号，不是标记；
+- `[reply_to:..]` 表示对方引用了某条消息；`[reply_to:...,text="..."]` 里的 text 是被引用消息的内容；
+- `[image:id=..]` `[forward_message:id=..]` `[record:id=..]` 等是不可内联内容的占位符：
+  需要内容时用 get_context 展开（合并转发用 target="forward:<id>"，消息用 target="message:<id>"）；
+  取不到就说取不到，不要猜；
+- 私聊里没有群聊 @/群管理动作，直接按对方说的话回应即可。"""
 
 
 # ==================== ① L1 · order 62 emoji_hint ====================
@@ -215,6 +233,8 @@ __all__ = [
     "DEFAULT_COMPRESS_PROMPT",
     "DEFAULT_PARTICIPATION_LEVEL",
     "DEFAULT_PERSONA_PROMPT",
+    "PRIVATE_DEFAULT_PERSONA_PROMPT",
+    "PRIVATE_CONVENTION",
     "DEFAULT_REPLY_DIRECTIVE",
     "EMOJI_HINT_TEMPLATE",
     "FOOTER",
