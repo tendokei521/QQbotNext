@@ -10,12 +10,18 @@
 from __future__ import annotations
 
 import types
+from datetime import datetime
 
 from app.agent.session.manager import SessionManager
 from app.agent.session.model import HistoryEntry, split_user_context
 from app.domain.events import GroupMessageEvent, MessageSegment, UserInfo
 
 NL = chr(10)  # 显式换行，避免测试源码里被转义处理
+
+
+#: 渲染按本地时区格式化；测试不能在 CI（UTC）下硬编码 +8 时区的时间文本。
+def _rendered_time(ts: int) -> str:
+    return datetime.fromtimestamp(ts).strftime("%m-%d %H:%M")
 
 
 def _mgr(tmp_path, bot_id=778) -> SessionManager:
@@ -99,7 +105,7 @@ def test_structured_entry_renders_from_base_not_content(tmp_path):
         timestamp=1788342260, segments=[{"type": "text", "data": {"text": "裸正文"}}],
     )
     rendered = format_history_for_llm(mgr.get_history("group_1"), is_private=False)
-    assert rendered[0]["content"] == "09-02 17:44 小明(20002): 裸正文"
+    assert rendered[0]["content"] == f"{_rendered_time(1788342260)} 小明(20002): 裸正文"
     # 结构化条目不应再被当成"增强块"原样输出
     assert not rendered[0]["content"].startswith("裸正文")
 
@@ -138,7 +144,7 @@ def test_rendered_entry_replays_meta_lines_after_body():
         ),
     )
     assert render_history_entry(entry) == (
-        "09-02 17:44 小明(20002): 看看" + NL + "提到了(用户名)：@小红(30003)"
+        f"{_rendered_time(1788342260)} 小明(20002): 看看" + NL + "提到了(用户名)：@小红(30003)"
     )
 
 

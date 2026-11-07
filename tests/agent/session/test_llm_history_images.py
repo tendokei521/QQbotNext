@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import base64
 import types
+from datetime import datetime
 
 import pytest
 
@@ -141,7 +142,9 @@ def test_image_only_entry_renders_placeholder_with_sender_prefix():
     entries = [_entry(text="")]
     rendered = format_history_for_llm(entries, is_private=True, entry_media=_hook(include_images=False, entries=entries))
 
-    assert rendered[0]["content"] == "10-18 22:49 对方: [图片#894061058]"
+    assert rendered[0]["content"] == (
+        f"{datetime.fromtimestamp(1792334953).strftime('%m-%d %H:%M')} 对方: [图片#894061058]"
+    )
 
 
 def test_vision_hook_inlines_local_image_into_history_message(media_ref):

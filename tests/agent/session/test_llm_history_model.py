@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from app.agent.session.model import (
     BaseInfo,
     HistoryEntry,
@@ -18,9 +20,13 @@ from app.agent.session.model import (
     render_history_entry,
 )
 
+#: 渲染用本地时区格式化时间；测试机时区不同（CI 是 UTC）时不能硬编码 "17:44"。
+_TS = 1788342260
+_RENDERED_TIME = datetime.fromtimestamp(_TS).strftime("%m-%d %H:%M")
+
 
 def _entry(**base_kw) -> HistoryEntry:
-    base = {"time": 1788342260, "sender_id": "20002", "sender_name": "小明", "text": "你好"}
+    base = {"time": _TS, "sender_id": "20002", "sender_name": "小明", "text": "你好"}
     base.update(base_kw)
     return HistoryEntry(role="user", message_id="1001", base=BaseInfo(**base))
 
@@ -29,7 +35,7 @@ def _entry(**base_kw) -> HistoryEntry:
 
 
 def test_structured_entry_renders_single_line():
-    assert render_history_entry(_entry()) == "09-02 17:44 小明(20002): 你好"
+    assert render_history_entry(_entry()) == f"{_RENDERED_TIME} 小明(20002): 你好"
 
 
 def test_structured_entry_private_uses_other_tag():
@@ -49,7 +55,7 @@ def test_structured_assistant_never_gets_prefix():
 
 def test_structured_entry_include_time_and_user_id_switches():
     assert render_history_entry(_entry(), include_time=False) == "小明(20002): 你好"
-    assert render_history_entry(_entry(), include_user_id=False) == "09-02 17:44 小明: 你好"
+    assert render_history_entry(_entry(), include_user_id=False) == f"{_RENDERED_TIME} 小明: 你好"
 
 
 def test_structured_mask_nickname_protects_sentence_like_names():
@@ -95,7 +101,7 @@ def test_legacy_row_fields_backfill_base_but_text_stays_legacy():
     entry = HistoryEntry.from_dict(row)
     assert entry.legacy_text == "裸正文"
     assert entry.base.sender_name == "小明"
-    assert render_history_entry(row) == "09-02 17:44 小明(20002): 裸正文"
+    assert render_history_entry(row) == f"{_RENDERED_TIME} 小明(20002): 裸正文"
 
 
 def test_legacy_enhanced_block_kept_verbatim():
