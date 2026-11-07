@@ -245,7 +245,7 @@ SCHEMA = {
     },
     "reply_mode": {
         "type": "select", "label": "回复模式",
-        "description": "条件触发=新消息打断旧回合并以最新优先；参与度=同群同时只跑一轮，未结束的新消息只记录不请求",
+        "description": "条件触发=新消息打断旧回合，最新优先；参与度=同群只跑一轮，新消息只记录",
         "default": "legacy", "group": "group_advanced",
         "options": {"legacy": "条件触发（旧版）", "participation": "参与度驱动（新版）"},
     },
@@ -308,12 +308,12 @@ SCHEMA = {
     # Q1：上下文预算（按 token 压力触发压缩，而不是按条数）
     "context_window": {
         "type": "number", "label": "模型上下文窗口",
-        "description": "按 token 计，用于判断何时压缩上下文。0 表示按条数触发",
+        "description": "按 token 计，用于判断何时压缩上下文。0 = 按条数触发",
         "default": 0, "min": 0, "max": 2000000, "group": "group_compress",
     },
     "context_compress_trigger_ratio": {
         "type": "number", "label": "压缩触发比例",
-        "description": "输入占窗口比例超过它时压缩。0 表示按条数触发",
+        "description": "输入占窗口比例超过它时压缩。0 = 按条数触发",
         "default": 0.8, "min": 0, "max": 1, "group": "group_compress",
     },
     "context_compress_keep_ratio": {
@@ -336,7 +336,7 @@ SCHEMA = {
     },
     "context_token_budget": {
         "type": "number", "label": "上下文 token 预算",
-        "description": "上下文 token 上限，超出从最旧对话开始丢。0 表示不限制",
+        "description": "上下文 token 上限，超出从最旧对话开始丢。0 = 不限制",
         "default": 0, "min": 0, "max": 200000, "group": "group_compress",
     },
     "context_token_chars_per_token": {
@@ -365,7 +365,7 @@ SCHEMA = {
     },
     "group_log_max_chars": {
         "type": "number", "label": "群聊背景字数上限",
-        "description": "背景最多占多少字，超出从最旧开始丢。0 表示不限制",
+        "description": "背景最多占多少字，超出从最旧开始丢。0 = 不限制",
         "default": 4000, "min": 0, "max": 20000, "group": "group_session",
     },
     "include_private_pre_history": {
@@ -384,7 +384,7 @@ SCHEMA = {
     },
     "context_expand_enable": {
         "type": "boolean", "label": "合并转发未展开标记",
-        "description": "极端情况下才需要：背景里的合并转发只给 id，开启后标为【未展开】提示模型用 get_context 取回。",
+        "description": "极端情况下才需要：背景里的合并转发只给 id，开启后标为【未展开】提示模型用 `get_context` 取回。",
         "default": False, "group": "group_session",
     },
     "referent_resolve_enable": {
@@ -914,7 +914,7 @@ SCHEMA = {
     # P6：工具审批模式（默认自动审批；旧布尔键 tool_approval_enable 已废弃）
     "tool_approval_mode": {
         "type": "select", "label": "工具审批",
-        "description": "自动审批：消息凭证鉴权通过即执行；人工审批：敏感工具执行前再请你确认，无人确认时一律不执行。",
+        "description": "自动审批：凭证通过即执行；人工审批：敏感工具执行前先确认，无人确认则不执行",
         "default": "auto", "group": "group_interrupt",
         "options": {
             "auto": "自动审批",
@@ -923,7 +923,7 @@ SCHEMA = {
     },
     "tool_approval_enable": {
         "type": "boolean", "label": "（已废弃）高危工具需人工审批",
-        "description": "已废弃，改用「工具审批」下拉（tool_approval_mode）。",
+        "description": "已废弃，改用「工具审批」下拉（`tool_approval_mode`）。",
         "default": False, "group": "group_permission",
     },
     "retry_profile": {
