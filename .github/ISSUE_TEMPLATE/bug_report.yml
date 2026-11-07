@@ -1,0 +1,53 @@
+name: Bug report
+description: 报告一个可复现的问题
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提问前请先看 README 的「排障」一节和总览页「运行状态」卡。
+        安全漏洞请不要走这里，见 SECURITY.md。
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 设置页「界面版本」或 pyproject.toml 里的版本号
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 运行平台
+      options:
+        - Windows
+        - Linux
+        - macOS
+        - 其他
+    validations:
+      required: true
+  - type: input
+    id: protocol
+    attributes:
+      label: 协议端
+      description: NapCat / Lagrange / LLOneBot / 其他（含版本）
+      placeholder: "NapCat 4.x"
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 做了什么、期望什么、实际发生什么
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / 截图
+      description: 控制台输出、logs/user.log 相关片段、浏览器截图
+      render: text
+  - type: textarea
+    id: env
+    attributes:
+      label: 其他信息
+      description: Python 版本、依赖是否装齐、是否改过配置

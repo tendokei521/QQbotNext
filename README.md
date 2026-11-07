@@ -458,8 +458,9 @@ pnpm build      # vue-tsc --noEmit && vite build → dist/
 
 ## 贡献与致谢
 
-欢迎 Issue 与 PR。提交前请先读 [AGENTS.md](AGENTS.md)：本项目对提交格式、测试策略与前端验证有硬性要求，
-一个"小而完整"的提交比一个巨大的 PR 更容易被合并。
+欢迎 Issue 与 PR。提交前请先读 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [AGENTS.md](AGENTS.md)：
+本项目对提交格式、测试策略与前端验证有硬性要求，一个"小而完整"的提交比一个巨大的 PR 更容易被合并。
+安全漏洞请按 [SECURITY.md](SECURITY.md) 走私密渠道报告，不要公开 Issue。
 
 **致谢**
 

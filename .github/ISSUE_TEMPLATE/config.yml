@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 使用问题 / 排障
+    url: https://github.com/tendokei521/QQbotNext/blob/main/README.md#排障
+    about: 先看 README 的排障表与总览页「运行状态」卡
+  - name: 安全漏洞
+    url: https://github.com/tendokei521/QQbotNext/security/advisories/new
+    about: 请走私密安全公告，不要公开 Issue

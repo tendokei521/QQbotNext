@@ -3,8 +3,8 @@
 本仓库的文档只有两层：**给人用**（根目录 `README.md` / `MAINTENANCE.md`）与**给改代码的人**（本目录）。
 不保留历史稿：过程记录以 commit message 和 PR 为准，文档只写**当前事实**。
 
-> 规则：只有本目录顶层这 12 份文档（含本索引）+ 根目录 README/MAINTENANCE/STYLE/AGENTS 属于现行文档，
-> 必须与代码一致。写新文档前先在这里登记；过时内容直接改掉或删除，不要"留着以后看"。
+> 规则：只有本目录顶层这 12 份文档（含本索引）+ 根目录 README/MAINTENANCE/STYLE/AGENTS/CONTRIBUTING/SECURITY
+> 属于现行文档，必须与代码一致。写新文档前先在这里登记；过时内容直接改掉或删除，不要"留着以后看"。
 
 ---
 
