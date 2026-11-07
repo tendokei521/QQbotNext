@@ -64,6 +64,23 @@ jobs:
       - name: Run backend tests
         run: python -m pytest -q
 
+      - name: Report failed tests
+        if: failure()
+        shell: bash
+        run: |
+          if [ -f .pytest_cache/v/cache/lastfailed ]; then
+            python - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path(".pytest_cache/v/cache/lastfailed").read_text())
+          for nodeid in list(data)[:50]:
+              print(f"::error title=pytest failure::{nodeid}")
+          PY
+          else
+            echo "no .pytest_cache/v/cache/lastfailed"
+          fi
+
       # 清单完整性：每个内置模块都必须有 module.json（v2 清单是模块唯一元数据来源）。
       - name: Verify module manifests
         run: python scripts/gen_module_manifests.py --check
@@ -126,6 +143,23 @@ jobs:
 
       - name: Run backend tests
         run: python -m pytest -q
+
+      - name: Report failed tests
+        if: failure()
+        shell: bash
+        run: |
+          if [ -f .pytest_cache/v/cache/lastfailed ]; then
+            python - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path(".pytest_cache/v/cache/lastfailed").read_text())
+          for nodeid in list(data)[:50]:
+              print(f"::error title=pytest failure::{nodeid}")
+          PY
+          else
+            echo "no .pytest_cache/v/cache/lastfailed"
+          fi
 
   deps:
     name: Dependency metadata sanity
