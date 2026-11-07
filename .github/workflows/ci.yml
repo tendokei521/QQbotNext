@@ -71,11 +71,19 @@ jobs:
           if [ -f .pytest_cache/v/cache/lastfailed ]; then
             python - <<'PY'
           import json
+          import subprocess
+          import sys
           from pathlib import Path
 
-          data = json.loads(Path(".pytest_cache/v/cache/lastfailed").read_text())
-          for nodeid in list(data)[:50]:
-              print(f"::error title=pytest failure::{nodeid}")
+          ids = list(json.loads(Path(".pytest_cache/v/cache/lastfailed").read_text()))[:8]
+          for nodeid in ids:
+              proc = subprocess.run(
+                  [sys.executable, "-m", "pytest", "-q", "--tb=line", nodeid],
+                  capture_output=True, text=True,
+              )
+              lines = [ln for ln in (proc.stdout or "").splitlines() if ln.strip()]
+              detail = " | ".join(lines[-4:])[:600]
+              print(f"::error title={nodeid}::{detail}")
           PY
           else
             echo "no .pytest_cache/v/cache/lastfailed"
@@ -151,11 +159,19 @@ jobs:
           if [ -f .pytest_cache/v/cache/lastfailed ]; then
             python - <<'PY'
           import json
+          import subprocess
+          import sys
           from pathlib import Path
 
-          data = json.loads(Path(".pytest_cache/v/cache/lastfailed").read_text())
-          for nodeid in list(data)[:50]:
-              print(f"::error title=pytest failure::{nodeid}")
+          ids = list(json.loads(Path(".pytest_cache/v/cache/lastfailed").read_text()))[:8]
+          for nodeid in ids:
+              proc = subprocess.run(
+                  [sys.executable, "-m", "pytest", "-q", "--tb=line", nodeid],
+                  capture_output=True, text=True,
+              )
+              lines = [ln for ln in (proc.stdout or "").splitlines() if ln.strip()]
+              detail = " | ".join(lines[-4:])[:600]
+              print(f"::error title={nodeid}::{detail}")
           PY
           else
             echo "no .pytest_cache/v/cache/lastfailed"
