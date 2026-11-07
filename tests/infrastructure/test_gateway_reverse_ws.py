@@ -121,7 +121,8 @@ async def test_reverse_client_attaches_and_dispatches_message():
     assert await gw.connect_bot("acc0") is True
 
     client = _FakeOneBot(f"ws://127.0.0.1:{port}/onebot/v11/ws")
-    task = asyncio.create_task(client.run(send_message=True))
+    stop = asyncio.Event()
+    task = asyncio.create_task(client.run(send_message=True, stop=stop))
     try:
         assert await _wait(lambda: seen), "反向连接接入后必须能派发事件"
         assert await _wait(lambda: gw.connections["acc0"].status == "connected")
@@ -129,6 +130,7 @@ async def test_reverse_client_attaches_and_dispatches_message():
         assert info["status"] == "connected"
         assert info["bot_id"] == 10001, "接入后应主动拉一次登录信息"
     finally:
+        stop.set()
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task

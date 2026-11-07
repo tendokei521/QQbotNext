@@ -82,6 +82,8 @@ class _FloodWs:
             if echo:
                 self._responded = True
                 return json.dumps({"status": "ok", "retcode": 0, "echo": echo, "data": {"message_id": 9}})
+        # 留出时间让接收循环消费最后的 API 响应，再结束迭代。
+        await asyncio.sleep(0.5)
         raise StopAsyncIteration
 
     async def send(self, data: str) -> None:

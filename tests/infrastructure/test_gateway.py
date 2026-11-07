@@ -121,6 +121,9 @@ class _ScriptedWs:
             if echo:
                 return json.dumps({"status": "ok", "retcode": 0, "echo": echo, "data": {"message_id": 9}})
             return ""
+        # 先把已投递的 API 响应交给事件循环处理，再结束迭代：
+        # 否则读循环会在 handler 恢复前退出并取消 worker（3.12 上必现）。
+        await asyncio.sleep(0.5)
         raise StopAsyncIteration
 
     async def send(self, data):
@@ -202,6 +205,9 @@ class _FailedRespWs:
                 return json.dumps({"status": "failed", "retcode": 110,
                                    "echo": echo, "message": "发送失败"})
             return ""
+        # 先把已投递的 API 响应交给事件循环处理，再结束迭代：
+        # 否则读循环会在 handler 恢复前退出并取消 worker（3.12 上必现）。
+        await asyncio.sleep(0.5)
         raise StopAsyncIteration
 
     async def send(self, data):
