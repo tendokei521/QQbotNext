@@ -58,13 +58,13 @@ class UIPage:
         return tuple(f for g in self.groups for f in g.fields)
 
 
-# ==================== 1. 本体配置页（3 页 / 47 键）====================
+# ==================== 1. 本体配置页（3 页 / 69 键）====================
 UI_PAGES: tuple[UIPage, ...] = (
     UIPage(
         id="behavior",
         label="对话行为",
         order=30,
-        subtitle="连发消息、打断与工具审批怎么处理",
+        subtitle="连发消息、打断与发言怎么处理",
         groups=(
             UIGroup(
                 "behavior_debounce",
@@ -75,6 +75,13 @@ UI_PAGES: tuple[UIPage, ...] = (
                 "behavior_interrupt",
                 "回复打断",
                 ("interrupt_enable", "interrupt_save_sent", "interrupt_debug"),
+            ),
+            # 发言通道（参与度模式）里模型偶尔把 `[tool_call:send_message]{...}` 当正文写出来；
+            # 该分组的开关决定是否按真正的工具调用补执行。
+            UIGroup(
+                "behavior_speech_fallback",
+                "发言识别",
+                ("text_tool_call_fallback",),
             ),
             UIGroup("behavior_approval", "工具审批", ("tool_approval_mode",)),
         ),

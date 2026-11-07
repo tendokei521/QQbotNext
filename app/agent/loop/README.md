@@ -11,6 +11,7 @@
 | `context.py` | `LlmContext`：一轮对话里到处要用的运行时上下文对象 |
 | `tool_step.py` | **唯一的工具轮循环**：`iter_stream_step`（事件流）/ `run_stream_step`（回调封装）/ `run_blocking_step`（非流式）；多轮、回填、补图都在这里 |
 | `tool_loop.py` | 工具批次执行：`execute_tool_batch`（有界并发 + 独占屏障，回填按模型顺序）、标准化与回传消息 |
+| `text_tool_call.py` | 正文里的工具调用解析：把 `[tool_call:send_message]{...}` 还原成真正的调用（发言通道兜底，只在 `tool_step` 里被调用） |
 | `turn_runner.py` | 结局与取消：`TurnReason` / `TurnState` / `AbortScope` / `TurnLimits`（`turn.py::run_turn` 据此产出 `reason` / `rounds` / `interrupted`） |
 | `locks.py` | 按会话的互斥锁（同一会话不并发跑两轮） |
 | `pool.py` | 并发槽位控制 |

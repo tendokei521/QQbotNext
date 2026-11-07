@@ -7,7 +7,7 @@
       "id": "behavior",
       "path": "/ai/settings/behavior",
       "title": "对话行为",
-      "subtitle": "连发消息、打断与工具审批怎么处理",
+      "subtitle": "连发消息、打断与发言怎么处理",
       "icon": "mdi-call-split",
       "color": "secondary",
       "order": 30,
@@ -30,6 +30,14 @@
             "interrupt_enable",
             "interrupt_save_sent",
             "interrupt_debug"
+          ]
+        },
+        {
+          "id": "behavior_speech_fallback",
+          "label": "发言识别",
+          "icon": "mdi-message-text-outline",
+          "fields": [
+            "text_tool_call_fallback"
           ]
         },
         {

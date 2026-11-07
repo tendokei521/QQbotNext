@@ -67,6 +67,7 @@
 | `speech_via_tool` | `true` | **文本=思考，发言必须调 `send_message`**；不调用=静默（正常结束） |
 | `speech_max_bubbles` | `4` | 一轮最多几条气泡 |
 | `speech_max_bubble_chars` | `300` | 单条气泡字数上限 |
+| `text_tool_call_fallback` | `false` | 模型把 `[tool_call:send_message]{...}` 写进正文、却不真正调用工具时，按一次真正的工具调用执行；只在参与度模式生效 |
 | `stream_output` | `false` | 是否流式输出（需模型/适配器支持）；失败会自动降级为整段 |
 | `interrupt_enable` | `false` | 回复途中来新消息时是否打断重来 |
 | `interrupt_save_sent` | `true` | 打断时把已发出的句子记进历史 |

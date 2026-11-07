@@ -49,6 +49,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.agent.loop.text_tool_call import extract_text_tool_calls
 from app.domain.splitter import split_sentences, strip_stream_artifacts
 
 #: 一次步骤的结局
@@ -136,6 +137,10 @@ class StepRequest:
     tool_log: Any = None
     #: 发言通道：普通文字输出只是思考，也并入 reasoning_text（换行拼接）
     text_as_thinking: bool = False
+    #: 发言通道兜底（「对话行为」页的开关）：模型把 ``[tool_call:send_message]{...}``
+    #: 写进正文时，按真正的工具调用执行。**只在 ``text_as_thinking`` 为真时有意义**：
+    #: 文本即回复的通道里正文已经作为消息发出去了，再执行一次就是重复发送。
+    text_tool_call_fallback: bool = False
 
 
 @dataclass
@@ -235,6 +240,25 @@ def _append_reasoning_text(result: Any, text: Any) -> None:
     current = str(result.reasoning_text or "")
     merged = f"{current}\n{piece}" if current else piece
     result.reasoning_text = merged[:4000]
+
+
+def _recover_text_tool_calls(req: StepRequest, text: str, round_index: int) -> list[dict]:
+    """发言通道兜底：把正文里写出的工具调用还原成真正的调用。
+
+    只在"正文=思考 + 开关打开"时生效（两条 runner 共用这一处判断）：
+    文本即回复的通道里正文已经发出去了，再按工具执行一次就是重复发送。
+    """
+    if not (req.text_tool_call_fallback and req.text_as_thinking):
+        return []
+    recovered = extract_text_tool_calls(text, id_prefix=f"text_call_r{round_index}")
+    if recovered:
+        from app.core.logger import account_label, logger
+
+        names = ", ".join(call["function"]["name"] for call in recovered)
+        logger.add_info(account_label(getattr(req.runtime, "bot_id", ""))).info(
+            f"[Speech] 正文里出现了工具调用写法（{names}），已按工具调用执行"
+        )
+    return recovered
 
 
 async def iter_stream_step(req: StepRequest, result: StepResult) -> AsyncIterator[tuple[str, Any]]:
@@ -371,6 +395,14 @@ async def _drive_stream_rounds(
                 usage_before=usage_before,
             )
             break
+
+        if not tool_calls:
+            # 发言通道兜底：模型可能把 `[tool_call:send_message]{...}` 当普通正文写出来，
+            # 此时正文只是思考（不会发出去），这里按真正的工具调用补执行。
+            for slot, recovered_call in enumerate(
+                _recover_text_tool_calls(req, round_text, round_index)
+            ):
+                tool_calls[slot] = recovered_call
 
         if not tool_calls:
             result.kind = KIND_ASSISTANT
@@ -545,6 +577,10 @@ async def run_blocking_step(req: StepRequest) -> StepResult:
             choices = raw.get("choices") or []
             if choices and isinstance(choices[0], dict):
                 result.finish_reason = str(choices[0].get("finish_reason") or "")
+
+        if not calls:
+            # 发言通道兜底：与流式路径同一判断（见 `_recover_text_tool_calls`）。
+            calls = _recover_text_tool_calls(req, text, round_index)
 
         if not calls:
             result.text = text

@@ -11,6 +11,7 @@ SCHEMA = {
     "group_context": {"type": "group", "label": "用户信息感知", "collapsible": True},
     "group_behavior": {"type": "group", "label": "行为规则（拟人化）", "collapsible": True},
     "group_interrupt": {"type": "group", "label": "回复打断", "collapsible": True},
+    "group_speech_fallback": {"type": "group", "label": "发言识别", "collapsible": True},
     "group_stream": {"type": "group", "label": "流式回复", "collapsible": True},
     "group_proactive": {"type": "group", "label": "主动消息", "collapsible": True},
     "group_schedule": {"type": "group", "label": "定时任务", "collapsible": True},
@@ -500,6 +501,13 @@ SCHEMA = {
         "type": "boolean", "label": "记录打断日志",
         "description": "开启后把回复被打断的情况写进日志。",
         "default": False, "group": "group_interrupt",
+    },
+
+    # ==================== 发言识别 ====================
+    "text_tool_call_fallback": {
+        "type": "boolean", "label": "识别正文里的发送动作",
+        "description": "模型把发送写成普通文字时，按工具调用照常发出。只在参与度模式生效。",
+        "default": False, "group": "group_speech_fallback",
     },
 
     # ==================== 权限 ====================
@@ -1177,7 +1185,7 @@ _BASIC_FIELDS = {
     "referent_resolve_enable", "context_compress_enable", "context_token_budget",
     # 对话行为
     "trigger_at", "trigger_keyword", "message_debounce_seconds", "reply_cooldown",
-    "interrupt_enable",
+    "interrupt_enable", "text_tool_call_fallback",
     # 流式输出
     "stream_output", "stream_send_by_sentence", "stream_send_interval_mode",
     "stream_send_interval_base_ms",

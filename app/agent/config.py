@@ -52,6 +52,10 @@ DEFAULT_LLM_CONFIG: dict = {
     # 补一轮等于逼它开口，和新模式的语义相反。
     "speech_max_bubbles": 4,
     "speech_max_bubble_chars": 300,
+    # 发言通道的正文兜底（「对话行为」页开关）：模型把 `[tool_call:send_message]{...}`
+    # 写进正文、却始终不真正调用工具时，按一次真正的工具调用执行。默认关闭；
+    # 只在参与度模式下有意义（文本即回复的通道里正文已经发出去了）。
+    "text_tool_call_fallback": False,
     # 记录历史时强制清洗助手输出里的（…）/(…) 内容，避免后续回复模仿括号风格
     "clean_output_parentheses": True,
     "group_enable": False,

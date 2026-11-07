@@ -268,6 +268,11 @@ async def stream_response(runtime, event, ctx=None):
     # 本轮一句话没说 = 静默（正常结局），不再用兜底话术填空、也不做催发言/补救轮。
     speech = meta.get("speech")
     speech_by_tool = speech is not None
+    # 发言通道兜底（「对话行为」页开关）：模型把 `[tool_call:send_message]{...}` 写进
+    # 正文时按真正的工具调用执行。只有发言通道可以这么做——文本即回复时正文已经发出去了。
+    text_tool_call_fallback = speech_by_tool and bool(
+        config.get("text_tool_call_fallback", False)
+    )
     spoken_parts: list[str] = []
 
     messages = assembly.build_for(runtime, req)
@@ -409,6 +414,7 @@ async def stream_response(runtime, event, ctx=None):
                 abort=abort,
                 tool_log=turn_log,
                 text_as_thinking=speech_by_tool,
+                text_tool_call_fallback=text_tool_call_fallback,
             ),
             step,
         )

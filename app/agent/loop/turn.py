@@ -485,6 +485,12 @@ async def _chat_once(
             ctx.state["step"] = summary
             await run_stage(runtime, "step_completed", ctx)
 
+    # 发言通道：正文只是思考；兜底开关只在通道内生效（文本即回复时正文已发出，不能重放）。
+    speech_by_tool = speech_via_tool(config)
+    text_tool_call_fallback = speech_by_tool and bool(
+        config.get("text_tool_call_fallback", False)
+    )
+
     async def _request_step():
         return await run_blocking_step(
             StepRequest(
@@ -498,7 +504,8 @@ async def _chat_once(
                 on_round_end=_on_round_end,
                 tool_log=tool_log,
                 abort=abort,
-                text_as_thinking=speech_via_tool(config),
+                text_as_thinking=speech_by_tool,
+                text_tool_call_fallback=text_tool_call_fallback,
             )
         )
 
@@ -572,6 +579,11 @@ async def _stream_once(
 
     sentences: list[str] = []
     limits = TurnLimits.from_config(config)
+    # 发言通道：正文只是思考；兜底开关只在通道内生效（文本即回复时正文已发出，不能重放）。
+    speech_by_tool = speech_via_tool(policy_cfg)
+    text_tool_call_fallback = speech_by_tool and bool(
+        policy_cfg.get("text_tool_call_fallback", False)
+    )
 
     async def _emit(sentence: str) -> None:
         sentences.append(sentence)
@@ -598,7 +610,8 @@ async def _stream_once(
             max_msg_len=max_msg_len,
             tool_log=tool_log,
             abort=abort,
-            text_as_thinking=speech_via_tool(policy_cfg),
+            text_as_thinking=speech_by_tool,
+            text_tool_call_fallback=text_tool_call_fallback,
         )
     )
     if step.kind == KIND_ERROR:
