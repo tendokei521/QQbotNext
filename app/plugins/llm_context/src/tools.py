@@ -16,16 +16,15 @@ def _renderer(runtime: Any):
     return getattr(runtime, "message_assembly", None)
 
 
-def _reply_mode(runtime: Any) -> str:
-    """当前回复模式：参与度模式下历史里的 assistant 要显示成工具调用。"""
-    config = getattr(runtime, "config", None)
-    getter = getattr(config, "get", None)
-    if callable(getter):
-        try:
-            return str(getter("reply_mode", "legacy") or "legacy")
-        except Exception:  # noqa: BLE001
-            return "legacy"
-    return "legacy"
+def _reply_mode(runtime: Any, *, is_private: bool = False) -> str:
+    """当前生效回复模式：参与度模式下历史里的 assistant 要显示成工具调用。
+
+    私聊恒为普通输出（``legacy``）：私聊没有发言通道，历史不能渲染成
+    ``[tool_call:send_message]``，否则模型会以为文本不会发出去。
+    """
+    from app.agent.capabilities import reply_mode_for
+
+    return reply_mode_for(getattr(runtime, "config", None), is_private=is_private)
 
 
 def _plain_segments(message: Any) -> str:
@@ -109,7 +108,7 @@ async def _handle(tool_ctx: ToolContext, args: dict) -> str:
             history,
             is_private=is_private,
             renderer=getattr(runtime, "history_renderer", None),
-            reply_mode=_reply_mode(runtime),
+            reply_mode=_reply_mode(runtime, is_private=is_private),
         )
         return "\n".join(str(item.get("content", "")) for item in rendered)
 

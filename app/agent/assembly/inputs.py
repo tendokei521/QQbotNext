@@ -30,6 +30,7 @@ async def collect_history_materials(
       ``memory_text`` 供旧调用方使用：v3 起记忆不再注入 system 指令位。
     """
     from app.agent.assembly.compress import maybe_compress_context
+    from app.agent.capabilities import reply_mode_for
     from app.agent.context.group import format_history_for_llm
 
     rounds = int(config.get("history_rounds", 25) or 25)
@@ -45,7 +46,7 @@ async def collect_history_materials(
         normalize_enhanced=bool(config.get("experimental_long_term_memory", False)),
         mask_nickname=True,
         renderer=getattr(runtime, "history_renderer", None),
-        reply_mode=str(config.get("reply_mode", "legacy") or "legacy"),
+        reply_mode=reply_mode_for(config, is_private=is_private),
     )
     if compress:
         chain = runtime.provider_chain() if callable(getattr(runtime, "provider_chain", None)) else []

@@ -38,7 +38,23 @@ def _reply_config_getter(req: Any):
 
 
 def reply_rules_section(req: Any) -> list[dict]:
-    """L1 段：把当前回复模式的内置规则告诉模型（随回复设置动态变化）。"""
+    """L1 段：把当前回复模式的内置规则告诉模型（随回复设置动态变化）。
+
+    私聊与群聊是两套语义：群聊才有"参与度/沉默"，私聊是一对一、对方直接找你，
+    文本即回复。私聊段**不读 reply_mode**——它在私聊不生效。
+    """
+    if bool(getattr(req, "is_private", False)):
+        return [{
+            "role": "system",
+            "content": (
+                "### 私聊\n"
+                "你正在和对方一对一私聊（QQ 私信）。对方直接找你，通常应当回应，"
+                "不需要判断参与度，也不用等被 @。\n"
+                "你输出的正文会直接作为消息发出；想说什么就用自己的话直接说，"
+                "可以简短，也可以反问，但不要用沉默代替回应。"
+            ),
+        }]
+
     getter = _reply_config_getter(req)
     try:
         mode = str(getter("reply_mode", "legacy") or "legacy")

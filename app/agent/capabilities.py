@@ -74,11 +74,14 @@ class OutputCapability:
         return self.kind == OUTPUT_SPEECH
 
     @classmethod
-    def from_config(cls, config: Any, *, source: str = "config") -> OutputCapability:
+    def from_config(
+        cls, config: Any, *, source: str = "config", is_private: bool = False
+    ) -> OutputCapability:
         """按配置推导（**升级兜底**：没人声明时保持改造前的行为）。
 
-        「发言通道」由**回复模式**决定（参与度模式 = 文本只是思考），不再读
-        `speech_via_tool`；其余形态仍按 `stream_output` 推导。
+        「发言通道」由**回复模式**决定（参与度模式 = 文本只是思考），但**仅限群聊**：
+        私聊是一对一、对方直接找你，不存在"看到但不接话"的场景，永远走普通输出
+        （文本即回复）。其余形态仍按 ``stream_output`` 推导。
         """
         getter = getattr(config, "get", None)
         if not callable(getter):
@@ -90,7 +93,7 @@ class OutputCapability:
             except Exception:  # noqa: BLE001 —— 配置坏了按默认（非流式/非发言通道）
                 return False
 
-        if reply_mode_of(config) == "participation":
+        if speech_channel_for(config, is_private=is_private):
             return cls(OUTPUT_SPEECH, "reply_mode")
         return cls(OUTPUT_STREAM if _flag("stream_output") else OUTPUT_BLOCKING, source)
 
@@ -180,14 +183,38 @@ def reply_mode_of(config: Any) -> str:
         return "legacy"
 
 
-def output_capability(runtime: Any, config: Any = None) -> OutputCapability:
+def reply_mode_for(config: Any, *, is_private: bool = False) -> str:
+    """**本轮生效**的回复模式：私聊永远是 ``legacy``（普通输出）。
+
+    参与度模式（全量观察 / 档位 / 预算 / 同群冷却 / 沉默语义）全部是群聊机制，
+    在私聊里既不运行也没有意义。此前它按账号级下发到私聊，私聊只继承了副作用
+    「文本=思考」，于是回复要靠 ``send_message`` 工具——非流式路径把它发进群 0，
+    用户一条都收不到。场景维度必须在**取用口**收口，而不是靠调用方各自记得判断。
+    """
+    return "legacy" if is_private else reply_mode_of(config)
+
+
+def speech_channel_for(config: Any, *, is_private: bool = False) -> bool:
+    """本轮是否走「发言通道」（文本=思考，``send_message`` 才是发言）。
+
+    **仅群聊**：``reply_mode=participation`` 且不是私聊。私聊一律普通输出。
+    """
+    return (not is_private) and reply_mode_of(config) == "participation"
+
+
+def output_capability(runtime: Any, config: Any = None, *, is_private: bool = False) -> OutputCapability:
     """输出能力：**回复模式优先** → 模块声明 → 配置推导。
 
     「发言通道」（文本=思考，发言走 ``send_message``）是回复模式的语义，不是输出模块的
     一个选项：参与度模式下它必须成立，否则"沉默"这个状态根本不存在。所以这条判定放在
     声明之前——模块只能决定"流式 / 一次性"，不能把参与度模式改回文本即回复。
+
+    **私聊例外**：私聊永远普通输出（文本即回复），既不看回复模式，也不接受模块声明的
+    发言通道。理由见 ``speech_channel_for``。
     """
     cfg = config if config is not None else getattr(runtime, "config", None)
+    if is_private:
+        return OutputCapability.from_config(cfg, is_private=True)
     if reply_mode_of(cfg) == "participation":
         return OutputCapability(OUTPUT_SPEECH, "reply_mode")
     registry = getattr(runtime, "capabilities", None)

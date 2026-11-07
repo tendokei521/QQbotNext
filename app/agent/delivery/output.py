@@ -365,6 +365,19 @@ class SpeechOutput:
                 await asyncio.to_thread(session_mgr.history.save_session, session)
 
 
+def _ctx_is_private(ctx: Any) -> bool:
+    """本轮是否私聊：优先流水线写入的事实，其次事件协议字段，最后会话前缀。"""
+    state = getattr(ctx, "state", None)
+    if isinstance(state, dict) and "is_private" in state:
+        return bool(state.get("is_private"))
+    event = getattr(ctx, "event", None)
+    if event is not None:
+        from app.domain.events import is_private_event
+
+        return is_private_event(event)
+    return str(getattr(ctx, "session_id", "") or "").startswith("private_")
+
+
 def select_default_output(config: Any = None, runtime: Any = None, ctx: Any = None) -> OutputStrategy:
     """框架默认输出策略：**通道**（发言通道 / 文本即回复）× **传输**（流式 / 一次拿全）。
 
@@ -377,22 +390,25 @@ def select_default_output(config: Any = None, runtime: Any = None, ctx: Any = No
     | 发言通道 | 流式 | `SpeechOutput(stream=True)` |
     | 发言通道 | 非流式 | `SpeechOutput(stream=False)` |
 
-    通道由**回复模式**决定（`reply_mode=participation` ⇒ 发言通道）；传输由
-    `stream_output` 决定。模块声明（`capabilities`）只在 legacy 且没有上下文时参与，
-    不再能把发言通道改回"文本即回复"。
+    通道由**回复模式**决定（`reply_mode=participation` ⇒ 发言通道），**但仅限群聊**；
+    私聊永远文本即回复（`reply_mode` 在私聊不生效）。传输由 `stream_output` 决定。
+    模块声明（`capabilities`）只在群聊 legacy 且没有上下文时参与，
+    不再能把发言通道改回"文本即回复"，也不能把私聊变成发言通道。
     """
     from app.agent.capabilities import output_capability
     from app.agent.delivery.speech import speech_via_tool
 
+    is_private = _ctx_is_private(ctx) if ctx is not None else False
     participation_turn = bool(
         ctx is not None and getattr(ctx, "state", None) and ctx.state.get("participation_gate")
     )
-    speech = participation_turn or speech_via_tool(config)
+    # 参与度门只在群聊打开（pipeline 只对 message_group 过门）；私聊一律普通输出。
+    speech = participation_turn or speech_via_tool(config, is_private=is_private)
     transport = _transport_stream(config, runtime)
     if speech:
         return SpeechOutput(runtime, config, stream=transport)
-    capability = output_capability(runtime, config)
-    if capability.speech:  # 声明了发言通道（模块/配置），同样尊重传输开关
+    capability = output_capability(runtime, config, is_private=is_private)
+    if capability.speech and not is_private:  # 声明了发言通道（模块/配置），同样尊重传输开关
         return SpeechOutput(runtime, config, stream=transport)
     return StreamOutput(runtime, config) if transport else BlockingOutput(runtime, config)
 
@@ -453,6 +469,10 @@ def resolve_output(runtime: Any, ctx: Any = None) -> OutputStrategy:
     """
     strategy = getattr(runtime, "output", None)
     if isinstance(strategy, OutputStrategy) and callable(getattr(strategy, "respond", None)):
+        # 私聊永远普通输出：模块策略（含发言通道实现）不能改写场景语义。
+        if _ctx_is_private(ctx) and (isinstance(strategy, SpeechOutput) or getattr(strategy, "speech", False)):
+            view = getattr(strategy, "config_view", None) or getattr(runtime, "config", None)
+            return select_default_output(view, runtime, ctx)
         # 模块接管：参与度模式下仍需框架的发言通道语义——模块策略只在 legacy 生效
         participation_turn = bool(
             ctx is not None

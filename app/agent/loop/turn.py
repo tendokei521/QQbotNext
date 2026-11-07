@@ -330,6 +330,7 @@ async def _run_inner(
                 config=config,
                 on_sentence=on_sentence,
                 usage_sink=sink,
+                is_private=is_private,
                 state=state,
                 ctx=ctx,
                 tool_log=turn_log,
@@ -346,6 +347,7 @@ async def _run_inner(
                 use_tools=use_tools,
                 config=config,
                 usage_sink=sink,
+                is_private=is_private,
                 state=state,
                 ctx=ctx,
                 tool_log=turn_log,
@@ -457,6 +459,7 @@ async def _chat_once(
     use_tools: bool,
     config: Any,
     usage_sink: dict,
+    is_private: bool = False,
     state: TurnState | None = None,
     ctx: Any = None,
     tool_log: Any = None,
@@ -486,7 +489,8 @@ async def _chat_once(
             await run_stage(runtime, "step_completed", ctx)
 
     # 发言通道：正文只是思考；兜底开关只在通道内生效（文本即回复时正文已发出，不能重放）。
-    speech_by_tool = speech_via_tool(config)
+    # 私聊永远普通输出（`is_private`），不把正文当思考。
+    speech_by_tool = speech_via_tool(config, is_private=is_private)
     text_tool_call_fallback = speech_by_tool and bool(
         config.get("text_tool_call_fallback", False)
     )
@@ -554,6 +558,7 @@ async def _stream_once(
     config: Any,
     on_sentence: Callable[[str], Awaitable[None]] | None,
     usage_sink: dict,
+    is_private: bool = False,
     state: TurnState | None = None,
     ctx: Any = None,
     tool_log: Any = None,
@@ -580,7 +585,8 @@ async def _stream_once(
     sentences: list[str] = []
     limits = TurnLimits.from_config(config)
     # 发言通道：正文只是思考；兜底开关只在通道内生效（文本即回复时正文已发出，不能重放）。
-    speech_by_tool = speech_via_tool(policy_cfg)
+    # 私聊永远普通输出（`is_private`），不把正文当思考。
+    speech_by_tool = speech_via_tool(policy_cfg, is_private=is_private)
     text_tool_call_fallback = speech_by_tool and bool(
         policy_cfg.get("text_tool_call_fallback", False)
     )

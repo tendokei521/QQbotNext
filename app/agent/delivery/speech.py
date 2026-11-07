@@ -325,23 +325,25 @@ def _normalize_at(raw: Any) -> tuple[str, ...]:
     return tuple(result)
 
 
-def speech_via_tool(config: Any, *, stream_output: bool | None = None) -> bool:
+def speech_via_tool(config: Any, *, stream_output: bool | None = None, is_private: bool = False) -> bool:
     """本轮是否走「文本=思考，send_message 才是发言」的通道。
 
-    **由回复模式决定**（2026-11-01 从模块移植为系统能力）：
-    - `reply_mode=participation` → 必然 True。参与度模式的沉默语义就建立在这上面，
-      没有它模型只能"把想法直接说出来"，"沉默"无从表达；
-    - `reply_mode=legacy` → False（文本即回复，流式/一次性由输出模块决定）。
+    **由回复模式决定，且仅群聊**（2026-11-07 收口）：
+    - `reply_mode=participation` **且不是私聊** → True。参与度模式的沉默语义就建立在
+      这上面，没有它模型只能"把想法直接说出来"，"沉默"无从表达；
+    - `reply_mode=legacy` → False（文本即回复，流式/一次性由输出模块决定）；
+    - **私聊恒为 False**：一对一里对方直接找你，不存在"参与度/看到但不接话"；
+      发言通道在私聊只继承副作用（文本不发送），已实际导致私信发送链路断裂。
 
     历史实现读 `speech_via_tool` 开关（llm_output 模块的"输出形态"三选一之一），
     于是装配层与输出层各看一个开关，最坏组合是"贴了发言协议但输出层按文本发"。
     那个键已退役，输出模块不再管发言通道。
     """
-    from app.agent.capabilities import reply_mode_of
+    from app.agent.capabilities import speech_channel_for
 
     if config is None or not hasattr(config, "get"):
         return False
-    return reply_mode_of(config) == "participation"
+    return speech_channel_for(config, is_private=is_private)
 
 
 def _validated_reply_id(ctx: Any, reply_id: str) -> str:

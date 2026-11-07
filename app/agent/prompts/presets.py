@@ -577,6 +577,8 @@ def render(
     config: Any = None,
     modalities: list[str] | None = None,
     override: str = "",
+    *,
+    is_private: bool = False,
 ) -> str:
     """按方案渲染行为段正文。
 
@@ -584,14 +586,22 @@ def render(
     只强制追加方案自己的「安全规则」与「工作方式」两段——与
     ``override_with_safety``（本文件）同一条底线：一次误配置不该能把
     "不越权 / 不泄露 / 怎么发言"整套删掉，也不该让模型对"文本是否发得出去"产生错误认知。
+
+    ``is_private`` 决定场景文案：私聊不出现群聊参与度/群友身份/发言通道条款。
     """
     segs = segments_of(preset)
     text = str(override or "").strip()
     if not text:
-        return _with_recap(persona_rules.render(runtime, available_tools, config, modalities, segments=segs))
+        return _with_recap(
+            persona_rules.render(
+                runtime, available_tools, config, modalities, segments=segs, is_private=is_private
+            )
+        )
 
     cfg = config if config is not None else getattr(runtime, "config", None)
-    caps = persona_rules.detect_caps(available_tools, cfg, modalities)
+    caps = persona_rules.detect_caps(
+        available_tools, cfg, modalities, is_private=is_private
+    )
     keep: list[str] = []
     for name, fn in segs:
         if name not in ("security", "work"):

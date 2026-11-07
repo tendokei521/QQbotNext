@@ -266,6 +266,9 @@ class LlmPipeline:
             session_id=session_id,
             user_text=user_text,
         )
+        # 场景事实只定一次：下游（输出策略 / 历史渲染 / 工具作用域）读这一份，
+        # 不再各自从 event.group 是否存在去猜。
+        ctx.state["is_private"] = not is_group
         job = LlmJob(id=uuid.uuid4().hex, group_key=session_id, ctx=ctx, generation=generation)
         job.busy_dropped = busy_dropped
         if participation and would_trigger and not busy_dropped:

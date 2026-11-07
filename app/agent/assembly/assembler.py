@@ -498,6 +498,10 @@ def apply_speech_protocol(messages: list[dict], req: PromptRequest) -> list[dict
     from app.agent.delivery.speech import speech_via_tool
     from app.agent.prompts.system import SPEECH_PROTOCOL
 
+    # 私聊永远普通输出：文本就是回复，贴「文本只是思考」会把模型带偏。
+    if bool(getattr(req, "is_private", False)):
+        return messages
+
     config = getattr(req, "config", None)
     forced = False
     ctx = getattr(req, "ctx", None)

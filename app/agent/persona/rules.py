@@ -78,10 +78,13 @@ def detect_caps(
     available_tools: set[str] | None = None,
     config: Any = None,
     modalities: list[str] | None = None,
+    *,
+    is_private: bool = False,
 ) -> dict:
     """探测本轮能力：段落据此决定哪些句子出现。
 
     返回的键同时给测试用（逐条断言"能力关掉 → 对应句子消失"）。
+    ``is_private`` 决定场景：私聊不可能是发言通道（文本即回复），参与度也不适用。
     """
     tools = set(available_tools) if available_tools is not None else None
     caps: dict[str, Any] = {
@@ -89,6 +92,7 @@ def detect_caps(
     }
     caps["has_memory"] = tools is None or any(n.startswith("memory_") for n in tools)
     caps["has_any_tool"] = tools is None or bool(tools)
+    caps["is_private"] = bool(is_private)
 
     # 视觉：模型声明的模态说了算；未声明（None=旧行为）时看总开关
     try:
@@ -101,14 +105,15 @@ def detect_caps(
         vision = True
     caps["vision"] = vision
 
-    # 发言通道：与 ``speech.speech_via_tool`` 同一判定（只看开关），
-    # 否则会出现"提示词说文本不会发出去、实际文本就是发出去"的自相矛盾。
+    # 发言通道：与 ``speech.speech_via_tool`` 同一判定（回复模式 + 场景），
+    # 否则会出现"提示词说文本不会发出去、实际文本就是发出去"的自相矛盾；
+    # 私聊永远是文本即回复，所以这里也必须为 False。
     try:
         from app.agent.delivery.speech import speech_via_tool
 
-        speech_by_tool = speech_via_tool(config)
+        speech_by_tool = speech_via_tool(config, is_private=is_private)
     except Exception:  # noqa: BLE001
-        speech_by_tool = bool(_cfg(config, "speech_via_tool", False))
+        speech_by_tool = bool(_cfg(config, "speech_via_tool", False)) and not is_private
     caps["speech_by_tool"] = speech_by_tool
     caps["outbound_directive"] = bool(_cfg(config, "outbound_directive_enable", True))
     # 引用/@ 的输出通道：工具通道与行内指令通道二选一
@@ -132,15 +137,18 @@ def render(
     config: Any = None,
     modalities: list[str] | None = None,
     segments: tuple[tuple[str, Any], ...] = (),
+    *,
+    is_private: bool = False,
 ) -> str:
     """按段落表渲染整段行为规则（一条 system 的正文）。
 
     ``segments`` 由提示词方案提供（``prompts.presets.segments_of``）；空表返回空串
     ——调用方应显式传入，缺省值只为兼容"没有方案"的库层直接调用。
     ``runtime`` 只在 ``config`` 缺省时用来取配置，其余不读运行时状态。
+    ``is_private`` 透传给能力探测与文案（私聊不出现群聊参与度/发言通道条款）。
     """
     cfg = config if config is not None else getattr(runtime, "config", None)
-    caps = detect_caps(available_tools, cfg, modalities)
+    caps = detect_caps(available_tools, cfg, modalities, is_private=is_private)
     parts: list[str] = []
     for name, fn in segments:
         try:

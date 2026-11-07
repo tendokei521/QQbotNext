@@ -35,6 +35,7 @@ from app.agent import logger
 from app.core.logger import account_label
 from app.agent.assembly.assembler import PromptRequest
 from app.agent.assembly.compress import maybe_compress_context
+from app.agent.capabilities import reply_mode_for
 from app.agent.context.group import (
     fetch_private_online_history,
 )
@@ -126,6 +127,10 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
     user_text = turn.user_text
     raw_user_text = turn.raw_user_text
     include_pre_history = turn.include_pre_history
+    if ctx is not None and isinstance(getattr(ctx, "state", None), dict):
+        # 把场景事实挂到本轮上下文：下游（输出策略 / 提示词段 / 历史渲染）只认这一份，
+        # 不再各自从 event.group 是否存在去猜。
+        ctx.state["is_private"] = bool(is_private)
     if bot is None:
         bot = getattr(event, "bot", None)
 
@@ -215,7 +220,9 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
             session_history_raw, is_private,
             bot_id=getattr(runtime, "bot_id", ""), session_id=session_id,
             runtime=runtime,
-            reply_mode=str(config.get("reply_mode", "legacy") or "legacy"),
+            # 私聊永远按普通输出渲染 assistant 历史（发言通道的 [tool_call:...] 形态
+            # 只属于群聊参与度模式；私聊沿用会让模型误以为文本不会发出去）。
+            reply_mode=reply_mode_for(config, is_private=is_private),
             entry_media=_history_media_hook(
                 session_history_raw,
                 # 历史图片与"本轮图片"同一道门：开关 + 模型声明 image 模态
@@ -267,8 +274,8 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
     all_specs, skill_blocks, tool_ctx = await _collect_llm_ext(
         runtime, event, session_id, is_private, schedule_enable
     )
-    # 发言通道：**由回复模式决定**（`reply_mode=participation` ⇒ 文本只当思考，
-    # 真正的发言走 send_message / finish；legacy ⇒ 文本即回复）。
+    # 发言通道：**由回复模式决定，且仅群聊**（`reply_mode=participation` 且非私聊
+    # ⇒ 文本只当思考，真正的发言走 send_message / finish；私聊与 legacy ⇒ 文本即回复）。
     # `ctx.state["participation_gate"]` 是流水线本轮过门时打的标记：群级覆盖下
     # 账号级配置读不到参与度模式，这个标记是唯一可靠的事实。
     from app.agent.policy import policy_view
@@ -277,7 +284,9 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
     participation_turn = bool(ctx is not None and ctx.state.get("participation_gate"))
     # 非流式请求：让 send_message 入稿即发送（见 SpeechOutbox.immediate）
     immediate = bool(ctx is not None and ctx.state.get("speech_immediate"))
-    speech = _build_speech(policy_cfg, force=participation_turn, immediate=immediate)
+    speech = _build_speech(
+        policy_cfg, force=participation_turn, immediate=immediate, is_private=is_private
+    )
     if speech is not None and ctx is not None:
         # 非流式的发言通道需要在一轮结束后统一 flush：把 outbox 挂到 ctx 上，
         # 由输出策略取用（流式路径仍走 meta["speech"]，两条路共用同一个 outbox）。
@@ -297,7 +306,7 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
                 "[LLM] 人格卡里有「输出格式」条款，会与发言通道（文本=思考）冲突，"
                 f"建议移到行为层或删掉：{conflicts}"
             )
-    elif _speech_intent(policy_cfg):
+    elif _speech_intent(policy_cfg, is_private=is_private):
         # 只在第一次告警：配置矛盾是持久状态，每条消息刷一遍日志没有信息量
         warn_key = (getattr(runtime, "bot_id", 0), "speech_intent")
         if warn_key not in _WARNED_SPEECH_INTENT:

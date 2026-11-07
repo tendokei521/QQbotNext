@@ -34,13 +34,14 @@ def _clean_output_for_history(config, text: str) -> str:
 _WARNED_SPEECH_INTENT: set = set()
 
 
-def _build_speech(config, *, force: bool = False, immediate: bool = False):
+def _build_speech(config, *, force: bool = False, immediate: bool = False, is_private: bool = False):
     """按配置构造本轮发言记账本；不该启用时返回 None（= 旧的文本即发言）。
 
     Args:
         force: 本轮已由回复模式判定为发言通道（`reply_mode=participation`）。
             群级覆盖下 `config` 可能是账号级视图，读不到 `reply_mode`，所以要显式传。
         immediate: 入稿即发送（非流式请求没有轮次边界可 flush，只能由工具自己发）。
+        is_private: 私聊永远普通输出——不构造 outbox、不注入 send_message/finish。
     """
     from app.agent.delivery.speech import (
         DEFAULT_MAX_BUBBLE_CHARS,
@@ -49,6 +50,8 @@ def _build_speech(config, *, force: bool = False, immediate: bool = False):
         speech_via_tool,
     )
 
+    if is_private:
+        return None
     if not (force or speech_via_tool(config)):
         return None
     try:
@@ -61,12 +64,12 @@ def _build_speech(config, *, force: bool = False, immediate: bool = False):
     return SpeechOutbox(max_bubbles=max_bubbles, max_chars=max_chars, immediate=immediate)
 
 
-def _speech_intent(config) -> bool:
-    """本轮是否**应该**走发言通道（由回复模式决定，见 delivery/speech.py）。"""
+def _speech_intent(config, *, is_private: bool = False) -> bool:
+    """本轮是否**应该**走发言通道（由回复模式决定，**仅群聊**；见 delivery/speech.py）。"""
     from app.agent.delivery.speech import speech_via_tool
 
     try:
-        return speech_via_tool(config)
+        return speech_via_tool(config, is_private=is_private)
     except Exception:  # noqa: BLE001
         return False
 

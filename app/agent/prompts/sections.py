@@ -123,6 +123,7 @@ def build_behavior(req: Any) -> list[dict]:
             req.config,
             req.modalities,
             segments=prompt_presets.CHAT_SEGMENTS,
+            is_private=bool(getattr(req, "is_private", False)),
         )
         return [{"role": "system", "content": text}] if str(text).strip() else []
     # 设置页的「系统提示词覆盖」已暂时停用（2026-11-03）：两套文案以仓内代码为准，
@@ -133,6 +134,7 @@ def build_behavior(req: Any) -> list[dict]:
         available_tools=req.available_tools,
         config=req.config,
         modalities=req.modalities,
+        is_private=bool(getattr(req, "is_private", False)),
     )
     return [{"role": "system", "content": text}] if str(text).strip() else []
 
