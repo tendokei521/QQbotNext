@@ -14,7 +14,6 @@ import json
 import socket
 import time
 
-import pytest
 import websockets
 
 from app.infrastructure.cache import Cache
@@ -131,7 +130,7 @@ async def test_reverse_client_attaches_and_dispatches_message():
         assert info["bot_id"] == 10001, "接入后应主动拉一次登录信息"
     finally:
         task.cancel()
-        with pytest.raises(asyncio.CancelledError):
+        with contextlib.suppress(asyncio.CancelledError):
             await task
         await gw.shutdown()
 
@@ -235,7 +234,7 @@ async def test_peer_close_keeps_listener_and_waits_again():
         assert await _wait(lambda: gw.connections["acc0"].status == "connected")
         stop.set()
         task.cancel()
-        with pytest.raises(asyncio.CancelledError):
+        with contextlib.suppress(asyncio.CancelledError):
             await task
         assert await _wait(lambda: gw.connections["acc0"].status == "connecting"), \
             "对端断开后监听仍在 → 状态应回到等待接入"

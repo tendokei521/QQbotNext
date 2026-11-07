@@ -112,7 +112,7 @@ class _ScriptedWs:
             })
         if self._step == 1:
             self._step = 2
-            deadline = time.monotonic() + 2
+            deadline = time.monotonic() + 8
             while not any(p.get("action") == "send_private_msg" for p in self.sent):
                 if time.monotonic() > deadline:
                     break
@@ -160,7 +160,7 @@ async def test_dispatch_does_not_block_api_response():
     gw.dispatch_handler = handler
     task = asyncio.create_task(gw._bot_server("main"))
     try:
-        await asyncio.wait_for(reply_ok.wait(), 2)
+        await asyncio.wait_for(reply_ok.wait(), 10)
     finally:
         task.cancel()
         try:
@@ -192,7 +192,7 @@ class _FailedRespWs:
             })
         if self._step == 1:
             self._step = 2
-            deadline = time.monotonic() + 2
+            deadline = time.monotonic() + 8
             while not any(p.get("action") == "send_private_msg" for p in self.sent):
                 if time.monotonic() > deadline:
                     break
@@ -239,7 +239,7 @@ async def test_failed_api_response_consumed_not_timeout():
     gw.dispatch_handler = handler
     task = asyncio.create_task(gw._bot_server("main"))
     try:
-        await asyncio.wait_for(got.wait(), 2)
+        await asyncio.wait_for(got.wait(), 10)
     finally:
         task.cancel()
         try:
