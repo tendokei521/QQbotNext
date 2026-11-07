@@ -49,12 +49,16 @@ ROOT = Path(__file__).resolve().parents[1]
 EXCLUDE_DIRS = {
     ".git", ".github", "venv", ".venv", "data", "logs", "node_modules",
     "__pycache__", ".pytest_cache", ".ruff_cache", ".idea", ".vscode",
+    "tests", "backups",
 }
-ROOT_ONLY_EXCLUDE_DIRS = {"dist", "build"}
+ROOT_ONLY_EXCLUDE_DIRS = {"dist", "build", "htmlcov"}
 EXCLUDE_FILES = {
-    ".env", "pytest.ini", ".coverage", ".gitmessage",
+    ".env", "pytest.ini", ".coverage", ".gitmessage", ".coverage.xml",
 }
 EXCLUDE_SUFFIXES = (".pyc", ".pyo", ".log", ".db", ".db-wal", ".db-shm")
+#: 本地测试/构建留下的目录（按前缀 / 后缀匹配，不随仓库分发）
+EXCLUDE_DIR_PREFIXES = ("pytest-of-",)
+EXCLUDE_DIR_SUFFIXES = (".egg-info",)
 
 #: 顶层必须存在的入口（缺任何一个，包都不可用 → 直接失败）
 REQUIRED_ENTRIES = ("start.sh", "start.py", "check_deps.py", "main.py", "pyproject.toml")
@@ -69,7 +73,7 @@ README_FIRST = """QQBot Next - 免安装发行包
 --------
 1. Windows 双击 `start.py`（或命令行 python start.py）；macOS/Linux 执行 ./start.sh。
    首次启动会自动建 venv、装依赖（离线包会直接用 wheelhouse/ 里的轮子）。
-2. 浏览器打开 http://127.0.0.1:8080 ，进入「首次配置」向导：
+2. 浏览器打开 http://127.0.0.1:9200 ，进入「首次配置」向导：
    连接账号 -> 配置模型 -> 写人设 -> 完成检查。
 3. 在群里 @ 机器人试一句。没反应就看总览页「运行状态」卡，它会告诉你差什么。
 
@@ -81,7 +85,7 @@ README_FIRST = """QQBot Next - 免安装发行包
 数据在哪
 --------
 data/（数据库与配置）、logs/（日志）都在本目录下，**升级时不要删**；
-换机迁移用「预设中心」导出/导入。
+换机迁移用「配置包」导出/导入。
 
 出问题先看
 ----------
@@ -91,11 +95,20 @@ data/（数据库与配置）、logs/（日志）都在本目录下，**升级�
 """
 
 
+def _is_excluded_dir(name: str) -> bool:
+    """目录名命中排除规则（测试临时目录、egg-info 等按前后缀匹配）。"""
+    if name in EXCLUDE_DIRS:
+        return True
+    if name.startswith(EXCLUDE_DIR_PREFIXES) or name.endswith(EXCLUDE_DIR_SUFFIXES):
+        return True
+    return False
+
+
 def _is_excluded(relative: Path) -> bool:
     parts = relative.parts
     if parts and parts[0] in ROOT_ONLY_EXCLUDE_DIRS:
         return True
-    if any(part in EXCLUDE_DIRS for part in parts[:-1]):
+    if any(_is_excluded_dir(part) for part in parts[:-1]):
         return True
     if relative.name in EXCLUDE_FILES:
         return True
@@ -131,7 +144,7 @@ def validate_tree(root: Path) -> None:
 
 
 def _write_zip(files: dict[str, bytes], out_path: Path) -> None:
-    """确定性 zip：固定时间戳 + 排序写入。"""
+    """确定性 zip：固定时间戳 + 排序写入；Unix 可执行位随条目保留。"""
     fixed = (2020, 1, 1, 0, 0, 0)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     buffer = io.BytesIO()
@@ -139,7 +152,10 @@ def _write_zip(files: dict[str, bytes], out_path: Path) -> None:
         for name in sorted(files):
             info = zipfile.ZipInfo(name, date_time=fixed)
             info.compress_type = zipfile.ZIP_DEFLATED
-            info.external_attr = 0o644 << 16
+            # create_system=3（Unix）后，解压端才认 external_attr 里的权限位；
+            # start.sh 必须带可执行位，否则 macOS/Linux 解压后无法 ./start.sh。
+            info.create_system = 3
+            info.external_attr = (0o755 if name.endswith(".sh") else 0o644) << 16
             archive.writestr(info, files[name])
     out_path.write_bytes(buffer.getvalue())
 
