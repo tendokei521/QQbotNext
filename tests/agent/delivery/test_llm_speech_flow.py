@@ -324,3 +324,45 @@ async def test_pipeline_sends_bubbles_and_backfills_history_id(monkeypatch, tmp_
     assert [str(e.get("message_id")) for e in entries] == ["9001", "9002"], (
         "每条气泡的历史都要拿到自己那条消息的 id（顺序反了会落到上一条上）"
     )
+
+def _private_event():
+    from app.domain.events import MessageSegment, PrivateMessageEvent, UserInfo
+
+    return PrivateMessageEvent(
+        event_type="message_private",
+        message_type="private",
+        time=1788342260,
+        user_id=20002,
+        self_id=778,
+        message_id=900,
+        message=[MessageSegment("text", {"text": "在吗"})],
+        user=UserInfo(user_id=20002, nickname="小明"),
+    )
+
+
+async def test_private_turn_never_enables_speech_channel(monkeypatch, tmp_path):
+    """私聊即使账号 reply_mode=participation，也不构造发言通道/工具/协议。
+
+    契约：私聊永远普通输出。历史事故正是私聊继承了发言通道，非流式路径把
+    回复发进 group 0（用户收不到、模型还收到"已发出"回执）。
+    """
+    from app.agent.delivery.output import BlockingOutput, resolve_output
+    from app.agent.loop.chat import prepare_prompt
+    from app.agent.loop.context import LlmContext
+
+    _register(monkeypatch)
+    monkeypatch.setenv("QQBOT_LLM_DATA_DIR", str(tmp_path / "llm"))
+    rt = _runtime(995, _config(reply_mode="participation", stream_output=False))
+    event = _private_event()
+    ctx = LlmContext(event=event, runtime=None, bot=None, session_id="private_20002")
+    ctx.user_text = "在吗"
+    ctx.state["user_context"] = {"sent_text": "在吗", "sender": "20002"}
+
+    _req, _session, meta = await prepare_prompt(rt, event, ctx)
+
+    assert meta["is_private"] is True
+    assert meta["speech"] is None, "私聊不应构造 SpeechOutbox"
+    names = {spec.name for spec in meta["all_specs"]}
+    assert "send_message" not in names
+    assert "finish" not in names
+    assert isinstance(resolve_output(rt, ctx), BlockingOutput)
