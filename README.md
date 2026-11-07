@@ -1,6 +1,6 @@
 <div align="center">
 
-# QQBot Next 2.0
+# QQBot Next 1.0
 
 **轻量化、易配置、功能全面的类 AstrBot QQ 机器人框架**
 
@@ -8,7 +8,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![OneBot](https://img.shields.io/badge/OneBot-v11-4B8BBE)](https://github.com/botuniverse/onebot-11)
-[![Version](https://img.shields.io/badge/version-2.0.0-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue)](CHANGELOG.md)
 [![License](https://img.shields.io/github/license/tendokei521/QQbotNext)](LICENSE)
 
 [它能做什么](#它能做什么) · [快速开始](#快速开始) · [接入 QQ](#接入-qq) · [管理后台](#管理后台) · [技术架构](#技术架构) · [文档](#文档)

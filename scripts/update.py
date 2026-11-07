@@ -8,7 +8,7 @@
 
     python scripts/update.py status                       # 当前版本 / 待应用 / 可回滚
     python scripts/update.py check --release rel.json     # 用本地 release JSON 比对（离线）
-    python scripts/update.py stage --kit QQBotNext-2.0.0-kit.zip
+    python scripts/update.py stage --kit QQBotNext-1.0.0-kit.zip
     python scripts/update.py apply                        # 备份并切上线（重启后生效）
     python scripts/update.py rollback                     # 退回上一版（含数据库备份）
 

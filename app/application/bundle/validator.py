@@ -114,7 +114,7 @@ def validate_bytes(
     data: bytes,
     *,
     framework_api_version: int = 1,
-    framework_version: str = "2.0.0",
+    framework_version: str = "1.0.0",
     installed_modules: dict[str, str] | None = None,
     agent_schema: dict | None = None,
     builtin_modules: set[str] | None = None,

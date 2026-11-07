@@ -207,7 +207,7 @@ def _wants_html(request: Request) -> bool:
 
 def create_app(container) -> FastAPI:
     """根据容器装配 FastAPI 应用。"""
-    app = FastAPI(title="QQBot Next 管理后台", version="2.0.0")
+    app = FastAPI(title="QQBot Next 管理后台", version="1.0.0")
     app.state.container = container
 
     # 路由

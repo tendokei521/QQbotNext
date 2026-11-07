@@ -1,6 +1,6 @@
 [project]
 name = "qqbot-next"
-version = "2.0.0"
+version = "1.0.0"
 description = "基于 OneBot 协议的多账号 QQ 机器人框架（分层 + 插件架构）"
 readme = "README.md"
 requires-python = ">=3.10"

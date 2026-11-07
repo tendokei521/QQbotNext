@@ -31,7 +31,7 @@ class BundleService:
         module_installer: Any = None,
         agent_schema: dict | None = None,
         framework_api_version: int = 1,
-        framework_version: str = "2.0.0",
+        framework_version: str = "1.0.0",
     ) -> None:
         self.config_service = config_service
         self.agent_manager = agent_manager
