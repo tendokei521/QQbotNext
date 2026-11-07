@@ -71,7 +71,8 @@ DEFAULT_LLM_CONFIG: dict = {
     "context_compress_prompt": "请把上面的历史对话压缩成一份简洁但完整的摘要，用于后续对话无缝续接：\n1. 覆盖所有核心话题及最终结论/结果；\n2. 高亮最近的主要关注点；\n3. 如有工具调用、任务进度或待办，说明当前状态和下一步；\n4. 保留用户的重要个人信息、偏好、称呼等关键事实；\n5. 使用与对话相同的语言输出。\n只输出摘要内容，不要输出额外解释。",
     # 消息组装方式（系统方案）：结构化 / 原始正文
     "structured_assembly": True,
-    # 回复模式：legacy=条件触发；participation=全量观察+参与度
+    # 回复模式（仅群聊）：legacy=条件触发；participation=全量观察+参与度。
+    # 私聊永远是普通输出（文本即回复），该键在私聊不生效。
     "reply_mode": "legacy",
     "participation_level": "low",
     "participation_max_requests": 60,    # 5 分钟窗口请求上限（执行按 30 秒粒度折算：每 30 秒 ≤ 6 次）

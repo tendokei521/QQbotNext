@@ -11,7 +11,7 @@
 | `onebot` | **框架内置**（`app/agent/tools/onebot/`，2026-11-03 从「工具扩展」插件并入） | OneBot API 175 个 |
 | `module` | 模块 `@tool` / `TOOLS` | 第三方工具 |
 | `llm_context` | `llm_context` | `get_context` |
-| `speech` | 框架发言通道 | `send_message` / `finish` |
+| `speech` | 框架发言通道（**仅群聊参与度模式**；私聊永远普通输出） | `send_message` / `finish` |
 
 判定链只对 `onebot` / `module` / `system` 分来源处理；其余来源跳过 ①—④，只受总表与权限约束。
 MCP（`source=mcp`）随「工具扩展」插件一起下线，不再有这一来源。

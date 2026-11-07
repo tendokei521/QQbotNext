@@ -343,7 +343,7 @@ OneBot 事件（WebSocket）
                 ├─ assembly       五层装配成 messages
                 ├─ providers      provider 链（重试 / 切换备用模型）
                 ├─ tool_step      执行工具调用、回流结果、继续下一轮
-                └─ delivery       按输出策略投递（纯文本 / 流式 / 发言通道）
+                └─ delivery       按输出策略投递（纯文本 / 流式 / 发言通道；发言通道仅群聊）
 ```
 
 流式与非流式共用同一套 prompt 准备与工具循环，差异只在投递；由架构测试守住。
@@ -442,7 +442,7 @@ pnpm build      # vue-tsc --noEmit && vite build → dist/
 
 ## 选型建议：与 AstrBot 的对比
 
-如果你正在 QQ 机器人框架之间做选择，这一节尽量说实话：
+如果你正在 QQ 机器人框架之间做选择：
 
 | 维度 | QQBot Next | [AstrBot](https://github.com/AstrBotDevs/AstrBot) |
 |---|---|---|

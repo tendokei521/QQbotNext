@@ -102,7 +102,7 @@
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `reply_mode` / `participation_level` / … | 见界面 | 参与度与"该不该接话"的策略键（`participation_*`）；参与度模式下同群同时只跑一轮，未结束的新消息只记录不请求 |
+| `reply_mode` / `participation_level` / … | 见界面 | 参与度与"该不该接话"的策略键（`participation_*`）；**仅群聊生效**，私聊始终普通输出（文本即回复）。参与度模式下同群同时只跑一轮，未结束的新消息只记录不请求 |
 | `structured_assembly` | 见界面 | 结构化消息组装（如按 JSON 组织回复段落） |
 | `onebot_tools_enable` | `true` | 「高级选项」页的**工具总开关**：开启后模型可调用 OneBot 工具（权限仍按调用者身份校验） |
 | `onebot_tools_allowed` / `onebot_tools_denied` / `onebot_tool_overrides` | `[]` / `[]` / `{}` | 「工具管理 → OneBot 工具」页：允许/禁止名单与逐工具权限/作用域覆盖 |

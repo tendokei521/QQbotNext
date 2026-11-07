@@ -244,14 +244,14 @@ SCHEMA = {
         "rows": 6, "group": "group_compress",
     },
     "reply_mode": {
-        "type": "select", "label": "回复模式",
-        "description": "条件触发=新消息打断旧回合，最新优先；参与度=同群只跑一轮，新消息只记录",
+        "type": "select", "label": "回复模式（仅群聊）",
+        "description": "仅对群聊生效；私聊始终是普通输出（文本即回复）。条件触发=新消息打断旧回合，最新优先；参与度=同群只跑一轮，新消息只记录",
         "default": "legacy", "group": "group_advanced",
         "options": {"legacy": "条件触发（旧版）", "participation": "参与度驱动（新版）"},
     },
     "participation_level": {
-        "type": "select", "label": "参与度",
-        "description": "发言倾向：极低=仅@；低=只接相关；中=延续话题；高=参与讨论",
+        "type": "select", "label": "参与度（仅群聊）",
+        "description": "参与度模式下的发言倾向，仅群聊生效：极低=仅@；低=只接相关；中=延续话题；高=参与讨论",
         "default": "low", "group": "group_advanced",
         "options": {
             "very_low": "极低（只接与自己相关的）",

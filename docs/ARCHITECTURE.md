@@ -66,7 +66,7 @@ OneBot 事件（WebSocket）
                 ├─ assembly.assembler  五层装配成 messages（见 §5）
                 ├─ providers           provider 链（重试 / 切换备用模型）
                 ├─ loop.tool_step      执行工具调用、回流结果、继续下一轮
-                └─ delivery            按输出策略投递（纯文本 / 流式 / 发言通道）
+                └─ delivery            按输出策略投递（纯文本 / 流式 / 发言通道；发言通道仅群聊）
 ```
 
 **两条路径必须一致**：流式（`loop/chat.py`）与非流式（`loop/turn.py`）共用同一套 prompt 准备与工具循环，
