@@ -4,6 +4,22 @@ version = "1.0.0"
 description = "基于 OneBot 协议的多账号 QQ 机器人框架（分层 + 插件架构）"
 readme = "README.md"
 requires-python = ">=3.10"
+authors = [{ name = "tendokei521" }]
+keywords = ["qqbot", "onebot", "qq", "llm", "chatbot", "bot-framework"]
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Framework :: FastAPI",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications :: Chat",
+]
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.23",
@@ -38,6 +54,12 @@ vector = [
 
 [project.scripts]
 qqbot = "app.bootstrap:main"
+
+[project.urls]
+Homepage = "https://github.com/tendokei521/QQbotNext"
+Repository = "https://github.com/tendokei521/QQbotNext"
+Issues = "https://github.com/tendokei521/QQbotNext/issues"
+Changelog = "https://github.com/tendokei521/QQbotNext/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["setuptools>=68"]

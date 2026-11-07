@@ -68,3 +68,8 @@ data/orphan-account-data.json
 
 # 数据库/配置备份（迁移前快照，属运行数据）
 /backups/
+
+# Build / coverage artifacts
+build/
+htmlcov/
+.coverage.xml
