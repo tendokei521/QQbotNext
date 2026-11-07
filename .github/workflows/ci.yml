@@ -104,6 +104,29 @@ jobs:
       - name: Show collected test count
         run: python -m pytest --collect-only -q | tail -2
 
+  # Windows 是主要使用平台（start.bat / 本地双击启动），单独跑一遍后端测试，
+  # 避免只在 Linux 上验证导致路径 / 换行 / 编码类问题漏到发布包里。
+  backend-windows:
+    name: Backend tests (windows, py3.12)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run backend tests
+        run: python -m pytest -q
+
   deps:
     name: Dependency metadata sanity
     runs-on: ubuntu-latest
