@@ -961,7 +961,18 @@ class LlmPipeline:
         if ctx.event.message_type == "private":
             response = await ctx.bot.send_private_msg(ctx.event.user_id, msg)
         else:
-            response = await ctx.bot.send_group_msg(ctx.event.group.group_id, msg)
+            group = getattr(ctx.event, "group", None)
+            response = await ctx.bot.send_group_msg(
+                getattr(group, "group_id", 0) if group is not None else 0, msg
+            )
+        if not (isinstance(response, dict) and str(response.get("status", "")) == "ok"):
+            # OneBot 的失败是响应里的 status，不是异常；这里必须留痕，
+            # 否则「模型回了、用户没收到」只能从 api 日志里倒推。
+            retcode = response.get("retcode") if isinstance(response, dict) else None
+            logger.add_info(account_label(self.runtime.bot_id)).warning(
+                f"[LLM] 发送未被确认 -> {ctx.session_id} "
+                f"(retcode={retcode}, status={response.get('status') if isinstance(response, dict) else response})"
+            )
         self._mark_sent_message_id(ctx, response)
         # Bot 发过话这件事由 `bot_sent` 钩子广播（主动消息类业务自己观察）——
         # 框架不该知道"主动消息"这个概念。

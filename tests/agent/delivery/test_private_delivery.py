@@ -94,3 +94,36 @@ async def test_flush_speech_private_has_no_at_segment():
     segment_types = [seg.type for seg in messages[0].segments]
     assert "at" not in segment_types
     assert "10001" not in str(messages[0].to_onebot())
+
+
+class _FailingBot(_Bot):
+    """OneBot 明确失败：返回 status=failed（不是抛异常）。"""
+
+    async def send_private_msg(self, user_id, message):
+        self.calls.append(("private", user_id, str(message)))
+        return {"status": "failed", "retcode": 1400, "message": None}
+
+    async def send_group_msg(self, group_id, message):
+        self.calls.append(("group", group_id, str(message)))
+        return {"status": "failed", "retcode": 1400, "message": None}
+
+
+@pytest.mark.asyncio
+async def test_deliver_now_does_not_report_failed_send_as_success():
+    """回归：发送失败曾经仍 `sent += 1`、写历史、回执「已直接发出 N 条」。
+
+    用户一条都收不到，模型却以为送达，历史里还留下一条假的 assistant 记录
+    （线上私聊事故正是这样：message_id=None 的 assistant 条目）。
+    """
+    bot = _FailingBot()
+    mgr = _SessionMgr()
+    ctx = _ctx(bot, _private_event(), mgr)
+    outbox = SpeechOutbox(immediate=True)
+    outbox.queue("你好")
+
+    sent, error = await deliver_now(ctx, outbox)
+
+    assert sent == 0
+    assert error and "发送失败" in error
+    assert mgr.added == [], "发送失败不能写 assistant 历史"
+

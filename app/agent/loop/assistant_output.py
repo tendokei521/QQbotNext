@@ -157,6 +157,12 @@ async def deliver_now(ctx: Any, speech: Any) -> tuple[int, str]:
                 response = await bot.send_private_msg(event.user_id, message)
         except Exception as e:  # noqa: BLE001 —— 交给模型决定是否重试
             return sent, f"发送失败: {e}"
+        # OneBot 的失败是「响应里 status != ok」，不是抛异常（连接超时才抛）。
+        # 不检查就会把失败当成功：回执模型"已发出"、还写一条用户永远收不到的
+        # assistant 历史（线上事故：私聊回复发进群 0，历史里却记着说过了）。
+        if not _send_confirmed(response):
+            retcode = response.get("retcode") if isinstance(response, dict) else None
+            return sent, f"发送失败: OneBot 未确认送达（retcode={retcode}）"
         sent += 1
         session_mgr.add_message(session_id, "assistant", _clean_output_for_history(None, text))
         data = response.get("data") if isinstance(response, dict) else None
@@ -167,4 +173,9 @@ async def deliver_now(ctx: Any, speech: Any) -> tuple[int, str]:
             except Exception as e:  # noqa: BLE001 —— 句柄回填失败不影响发送
                 logger.debug(f"[Speech] 回填 assistant 消息 id 失败（已忽略）: {e}")
     return sent, ""
+
+
+def _send_confirmed(response: Any) -> bool:
+    """OneBot 响应是否确认送达：``status == "ok"``（连接失败是 None）。"""
+    return isinstance(response, dict) and str(response.get("status", "")) == "ok"
 
