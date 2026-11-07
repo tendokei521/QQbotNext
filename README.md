@@ -39,7 +39,6 @@
 - [开发者指南](#开发者指南)
 - [文档](#文档)
 - [选型建议：与 AstrBot 的对比](#选型建议与-astrbot-的对比)
-- [与 v1 的差异](#与-v1-的差异)
 - [贡献与致谢](#贡献与致谢)
 - [许可与免责声明](#许可与免责声明)
 
@@ -457,18 +456,6 @@ pnpm build      # vue-tsc --noEmit && vite build → dist/
 > 结论：**要稳、要生态、要上生产 → 选 AstrBot；要轻、要改、要单进程 → 可以试试本项目。**
 > 本项目会持续向成熟框架学习，但在达到同等成熟度之前，不会建议你把它用在对稳定性要求最高的场景。
 
-## 与 v1 的差异
-
-v2 把"一次性脚本"重写成了分层框架：
-
-- 配置从散落的 JSON 收进 SQLite（`data/app.db`），旧配置启动时自动迁移；
-- 所有业务功能拆成可插拔插件，内置插件本身就是范本；
-- 管理界面换成 Vue 3 + Vuetify 3 的 Dashboard，前端产物随仓库发布；
-- 新增多账号、模型池与自动回退、人格预设、配置包、统计与诊断；
-- 更新与回滚改为 `scripts/update.py` 的暂存 / 切换 / 备份流程。
-
-从 v1 / v2 早期版本升级时，按 `python scripts/update.py` 与启动日志里的迁移提示操作即可。
-
 ## 贡献与致谢
 
 欢迎 Issue 与 PR。提交前请先读 [AGENTS.md](AGENTS.md)：本项目对提交格式、测试策略与前端验证有硬性要求，
@@ -476,6 +463,9 @@ v2 把"一次性脚本"重写成了分层框架：
 
 **致谢**
 
+- [AstrBot](https://github.com/AstrBotDevs/AstrBot)、[MaiBot](https://github.com/Mai-with-u/MaiBot)、
+  [LangBot](https://github.com/langbot-app/LangBot)、[qq-bridge](https://github.com/Derpyu520/qq-bridge)
+  等开源机器人框架：在提示词组织、群聊社交仿真、稳定性与易用性设计上提供了重要参考；
 - [OneBot](https://github.com/botuniverse/onebot-11) 协议标准，以及 NapCat / Lagrange / LLOneBot 等协议端实现；
 - FastAPI、Vue 3、Vuetify、aiosqlite、Pydantic 等开源项目；
 - 所有提出问题、提交反馈与使用本项目的人。
