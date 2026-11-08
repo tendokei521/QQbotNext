@@ -25,17 +25,21 @@ class OutputStrategy(Protocol):
 
 ## 现状
 
-两个**正交**的维度：
+三个**正交**的维度：
 
 | | 说明 | 谁决定 |
 |---|---|---|
 | **通道** | 文本即回复 / 发言通道（文本=思考，发言走工具） | 回复模式（`reply_mode`） |
 | **传输** | 流式（边收边用）/ 一次拿全 | `stream_output` |
+| **发言方式** | 整段一起发 / 收到就发 / 拆分节奏发 | `reply_send_mode`（见 `send_mode.py`） |
 
-- `BlockingOutput`：文本即回复 + 非流式；
-- `StreamOutput`：文本即回复 + 流式；
+- `BlockingOutput`：文本即回复 + 一次拿全；发言方式 `split` 时按换行/
+  句末标点拆开，逐条按节奏发送（非流式也能"分几条说"）；
+- `StreamOutput`：文本即回复 + 流式；`whole` 先攒着结束发一条，`realtime`
+  每切出一句立刻发，`split` 每句进消息池按节奏放行；
 - `SpeechOutput(stream=…)`：发言通道，**两种传输都支持**（流式=轮次边界 flush，非流式=整轮结束统一 flush）；
-- `select_default_output(config, runtime, ctx)`：按上面两个维度选策略。
+  发言方式不作用于发言通道——气泡条数由 `send_message` / 气泡约束决定；
+- `select_default_output(config, runtime, ctx)`：按通道与传输选策略，发言方式在策略内部生效。
 
 > 历史坑：发言通道曾经**寄生在流式里**（`capability.streams` 把 speech 也算流式），
 > 结果是"没开流式却被强制走流式请求"，而且非流式路径根本没有 flush 气球的实现。
@@ -52,6 +56,12 @@ from collections.abc import AsyncIterator, Callable
 from typing import Any, Protocol, runtime_checkable
 
 from app.agent.delivery.directives import build_outbound_builder
+from app.agent.delivery.send_mode import (
+    SEND_MODE_SPLIT,
+    SEND_MODE_WHOLE,
+    resolve_send_mode,
+    split_messages,
+)
 from app.core import diagnostics as diag
 from app.core.logger import account_label, logger
 from app.domain.message import Message
@@ -119,7 +129,16 @@ class BlockingOutput:
         if not ctx.response_messages:
             ctx.response_messages = [Message.from_text(ctx.response_text)]
 
-        for raw in list(ctx.response_messages):
+        messages = list(ctx.response_messages)
+        # 发言方式：非流式传输下 `realtime` 没有"边收"可谈，解析后退化为整段。
+        if resolve_send_mode(config, transport_stream=False) == SEND_MODE_SPLIT:
+            async for msg in _iter_split_delivery(
+                messages, config, runtime, ctx, should_stop
+            ):
+                yield msg
+            return
+
+        for raw in messages:
             msg = raw if isinstance(raw, Message) else Message.from_text(str(raw))
             if getattr(msg, "skip", False):
                 continue
@@ -127,10 +146,12 @@ class BlockingOutput:
 
 
 class StreamOutput:
-    """流式输出：逐句产出，可选经消息池按节奏放行。
+    """流式输出：文本边收边用，按「发言方式」决定发送形态。
 
-    ``stream_send_pool_enabled`` 打开时，句子进入 `StreamSendPool`——
-    池负责发送间隔/前后缀/队列策略，本策略从池的队列里取出并 yield。
+    - ``whole``：边收只攒着，本轮结束发一条（指令/引用按整段解析）；
+    - ``realtime``：每切出一句立刻 yield，不额外等待；
+    - ``split``：每句进入 `StreamSendPool`——池负责发送间隔/前后缀/队列策略，
+      本策略从池的队列里取出并 yield。
     """
 
     streams = True
@@ -150,14 +171,48 @@ class StreamOutput:
         self, ctx: Any, *, should_stop: Callable[[], bool] | None = None
     ) -> AsyncIterator[Message]:
         config = self._cfg(ctx)
-        pool_enabled = bool(
-            config.get("stream_send_pool_enabled", False) if _has_get(config) else False
-        )
-        if not pool_enabled:
-            async for msg in self._respond_direct(ctx, should_stop):
+        mode = resolve_send_mode(config, transport_stream=True)
+        if mode == SEND_MODE_WHOLE:
+            async for msg in self._respond_whole(ctx, should_stop):
                 yield msg
             return
-        async for msg in self._respond_via_pool(ctx, should_stop):
+        if mode == SEND_MODE_SPLIT:
+            async for msg in self._respond_via_pool(ctx, should_stop):
+                yield msg
+            return
+        async for msg in self._respond_direct(ctx, should_stop):
+            yield msg
+
+    async def _respond_whole(
+        self, ctx: Any, should_stop: Callable[[], bool] | None
+    ) -> AsyncIterator[Message]:
+        """整段一起发：流式边收边攒，本轮结束才构造一条消息。
+
+        发言通道的气泡（``Message`` 产出物）不参与合并——它们本身就是模型
+        决定要发的独立气泡，攒起来会把多条发言揉成一条。
+        """
+        from app.agent.loop.chat import stream_response
+
+        runtime = self.runtime or getattr(ctx, "runtime", None)
+        config = self._cfg(ctx)
+        outbound = build_outbound_builder(ctx.event, config)
+        parts: list[str] = []
+        async for item in stream_response(runtime, ctx.event, ctx):
+            if should_stop is not None and should_stop():
+                # 整段模式还没发出去任何东西：与流式打断同语义，剩余不再发送。
+                _mark_interrupted(ctx)
+                return
+            if isinstance(item, Message):
+                if item.segments:
+                    yield item
+                continue
+            parts.append(str(item or ""))
+
+        text = "".join(parts).strip()
+        if not text:
+            return
+        msg = outbound.build(text)
+        if msg is not None:
             yield msg
 
     async def _respond_direct(
@@ -268,8 +323,52 @@ def _mark_interrupted(ctx: Any) -> None:
         state["interrupted"] = True
 
 
-def _has_get(config: Any) -> bool:
-    return callable(getattr(config, "get", None))
+def _max_message_length(config: Any, runtime: Any) -> int:
+    """拆分发送时单片文本的上限（与流式切句共用 ``stream_sentence_max_length``）。"""
+    for cfg in (config, getattr(runtime, "config", None)):
+        for key in ("stream_sentence_max_length", "max_message_length"):
+            value = _safe_get(cfg, key, None)
+            try:
+                if value:
+                    return max(10, int(value))
+            except (TypeError, ValueError):
+                continue
+    return 200
+
+
+async def _iter_split_delivery(
+    messages: list[Any],
+    config: Any,
+    runtime: Any,
+    ctx: Any,
+    should_stop: Callable[[], bool] | None,
+) -> AsyncIterator[Message]:
+    """「拆分节奏」的非流式投递：整段拿到后切片，按发送节奏逐条产出。
+
+    与流式消息池同一口径：**第一条不等待**，之后每条发送前按 `SendPolicy`
+    等待（间隔模式 ``none`` 时不等待，等于连续发送）。发送前后钩子由流水线负责。
+    """
+    from app.domain.pace import SendPolicy
+
+    pieces = split_messages(
+        messages,
+        max_length=_max_message_length(config, runtime),
+        include_affix=config,
+    )
+    policy = SendPolicy(config if config is not None else {})
+    sent_any = False
+    for msg in pieces:
+        if getattr(msg, "skip", False):
+            continue
+        if should_stop is not None and should_stop():
+            _mark_interrupted(ctx)
+            return
+        if sent_any:
+            delay = policy.next_delay(msg)
+            if delay > 0:
+                await asyncio.sleep(delay)
+        sent_any = True
+        yield msg
 
 
 def _failure_log(ctx: Any):
@@ -428,6 +527,10 @@ def select_default_output(config: Any = None, runtime: Any = None, ctx: Any = No
     | 文本即回复 | 流式 | `StreamOutput` |
     | 发言通道 | 流式 | `SpeechOutput(stream=True)` |
     | 发言通道 | 非流式 | `SpeechOutput(stream=False)` |
+
+    **发言方式**（`reply_send_mode`：整段 / 收到就发 / 拆分节奏）不参与选策略，
+    由 `BlockingOutput` / `StreamOutput` 在 ``respond()`` 内部按配置生效；
+    发言通道的气泡已由模型逐条决定，不受发言方式改写。
 
     通道由**回复模式**决定（`reply_mode=participation` ⇒ 发言通道），**但仅限群聊**；
     私聊永远文本即回复（`reply_mode` 在私聊不生效）。传输由 `stream_output` 决定。

@@ -1,4 +1,4 @@
-"""流式文本句子切分器。"""
+"""文本句子切分器（流式边收边切 / 整段按条发送共用同一套断句口径）。"""
 
 from __future__ import annotations
 
@@ -54,3 +54,17 @@ def split_sentences(text: str, max_length: int = 50) -> tuple[list[str], str]:
 
     remainder = text[start:].strip()
     return sentences, remainder
+
+
+def split_for_delivery(text: str, max_length: int = 50) -> list[str]:
+    """把整段正文切成待发送片段（整段回复按条发送时用）。
+
+    与流式边收边切**同一口径**：换行、句末标点都算断点，连续标点不拆开，
+    超过 ``max_length`` 仍无断点时硬切，空片段丢弃。区别只是这里输入是
+    已经拿全的整段文本，所以不收尾「余量」——它本身就是最后一片。
+    """
+    sentences, remainder = split_sentences(text, max_length=max_length)
+    if remainder:
+        sentences.append(remainder)
+    cleaned = (strip_stream_artifacts(piece) for piece in sentences)
+    return [piece for piece in cleaned if piece]

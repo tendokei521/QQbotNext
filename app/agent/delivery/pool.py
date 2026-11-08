@@ -1,8 +1,8 @@
-"""流式回复有序消息池。
+"""流式回复有序消息池（「拆分节奏」发言方式的流式实现）。
 
 职责：
 - 接收流式句子，按 FIFO 顺序保存；
-- 按 SendPolicy 计算发送间隔；
+- 按 SendPolicy 计算发送间隔（**第一条不等待**，之后每条按节奏）；
 - 支持前缀/后缀；
 - 每条消息发送前后仍然由外部调用方触发 pre_send / post_send 钩子；
 - 流结束后等待队列清空。
@@ -46,6 +46,8 @@ class StreamSendPool:
         self._inflight = 0
         self._paused = asyncio.Event()
         self._paused.set()
+        #: 是否已经真正发出过一条：第一条不等待发送节奏（节奏是「条与条之间」的事）
+        self._sent_any = False
         self._sender_task = asyncio.create_task(self._sender_loop())
 
     async def put(self, msg: Message) -> None:
@@ -115,13 +117,9 @@ class StreamSendPool:
                 break
 
     def _apply_affix(self, msg: Message) -> Message:
-        prefix = self.config.get("stream_send_prefix", "") or ""
-        suffix = self.config.get("stream_send_suffix", "") or ""
-        if not prefix and not suffix:
-            return msg
-        if isinstance(msg, Message):
-            return Message.from_text(prefix + msg.text + suffix)
-        return Message.from_text(prefix + str(msg) + suffix)
+        from app.agent.delivery.send_mode import apply_affix
+
+        return apply_affix(self.config, msg)
 
     async def _sender_loop(self) -> None:
         """流式发送循环。
@@ -151,7 +149,11 @@ class StreamSendPool:
                 try:
                     await self._paused.wait()
 
-                    delay = 0.0 if self._flush else self._policy.next_delay(msg)
+                    delay = (
+                        0.0
+                        if (self._flush or not self._sent_any)
+                        else self._policy.next_delay(msg)
+                    )
                     if delay > 0:
                         await asyncio.sleep(delay)
 
@@ -163,6 +165,7 @@ class StreamSendPool:
                             continue
 
                     await self._send_message(final_msg)
+                    self._sent_any = True
 
                     if self._post_send is not None:
                         await self._post_send(final_msg)
