@@ -32,6 +32,7 @@
 
 
 from app.agent import logger
+from app.core import diagnostics as diag
 from app.core.logger import account_label
 from app.agent.assembly.assembler import PromptRequest
 from app.agent.assembly.compress import maybe_compress_context
@@ -189,7 +190,14 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
                     max_entries=int(config.get("image_max_count", 4) or 4),
                 )
             except Exception as e:  # noqa: BLE001 —— 回填是增强，失败只降级
-                logger.add_info(account_label(runtime.bot_id)).debug(f"历史图片回填失败（已忽略）: {e}")
+                diag.log_failure(
+                    logger.add_info(account_label(runtime.bot_id)),
+                    "image.backfill_failed",
+                    "历史图片回填失败（已忽略，按占位渲染）",
+                    error=e,
+                    fields={"bot": getattr(runtime, "bot_id", ""), "origin": "backfill"},
+                    with_traceback=True,
+                )
 
     # 先取完整会话历史：冻结群史需要知道"哪些 message_id 已在会话内"以及会话起点，
     # 只把**更早的、会话外的消息**拉成背景。
@@ -379,9 +387,17 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
                     max_bytes=max_image_bytes(config),
                     config=config,
                     segments=image_segments,
+                    origin="current_turn",
                 )
         except Exception as e:  # noqa: BLE001 —— 图片解析失败必须降级为纯文本
-            logger.add_info(account_label(runtime.bot_id)).warning(f"图片解析失败，按纯文本处理: {e}")
+            diag.log_failure(
+                logger.add_info(account_label(runtime.bot_id)),
+                "image.resolve_failed",
+                "图片解析失败，按纯文本处理",
+                error=e,
+                fields={"bot": getattr(runtime, "bot_id", ""), "origin": "current_turn"},
+                with_traceback=True,
+            )
 
     req = PromptRequest(
         runtime=runtime,

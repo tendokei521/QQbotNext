@@ -450,6 +450,7 @@ class LlmPipeline:
                     bot_id=bot_id,
                     bot=ctx.bot,
                     max_bytes=max_image_bytes(self.runtime.config),
+                    origin="current_turn",
                 )
             return await resolve_images(
                 ctx.event,
@@ -459,11 +460,20 @@ class LlmPipeline:
                 max_bytes=max_image_bytes(self.runtime.config),
                 config=self.runtime.config,
                 segments=segments,
+                origin="current_turn",
             )
         except Exception as e:  # noqa: BLE001 —— 图片解析失败必须降级为纯文本，不能阻断对话
-            from app.core.logger import logger
+            from app.core import diagnostics as diag
+            from app.core.logger import logger as _logger
 
-            logger.add_info(account_label(self.runtime.bot_id)).warning(f"图片解析失败，按纯文本处理: {e}")
+            diag.log_failure(
+                _logger.add_info(account_label(self.runtime.bot_id)),
+                "image.resolve_failed",
+                "图片解析失败，按纯文本处理",
+                error=e,
+                fields={"bot": getattr(self.runtime, "bot_id", ""), "origin": "current_turn"},
+                with_traceback=True,
+            )
             return []
 
     # ---------- 群聊准入（观察 → 触发 / 成本门） ----------

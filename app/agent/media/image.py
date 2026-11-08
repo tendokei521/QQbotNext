@@ -26,6 +26,7 @@ import asyncio
 import base64
 import binascii
 import re
+import time
 from collections.abc import Iterable
 from typing import Any
 
@@ -50,6 +51,7 @@ from app.agent.media.store import (
 from app.agent.media.store import (
     sniff_mime as _sniff_mime,
 )
+from app.core import diagnostics as diag
 from app.core.logger import logger
 
 # 单张图片字节上限：base64 后约 1.33 倍，10MB 原图 ≈ 13MB 请求体，多数网关会直接拒
@@ -81,6 +83,117 @@ def _cfg(config: Any, key: str, default: Any) -> Any:
 
 def _log():
     return logger.add_info("Image")
+
+
+class MediaUnavailable(Exception):
+    """图片字节取不到，而且这次失败**重试也没用**（链接过期 / 4xx / 文件被清）。
+
+    为什么要一个专门的异常：``_download_bytes`` 以前把所有失败压成 ``(None, "")``，
+    调用方只知道"没拿到"，于是历史回填每轮都重试同一条 ``rkey`` 已过期的直链，
+    在 ``warn.log`` 里刷出无数条没有 URL 的 ``图片下载失败（HTTP 400）``。
+    现在失败带着**可落标记的原因**冒泡：``persist_segment`` 会把段标成不可用
+    （``data["media_error"]``），后续任何一轮都不再白跑一次下载。
+
+    Attributes:
+        reason: 稳定原因码：``url_expired`` / ``http_403`` / ``too_large`` …
+        http: HTTP 状态码（0 表示没有拿到响应，如本地解码失败）。
+        retcode: CDN 业务码（QQ 图片 CDN 的 ``retcode``，没有则 0）。
+        detail: CDN 的 ``retmsg`` / 短响应体（已截断）。
+        url: 触发失败的原始 URL（落日志前统一走 ``diag.redact_url``）。
+    """
+
+    def __init__(
+        self,
+        reason: str,
+        *,
+        http: int = 0,
+        retcode: int = 0,
+        detail: str = "",
+        url: str = "",
+    ) -> None:
+        self.reason = str(reason or "unavailable")
+        self.http = int(http or 0)
+        self.retcode = int(retcode or 0)
+        self.detail = str(detail or "")
+        self.url = str(url or "")
+        super().__init__(self.describe())
+
+    def describe(self) -> str:
+        """``原因(HTTP 400, retcode=-5503007)`` 这样的一行摘要。"""
+        extra = []
+        if self.http:
+            extra.append(f"HTTP {self.http}")
+        if self.retcode:
+            extra.append(f"retcode={self.retcode}")
+        suffix = f"（{'，'.join(extra)}）" if extra else ""
+        return f"{self.reason}{suffix}"
+
+    def log_fields(self) -> dict[str, Any]:
+        """失败细节 → 结构化日志字段（空值会被 ``diag.log_failure`` 自动跳过）。"""
+        return {
+            "reason": self.reason,
+            "http": self.http,
+            "retcode": self.retcode,
+            "retmsg": self.detail,
+            "host": diag.url_host(self.url),
+            "url": diag.redact_url(self.url),
+        }
+
+
+def segment_unavailable(seg: Any) -> bool:
+    """该图片段是否已经被判定「取不到，且重试无用」（历史回填/本轮解析都靠它止损）。"""
+    marker = _seg_data(seg).get("media_error")
+    return isinstance(marker, dict) and bool(marker.get("reason"))
+
+
+def mark_segment_unavailable(seg: Any, error: MediaUnavailable) -> None:
+    """把永久失败写进段自身（``data["media_error"]``），后续轮次不再重试。
+
+    标记随会话历史一起落库：链接过期是**不可逆**的，不标就会每一轮都撞一次 400、
+    在 warn.log 里刷一条没有信息的告警（这正是本模块这次要堵死的噪音源）。
+    """
+    data = _mutable_data(seg)
+    if data is None:
+        return
+    data["media_error"] = {
+        "reason": error.reason,
+        "http": error.http,
+        "retcode": error.retcode,
+        "retmsg": error.detail,
+        "at": int(time.time()),
+    }
+
+
+def _parse_cdn_error(body: str) -> tuple[int, str]:
+    """QQ 图片 CDN 的错误体 → ``(retcode, retmsg)``（不是 JSON 就退化为短文本）。"""
+    text = str(body or "").strip()
+    if not text:
+        return 0, ""
+    try:
+        import json
+
+        payload = json.loads(text)
+    except (ValueError, TypeError):
+        return 0, text[:120]
+    if not isinstance(payload, dict):
+        return 0, text[:120]
+    try:
+        retcode = int(payload.get("retcode", 0) or 0)
+    except (TypeError, ValueError):
+        retcode = 0
+    retmsg = str(payload.get("retmsg", "") or payload.get("message", "") or "")[:120]
+    return retcode, retmsg
+
+
+def _is_expired_cdn_error(status: int, retcode: int, retmsg: str) -> bool:
+    """是不是「链接过期」这一类（CDN 用 400 + retcode=-5503007 表达）。"""
+    if retcode == -5503007:
+        return True
+    text = retmsg.lower()
+    if "expired" in text or "过期" in text:
+        return True
+    return status in (403, 410) and "expire" in text
+
 
 
 def _as_int(value: Any) -> int | None:
@@ -152,17 +265,50 @@ async def persist_segment(
     bot_id: Any = "",
     bot: Any = None,
     max_bytes: int = DEFAULT_MAX_IMAGE_BYTES,
+    origin: str = "",
 ) -> dict | None:
     """图片段 → 落盘 + 返回本地指向（``{"sha", "mime", "bytes"}``）。
 
     段里已经有指向时直接复用（幂等，不重复下载）。取字节的所有形态
     （data URL / ``base64://`` / http 直链 / ``get_image`` 兜底）都在 :func:`_segment_bytes`，
     这里只负责"取到就落盘"。
+
+    失败口径：
+    - **永久失败**（链接过期 / 4xx）：在段上打 ``media_error`` 标记（后续轮次不再重试），
+      并留一条带 URL/status/CDN 业务码/调用方的告警；
+    - 瞬时失败/超限：不标记，让下一轮还能再试（各自的日志已在 :func:`_segment_bytes` 里留过）。
+
+    Args:
+        origin: 触发来源（``inbound`` 收到即落盘 / ``current_turn`` 本轮解析 /
+            ``backfill`` 历史回填 / ``tool`` 工具取图），只用于日志定位。
     """
     existing = image_media.segment_media(seg)
     if existing:
         return existing
-    data, mime = await _segment_bytes(seg, bot=bot, max_bytes=max_bytes)
+    if segment_unavailable(seg):
+        # 已经判定过"重试无用"的段：历史回填/本轮解析都不再白撞一次 CDN
+        return None
+    try:
+        data, mime = await _segment_bytes(seg, bot=bot, max_bytes=max_bytes)
+    except MediaUnavailable as e:
+        mark_segment_unavailable(seg, e)
+        fields = {
+            "origin": origin,
+            "bot": bot_id,
+            "file": str(_seg_data(seg).get("file", "") or "")[:80],
+            **e.log_fields(),
+        }
+        diag.log_failure(
+            _log(),
+            "image.unavailable",
+            "图片取不到，已按占位处理（该段已标记，后续轮次不再重试）",
+            fields=fields,
+            once=True,
+            # 同一条死链只提醒一次：不同图片 file 不同，会被当成不同事件
+            once_key=f"{bot_id}:{e.reason}:{diag.redact_url(e.url) or fields['file']}",
+            account=bot_id,
+        )
+        return None
     if not data:
         return None
     return image_media.save_bytes(bot_id, data, mime=mime)
@@ -198,6 +344,7 @@ async def persist_images(
     bot: Any = None,
     max_bytes: int = DEFAULT_MAX_IMAGE_BYTES,
     timeout: float = 15.0,
+    origin: str = "inbound",
 ) -> int:
     """把一批消息段里的图片就地落盘（写 ``data["media"]`` 并抹掉远端地址）。
 
@@ -205,11 +352,14 @@ async def persist_images(
     失败的段保持原样但没有 ``media`` —— 渲染侧会退化成 ``[图片#id]`` 占位，
     模型仍可用 ``expand_image`` 按消息 id 再试一次。
 
-    幂等：段里已有指向就直接跳过，所以"pipeline 先落一次、chat 再落一次"不会重复下载。
+    幂等：段里已有指向（或已被判死链）就直接跳过，所以"pipeline 先落一次、
+    chat 再落一次"不会重复下载。
     """
     targets = [
         seg for seg in (segments or [])
-        if _seg_type(seg) in IMAGE_LIKE_SEGMENTS and not image_media.segment_media(seg)
+        if _seg_type(seg) in IMAGE_LIKE_SEGMENTS
+        and not image_media.segment_media(seg)
+        and not segment_unavailable(seg)
     ]
     if not targets:
         return 0
@@ -217,14 +367,31 @@ async def persist_images(
     async def _one(seg: Any) -> bool:
         try:
             media = await asyncio.wait_for(
-                persist_segment(seg, bot_id=bot_id, bot=bot, max_bytes=max_bytes),
+                persist_segment(seg, bot_id=bot_id, bot=bot, max_bytes=max_bytes, origin=origin),
                 timeout=max(1.0, float(timeout or 15.0)),
             )
-        except asyncio.TimeoutError:
-            _log().warning("图片下载超时，本条图片按占位处理")
+        except asyncio.TimeoutError as e:
+            diag.log_failure(
+                _log(),
+                "image.persist_timeout",
+                "图片落盘超时，本条图片按占位处理",
+                error=e,
+                fields={
+                    "origin": origin,
+                    "bot": bot_id,
+                    "timeout_s": max(1.0, float(timeout or 15.0)),
+                },
+            )
             return False
         except Exception as e:  # noqa: BLE001 —— 单张失败不该影响其余图片与本轮对话
-            _log().warning(f"图片落盘失败，本条图片按占位处理: {e}")
+            diag.log_failure(
+                _log(),
+                "image.persist_failed",
+                "图片落盘失败，本条图片按占位处理",
+                error=e,
+                fields={"origin": origin, "bot": bot_id},
+                with_traceback=True,
+            )
             return False
         if not media:
             return False
@@ -248,6 +415,7 @@ async def resolve_images(
     max_bytes: int = DEFAULT_MAX_IMAGE_BYTES,
     config: Any = None,
     segments: Iterable[Any] | None = None,
+    origin: str = "current_turn",
 ) -> list[dict]:
     """把本轮消息里的图片解析成 ``[{"kind": "base64", "value": ..., "mime": ..., "media": ...}]``。
 
@@ -266,8 +434,9 @@ async def resolve_images(
         max_bytes: 单张（或单个动图原始字节）体积上限。
         config: Agent 配置（读 ``gif_*`` / 内联预算开关）；缺省时按内置默认值。
         segments: 直接给一批段（``chat`` 会传"已经落过盘"的那批，避免重复下载）。
+        origin: 调用来源（只用于日志定位：``current_turn`` / ``tool`` / …）。
 
-    解析不到的图片会被跳过（并记一条 warning），不会阻断整轮请求。
+    解析不到的图片会被跳过并记一条结构化 warning（带原因与段上的 file），不会阻断整轮请求。
     """
     images: list[dict] = []
     limit = max(1, int(max_images or 1))
@@ -278,13 +447,31 @@ async def resolve_images(
     inline_max_mb, inline_max_edge = inline_budget(config)
     static_used = 0
     warned_limit = False
+    skipped_dead = 0
 
     source = list(segments) if segments is not None else collect_image_segments(event)
     for seg in source:
         media = image_media.segment_media(seg)
         if not media:
-            media = await persist_segment(seg, bot_id=bot_id, bot=bot, max_bytes=max_bytes)
+            if segment_unavailable(seg):
+                # 早前已被判死链的段：静默跳过（第一次失败时已经留过完整日志）
+                skipped_dead += 1
+                continue
+            media = await persist_segment(
+                seg, bot_id=bot_id, bot=bot, max_bytes=max_bytes, origin=origin
+            )
         if not media:
+            diag.log_failure(
+                _log(),
+                "image.resolve_skipped",
+                "本轮有图片没取到字节，未传给模型",
+                fields={
+                    "origin": origin,
+                    "bot": bot_id,
+                    "file": str(_seg_data(seg).get("file", "") or "")[:80],
+                },
+                level="debug",
+            )
             continue
         # 动图优先：命中线索才下字节确认，确认是动图就拆帧（帧走独立的帧数预算，
         # 不吃静态图的 max_images 配额——一张表情包不该挤掉同一轮的 4 张静态图）
@@ -307,6 +494,31 @@ async def resolve_images(
         if entry:
             images.append(entry)
             static_used += 1
+        else:
+            diag.log_failure(
+                _log(),
+                "image.inline_skipped",
+                "图片超过内联预算且压不下来，这张图没传给模型",
+                fields={
+                    "origin": origin,
+                    "bot": bot_id,
+                    "sha": str(media.get("sha", "") or ""),
+                    "bytes": media.get("bytes", 0),
+                    "inline_max_mb": inline_max_mb,
+                    "inline_max_edge": inline_max_edge,
+                },
+            )
+    if skipped_dead:
+        diag.log_failure(
+            _log(),
+            "image.skipped_dead_links",
+            "本轮有图片因链接已过期（已标记）被跳过，未重复下载",
+            fields={"origin": origin, "bot": bot_id, "count": skipped_dead},
+            level="info",
+            once=True,
+            once_key=f"{bot_id}:{origin}",
+            account=bot_id,
+        )
     return images
 
 
@@ -382,7 +594,17 @@ async def _frames_from_media(
 
 
 async def _segment_bytes(seg: Any, *, bot: Any, max_bytes: int) -> tuple[bytes | None, str]:
-    """把图片段取成原始字节（data URL / base64:// / http 直链 / get_image 兜底）。"""
+    """把图片段取成原始字节（data URL / base64:// / http 直链 / get_image 兜底）。
+
+    失败口径（决定"要不要再试"）：
+    - **永久失败**（链接过期 / 4xx）→ 抛 :class:`MediaUnavailable`，由
+      :func:`persist_segment` 在段上打 ``media_error`` 标记，后续轮次不再重试；
+    - **瞬时失败**（超时 / 5xx / 网络异常）→ 已记结构化日志，返回 ``(None, "")``；
+    - **体积超限** → 已记日志，返回 ``(None, "")``（改配置后还能再试，不打标记）。
+
+    直链过期时**不会提前 return**：还会拿 ``file`` 向 OneBot 的 ``get_image`` 换一次新链接
+    （这是链路过期后唯一能自愈的路），换来的链接再走同一套下载逻辑。
+    """
     data = _seg_data(seg)
     file_value = str(data.get("file", "") or "").strip()
 
@@ -393,12 +615,19 @@ async def _segment_bytes(seg: Any, *, bot: Any, max_bytes: int) -> tuple[bytes |
             continue
         payload = match.group(2)
         if len(payload) * 0.75 > max_bytes:
-            _log().warning(f"图片超过体积上限，已跳过（{len(payload) * 0.75 / 1024 / 1024:.1f}MB）")
+            diag.log_failure(
+                _log(),
+                "image.too_large",
+                "图片超过体积上限，已跳过",
+                fields={"source": "data_url", "mb": round(len(payload) * 0.75 / 1024 / 1024, 1)},
+            )
             return None, ""
         try:
             return base64.b64decode(payload), f"image/{match.group(1).lower()}"
         except (binascii.Error, ValueError) as e:
-            _log().warning(f"data URL 解码失败: {e}")
+            diag.log_failure(
+                _log(), "image.decode_failed", "data URL 解码失败", error=e, fields={"source": "data_url"}
+            )
             continue
 
     # 2) base64://xxx（OneBot 常用形态）
@@ -408,61 +637,207 @@ async def _segment_bytes(seg: Any, *, bot: Any, max_bytes: int) -> tuple[bytes |
             continue
         raw = candidate[len("base64://"):] if lowered.startswith("base64://") else candidate[len("base64:"):]
         if len(raw) * 0.75 > max_bytes:
-            _log().warning(f"图片超过体积上限，已跳过（{len(raw) * 0.75 / 1024 / 1024:.1f}MB）")
+            diag.log_failure(
+                _log(),
+                "image.too_large",
+                "图片超过体积上限，已跳过",
+                fields={"source": "base64_scheme", "mb": round(len(raw) * 0.75 / 1024 / 1024, 1)},
+            )
             return None, ""
         try:
             decoded = base64.b64decode(raw)
         except (binascii.Error, ValueError) as e:
-            _log().warning(f"base64 图片解码失败: {e}")
+            diag.log_failure(
+                _log(),
+                "image.decode_failed",
+                "base64 图片解码失败",
+                error=e,
+                fields={"source": "base64_scheme", "chars": len(raw)},
+            )
             continue
         # MIME 按魔数嗅探：file 名经常缺失/后缀不靠谱，声明错的 MIME 会让网关 400
         return decoded, _sniff_mime(decoded)
 
-    # 3) http(s) 直链
+    # 3) http(s) 直链：候选可能有两条（url / file），**永久失败不要提前返回**——
+    #    直链过期时还得给 get_image 兜底（OneBot 端可能换得出一条新链接）。
+    failures: list[MediaUnavailable] = []
+    seen: set[str] = set()
     for candidate in (str(data.get("url", "") or "").strip(), file_value):
-        if candidate.lower().startswith(("http://", "https://")):
-            return await _download_bytes(candidate, max_bytes=max_bytes)
-
-    # 4) 让 OneBot 把 file 换成可访问 URL
-    if bot is not None and file_value:
+        if not candidate.lower().startswith(("http://", "https://")) or candidate in seen:
+            continue
+        seen.add(candidate)
         try:
-            resp = await bot.get_image(file_value)
-        except Exception as e:  # noqa: BLE001 —— 取不到就降级，不能拖垮本轮对话
-            _log().warning(f"get_image 失败: {e}")
-            return None, ""
-        payload = (resp or {}).get("data", {}) or {}
+            return await _download_bytes(candidate, max_bytes=max_bytes)
+        except MediaUnavailable as e:
+            failures.append(e)
+
+    # 4) 让 OneBot 把 file 换成可访问 URL（直链过期/缺失时唯一可自救的路）
+    if bot is not None and file_value:
+        payload = await _get_image_payload(bot, file_value)
         for key in ("url", "file"):
             candidate = str(payload.get(key, "") or "").strip()
-            if candidate.lower().startswith(("http://", "https://")):
+            if not candidate.lower().startswith(("http://", "https://")) or candidate in seen:
+                continue
+            seen.add(candidate)
+            try:
                 return await _download_bytes(candidate, max_bytes=max_bytes)
-        _log().warning(f"get_image 未返回可用链接，图片未传给模型: {file_value}")
+            except MediaUnavailable as e:
+                failures.append(e)
+        inline = str(payload.get("base64", "") or "").strip()
+        if inline:
+            raw = inline[len("base64://"):] if inline.lower().startswith("base64://") else inline
+            try:
+                decoded = base64.b64decode(raw)
+            except (binascii.Error, ValueError) as e:
+                diag.log_failure(
+                    _log(),
+                    "image.decode_failed",
+                    "get_image 返回的 base64 解码失败",
+                    error=e,
+                    fields={"source": "get_image", "file": file_value},
+                )
+            else:
+                if len(decoded) <= max_bytes:
+                    return decoded, _sniff_mime(decoded)
+        if not failures:
+            diag.log_failure(
+                _log(),
+                "image.get_image_no_url",
+                "get_image 未返回可用链接，图片未传给模型",
+                fields={"file": file_value},
+            )
+    if failures:
+        raise failures[0]
     return None, ""
 
 
+async def _get_image_payload(bot: Any, file_value: str) -> dict:
+    """``get_image(file)`` → ``data``，失败时留一条可排查日志并返回空 dict。"""
+    started = time.monotonic()
+    try:
+        resp = await bot.get_image(file_value)
+    except Exception as e:  # noqa: BLE001 —— 取不到就降级，不能拖垮本轮对话
+        diag.log_failure(
+            _log(),
+            "image.get_image_failed",
+            "get_image 失败，图片按占位处理",
+            error=e,
+            fields={"file": file_value, "elapsed_ms": diag.elapsed_ms(started)},
+            with_traceback=True,
+        )
+        return {}
+    payload = (resp or {}).get("data", {}) or {}
+    return payload if isinstance(payload, dict) else {}
+
+
 async def _download_bytes(url: str, *, max_bytes: int, timeout: float = _ANIMATED_FETCH_TIMEOUT) -> tuple[bytes | None, str]:
-    """下载图片字节；超时、超限、非 200 都返回 ``(None, "")`` 并留日志。"""
+    """下载图片字节；**失败必须留下能定位的信息**（URL host / HTTP 状态 / CDN 业务码 / 耗时）。
+
+    失败分两类，调用方据此决定要不要再试：
+
+    - **永久失败**（4xx、链接过期）→ 抛 :class:`MediaUnavailable`，由 ``persist_segment``
+      在段上打 ``media_error`` 标记，后续轮次不再白撞；
+    - **瞬时失败**（超时、5xx、网络异常）→ 记日志后返回 ``(None, "")``，下一轮还能再试。
+    """
     import aiohttp
 
+    started = time.monotonic()
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
             async with session.get(url) as resp:
                 if resp.status != 200:
-                    _log().warning(f"图片下载失败（HTTP {resp.status}）")
+                    body = ""
+                    try:
+                        body = await resp.text()
+                    except Exception as e:  # noqa: BLE001 —— 读不到响应体不影响分类
+                        _log().debug(f"[image] 读取错误响应体失败: {e}")
+                    retcode, retmsg = _parse_cdn_error(body[:400])
+                    expired = _is_expired_cdn_error(resp.status, retcode, retmsg)
+                    permanent = 400 <= resp.status < 500 and resp.status not in (408, 429)
+                    fields: dict[str, Any] = {
+                        "http": resp.status,
+                        "host": diag.url_host(url),
+                        "url": diag.redact_url(url),
+                        "retcode": retcode,
+                        "retmsg": retmsg,
+                        "permanent": permanent,
+                        "elapsed_ms": diag.elapsed_ms(started),
+                        "max_bytes": max_bytes,
+                    }
+                    if expired:
+                        fields["hint"] = "QQ 图片直链的 rkey 已过期：需重新 get_image 换链接，重试原链接无用"
+                    diag.log_failure(_log(), "image.download_http_error", "图片下载失败", fields=fields)
+                    if permanent:
+                        raise MediaUnavailable(
+                            "url_expired" if expired else f"http_{resp.status}",
+                            http=resp.status,
+                            retcode=retcode,
+                            detail=retmsg,
+                            url=url,
+                        )
                     return None, ""
                 declared = int(resp.headers.get("Content-Length") or 0)
                 if declared > max_bytes:
-                    _log().warning(f"图片超过体积上限，已跳过（{declared / 1024 / 1024:.1f}MB）")
+                    diag.log_failure(
+                        _log(),
+                        "image.too_large",
+                        "图片超过体积上限，已跳过",
+                        fields={
+                            "source": "http",
+                            "host": diag.url_host(url),
+                            "url": diag.redact_url(url),
+                            "declared_mb": round(declared / 1024 / 1024, 1),
+                            "max_mb": round(max_bytes / 1024 / 1024, 1),
+                        },
+                    )
                     return None, ""
                 buffer = bytearray()
                 async for chunk in resp.content.iter_chunked(64 * 1024):
                     buffer.extend(chunk)
                     if len(buffer) > max_bytes:
-                        _log().warning(f"图片超过体积上限，已跳过（>{max_bytes / 1024 / 1024:.0f}MB）")
+                        diag.log_failure(
+                            _log(),
+                            "image.too_large",
+                            "图片超过体积上限，已跳过",
+                            fields={
+                                "source": "http_stream",
+                                "host": diag.url_host(url),
+                                "url": diag.redact_url(url),
+                                "max_mb": round(max_bytes / 1024 / 1024, 1),
+                            },
+                        )
                         return None, ""
                 data = bytes(buffer)
                 return data, _sniff_mime(data)
+    except MediaUnavailable:
+        raise
+    except asyncio.TimeoutError as e:
+        diag.log_failure(
+            _log(),
+            "image.download_timeout",
+            "图片下载超时（瞬时失败，下一轮可重试）",
+            error=e,
+            fields={
+                "host": diag.url_host(url),
+                "url": diag.redact_url(url),
+                "timeout_s": timeout,
+                "elapsed_ms": diag.elapsed_ms(started),
+            },
+        )
+        return None, ""
     except Exception as e:  # noqa: BLE001 —— 网络问题一律降级为"这张图不发"
-        _log().warning(f"图片下载异常: {e}")
+        diag.log_failure(
+            _log(),
+            "image.download_error",
+            "图片下载异常（瞬时失败，下一轮可重试）",
+            error=e,
+            fields={
+                "host": diag.url_host(url),
+                "url": diag.redact_url(url),
+                "elapsed_ms": diag.elapsed_ms(started),
+            },
+            with_traceback=True,
+        )
         return None, ""
 
 
@@ -578,8 +953,12 @@ async def backfill_history_media(
 
     由新到旧、最多 ``max_entries`` 张、总耗时不超过 ``timeout`` 秒：历史渲染发生在每轮
     请求前，不能因为回填把一轮对话拖成十几秒。**就地把指向写回条目**（传进来的必须是
-    会话里的真实条目，而不是 ``get_history`` 的深拷贝），失败只留 debug 日志——
-    链接已经过期的图确实救不回来，降级成 ``[图片#id]`` 占位即可。
+    会话里的真实条目，而不是 ``get_history`` 的深拷贝）。
+
+    失败的段会被 ``persist_segment`` 打上 ``media_error`` 标记（链接过期是不可逆的），
+    下一次回填直接跳过——否则同一条死链会在**每一轮**都撞一次 400，把 warn.log 刷成噪音。
+    每条死链的完整信息（URL host / HTTP 状态 / CDN retcode / 调用方）由 ``persist_segment``
+    留一条告警，这里只汇总"这轮回填救回几张、放弃几张"。
     """
     budget = max(0, int(max_entries or 0))
     if budget <= 0:
@@ -587,9 +966,14 @@ async def backfill_history_media(
     loop = asyncio.get_running_loop()
     deadline = loop.time() + max(1.0, float(timeout or 5.0))
     done = 0
+    dead = 0
+    errors = 0
     for entry in reversed(list(entries or [])):
         for seg in history_image_segments(entry):
             if image_media.segment_media(seg):
+                continue
+            if segment_unavailable(seg):
+                dead += 1
                 continue
             if budget <= 0 or loop.time() >= deadline:
                 return done
@@ -597,13 +981,26 @@ async def backfill_history_media(
             remaining = max(0.5, deadline - loop.time())
             try:
                 media = await asyncio.wait_for(
-                    persist_segment(seg, bot_id=bot_id, bot=bot, max_bytes=max_bytes),
+                    persist_segment(
+                        seg, bot_id=bot_id, bot=bot, max_bytes=max_bytes, origin="backfill"
+                    ),
                     timeout=remaining,
                 )
-            except Exception as e:  # noqa: BLE001 —— 回填是增强，失败一律忽略
-                _log().debug(f"历史图片回填失败（已忽略）: {e}")
+            except Exception as e:  # noqa: BLE001 —— 回填是增强，失败一律降级
+                errors += 1
+                diag.log_failure(
+                    _log(),
+                    "image.backfill_failed",
+                    "历史图片回填失败（已忽略，按占位渲染）",
+                    error=e,
+                    fields={"origin": "backfill", "bot": bot_id},
+                    level="debug",
+                    with_traceback=True,
+                )
                 media = None
             if not media:
+                if segment_unavailable(seg):
+                    dead += 1
                 continue
             data = seg.get("data") if isinstance(seg, dict) else None
             if not isinstance(data, dict):
@@ -611,12 +1008,28 @@ async def backfill_history_media(
             data["media"] = dict(media)
             image_media.strip_remote_addresses(data)
             done += 1
+    if done or dead or errors:
+        diag.log_failure(
+            _log(),
+            "image.backfill_summary",
+            "历史图片回填汇总",
+            fields={
+                "origin": "backfill",
+                "bot": bot_id,
+                "restored": done,
+                "dead": dead,
+                "errors": errors,
+                "budget": max_entries,
+            },
+            level="debug",
+        )
     return done
 
 
 __all__ = [
     "DEFAULT_MAX_IMAGE_BYTES",
     "IMAGE_LIKE_SEGMENTS",
+    "MediaUnavailable",
     "backfill_history_media",
     "build_user_content",
     "cache_enabled",
@@ -626,8 +1039,10 @@ __all__ = [
     "history_image_segments",
     "image_url_from_bytes",
     "inline_budget",
+    "mark_segment_unavailable",
     "max_image_bytes",
     "persist_images",
     "persist_segment",
     "resolve_images",
+    "segment_unavailable",
 ]
