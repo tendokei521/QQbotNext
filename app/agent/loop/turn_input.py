@@ -218,6 +218,7 @@ async def record_user_turn(
                 bot=getattr(event, "bot", None),
                 max_bytes=max_image_bytes(config),
                 origin="inbound",
+                session_id=turn.session_id,
             )
         except Exception as e:  # noqa: BLE001 —— 落盘失败只降级为占位，不能拖垮本轮对话
             from app.core import diagnostics as diag

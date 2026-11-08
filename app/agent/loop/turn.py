@@ -533,8 +533,12 @@ async def _chat_once(
         reasoning = step.reasoning_chars
         eff, src = _effective_max_tokens(provider_chain, meta["max_tokens"])
         hint = f"，思考 {reasoning} 字符但无正文（max_tokens={eff}，来自{src}）" if reasoning else ""
-        logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).warning(
-            f"[Turn] 空回复，按静默处理（不补兜底话术）{hint}"
+        # 空回复是"用户发了消息却什么都没收到"的典型症状：必须能定位到会话/任务，
+        # 否则同一句文案连续出现时无法区分是哪一轮、哪个群。
+        logger.add_info(account_label(getattr(runtime, "bot_id", "?"))).warning(
+            f"[Turn] 空回复，按静默处理（不补兜底话术）"
+            f" | session={getattr(ctx, 'session_id', '') or ''}"
+            f" task={getattr(getattr(runtime, 'task', None), 'task_id', '') or ''}{hint}"
         )
         # 空回复就是空回复：不再用「抱歉，我暂时无法回答」冒充模型说的话。
         # 结局由调用方按空文本判为 silent/max_tokens；这一轮不发消息、不写 assistant 历史。
@@ -762,6 +766,19 @@ async def _write_history(
 
         _commit_history_enrichment(runtime, session_id, ctx)
     except Exception as e:  # noqa: BLE001 —— 写历史失败不该丢掉已生成的回复
-        logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).warning(
-            f"[Turn] 写历史失败（已忽略）: {e}"
+        # 这条以前只有一句异常文本：同一秒内出现多条时无法区分会话/批次（实测 12 条同文案）。
+        from app.core import diagnostics as diag
+
+        diag.log_failure(
+            logger.add_info(account_label(getattr(runtime, "bot_id", "?"))),
+            "history.write_failed",
+            "写历史失败（已忽略，本轮回复不受影响）",
+            error=e,
+            fields={
+                "bot": getattr(runtime, "bot_id", ""),
+                "session": session_id,
+                "task": getattr(getattr(runtime, "task", None), "task_id", ""),
+                "chars": len(str(text or "")),
+            },
+            with_traceback=True,
         )

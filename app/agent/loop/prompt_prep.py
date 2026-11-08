@@ -188,6 +188,7 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
                     bot=bot,
                     max_bytes=max_image_bytes(config),
                     max_entries=int(config.get("image_max_count", 4) or 4),
+                    session_id=session_id,
                 )
             except Exception as e:  # noqa: BLE001 —— 回填是增强，失败只降级
                 diag.log_failure(
@@ -388,6 +389,8 @@ async def prepare_prompt(runtime, event=None, ctx=None, *, session_mgr=None, tur
                     config=config,
                     segments=image_segments,
                     origin="current_turn",
+                    session_id=session_id,
+                    message_id=getattr(event, "message_id", ""),
                 )
         except Exception as e:  # noqa: BLE001 —— 图片解析失败必须降级为纯文本
             diag.log_failure(

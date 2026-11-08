@@ -444,6 +444,8 @@ class LlmPipeline:
             if not segments:
                 return []
             bot_id = getattr(self.runtime, "bot_id", "")
+            session_id = getattr(ctx, "session_id", "")
+            message_id = getattr(getattr(ctx, "event", None), "message_id", "")
             if cache_enabled(self.runtime.config):
                 await persist_images(
                     segments,
@@ -451,6 +453,7 @@ class LlmPipeline:
                     bot=ctx.bot,
                     max_bytes=max_image_bytes(self.runtime.config),
                     origin="current_turn",
+                    session_id=session_id,
                 )
             return await resolve_images(
                 ctx.event,
@@ -461,6 +464,8 @@ class LlmPipeline:
                 config=self.runtime.config,
                 segments=segments,
                 origin="current_turn",
+                session_id=session_id,
+                message_id=message_id,
             )
         except Exception as e:  # noqa: BLE001 —— 图片解析失败必须降级为纯文本，不能阻断对话
             from app.core import diagnostics as diag

@@ -266,6 +266,8 @@ async def persist_segment(
     bot: Any = None,
     max_bytes: int = DEFAULT_MAX_IMAGE_BYTES,
     origin: str = "",
+    session_id: Any = "",
+    message_id: Any = "",
 ) -> dict | None:
     """图片段 → 落盘 + 返回本地指向（``{"sha", "mime", "bytes"}``）。
 
@@ -295,6 +297,8 @@ async def persist_segment(
         fields = {
             "origin": origin,
             "bot": bot_id,
+            "session": session_id,
+            "message_id": message_id,
             "file": str(_seg_data(seg).get("file", "") or "")[:80],
             **e.log_fields(),
         }
@@ -345,6 +349,7 @@ async def persist_images(
     max_bytes: int = DEFAULT_MAX_IMAGE_BYTES,
     timeout: float = 15.0,
     origin: str = "inbound",
+    session_id: Any = "",
 ) -> int:
     """把一批消息段里的图片就地落盘（写 ``data["media"]`` 并抹掉远端地址）。
 
@@ -367,7 +372,14 @@ async def persist_images(
     async def _one(seg: Any) -> bool:
         try:
             media = await asyncio.wait_for(
-                persist_segment(seg, bot_id=bot_id, bot=bot, max_bytes=max_bytes, origin=origin),
+                persist_segment(
+                    seg,
+                    bot_id=bot_id,
+                    bot=bot,
+                    max_bytes=max_bytes,
+                    origin=origin,
+                    session_id=session_id,
+                ),
                 timeout=max(1.0, float(timeout or 15.0)),
             )
         except asyncio.TimeoutError as e:
@@ -379,6 +391,7 @@ async def persist_images(
                 fields={
                     "origin": origin,
                     "bot": bot_id,
+                    "session": session_id,
                     "timeout_s": max(1.0, float(timeout or 15.0)),
                 },
             )
@@ -389,7 +402,7 @@ async def persist_images(
                 "image.persist_failed",
                 "图片落盘失败，本条图片按占位处理",
                 error=e,
-                fields={"origin": origin, "bot": bot_id},
+                fields={"origin": origin, "bot": bot_id, "session": session_id},
                 with_traceback=True,
             )
             return False
@@ -416,6 +429,8 @@ async def resolve_images(
     config: Any = None,
     segments: Iterable[Any] | None = None,
     origin: str = "current_turn",
+    session_id: Any = "",
+    message_id: Any = "",
 ) -> list[dict]:
     """把本轮消息里的图片解析成 ``[{"kind": "base64", "value": ..., "mime": ..., "media": ...}]``。
 
@@ -458,7 +473,13 @@ async def resolve_images(
                 skipped_dead += 1
                 continue
             media = await persist_segment(
-                seg, bot_id=bot_id, bot=bot, max_bytes=max_bytes, origin=origin
+                seg,
+                bot_id=bot_id,
+                bot=bot,
+                max_bytes=max_bytes,
+                origin=origin,
+                session_id=session_id,
+                message_id=message_id,
             )
         if not media:
             diag.log_failure(
@@ -468,9 +489,14 @@ async def resolve_images(
                 fields={
                     "origin": origin,
                     "bot": bot_id,
+                    "session": session_id,
+                    "message_id": message_id,
                     "file": str(_seg_data(seg).get("file", "") or "")[:80],
                 },
-                level="debug",
+                level="info",
+                once=True,
+                once_key=f"{bot_id}:{session_id}:{message_id}",
+                account=bot_id,
             )
             continue
         # 动图优先：命中线索才下字节确认，确认是动图就拆帧（帧走独立的帧数预算，
@@ -502,6 +528,8 @@ async def resolve_images(
                 fields={
                     "origin": origin,
                     "bot": bot_id,
+                    "session": session_id,
+                    "message_id": message_id,
                     "sha": str(media.get("sha", "") or ""),
                     "bytes": media.get("bytes", 0),
                     "inline_max_mb": inline_max_mb,
@@ -513,7 +541,13 @@ async def resolve_images(
             _log(),
             "image.skipped_dead_links",
             "本轮有图片因链接已过期（已标记）被跳过，未重复下载",
-            fields={"origin": origin, "bot": bot_id, "count": skipped_dead},
+            fields={
+                "origin": origin,
+                "bot": bot_id,
+                "session": session_id,
+                "message_id": message_id,
+                "count": skipped_dead,
+            },
             level="info",
             once=True,
             once_key=f"{bot_id}:{origin}",
@@ -948,6 +982,7 @@ async def backfill_history_media(
     max_bytes: int = DEFAULT_MAX_IMAGE_BYTES,
     max_entries: int = 4,
     timeout: float = 5.0,
+    session_id: Any = "",
 ) -> int:
     """给"只有远端直链、没有本地指向"的历史条目补一次落盘（改造前的老数据）。
 
@@ -969,6 +1004,9 @@ async def backfill_history_media(
     dead = 0
     errors = 0
     for entry in reversed(list(entries or [])):
+        entry_message_id = (
+            str(entry.get("message_id", "") or "") if isinstance(entry, dict) else ""
+        )
         for seg in history_image_segments(entry):
             if image_media.segment_media(seg):
                 continue
@@ -976,13 +1014,35 @@ async def backfill_history_media(
                 dead += 1
                 continue
             if budget <= 0 or loop.time() >= deadline:
+                diag.log_failure(
+                    _log(),
+                    "image.backfill_summary",
+                    "历史图片回填汇总（预算/耗时用尽，提前结束）",
+                    fields={
+                        "origin": "backfill",
+                        "bot": bot_id,
+                        "session": session_id,
+                        "restored": done,
+                        "dead": dead,
+                        "errors": errors,
+                        "budget": max_entries,
+                        "reason": "budget_or_timeout",
+                    },
+                    level="debug",
+                )
                 return done
             budget -= 1
             remaining = max(0.5, deadline - loop.time())
             try:
                 media = await asyncio.wait_for(
                     persist_segment(
-                        seg, bot_id=bot_id, bot=bot, max_bytes=max_bytes, origin="backfill"
+                        seg,
+                        bot_id=bot_id,
+                        bot=bot,
+                        max_bytes=max_bytes,
+                        origin="backfill",
+                        session_id=session_id,
+                        message_id=entry_message_id,
                     ),
                     timeout=remaining,
                 )
@@ -993,7 +1053,12 @@ async def backfill_history_media(
                     "image.backfill_failed",
                     "历史图片回填失败（已忽略，按占位渲染）",
                     error=e,
-                    fields={"origin": "backfill", "bot": bot_id},
+                    fields={
+                        "origin": "backfill",
+                        "bot": bot_id,
+                        "session": session_id,
+                        "message_id": entry_message_id,
+                    },
                     level="debug",
                     with_traceback=True,
                 )
@@ -1016,6 +1081,7 @@ async def backfill_history_media(
             fields={
                 "origin": "backfill",
                 "bot": bot_id,
+                "session": session_id,
                 "restored": done,
                 "dead": dead,
                 "errors": errors,
