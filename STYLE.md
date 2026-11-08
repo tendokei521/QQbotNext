@@ -116,6 +116,24 @@ except Exception as e:
     self.log.exception(f"[Module] {name} 加载失败: {e}")
 ```
 
+- **用户可感知的失败必须留「可定位」信息**：禁止只写一句没有对象的失败（反例：
+  `[Image] 图片下载失败（HTTP 400）`——没有 URL、没有响应体、没有调用方，只能靠猜）。
+  统一走 `app/core/diagnostics.py::log_failure`：
+
+  ```python
+  diag.log_failure(
+      _log(), "image.download_http_error", "图片下载失败",
+      fields={"bot": bot_id, "session": session_id, "http": 400, "url": diag.redact_url(url)},
+      once=True, once_key=..., account=bot_id,   # 热点路径去重
+  )
+  ```
+
+  `code=` 是稳定事件码（可 grep / 可告警），`fields=` 放定位字段（账号 / 会话 / message_id /
+  URL / HTTP 状态 / 重试次数），`caller=` 自动带调用链；URL 先过 `redact_url`（`rkey`／`token` 打码）。
+  永久失败（链接过期 / 4xx）还要在对象上留标记（如图片段的 `data["media_error"]`），
+  避免每一轮都重试同一条死链、把 `warn.log` 刷成噪音。参考实现：
+  `app/agent/media/image.py`（死链标记 + `get_image` 兜底）、`app/agent/delivery/channel.py`。
+
 - 日志前缀链式构造：`logger.add_info(f"#{index}").add_info(module.name).info(...)`；不要拼接裸字符串前缀。
 - 跨组件状态用 `TaskManager` 管理后台任务（可追踪、级联取消），不要散落 `asyncio.create_task`。
 
