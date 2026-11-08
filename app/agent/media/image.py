@@ -86,7 +86,7 @@ def _log():
 
 
 class MediaUnavailable(Exception):
-    """图片字节取不到，而且这次失败**重试也没用**（链接过期 / 4xx / 文件被清）。
+    """图片字节取不到，而且这次失败**重试也没用**（链接过期 / 4xx / 体积超限）。
 
     为什么要一个专门的异常：``_download_bytes`` 以前把所有失败压成 ``(None, "")``，
     调用方只知道"没拿到"，于是历史回填每轮都重试同一条 ``rkey`` 已过期的直链，
@@ -100,6 +100,8 @@ class MediaUnavailable(Exception):
         retcode: CDN 业务码（QQ 图片 CDN 的 ``retcode``，没有则 0）。
         detail: CDN 的 ``retmsg`` / 短响应体（已截断）。
         url: 触发失败的原始 URL（落日志前统一走 ``diag.redact_url``）。
+        limit: 体积上限（``too_large`` 时有效）。
+        size: 实际体积（``too_large`` 时有效，流式读超时可能只是下限）。
     """
 
     def __init__(
@@ -110,12 +112,16 @@ class MediaUnavailable(Exception):
         retcode: int = 0,
         detail: str = "",
         url: str = "",
+        limit: int = 0,
+        size: int = 0,
     ) -> None:
         self.reason = str(reason or "unavailable")
         self.http = int(http or 0)
         self.retcode = int(retcode or 0)
         self.detail = str(detail or "")
         self.url = str(url or "")
+        self.limit = int(limit or 0)
+        self.size = int(size or 0)
         super().__init__(self.describe())
 
     def describe(self) -> str:
@@ -125,6 +131,8 @@ class MediaUnavailable(Exception):
             extra.append(f"HTTP {self.http}")
         if self.retcode:
             extra.append(f"retcode={self.retcode}")
+        if self.size and self.limit:
+            extra.append(f"{self.size / 1024 / 1024:.1f}MB > {self.limit / 1024 / 1024:.1f}MB")
         suffix = f"（{'，'.join(extra)}）" if extra else ""
         return f"{self.reason}{suffix}"
 
@@ -135,22 +143,36 @@ class MediaUnavailable(Exception):
             "http": self.http,
             "retcode": self.retcode,
             "retmsg": self.detail,
+            "size_mb": round(self.size / 1024 / 1024, 1) if self.size else 0,
+            "limit_mb": round(self.limit / 1024 / 1024, 1) if self.limit else 0,
             "host": diag.url_host(self.url),
             "url": diag.redact_url(self.url),
         }
 
 
-def segment_unavailable(seg: Any) -> bool:
-    """该图片段是否已经被判定「取不到，且重试无用」（历史回填/本轮解析都靠它止损）。"""
+def segment_unavailable(seg: Any, *, max_bytes: int | None = None) -> bool:
+    """该图片段是否已经判定「取不到，且重试无用」（历史回填/本轮解析都靠它止损）。
+
+    ``too_large`` 是例外：它不是"取不到"，而是"太大没要"。当调用方把体积上限调大
+    （``max_bytes`` 传入且大于当时记录的上限）时允许再试一次——否则用户把
+    ``image_max_mb`` 从 10 调到 20 之后，那张 14.9MB 的图仍然永远被跳过。
+    """
     marker = _seg_data(seg).get("media_error")
-    return isinstance(marker, dict) and bool(marker.get("reason"))
+    if not isinstance(marker, dict) or not marker.get("reason"):
+        return False
+    if marker.get("reason") == "too_large" and max_bytes:
+        recorded_limit = int(marker.get("limit") or 0)
+        if recorded_limit and int(max_bytes) > recorded_limit:
+            return False
+    return True
 
 
 def mark_segment_unavailable(seg: Any, error: MediaUnavailable) -> None:
     """把永久失败写进段自身（``data["media_error"]``），后续轮次不再重试。
 
-    标记随会话历史一起落库：链接过期是**不可逆**的，不标就会每一轮都撞一次 400、
-    在 warn.log 里刷一条没有信息的告警（这正是本模块这次要堵死的噪音源）。
+    标记随会话历史一起落库：链接过期是**不可逆**的，体积超限则是"按当前上限不要它"，
+    两者都不该每一轮重新下载一次、在 warn.log 里刷一条没有信息的告警
+    （这正是本模块这次要堵死的噪音源）。
     """
     data = _mutable_data(seg)
     if data is None:
@@ -160,6 +182,8 @@ def mark_segment_unavailable(seg: Any, error: MediaUnavailable) -> None:
         "http": error.http,
         "retcode": error.retcode,
         "retmsg": error.detail,
+        "limit": error.limit,
+        "size": error.size,
         "at": int(time.time()),
     }
 
@@ -278,7 +302,9 @@ async def persist_segment(
     失败口径：
     - **永久失败**（链接过期 / 4xx）：在段上打 ``media_error`` 标记（后续轮次不再重试），
       并留一条带 URL/status/CDN 业务码/调用方的告警；
-    - 瞬时失败/超限：不标记，让下一轮还能再试（各自的日志已在 :func:`_segment_bytes` 里留过）。
+    - **体积超限**：同样打标记（记下当时的上限），后续轮次不再白下载一次；用户把
+      ``image_max_mb`` 调大后标记失效、自动再试一次（见 :func:`segment_unavailable`）；
+    - 瞬时失败：不标记，让下一轮还能再试（日志已在 :func:`_segment_bytes` 里留过）。
 
     Args:
         origin: 触发来源（``inbound`` 收到即落盘 / ``current_turn`` 本轮解析 /
@@ -287,8 +313,9 @@ async def persist_segment(
     existing = image_media.segment_media(seg)
     if existing:
         return existing
-    if segment_unavailable(seg):
-        # 已经判定过"重试无用"的段：历史回填/本轮解析都不再白撞一次 CDN
+    if segment_unavailable(seg, max_bytes=max_bytes):
+        # 已经判定过"重试无用"（或"按当前上限不要了"）的段：
+        # 历史回填/本轮解析都不再白撞一次 CDN
         return None
     try:
         data, mime = await _segment_bytes(seg, bot=bot, max_bytes=max_bytes)
@@ -302,13 +329,17 @@ async def persist_segment(
             "file": str(_seg_data(seg).get("file", "") or "")[:80],
             **e.log_fields(),
         }
+        if e.reason == "too_large":
+            summary = "图片超过体积上限，按当前上限跳过（已标记：调大 image_max_mb 后才会重试）"
+        else:
+            summary = "图片取不到，已按占位处理（该段已标记，后续轮次不再重试）"
         diag.log_failure(
             _log(),
             "image.unavailable",
-            "图片取不到，已按占位处理（该段已标记，后续轮次不再重试）",
+            summary,
             fields=fields,
             once=True,
-            # 同一条死链只提醒一次：不同图片 file 不同，会被当成不同事件
+            # 同一张图只提醒一次：不同图片 file 不同，会被当成不同事件
             once_key=f"{bot_id}:{e.reason}:{diag.redact_url(e.url) or fields['file']}",
             account=bot_id,
         )
@@ -364,7 +395,7 @@ async def persist_images(
         seg for seg in (segments or [])
         if _seg_type(seg) in IMAGE_LIKE_SEGMENTS
         and not image_media.segment_media(seg)
-        and not segment_unavailable(seg)
+        and not segment_unavailable(seg, max_bytes=max_bytes)
     ]
     if not targets:
         return 0
@@ -468,8 +499,8 @@ async def resolve_images(
     for seg in source:
         media = image_media.segment_media(seg)
         if not media:
-            if segment_unavailable(seg):
-                # 早前已被判死链的段：静默跳过（第一次失败时已经留过完整日志）
+            if segment_unavailable(seg, max_bytes=max_bytes):
+                # 早前已被判死链/超限的段：静默跳过（第一次失败时已经留过完整日志）
                 skipped_dead += 1
                 continue
             media = await persist_segment(
@@ -634,7 +665,9 @@ async def _segment_bytes(seg: Any, *, bot: Any, max_bytes: int) -> tuple[bytes |
     - **永久失败**（链接过期 / 4xx）→ 抛 :class:`MediaUnavailable`，由
       :func:`persist_segment` 在段上打 ``media_error`` 标记，后续轮次不再重试；
     - **瞬时失败**（超时 / 5xx / 网络异常）→ 已记结构化日志，返回 ``(None, "")``；
-    - **体积超限** → 已记日志，返回 ``(None, "")``（改配置后还能再试，不打标记）。
+    - **体积超限** → 抛 ``too_large`` 的 :class:`MediaUnavailable`：这张图按当前上限
+      不要了，段上打标记（记下当时上限），**后续轮次不再下载**；用户调大
+      ``image_max_mb`` 后标记失效、允许再试一次。
 
     直链过期时**不会提前 return**：还会拿 ``file`` 向 OneBot 的 ``get_image`` 换一次新链接
     （这是链路过期后唯一能自愈的路），换来的链接再走同一套下载逻辑。
@@ -649,13 +682,20 @@ async def _segment_bytes(seg: Any, *, bot: Any, max_bytes: int) -> tuple[bytes |
             continue
         payload = match.group(2)
         if len(payload) * 0.75 > max_bytes:
+            declared = int(len(payload) * 0.75)
             diag.log_failure(
                 _log(),
                 "image.too_large",
                 "图片超过体积上限，已跳过",
-                fields={"source": "data_url", "mb": round(len(payload) * 0.75 / 1024 / 1024, 1)},
+                fields={
+                    "source": "data_url",
+                    "size_mb": round(declared / 1024 / 1024, 1),
+                    "limit_mb": round(max_bytes / 1024 / 1024, 1),
+                },
             )
-            return None, ""
+            raise MediaUnavailable(
+                "too_large", limit=max_bytes, size=declared
+            )
         try:
             return base64.b64decode(payload), f"image/{match.group(1).lower()}"
         except (binascii.Error, ValueError) as e:
@@ -671,13 +711,18 @@ async def _segment_bytes(seg: Any, *, bot: Any, max_bytes: int) -> tuple[bytes |
             continue
         raw = candidate[len("base64://"):] if lowered.startswith("base64://") else candidate[len("base64:"):]
         if len(raw) * 0.75 > max_bytes:
+            declared = int(len(raw) * 0.75)
             diag.log_failure(
                 _log(),
                 "image.too_large",
                 "图片超过体积上限，已跳过",
-                fields={"source": "base64_scheme", "mb": round(len(raw) * 0.75 / 1024 / 1024, 1)},
+                fields={
+                    "source": "base64_scheme",
+                    "size_mb": round(declared / 1024 / 1024, 1),
+                    "limit_mb": round(max_bytes / 1024 / 1024, 1),
+                },
             )
-            return None, ""
+            raise MediaUnavailable("too_large", limit=max_bytes, size=declared)
         try:
             decoded = base64.b64decode(raw)
         except (binascii.Error, ValueError) as e:
@@ -704,6 +749,9 @@ async def _segment_bytes(seg: Any, *, bot: Any, max_bytes: int) -> tuple[bytes |
             return await _download_bytes(candidate, max_bytes=max_bytes)
         except MediaUnavailable as e:
             failures.append(e)
+            if e.reason == "too_large":
+                # 图本身太大：换 get_image 再要一次只会再拉一遍同样的字节
+                raise
 
     # 4) 让 OneBot 把 file 换成可访问 URL（直链过期/缺失时唯一可自救的路）
     if bot is not None and file_value:
@@ -767,10 +815,12 @@ async def _get_image_payload(bot: Any, file_value: str) -> dict:
 async def _download_bytes(url: str, *, max_bytes: int, timeout: float = _ANIMATED_FETCH_TIMEOUT) -> tuple[bytes | None, str]:
     """下载图片字节；**失败必须留下能定位的信息**（URL host / HTTP 状态 / CDN 业务码 / 耗时）。
 
-    失败分两类，调用方据此决定要不要再试：
+    失败分三类，调用方据此决定要不要再试：
 
     - **永久失败**（4xx、链接过期）→ 抛 :class:`MediaUnavailable`，由 ``persist_segment``
       在段上打 ``media_error`` 标记，后续轮次不再白撞；
+    - **体积超限** → 抛 ``too_large``（带当时上限与体积）：按当前上限不要这张图，
+      打标记后不再每轮下载；调大上限后自动重试；
     - **瞬时失败**（超时、5xx、网络异常）→ 记日志后返回 ``(None, "")``，下一轮还能再试。
     """
     import aiohttp
@@ -815,16 +865,18 @@ async def _download_bytes(url: str, *, max_bytes: int, timeout: float = _ANIMATE
                     diag.log_failure(
                         _log(),
                         "image.too_large",
-                        "图片超过体积上限，已跳过",
+                        "图片超过体积上限，已跳过（记下上限，调大后才会重试）",
                         fields={
                             "source": "http",
                             "host": diag.url_host(url),
                             "url": diag.redact_url(url),
-                            "declared_mb": round(declared / 1024 / 1024, 1),
-                            "max_mb": round(max_bytes / 1024 / 1024, 1),
+                            "size_mb": round(declared / 1024 / 1024, 1),
+                            "limit_mb": round(max_bytes / 1024 / 1024, 1),
                         },
                     )
-                    return None, ""
+                    raise MediaUnavailable(
+                        "too_large", limit=max_bytes, size=declared, url=url
+                    )
                 buffer = bytearray()
                 async for chunk in resp.content.iter_chunked(64 * 1024):
                     buffer.extend(chunk)
@@ -832,15 +884,18 @@ async def _download_bytes(url: str, *, max_bytes: int, timeout: float = _ANIMATE
                         diag.log_failure(
                             _log(),
                             "image.too_large",
-                            "图片超过体积上限，已跳过",
+                            "图片超过体积上限，已跳过（记下上限，调大后才会重试）",
                             fields={
                                 "source": "http_stream",
                                 "host": diag.url_host(url),
                                 "url": diag.redact_url(url),
-                                "max_mb": round(max_bytes / 1024 / 1024, 1),
+                                "size_mb": round(len(buffer) / 1024 / 1024, 1),
+                                "limit_mb": round(max_bytes / 1024 / 1024, 1),
                             },
                         )
-                        return None, ""
+                        raise MediaUnavailable(
+                            "too_large", limit=max_bytes, size=len(buffer), url=url
+                        )
                 data = bytes(buffer)
                 return data, _sniff_mime(data)
     except MediaUnavailable:
@@ -1010,7 +1065,7 @@ async def backfill_history_media(
         for seg in history_image_segments(entry):
             if image_media.segment_media(seg):
                 continue
-            if segment_unavailable(seg):
+            if segment_unavailable(seg, max_bytes=max_bytes):
                 dead += 1
                 continue
             if budget <= 0 or loop.time() >= deadline:
@@ -1064,7 +1119,7 @@ async def backfill_history_media(
                 )
                 media = None
             if not media:
-                if segment_unavailable(seg):
+                if segment_unavailable(seg, max_bytes=max_bytes):
                     dead += 1
                 continue
             data = seg.get("data") if isinstance(seg, dict) else None

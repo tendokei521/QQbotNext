@@ -177,6 +177,43 @@ async def test_backfill_skips_segments_already_marked_dead(monkeypatch):
     assert downloads == []
 
 
+@pytest.mark.asyncio
+async def test_oversize_image_is_marked_and_only_retried_after_limit_raised(monkeypatch):
+    """体积超限 = 按当前上限不要它，不是「每轮再下载一次」。
+
+    线上真实案例：14.9MB 的图被 10MB 上限跳过，历史里只剩直链；几小时后 rkey 过期，
+    回填每轮撞 400，在 warn.log 里刷 `图片下载失败（HTTP 400）`（本次事故的直接来源）。
+    """
+    downloads: list[int] = []
+
+    async def _too_large(url, *, max_bytes, timeout=0):
+        downloads.append(max_bytes)
+        raise image_mod.MediaUnavailable(
+            "too_large", limit=max_bytes, size=15 * 1024 * 1024, url=url
+        )
+
+    monkeypatch.setattr(image_mod, "_download_bytes", _too_large)
+    monkeypatch.setattr(image_mod.diag, "log_failure", _Recorder())
+
+    seg = {"type": "image", "data": {"file": "big.jpg", "url": EXPIRED_URL}}
+
+    assert await image_mod.persist_segment(seg, bot_id="123", origin="inbound") is None
+    marker = seg["data"]["media_error"]
+    assert marker["reason"] == "too_large"
+    assert marker["limit"] == 10 * 1024 * 1024
+    assert marker["size"] == 15 * 1024 * 1024
+
+    # 上限没变：不再下载（否则每轮白下一次 / 过期后每轮 400）
+    assert await image_mod.persist_segment(seg, bot_id="123", origin="backfill") is None
+    assert len(downloads) == 1
+
+    # 用户把上限调到 20MB：允许重试一次
+    await image_mod.persist_segment(
+        seg, bot_id="123", origin="backfill", max_bytes=20 * 1024 * 1024
+    )
+    assert len(downloads) == 2
+
+
 def test_log_failure_is_structured_and_once_per_key():
     diagnostics.reset_failure_state()
 
