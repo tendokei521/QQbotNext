@@ -52,7 +52,8 @@ from collections.abc import AsyncIterator, Callable
 from typing import Any, Protocol, runtime_checkable
 
 from app.agent.delivery.directives import build_outbound_builder
-from app.core.logger import account_label
+from app.core import diagnostics as diag
+from app.core.logger import account_label, logger
 from app.domain.message import Message
 
 
@@ -101,6 +102,16 @@ class BlockingOutput:
         ctx.response_messages = [outbound]
 
         if not await run_stage(runtime, "post_response", ctx):
+            # 钩子否决 = 整条回复不发。用户侧是"机器人没理我"，必须能查到是谁拦的。
+            diag.log_failure(
+                _failure_log(ctx),
+                "delivery.post_response_vetoed",
+                "post_response 阶段否决，整条回复未发送",
+                fields={
+                    **_failure_fields(ctx),
+                    "chars": len(str(response_text or "")),
+                },
+            )
             return
         job = getattr(ctx, "job", None)
         if job is not None and (job.skip or job.superseded):
@@ -214,12 +225,23 @@ class StreamOutput:
                     break
                 yield msg
         finally:
+            # 区分"被取消"与"生产者真的失败"：旧实现 `except (CancelledError, Exception): pass`
+            # 把 stream_response 的真实异常完全吞掉——整轮无输出、日志零痕迹。
             if not task.done():
                 task.cancel()
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                    pass
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:  # noqa: BLE001 —— 记录后照常结束本轮
+                diag.log_failure(
+                    _failure_log(ctx),
+                    "delivery.producer_failed",
+                    "流式生产者异常，本轮回复可能不完整甚至为空",
+                    error=e,
+                    fields=_failure_fields(ctx),
+                    with_traceback=True,
+                )
 
 
 def as_message(item: Any, outbound: Any = None) -> Message | None:
@@ -248,6 +270,24 @@ def _mark_interrupted(ctx: Any) -> None:
 
 def _has_get(config: Any) -> bool:
     return callable(getattr(config, "get", None))
+
+
+def _failure_log(ctx: Any):
+    """输出侧失败日志器：带上账号前缀（多账号时能分清是谁没发出去）。"""
+    runtime = getattr(ctx, "runtime", None)
+    bot_id = getattr(runtime, "bot_id", "")
+    return logger.add_info(account_label(bot_id))
+
+
+def _failure_fields(ctx: Any) -> dict[str, Any]:
+    """输出侧失败的定位字段（会话/任务 id 都在 ctx 上，别让日志只剩一句异常）。"""
+    runtime = getattr(ctx, "runtime", None)
+    return {
+        "bot": getattr(runtime, "bot_id", ""),
+        "session": getattr(ctx, "session_id", ""),
+        "task": getattr(getattr(runtime, "task", None), "task_id", ""),
+    }
+
 
 
 def _transport_stream(config: Any, runtime: Any = None) -> bool:

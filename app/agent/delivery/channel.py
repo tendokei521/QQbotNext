@@ -34,7 +34,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.core.logger import logger, account_label
+from app.core import diagnostics as diag
+from app.core.logger import account_label, logger
 from app.domain.message import Message
 from app.domain.session import parse_session_id
 
@@ -80,10 +81,34 @@ async def send_item(
 
     if hooks and runtime is not None:
         if not await _run_hook(runtime, "pre_send", ctx, outgoing):
+            # 否决 = 消息不发。旧实现在这里静默 return，用户只看到"机器人没理我"，
+            # 日志里既没有"被拦了"也没有拦的是哪条——是设计还是 bug 无从区分。
+            diag.log_failure(
+                logger.add_info("Delivery"),
+                "delivery.pre_send_vetoed",
+                "pre_send 钩子否决，本条消息未发送",
+                fields={
+                    "bot": getattr(runtime, "bot_id", ""),
+                    "session": session_id,
+                    "chars": len(str(getattr(outgoing, "text", "") or "")),
+                },
+                once=True,
+                once_key=f"{getattr(runtime, 'bot_id', '')}:{session_id}",
+                account=getattr(runtime, "bot_id", ""),
+            )
             return None
 
     if bot is None:
-        logger.add_info("Delivery").warning(f"[Send] 无可用 Bot，发送被跳过: {session_id}")
+        diag.log_failure(
+            logger.add_info("Delivery"),
+            "delivery.no_bot",
+            "无可用 Bot，发送被跳过",
+            fields={
+                "bot": getattr(runtime, "bot_id", "") if runtime is not None else "",
+                "session": session_id,
+                "chars": len(str(getattr(outgoing, "text", "") or "")),
+            },
+        )
         return None
 
     try:
@@ -92,7 +117,19 @@ async def send_item(
         else:
             response = await bot.send_private_msg(int(target), outgoing)
     except Exception as e:  # noqa: BLE001 —— 发送失败应当回传为 None，不炸调用方
-        logger.add_info("Delivery").error(f"[Send] 发送失败 {session_id}: {e}")
+        diag.log_failure(
+            logger.add_info("Delivery"),
+            "delivery.send_failed",
+            "消息发送异常",
+            error=e,
+            fields={
+                "bot": getattr(bot, "bot_id", "") or getattr(runtime, "bot_id", ""),
+                "session": session_id,
+                "target": target,
+                "chars": len(str(getattr(outgoing, "text", "") or "")),
+            },
+            with_traceback=True,
+        )
         _record_outbound(
             session_id=session_id,
             outgoing=outgoing,
@@ -169,8 +206,18 @@ async def _run_hook(runtime: Any, stage: str, ctx: Any, msg: Message) -> bool:
             )
         return bool(await run_stage(runtime, stage, ctx, msg))
     except Exception as e:  # noqa: BLE001 —— 钩子异常不该让消息发不出去
-        logger.add_info(account_label(getattr(runtime, 'bot_id', '?'))).debug(
-            f"[Send] {stage} 钩子执行异常（已忽略）: {e}"
+        # 钩子炸了却按"放过"处理：必须有痕迹，否则这条消息是"发了但没人知道钩子坏了"。
+        diag.log_failure(
+            logger.add_info(account_label(getattr(runtime, "bot_id", "?"))),
+            "delivery.hook_failed",
+            f"{stage} 钩子执行异常（已忽略，按放行处理）",
+            error=e,
+            fields={
+                "bot": getattr(runtime, "bot_id", ""),
+                "session": getattr(ctx, "session_id", ""),
+                "stage": stage,
+            },
+            with_traceback=True,
         )
         return True
 
