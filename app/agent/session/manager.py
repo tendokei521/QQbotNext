@@ -480,17 +480,22 @@ class SessionManager:
         meta_lines: list[str] | None = None,
         reasoning: str = "",
         silent: bool = False,
-    ):
+    ) -> bool:
         """追加一条历史。
 
         传入 ``segments`` 时写入**结构化形状**（``base`` + 顶层 ``content`` 兼容字段）：
         基础信息（时间/发送者/群号/正文/原始段）与正文分离，渲染时再组装，因此
         格式/脱敏/补全都能在读取侧决定；不传 ``segments`` 时保持旧形状（仅 content）。
+
+        Returns:
+            True = 已写入；False = 没写（会话不存在/已被回收，或 assistant 正文是垃圾）。
+            "会话不存在"必须留痕：旧实现在这里静默 return，会话过期/换号后整条历史
+            凭空消失，用户侧表现为"模型不记得刚才说的话"，日志侧却一片干净。
         """
         session = self.get_session(session_id)
         if session and session.data is not None:
             if role == "assistant" and _is_junk_assistant(content):
-                return
+                return False
             now = int(time.time()) if timestamp is None else int(timestamp)
             entry: dict[str, Any] = {"role": role, "time": now}
             if segments:
@@ -547,6 +552,28 @@ class SessionManager:
                 )
             session.touch()
             self._notify_updated(session_id, "message")
+            return True
+
+        # 会话不存在（过期清理/换号/forget）→ 整条历史被丢弃。旧实现静默 return，
+        # 用户侧表现为"模型不记得刚才说的话"，日志侧一片干净；这里必须留痕。
+        from app.core import diagnostics as diag
+
+        diag.log_failure(
+            logger.add_info(account_label(self.bot_id)),
+            "history.add_message_dropped",
+            "会话不存在，本条历史被丢弃（会话已过期/被回收/换号？）",
+            fields={
+                "bot": self.bot_id,
+                "session": session_id,
+                "role": role,
+                "message_id": message_id,
+                "chars": len(str(content or "")),
+            },
+            once=True,
+            once_key=f"{session_id}:{role}",
+            account=self.bot_id,
+        )
+        return False
 
     def upsert_streaming_assistant(self, session_id: str, text: str) -> bool:
         """流式路径专用：把本轮 assistant 正文写进历史，**支持边发边更新**。

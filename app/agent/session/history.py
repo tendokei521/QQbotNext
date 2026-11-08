@@ -96,8 +96,24 @@ class HistoryManager:
                 if data.get("session_id") == session_id:
                     result.append(data)
             except Exception as e:
-                # 单个历史文件损坏不应影响其余文件读取，但必须留痕（否则表现为"历史凭空消失"）
-                logger.debug(f"[History] 跳过无法读取的历史文件 {filename}: {e}")
+                # 单个历史文件损坏不应影响其余文件读取，但必须留痕（否则表现为"历史凭空消失"）。
+                # 升到 warning：归档损坏是用户可感知的数据丢失，debug 级别等于没记。
+                from app.core import diagnostics as diag
+
+                diag.log_failure(
+                    logger.add_info(account_label(self.bot_id)),
+                    "history.archive_unreadable",
+                    "历史归档文件无法读取，已跳过（该会话历史可能显示不全）",
+                    error=e,
+                    fields={
+                        "bot": self.bot_id,
+                        "file": filename,
+                        "session": session_id,
+                    },
+                    once=True,
+                    once_key=f"{session_id}:{filename}",
+                    account=self.bot_id,
+                )
                 continue
         result.sort(key=lambda d: d.get("saved_at", 0))
         return result
@@ -125,7 +141,20 @@ class HistoryManager:
                     "saved_at": data.get("saved_at", 0),
                 })
             except Exception as e:
-                logger.debug(f"[History] 跳过无法解析的任务文件 {filename}: {e}")
+                # 同 find_all_by_session：任务列表少一条 = 用户"会话列表丢了"，
+                # 必须留下文件名与错误，不能用 debug 吞掉。
+                from app.core import diagnostics as diag
+
+                diag.log_failure(
+                    logger.add_info(account_label(self.bot_id)),
+                    "history.task_file_unreadable",
+                    "历史任务文件无法解析，已跳过（会话列表可能少一条）",
+                    error=e,
+                    fields={"bot": self.bot_id, "file": filename},
+                    once=True,
+                    once_key=filename,
+                    account=self.bot_id,
+                )
                 continue
         tasks.sort(key=lambda t: t.get("saved_at", 0), reverse=True)
         return tasks
