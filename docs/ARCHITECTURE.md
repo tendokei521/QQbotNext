@@ -67,10 +67,12 @@ OneBot 事件（WebSocket）
                 ├─ providers           provider 链（重试 / 切换备用模型）
                 ├─ loop.tool_step      执行工具调用、回流结果、继续下一轮
                 └─ delivery            按输出策略投递（纯文本 / 流式 / 发言通道；发言通道仅群聊）
+                                       发言方式在这里生效：整段一条 / 收到就发 / 拆开按节奏发
 ```
 
 **两条路径必须一致**：流式（`loop/chat.py`）与非流式（`loop/turn.py`）共用同一套 prompt 准备与工具循环，
-差异只在投递；`tests/architecture/test_turn_path_parity.py` 守这条。
+差异只在投递（`delivery/output.py`：`stream_output` 选传输，`reply_send_mode` 选发言方式）；
+`tests/architecture/test_turn_path_parity.py` 守这条。
 
 ---
 

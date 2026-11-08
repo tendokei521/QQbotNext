@@ -6,15 +6,17 @@
 
 | 文件 | 职责 |
 |---|---|
+| `output.py` | 输出策略槽：通道（文本即回复 / 发言通道）× 传输（流式 / 一次拿全） |
+| `send_mode.py` | 发言方式：整段一条 / 收到就发 / 拆分节奏；碎片切片与前缀后缀 |
 | `speech.py` | 发言通道：文本=思考、`send_message`=真正发出 |
-| `pool.py` | 发言池：攒一波再发，避免刷屏 |
-| `pace.py` | 发送节奏：间隔、打字延迟 |
-| `splitter.py` | 长消息分条（按标点/长度） |
-| `directives.py` | 输出里的指令解析（`[split]` 一类标记） |
+| `pool.py` | 拆分节奏的流式实现：有序队列 + 按节奏放行 |
+| `directives.py` | 输出里的指令解析（`[reply]` / `[@QQ]`） |
+
+> 断句与节奏的纯函数在 `app/domain/`：`splitter.py`（切句）、`pace.py`（发送间隔）。
 
 ## 注意
 
-改「发多快/分几条」→ 这里；改「发什么内容」→ `assembly/` 或 `persona/`。
+改「发多快/分几条」→ 这里（含 `send_mode.py` 与 `pool.py`）；改「发什么内容」→ `assembly/` 或 `persona/`。
 
 ## 边界
 

@@ -39,7 +39,7 @@
 
 消费点只有两处：
 
-- `delivery/output.py::select_default_output` → `capabilities.output_capability`：**回复模式最优先**（`reply_mode=participation` ⇒ 发言通道）→ 声明 → 配置兜底；**流式与否只读 `stream_output`**，声明不改变传输。
+- `delivery/output.py::select_default_output` → `capabilities.output_capability`：**回复模式最优先**（`reply_mode=participation` ⇒ 发言通道）→ 声明 → 配置兜底；**流式与否只读 `stream_output`**，声明不改变传输。**发言方式（`reply_send_mode`：整段 / 收到就发 / 拆分节奏）是投递层的第三维**，两种传输都支持，不参与策略选择。
 - `tools/policy.py::prereq_state`：`context_expand` 先问 `has_tool_capability`，没人声明才回落 `context_expand_enable`（键缺失默认 True）。
 
 > 现状：5 个内置模块**都没有声明**（`declare_output` / `declare_tool` 零调用），所以行为全由配置兜底。声明是给第三方替换用的接口，不是现状描述。

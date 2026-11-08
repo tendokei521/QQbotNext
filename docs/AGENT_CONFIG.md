@@ -60,21 +60,34 @@
 | `include_pre_history` | `false` | 额外拉取入站前的群聊消息当背景（群聊记录模块停用时才有用） |
 | `group_log_enable` 等 | 见界面 | 群聊背景记录的开关/窗口/条数/字数 |
 
-## 4. 回复形态与投递（`group_stream` / `group_interrupt`）
+## 4. 输出与发言（`group_stream` / `group_interrupt`）
+
+**两个正交维度**：输出方式只决定「请求怎么要」，发言方式只决定「拿到的正文怎么发」。
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `speech_via_tool` | `true` | **文本=思考，发言必须调 `send_message`**；不调用=静默（正常结束） |
+| `speech_via_tool` | `true` | **文本=思考，发言必须调 `send_message`**；不调用=静默（正常结束）。仅参与度模式 |
 | `speech_max_bubbles` | `4` | 一轮最多几条气泡 |
 | `speech_max_bubble_chars` | `300` | 单条气泡字数上限 |
-| `text_tool_call_fallback` | `false` | 模型把 `[tool_call:send_message]{...}` 写进正文、却不真正调用工具时，按一次真正的工具调用执行；只在参与度模式生效，且本回合已调用过 `send_message` 后不再解析正文 |
-| `stream_output` | `false` | 是否流式输出（需模型/适配器支持）；失败会自动降级为整段 |
+| `text_tool_call_fallback` | `false` | 模型把 `[tool_call:send_message]{...}` 写进正文、却不真正调用工具时，按一次真正的工具调用执行；只在参与度模式生效 |
+| `stream_output` | `false` | **输出方式**：`false`=普通请求（一次拿全，默认）/ `true`=流式（边收边用，需模型/网关支持）。失败自动降级为整段 |
+| `reply_send_mode` | `auto` | **发言方式**：`whole` 整段一条 / `realtime` 收到就发（仅流式有效）/ `split` 按换行与句末标点拆开、按节奏逐条发（两种输出方式都支持）/ `auto` 跟随输出方式 |
 | `interrupt_enable` | `false` | 回复途中来新消息时是否打断重来 |
 | `interrupt_save_sent` | `true` | 打断时把已发出的句子记进历史 |
 | `clean_output_parentheses` | `true` | 清掉"（笑）"这类括号动作 |
 
-> 流式细分参数（`stream_send_*`、`stream_*_delay_ms` 等 19 个键）只在开流式时生效，
-> 界面分组里有说明，一般不用动。
+| 输出方式 | 发言方式 | 实际行为 |
+|---|---|---|
+| 普通请求 | `whole` / `auto` | 一轮结束发一条（改造前默认口径） |
+| 普通请求 | `split` | 整轮拿全后按换行/句末标点拆开，按节奏逐条发 |
+| 普通请求 | `realtime` | 没有"边收"可谈，退化为整段一条 |
+| 流式 | `whole` | 边收只攒着，结束发一条 |
+| 流式 | `realtime` / `auto` | 每切出一句立刻发（改造前开流式的行为） |
+| 流式 | `split` | 每切出一句发，按节奏等待；消息池负责队列与前后缀 |
+
+> 拆分/节奏参数（`stream_send_interval_*`、`stream_*_delay_ms`、`stream_send_prefix/suffix`、
+> 队列与收尾共 14 个键）只在**发言方式=拆分**时生效；`split` 在普通请求下同样生效。
+> 发言通道（参与度模式）的气泡由模型逐条决定，不受发言方式改写（气泡上限见 `speech_max_bubbles`）。
 
 ## 5. 工具与多模态（`group_tools`）
 

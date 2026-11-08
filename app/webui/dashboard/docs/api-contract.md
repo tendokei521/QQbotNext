@@ -586,13 +586,13 @@ dynamic / repeater 的子字段共用同一套渲染规则，控件与取值：
 ### 7.1 /agent/config 的 config/schema
 
 - `config` 即框架 `AgentConfig.raw_config` 过滤 password 后（打码）输出。`schema.config`（未拆分前，即 `app/agent/config_schema.SCHEMA`）包含分组与实际配置项——见 config_schema.py 全量，归纳：
-  - **分组（type:group）**：`group_api` API 设置 / `group_model` 模型参数 / `group_switch` 功能开关 / `group_session` 会话管理 / `group_trigger` 触发设置 / `group_stream` 流式回复 / `group_proactive` 主动消息 / `group_schedule` 定时任务 / `group_permission` 权限。均 `collapsible:true`。
+  - **分组（type:group）**：`group_api` API 设置 / `group_model` 模型参数 / `group_switch` 功能开关 / `group_session` 会话管理 / `group_trigger` 触发设置 / `group_stream` 输出与发言 / `group_proactive` 主动消息 / `group_schedule` 定时任务 / `group_permission` 权限。均 `collapsible:true`。
   - **字段类型分布**：
     - `password`: `api_key`
     - `text`/`string`: `api_base`, `model`, `stream_send_prefix`, `stream_send_suffix`
-    - `select`: `provider`, `stream_send_interval_mode`, `stream_send_curve`, `stream_queue_full_policy`, `include_private_pre_history`, `permission`
+    - `select`: `provider`, `reply_send_mode`, `stream_send_interval_mode`, `stream_send_curve`, `stream_queue_full_policy`, `include_private_pre_history`, `permission`
     - `number`: `retry_attempts`, `max_tokens`, `temperature(step 0.1)`, `reply_cooldown`, `stream_sentence_max_length`, `stream_send_interval_base_ms`, `stream_send_interval_min_ms`, `stream_send_interval_max_ms`, `stream_send_curve_k`, `stream_short_message_length`, `stream_short_message_delay_ms`, `stream_long_message_delay_ms`, `stream_send_max_queue`, `session_timeout`, `history_rounds`, `max_message_length`, `proactive_min_interval_minutes`, `proactive_max_interval_minutes`, `proactive_max_unanswered`, `proactive_quiet_hours_start`, `proactive_quiet_hours_end`, `proactive_group_idle_minutes`
-    - `boolean`: `group_enable`, `private_enable`, `stream_output`, `stream_send_pool_enabled`, `stream_send_by_sentence`, `stream_flush_on_finish`, `stream_keep_order`, `include_pre_history`, `trigger_at`, `proactive_friend_enable`, `proactive_group_enable`, `stream_proactive_enabled`, `schedule_enable`, `stream_scheduled_enabled`
+    - `boolean`: `group_enable`, `private_enable`, `stream_output`, `stream_flush_on_finish`, `include_pre_history`, `trigger_at`, `proactive_friend_enable`, `proactive_group_enable`, `stream_proactive_enabled`, `schedule_enable`, `stream_scheduled_enabled`
     - `string_list`: `trigger_keyword`, `proactive_friend_sessions`(QQ号), `proactive_group_sessions`(群号)
     - `textarea`: `system_prompt`, `proactive_prompt(rows 5)`, `schedule_prompt(rows 7)`
   - 每个字段带 `group` 归属。`permission` 选项：`everyone`/`member`/`group_admin`/`group_owner`/`owner`。
