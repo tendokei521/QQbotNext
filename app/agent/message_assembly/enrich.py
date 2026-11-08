@@ -114,7 +114,7 @@ async def _collect_reply(ctx) -> dict | None:
 def _render_reply_text(message, message_id: Any = None) -> str:
     """引用正文：优先用组装模块的渲染器（占位符带消息 id），失败退回纯文本。"""
     try:
-        from .message_assembly import render_segments
+        from .segments import render_segments
 
         rendered = render_segments(message, message_id=message_id)
         if rendered:
