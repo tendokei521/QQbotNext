@@ -120,6 +120,29 @@ async def _always_true(*_args, **_kwargs):
     return True
 
 
+@pytest.mark.asyncio
+async def test_blocking_split_respects_post_response_skip(monkeypatch):
+    """post_response 把消息标成 skip 时，拆分发送不得把否决项发出去。"""
+    from app.agent.loop import generate as generate_mod
+
+    async def fake_generate(runtime, event, ctx=None, **_kwargs):
+        return "第一行\n第二行。"
+
+    async def veto(runtime, stage, ctx, msg=None):
+        if stage == "post_response":
+            ctx.response_messages[0].skip = True
+        return True
+
+    monkeypatch.setattr(generate_mod, "generate_response", fake_generate)
+    monkeypatch.setattr("app.agent.hooks.run_stage", veto)
+
+    cfg = _Config(reply_send_mode="split", stream_send_interval_mode="none")
+    runtime = _runtime(**cfg._values)
+    messages = [msg async for msg in BlockingOutput(runtime, cfg).respond(_ctx(runtime))]
+
+    assert messages == []
+
+
 # ---------- 3. 流式 + whole / split ----------
 
 

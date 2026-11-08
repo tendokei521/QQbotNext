@@ -350,6 +350,9 @@ async def _iter_split_delivery(
     """
     from app.domain.pace import SendPolicy
 
+    # post_response 钩子可能把整条消息标成 skip（否决发送）：拆分前先剔掉，
+    # 否则拆出来的新 Message 不继承 skip 标记，反而会把它发出去。
+    messages = [msg for msg in messages if not getattr(msg, "skip", False)]
     pieces = split_messages(
         messages,
         max_length=_max_message_length(config, runtime),
