@@ -12,7 +12,7 @@ SCHEMA = {
     "group_behavior": {"type": "group", "label": "行为规则（拟人化）", "collapsible": True},
     "group_interrupt": {"type": "group", "label": "回复打断", "collapsible": True},
     "group_speech_fallback": {"type": "group", "label": "发言识别", "collapsible": True},
-    "group_stream": {"type": "group", "label": "流式回复", "collapsible": True},
+    "group_stream": {"type": "group", "label": "输出与发言", "collapsible": True},
     "group_proactive": {"type": "group", "label": "主动消息", "collapsible": True},
     "group_schedule": {"type": "group", "label": "定时任务", "collapsible": True},
     "group_memory": {"type": "group", "label": "长期记忆（实验性）", "collapsible": True},
@@ -52,22 +52,27 @@ SCHEMA = {
         "default": 1024, "min": 1, "max": 1000000, "group": "group_model",
     },
     "stream_output": {
-        "type": "boolean", "label": "流式输出", "description": "启用后 LLM 回复按句子流式发送（支持带 tools 的工具调用）",
-        "default": False, "group": "group_stream",
-    },    "stream_send_pool_enabled": {
-        "type": "boolean", "label": "启用流式消息池", "description": "开启后流式句子进入有序消息池，按频率发送",
+        "type": "boolean", "label": "流式请求（输出方式）",
+        "description": "开启=边收边用，模型边说边到；关闭=普通请求，一次拿全（默认）。只影响怎么要，不影响怎么发。",
         "default": False, "group": "group_stream",
     },
-    "stream_send_by_sentence": {
-        "type": "boolean", "label": "按句子发送", "description": "按句切分后逐条发送",
-        "default": True, "group": "group_stream",
+    "reply_send_mode": {
+        "type": "select", "label": "发言方式",
+        "description": "决定一轮回复分几条发：整段一条、收到就发，或按换行拆分后按节奏发。",
+        "default": "auto", "group": "group_stream",
+        "options": {
+            "auto": "自动：流式=收到就发，非流式=整段发",
+            "whole": "整段一起发（一条）",
+            "realtime": "收到就发（流式有效）",
+            "split": "按换行拆分，按节奏发",
+        },
     },
     "stream_sentence_max_length": {
-        "type": "number", "label": "单句最大长度", "description": "流式输出时每条消息的最大字符数",
+        "type": "number", "label": "单条最大长度", "description": "拆分发送时一条消息最多多少字，超长会在句中断开",
         "default": 200, "min": 10, "max": 500, "group": "group_stream",
     },
     "stream_send_interval_mode": {
-        "type": "select", "label": "发送间隔模式", "description": "固定间隔 = 恒定节奏；按字数曲线 = 长句多等；不等待 = 连续发送。",
+        "type": "select", "label": "发送间隔模式", "description": "拆分发送时相邻两条的等待：不等待=连着发；固定间隔=恒定节奏；按字数曲线=长句多等。",
         "default": "none", "group": "group_stream",
         "options": {
             "none": "不等待",
@@ -115,19 +120,19 @@ SCHEMA = {
         "default": 400, "min": 0, "max": 10000, "group": "group_stream",
     },
     "stream_send_prefix": {
-        "type": "string", "label": "发送前缀", "description": "每条流式消息发送前追加的文本",
+        "type": "string", "label": "发送前缀", "description": "每条拆分消息发送前追加的文本",
         "default": "", "group": "group_stream",
     },
     "stream_send_suffix": {
-        "type": "string", "label": "发送后缀", "description": "每条流式消息发送后追加的文本",
+        "type": "string", "label": "发送后缀", "description": "每条拆分消息发送后追加的文本",
         "default": "", "group": "group_stream",
     },
     "stream_send_max_queue": {
-        "type": "number", "label": "消息池最大排队数", "description": "队列满时的处理策略见下",
+        "type": "number", "label": "消息队列长度", "description": "流式拆分发送时最多排几条待发消息",
         "default": 20, "min": 1, "max": 200, "group": "group_stream",
     },
     "stream_queue_full_policy": {
-        "type": "select", "label": "队列满策略", "description": "消息池满时的行为",
+        "type": "select", "label": "队列满策略", "description": "队列排满时的处理方式",
         "default": "backpressure", "group": "group_stream",
         "options": {
             "backpressure": "背压（等待队列有空位）",
@@ -136,11 +141,21 @@ SCHEMA = {
         },
     },
     "stream_flush_on_finish": {
-        "type": "boolean", "label": "结束后立即清空", "description": "流结束后是否忽略剩余间隔立即发送剩余消息",
+        "type": "boolean", "label": "结束后立即清空", "description": "流结束后剩余消息不再等待，立即发完",
         "default": False, "group": "group_stream",
     },
+    # 2026-11-08 退役：定义只为旧配置迁移/对账保留，不再在界面出现。
+    # 「流式消息池」总闸被发言方式里的「拆分节奏」取代；另外两个键从未被读取。
+    "stream_send_pool_enabled": {
+        "type": "boolean", "label": "（已废弃）消息池开关", "description": "改由发言方式决定是否拆分发送",
+        "default": False, "group": "group_stream",
+    },
+    "stream_send_by_sentence": {
+        "type": "boolean", "label": "（已废弃）按句子发送", "description": "改由发言方式决定是否拆分发送",
+        "default": True, "group": "group_stream",
+    },
     "stream_keep_order": {
-        "type": "boolean", "label": "严格按顺序发送", "description": "保持生成顺序逐条发送（建议开启）",
+        "type": "boolean", "label": "（已废弃）严格按顺序发送", "description": "发送本身始终按生成顺序，无需设置",
         "default": True, "group": "group_stream",
     },
 
@@ -1113,8 +1128,30 @@ _gate(
 )
 _gate(_group_fields("group_memory", exclude=("experimental_long_term_memory",)), _on("experimental_long_term_memory"))
 
-# ── 流式回复：除总开关外，所有节奏参数都只在流式开启后才有意义 ────────
-_gate(_group_fields("group_stream", exclude=("stream_output",)), _on("stream_output"))
+# ── 输出与发言：两个维度正交，拆分/节奏参数只在会拆分的组合下有意义 ──
+# 会拆分的组合：流式请求（边收边切）或发言方式显式选了「拆分节奏」。
+_gate(
+    ["stream_sentence_max_length"],
+    {"anyOf": [{"key": "stream_output", "value": True}, {"key": "reply_send_mode", "value": "split"}]},
+)
+# 节奏/前后缀/收尾参数只属于「拆分节奏」发言方式
+_gate(
+    [
+        "stream_send_interval_mode",
+        "stream_send_interval_base_ms",
+        "stream_send_interval_min_ms",
+        "stream_send_interval_max_ms",
+        "stream_send_curve",
+        "stream_send_curve_k",
+        "stream_short_message_length",
+        "stream_short_message_delay_ms",
+        "stream_long_message_delay_ms",
+        "stream_send_prefix",
+        "stream_send_suffix",
+        "stream_flush_on_finish",
+    ],
+    {"key": "reply_send_mode", "value": "split"},
+)
 
 # 间隔参数只在「固定间隔 / 按字数曲线」下有效
 _gate(
@@ -1128,8 +1165,11 @@ _gate(
     ["stream_short_message_length", "stream_short_message_delay_ms", "stream_long_message_delay_ms"],
     {"key": "stream_send_curve", "value": "short_long"},
 )
-# 队列参数只在消息池开启后有效
-_gate(["stream_send_max_queue", "stream_queue_full_policy"], _on("stream_send_pool_enabled"))
+# 队列参数只用于流式拆分（消息池）
+_gate(
+    ["stream_send_max_queue", "stream_queue_full_policy"],
+    {"allOf": [{"key": "reply_send_mode", "value": "split"}, {"key": "stream_output", "value": True}]},
+)
 # 复用流式的两处开关也依赖流式总开关
 _gate(["stream_proactive_enabled", "stream_scheduled_enabled"], _on("stream_output"))
 
@@ -1186,8 +1226,8 @@ _BASIC_FIELDS = {
     # 对话行为
     "trigger_at", "trigger_keyword", "message_debounce_seconds", "reply_cooldown",
     "interrupt_enable", "text_tool_call_fallback",
-    # 流式输出
-    "stream_output", "stream_send_by_sentence", "stream_send_interval_mode",
+    # 输出与发言
+    "stream_output", "reply_send_mode", "stream_send_interval_mode",
     "stream_send_interval_base_ms",
     # 主动消息 / 定时任务
     "proactive_friend_enable", "proactive_group_enable",

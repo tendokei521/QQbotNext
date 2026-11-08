@@ -179,21 +179,20 @@ UI_PAGES: tuple[UIPage, ...] = (
             ),
             # Q5：提示词缓存（显式缓存标记 + 前缀稳定）；不开也能跑，只是更贵
             UIGroup("adv_model_cache", "模型缓存", ("prompt_cache_enable",)),
-            # 2026-11-01 流式输出内置：原 llm_output 模块删除，参数回到框架（账号级）。
-            # 开关只有 `stream_output`（传输方式）；其余是发送节奏/切句/池的调参。
+            # 2026-11-08 输出/发言两维拆分：输出方式（传输）与发言方式（投递）各管一件事。
+            # 旧「流式消息池」总闸与「按句子发送」开关已退役，见下方 DELETED_KEYS。
             UIGroup(
                 "adv_stream",
-                "流式输出",
+                "输出与发言",
                 (
                     "stream_output",
-                    "stream_send_by_sentence",
+                    "reply_send_mode",
                     "stream_sentence_max_length",
-                    "stream_send_pool_enabled",
                 ),
             ),
             UIGroup(
                 "adv_stream_tune",
-                "流式节奏",
+                "发送节奏",
                 (
                     "stream_send_interval_mode",
                     "stream_send_interval_base_ms",
@@ -209,7 +208,6 @@ UI_PAGES: tuple[UIPage, ...] = (
                     "stream_send_max_queue",
                     "stream_queue_full_policy",
                     "stream_flush_on_finish",
-                    "stream_keep_order",
                 ),
             ),
             # 发言通道启用后的气泡约束（通道本身由回复模式决定）
@@ -465,6 +463,14 @@ DELETED_KEYS: tuple[str, ...] = (
     # `debug_prompt` 已归 llm_enhance 模块所有（曾经被误判为"已删除"）
     "authority_type",
     "stream_proactive_scheduled_enabled",
+    # 2026-11-08 输出/发言两维拆分：
+    # - 「流式消息池」总闸被 `reply_send_mode=split` 取代（旧值仍作为 auto 的迁移信号读取，
+    #   见 delivery/send_mode.py，不算用户可见配置）；
+    # - 「按句子发送」从来没被读取过：拆不拆现在由发言方式决定；
+    # - 「严格按顺序发送」同样是僵尸键：发送池本身是 FIFO 单消费者，恒有序。
+    "stream_send_pool_enabled",
+    "stream_send_by_sentence",
+    "stream_keep_order",
     # 2026-11-03 工具扩展插件下线：总开关升为「高级选项」的 CORE 键，逐工具策略
     # （允许/禁止名单、权限覆盖）归「工具管理 → OneBot 工具」页；以下调参随插件删除。
     "onebot_tools_max_result",

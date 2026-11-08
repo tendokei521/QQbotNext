@@ -168,18 +168,17 @@
         },
         {
           "id": "adv_stream",
-          "label": "流式输出",
+          "label": "输出与发言",
           "icon": "mdi-folder-outline",
           "fields": [
             "stream_output",
-            "stream_send_by_sentence",
-            "stream_sentence_max_length",
-            "stream_send_pool_enabled"
+            "reply_send_mode",
+            "stream_sentence_max_length"
           ]
         },
         {
           "id": "adv_stream_tune",
-          "label": "流式节奏",
+          "label": "发送节奏",
           "icon": "mdi-folder-outline",
           "fields": [
             "stream_send_interval_mode",
@@ -195,8 +194,7 @@
             "stream_send_suffix",
             "stream_send_max_queue",
             "stream_queue_full_policy",
-            "stream_flush_on_finish",
-            "stream_keep_order"
+            "stream_flush_on_finish"
           ]
         },
         {

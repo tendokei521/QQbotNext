@@ -79,12 +79,13 @@ DEFAULT_LLM_CONFIG: dict = {
     "participation_max_tokens": 10000000,  # 5 分钟窗口 token 上限（执行按 30 秒粒度折算：每 30 秒 ≤ 100 万）
     "participation_cooldown_seconds": 3,  # 同群两次请求最小间隔
     "max_message_length": 1000,  # 单轮原文字符上限（组装标记不计入，先截原文再组装）
-    # 流式输出
+    # 输出方式（传输）：一次拿全 / 流式边收边用。
     "stream_output": False,
+    # 发言方式（投递）：拿到的正文怎么发——整段一条 / 收到就发 / 拆分节奏发。
+    # 与 stream_output 正交；auto 跟随输出方式（流式=收到就发，非流式=整段）。
+    "reply_send_mode": "auto",
     "stream_sentence_max_length": 200,
-    # 流式回复设置（消息池 / 发送频率 / 前后缀）
-    "stream_send_pool_enabled": False,
-    "stream_send_by_sentence": True,
+    # 拆分节奏（发言方式=split）的发送频率 / 前后缀 / 队列策略
     "stream_send_interval_mode": "none",       # none / fixed / length_curve
     "stream_send_interval_base_ms": 600,
     "stream_send_interval_min_ms": 100,
@@ -99,8 +100,7 @@ DEFAULT_LLM_CONFIG: dict = {
     "stream_send_max_queue": 20,
     "stream_queue_full_policy": "backpressure", # backpressure / drop_newest / drop_oldest
     "stream_flush_on_finish": False,
-    "stream_keep_order": True,
-    # 主动消息 / 定时任务也使用流式发送（与普通消息同一套流式配置）
+    # 主动消息 / 定时任务也使用流式请求（与普通消息同一套流式配置）
     "stream_proactive_enabled": False,
     "stream_scheduled_enabled": False,
     "trigger_at": False,
