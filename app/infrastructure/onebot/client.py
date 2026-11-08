@@ -19,6 +19,7 @@ from app.core.logger import api_logger
 from app.domain.bot import IBot
 from app.domain.message import Message, MessageSegment, SegmentLike
 from app.infrastructure.onebot.endpoint import FORWARD
+from app.infrastructure.onebot.log_text import params_brief
 
 # ==================== API 超时分级 ====================
 # 历史问题：所有 API 共用固定 10s。合并转发（视频/多节点）在 OneBot 侧要先上传再组装，
@@ -318,6 +319,12 @@ class BotConnection(IBot):
                 api_logger.error(f"[{self.label}] 发送前钩子执行异常 {action}: {e}")
                 allowed = True
             if not allowed:
+                # 被插件钩子拦下的消息：调用方只看到 None，必须在这里留痕，
+                # 否则"消息没发出去"在日志里零痕迹（是设计还是 bug 无从区分）。
+                api_logger.warning(
+                    f"[{self.label}] 出站被 before_send 钩子拦截: {action}"
+                    f" | params={params_brief(params)}"
+                )
                 return None
 
         if self._outbound_hook is not None:
@@ -383,7 +390,12 @@ class BotConnection(IBot):
             api_logger.debug(f"[{self.label}] API(->) {action} | echo:{echo_id[:8]}")
             response = await asyncio.wait_for(future, timeout=timeout)
             if response.get("status") != "ok":
-                api_logger.warning(f"{action} 失败: {response.get('retcode')} {response.get('message')}")
+                # 补账号前缀与关键参数：以前这行既无 [label] 也无 params，
+                # get_image 失败时连是哪个 file 都查不到（图片链路 400 的现场证据就丢在这里）。
+                api_logger.warning(
+                    f"[{self.label}] {action} 失败: retcode={response.get('retcode')}"
+                    f" msg={response.get('message')} | params={params_brief(params)}"
+                )
             else:
                 api_logger.debug(f"[{self.label}] API(<-) {action} | echo:{echo_id[:8]}")
             _log_user_api(action, params, response=response)

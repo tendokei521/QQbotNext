@@ -40,6 +40,37 @@ def _one_line(text: str) -> str:
     return sanitize_control(str(text or "").replace("\r", " ").replace("\n", " ")).strip()
 
 
+#: API 失败日志里值得保留的参数（定位"发给谁 / 取哪个"必需；**正文不进日志**）
+_LOGGED_PARAM_KEYS = (
+    "group_id",
+    "user_id",
+    "message_id",
+    "target_id",
+    "id",
+    "file",
+    "fid",
+    "count",
+)
+
+
+def params_brief(params: dict | None, limit: int = 160) -> str:
+    """把 OneBot 请求参数压成"只够定位"的一行（白名单 + 截断）。
+
+    以前失败日志只有 ``get_image 失败: -1 xxx``，``file`` 丢了，图片链路根本不知道
+    是哪个文件失败；把白名单键带上，既能定位又不会把消息正文/图片 base64 写进日志。
+    """
+    if not isinstance(params, dict):
+        return ""
+    parts = [
+        f"{key}={_one_line(params.get(key))[:60]}"
+        for key in _LOGGED_PARAM_KEYS
+        if params.get(key) not in (None, "")
+    ]
+    text = ",".join(parts)
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+
 def _message_log_text(event: MessageEvent) -> str:
     """消息的可读日志摘要（仅影响日志显示，不影响传输/派发）。
 

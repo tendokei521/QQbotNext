@@ -717,8 +717,46 @@ class OneBotGateway(GatewayLifecycleMixin):
             if seg.type == "forward":
                 fid = seg.data.get("id")
                 if fid:
-                    resp = await conn.get_forward_msg(str(fid))
+                    try:
+                        resp = await conn.get_forward_msg(str(fid))
+                    except Exception as e:  # noqa: BLE001 —— 拉不到也不能丢事件，但要留痕
+                        from app.core import diagnostics as diag
+
+                        diag.log_failure(
+                            bot_logger,
+                            "onebot.forward_fetch_failed",
+                            "合并转发内容拉取失败，按空转发处理（模型看不到里面写了什么）",
+                            error=e,
+                            fields={
+                                "bot": getattr(conn, "bot_id", ""),
+                                "group": getattr(getattr(event, "group", None), "group_id", ""),
+                                "message_id": getattr(event, "message_id", ""),
+                                "fid": fid,
+                            },
+                            with_traceback=True,
+                        )
+                        event.forward_msg = []
+                        event.forward_error = "fetch_failed"
+                        break
                     event.forward_msg = (resp or {}).get("data", {}).get("messages", []) or []
+                    if not event.forward_msg:
+                        from app.core import diagnostics as diag
+
+                        diag.log_failure(
+                            bot_logger,
+                            "onebot.forward_empty",
+                            "合并转发拉取结果为空（可能已过期/无权限）",
+                            fields={
+                                "bot": getattr(conn, "bot_id", ""),
+                                "group": getattr(getattr(event, "group", None), "group_id", ""),
+                                "message_id": getattr(event, "message_id", ""),
+                                "fid": fid,
+                                "status": (resp or {}).get("status", ""),
+                                "retcode": (resp or {}).get("retcode", ""),
+                            },
+                            level="info",
+                        )
+                        event.forward_error = "empty"
                 break
         return event
 
