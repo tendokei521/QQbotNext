@@ -30,6 +30,7 @@ from app.agent.tools.result import (  # noqa: F401 - 重导出，便于调用方
     ToolResult,
     coerce,
 )
+from app.core import diagnostics as diag
 from app.core.logger import logger
 
 # 单次工具执行超时（秒）
@@ -352,7 +353,19 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
                     except Exception as e:
                         success = False
                         error = str(e)
-                        logger.add_info("Tool").warning(f"[Tool] {name} 执行异常: {e}")
+                        diag.log_failure(
+                            logger.add_info("Tool"),
+                            "tool.exec_error",
+                            "工具执行异常",
+                            error=e,
+                            fields={
+                                "bot": getattr(getattr(ctx, "runtime", None), "bot_id", ""),
+                                "session": getattr(ctx, "session_id", "") if ctx is not None else "",
+                                "tool": name,
+                                "args_keys": ",".join(sorted(dict(args or {}).keys()))[:120],
+                            },
+                            with_traceback=True,
+                        )
                         result = f"error: 工具 {name} 执行异常: {e}"
             # 工具用 "error: ..." 文本报错（而非抛异常）时，此前会被记为 success=True，
             # 导致 1404/未连接之类的接口错误在日志与遥测里彻底不可见。
@@ -370,11 +383,41 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
                 result_note = _present(
                     spec.present_result, tr, what=f"present_result({name})"
                 )
-                logger.add_info("Tool").debug(
+                detail = (
                     f"[ToolCall]返回：{name} success={success} duration={duration_ms:.0f}ms "
                     f"error={error} code={tr.code} result={str(result)[:200]}"
                     + (f" | {result_note}" if result_note else "")
                 )
+                if success:
+                    logger.add_info("Tool").debug(detail)
+                else:
+                    # 失败**不能只进 debug.log**：用户可读日志（user/warn）里一条都看不到
+                    # 「模型想做事但没做成」，这是最需要排查的一类失败。
+                    # 参数只留键名（避免把消息正文/画像写进日志）。
+                    timeout_error = str(error or "").startswith("timeout(")
+                    diag.log_failure(
+                        logger.add_info("Tool"),
+                        "tool.call_failed",
+                        "工具调用失败",
+                        fields={
+                            "bot": getattr(getattr(ctx, "runtime", None), "bot_id", ""),
+                            "session": getattr(ctx, "session_id", "") if ctx is not None else "",
+                            "message_id": (
+                                (getattr(ctx, "extra", None) or {}).get("trigger_message_id", "")
+                                if ctx is not None
+                                else ""
+                            ),
+                            "tool": name,
+                            "source": spec.source,
+                            "error": error,
+                            "code": tr.code,
+                            "duration_ms": int(duration_ms),
+                            "args_keys": ",".join(sorted(dict(args or {}).keys()))[:120],
+                        },
+                        level="warning" if timeout_error else "info",
+                    )
+                    logger.add_info("Tool").debug(detail)
+
             await _run_tool_call_hooks(
                 ctx, spec, name, args, result, success, error, duration_ms, code=tr.code
             )
