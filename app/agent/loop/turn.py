@@ -777,7 +777,6 @@ async def _write_history(
             fields={
                 "bot": getattr(runtime, "bot_id", ""),
                 "session": session_id,
-                "task": getattr(getattr(runtime, "task", None), "task_id", ""),
                 "chars": len(str(text or "")),
             },
             with_traceback=True,

@@ -280,12 +280,11 @@ def _failure_log(ctx: Any):
 
 
 def _failure_fields(ctx: Any) -> dict[str, Any]:
-    """输出侧失败的定位字段（会话/任务 id 都在 ctx 上，别让日志只剩一句异常）。"""
+    """输出侧失败的定位字段（会话 id 在 ctx 上，别让日志只剩一句异常）。"""
     runtime = getattr(ctx, "runtime", None)
     return {
         "bot": getattr(runtime, "bot_id", ""),
         "session": getattr(ctx, "session_id", ""),
-        "task": getattr(getattr(runtime, "task", None), "task_id", ""),
     }
 
 
