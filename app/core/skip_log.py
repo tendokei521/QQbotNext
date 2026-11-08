@@ -47,6 +47,7 @@ def log_skip(
     hint: str = "",
     level: str = "warning",
     interval_s: float | None = None,
+    dedupe_key: str = "",
 ) -> bool:
     """记录一条"本轮被跳过"的日志（去重）。
 
@@ -60,6 +61,10 @@ def log_skip(
         interval_s: 覆盖默认去重窗口。``None`` = 按级别的默认（debug 60s，
             其余进程内只记一次）；``0`` = 不限流（测试/排查用）；
             ``>0`` = 该秒数内只记一次。
+        dedupe_key: 显式去重键（可选）。热点路径的 ``detail`` 常带**每次都在变的**
+            用量数字（"已用 12/50 次、621409/1000000 tokens"），拿它当键会让
+            ``interval_s`` 完全失效（线上 ``participation_budget`` 每 15s 刷一条就是这样）。
+            传一个稳定键（如 ``"budget"``）即可让限流重新生效，细节照常打印。
 
     Returns:
         True = 本次真的写了日志；False = 被去重。
@@ -71,8 +76,11 @@ def log_skip(
         window = max(0.0, float(interval_s))
     # 用户可见级别的去重键不带细节：同一条原因（如「群聊未开启」）不论命中哪个群，
     # 整个进程只留一条，避免不同群把同一条警告各刷一遍。
+    # 带了 interval_s/debug 窗口时，第三段优先用显式 dedupe_key（稳定），
+    # 否则退回 detail——detail 里若含易变数字，限流就会失效（见 dedupe_key 说明）。
+    key_tail = str(dedupe_key) if dedupe_key else str(detail)
     key = (
-        (account_key, str(reason), str(detail))
+        (account_key, str(reason), key_tail)
         if window is not None
         else (account_key, str(reason))
     )

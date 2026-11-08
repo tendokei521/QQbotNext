@@ -611,8 +611,11 @@ class LlmPipeline:
                     "预算按 30 秒粒度执行：每 30 秒最多 5 分钟上限的 1/10，"
                     "等窗口滚动后再试；确需更多请求请调高「5 分钟请求上限 / token 上限」"
                 ),
-                level="warning",
+                level="info",
                 interval_s=120,
+                # 细节里是每次都在变的用量数字：拿它当去重键会让 120s 限流完全失效
+                # （线上实测每 15~40s 刷一条）。用稳定键，细节照常打印。
+                dedupe_key="participation_budget",
             )
             return False
 
