@@ -3,7 +3,7 @@
 本仓库的文档只有两层：**给人用**（根目录 `README.md` / `MAINTENANCE.md`）与**给改代码的人**（本目录）。
 不保留历史稿：过程记录以 commit message 和 PR 为准，文档只写**当前事实**。
 
-> 规则：只有本目录顶层这 14 份文档（含本索引）+ 根目录 README/MAINTENANCE/STYLE/AGENTS/CONTRIBUTING/SECURITY
+> 规则：只有本目录顶层这 15 份文档（含本索引）+ 根目录 README/MAINTENANCE/STYLE/AGENTS/CONTRIBUTING/SECURITY
 > 属于现行文档，必须与代码一致。写新文档前先在这里登记；过时内容直接改掉或删除，不要"留着以后看"。
 
 ---
@@ -40,6 +40,7 @@
 |---|---|---|
 | [QQ_OFFICIAL_API.md](QQ_OFFICIAL_API.md) | 做官方协议适配 | 官方 OpenAPI / WS / Webhook / 群聊与单聊事件的**事实基线**（2026-11，含来源与未确认项） |
 | [QQ_OFFICIAL_BOT.md](QQ_OFFICIAL_BOT.md) | 决定要不要做、怎么改 | 适配方案：路线对比、现有耦合点（文件级）、目标架构、分阶段实施与风险 |
+| [QQ_OFFICIAL_BOT_TODO.md](QQ_OFFICIAL_BOT_TODO.md) | 接着做的人 | **唯一待办入口**：已完成提交、剩余 P0/P1/P2、恢复步骤、已知限制 |
 
 ---
 

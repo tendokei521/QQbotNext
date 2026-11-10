@@ -4,13 +4,9 @@
 > 事实基线：2026-11 官方文档（`https://api.bot.qq.com`，接口域名 2026-08-10 迁移）；
 > 协议细节与来源见 [QQ_OFFICIAL_API.md](QQ_OFFICIAL_API.md)。本文只写**改造方案**，不重复抄接口表。
 >
-> 状态（2026-11-10）：**Phase 0 / Phase 1 已落地**，Phase 2 只做了入站附件映射，Phase 3 未做。
-> 已完成：协议路由（GatewayHub）、账号配置 `protocol/transport/app_id/app_secret`、
-> `qqbot` WS 适配器（token 刷新 / 事件解码 / 去重 / 被动 `msg_id+msg_seq` / 撤回 /
-> 群列表模拟）、工具能力闸门（前后端 + 409 契约）、官方账号强制单条输出。
-> 未完成：出站富媒体（Phase 2）、Webhook / 主动消息配额 / 单聊流式（Phase 3）。
-
----
+> 状态（2026-11-10）：**Phase 0 / 1 / 2 与 Phase 3 Webhook 已落地**；剩余为真机联调与收尾
+> （主动消息配额、单聊流式评估、能力矩阵页、README 章节）。**待办见
+> [QQ_OFFICIAL_BOT_TODO.md](QQ_OFFICIAL_BOT_TODO.md)**（唯一入口，随代码更新）。
 
 ## 0. 实施状态（与代码同步）
 
@@ -18,8 +14,9 @@
 |---|---|---|
 | Phase 0 解耦 | ✅ 完成 | `app/domain/protocol.py`、`app/domain/ids.py`、`IBot.protocol/supports/require`、`tools/state.py::REASON_CAPABILITY_MISSING`、`GatewayHub` |
 | Phase 1 文本 MVP | ✅ 完成 | `app/infrastructure/qqbot/`（`auth/api/ws/codec/inbox/connection/gateway`）、`bots` 表新列、`GET /api/bots/protocols`、能力拦截（工具页 / 409） |
-| Phase 2 富媒体 | ⏳ 部分 | 入站附件已映射 `image/record/video/file` 段；**出站**图片/语音/文件仍需 `file_info` 上传，未做 |
-| Phase 3 Webhook / 主动消息 / 流式 | ⏳ 未做 | 协议目录暂时只列 `ws`；`allow_active_message=False`；单聊 `stream_messages` 未接 |
+| Phase 2 富媒体/群能力 | ✅ 完成 | `qqbot/media.py`（URL 上传 + 本地分片上传 → `file_info` → `msg_type=7`）、`get_group_info/get_group_member_list/set_group_ban/set_group_kick` |
+| Phase 3 Webhook | ✅ 完成 | `qqbot/webhook.py`（Ed25519）、`app/webui/api/qqbot_webhook.py`（公开回调 / op13 / op12）、gateway 无长连接在线 |
+| Phase 3 收尾 | ⏳ 待做 | 主动消息配额、单聊 `stream_messages`、能力矩阵页、README 接入章节 |
 
 ---
 
