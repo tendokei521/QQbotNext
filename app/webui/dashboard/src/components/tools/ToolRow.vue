@@ -19,6 +19,9 @@ export interface ToolLike {
   module?: string
   /** 工具来源（system / module / onebot / mcp）：逐工具开关要原样回传 */
   source?: string
+  /** 不可用原因（账号类型不支持时为 capability_missing） */
+  reason?: string
+  reason_text?: string
 }
 
 const props = withDefaults(

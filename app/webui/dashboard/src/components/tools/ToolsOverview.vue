@@ -113,6 +113,14 @@ function reasonText(tool: ToolState): string {
 /** 没有任何账号：工具状态无从判定，先引导去账号管理 */
 const noAccount = computed(() => agent.botId === null)
 
+/**
+ * 账号类型没有这个接口（能力缺失）：这类项一律不算「可用」，
+ * 界面上单独标出来，开关也不给点（点了服务端也会拒绝）。
+ */
+function isCapabilityMissing(tool: ToolState): boolean {
+  return tool.reason === 'capability_missing'
+}
+
 const filtered = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
   return tools.value.filter((t) => {
@@ -131,7 +139,8 @@ const filtered = computed(() => {
 const stats = computed(() => {
   const total = tools.value.length
   const on = tools.value.filter((t) => t.available).length
-  return { total, on, off: total - on }
+  const unsupported = tools.value.filter(isCapabilityMissing).length
+  return { total, on, off: total - on, unsupported }
 })
 
 /** 空表原因分三种：还没读完账号 / 没有匹配 / 这个来源就是没有工具 */
@@ -222,6 +231,7 @@ watch(
         style="max-width: 240px"
       />
       <span class="app-muted">可用 {{ stats.on }} / 共 {{ stats.total }}</span>
+      <span v-if="stats.unsupported" class="app-muted">· 账号类型不支持 {{ stats.unsupported }} 项</span>
       <v-spacer />
       <div class="d-flex align-center gap-2">
         <span class="text-body-2">只看不可用</span>
@@ -263,6 +273,15 @@ watch(
             <span v-if="tool.available" class="state-on">
               <v-icon icon="mdi-check-circle" size="14" class="mr-1" />可用
             </span>
+            <v-chip
+              v-else-if="isCapabilityMissing(tool)"
+              size="x-small"
+              color="warning"
+              variant="tonal"
+              :title="reasonText(tool)"
+            >
+              当前账号类型不支持
+            </v-chip>
             <span v-else class="state-off">
               <v-icon icon="mdi-minus-circle-outline" size="14" class="mr-1" />{{ reasonText(tool) }}
             </span>
@@ -281,7 +300,7 @@ watch(
           size="small"
           variant="text"
           :loading="busy === tool.name"
-          :disabled="tool.source === 'onebot' && tool.reason === 'tools_disabled'"
+          :disabled="isCapabilityMissing(tool) || (tool.source === 'onebot' && tool.reason === 'tools_disabled')"
           @click="toggle(tool)"
         >
           {{ tool.available ? '停用' : '启用' }}

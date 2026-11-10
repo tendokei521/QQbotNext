@@ -10,10 +10,11 @@
 import { computed, onBeforeUnmount, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import http, { errorMessage } from '@/api/http'
-import { useBotsStore } from '@/stores/bots'
+import { useBotsStore, type BotProtocol, type BotTransport } from '@/stores/bots'
 import { useBundlesStore } from '@/stores/bundles'
 import { useReadinessStore } from '@/stores/readiness'
 import { useNotifyStore } from '@/stores/notify'
+import { isTransportProtocol, useProtocolCatalog } from '@/composables/useProtocolCatalog'
 import BundleImportDialog from '@/components/bundles/BundleImportDialog.vue'
 
 const route = useRoute()
@@ -22,6 +23,7 @@ const bots = useBotsStore()
 const bundles = useBundlesStore()
 const readiness = useReadinessStore()
 const notify = useNotifyStore()
+const catalog = useProtocolCatalog()
 
 const step = ref(1)
 const STEPS = ['连接账号', '配置模型', '人格设定', '完成']
@@ -34,10 +36,19 @@ const defaultListenAddress = ref('')
 const account = reactive({
   id: '',
   name: '',
+  /** 账号类型：默认 OneBot，保持老用户向导流程不变 */
+  protocol: 'onebot' as BotProtocol,
+  /** 官方账号的接入方式；OneBot 为空串，看 conn_mode */
+  transport: '' as BotTransport,
+  app_id: '',
+  app_secret: '',
   conn_mode: 'reverse' as 'reverse' | 'forward',
   ws_url: '',
   access_token: '',
 })
+
+/** 官方账号（有接入方式）与 OneBot（有连接方向）是两套字段，按数据判断，不认协议名 */
+const officialAccount = computed(() => !!account.transport)
 // 后台每 2s 刷新一次「是否已连接」，前端不显示重试次数之类的过程状态
 const accountConnected = ref(false)
 const accountSaved = ref(false)
@@ -247,6 +258,10 @@ async function saveAccount(): Promise<boolean> {
     const res = await http.post('/api/setup/default-account', {
       id: account.id.trim(),
       name: account.name.trim(),
+      protocol: account.protocol,
+      transport: account.transport,
+      app_id: account.app_id.trim(),
+      app_secret: account.app_secret,
       ws_url: account.ws_url.trim(),
       access_token: account.access_token,
       conn_mode: account.conn_mode,
@@ -316,6 +331,39 @@ function onModeChange(mode: 'reverse' | 'forward') {
   markAccountDirty()
 }
 
+/** 账号类型选项：名称与顺序都来自协议目录（拿不到时用本地兜底目录） */
+const protocolChoices = computed(() =>
+  catalog.protocols.value.map((entry) => ({
+    protocol: entry.protocol,
+    label: entry.label,
+    official: isTransportProtocol(entry),
+  })),
+)
+
+/** 连接方式选项（WebSocket / Webhook）：官方账号用 */
+const transportItems = computed(() => catalog.transportOptions.value)
+
+/**
+ * 换账号类型：官方账号改成填 AppID / AppSecret 并选接入方式；
+ * OneBot 保持原来的「监听地址 + 令牌」流程，默认还是本地监听。
+ */
+function onProtocolChange(choice: { protocol: string; official: boolean }) {
+  account.protocol = choice.protocol as BotProtocol
+  if (choice.official) {
+    const entry = catalog.protocols.value.find((item) => item.protocol === choice.protocol)
+    const modes = entry?.modes || []
+    const preferred = modes.find((mode) => mode.value === 'ws') || modes[0]
+    account.transport = (preferred?.value || 'ws') as BotTransport
+    account.ws_url = ''
+    account.access_token = ''
+  } else {
+    account.transport = ''
+    account.conn_mode = 'reverse'
+    account.ws_url = defaultListenAddress.value
+  }
+  markAccountDirty()
+}
+
 /** 复制监听地址：非 https 的局域网地址下浏览器可能不给剪贴板权限，失败就让用户手动复制 */
 async function copyListenAddress(text: string) {
   const value = text.trim()
@@ -349,6 +397,9 @@ async function refreshAccount() {
       const [base, query] = raw.split('?')
       account.id = current.account_id
       account.name = current.name === current.account_id ? '' : current.name
+      account.protocol = (current.protocol || 'onebot') as BotProtocol
+      account.transport = (current.transport || '') as BotTransport
+      account.app_id = current.app_id || ''
       account.conn_mode = current.conn_mode === 'forward' ? 'forward' : 'reverse'
       account.ws_url = base || (account.conn_mode === 'reverse' ? defaultListenAddress.value : '')
       if (!account.access_token && query?.includes('access_token=')) {
@@ -532,7 +583,22 @@ onUnmounted(stopPolling)
       <v-card v-if="step === 1" variant="outlined">
         <v-card-title>连接 QQ 账号</v-card-title>
         <v-card-text>
+          <div class="app-muted mb-2">账号类型</div>
+          <div class="protocol-choice-row mb-4">
+            <v-btn
+              v-for="item in protocolChoices"
+              :key="item.protocol"
+              size="small"
+              :variant="account.protocol === item.protocol ? 'tonal' : 'outlined'"
+              :color="account.protocol === item.protocol ? 'primary' : undefined"
+              @click="onProtocolChange(item)"
+            >
+              {{ item.label }}
+            </v-btn>
+          </div>
+
           <v-btn-toggle
+            v-if="!officialAccount"
             :model-value="account.conn_mode"
             mandatory
             density="comfortable"
@@ -556,39 +622,83 @@ onUnmounted(stopPolling)
             @blur="saveAccount"
           />
 
-          <v-text-field
-            v-model="account.ws_url"
-            :label="account.conn_mode === 'reverse' ? '本机监听地址' : '协议端地址'"
-            :hint="account.conn_mode === 'reverse' ? '协议端填这个地址' : '填协议端的 ws 地址'"
-            persistent-hint
-            density="comfortable"
-            variant="outlined"
-            class="mb-3"
-            @update:model-value="markAccountDirty"
-            @blur="saveAccount"
-          >
-            <template #append-inner>
-              <v-btn
-                v-if="account.conn_mode === 'reverse'"
-                icon="mdi-content-copy"
-                size="x-small"
-                variant="text"
-                title="复制监听地址"
-                @click="copyListenAddress(account.ws_url)"
-              />
-            </template>
-          </v-text-field>
-          <v-text-field
-            v-model="account.access_token"
-            label="连接令牌（可选）"
-            hint="与协议端一致，可留空"
-            persistent-hint
-            density="comfortable"
-            variant="outlined"
-            autocomplete="off"
-            @update:model-value="markAccountDirty"
-            @blur="saveAccount"
-          />
+          <!-- 官方账号：AppID / AppSecret / 接入方式 -->
+          <template v-if="officialAccount">
+            <v-text-field
+              v-model="account.app_id"
+              label="AppID"
+              placeholder="例如：102034567"
+              hint="开放平台里这个机器人的 AppID"
+              persistent-hint
+              density="comfortable"
+              variant="outlined"
+              class="mb-3"
+              autocomplete="off"
+              @update:model-value="markAccountDirty"
+              @blur="saveAccount"
+            />
+            <v-text-field
+              v-model="account.app_secret"
+              label="AppSecret"
+              type="password"
+              hint="只在本机保存，不会发到别处"
+              persistent-hint
+              density="comfortable"
+              variant="outlined"
+              class="mb-3"
+              autocomplete="off"
+              @update:model-value="markAccountDirty"
+              @blur="saveAccount"
+            />
+            <v-select
+              :model-value="account.transport"
+              :items="transportItems"
+              label="连接方式"
+              hint="与开放平台上选的一致，本机部署用 WebSocket"
+              persistent-hint
+              density="comfortable"
+              variant="outlined"
+              class="mb-3"
+              @update:model-value="(v: string) => { account.transport = (v || '') as BotTransport; markAccountDirty() }"
+            />
+          </template>
+
+          <!-- OneBot：协议端地址 + 可选令牌 -->
+          <template v-else>
+            <v-text-field
+              v-model="account.ws_url"
+              :label="account.conn_mode === 'reverse' ? '本机监听地址' : '协议端地址'"
+              :hint="account.conn_mode === 'reverse' ? '协议端填这个地址' : '填协议端的 ws 地址'"
+              persistent-hint
+              density="comfortable"
+              variant="outlined"
+              class="mb-3"
+              @update:model-value="markAccountDirty"
+              @blur="saveAccount"
+            >
+              <template #append-inner>
+                <v-btn
+                  v-if="account.conn_mode === 'reverse'"
+                  icon="mdi-content-copy"
+                  size="x-small"
+                  variant="text"
+                  title="复制监听地址"
+                  @click="copyListenAddress(account.ws_url)"
+                />
+              </template>
+            </v-text-field>
+            <v-text-field
+              v-model="account.access_token"
+              label="连接令牌（可选）"
+              hint="与协议端一致，可留空"
+              persistent-hint
+              density="comfortable"
+              variant="outlined"
+              autocomplete="off"
+              @update:model-value="markAccountDirty"
+              @blur="saveAccount"
+            />
+          </template>
 
           <!-- 账号标识是内部名，放最后：放前面会被当成"地址/令牌"的分组标题 -->
           <v-btn
@@ -925,6 +1035,13 @@ onUnmounted(stopPolling)
 }
 
 .step-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 账号类型：两个短按钮并排，窄屏自动换行，不撑破 390px */
+.protocol-choice-row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;

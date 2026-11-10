@@ -4,6 +4,7 @@ import http, { errorMessage } from '@/api/http'
 import { useBotsStore } from '@/stores/bots'
 import { useToolsStore } from '@/stores/tools'
 import { useNotifyStore } from '@/stores/notify'
+import { useBotCapabilities } from '@/composables/useBotCapabilities'
 import { PERMISSION_LABELS, permissionLabel } from '@/agent/labels'
 import EmptyState from '@/components/EmptyState.vue'
 import ToolRow from '@/components/tools/ToolRow.vue'
@@ -36,6 +37,17 @@ interface ToolOverride {
 const bots = useBotsStore()
 const toolsStore = useToolsStore()
 const notify = useNotifyStore()
+const capabilities = useBotCapabilities()
+
+/** 服务端明确说「这个账号没有 OneBot 接口」（supported=false）时整页拦截 */
+const supported = ref(true)
+/** 拦截原因（服务端给的说明，优先展示它） */
+const blockedMessage = ref('')
+/** 能力表也说没有 OneBot 工具：老接口没有 supported 字段时靠这一条兜住 */
+const toolsAllowed = computed(() => supported.value && capabilities.supports('onebot_tools'))
+
+/** 拦截态下不渲染任何工具行（175 行铺出来只会让人以为能用） */
+const visibleGroups = computed(() => (toolsAllowed.value ? toolGroups.value : []))
 
 /** 策略键现在是 agent 本体配置；总开关（onebot_tools_enable）只在「高级选项」页编辑 */
 const agentConfig = ref<Record<string, any>>({})
@@ -232,13 +244,22 @@ async function loadTools() {
     // 工具清单来自 OneBot 端点；开关状态以「/api/agent/tools」统一判定为准，
     // 这样与「工具总览」里停用/启用同一工具时两边状态一致。
     const [toolsRes, stateRes] = await Promise.all([
-      http.get<{ ok: boolean; log_enabled: boolean; tools: OneBotTool[] }>('/api/agent/onebot/tools', {
+      http.get<{
+        ok: boolean
+        log_enabled: boolean
+        tools: OneBotTool[]
+        /** 这个账号类型有没有 OneBot 接口；false 时 tools 为空 */
+        supported?: boolean
+        message?: string
+      }>('/api/agent/onebot/tools', {
         params: { account_id: bots.currentAccountId },
       }),
       http.get<{ tools: { name: string; source: string; available: boolean }[] }>('/api/agent/tools', {
         params: { account_id: bots.currentAccountId },
       }),
     ])
+    supported.value = toolsRes.data?.supported !== false
+    blockedMessage.value = String(toolsRes.data?.message || '')
     const available = new Map<string, boolean>()
     for (const item of stateRes.data?.tools || []) {
       if (item.source === 'onebot') available.set(item.name, !!item.available)
@@ -299,14 +320,28 @@ watch(
       >
         接口文档
       </v-btn>
-      <v-btn variant="tonal" size="small" prepend-icon="mdi-restore" :disabled="!enabled" @click="resetOpen = true">
+      <v-btn
+        variant="tonal"
+        size="small"
+        prepend-icon="mdi-restore"
+        :disabled="!enabled || !toolsAllowed"
+        @click="resetOpen = true"
+      >
         恢复默认
       </v-btn>
     </div>
 
     <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-3" />
 
-    <div v-for="group in toolGroups" :key="group.category" class="tool-group">
+    <!-- 拦截态：这个账号类型没有 OneBot 接口，不渲染工具行，开关也不给点 -->
+    <v-alert v-if="!toolsAllowed" type="warning" variant="tonal" class="mb-3">
+      <div class="text-subtitle-2 mb-1">当前账号没有 OneBot 接口</div>
+      <div class="text-body-2">
+        {{ blockedMessage || '这一页的工具都按 OneBot 协议调用，这个账号类型用不了；换成 OneBot 账号后可以继续设置。' }}
+      </div>
+    </v-alert>
+
+    <div v-for="group in visibleGroups" :key="group.category" class="tool-group">
       <div
         class="tool-category"
         role="button"
@@ -371,7 +406,7 @@ watch(
     </div>
 
     <EmptyState
-      v-if="!tools.length && !loading"
+      v-if="toolsAllowed && !tools.length && !loading"
       icon="mdi-robot-industrial"
       :title="emptyText"
       description="账号连接后这里会列出可调用的 QQ 接口"

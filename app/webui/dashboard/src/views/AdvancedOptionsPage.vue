@@ -4,9 +4,14 @@ import http from '@/api/http'
 import { errorMessage } from '@/api/http'
 import { useAgentConfigStore } from '@/stores/agentConfig'
 import { useNotifyStore } from '@/stores/notify'
+import { useBotCapabilities } from '@/composables/useBotCapabilities'
 
 const agent = useAgentConfigStore()
 const notify = useNotifyStore()
+const capabilities = useBotCapabilities()
+
+/** 这个账号类型有没有 OneBot 接口（官方账号没有）：没有就禁用总开关 */
+const onebotToolsAllowed = computed(() => capabilities.supports('onebot_tools'))
 
 /** 高级选项（系统方案）：消息组装 / 工具 */
 const form = reactive({
@@ -88,7 +93,11 @@ onMounted(load)
         <v-switch
           v-model="form.onebot_tools_enable"
           label="启用工具"
-          hint="开启后模型可以调用 OneBot 工具（发消息、查询、群管理等）；工具自身的权限仍按调用者身份校验"
+          :hint="onebotToolsAllowed
+            ? '开启后模型可以调用 OneBot 工具（发消息、查询、群管理等）；工具自身的权限仍按调用者身份校验'
+            : '官方 QQ 机器人不支持 OneBot 工具，这一项在这个账号上用不了'"
+          :disabled="!onebotToolsAllowed"
+          persistent-hint
           density="comfortable"
           color="primary"
           hide-details="auto"

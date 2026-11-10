@@ -1,9 +1,20 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { useBotsStore, displayTitle, resolveAccount, type BotConfig, type BotConnMode, type BotData, type BotStatus } from '@/stores/bots'
+import {
+  useBotsStore,
+  displayTitle,
+  resolveAccount,
+  type BotConfig,
+  type BotConnMode,
+  type BotData,
+  type BotProtocol,
+  type BotStatus,
+  type BotTransport,
+} from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
+import { useProtocolCatalog } from '@/composables/useProtocolCatalog'
 import EmptyState from '@/components/EmptyState.vue'
 import AddBotDialog from '@/components/bots/AddBotDialog.vue'
 import EventMonitorDialog from '@/components/bots/EventMonitorDialog.vue'
@@ -16,6 +27,7 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 const route = useRoute()
 const bots = useBotsStore()
 const notify = useNotifyStore()
+const catalog = useProtocolCatalog()
 
 const STATUS_TEXT: Record<BotStatus, string> = {
   connected: '已连接',
@@ -31,6 +43,14 @@ const statusColor = (s: BotStatus) =>
 interface Draft {
   /** 展示名：可随时改；id 不可改，二者不是一个东西 */
   name: string
+  /** 账号协议（官方 / OneBot）：只在创建时选定，卡片上只展示 */
+  protocol: BotProtocol
+  /** 官方账号的接入方式（ws/webhook）；OneBot 为空串，卡片不显示这项 */
+  transport: BotTransport
+  /** 官方账号的 AppID；OneBot 忽略 */
+  app_id: string
+  /** 官方账号的 AppSecret：保存时原样带回，留空/打码值表示不改 */
+  app_secret: string
   ws_url: string
   access_token: string
   auto_connect: boolean
@@ -123,12 +143,40 @@ function connModeText(mode: BotConnMode): string {
   return mode === 'reverse' ? '本地监听' : '向外连接'
 }
 
-/** 卡片底部一行摘要：连接方式 + 当前协议端状态 + 账号标识 */
+/** 官方账号看接入方式（WebSocket / Webhook），不看连接方向；按数据判断，不认协议名 */
+function usesTransport(id: string): boolean {
+  return !!draftOf(id).transport
+}
+
+/** 卡片上的协议名：来自协议目录，老配置缺省显示 OneBot */
+function protocolChip(id: string): string {
+  return catalog.protocolLabel(draftOf(id).protocol)
+}
+
+/** 帮助按钮文案：官方账号没有协议端，说的是开放平台怎么配 */
+function protocolHelpLabel(id: string): string {
+  return usesTransport(id) ? '官方机器人怎么配' : '协议端怎么填'
+}
+
+/** 连接方式选项（WebSocket / Webhook）：来自协议目录 */
+const transportItems = computed(() => catalog.transportOptions.value)
+
+/** 卡片底部一行摘要：连接方式 + 当前状态 + 账号标识 */
 function cardSummary(b: BotData): string {
-  const parts = [connModeText(draftOf(b.id).conn_mode), statusText(b)]
-  if (b.conn_mode === 'reverse') parts.push(b.listening ? '监听中' : '未监听')
+  const draft = draftOf(b.id)
+  const parts = [
+    draft.transport ? catalog.transportLabel(draft.transport) : connModeText(draft.conn_mode),
+    statusText(b),
+  ]
+  if (!draft.transport && b.conn_mode === 'reverse') parts.push(b.listening ? '监听中' : '未监听')
   parts.push(`账号标识 ${b.id}`)
   return parts.join(' · ')
+}
+
+/** 能力差异说明（例如群列表来自学到的群、群名不可知）：服务端给什么就显示什么 */
+function capabilityNotes(b: BotData): string[] {
+  const raw = b.capability_notes
+  return Array.isArray(raw) ? raw.map(String) : []
 }
 
 /** 连接/重连进行中：主操作显示 loading 并禁用，避免重复点击 */
@@ -138,7 +186,17 @@ function cardBusy(b: BotData): boolean {
 
 function draftOf(id: string) {
   if (!drafts[id]) {
-    drafts[id] = { name: '', ws_url: '', access_token: '', auto_connect: false, conn_mode: 'forward' }
+    drafts[id] = {
+      name: '',
+      protocol: 'onebot',
+      transport: '',
+      app_id: '',
+      app_secret: '',
+      ws_url: '',
+      access_token: '',
+      auto_connect: false,
+      conn_mode: 'forward',
+    }
   }
   return drafts[id]
 }
@@ -191,6 +249,11 @@ async function loadCards() {
       const b = statuses.find((s) => s.id === id)
       drafts[id] = {
         name: cfg.name ?? '',
+        protocol: (cfg.protocol || b?.protocol || 'onebot') as BotProtocol,
+        transport: (cfg.transport || b?.transport || '') as BotTransport,
+        app_id: cfg.app_id ?? b?.app_id ?? '',
+        // 服务端给的是打码值：存着原样带回，用户不用为「没改过」的密钥操心
+        app_secret: cfg.app_secret ?? '',
         ws_url: cfg.ws_url ?? b?.ws_url ?? '',
         access_token: cfg.access_token ?? '',
         auto_connect: cfg.auto_connect ?? b?.auto_connect ?? false,
@@ -219,6 +282,10 @@ function buildPayload(): BotConfigPayload[] {
   return Object.entries(drafts).map(([id, d]) => ({
     id,
     name: d.name.trim() || id,
+    protocol: d.protocol,
+    transport: d.transport,
+    app_id: d.app_id.trim(),
+    app_secret: d.app_secret,
     ws_url: d.ws_url.trim(),
     access_token: d.access_token,
     auto_connect: d.auto_connect,
@@ -532,6 +599,9 @@ onBeforeUnmount(() => {
             <v-chip size="x-small" :color="statusChipColor(b)" variant="tonal">
               <v-icon start size="x-small" icon="mdi-circle" /> {{ statusText(b) }}
             </v-chip>
+            <v-chip size="x-small" variant="text" :title="`账号类型：${protocolChip(b.id)}`">
+              {{ protocolChip(b.id) }}
+            </v-chip>
             <span v-if="resolveAccount(b)?.nickname" class="text-caption app-line-clamp-1">
               {{ resolveAccount(b)!.nickname }}<template v-if="Number(resolveAccount(b)!.user_id) > 0"> ({{ resolveAccount(b)!.user_id }})</template>
             </span>
@@ -550,7 +620,13 @@ onBeforeUnmount(() => {
                 <v-btn v-bind="props" icon="mdi-dots-vertical" variant="text" size="small" title="更多操作" />
               </template>
               <v-list density="compact">
-                <v-list-item prepend-icon="mdi-content-copy" @click="copyAddress(draftOf(b.id).ws_url)">复制地址</v-list-item>
+                <v-list-item
+                  v-if="!usesTransport(b.id)"
+                  prepend-icon="mdi-content-copy"
+                  @click="copyAddress(draftOf(b.id).ws_url)"
+                >
+                  复制地址
+                </v-list-item>
                 <v-list-item prepend-icon="mdi-delete-outline" class="text-error" @click="deleteTarget = b.id">删除账号</v-list-item>
               </v-list>
             </v-menu>
@@ -567,25 +643,68 @@ onBeforeUnmount(() => {
             class="mb-2"
             @update:model-value="(v: string) => { draftOf(b.id).name = v; markDirty() }"
           />
-          <v-text-field
-            :model-value="draftOf(b.id).ws_url"
-            :label="draftOf(b.id).conn_mode === 'reverse' ? '本机监听地址' : '协议端地址'"
-            :placeholder="draftOf(b.id).conn_mode === 'reverse' ? 'ws://0.0.0.0:3001/onebot/v11/ws' : 'ws://127.0.0.1:3001/'"
-            density="comfortable"
-            hide-details="auto"
-            class="mb-2"
-            @update:model-value="(v: string) => { draftOf(b.id).ws_url = v; markDirty() }"
-          >
-            <template #append-inner>
-              <v-btn
-                icon="mdi-content-copy"
-                size="x-small"
-                variant="text"
-                title="复制地址"
-                @click="copyAddress(draftOf(b.id).ws_url)"
-              />
-            </template>
-          </v-text-field>
+          <!-- 官方账号：填 AppID 并选接入方式（WebSocket / Webhook），没有协议端地址与令牌 -->
+          <template v-if="usesTransport(b.id)">
+            <v-text-field
+              :model-value="draftOf(b.id).app_id"
+              label="AppID"
+              placeholder="例如：102034567"
+              hint="开放平台里这个机器人的 AppID"
+              persistent-hint
+              density="comfortable"
+              hide-details="auto"
+              class="mb-2"
+              autocomplete="off"
+              spellcheck="false"
+              @update:model-value="(v: string) => { draftOf(b.id).app_id = v; markDirty() }"
+            />
+            <v-select
+              :model-value="draftOf(b.id).transport"
+              :items="transportItems"
+              label="连接方式"
+              hint="与开放平台上选的一致，切换后要重新连接"
+              persistent-hint
+              density="comfortable"
+              hide-details="auto"
+              class="mb-2"
+              @update:model-value="(v: string) => { draftOf(b.id).transport = (v || '') as BotTransport; markDirty() }"
+            />
+          </template>
+
+          <!-- OneBot 账号：协议端地址 + 可选令牌 -->
+          <template v-else>
+            <v-text-field
+              :model-value="draftOf(b.id).ws_url"
+              :label="draftOf(b.id).conn_mode === 'reverse' ? '本机监听地址' : '协议端地址'"
+              :placeholder="draftOf(b.id).conn_mode === 'reverse' ? 'ws://0.0.0.0:3001/onebot/v11/ws' : 'ws://127.0.0.1:3001/'"
+              density="comfortable"
+              hide-details="auto"
+              class="mb-2"
+              @update:model-value="(v: string) => { draftOf(b.id).ws_url = v; markDirty() }"
+            >
+              <template #append-inner>
+                <v-btn
+                  icon="mdi-content-copy"
+                  size="x-small"
+                  variant="text"
+                  title="复制地址"
+                  @click="copyAddress(draftOf(b.id).ws_url)"
+                />
+              </template>
+            </v-text-field>
+            <v-text-field
+              :model-value="draftOf(b.id).access_token"
+              label="连接令牌（可选）"
+              placeholder="没有就留空"
+              hint="与协议端一致，可留空"
+              persistent-hint
+              density="comfortable"
+              hide-details="auto"
+              autocomplete="off"
+              class="mb-2"
+              @update:model-value="(v: string) => { draftOf(b.id).access_token = v; markDirty() }"
+            />
+          </template>
 
           <v-btn
             size="small"
@@ -595,26 +714,18 @@ onBeforeUnmount(() => {
             :prepend-icon="helpOpen[b.id] ? 'mdi-chevron-up' : 'mdi-help-circle-outline'"
             @click="toggleHelp(b.id)"
           >
-            协议端怎么填
+            {{ protocolHelpLabel(b.id) }}
           </v-btn>
           <v-expand-transition>
             <div v-if="helpOpen[b.id]" class="mb-3">
-              <ProtocolHelp :mode="draftOf(b.id).conn_mode" />
+              <ProtocolHelp
+                :official="usesTransport(b.id)"
+                :transport="draftOf(b.id).transport"
+                :mode="draftOf(b.id).conn_mode"
+              />
             </div>
           </v-expand-transition>
 
-          <v-text-field
-            :model-value="draftOf(b.id).access_token"
-            label="连接令牌（可选）"
-            placeholder="没有就留空"
-            hint="与协议端一致，可留空"
-            persistent-hint
-            density="comfortable"
-            hide-details="auto"
-            autocomplete="off"
-            class="mb-2"
-            @update:model-value="(v: string) => { draftOf(b.id).access_token = v; markDirty() }"
-          />
           <v-switch
             :model-value="draftOf(b.id).auto_connect"
             label="启动时自动连接"
@@ -624,6 +735,9 @@ onBeforeUnmount(() => {
             @update:model-value="(v: boolean | null) => { draftOf(b.id).auto_connect = !!v; markDirty() }"
           />
           <HintText class="mt-1" :text="cardSummary(b)" />
+          <div v-for="note in capabilityNotes(b)" :key="note" class="capability-note">
+            <v-icon icon="mdi-information-outline" size="14" /> {{ note }}
+          </div>
           <div v-if="b.last_error" class="error-tip">
             <v-icon icon="mdi-alert-circle-outline" size="small" /> {{ b.last_error }}
           </div>
@@ -731,5 +845,17 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   padding: 8px 10px;
   word-break: break-all;
+}
+
+/* 能力差异说明（群列表来源之类）：一行小字，不抢主信息 */
+.capability-note {
+  margin-top: 6px;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: rgba(var(--v-theme-on-surface), 0.62);
+  overflow-wrap: anywhere;
 }
 </style>

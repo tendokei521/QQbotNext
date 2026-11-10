@@ -9,6 +9,47 @@ export type BotStatus = 'connected' | 'disconnected' | 'connecting' | 'reconnect
 /** 连接方向：forward = 正向 WS（框架连出）/ reverse = 反向 WS（框架监听，OneBot 实现连入） */
 export type BotConnMode = 'forward' | 'reverse'
 
+/** 账号协议：onebot = OneBot v11 协议端；qqbot = 官方 QQ 机器人 */
+export type BotProtocol = 'onebot' | 'qqbot'
+
+/**
+ * 事件接入方式：官方 QQ 机器人在 WebSocket / Webhook 中二选一；
+ * OneBot 账号不看它（方向由 conn_mode 决定），为空串。
+ */
+export type BotTransport = 'ws' | 'webhook' | ''
+
+/** 能力表：只描述「这个账号类型能做什么」，页面按它决定显示/禁用，不认协议名 */
+export type BotCapabilities = Record<string, boolean | string | number>
+
+/** 协议目录里的一种连接方式（OneBot 正向/反向、官方 WebSocket/Webhook） */
+export interface ProtocolMode {
+  value: string
+  label: string
+  description?: string
+}
+
+/** 协议目录里的一个新建字段（AppID / AppSecret / 地址 / 令牌…） */
+export interface ProtocolField {
+  name: string
+  label: string
+  /** text / password / url；secret 为 true 时按密码框渲染 */
+  type?: string
+  required?: boolean
+  secret?: boolean
+  hint?: string
+}
+
+/** `GET /api/bots/protocols` 的一项：名称、连接方式、必填字段、能力摘要 */
+export interface ProtocolCatalogEntry {
+  protocol: BotProtocol | string
+  label: string
+  description?: string
+  modes: ProtocolMode[]
+  fields: ProtocolField[]
+  capabilities?: BotCapabilities
+  notes?: string[]
+}
+
 /** 账号身份信息：登录返回的 login_info 与「上次登录账号」快照同构 */
 export interface BotAccount {
   user_id?: number | string | null
@@ -30,11 +71,20 @@ export interface BotData {
   name: string
   status: BotStatus
   bot_id?: number | null
+  /** 账号协议（老配置缺省按 OneBot 处理） */
+  protocol?: BotProtocol
+  /** 官方账号的事件接入方式；OneBot 为空串 */
+  transport?: BotTransport
+  app_id?: string
   ws_url?: string
   access_token?: string
   owner_id?: number | null
   auto_connect?: boolean
   conn_mode?: BotConnMode
+  /** 这个账号类型能做什么（后端判定，页面据此禁用/拦截，不在页面上判断协议名） */
+  capabilities?: BotCapabilities
+  /** 能力差异的人话说明（例如群列表来自学习、群名不可知） */
+  capability_notes?: string[]
   /** 反向模式：监听是否就绪（用在等对端接入的过渡态） */
   listening?: boolean
   login_info?: BotAccount | null
@@ -49,6 +99,12 @@ export interface BotData {
 export interface BotConfig {
   id: string
   name: string
+  protocol: BotProtocol
+  /** 官方账号的事件接入方式（ws/webhook）；OneBot 为空串 */
+  transport: BotTransport
+  app_id: string
+  /** 读配置时被打码成 `****`，写回时留空表示不改 */
+  app_secret?: string
   ws_url: string
   access_token: string
   owner_id: number | null
@@ -60,13 +116,20 @@ export interface BotConfig {
 export interface BotAddPayload {
   id?: string
   name?: string
+  protocol: BotProtocol
   conn_mode: BotConnMode
+  /** 官方账号必填：ws / webhook；OneBot 不传 */
+  transport?: Exclude<BotTransport, ''>
   ws_url?: string
+  app_id?: string
+  app_secret?: string
 }
 
 export interface BotAddResult {
   id: string
   name: string
+  protocol: BotProtocol
+  transport: BotTransport
   conn_mode: BotConnMode
   ws_url: string
 }
@@ -174,6 +237,15 @@ export const useBotsStore = defineStore('bots', () => {
     return data.data.bots || []
   }
 
+  /**
+   * 协议目录：新建账号时「有哪些协议、每种协议有哪几种连接方式、要填什么」都以后端为准。
+   * 失败时抛给调用方，由调用方用本地兜底目录渲染（至少不白屏）。
+   */
+  async function fetchProtocols(): Promise<ProtocolCatalogEntry[]> {
+    const data = await http.get<{ ok?: boolean; protocols: ProtocolCatalogEntry[] }>('/api/bots/protocols')
+    return Array.isArray(data.data?.protocols) ? data.data.protocols : []
+  }
+
   async function saveBotConfig(configs: BotConfig[]) {
     const data = await http.post('/api/bots/config/save', { bots: configs })
     return unwrap(data.data)
@@ -242,6 +314,7 @@ export const useBotsStore = defineStore('bots', () => {
     selectBot,
     fetchBots,
     fetchBotConfig,
+    fetchProtocols,
     saveBotConfig,
     addBotConfig,
     deleteBotConfig,

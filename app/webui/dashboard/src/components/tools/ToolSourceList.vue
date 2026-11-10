@@ -41,6 +41,14 @@ function toggleCategory(category: string): void {
 }
 
 const total = computed(() => props.groups.reduce((sum, group) => sum + group.items.length, 0))
+
+/**
+ * 账号类型没有这个接口（能力缺失）：这不是「被关掉」，开关点了也改不动，
+ * 所以单独标出来并禁用开关，别让人反复点。
+ */
+function capabilityMissing(tool: ToolLike): boolean {
+  return tool.reason === 'capability_missing'
+}
 </script>
 
 <template>
@@ -73,11 +81,21 @@ const total = computed(() => props.groups.reduce((sum, group) => sum + group.ite
           v-for="tool in group.items"
           :key="tool.name"
           :tool="tool"
+          :disabled="capabilityMissing(tool)"
           @toggle="emit('toggle', tool)"
         >
-          <template v-if="tool.module" #meta>
-            <v-chip size="x-small" variant="tonal" :title="tool.module">
+          <template #meta>
+            <v-chip v-if="tool.module" size="x-small" variant="tonal" :title="tool.module">
               {{ moduleNames[tool.module] || '插件' }}
+            </v-chip>
+            <v-chip
+              v-if="capabilityMissing(tool)"
+              size="x-small"
+              color="warning"
+              variant="tonal"
+              :title="tool.reason_text || ''"
+            >
+              当前账号类型不支持
             </v-chip>
           </template>
         </ToolRow>

@@ -7,8 +7,11 @@
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import http, { errorMessage } from '@/api/http'
+import { useBotsStore } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
+import { supportsCapability } from '@/composables/useBotCapabilities'
 import EmptyState from '@/components/EmptyState.vue'
+import CapabilityGate from '@/components/common/CapabilityGate.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import { cleanLogTimestamp } from '@/utils/log'
 
@@ -20,6 +23,11 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: 'update:modelValue', v: boolean): void }>()
 
 const notify = useNotifyStore()
+const bots = useBotsStore()
+
+/** 测试发送按账号能力判定（不认协议名）：不支持主动发送的类型直接给禁用态 */
+const targetBot = computed(() => bots.bots.find((bot) => bot.id === props.accountId) || null)
+const canSendTest = computed(() => supportsCapability(targetBot.value, 'proactive'))
 
 interface OnebotEvent {
   seq: number
@@ -281,38 +289,40 @@ onBeforeUnmount(stopPolling)
 
       <v-card-text>
         <div class="text-subtitle-2 mb-2">发一条测试消息</div>
-        <div class="d-flex flex-wrap gap-2">
-          <v-text-field
-            v-model="groupId"
-            label="群号"
-            placeholder="留空则用最近一条群消息的群"
-            density="compact"
-            variant="outlined"
-            hide-details
-            class="test-group"
-          />
-          <v-btn variant="tonal" size="small" class="mt-1" @click="useLatestGroup">用最近的群</v-btn>
-        </div>
-        <div class="d-flex flex-wrap gap-2 mt-2">
-          <v-text-field
-            v-model="testText"
-            label="内容"
-            placeholder="例如：测试消息，收到请忽略"
-            density="compact"
-            variant="outlined"
-            hide-details
-            maxlength="500"
-            counter
-            class="test-text"
-            @keyup.enter="sendTest"
-          />
-          <v-btn color="primary" variant="tonal" :loading="sending" prepend-icon="mdi-send" class="mt-1" @click="sendTest">
-            发送
-          </v-btn>
-        </div>
-        <div class="app-muted mt-2">
-          以当前账号身份发送；失败会显示协议端返回的原因。
-        </div>
+        <CapabilityGate :allowed="canSendTest" text="该类型不支持主动发送：只能在收到消息后回复">
+          <div class="d-flex flex-wrap gap-2">
+            <v-text-field
+              v-model="groupId"
+              label="群号"
+              placeholder="留空则用最近一条群消息的群"
+              density="compact"
+              variant="outlined"
+              hide-details
+              class="test-group"
+            />
+            <v-btn variant="tonal" size="small" class="mt-1" @click="useLatestGroup">用最近的群</v-btn>
+          </div>
+          <div class="d-flex flex-wrap gap-2 mt-2">
+            <v-text-field
+              v-model="testText"
+              label="内容"
+              placeholder="例如：测试消息，收到请忽略"
+              density="compact"
+              variant="outlined"
+              hide-details
+              maxlength="500"
+              counter
+              class="test-text"
+              @keyup.enter="sendTest"
+            />
+            <v-btn color="primary" variant="tonal" :loading="sending" prepend-icon="mdi-send" class="mt-1" @click="sendTest">
+              发送
+            </v-btn>
+          </div>
+          <div class="app-muted mt-2">
+            以当前账号身份发送；失败会显示协议端返回的原因。
+          </div>
+        </CapabilityGate>
       </v-card-text>
     </v-card>
 
