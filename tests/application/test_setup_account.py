@@ -49,7 +49,8 @@ class FakeBotService:
         return any(str(bot.get("id")) == str(account_id) for bot in self.config_service.get_bots())
 
     async def add_bot(self, ws_url, owner_id, auto_connect, conn_mode="forward",
-                      account_id=None, name=""):
+                      account_id=None, name="", *, protocol="onebot", transport="",
+                      app_id="", app_secret=""):
         """替身：真正落配置的动作交给 ConfigService，与 BotService.add_bot 语义一致。"""
         created = await self.config_service.add_bot({
             "id": account_id,
@@ -58,6 +59,10 @@ class FakeBotService:
             "owner_id": owner_id,
             "auto_connect": auto_connect,
             "conn_mode": conn_mode,
+            "protocol": protocol,
+            "transport": transport,
+            "app_id": app_id,
+            "app_secret": app_secret,
         })
         return created
 

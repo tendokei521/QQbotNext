@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 
 from app.core.logger import logger
+from app.domain.protocol import PROTOCOL_QQBOT, normalize_protocol
 from app.infrastructure.onebot.endpoint import (
     EndpointError,
     is_reverse,
@@ -177,6 +178,9 @@ class SetupAccountService:
             "name": str(row.get("name") or account_id),
             "ws_url": str(row.get("ws_url") or ""),
             "conn_mode": normalize_mode(row.get("conn_mode")),
+            "protocol": normalize_protocol(row.get("protocol")),
+            "transport": str(row.get("transport") or ""),
+            "app_id": str(row.get("app_id") or ""),
             "connected": self.bot_service.is_connected(account_id),
             "connecting": self.connect_loop.running(account_id),
         }
@@ -191,10 +195,23 @@ class SetupAccountService:
         ws_url: str = "",
         access_token: str = "",
         conn_mode: str = "reverse",
+        protocol: str = "onebot",
+        transport: str = "",
+        app_id: str = "",
+        app_secret: str = "",
     ) -> dict:
         """保存向导账号：没有就建一个，有就改它（**永远不新增第二个**）。"""
         requested_id = str(account_id or "").strip()
         mode = normalize_mode(conn_mode)
+        protocol = normalize_protocol(protocol)
+        is_qqbot = protocol == PROTOCOL_QQBOT
+        if is_qqbot:
+            # 官方机器人没有协议端地址/方向：传输方式只有 ws（webhook 规划中）
+            transport = transport if transport in ("ws", "webhook") else "ws"
+            mode = normalize_mode("forward")
+            ws_url = ""
+        else:
+            transport = ""
 
         bots = self.config_service.get_bots()
         current = await self.current()
@@ -202,7 +219,7 @@ class SetupAccountService:
         # 地址取值规则（都在 normalize_listen_address 里）：
         # - 反向留空 → 默认 ws://127.0.0.1:4001/（见 default_listen_address）；
         # - 正向留空 → 保持空，等用户填对端地址。
-        address = normalize_listen_address(ws_url, mode)
+        address = "" if is_qqbot else normalize_listen_address(ws_url, mode)
         if address:
             label = "监听地址" if is_reverse(mode) else "连接地址"
             try:
@@ -226,20 +243,27 @@ class SetupAccountService:
                     address, None, True, conn_mode=mode,
                     account_id=requested_id or None,
                     name=str(name or "").strip(),
+                    protocol=protocol, transport=transport,
+                    app_id=str(app_id or "").strip(),
+                    app_secret=str(app_secret or "").strip(),
                 )
             except ValueError as e:
                 # 账号 id 非法/重复等由配置层抛 ValueError：转成可展示错误（API 回 400）
                 raise SetupAccountError(str(e)) from e
             await self.config_service.set_kv(SETUP_ACCOUNT_KV, created_id)
-            if address and not self.bot_service.is_connected(created_id):
+            if self._should_connect(address, is_qqbot, app_id, app_secret) and not self.bot_service.is_connected(created_id):
                 self.connect_loop.ensure(created_id)
             return {
                 "account_id": created_id,
                 "name": self.config_service.get_account_name(created_id),
                 "ws_url": address,
                 "conn_mode": mode,
+                "protocol": protocol,
+                "transport": transport,
+                "app_id": str(app_id or "").strip(),
                 "connected": self.bot_service.is_connected(created_id),
-                "connecting": bool(address) and self.connect_loop.running(created_id),
+                "connecting": self._should_connect(address, is_qqbot, app_id, app_secret)
+                and self.connect_loop.running(created_id),
                 "created": True,
             }
 
@@ -258,6 +282,13 @@ class SetupAccountService:
             row["name"] = str(name or "").strip() or row.get("name") or target_id
             row["ws_url"] = address
             row["conn_mode"] = mode
+            row["protocol"] = protocol
+            row["transport"] = transport
+            if is_qqbot:
+                row["app_id"] = str(app_id or "").strip()
+                secret = str(app_secret or "").strip()
+                if secret and "****" not in secret:
+                    row["app_secret"] = secret
             row["auto_connect"] = True
             if access_token:
                 row["access_token"] = access_token
@@ -274,23 +305,35 @@ class SetupAccountService:
         await self.config_service.set_kv(SETUP_ACCOUNT_KV, target_id)
         await self.bot_service.gateway.reconcile()
         self.connect_loop.stop(old_id)
-        if address and not self.bot_service.is_connected(target_id):
+        if self._should_connect(address, is_qqbot, app_id, app_secret) and not self.bot_service.is_connected(target_id):
             self.connect_loop.ensure(target_id)
         return {
             "account_id": target_id,
             "name": self.config_service.get_account_name(target_id),
             "ws_url": address,
             "conn_mode": mode,
+            "protocol": protocol,
+            "transport": transport,
+            "app_id": str(app_id or "").strip(),
             "connected": self.bot_service.is_connected(target_id),
-            "connecting": bool(address) and self.connect_loop.running(target_id),
+            "connecting": self._should_connect(address, is_qqbot, app_id, app_secret)
+            and self.connect_loop.running(target_id),
             "created": False,
         }
+
+    @staticmethod
+    def _should_connect(address: str, is_qqbot: bool, app_id: str, app_secret: str) -> bool:
+        """该账号是否具备「可以尝试连接」的最小条件（官方账号看凭据，不看地址）。"""
+        if is_qqbot:
+            return bool(str(app_id or "").strip() and str(app_secret or "").strip())
+        return bool(str(address or "").strip())
 
     def should_retry(self, account_id: str) -> bool:
         """是否还需要后台重试连接。
 
         已连上、反向监听已就绪、或地址还空着（正向等用户填）都不需要重试——
         否则前端每 2s 轮询一次就会反复新建/唤醒连接循环，白耗 CPU 与日志。
+        官方账号看「AppID + AppSecret 是否齐全」。
         """
         key = str(account_id or "")
         if not key:
@@ -301,7 +344,11 @@ class SetupAccountService:
             (bot for bot in self.config_service.get_bots() if str(bot.get("id")) == key),
             None,
         )
-        return bool(row and str(row.get("ws_url") or "").strip())
+        if not row:
+            return False
+        if normalize_protocol(row.get("protocol")) == PROTOCOL_QQBOT:
+            return bool(str(row.get("app_id") or "").strip() and str(row.get("app_secret") or "").strip())
+        return bool(str(row.get("ws_url") or "").strip())
 
     # ==================== 生命周期 ====================
 

@@ -118,6 +118,10 @@ async def api_setup_default_account_save(
             ws_url=str(body.get("ws_url") or ""),
             access_token=str(body.get("access_token") or ""),
             conn_mode=str(body.get("conn_mode") or "reverse"),
+            protocol=str(body.get("protocol") or "onebot"),
+            transport=str(body.get("transport") or ""),
+            app_id=str(body.get("app_id") or ""),
+            app_secret=str(body.get("app_secret") or ""),
         )
     except SetupAccountError as e:
         return _err(400, str(e), "SETUP_ACCOUNT_FAILED")
