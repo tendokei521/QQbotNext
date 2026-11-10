@@ -79,6 +79,9 @@ def bot_info(
         "conn_mode": conn_mode(conn),
         # 协议 + 能力摘要：WebUI 据此决定显示/禁用/整块拦截（不按协议名写分支）
         "protocol": protocol,
+        "transport": str(getattr(conn, "transport", "") or ""),
+        # AppID 不是凭据（AppSecret 才是），状态列表可以直接带出去
+        "app_id": str(getattr(conn, "app_id", "") or ""),
         "capabilities": capability_view(protocol),
         "capability_notes": capability_notes(protocol),
         # 反向模式：监听是否就绪（前端据此区分「监听中」与「已连接」）

@@ -21,6 +21,8 @@ def _conn(protocol: str) -> SimpleNamespace:
         auto_connect=False,
         conn_mode="forward",
         protocol=protocol,
+        transport="ws" if protocol == "qqbot" else "",
+        app_id="APPID" if protocol == "qqbot" else "",
         suppress_auto_reconnect=False,
     )
 
@@ -28,6 +30,8 @@ def _conn(protocol: str) -> SimpleNamespace:
 def test_qqbot_info_exposes_capabilities():
     info = bot_info(_conn("qqbot"))
     assert info["protocol"] == "qqbot"
+    assert info["transport"] == "ws"
+    assert info["app_id"] == "APPID"
     assert info["capabilities"]["onebot_tools"] is False
     assert info["capabilities"]["group_list"] == "learned"
     assert any("openid" in note for note in info["capability_notes"])

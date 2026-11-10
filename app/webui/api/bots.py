@@ -104,7 +104,7 @@ async def api_bot_protocols():
             "fields": [
                 {"name": "ws_url", "label": "协议端 / 监听地址", "type": "text", "required": False,
                  "secret": False, "hint": "反向模式填本机监听地址；正向模式填协议端的 ws 地址"},
-                {"name": "access_token", "label": "access_token", "type": "password", "required": False,
+                {"name": "access_token", "label": "连接令牌（可选）", "type": "password", "required": False,
                  "secret": True, "hint": "可选；与协议端里配置的一致"},
             ],
             "capabilities": capability_view(PROTOCOL_ONEBOT),
