@@ -158,10 +158,15 @@ class GatewayHub:
         raise AttributeError(name)
 
     def __setattr__(self, name: str, value: Any) -> None:
-        if name in ("onebot", "qqbot", "_bots_provider") or name.startswith("__"):
+        if name in ("onebot", "qqbot", "_bots_provider", "_merged") or name.startswith("__"):
             object.__setattr__(self, name, value)
             return
         object.__setattr__(self, name, value)
+        # property 的 setter 自己会决定怎么下发（例如 bots_provider 要按协议过滤成两份）；
+        # 这里再无条件转发一遍会把过滤后的 provider 覆盖成未过滤版本 ——
+        # 后果是 OneBot 网关把官方账号也建成连接（重启后 /api/bots 出现同 id 幽灵账号）。
+        if isinstance(getattr(type(self), name, None), property):
+            return
         onebot = self.__dict__.get("onebot")
         qqbot = self.__dict__.get("qqbot")
         if onebot is not None and hasattr(onebot, name):
