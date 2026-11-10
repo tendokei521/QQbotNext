@@ -21,6 +21,17 @@ SCHEMA = {
     "prompt": {"type": "textarea", "max_length": 5},
     "pools": {"type": "dynamic"},
     "image": {"type": "resource"},
+    # ListWidget 字段：落库是 {<id>: {enabled, index}}（api-contract §5.1）
+    "target_groups": {
+        "type": "list",
+        "label": "目标群聊",
+        "endpoint": "groups",
+        "id_field": "group_id",
+        "name_field": "group_name",
+        "checkboxes": True,
+        "default": {},
+    },
+    "cards": {"type": "repeater"},
 }
 
 
@@ -58,6 +69,33 @@ def test_unknown_keys_only_rejected_on_import_path():
     assert validate_config(SCHEMA, {"unknown_key": 1}) == []
     issues = validate_config(SCHEMA, {"unknown_key": 1}, reject_unknown=True)
     assert issues and issues[0]["key"] == "unknown_key"
+
+
+def test_list_type_accepts_listwidget_object():
+    """回归：ListWidget 保存 {<id>: {enabled, index}} 曾被当成「应为数组」拒绝。
+
+    现场症状（防撤回 target_groups / target_users）：
+    「配置值不合法，未保存：target_groups: 「目标群聊」应为数组；…」
+    """
+    payload = {
+        "target_groups": {"123456": {"enabled": True, "index": 0}, "654321": {"enabled": False, "index": 1}},
+    }
+    assert validate_config(SCHEMA, payload) == []
+    # 空对象（模块没配过、前端原样回传）同样合法
+    assert validate_config(SCHEMA, {"target_groups": {}}) == []
+    # 旧版数组格式（resolve_enabled_ids 仍兼容）继续接受
+    assert validate_config(SCHEMA, {"target_groups": ["123456"]}) == []
+
+
+def test_list_type_still_rejects_scalars():
+    for bad in ("123456", 123456, True):
+        issues = validate_field("target_groups", SCHEMA["target_groups"], bad)
+        assert issues and "目标群聊" in issues[0]["message"]
+
+
+def test_repeater_still_requires_array():
+    assert validate_field("cards", SCHEMA["cards"], [{"a": 1}]) == []
+    assert validate_field("cards", SCHEMA["cards"], {"a": 1})[0]["key"] == "cards"
 
 
 def test_permission_modes():

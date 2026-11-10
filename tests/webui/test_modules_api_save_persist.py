@@ -100,3 +100,39 @@ async def test_update_config_returns_5xx_when_persist_fails(monkeypatch):
     assert sent == [], "失败时不能广播成功事件"
     body = resp.body.decode("utf-8")
     assert "保存失败" in body
+
+
+class _CheckboxListModule(_Module):
+    """带 ListWidget 字段的模块（形状同防撤回的 target_groups）。"""
+
+    config_schema = {
+        "target_groups": {
+            "type": "list",
+            "label": "目标群聊",
+            "endpoint": "groups",
+            "id_field": "group_id",
+            "name_field": "group_name",
+            "checkboxes": True,
+            "default": {},
+        },
+    }
+
+
+async def test_update_config_accepts_listwidget_object(monkeypatch):
+    """回归：ListWidget 存的是 {<id>: {enabled, index}}，不是 JSON 数组。
+
+    历史 bug：值校验把 `list` 当数组校验，勾选目标群聊后保存直接回 400
+    「配置值不合法，未保存：target_groups: 「目标群聊」应为数组」，前端红条。
+    """
+    module = _CheckboxListModule()
+    config_service = _ConfigService()
+    _patch(monkeypatch, module, config_service)
+
+    payload = {"target_groups": {"123456": {"enabled": True, "index": 0}}}
+    resp = await _save(payload, config_service)
+
+    assert resp.status_code == 200, resp.body.decode("utf-8")
+    assert config_service.saved is not None
+    saved_config = config_service.saved[3]
+    assert saved_config["target_groups"] == {"123456": {"enabled": True, "index": 0}}
+

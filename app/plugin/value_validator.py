@@ -77,7 +77,17 @@ def validate_field(key: str, field: dict, value: Any) -> list[dict]:
             return [_issue(key, f"「{field.get('label', key)}」不能包含空项")]
         return []
 
-    if ftype in ("list", "repeater"):
+    if ftype == "list":
+        # `list` 是 ListWidget 的「id 列表」控件，落库形状是
+        # {<id>: {"enabled": bool, "index": int}}（见 api-contract §5.1），**不是 JSON 数组**；
+        # 旧格式（string_list 迁移前，resolve_enabled_ids 仍兼容）是 ["id1", ...]。
+        # 这里两种都放行，只拦住字符串/数字这类必然跑不通的值。
+        # 注意：`repeater` 才是"必须是数组"的类型，别把两者合并处理。
+        if isinstance(value, (dict, list)):
+            return []
+        return [_issue(key, f"「{field.get('label', key)}」应为对象或数组")]
+
+    if ftype == "repeater":
         if not isinstance(value, list):
             return [_issue(key, f"「{field.get('label', key)}」应为数组")]
         return []
