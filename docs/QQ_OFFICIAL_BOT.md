@@ -4,7 +4,22 @@
 > 事实基线：2026-11 官方文档（`https://api.bot.qq.com`，接口域名 2026-08-10 迁移）；
 > 协议细节与来源见 [QQ_OFFICIAL_API.md](QQ_OFFICIAL_API.md)。本文只写**改造方案**，不重复抄接口表。
 >
-> 状态：**方案稿，尚未实现**。当前代码只支持 OneBot v11；本文不承诺任何已支持的能力。
+> 状态（2026-11-10）：**Phase 0 / Phase 1 已落地**，Phase 2 只做了入站附件映射，Phase 3 未做。
+> 已完成：协议路由（GatewayHub）、账号配置 `protocol/transport/app_id/app_secret`、
+> `qqbot` WS 适配器（token 刷新 / 事件解码 / 去重 / 被动 `msg_id+msg_seq` / 撤回 /
+> 群列表模拟）、工具能力闸门（前后端 + 409 契约）、官方账号强制单条输出。
+> 未完成：出站富媒体（Phase 2）、Webhook / 主动消息配额 / 单聊流式（Phase 3）。
+
+---
+
+## 0. 实施状态（与代码同步）
+
+| 阶段 | 状态 | 代码落点 |
+|---|---|---|
+| Phase 0 解耦 | ✅ 完成 | `app/domain/protocol.py`、`app/domain/ids.py`、`IBot.protocol/supports/require`、`tools/state.py::REASON_CAPABILITY_MISSING`、`GatewayHub` |
+| Phase 1 文本 MVP | ✅ 完成 | `app/infrastructure/qqbot/`（`auth/api/ws/codec/inbox/connection/gateway`）、`bots` 表新列、`GET /api/bots/protocols`、能力拦截（工具页 / 409） |
+| Phase 2 富媒体 | ⏳ 部分 | 入站附件已映射 `image/record/video/file` 段；**出站**图片/语音/文件仍需 `file_info` 上传，未做 |
+| Phase 3 Webhook / 主动消息 / 流式 | ⏳ 未做 | 协议目录暂时只列 `ws`；`allow_active_message=False`；单聊 `stream_messages` 未接 |
 
 ---
 
