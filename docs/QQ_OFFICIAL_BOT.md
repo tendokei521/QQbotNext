@@ -266,6 +266,120 @@ bootstrap
   所以账号配置里 `transport` 必须显式。
 - 本机部署默认 WS：不需要公网、不需要证书，功能等价。
 
+### 3.7 最终形态：账号类型选择 + 能力拦截
+
+目标（用户可见）：
+
+1. 新增账号时**三选一**：官方 QQ 机器人 / OneBot 正向 / OneBot 反向；
+   官方机器人下再选 WebSocket（默认）或 Webhook。
+2. 官方账号上，凡「该协议没有的能力」都在前后端被拦住：前端显示
+   **「该类型不支持使用此方法」**，后端拒绝并返回稳定错误码；不会出现
+   「界面能点、点了 500 / 静默失败」。
+3. OneBot 账号行为零变化，老配置默认 `protocol=onebot`。
+
+#### 3.7.1 数据流
+
+```text
+AddBotDialog → POST /api/bots/config/add
+   { protocol, conn_mode | transport, ws_url?, app_id?, app_secret? }
+  → BotService.add_bot → GatewayHub.route(protocol) → OneBotGateway / QqBotGateway
+  → bots 表（protocol / transport / app_id / app_secret）
+  → 连接对象带 protocol
+
+GET /api/bots → bot_info(): protocol + capabilities + capability_notes
+前端 store: BotData.protocol / capabilities → useBotCapabilities() / <CapabilityGate>
+```
+
+新增 `GET /api/bots/protocols`：协议目录（名称、说明、连接方式、必填字段、帮助链接、
+能力摘要）。前端**不硬编码**「哪个协议有什么能力」，以后加第三种协议只改后端目录。
+
+#### 3.7.2 能力表（单一真源）
+
+新增 `app/domain/protocol.py`（纯领域、无 IO、可单测）：
+
+- `PROTOCOL_ONEBOT` / `PROTOCOL_QQBOT`；
+- `ACTIONS_BY_PROTOCOL`：每个协议能响应的 OneBot action 集合；
+- `supports_action(protocol, action) -> bool`；
+- `capability_view(protocol) -> dict`：给 UI 的小布尔集
+  （`onebot_tools / send_text / send_image / recall / group_list_learned / group_admin / member_list / proactive`）；
+- `CapabilityUnavailableError(ValueError)`：带 `protocol / capability / message`。
+
+官方账号第一版的能力集合：`send_group_msg`、`send_private_msg`、`send_msg`、
+`delete_msg`、`get_login_info`、`get_group_list`（**模拟**，见 §3.7.5）。
+群管理/成员列表等按实测与内邀权限（`11253`）再逐步加入。
+
+`IBot` 增加：`protocol`、`supports(action)`、`require(action)`（不支持即抛）、
+`capabilities`（给 UI 的 dict）。**离线也要能算**：登录前 `runtime._bot` 是 `None`，
+`tools/state.py` 通过 `runtime.config_service.get_bot(account_id)["protocol"]` 取协议
+（`account_store.py:60`），不依赖连接是否在线。
+
+#### 3.7.3 后端三道闸门（都指向同一个判定）
+
+1. **注入期**：`resolve_tool_state`（`app/agent/tools/state.py`）在判定链第 ① 层新增
+   「协议能力」子检查，返回新原因 `REASON_CAPABILITY_MISSING`（`reason_text` =
+   「当前账号类型（官方 QQ 机器人）不支持 OneBot 接口：send_poke」）。
+   `loop/tool_source` 本来就按 state 剔除不可用项 —— 于是模型**根本看不到**这些工具。
+2. **执行期**：`_execution_gate`（`tools/spec.py:495`）复用同一判定；清单是快照也能拦住，
+   返回 `error: 工具 X 当前不可用（…）`。
+3. **适配器兜底**：`QqBotConnection.call_api / send_*` 先 `require(action)`，未支持直接抛；
+   `tools/onebot/executor` 捕获后转成 `error: CAPABILITY_UNSUPPORTED …`，
+   `tools/result.py` 的 `ERROR_CODES` 增加 `CAPABILITY_UNSUPPORTED`（新增错误码必须登记，
+   现有测试守着「不可用项必有 reason_text / 错误码合法」）。
+
+**API / 服务层**：任何用到协议能力的入口先 `require_account_capability(account_id, cap)`，
+异常由 app 级 handler 统一转成 HTTP 409：
+
+```json
+{
+  "status": "error",
+  "code": "capability_unsupported",
+  "protocol": "qqbot",
+  "capability": "get_group_member_list",
+  "message": "官方 QQ 机器人不支持该操作：获取群成员列表"
+}
+```
+
+读列表类接口（如 `GET /api/agent/onebot/tools`）不返回 409，而是
+`200 + {supported: false, message, tools: []}`，让页面能渲染「拦截态」；
+**写操作**（工具开关、连接、刷新等）一律 409，绕过 UI 也改不动。
+
+#### 3.7.4 前端拦截
+
+新增 `useBotCapabilities()` 与 `<CapabilityGate>`（不满足时渲染禁用态 +
+tooltip「该类型不支持使用此方法」）。需要接的页面：
+
+| 页面 / 组件 | 官方账号下的表现 |
+|---|---|
+| `AddBotDialog.vue` | 三选一（官方 / 正向 / 反向）；官方再选 WS/Webhook；AppSecret 用密码框 |
+| `BotsPage.vue` | 协议 chip；官方隐藏 `ws_url/access_token`，显示 AppID；「测试发送」按能力禁用并提示被动窗口 |
+| `OnebotToolsPage.vue` | `capabilities.onebot_tools=false` → 整页 banner + 不渲染 175 项，开关只读 |
+| `ToolsOverview.vue` / `ToolSourceList.vue` | OneBot 分组显示「0 可用」+ `reason_text`（`/api/agent/tools` 已带该字段） |
+| `AdvancedOptionsPage.vue` | OneBot 工具总开关禁用 + hint |
+| 群列表相关页 | 标注「官方账号：群列表来自收到过的消息，可能不全；群名不可知」 |
+
+**不要**在各页面写 `if (protocol === 'qqbot')`：只读 `capabilities`，
+否则加第三种协议又要改一遍所有页面。
+
+#### 3.7.5 「官方有没有群列表 API」的结论
+
+- **没有。** 官方文档明确「获取机器人加入群列表」暂不开放；群资料、群成员列表
+  多数为内邀（`11253`）。
+- 因此 `get_group_list` 只能**兼容性模拟**：返回本地从 `GROUP_ADD_ROBOT` /
+  `GROUP_MESSAGE_CREATE` 学到的群；`known_groups`、按群配置照常工作，
+  但群名用别名或 openid 尾号。
+- `get_group_info` / `get_group_member_list` 默认标为**不支持**；若某个账号实测有内邀
+  权限，适配器可在连接期探测后加入能力集合，失败（`11253`）自动降级且不反复重试。
+
+#### 3.7.6 验收
+
+- OneBot 账号：175 个工具、正反向连接、群列表行为全部不变（现有测试绿）。
+- 官方账号：工具清单里 OneBot 项被过滤；`/api/agent/onebot/tools` 返回
+  `supported:false`；绕过 UI 调 `POST /api/agent/tools/toggle` → 409
+  `capability_unsupported`；插件直接 `bot.call_api("send_poke")` → 结构化错误、
+  不炸进程，日志带账号 + 协议 + 能力。
+- 前端：1440 / 390 两尺寸截图；官方账号下 OneBot 工具页显示拦截态且无 175 行；
+  OneBot 账号页面与现在一致。
+
 ---
 
 ## 4. 分阶段实施
@@ -273,10 +387,14 @@ bootstrap
 ### Phase 0：解耦（不改行为，可独立提交）
 
 - [ ] 清理 §2.5 的 13 处 `int()`，事件 dataclass 的 ID 类型改为字符串。
-- [ ] `IBot` 增加 `protocol` / `features` / `supports(action)`；`BotConnection` 声明 OneBot 全能力。
-- [ ] `build_onebot_tools()` 按能力过滤；OneBot 账号行为保持不变。
+- [ ] 新增 `app/domain/protocol.py`：协议常量、能力集合、`CapabilityUnavailableError`（见 §3.7）。
+- [ ] `IBot` 增加 `protocol` / `features` / `supports(action)` / `require(action)`；
+      `BotConnection` 声明 OneBot 全能力；`bot_info()` 带 `protocol/capabilities`。
+- [ ] `tools/state.py` 增加 `REASON_CAPABILITY_MISSING` 判定层；`build_onebot_tools()`
+      按能力过滤；OneBot 账号行为保持不变。
 - [ ] 抽出 `GatewayHub`，先只包 `OneBotGateway`，跑通现有网关测试。
-- [ ] 契约测试：字符串 ID 收发、能力过滤、未支持 action 返回失败而不是抛异常。
+- [ ] 契约测试：字符串 ID 收发、能力过滤、未支持 action 返回失败而不是抛异常、
+      不可用项必有 `reason_text`。
 
 **验收**：现有测试与架构闸门通过；OneBot 账号行为无变化。
 
@@ -289,9 +407,11 @@ bootstrap
 - [ ] 发送：文本 + 被动窗口 + `msg_seq`；撤回自己消息；action 映射表。
 - [ ] 群学习：`GROUP_ADD_ROBOT/DEL_ROBOT` + 群消息 → `known_groups`；`get_group_list` 兼容。
 - [ ] 官方账号：强制单条输出、主动消息默认关、工具按能力过滤。
-- [ ] WebUI：协议选择、AppID/Secret、状态与诊断台文案（`dist` 重建单独提交）。
-- [ ] 测试：codec fixture、`msg_seq` 分配、去重、token 刷新、错误映射；
-      假 OpenAPI/WS 服务端的集成测试。
+- [ ] 能力拦截落地：`GET /api/bots/protocols`、`bot_info` 带能力、409 统一错误；
+      `OnebotToolsPage` / `ToolsOverview` / `AdvancedOptionsPage` 的拦截态（见 §3.7）。
+- [ ] WebUI：协议三选一、AppID/Secret、状态与诊断台文案（`dist` 重建单独提交）。
+- [ ] 测试：codec fixture、`msg_seq` 分配、去重、token 刷新、错误映射、能力拦截
+      （工具过滤 / 409 契约）；假 OpenAPI/WS 服务端的集成测试。
 
 **验收**：测试群里完成私聊、群 @、全量（若开）、断线重连、重复推送不重复回复、
 token 过期自动刷新、发送失败原因可见；架构闸门通过。
