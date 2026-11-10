@@ -17,6 +17,7 @@ from typing import Any
 
 from app.core.logger import logger
 from app.core.task_manager import TaskManager
+from app.domain.protocol import normalize_protocol
 from app.infrastructure.config.account_store import AccountStoreMixin
 from app.infrastructure.config.binding_store import BindingStoreMixin
 from app.infrastructure.config.channel_override_store import ChannelOverrideStoreMixin
@@ -142,17 +143,22 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
         await self.purge_orphan_account_data()
 
     async def _ensure_schema(self) -> None:
-        """老库补列：`conn_mode`（连接方向）/ `modules_default_enabled`。
+        """老库补列：`conn_mode`（连接方向）/ `modules_default_enabled` / 协议字段。
 
         存量库的 `bots` 表只有 ws_url/owner_id/auto_connect；不补列会让
         `SELECT *` 之后所有读取都拿不到连接模式，反向账号被静默当成正向去连。
         默认值 `forward` 保证升级后存量账号行为不变。
         `modules_default_enabled` 默认 1 = 老账号「模块默认开」；新账号建号时写 0（默认关），
         所以这个默认值只服务升级路径，不会让新账号意外继承「开」。
+        `protocol` 默认 `onebot`：升级后全部老账号行为不变，官方账号由用户显式选择。
         """
         await self.db.ensure_columns("bots", {
             "conn_mode": "TEXT NOT NULL DEFAULT 'forward'",
             "modules_default_enabled": "INTEGER NOT NULL DEFAULT 1",
+            "protocol": "TEXT NOT NULL DEFAULT 'onebot'",
+            "transport": "TEXT NOT NULL DEFAULT ''",
+            "app_id": "TEXT NOT NULL DEFAULT ''",
+            "app_secret": "TEXT NOT NULL DEFAULT ''",
         })
 
     async def _migrate_legacy_if_needed(self) -> None:
@@ -269,6 +275,10 @@ class ConfigService(AccountStoreMixin, BindingStoreMixin, GroupStoreMixin, Chann
                 "owner_id": owner_id,
                 "auto_connect": bool(r["auto_connect"]),
                 "conn_mode": normalize_mode(r.get("conn_mode")),
+                "protocol": normalize_protocol(r.get("protocol")),
+                "transport": str(r.get("transport") or ""),
+                "app_id": str(r.get("app_id") or ""),
+                "app_secret": str(r.get("app_secret") or ""),
             }
             if not bool(r.get("modules_default_enabled", 1)):
                 self._modules_default_off.add(account_id)

@@ -21,6 +21,7 @@ import sys
 from typing import Any
 
 from app.core.logger import logger
+from app.domain.protocol import PROTOCOL_QQBOT, normalize_protocol
 
 #: 检查项严重级别：blocker 会让 ready=False；warn 只提示；info 仅展示
 LEVEL_BLOCKER = "blocker"
@@ -151,10 +152,12 @@ class ReadinessService:
         ))
 
         names = self._account_names()
+        onoff = normalize_protocol
         missing_address = [
             str(account.get("id"))
             for account in accounts
-            if not str(account.get("ws_url") or "").strip()
+            if onoff(account.get("protocol")) != PROTOCOL_QQBOT
+            and not str(account.get("ws_url") or "").strip()
         ]
         if missing_address:
             # 正向「向外连接」允许先不填地址（等用户填协议端地址），
@@ -168,6 +171,24 @@ class ReadinessService:
                 route="/bots",
                 label="去填写",
                 account_id=missing_address[0],
+            ))
+
+        missing_credentials = [
+            str(account.get("id"))
+            for account in accounts
+            if onoff(account.get("protocol")) == PROTOCOL_QQBOT
+            and not (str(account.get("app_id") or "").strip() and str(account.get("app_secret") or "").strip())
+        ]
+        if missing_credentials:
+            checks.append(_check(
+                "account_credentials",
+                False,
+                "官方机器人还没填 AppID / AppSecret",
+                level=LEVEL_WARN,
+                detail="、".join(names.get(aid, aid) for aid in missing_credentials),
+                route="/bots",
+                label="去填写",
+                account_id=missing_credentials[0],
             ))
 
         connections = self._connections()

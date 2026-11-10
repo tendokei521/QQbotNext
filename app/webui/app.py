@@ -354,9 +354,9 @@ def _install_bot_lifecycle_listener(container) -> None:
         return
     _bot_lifecycle_subscribed = True
 
-    from app.infrastructure.onebot.gateway import OneBotGateway
+    from app.infrastructure.gateway_hub import GatewayHub
 
-    gateway = container.get(OneBotGateway)
+    gateway = container.get(GatewayHub)
 
     def _status_payload(account_id: str | None, **overrides) -> dict:
         """组装某账号的最新账号/连接信息（含 last_account / account 回退字段）。"""
@@ -376,6 +376,10 @@ def _install_bot_lifecycle_listener(container) -> None:
             "account": stat.get("account"),
             "reconnect_attempts": stat.get("reconnect_attempts"),
             "ws_url": stat.get("ws_url"),
+            # 协议与能力：前端据此渲染/禁用/拦截（状态推送也要带，否则会丢字段）
+            "protocol": stat.get("protocol"),
+            "capabilities": stat.get("capabilities"),
+            "capability_notes": stat.get("capability_notes"),
             # 连接方向与反向监听状态：前端据此显示「正向地址 / 反向监听地址 / 监听中」
             "conn_mode": stat.get("conn_mode"),
             "listening": stat.get("listening"),

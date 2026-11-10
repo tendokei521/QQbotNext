@@ -185,6 +185,11 @@ class BotService:
         conn_mode: str = FORWARD,
         account_id: str | None = None,
         name: str = "",
+        *,
+        protocol: str = "onebot",
+        transport: str = "",
+        app_id: str = "",
+        app_secret: str = "",
     ) -> str:
         """新增账号：先落配置（分配/校验 id），再建网关连接对象，返回账号 id。"""
         account_id = await self.config_service.add_bot({
@@ -194,10 +199,15 @@ class BotService:
             "owner_id": owner_id,
             "auto_connect": auto_connect,
             "conn_mode": conn_mode,
+            "protocol": protocol,
+            "transport": transport,
+            "app_id": app_id,
+            "app_secret": app_secret,
         })
         await self.gateway.add_bot(
             ws_url, owner_id, auto_connect, account_id=account_id,
             conn_mode=conn_mode, name=self.config_service.get_account_name(account_id),
+            protocol=protocol, transport=transport, app_id=app_id, app_secret=app_secret,
         )
         # 建号即装配：账号 id 此时已确定，配置页从这一刻起就能用（不必等连接）
         await self.ensure_account(account_id)

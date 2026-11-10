@@ -81,7 +81,8 @@ async def test_migrate_from_legacy(project_root, settings):
     cfg = ConfigService(db, project_root)
     await cfg.init()
 
-    # bots 迁移：旧 JSON 没有连接方向 → 默认正向；id 由迁移自动分配，name 给默认名
+    # bots 迁移：旧 JSON 没有连接方向 → 默认正向；id 由迁移自动分配，name 给默认名。
+    # 协议字段默认 onebot（升级后老账号行为不变），官方机器人字段为空。
     bots = cfg.get_bots()
     assert bots == [{
         "id": "bot1",
@@ -90,6 +91,10 @@ async def test_migrate_from_legacy(project_root, settings):
         "owner_id": 10001,
         "auto_connect": False,
         "conn_mode": "forward",
+        "protocol": "onebot",
+        "transport": "",
+        "app_id": "",
+        "app_secret": "",
     }]
 
     # webui 配置迁移

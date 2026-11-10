@@ -114,7 +114,11 @@ def _event_type_name(raw: dict) -> str:
 
 
 def _message_summary(raw: dict) -> str:
-    """从原始 message 段提取 ≤80 字纯文本摘要（图片记 ``[图片]``）。"""
+    """从原始 message 段提取 ≤80 字纯文本摘要（图片记 ``[图片]``）。
+
+    同时兼容官方机器人的 payload（``content`` 字符串 + ``attachments``）：
+    诊断台对两种协议显示同一种「一行摘要」。
+    """
     message = raw.get("message")
     parts: list[str] = []
     if isinstance(message, str):
@@ -132,9 +136,34 @@ def _message_summary(raw: dict) -> str:
                 parts.append("@全体成员" if qq in ("", "all") else f"@{qq}")
             else:
                 parts.append(_SEGMENT_PLACEHOLDERS.get(seg_type, f"[{seg_type}]"))
+    if not parts and raw.get("content"):
+        parts.append(str(raw["content"]))
+    if not parts and raw.get("attachments"):
+        parts.append("[附件]")
     if not parts and raw.get("raw_message"):
         parts.append(str(raw["raw_message"]))
     return "".join(parts).strip()[:SUMMARY_MAXLEN]
+
+
+def _event_time(raw: dict, event: Any) -> int:
+    """事件时间：OneBot 是 Unix 秒；官方是 RFC3339 字符串。"""
+    value = raw.get("time")
+    if value is None:
+        value = raw.get("timestamp")
+    if value is None:
+        value = getattr(event, "time", 0)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return int(value)
+    text = str(value or "").strip()
+    if text.isdigit():
+        return int(text)
+    if text:
+        try:
+            from datetime import datetime
+            return int(datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp())
+        except ValueError:
+            pass
+    return int(time.time())
 
 
 class EventHistory:
@@ -158,7 +187,9 @@ class EventHistory:
         key = str(account_id or "")
         if not key:
             return {}
-        raw = getattr(event, "raw", None)
+        # 兼容两种输入：领域事件对象（OneBot）或 {"event_type", "raw"} 映射（官方适配器）。
+        mapping = event if isinstance(event, dict) else None
+        raw = mapping.get("raw") if mapping is not None else getattr(event, "raw", None)
         raw = raw if isinstance(raw, dict) else {}
         try:
             # 深拷贝：事件对象/原始 payload 在派发链里可能被模块改写，且外部若继续持有
@@ -173,16 +204,32 @@ class EventHistory:
         if buffer is None:
             buffer = deque(maxlen=self._maxlen)
             self._buffers[key] = buffer
-        event_time = raw.get("time") or getattr(event, "time", 0) or time.time()
+        announced_type = str((mapping or {}).get("event_type") or "") if mapping is not None else ""
+        if mapping is not None:
+            event_type = announced_type or (_event_type_name(raw) if raw else "unknown")
+        else:
+            # OneBot 事件对象：沿用原来的 post_type 拼名（诊断台按 message.group 展示）
+            event_type = (_event_type_name(raw) if raw else "") or str(
+                getattr(event, "event_type", "") or "unknown"
+            )
         user_id = raw.get("user_id")
         if user_id is None:
+            author = raw.get("author") or {}
+            if isinstance(author, dict):
+                user_id = author.get("member_openid") or author.get("user_openid") or author.get("id")
+        if user_id is None and mapping is not None:
+            user_id = mapping.get("user_id")
+        if user_id is None:
             user_id = getattr(event, "user_id", None)
+        group_id = raw.get("group_id") if raw.get("group_id") not in (None, "") else raw.get("group_openid")
+        if group_id in (None, "") and mapping is not None:
+            group_id = mapping.get("group_id")
         record = {
             "seq": seq,
-            "time": int(event_time),
-            "event_type": _event_type_name(raw) if raw else str(getattr(event, "event_type", "") or "unknown"),
+            "time": _event_time(raw, event),
+            "event_type": event_type,
             "user_id": user_id,
-            "group_id": raw.get("group_id"),
+            "group_id": group_id,
             "summary": _message_summary(raw) if raw else "",
             "raw": raw,
         }

@@ -25,6 +25,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from app.core.logger import set_account_labels
+from app.domain.protocol import PROTOCOL_QQBOT, normalize_protocol
 from app.infrastructure.config.ws_url import (
     ACCESS_TOKEN_MASK,
     join_ws_url,
@@ -92,6 +93,12 @@ class AccountStoreMixin:
                 "owner_id": b.get("owner_id"),
                 "auto_connect": bool(b.get("auto_connect")),
                 "conn_mode": normalize_mode(b.get("conn_mode")),
+                "protocol": normalize_protocol(b.get("protocol")),
+                "transport": str(b.get("transport") or ""),
+                "app_id": str(b.get("app_id") or ""),
+                # 与 ws_url 的 access_token 不同：AppSecret 更敏感，对外一律打码；
+                # 保存时提交打码哨兵 → 保留旧值（见 save_bots）。
+                "app_secret": ACCESS_TOKEN_MASK if b.get("app_secret") else "",
                 "ws_url": base,
                 "access_token": token,
             })
@@ -148,6 +155,21 @@ class AccountStoreMixin:
             else:
                 name = prev.get("name") or account_id
 
+            # 协议：缺字段时沿用旧值（老前端只提交旧字段也不该被改成 onebot）
+            protocol = (
+                normalize_protocol(cfg["protocol"])
+                if "protocol" in cfg
+                else normalize_protocol(prev.get("protocol"))
+            )
+            transport = self._normalize_transport(protocol, cfg, prev)
+
+            app_id = str(cfg.get("app_id", prev.get("app_id") or "") or "").strip()
+            secret = cfg.get("app_secret")
+            if secret is None or ACCESS_TOKEN_MASK in str(secret):
+                app_secret = str(prev.get("app_secret") or "")
+            else:
+                app_secret = str(secret).strip()
+
             default_off[account_id] = (
                 account_id not in old or account_id in self._modules_default_off
             )
@@ -158,6 +180,10 @@ class AccountStoreMixin:
                 "owner_id": cfg.get("owner_id", prev.get("owner_id")),
                 "auto_connect": bool(cfg.get("auto_connect", prev.get("auto_connect", False))),
                 "conn_mode": mode,
+                "protocol": protocol,
+                "transport": transport,
+                "app_id": app_id,
+                "app_secret": app_secret,
             }
 
         sqls: list[tuple[str, Sequence[Any]]] = []
@@ -169,10 +195,13 @@ class AccountStoreMixin:
             sqls.append((
                 "INSERT OR REPLACE INTO bots "
                 "(account_id, name, ws_url, owner_id, auto_connect, conn_mode, "
+                "protocol, transport, app_id, app_secret, "
                 "modules_default_enabled, sort_order) "
-                "VALUES (?,?,?,?,?,?,?,?)",
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (account_id, cfg["name"], cfg["ws_url"], cfg.get("owner_id"),
                  1 if cfg.get("auto_connect") else 0, cfg.get("conn_mode", FORWARD),
+                 cfg.get("protocol"), cfg.get("transport"), cfg.get("app_id"),
+                 cfg.get("app_secret"),
                  0 if default_off[account_id] else 1, order),
             ))
         await self.db.run_in_transaction(sqls)   # 先落库，成功后再更新内存缓存
@@ -197,6 +226,17 @@ class AccountStoreMixin:
             if old_base == base and token:
                 return token
         return ""
+
+    @staticmethod
+    def _normalize_transport(protocol: str, cfg: dict, prev: dict) -> str:
+        """官方机器人的传输方式：ws / webhook，缺省 ws；OneBot 账号恒为空串。"""
+        if protocol != PROTOCOL_QQBOT:
+            return ""
+        raw = cfg.get("transport")
+        if raw is None:
+            raw = prev.get("transport") or "ws"
+        value = str(raw or "").strip().lower()
+        return value if value in ("ws", "webhook") else "ws"
 
     async def add_bot(self, cfg: dict) -> str:
         """新增账号，返回它的 id。
@@ -225,6 +265,7 @@ class AccountStoreMixin:
                 raise ValueError(f"账号 id 已存在：{account_id}")
 
             name = normalize_account_name(cfg.get("name"), f"账号 {len(self._bots) + 1}")
+            protocol = normalize_protocol(cfg.get("protocol"))
             row = {
                 "id": account_id,
                 "name": name,
@@ -234,13 +275,18 @@ class AccountStoreMixin:
                 # 新增账号默认正向：`conn_mode` 未指定时不能写成空值，否则 save_bots 只能靠
                 # 「缺字段沿用旧值」兜底，而新账号没有旧值。
                 "conn_mode": normalize_mode(cfg.get("conn_mode")),
+                "protocol": protocol,
+                "transport": self._normalize_transport(protocol, cfg, {}),
+                "app_id": str(cfg.get("app_id") or "").strip(),
+                "app_secret": str(cfg.get("app_secret") or "").strip(),
             }
             # 只插这一行（不再「读出全部 → 追加 → 全量覆盖」）：两个并发加号不会互相覆盖，
             # 也不会把一个保存请求的 payload 当作"删除清单"作用到别人身上。
             await self.db.execute(
                 "INSERT OR REPLACE INTO bots "
                 "(account_id, name, ws_url, owner_id, auto_connect, conn_mode, "
-                "modules_default_enabled, sort_order) VALUES (?,?,?,?,?,?,?,?)",
+                "protocol, transport, app_id, app_secret, "
+                "modules_default_enabled, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     account_id,
                     row["name"],
@@ -248,6 +294,10 @@ class AccountStoreMixin:
                     row.get("owner_id"),
                     1 if row.get("auto_connect") else 0,
                     row["conn_mode"],
+                    row.get("protocol"),
+                    row.get("transport"),
+                    row.get("app_id"),
+                    row.get("app_secret"),
                     0,  # 新账号模块默认关
                     len(self._bots),  # 排序：追加到末尾
                 ),

@@ -149,6 +149,13 @@ CREATE TABLE IF NOT EXISTS bots (
     auto_connect INTEGER NOT NULL DEFAULT 0,
     -- 连接方向：forward=正向 WS（框架连出）/ reverse=反向 WS（框架监听、OneBot 实现连入）
     conn_mode   TEXT NOT NULL DEFAULT 'forward',
+    -- 协议：onebot = OneBot v11（默认，老账号行为不变）/ qqbot = 官方 QQ 机器人
+    protocol    TEXT NOT NULL DEFAULT 'onebot',
+    -- 官方机器人传输方式：ws / webhook（OneBot 账号为空，继续用 conn_mode 表达方向）
+    transport   TEXT NOT NULL DEFAULT '',
+    -- 官方机器人凭据（app_secret 对外打码；日志脱敏）
+    app_id      TEXT NOT NULL DEFAULT '',
+    app_secret  TEXT NOT NULL DEFAULT '',
     -- 模块默认开关：1=该账号未显式配置模块时默认「开」（老账号语义）；
     -- 0=默认「关」（新账号建号时写 0）：没手动打开的模块不该自己开始干活。
     -- 只影响功能模块；框架级 Agent 不受影响（要静默用它自己的开关）。

@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from app.core.logger import logger
+from app.domain.protocol import PROTOCOL_QQBOT, normalize_protocol
 from app.infrastructure.onebot.endpoint import (
     EndpointError,
     is_reverse,
@@ -38,23 +39,33 @@ def _ok(message: str, **extra):
     return JSONResponse(content={"status": "success", "message": message, **extra})
 
 
-def _err(status: int, message: str):
-    return JSONResponse(status_code=status, content={"status": "error", "message": message})
+def _err(status: int, message: str, *, code: str = "", **extra):
+    body = {"status": "error", "message": message}
+    if code:
+        body["code"] = code
+    body.update(extra)
+    return JSONResponse(status_code=status, content=body)
 
 
 def _validate_endpoints(bots: list) -> list[dict]:
-    """校验账号 ``ws_url`` 的形态，返回 ``[{id, error}]``（空列表 = 全部可用）。
+    """校验账号连接字段，返回 ``[{id, error}]``（空列表 = 全部可用）。
 
-    为什么放在 API 层而不是 ``save_bots``：``save_bots`` 还服务脚本/测试等
-    程序化调用，那里塞入严格校验会误伤"先存配置、后填地址"的用法；而 WebUI
-    的保存/新增是用户输入的唯一入口，必须当场拦下。
-
-    空地址不算错误（新账号可能还没填）；**填了就必须能用**。反向模式额外要求
-    写明端口——监听地址没有端口，对端根本无从填写。
+    按协议分支：OneBot 校验 ``ws_url``（反向必须带端口）；官方机器人没有 ws_url，
+    只校验 ``protocol/transport`` 合法（缺 AppID/AppSecret 不在保存时拦，交给就绪
+    检查，避免"先建号后填凭据"被 400 堵死）。
     """
     problems: list[dict] = []
     for index, bot in enumerate(bots):
         if not isinstance(bot, dict):
+            continue
+        protocol = normalize_protocol(bot.get("protocol"))
+        if protocol == PROTOCOL_QQBOT:
+            transport = str(bot.get("transport") or "ws").strip().lower()
+            if transport not in ("ws", "webhook"):
+                problems.append({
+                    "id": str(bot.get("id") or f"#{index + 1}"),
+                    "error": f"官方机器人连接方式只能是 ws/webhook（当前 {transport!r}）",
+                })
             continue
         raw = str(bot.get("ws_url") or "").strip()
         if not raw:
@@ -65,6 +76,59 @@ def _validate_endpoints(bots: list) -> list[dict]:
         except EndpointError as e:
             problems.append({"id": str(bot.get("id") or f"#{index + 1}"), "error": str(e)})
     return problems
+
+
+@router.get("/bots/protocols")
+async def api_bot_protocols():
+    """协议目录：前端据此渲染「官方机器人 / 正向 / 反向」与字段，不硬编码。
+
+    能力摘要来自领域层 ``capability_view``，与后端能力闸门同一份真源。
+    """
+    from app.domain.protocol import (
+        PROTOCOL_ONEBOT,
+        PROTOCOL_QQBOT,
+        capability_notes,
+        capability_view,
+        protocol_label,
+    )
+
+    catalog = [
+        {
+            "protocol": PROTOCOL_ONEBOT,
+            "label": protocol_label(PROTOCOL_ONEBOT),
+            "description": "本地 OneBot v11 协议端（NapCat / Lagrange / LLOneBot 等），支持正向/反向 WebSocket。",
+            "modes": [
+                {"value": "reverse", "label": "OneBot 反向（本地监听）", "description": "本机等协议端连进来（推荐）"},
+                {"value": "forward", "label": "OneBot 正向（向外连接）", "description": "本程序主动连协议端的 ws 地址"},
+            ],
+            "fields": [
+                {"name": "ws_url", "label": "协议端 / 监听地址", "type": "text", "required": False,
+                 "secret": False, "hint": "反向模式填本机监听地址；正向模式填协议端的 ws 地址"},
+                {"name": "access_token", "label": "access_token", "type": "password", "required": False,
+                 "secret": True, "hint": "可选；与协议端里配置的一致"},
+            ],
+            "capabilities": capability_view(PROTOCOL_ONEBOT),
+            "notes": capability_notes(PROTOCOL_ONEBOT),
+        },
+        {
+            "protocol": PROTOCOL_QQBOT,
+            "label": protocol_label(PROTOCOL_QQBOT),
+            "description": "QQ 开放平台官方机器人（AppID + AppSecret）。默认只收 @ 消息，回复受被动窗口限制。",
+            "modes": [
+                {"value": "ws", "label": "WebSocket", "description": "本机连官方网关，无需公网（推荐）"},
+                {"value": "webhook", "label": "Webhook", "description": "需要公网 HTTPS 回调（80/443/8080/8443）"},
+            ],
+            "fields": [
+                {"name": "app_id", "label": "AppID", "type": "text", "required": True, "secret": False,
+                 "hint": "QQ 开放平台 → 开发设置"},
+                {"name": "app_secret", "label": "AppSecret", "type": "password", "required": True, "secret": True,
+                 "hint": "只保存在本机数据库；接口返回打码"},
+            ],
+            "capabilities": capability_view(PROTOCOL_QQBOT),
+            "notes": capability_notes(PROTOCOL_QQBOT),
+        },
+    ]
+    return JSONResponse(content={"ok": True, "protocols": catalog})
 
 
 @router.get("/bots")
@@ -83,7 +147,17 @@ async def connect_bot(
         return _err(404, f"账号 {account_id} 不存在")
     name = bot_cfg.get("name") or account_id
     conn_mode = bot_cfg.get("conn_mode")
-    if account_id not in bot_service.gateway.connections:
+    protocol = normalize_protocol(bot_cfg.get("protocol"))
+    if protocol == PROTOCOL_QQBOT:
+        # 官方账号没有 ws_url / 反向监听：直接按配置建/更新连接对象
+        await bot_service.gateway.add_bot(
+            "", None, bot_cfg.get("auto_connect", False),
+            account_id=account_id, name=name, protocol=protocol,
+            transport=str(bot_cfg.get("transport") or "ws"),
+            app_id=str(bot_cfg.get("app_id") or ""),
+            app_secret=str(bot_cfg.get("app_secret") or ""),
+        )
+    elif account_id not in bot_service.gateway.connections:
         await bot_service.gateway.add_bot(
             bot_cfg.get("ws_url", ""), None, bot_cfg.get("auto_connect", False),
             account_id=account_id, conn_mode=conn_mode or "", name=name,
@@ -160,12 +234,12 @@ async def api_bots_config_add(
 ):
     """新增一个账号配置。
 
-    收 ``{"id": 可选, "name": 可选, "conn_mode": "forward"|"reverse", "ws_url": 可选}``：
+    收 ``{"id": 可选, "name": 可选, "protocol": "onebot"|"qqbot", ...}``：
 
-    - ``id`` 是账号唯一凭据（用户填；缺省自动分配 ``botN``，脚本调用友好）；
-    - ``name`` 是展示名（缺省「账号 N」）；
-    - ``ws_url`` 留空时按模式给默认建议（端口避开已有账号）——新卡片一出生就是
-      可用地址，不必等用户点连接才发现「反向地址必须写端口」。
+    - ``protocol`` 缺省 ``onebot``（老脚本/老前端行为不变）；
+    - OneBot：``conn_mode`` = forward/reverse，``ws_url`` 可选（留空按模式给默认建议）；
+    - 官方机器人：``transport`` = ws/webhook，收 ``app_id`` / ``app_secret``；
+    - ``id`` 是账号唯一凭据（用户填；缺省自动分配 ``botN``，脚本调用友好）。
     """
     body: dict = {}
     try:
@@ -175,15 +249,25 @@ async def api_bots_config_add(
     except Exception:
         body = {}   # 无 body 是合法调用（脚本可以只 POST 一个连接方式）
 
+    protocol = normalize_protocol(body.get("protocol"))
+    transport = str(body.get("transport") or "").strip().lower()
+    app_id = str(body.get("app_id") or "").strip()
+    app_secret = str(body.get("app_secret") or "").strip()
     mode = normalize_mode(body.get("conn_mode"))
     ws_url = str(body.get("ws_url") or "").strip()
-    if not ws_url:
-        ws_url = suggest_address(mode, [b.get("ws_url", "") for b in cfg_service.get_bots()])
-    # 用户显式给了地址就先校验：新建即报错，比"卡片存下了但连不上"好排查
-    try:
-        parse_endpoint(ws_url, require_port=is_reverse(mode))
-    except EndpointError as e:
-        return _err(400, f"连接地址不可用: {e}")
+
+    if protocol == PROTOCOL_QQBOT:
+        transport = transport if transport in ("ws", "webhook") else "ws"
+        ws_url = ""
+    else:
+        if not ws_url:
+            ws_url = suggest_address(mode, [b.get("ws_url", "") for b in cfg_service.get_bots()])
+        # 用户显式给了地址就先校验：新建即报错，比"卡片存下了但连不上"好排查
+        try:
+            parse_endpoint(ws_url, require_port=is_reverse(mode))
+        except EndpointError as e:
+            return _err(400, f"连接地址不可用: {e}")
+
     try:
         # Reuse BotService.add_bot: persist the config AND register a gateway connection
         # (status "disconnected") at once, so /api/bots (status list) includes the new
@@ -192,6 +276,8 @@ async def api_bots_config_add(
             ws_url, None, False, conn_mode=mode,
             account_id=str(body.get("id") or "").strip() or None,
             name=str(body.get("name") or "").strip(),
+            protocol=protocol, transport=transport,
+            app_id=app_id, app_secret=app_secret,
         )
     except ValueError as e:
         return _err(400, str(e))
@@ -199,6 +285,7 @@ async def api_bots_config_add(
     return _ok(
         f"已添加账号「{name}」",
         id=account_id, name=name, conn_mode=mode, ws_url=ws_url,
+        protocol=protocol, transport=transport,
     )
 
 
@@ -253,16 +340,21 @@ def _trim_event_raw(raw):
     return trimmed
 
 
-def _parse_group_id(value) -> int | None:
-    """把请求里的 group_id 解析成正整数；缺省/非法都返回 None（由调用方给中文提示）。"""
+def _parse_group_id(value) -> int | str | None:
+    """解析群标识：OneBot 是正整数群号，官方机器人是字符串 group_openid。
+
+    缺省/空白返回 None（由调用方给中文提示）；纯数字归一成 int，其余保留字符串。
+    """
     if value in (None, "") or isinstance(value, bool):
         return None
     if isinstance(value, int):
         return value if value > 0 else None
     text = str(value).strip()
-    if text.isdigit() and int(text) > 0:
-        return int(text)
-    return None
+    if not text:
+        return None
+    if text.isdigit():
+        return int(text) if int(text) > 0 else None
+    return text
 
 
 def _account_or_404(account_id: str, bot_service, config_service):
@@ -354,6 +446,9 @@ async def api_bot_test_message(
     raw_group_id = body.get("group_id")
     group_id = _parse_group_id(raw_group_id)
     if raw_group_id not in (None, "") and group_id is None:
+        return _err(400, "群标识不合法（OneBot 填群号，官方机器人填 group_openid）")
+    if normalize_protocol(getattr(conn, "protocol", "")) != PROTOCOL_QQBOT and isinstance(group_id, str):
+        # OneBot 端只认数字群号；把 openid 发过去只会得到对端的类型错误
         return _err(400, "群号必须是正整数")
     if group_id is None:
         group_id = bot_service.gateway.latest_group_id(str(account_id))

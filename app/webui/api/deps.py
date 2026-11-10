@@ -151,9 +151,9 @@ def get_service_access(request: Request):
 
 
 def get_gateway(request: Request):
-    from app.infrastructure.onebot.gateway import OneBotGateway
+    from app.infrastructure.gateway_hub import GatewayHub
 
-    return get_service(request, OneBotGateway)
+    return get_service(request, GatewayHub)
 
 
 def get_responder_service(request: Request):

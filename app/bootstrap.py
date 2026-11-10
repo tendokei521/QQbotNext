@@ -28,7 +28,9 @@ from app.core.settings import Settings, load_settings
 from app.core.task_manager import TaskManager
 from app.infrastructure.cache import Cache
 from app.infrastructure.config.config_service import ConfigService
+from app.infrastructure.gateway_hub import GatewayHub
 from app.infrastructure.onebot.gateway import OneBotGateway
+from app.infrastructure.qqbot.gateway import QqBotGateway
 from app.infrastructure.persistence.database import Database
 from app.plugin.base import ServiceAccess
 from app.plugin.dispatcher import ModuleDispatcher
@@ -327,8 +329,11 @@ def build_container(settings: Settings | None = None) -> Container:
 
     resource_registry.register("module", _module_resources, label="模块", desc="已加载的模块名")
 
-    # OneBot 网关
-    gateway = OneBotGateway(settings=settings, cache=cache, logger_=logger)
+    # 协议网关：OneBot + 官方 QQ 机器人，由 GatewayHub 按账号协议路由（对外同一张连接表）
+    onebot_gateway = OneBotGateway(settings=settings, cache=cache, logger_=logger)
+    qqbot_gateway = QqBotGateway(settings=settings, cache=cache, logger_=logger)
+    qqbot_gateway.config_service = config_service
+    gateway = GatewayHub(onebot=onebot_gateway, qqbot=qqbot_gateway)
 
     def _bot_of(bot_id):
         """按 bot_id 反查当前持有该账号的连接（IBot）；未登录/已换号时返回 None。"""
@@ -368,7 +373,8 @@ def build_container(settings: Settings | None = None) -> Container:
     gateway.before_send_hook_registry = before_send_hook_registry
     gateway.api_hook_registry = api_hook_registry
     gateway.lifecycle_hook_registry = lifecycle_hook_registry
-    container.register_factory(OneBotGateway, lambda: gateway)
+    container.register_factory(OneBotGateway, lambda: onebot_gateway)
+    container.register_factory(GatewayHub, lambda: gateway)
 
     # 节点注册表：内置入站链（路由 → 权限 → 派发 → Agent 兜底），框架/模块可插入/替换
     # 响应权仲裁（多账号同群）：策略存储 + 仲裁服务，唯一允许同时看注册表/网关/策略的组件

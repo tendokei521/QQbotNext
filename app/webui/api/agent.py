@@ -52,8 +52,12 @@ def _ok(message: str, **extra):
     return JSONResponse(content={"status": "success", "message": message, **extra})
 
 
-def _err(status: int, message: str):
-    return JSONResponse(status_code=status, content={"status": "error", "message": message})
+def _err(status: int, message: str, *, code: str = "", **extra):
+    body = {"status": "error", "message": message}
+    if code:
+        body["code"] = code
+    body.update(extra)
+    return JSONResponse(status_code=status, content=body)
 
 
 def _account_exists(config_service, account_id) -> bool:
@@ -363,6 +367,24 @@ async def agent_onebot_tools(
     runtime, _ = _runtime(agent_manager, bot_id)
     if runtime is None:
         return _err(404, f"账号不存在或未装配运行时: {bot_id}")
+
+    from app.agent.tools.state import protocol_of_runtime
+    from app.domain.protocol import PROTOCOL_QQBOT, capability_view, unsupported_message
+
+    protocol = protocol_of_runtime(runtime)
+    if protocol == PROTOCOL_QQBOT:
+        # 读接口返回 200 + supported=false（前端渲染拦截态）；写接口才用 409。
+        return JSONResponse(content={
+            "ok": True,
+            "supported": False,
+            "protocol": protocol,
+            "message": "当前账号类型（官方 QQ 机器人）不支持 OneBot 工具",
+            "capabilities": capability_view(protocol),
+            "log_enabled": False,
+            "tools": [],
+            "example_unsupported": unsupported_message(protocol, "send_poke"),
+        })
+
     tools = []
     for tool in ONEBOT_TOOLS:
         item = dict(tool)
@@ -370,6 +392,8 @@ async def agent_onebot_tools(
         tools.append(item)
     return JSONResponse(content={
         "ok": True,
+        "supported": True,
+        "protocol": protocol,
         "log_enabled": bool(runtime.config.get("onebot_tools_log_enabled", True)),
         "tools": tools,
     })
@@ -435,11 +459,23 @@ async def agent_tool_toggle(
     if not name:
         return _err(400, "缺少工具名 name")
     enabled = bool((data or {}).get("enabled", True))
+    source = str((data or {}).get("source", "") or "")
 
-    from app.agent.tools.state import resolve_tool_state, set_tool_disabled
+    from app.agent.tools.state import protocol_of_runtime, resolve_tool_state, set_tool_disabled
+    from app.domain.protocol import PROTOCOL_QQBOT
+
+    if source == "onebot" and protocol_of_runtime(runtime) == PROTOCOL_QQBOT:
+        # 写操作必须强硬拒绝：绕过前端也改不动一个「该协议根本没有」的工具。
+        return _err(
+            409,
+            "当前账号类型（官方 QQ 机器人）不支持 OneBot 工具",
+            code="capability_unsupported",
+            protocol=PROTOCOL_QQBOT,
+            capability=name,
+        )
 
     set_tool_disabled(runtime, name, disabled=not enabled)
-    state = resolve_tool_state(runtime, name=name, source=str((data or {}).get("source", "") or ""))
+    state = resolve_tool_state(runtime, name=name, source=source)
     return JSONResponse(
         content={
             "ok": True,
