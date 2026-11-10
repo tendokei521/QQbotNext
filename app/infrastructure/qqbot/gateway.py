@@ -54,6 +54,9 @@ class QqBotGateway:
         self.bot_server_tasks: dict[str, asyncio.Task] = {}
         self._connect_locks: dict[str, asyncio.Lock] = {}
         self._supervise_task: asyncio.Task | None = None
+        # Webhook 模式：没有读循环，事件由回调路由推进来；每账号一条队列 + 一个 worker
+        self._webhook_queues: dict[str, asyncio.Queue] = {}
+        self._webhook_workers: dict[str, asyncio.Task] = {}
 
         # 由 BotService / bootstrap 注入（与 OneBotGateway 同名）
         self.bots_provider: Callable[[], list[dict]] | None = None
@@ -202,6 +205,27 @@ class QqBotGateway:
             conn.status = "connecting"
             conn.last_error = None
             conn._last_notified_status = None
+            if str(conn.transport or "ws") == "webhook":
+                # Webhook 模式没有「框架连出去」的长连接：事件由回调路由推进来，
+                # 这里只准备 HTTP 会话 + 派发 worker，并把账号标在线。
+                await conn.ensure_session()
+                self._ensure_webhook_worker(key)
+                conn.status = "connected"
+                conn.reconnect_attempts = 0
+                conn.login_retrieved = True
+                conn.login_event.set()
+                conn.login_info = conn.login_info or {
+                    "user_id": conn.bot_id,
+                    "nickname": conn.account_name,
+                    "app_id": conn.app_id,
+                }
+                await self._notify_status(conn, "connected", "Webhook 模式")
+                if self.login_handler is not None:
+                    try:
+                        await self.login_handler(conn)
+                    except Exception as e:  # noqa: BLE001 —— 登录装配失败只影响本账号
+                        self.log.warning(f"官方账号「{bot_label(conn)}」登录装配失败: {e}")
+                return True
             self.bot_server_tasks[key] = asyncio.create_task(
                 self._run_account(key), name=f"qqbot_account:{key}"
             )
@@ -226,6 +250,7 @@ class QqBotGateway:
                 pass
             except Exception as e:  # noqa: BLE001 —— 读循环收尾异常只留痕
                 self.log.debug(f"[QQBot] 读循环收尾异常（{key}）: {e}")
+        await self._stop_webhook_worker(key)
         if conn is not None:
             try:
                 await conn.close()
@@ -255,6 +280,53 @@ class QqBotGateway:
             except Exception as e:  # noqa: BLE001 —— 监督循环收尾异常只留痕
                 self.log.debug(f"[QQBot] 监督循环收尾异常: {e}")
         self._supervise_task = None
+
+    # ==================== Webhook 事件入口 ====================
+    def _ensure_webhook_worker(self, account_id: str) -> None:
+        """Webhook 模式的事件队列/worker（幂等）。"""
+        key = str(account_id)
+        task = self._webhook_workers.get(key)
+        if task is not None and not task.done():
+            return
+        queue = self._webhook_queues.get(key)
+        if queue is None:
+            queue = asyncio.Queue(maxsize=EVENT_QUEUE_MAX)
+            self._webhook_queues[key] = queue
+        self._webhook_workers[key] = asyncio.create_task(
+            self._dispatch_worker(key, queue), name=f"qqbot_webhook_dispatch:{key}"
+        )
+
+    async def _stop_webhook_worker(self, account_id: str) -> None:
+        key = str(account_id)
+        task = self._webhook_workers.pop(key, None)
+        self._webhook_queues.pop(key, None)
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:  # noqa: BLE001 —— worker 收尾异常只留痕
+                self.log.debug(f"[QQBot] Webhook worker 收尾异常（{key}）: {e}")
+
+    async def handle_webhook(self, account_id: str, payload: dict) -> bool:
+        """回调路由验签后调用：把一条 op=0 事件送进该账号的处理队列。"""
+        key = str(account_id)
+        conn = self.connections.get(key)
+        if conn is None:
+            return False
+        self._ensure_webhook_worker(key)
+        queue = self._webhook_queues.get(key)
+        if queue is None:
+            return False
+        item = {
+            "t": str((payload or {}).get("t") or ""),
+            "d": (payload or {}).get("d") or {},
+            "id": (payload or {}).get("id") or "",
+            "s": (payload or {}).get("s"),
+        }
+        await self._handle_payload(conn, item, queue)
+        return True
 
     # ==================== 读循环 ====================
     async def _run_account(self, account_id: str) -> None:
@@ -416,6 +488,8 @@ class QqBotGateway:
             try:
                 await self.reconcile()
                 for account_id, conn in list(self.connections.items()):
+                    if str(conn.transport or "ws") == "webhook":
+                        continue  # Webhook 没有长连接可重连（回调地址常驻）
                     task = self.bot_server_tasks.get(account_id)
                     if conn.auto_connect and not conn.suppress_auto_reconnect and (task is None or task.done()):
                         self.log.info(f"官方账号「{bot_label(conn)}」掉线，自动重连")

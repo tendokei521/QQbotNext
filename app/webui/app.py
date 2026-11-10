@@ -35,6 +35,7 @@ from app.webui.api import modules as modules_router
 from app.webui.api import policy as policy_router
 from app.webui.api import prompt_presets as prompt_presets_router
 from app.webui.api import provider_presets as provider_presets_router
+from app.webui.api import qqbot_webhook as qqbot_webhook_router
 from app.webui.api import readiness as readiness_router
 from app.webui.api import resources as resources_router
 from app.webui.api import responder as responder_router
@@ -232,6 +233,7 @@ def create_app(container) -> FastAPI:
     app.include_router(resources_router.router, prefix="/api")
     app.include_router(responder_router.router, prefix="/api")
     app.include_router(webui_router.router, prefix="/api")
+    app.include_router(qqbot_webhook_router.router)
     app.include_router(build_ws_router())
 
     # 可选鉴权（WEBUI_TOKEN 非空时生效）
@@ -538,7 +540,8 @@ def _install_auth_middleware(app: FastAPI, container) -> None:
     @app.middleware("http")
     async def auth_middleware(request: Request, call_next):
         path = request.url.path
-        if path in _PUBLIC_PATHS or path.startswith("/api/auth/"):
+        # 官方机器人回调走 Ed25519 验签（官方不可能带 WebUI 令牌），单独放行
+        if path in _PUBLIC_PATHS or path.startswith("/api/auth/") or path.startswith("/qqbot/webhook/"):
             return await call_next(request)
 
         token = _expected_token()

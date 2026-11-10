@@ -32,6 +32,8 @@ dependencies = [
     "pydantic-settings>=2.0",
     "python-multipart>=0.0.6",
     "python-dotenv>=1.0",
+    # 官方 QQ 机器人 Webhook 验签（Ed25519）；WS 模式不需要，但一起装避免切模式缺库
+    "cryptography>=42",
     # 动图拆帧（GIF/动态 WebP → 静态帧）：视觉模型只读首帧，必须自己解码
     "pillow>=10.0",
 ]
