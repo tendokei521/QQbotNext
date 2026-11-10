@@ -32,10 +32,14 @@ class _MergedConnections(MutableMapping):
         self._qqbot = qqbot
 
     def __getitem__(self, key: str) -> Any:
-        key = str(key)
-        if key in self._qqbot:
-            return self._qqbot[key]
-        return self._onebot[key]
+        # 键可能是 int（旧测试/配置快照按 index 取）或 str（账号 id）：先按原样找，
+        # 再退回字符串形式，避免「连接明明在表里却取不到」。
+        for candidate in (key, str(key)):
+            if candidate in self._qqbot:
+                return self._qqbot[candidate]
+            if candidate in self._onebot:
+                return self._onebot[candidate]
+        raise KeyError(key)
 
     def __setitem__(self, key: str, value: Any) -> None:
         key = str(key)
@@ -46,12 +50,12 @@ class _MergedConnections(MutableMapping):
         target[key] = value
 
     def __delitem__(self, key: str) -> None:
-        key = str(key)
         removed = False
-        for mapping in (self._qqbot, self._onebot):
-            if key in mapping:
-                del mapping[key]
-                removed = True
+        for candidate in (key, str(key)):
+            for mapping in (self._qqbot, self._onebot):
+                if candidate in mapping:
+                    del mapping[candidate]
+                    removed = True
         if not removed:
             raise KeyError(key)
 
@@ -65,8 +69,7 @@ class _MergedConnections(MutableMapping):
         return len(set(self._onebot) | set(self._qqbot))
 
     def __contains__(self, key: object) -> bool:
-        text = str(key)
-        return text in self._onebot or text in self._qqbot
+        return any(candidate in self._onebot or candidate in self._qqbot for candidate in (key, str(key)))
 
 
 class GatewayHub:
@@ -105,11 +108,11 @@ class GatewayHub:
         return gateway.get_last_account(account_id) if gateway else None
 
     def _gateway_of(self, account_id: str):
-        key = str(account_id)
-        if key in self.qqbot.connections:
-            return self.qqbot
-        if key in self.onebot.connections:
-            return self.onebot
+        for key in (account_id, str(account_id)):
+            if key in self.qqbot.connections:
+                return self.qqbot
+            if key in self.onebot.connections:
+                return self.onebot
         return None
 
     def _gateway_for_protocol(self, protocol: Any):
