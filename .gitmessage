@@ -2,7 +2,7 @@
 # 例：
 #   feat(dashboard): add PageSectionNav component
 #   fix(llm): remove schedule fallback
-#   refactor(deps): make requirements.txt a pointer to pyproject
+#   refactor(deps): keep pyproject as the only dependency source
 #
 # type: feat / fix / docs / refactor / test / chore / perf / build / ci / style
 # 一步一提交：一个提交只做一件事，完成后立即提交（详见 STYLE.md §11 与 AGENTS.md）

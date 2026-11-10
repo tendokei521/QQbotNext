@@ -16,7 +16,7 @@
 
 ## 为什么不引入 itsdangerous / jose
 
-`itsdangerous` 只是 starlette 的**传递依赖**（未写进 requirements.txt），直接 import 等于
+`itsdangerous` 只是 starlette 的**传递依赖**（未写进 pyproject.toml 的运行时依赖），直接 import 等于
 引入一个隐式依赖。签名逻辑本身很短，这里用标准库 `hmac` + `hashlib` + `base64` 实现，
 零新增依赖。
 

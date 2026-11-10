@@ -224,8 +224,8 @@ pytest -q --cov --cov-report=term-missing   # 需要覆盖率时
 - [ ] **没有新增**函数内惰性 import；确需新增的已在 import 上方注明原因（§6）
 - [ ] 新增函数 ≤ 50 行（改存量长函数时，先拆你要动的那部分）
 - [ ] 涉及 `app/webui/api/` 或 §12 列出的区域时，确认没有加深循环依赖
-- [ ] 新增依赖只改 `pyproject.toml` 一处：**不要**在 `requirements.txt` 里重复列举
-      （该文件已改为指向 `pyproject.toml` 的纯指针，CI 会校验）
+- [ ] 新增依赖只改 `pyproject.toml` 一处（依赖清单的唯一事实源；根目录 `requirements.*`
+      安装入口已移除，本地安装/补装统一走 `start.py` 的自动检查）
 - [ ] 🔬 改动相关测试全绿（小改动档位可不跑；大工程收尾时改为 `pytest -q` 全量全绿）
 - [ ] 🔬 `ruff check <本次改过的文件>` 无**新增**违规（不是全库；存量按批次清理，见 §10.1）
 

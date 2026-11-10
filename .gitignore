@@ -35,7 +35,7 @@ htmlcov/
 .pytest_cache/
 .ruff_cache/
 ruff-report.txt
-# `pip install -e .`（requirements.bat / start.py 用得到）生成的 egg-info
+# `pip install -e .`（start.py / 手动安装用得到）生成的 egg-info
 *.egg-info/
 
 # 虚拟环境（start.py 自动创建；每台机器一份，绝不入库）

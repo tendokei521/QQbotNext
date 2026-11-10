@@ -3,10 +3,9 @@
 为什么判定逻辑只写这一份 Python（而不是 bat / sh 各写一套）：
 
 - PEP 508 约束解析（``uvicorn[standard]>=0.23``）、版本比对、``requires-python``
-  门槛，用 shell 写必然两边各维护一份，而 ``requirements.txt`` 的历史注释已经吃过
-  一次"bat 与 sh 清单漂移"的亏；
+  门槛，用 shell 写必然两边各维护一份——历史上 bat 与 sh 各写一套依赖清单，漂移过；
 - ``start.py`` 只做编排：建 venv → 升 pip/setuptools → 调本脚本 → 启动 ``main.py``，
-  依赖判定一律留在这里，bat / sh 不再各写一套。
+  依赖判定一律留在这里（根目录已不再有 requirements.* 独立安装入口）。
 
 用法::
 
