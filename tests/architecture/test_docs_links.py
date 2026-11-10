@@ -36,6 +36,7 @@ LIVE_DOCS = {
     "dashboard-frontend-architecture.md",
     "QQ_OFFICIAL_API.md",
     "QQ_OFFICIAL_BOT.md",
+    "QQ_OFFICIAL_BOT_TODO.md",
 }
 
 #: 根目录的现行文档（用户向 + 规范）
