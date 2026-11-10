@@ -23,6 +23,7 @@ from typing import Any
 
 from app.agent import logger
 from app.core.logger import account_label
+from app.domain.ids import as_int_id
 
 from . import detect
 from .consolidate import Consolidator
@@ -361,7 +362,7 @@ class MemoryManager:
         if cached and now - cached[0] < _MEMBER_CACHE_TTL:
             return cached[1]
         try:
-            res = await bot.get_group_member_list(group_id=int(group_id))
+            res = await bot.get_group_member_list(group_id=as_int_id(group_id))
             if hasattr(res, "data"):
                 res = res.data
             if isinstance(res, dict):

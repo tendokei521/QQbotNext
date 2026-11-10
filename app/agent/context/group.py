@@ -24,6 +24,7 @@ from app.agent.session.model import (
     time_prefix,
 )
 from app.core.logger import logger
+from app.domain.ids import as_int_id
 
 # 非文本消息段的展示名，避免模型完全看不到非文本消息
 _NON_TEXT_SEGMENTS = {
@@ -522,7 +523,7 @@ async def fetch_group_online_history(
     """
     try:
         result = await bot.get_msg_history(
-            group_id=int(group_id),
+            group_id=as_int_id(group_id),
             user_id=0,
             count=count,
             reverse_order=False,
@@ -575,7 +576,7 @@ async def fetch_private_online_history(
     try:
         result = await bot.get_msg_history(
             group_id=0,
-            user_id=int(user_id),
+            user_id=as_int_id(user_id),
             count=count,
             reverse_order=False,
         )
@@ -595,7 +596,7 @@ async def fetch_private_online_history(
 async def fetch_group_name(bot: Any, group_id: Any) -> str:
     """获取群名；失败时返回空字符串。"""
     try:
-        result = await bot.get_group_info(group_id=int(group_id))
+        result = await bot.get_group_info(group_id=as_int_id(group_id))
         data = (result or {}).get("data", {}) or {}
         return str(data.get("group_name", "") or "")
     except Exception as e:

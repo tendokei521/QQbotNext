@@ -22,6 +22,7 @@ import asyncio
 from typing import Any, Iterable
 
 from app.agent import logger
+from app.domain.ids import as_int_id
 
 # bot_id:group_id:qq -> 昵称（含群名片优先）
 _NICK_CACHE: dict[str, str] = {}
@@ -79,7 +80,7 @@ async def fetch_nickname(bot: Any, group_id: Any, qq: Any, *, bot_id: Any = "") 
         return hit
 
     try:
-        resp = await bot.get_group_member_info(group_id=int(group_id), user_id=user_id)
+        resp = await bot.get_group_member_info(group_id=as_int_id(group_id), user_id=user_id)
     except Exception as e:
         # 反查失败只影响"昵称展示"，不能让整轮渲染失败；留痕便于排查 API/权限异常
         logger.debug(f"[Nickname] 获取群成员昵称失败（group={group_id}, qq={qq}）: {e}")
