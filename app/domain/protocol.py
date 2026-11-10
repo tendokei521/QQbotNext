@@ -45,6 +45,10 @@ QQBOT_ACTIONS: frozenset[str] = frozenset({
     "delete_msg",
     "get_login_info",
     "get_group_list",
+    "get_group_info",
+    "get_group_member_list",
+    "set_group_ban",
+    "set_group_kick",
     "get_status",
 })
 
@@ -124,11 +128,11 @@ def capability_view(protocol: Any) -> dict[str, Any]:
     return {
         "onebot_tools": False,
         "send_text": True,
-        "send_image": False,   # Phase 2 富媒体接入后置 True
+        "send_image": True,    # 富媒体：本地分片上传 / 公网 URL 上传
         "recall": True,
         "group_list": "learned",
-        "group_admin": False,
-        "member_list": False,
+        "group_admin": True,   # 禁言/踢人：需机器人是群管理员，成员管理可能内邀
+        "member_list": True,   # 官方接口存在，但多数账号需内邀白名单（11253）
         "proactive": False,    # 被动回复模型；主动消息按配置单独开
         "webhook": True,
     }
@@ -140,8 +144,9 @@ def capability_notes(protocol: Any) -> list[str]:
     if proto == PROTOCOL_QQBOT:
         return [
             "默认只接收 @ 机器人的群消息；全量消息需群主在群设置里开启。",
-            "群列表来自收到过的消息，可能不全；官方不提供群名。",
+            "群列表来自收到过的消息，可能不全；群名需账号有「群信息」接口权限（11253）。",
             "回复必须带 msg_id（被动窗口：群 5 分钟 / 单聊 60 分钟）。",
             "用户标识是 openid，不是 QQ 号；不同账号之间不可关联。",
+            "群成员管理与禁言/踢人需要机器人是群管理员；成员列表多数账号为内邀（11253）。",
         ]
     return []

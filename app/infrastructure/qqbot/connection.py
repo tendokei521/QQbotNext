@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import aiohttp
@@ -26,6 +27,7 @@ from app.domain.protocol import PROTOCOL_QQBOT, CapabilityUnavailableError, unsu
 
 from .api import QqBotAPI, QqBotAPIError
 from .inbox import Inbox
+from .media import MediaError, MediaUploader
 from .ws import QqBotWSClient
 
 
@@ -93,6 +95,7 @@ class QqBotConnection(IBot):
         self.inbox = Inbox()
         self.api = QqBotAPI(self.app_id, self.app_secret, session=None, log=self.log)
         self.ws = QqBotWSClient(self.api, log=self.log)
+        self.uploader = MediaUploader(self.api, log=self.log)
         self._session: aiohttp.ClientSession | None = None
         self._closed = False
 
@@ -203,10 +206,10 @@ class QqBotConnection(IBot):
         self.learned_groups.update({row["group_id"]: row.get("group_name") or "" for row in self.all_group_list_info})
 
     # ---------- 发送 ----------
-    def _render_message(self, message: SegmentLike) -> tuple[str, list[str]]:
+    def _render_message(self, message: SegmentLike) -> tuple[str, list[MessageSegment]]:
         msg = _as_message(message)
         parts: list[str] = []
-        media: list[str] = []
+        media: list[MessageSegment] = []
         for seg in msg.segments:
             if seg.type == "text":
                 parts.append(str(seg.data.get("text") or ""))
@@ -216,20 +219,11 @@ class QqBotConnection(IBot):
             elif seg.type == "reply":
                 continue  # 被动回复已经用 msg_id 表达，正文不重复引用标记
             else:
-                media.append(seg.type)
+                media.append(seg)
         return "".join(parts).strip(), media
 
-    async def _send(self, scene: str, target: str, message: SegmentLike) -> dict:
-        content, media = self._render_message(message)
-        if media:
-            return _failed(
-                "MEDIA_UNSUPPORTED",
-                f"官方机器人第一版只支持文本，本条含 {','.join(sorted(set(media)))}",
-            )
-        if not content:
-            return _failed("EMPTY_MESSAGE", "消息内容为空，未发送")
-
-        payload: dict[str, Any] = {"content": content, "msg_type": 0}
+    async def _send_payload(self, scene: str, target: str, payload: dict[str, Any]) -> dict:
+        """统一附被动凭证并发一条；窗口外按配置决定是否允许主动消息。"""
         passive = self.inbox.next_passive(scene, target)
         if passive is not None:
             payload["msg_id"], payload["msg_seq"] = passive
@@ -251,6 +245,36 @@ class QqBotConnection(IBot):
         if message_id:
             self._sent_messages[message_id] = (scene, target, time.time())
         return _ok(data)
+
+    async def _send(self, scene: str, target: str, message: SegmentLike) -> dict:
+        content, media = self._render_message(message)
+        if not content and not media:
+            return _failed("EMPTY_MESSAGE", "消息内容为空，未发送")
+
+        if media:
+            # 官方一条消息只能带一个 media：文本作为首条媒体的 content（群聊必填），
+            # 其余媒体用空格占位。每个媒体各占一次被动回复额度。
+            last: dict = _ok({})
+            for index, seg in enumerate(media[:5]):
+                try:
+                    file_info = await self.uploader.resolve(scene, target, seg)
+                except MediaError as e:
+                    return _failed("MEDIA_UPLOAD_FAILED", str(e))
+                payload: dict[str, Any] = {
+                    "msg_type": 7,
+                    "media": {"file_info": file_info},
+                }
+                caption = content if index == 0 else ""
+                if scene == "group":
+                    payload["content"] = caption or " "
+                elif caption:
+                    payload["content"] = caption
+                last = await self._send_payload(scene, target, payload)
+                if last.get("status") != "ok":
+                    return last
+            return last
+
+        return await self._send_payload(scene, target, {"content": content, "msg_type": 0})
 
     async def send_group_msg(self, group_id: Any, message: SegmentLike, auto_escape: bool = False) -> dict:
         return await self._send("group", str(group_id), message)
@@ -301,6 +325,75 @@ class QqBotConnection(IBot):
     async def get_status(self) -> dict:
         return _ok({"online": self.status == "connected", "good": self.status == "connected"})
 
+    # ---------- 群信息 / 群成员 ----------
+    async def get_group_info(self, group_id: Any, no_cache: bool = False) -> dict:
+        """官方群基本信息（需要「群信息」接口权限；无权限时返回失败并由调用方降级）。"""
+        try:
+            data = await self.api.group_info(str(group_id))
+        except QqBotAPIError as e:
+            return _failed(e.code, e.message)
+        name = str((data or {}).get("group_name") or "")
+        if name:
+            self.learned_groups[str(group_id)] = name
+            self._refresh_group_lists()
+        return _ok({
+            "group_id": str(group_id),
+            "group_name": name,
+            "member_count": int((data or {}).get("group_member_num") or 0),
+            "max_member_count": 0,
+        })
+
+    async def get_group_member_list(self, group_id: Any) -> dict:
+        """分页拉取群成员（最多 20 页）；无权限（11253）返回失败。"""
+        members: list[dict] = []
+        cursor = ""
+        try:
+            for _ in range(20):
+                data = await self.api.group_members(str(group_id), cursor)
+                for row in (data or {}).get("members") or []:
+                    if not isinstance(row, dict):
+                        continue
+                    openid = str(row.get("member_openid") or "")
+                    if not openid:
+                        continue
+                    members.append({
+                        "user_id": openid,
+                        "nickname": str(row.get("username") or ""),
+                        "card": str(row.get("username") or ""),
+                        "role": str(row.get("member_role") or "member"),
+                    })
+                cursor = str((data or {}).get("next_cursor") or "")
+                if not cursor:
+                    break
+        except QqBotAPIError as e:
+            return _failed(e.code, e.message)
+        return _ok(members)
+
+    async def set_group_ban(self, group_id: Any, user_id: Any, duration: int = 30 * 60) -> dict:
+        """禁言（需要机器人是群管理员）。duration 秒；<=0 视为解除禁言。"""
+        try:
+            if int(duration or 0) <= 0:
+                members = [{"op": "del", "member_openid": str(user_id), "mute_expire_at": ""}]
+            else:
+                expire = (datetime.now(timezone.utc) + timedelta(seconds=int(duration))).isoformat()
+                members = [{"op": "add", "member_openid": str(user_id), "mute_expire_at": expire}]
+            await self.api.restrict_chat(str(group_id), members)
+        except QqBotAPIError as e:
+            return _failed(e.code, e.message)
+        return _ok({})
+
+    async def set_group_kick(
+        self, group_id: Any, user_id: Any, reject_add_request: bool = False
+    ) -> dict:
+        """踢人（批量移除接口；需要内邀权限或管理员身份，失败时返回官方错误）。"""
+        try:
+            data = await self.api.batch_remove_members(
+                str(group_id), [str(user_id)], blacklist=bool(reject_add_request)
+            )
+        except QqBotAPIError as e:
+            return _failed(e.code, e.message)
+        return _ok(data)
+
     # ---------- OneBot action 兼容层 ----------
     async def call_api(self, action: str, params: dict | None = None, timeout: float | int | None = None) -> dict | None:
         params = dict(params or {})
@@ -320,6 +413,19 @@ class QqBotConnection(IBot):
                 return await self.get_login_info()
             if action == "get_group_list":
                 return await self.get_group_list()
+            if action == "get_group_info":
+                return await self.get_group_info(params.get("group_id"))
+            if action == "get_group_member_list":
+                return await self.get_group_member_list(params.get("group_id"))
+            if action == "set_group_ban":
+                return await self.set_group_ban(
+                    params.get("group_id"), params.get("user_id"), int(params.get("duration") or 0)
+                )
+            if action == "set_group_kick":
+                return await self.set_group_kick(
+                    params.get("group_id"), params.get("user_id"),
+                    bool(params.get("reject_add_request", False)),
+                )
             if action == "get_status":
                 return await self.get_status()
         except CapabilityUnavailableError as e:

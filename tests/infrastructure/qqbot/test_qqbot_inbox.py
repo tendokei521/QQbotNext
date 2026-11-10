@@ -70,9 +70,24 @@ class FakeAPI:
         return {}
 
 
+class FakeUploader:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.seen: list[str] = []
+
+    async def resolve(self, scene: str, target: str, segment) -> str:
+        if self.fail:
+            from app.infrastructure.qqbot.media import MediaError
+
+            raise MediaError("上传失败（假）")
+        self.seen.append(str(getattr(segment, "type", "")))
+        return "FILEINFO"
+
+
 def _conn() -> QqBotConnection:
     conn = QqBotConnection(account_id="bot1", account_name="bot1", app_id="a", app_secret="s")
     conn.api = FakeAPI()  # type: ignore[assignment]
+    conn.uploader = FakeUploader()  # type: ignore[assignment]
     return conn
 
 
@@ -99,12 +114,39 @@ async def test_send_without_passive_window_fails_clearly():
 
 
 @pytest.mark.asyncio
-async def test_media_message_is_rejected_in_phase_one():
+async def test_media_message_uses_msg_type_7_with_file_info():
     conn = _conn()
     conn.inbox.remember_inbound("group", "G", "M1")
     response = await conn.send_group_msg("G", [{"type": "image", "data": {"file": "x.png"}}])
+    assert response["status"] == "ok"
+    payload = conn.api.calls[0][2]
+    assert payload["msg_type"] == 7
+    assert payload["media"]["file_info"] == "FILEINFO"
+    assert payload["content"] == " "  # 群聊要求 content 非空
+    assert (payload["msg_id"], payload["msg_seq"]) == ("M1", 1)
+
+
+@pytest.mark.asyncio
+async def test_media_with_caption_keeps_text_on_first_message():
+    conn = _conn()
+    conn.inbox.remember_inbound("group", "G", "M1")
+    await conn.send_group_msg("G", [
+        {"type": "text", "data": {"text": "看图"}},
+        {"type": "image", "data": {"file": "x.png"}},
+    ])
+    payload = conn.api.calls[0][2]
+    assert payload["content"] == "看图"
+    assert payload["msg_type"] == 7
+
+
+@pytest.mark.asyncio
+async def test_media_upload_failure_is_reported():
+    conn = _conn()
+    conn.uploader = FakeUploader(fail=True)  # type: ignore[assignment]
+    conn.inbox.remember_inbound("group", "G", "M1")
+    response = await conn.send_group_msg("G", [{"type": "image", "data": {"file": "x.png"}}])
     assert response["status"] == "failed"
-    assert response["retcode"] == "MEDIA_UNSUPPORTED"
+    assert response["retcode"] == "MEDIA_UPLOAD_FAILED"
 
 
 @pytest.mark.asyncio

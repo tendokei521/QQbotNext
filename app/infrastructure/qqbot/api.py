@@ -145,3 +145,45 @@ class QqBotAPI:
         if not url:
             raise QqBotAPIError("no_gateway", "官方未返回 WebSocket 接入点", path="/gateway")
         return url
+
+    # ==================== 群管理（官方 2026 新增，部分内邀） ====================
+
+    async def group_info(self, group_openid: str) -> dict:
+        return await self.request("GET", f"/v2/groups/{group_openid}/info")
+
+    async def group_members(self, group_openid: str, cursor: str = "") -> dict:
+        return await self.request(
+            "GET", f"/v2/groups/{group_openid}/members", params={"cursor": cursor}
+        )
+
+    async def restrict_chat(self, group_openid: str, members: list[dict]) -> dict:
+        return await self.request(
+            "POST", f"/v2/groups/{group_openid}/restrict_chat_setting", json={"members": members}
+        )
+
+    async def batch_remove_members(
+        self, group_openid: str, openids: list[str], *, blacklist: bool = False
+    ) -> dict:
+        return await self.request(
+            "POST", f"/v2/groups/{group_openid}/batch_remove_members",
+            json={"member_openids": list(openids), "add_to_member_blacklist": bool(blacklist)},
+        )
+
+    # ==================== 富媒体上传 ====================
+
+    @staticmethod
+    def scene_base(scene: str, target: str) -> str:
+        base = f"/v2/groups/{target}" if scene == "group" else f"/v2/users/{target}"
+        return base
+
+    async def upload_prepare(self, scene: str, target: str, payload: dict) -> dict:
+        base = self.scene_base(scene, target)
+        return await self.request("POST", f"{base}/upload_prepare", json=payload)
+
+    async def upload_part_finish(self, scene: str, target: str, payload: dict) -> dict:
+        base = self.scene_base(scene, target)
+        return await self.request("POST", f"{base}/upload_part_finish", json=payload)
+
+    async def upload_file(self, scene: str, target: str, payload: dict) -> dict:
+        base = self.scene_base(scene, target)
+        return await self.request("POST", f"{base}/files", json=payload)
