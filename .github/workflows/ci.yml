@@ -1,9 +1,9 @@
 name: CI
 
 # 说明：此前仓库只有 release.yml（tag 触发），push/PR 阶段从不跑测试，
-# 坏提交可以一直躺在 main 上，直到发布时才暴露（例如 requirements.txt 里
-# 混入 PyPI 上不存在的 "httpx2"，首次安装必然失败却无人发现）。
-# 本工作流把同一套校验前置到 push / PR。
+# 坏提交可以一直躺在 main 上，直到发布时才暴露。本工作流把同一套校验前置到 push / PR。
+# 依赖清单的唯一事实源是 pyproject.toml（根目录 requirements.* 安装入口已移除，
+# 本地安装/补装统一走 start.py 的自动检查）。
 on:
   push:
     branches: ['**']
@@ -177,8 +177,8 @@ jobs:
             echo "no .pytest_cache/v/cache/lastfailed"
           fi
 
-  deps:
-    name: Dependency metadata sanity
+  package:
+    name: Package build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -189,17 +189,8 @@ jobs:
         with:
           python-version: '3.10'
 
-      # 防止 requirements.txt 再次出现"平行维护"的漂移：
-      # 1) requirements.txt 必须只是指向 pyproject.toml 的指针，不得重复列举依赖；
-      # 2) 不得出现 PyPI 上不存在的包（历史故障：httpx2）；
-      # 3) 测试期依赖不得混入运行时 dependencies。
-      # 具体逻辑在 ci_check_pyproject.py（可本地运行，便于测试）。
-      - name: Validate dependency metadata
-        run: |
-          # tomllib 仅 Python 3.11+ 内置；本 job 固定 3.10，故用 tomli 兜底
-          python -m pip install --quiet tomli
-          python ci_check_pyproject.py
-
+      # 依赖元数据只以 pyproject.toml 为源（根目录 requirements.* 已移除）：
+      # 这里直接验证 sdist / wheel 真能构建出来，包元数据问题不拖到发版才暴雷。
       - name: Build distributions
         run: |
           python -m pip install --upgrade build

@@ -306,7 +306,6 @@ def cache_key(
         "python_version": python_version,
         "site_packages": _dir_stamp(site_packages_dir(python)),
         "pyproject": _file_digest(ROOT / "pyproject.toml"),
-        "requirements": _file_digest(ROOT / "requirements.txt"),
         "deps_script": _file_digest(DEPS_SCRIPT),
         "groups": sorted(["dev"] if dev else []) + sorted(["vector"] if vector else [])
         + sorted(str(g) for g in groups if g),
@@ -361,7 +360,6 @@ def cache_matches(record: dict | None, key: dict) -> tuple[bool, str]:
         ("python_version", "Python 版本变了"),
         ("site_packages", "依赖目录有变动（装/卸过包）"),
         ("pyproject", "pyproject.toml 改了"),
-        ("requirements", "requirements.txt 改了"),
         ("deps_script", "check_deps.py 改了"),
         ("groups", "可选依赖组不同"),
     ):
@@ -603,7 +601,7 @@ def main(
     if not DEPS_SCRIPT.exists():
         print()
         print(f"  [FAIL] 缺少 {DEPS_SCRIPT.name}（依赖自检脚本），仓库拷贝不完整")
-        print("         请重新完整拉取仓库，或先跑 requirements.bat / requirements.sh")
+        print("         依赖自检随仓库一起分发，请重新完整拉取仓库")
         return EXIT_DEPS
     rc, detail = check_dependencies(
         python,
@@ -631,8 +629,8 @@ def main(
         print("  依赖不齐，先不启动（旧版「继续 anyway」的后果是启动时一屏 traceback）。")
         print("  常见原因：没联网 / 没配镜像。可尝试：")
         print("    python start.py                     # 联网后重跑，会自动补装")
-        print("    requirements.bat  / requirements.sh # 走 requirements.txt 的兜底入口")
         print("    python check_deps.py --json         # 看到底缺哪几个")
+        print(f"    {venv_dir}\\Scripts\\python -m pip install -e .  # 手动兜底（非 Windows 用 bin/python3）")
         if not args.force_launch:
             return EXIT_DEPS
         print("  （--force-launch 已指定，继续尝试启动）")
