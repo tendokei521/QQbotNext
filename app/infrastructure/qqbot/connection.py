@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import aiohttp
 
@@ -25,7 +26,7 @@ from app.domain.protocol import PROTOCOL_QQBOT, CapabilityUnavailableError, unsu
 
 from .api import QqBotAPI, QqBotAPIError
 from .inbox import Inbox
-from .ws import QqBotReconnect, QqBotWSClient
+from .ws import QqBotWSClient
 
 
 def _ok(data: Any = None) -> dict:

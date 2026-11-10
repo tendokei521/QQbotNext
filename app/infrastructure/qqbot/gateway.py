@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -157,6 +156,7 @@ class QqBotGateway:
             log=self.log,
         )
         conn.known_groups_provider = self._known_groups_for(key)
+        conn._refresh_group_lists()
         if self.outbound_hook_factory:
             conn.outbound_hook = self.outbound_hook_factory(conn)
         conn.send_hook_registry = self.send_hook_registry

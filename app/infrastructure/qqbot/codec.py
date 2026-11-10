@@ -24,7 +24,6 @@ from app.domain.events import (
     BaseEvent,
     GroupInfo,
     GroupMessageEvent,
-    MessageEvent,
     NoticeEvent,
     PrivateMessageEvent,
     UserInfo,

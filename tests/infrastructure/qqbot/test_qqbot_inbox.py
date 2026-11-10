@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
 from app.infrastructure.qqbot.connection import QqBotConnection

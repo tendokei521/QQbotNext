@@ -115,8 +115,7 @@ async def api_bot_protocols():
             "label": protocol_label(PROTOCOL_QQBOT),
             "description": "QQ 开放平台官方机器人（AppID + AppSecret）。默认只收 @ 消息，回复受被动窗口限制。",
             "modes": [
-                {"value": "ws", "label": "WebSocket", "description": "本机连官方网关，无需公网（推荐）"},
-                {"value": "webhook", "label": "Webhook", "description": "需要公网 HTTPS 回调（80/443/8080/8443）"},
+                {"value": "ws", "label": "WebSocket", "description": "本机连官方网关（推荐，无需公网；Webhook 需公网回调，规划中）"},
             ],
             "fields": [
                 {"name": "app_id", "label": "AppID", "type": "text", "required": True, "secret": False,

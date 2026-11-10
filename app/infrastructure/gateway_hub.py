@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping, MutableMapping
+from collections.abc import Iterator, MutableMapping
 from typing import Any
 
 from app.domain.protocol import PROTOCOL_QQBOT, normalize_protocol
