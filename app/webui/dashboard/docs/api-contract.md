@@ -534,6 +534,10 @@ WS 通道会混合推送两类内容：
 - 用户改 mode：`all`→把每项 enabled=true；`none`→enabled=false；改任何 checkbox/拖拽时若当前是 all/none 则自动切到 `partial`。拖拽后重排 `index`（0 起）。
 - **保存取值**（widget.get）：`out[key] = { "<id>": {"enabled": bool, "index": int}, ... }`；若 `mode_select` 另加 `out[key + "_mode"] = mode`。随整体 config 一起 POST 到 `/module/{name}/config`。
 - 后端把 `module.config.get(key)` 作为已存字典来合并回填 enabled/index（`saved[iid]`），并排序。
+- **取值校验**（`app/plugin/value_validator.py::validate_field`）：`list` 接受上面的对象
+  `{ "<id>": {"enabled", "index"} }` 与旧版数组 `["id", ...]`（`resolve_enabled_ids` 两种都吃），
+  只拒绝字符串/数字/布尔这类必然跑不通的值；**`repeater` 才是「必须是数组」的类型**。
+  （历史 bug：二者曾被合并成"必须是数组"，导致勾选群聊后保存回 400「应为数组」。）
 
 ### 5.2 dynamic 字段（`DynamicWidget.vue`）
 
