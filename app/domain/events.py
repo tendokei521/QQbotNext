@@ -19,7 +19,7 @@ from app.domain.message import Message, MessageSegment, SegmentLike
 
 @dataclass
 class UserInfo:
-    user_id: int = 0
+    user_id: int | str = 0
     nickname: str = ""
     card: str = ""
     role: str = ""
@@ -27,7 +27,7 @@ class UserInfo:
 
 @dataclass
 class GroupInfo:
-    group_id: int = 0
+    group_id: int | str = 0
     group_name: str = ""
     user_role: str = ""
 
@@ -80,14 +80,15 @@ class BaseEvent:
     event_type: str
     post_type: str = ""
     time: int = 0
-    user_id: int = 0
-    self_id: int = 0
+    user_id: int | str = 0
+    self_id: int | str = 0
     bot: IBot = None
     #: 本条事件所属账号的**唯一凭据**（用户设定的 account id）。运行时/模块配置/
     #: 会话/统计的 key 一律用它；它不随「换个 QQ 登录」而变化。
     account_id: str | None = None
     #: 本次登录的 QQ 号：**运行时信息**，只用于展示与 OneBot 协议语义，不是身份。
-    bot_id: int | None = None
+    #: OneBot 是数字；官方机器人是字符串（openid / AppID）。
+    bot_id: int | str | None = None
     owner_id: int | None = None
     # 权限（由 dispatcher 计算后写入）
     role: str = "member"               # member / group_admin / group_owner
@@ -186,7 +187,7 @@ class MessageEvent(BaseEvent):
 
     message_type: str = ""
     sub_type: str = ""
-    message_id: int = 0
+    message_id: int | str = 0
     raw_message: str = ""
     message: list = field(default_factory=list)  # list[MessageSegment]
     forward_msg: list = field(default_factory=list)
@@ -252,14 +253,14 @@ class NoticeEvent(BaseEvent):
 
     notice_type: str = ""
     sub_type: str = ""
-    group_id: int = 0
-    target_id: int = 0
+    group_id: int | str = 0
+    target_id: int | str = 0
     # 表情回应
     emoji_likes: list = field(default_factory=list)
     emoji_is_add: bool = False
     # 撤回
-    operator_id: int = 0
-    message_id: int = 0
+    operator_id: int | str = 0
+    message_id: int | str = 0
     # 群名片变更（notice_type=group_card）
     card_new: str = ""
     card_old: str = ""
@@ -277,10 +278,10 @@ class RequestEvent(BaseEvent):
 
     request_type: str = ""
     sub_type: str = ""
-    group_id: int = 0
+    group_id: int | str = 0
     comment: str = ""
     flag: str = ""
-    operator_id: int = 0
+    operator_id: int | str = 0
 
     async def approve(self, approve: bool = True, reason: str = "") -> dict:
         """处理申请。"""

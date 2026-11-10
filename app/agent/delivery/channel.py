@@ -36,6 +36,7 @@ from typing import Any
 
 from app.core import diagnostics as diag
 from app.core.logger import account_label, logger
+from app.domain.ids import as_int_id
 from app.domain.message import Message
 from app.domain.session import parse_session_id
 
@@ -112,10 +113,14 @@ async def send_item(
         return None
 
     try:
+        # 目标可能是数字（OneBot 群号/QQ 号）或字符串（官方机器人 openid）：
+        # 优先让 bot 自己归一，避免对 openid 做 int() 直接抛 ValueError。
+        coerce = getattr(bot, "coerce_id", None)
+        target_id = coerce(target) if callable(coerce) else as_int_id(target)
         if is_group:
-            response = await bot.send_group_msg(int(target), outgoing)
+            response = await bot.send_group_msg(target_id, outgoing)
         else:
-            response = await bot.send_private_msg(int(target), outgoing)
+            response = await bot.send_private_msg(target_id, outgoing)
     except Exception as e:  # noqa: BLE001 —— 发送失败应当回传为 None，不炸调用方
         diag.log_failure(
             logger.add_info("Delivery"),

@@ -198,19 +198,26 @@ class EventHistory:
             return []
         return list(buffer)[-count:]
 
-    def latest_group_id(self, account_id: str) -> int | None:
-        """该账号最近一条群消息的群号（诊断台「用最近的群」/测试消息缺省群号）。"""
+    def latest_group_id(self, account_id: str) -> int | str | None:
+        """该账号最近一条群消息的群标识（诊断台「用最近的群」/测试消息缺省群号）。
+
+        兼容两种协议：OneBot 是数字群号，官方机器人是字符串 ``group_openid``。
+        因此只要是非空 ID 就返回，不能只认纯数字（否则官方账号永远取不到群）。
+        """
         buffer = self._buffers.get(str(account_id))
         if not buffer:
             return None
         for record in reversed(buffer):
             group_id = record.get("group_id")
-            if isinstance(group_id, bool):
+            if isinstance(group_id, bool) or group_id in (None, ""):
                 continue
-            if isinstance(group_id, int) and group_id > 0:
-                return group_id
-            if isinstance(group_id, str) and group_id.isdigit():
-                return int(group_id)
+            if isinstance(group_id, int):
+                if group_id > 0:
+                    return group_id
+                continue
+            text = str(group_id).strip()
+            if text:
+                return int(text) if text.isdigit() else text
         return None
 
     def clear(self, account_id: str) -> None:

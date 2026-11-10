@@ -20,6 +20,12 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from typing import Any
 
+from app.domain.protocol import (
+    PROTOCOL_ONEBOT,
+    capability_notes,
+    capability_view,
+    normalize_protocol,
+)
 from app.infrastructure.config.ws_url import split_ws_url
 from app.infrastructure.onebot.endpoint import FORWARD, normalize_mode
 
@@ -52,9 +58,10 @@ def bot_info(
     last_account: dict | None = None,
     listening: bool = False,
 ) -> dict:
-    """单个账号的对外视图（不含 access_token）。"""
+    """单个账号的对外视图（不含 access_token / app_secret）。"""
     base, _ = split_ws_url(conn.ws_url)
     account_id = getattr(conn, "account_id", None)
+    protocol = normalize_protocol(getattr(conn, "protocol", PROTOCOL_ONEBOT))
     return {
         "id": account_id,
         "name": getattr(conn, "account_name", "") or account_id or "",
@@ -70,6 +77,10 @@ def bot_info(
         "last_error": conn.last_error,
         "auto_connect": conn.auto_connect,
         "conn_mode": conn_mode(conn),
+        # 协议 + 能力摘要：WebUI 据此决定显示/禁用/整块拦截（不按协议名写分支）
+        "protocol": protocol,
+        "capabilities": capability_view(protocol),
+        "capability_notes": capability_notes(protocol),
         # 反向模式：监听是否就绪（前端据此区分「监听中」与「已连接」）
         "listening": bool(listening),
         # 本次运行期间是否被用户手动断开（为 True 时监督循环不会自动重连）

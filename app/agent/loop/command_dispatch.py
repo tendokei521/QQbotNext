@@ -29,6 +29,13 @@ from app.agent.commands import (
     parse_action,
 )
 from app.core.logger import account_label
+from app.domain.ids import as_int_id
+
+
+def _coerce_id(bot: Any, value: Any) -> Any:
+    """会话目标归一：OneBot 保持数字，官方机器人保持字符串 openid。"""
+    coerce = getattr(bot, "coerce_id", None)
+    return coerce(value) if callable(coerce) else as_int_id(value)
 
 
 async def handle_commands(module, session_mgr, session_id, group_id, user_id,
@@ -44,9 +51,9 @@ async def handle_commands(module, session_mgr, session_id, group_id, user_id,
     async def send(msg):
         text = f"# {msg}"
         if is_private:
-            await bot.send_private_msg(user_id=int(user_id), message=text)
+            await bot.send_private_msg(user_id=_coerce_id(bot, user_id), message=text)
         else:
-            await bot.send_group_msg(group_id=int(group_id), message=text)
+            await bot.send_group_msg(group_id=_coerce_id(bot, group_id), message=text)
 
     if is_help_action(action):
         await _send_help(
@@ -285,9 +292,9 @@ async def _send_help(module, event, bot, *, is_private, group_id, user_id, send)
     resp: Any = None
     try:
         if is_private:
-            resp = await bot.send_forward_msg(user_id=int(user_id), msgdata=nodes)
+            resp = await bot.send_forward_msg(user_id=_coerce_id(bot, user_id), msgdata=nodes)
         else:
-            resp = await bot.send_forward_msg(group_id=int(group_id), msgdata=nodes)
+            resp = await bot.send_forward_msg(group_id=_coerce_id(bot, group_id), msgdata=nodes)
         if isinstance(resp, dict) and resp.get("status") == "ok":
             return
         reason = resp.get("message") if isinstance(resp, dict) else resp

@@ -8,8 +8,16 @@ OneBot 适配器（infrastructure/onebot/client.BotConnection）实现本接口�
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Any
 
+from app.domain.ids import Id, as_int_id
 from app.domain.message import SegmentLike
+from app.domain.protocol import (
+    PROTOCOL_ONEBOT,
+    CapabilityUnavailableError,
+    capability_view,
+    supports_action,
+)
 
 
 def bot_label(bot: object, fallback: str = "?") -> str:
@@ -37,8 +45,34 @@ class IBot(ABC):
     #: 账号展示名：日志与界面显示都用它（可以随时改，id 不行）。
     account_name: str = ""
     #: 本账号当前登录的 QQ 号：**运行时信息**，登录后才有，不是身份、不当 key。
-    bot_id: int | None = None
+    #: OneBot 是数字 QQ 号；官方机器人是字符串（AppID / READY.user.id）。
+    bot_id: int | str | None = None
     owner_id: int | None = None
+    #: 协议标识（onebot / qqbot）。适配器覆盖；能力判定与 WebUI 都读它。
+    protocol: str = PROTOCOL_ONEBOT
+
+    # ---------- 协议能力 ----------
+    def supports(self, action: str) -> bool:
+        """本账号能否响应某个 OneBot action（官方账号只覆盖子集）。
+
+        适配器可覆盖以加入「运行期探测到的能力」（如内邀接口开通后）。
+        """
+        return supports_action(self.protocol, action)
+
+    def require(self, action: str) -> None:
+        """不支持就抛 :class:`CapabilityUnavailableError`（API/服务层用）。"""
+        if not self.supports(action):
+            raise CapabilityUnavailableError(self.protocol, action)
+
+    @property
+    def capabilities(self) -> dict[str, Any]:
+        """给 WebUI 的能力摘要（见 ``app.domain.protocol.capability_view``）。"""
+        return capability_view(self.protocol)
+
+    def coerce_id(self, value: Any) -> Id:
+        """把会话 id 里的目标转成该协议接受的形态：OneBot 数字、官方字符串。"""
+        return as_int_id(value)
+
 
     @property
     def label(self) -> str:

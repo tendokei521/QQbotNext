@@ -42,6 +42,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.core.logger import logger
+from app.domain.protocol import (
+    PROTOCOL_ONEBOT,
+    normalize_protocol,
+    supports_action,
+    unsupported_message,
+)
 
 # ==================== 原因码 ====================
 
@@ -53,6 +59,8 @@ REASON_USER_DISABLED = "user_disabled"
 REASON_DEPENDENCY_MISSING = "dependency_missing"
 REASON_OUT_OF_SCOPE = "out_of_scope"
 REASON_PERMISSION_DENIED = "permission_denied"
+#: 协议能力缺失：例如官方 QQ 机器人账号上的 OneBot 专属工具（戳一戳 / 群文件 / 合并转发…）
+REASON_CAPABILITY_MISSING = "capability_missing"
 
 #: 原因码 → 给用户看的一句话
 REASON_TEXT = {
@@ -64,6 +72,7 @@ REASON_TEXT = {
     REASON_DEPENDENCY_MISSING: "依赖未就绪（连接或密钥）",
     REASON_OUT_OF_SCOPE: "当前会话类型不在适用范围",
     REASON_PERMISSION_DENIED: "权限不足",
+    REASON_CAPABILITY_MISSING: "当前账号类型不支持该操作",
 }
 
 #: 用户级总表（agent 配置里**唯一**的 per-tool 开关）
@@ -143,6 +152,31 @@ def _onebot_manifest_entry(name: str) -> dict | None:
     return None
 
 
+def protocol_of_runtime(runtime: Any) -> str:
+    """该运行时的账号协议（离线也能算）。
+
+    优先级：已绑定连接的 ``protocol`` → 账号配置里的 ``protocol`` → OneBot。
+    登录前 ``runtime._bot`` 是 ``None``，此时必须读配置；否则官方账号在
+    「未连接」状态下会被误判成 OneBot，把 175 个 OneBot 工具全放出去。
+    """
+    bot = getattr(runtime, "_bot", None)
+    proto = str(getattr(bot, "protocol", "") or "") if bot is not None else ""
+    if proto:
+        return normalize_protocol(proto)
+    account_id = str(getattr(runtime, "bot_id", "") or "")
+    config_service = getattr(runtime, "config_service", None)
+    if config_service is not None and account_id:
+        try:
+            row = config_service.get_bot(account_id) or {}
+        except Exception as e:  # noqa: BLE001 —— 读配置失败按老行为（OneBot）处理
+            logger.debug(f"[Tool] 读取账号协议失败（{account_id}），按 OneBot 处理: {e}")
+            row = {}
+        proto = str((row or {}).get("protocol") or "")
+        if proto:
+            return normalize_protocol(proto)
+    return PROTOCOL_ONEBOT
+
+
 # ==================== 判定链 ====================
 
 
@@ -181,6 +215,23 @@ def resolve_tool_state(
 
     # ── ① 能力在不在 ──
     if tool_source == "onebot":
+        # 先看协议：官方 QQ 机器人只覆盖 OneBot 动作的一个子集。
+        # 这一层必须在「工具总开关」之前：账号类型不支持时，开关开没开都不可用。
+        protocol = protocol_of_runtime(runtime)
+        entry = _onebot_manifest_entry(tool_name)
+        action = str((entry or {}).get("action") or (entry or {}).get("name") or tool_name)
+        if not supports_action(protocol, action):
+            return _state(
+                False,
+                REASON_CAPABILITY_MISSING,
+                unsupported_message(protocol, action),
+                extra={
+                    "protocol": protocol,
+                    "capability": action,
+                    "description": str((entry or {}).get("description", "") or ""),
+                    "category": str((entry or {}).get("category", "onebot") or "onebot"),
+                },
+            )
         from app.agent.tools.onebot.security import tools_enabled
 
         if not tools_enabled(runtime):
@@ -412,6 +463,7 @@ def set_tool_disabled(runtime: Any, name: str, disabled: bool) -> None:
 
 __all__ = [
     "LEGACY_USER_MAPS",
+    "REASON_CAPABILITY_MISSING",
     "REASON_DEPENDENCY_MISSING",
     "REASON_MODULE_DISABLED",
     "REASON_MODULE_SWITCH_OFF",
@@ -423,6 +475,7 @@ __all__ = [
     "REASON_USER_DISABLED",
     "USER_TOOLS_DISABLED_KEY",
     "ToolState",
+    "protocol_of_runtime",
     "resolve_all_tool_states",
     "resolve_tool_state",
     "set_tool_disabled",
