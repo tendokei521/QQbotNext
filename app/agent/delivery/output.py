@@ -65,6 +65,20 @@ from app.agent.delivery.send_mode import (
 from app.core import diagnostics as diag
 from app.core.logger import account_label, logger
 from app.domain.message import Message
+from app.domain.protocol import PROTOCOL_QQBOT
+
+
+def _is_qqbot(runtime: Any) -> bool:
+    """当前账号是不是官方 QQ 机器人（被动回复窗口有限，必须少发/单发）。"""
+    if runtime is None:
+        return False
+    try:
+        from app.agent.tools.state import protocol_of_runtime
+
+        return protocol_of_runtime(runtime) == PROTOCOL_QQBOT
+    except Exception as e:  # noqa: BLE001 —— 判不出协议按 OneBot（保持旧行为）
+        logger.debug(f"[Output] 协议判定失败，按 OneBot 处理: {e}")
+        return False
 
 
 @runtime_checkable
@@ -131,7 +145,10 @@ class BlockingOutput:
 
         messages = list(ctx.response_messages)
         # 发言方式：非流式传输下 `realtime` 没有"边收"可谈，解析后退化为整段。
-        if resolve_send_mode(config, transport_stream=False) == SEND_MODE_SPLIT:
+        # 官方机器人强制整段发一条：被动回复窗口（群 5 分钟 5 次 / 单聊 60 分钟 4 次）
+        # 经不起逐句拆分，拆出去第 6 条就会被官方拒绝。
+        split_allowed = not _is_qqbot(runtime)
+        if split_allowed and resolve_send_mode(config, transport_stream=False) == SEND_MODE_SPLIT:
             async for msg in _iter_split_delivery(
                 messages, config, runtime, ctx, should_stop
             ):
@@ -550,10 +567,16 @@ def select_default_output(config: Any = None, runtime: Any = None, ctx: Any = No
     # 参与度门只在群聊打开（pipeline 只对 message_group 过门）；私聊一律普通输出。
     speech = participation_turn or speech_via_tool(config, is_private=is_private)
     transport = _transport_stream(config, runtime)
+    # 官方机器人：禁止流式逐句与发言通道（多气泡），一轮只发一条。
+    force_single = _is_qqbot(runtime)
+    if force_single:
+        speech = False
+        transport = False
     if speech:
         return SpeechOutput(runtime, config, stream=transport)
     capability = output_capability(runtime, config, is_private=is_private)
-    if capability.speech and not is_private:  # 声明了发言通道（模块/配置），同样尊重传输开关
+    if capability.speech and not is_private and not force_single:
+        # 声明了发言通道（模块/配置），同样尊重传输开关
         return SpeechOutput(runtime, config, stream=transport)
     return StreamOutput(runtime, config) if transport else BlockingOutput(runtime, config)
 
