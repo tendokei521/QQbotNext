@@ -91,6 +91,8 @@ Webhook 超时与重试次数；`content` 字数上限；主动消息每月配�
 发送时 `msg_type=7` + `media.file_info`；群聊 `content` 必填（无正文时填一个空格）。
 
 > 文档里 `upload_prepare` 的路径参数写作 `{group_id}`，但取值仍是 **group_openid**。
+> **实测（2026-11-11）**：`parts[].index` 从 **1** 开始（文档写 0 起），且分片偏移必须按返回顺序累计，
+> 不能用 `index × block_size`（否则第一片算成空片，合并报 `40034002 媒体文件格式不支持`）。
 
 ## 8. 来源
 
