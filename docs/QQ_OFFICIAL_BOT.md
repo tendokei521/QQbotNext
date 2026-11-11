@@ -16,7 +16,7 @@
 | Phase 1 文本 MVP | ✅ 完成 | `app/infrastructure/qqbot/`（`auth/api/ws/codec/inbox/connection/gateway`）、`bots` 表新列、`GET /api/bots/protocols`、能力拦截（工具页 / 409） |
 | Phase 2 富媒体/群能力 | ✅ 完成 | `qqbot/media.py`（URL 上传 + 本地分片上传 → `file_info` → `msg_type=7`）、`get_group_info/get_group_member_list/set_group_ban/set_group_kick` |
 | Phase 3 Webhook | ✅ 完成 | `qqbot/webhook.py`（Ed25519）、`app/webui/api/qqbot_webhook.py`（公开回调 / op13 / op12）、gateway 无长连接在线 |
-| Phase 3 收尾 | ⏳ 待做 | 主动消息配额、单聊 `stream_messages`、能力矩阵页、README 接入章节 |
+| Phase 3 收尾 | ✅ 完成 | 主动消息 `.env` 开关 + 每群/用户日配额（默认关）；能力矩阵用工具总览 `reason_text` + 账号卡片备注呈现；单聊 `stream_messages` 评估为不做（群无流式、收益低） |
 
 ---
 

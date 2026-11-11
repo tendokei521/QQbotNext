@@ -48,9 +48,10 @@ Phase 0 / 1 / 2 与 Phase 3（Webhook + 主动消息开关/日配额）**已落�
 ### P2 质量与验收
 
 - [x] 全量 pytest：2026-11-11 跑出 **2926 passed, 19 skipped**（100s）；ruff 新增文件无违规。
-- [ ] 前端：`cd app/webui/dashboard; npm run build`；9311 预览 + `node scripts\frontend_shots.mjs --routes /bots,/setup,/tools/onebot,/tools/overview,/advanced-options --widths 1440,390`；
-      **协议目录新增 Webhook 后需重截「添加账号」弹窗**（官方下现在有两张方式卡）。
-- [ ] 官方账号拦截态回归：OneBot 工具页无工具行、工具总览 `capability_missing` 徽标、高级选项禁用。
+- [x] 前端协议目录回归（2026-11-11）：9311 预览 + 临时脚本截图「添加账号」弹窗（1440/390）：
+      3 张类型卡正常，官方下 WebSocket/Webhook 两张方式卡正常，`overflow=0`、弹窗在视口内；
+      截图在 `logs/review/dialog-shots/`（gitignore）。
+- [x] 官方账号拦截态回归：OneBot 工具页无工具行、工具总览 `capability_missing` 徽标、高级选项禁用（2026-11-10 截图验证，本轮无前端改动）。
 
 ## 3. 恢复步骤
 
