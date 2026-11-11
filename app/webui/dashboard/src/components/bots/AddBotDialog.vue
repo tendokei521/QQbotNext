@@ -40,6 +40,8 @@ const { fieldLabelOf } = catalog
 /** 账号类型：官方机器人 / 第三方机器人（OneBot） */
 type BotKind = '' | 'official' | 'thirdparty'
 const kind = ref<BotKind>('')
+/** 两步向导：先选类型（双选卡只出现一次），选完进入对应表单；返回只能点左上角箭头 */
+const step = ref<'choose' | 'form'>('choose')
 /** 官方机器人的接入方式 ws/webhook */
 const officialTransport = ref('ws')
 /** 第三方机器人的连接方向 forward/reverse */
@@ -96,10 +98,16 @@ function chooseKind(next: 'official' | 'thirdparty') {
   kind.value = next
   attempted.value = false
   ensureFieldKeys()
+  step.value = 'form'
+}
+
+function backToChoose() {
+  step.value = 'choose'
 }
 
 function resetDefaults() {
   kind.value = ''
+  step.value = 'choose'
   officialTransport.value = 'ws'
   onebotMode.value = 'reverse'
   name.value = ''
@@ -221,10 +229,10 @@ async function create() {
     <v-card>
       <v-card-title class="text-h5 pa-4 pb-0 pl-6">添加账号</v-card-title>
       <v-card-text class="pa-4 pl-6">
-        <div class="app-muted mb-3">先选机器人类型：官方机器人，或使用 OneBot 协议端的第三方机器人</div>
-
-        <!-- 第一步：机器人类型（左：官方，右：第三方） -->
-        <div class="kind-list">
+        <!-- 第一步（只出现一次）：机器人类型，左：官方，右：第三方 -->
+        <template v-if="step === 'choose'">
+          <div class="app-muted mb-3">先选机器人类型：官方机器人，或使用 OneBot 协议端的第三方机器人</div>
+          <div class="kind-list">
           <v-card
             variant="outlined"
             hover
@@ -267,9 +275,25 @@ async function create() {
             />
           </v-card>
         </div>
+        </template>
 
-        <!-- 第二步（官方）：接入方式 ws / webhook -->
-        <div v-if="kind === 'official'" class="mt-3">
+        <!-- 第二步：对应类型的表单；顶部只有回退箭头，双选卡不再出现 -->
+        <template v-else>
+          <div class="form-head">
+            <v-btn
+              icon="mdi-arrow-left"
+              variant="text"
+              size="small"
+              density="comfortable"
+              class="form-head__back"
+              aria-label="返回选择机器人类型"
+              @click="backToChoose"
+            />
+            <span class="form-head__title">{{ kind === 'official' ? '官方机器人' : '第三方机器人' }}</span>
+          </div>
+
+          <!-- 官方：接入方式 ws / webhook -->
+          <div v-if="kind === 'official'" class="mt-2">
           <div class="app-muted mb-2">连接方式</div>
           <v-btn-toggle
             v-if="officialTransports.length > 1"
@@ -379,6 +403,7 @@ async function create() {
             />
           </div>
         </template>
+        </template>
       </v-card-text>
       <v-card-actions class="px-4 pb-4">
         <v-spacer />
@@ -466,6 +491,24 @@ async function create() {
   position: absolute;
   top: 8px;
   right: 8px;
+}
+
+/* 第二步表单头：只有一个回退箭头 + 当前类型标题，不出现「更换类型」入口 */
+.form-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.form-head__back {
+  margin-left: -8px;
+}
+
+.form-head__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(var(--v-theme-on-surface), .85);
 }
 
 /* 连接方式：默认一列一条；第三方机器人的正/反两张并排 */
