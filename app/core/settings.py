@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     ws_ping_interval: int = 30
     ws_ping_timeout: int = 10
 
+    # 官方 QQ 机器人：主动消息（默认关；只在被动回复窗口外才用到）
+    #: 开启后窗口外的消息尝试走官方主动消息（有配额且用户/群主可关闭）
+    qqbot_allow_active_message: bool = False
+    #: 每个「群 / 用户」每天的主动消息上限（0 = 不限制，交由官方频控）；默认保守 20
+    qqbot_active_daily_limit: int = 20
+
     # 插件**运行时数据**根目录（configs / data / plugins(zip) / uninstalled_modules.json）。
     # 业务插件的**代码**不在这里，见下面的 `plugins_dir`（默认 app/plugins）。
     # 放在 data/ 下而不是仓库根的 module/：仓库根只留代码与入口，运行时产物统一进 data/。

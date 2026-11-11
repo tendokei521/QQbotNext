@@ -66,6 +66,8 @@ class QqBotConnection(IBot):
         app_secret: str = "",
         transport: str = "ws",
         auto_connect: bool = False,
+        allow_active_message: bool = False,
+        active_daily_limit: int = 20,
         log: Any = None,
     ) -> None:
         self.account_id = str(account_id)
@@ -90,7 +92,10 @@ class QqBotConnection(IBot):
         self.login_event = asyncio.Event()
 
         #: 官方被动回复模型：默认不允许主动消息（配额/用户开关不透明，先保守）
-        self.allow_active_message = False
+        self.allow_active_message = bool(allow_active_message)
+        self.active_daily_limit = max(0, int(active_daily_limit or 0))
+        #: (日期, scene, target) → 当天已发主动消息数（跨天自然失效）
+        self._active_sent: dict[tuple[str, str, str], int] = {}
 
         self.inbox = Inbox()
         self.api = QqBotAPI(self.app_id, self.app_secret, session=None, log=self.log)
@@ -225,6 +230,7 @@ class QqBotConnection(IBot):
     async def _send_payload(self, scene: str, target: str, payload: dict[str, Any]) -> dict:
         """统一附被动凭证并发一条；窗口外按配置决定是否允许主动消息。"""
         passive = self.inbox.next_passive(scene, target)
+        is_active = passive is None
         if passive is not None:
             payload["msg_id"], payload["msg_seq"] = passive
         elif not self.allow_active_message:
@@ -232,6 +238,13 @@ class QqBotConnection(IBot):
                 "NO_PASSIVE_WINDOW",
                 "被动回复窗口已过/次数用尽（群 5 分钟 5 次，单聊 60 分钟 4 次），本条未发送",
             )
+        else:
+            over = self._active_quota_exceeded(scene, target)
+            if over:
+                return _failed(
+                    "ACTIVE_QUOTA_EXCEEDED",
+                    f"主动消息已达今天上限（{self.active_daily_limit} 条/{scene}/{target}），本条未发送",
+                )
         try:
             if scene == "group":
                 data = await self.api.send_group_message(target, payload)
@@ -241,10 +254,23 @@ class QqBotConnection(IBot):
             if e.passive_expired:
                 self.inbox.forget(scene, target)
             return _failed(e.code, f"{e.message}（code={e.code}）")
+        if is_active:
+            self._active_sent[self._active_key(scene, target)] = (
+                self._active_sent.get(self._active_key(scene, target), 0) + 1
+            )
         message_id = str((data or {}).get("id") or "")
         if message_id:
             self._sent_messages[message_id] = (scene, target, time.time())
         return _ok(data)
+
+    def _active_key(self, scene: str, target: str) -> tuple[str, str, str]:
+        return (time.strftime("%Y-%m-%d"), str(scene), str(target))
+
+    def _active_quota_exceeded(self, scene: str, target: str) -> bool:
+        """主动消息配额：0 = 不限制（只受官方频控）；跨天自动归零。"""
+        if self.active_daily_limit <= 0:
+            return False
+        return self._active_sent.get(self._active_key(scene, target), 0) >= self.active_daily_limit
 
     async def _send(self, scene: str, target: str, message: SegmentLike) -> dict:
         content, media = self._render_message(message)

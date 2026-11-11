@@ -150,6 +150,28 @@ async def test_media_upload_failure_is_reported():
 
 
 @pytest.mark.asyncio
+async def test_active_message_respects_daily_quota():
+    conn = _conn()
+    conn.allow_active_message = True
+    conn.active_daily_limit = 1
+    first = await conn.send_group_msg("G", "主动一条")
+    assert first["status"] == "ok"
+    payload = conn.api.calls[0][2]
+    assert "msg_id" not in payload, "窗口外发送不应带被动凭据"
+
+    second = await conn.send_group_msg("G", "再来一条")
+    assert second["status"] == "failed"
+    assert second["retcode"] == "ACTIVE_QUOTA_EXCEEDED"
+
+
+@pytest.mark.asyncio
+async def test_active_message_disabled_by_default():
+    conn = _conn()
+    response = await conn.send_group_msg("G", "hi")
+    assert response["retcode"] == "NO_PASSIVE_WINDOW"
+
+
+@pytest.mark.asyncio
 async def test_group_list_comes_from_learned_events():
     conn = _conn()
     conn.known_groups_provider = None

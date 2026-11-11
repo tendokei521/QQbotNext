@@ -146,6 +146,9 @@ class QqBotGateway:
             conn.api.app_secret = app_secret
             conn.api.tokens.app_id = app_id
             conn.api.tokens.app_secret = app_secret
+            # 主动消息开关是进程级配置，重载时同步到已建连接
+            conn.allow_active_message = bool(getattr(self.settings, "qqbot_allow_active_message", False))
+            conn.active_daily_limit = int(getattr(self.settings, "qqbot_active_daily_limit", 20) or 0)
             if changed and conn.status in ("connected", "connecting"):
                 await self.disconnect_bot(key)
             return key
@@ -156,6 +159,8 @@ class QqBotGateway:
             app_secret=app_secret,
             transport=transport,
             auto_connect=bool(auto_connect),
+            allow_active_message=bool(getattr(self.settings, "qqbot_allow_active_message", False)),
+            active_daily_limit=int(getattr(self.settings, "qqbot_active_daily_limit", 20) or 0),
             log=self.log,
         )
         conn.known_groups_provider = self._known_groups_for(key)

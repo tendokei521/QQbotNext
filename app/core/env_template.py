@@ -70,6 +70,16 @@ ENV_SECTIONS: tuple[tuple[str, tuple[EnvKey, ...]], ...] = (
         EnvKey("WS_PING_INTERVAL", "30", "心跳间隔（秒）"),
         EnvKey("WS_PING_TIMEOUT", "10", "心跳超时（秒）"),
     )),
+    ("官方 QQ 机器人（主动消息，默认关）", (
+        EnvKey(
+            "QQBOT_ALLOW_ACTIVE_MESSAGE", "false",
+            "被动回复窗口外是否允许发主动消息；官方有配额且用户/群主可关闭，默认关",
+        ),
+        EnvKey(
+            "QQBOT_ACTIVE_DAILY_LIMIT", "20",
+            "每个群/用户每天的主动消息上限（0 = 只受官方频控）；默认保守 20 条",
+        ),
+    )),
     ("插件 / 模块目录", (
         EnvKey(
             "MODULE_DIR", "data/module",
