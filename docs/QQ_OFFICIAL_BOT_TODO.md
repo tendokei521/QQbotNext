@@ -32,14 +32,18 @@ Phase 0 / 1 / 2 与 Phase 3（Webhook + 主动消息开关/日配额）**已落�
 - [x] 取 access_token（`api.bot.qq.com`）→ 成功，7200s。
 - [x] WS 模式：连接成功、收到 READY（机器人 P.L.A.N.A，bot 用户 id 10573840902808435688），`/api/bots` 状态 connected。
 - [x] C2C 私聊：收到文本 + 图片附件事件（openid `39EEAC…`），事件时间/附件解析正常。
-- [x] 被动文本回复：带 `msg_id/msg_seq` 发送成功（用户侧应收到「文本被动回复 OK」）。
-- [x] 本地图片分片上传 → `msg_type=7` 发送成功（库路径 + 调试脚本各一次），并在 2 分钟内撤回成功。
-- [ ] 群 @ 消息：需要机器人在测试群里被 @，验证群事件、群回复、群图片。
-- [ ] 群信息/成员列表/禁言/踢人：需群 openid 与管理员权限，确认 11253 降级。
+- [x] 被动文本回复：带 `msg_id/msg_seq` 发送成功（用户确认收到）。
+- [x] 本地图片分片上传 → `msg_type=7` 发送成功（库路径 + 调试脚本各一次），2 分钟内撤回成功（用户确认看到图片）。
+- [x] 群 @ 消息：`GROUP_ADD_ROBOT` + `GROUP_MESSAGE_CREATE` 均收到；群文本/群图片被动回复成功、群图片撤回成功（真机 2026-11-11）。
+- [x] 群信息 `GET /groups/{openid}/info` 真机可用（群名/成员数已返回并写入 known_groups）；群成员列表返回 40012010（无内邀权限）；禁言返回 40011030（机器人非管理员）——均按可读错误降级。
+- [ ] 应用层群回复：通过 `/api/bots/{id}/test-message` 走服务器内连接（验证 inbox 被动状态 + 群列表学习）。
 - [ ] Webhook：公网反代到 `/qqbot/webhook/{account_id}`，平台配置回调，验证 op13 与事件 ACK。
 
-> 真机发现并修复：分片上传 `parts[].index` 实际从 1 开始，原实现按 `index×block_size` 取片会得到空片 →
+> 真机发现并修复 1：分片上传 `parts[].index` 实际从 1 开始，原实现按 `index×block_size` 取片会得到空片 →
 > 合并报 `40034002`。已改为按返回顺序累计偏移，并加单测锁住。
+> 真机发现并修复 2：`GROUP_AT_MESSAGE_CREATE` 的 content 已去掉 @ 前缀、mentions 不含自己，
+> 原实现缺 `at(self_id)` 段 → 「仅 @ 我」永远不会触发；全量 `GROUP_MESSAGE_CREATE` 的
+> `<@member_openid>` 也需要映射到 self_id。已修并加单测。
 
 
 ### P1 收尾开发

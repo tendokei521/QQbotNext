@@ -74,8 +74,8 @@ Webhook 超时与重试次数；`content` 字数上限；主动消息每月配�
 
 | 接口 | 方法与路径 | 要点 |
 |---|---|---|
-| 获取群基本信息 | `GET /v2/groups/{group_openid}/info` | 返回 `group_name / group_finger_memo / group_class_text / group_tags / group_member_num`；**内邀**，无权限 `11253` |
-| 获取群成员列表 | `GET /v2/groups/{group_openid}/members?cursor=` | 每次最多 30 条，`next_cursor` 分页；**内邀**，`11253` |
+| 获取群基本信息 | `GET /v2/groups/{group_openid}/info` | 返回 `group_name / group_finger_memo / group_class_text / group_tags / group_member_num`；**内邀**，无权限 `11253`；真机 2026-11-11 验证本机器人可用 |
+| 获取群成员列表 | `GET /v2/groups/{group_openid}/members?cursor=` | 每次最多 30 条，`next_cursor` 分页；**内邀**，无权限错误码实测为 **40012010**（不是 11253） |
 | 设置群成员禁言 | `POST /v2/groups/{group_openid}/restrict_chat_setting` | body `{"members":[{"op":"add|update|del","member_openid":"...","mute_expire_at":"RFC3339"}]}`；单次 ≤20；机器人需群管理员；最长 30 天 |
 | 群成员批量移除 | `POST /v2/groups/{group_openid}/batch_remove_members` | body `{"member_openids":[...],"add_to_member_blacklist":false}`；单次 ≤20；**内邀**，`11253` |
 
