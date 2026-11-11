@@ -179,6 +179,12 @@ function capabilityNotes(b: BotData): string[] {
   return Array.isArray(raw) ? raw.map(String) : []
 }
 
+/** 能力说明默认折叠：信息量大，展开前不占版面（每个账号独立记忆） */
+const notesOpen = ref<Record<string, boolean>>({})
+function toggleNotes(id: string) {
+  notesOpen.value[id] = !notesOpen.value[id]
+}
+
 /** 连接/重连进行中：主操作显示 loading 并禁用，避免重复点击 */
 function cardBusy(b: BotData): boolean {
   return Boolean(acting[b.id]) || b.status === 'connecting' || b.status === 'reconnecting'
@@ -735,8 +741,29 @@ onBeforeUnmount(() => {
             @update:model-value="(v: boolean | null) => { draftOf(b.id).auto_connect = !!v; markDirty() }"
           />
           <HintText class="mt-1" :text="cardSummary(b)" />
-          <div v-for="note in capabilityNotes(b)" :key="note" class="capability-note">
-            <v-icon icon="mdi-information-outline" size="14" /> {{ note }}
+          <div v-if="capabilityNotes(b).length" class="capability-notes mt-1">
+            <v-btn
+              variant="text"
+              size="x-small"
+              density="comfortable"
+              class="capability-notes__toggle px-0 text-none"
+              :aria-expanded="!!notesOpen[b.id]"
+              @click="toggleNotes(b.id)"
+            >
+              <v-icon
+                :icon="notesOpen[b.id] ? 'mdi-triangle-small-up' : 'mdi-triangle-small-down'"
+                size="16"
+                class="mr-1"
+              />
+              能力与限制（{{ capabilityNotes(b).length }}）
+            </v-btn>
+            <v-expand-transition>
+              <div v-if="notesOpen[b.id]">
+                <div v-for="note in capabilityNotes(b)" :key="note" class="capability-note">
+                  <v-icon icon="mdi-information-outline" size="14" /> {{ note }}
+                </div>
+              </div>
+            </v-expand-transition>
           </div>
           <div v-if="b.last_error" class="error-tip">
             <v-icon icon="mdi-alert-circle-outline" size="small" /> {{ b.last_error }}
@@ -847,7 +874,14 @@ onBeforeUnmount(() => {
   word-break: break-all;
 }
 
-/* 能力差异说明（群列表来源之类）：一行小字，不抢主信息 */
+/* 能力差异说明（群列表来源之类）：默认折叠成一行小三角，展开才占版面 */
+.capability-notes__toggle {
+  color: rgba(var(--v-theme-on-surface), 0.62) !important;
+  min-height: 22px;
+  font-size: 12.5px;
+  letter-spacing: 0;
+}
+
 .capability-note {
   margin-top: 6px;
   display: flex;
