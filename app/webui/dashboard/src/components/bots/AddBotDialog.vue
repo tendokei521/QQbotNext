@@ -5,16 +5,20 @@ import {
   type BotAddPayload,
   type BotConnMode,
   type ProtocolField,
+  type ProtocolMode,
 } from '@/stores/bots'
 import { useNotifyStore } from '@/stores/notify'
 import { errorMessage } from '@/api/http'
-import { isTransportProtocol, useProtocolCatalog } from '@/composables/useProtocolCatalog'
+import { useProtocolCatalog } from '@/composables/useProtocolCatalog'
 import ProtocolHelp from '@/components/bots/ProtocolHelp.vue'
 
 /**
- * 新增账号：先选账号类型（官方 QQ 机器人 / OneBot 正向 / OneBot 反向），再创建。
+ * 新增账号：先选**机器人类型**（官方机器人 / 第三方机器人），再选连接方式。
  *
- * 账号类型与连接方式都来自 `GET /api/bots/protocols`（后端目录），前端不硬编码
+ * - 官方机器人：QQ 开放平台建号，填 AppID/AppSecret，连接方式 WebSocket / Webhook；
+ * - 第三方机器人：走 OneBot v11 协议端（NapCat / Lagrange 等），再选正向 / 反向。
+ *
+ * 类型与连接方式都来自 `GET /api/bots/protocols`（后端目录），前端不硬编码
  * 「哪种协议有什么能力」；目录拿不到时用本地兜底目录，保证还能建 OneBot 账号。
  * 字段同样按目录渲染：官方账号填 AppID / AppSecret，OneBot 填协议端地址。
  *
@@ -33,74 +37,14 @@ const catalog = useProtocolCatalog()
 /** 字段名→界面文案（目录给裸标识符时换成中文） */
 const { fieldLabelOf } = catalog
 
-/** 一张可选卡片：一个协议的一种连接方式（官方两种接入方式收在同一张卡里） */
-interface Choice {
-  key: string
-  protocol: string
-  /** 连接方向 forward/reverse，或官方账号的接入方式 ws/webhook */
-  mode: string
-  title: string
-  desc: string
-  icon: string
-  recommended?: boolean
-  /** 官方账号：卡片内再选 WebSocket / Webhook */
-  transports?: { value: string; title: string; description?: string }[]
-}
+/** 账号类型：官方机器人 / 第三方机器人（OneBot） */
+type BotKind = '' | 'official' | 'thirdparty'
+const kind = ref<BotKind>('')
+/** 官方机器人的接入方式 ws/webhook */
+const officialTransport = ref('ws')
+/** 第三方机器人的连接方向 forward/reverse */
+const onebotMode = ref<BotConnMode>('reverse')
 
-/** 目录 → 卡片。接入方式（ws/webhook）归一为卡片内的二级选项，连接方向各占一张卡 */
-const choices = computed<Choice[]>(() => {
-  const out: Choice[] = []
-  for (const entry of catalog.protocols.value) {
-    if (!entry.modes.length) {
-      out.push({
-        key: `${entry.protocol}:`,
-        protocol: entry.protocol,
-        mode: '',
-        title: entry.label,
-        desc: entry.description || '',
-        icon: 'mdi-robot-outline',
-      })
-      continue
-    }
-    if (isTransportProtocol(entry)) {
-      const ws = entry.modes.find((mode) => mode.value === 'ws')
-      out.push({
-        key: `${entry.protocol}:transport`,
-        protocol: entry.protocol,
-        mode: (ws || entry.modes[0]).value,
-        title: entry.label,
-        desc: entry.description || '',
-        icon: 'mdi-robot-happy-outline',
-        transports: entry.modes.map((mode) => ({
-          value: mode.value,
-          title: mode.label,
-          description: mode.description,
-        })),
-      })
-      continue
-    }
-    for (const mode of entry.modes) {
-      // 标题为目录里的方式名；目录没带协议名时在说明前补上，避免只看到「本地监听」不知道是哪种号
-      const protoName = entry.label.split(' ')[0]
-      const baseDesc = mode.description || entry.description || ''
-      const desc = mode.label.includes(protoName) ? baseDesc : [entry.label, baseDesc].filter(Boolean).join(' · ')
-      out.push({
-        key: `${entry.protocol}:${mode.value}`,
-        protocol: entry.protocol,
-        mode: mode.value,
-        title: mode.label,
-        desc,
-        icon: mode.value === 'reverse' ? 'mdi-call-received' : 'mdi-call-made',
-        recommended: mode.value === 'reverse',
-      })
-    }
-  }
-  return out
-})
-
-const selectedKey = ref('')
-/** 官方账号的接入方式（ws/webhook）；OneBot 账号下不用 */
-const selectedMode = ref('')
 const creating = ref(false)
 /** 展示名（随便改） */
 const name = ref('')
@@ -111,32 +55,56 @@ const values = reactive<Record<string, string>>({})
 /** 点过「创建账号」之后才把必填项标红，避免一打开就一片红 */
 const attempted = ref(false)
 
-const selected = computed(() => choices.value.find((item) => item.key === selectedKey.value) || null)
-const protocol = computed(() => selected.value?.protocol || 'onebot')
-const isTransportAccount = computed(() => !!selected.value?.transports?.length)
-/** 官方账号：当前接入方式；OneBot：连接方向 */
-const currentMode = computed(() => selectedMode.value || selected.value?.mode || 'forward')
-const fields = computed<ProtocolField[]>(() => catalog.fieldsOf(protocol.value))
+const officialEntry = computed(() => catalog.protocols.value.find((item) => item.protocol === 'qqbot') || null)
+const onebotEntry = computed(() => catalog.protocols.value.find((item) => item.protocol === 'onebot') || null)
 
+/** 官方接入方式：目录优先，缺省给 WebSocket / Webhook 两项 */
+const officialTransports = computed<ProtocolMode[]>(() => {
+  const modes = officialEntry.value?.modes || []
+  if (modes.length) return modes
+  return [
+    { value: 'ws', label: 'WebSocket', description: '本机连官方网关，不用公网地址（推荐）' },
+    { value: 'webhook', label: 'Webhook', description: '需要公网能访问的回调地址' },
+  ]
+})
+
+/** OneBot 连接方向：目录优先，缺省给「反向（推荐）/ 正向」两项 */
+const onebotModes = computed<ProtocolMode[]>(() => {
+  const modes = onebotEntry.value?.modes || []
+  if (modes.length) return modes
+  return [
+    { value: 'reverse', label: 'OneBot 反向（本地监听）', description: '本机等协议端连进来（推荐）' },
+    { value: 'forward', label: 'OneBot 正向（向外连接）', description: '本程序主动连协议端' },
+  ]
+})
+
+const protocol = computed(() => (kind.value === 'official' ? 'qqbot' : kind.value === 'thirdparty' ? 'onebot' : ''))
+const fields = computed<ProtocolField[]>(() => (protocol.value ? catalog.fieldsOf(protocol.value) : []))
+/** 当前生效的连接方式（官方是 ws/webhook；第三方是 forward/reverse） */
 const currentTransport = computed(() =>
-  selected.value?.transports?.find((item) => item.value === currentMode.value) || null,
+  officialTransports.value.find((item) => item.value === officialTransport.value) || null,
 )
 
-/** 选中的卡片换协议时，把该协议的字段键补齐（不重置已填的其他协议内容） */
+/** 选中的类型换协议时，把该协议的字段键补齐（不重置已填的其他协议内容） */
 function ensureFieldKeys() {
   for (const field of fields.value) {
     if (values[field.name] === undefined) values[field.name] = ''
   }
 }
 
+function chooseKind(next: 'official' | 'thirdparty') {
+  kind.value = next
+  attempted.value = false
+  ensureFieldKeys()
+}
+
 function resetDefaults() {
-  const preferred = choices.value.find((item) => item.recommended) || choices.value[0] || null
-  selectedKey.value = preferred?.key || ''
-  selectedMode.value = preferred?.mode || ''
+  kind.value = ''
+  officialTransport.value = 'ws'
+  onebotMode.value = 'reverse'
   name.value = ''
   attempted.value = false
   Object.keys(values).forEach((key) => delete values[key])
-  ensureFieldKeys()
   // 给一个不冲突的默认 id（形如 bot1），用户可以改；id 创建后不可变
   const taken = new Set(bots.bots.map((b) => b.id))
   let n = 1
@@ -148,19 +116,18 @@ watch(
   () => props.modelValue,
   (open) => {
     if (!open) return
-    // 每次打开都回到默认推荐项：上次的选择没有记忆价值
+    // 每次打开都从「选类型」开始：上次的选择没有记忆价值
     void catalog.load()
     resetDefaults()
   },
 )
 
-// 目录是异步到的：打开时可能还是本地兜底目录，到了之后把默认选中项对齐一次
+// 目录是异步到的：打开时可能还是本地兜底目录，到了之后补齐字段键即可
 watch(
   () => catalog.protocols.value,
   () => {
     if (!props.modelValue) return
-    if (!choices.value.some((item) => item.key === selectedKey.value)) resetDefaults()
-    else ensureFieldKeys()
+    ensureFieldKeys()
   },
 )
 
@@ -181,7 +148,7 @@ function fieldValue(field: ProtocolField): string {
 
 function fieldHint(field: ProtocolField): string {
   if (field.name === 'ws_url') {
-    return currentMode.value === 'reverse'
+    return onebotMode.value === 'reverse'
       ? '留空用默认监听地址，创建后卡片上能看到'
       : '填协议端给出的 ws 地址'
   }
@@ -198,7 +165,7 @@ const missingLabels = computed(() =>
   fields.value.filter((field) => field.required && !fieldValue(field).trim()).map((field) => field.label),
 )
 
-const canCreate = computed(() => !creating.value && !idError.value)
+const canCreate = computed(() => !creating.value && !idError.value && !!kind.value)
 
 function close() {
   if (creating.value) return
@@ -207,6 +174,10 @@ function close() {
 
 async function create() {
   if (creating.value) return
+  if (!kind.value) {
+    notify.push('请先选择机器人类型', 'warning')
+    return
+  }
   attempted.value = true
   if (idError.value) return
   if (missingLabels.value.length) {
@@ -224,8 +195,8 @@ async function create() {
       id: accountId.value.trim(),
       name: name.value.trim(),
       protocol: protocol.value,
-      conn_mode: (isTransportAccount.value ? 'forward' : currentMode.value) as BotConnMode,
-      ...(isTransportAccount.value ? { transport: currentMode.value as 'ws' | 'webhook' } : {}),
+      conn_mode: (kind.value === 'official' ? 'forward' : onebotMode.value) as BotConnMode,
+      ...(kind.value === 'official' ? { transport: officialTransport.value as 'ws' | 'webhook' } : {}),
       ...extra,
     } as BotAddPayload
     const result = await bots.addBotConfig(payload)
@@ -243,111 +214,171 @@ async function create() {
 <template>
   <v-dialog
     :model-value="props.modelValue"
-    max-width="560"
+    max-width="600"
     scrollable
     @update:model-value="(v: boolean) => emit('update:modelValue', v)"
   >
     <v-card>
       <v-card-title class="text-h5 pa-4 pb-0 pl-6">添加账号</v-card-title>
       <v-card-text class="pa-4 pl-6">
-        <div class="app-muted mb-3">先选账号类型，不确定就用 OneBot 反向（本地监听）</div>
+        <div class="app-muted mb-3">先选机器人类型：官方机器人，或使用 OneBot 协议端的第三方机器人</div>
 
-        <div class="mode-list">
+        <!-- 第一步：机器人类型（左：官方，右：第三方） -->
+        <div class="kind-list">
           <v-card
-            v-for="opt in choices"
-            :key="opt.key"
             variant="outlined"
             hover
-            class="mode-card"
-            :class="{ 'mode-card--active': selectedKey === opt.key }"
-            @click="selectedKey = opt.key; selectedMode = opt.mode"
+            class="kind-card"
+            :class="{ 'kind-card--active': kind === 'official' }"
+            @click="chooseKind('official')"
           >
-            <v-icon :icon="opt.icon" size="22" class="mode-card__icon" />
-            <div class="mode-card__text">
-              <div class="mode-card__title">
-                {{ opt.title }}
-                <span v-if="opt.recommended" class="mode-card__rec">(推荐)</span>
-              </div>
-              <div class="mode-card__desc">{{ opt.desc }}</div>
+            <v-icon icon="mdi-robot-happy-outline" size="26" class="kind-card__icon" />
+            <div class="kind-card__text">
+              <div class="kind-card__title">官方机器人</div>
+              <div class="kind-card__desc">QQ 开放平台建号，填 AppID / AppSecret；默认只收 @ 消息</div>
             </div>
             <v-icon
-              v-if="selectedKey === opt.key"
+              v-if="kind === 'official'"
               icon="mdi-check-circle"
               color="primary"
               size="18"
-              class="mode-card__check"
+              class="kind-card__check"
+            />
+          </v-card>
+
+          <v-card
+            variant="outlined"
+            hover
+            class="kind-card"
+            :class="{ 'kind-card--active': kind === 'thirdparty' }"
+            @click="chooseKind('thirdparty')"
+          >
+            <v-icon icon="mdi-robot-outline" size="26" class="kind-card__icon" />
+            <div class="kind-card__text">
+              <div class="kind-card__title">第三方机器人</div>
+              <div class="kind-card__desc">OneBot v11 协议端（NapCat / Lagrange / LLOneBot 等）</div>
+            </div>
+            <v-icon
+              v-if="kind === 'thirdparty'"
+              icon="mdi-check-circle"
+              color="primary"
+              size="18"
+              class="kind-card__check"
             />
           </v-card>
         </div>
 
-        <div v-if="selected?.transports?.length" class="mt-3">
+        <!-- 第二步（官方）：接入方式 ws / webhook -->
+        <div v-if="kind === 'official'" class="mt-3">
           <div class="app-muted mb-2">连接方式</div>
           <v-btn-toggle
-            v-if="selected.transports.length > 1"
-            :model-value="selectedMode"
+            v-if="officialTransports.length > 1"
+            :model-value="officialTransport"
             mandatory
             density="comfortable"
             variant="outlined"
             divided
-            @update:model-value="(v: any) => selectedMode = String(v || '')"
+            @update:model-value="(v: any) => officialTransport = String(v || '')"
           >
-            <v-btn v-for="item in selected.transports" :key="item.value" :value="item.value" size="small">
-              {{ item.title }}
+            <v-btn v-for="item in officialTransports" :key="item.value" :value="item.value" size="small">
+              {{ item.label }}
             </v-btn>
           </v-btn-toggle>
-          <div v-else class="connection-only">{{ selected.transports[0].title }}</div>
+          <div v-else class="connection-only">{{ officialTransports[0]?.label }}</div>
           <div v-if="currentTransport?.description" class="app-muted mt-2">
             {{ currentTransport.description }}
           </div>
         </div>
 
-        <div class="app-form-grid mt-3">
-          <v-text-field
-            v-model="name"
-            label="名称"
-            placeholder="如：主号"
-            hint="可留空，只影响显示"
-            persistent-hint
-            density="comfortable"
-            hide-details="auto"
-            maxlength="32"
-          />
-          <v-text-field
-            v-model="accountId"
-            label="账号标识"
-            placeholder="bot1"
-            :error-messages="accountId ? idError : ''"
-            :hint="accountId ? '用来区分多个账号，创建后不能改' : ''"
-            persistent-hint
-            density="comfortable"
-            hide-details="auto"
-            autocomplete="off"
-            spellcheck="false"
-          />
+        <!-- 第二步（第三方）：连接方向 正 / 反 -->
+        <div v-if="kind === 'thirdparty'" class="mt-3">
+          <div class="app-muted mb-2">连接方式</div>
+          <div class="mode-list mode-list--two">
+            <v-card
+              v-for="mode in onebotModes"
+              :key="mode.value"
+              variant="outlined"
+              hover
+              class="mode-card"
+              :class="{ 'mode-card--active': onebotMode === mode.value }"
+              @click="onebotMode = mode.value as BotConnMode"
+            >
+              <v-icon
+                :icon="mode.value === 'reverse' ? 'mdi-call-received' : 'mdi-call-made'"
+                size="22"
+                class="mode-card__icon"
+              />
+              <div class="mode-card__text">
+                <div class="mode-card__title">
+                  {{ mode.label }}
+                  <span v-if="mode.value === 'reverse'" class="mode-card__rec">(推荐)</span>
+                </div>
+                <div class="mode-card__desc">{{ mode.description }}</div>
+              </div>
+              <v-icon
+                v-if="onebotMode === mode.value"
+                icon="mdi-check-circle"
+                color="primary"
+                size="18"
+                class="mode-card__check"
+              />
+            </v-card>
+          </div>
         </div>
 
-        <div v-if="fields.length" class="mt-3">
-          <v-text-field
-            v-for="field in fields"
-            :key="field.name"
-            :model-value="values[field.name]"
-            :label="fieldLabelOf(field)"
-            :type="field.secret || field.type === 'password' ? 'password' : 'text'"
-            :hint="fieldHint(field)"
-            :error-messages="fieldError(field)"
-            persistent-hint
-            density="comfortable"
-            hide-details="auto"
-            class="mb-2"
-            autocomplete="off"
-            spellcheck="false"
-            @update:model-value="(v: string) => { values[field.name] = v }"
-          />
-        </div>
+        <!-- 第三步：名称 / 账号标识 / 协议字段（选了类型才出现） -->
+        <template v-if="kind">
+          <div class="app-form-grid mt-3">
+            <v-text-field
+              v-model="name"
+              label="名称"
+              placeholder="如：主号"
+              hint="可留空，只影响显示"
+              persistent-hint
+              density="comfortable"
+              hide-details="auto"
+              maxlength="32"
+            />
+            <v-text-field
+              v-model="accountId"
+              label="账号标识"
+              placeholder="bot1"
+              :error-messages="accountId ? idError : ''"
+              :hint="accountId ? '用来区分多个账号，创建后不能改' : ''"
+              persistent-hint
+              density="comfortable"
+              hide-details="auto"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
 
-        <div class="mt-2">
-          <ProtocolHelp :official="isTransportAccount" :mode="currentMode === 'forward' ? 'forward' : 'reverse'" />
-        </div>
+          <div v-if="fields.length" class="mt-3">
+            <v-text-field
+              v-for="field in fields"
+              :key="field.name"
+              :model-value="values[field.name]"
+              :label="fieldLabelOf(field)"
+              :type="field.secret || field.type === 'password' ? 'password' : 'text'"
+              :hint="fieldHint(field)"
+              :error-messages="fieldError(field)"
+              persistent-hint
+              density="comfortable"
+              hide-details="auto"
+              class="mb-2"
+              autocomplete="off"
+              spellcheck="false"
+              @update:model-value="(v: string) => { values[field.name] = v }"
+            />
+          </div>
+
+          <div class="mt-2">
+            <ProtocolHelp
+              :official="kind === 'official'"
+              :mode="onebotMode === 'forward' ? 'forward' : 'reverse'"
+            />
+          </div>
+        </template>
       </v-card-text>
       <v-card-actions class="px-4 pb-4">
         <v-spacer />
@@ -368,12 +399,92 @@ async function create() {
 </template>
 
 <style scoped>
-/* 选择器：账号类型一行一张卡，选中不填充（填充块会和「推荐」抢注意力），
-   只加主色描边、浅底与右上角对勾。说明是整句，单列让每条都读得顺。 */
+/* 机器人类型：官方 / 第三方，两张卡并排；窄屏自动叠成一列 */
+.kind-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+@media (max-width: 520px) {
+  .kind-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+.kind-card {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color .15s, box-shadow .15s, background-color .15s;
+}
+
+.kind-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .06);
+}
+
+.kind-card--active {
+  border-color: rgb(var(--v-theme-primary)) !important;
+  background: rgba(var(--v-theme-primary), .06);
+}
+
+.kind-card__icon {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  opacity: .55;
+}
+
+.kind-card--active .kind-card__icon {
+  opacity: 1;
+  color: rgb(var(--v-theme-primary));
+}
+
+.kind-card__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.kind-card__title {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  padding-right: 20px;
+}
+
+.kind-card__desc {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(var(--v-theme-on-surface), .6);
+}
+
+.kind-card__check {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
+/* 连接方式：默认一列一条；第三方机器人的正/反两张并排 */
 .mode-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.mode-list--two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+@media (max-width: 520px) {
+  .mode-list--two {
+    grid-template-columns: 1fr;
+  }
 }
 
 .mode-card {
