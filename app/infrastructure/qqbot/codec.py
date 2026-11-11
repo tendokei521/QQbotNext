@@ -147,7 +147,38 @@ def _base_fields(data: dict, bot: Any, event_type: str, message_type: str) -> di
     )
 
 
-def _group_message(data: dict, bot: Any) -> GroupMessageEvent:
+def _merge_self_mention(message: list[MessageSegment], data: dict, bot: Any, *, at_event: bool) -> None:
+    """把「@ 本机器人」统一成 ``at(qq=self_id)`` 段，供框架既有触发逻辑识别。
+
+    官方两种事件形态不同：
+    - ``GROUP_AT_MESSAGE_CREATE``：content 已去掉 @ 前缀、mentions 不含自己
+      → 必须补一个 ``at(self_id)`` 段，否则「仅 @ 我」的群永远不会触发；
+    - ``GROUP_MESSAGE_CREATE``（全量）：content 保留 ``<@bot_member_openid>``、
+      mentions 里 ``is_you=true`` → 把该段 qq 换成本 bot 的 self_id。
+    """
+    self_id = str(getattr(bot, "bot_id", "") or "")
+    if not self_id:
+        return
+    own_ids = {
+        str((m or {}).get("member_openid") or "")
+        for m in (data.get("mentions") or [])
+        if isinstance(m, dict) and m.get("is_you")
+    }
+    found = False
+    for seg in message:
+        if seg.type != "at":
+            continue
+        qq = str(seg.data.get("qq") or "")
+        if qq in own_ids:
+            seg.data["qq"] = self_id
+            qq = self_id
+        if qq == self_id:
+            found = True
+    if not found and (at_event or own_ids):
+        message.insert(0, MessageSegment.at(self_id))
+
+
+def _group_message(data: dict, bot: Any, *, at_event: bool = False) -> GroupMessageEvent:
     group_id = str(data.get("group_openid") or "")
     fields = _base_fields(data, bot, "message_group", "group")
     base_message = fields.pop("message")
@@ -156,6 +187,7 @@ def _group_message(data: dict, bot: Any) -> GroupMessageEvent:
     if quoted:
         message = [MessageSegment.text(quoted), *message]
     message.extend(_attachment_segments(data.get("attachments")))
+    _merge_self_mention(message, data, bot, at_event=at_event)
     return GroupMessageEvent(
         **fields,
         message=message,
@@ -177,7 +209,7 @@ def _private_message(data: dict, bot: Any) -> PrivateMessageEvent:
 def decode_event(name: str, data: dict, bot: Any) -> BaseEvent | None:
     """把一条 ``op=0`` 事件解码成领域事件；不产生业务事件时返回 None。"""
     if name in ("GROUP_AT_MESSAGE_CREATE", "GROUP_MESSAGE_CREATE"):
-        return _group_message(data, bot)
+        return _group_message(data, bot, at_event=name == "GROUP_AT_MESSAGE_CREATE")
     if name == "C2C_MESSAGE_CREATE":
         return _private_message(data, bot)
     if name in ("GROUP_ADD_ROBOT", "GROUP_DEL_ROBOT", "GROUP_MSG_RECEIVE", "GROUP_MSG_REJECT"):

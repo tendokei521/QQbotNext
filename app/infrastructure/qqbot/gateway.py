@@ -71,6 +71,8 @@ class QqBotGateway:
         self.lifecycle_hook_registry = None
         self.event_history = EventHistory()
         self.event_queue_drops: dict[str, int] = {}
+        #: (account_id, group_openid)：群信息接口不可用过的群，避免每条消息都重试
+        self._group_name_denied: set[tuple[str, str]] = set()
 
     # ==================== 账号表 ====================
     def _configs(self) -> list[dict]:
@@ -458,14 +460,32 @@ class QqBotGateway:
                 self.log.exception(f"官方账号「{bot_label(conn) if conn else account_id}」事件处理异常: {e}")
 
     async def _remember_group(self, conn: QqBotConnection, group_id: str) -> None:
-        """把学到的群写进本地 known_groups 缓存（GroupService/按群配置复用）。"""
+        """把学到的群写进本地 known_groups 缓存，并尽量补全群名。
+
+        官方没有「机器人已加入群列表」接口，但**有** `GET /v2/groups/{openid}/info`
+        （部分账号有权限，真机 2026-11-11 验证可用）。群名按群只查一次：
+        - 成功 → 写入 known_groups.name；
+        - 失败（无权限/限频）→ 记入 _group_name_denied，后续消息不再重复打接口。
+        """
         service = getattr(self, "config_service", None)
         if service is None:
             return
+        name = conn.learned_groups.get(group_id) or ""
+        deny_key = (conn.account_id, group_id)
+        if not name and deny_key not in self._group_name_denied:
+            resp = await conn.get_group_info(group_id)
+            if resp.get("status") == "ok":
+                name = str((resp.get("data") or {}).get("group_name") or "")
+            else:
+                self._group_name_denied.add(deny_key)
+                self.log.debug(
+                    f"[QQBot] 群信息接口不可用（{conn.account_id}/{group_id}）: "
+                    f"{(resp or {}).get('message') or (resp or {}).get('retcode')}"
+                )
         try:
             await service.upsert_known_groups(conn.account_id, [{
                 "group_id": group_id,
-                "group_name": conn.learned_groups.get(group_id) or "",
+                "group_name": name,
                 "in_group": True,
             }])
         except Exception as e:  # noqa: BLE001 —— 群缓存失败不影响收消息

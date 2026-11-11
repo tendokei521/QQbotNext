@@ -36,8 +36,24 @@ def test_group_at_event_maps_string_ids_and_mentions():
     assert event.message_id == "ROBOT1.0_msg1"
     assert event.time > 0
     assert event.text.startswith(" 你好 ")
-    at = [seg for seg in event.message if seg.type == "at"]
-    assert at and at[0].data["qq"] == "MEM_B"
+    at = [str(seg.data.get("qq")) for seg in event.message if seg.type == "at"]
+    assert "MEM_B" in at
+    # @ 事件 content 已去掉 @ 前缀，必须补一个 at(self_id) 才能让「仅 @ 我」触发
+    assert "BOT_OPENID" in at
+    assert event.is_at_me() is True
+
+
+def test_full_group_message_maps_is_you_mention_to_self():
+    """全量群消息：content 保留 <@bot_member_openid>，mentions.is_you=True。"""
+    data = _group_payload(
+        content="<@BOT_MEMBER> 423",
+        mentions=[{"bot": True, "member_openid": "BOT_MEMBER", "is_you": True}],
+    )
+    event = decode_event("GROUP_MESSAGE_CREATE", data, FakeBot())
+    assert event.text == " 423"
+    at = [str(seg.data.get("qq")) for seg in event.message if seg.type == "at"]
+    assert at == ["BOT_OPENID"]
+    assert event.is_at_me() is True
 
 
 def test_c2c_event_is_private_without_group():
@@ -72,7 +88,8 @@ def test_quoted_message_becomes_readable_prefix():
         msg_elements=[{"message_type": 0, "content": "原消息内容"}],
     )
     event = decode_event("GROUP_AT_MESSAGE_CREATE", data, FakeBot())
-    assert "[引用]原消息内容" in event.message[0].data["text"]
+    texts = [str(seg.data.get("text") or "") for seg in event.message if seg.type == "text"]
+    assert any("[引用]原消息内容" in text for text in texts)
 
 
 def test_unknown_event_returns_none_or_notice():
