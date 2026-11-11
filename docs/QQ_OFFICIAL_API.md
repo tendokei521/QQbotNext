@@ -66,7 +66,33 @@
 
 Webhook 超时与重试次数；`content` 字数上限；主动消息每月配额——官方均未给数值，勿写死。
 
-## 7. 来源
+## 7. 群管理 / 富媒体上传（2026-10 文档核对）
+
+以下接口在 2026-08/09 上线，路径与字段按当前 wiki 原文核对（旧社区文章没有）。
+
+### 7.1 群管理
+
+| 接口 | 方法与路径 | 要点 |
+|---|---|---|
+| 获取群基本信息 | `GET /v2/groups/{group_openid}/info` | 返回 `group_name / group_finger_memo / group_class_text / group_tags / group_member_num`；**内邀**，无权限 `11253` |
+| 获取群成员列表 | `GET /v2/groups/{group_openid}/members?cursor=` | 每次最多 30 条，`next_cursor` 分页；**内邀**，`11253` |
+| 设置群成员禁言 | `POST /v2/groups/{group_openid}/restrict_chat_setting` | body `{"members":[{"op":"add|update|del","member_openid":"...","mute_expire_at":"RFC3339"}]}`；单次 ≤20；机器人需群管理员；最长 30 天 |
+| 群成员批量移除 | `POST /v2/groups/{group_openid}/batch_remove_members` | body `{"member_openids":[...],"add_to_member_blacklist":false}`；单次 ≤20；**内邀**，`11253` |
+
+### 7.2 富媒体上传（三步：预上传 → 分片 PUT → 合并）
+
+| 步骤 | 接口 | 关键字段 |
+|---|---|---|
+| 预上传 | `POST /v2/groups/{group_id}/upload_prepare` | 请求 `file_type / file_size(字符串) / file_name / md5 / sha1 / md5_10m`；响应 `upload_id / block_size / parts[{index,presigned_url,block_size}] / upload_config` |
+| 分片完成 | `POST /v2/groups/{group_id}/upload_part_finish` | 每片 PUT 成功后调用：`upload_id / part_index / block_size / md5` |
+| 合并/上传 | `POST /v2/groups/{group_openid}/files` | 三选一：`url`（公网直传，http 开头）／`upload_id`（分片合并，配 `file_name`）／`file_data`（≤5MB）；`srv_send_msg=false` 只拿 `file_info`；响应 `file_uuid / file_info / ttl`（`srv_send_msg=true` 才有 `id`） |
+
+单聊把路径前缀换成 `/v2/users/{user_openid}`；**单聊与群聊的上传不互通**；`file_info` 有 TTL，过期需重传。
+发送时 `msg_type=7` + `media.file_info`；群聊 `content` 必填（无正文时填一个空格）。
+
+> 文档里 `upload_prepare` 的路径参数写作 `{group_id}`，但取值仍是 **group_openid**。
+
+## 8. 来源
 
 - 鉴权/调用：https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/access-token.html ；https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/api-call-guide.html
 - 事件与 op 码：https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/event-emit/payload.html ；.../event-emit/websocket.html ；.../event-emit/webhook.html
@@ -80,6 +106,7 @@ Webhook 超时与重试次数；`content` 字数上限；主动消息每月配�
 - 富媒体：https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/rich-media.html ；.../autogen/api/v2_groups_group_openid_files.post.html
 - 撤回：https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_messages_message_id.delete.html
 - Markdown/文本交互：https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/type/markdown.html ；.../message/trans/text-chain.html
-- 群管理：https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_info.get.html ；.../v2_groups_group_openid_members.get.html ；.../v2_groups_group_openid_restrict_chat_setting.post.html
+- 群管理：https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_info.get.html ；.../v2_groups_group_openid_members.get.html ；.../v2_groups_group_openid_restrict_chat_setting.post.html ；.../v2_groups_group_openid_batch_remove_members.post.html
+- 富媒体分片：https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_groups_group_id_upload_prepare.post.html ；.../v2_groups_group_id_upload_part_finish.post.html ；.../v2_groups_group_openid_files.post.html
 - 上架/认证/IP 白名单：https://bot.q.qq.com/wiki/ ；https://bot.q.qq.com/wiki/bot_FAQ/
 - 变更记录：https://bot.q.qq.com/wiki/develop/api-v2/changelog.html

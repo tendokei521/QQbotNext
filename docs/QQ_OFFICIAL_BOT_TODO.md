@@ -3,11 +3,11 @@
 > 用途：跨会话/关机后续做的**唯一待办入口**。状态与代码同步，完成一项就改这里并提交。
 > 方案与架构见 [QQ_OFFICIAL_BOT.md](QQ_OFFICIAL_BOT.md)，协议事实见 [QQ_OFFICIAL_API.md](QQ_OFFICIAL_API.md)。
 
-## 0. 一句话状态（2026-11-10 收工）
+## 0. 一句话状态（2026-11-11 更新）
 
-Phase 0 / Phase 1 / Phase 2（出站富媒体 + 群管理）/ Phase 3 Webhook **代码已落地并提交**；
-剩余是**真机联调**与少量收尾（主动消息配额、单聊流式评估、能力矩阵页、README 章节）。
-工作区已 clean，所有改动已 commit，可直接关机。
+Phase 0 / 1 / 2 与 Phase 3（Webhook + 主动消息开关/日配额）**已落地**；全量 pytest 2926 passed。
+剩余：**真机联调**（需要 AppID/AppSecret）、per-account 主动消息 UI、前端截图重验。
+工作区提交后即 clean，可随时关机。
 
 ## 1. 已完成（按提交）
 
@@ -38,15 +38,16 @@ Phase 0 / Phase 1 / Phase 2（出站富媒体 + 群管理）/ Phase 3 Webhook **
 
 ### P1 收尾开发
 
-- [ ] 主动消息配额会计（默认关闭）：`allow_active_message` 改为账号配置；按群/用户日限额；消费 `GROUP_MSG_REJECT/RECEIVE`、`C2C_MSG_REJECT/RECEIVE` 事件持久化开关。
-- [ ] 单聊 `stream_messages`（`/v2/users/{openid}/stream_messages`）评估：群聊无流式，仅单聊可做。
-- [ ] WebUI 能力矩阵：把 `capability_view` + 备注做成账号详情展示（目前已有卡片小字/拦截页）。
-- [ ] README「接入 QQ」补官方机器人与 Webhook 部署说明；`docs/README.md` 已登记本文件。
-- [ ] `docs/QQ_OFFICIAL_API.md` 补 2026-10 群管理/上传接口字段（群信息、成员列表、禁言、批量移除、upload_prepare/part_finish/files）。
+- [x] 主动消息（2026-11-11）：`.env` 开关 `QQBOT_ALLOW_ACTIVE_MESSAGE`（默认 false）+ 每群/用户日配额 `QQBOT_ACTIVE_DAILY_LIMIT`（默认 20）；窗口外超限返回 `ACTIVE_QUOTA_EXCEEDED`。
+- [ ] 主动消息 per-account 配置与 `GROUP_MSG_REJECT/RECEIVE`、`C2C_MSG_REJECT/RECEIVE` 事件持久化（用户/群主关闭后自动停发）。
+- [x] 单聊 `stream_messages` 评估：**不做**。群聊没有流式发送接口；单聊需要额外维护流式会话与 msg_seq 语义，收益低于成本，官方账号继续单条整段发送。
+- [x] WebUI 能力矩阵：工具总览（每工具 `available/reason_text`）+ 账号卡片 `capability_notes` + OneBot 工具页整页拦截，已覆盖「哪些工具在官方账号可用」。
+- [x] README「接入 QQ」补官方机器人与 Webhook 部署说明；`docs/README.md` 已登记本文件。
+- [x] `docs/QQ_OFFICIAL_API.md` 补 2026-10 群管理/上传接口字段（群信息、成员列表、禁言、批量移除、upload_prepare/part_finish/files）。
 
 ### P2 质量与验收
 
-- [ ] 全量验收：`venv\Scripts\python.exe -m pytest -q` 全绿 + `ruff check app tests` 无新增。
+- [x] 全量 pytest：2026-11-11 跑出 **2926 passed, 19 skipped**（100s）；ruff 新增文件无违规。
 - [ ] 前端：`cd app/webui/dashboard; npm run build`；9311 预览 + `node scripts\frontend_shots.mjs --routes /bots,/setup,/tools/onebot,/tools/overview,/advanced-options --widths 1440,390`；
       **协议目录新增 Webhook 后需重截「添加账号」弹窗**（官方下现在有两张方式卡）。
 - [ ] 官方账号拦截态回归：OneBot 工具页无工具行、工具总览 `capability_missing` 徽标、高级选项禁用。
