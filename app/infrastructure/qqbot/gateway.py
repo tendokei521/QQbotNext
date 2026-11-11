@@ -471,6 +471,8 @@ class QqBotGateway:
         if service is None:
             return
         name = conn.learned_groups.get(group_id) or ""
+        if name == group_id:
+            name = ""  # 历史缓存可能把 group_id 当名字存，不算“已知群名”
         deny_key = (conn.account_id, group_id)
         if not name and deny_key not in self._group_name_denied:
             resp = await conn.get_group_info(group_id)

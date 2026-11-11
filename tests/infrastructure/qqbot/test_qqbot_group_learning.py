@@ -50,6 +50,19 @@ async def test_remember_group_fills_name_once():
 
 
 @pytest.mark.asyncio
+async def test_group_id_as_name_is_treated_as_unknown():
+    """历史缓存会把 group_id 当 name 存；不能因此跳过群信息接口。"""
+    gateway = QqBotGateway()
+    gateway.config_service = FakeConfigService()
+    conn = FakeConn()
+    conn.learned_groups = {"G1": "G1"}
+
+    await gateway._remember_group(conn, "G1")
+    assert conn.info_calls == 1
+    assert gateway.config_service.upserts[-1][0]["group_name"] == "测试群"
+
+
+@pytest.mark.asyncio
 async def test_remember_group_does_not_retry_denied_api():
     gateway = QqBotGateway()
     gateway.config_service = FakeConfigService()
