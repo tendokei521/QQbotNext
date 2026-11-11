@@ -49,10 +49,12 @@ class FakeMediaAPI:
         size = int(payload["file_size"])
         block = 4
         parts = []
-        for index, start in enumerate(range(0, size, block)):
+        # 实测官方 parts.index 从 1 开始（文档写 0 起）：偏移必须按返回顺序累计，
+        # 不能 index × block_size，否则第一片会被算成空片 → 合并报 40034002。
+        for part_no, start in enumerate(range(0, size, block), start=1):
             parts.append({
-                "index": index,
-                "presigned_url": f"https://upload.example/{index}",
+                "index": part_no,
+                "presigned_url": f"https://upload.example/{part_no}",
                 "block_size": str(min(block, size - start)),
             })
         return {"upload_id": "UP1", "block_size": str(block), "parts": parts}
@@ -99,9 +101,10 @@ async def test_local_file_uses_chunked_upload(tmp_path):
     assert prepare["file_size"] == "10"
     assert prepare["md5"] == hashlib.md5(b"0123456789").hexdigest()
     assert prepare["sha1"] == hashlib.sha1(b"0123456789").hexdigest()
-    # 3 片：4+4+2；每片都真的 PUT 且各通知一次
+    # 3 片：4+4+2；每片都真的 PUT 且各通知一次（序号 1 起，按顺序累计偏移）
     assert len(api._session.puts) == 3
-    assert [p["part_index"] for p in api.part_finishes] == [0, 1, 2]
+    assert [p["part_index"] for p in api.part_finishes] == [1, 2, 3]
+    assert b"".join(chunk for _url, chunk in api._session.puts) == b"0123456789"
     assert api.merges[0]["upload_id"] == "UP1"
     assert api.merges[0]["srv_send_msg"] is False
 

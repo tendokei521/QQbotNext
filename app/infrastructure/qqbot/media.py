@@ -132,14 +132,20 @@ class MediaUploader:
         session = self._session
         if session is None:
             raise MediaError("HTTP 会话尚未建立")
+        # 关键：**不要**用 index × block_size 算偏移。
+        # 实测官方返回的 parts 序号从 1 开始（docs 写 0 起），按序号乘会算出空分片，
+        # 最终合并报 40034002「媒体文件格式不支持」。按返回顺序累计偏移最稳。
+        offset = 0
         for part in parts:
             index = int((part or {}).get("index") or 0)
             url = str((part or {}).get("presigned_url") or "")
-            size = int((part or {}).get("block_size") or 0) or len(payload) // max(1, len(parts))
-            start = index * size
-            chunk = payload[start:start + size]
+            size = int((part or {}).get("block_size") or 0) or (len(payload) - offset)
+            chunk = payload[offset:offset + size]
+            offset += len(chunk)
             if not url:
                 raise MediaError(f"分片 {index} 缺少预签名 URL")
+            if not chunk:
+                raise MediaError(f"分片 {index} 内容为空（预上传分片大小与文件不匹配）")
             async with session.put(url, data=chunk) as resp:
                 if resp.status >= 400:
                     raise MediaError(f"分片 {index} 上传失败（HTTP {resp.status}）")
