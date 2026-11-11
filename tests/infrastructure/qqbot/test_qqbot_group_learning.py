@@ -60,3 +60,15 @@ async def test_remember_group_does_not_retry_denied_api():
     await gateway._remember_group(conn, "G1")
     assert conn.info_calls == 1, "无权限后应按群记住，不能每条消息都重试"
     assert gateway.config_service.upserts[-1][0]["group_name"] == ""
+
+
+def test_learned_group_name_survives_refresh_with_empty_cache():
+    """known_groups 缓存里名字为空时，不能把刚查到的群名覆盖回空。"""
+    from app.infrastructure.qqbot.connection import QqBotConnection
+
+    conn = QqBotConnection(account_id="official", app_id="a", app_secret="s")
+    conn.known_groups_provider = lambda: [{"group_id": "G1", "name": "", "in_group": True}]
+    conn.learned_groups = {"G1": "真群名"}
+    conn._refresh_group_lists()
+    assert conn.all_group_list_info[0]["group_name"] == "真群名"
+    assert conn.learned_groups["G1"] == "真群名"

@@ -205,10 +205,14 @@ class QqBotConnection(IBot):
                 info[gid] = {"group_id": gid, "group_name": str(row.get("name") or ""), "in_group": bool(row.get("in_group", True))}
         for gid in self.learned_groups:
             info.setdefault(gid, {"group_id": gid, "group_name": "", "in_group": True})
+        # 群名优先级：内存里刚查到/学到的名字 > known_groups 缓存 > 空。
+        # 注意缓存里的空名不能反过来覆盖刚查到的名字（否则 get_group_info 白查）。
+        for gid, row in info.items():
+            name = self.learned_groups.get(gid) or str(row.get("group_name") or "")
+            row["group_name"] = name
+            self.learned_groups[gid] = name
         self.all_group_list_info = list(info.values())
         self.all_group_list = [row["group_id"] for row in self.all_group_list_info]
-        # 同步回 conn 缓存（GroupService 读取）
-        self.learned_groups.update({row["group_id"]: row.get("group_name") or "" for row in self.all_group_list_info})
 
     # ---------- 发送 ----------
     def _render_message(self, message: SegmentLike) -> tuple[str, list[MessageSegment]]:
