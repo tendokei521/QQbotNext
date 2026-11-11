@@ -36,7 +36,10 @@ Phase 0 / 1 / 2 与 Phase 3（Webhook + 主动消息开关/日配额）**已落�
 - [x] 本地图片分片上传 → `msg_type=7` 发送成功（库路径 + 调试脚本各一次），2 分钟内撤回成功（用户确认看到图片）。
 - [x] 群 @ 消息：`GROUP_ADD_ROBOT` + `GROUP_MESSAGE_CREATE` 均收到；群文本/群图片被动回复成功、群图片撤回成功（真机 2026-11-11）。
 - [x] 群信息 `GET /groups/{openid}/info` 真机可用（群名/成员数已返回并写入 known_groups）；群成员列表返回 40012010（无内邀权限）；禁言返回 40011030（机器人非管理员）——均按可读错误降级。
-- [ ] 应用层群回复：通过 `/api/bots/{id}/test-message` 走服务器内连接（验证 inbox 被动状态 + 群列表学习）。
+- [x] 应用层群回复：`/api/bots/{id}/test-message` 走服务器内连接发送成功（用户收到「应用层测试…OK」）。
+- [x] 「@ 我」触发：带 @ 的群消息会进入 Agent 流水线（日志停在「没有可用模型」，说明门控已放行）；不带 @ 的全量群消息不触发。
+- [x] 群名自动补全：下一次群消息后 known_groups/账号群列表显示真实群名。
+- [ ] LLM 端到端回复：测试库未配模型（日志 `no_api_key`/`没有可用模型`），需在 Agent 页接入模型后再验一轮。
 - [ ] Webhook：公网反代到 `/qqbot/webhook/{account_id}`，平台配置回调，验证 op13 与事件 ACK。
 
 > 真机发现并修复 1：分片上传 `parts[].index` 实际从 1 开始，原实现按 `index×block_size` 取片会得到空片 →
@@ -44,6 +47,8 @@ Phase 0 / 1 / 2 与 Phase 3（Webhook + 主动消息开关/日配额）**已落�
 > 真机发现并修复 2：`GROUP_AT_MESSAGE_CREATE` 的 content 已去掉 @ 前缀、mentions 不含自己，
 > 原实现缺 `at(self_id)` 段 → 「仅 @ 我」永远不会触发；全量 `GROUP_MESSAGE_CREATE` 的
 > `<@member_openid>` 也需要映射到 self_id。已修并加单测。
+> 真机发现并修复 3：known_groups 历史缓存会把 group_id 当 name 存，导致群名查询被跳过/被空值覆盖；
+> 已把「占位名 = group_id」视为未知，并在刷缓存时保护真实群名。
 
 
 ### P1 收尾开发
