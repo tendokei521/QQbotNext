@@ -97,6 +97,34 @@ async def test_old_binding_rows_are_removed_and_migration_runs_once(config_servi
     assert _agent_cfg(config_service, "acc1")[retirement.TARGET_KEY] is False
 
 
+async def test_no_bots_migration_is_completely_silent(config_service, monkeypatch):
+    """无账号可迁时既不写 INFO 也不写 DEBUG：迁移是内部动作，无事做就不留日志。"""
+    events: list[tuple[str, str]] = []
+
+    class _Log:
+        def add_info(self, _tag):
+            return self
+
+        def info(self, msg):
+            events.append(("info", str(msg)))
+
+        def debug(self, msg):
+            events.append(("debug", str(msg)))
+
+        def warning(self, msg):
+            events.append(("warning", str(msg)))
+
+        def error(self, msg):
+            events.append(("error", str(msg)))
+
+    monkeypatch.setattr(retirement, "logger", _Log())
+
+    report = await retirement.migrate_tools_module_config(config_service)
+
+    assert report["accounts"] == 0 and report["deleted"] == 0
+    assert events == [], f"无事可迁时不应产生任何日志: {events}"
+
+
 async def test_artifact_value_is_overwritten_by_effective_legacy_value(config_service):
     """agent 里早存下的同名键（旧默认 false）不能压过"旧模块其实开着"。"""
     await _seed_account(config_service, "acc1")

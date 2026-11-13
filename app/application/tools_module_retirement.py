@@ -103,10 +103,12 @@ async def migrate_tools_module_config(config_service: Any) -> dict:
 
     if not report["errors"]:
         await config_service.set_kv(MIGRATION_FLAG, "1")
-        logger.info(
-            f"[Migrate] 工具扩展模块已退役：{report['accounts']} 个账号（其中 "
-            f"{report['enabled']} 个保持开启），删除 {report['deleted']} 行旧绑定"
-        )
+        # 没有旧账号/旧绑定可处理时静默，不写"迁移完成 0 条"这类无信息量日志
+        if report["accounts"] or report["deleted"]:
+            logger.info(
+                f"[Migrate] 工具扩展模块已退役：{report['accounts']} 个账号（其中 "
+                f"{report['enabled']} 个保持开启），删除 {report['deleted']} 行旧绑定"
+            )
     else:
         logger.error(f"[Migrate] 工具扩展退役有 {len(report['errors'])} 个错误（下次启动重试）")
     return report

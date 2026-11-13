@@ -337,9 +337,11 @@ class BindingStoreMixin:
         await self.db.run_in_transaction(sqls)
         await self._load_bindings()
         await self._load_channel_policies()
-        self.log.info(
-            f"[Config] 已迁移作用域绑定: bindings={len(merged)} 群响应策略={policy_count}"
-        )
+        # 没有可迁移数据（新库/已迁移干净）时不产生任何日志：迁移是一次性内部动作
+        if merged or policy_count:
+            self.log.info(
+                f"[Config] 已迁移作用域绑定: bindings={len(merged)} 群响应策略={policy_count}"
+            )
         return True
 
     # ==================== 群响应权策略（channel_policies） ====================

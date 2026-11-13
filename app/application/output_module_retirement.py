@@ -95,10 +95,12 @@ async def migrate_llm_output_config(config_service: Any) -> dict:
 
     if not report["errors"]:
         await config_service.set_kv(MIGRATION_FLAG, "1")
-        logger.info(
-            f"[Migrate] llm_output 模块已退役：{report['rows']} 个作用域、"
-            f"{report['keys']} 个配置键并入 agent 配置"
-        )
+        # 无事可迁时完全静默（避免每次启动打一条"退役 0 个作用域"）
+        if report["rows"] or report["keys"]:
+            logger.info(
+                f"[Migrate] llm_output 模块已退役：{report['rows']} 个作用域、"
+                f"{report['keys']} 个配置键并入 agent 配置"
+            )
     else:
         logger.error(f"[Migrate] llm_output 退役有 {len(report['errors'])} 个错误（下次启动重试）")
     return report

@@ -555,12 +555,8 @@ async def run(settings: Settings | None = None) -> None:
     try:
         from app.application.tools_module_retirement import migrate_tools_module_config
 
-        tools_report = await migrate_tools_module_config(config_service)
-        if tools_report.get("accounts"):
-            logger.info(
-                f"[Migrate] 工具扩展退役：{tools_report['accounts']} 个账号的开关已并入"
-                f"「高级选项」（其中 {tools_report['enabled']} 个保持开启）"
-            )
+        # 迁移结果由 migrate_tools_module_config 自己输出（有实际搬迁才打）；这里不重复
+        await migrate_tools_module_config(config_service)
     except Exception as e:  # noqa: BLE001 —— 迁移失败不该阻断启动
         logger.error(f"[Migrate] 工具扩展模块配置迁移失败（旧开关可能未生效）: {e}")
 

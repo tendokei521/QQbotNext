@@ -112,8 +112,7 @@ async def migrate_four_modules(config_service: Any) -> MergeReport:
             targets.setdefault((scope_type, scope_id), {})[old] = row
 
     if not targets:
-        # 新装环境：没有旧行可迁，不写标记（之后建号还能迁）
-        logger.info("[Migrate] 四模块合并：没有可迁移的旧模块行，跳过")
+        # 新装环境：没有旧行可迁，不写标记（之后建号还能迁）；无事可做则完全静默
         return report
 
     report.backup = _backup_db(config_service)
