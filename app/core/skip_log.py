@@ -48,6 +48,7 @@ def log_skip(
     level: str = "warning",
     interval_s: float | None = None,
     dedupe_key: str = "",
+    global_once: bool = False,
 ) -> bool:
     """记录一条"本轮被跳过"的日志（去重）。
 
@@ -65,25 +66,32 @@ def log_skip(
             用量数字（"已用 12/50 次、621409/1000000 tokens"），拿它当键会让
             ``interval_s`` 完全失效（线上 ``participation_budget`` 每 15s 刷一条就是这样）。
             传一个稳定键（如 ``"budget"``）即可让限流重新生效，细节照常打印。
+        global_once: ``True`` 时忽略账号与细节，**整个进程只提醒一次**（跨账号共享）。
+            用于「群消息没 @ 机器人」这种常态：提醒一句就够，不能每账号/每群各刷一遍。
 
     Returns:
         True = 本次真的写了日志；False = 被去重。
     """
     account_key = str(account_id if account_id not in (None, "") else "?")
-    # 默认窗口：debug 是技术日志（可反复看），其余是用户可见提示（进程内一次）
-    window: float | None = DEBUG_REPEAT_INTERVAL_S if str(level) == "debug" else None
-    if interval_s is not None:
-        window = max(0.0, float(interval_s))
-    # 用户可见级别的去重键不带细节：同一条原因（如「群聊未开启」）不论命中哪个群，
-    # 整个进程只留一条，避免不同群把同一条警告各刷一遍。
-    # 带了 interval_s/debug 窗口时，第三段优先用显式 dedupe_key（稳定），
-    # 否则退回 detail——detail 里若含易变数字，限流就会失效（见 dedupe_key 说明）。
-    key_tail = str(dedupe_key) if dedupe_key else str(detail)
-    key = (
-        (account_key, str(reason), key_tail)
-        if window is not None
-        else (account_key, str(reason))
-    )
+    if global_once:
+        # 全局一次性提醒：不区分账号/群，进程启动后第一次命中时说明即可
+        key: tuple[str, ...] = ("__global__", str(reason))
+        window: float | None = None
+    else:
+        # 默认窗口：debug 是技术日志（可反复看），其余是用户可见提示（进程内一次）
+        window = DEBUG_REPEAT_INTERVAL_S if str(level) == "debug" else None
+        if interval_s is not None:
+            window = max(0.0, float(interval_s))
+        # 用户可见级别的去重键不带细节：同一条原因（如「群聊未开启」）不论命中哪个群，
+        # 整个进程只留一条，避免不同群把同一条警告各刷一遍。
+        # 带了 interval_s/debug 窗口时，第三段优先用显式 dedupe_key（稳定），
+        # 否则退回 detail——detail 里若含易变数字，限流就会失效（见 dedupe_key 说明）。
+        key_tail = str(dedupe_key) if dedupe_key else str(detail)
+        key = (
+            (account_key, str(reason), key_tail)
+            if window is not None
+            else (account_key, str(reason))
+        )
 
     if window is None:
         # 进程内只记一次：同一「账号 + 原因」重启后才会再提醒

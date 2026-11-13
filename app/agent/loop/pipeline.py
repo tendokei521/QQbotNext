@@ -503,9 +503,11 @@ class LlmPipeline:
                 "trigger_not_matched",
                 f"group={getattr(getattr(ctx.event, 'group', None), 'group_id', '?')} · mode={config.get('trigger_mode', '?')}",
                 hint=hint_for("trigger_not_matched"),
-                # 群消息没 @/关键词是常态（大部分群消息都不是在叫 bot），
-                # 属于技术排查信息，不进用户可见日志（UI 的生效预览已能解释）。
-                level="debug",
+                # 群消息没 @/关键词是常态（大部分群消息都不是在叫 bot）。
+                # 以前每条都打 debug（按群 60s 窗口）→ debug.log 被淹没；
+                # 现在改为「用户可见、但整个进程只提醒一次」，跨账号共享。
+                level="info",
+                global_once=True,
             )
             return False
         # 把「触发条件」补进统一判定链，让「为什么不回」在 UI/日志里是同一条链

@@ -71,6 +71,29 @@ def test_different_detail_is_not_reported_separately(monkeypatch):
     assert len(calls) == 1
 
 
+def test_global_once_is_shared_across_accounts(monkeypatch):
+    """``global_once``：忽略账号/细节，整个进程只提醒一次（启动后第一次）。"""
+    calls = _capture(monkeypatch)
+
+    assert skip_log.log_skip(
+        "acc1", "trigger_not_matched", "group=1 · mode=none", hint="去调触发方式",
+        level="info", global_once=True,
+    ) is True
+    assert skip_log.log_skip(
+        "acc2", "trigger_not_matched", "group=2 · mode=none", hint="去调触发方式",
+        level="info", global_once=True,
+    ) is False
+
+    assert len(calls) == 1
+    assert calls[0]["level"] == "info"
+    assert "group=1" in calls[0]["message"]
+
+    skip_log.reset_skip_log_state()
+    assert skip_log.log_skip(
+        "acc1", "trigger_not_matched", "group=1", level="info", global_once=True
+    ) is True
+
+
 def test_debug_level_keeps_repeat_window(monkeypatch):
     """debug 级只进 debug.log（技术证据），保留 60s 窗口，不参与"进程内一次"。"""
     calls = _capture(monkeypatch)
