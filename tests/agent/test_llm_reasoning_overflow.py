@@ -237,7 +237,7 @@ async def test_stream_response_request_log_reports_max_tokens_source(monkeypatch
             fake_lines.append(f"E:{msg}")
 
         def debug(self, msg):
-            pass
+            fake_lines.append(str(msg))
 
     import app.agent.loop.chat as chat_mod
 

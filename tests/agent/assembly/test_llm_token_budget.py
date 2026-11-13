@@ -128,6 +128,44 @@ def test_truncate_handles_empty_and_zero_limit():
 # ==================== 与组装收口打通 ====================
 
 
+def test_estimate_logging_is_throttled(monkeypatch):
+    """「本轮输入估算」只在接近上限/明显偏大时打，避免每轮刷 debug。"""
+    lines: list[str] = []
+
+    class _Log:
+        def add_info(self, _tag):
+            return self
+
+        def debug(self, msg):
+            lines.append(str(msg))
+
+        def warning(self, msg):  # pragma: no cover - 本用例不触发裁剪警告
+            lines.append(f"W:{msg}")
+
+    monkeypatch.setattr(tb, "logger", _Log())
+
+    # 小请求：不设上限也不打日志
+    tb.apply_request_policy([{"role": "user", "content": "hi"}], _Config({}), bot_id=1)
+    assert lines == []
+
+    # 大请求（约 8000 token）且未设上限：打一条
+    tb.apply_request_policy(
+        [{"role": "user", "content": "x" * 16000}], _Config({}), bot_id=1
+    )
+    assert lines and "未设上限" in lines[-1]
+
+    # 有上限但离上限很远：不打；接近 80%：打
+    lines.clear()
+    tb.apply_request_policy(
+        [{"role": "user", "content": "x" * 200}], _Config({}), max_tokens=100, context_window=1000, bot_id=1
+    )
+    assert lines == []
+    tb.apply_request_policy(
+        [{"role": "user", "content": "x" * 1600}], _Config({}), max_tokens=100, context_window=1000, bot_id=1
+    )
+    assert lines and "上限 850" in lines[-1]
+
+
 async def test_apply_post_assemble_applies_budget():
     runtime = _Runtime({"context_token_budget": 300, "context_token_chars_per_token": 1})
     messages = _long_history(rounds=10, chars=400)

@@ -575,7 +575,20 @@ class QqBotGateway:
             try:
                 await self.status_handler(conn, state, detail)
             except Exception as e:  # noqa: BLE001
-                self.log.warning(f"[QQBot] 状态回调失败: {e}")
+                self._warn_status_cb_once(e)
+
+    def _warn_status_cb_once(self, e: Exception) -> None:
+        """同一类状态回调异常每进程只警告一次（之后 debug）。"""
+        key = f"{type(e).__name__}:{e}"
+        warned = getattr(self, "_status_cb_warned", None)
+        if warned is None:
+            warned = set()
+            self._status_cb_warned = warned
+        if key in warned:
+            self.log.debug(f"[QQBot] 状态回调失败（已提醒过）: {e}")
+            return
+        warned.add(key)
+        self.log.warning(f"[QQBot] 状态回调失败: {e}")
 
     # ==================== 对外查询 ====================
     def get_bot(self, account_id: str) -> QqBotConnection | None:

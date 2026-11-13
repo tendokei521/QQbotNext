@@ -24,6 +24,11 @@ from typing import Any
 
 from app.core.logger import logger
 
+#: 框架启动时固定注册的资源种类：属于装配流程，不逐个打日志
+_BUILTIN_RESOURCE_KINDS = frozenset(
+    {"role_preset", "provider_preset", "provider_model", "bot", "module", "group"}
+)
+
 
 @dataclass(frozen=True)
 class ResourceKind:
@@ -85,7 +90,9 @@ class ResourceRegistry:
             needs_bot=bool(needs_bot),
         )
         self._entries[key] = (meta, handler)
-        self.log.debug(f"[Resource] 已注册资源种类: {key}（{meta.label}）")
+        # 内置的 6 种资源是固定启动流程，逐个打日志只会刷屏；只记录插件自定义种类
+        if key not in _BUILTIN_RESOURCE_KINDS:
+            self.log.debug(f"[Resource] 已注册资源种类: {key}（{meta.label}）")
         return meta
 
     def unregister(self, kind: str) -> None:

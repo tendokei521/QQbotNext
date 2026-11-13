@@ -271,7 +271,8 @@ def log_token_usage(
     if model:
         text += f" | model={model}"
     text += " | 流式" if stream else " | 非流式"
-    logger.add_info("Api").info(text)
+    # token 用量是技术细节：留 debug 即可，用户日志不必每请求一条
+    logger.add_info("Api").debug(text)
 
 
 async def _chat_with_tool_loop(

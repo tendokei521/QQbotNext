@@ -295,11 +295,11 @@ async def stream_response(runtime, event, ctx=None):
                 f"[Invariant] 自检调用失败（已忽略）: {e}"
             )
 
-    # 本次请求真正生效的 max_tokens（链上 provider 配置赢过 Agent 配置）：打出来，
-    # 免得再出现「8192 到底哪设的」这种排查——见 _effective_max_tokens。
+    # 本次请求真正生效的 max_tokens（链上 provider 配置赢过 Agent 配置）：留 debug 证据即可，
+    # 每请求一条 INFO 会把用户日志刷满（排查看 debug.log）。
     eff_max_tokens, max_tokens_src = _effective_max_tokens(provider_chain, meta["max_tokens"])
 
-    logger.add_info(account_label(runtime.bot_id)).info(
+    logger.add_info(account_label(runtime.bot_id)).debug(
         f"流式 API 请求 -> {session_id} (task: {session.task_id}), 消息数: {len(messages)}, "
         f"max_tokens={eff_max_tokens}（来自{max_tokens_src}）"
     )

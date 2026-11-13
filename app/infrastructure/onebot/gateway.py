@@ -236,7 +236,20 @@ class OneBotGateway(GatewayLifecycleMixin):
             try:
                 await self.status_handler(conn, state, detail)
             except Exception as e:
-                self.log.warning(f"[Gateway] 状态回调失败: {e}")
+                self._warn_status_cb_once(e)
+
+    def _warn_status_cb_once(self, e: Exception) -> None:
+        """同一类状态回调异常每进程只警告一次（之后 debug），避免每个状态事件刷一遍。"""
+        key = f"{type(e).__name__}:{e}"
+        warned = getattr(self, "_status_cb_warned", None)
+        if warned is None:
+            warned = set()
+            self._status_cb_warned = warned
+        if key in warned:
+            self.log.debug(f"[Gateway] 状态回调失败（已提醒过）: {e}")
+            return
+        warned.add(key)
+        self.log.warning(f"[Gateway] 状态回调失败: {e}")
 
     # ==================== 连接管理 ====================
     async def add_bot(

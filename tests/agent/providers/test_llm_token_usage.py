@@ -39,6 +39,10 @@ class _FakeLogger:
     def info(self, msg: str) -> None:
         self.lines.append(str(msg))
 
+    def debug(self, msg: str) -> None:
+        # 用量行现在走 debug 级（用户日志精简），但测试仍要能断言到内容
+        self.lines.append(str(msg))
+
     def warning(self, msg: str) -> None:  # pragma: no cover - 兜底
         self.lines.append(f"W:{msg}")
 

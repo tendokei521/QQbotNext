@@ -16,6 +16,9 @@ from __future__ import annotations
 from app.agent import logger
 from app.agent.tools.spec import ToolContext
 
+#: 上次打过的"被剔除工具"签名：同一组工具不可用时只记一次（每轮重复无信息量）
+_last_dropped_signature: tuple[tuple[str, str], ...] | None = None
+
 
 def _images_enabled(config) -> bool:
     """图片是否随请求传给模型（默认开；仅对声明了 image 模态的模型生效）。"""
@@ -148,9 +151,13 @@ async def _collect_llm_ext(
         else:
             dropped.append((spec.name, state.reason_text))
     if dropped:
-        logger.add_info("Tool").debug(
-            f"[Tool] 本轮剔除 {len(dropped)} 个不可用工具："
-            + "、".join(f"{name}({why})" for name, why in dropped[:6])
-        )
+        global _last_dropped_signature
+        signature = tuple(dropped)
+        if signature != _last_dropped_signature:
+            _last_dropped_signature = signature
+            logger.add_info("Tool").debug(
+                f"[Tool] 本轮剔除 {len(dropped)} 个不可用工具："
+                + "、".join(f"{name}({why})" for name, why in dropped[:6])
+            )
 
     return filtered, skill_blocks, ctx

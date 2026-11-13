@@ -283,7 +283,7 @@ def make_executor(specs: list[ToolSpec], ctx: ToolContext | None = None) -> Tool
                 call_note = _present(
                     spec.present_call, dict(args or {}), what=f"present_call({name})"
                 )
-                logger.add_info("Tool").info(
+                logger.add_info("Tool").debug(
                     f"[ToolCall]调用工具：{name}" + (f" | {call_note}" if call_note else "")
                 )
             # 消息凭证鉴权（需要权限的 OneBot 工具在群聊里由「被引用的消息发送者」授权）：

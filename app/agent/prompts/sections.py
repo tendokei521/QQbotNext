@@ -42,6 +42,16 @@ from .system import SPEAKER_AUTHORITY_LINE
 
 # ==================== 各块实现（只读 req，无副作用） ====================
 
+#: 角色预设异常已提醒过：(bot_id, preset_id, 类型)；之后降为 debug，避免每轮刷警告
+_preset_warned: set[tuple[str, str, str]] = set()
+
+
+def _warn_preset_once(bot_id: Any, preset_id: str, kind: str, message: str) -> None:
+    key = (str(bot_id or "?"), str(preset_id or ""), kind)
+    level = "debug" if key in _preset_warned else "warning"
+    _preset_warned.add(key)
+    getattr(logger.add_info(account_label(bot_id)), level)(message)
+
 
 # ---- L1 10 persona · 人格预设解析 ----
 def resolve_persona_preset(req: Any) -> dict | None:
@@ -60,13 +70,19 @@ def resolve_persona_preset(req: Any) -> dict | None:
     try:
         preset = getter(preset_id)
     except Exception as e:  # noqa: BLE001 —— 预设读取失败不该让整轮请求炸掉
-        logger.add_info(account_label(getattr(req.runtime, 'bot_id', '?'))).warning(
-            f"[Assembly] 读取角色预设失败（已忽略）: {preset_id}: {e}"
+        _warn_preset_once(
+            getattr(req.runtime, "bot_id", "?"),
+            preset_id,
+            "read_failed",
+            f"[Assembly] 读取角色预设失败（已忽略）: {preset_id}: {e}",
         )
         return None
     if not isinstance(preset, dict):
-        logger.add_info(account_label(getattr(req.runtime, 'bot_id', '?'))).warning(
-            f"[Assembly] 角色预设不存在（悬挂引用）: {preset_id}，已回退 system_prompt"
+        _warn_preset_once(
+            getattr(req.runtime, "bot_id", "?"),
+            preset_id,
+            "missing",
+            f"[Assembly] 角色预设不存在（悬挂引用）: {preset_id}，已回退 system_prompt",
         )
         return None
     return preset
@@ -83,8 +99,11 @@ def build_persona(req: Any) -> list[dict]:
         text = str(preset.get("system_prompt") or "").strip()
         if text:
             return [{"role": "system", "content": text}]
-        logger.add_info(account_label(getattr(req.runtime, 'bot_id', '?'))).warning(
-            "[Assembly] 角色预设没有 system_prompt，已回退 system_prompt"
+        _warn_preset_once(
+            getattr(req.runtime, "bot_id", "?"),
+            str(req.cfg("persona_preset_id", "") or ""),
+            "no_system_prompt",
+            "[Assembly] 角色预设没有 system_prompt，已回退 system_prompt",
         )
     from .system import PRIVATE_DEFAULT_PERSONA_PROMPT
 

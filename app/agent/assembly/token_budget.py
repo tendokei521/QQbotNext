@@ -23,6 +23,8 @@ from app.agent import logger
 DEFAULT_CHARS_PER_TOKEN = 2.0
 #: 每条消息的固定开销（role/分隔符等），对齐主流 chat 模板的粗估
 PER_MESSAGE_OVERHEAD = 4
+#: 未配置上下文窗口时，只有输入明显偏大才打一条估算日志（避免每轮刷屏）
+LARGE_CONTEXT_DEBUG_TOKENS = 8000
 
 
 def _cfg(config: Any, key: str, default: Any) -> Any:
@@ -208,14 +210,15 @@ def apply_request_policy(
     limit, why = request_limit(config, max_tokens=max_tokens, context_window=context_window)
     estimated = estimate_tokens(messages, per_token_chars=ratio)
     tag = f"#{bot_id or '?'}"
+    # 每轮都打"本轮估算 N token"只会淹没日志：只在接近上限 / 上下文明显偏大时留一条
     if limit <= 0:
-        if not quiet:
+        if not quiet and estimated >= LARGE_CONTEXT_DEBUG_TOKENS:
             logger.add_info(tag).debug(
                 f"[Context] 本轮输入估算 ≈{estimated} token（未设上限：配置页可填模型上下文窗口）"
             )
         return messages
     if estimated <= limit:
-        if not quiet:
+        if not quiet and estimated >= limit * 0.8:
             logger.add_info(tag).debug(
                 f"[Context] 本轮输入估算 ≈{estimated} / 上限 {limit} token（{why}）"
             )

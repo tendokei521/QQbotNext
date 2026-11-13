@@ -22,8 +22,15 @@ class FakeLog:
         self.parts.append(text)
         self.records.append((self._prefix, text))
 
-    def debug(self, text: str) -> None:  # pragma: no cover
+    def debug(self, text: str) -> None:
         self.parts.append(text)
+        self.records.append(("debug", text))
+
+    def warning(self, text: str) -> None:
+        self.records.append(("warning", text))
+
+    def error(self, text: str) -> None:  # pragma: no cover
+        self.records.append(("error", text))
 
 
 def _conn() -> SimpleNamespace:
@@ -80,6 +87,19 @@ def test_private_message_is_logged_without_group():
     assert "接收" in prefix
     assert "G1" not in prefix
     assert "小红(U2)" in text and "在吗" in text
+
+
+def test_status_callback_failure_warns_once_then_debug():
+    gateway = QqBotGateway()
+    log = FakeLog()
+    gateway.log = log
+
+    gateway._warn_status_cb_once(RuntimeError("object has no notify_offline"))
+    gateway._warn_status_cb_once(RuntimeError("object has no notify_offline"))
+
+    assert len(log.records) == 2, "同一类状态回调异常应只警告一次"
+    assert log.records[0][0] == "warning"
+    assert log.records[1][0] == "debug"
 
 
 def test_log_render_failure_does_not_raise():

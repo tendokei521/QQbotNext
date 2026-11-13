@@ -141,14 +141,18 @@ async def persist_with_retry(
     "保存成功"的假象会一直留到重启后发现配置没了。
     """
     async def _final_write() -> None:
-        """取消路径的兜底：落盘任务没有调用方可抛，失败也必须留痕。"""
-        log.warning("[Config] 落盘任务被取消，尝试完成最后一次写入")
+        """取消路径的兜底：落盘任务没有调用方可抛，失败也必须留痕。
+
+        关停期已没有补救手段（DB 往往已关闭），这类行只在 debug 里保留证据，
+        不刷到用户日志里（真正的数据风险由「关停时仍有落盘任务」那条汇总覆盖）。
+        """
+        log.debug("[Config] 落盘任务被取消，尝试完成最后一次写入")
         try:
             await persist_fn(*args)
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001 —— 兜底写入失败也要留痕
-            log.error(f"[Config] 取消时的兜底写入仍失败（本次修改仅内存生效）: {e}")
+            log.debug(f"[Config] 取消时的兜底写入仍失败（本次修改仅内存生效）: {e}")
 
     for attempt in (1, 2):
         try:

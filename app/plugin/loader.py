@@ -45,6 +45,9 @@ ENTRY_FILE = "main.py"
 #: 旧入口名，仍兼容：外部 zip 插件可能还是 `module.py`
 LEGACY_ENTRY_FILE = "module.py"
 
+#: 内置模块清单缺失的已提醒集合（每进程每个模块只警告一次，之后降 debug）
+_manifest_warned: set[str] = set()
+
 
 def resolve_entry_file(module_path: Path) -> Path | None:
     """返回插件入口文件：优先 `main.py`，回退 `module.py`（兼容旧插件）。"""
@@ -81,7 +84,12 @@ def resolve_manifest(module_name: str, module_path: Path, source: str, log) -> M
         if source == "installed":
             log.error(f"[Module] {module_name} 清单无效，拒绝加载: {detail}")
             return None
-        log.warning(f"[Module] {module_name} 内置清单缺失/无效，使用类属性兜底: {detail}")
+        # 内置模块清单缺失是启动期一次性问题：每个模块每进程只警告一次
+        if module_name not in _manifest_warned:
+            _manifest_warned.add(module_name)
+            log.warning(f"[Module] {module_name} 内置清单缺失/无效，使用类属性兜底: {detail}")
+        else:
+            log.debug(f"[Module] {module_name} 内置清单缺失（已提醒过，使用类属性兜底）")
         return Manifest(
             name=module_name,
             display_name="",
@@ -323,10 +331,7 @@ async def register_data_sources(
             await scheduler.register_module(instance)
         except Exception as e:  # noqa: BLE001
             log.warning(f"[Module] {module_name} 定时任务注册异常: {e}")
-    elif scheduler is not None and online:
-        log.debug(f"[Module] {module_name} 已禁用：跳过定时任务注册")
-    elif scheduler is not None:
-        log.debug(f"[Module] {module_name} 离线装配：定时任务待上线后注册")
+    # 离线装配 / 已禁用：属于装配生命周期，正常状态不再逐模块打 debug
 
     try:
         missing = instance.missing_requirements()
@@ -351,6 +356,7 @@ async def activate(instance: BaseModule, module_name: str, services: ServiceAcce
         enabled = True
 
     if not enabled:
+        # 关闭是静默状态：用户日志不出现，只留一条 debug 作为"为什么没装配"的证据
         log.debug(f"[Module] {module_name} 已禁用：跳过 on_load（不接管运行时能力）")
         return
 
