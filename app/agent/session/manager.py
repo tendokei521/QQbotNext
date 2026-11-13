@@ -38,11 +38,12 @@ import re
 import threading
 import time
 import uuid
+from collections import OrderedDict
 from typing import Any
 
 from app.agent import logger
-from app.core.logger import account_label
 from app.agent.storage import create_history_store
+from app.core.logger import account_label
 
 #: 存储层条目字段（读取侧可依赖的契约，见模块 docstring）
 HISTORY_ENTRY_FIELDS = ("role", "content", "time", "user_id", "nickname", "message_id", "base")
@@ -304,6 +305,10 @@ class SessionManager:
         self.sessions: dict[str, Session] = {}
         self.lock = threading.RLock()
         self.history = create_history_store(bot_id)
+        # 已归档但仍在内存的会话快照：超时后不丢对象，下一条消息直接唤醒，
+        # 避免「每次间隔超过 session_timeout 就 创建会话→重读归档」的抖动。
+        # 有界（只留最近 SLEEPING_MAX 个），磁盘归档仍是唯一真相。
+        self._sleeping: OrderedDict[str, Session] = OrderedDict()
         # 流式发言的"当前这条 assistant 历史"跟踪（见 upsert_streaming_assistant）
         self._streaming_entries: dict[str, dict] = {}
         #: 流式条目的稳定 id（事件日志里靠它把多次 delta 折叠成一条）
@@ -313,6 +318,9 @@ class SessionManager:
         self._stop_event = threading.Event()
         self._cleanup_thread: threading.Thread | None = None
         self._start_auto_cleanup()
+
+    #: 内存里保留的已归档会话快照上限（超过后丢最久未用，磁盘归档不受影响）
+    SLEEPING_MAX = 200
 
     def _notify_archive(self, session) -> None:
         cb = self.on_archive
@@ -339,6 +347,8 @@ class SessionManager:
     def close(self):
         """关闭历史存储连接并停止清理线程。"""
         self.stop_cleanup()
+        with self.lock:
+            self._sleeping.clear()
         try:
             close_fn = getattr(self.history, "close", None)
             if callable(close_fn):
@@ -365,11 +375,7 @@ class SessionManager:
             expired = [sid for sid, s in self.sessions.items() if not s.is_alive()]
             for sid in expired:
                 session = self.sessions.pop(sid)
-                self.history.save_session(session)
-                self._notify_archive(session)
-                logger.add_info(account_label(self.bot_id)).info(
-                    f"会话过期已归档: {sid}"
-                )
+                self._archive_locked(session)
         self._maybe_gc_media()
 
     #: 本地图片清理的最小间隔（引用中的图永远不会被删，这里只收无主文件）
@@ -400,9 +406,26 @@ class SessionManager:
         session = Session(session_id, session_type, timeout)
         with self.lock:
             self.sessions[session_id] = session
-        logger.add_info(account_label(self.bot_id)).info(f"创建会话: {session_id}")
+        logger.add_info(account_label(self.bot_id)).debug(f"创建会话: {session_id}")
         self._notify_updated(session_id, "created")
         return session
+
+    def _archive_locked(self, session: Session) -> None:
+        """把会话写回归档并放进内存快照池（调用方必须已持有 self.lock）。
+
+        以前这里直接 ``sessions.pop``，下一条消息就得重新 create + 读归档；
+        现在保留对象快照，唤醒时只 touch 一下，日志与磁盘 IO 都少一遍。
+        """
+        session_id = session.id
+        self.history.save_session(session)
+        self._notify_archive(session)
+        self._sleeping[session_id] = session
+        self._sleeping.move_to_end(session_id)
+        while len(self._sleeping) > self.SLEEPING_MAX:
+            self._sleeping.popitem(last=False)
+        logger.add_info(account_label(self.bot_id)).debug(
+            f"会话过期已归档: {session_id}（内存快照保留，下条消息直接唤醒）"
+        )
 
     def get_session(self, session_id: str) -> Session | None:
         with self.lock:
@@ -411,13 +434,24 @@ class SessionManager:
                 return session
             if session:
                 del self.sessions[session_id]
-                self.history.save_session(session)
-                self._notify_archive(session)
+                self._archive_locked(session)
+            slept = self._sleeping.pop(session_id, None)
+            if slept is not None:
+                # 唤醒语义与「新建 + 读归档」一致：参与者/回复冷却重置，历史保留
+                slept.participants.clear()
+                slept.last_reply_time = 0
+                slept.touch()
+                self.sessions[session_id] = slept
+                logger.add_info(account_label(self.bot_id)).debug(
+                    f"会话唤醒: {session_id}（复用内存快照，无需重读归档）"
+                )
+                return slept
             return None
 
     def destroy_session(self, session_id: str):
         with self.lock:
             session = self.sessions.pop(session_id, None)
+            self._sleeping.pop(session_id, None)
             if session:
                 self.history.save_session(session)
                 self._notify_archive(session)
@@ -431,6 +465,7 @@ class SessionManager:
         """
         with self.lock:
             exist = session_id in self.sessions
+            self._sleeping.pop(session_id, None)
             if exist:
                 self.sessions.pop(session_id, None)
                 logger.add_info(account_label(self.bot_id)).info(f"会话已从内存移除: {session_id}")
@@ -865,7 +900,7 @@ class SessionManager:
             session.conversations[conv.id] = conv
         latest = max(convs, key=lambda d: d.get("saved_at", 0))
         session.active_id = latest.get("conv_id") or latest.get("task_id")
-        logger.add_info(account_label(self.bot_id)).info(
+        logger.add_info(account_label(self.bot_id)).debug(
             f"归档恢复: {session_id} ({len(session.conversations)} 个对话)"
         )
 
