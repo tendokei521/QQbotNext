@@ -21,6 +21,7 @@ from app.core.event_bus import BotLifecycleEvent, event_bus
 from app.core.logger import logger
 from app.domain.bot import bot_label
 from app.infrastructure.onebot.gateway_events import EventHistory
+from app.infrastructure.onebot.log_text import received_log_lines
 from app.infrastructure.qqbot.codec import decode_event, dedupe_key, group_of, message_target
 from app.infrastructure.qqbot.connection import QqBotConnection
 from app.infrastructure.qqbot.ws import QqBotReconnect
@@ -436,6 +437,7 @@ class QqBotGateway:
             return
         if scene and target:
             conn.inbox.remember_inbound(scene, target, data.get("id") or item.get("id"))
+        self._log_received(conn, event)
         try:
             queue.put_nowait(event)
         except asyncio.QueueFull:
@@ -445,6 +447,28 @@ class QqBotGateway:
                 queue.put_nowait(event)
             except (asyncio.QueueEmpty, asyncio.QueueFull):
                 pass
+
+    def _log_received(self, conn: QqBotConnection, event: Any) -> None:
+        """把收到的消息/通知写进接收日志（与 OneBot 同一套渲染口径）。
+
+        OneBot 网关在 ``_process_event`` 里显式调用 ``received_log_lines``；官方网关
+        之前只把事件塞进诊断缓冲，导致 ``debug.log`` 里完全看不到“收到消息”。
+        这里补上同样的 ``[接收<-][账号][群名(群 id)] 昵称(id): 内容`` 行。
+        """
+        if not event:
+            return
+        try:
+            recv = getattr(conn, "_recv_logger", None)
+            if recv is None:
+                recv = self.log.prefix(f"Recv][{bot_label(conn)}")
+                conn._recv_logger = recv
+            lines = received_log_lines(
+                conn, event, lambda gid: conn.learned_groups.get(str(gid), "")
+            )
+            for prefix, text in lines:
+                recv.prefix(prefix).info(text)
+        except Exception as e:  # noqa: BLE001 —— 日志失败绝不能影响收消息
+            self.log.debug(f"[QQBot] 接收日志渲染失败（{conn.account_id}）: {e}")
 
     async def _dispatch_worker(self, account_id: str, queue: asyncio.Queue) -> None:
         conn = self.connections.get(account_id)
